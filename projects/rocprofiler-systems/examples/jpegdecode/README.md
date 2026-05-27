@@ -11,7 +11,7 @@ This example benchmarks JPEG image decoding performance using the AMD rocJPEG li
 
 ## Prerequisites
 
-- CMake 3.21+
+- CMake 3.25+
 - HIP runtime
 - rocJPEG library
 - rocprofiler-register
@@ -46,7 +46,7 @@ cmake --build <build_dir> --target jpegdecode
 **Key parameters:**
 
 | Parameter | Description |
-|-----------|-------------|
+| ----------- | ------------- |
 | `-i` | Input directory containing JPEG files |
 | `-b` | Batch size (images per decode batch) |
 | `-d` | GPU device ID |
@@ -61,7 +61,7 @@ rocprof-sys-run -- ./jpegdecode -i /path/to/images/ -b 4
 ### Recommended Configuration
 
 | Variable | Value | Purpose |
-|----------|-------|---------|
+| ---------- | ------- | --------- |
 | `ROCPROFSYS_ROCM_DOMAINS` | `hip_runtime_api,kernel_dispatch,memory_copy` | Trace HIP API and GPU operations |
 | `ROCPROFSYS_TRACE` | `true` | Generate Perfetto trace |
 | `ROCPROFSYS_PROFILE` | `true` | Generate call-stack profile |

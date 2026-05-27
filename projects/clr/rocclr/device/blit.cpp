@@ -338,9 +338,9 @@ bool HostBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& 
   return true;
 }
 
-bool HostBlitManager::copyBufferBatch(std::vector<amd::BatchCopyOp>& copyOps) const {
+bool HostBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& copyOps) const {
   // Default implementation falls back to individual copies
-  for (auto& op : copyOps) {
+  for (const auto& op : copyOps) {
     if (op.srcMemory == nullptr || op.dstMemory == nullptr) {
       return false;
     }

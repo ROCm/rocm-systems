@@ -59,6 +59,7 @@ BaseRocR::BaseRocR(void) {
   kernarg_buffer_ = nullptr;
   kernel_object_ = 0;
   memset(&aql_, 0, sizeof(aql_));
+  memset(&metadata_prefetch_, 0, sizeof(metadata_prefetch_));
   set_requires_profile(-1);
   set_enable_interrupt(false);
   orig_hsa_enable_interrupt_ = GetEnv("HSA_ENABLE_INTERRUPT");

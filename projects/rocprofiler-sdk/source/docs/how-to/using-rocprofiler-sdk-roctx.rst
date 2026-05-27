@@ -27,6 +27,16 @@ Markers
 
 Markers are used to insert a marker in the code with a message. Creating markers helps you see when a line of code is executed.
 
+When using ROCTx markers with profiling tools that support Perfetto trace visualization, such as ``rocprofv3`` or ``rocprof-sys``, markers created using ``roctxMark()`` appear as arrows in the Perfetto UI timeline. For example, markers like ``roctxMark("pre-launch")`` and ``roctxMark("post-kernel-launch")`` will be displayed as visual markers pointing to the exact timestamp when that line of code was executed.
+
+To illustrate this, a call to ``roctxMark("iter")`` was added after the kernel launch in the timing loop of the `daxpy training example code <https://github.com/amd/HPCTrainingExamples/blob/main/HIP-Optimizations/daxpy/daxpy_5.hip>`_. In the Perfetto trace generated using ``rocprofv3 --runtime-trace`` and ``rocpd2pftrace``, visual markers are visible at the end of each kernel launch in the timing loop ROCTx region.
+
+.. figure:: /data/perfetto_marker.png
+   :alt: ROCTx markers displayed as arrows in Perfetto UI
+   :align: center
+
+   Example of ``roctxMark()`` annotations appearing as arrows in the Perfetto UI timeline
+
 Ranges
 =======
 
@@ -108,6 +118,8 @@ For the description of the fields in the output file, see :ref:`output-file-fiel
 
 ``roctxProfilerPause`` and ``roctxProfilerResume`` can be used to hide the calls between them. This is useful when you want to hide the calls that are not relevant to your profiling session.
 
+.. _mode1-example:
+
 .. code-block:: bash
 
     #include <rocprofiler-sdk-roctx/roctx.h>
@@ -160,6 +172,169 @@ The preceding command generates a ``hip_api_trace.csv`` file prefixed with the p
    "HIP_RUNTIME_API","hipMemcpy",1643920,1643920,14,320301632901249,320301633934395
    "HIP_RUNTIME_API","hipFree",1643920,1643920,15,320301643320908,320301643511479
    "HIP_RUNTIME_API","hipFree",1643920,1643920,16,320301643512629,320301643585639
+
+Profiler control with selected regions
++++++++++++++++++++++++++++++++++++++++
+
+The ``roctxProfilerPause()`` and ``roctxProfilerResume()`` APIs can be used in two different ways depending on whether the ``--selected-regions`` option is used with ``rocprofv3``.
+
+Two modes of operation
+=======================
+
+**Mode 1: Default behavior (without --selected-regions)**
+
+When running ``rocprofv3`` without the ``--selected-regions`` option, profiling is **enabled** as soon as the application starts. The ``roctxProfilerPause()`` and ``roctxProfilerResume()`` APIs are used to temporarily hide specific sections of code from profiling.
+
+- Use case: Profile everything exluding the specific regions.
+- Profiler starts: **Enabled**
+- ``roctxProfilerPause()``: Temporarily stops data collection.
+- ``roctxProfilerResume()``: Resumes data collection.
+
+This mode is demonstrated in the :ref:`example from the previous section <mode1-example>`.
+
+**Mode 2: Selected regions profiling (with --selected-regions)**
+
+When running ``rocprofv3`` with the ``--selected-regions`` option, profiling is **disabled** by default. Data collection takes place only for regions explicitly enclosed within ``roctxProfilerResume()`` and ``roctxProfilerPause()`` calls.
+
+- Use case: Profile only the specific regions, exclude everything else.
+- Profiler starts: **Disabled**
+- ``roctxProfilerResume()``: Starts data collection.
+- ``roctxProfilerPause()``: Stops data collection.
+- All tracing and profiling options collect data **only** within the marked regions.
+
+Using --selected-regions option
+================================
+
+The ``--selected-regions`` option enables profiling only for the explicitly marked code regions. This provides fine-grained control over data collection, allowing you to focus profiling on specific regions of interest in your application.
+
+.. important::
+
+    When ``--selected-regions`` is enabled, all the requested tracing or profiling data, such as kernel traces, API traces, memory copy traces, counter collection, and so on, is collected only for the regions enclosed within the ``roctxProfilerResume()`` and ``roctxProfilerPause()`` calls. This is not limited to marker traces; it controls all profiling activity.
+
+**Example of selected regions:**
+
+Here is a code sample with explicitly marked code regions within the ``roctxProfilerResume()`` and ``roctxProfilerPause()`` calls:
+
+.. code-block:: c++
+
+    #include <rocprofiler-sdk-roctx/roctx.h>
+
+    // Initialization code (not profiled when using --selected-regions)
+    hipMalloc(&gpuMatrix, NUM * sizeof(float));
+    hipMalloc(&gpuTransposeMatrix, NUM * sizeof(float));
+
+    // Start profiling for region 1
+    roctxProfilerResume(0);
+
+    // Region 1: Data transfer and computation (will be profiled)
+    hipMemcpy(gpuMatrix, Matrix, NUM * sizeof(float), hipMemcpyHostToDevice);
+    hipLaunchKernelGGL(matrixTranspose,
+                       dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH / THREADS_PER_BLOCK_Y),
+                       dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y),
+                       0, 0,
+                       gpuTransposeMatrix, gpuMatrix, WIDTH);
+
+    // Stop profiling
+    roctxProfilerPause(0);
+
+    // Code here is not profiled
+    someOtherFunction();
+
+    // Start profiling for region 2
+    roctxProfilerResume(0);
+
+    // Region 2: Result retrieval (will be profiled)
+    hipMemcpy(TransposeMatrix, gpuTransposeMatrix, NUM * sizeof(float), hipMemcpyDeviceToHost);
+
+    // Stop profiling
+    roctxProfilerPause(0);
+
+    // Cleanup (not profiled)
+    hipFree(gpuMatrix);
+    hipFree(gpuTransposeMatrix);
+
+When the preceding code is run with selected regions enabled as shown here:
+
+.. code-block:: shell
+
+    rocprofv3 --selected-regions --hip-trace --kernel-trace --output-format csv -- <application_path>
+
+This command will collect HIP API traces and kernel traces **only** for the regions enclosed within ``roctxProfilerResume(0)`` and ``roctxProfilerPause(0)``. The initialization code, ``someOtherFunction()``, and cleanup code will not be profiled.
+
+**Multiple region profiling:**
+
+You can instrument your code with multiple ``roctxProfilerResume()`` and ``roctxProfilerPause()`` pairs throughout the application. For each such pair, the ``--selected-regions`` option collects data in each region where profiling is resumed. There is no need to provide a list of regions as all regions enclosed within the API calls will be profiled automatically.
+
+**Nested pause-resume pairs:**
+
+By default, each ``roctxProfilerResume()`` and ``roctxProfilerPause()`` call directly toggles profiling on or off. For nested pairs, such as a function with profiling control called from within another profiled region, the innermost call affects the profiling state. To handle nested pairs with reference counting, use the ``--selected-regions-ref-count`` option, which uses reference counting for pause and resume calls and only toggles profiling when the outermost pair boundaries are crossed.
+
+**Thread-specific control:**
+
+For more fine-grained control, you can use thread-specific pause and resume:
+
+.. code-block:: c++
+
+    roctx_thread_id_t tid;
+    roctxGetThreadId(&tid);
+
+    roctxProfilerResume(tid);  // Resume profiling on current thread only
+    // ... code to profile ...
+    roctxProfilerPause(tid);   // Pause profiling on current thread only
+
+When using ``0`` as the thread ID argument, the control applies to all threads. When using a specific thread ID (obtained via ``roctxGetThreadId()``), the control applies only to that thread.
+
+**Combining with other profiling options:**
+
+The ``--selected-regions`` option works with all tracing and profiling options, such as:
+
+- API tracing: ``--hip-trace``, ``--hsa-trace``, ``--marker-trace``, ``--rccl-trace``, and others.
+- Kernel tracing: ``--kernel-trace``.
+- Memory tracing: ``--memory-copy-trace``, ``--memory-allocation-trace``, ``--scratch-memory-trace``.
+- Counter collection: ``--pmc``.
+- Thread tracing: ``--advanced-thread-trace``.
+- PC sampling: ``--pc-sampling-beta-enabled``.
+
+.. note::
+   - The ``--selected-regions`` option can't be used together with ``--collection-period``. These are mutually exclusive profiling control mechanisms. Use ``--selected-regions`` for code-based control and ``--collection-period`` for time-based control.
+
+   - For thread trace (ATT) profiling, ``--att --selected-regions`` can be used together to control exactly which GPU kernel dispatches are thread-traced, using ``roctxProfilerResume(0)`` and ``roctxProfilerPause(0)``. See :ref:`using-thread-trace` for details.
+
+**Comparison summary:**
+
+The following table compares the behavior when profiling with and without ``--selected-regions`` option:
+
+.. list-table:: roctxProfilerPause/Resume behavior comparison
+   :header-rows: 1
+   :widths: 30 35 35
+
+   * - Aspect
+     - Without --selected-regions
+     - With --selected-regions
+
+   * - Initial profiler state
+     - Enabled (profiling active)
+     - Disabled (profiling inactive)
+
+   * - roctxProfilerPause() effect
+     - Temporarily hides code from profiling
+     - Stops profiling in a region
+
+   * - roctxProfilerResume() effect
+     - Resumes profiling after pause
+     - Starts profiling in a region
+
+   * - Use case
+     - Profiles everything except marked regions
+     - Profiles only marked regions
+
+   * - Typical workflow
+     - Excludes uninteresting regions
+     - Includes only interesting regions
+
+   * - Data collected
+     - All code except paused regions
+     - Only resumed regions
 
 Resource naming
 ++++++++++++++++
@@ -250,7 +425,7 @@ The following sample code from the MatrixTranspose application shows the usage o
 
 Before using the ``roctx`` module for python application, ensure that the ``roctx`` module is built, installed and available in your python environment.
 
-An example to build and install ``roctx`` module is as follows:    
+An example to build and install ``roctx`` module is as follows:
 
 .. code-block:: shell
 
@@ -264,26 +439,26 @@ Multiple python versions can be specified in the ``ROCPROFILER_PYTHON_VERSIONS``
     ``cmake -B build-sdk -DCMAKE_INSTALL_PREFIX=/opt/rocm -DROCPROFILER_PYTHON_VERSIONS="3.8;3.9;3.10;3.11;3.12" -DCMAKE_PREFIX_PATH=/opt/rocm``
 
 Based on the python major.minor version and the roctx module install path ("/opt/rocm" in above example), set the ``PYTHONPATH`` environment variable to include the path to the ``roctx`` module.
-    
+
 .. code-block:: shell
 
    export PYTHONPATH="<install-path>/lib/pythonX.Y/site-packages:$PYTHONPATH"
-    
+
 Above example will install the roctx module in ``/opt/rocm/lib/python3.10/site-packages``, set the ``PYTHONPATH`` as follows:
 
 .. code-block:: shell
 
     export PYTHONPATH=/opt/rocm/lib/python3.10/site-packages:$PYTHONPATH
 
-    
+
 Once the ``PYTHONPATH`` is set, user should be able to import the `roctx` package:
 
 .. code-block:: shell
 
    python3 -c "import roctx"
-    
+
 User can profile the python application which is annotated with ROCTx markers using ``rocprofv3`` as follows:
-    
+
 .. code-block:: shell
 
    rocprofv3 --marker-trace --output-format csv -- $(which python) <python_application_path>

@@ -38,7 +38,7 @@ executionControl:
     tags: [kernel, multigpu]
   Unit_hipLaunchCooperativeKernelMultiDevice_Negative_MultiKernelSameDevice:
     <<: *level_2
-    tags: [kernel]
+    tags: [kernel, multigpu]
   Unit_hipExtLaunchKernel_Positive_Basic:
     <<: *level_2
     tags: [kernel, launch]
@@ -53,10 +53,10 @@ executionControl:
     tags: [kernel, launch]
   Unit_hipExtLaunchMultiKernelMultiDevice_Positive_Basic:
     <<: *level_2
-    tags: [kernel, launch, multigpu]
+    tags: [kernel, launch]
   Unit_hipExtLaunchMultiKernelMultiDevice_Negative_Parameters:
     <<: *level_2
-    tags: [kernel, launch, multigpu]
+    tags: [kernel, launch]
     # NOTE: The following test is disabled due to defect - EXSWHTEC-244
     disabled: [amd_linux, amd_windows]
   Unit_hipExtLaunchMultiKernelMultiDevice_Negative_MultiKernelSameDevice:

@@ -1,0 +1,14 @@
+include README.md
+include LICENSE
+include pyproject.toml
+include CMakeLists.txt
+
+recursive-include src *.cc *.h *.hpp
+recursive-include rocshmem4py *.py
+recursive-include tests *.py
+
+exclude launch_test.sh
+
+global-exclude __pycache__
+global-exclude *.py[co]
+global-exclude .DS_Store

@@ -8,16 +8,10 @@ subtrees:
 
 - caption: Install
   entries:
-  - file: install/rocDecode-prerequisites.rst
-    title: Prerequisites
-  - file: install/rocDecode-clone-project.rst
-    title: Cloning the project
-  - file: install/rocDecode-package-install.rst
-    title: Installing with the package installer
+  - file: install/rocDecode-install.rst
+    title: Install rocDecode
   - file: install/rocDecode-build-and-install.rst
-    title: Installing from source code
-  - url: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/docker
-    title: Docker containers
+    title: Build from source
 
 - caption: Conceptual
   entries:
@@ -56,8 +50,20 @@ subtrees:
         title: Hardware decoder API
       - file: reference/rocDecode-sw-decoder.rst
         title: Software decoder API
+  - file: reference/rocDecode-utility-classes.rst
+    title: Utility classes 
+    subtrees:
+    - entries:
+      - file: reference/rocDecode-util-decoder.rst
+        title: RocVideoDecoder class
+      - file: reference/rocDecode-demux.rst
+        title: Video demultiplexer class
+      - file: reference/rocDecode-ffmpeg-decoder.rst
+        title: FFMpeg decoder class
   - file: reference/rocDecode-logging-control.rst
     title: Logging levels 
+  - file: reference/rocDecode-env-vars.rst
+    title: Environment variables
   - file: reference/rocDecode-formats-and-architectures.rst
     title: rocDecode supported codecs and architectures
   - file: doxygen/html/files

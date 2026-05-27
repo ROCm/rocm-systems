@@ -89,19 +89,21 @@ __global__ void WorkGroupPrimitiveTest(int loop, int skip,
 WorkGroupPrimitiveTester::WorkGroupPrimitiveTester(TesterArguments args)
     : Tester(args) {
   size_t buff_size = max_msg_size * args.num_wgs;
-  source = (char *)rocshmem_malloc(buff_size);
-  dest = (char *)rocshmem_malloc(buff_size);
+  char *local = (char *) alloc_test_buffer(buff_size, args.local_buf_type);
+  char *remote = (char *) alloc_test_buffer(buff_size);
 
-  if (source == nullptr || dest == nullptr) {
-    std::cerr << "Error allocating memory from symmetric heap" << std::endl;
-    std::cerr << "source: " << source << ", dest: " << dest << std::endl;
-    if (source) {
-      rocshmem_free(source);
-    }
-    if (dest) {
-      rocshmem_free(dest);
-    }
-    rocshmem_global_exit(1);
+  switch (_type) {
+    case WGPutTestType:
+    case WGPutNBITestType:
+      source = local;
+      dest = remote;
+      break;
+    case WGGetTestType:
+    case WGGetNBITestType:
+    default:
+      dest = local;
+      source = remote;
+      break;
   }
 
   for(size_t i = 0; i < buff_size; i++) {
@@ -110,8 +112,25 @@ WorkGroupPrimitiveTester::WorkGroupPrimitiveTester(TesterArguments args)
 }
 
 WorkGroupPrimitiveTester::~WorkGroupPrimitiveTester() {
-  rocshmem_free(source);
-  rocshmem_free(dest);
+  char *local = nullptr;
+  char *remote = nullptr;
+
+  switch (_type) {
+    case WGPutTestType:
+    case WGPutNBITestType:
+      local = source;
+      remote = dest;
+      break;
+    case WGGetTestType:
+    case WGGetNBITestType:
+    default:
+      local = dest;
+      remote = source;
+      break;
+  }
+
+  free_test_buffer(local, args.local_buf_type);
+  free_test_buffer(remote);
 }
 
 void WorkGroupPrimitiveTester::resetBuffers(size_t size) {

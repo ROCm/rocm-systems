@@ -27,7 +27,6 @@ constexpr char const* kernelName[] = {
   "ReduceScatter_LDMC"
 };
 
-#ifdef GENERATE_SYM_KERNELS
 constexpr uint32_t kernelMask_STMC = 1<<ncclSymkKernelId_AllGather_LLMC |
                                      1<<ncclSymkKernelId_AllGather_STMC |
                                      1<<ncclSymkKernelId_AllReduce_AGxLLMC_R |
@@ -36,7 +35,6 @@ constexpr uint32_t kernelMask_STMC = 1<<ncclSymkKernelId_AllGather_LLMC |
 
 constexpr uint32_t kernelMask_LDMC = 1<<ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC |
                                      1<<ncclSymkKernelId_ReduceScatter_LDMC;
-#endif
 
 constexpr uint32_t kernelMask_LL = 1<<ncclSymkKernelId_AllReduce_AGxLL_R |
                                    1<<ncclSymkKernelId_AllReduce_AGxLLMC_R |
@@ -57,6 +55,18 @@ constexpr uint32_t kernelMask_AR = 1<<ncclSymkKernelId_AllReduce_AGxLLMC_R |
 constexpr uint32_t kernelMask_RS = 1<<ncclSymkKernelId_ReduceScatter_LD |
                                    1<<ncclSymkKernelId_ReduceScatter_LDMC |
                                    1<<ncclSymkKernelId_ReduceScatter_LL;
+
+constexpr uint32_t kernelMask_LSA = 1<<ncclSymkKernelId_AllReduce_AGxLL_R |
+                                    1<<ncclSymkKernelId_AllReduce_AGxLLMC_R |
+                                    1<<ncclSymkKernelId_AllReduce_RSxLD_AGxST |
+                                    1<<ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC |
+                                    1<<ncclSymkKernelId_AllGather_LL |
+                                    1<<ncclSymkKernelId_AllGather_LLMC |
+                                    1<<ncclSymkKernelId_AllGather_ST |
+                                    1<<ncclSymkKernelId_AllGather_STMC |
+                                    1<<ncclSymkKernelId_ReduceScatter_LL |
+                                    1<<ncclSymkKernelId_ReduceScatter_LD |
+                                    1<<ncclSymkKernelId_ReduceScatter_LDMC;
 
 static uint32_t kernelMask_coll(ncclFunc_t coll) {
   switch (coll) {
@@ -93,6 +103,7 @@ static uint32_t kernelMask_user() {
 }
 
 NCCL_PARAM(SymCTAs, "SYM_CTAS", 0)
+NCCL_PARAM(SymLL, "SYM_LL", 1)
 
 static double softmin(double x, double ceiling, double softness) {
   // looks like a smooth version of: min(x, ceiling)
@@ -221,7 +232,9 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
     lla2aReq.next = reqs.resourceRequirementsList;
     reqs.resourceRequirementsList = &lla2aReq;
 
-    NCCLCHECK(ncclDevrCommCreateInternal(comm, &reqs, &symk->kcomm.devComm));
+    if (comm->nNodes == 1) {
+      NCCLCHECK(ncclDevrCommCreateInternal(comm, &reqs, &symk->kcomm.devComm));
+    }
   }
   return ncclSuccess;
 }
@@ -262,7 +275,6 @@ static bool ncclSymkImplemented(ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, nccl
 }
 
 static uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty, size_t nElts) {
-#ifdef GENERATE_SYM_KERNELS
   uint32_t kmask = kernelMask_coll(coll);
   kmask &= kernelMask_user();
 
@@ -293,6 +305,8 @@ static uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int/*ncclDe
   if (!hasSTMC) kmask &= ~kernelMask_STMC;
   if (!hasLDMC) kmask &= ~kernelMask_LDMC;
 
+  if (ncclParamSymLL() == 0) kmask &= ~kernelMask_LL;
+
   size_t nBytes = nElts*ncclTypeSize(ty);
   size_t nBusBytes = (coll == ncclFuncAllReduce ? 1 : comm->nRanks)*nBytes;
   // LL kernels use 32-bit ints to track element counts and indices.
@@ -301,10 +315,9 @@ static uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int/*ncclDe
   // to be at least 32 bytes per chunk)
   if (nBusBytes >= 32*(size_t(2)<<30)) kmask = 0;
 
+  if (comm->nNodes > 1) kmask &= ~kernelMask_LSA;
+
   return kmask;
-#else
-  return 0;
-#endif
 }
 
 bool ncclSymkAvailable(struct ncclComm* comm, ncclFunc_t coll, int/*ncclDevRedOp_t*/ red,
@@ -348,7 +361,11 @@ ncclResult_t ncclSymkPickKernel(
   *kernelId = bestKernel;
   *estTimeUs = kmask==0 || kernelMask_user() == (1<<ncclSymkKernelId_Count)-1 ? bestTime : 0.0f;
   *nBlocks = bestBlocks;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  *nWarps = 256/comm->WarpSize;
+#else
   *nWarps = 16;
+#endif
   return ncclSuccess;
 }
 
@@ -358,12 +375,6 @@ const char* ncclSymkKernelIdToString(int kernelId) {
   }
   return kernelName[kernelId];
 }
-
-#ifndef GENERATE_SYM_KERNELS
-void* ncclSymkGetKernelPtr(ncclSymkKernelId kernelId, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty) {
-  return nullptr;
-}
-#endif
 
 /* this function fills in the devWork except nextWorkOffset */
 ncclResult_t ncclSymkMakeDevWork(struct ncclComm* comm, struct ncclTaskColl* task, struct ncclSymkDevWork* outDevWork) {
@@ -378,3 +389,9 @@ ncclResult_t ncclSymkMakeDevWork(struct ncclComm* comm, struct ncclTaskColl* tas
   outDevWork->nChannels = 0;
   return ncclSuccess;
 }
+
+#ifndef GENERATE_SYM_KERNELS
+void* ncclSymkGetKernelPtr(ncclSymkKernelId kernelId, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty) {
+  return nullptr;
+}
+#endif

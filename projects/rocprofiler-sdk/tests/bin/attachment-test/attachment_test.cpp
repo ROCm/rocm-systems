@@ -24,11 +24,26 @@
 #include <rocprofiler-sdk-roctx/roctx.h>
 #include <unistd.h>
 #include <chrono>
+#include <csignal>
 #include <cstdlib>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
+
+namespace
+{
+// required type for signal handlers
+volatile std::sig_atomic_t signal_received = 0;
+}  // namespace
+
+// signal handler - must have C linkage
+extern "C" void
+attachment_test_signal_handler(int signum)
+{
+    signal_received = signum;
+}
 
 /* Macro for checking GPU API return values */
 #define HIP_ASSERT(call)                                                                           \
@@ -78,8 +93,13 @@ execute_kernels(const size_t tid, const size_t device_id)
     }
 
     // Run kernels in a loop for a while
-    std::cout << "Starting kernel execution loop for thread " << tid << " on device " << device_id
-              << "...\n";
+    {
+        // compose string first to avoid multithreaded handling of cout << operator
+        auto msg = std::stringstream{};
+        msg << "Starting kernel execution loop for thread " << tid << " on device " << device_id
+            << "...\n";
+        std::cout << msg.str();
+    }
     const int num_iterations = 30;
 
     for(int iter = 0; iter < num_iterations; ++iter)
@@ -135,8 +155,13 @@ execute_kernels(const size_t tid, const size_t device_id)
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
 
-    std::cout << "Kernel execution loop completed for thread " << tid << " on device " << device_id
-              << "...\n";
+    {
+        // compose string first to avoid multithreaded handling of cout << operator
+        auto msg = std::stringstream{};
+        msg << "Kernel execution loop completed for thread " << tid << " on device " << device_id
+            << "...\n";
+        std::cout << msg.str();
+    }
 
     HIP_ASSERT(hipStreamDestroy(stream));
     // Cleanup
@@ -147,6 +172,9 @@ execute_kernels(const size_t tid, const size_t device_id)
 int
 main(int argc, char** argv)
 {
+    // Install signal handler for SIGINT
+    std::signal(SIGWINCH, attachment_test_signal_handler);
+
     size_t nthreads{8};
     int    ndevices{0};
     for(int i = 1; i < argc; ++i)
@@ -194,6 +222,11 @@ main(int argc, char** argv)
     for(auto& itr : _threads)
         itr.join();
 
+    if(signal_received)
+    {
+        std::cout << "Attachment test process " << getpid() << " received signal "
+                  << signal_received << "\n";
+    }
     std::cout << "Attachment test app finished" << std::endl;
 
     return 0;

@@ -72,7 +72,8 @@ signal.signal(signal.SIGTERM, signal_handler)
 atexit.register(amdsmi_shut_down)
 
 gpus = amdsmi_get_processor_handles()
-cpus = amdsmi_get_cpusocket_handles()
+ret = amdsmi_get_cpu_handles()
+cpus = ret["processor_handles"]
 
 print(f"gpus variable populated with:{gpus}")
 print(f"cpus variable populated with:{cpus}")

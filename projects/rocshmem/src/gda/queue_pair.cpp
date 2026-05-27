@@ -44,7 +44,7 @@ QueuePair::QueuePair(struct ibv_pd* pd, int gda_provider) {
   allocator.allocate((void**)&nonfetching_atomic, 8);
   allocator.allocate((void**)&fetching_atomic, 8 * FETCHING_ATOMIC_CNT);
   allocator.allocate((void**)&fetching_atomic_freelist, sizeof(FreeListT*));
-  new (fetching_atomic_freelist) FreeListT();
+  new (fetching_atomic_freelist) FreeListT(HIPAllocator());
 
   CHECK_HIP(hipMemset(nonfetching_atomic, 0, 8));
   CHECK_HIP(hipMemset(fetching_atomic, 0, 8 * FETCHING_ATOMIC_CNT));
@@ -66,7 +66,7 @@ QueuePair::QueuePair(struct ibv_pd* pd, int gda_provider) {
   int deviceId;
   CHECK_HIP(hipGetDevice(&deviceId));
   int wf_size = get_wf_size(deviceId);
-  for(int i{0}; i < FETCHING_ATOMIC_CNT; i+=wf_size) {
+  for(uint32_t i{0}; i < FETCHING_ATOMIC_CNT; i+=wf_size) {
     fetching_atomic_freelist->push_back(fetching_atomic + i);
   }
 
@@ -100,6 +100,13 @@ QueuePair::QueuePair(struct ibv_pd* pd, int gda_provider) {
     assert(false /* invalid nic provider */);
   }
   gda_provider_ = gda_provider;
+
+  /* Setup User Buffer Registration Mechanism */
+  pd_ = pd;
+  num_user_buffers = envvar::gda::num_user_buffers;
+
+  CHECK_HIP(hipMalloc(&user_buf_info, sizeof(struct user_buf_info_t) *  num_user_buffers));
+  CHECK_HIP(hipMemset(user_buf_info, 0, sizeof(struct user_buf_info_t) *  num_user_buffers));
 }
 
 QueuePair::~QueuePair() {
@@ -116,6 +123,11 @@ QueuePair::~QueuePair() {
 
   fetching_atomic_freelist->~FreeListT();
   allocator.deallocate((void*)fetching_atomic_freelist);
+
+  if (user_buf_info) {
+    CHECK_HIP(hipFree(user_buf_info));
+    user_buf_info = nullptr;
+  }
 }
 
 __device__ uint64_t QueuePair::get_same_qp_lane_mask() {
@@ -129,27 +141,22 @@ __device__ uint64_t QueuePair::get_same_qp_lane_mask() {
 /******************************************************************************
  ************************ PROVIDER-SPECIFIC HELPERS ***************************
  *****************************************************************************/
-__device__ void QueuePair::post_wqe_rma(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy) {
+__device__ void QueuePair::post_wqe_rma([[maybe_unused]] int pe, int32_t size, uintptr_t laddr,
+    uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info) {
   switch (gda_provider_) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
-    ionic_post_wqe_rma(pe, size, laddr, raddr, opcode, cy);
+    ionic_post_wqe_rma(size, laddr, raddr, opcode, wf_info);
     return;
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
-    if ((cy == THREAD) ||
-        (cy == WAVE && is_thread_zero_in_wave())) {
-      bnxt_post_wqe_rma(pe, size, laddr, raddr, opcode);
-    }
+    bnxt_post_wqe_rma(size, laddr, raddr, opcode, wf_info);
     return;
 #endif
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
-    if ((cy == THREAD) ||
-        (cy == WAVE && is_thread_zero_in_wave())) {
-      mlx5_post_wqe_rma(pe, size, laddr, raddr, opcode);
-    }
+    mlx5_post_wqe_rma(size, laddr, raddr, opcode, wf_info);
     return;
 #endif
   default:
@@ -157,11 +164,12 @@ __device__ void QueuePair::post_wqe_rma(int pe, int32_t size, uintptr_t laddr, u
   }
 }
 
-__device__ void QueuePair::post_wqe_rma_single(int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, bool ring_db) {
+__device__ void QueuePair::post_wqe_rma_single([[maybe_unused]] int32_t size, uintptr_t laddr,
+    uintptr_t raddr, uint8_t opcode, [[maybe_unused]] bool ring_db) {
   switch (gda_provider_) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
-    ionic_post_wqe_rma_single(0 /*pe (unused)*/, size, laddr, raddr, opcode, Collectivity::THREAD);
+    ionic_post_wqe_rma_single(size, laddr, raddr, opcode);
     return;
 #endif
 #if defined(GDA_BNXT)
@@ -171,7 +179,7 @@ __device__ void QueuePair::post_wqe_rma_single(int32_t size, uintptr_t laddr, ui
 #endif
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
-    mlx5_post_wqe_rma_single(0 /* pe (unused) */, size, laddr, raddr, opcode, ring_db);
+    mlx5_post_wqe_rma_single(size, laddr, raddr, opcode, ring_db);
     return;
 #endif
   default:
@@ -179,20 +187,24 @@ __device__ void QueuePair::post_wqe_rma_single(int32_t size, uintptr_t laddr, ui
   }
 }
 
-__device__ uint64_t QueuePair::post_wqe_amo(int pe, int32_t size, uintptr_t raddr, uint8_t opcode,
-                                            int64_t atomic_data, int64_t atomic_cmp, bool fetching) {
+__device__ uint64_t QueuePair::post_wqe_amo([[maybe_unused]] int32_t size, uintptr_t raddr,
+    uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+    bool fetching, ActiveWFInfo &wf_info) {
   switch (gda_provider_) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
-    return ionic_post_wqe_amo(pe, size, raddr, opcode, atomic_data, atomic_cmp, fetching);
+    return ionic_post_wqe_amo(size, raddr, opcode, atomic_data, atomic_cmp,
+           fetching, wf_info);
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
-    return bnxt_post_wqe_amo(raddr, opcode, atomic_data, atomic_cmp, fetching);
+    return bnxt_post_wqe_amo(raddr, opcode, atomic_data, atomic_cmp, fetching,
+           wf_info);
 #endif
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
-    return mlx5_post_wqe_amo(pe, size, raddr, opcode, atomic_data, atomic_cmp, fetching);
+    return mlx5_post_wqe_amo(size, raddr, opcode, atomic_data, atomic_cmp,
+           fetching, wf_info);
 #endif
   default:
     assert(false /* invalid nic provider */);
@@ -200,22 +212,21 @@ __device__ uint64_t QueuePair::post_wqe_amo(int pe, int32_t size, uintptr_t radd
   }
 }
 
-__device__ uint64_t QueuePair::post_wqe_amo_single(uintptr_t raddr, uint8_t opcode,
-                                                   int64_t atomic_data, int64_t atomic_cmp,
-                                                   bool fetching) {
+__device__ uint64_t QueuePair::post_wqe_amo_single(uintptr_t raddr,
+    uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching) {
   switch (gda_provider_) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
-    return ionic_post_wqe_amo_single(0 /*pe (unused)*/, 8 /*size_bytes (only 8-byte atomics implemented)*/, raddr, opcode, atomic_data, atomic_cmp, fetching);
+    return ionic_post_wqe_amo_single(8 /*size_bytes (only 8-byte atomics implemented)*/, raddr, opcode, atomic_data, atomic_cmp, fetching);
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
-    return bnxt_post_wqe_amo_single(raddr, opcode, atomic_data, atomic_cmp, fetching);
+    return bnxt_post_wqe_amo_single(raddr, opcode, atomic_data, atomic_cmp,
+           fetching);
 #endif
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
-    return mlx5_post_wqe_amo_single(0 /* pe (unused) */, 8 /* 8-byte atomics */,
-                                    raddr, opcode, atomic_data, atomic_cmp, fetching);
+    return mlx5_post_wqe_amo_single(8 /* 8-byte atomics */, raddr, opcode, atomic_data, atomic_cmp, fetching);
 #endif
   default:
     assert(false /* invalid nic provider */);
@@ -223,29 +234,27 @@ __device__ uint64_t QueuePair::post_wqe_amo_single(uintptr_t raddr, uint8_t opco
   }
 }
 
-__device__ void QueuePair::quiet(Collectivity cy) {
-  switch (gda_provider_) {
-#if defined(GDA_IONIC)
-  case GDAProvider::IONIC:
-    ionic_quiet();
-    return;
-#endif
-#if defined(GDA_BNXT)
-  case GDAProvider::BNXT:
-    if (cy == THREAD || is_thread_zero_in_wave()) {
-      bnxt_quiet();
-    }
-    return;
-#endif
-#if defined(GDA_MLX5)
-  case GDAProvider::MLX5:
-    if (cy == THREAD || is_thread_zero_in_wave()) {
-      mlx5_quiet();
-    }
-    return;
-#endif
-  default:
-    assert(false /* invalid nic provider */);
+__device__ void QueuePair::quiet([[maybe_unused]] ActiveWFInfo &wf_info) {
+  if(wf_info.is_pe_group_first) {
+      switch (gda_provider_) {
+    #if defined(GDA_IONIC)
+      case GDAProvider::IONIC:
+        ionic_quiet(wf_info);
+        return;
+    #endif
+    #if defined(GDA_BNXT)
+      case GDAProvider::BNXT:
+          bnxt_quiet();
+        return;
+    #endif
+    #if defined(GDA_MLX5)
+      case GDAProvider::MLX5:
+          mlx5_quiet();
+        return;
+    #endif
+      default:
+        assert(false /* invalid nic provider */);
+      }
   }
 }
 
@@ -253,7 +262,7 @@ __device__ void QueuePair::quiet_single() {
   switch (gda_provider_) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
-    ionic_quiet();
+    ionic_quiet_single();
     return;
 #endif
 #if defined(GDA_BNXT)
@@ -274,13 +283,16 @@ __device__ void QueuePair::quiet_single() {
 /******************************************************************************
  ****************************** SHMEM INTERFACE *******************************
  *****************************************************************************/
-__device__ void QueuePair::put_nbi(void *dest, const void *source, size_t nelems, int pe, Collectivity cy) {
+__device__ void QueuePair::put_nbi(void *dest, const void *source,
+    size_t nelems, int pe, ActiveWFInfo &wf_info) {
   uintptr_t src = reinterpret_cast<uintptr_t>(source);
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
-  post_wqe_rma(pe, nelems, src, dst, gda_op_rdma_write, cy);
+  post_wqe_rma(pe, nelems, src, dst, gda_op_rdma_write, wf_info);
 }
 
-__device__ void QueuePair::put_nbi_single(void *dest, const void *source, size_t nelems, bool ring_db) {
+// Used in all to all
+__device__ void QueuePair::put_nbi_single(void *dest, const void *source,
+    size_t nelems, bool ring_db) {
   uintptr_t src = reinterpret_cast<uintptr_t>(source);
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
   post_wqe_rma_single(nelems, src, dst, gda_op_rdma_write, ring_db);
@@ -292,35 +304,124 @@ __device__ void QueuePair::get_nbi_single(void *dest, const void *source, size_t
   post_wqe_rma_single(nelems, dst, src, gda_op_rdma_read, ring_db);
 }
 
-__device__ void QueuePair::get_nbi(void *dest, const void *source, size_t nelems, int pe, Collectivity cy) {
+__device__ void QueuePair::get_nbi(void *dest, const void *source,
+    size_t nelems, int pe, ActiveWFInfo &wf_info) {
   uintptr_t src = reinterpret_cast<uintptr_t>(source);
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
-  post_wqe_rma(pe, nelems, dst, src, gda_op_rdma_read, cy);
+  post_wqe_rma(pe, nelems, dst, src, gda_op_rdma_read, wf_info);
 }
 
-__device__ int64_t QueuePair::atomic_cas(void *dest, int64_t atomic_data, int64_t atomic_cmp, int pe) {
+__device__ int64_t QueuePair::atomic_cas(void *dest, int64_t atomic_data,
+    int64_t atomic_cmp, ActiveWFInfo &wf_info) {
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
-  return post_wqe_amo(pe, sizeof(int64_t), dst, gda_op_atomic_cs, atomic_data, atomic_cmp, true);
+  return post_wqe_amo(sizeof(int64_t), dst, gda_op_atomic_cs, atomic_data,
+                      atomic_cmp, true, wf_info);
 }
 
-__device__ int64_t QueuePair::atomic_cas_nofetch(void *dest, int64_t atomic_data, int64_t atomic_cmp, int pe) {
+__device__ int64_t QueuePair::atomic_cas_nofetch(void *dest,
+    int64_t atomic_data, int64_t atomic_cmp, ActiveWFInfo &wf_info) {
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
-  return post_wqe_amo(pe, sizeof(int64_t), dst, gda_op_atomic_cs, atomic_data, atomic_cmp, false);
+  return post_wqe_amo(sizeof(int64_t), dst, gda_op_atomic_cs, atomic_data,
+                      atomic_cmp, false, wf_info);
 }
 
-__device__ int64_t QueuePair::atomic_fetch(void *dest, int64_t atomic_data, int64_t atomic_cmp, int pe) {
+__device__ int64_t QueuePair::atomic_fetch(void *dest, int64_t atomic_data,
+    int64_t atomic_cmp, ActiveWFInfo &wf_info) {
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
-  return post_wqe_amo(pe, sizeof(int64_t), dst, gda_op_atomic_fa, atomic_data, atomic_cmp, true);
+  return post_wqe_amo(sizeof(int64_t), dst, gda_op_atomic_fa, atomic_data,
+                      atomic_cmp, true, wf_info);
 }
 
-__device__ void QueuePair::atomic_nofetch(void *dest, int64_t atomic_data, int64_t atomic_cmp, int pe) {
+__device__ void QueuePair::atomic_nofetch(void *dest, int64_t atomic_data,
+    int64_t atomic_cmp, ActiveWFInfo &wf_info) {
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
-  post_wqe_amo(pe, sizeof(int64_t), dst, gda_op_atomic_fa, atomic_data, atomic_cmp, false);
+  post_wqe_amo(sizeof(int64_t), dst, gda_op_atomic_fa, atomic_data,
+               atomic_cmp, false, wf_info);
 }
 
 __device__ void QueuePair::atomic_nofetch_single(void *dest, int64_t value) {
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
   post_wqe_amo_single(dst, gda_op_atomic_fa, value, 0, false);
+}
+
+int QueuePair::buffer_register(uintptr_t addr, size_t length) {
+  struct ibv_mr *mr = nullptr;
+  int access = 0;
+
+  if (user_buffer_mrs.size() >= num_user_buffers) {
+    LOG_WARN("Unable to register user buffer with QP. "
+             "Please increase the value of ROCSHMEM_GDA_NUM_USER_BUFFERS");
+    return ROCSHMEM_ERROR;
+  }
+
+  access = IBV_ACCESS_LOCAL_WRITE
+         | IBV_ACCESS_REMOTE_WRITE
+         | IBV_ACCESS_REMOTE_READ
+         | IBV_ACCESS_REMOTE_ATOMIC;
+
+  if (envvar::gda::pcie_relaxed_ordering) {
+    access |= IBV_ACCESS_RELAXED_ORDERING;
+  }
+
+  mr = ibv.reg_mr(pd_, (void*)addr, length, access, &allocator);
+  CHECK_NNULL(mr, "ibv_reg_mr (buffer_register)");
+
+  user_buffer_mrs[addr] = mr;
+
+  for (size_t i=0; i<num_user_buffers; i++) {
+    if (user_buf_info[i].addr == 0) {
+      user_buf_info[i].addr   = addr;
+      user_buf_info[i].length = length;
+
+      if (gda_provider_ == GDAProvider::MLX5) {
+        user_buf_info[i].lkey = htobe32(mr->lkey);
+      } else {
+        user_buf_info[i].lkey = mr->lkey;
+      }
+
+      break;
+    }
+  }
+
+  return ROCSHMEM_SUCCESS;
+}
+
+int QueuePair::buffer_unregister(uintptr_t addr) {
+  int err;
+
+  for (size_t i=0; i<num_user_buffers; i++) {
+    if (is_ptr_in_range(user_buf_info[i].addr, user_buf_info[i].length, addr)) {
+      CHECK_HIP(hipMemset(&user_buf_info[i], 0, sizeof(struct user_buf_info_t)));
+      break;
+    }
+  }
+
+  err = ibv.dereg_mr(user_buffer_mrs[addr]);
+  CHECK_ZERO(err, "ibv_dereg_mr (buffer_unregister)");
+
+  user_buffer_mrs.erase(addr);
+
+  return ROCSHMEM_SUCCESS;
+}
+
+__device__ uint32_t QueuePair::get_lkey(uintptr_t addr) {
+  /* Check if in heap */
+  if (is_ptr_in_range(base_heap, base_heap_size, addr)) {
+    return lkey;
+  }
+
+  /* Get the correct lkey for the user buffer */
+  for (size_t i=0; i<num_user_buffers; i++) {
+    uintptr_t uaddr = user_buf_info[i].addr;
+    size_t uaddr_len = user_buf_info[i].length;
+
+    if (is_ptr_in_range(uaddr, uaddr_len, addr)) {
+      return user_buf_info[i].lkey;
+    }
+  }
+
+  LOGD_ERROR_ABORT("Valid lkey buffer not found");
+  return 0;
 }
 
 }  // namespace rocshmem

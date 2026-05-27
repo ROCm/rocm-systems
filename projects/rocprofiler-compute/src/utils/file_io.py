@@ -29,7 +29,14 @@ def load_sys_info(f: str) -> pd.DataFrame:
     """
     Load sys running info from csv file to a df.
     """
-    return pd.read_csv(f)
+    from utils.specs import canonical_gpu_arch
+
+    df = pd.read_csv(f)
+    if "gpu_arch" in df.columns and not df.empty:
+        df["gpu_arch"] = df["gpu_arch"].map(
+            lambda x: canonical_gpu_arch(str(x)) if pd.notna(x) else x
+        )
+    return df
 
 
 def load_panel_configs(
@@ -41,7 +48,7 @@ def load_panel_configs(
     configs: dict[int, dict[str, Any]] = {}
     for dir_path in dirs:
         for yaml_file in Path(dir_path).glob("*.yaml"):
-            with open(yaml_file) as file:
+            with open(yaml_file, encoding="utf-8") as file:
                 config_yml = yaml.safe_load(file)
                 # metric key can be None due to some metric-
                 # tables not having any metrics
@@ -64,7 +71,7 @@ def load_profiling_config(config_dir: str) -> dict[str, Any]:
     """
     config_path = Path(config_dir) / "profiling_config.yaml"
     try:
-        with open(config_path) as file:
+        with open(config_path, encoding="utf-8") as file:
             return yaml.safe_load(file) or {}
     except FileNotFoundError:
         console_log(f"Could not find profiling_config.yaml in {config_dir}")
@@ -73,7 +80,7 @@ def load_profiling_config(config_dir: str) -> dict[str, Any]:
 
 @demarcate
 def create_df_kernel_top_stats(
-    df_in: dict[str, pd.DataFrame],
+    df_in: pd.DataFrame,
     raw_data_dir: str,
     filter_gpu_ids: Optional[list[str]],
     filter_dispatch_ids: Optional[list[str]],
@@ -89,7 +96,7 @@ def create_df_kernel_top_stats(
         A tuple of (kernel_top_df, dispatch_info_df).
     """
 
-    df = df_in["pmc_perf"].copy()
+    df = df_in.copy()
 
     # The logic below for filters are the same as in parser.apply_filters(),
     # which can be merged together if need it.
@@ -210,6 +217,71 @@ def create_df_kernel_top_stats(
     return grouped.reset_index(drop=True), dispatch_info.reset_index(drop=True)
 
 
+def build_agent_to_gpu_map(
+    agent_info_path: Path,
+) -> dict[str, int]:
+    """
+    Map ``"Agent N"`` strings to 0-indexed GPU IDs.
+
+    GPU agents are identified by ``Agent_Type == "GPU"`` in the
+    agent info CSV.  They are sorted by ``Node_Id`` so that the
+    first GPU agent maps to GPU 0, the second to GPU 1, etc.
+
+    Returns an empty dict when *agent_info_path* does not exist.
+    """
+    if not agent_info_path.exists():
+        return {}
+
+    agent_df = pd.read_csv(agent_info_path)
+    gpu_agents = (
+        agent_df[agent_df["Agent_Type"] == "GPU"]
+        .sort_values("Node_Id")
+        .reset_index(drop=True)
+    )
+    return {f"Agent {row.Node_Id}": row.Index for row in gpu_agents.itertuples()}
+
+
+@demarcate
+def process_pc_sampling_kernel_trace(
+    workload_path: str,
+) -> pd.DataFrame:
+    """
+    Build kernel and dispatch info from a kernel trace.
+
+    Used for PC-sampling-only runs where ``pmc_perf`` data is not
+    available.  Reads ``ps_file_kernel_trace.csv`` (and optionally
+    ``ps_file_agent_info.csv`` for GPU ID mapping)
+    """
+    trace_path = Path(workload_path) / "ps_file_kernel_trace.csv"
+    if not trace_path.exists():
+        console_warning(
+            f"Kernel trace not found at {trace_path}. Cannot build dispatch data."
+        )
+        return pd.DataFrame(
+            columns=[
+                "Dispatch_Id",
+                "Kernel_Name",
+                "Start_Timestamp",
+                "End_Timestamp",
+                "GPU_ID",
+            ]
+        )
+
+    trace_df = pd.read_csv(trace_path)
+
+    # Map agent IDs to GPU IDs
+    agent_to_gpu = build_agent_to_gpu_map(
+        Path(workload_path) / "ps_file_agent_info.csv"
+    )
+    trace_df["GPU_ID"] = trace_df["Agent_Id"].map(agent_to_gpu).fillna(0).astype(int)
+
+    trace_df = trace_df[
+        ["Dispatch_Id", "Kernel_Name", "Start_Timestamp", "End_Timestamp", "GPU_ID"]
+    ]
+
+    return trace_df
+
+
 @demarcate
 def create_df_pmc(
     raw_data_root_dir: str,
@@ -226,46 +298,26 @@ def create_df_pmc(
     def create_single_df_pmc(
         raw_data_dir: str, node_name: Optional[str], kernel_verbose: int, verbose: int
     ) -> pd.DataFrame:
-        dfs: list[pd.DataFrame] = []
-        coll_levels: list[str] = []
-
-        for csv_file in Path(raw_data_dir).rglob("*.csv"):
-            file_name = csv_file.name
-
-            is_sq_file = file_name.startswith("SQ")
-            is_pmc_perf = file_name == f"{schema.PMC_PERF_FILE_PREFIX}.csv"
-
-            if is_sq_file or is_pmc_perf:
-                tmp_df = pd.read_csv(csv_file)
-
-                if config_dict.get("format_rocprof_output") == "rocpd":
-                    tmp_df = utils_analysis.process_rocpd_csv(tmp_df)
-
-                # Demangle original KernelNames
-                # Skip for Standalone Roofline with -1 to keep full kernel names
-                if kernel_verbose >= 0:
-                    kernel_name_shortener(tmp_df, kernel_verbose)
-
-                # NB:
-                #   Idealy, the Node column should be added out of
-                #   multiindexing level. Here, we add it into pmc_perf
-                #   as it is the main sub-df which can be handled easily
-                #   later.
-                if file_name == "pmc_perf.csv" and node_name is not None:
-                    tmp_df.insert(0, "Node", node_name)
-
-                dfs.append(tmp_df)
-                # Remove .csv extension for collection level
-                coll_levels.append(csv_file.stem)
-
-        if not dfs:
+        pmc_perf_path = Path(raw_data_dir) / f"{schema.PMC_PERF_FILE_PREFIX}.csv"
+        if not pmc_perf_path.is_file():
             return pd.DataFrame()
 
-        # TODO: double check the case if all tmp_df.shape[0] are not on the same page
-        final_df = pd.concat(dfs, keys=coll_levels, axis=1, join="inner", copy=False)
+        df = pd.read_csv(pmc_perf_path)
+
+        if config_dict.get("format_rocprof_output") == "rocpd":
+            df = utils_analysis.process_rocpd_csv(df)
+
+        # Demangle original KernelNames
+        # Skip for Standalone Roofline with -1 to keep full kernel names
+        if kernel_verbose >= 0:
+            kernel_name_shortener(df, kernel_verbose)
+
+        if node_name is not None:
+            df.insert(0, "Node", node_name)
+
         if verbose >= 2:
-            console_debug(f"pmc_raw_data final_single_df {final_df.info}")
-        return final_df
+            console_debug(f"pmc_raw_data final_single_df {df.info}")
+        return df
 
     root_path = Path(raw_data_root_dir)
 

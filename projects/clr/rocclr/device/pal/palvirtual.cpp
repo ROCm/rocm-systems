@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include "platform/command_utils.hpp"
 #include "platform/perfctr.hpp"
 #include "platform/threadtrace.hpp"
 #include "platform/kernel.hpp"
@@ -25,6 +26,9 @@
 #include <sstream>
 #include <algorithm>
 #include <thread>
+#include <cstddef>
+#include <limits>
+#include <utility>
 #include "palQueue.h"
 #include "palFence.h"
 #include "palQueueSemaphore.h"
@@ -158,8 +162,9 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
   }
 
   size_t allocSize = qSize + max_command_buffers * (cmdSize + fSize);
-  VirtualGPU::Queue* queue =
-      new (allocSize) VirtualGPU::Queue(gpu, palDev, residency_limit, max_command_buffers);
+  VirtualGPU::Queue* queue = amd::AllocWithTrailing<VirtualGPU::Queue>(
+      allocSize, gpu, palDev, residency_limit, max_command_buffers);
+  
   if (queue != nullptr) {
     address addrQ = nullptr;
     if (((qCreateInfo.engineType == Pal::EngineTypeCompute) ||
@@ -168,7 +173,8 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
       uint32_t index = AllocedQueues(gpu, qCreateInfo.engineType);
       // Create PAL queue object
       if (index < GPU_MAX_HW_QUEUES) {
-        Device::QueueRecycleInfo* info = new (qSize) Device::QueueRecycleInfo(gpu.dev());
+        Device::QueueRecycleInfo* info =
+            amd::AllocWithTrailing<Device::QueueRecycleInfo>(qSize, gpu.dev());
         if (info == nullptr) {
           LogError("Could not create QueueRecycleInfo!");
           return nullptr;
@@ -182,7 +188,7 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
           // Save uniqueue index for scratch buffer access
           info->index_ = index;
         } else {
-          delete queue;
+          amd::DestroyWithTrailing(queue);
           return nullptr;
         }
       } else {
@@ -210,7 +216,10 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
       queue->lock_ = &info->queue_lock_;
       addrQ = reinterpret_cast<address>(&queue[1]);
     } else {
-      Device::QueueRecycleInfo* info = new Device::QueueRecycleInfo(gpu.dev());
+      // Exclusive-compute path: the PAL IQueue is placed into the Queue wrapper's trailing
+      // region (see addrQ assignment below), so QueueRecycleInfo carries no trailing payload.
+      Device::QueueRecycleInfo* info =
+          amd::AllocWithTrailing<Device::QueueRecycleInfo>(0, gpu.dev());
       if (info == nullptr) {
         LogError("Could not create QueueRecycleInfo!");
         return nullptr;
@@ -223,7 +232,7 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
       result = palDev->CreateQueue(qCreateInfo, addrQ, &queue->iQueue_);
     }
     if (result != Pal::Result::Success) {
-      delete queue;
+      amd::DestroyWithTrailing(queue);
       return nullptr;
     }
     queue->UpdateAppPowerProfile();
@@ -234,7 +243,7 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
     for (uint i = 0; i < max_command_buffers; ++i) {
       result = palDev->CreateCmdBuffer(cmdCreateInfo, &addrCmd[i * cmdSize], &queue->iCmdBuffs_[i]);
       if (result != Pal::Result::Success) {
-        delete queue;
+        amd::DestroyWithTrailing(queue);
         return nullptr;
       }
 
@@ -242,13 +251,13 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
       fenceCreateinfo.flags.signaled = false;
       result = palDev->CreateFence(fenceCreateinfo, &addrF[i * fSize], &queue->iCmdFences_[i]);
       if (result != Pal::Result::Success) {
-        delete queue;
+        amd::DestroyWithTrailing(queue);
         return nullptr;
       }
       if (i == StartCmdBufIdx) {
         result = queue->iCmdBuffs_[i]->Begin(cmdBuildInfo);
         if (result != Pal::Result::Success) {
-          delete queue;
+          amd::DestroyWithTrailing(queue);
           return nullptr;
         }
       }
@@ -258,7 +267,7 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
 }
 
 VirtualGPU::Queue::~Queue() {
-  delete reinterpret_cast<Device::QueueRecycleInfo*>(info_);
+  amd::DestroyWithTrailing(reinterpret_cast<Device::QueueRecycleInfo*>(info_));
 
   if (nullptr != iQueue_) {
     // Make sure the queues are idle
@@ -269,10 +278,11 @@ VirtualGPU::Queue::~Queue() {
 
   // Remove all memory references
   std::vector<Pal::IGpuMemory*> memRef;
+  memRef.reserve(memReferences_.size());
   for (auto it : memReferences_) {
     memRef.push_back(it.first->iMem());
   }
-  if (memRef.size() != 0) {
+  if (!memRef.empty()) {
     iDev_->RemoveGpuMemoryReferences(memRef.size(), &memRef[0], iQueue_);
   }
   memReferences_.clear();
@@ -300,7 +310,7 @@ VirtualGPU::Queue::~Queue() {
             queue.second->index_--;
           }
         }
-        delete gpu_.dev().QueuePool().find(iQueue_)->second;
+        amd::DestroyWithTrailing(gpu_.dev().QueuePool().find(iQueue_)->second);
         const_cast<Device&>(gpu_.dev()).QueuePool().erase(iQueue_);
       }
     } else {
@@ -1138,8 +1148,8 @@ VirtualGPU::~VirtualGPU() {
 
   {
     // Destroy queues
-    delete queues_[MainEngine];
-    delete queues_[SdmaEngine];
+    amd::DestroyWithTrailing(queues_[MainEngine]);
+    amd::DestroyWithTrailing(queues_[SdmaEngine]);
 
     if (nullptr != cmdAllocator_) {
       cmdAllocator_->Destroy();
@@ -2293,9 +2303,26 @@ void VirtualGPU::submitStreamOperation(amd::StreamOperationCommand& cmd) {
       LogError("submitStreamOperation: Wait failed!");
     }
   } else if (type == ROCCLR_COMMAND_STREAM_WRITE_VALUE) {
-    bool result = static_cast<KernelBlitManager&>(blitMgr()).streamOpsWrite(*memory, value, offset,
-                                                                            sizeBytes);
-    ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "Writing value: 0x%lx", value);
+    bool result;
+    switch (flags) {
+      case ROCCLR_STREAM_WRITE_VALUE_DEFAULT: {
+        result = blitMgr().streamOpsWrite(*memory, value, offset, sizeBytes);
+        break;
+      }
+      case ROCCLR_STREAM_WRITE_VALUE_INCREMENT: {
+        result = blitMgr().streamOpsIncrement(*memory, value, offset, sizeBytes);
+        break;
+      }
+      case ROCCLR_STREAM_WRITE_VALUE_DECREMENT: {
+        result = blitMgr().streamOpsDecrement(*memory, value, offset, sizeBytes);
+        break;
+      }
+      default: {
+        ShouldNotReachHere();
+        break;
+      }
+    }
+
     if (!result) {
       LogError("submitStreamOperation: Write failed!");
     }
@@ -3182,7 +3209,7 @@ void VirtualGPU::submitMakeBuffersResident(amd::MakeBuffersResidentCommand& vcmd
   std::scoped_lock lock(execution());
   profilingBegin(vcmd);
 
-  std::vector<amd::Memory*> memObjects = vcmd.memObjects();
+  const std::vector<amd::Memory*>& memObjects = vcmd.memObjects();
   uint32_t numObjects = memObjects.size();
   Pal::GpuMemoryRef* pGpuMemRef = new Pal::GpuMemoryRef[numObjects];
   Pal::IGpuMemory** pGpuMems = new Pal::IGpuMemory*[numObjects];

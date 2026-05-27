@@ -32,6 +32,8 @@
 extern "C" {
 #endif
 
+/* Forward declaration for debug trap ioctl arguments */
+struct kfd_ioctl_dbg_trap_args;
 
 /**
   "Opens" the HSA kernel driver for user-kernel mode communication.
@@ -370,6 +372,26 @@ hsaKmtCreateQueueExt(
     HsaEvent*           Event,            //IN
     HsaQueueResource*   QueueResource     //OUT
     );
+
+/**
+  Creates a GPU queue with user-mode access rights
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtCreateQueueV2(
+    HSAuint32           NodeId,                           //IN
+    HSA_QUEUE_TYPE      Type,                             //IN
+    HSAuint32           QueuePercentage,                  //IN
+    HSA_QUEUE_PRIORITY  Priority,                         //IN
+    HSAuint32           SdmaEngineId,                     //IN
+    void*               QueueAddress,                     //IN
+    HSAuint64           QueueSizeInBytes,                 //IN
+    HSAuint64           MetaDataPrefetchSizeInBytes,      //IN
+    HsaEvent*           Event,                            //IN
+    HsaQueueResource*   QueueResource                     //OUT
+    );
+
 
 /**
   Updates a queue
@@ -872,8 +894,10 @@ hsaKmtCheckRuntimeDebugSupport(
 /**
   Debug ops call primarily used for KFD testing
  */
-HSAKMT_STATUS HSAKMTAPI hsaKmtDebugTrapIoctl(
-    struct kfd_ioctl_dbg_trap_args *arg,
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtDebugTrapIoctl(
+    struct kfd_ioctl_dbg_trap_args *args,
     HSA_QUEUEID *Queues,
     HSAuint64 *DebugReturn
     );

@@ -64,10 +64,7 @@ static void RunBenchmark(const hipMemPoolAttr attribute) {
  */
 HIP_TEST_CASE(Performance_hipMemPoolSetAttribute) {
   if (!AreMemPoolsSupported(0)) {
-    HipTest::HIP_SKIP_TEST(
-        "GPU 0 doesn't support hipDeviceAttributeMemoryPoolsSupported "
-        "attribute. Hence skipping the testing with Pass result.\n");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
   hipMemPoolAttr attribute =
       GENERATE(hipMemPoolAttrReleaseThreshold, hipMemPoolReuseFollowEventDependencies,

@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "library/components/backtrace_metrics.hpp"
 #include "core/common.hpp"
@@ -32,6 +13,7 @@
 #include "library/runtime.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
+#include <cstdint>
 
 #include <functional>
 #include <timemory/backends/papi.hpp>
@@ -99,25 +81,25 @@ struct perfetto_rusage
 {};
 
 unique_ptr_t<std::vector<std::string>>&
-get_papi_labels(int64_t _tid)
+get_papi_labels(std::int64_t _tid)
 {
     return papi_label_instances::instance(construct_on_thread{ _tid });
 }
 
 unique_ptr_t<hw_counters>&
-get_papi_vector(int64_t _tid)
+get_papi_vector(std::int64_t _tid)
 {
     return papi_vector_instances::instance(construct_on_thread{ _tid });
 }
 
 unique_ptr_t<backtrace_metrics>&
-get_backtrace_metrics_init(int64_t _tid)
+get_backtrace_metrics_init(std::int64_t _tid)
 {
     return backtrace_metrics_init_instances::instance(construct_on_thread{ _tid });
 }
 
 unique_ptr_t<bool>&
-get_sampler_running(int64_t _tid)
+get_sampler_running(std::int64_t _tid)
 {
     return sampler_running_instances::instance(construct_on_thread{ _tid }, false);
 }
@@ -136,7 +118,7 @@ backtrace_metrics::description()
 }
 
 std::vector<std::string>
-backtrace_metrics::get_hw_counter_labels(int64_t _tid)
+backtrace_metrics::get_hw_counter_labels(std::int64_t _tid)
 {
     auto& _v = get_papi_labels(_tid);
     return (_v) ? *_v : std::vector<std::string>{};
@@ -185,7 +167,8 @@ metadata_init_categories()
 
 template <typename Category>
 void
-apply_for_all_thread_names(int64_t _tid, std::function<void(const std::string&)> _apply)
+apply_for_all_thread_names(std::int64_t                            _tid,
+                           std::function<void(const std::string&)> _apply)
 {
     if constexpr(std::is_same_v<Category, category::thread_hardware_counter>)
     {
@@ -194,7 +177,7 @@ apply_for_all_thread_names(int64_t _tid, std::function<void(const std::string&)>
         {
             std::string _desc = tim::papi::get_event_info(itr).short_descr;
             if(_desc.empty()) _desc = itr;
-            if(get_is_continuous_integration() && _desc.empty())
+            if(_desc.empty())
             {
                 throw std::runtime_error(
                     fmt::format("Empty description for {}", itr.c_str()));
@@ -215,14 +198,14 @@ apply_for_all_thread_names(int64_t _tid, std::function<void(const std::string&)>
 
 template <typename Category>
 void
-metadata_init_tracks(int64_t _tid)
+metadata_init_tracks(std::int64_t _tid)
 {
     const auto& t_info    = thread_info::get(_tid, SequentTID);
-    auto        thread_id = static_cast<uint64_t>(t_info->index_data->system_value);
+    auto        thread_id = static_cast<std::uint64_t>(t_info->index_data->system_value);
 
     trace_cache::get_metadata_registry().add_thread_info(
-        { getppid(), getpid(), thread_id, static_cast<uint32_t>(t_info->get_start()),
-          static_cast<uint32_t>(t_info->get_stop()), "{}" });
+        { getppid(), getpid(), thread_id, static_cast<std::uint32_t>(t_info->get_start()),
+          static_cast<std::uint32_t>(t_info->get_stop()), "{}" });
 
     apply_for_all_thread_names<Category>(_tid, [&](const std::string& _track_name) {
         trace_cache::get_metadata_registry().add_track({ _track_name, thread_id, "{}" });
@@ -231,7 +214,8 @@ metadata_init_tracks(int64_t _tid)
 
 template <typename Category>
 void
-metadata_initialize_backtrace_metrics_pmc(size_t dev_id, const char* _units, int64_t _tid)
+metadata_initialize_backtrace_metrics_pmc(size_t dev_id, const char* _units,
+                                          std::int64_t _tid)
 {
     constexpr size_t EVENT_CODE       = 0;
     constexpr size_t INSTANCE_ID      = 0;
@@ -252,20 +236,20 @@ metadata_initialize_backtrace_metrics_pmc(size_t dev_id, const char* _units, int
 
 template <typename Category, typename Value>
 void
-cache_backtrace_metrics_events(const uint32_t device_id, uint64_t timestamp_ns,
-                               Value value, int64_t _tid)
+cache_backtrace_metrics_events(const std::uint32_t device_id, std::uint64_t timestamp_ns,
+                               Value value, std::int64_t _tid)
 {
     auto _tid_name = fmt::format("[{}]", _tid);
 
     size_t      stack_id        = 0;
     size_t      parent_stack_id = 0;
     size_t      correlation_id  = 0;
-    const auto* event_metadata  = "";
-    const auto* call_stack      = "";
-    const auto* line_info       = "";
+    const auto* event_metadata  = "{}";
+    const auto* call_stack      = "{}";
+    const auto* line_info       = "{}";
 
-    std::optional<int64_t> _system_tid{ std::nullopt };
-    const auto&            _thread_info = thread_info::get(_tid, SequentTID);
+    std::optional<std::int64_t> _system_tid{ std::nullopt };
+    const auto&                 _thread_info = thread_info::get(_tid, SequentTID);
     if(_thread_info.has_value())
     {
         _system_tid = _thread_info->index_data->system_value;
@@ -275,7 +259,7 @@ cache_backtrace_metrics_events(const uint32_t device_id, uint64_t timestamp_ns,
         trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
             static_cast<size_t>(category_enum_id<Category>::value), _track_name,
             timestamp_ns, event_metadata, stack_id, parent_stack_id, correlation_id,
-            call_stack, line_info, device_id, static_cast<uint8_t>(agent_type::CPU),
+            call_stack, line_info, device_id, static_cast<std::uint8_t>(agent_type::CPU),
             _track_name, _value, _system_tid });
     };
 
@@ -317,7 +301,7 @@ backtrace_metrics::sample(int)
     if(!m_valid.any()) return;
 
     auto _cache = tim::rusage_cache{ RUSAGE_THREAD };
-    m_cpu       = tim::get_clock_thread_now<int64_t, std::nano>();
+    m_cpu       = tim::get_clock_thread_now<std::int64_t, std::nano>();
     m_mem_peak  = _cache.get_peak_rss();
     m_ctx_swch  = _cache.get_num_priority_context_switch() +
                  _cache.get_num_voluntary_context_switch();
@@ -339,7 +323,7 @@ backtrace_metrics::sample(int)
 }
 
 void
-backtrace_metrics::configure(bool _setup, int64_t _tid)
+backtrace_metrics::configure(bool _setup, std::int64_t _tid)
 {
     auto& _running    = get_sampler_running(_tid);
     bool  _is_running = (!_running) ? false : *_running;
@@ -381,7 +365,7 @@ backtrace_metrics::configure(bool _setup, int64_t _tid)
 }
 
 void
-backtrace_metrics::init_perfetto(int64_t _tid, valid_array_t _valid)
+backtrace_metrics::init_perfetto(std::int64_t _tid, valid_array_t _valid)
 {
     auto _hw_cnt_labels = *get_papi_labels(_tid);
     auto _tid_name      = fmt::format("[{}]", _tid);
@@ -410,7 +394,7 @@ backtrace_metrics::init_perfetto(int64_t _tid, valid_array_t _valid)
         {
             std::string _desc = tim::papi::get_event_info(itr).short_descr;
             if(_desc.empty()) _desc = itr;
-            if(get_is_continuous_integration() && _desc.empty())
+            if(_desc.empty())
             {
                 throw std::runtime_error(
                     fmt::format("Empty description for {}", itr.c_str()));
@@ -422,20 +406,20 @@ backtrace_metrics::init_perfetto(int64_t _tid, valid_array_t _valid)
 }
 
 void
-backtrace_metrics::fini_perfetto(int64_t _tid, valid_array_t _valid)
+backtrace_metrics::fini_perfetto(std::int64_t _tid, valid_array_t _valid)
 {
     auto        _hw_cnt_labels = *get_papi_labels(_tid);
     const auto& _thread_info   = thread_info::get(_tid, SequentTID);
 
-    if(get_is_continuous_integration() && !_thread_info)
+    if(!_thread_info)
     {
         throw std::runtime_error(
             fmt::format("Error! missing thread info for tid={}", _tid));
     }
     if(!_thread_info) return;
 
-    uint64_t _ts         = _thread_info->get_stop();
-    uint64_t _rusage_idx = 0;
+    std::uint64_t _ts         = _thread_info->get_stop();
+    std::uint64_t _rusage_idx = 0;
 
     if(get_valid(category::thread_cpu_time{}, _valid))
     {
@@ -480,7 +464,7 @@ backtrace_metrics::fini_perfetto(int64_t _tid, valid_array_t _valid)
 }
 
 void
-backtrace_metrics::init_cache(int64_t _tid, valid_array_t _valid)
+backtrace_metrics::init_cache(std::int64_t _tid, valid_array_t _valid)
 {
     metadata_init_categories();
     if(get_valid(category::thread_cpu_time{}, _valid))
@@ -551,9 +535,9 @@ backtrace_metrics::operator-=(const backtrace_metrics& _rhs)
 }
 
 void
-backtrace_metrics::post_process_perfetto(int64_t _tid, uint64_t _ts) const
+backtrace_metrics::post_process_perfetto(std::int64_t _tid, std::uint64_t _ts) const
 {
-    uint64_t _rusage_idx = 0;
+    std::uint64_t _rusage_idx = 0;
 
     if((*this)(category::thread_cpu_time{}))
     {
@@ -598,7 +582,7 @@ backtrace_metrics::post_process_perfetto(int64_t _tid, uint64_t _ts) const
 }
 
 void
-backtrace_metrics::cache_backtrace_data(int64_t _tid, uint64_t _ts) const
+backtrace_metrics::cache_backtrace_data(std::int64_t _tid, std::uint64_t _ts) const
 {
     auto is_category_enabled = [&](const auto& _category) { return (*this)(_category); };
 
@@ -616,13 +600,13 @@ backtrace_metrics::cache_backtrace_data(int64_t _tid, uint64_t _ts) const
 
     if(is_category_enabled(category::thread_context_switch{}))
     {
-        cache_backtrace_metrics_events<category::thread_context_switch, int64_t>(
+        cache_backtrace_metrics_events<category::thread_context_switch, std::int64_t>(
             0, _ts, m_ctx_swch, _tid);
     }
 
     if(is_category_enabled(category::thread_page_fault{}))
     {
-        cache_backtrace_metrics_events<category::thread_page_fault, int64_t>(
+        cache_backtrace_metrics_events<category::thread_page_fault, std::int64_t>(
             0, _ts, m_page_flt, _tid);
     }
     if(is_category_enabled(type_list<hw_counters>{}) &&
@@ -634,17 +618,5 @@ backtrace_metrics::cache_backtrace_data(int64_t _tid, uint64_t _ts) const
 }
 }  // namespace component
 }  // namespace rocprofsys
-
-ROCPROFSYS_INSTANTIATE_EXTERN_COMPONENT(
-    TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_wall_clock>), true,
-    double)
-
-ROCPROFSYS_INSTANTIATE_EXTERN_COMPONENT(
-    TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_cpu_clock>), true,
-    double)
-
-ROCPROFSYS_INSTANTIATE_EXTERN_COMPONENT(
-    TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_fraction>), true,
-    double)
 
 TIMEMORY_INITIALIZE_STORAGE(rocprofsys::component::backtrace_metrics)

@@ -388,10 +388,9 @@ void Command::enqueue() {
     std::scoped_lock sl(queue_->vdev()->execution());
     queue_->FormSubmissionBatch(this);
 
-    // Enqueue flushes, except profiling markers to avoid frequent expensive callbacks.
-    // Also flush unconditionally when the batch exceeds the size threshold.
+    // Enqueue flushes, except profiling markers to avoid frequent expensive callbacks
     if (((type() == 0) && profilingInfo().batch_flush_) || (type() == CL_COMMAND_MARKER) ||
-        (type() == CL_COMMAND_TASK) || queue_->ShouldFlushBatch()) {
+        (type() == CL_COMMAND_TASK)) {
       // The current HSA signal tracking logic requires profiling enabled for the markers
       EnableProfiling();
       // Update batch head for the current marker. Hence the status of all commands can be
@@ -404,6 +403,7 @@ void Command::enqueue() {
       queue_->ResetSubmissionBatch();
     } else {
       submit(*queue_->vdev());
+      queue_->FlushSubmissionBatch();
     }
   } else {
     queue_->append(*this);

@@ -124,17 +124,31 @@ T fetch_min(T* obj, U arg, rocshmem_memory_orders o) {
   return __hip_atomic_fetch_min(obj, arg, o.atomic, s);
 }
 
-template <rocshmem_memory_scope s>
-__device__
-void threadfence() {
-  if constexpr (s == memory_scope_system) {
-    __threadfence_system();
-  } else if constexpr (s == memory_scope_agent) {
-    __threadfence();
-  } else if constexpr (s == memory_scope_workgroup) {
-    __threadfence_block();
+#define ROCSHMEM_DISPATCH_FENCE_ORDER(SCOPE_STR)         \
+  if constexpr (order == memory_order_acquire)           \
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, SCOPE_STR); \
+  else if constexpr (order == memory_order_release)      \
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, SCOPE_STR); \
+  else if constexpr (order == memory_order_acq_rel)      \
+    __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, SCOPE_STR); \
+  else                                                   \
+    __builtin_amdgcn_fence(__ATOMIC_SEQ_CST, SCOPE_STR)
+
+template <rocshmem_memory_scope scope = memory_scope_system,
+          rocshmem_memory_order order = memory_order_seq_cst>
+__device__ __forceinline__ void threadfence() {
+  if constexpr (scope == memory_scope_thread ||
+                scope == memory_scope_wavefront ||
+                scope == memory_scope_workgroup) {
+    ROCSHMEM_DISPATCH_FENCE_ORDER("workgroup");
+  } else if constexpr (scope == memory_scope_agent) {
+    ROCSHMEM_DISPATCH_FENCE_ORDER("agent");
+  } else {
+    ROCSHMEM_DISPATCH_FENCE_ORDER("");  // system scope
   }
 }
+
+#undef ROCSHMEM_DISPATCH_FENCE_ORDER
 
 } // namespace atomic
 } // namespace detail

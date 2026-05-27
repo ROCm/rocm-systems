@@ -28,6 +28,7 @@
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "rocshmem/rocshmem.hpp"
 #include "context_ipc_device.hpp"
+#include "log.hpp"
 #include "util.hpp"
 #include "ipc_team.hpp"
 #include "rocshmem_calc.hpp"
@@ -286,8 +287,6 @@ __device__ void IPCContext::internal_ring_allreduce(
     T *dst, const T *src, int nelems, IPCTeam *team_obj,  // NOLINT(runtime/int)
     int n_seg, int seg_size, int chunk_size) {
 
-  int stride = team_obj->tinfo_wrt_world->stride;
-  int PE_start = team_obj->tinfo_wrt_world->pe_start;
   int PE_size = team_obj->tinfo_wrt_world->size;
   long *pSync = team_obj->reduce_pSync;
   T *pWrk = reinterpret_cast<T *>(team_obj->pWrk);
@@ -406,7 +405,7 @@ __device__ int IPCContext::reduce(rocshmem_team_t team, T *dest,
         }
       }
     } else {
-      GPU_DPRINTF("Unsupported reduction size for IPC conduit.\n");
+      LOGD_WARN("Unsupported reduction size for IPC conduit.");
       return ROCSHMEM_ERROR;
     }
   }
@@ -471,17 +470,23 @@ __device__ void IPCContext::internal_broadcast(T *dst, const T *src, int nelems,
 template <typename T>
 __device__ void IPCContext::alltoall(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems) {
-  alltoall_linear(team, dst, src, nelems);
+#if defined(USE_SDMA)
+  if (sizeof(T) * nelems < 512 || ipcImpl_.sdmaImpl_.sdmaEnabled)
+#else
+  if (sizeof(T) * nelems < 512)
+#endif
+    alltoall_linear_thread_puts(team, dst, src, nelems);
+  else
+    alltoall_linear(team, dst, src, nelems);
 }
 
 template <typename T>
-__device__ void IPCContext::alltoallv(rocshmem_team_t team,
-                                      T *dest, const size_t dest_nelems[],
-                                      const size_t dest_displs[],
-                                      T *source, const size_t source_nelems[],
-                                      const size_t source_displs[]) {
-  printf("rocshmem::ipc:alltoallv not implemented\n");
-  abort();
+__device__ void IPCContext::alltoallv([[maybe_unused]] rocshmem_team_t team,
+                                      [[maybe_unused]] T *dest, [[maybe_unused]] const size_t dest_nelems[],
+                                      [[maybe_unused]] const size_t dest_displs[],
+                                      [[maybe_unused]] T *source, [[maybe_unused]] const size_t source_nelems[],
+                                      [[maybe_unused]] const size_t source_displs[]) {
+  LOGD_ERROR_ABORT("ipc:alltoallv not implemented");
 }
 
 template <typename T>
@@ -505,6 +510,53 @@ __device__ void IPCContext::alltoall_linear(rocshmem_team_t team, T *dst,
   }
   // wait until everyone has obtained their designated data
   internal_sync_wg(my_pe, pe_start, stride, pe_size, pSync);
+}
+
+template <typename T>
+__device__ void IPCContext::alltoall_linear_thread_puts(rocshmem_team_t team,
+    T *dst, const T *src, int nelems) {
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+
+  int pe_size = team_obj->num_pes;
+  long *pSync = team_obj->alltoall_pSync;
+  int my_pe_in_team = team_obj->my_pe;
+  size_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
+
+  int tid = get_flat_block_id();
+  int step_size = min(get_flat_block_size(), WF_SIZE);
+//  printf("my_pe=%d\ttid=%d, pSync=%p, tnpes=%d, tmype=%d, offset=%lu, step=%d\n", my_pe_in_team, tid, pSync, pe_size, my_pe_in_team, alltoall_pSync_offset, step_size);
+
+  // Have each PE put their designated data to the other PEs
+  for (int j = tid; j < pe_size; j += step_size) {
+    int dest_pe = team_obj->get_pe_in_world(j);
+    put_nbi(
+      &dst[my_pe_in_team * nelems],
+      &src[j * nelems], nelems, dest_pe);
+  }
+  for (int j = tid; j < pe_size; j += step_size) {
+    int dest_pe = team_obj->get_pe_in_world(j);
+    fence(dest_pe);
+    ptrdiff_t L_offset = reinterpret_cast<char*>(&pSync[alltoall_pSync_offset + my_pe_in_team]) - wrk_sync_pool_bases_[my_pe];
+    ipcImpl_.ipcAMOAdd(reinterpret_cast<long*>(wrk_sync_pool_bases_[dest_pe] + L_offset), 1L);
+  }
+
+  // wait until everyone has obtained their designated data
+  for (int j = tid; j < pe_size; j+= step_size) {
+    int dest_pe = team_obj->get_pe_in_world(j);
+
+    volatile long *vol_ivars = &pSync[alltoall_pSync_offset + dest_pe];
+    while (uncached_load(vol_ivars) != 1) { }
+
+    //quiet(dest_pe);// needed to quiet add when it is nbi in gda, it is not nbi in ipc
+
+    pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
+  }
+
+  if (is_thread_zero_in_block()) {
+    team_obj->alltoall_sequence_number++;
+  }
+
+  __syncthreads();
 }
 
 template <typename T>

@@ -141,7 +141,7 @@ hsa_status_t KfdDriver::Init() {
 
 hsa_status_t KfdDriver::ShutDown() {
   HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtRuntimeDisable());
-  if (ret != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  if (ret != HSAKMT_STATUS_SUCCESS && ret != HSAKMT_STATUS_NOT_SUPPORTED) return HSA_STATUS_ERROR;
 
   ret = HSAKMT_CALL(hsaKmtReleaseSystemProperties());
 
@@ -311,10 +311,14 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
     }
   }
 
-  const uint32_t node_id =
-      (alloc_flags & core::MemoryRegion::AllocateGTTAccess)
-          ? agent_node_id
-          : m_region.owner()->node_id();
+  // agent_node_id uses 0 as the allocator default/unspecified sentinel.
+  const bool has_agent_node_id = agent_node_id != 0;
+  const bool allocation_uses_agent_node =
+      (alloc_flags & (core::MemoryRegion::AllocateGTTAccess |
+                      core::MemoryRegion::AllocateQueueObject)) != 0;
+  const uint32_t node_id = has_agent_node_id && allocation_uses_agent_node
+      ? agent_node_id
+      : m_region.owner()->node_id();
 
   //// Allocate memory.
   //// If it fails attempt to release memory from the block allocator and retry.
@@ -389,14 +393,14 @@ hsa_status_t KfdDriver::FreeMemory(void *mem, size_t size) {
 
 hsa_status_t KfdDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
                                     HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id,
-                                    void* queue_addr, uint64_t queue_size_bytes, HsaEvent* event,
-                                    HsaQueueResource& queue_resource) const {
+                                    void* queue_addr, uint64_t queue_size_bytes, uint64_t queue_metadata_size_bytes,
+                                    HsaEvent* event, HsaQueueResource& queue_resource) const {
   // Convert from ROCR internal priority type to KFD type
   HSA_QUEUE_PRIORITY kfd_priority = HsaInternalToKfdPriority(priority);
 
-  if (HSAKMT_CALL(hsaKmtCreateQueueExt(node_id, type, queue_pct, kfd_priority, sdma_engine_id,
-                                       queue_addr, queue_size_bytes, event, &queue_resource)) !=
-      HSAKMT_STATUS_SUCCESS) {
+  if (HSAKMT_CALL(hsaKmtCreateQueueV2(node_id, type, queue_pct, kfd_priority, sdma_engine_id,
+                                         queue_addr, queue_size_bytes, queue_metadata_size_bytes,
+                                         event, &queue_resource)) != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
   return HSA_STATUS_SUCCESS;
@@ -582,12 +586,12 @@ void *KfdDriver::AllocateKfdMemory(const HsaMemFlags &flags, uint32_t node_id,
 
 bool KfdDriver::FreeKfdMemory(void *mem, size_t size) {
   if (mem == nullptr || size == 0) {
-    debug_print("Invalid free ptr:%p size:%lu\n", mem, size);
+    debug_print("Invalid free ptr:%p size:%zu\n", mem, size);
     return false;
   }
 
   if (HSAKMT_CALL(hsaKmtFreeMemory(mem, size)) != HSAKMT_STATUS_SUCCESS) {
-    debug_print("Failed to free ptr:%p size:%lu\n", mem, size);
+    debug_print("Failed to free ptr:%p size:%zu\n", mem, size);
     return false;
   }
   return true;

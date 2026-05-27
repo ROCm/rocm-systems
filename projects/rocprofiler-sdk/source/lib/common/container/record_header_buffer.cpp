@@ -26,6 +26,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstring>
 #include <new>
 
 namespace rocprofiler::common::container
@@ -106,12 +107,13 @@ record_header_buffer::clear()
     {
         auto _sz = m_buffer.capacity();
         if(!m_buffer.clear(std::nothrow_t{})) return 0;
-        std::for_each(m_headers.begin(), m_headers.end(), [](auto& itr) {
-            rocprofiler_record_header_t record = {};
-            record.hash                        = 0;
-            record.payload                     = nullptr;
-            itr                                = record;
-        });
+        // Only clear the used portion of m_headers (first _n elements)
+        // m_index is atomically incremented during every emplace, so it should
+        // indicate the number of used elements.
+        if(_n > 0)
+        {
+            std::memset(m_headers.data(), 0, _n * sizeof(rocprofiler_record_header_t));
+        }
         rocprofiler_record_header_t record = {};
         record.hash                        = 0;
         record.payload                     = nullptr;

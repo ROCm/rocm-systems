@@ -516,7 +516,11 @@ void RocmSMI::Initialize(uint64_t flags) {
 
 void RocmSMI::Cleanup() {
   devices_.clear();
+  nic_devices_.clear();
+  switch_devices_.clear();
   monitors_.clear();
+  nic_monitors_.clear();
+  switch_monitors_.clear();
 
   if (kfd_notif_evt_fh() >= 0) {
     int ret = close(kfd_notif_evt_fh());

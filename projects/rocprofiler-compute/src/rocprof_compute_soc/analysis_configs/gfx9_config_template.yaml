@@ -299,3 +299,21 @@ panels:
   - type: metric_table
     id: 12
     title: L2 Bottleneck Detection Indicators
+  - type: metric_table
+    id: 13
+    title: EA Interface
+  - type: metric_table
+    id: 14
+    title: EA Traffic
+  - type: metric_table
+    id: 15
+    title: EA Raw Counter Values
+  - type: metric_table
+    id: 16
+    title: Normalized EA Stall Metrics (%)
+  - type: metric_table
+    id: 17
+    title: Normalized EA Throughput Metrics (per Second)
+  - type: metric_table
+    id: 18
+    title: EA Bottleneck Detection Indicators

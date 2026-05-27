@@ -1,4 +1,4 @@
-# TODO(#4070): Optimize media libs
+# This Media Library CI pipeline is separate from TheRock CI for extended customer test cases
 name: Media Libs CI
 
 on:
@@ -72,3 +72,13 @@ jobs:
         -DTHEROCK_ENABLE_ROCDECODE=ON
         -DTHEROCK_ENABLE_ROCJPEG=ON
       projects_to_test: ""
+      test_runs_on: ""
+
+  therock-test-linux:
+    name: "Test Media Libs"
+    needs: [therock-ci-linux]
+    uses: ./.github/workflows/therock-media-test-packages.yml
+    with:
+      amdgpu_families: "gfx94X-dcgpu"
+      test_runs_on: "linux-gfx942-1gpu-ossci-rocm"
+      platform: "linux"

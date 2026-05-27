@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2014-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -695,7 +695,7 @@ Result HashBase<Key, Entry, Allocator, HashFunc, EqualFunc, AllocFunc, GroupSize
 }
 
 // =====================================================================================================================
-// Returns pointer to the next group of the spcified group.
+// Returns pointer to the next group of the specified group.
 template<
     typename Key,
     typename Entry,

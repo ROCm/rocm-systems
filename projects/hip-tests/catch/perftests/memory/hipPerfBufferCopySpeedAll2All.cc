@@ -85,8 +85,7 @@ static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu, DEV_MEM_
   unsigned int blocks = 16;  // DEBUG_CLR_LIMIT_BLIT_WG
   HIP_CHECK(hipGetDeviceCount(&nGpus));
   if (nGpus < 2) {
-    fprintf(stderr, "Need at least 2 GPUs, skipped!\n");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 #if 0
   if (kernelCopy) {
@@ -221,7 +220,8 @@ static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu, DEV_MEM_
   free(streams);
   free(dstBuf);
   free(srcBuf);
-  SUCCEED("");
+  // Successful completion of the perf sweep; not a runtime skip (see HIP_SKIP_TEST elsewhere).
+  CHECK(true);
 }
 
 static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu) {

@@ -60,10 +60,7 @@ static void RunBenchmark(const size_t array_size) {
  */
 HIP_TEST_CASE(Performance_hipMemPoolExportPointer) {
   if (!AreMemPoolsSupported(0)) {
-    HipTest::HIP_SKIP_TEST(
-        "GPU 0 doesn't support hipDeviceAttributeMemoryPoolsSupported "
-        "attribute. Hence skipping the testing with Pass result.\n");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
   size_t array_size = GENERATE(4_KB, 4_MB, 16_MB);
   RunBenchmark(array_size);

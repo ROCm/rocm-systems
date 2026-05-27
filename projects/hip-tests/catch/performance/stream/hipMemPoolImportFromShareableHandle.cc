@@ -62,10 +62,7 @@ static void RunBenchmark() {
  */
 HIP_TEST_CASE(Performance_hipMemPoolImportFromShareableHandle) {
   if (!AreMemPoolsSupported(0)) {
-    HipTest::HIP_SKIP_TEST(
-        "GPU 0 doesn't support hipDeviceAttributeMemoryPoolsSupported "
-        "attribute. Hence skipping the testing with Pass result.\n");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
   RunBenchmark();
 }

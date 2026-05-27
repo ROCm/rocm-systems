@@ -1,10 +1,10 @@
 # JPEG decode batched sample
 
-The jpeg decode bacthed sample illustrates decoding JPEG images by batches of specified size using rocJPEG library to get the individual decoded images in one of the supported output format (i.e., native, yuv, y, rgb, rgb_planar). This sample can be configured with a device ID and optionally able to dump the output to a file.
+The jpeg decode batched sample illustrates decoding JPEG images by batches of specified size using rocJPEG library to get the individual decoded images in one of the supported output format (i.e., native, yuv, y, rgb, rgb_planar). This sample can be configured with a device ID and optionally able to dump the output to a file.
 
 ## Prerequisites:
 
-* Install [rocJPEG](../../README.md#build-and-install-instructions)
+* Install [rocJPEG](https://rocm.docs.amd.com/projects/rocJPEG/en/latest/install/rocjpeg-build-and-install.html)
 
 ## Build
 

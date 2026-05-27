@@ -201,7 +201,8 @@ public:
         raddr, rkey,
         laddr, lkey, byte_count,
         send_inline)} { }
-} __attribute__((__packed__)) __attribute__((__aligned__(64)));
+} __attribute__((__aligned__(64)));
+
 static_assert(sizeof(gda_mlx5_wqe) == sizeof(gda_mlx5_wqe_segment[4]),
               "mlx5 WQEs have up to 4 segments");
 
@@ -256,10 +257,9 @@ template <typename T>
 struct gda_mlx5_device_queue {
   T* buf;
   __be32* dbrec;
-  uint32_t lock;
 
   __host__ inline gda_mlx5_device_queue(T* buf, __be32* dbrec)
-    : buf{buf}, dbrec{dbrec}, lock{0} { }
+    : buf{buf}, dbrec{dbrec} { }
 
   __host__ inline gda_mlx5_device_queue() : gda_mlx5_device_queue{nullptr, nullptr} { }
 };
@@ -272,13 +272,14 @@ struct gda_mlx5_device_cq : public gda_mlx5_device_queue<mlx5_cqe64> {
 struct gda_mlx5_device_sq : public gda_mlx5_device_queue<gda_mlx5_wqe> {
   gda_mlx5_doorbell* db;
   uint64_t post;
+  uint32_t lock;
   uint16_t depth;
-  uint16_t tail;
+  uint16_t depth_mask;
 
   __host__ inline gda_mlx5_device_sq(gda_mlx5_wqe* buf, __be32* dbrec,
                                      gda_mlx5_doorbell* db, uint16_t depth)
     : gda_mlx5_device_queue{buf, dbrec},
-      db{db}, post{0}, depth{depth}, tail{0} { }
+      db{db}, post{0}, lock{0}, depth{depth}, depth_mask{static_cast<uint16_t>(depth - 1)} { }
 
   __host__ inline gda_mlx5_device_sq() : gda_mlx5_device_sq{nullptr, nullptr, nullptr, 0} { }
 
@@ -290,7 +291,8 @@ struct gda_mlx5_device_sq : public gda_mlx5_device_queue<gda_mlx5_wqe> {
 /*
  * QP layout:
  * [ [ WQ: WQE | WQE | WQE | ... | WQE ] : 64 * 2^N
- *   [ CQ: CQE | CQE ]                   : 64 * 2
+ *   [ CQ: CQE ]                         : 64
+ *   [ padding - to AMDGPU cache line  ] : 64
  *   [ padding - to page table - 256   ] : 3712 - max(4096 - 64 * 2^N, 0)
  *   [ SQ DBREC ]                        : 8
  *   [ padding - to AMDGPU cache line  ] : 120
@@ -301,6 +303,7 @@ struct gda_mlx5_device_sq : public gda_mlx5_device_queue<gda_mlx5_wqe> {
  */
 struct mlx5_devx_qp {
   ibv_context*      ctx;
+  struct ibv_pd*    pd;
   mlx5dv_devx_obj*  devx_cq_obj;
   mlx5dv_devx_obj*  devx_qp_obj;
   mlx5dv_devx_uar*  uar;
@@ -311,6 +314,7 @@ struct mlx5_devx_qp {
   uint32_t*         qp_dbrec;
   uint32_t          cqn;
   uint32_t          qpn;
+  uint32_t          cq_depth;
   uint16_t          sq_depth;
 
   void dump(int conn_num);

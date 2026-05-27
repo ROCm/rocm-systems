@@ -37,6 +37,7 @@
 #define MI200_XGMI_WIDTH 36.0
 #define GFX94X_XGMI_WIDTH 48.0
 #define GFX95X_XGMI_WIDTH 48.0
+#define GFX125X_XGMI_WIDTH 64.0  // placeholder — revisit with measured hardware data
 
 // Intel CPU convert GPU P2P traffic into 64B PCI TLPs, so GPU
 // to GPU traffic consumes more PCI bandwidth.
@@ -139,6 +140,12 @@ struct ncclTopoLinkList {
 #define RCCL_TOPO_FORCE_INTRA 16
 #define RCCL_TOPO_XGMI_ALL  32
 
+/* Rome preset graph: index into romeTopoModels[] in rome_models.cc, or sentinel below. */
+#define RCCL_ROME_TOPO_PRESET_MODEL_IDX_NONE (-1)
+#define RCCL_ROME_TOPO_PRESET_MODEL_IDX_GIO_COLUMBA (1000000)
+/* parse4H4P() applies rome_model_68 directly; this tags the preset, not romeTopoModels[]. */
+#define RCCL_ROME_TOPO_PRESET_MODEL_IDX_4H4P (1000001)
+
 
 #define GCN_ARCH_NAME_LEN 16
 
@@ -158,6 +165,7 @@ struct ncclTopoNode {
     }gpu;
     struct {
       int dev; // Plugin dev number
+      uint64_t pciId;
       uint64_t asic;
       int port;
       float bw;
@@ -211,11 +219,15 @@ struct ncclTopoSystem {
   bool warpSpeedEnabled;
 #endif
   float baseBw;
-  bool mscclEnabled;
 
   // [RCCL] Track hostIdx to support rail-optimized rings/trees
   int hostIdx;
   bool useRailOptimizedTrees;
+  int inter;
+  /* RCCL Rome / GIO preset: RCCL_ROME_TOPO_PRESET_MODEL_IDX_* sentinels or romeTopoModels[] index */
+  int romeTopoModelIdx;
+  /* Preset matchers assume uniform ranks per host; otherwise use generic search in ncclTopoCompute */
+  bool skipPresetTopoMatching;
 };
 
 ncclResult_t ncclTopoGetNode(struct ncclTopoSystem* system, struct ncclTopoNode** node, int type, uint64_t id);
@@ -317,6 +329,8 @@ static float ncclTopoXGMISpeed(const char* gcn) {
     return GFX94X_XGMI_WIDTH;
   else if (IsArchMatch(gcn, "gfx95"))
     return GFX95X_XGMI_WIDTH;
+  else if (IsArchMatch(gcn, "gfx1250"))
+    return GFX125X_XGMI_WIDTH;
   else
     return VEGA_XGMI_WIDTH;
 }

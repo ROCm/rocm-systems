@@ -25,6 +25,9 @@ __global__ void CoherentTst(int* ptr) {  // ptr was set to 1
   atomicAdd_system(ptr, 1);              // now ptr is 2
   while (atomicCAS_system(ptr, 3, 4) != 3) {
     // wait till ptr is updated to 3 in host, then change it to 4
+#if HT_AMD
+    __builtin_amdgcn_s_sleep(100);
+#endif
   }
 }
 
@@ -138,9 +141,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_CoherentTst) {
     HIP_CHECK(hipFree(Ptr));
     REQUIRE(YES_COHERENT);
   } else {
-    SUCCEED(
-        "GPU 0 doesn't support ManagedMemory "
-        "device attribute. Hence skipping the test with Pass result.\n");
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }
 #endif
@@ -179,9 +180,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_CoherentTstWthAdvise) {
     HIP_CHECK(hipStreamDestroy(strm));
     REQUIRE(YES_COHERENT);
   } else {
-    SUCCEED(
-        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
-        "attribute. Hence skipping the test with Pass result.\n");
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }
 
@@ -221,46 +220,47 @@ HIP_TEST_CASE(Unit_hipExtMallocWithFlags_CoherentTst) {
 
   HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, 0));
   INFO("hipDeviceAttributeManagedMemory: " << managed);
-  if (managed == 1 && Pageable == 1) {
-    // Allocating hipExtMallocWithFlags() memory with flags
-    HIP_CHECK(hipDeviceGetAttribute(&finegrain, hipDeviceAttributeFineGrainSupport, 0));
-    if (finegrain == 1) {
-      SECTION("hipExtMallocWithFlags with hipDeviceMallocFinegrained flag") {
-        HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&Ptr), SIZE * 2,
-                                        hipDeviceMallocFinegrained));
-      }
-    }
-    SECTION("hipExtMallocWithFlags with hipDeviceMallocSignalMemory flag") {
-      // for hipMallocSignalMemory flag the size of memory must be 8
-      HIP_CHECK(
-          hipExtMallocWithFlags(reinterpret_cast<void**>(&Ptr), SIZE * 2, hipMallocSignalMemory));
-    }
-    SECTION("hipExtMallocWithFlags with hipDeviceMallocDefault flag") {
-      /* hipExtMallocWithFlags() with flag
-      hipDeviceMallocDefault allocates CoarseGrain memory */
-      FineGrain = false;
-      HIP_CHECK(
-          hipExtMallocWithFlags(reinterpret_cast<void**>(&Ptr), SIZE * 2, hipDeviceMallocDefault));
-    }
-    if (FineGrain) {
-      TstCoherency(Ptr, MemoryType::kDeviceFineGrained);
-    } else {
-      *Ptr = InitVal;
-      hipStream_t strm;
-      HIP_CHECK(hipStreamCreate(&strm));
-      SquareKrnl<<<1, 1, 0, strm>>>(Ptr);
-      HIP_CHECK(hipStreamSynchronize(strm));
-      if (*Ptr == (InitVal * InitVal)) {
-        YES_COHERENT = true;
-      }
-      HIP_CHECK(hipStreamDestroy(strm));
-    }
-    HIP_CHECK(hipFree(Ptr));
-    REQUIRE(YES_COHERENT);
-  } else {
-    SUCCEED(
-        "GPU 0 doesn't support ManagedMemory or PageableMemoryAccess"
-        "device attribute. Hence skipping the test with Pass result.\n");
+  if (managed != 1) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
+  if (Pageable != 1) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
+  }
+
+  // Allocating hipExtMallocWithFlags() memory with flags
+  HIP_CHECK(hipDeviceGetAttribute(&finegrain, hipDeviceAttributeFineGrainSupport, 0));
+  if (finegrain == 1) {
+    SECTION("hipExtMallocWithFlags with hipDeviceMallocFinegrained flag") {
+      HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&Ptr), SIZE * 2,
+                                      hipDeviceMallocFinegrained));
+    }
+  }
+  SECTION("hipExtMallocWithFlags with hipDeviceMallocSignalMemory flag") {
+    // for hipMallocSignalMemory flag the size of memory must be 8
+    HIP_CHECK(
+        hipExtMallocWithFlags(reinterpret_cast<void**>(&Ptr), SIZE * 2, hipMallocSignalMemory));
+  }
+  SECTION("hipExtMallocWithFlags with hipDeviceMallocDefault flag") {
+    /* hipExtMallocWithFlags() with flag
+    hipDeviceMallocDefault allocates CoarseGrain memory */
+    FineGrain = false;
+    HIP_CHECK(
+        hipExtMallocWithFlags(reinterpret_cast<void**>(&Ptr), SIZE * 2, hipDeviceMallocDefault));
+  }
+  if (FineGrain) {
+    TstCoherency(Ptr, MemoryType::kDeviceFineGrained);
+  } else {
+    *Ptr = InitVal;
+    hipStream_t strm;
+    HIP_CHECK(hipStreamCreate(&strm));
+    SquareKrnl<<<1, 1, 0, strm>>>(Ptr);
+    HIP_CHECK(hipStreamSynchronize(strm));
+    if (*Ptr == (InitVal * InitVal)) {
+      YES_COHERENT = true;
+    }
+    HIP_CHECK(hipStreamDestroy(strm));
+  }
+  HIP_CHECK(hipFree(Ptr));
+  REQUIRE(YES_COHERENT);
 }
 #endif

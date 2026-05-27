@@ -1,6 +1,6 @@
-# ruff: noqa
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
+# ruff: noqa
 
 """
 ROCTX Injection Wrapper - Auto-discovers and intercepts ALL PyTorch operators
@@ -119,6 +119,7 @@ if hasattr(torch._C, "_dispatch_call"):
             console_warning(
                 "torch trace", "Cannot inject ROCTX markers for torch._C._dispatch_call"
             )
+            raise
         finally:
             rangePop()
             marker_stack.pop()

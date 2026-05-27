@@ -44,8 +44,7 @@ namespace hsa
 class QueueController
 {
 public:
-    using agent_callback_tuple_t =
-        std::tuple<rocprofiler_agent_t, Queue::queue_cb_t, Queue::completed_cb_t>;
+    using agent_callback_tuple_t = std::tuple<rocprofiler_agent_t, queue_callbacks_t>;
     using queue_iterator_cb_t    = std::function<void(const Queue*)>;
     using callback_iterator_cb_t = std::function<void(ClientID, const agent_callback_tuple_t&)>;
     using queue_map_t            = std::unordered_map<hsa_queue_t*, std::unique_ptr<Queue>>;
@@ -64,9 +63,7 @@ public:
     // Add callback to queues associated with the agent. Returns a client
     // id that can be used by callers to remove the callback. If no agent
     // is specified, callback will be applied to all agents.
-    ClientID add_callback(std::optional<rocprofiler_agent_t>,
-                          Queue::queue_cb_t,
-                          Queue::completed_cb_t);
+    ClientID add_callback(std::optional<rocprofiler_agent_t>, queue_callbacks_t callbacks);
     void     remove_callback(ClientID);
 
     const CoreApiTable& get_core_table() const { return _core_table; }

@@ -55,7 +55,7 @@ FLD_DESC_ENT(RDC_FI_GPU_TEMP,            "GPU temperature in millidegrees Celsiu
 FLD_DESC_ENT(RDC_FI_POWER_USAGE,         "Power usage in microwatts",                   "POWER_USAGE",      true)
 FLD_DESC_ENT(RDC_FI_PCIE_TX,             "PCIe Tx utilization in bytes/second",         "PCIE_TX",          true)
 FLD_DESC_ENT(RDC_FI_PCIE_RX,             "PCIe Rx utilization in bytes/second",         "PCIE_RX",          true)
-FLD_DESC_ENT(RDC_FI_PCIE_BANDWIDTH,      "PCIe bandwidth in GB/sec",                      "PCIE_BANDWIDTH",   true)
+FLD_DESC_ENT(RDC_FI_PCIE_BANDWIDTH,      "PCIe bandwidth in GB/sec",                    "PCIE_BANDWIDTH",   true)
 FLD_DESC_ENT(RDC_FI_PCIE_LC_PERF_OTHER_END_RECOVERY, "PCIe end recovery counter",       "PCIE_RECOVERY_COUNT", true)
 FLD_DESC_ENT(RDC_FI_PCIE_NAK_RCVD_COUNT_ACC, "PCIe nak received counter",               "PCIE_NAK_RCVD_COUNT", true)
 FLD_DESC_ENT(RDC_FI_PCIE_NAK_SENT_COUNT_ACC, "PCIe nak sent counter",                   "PCIE_NAK_SENT_COUNT", true)
@@ -133,8 +133,8 @@ FLD_DESC_ENT(RDC_FI_XGMI_4_WRITE_KB,     "XGMI4 accumulated data write size (KB)
 FLD_DESC_ENT(RDC_FI_XGMI_5_WRITE_KB,     "XGMI5 accumulated data write size (KB)",      "XGMI_5_WRITE",     true)
 FLD_DESC_ENT(RDC_FI_XGMI_6_WRITE_KB,     "XGMI6 accumulated data write size (KB)",      "XGMI_6_WRITE",     true)
 FLD_DESC_ENT(RDC_FI_XGMI_7_WRITE_KB,     "XGMI7 accumulated data write size (KB)",      "XGMI_7_WRITE",     true)
-FLD_DESC_ENT(RDC_FI_XGMI_TOTAL_READ_KB,    "XGMI accumlated data read size across all lanes (KB)", "XGMI_TOTAL_READ", true)
-FLD_DESC_ENT(RDC_FI_XGMI_TOTAL_WRITE_KB,    "XGMI accumlated data write size across all lanes (KB)", "XGMI_TOTAL_WRITE", true)
+FLD_DESC_ENT(RDC_FI_XGMI_TOTAL_READ_KB,    "XGMI accumulated data read size across all lanes (KB)", "XGMI_TOTAL_READ", true)
+FLD_DESC_ENT(RDC_FI_XGMI_TOTAL_WRITE_KB,    "XGMI accumulated data write size across all lanes (KB)", "XGMI_TOTAL_WRITE", true)
 
 
 // ROCProfiler fields
@@ -226,9 +226,9 @@ FLD_DESC_ENT(RDC_EVNT_NOTIF_MIGRATE_START,    "GPU migrate has started",       "
 FLD_DESC_ENT(RDC_EVNT_NOTIF_MIGRATE_END,      "GPU migrate has ended",         "MIGRATE_END",      false)
 FLD_DESC_ENT(RDC_EVNT_NOTIF_PAGE_FAULT_START, "GPU page fault started",        "PAGE_FAULT_START", false)
 FLD_DESC_ENT(RDC_EVNT_NOTIF_PAGE_FAULT_END,   "GPU page fault ended",          "PAGE_FAULT_END",   false)
-FLD_DESC_ENT(RDC_EVNT_NOTIF_QUEUE_EVICTION,   "GPU queue eviction occured",    "QUEUE_EVICITION",  false)
-FLD_DESC_ENT(RDC_EVNT_NOTIF_QUEUE_RESTORE,    "GPU queue restore occured",     "QUEUE_RESTORE",    false)
-FLD_DESC_ENT(RDC_EVNT_NOTIF_UNMAP_FROM_GPU,   "GPU unmap occured",             "UNMAP_FROM_GPU",   false)
+FLD_DESC_ENT(RDC_EVNT_NOTIF_QUEUE_EVICTION,   "GPU queue eviction occurred",   "QUEUE_EVICTION",   false)
+FLD_DESC_ENT(RDC_EVNT_NOTIF_QUEUE_RESTORE,    "GPU queue restore occurred",    "QUEUE_RESTORE",    false)
+FLD_DESC_ENT(RDC_EVNT_NOTIF_UNMAP_FROM_GPU,   "GPU unmap occurred",            "UNMAP_FROM_GPU",   false)
 FLD_DESC_ENT(RDC_EVNT_NOTIF_PROCESS_START,    "GPU process started",           "PROCESS_START",    false)
 FLD_DESC_ENT(RDC_EVNT_NOTIF_PROCESS_END,      "GPU process ended",             "PROCESS_END",      false)
 

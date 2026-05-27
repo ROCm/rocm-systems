@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
+#Add a name for the rocm-systems location
+set(ROCM_SYSTEMS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+
 # Set cmake_prefix_path for searching, ROCM_PATH if avail otherwise default to general rocm install path
 set(CMAKE_PREFIX_PATH $ENV{ROCM_PATH} "/opt/rocm/")
 message(STATUS "ROCM_PATH: $ENV{ROCM_PATH}")
@@ -82,74 +85,21 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
 endif()
 message(STATUS "Installation path: ${CMAKE_INSTALL_PREFIX}")
 
-option(CHECK_PYTHON_DEPS "Verify necessary python dependencies" ON)
+# Profile mode requires only Python 3.8+ standard library (no external dependencies)
+# Analyze mode dependencies are checked at runtime via verify_deps()
+# Standalone binary handles its own dependencies via bundled venv
+
 option(STANDALONEBINARY "Whether to build standalone binary" OFF)
-if(CHECK_PYTHON_DEPS AND NOT STANDALONEBINARY)
-    # Python 3 is required
+
+# Only find Python interpreter - no dependency checking
+if(NOT STANDALONEBINARY)
     message(STATUS "Detecting Python interpreter...")
-    find_package(Python3 3.9 COMPONENTS Interpreter REQUIRED)
-
-    # Allow user-provided python search path
-    if(DEFINED PYTHON_DEPS)
-        set(ENV{PYTHONPATH} "${PYTHON_DEPS}")
-        message(STATUS "Optional PYTHON_DEPS provided:")
-        list(APPEND CMAKE_MESSAGE_INDENT "  ")
-        message(STATUS "including ${PYTHON_DEPS} in search path")
-        list(POP_BACK CMAKE_MESSAGE_INDENT)
-    endif()
-
-    # Check required Python packages
-    file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/requirements.txt" pythonDeps)
-
-    message(STATUS "Checking for required Python package dependencies...")
-    set_property(GLOBAL PROPERTY pythonDepsFlag "groovy")
-
-    function(checkPythonPackage [package])
-        # mapping for non-default package names
-        set(PACKAGE ${ARGV0})
-        if(${ARGV0} STREQUAL "pyyaml")
-            set(PACKAGE "yaml")
-        endif()
-        execute_process(
-            COMMAND ${Python3_EXECUTABLE} -c "import ${PACKAGE}"
-            OUTPUT_QUIET
-            ERROR_QUIET
-            RESULT_VARIABLE EXIT_CODE
-        )
-        if(${EXIT_CODE} EQUAL 0)
-            message(STATUS "${ARGV0} = yes")
-        else()
-            message(STATUS "${ARGV0} = missing")
-            set_property(GLOBAL PROPERTY pythonDepsFlag "missing")
-        endif()
-    endfunction()
-
-    list(APPEND CMAKE_MESSAGE_INDENT "  ")
-    foreach(package IN LISTS pythonDeps)
-        # Filter out any version requirements from requirements.txt
-        string(REGEX REPLACE "[><=].*" "" package "${package}")
-        string(REPLACE "-" "_" package "${package}")
-        checkpythonpackage(${package})
-    endforeach()
-    list(POP_BACK CMAKE_MESSAGE_INDENT)
-
-    get_property(pythonDepsInstalled GLOBAL PROPERTY pythonDepsFlag)
-    if(${pythonDepsInstalled} STREQUAL "groovy")
-        message(STATUS "OK: Python dependencies available in current environment.")
-    else()
-        message(
-            FATAL_ERROR
-            "\nNecessary Python package dependencies not found. Please install required dependencies "
-            "above using your favorite package manager. If using pip, consider running:\n"
-            "python3 -m pip install -r requirements.txt\n"
-            "at the top-level of this repository. If preparing a shared installation for "
-            "multiple users, consider adding the -t <target-dir> option to install necessary dependencies "
-            "into a shared directory, e.g.\n"
-            "python3 -m pip install -t <shared-install-path> -r requirements.txt\n"
-            "Note that the -DPYTHON_DEPS=<shared-install-path> can be used to provide an "
-            "additional search path to cmake for python packages."
-        )
-    endif()
+    find_package(Python3 3.8 COMPONENTS Interpreter REQUIRED)
+    message(STATUS "Python ${Python3_VERSION} found")
+    message(
+        STATUS
+        "Note: Profile mode uses stdlib only. Analyze mode deps checked at runtime."
+    )
 endif()
 
 # ----------------------
@@ -199,6 +149,7 @@ endif()
 
 # Setup testing collateral
 
+option(INSTALL_TESTS "Build test suite" OFF)
 option(ENABLE_TESTS "Enable compilation of testing collateral" OFF)
 set(CMAKE_HIP_FLAGS_RELEASE "-O2")
 if(${ENABLE_TESTS})
@@ -302,6 +253,27 @@ option(
     "Skip building native counter collection tool library (for runtime compilation)"
     OFF
 )
+
+# -------------------
+# Setup tool library
+# -------------------
+if(NOT SKIP_NATIVE_TOOL_BUILD)
+    add_subdirectory(src/lib)
+endif()
+
+# ---------------------------
+# Profile mode import guard
+# ---------------------------
+
+# Import guard only works when calling main() directly (not in binary subprocess mode)
+if(NOT STANDALONEBINARY)
+    add_test(
+        NAME test_import_guard
+        COMMAND
+            ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_import_guard.xml
+            ${COV_OPTION} tests/test_import_guard.py ${WORKING_DIR_OPTION}
+    )
+endif()
 
 # ---------------------------
 # profile mode tests
@@ -448,6 +420,14 @@ add_test(
         tests/test_metric_validation.py ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_native_tool_finder
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_native_tool_finder.xml ${COV_OPTION}
+        tests/test_native_tool_finder.py ${WORKING_DIR_OPTION}
+)
+
 set_tests_properties(
     test_profile_kernel_execution
     test_profile_dispatch
@@ -533,6 +513,15 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
+# Memory chart CLI renderers (gfx9 plotille + gfx11 Rich) — no GPU required
+add_test(
+    NAME test_mem_chart
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_mem_chart.xml ${COV_OPTION} tests/test_mem_chart.py
+        ${WORKING_DIR_OPTION}
+)
+
 add_test(
     NAME test_roofline_calc_ai_analyze
     COMMAND
@@ -566,6 +555,18 @@ add_test(
 )
 
 # -----------------------------------
+# Metrics unit tests
+# -----------------------------------
+
+add_test(
+    NAME test_metric_utils
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_metric_utils.xml ${COV_OPTION} tests/test_metric_utils.py
+        ${WORKING_DIR_OPTION}
+)
+
+# -----------------------------------
 # Autogenerated configuration tests
 # -----------------------------------
 
@@ -589,8 +590,17 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_pc_sampling_analysis
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -s
+        --junitxml=tests/test_pc_sampling_analysis.xml ${COV_OPTION}
+        tests/test_pc_sampling_analysis.py ${WORKING_DIR_OPTION}
+)
+
 set_tests_properties(
     test_pc_sampling
+    test_pc_sampling_analysis
     PROPERTIES TIMEOUT 300 LABELS "profile" RESOURCE_GROUPS gpus:1
 )
 
@@ -611,11 +621,24 @@ add_test(
 # -----------------------------------
 
 add_test(
-    NAME test_torch_trace
+    NAME test_torch_trace_analysis
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_torch_trace.xml ${COV_OPTION} tests/test_torch_trace.py
-        ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_torch_trace_analysis.xml ${COV_OPTION}
+        tests/test_torch_trace_analysis.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_torch_trace_coverage
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_torch_trace_coverage.xml ${COV_OPTION}
+        tests/test_torch_trace_coverage.py ${WORKING_DIR_OPTION}
+)
+
+set_tests_properties(
+    test_torch_trace_coverage
+    PROPERTIES TIMEOUT 1800 LABELS "profile" RESOURCE_GROUPS gpus:1
 )
 
 # ---------------------------------------
@@ -629,6 +652,39 @@ add_test(
         --junitxml=tests/test_utils_profile_csv.xml ${COV_OPTION}
         tests/test_utils_profile_csv.py ${WORKING_DIR_OPTION}
 )
+
+# -----------------------------------
+# Profiler base unit tests
+# -----------------------------------
+
+add_test(
+    NAME test_profiler_base
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_profiler_base.xml ${COV_OPTION} tests/test_profiler_base.py
+        ${WORKING_DIR_OPTION}
+)
+
+# -----------------------------------
+# SoC base counter allocation tests
+# -----------------------------------
+
+add_test(
+    NAME test_soc_base
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_soc_base.xml ${COV_OPTION} tests/test_soc_base.py
+        ${WORKING_DIR_OPTION}
+)
+
+if(TARGET test-rocprofiler-compute-tool)
+    if(TEST_FROM_INSTALL)
+        set(_tool_test_cmd tests/test-rocprofiler-compute-tool)
+    else()
+        set(_tool_test_cmd $<TARGET_FILE:test-rocprofiler-compute-tool>)
+    endif()
+    add_test(NAME test-rocprofiler-compute-tool COMMAND ${_tool_test_cmd})
+endif()
 
 # -----------------------------------
 # Generate coverage tests
@@ -649,15 +705,18 @@ if(${ENABLE_COVERAGE})
         test_pc_sampling
         test_analyze_commands
         test_analyze_workloads
+        test_metric_utils
         test_L1_cache_counters
         test_num_xcds_spec_class
         test_num_xcds_cli_output
         test_utils
+        test_mem_chart
         test_roofline_calc_ai_analyze
         test_data_imputation
         test_autogen_config
         test_tui_components
-        test_torch_trace
+        test_torch_trace_analysis
+        test_torch_trace_coverage
     )
 
     string(REPLACE ";" ";" ALL_TESTS_STRING "${ALL_TEST_NAMES}")
@@ -680,10 +739,20 @@ if(${ENABLE_COVERAGE})
 endif()
 
 # -------------------
-# Setup tool library
+# Test categorization
 # -------------------
-if(NOT SKIP_NATIVE_TOOL_BUILD)
-    add_subdirectory(src/lib)
+set(_test_categories_yaml "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_categories.yaml")
+include(${ROCM_SYSTEMS_ROOT}/shared/ctest/TestCategories.cmake OPTIONAL)
+
+if(COMMAND apply_ctest_category_labels)
+    if(EXISTS "${_test_categories_yaml}")
+        message(STATUS "YAML-based test categorization")
+        apply_ctest_category_labels("${_test_categories_yaml}")
+    else()
+        message(STATUS "No test categorization (YAML missing)")
+    endif()
+else()
+    message(STATUS "Test categorization not available (TestCategories.cmake not found)")
 endif()
 
 # ---------
@@ -704,22 +773,9 @@ install(
 )
 # support files and version info
 install(
-    FILES
-        src/argparser.py
-        src/config.py
-        src/rocprof_compute_base.py
-        src/roofline.py
-        VERSION
-        VERSION.sha
+    FILES src/argparser.py src/config.py src/rocprof_compute_base.py VERSION VERSION.sha
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
-)
-# src/hip (local hip python wrapper)
-install(
-    DIRECTORY src/hip
-    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-    COMPONENT main
-    PATTERN "__pycache__" EXCLUDE
 )
 # src/rocprof_compute_analyze
 install(
@@ -737,9 +793,13 @@ install(
     PATTERN "rooflines*" EXCLUDE
     PATTERN "__pycache__" EXCLUDE
 )
-# src/utils/rooflines
-file(GLOB rooflinebins src/utils/rooflines/roofline-*)
-install(PROGRAMS ${rooflinebins} DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT main)
+# src/roofline
+install(
+    DIRECTORY src/roofline
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    COMPONENT main
+    PATTERN "__pycache__" EXCLUDE
+)
 # src/rocprof_compute_soc
 install(
     DIRECTORY src/rocprof_compute_soc
@@ -757,13 +817,6 @@ install(
 # src/rocprof_compute_tui
 install(
     DIRECTORY src/rocprof_compute_tui
-    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-    COMPONENT main
-    PATTERN "__pycache__" EXCLUDE
-)
-# tools/config_management
-install(
-    DIRECTORY tools/config_management
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
     PATTERN "__pycache__" EXCLUDE
@@ -842,21 +895,23 @@ if(NOT SKIP_NATIVE_TOOL_BUILD)
 else()
     # Install source files for runtime compilation
     install(
-        FILES src/lib/rocprofiler_compute_tool.cpp src/lib/helper.cpp src/lib/helper.hpp
+        DIRECTORY src/lib/
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/lib
         COMPONENT main
+        PATTERN "_build" EXCLUDE
+        PATTERN "tests" EXCLUDE
     )
 endif()
 
-# top-level symlink for bin/rocprof-compute
+# top-level bin/rocprof-compute launcher (re-execs into libexec entrypoint)
+configure_file(
+    ${PROJECT_SOURCE_DIR}/cmake/${EXECUTABLE_NAME}.in
+    ${PROJECT_BINARY_DIR}/${EXECUTABLE_NAME}
+    @ONLY
+)
 install(
-    CODE
-        "execute_process(
-    COMMAND bash -c \"set -e
-    cd \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}
-    mkdir -p ${CMAKE_INSTALL_BINDIR}
-    ln -sf ../${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/${EXECUTABLE_NAME} ${CMAKE_INSTALL_BINDIR}/${EXECUTABLE_NAME}
-    \")"
+    PROGRAMS ${PROJECT_BINARY_DIR}/${EXECUTABLE_NAME}
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
     COMPONENT main
 )
 
@@ -867,7 +922,6 @@ install(
 )
 
 # TEST collateral
-option(INSTALL_TESTS "Build test suite" OFF)
 if(INSTALL_TESTS)
     install(
         DIRECTORY tests
@@ -876,6 +930,11 @@ if(INSTALL_TESTS)
         FILES_MATCHING
         PATTERN "*.py"
         PATTERN "__pycache__" EXCLUDE
+    )
+    install(
+        PROGRAMS therock_test_runner.py
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+        COMPONENT tests
     )
     install(
         DIRECTORY tests/workloads

@@ -229,10 +229,12 @@ HIP_TEST_CASE(Unit_hipGraphClone_Functional) {
       if (canAccessPeer) {
         hipGraphClone_DeviceContextChange();
       } else {
-        SUCCEED("Machine does not seem to have P2P");
+        WARN("Skipping device context change section: peer access is not available between devices.");
+        return;
       }
     } else {
-      SUCCEED("skipped the testcase as no of devices is less than 2");
+      WARN("Skipping device context change section: fewer than two GPUs.");
+      return;
     }
   }
 }

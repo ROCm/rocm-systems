@@ -85,7 +85,7 @@ parser.add_argument('--videodecode_exe',   type=str, default='',
 parser.add_argument('--gpu_device_id',      type=int, default=0,
                     help='The GPU device ID that will be used to run the test on it - optional (default:0 [range:0 - N-1] N = total number of available GPUs on a machine)')
 parser.add_argument('--files_directory',    type=str, default='',
-                    help='The path to a dirctory containing one or more supported files for decoding (e.g., mp4, mov, etc.) - required')
+                    help='The path to a directory containing one or more supported files for decoding (e.g., mp4, mov, etc.) - required')
 parser.add_argument('--sample_mode',          type=int, default=0,
                     help='The sample to run - optional (default:0 [range:0-1] 0: videoDecode, 1: videoDecodePerf)')
 parser.add_argument('--num_threads',          type=int, default=1,
@@ -93,7 +93,7 @@ parser.add_argument('--num_threads',          type=int, default=1,
 parser.add_argument('--max_num_decoded_frames',          type=int, default=0,
                     help='The max number of decoded frames. Useful for partial decoding of a long stream. - optional (default:0, meaning no limit)')
 parser.add_argument('--results_directory',    type=str, default='',
-                    help='The path to a dirctory to store results - optional')
+                    help='The path to a directory to store results - optional')
 parser.add_argument('--check_decode_status',          type=int, default=0,
                     help='Report the number of streams that have completed decoding without abortion. For decoder stability check. - optional (default:0, meaning normal performance report)')
 parser.add_argument('--use_ffmpeg_demuxer',   type=int, default=1,

@@ -42,16 +42,8 @@ import common
 verbose = common.VERBOSITY_NORMAL
 
 
-amdsmi_path = os.environ.get("AMDSMI_PATH", "/opt/rocm/share/amd_smi")
-if not os.path.exists(amdsmi_path):
-    raise FileNotFoundError(
-        f'AMDSMI_PATH "{amdsmi_path}" does not exist. Please set the correct path in your environment.'
-    )
-sys.path.append(amdsmi_path)
-try:
-    import amdsmi
-except ImportError as exc:
-    raise ImportError(f"Could not import {amdsmi_path}") from exc
+# common.py owns path resolution, sys.path setup, and amdsmi loading — borrow the reference.
+from common import amdsmi
 
 
 class TestAmdSmiInit(unittest.TestCase):
@@ -646,7 +638,8 @@ class TestAmdSmiPython(unittest.TestCase):
         self.common.print_func_name("")
 
         try:
-            cpu_processors = amdsmi.amdsmi_get_cpusocket_handles()
+            ret = amdsmi.amdsmi_get_cpu_handles()
+            cpu_processors = ret["processor_handles"]
         except amdsmi.AmdSmiLibraryException:
             cpu_processors = []
         if not cpu_processors:
@@ -701,7 +694,8 @@ class TestAmdSmiPython(unittest.TestCase):
         self.common.print_func_name("")
 
         try:
-            cpu_processors = amdsmi.amdsmi_get_cpusocket_handles()
+            ret = amdsmi.amdsmi_get_cpu_handles()
+            cpu_processors = ret["processor_handles"]
         except amdsmi.AmdSmiLibraryException:
             cpu_processors = []
         if not cpu_processors:
@@ -740,10 +734,6 @@ class TestAmdSmiPython(unittest.TestCase):
                 power_cap_max = amdsmi.amdsmi_get_cpu_socket_power_cap_max(cpu)
                 self.common.print(msg, power_cap_max)
                 self.common.check_ret("", "", self.common.PASS)
-
-                # Convert power_cap_max from string that has units to an integer
-                # Ex.  power_cap_max = "5000 mW"  to   power_cap_max = 5000
-                power_cap_max = int(power_cap_max.split()[0])
             except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
                 if self.common.check_ret(msg, e, self.common.PASS):
                     self.raise_exception = e
@@ -859,12 +849,27 @@ class TestAmdSmiPython(unittest.TestCase):
                     self.raise_exception = e
                 found_error = True
 
-            # Determine max fan speed
+            if found_error:
+                continue
+
+            # Verify max fan speed returns a sensible value
             msg = f"\t### amdsmi_get_gpu_fan_speed_max(gpu={i}, index=0):"
             try:
                 fan_speed_max = amdsmi.amdsmi_get_gpu_fan_speed_max(gpu, 0)
                 self.common.print(msg, fan_speed_max)
                 self.common.check_ret("", "", self.common.PASS)
+                assert fan_speed_max > 0, f"Max fan speed must be > 0, got {fan_speed_max}"
+                # Detect gpu_od interface to set appropriate max threshold
+                gpu_bdf = amdsmi.amdsmi_get_gpu_device_bdf(gpu)
+                has_gpu_od = common.has_gpu_od_interface(gpu_bdf)
+                if has_gpu_od:
+                    assert fan_speed_max <= 100, (
+                        f"gpu_od max fan speed must be <= 100, got {fan_speed_max}"
+                    )
+                else:
+                    assert fan_speed_max <= 255, (
+                        f"Max fan speed must be <= 255, got {fan_speed_max}"
+                    )
             except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
                 if self.common.check_ret(msg, e, self.common.PASS):
                     self.raise_exception = e
@@ -873,10 +878,13 @@ class TestAmdSmiPython(unittest.TestCase):
             if found_error:
                 continue
 
-            if fan_speed_orig == fan_speed_max:
-                fan_speed = int(fan_speed_max / 2)
-            else:
-                fan_speed = fan_speed_max
+            # Calculate a safe mid-range value based on actual hardware limits.
+            # This avoids hardcoding and works with any OD_RANGE configuration.
+            # For legacy hwmon: min=0, max=255 -> mid=127
+            # For gpu_od: min=0 (conservative), max from API -> mid dynamically calculated
+            min_value = 0  # Conservative minimum (works for both legacy and gpu_od)
+            max_value = fan_speed_max
+            fan_speed = min_value + ((max_value - min_value) // 2)
 
             # Set fan speed
             msg = f"\t### amdsmi_set_gpu_fan_speed(gpu={i}, index=0, fan_speed={fan_speed}):"
@@ -888,10 +896,10 @@ class TestAmdSmiPython(unittest.TestCase):
                 if self.common.check_ret(msg, e, self.common.PASS):
                     self.raise_exception = e
 
-            # Set to original fan speed
-            msg = f"\t### amdsmi_set_gpu_fan_speed(gpu={i}, index=0, fan_speed_current={fan_speed_orig}):"
+            # Reset fan to driver control (works for both legacy and gpu_od)
+            msg = f"\t### amdsmi_reset_gpu_fan(gpu={i}, index=0):"
             try:
-                ret = amdsmi.amdsmi_set_gpu_fan_speed(gpu, 0, fan_speed_orig)
+                ret = amdsmi.amdsmi_reset_gpu_fan(gpu, 0)
                 self.common.print(msg, ret)
                 self.common.check_ret("", "", self.common.PASS)
             except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
@@ -1533,24 +1541,15 @@ if __name__ == "__main__":
     elif any(a in ("-v", "-vv", "--verbose") for a in sys.argv):
         verbose = common.VERBOSITY_VERBOSE
 
-    # If no -k or --keyword argument is given, print all available tests.
-    # Do this before the -h check so the test list appears above unittest's help output.
-    if not ("-k" in sys.argv or "--keyword" in sys.argv):
-        if verbose > common.VERBOSITY_QUIET:
-            common.print_tests(__name__)
-
     # Skip legend/title/"Running" preamble when the user just wants help text.
     if "-h" in sys.argv or "--help" in sys.argv:
-        unittest.main()
+        common.print_unittest_help()
+        common.print_amdsmi_path_help()
+        sys.exit(0)
 
-    # Only show the dot-character legend when not in verbose mode; in verbose
-    # mode each test prints its own result line so the dot legend is irrelevant.
-    if verbose < common.VERBOSITY_VERBOSE:
-        common.print_legend()
-
-    if verbose > common.VERBOSITY_QUIET:
-        print(f"AMD SMI Integration Tests\n")
-        print("Running tests...\n")
+    if "-l" in sys.argv or "--list" in sys.argv:
+        common.print_tests(__name__)
+        sys.exit(0)
 
     # Detect if ran without sudo or root privileges
     if os.geteuid() != 0:
@@ -1560,6 +1559,15 @@ if __name__ == "__main__":
         )
         print("Please relaunch with elevated privileges.\n", file=sys.stderr)
         sys.exit(1)
+
+    # Only show the dot-character legend when not in verbose mode; in verbose
+    # mode each test prints its own result line so the dot legend is irrelevant.
+    if verbose < common.VERBOSITY_VERBOSE:
+        common.print_legend()
+
+    if verbose > common.VERBOSITY_QUIET:
+        print(f"AMD SMI Integration Tests\n")
+        print("Running tests...\n")
 
     # WARNING: Future developers! Please read. :)
     # Avoid per-test ASIC skipping because:
@@ -1596,7 +1604,9 @@ if __name__ == "__main__":
     #       self.assertEqual(e.get_error_code(), amdsmi.AmdSmiStatus.AMDSMI_STATUS_NOT_SUPPORTED)
     # ---------------------------------------------------------------------------
 
-    runner = unittest.TextTestRunner(verbosity=common.make_runner_verbosity(verbose))
+    runner = unittest.TextTestRunner(
+        stream=sys.stderr, verbosity=common.make_runner_verbosity(verbose)
+    )
 
     common.expand_glob_k_arg(globals())
     unittest.main(testRunner=runner)

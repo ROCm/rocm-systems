@@ -54,11 +54,11 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSetMemoryPolicyCtx(HsaKFDContext *ctx,
 	pr_debug("[%s] node %d; default %d; alternate %d\n",
 		__func__, Node, DefaultPolicy, AlternatePolicy);
 
-	result = hsakmt_validate_nodeid(Node, &gpu_id);
+	result = hsakmt_validate_nodeid(ctx, Node, &gpu_id);
 	if (result != HSAKMT_STATUS_SUCCESS)
 		return result;
 
-	if (hsakmt_get_gfxv_by_node_id(Node) != GFX_VERSION_KAVERI)
+	if (hsakmt_get_gfxv_by_node_id(ctx, Node) != GFX_VERSION_KAVERI)
 		/* This is a legacy API useful on Kaveri only. On dGPU
 		 * the alternate aperture is setup and used
 		 * automatically for coherent allocations. Don't let
@@ -136,7 +136,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAllocMemoryAlignCtx(HsaKFDContext *ctx,
 
 	pr_debug("[%s] node %d\n", __func__, PreferredNode);
 
-	result = hsakmt_validate_nodeid(PreferredNode, &gpu_id);
+	result = hsakmt_validate_nodeid(ctx, PreferredNode, &gpu_id);
 	if (result != HSAKMT_STATUS_SUCCESS) {
 		pr_err("[%s] invalid node ID: %d\n", __func__, PreferredNode);
 		return result;
@@ -253,7 +253,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAvailableMemoryCtx(HsaKFDContext *ctx,
 
 	pr_debug("[%s] node %d\n", __func__, Node);
 
-	result = hsakmt_validate_nodeid(Node, &args.gpu_id);
+	result = hsakmt_validate_nodeid(ctx, Node, &args.gpu_id);
 	if (result != HSAKMT_STATUS_SUCCESS) {
 		pr_err("[%s] invalid node ID: %d\n", __func__, Node);
 		return result;
@@ -303,7 +303,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemoryToNodesCtx(HsaKFDContext *ctx,
 		/* TODO: support mixed APU and dGPU configurations */
 		return HSAKMT_STATUS_NOT_SUPPORTED;
 
-	ret = hsakmt_validate_nodeid_array(&gpu_id_array,
+	ret = hsakmt_validate_nodeid_array(ctx, &gpu_id_array,
 			NumberOfNodes, NodeArray);
 
 	if (ret == HSAKMT_STATUS_SUCCESS) {
@@ -384,7 +384,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterGraphicsHandleToNodesExtCtx(HsaKFDContext 
 	pr_debug("[%s] number of nodes %lu\n", __func__, NumberOfNodes);
 
 	if (NodeArray != NULL || NumberOfNodes != 0) {
-		ret = hsakmt_validate_nodeid_array(&gpu_id_array,
+		ret = hsakmt_validate_nodeid_array(ctx, &gpu_id_array,
 				NumberOfNodes, NodeArray);
 	}
 
@@ -466,7 +466,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterSharedHandleToNodesCtx(HsaKFDContext *ctx,
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 
 	if (NodeArray) {
-		ret = hsakmt_validate_nodeid_array(&gpu_id_array, NumberOfNodes, NodeArray);
+		ret = hsakmt_validate_nodeid_array(ctx, &gpu_id_array, NumberOfNodes, NodeArray);
 		if (ret != HSAKMT_STATUS_SUCCESS)
 			goto error;
 	}
@@ -566,7 +566,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPUNodesCtx(HsaKFDContext *ctx,
 		return hsaKmtMapMemoryToGPUCtx(ctx, MemoryAddress,
 					MemorySizeInBytes, AlternateVAGPU);
 
-	ret = hsakmt_validate_nodeid_array(&gpu_id_array,
+	ret = hsakmt_validate_nodeid_array(ctx, &gpu_id_array,
 				NumberOfNodes, NodeArray);
 	if (ret != HSAKMT_STATUS_SUCCESS)
 		return ret;
@@ -632,7 +632,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetTileConfigCtx(HsaKFDContext *ctx,
 
 	pr_debug("[%s] node %d\n", __func__, NodeId);
 
-	result = hsakmt_validate_nodeid(NodeId, &gpu_id);
+	result = hsakmt_validate_nodeid(ctx, NodeId, &gpu_id);
 	if (result != HSAKMT_STATUS_SUCCESS)
 		return result;
 
