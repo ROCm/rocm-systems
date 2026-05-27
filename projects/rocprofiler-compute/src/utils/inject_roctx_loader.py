@@ -40,12 +40,14 @@ _SO_SOURCE = _SO_SOURCE_DIR / "roctx_recordfn.cpp"
 _SO_BUILDFILE = _SO_SOURCE_DIR / "CMakeLists.txt"
 
 # Owner of the install-tree LIBDIR sub-folder we resolve prebuilt .so
-# files from. Hard-coded to "rocprofiler-compute" because the loader
-# has no access to CMAKE_PROJECT_NAME at import time. The sweep over
-# rocm-systems/projects/*/CMakeLists.txt confirmed this directory is
-# solely owned by us, so there is no risk of pulling a stranger's
-# library by name collision.
-_INSTALL_TREE_PROJECT_NAME = "rocprofiler-compute"
+# files from. Generated during configure/install when available; keep
+# a safe fallback for editable installs or stripped distributions.
+try:
+    from utils._install_metadata import (
+        INSTALL_PROJECT_NAME as _INSTALL_TREE_PROJECT_NAME,
+    )
+except Exception:
+    _INSTALL_TREE_PROJECT_NAME = "rocprofiler-compute"
 
 # Recorded in the negative-cache marker so post-mortem readers can see
 # which build tier wrote it. Tests match these strings literally.

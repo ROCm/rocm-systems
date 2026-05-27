@@ -3548,3 +3548,87 @@ def test_profile_invalid_workloads_no_torch_trace(
     )
 
     common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.torch_trace
+def test_torch_trace_deep_tensor_wraps_overhead(
+    require_torch,
+    binary_handler_profile_rocprof_compute,
+):
+    """Optional manual benchmark for deep tensor wrap overhead.
+
+    This benchmark is skipped by default to keep CI stable/time-bounded.
+    Run manually with ROCPROFCOMPUTE_RUN_DEEP_TENSOR_WRAP_BENCH=1.
+    """
+    require_torch(gpu=True)
+
+    run_bench = os.environ.get("ROCPROFCOMPUTE_RUN_DEEP_TENSOR_WRAP_BENCH", "")
+    if run_bench.strip().lower() not in ("1", "true", "yes", "on"):
+        pytest.skip(
+            (
+                "set ROCPROFCOMPUTE_RUN_DEEP_TENSOR_WRAP_BENCH=1 "
+                "to run this manual benchmark"
+            )
+        )
+
+    def _run_once(*, deep_wraps: bool, param_id: str) -> tuple[float, float]:
+        workload_dir = common.get_output_dir(param_id=param_id)
+        prev = os.environ.get("ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS")
+        os.environ["ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS"] = (
+            "1" if deep_wraps else "0"
+        )
+        try:
+            start = time.time()
+            returncode = binary_handler_profile_rocprof_compute(
+                config,
+                workload_dir,
+                ["--experimental", "--torch-trace", "--iteration-multiplexing"],
+                check_success=True,
+                roof=False,
+                app_name="torch_test_app",
+            )
+            elapsed = time.time() - start
+            assert returncode == 0, "torch-trace profiling run failed"
+
+            results_files = list(Path(workload_dir).glob("results_*.csv"))
+            df = pd.concat([pd.read_csv(f) for f in results_files], ignore_index=True)
+            kernel_duration_total = (
+                df["End_Timestamp"].max() - df["Start_Timestamp"].min()
+            )
+            return elapsed, kernel_duration_total
+        finally:
+            common.clean_output_dir(config["cleanup"], workload_dir)
+            if prev is None:
+                os.environ.pop("ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS", None)
+            else:
+                os.environ["ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS"] = prev
+
+    baseline_wall, baseline_kernel = _run_once(
+        deep_wraps=False,
+        param_id="torch_trace_deep_wraps_off",
+    )
+    deep_wall, deep_kernel = _run_once(
+        deep_wraps=True,
+        param_id="torch_trace_deep_wraps_on",
+    )
+
+    wall_overhead = (
+        ((deep_wall - baseline_wall) / baseline_wall) * 100
+        if baseline_wall > 0
+        else 0.0
+    )
+    kernel_overhead = (
+        ((deep_kernel - baseline_kernel) / baseline_kernel) * 100
+        if baseline_kernel > 0
+        else 0.0
+    )
+
+    print("\n" + "=" * 70)
+    print("Deep Tensor Wrap Overhead Benchmark (--torch-trace):")
+    print(f"  Baseline wall-clock:         {baseline_wall:.2f}s")
+    print(f"  Deep-wraps wall-clock:       {deep_wall:.2f}s")
+    print(f"  Wall-clock overhead:         {wall_overhead:.1f}%")
+    print(f"  Baseline kernel duration:    {baseline_kernel:.0f} ns")
+    print(f"  Deep-wraps kernel duration:  {deep_kernel:.0f} ns")
+    print(f"  Kernel overhead:             {kernel_overhead:.1f}%")
+    print("=" * 70 + "\n")

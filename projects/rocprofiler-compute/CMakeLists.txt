@@ -861,6 +861,15 @@ install(
     PATTERN src/rocprof_compute_analyze/tests EXCLUDE
     PATTERN "__pycache__" EXCLUDE
 )
+# Generate install metadata consumed by utils/inject_roctx_loader.py.
+set(ROCTX_UTILS_GENERATED_DIR "${PROJECT_BINARY_DIR}/generated/utils")
+file(MAKE_DIRECTORY ${ROCTX_UTILS_GENERATED_DIR})
+configure_file(
+    ${PROJECT_SOURCE_DIR}/src/utils/_install_metadata.py.in
+    ${ROCTX_UTILS_GENERATED_DIR}/_install_metadata.py
+    @ONLY
+)
+
 # src/utils
 install(
     DIRECTORY src/utils
@@ -868,6 +877,11 @@ install(
     COMPONENT main
     PATTERN "rooflines*" EXCLUDE
     PATTERN "__pycache__" EXCLUDE
+)
+install(
+    FILES ${ROCTX_UTILS_GENERATED_DIR}/_install_metadata.py
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/utils
+    COMPONENT main
 )
 # Always install the roctx_recordfn sources next to the loader's
 # search path so the runtime cmake-tier (utils/inject_roctx_loader.py:

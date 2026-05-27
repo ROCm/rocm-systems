@@ -5,11 +5,11 @@
 
 Loaded by rocprofv3 as ``python inject_roctx.py main.py [args...]``.
 Forward + backward ATen ops are covered by the C++ RecordFunction tier
-(roctx_recordfn.so) when it loads, with a Python TorchDispatchMode
-fallback otherwise; structural wraps (nn.Module, Optimizer, distributed
-collectives, CUDA graph, Triton, torch.compile) run on both tiers. All
-process-global patching is gated on ``__main__`` so plain ``import
-utils.inject_roctx`` from test/tooling code stays inert.
+(roctx_recordfn.so) when install_global_wraps() initializes it, with a
+Python TorchDispatchMode fallback otherwise; structural wraps
+(nn.Module, Optimizer, distributed collectives, CUDA graph, Triton,
+torch.compile) run on both tiers. Plain ``import utils.inject_roctx``
+from test/tooling code stays inert.
 """
 
 import importlib
@@ -132,7 +132,7 @@ try:
 except Exception:
     CompiledKernel = None
 
-# Load roctx_recordfn.so; on any failure fall back to the Python tier.
+# Loader entry points for roctx_recordfn.so.
 try:
     from utils import inject_roctx_loader as _roctx_loader_module
     from utils.inject_roctx_loader import load as _load_roctx_recordfn
@@ -145,7 +145,24 @@ except Exception as _e:
     _roctx_loader_module = None
 
 _roctx_recordfn = None
-if _load_roctx_recordfn is not None:
+_USING_C_TIER = False
+_C_TIER_INITIALIZED = False
+
+
+def _initialize_c_tier() -> bool:
+    """Load + install roctx_recordfn.so once per process."""
+    global _roctx_recordfn, _USING_C_TIER, _C_TIER_INITIALIZED
+
+    if _C_TIER_INITIALIZED:
+        return _USING_C_TIER
+
+    _C_TIER_INITIALIZED = True
+
+    if _load_roctx_recordfn is None:
+        _roctx_recordfn = None
+        _USING_C_TIER = False
+        return False
+
     try:
         _roctx_recordfn = _load_roctx_recordfn()
     except Exception as _e:
@@ -155,21 +172,27 @@ if _load_roctx_recordfn is not None:
         )
         _roctx_recordfn = None
 
-if _roctx_recordfn is not None:
-    try:
-        _roctx_recordfn.install()
-        console_log(
-            "torch trace",
-            "Coverage tier: C++ RecordFunction (global callback; covers every thread).",
-        )
-    except Exception as _e:
-        console_warning(
-            "torch trace",
-            f".so install() raised; falling back to Python tier: {_e}",
-        )
-        _roctx_recordfn = None
+    if _roctx_recordfn is not None:
+        try:
+            _roctx_recordfn.install()
+            console_log(
+                "torch trace",
+                (
+                    "Coverage tier: C++ RecordFunction "
+                    "(global callback; covers every thread)."
+                ),
+            )
+            _USING_C_TIER = True
+            return True
+        except Exception as _e:
+            console_warning(
+                "torch trace",
+                f".so install() raised; falling back to Python tier: {_e}",
+            )
+            _roctx_recordfn = None
 
-_USING_C_TIER = _roctx_recordfn is not None
+    _USING_C_TIER = False
+    return False
 
 
 def _emit_python_tier_fallback_warning() -> None:
@@ -179,8 +202,7 @@ def _emit_python_tier_fallback_warning() -> None:
     visible at default verbosity without a separate -VVV re-run, and
     emits exactly once per process (the loader's per-tier WHY lines
     stay at LOG to avoid multiplying noise on multi-pass PMC sweeps).
-    Gated on ``__main__`` by the caller so plain imports from
-    test/tooling code stay inert (matches the module docstring).
+    Called by install_global_wraps() after _initialize_c_tier().
     """
     if _USING_C_TIER:
         return
@@ -531,7 +553,12 @@ def patch_process_group_methods() -> None:
 
         def init_subclass_hook(cls: type, **kwargs: Any) -> None:
             try:
-                original_init_subclass(**kwargs)
+                original_init_subclass_fn = getattr(
+                    original_init_subclass,
+                    "__func__",
+                    original_init_subclass,
+                )
+                original_init_subclass_fn(cls, **kwargs)
             except Exception:
                 pass
             try:
@@ -1031,23 +1058,39 @@ EXTRA_STRUCTURAL_WRAPS = (
 
 
 # Tensor methods that frequently land in user code as the entry point
-# for an ATen op (e.g. ``output.argmax(dim=1)``, ``loss.item()``,
-# ``x.to(device)``). Wrapping them adds a USER_SCOPE frame so the
-# enclosed aten:: dispatch records inherit the user file:line.
+# for an ATen op (e.g. ``output.argmax(dim=1)``, ``loss.item()``).
+# Wrapping them adds a USER_SCOPE frame so enclosed aten:: dispatch
+# records inherit the user file:line.
 TENSOR_METHOD_WRAPS = (
-    "to",
     "item",
     "argmax",
     "sum",
     "mean",
     "max",
     "eq",
-    "cpu",
-    "cuda",
     "numpy",
     "tolist",
+)
+
+DEEP_TENSOR_METHOD_WRAPS = (
+    "to",
+    "cpu",
+    "cuda",
     "contiguous",
 )
+
+DEEP_TENSOR_METHOD_WRAPS_ENV = "ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS"
+
+
+def _deep_tensor_method_wraps_enabled() -> bool:
+    value = os.environ.get(DEEP_TENSOR_METHOD_WRAPS_ENV, "").strip().lower()
+    return value in ("1", "true", "yes", "on")
+
+
+def _selected_tensor_method_wraps() -> tuple[str, ...]:
+    if _deep_tensor_method_wraps_enabled():
+        return TENSOR_METHOD_WRAPS + DEEP_TENSOR_METHOD_WRAPS
+    return TENSOR_METHOD_WRAPS
 
 
 def install_function_apply_wrappers() -> bool:
@@ -1058,9 +1101,10 @@ def install_function_apply_wrappers() -> bool:
 
     def stamp_apply(cls: type) -> None:
         try:
-            existing = cls.__dict__.get("apply")
-            if existing is not None and getattr(existing, "_roctx_wrapped", False):
-                return
+            for ancestor in cls.__mro__:
+                existing = ancestor.__dict__.get("apply")
+                if existing is not None and getattr(existing, "_roctx_wrapped", False):
+                    return
         except Exception:
             return
         try:
@@ -1093,7 +1137,12 @@ def install_function_apply_wrappers() -> bool:
 
     def init_subclass_hook(cls: type, **kwargs: Any) -> None:
         try:
-            original_init_subclass(**kwargs)
+            original_init_subclass_fn = getattr(
+                original_init_subclass,
+                "__func__",
+                original_init_subclass,
+            )
+            original_init_subclass_fn(cls, **kwargs)
         except Exception:
             pass
         try:
@@ -1110,20 +1159,31 @@ def install_function_apply_wrappers() -> bool:
 
 
 def install_tensor_method_wrappers() -> None:
-    """Wrap TENSOR_METHOD_WRAPS on torch.Tensor. Each wrap adds a
+    """Wrap selected tensor methods on torch.Tensor. Each wrap adds a
     USER_SCOPE frame around the call, so the ATen dispatch records that
     fire inside inherit the user file:line via the C++ tier's
     aten.nested:0 label (or the Python tier's frame walker).
 
+    Methods in DEEP_TENSOR_METHOD_WRAPS are opt-in via
+    ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS=1.
+
     Methods that are read-only descriptors (``Tensor.shape``-style) or
     that refuse Python-level reassignment are silently skipped."""
     wrapped = []
-    for method_name in TENSOR_METHOD_WRAPS:
+    selected_methods = _selected_tensor_method_wraps()
+    if not _deep_tensor_method_wraps_enabled():
+        console_log(
+            "torch trace",
+            "Deep tensor method wraps disabled by default; set "(
+                f"{DEEP_TENSOR_METHOD_WRAPS_ENV}=1 to enable "
+                f"({', '.join(DEEP_TENSOR_METHOD_WRAPS)})."
+            ),
+        )
+    for method_name in selected_methods:
         fn = getattr(torch.Tensor, method_name, None)
         if fn is None or not callable(fn):
             continue
         if getattr(fn, "_roctx_wrapped", False):
-            wrapped.append(method_name)
             continue
         try:
             wrapped_fn = roctx_wrapper(fn, f"torch.Tensor.{method_name}")
@@ -1146,7 +1206,7 @@ def install_tensor_method_wrappers() -> None:
 
 
 def install_extra_structural_wrappers() -> None:
-    """Wrap EXTRA_STRUCTURAL_WRAPS, TENSOR_METHOD_WRAPS,
+    """Wrap EXTRA_STRUCTURAL_WRAPS, selected tensor methods,
     torch.cuda.{Event,Stream}.__init__, and torch.autograd.Function.apply.
     Each wrap is independent: a single failure does not block the others."""
     wrapped = []
@@ -1264,8 +1324,10 @@ def install_global_wraps() -> None:
 
     Dispatcher hook runs first so structural wraps inherit ATen-dispatch
     markers. Idempotent (each patch_* / inject_* stamps ``_roctx_wrapped``
-    on the replacement); gated on ``__main__`` so plain imports stay inert.
+    on the replacement).
     """
+    _initialize_c_tier()
+    _emit_python_tier_fallback_warning()
     install_dispatcher_hook()
     patch_distributed_collectives()
     patch_process_group_methods()
@@ -1279,7 +1341,6 @@ def install_global_wraps() -> None:
 
 
 if __name__ == "__main__":
-    _emit_python_tier_fallback_warning()
     if len(sys.argv) < 2:
         console_log(
             "torch trace", "Usage: python inject_roctx.py <script.py> [script_args...]"

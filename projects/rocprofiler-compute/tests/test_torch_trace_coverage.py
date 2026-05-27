@@ -16,7 +16,6 @@ Why: the only end-to-end check that the --torch-trace marker stream
     matches torch.profiler ground truth at the per-op level.
 """
 
-import importlib.util
 import json
 import random
 import sys
@@ -28,17 +27,18 @@ from typing import Any, Dict, List, Tuple
 import common
 import pytest
 
-# Guard torch / loader imports so this module still loads on CPU-only
-# hosts. The cpp_tier_* tests below skip via the module-scoped
-# roctx_recordfn_so fixture and the require_torch(gpu=True) call.
-# A module-level pytest.skip(..., allow_module_level=True) or a top-
-# level pytest.importorskip("torch") would collect zero items on a
-# CPU-only host and make pytest exit with code 5, which CTest reads
-# as a test failure.
-if importlib.util.find_spec("torch") is not None:
+# Eager imports are safe now that C++ tier loading is deferred to
+# install_global_wraps(); keep best-effort fallbacks so collection
+# still succeeds on hosts without PyTorch.
+try:
     import torch  # noqa: E402
+except Exception:
+    torch = None
 
+try:
     from utils import inject_roctx_loader  # noqa: E402
+except Exception:
+    inject_roctx_loader = None
 
 COVERAGE_TEST_CONFIG: Dict[str, Any] = {"cleanup": True}
 
@@ -406,10 +406,12 @@ def roctx_recordfn_so():
     Each test calls install() explicitly so the fixture itself stays
     test-state-free; uninstall() runs best-effort on teardown.
     """
-    if importlib.util.find_spec("torch") is None:
+    if torch is None:
         pytest.skip("PyTorch is not installed")
     if not torch.cuda.is_available():
         pytest.skip("torch.cuda.is_available() is False")
+    if inject_roctx_loader is None:
+        pytest.skip("inject_roctx_loader import failed")
     mod = inject_roctx_loader.load()
     if mod is None:
         pytest.skip("roctx_recordfn.so unavailable (no toolchain/libtorch)")
@@ -815,3 +817,52 @@ def test_cpp_tier_user_spawned_python_thread_emits_markers(
         if m.startswith("test.user_thread/") and _leaf_label(m) in cpp_labels
     ]
     assert cpp_markers, "no C++-tier markers captured from user-spawned Python thread"
+
+
+@pytest.mark.torch_trace
+def test_cpp_tier_function_apply_no_double_wrap_on_grandchild(
+    require_torch,
+    monkeypatch,
+):
+    """A grandchild Function subclass should not get a second apply wrapper."""
+    require_torch()
+
+    try:
+        from utils import inject_roctx
+    except SystemExit:
+        pytest.skip("roctx bindings are unavailable in this environment")
+
+    push_counter = {"count": 0}
+
+    def _count_push(*_args, **_kwargs):
+        push_counter["count"] += 1
+
+    monkeypatch.setattr(inject_roctx, "_push_scope", _count_push)
+    monkeypatch.setattr(inject_roctx, "_pop_scope", lambda: None)
+
+    class Foo(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx, x):
+            return x + 1
+
+        @staticmethod
+        def backward(ctx, grad_out):
+            return grad_out
+
+    class Bar(Foo):
+        pass
+
+    assert inject_roctx.install_function_apply_wrappers() is True
+
+    # With the MRO-aware guard, only Foo carries the wrapped staticmethod.
+    assert getattr(Foo.__dict__.get("apply"), "_roctx_wrapped", False)
+    assert "apply" not in Bar.__dict__
+
+    x = torch.tensor(1.0, requires_grad=True)
+    y = Bar.apply(x)
+    y.backward()
+
+    assert push_counter["count"] == 1, (
+        "Bar.apply triggered more than one wrapper push; "
+        "Function.apply was double-wrapped across the inheritance chain"
+    )
