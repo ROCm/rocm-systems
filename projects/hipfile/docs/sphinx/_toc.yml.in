@@ -55,3 +55,7 @@ subtrees:
           - file: reference/api-batch
           - file: reference/api-errors
           - file: reference/api-python
+  - caption: Troubleshooting
+    entries:
+      - file: troubleshooting/known-issues
+        title: Known issues
