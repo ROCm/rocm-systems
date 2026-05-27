@@ -673,7 +673,7 @@ void GpuAgent::InitDerivedCuid() {
   }
 
 #else
-  debug_print("Secondary CUID not available: AMDCUID support not enabled.\n");
+  debug_print_n(1, "Secondary CUID not available: AMDCUID support not enabled.\n");
 #endif
 }
 

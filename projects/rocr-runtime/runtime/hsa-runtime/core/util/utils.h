@@ -129,7 +129,7 @@ static __forceinline unsigned long long int strtoull(const char* str,
 #if defined(__linux__)
 #define debug_warning_n(exp, limit)                                                                \
   do {                                                                                             \
-    static std::atomic<int> count(0);                                                              \
+    static std::atomic<unsigned int> count(0);                                                              \
     if (!(exp) && (limit == 0 || count < limit)) {                                                 \
       fprintf(stderr, "Warning: " STRING(exp) " in %s, " __FILE__ ":" STRING(__LINE__) "\n",       \
               __PRETTY_FUNCTION__);                                                                \
@@ -160,6 +160,21 @@ static __forceinline unsigned long long int strtoull(const char* str,
   do {                                                                                             \
     fprintf(stderr, fmt, ##__VA_ARGS__);                                                           \
   } while (false)
+#endif
+
+#ifdef NDEBUG
+#define debug_print_n(fmt, ...)                                                                      \
+  do {                                                                                             \
+  } while (false)
+#else
+#define debug_print_n(limit, fmt, ...)                                                             \
+  do {                                                                                             \
+    static std::atomic<unsigned int> count(0);                                                              \
+    if (limit == 0 || count < limit) {                                                             \
+      fprintf(stderr, fmt, ##__VA_ARGS__);                                                         \
+    count++;                                                                                       \
+  }                                                                                                \
+} while (false)
 #endif
 
 #ifdef NDEBUG
