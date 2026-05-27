@@ -51,8 +51,7 @@ public:
     // Process-singleton accessor. The ugly name documents the
     // constraint: only call this from a top-level attach or finalize
     // entry point.
-    [[nodiscard]] static output_file_registry&
-    instance_for_top_level_attach_finalize();
+    [[nodiscard]] static output_file_registry& instance_for_top_level_attach_finalize();
 
     output_file_registry() = default;
 

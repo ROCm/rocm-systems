@@ -40,10 +40,9 @@ struct subtree_walk
 // (MPI fork generations) do not blow the call stack.
 subtree_walk
 collect_subtree_order(
-    pid_t                                                root_pid,
-    const std::unordered_map<pid_t, std::vector<pid_t>>& children_by_ppid)
+    pid_t root_pid, const std::unordered_map<pid_t, std::vector<pid_t>>& children_by_ppid)
 {
-    subtree_walk      walk{};
+    subtree_walk       walk{};
     std::vector<pid_t> stack{ root_pid };
     while(!stack.empty())
     {
@@ -65,8 +64,7 @@ collect_subtree_order(
 // is moved into its parent before the parent itself is moved out.
 void
 attach_children_bottom_up(const subtree_walk&                      walk,
-                          std::unordered_map<pid_t, process_node>& built,
-                          pid_t                                    root_pid)
+                          std::unordered_map<pid_t, process_node>& built, pid_t root_pid)
 {
     for(auto rit = walk.order.rbegin(); rit != walk.order.rend(); ++rit)
     {

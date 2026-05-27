@@ -416,9 +416,8 @@ unified_memory_processor_t::write_text_output(std::ostream& out) const
                     << "  " << std::setw(10)
                     << common::format_size_human(
                            static_cast<std::uintmax_t>(stats.total_size_bytes))
-                    << "  "
-                    << std::setw(11) << detail::format_time(stats.total_time_ns) << "  "
-                    << std::setw(9) << std::fixed << std::setprecision(2)
+                    << "  " << std::setw(11) << detail::format_time(stats.total_time_ns)
+                    << "  " << std::setw(9) << std::fixed << std::setprecision(2)
                     << stats.bandwidth_gbps() << " GB/s  " << name << "\n";
             }
         };

@@ -42,9 +42,8 @@ wrap_to_width(std::string_view content, std::size_t width)
         }
         std::size_t cut = width;
         // UTF-8 backoff: never split inside a multi-byte code point.
-        while(cut > 0 &&
-              (static_cast<unsigned char>(content[cut]) & UTF8_CONTINUATION_MASK) ==
-                  UTF8_CONTINUATION_BITS)
+        while(cut > 0 && (static_cast<unsigned char>(content[cut]) &
+                          UTF8_CONTINUATION_MASK) == UTF8_CONTINUATION_BITS)
             --cut;
         // ws==0 would yield an empty leading chunk and never advance;
         // treat as "no break" and fall through to byte chunking.

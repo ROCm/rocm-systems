@@ -9,9 +9,10 @@
 #include <optional>
 #include <string>
 
-namespace rocprofsys::common
+namespace rocprofsys
 {
-
+inline namespace common
+{
 [[nodiscard]] inline std::string
 format_size_human(std::uintmax_t bytes)
 {
@@ -32,4 +33,5 @@ format_size_human(std::optional<std::uintmax_t> size_bytes)
     return format_size_human(*size_bytes);
 }
 
-}  // namespace rocprofsys::common
+}  // namespace common
+}  // namespace rocprofsys

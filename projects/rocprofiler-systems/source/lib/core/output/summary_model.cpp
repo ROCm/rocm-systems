@@ -46,8 +46,8 @@ build_summary_model(const output_file_registry& registry, const run_metadata& me
     auto rows = registry.rows();
     if(rows.empty()) return model;
 
-    auto processes  = registry.processes();
-    model.built     = build_tree(rows, processes);
+    auto processes    = registry.processes();
+    model.built       = build_tree(rows, processes);
     model.built.roots = collapse_helpers(std::move(model.built.roots));
     classify(model.built.roots, getpid());
 

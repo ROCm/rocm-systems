@@ -33,21 +33,25 @@ output_file_registry::make_entry(std::string path, output_format format,
                      "sqlite3, AMD Visualizer (OPTIQ), or rocprofiler-sdk provided rocpd "
                      "Python module for conversion to other formats" };
         case output_format::json:
-            return { component_name.empty() ? "JSON output"
-                                            : fmt::format("JSON ({})", component_name),
-                     path,
-                     fmt::format("jq . {}", output::escape_for_shell_single_quotes(path)) };
+            return {
+                component_name.empty() ? "JSON output"
+                                       : fmt::format("JSON ({})", component_name),
+                path, fmt::format("jq . {}", output::escape_for_shell_single_quotes(path))
+            };
         case output_format::text:
-            return { component_name.empty() ? "Text profile"
-                                            : fmt::format("Profile ({})", component_name),
-                     path,
-                     fmt::format("cat {}", output::escape_for_shell_single_quotes(path)) };
+            return {
+                component_name.empty() ? "Text profile"
+                                       : fmt::format("Profile ({})", component_name),
+                path, fmt::format("cat {}", output::escape_for_shell_single_quotes(path))
+            };
         case output_format::causal_json:
             return { "Causal profile (JSON)", path,
-                     fmt::format("jq . {}", output::escape_for_shell_single_quotes(path)) };
+                     fmt::format("jq . {}",
+                                 output::escape_for_shell_single_quotes(path)) };
         case output_format::causal_text:
             return { "Causal profile (text)", path,
-                     fmt::format("cat {}", output::escape_for_shell_single_quotes(path)) };
+                     fmt::format("cat {}",
+                                 output::escape_for_shell_single_quotes(path)) };
     }
     return { "Unknown", std::move(path), "" };
 }

@@ -179,8 +179,7 @@ render_header(std::string& msg, const run_metadata& meta, std::size_t process_co
 
     const std::size_t longest =
         std::max({ title.size(), run_line.size(), dir_line.size() });
-    const std::size_t inner =
-        std::clamp<std::size_t>(longest + 2, MIN_INNER, MAX_INNER);
+    const std::size_t inner = std::clamp<std::size_t>(longest + 2, MIN_INNER, MAX_INNER);
     const std::size_t content_width = inner - 2;
 
     // ─ is 3-byte UTF-8.
