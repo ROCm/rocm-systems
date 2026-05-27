@@ -9,8 +9,6 @@ target_link_libraries(
         rocprofiler-systems-googletest-library
         rocprofiler-systems-logger
         rocprofiler-systems::rocprofiler-systems-headers
-        rocprofiler-systems::rocprofiler-systems-rocm
-        rocprofiler-systems::rocprofiler-systems-timemory
 )
 
 if(ROCPROFSYS_BUILD_AINIC)

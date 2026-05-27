@@ -4,13 +4,13 @@
 import argparse
 import csv
 import ctypes
+import errno
 import glob
 import io
-import locale
 import os
+import pty
 import re
 import select
-import selectors
 import shutil
 import subprocess
 import sys
@@ -37,26 +37,6 @@ from vendored import yaml
 # Global constants
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
 
-SUPPORTED_DENOM: dict[str, str] = {
-    "per_wave": "SQ_WAVES",
-    "per_cycle": "$GRBM_GUI_ACTIVE_PER_XCD",
-    "per_second": "((End_Timestamp - Start_Timestamp) / 1000000000)",
-    "per_kernel": "1",
-}
-
-# Build-in defined in mongodb variables:
-BUILD_IN_VARS: dict[str, str] = {
-    "GRBM_GUI_ACTIVE_PER_XCD": "(GRBM_GUI_ACTIVE / $num_xcd)",
-    "GRBM_COUNT_PER_XCD": "(GRBM_COUNT / $num_xcd)",
-    "GRBM_SPI_BUSY_PER_XCD": "(GRBM_SPI_BUSY / $num_xcd)",
-    "numActiveCUs": "TO_INT(MIN((((ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / \
-        $GRBM_GUI_ACTIVE_PER_XCD)), 0) / $max_waves_per_cu) * 8) + \
-        MIN(MOD(ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / \
-        $GRBM_GUI_ACTIVE_PER_XCD)), 0), $max_waves_per_cu), 8)), $cu_per_gpu))",
-    "kernelBusyCycles": "ROUND(AVG((((End_Timestamp - Start_Timestamp) / \
-        1000) * $max_sclk)), 0)",
-    "hbmBandwidth": "($max_mclk / 1000 * 32 * $num_hbm_channels)",
-}
 
 # Supported expression field names for metric tables
 SUPPORTED_FIELD: list[str] = [
@@ -280,7 +260,7 @@ def get_version(rocprof_compute_home: Path) -> dict[str, str]:
     for directory in search_dirs:
         version_file = directory / "VERSION"
         try:
-            with open(version_file) as file:
+            with open(version_file, encoding="utf-8") as file:
                 VER = file.read().replace("\n", "")
                 found = True
                 version_dir = directory
@@ -304,7 +284,7 @@ def get_version(rocprof_compute_home: Path) -> dict[str, str]:
         except Exception:
             try:
                 sha_file = version_dir / "VERSION.sha"
-                with open(sha_file) as file:
+                with open(sha_file, encoding="utf-8") as file:
                     SHA = file.read().replace("\n", "")
                     MODE = "release"
             except Exception:
@@ -375,43 +355,47 @@ def perform_attach_detach(new_env: dict[str, str], options: dict[str, Any]) -> N
         except Exception as e:
             console_error(f"Error loading {libname}: {e}")
 
-        # Set argument and return types for attach/detach functions
+        # Set argument and return types for live attach functions
         try:
-            # old attach/detach API
-            c_lib.attach.argtypes = [ctypes.c_uint]
+            # new live attach API
+            c_lib.rocattach_attach.restype = ctypes.c_int
+            c_lib.rocattach_attach.argtypes = [ctypes.c_int]
+            c_lib.rocattach_detach.restype = ctypes.c_int
+            c_lib.rocattach_detach.argtypes = [ctypes.c_int]
         except Exception as e:
             console_debug(
-                "Error setting old attach/detach API argument "
-                f"types: {e}, trying new API"
+                "Error setting new live attach API argument "
+                f"types: {e}, trying legacy live attach API"
             )
             try:
-                # new attach/detach API
-                c_lib.rocattach_attach.restype = ctypes.c_int
-                c_lib.rocattach_attach.argtypes = [ctypes.c_int]
-                c_lib.rocattach_detach.restype = ctypes.c_int
-                c_lib.rocattach_detach.argtypes = [ctypes.c_int]
+                # old live attach API
+                c_lib.attach.restype = ctypes.c_int
+                c_lib.attach.argtypes = [ctypes.c_uint]
+                c_lib.detach.restype = ctypes.c_int
+                c_lib.detach.argtypes = [ctypes.c_uint]
             except Exception as e:
-                console_error(
-                    f"Error setting attach/detach function argument types: {e}"
-                )
+                console_error(f"Error setting live attach function argument types: {e}")
 
         pid = options["ROCPROF_ATTACH_PID"]
         if pid is None:
-            console_error("Mode of attach/detach must have setup for process ID")
+            console_error("Live attach mode requires a process ID (ROCPROF_ATTACH_PID)")
 
         try:
-            # old attach/detach API
-            c_lib.attach(int(pid))
+            # new live attach API
+            attach_status = c_lib.rocattach_attach(int(pid))
+            if attach_status != 0:
+                console_error(
+                    f"Error attaching to process {pid}, "
+                    f"rocattach_attach returned {attach_status}"
+                )
         except Exception as e:
-            console_debug(f"Error attaching with old API: {e}, trying new API")
+            console_debug(
+                "Error attaching with latest live attach "
+                f"API: {e}, trying legacy live attach API"
+            )
             try:
-                # new attach/detach API
-                attach_status = c_lib.rocattach_attach(int(pid))
-                if attach_status != 0:
-                    console_error(
-                        f"Error attaching to process {pid}, "
-                        f"rocattach_attach returned {attach_status}"
-                    )
+                # old live attach API
+                c_lib.attach(int(pid))
             except Exception as e:
                 console_error(f"Error attaching to process {pid}: {e}")
 
@@ -430,18 +414,21 @@ def perform_attach_detach(new_env: dict[str, str], options: dict[str, Any]) -> N
             time.sleep(int(duration) / 1000)
 
         try:
-            # old attach/detach API
-            c_lib.detach(int(pid))
+            # new live attach API
+            detach_status = c_lib.rocattach_detach(int(pid))
+            if detach_status != 0:
+                console_error(
+                    f"Error detaching from process {pid}, "
+                    f"rocattach_detach returned {detach_status}"
+                )
         except Exception as e:
-            console_debug(f"Error detaching with old API: {e}, trying new API")
+            console_debug(
+                f"Error detaching with latest live attach API: {e}, "
+                "trying detach with legacy live attach API"
+            )
             try:
-                # new attach/detach API
-                detach_status = c_lib.rocattach_detach(int(pid))
-                if detach_status != 0:
-                    console_error(
-                        f"Error detaching from process {pid}, "
-                        f"rocattach_detach returned {detach_status}"
-                    )
+                # old live attach API
+                c_lib.detach(int(pid))
             except Exception as e:
                 console_error(f"Error detaching from process {pid}: {e}")
 
@@ -452,9 +439,6 @@ def capture_subprocess_output(
     profileMode: bool = False,
     enable_logging: bool = True,
 ) -> tuple[bool, str]:
-    # Start subprocess
-    # bufsize = 1 means output is line buffered
-    # universal_newlines = True is required for line buffering
     sanitized_env = (
         None
         if new_env is None
@@ -464,51 +448,44 @@ def capture_subprocess_output(
         }
     )
 
-    process = (
-        subprocess.Popen(
+    # Use a PTY in profile mode to prevent instrumentation output from
+    # being interleaved with workload output.
+    if profileMode:
+        pty_parent_fd, pty_child_fd = pty.openpty()
+        stdout_arg = pty_child_fd
+        stderr_arg = pty_child_fd
+    else:
+        stdout_arg = subprocess.PIPE
+        stderr_arg = subprocess.STDOUT
+
+    # env=None is Popen's default (inherit parent env).
+    try:
+        process = subprocess.Popen(
             subprocess_args,
-            bufsize=1,
             stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            stdout=stdout_arg,
+            stderr=stderr_arg,
             universal_newlines=True,
-        )
-        if sanitized_env == None
-        else subprocess.Popen(
-            subprocess_args,
-            bufsize=1,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True,
+            errors="replace",
             env=sanitized_env,
         )
-    )
+    except BaseException:
+        # Close PTY fds if Popen fails.
+        if profileMode:
+            os.close(pty_parent_fd)
+            os.close(pty_child_fd)
+        raise
 
-    # Create callback function for process output
+    if profileMode:
+        # Close the child end; parent only reads. errors="replace" skips
+        # bad bytes instead of crashing the read loop.
+        os.close(pty_child_fd)
+        process_stdout = os.fdopen(pty_parent_fd, "r", errors="replace")
+    else:
+        process_stdout = process.stdout
+
+    # Create buffer for captured process output
     buf = io.StringIO()
-
-    def handle_output(stream: io.TextIOWrapper, _mask) -> None:
-        try:
-            # Because the process' output is line buffered, there's only ever one
-            # line to read when this function is called
-            line = stream.readline()
-            if not line:
-                return
-            buf.write(line)
-            if enable_logging:
-                if profileMode:
-                    console_log(get_rocprof_cmd(), line.strip(), indent_level=1)
-                else:
-                    console_log(line.strip())
-        except UnicodeDecodeError:
-            # Skip this line
-            pass
-
-    # Register callback for an "available for read" event from subprocess' stdout stream
-    selector = selectors.DefaultSelector()
-    if process.stdout is not None:
-        selector.register(process.stdout, selectors.EVENT_READ, handle_output)
 
     def forward_input() -> None:
         """
@@ -547,19 +524,30 @@ def capture_subprocess_output(
     input_thread = threading.Thread(target=forward_input, daemon=True)
     input_thread.start()
 
-    # Loop until subprocess is terminated
-    while process.poll() is None:
-        # Wait for events and handle them with their registered callbacks
-        events = selector.select()
-        for key, mask in events:
-            callback = key.data
-            callback(key.fileobj, mask)
+    # Read until the child closes its end. Pipes signal EOF with an empty
+    # string; PTYs signal it with OSError(EIO). The two never overlap.
+    while True:
+        try:
+            line = process_stdout.readline()
+        except OSError as e:
+            if e.errno == errno.EIO:
+                break
+            raise
+        if not line:
+            break
+        buf.write(line)
+        if not enable_logging:
+            continue
+        if profileMode:
+            console_log(get_rocprof_cmd(), line.strip(), indent_level=1)
+        else:
+            console_log(line.strip())
 
+    process_stdout.close()
     input_thread.join(timeout=1)
 
     # Get process return code
     return_code = process.wait()
-    selector.close()
 
     success = return_code == 0
 
@@ -614,7 +602,7 @@ def parse_pmc_perf(pmc_perf_file: str) -> list[str]:
     Parse the YAML file to get the pmc counters.
     Assumes only one job per file.
     """
-    with open(pmc_perf_file) as file:
+    with open(pmc_perf_file, encoding="utf-8") as file:
         data = yaml.safe_load(file) or {}
     jobs = data.get("jobs", [])
     if not jobs:
@@ -656,7 +644,7 @@ def parse_sets_yaml(arch: str) -> dict[str, Any]:
         / "sets"
         / f"{arch}_sets.yaml"
     )
-    with open(filename) as file:
+    with open(filename, encoding="utf-8") as file:
         content = file.read()
     data = yaml.safe_load(content)
 
@@ -679,7 +667,7 @@ def load_panel_configs(
     configs: dict[int, dict[str, Any]] = {}
     for dir_path in dirs:
         for yaml_file in Path(dir_path).glob("*.yaml"):
-            with open(yaml_file) as file:
+            with open(yaml_file, encoding="utf-8") as file:
                 config_yml = yaml.safe_load(file)
                 # metric key can be None due to some metric-
                 # tables not having any metrics
@@ -934,43 +922,99 @@ def convert_metric_id_to_panel_info(
 
 def load_yaml(filepath: str) -> dict[str, Any]:
     """Load YAML file and return as dictionary."""
-    with open(filepath) as f:
+    with open(filepath, encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
-def get_panel_alias() -> dict[str, str]:
-    panel_yaml = load_yaml(
-        f"{config.rocprof_compute_home}/rocprof_compute_soc/analysis_configs/gfx9_config_template.yaml"
+def get_arch_panel_id_to_alias(arch: str) -> dict[str, str]:
+    """Return panel_id_str -> alias from the *_config_template.yaml whose
+    filename prefix matches arch. Empty/None aliases stay as "".
+    Returns {} when no template matches the arch."""
+    template_glob = (
+        f"{config.rocprof_compute_home}"
+        "/rocprof_compute_soc/analysis_configs/*_config_template.yaml"
     )
+    for path in sorted(glob.glob(template_glob)):
+        m = re.match(r".*(gfx\d+)_config_template\.yaml$", path)
+        if m and arch.startswith(m.group(1)):
+            panel_yaml = load_yaml(path) or {}
+            panels = panel_yaml.get("panels") or []
+            return {str(p["panel_id"]): (p.get("panel_alias") or "") for p in panels}
+    return {}
+
+
+def get_arch_alias_to_panel_id(arch: str) -> dict[str, str]:
+    """Inverse of get_arch_panel_id_to_alias for resolving --block
+    <alias> tokens: alias -> panel_id_str. Skips panels with empty or
+    None aliases so unknown aliases naturally raise KeyError on lookup."""
     return {
-        panel["panel_alias"]: str(panel["panel_id"]) for panel in panel_yaml["panels"]
+        alias: pid for pid, alias in get_arch_panel_id_to_alias(arch).items() if alias
     }
 
 
-def get_rank() -> Optional[str]:
-    rank_env_vars = [
-        "SLURM_PROCID",
-        "FLUX_TASK_RANK",
-        "PMI_RANK",
-        "PMIX_RANK",
-        "PALS_RANKID",
-        "OMPI_COMM_WORLD_RANK",
-        "MV2_COMM_WORLD_RANK",
-        "MPI_RANKID",
-        "MPI_LOCALRANKID",
-        "MPI_RANK",
-    ]
-    for env_var in rank_env_vars:
-        value = os.environ.get(env_var)
-        if value is not None:
-            return value
+def get_job_rank_and_size() -> tuple[Optional[str], Optional[int]]:
+    """Detect job rank and total ranks from runtime environment variables.
 
-    return None
+    Returns a (rank, total_ranks) tuple, ensuring both values come from the same
+    runtime.
+    """
+    # Note: PMIX_RANK is intentionally excluded. PMIx has no standard size env var,
+    # and PMIx is never a standalone launcher — it always runs behind SLURM, OpenMPI,
+    # PALS, etc., which set their own paired rank/size vars checked here. If only
+    # PMIX_RANK is set, the launcher also sets generic MPI_RANK/MPI_SIZE caught below.
+    rank_size_env_vars = [
+        ("PBS_NODENUM", "PBS_O_TASKNUM"),  # PBS/Torque
+        ("SLURM_PROCID", "SLURM_NTASKS"),  # SLURM
+        ("FLUX_TASK_RANK", "FLUX_JOB_SIZE"),  # Flux
+        ("PMI_RANK", "PMI_SIZE"),  # PMI
+        ("PALS_RANKID", "PALS_WORLD_SIZE"),  # PALS (HPE Cray)
+        ("OMPI_COMM_WORLD_RANK", "OMPI_COMM_WORLD_SIZE"),  # OpenMPI
+        ("MV2_COMM_WORLD_RANK", "MV2_COMM_WORLD_SIZE"),  # MVAPICH2
+        ("MPI_RANKID", "MPI_NRANKS"),  # Generic
+        ("MPI_LOCALRANKID", "MPI_LOCALNRANKS"),  # Generic (local)
+        ("MPI_RANK", "MPI_SIZE"),  # Generic
+    ]
+    matched_rank = None
+    matched_rank_var = None
+    matched_size = None
+    matched_size_var = None
+    for rank_var, size_var in rank_size_env_vars:
+        rank_value = os.environ.get(rank_var)
+        try:
+            _ = int(rank_value)
+        except (TypeError, ValueError):
+            continue
+
+        # Rank is valid; try to get a matching size for a complete pair
+        size_value = os.environ.get(size_var)
+        try:
+            matched_size = int(size_value)
+        except (TypeError, ValueError):
+            # Size missing or invalid — remember rank as fallback but keep
+            # searching for a runtime that provides both rank and size
+            if matched_rank is None:
+                matched_rank = rank_value
+                matched_rank_var = rank_var
+                matched_size_var = size_var
+            continue
+
+        # Complete pair found
+        matched_rank = rank_value
+        matched_rank_var = rank_var
+        matched_size_var = size_var
+        break
+
+    console_debug(
+        f"Parallel runtime detected: {matched_rank_var}='{matched_rank}',"
+        f" {matched_size_var}={matched_size}"
+    )
+
+    return (matched_rank, matched_size)
 
 
 def replace_rank(name: str) -> str:
     def rank(match: re.Match[str]) -> str:
-        value = get_rank()
+        value, _ = get_job_rank_and_size()
         if value is not None:
             return value + match.group(1)  # preserve trailing slash
         else:
@@ -1033,7 +1077,7 @@ def create_temp_rocprofiler_metrics_path(sdk_config: dict[str, Any]) -> str:
     # Current version of sdk uses config.yaml instead of counter_defs.yaml
     tmpfile_path_new = tmpfile_parent / "config.yaml"
 
-    with open(tmpfile_path_old, "w") as tmpfile:
+    with open(tmpfile_path_old, "w", encoding="utf-8") as tmpfile:
         # Old sdk does not support firmware restrictions
         sdk_config_old = {
             **sdk_config,
@@ -1045,31 +1089,22 @@ def create_temp_rocprofiler_metrics_path(sdk_config: dict[str, Any]) -> str:
         }
         yaml.dump(sdk_config_old, tmpfile, default_flow_style=False, sort_keys=False)
 
-    with open(tmpfile_path_new, "w") as tmpfile:
+    with open(tmpfile_path_new, "w", encoding="utf-8") as tmpfile:
         yaml.dump(sdk_config, tmpfile, default_flow_style=False, sort_keys=False)
 
     return str(tmpfile_parent)
 
 
-def set_locale_encoding() -> None:
-    try:
-        # Attempt to set the locale to 'C.UTF-8'
-        locale.setlocale(locale.LC_ALL, "C.UTF-8")
-    except locale.Error:
-        # If 'C.UTF-8' is not available, check if the current locale is UTF-8 based
-        current_locale = locale.getdefaultlocale()
-        if current_locale and current_locale[1] and "UTF-8" in current_locale[1]:
-            try:
-                locale.setlocale(locale.LC_ALL, current_locale[0])
-            except locale.Error as e:
-                console_error(
-                    f"Failed to set locale to the current UTF-8-based locale: {e}"
-                )
-        else:
-            console_error(
-                "Please ensure that a UTF-8-based locale is available on your system.",
-                exit=False,
-            )
+def reconfigure_stdio_utf8() -> None:
+    """Force sys.stdout and sys.stderr to UTF-8 so tabulated output never
+    crashes with UnicodeEncodeError on systems started under a non-UTF-8
+    locale.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, io.UnsupportedOperation):
+            pass
 
 
 def validate_roofline_csv(workload_dir: Union[str, Path, list]) -> tuple[bool, str]:
@@ -1098,7 +1133,7 @@ def validate_roofline_csv(workload_dir: Union[str, Path, list]) -> tuple[bool, s
 
     # Validate CSV structure
     try:
-        with open(benchmark_results) as csvfile:
+        with open(benchmark_results, newline="", encoding="utf-8") as csvfile:
             csv_reader = csv.reader(csvfile, delimiter=",")
             row_count = 0
             num_headers = 0

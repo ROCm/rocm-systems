@@ -86,6 +86,12 @@ setup()
     if(get_perfetto_backend() != "inprocess") args.backends |= ::perfetto::kSystemBackend;
     if(get_perfetto_backend() != "system") args.backends |= ::perfetto::kInProcessBackend;
 
+    // Silence all Perfetto log output on log-disabled ranks with empty callback
+    if(!config::output_filtering::is_log_output_enabled_for_current_mpi_rank())
+    {
+        args.log_message_callback = +[](::perfetto::base::LogMessageCallbackArgs) {};
+    }
+
     ::perfetto::Tracing::Initialize(args);
     ::perfetto::TrackEvent::Register();
 }
@@ -128,7 +134,7 @@ stop()
 
     auto& tracing_session = get_perfetto_session();
 
-    if(get_is_continuous_integration() && tracing_session == nullptr)
+    if(tracing_session == nullptr)
     {
         throw std::runtime_error("Null pointer to the tracing session");
     }
@@ -179,7 +185,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
             auto _fnum_read = ::fread(_data.data(), sizeof(char), _fnum_elem, _fdata);
             ::fclose(_fdata);
 
-            if(get_is_continuous_integration() && _fnum_read != _fnum_elem)
+            if(_fnum_read != _fnum_elem)
             {
                 throw std::runtime_error(fmt::format(
                     "read {} elements from perfetto trace file '{}'. Expected {}",
@@ -227,7 +233,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
 
     auto _filename = config::get_perfetto_output_filename();
 
-    if(config::output_filtering::is_output_enabled_for_current_mpi_rank())
+    if(config::output_filtering::is_file_output_enabled_for_current_mpi_rank())
     {
         // In MPI combined-trace mode, only rank 0 has non-empty trace_data
         // after the gather, so only rank 0 writes and registers the file.
@@ -265,8 +271,9 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
         }
     }
 
-    // Merge the output files, if rank 0
-    if(dmp::rank() == 0)
+    // Merge the output files, if rank 0 and output is enabled for this rank
+    if(dmp::rank() == 0 &&
+       config::output_filtering::is_file_output_enabled_for_current_mpi_rank())
     {
         auto _output_folder = filepath::dirname(_filename);
         auto _script_path   = std::string{ "rocprof-sys-merge-output.sh" };

@@ -53,16 +53,23 @@ jobs:
   rhel:
     runs-on: ubuntu-latest
     container:
-      image: dgaliffiamd/rocprofiler-systems:ci-base-rhel-${{ matrix.os-release }}
+      image: dgaliffiamd/rocprofiler-systems:ci-rocm-${{ matrix.rocm-version }}-rhel-${{ matrix.os-release }}
       options: --shm-size=512m
 
     strategy:
       fail-fast: false
       matrix:
         compiler: ['g++']
-        os-release: [ '8.10', '9' ]
+        os-release: [ '8.10', '9', '10' ]
         rocm-version: [ '6.3', '6.4', '7.0', '7.1', '7.2' ]
         build-type: ['Release']
+        exclude:
+          - os-release: '10'
+            rocm-version: '6.3'
+          - os-release: '10'
+            rocm-version: '6.4'
+          - os-release: '10'
+            rocm-version: '7.0'
 
     steps:
     - uses: actions/checkout@v6
@@ -78,6 +85,9 @@ jobs:
         echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV &&
         echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV &&
         echo "OS_VERSION_MAJOR=$(cat /etc/os-release | grep 'VERSION_ID' | sed 's/=/ /1' | awk '{print $NF}' | sed 's/"//g' | sed 's/\./ /g' | awk '{print $1}')" >> $GITHUB_ENV &&
+        echo "/opt/rocm/bin" >> $GITHUB_PATH &&
+        echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV &&
+        echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV &&
         env
 
     - name: Install Packages
@@ -90,32 +100,11 @@ jobs:
             # Set env var so validate_perfetto_trace() uses the downloaded binary
             echo "ROCPROFSYS_TRACE_PROC_SHELL=/opt/trace_processor/bin/trace_processor_shell" >> $GITHUB_ENV
           fi
-
-    - name: Install ROCm Packages
-      timeout-minutes: 30
-      uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 #v4.0.0
-      with:
-        retry_wait_seconds: 30
-        timeout_minutes: 30
-        max_attempts: 3
-        command: |
-          RPM_TAG=".el${OS_VERSION_MAJOR}"
-          ROCM_VERSION=${{ matrix.rocm-version }}
-          ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
-          ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
-          ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
-          if [ "${OS_VERSION_MAJOR}" -eq 8 ]; then PERL_REPO=powertools; else PERL_REPO=crb; fi
-          dnf -y --enablerepo=${PERL_REPO} install perl-File-BaseDir
-          printf '%s\n' '[rocm]' \
-            "name=ROCm ${ROCM_VERSION} repository" \
-            "baseurl=https://repo.radeon.com/rocm/el${OS_VERSION_MAJOR}/${ROCM_VERSION}/main" \
-            'enabled=1' 'priority=50' 'gpgcheck=1' \
-            'gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key' |
-            tee /etc/yum.repos.d/rocm.repo
-          cat /etc/yum.repos.d/rocm.repo
-          # yum install -y https://repo.radeon.com/amdgpu-install/${{ matrix.rocm-version }}/rhel/${{ matrix.os-release }}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1${RPM_TAG}.noarch.rpm
-          dnf install -y rocm-dev
-          if [ "${OS_VERSION_MAJOR}" -gt 8 ]; then dnf install -y libavcodec-free-devel libavformat-free-devel; fi
+          if [ $OS_VERSION_MAJOR -eq 10 ]; then
+            # TODO: Move package install to the docker.
+            dnf install -y --enablerepo=crb mpich mpich-devel
+            echo "/usr/lib64/mpich/bin" >> $GITHUB_PATH
+          fi
 
     - name: Configure, Build, and Test
       timeout-minutes: 115
@@ -144,7 +133,6 @@ jobs:
           -DROCPROFSYS_BUILD_TBB=ON
           -DROCPROFSYS_BUILD_ELFUTILS=ON
           -DROCPROFSYS_BUILD_LIBIBERTY=ON
-          -DROCPROFSYS_USE_MPI_HEADERS=ON
           -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON
           -DROCPROFSYS_MAX_THREADS=64
           -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF

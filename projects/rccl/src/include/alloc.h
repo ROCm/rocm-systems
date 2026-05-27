@@ -313,6 +313,22 @@ extern struct allocationTracker allocTracker[];
 
 #include "rocmwrap.h"
 
+// Helper function to map memory and set access permissions for a device
+static inline ncclResult_t ncclCuMemMapAndSetAccess(void *ptr, size_t size,
+  CUmemGenericAllocationHandle handle,
+  int cudaDev) {
+  ncclResult_t result = ncclSuccess;
+  // Map the virtual address range to the physical allocation
+  CUCHECK(cuMemMap((CUdeviceptr)ptr, size, 0, handle, 0));
+  // Set access permissions for the device
+  CUmemAccessDesc accessDesc = {};
+  accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+  accessDesc.location.id = cudaDev;
+  accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+  CUCHECK(cuMemSetAccess((CUdeviceptr)ptr, size, &accessDesc, 1));
+  return result;
+}
+
 // ncclCuMemAllocAddr takes memory handle and size and returns the mapped address pointer
 static inline ncclResult_t ncclCuMemAllocAddr(void **ptr, CUmemGenericAllocationHandle *handleIn, size_t size) {
   ncclResult_t result = ncclSuccess;
@@ -337,7 +353,7 @@ static inline ncclResult_t ncclCuMemAllocAddr(void **ptr, CUmemGenericAllocation
   accessDesc.location.id = cudaDev;
   accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
   CUCHECKGOTO(cuMemSetAccess((CUdeviceptr)*ptr, size, &accessDesc, 1), result, fail);
-  TRACE(NCCL_ALLOC, "CuMem Map Size %zu pointer %p handle %llx", size, *ptr, *handleIn);
+  TRACE(NCCL_ALLOC, "CuMem Map Size %zu pointer %p handle %p", size, *ptr, (void*)(uintptr_t)*handleIn);
   if (cudaDev < MAX_ALLOC_TRACK_NGPU) {
      __atomic_fetch_add(&allocTracker[cudaDev].totalAlloc, 1, __ATOMIC_RELAXED);
      __atomic_fetch_add(&allocTracker[cudaDev].totalAllocSize, size, __ATOMIC_RELAXED);
@@ -449,14 +465,13 @@ restoreCapMode:
     CUDACHECK(cudaThreadExchangeStreamCaptureMode(&capMode));
     if (result != ncclSuccess) goto fail;
   }
-  TRACE(NCCL_ALLOC, "CuMem Alloc Size %zu pointer %p handle %llx", size, *ptr, handle);
+  TRACE(NCCL_ALLOC, "CuMem Alloc Size %zu pointer %p handle %p", size, *ptr, (void*)(uintptr_t)handle);
   
   if (cudaDev < MAX_ALLOC_TRACK_NGPU) {
      __atomic_fetch_add(&allocTracker[cudaDev].totalAlloc, 1, __ATOMIC_RELAXED);
      __atomic_fetch_add(&allocTracker[cudaDev].totalAllocSize, size, __ATOMIC_RELAXED);
   }
   INFO(NCCL_ALLOC, "ncclCuMemAlloc: Memory used = %ld on device = %d", allocTracker[cudaDev].totalAllocSize, cudaDev);
-
   return result;
 fail:
   WARN("ncclCuMemAlloc failed (size %zu, dev %d): cleaning up partial allocation", size, cudaDev);
@@ -481,7 +496,7 @@ static inline ncclResult_t ncclCuMemFree(void *ptr) {
   CUCHECK(cuMemRelease(handle));
   CUdeviceptr base = nullptr;
   CUCHECK(cuMemGetAddressRange(&base, &size, (CUdeviceptr)ptr));
-  TRACE(NCCL_ALLOC, "CuMem Free Size %zu pointer %p handle 0x%llx", size, ptr, handle);
+  TRACE(NCCL_ALLOC, "CuMem Free Size %zu pointer %p handle %p", size, ptr, (void*)(uintptr_t)handle);
   CUCHECK(cuMemUnmap((CUdeviceptr)ptr, size));
   CUCHECK(cuMemRelease(handle));
   CUCHECK(cuMemAddressFree((CUdeviceptr)ptr, size));
@@ -516,6 +531,12 @@ static inline ncclResult_t ncclCuMemAllocAddr(void **ptr, CUmemGenericAllocation
 }
 
 static inline ncclResult_t ncclCuMemFreeAddr(void *ptr) {
+  WARN("CUMEM requires ROCM_VERSION >= 7.0.0");
+  return ncclInternalError;
+}
+
+static inline ncclResult_t ncclCuMemMapAndSetAccess(void *ptr, size_t size,
+  CUmemGenericAllocationHandle handle, int cudaDev) {
   WARN("CUMEM requires ROCM_VERSION >= 7.0.0");
   return ncclInternalError;
 }

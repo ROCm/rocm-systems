@@ -24,7 +24,7 @@
 #define SRC_DEF_GPU_BLOCK_INFO_H_
 
 #include <stdint.h>
-#include "util/reg_offsets.h"
+#include "lib/aqlprofile/util/reg_offsets.h"
 
 // Counter Block attributes
 enum CounterBlockAttr
@@ -68,6 +68,17 @@ enum CounterBlockAttr
     CounterBlockRpbAttr = 0x200000,
     // ATC block
     CounterBlockAtcAttr = 0x400000,
+    // Blocks controlled by GRBMA
+    CounterBlockGrbmaAttr = 0x800000,
+    // Blocks belongs to UTCL2
+    CounterBlockUtcl2Attr = 0x1000000,
+    // Blocks using PerfCnt instead of Perfmon logic
+    // Difference between Perfmon and PerfCnt:
+    //   Perfmon uses PERFCOUNTER_SELECT
+    //   PerfCnt uses PERFCOUNTER_CFG + PERFCOUNTER_RSLT_CNTL
+    CounterBlockPerfCntAttr = CounterBlockRpbAttr | CounterBlockAtcAttr | CounterBlockUtcl2Attr,
+    // GLARB blocks
+    CounterBlockGlarbAttr = 0x2000000,
 };
 
 // Register address corresponding to each counter

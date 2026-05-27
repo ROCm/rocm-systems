@@ -23,7 +23,7 @@ documentation](https://instinct.docs.amd.com/projects/amd-smi-virt/en/latest/).
 ```
 
 ```{note}
-AMD SMI is the successor to <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocm-smi-lib>.
+AMD SMI is the successor to [ROCm SMI](https://github.com/ROCm/rocm-systems/tree/develop/projects/rocm-smi-lib).
 ```
 
 ::::{grid} 2
@@ -54,7 +54,8 @@ AMD SMI is the successor to <https://github.com/ROCm/rocm-systems/tree/develop/p
 :::
 
 :::{grid-item-card} Conceptual
-* [Performance levels and determinism](./conceptual/perf-determinism.md)
+* [GPU violations](./conceptual/gpu-violations.md)
+* [Performance determinism](./conceptual/perf-determinism.md)
 * [Reliability, availability, serviceability](./conceptual/ras.md)
 :::
 

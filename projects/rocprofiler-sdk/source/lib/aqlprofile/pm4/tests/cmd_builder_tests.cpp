@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 #include <gtest/gtest.h>
-#include "pm4/cmd_builder.h"
+#include "lib/aqlprofile/pm4/cmd_builder.h"
 
 using pm4_builder::CmdBuffer;
 

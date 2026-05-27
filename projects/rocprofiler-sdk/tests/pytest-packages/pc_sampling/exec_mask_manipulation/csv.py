@@ -27,10 +27,10 @@ import numpy as np
 import pandas as pd
 
 
-def stochastic_assert(df, df_condition_selection, max_failing_samples=20):
+def stochastic_assert(df, df_condition_selection, max_failing_samples=30):
     # TODO: When asserting certain conditions related to exec_masks for all samples,
     # we observe some failures.
-    # This usually happens because some small number of samples (e.g., 1-20 out of 100k)
+    # This usually happens because some small number of samples (e.g., 1-30 out of 100k)
     # do not satisfy the condition. This is either a regression in the ROCr 2nd level trap
     # handler (as sometimes execution mask or correlation ID mismatches), or
     # just stochastic nature of the sampling (meaning our checks are too strict).

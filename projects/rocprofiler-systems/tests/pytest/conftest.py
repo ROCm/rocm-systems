@@ -39,6 +39,7 @@ from rocprofsys import (
     validate_rocpd_database,
     validate_timemory_json,
     validate_causal_json,
+    validate_unified_memory_outputs,
     validate_file_exists,
     BaselineRunner,
     SamplingRunner,
@@ -319,7 +320,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "group_by_stream",
         "openmp",
         "openmp_target",
-        "ompvv",
+        "fortran",
         "sampling_duration",
         "no_tmp_files",
         "rccl",
@@ -348,7 +349,10 @@ def pytest_configure(config: pytest.Config) -> None:
         "scratch_memory",
         "rocm",
         "kfd",
+        "unified_memory",
         "selective_regions",
+        "minimal",
+        "rank_filter",
     ]
     for label in non_functional_markers + generic_functional_markers:
         config.addinivalue_line("markers", f"{label}: label test as {label}")
@@ -564,7 +568,7 @@ def pytest_collection_modifyitems(config, items) -> None:
             _msg = nic_unavailable_reason(rocprof_config)
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
-        if "kfd" in item.keywords:
+        if "kfd" in item.keywords or "unified_memory" in item.keywords:
             _msg = kfd_unavailable_reason(rocprof_config)
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
@@ -1957,6 +1961,7 @@ class RocprofsysTest:
         assert_regex,
         assert_perfetto,
         assert_rocpd,
+        assert_unified_memory_output,
         assert_causal_json,
         assert_file_exists,
         assert_timemory,
@@ -1969,6 +1974,7 @@ class RocprofsysTest:
         self.assert_regex = assert_regex
         self.assert_perfetto = assert_perfetto
         self.assert_rocpd = assert_rocpd
+        self.assert_unified_memory_output = assert_unified_memory_output
         self.assert_causal_json = assert_causal_json
         self.assert_file_exists = assert_file_exists
         self.assert_timemory = assert_timemory
@@ -2276,6 +2282,7 @@ def assert_perfetto(
         depths: Optional[list[int]] = None,
         label_substrings: Optional[list[str]] = None,
         counter_names: Optional[list[str]] = None,
+        check_counter_pairing: bool = False,
         key_names: Optional[list[str]] = None,
         key_counts: Optional[list[int]] = None,
         trace_processor_path: Optional[Path] = None,
@@ -2308,6 +2315,7 @@ def assert_perfetto(
                 depths=depths,
                 label_substrings=label_substrings,
                 counter_names=counter_names,
+                check_counter_pairing=check_counter_pairing,
                 key_names=key_names,
                 key_counts=key_counts,
                 trace_processor_path=trace_processor_path,
@@ -2521,6 +2529,56 @@ def assert_file_exists(subtests, record_subtest_failure, request):
                         pytest.fail(msg)
 
     return _assert_file_exists
+
+
+@pytest.fixture
+def assert_unified_memory_output(subtests, tests_dir, record_subtest_failure, request):
+    """Fixture that returns an assert_unified_memory_output function."""
+    if _is_assert_disabled(request, "assert_unified_memory_output"):
+        return lambda *args, **kwargs: None
+
+    def _assert_unified_memory_output(
+        result: TestResult,
+        subtest_name: str = "Unified-memory output validation",
+        timeout: int = 60,
+        pass_regex: Optional[list[str]] = None,
+        fail_regex: Optional[list[str]] = None,
+        skip_on_fail: bool = False,
+        fail_message: Optional[str] = None,
+    ) -> None:
+        with subtests.test(subtest_name):
+            validation = validate_unified_memory_outputs(
+                result.output_dir,
+                tests_dir=tests_dir,
+                timeout=timeout,
+            )
+            output = f"Command: {validation.command}\n\n{validation.message}"
+            if not validation.is_valid:
+                msg = fail_message or f"Unified-memory validation failed:\n{output}"
+                if skip_on_fail:
+                    pytest.skip(msg)
+                else:
+                    record_subtest_failure(subtest_name)
+                    pytest.fail(msg)
+            if pass_regex:
+                for pattern in pass_regex:
+                    if not re.search(pattern, validation.stdout):
+                        record_subtest_failure(subtest_name)
+                        pytest.fail(
+                            f"Pass regex not found: {pattern}\n{output}",
+                            pytrace=False,
+                        )
+            if fail_regex:
+                for pattern in fail_regex:
+                    if re.search(pattern, validation.stdout):
+                        record_subtest_failure(subtest_name)
+                        pytest.fail(
+                            f"Fail regex found: {pattern}\n{output}",
+                            pytrace=False,
+                        )
+            _print_subtest_output(request, subtest_name, output)
+
+    return _assert_unified_memory_output
 
 
 @pytest.fixture

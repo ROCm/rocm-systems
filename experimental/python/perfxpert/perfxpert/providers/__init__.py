@@ -16,10 +16,14 @@ Public API:
 Env var conventions (canonical):
     PERFXPERT_LLM_ANTHROPIC_KEY
     PERFXPERT_LLM_OPENAI_KEY
-    PERFXPERT_LLM_LOCAL_URL         (ollama)
+    PERFXPERT_LLM_LOCAL_URL         (ollama; OLLAMA_HOST also accepted)
     PERFXPERT_LLM_PRIVATE_URL / _MODEL / _API_KEY / _HEADERS / _VERIFY_SSL
-    PERFXPERT_OPENCODE_PATH
+    PRIVATE_LLM_ENDPOINT            (private endpoint URL compatibility alias)
     PERFXPERT_IN_OPENCODE_SESSION   (recursion guard marker)
+
+PERFXPERT_OPENCODE_PATH is intentionally not a provider env var. It is
+honored only by the explicit `perfxpert-code opencode ...` launcher escape
+hatch for user-owned upstream binaries.
 
 Back-compat env-var aliases (honored with DeprecationWarning):
     ROCPD_LLM_*  → PERFXPERT_LLM_*   (pre-rename alias)

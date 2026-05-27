@@ -116,22 +116,22 @@ rdna_gfx1151_section_map = {
     "rdna1151-wave-dispatch-statistics-gfx1151": "Wave Dispatch Statistics",
     "rdna1151-cpc-utilization-gfx1151": "CPC Utilization",
     "rdna1151-cpc-interface-utilization-gfx1151": "CPC Interface Utilization",
-    "rdna1151-mec-stall-cycles-gfx1151": "Micro Engine (ME) Stall Cycles",
+    "rdna1151-mec-stall-cycles-gfx1151": "MEC Stall Cycles",
     "rdna1151-cpc-memory-requests-gfx1151": "CPC Memory Requests",
-    "rdna1151-mec-instruction-cache-gfx1151": "Micro Engine (ME) Instruction Cache",
-    "rdna1151-tcp-utilization-gfx1151": "TCP Utilization",
-    "rdna1151-tcp-request-statistics-gfx1151": "TCP Request Statistics",
-    "rdna1151-tcp-cache-performance-gfx1151": "TCP Cache Performance",
-    "rdna1151-tcp-tcp-gl1-interface-gfx1151": "TCP TCP-GL1 Interface",
-    "rdna1151-tcp-stalls-gfx1151": "TCP Stalls",
-    "rdna1151-gl1c-utilization-gfx1151": "GL1C Utilization",
-    "rdna1151-gl1c-request-statistics-gfx1151": "GL1C Request Statistics",
-    "rdna1151-gl1c-cache-performance-gfx1151": "GL1C Cache Performance",
-    "rdna1151-gl1c-stalls-gfx1151": "GL1C Stalls",
-    "rdna1151-gl1c-gl1c-gl2-interface-gfx1151": "GL1C-GL2 Interface",
-    "rdna1151-gl2c-cache-performance-gfx1151": "GL2C Cache Performance",
-    "rdna1151-gl2c-request-statistics-gfx1151": "GL2C Request Statistics",
-    "rdna1151-gl2c-bandwidth-gfx1151": "GL2C Bandwidth",
+    "rdna1151-mec-instruction-cache-gfx1151": "MEC Instruction Cache",
+    "rdna1151-gl0-utilization-gfx1151": "GL0 Utilization",
+    "rdna1151-gl0-request-statistics-gfx1151": "GL0 Request Statistics",
+    "rdna1151-gl0-cache-performance-gfx1151": "GL0 Cache Performance",
+    "rdna1151-gl0-gl1-interface-gfx1151": "GL0-GL1 Interface",
+    "rdna1151-gl0-stalls-gfx1151": "GL0 Stalls",
+    "rdna1151-gl1-cache-utilization-gfx1151": "GL1 Cache Utilization",
+    "rdna1151-gl1-cache-request-statistics-gfx1151": "GL1 Cache Request Statistics",
+    "rdna1151-gl1-cache-performance-gfx1151": "GL1 Cache Performance",
+    "rdna1151-gl1-cache-stalls-gfx1151": "GL1 Cache Stalls",
+    "rdna1151-gl1-gl2-interface-gfx1151": "GL1-GL2 Interface",
+    "rdna1151-gl2-cache-performance-gfx1151": "GL2 Cache Performance",
+    "rdna1151-gl2-cache-request-statistics-gfx1151": "GL2 Cache Request Statistics",
+    "rdna1151-gl2-cache-bandwidth-gfx1151": "GL2 Cache Bandwidth",
     "rdna1151-dram-read-interface-gfx1151": "DRAM Read Interface",
     "rdna1151-dram-write-interface-gfx1151": "DRAM Write Interface",
     "rdna1151-system-arbiter-sarb-gfx1151": "System Arbiter (SARB)",
@@ -142,20 +142,18 @@ rdna_gfx1151_section_map = {
     "rdna1151-memory-chart-scalar-data-cache-gfx1151": (
         "Memory chart - Scalar Data Cache"
     ),
-    "rdna1151-memory-chart-tcp-cache-vector-l0-gfx1151": (
-        "Memory chart - TCP Cache (GL0)"
-    ),
+    "rdna1151-memory-chart-tcp-cache-gfx1151": ("Memory chart - TCP Cache"),
     "rdna1151-memory-chart-lds-local-data-share-gfx1151": (
         "Memory chart - LDS (Local Data Share)"
     ),
     "rdna1151-memory-chart-tcp-gl1-interface-gfx1151": (
         "Memory chart - TCP-GL1 Interface"
     ),
-    "rdna1151-memory-chart-gl1c-cache-l1-gfx1151": ("Memory chart - GL1C Cache"),
-    "rdna1151-memory-chart-gl1c-gl2-interface-gfx1151": (
-        "Memory chart - GL1C-GL2 Interface"
+    "rdna1151-memory-chart-gl1-cache-gfx1151": ("Memory chart - GL1 Cache"),
+    "rdna1151-memory-chart-gl1-gl2-interface-gfx1151": (
+        "Memory chart - GL1-GL2 Interface"
     ),
-    "rdna1151-memory-chart-gl2c-cache-l2-gfx1151": ("Memory chart - GL2C Cache"),
+    "rdna1151-memory-chart-gl2-cache-gfx1151": ("Memory chart - GL2 Cache"),
     "rdna1151-memory-chart-gcea-to-system-memory-gfx1151": (
         "Memory chart - GCEA to System Memory"
     ),

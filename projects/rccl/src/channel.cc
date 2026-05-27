@@ -9,6 +9,9 @@
 #include "gdrwrap.h"
 #include "transport.h"
 
+// When RCCL_PXN_OPT_QP_USAGE is set to 1, ncclP2pChannelBaseForRound uses batch stride of comm->maxLocalRanks instead of 1 when p2p-batching is not enabled
+RCCL_PARAM(PxnOptQpUsage, "PXN_OPT_QP_USAGE", 0);
+
 ncclResult_t initChannel(struct ncclComm* comm, int channelId) {
   struct ncclChannel* channel = &comm->channels[channelId];
   if (channel->id != -1) return ncclSuccess;
