@@ -43,11 +43,10 @@ struct RecoveryQpnEntry {
   uint32_t newQpn;
 };
 
-// Max QPN entries that fit in the UD receive buffer after GRH.
-// portRecoveryGrhBuf is 128 bytes; UD prepends 40-byte GRH; remaining 88 bytes
-// fits 11 RecoveryQpnEntry (8 bytes each). Send buffer is 128 bytes (16 entries)
-// but the receiver is the bottleneck.
-#define NCCL_IB_MAX_RECOVERY_QPN_ENTRIES ((128 - NCCL_IB_UD_GRH_SIZE) / (int)sizeof(struct RecoveryQpnEntry))
+// Max QPN entries for recovery exchange. Both send and recv buffers are
+// sized to NCCL_IB_MAX_QPS entries, accommodating the worst case where
+// all QPs belong to the failed device.
+#define NCCL_IB_MAX_RECOVERY_QPN_ENTRIES NCCL_IB_MAX_QPS
 
 static ncclResult_t IbCastPortRecoveryQpInitUd(struct ncclIbQp* qp, int pkeyIndex, int portNum) {
   struct ibv_qp_attr attr;

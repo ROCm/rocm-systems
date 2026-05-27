@@ -62,6 +62,7 @@ struct ncclIbCastResiliencyState {
   int  outstandingRecovery;
   int  ndevs;
   int  devState[4];
+  int  recoveryCount[4];
 };
 
 /* Fills out with the current resiliency state of the communicator.

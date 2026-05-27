@@ -578,6 +578,7 @@ ncclResult_t IbCastResiliencyDevInit(struct ncclIbResiliency* resCtx, uint devIn
   assert(devIndex < resCtx->ndevs);
   struct ncclIbResiliencyDev* resDev = &resCtx->devs[devIndex];
   resDev->state.store(ncclIbResiliencyDevStateOk, std::memory_order_release);
+  resDev->recoveryCount = 0;
   void* cqContext = (void*)&resCtx->baseComm->stats;
   int cqSize = -1;
   if (resCtx->baseComm->isSend) {
@@ -999,7 +1000,8 @@ ncclResult_t IbCastResiliencyProgress(struct ncclIbResiliency* resCtx) {
       TRACE(NCCL_NET, "NET/IB: %s: Checking dev state for device %d: state=%d (comm=%p).", __func__, devIndex, devState, resCtx->baseComm);
       if (devState == ncclIbResiliencyDevStateRecovered) {
         resCtx->outstandingRecovery--;
-        INFO(NCCL_NET, "NET/IB: %s: Device %d has been recovered for resiliency context (%s comm=%p, outstandingRecovery=%d)", __func__, devIndex, resCtx->baseComm->isSend ? "send" : "recv", resCtx->baseComm, resCtx->outstandingRecovery);
+        resCtx->devs[devIndex].recoveryCount++;
+        INFO(NCCL_NET, "NET/IB: %s: Device %d has been recovered for resiliency context (%s comm=%p, outstandingRecovery=%d, recoveryCount=%d)", __func__, devIndex, resCtx->baseComm->isSend ? "send" : "recv", resCtx->baseComm, resCtx->outstandingRecovery, resCtx->devs[devIndex].recoveryCount);
         IbCastResiliencyActiveQpsRestore(resCtx, devIndex);
         resCtx->devs[devIndex].state.store(ncclIbResiliencyDevStateOk, std::memory_order_release);
       }

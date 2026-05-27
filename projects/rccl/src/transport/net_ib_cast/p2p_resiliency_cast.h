@@ -42,9 +42,14 @@ struct ncclIbResiliencyDev {
   // CQ to get CQEs for recovery protocol messages.
   struct ibv_cq* portRecoveryCq;
   // GRH buffer and MR for UD recovery QP receives (UD prepends 40-byte GRH).
-  // Extended to 128 bytes to hold GRH (40) + QPN payload for AINIC recovery.
-  uint8_t portRecoveryGrhBuf[128];
+  // Sized to hold GRH + max QPN payload for AINIC destroy+recreate recovery.
+  // RecoveryQpnEntry is 8 bytes; worst case is NCCL_IB_MAX_QPS entries.
+  uint8_t portRecoveryGrhBuf[40 + NCCL_IB_MAX_QPS * 8];
   struct ibv_mr* portRecoveryGrhMr;
+  // Number of times this device completed recovery (Recovered → Ok).
+  // Monotonically increasing; used by tests to verify recovery without
+  // depending on devState timing.
+  int recoveryCount;
   // MR for QPN send buffer, registered against this device's PD.
   struct ibv_mr* portRecoveryQpnMr;
 };
@@ -95,7 +100,7 @@ struct ncclIbResiliency {
   // Shared across devices — safe because the recovery thread processes contexts
   // serially (one device at a time). If concurrent device recovery is ever added,
   // this buffer must be moved to per-device or per-recovery-context.
-  uint8_t portRecoveryQpnBuf[128];
+  uint8_t portRecoveryQpnBuf[NCCL_IB_MAX_QPS * 8];
 };
 
 enum ncclIbResiliencyRequestSendState {
