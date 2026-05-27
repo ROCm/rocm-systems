@@ -125,6 +125,7 @@ jobs:
   build-and-test-rocprofiler-sdk-deb:
     name: Build & Test rocprofiler-sdk • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
     if: false
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -268,6 +269,7 @@ jobs:
   # ---------------------------------------------------------------------------
   build-and-test-rocprofiler-sdk-rpm:
     name: Build & Test rocprofiler-sdk • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -353,7 +355,7 @@ jobs:
           enable-aqlprofile-build: ${{ env.ENABLE_AQLPROFILE_BUILD }}
           enable-rocprof-trace-decoder-build: 'true'
           install-nightly-rocm: ${{ env.INSTALL_NIGHTLY_ROCM }}
-          ccache-key: ccache-trace-decoder-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
+          ccache-key: sccache-trace-decoder-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
           ccache-variant: sccache
 
       - name: Configure, Build, and Test
