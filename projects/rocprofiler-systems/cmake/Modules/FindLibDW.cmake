@@ -16,10 +16,13 @@ Discovery order:
 
 1. If ``LibDW::LibDW`` already exists (e.g. created upfront by
    ``DyninstElfUtils.cmake`` for the from-source build), short-circuit.
-2. ``find_package(libdw CONFIG)`` — picks up a vendored or generated
-   ``libdw-config.cmake`` (TheRock sysdep, or the from-source build's
-   generated config).
-3. ``pkg_check_modules(libdw)`` — distro fallback for system installs.
+2. ``find_package(libdw CONFIG)`` — dormant hedge for a future vendored
+   ``libdw-config.cmake`` that ships a version file. TheRock currently
+   provides the config but no version file, so this step's version
+   check fails and we fall through.
+3. ``pkg_check_modules(libdw)`` — canonical path for both system installs
+   (``/usr``) and the TheRock vendored sysdep (which ships
+   ``libdw.pc`` in ``lib/rocm_sysdeps/lib/pkgconfig/``).
 
 Variables that affect this module
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -47,16 +50,17 @@ if(TARGET LibDW::LibDW AND LibDW_LIBRARIES AND LibDW_INCLUDE_DIRS)
     return()
 endif()
 
-# 2. Try the canonical lowercase config package. Covers:
-#    - TheRock sysdep (lib/rocm_sysdeps/lib/cmake/libdw/libdw-config.cmake)
-#    - The from-source build's generated config (libdw_DIR pre-set)
+# 2. Try the canonical lowercase config package. Currently dormant in
+#    all three modes (see docstring) but kept as the standard
+#    "config-first then pkg-config" pattern and as a hedge if a future
+#    vendored config ships a version file.
 if(NOT LibDW_FOUND)
     find_package(libdw ${LibDW_FIND_VERSION} CONFIG QUIET)
     if(libdw_FOUND AND TARGET libdw::libdw)
         set(LibDW_FOUND TRUE)
         set(LibDW_VERSION "${libdw_VERSION}")
         get_target_property(LibDW_INCLUDE_DIRS libdw::libdw INTERFACE_INCLUDE_DIRECTORIES)
-        get_target_property(LibDW_LIBRARIES    libdw::libdw IMPORTED_LOCATION)
+        get_target_property(LibDW_LIBRARIES libdw::libdw IMPORTED_LOCATION)
         if(NOT TARGET LibDW::LibDW)
             add_library(LibDW::LibDW INTERFACE IMPORTED)
             target_link_libraries(LibDW::LibDW INTERFACE libdw::libdw)
@@ -64,7 +68,8 @@ if(NOT LibDW_FOUND)
     endif()
 endif()
 
-# 3. pkg-config fallback for system installs.
+# 3. pkg-config: the canonical path for both system installs (/usr) and
+#    the TheRock vendored sysdep (lib/rocm_sysdeps/lib/pkgconfig/libdw.pc).
 if(NOT LibDW_FOUND AND NOT LibDW_NO_SYSTEM_PATHS)
     find_package(PkgConfig QUIET)
     if(PKG_CONFIG_FOUND)
@@ -86,8 +91,8 @@ if(NOT LibDW_FOUND AND NOT LibDW_NO_SYSTEM_PATHS)
             pkg_get_variable(PC_LIBDW_INCLUDE_DIRS libdw includedir)
         endif()
         set(LibDW_INCLUDE_DIRS "${PC_LIBDW_INCLUDE_DIRS}")
-        set(LibDW_LIBRARIES    "${PC_LIBDW_LINK_LIBRARIES}")
-        set(LibDW_VERSION      "${PC_LIBDW_VERSION}")
+        set(LibDW_LIBRARIES "${PC_LIBDW_LINK_LIBRARIES}")
+        set(LibDW_VERSION "${PC_LIBDW_VERSION}")
 
         # Some platforms list libelf as a dependency; split it off so the
         # imported target's IMPORTED_LOCATION points only at libdw.
@@ -110,14 +115,17 @@ if(NOT LibDW_FOUND AND NOT LibDW_NO_SYSTEM_PATHS)
 
         if(NOT TARGET LibDW::LibDW)
             add_library(LibDW::LibDW UNKNOWN IMPORTED)
-            set_target_properties(LibDW::LibDW PROPERTIES
-                IMPORTED_LINK_INTERFACE_LANGUAGES "C"
-                IMPORTED_LOCATION "${LibDW_LIBRARIES}"
-                INTERFACE_INCLUDE_DIRECTORIES "${LibDW_INCLUDE_DIRS}"
+            set_target_properties(
+                LibDW::LibDW
+                PROPERTIES
+                    IMPORTED_LINK_INTERFACE_LANGUAGES "C"
+                    IMPORTED_LOCATION "${LibDW_LIBRARIES}"
+                    INTERFACE_INCLUDE_DIRECTORIES "${LibDW_INCLUDE_DIRS}"
             )
             if(_link_libs)
-                set_target_properties(LibDW::LibDW PROPERTIES
-                    IMPORTED_LINK_DEPENDENT_LIBRARIES "${_link_libs}"
+                set_target_properties(
+                    LibDW::LibDW
+                    PROPERTIES IMPORTED_LINK_DEPENDENT_LIBRARIES "${_link_libs}"
                 )
             endif()
         endif()
@@ -127,7 +135,8 @@ if(NOT LibDW_FOUND AND NOT LibDW_NO_SYSTEM_PATHS)
 endif()
 
 include(FindPackageHandleStandardArgs)
-find_package_handle_standard_args(LibDW
+find_package_handle_standard_args(
+    LibDW
     FOUND_VAR LibDW_FOUND
     REQUIRED_VARS LibDW_LIBRARIES LibDW_INCLUDE_DIRS
     VERSION_VAR LibDW_VERSION

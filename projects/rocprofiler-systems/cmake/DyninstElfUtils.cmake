@@ -10,21 +10,32 @@
 # Discovery uses a single path in all three supported build modes:
 #
 #   1. ROCPROFSYS_BUILD_ELFUTILS=ON (from source). Build elfutils via
-#      ExternalProject, then pre-create the LibDW::LibDW / LibELF::LibELF
-#      targets so the shim FindLibDW / FindLibELF modules short-circuit
-#      when Dyninst later does find_package(LibDW) / find_package(LibELF).
+#      ExternalProject, then pre-create three imported targets:
+#        - LibDW::LibDW / LibElf::LibElf for rocprofiler-systems' own
+#          consumers (rocprofiler-systems-elfutils interface lib).
+#        - Dyninst::ElfUtils (interface wrapping the two above) so that
+#          Dyninst's tpls/DyninstElfUtils.cmake short-circuits its own
+#          find_package(Elfutils) via its `if(TARGET Dyninst::ElfUtils)`
+#          check. This is the only reliable mode-1 short-circuit for
+#          Dyninst — its CMakeLists.txt prepends its own cmake/Modules/
+#          at position 0 of CMAKE_MODULE_PATH, so our FindLibDW / FindLibElf
+#          shims never run for Dyninst's own find_package(LibDW|LibElf)
+#          calls.
 #
-#   2. ROCPROFSYS_BUILD_ELFUTILS=OFF, system install. Shim falls through to
-#      pkg-config and discovers /usr/lib libdw.so / libelf.so.
+#   2. ROCPROFSYS_BUILD_ELFUTILS=OFF, system install. Shim's pkg-config
+#      fallback discovers /usr/lib libdw.so / libelf.so via libdw.pc /
+#      libelf.pc.
 #
-#   3. ROCPROFSYS_BUILD_ELFUTILS=OFF, vendored sysdep (TheRock). TheRock sets
-#      libdw_DIR / libelf_DIR; shim's find_package(libdw|libelf CONFIG)
-#      resolves the vendored configs.
+#   3. ROCPROFSYS_BUILD_ELFUTILS=OFF, vendored sysdep (TheRock). TheRock
+#      ships libdw.pc / libelf.pc under lib/rocm_sysdeps/lib/pkgconfig/
+#      and propagates PKG_CONFIG_PATH to this subproject's configure
+#      environment, so the shim's pkg-config fallback resolves them the
+#      same way as mode 2.
 #
 # Exported to consumers
 # ---------------------
-#   LibDW::LibDW, LibELF::LibELF  — imported targets (preferred)
-#   LibDW_*, LibELF_*             — legacy variables (Dyninst's FindElfutils.cmake)
+#   LibDW::LibDW, LibElf::LibElf  — imported targets (preferred)
+#   LibDW_*, LibElf_*             — legacy variables (Dyninst's FindElfutils.cmake)
 #   rocprofiler-systems-elfutils  — INTERFACE target wrapping both
 #
 # Optional: LibDebuginfod::LibDebuginfod via ENABLE_DEBUGINFOD.
@@ -146,8 +157,10 @@ if(ROCPROFSYS_BUILD_ELFUTILS)
         PATTERN "*${CMAKE_SHARED_LIBRARY_SUFFIX}*"
     )
 
-    # Pre-create the imported targets so the FindLibDW / FindLibELF shims
-    # short-circuit when Dyninst's add_subdirectory later does find_package.
+    # Pre-create LibDW::LibDW / LibElf::LibElf for rocprofiler-systems' own
+    # consumers (rocprofiler-systems-elfutils interface lib). Not consumed by
+    # Dyninst — its bundled FindLibDW / FindLibElf win on CMAKE_MODULE_PATH
+    # precedence; Dyninst is short-circuited via Dyninst::ElfUtils below.
     # The targets carry an add_dependencies edge to the ExternalProject build
     # step so anything that links them waits for the .so to exist.
     set(LibDW_FOUND TRUE)
@@ -166,30 +179,30 @@ if(ROCPROFSYS_BUILD_ELFUTILS)
         add_dependencies(LibDW::LibDW rocprofiler-systems-elfutils-build)
     endif()
 
-    set(LibELF_FOUND TRUE)
-    set(LibELF_INCLUDE_DIRS "${_eu_root}/include")
-    set(LibELF_LIBRARIES "${_eu_libelf}")
-    set(LibELF_VERSION "${ELFUTILS_DOWNLOAD_VERSION}")
-    if(NOT TARGET LibELF::LibELF)
-        add_library(LibELF::LibELF UNKNOWN IMPORTED GLOBAL)
+    set(LibElf_FOUND TRUE)
+    set(LibElf_INCLUDE_DIRS "${_eu_root}/include")
+    set(LibElf_LIBRARIES "${_eu_libelf}")
+    set(LibElf_VERSION "${ELFUTILS_DOWNLOAD_VERSION}")
+    if(NOT TARGET LibElf::LibElf)
+        add_library(LibElf::LibElf UNKNOWN IMPORTED GLOBAL)
         set_target_properties(
-            LibELF::LibELF
+            LibElf::LibElf
             PROPERTIES
                 IMPORTED_LINK_INTERFACE_LANGUAGES "C"
                 IMPORTED_LOCATION "${_eu_libelf}"
                 INTERFACE_INCLUDE_DIRECTORIES "${_eu_root}/include"
         )
-        add_dependencies(LibELF::LibELF rocprofiler-systems-elfutils-build)
+        add_dependencies(LibElf::LibElf rocprofiler-systems-elfutils-build)
     endif()
 
     # Pre-create Dyninst::ElfUtils so Dyninst's tpls/DyninstElfUtils.cmake
     # short-circuits its own find_package(Elfutils). Without this, Dyninst's
-    # bundled FindLibDW/FindLibELF (prepended at position 0 of
+    # bundled FindLibDW/FindLibElf (prepended at position 0 of
     # CMAKE_MODULE_PATH by external/dyninst/CMakeLists.txt) run against the
     # host elfutils and clash with the bundled version we just staged.
     if(NOT TARGET Dyninst::ElfUtils)
         add_library(Dyninst::ElfUtils INTERFACE IMPORTED GLOBAL)
-        target_link_libraries(Dyninst::ElfUtils INTERFACE LibELF::LibELF LibDW::LibDW)
+        target_link_libraries(Dyninst::ElfUtils INTERFACE LibElf::LibElf LibDW::LibDW)
         target_include_directories(
             Dyninst::ElfUtils
             SYSTEM
@@ -201,15 +214,15 @@ if(ROCPROFSYS_BUILD_ELFUTILS)
     # Modes 2 and 3: discover via shim Find modules (config-package then pkg-config).
     # --------------------------------------------------------------------------------------
 else()
-    find_package(LibELF ${ElfUtils_MIN_VERSION})
-    if(LibELF_FOUND)
+    find_package(LibElf ${ElfUtils_MIN_VERSION})
+    if(LibElf_FOUND)
         find_package(LibDW ${ElfUtils_MIN_VERSION})
         if(ENABLE_DEBUGINFOD)
             find_package(LibDebuginfod ${ElfUtils_MIN_VERSION} REQUIRED)
         endif()
     endif()
 
-    if(NOT (LibELF_FOUND AND LibDW_FOUND))
+    if(NOT (LibElf_FOUND AND LibDW_FOUND))
         if(STERILE_BUILD)
             rocprofiler_systems_message(FATAL_ERROR
                 "ElfUtils not found and cannot be downloaded because build is sterile."
@@ -225,7 +238,7 @@ endif()
 # --------------------------------------------------------------------------------------
 # Populate the umbrella rocprofiler-systems-elfutils interface library.
 # --------------------------------------------------------------------------------------
-target_link_libraries(rocprofiler-systems-elfutils INTERFACE LibELF::LibELF LibDW::LibDW)
+target_link_libraries(rocprofiler-systems-elfutils INTERFACE LibElf::LibElf LibDW::LibDW)
 if(ENABLE_DEBUGINFOD AND TARGET LibDebuginfod::LibDebuginfod)
     target_link_libraries(
         rocprofiler-systems-elfutils
@@ -235,14 +248,14 @@ endif()
 
 # Legacy aggregate variables, kept for any external consumer that read them.
 set(ElfUtils_INCLUDE_DIRS
-    ${LibELF_INCLUDE_DIRS}
+    ${LibElf_INCLUDE_DIRS}
     ${LibDW_INCLUDE_DIRS}
     CACHE PATH
     "elfutils include directories"
     FORCE
 )
 set(ElfUtils_LIBRARIES
-    ${LibELF_LIBRARIES}
+    ${LibElf_LIBRARIES}
     ${LibDW_LIBRARIES}
     CACHE FILEPATH
     "elfutils library files"
@@ -266,4 +279,4 @@ if(ENABLE_DEBUGINFOD AND LibDebuginfod_FOUND)
 endif()
 
 rocprofiler_systems_message(STATUS "ElfUtils libdw:  ${LibDW_LIBRARIES} (v${LibDW_VERSION})")
-rocprofiler_systems_message(STATUS "ElfUtils libelf: ${LibELF_LIBRARIES} (v${LibELF_VERSION})")
+rocprofiler_systems_message(STATUS "ElfUtils libelf: ${LibElf_LIBRARIES} (v${LibElf_VERSION})")
