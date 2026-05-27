@@ -86,7 +86,6 @@ set_env(std::string_view, Tp, int override = 0);
 inline std::optional<std::string>
 get_env_optional(std::string_view env_id)
 {
-    if(env_id.empty()) return std::nullopt;
     return impl::get_env_direct(env_id);
 }
 

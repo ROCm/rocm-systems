@@ -35,11 +35,6 @@
 #include <string>
 #include <string_view>
 
-// POSIX process environment table.
-// We intentionally read from environ directly instead of std::getenv()
-// because target applications (e.g. bash) may interpose getenv().
-extern "C" char** environ;
-
 namespace rocprofiler
 {
 namespace common
@@ -50,8 +45,10 @@ namespace impl
 // This avoids issues with bash's custom getenv() implementation which
 // breaks when setenv() is called before bash initializes its internal tables.
 //
-// THREAD SAFETY: This function is NOT thread-safe with respect to concurrent
-// setenv()/putenv()/unsetenv() calls.
+// THREAD SAFETY: Reads are NOT safe against concurrent setenv()/putenv()/
+// unsetenv() from any thread, because glibc may reallocate the environ
+// array itself (not just mutate entries). Prefer reading at init time or
+// caching in a function-local static.
 std::optional<std::string>
 get_env_direct(std::string_view name)
 {
@@ -74,7 +71,6 @@ get_env_direct(std::string_view name)
 std::string
 get_env(std::string_view env_id, std::string_view _default)
 {
-    if(env_id.empty()) return std::string{_default};
     auto env_var = get_env_direct(env_id);
     if(env_var) return *env_var;
     return std::string{_default};
@@ -127,7 +123,6 @@ get_env(std::string_view env_id,
         sizeof(Tp) <= sizeof(uint64_t),
         "change use of stol/stoul if instantiating for type larger than a 64-bit integer");
 
-    if(env_id.empty()) return _default;
     auto env_var = get_env_direct(env_id);
     if(env_var)
     {

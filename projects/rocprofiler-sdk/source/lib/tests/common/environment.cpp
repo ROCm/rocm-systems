@@ -29,9 +29,6 @@
 #include <cstring>
 #include <string>
 
-// POSIX process environment table
-extern "C" char** environ;
-
 namespace
 {
 bool _common_environment_test_init_logging = (rocprofiler::common::init_logging("TEST"), true);

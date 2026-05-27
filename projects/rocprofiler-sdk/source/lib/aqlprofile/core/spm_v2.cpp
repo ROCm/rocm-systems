@@ -178,6 +178,7 @@ is_virtualization_enabled()
 bool
 is_agent_supported_for_spm(const AgentInfo* agentInfo)
 {
+    // Check value, not just presence (must be non-empty and non-zero to override)
     auto env_val = rocprofiler::common::get_env_optional("AQLPROFILE_SPM_OVERRIDE_AGENT_CHECK");
     if(env_val && !env_val->empty() && env_val->front() != '0') return true;
 

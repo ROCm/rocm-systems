@@ -405,7 +405,6 @@ hsa_ven_amd_aqlprofile_start(hsa_ven_amd_aqlprofile_profile_t* profile,
             }
             else
             {
-                // Preserve original behavior: empty string calls atoi("") which returns 0
                 auto env_val = rocprofiler::common::get_env_optional("AQLPROFILE_SPM_SAMPLE_RATE");
                 if(env_val) trace_config.sampleRate = std::atoi(env_val->c_str());
 

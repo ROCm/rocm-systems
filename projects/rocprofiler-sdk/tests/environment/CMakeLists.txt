@@ -56,15 +56,19 @@ rocprofiler_add_integration_execute_test(
     FIXTURES_SETUP environment-bash-multiple)
 
 # Test 4: Invalid ROCPROFILER_METRICS_PATH with sh should show warning
-rocprofiler_add_integration_execute_test(
-    environment-sh-invalid-path
-    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES -- sh -c "exit 0"
-    DEPENDS rocprofiler-sdk::rocprofv3
-    TIMEOUT 30
-    LABELS "integration-tests" "environment" "sh"
-    ENVIRONMENT "ROCPROFILER_METRICS_PATH=/nonexistent/sh/test"
-    PASS_REGULAR_EXPRESSION "Counter definitions file '/nonexistent/sh/test"
-    FIXTURES_SETUP environment-sh-test)
+find_program(SH_EXECUTABLE sh)
+if(SH_EXECUTABLE)
+    rocprofiler_add_integration_execute_test(
+        environment-sh-invalid-path
+        COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES --
+                ${SH_EXECUTABLE} -c "exit 0"
+        DEPENDS rocprofiler-sdk::rocprofv3
+        TIMEOUT 30
+        LABELS "integration-tests" "environment" "sh"
+        ENVIRONMENT "ROCPROFILER_METRICS_PATH=/nonexistent/sh/test"
+        PASS_REGULAR_EXPRESSION "Counter definitions file '/nonexistent/sh/test"
+        FIXTURES_SETUP environment-sh-test)
+endif()
 
 # Test 5: Invalid ROCPROFILER_METRICS_PATH with zsh should show warning
 find_program(ZSH_EXECUTABLE zsh)
