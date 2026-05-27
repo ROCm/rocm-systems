@@ -63,7 +63,7 @@ get_code_object_registration()
 hsa_status_t
 executable_freeze(hsa_executable_t executable, const char* options)
 {
-    auto* registration = CHECK_NOTNULL(get_code_object_registration());
+    auto*           registration = CHECK_NOTNULL(get_code_object_registration());
     std::lock_guard lg(registration->mutex);
     auto            status = registration->hsa_executable_freeze_fn(executable, options);
 
