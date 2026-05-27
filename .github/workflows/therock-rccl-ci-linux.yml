@@ -38,9 +38,9 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          # TODO(rocm-systems#6439): revert to pinned commit (was 794702ebd137f1fdde4bf65c02eba5fe14a0676a, 2026-05-19) before merging.
+          # TODO(rocm-systems#6439): revert to pinned commit (was f6823a1859d0f5ffaea71fdcd5f310807d0e8ea7, 2026-05-25) before merging.
           # Temporarily testing against TheRock branch carrying the matching test-runner changes.
-          ref: users/dravindr/tr_rccl
+          ref: users/dravindr/tr_rccl2
 
       - name: Install python deps
         run: |
