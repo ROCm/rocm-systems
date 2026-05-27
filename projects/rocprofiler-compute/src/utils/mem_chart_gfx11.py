@@ -16,7 +16,7 @@ API:
 
 Metric dict keys must match the Memory Chart panel YAML for RDNA3.5:
 
-    src/rocprof_compute_soc/analysis_configs/gfx1151/0300_memory_chart.yaml
+    src/rocprof_compute_soc/analysis_configs/gfx115x/0300_memory_chart.yaml
 
 Use ``MEM_CHART_PANEL_METRIC_KEYS`` for the authoritative ordered list.
 (If a future gfx target adds ``0300_memory_chart.yaml``, keep keys aligned there.)
@@ -47,7 +47,7 @@ from utils.utils_analysis import format_bw_human_readable
 # ---------------------------------------------------------------------------
 
 # Keys = ``metric:`` names under each ``metric_table`` in
-# ``analysis_configs/gfx1151/0300_memory_chart.yaml`` (tables 301–309), in panel order.
+# ``analysis_configs/gfx115x/0300_memory_chart.yaml`` (tables 301–309), in panel order.
 # Commented-out YAML metrics (e.g. TCP Atomic, LDS direct read/write) are omitted.
 _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
     # Table 301: Instruction Cache
@@ -744,7 +744,7 @@ def plot_mem_chart(
 ) -> str:
     """Plot the memory chart and return as string.
 
-    ``metric_dict`` keys should match ``0300_memory_chart.yaml`` (gfx1151), i.e.
+    ``metric_dict`` keys should match ``0300_memory_chart.yaml`` (gfx115x), i.e.
     ``MEM_CHART_PANEL_METRIC_KEYS``. Values for bandwidth metrics are in **Bytes/s**.
     Input is normalized to a flat ordered dict before rendering.
 

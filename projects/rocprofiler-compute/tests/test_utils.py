@@ -20,6 +20,7 @@ import utils.utils_analysis as utils_analysis
 import utils.utils_common as utils_common
 import utils.utils_profile as utils_profile
 from utils.amdsmi_interface import _per_device_query
+from utils.mi_gpu_spec import mi_gpu_specs
 from utils.tty import (
     format_duration,
     format_node_stats,
@@ -4281,12 +4282,13 @@ def test_pc_sampling_prof_multiarg_appcmd(
 
 
 def test_set_parser():
-    from utils.utils_common import parse_sets_yaml
-
-    result = parse_sets_yaml("gfx90a")
-
+    result = utils_common.parse_sets_yaml("gfx90a")
     assert "compute_thruput_util" in result
     assert result["compute_thruput_util"]["title"] == "Compute Throughput Utilization"
+
+    shared = utils_common.parse_sets_yaml("gfx1152")
+    assert "compute_thruput_flops" in shared
+    assert shared["launch_stats"]["title"] == "Launch Stats"
 
 
 @pytest.mark.sci_notion
@@ -4369,11 +4371,7 @@ def test_list_metrics(binary_handler_analyze_rocprof_compute, capsys):
 
 def list_blocks_supported_archs() -> list[str]:
     """Return sorted arch names from analysis_configs/gfx* directories."""
-    return sorted(
-        p.name
-        for p in ANALYSIS_CONFIGS.iterdir()
-        if p.is_dir() and p.name.startswith("gfx")
-    )
+    return list(mi_gpu_specs.get_gpu_series_dict().keys())
 
 
 def arch_panels_from_disk(arch: str) -> dict[str, str]:
@@ -4428,7 +4426,9 @@ def test_list_blocks_all_archs(binary_handler_analyze_rocprof_compute, capsys, a
         name = line[name_col:].strip()
         block_entries[block_id] = (alias, name)
 
-    expected_panels = arch_panels_from_disk(arch)
+    expected_panels = arch_panels_from_disk(
+        utils_common.canonical_config_arch(arch) or arch
+    )
     assert set(block_entries) == set(expected_panels), (
         f"--list-blocks {arch}: rows {sorted(block_entries)} != "
         f"on-disk panels {sorted(expected_panels)}"

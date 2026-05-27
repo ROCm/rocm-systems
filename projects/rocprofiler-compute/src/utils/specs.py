@@ -32,15 +32,6 @@ from utils.utils_common import format_table_ascii, get_version
 T = TypeVar("T")
 
 
-def canonical_gpu_arch(gpu_arch: Optional[str]) -> Optional[str]:
-    """Map LLVM GPU targets that share one SoC and analysis config tree."""
-    if gpu_arch is None:
-        return None
-    if gpu_arch == "gfx1152":
-        return "gfx1151"
-    return gpu_arch
-
-
 VERSION_LOC: list[str] = [
     "version",
     "version-dev",
@@ -51,6 +42,40 @@ VERSION_LOC: list[str] = [
     "version-libs",
     "version-utils",
 ]
+
+
+def run(cmd: list[str]) -> Optional[str]:
+    """Run a command and return stdout, aborting on execution failures."""
+    cmd_str = " ".join(cmd)
+    try:
+        completed = subprocess.run(
+            cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError as exc:
+        console_error(f"Required command not found: {cmd_str} ({exc})")
+        return None
+    except OSError as exc:
+        console_error(f"Failed to execute command: {cmd_str} ({exc})")
+        return None
+    if completed.returncode != 0:
+        stderr = completed.stderr.strip()
+        message = f"Command failed with exit code {completed.returncode}: {cmd_str}"
+        if stderr:
+            message += f". stderr: {stderr}"
+        console_error(message)
+        return None
+    return completed.stdout
+
+
+def search(pattern: str, string: str) -> Optional[str]:
+    """Return the first multiline regex capture group, if present."""
+    match = re.search(pattern, string, re.MULTILINE)
+    if match is not None:
+        return match.group(1)
+    return None
 
 
 def detect_arch(rocminfo_lines: list[str]) -> Optional[tuple[str, int]]:
@@ -64,9 +89,8 @@ def detect_arch(rocminfo_lines: list[str]) -> Optional[tuple[str, int]]:
         if not gpu_arch:
             continue
 
-        arch_for_support = canonical_gpu_arch(gpu_arch)
-        if arch_for_support in supported_gpu_arch:
-            return (arch_for_support, idx1)
+        if gpu_arch in supported_gpu_arch:
+            return (gpu_arch, idx1)
 
         if gpu_arch not in unsupported_gpu_arch:
             unsupported_gpu_arch.add(gpu_arch)
@@ -899,27 +923,6 @@ def get_rocm_ver() -> str:
     )
     console_error("Ensure you have valid ROCm installation.", exit=False)
     return ""
-
-
-def run(cmd: list[str], exit_on_error: bool = False) -> str:
-    try:
-        p = subprocess.run(cmd, capture_output=True)
-    except FileNotFoundError as e:
-        console_error(
-            f"Unable to parse specs. Can't find ROCm asset: {e.filename}\n"
-            'Try passing a path to an existing workload results in "analyze" mode.'
-        )
-
-    if exit_on_error and p.returncode != 0:  # type: ignore
-        console_error(f"Command {cmd} failed with non-zero exit code")
-    return p.stdout.decode("utf-8")  # type: ignore
-
-
-def search(pattern: str, string: str) -> Optional[str]:
-    m = re.search(pattern, string, re.MULTILINE)
-    if m is not None:
-        return m.group(1)
-    return None
 
 
 def total_sqc(archname: str, num_compute_units: str, num_shader_engines: str) -> int:

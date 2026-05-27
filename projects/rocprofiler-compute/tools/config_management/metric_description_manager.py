@@ -18,7 +18,7 @@ Usage (paths relative to project root):
     python $SCRIPT --sync-all $CONFIGS
     python $SCRIPT --validate <arch_name> $CONFIGS
     python $SCRIPT --generate-docs
-    python $SCRIPT --generate-docs --docs-arch gfx1151
+    python $SCRIPT --generate-docs --docs-arch gfx115x
 """
 
 from __future__ import annotations
@@ -30,7 +30,6 @@ from pathlib import Path
 from typing import Union
 
 import yaml
-from ruamel.yaml.scalarstring import SingleQuotedScalarString
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -41,7 +40,7 @@ from config_management import utils_ruamel as cm_utils  # noqa: E402
 
 def is_rdna35_arch(arch_name: str) -> bool:
     """True for RDNA 3.5 IP names: gfx115x (gfx1150 to gfx115f)."""
-    return bool(re.fullmatch(r"gfx115[0-9a-f]", arch_name, re.IGNORECASE))
+    return bool(re.fullmatch(r"gfx115([0-9a-f]|x)", arch_name, re.IGNORECASE))
 
 
 def normalize_unit_for_docs(unit: str) -> str:
@@ -460,9 +459,7 @@ def generate_docs_from_per_arch(
                 # Extract only RST and unit (drop 'plain' text)
                 entry = {}
                 if "rst" in metric_info:
-                    entry["rst"] = SingleQuotedScalarString(
-                        format_yaml_scalar(metric_info["rst"])
-                    )
+                    entry["rst"] = format_yaml_scalar(metric_info["rst"])
                 if "unit" in metric_info:
                     entry["unit"] = metric_info["unit"]
                 docs_data[docs_section][docs_metric_name] = entry

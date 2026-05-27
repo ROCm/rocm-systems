@@ -60,7 +60,7 @@ EXPERIMENTAL_PANEL_IDS = {30}  # Panel IDs that are experimental/optional
 
 def is_gfx11_ip_variant(arch_name: str) -> bool:
     """True for RDNA 3.5 IP dirs: gfx115x (gfx1150 to gfx115f)."""
-    return bool(re.fullmatch(r"gfx115[0-9a-f]", arch_name, re.IGNORECASE))
+    return bool(re.fullmatch(r"gfx115([0-9a-f]|x)", arch_name, re.IGNORECASE))
 
 
 def normalize_panel_id(panel_id: int) -> int:

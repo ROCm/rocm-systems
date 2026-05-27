@@ -4,15 +4,16 @@
 import re
 import subprocess
 import tempfile
+from subprocess import CompletedProcess
 from unittest.mock import patch
 
 import common
 import pytest
 
-try:
-    from src.utils.specs import generate_machine_specs
-except Exception:
-    from utils.specs import generate_machine_specs
+import utils.specs as specs
+from utils.file_io import is_single_panel_config
+from utils.specs import generate_machine_specs
+from utils.utils_common import canonical_config_arch
 
 # NOTE: Only testing gfx942 for now.
 GFX942_CHIP_IDS_TO_NUM_XCDS = {
@@ -189,6 +190,27 @@ def test_load_yaml_generic_exception():
 
 
 @pytest.mark.misc
+@pytest.mark.parametrize(
+    "mock_kwargs",
+    [
+        {"side_effect": FileNotFoundError("missing")},
+        {
+            "return_value": CompletedProcess(
+                args=["rocminfo"], returncode=1, stdout="", stderr="boom"
+            )
+        },
+    ],
+    ids=["missing_binary", "nonzero_exit"],
+)
+def test_run_fails_fast(mock_kwargs):
+    with (
+        patch.object(specs.subprocess, "run", **mock_kwargs),
+        pytest.raises(SystemExit),
+    ):
+        specs.run(["rocminfo"])
+
+
+@pytest.mark.misc
 def test_get_gpu_series_dict_uninitialized():
     """Test get_gpu_series_dict when dict not populated - covers lines 182-185"""
     from src.utils.mi_gpu_spec import MIGPUSpecs
@@ -252,6 +274,28 @@ def test_get_gpu_model_none_result():
     with patch.object(MIGPUSpecs, "_chip_id_dict", {999: None}):
         result = MIGPUSpecs.get_gpu_model("gfx942", "999")
         assert result is None
+
+
+@pytest.mark.misc
+def test_canonical_config_arch_maps_gfx115_variants_to_shared_dir():
+    assert canonical_config_arch(None) is None
+    assert canonical_config_arch("gfx1150") == "gfx115x"
+    assert canonical_config_arch("gfx1151") == "gfx115x"
+    assert canonical_config_arch("gfx1152") == "gfx115x"
+    assert canonical_config_arch("gfx942") == "gfx942"
+
+
+@pytest.mark.misc
+def test_is_single_panel_config_accepts_shared_gfx115x_dir(tmp_path):
+    (tmp_path / "gfx115x").mkdir()
+
+    supported_archs = {
+        "gfx1150": "rdna35_point_1",
+        "gfx1151": "rdna35_halo",
+        "gfx1152": "rdna35_point_2",
+    }
+
+    assert is_single_panel_config(str(tmp_path), supported_archs) is False
 
 
 @pytest.mark.misc
