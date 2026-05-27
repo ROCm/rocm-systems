@@ -32,7 +32,7 @@
 #ifndef __AMDGPU_DRM_H__
 #define __AMDGPU_DRM_H__
 
-#include "drm/drm.h"
+#include "drm.h"
 
 #if defined(__cplusplus)
 extern "C" {

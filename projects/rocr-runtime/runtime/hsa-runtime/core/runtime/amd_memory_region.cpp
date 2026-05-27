@@ -641,10 +641,9 @@ void MemoryRegion::Trim() const { fragment_allocator_.trim(); }
 void* MemoryRegion::BlockAllocator::alloc(size_t request_size, size_t& allocated_size) const {
   void* ret;
   size_t bsize = AlignUp(request_size, block_size());
-  //uint64_t mmap_offset; //unused
 
   hsa_status_t err = region_.AllocateImpl(
-      bsize, core::MemoryRegion::AllocateRestrict | core::MemoryRegion::AllocateDirect, &ret, /*&mmap_offset,*/ 0);
+      bsize, core::MemoryRegion::AllocateRestrict | core::MemoryRegion::AllocateDirect, &ret, 0);
   if (err != HSA_STATUS_SUCCESS)
     throw AMD::hsa_exception(err, "MemoryRegion::BlockAllocator::alloc failed.");
   assert(ret != nullptr && "Region returned nullptr on success.");
