@@ -505,8 +505,46 @@ static void setFilesLimit() {
 [[maybe_unused]] __host__ void *rocshmem_malloc(size_t size) {
   VERIFY_BACKEND();
 
-  void *ptr;
+  void *ptr{nullptr};
   backend->heap.malloc(&ptr, size);
+  rocshmem_barrier_all();
+
+  return ptr;
+}
+
+[[maybe_unused]] __host__ void *rocshmem_align(size_t alignment, size_t size) {
+  VERIFY_BACKEND();
+
+  /*
+   * Validate alignment per OpenSHMEM semantics:
+   *   - must be non-zero,
+   *   - must be a power of two,
+   *   - must be a multiple of sizeof(void *).
+   *
+   * The three conditions map directly onto the three && operands below:
+   * the non-zero guard also prevents `(0 & -1) == 0` from spoofing the
+   * power-of-two test, and the explicit modulo check is what rejects the
+   * small powers of two (1, 2, and on 64-bit also 4) that are otherwise
+   * valid powers of two but too small to hold a pointer.
+   */
+  bool valid_alignment = (alignment != 0) &&
+                         ((alignment & (alignment - 1)) == 0) &&
+                         (alignment % sizeof(void *) == 0);
+
+  void *ptr{nullptr};
+  if (valid_alignment) {
+    backend->heap.malign(&ptr, alignment, size);
+  } else {
+    LOG_WARN("rocshmem_align: invalid alignment %zu (must be a power of two "
+             "and a multiple of sizeof(void *) = %zu); returning NULL",
+             alignment, sizeof(void *));
+  }
+
+  /*
+   * rocshmem_align is collective: every PE must reach this barrier. We do
+   * not early-return on invalid alignment, otherwise the failing PE would
+   * leave the others blocked here forever.
+   */
   rocshmem_barrier_all();
 
   return ptr;
