@@ -320,7 +320,12 @@ inline native<uint32_t> f32_to_f16_simd(native<float> val) {
   // Denormal (fe 102..112): m' = fm|0x800000, shift right by sh=126-fe (14..24)
   // with round-to-nearest-even.
   const U mm = fm | 0x800000u;
-  const U sh = 126u - fe;
+  // sh = 126 - fe is in [14,24] for the real denormal range (fe 102..112), but
+  // lanes with fe < 102 (flushed to zero below) yield sh up to 126. Clamp to 31
+  // so the shifts here never hit undefined/masked behaviour; those lanes are
+  // overwritten by the `fe < 102` flush, so the clamped value is discarded.
+  U sh = 126u - fe;
+  stdx::where(sh > 31u, sh) = 31u;
   const U drb = (mm >> (sh - 1u)) & 1u;
   const U mask_lo = (1u << (sh - 1u)) - 1u;
   U dsticky(0u);

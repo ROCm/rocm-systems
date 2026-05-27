@@ -16,11 +16,26 @@
 #include <bit>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <random>
 #include <thread>
 
 namespace {
+
+// Toolchain-guard sweep length. The bit-exactness guards below were validated
+// over a 250k-iteration full-range sweep, but running that on every CI build
+// adds significant wall time (5 sweeps x 250k x SIMD width). Default to a
+// shorter deterministic sweep that still covers NaN/Inf/denormal/negative bit
+// patterns; set ROCJITSU_SIMD_FULL_SWEEP=1 for the exhaustive run (e.g. when
+// qualifying a new toolchain).
+inline int sweep_iters() {
+  static const int n = [] {
+    const char *full = std::getenv("ROCJITSU_SIMD_FULL_SWEEP");
+    return (full && full[0] == '1') ? 250000 : 20000;
+  }();
+  return n;
+}
 
 // Each test skips at runtime when `<experimental/simd>` is unavailable;
 // the SIMD body is type-checked but compiles out via `if constexpr`.
@@ -233,7 +248,7 @@ void expect_simd_bit_exact(ScalarFn scalar_fn, VectorFn vector_fn) {
   using V = util::native<float>;
   constexpr std::size_t W = util::native_width_v<float>;
   std::mt19937 rng(0xA17C0DEu);
-  for (int iter = 0; iter < 250000; ++iter) {
+  for (int iter = 0, n = sweep_iters(); iter < n; ++iter) {
     alignas(V) float in[W];
     for (std::size_t i = 0; i < W; ++i)
       in[i] = std::bit_cast<float>(static_cast<uint32_t>(rng()));
@@ -282,7 +297,7 @@ TEST(UtilSimd, Fma_VectorMatchesScalar_BitExact) {
     return ((u >> 23) & 0xFFu) == 0xFFu && (u & 0x7FFFFFu) != 0u;
   };
   std::mt19937 rng(0xF1AC0DEu);
-  for (int iter = 0; iter < 250000; ++iter) {
+  for (int iter = 0, n = sweep_iters(); iter < n; ++iter) {
     alignas(V) float a[W], b[W], c[W];
     for (std::size_t i = 0; i < W; ++i) {
       a[i] = std::bit_cast<float>(static_cast<uint32_t>(rng()));
@@ -320,7 +335,7 @@ TEST(UtilSimd, FmaF64_VectorMatchesScalar_BitExact) {
     return ((u >> 52) & 0x7FFu) == 0x7FFu && (u & 0xFFFFFFFFFFFFFull) != 0u;
   };
   std::mt19937_64 rng(0xF1AC0DE64ull);
-  for (int iter = 0; iter < 250000; ++iter) {
+  for (int iter = 0, n = sweep_iters(); iter < n; ++iter) {
     alignas(V) double a[W], b[W], c[W];
     for (std::size_t i = 0; i < W; ++i) {
       a[i] = std::bit_cast<double>(rng());
@@ -358,7 +373,7 @@ void expect_f64_unary_bit_exact(ScalarFn scalar_fn, VectorFn vector_fn) {
     return ((u >> 52) & 0x7FFu) == 0x7FFu && (u & 0xFFFFFFFFFFFFFull) != 0u;
   };
   std::mt19937_64 rng(0xD06F64ull);
-  for (int iter = 0; iter < 200000; ++iter) {
+  for (int iter = 0, n = sweep_iters(); iter < n; ++iter) {
     alignas(V) double a[W];
     for (std::size_t i = 0; i < W; ++i)
       a[i] = std::bit_cast<double>(rng());
@@ -436,7 +451,7 @@ void expect_minmax_bit_exact(ScalarFn scalar_fn, VectorFn vector_fn) {
   };
   auto is_zero_bits = [](uint32_t u) { return (u & 0x7FFFFFFFu) == 0u; };
   std::mt19937 rng(0xFA00C0DEu);
-  for (int iter = 0; iter < 250000; ++iter) {
+  for (int iter = 0, n = sweep_iters(); iter < n; ++iter) {
     alignas(V) float a[W], b[W];
     for (std::size_t i = 0; i < W; ++i) {
       uint32_t ra = rng(), rb = rng();
