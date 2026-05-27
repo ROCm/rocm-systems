@@ -42,13 +42,12 @@
 #include <regex>
 
 #include "amd_smi/impl/amd_smi_common.h"
+#include "amd_smi/impl/amd_smi_test_flags.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_logger.h"
 
 namespace amd::smi {
-
-#define AMD_SMI_INIT_FLAG_RESRV_TEST1 0x800000000000000  //!< Reserved for test
 
 AMDSmiSystem& AMDSmiSystem::getInstance() {
   static AMDSmiSystem instance;
@@ -341,9 +340,12 @@ amdsmi_status_t AMDSmiSystem::populate_amd_cpus() {
 
 amdsmi_status_t AMDSmiSystem::populate_amd_gpu_devices() {
   AMDSmiSystem::cleanup();
-  // init rsmi
+  // init rsmi — forward the test flag so the mutex becomes non-blocking
   rsmi_driver_state_t state;
-  rsmi_status_t ret = rsmi_init(0);
+  uint64_t rsmi_flags = (init_flag_ & AMD_SMI_INIT_FLAG_RESRV_TEST1)
+                            ? static_cast<uint64_t>(RSMI_INIT_FLAG_RESRV_TEST1)
+                            : 0ULL;
+  rsmi_status_t ret = rsmi_init(rsmi_flags);
   if (ret != RSMI_STATUS_SUCCESS) {
     if (rsmi_driver_status(&state) == RSMI_STATUS_SUCCESS &&
         state != RSMI_DRIVER_MODULE_STATE_LIVE) {

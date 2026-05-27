@@ -5,7 +5,6 @@ env:
   AIS_CI_IMAGE_NAME: ais_ci_${{ inputs.platform }}
   AIS_DOCKER_REGISTRY: ghcr.io/${{ github.repository_owner }}/hipfile
   AIS_INPUT_ROCM_VERSION: ${{ inputs.rocm_version }}
-  AIS_PR_BASE_URL: ${{ github.server_url }}/${{ github.repository }}/pull
 
 on:
   workflow_call:
@@ -32,9 +31,19 @@ on:
           If a new CI image is produced, returns the new CI image name & tag.
           Otherwise, returns the current CI image name & tag.
         value: >-
-          ${{ 
+          ${{
             jobs.build_AIS_image.result == 'skipped' && jobs.get_latest_AIS_image.outputs.new_ci_image ||
             jobs.build_AIS_image.result == 'success' && jobs.build_AIS_image.outputs.new_ci_image ||
+            null
+          }}
+      ci_image_nvidia:
+        description: |
+          The full name & tag of the NVIDIA CI image to use.
+          Same as ci_image but with CUDA SDK and NVIDIA drivers installed.
+        value: >-
+          ${{
+            jobs.build_AIS_image.result == 'skipped' && jobs.get_latest_AIS_image.outputs.new_ci_image_nvidia ||
+            jobs.build_AIS_image.result == 'success' && jobs.build_AIS_image.outputs.new_ci_image_nvidia ||
             null
           }}
       ci_image_build_satisfied:
@@ -59,7 +68,6 @@ permissions:
   packages: write
 
 jobs:
-
   # GitHub Actions does not have a built-in toLower() function which has made a lot of
   # people sad. https://github.com/orgs/community/discussions/25768
   get_latest_AIS_image:
@@ -67,12 +75,15 @@ jobs:
     runs-on: [ubuntu-24.04]
     outputs:
       new_ci_image: ${{ steps.ci-image.outputs.AIS_CI_IMAGE }}
+      new_ci_image_nvidia: ${{ steps.ci-image.outputs.AIS_CI_IMAGE_NVIDIA }}
     steps:
       - name: Set default CI image
         id: ci-image
         run: |
           AIS_CI_IMAGE="${AIS_DOCKER_REGISTRY}/${AIS_CI_IMAGE_NAME}:latest-rocm${AIS_INPUT_ROCM_VERSION}"
           echo "AIS_CI_IMAGE=$(printf '%s' "${AIS_CI_IMAGE}" | tr '[:upper:]' '[:lower:]')" >> "${GITHUB_OUTPUT}"
+          AIS_CI_IMAGE_NVIDIA="${AIS_DOCKER_REGISTRY}/${AIS_CI_IMAGE_NAME}:latest-rocm${AIS_INPUT_ROCM_VERSION}-nvidia"
+          echo "AIS_CI_IMAGE_NVIDIA=$(printf '%s' "${AIS_CI_IMAGE_NVIDIA}" | tr '[:upper:]' '[:lower:]')" >> "${GITHUB_OUTPUT}"
 
   build_AIS_image:
     if: ${{ inputs.dockerfile_changed }}
@@ -80,19 +91,23 @@ jobs:
     container: docker:28.5
     outputs:
       new_ci_image: ${{ steps.ci-image.outputs.AIS_CI_IMAGE }}
+      new_ci_image_nvidia: ${{ steps.ci-image.outputs.AIS_CI_IMAGE_NVIDIA }}
     steps:
       - name: Set CI environment variables
         run: |
           echo "AIS_CI_IMAGE_TAG=$(echo "${GITHUB_REF}" | sed 's|[^a-zA-Z0-9]|-|g')-rocm${AIS_INPUT_ROCM_VERSION}" >> "${GITHUB_ENV}"
-          echo "AIS_PR_NUMBER=$(echo "${GITHUB_REF}" | sed 's|[^0-9]||g')" >> "${GITHUB_ENV}"
 
       - name: Set target AIS CI Image
         id: ci-image
         run: |
           AIS_CI_IMAGE="${AIS_DOCKER_REGISTRY}/${AIS_CI_IMAGE_NAME}:${AIS_CI_IMAGE_TAG}"
           echo "AIS_CI_IMAGE=$(printf '%s' "${AIS_CI_IMAGE}" | tr '[:upper:]' '[:lower:]')" >> "${GITHUB_OUTPUT}"
+          AIS_CI_IMAGE_NVIDIA="${AIS_DOCKER_REGISTRY}/${AIS_CI_IMAGE_NAME}:${AIS_CI_IMAGE_TAG}-nvidia"
+          echo "AIS_CI_IMAGE_NVIDIA=$(printf '%s' "${AIS_CI_IMAGE_NVIDIA}" | tr '[:upper:]' '[:lower:]')" >> "${GITHUB_OUTPUT}"
           AIS_CI_LATEST_CACHE="${AIS_DOCKER_REGISTRY}/${AIS_CI_IMAGE_NAME}:latest-rocm${AIS_INPUT_ROCM_VERSION}-cache"
           echo "AIS_CI_LATEST_CACHE=$(printf '%s' "${AIS_CI_LATEST_CACHE}" | tr '[:upper:]' '[:lower:]')" >> "${GITHUB_OUTPUT}"
+          AIS_CI_LATEST_CACHE_NVIDIA="${AIS_DOCKER_REGISTRY}/${AIS_CI_IMAGE_NAME}:latest-rocm${AIS_INPUT_ROCM_VERSION}-nvidia-cache"
+          echo "AIS_CI_LATEST_CACHE_NVIDIA=$(printf '%s' "${AIS_CI_LATEST_CACHE_NVIDIA}" | tr '[:upper:]' '[:lower:]')" >> "${GITHUB_OUTPUT}"
 
       - name: Fetching code repository...
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -120,14 +135,24 @@ jobs:
         run: |
           docker buildx build \
             -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.${AIS_CI_IMAGE_NAME}" \
-            --label "org.opencontainers.image.description= \
-              ${AIS_CI_IMAGE_NAME} Development Image for AIS CI using branch \
-              ${GITHUB_HEAD_REF} for PR #${AIS_PR_NUMBER}. \
-              PR URL: ${AIS_PR_BASE_URL}/${AIS_PR_NUMBER}" \
+            --target base \
             --build-arg BUILDKIT_INLINE_CACHE=1 \
             --build-arg ROCM_VERSION=${AIS_INPUT_ROCM_VERSION} \
             --cache-from=type=registry,ref="${{ steps.ci-image.outputs.AIS_CI_IMAGE }}" \
             --cache-from=type=registry,ref="${{ steps.ci-image.outputs.AIS_CI_LATEST_CACHE }}" \
             --push \
             -t "${{ steps.ci-image.outputs.AIS_CI_IMAGE }}" \
+            "${GITHUB_WORKSPACE}/projects/hipfile/util/docker"
+
+      - name: Build NVIDIA image for AIS CI
+        run: |
+          docker buildx build \
+            -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.${AIS_CI_IMAGE_NAME}" \
+            --target nvidia \
+            --build-arg BUILDKIT_INLINE_CACHE=1 \
+            --build-arg ROCM_VERSION=${AIS_INPUT_ROCM_VERSION} \
+            --cache-from=type=registry,ref="${{ steps.ci-image.outputs.AIS_CI_IMAGE_NVIDIA }}" \
+            --cache-from=type=registry,ref="${{ steps.ci-image.outputs.AIS_CI_LATEST_CACHE_NVIDIA }}" \
+            --push \
+            -t "${{ steps.ci-image.outputs.AIS_CI_IMAGE_NVIDIA }}" \
             "${GITHUB_WORKSPACE}/projects/hipfile/util/docker"

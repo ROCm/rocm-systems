@@ -149,6 +149,7 @@ endif()
 
 # Setup testing collateral
 
+option(INSTALL_TESTS "Build test suite" OFF)
 option(ENABLE_TESTS "Enable compilation of testing collateral" OFF)
 set(CMAKE_HIP_FLAGS_RELEASE "-O2")
 if(${ENABLE_TESTS})
@@ -252,6 +253,13 @@ option(
     "Skip building native counter collection tool library (for runtime compilation)"
     OFF
 )
+
+# -------------------
+# Setup tool library
+# -------------------
+if(NOT SKIP_NATIVE_TOOL_BUILD)
+    add_subdirectory(src/lib)
+endif()
 
 # ---------------------------
 # Profile mode import guard
@@ -412,6 +420,14 @@ add_test(
         tests/test_metric_validation.py ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_native_tool_finder
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_native_tool_finder.xml ${COV_OPTION}
+        tests/test_native_tool_finder.py ${WORKING_DIR_OPTION}
+)
+
 set_tests_properties(
     test_profile_kernel_execution
     test_profile_dispatch
@@ -485,6 +501,14 @@ add_test(
         tests/test_gpu_specs.py ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_mi_gpu_spec
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_mi_gpu_spec.xml ${COV_OPTION} tests/test_mi_gpu_spec.py
+        ${WORKING_DIR_OPTION}
+)
+
 # ---------------------------
 # Utils tests
 # ---------------------------
@@ -497,13 +521,13 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
-# RDNA3.5 memory chart CLI (Rich) — no GPU required
+# Memory chart CLI renderers (gfx9 plotille + gfx11 Rich) — no GPU required
 add_test(
-    NAME test_mem_chart_gfx11
+    NAME test_mem_chart
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_mem_chart_gfx11.xml ${COV_OPTION}
-        tests/test_mem_chart_gfx11.py ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_mem_chart.xml ${COV_OPTION} tests/test_mem_chart.py
+        ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -535,6 +559,18 @@ add_test(
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
         --junitxml=tests/test_analysis_db.xml ${COV_OPTION} tests/test_analysis_db.py
+        ${WORKING_DIR_OPTION}
+)
+
+# -----------------------------------
+# Metrics unit tests
+# -----------------------------------
+
+add_test(
+    NAME test_metric_utils
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_metric_utils.xml ${COV_OPTION} tests/test_metric_utils.py
         ${WORKING_DIR_OPTION}
 )
 
@@ -593,11 +629,24 @@ add_test(
 # -----------------------------------
 
 add_test(
-    NAME test_torch_trace
+    NAME test_torch_trace_analysis
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_torch_trace.xml ${COV_OPTION} tests/test_torch_trace.py
-        ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_torch_trace_analysis.xml ${COV_OPTION}
+        tests/test_torch_trace_analysis.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_torch_trace_coverage
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_torch_trace_coverage.xml ${COV_OPTION}
+        tests/test_torch_trace_coverage.py ${WORKING_DIR_OPTION}
+)
+
+set_tests_properties(
+    test_torch_trace_coverage
+    PROPERTIES TIMEOUT 1800 LABELS "profile" RESOURCE_GROUPS gpus:1
 )
 
 # ---------------------------------------
@@ -636,6 +685,15 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
+if(TARGET test-rocprofiler-compute-tool)
+    if(TEST_FROM_INSTALL)
+        set(_tool_test_cmd tests/test-rocprofiler-compute-tool)
+    else()
+        set(_tool_test_cmd $<TARGET_FILE:test-rocprofiler-compute-tool>)
+    endif()
+    add_test(NAME test-rocprofiler-compute-tool COMMAND ${_tool_test_cmd})
+endif()
+
 # -----------------------------------
 # Generate coverage tests
 # -----------------------------------
@@ -655,16 +713,19 @@ if(${ENABLE_COVERAGE})
         test_pc_sampling
         test_analyze_commands
         test_analyze_workloads
+        test_metric_utils
         test_L1_cache_counters
         test_num_xcds_spec_class
         test_num_xcds_cli_output
+        test_mi_gpu_spec
         test_utils
-        test_mem_chart_gfx11
+        test_mem_chart
         test_roofline_calc_ai_analyze
         test_data_imputation
         test_autogen_config
         test_tui_components
-        test_torch_trace
+        test_torch_trace_analysis
+        test_torch_trace_coverage
     )
 
     string(REPLACE ";" ";" ALL_TESTS_STRING "${ALL_TEST_NAMES}")
@@ -701,13 +762,6 @@ if(COMMAND apply_ctest_category_labels)
     endif()
 else()
     message(STATUS "Test categorization not available (TestCategories.cmake not found)")
-endif()
-
-# -------------------
-# Setup tool library
-# -------------------
-if(NOT SKIP_NATIVE_TOOL_BUILD)
-    add_subdirectory(src/lib)
 endif()
 
 # ---------
@@ -772,13 +826,6 @@ install(
 # src/rocprof_compute_tui
 install(
     DIRECTORY src/rocprof_compute_tui
-    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-    COMPONENT main
-    PATTERN "__pycache__" EXCLUDE
-)
-# tools/config_management
-install(
-    DIRECTORY tools/config_management
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
     PATTERN "__pycache__" EXCLUDE
@@ -857,21 +904,23 @@ if(NOT SKIP_NATIVE_TOOL_BUILD)
 else()
     # Install source files for runtime compilation
     install(
-        FILES src/lib/rocprofiler_compute_tool.cpp src/lib/helper.cpp src/lib/helper.hpp
+        DIRECTORY src/lib/
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/lib
         COMPONENT main
+        PATTERN "_build" EXCLUDE
+        PATTERN "tests" EXCLUDE
     )
 endif()
 
-# top-level symlink for bin/rocprof-compute
+# top-level bin/rocprof-compute launcher (re-execs into libexec entrypoint)
+configure_file(
+    ${PROJECT_SOURCE_DIR}/cmake/${EXECUTABLE_NAME}.in
+    ${PROJECT_BINARY_DIR}/${EXECUTABLE_NAME}
+    @ONLY
+)
 install(
-    CODE
-        "execute_process(
-    COMMAND bash -c \"set -e
-    cd \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}
-    mkdir -p ${CMAKE_INSTALL_BINDIR}
-    ln -sf ../${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/${EXECUTABLE_NAME} ${CMAKE_INSTALL_BINDIR}/${EXECUTABLE_NAME}
-    \")"
+    PROGRAMS ${PROJECT_BINARY_DIR}/${EXECUTABLE_NAME}
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
     COMPONENT main
 )
 
@@ -882,7 +931,6 @@ install(
 )
 
 # TEST collateral
-option(INSTALL_TESTS "Build test suite" OFF)
 if(INSTALL_TESTS)
     install(
         DIRECTORY tests
@@ -891,6 +939,11 @@ if(INSTALL_TESTS)
         FILES_MATCHING
         PATTERN "*.py"
         PATTERN "__pycache__" EXCLUDE
+    )
+    install(
+        PROGRAMS therock_test_runner.py
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+        COMPONENT tests
     )
     install(
         DIRECTORY tests/workloads

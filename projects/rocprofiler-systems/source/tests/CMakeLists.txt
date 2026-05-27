@@ -5,6 +5,7 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:lib-common-tests>
     $<TARGET_OBJECTS:trace-cache-tests>
     $<TARGET_OBJECTS:demangler-tests>
+    $<TARGET_OBJECTS:progress-tests>
     $<TARGET_OBJECTS:logger-tests>
     $<TARGET_OBJECTS:lib-components-tests>
     $<TARGET_OBJECTS:rocprofiler-sdk-components-unit-tests>
@@ -17,6 +18,15 @@ list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-gpu-collector-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-nic-collector-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-cpu-collector-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:procfs-driver-tests>)
+if(
+    (ROCPROFSYS_ROCM_VERSION_MAJOR GREATER 6)
+    OR (
+        ROCPROFSYS_ROCM_VERSION_MAJOR EQUAL 6
+        AND ROCPROFSYS_ROCM_VERSION_MINOR GREATER_EQUAL 4
+    )
+)
+    list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-sdk-pmc-collector-tests>)
+endif()
 
 add_executable(rocprof-sys-unit-tests ${UNIT_TEST_OBJECTS})
 

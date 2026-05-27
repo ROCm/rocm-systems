@@ -1,0 +1,107 @@
+name: profiler-hub Static Analysis
+run-name: profiler-hub-static-analysis
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - develop
+    paths:
+      - '.github/workflows/profiler-hub-static-analysis.yml'
+      - 'profilers/profiler-hub/**'
+      - '!profilers/profiler-hub/build/**'
+      - '!profilers/profiler-hub/docs/**'
+      - '!profilers/profiler-hub/README.md'
+  pull_request:
+    branches:
+      - develop
+    paths:
+      - '.github/workflows/profiler-hub-static-analysis.yml'
+      - 'profilers/profiler-hub/**'
+      - '!profilers/profiler-hub/build/**'
+      - '!profilers/profiler-hub/docs/**'
+      - '!profilers/profiler-hub/README.md'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  clang-tidy:
+    name: clang-tidy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            profilers/profiler-hub
+            .github/workflows
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            gcc g++ clang-tidy-18 \
+            libsqlite3-dev libspdlog-dev libfmt-dev nlohmann-json3-dev \
+            libgtest-dev libgmock-dev libbenchmark-dev
+          sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-18 100
+
+      - name: Configure
+        working-directory: profilers/profiler-hub
+        env:
+          CC: gcc
+          CXX: g++
+        run: |
+          cmake --version
+          clang-tidy --version | head -2
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DPROFILER_HUB_BUILD_TESTS=OFF \
+            -DPROFILER_HUB_BUILD_BENCHMARKS=OFF
+
+      - name: Build
+        working-directory: profilers/profiler-hub
+        run: cmake --build build --parallel $(nproc)
+
+      - name: Run clang-tidy
+        working-directory: profilers/profiler-hub
+        run: |
+          set -o pipefail
+          cmake --build build --target clang-tidy 2>&1 | tee clang-tidy.log
+          WARNINGS=$(grep -cE 'warning:' clang-tidy.log || true)
+          ERRORS=$(grep -cE 'error:' clang-tidy.log || true)
+          {
+            echo "## clang-tidy summary"
+            echo ""
+            echo "| Severity | Count |"
+            echo "|----------|-------|"
+            echo "| Errors   | ${ERRORS} |"
+            echo "| Warnings | ${WARNINGS} |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+          echo "Errors: ${ERRORS}, Warnings: ${WARNINGS}"
+
+      - name: Report clang-tidy findings (non-blocking)
+        working-directory: profilers/profiler-hub
+        run: |
+          WARNINGS=$(grep -cE 'warning:' clang-tidy.log || true)
+          ERRORS=$(grep -cE 'error:' clang-tidy.log || true)
+          if [ "${ERRORS}" -gt 0 ] || [ "${WARNINGS}" -gt 0 ]; then
+            echo "::warning::clang-tidy reported ${ERRORS} error(s) and ${WARNINGS} warning(s); cleanup tracked separately"
+          else
+            echo "clang-tidy produced zero errors and zero warnings"
+          fi
+
+      - name: Upload clang-tidy log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: clang-tidy-log
+          path: profilers/profiler-hub/clang-tidy.log
+          if-no-files-found: warn

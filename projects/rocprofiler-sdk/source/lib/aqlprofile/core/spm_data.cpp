@@ -25,7 +25,7 @@
 #include <thread>
 #include <condition_variable>
 
-#include "lib/aqlprofile/core/logger.h"
+#include "lib/aqlprofile/core/logger.hpp"
 #include "lib/aqlprofile/core/pm4_factory.h"
 #include "lib/aqlprofile/util/hsa_rsrc_factory.h"
 
@@ -116,7 +116,7 @@ producer(spm_state_t* s)
         status = HsaSpmSetDestBuffer(args);
         if(status != HSA_STATUS_SUCCESS)
         {
-            ERR_LOGGING << "hsa_amd_spm_set_dest_buffer() error";
+            ERR_LOGGING("hsa_amd_spm_set_dest_buffer() error");
             goto exit_;
         }
 #if DEBUG_SPM >= 2
@@ -173,7 +173,11 @@ exit_:
         s->data_ready  = true;
         s->work_cond.notify_one();
     }
-    s->stop_cons_thread = true;
+    {
+        std::unique_lock<std::mutex> lock(s->work_mutex);
+        s->stop_cons_thread = true;
+        s->work_cond.notify_one();
+    }
 }
 
 static void
@@ -182,8 +186,9 @@ consumer(spm_state_t* s)
     do
     {
         std::unique_lock<std::mutex> lock(s->work_mutex);
-        while(!s->data_ready)
+        while(!s->data_ready && !s->stop_cons_thread)
             s->work_cond.wait(lock);
+        if(s->stop_cons_thread) break;
         s->data_ready = false;
 
         hsa_status_t                       status = HSA_STATUS_SUCCESS;
@@ -216,7 +221,7 @@ consumer(spm_state_t* s)
 
         if(status != HSA_STATUS_SUCCESS)
         {
-            ERR_LOGGING << "SPM consumer callback failed";
+            ERR_LOGGING("SPM consumer callback failed");
             s->stop_cons_thread = true;
         }
     } while(!s->stop_cons_thread);
@@ -240,7 +245,7 @@ start_spm_threads(spm_state_t& s)
         rocprofiler::aqlprofile::get_amd_ext_table()->hsa_amd_spm_acquire_fn(s.profile->agent);
     if(status != HSA_STATUS_SUCCESS)
     {
-        ERR_LOGGING << "hsa_amd_spm_acquire() error";
+        ERR_LOGGING("hsa_amd_spm_acquire() error");
         abort();
         return status;
     }
@@ -306,7 +311,7 @@ start_spm_threads(spm_state_t& s)
     status                        = HsaSpmSetDestBuffer(args);
     if(status != HSA_STATUS_SUCCESS)
     {
-        ERR_LOGGING << "hsa_amd_spm_set_dest_buffer() init error";
+        ERR_LOGGING("hsa_amd_spm_set_dest_buffer() init error");
         abort();
         return status;
     }

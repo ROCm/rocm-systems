@@ -311,10 +311,14 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
     }
   }
 
-  const uint32_t node_id =
-      (alloc_flags & core::MemoryRegion::AllocateGTTAccess)
-          ? agent_node_id
-          : m_region.owner()->node_id();
+  // agent_node_id uses 0 as the allocator default/unspecified sentinel.
+  const bool has_agent_node_id = agent_node_id != 0;
+  const bool allocation_uses_agent_node =
+      (alloc_flags & (core::MemoryRegion::AllocateGTTAccess |
+                      core::MemoryRegion::AllocateQueueObject)) != 0;
+  const uint32_t node_id = has_agent_node_id && allocation_uses_agent_node
+      ? agent_node_id
+      : m_region.owner()->node_id();
 
   //// Allocate memory.
   //// If it fails attempt to release memory from the block allocator and retry.
@@ -582,12 +586,12 @@ void *KfdDriver::AllocateKfdMemory(const HsaMemFlags &flags, uint32_t node_id,
 
 bool KfdDriver::FreeKfdMemory(void *mem, size_t size) {
   if (mem == nullptr || size == 0) {
-    debug_print("Invalid free ptr:%p size:%lu\n", mem, size);
+    debug_print("Invalid free ptr:%p size:%zu\n", mem, size);
     return false;
   }
 
   if (HSAKMT_CALL(hsaKmtFreeMemory(mem, size)) != HSAKMT_STATUS_SUCCESS) {
-    debug_print("Failed to free ptr:%p size:%lu\n", mem, size);
+    debug_print("Failed to free ptr:%p size:%zu\n", mem, size);
     return false;
   }
   return true;

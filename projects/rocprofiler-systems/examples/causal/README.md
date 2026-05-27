@@ -38,7 +38,7 @@ The build generates multiple variants of each executable:
 **Targets:**
 
 | Target | Description |
-|--------|-------------|
+| ------ | ----------- |
 | `causal-both` | Both RNG and CPU workloads |
 | `causal-rng` | RNG-based workload only |
 | `causal-cpu` | CPU-based workload only |
@@ -58,7 +58,7 @@ The build generates multiple variants of each executable:
 **Arguments:**
 
 | Position | Description | Default |
-|----------|-------------|---------|
+| -------- | ----------- | ------- |
 | 1 | Work fraction (percentage ratio fast/slow) | 70 |
 | 2 | Number of iterations | 50 |
 | 3 | Random seed | random |
@@ -80,7 +80,7 @@ rocprof-sys-causal --mode line -- ./causal-cpu-rocprofsys 70 10 432525 100000000
 ### Recommended Configuration
 
 | Variable | Value | Purpose |
-|----------|-------|---------|
+| ---------- | ------- | --------- |
 | `ROCPROFSYS_CAUSAL_RANDOM_SEED` | `1342342` | Fixed seed for reproducible causal experiments |
 | `ROCPROFSYS_TIME_OUTPUT` | `OFF` | Disable timestamped output directories |
 | `ROCPROFSYS_FILE_OUTPUT` | `ON` | Enable file output |
@@ -88,7 +88,7 @@ rocprof-sys-causal --mode line -- ./causal-cpu-rocprofsys 70 10 432525 100000000
 **Causal CLI flags:**
 
 | Flag | Description |
-|------|-------------|
+| ------ | ------------- |
 | `-n` | Number of causal experiment iterations |
 | `-w` | Number of warmup iterations |
 | `-d` | Virtual speedup delta (percentage steps) |

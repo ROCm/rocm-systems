@@ -49,7 +49,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: "ROCm/TheRock"
-          ref: 903ee444eb935adf456bf5df724e1b6f5c2ce962 # 2026-05-03 commit
+          ref: f6823a1859d0f5ffaea71fdcd5f310807d0e8ea7 # 2026-05-25 commit
 
       # Centralized arch-specific configuration
       - name: Set arch-specific paths
@@ -74,6 +74,19 @@ jobs:
               exit 1
               ;;
           esac
+
+      - name: Cleanup orphan RCCL/MPI processes
+        if: always()
+        run: |
+          echo "Cleaning up orphan processes..."
+          pkill -9 -f prterun || true
+          pkill -9 -f mpirun || true
+          pkill -9 -f "_perf" || true
+
+          sleep 10
+
+          echo "Processes still holding artifact directory:"
+          fuser -vm "${OUTPUT_ARTIFACTS_DIR}" || true
 
       - name: Run setup test environment workflow
         uses: './.github/actions/setup_test_environment'
