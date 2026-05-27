@@ -41,8 +41,7 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "ROCPROF_COLLECTION_PERIOD_TESTING=true"
-    FIXTURES_SETUP rocprofv3-test-collection-period
-    UNSTABLE)
+    FIXTURES_SETUP rocprofv3-test-collection-period)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-collection-period
@@ -59,5 +58,4 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/collection-period/out_collection_periods.log
     TIMEOUT 45
     LABELS "integration-tests"
-    FIXTURES_REQUIRED rocprofv3-test-collection-period
-    UNSTABLE)
+    FIXTURES_REQUIRED rocprofv3-test-collection-period)
