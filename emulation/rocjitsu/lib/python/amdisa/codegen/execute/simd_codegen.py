@@ -7,8 +7,10 @@ Emits an `<experimental/simd>`-based fast path on top of the generated
 scalar per-lane bodies. The scalar body is preserved verbatim as a
 fallback; the SIMD probe is a single line at the start of the kernel:
 
-    if (try_execute_binary_vop2_simd<T>(inst, wf, op_functor))
-      return;
+    ROCJITSU_TRY_SIMD_VOP2_BINARY(T, op_functor);
+
+That macro (defined in ``simd_glue.h``) expands to a call to
+``try_execute_binary_vop2_simd<T>`` plus an early ``return`` on success.
 
 `try_execute_binary_vop2_simd` in ``simd_glue.h`` is a constrained
 template (``requires(util::has_stdx_simd)``) plus an unconstrained
@@ -34,21 +36,981 @@ from __future__ import annotations
 # The functor is invoked as `bin_op(simd<T>, simd<T>) -> simd<T>` inside
 # try_execute_binary_vop2_simd. Use std::*<> for stateless ops.
 SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
+    # --- float32 (IEEE-754 single-rounded, bit-identical to scalar body) ---
     "v_add_f32_vop2": ("float32_t", "std::plus<>{}"),
+    "v_sub_f32_vop2": ("float32_t", "std::minus<>{}"),
+    "v_subrev_f32_vop2": ("float32_t", "[](auto a, auto b) { return b - a; }"),
+    "v_mul_f32_vop2": ("float32_t", "std::multiplies<>{}"),
+    # --- uint32 (wrap-around / bitwise, bit-identical to scalar body) ---
     "v_add_u32_vop2": ("uint32_t", "std::plus<>{}"),
+    "v_sub_u32_vop2": ("uint32_t", "std::minus<>{}"),
+    "v_subrev_u32_vop2": ("uint32_t", "[](auto a, auto b) { return b - a; }"),
+    "v_and_b32_vop2": ("uint32_t", "std::bit_and<>{}"),
+    "v_or_b32_vop2": ("uint32_t", "std::bit_or<>{}"),
+    "v_xor_b32_vop2": ("uint32_t", "std::bit_xor<>{}"),
+    "v_xnor_b32_vop2": ("uint32_t", "[](auto a, auto b) { return ~(a ^ b); }"),
+    # rev: shift value is vsrc1 (b), shift count is src0 (a), masked to 5 bits.
+    "v_lshlrev_b32_vop2": ("uint32_t", "[](auto a, auto b) { return b << (a & 31u); }"),
+    "v_lshrrev_b32_vop2": ("uint32_t", "[](auto a, auto b) { return b >> (a & 31u); }"),
+    "v_mul_u32_u24_vop2": (
+        "uint32_t",
+        "[](auto a, auto b) { return (a & 0x00FFFFFFu) * (b & 0x00FFFFFFu); }",
+    ),
+    # Signed 24-bit multiply, low 32 bits. Sign-extend the low 24 bits to int32
+    # (matching the scalar (int32_t)(x<<8)>>8); the int32 product's low 32 bits
+    # are exact, so no widening is needed.
+    "v_mul_i32_i24_vop2": (
+        "uint32_t",
+        "[](auto a, auto b) {"
+        " auto sa = (util::stdx::static_simd_cast<util::native<int32_t>>(a) << 8) >> 8;"
+        " auto sb = (util::stdx::static_simd_cast<util::native<int32_t>>(b) << 8) >> 8;"
+        " return util::stdx::static_simd_cast<util::native<uint32_t>>(sa * sb); }",
+    ),
+    # High 32 bits of the 24-bit multiply (48-bit product). The 32x32->64 step is
+    # done by widening the lanes to a 64-bit fixed_size_simd, multiplying, and
+    # shifting right by 32 (arithmetic for the signed form) before truncating
+    # back to uint32 — bit-identical to the scalar uint64/int64 intermediates.
+    "v_mul_hi_u32_u24_vop2": (
+        "uint32_t",
+        "[](auto a, auto b) {"
+        " using U64 = util::stdx::fixed_size_simd<uint64_t, util::native<uint32_t>::size()>;"
+        " auto pa = util::stdx::static_simd_cast<U64>(a & 0x00FFFFFFu);"
+        " auto pb = util::stdx::static_simd_cast<U64>(b & 0x00FFFFFFu);"
+        " return util::stdx::static_simd_cast<util::native<uint32_t>>((pa * pb) >> 32); }",
+    ),
+    "v_mul_hi_i32_i24_vop2": (
+        "uint32_t",
+        "[](auto a, auto b) {"
+        " auto sa = (util::stdx::static_simd_cast<util::native<int32_t>>(a) << 8) >> 8;"
+        " auto sb = (util::stdx::static_simd_cast<util::native<int32_t>>(b) << 8) >> 8;"
+        " using I64 = util::stdx::fixed_size_simd<int64_t, util::native<int32_t>::size()>;"
+        " auto pa = util::stdx::static_simd_cast<I64>(sa);"
+        " auto pb = util::stdx::static_simd_cast<I64>(sb);"
+        " return util::stdx::static_simd_cast<util::native<uint32_t>>((pa * pb) >> 32); }",
+    ),
+    "v_max_u32_vop2": ("uint32_t", "[](auto a, auto b) { return util::stdx::max(a, b); }"),
+    "v_min_u32_vop2": ("uint32_t", "[](auto a, auto b) { return util::stdx::min(a, b); }"),
+    # --- int32 (signed: arithmetic shift / signed min-max) ---
+    "v_ashrrev_i32_vop2": ("int32_t", "[](auto a, auto b) { return b >> (a & 31); }"),
+    "v_max_i32_vop2": ("int32_t", "[](auto a, auto b) { return util::stdx::max(a, b); }"),
+    "v_min_i32_vop2": ("int32_t", "[](auto a, auto b) { return util::stdx::min(a, b); }"),
+    # --- 16-bit integer (low 16 bits, result zero-extended to 32). Lane type
+    # stays uint32_t; the functor masks/sign-extends the low 16 bits and writes
+    # back the zero-extended 16-bit result, matching write_lane semantics. ---
+    "v_add_u16_vop2": ("uint32_t", "[](auto a, auto b) { return (a + b) & 0xFFFFu; }"),
+    "v_sub_u16_vop2": ("uint32_t", "[](auto a, auto b) { return (a - b) & 0xFFFFu; }"),
+    "v_subrev_u16_vop2": ("uint32_t", "[](auto a, auto b) { return (b - a) & 0xFFFFu; }"),
+    "v_mul_lo_u16_vop2": (
+        "uint32_t",
+        "[](auto a, auto b) { return ((a & 0xFFFFu) * (b & 0xFFFFu)) & 0xFFFFu; }",
+    ),
+    # rev: shift value is vsrc1 (b), count is src0 (a) masked to 4 bits.
+    "v_lshlrev_b16_vop2": ("uint32_t", "[](auto a, auto b) { return (b << (a & 15u)) & 0xFFFFu; }"),
+    "v_lshrrev_b16_vop2": ("uint32_t", "[](auto a, auto b) { return (b & 0xFFFFu) >> (a & 15u); }"),
+    # ashr: sign-extend the low 16 bits to int32, arithmetic-shift by count & 15
+    # (the scalar masks the i16 count to 4 bits), then take the low 16 bits.
+    "v_ashrrev_i16_vop2": (
+        "uint32_t",
+        "[](auto a, auto b) {"
+        " auto sb = (util::stdx::static_simd_cast<util::native<int32_t>>(b) << 16) >> 16;"
+        " auto sa = (util::stdx::static_simd_cast<util::native<int32_t>>(a) << 16) >> 16;"
+        " return util::stdx::static_simd_cast<util::native<uint32_t>>(sb >> (sa & 15)) & 0xFFFFu; }",
+    ),
+    "v_max_i16_vop2": (
+        "uint32_t",
+        "[](auto a, auto b) {"
+        " auto sa = (util::stdx::static_simd_cast<util::native<int32_t>>(a) << 16) >> 16;"
+        " auto sb = (util::stdx::static_simd_cast<util::native<int32_t>>(b) << 16) >> 16;"
+        " return util::stdx::static_simd_cast<util::native<uint32_t>>(util::stdx::max(sa, sb))"
+        " & 0xFFFFu; }",
+    ),
+    "v_min_i16_vop2": (
+        "uint32_t",
+        "[](auto a, auto b) {"
+        " auto sa = (util::stdx::static_simd_cast<util::native<int32_t>>(a) << 16) >> 16;"
+        " auto sb = (util::stdx::static_simd_cast<util::native<int32_t>>(b) << 16) >> 16;"
+        " return util::stdx::static_simd_cast<util::native<uint32_t>>(util::stdx::min(sa, sb))"
+        " & 0xFFFFu; }",
+    ),
+    "v_max_u16_vop2": (
+        "uint32_t",
+        "[](auto a, auto b) { return util::stdx::max(a & 0xFFFFu, b & 0xFFFFu); }",
+    ),
+    "v_min_u16_vop2": (
+        "uint32_t",
+        "[](auto a, auto b) { return util::stdx::min(a & 0xFFFFu, b & 0xFFFFu); }",
+    ),
+    # --- float min/max. util::stdx::fmax/fmin match the scalar std::fmax/fmin
+    # used by the generated bodies for all finite/Inf inputs. Two accepted
+    # divergences (per project direction): (1) NaN inputs may differ in NaN
+    # payload; (2) a signed-zero tie returns the opposite-signed zero — scalar
+    # std::fmax/fmin returns the first operand, the packed vmaxps/vminps the
+    # second, so e.g. fmax(-0,+0) is -0 (scalar) vs +0 (SIMD). Both are
+    # numerically equal results; the guard tests skip NaN-input and zero-tie
+    # lanes (UtilSimd.Fmax/Fmin_VectorMatchesScalar_BitExact). All other inputs
+    # are bit-exact. (The earlier "not reproducible" note conflated these two
+    # accepted corners with a hard blocker.) ---
+    "v_max_f32_vop2": ("float32_t", "[](auto a, auto b) { return util::stdx::fmax(a, b); }"),
+    "v_min_f32_vop2": ("float32_t", "[](auto a, auto b) { return util::stdx::fmin(a, b); }"),
+    "v_max_f16_vop2": (
+        "uint32_t",
+        "[](auto a, auto b) {"
+        " return util::f32_to_f16_simd("
+        "util::stdx::fmax(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b))); }",
+    ),
+    "v_min_f16_vop2": (
+        "uint32_t",
+        "[](auto a, auto b) {"
+        " return util::f32_to_f16_simd("
+        "util::stdx::fmin(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b))); }",
+    ),
+    # --- f16 binary (low 16 bits f16, result zero-extended). Same f32
+    # intermediate as the scalar bodies (single final round) ⇒ bit-identical. ---
+    "v_add_f16_vop2": (
+        "uint32_t",
+        "[](auto a, auto b) {"
+        " return util::f32_to_f16_simd(util::f16_to_f32_simd(a) + util::f16_to_f32_simd(b)); }",
+    ),
+    "v_sub_f16_vop2": (
+        "uint32_t",
+        "[](auto a, auto b) {"
+        " return util::f32_to_f16_simd(util::f16_to_f32_simd(a) - util::f16_to_f32_simd(b)); }",
+    ),
+    "v_subrev_f16_vop2": (
+        "uint32_t",
+        "[](auto a, auto b) {"
+        " return util::f32_to_f16_simd(util::f16_to_f32_simd(b) - util::f16_to_f32_simd(a)); }",
+    ),
+    "v_mul_f16_vop2": (
+        "uint32_t",
+        "[](auto a, auto b) {"
+        " return util::f32_to_f16_simd(util::f16_to_f32_simd(a) * util::f16_to_f32_simd(b)); }",
+    ),
+    # v_ldexp_f16: dst = f16(ldexp(f16->f32(src0), (int16)vsrc1)). src0 is an f16
+    # multiplicand, vsrc1 a signed-16-bit exponent (widened to a fixed_size int
+    # lane). std::ldexp is a power-of-2 scale with a single correctly-rounded
+    # result; util::stdx::ldexp matches it bit-for-bit (verified full-range incl
+    # NaN/Inf/denormal), and the f16<->f32 conversions are bit-exact, so the
+    # composition matches the scalar body. No NaN-operand ambiguity (unlike fma).
+    "v_ldexp_f16_vop2": (
+        "uint32_t",
+        "[](auto a, auto b) {"
+        " auto x = util::f16_to_f32_simd(a);"
+        " auto n = util::stdx::static_simd_cast<"
+        "util::stdx::fixed_size_simd<int, util::native<float>::size()>>("
+        "(util::stdx::static_simd_cast<util::native<int32_t>>(b) << 16) >> 16);"
+        " return util::f32_to_f16_simd(util::stdx::ldexp(x, n)); }",
+    ),
+}
+
+# template_name -> (cpp_in_type, cpp_out_type, cpp_unary_op_functor)
+#
+# Same keying as SIMD_VOP2_BINARY. The functor is invoked as
+#   un_op(simd<Tin>) -> simd<Tout>
+# inside try_execute_unary_vop1_simd. Tin and Tout are both 32-bit lane
+# types and may differ (e.g. int32->float32 for v_cvt_f32_i32). Eligible
+# kernels are those whose host SIMD result is bit-identical to the scalar
+# generated body: elementwise bit ops, exact int<->float casts, and the
+# correctly-rounded IEEE operations (div, sqrt, and — verified per toolchain
+# via the parity test — exp2/log2). NaN/clamp-bearing conversions and the
+# inexact transcendentals (sin/cos) are excluded.
+SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
+    # --- bitwise / move (uint32, bit-identical) ---
+    "v_mov_b32_vop1": ("uint32_t", "uint32_t", "[](auto a) { return a; }"),
+    "v_not_b32_vop1": ("uint32_t", "uint32_t", "[](auto a) { return ~a; }"),
+    # v_bfrev_b32: reverse the 32 bits of src0. The scalar body loops bit-by-bit;
+    # this is the branchless swap-by-strides equivalent (1/2/4/8/16-bit groups),
+    # bit-identical for every input. Pure uint32 bitwise ops.
+    "v_bfrev_b32_vop1": (
+        "uint32_t",
+        "uint32_t",
+        "[](auto a) {"
+        " auto x = a;"
+        " x = ((x & 0x55555555u) << 1) | ((x >> 1) & 0x55555555u);"
+        " x = ((x & 0x33333333u) << 2) | ((x >> 2) & 0x33333333u);"
+        " x = ((x & 0x0F0F0F0Fu) << 4) | ((x >> 4) & 0x0F0F0F0Fu);"
+        " x = ((x & 0x00FF00FFu) << 8) | ((x >> 8) & 0x00FF00FFu);"
+        " return (x << 16) | (x >> 16); }",
+    ),
+    # --- ubyte -> f32 (extract byte N, exact int->float) -----------------------
+    # dst = float(byte_N(src0)); byte value is 0..255 so the int->float cast is
+    # exact and bit-identical to the scalar static_cast<float>.
+    "v_cvt_f32_ubyte0_vop1": (
+        "uint32_t",
+        "float32_t",
+        "[](auto a) { return util::stdx::static_simd_cast<util::native<float32_t>>(a & 0xFFu); }",
+    ),
+    "v_cvt_f32_ubyte1_vop1": (
+        "uint32_t",
+        "float32_t",
+        "[](auto a) {"
+        " return util::stdx::static_simd_cast<util::native<float32_t>>((a >> 8) & 0xFFu); }",
+    ),
+    "v_cvt_f32_ubyte2_vop1": (
+        "uint32_t",
+        "float32_t",
+        "[](auto a) {"
+        " return util::stdx::static_simd_cast<util::native<float32_t>>((a >> 16) & 0xFFu); }",
+    ),
+    "v_cvt_f32_ubyte3_vop1": (
+        "uint32_t",
+        "float32_t",
+        "[](auto a) {"
+        " return util::stdx::static_simd_cast<util::native<float32_t>>((a >> 24) & 0xFFu); }",
+    ),
+    # --- int<->float casts (single-rounded, bit-identical) ---
+    "v_cvt_f32_i32_vop1": (
+        "int32_t",
+        "float32_t",
+        "[](auto a) { return util::stdx::static_simd_cast<util::native<float32_t>>(a); }",
+    ),
+    "v_cvt_f32_u32_vop1": (
+        "uint32_t",
+        "float32_t",
+        "[](auto a) { return util::stdx::static_simd_cast<util::native<float32_t>>(a); }",
+    ),
+    # --- float rounding (bit-identical to std::* on host) ---
+    "v_floor_f32_vop1": ("float32_t", "float32_t", "[](auto a) { return util::stdx::floor(a); }"),
+    "v_ceil_f32_vop1": ("float32_t", "float32_t", "[](auto a) { return util::stdx::ceil(a); }"),
+    "v_trunc_f32_vop1": ("float32_t", "float32_t", "[](auto a) { return util::stdx::trunc(a); }"),
+    "v_rndne_f32_vop1": (
+        "float32_t",
+        "float32_t",
+        "[](auto a) { return util::stdx::nearbyint(a); }",
+    ),
+    "v_fract_f32_vop1": (
+        "float32_t",
+        "float32_t",
+        "[](auto a) { return a - util::stdx::floor(a); }",
+    ),
+    # --- transcendental div / sqrt. These mirror amdgpu::transcendental::*_f32
+    # exactly via util::*_f32_simd (FTZ input/output flush + canonical-qNaN and
+    # NaN-input-preservation blends), so the SIMD result is bit-identical to the
+    # forced-scalar body on every input incl NaN/Inf/denormal. ---
+    "v_rcp_f32_vop1": ("float32_t", "float32_t", "[](auto a) { return util::rcp_f32_simd(a); }"),
+    "v_rcp_iflag_f32_vop1": (
+        "float32_t",
+        "float32_t",
+        "[](auto a) { return util::rcp_f32_simd(a); }",
+    ),
+    "v_rsq_f32_vop1": ("float32_t", "float32_t", "[](auto a) { return util::rsq_f32_simd(a); }"),
+    "v_sqrt_f32_vop1": ("float32_t", "float32_t", "[](auto a) { return util::sqrt_f32_simd(a); }"),
+    # --- transcendental exp2/log2. util::{exp,log}_f32_simd wrap stdx::exp2/log2
+    # with the same FTZ flush / special-case guards as the scalar transcendental
+    # reference; the underlying vector libm is bit-exact to scalar std::* on the
+    # supported toolchains (libstdc++ 13 / AVX-512), guarded by
+    # UtilSimd.Exp2/Log2_*_BitExact. v_sin/v_cos excluded: vector libm ~1 ULP off. ---
+    "v_exp_f32_vop1": ("float32_t", "float32_t", "[](auto a) { return util::exp_f32_simd(a); }"),
+    "v_log_f32_vop1": ("float32_t", "float32_t", "[](auto a) { return util::log_f32_simd(a); }"),
+    # --- float -> int conversions with NaN->0 and saturating clamp. The float
+    # comparison masks are re-typed to the int lane via simd_mask_as<> before
+    # the where-blend. Masks are mutually exclusive so application order is
+    # irrelevant. Matches the scalar bodies' truncate-toward-zero cast. ---
+    "v_cvt_i32_f32_vop1": (
+        "float32_t",
+        "int32_t",
+        "[](auto s) {"
+        " util::native<int32_t> out = util::stdx::static_simd_cast<util::native<int32_t>>(s);"
+        " util::stdx::where(simd_mask_as<int32_t>(s >= 2147483648.0f), out) = 2147483647;"
+        " util::stdx::where(simd_mask_as<int32_t>(s < -2147483648.0f), out) = (-2147483647 - 1);"
+        " util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(s)), out) = 0;"
+        " return out; }",
+    ),
+    "v_cvt_u32_f32_vop1": (
+        "float32_t",
+        "uint32_t",
+        "[](auto s) {"
+        " util::native<uint32_t> out = util::stdx::static_simd_cast<util::native<uint32_t>>(s);"
+        " util::stdx::where(simd_mask_as<uint32_t>(s >= 4294967296.0f), out) = 4294967295u;"
+        " util::stdx::where(simd_mask_as<uint32_t>(util::stdx::isnan(s) || s < 0.0f), out) = 0u;"
+        " return out; }",
+    ),
+    "v_cvt_flr_i32_f32_vop1": (
+        "float32_t",
+        "int32_t",
+        "[](auto s) {"
+        " auto r = util::stdx::floor(s);"
+        " util::native<int32_t> out = util::stdx::static_simd_cast<util::native<int32_t>>(r);"
+        " util::stdx::where(simd_mask_as<int32_t>(r >= 2147483648.0f), out) = 2147483647;"
+        " util::stdx::where(simd_mask_as<int32_t>(r < -2147483648.0f), out) = (-2147483647 - 1);"
+        " util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(r)), out) = 0;"
+        " return out; }",
+    ),
+    "v_cvt_rpi_i32_f32_vop1": (
+        "float32_t",
+        "int32_t",
+        "[](auto s) {"
+        " auto r = util::stdx::ceil(s - util::native<float32_t>(0.5f));"
+        " util::native<int32_t> out = util::stdx::static_simd_cast<util::native<int32_t>>(r);"
+        " util::stdx::where(simd_mask_as<int32_t>(r >= 2147483648.0f), out) = 2147483647;"
+        " util::stdx::where(simd_mask_as<int32_t>(r < -2147483648.0f), out) = (-2147483647 - 1);"
+        " util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(r)), out) = 0;"
+        " return out; }",
+    ),
+    # --- f16 (half) ops. Scalar bodies route through an f32 intermediate with a
+    # single final round, so the SIMD path (f16_to_f32_simd -> f32 op ->
+    # f32_to_f16_simd) is bit-identical. The conversions are bit-exact (see
+    # UtilSimd.F16ToF32/F32ToF16 guards). f16 result occupies the low 16 bits of
+    # the dst, high zeroed (Tout=uint32_t), matching write_lane zero-extension. ---
+    "v_floor_f16_vop1": (
+        "uint32_t",
+        "uint32_t",
+        "[](auto a) { return util::f32_to_f16_simd(util::stdx::floor(util::f16_to_f32_simd(a))); }",
+    ),
+    "v_ceil_f16_vop1": (
+        "uint32_t",
+        "uint32_t",
+        "[](auto a) { return util::f32_to_f16_simd(util::stdx::ceil(util::f16_to_f32_simd(a))); }",
+    ),
+    "v_trunc_f16_vop1": (
+        "uint32_t",
+        "uint32_t",
+        "[](auto a) { return util::f32_to_f16_simd(util::stdx::trunc(util::f16_to_f32_simd(a))); }",
+    ),
+    "v_rndne_f16_vop1": (
+        "uint32_t",
+        "uint32_t",
+        "[](auto a) {"
+        " return util::f32_to_f16_simd(util::stdx::nearbyint(util::f16_to_f32_simd(a))); }",
+    ),
+    "v_fract_f16_vop1": (
+        "uint32_t",
+        "uint32_t",
+        "[](auto a) {"
+        " auto f = util::f16_to_f32_simd(a);"
+        " return util::f32_to_f16_simd(f - util::stdx::floor(f)); }",
+    ),
+    # f16 transcendentals mirror the scalar f32_to_f16(<op>_f32(f16_to_f32(x)))
+    # by applying the f32-domain util::*_f32_simd helper (FTZ flush + canonical
+    # qNaN / NaN-input guards) on the f16->f32 intermediate.
+    "v_rcp_f16_vop1": (
+        "uint32_t",
+        "uint32_t",
+        "[](auto a) {"
+        " return util::f32_to_f16_simd(util::rcp_f32_simd(util::f16_to_f32_simd(a))); }",
+    ),
+    "v_rsq_f16_vop1": (
+        "uint32_t",
+        "uint32_t",
+        "[](auto a) {"
+        " return util::f32_to_f16_simd(util::rsq_f32_simd(util::f16_to_f32_simd(a))); }",
+    ),
+    "v_sqrt_f16_vop1": (
+        "uint32_t",
+        "uint32_t",
+        "[](auto a) {"
+        " return util::f32_to_f16_simd(util::sqrt_f32_simd(util::f16_to_f32_simd(a))); }",
+    ),
+    # exp/log_f16 inherit the exp2/log2 toolchain guard (UtilSimd.Exp2/Log2_*).
+    "v_exp_f16_vop1": (
+        "uint32_t",
+        "uint32_t",
+        "[](auto a) {"
+        " return util::f32_to_f16_simd(util::exp_f32_simd(util::f16_to_f32_simd(a))); }",
+    ),
+    "v_log_f16_vop1": (
+        "uint32_t",
+        "uint32_t",
+        "[](auto a) {"
+        " return util::f32_to_f16_simd(util::log_f32_simd(util::f16_to_f32_simd(a))); }",
+    ),
+    # --- f16 <-> f32 / int16 conversions ---
+    "v_cvt_f32_f16_vop1": (
+        "uint32_t",
+        "float32_t",
+        "[](auto a) { return util::f16_to_f32_simd(a); }",
+    ),
+    "v_cvt_f16_f32_vop1": (
+        "float32_t",
+        "uint32_t",
+        "[](auto a) { return util::f32_to_f16_simd(a); }",
+    ),
+    "v_cvt_f16_i16_vop1": (
+        "int32_t",
+        "uint32_t",
+        "[](auto a) {"
+        " auto i = (a << 16) >> 16;"  # sign-extend low 16 bits
+        " return util::f32_to_f16_simd(util::stdx::static_simd_cast<util::native<float32_t>>(i)); }",
+    ),
+    "v_cvt_f16_u16_vop1": (
+        "uint32_t",
+        "uint32_t",
+        "[](auto a) {"
+        " auto u = a & 0xFFFFu;"
+        " return util::f32_to_f16_simd(util::stdx::static_simd_cast<util::native<float32_t>>(u)); }",
+    ),
+    "v_cvt_i16_f16_vop1": (
+        "uint32_t",
+        "uint32_t",
+        "[](auto a) {"
+        " auto s = util::f16_to_f32_simd(a);"
+        " util::native<int32_t> o = util::stdx::static_simd_cast<util::native<int32_t>>(s);"
+        " util::stdx::where(simd_mask_as<int32_t>(s >= 32768.0f), o) = 32767;"
+        " util::stdx::where(simd_mask_as<int32_t>(s < -32768.0f), o) = -32768;"
+        " util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(s)), o) = 0;"
+        " return util::stdx::static_simd_cast<util::native<uint32_t>>(o) & 0xFFFFu; }",
+    ),
+    "v_cvt_u16_f16_vop1": (
+        "uint32_t",
+        "uint32_t",
+        "[](auto a) {"
+        " auto s = util::f16_to_f32_simd(a);"
+        " util::native<uint32_t> o = util::stdx::static_simd_cast<util::native<uint32_t>>(s);"
+        " util::stdx::where(simd_mask_as<uint32_t>(s >= 65536.0f), o) = 65535u;"
+        " util::stdx::where(simd_mask_as<uint32_t>(util::stdx::isnan(s) || s < 0.0f), o) = 0u;"
+        " return o & 0xFFFFu; }",
+    ),
+}
+
+
+# template_name -> cpp_carry_op_functor
+#
+# Same keying as SIMD_VOP2_BINARY. The functor is invoked as
+#   carry_op(simd<uint32_t> src0, simd<uint32_t> vsrc1, simd<uint32_t> cin)
+#     -> SimdCarry<simd<uint32_t>, mask>
+# inside try_execute_binary_vop2_carry_simd (lane type fixed to uint32_t).
+# `cin` is the incoming VCC bit (0/1 per lane); the add_co/sub_co/subrev_co
+# forms have no carry-in and ignore it (unnamed third parameter). Each functor
+# returns the 32-bit result and a per-lane carry/borrow mask via make_simd_carry;
+# the glue masked-stores the result and merges the carry into VCC for active
+# lanes only. Bit-identical to the scalar bodies:
+#   add_co:     w = (u64)a + (u64)b;          carry  = w > 0xFFFFFFFF
+#   sub_co:     dst = a - b;                  borrow = a < b
+#   subrev_co:  dst = b - a;                  borrow = b < a   (operands swapped)
+#   addc:       w = (u64)a + (u64)b + cin;    carry  = w > 0xFFFFFFFF
+#   subb:       dst = a - b - cin;            borrow = a < b + cin
+#   subbrev:    dst = b - a - cin;            borrow = b < a + cin (operands swapped)
+# The unsigned-wraparound carry/borrow identities (e.g. add carry = (a+b) < a;
+# subtract-with-borrow chain) reproduce the scalar u64-domain results exactly.
+SIMD_VOP2_CARRY: dict[str, str] = {
+    "v_add_co_u32_vop2": (
+        "[](auto a, auto b, auto) {"
+        " auto s = a + b;"
+        " return make_simd_carry(s, s < a); }"
+    ),
+    "v_sub_co_u32_vop2": (
+        "[](auto a, auto b, auto) { return make_simd_carry(a - b, a < b); }"
+    ),
+    "v_subrev_co_u32_vop2": (
+        "[](auto a, auto b, auto) { return make_simd_carry(b - a, b < a); }"
+    ),
+    "v_addc_co_u32_vop2": (
+        "[](auto a, auto b, auto cin) {"
+        " auto t1 = a + b; auto c1 = t1 < a;"
+        " auto t2 = t1 + cin; auto c2 = t2 < t1;"
+        " return make_simd_carry(t2, c1 | c2); }"
+    ),
+    "v_subb_co_u32_vop2": (
+        "[](auto a, auto b, auto cin) {"
+        " auto t1 = a - b; auto bw1 = a < b;"
+        " auto t2 = t1 - cin; auto bw2 = t1 < cin;"
+        " return make_simd_carry(t2, bw1 | bw2); }"
+    ),
+    "v_subbrev_co_u32_vop2": (
+        "[](auto a, auto b, auto cin) {"
+        " auto t1 = b - a; auto bw1 = b < a;"
+        " auto t2 = t1 - cin; auto bw2 = t1 < cin;"
+        " return make_simd_carry(t2, bw1 | bw2); }"
+    ),
+}
+
+
+# template_name -> (cpp_type, k_literal_expr, cpp_fma_op_functor)
+#
+# Same keying as SIMD_VOP2_BINARY. The VOP2 FMA/MAC/MAD family has three operand
+# shapes, all built on the single-rounded fused multiply-add (the scalar bodies
+# use std::fma). The functor is invoked as
+#   fma_op(simd<T> src0, simd<T> vsrc1, simd<T> vdst, simd<T> k) -> simd<T>
+# inside try_execute_ternary_vop2_simd; `k` is the broadcast inline literal
+# (`k_literal_expr`, an inst.-qualified expression, or "0u" when there is none).
+# Shapes:
+#   dst-accumulate (fmac/mac):     fma(s0, s1, dvst)        -- ignores k
+#   literal addend (fmaak/madak):  fma(s0, s1, k)           -- ignores dvst
+#   literal mult  (fmamk/madmk):   fma(s0, k, s1)           -- ignores dvst
+# f16 forms (lane type uint32_t) convert each operand via f16_to_f32_simd and
+# round the result with f32_to_f16_simd (single final round, matching scalar).
+# util::stdx::fma is bit-identical to std::fma for all finite/Inf inputs
+# (UtilSimd.Fma_VectorMatchesScalar_BitExact, NaN inputs excluded); the f16<->f32
+# conversions are already bit-exact, so the f16 forms match by composition. When
+# an input is NaN the packed and scalar FMA may pick a different NaN operand to
+# propagate (toolchain-dependent payload); that NaN-payload divergence is
+# accepted (the result is a NaN either way). Note the two
+# distinct literal members: fmaak/fmamk use inst.simm32_, while madak/madmk use
+# inst.simm32.encoding_value_ (matching the scalar bodies). v_fmac_f64 is
+# excluded (64-bit / 2-VGPR lanes — a separate width).
+_FMA_ACC_F32 = "[](auto a, auto b, auto d, auto) { return util::stdx::fma(a, b, d); }"
+_FMA_ADDK_F32 = "[](auto a, auto b, auto, auto k) { return util::stdx::fma(a, b, k); }"
+_FMA_MULK_F32 = "[](auto a, auto b, auto, auto k) { return util::stdx::fma(a, k, b); }"
+_FMA_ACC_F16 = (
+    "[](auto a, auto b, auto d, auto) {"
+    " return util::f32_to_f16_simd(util::stdx::fma("
+    "util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), util::f16_to_f32_simd(d))); }"
+)
+_FMA_ADDK_F16 = (
+    "[](auto a, auto b, auto, auto k) {"
+    " return util::f32_to_f16_simd(util::stdx::fma("
+    "util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), util::f16_to_f32_simd(k))); }"
+)
+_FMA_MULK_F16 = (
+    "[](auto a, auto b, auto, auto k) {"
+    " return util::f32_to_f16_simd(util::stdx::fma("
+    "util::f16_to_f32_simd(a), util::f16_to_f32_simd(k), util::f16_to_f32_simd(b))); }"
+)
+SIMD_VOP2_TERNARY: dict[str, tuple[str, str, str]] = {
+    # --- f32 dst-accumulate ---
+    "v_fmac_f32_vop2": ("float32_t", "0u", _FMA_ACC_F32),
+    "v_fmac_dx9_zero_f32_vop2": ("float32_t", "0u", _FMA_ACC_F32),
+    "v_mac_f32_vop2": ("float32_t", "0u", _FMA_ACC_F32),
+    # --- f32 inline literal ---
+    "v_fmaak_f32_vop2": ("float32_t", "inst.simm32_", _FMA_ADDK_F32),
+    "v_madak_f32_vop2": ("float32_t", "inst.simm32.encoding_value_", _FMA_ADDK_F32),
+    "v_fmamk_f32_vop2": ("float32_t", "inst.simm32_", _FMA_MULK_F32),
+    "v_madmk_f32_vop2": ("float32_t", "inst.simm32.encoding_value_", _FMA_MULK_F32),
+    # --- f16 dst-accumulate ---
+    "v_fmac_f16_vop2": ("uint32_t", "0u", _FMA_ACC_F16),
+    "v_mac_f16_vop2": ("uint32_t", "0u", _FMA_ACC_F16),
+    # --- f16 inline literal ---
+    "v_madak_f16_vop2": ("uint32_t", "inst.simm32.encoding_value_", _FMA_ADDK_F16),
+    "v_fmamk_f16_vop2": ("uint32_t", "inst.simm32_", _FMA_MULK_F16),
+    "v_madmk_f16_vop2": ("uint32_t", "inst.simm32.encoding_value_", _FMA_MULK_F16),
+}
+
+
+# template_name -> cpp_fma_op_functor (dst-accumulate, over native<double>).
+#
+# 64-bit-lane VOP2 FMA. The only f64 VOP2 op reachable on CDNA4 is v_fmac_f64
+# (dst = fma(src0, vsrc1, dst), all f64). The functor is invoked as
+#   fma_op(simd<double> src0, simd<double> vsrc1, simd<double> vdst) -> simd<double>
+# inside try_execute_ternary_vop2_f64_simd (lane type fixed to double, read/written
+# through the split lo/hi 32-bit VGPR-pair path). util::stdx::fma over native<double>
+# is bit-identical to the scalar std::fma for all finite/Inf inputs; NaN-input lanes
+# may differ in propagated NaN payload (accepted). Guarded by
+# UtilSimd.FmaF64_VectorMatchesScalar_BitExact.
+SIMD_VOP2_FMA_F64: dict[str, str] = {
+    "v_fmac_f64_vop2": "[](auto a, auto b, auto d) { return util::stdx::fma(a, b, d); }",
+}
+
+
+# --- 64-bit-lane VOP1 unary (f64 math + v_mov_b64) -------------------------
+#
+# Maps template_name -> (lane_cpp_type, unary functor). Read/written as
+# native<T> through the split lo/hi VGPR-pair path (read_simd64/write_simd64).
+# The math ops use T = double and mirror the scalar body verbatim: the scalar
+# rcp/rsq write `1.0f / x` (the float 1.0f converts exactly to 1.0 and the
+# division is done in double), so the SIMD form uses native<double>(1.0). All
+# map to correctly-rounded IEEE ops (vroundpd / vsqrtpd / vdivpd), bit-identical
+# to std::* for finite/Inf inputs; NaN-input payload divergence is accepted (see
+# the glue note + UtilSimd.*F64*_BitExact guards). v_mov_b64 is a pure 64-bit
+# copy (T = uint64_t).
+SIMD_VOP1_UNARY_F64: dict[str, tuple[str, str]] = {
+    "v_ceil_f64_vop1": ("double", "[](auto a) { return util::stdx::ceil(a); }"),
+    "v_floor_f64_vop1": ("double", "[](auto a) { return util::stdx::floor(a); }"),
+    "v_trunc_f64_vop1": ("double", "[](auto a) { return util::stdx::trunc(a); }"),
+    "v_rndne_f64_vop1": ("double", "[](auto a) { return util::stdx::nearbyint(a); }"),
+    "v_fract_f64_vop1": ("double", "[](auto a) { return a - util::stdx::floor(a); }"),
+    "v_rcp_f64_vop1": ("double", "[](auto a) { return util::native<double>(1.0) / a; }"),
+    "v_rsq_f64_vop1": (
+        "double",
+        "[](auto a) { return util::native<double>(1.0) / util::stdx::sqrt(a); }",
+    ),
+    "v_sqrt_f64_vop1": ("double", "[](auto a) { return util::stdx::sqrt(a); }"),
+    "v_mov_b64_vop1": ("uint64_t", "[](auto a) { return a; }"),
+}
+
+
+# --- mixed-width f64 <-> 32-bit conversions -------------------------------
+#
+# These VOP1 cvt ops bridge an 8-wide (native_width64) f64 chunk and the same
+# number of 32-bit lanes, so they use dedicated glue rather than the equal-width
+# unary path. The 32-bit side is a util::narrow32<T> (fixed_size_simd<T,8>); a
+# direct static_simd_cast bridges it to/from native<double> with no bit_cast.
+#
+# f64 source -> 32-bit dst. template_name -> (out_lane_cpp_type, functor); the
+# functor is invoked as cvt_op(native<double>) -> narrow32<Tout> inside
+# try_execute_cvt_f64_to_b32_simd. cvt_f32_f64 is a single correctly-rounded
+# narrowing cast (vcvtpd2ps); the int forms do NaN->0 and the saturating clamp in
+# the double domain (all where-masks native<double>, so no cross-width mask cast)
+# then one truncating cast to the 8-wide int — bit-identical to the scalar body
+# for finite/Inf inputs. A NaN *result* of cvt_f32_f64 may differ in payload
+# (accepted; the A/B test skips it). INT32_MAX/MIN and UINT32_MAX are all exactly
+# representable in double, so the clamp constants cast back to the exact integers.
+SIMD_CVT_F64_TO_B32: dict[str, tuple[str, str]] = {
+    "v_cvt_f32_f64_vop1": (
+        "float32_t",
+        "[](auto s) { return util::stdx::static_simd_cast<util::narrow32<float32_t>>(s); }",
+    ),
+    "v_cvt_i32_f64_vop1": (
+        "int32_t",
+        "[](auto s) {"
+        " auto r = s;"
+        " util::stdx::where(util::stdx::isnan(s), r) = 0.0;"
+        " util::stdx::where(s >= 2147483648.0, r) = 2147483647.0;"
+        " util::stdx::where(s < -2147483648.0, r) = -2147483648.0;"
+        " return util::stdx::static_simd_cast<util::narrow32<int32_t>>(r); }",
+    ),
+    "v_cvt_u32_f64_vop1": (
+        "uint32_t",
+        "[](auto s) {"
+        " auto r = s;"
+        " util::stdx::where(util::stdx::isnan(s) || s < 0.0, r) = 0.0;"
+        " util::stdx::where(s >= 4294967296.0, r) = 4294967295.0;"
+        " return util::stdx::static_simd_cast<util::narrow32<uint32_t>>(r); }",
+    ),
+}
+
+# 32-bit source -> f64 dst. template_name -> (in_lane_cpp_type, functor); the
+# functor is invoked as cvt_op(narrow32<Tin>) -> native<double> inside
+# try_execute_cvt_b32_to_f64_simd. Each is an exact widening static_simd_cast
+# (vcvtps2pd for f32; int->double for i32/u32), bit-identical to the scalar body
+# (static_cast<double>) for every input.
+SIMD_CVT_B32_TO_F64: dict[str, tuple[str, str]] = {
+    "v_cvt_f64_f32_vop1": (
+        "float32_t",
+        "[](auto in) { return util::stdx::static_simd_cast<util::native<double>>(in); }",
+    ),
+    "v_cvt_f64_i32_vop1": (
+        "int32_t",
+        "[](auto in) { return util::stdx::static_simd_cast<util::native<double>>(in); }",
+    ),
+    "v_cvt_f64_u32_vop1": (
+        "uint32_t",
+        "[](auto in) { return util::stdx::static_simd_cast<util::native<double>>(in); }",
+    ),
+}
+
+
+# template_name set for v_cndmask_b32 (VCC-driven per-lane select). No functor:
+# the op is fixed (dst = (VCC bit) ? vsrc1 : src0), a pure 32-bit bit select, so
+# the SIMD result is bit-identical to the scalar body for every input.
+SIMD_VOP2_CNDMASK: set[str] = {
+    "v_cndmask_b32_vop2",
+}
+
+
+# --- VOPC compare -> VCC ---------------------------------------------------
+#
+# 198 VOPC opcodes on CDNA4 are the single biggest breadth. Each writes one bit
+# into VCC per active EXEC lane (inactive bits preserved); CDNA4 has no v_cmpx
+# (EXEC-writing) form, so one glue shape (try_execute_vopc_simd) covers them all.
+# The table maps template_name -> (lane_cpp_type, cmp_functor); the functor is
+# invoked as cmp_op(native<T> src0, native<T> vsrc1) -> simd_mask and must mirror
+# the scalar body's comparison expression *verbatim* (esp. the ordered vs
+# unordered NaN behaviour, e.g. v_cmp_nlt = !(a < b), true on NaN). It is built
+# programmatically below from per-suffix operand conversions and per-relation
+# expressions.
+#
+# Lane width buckets: the 32-bit (f32/i32/u32) and 16-bit (f16/i16/u16) suffixes
+# all read as 32-bit lanes — the 16-bit ones narrow/convert inside the functor —
+# so they share the existing read_simd<T> path. The 64-bit suffixes (f64/i64/u64)
+# need the 64-bit-lane infra and are wired separately. v_cmp_class_* (a bitfield
+# class test, not a relational compare) is left scalar.
+
+# suffix -> (lane_cpp_type, operand-conversion template using {x})
+_VOPC_SUFFIX: dict[str, tuple[str, str]] = {
+    "f32": ("float32_t", "{x}"),
+    "f16": ("uint32_t", "util::f16_to_f32_simd({x})"),
+    "i32": ("int32_t", "{x}"),
+    "u32": ("uint32_t", "{x}"),
+    # 16-bit integers read as uint32 lanes; sign-extend / mask the low 16 bits to
+    # match the scalar static_cast<int16_t>/<uint16_t>.
+    "i16": ("uint32_t", "((util::stdx::static_simd_cast<util::native<int32_t>>({x}) << 16) >> 16)"),
+    "u16": ("uint32_t", "({x} & 0xFFFFu)"),
+    # 64-bit lanes: read directly as the native 64-bit lane type (read_simd64),
+    # so the conversion is the identity. Routed through the VOPC64 glue.
+    "f64": ("double", "{x}"),
+    "i64": ("int64_t", "{x}"),
+    "u64": ("uint64_t", "{x}"),
+}
+
+# relation -> mask expression over converted operands {a}, {b}. These mirror the
+# generated scalar comparison expressions exactly (incl. float ordered/unordered
+# NaN semantics): the n* forms are the logical negation of the base relation, so
+# they are true on NaN; o/u test orderedness directly.
+_VOPC_REL: dict[str, str] = {
+    "eq": "{a} == {b}",
+    "lt": "{a} < {b}",
+    "le": "{a} <= {b}",
+    "gt": "{a} > {b}",
+    "ge": "{a} >= {b}",
+    "ne": "{a} != {b}",  # integer not-equal
+    # float less-or-greater: ordered, FALSE on NaN. Scalar body is (a<b)||(a>b),
+    # NOT a!=b (which is TRUE on NaN). nlg is its logical negation.
+    "lg": "({a} < {b}) || ({a} > {b})",
+    "neq": "{a} != {b}",  # float not-equal
+    "nge": "!({a} >= {b})",
+    "ngt": "!({a} > {b})",
+    "nle": "!({a} <= {b})",
+    "nlg": "!(({a} < {b}) || ({a} > {b}))",
+    "nlt": "!({a} < {b})",
+    "o": "!util::stdx::isnan({a}) && !util::stdx::isnan({b})",
+    "u": "util::stdx::isnan({a}) || util::stdx::isnan({b})",
+}
+
+# Constant relations carry no comparison: f is always-false, t/tru always-true.
+# The mask type is taken from the converted-operand compare so it matches lane
+# width regardless of suffix.
+_VOPC_CONST: dict[str, str] = {"f": "false", "t": "true", "tru": "true"}
+
+_VOPC_FLOAT_RELS = ["eq", "ge", "gt", "le", "lg", "lt", "neq", "nge", "ngt", "nle", "nlg", "nlt",
+                    "o", "u", "f", "tru"]
+_VOPC_INT_RELS = ["eq", "ge", "gt", "le", "lt", "ne", "f", "t"]
+
+
+def _vopc_functor(conv: str, rel: str) -> str:
+    ca = conv.format(x="a")
+    cb = conv.format(x="b")
+    if rel in _VOPC_CONST:
+        body = f"decltype({ca} == {cb})({_VOPC_CONST[rel]})"
+    else:
+        body = _VOPC_REL[rel].format(a=ca, b=cb)
+    return f"[](auto a, auto b) {{ return {body}; }}"
+
+
+def _build_simd_vopc() -> dict[str, tuple[str, str]]:
+    table: dict[str, tuple[str, str]] = {}
+    # 16-/32-bit lane suffixes only; f64/i64/u64 (64-bit lane) wired separately.
+    for suf in ("f16", "f32"):
+        lane_t, conv = _VOPC_SUFFIX[suf]
+        for rel in _VOPC_FLOAT_RELS:
+            table[f"v_cmp_{rel}_{suf}_vopc"] = (lane_t, _vopc_functor(conv, rel))
+    for suf in ("i16", "u16", "i32", "u32"):
+        lane_t, conv = _VOPC_SUFFIX[suf]
+        for rel in _VOPC_INT_RELS:
+            table[f"v_cmp_{rel}_{suf}_vopc"] = (lane_t, _vopc_functor(conv, rel))
+    return table
+
+
+def _build_simd_vopc64() -> dict[str, tuple[str, str]]:
+    """64-bit-lane VOPC compares (f64/i64/u64), routed through the VOPC64 glue."""
+    table: dict[str, tuple[str, str]] = {}
+    lane_t, conv = _VOPC_SUFFIX["f64"]
+    for rel in _VOPC_FLOAT_RELS:
+        table[f"v_cmp_{rel}_f64_vopc"] = (lane_t, _vopc_functor(conv, rel))
+    for suf in ("i64", "u64"):
+        lane_t, conv = _VOPC_SUFFIX[suf]
+        for rel in _VOPC_INT_RELS:
+            table[f"v_cmp_{rel}_{suf}_vopc"] = (lane_t, _vopc_functor(conv, rel))
+    return table
+
+
+SIMD_VOPC: dict[str, tuple[str, str]] = _build_simd_vopc()
+SIMD_VOPC64: dict[str, tuple[str, str]] = _build_simd_vopc64()
+
+
+# --- VOPC v_cmp_class -> VCC ----------------------------------------------
+#
+# v_cmp_class tests src0's IEEE-754 float class against a 10-bit class mask in
+# vsrc1 and writes one VCC bit per active lane. It is NOT a relational compare
+# (no src0-vs-vsrc1 ordering), so it needs a class-decode functor rather than the
+# relational builder above — but the VCC merge / lane packing is identical, so the
+# f16/f32 forms reuse try_execute_vopc_simd (lane type uint32_t, raw bits). src0 is
+# read as raw bits and vsrc1 as the mask; the functor partitions the value into
+# exactly one of the 10 mutually exclusive classes (one bit set in `cls`) and
+# returns `(cls & mask) != 0`, which equals the scalar body's OR of mask-gated
+# class predicates. The classification is done purely from the exponent / mantissa
+# / sign bits (matching the scalar std::isnan/isinf/isnormal/signbit outcomes,
+# which for finite/Inf reduce to the same bit tests), so it is bit-exact for every
+# input including NaN payloads. f64 (a 64-bit value vs a 32-bit mask) needs a
+# mixed-width glue and is wired separately.
+#
+# Class-bit layout (low 10 bits of the mask): 0x001 sNaN, 0x002 qNaN, 0x004 -Inf,
+# 0x008 -normal, 0x010 -denormal, 0x020 -0, 0x040 +0, 0x080 +denormal,
+# 0x100 +normal, 0x200 +Inf. The qNaN bit is the mantissa MSB
+# (f32 0x00400000, f16 0x0200).
+_CMP_CLASS_F32 = (
+    "[](auto a, auto b) {"
+    " using U = util::native<uint32_t>;"
+    " U exp = (a >> 23) & 0xFFu;"
+    " U mant = a & 0x7FFFFFu;"
+    " auto sgn = ((a >> 31) & 1u) != 0u;"
+    " auto qnan = ((a >> 22) & 1u) != 0u;"
+    " auto is_nan = (exp == 0xFFu) && (mant != 0u);"
+    " auto is_inf = (exp == 0xFFu) && (mant == 0u);"
+    " auto is_zero = (exp == 0u) && (mant == 0u);"
+    " auto is_den = (exp == 0u) && (mant != 0u);"
+    " auto is_norm = (exp >= 1u) && (exp <= 0xFEu);"
+    " U cls(0u);"
+    " util::stdx::where(is_nan && !qnan, cls) = 0x001u;"
+    " util::stdx::where(is_nan && qnan, cls) = 0x002u;"
+    " util::stdx::where(is_inf && sgn, cls) = 0x004u;"
+    " util::stdx::where(is_norm && sgn, cls) = 0x008u;"
+    " util::stdx::where(is_den && sgn, cls) = 0x010u;"
+    " util::stdx::where(is_zero && sgn, cls) = 0x020u;"
+    " util::stdx::where(is_zero && !sgn, cls) = 0x040u;"
+    " util::stdx::where(is_den && !sgn, cls) = 0x080u;"
+    " util::stdx::where(is_norm && !sgn, cls) = 0x100u;"
+    " util::stdx::where(is_inf && !sgn, cls) = 0x200u;"
+    " return (cls & b) != 0u; }"
+)
+_CMP_CLASS_F16 = (
+    "[](auto a, auto b) {"
+    " using U = util::native<uint32_t>;"
+    " U h = a & 0xFFFFu;"
+    " U exp = (h >> 10) & 0x1Fu;"
+    " U mant = h & 0x3FFu;"
+    " auto sgn = ((h >> 15) & 1u) != 0u;"
+    " auto qnan = ((h >> 9) & 1u) != 0u;"
+    " auto is_nan = (exp == 0x1Fu) && (mant != 0u);"
+    " auto is_inf = (exp == 0x1Fu) && (mant == 0u);"
+    " auto is_zero = (exp == 0u) && (mant == 0u);"
+    " auto is_den = (exp == 0u) && (mant != 0u);"
+    " auto is_norm = (exp >= 1u) && (exp <= 30u);"
+    " U cls(0u);"
+    " util::stdx::where(is_nan && !qnan, cls) = 0x001u;"
+    " util::stdx::where(is_nan && qnan, cls) = 0x002u;"
+    " util::stdx::where(is_inf && sgn, cls) = 0x004u;"
+    " util::stdx::where(is_norm && sgn, cls) = 0x008u;"
+    " util::stdx::where(is_den && sgn, cls) = 0x010u;"
+    " util::stdx::where(is_zero && sgn, cls) = 0x020u;"
+    " util::stdx::where(is_zero && !sgn, cls) = 0x040u;"
+    " util::stdx::where(is_den && !sgn, cls) = 0x080u;"
+    " util::stdx::where(is_norm && !sgn, cls) = 0x100u;"
+    " util::stdx::where(is_inf && !sgn, cls) = 0x200u;"
+    " return (cls & b) != 0u; }"
+)
+SIMD_VOPC_CLASS: dict[str, tuple[str, str]] = {
+    "v_cmp_class_f16_vopc": ("uint32_t", _CMP_CLASS_F16),
+    "v_cmp_class_f32_vopc": ("uint32_t", _CMP_CLASS_F32),
+}
+
+
+# v_cmp_class_f64: a 64-bit f64 value (src0) tested against a 32-bit class mask
+# (vsrc1), so it needs the mixed-width class glue (try_execute_vopc_class_f64_simd)
+# rather than the equal-width VOPC path. The functor receives src0 as
+# native<uint64_t> raw bits and vsrc1 as a native_width64-wide narrow32<uint32_t>
+# mask; it classifies the f64 from its raw bits (qNaN bit = mantissa MSB
+# 0x0008000000000000), partitions into one of the 10 mutually exclusive classes,
+# casts the small class code down to the 32-bit mask width, and returns
+# (cls & mask) != 0. Pure bit decode, bit-exact with the scalar body. The
+# class-bit layout matches the f16/f32 forms above.
+_CMP_CLASS_F64 = (
+    "[](auto s, auto m) {"
+    " using U = util::native<uint64_t>;"
+    " U exp = (s >> 52) & 0x7FFu;"
+    " U mant = s & 0xFFFFFFFFFFFFFull;"
+    " auto sgn = ((s >> 63) & 1u) != 0u;"
+    " auto qnan = ((s >> 51) & 1u) != 0u;"
+    " auto is_nan = (exp == 0x7FFu) && (mant != 0u);"
+    " auto is_inf = (exp == 0x7FFu) && (mant == 0u);"
+    " auto is_zero = (exp == 0u) && (mant == 0u);"
+    " auto is_den = (exp == 0u) && (mant != 0u);"
+    " auto is_norm = (exp >= 1u) && (exp <= 0x7FEu);"
+    " U cls(0u);"
+    " util::stdx::where(is_nan && !qnan, cls) = 0x001u;"
+    " util::stdx::where(is_nan && qnan, cls) = 0x002u;"
+    " util::stdx::where(is_inf && sgn, cls) = 0x004u;"
+    " util::stdx::where(is_norm && sgn, cls) = 0x008u;"
+    " util::stdx::where(is_den && sgn, cls) = 0x010u;"
+    " util::stdx::where(is_zero && sgn, cls) = 0x020u;"
+    " util::stdx::where(is_zero && !sgn, cls) = 0x040u;"
+    " util::stdx::where(is_den && !sgn, cls) = 0x080u;"
+    " util::stdx::where(is_norm && !sgn, cls) = 0x100u;"
+    " util::stdx::where(is_inf && !sgn, cls) = 0x200u;"
+    " auto cls32 = util::stdx::static_simd_cast<util::narrow32<uint32_t>>(cls);"
+    " return (cls32 & m) != 0u; }"
+)
+SIMD_VOPC_CLASS_F64: dict[str, str] = {
+    "v_cmp_class_f64_vopc": _CMP_CLASS_F64,
+}
+
+
+# VOP3 forms of v_cmp_class. Same classification as the VOPC forms (the functors
+# are reused verbatim), but the VOP3 glue additionally applies the abs/neg source
+# modifiers to src0's raw bits before classifying, reads the class mask from src1,
+# and merges the result into the SGPR-pair dst (inst.vdst.read/write_scalar64)
+# rather than VCC. The per-op sign-bit mask (abs clears it, neg flips it) is passed
+# to the glue: 0x8000 (f16) / 0x80000000 (f32) share a uint32 lane, 0x8000…0 (f64)
+# is 64-bit. f16/f32 go through the 32-bit-value glue; f64 through the 64-bit one.
+SIMD_VOP3_CLASS: dict[str, tuple[str, str]] = {
+    "v_cmp_class_f16_vop3": ("0x8000u", _CMP_CLASS_F16),
+    "v_cmp_class_f32_vop3": ("0x80000000u", _CMP_CLASS_F32),
+}
+SIMD_VOP3_CLASS_F64: dict[str, str] = {
+    "v_cmp_class_f64_vop3": _CMP_CLASS_F64,
 }
 
 
 def simd_probe_line(template_name: str) -> str | None:
     """Return the SIMD fast-path probe block for a kernel, or None."""
-    spec = SIMD_VOP2_BINARY.get(template_name)
-    if spec is None:
-        return None
-    cpp_t, cpp_op = spec
-    return (
-        f"  if (try_execute_binary_vop2_simd<{cpp_t}>(inst, wf, {cpp_op}))\n"
-        f"    return;"
-    )
+    if template_name in SIMD_VOP2_CNDMASK:
+        return "  ROCJITSU_TRY_SIMD_VOP2_CNDMASK();"
+    spec2 = SIMD_VOP2_BINARY.get(template_name)
+    if spec2 is not None:
+        cpp_t, cpp_op = spec2
+        return f"  ROCJITSU_TRY_SIMD_VOP2_BINARY({cpp_t}, {cpp_op});"
+    spec1 = SIMD_VOP1_UNARY.get(template_name)
+    if spec1 is not None:
+        cpp_tin, cpp_tout, cpp_op = spec1
+        return f"  ROCJITSU_TRY_SIMD_VOP1_UNARY({cpp_tin}, {cpp_tout}, {cpp_op});"
+    specc = SIMD_VOP2_CARRY.get(template_name)
+    if specc is not None:
+        return f"  ROCJITSU_TRY_SIMD_VOP2_CARRY({specc});"
+    spect = SIMD_VOP2_TERNARY.get(template_name)
+    if spect is not None:
+        cpp_t, k_expr, cpp_op = spect
+        return f"  ROCJITSU_TRY_SIMD_VOP2_TERNARY({cpp_t}, {k_expr}, {cpp_op});"
+    specf64 = SIMD_VOP2_FMA_F64.get(template_name)
+    if specf64 is not None:
+        return f"  ROCJITSU_TRY_SIMD_VOP2_FMA_F64({specf64});"
+    spec1f64 = SIMD_VOP1_UNARY_F64.get(template_name)
+    if spec1f64 is not None:
+        lane_t, cpp_op = spec1f64
+        return f"  ROCJITSU_TRY_SIMD_VOP1_UNARY_F64({lane_t}, {cpp_op});"
+    speccvtout = SIMD_CVT_F64_TO_B32.get(template_name)
+    if speccvtout is not None:
+        out_t, cpp_op = speccvtout
+        return f"  ROCJITSU_TRY_SIMD_CVT_F64_TO_B32({out_t}, {cpp_op});"
+    speccvtin = SIMD_CVT_B32_TO_F64.get(template_name)
+    if speccvtin is not None:
+        in_t, cpp_op = speccvtin
+        return f"  ROCJITSU_TRY_SIMD_CVT_B32_TO_F64({in_t}, {cpp_op});"
+    specvopc = SIMD_VOPC.get(template_name)
+    if specvopc is not None:
+        lane_t, cpp_op = specvopc
+        return f"  ROCJITSU_TRY_SIMD_VOPC({lane_t}, {cpp_op});"
+    specclass = SIMD_VOPC_CLASS.get(template_name)
+    if specclass is not None:
+        lane_t, cpp_op = specclass
+        return f"  ROCJITSU_TRY_SIMD_VOPC({lane_t}, {cpp_op});"
+    specclass64 = SIMD_VOPC_CLASS_F64.get(template_name)
+    if specclass64 is not None:
+        return f"  ROCJITSU_TRY_SIMD_VOPC_CLASS_F64({specclass64});"
+    spec3class = SIMD_VOP3_CLASS.get(template_name)
+    if spec3class is not None:
+        sm, cpp_op = spec3class
+        return f"  ROCJITSU_TRY_SIMD_VOP3_CLASS_B32({sm}, {cpp_op});"
+    spec3class64 = SIMD_VOP3_CLASS_F64.get(template_name)
+    if spec3class64 is not None:
+        return f"  ROCJITSU_TRY_SIMD_VOP3_CLASS_F64(0x8000000000000000ull, {spec3class64});"
+    specvopc64 = SIMD_VOPC64.get(template_name)
+    if specvopc64 is not None:
+        lane_t, cpp_op = specvopc64
+        return f"  ROCJITSU_TRY_SIMD_VOPC64({lane_t}, {cpp_op});"
+    return None
+
+
+def simd_probe_arch_portable(template_name: str) -> bool:
+    """Whether a SIMD-probe kernel can be force-routed through the shared
+    execute template on an ISA that is not in its cross-ISA shared group.
+
+    Most SIMD fast-path kernels have an arch-independent body (arithmetic /
+    compare on `inst.src0` / `inst.vsrc1` / `inst.vdst`), so an ISA whose
+    operand/field signature kept it out of the shared plan can still safely
+    delegate to the one shared template — the body is identical. The exception
+    is the inline-literal FMA family (v_fmaak/fmamk/madak/madmk): those read the
+    32-bit literal through an ISA-divergent member (`simm32_` on some ISAs vs a
+    `simm32` Operand with `.encoding_value_` on others), so a single shared body
+    cannot satisfy every ISA. Those are identified by a non-``"0u"`` literal
+    expression in SIMD_VOP2_TERNARY and are left to the genuine shared plan;
+    the dst-accumulate forms (literal ``"0u"``: v_fmac/v_mac, and v_fmac_f64)
+    are portable.
+    """
+    if simd_probe_line(template_name) is None:
+        return False
+    spect = SIMD_VOP2_TERNARY.get(template_name)
+    if spect is not None and spect[1] != "0u":
+        return False
+    return True
 
 
 def simd_extra_includes() -> list[str]:

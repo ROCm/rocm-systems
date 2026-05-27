@@ -83,6 +83,36 @@ uint32_t *AmdgpuIsaOperand<Isa>::simd_dst_ptr(amdgpu::Wavefront &wf, uint32_t la
   return nullptr;
 }
 
+template <typename Isa>
+std::pair<const uint32_t *, const uint32_t *>
+AmdgpuIsaOperand<Isa>::simd_lane_ptr64(const amdgpu::Wavefront &wf, uint32_t lane_base) const {
+  if (this->delegate())
+    return amdgpu::SimdAccess::lane_ptr64(*this->delegate(), wf, lane_base);
+  if (auto off = Isa::resolved_vgpr_offset(this->opr_type_, this->encoding_value_)) {
+    uint32_t reg = wf.vgpr_alloc().base + *off;
+    const uint8_t *lo = wf.cu().vgpr_data(reg);
+    const uint8_t *hi = wf.cu().vgpr_data(reg + 1);
+    const uint32_t byte_off = lane_base * sizeof(uint32_t);
+    return {reinterpret_cast<const uint32_t *>(lo + byte_off),
+            reinterpret_cast<const uint32_t *>(hi + byte_off)};
+  }
+  return {nullptr, nullptr};
+}
+
+template <typename Isa>
+std::pair<uint32_t *, uint32_t *> AmdgpuIsaOperand<Isa>::simd_dst_ptr64(amdgpu::Wavefront &wf,
+                                                                        uint32_t lane_base) const {
+  if (auto off = Isa::resolved_vgpr_offset(this->opr_type_, this->encoding_value_)) {
+    uint32_t reg = wf.vgpr_alloc().base + *off;
+    uint8_t *lo = wf.cu().vgpr_data(reg);
+    uint8_t *hi = wf.cu().vgpr_data(reg + 1);
+    const uint32_t byte_off = lane_base * sizeof(uint32_t);
+    return {reinterpret_cast<uint32_t *>(lo + byte_off),
+            reinterpret_cast<uint32_t *>(hi + byte_off)};
+  }
+  return {nullptr, nullptr};
+}
+
 } // namespace rocjitsu
 
 #endif // ROCJITSU_ISA_ISA_OPERAND_SIMD_INL_H_
