@@ -24,8 +24,11 @@ struct ipc_user_buf_entry_t {
   size_t    length;                        // buffer length
 };
 
-// Host-side function to update the constant memory table
+// Host-side function to update the constant memory table (legacy, replaces entire table)
 void ipc_user_buf_update_table(const ipc_user_buf_entry_t* entries, int count);
+
+// Add a single entry to the master table and sync to device constant memory
+int ipc_user_buf_add_entry(const ipc_user_buf_entry_t* entry);
 
 }  // namespace rocshmem
 

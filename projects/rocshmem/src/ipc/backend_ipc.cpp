@@ -579,19 +579,19 @@ int IPCBackend::buffer_unregister(void *addr) {
 }
 
 void IPCBackend::sync_user_buf_constmem() {
-  int count = std::min((int)user_buffers_.size(), IPC_MAX_USER_BUFS);
-  ipc_user_buf_entry_t entries[IPC_MAX_USER_BUFS] = {};
-
-  for (int b = 0; b < count; b++) {
-    entries[b].local_base = reinterpret_cast<uintptr_t>(user_buffers_[b].addr);
-    entries[b].length = user_buffers_[b].length;
-    for (int pe = 0; pe < num_pes && pe < IPC_MAX_PES; pe++) {
-      entries[b].remote_bases[pe] = reinterpret_cast<uintptr_t>(user_buffers_[b].bases[pe]);
-    }
+  // Add the most recently registered buffer to the master table.
+  // Uses ipc_user_buf_add_entry to avoid overwriting VMM-registered entries.
+  if (user_buffers_.empty()) return;
+  auto &ubuf = user_buffers_.back();
+  ipc_user_buf_entry_t entry = {};
+  entry.local_base = reinterpret_cast<uintptr_t>(ubuf.addr);
+  entry.length = ubuf.length;
+  for (int pe = 0; pe < num_pes && pe < IPC_MAX_PES; pe++) {
+    entry.remote_bases[pe] = reinterpret_cast<uintptr_t>(ubuf.bases[pe]);
   }
-
-  ipc_user_buf_update_table(entries, count);
-  LOG_TRACE("IPCBackend::sync_user_buf_constmem: %d buffers synced to __constant__", count);
+  ipc_user_buf_add_entry(&entry);
+  LOG_TRACE("IPCBackend::sync_user_buf_constmem: added buffer %p +%zu (master count now includes this)",
+            ubuf.addr, ubuf.length);
 }
 
 void IPCBackend::setup_fence_buffer() {
