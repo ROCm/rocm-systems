@@ -23,7 +23,9 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
         super().__init__(profiling_args, profiler_mode, soc)
 
     def get_profiler_options(
-        self, native_tool_path: Optional[str] = None
+        self,
+        native_tool_path: Optional[str] = None,
+        pc_sampling: bool = False,
     ) -> dict[str, Union[str, list[str]]]:
         args = self.get_args()
         app_cmd = shlex.split(args.remaining)
@@ -137,6 +139,19 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             options["ROCPROF_KERNEL_FILTER_RANGE"] = f"[{','.join(dispatch)}]"
         if not args.attach_pid:
             options["APP_CMD"] = app_cmd
+
+        if pc_sampling:
+            method = args.pc_sampling_method
+            options.update({
+                "ROCPROF_COUNTER_COLLECTION": "0",
+                "ROCPROF_PC_SAMPLING_METHOD": method,
+                "ROCPROF_PC_SAMPLING_INTERVAL": str(args.pc_sampling_interval),
+                "ROCPROF_PC_SAMPLING_UNIT": (
+                    "time" if method == "host_trap" else "cycles"
+                ),
+                "ROCPROFILER_PC_SAMPLING_BETA_ENABLED": "1",
+            })
+
         return options
 
     # -----------------------

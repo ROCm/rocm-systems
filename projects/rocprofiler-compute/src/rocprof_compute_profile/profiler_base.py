@@ -24,7 +24,6 @@ from utils.native_tool_finder import NativeToolFinder
 from utils.utils_common import (
     format_time,
     get_job_rank_and_size,
-    is_only_pc_sampling,
     print_status,
 )
 from utils.utils_exceptions import (
@@ -487,8 +486,13 @@ class RocProfCompute_Base:
             )
             return
 
-        # No native tool for pc sampling
-        pc_sampling.run(self.get_profiler_options(), total_runs)
+        if self.__profiler == "rocprofiler-sdk":
+            pc_sampling_options = self.get_profiler_options(
+                native_tool_path=native_tool_path, pc_sampling=True
+            )
+        else:
+            pc_sampling_options = self.get_profiler_options()
+        pc_sampling.run(pc_sampling_options, total_runs)
 
     def __get_native_tool_path(self, args: argparse.Namespace) -> str | None:
         try:
@@ -514,15 +518,12 @@ class RocProfCompute_Base:
         # Native counter collection tool is only compatible with
         # rocprofiler-sdk public API for ROCm version >= 7.x.x
 
-        # PC sampling only profile does not need native tool
-
         # Do not use native tool in attach
         # mode until we figure out how multiple tools can attach
         # TODO: Figure out how multiple tools can attach
         return (
             int(self._soc._mspec.rocm_version.split(".")[0]) >= 7
             and not args.attach_pid
-            and not is_only_pc_sampling(args.filter_blocks)
         )
 
     @abstractmethod
