@@ -97,12 +97,12 @@ public:
         }
     }
 
-    int get_sample_1_count() const { return m_sample_1_count.load(); }
-    int get_sample_2_count() const { return m_sample_2_count.load(); }
-    int get_sample_3_count() const { return m_sample_3_count.load(); }
-    int get_sample_4_count() const { return m_sample_4_count.load(); }
-    int get_sample_5_count() const { return m_sample_5_count.load(); }
-    int get_unknown_count() const { return m_unknown_count.load(); }
+    [[nodiscard]] int get_sample_1_count() const { return m_sample_1_count.load(); }
+    [[nodiscard]] int get_sample_2_count() const { return m_sample_2_count.load(); }
+    [[nodiscard]] int get_sample_3_count() const { return m_sample_3_count.load(); }
+    [[nodiscard]] int get_sample_4_count() const { return m_sample_4_count.load(); }
+    [[nodiscard]] int get_sample_5_count() const { return m_sample_5_count.load(); }
+    [[nodiscard]] int get_unknown_count() const { return m_unknown_count.load(); }
 
 private:
     void check_sample_1(size_t index, const test_sample_1& sample)
@@ -402,7 +402,7 @@ TEST_F(storage_parser_test, load_many_small_samples)
     {
         auto x = "sample_" + std::to_string(i);
         strings.push_back(x);
-        many_samples.push_back({ 0, strings[i] });
+        many_samples.emplace_back(0, strings[i]);
     }
 
     create_test_file_with_samples(many_samples, {}, {});

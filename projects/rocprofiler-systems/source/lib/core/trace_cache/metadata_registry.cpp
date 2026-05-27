@@ -16,9 +16,7 @@
 #include <string>
 #include <string_view>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 
 namespace
@@ -733,7 +731,7 @@ metadata_registry::overwrite_callback_names(
 
         for(const auto& [op_idx, op_name] : operations_data)
         {
-            operation_names.push_back(*op_name);
+            operation_names.emplace_back(*op_name);
         }
 
         return operation_names;
@@ -754,8 +752,7 @@ metadata_registry::overwrite_callback_names(
         auto callback_kind = category_info.first;
         // Store operations of all following categories
         //  as they will be deleted
-        for(callback_kind_t i =
-                static_cast<callback_kind_t>(static_cast<int>(callback_kind) + 1);
+        for(auto i = static_cast<callback_kind_t>(static_cast<int>(callback_kind) + 1);
             i < ROCPROFILER_CALLBACK_TRACING_LAST;
             i = static_cast<callback_kind_t>(static_cast<int>(i) + 1))
         {
@@ -893,5 +890,4 @@ metadata_registry::load_from_file(const std::string&                   filepath,
     }
 }
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

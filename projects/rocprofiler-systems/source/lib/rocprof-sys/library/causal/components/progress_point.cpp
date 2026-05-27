@@ -13,11 +13,7 @@
 #include <timemory/mpl/type_traits.hpp>
 #include <timemory/units.hpp>
 
-namespace rocprofsys
-{
-namespace causal
-{
-namespace component
+namespace rocprofsys::causal::component
 {
 namespace
 {
@@ -180,13 +176,9 @@ progress_point::print(std::ostream& os) const
     os << tim::get_hash_identifier(m_hash) << " :: ";
     tim::operation::base_printer<progress_point>(os, *this);
 }
-}  // namespace component
-}  // namespace causal
-}  // namespace rocprofsys
+}  // namespace rocprofsys::causal::component
 
-namespace tim
-{
-namespace operation
+namespace tim::operation
 {
 namespace causal = rocprofsys::causal;
 
@@ -219,5 +211,4 @@ pop_node<causal::component::progress_point>::operator()(type& _obj,
         *itr += _obj;
     }
 }
-}  // namespace operation
-}  // namespace tim
+}  // namespace tim::operation

@@ -36,9 +36,7 @@
         }                                                                                \
     }
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::rocprofiler_sdk
 {
 namespace
 {
@@ -782,5 +780,4 @@ get_backtrace_operations(rocprofiler_buffer_tracing_kind_t kindv)
     }
     return _ret;
 }
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk

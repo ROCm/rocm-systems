@@ -38,7 +38,7 @@ public:
     temp_dir(temp_dir&&)                 = delete;
     temp_dir& operator=(temp_dir&&)      = delete;
 
-    const std::string& path() const noexcept { return m_path; }
+    [[nodiscard]] const std::string& path() const noexcept { return m_path; }
 
     std::string write_file(const std::string& name, const std::string& content)
     {

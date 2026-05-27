@@ -18,9 +18,7 @@
 #include <cstddef>
 #include <cstdlib>
 
-namespace rocprofsys
-{
-namespace component
+namespace rocprofsys::component
 {
 namespace
 {
@@ -432,7 +430,6 @@ vaapi_gotcha::audit(const gotcha_data& _data, audit::outgoing /*unused*/, VAStat
                                            ret);
 }
 
-}  // namespace component
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component
 
 TIMEMORY_STORAGE_INITIALIZER(rocprofsys::component::vaapi_gotcha)

@@ -18,9 +18,7 @@
 #include <cstddef>
 #include <cstdlib>
 
-namespace rocprofsys
-{
-namespace component
+namespace rocprofsys::component
 {
 namespace
 {
@@ -367,7 +365,6 @@ ucx_gotcha::audit(const gotcha_data& _data, audit::outgoing /*unused*/, int ret)
                                          ret);
 }
 
-}  // namespace component
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component
 
 TIMEMORY_STORAGE_INITIALIZER(rocprofsys::component::ucx_gotcha)

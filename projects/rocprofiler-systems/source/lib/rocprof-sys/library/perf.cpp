@@ -41,9 +41,7 @@
         }
 #endif
 
-namespace rocprofsys
-{
-namespace perf
+namespace rocprofsys::perf
 {
 namespace
 {
@@ -379,12 +377,12 @@ perf_event::iterator::get()
                                       sizeof(struct perf_event_header));
 
     // Get a pointer to the header
-    struct perf_event_header* header = reinterpret_cast<struct perf_event_header*>(_buf);
+    auto* header = reinterpret_cast<struct perf_event_header*>(_buf);
 
     // Copy out the entire record
     perf_event::copy_from_ring_buffer(m_mapping, m_index, _buf, header->size);
 
-    return perf_event::record(&m_source, header);
+    return { &m_source, header };
 }
 
 bool
@@ -708,5 +706,4 @@ get_instance(std::int64_t _tid)
     }
     return _data->at(_tid);
 }
-}  // namespace perf
-}  // namespace rocprofsys
+}  // namespace rocprofsys::perf

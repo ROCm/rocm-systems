@@ -21,9 +21,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-namespace rocprofsys
-{
-namespace common_utils
+namespace rocprofsys::common_utils
 {
 
 namespace
@@ -793,5 +791,4 @@ print_help_for_domain(const std::string& captured, std::string_view domain,
     return true;
 }
 
-}  // namespace common_utils
-}  // namespace rocprofsys
+}  // namespace rocprofsys::common_utils

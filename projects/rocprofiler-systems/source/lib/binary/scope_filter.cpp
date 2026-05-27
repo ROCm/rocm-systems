@@ -6,9 +6,7 @@
 
 #include <regex>
 
-namespace rocprofsys
-{
-namespace binary
+namespace rocprofsys::binary
 {
 bool
 scope_filter::operator()(std::string_view _value) const
@@ -27,5 +25,4 @@ scope_filter::operator()(std::string_view _value) const
     }
     throw exception<std::runtime_error>{ "invalid scope filter mode" };
 }
-}  // namespace binary
-}  // namespace rocprofsys
+}  // namespace rocprofsys::binary

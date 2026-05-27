@@ -310,7 +310,7 @@ pthread_create_gotcha::wrapper::wrap(void* _arg)
     auto _self = pthread_self();
 
     // convert the argument
-    wrapper* _wrapper = static_cast<wrapper*>(_arg);
+    auto* _wrapper = static_cast<wrapper*>(_arg);
 
     // store the handle
     {

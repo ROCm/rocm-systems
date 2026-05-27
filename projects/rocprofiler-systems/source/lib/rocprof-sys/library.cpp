@@ -94,14 +94,11 @@ using namespace rocprofsys;
 
 //======================================================================================//
 
-namespace rocprofsys
-{
-namespace timeout
+namespace rocprofsys::timeout
 {
 void
 setup() ROCPROFSYS_INTERNAL_API;
 }
-}  // namespace rocprofsys
 
 namespace
 {
@@ -281,7 +278,7 @@ struct fini_bundle
             std::get<Tp>(m_data), std::forward<Args>(_args)...));
     }
 
-    std::string as_string(bool _print_prefix = true) const
+    [[nodiscard]] std::string as_string(bool _print_prefix = true) const
     {
         std::stringstream _ss;
         if(_print_prefix && !m_label.empty()) _ss << m_label << " : ";

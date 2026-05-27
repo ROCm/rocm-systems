@@ -12,9 +12,7 @@
 #include <cctype>
 #include <string_view>
 
-namespace rocprofsys
-{
-namespace amd_smi
+namespace rocprofsys::amd_smi
 {
 namespace
 {
@@ -109,5 +107,4 @@ config_settings(const std::shared_ptr<settings>& _config)
             "An empty value implies 'all' and 'none' suppresses all.",
         "busy, temp, power, mem_usage", "backend", "amd_smi", "rocm", "process_sampling");
 }
-}  // namespace amd_smi
-}  // namespace rocprofsys
+}  // namespace rocprofsys::amd_smi

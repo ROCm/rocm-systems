@@ -8,9 +8,7 @@
 #include <map>
 #include <set>
 
-namespace rocprofsys
-{
-namespace causal
+namespace rocprofsys::causal
 {
 namespace
 {
@@ -65,5 +63,4 @@ add_samples(std::uint32_t _index, const std::map<uintptr_t, std::uint64_t>& _v)
         add_sample(_index, itr.first, itr.second);
     }
 }
-}  // namespace causal
-}  // namespace rocprofsys
+}  // namespace rocprofsys::causal

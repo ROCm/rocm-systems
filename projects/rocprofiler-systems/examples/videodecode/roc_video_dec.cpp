@@ -437,9 +437,9 @@ RocVideoDecoder::HandleVideoSequence(RocdecVideoFormat* p_video_format)
         if(!(max_width_ > p_video_format->coded_width ||
              max_height_ > p_video_format->coded_height))
         {
-            RocdecVideoFormatEx* vidFormatEx = (RocdecVideoFormatEx*) p_video_format;
-            max_width_                       = vidFormatEx->max_width;
-            max_height_                      = vidFormatEx->max_height;
+            auto* vidFormatEx = (RocdecVideoFormatEx*) p_video_format;
+            max_width_        = vidFormatEx->max_width;
+            max_height_       = vidFormatEx->max_height;
         }
     }
     if(max_width_ < (int) p_video_format->coded_width)
@@ -859,7 +859,7 @@ RocVideoDecoder::HandlePictureDisplay(RocdecParserDispInfo* pDispInfo)
         if(sei_message_display_q_[pDispInfo->picture_index].sei_data)
         {
             // Write SEI Message
-            std::uint8_t* sei_buffer =
+            auto* sei_buffer =
                 (std::uint8_t*) (sei_message_display_q_[pDispInfo->picture_index]
                                      .sei_data);
             std::uint32_t sei_num_messages =
@@ -1446,7 +1446,7 @@ RocVideoDecoder::UpdateMd5ForFrame(void* surf_mem, OutputSurfaceInfo* surf_info)
 
     // Need to covert interleaved planar to stacked planar, assuming 4:2:0 chroma
     // sampling.
-    std::uint8_t* stacked_ptr = new std::uint8_t[output_image_size];
+    auto* stacked_ptr = new std::uint8_t[output_image_size];
 
     std::uint8_t* tmp_hst_ptr   = hst_ptr;
     int           output_stride = surf_info->output_pitch;
@@ -1508,7 +1508,7 @@ RocVideoDecoder::UpdateMd5ForFrame(void* surf_mem, OutputSurfaceInfo* surf_info)
     // For 10 bit, convert from P010 to little endian to match reference decoder output
     if(surf_info->bytes_per_pixel == 2)
     {
-        std::uint16_t* ptr = reinterpret_cast<std::uint16_t*>(stacked_ptr);
+        auto* ptr = reinterpret_cast<std::uint16_t*>(stacked_ptr);
         for(i = 0; i < img_size / 2; i++)
         {
             ptr[i] = ptr[i] >> 6;

@@ -6,9 +6,7 @@
 
 #include "logger/debug.hpp"
 
-namespace rocprofsys
-{
-namespace utility
+namespace rocprofsys::utility
 {
 namespace
 {
@@ -124,5 +122,4 @@ trim_str(std::string& str)
     str.erase(end + 1);
 }
 
-}  // namespace utility
-}  // namespace rocprofsys
+}  // namespace rocprofsys::utility

@@ -19,9 +19,7 @@
 
 #include <dlfcn.h>
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::rocprofiler_sdk
 {
 
 struct rccl_recv
@@ -334,5 +332,4 @@ tool_tracing_callback_rccl(std::uint32_t                                 operati
     }
 }
 
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk

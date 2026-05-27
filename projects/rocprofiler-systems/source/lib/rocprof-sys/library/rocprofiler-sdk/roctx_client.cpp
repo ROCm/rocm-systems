@@ -29,9 +29,7 @@
 #include <string_view>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::rocprofiler_sdk
 {
 
 namespace
@@ -317,5 +315,4 @@ roctx_client<MarkerWriterPolicy>::marker_control_callback(
 
 template class roctx_client<default_marker_policy>;
 
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk

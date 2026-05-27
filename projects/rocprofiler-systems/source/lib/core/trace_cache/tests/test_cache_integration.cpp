@@ -315,8 +315,8 @@ TEST_F(trace_cache_module_integration_test, buffer_fragmentation_handling)
 
     for(int i = 0; i < 100; ++i)
     {
-        large_texts.push_back(std::string(1000, 'A' + (i % 26)));
-        large_samples.push_back({ i, large_texts[i] });
+        large_texts.emplace_back(1000, 'A' + (i % 26));
+        large_samples.emplace_back(i, large_texts[i]);
 
         std::vector<std::uint8_t> small_payload(10, static_cast<std::uint8_t>(i));
         small_samples.emplace_back(small_payload);
@@ -469,7 +469,7 @@ TEST_F(trace_cache_module_integration_test, stress_test_multiple_fragmentations)
             {
                 int    value     = value_dist(rng);
                 size_t text_size = size_dist(rng);
-                texts.push_back(std::string(text_size, 'X'));
+                texts.emplace_back(text_size, 'X');
 
                 test_sample_1 sample(value, texts.back());
                 expected_1.push_back(sample);
@@ -502,8 +502,8 @@ TEST_F(trace_cache_module_integration_test, performance_write_test)
     samples.reserve(sample_count);
     for(int i = 0; i < sample_count; ++i)
     {
-        payloads.push_back(std::string(payload_size, static_cast<char>(i % 255)));
-        samples.push_back({ i, payloads[i] });
+        payloads.emplace_back(payload_size, static_cast<char>(i % 255));
+        samples.emplace_back(i, payloads[i]);
     }
 
     auto start_time = std::chrono::high_resolution_clock::now();

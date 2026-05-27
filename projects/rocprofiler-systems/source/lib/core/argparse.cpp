@@ -19,9 +19,7 @@
 
 #include <cstdint>
 
-namespace rocprofsys
-{
-namespace argparse
+namespace rocprofsys::argparse
 {
 namespace
 {
@@ -1430,5 +1428,4 @@ add_extended_arguments(parser_t& _parser, parser_data& _data)
 
     return _data;
 }
-}  // namespace argparse
-}  // namespace rocprofsys
+}  // namespace rocprofsys::argparse

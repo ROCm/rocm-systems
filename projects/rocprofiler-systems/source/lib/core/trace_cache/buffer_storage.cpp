@@ -14,9 +14,7 @@
 
 using namespace std::chrono_literals;
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 
 flush_worker_t::flush_worker_t(worker_function_t            worker_function,
@@ -129,5 +127,4 @@ flush_worker_t::stop(const pid_t& current_pid)
     }
 }
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

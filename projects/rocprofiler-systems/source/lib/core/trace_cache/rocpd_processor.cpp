@@ -27,9 +27,7 @@
 #include <rocprofiler-sdk/context.h>
 #include <rocprofiler-sdk/version.h>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 namespace
 {
@@ -983,5 +981,4 @@ rocpd_processor_t::insert_thread_id(info::thread& t_info, const node_info& n_inf
                                          t_info.end);
 }
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

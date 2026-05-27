@@ -139,11 +139,7 @@ get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& upid)
 
 }  // namespace
 
-namespace rocprofsys
-{
-namespace rocpd
-{
-namespace data_storage
+namespace rocprofsys::rocpd::data_storage
 {
 database::database(int pid, int ppid, std::string output_path)
 : m_path(std::move(output_path))
@@ -231,6 +227,4 @@ database::flush()
     }
 }
 
-}  // namespace data_storage
-}  // namespace rocpd
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocpd::data_storage

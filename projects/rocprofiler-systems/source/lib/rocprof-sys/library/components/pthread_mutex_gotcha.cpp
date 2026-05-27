@@ -18,9 +18,7 @@
 #include <pthread.h>
 #include <stdexcept>
 
-namespace rocprofsys
-{
-namespace component
+namespace rocprofsys::component
 {
 pthread_mutex_gotcha::hash_array_t&
 pthread_mutex_gotcha::get_hashes()
@@ -267,12 +265,9 @@ pthread_mutex_gotcha::is_disabled()
     return (!_info || _info->is_offset || get_state() != ::rocprofsys::State::Active ||
             get_thread_state() != ThreadState::Enabled);
 }
-}  // namespace component
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component
 
-namespace tim
-{
-namespace policy
+namespace tim::policy
 {
 template <size_t N>
 pthread_mutex_gotcha&
@@ -286,5 +281,4 @@ static_data<pthread_mutex_gotcha, pthread_mutex_gotcha_t>::operator()(
         thread_data_t::instance(rocprofsys::construct_on_thread{}, _data);
     return *_v;
 }
-}  // namespace policy
-}  // namespace tim
+}  // namespace tim::policy

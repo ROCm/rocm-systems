@@ -14,11 +14,7 @@
 #include <array>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace causal
-{
-namespace component
+namespace rocprofsys::causal::component
 {
 namespace
 {
@@ -92,6 +88,4 @@ causal_gotcha::remove_signals(sigset_t* _set)
 
     if(sigismember(_set, SIGABRT) != 0) sigdelset(_set, SIGABRT);
 }
-}  // namespace component
-}  // namespace causal
-}  // namespace rocprofsys
+}  // namespace rocprofsys::causal::component

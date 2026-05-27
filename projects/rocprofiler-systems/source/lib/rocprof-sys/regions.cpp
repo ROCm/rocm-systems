@@ -12,9 +12,7 @@
 #    pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #endif
 
-namespace rocprofsys
-{
-namespace impl
+namespace rocprofsys::impl
 {
 namespace
 {
@@ -98,8 +96,7 @@ invoke_category_region_stop(rocprofsys_category_t _category, const char* name,
     }
 }
 }  // namespace
-}  // namespace impl
-}  // namespace rocprofsys
+}  // namespace rocprofsys::impl
 
 //======================================================================================//
 

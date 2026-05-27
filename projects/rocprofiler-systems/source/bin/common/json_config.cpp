@@ -14,9 +14,7 @@
 #include <set>
 #include <sstream>
 
-namespace rocprofsys
-{
-namespace json_config
+namespace rocprofsys::json_config
 {
 
 namespace
@@ -985,5 +983,4 @@ export_config_as_json(const std::map<std::string, std::string>& env_vars,
     return config.dump(indent);
 }
 
-}  // namespace json_config
-}  // namespace rocprofsys
+}  // namespace rocprofsys::json_config

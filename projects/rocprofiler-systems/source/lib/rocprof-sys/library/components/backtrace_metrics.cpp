@@ -63,9 +63,7 @@ namespace tracing
 using namespace ::rocprofsys::tracing;
 }
 
-namespace rocprofsys
-{
-namespace component
+namespace rocprofsys::component
 {
 using hw_counters           = typename backtrace_metrics::hw_counters;
 using signal_type_instances = thread_data<std::set<int>, category::sampling>;
@@ -626,7 +624,6 @@ backtrace_metrics::cache_backtrace_data(std::int64_t _tid, std::uint64_t _ts) co
                                        hw_counter_data_t>(0, _ts, m_hw_counter, _tid);
     }
 }
-}  // namespace component
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component
 
 TIMEMORY_INITIALIZE_STORAGE(rocprofsys::component::backtrace_metrics)

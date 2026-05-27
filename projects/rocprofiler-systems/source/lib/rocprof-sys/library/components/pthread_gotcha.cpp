@@ -18,9 +18,7 @@
 #include <array>
 #include <vector>
 
-namespace tim
-{
-namespace operation
+namespace tim::operation
 {
 template <>
 struct stop<rocprofsys::component::pthread_create_gotcha_t>
@@ -35,8 +33,7 @@ struct stop<rocprofsys::component::pthread_create_gotcha_t>
     void operator()(type& /*unused*/, Args&&... /*unused*/)
     {}
 };
-}  // namespace operation
-}  // namespace tim
+}  // namespace tim::operation
 
 namespace rocprofsys
 {

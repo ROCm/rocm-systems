@@ -24,9 +24,7 @@
 #include <chrono>
 #include <random>
 
-namespace rocprofsys
-{
-namespace causal
+namespace rocprofsys::causal
 {
 namespace
 {
@@ -197,5 +195,4 @@ delay::compute_total_delay(std::uint64_t _baseline)
 {
     return get_global().load() - _baseline;
 }
-}  // namespace causal
-}  // namespace rocprofsys
+}  // namespace rocprofsys::causal

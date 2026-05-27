@@ -338,10 +338,12 @@ main(int argc, char** argv)
               << std::endl;
     for(int i = 0; i < num_threads; ++i)
     {
-        thread_pool.ExecuteJob(
-            std::bind(DecodeImages, std::ref(decode_info_per_thread[i]), rocjpeg_utils,
-                      std::ref(decode_params), save_images, std::ref(output_file_path),
-                      batch_size, device_id));
+        thread_pool.ExecuteJob([&capture0 = decode_info_per_thread[i], rocjpeg_utils,
+                                &decode_params, save_images, &output_file_path,
+                                batch_size, device_id] {
+            DecodeImages(capture0, rocjpeg_utils, decode_params, save_images,
+                         output_file_path, batch_size, device_id);
+        });
     }
     thread_pool.JoinThreads();
 

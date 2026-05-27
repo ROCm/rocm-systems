@@ -20,9 +20,7 @@
 #include <thread>
 #include <type_traits>
 
-namespace rocprofsys
-{
-namespace constraint
+namespace rocprofsys::constraint
 {
 namespace
 {
@@ -348,5 +346,4 @@ get_trace_stages()
 
     return _v;
 }
-}  // namespace constraint
-}  // namespace rocprofsys
+}  // namespace rocprofsys::constraint

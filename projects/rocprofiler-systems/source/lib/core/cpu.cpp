@@ -15,9 +15,7 @@
 #include <unistd.h>
 #include <unordered_map>
 
-namespace rocprofsys
-{
-namespace cpu
+namespace rocprofsys::cpu
 {
 std::vector<cpu_info>
 process_cpu_info_data()
@@ -192,5 +190,4 @@ query_cpu_agents()
         mgr.insert_agent(cur_agent);
     }
 }
-}  // namespace cpu
-}  // namespace rocprofsys
+}  // namespace rocprofsys::cpu

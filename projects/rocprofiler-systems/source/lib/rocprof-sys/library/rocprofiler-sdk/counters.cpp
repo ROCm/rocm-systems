@@ -14,9 +14,7 @@
 
 #include "logger/debug.hpp"
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::rocprofiler_sdk
 {
 namespace
 {
@@ -218,5 +216,4 @@ counter_storage::write(counter_storage_type* storage, const std::string& metric_
     counter_data_tracker::description() = metric_description;
     storage->write();
 }
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk

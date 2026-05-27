@@ -8,9 +8,7 @@
 
 #include "logger/debug.hpp"
 
-namespace rocprofsys
-{
-namespace perf
+namespace rocprofsys::perf
 {
 namespace units = ::tim::units;
 
@@ -265,5 +263,4 @@ config_overflow_sampling(struct perf_event_attr& _pe, std::string_view _event,
         _pe.sample_period = static_cast<std::uint64_t>(_freq);
     }
 }
-}  // namespace perf
-}  // namespace rocprofsys
+}  // namespace rocprofsys::perf

@@ -9,9 +9,7 @@
 #include <dwarf.h>
 #include <elfutils/libdw.h>
 
-namespace rocprofsys
-{
-namespace binary
+namespace rocprofsys::binary
 {
 namespace
 {
@@ -216,5 +214,4 @@ dwarf_entry::serialize<cereal::MinimalJSONOutputArchive>(
 template void
 dwarf_entry::serialize<cereal::PrettyJSONOutputArchive>(cereal::PrettyJSONOutputArchive&,
                                                         const unsigned int);
-}  // namespace binary
-}  // namespace rocprofsys
+}  // namespace rocprofsys::binary

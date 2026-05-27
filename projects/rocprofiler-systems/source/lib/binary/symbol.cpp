@@ -32,9 +32,7 @@
 
 #include <timemory/mpl/concepts.hpp>
 
-namespace rocprofsys
-{
-namespace binary
+namespace rocprofsys::binary
 {
 namespace
 {
@@ -406,5 +404,4 @@ symbol::get_debug_line_info<std::deque<symbol>>(
 template std::vector<dwarf_entry>
 symbol::get_debug_line_info<std::vector<dwarf_entry>>(
     const std::vector<scope_filter>& _filters) const;
-}  // namespace binary
-}  // namespace rocprofsys
+}  // namespace rocprofsys::binary

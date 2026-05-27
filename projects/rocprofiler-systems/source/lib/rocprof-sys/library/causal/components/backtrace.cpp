@@ -32,11 +32,7 @@
 #include <execinfo.h>
 #include <type_traits>
 
-namespace rocprofsys
-{
-namespace causal
-{
-namespace component
+namespace rocprofsys::causal::component
 {
 namespace
 {
@@ -224,9 +220,7 @@ backtrace::get_period(std::uint64_t _units)
         static_cast<std::int64_t>(_period * units::sec) % units::sec;
     return static_cast<Tp>(_period_nsec) / static_cast<cast_type>(_units);
 }
-}  // namespace component
-}  // namespace causal
-}  // namespace rocprofsys
+}  // namespace rocprofsys::causal::component
 
 #define INSTANTIATE_BT_CAUSAL_PERIOD(TYPE)                                               \
     template TYPE rocprofsys::causal::component::backtrace::get_period<TYPE>(            \

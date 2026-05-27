@@ -74,9 +74,7 @@ operator<<(std::ostream& _os, const SpaceHandle& _handle)
     return _os;
 }
 
-namespace rocprofsys
-{
-namespace dl
+namespace rocprofsys::dl
 {
 namespace
 {
@@ -451,9 +449,9 @@ public:
     ompt_start_tool_result_t* (*ompt_start_tool_f)(unsigned int, const char*);
 #endif
 
-    auto get_omni_library() const { return m_omnilib; }
-    auto get_user_library() const { return m_userlib; }
-    auto get_dl_library() const { return m_dllib; }
+    [[nodiscard]] auto get_omni_library() const { return m_omnilib; }
+    [[nodiscard]] auto get_user_library() const { return m_userlib; }
+    [[nodiscard]] auto get_dl_library() const { return m_dllib; }
 
 private:
     void*       m_omnihandle = nullptr;
@@ -547,8 +545,7 @@ bool _rocprofsys_dl_fini = (std::atexit([]() {
                             }),
                             true);
 }  // namespace
-}  // namespace dl
-}  // namespace rocprofsys
+}  // namespace rocprofsys::dl
 
 //--------------------------------------------------------------------------------------//
 
@@ -1105,9 +1102,7 @@ extern "C"
 #endif
 }
 
-namespace rocprofsys
-{
-namespace dl
+namespace rocprofsys::dl
 {
 namespace
 {
@@ -1387,8 +1382,7 @@ bool        _handle_preload = rocprofsys_preload();
 main_func_t main_real       = nullptr;
 init_func_t init_real       = nullptr;
 }  // namespace
-}  // namespace dl
-}  // namespace rocprofsys
+}  // namespace rocprofsys::dl
 
 extern "C"
 {

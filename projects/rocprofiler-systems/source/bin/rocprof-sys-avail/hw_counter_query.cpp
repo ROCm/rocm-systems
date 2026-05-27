@@ -21,9 +21,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace avail
+namespace rocprofsys::avail
 {
 namespace
 {
@@ -198,9 +196,9 @@ query_gpu_hw_counters()
             {
                 auto sym        = fmt::format("{}:device={}", ci.info.name, dev_idx);
                 auto short_desc = fmt::format("Derived counter: {}", ci.info.expression);
-                result.emplace_back(hardware_counter_info(
-                    true, tim::hardware_counters::api::rocm, result.size(), 0, sym, pysym,
-                    short_desc, long_desc, units, qualifier_vec_t{ device_qualifier }));
+                result.emplace_back(true, tim::hardware_counters::api::rocm,
+                                    result.size(), 0, sym, pysym, short_desc, long_desc,
+                                    units, qualifier_vec_t{ device_qualifier });
             }
             else
             {
@@ -220,14 +218,13 @@ query_gpu_hw_counters()
                 {
                     short_desc += fmt::format("{}", fmt::join(dim_info_strs, ". "));
                 }
-                result.emplace_back(hardware_counter_info(
-                    true, tim::hardware_counters::api::rocm, result.size(), 0, sym, pysym,
-                    short_desc, long_desc, units, qualifier_vec_t{ device_qualifier }));
+                result.emplace_back(true, tim::hardware_counters::api::rocm,
+                                    result.size(), 0, sym, pysym, short_desc, long_desc,
+                                    units, qualifier_vec_t{ device_qualifier });
             }
         }
     }
 
     return result;
 }
-}  // namespace avail
-}  // namespace rocprofsys
+}  // namespace rocprofsys::avail

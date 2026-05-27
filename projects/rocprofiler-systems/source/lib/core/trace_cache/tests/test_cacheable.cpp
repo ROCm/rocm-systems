@@ -703,8 +703,7 @@ TEST_F(cacheable_test, store_value_span_uint32)
     size_t stored_size = *reinterpret_cast<size_t*>(buffer.data());
     EXPECT_EQ(stored_size, expected_data_size);
 
-    std::uint32_t* data_start =
-        reinterpret_cast<std::uint32_t*>(buffer.data() + sizeof(size_t));
+    auto* data_start = reinterpret_cast<std::uint32_t*>(buffer.data() + sizeof(size_t));
     for(size_t i = 0; i < data.size(); ++i)
     {
         EXPECT_EQ(data_start[i], data[i]);

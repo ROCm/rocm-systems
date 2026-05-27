@@ -20,9 +20,7 @@
 #include <sstream>
 #include <thread>
 
-namespace rocprofsys
-{
-namespace timeout
+namespace rocprofsys::timeout
 {
 void
 setup() ROCPROFSYS_INTERNAL_API;
@@ -209,5 +207,4 @@ setup()
         }
     }
 }
-}  // namespace timeout
-}  // namespace rocprofsys
+}  // namespace rocprofsys::timeout

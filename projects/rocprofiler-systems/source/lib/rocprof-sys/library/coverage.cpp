@@ -25,9 +25,7 @@
 #define ROCPROFSYS_SERIALIZE(MEMBER_VARIABLE)                                            \
     ar(::tim::cereal::make_nvp(#MEMBER_VARIABLE, MEMBER_VARIABLE))
 
-namespace rocprofsys
-{
-namespace coverage
+namespace rocprofsys::coverage
 {
 namespace
 {
@@ -275,8 +273,7 @@ post_process()
         }
     }
 }
-}  // namespace coverage
-}  // namespace rocprofsys
+}  // namespace rocprofsys::coverage
 
 //--------------------------------------------------------------------------------------//
 

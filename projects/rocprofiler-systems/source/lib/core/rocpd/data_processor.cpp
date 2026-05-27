@@ -10,9 +10,7 @@
 
 #include <memory>
 
-namespace rocprofsys
-{
-namespace rocpd
+namespace rocprofsys::rocpd
 {
 data_processor::data_processor(std::shared_ptr<data_storage::database> database)
 : _database(std::move(database))
@@ -583,5 +581,4 @@ data_processor::flush()
     _database->flush();
 }
 
-}  // namespace rocpd
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocpd

@@ -80,8 +80,8 @@ struct MockedSHMEMGotcha
     {
         return test_globals::g_shmem_gotcha_gmock->at(index);
     }
-    static void disable() { test_globals::g_shmem_gotcha_gmock->disable(); }
-    bool        get_is_running() const
+    static void        disable() { test_globals::g_shmem_gotcha_gmock->disable(); }
+    [[nodiscard]] bool get_is_running() const
     {
         return test_globals::g_shmem_gotcha_gmock->get_is_running();
     }

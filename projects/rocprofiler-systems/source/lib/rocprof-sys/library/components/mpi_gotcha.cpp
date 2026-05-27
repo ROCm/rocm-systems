@@ -25,9 +25,7 @@
 #include <thread>
 #include <unistd.h>
 
-namespace rocprofsys
-{
-namespace component
+namespace rocprofsys::component
 {
 namespace
 {
@@ -39,7 +37,7 @@ struct comm_rank_data
     int       size = -1;
     uintptr_t comm = mpi_gotcha::null_comm();
 
-    auto updated() const
+    [[nodiscard]] auto updated() const
     {
         return comm != mpi_gotcha::null_comm() && rank >= 0 && size > 0;
     };
@@ -470,7 +468,6 @@ mpi_gotcha::publish_rank_and_size(int rank, int size)
     }
 }
 
-}  // namespace component
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component
 
 TIMEMORY_INITIALIZE_STORAGE(rocprofsys::component::mpi_gotcha)

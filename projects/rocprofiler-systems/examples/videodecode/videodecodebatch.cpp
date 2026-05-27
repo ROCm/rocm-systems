@@ -53,7 +53,7 @@ public:
         // Create the specified number of threads
         threads_.reserve(nthreads);
         for(int i = 0; i < nthreads; ++i)
-            threads_.emplace_back(std::bind(&ThreadPool::ThreadEntry, this, i));
+            threads_.emplace_back([this, i] { ThreadEntry(i); });
     }
 
     ~ThreadPool() {}
@@ -698,11 +698,15 @@ main(int argc, char** argv)
                 v_dec_info[thread_idx]->decoding_complete = true;
                 continue;
             }
-            thread_pool.ExecuteJob(
-                std::bind(DecProc, v_dec_info[thread_idx]->viddec.get(),
-                          v_demuxer[j].get(), &v_frame[j], &v_fps[j],
-                          std::ref(v_dec_info[thread_idx]->decoding_complete),
-                          b_dump_output_frames, output_file_names[j], mem_type));
+            thread_pool.ExecuteJob([capture0 = v_dec_info[thread_idx]->viddec.get(),
+                                    capture1 = v_demuxer[j].get(), capture2 = &v_frame[j],
+                                    capture3  = &v_fps[j],
+                                    &capture4 = v_dec_info[thread_idx]->decoding_complete,
+                                    b_dump_output_frames, capture5 = output_file_names[j],
+                                    mem_type] {
+                DecProc(capture0, capture1, capture2, capture3, capture4,
+                        b_dump_output_frames, capture5, mem_type);
+            });
         }
 
         thread_pool.JoinThreads();

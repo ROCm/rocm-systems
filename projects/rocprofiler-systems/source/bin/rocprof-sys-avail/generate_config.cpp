@@ -84,9 +84,7 @@ ignore_setting(const Tp& _v, const format_options& fmt_opts)
 std::array<bool, TOTAL> custom_setting_serializer::options = { false };
 const format_options*   custom_setting_serializer::fmt     = nullptr;
 
-namespace tim
-{
-namespace operation
+namespace tim::operation
 {
 template <typename Tp>
 struct setting_serialization<Tp, custom_setting_serializer>
@@ -157,8 +155,7 @@ struct setting_serialization<tsettings<Tp>, custom_setting_serializer>
         if(_save) _val.set(_save->get());
     }
 };
-}  // namespace operation
-}  // namespace tim
+}  // namespace tim::operation
 
 template <typename... Tp>
 void

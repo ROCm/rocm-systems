@@ -40,11 +40,7 @@
 #include <string>
 #include <type_traits>
 
-namespace rocprofsys
-{
-namespace causal
-{
-namespace sampling
+namespace rocprofsys::causal::sampling
 {
 using ::tim::sampling::dynamic;
 using ::tim::sampling::overflow;
@@ -55,9 +51,7 @@ using causal_bundle_t =
 using causal_sampler_t  = tim::sampling::sampler<causal_bundle_t, dynamic>;
 using backtrace_enabled = trait::runtime_enabled<component::backtrace>;
 using overflow_enabled  = trait::runtime_enabled<component::overflow>;
-}  // namespace sampling
-}  // namespace causal
-}  // namespace rocprofsys
+}  // namespace rocprofsys::causal::sampling
 
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(prevent_reentry, causal::sampling::causal_sampler_t,
                                  std::true_type)
@@ -68,11 +62,7 @@ ROCPROFSYS_DEFINE_CONCRETE_TRAIT(provide_backtrace, causal::sampling::causal_sam
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(buffer_size, causal::sampling::causal_sampler_t,
                                  TIMEMORY_ESC(std::integral_constant<size_t, 4096>))
 
-namespace rocprofsys
-{
-namespace causal
-{
-namespace sampling
+namespace rocprofsys::causal::sampling
 {
 namespace
 {
@@ -649,6 +639,4 @@ post_process_causal(std::int64_t /*unused*/, const std::vector<causal_bundle_t>&
     }
 }
 }  // namespace
-}  // namespace sampling
-}  // namespace causal
-}  // namespace rocprofsys
+}  // namespace rocprofsys::causal::sampling

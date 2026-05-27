@@ -16,11 +16,7 @@
 #include "logger/debug.hpp"
 #include <spdlog/fmt/ranges.h>
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
-{
-namespace control
+namespace rocprofsys::rocprofiler_sdk::control
 {
 
 trace_control::trace_control(std::string_view trace_regions)
@@ -211,6 +207,4 @@ trace_control::trigger_callbacks(const std::vector<callback_t>& callbacks)
     }
 }
 
-}  // namespace control
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk::control

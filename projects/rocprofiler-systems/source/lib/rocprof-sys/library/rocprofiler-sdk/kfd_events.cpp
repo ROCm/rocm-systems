@@ -21,9 +21,7 @@
 #    include <spdlog/fmt/fmt.h>
 #    include <unistd.h>
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::rocprofiler_sdk
 {
 
 namespace
@@ -632,7 +630,6 @@ tool_kfd_event_dropped_events_callback(
     });
 }
 
-}  // namespace rocprofiler_sdk
+}  // namespace rocprofsys::rocprofiler_sdk
 
-}  // namespace rocprofsys
 #endif

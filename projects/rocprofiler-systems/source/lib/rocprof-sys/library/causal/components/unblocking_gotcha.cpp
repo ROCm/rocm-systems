@@ -28,11 +28,7 @@
 #pragma weak pthread_barrier_wait
 #pragma weak kill
 
-namespace rocprofsys
-{
-namespace causal
-{
-namespace component
+namespace rocprofsys::causal::component
 {
 std::string
 unblocking_gotcha::label()
@@ -119,8 +115,6 @@ unblocking_gotcha::operator()(gotcha_index<kill_idx> /*unused*/, int (*_func)(pi
 
     return _ret;
 }
-}  // namespace component
-}  // namespace causal
-}  // namespace rocprofsys
+}  // namespace rocprofsys::causal::component
 
 TIMEMORY_INVOKE_PREINIT(rocprofsys::causal::component::unblocking_gotcha)

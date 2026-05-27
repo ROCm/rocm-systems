@@ -8,9 +8,7 @@
 #include <string>
 #include <utility>
 
-namespace rocprofsys
-{
-namespace binary
+namespace rocprofsys::binary
 {
 address_multirange&
 address_multirange::operator+=(std::pair<coarse, uintptr_t>&& _v)
@@ -37,7 +35,7 @@ address_multirange::operator+=(uintptr_t _v)
     // for(auto&& itr : m_fine_ranges)
     //    if(itr.contains(_v)) return *this;
 
-    m_fine_ranges.emplace(address_range{ _v });
+    m_fine_ranges.emplace(_v);
     return *this;
 }
 
@@ -52,5 +50,4 @@ address_multirange::operator+=(address_range _v)
     m_fine_ranges.emplace(_v);
     return *this;
 }
-}  // namespace binary
-}  // namespace rocprofsys
+}  // namespace rocprofsys::binary

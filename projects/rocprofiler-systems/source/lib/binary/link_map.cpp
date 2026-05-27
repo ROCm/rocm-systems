@@ -17,9 +17,7 @@
 #include <string>
 #include <string_view>
 
-namespace rocprofsys
-{
-namespace binary
+namespace rocprofsys::binary
 {
 namespace
 {
@@ -161,5 +159,4 @@ link_file::real() const
 {
     return filepath::realpath(name, nullptr, false);
 }
-}  // namespace binary
-}  // namespace rocprofsys
+}  // namespace rocprofsys::binary
