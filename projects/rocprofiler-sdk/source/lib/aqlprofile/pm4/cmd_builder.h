@@ -146,6 +146,24 @@ private:
     std::vector<uint32_t> data_;
 };
 
+enum ChipletId
+{
+    CHIPLET_XCD0 = 0,
+    CHIPLET_XCD1 = 1,
+    CHIPLET_XCD2 = 2,
+    CHIPLET_XCD3 = 3,
+    CHIPLET_XCD4 = 4,
+    CHIPLET_XCD5 = 5,
+    CHIPLET_XCD6 = 6,
+    CHIPLET_XCD7 = 7,
+    CHIPLET_AID0 = 8,
+    CHIPLET_AID1 = 9,
+    CHIPLET_AID2 = 10,
+    CHIPLET_AID3 = 11,
+    CHIPLET_MID0 = 12,
+    CHIPLET_MID1 = 13,
+};
+
 /// @brief Specifies the public interface of CmdBuilder for use by
 /// clients to build Gpu command streams.
 class CmdBuilder
@@ -269,6 +287,30 @@ public:
     }
 
     virtual void BuildWriteConfigRegPacket(CmdBuffer* cmdbuf, uint32_t addr, uint32_t value) = 0;
+
+    virtual void BuildWritePConfigRegPacketToChiplet(CmdBuffer* cmdbuf,
+                                                     uint32_t   addr,
+                                                     uint32_t   value,
+                                                     ChipletId  chiplet,
+                                                     bool       write_to_aid = true)
+    {}
+    virtual void BuildWritePConfigRegPacketToChiplet(CmdBuffer*      cmdbuf,
+                                                     const Register& reg,
+                                                     uint32_t        value,
+                                                     ChipletId       chiplet,
+                                                     bool            write_to_aid = true)
+    {}
+
+    virtual uint32_t BuildCopyCounterDataPacketFromChiplet(CmdBuffer*      cmdbuf,
+                                                           const Register& reg_lo,
+                                                           const Register& reg_hi,
+                                                           const void*     dst_addr,
+                                                           uint32_t        dw_mask,
+                                                           ChipletId       chiplet,
+                                                           bool            copy_from_aid = true)
+    {
+        return 0;
+    }
 
 private:
     const reg_base_offset_table* const ip_offset_table;

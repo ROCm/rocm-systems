@@ -38,18 +38,9 @@ jobs:
             (fromJSON(inputs.component).container_image || inputs.default_container_image)
             || null
         }}
-      options: --ipc host
-        --group-add video
-        --device /dev/kfd
-        --device /dev/dri
-        --group-add 993
-        --group-add 992
-        --group-add 110
-        --ulimit memlock=-1:-1
-        --security-opt seccomp=unconfined
-        --env-file /etc/podinfo/gha-gpu-isolation-settings
-        --user 0:0
-        ${{ fromJSON(inputs.component).container_options }}
+      # Container options are configured by TheRock's
+      # build_tools/github_actions/fetch_test_configurations.py.
+      options: ${{ fromJSON(inputs.component).container_options }}
     strategy:
       fail-fast: false
       matrix:
