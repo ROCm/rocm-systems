@@ -88,25 +88,46 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
         " auto pb = util::stdx::static_simd_cast<I64>(sb);"
         " return util::stdx::static_simd_cast<util::native<uint32_t>>((pa * pb) >> 32); }",
     ),
-    "v_max_u32_vop2": ("uint32_t", "[](auto a, auto b) { return util::stdx::max(a, b); }"),
-    "v_min_u32_vop2": ("uint32_t", "[](auto a, auto b) { return util::stdx::min(a, b); }"),
+    "v_max_u32_vop2": (
+        "uint32_t",
+        "[](auto a, auto b) { return util::stdx::max(a, b); }",
+    ),
+    "v_min_u32_vop2": (
+        "uint32_t",
+        "[](auto a, auto b) { return util::stdx::min(a, b); }",
+    ),
     # --- int32 (signed: arithmetic shift / signed min-max) ---
     "v_ashrrev_i32_vop2": ("int32_t", "[](auto a, auto b) { return b >> (a & 31); }"),
-    "v_max_i32_vop2": ("int32_t", "[](auto a, auto b) { return util::stdx::max(a, b); }"),
-    "v_min_i32_vop2": ("int32_t", "[](auto a, auto b) { return util::stdx::min(a, b); }"),
+    "v_max_i32_vop2": (
+        "int32_t",
+        "[](auto a, auto b) { return util::stdx::max(a, b); }",
+    ),
+    "v_min_i32_vop2": (
+        "int32_t",
+        "[](auto a, auto b) { return util::stdx::min(a, b); }",
+    ),
     # --- 16-bit integer (low 16 bits, result zero-extended to 32). Lane type
     # stays uint32_t; the functor masks/sign-extends the low 16 bits and writes
     # back the zero-extended 16-bit result, matching write_lane semantics. ---
     "v_add_u16_vop2": ("uint32_t", "[](auto a, auto b) { return (a + b) & 0xFFFFu; }"),
     "v_sub_u16_vop2": ("uint32_t", "[](auto a, auto b) { return (a - b) & 0xFFFFu; }"),
-    "v_subrev_u16_vop2": ("uint32_t", "[](auto a, auto b) { return (b - a) & 0xFFFFu; }"),
+    "v_subrev_u16_vop2": (
+        "uint32_t",
+        "[](auto a, auto b) { return (b - a) & 0xFFFFu; }",
+    ),
     "v_mul_lo_u16_vop2": (
         "uint32_t",
         "[](auto a, auto b) { return ((a & 0xFFFFu) * (b & 0xFFFFu)) & 0xFFFFu; }",
     ),
     # rev: shift value is vsrc1 (b), count is src0 (a) masked to 4 bits.
-    "v_lshlrev_b16_vop2": ("uint32_t", "[](auto a, auto b) { return (b << (a & 15u)) & 0xFFFFu; }"),
-    "v_lshrrev_b16_vop2": ("uint32_t", "[](auto a, auto b) { return (b & 0xFFFFu) >> (a & 15u); }"),
+    "v_lshlrev_b16_vop2": (
+        "uint32_t",
+        "[](auto a, auto b) { return (b << (a & 15u)) & 0xFFFFu; }",
+    ),
+    "v_lshrrev_b16_vop2": (
+        "uint32_t",
+        "[](auto a, auto b) { return (b & 0xFFFFu) >> (a & 15u); }",
+    ),
     # ashr: sign-extend the low 16 bits to int32, arithmetic-shift by count & 15
     # (the scalar masks the i16 count to 4 bits), then take the low 16 bits.
     "v_ashrrev_i16_vop2": (
@@ -150,8 +171,14 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
     # lanes (UtilSimd.Fmax/Fmin_VectorMatchesScalar_BitExact). All other inputs
     # are bit-exact. (The earlier "not reproducible" note conflated these two
     # accepted corners with a hard blocker.) ---
-    "v_max_f32_vop2": ("float32_t", "[](auto a, auto b) { return util::stdx::fmax(a, b); }"),
-    "v_min_f32_vop2": ("float32_t", "[](auto a, auto b) { return util::stdx::fmin(a, b); }"),
+    "v_max_f32_vop2": (
+        "float32_t",
+        "[](auto a, auto b) { return util::stdx::fmax(a, b); }",
+    ),
+    "v_min_f32_vop2": (
+        "float32_t",
+        "[](auto a, auto b) { return util::stdx::fmin(a, b); }",
+    ),
     "v_max_f16_vop2": (
         "uint32_t",
         "[](auto a, auto b) {"
@@ -270,9 +297,21 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         "[](auto a) { return util::stdx::static_simd_cast<util::native<float32_t>>(a); }",
     ),
     # --- float rounding (bit-identical to std::* on host) ---
-    "v_floor_f32_vop1": ("float32_t", "float32_t", "[](auto a) { return util::stdx::floor(a); }"),
-    "v_ceil_f32_vop1": ("float32_t", "float32_t", "[](auto a) { return util::stdx::ceil(a); }"),
-    "v_trunc_f32_vop1": ("float32_t", "float32_t", "[](auto a) { return util::stdx::trunc(a); }"),
+    "v_floor_f32_vop1": (
+        "float32_t",
+        "float32_t",
+        "[](auto a) { return util::stdx::floor(a); }",
+    ),
+    "v_ceil_f32_vop1": (
+        "float32_t",
+        "float32_t",
+        "[](auto a) { return util::stdx::ceil(a); }",
+    ),
+    "v_trunc_f32_vop1": (
+        "float32_t",
+        "float32_t",
+        "[](auto a) { return util::stdx::trunc(a); }",
+    ),
     "v_rndne_f32_vop1": (
         "float32_t",
         "float32_t",
@@ -287,21 +326,41 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
     # exactly via util::*_f32_simd (FTZ input/output flush + canonical-qNaN and
     # NaN-input-preservation blends), so the SIMD result is bit-identical to the
     # forced-scalar body on every input incl NaN/Inf/denormal. ---
-    "v_rcp_f32_vop1": ("float32_t", "float32_t", "[](auto a) { return util::rcp_f32_simd(a); }"),
+    "v_rcp_f32_vop1": (
+        "float32_t",
+        "float32_t",
+        "[](auto a) { return util::rcp_f32_simd(a); }",
+    ),
     "v_rcp_iflag_f32_vop1": (
         "float32_t",
         "float32_t",
         "[](auto a) { return util::rcp_f32_simd(a); }",
     ),
-    "v_rsq_f32_vop1": ("float32_t", "float32_t", "[](auto a) { return util::rsq_f32_simd(a); }"),
-    "v_sqrt_f32_vop1": ("float32_t", "float32_t", "[](auto a) { return util::sqrt_f32_simd(a); }"),
+    "v_rsq_f32_vop1": (
+        "float32_t",
+        "float32_t",
+        "[](auto a) { return util::rsq_f32_simd(a); }",
+    ),
+    "v_sqrt_f32_vop1": (
+        "float32_t",
+        "float32_t",
+        "[](auto a) { return util::sqrt_f32_simd(a); }",
+    ),
     # --- transcendental exp2/log2. util::{exp,log}_f32_simd wrap stdx::exp2/log2
     # with the same FTZ flush / special-case guards as the scalar transcendental
     # reference; the underlying vector libm is bit-exact to scalar std::* on the
     # supported toolchains (libstdc++ 13 / AVX-512), guarded by
     # UtilSimd.Exp2/Log2_*_BitExact. v_sin/v_cos excluded: vector libm ~1 ULP off. ---
-    "v_exp_f32_vop1": ("float32_t", "float32_t", "[](auto a) { return util::exp_f32_simd(a); }"),
-    "v_log_f32_vop1": ("float32_t", "float32_t", "[](auto a) { return util::log_f32_simd(a); }"),
+    "v_exp_f32_vop1": (
+        "float32_t",
+        "float32_t",
+        "[](auto a) { return util::exp_f32_simd(a); }",
+    ),
+    "v_log_f32_vop1": (
+        "float32_t",
+        "float32_t",
+        "[](auto a) { return util::log_f32_simd(a); }",
+    ),
     # --- float -> int conversions with NaN->0 and saturating clamp. The float
     # comparison masks are re-typed to the int lane via simd_mask_as<> before
     # the where-blend. Masks are mutually exclusive so application order is
@@ -608,7 +667,10 @@ SIMD_VOP1_UNARY_F64: dict[str, tuple[str, str]] = {
     "v_trunc_f64_vop1": ("double", "[](auto a) { return util::stdx::trunc(a); }"),
     "v_rndne_f64_vop1": ("double", "[](auto a) { return util::stdx::nearbyint(a); }"),
     "v_fract_f64_vop1": ("double", "[](auto a) { return a - util::stdx::floor(a); }"),
-    "v_rcp_f64_vop1": ("double", "[](auto a) { return util::native<double>(1.0) / a; }"),
+    "v_rcp_f64_vop1": (
+        "double",
+        "[](auto a) { return util::native<double>(1.0) / a; }",
+    ),
     "v_rsq_f64_vop1": (
         "double",
         "[](auto a) { return util::native<double>(1.0) / util::stdx::sqrt(a); }",
@@ -713,7 +775,10 @@ _VOPC_SUFFIX: dict[str, tuple[str, str]] = {
     "u32": ("uint32_t", "{x}"),
     # 16-bit integers read as uint32 lanes; sign-extend / mask the low 16 bits to
     # match the scalar static_cast<int16_t>/<uint16_t>.
-    "i16": ("uint32_t", "((util::stdx::static_simd_cast<util::native<int32_t>>({x}) << 16) >> 16)"),
+    "i16": (
+        "uint32_t",
+        "((util::stdx::static_simd_cast<util::native<int32_t>>({x}) << 16) >> 16)",
+    ),
     "u16": ("uint32_t", "({x} & 0xFFFFu)"),
     # 64-bit lanes: read directly as the native 64-bit lane type (read_simd64),
     # so the conversion is the identity. Routed through the VOPC64 glue.
@@ -751,8 +816,24 @@ _VOPC_REL: dict[str, str] = {
 # width regardless of suffix.
 _VOPC_CONST: dict[str, str] = {"f": "false", "t": "true", "tru": "true"}
 
-_VOPC_FLOAT_RELS = ["eq", "ge", "gt", "le", "lg", "lt", "neq", "nge", "ngt", "nle", "nlg", "nlt",
-                    "o", "u", "f", "tru"]
+_VOPC_FLOAT_RELS = [
+    "eq",
+    "ge",
+    "gt",
+    "le",
+    "lg",
+    "lt",
+    "neq",
+    "nge",
+    "ngt",
+    "nle",
+    "nlg",
+    "nlt",
+    "o",
+    "u",
+    "f",
+    "tru",
+]
 _VOPC_INT_RELS = ["eq", "ge", "gt", "le", "lt", "ne", "f", "t"]
 
 

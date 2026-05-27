@@ -108,12 +108,12 @@ TEST(Vop1CvtF64Scalar, I32FromF64_FullDoubleRead) {
   Fixture fx;
   for (double d : {3.7, -3.7, 100.9, -100.9, 1e12, -1e12}) {
     uint64_t bits = std::bit_cast<uint64_t>(d);
-    uint64_t got = fx.run(/*v_cvt_i32_f64=*/3, static_cast<uint32_t>(bits),
-                          static_cast<uint32_t>(bits >> 32));
-    int32_t ref = std::isnan(d)             ? 0
-                  : d >= 2147483648.0       ? INT32_MAX
-                  : d < -2147483648.0       ? INT32_MIN
-                                            : static_cast<int32_t>(d);
+    uint64_t got =
+        fx.run(/*v_cvt_i32_f64=*/3, static_cast<uint32_t>(bits), static_cast<uint32_t>(bits >> 32));
+    int32_t ref = std::isnan(d)       ? 0
+                  : d >= 2147483648.0 ? INT32_MAX
+                  : d < -2147483648.0 ? INT32_MIN
+                                      : static_cast<int32_t>(d);
     EXPECT_EQ(static_cast<uint32_t>(got), static_cast<uint32_t>(ref)) << "v_cvt_i32_f64 of " << d;
   }
 }

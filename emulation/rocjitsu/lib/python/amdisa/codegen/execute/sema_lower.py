@@ -78,8 +78,12 @@ class OperandMap:
                 return width
             return 64 if size == 64 else 32
 
-        src_b = {i: OperandBinding(name, reg, _bw(name)) for i, name in enumerate(src_ops)}
-        dst_b = {i: OperandBinding(name, reg, _bw(name)) for i, name in enumerate(dst_ops)}
+        src_b = {
+            i: OperandBinding(name, reg, _bw(name)) for i, name in enumerate(src_ops)
+        }
+        dst_b = {
+            i: OperandBinding(name, reg, _bw(name)) for i, name in enumerate(dst_ops)
+        }
         return OperandMap(src_bindings=src_b, dst_bindings=dst_b)
 
 

@@ -131,18 +131,15 @@ struct CarryCase {
 };
 
 const CarryCase kCases[] = {
-    {"v_add_co_u32", 25},    {"v_sub_co_u32", 26},  {"v_subrev_co_u32", 27},
-    {"v_addc_co_u32", 28},   {"v_subb_co_u32", 29}, {"v_subbrev_co_u32", 30},
+    {"v_add_co_u32", 25},  {"v_sub_co_u32", 26},  {"v_subrev_co_u32", 27},
+    {"v_addc_co_u32", 28}, {"v_subb_co_u32", 29}, {"v_subbrev_co_u32", 30},
 };
 
 // Carry-in VCC patterns to seed before execution. addc/subb/subbrev read these;
 // the non-carry-in forms ignore them but must still leave inactive bits intact.
 const uint64_t kVccPatterns[] = {
-    0x0000000000000000ULL,
-    0xFFFFFFFFFFFFFFFFULL,
-    0xAAAAAAAAAAAAAAAAULL,
-    0x5555555555555555ULL,
-    0x0123456789ABCDEFULL,
+    0x0000000000000000ULL, 0xFFFFFFFFFFFFFFFFULL, 0xAAAAAAAAAAAAAAAAULL,
+    0x5555555555555555ULL, 0x0123456789ABCDEFULL,
 };
 
 void check_case(const CarryCase &c, uint64_t exec) {
@@ -162,8 +159,9 @@ void check_case(const CarryCase &c, uint64_t exec) {
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       const bool active = (exec >> lane) & 1ULL;
       EXPECT_EQ(scalar.dst[lane], simd.dst[lane])
-          << c.label << " vcc_in=0x" << std::hex << vcc_in << ": dst divergence at lane " << std::dec
-          << lane << std::hex << " scalar=0x" << scalar.dst[lane] << " simd=0x" << simd.dst[lane];
+          << c.label << " vcc_in=0x" << std::hex << vcc_in << ": dst divergence at lane "
+          << std::dec << lane << std::hex << " scalar=0x" << scalar.dst[lane] << " simd=0x"
+          << simd.dst[lane];
       if (!active) {
         EXPECT_EQ(simd.dst[lane], DST_SENTINEL)
             << c.label << ": SIMD clobbered inactive dst lane " << lane;

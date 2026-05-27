@@ -91,8 +91,12 @@ def gen_vector_cmp_class(
         L.append('    bool is_zero = (f16_exp == 0) && (f16_mant == 0);')
         L.append('    bool is_denorm = (f16_exp == 0) && (f16_mant != 0);')
         L.append('    bool is_normal = (f16_exp >= 1) && (f16_exp <= 30);')
-        L.append('    if ((mask & 0x001) && is_nan && (s0_raw & 0x0200) == 0) match = true;')
-        L.append('    if ((mask & 0x002) && is_nan && (s0_raw & 0x0200) != 0) match = true;')
+        L.append(
+            '    if ((mask & 0x001) && is_nan && (s0_raw & 0x0200) == 0) match = true;'
+        )
+        L.append(
+            '    if ((mask & 0x002) && is_nan && (s0_raw & 0x0200) != 0) match = true;'
+        )
         L.append('    if ((mask & 0x004) && is_inf && f16_sign) match = true;')
         L.append('    if ((mask & 0x008) && is_normal && f16_sign) match = true;')
         L.append('    if ((mask & 0x010) && is_denorm && f16_sign) match = true;')
