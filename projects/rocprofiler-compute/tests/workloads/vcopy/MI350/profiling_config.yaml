@@ -13,7 +13,7 @@ mem_level: ALL
 mode: profile
 name: vcopy
 no_roof: true
-path: /app/workloads/vcopy/MI350
+output_directory: /app/workloads/vcopy/MI350
 quiet: false
 remaining:
 - --
@@ -30,7 +30,6 @@ roofline_data_type:
 sort: kernels
 spatial_multiplexing: null
 specs: false
-subpath: gpu
 summaries: false
 target: null
 use_rocscope: false

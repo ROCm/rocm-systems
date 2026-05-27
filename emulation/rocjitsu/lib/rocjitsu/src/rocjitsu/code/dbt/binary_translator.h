@@ -105,15 +105,17 @@ private:
   /// @brief Apply a single semantic replacement to the translated text.
   ///
   /// @details If the replacement fits within the source byte range, writes
-  /// in-place with NOP padding. If it expands, writes a branch stub in-place
-  /// and appends the replacement body + return branch to the code cave via
-  /// the patcher.
+  /// in-place and pads any leftover source words. If it expands, writes a
+  /// branch stub in-place and appends the replacement body + return branch to
+  /// the .rj_translations code cave via the patcher.
   ///
   /// @param repl    The semantic replacement to apply.
   /// @param text    The translated text buffer (same size as original .text).
   /// @param patcher The code object patcher for cave body accumulation.
-  void apply_semantic(const struct SemanticReplacement &repl, std::vector<uint8_t> &text,
-                      CodeObjectPatcher &patcher);
+  /// @returns true if the replacement was applied safely; false if an expanding
+  ///          replacement could not be branched to/from the code cave.
+  [[nodiscard]] bool apply_semantic(const struct SemanticReplacement &repl,
+                                    std::vector<uint8_t> &text, CodeObjectPatcher &patcher);
 
   /// @brief Translate a single instruction via the encoding translation pipeline.
   ///
@@ -125,9 +127,15 @@ private:
   /// @param offset     Byte offset of the instruction within .text.
   /// @param text       The translated text buffer.
   /// @param dst_opcode Target opcode from the legalization table.
-  void handle_encoding(const Instruction &inst, uint64_t offset, std::vector<uint8_t> &text,
-                       uint16_t dst_opcode, CodeObjectPatcher &patcher,
-                       std::span<const uint8_t> orig_text);
+  /// @param patcher    The code object patcher for expanded instruction bodies.
+  /// @param orig_text   The original .text bytes used to preserve trailing literals.
+  /// @returns true if the instruction was translated or copied safely; false if
+  ///          the translated encoding expanded and could not be branched through
+  ///          the code cave.
+  [[nodiscard]] bool handle_encoding(const Instruction &inst, uint64_t offset,
+                                     std::vector<uint8_t> &text, uint16_t dst_opcode,
+                                     CodeObjectPatcher &patcher,
+                                     std::span<const uint8_t> orig_text);
 
   rj_code_arch_t guest_arch_;                               ///< Source ISA.
   rj_code_arch_t host_arch_;                                ///< Target ISA.

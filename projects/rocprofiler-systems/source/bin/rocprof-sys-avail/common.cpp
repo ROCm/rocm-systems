@@ -414,3 +414,66 @@ file_exists(const std::string& _fname)
 }
 
 //--------------------------------------------------------------------------------------//
+
+namespace
+{
+constexpr std::string_view _rocm_op_prefix = "ROCPROFSYS_ROCM_";
+constexpr std::string_view _rocm_op_suffix = "_OPERATIONS";
+}  // namespace
+
+std::optional<std::string>
+rocm_domain_from_setting_name(std::string_view _env_var_name)
+{
+    // Check if the environment variable name matches the expected shape
+    // ROCPROFSYS_ROCM_<DOMAIN>_OPERATIONS.
+    if(_env_var_name.size() <= _rocm_op_prefix.size() + _rocm_op_suffix.size() ||
+       _env_var_name.compare(0, _rocm_op_prefix.size(), _rocm_op_prefix) != 0 ||
+       _env_var_name.compare(_env_var_name.size() - _rocm_op_suffix.size(),
+                             _rocm_op_suffix.size(), _rocm_op_suffix) != 0)
+        return std::nullopt;
+
+    // Extract the domain name from the environment variable name, then convert it to
+    // lowercase.
+    std::string _domain{ _env_var_name.substr(
+        _rocm_op_prefix.size(),
+        _env_var_name.size() - _rocm_op_prefix.size() - _rocm_op_suffix.size()) };
+    std::transform(_domain.begin(), _domain.end(), _domain.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    return _domain;
+}
+
+std::string
+rocm_setting_name_for_domain(std::string_view _domain)
+{
+    std::string _result;
+    _result.reserve(_rocm_op_prefix.size() + _domain.size() + _rocm_op_suffix.size());
+    _result.append(_rocm_op_prefix);
+    _result.append(_domain);
+    _result.append(_rocm_op_suffix);
+    std::transform(_result.begin() + _rocm_op_prefix.size(),
+                   _result.end() - _rocm_op_suffix.size(),
+                   _result.begin() + _rocm_op_prefix.size(),
+                   [](unsigned char c) { return std::toupper(c); });
+    return _result;
+}
+
+void
+filter_operations(const std::string& env_var_name, std::vector<std::string>& choices)
+{
+    auto _domain = rocm_domain_from_setting_name(env_var_name);
+    if(!_domain) return;
+
+    // Filter out unsupported operations for the OMPT domain.
+    if(*_domain == "ompt")
+    {
+        choices.erase(
+            std::remove_if(choices.begin(), choices.end(),
+                           [](const std::string& op) {
+                               return op == "omp_callback_functions" ||  // internal
+                                      op == "omp_thread_end";            // unsupported
+                           }),
+            choices.end());
+    }
+}
+
+//--------------------------------------------------------------------------------------//

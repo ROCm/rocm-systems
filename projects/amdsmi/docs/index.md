@@ -23,7 +23,7 @@ documentation](https://instinct.docs.amd.com/projects/amd-smi-virt/en/latest/).
 ```
 
 ```{note}
-AMD SMI is the successor to <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocm-smi-lib>.
+AMD SMI is the successor to [ROCm SMI](https://github.com/ROCm/rocm-systems/tree/develop/projects/rocm-smi-lib).
 ```
 
 ::::{grid} 2
