@@ -8,11 +8,19 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Added
 
+- Parallel Perfetto post-processing of cached trace data. Per-pid Perfetto output is now produced concurrently across worker threads in the trace-cache path, matching the throughput shape of the RocPD post-processor and reducing end-of-run flush time on large traces.
+- `ROCPROFSYS_PERFETTO_OUTPUT_LAYOUT` environment variable to control Perfetto trace aggregation. Accepts `single_file_only` (one merged trace across pids and MPI ranks), `per_process_only` (per-pid files for cached output and per-rank files for live output, no cross-process merge), or `full` (default; both per-process files and a merged trace).
+
 ### Changed
 
 - Remove Boost as a Dyninst dependency by replacing Boost usage with in-tree dyncompat shims and C++17 standard library equivalents; Bundled Dyninst now requires **GCC ≥ 10**
+- Cross-rank Perfetto trace merging is now performed in-process by the rocprof-sys runtime. The standalone `rocprof-sys-merge-output.sh` helper script has been removed; merged output is produced under the same `merged.proto` filename by the new `ROCPROFSYS_PERFETTO_OUTPUT_LAYOUT` mechanism.
+- `ROCPROFSYS_PERFETTO_COMBINE_TRACES` is deprecated and no longer consulted. A deprecation banner directs users to set `ROCPROFSYS_PERFETTO_OUTPUT_LAYOUT` instead.
+- `ROCPROFSYS_MERGE_PERFETTO_FILES` is deprecated and no longer consulted. A deprecation banner directs users to set `ROCPROFSYS_PERFETTO_OUTPUT_LAYOUT` instead.
 
 ### Resolved issues
+
+- Fixed a Perfetto cached-trace data-loss issue where multiple per-pid sources merged into a single `.proto` file collapsed their distinct `trusted_packet_sequence_id` namespaces, causing some interned-data references (event categories, event names) to be misresolved or dropped at read time. Per-source seq_ids are now offset rather than replaced, preserving each source's interned-data namespace across the merged output.
 
 ## ROCm Systems Profiler 1.6.0 for ROCm 7.13.0
 
