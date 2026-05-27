@@ -67,68 +67,18 @@ class Gfx12CmdBuilder : public CmdBuilder {
         die_id = PACKET3_COPY_DATA__XCD_DIE_ID(PACKET3_COPY_DATA__XCD_DIE_ID__XCD4);
         break;
       case CHIPLET_XCD0:
-        if (is_aid_chiplet) {
-          remote_mode = PACKET3_COPY_DATA__MODE(PACKET3_COPY_DATA__MODE__REMOTE_OR_LOCAL_AID);
-        } else {
-          remote_mode = PACKET3_COPY_DATA__MODE(PACKET3_COPY_DATA__MODE__LOCAL_XCD);
-        }
-        die_id = PACKET3_COPY_DATA__XCD_DIE_ID(PACKET3_COPY_DATA__XCD_DIE_ID__XCD0);
-        break;
       case CHIPLET_XCD1:
-        if (is_aid_chiplet) {
-          return false;
-        } else {
-          remote_mode = PACKET3_COPY_DATA__MODE(PACKET3_COPY_DATA__MODE__LOCAL_XCD);
-        }
-        die_id = PACKET3_COPY_DATA__XCD_DIE_ID(PACKET3_COPY_DATA__XCD_DIE_ID__XCD1);
-        break;
       case CHIPLET_XCD2:
-        if (is_aid_chiplet) {
-          return false;
-        } else {
-          remote_mode = PACKET3_COPY_DATA__MODE(PACKET3_COPY_DATA__MODE__LOCAL_XCD);
-        }
-        die_id = PACKET3_COPY_DATA__XCD_DIE_ID(PACKET3_COPY_DATA__XCD_DIE_ID__XCD2);
-        break;
       case CHIPLET_XCD3:
-        if (is_aid_chiplet) {
-          return false;
-        } else {
-          remote_mode = PACKET3_COPY_DATA__MODE(PACKET3_COPY_DATA__MODE__LOCAL_XCD);
-        }
-        die_id = PACKET3_COPY_DATA__XCD_DIE_ID(PACKET3_COPY_DATA__XCD_DIE_ID__XCD3);
-        break;
       case CHIPLET_XCD4:
-        if (is_aid_chiplet) {
-          remote_mode = PACKET3_COPY_DATA__MODE(PACKET3_COPY_DATA__MODE__REMOTE_OR_LOCAL_AID);
-        } else {
-          remote_mode = PACKET3_COPY_DATA__MODE(PACKET3_COPY_DATA__MODE__LOCAL_XCD);
-        }
-        die_id = PACKET3_COPY_DATA__XCD_DIE_ID(PACKET3_COPY_DATA__XCD_DIE_ID__XCD4);
-        break;
       case CHIPLET_XCD5:
-        if (is_aid_chiplet) {
-          return false;
-        } else {
-          remote_mode = PACKET3_COPY_DATA__MODE(PACKET3_COPY_DATA__MODE__LOCAL_XCD);
-        }
-        die_id = PACKET3_COPY_DATA__XCD_DIE_ID(PACKET3_COPY_DATA__XCD_DIE_ID__XCD5);
-        break;
       case CHIPLET_XCD6:
-        if (is_aid_chiplet) {
-          return false ;
-        } else {
-          remote_mode = PACKET3_COPY_DATA__MODE(PACKET3_COPY_DATA__MODE__LOCAL_XCD);
-        }
-        die_id = PACKET3_COPY_DATA__XCD_DIE_ID(PACKET3_COPY_DATA__XCD_DIE_ID__XCD6);
-        break;
       case CHIPLET_XCD7:
-        if (is_aid_chiplet) {
-          return false;
-        } else {
+        if (is_aid_chiplet)
+          remote_mode = PACKET3_COPY_DATA__MODE(PACKET3_COPY_DATA__MODE__REMOTE_OR_LOCAL_AID);
+        else
           remote_mode = PACKET3_COPY_DATA__MODE(PACKET3_COPY_DATA__MODE__LOCAL_XCD);
-        }
-        die_id = PACKET3_COPY_DATA__XCD_DIE_ID(PACKET3_COPY_DATA__XCD_DIE_ID__XCD7);
+        die_id = PACKET3_COPY_DATA__XCD_DIE_ID(chiplet_id);
         break;
       default:
         return false;
@@ -171,13 +121,12 @@ class Gfx12CmdBuilder : public CmdBuilder {
         }
         dword2 |= remote_mode | die_id |
           PACKET3_COPY_DATA__SRC_DST_REMOTE_MODE(PACKET3_COPY_DATA__SRC_DST_REMOTE_MODE__DST_IS_REMOTE);
-      } else if (is_aid_chiplet)
-        if (chiplet_id == CHIPLET_XCD0 || chiplet_id == CHIPLET_XCD4) {
-          // bit32: 1 = Remote DIE
-          dword5 |= 0x40000000;
-          // bit34-39: 1 = AID0; 2 = AID1
-          dword6 = chiplet_id == CHIPLET_XCD0 ? 1 : 2;
-        }
+      } else if (is_aid_chiplet) {
+        // bit32: 1 = Remote DIE
+        dword5 |= 0x40000000;
+        // bit34-39: 1 = AID0; 2 = AID1
+        dword6 = chiplet_id == CHIPLET_XCD0 ? 1 : 2;
+      }
     }
 
     // build the pm4mec_copy_data command which has 6 Dwords
@@ -235,13 +184,12 @@ class Gfx12CmdBuilder : public CmdBuilder {
         }
         dword2 |= remote_mode | die_id |
           PACKET3_COPY_DATA__SRC_DST_REMOTE_MODE(PACKET3_COPY_DATA__SRC_DST_REMOTE_MODE__SRC_IS_REMOTE);
-      } else if (is_aid_chiplet)
-        if (chiplet_id == CHIPLET_XCD0 || chiplet_id == CHIPLET_XCD4) {
-          // bit32: 1 = Remote DIE
-          dword3 |= 0x40000000;
-          // bit34-39: 1 = AID0; 2 = AID1
-          dword4 = chiplet_id == CHIPLET_XCD0 ? 1 : 2;
-        }
+      } else if (is_aid_chiplet) {
+        // bit32: 1 = Remote DIE
+        dword3 |= 0x40000000;
+        // bit34-39: 1 = AID0; 2 = AID1
+        dword4 = chiplet_id == CHIPLET_XCD0 ? 1 : 2;
+      }
     }
 
     // build the pm4mec_copy_data command which has 6 Dwords

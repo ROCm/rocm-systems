@@ -280,7 +280,11 @@ const AgentInfo* HsaRsrcFactory::AddAgentInfo(const hsa_agent_t agent) {
     //       Patch it to be WGP = 2CU to reuse profiler logic
     if (!strncmp(agent_info->name, "gfx1250", 7)) {
       agent_info->cu_num = agent_info->se_num * agent_info->shader_arrays_per_se * 9 * 2;
-      agent_info->xcc_per_aid = 4;
+      if (agent_info->xcc_num == 6) {
+        agent_info->xcc_per_aid = 3;
+      } else {
+        agent_info->xcc_per_aid = 4;
+      }
     } else if (!strncmp(agent_info->name, "gfx94", 5) || !strncmp(agent_info->name, "gfx95", 5)) {
       agent_info->xcc_per_aid = 2;
     } else {

@@ -132,7 +132,7 @@ class CmdBuffer {
 };
 
 enum ChipletId {
-  CHIPLET_XCD0 = 0,
+  CHIPLET_XCD0 = 0,   // This is intentionally set to 0 so that it matches PACKET3_COPY_DATA__XCD_DIE_ID__XCD0
   CHIPLET_XCD1 = 1,
   CHIPLET_XCD2 = 2,
   CHIPLET_XCD3 = 3,
