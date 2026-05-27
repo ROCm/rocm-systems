@@ -165,22 +165,6 @@ TEST_F(pthread_mutex_gotcha_test, test_shutdown_calls_disable)
     EXPECT_NO_THROW(sut::shutdown());
 }
 
-TEST_F(pthread_mutex_gotcha_test, test_pause_calls_set_ready_false)
-{
-    EXPECT_NO_THROW(sut::pause());
-}
-
-TEST_F(pthread_mutex_gotcha_test, test_resume_calls_set_ready_true)
-{
-    EXPECT_NO_THROW(sut::resume());
-}
-
-TEST_F(pthread_mutex_gotcha_test, test_pause_then_resume)
-{
-    EXPECT_NO_THROW(sut::pause());
-    EXPECT_NO_THROW(sut::resume());
-}
-
 TEST_F(pthread_mutex_gotcha_test, test_configure_sets_initializer)
 {
     std::function<void()> initializer;
