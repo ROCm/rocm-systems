@@ -6,12 +6,14 @@
 
 #include "rocjitsu/code/dbt/semantic/cdna4_to_rdna_common.h"
 
+#include "rocjitsu/code/dbt/translation_rule.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
 #include "rocjitsu/isa/instruction.h"
 
 #include <cstring>
+#include <string>
 #include <utility>
 
 namespace rocjitsu {
@@ -43,6 +45,11 @@ std::vector<uint32_t> lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch
   constexpr uint16_t kOpAddCoCiU32 = 288;
   constexpr uint8_t kSoppWaitAlu = 8;
 
+  // This lowering introduces VCC as the explicit carry register. VCC is special
+  // scalar state, not a liveness-allocated scratch SGPR pair, so it must not
+  // grow the ordinary SGPR descriptor allocation. Treating it as normal SGPRs
+  // makes valid RDNA targets look unsupported once diagnostics become fatal.
+
   std::vector<uint32_t> words;
 
   // v_add_co_u32 writes VCC, then v_add_co_ci_u32 consumes VCC as carry-in.
@@ -73,11 +80,16 @@ std::vector<uint32_t> lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch
 
 } // namespace
 
-std::vector<uint32_t> expand_cdna4_v_lshl_add_u64_for_rdna(const Instruction &inst,
-                                                           uint32_t host_arch, uint64_t,
-                                                           const LivenessAnalysis &,
-                                                           const LaneLayout *, const LaneLayout *) {
-  return lower_v_lshl_add_u64(inst, static_cast<rj_code_arch_t>(host_arch));
+ExpandResult expand_cdna4_v_lshl_add_u64_for_rdna(const Instruction &inst, uint32_t host_arch,
+                                                  uint64_t, const LivenessAnalysis &,
+                                                  TranslationContext &, const LaneLayout *,
+                                                  const LaneLayout *) {
+  auto words = lower_v_lshl_add_u64(inst, static_cast<rj_code_arch_t>(host_arch));
+  if (!words.empty())
+    return ExpandResult::success(std::move(words));
+  return ExpandResult::failed(std::string(inst.mnemonic()) +
+                              " matched a semantic expansion rule, but the rule rejected "
+                              "this instruction form as unsupported.");
 }
 
 } // namespace rocjitsu

@@ -19,6 +19,7 @@
 #include <bit>
 #include <cassert>
 #include <cstring>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -134,7 +135,8 @@ constexpr uint8_t kOpWmmaF32_16x16x16_F16 = 64;
 /// MFMA layout. The ds_bpermute tail corrects the affected lanes using the
 /// generated matrix conversion table.
 std::vector<uint32_t> lower_mfma_f32_16x16x16_f16(const Instruction &inst,
-                                                  const LivenessAnalysis &liveness) {
+                                                  const LivenessAnalysis &liveness,
+                                                  TranslationContext &context) {
   const auto *raw = inst.raw_encoding();
   if (!raw || inst.size() < 8)
     return {};
@@ -166,6 +168,13 @@ std::vector<uint32_t> lower_mfma_f32_16x16x16_f16(const Instruction &inst,
   if (!free_reg)
     return {};
   const uint8_t vaddr = static_cast<uint8_t>(*free_reg);
+
+  // Record feedback only after the full scratch allocation succeeds. A failed
+  // lowering returns empty and should not grow descriptor resources for code
+  // that was never emitted.
+  context.require_sgprs(static_cast<uint32_t>(kExecSave) + 2);
+  context.require_sgprs(static_cast<uint32_t>(kTmpSgpr) + 1);
+  context.require_vgprs(static_cast<uint32_t>(vaddr) + 1);
 
   std::vector<uint32_t> words;
 
@@ -232,33 +241,45 @@ std::vector<uint32_t> lower_mfma_f32_16x16x16_f16(const Instruction &inst,
   return words;
 }
 
-std::vector<uint32_t> expand_waitcnt(const Instruction &inst, uint32_t, uint64_t,
-                                     const LivenessAnalysis &, const LaneLayout *,
-                                     const LaneLayout *) {
+ExpandResult expand_waitcnt(const Instruction &inst, uint32_t, uint64_t, const LivenessAnalysis &,
+                            TranslationContext &, const LaneLayout *, const LaneLayout *) {
   if (!inst.raw_encoding())
-    return {};
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " matched the waitcnt expansion rule without raw encoding");
   const auto &sopp = *reinterpret_cast<const cdna4::SoppMachineInst *>(inst.raw_encoding());
-  return encode_waitcnt_gfx12(decode_waitcnt_gfx9(sopp.simm16));
+  return ExpandResult::success(encode_waitcnt_gfx12(decode_waitcnt_gfx9(sopp.simm16)));
 }
 
-std::vector<uint32_t> expand_accvgpr_read(const Instruction &inst, uint32_t, uint64_t,
-                                          const LivenessAnalysis &, const LaneLayout *,
-                                          const LaneLayout *) {
-  return lower_accvgpr_read(inst);
+ExpandResult expand_accvgpr_read(const Instruction &inst, uint32_t, uint64_t,
+                                 const LivenessAnalysis &, TranslationContext &, const LaneLayout *,
+                                 const LaneLayout *) {
+  auto words = lower_accvgpr_read(inst);
+  if (!words.empty())
+    return ExpandResult::success(std::move(words));
+  return ExpandResult::failed(
+      std::string(inst.mnemonic()) +
+      " matched the AccVGPR read expansion rule, but the instruction form is unsupported");
 }
 
-std::vector<uint32_t> expand_accvgpr_write(const Instruction &, uint32_t, uint64_t,
-                                           const LivenessAnalysis &, const LaneLayout *,
-                                           const LaneLayout *) {
+ExpandResult expand_accvgpr_write(const Instruction &, uint32_t, uint64_t, const LivenessAnalysis &,
+                                  TranslationContext &, const LaneLayout *, const LaneLayout *) {
   // AccVGPR writes are already represented by the unified VGPR mapping that
   // descriptor translation reserves for RDNA targets.
-  return {build_s_nop()};
+  return ExpandResult::success({build_s_nop()});
 }
 
-std::vector<uint32_t> expand_mfma_f32_16x16x16_f16(const Instruction &inst, uint32_t, uint64_t,
-                                                   const LivenessAnalysis &liveness,
-                                                   const LaneLayout *, const LaneLayout *) {
-  return lower_mfma_f32_16x16x16_f16(inst, liveness);
+ExpandResult expand_mfma_f32_16x16x16_f16(const Instruction &inst, uint32_t, uint64_t,
+                                          const LivenessAnalysis &liveness,
+                                          TranslationContext &context, const LaneLayout *,
+                                          const LaneLayout *) {
+  auto words = lower_mfma_f32_16x16x16_f16(inst, liveness, context);
+  if (!words.empty())
+    return ExpandResult::success(std::move(words));
+  return ExpandResult::failed(
+      std::string(inst.mnemonic()) +
+          " matched the MFMA expansion rule, but scratch allocation or operand validation failed",
+      {"Check whether conservative liveness leaves a free SGPR pair and VGPR scratch.",
+       "Add a more general lowering or spill path for this MFMA form."});
 }
 
 // CDNA4 encoding IDs (encoding_id = w0 >> 23, from CDNA4 instruction words).

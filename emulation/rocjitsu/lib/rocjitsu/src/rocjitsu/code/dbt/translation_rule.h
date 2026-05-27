@@ -25,12 +25,88 @@
 #include <compare>
 #include <cstdint>
 #include <span>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
 
 class Instruction;
 class LivenessAnalysis;
+
+/// @brief Per-kernel resource feedback collected while semantic lowerings run.
+///
+/// @details Descriptor translation happens before instruction translation, but
+/// semantic lowerings only know their actual scratch choices after liveness has
+/// been computed. Each kernel is lowered once while recording the highest
+/// SGPR/VGPR count required by those lowerings here; BinaryTranslator then
+/// recomputes the affected descriptor translations with those larger minimums
+/// before patching descriptors into the output image. A second instruction pass
+/// is only needed if a future lowering depends on descriptor-derived register
+/// numbers that can change during that recomputation.
+struct TranslationContext {
+  uint32_t num_vgprs = 0;
+  uint32_t num_agprs = 0;
+  uint32_t accum_offset = 0;
+  uint32_t num_sgprs = 0;
+  uint32_t required_vgpr_count = 0;
+  uint32_t required_sgpr_count = 0;
+
+  TranslationContext() = default;
+  TranslationContext(uint32_t vgprs, uint32_t sgprs)
+      : num_vgprs(vgprs), num_sgprs(sgprs), required_vgpr_count(0), required_sgpr_count(0) {}
+  TranslationContext(uint32_t vgprs, uint32_t agprs, uint32_t accum_base, uint32_t sgprs)
+      : num_vgprs(vgprs), num_agprs(agprs), accum_offset(accum_base), num_sgprs(sgprs),
+        required_vgpr_count(0), required_sgpr_count(0) {}
+
+  void require_vgprs(uint32_t count) {
+    if (required_vgpr_count < count)
+      required_vgpr_count = count;
+  }
+
+  void require_sgprs(uint32_t count) {
+    if (required_sgpr_count < count)
+      required_sgpr_count = count;
+  }
+};
+
+/// @brief Status returned by a semantic EXPAND rule lookup or expansion.
+enum class ExpandStatus {
+  NotHandled, ///< No rule matched this instruction.
+  Success,    ///< A rule emitted replacement instruction words.
+  Failed,     ///< A rule matched but could not safely emit a lowering.
+};
+
+/// @brief Structured result from a semantic EXPAND rule.
+///
+/// @details Empty replacement words are no longer overloaded to mean both
+/// "there is no rule" and "a rule exists but failed." BinaryTranslator uses the
+/// status to hard-fail unimplemented or failed EXPAND legalizations with useful
+/// diagnostics instead of silently NOP-filling the source instruction.
+struct ExpandResult {
+  ExpandStatus status = ExpandStatus::NotHandled;
+  std::vector<uint32_t> words;
+  std::string message;
+  std::vector<std::string> required_work;
+
+  [[nodiscard]] static ExpandResult not_handled() { return {}; }
+
+  [[nodiscard]] static ExpandResult success(std::vector<uint32_t> replacement_words) {
+    ExpandResult result;
+    result.status = ExpandStatus::Success;
+    result.words = std::move(replacement_words);
+    return result;
+  }
+
+  [[nodiscard]] static ExpandResult failed(std::string failure_message,
+                                           std::vector<std::string> work = {}) {
+    ExpandResult result;
+    result.status = ExpandStatus::Failed;
+    result.message = std::move(failure_message);
+    result.required_work = std::move(work);
+    return result;
+  }
+};
 
 // ---------------------------------------------------------------------------
 // Tier 1: Instruction Descriptor
@@ -124,11 +200,10 @@ struct LaneLayout;
 /// @param liveness      Kernel-scoped live-before data for safe scratch register allocation.
 /// @param guest_layout  Source matrix lane layout (nullptr if not a matrix op).
 /// @param host_layout   Target matrix lane layout (nullptr if not a matrix op).
-/// @returns Replacement instruction words, or empty vector if unhandled.
-using ExpandFn = std::vector<uint32_t> (*)(const Instruction &inst, uint32_t arch, uint64_t offset,
-                                           const LivenessAnalysis &liveness,
-                                           const LaneLayout *guest_layout,
-                                           const LaneLayout *host_layout);
+/// @returns Structured expansion status and replacement words.
+using ExpandFn = ExpandResult (*)(const Instruction &inst, uint32_t arch, uint64_t offset,
+                                  const LivenessAnalysis &liveness, TranslationContext &context,
+                                  const LaneLayout *guest_layout, const LaneLayout *host_layout);
 
 /// @brief A single translation rule for one (source, target) instruction.
 ///

@@ -6,11 +6,11 @@
 
 #pragma once
 
+#include "rocjitsu/code/dbt/translation_diagnostic.h"
 #include "rocjitsu/code/rj_code.h"
 
 #include <cstdint>
 #include <span>
-#include <string>
 #include <vector>
 
 namespace rocjitsu {
@@ -33,9 +33,16 @@ struct KdTranslation {
   uint64_t descriptor_file_offset = 0;
   uint64_t entry_text_offset = 0;
 
+  /// Ordinary architectural VGPRs required by translated code.
   uint32_t target_vgpr_count = 0;
+  /// Descriptor allocation end encoded in COMPUTE_PGM_RSRC1.  On CDNA kernels
+  /// with AccVGPRs this may be larger than target_vgpr_count because it also
+  /// reserves the AccVGPR window selected by ACCUM_OFFSET.
+  uint32_t target_vgpr_allocation_count = 0;
   uint32_t target_vgpr_granulated = 0;
+  uint32_t target_accvgpr_base = 0;
   uint32_t accvgpr_base = 0;
+  uint32_t target_agpr_count = 0;
   uint32_t vgpr_spill_to_lds_count = 0;
   uint32_t vgpr_spill_to_scratch_count = 0;
 
@@ -65,7 +72,10 @@ struct KdTranslation {
   uint8_t host_wavefront_size = 64;
 
   uint32_t guest_vgpr_count = 0;
+  uint32_t guest_vgpr_allocation_count = 0;
+  uint32_t guest_agpr_count = 0;
   uint32_t host_vgpr_count = 0;
+  uint32_t host_vgpr_allocation_count = 0;
   uint32_t guest_sgpr_count = 0;
   uint32_t host_sgpr_count = 0;
 
@@ -73,7 +83,7 @@ struct KdTranslation {
   uint32_t target_occupancy = 0;
 
   bool supported = true;
-  std::vector<std::string> warnings;
+  std::vector<TranslationDiagnostic> diagnostics;
 };
 
 /// @brief Compute descriptor patches and semantic metadata for one DBT pair.
