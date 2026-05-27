@@ -147,16 +147,13 @@ TEST(Vop2FmaF64SimdCorrectness, LaneLayoutRoundTrip) {
     expected[lane] = v;
     fx.write64(vb + 0, lane, v);
   }
-  const uint32_t *lo =
-      reinterpret_cast<const uint32_t *>(fx.cu->vgpr_data(vb + 0));
-  const uint32_t *hi =
-      reinterpret_cast<const uint32_t *>(fx.cu->vgpr_data(vb + 1));
+  const uint32_t *lo = reinterpret_cast<const uint32_t *>(fx.cu->vgpr_data(vb + 0));
+  const uint32_t *hi = reinterpret_cast<const uint32_t *>(fx.cu->vgpr_data(vb + 1));
   constexpr std::size_t W = util::native_width64;
   for (uint32_t base = 0; base < WF_SIZE; base += static_cast<uint32_t>(W)) {
     util::native<uint64_t> v = util::load64<uint64_t>(lo + base, hi + base);
     for (std::size_t i = 0; i < W; ++i)
-      EXPECT_EQ(v[i], expected[base + i])
-          << "load64 mismatch at lane " << (base + i);
+      EXPECT_EQ(v[i], expected[base + i]) << "load64 mismatch at lane " << (base + i);
   }
 }
 
@@ -178,9 +175,8 @@ void check_fmac(uint64_t exec) {
     // different NaN payload between packed and scalar (accepted divergence).
     if (is_f64_nan(scalar[lane]) || is_f64_nan(simd[lane]))
       continue;
-    EXPECT_EQ(scalar[lane], simd[lane])
-        << "v_fmac_f64 dst divergence at lane " << lane << std::hex << " scalar=0x" << scalar[lane]
-        << " simd=0x" << simd[lane];
+    EXPECT_EQ(scalar[lane], simd[lane]) << "v_fmac_f64 dst divergence at lane " << lane << std::hex
+                                        << " scalar=0x" << scalar[lane] << " simd=0x" << simd[lane];
   }
   delete inst;
 }

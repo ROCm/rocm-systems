@@ -780,7 +780,7 @@ template <typename Inst, typename CmpOp>
 /// for the f64 math ops, `uint64_t` for v_mov_b64). Variadic in the functor so
 /// its commas pass through as one token sequence.
 #define ROCJITSU_TRY_SIMD_VOP1_UNARY_F64(T, ...)                                                   \
-  if (::rocjitsu::amdgpu::try_execute_unary_vop1_f64_simd<T>(inst, wf, __VA_ARGS__))                \
+  if (::rocjitsu::amdgpu::try_execute_unary_vop1_f64_simd<T>(inst, wf, __VA_ARGS__))               \
   return
 
 /// Mixed-width cvt counterpart, f64 source -> 32-bit dst. `Tout` is the 32-bit

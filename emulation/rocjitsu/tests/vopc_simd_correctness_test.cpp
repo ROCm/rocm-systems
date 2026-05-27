@@ -63,17 +63,15 @@ const std::array<uint32_t, 10> kInt32 = {{0x00000000u, 0x00000001u, 0xFFFFFFFFu,
 
 // 64-bit edge sets ----------------------------------------------------------
 // f64: ±0, ±1, ±Inf, NaN, denorm, pi, max.
-const std::array<uint64_t, 10> kF64 = {{0x0000000000000000ull, 0x8000000000000000ull,
-                                        0x3FF0000000000000ull, 0xBFF0000000000000ull,
-                                        0x7FF0000000000000ull, 0xFFF0000000000000ull,
-                                        0x7FF8000000000000ull, 0x0000000000000001ull,
-                                        0x400921FB54442D18ull, 0x7FEFFFFFFFFFFFFFull}};
+const std::array<uint64_t, 10> kF64 = {
+    {0x0000000000000000ull, 0x8000000000000000ull, 0x3FF0000000000000ull, 0xBFF0000000000000ull,
+     0x7FF0000000000000ull, 0xFFF0000000000000ull, 0x7FF8000000000000ull, 0x0000000000000001ull,
+     0x400921FB54442D18ull, 0x7FEFFFFFFFFFFFFFull}};
 // integer edges (i64/u64).
-const std::array<uint64_t, 10> kInt64 = {{0x0000000000000000ull, 0x0000000000000001ull,
-                                          0xFFFFFFFFFFFFFFFFull, 0x7FFFFFFFFFFFFFFFull,
-                                          0x8000000000000000ull, 0x00000000FFFFFFFFull,
-                                          0x0000000080000000ull, 0x000000007FFFFFFFull,
-                                          0x123456789ABCDEF0ull, 0xAAAAAAAA55555555ull}};
+const std::array<uint64_t, 10> kInt64 = {
+    {0x0000000000000000ull, 0x0000000000000001ull, 0xFFFFFFFFFFFFFFFFull, 0x7FFFFFFFFFFFFFFFull,
+     0x8000000000000000ull, 0x00000000FFFFFFFFull, 0x0000000080000000ull, 0x000000007FFFFFFFull,
+     0x123456789ABCDEF0ull, 0xAAAAAAAA55555555ull}};
 
 struct Fixture {
   amdgpu::GpuMemory gpu_mem;
@@ -145,13 +143,12 @@ std::vector<VopcCase> all_cases() {
            {32u, Kind::F16}, {64u, Kind::F32}, {96u, Kind::F64}})
     for (uint32_t off = 0; off < 16; ++off)
       cs.push_back({base + off, k});
-  for (auto [base, k] : std::initializer_list<std::pair<uint32_t, Kind>>{
-           {160u, Kind::INT32},
-           {168u, Kind::INT32},
-           {192u, Kind::INT32},
-           {200u, Kind::INT32},
-           {224u, Kind::INT64},
-           {232u, Kind::INT64}})
+  for (auto [base, k] : std::initializer_list<std::pair<uint32_t, Kind>>{{160u, Kind::INT32},
+                                                                         {168u, Kind::INT32},
+                                                                         {192u, Kind::INT32},
+                                                                         {200u, Kind::INT32},
+                                                                         {224u, Kind::INT64},
+                                                                         {232u, Kind::INT64}})
     for (uint32_t off = 0; off < 8; ++off)
       cs.push_back({base + off, k});
   return cs;
