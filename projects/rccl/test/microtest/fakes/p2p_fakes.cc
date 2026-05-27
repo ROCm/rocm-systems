@@ -41,6 +41,69 @@
 
 #include "p2p_fakes.h"     // controllable seam hooks
 
+#include <type_traits>
+
+// ---------------------------------------------------------------------------
+// Signature-drift watchdog (plan item B12).
+//
+// Each controllable seam in p2p_fakes.h is a std::function whose signature
+// must match the production declaration of the symbol it shadows. If a
+// signature changes upstream (an arg added/removed/retyped), the link
+// step would catch it for `extern`-redeclared functions -- but it would
+// NOT catch it for symbols we redefine ourselves (because our definition
+// becomes the new authority), and it definitely wouldn't catch hook-only
+// drift on `std::function` types.
+//
+// The static_asserts below extract the function-signature type from each
+// std::function<R(A...)> hook and compare it against the production
+// declaration's signature (via decltype(&fn)). Any mismatch fires at
+// compile time with a clear error pointing at the offending hook.
+//
+// For symbols we redefine (e.g. hipMemRetainAllocationHandle is macro-
+// shimmed in p2p-test.cc), we anchor the assert to the production
+// declaration that the header pulled in -- those macros are NOT defined
+// in this TU, so taking the address of the production symbol here is
+// safe and resolves to the real prototype.
+namespace {
+template <typename F> struct FnSigOf;
+template <typename R, typename... A>
+struct FnSigOf<std::function<R(A...)>> { using type = R(A...); };
+template <typename F> using FnSigOf_t = typename FnSigOf<F>::type;
+
+template <typename Hook, typename ProdFn>
+constexpr bool HookMatchesProd() {
+    return std::is_same_v<FnSigOf_t<Hook>,
+                          std::remove_pointer_t<ProdFn>>;
+}
+}  // namespace
+
+#define ASSERT_HOOK_MATCHES_PROD(hook, prod)                                \
+    static_assert(HookMatchesProd<decltype(hook), decltype(&prod)>(),       \
+                  "signature drift: " #hook " no longer matches " #prod    \
+                  " -- update the std::function signature in p2p_fakes.h")
+
+ASSERT_HOOK_MATCHES_PROD(g_proxyConnect,              ncclProxyConnect);
+ASSERT_HOOK_MATCHES_PROD(g_proxyCallBlocking,         ncclProxyCallBlocking);
+ASSERT_HOOK_MATCHES_PROD(g_proxyClientQueryFdBlocking, ncclProxyClientQueryFdBlocking);
+ASSERT_HOOK_MATCHES_PROD(g_strongStreamAcquire,       ncclStrongStreamAcquire);
+ASSERT_HOOK_MATCHES_PROD(g_hipMemGetAddressRange,     hipMemGetAddressRange);
+ASSERT_HOOK_MATCHES_PROD(g_hipIpcGetMemHandle,        hipIpcGetMemHandle);
+ASSERT_HOOK_MATCHES_PROD(g_hipMemRetainAllocationHandle,  hipMemRetainAllocationHandle);
+ASSERT_HOOK_MATCHES_PROD(g_hipMemExportToShareableHandle, hipMemExportToShareableHandle);
+ASSERT_HOOK_MATCHES_PROD(g_hipMemRelease,             hipMemRelease);
+// ncclCuMemEnable: header declares `int ncclCuMemEnable()` (rocmwrap.h).
+ASSERT_HOOK_MATCHES_PROD(g_cuMemEnable,               ncclCuMemEnable);
+// Note: g_loadParam, g_fakeCudaCallocAsync, g_fakeCudaMemcpyAsync
+// intentionally don't have prod-drift asserts -- they don't shadow a
+// single concrete production function. g_loadParam stands in for the
+// generated NCCL_PARAM bodies (which p2p-test.cc redirects via macro);
+// g_fakeCudaCallocAsync / g_fakeCudaMemcpyAsync stand in for the
+// header-only ncclCudaCallocAsync / ncclCudaMemcpyAsync templates,
+// which are type-erased at the shim site. If the underlying contracts
+// shift the right check is at the macro-shim site in p2p-test.cc.
+
+#undef ASSERT_HOOK_MATCHES_PROD
+
 // ---------------------------------------------------------------------------
 // Bucket A: trivial globals
 // ---------------------------------------------------------------------------
