@@ -33,8 +33,8 @@
 
 static constexpr int kBlockDim = 1024;
 
-unsigned long long fullMask, halfHighBitsOn, halfBitsOn, halfWaveSize, high16BitsOn,
-                   high8BitsOn, high4BitsOn, allButOne;
+unsigned long long fullMask, halfHighBitsOn, halfBitsOn, high16BitsOn, high8BitsOn, high4BitsOn,
+                   allButOne;
 
 static void initializeMasks()
 {
