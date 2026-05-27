@@ -238,10 +238,6 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::Initialize(const core::Agent& agent,
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
-  // Cache engine ID and xGMI flag for use during queries
-  sdma_engine_id_ = rec_eng;
-  is_xgmi_ = use_xgmi;
-
   // Cache MMIO pointers to avoid repeated struct access + reinterpret_cast in hot paths.
   queue_wptr_ = reinterpret_cast<volatile uint64_t*>(queue_resource_.Queue_write_ptr);
   queue_rptr_ = reinterpret_cast<volatile uint64_t*>(queue_resource_.Queue_read_ptr);

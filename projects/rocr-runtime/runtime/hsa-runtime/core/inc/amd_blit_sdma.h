@@ -93,7 +93,6 @@ class BlitSdmaBase : public core::Blit {
   virtual bool BroadcastSupported() const = 0;
   virtual bool PlatformAtomicSupport() const = 0;
   virtual bool IsGfx1250() const = 0;
-  virtual bool HdpFlushSupport() const = 0;
 
   virtual hsa_status_t SubmitPrologue(const std::vector<core::Signal*>& dep_signals,
                                       core::Signal& out_signal,
@@ -134,19 +133,6 @@ class BlitSdmaBase : public core::Blit {
   virtual hsa_status_t SubmitNotifyEpilogue(core::Signal& out_signal) = 0;
 
   virtual bool SwapSupported() const = 0;
-
-  // @brief Returns the GPU agent that owns this SDMA queue.
-  virtual GpuAgent* agent() const = 0;
-
-  // Accessors for SDMA information queries
-  virtual char* queue_start_addr() const = 0;
-  virtual volatile uint64_t* queue_wptr() const = 0;
-  virtual volatile uint64_t* queue_rptr() const = 0;
-  virtual volatile uint64_t* queue_doorbell() const = 0;
-  virtual const HsaQueueResource& queue_resource() const = 0;
-  virtual uint32_t sdma_engine_id() const = 0;
-  virtual bool is_xgmi() const = 0;
-  virtual size_t min_submission_size() const = 0;
   virtual bool UsesGCR() const = 0;
 };
 
@@ -240,7 +226,6 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
   virtual bool GangLeader() const override { return gang_leader_; }
   bool BroadcastSupported() const override { return broadcast_supported_; }
   bool PlatformAtomicSupport() const override { return platform_atomic_support_; }
-  bool HdpFlushSupport() const override { return hdp_flush_support_; }
   bool IsGfx1250() const override { return is_gfx1250_; }
 
   hsa_status_t SubmitPrologue(const std::vector<core::Signal*>& dep_signals,
@@ -278,17 +263,6 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
   hsa_status_t SubmitNotifyEpilogue(core::Signal& out_signal) override;
 
   bool SwapSupported() const override { return swap_supported_; }
-  GpuAgent* agent() const override { return agent_; }
-
-  // Accessors for direct sdma queue
-  char* queue_start_addr() const override { return queue_start_addr_; }
-  volatile uint64_t* queue_wptr() const override { return queue_wptr_; }
-  volatile uint64_t* queue_rptr() const override { return queue_rptr_; }
-  volatile uint64_t* queue_doorbell() const override { return queue_doorbell_; }
-  const HsaQueueResource& queue_resource() const override { return queue_resource_; }
-  uint32_t sdma_engine_id() const override { return sdma_engine_id_; }
-  bool is_xgmi() const override { return is_xgmi_; }
-  size_t min_submission_size() const override { return min_submission_size_; }
   bool UsesGCR() const override { return useGCR; }
 
  private:
@@ -507,12 +481,6 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
 
   /// True if SDMA supports linear swap copy (gfx94X+).
   bool swap_supported_;
-
-  /// SDMA engine ID assigned by KFD (-1 = auto-selected).
-  uint32_t sdma_engine_id_;
-
-  /// True if this queue uses an xGMI-optimized SDMA engine.
-  bool is_xgmi_;
 };
 
 

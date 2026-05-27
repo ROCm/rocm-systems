@@ -18,6 +18,8 @@ namespace AMD {
 
 namespace {
   core::SharedQueue* AllocateSdmaSharedQueue(core::Agent* agent) {
+    /* The amd_queue_v2_t struct is only used internally by ROCr for SDMA queues. 
+    SDMA FW does not use it. */
     core::SharedQueue* shared_queue = static_cast<core::SharedQueue*>(core::Runtime::runtime_singleton_->system_allocator()(
           sizeof(core::SharedQueue), MemoryRegion::GetPageSize(), 0, agent->node_id()));
     memset(shared_queue, 0, sizeof(core::SharedQueue));
