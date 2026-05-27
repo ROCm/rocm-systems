@@ -1488,7 +1488,7 @@
     },
     {
       "name": "Revoke MPI Tests (2-rank)",
-      "description": "ncclCommRevoke blocking and non-blocking coverage at 2 ranks on a single node: argument validation, lifecycle (revoke -> destroy/finalize/split/shrink), in-flight collective/P2P recovery, and async-job worker thread behavior",
+      "description": "ncclCommRevoke blocking and non-blocking coverage at 2 ranks on a single node: argument validation, lifecycle (revoke -> destroy/finalize/split), in-flight collective recovery, and async-job worker thread behavior",
       "config": "revoke_mpi_tests",
       "enabled": true
     },
