@@ -31,11 +31,13 @@ Result variables
 ``LibElf_FOUND``, ``LibElf_INCLUDE_DIRS``, ``LibElf_LIBRARIES``, ``LibElf_VERSION``
 #]=======================================================================]
 
+cmake_policy(PUSH)
 cmake_policy(SET CMP0074 NEW)
 
 # 1. Short-circuit: already populated upstream.
 if(TARGET LibElf::LibElf AND LibElf_LIBRARIES AND LibElf_INCLUDE_DIRS)
     set(LibElf_FOUND TRUE)
+    cmake_policy(POP)
     return()
 endif()
 
@@ -89,3 +91,5 @@ find_package_handle_standard_args(
 if(LibElf_FOUND)
     mark_as_advanced(LibElf_INCLUDE_DIRS LibElf_LIBRARIES LibElf_VERSION)
 endif()
+
+cmake_policy(POP)

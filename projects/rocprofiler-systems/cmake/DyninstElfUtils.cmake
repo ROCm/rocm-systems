@@ -156,11 +156,12 @@ if(ROCPROFSYS_BUILD_ELFUTILS)
     )
 
     # Pre-create LibDW::LibDW / LibElf::LibElf for rocprofiler-systems' own
-    # consumers (rocprofiler-systems-elfutils interface lib). Not consumed by
-    # Dyninst — its bundled FindLibDW / FindLibElf win on CMAKE_MODULE_PATH
-    # precedence; Dyninst is short-circuited via Dyninst::ElfUtils below.
-    # The targets carry an add_dependencies edge to the ExternalProject build
-    # step so anything that links them waits for the .so to exist.
+    # consumers (the rocprofiler-systems-elfutils interface lib). Each target
+    # carries an add_dependencies edge to the ExternalProject build step so
+    # anything that links them waits for the .so to exist.
+    #
+    # Dyninst does NOT consume these — see the Dyninst::ElfUtils block below
+    # for how Dyninst's subtree is short-circuited.
     set(LibDW_FOUND TRUE)
     set(LibDW_INCLUDE_DIRS "${_eu_root}/include")
     set(LibDW_LIBRARIES "${_eu_libdw}")

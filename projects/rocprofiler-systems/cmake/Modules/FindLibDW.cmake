@@ -38,11 +38,13 @@ Result variables
 ``LibDW_FOUND``, ``LibDW_INCLUDE_DIRS``, ``LibDW_LIBRARIES``, ``LibDW_VERSION``
 #]=======================================================================]
 
+cmake_policy(PUSH)
 cmake_policy(SET CMP0074 NEW)
 
 # 1. Short-circuit: already populated upstream (e.g. mode 1 pre-creates target).
 if(TARGET LibDW::LibDW AND LibDW_LIBRARIES AND LibDW_INCLUDE_DIRS)
     set(LibDW_FOUND TRUE)
+    cmake_policy(POP)
     return()
 endif()
 
@@ -79,7 +81,7 @@ if(NOT LibDW_FOUND AND NOT LibDW_NO_SYSTEM_PATHS)
             set(_libdw "")
             set(_link_libs "")
             foreach(_l ${LibDW_LIBRARIES})
-                if(${_l} MATCHES "libdw")
+                if("${_l}" MATCHES "libdw")
                     set(_libdw ${_l})
                 else()
                     list(APPEND _link_libs ${_l})
@@ -123,3 +125,5 @@ find_package_handle_standard_args(
 if(LibDW_FOUND)
     mark_as_advanced(LibDW_INCLUDE_DIRS LibDW_LIBRARIES LibDW_VERSION)
 endif()
+
+cmake_policy(POP)
