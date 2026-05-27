@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,18 +20,49 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#pragma once
+#include "lib/rocprofiler-sdk/platform/windows/agent.hpp"
 
-#include <rocprofiler-sdk/agent.h>
+#include "lib/common/logging.hpp"
 
 namespace rocprofiler
 {
-namespace agent
+namespace platform
 {
-// Apply ROCR_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES / ... policy. Pure function
-// of env vars + agent type. Implemented in agent.cpp; called by topology
-// providers as they materialize agents.
-void
-update_agent_runtime_visibility(rocprofiler_agent_t& agent_info);
-}  // namespace agent
+namespace windows
+{
+#ifdef _WIN32
+// TODO(win-d3dkmt): include <d3dkmthk.h> / <ntddvdeo.h> equivalents from the
+// WDK / Windows SDK. The POC at bgopesh/win-agent-info-poc demonstrates the
+// exact link target and which headers are used. Real implementation will
+// mirror platform/wsl/agent.cpp against the WDK D3DKMT entry points.
+
+bool
+is_available()
+{
+    return true;
+}
+
+std::vector<unique_agent_t>
+enumerate()
+{
+    ROCP_WARNING << "windows::enumerate: native Windows path not yet implemented (skeleton only)";
+    return {};
+}
+#else
+bool
+is_available()
+{
+    return false;
+}
+
+std::vector<unique_agent_t>
+enumerate()
+{
+    ROCP_WARNING << "windows::enumerate: not available on this platform";
+    return {};
+}
+#endif
+
+}  // namespace windows
+}  // namespace platform
 }  // namespace rocprofiler

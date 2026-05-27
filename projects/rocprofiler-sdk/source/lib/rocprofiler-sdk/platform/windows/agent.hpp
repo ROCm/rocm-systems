@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,17 +22,28 @@
 
 #pragma once
 
-#include "lib/rocprofiler-sdk/topology/topology_provider.hpp"
+#include "lib/rocprofiler-sdk/platform/agent.hpp"
+
+#include <string_view>
+#include <vector>
 
 namespace rocprofiler
 {
-namespace topology
+namespace platform
 {
-class LinuxKfdProvider final : public TopologyProvider
+namespace windows
 {
-public:
-    std::vector<unique_agent_t> enumerate() override;
-    std::string_view            name() const override { return "linux-kfd"; }
-};
-}  // namespace topology
+// True on native Windows builds; always false elsewhere (the windows/
+// subdirectory is not compiled on non-WIN32 hosts).
+bool
+is_available();
+
+// Native Windows D3DKMT enumeration. Skeleton only at this point - real
+// implementation will mirror the WSL path against the WDK headers.
+std::vector<unique_agent_t>
+enumerate();
+
+constexpr std::string_view name = "windows-d3dkmt";
+}  // namespace windows
+}  // namespace platform
 }  // namespace rocprofiler

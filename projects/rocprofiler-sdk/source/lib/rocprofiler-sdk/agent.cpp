@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,9 +28,13 @@
 #include "lib/common/static_object.hpp"
 #include "lib/common/string_entry.hpp"
 #include "lib/common/utility.hpp"
-#include "lib/rocprofiler-sdk/agent_internal.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
-#include "lib/rocprofiler-sdk/topology/topology_provider.hpp"
+#include "lib/rocprofiler-sdk/platform/agent.hpp"
+#include "lib/rocprofiler-sdk/platform/gnulinux/agent.hpp"
+#include "lib/rocprofiler-sdk/platform/wsl/agent.hpp"
+#ifdef _WIN32
+#    include "lib/rocprofiler-sdk/platform/windows/agent.hpp"
+#endif
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -282,20 +286,83 @@ update_agent_runtime_visibility(rocprofiler_agent_t& agent_info)
 
 namespace
 {
-using unique_agent_t = ::rocprofiler::topology::unique_agent_t;
+using unique_agent_t = ::rocprofiler::platform::unique_agent_t;
 
-topology::TopologyProvider&
-get_topology_provider()
+// Selects the platform enumerator at runtime.
+//
+// Precedence:
+//   1. ROCPROFILER_FORCE_PLATFORM={gnulinux|wsl|windows} overrides everything.
+//      Unknown values are logged and ignored.
+//   2. gnulinux::is_available() (KFD sysfs present) - the common bare-metal
+//      Linux case, kept first to preserve existing behaviour byte-for-byte.
+//   3. wsl::is_available() (/dev/dxg + libdxcore.so) - WSL guest with the
+//      DXCore driver shimmed in.
+//   4. windows::is_available() - only true on _WIN32 builds.
+//   5. Fallback: gnulinux enumerator (will log and return an empty vector).
+std::vector<unique_agent_t>
+enumerate_platform_agents()
 {
-    static auto _p = topology::make_default_provider();
-    return *_p;
+    const auto forced = common::get_env("ROCPROFILER_FORCE_PLATFORM", std::string{});
+    if(!forced.empty())
+    {
+        if(forced == "gnulinux")
+        {
+            ROCP_INFO << "agent topology: forced gnulinux via ROCPROFILER_FORCE_PLATFORM";
+            return platform::gnulinux::enumerate();
+        }
+        if(forced == "wsl")
+        {
+            ROCP_INFO << "agent topology: forced wsl via ROCPROFILER_FORCE_PLATFORM";
+            return platform::wsl::enumerate();
+        }
+        if(forced == "windows")
+        {
+#ifdef _WIN32
+            ROCP_INFO << "agent topology: forced windows via ROCPROFILER_FORCE_PLATFORM";
+            return platform::windows::enumerate();
+#else
+            ROCP_WARNING << "agent topology: ROCPROFILER_FORCE_PLATFORM=windows ignored on "
+                            "non-Windows build";
+#endif
+        }
+        else
+        {
+            ROCP_WARNING << fmt::format(
+                "agent topology: unknown ROCPROFILER_FORCE_PLATFORM='{}' (expected "
+                "gnulinux|wsl|windows); falling back to autodetect",
+                forced);
+        }
+    }
+
+    if(platform::gnulinux::is_available())
+    {
+        ROCP_INFO << "agent topology: selected " << platform::gnulinux::name << " (sysfs present)";
+        return platform::gnulinux::enumerate();
+    }
+    if(platform::wsl::is_available())
+    {
+        ROCP_INFO << "agent topology: selected " << platform::wsl::name
+                  << " (libdxcore.so present)";
+        return platform::wsl::enumerate();
+    }
+#ifdef _WIN32
+    if(platform::windows::is_available())
+    {
+        ROCP_INFO << "agent topology: selected " << platform::windows::name;
+        return platform::windows::enumerate();
+    }
+#endif
+
+    ROCP_WARNING << "agent topology: no platform matched; falling back to "
+                 << platform::gnulinux::name << " (will return empty)";
+    return platform::gnulinux::enumerate();
 }
 
 auto&
 get_agent_topology()
 {
-    static auto*& _v = common::static_object<std::vector<unique_agent_t>>::construct(
-        get_topology_provider().enumerate());
+    static auto*& _v =
+        common::static_object<std::vector<unique_agent_t>>::construct(enumerate_platform_agents());
     return *CHECK_NOTNULL(_v);
 }
 
@@ -732,7 +799,7 @@ get_agent_available_properties()
 void
 internal_refresh_topology()
 {
-    auto _updated_topology = get_topology_provider().enumerate();
+    auto _updated_topology = enumerate_platform_agents();
     std::swap(get_agent_topology(), _updated_topology);
 }
 }  // namespace agent

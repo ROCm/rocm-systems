@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,30 +22,30 @@
 
 #pragma once
 
-#include "lib/rocprofiler-sdk/topology/topology_provider.hpp"
+#include "lib/rocprofiler-sdk/platform/agent.hpp"
 
-#include <memory>
+#include <string_view>
+#include <vector>
 
 namespace rocprofiler
 {
-namespace topology
+namespace platform
 {
-class DxgProvider final : public TopologyProvider
+namespace wsl
 {
-public:
-    DxgProvider();
-    ~DxgProvider() override;
+// True if running inside WSL with a usable DXCore driver: /dev/dxg present and
+// libdxcore.so dlopens with D3DKMTEnumAdapters3 resolvable. Result is cached
+// on first call.
+bool
+is_available();
 
-    std::vector<unique_agent_t> enumerate() override;
-    std::string_view            name() const override { return "wsl-dxcore"; }
+// Enumerates AMD adapters via libdxcore.so (D3DKMTEnumAdapters3 +
+// D3DKMTQueryAdapterInfo). Returns empty vector if WSL/DXCore is not present
+// or no AMD adapter was found.
+std::vector<unique_agent_t>
+enumerate();
 
-    // True if libdxcore.so can be dlopened and D3DKMTEnumAdapters3 resolved.
-    // Cached on first call. Used by the factory for runtime selection.
-    static bool is_available();
-
-private:
-    struct Impl;
-    std::unique_ptr<Impl> m_impl;
-};
-}  // namespace topology
+constexpr std::string_view name = "wsl-dxcore";
+}  // namespace wsl
+}  // namespace platform
 }  // namespace rocprofiler

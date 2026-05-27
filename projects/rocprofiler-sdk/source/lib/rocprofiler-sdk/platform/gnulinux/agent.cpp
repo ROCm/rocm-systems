@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "lib/rocprofiler-sdk/topology/linux_kfd_provider.hpp"
+#include "lib/rocprofiler-sdk/platform/gnulinux/agent.hpp"
 
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
@@ -28,7 +28,6 @@
 #include "lib/common/string_entry.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
-#include "lib/rocprofiler-sdk/agent_internal.hpp"
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -40,6 +39,7 @@
 #include <libdrm/amdgpu.h>
 #include <xf86drm.h>
 
+#include <array>
 #include <cstring>
 #include <fstream>
 #include <limits>
@@ -55,7 +55,9 @@
 
 namespace rocprofiler
 {
-namespace topology
+namespace platform
+{
+namespace gnulinux
 {
 namespace
 {
@@ -65,6 +67,9 @@ using ::rocprofiler::agent::get_agent_available_properties;
 using ::rocprofiler::agent::update_agent_runtime_visibility;
 using ::rocprofiler::agent::uuid_view_t;
 
+// Random per-process offset applied to rocprofiler_agent_id_t.handle so that
+// agent IDs are not stable integers across runs. Helps catch consumers that
+// accidentally hard-code an ID instead of looking it up via the agent table.
 uint64_t
 get_agent_offset()
 {
@@ -393,21 +398,41 @@ read_property(const MapT& data, const std::string& label, Tp& value)
             value = static_cast<Tp>(local_value);
     }
 }
+
+// Candidate locations for the KFD sysfs topology root, in priority order.
+// Env-var overrides come first so a test fixture or alternate mount can
+// supersede the canonical /sys paths without rebuilding. Returned by value;
+// callers iterate it directly so the temporary strings outlive the loop.
+std::array<std::string, 5>
+sysfs_node_candidates()
+{
+    return {
+        common::get_env("ROCPROFILER_KFD_TOPOLOGY", ""),  // rocprofiler-sdk specific
+        common::get_env("AMD_KFD_TOPOLOGY", ""),          // universal AMD KFD topology env var
+        common::get_env("HSA_MODEL_TOPOLOGY", ""),        // HSA specific env var
+        std::string{"/sys/devices/virtual/kfd/kfd/topology/nodes"},
+        std::string{"/sys/class/kfd/kfd/topology/nodes"},
+    };
+}
 }  // namespace
 
+bool
+is_available()
+{
+    for(const std::string& p : sysfs_node_candidates())
+    {
+        if(!p.empty() && fs::exists(fs::path{p}) && fs::is_directory(fs::path{p})) return true;
+    }
+    return false;
+}
+
 std::vector<unique_agent_t>
-LinuxKfdProvider::enumerate()
+enumerate()
 {
     auto data = std::vector<unique_agent_t>{};
 
     auto _sysfs_nodes_path = std::optional<fs::path>{};
-    for(auto itr : std::initializer_list<std::string>{
-            common::get_env("ROCPROFILER_KFD_TOPOLOGY", ""),  // rocprofiler-sdk specific
-            common::get_env("AMD_KFD_TOPOLOGY", ""),          // universal AMD KFD topology env var
-            common::get_env("HSA_MODEL_TOPOLOGY", ""),        // HSA specific env var
-            "/sys/devices/virtual/kfd/kfd/topology/nodes",
-            "/sys/class/kfd/kfd/topology/nodes",
-        })
+    for(const auto& itr : sysfs_node_candidates())
     {
         if(!itr.empty() && fs::exists(fs::path{itr}) && fs::is_directory(fs::path{itr}))
         {
@@ -792,5 +817,6 @@ LinuxKfdProvider::enumerate()
     return data;
 }
 
-}  // namespace topology
+}  // namespace gnulinux
+}  // namespace platform
 }  // namespace rocprofiler

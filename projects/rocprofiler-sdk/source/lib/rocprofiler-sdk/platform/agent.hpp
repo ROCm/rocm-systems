@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,33 +22,18 @@
 
 #pragma once
 
-#include "lib/rocprofiler-sdk/topology/topology_provider.hpp"
+#include <rocprofiler-sdk/agent.h>
 
-#include <cstdint>
+#include <memory>
+#include <vector>
 
 namespace rocprofiler
 {
-namespace topology
+namespace platform
 {
-class D3dkmtProvider final : public TopologyProvider
-{
-public:
-    D3dkmtProvider();
-    ~D3dkmtProvider() override;
-
-    std::vector<unique_agent_t> enumerate() override;
-    std::string_view            name() const override { return "win-d3dkmt"; }
-
-private:
-    // Helpers declared here so the eventual implementation has a place to land.
-    // All bodies are #ifdef _WIN32 guarded in the .cpp.
-    struct AdapterRecord;  // opaque; defined in .cpp under _WIN32
-
-    static bool           enumerate_adapters_(std::vector<AdapterRecord>& out);
-    static bool           query_node_metadata_(AdapterRecord& adapter);
-    static bool           query_umd_private_(AdapterRecord& adapter);
-    static bool           query_physical_adapter_(AdapterRecord& adapter);
-    static unique_agent_t adapter_to_agent_(const AdapterRecord& adapter, uint64_t logical_node_id);
-};
-}  // namespace topology
+// Owning handle for a rocprofiler_agent_t produced by a platform enumerator.
+// The custom deleter is responsible for freeing the mem_banks/caches/io_links
+// arrays in addition to the struct itself.
+using unique_agent_t = std::unique_ptr<rocprofiler_agent_t, void (*)(rocprofiler_agent_t*)>;
+}  // namespace platform
 }  // namespace rocprofiler

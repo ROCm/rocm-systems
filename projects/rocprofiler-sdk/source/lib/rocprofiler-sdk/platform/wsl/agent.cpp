@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,12 +20,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "lib/rocprofiler-sdk/topology/dxg_provider.hpp"
+#include "lib/rocprofiler-sdk/platform/wsl/agent.hpp"
 
 #include "lib/common/logging.hpp"
 #include "lib/common/string_entry.hpp"
 #include "lib/common/utility.hpp"
-#include "lib/rocprofiler-sdk/agent_internal.hpp"
+#include "lib/rocprofiler-sdk/agent.hpp"
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -39,13 +39,17 @@
 #include <cstdint>
 #include <cstring>
 #include <cwchar>
+#include <limits>
+#include <memory>
 #include <random>
 #include <string>
 #include <vector>
 
 namespace rocprofiler
 {
-namespace topology
+namespace platform
+{
+namespace wsl
 {
 namespace
 {
@@ -175,19 +179,19 @@ probe_libdxcore()
     static const bool _v = []() {
         if(::access("/dev/dxg", F_OK) != 0)
         {
-            ROCP_INFO << "DxgProvider: /dev/dxg not present; not a WSL GPU environment";
+            ROCP_INFO << "wsl::is_available: /dev/dxg not present; not a WSL GPU environment";
             return false;
         }
         void* h = open_libdxcore();
         if(!h)
         {
-            ROCP_INFO << "DxgProvider: dlopen(libdxcore.so) failed: " << ::dlerror();
+            ROCP_INFO << "wsl::is_available: dlopen(libdxcore.so) failed: " << ::dlerror();
             return false;
         }
         void* sym = ::dlsym(h, "D3DKMTEnumAdapters3");
         if(!sym)
         {
-            ROCP_INFO << "DxgProvider: dlsym(D3DKMTEnumAdapters3) failed";
+            ROCP_INFO << "wsl::is_available: dlsym(D3DKMTEnumAdapters3) failed";
             ::dlclose(h);
             return false;
         }
@@ -197,6 +201,9 @@ probe_libdxcore()
     return _v;
 }
 
+// Random per-process offset applied to rocprofiler_agent_id_t.handle. Kept
+// identical to the gnulinux path so agent IDs are non-stable across runs and
+// downstream code cannot accidentally treat them as ordinals.
 uint64_t
 get_agent_offset()
 {
@@ -259,89 +266,97 @@ query_one(PFN_D3DKMTQueryAdapterInfo query_fn,
     if(st != kNtSuccess)
     {
         ROCP_INFO << fmt::format(
-            "DxgProvider: D3DKMTQueryAdapterInfo type={} failed status=0x{:08x}",
+            "wsl::enumerate: D3DKMTQueryAdapterInfo type={} failed status=0x{:08x}",
             static_cast<uint32_t>(type),
             static_cast<uint32_t>(st));
     }
     return st;
 }
-}  // namespace
 
-struct DxgProvider::Impl
+// RAII wrapper for the dlopen'd libdxcore.so handle plus resolved symbols.
+struct DxcoreHandle
 {
-    void*                      dxcore_handle = nullptr;
+    void*                      handle        = nullptr;
     PFN_D3DKMTEnumAdapters3    enum_adapters = nullptr;
     PFN_D3DKMTQueryAdapterInfo query_adapter = nullptr;
     PFN_D3DKMTCloseAdapter     close_adapter = nullptr;
+
+    DxcoreHandle()
+    {
+        handle = open_libdxcore();
+        if(!handle) return;
+        enum_adapters =
+            reinterpret_cast<PFN_D3DKMTEnumAdapters3>(::dlsym(handle, "D3DKMTEnumAdapters3"));
+        query_adapter =
+            reinterpret_cast<PFN_D3DKMTQueryAdapterInfo>(::dlsym(handle, "D3DKMTQueryAdapterInfo"));
+        close_adapter =
+            reinterpret_cast<PFN_D3DKMTCloseAdapter>(::dlsym(handle, "D3DKMTCloseAdapter"));
+    }
+
+    ~DxcoreHandle()
+    {
+        if(handle) ::dlclose(handle);
+    }
+
+    DxcoreHandle(const DxcoreHandle&) = delete;
+    DxcoreHandle& operator=(const DxcoreHandle&) = delete;
+
+    bool ready() const
+    {
+        return handle != nullptr && enum_adapters != nullptr && query_adapter != nullptr &&
+               close_adapter != nullptr;
+    }
 };
+}  // namespace
 
 bool
-DxgProvider::is_available()
+is_available()
 {
     return probe_libdxcore();
 }
 
-DxgProvider::DxgProvider()
-: m_impl(std::make_unique<Impl>())
-{
-    m_impl->dxcore_handle = open_libdxcore();
-    if(!m_impl->dxcore_handle) return;
-
-    m_impl->enum_adapters = reinterpret_cast<PFN_D3DKMTEnumAdapters3>(
-        ::dlsym(m_impl->dxcore_handle, "D3DKMTEnumAdapters3"));
-    m_impl->query_adapter = reinterpret_cast<PFN_D3DKMTQueryAdapterInfo>(
-        ::dlsym(m_impl->dxcore_handle, "D3DKMTQueryAdapterInfo"));
-    m_impl->close_adapter = reinterpret_cast<PFN_D3DKMTCloseAdapter>(
-        ::dlsym(m_impl->dxcore_handle, "D3DKMTCloseAdapter"));
-}
-
-DxgProvider::~DxgProvider()
-{
-    if(m_impl && m_impl->dxcore_handle) ::dlclose(m_impl->dxcore_handle);
-}
-
 std::vector<unique_agent_t>
-DxgProvider::enumerate()
+enumerate()
 {
     std::vector<unique_agent_t> out;
 
-    if(!m_impl || !m_impl->dxcore_handle)
+    DxcoreHandle dxc;
+    if(!dxc.handle)
     {
-        ROCP_WARNING << "DxgProvider: libdxcore.so not available; returning empty topology";
+        ROCP_WARNING << "wsl::enumerate: libdxcore.so not available; returning empty topology";
         return out;
     }
-
-    if(!m_impl->enum_adapters || !m_impl->query_adapter || !m_impl->close_adapter)
+    if(!dxc.ready())
     {
-        ROCP_WARNING << "DxgProvider: required D3DKMT* symbols missing in libdxcore.so";
+        ROCP_WARNING << "wsl::enumerate: required D3DKMT* symbols missing in libdxcore.so";
         return out;
     }
 
     DxcEnumAdapters3 e{};
     e.Filter.bits.IncludeComputeOnly = 1;
 
-    NTSTATUS st = m_impl->enum_adapters(&e);
+    NTSTATUS st = dxc.enum_adapters(&e);
     if(st != kNtSuccess)
     {
         ROCP_WARNING << fmt::format(
-            "DxgProvider: D3DKMTEnumAdapters3 (count) failed status=0x{:08x}",
+            "wsl::enumerate: D3DKMTEnumAdapters3 (count) failed status=0x{:08x}",
             static_cast<uint32_t>(st));
         return out;
     }
 
     if(e.NumAdapters == 0)
     {
-        ROCP_INFO << "DxgProvider: zero adapters reported by D3DKMTEnumAdapters3";
+        ROCP_INFO << "wsl::enumerate: zero adapters reported by D3DKMTEnumAdapters3";
         return out;
     }
 
     std::vector<DxcAdapterInfo> infos(e.NumAdapters);
     e.pAdapters = infos.data();
-    st          = m_impl->enum_adapters(&e);
+    st          = dxc.enum_adapters(&e);
     if(st != kNtSuccess)
     {
         ROCP_WARNING << fmt::format(
-            "DxgProvider: D3DKMTEnumAdapters3 (fill) failed status=0x{:08x}",
+            "wsl::enumerate: D3DKMTEnumAdapters3 (fill) failed status=0x{:08x}",
             static_cast<uint32_t>(st));
         return out;
     }
@@ -355,42 +370,38 @@ DxgProvider::enumerate()
         const auto& a = infos[i];
 
         DxcQueryDeviceIds devids{};
-        if(query_one(m_impl->query_adapter,
+        if(query_one(dxc.query_adapter,
                      a.hAdapter,
                      DXC_KMTQAITYPE_PHYSICALADAPTERDEVICEIDS,
                      &devids,
                      sizeof(devids)) != kNtSuccess)
         {
             DxcCloseAdapter cl{a.hAdapter};
-            m_impl->close_adapter(&cl);
+            dxc.close_adapter(&cl);
             continue;
         }
 
         if(devids.DeviceIds.VendorID != 0x1002)
         {
             ROCP_INFO << fmt::format(
-                "DxgProvider: skipping non-AMD adapter (vendor=0x{:04x} device=0x{:04x})",
+                "wsl::enumerate: skipping non-AMD adapter (vendor=0x{:04x} device=0x{:04x})",
                 devids.DeviceIds.VendorID,
                 devids.DeviceIds.DeviceID);
             DxcCloseAdapter cl{a.hAdapter};
-            m_impl->close_adapter(&cl);
+            dxc.close_adapter(&cl);
             continue;
         }
 
         DxcAdapterAddress addr{};
         query_one(
-            m_impl->query_adapter, a.hAdapter, DXC_KMTQAITYPE_ADAPTERADDRESS, &addr, sizeof(addr));
+            dxc.query_adapter, a.hAdapter, DXC_KMTQAITYPE_ADAPTERADDRESS, &addr, sizeof(addr));
 
         DxcAdapterRegistryInfo reg{};
-        query_one(m_impl->query_adapter,
-                  a.hAdapter,
-                  DXC_KMTQAITYPE_ADAPTERREGISTRYINFO,
-                  &reg,
-                  sizeof(reg));
+        query_one(
+            dxc.query_adapter, a.hAdapter, DXC_KMTQAITYPE_ADAPTERREGISTRYINFO, &reg, sizeof(reg));
 
         DxcSegmentSizeInfo seg{};
-        query_one(
-            m_impl->query_adapter, a.hAdapter, DXC_KMTQAITYPE_GETSEGMENTSIZE, &seg, sizeof(seg));
+        query_one(dxc.query_adapter, a.hAdapter, DXC_KMTQAITYPE_GETSEGMENTSIZE, &seg, sizeof(seg));
 
         auto info                 = common::init_public_api_struct(rocprofiler_agent_t{});
         info.type                 = ROCPROFILER_AGENT_TYPE_GPU;
@@ -406,7 +417,10 @@ DxgProvider::enumerate()
                            (addr.FunctionNumber & 0x7);
         info.domain         = 0;
         info.local_mem_size = seg.DedicatedVideoMemorySize;
-        info.num_xcc        = 1;
+        // DXCore on WSL does not expose XCC topology; consumer-class adapters
+        // shipped on WSL today are single-XCC, so 1 is the only correct value
+        // here. Multi-XCC datacenter parts are not supported on this path.
+        info.num_xcc = 1;
 
         auto adapter_name = wchar_to_utf8(reg.AdapterString, kMaxStr);
         if(adapter_name.empty()) adapter_name = "unknown";
@@ -428,7 +442,7 @@ DxgProvider::enumerate()
         update_agent_runtime_visibility(info);
 
         ROCP_INFO << fmt::format(
-            "DxgProvider: enumerated adapter {} vendor=0x{:04x} device=0x{:04x} "
+            "wsl::enumerate: enumerated adapter {} vendor=0x{:04x} device=0x{:04x} "
             "BDF={:02x}:{:02x}.{:x} dedicated_vram={} '{}'",
             i,
             devids.DeviceIds.VendorID,
@@ -450,11 +464,12 @@ DxgProvider::enumerate()
         });
 
         DxcCloseAdapter cl{a.hAdapter};
-        m_impl->close_adapter(&cl);
+        dxc.close_adapter(&cl);
     }
 
     return out;
 }
 
-}  // namespace topology
+}  // namespace wsl
+}  // namespace platform
 }  // namespace rocprofiler
