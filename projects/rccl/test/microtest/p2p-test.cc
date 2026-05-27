@@ -2575,3 +2575,480 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_CuMemFreshRegistrationRetainFailureDirect
 }
 
 #endif  // ROCM_VERSION >= 70000
+
+// ===========================================================================
+// Remaining-coverage tests: each one drives a single previously-unhit
+// branch identified by `FUNC=ipcRegisterBuffer ./coverage.sh`. The branches
+// 961:35, 975:13, 981:11 and 1018:9 in ipcRegisterBuffer are intentionally
+// not covered: 961:35 is dead under our build (its precondition requires
+// `legacyIpcCap` to be true while ForceLegacyCudaRegister is *off*, which
+// is contradictory for HIP_VERSION < 71260540); 975:13 is a defensive
+// nullptr check on a pointer that is unconditionally written one line
+// earlier; 981:11 and 1018:9 are the False (assert-fail) sides of
+// `assert(...)` macros, not reachable by a passing test.
+// ===========================================================================
+
+// Branch 959:20 False -- `else if (legacyIpcCap)` False arm: enters the
+// trailing `// nothing works, just return` bare `goto fail`. Precondition
+// (HIP_VERSION < 71260540 path): `ncclCuMemEnable() == 0` AND
+// `ncclParamLegacyCudaRegister() == 0`, so neither the cuMem nor the
+// legacy export arm is eligible. Both defaults (cuMemEnable returns 0,
+// loadParam returns deftVal=0) hand us this state without any hooks --
+// the test just refrains from installing ForceLegacyCudaRegister.
+TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationNothingWorksFallthrough)
+{
+    constexpr int       kPeerRank      = 2;
+    constexpr int       kPeerLocalRank = 1;
+    constexpr uintptr_t kBaseAddr      = 0x100000;
+    constexpr std::size_t kBaseSize    = 0x4000;
+    constexpr uintptr_t kBuffOffset    = 0x80;
+    constexpr uintptr_t kBegOffset     = 0x20;
+    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
+    constexpr int       kNRanks        = kPeerRank + 1;
+
+    CommBuilder cb;
+    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
+      .WithMaxLocalRanks()
+      .WithSharedRes()
+      .WithProxyConnArray(kNRanks);
+    cb.comm().gproxyConn[kPeerRank].initialized = true;
+
+    ncclReg regRecord{};
+    regRecord.begAddr = kBegAddr;
+    regRecord.endAddr = kBegAddr + 0x1000;
+    RegRecordCleaner regCleanup(regRecord);
+
+    // No loadParam hook -> ncclParamLegacyCudaRegister() returns 0
+    // (default). No cuMemEnable hook -> ncclCuMemEnable() returns 0
+    // (default). legacyIpcCap therefore stays 0 across the prologue,
+    // and the trailing `else { goto fail; }` fires.
+    const void* const kUserbuff =
+        reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
+    ScopedHook memGet(g_hipMemGetAddressRange,
+        [&](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t) -> hipError_t {
+            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
+            if (psize) *psize = kBaseSize;
+            return hipSuccess;
+        });
+    ScopedHook ipcGet(g_hipIpcGetMemHandle,
+        [](hipIpcMemHandle_t*, void*) -> hipError_t {
+            ADD_FAILURE() << "nothing-works fall-through must not reach hipIpcGetMemHandle";
+            return hipErrorInvalidValue;
+        });
+    ScopedHook proxy(g_proxyCallBlocking,
+        [](struct ncclComm*, struct ncclProxyConnector*, int,
+           void*, int, void*, int) -> ncclResult_t {
+            ADD_FAILURE() << "nothing-works fall-through must not reach proxy register";
+            return ncclInternalError;
+        });
+
+    int peerRanks[] = {kPeerRank};
+    IpcRegOutputs out;
+    bool isLegacyIpc = false;
+
+    auto r = CallIpcRegisterBuffer(cb, kUserbuff,
+                                   /*buffSize=*/ 256,
+                                   peerRanks, 1,
+                                   NCCL_IPC_COLLECTIVE,
+                                   &regRecord, out, &isLegacyIpc);
+
+    EXPECT_EQ(memGet.calls, 1);
+    EXPECT_EQ(ipcGet.calls, 0);
+    EXPECT_EQ(proxy.calls,  0);
+
+    // Same quirk as the directMode short-circuits: bare `goto fail` so
+    // ret stays ncclSuccess, fail: epilogue zeros outputs.
+    EXPECT_EQ(r, ncclSuccess);
+    out.ExpectZeroed();
+    EXPECT_FALSE(isLegacyIpc);
+    EXPECT_EQ(regRecord.ipcInfos[kPeerLocalRank], nullptr);
+    EXPECT_FALSE(regRecord.state & IPC_REG_COMPLETE);
+}
+
+// Branch 964:15 False -- `if (isLegacyIpc) *isLegacyIpc = true` in the
+// legacy-export arm with isLegacyIpc=nullptr. Mirror of
+// FreshRegistrationLegacyIpcSucceeds but passes nullptr; pins down that
+// the gated write doesn't deref a null pointer.
+TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationLegacyIpcNullIsLegacyIpcPointerIsSkipped)
+{
+    constexpr int       kPeerRank      = 2;
+    constexpr int       kPeerLocalRank = 1;
+    constexpr uintptr_t kBaseAddr      = 0x100000;
+    constexpr std::size_t kBaseSize    = 0x4000;
+    constexpr uintptr_t kBuffOffset    = 0x80;
+    constexpr uintptr_t kBegOffset     = 0x20;
+    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
+    constexpr uintptr_t kRmtRegAddr    = 0xCAFE0000ull;
+    constexpr int       kNRanks        = kPeerRank + 1;
+
+    CommBuilder cb;
+    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
+      .WithMaxLocalRanks()
+      .WithSharedRes()
+      .WithProxyConnArray(kNRanks);
+    cb.comm().gproxyConn[kPeerRank].initialized = true;
+    cb.comm().directMode = 0;
+
+    ncclReg regRecord{};
+    regRecord.begAddr = kBegAddr;
+    regRecord.endAddr = kBegAddr + 0x1000;
+    RegRecordCleaner regCleanup(regRecord);
+    ScopedHook loadParam(g_loadParam, ForceLegacyCudaRegister());
+
+    const void* const kUserbuff =
+        reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
+    ScopedHook memGet(g_hipMemGetAddressRange,
+        [&](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t) -> hipError_t {
+            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
+            if (psize) *psize = kBaseSize;
+            return hipSuccess;
+        });
+    ScopedHook ipcGet(g_hipIpcGetMemHandle,
+        [](hipIpcMemHandle_t* h, void*) -> hipError_t {
+            if (h) std::memset(h, 0x5A, sizeof(*h));
+            return hipSuccess;
+        });
+    ScopedHook proxy(g_proxyCallBlocking,
+        [&](struct ncclComm*, struct ncclProxyConnector*, int,
+            void*, int, void* resp, int respSize) -> ncclResult_t {
+            if (resp && static_cast<size_t>(respSize) >= sizeof(void*))
+                std::memcpy(resp, &kRmtRegAddr, sizeof(void*));
+            return ncclSuccess;
+        });
+
+    int peerRanks[] = {kPeerRank};
+    IpcRegOutputs out;
+
+    auto r = CallIpcRegisterBuffer(cb, kUserbuff,
+                                   /*buffSize=*/ 256,
+                                   peerRanks, 1,
+                                   NCCL_IPC_COLLECTIVE,
+                                   &regRecord, out, /*isLegacyIpc=*/ nullptr);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(out.regBufFlag, 1);
+    ASSERT_NE(regRecord.ipcInfos[kPeerLocalRank], nullptr);
+    EXPECT_TRUE(regRecord.ipcInfos[kPeerLocalRank]->impInfo.legacyIpcCap);
+}
+
+#if ROCM_VERSION >= 70000
+
+// Branches 938:17 False and 935:17 False -- the two `if (isLegacyIpc)`
+// writes inside the cuMem arm (success sub-branch line 938 sets it to
+// false; retry-as-legacy sub-branch line 935 sets it to true) with
+// isLegacyIpc=nullptr. One test covers both sub-arms via the
+// sameProcess success path and the Retain-failure fallback path.
+TEST_F(P2pMicrotest, IpcRegisterBuffer_CuMemFreshRegistrationNullIsLegacyIpcPointerSuccessSkipped)
+{
+    constexpr int       kPeerRank      = 2;
+    constexpr int       kPeerLocalRank = 1;
+    constexpr uintptr_t kBaseAddr      = 0x100000;
+    constexpr std::size_t kBaseSize    = 0x4000;
+    constexpr uintptr_t kBuffOffset    = 0x80;
+    constexpr uintptr_t kBegOffset     = 0x20;
+    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
+    constexpr uintptr_t kRmtRegAddr    = 0xCAFE0000ull;
+    constexpr int       kNRanks        = kPeerRank + 1;
+
+    CommBuilder cb;
+    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
+      .WithMaxLocalRanks()
+      .WithSharedRes()
+      .WithProxyConnArray(kNRanks);
+    cb.comm().gproxyConn[kPeerRank].initialized = true;
+    cb.comm().gproxyConn[kPeerRank].sameProcess = 1;
+
+    ncclReg regRecord{};
+    regRecord.begAddr = kBegAddr;
+    regRecord.endAddr = kBegAddr + 0x1000;
+    RegRecordCleaner regCleanup(regRecord);
+
+    ScopedHook cuMemEnable(g_cuMemEnable, [] { return 1; });
+    ScopedHook memGet(g_hipMemGetAddressRange,
+        [&](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t) -> hipError_t {
+            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
+            if (psize) *psize = kBaseSize;
+            return hipSuccess;
+        });
+    ScopedHook retain(g_hipMemRetainAllocationHandle,
+        [](hipMemGenericAllocationHandle_t* h, void*) -> hipError_t {
+            if (h) *h = MakeSentinelHandle();
+            return hipSuccess;
+        });
+    ScopedHook release(g_hipMemRelease,
+        [](hipMemGenericAllocationHandle_t) -> hipError_t { return hipSuccess; });
+    ScopedHook proxy(g_proxyCallBlocking,
+        [&](struct ncclComm*, struct ncclProxyConnector*, int,
+            void*, int, void* resp, int respSize) -> ncclResult_t {
+            if (resp && static_cast<size_t>(respSize) >= sizeof(void*))
+                std::memcpy(resp, &kRmtRegAddr, sizeof(void*));
+            return ncclSuccess;
+        });
+
+    int peerRanks[] = {kPeerRank};
+    IpcRegOutputs out;
+
+    auto r = CallIpcRegisterBuffer(cb,
+                                   reinterpret_cast<const void*>(kBegAddr + kBuffOffset),
+                                   /*buffSize=*/ 256,
+                                   peerRanks, 1,
+                                   NCCL_IPC_COLLECTIVE,
+                                   &regRecord, out, /*isLegacyIpc=*/ nullptr);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(out.regBufFlag, 1);
+    ASSERT_NE(regRecord.ipcInfos[kPeerLocalRank], nullptr);
+    EXPECT_FALSE(regRecord.ipcInfos[kPeerLocalRank]->impInfo.legacyIpcCap);
+}
+
+// Branch 935:17 False -- isLegacyIpc=nullptr on the cuMem retry-as-legacy
+// fallback arm. Slimmed copy of the existing
+// CuMemFreshRegistrationRetainFailureFallsBackToLegacyExport test.
+TEST_F(P2pMicrotest, IpcRegisterBuffer_CuMemFreshRegistrationNullIsLegacyIpcPointerRetryArmSkipped)
+{
+    constexpr int       kPeerRank      = 2;
+    constexpr int       kPeerLocalRank = 1;
+    constexpr uintptr_t kBaseAddr      = 0x100000;
+    constexpr std::size_t kBaseSize    = 0x4000;
+    constexpr uintptr_t kBuffOffset    = 0x80;
+    constexpr uintptr_t kBegOffset     = 0x20;
+    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
+    constexpr uintptr_t kRmtRegAddr    = 0xCAFE0000ull;
+    constexpr int       kNRanks        = kPeerRank + 1;
+
+    CommBuilder cb;
+    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
+      .WithMaxLocalRanks()
+      .WithSharedRes()
+      .WithProxyConnArray(kNRanks);
+    cb.comm().gproxyConn[kPeerRank].initialized = true;
+    cb.comm().directMode = 0;
+
+    ncclReg regRecord{};
+    regRecord.begAddr = kBegAddr;
+    regRecord.endAddr = kBegAddr + 0x1000;
+    RegRecordCleaner regCleanup(regRecord);
+
+    ScopedHook cuMemEnable(g_cuMemEnable, [] { return 1; });
+    ScopedHook loadParam(g_loadParam, ForceLegacyCudaRegister());
+    ScopedHook memGet(g_hipMemGetAddressRange,
+        [&](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t) -> hipError_t {
+            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
+            if (psize) *psize = kBaseSize;
+            return hipSuccess;
+        });
+    ScopedHook retain(g_hipMemRetainAllocationHandle,
+        [](hipMemGenericAllocationHandle_t*, void*) -> hipError_t {
+            return hipErrorInvalidValue;
+        });
+    ScopedHook ipcGet(g_hipIpcGetMemHandle,
+        [](hipIpcMemHandle_t* h, void*) -> hipError_t {
+            if (h) std::memset(h, 0x5A, sizeof(*h));
+            return hipSuccess;
+        });
+    ScopedHook proxy(g_proxyCallBlocking,
+        [&](struct ncclComm*, struct ncclProxyConnector*, int,
+            void*, int, void* resp, int respSize) -> ncclResult_t {
+            if (resp && static_cast<size_t>(respSize) >= sizeof(void*))
+                std::memcpy(resp, &kRmtRegAddr, sizeof(void*));
+            return ncclSuccess;
+        });
+
+    int peerRanks[] = {kPeerRank};
+    IpcRegOutputs out;
+
+    auto r = CallIpcRegisterBuffer(cb,
+                                   reinterpret_cast<const void*>(kBegAddr + kBuffOffset),
+                                   /*buffSize=*/ 256,
+                                   peerRanks, 1,
+                                   NCCL_IPC_COLLECTIVE,
+                                   &regRecord, out, /*isLegacyIpc=*/ nullptr);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(ipcGet.calls, 1);  // confirm retry arm taken
+    EXPECT_EQ(out.regBufFlag, 1);
+    ASSERT_NE(regRecord.ipcInfos[kPeerLocalRank], nullptr);
+    EXPECT_TRUE(regRecord.ipcInfos[kPeerLocalRank]->impInfo.legacyIpcCap);
+}
+
+// Branch 950:21 False -- `hipMemExportToShareableHandle(...) != hipSuccess`
+// False (export succeeds) on the fabric sub-arm. Sister to
+// CuMemFreshRegistrationFabricExportFailureReleasesHandle (which drives
+// the True arm). The contract: on success the function continues into
+// hipMemRelease and the proxy register, returning the canned rmtRegAddr.
+TEST_F(P2pMicrotest, IpcRegisterBuffer_CuMemFreshRegistrationFabricExportSucceeds)
+{
+    constexpr int       kPeerRank      = 2;
+    constexpr int       kPeerLocalRank = 1;
+    constexpr uintptr_t kBaseAddr      = 0x100000;
+    constexpr std::size_t kBaseSize    = 0x4000;
+    constexpr uintptr_t kBuffOffset    = 0x80;
+    constexpr uintptr_t kBegOffset     = 0x20;
+    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
+    constexpr uintptr_t kRmtRegAddr    = 0xCAFE0000ull;
+    constexpr int       kNRanks        = kPeerRank + 1;
+
+    auto saved_handle_type = ncclCuMemHandleType;
+    ncclCuMemHandleType = hipMemHandleTypeWin32;  // anything != POSIX_FD
+
+    CommBuilder cb;
+    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
+      .WithMaxLocalRanks()
+      .WithSharedRes()
+      .WithProxyConnArray(kNRanks);
+    cb.comm().gproxyConn[kPeerRank].initialized = true;
+    cb.comm().gproxyConn[kPeerRank].sameProcess = 0;
+
+    ncclReg regRecord{};
+    regRecord.begAddr = kBegAddr;
+    regRecord.endAddr = kBegAddr + 0x1000;
+    RegRecordCleaner regCleanup(regRecord);
+
+    ScopedHook cuMemEnable(g_cuMemEnable, [] { return 1; });
+    const void* const kUserbuff =
+        reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
+    ScopedHook memGet(g_hipMemGetAddressRange,
+        [&](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t) -> hipError_t {
+            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
+            if (psize) *psize = kBaseSize;
+            return hipSuccess;
+        });
+    ScopedHook retain(g_hipMemRetainAllocationHandle,
+        [](hipMemGenericAllocationHandle_t* h, void*) -> hipError_t {
+            if (h) *h = MakeSentinelHandle();
+            return hipSuccess;
+        });
+    // Fabric export *succeeds* -- the seam under test.
+    ScopedHook xport(g_hipMemExportToShareableHandle,
+        [](void* shareableHandle, hipMemGenericAllocationHandle_t h,
+           hipMemAllocationHandleType handleType,
+           unsigned long long) -> hipError_t {
+            EXPECT_TRUE(HandleHasSentinel(h));
+            EXPECT_NE(handleType, hipMemHandleTypePosixFileDescriptor);
+            // Production writes the exported handle into
+            // ipcInfo.ipcDesc.cuDesc.handle; leave its contents
+            // unspecified -- this test pins down control flow, not
+            // the handle bytes. Touch the first byte so a tooling
+            // check that ipcRegisterBuffer hands us a writable buffer
+            // surfaces here.
+            if (shareableHandle) {
+                static_cast<char*>(shareableHandle)[0] = 0;
+            }
+            return hipSuccess;
+        });
+    ScopedHook release(g_hipMemRelease,
+        [](hipMemGenericAllocationHandle_t h) -> hipError_t {
+            EXPECT_TRUE(HandleHasSentinel(h));
+            return hipSuccess;
+        });
+    ScopedHook proxy(g_proxyCallBlocking,
+        [&](struct ncclComm*, struct ncclProxyConnector*, int,
+            void*, int, void* resp, int respSize) -> ncclResult_t {
+            if (resp && static_cast<size_t>(respSize) >= sizeof(void*))
+                std::memcpy(resp, &kRmtRegAddr, sizeof(void*));
+            return ncclSuccess;
+        });
+
+    int peerRanks[] = {kPeerRank};
+    IpcRegOutputs out;
+    bool isLegacyIpc = true;
+
+    auto r = CallIpcRegisterBuffer(cb, kUserbuff,
+                                   /*buffSize=*/ 256,
+                                   peerRanks, 1,
+                                   NCCL_IPC_COLLECTIVE,
+                                   &regRecord, out, &isLegacyIpc);
+
+    EXPECT_EQ(retain.calls,  1);
+    EXPECT_EQ(xport.calls,   1);
+    EXPECT_EQ(release.calls, 1);
+    EXPECT_EQ(proxy.calls,   1);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(out.regBufFlag, 1);
+    EXPECT_FALSE(isLegacyIpc);  // cuMem-success arm cleared it
+    ASSERT_NE(regRecord.ipcInfos[kPeerLocalRank], nullptr);
+    EXPECT_FALSE(regRecord.ipcInfos[kPeerLocalRank]->impInfo.legacyIpcCap);
+
+    ncclCuMemHandleType = saved_handle_type;
+}
+
+// Branch 932:37 True -- the second operand of
+// `comm->directMode || !ncclParamLegacyCudaRegister()` evaluates True
+// inside the cuMem retry-as-legacy path. Precondition: directMode=false
+// (so the LHS doesn't short-circuit) AND ncclParamLegacyCudaRegister()
+// returns 0 (so the RHS is True). Mirror of
+// CuMemFreshRegistrationRetainFailureDirectModeShortCircuits but the
+// short-circuit is driven by the param rather than directMode.
+TEST_F(P2pMicrotest, IpcRegisterBuffer_CuMemFreshRegistrationRetainFailureParamOffShortCircuits)
+{
+    constexpr int       kPeerRank      = 2;
+    constexpr int       kPeerLocalRank = 1;
+    constexpr uintptr_t kBaseAddr      = 0x100000;
+    constexpr std::size_t kBaseSize    = 0x4000;
+    constexpr uintptr_t kBuffOffset    = 0x80;
+    constexpr uintptr_t kBegOffset     = 0x20;
+    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
+    constexpr int       kNRanks        = kPeerRank + 1;
+
+    CommBuilder cb;
+    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
+      .WithMaxLocalRanks()
+      .WithSharedRes()
+      .WithProxyConnArray(kNRanks);
+    cb.comm().gproxyConn[kPeerRank].initialized = true;
+    cb.comm().directMode = 0;  // force the guard to evaluate the RHS
+
+    ncclReg regRecord{};
+    regRecord.begAddr = kBegAddr;
+    regRecord.endAddr = kBegAddr + 0x1000;
+    RegRecordCleaner regCleanup(regRecord);
+
+    ScopedHook cuMemEnable(g_cuMemEnable, [] { return 1; });
+    // No loadParam hook -> ncclParamLegacyCudaRegister() returns 0
+    // (default) -> RHS of `directMode || !ncclParamLegacyCudaRegister()`
+    // is True -> guard short-circuits to goto fail.
+    const void* const kUserbuff =
+        reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
+    ScopedHook memGet(g_hipMemGetAddressRange,
+        [&](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t) -> hipError_t {
+            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
+            if (psize) *psize = kBaseSize;
+            return hipSuccess;
+        });
+    ScopedHook retain(g_hipMemRetainAllocationHandle,
+        [](hipMemGenericAllocationHandle_t*, void*) -> hipError_t {
+            return hipErrorInvalidValue;
+        });
+    ScopedHook ipcGet(g_hipIpcGetMemHandle,
+        [](hipIpcMemHandle_t*, void*) -> hipError_t {
+            ADD_FAILURE() << "short-circuit must not reach hipIpcGetMemHandle";
+            return hipErrorInvalidValue;
+        });
+    ScopedHook proxy(g_proxyCallBlocking,
+        [](struct ncclComm*, struct ncclProxyConnector*, int,
+           void*, int, void*, int) -> ncclResult_t {
+            ADD_FAILURE() << "short-circuit must not reach proxy register";
+            return ncclInternalError;
+        });
+
+    int peerRanks[] = {kPeerRank};
+    IpcRegOutputs out;
+    bool isLegacyIpc = false;
+
+    auto r = CallIpcRegisterBuffer(cb, kUserbuff,
+                                   /*buffSize=*/ 256,
+                                   peerRanks, 1,
+                                   NCCL_IPC_COLLECTIVE,
+                                   &regRecord, out, &isLegacyIpc);
+
+    EXPECT_EQ(retain.calls, 1);
+    EXPECT_EQ(ipcGet.calls, 0);
+    EXPECT_EQ(proxy.calls,  0);
+    EXPECT_EQ(r, ncclSuccess);  // bare `goto fail`
+    out.ExpectZeroed();
+    EXPECT_FALSE(isLegacyIpc);
+    EXPECT_EQ(regRecord.ipcInfos[kPeerLocalRank], nullptr);
+}
+
+#endif  // ROCM_VERSION >= 70000
