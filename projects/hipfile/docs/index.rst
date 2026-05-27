@@ -48,6 +48,7 @@ The hipFile source is in the `ROCm rocm-systems monorepo <https://github.com/ROC
 
    .. grid-item-card:: Troubleshooting
 
+      * :doc:`Troubleshooting <troubleshooting/troubleshooting>`
       * :doc:`Known issues <troubleshooting/known-issues>`
       
 To contribute to the documentation, refer to
