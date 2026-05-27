@@ -687,6 +687,38 @@ __device__ void llvm_amdgcn_raw_buffer_store_b128(
     __uint128_t vdata, i32x4_t srsrc, uint32_t voffset, uint32_t soffset,
     uint32_t aux) __asm("llvm.amdgcn.raw.buffer.store.i128");
 
+__device__ uint64_t llvm_amdgcn_raw_buffer_load_b64(
+    i32x4_t srsrc, uint32_t voffset, uint32_t soffset,
+    uint32_t aux) __asm("llvm.amdgcn.raw.buffer.load.i64");
+
+__device__ void llvm_amdgcn_raw_buffer_store_b64(
+    uint64_t vdata, i32x4_t srsrc, uint32_t voffset, uint32_t soffset,
+    uint32_t aux) __asm("llvm.amdgcn.raw.buffer.store.i64");
+
+__device__ uint32_t llvm_amdgcn_raw_buffer_load_b32(
+    i32x4_t srsrc, uint32_t voffset, uint32_t soffset,
+    uint32_t aux) __asm("llvm.amdgcn.raw.buffer.load.i32");
+
+__device__ void llvm_amdgcn_raw_buffer_store_b32(
+    uint32_t vdata, i32x4_t srsrc, uint32_t voffset, uint32_t soffset,
+    uint32_t aux) __asm("llvm.amdgcn.raw.buffer.store.i32");
+
+__device__ uint16_t llvm_amdgcn_raw_buffer_load_b16(
+    i32x4_t srsrc, uint32_t voffset, uint32_t soffset,
+    uint32_t aux) __asm("llvm.amdgcn.raw.buffer.load.i16");
+
+__device__ void llvm_amdgcn_raw_buffer_store_b16(
+    uint16_t vdata, i32x4_t srsrc, uint32_t voffset, uint32_t soffset,
+    uint32_t aux) __asm("llvm.amdgcn.raw.buffer.store.i16");
+
+__device__ uint8_t llvm_amdgcn_raw_buffer_load_b8(
+    i32x4_t srsrc, uint32_t voffset, uint32_t soffset,
+    uint32_t aux) __asm("llvm.amdgcn.raw.buffer.load.i8");
+
+__device__ void llvm_amdgcn_raw_buffer_store_b8(
+    uint8_t vdata, i32x4_t srsrc, uint32_t voffset, uint32_t soffset,
+    uint32_t aux) __asm("llvm.amdgcn.raw.buffer.store.i8");
+
 // ==============================================================================
 // CACHE POLICIES
 // ==============================================================================
@@ -698,6 +730,26 @@ enum class CachePolicy {
   SystemScope,   // Bypass L1 and L2 (sc0 sc1 / glc slc / scope:SYS)
   SystemScopeNT  // Bypass L1 and L2 + Streaming (sc0 sc1 nt)
 };
+
+// Maps a CachePolicy to the AMDGCN buffer instruction aux bits (sc0/sc1/nt).
+__host__ __device__ constexpr uint32_t cache_policy_aux(CachePolicy p) {
+  return p == CachePolicy::BypassL1     ? 0b00001 :
+         p == CachePolicy::NonTemporal  ? 0b00010 :
+         p == CachePolicy::SystemScope  ? 0b10001 :
+         p == CachePolicy::SystemScopeNT? 0b10011 :
+                                          0b00000;  // Standard / FlatCache
+}
+
+__device__ __forceinline__ i32x4_t
+make_buffer_resource(const void* base, uint32_t num_bytes) {
+  uint64_t addr = reinterpret_cast<uint64_t>(base);
+  i32x4_t rsrc;
+  rsrc[0] = static_cast<int32_t>(addr & 0xFFFFFFFFu);
+  rsrc[1] = static_cast<int32_t>(addr >> 32);
+  rsrc[2] = static_cast<int32_t>(num_bytes);
+  rsrc[3] = 0x00020000;  // raw buffer descriptor: no stride/swizzle
+  return rsrc;
+}
 
 template <int Size, CachePolicy LoadPolicy = CachePolicy::Standard,
           CachePolicy StorePolicy = LoadPolicy>
@@ -788,30 +840,13 @@ struct AsmAccess<16, LoadPolicy, StorePolicy> {
     }
   }
 
-  static __device__ __forceinline__ i32x4_t
-  make_buffer_resource(const void *base, uint32_t num_bytes) {
-    uint64_t addr = reinterpret_cast<uint64_t>(base);
-    i32x4_t rsrc;
-    rsrc[0] = static_cast<int32_t>(addr & 0xFFFFFFFFu);
-    rsrc[1] = static_cast<int32_t>(addr >> 32);
-    rsrc[2] = static_cast<int32_t>(num_bytes);
-    rsrc[3] = 0x00020000;  // raw, no stride/swizzle
-    return rsrc;
-  }
-  
   //! The bits order might be different on various archs
   static __device__ __forceinline__ type load_buffer(const void *ptr,
                                                      uint32_t buf_size,
                                                      uint32_t offset) {
     i32x4_t rsrc = make_buffer_resource(ptr, buf_size);
-    constexpr uint32_t aux =
-        (LoadPolicy == CachePolicy::Standard)     ? 0b00000 :
-        (LoadPolicy == CachePolicy::FlatCache)    ? 0b00000 :
-        (LoadPolicy == CachePolicy::BypassL1)     ? 0b00001 :
-        (LoadPolicy == CachePolicy::NonTemporal)  ? 0b00010 :
-        (LoadPolicy == CachePolicy::SystemScope)  ? 0b10001 :
-      /*(LoadPolicy == CachePolicy::SystemScopeNT)*/ 0b10011;
-    return static_cast<type>(
+    constexpr uint32_t aux = cache_policy_aux(LoadPolicy);
+    return __builtin_bit_cast(type,
         llvm_amdgcn_raw_buffer_load_b128(rsrc, offset, 0, aux));
   }
 
@@ -821,13 +856,7 @@ struct AsmAccess<16, LoadPolicy, StorePolicy> {
                                                       uint32_t offset,
                                                       type val) {
     i32x4_t rsrc = make_buffer_resource(ptr, buf_size);
-    constexpr uint32_t aux =
-        (StorePolicy == CachePolicy::Standard)     ? 0b00000 :
-        (StorePolicy == CachePolicy::FlatCache)    ? 0b00000 :
-        (StorePolicy == CachePolicy::BypassL1)     ? 0b00001 :
-        (StorePolicy == CachePolicy::NonTemporal)  ? 0b00010 :
-        (StorePolicy == CachePolicy::SystemScope)  ? 0b10001 :
-      /*(StorePolicy == CachePolicy::SystemScopeNT)*/ 0b10011;
+    constexpr uint32_t aux = cache_policy_aux(StorePolicy);
     llvm_amdgcn_raw_buffer_store_b128(static_cast<__uint128_t>(val),
                                       rsrc, offset, 0, aux);
   }
@@ -842,20 +871,8 @@ struct AsmAccess<16, LoadPolicy, StorePolicy> {
     i32x4_t rsrc = make_buffer_resource(src, buf_size);
     i32x4_t rdst = make_buffer_resource(dst, buf_size);
 
-    constexpr uint32_t aux_load =
-        (LoadPolicy == CachePolicy::Standard)      ? 0b00000
-        : (LoadPolicy == CachePolicy::FlatCache)   ? 0b00000
-        : (LoadPolicy == CachePolicy::BypassL1)    ? 0b00001
-        : (LoadPolicy == CachePolicy::NonTemporal) ? 0b00010
-        : (LoadPolicy == CachePolicy::SystemScope) ? 0b10001
-                                                   : 0b10011;
-    constexpr uint32_t aux_store =
-        (StorePolicy == CachePolicy::Standard)      ? 0b00000
-        : (StorePolicy == CachePolicy::FlatCache)   ? 0b00000
-        : (StorePolicy == CachePolicy::BypassL1)    ? 0b00001
-        : (StorePolicy == CachePolicy::NonTemporal) ? 0b00010
-        : (StorePolicy == CachePolicy::SystemScope) ? 0b10001
-                                                    : 0b10011;
+    constexpr uint32_t aux_load  = cache_policy_aux(LoadPolicy);
+    constexpr uint32_t aux_store = cache_policy_aux(StorePolicy);
 
 #pragma unroll
     for (int u = 0; u < Unroll; u++) {
@@ -954,6 +971,50 @@ struct AsmAccess<8, LoadPolicy, StorePolicy> {
 #endif
     }
   }
+
+  static __device__ __forceinline__ type load_buffer(const void *ptr,
+                                                     uint32_t buf_size,
+                                                     uint32_t offset) {
+    i32x4_t rsrc = make_buffer_resource(ptr, buf_size);
+    constexpr uint32_t aux = cache_policy_aux(LoadPolicy);
+    return __builtin_bit_cast(type,
+        llvm_amdgcn_raw_buffer_load_b64(rsrc, offset, 0, aux));
+  }
+
+  static __device__ __forceinline__ void store_buffer(void *ptr,
+                                                      uint32_t buf_size,
+                                                      uint32_t offset,
+                                                      type val) {
+    i32x4_t rsrc = make_buffer_resource(ptr, buf_size);
+    constexpr uint32_t aux = cache_policy_aux(StorePolicy);
+    llvm_amdgcn_raw_buffer_store_b64(static_cast<uint64_t>(val),
+                                     rsrc, offset, 0, aux);
+  }
+
+  static __device__ __forceinline__ void load_store_buffer(void* __restrict__ src,
+                                                           void* __restrict__ dst,
+                                                           uint32_t buf_size,
+                                                           int offset, int tid,
+                                                           int stride) {
+    constexpr int Unroll = 16;
+    uint64_t regs[Unroll];
+    i32x4_t rsrc = make_buffer_resource(src, buf_size);
+    i32x4_t rdst = make_buffer_resource(dst, buf_size);
+
+    constexpr uint32_t aux_load  = cache_policy_aux(LoadPolicy);
+    constexpr uint32_t aux_store = cache_policy_aux(StorePolicy);
+
+#pragma unroll
+    for (int u = 0; u < Unroll; u++) {
+      regs[u] = llvm_amdgcn_raw_buffer_load_b64(rsrc, tid * 8,
+        (offset + u * stride) * 8, aux_load);
+    }
+#pragma unroll
+    for (int u = 0; u < Unroll; u++) {
+      llvm_amdgcn_raw_buffer_store_b64(regs[u], rdst, tid * 8,
+        (offset + u * stride) * 8, aux_store);
+    }
+  }
 };
 
 // ==============================================================================
@@ -1038,6 +1099,50 @@ struct AsmAccess<4, LoadPolicy, StorePolicy> {
 #else
       *reinterpret_cast<type*>(dst) = val;
 #endif
+    }
+  }
+
+  static __device__ __forceinline__ type load_buffer(const void *ptr,
+                                                     uint32_t buf_size,
+                                                     uint32_t offset) {
+    i32x4_t rsrc = make_buffer_resource(ptr, buf_size);
+    constexpr uint32_t aux = cache_policy_aux(LoadPolicy);
+    return __builtin_bit_cast(type,
+        llvm_amdgcn_raw_buffer_load_b32(rsrc, offset, 0, aux));
+  }
+
+  static __device__ __forceinline__ void store_buffer(void *ptr,
+                                                      uint32_t buf_size,
+                                                      uint32_t offset,
+                                                      type val) {
+    i32x4_t rsrc = make_buffer_resource(ptr, buf_size);
+    constexpr uint32_t aux = cache_policy_aux(StorePolicy);
+    llvm_amdgcn_raw_buffer_store_b32(static_cast<uint32_t>(val),
+                                     rsrc, offset, 0, aux);
+  }
+
+  static __device__ __forceinline__ void load_store_buffer(void* __restrict__ src,
+                                                           void* __restrict__ dst,
+                                                           uint32_t buf_size,
+                                                           int offset, int tid,
+                                                           int stride) {
+    constexpr int Unroll = 16;
+    uint32_t regs[Unroll];
+    i32x4_t rsrc = make_buffer_resource(src, buf_size);
+    i32x4_t rdst = make_buffer_resource(dst, buf_size);
+
+    constexpr uint32_t aux_load  = cache_policy_aux(LoadPolicy);
+    constexpr uint32_t aux_store = cache_policy_aux(StorePolicy);
+
+#pragma unroll
+    for (int u = 0; u < Unroll; u++) {
+      regs[u] = llvm_amdgcn_raw_buffer_load_b32(rsrc, tid * 4,
+        (offset + u * stride) * 4, aux_load);
+    }
+#pragma unroll
+    for (int u = 0; u < Unroll; u++) {
+      llvm_amdgcn_raw_buffer_store_b32(regs[u], rdst, tid * 4,
+        (offset + u * stride) * 4, aux_store);
     }
   }
 };
@@ -1154,6 +1259,50 @@ struct AsmAccess<2, LoadPolicy, StorePolicy> {
 #endif
     }
   }
+
+  static __device__ __forceinline__ type load_buffer(const void *ptr,
+                                                     uint32_t buf_size,
+                                                     uint32_t offset) {
+    i32x4_t rsrc = make_buffer_resource(ptr, buf_size);
+    constexpr uint32_t aux = cache_policy_aux(LoadPolicy);
+    return static_cast<type>(
+        llvm_amdgcn_raw_buffer_load_b16(rsrc, offset, 0, aux));
+  }
+
+  static __device__ __forceinline__ void store_buffer(void *ptr,
+                                                      uint32_t buf_size,
+                                                      uint32_t offset,
+                                                      type val) {
+    i32x4_t rsrc = make_buffer_resource(ptr, buf_size);
+    constexpr uint32_t aux = cache_policy_aux(StorePolicy);
+    llvm_amdgcn_raw_buffer_store_b16(static_cast<uint16_t>(val),
+                                     rsrc, offset, 0, aux);
+  }
+
+  static __device__ __forceinline__ void load_store_buffer(void* __restrict__ src,
+                                                           void* __restrict__ dst,
+                                                           uint32_t buf_size,
+                                                           int offset, int tid,
+                                                           int stride) {
+    constexpr int Unroll = 16;
+    uint16_t regs[Unroll];
+    i32x4_t rsrc = make_buffer_resource(src, buf_size);
+    i32x4_t rdst = make_buffer_resource(dst, buf_size);
+
+    constexpr uint32_t aux_load  = cache_policy_aux(LoadPolicy);
+    constexpr uint32_t aux_store = cache_policy_aux(StorePolicy);
+
+#pragma unroll
+    for (int u = 0; u < Unroll; u++) {
+      regs[u] = llvm_amdgcn_raw_buffer_load_b16(rsrc, tid * 2,
+        (offset + u * stride) * 2, aux_load);
+    }
+#pragma unroll
+    for (int u = 0; u < Unroll; u++) {
+      llvm_amdgcn_raw_buffer_store_b16(regs[u], rdst, tid * 2,
+        (offset + u * stride) * 2, aux_store);
+    }
+  }
 };
 
 // ==============================================================================
@@ -1266,6 +1415,49 @@ struct AsmAccess<1, LoadPolicy, StorePolicy> {
 #else
       *reinterpret_cast<type*>(dst) = val;
 #endif
+    }
+  }
+
+  static __device__ __forceinline__ type load_buffer(const void *ptr,
+                                                     uint32_t buf_size,
+                                                     uint32_t offset) {
+    i32x4_t rsrc = make_buffer_resource(ptr, buf_size);
+    constexpr uint32_t aux = cache_policy_aux(LoadPolicy);
+    return static_cast<type>(
+        llvm_amdgcn_raw_buffer_load_b8(rsrc, offset, 0, aux));
+  }
+
+  static __device__ __forceinline__ void store_buffer(void *ptr,
+                                                      uint32_t buf_size,
+                                                      uint32_t offset,
+                                                      type val) {
+    i32x4_t rsrc = make_buffer_resource(ptr, buf_size);
+    constexpr uint32_t aux = cache_policy_aux(StorePolicy);
+    llvm_amdgcn_raw_buffer_store_b8(val, rsrc, offset, 0, aux);
+  }
+
+  static __device__ __forceinline__ void load_store_buffer(void* __restrict__ src,
+                                                           void* __restrict__ dst,
+                                                           uint32_t buf_size,
+                                                           int offset, int tid,
+                                                           int stride) {
+    constexpr int Unroll = 16;
+    uint8_t regs[Unroll];
+    i32x4_t rsrc = make_buffer_resource(src, buf_size);
+    i32x4_t rdst = make_buffer_resource(dst, buf_size);
+
+    constexpr uint32_t aux_load  = cache_policy_aux(LoadPolicy);
+    constexpr uint32_t aux_store = cache_policy_aux(StorePolicy);
+
+#pragma unroll
+    for (int u = 0; u < Unroll; u++) {
+      regs[u] = llvm_amdgcn_raw_buffer_load_b8(rsrc, tid,
+        offset + u * stride, aux_load);
+    }
+#pragma unroll
+    for (int u = 0; u < Unroll; u++) {
+      llvm_amdgcn_raw_buffer_store_b8(regs[u], rdst, tid,
+        offset + u * stride, aux_store);
     }
   }
 };
