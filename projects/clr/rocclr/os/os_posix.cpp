@@ -760,6 +760,30 @@ uint64_t Os::xgetbv(uint32_t ecx) {
 
   return ((uint64_t)edx << 32) | (uint64_t)eax;
 }
+
+bool Os::hasMovdir64b() {
+  // CPUID leaf 7, sub-leaf 0: ECX bit 28 = MOVDIR64B.
+  static const bool supported = [] {
+    int regs[4];
+#ifdef _LP64
+    __asm__ __volatile__(
+        "movq %%rbx, %%rsi;"
+        "cpuid;"
+        "xchgq %%rbx, %%rsi;"
+        : "=a"(regs[0]), "=S"(regs[1]), "=c"(regs[2]), "=d"(regs[3])
+        : "a"(7), "c"(0));
+#else
+    __asm__ __volatile__(
+        "movl %%ebx, %%esi;"
+        "cpuid;"
+        "xchgl %%ebx, %%esi;"
+        : "=a"(regs[0]), "=S"(regs[1]), "=c"(regs[2]), "=d"(regs[3])
+        : "a"(7), "c"(0));
+#endif
+    return static_cast<bool>((regs[2] >> 28) & 1);
+  }();
+  return supported;
+}
 #endif  // ATI_ARCH_X86
 
 uint64_t Os::offsetToEpochNanos() {

@@ -21,6 +21,7 @@
 #include "devkernel.hpp"
 #include "amdocl/cl_profile_amd.h"
 #include "devsignal.hpp"
+#include "utils/nontemporal.hpp"
 
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)
@@ -640,6 +641,9 @@ struct Info : public amd::EmbeddedObject {
 
   //! large bar support.
   bool largeBar_;
+
+  //! CPU supports MOVDIR64B (atomic 64-byte write with WC buffer close).
+  bool movdir64b_;
 
   uint32_t hmmSupported_;            //!< ROCr supports HMM interfaces
   uint32_t hmmCpuMemoryAccessible_;  //!< CPU memory is accessible by GPU without pinning/register
@@ -1360,7 +1364,7 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void HiddenHeapInit() = 0;
 
   //! Fast-path dispatch using a pre-built contiguous flat packet buffer.
-  virtual bool dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPacketData,
+  virtual bool dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>& flatPacketData,
                                           const std::vector<uint32_t>& validFullHeaders,
                                           amd::AccumulateCommand* vcmd = nullptr,
                                           bool attach_signal = false,

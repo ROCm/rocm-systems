@@ -1700,7 +1700,7 @@ hipError_t GraphExec::UpdateAQLPacket(hip::GraphNode* node) {
 // Append one 64-byte AQL packet to a flat buffer: copies the body, saves the original full_header
 // and invalidates the header.
 void GraphExec::PacketBatch::appendPacketToFlatBuffer(const uint8_t* pkt_raw,
-                                                      std::vector<uint8_t>& flatData,
+                                                      amd::AlignedVector64<uint8_t>& flatData,
                                                       std::vector<uint32_t>& fullHeaders) {
   static constexpr size_t kSigOff = 56;
   const size_t baseOff = flatData.size();
@@ -1932,7 +1932,7 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
     }
 
     const std::vector<const std::string*>* kernelNamesToDispatch;
-    const std::vector<uint8_t>* flatData;
+    const amd::AlignedVector64<uint8_t>* flatData;
     const std::vector<uint32_t>* flatHdrs;
 
     if (packetBatch.disabledNodeCount == 0) {

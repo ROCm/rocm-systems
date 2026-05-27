@@ -264,15 +264,17 @@ release(uint, HIP_SKIP_ABORT_ON_GPU_ERROR, true,                              \
         "Set this to true, to avoid host side abort for GPU errors")          \
 release(bool, HIP_FORCE_SPIRV_CODEOBJECT, false,                              \
         "Force use of SPIRV instead of device specific code object.")         \
-release(uint, DEBUG_CLR_BATCH_CPU_SYNC_SIZE, 16,                               \
+release(uint, DEBUG_CLR_BATCH_CPU_SYNC_SIZE, 16,                              \
         "Forces the minimum batch size for CPU sync")                         \
 release(bool, DEBUG_CLR_DISABLE_IMAGE, false,                                 \
         "1 = Disable Image support for ROC path")                             \
 release(bool, DEBUG_CLR_ENABLE_PREFETCH_METADATA, true,                       \
         "Enable metadata prefetch for some Aql packets")                      \
 release(uint, DEBUG_CLR_DOORBELL_SKIP, 16,                                    \
-        "Number of consecutive dispatches that may skip the doorbell flush.")
-
+        "Number of consecutive dispatches that may skip the doorbell flush.") \
+release(uint, DEBUG_CLR_DEV_QUEUE, 0,                                         \
+        "Device-memory queue placement: 0=system mem (default), "             \
+        ">0=ring buffer in device mem when Large BAR is available")           \
 
 namespace amd {
 
