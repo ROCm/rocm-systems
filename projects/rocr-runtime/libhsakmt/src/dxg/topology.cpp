@@ -842,6 +842,11 @@ HSAKMT_STATUS topology_sysfs_get_mem_props(uint32_t node_id, uint32_t mem_id,
 
   props.HeapType = HSA_HEAPTYPE_FRAME_BUFFER_PRIVATE;
   props.SizeInBytes = device->LocalHeapSize();
+  // On APU, allocations can spill from local to non-local via the GART fallback,
+  // so the effective per-allocation cap is local + non-local.
+  if (!device->IsDgpu()) {
+    props.SizeInBytes += device->NonLocalHeapSize();
+  }
   props.Width = device->MemoryBusWidth();
   props.MemoryClockMax = device->MaxMemoryClockMhz();
 
