@@ -163,6 +163,9 @@ struct AgentInfo
     // from the public V2 ABI layout.
     aqlprofile_cu_bitmap_t cu_bitmap{};
 
+    // Number of XCC per AID
+    uint32_t xcc_per_aid{1};
+
     uint32_t se_per_xcc() const { return se_num / xcc_num; }
 };
 

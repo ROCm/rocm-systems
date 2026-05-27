@@ -54,6 +54,15 @@ SPISkip(size_t block, size_t id)
     return (block & CounterBlockSPIAttr) != 0 && id >= SPI_SPECIAL_CNT;
 }
 
+enum GCMode
+{
+    GC_MODE_XCD_ID_MASK        = 0xFF,
+    GC_MODE_XCD                = 0x100,
+    GC_MODE_AID                = 0x200,
+    GC_MODE_AID_WITH_XCD_INDEX = 0x400,
+    GC_MODE_ALL                = GC_MODE_XCD | GC_MODE_AID,
+};
+
 class CmdBuffer;
 class CmdBuilder;
 
@@ -137,15 +146,19 @@ private:
     typedef uint32_t reg_addr_t;
     // Shader Engines number on the GPU
     uint32_t se_number_;
-    uint32_t wgp_per_sa;
-    uint32_t sarrays_per_se;
+    uint32_t wgp_per_sa_;
+    uint32_t sarrays_per_se_;
     // XCC number on the GPU
     uint32_t xcc_number_;
+    uint32_t xcc_per_aid_;
     Builder  builder;
+    // TODO: Temporary patch for gfx1250's asymmetric CU design, will remove
+    //       after CU mask support is added to agent_info
+    bool asymmetric_cu_patch;
 
     // WGP harvesting support (GFX11+): per-(SE, SA) active WGP physical indices.
     //
-    // Sized in the constructor from the chip's actual se_number_ x sarrays_per_se
+    // Sized in the constructor from the chip's actual se_number_ x sarrays_per_se_
     // so we never overrun on parts that exceed the aqlprofile_cu_bitmap_t window
     // (AQLPROFILE_DRM_CU_BITMAP_NUM_SE x AQLPROFILE_DRM_CU_BITMAP_NUM_SA_PER_SE,
     // e.g. Navi31: 6 SE x 2 SA = 12 SAs; MI200: 8 SE x 1 SA = 8 SAs), and so
@@ -193,28 +206,28 @@ private:
 
     // helper function to convert a 32-bit address to a 64-bit SMN address.
     // Returns the address seen by UMC_MASTER_XCC of register at reg_addr on target_aid_index.
-    uint64_t get_smn_addr(uint64_t addr, uint32_t target_aid_index)
+    uint64_t get_smn_addr(uint64_t addr, uint32_t target_aid_index, bool use_aid = true)
     {
-        if(xcc_number_ > 1)
+        if((xcc_number_ > 1) && use_aid)
             addr |= ((uint64_t) 1 << UMC_USR_BIT) | ((uint64_t) target_aid_index << UMC_AID_BIT);
         return addr;
     }
 
-    uint64_t get_smn_addr(const Register& reg, uint32_t target_aid_index)
+    uint64_t get_smn_addr(const Register& reg, uint32_t target_aid_index, bool use_aid = true)
     {
-        return get_smn_addr(builder.get_addr(reg), target_aid_index);
+        return get_smn_addr(builder.get_addr(reg), target_aid_index, use_aid);
     }
 
     // start counters for rpb-block like instances
-    void start_generic_mc_counters(CmdBuffer*                          cmd_buffer,
-                                   const std::map<uint32_t, uint64_t>& instances)
+    void start_generic_mc_counters(CmdBuffer*                cmd_buffer,
+                                   const std::set<uint64_t>& instances,
+                                   bool                      use_aid = true)
     {
         // insert master XCC PRED_EXEC packet here if it is MI300
         PrecExecBuilder<Builder> prec_exec_builder(
-            builder, cmd_buffer, VIRTUALXCCID_SELECT, xcc_number_ > 1);
-        for(const auto& i : instances)
+            builder, cmd_buffer, VIRTUALXCCID_SELECT, (xcc_number_ > 1) && use_aid);
+        for(const auto& control_addr : instances)
         {
-            uint64_t control_addr = i.second;
             // rpb instance clear
             builder.BuildWritePConfigRegPacket(
                 cmd_buffer, control_addr, Primitives::mc_reset_value());
@@ -224,22 +237,64 @@ private:
         }
     }
 
-    // 'attr' is reserved for future expansion
-    void SetGrbmGfxIndex(CmdBuffer* cmd_buffer, uint32_t value, uint32_t attr = 0)
+    void SetGrbmGfxIndex(CmdBuffer* cmd_buffer, uint32_t value, GCMode gc_mode = GC_MODE_XCD)
     {
-        builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR, value);
+        uint32_t xcc_id;
+        if(gc_mode & GC_MODE_XCD)
+            builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR, value);
+        if(gc_mode & GC_MODE_AID)
+        {
+            for(xcc_id = 0; xcc_id < xcc_number_; xcc_id += xcc_per_aid_)
+            {
+                PrecExecBuilder<Builder> prec_exec_builder(
+                    builder, cmd_buffer, xcc_id, xcc_number_ > 1);
+                builder.BuildWritePConfigRegPacketToChiplet(cmd_buffer,
+                                                            Primitives::GRBMA_GFX_INDEX_ADDR,
+                                                            value,
+                                                            static_cast<ChipletId>(xcc_id));
+            }
+        }
+        if(gc_mode & GC_MODE_AID_WITH_XCD_INDEX)
+        {
+            xcc_id = gc_mode & GC_MODE_XCD_ID_MASK;
+            // We don't need PrecExec for this case because the caller will program PrecExec
+            builder.BuildWritePConfigRegPacketToChiplet(cmd_buffer,
+                                                        Primitives::GRBMA_GFX_INDEX_ADDR,
+                                                        value,
+                                                        static_cast<ChipletId>(xcc_id));
+        }
     }
 
-    // 'attr' is reserved for future expansion
-    void SetGrbmBroadcast(CmdBuffer* cmd_buffer, uint32_t attr = 0)
+    void SetGrbmBroadcast(CmdBuffer* cmd_buffer, GCMode gc_mode)
     {
-        SetGrbmGfxIndex(cmd_buffer, Primitives::grbm_broadcast_value());
+        SetGrbmGfxIndex(cmd_buffer, Primitives::grbm_broadcast_value(), gc_mode);
     }
 
     void SetPerfmonCntl(CmdBuffer* cmd_buffer, uint32_t value, uint32_t attr)
     {
         if(attr & CounterBlockCpmonAttr)
             builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::CP_PERFMON_CNTL_ADDR, value);
+        if(attr & CounterBlockGrbmaAttr)
+        {
+            for(uint32_t xcc_id = 0; xcc_id < xcc_number_; xcc_id += xcc_per_aid_)
+            {
+                PrecExecBuilder<Builder> prec_exec_builder(
+                    builder, cmd_buffer, xcc_id, xcc_number_ > 1);
+                builder.BuildWritePConfigRegPacketToChiplet(cmd_buffer,
+                                                            Primitives::AID_PERFMON_CNTL_ADDR,
+                                                            value,
+                                                            static_cast<ChipletId>(xcc_id));
+            }
+        }
+    }
+
+    uint32_t GetInstanceIndex(uint32_t instance_index, const GpuBlockInfo* block_info)
+    {
+        // GLARB blocks require special instance handling, so we encode instance_count into
+        // instance_index. This won't impact GPUs without GLARB blocks
+        return (block_info->attr & CounterBlockGlarbAttr)
+                   ? (instance_index | (block_info->instance_count << 16))
+                   : instance_index;
     }
 
     // Populate active_wgp_indices_[se][sa] for the per-WGP read loop in
@@ -254,7 +309,7 @@ private:
     //
     // For any (se, sa) where the bitmap is unavailable (V0/V1 agents,
     // pre-GFX11 parts, or coordinates outside the DRM ABI window such as
-    // Navi31's SE >= 4), synthesize a fully-active bitmap of wgp_per_sa
+    // Navi31's SE >= 4), synthesize a fully-active bitmap of wgp_per_sa_
     // contiguous WGPs (two CU bits per WGP). That collapses the fallback
     // path into the same loop and preserves pre-fix sequential iteration.
     //
@@ -270,14 +325,14 @@ private:
         // Size the per-(SE, SA) WGP index tables to the actual chip topology.
         // This fits Navi31 (6 x 2), MI200 (8 x 1), and future GPUs with larger
         // SE x SA-per-SE topologies, none of which fit in a hardcoded kMaxSA bound.
-        active_wgp_indices_.assign(se_number_, std::vector<std::vector<uint32_t>>(sarrays_per_se));
+        active_wgp_indices_.assign(se_number_, std::vector<std::vector<uint32_t>>(sarrays_per_se_));
 
         constexpr uint32_t kMaxWgpPerSa  = 16;
         constexpr uint32_t bitmap_se_lim = std::extent_v<decltype(aqlprofile_cu_bitmap_t::bits), 0>;
         constexpr uint32_t bitmap_sa_lim = std::extent_v<decltype(aqlprofile_cu_bitmap_t::bits), 1>;
         for(uint32_t se = 0; se < se_number_; ++se)
         {
-            for(uint32_t sa = 0; sa < sarrays_per_se; ++sa)
+            for(uint32_t sa = 0; sa < sarrays_per_se_; ++sa)
             {
                 auto& indices = active_wgp_indices_.at(se).at(sa);
 
@@ -286,13 +341,13 @@ private:
                                      : 0u;
                 if(cu_bm == 0)
                 {
-                    // No bitmap for this SA. Guard wgp_per_sa==0 here so the
+                    // No bitmap for this SA. Guard wgp_per_sa_==0 here so the
                     // synthesized cu_bm is always non-zero by construction and
                     // we never hand 0 to __builtin_clz below (which is UB).
-                    // (1u << 32) is also UB; clamp when wgp_per_sa covers the
+                    // (1u << 32) is also UB; clamp when wgp_per_sa_ covers the
                     // full 32-bit window (16 WGPs * 2 CU bits).
-                    if(wgp_per_sa == 0) continue;
-                    cu_bm = (wgp_per_sa >= kMaxWgpPerSa) ? ~0u : ((1u << (wgp_per_sa * 2u)) - 1u);
+                    if(wgp_per_sa_ == 0) continue;
+                    cu_bm = (wgp_per_sa_ >= kMaxWgpPerSa) ? ~0u : ((1u << (wgp_per_sa_ * 2u)) - 1u);
                 }
 
                 const uint32_t max_cu_bit = 31u - __builtin_clz(cu_bm);
@@ -312,21 +367,24 @@ public:
     , builder(acquire_ip_offset_table(agent_info))
     , se_number_(agent_info->se_num / agent_info->xcc_num)
     , xcc_number_(agent_info->xcc_num)
-    , sarrays_per_se(agent_info->shader_arrays_per_se)
+    , xcc_per_aid_(agent_info->xcc_per_aid)
+    , sarrays_per_se_(agent_info->shader_arrays_per_se)
     {
-        this->wgp_per_sa = (agent_info->cu_num / 2 + sarrays_per_se * se_number_ - 1) /
-                           (se_number_ * sarrays_per_se);
+        this->wgp_per_sa_ = (agent_info->cu_num / 2 + sarrays_per_se_ * se_number_ - 1) /
+                            (se_number_ * sarrays_per_se_);
+        this->wgp_per_sa_ /= agent_info->xcc_num;
 
         build_active_wgp_indices(agent_info);
 
         // Due to MI300 CP firmware issue we need to use mem_mapped_register mode to patch for GCEA
         // hang. Otherwise both perfcounters mode and mem_mapped_register mode should work.
         builder.bUsePerfCounterMode = (xcc_number_ > 1) ? false : true;
+        this->asymmetric_cu_patch   = strncmp(agent_info->name, "gfx1250", 7) ? false : true;
     }
 
     int GetNumWGPs() override
     {
-        if(Primitives::GFXIP_LEVEL >= 11) return wgp_per_sa;
+        if(Primitives::GFXIP_LEVEL >= 11) return wgp_per_sa_;
         return 1;
     };
 
@@ -358,8 +416,10 @@ public:
     {
         // Issue barrier command
         if(!concurrent) builder.BuildWriteWaitIdlePacket(cmd_buffer);
+        GCMode gc_mode_global =
+            (counters_vec.get_attr() & CounterBlockGrbmaAttr) ? GC_MODE_ALL : GC_MODE_XCD;
         // Reset Grbm to its default state - broadcast
-        SetGrbmBroadcast(cmd_buffer, counters_vec.get_attr());
+        SetGrbmBroadcast(cmd_buffer, gc_mode_global);
         // Disable RLC Perfmon Clock Gating
         // On Vega this is needed to collect Perf Cntrs
         if(Primitives::GFXIP_LEVEL == 9)
@@ -407,8 +467,9 @@ public:
         std::map<uint32_t, uint64_t> umcchs;
         // RPB/ATC are per AID block like UMC above, we save its control register (for
         // enable/disable) per AID instance
-        std::map<uint32_t, uint64_t> rpbs;
-        std::map<uint32_t, uint64_t> atcs;
+        std::set<uint64_t> rpbs;
+        std::set<uint64_t> atcs;
+        std::set<uint64_t> perf_cnt;
         // Programming perf counters
         for(const auto& counter_des : counters_vec)
         {
@@ -435,9 +496,11 @@ public:
             //       this is not a common practice
             const uint32_t grbm_value =
                 (block_info->instance_count > 1 && !(block_info->attr & CounterBlockWgpAttr))
-                    ? Primitives::grbm_inst_index_value(block_des.index)
+                    ? Primitives::grbm_inst_index_value(
+                          GetInstanceIndex(block_des.index, block_info))
                     : Primitives::grbm_broadcast_value();
-            SetGrbmGfxIndex(cmd_buffer, grbm_value, block_info->attr);
+            GCMode gc_mode = (block_info->attr & CounterBlockGrbmaAttr) ? GC_MODE_ALL : GC_MODE_XCD;
+            SetGrbmGfxIndex(cmd_buffer, grbm_value, gc_mode);
             // Reset counters
             if(block_info->attr & CounterBlockMcAttr)
             {
@@ -456,11 +519,24 @@ public:
             }
 
             // Setup counters
-            if(block_info->select_value != NULL && !(block_info->attr & CounterBlockRpbAttr) &&
-               !(block_info->attr & CounterBlockAtcAttr))
+            if(block_info->select_value != NULL && !(block_info->attr & CounterBlockPerfCntAttr))
             {
-                builder.BuildWriteConfigRegPacket(
-                    cmd_buffer, reg_info.select_addr, block_info->select_value(counter_des));
+                auto select_addr = reg_info.select_addr;
+                auto value       = block_info->select_value(counter_des);
+                if(block_info->attr & CounterBlockGrbmaAttr)
+                {
+                    for(uint32_t xcc_id = 0; xcc_id < xcc_number_; xcc_id += xcc_per_aid_)
+                    {
+                        PrecExecBuilder<Builder> prec_exec_builder(
+                            builder, cmd_buffer, xcc_id, xcc_number_ > 1);
+                        builder.BuildWritePConfigRegPacketToChiplet(
+                            cmd_buffer, select_addr, value, static_cast<ChipletId>(xcc_id));
+                    }
+                }
+                else
+                {
+                    builder.BuildWriteConfigRegPacket(cmd_buffer, select_addr, value);
+                }
             }
             if(block_info->attr & CounterBlockSdmaAttr)
             {
@@ -540,29 +616,34 @@ public:
                         cmd_buffer, select_addr, Primitives::sdma_select_value(counter_des));
                 }
             }
-            if(block_info->attr & CounterBlockAidAttr)
+            if(block_info->attr & (CounterBlockAidAttr | CounterBlockPerfCntAttr))
             {
-                const auto target_aid_index = GetTargetAid(counter_des);
+                bool       use_aid          = bool(block_info->attr & CounterBlockAidAttr);
+                const auto target_aid_index = use_aid ? GetTargetAid(counter_des) : 0;
                 const auto instance_index   = counter_des.block_des.index;
 
                 // insert master XCC PRED_EXEC packet here if it is MI300
                 PrecExecBuilder<Builder> prec_exec_builder(
-                    builder, cmd_buffer, VIRTUALXCCID_SELECT, xcc_number_ > 1);
+                    builder, cmd_buffer, VIRTUALXCCID_SELECT, (xcc_number_ > 1) && use_aid);
 
                 // umc counter select per UMC counter
-                uint64_t select_addr  = get_smn_addr(reg_info.select_addr, target_aid_index);
-                uint64_t control_addr = get_smn_addr(reg_info.control_addr, target_aid_index);
+                uint64_t select_addr =
+                    get_smn_addr(reg_info.select_addr, target_aid_index, use_aid);
+                uint64_t control_addr =
+                    get_smn_addr(reg_info.control_addr, target_aid_index, use_aid);
 
                 if(block_info->attr & CounterBlockUmcAttr)
                 {
                     // skip
                 }
-                if(block_info->attr & CounterBlockRpbAttr || block_info->attr & CounterBlockAtcAttr)
+                if(block_info->attr & CounterBlockPerfCntAttr)
                 {
                     if(block_info->attr & CounterBlockRpbAttr)
-                        rpbs.insert({instance_index, control_addr});
+                        rpbs.insert(control_addr);
+                    else if(block_info->attr & CounterBlockAtcAttr)
+                        atcs.insert(control_addr);
                     else
-                        atcs.insert({instance_index, control_addr});
+                        perf_cnt.insert(control_addr);
                     builder.BuildWritePConfigRegPacket(
                         cmd_buffer, select_addr, block_info->select_value(counter_des));
                 }
@@ -636,8 +717,10 @@ public:
         // ATC start is treated the same as RPB instance
         if(!atcs.empty()) start_generic_mc_counters(cmd_buffer, atcs);
 
+        if(!perf_cnt.empty()) start_generic_mc_counters(cmd_buffer, perf_cnt, false);
+
         // Reset Grbm to its default state - broadcast
-        SetGrbmBroadcast(cmd_buffer, counters_vec.get_attr());
+        SetGrbmBroadcast(cmd_buffer, gc_mode_global);
         // Program Compute Perfcount Enable register to support perf counting
         builder.BuildWriteShRegPacket(cmd_buffer,
                                       Primitives::COMPUTE_PERFCOUNT_ENABLE_ADDR,
@@ -656,10 +739,13 @@ public:
     uint32_t ReadXccPackets(CmdBuffer*             cmd_buffer,
                             const counters_vector& counters_vec,
                             uint32_t*              buf,
-                            uint32_t&              read_counter)
+                            uint32_t&              read_counter,
+                            GCMode                 gc_mode = GC_MODE_XCD)
     {
+        uint32_t xcc_id = gc_mode & GC_MODE_XCD_ID_MASK;
+
         // Reset Grbm to its default state - broadcast
-        SetGrbmBroadcast(cmd_buffer, counters_vec.get_attr());
+        SetGrbmBroadcast(cmd_buffer, gc_mode);
 
         if(Primitives::GFXIP_LEVEL == 10)
         {
@@ -694,8 +780,27 @@ public:
             const auto* reg_table  = get_reg_table(counter_des);
             const auto& reg_info   = reg_table[counter_des.index];
 
-            // Skip UMC/SDMA/ATC/RPB counters
+            // Skip AID mode counters
             if(block_info->attr & CounterBlockAidAttr) continue;
+
+            // Keep PerfCnt for XCD mode, skip it for AIGC mode
+            if((block_info->attr & CounterBlockPerfCntAttr) && (gc_mode & GC_MODE_XCD))
+            {
+                // Choose which counter to read
+                builder.BuildWritePConfigRegPacket(
+                    cmd_buffer, reg_info.control_addr, Primitives::mc_config_value(counter_des));
+                builder.BuildCopyCounterDataPacket(cmd_buffer,
+                                                   reg_info.register_addr_lo,
+                                                   reg_info.register_addr_hi,
+                                                   buf + read_counter,
+                                                   3);
+                read_counter += 2;
+                continue;
+            }
+
+            if(bool(block_info->attr & CounterBlockGrbmaAttr) !=
+               bool(gc_mode & GC_MODE_AID_WITH_XCD_INDEX))
+                continue;
 
             if(SPISkip(block_info->attr, counter_des.id))
             {
@@ -704,7 +809,7 @@ public:
             }
 
             // Reset Grbm to its default state - broadcast
-            SetGrbmBroadcast(cmd_buffer, counters_vec.get_attr());
+            SetGrbmBroadcast(cmd_buffer, gc_mode);
 
             if(block_info->attr & CounterBlockMcAttr)
             {
@@ -769,7 +874,7 @@ public:
                 const uint32_t se_end_index =
                     (block_info->attr & CounterBlockSeAttr) ? se_number_ : 1;
                 const uint32_t sa_end_index =
-                    (block_info->attr & CounterBlockSaAttr) ? sarrays_per_se : 1;
+                    (block_info->attr & CounterBlockSaAttr) ? sarrays_per_se_ : 1;
                 for(uint32_t se_index = 0; se_index < se_end_index; ++se_index)
                     for(uint32_t sarray = 0; sarray < sa_end_index; ++sarray)
                     {
@@ -788,7 +893,8 @@ public:
                         }
                         else if(block_info->instance_count > 1)
                         {
-                            grbm_value = Primitives::grbm_inst_index_value(block_des.index);
+                            grbm_value = Primitives::grbm_inst_index_value(
+                                GetInstanceIndex(block_des.index, block_info));
                         }
                         else if(block_info->attr & CounterBlockSeAttr)
                         {
@@ -818,8 +924,21 @@ public:
                         }
                         else if(bIsWGPcounter12)
                         {
-                            for(int wgp = 0; wgp < wgp_per_sa; wgp++)
+                            for(int wgp = 0; wgp < wgp_per_sa_; wgp++)
                             {
+                                // TODO: This patch is needed to avoid soft-hang for some WGP
+                                //       blocks, will remove after CU mask support is added to
+                                //       agent_info
+                                if(asymmetric_cu_patch && sarray == 1 && wgp == 8)
+                                {
+                                    if(buf != nullptr)
+                                    {
+                                        buf[read_counter]     = 0;
+                                        buf[read_counter + 1] = 0;
+                                    }
+                                    read_counter += 2;
+                                    continue;
+                                }
                                 if(block_info->instance_count > 1)
                                     grbm_value = Primitives::grbm_inst_se_sh_wgp_index_value(
                                         block_des.index, se_index, sarray, wgp);
@@ -839,19 +958,28 @@ public:
                         }
                         else
                         {
-                            SetGrbmGfxIndex(cmd_buffer, grbm_value, block_info->attr);
-                            builder.BuildCopyCounterDataPacket(cmd_buffer,
-                                                               reg_info.register_addr_lo,
-                                                               reg_info.register_addr_hi,
-                                                               buf + read_counter,
-                                                               3);
+                            SetGrbmGfxIndex(cmd_buffer, grbm_value, gc_mode);
+                            if(block_info->attr & CounterBlockGrbmaAttr)
+                                builder.BuildCopyCounterDataPacketFromChiplet(
+                                    cmd_buffer,
+                                    reg_info.register_addr_lo,
+                                    reg_info.register_addr_hi,
+                                    buf + read_counter,
+                                    3,
+                                    static_cast<ChipletId>(xcc_id));
+                            else
+                                builder.BuildCopyCounterDataPacket(cmd_buffer,
+                                                                   reg_info.register_addr_lo,
+                                                                   reg_info.register_addr_hi,
+                                                                   buf + read_counter,
+                                                                   3);
                             read_counter += 2;
                         }
                     }
             }
         }
         // Reset Grbm to its default state - broadcast
-        SetGrbmBroadcast(cmd_buffer, counters_vec.get_attr());
+        SetGrbmBroadcast(cmd_buffer, gc_mode);
         // Return amount of data to read
         return read_counter * sizeof(uint32_t);
     }
@@ -859,11 +987,13 @@ public:
     // Build PMC stop PM4 comands
     void Stop(CmdBuffer* cmd_buffer, const counters_vector& counters_vec) override
     {
+        GCMode gc_mode =
+            (counters_vec.get_attr() & CounterBlockGrbmaAttr) ? GC_MODE_ALL : GC_MODE_XCD;
         // Reset Grbm to its default state - broadcast
-        SetGrbmBroadcast(cmd_buffer, counters_vec.get_attr());
+        SetGrbmBroadcast(cmd_buffer, gc_mode);
 
         uint32_t sdma_mask = 0;
-        if(counters_vec.get_attr() & CounterBlockAidAttr)
+        if(counters_vec.get_attr() & (CounterBlockAidAttr | CounterBlockPerfCntAttr))
         {
             for(const auto& counter_des : counters_vec)
             {
@@ -872,57 +1002,67 @@ public:
                 const auto* reg_table  = get_reg_table(counter_des);
                 const auto& reg_info   = reg_table[counter_des.index];
 
-                if(!(block_info->attr & CounterBlockAidAttr))
-                    // skip all non-AID blocks
-                    continue;
-
-                // MI300 AID blocks: UMC/RPB/ATC/SDMA event insert master XCC PRED_EXEC packet here
-                PrecExecBuilder<Builder> prec_exec_builder(
-                    builder, cmd_buffer, VIRTUALXCCID_SELECT, xcc_number_ > 1);
-
-                const auto target_aid_index = GetTargetAid(counter_des);
-                uint64_t   smn_control_addr = get_smn_addr(reg_info.control_addr, target_aid_index);
-
-                if(block_info->attr & CounterBlockUmcAttr)
+                if(block_info->attr & CounterBlockAidAttr)
                 {
-                    // Stop UMC
-                }
-                else if(block_info->attr & (CounterBlockRpbAttr | CounterBlockAtcAttr))
-                {
-                    // Stop RPB/ATC
-                    builder.BuildWritePConfigRegPacket(cmd_buffer, smn_control_addr, 0);
-                }
-                else if(block_info->attr & CounterBlockSdmaAttr)
-                {
-                    // Stop SDMA
-                    if(reg_info.control_addr.offset == 0)
+                    // MI300 AID blocks: UMC/RPB/ATC/SDMA event insert master XCC PRED_EXEC packet
+                    // here
+                    PrecExecBuilder<Builder> prec_exec_builder(
+                        builder, cmd_buffer, VIRTUALXCCID_SELECT, xcc_number_ > 1);
+
+                    const auto target_aid_index = GetTargetAid(counter_des);
+                    uint64_t   smn_control_addr =
+                        get_smn_addr(reg_info.control_addr, target_aid_index);
+
+                    if(block_info->attr & CounterBlockUmcAttr)
                     {
-                        // MI100: stopped per instance
-                        const uint32_t mask = 1u << counter_des.block_des.index;
-                        if((sdma_mask & mask) == 0)
+                        // Stop UMC
+                    }
+                    else if(block_info->attr & (CounterBlockRpbAttr | CounterBlockAtcAttr))
+                    {
+                        // Stop RPB/ATC
+                        builder.BuildWritePConfigRegPacket(cmd_buffer, smn_control_addr, 0);
+                    }
+                    else if(block_info->attr & CounterBlockSdmaAttr)
+                    {
+                        // Stop SDMA
+                        if(reg_info.control_addr.offset == 0)
                         {
-                            sdma_mask |= mask;
-                            auto control_addr = (reg_info.control_addr.offset == 0)
-                                                    ? reg_info.select_addr
-                                                    : reg_info.control_addr;
+                            // MI100: stopped per instance
+                            const uint32_t mask = 1u << counter_des.block_des.index;
+                            if((sdma_mask & mask) == 0)
+                            {
+                                sdma_mask |= mask;
+                                auto control_addr = (reg_info.control_addr.offset == 0)
+                                                        ? reg_info.select_addr
+                                                        : reg_info.control_addr;
+                                builder.BuildWritePConfigRegPacket(
+                                    cmd_buffer,
+                                    control_addr,
+                                    Primitives::sdma_stop_value(counter_des));
+                            }
+                        }
+                        else if(xcc_number_ > 1)
+                        {
+                            // MI300 SDMA event: insert master XCC PRED_EXEC packet here
                             builder.BuildWritePConfigRegPacket(
-                                cmd_buffer, control_addr, Primitives::sdma_stop_value(counter_des));
+                                cmd_buffer,
+                                smn_control_addr,
+                                Primitives::sdma_stop_value(counter_des));
+                        }
+                        else
+                        {
+                            // MI200: stopped per counter to choose which counter to read
+                            builder.BuildWritePConfigRegPacket(
+                                cmd_buffer,
+                                reg_info.control_addr,
+                                Primitives::sdma_stop_value(counter_des));
                         }
                     }
-                    else if(xcc_number_ > 1)
-                    {
-                        // MI300 SDMA event: insert master XCC PRED_EXEC packet here
-                        builder.BuildWritePConfigRegPacket(
-                            cmd_buffer, smn_control_addr, Primitives::sdma_stop_value(counter_des));
-                    }
-                    else
-                    {
-                        // MI200: stopped per counter to choose which counter to read
-                        builder.BuildWritePConfigRegPacket(
-                            cmd_buffer,
-                            reg_info.control_addr,
-                            Primitives::sdma_stop_value(counter_des));
-                    }
+                }
+                else if(block_info->attr & CounterBlockPerfCntAttr)
+                {
+                    // Stop Per-XCD PerfCnt
+                    builder.BuildWritePConfigRegPacket(cmd_buffer, reg_info.control_addr, 0);
                 }
             }
         }
@@ -1027,11 +1167,22 @@ public:
                 }
             }
         }
-        for(size_t xcc_selected = 0; xcc_selected < xcc_number_; ++xcc_selected)
+        for(uint32_t xcc_selected = 0; xcc_selected < xcc_number_; ++xcc_selected)
         {
             PrecExecBuilder<Builder> prec_exec_builder(
                 builder, cmd_buffer, xcc_selected, xcc_number_ > 1);
             ReadXccPackets(cmd_buffer, counters_vec, buf, read_counter);
+        }
+        // AIGC blocks
+        if(counters_vec.get_attr() & CounterBlockGrbmaAttr)
+        {
+            for(uint32_t xcc_selected = 0; xcc_selected < xcc_number_; xcc_selected += xcc_per_aid_)
+            {
+                PrecExecBuilder<Builder> prec_exec_builder(
+                    builder, cmd_buffer, xcc_selected, xcc_number_ > 1);
+                GCMode gc_mode = (GCMode)(GC_MODE_AID_WITH_XCD_INDEX | xcc_selected);
+                ReadXccPackets(cmd_buffer, counters_vec, buf, read_counter, gc_mode);
+            }
         }
 
         builder.BuildCacheFlushPacket(
