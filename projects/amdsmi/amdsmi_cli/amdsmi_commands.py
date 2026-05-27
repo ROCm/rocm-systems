@@ -6503,9 +6503,7 @@ class AMDSMICommands:
                     gpu_idx = gpu_entry["gpu_index"]
                     parts = [f"GPU: {gpu_idx}"]
                     if isinstance(gpu_entry["mem"], dict):
-                        parts.append(
-                            f"MEM: {gpu_entry['mem']['value']} {gpu_entry['mem']['unit']}"
-                        )
+                        parts.append(f"MEM: {gpu_entry['mem']['value']} {gpu_entry['mem']['unit']}")
                     else:
                         parts.append(f"MEM: {gpu_entry['mem']}")
                     eng = gpu_entry.get("engine_usage", {})
