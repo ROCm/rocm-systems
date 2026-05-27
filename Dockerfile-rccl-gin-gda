@@ -130,6 +130,9 @@ ARG GPU_TARGETS=gfx950
 # individual subdirs are checked in shell before use.
 ARG USE_LOCAL_SRC=0
 
+# DEBUG_BUILD=1: build all components with debug symbols (-g, Debug).
+ARG DEBUG_BUILD=0
+
 ## building rocSHMEM
 ARG ROCSHMEM_BRANCH=users/abouteiller/gin-stage1-wip
 ARG ROCSHMEM_CACHE_BUST=1
@@ -156,7 +159,8 @@ RUN cd rocshmem/src/projects/rocshmem \
       -DUSE_EXTERNAL_MPI=OFF \
       -DGPU_TARGETS=${GPU_TARGETS} \
       -DCMAKE_INSTALL_PREFIX=${ROCSHMEM_INSTALL_DIR} \
-      -DUSE_IPC=ON -DUSE_SDMA=ON
+      -DUSE_IPC=ON -DUSE_SDMA=ON \
+      $([ "${DEBUG_BUILD}" = "1" ] && echo "-DCMAKE_BUILD_TYPE=Debug")
 
 ## building RCCL
 #ARG RCCL_BRANCH=users/prasanna-amd/nccl-sync-v2-28-9-gin-rebased-0501
@@ -187,12 +191,14 @@ RUN cd rccl/src/projects/rccl \
        's/if (comm->enableRocshmem && comm->nNodes > 1 && (comm->nRanks\/comm->nNodes == 8) && comm->rocshmemThreshold <= 1048576)/if (comm->enableRocshmem)/' \
        src/rccl_wrap.cc
 RUN cd rccl/src/projects/rccl \
- && ./install.sh --amdgpu_targets=${GPU_TARGETS} --prefix=${RCCL_INSTALL_PREFIX} --rocshmem --no-device-linker --no_clean
+ && ./install.sh --amdgpu_targets=${GPU_TARGETS} --prefix=${RCCL_INSTALL_PREFIX} --rocshmem --no-device-linker --no_clean \
+      $([ "${DEBUG_BUILD}" = "1" ] && echo "--debug")
 
 # Workaround: hipify renames core.h->core_tmp.h but gin headers still include ../core.h
-RUN ln -sf core_tmp.h ${WORKDIR}/rccl/src/projects/rccl/build/release/include/nccl_device/core.h \
- && ln -sf ../hipify/src/include/nccl_tuner.h ${WORKDIR}/rccl/src/projects/rccl/build/release/include/nccl_tuner.h \
- && cp -r ${WORKDIR}/rccl/src/projects/rccl/build/release/include/* ${RCCL_INSTALL_PREFIX}/include/
+RUN RCCL_BUILD_DIR=$([ "${DEBUG_BUILD}" = "1" ] && echo "debug" || echo "release") \
+ && ln -sf core_tmp.h ${WORKDIR}/rccl/src/projects/rccl/build/${RCCL_BUILD_DIR}/include/nccl_device/core.h \
+ && ln -sf ../hipify/src/include/nccl_tuner.h ${WORKDIR}/rccl/src/projects/rccl/build/${RCCL_BUILD_DIR}/include/nccl_tuner.h \
+ && cp -r ${WORKDIR}/rccl/src/projects/rccl/build/${RCCL_BUILD_DIR}/include/* ${RCCL_INSTALL_PREFIX}/include/
 
 ## building RCCL-Tests
 RUN if [ "${USE_LOCAL_SRC}" != "1" ]; then \
@@ -202,7 +208,7 @@ RUN if [ "${USE_LOCAL_SRC}" != "1" ]; then \
     fi
 RUN mkdir rccl-tests \
     && cd rccl-tests \
-    && cmake -DCMAKE_BUILD_TYPE=Release -DUSE_MPI=ON -DENABLE_DEVICE_API=ON -DCMAKE_PREFIX_PATH="${RCCL_INSTALL_PREFIX};${MPI_INSTALL_PREFIX}" -DGPU_TARGETS=${GPU_TARGETS} ${WORKDIR}/rccl/src/projects/rccl-tests \
+    && cmake $([ "${DEBUG_BUILD}" = "1" ] && echo "-DCMAKE_BUILD_TYPE=Debug" || echo "-DCMAKE_BUILD_TYPE=Release") -DUSE_MPI=ON -DENABLE_DEVICE_API=ON -DCMAKE_PREFIX_PATH="${RCCL_INSTALL_PREFIX};${MPI_INSTALL_PREFIX}" -DGPU_TARGETS=${GPU_TARGETS} ${WORKDIR}/rccl/src/projects/rccl-tests \
     && make -j16 -k || true # keep going allreduce fails to build but alltoall builds
 
 ## set environment variables
