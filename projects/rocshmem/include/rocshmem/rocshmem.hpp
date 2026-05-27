@@ -240,6 +240,24 @@ __host__ void rocshmem_free(void *ptr);
 __host__ int rocshmem_buffer_register(void *addr, size_t length);
 
 /**
+ * @brief Register user memory with known per-PE VMM/flat-space layout
+ *
+ * For memory mapped into a flat virtual address space (e.g., RCCL's LSA),
+ * each PE's buffer is at a known stride from the local address.
+ * No collective exchange is needed — remote addresses are computed locally.
+ *
+ * @param[in] addr    Local base address (this PE's view)
+ * @param[in] length  Buffer length
+ * @param[in] my_pe   This PE's index
+ * @param[in] n_pes   Total number of PEs
+ * @param[in] stride  Signed byte stride between consecutive PEs
+ * @return 0 on success, non-zero on error
+ */
+__host__ int rocshmem_buffer_register_vmm(void *addr, size_t length,
+                                          int my_pe, int n_pes,
+                                          ptrdiff_t stride);
+
+/**
  * @brief Deregisters previously registered user memory
  *
  * @param[in] addr Pointer to previously registered memory
