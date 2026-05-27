@@ -21,10 +21,12 @@ from utils.logger import (
 )
 from utils.roofline_calc import (
     AI_CACHE_LEVELS,
+    CACHE_LEVEL_COLORS,
     MATRIX_DATATYPES,
     PEAK_OPS_DATATYPES,
     SUPPORTED_DATATYPES,
     construct_roof,
+    get_color,
 )
 from utils.specs import MachineSpecs
 
@@ -345,12 +347,6 @@ class Roofline:
                 )
 
                 plot_points_data = []
-                cache_colors = {
-                    "ai_l1": "blue",
-                    "ai_l2": "green",
-                    "ai_hbm": "red",
-                    "ai_lds": "orange",
-                }
 
                 for cache_level in AI_CACHE_LEVELS:
                     if cache_level in self.__ai_data:
@@ -368,7 +364,7 @@ class Roofline:
 
                                 plot_points_data.append({
                                     "symbol": None,
-                                    "color": cache_colors.get(cache_level, "gray"),
+                                    "color": get_color(cache_level),
                                     "cache_level": cache_level.replace(
                                         "ai_", "", 1
                                     ).upper(),
@@ -466,12 +462,6 @@ class Roofline:
             kernel_names = self.__ai_data.get("kernelNames", [])
             symbols_list = [SYMBOLS[i % len(SYMBOLS)] for i in range(len(kernel_names))]
             show_in_legend = not self.__run_parameters["is_standalone"]
-            cache_plot_styles = {
-                "ai_l1": ("L1", "blue"),
-                "ai_l2": ("L2", "green"),
-                "ai_hbm": ("HBM", "red"),
-                "ai_lds": ("LDS", "orange"),
-            }
 
             for cache_level in AI_CACHE_LEVELS:
                 if (
@@ -480,7 +470,7 @@ class Roofline:
                 ):
                     continue
 
-                name, color = cache_plot_styles[cache_level]
+                name = cache_level.removeprefix("ai_").upper()
                 fig.add_trace(
                     go.Scatter(
                         x=self.__ai_data[cache_level][0],
@@ -488,11 +478,9 @@ class Roofline:
                         name=name,
                         mode="markers",
                         marker=dict(
-                            color=color,
+                            color=get_color(cache_level),
                             size=10,
-                            symbol=symbols_list[
-                                : len(self.__ai_data[cache_level][0])
-                            ],
+                            symbol=symbols_list[: len(self.__ai_data[cache_level][0])],
                         ),
                         showlegend=show_in_legend,
                     ),
@@ -585,6 +573,7 @@ class Roofline:
                         y=bw_line["y"],
                         name=legend_name,
                         mode="lines",
+                        line=dict(color=get_color(level.lower())),
                         hovertemplate=f"<b>{legend_name}</b><extra></extra>",
                     ),
                     **subplot_kwargs,
@@ -608,6 +597,7 @@ class Roofline:
                     y=valu_data[1],
                     name=legend_name,
                     mode="lines",
+                    line=dict(color=CACHE_LEVEL_COLORS["valu"]),
                     hovertemplate=f"<b>{legend_name}</b><extra></extra>",
                 ),
                 **subplot_kwargs,
@@ -623,6 +613,7 @@ class Roofline:
                     y=matrix_data[1],
                     name=legend_name,
                     mode="lines",
+                    line=dict(color=CACHE_LEVEL_COLORS["matrix_ops"]),
                     hovertemplate=f"<b>{legend_name}</b><extra></extra>",
                 ),
                 **subplot_kwargs,
