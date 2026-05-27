@@ -2386,11 +2386,17 @@ ncclResult_t applyKernelStackLimits(const char* archName, size_t maxLocalSizeByt
 #ifdef USE_INDIRECT_FUNCTION_CALL
   if (ncclParamSetStackSize() == 1 && !IsArchMatch(archName,"gfx942") && !IsArchMatch(archName,"gfx950")) {
     int64_t stackSize = rcclParamStackSizeOverride() ? rcclParamStackSizeOverride() : (int64_t)maxLocalSizeBytes;
+    if (stackSize < 0) {
+      // cudaDeviceSetLimit takes size_t -- a negative override would wrap to
+      // a huge value. Fall back to maxLocalSizeBytes and warn.
+      WARN("RCCL_STACK_SIZE_OVERRIDE=%zi is negative, falling back to maxLocalSizeBytes=%zu", (ssize_t)stackSize, maxLocalSizeBytes);
+      stackSize = (int64_t)maxLocalSizeBytes;
+    }
     if (stackSize == 0) {
       stackSize = IsArchMatch(archName,"gfx906") ? 1024 : 512;
     }
     INFO(NCCL_INIT, "Setting cudaLimitStackSize to %zi maxLocalSizeBytes %zu", (ssize_t)stackSize, maxLocalSizeBytes);
-    CUDACHECKIGNORE(cudaDeviceSetLimit(cudaLimitStackSize, stackSize));
+    CUDACHECKIGNORE(cudaDeviceSetLimit(cudaLimitStackSize, (size_t)stackSize));
     // This path already chose stackSize with RCCL_STACK_SIZE_OVERRIDE
     // taken into account (and falls back to maxLocalSizeBytes or an
     // arch-specific floor otherwise). The unconditional second
