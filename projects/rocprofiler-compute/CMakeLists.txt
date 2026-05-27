@@ -633,6 +633,17 @@ add_test(
         tests/test_tui_components.py ${WORKING_DIR_OPTION}
 )
 
+# roctx_recordfn pybind11 extension used by --torch-trace. Built only
+# when ENABLE_TESTS=ON, as a CI test fixture: the torch-trace tests
+# below pin the loader to this configure-time artifact via
+# ROCPROFCOMPUTE_ROCTX_RECORDFN_SO so pytest never shells out to cmake
+# or torch.utils.cpp_extension at test time. Production installs ship
+# the sources (rule below) and the runtime loader's cmake-tier builds
+# the .so on first --torch-trace use in the user's PyTorch env.
+# See src/lib/roctx_recordfn/CMakeLists.txt for the full contract.
+if(ENABLE_TESTS)
+    add_subdirectory(src/lib/roctx_recordfn)
+endif()
 # -----------------------------------
 # Torch trace tests
 # -----------------------------------
@@ -664,6 +675,10 @@ set_tests_properties(
 # is built (ENABLE_TESTS=ON + torch present); when it is not exported,
 # the test skips at the loader-resolution step.
 if(ROCTX_RECORDFN_SO_PATH)
+    message(
+        STATUS
+        "torch trace: pinning test_torch_trace_coverage to ${ROCTX_RECORDFN_SO_PATH}"
+    )
     set_property(
         TEST test_torch_trace_coverage
         APPEND
@@ -854,17 +869,6 @@ install(
     PATTERN "rooflines*" EXCLUDE
     PATTERN "__pycache__" EXCLUDE
 )
-# roctx_recordfn pybind11 extension used by --torch-trace. Built only
-# when ENABLE_TESTS=ON, as a CI test fixture: the torch-trace tests
-# below pin the loader to this configure-time artifact via
-# ROCPROFCOMPUTE_ROCTX_RECORDFN_SO so pytest never shells out to cmake
-# or torch.utils.cpp_extension at test time. Production installs ship
-# the sources (rule below) and the runtime loader's cmake-tier builds
-# the .so on first --torch-trace use in the user's PyTorch env.
-# See src/lib/roctx_recordfn/CMakeLists.txt for the full contract.
-if(ENABLE_TESTS)
-    add_subdirectory(src/lib/roctx_recordfn)
-endif()
 # Always install the roctx_recordfn sources next to the loader's
 # search path so the runtime cmake-tier (utils/inject_roctx_loader.py:
 # _try_cmake_build) can rebuild against the user's torch env, even
