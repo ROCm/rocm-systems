@@ -2,9 +2,9 @@
    :description: ROCm Systems Profiler documentation and reference
    :keywords: rocprof-sys, rocprofiler-systems, Omnitrace, ROCm, profiler, tracking, visualization, tool, Instinct, accelerator, AMD
 
-***********************************
-ROCm Systems Profiler documentation
-***********************************
+*******************************************
+ROCm Systems Profiler (rocprofiler-systems)
+*******************************************
 
 ROCm Systems Profiler is designed for the high-level profiling and comprehensive tracing
 of applications running on the CPU or the CPU and GPU. It supports dynamic binary
@@ -19,7 +19,8 @@ It is the successor to `<https://github.com/ROCm/omnitrace>`__.
 
   .. grid-item-card:: Install
 
-    * :doc:`ROCm Systems Profiler installation <./install/install>`
+    * :doc:`Install ROCm Systems Profiler <./install/install>`
+    * :doc:`Build from source <./install/build>`
 
 Use the following topics to learn more about the advantages of ROCm Systems Profiler in application
 profiling, how it supports performance analysis, and how to leverage its capabilities in practice:
@@ -40,7 +41,6 @@ profiling, how it supports performance analysis, and how to leverage its capabil
       * :doc:`Instrumenting and rewriting a binary application <./how-to/instrumenting-rewriting-binary-application>`
       * :doc:`Performing causal profiling <./how-to/performing-causal-profiling>`
       * :doc:`Profiling Python scripts <./how-to/profiling-python-scripts>`
-      * :doc:`Communication runtime profiling <./how-to/communication-runtime-profiling>`
       * :doc:`Network performance profiling <./how-to/nic-profiling>`
       * :doc:`Communication runtime profiling <./how-to/communication-runtime-profiling>`
       * :doc:`VCN and JPEG sampling and tracing <./how-to/vcn-jpeg-sampling>`
