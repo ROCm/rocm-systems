@@ -8,6 +8,8 @@
 #include <stdexcept>
 #include <timemory/components/base/declaration.hpp>
 
+#include "logger/debug.hpp"
+
 #include <cerrno>
 #include <cstddef>
 #include <mutex>
@@ -86,22 +88,9 @@ struct pthread_mutex_gotcha : tim::component::base<pthread_mutex_gotcha<Policy>,
 
     static void shutdown() { Policy::gotcha_t::disable(); }
 
-    static void pause()
-    {
-        // s_is_paused is the real pause mechanism: pthread_mutex_gotcha_t carries the
-        // fast_gotcha trait, so the framework installs fast_func (not wrap) as the PLT
-        // wrapper. fast_func never reads _data.ready, making set_ready() a no-op here.
-        // s_is_paused is checked first in is_disabled(), suppressing audit calls inside
-        // operator() without affecting the underlying pthread function calls.
-        s_is_paused.store(true, std::memory_order_relaxed);
-        Policy::gotcha_t::set_ready(false);
-    }
+    static void pause() { s_is_paused.store(true, std::memory_order_relaxed); }
 
-    static void resume()
-    {
-        s_is_paused.store(false, std::memory_order_relaxed);
-        Policy::gotcha_t::set_ready(true);
-    }
+    static void resume() { s_is_paused.store(false, std::memory_order_relaxed); }
 
     int operator()(int (*_callee)(pthread_mutex_t*), pthread_mutex_t* _mutex) const
     {
@@ -157,33 +146,34 @@ private:
     }
 
     template <typename... Args>
-    auto operator()(uintptr_t /*addr*/, int (*_callee)(Args...), Args... _args) const
+    auto operator()(uintptr_t /*addr*/, int (*callee)(Args...), Args... args) const
     {
         if(is_disabled() || m_protect)
         {
-            if(!_callee)
+            if(!callee)
             {
+                LOG_WARNING("Callee not available.");
                 return EINVAL;
             }
-            return (*_callee)(_args...);
+            return (*callee)(args...);
         }
 
         struct local_dtor
         {
             explicit local_dtor(bool& _v)
-            : _protect{ _v }
+            : m_protect{ _v }
             {}
-            ~local_dtor() { _protect = false; }
-            bool& _protect;
-        } _dtor{ m_protect = true };
+            ~local_dtor() { m_protect = false; }
+            bool& m_protect;
+        } dtor{ m_protect = true };
 
         if(m_data == nullptr)
         {
             throw std::runtime_error("pthread_mutex_gotcha gotcha_data is null.");
         }
 
-        Policy::audit_incoming(std::string_view{ m_data->tool_id }, _args...);
-        auto result = (*_callee)(_args...);
+        Policy::audit_incoming(std::string_view{ m_data->tool_id }, args...);
+        auto result = (*callee)(args...);
         Policy::audit_outgoing(std::string_view{ m_data->tool_id }, result);
 
         return result;
@@ -195,6 +185,6 @@ private:
 };
 
 template <typename Policy>
-std::atomic<bool> pthread_mutex_gotcha<Policy>::s_is_paused = false;
+inline std::atomic<bool> pthread_mutex_gotcha<Policy>::s_is_paused = false;
 
 }  // namespace rocprofsys::component

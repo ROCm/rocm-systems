@@ -13,6 +13,7 @@ target_link_libraries(
     lib-components-tests
     PUBLIC
         rocprofiler-systems-headers # defines.hpp
+        rocprofiler-systems-logger
         rocprofiler-systems-googletest-library
         rocprofiler-systems-timemory
         rocprofiler-systems-core-library
