@@ -11929,10 +11929,10 @@ inline void execute_v_max3_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
     if (!(exec & (1ULL << lane)))
       continue;
     inst.vdst.write_lane(wf, lane,
-                         static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(std::fmax(
-                             std::fmax(static_cast<int16_t>(inst.src0.read_lane(wf, lane)),
-                                       static_cast<int16_t>(inst.src1.read_lane(wf, lane))),
-                             static_cast<int16_t>(inst.src2.read_lane(wf, lane)))))));
+                         static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
+                             std::max(std::max(static_cast<int16_t>(inst.src0.read_lane(wf, lane)),
+                                               static_cast<int16_t>(inst.src1.read_lane(wf, lane))),
+                                      static_cast<int16_t>(inst.src2.read_lane(wf, lane)))))));
   }
 }
 
@@ -11943,9 +11943,9 @@ inline void execute_v_max3_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
     if (!(exec & (1ULL << lane)))
       continue;
     inst.vdst.write_lane(wf, lane,
-                         std::fmax(std::fmax(static_cast<int32_t>(inst.src0.read_lane(wf, lane)),
-                                             static_cast<int32_t>(inst.src1.read_lane(wf, lane))),
-                                   static_cast<int32_t>(inst.src2.read_lane(wf, lane))));
+                         std::max(std::max(static_cast<int32_t>(inst.src0.read_lane(wf, lane)),
+                                           static_cast<int32_t>(inst.src1.read_lane(wf, lane))),
+                                  static_cast<int32_t>(inst.src2.read_lane(wf, lane))));
   }
 }
 
@@ -11956,9 +11956,9 @@ inline void execute_v_max3_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
     if (!(exec & (1ULL << lane)))
       continue;
     inst.vdst.write_lane(wf, lane,
-                         static_cast<uint32_t>(static_cast<uint16_t>(std::fmax(
-                             std::fmax(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)),
-                                       static_cast<uint16_t>(inst.src1.read_lane(wf, lane))),
+                         static_cast<uint32_t>(static_cast<uint16_t>(std::max(
+                             std::max(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)),
+                                      static_cast<uint16_t>(inst.src1.read_lane(wf, lane))),
                              static_cast<uint16_t>(inst.src2.read_lane(wf, lane))))));
   }
 }
@@ -11971,8 +11971,8 @@ inline void execute_v_max3_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
       continue;
     inst.vdst.write_lane(
         wf, lane,
-        std::fmax(std::fmax(inst.src0.read_lane(wf, lane), inst.src1.read_lane(wf, lane)),
-                  inst.src2.read_lane(wf, lane)));
+        std::max(std::max(inst.src0.read_lane(wf, lane), inst.src1.read_lane(wf, lane)),
+                 inst.src2.read_lane(wf, lane)));
   }
 }
 
@@ -12495,7 +12495,7 @@ inline void execute_v_med3_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
                            auto a = static_cast<int16_t>(inst.src0.read_lane(wf, lane));
                            auto b = static_cast<int16_t>(inst.src1.read_lane(wf, lane));
                            auto c = static_cast<int16_t>(inst.src2.read_lane(wf, lane));
-                           return std::fmax(std::fmin(std::fmax(a, b), c), std::fmin(a, b));
+                           return std::max(std::min(std::max(a, b), c), std::min(a, b));
                          }()))));
   }
 }
@@ -12510,7 +12510,7 @@ inline void execute_v_med3_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
       auto a = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
       auto b = static_cast<int32_t>(inst.src1.read_lane(wf, lane));
       auto c = static_cast<int32_t>(inst.src2.read_lane(wf, lane));
-      return std::fmax(std::fmin(std::fmax(a, b), c), std::fmin(a, b));
+      return std::max(std::min(std::max(a, b), c), std::min(a, b));
     }());
   }
 }
@@ -12525,7 +12525,7 @@ inline void execute_v_med3_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
                            auto a = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
                            auto b = static_cast<uint16_t>(inst.src1.read_lane(wf, lane));
                            auto c = static_cast<uint16_t>(inst.src2.read_lane(wf, lane));
-                           return std::fmax(std::fmin(std::fmax(a, b), c), std::fmin(a, b));
+                           return std::max(std::min(std::max(a, b), c), std::min(a, b));
                          }())));
   }
 }
@@ -12540,7 +12540,7 @@ inline void execute_v_med3_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
       auto a = inst.src0.read_lane(wf, lane);
       auto b = inst.src1.read_lane(wf, lane);
       auto c = inst.src2.read_lane(wf, lane);
-      return std::fmax(std::fmin(std::fmax(a, b), c), std::fmin(a, b));
+      return std::max(std::min(std::max(a, b), c), std::min(a, b));
     }());
   }
 }
@@ -12654,10 +12654,10 @@ inline void execute_v_min3_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
     if (!(exec & (1ULL << lane)))
       continue;
     inst.vdst.write_lane(wf, lane,
-                         static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(std::fmin(
-                             std::fmin(static_cast<int16_t>(inst.src0.read_lane(wf, lane)),
-                                       static_cast<int16_t>(inst.src1.read_lane(wf, lane))),
-                             static_cast<int16_t>(inst.src2.read_lane(wf, lane)))))));
+                         static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
+                             std::min(std::min(static_cast<int16_t>(inst.src0.read_lane(wf, lane)),
+                                               static_cast<int16_t>(inst.src1.read_lane(wf, lane))),
+                                      static_cast<int16_t>(inst.src2.read_lane(wf, lane)))))));
   }
 }
 
@@ -12668,9 +12668,9 @@ inline void execute_v_min3_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
     if (!(exec & (1ULL << lane)))
       continue;
     inst.vdst.write_lane(wf, lane,
-                         std::fmin(std::fmin(static_cast<int32_t>(inst.src0.read_lane(wf, lane)),
-                                             static_cast<int32_t>(inst.src1.read_lane(wf, lane))),
-                                   static_cast<int32_t>(inst.src2.read_lane(wf, lane))));
+                         std::min(std::min(static_cast<int32_t>(inst.src0.read_lane(wf, lane)),
+                                           static_cast<int32_t>(inst.src1.read_lane(wf, lane))),
+                                  static_cast<int32_t>(inst.src2.read_lane(wf, lane))));
   }
 }
 
@@ -12681,9 +12681,9 @@ inline void execute_v_min3_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
     if (!(exec & (1ULL << lane)))
       continue;
     inst.vdst.write_lane(wf, lane,
-                         static_cast<uint32_t>(static_cast<uint16_t>(std::fmin(
-                             std::fmin(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)),
-                                       static_cast<uint16_t>(inst.src1.read_lane(wf, lane))),
+                         static_cast<uint32_t>(static_cast<uint16_t>(std::min(
+                             std::min(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)),
+                                      static_cast<uint16_t>(inst.src1.read_lane(wf, lane))),
                              static_cast<uint16_t>(inst.src2.read_lane(wf, lane))))));
   }
 }
@@ -12696,8 +12696,8 @@ inline void execute_v_min3_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
       continue;
     inst.vdst.write_lane(
         wf, lane,
-        std::fmin(std::fmin(inst.src0.read_lane(wf, lane), inst.src1.read_lane(wf, lane)),
-                  inst.src2.read_lane(wf, lane)));
+        std::min(std::min(inst.src0.read_lane(wf, lane), inst.src1.read_lane(wf, lane)),
+                 inst.src2.read_lane(wf, lane)));
   }
 }
 

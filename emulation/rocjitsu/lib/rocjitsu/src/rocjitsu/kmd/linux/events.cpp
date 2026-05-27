@@ -19,6 +19,17 @@
 
 namespace rocjitsu {
 
+namespace {
+
+void write_event_slot(void *page, size_t page_size, uint32_t event_id, uint64_t value) {
+  if (!page || event_id >= page_size / sizeof(uint64_t))
+    return;
+  auto *slots = static_cast<uint64_t *>(page);
+  std::atomic_ref<uint64_t>(slots[event_id]).store(value, std::memory_order_release);
+}
+
+} // namespace
+
 EventState::~EventState() {
   if (memfd >= 0)
     ::close(memfd);
@@ -39,6 +50,7 @@ void EventState::signal_interrupt(uint32_t event_id) {
   auto it = events_.find(event_id);
   if (it != events_.end() && it->second.event_type == 0) {
     it->second.event_age = 1;
+    write_event_slot(page, page_size, event_id, 1);
     for (auto *cv : it->second.waiters)
       cv->notify_one();
   }
@@ -105,11 +117,7 @@ int EventState::destroy_event(void *arg) {
       events_.erase(it);
     }
   }
-  if (page && args->event_id < page_size / sizeof(uint64_t)) {
-    auto *slots = static_cast<uint64_t *>(page);
-    std::atomic_ref<uint64_t>(slots[args->event_id])
-        .store(KFD_SIGNAL_EVENT_LIMIT, std::memory_order_release);
-  }
+  write_event_slot(page, page_size, args->event_id, KFD_SIGNAL_EVENT_LIMIT);
   return 0;
 }
 
@@ -122,10 +130,7 @@ int EventState::set_event(void *arg) {
   if (it == events_.end())
     return -EINVAL;
   it->second.event_age = 1;
-  if (page && args->event_id < page_size / sizeof(uint64_t)) {
-    auto *slots = static_cast<uint64_t *>(page);
-    std::atomic_ref<uint64_t>(slots[args->event_id]).store(1, std::memory_order_release);
-  }
+  write_event_slot(page, page_size, args->event_id, 1);
   for (auto *cv : it->second.waiters)
     cv->notify_one();
   return 0;
@@ -140,14 +145,24 @@ int EventState::reset_event(void *arg) {
   if (it == events_.end())
     return -EINVAL;
   it->second.event_age = 0;
+  write_event_slot(page, page_size, args->event_id, KFD_SIGNAL_EVENT_LIMIT);
   return 0;
 }
 
-/// @brief Block until any waited signal event is satisfied, or timeout/close.
+/// @brief Block until waited events satisfy the predicate, or timeout/close.
 int EventState::wait_events(void *arg) {
   assert(arg && "wait_events called with null arg");
   auto *args = static_cast<kfd_ioctl_wait_events_args *>(arg);
   auto *ev_data = reinterpret_cast<kfd_event_data *>(args->events_ptr);
+  const bool wait_all = args->wait_for_all != 0;
+
+  auto satisfied = [](const GpuEvent &ev, const kfd_event_data &ed) -> bool {
+    if (ev.event_type == 0) {
+      uint64_t caller_age = ed.signal_event_data.last_event_age;
+      return (caller_age != 0) ? (ev.event_age >= caller_age) : (ev.event_age > 0);
+    }
+    return ev.event_age > 0;
+  };
 
   std::condition_variable my_cv;
   std::unique_lock<std::mutex> lock(mutex_);
@@ -169,19 +184,18 @@ int EventState::wait_events(void *arg) {
   auto is_ready = [&]() -> bool {
     if (closing_)
       return true;
+    bool all_satisfied = true;
+    bool any_satisfied = false;
     for (uint32_t i = 0; i < args->num_events; ++i) {
       auto it = events_.find(ev_data[i].event_id);
       if (it == events_.end())
         return true;
-      if (it->second.event_type != 0)
-        continue;
-      uint64_t caller_age = ev_data[i].signal_event_data.last_event_age;
-      if (caller_age != 0 && it->second.event_age >= caller_age)
-        return true;
-      if (caller_age == 0 && it->second.event_age > 0)
-        return true;
+      if (satisfied(it->second, ev_data[i]))
+        any_satisfied = true;
+      else
+        all_satisfied = false;
     }
-    return false;
+    return wait_all ? all_satisfied : any_satisfied;
   };
 
   if (args->timeout == 0) {
@@ -199,28 +213,31 @@ int EventState::wait_events(void *arg) {
 
   bool any_ready = false;
   bool any_destroyed = false;
+  bool all_ready = true;
   for (uint32_t i = 0; i < args->num_events; ++i) {
     auto it = events_.find(ev_data[i].event_id);
     if (it == events_.end()) {
       any_destroyed = true;
+      all_ready = false;
       continue;
     }
-    if (it->second.event_type != 0)
-      continue;
-    uint64_t caller_age = ev_data[i].signal_event_data.last_event_age;
-    uint64_t current_age = it->second.event_age;
-    bool satisfied = (caller_age != 0) ? (current_age >= caller_age) : (current_age > 0);
-    if (satisfied) {
+    if (satisfied(it->second, ev_data[i])) {
       any_ready = true;
-      ev_data[i].signal_event_data.last_event_age = current_age;
-      if (it->second.auto_reset)
+      if (it->second.event_type == 0)
+        ev_data[i].signal_event_data.last_event_age = it->second.event_age;
+      if (it->second.auto_reset) {
         it->second.event_age = 0;
+        if (it->second.event_type == 0)
+          write_event_slot(page, page_size, it->second.event_id, KFD_SIGNAL_EVENT_LIMIT);
+      }
+    } else {
+      all_ready = false;
     }
   }
 
   if (any_destroyed)
     args->wait_result = KFD_IOC_WAIT_RESULT_FAIL;
-  else if (any_ready)
+  else if (wait_all ? all_ready : any_ready)
     args->wait_result = KFD_IOC_WAIT_RESULT_COMPLETE;
   else
     args->wait_result = KFD_IOC_WAIT_RESULT_TIMEOUT;

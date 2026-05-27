@@ -64,9 +64,9 @@ public:
 
   /// @brief Handle KFD WAIT_EVENTS ioctl.
   /// @param arg Pointer to kfd_ioctl_wait_events_args.
-  /// @details Blocks the caller until any waited-on signal event has
-  ///          event_age >= last_event_age, or until timeout/closing. Creates
-  ///          a thread-local CV and registers it with each waited event.
+  /// @details Blocks the caller until waited-on signal events satisfy the
+  ///          age predicate, respecting wait_for_all (AND vs OR semantics).
+  ///          Creates a thread-local CV and registers it with each waited event.
   /// @returns 0 on success, -EBADF if the driver is closing.
   int wait_events(void *arg);
 

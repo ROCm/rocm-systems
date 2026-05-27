@@ -1022,8 +1022,6 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' for (int i = 0; i < 8; ++i)'
     ' if (s & (0xFu << (i * 4))) r |= (1u << i);'
     ' return r; }}()',
-    'bitset0': '({0} & ~(1u << ({0} & 31u)))',
-    'bitset1': '({0} | (1u << ({0} & 31u)))',
     'v_readfirstlane': '{0}',
     'ffbh_i32': '[&]() {{ auto s = static_cast<int32_t>({0});'
     ' uint32_t a = s < 0 ? ~static_cast<uint32_t>(s) : static_cast<uint32_t>(s);'
@@ -1122,8 +1120,6 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     ' return static_cast<uint32_t>(v >> ({1} & 31u)); }}()',
     'util::arithmetic_shr_i16': '[&]() {{ auto v = static_cast<int16_t>({0});'
     ' return static_cast<uint32_t>(static_cast<uint16_t>(v >> ({1} & 15u))); }}()',
-    'bitset0': '({0} & ~(1u << ({0} & 31u)))',
-    'bitset1': '({0} | (1u << ({0} & 31u)))',
     'bfm': '(((1u << ({0} & 31u)) - 1u) << ({1} & 31u))',
     'bfm64': '[&]() {{ uint64_t cnt = {0} & 63u; uint64_t off = {1} & 63u;'
     ' return cnt == 0 ? 0ULL : ((1ULL << cnt) - 1ULL) << off; }}()',
@@ -1260,10 +1256,14 @@ _INLINE_BINARY_OPS: dict[str, str] = {
 }
 
 _INLINE_TERNARY_OPS: dict[str, str] = {
-    'min3': 'std::fmin(std::fmin({0}, {1}), {2})',
-    'max3': 'std::fmax(std::fmax({0}, {1}), {2})',
-    'med3': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
+    'min3_f': 'std::fmin(std::fmin({0}, {1}), {2})',
+    'max3_f': 'std::fmax(std::fmax({0}, {1}), {2})',
+    'med3_f': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
     ' return std::fmax(std::fmin(std::fmax(a, b), c), std::fmin(a, b)); }}()',
+    'min3_i': 'std::min(std::min({0}, {1}), {2})',
+    'max3_i': 'std::max(std::max({0}, {1}), {2})',
+    'med3_i': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
+    ' return std::max(std::min(std::max(a, b), c), std::min(a, b)); }}()',
     'lerp_u8': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
     ' uint32_t r = 0;'
     ' for (int i = 0; i < 4; ++i) {{'
@@ -1382,9 +1382,6 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     ' auto b = static_cast<int32_t>({1} << 8) >> 8;'
     ' return static_cast<uint32_t>(a * b + static_cast<int32_t>({2})); }}()',
     'bfe_u': '[&]() {{ uint32_t src={0}; uint32_t off={1} & 31u; uint32_t w={2} & 31u;'
-    ' auto b = static_cast<int32_t>({1} << 8) >> 8;'
-    ' return static_cast<uint32_t>(a * b + static_cast<int32_t>({2})); }}()',
-    'bfe_u': '[&]() {{ uint32_t src={0}; uint32_t off={1} & 31u; uint32_t w={2} & 31u;'
     ' if (w == 0) return 0u;'
     ' uint32_t mask = (w >= 32) ? ~0u : ((1u << w) - 1u);'
     ' return (src >> off) & mask; }}()',
@@ -1432,6 +1429,9 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
         return _INLINE_UNARY_OPS[callee].format(args[0])
     if len(args) == 2 and callee in _INLINE_BINARY_OPS:
         return _INLINE_BINARY_OPS[callee].format(args[0], args[1])
+    if callee in ('min3', 'max3', 'med3'):
+        suffix = '_f' if node.ty and node.ty.base == 'F' else '_i'
+        return _INLINE_TERNARY_OPS[callee + suffix].format(args[0], args[1], args[2])
     if len(args) == 3 and callee in _INLINE_TERNARY_OPS:
         return _INLINE_TERNARY_OPS[callee].format(args[0], args[1], args[2])
 

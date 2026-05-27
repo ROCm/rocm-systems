@@ -4363,9 +4363,9 @@ void VMin3I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     vdst.write_lane(wf, lane,
-                    std::fmin(std::fmin(static_cast<int32_t>(src0.read_lane(wf, lane)),
-                                        static_cast<int32_t>(src1.read_lane(wf, lane))),
-                              static_cast<int32_t>(src2.read_lane(wf, lane))));
+                    std::min(std::min(static_cast<int32_t>(src0.read_lane(wf, lane)),
+                                      static_cast<int32_t>(src1.read_lane(wf, lane))),
+                             static_cast<int32_t>(src2.read_lane(wf, lane))));
   }
 }
 
@@ -4389,8 +4389,8 @@ void VMin3U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     vdst.write_lane(wf, lane,
-                    std::fmin(std::fmin(src0.read_lane(wf, lane), src1.read_lane(wf, lane)),
-                              src2.read_lane(wf, lane)));
+                    std::min(std::min(src0.read_lane(wf, lane), src1.read_lane(wf, lane)),
+                             src2.read_lane(wf, lane)));
   }
 }
 
@@ -4414,9 +4414,9 @@ void VMax3I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     vdst.write_lane(wf, lane,
-                    std::fmax(std::fmax(static_cast<int32_t>(src0.read_lane(wf, lane)),
-                                        static_cast<int32_t>(src1.read_lane(wf, lane))),
-                              static_cast<int32_t>(src2.read_lane(wf, lane))));
+                    std::max(std::max(static_cast<int32_t>(src0.read_lane(wf, lane)),
+                                      static_cast<int32_t>(src1.read_lane(wf, lane))),
+                             static_cast<int32_t>(src2.read_lane(wf, lane))));
   }
 }
 
@@ -4440,8 +4440,8 @@ void VMax3U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     vdst.write_lane(wf, lane,
-                    std::fmax(std::fmax(src0.read_lane(wf, lane), src1.read_lane(wf, lane)),
-                              src2.read_lane(wf, lane)));
+                    std::max(std::max(src0.read_lane(wf, lane), src1.read_lane(wf, lane)),
+                             src2.read_lane(wf, lane)));
   }
 }
 
@@ -4468,7 +4468,7 @@ void VMed3I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       auto a = static_cast<int32_t>(src0.read_lane(wf, lane));
       auto b = static_cast<int32_t>(src1.read_lane(wf, lane));
       auto c = static_cast<int32_t>(src2.read_lane(wf, lane));
-      return std::fmax(std::fmin(std::fmax(a, b), c), std::fmin(a, b));
+      return std::max(std::min(std::max(a, b), c), std::min(a, b));
     }());
   }
 }
@@ -4496,7 +4496,7 @@ void VMed3U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       auto a = src0.read_lane(wf, lane);
       auto b = src1.read_lane(wf, lane);
       auto c = src2.read_lane(wf, lane);
-      return std::fmax(std::fmin(std::fmax(a, b), c), std::fmin(a, b));
+      return std::max(std::min(std::max(a, b), c), std::min(a, b));
     }());
   }
 }
@@ -5872,9 +5872,9 @@ void VMin3I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     vdst.write_lane(wf, lane,
                     static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
-                        std::fmin(std::fmin(static_cast<int16_t>(src0.read_lane(wf, lane)),
-                                            static_cast<int16_t>(src1.read_lane(wf, lane))),
-                                  static_cast<int16_t>(src2.read_lane(wf, lane)))))));
+                        std::min(std::min(static_cast<int16_t>(src0.read_lane(wf, lane)),
+                                          static_cast<int16_t>(src1.read_lane(wf, lane))),
+                                 static_cast<int16_t>(src2.read_lane(wf, lane)))))));
   }
 }
 
@@ -5899,9 +5899,9 @@ void VMin3U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     vdst.write_lane(wf, lane,
                     static_cast<uint32_t>(static_cast<uint16_t>(
-                        std::fmin(std::fmin(static_cast<uint16_t>(src0.read_lane(wf, lane)),
-                                            static_cast<uint16_t>(src1.read_lane(wf, lane))),
-                                  static_cast<uint16_t>(src2.read_lane(wf, lane))))));
+                        std::min(std::min(static_cast<uint16_t>(src0.read_lane(wf, lane)),
+                                          static_cast<uint16_t>(src1.read_lane(wf, lane))),
+                                 static_cast<uint16_t>(src2.read_lane(wf, lane))))));
   }
 }
 
@@ -5926,9 +5926,9 @@ void VMax3I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     vdst.write_lane(wf, lane,
                     static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
-                        std::fmax(std::fmax(static_cast<int16_t>(src0.read_lane(wf, lane)),
-                                            static_cast<int16_t>(src1.read_lane(wf, lane))),
-                                  static_cast<int16_t>(src2.read_lane(wf, lane)))))));
+                        std::max(std::max(static_cast<int16_t>(src0.read_lane(wf, lane)),
+                                          static_cast<int16_t>(src1.read_lane(wf, lane))),
+                                 static_cast<int16_t>(src2.read_lane(wf, lane)))))));
   }
 }
 
@@ -5953,9 +5953,9 @@ void VMax3U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     vdst.write_lane(wf, lane,
                     static_cast<uint32_t>(static_cast<uint16_t>(
-                        std::fmax(std::fmax(static_cast<uint16_t>(src0.read_lane(wf, lane)),
-                                            static_cast<uint16_t>(src1.read_lane(wf, lane))),
-                                  static_cast<uint16_t>(src2.read_lane(wf, lane))))));
+                        std::max(std::max(static_cast<uint16_t>(src0.read_lane(wf, lane)),
+                                          static_cast<uint16_t>(src1.read_lane(wf, lane))),
+                                 static_cast<uint16_t>(src2.read_lane(wf, lane))))));
   }
 }
 
@@ -5983,7 +5983,7 @@ void VMed3I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                       auto a = static_cast<int16_t>(src0.read_lane(wf, lane));
                       auto b = static_cast<int16_t>(src1.read_lane(wf, lane));
                       auto c = static_cast<int16_t>(src2.read_lane(wf, lane));
-                      return std::fmax(std::fmin(std::fmax(a, b), c), std::fmin(a, b));
+                      return std::max(std::min(std::max(a, b), c), std::min(a, b));
                     }()))));
   }
 }
@@ -6011,7 +6011,7 @@ void VMed3U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                       auto a = static_cast<uint16_t>(src0.read_lane(wf, lane));
                       auto b = static_cast<uint16_t>(src1.read_lane(wf, lane));
                       auto c = static_cast<uint16_t>(src2.read_lane(wf, lane));
-                      return std::fmax(std::fmin(std::fmax(a, b), c), std::fmin(a, b));
+                      return std::max(std::min(std::max(a, b), c), std::min(a, b));
                     }())));
   }
 }
