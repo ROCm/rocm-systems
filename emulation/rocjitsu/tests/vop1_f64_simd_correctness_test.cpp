@@ -166,9 +166,8 @@ void check_case(const F64UnaryCase &c, uint64_t exec) {
     // diverge between packed and scalar — accepted).
     if (c.is_float && (is_f64_nan(scalar[lane]) || is_f64_nan(simd[lane])))
       continue;
-    EXPECT_EQ(scalar[lane], simd[lane])
-        << c.name << " dst divergence at lane " << lane << std::hex << " scalar=0x" << scalar[lane]
-        << " simd=0x" << simd[lane];
+    EXPECT_EQ(scalar[lane], simd[lane]) << c.name << " dst divergence at lane " << lane << std::hex
+                                        << " scalar=0x" << scalar[lane] << " simd=0x" << simd[lane];
   }
   delete inst;
 }

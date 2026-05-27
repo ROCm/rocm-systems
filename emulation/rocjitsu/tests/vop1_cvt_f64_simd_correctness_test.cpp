@@ -60,26 +60,38 @@ const std::array<double, 20> kF64In = {{
     2.5,
     -2.5,
     0.5,
-    3.0e9,                                       // > 2^31, < 2^32
-    5.0e9,                                       // > 2^32
-    -5.0e9,                                      // < -2^31
-    1.0e300,                                     // overflow both
-    std::numeric_limits<double>::quiet_NaN(),    //
-    std::numeric_limits<double>::infinity(),     //
-    -std::numeric_limits<double>::infinity(),    //
-    std::numeric_limits<double>::denorm_min(),   //
-    2147483647.0,                                // exactly INT32_MAX
-    2147483648.0,                                // exactly 2^31
-    4294967295.0,                                // exactly UINT32_MAX
-    3.141592653589793,                           //
-    -2.718281828459045,                          //
+    3.0e9,                                     // > 2^31, < 2^32
+    5.0e9,                                     // > 2^32
+    -5.0e9,                                    // < -2^31
+    1.0e300,                                   // overflow both
+    std::numeric_limits<double>::quiet_NaN(),  //
+    std::numeric_limits<double>::infinity(),   //
+    -std::numeric_limits<double>::infinity(),  //
+    std::numeric_limits<double>::denorm_min(), //
+    2147483647.0,                              // exactly INT32_MAX
+    2147483648.0,                              // exactly 2^31
+    4294967295.0,                              // exactly UINT32_MAX
+    3.141592653589793,                         //
+    -2.718281828459045,                        //
 }};
 
 // 32-bit-source inputs, reinterpreted per op as f32 / i32 / u32 bits. Covers ±0,
 // ±1, ±Inf, NaN, denorm, pi, max (as f32) and signed/extreme boundaries (as int).
 const std::array<uint32_t, 14> kB32In = {{
-    0x00000000u, 0x80000000u, 0x3F800000u, 0xBF800000u, 0x7F800000u, 0xFF800000u, 0x7FC00000u,
-    0x00000001u, 0x40490FDBu, 0x7F7FFFFFu, 0xFFFFFFFFu, 0x7FFFFFFFu, 0x12345678u, 0xAAAA5555u,
+    0x00000000u,
+    0x80000000u,
+    0x3F800000u,
+    0xBF800000u,
+    0x7F800000u,
+    0xFF800000u,
+    0x7FC00000u,
+    0x00000001u,
+    0x40490FDBu,
+    0x7F7FFFFFu,
+    0xFFFFFFFFu,
+    0x7FFFFFFFu,
+    0x12345678u,
+    0xAAAA5555u,
 }};
 
 bool is_f32_nan(uint32_t bits) { return std::isnan(std::bit_cast<float>(bits)); }

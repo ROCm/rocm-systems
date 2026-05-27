@@ -2987,6 +2987,7 @@ class CodeGenerator:
                         from amdisa.codegen.execute.simd_codegen import (
                             simd_probe_arch_portable as _simd_probe_arch_portable,
                         )
+
                         _enc_key_for_probe = enc.enc_name.lower().replace('enc_', '')
                         _portable_probe = _simd_probe_arch_portable(
                             f'{inst.mnemonic}_{_enc_key_for_probe}'

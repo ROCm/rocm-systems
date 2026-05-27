@@ -347,8 +347,8 @@ TEST(UtilSimd, FmaF64_VectorMatchesScalar_BitExact) {
     alignas(V) double out[W];
     util::stdx::fma(va, vb, vc).copy_to(out, util::stdx::element_aligned);
     for (std::size_t i = 0; i < W; ++i) {
-      if (is_nan_bits(std::bit_cast<uint64_t>(a[i])) || is_nan_bits(std::bit_cast<uint64_t>(b[i])) ||
-          is_nan_bits(std::bit_cast<uint64_t>(c[i])))
+      if (is_nan_bits(std::bit_cast<uint64_t>(a[i])) ||
+          is_nan_bits(std::bit_cast<uint64_t>(b[i])) || is_nan_bits(std::bit_cast<uint64_t>(c[i])))
         continue; // NaN-input payload divergence is accepted
       const double s = std::fma(a[i], b[i], c[i]);
       ASSERT_EQ(std::bit_cast<uint64_t>(s), std::bit_cast<uint64_t>(out[i]))

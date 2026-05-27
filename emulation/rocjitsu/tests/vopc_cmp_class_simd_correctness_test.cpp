@@ -114,8 +114,22 @@ const std::array<uint64_t, 14> kF64 = {{
 
 // Class masks: each single class bit, all bits, none, and a few mixes.
 const std::array<uint32_t, 16> kMasks = {{
-    0x001u, 0x002u, 0x004u, 0x008u, 0x010u, 0x020u, 0x040u, 0x080u, 0x100u, 0x200u, 0x3FFu, 0x000u,
-    0x155u, 0x2AAu, 0x0C0u, 0x006u,
+    0x001u,
+    0x002u,
+    0x004u,
+    0x008u,
+    0x010u,
+    0x020u,
+    0x040u,
+    0x080u,
+    0x100u,
+    0x200u,
+    0x3FFu,
+    0x000u,
+    0x155u,
+    0x2AAu,
+    0x0C0u,
+    0x006u,
 }};
 
 enum class Kind { F16, F32, F64 };
@@ -242,10 +256,9 @@ void check_all_vop3(uint64_t exec) {
           for (uint64_t vcc_in : kVcc) {
             uint64_t scalar = fx.run(inst, /*force_scalar=*/true, c.kind, rot, exec, vcc_in);
             uint64_t simd = fx.run(inst, /*force_scalar=*/false, c.kind, rot, exec, vcc_in);
-            EXPECT_EQ(scalar, simd)
-                << c.name << " abs=" << abs << " neg=" << neg << " rot=" << rot << " vcc_in=0x"
-                << std::hex << vcc_in << ": VCC divergence scalar=0x" << scalar << " simd=0x"
-                << simd;
+            EXPECT_EQ(scalar, simd) << c.name << " abs=" << abs << " neg=" << neg << " rot=" << rot
+                                    << " vcc_in=0x" << std::hex << vcc_in
+                                    << ": VCC divergence scalar=0x" << scalar << " simd=0x" << simd;
             const uint64_t inactive = ~exec;
             EXPECT_EQ(simd & inactive, vcc_in & inactive)
                 << c.name << " abs=" << abs << " neg=" << neg << ": SIMD altered inactive VCC bit";
