@@ -676,7 +676,27 @@ HIP_TEST_CASE(Unit_hipMemPoolGetAccess_GetDefMempoolOfEachDevice) {
 HIP_TEST_CASE(Unit_hipMemPoolSetAccess_ValidationMatrix) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
+  }
+
+  const auto device_supports_mempool = [](int device) {
+    int mempool_supported = 0;
+    HIP_CHECK(hipDeviceGetAttribute(&mempool_supported, hipDeviceAttributeMemoryPoolsSupported,
+                                    device));
+    return mempool_supported != 0;
+  };
+  const auto can_access_peer = [](int src, int dst) {
+    int can_access = 0;
+    HIP_CHECK(hipDeviceCanAccessPeer(&can_access, src, dst));
+    return can_access != 0;
+  };
+
+  // Check all devices support mempool and can access each others memory
+  if (!device_supports_mempool(0) || !device_supports_mempool(1) ||
+      !device_supports_mempool(2) ||
+      !can_access_peer(0, 1) || !can_access_peer(0, 2)) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     return;
   }
 
@@ -707,7 +727,7 @@ HIP_TEST_CASE(Unit_hipMemPoolSetAccess_ValidationMatrix) {
 
   SECTION("Batch of N peers ProtNone applies to all") {
     if (device_count < 3) {
-      SUCCEED("Skipping: needs >=3 GPUs");
+      HIP_SKIP_TEST("Skipping: needs >=3 GPUs");
       return;
     }
     MemPoolGuard mempool(MemPools::created, 0);
@@ -834,7 +854,7 @@ HIP_TEST_CASE(Unit_hipMemPoolSetAccess_ValidationMatrix) {
 
   SECTION("Mixed-flag batch applies each descriptor") {
     if (device_count < 3) {
-      SUCCEED("Skipping: needs >=3 GPUs");
+      HIP_SKIP_TEST("Skipping: needs >=3 GPUs");
       return;
     }
     MemPoolGuard mempool(MemPools::created, 0);
