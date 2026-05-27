@@ -3,7 +3,8 @@
 namespace wsl {
 namespace thunk {
 
-const struct GfxipTable kGfxipTable[] = {
+namespace {
+static const struct GfxipTable kGfxipTable[] = {
   { 0x7448, 11, 0, 0 },
   { 0x744C, 11, 0, 0 },
   { 0x745E, 11, 0, 0 },
@@ -22,11 +23,25 @@ const struct GfxipTable kGfxipTable[] = {
 };
 
 const int kGfxipTableSize = sizeof(kGfxipTable) / sizeof(kGfxipTable[0]);
+} // namespace
 
 bool QueryAdapterSupported(unsigned int device_id) {
   for (int i = 0; i < kGfxipTableSize; i++) {
     if (device_id == kGfxipTable[i].device_id)
       return true;
+  }
+  return false;
+}
+
+bool LookupGfxipEntry(uint16_t device_id, GfxipTable *out) {
+  if (out == nullptr)
+    return false;
+
+  for (int i = 0; i < kGfxipTableSize; i++) {
+    if (kGfxipTable[i].device_id == device_id) {
+      *out = kGfxipTable[i];
+      return true;
+    }
   }
   return false;
 }

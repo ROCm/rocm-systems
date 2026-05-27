@@ -73,10 +73,9 @@ struct GfxipTable {
   uint8_t  stepping;
 };
 
-extern const struct GfxipTable kGfxipTable[];
-extern const int kGfxipTableSize;
 
 bool QueryAdapterSupported(unsigned int device_id);
+bool LookupGfxipEntry(uint16_t device_id, GfxipTable *out);
 
 } // namespace thunk
 } // namespace wsl
