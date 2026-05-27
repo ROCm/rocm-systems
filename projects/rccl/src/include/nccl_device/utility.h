@@ -25,8 +25,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#if NCCL_DEVICE_COMPILE
-#if defined(NCCL_HIP_PLATFORM)
+#if __CUDACC__
+#if __HIP_PLATFORM_AMD__
 #include <atomic>
 #else
 #include <cuda/atomic>
@@ -47,7 +47,7 @@ struct ValueAsType { static constexpr T value = value_; };
 
 // Returns the value zero but the compiler cannot prove that it is zero so it
 // is useful to inhibit compiler optimizations.
-#if NCCL_DEVICE_COMPILE
+#if __CUDACC__
 template<typename=void>
 NCCL_DEVICE_INLINE int opaqueZero() {
   __device__ static int zero = 0;
@@ -238,8 +238,8 @@ NCCL_DEVICE_INLINE uint32_t idivRcp32_upto64(int x) {
 }
 #endif
 
-#if NCCL_DEVICE_COMPILE
-#if defined(NCCL_HIP_PLATFORM)
+#if __CUDACC__
+#if __HIP_PLATFORM_AMD__
 NCCL_HOST_DEVICE_INLINE constexpr std::memory_order acquireOrderOf(std::memory_order ord) {
   return ord == std::memory_order_release ? std::memory_order_relaxed :
          ord == std::memory_order_acq_rel ? std::memory_order_acquire :
@@ -297,11 +297,11 @@ NCCL_HOST_DEVICE_INLINE constexpr cuda::memory_order releaseOrderOf(cuda::memory
 #endif
 #endif
 
-#if NCCL_DEVICE_COMPILE
+#if __CUDACC__
 NCCL_DEVICE_INLINE void fenceAcquireGpu() {
   static __device__ int dummy;
   int tmp;
-#if defined(NCCL_HIP_PLATFORM)
+#if __HIP_PLATFORM_AMD__
   tmp = __atomic_load_n(&dummy, __ATOMIC_ACQUIRE);
   __threadfence();
 #else
@@ -310,7 +310,7 @@ NCCL_DEVICE_INLINE void fenceAcquireGpu() {
   dummy = tmp;
 }
 NCCL_DEVICE_INLINE void fenceReleaseGpu() {
-#if defined(NCCL_HIP_PLATFORM)
+#if __HIP_PLATFORM_AMD__
   __threadfence();
 #else
   cuda::atomic_thread_fence(cuda::memory_order_release, cuda::thread_scope_device);
@@ -318,7 +318,7 @@ NCCL_DEVICE_INLINE void fenceReleaseGpu() {
 }
 #endif
 
-#if NCCL_DEVICE_COMPILE
+#if __CUDACC__
 template<typename T>
 NCCL_DEVICE_INLINE T atomicLoad(T* ptr, cuda::memory_order ord, cuda::thread_scope scope) {
   switch (scope) {
@@ -335,7 +335,7 @@ NCCL_DEVICE_INLINE T atomicLoad(T* ptr, cuda::memory_order ord, cuda::thread_sco
 }
 #endif
 
-#if NCCL_DEVICE_COMPILE
+#if __CUDACC__
 template<typename T>
 NCCL_DEVICE_INLINE void atomicStore(T* ptr, T val, cuda::memory_order ord, cuda::thread_scope scope) {
   switch (scope) {

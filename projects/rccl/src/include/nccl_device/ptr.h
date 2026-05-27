@@ -35,7 +35,7 @@ struct ncclSymPtr {
   NCCL_HOST_DEVICE_INLINE ncclSymPtr<T>& operator-=(long long d);
   NCCL_HOST_DEVICE_INLINE ncclSymPtr<T>& operator-=(unsigned long long d);
 
-  #if NCCL_CHECK_CUDACC
+  #if __CUDACC__
   NCCL_DEVICE_INLINE T* localPtr() const;
   NCCL_DEVICE_INLINE T* lsaPtr(int peer) const;
   NCCL_DEVICE_INLINE T* peerPtr(int peer) const;

@@ -45,9 +45,9 @@
  * nccl_device headers and therefore still inline into the thunk body.
  */
 
-#if NCCL_CHECK_CUDACC   /* Defined in nccl_device/utility.h; true under HIP-Clang -x hip
-                           (__HIPCC__) and NVCC (__CUDACC__). HIP-Clang does NOT
-                           define __CUDACC__, so a bare `#if __CUDACC__` here would
+#if NCCL_CHECK_CUDACC   /* Defined in hip_compat.h (via nccl_device/utility.h); true under
+                           HIP-Clang -x hip (__HIPCC__) and NVCC (__CUDACC__). HIP-Clang does
+                           NOT define __CUDACC__, so a bare `#if __CUDACC__` here would
                            silently drop the entire device body from the bitcode. */
 
 /* ========================================================================
