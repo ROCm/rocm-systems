@@ -57,7 +57,14 @@ jobs:
             cmake \
             ${{ matrix.compiler.pkg }} \
             libsqlite3-dev libspdlog-dev libfmt-dev nlohmann-json3-dev \
-            libgtest-dev libgmock-dev libbenchmark-dev
+            libgtest-dev libgmock-dev
+          # libbenchmark-dev on ubuntu-22.04 ships LTO bytecode from gcc 11.2,
+          # incompatible with the current runner's gcc 11.4 (lto1: bytecode
+          # stream ... version 11.2 instead of the expected 11.3). Fall back
+          # to FetchContent on 22.04; install the system package elsewhere.
+          if [[ "${{ matrix.os }}" != "ubuntu-22.04" ]]; then
+            sudo apt-get install -y libbenchmark-dev
+          fi
 
       - name: Configure
         working-directory: profilers/profiler-hub
