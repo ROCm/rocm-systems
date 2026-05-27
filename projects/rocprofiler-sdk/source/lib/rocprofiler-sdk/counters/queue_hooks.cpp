@@ -1,7 +1,6 @@
-// projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/counters/queue_hooks.cpp
 #include "lib/rocprofiler-sdk/counters/queue_hooks.hpp"
-#include "lib/rocprofiler-sdk/counters/dispatch_handlers.hpp"  // for queue_cb, completed_cb
-#include "lib/rocprofiler-sdk/context/context.hpp"             // for get_active_contexts
+#include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/counters/dispatch_handlers.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_hooks/client_ids.hpp"
 
 namespace rocprofiler
@@ -10,7 +9,6 @@ namespace counters
 {
 namespace
 {
-// Filter used to enumerate active contexts with dispatch_counter_collection.
 auto
 active_counter_contexts_filter()
 {
@@ -31,9 +29,9 @@ write_hook(const hsa::Queue&                                        queue,
            hsa::inst_pkt_t&                                         inst_pkt,
            bool&                                                    is_serialized)
 {
+    // The API caps active dispatch_counter_collection contexts at one, but
+    // iterate defensively.
     auto active = context::get_active_contexts(active_counter_contexts_filter());
-    // Today the API enforces at most one active dispatch_counter_collection
-    // context at a time (see context.cpp validation), but we iterate defensively.
     for(const auto* ctx : active)
     {
         for(auto& cb : ctx->dispatch_counter_collection->callbacks)

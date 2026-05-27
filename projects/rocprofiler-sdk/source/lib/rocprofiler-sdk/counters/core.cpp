@@ -155,12 +155,6 @@ start_context(const context::context* ctx)
         if(enabled) return;
         enabled = true;
     });
-
-    // Callback installation deleted — counters::write_hook and
-    // counters::signal_completion_hook are called directly from queue.cpp's
-    // WriteInterceptor and AsyncSignalHandler via the new hooks mechanism.
-    // The `enabled` flag set above remains because it gates per-callback
-    // dispatch inside the hook (see counters/queue_hooks.cpp).
 }
 
 void

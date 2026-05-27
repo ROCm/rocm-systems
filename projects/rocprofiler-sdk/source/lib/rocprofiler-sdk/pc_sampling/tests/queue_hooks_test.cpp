@@ -1,4 +1,3 @@
-// projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/pc_sampling/tests/queue_hooks_test.cpp
 #include "lib/rocprofiler-sdk/pc_sampling/queue_hooks.hpp"
 
 #include "lib/rocprofiler-sdk/agent.hpp"
@@ -30,20 +29,14 @@ test_init()
 
 TEST(PCSamplingQueueHooks, IsConfiguredOnAgentReturnsFalseWithoutConfiguredAgent)
 {
-    // No PC sampling service is configured in a fresh unit test: the wrapper
-    // must return false for any agent id, including the disabled-build path
-    // which always returns false regardless of the id.
     rocprofiler_agent_id_t fake_agent{.handle = 0};
     EXPECT_FALSE(rocprofiler::pc_sampling::is_configured_on_agent(fake_agent));
 }
 
+// Link-sanity: both queue_hooks symbols must resolve in both
+// ROCPROFILER_SDK_HSA_PC_SAMPLING==0 and ==1 builds.
 TEST(PCSamplingQueueHooks, SymbolsExist)
 {
-    // Link-sanity test: confirm both pc_sampling::queue_hooks symbols are
-    // resolvable. Calling is_configured_on_agent with a fake id exercises the
-    // wrapper symbol; taking the address of maybe_marker_packet exercises the
-    // marker-packet symbol without requiring a real queue. Both must link in
-    // ROCPROFILER_SDK_HSA_PC_SAMPLING==1 and ==0 build configurations.
     rocprofiler_agent_id_t fake_agent{.handle = 0};
     EXPECT_FALSE(rocprofiler::pc_sampling::is_configured_on_agent(fake_agent));
 
@@ -53,9 +46,6 @@ TEST(PCSamplingQueueHooks, SymbolsExist)
 
 TEST(PCSamplingQueueHooks, MaybeMarkerReturnsNulloptWithoutConfiguredAgent)
 {
-    // With no PC sampling service configured on any agent, maybe_marker_packet
-    // must return nullopt. Mirrors the counters/thread_trace "no active
-    // context" unit tests.
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     test_init();
 

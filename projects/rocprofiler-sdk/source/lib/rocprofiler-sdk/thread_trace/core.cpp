@@ -474,9 +474,6 @@ void
 DispatchThreadTracer::start_context()
 {
     CHECK_NOTNULL(hsa::get_queue_controller())->enable_serialization();
-    // Callback installation deleted — thread_trace::write_hook and
-    // thread_trace::signal_completion_hook are called directly from
-    // queue.cpp via the new hooks mechanism.
 }
 
 void
@@ -486,7 +483,6 @@ DispatchThreadTracer::stop_context()  // NOLINT(readability-convert-member-funct
     if(!controller) return;
 
     controller->disable_serialization();
-    // Callback removal deleted — see start_context.
 }
 
 DeviceThreadTracer::DeviceThreadTracer()

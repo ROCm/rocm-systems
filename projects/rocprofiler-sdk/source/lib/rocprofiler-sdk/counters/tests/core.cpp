@@ -910,20 +910,12 @@ TEST(core, create_counter)
     }
 }
 
-// ----------------------------------------------------------------------------
-// Tests for counters::write_hook (Tasks 1.4 and 1.5 of the queue-hooks refactor)
-//
-// These exercise the write-path enumerator that WriteInterceptor calls. Each
-// test colocates here (rather than queue_hooks_test.cpp) so it can reuse the
-// fixture helpers above (`test_init`, `get_client_ctx`, `null_dispatch_callback`,
-// `null_buffered_callback`).
-// ----------------------------------------------------------------------------
+// Tests for counters::write_hook colocated here to reuse the file-local
+// fixture helpers (test_init, get_client_ctx, null_dispatch_callback,
+// null_buffered_callback).
 
 namespace
 {
-// Build a synthetic packet whose fields don't matter for write_hook itself
-// (write_hook just forwards them to queue_cb, which only reads dispatch fields
-// when the user_cb returns a non-zero handle).
 hsa::rocprofiler_packet
 make_synthetic_packet()
 {
@@ -938,8 +930,6 @@ TEST(CountersQueueHooks, WriteHookProducesNoEntriesWhenNoContextActive)
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     test_init();
 
-    // Sanity: no dispatch_counter_collection context should be active in a
-    // fresh test. If a prior test leaked one, that is a separate bug.
     ASSERT_FALSE(counters::is_any_active());
 
     ASSERT_TRUE(hsa::get_queue_controller() != nullptr);
@@ -993,7 +983,6 @@ TEST(CountersQueueHooks, WriteHookProducesOneEntryWithOneActiveCounterCallback)
                      "Could not setup buffered service");
     ROCPROFILER_CALL(rocprofiler_start_context(get_client_ctx()), "start context");
 
-    // Verify the context is actually active and visible to get_active_contexts.
     EXPECT_TRUE(counters::is_any_active());
 
     auto* ctx_p = context::get_mutable_registered_context(get_client_ctx());
@@ -1023,8 +1012,8 @@ TEST(CountersQueueHooks, WriteHookProducesOneEntryWithOneActiveCounterCallback)
                          inst_pkt,
                          is_serialized);
 
-    // null_dispatch_callback leaves req_profile.handle == 0, so queue_cb
-    // returns {EmptyAQLPacket, /*bSerial=*/true} — non-null packet, serialized.
+    // null_dispatch_callback leaves req_profile.handle == 0 → queue_cb
+    // returns {EmptyAQLPacket, /*serialize=*/true}.
     EXPECT_EQ(inst_pkt.size(), 1u);
     EXPECT_EQ(inst_pkt[0].second, hsa::queue_hooks::COUNTERS_CLIENT_ID);
     EXPECT_TRUE(is_serialized);
@@ -1058,9 +1047,7 @@ TEST(CountersMultiCallback, TwoCallbacksProduceTwoInstPktEntries)
                                                &opt_buff_id),
                      "Could not create buffer");
 
-    // Configure twice — each call appends a counter_callback_info to
-    // dispatch_counter_collection->callbacks (see
-    // CounterController::configure_dispatch in counters/controller.cpp).
+    // Two configure calls → two entries in dispatch_counter_collection->callbacks.
     ROCPROFILER_CALL(rocprofiler_configure_buffer_dispatch_counting_service(
                          get_client_ctx(), opt_buff_id, null_dispatch_callback, (void*) 0x1111),
                      "Could not setup buffered service (1st)");

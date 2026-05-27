@@ -190,8 +190,6 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
         auto dispatch_time = kernel_dispatch::get_dispatch_time(queue_info_session, packet);
         kernel_dispatch::dispatch_complete(queue_info_session, packet, dispatch_time);
 
-        // Direct subsystem completion calls — each subsystem decides internally
-        // whether it has work to do for this dispatch.
         rocprofiler::counters::signal_completion_hook(queue_info_session.queue,
                                                       packet.kernel_packet,
                                                       _session,
@@ -348,21 +346,21 @@ WriteInterceptor(const void* packets,
 
     auto& queue = *static_cast<Queue*>(data);
 
-    // We have no packets, do nothing.
     if(pkt_count == 0)
     {
         writer(packets, pkt_count);
         return;
     }
 
-    // Skip the per-packet rewrite path only when NO subsystem needs it.
+    // Skip per-packet rewriting when no subsystem needs it.
     bool kernel_tracing_active = !context::get_active_contexts(context_filter).empty();
     bool counters_active       = rocprofiler::counters::is_any_active();
     bool thread_trace_active   = rocprofiler::thread_trace::is_any_active();
     bool pc_sampling_configured =
         rocprofiler::pc_sampling::is_configured_on_agent(queue.get_agent().get_rocp_agent()->id);
 
-    if(!kernel_tracing_active && !counters_active && !thread_trace_active && !pc_sampling_configured)
+    if(!kernel_tracing_active && !counters_active && !thread_trace_active &&
+       !pc_sampling_configured)
     {
         writer(packets, pkt_count);
         return;
@@ -626,26 +624,18 @@ WriteInterceptor(const void* packets,
                 thr_id,
                 ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH);
 
-            // Stores the instrumentation pkt (i.e. AQL packets for counter collection)
-            // along with an ID of the client we got the packet from (this will be returned via
-            // completed_cb_t)
+            // Append per-subsystem AQL injection packets to instrumentation_packets.
+            // Each hook checks its own activation state; serialize flag is OR-folded.
+            rocprofiler::counters::write_hook(queue,
+                                              kernel_packet,
+                                              kernel_id,
+                                              dispatch_id,
+                                              &_packet_data.user_data,
+                                              _packet_data.tracing_data.external_correlation_ids,
+                                              corr_id,
+                                              _packet_data.instrumentation_packets,
+                                              _packet_data.is_serialized);
 
-            // Direct subsystem calls — each subsystem checks its own
-            // activation state internally.
-            //
-            // Counters: 0..N entries (one per active counter_callback_info)
-            rocprofiler::counters::write_hook(
-                queue,
-                kernel_packet,
-                kernel_id,
-                dispatch_id,
-                &_packet_data.user_data,
-                _packet_data.tracing_data.external_correlation_ids,
-                corr_id,
-                /*out*/ _packet_data.instrumentation_packets,
-                /*inout*/ _packet_data.is_serialized);
-
-            // Thread trace: 0..N entries (one per active tracer)
             rocprofiler::thread_trace::write_hook(
                 queue,
                 kernel_packet,
@@ -654,10 +644,10 @@ WriteInterceptor(const void* packets,
                 &_packet_data.user_data,
                 _packet_data.tracing_data.external_correlation_ids,
                 corr_id,
-                /*out*/ _packet_data.instrumentation_packets,
-                /*inout*/ _packet_data.is_serialized);
+                _packet_data.instrumentation_packets,
+                _packet_data.is_serialized);
 
-            // PC sampling marker is emitted later in the splice — see maybe_marker_packet below.
+            // PC sampling marker is spliced separately below (maybe_marker_packet).
 
             bool inserted_before = false;
             if(_packet_data.is_serialized)
@@ -680,9 +670,6 @@ WriteInterceptor(const void* packets,
                 }
             }
 
-            // PC sampling marker — moved from inline #if block into
-            // pc_sampling::maybe_marker_packet. Same position in transformed_packets, same
-            // gating semantics (configured agent, not started service).
             if(auto marker = rocprofiler::pc_sampling::maybe_marker_packet(
                    queue, dispatch_id, _packet_data.tracing_data.external_correlation_ids, corr_id))
             {
@@ -771,9 +758,7 @@ WriteInterceptor(const void* packets,
         _writer(std::move(transformed_packets));
     };
 
-    // Replaces map-iteration that ANDed every callback's batch_packets() return.
-    // Today: counters and thread_trace return false (each forces per-packet mode);
-    // pc_sampling returns true. So batched mode iff neither counters nor ATT is active.
+    // Counters and ATT both require per-packet mode; pc_sampling allows batching.
     bool should_batch_packets =
         !rocprofiler::counters::is_any_active() && !rocprofiler::thread_trace::is_any_active();
 

@@ -1,7 +1,6 @@
-// projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/thread_trace/queue_hooks.cpp
 #include "lib/rocprofiler-sdk/thread_trace/queue_hooks.hpp"
-#include "lib/rocprofiler-sdk/thread_trace/core.hpp"  // for DispatchThreadTracer
 #include "lib/rocprofiler-sdk/hsa/queue_hooks/client_ids.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
 namespace rocprofiler
 {
@@ -29,8 +28,6 @@ write_hook(const hsa::Queue&              queue,
            hsa::inst_pkt_t&               inst_pkt,
            bool&                          is_serialized)
 {
-    // Mirrors today's lambda at thread_trace/core.cpp:486-495 which discards
-    // kern_pkt and extern_corr_ids.
     auto active = context::get_active_contexts(active_thread_trace_contexts_filter());
     for(auto* ctx : active)
     {
@@ -51,8 +48,6 @@ signal_completion_hook(const hsa::Queue& /*queue*/,
                        hsa::inst_pkt_t&                            inst_pkt,
                        kernel_dispatch::profiling_time /*dispatch_time*/)
 {
-    // Mirrors today's lambda at thread_trace/core.cpp:497-503 which calls
-    // post_kernel_call with (aql, *session, packet_data).
     auto active = context::get_active_contexts(active_thread_trace_contexts_filter());
     for(auto* ctx : active)
     {

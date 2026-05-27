@@ -32,9 +32,8 @@ namespace rocprofiler
 {
 namespace hsa
 {
-// Test-only Queue subclass that bypasses HSA queue construction by overriding
-// get_agent() / get_id(). Originally duplicated in counters/tests/core.cpp and
-// tests/hsa_barrier.cpp; hoisted here to share across test binaries.
+// Test-only Queue subclass that overrides get_agent() / get_id() to bypass
+// HSA queue construction.
 class FakeQueue : public Queue
 {
 public:

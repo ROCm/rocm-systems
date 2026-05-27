@@ -1,4 +1,3 @@
-// projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/pc_sampling/queue_hooks.cpp
 #include "lib/rocprofiler-sdk/pc_sampling/queue_hooks.hpp"
 
 #include "lib/rocprofiler-sdk/pc_sampling/defines.hpp"
@@ -31,17 +30,10 @@ maybe_marker_packet(
     const context::correlation_id*                                          correlation_id)
 {
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
-    // Logic moved verbatim from queue.cpp:650-657. Uses the always-available
-    // wrapper is_configured_on_agent (defined in this TU) rather than the
-    // #if-guarded is_pc_sample_service_configured directly.
     auto agent_id = queue.get_agent().get_rocp_agent()->id;
     if(!is_configured_on_agent(agent_id)) return std::nullopt;
-
-    // generate_marker_packet_for_kernel takes a non-const correlation_id*
-    // because it calls add_ref_count(). The call site at queue.cpp:653 passes
-    // the non-const `corr_id`; queue_hooks.hpp's signature takes the parameter
-    // const-correct for the caller side, so this TU strips const for the
-    // legacy API.
+    // generate_marker_packet_for_kernel takes correlation_id* non-const
+    // (calls add_ref_count); our signature is const-correct for callers.
     return pc_sampling::hsa::generate_marker_packet_for_kernel(
         const_cast<context::correlation_id*>(correlation_id), ext_corr_ids, dispatch_id);
 #else
@@ -62,15 +54,8 @@ signal_completion_hook(const ::rocprofiler::hsa::Queue&                         
                        kernel_dispatch::profiling_time /*dispatch_time*/)
 {
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
-    // Logic from pc_sampling/hsa_adapter.cpp's signal_completion lambda
-    // (kernel_completion_cb call). kernel_completion_cb itself is now declared
-    // in hsa_adapter.hpp; it internally checks session.correlation_id and
-    // is_pc_sample_service_configured, so the no-session guard here is purely
-    // defensive (mirroring how the lambda was registered only when a session
-    // existed).
     if(!session) return;
-    // kernel_completion_cb takes a non-const rocprofiler_packet& even though
-    // the parameter is unused (legacy signature). Strip const to call it.
+    // kernel_completion_cb takes a non-const packet& (legacy signature; unused).
     pc_sampling::hsa::kernel_completion_cb(
         queue.get_agent().get_rocp_agent(),
         const_cast<::rocprofiler::hsa::rocprofiler_packet&>(kernel_packet),

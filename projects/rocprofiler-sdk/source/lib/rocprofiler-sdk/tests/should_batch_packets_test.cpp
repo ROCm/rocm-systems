@@ -20,24 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Invariant tests for the `should_batch_packets` decision in
-// hsa/queue.cpp:WriteInterceptor. After C2, the historical map-iteration over
-// the per-callback registration map (which ANDed every callback's
-// batch_packets() return) is replaced with the explicit expression:
-//
-//     bool should_batch_packets =
-//         !rocprofiler::counters::is_any_active()
-//         && !rocprofiler::thread_trace::is_any_active();
-//
-// These tests pin the semantics of the two `is_any_active()` predicates that
-// drive that decision:
-//   1. Idle  -> batched mode allowed   (both predicates false).
-//   2. Counters active -> per-packet mode forced (counters::is_any_active()).
-//   3. ATT     active -> per-packet mode forced (thread_trace::is_any_active()).
-//
-// Test 3 is skipped: standalone DispatchThreadTracer activation requires
-// real GPU dispatch / KFD plumbing not available in this unit-test harness.
-// The ATT-active path is covered by the C2 manual `rocprofv3 --att` smoke.
+// Pins the should_batch_packets predicate WriteInterceptor uses:
+//   !counters::is_any_active() && !thread_trace::is_any_active()
 
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -116,13 +100,6 @@ null_buffered_callback(rocprofiler_context_id_t,
 {}
 }  // namespace
 
-// ---------------------------------------------------------------------------
-// Test 1: idle -> batched mode allowed.
-//
-// With no subsystem active, the conjunction
-//     !counters::is_any_active() && !thread_trace::is_any_active()
-// evaluates to `true`, i.e. WriteInterceptor will take the batched path.
-// ---------------------------------------------------------------------------
 TEST(ShouldBatchPackets, BatchesPacketsWhenNoSubsystemActive)
 {
     EXPECT_FALSE(rocprofiler::counters::is_any_active());
@@ -133,15 +110,9 @@ TEST(ShouldBatchPackets, BatchesPacketsWhenNoSubsystemActive)
     EXPECT_TRUE(should_batch_packets);
 }
 
-// ---------------------------------------------------------------------------
-// Test 2: counters context active -> per-packet mode required.
-//
-// Activation mirrors `TEST(core, start_stop_buffered_ctx)` in
-// counters/tests/core.cpp:523. The direct queue_cb invocation pattern (used
-// elsewhere in counters tests) is deliberately NOT used here because it
-// bypasses context registration, so `is_any_active()` (which walks the
-// active-context list) would not observe the context.
-// ---------------------------------------------------------------------------
+// Uses the full registered-context activation pattern (configure + start_context)
+// rather than direct queue_cb invocation; is_any_active() walks the active-context
+// list and would not see a context that bypasses registration.
 TEST(ShouldBatchPackets, RequiresPerPacketWhenCountersActive)
 {
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
@@ -173,7 +144,6 @@ TEST(ShouldBatchPackets, RequiresPerPacketWhenCountersActive)
                                 !rocprofiler::thread_trace::is_any_active();
     EXPECT_FALSE(should_batch_packets);
 
-    // Teardown — leave the context machinery clean for subsequent tests.
     ROCPROFILER_CALL(rocprofiler_stop_context(get_client_ctx()), "stop context");
     EXPECT_FALSE(rocprofiler::counters::is_any_active());
 
@@ -184,23 +154,9 @@ TEST(ShouldBatchPackets, RequiresPerPacketWhenCountersActive)
     registration::finalize();
 }
 
-// ---------------------------------------------------------------------------
-// Test 3: ATT (thread_trace) active -> per-packet mode required.
-//
-// SKIPPED. DispatchThreadTracer activation in `thread_trace/core.cpp` runs
-// through the full registration pipeline and reaches into KFD / aqlprofile
-// for trace buffer allocation; there is no existing pattern under
-// `thread_trace/tests/` that activates one standalone in a unit-test
-// harness without a live GPU. Faking activation by, e.g., poking the
-// internal active-contexts list would not exercise the same predicate
-// path as production, so we explicitly skip rather than mislead.
-//
-// Coverage for this branch comes from the C2 manual smoke
-// `rocprofv3 --att ...` — the per-packet path is the only way an ATT
-// session can return non-trivial trace data.
-// ---------------------------------------------------------------------------
+// ATT-active coverage requires GPU/KFD plumbing not available in unit tests;
+// the per-packet path is exercised by the rocprofv3 --att smoke instead.
 TEST(ShouldBatchPackets, RequiresPerPacketWhenATTActive)
 {
-    GTEST_SKIP() << "DispatchThreadTracer activation requires GPU integration smoke "
-                    "(`rocprofv3 --att`) — see C2 manual smoke tests.";
+    GTEST_SKIP() << "DispatchThreadTracer activation requires GPU integration smoke";
 }
