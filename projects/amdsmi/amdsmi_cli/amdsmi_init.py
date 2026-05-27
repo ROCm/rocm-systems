@@ -118,7 +118,7 @@ def amdsmi_cli_init():
         logging.debug("ionic driver's initstate is live")
         init_flag |= amdsmi_interface.AmdSmiInitFlags.INIT_AMD_NICS
 
-    init_timeout = int(os.environ.get("AMDSMI_INIT_TIMEOUT_SEC", "30"))
+    _INIT_TIMEOUT_SEC = 30
     init_result = {"exception": None}
 
     def _run_init():
@@ -129,14 +129,12 @@ def amdsmi_cli_init():
 
     init_thread = threading.Thread(target=_run_init, daemon=True)
     init_thread.start()
-    init_thread.join(timeout=init_timeout if init_timeout > 0 else None)
+    init_thread.join(timeout=_INIT_TIMEOUT_SEC)
 
     if init_thread.is_alive():
         logging.error(
-            "amdsmi_init() timed out after %ds. "
-            "The GPU driver may be unresponsive. "
-            "Set AMDSMI_INIT_TIMEOUT_SEC=0 to disable timeout.",
-            init_timeout,
+            "amdsmi_init() timed out after %ds. The GPU driver may be unresponsive.",
+            _INIT_TIMEOUT_SEC,
         )
         sys.exit(2)
 

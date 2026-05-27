@@ -47,7 +47,6 @@ durations. They must be set **before** the AMDSMI library loads.
 |---|---|---|
 | ``AMDSMI_GPU_METRICS_CACHE_MS`` | GPU metrics cache duration (ms) | 1 ms (set to 0 to disable) |
 | ``AMDSMI_ASIC_INFO_CACHE_MS`` | GPU ASIC info cache duration (ms) | 10000 ms (set to 0 to disable) |
-| ``AMDSMI_INIT_TIMEOUT_SEC`` | Maximum time to wait for library initialization (seconds) | 30 s (set to 0 to disable) |
 ```
 
 You can set these in one of two ways:

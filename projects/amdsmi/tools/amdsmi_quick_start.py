@@ -32,9 +32,6 @@ import sys
 # ASIC info cache set to 10000 by default, uncomment to change
 # os.environ["AMDSMI_ASIC_INFO_CACHE_MS"] = "10000"
 
-# Init timeout set to 30 by default, uncomment to change
-# os.environ["AMDSMI_INIT_TIMEOUT_SEC"] = "30"
-
 try:
     from amdsmi import *
 except ImportError as e:
