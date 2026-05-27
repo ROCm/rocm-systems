@@ -4,8 +4,10 @@
 #include "gtest/gtest.h"
 
 #include "core/output_file_registry.hpp"
+#include "core/perfetto/packet_framing.hpp"
 #include "core/perfetto/sinks.hpp"
 
+#include <cstdint>
 #include <vector>
 
 TEST(recording_sink, default_state_is_empty_and_unfinalized)
@@ -71,3 +73,142 @@ TEST(per_pid_file_sink, empty_bytes_is_early_return)
 // is exercised by the integration tests in tests/pytest/. Unit-level
 // mocking of config::get_perfetto_output_filename(...) here would require
 // library-init machinery this test binary does not own.
+
+// ----------------------------------------------------------------------------
+// single_file_sink
+// ----------------------------------------------------------------------------
+
+namespace
+{
+using rocprofsys::core::append_varint;
+using rocprofsys::core::read_varint;
+using rocprofsys::core::TRACE_PACKETS_TAG;
+using rocprofsys::core::TRUSTED_SEQ_ID_TAG;
+
+// Builds a Trace.packets-framed buffer containing one TracePacket whose
+// trusted_packet_sequence_id is the SDK placeholder (1) and whose payload
+// is a single length-delimited field 11 carrying `marker`. Matches the
+// shape that single_file_sink::on_source_drained walks.
+std::vector<char>
+build_framed_placeholder_packet(char marker)
+{
+    std::vector<char> inner;
+    inner.push_back(static_cast<char>(TRUSTED_SEQ_ID_TAG));
+    append_varint(inner, 1);
+    inner.push_back(static_cast<char>((11 << 3) | 2));
+    append_varint(inner, 1);
+    inner.push_back(marker);
+
+    std::vector<char> framed;
+    framed.push_back(static_cast<char>(TRACE_PACKETS_TAG));
+    append_varint(framed, inner.size());
+    framed.insert(framed.end(), inner.begin(), inner.end());
+    return framed;
+}
+
+// Decodes the seq_id and payload-marker of the framed packet at `start`
+// in `buf`, returning the byte index immediately after that packet.
+std::size_t
+read_framed_packet(const std::vector<char>& buf, std::size_t start,
+                   std::uint64_t& out_seq_id, char& out_marker)
+{
+    EXPECT_EQ(static_cast<std::uint8_t>(buf[start]), TRACE_PACKETS_TAG);
+    std::size_t   pos = start + 1;
+    std::uint64_t len = 0;
+    EXPECT_TRUE(read_varint(buf.data(), buf.size(), pos, len));
+    const auto payload_start = pos;
+    const auto payload_end   = payload_start + static_cast<std::size_t>(len);
+
+    // Walk fields until we find the seq_id and the marker.
+    out_seq_id = 0;
+    out_marker = 0;
+    while(pos < payload_end)
+    {
+        std::uint64_t tag = 0;
+        EXPECT_TRUE(read_varint(buf.data(), buf.size(), pos, tag));
+        if(tag == TRUSTED_SEQ_ID_TAG)
+        {
+            EXPECT_TRUE(read_varint(buf.data(), buf.size(), pos, out_seq_id));
+        }
+        else if(tag == ((11 << 3) | 2))
+        {
+            std::uint64_t field_len = 0;
+            EXPECT_TRUE(read_varint(buf.data(), buf.size(), pos, field_len));
+            EXPECT_EQ(field_len, 1u);
+            out_marker = buf[pos];
+            pos += static_cast<std::size_t>(field_len);
+        }
+        else
+        {
+            ADD_FAILURE() << "unexpected field tag in test packet: " << tag;
+            return payload_end;
+        }
+    }
+    return payload_end;
+}
+}  // namespace
+
+TEST(single_file_sink, cross_source_preserves_seq_id_namespace)
+{
+    // Feed two sources whose inputs both carry the SDK placeholder
+    // seq_id=1 — the case that exposed the bug in jacobi-hip-sys-run.
+    // Each source must end up with its own disjoint effective seq_id
+    // so downstream interned-data resolution does not collapse the
+    // two sources' iid namespaces into one.
+    rocprofsys::output_file_registry   registry;
+    rocprofsys::core::single_file_sink sink{ registry };
+
+    auto bytes_a = build_framed_placeholder_packet('A');
+    auto bytes_b = build_framed_placeholder_packet('B');
+
+    sink.on_source_drained(101, std::move(bytes_a));
+    sink.on_source_drained(202, std::move(bytes_b));
+
+    const auto& buf = sink.buffer_for_testing();
+    ASSERT_FALSE(buf.empty());
+
+    std::uint64_t seq_id_a = 0;
+    char          marker_a = 0;
+    const auto    after_a  = read_framed_packet(buf, 0, seq_id_a, marker_a);
+
+    std::uint64_t seq_id_b = 0;
+    char          marker_b = 0;
+    read_framed_packet(buf, after_a, seq_id_b, marker_b);
+
+    EXPECT_EQ(marker_a, 'A');
+    EXPECT_EQ(marker_b, 'B');
+
+    // Distinct sources must land in disjoint seq_id ranges. The exact
+    // base values are an implementation detail (set by the per-source
+    // stride), but the difference must be at least one stride so the
+    // ranges cannot overlap on any subsequent packets.
+    ASSERT_GT(seq_id_b, seq_id_a);
+    EXPECT_GE(seq_id_b - seq_id_a, 1u << 16);
+}
+
+TEST(single_file_sink, same_source_shares_base_offset)
+{
+    // Two drains from the same source share the same base offset, so
+    // their outputs end up with the same effective seq_id (when their
+    // original seq_ids match). The per-source allocation is sticky.
+    rocprofsys::output_file_registry   registry;
+    rocprofsys::core::single_file_sink sink{ registry };
+
+    sink.on_source_drained(7, build_framed_placeholder_packet('X'));
+    sink.on_source_drained(7, build_framed_placeholder_packet('Y'));
+
+    const auto& buf = sink.buffer_for_testing();
+    ASSERT_FALSE(buf.empty());
+
+    std::uint64_t seq_id_x = 0;
+    char          marker_x = 0;
+    const auto    after_x  = read_framed_packet(buf, 0, seq_id_x, marker_x);
+
+    std::uint64_t seq_id_y = 0;
+    char          marker_y = 0;
+    read_framed_packet(buf, after_x, seq_id_y, marker_y);
+
+    EXPECT_EQ(marker_x, 'X');
+    EXPECT_EQ(marker_y, 'Y');
+    EXPECT_EQ(seq_id_x, seq_id_y);
+}

@@ -80,16 +80,18 @@ private:
 
 // Cached-mode sink: concatenates per-pid bytes into one .proto file.
 //
-// The cached_interceptor exfiltrates TracePackets from the SDK before the
-// tracing service stamps trusted_packet_sequence_id, so every packet the
-// engine drains arrives with the SDK's placeholder value (1). Concatenating
-// per-pid streams that all claim seq_id=1 would make Perfetto interpret
-// every packet as belonging to a single producer and mis-apply incremental
-// state (TracePacketDefaults, default tracks) across pid boundaries. This
-// sink stands in for the missing service-side stamping: each source_id is
-// assigned a sequential trusted_packet_sequence_id on first arrival, and
-// every TracePacket from that source is rewritten with that id before
-// being appended to the in-memory buffer. finalize() writes the buffer.
+// Each source_id is assigned a base offset on first arrival, and every
+// TracePacket from that source has its trusted_packet_sequence_id shifted
+// by that base before being appended to the in-memory buffer. The offset
+// (not replace) semantics preserve Perfetto's per-seq_id interned-data
+// namespacing: collapsing distinct input seq_ids into one output value
+// would merge independent iid namespaces and silently misresolve later
+// definitions. The cached interceptor exfiltrates packets before the
+// tracing service stamps seq_ids so its inputs all carry the SDK's
+// placeholder (1) — the offset still produces disjoint output ranges
+// across sources. Live-mode MPI inputs carry pre-stamped seq_ids (one
+// per producer thread) and the offset preserves those relative ids
+// inside each source's window. finalize() writes the buffer.
 class single_file_sink
 {
 public:
@@ -122,12 +124,29 @@ public:
     // MPI headers (and the workload is launched under mpiexec/srun).
     void set_append_mode(std::uint32_t seq_id_base) noexcept;
 
+    // Test-only inspector: exposes the accumulated rewritten bytes before
+    // finalize() so unit tests can assert per-source seq_id offsetting
+    // without depending on the config singleton + filesystem path that
+    // finalize() would resolve. Mirrors recording_sink::records().
+    [[nodiscard]] const std::vector<char>& buffer_for_testing() const noexcept
+    {
+        return m_buffer;
+    }
+
 private:
+    // Width of each source's seq_id sub-range inside this sink's output
+    // namespace. Source N's effective seq_ids land in
+    // [base_N, base_N + PER_SOURCE_SEQ_ID_BASE_STRIDE). 1<<16 comfortably
+    // exceeds the few-hundred internal seq_ids any single Perfetto SDK
+    // TracingSession produces, while still letting many sources fit
+    // inside the 1<<20 per-rank window the MPI merge path uses.
+    static constexpr std::uint32_t PER_SOURCE_SEQ_ID_BASE_STRIDE = 1u << 16;
+
     output_file_registry*                  m_registry{ nullptr };
     std::string                            m_output_filename_override{};
     std::vector<char>                      m_buffer{};
-    std::unordered_map<int, std::uint32_t> m_source_seq_ids{};
-    std::uint32_t                          m_next_seq_id{ 1 };
+    std::unordered_map<int, std::uint32_t> m_source_seq_id_bases{};
+    std::uint32_t                          m_next_source_base{ 1 };
     bool                                   m_append_mode{ false };
 };
 

@@ -131,8 +131,11 @@ extract_first_packet_payload(const std::vector<char>& framed)
 }
 }  // namespace
 
-TEST(packet_framing_rewrite, swaps_seq_id_preserves_other_fields)
+TEST(packet_framing_rewrite, applies_offset_to_existing_seq_id)
 {
+    // Input seq_id is the SDK placeholder (1); offset 42 must produce
+    // effective seq_id 43, preserving the original-seq_id contribution
+    // rather than replacing it. The other fields stay byte-identical.
     auto in = build_packet_with_placeholder_seq_id(0xCAFE, { 'x', 'y', 'z' });
 
     std::vector<char> dst;
@@ -140,21 +143,63 @@ TEST(packet_framing_rewrite, swaps_seq_id_preserves_other_fields)
 
     auto inner = extract_first_packet_payload(dst);
 
-    // Expected inner payload: timestamp_ns + payload field + new seq_id (42).
     std::vector<char> expected;
     expected.push_back(static_cast<char>((8 << 3) | 0));
     append_varint(expected, 0xCAFE);
     expected.push_back(static_cast<char>((11 << 3) | 2));
     append_varint(expected, 3);
     expected.insert(expected.end(), { 'x', 'y', 'z' });
-    // rewrite_trace_packet appends the new seq_id LAST (after walking the input).
     expected.push_back(static_cast<char>(TRUSTED_SEQ_ID_TAG));
-    append_varint(expected, 42);
+    append_varint(expected, 1u + 42u);
 
     EXPECT_EQ(inner, expected);
 }
 
-TEST(packet_framing_rewrite, distinct_seq_ids_for_separate_calls)
+TEST(packet_framing_rewrite, preserves_distinct_seq_ids_across_packets)
+{
+    // Two packets from the same source carrying different original seq_ids
+    // (5 and 9). With the same offset (100) applied, the effective seq_ids
+    // stay distinct (105 and 109) so each retains its own interned-data
+    // namespace in the merged stream.
+    auto build_with = [](std::uint32_t seq_id) {
+        std::vector<char> p;
+        p.push_back(static_cast<char>(TRUSTED_SEQ_ID_TAG));
+        append_varint(p, seq_id);
+        return p;
+    };
+
+    auto in_5 = build_with(5);
+    auto in_9 = build_with(9);
+
+    std::vector<char> dst;
+    ASSERT_TRUE(rewrite_trace_packet(dst, in_5.data(), in_5.size(), 100));
+    ASSERT_TRUE(rewrite_trace_packet(dst, in_9.data(), in_9.size(), 100));
+
+    // Decode both framed packets and extract their seq_id values.
+    auto extract_seq_id_at = [&](std::size_t start) -> std::uint64_t {
+        EXPECT_EQ(static_cast<std::uint8_t>(dst[start]), TRACE_PACKETS_TAG);
+        std::size_t   pos = start + 1;
+        std::uint64_t len = 0;
+        EXPECT_TRUE(read_varint(dst.data(), dst.size(), pos, len));
+        const auto payload_start = pos;
+        EXPECT_EQ(static_cast<std::uint8_t>(dst[payload_start]), TRUSTED_SEQ_ID_TAG);
+        pos                  = payload_start + 1;
+        std::uint64_t seq_id = 0;
+        EXPECT_TRUE(read_varint(dst.data(), dst.size(), pos, seq_id));
+        EXPECT_EQ(pos, payload_start + static_cast<std::size_t>(len));
+        return seq_id;
+    };
+
+    EXPECT_EQ(extract_seq_id_at(0), 105u);
+    // Second packet starts after first frame (tag + len varint + payload).
+    std::size_t   pos = 1;
+    std::uint64_t len = 0;
+    ASSERT_TRUE(read_varint(dst.data(), dst.size(), pos, len));
+    const auto second_start = pos + static_cast<std::size_t>(len);
+    EXPECT_EQ(extract_seq_id_at(second_start), 109u);
+}
+
+TEST(packet_framing_rewrite, distinct_offsets_for_separate_calls)
 {
     auto in = build_packet_with_placeholder_seq_id(1, {});
 
@@ -164,6 +209,29 @@ TEST(packet_framing_rewrite, distinct_seq_ids_for_separate_calls)
     ASSERT_TRUE(rewrite_trace_packet(dst_99, in.data(), in.size(), 99));
 
     EXPECT_NE(dst_7, dst_99);
+}
+
+TEST(packet_framing_rewrite, offset_zero_leaves_seq_id_unchanged)
+{
+    // Regression guard: offset 0 must not be a sentinel for "no offset
+    // applied" — it must add zero and emit the original seq_id.
+    auto in = build_packet_with_placeholder_seq_id(0xBEEF, { 'q' });
+
+    std::vector<char> dst;
+    ASSERT_TRUE(rewrite_trace_packet(dst, in.data(), in.size(), 0));
+
+    auto inner = extract_first_packet_payload(dst);
+
+    std::vector<char> expected;
+    expected.push_back(static_cast<char>((8 << 3) | 0));
+    append_varint(expected, 0xBEEF);
+    expected.push_back(static_cast<char>((11 << 3) | 2));
+    append_varint(expected, 1);
+    expected.push_back('q');
+    expected.push_back(static_cast<char>(TRUSTED_SEQ_ID_TAG));
+    append_varint(expected, 1u);
+
+    EXPECT_EQ(inner, expected);
 }
 
 TEST(packet_framing_rewrite, rejects_truncated_varint_tag)
@@ -219,13 +287,14 @@ TEST(packet_framing_rewrite, fixed32_wire_advances_four_bytes)
     EXPECT_TRUE(rewrite_trace_packet(dst, bytes.data(), bytes.size(), 5));
 }
 
-TEST(packet_framing_rewrite, empty_input_emits_only_new_seq_id)
+TEST(packet_framing_rewrite, empty_input_emits_offset_as_seq_id)
 {
+    // No input bytes means no original seq_id is observed; the rewritten
+    // payload contains just the offset value as the new seq_id.
     std::vector<char> dst;
     ASSERT_TRUE(rewrite_trace_packet(dst, nullptr, 0, 13));
 
-    auto inner = extract_first_packet_payload(dst);
-    // Inner should be: seq_id tag (0x50) + varint(13)
+    auto              inner = extract_first_packet_payload(dst);
     std::vector<char> expected;
     expected.push_back(static_cast<char>(TRUSTED_SEQ_ID_TAG));
     append_varint(expected, 13);

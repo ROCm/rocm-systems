@@ -244,7 +244,7 @@ single_file_sink::set_append_mode(std::uint32_t seq_id_base) noexcept
     // Shift this process's seq_id namespace so concurrent appenders do not
     // collide on trusted_packet_sequence_id. The +1 preserves the existing
     // "seq_id starts at 1" invariant downstream consumers may rely on.
-    m_next_seq_id = seq_id_base + 1;
+    m_next_source_base = seq_id_base + 1;
 }
 
 void
@@ -269,9 +269,14 @@ single_file_sink::on_source_drained(int source_id, std::vector<char> bytes)
                     "ROCPROFSYS_PERFETTO_OUTPUT_LAYOUT=per_process.");
     }
 
-    auto [it, inserted] = m_source_seq_ids.try_emplace(source_id, m_next_seq_id);
-    if(inserted) ++m_next_seq_id;
-    const auto seq_id = it->second;
+    // Each source gets a disjoint seq_id sub-range; per-packet rewrites
+    // add this base to the packet's original seq_id, preserving the
+    // per-source iid namespace structure that Perfetto's interned-data
+    // resolution depends on.
+    auto [it, inserted] =
+        m_source_seq_id_bases.try_emplace(source_id, m_next_source_base);
+    if(inserted) m_next_source_base += PER_SOURCE_SEQ_ID_BASE_STRIDE;
+    const auto seq_id_offset = it->second;
 
     std::size_t pos = 0;
     while(pos < bytes.size())
@@ -296,7 +301,7 @@ single_file_sink::on_source_drained(int source_id, std::vector<char> bytes)
         }
 
         if(!rewrite_trace_packet(m_buffer, bytes.data() + pos,
-                                 static_cast<std::size_t>(len), seq_id))
+                                 static_cast<std::size_t>(len), seq_id_offset))
         {
             LOG_ERROR("single_file_sink: source {} TracePacket malformed at "
                       "offset {}; dropping remainder",
@@ -317,7 +322,7 @@ single_file_sink::finalize()
     if(!config::output_filtering::is_file_output_enabled_for_current_mpi_rank())
     {
         m_buffer.clear();
-        m_source_seq_ids.clear();
+        m_source_seq_id_bases.clear();
         return;
     }
 
@@ -342,7 +347,7 @@ single_file_sink::finalize()
     }
 
     m_buffer.clear();
-    m_source_seq_ids.clear();
+    m_source_seq_id_bases.clear();
 }
 
 // ----------------------------------------------------------------------------

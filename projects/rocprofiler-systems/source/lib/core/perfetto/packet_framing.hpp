@@ -71,8 +71,18 @@ append_varint(std::vector<char>& dst, std::uint64_t v)
 
 // Walks one TracePacket payload, copies every field verbatim EXCEPT
 // trusted_packet_sequence_id (field 10), then appends a fresh field 10
-// with `new_seq_id`. Wraps the rewritten payload in the Trace.packets
-// length-delimited frame and appends it to `dst`.
+// carrying `seq_id_offset + original_seq_id` (or just `seq_id_offset`
+// if the input had no seq_id field). Wraps the rewritten payload in
+// the Trace.packets length-delimited frame and appends it to `dst`.
+//
+// Offset (not replace) is the correct semantics because Perfetto's
+// interned-data namespace (event_categories[].iid, event_names[].iid,
+// debug_annotation_names[].iid) is keyed PER trusted_packet_sequence_id.
+// Collapsing distinct input seq_ids into one output value would merge
+// independent iid namespaces and silently misresolve later definitions.
+// Adding a per-source base offset preserves the original seq_id
+// grouping while shifting the whole range into a disjoint window of
+// the merged namespace.
 //
 // Returns false on malformed input (truncated varint, length overflow,
 // or unknown wire type). On false return, `dst` may have been partially
@@ -80,10 +90,12 @@ append_varint(std::vector<char>& dst, std::uint64_t v)
 // rather than risk emitting garbage.
 inline bool
 rewrite_trace_packet(std::vector<char>& dst, const char* packet, std::size_t size,
-                     std::uint32_t new_seq_id)
+                     std::uint32_t seq_id_offset)
 {
     std::vector<char> rewritten;
     rewritten.reserve(size + 5);
+
+    std::uint64_t original_seq_id = 0;
 
     std::size_t pos = 0;
     while(pos < size)
@@ -101,6 +113,7 @@ rewrite_trace_packet(std::vector<char>& dst, const char* packet, std::size_t siz
                 std::uint64_t v = 0;
                 if(!read_varint(packet, size, pos, v)) return false;
                 value_end = pos;
+                if(tag == TRUSTED_SEQ_ID_TAG) original_seq_id = v;
                 break;
             }
             case 2:  // length-delimited
@@ -131,7 +144,7 @@ rewrite_trace_packet(std::vector<char>& dst, const char* packet, std::size_t siz
     }
 
     rewritten.push_back(static_cast<char>(TRUSTED_SEQ_ID_TAG));
-    append_varint(rewritten, new_seq_id);
+    append_varint(rewritten, original_seq_id + seq_id_offset);
 
     dst.push_back(static_cast<char>(TRACE_PACKETS_TAG));
     append_varint(dst, rewritten.size());
