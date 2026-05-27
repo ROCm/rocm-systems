@@ -164,6 +164,8 @@ struct traced_copy_data
                                         timestamp_t                    _end = 0) const;
 };
 
+using traced_copy_data_vec_t = common::container::small_vector<traced_copy_data, 1>;
+
 struct async_copy_data
 {
     hsa_signal_t                  orig_signal    = {};
@@ -171,7 +173,7 @@ struct async_copy_data
     rocprofiler_thread_id_t       tid            = common::get_tid();
     uint64_t                      start_ts       = 0;
     context::correlation_id*      correlation_id = nullptr;
-    std::vector<traced_copy_data> traced_copies  = {};
+    traced_copy_data_vec_t        traced_copies  = {};
 
     auto get_lock() { return std::make_unique<std::unique_lock<std::mutex>>(m_mtx); }
 
@@ -786,13 +788,13 @@ compute_address(const hsa_pitched_ptr_t* val)
  * @brief Appends one logical copy from a batch descriptor when tracing is enabled for it.
  */
 bool
-append_batch_traced_copy_data(std::vector<traced_copy_data>& _traced_copies,
-                              hsa_agent_t                    _dst_agent,
-                              hsa_agent_t                    _src_agent,
-                              const void*                    _dst_address,
-                              const void*                    _src_address,
-                              uint64_t                       _bytes_copied,
-                              std::string_view               _name)
+append_batch_traced_copy_data(traced_copy_data_vec_t& _traced_copies,
+                              hsa_agent_t             _dst_agent,
+                              hsa_agent_t             _src_agent,
+                              const void*             _dst_address,
+                              const void*             _src_address,
+                              uint64_t                _bytes_copied,
+                              std::string_view        _name)
 {
     if(_bytes_copied == 0) return false;
 
@@ -814,7 +816,7 @@ append_batch_traced_copy_data(std::vector<traced_copy_data>& _traced_copies,
  * @brief Expands a batch descriptor into the logical copy records rocprofiler can represent.
  */
 void
-populate_batch_traced_copy_data(std::vector<traced_copy_data>&  _traced_copies,
+populate_batch_traced_copy_data(traced_copy_data_vec_t&         _traced_copies,
                                 const hsa_amd_memory_copy_op_t& _copy_op,
                                 std::string_view                _name)
 {
@@ -938,7 +940,7 @@ async_batch_copy_impl(const hsa_amd_memory_copy_op_t* copy_ops,
 
     for(uint32_t i = 0; i < num_copy_ops; ++i)
     {
-        auto _traced_copies = std::vector<traced_copy_data>{};
+        auto _traced_copies = traced_copy_data_vec_t{};
         populate_batch_traced_copy_data(_traced_copies, copy_ops[i], meta_type::name);
 
         if(_traced_copies.empty()) continue;

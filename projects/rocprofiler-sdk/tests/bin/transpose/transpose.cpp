@@ -310,7 +310,6 @@ run(int rank, int tid, int devid, int argc, char** argv)
     HIP_API_CALL(hipFreeAsync(out, stream));
 
     HIP_API_CALL(hipStreamSynchronize(stream));
-
     HIP_API_CALL(hipStreamDestroy(stream));
 
     mark("end");
