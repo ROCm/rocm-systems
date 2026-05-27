@@ -103,12 +103,11 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run: |
-        for env_dir in /opt/conda/envs/py3.{8,9,10,11,12,13}/; do
-          if [ -d "${env_dir}" ] && [ -x "${env_dir}bin/python3" ]; then
-            echo "Installing requirements into ${env_dir}"
-            "${env_dir}bin/python3" -m pip install -r requirements.txt
-          fi
-        done
+        env_dir=/opt/conda/envs/py3.12/
+        if [ -d "${env_dir}" ] && [ -x "${env_dir}bin/python3" ]; then
+          echo "Installing requirements into ${env_dir}"
+          "${env_dir}bin/python3" -m pip install -r requirements.txt
+        fi
 
     - name: Sync gcov with GCC
       shell: bash
@@ -134,7 +133,7 @@ jobs:
           -DROCPROFSYS_BUILD_CI=ON \
           -DROCPROFSYS_USE_MPI=ON \
           -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
-          "-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13" \
+          -DROCPROFSYS_PYTHON_ENVS=py3.12 \
           -DROCPROFSYS_MAX_THREADS=64 \
           "-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;videodecode;jpegdecode;openmp" \
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
