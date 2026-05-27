@@ -30,7 +30,6 @@ from pathlib import Path
 from typing import Union
 
 import yaml
-from ruamel.yaml.scalarstring import SingleQuotedScalarString
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -460,9 +459,7 @@ def generate_docs_from_per_arch(
                 # Extract only RST and unit (drop 'plain' text)
                 entry = {}
                 if "rst" in metric_info:
-                    entry["rst"] = SingleQuotedScalarString(
-                        format_yaml_scalar(metric_info["rst"])
-                    )
+                    entry["rst"] = format_yaml_scalar(metric_info["rst"])
                 if "unit" in metric_info:
                     entry["unit"] = metric_info["unit"]
                 docs_data[docs_section][docs_metric_name] = entry
