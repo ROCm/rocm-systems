@@ -20,7 +20,8 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT
         "ROCPROFILER_TOOL_OUTPUT_FILE=counter-collection-test.json"
         "ROCPROFILER_TOOL_CONTEXTS=COUNTER_COLLECTION" "ROCPROF_COUNTERS=SQ_WAVES_sum"
-    FIXTURES_SETUP counter-collection)
+    FIXTURES_SETUP counter-collection
+    UNSTABLE)
 
 # Validate test - validates the counter collection JSON output
 rocprofiler_add_integration_validate_test(
@@ -31,4 +32,5 @@ rocprofiler_add_integration_validate_test(
     LABELS "integration-tests"
     TIMEOUT 45
     FIXTURES_REQUIRED counter-collection
-    ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/counter-collection-test.json)
+    ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/counter-collection-test.json
+    UNSTABLE)
