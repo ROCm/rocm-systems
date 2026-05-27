@@ -1,0 +1,220 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
+import argparse
+import os
+import shlex
+import shutil
+import time
+from pathlib import Path
+from typing import Any, Union, cast
+
+from utils.logger import console_debug, console_error, console_log
+from utils.utils_common import (
+    capture_subprocess_output,
+    get_rocprof_cmd,
+    is_only_pc_sampling,
+    perform_attach_detach,
+)
+
+
+def _is_live_attach(
+    profiler_options: Union[list[str], dict[str, Union[str, list[str]]]],
+) -> bool:
+    return (isinstance(profiler_options, list) and "--pid" in profiler_options) or (
+        isinstance(profiler_options, dict)
+        and profiler_options.get("ROCPROF_ATTACH_PID") is not None
+    )
+
+
+class PCSamplingProfiler:
+    """Standalone PC sampling profile pass.
+
+    Encapsulates the rocprof launch, env/option construction, output-path
+    cleanup, and timing/logging for a single PC sampling collection. The
+    counter-collection profiler delegates to this class when block 21 is
+    requested.
+    """
+
+    def __init__(
+        self,
+        args: argparse.Namespace,
+        profiler_mode: str,
+        workload_dir: Union[str, Path],
+    ) -> None:
+        self._args = args
+        self._profiler = profiler_mode
+        self._workload_dir = str(workload_dir)
+
+    def is_requested(self) -> bool:
+        return any(
+            block in ["21", "pc_sampling"] for block in self._args.filter_blocks
+        )
+
+    def is_exclusive(self) -> bool:
+        return is_only_pc_sampling(self._args.filter_blocks)
+
+    def run(
+        self,
+        profiler_options: Union[list[str], dict[str, Any]],
+    ) -> None:
+        """Execute the PC sampling pass and log timing."""
+        total_runs = len(
+            list(Path(self._workload_dir).glob("perfmon/pmc_perf_*.yaml"))
+        )
+        console_log(
+            f"[Run {total_runs + 1}/{total_runs + 1}][PC sampling profile run]"
+        )
+
+        self._cleanup_stale_output(profiler_options)
+
+        start_time = time.time()
+        self._launch(profiler_options)
+        duration = time.time() - start_time
+
+        console_debug(
+            "profiling",
+            f"The time of pc sampling profiling is {int(duration / 60)} m "
+            f"{duration % 60} sec",
+        )
+
+    def _cleanup_stale_output(
+        self,
+        profiler_options: Union[list[str], dict[str, Any]],
+    ) -> None:
+        """Remove a leftover ROCPROF_OUTPUT_PATH in PC-sampling-only sdk runs."""
+        if not (self.is_exclusive() and self._profiler == "rocprofiler-sdk"):
+            return
+        rocprof_output_path = getattr(profiler_options, "ROCPROF_OUTPUT_PATH", None)
+        if rocprof_output_path is None:
+            return
+        rocprof_output_path = Path(rocprof_output_path)
+        if rocprof_output_path.exists():
+            shutil.rmtree(rocprof_output_path, ignore_errors=True)
+            console_debug(
+                f"Removed existing ROCProf output path: {rocprof_output_path}"
+            )
+
+    def _launch(
+        self,
+        profiler_options: Union[list[str], dict[str, Union[str, list[str]]]],
+    ) -> None:
+        """Run rocprof with pc sampling. Current support v3 only."""
+        # Todo:
+        #   - precheck with rocprofv3 –-list-avail
+        method = self._args.pc_sampling_method
+        interval = self._args.pc_sampling_interval
+        unit = "time" if method == "host_trap" else "cycles"
+
+        if get_rocprof_cmd() == "rocprofiler-sdk":
+            self._launch_sdk(profiler_options, method, interval, unit)
+        else:
+            self._launch_v3(profiler_options, method, interval, unit)
+
+    def _launch_sdk(
+        self,
+        profiler_options: Union[list[str], dict[str, Union[str, list[str]]]],
+        method: str,
+        interval: int,
+        unit: str,
+    ) -> None:
+        options = cast(dict[str, Union[str, list[str]]], profiler_options).copy()
+        options.update({
+            # no counter collection for pc sampling
+            "ROCPROF_COUNTER_COLLECTION": "0",
+            "ROCPROF_KERNEL_TRACE": "1",
+            "ROCPROF_OUTPUT_FORMAT": "csv,json",
+            "ROCPROF_OUTPUT_PATH": self._workload_dir,
+            "ROCPROF_OUTPUT_FILE_NAME": "ps_file",
+            "ROCPROFILER_PC_SAMPLING_BETA_ENABLED": "1",
+            "ROCPROF_PC_SAMPLING_UNIT": unit,
+            "ROCPROF_PC_SAMPLING_INTERVAL": str(interval),
+            "ROCPROF_PC_SAMPLING_METHOD": method,
+        })
+        app_cmd = options.pop("APP_CMD") if "APP_CMD" in options else None
+        new_env = os.environ.copy()
+        for key, value in options.items():
+            new_env[key] = value
+        console_debug(f"pc sampling rocprof sdk env vars: {new_env}")
+
+        if _is_live_attach(profiler_options):
+            perform_attach_detach(new_env, options)
+            return
+
+        if app_cmd is None:
+            console_error(
+                "APP_CMD, the workload's executable must be provided "
+                "when not in live attach mode"
+            )
+
+        console_debug(f"pc sampling rocprof sdk user provided command: {app_cmd}")
+        success, _ = capture_subprocess_output(
+            app_cmd, new_env=new_env, profileMode=True
+        )
+        if not success:
+            console_error("PC sampling failed.")
+
+    def _launch_v3(
+        self,
+        profiler_options: Union[list[str], dict[str, Union[str, list[str]]]],
+        method: str,
+        interval: int,
+        unit: str,
+    ) -> None:
+        profiler_options_list = cast(list[str], profiler_options)
+
+        options = [
+            "--kernel-trace",
+            "--pc-sampling-beta-enabled",
+            "--pc-sampling-method",
+            method,
+            "--pc-sampling-unit",
+            unit,
+            "--output-format",
+            "csv",
+            "json",
+            "--pc-sampling-interval",
+            str(interval),
+            "-d",
+            self._workload_dir,
+            "-o",
+            "ps_file",  # TODO: sync up with the name from source in 2100_.yaml
+        ]
+
+        if _is_live_attach(profiler_options):
+            try:
+                pid_idx = profiler_options_list.index("--pid")
+                options += ["--pid", profiler_options_list[pid_idx + 1]]
+                if "--attach-duration-msec" in profiler_options_list:
+                    dur_idx = profiler_options_list.index("--attach-duration-msec")
+                    options += [
+                        "--attach-duration-msec",
+                        profiler_options_list[dur_idx + 1],
+                    ]
+            except (ValueError, IndexError):
+                console_error(
+                    "--pid or --attach-duration-msec option not found in "
+                    "profiler arguments for live attach mode"
+                )
+        else:
+            try:
+                app_cmd_with_separator = profiler_options_list[
+                    profiler_options_list.index("--") :
+                ]
+                options += app_cmd_with_separator
+            except ValueError:
+                console_error(
+                    "APP_CMD, the workload's executable must be provided "
+                    "when not in live attach mode"
+                )
+
+        console_debug(
+            f"rocprof command: {shlex.join([get_rocprof_cmd()] + options)}"
+        )
+        success, _ = capture_subprocess_output(
+            [get_rocprof_cmd()] + options,
+            new_env=os.environ.copy(),
+            profileMode=True,
+        )
+        if not success:
+            console_error("PC sampling failed.")
