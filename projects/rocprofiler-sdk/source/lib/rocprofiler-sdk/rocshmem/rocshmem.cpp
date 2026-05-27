@@ -457,7 +457,7 @@ copy_table(Tp* _orig, uint64_t _tbl_instance, std::integral_constant<size_t, OpI
 
         ROCP_FATAL_IF(_copy_func && _tbl_instance == 0)
             << _info.name << " has non-null function pointer " << _copy_func
-            << " despite this being the first instance of the library being copies";
+            << " despite this being the first instance of the library being copied";
 
         if(!_copy_func)
         {
