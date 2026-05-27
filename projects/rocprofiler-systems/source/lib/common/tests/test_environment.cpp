@@ -564,9 +564,9 @@ protected:
 TEST_F(FakeEnvConfigTest, OperatorSetsValue)
 {
     env_config<fake_env> cfg;
-    cfg.env_name  = "FOO";
-    cfg.env_value = "injected";
-    cfg.override  = 1;
+    cfg.m_env_name  = "FOO";
+    cfg.m_env_value = "injected";
+    cfg.m_override  = 1;
     cfg();
     EXPECT_EQ(fake_environment::get_env("FOO", std::string{}), "injected");
 }
@@ -575,9 +575,9 @@ TEST_F(FakeEnvConfigTest, OperatorRespectsOverrideZero)
 {
     fake_env::setenv("FOO", "original", 1);
     env_config<fake_env> cfg;
-    cfg.env_name  = "FOO";
-    cfg.env_value = "new";
-    cfg.override  = 0;
+    cfg.m_env_name  = "FOO";
+    cfg.m_env_value = "new";
+    cfg.m_override  = 0;
     cfg();
     EXPECT_EQ(fake_environment::get_env("FOO", std::string{}), "original");
 }
@@ -585,9 +585,9 @@ TEST_F(FakeEnvConfigTest, OperatorRespectsOverrideZero)
 TEST_F(FakeEnvConfigTest, VerbosePathExecutes)
 {
     env_config<fake_env> cfg;
-    cfg.env_name  = "FOO";
-    cfg.env_value = "verbose_value";
-    cfg.override  = 1;
+    cfg.m_env_name  = "FOO";
+    cfg.m_env_value = "verbose_value";
+    cfg.m_override  = 1;
     EXPECT_EQ(cfg(true), 0);
     EXPECT_EQ(fake_environment::get_env("FOO", std::string{}), "verbose_value");
 }
@@ -595,9 +595,9 @@ TEST_F(FakeEnvConfigTest, VerbosePathExecutes)
 TEST_F(FakeEnvConfigTest, EmptyNameIsNoop)
 {
     env_config<fake_env> cfg;
-    cfg.env_name  = "";
-    cfg.env_value = "ignored";
-    cfg.override  = 1;
+    cfg.m_env_name  = "";
+    cfg.m_env_value = "ignored";
+    cfg.m_override  = 1;
     EXPECT_EQ(cfg(), -1);
     EXPECT_TRUE(fake_env::store.empty());
 }

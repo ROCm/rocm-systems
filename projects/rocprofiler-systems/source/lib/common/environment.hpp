@@ -4,15 +4,17 @@
 #pragma once
 
 #include "common/defines.h"
-#include <cstdint>
-
 #include "common/join.hpp"
+
+#include <timemory/log/color.hpp>
+#include <timemory/utility/filepath.hpp>
+
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <exception>
 #include <set>
 #include <sstream>
@@ -20,10 +22,12 @@
 #include <stdlib.h>
 #include <string>
 #include <string_view>
-#include <timemory/utility/filepath.hpp>
 #include <type_traits>
 #include <unistd.h>
+#include <unordered_map>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 
 #if !defined(ROCPROFSYS_ENVIRON_LOG_NAME)
 #    if defined(ROCPROFSYS_COMMON_LIBRARY_NAME)
@@ -89,102 +93,119 @@ template <typename EnvType = posix_env>
 struct environment
 {
 private:
+    // env_id is always constructed from a null-terminated string at every call site
+    static const char* fetch_raw_env(std::string_view env_id)
+    {
+        if(env_id.empty()) return nullptr;
+        return EnvType::getenv(
+            env_id.data());  // NOLINT(bugprone-suspicious-stringview-data-usage)
+    }
+
     template <typename Tp>
-    static auto get_env_impl(std::string_view env_id, Tp _default)
+    static std::string get_env_string(std::string_view env_id, const Tp& fallback)
+    {
+        const char* raw = fetch_raw_env(env_id);
+        return raw ? std::string{ raw } : std::string{ fallback };
+    }
+
+    static bool get_env_bool(std::string_view env_id, bool fallback)
+    {
+        const char* raw = fetch_raw_env(env_id);
+        if(!raw) return fallback;
+
+        const std::string_view env_sv{ raw };
+        if(env_sv.empty())
+        {
+            throw std::runtime_error(
+                std::string{ "No boolean value provided for " }.append(env_id));
+        }
+
+        if(env_sv.find_first_not_of("0123456789") == std::string_view::npos)
+        {
+            return static_cast<bool>(std::stoi(raw));
+        }
+
+        std::string lower{ env_sv };
+        std::transform(lower.begin(), lower.end(), lower.begin(),
+                       [](unsigned char chr) { return std::tolower(chr); });
+
+        constexpr auto false_values = std::array{
+            std::string_view{ "off" }, std::string_view{ "false" },
+            std::string_view{ "no" },  std::string_view{ "n" },
+            std::string_view{ "f" },   std::string_view{ "0" },
+        };
+        return !std::any_of(false_values.begin(), false_values.end(),
+                            [&lower](std::string_view val) { return lower == val; });
+    }
+
+    template <typename Tp>
+    static Tp get_env_float(std::string_view env_id, Tp fallback)
+    {
+        const char* raw = fetch_raw_env(env_id);
+        if(!raw) return fallback;
+        try
+        {
+            return static_cast<Tp>(std::stod(raw));
+        } catch(const std::exception& exc)
+        {
+            (void) fprintf(
+                stderr,
+                "[rocprof-sys][get_env] Exception thrown converting "
+                "getenv(\"%s\") = %s to float: %s\n",
+                env_id.data(),  // NOLINT(bugprone-suspicious-stringview-data-usage)
+                raw, exc.what());
+        }
+        return fallback;
+    }
+
+    template <typename Tp>
+    static Tp get_env_integral(std::string_view env_id, Tp fallback)
+    {
+        const char* raw = fetch_raw_env(env_id);
+        if(!raw) return fallback;
+        try
+        {
+            if constexpr(std::is_same_v<Tp, int>)
+            {
+                return std::stoi(raw);
+            }
+            else
+            {
+                return static_cast<Tp>(std::stoll(raw));
+            }
+        } catch(const std::exception& exc)
+        {
+            (void) fprintf(
+                stderr,
+                "[rocprof-sys][get_env] Exception thrown converting "
+                "getenv(\"%s\") = %s to integer: %s\n",
+                env_id.data(),  // NOLINT(bugprone-suspicious-stringview-data-usage)
+                raw, exc.what());
+        }
+        return fallback;
+    }
+
+    template <typename Tp>
+    static auto get_env_impl(std::string_view env_id, const Tp& fallback)
     {
         if constexpr(std::is_same_v<std::decay_t<Tp>, std::string> ||
                      std::is_same_v<std::decay_t<Tp>, std::string_view> ||
-                     std::is_same_v<std::decay_t<Tp>, const char*>)
+                     std::is_same_v<std::decay_t<Tp>, const char*> ||
+                     std::is_same_v<std::decay_t<Tp>, char*>)
         {
-            if(env_id.empty())
-            {
-                return std::string{ _default };
-            }
-            auto* env_var = EnvType::getenv(env_id.data());
-            return env_var ? std::string{ env_var } : std::string{ _default };
+            return get_env_string(env_id, fallback);
         }
         else if constexpr(std::is_same_v<Tp, bool>)
         {
-            if(env_id.empty())
-            {
-                return _default;
-            }
-            auto* env_var = EnvType::getenv(env_id.data());
-            if(!env_var) return _default;
-
-            if(std::string_view{ env_var }.empty())
-            {
-                throw std::runtime_error(std::string{ "No boolean value provided for " } +
-                                         std::string{ env_id });
-            }
-
-            if(std::string_view{ env_var }.find_first_not_of("0123456789") ==
-               std::string_view::npos)
-            {
-                return static_cast<bool>(std::stoi(env_var));
-            }
-
-            for(size_t i = 0; i < strlen(env_var); ++i)
-            {
-                env_var[i] = tolower(env_var[i]);
-            }
-            for(const auto& itr : { "off", "false", "no", "n", "f", "0" })
-            {
-                if(strcmp(env_var, itr) == 0)
-                {
-                    return false;
-                }
-            }
-            return true;
+            return get_env_bool(env_id, fallback);
         }
         else if constexpr(std::is_floating_point_v<Tp>)
         {
-            if(env_id.empty())
-            {
-                return _default;
-            }
-            auto* env_var = EnvType::getenv(env_id.data());
-            if(!env_var)
-            {
-                return _default;
-            }
-            try
-            {
-                return static_cast<Tp>(std::stod(env_var));
-            } catch(const std::exception& e)
-            {
-                fprintf(
-                    stderr,
-                    "[rocprof-sys][get_env] Exception thrown converting getenv(\"%s\") = "
-                    "%s to float: %s\n",
-                    env_id.data(), env_var, e.what());
-            }
-            return _default;
+            return get_env_float(env_id, fallback);
         }
-        else  // integral: int, long, size_t, etc.
+        else
         {
-            if(env_id.empty()) return _default;
-            auto* env_var = EnvType::getenv(env_id.data());
-            if(!env_var) return _default;
-            try
-            {
-                if constexpr(std::is_same_v<Tp, int>)
-                {
-                    return std::stoi(env_var);
-                }
-                else
-                {
-                    return static_cast<Tp>(std::stoll(env_var));
-                }
-            } catch(const std::exception& e)
-            {
-                fprintf(
-                    stderr,
-                    "[rocprof-sys][get_env] Exception thrown converting getenv(\"%s\") = "
-                    "%s to integer: %s\n",
-                    env_id.data(), env_var, e.what());
-            }
-            return _default;
+            return get_env_integral(env_id, fallback);
         }
     }
 
@@ -240,16 +261,16 @@ public:
 template <typename EnvType = posix_env>
 struct ROCPROFSYS_INTERNAL_API env_config
 {
-    std::string env_name  = {};
-    std::string env_value = {};
-    int         override  = 0;
+    std::string m_env_name  = {};
+    std::string m_env_value = {};
+    int         m_override  = 0;
 
     auto operator()(bool _verbose = false) const
     {
-        if(env_name.empty()) return -1;
-        ROCPROFSYS_ENVIRON_LOG(_verbose, "setenv(\"%s\", \"%s\", %i)\n", env_name.c_str(),
-                               env_value.c_str(), override);
-        return EnvType::setenv(env_name.c_str(), env_value.c_str(), override);
+        if(m_env_name.empty()) return -1;
+        ROCPROFSYS_ENVIRON_LOG(_verbose, "setenv(\"%s\", \"%s\", %i)\n",
+                               m_env_name.c_str(), m_env_value.c_str(), m_override);
+        return EnvType::setenv(m_env_name.c_str(), m_env_value.c_str(), m_override);
     }
 };
 
@@ -259,9 +280,9 @@ struct ROCPROFSYS_INTERNAL_API env_config
 
 template <typename Tp>
 inline auto
-get_env(std::string_view env_id, Tp&& _default)
+get_env(std::string_view env_id, Tp&& value_default)
 {
-    return environment<>::get_env(env_id, std::forward<Tp>(_default));
+    return environment<>::get_env(env_id, std::forward<Tp>(value_default));
 }
 
 template <typename Tp = std::string>
@@ -273,58 +294,65 @@ get_env(std::string_view env_id)
 
 template <typename Tp>
 inline void
-set_env(const std::string& env_var, const Tp& _val, int override)
+set_env(const std::string& env_var, const Tp& value, int override)
 {
-    environment<>::set_env(env_var, _val, override);
+    environment<>::set_env(env_var, value, override);
 }
 
 template <typename Tp>
 inline auto
-get_env_choice(std::string_view env_id, Tp _default, std::set<Tp> _choices)
+get_env_choice(std::string_view env_id, Tp value_default, std::set<Tp> value_choices)
 {
-    return environment<>::get_env_choice(env_id, _default, std::move(_choices));
+    return environment<>::get_env_choice(env_id, value_default, std::move(value_choices));
 }
 
 // ── Env-vector helpers (operate on std::vector<std::string>, not the real env) ──
 
 inline void
-remove_env(std::vector<std::string>& _environ, std::string_view _env_var,
-           const std::unordered_set<std::string>& _original_envs)
+remove_env(std::vector<std::string>& env_list, std::string_view env_variable,
+           const std::unordered_set<std::string>& original_envs)
 {
-    auto key = join("", _env_var, "=");
+    auto key = join("", env_variable, "=");
 
-    _environ.erase(std::remove_if(_environ.begin(), _environ.end(),
+    env_list.erase(std::remove_if(env_list.begin(), env_list.end(),
                                   [&key](const std::string& entry) {
                                       return std::string_view{ entry }.find(key) == 0;
                                   }),
-                   _environ.end());
+                   env_list.end());
 
     // Restore from original_envs if previously existed
-    for(const auto& orig : _original_envs)
+    for(const auto& orig : original_envs)
     {
-        if(std::string_view{ orig }.find(key) == 0) _environ.emplace_back(orig);
+        if(std::string_view{ orig }.find(key) == 0) env_list.emplace_back(orig);
     }
 }
 
 inline std::string
 discover_llvm_libdir_for_ompt(bool verbose = false)
 {
-    auto strip = [](std::string s) {
-        if(!s.empty() && s.back() == '/') s.pop_back();
-        return s;
+    auto strip = [](std::string value_to_strip) {
+        if(!value_to_strip.empty() && value_to_strip.back() == '/')
+        {
+            value_to_strip.pop_back();
+        }
+        return value_to_strip;
     };
 
     // Common ROCm envs
     const auto rocm_dir  = strip(get_env<std::string>("ROCM_PATH", "/opt/rocm"));
     const auto rocmv_dir = strip(get_env<std::string>("ROCmVersion_DIR", ""));
 
-    std::vector<std::string> candidates;
-    candidates.reserve(6);
+    const constexpr auto number_of_candidates = 6;
 
-    auto push_unique = [&](const std::string& p) {
-        if(p.empty()) return;
-        if(std::find(candidates.begin(), candidates.end(), p) == candidates.end())
-            candidates.emplace_back(p);
+    std::vector<std::string> candidates;
+    candidates.reserve(number_of_candidates);
+
+    auto push_unique = [&](const std::string& candidate) {
+        if(candidate.empty()) return;
+        if(std::find(candidates.begin(), candidates.end(), candidate) == candidates.end())
+        {
+            candidates.emplace_back(candidate);
+        }
     };
 
     if(!rocmv_dir.empty())
@@ -343,11 +371,11 @@ discover_llvm_libdir_for_ompt(bool verbose = false)
     };
 
     // Pick the first candidate that contains libomptarget.so
-    auto it = std::find_if(candidates.begin(), candidates.end(), has_libomptarget);
-    if(it != candidates.end())
+    auto result = std::find_if(candidates.begin(), candidates.end(), has_libomptarget);
+    if(result != candidates.end())
     {
-        ROCPROFSYS_ENVIRON_LOG(verbose, "Using LLVM libdir: %s\n", it->c_str());
-        return *it;
+        ROCPROFSYS_ENVIRON_LOG(verbose, "Using LLVM libdir: %s\n", result->c_str());
+        return *result;
     }
 
     ROCPROFSYS_ENVIRON_LOG(verbose,
@@ -646,7 +674,9 @@ consolidate_env_entries(std::vector<std::string>& envp)
 
         std::size_t total_parts_length = 0;
         for(const auto& part : parts)
+        {
             total_parts_length += part.size();
+        }
 
         result.reserve(result.size() + total_parts_length + (parts.size() - 1));
 
