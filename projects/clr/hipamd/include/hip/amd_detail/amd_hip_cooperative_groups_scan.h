@@ -247,7 +247,7 @@ namespace impl {
 
       if (laneId) {
         mask <<= 64 - laneId;
-        nextBit -= __builtin_clzll(mask) + 1;
+        nextBit -= mask? __builtin_clzll(mask) + 1 : 0;
       } else {
         mask = 0ull;
       }
