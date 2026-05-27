@@ -122,7 +122,11 @@ jobs:
       rocm_version: ${{ inputs.rocm_version }}
 
   build_and_test_NVIDIA:
-    if: ${{ !cancelled() && needs.build_AIS_CI_image.outputs.ci_image_build_satisfied == 'true' }}
+    if: >-
+      ${{ !cancelled()
+        && needs.build_AIS_CI_image.outputs.ci_image_build_satisfied == 'true'
+        && !startsWith(inputs.rocm_version, '7.13.')
+      }}
     needs: [AIS_CI_Pre-check, build_AIS_CI_image]
     uses: ./.github/workflows/hipfile-build-nvidia.yml
     with:

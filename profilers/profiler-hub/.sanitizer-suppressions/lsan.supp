@@ -1,0 +1,3 @@
+# LSan suppressions for profiler-hub (paired with ASan).
+# Format: leak:<symbol-or-lib>
+# See https://github.com/google/sanitizers/wiki/AddressSanitizerLeakSanitizer

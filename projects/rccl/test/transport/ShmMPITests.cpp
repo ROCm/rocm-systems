@@ -337,7 +337,8 @@ public:
             {
                 TEST_INFO("Skipping CE memcpy test - NCCL_SHM_USE_CUDA_MEMCPY not set to '1'");
                 TEST_INFO("To enable this test, set: export NCCL_SHM_USE_CUDA_MEMCPY=1");
-            } // Skip test gracefully
+            }
+            GTEST_SKIP() << "NCCL_SHM_USE_CUDA_MEMCPY=1 required for ShmWithMemcpyTest";
         }
 
         // Validate preconditions
