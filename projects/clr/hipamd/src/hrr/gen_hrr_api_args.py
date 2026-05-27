@@ -134,10 +134,6 @@ PASSTHROUGH_ONLY: Set[str] = {
     "hipModuleGetFunction",
 }
 
-# APIs where the generated shim writes event BEFORE calling real fn
-# (so we capture input args even if the call fails; default is AFTER)
-PRE_CALL_APIS: Set[str] = set()
-
 # ---------------------------------------------------------------------------
 # Playback manual APIs — implemented by hand in hip_playback.cpp
 # ---------------------------------------------------------------------------
