@@ -242,44 +242,36 @@ private:
             builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::CP_PERFMON_CNTL_ADDR, value);
     }
 
-public:
-    explicit GpuPmcBuilder(const AgentInfo* agent_info)
-    : PmcBuilder()
-    , builder(acquire_ip_offset_table(agent_info))
-    , se_number_(agent_info->se_num / agent_info->xcc_num)
-    , xcc_number_(agent_info->xcc_num)
-    , sarrays_per_se(agent_info->shader_arrays_per_se)
+    // Populate active_wgp_indices_[se][sa] for the per-WGP read loop in
+    // bIsWGPcounter11 below.
+    //
+    // When the DRM cu_bitmap is available (V2 registration on GFX11+ parts
+    // with (se, sa) inside the kernel ABI window of [NUM_SE][NUM_SA_PER_SE]),
+    // the highest set bit gives the max WGP coordinate to consider, and
+    // harvested WGPs (no CU bits set in their pair-window) are skipped
+    // automatically. That avoids the aliased reads previously produced on
+    // GFX11+ parts with WGP harvesting.
+    //
+    // For any (se, sa) where the bitmap is unavailable (V0/V1 agents,
+    // pre-GFX11 parts, or coordinates outside the DRM ABI window such as
+    // Navi31's SE >= 4), synthesize a fully-active bitmap of wgp_per_sa
+    // contiguous WGPs (two CU bits per WGP). That collapses the fallback
+    // path into the same loop and preserves pre-fix sequential iteration.
+    //
+    // The (se < bitmap_se_lim && sa < bitmap_sa_lim) guard on the element
+    // read is a hard correctness requirement: aqlprofile_cu_bitmap_t::bits
+    // is a C uint32_t array sized by the kernel-ABI-fixed dimensions, so
+    // reading agent_info->cu_bitmap.bits[se][sa] for out-of-window indices
+    // would be UB on the C array, not a guaranteed zero. Derive the
+    // iteration bounds from the type itself so they cannot drift from the
+    // bitmap layout.
+    void build_active_wgp_indices(const AgentInfo* agent_info)
     {
-        this->wgp_per_sa = (agent_info->cu_num / 2 + sarrays_per_se * se_number_ - 1) /
-                           (se_number_ * sarrays_per_se);
-
         // Size the per-(SE, SA) WGP index tables to the actual chip topology.
         // This fits Navi31 (6 x 2), MI200 (8 x 1), and future GPUs with larger
         // SE x SA-per-SE topologies, none of which fit in a hardcoded kMaxSA bound.
         active_wgp_indices_.assign(se_number_, std::vector<std::vector<uint32_t>>(sarrays_per_se));
 
-        // Build per-(SE, SA) active WGP index tables.
-        //
-        // When the DRM cu_bitmap is available (V2 registration on GFX11+ parts
-        // with (se, sa) inside the kernel ABI window of [NUM_SE][NUM_SA_PER_SE]),
-        // the highest set bit gives the max WGP coordinate to consider, and
-        // harvested WGPs (no CU bits set in their pair-window) are skipped
-        // automatically. That avoids the aliased reads previously produced on
-        // GFX11+ parts with WGP harvesting.
-        //
-        // For any (se, sa) where the bitmap is unavailable (V0/V1 agents,
-        // pre-GFX11 parts, or coordinates outside the DRM ABI window such as
-        // Navi31's SE >= 4), synthesize a fully-active bitmap of wgp_per_sa
-        // contiguous WGPs (two CU bits per WGP). That collapses the fallback
-        // path into the same loop and preserves pre-fix sequential iteration.
-        //
-        // The (se < bitmap_se_lim && sa < bitmap_sa_lim) guard on the element
-        // read is a hard correctness requirement: aqlprofile_cu_bitmap_t::bits
-        // is a C uint32_t array sized by the kernel-ABI-fixed dimensions, so
-        // reading agent_info->cu_bitmap.bits[se][sa] for out-of-window indices
-        // would be UB on the C array, not a guaranteed zero. Derive the
-        // iteration bounds from the type itself so they cannot drift from the
-        // bitmap layout.
         constexpr uint32_t kMaxWgpPerSa  = 16;
         constexpr uint32_t bitmap_se_lim = std::extent_v<decltype(aqlprofile_cu_bitmap_t::bits), 0>;
         constexpr uint32_t bitmap_sa_lim = std::extent_v<decltype(aqlprofile_cu_bitmap_t::bits), 1>;
@@ -312,6 +304,20 @@ public:
                 }
             }
         }
+    }
+
+public:
+    explicit GpuPmcBuilder(const AgentInfo* agent_info)
+    : PmcBuilder()
+    , builder(acquire_ip_offset_table(agent_info))
+    , se_number_(agent_info->se_num / agent_info->xcc_num)
+    , xcc_number_(agent_info->xcc_num)
+    , sarrays_per_se(agent_info->shader_arrays_per_se)
+    {
+        this->wgp_per_sa = (agent_info->cu_num / 2 + sarrays_per_se * se_number_ - 1) /
+                           (se_number_ * sarrays_per_se);
+
+        build_active_wgp_indices(agent_info);
 
         // Due to MI300 CP firmware issue we need to use mem_mapped_register mode to patch for GCEA
         // hang. Otherwise both perfcounters mode and mem_mapped_register mode should work.
@@ -796,9 +802,6 @@ public:
 
                         if(bIsWGPcounter11)
                         {
-                            // Use harvesting-aware WGP index table for this (SE, SA).
-                            // .at() gives bounds-checked access against the dynamic
-                            // [se_number_][sarrays_per_se] storage.
                             const auto& indices = active_wgp_indices_.at(se_index).at(sarray);
                             for(uint32_t wgp : indices)
                             {
