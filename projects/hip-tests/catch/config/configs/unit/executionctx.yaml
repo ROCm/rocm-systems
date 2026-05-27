@@ -12,7 +12,7 @@ executionctx:
     <<: *level_2
   Unit_hipExecutionCtxStreamDestroy_Negative:
     <<: *level_2
-    disabled: [amd_linux, amd_windows]
+    disabled: [amd_linux, amd_windows, amd_wsl]
   Unit_hipExecutionCtxRecordWaitEvent_Sanity:
     <<: *level_2
   Unit_hipExecutionCtxRecordEventFunctional:

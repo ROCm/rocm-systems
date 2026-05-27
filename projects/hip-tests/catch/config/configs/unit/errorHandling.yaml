@@ -81,8 +81,8 @@ errorHandling:
   Unit_hipDynamicLogging_Positive_Basic:
     <<: *level_2
     # Following tests disabled as it should be a local perf test
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
   Unit_hipDynamicLogging_Positive_MultipleEnableDisable:
     <<: *level_2
     # Following tests disabled as it should be a local perf test
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]

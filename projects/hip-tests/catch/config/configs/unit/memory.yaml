@@ -155,15 +155,15 @@ memory:
   Unit_hipMemcpy2D_H2D_D2D_D2H:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
   Unit_hipMemcpy2D_H2D_D2D_D2H_WithOffset:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
   Unit_hipMemcpy2D_H2D_D2D_D2H_Managed_WithOffset:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
   Unit_hipMemcpy2D_multiDevice_Basic_Size_Test:
     <<: *level_2
     tags: [transfer]
@@ -183,7 +183,7 @@ memory:
   Unit_hipMemcpy2DAsync_Host_N_PinnedMem:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
   Unit_hipMemcpy2DAsync_multiDevice_StreamOnDiffDevice:
     <<: *level_2
     tags: [multigpu]
@@ -294,7 +294,7 @@ memory:
   Unit_hipMemcpyHtoAAsync_BasicTstsWithDiffStreams:
     <<: *level_2
     # Rock_Linux_Failures_on_gfx94X
-    disabled: [amd_linux]
+    disabled: [amd_linux, amd_wsl]
     tags: [transfer, image]
   Unit_hipMemcpyHtoAAsync_MultiDevice:
     <<: *level_2
@@ -324,13 +324,13 @@ memory:
     <<: *level_2
     # disabling due to flaky segfault in CI nightly https://github.com/ROCm/TheRock/issues/4111
     tags: []
-    disabled: [amd_linux]
+    disabled: [amd_linux, amd_wsl]
   Unit_hipHostRegister_DirectReferenceFromKernel: *level_2
   Unit_hipHostRegister_DirectReferenceMultGpu:
     <<: *level_2
     tags: []
     # Rock_Linux_Failures_on_gfx94X
-    disabled: [amd_linux]
+    disabled: [amd_linux, amd_wsl]
   Unit_hipHostRegister_SameChunkRepeat:
     <<: *level_2
     tags: [alloc]
@@ -347,7 +347,7 @@ memory:
     <<: *level_2
     tags: [alloc]
     # disabled due to flaky segfault in CI nightly https://github.com/ROCm/TheRock/issues/4111
-    disabled: [amd_linux]
+    disabled: [amd_linux, amd_wsl]
   Unit_hipHostRegister_AsyncApis:
     <<: *level_2
     tags: [alloc]
@@ -511,7 +511,7 @@ memory:
   Unit_hipMemset3DAsync_capturehipMemset3DAsync:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [memset]
   Unit_hipMemset3D_Capture: *level_2
   Unit_hipMemset2D_BasicFunctional:
@@ -526,7 +526,7 @@ memory:
   Unit_hipMemset2DAsync_capturehipMemset2DAsync:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [memset]
   Unit_hipMemset2D_Capture: *level_2
   Unit_hipHostMalloc_ArgValidation:
@@ -802,7 +802,7 @@ memory:
   Unit_hipMemcpy3DPeerAsync_BasicFunctional:
     <<: *level_2
     # Rock_Linux_Failures_on_gfx94X
-    disabled: [amd_linux]
+    disabled: [amd_linux, amd_wsl]
     tags: [multigpu, transfer, image]
   Unit_hipMemcpy3DPeerAsync_NegativeTsts:
     <<: *level_2
@@ -978,7 +978,7 @@ memory:
   Unit_hipPointerSetAttribute_Positive_SyncMemops:
     <<: *level_2
     # Below test is disabled due to defect EXSWHTEC-347
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [query]
   Unit_hipPointerSetAttribute_Negative_Parameters:
     <<: *level_2
@@ -1047,14 +1047,14 @@ memory:
   Unit_hipMemPoolSetGetAccess_Positive_MultipleGPU:
     <<: *level_2
     tags: [alloc, multigpu]
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
   Unit_hipMemPoolSetGetAccess_Positive_P2P:
     <<: *level_2
     tags: [alloc, multigpu]
   Unit_hipMemPoolSetAccess_Negative_Parameters:
     <<: *level_2
     # SWDEV-435667: Below tests failing randomly in stress test on 08/12/23
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [alloc]
   Unit_hipMemPoolSetAccess_SetAccess:
     <<: *level_2
@@ -1065,7 +1065,7 @@ memory:
   Unit_hipMemPoolGetAccess_Negative_Parameters:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [alloc]
   Unit_hipMemPoolGetAccess_SetGet:
     <<: *level_2
@@ -1085,12 +1085,12 @@ memory:
   Unit_hipMemPoolSetAttribute_EventDependencies:
     <<: *level_2
     # mlsejenkins_Window_Failures_on_gfx1201
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [alloc]
   Unit_hipMemPoolSetAttribute_Negative_Parameters:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [alloc]
   Unit_hipMemPoolSetAttribute_ResetMemHighAttr:
     <<: *level_2
@@ -1098,7 +1098,7 @@ memory:
   Unit_hipMemPoolGetAttribute_Negative_Parameters:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [alloc]
   Unit_hipMemPoolGetAttribute_SetGet:
     <<: *level_2
@@ -1150,7 +1150,7 @@ memory:
     tags: [alloc, multigpu]
   Unit_hipMemPoolTrimTo_Multithreaded:
     <<: *level_2
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [alloc]
   Unit_hipMallocFromPoolAsync_Basic_OneAlloc:
     <<: *level_2
@@ -1187,11 +1187,11 @@ memory:
     tags: [alloc]
   Unit_hipMallocFromPoolAsync_MThread_MaxThresh:
     <<: *level_2
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [alloc]
   Unit_hipMallocFromPoolAsync_MThread_CommonMpool_DefaultMempool:
     <<: *level_2
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [alloc]
   Unit_hipMallocFromPoolAsync_MThread_CommonMpool_MaxThresh:
     <<: *level_2
@@ -1503,7 +1503,7 @@ memory:
   Unit_hipMalloc_Allocate90PercentOfDeviceMemory:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [alloc]
   Unit_hipMalloc_Allocate110PercentOfDeviceMemory: *level_2
   Unit_hipMalloc_AllocateAvailableVRAMAndPossibleRAM: *level_2
@@ -1767,7 +1767,7 @@ memory:
     tags: [query]
   Unit_hipMemPrefetchBatchAsync_LocationDistribution:
     <<: *level_2
-    disabled: [amd_windows, amd_linux]
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [query]
   Unit_hipMemPrefetchBatchAsync_RoundTripDataIntegrity:
     <<: *level_2
@@ -1912,7 +1912,7 @@ memory:
   Unit_hipMemAdvise_TstAlignedAllocMem_XNACK:
     <<: *level_2
     # Rock_Linux_Failures_on_gfx94X
-    disabled: [amd_linux]
+    disabled: [amd_linux, amd_wsl]
     tags: [query]
   Unit_hipMemAdvise_ReadMosltyMgpuTst:
     <<: *level_2
@@ -1958,12 +1958,12 @@ memory:
   Unit_hipFreeAsync_Negative_Parameters:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [alloc]
   Unit_hipFreeAsync_capturehipFreeAsync:
     <<: *level_2
     # Rock_Linux_Failures_on_gfx94X
-    disabled: [amd_linux]
+    disabled: [amd_linux, amd_wsl]
     tags: [alloc]
   Unit_hipFreeHost_InvalidMemory:
     <<: *level_2
@@ -2052,13 +2052,13 @@ memory:
   Unit_hipMallocMipmappedArray_DiffSizes:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [alloc]
   Unit_hipMallocMipmappedArray_MultiThread:
     <<: *level_2
     tags: [alloc]
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
   Unit_hipMallocMipmappedArray_happy: *level_2
   Unit_hipMallocMipmappedArray_Negative_NullArrayPtr:
     <<: *level_2
@@ -2075,7 +2075,7 @@ memory:
   Unit_hipMallocMipmappedArray_Negative_InvalidFlags:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [alloc]
   Unit_hipMallocMipmappedArray_Negative_InvalidFormat:
     <<: *level_2
@@ -2112,7 +2112,7 @@ memory:
   Unit_hipGetMipmappedArrayLevel_Negative:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [alloc]
   Unit_hipFreeMipmappedArrayImplicitSyncArray: *level_2
   Unit_hipFreeMipmappedArray_Negative_Nullptr:
@@ -2121,7 +2121,7 @@ memory:
   Unit_hipFreeMipmappedArrayMultiTArray:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
   Unit_hipMallocArray_DiffSizes:
     <<: *level_2
     tags: [alloc, image]
@@ -2191,27 +2191,27 @@ memory:
   Unit_hipHostAlloc_Basic:
     <<: *level_2
     # SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [alloc]
   Unit_hipHostAlloc_Default:
     <<: *level_2
     # SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [alloc]
   Unit_hipHostAlloc_Negative_NonCoherent:
     <<: *level_2
     # SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [alloc]
   Unit_hipHostAlloc_Negative_Coherent:
     <<: *level_2
     # SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [alloc]
   Unit_hipHostAlloc_Negative_NumaUser:
     <<: *level_2
     # SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [alloc]
   Unit_hipHostAlloc_ArgValidation:
     <<: *level_2

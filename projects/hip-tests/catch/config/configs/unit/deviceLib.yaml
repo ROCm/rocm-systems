@@ -243,7 +243,7 @@ deviceLib:
   Unit_Test_makechar_functionality:
     <<: *level_2
     # Rock_Linux_Failures_on_gfx94X
-    disabled: [amd_linux]
+    disabled: [amd_linux, amd_wsl]
     tags: [types]
   Unit_bf16_basic:
     <<: *level_2
@@ -488,4 +488,4 @@ deviceLib:
     # "============================TheRock_Bump_Windows_timeout #4547==========================="
     # "=== This is newly added test to check ASAN memory errors deduced from rocDecode ==="
     # "=== during ASAN/memleak detection work on Linux ==="
-    disabled: [amd_linux, amd_windows]
+    disabled: [amd_linux, amd_windows, amd_wsl]

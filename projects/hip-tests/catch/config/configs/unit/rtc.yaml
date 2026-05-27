@@ -42,7 +42,7 @@ rtc:
   Unit_RTC_LinkDestroy_Default:
     <<: *level_2
     # SWDEV-450909: Test failed in stress testing
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [link]
   Unit_RTC_LinkerAPI:
     <<: *level_2
