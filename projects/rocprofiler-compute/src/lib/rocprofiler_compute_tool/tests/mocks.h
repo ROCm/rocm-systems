@@ -8,18 +8,17 @@
 
 #include <gmock/gmock.h>
 
-#include <optional>
 #include <string>
 #include <string_view>
 
 class MockInputParameters : public rocprofiler_compute_tool::InputParameters
 {
 public:
-    std::optional<std::string_view> get_output_path() override;
-    std::optional<std::string_view> get_requested_counters() override;
-    std::optional<std::string_view> get_iteration_multiplexing_mode() override;
-    std::optional<std::string_view> get_kernel_filter_include_regex() override;
-    std::optional<std::string_view> get_kernel_filter_range() override;
+    std::string_view get_output_path() override;
+    std::string_view get_requested_counters() override;
+    std::string_view get_iteration_multiplexing_mode() override;
+    std::string_view get_kernel_filter_include_regex() override;
+    std::string_view get_kernel_filter_range() override;
 
     void set_output_path(const std::string& output_path);
     void set_requested_counters(const std::string& counters);

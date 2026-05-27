@@ -6,38 +6,38 @@
 
 #include <utility>
 
-std::optional<std::string_view> MockInputParameters::get_output_path()
+std::string_view MockInputParameters::get_output_path()
 {
-    if (!m_output_path_set)
-        return std::nullopt;
+    if (!m_output_path_set || m_output_path.empty())
+        return rocprofiler_compute_tool::EnvInputParameters::get_default_output_path();
     return std::string_view{m_output_path};
 }
 
-std::optional<std::string_view> MockInputParameters::get_requested_counters()
+std::string_view MockInputParameters::get_requested_counters()
 {
-    if (!m_requested_counters_set)
-        return std::nullopt;
+    if (!m_requested_counters_set || m_requested_counters.empty())
+        return rocprofiler_compute_tool::EnvInputParameters::get_default_requested_counters();
     return std::string_view{m_requested_counters};
 }
 
-std::optional<std::string_view> MockInputParameters::get_iteration_multiplexing_mode()
+std::string_view MockInputParameters::get_iteration_multiplexing_mode()
 {
-    if (!m_iteration_multiplexing_mode_set)
-        return std::nullopt;
+    if (!m_iteration_multiplexing_mode_set || m_iteration_multiplexing_mode.empty())
+        return rocprofiler_compute_tool::EnvInputParameters::get_default_iteration_multiplexing_mode();
     return std::string_view{m_iteration_multiplexing_mode};
 }
 
-std::optional<std::string_view> MockInputParameters::get_kernel_filter_include_regex()
+std::string_view MockInputParameters::get_kernel_filter_include_regex()
 {
-    if (!m_kernel_filter_include_regex_set)
-        return std::nullopt;
+    if (!m_kernel_filter_include_regex_set || m_kernel_filter_include_regex.empty())
+        return rocprofiler_compute_tool::EnvInputParameters::get_default_kernel_filter_include_regex();
     return std::string_view{m_kernel_filter_include_regex};
 }
 
-std::optional<std::string_view> MockInputParameters::get_kernel_filter_range()
+std::string_view MockInputParameters::get_kernel_filter_range()
 {
-    if (!m_kernel_filter_range_set)
-        return std::nullopt;
+    if (!m_kernel_filter_range_set || m_kernel_filter_range.empty())
+        return rocprofiler_compute_tool::EnvInputParameters::get_default_kernel_filter_range();
     return std::string_view{m_kernel_filter_range};
 }
 

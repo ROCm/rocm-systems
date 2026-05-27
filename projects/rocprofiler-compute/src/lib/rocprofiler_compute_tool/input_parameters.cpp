@@ -4,6 +4,7 @@
 
 #include "environ_cache.h"
 
+#include <iostream>
 #include <utility>
 
 using namespace rocprofiler_compute_tool;
@@ -13,27 +14,40 @@ EnvInputParameters::EnvInputParameters(std::shared_ptr<const EnvironCache> envir
 {
 }
 
-std::optional<std::string_view> EnvInputParameters::get_output_path()
+std::string_view EnvInputParameters::get_or_warn(std::string_view env_var_name,
+                                                 std::string_view default_value)
 {
-    return m_environ->get("ROCPROF_OUTPUT_PATH");
+    const auto v = m_environ->get(env_var_name);
+    if (v && !v->empty())
+        return *v;
+
+    const auto reason = v ? std::string_view{"empty"} : std::string_view{"unset"};
+    std::clog << "\033[33m[rocprofiler-compute] WARNING: " << env_var_name << " is " << reason
+              << "; defaulting to \"" << default_value << "\"\033[0m" << std::endl;
+    return default_value;
 }
 
-std::optional<std::string_view> EnvInputParameters::get_requested_counters()
+std::string_view EnvInputParameters::get_output_path()
 {
-    return m_environ->get("ROCPROF_COUNTERS");
+    return get_or_warn("ROCPROF_OUTPUT_PATH", kDefaultOutputPath);
 }
 
-std::optional<std::string_view> EnvInputParameters::get_iteration_multiplexing_mode()
+std::string_view EnvInputParameters::get_requested_counters()
 {
-    return m_environ->get("ROCPROF_ITERATION_MULTIPLEXING");
+    return get_or_warn("ROCPROF_COUNTERS", kDefaultRequestedCounters);
 }
 
-std::optional<std::string_view> EnvInputParameters::get_kernel_filter_include_regex()
+std::string_view EnvInputParameters::get_iteration_multiplexing_mode()
 {
-    return m_environ->get("ROCPROF_KERNEL_FILTER_INCLUDE_REGEX");
+    return get_or_warn("ROCPROF_ITERATION_MULTIPLEXING", kDefaultIterationMultiplexingMode);
 }
 
-std::optional<std::string_view> EnvInputParameters::get_kernel_filter_range()
+std::string_view EnvInputParameters::get_kernel_filter_include_regex()
 {
-    return m_environ->get("ROCPROF_KERNEL_FILTER_RANGE");
+    return get_or_warn("ROCPROF_KERNEL_FILTER_INCLUDE_REGEX", kDefaultKernelFilterIncludeRegex);
+}
+
+std::string_view EnvInputParameters::get_kernel_filter_range()
+{
+    return get_or_warn("ROCPROF_KERNEL_FILTER_RANGE", kDefaultKernelFilterRange);
 }

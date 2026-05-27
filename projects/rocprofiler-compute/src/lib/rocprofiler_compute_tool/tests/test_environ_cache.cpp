@@ -96,14 +96,9 @@ TEST_F(TestEnvironCache, EnvInputParametersInjectedCache_ReturnsInjectedValues)
                              "ROCPROF_KERNEL_FILTER_RANGE=3-7"}};
     EnvInputParameters input_parameters{std::make_shared<EnvironCache>(envp.data())};
 
-    EXPECT_EQ(input_parameters.get_output_path(),
-              std::optional<std::string_view>{std::string_view{"/tmp/injected"}});
-    EXPECT_EQ(input_parameters.get_requested_counters(),
-              std::optional<std::string_view>{std::string_view{"SQ_WAVES"}});
-    EXPECT_EQ(input_parameters.get_iteration_multiplexing_mode(),
-              std::optional<std::string_view>{std::string_view{"kernel"}});
-    EXPECT_EQ(input_parameters.get_kernel_filter_include_regex(),
-              std::optional<std::string_view>{std::string_view{".*gemm.*"}});
-    EXPECT_EQ(input_parameters.get_kernel_filter_range(),
-              std::optional<std::string_view>{std::string_view{"3-7"}});
+    EXPECT_EQ(input_parameters.get_output_path(), std::string_view{"/tmp/injected"});
+    EXPECT_EQ(input_parameters.get_requested_counters(), std::string_view{"SQ_WAVES"});
+    EXPECT_EQ(input_parameters.get_iteration_multiplexing_mode(), std::string_view{"kernel"});
+    EXPECT_EQ(input_parameters.get_kernel_filter_include_regex(), std::string_view{".*gemm.*"});
+    EXPECT_EQ(input_parameters.get_kernel_filter_range(), std::string_view{"3-7"});
 }
