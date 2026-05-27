@@ -152,13 +152,14 @@ void SvmProfileControl::PollSmi() {
 
   for (int i = 0; i < core::Runtime::runtime_singleton_->gpu_agents().size(); i++) {
     auto gpu_agent = core::Runtime::runtime_singleton_->gpu_agents()[i];
-    auto err = gpu_agent->driver().OpenSMI(gpu_agent->node_id(), &files[i + 1].fd);
-    assert(err == HSA_STATUS_SUCCESS);
+    [[maybe_unused]] auto err = gpu_agent->driver().OpenSMI(gpu_agent->node_id(), &files[i + 1].fd);
+    assert(err == HSA_STATUS_SUCCESS && "OpenSMI failed - SVM profiling disabled");
     files[i + 1].events = POLLIN;
     files[i + 1].revents = 0;
     // Enable collecting masked events.
     auto wrote = write(files[i + 1].fd, &events, sizeof(events));
     assert(wrote == sizeof(events));
+    (void)wrote;
   }
   MAKE_NAMED_SCOPE_GUARD(smiGuard, [&]() {
     for (int i = 1; i < files.size(); i++) {

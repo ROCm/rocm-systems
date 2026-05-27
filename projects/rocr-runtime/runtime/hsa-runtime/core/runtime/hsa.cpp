@@ -286,7 +286,9 @@ hsa_status_t
   uint16_t system_version_major = 0;
   hsa_status_t status = core::Runtime::runtime_singleton_->GetSystemInfo(
       HSA_SYSTEM_INFO_VERSION_MAJOR, &system_version_major);
-  assert(status == HSA_STATUS_SUCCESS);
+  if (status != HSA_STATUS_SUCCESS) {
+    return status;
+  }
 
   if (version_major <= system_version_major) {
     uint16_t system_version_minor = 0;
@@ -659,7 +661,9 @@ hsa_status_t
     uint16_t agent_version_major = 0;
     hsa_status_t status =
         agent->GetInfo(HSA_AGENT_INFO_VERSION_MAJOR, &agent_version_major);
-    assert(status == HSA_STATUS_SUCCESS);
+    if (status != HSA_STATUS_SUCCESS) {
+      return status;
+    }
 
     if (version_major <= agent_version_major) {
       uint16_t agent_version_minor = 0;
@@ -693,7 +697,9 @@ hsa_status_t hsa_agent_major_extension_supported(uint16_t extension, hsa_agent_t
   if (agent->device_type() == core::Agent::kAmdGpuDevice) {
     uint16_t agent_version_major = 0;
     hsa_status_t status = agent->GetInfo(HSA_AGENT_INFO_VERSION_MAJOR, &agent_version_major);
-    assert(status == HSA_STATUS_SUCCESS);
+    if (status != HSA_STATUS_SUCCESS) {
+      return status;
+    }
 
     if (version_major <= agent_version_major) {
       *version_minor = 0;

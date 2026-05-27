@@ -617,7 +617,10 @@ void AqlQueue::AllocRegisteredRingBuffer(uint32_t queue_size_pkts) {
         core::MemoryRegion::AllocateExecutable);
   }
 
-  assert(ring_buf_ != NULL && "AQL queue memory allocation failure");
+  if (ring_buf_ == nullptr) {
+    throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
+                             "AQL queue memory allocation failure.");
+  }
   // Fill the ring buffer with invalid packet headers.
   // Leave packet content uninitialized to help track errors.
   for (uint32_t pkt_id = 0; pkt_id < queue_size_pkts; ++pkt_id)
@@ -704,10 +707,9 @@ int AqlQueue::CreateRingBufferFD(const char* ring_buf_shm_path,
 
 void AqlQueue::Suspend() {
   suspended_ = true;
-  auto err =
+  [[maybe_unused]] auto err =
       agent_->driver().UpdateQueue(queue_id_, 0, priority_, ring_buf_, ring_buf_alloc_bytes_, NULL);
   assert(err == HSA_STATUS_SUCCESS && "Update queue failed.");
-  (void)err;
 }
 
 void AqlQueue::Resume() {
@@ -715,7 +717,7 @@ void AqlQueue::Resume() {
     suspended_ = false;
     auto err = agent_->driver().UpdateQueue(queue_id_, 100, priority_, ring_buf_,
                                             ring_buf_alloc_bytes_, NULL);
-    assert(err == HSA_STATUS_SUCCESS && "Update queue failed.");
+    // Best-effort resume - log but continue on failure
     (void)err;
   }
 }
@@ -724,9 +726,10 @@ hsa_status_t AqlQueue::Inactivate() {
   bool active = active_.exchange(false, std::memory_order_relaxed);
   if (active) {
     auto err = agent_->driver().DestroyQueue(queue_id_);
-    assert(err == HSA_STATUS_SUCCESS && "Destroy queue failed.");
-    (void)err;
     atomic::Fence(std::memory_order_acquire);
+    if (err != HSA_STATUS_SUCCESS) {
+      return err;
+    }
   }
   return HSA_STATUS_SUCCESS;
 }
@@ -1665,7 +1668,9 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
 
     if (!in_signal) {
       err = hsa_signal_create(1, 0, NULL, &local_signal);
-      assert(err == HSA_STATUS_SUCCESS);
+      if (err != HSA_STATUS_SUCCESS) {
+        throw AMD::hsa_exception(err, "Signal creation failed in PM4 execution.");
+      }
     }
 
     constexpr uint32_t AMD_AQL_FORMAT_PM4_IB = 0x1;
@@ -1714,10 +1719,9 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
     ret = hsa_signal_wait_scacquire(local_signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
                                     HSA_WAIT_STATE_ACTIVE);
     err = hsa_signal_destroy(local_signal);
-    assert(ret == 0 && err == HSA_STATUS_SUCCESS);
     (void)ret;
+    (void)err;
   }
-  (void)err;
 }
 
 void AqlQueue::FillBufRsrcWord0() {

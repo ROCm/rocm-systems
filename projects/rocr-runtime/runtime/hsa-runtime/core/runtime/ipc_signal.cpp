@@ -64,7 +64,7 @@ SharedMemory::SharedMemory(SharedMemory&& rhs) {
 
 SharedMemory::~SharedMemory() {
   if (ptr_ == nullptr) return;
-  auto err = Runtime::runtime_singleton_->IPCDetach(ptr_);
+  [[maybe_unused]] auto err = Runtime::runtime_singleton_->IPCDetach(ptr_);
   assert(err == HSA_STATUS_SUCCESS && "IPC detach failed.");
 }
 

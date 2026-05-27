@@ -92,12 +92,16 @@ hsa_status_t ImageManagerKv::Initialize(hsa_agent_t agent_handle) {
   agent_ = agent_handle;
 
   hsa_status_t status = GetGPUAsicID(agent_, &chip_id_);
+  if (status != HSA_STATUS_SUCCESS) {
+    return status;
+  }
   uint32_t major_ver = MajorVerFromDevID(chip_id_);
-  assert(status == HSA_STATUS_SUCCESS);
 
   status = HSA::hsa_agent_get_info(
       agent_, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_ASIC_FAMILY_ID), &family_type_);
-  assert(status == HSA_STATUS_SUCCESS);
+  if (status != HSA_STATUS_SUCCESS) {
+    return status;
+  }
 
   HsaGpuTileConfig tileConfig = {0};
   unsigned int tc[40] = {0};
@@ -109,9 +113,13 @@ hsa_status_t ImageManagerKv::Initialize(hsa_agent_t agent_handle) {
   uint32_t node_id = 0;
   status = HSA::hsa_agent_get_info(
       agent_, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID), &node_id);
-  assert(status == HSA_STATUS_SUCCESS);
+  if (status != HSA_STATUS_SUCCESS) {
+    return status;
+  }
   hsa_status_t stat = HSA::hsa_get_tile_config(agent_handle, &tileConfig);
-  assert(stat == HSA_STATUS_SUCCESS);
+  if (stat != HSA_STATUS_SUCCESS) {
+    return stat;
+  }
 
   // Initialize address library.
   // TODO(bwicakso) hard coded based on UGL parameters.
@@ -166,7 +174,9 @@ hsa_status_t ImageManagerKv::Initialize(hsa_agent_t agent_handle) {
   // hsa_ext_image_create.
   hsa_amd_coherency_type_t coherency_type;
   status = AMD::hsa_amd_coherency_get_type(agent_, &coherency_type);
-  assert(status == HSA_STATUS_SUCCESS);
+  if (status != HSA_STATUS_SUCCESS) {
+    return status;
+  }
   mtype_ = (coherency_type == HSA_AMD_COHERENCY_TYPE_COHERENT) ? 3 : 1;
 
   // TODO: handle the case where the call to hsa_set_memory_type happens after
@@ -174,14 +184,18 @@ hsa_status_t ImageManagerKv::Initialize(hsa_agent_t agent_handle) {
 
   hsa_region_t local_region = {0};
   status = HSA::hsa_agent_iterate_regions(agent_, GetLocalMemoryRegion, &local_region);
-  assert(status == HSA_STATUS_SUCCESS);
+  if (status != HSA_STATUS_SUCCESS) {
+    return status;
+  }
 
   local_memory_base_address_ = 0;
   if (local_region.handle != 0) {
     status = HSA::hsa_region_get_info(local_region,
                                       static_cast<hsa_region_info_t>(HSA_AMD_REGION_INFO_BASE),
                                       &local_memory_base_address_);
-    assert(status == HSA_STATUS_SUCCESS);
+    if (status != HSA_STATUS_SUCCESS) {
+      return status;
+    }
   }
 
   // Zeroed the queue object so it can be created on demand.

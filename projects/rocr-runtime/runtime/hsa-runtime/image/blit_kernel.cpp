@@ -292,7 +292,9 @@ hsa_status_t BlitKernel::CopyBufferToImage(
   };
 
   KernelArgs* args = (KernelArgs*)Allocate(dst_image_view->component, sizeof(KernelArgs));
-  assert(args != NULL);
+  if (args == nullptr) {
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
   memset(args, 0, sizeof(KernelArgs));
   args->buffer = src_memory;
   for(auto& img : args->image)
@@ -400,7 +402,9 @@ hsa_status_t BlitKernel::CopyImageToBuffer(
   };
 
   KernelArgs* args = (KernelArgs*)Allocate(src_image_view->component, sizeof(KernelArgs));
-  assert(args != NULL);
+  if (args == nullptr) {
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
   memset(args, 0, sizeof(KernelArgs));
   for(auto &img : args->image)
     img = src_image_view->Convert();
@@ -517,7 +521,9 @@ hsa_status_t BlitKernel::CopyImage(
   };
 
   KernelArgs* args = (KernelArgs*)Allocate(dst_image_view->component, sizeof(KernelArgs));
-  assert(args != NULL);
+  if (args == nullptr) {
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
   memset(args, 0, sizeof(KernelArgs));
 
   for(auto& img : args->src)
@@ -579,7 +585,9 @@ hsa_status_t BlitKernel::FillImage(
   };
 
   KernelArgs* args = (KernelArgs*)Allocate(image.component, sizeof(KernelArgs));
-  assert(args != NULL);
+  if (args == nullptr) {
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
   memset(args, 0, sizeof(KernelArgs));
 
   for(auto &img : args->image)

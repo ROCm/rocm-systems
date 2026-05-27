@@ -137,10 +137,12 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
     throw AMD::hsa_exception(HSA_STATUS_ERROR, "Agent creation failed.\nThe GPU node uses a deprecated doorbell type\n");
 
   hsa_status_t err = driver().GetClockCounters(node_id(), &t0_);
+  if (err != HSA_STATUS_SUCCESS) {
+    throw AMD::hsa_exception(err, "Agent creation failed.\nGetClockCounters error.\n");
+  }
   t1_ = t0_;
   historical_clock_ratio_ = 0.0;
   gpu_clock_offset_ = 0;
-  assert(err == HSA_STATUS_SUCCESS && "hsaGetClockCounters error");
 
   num_h2d_d2h_engines_ = properties_.NumSdmaEngines > 2 ? 2 : properties_.NumSdmaEngines;
   num_p2p_engines_ =  properties_.NumSdmaXgmiEngines ? properties_.NumSdmaXgmiEngines
@@ -246,7 +248,9 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
 
   bool model_enabled;
   err = driver().IsModelEnabled(&model_enabled);
-  assert(err == HSA_STATUS_SUCCESS && "IsModelEnabled failed");
+  if (err != HSA_STATUS_SUCCESS) {
+    throw AMD::hsa_exception(err, "Agent creation failed.\nIsModelEnabled error.\n");
+  }
   if (model_enabled) {
     wallclock_frequency_ = 0;
   } else {
@@ -572,12 +576,11 @@ void GpuAgent::InitScratchPool() {
 
   void* scratch_base = nullptr;
   hsa_status_t err = driver().AllocateScratchMemory(node_id(), max_scratch_len, &scratch_base);
-  assert(err == HSA_STATUS_SUCCESS && "AllocateScratchMemory failed");
-  assert(IsMultipleOf(scratch_base, 0x1000) &&
-         "Scratch base is not page aligned!");
 
   scratch_pool_. ~SmallHeap();
-  if (HSA_STATUS_SUCCESS == err) {
+  if (err == HSA_STATUS_SUCCESS) {
+    assert(IsMultipleOf(scratch_base, 0x1000) &&
+           "Scratch base is not page aligned!");
     new (&scratch_pool_) SmallHeap(scratch_base, max_scratch_len);
   } else {
     new (&scratch_pool_) SmallHeap();
@@ -607,15 +610,21 @@ void GpuAgent::ReserveScratch()
     reserved_sz = MaxScratchDevice();
   }
 
-  size_t available;
-  [[maybe_unused]] hsa_status_t mem_err = driver().AvailableMemory(node_id(), &available);
-  assert(mem_err == HSA_STATUS_SUCCESS && "AvailableMemory failed");
+  size_t available = 0;
+  hsa_status_t mem_err = driver().AvailableMemory(node_id(), &available);
+  if (mem_err != HSA_STATUS_SUCCESS) {
+    // Cannot determine available memory - skip reservation
+    return;
+  }
+
   std::lock_guard<std::mutex> lock(scratch_lock_);
   if (!scratch_cache_.reserved_bytes() && reserved_sz && available > 8 * reserved_sz) {
     HSAuint64 alt_va;
     void* reserved_base = scratch_pool_.alloc(reserved_sz);
-    if (reserved_base == nullptr)
-      throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES, "Reserve scratch memory failed.");
+    if (!reserved_base) {
+      // Allocation failed - skip reservation
+      return;
+    }
 
     if (driver().MakeMemoryResident(reserved_base, reserved_sz, &alt_va) == HSA_STATUS_SUCCESS)
       scratch_cache_.reserve(reserved_sz, reserved_base);
@@ -2473,9 +2482,11 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
           (supported_isas()[0]->GetMajorVersion() == 9) && (supported_isas()[0]->GetMinorVersion() == 0) &&
           (supported_isas()[0]->GetStepping() == 10)) {
         uint32_t count = 0;
-        [[maybe_unused]] hsa_status_t cu_err =
+        hsa_status_t cu_err =
             GetInfo((hsa_agent_info_t)HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT, &count);
-        assert(cu_err == HSA_STATUS_SUCCESS && "CU count query failed.");
+        if (cu_err != HSA_STATUS_SUCCESS) {
+          return cu_err;
+        }
         *((uint32_t*)value) = (count & 0xFFFFFFF8) - 8;  // value = floor(count/8)*8-8
         break;
       }
@@ -3238,9 +3249,13 @@ hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttra
       // NearestCpuAgent owns pool returned system_allocator()
       auto cpuAgent = GetNearestCpuAgent()->public_handle();
 
-      [[maybe_unused]] hsa_status_t allow_ret =
+      hsa_status_t allow_ret =
           AMD::hsa_amd_agents_allow_access(1, &cpuAgent, NULL, trap_handler_tma_region_);
-      assert(allow_ret == HSA_STATUS_SUCCESS);
+      if (allow_ret != HSA_STATUS_SUCCESS) {
+        finegrain_deallocator()(trap_handler_tma_region_);
+        trap_handler_tma_region_ = nullptr;
+        return allow_ret;
+      }
     }
 
     /* On non-large BAR systems, we may not be able to access device memory, so do a DmaCopy */
@@ -3294,9 +3309,10 @@ void GpuAgent::BindTrapHandler() {
     auto doorbell_queue_map_size = MAX_NUM_DOORBELLS * sizeof(amd_queue_v2_t*);
 
     doorbell_queue_map_ = (amd_queue_v2_t**)system_allocator()(doorbell_queue_map_size, 0x1000, 0);
-    if (doorbell_queue_map_ == NULL)
+    if (doorbell_queue_map_ == NULL) {
       throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
                                "Doorbell queue map allocation failed.");
+    }
 
     memset(doorbell_queue_map_, 0, doorbell_queue_map_size);
 
@@ -3305,9 +3321,11 @@ void GpuAgent::BindTrapHandler() {
   }
 
   // Bind the trap handler to this node.
-  [[maybe_unused]] hsa_status_t trap_err =
+  hsa_status_t trap_err =
       driver().SetTrapHandler(node_id(), trap_code_buf_, trap_code_buf_size_, tma_addr, tma_size);
-  assert(trap_err == HSA_STATUS_SUCCESS && "SetTrapHandler() failed");
+  if (trap_err != HSA_STATUS_SUCCESS) {
+    throw AMD::hsa_exception(trap_err, "SetTrapHandler() failed.");
+  }
 }
 
 void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
