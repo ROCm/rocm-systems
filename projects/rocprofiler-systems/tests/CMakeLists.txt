@@ -58,9 +58,7 @@ set_target_properties(
 # depend on `copy-test-files`, so a build-time copy alone could race and
 # leave _load_test_categories() silently degrading to "no tier labels".
 # The build-time copy below also picks up edits without re-running cmake.
-set(ROCPROFSYS_TEST_CATEGORIES_YAML
-    ${CMAKE_CURRENT_LIST_DIR}/test_categories.yaml
-)
+set(ROCPROFSYS_TEST_CATEGORIES_YAML ${CMAKE_CURRENT_LIST_DIR}/test_categories.yaml)
 configure_file(
     ${ROCPROFSYS_TEST_CATEGORIES_YAML}
     ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/test_categories.yaml
