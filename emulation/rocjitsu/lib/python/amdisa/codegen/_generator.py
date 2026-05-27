@@ -645,7 +645,6 @@ class CodeGenerator:
                 'scalar_bitcmp',
                 'scalar_saveexec',
                 'scalar_bfe',
-                'vector_cmp_class',
                 'vector_swap',
                 'vector_mov',
                 'vector_binop',
@@ -674,21 +673,16 @@ class CodeGenerator:
                     if 'omod' in inst_fields:
                         ef.add('omod')
                     sema_block = enrich_block(sema_block, enc_field_names=frozenset(ef))
+                # Preserve 6470's scalar_saveexec -> b64 dtype fix. Per-operand
+                # bit widths (op_widths) subsume the old src_width/dst_width name
+                # heuristics: mixed-width instructions (e.g. the f64<->32-bit
+                # conversions, frexp_*_f64) bind each operand to its own declared
+                # lane width via op.size instead of a single instruction-level
+                # dtype width.
                 omap_dtype = 'b64' if cls == 'scalar_saveexec' else dtype
-                omap_kwargs = {}
-                name_lower = inst.name.lower()
-                # AMD naming: V_CVT_DST_SRC — last suffix is source type
-                if name_lower.endswith('_f64'):
-                    omap_kwargs['src_width'] = 64
-                elif 'cvt_f64_' in name_lower:
-                    omap_kwargs['dst_width'] = 64
-                if 'frexp_exp_i32_f64' in name_lower:
-                    omap_kwargs['src_width'] = 64
-                elif 'frexp_mant_f64' in name_lower:
-                    omap_kwargs['src_width'] = 64
-                    omap_kwargs['dst_width'] = 64
+                op_widths = {op.name: op.size for op in inst.operands}
                 omap = OperandMap.from_operand_names(
-                    src_ops, dst_ops, sema_block.pragma, omap_dtype, **omap_kwargs
+                    src_ops, dst_ops, sema_block.pragma, omap_dtype, op_widths
                 )
                 lctx = LoweringContext(exec_model=sema_block.pragma, operand_map=omap)
                 if cls == 'vector_cndmask' and is_vop3 and len(src_ops) >= 3:
@@ -2975,12 +2969,34 @@ class CodeGenerator:
                             and body_stripped.count('\n') <= 1
                         )
                         can_share = self._can_share_execute(inst.mnemonic)
+                        # Ops with an arch-portable SIMD fast-path probe must
+                        # route through the shared execute template even when
+                        # _can_share_execute is False for this ISA: the probe
+                        # lives only in the shared kernel (simd_probe_line is
+                        # emitted in _write_shared_execute_templates), and
+                        # delegating keeps the DPP/SDWA cleanup + postamble
+                        # running around the call (an inlined body with the
+                        # probe's early `return` would skip them). Without this,
+                        # the dst-accumulate v_fmac_f64 / v_fmac_f32 / v_mac_*
+                        # family inlines its scalar loop on CDNA4 and the probe
+                        # is dead code. Only *arch-portable* probes qualify: the
+                        # inline-literal FMA forms (v_fmaak/fmamk/madak/madmk)
+                        # read the literal through an ISA-divergent member, so a
+                        # single shared body can't serve every ISA — those are
+                        # left to the genuine shared plan.
+                        from amdisa.codegen.execute.simd_codegen import (
+                            simd_probe_arch_portable as _simd_probe_arch_portable,
+                        )
+                        _enc_key_for_probe = enc.enc_name.lower().replace('enc_', '')
+                        _portable_probe = _simd_probe_arch_portable(
+                            f'{inst.mnemonic}_{_enc_key_for_probe}'
+                        )
                         if body_throws:
                             exec_impl = cgen.Line(
                                 f'void {inst.fmt_name}::execute_impl'
                                 f'(amdgpu::Wavefront &wf) {{ (void)wf; throw util::UnimplementedInst(mnemonic()); }}'
                             )
-                        elif can_share:
+                        elif can_share or _portable_probe:
                             enc_key = enc.enc_name.lower().replace('enc_', '')
                             tmpl_name = f'{inst.mnemonic}_{enc_key}'
                             exec_impl = cgen.Line(
@@ -2991,12 +3007,15 @@ class CodeGenerator:
                                 f'{_dpp_cleanup}'
                                 f'{_sdwa_postamble}}}'
                             )
+                            # Store the shared template body. setdefault keeps the
+                            # first writer: for a can_share op that is its plan
+                            # owner; for a force-shared portable probe op (no plan
+                            # owner on any ISA) the body is arch-independent, so
+                            # whichever ISA writes first is correct and identical.
                             body_key = (inst.mnemonic, enc.enc_name)
-                            self._shared_execute_bodies[body_key] = (
-                                inst,
-                                sem,
-                                body,
-                                enc.enc_name,
+                            self._shared_execute_bodies.setdefault(
+                                body_key,
+                                (inst, sem, body, enc.enc_name),
                             )
                         else:
                             exec_impl = cgen.Line(
