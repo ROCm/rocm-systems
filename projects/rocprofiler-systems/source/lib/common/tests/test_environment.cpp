@@ -239,6 +239,79 @@ TEST_F(AddTorchLibraryPathTest, HandlesEmptyExecutable)
     EXPECT_EQ(envp[0], "LD_LIBRARY_PATH=/usr/lib");
 }
 
+TEST_F(AddTorchLibraryPathTest, PythonExecutableWithoutTorchLeavesEnvUnchanged)
+{
+    // "/nonexistent/python3" is recognised as a Python interpreter but
+    // discover_torch_libpath returns "" → early return, env unchanged.
+    std::vector<std::string> envp = { "LD_LIBRARY_PATH=/usr/lib" };
+    add_torch_library_path(envp, "/nonexistent/python3", false, updated_envs);
+    ASSERT_EQ(envp.size(), 1);
+    EXPECT_EQ(envp[0], "LD_LIBRARY_PATH=/usr/lib");
+}
+
+// ── discover_torch_libpath direct tests (L384–L442) ──────────────────────────
+
+TEST(DiscoverTorchLibpathTest, EmptyBinaryReturnsEmpty)
+{
+    EXPECT_EQ(discover_torch_libpath(""), "");
+}
+
+TEST(DiscoverTorchLibpathTest, UnsafeCharInPathReturnsEmpty)
+{
+    // ';' hits default: return false in is_safe_executable_path
+    EXPECT_EQ(discover_torch_libpath("/usr/bin/python;injected", true), "");
+}
+
+TEST(DiscoverTorchLibpathTest, SpaceInPathReturnsEmpty)
+{
+    EXPECT_EQ(discover_torch_libpath("/path with space/python3", true), "");
+}
+
+TEST(DiscoverTorchLibpathTest, DollarSignInPathReturnsEmpty)
+{
+    EXPECT_EQ(discover_torch_libpath("$HOME/python3", true), "");
+}
+
+TEST(DiscoverTorchLibpathTest, SafePathWithAllowedCharsAndNoTorchReturnsEmpty)
+{
+    // Path uses all allowed non-alnum chars (/ _ - + .) to exercise every
+    // switch case in is_safe_executable_path. Shell exits non-zero (not found)
+    // → popen succeeds, status != 0 → returns empty string.
+    EXPECT_EQ(discover_torch_libpath("/nonexistent_dir/python-3.11+safe.bin", true), "");
+}
+
+// ── posix_env + forwarding free functions (L77, L79, L269–L279) ──────────────
+// Calling get_env / set_env without the fake_environment:: prefix exercises
+// posix_env::getenv / setenv through the real environment<posix_env>.
+
+TEST(FreeFunctionEnvTest, GetEnvReturnsDefaultForUnsetVar)
+{
+    // Unset variable → default returned; covers posix_env::getenv + free-func body
+    EXPECT_EQ(get_env("ROCPROFSYS_FREE_FUNC_TEST_UNSET_99887766", std::string{ "dflt" }),
+              "dflt");
+}
+
+TEST(FreeFunctionEnvTest, GetEnvOneArgReturnsEmptyForUnsetVar)
+{
+    EXPECT_EQ(get_env<std::string>("ROCPROFSYS_FREE_FUNC_TEST_UNSET_99887766"), "");
+}
+
+TEST(FreeFunctionEnvTest, SetEnvAndGetViaFreeFunction)
+{
+    const char* name = "ROCPROFSYS_FREE_FUNC_SETENV_TEST_99887766";
+    set_env(std::string{ name }, std::string{ "free_val" }, 1);
+    EXPECT_EQ(get_env(name, std::string{}), "free_val");
+    ::unsetenv(name);
+}
+
+// ── Enum used by the dispatch tests below ────────────────────────────────────
+enum class test_color : int
+{
+    red   = 0,
+    green = 1,
+    blue  = 2,
+};
+
 // ── Dependency-injection tests via fake_env ───────────────────────────────────
 // These tests never touch the real process environment.
 
@@ -377,6 +450,110 @@ TEST_F(FakeEnvGetEnvChoiceTest, ReturnsDefaultWhenInvalidChoiceSet)
     EXPECT_EQ(result, "trace");
 }
 
+// ── Bool branch gaps ──────────────────────────────────────────────────────────
+
+TEST_F(FakeEnvGetEnvTest, BoolEmptyEnvIdReturnsDefault)
+{
+    EXPECT_FALSE(fake_environment::get_env("", false));
+    EXPECT_TRUE(fake_environment::get_env("", true));
+}
+
+TEST_F(FakeEnvGetEnvTest, BoolEmptyValueThrows)
+{
+    fake_env::setenv("FOO", "", 1);
+    EXPECT_THROW(fake_environment::get_env("FOO", false), std::runtime_error);
+}
+
+TEST_F(FakeEnvGetEnvTest, BoolNumericGreaterThanOneIsTrue)
+{
+    fake_env::setenv("FOO", "2", 1);
+    EXPECT_TRUE(fake_environment::get_env("FOO", false));
+}
+
+TEST_F(FakeEnvGetEnvTest, BoolUpperCaseFalseVariants)
+{
+    for(const char* v : { "FALSE", "NO", "OFF", "F", "N" })
+    {
+        fake_env::reset();
+        fake_env::setenv("FOO", v, 1);
+        EXPECT_FALSE(fake_environment::get_env("FOO", true)) << "value: " << v;
+    }
+}
+
+// ── Float branch gaps ─────────────────────────────────────────────────────────
+
+TEST_F(FakeEnvGetEnvTest, FloatEmptyEnvIdReturnsDefault)
+{
+    EXPECT_NEAR(fake_environment::get_env("", 1.5), 1.5, 1e-9);
+}
+
+TEST_F(FakeEnvGetEnvTest, FloatInvalidStringReturnsDefault)
+{
+    fake_env::setenv("FOO", "not_a_float", 1);
+    EXPECT_NEAR(fake_environment::get_env("FOO", 9.9), 9.9, 1e-9);
+}
+
+TEST_F(FakeEnvGetEnvTest, FloatTypeReturnsValue)
+{
+    fake_env::setenv("FOO", "1.5", 1);
+    EXPECT_NEAR(fake_environment::get_env("FOO", 0.0f), 1.5f, 1e-6f);
+}
+
+// ── Integral branch gaps ──────────────────────────────────────────────────────
+
+TEST_F(FakeEnvGetEnvTest, IntEmptyEnvIdReturnsDefault)
+{
+    EXPECT_EQ(fake_environment::get_env("", 99), 99);
+}
+
+TEST_F(FakeEnvGetEnvTest, IntInvalidStringReturnsDefault)
+{
+    fake_env::setenv("FOO", "not_an_int", 1);
+    EXPECT_EQ(fake_environment::get_env("FOO", 42), 42);
+}
+
+TEST_F(FakeEnvGetEnvTest, LongReturnsValueWhenSet)
+{
+    fake_env::setenv("FOO", "123456789012", 1);
+    EXPECT_EQ(fake_environment::get_env("FOO", 0L), 123456789012L);
+}
+
+TEST_F(FakeEnvGetEnvTest, SizeTReturnsValueWhenSet)
+{
+    fake_env::setenv("FOO", "42", 1);
+    EXPECT_EQ(fake_environment::get_env("FOO", std::size_t{ 0 }), std::size_t{ 42 });
+}
+
+// ── to_env_string ─────────────────────────────────────────────────────────────
+
+TEST(ToEnvStringTest, BoolTrue) { EXPECT_EQ(to_env_string(true), "true"); }
+
+TEST(ToEnvStringTest, BoolFalse) { EXPECT_EQ(to_env_string(false), "false"); }
+
+TEST(ToEnvStringTest, Int) { EXPECT_EQ(to_env_string(42), "42"); }
+
+TEST(ToEnvStringTest, Double) { EXPECT_EQ(to_env_string(3.14), std::to_string(3.14)); }
+
+TEST(ToEnvStringTest, StringPassthrough)
+{
+    EXPECT_EQ(to_env_string(std::string{ "hello" }), "hello");
+}
+
+TEST(ToEnvStringTest, ConstCharPtrPassthrough)
+{
+    EXPECT_EQ(to_env_string("world"), std::string{ "world" });
+}
+
+// ── consolidate_env_entries: no-'=' entry ─────────────────────────────────────
+
+TEST_F(DuplicatedEnvironmentEntriesTest, SkipsEntryWithoutEqualsSign)
+{
+    std::vector<std::string> env_vars = { "NO_EQUALS", "PATH=/usr/bin" };
+    consolidate_env_entries(env_vars);
+    ASSERT_EQ(env_vars.size(), 1);
+    EXPECT_EQ(env_vars[0], "PATH=/usr/bin");
+}
+
 class FakeEnvConfigTest : public ::testing::Test
 {
 protected:
@@ -405,6 +582,16 @@ TEST_F(FakeEnvConfigTest, OperatorRespectsOverrideZero)
     EXPECT_EQ(fake_environment::get_env("FOO", std::string{}), "original");
 }
 
+TEST_F(FakeEnvConfigTest, VerbosePathExecutes)
+{
+    env_config<fake_env> cfg;
+    cfg.env_name  = "FOO";
+    cfg.env_value = "verbose_value";
+    cfg.override  = 1;
+    EXPECT_EQ(cfg(true), 0);
+    EXPECT_EQ(fake_environment::get_env("FOO", std::string{}), "verbose_value");
+}
+
 TEST_F(FakeEnvConfigTest, EmptyNameIsNoop)
 {
     env_config<fake_env> cfg;
@@ -413,4 +600,58 @@ TEST_F(FakeEnvConfigTest, EmptyNameIsNoop)
     cfg.override  = 1;
     EXPECT_EQ(cfg(), -1);
     EXPECT_TRUE(fake_env::store.empty());
+}
+
+// ── Enum dispatch (get_env<Tp> where is_enum_v<Tp>) ──────────────────────────
+
+class FakeEnvEnumTest : public ::testing::Test
+{
+protected:
+    void SetUp() override { fake_env::reset(); }
+    void TearDown() override { fake_env::reset(); }
+};
+
+TEST_F(FakeEnvEnumTest, EnumReturnsDefaultWhenUnset)
+{
+    EXPECT_EQ(fake_environment::get_env("FOO", test_color::green), test_color::green);
+}
+
+TEST_F(FakeEnvEnumTest, EnumReturnsValueWhenSet)
+{
+    fake_env::setenv("FOO", "2", 1);
+    EXPECT_EQ(fake_environment::get_env("FOO", test_color::red), test_color::blue);
+}
+
+TEST_F(FakeEnvEnumTest, EnumEmptyEnvIdReturnsDefault)
+{
+    EXPECT_EQ(fake_environment::get_env("", test_color::green), test_color::green);
+}
+
+// ── get_env_choice with non-string type ───────────────────────────────────────
+
+class FakeEnvIntChoiceTest : public ::testing::Test
+{
+protected:
+    void SetUp() override { fake_env::reset(); }
+    void TearDown() override { fake_env::reset(); }
+};
+
+TEST_F(FakeEnvIntChoiceTest, ReturnsDefaultWhenUnset)
+{
+    auto result = fake_environment::get_env_choice("FOO", 1, std::set<int>{ 1, 2, 3 });
+    EXPECT_EQ(result, 1);
+}
+
+TEST_F(FakeEnvIntChoiceTest, ReturnsValueWhenValidChoiceSet)
+{
+    fake_env::setenv("FOO", "3", 1);
+    auto result = fake_environment::get_env_choice("FOO", 1, std::set<int>{ 1, 2, 3 });
+    EXPECT_EQ(result, 3);
+}
+
+TEST_F(FakeEnvIntChoiceTest, ReturnsDefaultWhenInvalidChoiceSet)
+{
+    fake_env::setenv("FOO", "99", 1);
+    auto result = fake_environment::get_env_choice("FOO", 1, std::set<int>{ 1, 2, 3 });
+    EXPECT_EQ(result, 1);
 }

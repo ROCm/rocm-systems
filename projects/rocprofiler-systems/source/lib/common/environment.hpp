@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -95,35 +96,58 @@ private:
                      std::is_same_v<std::decay_t<Tp>, std::string_view> ||
                      std::is_same_v<std::decay_t<Tp>, const char*>)
         {
-            if(env_id.empty()) return std::string{ _default };
+            if(env_id.empty())
+            {
+                return std::string{ _default };
+            }
             auto* env_var = EnvType::getenv(env_id.data());
             return env_var ? std::string{ env_var } : std::string{ _default };
         }
         else if constexpr(std::is_same_v<Tp, bool>)
         {
-            if(env_id.empty()) return _default;
+            if(env_id.empty())
+            {
+                return _default;
+            }
             auto* env_var = EnvType::getenv(env_id.data());
             if(!env_var) return _default;
 
             if(std::string_view{ env_var }.empty())
+            {
                 throw std::runtime_error(std::string{ "No boolean value provided for " } +
                                          std::string{ env_id });
+            }
 
             if(std::string_view{ env_var }.find_first_not_of("0123456789") ==
                std::string_view::npos)
+            {
                 return static_cast<bool>(std::stoi(env_var));
+            }
 
             for(size_t i = 0; i < strlen(env_var); ++i)
+            {
                 env_var[i] = tolower(env_var[i]);
+            }
             for(const auto& itr : { "off", "false", "no", "n", "f", "0" })
-                if(strcmp(env_var, itr) == 0) return false;
+            {
+                if(strcmp(env_var, itr) == 0)
+                {
+                    return false;
+                }
+            }
             return true;
         }
         else if constexpr(std::is_floating_point_v<Tp>)
         {
-            if(env_id.empty()) return _default;
+            if(env_id.empty())
+            {
+                return _default;
+            }
             auto* env_var = EnvType::getenv(env_id.data());
-            if(!env_var) return _default;
+            if(!env_var)
+            {
+                return _default;
+            }
             try
             {
                 return static_cast<Tp>(std::stod(env_var));
@@ -145,9 +169,13 @@ private:
             try
             {
                 if constexpr(std::is_same_v<Tp, int>)
+                {
                     return std::stoi(env_var);
+                }
                 else
+                {
                     return static_cast<Tp>(std::stoll(env_var));
+                }
             } catch(const std::exception& e)
             {
                 fprintf(
@@ -162,16 +190,17 @@ private:
 
 public:
     template <typename Tp>
-    static auto get_env(std::string_view env_id, Tp&& _default)
+    static auto get_env(std::string_view env_id, Tp&& value_default)
     {
-        if constexpr(std::is_enum<Tp>::value)
+        if constexpr(std::is_enum_v<Tp>)
         {
-            using Up = std::underlying_type_t<Tp>;
-            return static_cast<Tp>(get_env_impl(env_id, static_cast<Up>(_default)));
+            using up_t = std::underlying_type_t<Tp>;
+            return static_cast<Tp>(
+                get_env_impl(env_id, static_cast<up_t>(value_default)));
         }
         else
         {
-            return get_env_impl(env_id, std::forward<Tp>(_default));
+            return get_env_impl(env_id, std::forward<Tp>(value_default));
         }
     }
 
@@ -182,28 +211,28 @@ public:
     }
 
     template <typename Tp>
-    static void set_env(const std::string& env_var, const Tp& _val, int override)
+    static void set_env(const std::string& env_var, const Tp& value, int override)
     {
         std::stringstream ss_val;
-        ss_val << _val;
+        ss_val << value;
         EnvType::setenv(env_var.c_str(), ss_val.str().c_str(), override);
     }
 
     template <typename Tp>
-    static auto get_env_choice(std::string_view env_id, Tp _default,
-                               std::set<Tp> _choices)
+    static auto get_env_choice(std::string_view env_id, Tp value_default,
+                               std::set<Tp> choices)
     {
-        auto _val = get_env(env_id, _default);
-        if(_choices.find(_val) == _choices.end())
+        auto value = get_env(env_id, value_default);
+        if(choices.find(value) == choices.end())
         {
             fprintf(
                 stderr,
                 "[rocprof-sys][get_env] Environment variable \"%s\" has invalid value "
                 "\"%s\". Reverting to default.\n",
                 env_id.data(), get_env<std::string>(env_id).c_str());
-            return _default;
+            return value_default;
         }
-        return _val;
+        return value;
     }
 };
 
