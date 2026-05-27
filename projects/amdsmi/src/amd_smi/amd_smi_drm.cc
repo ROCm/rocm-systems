@@ -128,10 +128,12 @@ amdsmi_status_t AMDSmiDrm::init() {
     drm_paths_.push_back(render_name);
 
     std::string name = "/dev/dri/" + render_name;
-    ScopedFD fd(name.c_str(), O_RDWR | O_CLOEXEC);
+    ScopedFD fd(name.c_str(), O_RDWR | O_CLOEXEC | O_NONBLOCK);
 
     amdsmi_bdf_t bdf;
     if (fd.valid()) {
+      // Clear O_NONBLOCK now that open() succeeded so ioctls behave normally
+      fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK);
       auto version = drm_get_version(fd);
       if (drm_get_device(fd, &device) == 0) {
         vendor_id = device->deviceinfo.pci->vendor_id;
