@@ -394,14 +394,92 @@ Then /opsx:archive
 
 ---
 
-## 8. Alternatives Considered
+## 8. Comparisons
+
+### 8.1 This proposal vs get-shit-done-redux (GSD)
+
+[get-shit-done-redux](https://github.com/open-gsd/get-shit-done-redux) (GSD) is an
+all-in-one meta-prompting and spec-driven system (`npx
+@opengsd/get-shit-done-redux`). It targets the same problems—context rot, durable
+planning memory, verification before ship—but packages them under one `/gsd-*`
+command surface instead of composing separate tools.
+
+| Dimension | **This proposal** (OpenSpec + Superpowers + graphify) | **GSD Redux** |
+|-----------|--------------------------------------------------------|---------------|
+| **Architecture** | Compose three focused tools | Single installer + orchestration |
+| **Spec / memory** | `openspec/changes/<name>/` → archive | `.planning/`, `PROJECT.md`, `ROADMAP.md`, `STATE.md`, `CONTEXT.md` |
+| **Code map** | graphify (`graphify query`, `path`, `update`) | `/gsd-map-codebase` |
+| **Execution** | Superpowers TDD, plans, subagents | `/gsd-execute-phase` (parallel waves, fresh contexts) |
+| **Main loop** | 5 phases (§3); `/opsx:*` + skills | 6 commands: new-project → discuss → plan → execute → verify → ship |
+| **Brownfield fit** | Delta changes per feature; minimal ceremony | `/gsd-map-codebase` + phase/milestone model |
+| **Token strategy** | Small spec files + scoped graphify subgraphs | Offload work to subagents; main window stays light |
+| **Team / org fit** | Matches `AGENTS.md`, `.ai/rules/`, rocm-systems PR flow | Strong for solo/small teams; second planning convention to adopt |
+
+**Overlap:** GSD’s map → plan → execute → verify loop mirrors our graphify → OpenSpec
+→ Superpowers flow. GSD README testimonials mention OpenSpec and Spec Kit; GSD
+positions itself as an integrated alternative, not a thin wrapper around them.
+
+**Why we stay composable for rocprofiler-compute:**
+
+- **Existing codebase** in rocm-systems—per-change OpenSpec folders map cleanly to
+  feature branches and PR review, without a full GSD project bootstrap.
+- **Domain testing** (pytest / Docker+ctest / GPU) is documented in our spec and
+  skills, not built into GSD.
+- **graphify** is already in-repo; GSD mapping would duplicate it unless we drop
+  graphify.
+- **Superpowers** gives explicit TDD gates; GSD verification is strong but
+  configurable and less “iron law” on test-first.
+- **Partial adoption** is possible (OpenSpec only, add Superpowers later); GSD is
+  harder to adopt in slices.
+
+**When GSD is worth a pilot:** the team wants one command onboarding, pain is
+mainly context rot in long sessions, and you are willing to standardize on
+`.planning/` alongside (or instead of) `openspec/changes/`. Use only
+`@opengsd/get-shit-done-redux` (not legacy `gsd-build/*` packages).
+
+### 8.2 OpenSpec vs GitHub Spec Kit
+
+[GitHub Spec Kit](https://github.com/github/spec-kit) (`/speckit.*` commands) is
+the other major open-source SDD toolkit. Both make specs executable for AI
+agents; they optimize for different project shapes.
+
+| Dimension | **OpenSpec** | **Spec Kit** |
+|-----------|--------------|--------------|
+| **Best fit** | **Brownfield** (1→n): existing codebases, incremental changes | **Greenfield** (0→1): new products, heavy upfront architecture |
+| **Spec shape** | **Delta specs** per change (ADDED/MODIFIED/REMOVED) | Constitution + phased artifacts (`specify` → `plan` → `tasks` → `implement`) |
+| **Governance** | Lightweight; `openspec/config.yaml` context | **Constitution**—global rules, standards, compliance across every feature |
+| **Workflow** | Fluid OPSX actions (`/opsx:new`, `ff`, `apply`, `archive`) | **Phase gates**—each stage reviewed before the next |
+| **Context cost** | Smaller change folders; community reports lighter prompts | Richer templates; higher framework token overhead |
+| **Flexibility** | Per-change folders; easy to skip ceremony for tiny fixes | Strong structure; better when consistency matters more than speed |
+| **Agent support** | Broad (Cursor, Claude Code, Copilot, etc.) | Broad (`specify` CLI + multi-agent templates) |
+
+**Practical guidance for rocprofiler-compute:**
+
+- **OpenSpec** fits this repo: large Python/C++ tree, many SOCs, ongoing MI/RDNA
+  work, and sparse-checkout development. We record *what changed* relative to
+  existing behavior instead of regenerating a full system spec per button.
+- **Spec Kit** is a strong choice when **bootstrapping a new service or tool from
+  zero**, especially if the team wants a single constitution (coding standards,
+  TDD policy, API conventions) applied uniformly from day one.
+- **Not mutually exclusive in theory**, but running both conventions
+  (`openspec/changes/` and Spec Kit phase artifacts) in one repo creates duplicate
+  planning surfaces—pick one spec system per project unless you define clear
+  boundaries (e.g. Spec Kit for a new sub-component only).
+
+**This proposal uses OpenSpec** for specs and **Superpowers** for execution
+discipline; we do not adopt Spec Kit’s constitution pipeline here. If the team
+later spins up a **greenfield** ROCm-side tool, Spec Kit remains a reasonable
+option for that repo’s initial architecture pass.
+
+### 8.3 Other alternatives (summary)
 
 | Alternative | Why not primary |
 |-------------|-----------------|
 | **Superpowers only** | No durable change specs in-repo |
 | **OpenSpec only** | Weak enforcement of test/debug/worktree discipline |
+| **GSD Redux (all-in-one)** | See §8.1; overlap without replacing graphify/OpenSpec investment |
+| **Spec Kit (instead of OpenSpec)** | See §8.2; better for greenfield; heavier for brownfield iteration |
 | **Plain AGENTS.md / Cursor rules** | Suggestions, not gated workflows |
-| **Spec-kit / other SDD tools** | OpenSpec already integrated in repo |
 | **Full custom skill suite** | Higher maintenance; start with upstream skills + §6.5 |
 
 ---
@@ -419,16 +497,22 @@ Then /opsx:archive
 3. BSWEN — *OpenSpec vs Superpowers: Which SDD Framework Should You Choose?*  
    https://docs.bswen.com/blog/2026-03-27-openspec-vs-superpowers/
 
-4. OpenSpec repository.  
+4. open-gsd — *get-shit-done-redux* (integrated SDD / context engineering).  
+   https://github.com/open-gsd/get-shit-done-redux
+
+5. GitHub — *spec-kit* (constitution + phased SDD).  
+   https://github.com/github/spec-kit
+
+6. OpenSpec repository.  
    https://github.com/Fission-AI/OpenSpec
 
-5. Superpowers repository (obra/superpowers).  
+7. Superpowers repository (obra/superpowers).  
    https://github.com/obra/superpowers
 
-6. rocprofiler-compute — `README.md` (testing, Docker, ctest).  
-7. rocprofiler-compute — `AGENTS.md`, `.ai/rules/*`.  
-8. rocprofiler-compute — `openspec/config.yaml` (existing init).  
-9. rocprofiler-compute — `graphify-out/`, `.cursor/rules/graphify.mdc` (code navigation).
+8. rocprofiler-compute — `README.md` (testing, Docker, ctest).  
+9. rocprofiler-compute — `AGENTS.md`, `.ai/rules/*`.  
+10. rocprofiler-compute — `openspec/config.yaml` (local init; optional commit).  
+11. rocprofiler-compute — `graphify-out/`, `.cursor/rules/graphify.mdc` (code navigation).
 
 ---
 
