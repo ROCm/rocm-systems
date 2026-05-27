@@ -1,0 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
+"""Generated install metadata for torch-trace loader paths."""
+
+INSTALL_PROJECT_NAME = "@CMAKE_PROJECT_NAME@"
