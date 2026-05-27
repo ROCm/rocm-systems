@@ -1,0 +1,8 @@
+{
+  "attack_id": "symlink_escape",
+  "status": "defeated",
+  "details": {
+    "symlink": "/tmp/pytest-of-aelwazir/pytest-270/test_patch_apply_rejects_symli0/project/looks_local.cpp",
+    "target_outside": "/tmp/pytest-of-aelwazir/pytest-270/test_patch_apply_rejects_symli0/outside_secret.txt"
+  }
+}

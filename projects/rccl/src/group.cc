@@ -157,6 +157,9 @@ ncclResult_t ncclP2PPreconnectFunc(struct ncclAsyncJob* job_) {
   NCCLCHECK(ncclTransportP2pSetup(comm, NULL, 1));
   if (comm->p2pNet) NCCLCHECK(ncclTransportP2pSetup(comm, NULL, NCCL_CONN_IDX_P2P_NET));
   if (mode != cudaStreamCaptureModeRelaxed) CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
+  INFO(NCCL_INIT, "rank %d/%d cudaDev %d nvmlDev %d busId %#llx commId 0x%016llx Send/Recv P2P transport setup complete (p2pNet=%d)",
+    comm->rank, comm->nRanks, comm->cudaDev, comm->nvmlDev,
+    (unsigned long long)comm->busId, (unsigned long long)comm->commHash, comm->p2pNet ? 1 : 0);
   return ncclSuccess;
 }
 
@@ -378,10 +381,31 @@ static void reclaimPlannerState(struct ncclComm* comm) {
     (void)cb->fn(comm, cb);
   }
   comm->preconnectNext = reinterpret_cast<struct ncclComm*>(0x1);
-  for (int i = 0; i < comm->nRanks; i++) {
+  // connectSend/connectRecv are allocated as comm->nRanks * NCCL_MAX_CONNS
+  for (int i = 0; i < comm->nRanks * NCCL_MAX_CONNS; i++) {
     for (int j = 0; j < MAXCHANNELS/64; j++) {
       comm->connectSend[i].masks[j] = 0UL;
       comm->connectRecv[i].masks[j] = 0UL;
+    }
+  }
+  for (int c = 0; c < MAXCHANNELS; c++) {
+    struct ncclChannelPeer** peers = comm->channels[c].peers;
+    if (peers == NULL) continue;
+    for (int p = 0; p < comm->nRanks; p++) {
+      struct ncclChannelPeer* peerComm = peers[p];
+      if (peerComm == NULL) continue;
+      for (int i = 0; i < NCCL_MAX_CONNS; i++) {
+        struct ncclConnector* sendConn = &peerComm->send[i];
+        struct ncclConnector* recvConn = &peerComm->recv[i];
+        if (sendConn->p2pOnly && sendConn->transportComm == NULL) {
+          sendConn->hasSeen = 0;
+          sendConn->p2pOnly = 0;
+        }
+        if (recvConn->p2pOnly && recvConn->transportComm == NULL) {
+          recvConn->hasSeen = 0;
+          recvConn->p2pOnly = 0;
+        }
+      }
     }
   }
   while (!ncclIntruQueueEmpty(&comm->planner.planQueue)) {

@@ -14,6 +14,12 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/hip/**/*'
 
+"project: hipfile":
+- changed-files:
+  - any-glob-to-any-file:
+    - 'projects/hipfile/**/*'
+    - '.github/workflows/hipfile-*'
+
 "project: hipother":
 - changed-files:
   - any-glob-to-any-file: 'projects/hipother/**/*'

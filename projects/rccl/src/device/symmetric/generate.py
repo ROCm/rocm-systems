@@ -157,13 +157,13 @@ def kernel_conds(k):
 
 def instantiate(k):
   form_red_ty = (
-    "__global__ void {cname}(ncclSymkDevWorkArgs4K NCCL_GRID_CONSTANT const *args4K) {{\n"
-    "  ncclSymkRun_{id}<{red}, {ty}>(args4K->args);\n"
+    "__global__ void {cname}(ncclSymkDevWorkArgs4K NCCL_GRID_CONSTANT const args4K) {{\n"
+    "  ncclSymkRun_{id}<{red}, {ty}>(&args4K.args);\n"
     "}}"
   )
   form = (
-    "__global__ void {cname}(ncclSymkDevWorkArgs4K NCCL_GRID_CONSTANT const *args4K) {{\n"
-    "  ncclSymkRun_{id}(args4K->args);\n"
+    "__global__ void {cname}(ncclSymkDevWorkArgs4K NCCL_GRID_CONSTANT const args4K) {{\n"
+    "  ncclSymkRun_{id}(&args4K.args);\n"
     "}}"
   )
 
@@ -176,7 +176,7 @@ def instantiate(k):
   return inst
 
 def prototype(k):
-  return "__global__ void {cname}(ncclSymkDevWorkArgs4K const *args4K);".format(cname=kernel_cname(k))
+  return "__global__ void {cname}(ncclSymkDevWorkArgs4K const);".format(cname=kernel_cname(k))
 
 ################################################################################
 
@@ -222,10 +222,18 @@ with open(os.path.join(gensrc, "sym_kernels_host.cc"), "w") as f:
   emitln(f, '')
 
   emitln(f, 'extern int const ncclSymkKernelCount = %d;' % len(list(enumerate_kernels())))
-  emitln(f, 'extern void* const ncclSymkKernelList[] = {')
+  emitln(f, 'void* ncclSymkKernelList[] = {')
   for k in enumerate_kernels():
     emitln(f, '(void*){cname},'.format(cname=kernel_cname(k)))
   emitln(f, 'nullptr};')
+  emitln(f, '')
+
+  emitln(f, 'int ncclSymkKernelRequirements[] = {')
+  for index,k in enumerate(enumerate_kernels()):
+    cudart, _, _ = required_cuda(k)
+    sym = kernel_cname(k)
+    emitln(f, '  %7d, /*%4d %s*/' % (cudart or 0, index, sym));
+  emitln(f, '};')
   emitln(f, '')
 
   emitln(f, 'void* ncclSymkGetKernelPtr(ncclSymkKernelId id, int red, ncclDataType_t ty) {')

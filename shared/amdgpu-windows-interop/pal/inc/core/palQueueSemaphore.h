@@ -139,7 +139,7 @@ struct QueueSemaphoreExportInfo
             uint32 isReference        :  1;   ///< If set, then the semaphore exporting a handle that reference the
                                               ///< same sync object in the kernel.  Otherwise, the object is copied
                                               ///< to the new Semaphore.
-            uint32 reserved           : 31;   ///< Resevered for future use.
+            uint32 reserved           : 31;   ///< Reserved for future use.
         };
         uint32 u32All;                        ///< Flags packed as 32-bit uint.
     } flags;                                  ///< External queue semaphore export flags.

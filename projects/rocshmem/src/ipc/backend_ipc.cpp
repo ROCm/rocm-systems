@@ -23,6 +23,7 @@
  *****************************************************************************/
 
 #include <cstring>
+#include <vector>
 
 #include <hip/hip_runtime.h>
 #include <cstdlib>
@@ -121,9 +122,11 @@ void IPCBackend::init() {
 
   setup_team_world();
 
+  setup_team_shared();
+
   TeamInfo *tinfo = team_tracker.get_team_world()->tinfo_wrt_world;
 
-  default_context_proxy_ = IPCDefaultContextProxyT(this, tinfo);
+  default_context_proxy_ = IPCDefaultContextProxy(this, tinfo);
 
   setup_ctxs();
 }
@@ -139,8 +142,12 @@ IPCBackend::~IPCBackend() {
   // Close IPC handles for remote heap bases
   ipcImpl.ipcHostStop();
 
-  auto *team_world{team_tracker.get_team_world()};
-  team_world->~Team();
+  auto *team_shared{static_cast<IPCTeam*>(team_tracker.get_team_shared())};
+  team_shared->~IPCTeam();
+  CHECK_HIP(hipFree(team_shared));
+
+  auto *team_world{static_cast<IPCTeam*>(team_tracker.get_team_world())};
+  team_world->~IPCTeam();
   CHECK_HIP(hipFree(team_world));
 
   CHECK_HIP(hipFree(ctx_array));
@@ -216,6 +223,20 @@ void IPCBackend::setup_team_world() {
   set_team_world_device(host::ROCSHMEM_TEAM_WORLD);
 }
 
+void IPCBackend::setup_team_shared() {
+  TeamInfo team_info_wrt_parent(nullptr, 0, 1, num_pes);
+  TeamInfo team_info_wrt_world(nullptr, 0, 1, num_pes);
+
+  IPCTeam *team_shared{nullptr};
+  CHECK_HIP(hipMalloc(&team_shared, sizeof(IPCTeam)));
+  new (team_shared) IPCTeam(this, team_info_wrt_parent, team_info_wrt_world,
+                             num_pes, my_pe, backend_comm, 1);
+  team_tracker.set_team_shared(team_shared);
+
+  host::ROCSHMEM_TEAM_SHARED = reinterpret_cast<rocshmem_team_t>(team_shared);
+  set_team_shared_device(host::ROCSHMEM_TEAM_SHARED);
+}
+
 void IPCBackend::team_destroy(rocshmem_team_t team) {
   IPCTeam *team_obj = get_internal_ipc_team(team);
 
@@ -229,24 +250,30 @@ void IPCBackend::team_destroy(rocshmem_team_t team) {
 }
 
 void IPCBackend::Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_bytes,
-                                      Team *team) {
+                                      const TeamInfo& new_team_info_wrt_world,
+                                      int num_pes, int my_pe_in_new_team) {
 
   // Implement an Allreduce outside of MPI. This is specialized for the scenario
   // required for the team creation, i.e. assuming bytes and using BAND operation.
   // Implementation uses an Allgather operation followed a local reduction.
-
-  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
-  int num_pes = team_obj->num_pes;
-  int my_pe = team_obj->my_pe;
+  // Note: Only PEs in the new team call this function.
 
   char *tmp_buffer = new char[num_pes * num_bytes];
   std::memset(tmp_buffer, 0, num_pes * num_bytes);
-  std::memcpy (&tmp_buffer[my_pe * num_bytes], inbuf, num_bytes);
+  std::memcpy (&tmp_buffer[my_pe_in_new_team * num_bytes], inbuf, num_bytes);
 
-  if (num_pes == backend_bootstr->getNranks() ) {
+  // Fast path: new team is TEAM_WORLD (all PEs in identity order)
+  if (num_pes == backend_bootstr->getNranks() &&
+      new_team_info_wrt_world.pe_start == 0 && new_team_info_wrt_world.stride == 1) {
     backend_bootstr->allGather(tmp_buffer, num_bytes);
   } else {
-    LOG_ERROR_ABORT("create_new_team: non-mpi version only supports parent_teams that contain all processes");
+    // Build a vector of world ranks for the new team
+    std::vector<int> world_ranks;
+    world_ranks.reserve(num_pes);
+    for (int i = 0; i < num_pes; i++) {
+      world_ranks.push_back(new_team_info_wrt_world.pe_start + i * new_team_info_wrt_world.stride);
+    }
+    backend_bootstr->groupAllGather(tmp_buffer, num_bytes, world_ranks);
   }
 
   for (size_t i = 0; i < num_bytes; i++) {
@@ -263,17 +290,18 @@ void IPCBackend::create_new_team([[maybe_unused]] Team *parent_team,
                                 const TeamInfo& team_info_wrt_parent,
                                 const TeamInfo& team_info_wrt_world,
                                 int num_pes, int my_pe_in_new_team,
-                                MPI_Comm team_comm,
+                                MPI_Comm new_team_comm,
                                 rocshmem_team_t *new_team) {
   /**
    * Read the bit mask and find out a common index into
    * the pool of available work arrays.
    */
-  if (team_comm != MPI_COMM_NULL) {
+  if (new_team_comm != MPI_COMM_NULL) {
     NET_CHECK(mpilib_ftable_.Allreduce(team_pool_bitmask_, team_reduced_bitmask_, team_bitmask_size_,
-                                       MPI_CHAR, MPI_BAND, team_comm));
+                                       MPI_CHAR, MPI_BAND, new_team_comm));
   } else {
-    Allreduce_char_BAND (team_pool_bitmask_, team_reduced_bitmask_, team_bitmask_size_, parent_team);
+    Allreduce_char_BAND (team_pool_bitmask_, team_reduced_bitmask_, team_bitmask_size_,
+                         team_info_wrt_world, num_pes, my_pe_in_new_team);
   }
 
   /* Pick the least significant non-zero bit (logical layout) in the reduced
@@ -297,7 +325,7 @@ void IPCBackend::create_new_team([[maybe_unused]] Team *parent_team,
   CHECK_HIP(hipMalloc(&new_team_obj, sizeof(IPCTeam)));
   new (new_team_obj)
       IPCTeam(this, team_info_wrt_parent, team_info_wrt_world, num_pes,
-                my_pe_in_new_team, team_comm, common_index);
+                my_pe_in_new_team, new_team_comm, common_index);
 
   *new_team = get_external_team(new_team_obj);
 }
@@ -558,8 +586,8 @@ void IPCBackend::teams_init() {
 
   memset(team_pool_bitmask_, 0, team_bitmask_size_);
   memset(team_reduced_bitmask_, 0, team_bitmask_size_);
-  /* Set all to available except the 0th one (reserved for TEAM_WORLD) */
-  for (int bit_i = 1; bit_i < max_num_teams; bit_i++) {
+  /* Set all to available except reserved teams (TEAM_WORLD and TEAM_SHARED) */
+  for (int bit_i = TeamTracker::NUM_RESERVED_TEAMS; bit_i < max_num_teams; bit_i++) {
     int byte_i = bit_i / CHAR_BIT;
 
     team_pool_bitmask_[byte_i] |= 1 << (bit_i % CHAR_BIT);

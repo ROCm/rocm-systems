@@ -478,7 +478,7 @@ namespace DevDriver
         // Disallow copy construct.
         Vector(Vector& rhs) = delete;
 
-        // This indirection fixes the warning comparision of a constant with another constant. This should be
+        // This indirection fixes the warning comparison of a constant with another constant. This should be
         // replace with `if constexpr` once AMDLog upgrades to support C++17.
         constexpr bool is_type_trivial()
         {

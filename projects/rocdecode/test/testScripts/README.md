@@ -35,7 +35,7 @@ optional arguments:
   --gpu_device_id GPU_DEVICE_ID
                         The GPU device ID that will be used to run the test on it - optional (default:0 [range:0 - N-1] N = total number of available GPUs on a machine)
   --files_directory FILES_DIRECTORY
-                        The path to a dirctory containing one or more supported files for decoding (e.g., mp4, mov, etc.) - required
+                        The path to a directory containing one or more supported files for decoding (e.g., mp4, mov, etc.) - required
   --sample_mode SAMPLE_MODE
                         The sample to run - optional (default:0 [range:0-1] 0: videoDecode, 1: videoDecodePerf)
   --num_threads NUM_THREADS
@@ -58,5 +58,5 @@ optional arguments:
   --gpu_device_id GPU_DEVICE_ID
                         The GPU device ID that will be used to run the test on it - optional (default:0 [range:0 - N-1] N = total number of available GPUs on a machine)
   --files_directory FILES_DIRECTORY
-                        The path to a dirctory containing one or more supported files for decoding (e.g., mp4, mov, etc.) and their corresponding reference MD5 digests - required
+                        The path to a directory containing one or more supported files for decoding (e.g., mp4, mov, etc.) and their corresponding reference MD5 digests - required
 ```

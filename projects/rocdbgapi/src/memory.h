@@ -190,6 +190,7 @@ public:
     global,
     private_swizzled,
     private_unswizzled,
+    global_swizzled,
     agent,
     host
   };
@@ -256,7 +257,7 @@ public:
 
   /* Lower an address in this address space to an address in a base address
      space in the same architecture.  The base address spaces kinds are global,
-     local, private_swizzled, and private_unswizzled.  */
+     local, private_swizzled, private_unswizzled, and global_swizzled.  */
   virtual std::pair<const address_space_t & /* lowered_address_space  */,
                     amd_dbgapi_segment_address_t /* lowered_address  */>
   lower (const agent_t &agent, amd_dbgapi_segment_address_t address) const = 0;
@@ -402,6 +403,56 @@ public:
            amd_dbgapi_segment_address_t from_address) const override;
 };
 
+class global_swizzled_address_space_t : public address_space_t
+{
+private:
+  amd_dbgapi_size_t const m_interleave_size;
+  const private_swizzled_address_space_t &m_private_lane;
+
+public:
+  global_swizzled_address_space_t (
+    amd_dbgapi_address_space_id_t address_space_id,
+    std::string name, amd_dbgapi_size_t interleave_size,
+    amd_dbgapi_size_t va_address_size,
+    const private_swizzled_address_space_t &private_lane)
+    : address_space_t (address_space_id, kind_t::global_swizzled,
+                       std::move (name), std::nullopt,
+                       va_address_size, 0x0000000000000000,
+                       AMD_DBGAPI_ADDRESS_SPACE_ACCESS_ALL),
+      m_interleave_size (interleave_size),
+      m_private_lane (private_lane)
+  {
+  }
+
+  amd_dbgapi_size_t interleave_size () const { return m_interleave_size; }
+
+  const private_swizzled_address_space_t &private_lane () const
+  {
+    return m_private_lane;
+  }
+
+  amd_dbgapi_segment_address_dependency_t address_dependency (
+    amd_dbgapi_segment_address_t /* address  */) const override
+  {
+    return AMD_DBGAPI_SEGMENT_ADDRESS_DEPENDENCE_PROCESS;
+  }
+
+  std::pair<const address_space_t &, amd_dbgapi_segment_address_t>
+  lower (const agent_t &agent,
+         amd_dbgapi_segment_address_t global_swizzled_address) const override;
+
+  std::pair<amd_dbgapi_segment_address_t, amd_dbgapi_size_t>
+  convert (const wave_t &wave, amd_dbgapi_lane_id_t lane_id,
+           const address_space_t &from_address_space,
+           amd_dbgapi_segment_address_t from_address) const override;
+
+  /* Convert the input GLOBAL_SWIZZLED_ADDR to a global address.
+     Return this global address along with the number of bytes that
+     this conversion is valid for.  */
+  std::pair<amd_dbgapi_segment_address_t, amd_dbgapi_size_t>
+  to_global (amd_dbgapi_segment_address_t global_swizzled_addr) const;
+};
+
 class generic_address_space_t : public address_space_t
 {
 private:
@@ -410,7 +461,8 @@ private:
      one in the apertures is invalid.  */
   std::optional<amd_dbgapi_segment_address_t>
   generic_address_for_address_space (
-    const agent_t &agent, const address_space_t &segment_address_space,
+    const wave_t &wave, amd_dbgapi_lane_id_t lane_id,
+    const address_space_t &segment_address_space,
     amd_dbgapi_segment_address_t segment_address) const;
 
 public:

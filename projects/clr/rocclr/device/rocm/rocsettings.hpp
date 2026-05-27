@@ -34,10 +34,10 @@ class Settings : public device::Settings {
       uint system_scope_signal_ : 1;   //!< HSA signal is visibile to the entire system
       uint fgs_kernel_arg_ : 1;        //!< Use fine grain kernel arg segment
       uint barrier_value_packet_ : 1;  //!< Barrier value packet functionality
-      uint dynamic_queues_ : 2;        //!< Dynamic queues: 0=off, 1=Depth
+      uint dynamic_queues_ : 2;        //!< Dynamic queues: 0=off, 1=Depth, 2=1+dedicated null
       uint blocking_blit_ : 1;         //!< Blit ops can be blocking on CPU
-      uint queue_pipe_dist_ : 1;       //!< MI300 queue pipe distribution (gfx94x)
-      uint ext_dispatch_packet_ : 1;    //!< Uses new ext dispatch packet for all launches
+      uint queue_pipe_dist_ : 1;       //!< gfx94x queue pipe distribution
+      uint ext_dispatch_packet_ : 1;   //!< Uses new ext dispatch packet for all launches
       uint reserved_ : 18;
     };
     uint value_;

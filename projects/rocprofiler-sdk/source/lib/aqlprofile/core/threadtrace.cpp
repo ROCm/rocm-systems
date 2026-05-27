@@ -20,8 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "core/aql_profile.hpp"
-#include "aqlprofile-sdk/aql_profile_v2.h"
+#include "lib/aqlprofile/core/aql_profile.hpp"
+#include "lib/aqlprofile/aqlprofile.hpp"
 
 #include <cstdint>
 #include <future>
@@ -30,13 +30,13 @@
 #include <vector>
 #include <shared_mutex>
 
-#include "core/logger.h"
-#include "core/pm4_factory.h"
-#include "pm4/cmd_builder.h"
-#include "pm4/sqtt_builder.h"
+#include "lib/aqlprofile/core/logger.hpp"
+#include "lib/aqlprofile/core/pm4_factory.h"
+#include "lib/aqlprofile/pm4/cmd_builder.h"
+#include "lib/aqlprofile/pm4/sqtt_builder.h"
 
-#include "core/commandbuffermgr.hpp"
-#include "memorymanager.hpp"
+#include "lib/aqlprofile/core/commandbuffermgr.hpp"
+#include "lib/aqlprofile/core/memorymanager.hpp"
 
 #define THREAD_TRACE_PREFIX_SIZE  0x100
 #define DEFAULT_TRACE_BUFFER_SIZE (3 << 26)
@@ -91,7 +91,7 @@ _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t            handle,
 
         if(control_ptr[se_index].status & sqttbuilder->GetUTCErrorMask())
         {
-            ERR_LOGGING << "SQTT memory error received, SE(" << se_index << ")";
+            ERR_LOGGING("SQTT memory error received, SE({})", se_index);
             status = HSA_STATUS_ERROR_EXCEPTION;
         }
         auto status2_value = (pm4_factory->GetGpuId() >= aql_profile::GFX12_GPU_ID)
@@ -99,7 +99,7 @@ _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t            handle,
                                  : control_ptr[se_index].status;
         if(status2_value & sqttbuilder->GetBufferFullMask())
         {
-            ERR2_LOGGING << "SQTT data buffer full, SE(" << se_index << ")";
+            AQL_WARNING << "SQTT data buffer full, SE(" << se_index << ")";
             if(status == HSA_STATUS_SUCCESS) status = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
         }
 
@@ -120,8 +120,10 @@ _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t            handle,
 
         if(sample_size >= sample_capacity)
         {
-            ERR_LOGGING << "SQTT data out of bounds, sample_id(" << se_index << ") size("
-                        << sample_size << "/" << sample_capacity << ")";
+            ERR_LOGGING("SQTT data out of bounds, sample_id({}) size({}/{})",
+                        se_index,
+                        sample_size,
+                        sample_capacity);
             sample_size = sample_capacity;
             if(status == HSA_STATUS_SUCCESS) status = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
         }
@@ -253,7 +255,8 @@ _internal_aqlprofile_att_create_packets(aqlprofile_handle_t*                  ha
                     trace_config.perfcounters.push_back({p->counter_id, p->simd_mask});
                     break;
                 default:
-                    ERR_LOGGING << "Bad trace parameter name (" << p->parameter_name << ")";
+                    ERR_LOGGING("Bad trace parameter name ({})",
+                                static_cast<int>(p->parameter_name));
                     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
             }
 
@@ -519,11 +522,11 @@ aqlprofile_att_codeobj_marker(hsa_ext_amd_aql_pm4_packet_t*        packet,
             packet, handle, data, alloc_cb, dealloc_cb, userdata);
     } catch(hsa_status_t err)
     {
-        ERR_LOGGING << err;
+        ERR_LOGGING("{}", static_cast<int>(err));
         return err;
     } catch(std::exception& e)
     {
-        ERR_LOGGING << e.what();
+        ERR_LOGGING("{}", e.what());
         return HSA_STATUS_ERROR;
     } catch(...)
     {
@@ -542,11 +545,11 @@ aqlprofile_att_iterate_data(aqlprofile_handle_t            handle,
         return aql_profile_v2::_internal_aqlprofile_att_iterate_data(handle, callback, userdata);
     } catch(hsa_status_t err)
     {
-        ERR_LOGGING << err;
+        ERR_LOGGING("{}", static_cast<int>(err));
         return err;
     } catch(std::exception& e)
     {
-        ERR_LOGGING << e.what();
+        ERR_LOGGING("{}", e.what());
         return HSA_STATUS_ERROR;
     } catch(...)
     {
@@ -569,11 +572,11 @@ aqlprofile_att_create_packets(aqlprofile_handle_t*                  handle,
             handle, packets, profile, alloc_cb, dealloc_cb, copy_fn, userdata);
     } catch(hsa_status_t err)
     {
-        ERR_LOGGING << err;
+        ERR_LOGGING("{}", static_cast<int>(err));
         return err;
     } catch(std::exception& e)
     {
-        ERR_LOGGING << e.what();
+        ERR_LOGGING("{}", e.what());
         return HSA_STATUS_ERROR;
     } catch(...)
     {

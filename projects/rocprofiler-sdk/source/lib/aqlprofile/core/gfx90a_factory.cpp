@@ -20,11 +20,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "core/gfx9_factory.h"
-#include "def/gfx90a_def.h"
-#include "pm4/gfx9_cmd_builder.h"
-#include "pm4/pmc_builder.h"
-#include "pm4/sqtt_builder.h"
+#include "lib/aqlprofile/core/gfx9_factory.h"
+#include "lib/aqlprofile/def/gfx90a_def.h"
+#include "lib/aqlprofile/pm4/gfx9_cmd_builder.h"
+#include "lib/aqlprofile/pm4/pmc_builder.h"
+#include "lib/aqlprofile/pm4/sqtt_builder.h"
+#include "lib/common/logging.hpp"
 
 namespace aql_profile
 {
@@ -126,8 +127,15 @@ Mi200Factory::Mi200Factory(const AgentInfo* agent_info)
             case SqCounterBlockId: block_info->event_id_max = 303; break;
             case TcpCounterBlockId:
                 block_info->event_id_max = 87;
-                assert(agent_info->se_num * block_info->instance_count ==
-                       cu_block_delay_table_size);
+                ROCP_FATAL_IF(agent_info->se_per_xcc() * block_info->instance_count !=
+                              cu_block_delay_table_size)
+                    << fmt::format("Mismatch in CU block delay table size. Expected {}, got {}. "
+                                   "agent devid: {}. agent SE/XCC: {}, block instances: {}",
+                                   agent_info->se_per_xcc() * block_info->instance_count,
+                                   cu_block_delay_table_size,
+                                   agent_info->dev_index,
+                                   agent_info->se_per_xcc(),
+                                   block_info->instance_count);
                 break;
             case TccCounterBlockId:
                 block_info->instance_count = 32;

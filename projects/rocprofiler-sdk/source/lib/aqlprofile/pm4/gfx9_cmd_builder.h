@@ -32,7 +32,7 @@
 #include <iostream>
 #include <sstream>
 
-#include "pm4/cmd_builder.h"
+#include "lib/aqlprofile/pm4/cmd_builder.h"
 
 namespace pm4_builder
 {
@@ -308,18 +308,30 @@ public:
         build_pm4_copy_data(cmdbuf, src_reg_addr, dst_addr, size, wait);
     }
 
-    uint32_t BuildCopyCounterDataPacket(CmdBuffer*  cmdbuf,
-                                        uint64_t    src_reg_addr_lo,
-                                        uint64_t    src_reg_addr_hi,
-                                        const void* dst_addr,
-                                        uint32_t    dw_mask)
+    uint32_t BuildCopyCounterDataPacket(CmdBuffer*      cmdbuf,
+                                        uint64_t        src_reg_addr_lo,
+                                        uint64_t        src_reg_addr_hi,
+                                        const uint32_t* dst_addr,
+                                        uint32_t        dw_mask)
     {
+        if(dw_mask == 0x3 && src_reg_addr_hi == src_reg_addr_lo + 1 &&
+           (reinterpret_cast<std::uintptr_t>(dst_addr) % 8) == 0)
+        {
+            BuildCopyRegDataPacket(cmdbuf,
+                                   src_reg_addr_lo,
+                                   dst_addr,
+                                   PACKET3_COPY_DATA__COUNT_SEL__64_BITS_OF_DATA,
+                                   false);
+            return 2;
+        }
+
         uint32_t read_counter = 0;
+
         if(dw_mask & 0x1)
         {
             BuildCopyRegDataPacket(cmdbuf,
                                    src_reg_addr_lo,
-                                   (uint32_t*) dst_addr + read_counter,
+                                   dst_addr + read_counter,
                                    PACKET3_COPY_DATA__COUNT_SEL__32_BITS_OF_DATA,
                                    false);
             ++read_counter;
@@ -328,7 +340,7 @@ public:
         {
             BuildCopyRegDataPacket(cmdbuf,
                                    src_reg_addr_hi,
-                                   (uint32_t*) dst_addr + read_counter,
+                                   dst_addr + read_counter,
                                    PACKET3_COPY_DATA__COUNT_SEL__32_BITS_OF_DATA,
                                    false);
             ++read_counter;
@@ -491,7 +503,7 @@ public:
     void BuildCopyCounterDataPacket(CmdBuffer*      cmd,
                                     const Register& reg_lo,
                                     const Register& reg_hi,
-                                    const void*     dst_addr,
+                                    const uint32_t* dst_addr,
                                     uint32_t        mask)
     {
         BuildCopyCounterDataPacket(cmd,

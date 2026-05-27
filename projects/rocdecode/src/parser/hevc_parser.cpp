@@ -185,7 +185,7 @@ int HevcVideoParser::FillSeqCallbackFn(HevcSeqParamSet* sps_data) {
     
     video_format_params_.bitrate = 0;
 
-    // Dispaly aspect ratio
+    // Display aspect ratio
     // Table E-1.
     static const Rational hevc_sar[] = {
         {0, 0}, // unspecified
@@ -270,7 +270,7 @@ int HevcVideoParser::SendPicForDecode() {
     dec_pic_params_.intra_pic_flag = slice_info_list_[0].slice_header.slice_type == HEVC_SLICE_TYPE_I ? 1 : 0;
 
     // Todo: field_pic_flag, bottom_field_flag, second_field, ref_pic_flag, and intra_pic_flag seems to be associated with AVC/H.264.
-    // Do we need them for general purpose? Reomve if not.
+    // Do we need them for general purpose? Remove if not.
 
     // Fill picture parameters
     RocdecHevcPicParams *pic_param_ptr = &dec_pic_params_.pic_params.hevc;
@@ -671,7 +671,7 @@ ParserResult HevcVideoParser::ParsePictureData(const uint8_t* p_stream, uint32_t
                         // Get POC. 8.3.1.
                         CalculateCurrPoc();
 
-                        // Locate a free buffer for the current picutre in decode buffer pool before output picture marking (C.5.2.2)
+                        // Locate a free buffer for the current picture in decode buffer pool before output picture marking (C.5.2.2)
                         if (FindFreeInDecBufPool() != PARSER_OK) {
                             FunctionExitLog(g_rocdec_logger);
                             return PARSER_FAIL;
@@ -767,7 +767,7 @@ void HevcVideoParser::ParsePtl(HevcProfileTierLevel *ptl, bool profile_present_f
         ptl->general_frame_only_constraint_flag = Parser::GetBit(nalu, offset);
         // ReadBits is limited to 32
         offset += 44; // skip 44 bits
-        // Todo: add constrant flags parsing for higher profiles when needed
+        // Todo: add constraint flags parsing for higher profiles when needed
     }
 
     ptl->general_level_idc = Parser::ReadBits(nalu, offset, 8);
@@ -794,7 +794,7 @@ void HevcVideoParser::ParsePtl(HevcProfileTierLevel *ptl, bool profile_present_f
             ptl->sub_layer_frame_only_constraint_flag[i] = Parser::GetBit(nalu, offset);
             // ReadBits is limited to 32
             offset += 44;  // skip 44 bits
-            // Todo: add constrant flags parsing for higher profiles when needed
+            // Todo: add constraint flags parsing for higher profiles when needed
         }
         if (ptl->sub_layer_level_present_flag[i]) {
             ptl->sub_layer_level_idc[i] = Parser::ReadBits(nalu, offset, 8);
@@ -1994,7 +1994,7 @@ ParserResult HevcVideoParser::ParseSliceHeader(uint8_t *nalu, size_t size, HevcS
         p_slice_header->is_received = 1;
         memcpy(&slice_header_copy_, p_slice_header, sizeof(HevcSliceSegHeader));
     } else {
-        //dependant slice
+        //dependent slice
         if (!slice_header_copy_.is_received) {
             return PARSER_WRONG_STATE;
         }
@@ -2510,7 +2510,7 @@ int HevcVideoParser::BumpPicFromDpb() {
         }
     }
     if (min_poc_pic_idx >= HEVC_MAX_DPB_FRAMES) {
-        // No picture that is needed for ouput is found
+        // No picture that is needed for output is found
         return PARSER_OK;
     }
 

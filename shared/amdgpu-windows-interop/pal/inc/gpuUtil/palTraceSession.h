@@ -448,7 +448,7 @@ public:
 
     /// Initialize the trace session before requesting a trace.
     ///
-    /// @returns Success if initalization was successful, or ErrorUnknown upon failure.
+    /// @returns Success if initialization was successful, or ErrorUnknown upon failure.
     Pal::Result Init();
 
     /// Returns whether tracing has been formally enabled via UberTrace or not.
@@ -754,9 +754,9 @@ public:
         return m_pConfigData;
     }
 
-    /// Indicates if a cancel-trace signal has been received and that a cancelation is in progress.
+    /// Indicates if a cancel-trace signal has been received and that a cancellation is in progress.
     ///
-    /// @return true if a cancelation is in progress.
+    /// @return true if a cancellation is in progress.
     bool IsCancelingTrace() const { return m_cancelingTrace; }
 
     /// Register a function to be called when the Trace Session state changes.
@@ -835,9 +835,9 @@ private:
     rdfStream*          m_pCurrentStream;    // Active RDF stream for writing chunks
     Pal::int32          m_currentChunkIndex; // The current chunk index of the RDF stream
     bool                m_tracingEnabled;    // Flag indicating UberTrace tracing is enabled tool-side
-    void*               m_pConfigData;       // Buffer containing the cached trace configurationn
+    void*               m_pConfigData;       // Buffer containing the cached trace configuration
     size_t              m_configDataSize;    // Size of the cached trace config buffer
-    bool                m_cancelingTrace;    // Indicates that a cancel signal has been received and trace cancelation
+    bool                m_cancelingTrace;    // Indicates that a cancel signal has been received and trace cancellation
                                              // is in progress.
 
     Util::Mutex         m_stateChangeCallbackLock; // RW lock for state change callbacks

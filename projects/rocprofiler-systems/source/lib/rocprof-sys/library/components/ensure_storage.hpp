@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "core/defines.hpp"
+#include "common/defines.h"
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/mpl/type_traits.hpp>
@@ -20,8 +20,6 @@ namespace
 template <typename... Tp>
 struct ensure_storage
 {
-    ROCPROFSYS_DEFAULT_OBJECT(ensure_storage)
-
     void operator()() const { ROCPROFSYS_FOLD_EXPRESSION((*this)(tim::type_list<Tp>{})); }
 
 private:

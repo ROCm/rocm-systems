@@ -52,6 +52,7 @@ enum class InstCategory
     BARRIER_WAIT_EXCLUDED,
     MFMA_SCALE,
     GFX9_BARRIER,
+    V_MOV_B64,
     LAST
 };
 
@@ -74,10 +75,13 @@ public:
 
         InstCategory type = root_trie.type_from_trie(line);
 
-        if (gfxip == 9 && type == InstCategory::VALU)
+        if (type == InstCategory::VALU)
         {
             // Check for scale MFMA
-            if (line.find("v_mfma_scale_") != std::string::npos) type = InstCategory::MFMA_SCALE;
+            if (gfxip == 9 && line.find("v_mfma_scale_") == 0)
+                type = InstCategory::MFMA_SCALE;
+            else if (gfxip == 12 && line.find("v_mov_b64") == 0)
+                type = InstCategory::V_MOV_B64;
         }
         else if (gfxip == 9 && type == InstCategory::IMMED)
         {

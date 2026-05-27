@@ -30,7 +30,7 @@ function(ais_add_executable)
     ais_set_compiler_flags(${arg_NAME})
 
     # Set C++ standard
-    target_compile_features(${arg_NAME} PRIVATE cxx_std_17)
+    target_compile_features(${arg_NAME} PRIVATE cxx_std_${AIS_CXX_STANDARD})
     set_target_properties(${arg_NAME} PROPERTIES CXX_EXTENSIONS OFF)
 
     # Turn sanitizers off for executables

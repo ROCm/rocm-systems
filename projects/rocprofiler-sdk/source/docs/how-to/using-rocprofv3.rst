@@ -4,9 +4,9 @@
 
 .. _using-rocprofv3:
 
-======================
-Using rocprofv3
-======================
+==================================================
+Application tracing and profiling using rocprofv3
+==================================================
 
 ``rocprofv3`` is a CLI tool that helps you optimize applications and analyze the low-level kernel details without requiring any modification in the source code.
 It's backward compatible with its predecessor, `rocprof <https://rocm.docs.amd.com/projects/rocprofiler/en/latest/index.html>`_, and provides enhanced features for application profiling with better accuracy.
@@ -26,205 +26,7 @@ Before tracing or profiling your HIP application using ``rocprofv3``, build it u
    cmake -B <build-directory> <source-directory> -DCMAKE_PREFIX_PATH=/opt/rocm
    cmake --build <build-directory> --target all --parallel <N>
 
-.. _cli-options:
-
-Command-line options
---------------------
-
-The following table lists the commonly used ``rocprofv3`` command-line options categorized according to their purpose.
-
-.. # COMMENT: The following lines define a line break for use in the table below.
-.. |br| raw:: html
-
-    <br />
-
-.. list-table:: rocprofv3 options
-   :header-rows: 1
-
-   * - Purpose
-     - Option
-     - Description
-
-   * - I/O options
-     - | ``-i`` INPUT \| ``--input`` INPUT |br| |br| |br| |br| |br| |br|
-       | ``-o`` OUTPUT_FILE \| ``--output-file`` OUTPUT_FILE |br| |br| |br|
-       | ``-d`` OUTPUT_DIRECTORY \| ``--output-directory`` OUTPUT_DIRECTORY |br| |br|
-       | ``-f {csv,json,pftrace,otf2,rocpd} [{csv,json,pftrace,otf2,rocpd} ...]`` \| ``--output-format {csv,json,pftrace,otf2,rocpd} [{csv,json,pftrace,otf2,rocpd} ...]`` |br| |br|
-       | ``--output-config`` [BOOL] |br| |br|
-       | ``--log-level {fatal,error,warning,info,trace,env}`` |br| |br|
-       | ``-E`` EXTRA_COUNTERS \| ``--extra-counters`` EXTRA_COUNTERS
-     - | Specifies the path to the input file. JSON and YAML formats support configuration of all command-line options for tracing and profiling whereas the text format supports only the specification of HW counters. |br| |br|
-       | Specifies output file name. If nothing is specified, the default path is ``%hostname%/%pid%``. |br| |br|
-       | Specifies the output path for saving the output files. If nothing is specified, the default path is ``%hostname%/%pid%``. |br| |br|
-       | Specifies output format. Supported formats: CSV, JSON, PFTrace, OTF2 and rocpd. |br| |br| |br|
-       | Generates a configuration output file containing the resolved ``rocprofv3`` settings and options used for the profiling session. |br| |br| |br|
-       | Sets the desired log level. |br| |br| |br|
-       | Specifies the path to a YAML file consisting of extra counter definitions.
-
-   * - Process attachment
-     - | ``-p`` PID \| ``--pid`` PID \| ``--attach`` PID
-     - | Attaches to a running process by process ID and profiles it dynamically. This enables profiling of applications that are already running without needing to restart them from the profiler. The profiler will instrument the target process and collect the specified tracing or counter data for the configured duration.
-
-   * - Aggregate tracing
-     - | ``-r`` [BOOL] \| ``--runtime-trace`` [BOOL] |br| |br| |br| |br| |br| |br| |br|
-       | ``-s`` [BOOL] \| ``--sys-trace`` [BOOL]
-     - | Collects tracing data for HIP runtime API, marker (ROCTx) API, RCCL API, memory operations (copies, scratch, and allocation), and kernel dispatches. Similar to ``--sys-trace`` but without HIP compiler API and the underlying HSA API tracing. |br| |br|
-       | Collects tracing data for HIP API, HSA API, marker (ROCTx) API, RCCL API, memory operations (copies, scratch, and allocations), and kernel dispatches.
-
-   * - PC sampling
-     - | ``--pc-sampling-beta-enabled`` [BOOL] |br| |br| |br| |br| |br|
-       | ``--pc-sampling-unit`` {instructions,cycles,time} |br| |br| |br|
-       | ``--pc-sampling-method`` {stochastic,host_trap} |br| |br|
-       | ``--pc-sampling-interval`` PC_SAMPLING_INTERVAL
-     - | Enables PC sampling and sets the ROCPROFILER_PC_SAMPLING_BETA_ENABLED environment variable. Note that PC sampling support is in beta version. |br| |br|
-       | Specifies the unit for PC sampling type or method. Note that only units of time are supported. |br| |br|
-       | Specifies the PC sampling type. Note that only host trap method is supported. |br| |br|
-       | Specifies the PC sample generation frequency.
-
-   * - Basic tracing
-     - | ``--hip-trace`` [BOOL] |br| |br| |br| |br| |br| |br|
-       | ``--marker-trace`` [BOOL] |br| |br| |br| |br| |br|
-       | ``--kernel-trace`` [BOOL] |br| |br|
-       | ``--memory-copy-trace`` [BOOL] |br| |br| |br|
-       | ``--memory-allocation-trace`` [BOOL] |br| |br| |br| |br|
-       | ``--kfd-trace`` [BOOL] |br| |br| |br| |br| |br| |br| |br| |br| |br|
-       | ``--scratch-memory-trace`` [BOOL] |br| |br| |br| |br|
-       | ``--hsa-trace`` [BOOL] |br| |br| |br| |br| |br| |br| |br|
-       | ``--rccl-trace`` [BOOL] |br| |br| |br| |br|
-       | ``--kokkos-trace`` [BOOL] |br| |br| |br| |br|
-       | ``--rocdecode-trace`` [BOOL]
-     - | Combination of ``--hip-runtime-trace`` and ``--hip-compiler-trace``. This option only enables the HIP API tracing. Unlike previous iterations of ``rocprof``, this option doesn't enable kernel tracing, memory copy tracing, and so on. |br| |br|
-       | Collects marker (ROCTx) traces. Similar to ``--roctx-trace`` option in earlier ``rocprof`` versions, but with improved ``ROCTx`` library with more features. |br| |br|
-       | Collects kernel dispatch traces. |br| |br|
-       | Collects memory copy traces. This was a part of the HIP and HSA traces in previous ``rocprof`` versions. |br| |br|
-       | Collects memory allocation traces. Displays starting address, allocation size, and the agent where allocation occurs. |br| |br|
-       | Collects ``--kfd-page-migration-trace``, ``--kfd-page-mapping-trace``, ``--kfd-queue-trace``, and ``--kfd-dropped-events-trace``. KFD (Kernel Fusion Driver) traces capture low-level driver routines involving mapping, unmapping, and migration of data between GPU and system memories, as well as eviction/restoration of GPU queues to facilitate such routines. |br| |br|
-       | Collects scratch memory operations traces. Helps in determining scratch allocations and manage them efficiently. |br| |br|
-       | Collects ``--hsa-core-trace``, ``--hsa-amd-trace``, ``--hsa-image-trace``, and ``--hsa-finalizer-trace``. This option only enables the HSA API tracing. Unlike previous iterations of ``rocprof``, this doesn't enable kernel tracing, memory copy tracing, and so on. |br| |br|
-       | Collects traces for RCCL (ROCm Communication Collectives Library), which is also pronounced as 'Rickle'. |br| |br|
-       | Enables builtin Kokkos tools support, which implies enabling ``--marker-trace`` collection and ``--kernel-rename``. |br| |br|
-       | Collects traces for rocDecode APIs.
-
-   * - Granular tracing
-     - | ``--hip-runtime-trace`` [BOOL] |br| |br| |br| |br|
-       | ``--hip-compiler-trace`` [BOOL] |br| |br| |br| |br|
-       | ``--hsa-core-trace`` [BOOL] |br| |br| |br| |br|
-       | ``--hsa-amd-trace`` [BOOL] |br| |br| |br| |br|
-       | ``--hsa-image-trace`` [BOOL] |br| |br| |br| |br| |br|
-       | ``--hsa-finalizer-trace`` [BOOL] |br| |br| |br| |br| |br|
-       | ``--kfd-page-migration-trace`` [BOOL] |br| |br| |br|
-       | ``--kfd-page-mapping-trace`` [BOOL] |br| |br| |br|
-       | ``--kfd-queue-trace`` [BOOL] |br| |br| |br|
-       | ``--kfd-dropped-events-trace`` [BOOL]
-     - | Collects HIP Runtime API traces. For example, public HIP API functions starting with ``hip`` such as ``hipSetDevice``. |br| |br|
-       | Collects HIP Compiler generated code traces. For example, HIP API functions starting with ``__hip`` such as ``__hipRegisterFatBinary``. |br| |br|
-       | Collects HSA API traces (core API). For example, HSA functions prefixed with only ``hsa_`` such as ``hsa_init``. |br| |br|
-       | Collects HSA API traces (AMD-extension API). For example, HSA functions prefixed with ``hsa_amd_`` such as ``hsa_amd_coherency_get_type``. |br| |br|
-       | Collects HSA API traces (image-extenson API). For example, HSA functions prefixed with only ``hsa_ext_image_`` such as ``hsa_ext_image_get_capability``. |br| |br|
-       | Collects HSA API traces (Finalizer-extension API). For example, HSA functions prefixed with only ``hsa_ext_program_`` such as ``hsa_ext_program_create``. |br| |br|
-       | Collects traces of KFD events involving migration of pages across device memories. |br| |br|
-       | Collects traces of KFD events involving faulting, mapping, and invalidation of pages. |br| |br|
-       | Collects traces of KFD events involving GPU queue eviction and restoration operations. |br| |br|
-       | Collects traces of KFD events dropped by the KFD device driver.
-
-   * - Counter collection
-     - | ``--pmc`` [PMC ...]
-     - | Specifies performance monitoring counters to be collected. Use comma or space to specify more than one counter. For multi-pass collection, use multiple ``--pmc`` flags where each flag defines a separate counter group. The job fails if a counter group can't be collected in a single pass.
-
-   * - Post-processing tracing
-     - | ``--stats`` [BOOL] |br| |br| |br| |br| |br|
-       | ``-S`` [BOOL] \| ``--summary`` [BOOL] |br| |br| |br| |br| |br| |br|
-       | ``-D`` [BOOL] \| ``--summary-per-domain`` [BOOL] |br| |br| |br|
-       | ``--summary-groups`` REGULAR_EXPRESSION [REGULAR_EXPRESSION ...]
-     - | Collects statistics of enabled tracing types. Must be combined with one or more tracing options. Doesn't include default kernel stats unlike previous ``rocprof`` versions. |br| |br|
-       | Displays single summary of tracing data for the enabled tracing type, after conclusion of the profiling session. Displays a summary of tracing data for the enabled tracing type, after conclusion of the profiling session. |br| |br|
-       | Displays a summary of each tracing domain for the enabled tracing type, after conclusion of the profiling session. |br| |br|
-       | Displays a summary for each set of domains matching the specified regular expression. For example, 'KERNEL_DISPATCH\|MEMORY_COPY' generates a summary of all the tracing data in the `KERNEL_DISPATCH` and `MEMORY_COPY` domains. Similarly '\*._API' generates a summary of all the tracing data in the ``HIP_API``, ``HSA_API``, and ``MARKER_API`` domains.
-
-   * - Summary
-     - | ``--summary-output-file`` SUMMARY_OUTPUT_FILE |br| |br|
-       | ``-u`` {sec,msec,usec,nsec} \| ``--summary-units`` {sec,msec,usec,nsec}
-     - | Outputs summary to a file, stdout, or stderr. By default, outputs to stderr. |br| |br|
-       | Specifies timing unit for output summary.
-
-   * - Kernel naming
-     - | ``-M`` [BOOL] \| ``--mangled-kernels`` [BOOL] |br| |br|
-       | ``-T`` [BOOL] \| ``--truncate-kernels`` [BOOL] |br| |br| |br| |br|
-       | ``--kernel-rename`` [BOOL]
-     - | Overrides the default demangling of kernel names. |br| |br|
-       | Truncates the demangled kernel names for improved readability. In earlier ``rocprof`` versions, this was known as ``--basenames [on/off]``. |br| |br|
-       | Uses region names defined using ``roctxRangePush`` or ``roctxRangePop`` to rename the kernels. Was known as ``--roctx-rename`` in earlier ``rocprof`` versions.
-
-   * - Filtering
-     - | ``--kernel-include-regex`` REGULAR_EXPRESSION |br| |br| |br| |br|
-       | ``--kernel-exclude-regex`` REGULAR_EXPRESSION |br| |br| |br| |br|
-       | ``--kernel-iteration-range`` KERNEL_ITERATION_RANGE [KERNEL_ITERATION_RANGE ...] |br| |br|
-       | ``-P`` (START_DELAY_TIME):(COLLECTION_TIME):(REPEAT) [(START_DELAY_TIME):(COLLECTION_TIME):(REPEAT) ...] \| ``--collection-period`` (START_DELAY_TIME):(COLLECTION_TIME):(REPEAT) [(START_DELAY_TIME):(COLLECTION_TIME):(REPEAT) ...] |br| |br| |br| |br| |br| |br| |br| |br| |br| |br| |br| |br| |br| |br| |br|
-       | ``--collection-period-unit`` {hour,min,sec,msec,usec,nsec}
-     - | Filters counter-collection and thread-trace data to include the kernels matching the specified regular expression. Non-matching kernels are excluded. |br| |br|
-       | Filters counter-collection and thread-trace data to exclude the kernels matching the specified regular expression. It is applied after ``--kernel-include-regex`` option. |br| |br|
-       | Specifies iteration range for each kernel matching the filter [start-stop]. |br| |br| |br|
-       | START_DELAY_TIME\: Time in seconds before the data collection begins. |br| COLLECTION_TIME\: Duration of data collection in seconds. |br| REPEAT\: Number of times the data collection cycle is repeated. |br| The default unit for time is seconds, which can be changed using the ``--collection-period-unit`` option. To repeat the cycle indefinitely, specify ``repeat`` as 0. You can specify multiple configurations, each defined by a triplet in the format ``start_delay_time:collection_time:repeat``. For example, the command ``-P 10:10:1 5:3:0`` specifies two configurations, the first one with a start delay time of 10 seconds, a collection time of 10 seconds, and a repeat of 1 (the cycle repeats once), and the second with a start delay time of 5 seconds, a collection time of 3 seconds, and a repeat of 0 (the cycle repeats indefinitely). |br| |br| |br|
-       | To change the unit of time used in ``--collection-period`` or ``-P``, specify the desired unit using the ``--collection-period-unit`` option. The available units are ``hour`` for hours, ``min`` for minutes, ``sec`` for seconds, ``msec`` for milliseconds, ``usec`` for microseconds, and ``nsec`` for nanoseconds.
-
-   * - Perfetto-specific
-     - | ``--perfetto-backend`` {inprocess,system} |br| |br| |br| |br| |br|
-       | ``--perfetto-buffer-size`` KB |br| |br| |br|
-       | ``--perfetto-buffer-fill-policy`` {discard,ring_buffer} |br| |br|
-       | ``--perfetto-shmem-size-hint`` KB
-     - | Specifies backend for Perfetto data collection. When selecting 'system' mode, ensure to run the Perfetto ``traced`` daemon and then start a Perfetto session. |br| |br|
-       | Specifies buffer size for Perfetto output in KB. Default: 1 GB. |br| |br|
-       | Specifies policy for handling new records when Perfetto reaches the buffer limit. |br| |br|
-       | Specifies Perfetto shared memory size hint in KB. Default: 64 KB.
-
-   * - Display
-     - | ``-L`` [BOOL] \| ``--list-avail`` [BOOL] |br| |br|
-       | ``--group-by-queue`` [BOOL]
-     - | Lists the PC sampling configurations and metrics available in the config.yaml file for counter collection. In earlier ``rocprof`` versions, this was known as ``--list-basic``, ``--list-derived``, and ``--list-counters``. |br| |br|
-       | For displaying the HSA Queues that kernels and memory copy operations are submitted to rather than the default grouping of HIP Streams for perfetto.
-
-   * - Other
-     - | ``--preload`` PRELOAD  |br| |br|
-       | ``--minimum-output-data`` KB |br| |br|
-       | ``--disable-signal-handlers`` [BOOL] |br| |br|
-       | ``--rocm-root`` PATH |br| |br|
-       | ``--sdk-soversion`` SDK_SOVERSION |br| |br|
-       | ``--sdk-version`` SDK_VERSION
-     - | Specifies libraries to prepend to ``LD_PRELOAD``. Useful for sanitizer libraries and custom instrumentation tools. Multiple libraries can be specified. |br| |br|
-       | Specifies the minimum output data size threshold in KB. Output files are generated only if the collected profiling data exceeds this threshold. This prevents creation of empty or very small output files. Default is 0 (no threshold). |br| |br|
-       | Controls signal handler prioritization. When set to true, disables rocprofv3 signal handler prioritization, allowing application signal handlers to take precedence. Useful for applications with custom crash handling or when integrating with testing frameworks. Default is false (rocprofv3 handlers have priority). |br| |br|
-       | Specifies custom ROCm installation directory instead of automatic detection. Useful for multiple ROCm installations, custom builds, or non-standard locations. |br| |br|
-       | Specifies the shared object version number for ROCProfiler SDK library resolution. Controls which major version of librocprofiler-sdk.so.X to use. |br| |br|
-       | Specifies the exact version number for ROCProfiler SDK library resolution. Controls library selection with full semantic versioning (X.Y.Z format).
-
-To see exhaustive list of ``rocprofv3`` options:
-
-.. code-block:: bash
-
-    rocprofv3 -h
-    rocprofv3 --help
-
-To display version information for ``rocprofv3``:
-
-.. code-block:: bash
-
-    rocprofv3 -v
-    rocprofv3 --version
-
-The version command provides comprehensive build and system information including:
-
-.. code-block:: shell
-
-    $ rocprofv3 -v
-                 version: 1.0.0
-            git_revision: a1b2c3d4e5f6789012345678901234567890abcd
-            library_arch: x86_64-linux-gnu
-             system_name: Linux
-        system_processor: x86_64
-          system_version: 6.8.0-57-generic
-             compiler_id: GNU
-        compiler_version: 11.4.0
-            rocm_version: 6.2.0
+.. _application-tracing:
 
 Application tracing
 ---------------------
@@ -271,9 +73,12 @@ Here are the contents of ``hip_api_trace.csv`` file:
    :header-rows: 1
 
 
-``rocprofv3`` provides options to collect traces at more granular level. For HIP, you can collect traces for HIP compile time APIs and runtime APIs separately.
+``rocprofv3`` provides options to collect traces at more granular level. For HIP, you can collect traces for HIP compile-time APIs and runtime APIs separately.
 
-To collect HIP compile time API traces, use:
+HIP compile-time API traces
+****************************
+
+To collect HIP compile-time API traces, use:
 
 .. code-block:: shell
 
@@ -287,11 +92,13 @@ The preceding command generates a ``hip_api_trace.csv`` file prefixed with the p
 
 Here are the contents of ``hip_api_trace.csv`` file:
 
-.. csv-table:: HIP compile time api trace
+.. csv-table:: HIP compile-time api trace
    :file: /data/hip_compile_trace.csv
    :widths: 10,10,10,10,10,20,20
    :header-rows: 1
 
+HIP runtime API traces
+***********************
 
 To collect HIP runtime time API traces, use:
 
@@ -544,21 +351,21 @@ The trace output is captured in a rocpd database file and can be converted to pf
 
 .. code-block:: shell
 
-    rocprofv3 --rccl-trace --sys-trace -- <application_path>
+   rocprofv3 --rccl-trace --sys-trace -- <application_path>
 
-The preceding command generates a rocpd database file prefixed with the process ID which can be converted to pftrace to be visualized in Perfetto UI.
-
+The preceding command generates a rocpd database file prefixed with the process ID, which can be converted into PFTrace for visualization in the Perfetto UI.
 
 .. code-block:: shell
 
-    $ /opt/rocm/bin/rocpd2pftrace -i 163852_results.db
+   $ /opt/rocm/bin/rocpd2pftrace -i 163852_results.db
 
 The following image visualizes the ``RCCL`` trace for the referenced `allreduce_rccl sample application <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-systems/examples/rccl/rccl-tests/src/all_reduce.cpp>`_ using the Perfetto UI.
-The host thread track and select compute streams have been pinned in the visualization to enhance readability.
+The host thread track and select compute streams are pinned in the visualization to enhance readability.
 This enables clear observation of the ``RCCL`` compute kernels launched during ``ncclAllReduce`` operations on the host thread.
 
-
 .. image:: /data/perfetto_rccl.png
+   :width: 100%
+   :align: center
 
 rocDecode trace
 ++++++++++++++++
@@ -606,14 +413,14 @@ Here are the contents of ``rocjpeg_api_trace.csv`` file:
    :widths: 10,10,10,10,10,20,20
    :header-rows: 1
 
-Process Attachment
-+++++++++++++++++++
+Dynamic process attachment
++++++++++++++++++++++++++++
 
-``rocprofv3`` supports attaching to already running processes to profile them dynamically without requiring application restart. This is particularly useful for long-running applications, services, or when you need to profile an application that is already in a specific state.
+To profile applications dynamically without requiring to restart the application,``rocprofv3`` provides dynamic process attachment. This is particularly useful for profiling long-running applications, services, or applications in a specific state.
 
-Process attachment uses the ``-p``, ``--pid``, or ``--attach`` options (all equivalent) followed by the target process ID. The profiler will instrument the target process and collect the specified tracing or counter data for the configured duration.
+Dynamic process attachment uses the ``-p``, ``--pid``, or ``--attach`` options (all equivalent) followed by the target process ID. The profiler instruments the target process and collects the specified tracing or counter data for the configured duration.
 
-Read in detail about process attachment in :ref:`using-rocprofv3-process-attachment`.
+For more information, see :ref:`rocprofv3-process-attachment`.
 
 Post-processing tracing options
 ++++++++++++++++++++++++++++++++
@@ -709,12 +516,12 @@ The preceding command generates an output file named "filename" consisting of th
 .. include:: /data/summary.txt
    :literal:
 
-Configuration Output
+Configuration output
 +++++++++++++++++++++++
 
 The ``--output-config`` option generates a comprehensive configuration output file that contains all resolved ``rocprofv3`` settings and options used during a profiling session. This feature is essential for debugging, reproducibility, and configuration validation.
 
-To generate a configuration output file during profiling:
+To generate a configuration output file during profiling, use:
 
 .. code-block:: bash
 
@@ -731,7 +538,7 @@ The config section is the most comprehensive part, containing all profiling opti
 
 The environment section captures all environment variables active during the profiling session, including system variables such as ``SHELL``, ``COLORTERM``, ``HOSTNAME``, and ROCm-specific variables, providing complete environmental context for reproduction.
 
-Example configuration output structure:
+Sample configuration output structure:
 
 .. code-block:: json
 
@@ -898,6 +705,8 @@ To disable multiple specific tracing options, use:
 
 This feature is particularly useful to collect most traces excluding specific ones that might be unnecessary for your analysis or that generate excessive data.
 
+.. _kernel-counter-collection:
+
 Kernel counter collection
 --------------------------
 
@@ -917,7 +726,7 @@ To see the counters available on the GPU, use:
 
 Sample output for the list-avail command:
 
-.. file:: /data/list-avail.txt
+.. include:: /data/list-avail.txt
    :width: 100%
    :align: center
 
@@ -927,16 +736,11 @@ For a comprehensive list of counters available on MI200, see `MI200 performance 
 
 .. note::
 
-   Counter Dimension Collection
-   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   **Counter dimension collection:** When collecting counters with multiple dimensions or instances, such as ``TCC_MISS`` with ``DIMENSION_INSTANCE[0:15]``, individual dimension values can't be collected separately using bracket notation, such as ``TCC_MISS[0]`` or ``TCC_MISS[15]`` in the input files.
 
-   When collecting counters with multiple dimensions or instances (e.g., ``TCC_MISS`` with ``DIMENSION_INSTANCE[0:15]``), individual dimension values cannot be collected separately using bracket notation such as ``TCC_MISS[0]`` or ``TCC_MISS[15]`` in input files.
+   **To collect aggregated values:** Specify the counter name without dimension specifiers, such as ``pmc: TCC_MISS``. The ``rocprofv3`` tool automatically collects accumulated values across all instances.
 
-   **To collect aggregated values:**
-      Specify the counter name without dimension specifiers (e.g., ``pmc: TCC_MISS``). The ``rocprofv3`` tool will automatically collect accumulated values across all instances.
-
-   **To collect per-instance values:**
-      Use JSON output format, which includes detailed dimension information for individual counter instances.
+   **To collect values per instance:** Use JSON output format, which includes detailed dimension information for individual counter instances.
 
 Counter collection using input file
 +++++++++++++++++++++++++++++++++++++
@@ -1050,9 +854,9 @@ To supply the counters in the command line, use:
 Multi-pass counter collection
 ++++++++++++++++++++++++++++++
 
-When counters cannot be collected simultaneously due to hardware limitations, you can use multi-pass counter collection. This allows you to collect different sets of counters across multiple profiling passes of the same application.
+When counters can't be collected simultaneously due to hardware limitations, you can use multi-pass counter collection. This helps you collect different sets of counters across multiple profiling passes of the same application.
 
-**Using multiple --pmc flags**
+**Using multiple** ``--pmc`` **flags:**
 
 You can specify multiple ``--pmc`` flags to define different counter groups. Each ``--pmc`` flag represents a separate profiling pass:
 
@@ -1060,14 +864,15 @@ You can specify multiple ``--pmc`` flags to define different counter groups. Eac
 
    rocprofv3 --pmc SQ_WAVES SQ_WAVE_CYCLES --pmc GRBM_COUNT GRBM_GUI_ACTIVE -- <application_path>
 
-This command creates two profiling passes:
+The preceding command creates two profiling passes:
 
-- Pass 1: Collects ``SQ_WAVES`` and ``SQ_WAVE_CYCLES``
-- Pass 2: Collects ``GRBM_COUNT`` and ``GRBM_GUI_ACTIVE``
+- Pass 1: Collects ``SQ_WAVES`` and ``SQ_WAVE_CYCLES``.
 
-**Combining CLI and input file**
+- Pass 2: Collects ``GRBM_COUNT`` and ``GRBM_GUI_ACTIVE``.
 
-You can combine command-line ``--pmc`` flags with an input file. The CLI counter groups and input file counter groups are combined, creating separate passes for each:
+**Combining CLI and input file:**
+
+You can combine ``--pmc`` flag with an input file. The counters specified in CLI and input file are combined, creating separate passes for each counter:
 
 .. code-block:: shell
 
@@ -1080,16 +885,19 @@ If ``input.txt`` contains:
    pmc: FETCH_SIZE SQ_WAVES
    pmc: GRBM_GUI_ACTIVE
 
-This creates four profiling passes:
+The preceding command creates four profiling passes:
 
-- Pass 1: ``GRBM_COUNT`` (from CLI)
-- Pass 2: ``SQ_WAVES`` (from CLI)
-- Pass 3: ``FETCH_SIZE SQ_WAVE_CYCLES`` (from input file)
-- Pass 4: ``GRBM_GUI_ACTIVE`` (from input file)
+- Pass 1: ``GRBM_COUNT`` (from CLI).
 
-**Output organization**
+- Pass 2: ``SQ_WAVES`` (from CLI).
 
-For multi-pass counter collection, each pass generates its output in a separate ``pass_n`` subdirectory:
+- Pass 3: ``FETCH_SIZE SQ_WAVE_CYCLES`` (from input file).
+
+- Pass 4: ``GRBM_GUI_ACTIVE`` (from input file).
+
+**Output organization:**
+
+In multi-pass counter collection, each pass generates its output in a separate ``pass_n`` subdirectory:
 
 .. code-block:: text
 
@@ -1105,9 +913,11 @@ For multi-pass counter collection, each pass generates its output in a separate 
 
 .. note::
 
-   - Multi-pass counter collection is not compatible with attach mode (``--pid``)
-   - Multi-pass counter collection is not compatible with ``--collection-period``
-   - Each pass runs the application from start to finish
+   - Multi-pass counter collection is not compatible with attach mode (``--pid``).
+
+   - Multi-pass counter collection is not compatible with ``--collection-period``.
+
+   - Each pass runs the application from start to finish.
 
 .. _extra-counters:
 
@@ -1329,928 +1139,6 @@ The ``agent_info.csv`` file contains information about the CPU or GPU the kernel
     0,0,"CPU",24,0,0,0,0,0,0,0,0,1,24,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,3800,0,0,0,0,0,0,23,0,0,0,0,0,0,0,0,0,0,0,"AMD Ryzen 9 3900X 12-Core Processor","CPU","AMD Ryzen 9 3900X 12-Core Processor",""
     1,1,"GPU",0,256,0,2147487744,10,64,0,64,64,1,64,4,4,1,16,4,32,90000,4098,26751,12032,0,128,2,0,2,24,3800,1630,432,440,138420864,16,40,141,1024,4294967295,0,0,64700,1024,1024,1024,4294967295,4294967295,4294967295,"gfx900","AMD","Radeon RX Vega","vega10"
 
-Advanced options
------------------
-
-``rocprofv3`` provides the following miscellaneous functionalities for improved control and flexibility.
-
-Minimum output data threshold
-+++++++++++++++++++++++++++++
-
-The ``--minimum-output-data`` option allows you to control the generation of output files by setting a minimum data size threshold. This prevents the creation of empty or very small output files that contain no meaningful profiling data.
-
-When this option is specified, ``rocprofv3`` only generates output files if the collected data size exceeds the specified threshold. This is particularly useful in scenarios where:
-
-- You're profiling applications that may have sporadic GPU activity
-- You want to avoid processing empty trace files in automated workflows
-- You're running batch jobs and only want meaningful results
-
-To specify the minimum output data threshold, use the ``--minimum-output-data`` option followed by the size in KB:
-
-.. code-block:: bash
-
-    rocprofv3 --minimum-output-data 100 --hip-trace --output-format csv -- <application_path>
-
-The preceding command only generates output files if the HIP trace data is larger than 100 KB.
-
-**Example scenarios:**
-
-**Scenario 1: Filtering out applications with minimal GPU activity**
-
-.. code-block:: bash
-
-    # Only generate output if kernel trace data > 50 KB
-    rocprofv3 --minimum-output-data 50 --kernel-trace --output-format csv -- <application_path>
-
-**Scenario 2: Batch profiling with meaningful data collection**
-
-.. code-block:: bash
-
-    # For system tracing, only output files if data > 1 MB
-    rocprofv3 --minimum-output-data 1024 --sys-trace --output-format pftrace -- <application_path>
-
-**Using with input files:**
-
-You can also specify this option in YAML or JSON input files:
-
-.. code-block:: yaml
-
-    jobs:
-      - hip_trace: true
-        kernel_trace: true
-        minimum_output_data: 100
-        output_format: ["csv", "json"]
-        output_directory: "filtered_results"
-
-.. code-block:: json
-
-    {
-      "jobs": [
-        {
-          "hip_trace": true,
-          "kernel_trace": true,
-          "minimum_output_data": 100,
-          "output_format": ["csv", "json"],
-          "output_directory": "filtered_results"
-        }
-      ]
-    }
-
-**Important notes:**
-
-- The threshold applies to the raw profiling data size, not the final output file size
-- If multiple output formats are specified, the threshold check applies to each format independently
-- A value of 0 (default) means all output files are generated regardless of size
-- This option works with all tracing and counter collection modes
-
-This feature is especially valuable in automated testing environments where you want to ensure that only applications with meaningful GPU activity generate profiling outputs, reducing storage overhead and simplifying result analysis.
-
-Signal handler control
-++++++++++++++++++++++
-
-The ``--disable-signal-handlers`` option provides control over signal handling behavior in ``rocprofv3``, allowing you to manage how the profiler responds to system signals like SIGSEGV, SIGTERM, and others.
-
-By default, ``rocprofv3`` installs its own signal handlers to ensure proper cleanup and data collection when the application encounters errors or is terminated. However, in some scenarios, you may want the application's own signal handlers to take precedence.
-
-When ``--disable-signal-handlers`` is set to ``true``, ``rocprofv3`` disables the prioritization of its signal handlers over application-installed signal handlers. This means:
-
-- If your application has custom signal handlers for SIGSEGV, SIGTERM, or similar signals, those handlers will be executed instead of ``rocprofv3``'s handlers
-- The application maintains full control over signal handling behavior
-- ``rocprofv3`` will still attempt to collect and save profiling data when possible
-
-**Important note**: Even with this option enabled, the underlying ``glog`` library may still install signal handlers that provide stack backtraces for debugging purposes.
-
-**Basic usage:**
-
-.. code-block:: bash
-
-    rocprofv3 --disable-signal-handlers --hip-trace --output-format csv -- <application_path>
-
-The preceding command disables ``rocprofv3`` signal handler prioritization, allowing the application's signal handlers to take precedence.
-
-**Example scenarios:**
-
-**Scenario 1: Application with custom crash handling**
-
-.. code-block:: bash
-
-    # For applications that implement custom crash reporting or recovery
-    rocprofv3 --disable-signal-handlers --sys-trace --output-format pftrace -- ./my_app_with_custom_handlers
-
-**Scenario 2: Debugging applications with existing signal handlers**
-
-.. code-block:: bash
-
-    # When debugging applications that rely on specific signal handling behavior
-    rocprofv3 --disable-signal-handlers --kernel-trace --pmc SQ_WAVES -- ./debug_application
-
-**Scenario 3: Integration with testing frameworks**
-
-.. code-block:: bash
-
-    # For test frameworks that need to handle signals for test orchestration
-    rocprofv3 --disable-signal-handlers --runtime-trace --output-directory test_results -- ./test_suite
-
-**Using with input files:**
-
-You can also specify this option in YAML or JSON input files:
-
-.. code-block:: yaml
-
-    jobs:
-      - hip_trace: true
-        kernel_trace: true
-        disable_signal_handlers: true
-        output_format: ["csv", "json"]
-        output_directory: "custom_signal_handling"
-
-.. code-block:: json
-
-    {
-      "jobs": [
-        {
-          "hip_trace": true,
-          "kernel_trace": true,
-          "disable_signal_handlers": true,
-          "output_format": ["csv", "json"],
-          "output_directory": "custom_signal_handling"
-        }
-      ]
-    }
-
-**When to use this option:**
-
- **Use when:**
-- Your application has custom signal handlers that must execute
-- You're integrating with testing frameworks that manage signals
-- Debugging applications where signal handling behavior is critical
-- Working with applications that implement custom crash reporting
-
- **Avoid when:**
-- You want ``rocprofv3`` to provide maximum protection against data loss
-- Your application doesn't have custom signal handlers
-- You're doing standard profiling where signal handling isn't a concern
-
-**Example: Application with custom SIGSEGV handler**
-
-If your application has a custom segmentation fault handler:
-
-.. code-block:: cpp
-
-    #include <signal.h>
-    #include <stdio.h>
-
-    void custom_sigsegv_handler(int sig) {
-        printf("Custom SIGSEGV handler called\n");
-        // Custom crash reporting logic
-        exit(1);
-    }
-
-    int main() {
-        signal(SIGSEGV, custom_sigsegv_handler);
-
-        // Application code that might trigger SIGSEGV
-        return 0;
-    }
-
-Use ``--disable-signal-handlers`` to ensure your custom handler executes:
-
-.. code-block:: bash
-
-    rocprofv3 --disable-signal-handlers --hip-trace -- ./app_with_custom_handler
-
-**Troubleshooting:**
-
-- If profiling data appears incomplete with this option enabled, check if your application's signal handlers are properly saving or flushing data
-- Consider implementing explicit ``rocprofv3`` cleanup calls in your application's signal handlers if data integrity is important
-- Monitor application behavior to ensure custom signal handling doesn't interfere with profiling data collection
-
-This option provides the flexibility needed for complex applications and testing environments while maintaining ``rocprofv3``'s core profiling functionality.
-
-Library preloading
-+++++++++++++++++++
-
-The ``--preload`` option allows you to specify additional libraries to prepend to the ``LD_PRELOAD`` environment variable. This is particularly useful when working with sanitizer libraries, debugging tools, or other instrumentation libraries that need to be loaded before the application starts.
-
-``LD_PRELOAD`` is a powerful mechanism in Linux that allows you to load shared libraries before any other libraries, effectively intercepting and overriding function calls. The ``--preload`` option in ``rocprofv3`` provides a convenient way to manage this without manually setting environment variables.
-
-**Basic usage:**
-
-.. code-block:: bash
-
-    rocprofv3 --preload /path/to/library.so --hip-trace --output-format csv -- <application_path>
-
-The preceding command preloads the specified library and enables HIP tracing.
-
-**Example scenarios:**
-
-**Scenario 1: Using AddressSanitizer (ASan)**
-
-.. code-block:: bash
-
-    # Preload AddressSanitizer for memory error detection
-    rocprofv3 --preload /usr/lib/x86_64-linux-gnu/libasan.so.5 --sys-trace -- ./my_application
-
-**Scenario 2: Using ThreadSanitizer (TSan)**
-
-.. code-block:: bash
-
-    # Preload ThreadSanitizer for race condition detection
-    rocprofv3 --preload /usr/lib/x86_64-linux-gnu/libtsan.so.0 --kernel-trace --pmc SQ_WAVES -- ./threaded_app
-
-**Scenario 3: Multiple preloaded libraries**
-
-.. code-block:: bash
-
-    # Preload multiple libraries (custom profiler and sanitizer)
-    rocprofv3 --preload /opt/custom/libprofiler.so /usr/lib/libasan.so --runtime-trace -- ./complex_app
-
-**Scenario 4: Using MemorySanitizer (MSan)**
-
-.. code-block:: bash
-
-    # Preload MemorySanitizer for uninitialized memory detection
-    rocprofv3 --preload /usr/lib/x86_64-linux-gnu/libmsan.so.0 --hip-trace -- ./memory_intensive_app
-
-**Using with input files:**
-
-You can also specify this option in YAML or JSON input files:
-
-.. code-block:: yaml
-
-    jobs:
-      - hip_trace: true
-        kernel_trace: true
-        preload:
-          - "/usr/lib/x86_64-linux-gnu/libasan.so.5"
-          - "/opt/custom/libprofiler.so"
-        output_format: ["csv"]
-
-.. code-block:: json
-
-    {
-      "jobs": [
-        {
-          "hip_trace": true,
-          "kernel_trace": true,
-          "preload": [
-            "/usr/lib/x86_64-linux-gnu/libasan.so.5",
-            "/opt/custom/libprofiler.so"
-          ],
-          "output_format": ["csv"]
-        }
-      ]
-    }
-
-**Common use cases:**
-
-**Sanitizer libraries:**
-- AddressSanitizer (``libasan.so``) for memory error detection
-- ThreadSanitizer (``libtsan.so``) for race condition detection
-- MemorySanitizer (``libmsan.so``) for uninitialized memory detection
-- UndefinedBehaviorSanitizer (``libubsan.so``) for undefined behavior detection
-
- **Debugging and profiling tools:**
-- Custom memory allocators (``jemalloc``, ``tcmalloc``)
-- Performance profiling libraries
-- Custom instrumentation libraries
-- Mock libraries for testing
-
- **Third-party analysis tools:**
-- Valgrind replacement libraries
-- Custom logging frameworks
-- Security analysis tools
-
-**Library order considerations:**
-
-The order of libraries in ``--preload`` matters as they are processed in the order specified:
-
-.. code-block:: bash
-
-    # Library1 will be loaded before Library2
-    rocprofv3 --preload /path/to/library1.so /path/to/library2.so --hip-trace -- ./app
-
-**Environment variable interaction:**
-
-The ``--preload`` option works alongside existing ``LD_PRELOAD`` settings:
-
-.. code-block:: bash
-
-    # If LD_PRELOAD is already set, --preload libraries are prepended
-    export LD_PRELOAD="/existing/library.so"
-    rocprofv3 --preload /new/library.so --hip-trace -- ./app
-    # Effective LD_PRELOAD: "/new/library.so:/existing/library.so"
-
-**Troubleshooting:**
-
-- **Library not found**: Ensure the library path is correct and the library exists
-- **Symbol conflicts**: Check for conflicting symbols between preloaded libraries
-- **Performance impact**: Sanitizers can significantly slow down execution
-- **Memory usage**: Some tools like AddressSanitizer increase memory consumption substantially
-
-ROCm root path configuration
-++++++++++++++++++++++++++++
-
-The ``--rocm-root`` option allows you to specify a custom ROCm installation directory instead of using the default relative path detection. This is useful when working with multiple ROCm installations, custom builds, or non-standard installation locations.
-
-By default, ``rocprofv3`` automatically detects the ROCm installation path relative to its own location. However, in some environments, you may need to explicitly specify which ROCm installation to use.
-
-**Basic usage:**
-
-.. code-block:: bash
-
-    rocprofv3 --rocm-root /opt/custom-rocm --hip-trace --output-format csv -- <application_path>
-
-The preceding command uses the ROCm installation located at ``/opt/custom-rocm``.
-
-**Example scenarios:**
-
-**Scenario 1: Multiple ROCm versions**
-
-.. code-block:: bash
-
-    # Use ROCm 5.7.0 specifically
-    rocprofv3 --rocm-root /opt/rocm-5.7.0 --sys-trace -- ./app_for_rocm_5_7
-
-    # Use ROCm 6.0.0 for comparison
-    rocprofv3 --rocm-root /opt/rocm-6.0.0 --sys-trace -- ./app_for_rocm_6_0
-
-**Scenario 2: Custom ROCm build**
-
-.. code-block:: bash
-
-    # Use custom ROCm build with debugging symbols
-    rocprofv3 --rocm-root /home/developer/rocm-debug-build --kernel-trace --pmc SQ_WAVES -- ./debug_app
-
-**Scenario 3: Development environment**
-
-.. code-block:: bash
-
-    # Use locally built ROCm for development
-    rocprofv3 --rocm-root /workspace/rocm-dev --runtime-trace -- ./test_application
-
-**Scenario 4: Container environments**
-
-.. code-block:: bash
-
-    # Use ROCm mounted at custom location in container
-    rocprofv3 --rocm-root /usr/local/rocm --hip-trace -- ./containerized_app
-
-**Directory structure requirements:**
-
-The specified ROCm root path should contain the standard ROCm directory structure:
-
-.. code-block:: shell
-
-    /opt/custom-rocm/
-    ├── bin/           # ROCm executables
-    ├── lib/           # ROCm libraries
-    ├── include/       # ROCm headers
-    ├── share/         # Shared resources
-    └── ...
-
-**Using with input files:**
-
-This option is typically used from the command line, but can be specified in wrapper scripts:
-
-.. code-block:: bash
-
-    #!/bin/bash
-    # profile_with_custom_rocm.sh
-    ROCM_PATH="/opt/rocm-custom"
-    rocprofv3 --rocm-root "$ROCM_PATH" -i input.yaml -- "$@"
-
-**Environment variable interaction:**
-
-The ``--rocm-root`` option overrides automatic path detection and environment variables like ``ROCM_PATH``:
-
-.. code-block:: bash
-
-    # --rocm-root takes precedence over environment variables
-    export ROCM_PATH="/opt/rocm-default"
-    rocprofv3 --rocm-root /opt/rocm-override --hip-trace -- ./app
-    # Uses /opt/rocm-override, not /opt/rocm-default
-
-**Validation and troubleshooting:**
-
-- **Path validation**: Ensure the specified path contains a valid ROCm installation
-- **Library compatibility**: Verify that the ROCm version is compatible with your application
-- **Permission issues**: Check read permissions for the ROCm directory
-- **Path format**: Use absolute paths to avoid ambiguity
-
-SDK shared object version control
-++++++++++++++++++++++++++++++++++
-
-The ``--sdk-soversion`` option allows you to specify the shared object version number for the ROCProfiler SDK library. This provides precise control over which version of the library is loaded, useful for testing, compatibility verification, or working with specific library versions.
-
-Shared object versioning follows the Linux convention where libraries have version suffixes like ``.so.X`` where X is the major version number. This option helps resolve library paths when multiple versions are installed.
-
-**Basic usage:**
-
-.. code-block:: bash
-
-    rocprofv3 --sdk-soversion 2 --hip-trace --output-format csv -- <application_path>
-
-The preceding command uses ``librocprofiler-sdk.so.2`` instead of the default version.
-
-**Example scenarios:**
-
-**Scenario 1: Testing with specific library version**
-
-.. code-block:: bash
-
-    # Test application with SDK version 1
-    rocprofv3 --sdk-soversion 1 --kernel-trace --pmc SQ_WAVES -- ./app_v1_test
-
-    # Test same application with SDK version 2
-    rocprofv3 --sdk-soversion 2 --kernel-trace --pmc SQ_WAVES -- ./app_v2_test
-
-**Scenario 2: Compatibility verification**
-
-.. code-block:: bash
-
-    # Verify backward compatibility with older SDK
-    rocprofv3 --sdk-soversion 0 --sys-trace -- ./legacy_application
-
-**Scenario 3: Development and testing**
-
-.. code-block:: bash
-
-    # Use specific version for regression testing
-    rocprofv3 --sdk-soversion 3 --runtime-trace --output-directory regression_test -- ./test_suite
-
-**Scenario 4: Production environment pinning**
-
-.. code-block:: bash
-
-    # Pin to specific version for production consistency
-    rocprofv3 --sdk-soversion 1 --hip-trace --minimum-output-data 100 -- ./production_app
-
-**Library resolution behavior:**
-
-The option affects library loading in the following order:
-
-1. ``librocprofiler-sdk.so.X`` (where X is the specified soversion)
-2. Fallback to default library if specific version not found
-
-**Using with scripts:**
-
-.. code-block:: bash
-
-    #!/bin/bash
-    # test_matrix.sh - Test with multiple SDK versions
-    for version in 0 1 2; do
-        echo "Testing with SDK SO version $version"
-        rocprofv3 --sdk-soversion $version --hip-trace -- ./test_app
-    done
-
-**Troubleshooting:**
-
-- **Library not found**: Verify the specified soversion exists in the library path
-- **ABI compatibility**: Ensure the SDK version is compatible with your ROCm installation
-- **Symbol mismatches**: Check for symbol compatibility between versions
-- **Performance differences**: Different versions may have performance characteristics
-
-SDK version specification
-+++++++++++++++++++++++++
-
-The ``--sdk-version`` option allows you to specify the exact version number for the ROCProfiler SDK library resolution. This provides the finest level of control over library selection, useful for testing specific versions, development workflows, or ensuring reproducible profiling environments.
-
-This option helps resolve library paths for version-specific libraries like ``librocprofiler-sdk.so.X.Y.Z`` where X.Y.Z represents the full semantic version.
-
-**Basic usage:**
-
-.. code-block:: bash
-
-    rocprofv3 --sdk-version 1.2.3 --hip-trace --output-format csv -- <application_path>
-
-The preceding command uses ``librocprofiler-sdk.so.1.2.3`` if available.
-
-**Example scenarios:**
-
-**Scenario 1: Exact version testing**
-
-.. code-block:: bash
-
-    # Test with specific patch version for bug verification
-    rocprofv3 --sdk-version 2.1.5 --kernel-trace -- ./bug_reproduction_case
-
-    # Test with fixed version
-    rocprofv3 --sdk-version 2.1.6 --kernel-trace -- ./bug_verification_case
-
-**Scenario 2: Reproducible profiling**
-
-.. code-block:: bash
-
-    # Ensure exact same SDK version for reproducible results
-    rocprofv3 --sdk-version 2.2.1 --pmc SQ_WAVES GRBM_COUNT --output-format pftrace -- ./benchmark_app
-
-**Version format support:**
-
-The option supports various version formats:
-
-- **Semantic versioning**: ``1.2.3``, ``2.0.0``, ``1.5.10``
-
-**Library resolution priority:**
-
-When ``--sdk-version`` is specified, the library resolution follows this order:
-
-1. ``librocprofiler-sdk.so.X.Y.Z`` (exact version match)
-2. ``librocprofiler-sdk.so.X.Y`` (major.minor match)
-3. ``librocprofiler-sdk.so.X`` (major version match)
-4. Default library (``librocprofiler-sdk.so``)
-
-**Using with input files:**
-
-While typically used from command line, it can be scripted:
-
-.. code-block:: bash
-
-    #!/bin/bash
-    # version_matrix_test.sh
-    VERSIONS=("2.1.0" "2.1.1" "2.1.2" "2.2.0")
-
-    for version in "${VERSIONS[@]}"; do
-        echo "Testing SDK version $version"
-        rocprofv3 --sdk-version "$version" --hip-trace --output-directory "results_$version" -- ./test_app
-    done
-
-**Combined with other version options:**
-
-.. code-block:: bash
-
-    # Combine with soversion for maximum control
-    rocprofv3 --sdk-version 2.1.5 --sdk-soversion 2 --hip-trace -- ./app
-
-    # Combine with custom ROCm root
-    rocprofv3 --rocm-root /opt/rocm-6.0 --sdk-version 2.2.0 --sys-trace -- ./app
-
-Agent index
-++++++++++++++
-
-The agent index is a unique identifier for each agent in the system. It is used to identify the agent in the output files. Since, each runtime or tool has an independent representation of the agent's indices, ``rocprofv3`` provides an option to configure the agent index in the output files.
-
-- **absolute** == *node_id* - Absolute index of the agent, regardless of cgroups masking. This is a monotonically increasing number, which is incremented for every folder in ``/sys/class/kfd/kfd/topology/nodes``. For example, Agent-0, Agent-2, Agent-4.
-- **relative** == *logical_node_id* - Relative index of the agent accounting for cgroups masking. This is a monotonically increasing number, which is incremented for every folder in ``/sys/class/kfd/kfd/topology/nodes/``, whose properties file is non-empty. For example, Agent-0, Agent-1, Agent-2.
-- **type-relative** == *logical_node_type_id* - Relative index of the agent accounting for cgroups masking, where indexing starts at zero for each agent type. For example, CPU-0, GPU-0, GPU-1.
-
-To set the agent index in the output files, use the ``--agent-index`` or ``-A {absolute,relative,type-relative}`` option. The default value is ``relative``.
-
-The following example shows how to set the agent index on a system with multiple GPUs and CPUs:
-
-Here is the ``rocm-smi`` output:
-
-.. include:: /data/rocm-smi.txt
-   :literal:
-
-To set the agent index to relative, use:
-
-.. code-block:: shell
-
-    rocprofv3 --kernel-trace --agent-index=relative --output-format csv -- <application_path>
-
-Here is the generated ouput file with ``Agent_Id`` as "Agent 7":
-
-.. code-block:: shell
-
-    $ cat kernel_trace.csv
-
-    "Kind","Agent_Id","Queue_Id","Stream_Id","Thread_Id","Dispatch_Id","Kernel_Id","Kernel_Name","Correlation_Id","Start_Timestamp","End_Timestamp","LDS_Block_Size","Scratch_Size","VGPR_Count","Accum_VGPR_Count","SGPR_Count","Workgroup_Size_X","Workgroup_Size_Y","Workgroup_Size_Z","Grid_Size_X","Grid_Size_Y","Grid_Size_Z"
-    "KERNEL_DISPATCH","Agent 7",17,26,847809,101,49,"void addition_kernel<float>(float*, float const*, float const*, int, int)",101,1551401624448706,1551401624459226,0,0,8,0,16,64,1,1,1024,1024,1
-
-To set the agent index to type-relative, use:
-
-.. code-block:: shell
-
-    rocprofv3 --kernel-trace --agent-index=type-relative --output-format csv -- <application_path>
-
-Here is the generated ouput file with ``Agent_Id`` as "GPU 3":
-
-.. code-block:: shell
-
-    $ cat kernel_trace.csv
-
-    "Kind","Agent_Id","Queue_Id","Stream_Id","Thread_Id","Dispatch_Id","Kernel_Id","Kernel_Name","Correlation_Id","Start_Timestamp","End_Timestamp","LDS_Block_Size","Scratch_Size","VGPR_Count","Accum_VGPR_Count","SGPR_Count","Workgroup_Size_X","Workgroup_Size_Y","Workgroup_Size_Z","Grid_Size_X","Grid_Size_Y","Grid_Size_Z"
-    "KERNEL_DISPATCH","GPU 3",19,29,846827,113,49,"void addition_kernel<float>(float*, float const*, float const*, int, int)",113,1551314943082302,1551314943092222,0,0,8,0,16,64,1,1,1024,1024,1
-
-Group by queue
-++++++++++++++++++
-
-By default, ``rocprofv3`` shows the HIP streams to which the kernel and memory copy operations were submitted, when outputting a perfetto trace. Whereas, the ``--group-by-queue`` option displays the HSA queues to which these kernel and memory operations were submitted.
-
-.. image:: /data/streams_pftrace.png
-
-.. code-block:: shell
-
-    rocprofv3 -s --group-by-queue --output-format pftrace  -- <application_path>
-
-The preceding command generates a ``pftrace`` file with the kernel and memory copy operations grouped into HSA queues instead of HIP streams.
-
-.. image:: /data/streams_pftrace_grouped.png
-
-Kernel naming and filtering
-----------------------------
-
-``rocprofv3`` provides the following functionalities to configure the kernel name in the output file or to filter the kernels based on requirement.
-
-Kernel name mangling
-++++++++++++++++++++++
-
-In ``rocprofv3`` output, by default, the kernel names are demangled to exclude the kernel arguments. This improves readability of the collected output.
-
-To see the mangled kernel names, disable this feature by using the ``--mangled-kernels`` option.
-
-Here is an example of kernel trace by default:
-
-.. code-block:: shell
-
-    $ cat 123_kernel_trace.csv
-
-    "Kind","Agent_Id","Queue_Id","Stream_Id","Thread_Id","Dispatch_Id","Kernel_Id","Kernel_Name","Correlation_Id","Start_Timestamp","End_Timestamp","LDS_Block_Size","Scratch_Size","VGPR_Count","Accum_VGPR_Count","SGPR_Count","Workgroup_Size_X","Workgroup_Size_Y","Workgroup_Size_Z","Grid_Size_X","Grid_Size_Y","Grid_Size_Z"
-    "KERNEL_DISPATCH","Agent 4",1,1,852831,1,10,"void addition_kernel<float>(float*, float const*, float const*, int, int)",1,1551874061244694,1551874061255734,0,0,8,0,16,64,1,1,1024,1024,1
-    "KERNEL_DISPATCH","Agent 4",1,1,852831,2,13,"subtract_kernel(float*, float const*, float const*, int, int)",2,1551874061259214,1551874061270254,0,0,8,0,16,64,1,1,1024,1024,1
-    "KERNEL_DISPATCH","Agent 4",1,1,852831,3,12,"multiply_kernel(float*, float const*, float const*, int, int)",3,1551874061270254,1551874061279974,0,0,8,0,16,64,1,1,1024,1024,1
-    "KERNEL_DISPATCH","Agent 4",2,2,852831,8,11,"divide_kernel(float*, float const*, float const*, int, int)",8,1551874061326294,1551874061335454,0,0,12,4,16,64,1,1,1024,1024,1
-
-To disable kernel name demangling, use:
-
-.. code-block:: shell
-
-   rocprofv3 --mangled-kernels --kernel-trace --output-format csv -- <application_path>
-
-The preceding command generates the following ``kernel_trace.csv`` file with mangled kernel names:
-
-.. code-block:: shell
-
-    $ cat 123_kernel_trace.csv
-
-    "Kind","Agent_Id","Queue_Id","Stream_Id","Thread_Id","Dispatch_Id","Kernel_Id","Kernel_Name","Correlation_Id","Start_Timestamp","End_Timestamp","LDS_Block_Size","Scratch_Size","VGPR_Count","Accum_VGPR_Count","SGPR_Count","Workgroup_Size_X","Workgroup_Size_Y","Workgroup_Size_Z","Grid_Size_X","Grid_Size_Y","Grid_Size_Z"
-    "KERNEL_DISPATCH","Agent 4",1,1,850334,1,10,"_Z15addition_kernelIfEvPT_PKfS3_ii.kd",1,1551636841670446,1551636841681606,0,0,8,0,16,64,1,1,1024,1024,1
-    "KERNEL_DISPATCH","Agent 4",1,1,850334,2,13,"_Z15subtract_kernelPfPKfS1_ii.kd",2,1551636841686726,1551636841697606,0,0,8,0,16,64,1,1,1024,1024,1
-    "KERNEL_DISPATCH","Agent 4",1,1,850334,3,12,"_Z15multiply_kernelPfPKfS1_ii.kd",3,1551636841701926,1551636841712806,0,0,8,0,16,64,1,1,1024,1024,1
-    "KERNEL_DISPATCH","Agent 4",2,2,850334,8,11,"_Z13divide_kernelPfPKfS1_ii.kd",8,1551636841762926,1551636841774646,0,0,12,4,16,64,1,1,1024,1024,1
-
-
-Kernel name truncation
-+++++++++++++++++++++++
-
-The kernel name truncation feature allows you to limit the kernel name length in the output files. This is useful when dealing with long kernel names that can make the output files difficult to read.
-
-To enable kernel name truncation, use the ``--truncate-kernels`` option:
-
-.. code-block:: shell
-
-    rocprofv3 --truncate-kernels --kernel-trace --output-format csv -- <application_path>
-
-The preceding command generates the following ``kernel_trace.csv`` file with truncated kernel names:
-
-.. csv-table:: Kernel trace truncated
-   :file: /data/kernel_trace_truncated.csv
-   :widths: 10,10,10,10,10,10,10,10,10,20,20,10,10,10,10,10,10,10,10,10,10,10
-   :header-rows: 1
-
-Kernel filtering
-+++++++++++++++++
-
-Kernel filtering helps to include or exclude the kernels for profiling by specifying a filter using a regex string. You can also specify an iteration range for profiling the included kernels. If the iteration range is not provided, then all iterations of the included kernels are profiled.
-
-Here is an input file with kernel filters:
-
-.. code-block:: shell
-
-    $ cat input.yml
-    jobs:
-        - pmc: [SQ_WAVES]
-        kernel_include_regex: "divide"
-        kernel_exclude_regex: ""
-        kernel_iteration_range: "[1, 2, [5-8]]"
-
-To collect counters for the kernels matching the filters specified in the preceding input file, run:
-
-.. code-block:: shell
-
-    rocprofv3 -i input.yml --output-format csv -- <application_path>
-
-    $ cat pass_1/312_counter_collection.csv
-    "Correlation_Id","Dispatch_Id","Agent_Id","Queue_Id","Process_Id","Thread_Id","Grid_Size","Kernel_Id","Kernel_Name","Workgroup_Size","LDS_Block_Size","Scratch_Size","VGPR_Count","Accum_VGPR_Count","SGPR_Count","Counter_Name","Counter_Value","Start_Timestamp","End_Timestamp"
-    1,1,4,1,225049,225049,1048576,10,"void addition_kernel<float>(float*, float const*, float const*, int, int)",64,0,0,8,0,16,"SQ_WAVES",16384.000000,317095766765717,317095766775957
-    2,2,4,1,225049,225049,1048576,13,"subtract_kernel(float*, float const*, float const*, int, int)",64,0,0,8,0,16,"SQ_WAVES",16384.000000,317095767013157,317095767022957
-    3,3,4,1,225049,225049,1048576,11,"multiply_kernel(float*, float const*, float const*, int, int)",64,0,0,8,0,16,"SQ_WAVES",16384.000000,317095767176998,317095767186678
-    4,4,4,1,225049,225049,1048576,12,"divide_kernel(float*, float const*, float const*, int, int)",64,0,0,12,4,16,"SQ_WAVES",16384.000000,317095767380718,317095767390878
-
-
-Kernel rename
-++++++++++++++
-
-The ``roctxRangePush`` and ``roctxRangePop`` also let you rename the enclosed kernel with the supplied message. In the legacy ``rocprof``, this functionality was known as ``--roctx-rename``.
-
-See how to use ``roctxRangePush`` and ``roctxRangePop`` for renaming the enclosed kernel:
-
-.. code-block:: bash
-
-    #include <rocprofiler-sdk-roctx/roctx.h>
-
-    roctxRangePush("HIP_Kernel-1");
-
-    // Launching kernel from host
-    hipLaunchKernelGGL(matrixTranspose, dim3(WIDTH/THREADS_PER_BLOCK_X, WIDTH/THREADS_PER_BLOCK_Y), dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0,0,gpuTransposeMatrix,gpuMatrix, WIDTH);
-
-    // Memory transfer from device to host
-    roctxRangePush("hipMemCpy-DeviceToHost");
-
-    hipMemcpy(TransposeMatrix, gpuTransposeMatrix, NUM * sizeof(float), hipMemcpyDeviceToHost);
-
-    roctxRangePop();  // for "hipMemcpy"
-    roctxRangePop();  // for "hipLaunchKernel"
-    roctxRangeStop(rangeId);
-
-To rename the kernel, use:
-
-.. code-block:: bash
-
-    rocprofv3 --marker-trace --kernel-rename --output-format csv -- <application_path>
-
-The preceding command generates the following ``marker-trace`` file prefixed with the process ID:
-
-.. code-block:: shell
-
-    $ cat 210_marker_api_trace.csv
-   "Domain","Function","Process_Id","Thread_Id","Correlation_Id","Start_Timestamp","End_Timestamp"
-   "MARKER_CORE_API","roctxGetThreadId",315155,315155,2,58378843928406,58378843930247
-   "MARKER_CONTROL_API","roctxProfilerPause",315155,315155,3,58378844627184,58378844627502
-   "MARKER_CONTROL_API","roctxProfilerResume",315155,315155,4,58378844638601,58378844639267
-   "MARKER_CORE_API","pre-kernel-launch",315155,315155,5,58378844641787,58378844641787
-   "MARKER_CORE_API","post-kernel-launch",315155,315155,6,58378844936586,58378844936586
-   "MARKER_CORE_API","memCopyDth",315155,315155,7,58378844938371,58378851383270
-   "MARKER_CORE_API","HIP_Kernel-1",315155,315155,1,58378526575735,58378851384485
-
-
-I/O control options
---------------------
-
-``rocprofv3`` provides the following options to control the output.
-
-.. _output-prefix-keys:
-
-Output prefix keys
-+++++++++++++++++++
-
-Output prefix keys are useful in multiple use cases but are most helpful when dealing with multiple profiling runs or large MPI jobs. Here is the list of available keys:
-
-.. list-table::
-   :header-rows: 1
-
-   * - String
-     - Encoding
-   * - ``%argv%``
-     - Entire command-line condensed into a single string
-   * - ``%argt%``
-     - Similar to ``%argv%`` except basename of the first command-line argument
-   * - ``%args%``
-     - All command-line arguments condensed into a single string
-   * - ``%tag%``
-     - Basename of the first command-line argument
-   * - ``%hostname%``
-     - Hostname of the machine (``gethostname()``)
-   * - ``%pid%``
-     - Process identifier (``getpid()``)
-   * - ``%ppid%``
-     - Parent process identifier (``getppid()``)
-   * - ``%pgid%``
-     - Process group identifier (``getpgid(getpid())``)
-   * - ``%psid%``
-     - Process session identifier  (``getsid(getpid())``)
-   * - ``%psize%``
-     - Number of sibling processes (reads ``/proc/<PPID>/tasks/<PPID>/children``)
-   * - ``%job%``
-     - Value of ``SLURM_JOB_ID`` environment variable if exists, else 0
-   * - ``%rank%``
-     - Value of ``SLURM_PROCID`` environment variable if exists, else ``MPI_Comm_rank``, or 0 for non-mpi
-   * - ``%size%``
-     - ``MPI_Comm_size`` or 1 for non-mpi
-   * - ``%nid%``
-     - ``%rank%`` if possible, otherwise ``%pid%``
-   * - ``%launch_time%``
-     - Launch date and/or time
-   * - ``%env{NAME}%``
-     - Value of ``NAME`` environment variable (``getenv(NAME)``)
-   * - ``$env{NAME}``
-     - Alternative syntax to ``%env{NAME}%``
-   * - ``%p``
-     - Shorthand for ``%pid%``
-   * - ``%j``
-     - Shorthand for ``%job%``
-   * - ``%r``
-     - Shorthand for ``%rank%``
-   * - ``%s``
-     - Shorthand for ``%size%``
-
-Output directory
-+++++++++++++++++
-
-To specify the output directory, use ``--output-directory`` or ``-d`` option. If not specified, the default output path is ``%hostname%/%pid%``.
-
-.. code-block:: shell
-
-   rocprofv3 --hip-trace --output-directory output_dir --output-format csv -- <application_path>
-
-The preceding command generates an ``output_dir/%hostname%/%pid%_hip_api_trace.csv`` file.
-
-.. _output_field_format:
-
-The output directory option supports many placeholders such as:
-
-- ``%hostname%``: Machine host name
-- ``%pid%``: Process ID
-- ``%env{NAME}%``: Consistent with other output key formats (starts and ends with `%`)
-- ``$ENV{NAME}``: Similar to CMake
-- ``%q{NAME}%``: Compatibility with NVIDIA
-
-To see the complete list, refer to :ref:`output-prefix-keys`.
-
-The following example shows how to use the output directory option with placeholders:
-
-.. code-block:: bash
-
-   mpirun -n 2 rocprofv3 --hip-trace -d %h.%p.%env{OMPI_COMM_WORLD_RANK}% --output-format csv -- <application_path>
-
-The preceding command runs the application with ``rocprofv3`` and generates the trace file for each rank. The trace files are prefixed with hostname, process ID, and MPI rank.
-
-Assuming the hostname as `ubuntu-latest` and the process IDs as 3000020 and 3000019, the output file names are:
-
-.. code-block:: bash
-
-    ubuntu-latest.3000020.1/ubuntu-latest/3000020_agent_info.csv
-    ubuntu-latest.3000019.0/ubuntu-latest/3000019_agent_info.csv
-    ubuntu-latest.3000020.1/ubuntu-latest/3000020_hip_api_trace.csv
-    ubuntu-latest.3000019.0/ubuntu-latest/3000019_hip_api_trace.csv
-
-Output file
-++++++++++++
-
-To specify the output file name, use ``--output-file`` or ``-o`` option. If not specified, the output file is prefixed with the process ID by default.
-
-.. code-block:: shell
-
-   rocprofv3 --hip-trace --output-file output --output-format csv -- <application_path>
-
-The preceding command generates an ``output_hip_api_trace.csv`` file.
-
-The output file name can also include placeholders such as ``%hostname%`` and ``%pid%``. For example:
-
-.. code-block:: shell
-
-   rocprofv3 --hip-trace --output-file %hostname%/%pid%_hip_api_trace --output-format csv -- <application_path>
-
-The preceding command generates an ``%hostname%/%pid%_hip_api_trace.csv`` file.
-
-Collection period
-+++++++++++++++++++
-
-The collection period is the time interval during which the profiling data is collected. You can specify the collection period using the ``--collection-period`` or ``-P`` option.
-You can also specify multiple configurations, each defined by a triplet in the format ``start_delay:collection_time:repeat``.
-
-The triplet is defined as follows:
-
-- **Start delay time**: The time after which the profiling data collection starts.
-- **Collection time**: The time period during which the profiling data is collected.
-- **Repeat**: The number of times the cycle is repeated. A repeat value of 0 indicates that the cycle will repeat indefinitely.
-
-.. code-block:: shell
-
-   rocprofv3 --collection-period 5:1:1 --hip-trace -- <application_path>
-
-The preceding command collects the profiling data for 1 second, starting 5 seconds after the application starts, and this cycle will be repeated once.
-
-The collection period can be specified in different units, such as seconds, milliseconds, microseconds, and nanoseconds. The default unit is "seconds". You can change the unit using the ``--collection-period-unit`` option.
-
-The available time units are:
-
-`--collection-period-unit`: `hour`, `min`, `sec`, `msec`, `usec`, `nsec`
-
-To specify the time unit as milliseconds, use:
-
-.. code-block:: shell
-
-   rocprofv3 --collection-period 5:1:0 --collection-period-unit msec --hip-trace -- <application_path>
-
-Perfetto-specific options
-++++++++++++++++++++++++++
-
-The following options are specific to Perfetto tracing and are used to control the Perfetto data collection behavior:
-
-- **--perfetto-buffer-fill-policy {discard,ring_buffer}**: Policy for handling new records when Perfetto reaches the buffer limit.
-
-  - **RING_BUFFER (default)**: The buffer behaves like a ring buffer. Once full, writes wrap over and replace the oldest trace data in the buffer.
-
-  - **DISCARD**: The buffer stops accepting data once full. Further write attempts are dropped.
-
-- **--perfetto-buffer-size KB**: The buffer size for Perfetto output in KB. Default: 1 GB. If set, stops the tracing session after N bytes have been written. Used to cap the trace size.
-
-- **--perfetto-backend {inprocess,system}**: Perfetto data collection backend. ``system`` mode requires starting traced and perfetto daemons. By default Perfetto keeps the full trace buffers in memory.
-
-- **--perfetto-shmem-size-hint KB**: Perfetto shared memory size hint in KB. Default: 64 KB. This option gives you control over shared memory buffer sizing. You can tweak this option to avoid data losses when data is produced at a higher rate.
-
 .. _output-file-fields:
 
 Output file fields
@@ -2258,66 +1146,128 @@ Output file fields
 
 The following table lists the various fields or the columns in the output CSV files generated for application tracing and kernel counter collection:
 
-.. list-table:: output file fields
-  :header-rows: 1
+.. raw:: html
 
-  * - Field
-    - Description
-
-  * - Agent_Id
-    - GPU identifier to which the kernel was submitted.
-
-  * - Correlation_Id
-    - Unique identifier for correlation between HIP and HSA async calls during activity tracing.
-
-  * - Start_Timestamp
-    - Begin time in nanoseconds (ns) when the kernel begins execution.
-
-  * - End_Timestamp
-    - End time in ns when the kernel finishes execution.
-
-  * - Queue_Id
-    - ROCm queue unique identifier to which the kernel was submitted.
-
-  * - Stream_Id
-    - Identifies HIP stream ID to which kernel or memory copy operation was submitted. Defaults to 0 if the hip-stream-display option is not enabled
-
-  * - Private_Segment_Size
-    - The amount of memory required in bytes for the combined private, spill, and arg segments for a work item.
-
-  * - Group_Segment_Size
-    - The group segment memory required by a workgroup in bytes. This does not include any dynamically allocated group segment memory that may be added when the kernel is dispatched.
-
-  * - Workgroup_Size
-    - The total number of work-items (or, threads) in each workgroup (or, block) launched as part of the kernel dispatch. In HIP, this is equivalent to the total block size.
-
-  * - Workgroup_Size_n
-    - Size of the workgroup in the nth dimension as declared by the compute shader, where n = X, Y, or Z.
-
-  * - Grid_Size
-    - The total number of work-items (or, threads) launched as a part of the kernel dispatch. In HIP, this is equivalent to the total grid size multiplied by the total workgroup (or, block) size.
-
-  * - Grid_Size_n
-    - Number of work-items (or, threads) in the nth dimension required to launch the kernel, where n = X, Y, or Z.
-
-  * - LDS_Block_Size
-    - Thread block size for the kernel's Local Data Share (LDS) memory.
-
-  * - Scratch_Size
-    - Kernel’s scratch memory size.
-
-  * - SGPR_Count
-    - Kernel's Scalar General Purpose Register (SGPR) count.
-
-  * - VGPR_Count
-    - Kernel's Architected Vector General Purpose Register (VGPR) count.
-
-  * - Accum_VGPR_Count
-    - Kernel's Accumulation Vector General Purpose Register (Accum_VGPR/AGPR) count.
+   <div class="pst-scrollable-table-container">
+      <table id="rocprov3-output-fields" class="table">
+         <thead>
+            <tr>
+               <th>Information type</th>
+               <th>Field</th>
+               <th>Description</th>
+            </tr>
+         </thead>
+         <colgroup>
+            <col span="1">
+            <col span="1">
+         </colgroup>
+         <tbody class="output-fields">
+            <tr>
+               <th rowspan="7">Dispatch information</th>
+               <td>Agent_Id</td>
+               <td>GPU identifier to which the kernel was submitted.</td>
+            </tr>
+            <tr>
+               <td>Correlation_Id</td>
+               <td>Unique identifier for correlation between HIP and HSA async calls during activity tracing.</td>
+            </tr>
+            <tr>
+               <td>Dispatch_Id</td>
+               <td>Dispatch identifier</td>
+            </tr>
+            <tr>
+               <td>Process_Id</td>
+               <td>Process identifier</td>
+            </tr>
+            <tr>
+               <td>Thread_Id</td>
+               <td>Thread identifier</td>
+            </tr>
+            <tr>
+               <td>Queue_Id</td>
+               <td>ROCm queue unique identifier to which the kernel was submitted.</td>
+            </tr>
+            <tr>
+               <td>Stream_Id</td>
+               <td>Identifies HIP stream ID to which kernel or memory copy operation was submitted. Defaults to 0 if the hip-stream-display option is not enabled</td>
+            </tr>
+            <tr>
+               <th rowspan="8">Kernel information</th>
+               <td>Grid_Size</td>
+               <td>The total number of work-items (or, threads) launched as a part of the kernel dispatch. In HIP, this is equivalent to the total grid size multiplied by the total workgroup (or, block) size.</td>
+            </tr>
+            <tr>
+               <td>Grid_Size_n</td>
+               <td>Number of work-items (or, threads) in the nth dimension required to launch the kernel, where n = X, Y, or Z.</td>
+            </tr>
+            <tr>
+               <td>Kernel_Id</td>
+               <td>Kernel identifier</td>
+            </tr>
+            <tr>
+               <td>Kernel_Name</td>
+               <td>Kernel name</td>
+            </tr>
+            <tr>
+               <td>Workgroup_Size</td>
+               <td>The total number of work-items (or, threads) in each workgroup (or, block) launched as part of the kernel dispatch. In HIP, this is equivalent to the total block size.</td>
+            </tr>
+            <tr>
+               <td>Workgroup_Size_n</td>
+               <td>Size of the workgroup in the nth dimension as declared by the compute shader, where n = X, Y, or Z.</td>
+            </tr>
+            <tr>
+               <td>Private_Segment_Size</td>
+               <td>The amount of memory required in bytes for the combined private, spill, and arg segments for a work item.</td>
+            </tr>
+            <tr>
+               <td>Group_Segment_Size</td>
+               <td>The group segment memory required by a workgroup in bytes. This does not include any dynamically allocated group segment memory that may be added when the kernel is dispatched.</td>
+            </tr>
+            <tr>
+               <th rowspan="5">Resource usage</th>
+               <td>LDS_Block_Size</td>
+               <td>Thread block size for the kernel’s Local Data Share (LDS) memory (shared memory per work-group).</td>
+            </tr>
+            <tr>
+               <td>Scratch_Size</td>
+               <td>Kernel’s scratch memory (private memory per work-item) size.</td>
+            </tr>
+            <tr>
+               <td>SGPR_Count</td>
+               <td>Kernel’s Scalar General Purpose Register (SGPR) count.</td>
+            </tr>
+            <tr>
+               <td>VGPR_Count</td>
+               <td>Kernel’s Architected Vector General Purpose Register (VGPR) count.</td>
+            </tr>
+            <tr>
+               <td>Accum_VGPR_Count</td>
+               <td>Kernel’s Accumulation Vector General Purpose Register (Accum_VGPR/AGPR) count.</td>
+            </tr>
+            <tr>
+               <th rowspan="4">Counter data</td>
+               <td>Counter_Name</td>
+               <td>Name of the counter</td>
+            </tr>
+            <tr>
+               <td>Counter_Value</td>
+               <td>The numeric value measured by a specific hardware performance counter during a kernel dispatch</td>
+            </tr>
+            <tr>
+               <td>Start_Timestamp</td>
+               <td>Begin time in nanoseconds (ns) when the kernel begins execution.</td>
+            </tr>
+            <tr>
+               <td>End_Timestamp</td>
+               <td>End time in ns when the kernel finishes execution.</td>
+            </tr>
+         </tbody>
+      </table>
+   </div>
 
 Output formats
 ----------------
-
 
 - rocpd (SQLite3 Database (Default))
 - CSV

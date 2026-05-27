@@ -28,7 +28,7 @@ function(ais_add_libraries)
     add_library(${arg_NAME} ${arg_SRCS})
 
     # Set C++ standard
-    target_compile_features(${arg_NAME} PUBLIC cxx_std_17)
+    target_compile_features(${arg_NAME} PUBLIC cxx_std_${AIS_CXX_STANDARD})
     set_target_properties(${arg_NAME} PROPERTIES CXX_EXTENSIONS OFF)
 
     # Set position-independent code

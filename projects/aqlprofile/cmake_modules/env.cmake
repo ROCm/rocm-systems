@@ -43,7 +43,12 @@ endif()
 
 ## Enable debug trace
 if ( DEFINED ENV{CMAKE_DEBUG_TRACE} )
-  add_definitions ( -DDEBUG_TRACE=1 )
+  if( $ENV{CMAKE_DEBUG_TRACE} STREQUAL "1")
+    add_definitions ( -DDEBUG_TRACE=1 )
+  endif()
+  if( $ENV{CMAKE_DEBUG_TRACE} STREQUAL "2")
+    add_definitions ( -DDEBUG_TRACE=2 )
+  endif()
 endif()
 
 ## Enable direct loading of AQL-profile HSA extension

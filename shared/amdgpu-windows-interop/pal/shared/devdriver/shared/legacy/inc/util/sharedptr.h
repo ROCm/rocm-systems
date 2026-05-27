@@ -223,14 +223,14 @@ namespace DevDriver
             return Get();
         }
 
-        // Templated comparison operator. Allows comparing shared pointer objects so long as U is convertable to T.
+        // Templated comparison operator. Allows comparing shared pointer objects so long as U is convertible to T.
         template <typename U, typename = typename Platform::EnableIf<Platform::IsConvertible<U*, T*>::Value>::Type>
         bool operator== (const SharedPointer< U >&right) const
         {
             return m_pObject == right.m_pObject;
         }
 
-        // Templated comparison operator. Allows comparing shared pointer objects so long as U is convertable to T.
+        // Templated comparison operator. Allows comparing shared pointer objects so long as U is convertible to T.
         template <typename U, typename = typename Platform::EnableIf<Platform::IsConvertible<U*, T*>::Value>::Type>
         bool operator!= (const SharedPointer< U >&right) const
         {

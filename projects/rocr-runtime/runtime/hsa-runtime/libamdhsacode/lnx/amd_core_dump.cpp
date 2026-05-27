@@ -83,23 +83,6 @@ namespace {
 /* Implementation details */
 namespace impl {
 
-// Optional: Detect if running in a container
-namespace {
-[[nodiscard]] bool is_running_in_container() {
-  std::ifstream cgroup("/proc/1/cgroup");
-  if (!cgroup.is_open()) return false;
-
-  std::string line;
-  while (std::getline(cgroup, line)) {
-    if (line.find("docker") != std::string::npos ||
-        line.find("lxc") != std::string::npos ||
-        line.find("kubepods") != std::string::npos) {
-      return true;
-    }
-  }
-  return false;
-}
-} // anonymous namespace
 
 // Read kernel core pattern from /proc/sys/kernel/core_pattern
 static std::string read_kernel_core_pattern() {
@@ -747,17 +730,6 @@ hsa_status_t write_to_pipe_handler(const std::string& pattern,
                                           const SegmentsInfo& segments,
                                           size_t size_limit,
                                           bool show_progress) {
-  // Check if we're in a container
-  if (is_running_in_container() && custom_core_dump().empty()) {
-    fprintf(stderr,
-      "GPU coredump: System pipe patterns not supported in containers.\n"
-      "Falling back to file-based dump. Use custom pattern (HSA_COREDUMP_FILE)"
-      " to override.\n");
-    // Fall back to file-based dump
-    std::string filename = PREFIX_FILE_NAME + "." + std::to_string(getpid()) + ".gpu";
-    return build_core_dump(filename, segments, size_limit, show_progress);
-  }
-
   // Extract program and arguments (remove leading '|')
   std::string command = pattern.substr(1);
   std::string substituted = substitute_core_pattern(command);
@@ -767,6 +739,16 @@ hsa_status_t write_to_pipe_handler(const std::string& pattern,
     fprintf(stderr, "GPU coredump: Invalid pipe pattern\n");
     return HSA_STATUS_ERROR;
   }
+
+  if (args[0][0] == '/' && access(args[0].c_str(), X_OK) != 0) {
+    fprintf(stderr,
+      "GPU coredump: Pipe handler '%s' not found or not executable.\n"
+      "Falling back to file-based dump. Set HSA_COREDUMP_PATTERN to override.\n",
+      args[0].c_str());
+    std::string filename = PREFIX_FILE_NAME + "." + std::to_string(getpid()) + ".gpu";
+    return build_core_dump(filename, segments, size_limit, show_progress);
+  }
+
   // Create pipe for communication
   int pipefd[2];
   if (pipe(pipefd) == -1) {

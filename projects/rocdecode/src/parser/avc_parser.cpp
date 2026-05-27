@@ -391,7 +391,7 @@ ParserResult AvcVideoParser::NotifyNewSps(AvcSeqParameterSet *p_sps) {
 
     video_format_params_.bitrate = 0;
 
-    // Dispaly aspect ratio
+    // Display aspect ratio
     // Table E-1.
     static const Rational avc_sar[] = {
         {0, 0}, // unspecified
@@ -2277,7 +2277,7 @@ ParserResult AvcVideoParser::SetupReflist(AvcSliceInfo *p_slice_info) {
     }
 
     if (p_slice_header->slice_type == kAvcSliceTypeI || p_slice_header->slice_type == kAvcSliceTypeSI || p_slice_header->slice_type == kAvcSliceTypeI_7 || p_slice_header->slice_type == kAvcSliceTypeSI_9) {
-        // We still need to do 8.2.4.1 above for I pictures but will not go furhter.
+        // We still need to do 8.2.4.1 above for I pictures but will not go further.
         return PARSER_OK;
     }
 
@@ -2809,7 +2809,7 @@ ParserResult AvcVideoParser::MarkDecodedRefPics() {
             dpb_buffer_.field_pic_list[i * 2].is_reference = kUnusedForReference;
             dpb_buffer_.field_pic_list[i * 2 + 1].is_reference = kUnusedForReference;
         }
-        // Output the remaining picutres in DPB
+        // Output the remaining pictures in DPB
         if (FlushDpb() != PARSER_OK) {
             return PARSER_FAIL;
         }
@@ -3014,7 +3014,7 @@ ParserResult AvcVideoParser::MarkDecodedRefPics() {
                             dpb_buffer_.field_pic_list[j * 2].is_reference = kUnusedForReference;
                             dpb_buffer_.field_pic_list[j * 2 + 1].is_reference = kUnusedForReference;
                         }
-                        // Output the remaining picutres in DPB
+                        // Output the remaining pictures in DPB
                         if (FlushDpb() != PARSER_OK) {
                                 return PARSER_FAIL;
                         }

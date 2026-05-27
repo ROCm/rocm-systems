@@ -351,6 +351,11 @@ class Device : public NullDevice {
   static hsa_status_t iterateCpuMemoryPoolCallback(hsa_amd_memory_pool_t region, void* data);
   static hsa_status_t loaderQueryHostAddress(const void* device, const void** host);
 
+  //! Returns the AMD HSA loader extension function table.
+  static const hsa_ven_amd_loader_1_03_pfn_t& loaderExtensionTable() {
+    return amd_loader_ext_table;
+  }
+
   static bool loadHsaModules();
 
   hsa_agent_t getBackendDevice() const { return bkendDevice_; }
@@ -404,6 +409,7 @@ class Device : public NullDevice {
   }
 
   virtual device::Signal* createSignal() const override;
+  virtual device::Signal* createIpcSignal() const override;
 
   //! Acquire external graphics API object in the host thread
   //! Needed for OpenGL objects on CPU device
@@ -545,7 +551,8 @@ class Device : public NullDevice {
       amd::CommandQueue::Priority priority = amd::CommandQueue::Priority::Normal,
       bool managed = false, bool dedicated_queue = false,
       hsa_queue_t* preferred = nullptr,
-      const std::unordered_set<uint64_t>* excluded_ids = nullptr);
+      const std::unordered_set<uint64_t>* excluded_ids = nullptr,
+      void** metadata_ring_buffer = nullptr);
 
   //! Release HSA queue
   void releaseQueue(hsa_queue_t*, const std::vector<uint32_t>& cuMask = {}, bool coop_queue = false,
@@ -553,8 +560,12 @@ class Device : public NullDevice {
 
   hsa_queue_t* AcquireActiveQueue(amd::CommandQueue::Priority priority,
                                    hsa_queue_t* preferred = nullptr,
-                                   const std::unordered_set<uint64_t>* excluded_ids = nullptr);
+                                   const std::unordered_set<uint64_t>* excluded_ids = nullptr,
+                                   void** metadata_ring_buffer = nullptr);
   bool ReleaseActiveQueue(hsa_queue_t* queue, amd::CommandQueue::Priority priority);
+
+  //! Return the pre-computed metadata packet version header bits
+  uint32_t MetadataVersionHeader() const { return metadata_version_header_; }
 
   //! Return multi GPU grid launch sync buffer
   address MGSync() const { return mg_sync_; }
@@ -633,7 +644,7 @@ class Device : public NullDevice {
                            int numa_id = kDefaultNumaNode) const;
   static constexpr hsa_signal_value_t InitSignalValue = 1;
 
-  static hsa_ven_amd_loader_1_00_pfn_t amd_loader_ext_table;
+  static hsa_ven_amd_loader_1_03_pfn_t amd_loader_ext_table;
 
   std::recursive_mutex* mapCacheOps_;    //!< Lock to serialise cache for the map resources
   std::vector<amd::Memory*>* mapCache_;  //!< Map cache info structure
@@ -670,12 +681,17 @@ class Device : public NullDevice {
                                    //!< mode
   static address mg_sync_;         //!< MGPU grid launch sync memory (SVM location)
 
+  //! Pre-computed metadata packet version header bits
+  uint32_t metadata_version_header_ = 0;
+  bool metadata_version_queried_ = false;
+
   struct QueueInfo {
     int refCount;             //! Reference counter. Shows how many time the queue was shared
     bool hasDedicatedQueue_;  //! True if this queue is a dedicated queue (e.g., null stream)
+    void* metadataRingBuffer_; //! Metadata prefetch ring buffer base
 
     // Constructor
-    QueueInfo() : refCount(0), hasDedicatedQueue_(false) {}
+    QueueInfo() : refCount(0), hasDedicatedQueue_(false), metadataRingBuffer_(nullptr) {}
 
     //! Get the current hardware queue depth (wptr - rptr)
     static uint64_t GetHwQueueDepth(hsa_queue_t* queue) {
@@ -720,7 +736,8 @@ class Device : public NullDevice {
   //! Use dynamic queues mode to get a queue from pool
   hsa_queue_t* getQueueFromPool(const uint qIndex, bool force_reuse = false,
                                 hsa_queue_t* preferred = nullptr,
-                                const std::unordered_set<uint64_t>* excluded_ids = nullptr);
+                                const std::unordered_set<uint64_t>* excluded_ids = nullptr,
+                                void** metadata_ring_buffer = nullptr);
 
   //! returns value for corresponding LinkAttrbutes in a vector given Memory pool.
   virtual bool findLinkInfo(const hsa_amd_memory_pool_t& pool,
@@ -762,6 +779,12 @@ class Device : public NullDevice {
   friend void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data);
 
  public:
+
+  //! Count of schedulerQueue_ instances per device
+  //! Windows AQL device-enqueue path.
+  std::atomic<uint32_t> hasSchedulerQueue_{0};
+  static std::atomic<bool> skipHsaShutdown_;
+
   std::atomic<uint> numOfVgpus_;  //!< Virtual gpu unique index
 
   //! Returns the valid SDMA engine bitmask for the given operation type.

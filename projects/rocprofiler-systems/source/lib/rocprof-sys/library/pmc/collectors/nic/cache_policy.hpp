@@ -134,14 +134,14 @@ struct cache_policy
     static void store_sample(size_t device_id, const std::string& device_name,
                              const enabled_metrics& enabled_metrics_cfg,
                              const enabled_metrics& supported_metrics,
-                             const metrics& metric_values, uint64_t timestamp)
+                             const metrics& metric_values, std::uint64_t timestamp)
     {
         enabled_metrics _enabled_metrics;
         _enabled_metrics.value = enabled_metrics_cfg.value & supported_metrics.value;
 
         trace_cache::get_buffer_storage().store(trace_cache::ainic_pmc_sample{
-            _enabled_metrics, static_cast<uint32_t>(device_id), device_name, timestamp,
-            metric_values });
+            _enabled_metrics, static_cast<std::uint32_t>(device_id), device_name,
+            timestamp, metric_values });
     }
 };
 

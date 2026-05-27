@@ -439,7 +439,7 @@
     // Save SCHED_MODE from ttmp1[27:26] into ttmp11[27:26]. We will restore it on exit
     s_andn2_b32         ttmp11, ttmp11, TTMP11_SCHED_MODE_MASK
     s_and_b32           ttmp2,  ttmp1, TTMP1_SCHED_MODE_MASK
-    s_or_b32            ttmp11, ttmp2, TTMP1_SCHED_MODE_MASK
+    s_or_b32            ttmp11, ttmp11, ttmp2
   .endif
   s_mov_b32           ttmp3, 0
 
@@ -1324,12 +1324,6 @@
 
 .exit_trap:
 
-.if .amdgcn.gfx_generation_minor == 0
-    // Restore ttmp11[27:26] into SCHED_MODE[0:1]
-    s_bfe_u32         ttmp2, ttmp11, TTMP11_SCHED_MODE_BFE
-    s_setreg_b32      hwreg(HW_REG_WAVE_SCHED_MODE, 0, 2), ttmp2
-.endif
-
 .if .amdgcn.gfx_generation_minor == 5
  // VGPR MSB Fixup Function for GFX12.5
  // This function detects if we're returning to a VALU instruction followed by
@@ -1512,12 +1506,21 @@
   s_setreg_b32      hwreg(HW_REG_XNACK_STATE_PRIV, SQ_WAVE_XNACK_STATE_PRIV_FXPTR_SHIFT, SQ_WAVE_XNACK_STATE_PRIV_FXPTR_SIZE), ttmp2
 .endif //.amdgcn.gfx_generation_minor == 5
 
+.if .amdgcn.gfx_generation_minor == 0
+  // Extract SCHED_MODE from ttmp11 so we can restore it just before s_rfe.
+  s_bfe_u32         ttmp2, ttmp11, TTMP11_SCHED_MODE_BFE
+.endif
+
   // Restore SQ_WAVE_STATUS.
   s_and_b64         exec, exec, exec                        // Restore STATUS.EXECZ, not writable by s_setreg_b32
   s_and_b64         vcc, vcc, vcc                           // Restore STATUS.VCCZ, not writable by s_setreg_b32
   s_setreg_b32      hwreg(HW_REG_STATE_PRIV, 0, SQ_WAVE_STATE_PRIV_BARRIER_COMPLETE_SHIFT), ttmp12
   s_lshr_b32        ttmp12, ttmp12, (SQ_WAVE_STATE_PRIV_BARRIER_COMPLETE_SHIFT + 1)
   s_setreg_b32      hwreg(HW_REG_STATE_PRIV, SQ_WAVE_STATE_PRIV_BARRIER_COMPLETE_SHIFT + 1, 32 - SQ_WAVE_STATE_PRIV_BARRIER_COMPLETE_SHIFT - 1), ttmp12
+
+.if .amdgcn.gfx_generation_minor == 0
+  s_setreg_b32      hwreg(HW_REG_WAVE_SCHED_MODE, 0, 2), ttmp2
+.endif
 
   // Return to original (possibly modified) PC.
   s_rfe_b64         [ttmp0, ttmp1]

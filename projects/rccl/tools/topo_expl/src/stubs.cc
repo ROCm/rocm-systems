@@ -52,3 +52,16 @@ bool rcclUseAinic() {
 int64_t ncclParamWorkArgsBytes() {
   return INT64_MAX;
 }
+
+// Stubs for symbols newly referenced by src/misc/param.cc and debug.h
+// after the NCCL 2.28.9 sync. topo_expl does not use the env-plugin
+// machinery and does not link debug.cc, so provide minimal definitions.
+__attribute__((visibility("default"))) uint64_t ncclDebugMask = 0;
+
+ncclResult_t ncclInitEnv(void) {
+  return ncclSuccess;
+}
+
+const char* ncclEnvPluginGetEnv(const char* name) {
+  return getenv(name);
+}

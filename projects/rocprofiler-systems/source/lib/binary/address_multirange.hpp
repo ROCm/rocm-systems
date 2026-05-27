@@ -20,8 +20,6 @@ struct address_multirange
     struct coarse
     {};
 
-    ROCPROFSYS_DEFAULT_OBJECT(address_multirange)
-
     address_multirange& operator+=(std::pair<coarse, uintptr_t>&&);
     address_multirange& operator+=(std::pair<coarse, address_range>&& _v);
     address_multirange& operator+=(uintptr_t _v);

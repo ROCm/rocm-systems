@@ -30,8 +30,8 @@ public:
 
     void shutdown();
 
-    void register_region_pauser_resume_callbacks(callback_t resume_callback,
-                                                 callback_t pause_callback);
+    void register_region_pause_resume_callbacks(callback_t resume_callback,
+                                                callback_t pause_callback);
 
     bool region_filter_active() const
     {
@@ -41,16 +41,16 @@ public:
 
     void force_initial_pause();
 
-    void handle_range_start(uint64_t range_id, const char* message);
-    void handle_range_stop(uint64_t range_id);
-    void handle_pause();
-    void handle_resume();
+    void handle_range_start(std::uint64_t range_id, const char* message);
+    void handle_range_stop(std::uint64_t range_id);
+    void handle_pause(std::uint64_t tid);
+    void handle_resume(std::uint64_t tid);
 
 private:
     std::set<std::string, std::less<>> m_trace_regions;
-    std::unordered_set<uint64_t>       m_active_range_ids;
+    std::unordered_set<std::uint64_t>  m_active_range_ids;
     std::atomic<bool>                  m_region_filter_active{ false };
-    std::atomic<uint32_t>              m_active_region_count{ 0 };
+    std::atomic<std::uint32_t>         m_active_region_count{ 0 };
     std::atomic<bool>                  m_user_paused{ false };
 
     std::vector<callback_t> m_resume_callbacks;

@@ -8,12 +8,12 @@ set -e
 : ${VERSIONS:=24.04}
 : ${NJOBS=$(nproc)}
 : ${ELFUTILS_VERSION:=0.188}
-: ${BOOST_VERSION:=1.79.0}
 : ${PYTHON_VERSIONS:="8 9 10 11 12 13"}
 : ${PUSH:=0}
 : ${PULL:=--pull}
 : ${GPU_TYPE:=""}
 : ${GPU_TARBALL:=""}
+: ${ROCM_VERSION:=""}
 
 verbose-run()
 {
@@ -44,9 +44,9 @@ usage()
     print_default_option distro "[ubuntu|opensuse|rhel|debian]" "OS distribution" "${DISTRO}"
     print_default_option versions "[VERSION] [VERSION...]" "Ubuntu, OpenSUSE, or RHEL release" "${VERSIONS}"
     print_default_option python-versions "[VERSION] [VERSION...]" "Python 3 minor releases" "${PYTHON_VERSIONS}"
+    print_default_option rocm-version "[VERSION]" "ROCm version to install (e.g. 7.2)" "${ROCM_VERSION:-none}"
     print_default_option "jobs -j" "[N]" "parallel build jobs" "${NJOBS}"
     print_default_option elfutils-version "[0.183..0.188]" "ElfUtils version" "${ELFUTILS_VERSION}"
-    print_default_option boost-version "[1.67.0..1.79.0]" "Boost version" "${BOOST_VERSION}"
     print_default_option user "[USERNAME]" "DockerHub username" "${USER}"
     print_default_option type "[base|gfxXXX]" "Type of image to create" "${TYPE}"
 }
@@ -103,11 +103,6 @@ do
             ELFUTILS_VERSION=${1}
             reset-last
             ;;
-        "--boost-version")
-            shift
-            BOOST_VERSION=${1}
-            reset-last
-            ;;
         "--gpu-type")
             shift
             GPU_TYPE=${1}
@@ -116,6 +111,11 @@ do
         "--gpu-tarball")
             shift
             GPU_TARBALL=${1}
+            reset-last
+            ;;
+        "--rocm-version")
+            shift
+            ROCM_VERSION=${1}
             reset-last
             ;;
         --user|-u)
@@ -142,6 +142,10 @@ do
     n=$((${n} + 1))
     shift
 done
+
+if [ -n "${ROCM_VERSION}" ] && [ "${TYPE}" = "base" ]; then
+    TYPE="rocm-${ROCM_VERSION}"
+fi
 
 if [ "${DISTRO}" = "debian" ]; then
     DOCKER_FILE=Dockerfile.ubuntu.ci
@@ -174,18 +178,24 @@ fi
 
 for VERSION in ${VERSIONS}
 do
+    BASE_IMAGE_ARG=""
+    if [ "${DISTRO}" = "ubuntu" ] && [ -n "${ROCM_VERSION}" ]; then
+        BASE_IMAGE_ARG="--build-arg BASE_IMAGE=rocm/dev-ubuntu-${VERSION}:${ROCM_VERSION}"
+    fi
+
     verbose-run docker build . \
         ${PULL} \
         -f docker/${DOCKER_FILE} \
         --tag ${USER}/rocprofiler-systems:ci-${TYPE}-${DISTRO}-${VERSION} \
         --build-arg DISTRO=${DISTRO_IMAGE} \
         --build-arg VERSION=${VERSION} \
+        ${BASE_IMAGE_ARG} \
         --build-arg NJOBS=${NJOBS} \
         --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\" \
         --build-arg ELFUTILS_DOWNLOAD_VERSION=${ELFUTILS_VERSION} \
-        --build-arg BOOST_DOWNLOAD_VERSION=${BOOST_VERSION} \
         --build-arg GPU_TYPE=${GPU_TYPE} \
-        --build-arg GPU_TARBALL=${GPU_TARBALL}
+        --build-arg GPU_TARBALL=${GPU_TARBALL} \
+        --build-arg ROCM_VERSION=${ROCM_VERSION}
 done
 
 if [ "${PUSH}" -gt 0 ]; then

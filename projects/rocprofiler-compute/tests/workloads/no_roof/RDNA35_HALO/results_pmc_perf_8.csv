@@ -1,0 +1,10 @@
+GPU_ID,GUID,Correlation_Id,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,Scratch_Per_Workitem,Arch_VGPR,Accum_VGPR,SGPR,Kernel_Name,Start_Timestamp,End_Timestamp,Kernel_ID,Counter_Name,Counter_Value
+1,000091ae-fbbd-7bbd-aa17-dc16c1c74008,1,0,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",2444164203310672,2444164203344375,0,CPC_GUS_WRITE_REQUEST_SENT_sum,0.0
+1,000091ae-fbbd-7bbd-aa17-dc16c1c74008,1,0,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",2444164203310672,2444164203344375,0,GCEA_SARB_REQ_PER_VC_sum,1770080.0
+1,000091ae-fbbd-7bbd-aa17-dc16c1c74008,1,0,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",2444164203310672,2444164203344375,0,GCEA_WDRAM_NUM_BANKS_VLD_sum,215772.0
+1,000091ae-fbbd-7bbd-aa17-dc16c1c74008,2,1,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",2444164205065172,2444164205141195,0,CPC_GUS_WRITE_REQUEST_SENT_sum,0.0
+1,000091ae-fbbd-7bbd-aa17-dc16c1c74008,2,1,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",2444164205065172,2444164205141195,0,GCEA_SARB_REQ_PER_VC_sum,1652180.0
+1,000091ae-fbbd-7bbd-aa17-dc16c1c74008,2,1,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",2444164205065172,2444164205141195,0,GCEA_WDRAM_NUM_BANKS_VLD_sum,130993.0
+1,000091ae-fbbd-7bbd-aa17-dc16c1c74008,3,2,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",2444164205472874,2444164205543287,0,CPC_GUS_WRITE_REQUEST_SENT_sum,0.0
+1,000091ae-fbbd-7bbd-aa17-dc16c1c74008,3,2,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",2444164205472874,2444164205543287,0,GCEA_SARB_REQ_PER_VC_sum,1650590.0
+1,000091ae-fbbd-7bbd-aa17-dc16c1c74008,3,2,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",2444164205472874,2444164205543287,0,GCEA_WDRAM_NUM_BANKS_VLD_sum,131616.0

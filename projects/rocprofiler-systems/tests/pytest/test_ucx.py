@@ -123,7 +123,8 @@ class TestUCX(RocprofsysTest):
             env=ucx_env,
             rewrite_args=REWRITE_ARGS,
             run_args=RUN_ARGS,
-            mpi_ranks=2,
+            launcher="mpi",
+            num_procs=2,
         )
         self.assert_regex(
             result,
@@ -158,7 +159,12 @@ class TestUCX(RocprofsysTest):
         SYS_RUN_PASS_REGEX = [r"ucx_gotcha|category::ucx|Using UCX|pml.*ucx"]
 
         result = self.run_test(
-            mode, "mpi-example", env=ucx_env, rewrite_args=REWRITE_ARGS, mpi_ranks=2
+            mode,
+            "mpi-send-recv",
+            env=ucx_env,
+            rewrite_args=REWRITE_ARGS,
+            launcher="mpi",
+            num_procs=2,
         )
         self.assert_regex(
             result,
@@ -197,7 +203,8 @@ class TestUCX(RocprofsysTest):
             env=ucx_mpip_env,
             rewrite_args=REWRITE_ARGS,
             run_args=RUN_ARGS,
-            mpi_ranks=2,
+            launcher="mpi",
+            num_procs=2,
         )
         self.assert_regex(
             result,
@@ -226,7 +233,8 @@ class TestUCX(RocprofsysTest):
             env=ucx_env,
             rewrite_args=REWRITE_ARGS,
             run_args=[msg_size],
-            mpi_ranks=2,
+            launcher="mpi",
+            num_procs=2,
         )
         self.assert_regex(
             result,
@@ -255,7 +263,8 @@ class TestUCX(RocprofsysTest):
             env=ucx_active_messages_env,
             rewrite_args=REWRITE_ARGS,
             run_args=RUN_ARGS,
-            mpi_ranks=2,
+            launcher="mpi",
+            num_procs=2,
         )
         self.assert_regex(
             result,
