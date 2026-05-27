@@ -25,6 +25,9 @@
 #include "hsa/hsa_ven_amd_aqlprofile.h"
 #endif
 
+typedef hsa_status_t HSA_API hsa_amd_queue_create_fn(
+    hsa_agent_t agent, hsa_amd_queue_create_desc_t* descs, uint32_t num_descs);
+
 namespace amd {
 namespace roc {
 
@@ -102,6 +105,7 @@ struct RocrEntryPoints {
   decltype(hsa_amd_signal_create)* hsa_amd_signal_create_;
   decltype(hsa_amd_register_system_event_handler)* hsa_amd_register_system_event_handler_;
   decltype(hsa_amd_queue_set_priority)* hsa_amd_queue_set_priority_;
+  hsa_amd_queue_create_fn* hsa_amd_queue_create_;
   decltype(hsa_amd_memory_async_copy_rect)* hsa_amd_memory_async_copy_rect_;
   decltype(hsa_amd_memory_lock_to_pool)* hsa_amd_memory_lock_to_pool_;
   decltype(hsa_amd_signal_value_pointer)* hsa_amd_signal_value_pointer_;
@@ -151,7 +155,7 @@ struct RocrEntryPoints {
     return false;                                                                                 \
   }
 #define GET_ROCR_OPTIONAL_SYMBOL(NAME)                                                            \
-  cep_.NAME = reinterpret_cast<t_##NAME>(Os::getSymbol(cep_.handle, #NAME));
+  cep_.NAME##_ = reinterpret_cast<NAME##_fn*>(Os::getSymbol(cep_.handle, #NAME));
 #else
 #define ROCR_DYN(NAME) NAME
 #define GET_ROCR_SYMBOL(NAME)
@@ -431,6 +435,22 @@ class Hsa : public amd::AllStatic {
   }
   static hsa_status_t queue_set_priority(hsa_queue_t* queue, hsa_amd_queue_priority_t priority) {
     return ROCR_DYN(hsa_amd_queue_set_priority)(queue, priority);
+  }
+  static bool amd_queue_create_available() {
+#ifdef ROCR_DYN_DLL
+    return ROCR_DYN(hsa_amd_queue_create) != nullptr;
+#else
+    return true;
+#endif
+  }
+  static hsa_status_t amd_queue_create(hsa_agent_t agent,
+                                       hsa_amd_queue_create_desc_t* descs,
+                                       uint32_t num_descs) {
+#ifdef ROCR_DYN_DLL
+    return ROCR_DYN(hsa_amd_queue_create)(agent, descs, num_descs);
+#else
+    return hsa_amd_queue_create(agent, descs, num_descs);
+#endif
   }
   static hsa_status_t memory_async_copy_rect(
     const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset, const hsa_pitched_ptr_t* src,
