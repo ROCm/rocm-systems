@@ -690,9 +690,16 @@ configure_settings(bool _init)
                               "perfetto", "data");
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_PERFETTO_COMBINE_TRACES",
-                              "Combine Perfetto traces. If not explicitly set, it will "
-                              "default to the value of ROCPROFSYS_COLLAPSE_PROCESSES",
-                              false, "perfetto", "data", "advanced");
+                              "Deprecated, no longer consulted. Use "
+                              "ROCPROFSYS_PERFETTO_OUTPUT_LAYOUT=single_file_only|full "
+                              "to control cross-rank Perfetto trace aggregation",
+                              false, "perfetto", "data", "advanced", "deprecated");
+
+    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_MERGE_PERFETTO_FILES",
+                              "Deprecated, no longer consulted. Use "
+                              "ROCPROFSYS_PERFETTO_OUTPUT_LAYOUT=single_file_only|full "
+                              "to control cross-rank Perfetto trace aggregation",
+                              false, "perfetto", "data", "advanced", "deprecated");
 
     ROCPROFSYS_CONFIG_SETTING(std::uint32_t, "ROCPROFSYS_PERFETTO_FLUSH_PERIOD_MS",
                               "Set Perfetto flush period (in ms)", std::uint32_t{ 10000 },
@@ -1143,13 +1150,16 @@ configure_settings(bool _init)
     _config->get_global_components() =
         _config->get<std::string>("ROCPROFSYS_TIMEMORY_COMPONENTS");
 
-    auto _combine_perfetto_traces = _config->find("ROCPROFSYS_PERFETTO_COMBINE_TRACES");
-    if(!_combine_perfetto_traces->second->get_environ_updated() &&
-       _combine_perfetto_traces->second->get_config_updated())
-    {
-        _combine_perfetto_traces->second->set(_config->get<bool>("collapse_processes"));
-    }
-
+    // Both legacy bool settings are advertised against the new
+    // enum-string OUTPUT_LAYOUT for guidance, but their values cannot be
+    // mechanically migrated ("true"/"false" is not a valid layout enum),
+    // so the warn-only form is used and OUTPUT_LAYOUT keeps its own default.
+    handle_deprecated_setting("ROCPROFSYS_PERFETTO_COMBINE_TRACES",
+                              "ROCPROFSYS_PERFETTO_OUTPUT_LAYOUT", 0,
+                              /*_migrate=*/false);
+    handle_deprecated_setting("ROCPROFSYS_MERGE_PERFETTO_FILES",
+                              "ROCPROFSYS_PERFETTO_OUTPUT_LAYOUT", 0,
+                              /*_migrate=*/false);
     handle_deprecated_setting("ROCPROFSYS_AMD_SMI_DEVICES", "ROCPROFSYS_SAMPLING_GPUS");
     handle_deprecated_setting("ROCPROFSYS_USE_THREAD_SAMPLING",
                               "ROCPROFSYS_USE_PROCESS_SAMPLING");
@@ -1473,8 +1483,10 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
 
 #if !defined(ROCPROFSYS_USE_MPI) || ROCPROFSYS_USE_MPI == 0
     _config->disable("ROCPROFSYS_PERFETTO_COMBINE_TRACES");
+    _config->disable("ROCPROFSYS_MERGE_PERFETTO_FILES");
     _config->disable("ROCPROFSYS_COLLAPSE_PROCESSES");
     _config->find("ROCPROFSYS_PERFETTO_COMBINE_TRACES")->second->set_hidden(true);
+    _config->find("ROCPROFSYS_MERGE_PERFETTO_FILES")->second->set_hidden(true);
     _config->find("ROCPROFSYS_COLLAPSE_PROCESSES")->second->set_hidden(true);
 #endif
 
@@ -1535,7 +1547,7 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
 
 void
 handle_deprecated_setting(const std::string& _old, const std::string& _new,
-                          int /*_verbose*/)
+                          int /*_verbose*/, bool                      _migrate)
 {
     auto _config      = settings::shared_instance();
     auto _old_setting = _config->find(_old);
@@ -1564,7 +1576,7 @@ handle_deprecated_setting(const std::string& _old, const std::string& _new,
         LOG_WARNING("#   {} is deprecated!", _old);
         LOG_WARNING("#   Use {} instead!", _new);
 
-        if(!_new_setting->second->get_environ_updated() &&
+        if(_migrate && !_new_setting->second->get_environ_updated() &&
            !_new_setting->second->get_config_updated())
         {
             auto _before = _new_setting->second->as_string();
@@ -2122,22 +2134,6 @@ get_perfetto_flush_period()
 {
     static auto _v = get_config()->find("ROCPROFSYS_PERFETTO_FLUSH_PERIOD_MS");
     return static_cast<tim::tsettings<std::uint32_t>&>(*_v->second).get();
-}
-
-bool
-get_perfetto_combined_traces()
-{
-    static auto _v = get_config()->find("ROCPROFSYS_PERFETTO_COMBINE_TRACES");
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-}
-
-bool
-combined_traces_explicitly_set()
-{
-    static auto _v = get_config()->find("ROCPROFSYS_PERFETTO_COMBINE_TRACES");
-    if(_v == get_config()->end()) return false;
-    const auto& setting = *_v->second;
-    return setting.get_environ_updated() || setting.get_config_updated();
 }
 
 std::string

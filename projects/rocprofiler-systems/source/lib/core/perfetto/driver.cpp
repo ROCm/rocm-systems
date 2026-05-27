@@ -86,19 +86,6 @@ constexpr ::mode_t TMP_FILE_PERMS = 0600;
 // sources per rank, well past anything a single trace would produce.
 constexpr std::uint32_t MERGED_SEQ_ID_RANK_STRIDE = 1u << 20;
 
-void
-warn_combined_traces_deprecated_once()
-{
-    static bool warned = false;
-    if(warned) return;
-    if(!config::combined_traces_explicitly_set()) return;
-
-    warned = true;
-    LOG_WARNING("ROCPROFSYS_PERFETTO_COMBINE_TRACES is deprecated and no longer "
-                "consulted; ROCPROFSYS_PERFETTO_OUTPUT_LAYOUT now controls per-rank "
-                "vs merged output. Set OUTPUT_LAYOUT to 'single_file_only', "
-                "'per_process_only', or 'full' (default) to silence this warning.");
-}
 }  // namespace
 
 live_perfetto_driver::live_perfetto_driver() noexcept
@@ -182,8 +169,6 @@ live_perfetto_driver::post_process(bool&                 perfetto_output_error,
     }
 
     m_engine->destroy_session(pid);
-
-    warn_combined_traces_deprecated_once();
 
     const auto layout        = config::get_perfetto_output_layout();
     const bool want_per_rank = (layout != "single_file_only");

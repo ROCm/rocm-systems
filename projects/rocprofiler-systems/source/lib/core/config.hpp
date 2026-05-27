@@ -60,9 +60,15 @@ get_sampling_signals(std::int64_t _tid = 0);
 void
 finalize();
 
+// Emit a deprecation banner if `_old` was set by the user. When `_migrate`
+// is true (default), also propagate `_old`'s string value into `_new` if
+// `_new` was not itself explicitly set; pass false when the two settings
+// have incompatible types or semantics (e.g. a deprecated bool replaced
+// by an enum-string with set_choices), so the new setting keeps its own
+// default instead of being overwritten with a meaningless string.
 void
 handle_deprecated_setting(const std::string& _old, const std::string& _new,
-                          int _verbose = 0);
+                          int _verbose = 0, bool _migrate = true);
 
 void
 print_banner(std::ostream& _os = std::cerr);
@@ -242,15 +248,6 @@ get_perfetto_buffer_size();
 
 std::uint32_t
 get_perfetto_flush_period();
-
-bool
-get_perfetto_combined_traces();
-
-// True iff the user explicitly set ROCPROFSYS_PERFETTO_COMBINE_TRACES via
-// environment or a config file. Used to fire a one-shot deprecation warning
-// — the setting is no longer consulted by the routing code.
-bool
-combined_traces_explicitly_set();
 
 std::string
 get_perfetto_fill_policy();
