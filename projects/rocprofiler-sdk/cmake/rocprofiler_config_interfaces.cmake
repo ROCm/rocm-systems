@@ -395,3 +395,45 @@ else()
                                INTERFACE ROCPROFILER_SDK_USE_SYSTEM_ROCJPEG=0)
 
 endif()
+
+# ----------------------------------------------------------------------------------------#
+#
+# rocSHMEM
+#
+# ----------------------------------------------------------------------------------------#
+
+# rocSHMEM's installed config references MPI::MPI_CXX and
+# rocprofiler-register::rocprofiler-register in roc::rocshmem's link interface, so both
+# must be located first or find_package(rocshmem) will fail to define the imported
+# target.
+find_package(MPI COMPONENTS CXX)
+find_package(
+    rocprofiler-register
+    CONFIG
+    HINTS
+    ${rocm_version_DIR}
+    ${ROCM_PATH}
+    PATHS
+    ${rocm_version_DIR}
+    ${ROCM_PATH})
+
+if(MPI_CXX_FOUND AND rocprofiler-register_FOUND)
+    find_package(
+        rocshmem
+        CONFIG
+        HINTS
+        ${rocm_version_DIR}
+        ${ROCM_PATH}
+        PATHS
+        ${rocm_version_DIR}
+        ${ROCM_PATH})
+endif()
+
+if(rocshmem_FOUND AND TARGET roc::rocshmem)
+    rocprofiler_config_nolink_target(rocprofiler-sdk-rocshmem-nolink roc::rocshmem
+                                     INTERFACE ROCPROFILER_SDK_USE_SYSTEM_ROCSHMEM=1)
+else()
+    target_compile_definitions(rocprofiler-sdk-rocshmem-nolink
+                               INTERFACE ROCPROFILER_SDK_USE_SYSTEM_ROCSHMEM=0)
+
+endif()

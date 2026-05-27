@@ -110,3 +110,6 @@ rocprofiler_add_nolink_interface_library(
 rocprofiler_add_nolink_interface_library(
     rocprofiler-sdk-rocjpeg-nolink "ROCJPEG headers without linking to ROCJPEG library"
     IMPORTED)
+rocprofiler_add_nolink_interface_library(
+    rocprofiler-sdk-rocshmem-nolink
+    "ROCSHMEM headers without linking to ROCSHMEM library" IMPORTED)
