@@ -382,14 +382,16 @@ ncclResult_t CallIpcRegisterBuffer(ncclComm& comm,
 //   - A ncclReg with begAddr/endAddr populated and a RegRecordCleaner
 //     attached so per-peer ipcInfos / hostPeerRmtAddrs allocations are
 //     freed automatically.
-//   - The g_loadParam hook forced to ForceLegacyCudaRegister() -- every
-//     fresh-reg test the legacy-IPC arm covers needs this.
 //
 // What tests provide themselves:
 //   - The specific seam hooks that make the test interesting. Use the
 //     MakeDefault*Hook() helpers for the boilerplate happy-path memGet /
 //     ipcGet hooks; install proxy/connect/acquire/etc. directly with
 //     ScopedHook in the test body.
+//   - InstallLegacyCudaRegisterHook() to force the legacy-IPC arm. Not
+//     done by default because several tests (`NothingWorksFallthrough`,
+//     `ProxyConnectFailurePropagates`, the cuMem-arm tests) deliberately
+//     want g_loadParam at its default.
 //
 // The helper hooks return ScopedHook by value; C++17 guaranteed copy
 // elision lets the non-movable, non-copyable ScopedHook propagate out of
@@ -432,7 +434,6 @@ protected:
         regRecord.begAddr = kBegAddr;
         regRecord.endAddr = kBegAddr + 0x1000;
         regCleanup.emplace(regRecord);
-        loadParam.emplace(g_loadParam, ForceLegacyCudaRegister());
     }
 
     void TearDown() override {
@@ -441,6 +442,13 @@ protected:
         loadParam.reset();
         regCleanup.reset();
         P2pMicrotest::TearDown();
+    }
+
+    // Force the legacy-IPC arm of the fresh-registration path. Tests that
+    // need to reach the `else if (legacyIpcCap)` block call this in their
+    // body before invoking ipcRegisterBuffer.
+    void InstallLegacyCudaRegisterHook() {
+        loadParam.emplace(g_loadParam, ForceLegacyCudaRegister());
     }
 
     // Standard happy-path hooks for the two HIP driver entry points the
@@ -870,6 +878,7 @@ TEST_F(FreshRegistrationLegacyIpcSucceedsFixture, PopulatesIpcInfoRecord)
 // returns ncclSuccess with all outputs left zeroed by the prologue.
 TEST_F(FreshRegistrationMicrotest, ProxyReturnsNullRmtAddrSkipsBookkeeping)
 {
+    InstallLegacyCudaRegisterHook();
     auto memGet = MakeDefaultMemGetHook();
     auto ipcGet = MakeDefaultIpcGetHook();
     ScopedHook connect(g_proxyConnect,
@@ -929,6 +938,7 @@ TEST_F(FreshRegistrationMicrotest, SkipsProxyConnectWhenAlreadyInitialized)
     // Key precondition: skip the connect.
     cb.comm().gproxyConn[kPeerRank].initialized = true;
 
+    InstallLegacyCudaRegisterHook();
     auto memGet = MakeDefaultMemGetHook();
     auto ipcGet = MakeDefaultIpcGetHook();
     // Default g_proxyConnect returns ncclSystemError -- if it were called
@@ -991,44 +1001,13 @@ TEST_F(FreshRegistrationMicrotest, SkipsProxyConnectWhenAlreadyInitialized)
 // fail: path doesn't roll back ipcInfos), not something this test is
 // asserting. The RegRecordCleaner would normally double-free, so we
 // null out the slot before the cleaner runs.
-TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationFreesNewInfoOnPostLoopFailure)
+TEST_F(FreshRegistrationMicrotest, FreesNewInfoOnPostLoopFailure)
 {
-    constexpr int       kPeerRank      = 2;
-    constexpr int       kPeerLocalRank = 1;
-    constexpr uintptr_t kBaseAddr      = 0x100000;
-    constexpr std::size_t kBaseSize    = 0x4000;
-    constexpr uintptr_t kBuffOffset    = 0x80;
-    constexpr uintptr_t kBegOffset     = 0x20;
-    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
-    constexpr uintptr_t kRmtRegAddr    = 0xCAFE0000ull;
-    constexpr int       kNRanks        = kPeerRank + 1;
+    constexpr uintptr_t kRmtRegAddr = 0xCAFE0000ull;
 
-    CommBuilder cb;
-    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
-      .WithMaxLocalRanks()
-      .WithSharedRes()
-      .WithProxyConnArray(kNRanks);
-
-    ncclReg regRecord{};
-    regRecord.begAddr = kBegAddr;
-    regRecord.endAddr = kBegAddr + 0x1000;
-    RegRecordCleaner regCleanup(regRecord);
-    ScopedHook loadParam(g_loadParam, ForceLegacyCudaRegister());
-
-    const void* const kUserbuff =
-        reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
-    ScopedHook memGet(g_hipMemGetAddressRange,
-        [&](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t)
-            -> hipError_t {
-            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
-            if (psize) *psize = kBaseSize;
-            return hipSuccess;
-        });
-    ScopedHook ipcGet(g_hipIpcGetMemHandle,
-        [&](hipIpcMemHandle_t* h, void*) -> hipError_t {
-            if (h) std::memset(h, 0x5A, sizeof(*h));
-            return hipSuccess;
-        });
+    InstallLegacyCudaRegisterHook();
+    auto memGet = MakeDefaultMemGetHook();
+    auto ipcGet = MakeDefaultIpcGetHook();
     ScopedHook connect(g_proxyConnect,
         [&](struct ncclComm*, int, int, int,
             struct ncclProxyConnector* pc) -> ncclResult_t {
@@ -1238,37 +1217,9 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_NullIsLegacyIpcPointerIsSkipped)
 // fail:, so the epilogue must skip the free without crashing.
 //
 // Plan item A3.
-TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationProxyConnectFailurePropagates)
+TEST_F(FreshRegistrationMicrotest, ProxyConnectFailurePropagates)
 {
-    constexpr int       kPeerRank      = 2;
-    constexpr int       kPeerLocalRank = 1;
-    constexpr uintptr_t kBaseAddr      = 0x100000;
-    constexpr std::size_t kBaseSize    = 0x4000;
-    constexpr uintptr_t kBuffOffset    = 0x80;
-    constexpr uintptr_t kBegOffset     = 0x20;
-    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
-    constexpr int       kNRanks        = kPeerRank + 1;
-
-    CommBuilder cb;
-    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
-      .WithMaxLocalRanks()
-      .WithSharedRes()
-      .WithProxyConnArray(kNRanks);
-
-    ncclReg regRecord{};
-    regRecord.begAddr = kBegAddr;
-    regRecord.endAddr = kBegAddr + 0x1000;
-    RegRecordCleaner regCleanup(regRecord);
-
-    const void* const kUserbuff =
-        reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
-    ScopedHook memGet(g_hipMemGetAddressRange,
-        [&](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t)
-            -> hipError_t {
-            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
-            if (psize) *psize = kBaseSize;
-            return hipSuccess;
-        });
+    auto memGet = MakeDefaultMemGetHook();
     // The seam under test: proxy connect refuses. Control should route
     // through NCCLCHECKGOTO into fail: without ever calling
     // hipIpcGetMemHandle or ncclProxyCallBlocking (both default to
@@ -1347,22 +1298,8 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationProxyConnectFailurePropa
 // for control reaching the legacy-export arm at all (the param
 // defaults to 0, which routes instead through the trailing
 // `// nothing works, just return` goto fail).
-TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationLegacyIpcGetMemHandleFailurePropagates)
+TEST_F(FreshRegistrationMicrotest, LegacyIpcGetMemHandleFailurePropagates)
 {
-    constexpr int       kPeerRank      = 2;
-    constexpr int       kPeerLocalRank = 1;
-    constexpr uintptr_t kBaseAddr      = 0x100000;
-    constexpr std::size_t kBaseSize    = 0x4000;
-    constexpr uintptr_t kBuffOffset    = 0x80;
-    constexpr uintptr_t kBegOffset     = 0x20;
-    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
-    constexpr int       kNRanks        = kPeerRank + 1;
-
-    CommBuilder cb;
-    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
-      .WithMaxLocalRanks()
-      .WithSharedRes()
-      .WithProxyConnArray(kNRanks);
     // Pre-mark gproxyConn initialized so the (covered-elsewhere)
     // proxyConnect call is skipped -- shaves a hook off this test.
     cb.comm().gproxyConn[kPeerRank].initialized = true;
@@ -1371,23 +1308,8 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationLegacyIpcGetMemHandleFai
     // the hipIpcGetMemHandle call.
     cb.comm().directMode = 0;
 
-    ncclReg regRecord{};
-    regRecord.begAddr = kBegAddr;
-    regRecord.endAddr = kBegAddr + 0x1000;
-    RegRecordCleaner regCleanup(regRecord);
-
-    // Force the legacy-IPC arm to be entered (see ForceLegacyCudaRegister).
-    ScopedHook loadParam(g_loadParam, ForceLegacyCudaRegister());
-
-    const void* const kUserbuff =
-        reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
-    ScopedHook memGet(g_hipMemGetAddressRange,
-        [&](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t)
-            -> hipError_t {
-            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
-            if (psize) *psize = kBaseSize;
-            return hipSuccess;
-        });
+    InstallLegacyCudaRegisterHook();
+    auto memGet = MakeDefaultMemGetHook();
     // The seam under test: legacy IPC export refuses.
     ScopedHook ipcGet(g_hipIpcGetMemHandle,
         [&](hipIpcMemHandle_t*, void* devPtr) -> hipError_t {
@@ -1570,44 +1492,16 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationFailureClearsOutputs)
 // LegacyIpcGetMemHandleFailurePropagates: that one fails at the
 // hipIpcGetMemHandle call site itself; this one fails one line earlier,
 // at the directMode guard.
-TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationDirectModeShortCircuitsLegacyExport)
+TEST_F(FreshRegistrationMicrotest, DirectModeShortCircuitsLegacyExport)
 {
-    constexpr int       kPeerRank      = 2;
-    constexpr int       kPeerLocalRank = 1;
-    constexpr uintptr_t kBaseAddr      = 0x100000;
-    constexpr std::size_t kBaseSize    = 0x4000;
-    constexpr uintptr_t kBuffOffset    = 0x80;
-    constexpr uintptr_t kBegOffset     = 0x20;
-    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
-    constexpr int       kNRanks        = kPeerRank + 1;
-
-    CommBuilder cb;
-    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
-      .WithMaxLocalRanks()
-      .WithSharedRes()
-      .WithProxyConnArray(kNRanks);
     cb.comm().gproxyConn[kPeerRank].initialized = true;  // skip proxyConnect
     cb.comm().directMode = 1;                            // the seam under test
-
-    ncclReg regRecord{};
-    regRecord.begAddr = kBegAddr;
-    regRecord.endAddr = kBegAddr + 0x1000;
-    RegRecordCleaner regCleanup(regRecord);
 
     // Force legacyIpcCap=1 so control reaches the `else if (legacyIpcCap)`
     // arm. Without this it would take the `// nothing works` goto fail
     // one branch earlier, exercising a different failure surface.
-    ScopedHook loadParam(g_loadParam, ForceLegacyCudaRegister());
-
-    const void* const kUserbuff =
-        reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
-    ScopedHook memGet(g_hipMemGetAddressRange,
-        [&](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t)
-            -> hipError_t {
-            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
-            if (psize) *psize = kBaseSize;
-            return hipSuccess;
-        });
+    InstallLegacyCudaRegisterHook();
+    auto memGet = MakeDefaultMemGetHook();
     // The contract: hipIpcGetMemHandle MUST NOT be reached when directMode
     // is set -- the short-circuit fires first.
     ScopedHook ipcGet(g_hipIpcGetMemHandle,
@@ -2051,44 +1945,18 @@ bool HandleHasSentinel(const hipMemGenericAllocationHandle_t& h)
 // cuMem* arm, sameProcess=true: Retain -> memcpy handle into ipcInfo ->
 // proxy register -> Release. Lights up the same-process sub-arm without
 // touching hipMemExportToShareableHandle or the POSIX_FD/fabric branches.
-TEST_F(P2pMicrotest, IpcRegisterBuffer_CuMemFreshRegistrationSameProcessSucceeds)
+TEST_F(FreshRegistrationMicrotest, CuMemSameProcessSucceeds)
 {
-    constexpr int       kPeerRank      = 2;
-    constexpr int       kPeerLocalRank = 1;
-    constexpr uintptr_t kBaseAddr      = 0x100000;
-    constexpr std::size_t kBaseSize    = 0x4000;
-    constexpr uintptr_t kBuffOffset    = 0x80;
-    constexpr uintptr_t kBegOffset     = 0x20;
-    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
-    constexpr uintptr_t kRmtRegAddr    = 0xCAFE0000ull;
-    constexpr int       kNRanks        = kPeerRank + 1;
+    constexpr uintptr_t kRmtRegAddr = 0xCAFE0000ull;
 
-    CommBuilder cb;
-    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
-      .WithMaxLocalRanks()
-      .WithSharedRes()
-      .WithProxyConnArray(kNRanks);
     // Skip the (covered-elsewhere) proxyConnect call; pre-mark the slot.
     cb.comm().gproxyConn[kPeerRank].initialized = true;
     // Drive the `if (proxyConn->sameProcess)` True arm.
     cb.comm().gproxyConn[kPeerRank].sameProcess = 1;
 
-    ncclReg regRecord{};
-    regRecord.begAddr = kBegAddr;
-    regRecord.endAddr = kBegAddr + 0x1000;
-    RegRecordCleaner regCleanup(regRecord);
-
     // Enter the cuMem* arm.
     ScopedHook cuMemEnable(g_cuMemEnable, [] { return 1; });
-
-    const void* const kUserbuff =
-        reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
-    ScopedHook memGet(g_hipMemGetAddressRange,
-        [&](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t) -> hipError_t {
-            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
-            if (psize) *psize = kBaseSize;
-            return hipSuccess;
-        });
+    auto memGet = MakeDefaultMemGetHook();
 
     ScopedHook retain(g_hipMemRetainAllocationHandle,
         [](hipMemGenericAllocationHandle_t* h, void* addr) -> hipError_t {
@@ -2159,18 +2027,10 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_CuMemFreshRegistrationSameProcessSucceeds
 // Retain -> Export (hands back a real fd via dup(STDERR_FILENO) so the
 // subsequent SYSCHECKGOTO(close(expFd)) succeeds) ->
 // ncclProxyClientQueryFdBlocking -> close -> Release -> proxy register.
-TEST_F(P2pMicrotest, IpcRegisterBuffer_CuMemFreshRegistrationPosixFdSucceeds)
+TEST_F(FreshRegistrationMicrotest, CuMemPosixFdSucceeds)
 {
-    constexpr int       kPeerRank      = 2;
-    constexpr int       kPeerLocalRank = 1;
-    constexpr uintptr_t kBaseAddr      = 0x100000;
-    constexpr std::size_t kBaseSize    = 0x4000;
-    constexpr uintptr_t kBuffOffset    = 0x80;
-    constexpr uintptr_t kBegOffset     = 0x20;
-    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
     constexpr uintptr_t kRmtRegAddr    = 0xCAFE0000ull;
     constexpr int       kRmtImportedFd = 0x7e1e7;  // canned remote-fd value
-    constexpr int       kNRanks        = kPeerRank + 1;
 
     // ncclCuMemHandleType is a fakes-owned global; existing tests don't
     // touch it (its default is hipMemHandleTypePosixFileDescriptor, which
@@ -2179,17 +2039,8 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_CuMemFreshRegistrationPosixFdSucceeds)
     auto saved_handle_type = ncclCuMemHandleType;
     ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
 
-    CommBuilder cb;
-    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
-      .WithMaxLocalRanks()
-      .WithSharedRes()
-      .WithProxyConnArray(kNRanks);
     cb.comm().gproxyConn[kPeerRank].initialized = true;
     cb.comm().gproxyConn[kPeerRank].sameProcess = 0;
-
-    ncclReg regRecord{};
-    regRecord.begAddr = kBegAddr;
-    regRecord.endAddr = kBegAddr + 0x1000;
     RegRecordCleaner regCleanup(regRecord);
 
     ScopedHook cuMemEnable(g_cuMemEnable, [] { return 1; });
@@ -2294,33 +2145,14 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_CuMemFreshRegistrationPosixFdSucceeds)
 // drives the `if (CUPFN(hipMemExportToShareableHandle(...)) != hipSuccess)`
 // True arm in the fabric sub-branch. The contract: hipMemRelease must
 // fire on the handle before `goto fail`, otherwise the handle leaks.
-TEST_F(P2pMicrotest, IpcRegisterBuffer_CuMemFreshRegistrationFabricExportFailureReleasesHandle)
+TEST_F(FreshRegistrationMicrotest, CuMemFabricExportFailureReleasesHandle)
 {
-    constexpr int       kPeerRank      = 2;
-    constexpr int       kPeerLocalRank = 1;
-    constexpr uintptr_t kBaseAddr      = 0x100000;
-    constexpr std::size_t kBaseSize    = 0x4000;
-    constexpr uintptr_t kBuffOffset    = 0x80;
-    constexpr uintptr_t kBegOffset     = 0x20;
-    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
-    constexpr int       kNRanks        = kPeerRank + 1;
-
     // Switch fakes-owned global to the non-POSIX_FD branch.
     auto saved_handle_type = ncclCuMemHandleType;
     ncclCuMemHandleType = hipMemHandleTypeWin32;  // anything != POSIX_FD
 
-    CommBuilder cb;
-    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
-      .WithMaxLocalRanks()
-      .WithSharedRes()
-      .WithProxyConnArray(kNRanks);
     cb.comm().gproxyConn[kPeerRank].initialized = true;
     cb.comm().gproxyConn[kPeerRank].sameProcess = 0;
-
-    ncclReg regRecord{};
-    regRecord.begAddr = kBegAddr;
-    regRecord.endAddr = kBegAddr + 0x1000;
-    RegRecordCleaner regCleanup(regRecord);
 
     ScopedHook cuMemEnable(g_cuMemEnable, [] { return 1; });
     const void* const kUserbuff =
@@ -2404,34 +2236,16 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_CuMemFreshRegistrationFabricExportFailure
 // Sister to the existing FreshRegistrationLegacyIpcSucceeds: that one
 // stays out of the cuMem arm entirely; this one *enters* the cuMem arm,
 // fails Retain, and falls back to legacy export within the cuMem block.
-TEST_F(P2pMicrotest, IpcRegisterBuffer_CuMemFreshRegistrationRetainFailureFallsBackToLegacyExport)
+TEST_F(FreshRegistrationMicrotest, CuMemRetainFailureFallsBackToLegacyExport)
 {
-    constexpr int       kPeerRank      = 2;
-    constexpr int       kPeerLocalRank = 1;
-    constexpr uintptr_t kBaseAddr      = 0x100000;
-    constexpr std::size_t kBaseSize    = 0x4000;
-    constexpr uintptr_t kBuffOffset    = 0x80;
-    constexpr uintptr_t kBegOffset     = 0x20;
-    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
-    constexpr uintptr_t kRmtRegAddr    = 0xCAFE0000ull;
-    constexpr int       kNRanks        = kPeerRank + 1;
+    constexpr uintptr_t kRmtRegAddr = 0xCAFE0000ull;
 
-    CommBuilder cb;
-    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
-      .WithMaxLocalRanks()
-      .WithSharedRes()
-      .WithProxyConnArray(kNRanks);
     cb.comm().gproxyConn[kPeerRank].initialized = true;
     // directMode=false so the `directMode || !legacyParam` short-circuit's
     // first operand is False; combined with ForceLegacyCudaRegister
     // (second operand also False), the whole guard takes its False arm
     // and control proceeds to the legacy hipIpcGetMemHandle fallback.
     cb.comm().directMode = 0;
-
-    ncclReg regRecord{};
-    regRecord.begAddr = kBegAddr;
-    regRecord.endAddr = kBegAddr + 0x1000;
-    RegRecordCleaner regCleanup(regRecord);
 
     // Enter the cuMem arm.
     ScopedHook cuMemEnable(g_cuMemEnable, [] { return 1; });
@@ -2530,29 +2344,10 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_CuMemFreshRegistrationRetainFailureFallsB
 // permitted). Mirror of the existing
 // FreshRegistrationDirectModeShortCircuitsLegacyExport test, which
 // exercises the analogous guard in the *legacy* arm.
-TEST_F(P2pMicrotest, IpcRegisterBuffer_CuMemFreshRegistrationRetainFailureDirectModeShortCircuits)
+TEST_F(FreshRegistrationMicrotest, CuMemRetainFailureDirectModeShortCircuits)
 {
-    constexpr int       kPeerRank      = 2;
-    constexpr int       kPeerLocalRank = 1;
-    constexpr uintptr_t kBaseAddr      = 0x100000;
-    constexpr std::size_t kBaseSize    = 0x4000;
-    constexpr uintptr_t kBuffOffset    = 0x80;
-    constexpr uintptr_t kBegOffset     = 0x20;
-    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
-    constexpr int       kNRanks        = kPeerRank + 1;
-
-    CommBuilder cb;
-    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
-      .WithMaxLocalRanks()
-      .WithSharedRes()
-      .WithProxyConnArray(kNRanks);
     cb.comm().gproxyConn[kPeerRank].initialized = true;
     cb.comm().directMode = 1;  // drives the guard's True arm
-
-    ncclReg regRecord{};
-    regRecord.begAddr = kBegAddr;
-    regRecord.endAddr = kBegAddr + 0x1000;
-    RegRecordCleaner regCleanup(regRecord);
 
     ScopedHook cuMemEnable(g_cuMemEnable, [] { return 1; });
     // legacyParam value doesn't matter for short-circuit semantics --
@@ -2628,41 +2423,15 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_CuMemFreshRegistrationRetainFailureDirect
 // legacy export arm is eligible. Both defaults (cuMemEnable returns 0,
 // loadParam returns deftVal=0) hand us this state without any hooks --
 // the test just refrains from installing ForceLegacyCudaRegister.
-TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationNothingWorksFallthrough)
+TEST_F(FreshRegistrationMicrotest, NothingWorksFallthrough)
 {
-    constexpr int       kPeerRank      = 2;
-    constexpr int       kPeerLocalRank = 1;
-    constexpr uintptr_t kBaseAddr      = 0x100000;
-    constexpr std::size_t kBaseSize    = 0x4000;
-    constexpr uintptr_t kBuffOffset    = 0x80;
-    constexpr uintptr_t kBegOffset     = 0x20;
-    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
-    constexpr int       kNRanks        = kPeerRank + 1;
-
-    CommBuilder cb;
-    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
-      .WithMaxLocalRanks()
-      .WithSharedRes()
-      .WithProxyConnArray(kNRanks);
     cb.comm().gproxyConn[kPeerRank].initialized = true;
-
-    ncclReg regRecord{};
-    regRecord.begAddr = kBegAddr;
-    regRecord.endAddr = kBegAddr + 0x1000;
-    RegRecordCleaner regCleanup(regRecord);
 
     // No loadParam hook -> ncclParamLegacyCudaRegister() returns 0
     // (default). No cuMemEnable hook -> ncclCuMemEnable() returns 0
     // (default). legacyIpcCap therefore stays 0 across the prologue,
     // and the trailing `else { goto fail; }` fires.
-    const void* const kUserbuff =
-        reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
-    ScopedHook memGet(g_hipMemGetAddressRange,
-        [&](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t) -> hipError_t {
-            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
-            if (psize) *psize = kBaseSize;
-            return hipSuccess;
-        });
+    auto memGet = MakeDefaultMemGetHook();
     ScopedHook ipcGet(g_hipIpcGetMemHandle,
         [](hipIpcMemHandle_t*, void*) -> hipError_t {
             ADD_FAILURE() << "nothing-works fall-through must not reach hipIpcGetMemHandle";
@@ -2702,45 +2471,16 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationNothingWorksFallthrough)
 // legacy-export arm with isLegacyIpc=nullptr. Mirror of
 // FreshRegistrationLegacyIpcSucceeds but passes nullptr; pins down that
 // the gated write doesn't deref a null pointer.
-TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationLegacyIpcNullIsLegacyIpcPointerIsSkipped)
+TEST_F(FreshRegistrationMicrotest, LegacyIpcNullIsLegacyIpcPointerIsSkipped)
 {
-    constexpr int       kPeerRank      = 2;
-    constexpr int       kPeerLocalRank = 1;
-    constexpr uintptr_t kBaseAddr      = 0x100000;
-    constexpr std::size_t kBaseSize    = 0x4000;
-    constexpr uintptr_t kBuffOffset    = 0x80;
-    constexpr uintptr_t kBegOffset     = 0x20;
-    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
-    constexpr uintptr_t kRmtRegAddr    = 0xCAFE0000ull;
-    constexpr int       kNRanks        = kPeerRank + 1;
+    constexpr uintptr_t kRmtRegAddr = 0xCAFE0000ull;
 
-    CommBuilder cb;
-    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
-      .WithMaxLocalRanks()
-      .WithSharedRes()
-      .WithProxyConnArray(kNRanks);
     cb.comm().gproxyConn[kPeerRank].initialized = true;
     cb.comm().directMode = 0;
 
-    ncclReg regRecord{};
-    regRecord.begAddr = kBegAddr;
-    regRecord.endAddr = kBegAddr + 0x1000;
-    RegRecordCleaner regCleanup(regRecord);
-    ScopedHook loadParam(g_loadParam, ForceLegacyCudaRegister());
-
-    const void* const kUserbuff =
-        reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
-    ScopedHook memGet(g_hipMemGetAddressRange,
-        [&](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t) -> hipError_t {
-            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
-            if (psize) *psize = kBaseSize;
-            return hipSuccess;
-        });
-    ScopedHook ipcGet(g_hipIpcGetMemHandle,
-        [](hipIpcMemHandle_t* h, void*) -> hipError_t {
-            if (h) std::memset(h, 0x5A, sizeof(*h));
-            return hipSuccess;
-        });
+    InstallLegacyCudaRegisterHook();
+    auto memGet = MakeDefaultMemGetHook();
+    auto ipcGet = MakeDefaultIpcGetHook();
     ScopedHook proxy(g_proxyCallBlocking,
         [&](struct ncclComm*, struct ncclProxyConnector*, int,
             void*, int, void* resp, int respSize) -> ncclResult_t {
@@ -2771,38 +2511,15 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationLegacyIpcNullIsLegacyIpc
 // false; retry-as-legacy sub-branch line 935 sets it to true) with
 // isLegacyIpc=nullptr. One test covers both sub-arms via the
 // sameProcess success path and the Retain-failure fallback path.
-TEST_F(P2pMicrotest, IpcRegisterBuffer_CuMemFreshRegistrationNullIsLegacyIpcPointerSuccessSkipped)
+TEST_F(FreshRegistrationMicrotest, CuMemNullIsLegacyIpcPointerSuccessSkipped)
 {
-    constexpr int       kPeerRank      = 2;
-    constexpr int       kPeerLocalRank = 1;
-    constexpr uintptr_t kBaseAddr      = 0x100000;
-    constexpr std::size_t kBaseSize    = 0x4000;
-    constexpr uintptr_t kBuffOffset    = 0x80;
-    constexpr uintptr_t kBegOffset     = 0x20;
-    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
-    constexpr uintptr_t kRmtRegAddr    = 0xCAFE0000ull;
-    constexpr int       kNRanks        = kPeerRank + 1;
+    constexpr uintptr_t kRmtRegAddr = 0xCAFE0000ull;
 
-    CommBuilder cb;
-    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
-      .WithMaxLocalRanks()
-      .WithSharedRes()
-      .WithProxyConnArray(kNRanks);
     cb.comm().gproxyConn[kPeerRank].initialized = true;
     cb.comm().gproxyConn[kPeerRank].sameProcess = 1;
 
-    ncclReg regRecord{};
-    regRecord.begAddr = kBegAddr;
-    regRecord.endAddr = kBegAddr + 0x1000;
-    RegRecordCleaner regCleanup(regRecord);
-
     ScopedHook cuMemEnable(g_cuMemEnable, [] { return 1; });
-    ScopedHook memGet(g_hipMemGetAddressRange,
-        [&](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t) -> hipError_t {
-            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
-            if (psize) *psize = kBaseSize;
-            return hipSuccess;
-        });
+    auto memGet = MakeDefaultMemGetHook();
     ScopedHook retain(g_hipMemRetainAllocationHandle,
         [](hipMemGenericAllocationHandle_t* h, void*) -> hipError_t {
             if (h) *h = MakeSentinelHandle();
@@ -2837,39 +2554,16 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_CuMemFreshRegistrationNullIsLegacyIpcPoin
 // Branch 935:17 False -- isLegacyIpc=nullptr on the cuMem retry-as-legacy
 // fallback arm. Slimmed copy of the existing
 // CuMemFreshRegistrationRetainFailureFallsBackToLegacyExport test.
-TEST_F(P2pMicrotest, IpcRegisterBuffer_CuMemFreshRegistrationNullIsLegacyIpcPointerRetryArmSkipped)
+TEST_F(FreshRegistrationMicrotest, CuMemNullIsLegacyIpcPointerRetryArmSkipped)
 {
-    constexpr int       kPeerRank      = 2;
-    constexpr int       kPeerLocalRank = 1;
-    constexpr uintptr_t kBaseAddr      = 0x100000;
-    constexpr std::size_t kBaseSize    = 0x4000;
-    constexpr uintptr_t kBuffOffset    = 0x80;
-    constexpr uintptr_t kBegOffset     = 0x20;
-    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
-    constexpr uintptr_t kRmtRegAddr    = 0xCAFE0000ull;
-    constexpr int       kNRanks        = kPeerRank + 1;
+    constexpr uintptr_t kRmtRegAddr = 0xCAFE0000ull;
 
-    CommBuilder cb;
-    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
-      .WithMaxLocalRanks()
-      .WithSharedRes()
-      .WithProxyConnArray(kNRanks);
     cb.comm().gproxyConn[kPeerRank].initialized = true;
     cb.comm().directMode = 0;
 
-    ncclReg regRecord{};
-    regRecord.begAddr = kBegAddr;
-    regRecord.endAddr = kBegAddr + 0x1000;
-    RegRecordCleaner regCleanup(regRecord);
-
     ScopedHook cuMemEnable(g_cuMemEnable, [] { return 1; });
-    ScopedHook loadParam(g_loadParam, ForceLegacyCudaRegister());
-    ScopedHook memGet(g_hipMemGetAddressRange,
-        [&](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t) -> hipError_t {
-            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
-            if (psize) *psize = kBaseSize;
-            return hipSuccess;
-        });
+    InstallLegacyCudaRegisterHook();
+    auto memGet = MakeDefaultMemGetHook();
     ScopedHook retain(g_hipMemRetainAllocationHandle,
         [](hipMemGenericAllocationHandle_t*, void*) -> hipError_t {
             return hipErrorInvalidValue;
@@ -2909,43 +2603,18 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_CuMemFreshRegistrationNullIsLegacyIpcPoin
 // CuMemFreshRegistrationFabricExportFailureReleasesHandle (which drives
 // the True arm). The contract: on success the function continues into
 // hipMemRelease and the proxy register, returning the canned rmtRegAddr.
-TEST_F(P2pMicrotest, IpcRegisterBuffer_CuMemFreshRegistrationFabricExportSucceeds)
+TEST_F(FreshRegistrationMicrotest, CuMemFabricExportSucceeds)
 {
-    constexpr int       kPeerRank      = 2;
-    constexpr int       kPeerLocalRank = 1;
-    constexpr uintptr_t kBaseAddr      = 0x100000;
-    constexpr std::size_t kBaseSize    = 0x4000;
-    constexpr uintptr_t kBuffOffset    = 0x80;
-    constexpr uintptr_t kBegOffset     = 0x20;
-    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
-    constexpr uintptr_t kRmtRegAddr    = 0xCAFE0000ull;
-    constexpr int       kNRanks        = kPeerRank + 1;
+    constexpr uintptr_t kRmtRegAddr = 0xCAFE0000ull;
 
     auto saved_handle_type = ncclCuMemHandleType;
     ncclCuMemHandleType = hipMemHandleTypeWin32;  // anything != POSIX_FD
 
-    CommBuilder cb;
-    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
-      .WithMaxLocalRanks()
-      .WithSharedRes()
-      .WithProxyConnArray(kNRanks);
     cb.comm().gproxyConn[kPeerRank].initialized = true;
     cb.comm().gproxyConn[kPeerRank].sameProcess = 0;
 
-    ncclReg regRecord{};
-    regRecord.begAddr = kBegAddr;
-    regRecord.endAddr = kBegAddr + 0x1000;
-    RegRecordCleaner regCleanup(regRecord);
-
     ScopedHook cuMemEnable(g_cuMemEnable, [] { return 1; });
-    const void* const kUserbuff =
-        reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
-    ScopedHook memGet(g_hipMemGetAddressRange,
-        [&](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t) -> hipError_t {
-            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
-            if (psize) *psize = kBaseSize;
-            return hipSuccess;
-        });
+    auto memGet = MakeDefaultMemGetHook();
     ScopedHook retain(g_hipMemRetainAllocationHandle,
         [](hipMemGenericAllocationHandle_t* h, void*) -> hipError_t {
             if (h) *h = MakeSentinelHandle();
@@ -3013,29 +2682,10 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_CuMemFreshRegistrationFabricExportSucceed
 // returns 0 (so the RHS is True). Mirror of
 // CuMemFreshRegistrationRetainFailureDirectModeShortCircuits but the
 // short-circuit is driven by the param rather than directMode.
-TEST_F(P2pMicrotest, IpcRegisterBuffer_CuMemFreshRegistrationRetainFailureParamOffShortCircuits)
+TEST_F(FreshRegistrationMicrotest, CuMemRetainFailureParamOffShortCircuits)
 {
-    constexpr int       kPeerRank      = 2;
-    constexpr int       kPeerLocalRank = 1;
-    constexpr uintptr_t kBaseAddr      = 0x100000;
-    constexpr std::size_t kBaseSize    = 0x4000;
-    constexpr uintptr_t kBuffOffset    = 0x80;
-    constexpr uintptr_t kBegOffset     = 0x20;
-    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
-    constexpr int       kNRanks        = kPeerRank + 1;
-
-    CommBuilder cb;
-    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
-      .WithMaxLocalRanks()
-      .WithSharedRes()
-      .WithProxyConnArray(kNRanks);
     cb.comm().gproxyConn[kPeerRank].initialized = true;
     cb.comm().directMode = 0;  // force the guard to evaluate the RHS
-
-    ncclReg regRecord{};
-    regRecord.begAddr = kBegAddr;
-    regRecord.endAddr = kBegAddr + 0x1000;
-    RegRecordCleaner regCleanup(regRecord);
 
     ScopedHook cuMemEnable(g_cuMemEnable, [] { return 1; });
     // No loadParam hook -> ncclParamLegacyCudaRegister() returns 0
