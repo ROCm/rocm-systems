@@ -17,6 +17,8 @@
 
 #include <gtest/gtest.h>
 
+#include <unistd.h>  // dup, STDERR_FILENO -- POSIX_FD test hands close() a real fd
+
 #include <array>
 #include <cstdint>
 #include <initializer_list>
@@ -73,6 +75,16 @@
     g_hipMemGetAddressRange((pbase), (psize), (dptr))
 #define hipIpcGetMemHandle(handle, devPtr) \
     g_hipIpcGetMemHandle((handle), (devPtr))
+
+// Same pattern for the three cuMem*-export entry points the ROCm 7+ arm
+// of ipcRegisterBuffer calls. Without these macro shims, the call sites
+// bind directly to the real hip::host symbols and need a GPU at runtime.
+#define hipMemRetainAllocationHandle(handle, addr) \
+    g_hipMemRetainAllocationHandle((handle), (addr))
+#define hipMemExportToShareableHandle(shareableHandle, handle, handleType, flags) \
+    g_hipMemExportToShareableHandle((shareableHandle), (handle), (handleType), (flags))
+#define hipMemRelease(handle) \
+    g_hipMemRelease((handle))
 
 // Pull in the hipified copy of p2p.cc (cudaXxx -> hipXxx rewrites already
 // applied by the hipify pass that runs as part of the main RCCL build).
@@ -1959,3 +1971,386 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_MultiPeerFreshRegistrationReusesBaseAddrA
     EXPECT_EQ(regRecord.ipcInfos[kPeer1LocalRank]->baseAddr,
               reinterpret_cast<void*>(kBaseAddr));
 }
+
+// ===========================================================================
+// cuMem*-export arm tests (plan item A7).
+//
+// All three tests share the same shape:
+//   - g_cuMemEnable hook returns 1 -> cuMem* arm is entered (not legacy).
+//   - g_hipMemRetainAllocationHandle hook succeeds with a sentinel handle.
+//   - Per-test: drive sameProcess and ncclCuMemHandleType to pick which
+//     of the three cuMem* sub-arms fires (sameProcess / POSIX_FD /
+//     fabric).
+//   - g_proxyCallBlocking returns a canned rmtRegAddr so the post-loop
+//     bookkeeping fires (where applicable).
+//
+// These light up the entire `if (ncclCuMemEnable())` branch in
+// ipcRegisterBuffer, which is the production path on ROCm 7+.
+// ===========================================================================
+
+#if ROCM_VERSION >= 70000
+
+namespace {
+
+// Sentinel value the Retain hook writes into the handle. The cuMem* arm
+// shuttles this through hipMemExportToShareableHandle / hipMemRelease;
+// the test asserts those hooks see the same value.
+constexpr std::uintptr_t kSentinelHandleBits = 0xDEADC0DE12340000ull;
+
+hipMemGenericAllocationHandle_t MakeSentinelHandle()
+{
+    hipMemGenericAllocationHandle_t h{};
+    static_assert(sizeof(h) >= sizeof(std::uintptr_t),
+                  "sentinel must fit in the handle");
+    std::memcpy(&h, &kSentinelHandleBits, sizeof(std::uintptr_t));
+    return h;
+}
+
+bool HandleHasSentinel(const hipMemGenericAllocationHandle_t& h)
+{
+    std::uintptr_t bits = 0;
+    std::memcpy(&bits, &h, sizeof(std::uintptr_t));
+    return bits == kSentinelHandleBits;
+}
+
+}  // namespace
+
+// cuMem* arm, sameProcess=true: Retain -> memcpy handle into ipcInfo ->
+// proxy register -> Release. Lights up the same-process sub-arm without
+// touching hipMemExportToShareableHandle or the POSIX_FD/fabric branches.
+TEST_F(P2pMicrotest, IpcRegisterBuffer_CuMemFreshRegistrationSameProcessSucceeds)
+{
+    constexpr int       kPeerRank      = 2;
+    constexpr int       kPeerLocalRank = 1;
+    constexpr uintptr_t kBaseAddr      = 0x100000;
+    constexpr std::size_t kBaseSize    = 0x4000;
+    constexpr uintptr_t kBuffOffset    = 0x80;
+    constexpr uintptr_t kBegOffset     = 0x20;
+    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
+    constexpr uintptr_t kRmtRegAddr    = 0xCAFE0000ull;
+    constexpr int       kNRanks        = kPeerRank + 1;
+
+    CommBuilder cb;
+    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
+      .WithMaxLocalRanks()
+      .WithSharedRes()
+      .WithProxyConnArray(kNRanks);
+    // Skip the (covered-elsewhere) proxyConnect call; pre-mark the slot.
+    cb.comm().gproxyConn[kPeerRank].initialized = true;
+    // Drive the `if (proxyConn->sameProcess)` True arm.
+    cb.comm().gproxyConn[kPeerRank].sameProcess = 1;
+
+    ncclReg regRecord{};
+    regRecord.begAddr = kBegAddr;
+    regRecord.endAddr = kBegAddr + 0x1000;
+    RegRecordCleaner regCleanup(regRecord);
+
+    // Enter the cuMem* arm.
+    ScopedHook cuMemEnable(g_cuMemEnable, [] { return 1; });
+
+    const void* const kUserbuff =
+        reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
+    ScopedHook memGet(g_hipMemGetAddressRange,
+        [&](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t) -> hipError_t {
+            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
+            if (psize) *psize = kBaseSize;
+            return hipSuccess;
+        });
+
+    ScopedHook retain(g_hipMemRetainAllocationHandle,
+        [](hipMemGenericAllocationHandle_t* h, void* addr) -> hipError_t {
+            EXPECT_EQ(addr, reinterpret_cast<void*>(kBaseAddr));
+            if (h) *h = MakeSentinelHandle();
+            return hipSuccess;
+        });
+    // Same-process arm must NOT call export.
+    ScopedHook xport(g_hipMemExportToShareableHandle,
+        [](void*, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
+           unsigned long long) -> hipError_t {
+            ADD_FAILURE() << "sameProcess arm must not call hipMemExportToShareableHandle";
+            return hipErrorInvalidValue;
+        });
+    ScopedHook release(g_hipMemRelease,
+        [](hipMemGenericAllocationHandle_t h) -> hipError_t {
+            EXPECT_TRUE(HandleHasSentinel(h));
+            return hipSuccess;
+        });
+
+    ScopedHook proxy(g_proxyCallBlocking,
+        [&](struct ncclComm*, struct ncclProxyConnector*, int type,
+            void* req, int reqSize, void* resp, int respSize) -> ncclResult_t {
+            EXPECT_EQ(type, ncclProxyMsgRegister);
+            if (req == nullptr ||
+                static_cast<size_t>(reqSize) < sizeof(p2pIpcExpInfo)) {
+                ADD_FAILURE() << "malformed register-msg request";
+                return ncclInternalError;
+            }
+            auto* info = static_cast<p2pIpcExpInfo*>(req);
+            // cuMem* arm clears legacyIpcCap (in contrast to the legacy arm).
+            EXPECT_FALSE(info->legacyIpcCap);
+            EXPECT_EQ(info->size,   kBaseSize);
+            EXPECT_EQ(info->offset, kBegOffset);
+            // Same-process arm memcpy'd the Retain handle into memHandle.
+            EXPECT_TRUE(HandleHasSentinel(info->ipcDesc.memHandle));
+            EXPECT_GE(static_cast<size_t>(respSize), sizeof(void*));
+            if (resp) std::memcpy(resp, &kRmtRegAddr, sizeof(void*));
+            return ncclSuccess;
+        });
+
+    int peerRanks[] = {kPeerRank};
+    IpcRegOutputs out;
+    bool isLegacyIpc = true;  // expect cuMem arm to clear
+
+    auto r = CallIpcRegisterBuffer(cb, kUserbuff,
+                                   /*buffSize=*/ 256,
+                                   peerRanks, 1,
+                                   NCCL_IPC_COLLECTIVE,
+                                   &regRecord, out, &isLegacyIpc);
+
+    EXPECT_EQ(cuMemEnable.calls, 1);
+    EXPECT_EQ(retain.calls,      1);
+    EXPECT_EQ(xport.calls,       0);  // sameProcess arm skipped it
+    EXPECT_EQ(release.calls,     1);
+    EXPECT_EQ(proxy.calls,       1);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(out.regBufFlag, 1);
+    EXPECT_EQ(out.offsetOut,  kBuffOffset);
+    EXPECT_FALSE(isLegacyIpc);  // cuMem arm cleared it
+
+    ASSERT_NE(regRecord.ipcInfos[kPeerLocalRank], nullptr);
+    EXPECT_FALSE(regRecord.ipcInfos[kPeerLocalRank]->impInfo.legacyIpcCap);
+}
+
+// cuMem* arm, sameProcess=false, POSIX_FD handle type:
+// Retain -> Export (hands back a real fd via dup(STDERR_FILENO) so the
+// subsequent SYSCHECKGOTO(close(expFd)) succeeds) ->
+// ncclProxyClientQueryFdBlocking -> close -> Release -> proxy register.
+TEST_F(P2pMicrotest, IpcRegisterBuffer_CuMemFreshRegistrationPosixFdSucceeds)
+{
+    constexpr int       kPeerRank      = 2;
+    constexpr int       kPeerLocalRank = 1;
+    constexpr uintptr_t kBaseAddr      = 0x100000;
+    constexpr std::size_t kBaseSize    = 0x4000;
+    constexpr uintptr_t kBuffOffset    = 0x80;
+    constexpr uintptr_t kBegOffset     = 0x20;
+    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
+    constexpr uintptr_t kRmtRegAddr    = 0xCAFE0000ull;
+    constexpr int       kRmtImportedFd = 0x7e1e7;  // canned remote-fd value
+    constexpr int       kNRanks        = kPeerRank + 1;
+
+    // ncclCuMemHandleType is a fakes-owned global; existing tests don't
+    // touch it (its default is hipMemHandleTypePosixFileDescriptor, which
+    // is what we need here). Pin it down explicitly so a future fakes
+    // change doesn't silently turn this into a fabric-arm test.
+    auto saved_handle_type = ncclCuMemHandleType;
+    ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
+
+    CommBuilder cb;
+    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
+      .WithMaxLocalRanks()
+      .WithSharedRes()
+      .WithProxyConnArray(kNRanks);
+    cb.comm().gproxyConn[kPeerRank].initialized = true;
+    cb.comm().gproxyConn[kPeerRank].sameProcess = 0;
+
+    ncclReg regRecord{};
+    regRecord.begAddr = kBegAddr;
+    regRecord.endAddr = kBegAddr + 0x1000;
+    RegRecordCleaner regCleanup(regRecord);
+
+    ScopedHook cuMemEnable(g_cuMemEnable, [] { return 1; });
+    const void* const kUserbuff =
+        reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
+    ScopedHook memGet(g_hipMemGetAddressRange,
+        [&](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t) -> hipError_t {
+            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
+            if (psize) *psize = kBaseSize;
+            return hipSuccess;
+        });
+    ScopedHook retain(g_hipMemRetainAllocationHandle,
+        [](hipMemGenericAllocationHandle_t* h, void*) -> hipError_t {
+            if (h) *h = MakeSentinelHandle();
+            return hipSuccess;
+        });
+
+    // Hand back a real fd so the subsequent SYSCHECKGOTO(close(expFd))
+    // doesn't fail with EBADF. dup(STDERR_FILENO) is cheap and always
+    // open during gtest runs.
+    int duped_fd_seen = -1;
+    ScopedHook xport(g_hipMemExportToShareableHandle,
+        [&duped_fd_seen](void* shareableHandle,
+                         hipMemGenericAllocationHandle_t h,
+                         hipMemAllocationHandleType handleType,
+                         unsigned long long /*flags*/) -> hipError_t {
+            EXPECT_TRUE(HandleHasSentinel(h));
+            EXPECT_EQ(handleType, hipMemHandleTypePosixFileDescriptor);
+            int fd = dup(STDERR_FILENO);
+            if (fd < 0) return hipErrorInvalidValue;
+            duped_fd_seen = fd;
+            if (shareableHandle) {
+                int* outFd = static_cast<int*>(shareableHandle);
+                *outFd = fd;
+            }
+            return hipSuccess;
+        });
+
+    ScopedHook query(g_proxyClientQueryFdBlocking,
+        [&duped_fd_seen](struct ncclComm*, struct ncclProxyConnector*,
+                         int localFd, int* rmtFd) -> ncclResult_t {
+            EXPECT_EQ(localFd, duped_fd_seen);
+            if (rmtFd) *rmtFd = kRmtImportedFd;
+            return ncclSuccess;
+        });
+
+    ScopedHook release(g_hipMemRelease,
+        [](hipMemGenericAllocationHandle_t h) -> hipError_t {
+            EXPECT_TRUE(HandleHasSentinel(h));
+            return hipSuccess;
+        });
+
+    ScopedHook proxy(g_proxyCallBlocking,
+        [&](struct ncclComm*, struct ncclProxyConnector*, int type,
+            void* req, int reqSize, void* resp, int respSize) -> ncclResult_t {
+            EXPECT_EQ(type, ncclProxyMsgRegister);
+            if (req == nullptr ||
+                static_cast<size_t>(reqSize) < sizeof(p2pIpcExpInfo)) {
+                ADD_FAILURE() << "malformed register-msg request";
+                return ncclInternalError;
+            }
+            auto* info = static_cast<p2pIpcExpInfo*>(req);
+            EXPECT_FALSE(info->legacyIpcCap);
+            // POSIX_FD arm writes the rmtFd handed back by
+            // ncclProxyClientQueryFdBlocking into ipcInfo.impFd.
+            EXPECT_EQ(info->impFd, kRmtImportedFd);
+            EXPECT_GE(static_cast<size_t>(respSize), sizeof(void*));
+            if (resp) std::memcpy(resp, &kRmtRegAddr, sizeof(void*));
+            return ncclSuccess;
+        });
+
+    int peerRanks[] = {kPeerRank};
+    IpcRegOutputs out;
+    bool isLegacyIpc = true;
+
+    auto r = CallIpcRegisterBuffer(cb, kUserbuff,
+                                   /*buffSize=*/ 256,
+                                   peerRanks, 1,
+                                   NCCL_IPC_COLLECTIVE,
+                                   &regRecord, out, &isLegacyIpc);
+
+    EXPECT_EQ(retain.calls,  1);
+    EXPECT_EQ(xport.calls,   1);
+    EXPECT_EQ(query.calls,   1);
+    EXPECT_EQ(release.calls, 1);
+    EXPECT_EQ(proxy.calls,   1);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(out.regBufFlag, 1);
+    EXPECT_FALSE(isLegacyIpc);
+
+    // The duped fd was closed by ipcRegisterBuffer's SYSCHECKGOTO(close).
+    // Verify by attempting a second close -- it should fail with EBADF.
+    int second_close = ::close(duped_fd_seen);
+    EXPECT_EQ(second_close, -1);
+    EXPECT_EQ(errno, EBADF);
+
+    ncclCuMemHandleType = saved_handle_type;
+}
+
+// cuMem* arm, sameProcess=false, fabric handle type, export failure:
+// drives the `if (CUPFN(hipMemExportToShareableHandle(...)) != hipSuccess)`
+// True arm in the fabric sub-branch. The contract: hipMemRelease must
+// fire on the handle before `goto fail`, otherwise the handle leaks.
+TEST_F(P2pMicrotest, IpcRegisterBuffer_CuMemFreshRegistrationFabricExportFailureReleasesHandle)
+{
+    constexpr int       kPeerRank      = 2;
+    constexpr int       kPeerLocalRank = 1;
+    constexpr uintptr_t kBaseAddr      = 0x100000;
+    constexpr std::size_t kBaseSize    = 0x4000;
+    constexpr uintptr_t kBuffOffset    = 0x80;
+    constexpr uintptr_t kBegOffset     = 0x20;
+    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
+    constexpr int       kNRanks        = kPeerRank + 1;
+
+    // Switch fakes-owned global to the non-POSIX_FD branch.
+    auto saved_handle_type = ncclCuMemHandleType;
+    ncclCuMemHandleType = hipMemHandleTypeWin32;  // anything != POSIX_FD
+
+    CommBuilder cb;
+    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
+      .WithMaxLocalRanks()
+      .WithSharedRes()
+      .WithProxyConnArray(kNRanks);
+    cb.comm().gproxyConn[kPeerRank].initialized = true;
+    cb.comm().gproxyConn[kPeerRank].sameProcess = 0;
+
+    ncclReg regRecord{};
+    regRecord.begAddr = kBegAddr;
+    regRecord.endAddr = kBegAddr + 0x1000;
+    RegRecordCleaner regCleanup(regRecord);
+
+    ScopedHook cuMemEnable(g_cuMemEnable, [] { return 1; });
+    const void* const kUserbuff =
+        reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
+    ScopedHook memGet(g_hipMemGetAddressRange,
+        [&](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t) -> hipError_t {
+            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
+            if (psize) *psize = kBaseSize;
+            return hipSuccess;
+        });
+    ScopedHook retain(g_hipMemRetainAllocationHandle,
+        [](hipMemGenericAllocationHandle_t* h, void*) -> hipError_t {
+            if (h) *h = MakeSentinelHandle();
+            return hipSuccess;
+        });
+    // Export fails on the fabric arm.
+    ScopedHook xport(g_hipMemExportToShareableHandle,
+        [](void*, hipMemGenericAllocationHandle_t,
+           hipMemAllocationHandleType handleType,
+           unsigned long long) -> hipError_t {
+            EXPECT_NE(handleType, hipMemHandleTypePosixFileDescriptor);
+            return hipErrorInvalidValue;  // drives the error-arm goto fail
+        });
+    // The contract under test: Release fires on the sentinel handle
+    // before goto fail (the handle-leak guard).
+    ScopedHook release(g_hipMemRelease,
+        [](hipMemGenericAllocationHandle_t h) -> hipError_t {
+            EXPECT_TRUE(HandleHasSentinel(h));
+            return hipSuccess;
+        });
+    // Proxy register must never fire on this failure path.
+    ScopedHook proxy(g_proxyCallBlocking,
+        [](struct ncclComm*, struct ncclProxyConnector*, int,
+           void*, int, void*, int) -> ncclResult_t {
+            ADD_FAILURE() << "proxy register must not fire after export failure";
+            return ncclInternalError;
+        });
+
+    int peerRanks[] = {kPeerRank};
+    IpcRegOutputs out;
+    bool isLegacyIpc = true;
+
+    auto r = CallIpcRegisterBuffer(cb, kUserbuff,
+                                   /*buffSize=*/ 256,
+                                   peerRanks, 1,
+                                   NCCL_IPC_COLLECTIVE,
+                                   &regRecord, out, &isLegacyIpc);
+
+    EXPECT_EQ(retain.calls,  1);
+    EXPECT_EQ(xport.calls,   1);
+    EXPECT_EQ(release.calls, 1);  // the handle-leak guard contract
+    EXPECT_EQ(proxy.calls,   0);
+
+    // The fabric-arm export-failure path is a bare `goto fail` (not a
+    // CUCHECKGOTO), so ret stays ncclSuccess; the fail: epilogue zeros
+    // the outputs.
+    EXPECT_EQ(r, ncclSuccess);
+    out.ExpectZeroed();
+    EXPECT_FALSE(isLegacyIpc);  // cleared by the cuMem arm before failing
+    EXPECT_EQ(regRecord.ipcInfos[kPeerLocalRank], nullptr);
+    EXPECT_FALSE(regRecord.state & IPC_REG_COMPLETE);
+
+    ncclCuMemHandleType = saved_handle_type;
+}
+
+#endif  // ROCM_VERSION >= 70000

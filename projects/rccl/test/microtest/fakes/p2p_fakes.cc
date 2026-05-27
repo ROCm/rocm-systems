@@ -98,7 +98,55 @@ std::function<int64_t(const char*, int64_t)> g_loadParam = DefaultLoadParam;
 // Bucket C: seams worth controlling from tests (return failure by default)
 // ---------------------------------------------------------------------------
 
-int ncclCuMemEnable() { return 0; }
+// --- Controllable seam: ncclCuMemEnable ---------------------------------
+// Default returns 0 (the historical stub behaviour) -- existing tests
+// keep flowing into the legacy-IPC arm. Tests for the cuMem*-export arm
+// install a hook returning 1.
+static int DefaultCuMemEnable() { return 0; }
+std::function<int()> g_cuMemEnable = DefaultCuMemEnable;
+int ncclCuMemEnable() { return g_cuMemEnable(); }
+
+// --- Controllable seams: hipMemRetainAllocationHandle /
+//                          hipMemExportToShareableHandle /
+//                          hipMemRelease --------------------------------
+// The three HIP runtime entry points the cuMem* arm of ipcRegisterBuffer
+// calls. Macro-shimmed in p2p-test.cc so the call sites route here.
+static hipError_t DefaultHipMemRetainAllocationHandle(
+    hipMemGenericAllocationHandle_t*, void*)
+{
+    return hipErrorInvalidValue;
+}
+static hipError_t DefaultHipMemExportToShareableHandle(
+    void*, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
+    unsigned long long)
+{
+    return hipErrorInvalidValue;
+}
+static hipError_t DefaultHipMemRelease(hipMemGenericAllocationHandle_t)
+{
+    return hipErrorInvalidValue;
+}
+
+std::function<hipError_t(hipMemGenericAllocationHandle_t*, void*)>
+    g_hipMemRetainAllocationHandle = DefaultHipMemRetainAllocationHandle;
+std::function<hipError_t(void*, hipMemGenericAllocationHandle_t,
+                         hipMemAllocationHandleType, unsigned long long)>
+    g_hipMemExportToShareableHandle = DefaultHipMemExportToShareableHandle;
+std::function<hipError_t(hipMemGenericAllocationHandle_t)>
+    g_hipMemRelease = DefaultHipMemRelease;
+
+// --- Controllable seam: ncclProxyClientQueryFdBlocking -------------------
+// The cuMem* POSIX_FD arm of ipcRegisterBuffer calls this to ship the
+// exported fd to the remote proxy and get an imported-fd handle back.
+// Default returns ncclSystemError so unexpected calls fail loudly.
+static ncclResult_t DefaultProxyClientQueryFdBlocking(
+    struct ncclComm*, struct ncclProxyConnector*, int, int*)
+{
+    return ncclSystemError;
+}
+std::function<ncclResult_t(struct ncclComm*, struct ncclProxyConnector*,
+                           int, int*)>
+    g_proxyClientQueryFdBlocking = DefaultProxyClientQueryFdBlocking;
 
 // --- Controllable seams: ncclProxyConnect / ncclProxyCallBlocking --------
 // Default behaviour is the old stub: return ncclSystemError. Happy-path
@@ -174,12 +222,12 @@ ncclResult_t ncclProxyClientGetFdBlocking(struct ncclComm* /*comm*/,
     return ncclSystemError;
 }
 
-ncclResult_t ncclProxyClientQueryFdBlocking(struct ncclComm*           /*comm*/,
-                                            struct ncclProxyConnector* /*proxyConn*/,
-                                            int                        /*localFd*/,
-                                            int*                       /*rmtFd*/)
+ncclResult_t ncclProxyClientQueryFdBlocking(struct ncclComm*           comm,
+                                            struct ncclProxyConnector* proxyConn,
+                                            int                        localFd,
+                                            int*                       rmtFd)
 {
-    return ncclSystemError;
+    return g_proxyClientQueryFdBlocking(comm, proxyConn, localFd, rmtFd);
 }
 
 ncclResult_t ncclRegLocalIsValid(struct ncclReg* /*reg*/, bool* isValid)
@@ -349,6 +397,11 @@ void ResetP2pFakes()
     g_hipMemGetAddressRange  = DefaultHipMemGetAddressRange;
     g_hipIpcGetMemHandle     = DefaultHipIpcGetMemHandle;
     g_loadParam              = DefaultLoadParam;
+    g_cuMemEnable                  = DefaultCuMemEnable;
+    g_hipMemRetainAllocationHandle = DefaultHipMemRetainAllocationHandle;
+    g_hipMemExportToShareableHandle= DefaultHipMemExportToShareableHandle;
+    g_hipMemRelease                = DefaultHipMemRelease;
+    g_proxyClientQueryFdBlocking   = DefaultProxyClientQueryFdBlocking;
     for (void* p : g_fakeAllocations) std::free(p);
     g_fakeAllocations.clear();
 }

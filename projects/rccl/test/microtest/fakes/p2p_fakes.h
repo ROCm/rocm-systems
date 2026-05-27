@@ -98,6 +98,42 @@ extern std::function<hipError_t(hipDeviceptr_t* /*pbase*/, std::size_t* /*psize*
 extern std::function<hipError_t(hipIpcMemHandle_t* /*handle*/, void* /*devPtr*/)>
     g_hipIpcGetMemHandle;
 
+// ncclCuMemEnable: gates the cuMem*-export arm of ipcRegisterBuffer
+// against the legacy-IPC arm. Default returns 0 so existing tests stay
+// on the legacy arm. Tests for the cuMem* arm install a hook returning 1.
+extern std::function<int()> g_cuMemEnable;
+
+// hipMemRetainAllocationHandle / hipMemExportToShareableHandle /
+// hipMemRelease: the three HIP runtime entry points the cuMem*-export
+// arm of ipcRegisterBuffer calls. The microtest binary links hip::host
+// so these symbols resolve at link time, but at runtime they need a real
+// GPU. The macro shims in p2p-test.cc route the p2p.cc call sites
+// through these hooks instead.
+//
+// Defaults return hipErrorInvalidValue so unexpected call sites surface
+// via CUCHECKGOTO; tests that want a happy path install a hook that
+// returns hipSuccess (and, for Retain, hands back a sentinel handle).
+extern std::function<hipError_t(hipMemGenericAllocationHandle_t* /*handle*/,
+                                void* /*addr*/)>
+    g_hipMemRetainAllocationHandle;
+extern std::function<hipError_t(void* /*shareableHandle*/,
+                                hipMemGenericAllocationHandle_t /*handle*/,
+                                hipMemAllocationHandleType /*handleType*/,
+                                unsigned long long /*flags*/)>
+    g_hipMemExportToShareableHandle;
+extern std::function<hipError_t(hipMemGenericAllocationHandle_t /*handle*/)>
+    g_hipMemRelease;
+
+// ncclProxyClientQueryFdBlocking: the cuMem*-export POSIX_FD arm of
+// ipcRegisterBuffer calls this to register the exported fd with the
+// remote proxy and receive back an imported fd handle. Default returns
+// ncclSystemError so unexpected call sites fail loudly; happy-path tests
+// install a hook that succeeds and writes a canned imported-fd value.
+extern std::function<ncclResult_t(struct ncclComm*,
+                                  struct ncclProxyConnector*,
+                                  int /*localFd*/, int* /*rmtFd*/)>
+    g_proxyClientQueryFdBlocking;
+
 // NCCL_PARAM redirector: p2p-test.cc replaces the body of every
 // NCCL_PARAM(name, env, deftVal) generator in the #included p2p.cc with a
 // thin trampoline that calls g_loadParam(env, deftVal) on every invocation
