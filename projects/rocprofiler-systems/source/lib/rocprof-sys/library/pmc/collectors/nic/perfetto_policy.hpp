@@ -138,7 +138,8 @@ struct perfetto_policy
         {
             device_tracks[RX_RDMA_UCAST_PKTS_VALUE] = {
                 "RX RDMA PACKETS", "packets",
-                counter_track::emplace(device_index, addendum("RX RDMA PACKETS"), "packets")
+                counter_track::emplace(device_index, addendum("RX RDMA PACKETS"),
+                                       "packets")
             };
         }
 
@@ -146,7 +147,8 @@ struct perfetto_policy
         {
             device_tracks[TX_RDMA_UCAST_PKTS_VALUE] = {
                 "TX RDMA PACKETS", "packets",
-                counter_track::emplace(device_index, addendum("TX RDMA PACKETS"), "packets")
+                counter_track::emplace(device_index, addendum("TX RDMA PACKETS"),
+                                       "packets")
             };
         }
 
@@ -154,7 +156,8 @@ struct perfetto_policy
         {
             device_tracks[RX_RDMA_CNP_PKTS_VALUE] = {
                 "RX CNP PACKETS", "packets",
-                counter_track::emplace(device_index, addendum("RX CNP PACKETS"), "packets")
+                counter_track::emplace(device_index, addendum("RX CNP PACKETS"),
+                                       "packets")
             };
         }
 
@@ -162,7 +165,8 @@ struct perfetto_policy
         {
             device_tracks[TX_RDMA_CNP_PKTS_VALUE] = {
                 "TX CNP PACKETS", "packets",
-                counter_track::emplace(device_index, addendum("TX CNP PACKETS"), "packets")
+                counter_track::emplace(device_index, addendum("TX CNP PACKETS"),
+                                       "packets")
             };
         }
 
