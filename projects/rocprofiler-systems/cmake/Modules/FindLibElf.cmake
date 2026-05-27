@@ -8,19 +8,14 @@ FindLibElf
 Find libelf, the elfutils library for ELF file inspection.
 
 This module mirrors :module:`FindLibDW`: a thin shim that funnels discovery
-through the lowercase upstream ``libelf`` config package first, then falls
-back to pkg-config for distro installs.
+through pkg-config, which covers both system installs and the TheRock
+vendored sysdep.
 
 Discovery order:
 
 1. If ``LibElf::LibElf`` already exists (e.g. pre-created by
    ``DyninstElfUtils.cmake`` for the from-source build), short-circuit.
-2. ``find_package(libelf CONFIG)`` — dormant hedge for a future vendored
-   ``libelf-config.cmake``. TheRock currently only ships the camelCase
-   ``LibElf`` config (target ``elf::elf``) for ROCR-Runtime; the
-   lowercase ``libelf`` config does not exist, so this step is a no-op
-   today.
-3. ``pkg_check_modules(libelf)`` — canonical path for both system
+2. ``pkg_check_modules(libelf)`` — canonical path for both system
    installs (``/usr``) and the TheRock vendored sysdep (which ships
    ``libelf.pc`` in ``lib/rocm_sysdeps/lib/pkgconfig/``).
 
@@ -44,26 +39,7 @@ if(TARGET LibElf::LibElf AND LibElf_LIBRARIES AND LibElf_INCLUDE_DIRS)
     return()
 endif()
 
-# 2. Try the canonical lowercase config package.
-if(NOT LibElf_FOUND)
-    find_package(libelf ${LibElf_FIND_VERSION} CONFIG QUIET)
-    if(libelf_FOUND AND TARGET libelf::libelf)
-        set(LibElf_FOUND TRUE)
-        set(LibElf_VERSION "${libelf_VERSION}")
-        get_target_property(
-            LibElf_INCLUDE_DIRS
-            libelf::libelf
-            INTERFACE_INCLUDE_DIRECTORIES
-        )
-        get_target_property(LibElf_LIBRARIES libelf::libelf IMPORTED_LOCATION)
-        if(NOT TARGET LibElf::LibElf)
-            add_library(LibElf::LibElf INTERFACE IMPORTED)
-            target_link_libraries(LibElf::LibElf INTERFACE libelf::libelf)
-        endif()
-    endif()
-endif()
-
-# 3. pkg-config: the canonical path for both system installs (/usr) and
+# 2. pkg-config: the canonical path for both system installs (/usr) and
 #    the TheRock vendored sysdep (lib/rocm_sysdeps/lib/pkgconfig/libelf.pc).
 if(NOT LibElf_FOUND AND NOT LibElf_NO_SYSTEM_PATHS)
     find_package(PkgConfig QUIET)

@@ -16,11 +16,7 @@ Discovery order:
 
 1. If ``LibDW::LibDW`` already exists (e.g. created upfront by
    ``DyninstElfUtils.cmake`` for the from-source build), short-circuit.
-2. ``find_package(libdw CONFIG)`` — dormant hedge for a future vendored
-   ``libdw-config.cmake`` that ships a version file. TheRock currently
-   provides the config but no version file, so this step's version
-   check fails and we fall through.
-3. ``pkg_check_modules(libdw)`` — canonical path for both system installs
+2. ``pkg_check_modules(libdw)`` — canonical path for both system installs
    (``/usr``) and the TheRock vendored sysdep (which ships
    ``libdw.pc`` in ``lib/rocm_sysdeps/lib/pkgconfig/``).
 
@@ -50,25 +46,7 @@ if(TARGET LibDW::LibDW AND LibDW_LIBRARIES AND LibDW_INCLUDE_DIRS)
     return()
 endif()
 
-# 2. Try the canonical lowercase config package. Currently dormant in
-#    all three modes (see docstring) but kept as the standard
-#    "config-first then pkg-config" pattern and as a hedge if a future
-#    vendored config ships a version file.
-if(NOT LibDW_FOUND)
-    find_package(libdw ${LibDW_FIND_VERSION} CONFIG QUIET)
-    if(libdw_FOUND AND TARGET libdw::libdw)
-        set(LibDW_FOUND TRUE)
-        set(LibDW_VERSION "${libdw_VERSION}")
-        get_target_property(LibDW_INCLUDE_DIRS libdw::libdw INTERFACE_INCLUDE_DIRECTORIES)
-        get_target_property(LibDW_LIBRARIES libdw::libdw IMPORTED_LOCATION)
-        if(NOT TARGET LibDW::LibDW)
-            add_library(LibDW::LibDW INTERFACE IMPORTED)
-            target_link_libraries(LibDW::LibDW INTERFACE libdw::libdw)
-        endif()
-    endif()
-endif()
-
-# 3. pkg-config: the canonical path for both system installs (/usr) and
+# 2. pkg-config: the canonical path for both system installs (/usr) and
 #    the TheRock vendored sysdep (lib/rocm_sysdeps/lib/pkgconfig/libdw.pc).
 if(NOT LibDW_FOUND AND NOT LibDW_NO_SYSTEM_PATHS)
     find_package(PkgConfig QUIET)
