@@ -38,13 +38,9 @@ Result variables
 ``LibDW_FOUND``, ``LibDW_INCLUDE_DIRS``, ``LibDW_LIBRARIES``, ``LibDW_VERSION``
 #]=======================================================================]
 
-cmake_policy(PUSH)
-cmake_policy(SET CMP0074 NEW)
-
 # 1. Short-circuit: already populated upstream (e.g. mode 1 pre-creates target).
 if(TARGET LibDW::LibDW AND LibDW_LIBRARIES AND LibDW_INCLUDE_DIRS)
     set(LibDW_FOUND TRUE)
-    cmake_policy(POP)
     return()
 endif()
 
@@ -125,5 +121,3 @@ find_package_handle_standard_args(
 if(LibDW_FOUND)
     mark_as_advanced(LibDW_INCLUDE_DIRS LibDW_LIBRARIES LibDW_VERSION)
 endif()
-
-cmake_policy(POP)
