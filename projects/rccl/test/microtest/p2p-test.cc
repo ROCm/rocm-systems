@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -366,6 +367,102 @@ ncclResult_t CallIpcRegisterBuffer(ncclComm& comm,
 }
 
 }  // namespace
+
+// ===========================================================================
+// FreshRegistrationMicrotest -- shared scaffolding for tests that drive the
+// fresh-registration arm of ipcRegisterBuffer (the `else` arm of the per-peer
+// loop, where ipcInfos[peerLocalRank] is NULL on entry).
+//
+// What this fixture owns:
+//   - The scenario constants every fresh-reg test uses (peer rank, base
+//     addr, buffer offset, ranks-in-comm).
+//   - A pre-wired CommBuilder (rankToLocalRank table, localRanks set to
+//     NCCL_MAX_LOCAL_RANKS, sharedRes pointer, gproxyConn array sized to
+//     kNRanks).
+//   - A ncclReg with begAddr/endAddr populated and a RegRecordCleaner
+//     attached so per-peer ipcInfos / hostPeerRmtAddrs allocations are
+//     freed automatically.
+//   - The g_loadParam hook forced to ForceLegacyCudaRegister() -- every
+//     fresh-reg test the legacy-IPC arm covers needs this.
+//
+// What tests provide themselves:
+//   - The specific seam hooks that make the test interesting. Use the
+//     MakeDefault*Hook() helpers for the boilerplate happy-path memGet /
+//     ipcGet hooks; install proxy/connect/acquire/etc. directly with
+//     ScopedHook in the test body.
+//
+// The helper hooks return ScopedHook by value; C++17 guaranteed copy
+// elision lets the non-movable, non-copyable ScopedHook propagate out of
+// the prvalue return. Capture them with `auto x = MakeDefault...();`.
+//
+// Defined here (after the anonymous-namespace helpers block) because it
+// names CommBuilder / RegRecordCleaner / ScopedHook / ForceLegacyCudaRegister
+// from that namespace.
+// ===========================================================================
+class FreshRegistrationMicrotest : public P2pMicrotest {
+protected:
+    static constexpr int          kPeerRank      = 2;
+    static constexpr int          kPeerLocalRank = 1;
+    static constexpr uintptr_t    kBaseAddr      = 0x100000;
+    static constexpr std::size_t  kBaseSize      = 0x4000;
+    static constexpr uintptr_t    kBuffOffset    = 0x80;
+    static constexpr uintptr_t    kBegOffset     = 0x20;
+    static constexpr uintptr_t    kBegAddr       = kBaseAddr + kBegOffset;
+    static constexpr int          kNRanks        = kPeerRank + 1;
+
+    CommBuilder cb;
+    ncclReg     regRecord{};
+    // std::optional rather than raw members so RegRecordCleaner (which
+    // captures &regRecord) and the ScopedHook (which mutates a global
+    // std::function slot) are constructed in SetUp() *after* regRecord
+    // has its initial state, and torn down in TearDown() in the right
+    // order. Using std::optional here avoids the unique_ptr<ScopedHook<
+    // long-sig...>> pattern the older fixture in this file has to use.
+    std::optional<RegRecordCleaner> regCleanup;
+    std::optional<ScopedHook<int64_t(const char*, int64_t)>> loadParam;
+
+    const void* const kUserbuff =
+        reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
+
+    void SetUp() override {
+        cb.WithLocalRank(kPeerRank, kPeerLocalRank)
+          .WithMaxLocalRanks()
+          .WithSharedRes()
+          .WithProxyConnArray(kNRanks);
+        regRecord.begAddr = kBegAddr;
+        regRecord.endAddr = kBegAddr + 0x1000;
+        regCleanup.emplace(regRecord);
+        loadParam.emplace(g_loadParam, ForceLegacyCudaRegister());
+    }
+
+    void TearDown() override {
+        // Hooks first (restore the global slots), then the regRecord
+        // cleaner (frees per-peer allocations the call may have made).
+        loadParam.reset();
+        regCleanup.reset();
+        P2pMicrotest::TearDown();
+    }
+
+    // Standard happy-path hooks for the two HIP driver entry points the
+    // fresh-reg arm hits before reaching the seam most tests actually
+    // care about. Returned by value; capture with `auto`.
+    auto MakeDefaultMemGetHook() {
+        return ScopedHook(g_hipMemGetAddressRange,
+            [](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t)
+                -> hipError_t {
+                if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
+                if (psize) *psize = kBaseSize;
+                return hipSuccess;
+            });
+    }
+    auto MakeDefaultIpcGetHook() {
+        return ScopedHook(g_hipIpcGetMemHandle,
+            [](hipIpcMemHandle_t* h, void*) -> hipError_t {
+                if (h) std::memset(h, 0x5A, sizeof(*h));
+                return hipSuccess;
+            });
+    }
+};
 
 // ===========================================================================
 // Tests
@@ -771,43 +868,10 @@ TEST_F(FreshRegistrationLegacyIpcSucceedsFixture, PopulatesIpcInfoRecord)
 // must be skipped. Because *regBufFlag is then never set to 1, the
 // post-loop strong-stream block also stays skipped, and the function
 // returns ncclSuccess with all outputs left zeroed by the prologue.
-TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationProxyReturnsNullRmtAddr)
+TEST_F(FreshRegistrationMicrotest, ProxyReturnsNullRmtAddrSkipsBookkeeping)
 {
-    constexpr int       kPeerRank      = 2;
-    constexpr int       kPeerLocalRank = 1;
-    constexpr uintptr_t kBaseAddr      = 0x100000;
-    constexpr std::size_t kBaseSize    = 0x4000;
-    constexpr uintptr_t kBuffOffset    = 0x80;
-    constexpr uintptr_t kBegOffset     = 0x20;
-    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
-    constexpr int       kNRanks        = kPeerRank + 1;
-
-    CommBuilder cb;
-    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
-      .WithMaxLocalRanks()
-      .WithSharedRes()
-      .WithProxyConnArray(kNRanks);
-
-    ncclReg regRecord{};
-    regRecord.begAddr = kBegAddr;
-    regRecord.endAddr = kBegAddr + 0x1000;
-    RegRecordCleaner regCleanup(regRecord);
-    ScopedHook loadParam(g_loadParam, ForceLegacyCudaRegister());
-
-    const void* const kUserbuff =
-        reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
-    ScopedHook memGet(g_hipMemGetAddressRange,
-        [&](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t)
-            -> hipError_t {
-            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
-            if (psize) *psize = kBaseSize;
-            return hipSuccess;
-        });
-    ScopedHook ipcGet(g_hipIpcGetMemHandle,
-        [&](hipIpcMemHandle_t* h, void*) -> hipError_t {
-            if (h) std::memset(h, 0x5A, sizeof(*h));
-            return hipSuccess;
-        });
+    auto memGet = MakeDefaultMemGetHook();
+    auto ipcGet = MakeDefaultIpcGetHook();
     ScopedHook connect(g_proxyConnect,
         [&](struct ncclComm*, int, int, int,
             struct ncclProxyConnector* pc) -> ncclResult_t {
@@ -837,7 +901,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationProxyReturnsNullRmtAddr)
 
     EXPECT_EQ(r, ncclSuccess);
     // Bookkeeping block was skipped:
-    EXPECT_EQ(regRecord.ipcInfos[kPeerLocalRank], nullptr);
+    EXPECT_EQ(regRecord.ipcInfos[kPeerLocalRank], nullptr);  // fixture's regRecord
     EXPECT_EQ(regRecord.regIpcAddrs.hostPeerRmtAddrs, nullptr);
     EXPECT_EQ(regRecord.regIpcAddrs.devPeerRmtAddrs,  nullptr);
     EXPECT_FALSE(regRecord.state & IPC_REG_COMPLETE);
@@ -858,46 +922,15 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationProxyReturnsNullRmtAddr)
 // = true so the per-peer loop's `if (...initialized == false)` test takes
 // the False arm and ncclProxyConnect is *not* called. The rest of the registration (handle export, proxy register,
 // bookkeeping) proceeds normally.
-TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationSkipsProxyConnectWhenAlreadyInitialized)
+TEST_F(FreshRegistrationMicrotest, SkipsProxyConnectWhenAlreadyInitialized)
 {
-    constexpr int       kPeerRank      = 2;
-    constexpr int       kPeerLocalRank = 1;
-    constexpr uintptr_t kBaseAddr      = 0x100000;
-    constexpr std::size_t kBaseSize    = 0x4000;
-    constexpr uintptr_t kBuffOffset    = 0x80;
-    constexpr uintptr_t kBegOffset     = 0x20;
-    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
-    constexpr uintptr_t kRmtRegAddr    = 0xCAFE0000ull;
-    constexpr int       kNRanks        = kPeerRank + 1;
+    constexpr uintptr_t kRmtRegAddr = 0xCAFE0000ull;
 
-    CommBuilder cb;
-    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
-      .WithMaxLocalRanks()
-      .WithSharedRes()
-      .WithProxyConnArray(kNRanks);
     // Key precondition: skip the connect.
     cb.comm().gproxyConn[kPeerRank].initialized = true;
 
-    ncclReg regRecord{};
-    regRecord.begAddr = kBegAddr;
-    regRecord.endAddr = kBegAddr + 0x1000;
-    RegRecordCleaner regCleanup(regRecord);
-    ScopedHook loadParam(g_loadParam, ForceLegacyCudaRegister());
-
-    const void* const kUserbuff =
-        reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
-    ScopedHook memGet(g_hipMemGetAddressRange,
-        [&](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t)
-            -> hipError_t {
-            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
-            if (psize) *psize = kBaseSize;
-            return hipSuccess;
-        });
-    ScopedHook ipcGet(g_hipIpcGetMemHandle,
-        [&](hipIpcMemHandle_t* h, void*) -> hipError_t {
-            if (h) std::memset(h, 0x5A, sizeof(*h));
-            return hipSuccess;
-        });
+    auto memGet = MakeDefaultMemGetHook();
+    auto ipcGet = MakeDefaultIpcGetHook();
     // Default g_proxyConnect returns ncclSystemError -- if it were called
     // we'd see the test fail with that error code. Wrap in a ScopedHook
     // anyway so we can assert .calls == 0 explicitly.
@@ -926,7 +959,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationSkipsProxyConnectWhenAlr
                                    NCCL_IPC_COLLECTIVE,
                                    &regRecord, out, &isLegacyIpc);
 
-    EXPECT_EQ(connect.calls, 0);   // the contract under test
+    EXPECT_EQ(connect.calls, 0);    // the contract under test
     EXPECT_EQ(memGet.calls,  1);
     EXPECT_EQ(ipcGet.calls,  1);
     EXPECT_EQ(proxy.calls,   1);
