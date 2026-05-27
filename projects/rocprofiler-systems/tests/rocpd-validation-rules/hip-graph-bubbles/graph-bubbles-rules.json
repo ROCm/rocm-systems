@@ -1,7 +1,7 @@
 {
     "required_tables": [
         {
-            "commit": "HIP graph bubbles: kernel count must match RUN_ARGS in rocprof-sys-hip-graph-bubbles-tests.cmake and _HIP_GRAPH_BUBBLES_* in test_hip_graph_bubbles.py; if those change, update min_rows, expected_result, and descriptions below.",
+            "commit": "HIP graph bubbles: kernel count must match RUN_ARGS and _HIP_GRAPH_BUBBLES_* in test_hip_graph_bubbles.py; if those change, update min_rows, expected_result, and descriptions below.",
             "min_rows": 384,
             "name": "kernels",
             "required_columns": [

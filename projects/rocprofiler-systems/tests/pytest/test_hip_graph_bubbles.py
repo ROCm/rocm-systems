@@ -35,7 +35,7 @@ def _hip_graph_bubbles_rocm_events(gpu_info: GPUInfo) -> str:
 
 @pytest.fixture
 def hip_graph_bubbles_env(gpu_info: GPUInfo) -> dict[str, str]:
-    """Environment variables for HIP graph + marker tests (ROCM_EVENTS always set, like CMake)."""
+    """Environment variables for HIP graph + marker tests."""
     return {
         "ROCPROFSYS_ROCM_EVENTS": _hip_graph_bubbles_rocm_events(gpu_info),
         "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,kernel_dispatch,marker_api",
@@ -74,7 +74,6 @@ class TestHipGraphBubbles(RocprofsysTest):
         hip_graph_bubbles_rocpd_env: dict[str, str],
         hip_graph_bubbles_rules: list[Path],
     ):
-        """Baseline / sampling / sys_run; sampling also validates ROCPD (graph-bubbles-rules.json)."""
         result = self.run_test(
             mode,
             "hip-graph-bubbles",

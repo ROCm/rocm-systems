@@ -61,12 +61,10 @@ rocprof-sys-run -- ./hip-graph-bubbles 64 6
 | ---------- | ------- | --------- |
 | `ROCPROFSYS_ROCM_DOMAINS` | `hip_runtime_api,kernel_dispatch,marker_api` | Trace HIP API, kernel launches, and rocTX markers |
 | `ROCPROFSYS_ROCM_EVENTS` | `GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU` (Instinct) or `SQ_WAVES` (e.g. Navi) | Sample GPU hardware counters |
-| `ROCPROFSYS_USE_AMD_SMI` | `OFF` | Avoid extra PMC rows when validating ROCPD output |
 
 ```bash
 rocprof-sys-run \
     -e ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,marker_api \
     -e ROCPROFSYS_ROCM_EVENTS=GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU \
-    -e ROCPROFSYS_USE_AMD_SMI=OFF \
     -- ./hip-graph-bubbles 64 6
 ```
