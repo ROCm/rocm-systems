@@ -78,7 +78,13 @@ if(ROCPROFSYS_BUILD_ELFUTILS)
         ELFUTILS_DOWNLOAD_VERSION "Version of elfutils to download and install" STRING
         "0.195"
     )
-    set(ELFUTILS_DOWNLOAD_VERSION ${ElfUtils_DOWNLOAD_VERSION})
+    # Honor legacy user override (-DElfUtils_DOWNLOAD_VERSION=...) if provided.
+    if(
+        DEFINED ElfUtils_DOWNLOAD_VERSION
+        AND NOT "${ElfUtils_DOWNLOAD_VERSION}" STREQUAL ""
+    )
+        set(ELFUTILS_DOWNLOAD_VERSION "${ElfUtils_DOWNLOAD_VERSION}")
+    endif()
 
     if(${ELFUTILS_DOWNLOAD_VERSION} VERSION_LESS ${ElfUtils_MIN_VERSION})
         rocprofiler_systems_message(
