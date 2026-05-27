@@ -692,6 +692,16 @@ save(ArchiveT& ar, rocprofiler_buffer_tracing_rocshmem_api_record_t data)
 
 template <typename ArchiveT>
 void
+save(ArchiveT& ar, rocprofiler_buffer_tracing_rocshmem_api_ext_record_t data)
+{
+    save_buffer_tracing_api_record(ar, data);
+    auto args = sdk::serialization::get_buffer_tracing_args(data);
+    ROCP_SDK_SAVE_VALUE("args", args);
+    ROCP_SDK_SAVE_DATA_FIELD(retval);
+}
+
+template <typename ArchiveT>
+void
 save(ArchiveT& ar, rocprofiler_buffer_tracing_ompt_target_t data)
 {
     ROCP_SDK_SAVE_DATA_VALUE("kind", kind);

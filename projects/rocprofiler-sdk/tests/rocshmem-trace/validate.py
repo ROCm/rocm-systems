@@ -127,6 +127,21 @@ def test_rocshmem_domain_registered(input_data):
     )
 
 
+def test_rocshmem_ext_domain_registered(input_data):
+    """The ROCSHMEM_API_EXT buffer-tracing kind exposes the same 9 operation names."""
+    sdk_data = _get_sdk_data(input_data)
+    op_lookup = get_operation(sdk_data["buffer_records"], "ROCSHMEM_API_EXT")
+    assert (
+        op_lookup is not None
+    ), "ROCSHMEM_API_EXT kind not registered in buffer_records.names"
+    _, op_names = op_lookup
+    assert len(op_names) == 9, f"expected 9 operations, got {len(op_names)}: {op_names}"
+    assert set(op_names) == EXPECTED_OPERATIONS, (
+        f"operation set mismatch.\n  got:      {sorted(op_names)}"
+        f"\n  expected: {sorted(EXPECTED_OPERATIONS)}"
+    )
+
+
 def test_buffer_records_contain_all_apis(input_data):
     """Every traced API surfaces at least once in the buffer-tracing stream."""
     sdk_data = _get_sdk_data(input_data)
@@ -175,6 +190,70 @@ def test_buffer_records_contain_all_apis(input_data):
 
     assert observed_ops == EXPECTED_OPERATIONS, (
         "rocshmem-demo did not exercise every traced API."
+        f"\n  missing: {sorted(EXPECTED_OPERATIONS - observed_ops)}"
+        f"\n  extra:   {sorted(observed_ops - EXPECTED_OPERATIONS)}"
+    )
+
+
+def test_buffer_ext_records_contain_args_and_retval(input_data):
+    """EXT buffer records carry the same coverage as the basic buffer stream,
+    plus an ``args`` payload and a ``retval`` field."""
+    sdk_data = _get_sdk_data(input_data)
+    op_lookup = get_operation(sdk_data["buffer_records"], "ROCSHMEM_API_EXT")
+    assert op_lookup is not None, "ROCSHMEM_API_EXT kind missing"
+    kind_idx, op_names = op_lookup
+
+    ext_records = sdk_data["buffer_records"].get("rocshmem_api_ext_traces", [])
+    if not ext_records:
+        pytest.skip("rocshmem ext tracing unavailable (no buffer ext records captured)")
+
+    assert len(ext_records) >= EXPECTED_BUFFER_RECORDS, (
+        f"expected >={EXPECTED_BUFFER_RECORDS} rocshmem_api_ext buffer records "
+        f"({DEMO_ITERATIONS} iters x {len(EXPECTED_OPERATIONS)} APIs), "
+        f"got {len(ext_records)}"
+    )
+
+    observed_ops = set()
+    for rec in ext_records:
+        for key in (
+            "size",
+            "kind",
+            "operation",
+            "correlation_id",
+            "start_timestamp",
+            "end_timestamp",
+            "thread_id",
+            "args",
+            "retval",
+        ):
+            assert key in rec, f"missing key '{key}' in ext buffer record: {rec}"
+
+        assert rec["kind"] == kind_idx, f"unexpected kind in ext record: {rec}"
+        assert (
+            0 <= rec["operation"] < len(op_names)
+        ), f"operation index out of range: {rec}"
+        observed_ops.add(op_names[rec["operation"]])
+
+        assert rec["size"] > 0
+        assert rec["thread_id"] > 0
+        assert rec["start_timestamp"] > 0
+        assert rec["end_timestamp"] > 0
+        assert rec["start_timestamp"] < rec["end_timestamp"]
+        assert rec["correlation_id"]["internal"] > 0
+
+        # args serializes as a list of {type, name, value} dicts (one per
+        # parameter). Every host-stream rocSHMEM API takes at least one
+        # argument, so the list must be non-empty and well-formed.
+        assert isinstance(rec["args"], list), f"args is not a list: {rec}"
+        assert len(rec["args"]) > 0, f"empty args in ext record: {rec}"
+        for arg in rec["args"]:
+            assert isinstance(arg, dict), f"arg is not a dict: {rec}"
+            for key in ("type", "name", "value"):
+                assert key in arg, f"missing arg.{key}: {rec}"
+                assert isinstance(arg[key], str), f"arg.{key} is not a string: {rec}"
+
+    assert observed_ops == EXPECTED_OPERATIONS, (
+        "rocshmem-demo did not exercise every traced API in EXT stream."
         f"\n  missing: {sorted(EXPECTED_OPERATIONS - observed_ops)}"
         f"\n  extra:   {sorted(observed_ops - EXPECTED_OPERATIONS)}"
     )

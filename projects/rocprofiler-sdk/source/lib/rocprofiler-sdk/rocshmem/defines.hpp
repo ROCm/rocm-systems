@@ -44,6 +44,7 @@
                                                                                                    \
         using domain_type::callback_domain_idx;                                                    \
         using domain_type::buffered_domain_idx;                                                    \
+        using domain_type::buffered_ext_domain_idx;                                                \
         using domain_type::args_type;                                                              \
         using domain_type::retval_type;                                                            \
         using domain_type::callback_data_type;                                                     \
@@ -94,9 +95,14 @@
             return &base_type::functor<RetT, Args...>;                                             \
         }                                                                                          \
                                                                                                    \
-        static std::vector<void*> as_arg_addr(callback_data_type) { return std::vector<void*>{}; } \
+        static std::vector<void*> as_arg_addr(rocprofiler_rocshmem_api_args_t)                     \
+        {                                                                                          \
+            return std::vector<void*>{};                                                           \
+        }                                                                                          \
                                                                                                    \
-        static std::vector<common::stringified_argument> as_arg_list(callback_data_type, int32_t)  \
+        static std::vector<common::stringified_argument> as_arg_list(                              \
+            rocprofiler_rocshmem_api_args_t,                                                       \
+            int32_t)                                                                               \
         {                                                                                          \
             return {};                                                                             \
         }                                                                                          \
@@ -122,8 +128,9 @@
         using this_type   = rocshmem_api_info<table_idx, operation_idx>;                           \
         using base_type   = rocshmem_api_impl<table_idx, operation_idx>;                           \
                                                                                                    \
-        static constexpr auto callback_domain_idx = domain_type::callback_domain_idx;              \
-        static constexpr auto buffered_domain_idx = domain_type::buffered_domain_idx;              \
+        static constexpr auto callback_domain_idx     = domain_type::callback_domain_idx;          \
+        static constexpr auto buffered_domain_idx     = domain_type::buffered_domain_idx;          \
+        static constexpr auto buffered_ext_domain_idx = domain_type::buffered_ext_domain_idx;      \
                                                                                                    \
         using domain_type::args_type;                                                              \
         using domain_type::retval_type;                                                            \
@@ -175,10 +182,16 @@
             return &base_type::functor<RetT, Args...>;                                             \
         }                                                                                          \
                                                                                                    \
-        static std::vector<void*> as_arg_addr(callback_data_type trace_data)                       \
+        static std::vector<void*> as_arg_addr(rocprofiler_rocshmem_api_args_t args)                \
         {                                                                                          \
             return std::vector<void*>{                                                             \
-                GET_ADDR_MEMBER_FIELDS(get_api_data_args(trace_data.args), __VA_ARGS__)};          \
+                GET_ADDR_MEMBER_FIELDS(get_api_data_args(args), __VA_ARGS__)};                     \
+        }                                                                                          \
+                                                                                                   \
+        static auto as_arg_list(rocprofiler_rocshmem_api_args_t args, int32_t max_deref)           \
+        {                                                                                          \
+            return utils::stringize(                                                               \
+                max_deref, GET_NAMED_MEMBER_FIELDS(get_api_data_args(args), __VA_ARGS__));         \
         }                                                                                          \
     };                                                                                             \
     }                                                                                              \
