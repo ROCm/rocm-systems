@@ -72,10 +72,16 @@ jobs:
 
       - name: Test
         timeout-minutes: 15
-        # Currently, TheRock CI in RCCL always builds with MPI-supported enabled which causes the
-        # RCCL correctness tests to fail on the mi325 runners which don't have MPI pre-installed.
-        # TODO (geomin12): Rebuild rccl-tests without MPI to enable RCCL correctness tests.
+        # Drive rccl single-node tier via shared test_runner.py
+        # (rocm-systems#6439 + TheRock#5469). rocm-systems#4573 installs
+        # tier + arch-exclude labels into bin/rccl/CTestTestfile.cmake, so
+        # `ctest -L <tier>` is the right surface. The legacy
+        # `-k "not test_rccl_correctness_tests"` filter is dropped: the
+        # rccl-tests perf binaries live in a separate artifact and aren't
+        # CTests under bin/rccl/, so MPI-on-mi325 cannot trigger here.
+        env:
+          TEST_COMPONENT: rccl
+          TEST_TYPE: quick
+          AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
         run: |
-          pytest ./build_tools/github_actions/test_executable_scripts/test_rccl.py -v -s \
-            -k "not test_rccl_correctness_tests" \
-            --log-cli-level=info
+          python ./build_tools/github_actions/test_executable_scripts/test_runner.py
