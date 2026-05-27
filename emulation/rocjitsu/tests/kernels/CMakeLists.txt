@@ -21,7 +21,7 @@ find_program(
     HINTS
     ENV ROCM_PATH
     /opt/rocm
-    PATH_SUFFIXES bin
+    PATH_SUFFIXES lib/llvm/bin bin
     DOC "Path to the ROCm amdclang++ compiler"
 )
 
@@ -47,8 +47,15 @@ set(KERNEL_OUTPUT_DIR ${CMAKE_BINARY_DIR}/kernels)
 file(MAKE_DIRECTORY ${KERNEL_OUTPUT_DIR})
 
 # Locate the ROCm installation root for --rocm-path.
-get_filename_component(ROCM_PATH "${AMDCLANG}" DIRECTORY)
-get_filename_component(ROCM_PATH "${ROCM_PATH}" DIRECTORY)
+# Prefer ROCM_PATH from the environment (needed for pip-installed
+# ROCm where the directory layout differs from /opt/rocm).
+# Otherwise derive from the amdclang++ location (up two directories).
+if(DEFINED ENV{ROCM_PATH})
+    set(ROCM_PATH "$ENV{ROCM_PATH}")
+else()
+    get_filename_component(ROCM_PATH "${AMDCLANG}" DIRECTORY)
+    get_filename_component(ROCM_PATH "${ROCM_PATH}" DIRECTORY)
+endif()
 
 include(rj_add_device_kernel)
 

@@ -1,0 +1,86 @@
+# rocjitsu CI: build from source and run the full test suite.
+#
+# How it works:
+#   1. Sparse-checkout emulation/rocjitsu
+#   2. pip install rocm[devel] into a venv (provides hipcc,
+#      amdclang++, and device libraries for compiling HIP kernels)
+#   3. Build with clang + ninja in Release mode
+#   4. Run the full ctest suite on the CPU emulator
+#
+# No GPU hardware is needed. rocjitsu's tests run on its built-in
+# CPU emulator, which simulates AMD GPU execution. HIP kernels are
+# compiled for gfx950 by hipcc, then loaded and executed by the
+# emulator at test time.
+#
+# Excluded tests:
+#   RocminfoTest — spawns rocminfo under LD_PRELOAD with the KMD
+#   interposer, which requires /dev/kfd (unavailable on CI runners).
+
+name: rocjitsu CI
+
+on:
+  pull_request:
+    paths:
+      - "emulation/rocjitsu/**"
+      - ".github/workflows/rocjitsu-ci.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "emulation/rocjitsu/**"
+      - ".github/workflows/rocjitsu-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: Linux (clang, Release)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          sparse-checkout: emulation/rocjitsu
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build clang libdrm-dev
+
+      - name: Install ROCm SDK via pip
+        run: |
+          python3 -m venv .venv
+          source .venv/bin/activate
+          # See https://repo.amd.com/rocm/whl/ for available arch indexes.
+          pip install --index-url https://repo.amd.com/rocm/whl/gfx950-dcgpu/ "rocm[libraries,devel]"
+
+          # Set ROCM_PATH so cmake finds amdclang++, HIP headers,
+          # and device libs from the pip-installed SDK.
+          ROCM=$(rocm-sdk path --root)
+          echo "ROCM_PATH=$ROCM" >> $GITHUB_ENV
+          echo "PATH=$PWD/.venv/bin:$PATH" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=$ROCM/lib" >> $GITHUB_ENV
+
+          # Sanity check
+          hipcc --version
+          echo '__global__ void k(){}' \
+            | hipcc -x hip --offload-arch=gfx950 \
+              --cuda-device-only -c -o /dev/null -
+
+      - name: Configure
+        run: >
+          cmake -B build -G Ninja
+          -S emulation/rocjitsu
+          -DCMAKE_C_COMPILER=clang
+          -DCMAKE_CXX_COMPILER=clang++
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_FLAGS="-Werror"
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Test
+        run: >
+          ctest --test-dir build
+          --output-on-failure
+          --timeout 120
+          --exclude-regex "RocminfoTest|RocblasGemmCdna3"

@@ -330,7 +330,7 @@ find_program(
     ENV ROCM_PATH
     PATH_SUFFIXES bin
 )
-if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
+if(HIPCC_EXECUTABLE)
     set(GTEST_INC ${googletest_SOURCE_DIR}/googletest/include)
     set(GTEST_LIB_DIR ${CMAKE_BINARY_DIR}/lib)
 
@@ -475,5 +475,5 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
 
     message(STATUS "HIP tests enabled (found ${HIPCC_EXECUTABLE})")
 else()
-    message(STATUS "HIP tests disabled (hipcc or libhsa-runtime64 not found)")
+    message(STATUS "HIP tests disabled (hipcc not found)")
 endif()
