@@ -14,6 +14,7 @@ add_executable(rocprofiler-systems-instrument)
 target_sources(
     rocprofiler-systems-instrument
     PRIVATE
+        ${CMAKE_CURRENT_LIST_DIR}/arg_serializer.hpp
         ${CMAKE_CURRENT_LIST_DIR}/details.cpp
         ${CMAKE_CURRENT_LIST_DIR}/function_signature.cpp
         ${CMAKE_CURRENT_LIST_DIR}/function_signature.hpp
@@ -28,6 +29,10 @@ target_sources(
         ${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-instrument.cpp
         ${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-instrument.hpp
 )
+
+if(ROCPROFSYS_BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
 
 target_link_libraries(
     rocprofiler-systems-instrument
