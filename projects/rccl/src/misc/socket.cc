@@ -123,6 +123,9 @@ ncclResult_t ncclSocketListen(struct ncclSocket* sock) {
 
   SYSCHECK(listen(sock->socketDescriptor, 16384), "listen");
 
+  // Listener fd must be non-blocking for async accept loops (AICOMNET-196).
+  NCCLCHECK(ncclOsSocketSetFlags(sock));
+
   // Set acceptSocketDescriptor to the same value as socketDescriptor for listening sockets
   sock->acceptSocketDescriptor = sock->socketDescriptor;
   sock->state = ncclSocketStateReady;
