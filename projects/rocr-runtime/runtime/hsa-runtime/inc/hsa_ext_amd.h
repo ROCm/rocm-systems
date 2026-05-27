@@ -75,9 +75,10 @@
  * - 1.21 - hsa_amd_signal_get_event_id
  * - 1.22 - hsa_amd_queue_get_info: per-queue VM fault state queries
  * - 1.23 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS
+ * - 1.24 - hsa_amd_queue_create: batch queue creation with descriptor
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 23
+#define HSA_AMD_INTERFACE_VERSION_MINOR 24
 
 #ifdef __cplusplus
 extern "C" {
@@ -3481,6 +3482,127 @@ typedef enum {
    */
   HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR = (1 << 1),
 } hsa_amd_queue_create_flag_t;
+
+/**
+ * @brief Version of the hsa_amd_queue_create_desc_t structure.
+ *
+ * Callers must set the @c version field to this value. The runtime rejects
+ * descriptors whose version it does not recognise.
+ */
+#define HSA_AMD_QUEUE_CREATE_DESC_VERSION 1
+
+/**
+ * @brief Default value for @c private_segment_size in
+ * ::hsa_amd_queue_create_desc_t.
+ *
+ * Requests the runtime's profile-dependent default scratch allocation.
+ * Equivalent to passing @c UINT32_MAX to ::hsa_queue_create.
+ */
+#define HSA_AMD_PRIVATE_SEGMENT_SIZE_DEFAULT UINT32_MAX
+
+/**
+ * @brief Describes a single queue to create within a batch.
+ *
+ * Each descriptor is self-contained: it carries the queue type, size,
+ * priority, memory placement flags, CU mask, and error callback.  On
+ * success the runtime writes the created queue into the @c queue field.
+ * An array of descriptors can be passed to
+ * ::hsa_amd_queue_create to create multiple queues in a single call.
+ *
+ * The @c version field must be set to @c HSA_AMD_QUEUE_CREATE_DESC_VERSION.
+ * Future versions may reinterpret @c reserved bytes as new fields
+ * (e.g. tg_chunk_size, pm_hint, dispatch_granularity_limiter,
+ * group_segment_size).
+ *
+ * Descriptor version 1 does not expose @c group_segment_size. The runtime
+ * uses its default group-segment sizing, equivalent to passing @c UINT32_MAX
+ * to ::hsa_queue_create.
+ *
+ * All @c reserved fields must be zero.
+ */
+typedef struct hsa_amd_queue_create_desc_s {
+  /** Struct version. Must be HSA_AMD_QUEUE_CREATE_DESC_VERSION. */
+  uint16_t version;
+  /** Memory placement flags (hsa_amd_queue_create_flag_t). 0 = system memory. */
+  uint16_t flags;
+  /** Number of packets the queue can hold. Must be a power of 2. */
+  uint32_t queue_size;
+  /** Queue type: HSA_QUEUE_TYPE_MULTI, HSA_QUEUE_TYPE_SINGLE, or
+   *  HSA_QUEUE_TYPE_COOPERATIVE. */
+  hsa_queue_type32_t type;
+  /** Dispatch and wavefront scheduling priority. HSA_AMD_QUEUE_PRIORITY_NORMAL = default. */
+  hsa_amd_queue_priority_t priority;
+  /** Callback invoked by the runtime for asynchronous queue errors. May be NULL. */
+  void (*callback)(hsa_status_t status, hsa_queue_t *source, void *data);
+  /** Application data passed to @c callback. May be NULL. */
+  void *callback_data;
+  /** Initial scratch (private segment) size in bytes per work-item.
+   *  The runtime uses this to pre-allocate scratch memory for the queue.
+   *  0 = no scratch.  HSA_AMD_PRIVATE_SEGMENT_SIZE_DEFAULT = runtime
+   *  default (profile-dependent).  Other non-zero values are passed
+   *  directly to the queue allocator.  Scratch may still grow dynamically
+   *  beyond this initial allocation. */
+  uint32_t private_segment_size;
+  /** Number of bits in the CU mask. Must be a multiple of 32.
+   *  0 = no CU mask (all CUs enabled). */
+  uint32_t cu_mask_count;
+  /** CU mask array. NULL when @c cu_mask_count is 0. Each bit corresponds to
+   *  one CU; the array length is ceil(cu_mask_count / 32) uint32_t elements. */
+  const uint32_t *cu_mask;
+  /** [out] On success the runtime writes the created queue pointer here.
+   *  On failure this is set to NULL. */
+  hsa_queue_t *queue;
+  /** Reserved for future use. Must be 0.  Typed as uint8_t for finest
+   *  granularity — future fields of any size can be carved out without
+   *  wasting bytes on alignment padding. */
+  uint8_t reserved[40];
+} hsa_amd_queue_create_desc_t;
+
+/**
+ * @brief Create one or more queues from an array of descriptors.
+ *
+ * @details Each element of @p descs fully describes a queue to create on
+ * @p agent. The runtime creates the queue, applies the requested priority
+ * and CU mask atomically, and writes the result to the descriptor's
+ * @c queue output pointer.
+ *
+ * For single-queue creation pass @p num_descs = 1.
+ *
+ * On partial failure (batch mode), queues that were successfully created
+ * remain valid. The caller should inspect each @c descs[i].queue pointer
+ * (NULL indicates that particular queue failed). The return value reflects
+ * the first error encountered.
+ *
+ * @param[in] agent Agent on which to create all queues.
+ *
+ * @param[in,out] descs Array of queue descriptors. Each descriptor's
+ * @c queue field is an output parameter written by the runtime.
+ *
+ * @param[in] num_descs Number of elements in @p descs. Must be >= 1.
+ *
+ * @retval ::HSA_STATUS_SUCCESS All queues were created successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been
+ * initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_AGENT @p agent is invalid.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p descs is NULL,
+ * @p num_descs is 0, a descriptor's @c version is unrecognised, @c queue_size
+ * is not a power of two, @c queue_size is 0, @c type is invalid, @c priority
+ * is invalid, @c cu_mask_count is not a multiple of 32, or @c reserved fields
+ * are non-zero.
+ *
+ * @retval ::HSA_STATUS_ERROR_OUT_OF_RESOURCES The runtime could not allocate
+ * the required resources for one or more queues.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_QUEUE_CREATION @p agent does not support
+ * queues of the requested type.
+ */
+hsa_status_t HSA_API hsa_amd_queue_create(
+    hsa_agent_t agent,
+    hsa_amd_queue_create_desc_t *descs,
+    uint32_t num_descs);
 
 /** @} */
 

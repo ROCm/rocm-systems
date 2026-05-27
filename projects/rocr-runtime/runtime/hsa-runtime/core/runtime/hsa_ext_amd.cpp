@@ -152,6 +152,15 @@ static __forceinline bool IsValid(T* ptr) {
 
 namespace AMD {
 
+static_assert(sizeof(hsa_amd_queue_create_desc_t) == 96,
+              "hsa_amd_queue_create_desc_t ABI layout changed");
+
+static bool IsValidQueuePriority(hsa_amd_queue_priority_t priority) {
+  return priority == HSA_AMD_QUEUE_PRIORITY_LOW ||
+         priority == HSA_AMD_QUEUE_PRIORITY_NORMAL ||
+         priority == HSA_AMD_QUEUE_PRIORITY_HIGH;
+}
+
 hsa_status_t handleException() {
   try {
     throw;
@@ -1903,27 +1912,160 @@ hsa_status_t HSA_API hsa_amd_svm_discard_batch_async(void** ptrs, size_t* sizes,
   IS_BAD_PTR(ptrs);
   IS_BAD_PTR(sizes);
   IS_ZERO(count);
-  
+
   if (!core::Runtime::runtime_singleton_->XnackEnabled()) {
     return static_cast<hsa_status_t>(HSA_STATUS_ERROR_XNACK_DISABLED);
   }
 
   // Check if dep_signals and num_dep_signals are consistent
-  if ((num_dep_signals == 0 && dep_signals != nullptr) || 
+  if ((num_dep_signals == 0 && dep_signals != nullptr) ||
       (num_dep_signals > 0 && dep_signals == nullptr)) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
-  return core::Runtime::runtime_singleton_->SvmBatchDiscard(ptrs, sizes, count, 
+  return core::Runtime::runtime_singleton_->SvmBatchDiscard(ptrs, sizes, count,
                                                 num_dep_signals, dep_signals,
                                                 completion_signal);
 
-  CATCH;                                       
+  CATCH;
 }
 
 hsa_status_t hsa_amd_enable_logging(uint8_t* flags, void *file) {
   TRY;
   return core::Runtime::runtime_singleton_->EnableLogging(flags, file);
+  CATCH;
+}
+
+hsa_status_t hsa_amd_queue_create(hsa_agent_t agent_handle,
+                                  hsa_amd_queue_create_desc_t* descs,
+                                  uint32_t num_descs) {
+  TRY;
+  IS_OPEN();
+
+  if (descs == nullptr || num_descs == 0) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  core::Agent* agent = core::Agent::Convert(agent_handle);
+  IS_VALID(agent);
+
+  hsa_queue_type32_t agent_queue_type = HSA_QUEUE_TYPE_MULTI;
+  hsa_status_t status =
+      agent->GetInfo(HSA_AGENT_INFO_QUEUE_TYPE, &agent_queue_type);
+  if (status != HSA_STATUS_SUCCESS) return status;
+
+  hsa_status_t first_error = HSA_STATUS_SUCCESS;
+
+  for (uint32_t i = 0; i < num_descs; ++i) {
+    auto& d = descs[i];
+
+    // Clear output field
+    d.queue = nullptr;
+
+    // Validate descriptor
+    if (d.version != HSA_AMD_QUEUE_CREATE_DESC_VERSION) {
+      if (first_error == HSA_STATUS_SUCCESS)
+        first_error = HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      continue;
+    }
+
+    if (d.queue_size == 0 || !IsPowerOfTwo(d.queue_size)) {
+      if (first_error == HSA_STATUS_SUCCESS)
+        first_error = HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      continue;
+    }
+
+    if (d.type > HSA_QUEUE_TYPE_COOPERATIVE) {
+      if (first_error == HSA_STATUS_SUCCESS)
+        first_error = HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      continue;
+    }
+
+    if (!IsValidQueuePriority(d.priority)) {
+      if (first_error == HSA_STATUS_SUCCESS)
+        first_error = HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      continue;
+    }
+
+    // Verify reserved fields are zero
+    {
+      static const uint8_t zeroes[sizeof(d.reserved)] = {};
+      if (memcmp(d.reserved, zeroes, sizeof(d.reserved)) != 0) {
+        if (first_error == HSA_STATUS_SUCCESS)
+          first_error = HSA_STATUS_ERROR_INVALID_ARGUMENT;
+        continue;
+      }
+    }
+
+    if ((agent_queue_type == HSA_QUEUE_TYPE_SINGLE) &&
+        (d.type != HSA_QUEUE_TYPE_SINGLE)) {
+      if (first_error == HSA_STATUS_SUCCESS)
+        first_error = HSA_STATUS_ERROR_INVALID_QUEUE_CREATION;
+      continue;
+    }
+
+    const bool requests_device_mem_queue =
+        (d.flags & (HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF |
+                    HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR)) != 0;
+    if (requests_device_mem_queue) {
+      if (agent->device_type() != core::Agent::kAmdGpuDevice ||
+          !static_cast<AMD::GpuAgent*>(agent)->LargeBarEnabled()) {
+        if (first_error == HSA_STATUS_SUCCESS)
+          first_error = HSA_STATUS_ERROR_INVALID_QUEUE_CREATION;
+        continue;
+      }
+    }
+
+    if ((d.cu_mask_count == 0 && d.cu_mask != nullptr) ||
+        (d.cu_mask_count > 0 && d.cu_mask == nullptr) ||
+        (d.cu_mask_count % 32 != 0)) {
+      if (first_error == HSA_STATUS_SUCCESS)
+        first_error = HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      continue;
+    }
+
+    {
+      auto callback = d.callback ? d.callback : core::Queue::DefaultErrorHandler;
+      uint64_t queue_create_flags = d.flags;
+
+      core::Queue* cmd_queue = nullptr;
+      status = agent->QueueCreate(d.queue_size, d.type, queue_create_flags, callback,
+                                  d.callback_data, d.private_segment_size, UINT32_MAX,
+                                  true, &cmd_queue);
+      if (status != HSA_STATUS_SUCCESS) {
+        if (first_error == HSA_STATUS_SUCCESS) first_error = status;
+        continue;
+      }
+
+      hsa_queue_t* hsa_q = core::Queue::Convert(cmd_queue);
+
+      // Apply priority if non-default
+      if (d.priority != HSA_AMD_QUEUE_PRIORITY_NORMAL) {
+        auto prio = static_cast<HSA::hsa_amd_queue_priority_internal_t>(d.priority);
+        status = cmd_queue->SetPriority(prio);
+        if (status != HSA_STATUS_SUCCESS) {
+          cmd_queue->Destroy();
+          if (first_error == HSA_STATUS_SUCCESS) first_error = status;
+          continue;
+        }
+      }
+
+      // Apply CU mask if specified
+      if (d.cu_mask_count > 0 && d.cu_mask != nullptr) {
+        status = cmd_queue->SetCUMasking(d.cu_mask_count, d.cu_mask);
+        if (status != HSA_STATUS_SUCCESS) {
+          cmd_queue->Destroy();
+          if (first_error == HSA_STATUS_SUCCESS) first_error = status;
+          continue;
+        }
+      }
+
+      core::Runtime::runtime_singleton_->InternalQueueCreateNotify(hsa_q, agent_handle);
+      d.queue = hsa_q;
+    }
+  }
+
+  return first_error;
   CATCH;
 }
 

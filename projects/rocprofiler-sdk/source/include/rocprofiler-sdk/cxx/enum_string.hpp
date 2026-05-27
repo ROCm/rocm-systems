@@ -413,6 +413,9 @@ ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_svm_discard_batch_
 #    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_signal_get_event_id);
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0E
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_queue_create);
+#    endif
 #endif
 
 #if HSA_AMD_EXT_API_TABLE_MAJOR_VERSION == 0x01
@@ -446,6 +449,8 @@ static_assert(ROCPROFILER_HSA_AMD_EXT_API_ID_LAST == 80);
 static_assert(ROCPROFILER_HSA_AMD_EXT_API_ID_LAST == 81);
 #    elif HSA_AMD_EXT_API_TABLE_STEP_VERSION == 0x0D
 static_assert(ROCPROFILER_HSA_AMD_EXT_API_ID_LAST == 82);
+#    elif HSA_AMD_EXT_API_TABLE_STEP_VERSION == 0x0E
+static_assert(ROCPROFILER_HSA_AMD_EXT_API_ID_LAST == 83);
 #    else
 #        if !defined(ROCPROFILER_UNSAFE_NO_VERSION_CHECK) &&                                       \
             (defined(ROCPROFILER_CI) && ROCPROFILER_CI > 0)
