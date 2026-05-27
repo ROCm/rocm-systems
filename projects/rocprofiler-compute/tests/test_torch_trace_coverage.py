@@ -728,28 +728,90 @@ def test_cpp_tier_detached_forward_does_not_explode(require_torch, roctx_recordf
 def test_cpp_tier_concurrent_threads_no_callback_errors(
     require_torch, roctx_recordfn_so
 ):
-    """Concurrent fwd+bwd on N Python threads: no callback errors, no
-    deadlock, global push/pop balance preserved. Per-thread correlation
-    may be lower because backward saves can race against same-seqNr
-    consumes -- that is acceptable."""
+    """Concurrent worker threads must emit C++-tier markers and keep
+    callback/push-pop invariants intact."""
     require_torch(gpu=True)
     mod = roctx_recordfn_so
     mod.install()
     before = mod.dump_stats()
+    mod.start_capture()
 
-    def worker():
-        for _ in range(4):
-            x = torch.randn(64, 64, device="cuda", requires_grad=True)
-            (x @ x).sum().backward()
-        torch.cuda.synchronize()
+    n_workers = 4
 
-    threads = [threading.Thread(target=worker) for _ in range(4)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join(timeout=60)
-        assert not t.is_alive(), "worker thread deadlocked"
+    def worker(worker_id: int) -> None:
+        scope = f"test.concurrent.worker{worker_id}"
+        mod.push_user_scope(scope, f"#1@test_thread:{worker_id}")
+        try:
+            for _ in range(4):
+                x = torch.randn(64, 64, device="cuda", requires_grad=True)
+                (x @ x).sum().backward()
+            torch.cuda.synchronize()
+        finally:
+            mod.pop_user_scope()
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(n_workers)]
+    try:
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=60)
+            assert not t.is_alive(), "worker thread deadlocked"
+        captured = mod.stop_capture()
+    except Exception:
+        mod.stop_capture()
+        raise
+
+    cpp_labels = {"aten:0", "aten.nested:0", "autograd.bwd:0", "autograd.engine:0"}
+    for worker_id in range(n_workers):
+        scope = f"test.concurrent.worker{worker_id}/"
+        per_worker = [
+            m for m in captured if m.startswith(scope) and _leaf_label(m) in cpp_labels
+        ]
+        assert per_worker, (
+            f"worker {worker_id} emitted no C++-tier markers (scope={scope!r}); "
+            "global callback coverage is missing on at least one thread"
+        )
 
     after = mod.dump_stats()
     assert (after["callback_errors"] - before["callback_errors"]) == 0
     assert after["pops"] == after["pushes"]
+
+
+@pytest.mark.torch_trace
+def test_cpp_tier_user_spawned_python_thread_emits_markers(
+    require_torch, roctx_recordfn_so
+):
+    """A plain user-spawned Python thread running ATen forward ops should
+    emit at least one captured C++-tier marker."""
+    require_torch(gpu=True)
+    mod = roctx_recordfn_so
+    mod.install()
+    mod.start_capture()
+
+    def worker() -> None:
+        mod.push_user_scope("test.user_thread", "#1@test_thread:plain")
+        try:
+            x = torch.randn(64, 64, device="cuda", requires_grad=False)
+            y = x @ x
+            del y
+            torch.cuda.synchronize()
+        finally:
+            mod.pop_user_scope()
+
+    t = threading.Thread(target=worker)
+    try:
+        t.start()
+        t.join(timeout=60)
+        assert not t.is_alive(), "user thread deadlocked"
+        captured = mod.stop_capture()
+    except Exception:
+        mod.stop_capture()
+        raise
+
+    cpp_labels = {"aten:0", "aten.nested:0", "autograd.bwd:0", "autograd.engine:0"}
+    cpp_markers = [
+        m
+        for m in captured
+        if m.startswith("test.user_thread/") and _leaf_label(m) in cpp_labels
+    ]
+    assert cpp_markers, "no C++-tier markers captured from user-spawned Python thread"

@@ -123,7 +123,8 @@ struct Shard
 std::array<Shard, NUM_SHARDS> g_shards;
 
 // Soft cap per shard. Detached forwards leak entries; at the cap we
-// LRU-evict one snapshot rather than clear the whole shard.
+// LRU-evict one snapshot rather than clear the whole shard. With
+// addGlobalCallback(), every callback-firing thread contributes to this pool.
 constexpr std::size_t SHARD_SOFT_CAP = 10000;
 
 std::atomic<at::CallbackHandle> g_handle{at::INVALID_CALLBACK_HANDLE};
@@ -583,14 +584,14 @@ std::int64_t install()
 {
     // Serialize on g_install_mu so a second install() observes the
     // existing valid handle and skips re-registration. g_handle is
-    // only published after addThreadLocalCallback returns.
+    // only published after addGlobalCallback returns.
     std::lock_guard<std::mutex> lock(g_install_mu);
     const auto                  existing = g_handle.load();
     if (existing != at::INVALID_CALLBACK_HANDLE)
     {
         return static_cast<std::int64_t>(existing);
     }
-    const auto handle = at::addThreadLocalCallback(
+    const auto handle = at::addGlobalCallback(
         at::RecordFunctionCallback(start_cb, end_cb)
             .scopes({at::RecordScope::FUNCTION, at::RecordScope::BACKWARD_FUNCTION}));
     g_handle.store(handle);
@@ -668,7 +669,7 @@ PYBIND11_MODULE(roctx_recordfn, m)
 
     m.def("install",
           &install,
-          "Install the thread-local RecordFunction callback. Returns the "
+          "Install the global RecordFunction callback. Returns the "
           "CallbackHandle; on a second call returns the existing handle "
           "(never 0) without re-registering.");
     m.def("uninstall", &uninstall, "Remove the registered callback.");

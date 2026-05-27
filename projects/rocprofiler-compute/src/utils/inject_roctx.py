@@ -160,9 +160,7 @@ if _roctx_recordfn is not None:
         _roctx_recordfn.install()
         console_log(
             "torch trace",
-            "Coverage tier: C++ RecordFunction callback "
-            "(autograd-worker context propagated via seqNr correlation + "
-            "c10::ThreadLocalDebugInfo USER_SCOPE chain).",
+            "Coverage tier: C++ RecordFunction (global callback; covers every thread).",
         )
     except Exception as _e:
         console_warning(
@@ -879,12 +877,14 @@ def wrap_method_on_subclasses(
     base_class: type,
     method_name: str,
     wrapper_factory: Callable[..., Any],
-) -> None:
+) -> int:
     """Wrap method_name on every class that defines it (each definition at
     most once; inheritors share their ancestor's wrap). Existing subclasses
     are wrapped eagerly; later ones via a base_class.__init__ hook
-    (subclasses overriding __init__ must call super().__init__())."""
+    (subclasses overriding __init__ must call super().__init__()). Returns
+    the number of method definitions newly wrapped in this process."""
     wrapped_classes = set()
+    wrapped_method_count = {"count": 0}
 
     def wrap_class(cls: type) -> None:
         if cls in wrapped_classes:
@@ -898,6 +898,7 @@ def wrap_method_on_subclasses(
                         wrapped_fn = wrapper_factory(fn)
                         wrapped_fn._roctx_wrapped = True
                         setattr(ancestor, method_name, wrapped_fn)
+                        wrapped_method_count["count"] += 1
                     break
         except Exception as e:
             console_warning(
@@ -920,6 +921,8 @@ def wrap_method_on_subclasses(
 
         init_hook._roctx_init_hook = True
         base_class.__init__ = init_hook
+
+    return wrapped_method_count["count"]
 
 
 def inject_roctx_into_optimizer() -> None:
@@ -948,11 +951,13 @@ def inject_roctx_into_optimizer() -> None:
 
         return step_with_roctx
 
-    wrap_method_on_subclasses(Optimizer, "step", make_step_wrapper)
-    console_log(
-        "torch trace",
-        "Wrapped optimizer.step() across torch.optim subclasses with ROCTX markers\n",
-    )
+    wrapped_count = wrap_method_on_subclasses(Optimizer, "step", make_step_wrapper)
+    if wrapped_count > 0:
+        console_log(
+            "torch trace",
+            "Wrapped optimizer.step() across torch.optim subclasses "
+            "with ROCTX markers\n",
+        )
 
 
 def wrap_module_function(
@@ -1228,8 +1233,14 @@ def inject_roctx_into_model() -> None:
             _pop_scope()
 
     call_with_roctx._roctx_wrapped = True
-    nn.Module.__call__ = call_with_roctx
-    console_log("torch trace", "Wrapped nn.Module forward() with ROCTX markers\n")
+    did_wrap = False
+    try:
+        nn.Module.__call__ = call_with_roctx
+        did_wrap = nn.Module.__call__ is call_with_roctx
+    except Exception as e:
+        console_warning("torch trace", f"Could not patch nn.Module.__call__: {e}")
+    if did_wrap:
+        console_log("torch trace", "Wrapped nn.Module forward() with ROCTX markers\n")
 
 
 # Public test surface.
