@@ -25,7 +25,7 @@ HIP_FILE=$4
 
 {
     echo "#line 1 \"${SRC_FILE}\""
-    ${HIPIFY_EXEC} -quiet-warnings ${SRC_DIR}/${SRC_FILE}
+    ${HIPIFY_EXEC} -experimental -quiet-warnings ${SRC_DIR}/${SRC_FILE}
 } > ${HIP_FILE}
 
 echo "Added source file reference to $HIP_FILE"
