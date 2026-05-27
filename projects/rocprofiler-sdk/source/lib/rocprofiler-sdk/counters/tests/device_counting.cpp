@@ -166,12 +166,11 @@ sort_counter_records(std::vector<rocprofiler_record_counter_t>& records)
                                lhs.counter_value,
                                lhs.dispatch_id,
                                lhs.agent_id.handle,
-                               lhs.user_data.value) <
-               std::make_tuple(rhs.id,
-                               rhs.counter_value,
-                               rhs.dispatch_id,
-                               rhs.agent_id.handle,
-                               rhs.user_data.value);
+                               lhs.user_data.value) < std::make_tuple(rhs.id,
+                                                                      rhs.counter_value,
+                                                                      rhs.dispatch_id,
+                                                                      rhs.agent_id.handle,
+                                                                      rhs.user_data.value);
     });
 }
 
