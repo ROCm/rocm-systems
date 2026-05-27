@@ -23,7 +23,8 @@ namespace RcclUnitTesting
  * @brief Generic thread-safe process isolated test runner
  *
  * This class provides a framework for running tests in isolated processes
- * with clean environment settings and sequential execution.
+ * using fork()+execv(), with per-test environment control and optional
+ * parallel execution with GPU-aware slot scheduling.
  *
  */
 class ProcessIsolatedTestRunner
@@ -117,12 +118,12 @@ public:
          *
          * When the runner executes tests in parallel it partitions the GPU pool
          * (see ExecutionOptions::gpuPool) into non-overlapping subsets and injects
-         * HIP_VISIBLE_DEVICES / ROCR_VISIBLE_DEVICES into each child so that
-         * concurrent tests never share a physical device.
+         * HIP_VISIBLE_DEVICES into each child so that concurrent tests never
+         * share a physical device.
          *
          * @param n Number of GPUs needed.
-         *          0 = CPU-only test, no GPU slot acquired (runs freely in parallel).
-         *          1 = one dedicated GPU from the pool (default).
+         *          0 = CPU-only test, no GPU slot acquired (runs freely in parallel). Default.
+         *          1 = one dedicated GPU from the pool.
          *          N = exactly N GPUs from the pool.
          * @return Reference to this TestConfig for method chaining
          */
@@ -138,21 +139,17 @@ public:
         bool   verboseLogging;     ///< Enable verbose logging
         size_t maxParallelJobs;    ///< Maximum number of concurrent child processes.
                                    ///< 1 = sequential (default).
-                                   ///< 0 = std::thread::hardware_concurrency().
+                                   ///< 0 = GPU pool size, or hardware_concurrency() if no pool.
                                    ///< N > 1 = up to N tests run simultaneously.
                                    ///< Results are always reported in registration order.
 
         /// Physical GPU device indices available for distribution across parallel
         /// test processes.  Each concurrent child is assigned a non-overlapping
-        /// subset and sees only its assigned GPUs via HIP_VISIBLE_DEVICES /
-        /// ROCR_VISIBLE_DEVICES so tests never contend on the same device.
+        /// subset and sees only its assigned GPUs via HIP_VISIBLE_DEVICES so
+        /// tests never contend on the same device.
         ///
-        /// Empty (default): auto-detect from HIP_VISIBLE_DEVICES /
-        /// ROCR_VISIBLE_DEVICES environment variables; if those are unset, count
-        /// /dev/dri/renderD* nodes and build a pool [0, 1, ..., N-1].
-        ///
-        /// Only used when maxParallelJobs > 1.  Sequential runs (default) leave
-        /// device selection to the test itself.
+        /// Empty (default): auto-detect via HIP_VISIBLE_DEVICES, then KFD sysfs.
+        /// Only used when maxParallelJobs > 1.
         std::vector<int> gpuPool;
 
         /**
@@ -210,10 +207,18 @@ private:
      * @param stderrPipe Stderr pipe file descriptors [read, write]
      * @param pid Child process ID to monitor
      * @param status Pointer to status variable for waitpid
+     * @param timeout Wall-clock limit; 0 = unlimited.  On expiry the child is
+     *                SIGTERM'd (then SIGKILL'd) and *status is set to indicate
+     *                RCCL_TEST_TIMEOUT.
      * @return Captured output from stdout and stderr
      */
-    static CapturedOutput
-        captureProcessOutput(int stdoutPipe[2], int stderrPipe[2], pid_t pid, int* status);
+    static CapturedOutput captureProcessOutput(
+        int                  stdoutPipe[2],
+        int                  stderrPipe[2],
+        pid_t                pid,
+        int*                 status,
+        std::chrono::seconds timeout = std::chrono::seconds(0)
+    );
 
     /**
      * @brief Display captured output with formatted delimiters
@@ -296,9 +301,9 @@ public:
     static void recordTestResult(const TestResult& result);
 
     /**
-     * @brief Execute all registered tests sequentially
-     * @param options Execution options (defaults to continue on failure)
-     * @return True if all tests passed, false otherwise
+     * @brief Execute all registered tests (sequentially or in parallel)
+     * @param options Execution options (defaults to sequential, continue on failure)
+     * @return True if all tests passed, false if any failed or the GPU pool could not be detected
      * @note This method automatically clears all test registrations and results
      *       after execution, ensuring a clean state for the next test suite.
      */
@@ -310,7 +315,7 @@ public:
      * @param totalRegistered  Total number of tests that were registered (may
      *                         differ from the number actually run when
      *                         stopOnFirstFailure is active)
-     * @return True if all tests passed and none were left unrun, false otherwise
+     * @return True if no tests failed; tests not run due to stopOnFirstFailure do not count as failures
      */
     static bool generateReport(const ExecutionOptions& options, size_t totalRegistered);
 

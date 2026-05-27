@@ -35,10 +35,8 @@ extern "C" int __llvm_profile_write_file(void);
 namespace RcclUnitTesting
 {
 
-// Sentinel environment variable set by the fork child before execv(). When
-// the re-exec'd process finds this variable set, executeAllTests() runs the
-// matching test lambda inline (no further fork/exec) then _exit()s with the
-// result.
+// Env var set by fork child before execv(); signals the re-exec'd process to
+// run the named test lambda inline and _exit() with the result.
 static constexpr const char* kReexecMarkerEnvVar = "RCCL_PIT_REEXEC_TEST";
 
 // Exit codes for test process results
@@ -113,20 +111,13 @@ ProcessIsolatedTestRunner::TestConfig& ProcessIsolatedTestRunner::TestConfig::wi
     return *this;
 }
 
-// Detect the set of physical GPU device indices available to this process.
-// Priority order:
-//   1. HIP_VISIBLE_DEVICES — parsed as a comma-separated list of device indices.
-//   2. ROCR_VISIBLE_DEVICES — same format (used by some ROCm versions).
-//   3. /dev/dri/renderD* node count — each node represents one GPU on ROCm/AMDGPU;
-//      produces pool [0, 1, ..., N-1].
-//
-// Returns an empty vector when no GPUs are detected, which disables GPU slot
-// management (tests run without HIP_VISIBLE_DEVICES restrictions).
+// Detects available GPU indices: first from HIP_VISIBLE_DEVICES, then from
+// KFD sysfs. Returns empty if neither source yields a pool.
 static std::vector<int> detectGpuPool()
 {
-    for(const char* envName : {"HIP_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"})
+    // Priority 1: HIP_VISIBLE_DEVICES
     {
-        const char* val = std::getenv(envName);
+        const char* val = std::getenv("HIP_VISIBLE_DEVICES");
         if(val && *val)
         {
             std::vector<int>  pool;
@@ -147,27 +138,46 @@ static std::vector<int> detectGpuPool()
         }
     }
 
-    int count = 0;
-    if(DIR* dir = opendir("/dev/dri"))
+    // Priority 2: KFD topology sysfs — counts GPU nodes with non-zero gpu_id.
+    // Does not open any GPU device file, avoiding KFD FD inheritance in children.
     {
-        while(struct dirent* e = readdir(dir))
-            if(std::strncmp(e->d_name, "renderD", 7) == 0)
-                ++count;
-        closedir(dir);
+        int kfdCount = 0;
+        if(DIR* dir = opendir("/sys/class/kfd/kfd/topology/nodes"))
+        {
+            while(struct dirent* e = readdir(dir))
+            {
+                if(e->d_name[0] == '.') continue;
+                char gpuIdPath[512];
+                std::snprintf(
+                    gpuIdPath, sizeof(gpuIdPath),
+                    "/sys/class/kfd/kfd/topology/nodes/%s/gpu_id", e->d_name
+                );
+                FILE* f = std::fopen(gpuIdPath, "r");
+                if(f)
+                {
+                    unsigned gpuId = 0;
+                    if(std::fscanf(f, "%u", &gpuId) == 1 && gpuId != 0)
+                        ++kfdCount;
+                    std::fclose(f);
+                }
+            }
+            closedir(dir);
+        }
+        if(kfdCount > 0)
+        {
+            std::vector<int> pool;
+            pool.reserve(static_cast<size_t>(kfdCount));
+            for(int i = 0; i < kfdCount; ++i)
+                pool.push_back(i);
+            return pool;
+        }
     }
 
-    std::vector<int> pool;
-    pool.reserve(count);
-    for(int i = 0; i < count; ++i)
-        pool.push_back(i);
-    return pool;
+    return {};
 }
 
-// ── GpuSlotManager ────────────────────────────────────────────────────────
-// Tracks which physical GPU device indices from a fixed pool are currently
-// in use.  acquire() and release() are NOT themselves thread-safe: the
-// caller is responsible for holding the shared mutex (cvMtx in
-// executeAllTests) whenever either method is invoked.
+// Tracks which physical GPU device indices from a fixed pool are in use.
+// acquire() and release() must be called with the external mutex (cvMtx) held.
 class GpuSlotManager
 {
 public:
@@ -186,9 +196,8 @@ public:
             std::count(inUse_.begin(), inUse_.end(), false));
     }
 
-    // Assign `n` free slots; returns their physical device IDs.
-    // Precondition: n <= size() — callers must clamp before calling.
-    // Must be called with the external mutex held.
+    // Assigns `n` free slots and returns their physical device IDs.
+    // Precondition: n <= size(); must be called with the external mutex held.
     std::vector<int> acquire(size_t n)
     {
         std::vector<int> assigned;
@@ -286,11 +295,8 @@ int ProcessIsolatedTestRunner::runTestInProcess(const TestConfig& config)
 
     try
     {
-        // Environment was already applied in the fork child before execv().
-        // Do NOT call applyEnvironmentVariables() here: for configs with
-        // inheritParentEnv=false it would invoke clearenv() a second time,
-        // wiping HIP_VISIBLE_DEVICES that the parallel GPU slot manager
-        // injected before re-exec.
+        // Environment was already applied before execv(); do NOT call
+        // applyEnvironmentVariables() again — it would wipe HIP_VISIBLE_DEVICES.
 
         // Thread-safe test execution with timeout protection
         std::atomic<bool>  testCompleted{false};
@@ -490,9 +496,11 @@ void ProcessIsolatedTestRunner::redirectOutputToPipes(int stdoutPipe[2], int std
     close(stderrPipe[1]);
 }
 
-// Helper method: Capture output from child process pipes
+// Reads stdout/stderr pipes until the child exits or the deadline is reached.
+// On timeout: SIGTERM, then SIGKILL after 2 s; *status set to RCCL_TEST_TIMEOUT.
 ProcessIsolatedTestRunner::CapturedOutput ProcessIsolatedTestRunner::captureProcessOutput(
-    int stdoutPipe[2], int stderrPipe[2], pid_t pid, int* status
+    int stdoutPipe[2], int stderrPipe[2], pid_t pid, int* status,
+    std::chrono::seconds timeout
 )
 {
     // Close write ends of pipes in parent process (not needed)
@@ -501,23 +509,52 @@ ProcessIsolatedTestRunner::CapturedOutput ProcessIsolatedTestRunner::captureProc
 
     CapturedOutput output;
     char           buffer[4096];
-    ssize_t        count;
+    ssize_t        nbytes;
 
-    // Drain stdout and stderr interleaved via poll() to avoid a deadlock
-    // where the child blocks writing one pipe while the parent is blocked
-    // reading the other (possible when either pipe buffer fills, ~64 KB).
+    using Clock    = std::chrono::steady_clock;
+    using TimePoint = Clock::time_point;
+
+    const bool    hasTimeout = (timeout.count() > 0);
+    const TimePoint deadline = hasTimeout ? Clock::now() + timeout
+                                          : TimePoint::max();
+
+    // Drain stdout and stderr interleaved via poll() to avoid deadlock when
+    // the child fills one pipe buffer (~64 KB) while the parent reads the other.
     struct pollfd pfds[2];
     pfds[0] = {stdoutPipe[0], POLLIN, 0};
     pfds[1] = {stderrPipe[0], POLLIN, 0};
     int openFds = 2;
 
+    bool timedOut = false;
+
     while(openFds > 0)
     {
-        int ready = poll(pfds, 2, -1 /*block indefinitely*/);
+        int pollMs = -1; // block indefinitely by default
+        if(hasTimeout)
+        {
+            auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+                deadline - Clock::now()
+            );
+            if(remaining.count() <= 0)
+            {
+                timedOut = true;
+                break;
+            }
+            // Cap to 5 s slices so we re-check the deadline regularly.
+            auto capMs = std::min<long long>(remaining.count(), 5000LL);
+            pollMs     = static_cast<int>(capMs);
+        }
+
+        int ready = poll(pfds, 2, pollMs);
         if(ready < 0)
         {
             if(errno == EINTR) continue;
             break; // unexpected error -- fall through to waitpid
+        }
+        if(ready == 0)
+        {
+            // poll timed out — re-check deadline next iteration
+            continue;
         }
         for(int i = 0; i < 2; ++i)
         {
@@ -525,10 +562,10 @@ ProcessIsolatedTestRunner::CapturedOutput ProcessIsolatedTestRunner::captureProc
 
             if(pfds[i].revents & (POLLIN | POLLHUP | POLLERR))
             {
-                count = read(pfds[i].fd, buffer, sizeof(buffer) - 1);
-                if(count > 0)
+                nbytes = read(pfds[i].fd, buffer, sizeof(buffer) - 1);
+                if(nbytes > 0)
                 {
-                    buffer[count] = '\0';
+                    buffer[nbytes] = '\0';
                     (i == 0 ? output.stdoutContent : output.stderrContent)
                         += buffer;
                 }
@@ -543,7 +580,36 @@ ProcessIsolatedTestRunner::CapturedOutput ProcessIsolatedTestRunner::captureProc
         }
     }
 
-    // Wait for child to exit (blocking).
+    if(timedOut)
+    {
+        // Give the child a chance to exit cleanly, then force-kill it.
+        kill(pid, SIGTERM);
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+        kill(pid, SIGKILL);
+
+        // Drain any last output flushed before death.
+        for(int i = 0; i < 2; ++i)
+        {
+            if(pfds[i].fd < 0) continue;
+            // Non-blocking drain
+            fcntl(pfds[i].fd, F_SETFL, O_NONBLOCK);
+            while((nbytes = read(pfds[i].fd, buffer, sizeof(buffer) - 1)) > 0)
+            {
+                buffer[nbytes] = '\0';
+                (i == 0 ? output.stdoutContent : output.stderrContent) += buffer;
+            }
+            close(pfds[i].fd);
+        }
+
+        waitpid(pid, status, 0);
+
+        // Encode as if the child exited with RCCL_TEST_TIMEOUT so the caller
+        // path that checks WIFEXITED / WEXITSTATUS reports a TIMEOUT result.
+        *status = RCCL_TEST_TIMEOUT << 8;
+        return output;
+    }
+
+    // Normal path: wait for child to exit.
     waitpid(pid, status, 0);
 
     return output;
@@ -568,9 +634,8 @@ void ProcessIsolatedTestRunner::displayCapturedOutput(
     }
 }
 
-// Re-exec child entrypoint.  If kReexecMarkerEnvVar is set this process is a
-// re-exec'd child: locate the matching test, run it, flush coverage, and
-// _exit().  Returns normally only when called from the original parent.
+// Re-exec child entrypoint: if kReexecMarkerEnvVar is set, runs the named test
+// and _exit()s with the result. Returns normally only in the original parent.
 void ProcessIsolatedTestRunner::handleReexecEntrypoint(
     const std::vector<TestConfig>& tests)
 {
@@ -628,9 +693,7 @@ void ProcessIsolatedTestRunner::runParallel(
     const SpawnFn&                 spawnFn)
 {
     // Bounded sliding window: up to `parallelism` children run at once.
-    // GPU tests receive a non-overlapping slice of the pool via
-    // HIP_VISIBLE_DEVICES; concurrency and GPU slot availability are
-    // checked atomically to avoid TOCTOU races.
+    // GPU slot availability and active count are checked atomically.
     GpuSlotManager slots(gpuPool);
 
     if(!slots.empty())
@@ -737,9 +800,8 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
     // target test and calls _exit() — it returns only in the parent.
     handleReexecEntrypoint(testsToRun);
 
-    // Capture the gtest test-info once in the parent — current_test_info() is
-    // a single global (not thread-local) and remains valid for the lifetime of
-    // this TEST() body, including across background threads.
+    // Capture gtest test-info once in the parent; current_test_info() is a
+    // single global valid for the lifetime of this TEST() body.
     const ::testing::TestInfo* gtestInfo
         = ::testing::UnitTest::GetInstance()->current_test_info();
     if(!gtestInfo)
@@ -750,13 +812,8 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
         return false;
     }
 
-    // spawnOne: fork+execv a fresh copy of the binary to run a single isolated
-    // test.  `assignedGpus` lists the physical device indices this child is
-    // allowed to use; injected via HIP_VISIBLE_DEVICES / ROCR_VISIBLE_DEVICES
-    // in the fork child so concurrent tests never share a GPU.
-    // Safe to call from multiple threads: env modifications happen inside the
-    // fork child (always single-threaded); parent threads only touch their own
-    // pipe fds and block in waitpid() for their own child PID.
+    // spawnOne: fork+execv a fresh binary copy to run one isolated test.
+    // Thread-safe: env changes happen only in the fork child; parents own their pipe fds.
     auto spawnOne = [&](const TestConfig& cfg, const std::vector<int>& assignedGpus)
         -> SpawnOutcome
     {
@@ -781,23 +838,19 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
 
         if(pid == 0)
         {
-            // Always re-exec: replace this child image with a fresh copy of
-            // the binary. execv() discards all counters before any coverage
-            // data is touched; flushing is handled in the re-exec entrypoint.
+            // Always re-exec to get a fresh binary image; execv() discards
+            // all counters before coverage data is touched.
             redirectOutputToPipes(stdout_fd, stderr_fd);
             applyEnvironmentVariables(cfg);
 
             // Restrict GPU visibility to the assigned subset so this child
-            // cannot accidentally use a GPU that a sibling test is using.
-            // Both env vars are set for compatibility across ROCm versions.
+            // cannot accidentally share a GPU with a sibling test.
             if(!assignedGpus.empty())
             {
                 std::string ids = GpuSlotManager::formatList(assignedGpus);
 
-                // Warn when the slot manager overrides a value the test
-                // set via withEnvironment() / setVariable().  The override
-                // is intentional (isolation requires it) but should be
-                // visible so test authors can diagnose unexpected behaviour.
+                // Warn when the slot manager overrides a test-specified value;
+                // the override is intentional for isolation.
                 const char* existingHVD = std::getenv("HIP_VISIBLE_DEVICES");
                 if(existingHVD && *existingHVD)
                     std::cerr
@@ -807,15 +860,10 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
                         << "' for parallel isolation\n";
 
                 setenv("HIP_VISIBLE_DEVICES", ids.c_str(), 1 /*overwrite*/);
-                setenv("ROCR_VISIBLE_DEVICES", ids.c_str(), 1);
             }
 
-            // Give each re-exec'd child its own profraw file so parallel
-            // runs don't clobber each other.  %p is expanded to the child
-            // PID by the LLVM profile runtime; %m adds the binary module
-            // hash so profiles from different test executables stay
-            // distinguishable when merging.  overwrite=0 preserves any
-            // LLVM_PROFILE_FILE already set by CI or the test config.
+            // Give each child its own profraw file (%p=PID, %m=module hash).
+            // overwrite=0 preserves any LLVM_PROFILE_FILE already set by CI.
 #if defined(RCCL_TEST_CODE_COVERAGE)
             setenv("LLVM_PROFILE_FILE", "rccl_tests_%p_%m.profraw", 0 /*no overwrite*/);
 #endif
@@ -880,7 +928,8 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
         }
 
         int            status;
-        CapturedOutput output = captureProcessOutput(stdout_fd, stderr_fd, pid, &status);
+        CapturedOutput output = captureProcessOutput(stdout_fd, stderr_fd, pid, &status,
+                                                     cfg.timeout);
 
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - startTime
@@ -930,12 +979,8 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
         }
         else if(WIFSIGNALED(status))
         {
-            // With the re-exec model the child always calls _exit(code) after
-            // the test completes, so a signal means a genuine crash or an
-            // external kill (OOM killer, SIGKILL from CI timeout, SIGSEGV).
-            // The old fork-only model needed a 'PASSED' heuristic because GPU
-            // runtime atexit handlers could SIGTERM an already-successful child;
-            // _exit() bypasses atexit, so that case no longer applies.
+            // With re-exec the child always _exit()s after completion, so a
+            // signal indicates a genuine crash or external kill (OOM, SIGSEGV).
             int signal = WTERMSIG(status);
             result.passed       = false;
             result.exitCode     = -signal;
@@ -955,17 +1000,22 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
         return {result, output};
     };
 
-    // ── Determine parallelism ──────────────────────────────────────────────
-    // Detect the GPU pool once here so both the parallelism calculation and
-    // the slot manager always operate on the same snapshot.  A second call
-    // to detectGpuPool() inside the parallel block would re-parse env vars
-    // and re-scan /dev/dri independently, risking a TOCTOU divergence.
+    // Detect the GPU pool once so the parallelism calculation and slot
+    // manager always operate on the same snapshot.
     const std::vector<int> detectedPool
         = options.gpuPool.empty() ? detectGpuPool() : options.gpuPool;
+    if(detectedPool.empty())
+    {
+        TEST_INFO("Could not determine GPU pool.");
+        TEST_INFO("  Tried: HIP_VISIBLE_DEVICES (not set or empty),");
+        TEST_INFO("         /sys/class/kfd/kfd/topology/nodes (not found or no GPU nodes).");
+        TEST_INFO("  Fix: set HIP_VISIBLE_DEVICES=0,1,...  or ensure the KFD sysfs is mounted.");
+        ADD_FAILURE() << "Set HIP_VISIBLE_DEVICES or ensure /sys/class/kfd is mounted.";
+        return false;
+    }
 
-    // When maxParallelJobs is 0, default to the GPU pool size so threads
-    // don't pile up waiting for slots on GPU-test suites; fall back to
-    // hardware_concurrency() when no GPU pool exists.
+    // When maxParallelJobs is 0, default to pool size (or hardware_concurrency()
+    // for CPU-only suites) to avoid threads piling up waiting for GPU slots.
     const size_t parallelism
         = (options.maxParallelJobs == 0)
               ? (detectedPool.empty()
@@ -1060,9 +1110,8 @@ bool ProcessIsolatedTestRunner::generateReport(
         }
     }
 
-    // notRunTests (stop-on-first-failure) is shown in the summary log
-    // but does not itself constitute a failure — the actual failing test
-    // already drives the false return.
+    // notRunTests is shown in the summary but is not itself a failure;
+    // the actual failing test drives the false return.
     return failedTests == 0;
 }
 
