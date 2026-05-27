@@ -350,6 +350,11 @@ bool run_new_test_flow() {
 
         auto total = 0;
         for (auto& pmc_result : pmc_results) {
+          //std::cout << "block_name " << pmc_result.block_name 
+          //          << " block_index " << pmc_result.block_index 
+          //          << " event_id " << pmc_result.event_id
+          //          << " value " << pmc_result.value 
+          //           <<std::endl;
           total += pmc_result.value;
         }
         TEST_ASSERT_EQUAL(total, 0, "counter_result_value_beforedoorbell");
@@ -367,7 +372,6 @@ bool run_new_test_flow() {
         aqlprofile_pmc_iterate_data(pmc_handle, pmc_data_cb, &pmc_results);
 
         // --- Verify results ---
-        //TODO: Delete after code review. These lines are added to show the o/p to bing and giovanni
         std::cout << "=== AQLProfile PMC Results (aqlprofile SDK v2) ===" << std::endl;
         auto total1 = 0;
         for (auto& pmc_result : pmc_results) {
@@ -397,16 +401,14 @@ bool run_new_test_flow() {
         //for (auto& [buf_id, des] : kr.conv.GetMemMap()) {
         //  if (des.ptr) rsrc->FreeMemory(des.ptr);
         //}
-        hsa_signal_destroy(kernel_signal);
-        hsa_signal_destroy(prof_signal);
         hsa_executable_destroy(kr.hsa_exec);
-
         aqlprofile_pmc_delete_packets(pmc_handle);
+
     } else {
         std::cerr << "AQLPROFILE_NEW_TESTS: aqlprofile_pmc_create_packets failed" << std::endl;
-        hsa_signal_destroy(kernel_signal);
-        hsa_signal_destroy(prof_signal);
     }
+    hsa_signal_destroy(kernel_signal);
+    hsa_signal_destroy(prof_signal);
 
     hsa_queue_destroy(queue);
     TestHsa::HsaShutdown();
