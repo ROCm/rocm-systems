@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -1942,7 +1942,7 @@ hsa_status_t hsa_amd_external_semaphore_handle_open(
 
   // The descriptor union has separate active members per handle type
   // (win32_handle for OPAQUE_WIN32 / OPAQUE_WIN32_KMT, fd for OPAQUE_FD).
-  // Only the Win32 NT-handle path is wired through libhsakmt today, so
+  // Only the Win32 NT-handle path is wired through the driver today, so
   // reject other types up front: reading an inactive union member is
   // undefined behaviour in C++.
   if (desc->type != HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32 &&
@@ -1950,36 +1950,8 @@ hsa_status_t hsa_amd_external_semaphore_handle_open(
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
-  // hsa_amd_external_semaphore_handle_type_t maps 1:1 to
-  // HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE by design (see hsa_ext_amd.h).
-  HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE kmt_type =
-      static_cast<HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE>(desc->type);
-
-  HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {};
-  HSAKMT_STATUS s = hsaKmtImportExternalSemaphore(
-      core_agent->node_id(),
-      desc->handle.win32_handle,
-      kmt_type,
-      &kmt_handle);
-
-  // libhsakmt distinguishes invalid input (null handle, unknown type)
-  // from "no node for this agent" and from generic KMD failures.
-  // Surface those distinctions to the public API instead of folding
-  // every non-success code into HSA_STATUS_ERROR.
-  switch (s) {
-    case HSAKMT_STATUS_SUCCESS:
-      break;
-    case HSAKMT_STATUS_INVALID_PARAMETER:  // e.g. null win32_handle
-    case HSAKMT_STATUS_NOT_SUPPORTED:      // unsupported handle type
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSAKMT_STATUS_INVALID_NODE_UNIT:  // no WDDM device for node
-      return HSA_STATUS_ERROR_INVALID_AGENT;
-    default:
-      return HSA_STATUS_ERROR;
-  }
-
-  out_sem->handle = kmt_handle.handle;
-  return HSA_STATUS_SUCCESS;
+  return core_agent->driver().ImportExternalSemaphore(
+      core_agent->node_id(), desc->handle.win32_handle, desc->type, out_sem);
   CATCH;
 }
 
@@ -1988,10 +1960,13 @@ hsa_status_t hsa_amd_external_semaphore_handle_close(
   TRY;
   IS_OPEN();
 
-  HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = { sem.handle };
-  HSAKMT_STATUS s = hsaKmtDestroyExternalSemaphore(kmt_handle);
-  if (s != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
-  return HSA_STATUS_SUCCESS;
+  // No agent on the close API; iterate drivers. The base Destroy
+  // returns INVALID_AGENT ("not my handle"); first owner wins.
+  for (auto& driver : core::Runtime::runtime_singleton_->AgentDrivers()) {
+    hsa_status_t s = driver->DestroyExternalSemaphore(sem);
+    if (s != HSA_STATUS_ERROR_INVALID_AGENT) return s;
+  }
+  return HSA_STATUS_ERROR_INVALID_AGENT;
   CATCH;
 }
 
