@@ -150,13 +150,20 @@ rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t         conte
  *
  * If no flags are set (NONE), the runtime uses internal heuristics driven by the requested
  * record kinds:
- * - V1 records -> host-trap
- * - V2 records -> stochastic
  * - V0 records -> prefer stochastic, fall back to host-trap
+ * - V1 records -> prefer host-trap, fall back to stochastic
+ * - V2 records -> stochastic
+ * - V3 records -> prefer host-trap, fall back to stochastic
+ * - V4 records -> stochastic
  *
- * Conflicting flags (e.g., REQUIRE_HOST_TRAP | REQUIRE_STOCHASTIC, or mixing PREFER_* and
- * REQUIRE_* for opposite methods) are rejected with
- * ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT.
+ * Conflicting same-strength flags are rejected with
+ * ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT:
+ * - PREFER_HOST_TRAP | PREFER_STOCHASTIC
+ * - REQUIRE_HOST_TRAP | REQUIRE_STOCHASTIC
+ *
+ * Mixing PREFER_* with REQUIRE_* (in any combination, including opposite methods)
+ * is NOT a conflict: the REQUIRE_* flag takes precedence and the PREFER_* flag is
+ * silently ignored.
  */
 typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_api_flags_t
 {
@@ -198,20 +205,21 @@ typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_api_flags_t
  *   please @see rocprofiler_create_buffer and @see rocprofiler_buffer_tracing_cb_t.
  *
  * Before calling this function, we recommend querying PC sampling configurations
- * supported by the GPU agent via the @see rocprofiler_query_pc_sampling_agent_configurations
- * or @see rocprofiler_pc_sampling_query_agent_configurations_v2.
- * The client chooses the @p unit and @p interval to match one of the
- * available configurations. Note that the @p interval must belong to the range of values
- * [available_config.min_interval, available_config.max_interval],
+ * supported by the GPU agent via @see rocprofiler_pc_sampling_query_agent_configurations_v2.
+ * The query should be invoked with the same @p record_kinds and @p flags the caller
+ * intends to pass here; the SDK returns only the configurations compatible with that
+ * request. From the returned list, the client chooses the @p unit and @p interval to
+ * match one of the available configurations. Note that the @p interval must belong to
+ * the range of values [available_config.min_interval, available_config.max_interval],
  * where available_config is the instance of the @see rocprofiler_pc_sampling_configuration_s
  * supported/available at the moment.
  *
  * Method Selection:
- * Unlike the v1 API, this function does NOT take an explicit sampling method parameter.
+ * This function does NOT take an explicit sampling method parameter.
  * Instead, the runtime selects the best method (host-trap or stochastic) based on:
- * - The requested @p record_kinds (V1 -> host-trap, V2 -> stochastic,
- *   V0 -> prefer stochastic with fallback to host-trap;
- *   V3 -> host-trap; V4 -> stochastic)
+ * - The requested @p record_kinds (V0 -> prefer stochastic, fall back to host-trap;
+ *   V1 -> prefer host-trap, fall back to stochastic; V2 -> stochastic;
+ *   V3 -> prefer host-trap, fall back to stochastic; V4 -> stochastic)
  * - The @p flags parameter which allows soft preferences (PREFER_*) or hard
  *   requirements (REQUIRE_*) for a specific method
  *
@@ -274,13 +282,53 @@ typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_api_flags_t
  * };
  *
  * // REQUIRE_HOST_TRAP and REQUIRE_STOCHASTIC are mutually exclusive; the call returns
- * // ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT. Mixing PREFER_HOST_TRAP with
- * // REQUIRE_STOCHASTIC (or any other contradicting combination) is rejected the same way.
+ * // ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT. The same applies to
+ * // PREFER_HOST_TRAP | PREFER_STOCHASTIC.
+ * //
+ * // Note: mixing PREFER_* with REQUIRE_* (even for opposite methods) is NOT a
+ * // conflict - the REQUIRE_* flag takes precedence and the PREFER_* flag is
+ * // silently ignored.
  * rocprofiler_pc_sampling_configure_service_v2(
  *     context_id, agent_id, unit, interval, buffer_id,
  *     record_kinds, 1,
  *     ROCPROFILER_PC_SAMPLING_API_FLAG_REQUIRE_HOST_TRAP |
  *     ROCPROFILER_PC_SAMPLING_API_FLAG_REQUIRE_STOCHASTIC);
+ * @endcode
+ *
+ * Example 5 - REJECTED (INVALID_ARGUMENT): Conflicting record kinds.
+ * @code
+ * // At most ONE valid version (V0_SAMPLE through V4_SAMPLE) may appear in @p record_kinds.
+ * // Mixing two valid versions (here V1 and V2) is rejected with
+ * // ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT, regardless of @p flags.
+ * rocprofiler_pc_sampling_record_kind_t record_kinds[] = {
+ *     ROCPROFILER_PC_SAMPLING_RECORD_V1_SAMPLE,
+ *     ROCPROFILER_PC_SAMPLING_RECORD_V2_SAMPLE
+ * };
+ *
+ * rocprofiler_pc_sampling_configure_service_v2(
+ *     context_id, agent_id, unit, interval, buffer_id,
+ *     record_kinds, 2, ROCPROFILER_PC_SAMPLING_API_FLAG_NONE);
+ * @endcode
+ *
+ * Example 6 - REJECTED (INVALID_ARGUMENT): Incompatible record kind and method flag.
+ * @code
+ * // V2 is a stochastic-only record kind, but the caller hard-requires host-trap.
+ * // Host-trap cannot produce V2/V4 records, so the request is internally
+ * // inconsistent and rejected with ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT
+ * // before the service is configured.
+ * //
+ * // Note that the reverse - REQUIRE_STOCHASTIC combined with V1/V3 host-trap
+ * // record kinds - is NOT rejected: stochastic can produce records in the V1/V3
+ * // layout (with the stochastic-only fields left unpopulated), so the runtime
+ * // honors the request.
+ * rocprofiler_pc_sampling_record_kind_t record_kinds[] = {
+ *     ROCPROFILER_PC_SAMPLING_RECORD_V2_SAMPLE
+ * };
+ *
+ * rocprofiler_pc_sampling_configure_service_v2(
+ *     context_id, agent_id, unit, interval, buffer_id,
+ *     record_kinds, 1,
+ *     ROCPROFILER_PC_SAMPLING_API_FLAG_REQUIRE_HOST_TRAP);
  * @endcode
  *
  * Rocprofiler-SDK checks whether the requested configuration is actually supported
@@ -300,14 +348,14 @@ typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_api_flags_t
  * Constraint2: Since the same GPU agent can be used by multiple processes concurrently,
  * Rocprofiler-SDK cannot guarantee the exclusive access to the PC sampling capability.
  * The consequence is the following scenario. The tool TA that belongs to the process PA,
- * calls the @see rocprofiler_query_pc_sampling_agent_configurations that returns the
+ * calls @see rocprofiler_pc_sampling_query_agent_configurations_v2 that returns the
  * two supported configurations CA and CB by the agent. Then the tool TB of the process PB,
  * configures the PC sampling on the same agent by using the configuration CB.
  * Subsequently, the TA tries configuring the CA on the agent, and it fails.
  * To point out that this case happened, we introduce a special status code
  * @see ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE.
  * When this status code is observed by the tool TA, it queries all available configurations again
- * by calling @see rocprofiler_query_pc_sampling_agent_configurations,
+ * by calling @see rocprofiler_pc_sampling_query_agent_configurations_v2,
  * that returns only CB this time. The tool TA can choose CB, so that both
  * TA and TB use the PC sampling capability in the separate processes.
  * Both TA and TB receives samples generated by the kernels launched by the
@@ -347,7 +395,9 @@ typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_api_flags_t
  * - multiple valid versions (V0_SAMPLE-V4_SAMPLE) in the array
  * - duplicate record kinds in the array
  * - invalid record_kind value
- * - conflicting flags (e.g. REQUIRE_HOST_TRAP | REQUIRE_STOCHASTIC)
+ * - conflicting same-strength flags (PREFER_HOST_TRAP | PREFER_STOCHASTIC, or
+ *   REQUIRE_HOST_TRAP | REQUIRE_STOCHASTIC). Mixing PREFER_* with REQUIRE_* is
+ *   allowed; REQUIRE_* wins and PREFER_* is ignored.
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
@@ -584,6 +634,59 @@ typedef rocprofiler_status_t (*rocprofiler_available_pc_sampling_configurations_
  * rocprofiler_pc_sampling_query_agent_configurations_v2(
  *     agent_id, record_kinds, 2,
  *     ROCPROFILER_PC_SAMPLING_API_FLAG_REQUIRE_HOST_TRAP, cb, user_data);
+ * @endcode
+ *
+ * Example 4 - REJECTED (INVALID_ARGUMENT): Incompatible record kind and method flag.
+ * @code
+ * // V2 is a stochastic-only record kind, but the caller hard-requires host-trap.
+ * // Host-trap cannot produce V2/V4 records, so the request is internally
+ * // inconsistent and rejected with ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT
+ * // before the callback is invoked.
+ * //
+ * // Note that the reverse - REQUIRE_STOCHASTIC combined with V1/V3 host-trap
+ * // record kinds - is NOT rejected: stochastic can produce records in the V1/V3
+ * // layout (with the stochastic-only fields left unpopulated), so the runtime
+ * // honors the request.
+ * rocprofiler_pc_sampling_record_kind_t record_kinds[] = {
+ *     ROCPROFILER_PC_SAMPLING_RECORD_V2_SAMPLE
+ * };
+ * rocprofiler_pc_sampling_query_agent_configurations_v2(
+ *     agent_id, record_kinds, 1,
+ *     ROCPROFILER_PC_SAMPLING_API_FLAG_REQUIRE_HOST_TRAP, cb, user_data);
+ * @endcode
+ *
+ * Example 5 - REJECTED (INVALID_ARGUMENT): Duplicate record kinds.
+ * @code
+ * // The same valid record kind appears more than once. Duplicates carry no
+ * // additional information and are rejected with
+ * // ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT.
+ * rocprofiler_pc_sampling_record_kind_t record_kinds[] = {
+ *     ROCPROFILER_PC_SAMPLING_RECORD_V1_SAMPLE,
+ *     ROCPROFILER_PC_SAMPLING_RECORD_V1_SAMPLE
+ * };
+ * rocprofiler_pc_sampling_query_agent_configurations_v2(
+ *     agent_id, record_kinds, 2,
+ *     ROCPROFILER_PC_SAMPLING_API_FLAG_NONE, cb, user_data);
+ * @endcode
+ *
+ * Example 6 - REJECTED (INVALID_ARGUMENT): Conflicting flags.
+ * @code
+ * // Same-strength opposing flags - PREFER_HOST_TRAP | PREFER_STOCHASTIC, or
+ * // REQUIRE_HOST_TRAP | REQUIRE_STOCHASTIC - are mutually exclusive method
+ * // selectors. Combining them is rejected with
+ * // ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT.
+ * //
+ * // Note: mixing PREFER_* with REQUIRE_* (even for opposite methods) is NOT a
+ * // conflict - the REQUIRE_* flag takes precedence and the PREFER_* flag is
+ * // silently ignored.
+ * rocprofiler_pc_sampling_record_kind_t record_kinds[] = {
+ *     ROCPROFILER_PC_SAMPLING_RECORD_V0_SAMPLE
+ * };
+ * rocprofiler_pc_sampling_query_agent_configurations_v2(
+ *     agent_id, record_kinds, 1,
+ *     ROCPROFILER_PC_SAMPLING_API_FLAG_PREFER_HOST_TRAP |
+ *     ROCPROFILER_PC_SAMPLING_API_FLAG_PREFER_STOCHASTIC,
+ *     cb, user_data);
  * @endcode
  *
  * @param [in] agent_id  - id of the agent for which available configurations will be listed
@@ -944,25 +1047,31 @@ rocprofiler_pc_sampling_get_instruction_not_issued_reason_name_v2(
     uint64_t*                                               name_len) ROCPROFILER_API;
 
 /**
- * @brief Information provided by snapshot block (relevant for stochastic PC sampling only)
- *
- * 8B in total.
+ * @brief Information provided by snapshot block (relevant for stochastic PC sampling only).
  */
 typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_snapshot_information_v0_t
 {
-    uint8_t wave_issued;       ///< 1 - wave issued an instruction at the moment of sampling;
-                               ///< 0 - wave didn't issue an instruction at the moment of sampling.
-    uint8_t instruction_type;  ///< if wave_issued=1, type of issued instruction (see
-                               ///< ::rocprofiler_pc_sampling_instruction_type_t); otherwise might
-                               ///< be irrelevant
-    uint8_t
-        no_issue_reason;  ///< if wave_issue=0, reason for not issuing the instruction (see
-                          ///< ::rocprofiler_pc_sampling_no_issue_reason_t); otherwise irrelevant
-    uint8_t wave_count;   ///< number of concurrently running waves on CU (on GFX9) or SIMD (GFX10+)
-                          ///< at the moment of sampling
-    uint32_t ext_data;  ///< Extension data bitfield. Architecture-dependent packed fields.
-                        ///< To decode, use ::rocprofiler_pc_sampling_snapshot_ext_field_id_t
-                        ///< and helper functions.
+    uint8_t  wave_issued;
+    uint8_t  instruction_type;
+    uint8_t  no_issue_reason;
+    uint8_t  wave_count;
+    uint32_t ext_data;
+
+    /// @var rocprofiler_pc_sampling_snapshot_information_v0_t::wave_issued
+    /// @brief 1 - wave issued an instruction at the moment of sampling;
+    /// 0 - wave didn't issue an instruction at the moment of sampling.
+    /// @var rocprofiler_pc_sampling_snapshot_information_v0_t::instruction_type
+    /// @brief if wave_issued=1, type of issued instruction
+    /// (see ::rocprofiler_pc_sampling_instruction_type_t); otherwise might be irrelevant.
+    /// @var rocprofiler_pc_sampling_snapshot_information_v0_t::no_issue_reason
+    /// @brief if wave_issued=0, reason for not issuing the instruction
+    /// (see ::rocprofiler_pc_sampling_no_issue_reason_t); otherwise irrelevant.
+    /// @var rocprofiler_pc_sampling_snapshot_information_v0_t::wave_count
+    /// @brief number of concurrently running waves on CU (on GFX9) or SIMD (GFX10+)
+    /// at the moment of sampling.
+    /// @var rocprofiler_pc_sampling_snapshot_information_v0_t::ext_data
+    /// @brief Extension data bitfield. Architecture-dependent packed fields.
+    /// To decode, use ::rocprofiler_pc_sampling_snapshot_ext_field_id_t and helper functions.
 } rocprofiler_pc_sampling_snapshot_information_v0_t;
 
 ROCPROFILER_CXX_CODE(
@@ -1018,10 +1127,6 @@ ROCPROFILER_CXX_CODE(
 
 /**
  * @brief Information about where was running when sampled.
- *
- * If size of the records is not that important, we should use this version as it's simpler.
- * If however we need to save some more space in PC sampling record, then we can fall back
- * to packing this information into 64-bit and use bit-offsets.
  */
 typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_hw_id_v1_t
 {
@@ -1047,7 +1152,7 @@ ROCPROFILER_CXX_CODE(
         "Increasing the size of the rocprofiler_pc_sampling_hw_id_v1_t is not permitted");)
 
 /**
- * @brief 64B in total (experimental) Minimal PC sampling record acceptable on all architectures
+ * @brief (experimental) Minimal PC sampling record acceptable on all architectures
  * (e.g., MI200, MI300, MI350)
  *
  */
@@ -1069,7 +1174,7 @@ ROCPROFILER_CXX_CODE(
         "Increasing the size of the rocprofiler_pc_sampling_record_v0_t is not permitted");)
 
 /**
- * @brief 88B in total (experimental) PC sampling records tailored for host-trap on GFX9 and Navi4x
+ * @brief (experimental) PC sampling records tailored for host-trap on GFX9 and Navi4x
  *
  */
 typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v1_t
@@ -1097,7 +1202,7 @@ ROCPROFILER_CXX_CODE(
         "Increasing the size of the rocprofiler_pc_sampling_record_v1_t is not permitted");)
 
 /**
- * @brief 96B in total (experimental) PC Sampling Record tailored for stochastic sampling on
+ * @brief (experimental) PC Sampling Record tailored for stochastic sampling on
  * MI300/MI350
  *
  */
@@ -1129,7 +1234,7 @@ ROCPROFILER_CXX_CODE(
         "Increasing the size of the rocprofiler_pc_sampling_record_v2_t is not permitted");)
 
 /**
- * @brief 104B in total (experimental) PC sampling record tailored for host-trap sampling
+ * @brief (experimental) PC sampling record tailored for host-trap sampling
  * on gfx1250 compatible architectures.
  * Please note that `simd_in_group` is always zero on gfx1250.
  *
@@ -1145,27 +1250,39 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v3_t
     // 16B
     rocprofiler_pc_sampling_hw_id_v1_t hw_id;
     // 12B
-    rocprofiler_dim3_t workgroup_position;  ///< work group position in 3D grid
-                                            ///< (or cluster if cluster_id != 0)
+    rocprofiler_dim3_t workgroup_position;
     // 7B (will probably be padded to 8B)
-    uint8_t wave_in_group;     ///< wave position in the workgroup
-    uint8_t simd_in_group;     ///< Reserved for future use, must be zero
-    uint8_t cluster_id;        ///< non-zero value means wave is in cluster
-                               ///< (reserved for future use, must be zero for now)
-    uint8_t cluster_flat_nwg;  ///< flat number of work groups in cluster
-                               ///< (meaningful if cluster_id != 0)
-    uint8_t cluster_nwg_x;    ///< number of work groups in cluster in X axis
-                               ///< (meaningful if cluster_id != 0)
-    uint8_t cluster_nwg_y;    ///< number of work groups in cluster in Y axis
-                               ///< (meaningful if cluster_id != 0)
-    uint8_t cluster_nwg_z;    ///< number of work groups in cluster in Z axis
-                               ///< (meaningful if cluster_id != 0)
+    uint8_t wave_in_group;
+    uint8_t simd_in_group;
+    uint8_t cluster_id;
+    uint8_t cluster_flat_nwg;
+    uint8_t cluster_nwg_x;
+    uint8_t cluster_nwg_y;
+    uint8_t cluster_nwg_z;
     // 12B
-    rocprofiler_dim3_t cluster_position;  ///< cluster position in 3D grid
-                                          ///< (relevant only if cluster_id != 0)
+    rocprofiler_dim3_t cluster_position;
 
-    /// @var correlation_id
-    /// @brief API launch call id that matches dispatch ID
+    /// @var rocprofiler_pc_sampling_record_v3_t::correlation_id
+    /// @brief API launch call id that matches dispatch ID.
+    /// @var rocprofiler_pc_sampling_record_v3_t::workgroup_position
+    /// @brief work group position in 3D grid (or cluster if cluster_id != 0).
+    /// @var rocprofiler_pc_sampling_record_v3_t::wave_in_group
+    /// @brief wave position in the workgroup.
+    /// @var rocprofiler_pc_sampling_record_v3_t::simd_in_group
+    /// @brief Reserved for future use, must be zero.
+    /// @var rocprofiler_pc_sampling_record_v3_t::cluster_id
+    /// @brief non-zero value means wave is in cluster
+    /// (reserved for future use, must be zero for now).
+    /// @var rocprofiler_pc_sampling_record_v3_t::cluster_flat_nwg
+    /// @brief flat number of work groups in cluster (meaningful if cluster_id != 0).
+    /// @var rocprofiler_pc_sampling_record_v3_t::cluster_nwg_x
+    /// @brief number of work groups in cluster in X axis (meaningful if cluster_id != 0).
+    /// @var rocprofiler_pc_sampling_record_v3_t::cluster_nwg_y
+    /// @brief number of work groups in cluster in Y axis (meaningful if cluster_id != 0).
+    /// @var rocprofiler_pc_sampling_record_v3_t::cluster_nwg_z
+    /// @brief number of work groups in cluster in Z axis (meaningful if cluster_id != 0).
+    /// @var rocprofiler_pc_sampling_record_v3_t::cluster_position
+    /// @brief cluster position in 3D grid (relevant only if cluster_id != 0).
 } rocprofiler_pc_sampling_record_v3_t;
 
 ROCPROFILER_CXX_CODE(
@@ -1174,7 +1291,7 @@ ROCPROFILER_CXX_CODE(
         "Increasing the size of the rocprofiler_pc_sampling_record_v3_t is not permitted");)
 
 /**
- * @brief 120B in total (experimental) PC sampling record tailored for stochastic sampling
+ * @brief (experimental) PC sampling record tailored for stochastic sampling
  * on gfx1250 compatible architectures.
  * Please note that `simd_in_group` is always zero on gfx1250.
  *
@@ -1190,32 +1307,44 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v4_t
     // 16B
     rocprofiler_pc_sampling_hw_id_v1_t hw_id;
     // 12B
-    rocprofiler_dim3_t workgroup_position;  ///< work group position in 3D grid
-                                            ///< (or cluster if cluster_id != 0)
+    rocprofiler_dim3_t workgroup_position;
     // 7B (will probably be padded to 8B)
-    uint8_t wave_in_group;     ///< wave position in the workgroup
-    uint8_t simd_in_group;     ///< Reserved for future use, must be zero
-    uint8_t cluster_id;        ///< non-zero value means wave is in cluster
-                               ///< (reserved for future use, must be zero for now)
-    uint8_t cluster_flat_nwg;  ///< flat number of work groups in cluster
-                               ///< (meaningful if cluster_id != 0)
-    uint8_t cluster_nwg_x;    ///< number of work groups in cluster in X axis
-                               ///< (meaningful if cluster_id != 0)
-    uint8_t cluster_nwg_y;    ///< number of work groups in cluster in Y axis
-                               ///< (meaningful if cluster_id != 0)
-    uint8_t cluster_nwg_z;    ///< number of work groups in cluster in Z axis
-                               ///< (meaningful if cluster_id != 0)
+    uint8_t wave_in_group;
+    uint8_t simd_in_group;
+    uint8_t cluster_id;
+    uint8_t cluster_flat_nwg;
+    uint8_t cluster_nwg_x;
+    uint8_t cluster_nwg_y;
+    uint8_t cluster_nwg_z;
     // 12B
-    rocprofiler_dim3_t cluster_position;  ///< cluster position in 3D grid
-                                          ///< (relevant only if cluster_id != 0)
+    rocprofiler_dim3_t cluster_position;
     // 8B
     rocprofiler_pc_sampling_snapshot_information_v0_t snapshot_information;
     // 9B (probably padded to 12B)
     rocprofiler_pc_sampling_memory_counters_v1_t memory_counters;
 
-    /// @var correlation_id
-    /// @brief API launch call id that matches dispatch ID
-    /// @var memory_counters
+    /// @var rocprofiler_pc_sampling_record_v4_t::correlation_id
+    /// @brief API launch call id that matches dispatch ID.
+    /// @var rocprofiler_pc_sampling_record_v4_t::workgroup_position
+    /// @brief work group position in 3D grid (or cluster if cluster_id != 0).
+    /// @var rocprofiler_pc_sampling_record_v4_t::wave_in_group
+    /// @brief wave position in the workgroup.
+    /// @var rocprofiler_pc_sampling_record_v4_t::simd_in_group
+    /// @brief Reserved for future use, must be zero.
+    /// @var rocprofiler_pc_sampling_record_v4_t::cluster_id
+    /// @brief non-zero value means wave is in cluster
+    /// (reserved for future use, must be zero for now).
+    /// @var rocprofiler_pc_sampling_record_v4_t::cluster_flat_nwg
+    /// @brief flat number of work groups in cluster (meaningful if cluster_id != 0).
+    /// @var rocprofiler_pc_sampling_record_v4_t::cluster_nwg_x
+    /// @brief number of work groups in cluster in X axis (meaningful if cluster_id != 0).
+    /// @var rocprofiler_pc_sampling_record_v4_t::cluster_nwg_y
+    /// @brief number of work groups in cluster in Y axis (meaningful if cluster_id != 0).
+    /// @var rocprofiler_pc_sampling_record_v4_t::cluster_nwg_z
+    /// @brief number of work groups in cluster in Z axis (meaningful if cluster_id != 0).
+    /// @var rocprofiler_pc_sampling_record_v4_t::cluster_position
+    /// @brief cluster position in 3D grid (relevant only if cluster_id != 0).
+    /// @var rocprofiler_pc_sampling_record_v4_t::memory_counters
     /// @brief Memory counters (@see ::rocprofiler_pc_sampling_memory_counters_v1_t).
 } rocprofiler_pc_sampling_record_v4_t;
 
@@ -1230,44 +1359,99 @@ ROCPROFILER_CXX_CODE(
  * Extension field identifiers for the ext_data bitfield in
  * ::rocprofiler_pc_sampling_snapshot_information_v0_t. These are architecture-dependent
  * packed fields that require the query/decode API for interpretation.
- *
- * TODO: Think about ordering based on commonalities among architectures.
  */
 typedef enum
 {
     ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_NONE = 0,
     ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_VALU,
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_MATRIX,  ///< GFX9 specific
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_MATRIX,
     ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_LDS,
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_LDS_DIRECT,  ///< GFX12 specific
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_LDS_DIRECT,
     ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_SCALAR,
     ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_VMEM_TEX,
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_FLAT,  ///< GFX9 specific
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_FLAT,
     ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_EXP,
     ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_BRMSG_MISC,
     ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_VALU,
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_MATRIX,  ///< GFX9 specific
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_MATRIX,
     ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_LDS,
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_LDS_DIRECT,  ///< GFX12 specific
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_LDS_DIRECT,
     ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_SCALAR,
     ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_VMEM_TEX,
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_FLAT,  ///< GFX9 specific
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_FLAT,
     ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_EXP,
     ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_BRMSG_MISC,
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_DUAL_ISSUE_VALU,    ///< GFX9 specific
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_LOCK_CONTENTION,  ///< GFX1250 specific
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_RESERVED0,        ///< future gen specific
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_RESERVED1,        ///< future gen specific
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_DUAL_ISSUE_VALU,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_LOCK_CONTENTION,
     ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_LAST
 
+    /// @var ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_NONE
+    /// @brief Sentinel value indicating no extension field. Not a valid field to query.
+    /// @var ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_VALU
+    /// @brief Any wave issued a vector ALU instruction at the moment of sampling.
+    /// @var ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_MATRIX
+    /// @brief Any wave issued a matrix instruction at the moment of sampling.
+    /// GFX9 specific.
+    /// @var ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_LDS
+    /// @brief Any wave issued an LDS (local data share) instruction at the moment of sampling.
+    /// @var ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_LDS_DIRECT
+    /// @brief Any wave issued an LDS-direct instruction at the moment of sampling.
+    /// GFX12 specific.
+    /// @var ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_SCALAR
+    /// @brief Any wave issued a scalar ALU instruction at the moment of sampling.
+    /// @var ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_VMEM_TEX
+    /// @brief Any wave issued a vector memory or texture instruction at the moment of sampling.
+    /// @var ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_FLAT
+    /// @brief Any wave issued a flat memory instruction at the moment of sampling.
+    /// GFX9 specific.
+    /// @var ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_EXP
+    /// @brief Any wave issued an export instruction at the moment of sampling.
+    /// @var ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_BRMSG_MISC
+    /// @brief Any wave issued a branch, message, or miscellaneous instruction at the moment of sampling.
+    /// @var ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_VALU
+    /// @brief Arbiter accepted an instruction, but it was stalled by the VALU pipeline
+    /// (any wave observed VALU execution pipeline back-pressure).
+    /// @var ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_MATRIX
+    /// @brief Arbiter accepted an instruction, but it was stalled by the MATRIX pipeline
+    /// (any wave observed MATRIX execution pipeline back-pressure).
+    /// GFX9 specific.
+    /// @var ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_LDS
+    /// @brief Arbiter accepted an instruction, but it was stalled by the LDS pipeline
+    /// (any wave observed LDS execution pipeline back-pressure).
+    /// @var ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_LDS_DIRECT
+    /// @brief Arbiter accepted an instruction, but it was stalled by the LDS-direct pipeline
+    /// (any wave observed LDS-direct execution pipeline back-pressure).
+    /// GFX12 specific.
+    /// @var ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_SCALAR
+    /// @brief Arbiter accepted an instruction, but it was stalled by the SALU pipeline
+    /// (any wave observed SALU execution pipeline back-pressure).
+    /// @var ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_VMEM_TEX
+    /// @brief Arbiter accepted an instruction, but it was stalled by the VMEM/TEX pipeline
+    /// (any wave observed VMEM/TEX execution pipeline back-pressure).
+    /// @var ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_FLAT
+    /// @brief Arbiter accepted an instruction, but it was stalled by the FLAT pipeline
+    /// (any wave observed FLAT execution pipeline back-pressure).
+    /// GFX9 specific.
+    /// @var ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_EXP
+    /// @brief Arbiter accepted an instruction, but it was stalled by the EXP pipeline
+    /// (any wave observed EXP execution pipeline back-pressure).
+    /// @var ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_BRMSG_MISC
+    /// @brief Arbiter accepted an instruction, but it was stalled by the BRMSG/MISC pipeline
+    /// (any wave observed BRMSG/MISC execution pipeline back-pressure).
+    /// @var ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_DUAL_ISSUE_VALU
+    /// @brief Any wave dual-issued two vector ALU instructions in the same cycle.
+    /// GFX9 specific.
     /// @var ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_LOCK_CONTENTION
     /// @brief At least one wave was unable to take a snapshot because the previous snapshot
     /// had not yet been read. A high frequency of this bit indicates that the sampling
     /// interval is too small.
+    /// GFX1250 specific.
+    /// @var ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_LAST
+    /// @brief Sentinel marking the end of the enumeration. Not a valid field to query.
 } rocprofiler_pc_sampling_snapshot_ext_field_id_t;
 
 /**
- * @brief (experimental) (Optional) Return the string encoding of
+ * @brief (experimental) Return the string encoding of
  * ::rocprofiler_pc_sampling_snapshot_ext_field_id_t value
  *
  * @param [in] field_id Snapshot ext_data field enum value
@@ -1313,14 +1497,23 @@ typedef rocprofiler_status_t (*rocprofiler_pc_sampling_snapshot_ext_fields_cb_t)
  * and record kind. To extract field values from the ext_data bitfield, use
  * ::rocprofiler_pc_sampling_extract_snapshot_ext_field_values.
  *
+ * When the agent and @p record_kind combination does not expose any ext_data
+ * (for example, the agent does not support ext_data on this record kind, or the
+ * record kind itself does not carry snapshot information such as host-trap record
+ * kinds V1 and V3), the function still returns ::ROCPROFILER_STATUS_SUCCESS and
+ * invokes the callback once with @c num_fields = 0. The caller can therefore use
+ * an empty result as the signal that ext_data extraction is not applicable, instead
+ * of treating it as an error.
+ *
  * @param[in] agent_id - ID of the agent to query
  * @param[in] record_kind - The record kind to query fields for
  * @param[in] cb - User callback that receives the supported field IDs
  * @param[in] user_data - Passed through to @p cb
  * @return ::rocprofiler_status_t
- * @retval ::ROCPROFILER_STATUS_SUCCESS @p cb successfully finished
- * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT invalid agent_id, null callback, or
- * record_kind does not contain snapshot information (e.g., host-trap record kinds V1, V3)
+ * @retval ::ROCPROFILER_STATUS_SUCCESS @p cb successfully finished (including the
+ * empty-list case described above)
+ * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT invalid @p agent_id, null
+ * @p cb, or @p record_kind is not a recognized PC sampling record kind
  * @retval ::ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE agent does not support PC sampling
  */
 ROCPROFILER_SDK_EXPERIMENTAL
@@ -1376,8 +1569,9 @@ typedef rocprofiler_status_t (*rocprofiler_pc_sampling_snapshot_ext_field_values
  * @param[in] user_data - Passed through to @p cb
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_SUCCESS all fields extracted successfully and callback completed
- * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT null pointers, num_fields is 0, or
- * record_kind does not contain snapshot information (e.g., host-trap record kinds V1, V3)
+ * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT null pointers, num_fields is 0,
+ * @p record_kind is not a recognized PC sampling record kind, or @p record_kind does not
+ * carry snapshot ext_data (e.g., host-trap record kinds V1, V3)
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
@@ -1388,18 +1582,6 @@ rocprofiler_pc_sampling_extract_snapshot_ext_field_values(
     size_t                                                num_fields,
     rocprofiler_pc_sampling_snapshot_ext_field_values_cb_t cb,
     void* user_data) ROCPROFILER_API ROCPROFILER_NONNULL(2, 3, 5);
-
-/// NOTE: the following code is kept so that we could quickly compile the existing code before full
-/// refactoring
-ROCPROFILER_SDK_EXPERIMENTAL
-rocprofiler_status_t
-rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t         context_id,
-                                          rocprofiler_agent_id_t           agent_id,
-                                          rocprofiler_pc_sampling_method_t method,
-                                          rocprofiler_pc_sampling_unit_t   unit,
-                                          uint64_t                         interval,
-                                          rocprofiler_buffer_id_t          buffer_id,
-                                          int                              flags) ROCPROFILER_API;
 
 ROCPROFILER_SDK_EXPERIMENTAL
 const char*
