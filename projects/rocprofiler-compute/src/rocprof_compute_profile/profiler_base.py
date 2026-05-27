@@ -371,7 +371,7 @@ class RocProfCompute_Base:
 
         pc_sampling = PCSamplingProfiler(
             args=args,
-            profiler_mode=self.__profiler,
+            profiler=self.__profiler,
             workload_dir=args.output_directory,
         )
 

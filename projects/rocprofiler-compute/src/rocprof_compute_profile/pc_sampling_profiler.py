@@ -7,7 +7,7 @@ import shlex
 import shutil
 import time
 from pathlib import Path
-from typing import Any, Union, cast
+from typing import Union, cast
 
 from utils.logger import console_debug, console_error, console_log
 from utils.utils_common import (
@@ -31,11 +31,11 @@ class PCSamplingProfiler:
     def __init__(
         self,
         args: argparse.Namespace,
-        profiler_mode: str,
+        profiler: str,
         workload_dir: Union[str, Path],
     ) -> None:
         self._args = args
-        self._profiler = profiler_mode
+        self._profiler = profiler
         self._workload_dir = str(workload_dir)
 
     def is_requested(self) -> bool:
@@ -48,7 +48,7 @@ class PCSamplingProfiler:
 
     def run(
         self,
-        profiler_options: Union[list[str], dict[str, Any]],
+        profiler_options: Union[list[str], dict[str, Union[str, list[str]]]],
     ) -> None:
         """Execute the PC sampling pass and log timing."""
         total_runs = len(
@@ -72,12 +72,14 @@ class PCSamplingProfiler:
 
     def _cleanup_stale_output(
         self,
-        profiler_options: Union[list[str], dict[str, Any]],
+        profiler_options: Union[list[str], dict[str, Union[str, list[str]]]],
     ) -> None:
         """Remove a leftover ROCPROF_OUTPUT_PATH in PC-sampling-only sdk runs."""
         if not (self.is_exclusive() and self._profiler == "rocprofiler-sdk"):
             return
-        rocprof_output_path = getattr(profiler_options, "ROCPROF_OUTPUT_PATH", None)
+        if not isinstance(profiler_options, dict):
+            return
+        rocprof_output_path = profiler_options.get("ROCPROF_OUTPUT_PATH")
         if rocprof_output_path is None:
             return
         rocprof_output_path = Path(rocprof_output_path)
