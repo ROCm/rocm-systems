@@ -141,14 +141,25 @@ void runAggregation(hiprtcProgram& prog, AggregationType aggType) {
 
       mask <<= ((laneId % wavefrontSize) / tileSize) * tileSize;
 
-      if (tileSize <= wavefrontSize) {
-        T expectedByLane[64];
-        T expected;
-        T result = output.host_ptr()[numTile * wavefrontSize + laneId];
-        Op<T> op;
+      if ((1ull << laneId) & mask) {
+        if (tileSize <= wavefrontSize) {
+          T expectedByLane[64];
+          T expected;
+          Op<T> op;
+          T result = output.host_ptr()[numTile * wavefrontSize + laneId];
 
-        expected = calculateExpected(expectedByLane, input.host_ptr(), op, mask, aggType);
-        REQUIRE(result == expectedByLane[laneId]);
+          expected = calculateExpected(expectedByLane, input.host_ptr(), op, mask, aggType);
+
+          if constexpr (std::is_integral<T>::value) {
+            REQUIRE(result == expectedByLane[laneId]);
+          } else {
+            compareFloatingPoint<Op<T>>(result,
+                                     expectedByLane[laneId],
+                                     mask,
+                                     input.host_ptr(),
+                                     laneId);
+          }
+        }
       }
     }
 
