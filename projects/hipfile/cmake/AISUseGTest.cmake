@@ -5,31 +5,36 @@
 include(AISSanitizers)
 include(FetchContent)
 
-# This line is used (or not) in FetchContent_Declare to determine
-# if we check for a system GoogleTest install first. When building
+# Decide whether to check for a system GoogleTest install first. When building
 # with the sanitizers, we HAVE to build GoogleTest from source.
 if(AIS_USE_SANITIZERS OR AIS_USE_THREAD_SANITIZER)
-    set(AIS_LOCAL_GTEST_CHECK "")
+    set(AIS_GTEST_TRY_SYSTEM FALSE)
 else()
-    set(AIS_LOCAL_GTEST_CHECK FIND_PACKAGE_ARGS NAMES GTest)
+    set(AIS_GTEST_TRY_SYSTEM TRUE)
 endif()
-
-# lint_cmake: -readability/wonkycase
-FetchContent_Declare(
-  googletest
-  URL https://github.com/google/googletest/releases/download/v1.17.0/googletest-1.17.0.tar.gz
-  DOWNLOAD_EXTRACT_TIMESTAMP true
-  ${AIS_LOCAL_GTEST_CHECK}
-  SYSTEM
-)
-# lint_cmake: +readability/wonkycase
 
 set(INSTALL_GTEST OFF CACHE BOOL "Don't install GoogleTest")
 set(GTEST_HAS_ABSL OFF CACHE BOOL "Don't use Abseil for GoogleTest")
 
+# We use find_package manually instead of FIND_PACKAGE_ARGS with
+# FetchContent_Declare, since FIND_PACKAGE_ARGS was introduced in CMake
+# version 3.24, which is unavailable on some operating systems:
+# https://cmake.org/cmake/help/latest/module/FetchContent.html
+if(AIS_GTEST_TRY_SYSTEM)
+    find_package(GTest QUIET)
+endif()
+
+if(NOT GTest_FOUND)
 # lint_cmake: -readability/wonkycase
-FetchContent_MakeAvailable(googletest)
+    FetchContent_Declare(
+      googletest
+      URL https://github.com/google/googletest/releases/download/v1.17.0/googletest-1.17.0.tar.gz
+      DOWNLOAD_EXTRACT_TIMESTAMP true
+      SYSTEM
+    )
+    FetchContent_MakeAvailable(googletest)
 # lint_cmake: +readability/wonkycase
+endif()
 
 if(googletest_SOURCE_DIR)
     message(STATUS "Using fetched GoogleTest")

@@ -74,6 +74,7 @@ enum gpu_id_t
     GFX11_GPU_ID,    // generic Gfx11 id
     GFX115X_GPU_ID,  // Gfx11.5x id
     GFX12_GPU_ID,    // generic Gfx12 id
+    MI450_GPU_ID,    // Mi450 GPU id
 };
 
 // Block info map class
@@ -167,6 +168,8 @@ public:
     virtual bool IsGFX12() const { return false; }
     // Return number of XCC on the GPU
     uint32_t GetXccNumber() const { return agent_info_->xcc_num; }
+    // Return number of XCC per AID
+    uint32_t GetXccPerAid() const { return agent_info_->xcc_per_aid; }
 
     // SPM specific
     virtual uint32_t GetSpmSampleDelayMax() { return 0; }
@@ -304,6 +307,8 @@ private:
     static Pm4Factory* Mi300Create(const AgentInfo* agent_info);
     // Create MI350 factory
     static Pm4Factory* Mi350Create(const AgentInfo* agent_info);
+    // Create MI450 factory
+    static Pm4Factory* Mi450Create(const AgentInfo* agent_info);
     // Return GPU id for a given agent
     static gpu_id_t GetGpuId(std::string_view);
 
@@ -348,6 +353,7 @@ Pm4Factory::Create(const AgentInfo* agent_info, gpu_id_t gpu_id, bool concurrent
             case MI200_GPU_ID: it->second = Mi200Create(agent_info); break;
             case MI300_GPU_ID: it->second = Mi300Create(agent_info); break;
             case MI350_GPU_ID: it->second = Mi350Create(agent_info); break;
+            case MI450_GPU_ID: it->second = Mi450Create(agent_info); break;
             default: throw aql_profile_exc_val<gpu_id_t>("GPU id error", gpu_id);
         }
     }
@@ -443,6 +449,7 @@ Pm4Factory::GetGpuId(std::string_view gfx_ip)
         {"gfx10", GFX10_GPU_ID},
         {"gfx115", GFX115X_GPU_ID},
         {"gfx11", GFX11_GPU_ID},
+        {"gfx125", MI450_GPU_ID},
         {"gfx12", GFX12_GPU_ID},
     };
 

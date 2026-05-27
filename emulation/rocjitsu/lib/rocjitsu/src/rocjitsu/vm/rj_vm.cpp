@@ -3,6 +3,7 @@
 
 #include "rocjitsu/vm/rj_vm.h"
 
+#include "embedded_schema.h"
 #include "rocjitsu/config/checkpoint.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/refcount.h"
@@ -43,22 +44,22 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_t **handle) {
 
 } // namespace
 
-rj_status_t rj_vm_create(const char *json_path, const char *schema_path, rj_vm_t **vm) {
-  if (!json_path || !schema_path || !vm)
+rj_status_t rj_vm_create(const char *json_path, rj_vm_t **vm) {
+  if (!json_path || !vm)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   try {
-    auto loaded = config::load_config(json_path, schema_path);
+    auto loaded = config::load_config(json_path, rocjitsu::kEmbeddedSchema);
     return create_from_loaded(loaded, vm);
   } catch (const std::exception &) {
     return ROCJITSU_STATUS_INVALID_FILE;
   }
 }
 
-rj_status_t rj_vm_create_from_string(const char *json, const char *schema_path, rj_vm_t **vm) {
-  if (!json || !schema_path || !vm)
+rj_status_t rj_vm_create_from_string(const char *json, rj_vm_t **vm) {
+  if (!json || !vm)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   try {
-    auto loaded = config::load_config_from_string(json, schema_path);
+    auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
     return create_from_loaded(loaded, vm);
   } catch (const std::exception &) {
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
