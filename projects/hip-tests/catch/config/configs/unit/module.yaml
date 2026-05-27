@@ -31,7 +31,7 @@ module:
   Unit_hipModuleLaunchKernel_Negative_Parameters:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows, amd_linux]
+    disabled: [amd_windows]
     tags: [launch]
   Unit_hipModuleLaunchKernel_Fntl:
     <<: *level_2
@@ -296,7 +296,7 @@ module:
   Unit_hipExtModuleLaunchKernel_Negative_Parameters:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows, amd_linux]
+    disabled: [amd_windows]
     tags: [launch]
   Unit_hipExtModuleLaunchKernel_Functional:
     <<: *level_2
