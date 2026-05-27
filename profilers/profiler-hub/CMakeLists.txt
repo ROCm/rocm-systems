@@ -26,6 +26,8 @@ if(PROFILER_HUB_BUILD_TESTS)
     enable_testing()
 endif()
 
+include(GNUInstallDirs)
+
 # ------------------------------------------------------------ #
 # Version
 # ------------------------------------------------------------ #
