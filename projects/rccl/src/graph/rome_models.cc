@@ -2322,7 +2322,9 @@ static ncclResult_t parseRomeSystem(struct ncclTopoSystem* system, struct rcclRo
     int n = net_scores[i].n;
     for (int j = 0; j < romeTopo->nGpus; j++) {
       int g = gpu_scores[j].g;
-      romeTopo->gdrLevel[i*romeTopo->nGpus+j] = system->nodes[GPU].nodes[g].paths[NET][n].type;
+      struct ncclTopoNode* gpuNode = &system->nodes[GPU].nodes[g];
+      // paths[NET] is null when the GPU has no topology path to any NET node (e.g. remote NICs in MNNVL)
+      romeTopo->gdrLevel[i*romeTopo->nGpus+j] = (gpuNode->paths[NET] != NULL) ? gpuNode->paths[NET][n].type : PATH_DIS;
     }
   }
 

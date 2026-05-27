@@ -11,7 +11,7 @@ import pandas as pd
 
 from utils import schema
 from utils.logger import console_debug, console_error, console_warning
-from utils.parser import eval_metric
+from utils.metrics.evaluation_pipeline import eval_metric
 
 ################################################
 # Global vars
@@ -324,7 +324,6 @@ def calc_ceilings(
 def calc_ai_analyze(
     workload: schema.Workload,
     pmc_df: pd.DataFrame,
-    config: dict[str, Any],
     arch_config: schema.ArchConfig,
 ) -> dict[str, Union[list[list[float]], list[str]]]:
     """
@@ -373,13 +372,11 @@ def calc_ai_analyze(
         console_debug("roofline", f"Processing kernel {kernel_id}: {kernel_name[:50]}")
 
         # filter PMC data for specific kernel
-        kernel_pmc_df = pmc_df[pmc_df["pmc_perf"]["Kernel_Name"] == kernel_name]
+        kernel_pmc_df = pmc_df[pmc_df["Kernel_Name"] == kernel_name]
 
         if kernel_pmc_df.empty:
             console_debug("roofline", f"No PMC data for kernel {kernel_id}")
             continue
-
-        kernel_only_data = {"pmc_perf": kernel_pmc_df["pmc_perf"]}
 
         kernel_dfs: dict[int, pd.DataFrame] = {}
         kernel_dfs_type: dict[int, str] = {}
@@ -395,9 +392,8 @@ def calc_ai_analyze(
             kernel_dfs_type,
             workload.sys_info.iloc[0],
             workload.roofline_peaks,
-            kernel_only_data,
+            kernel_pmc_df,
             debug=False,
-            config=config,
         )
 
         ai_hbm = ai_l2 = ai_l1 = performance = 0
@@ -436,11 +432,16 @@ def calc_ai_analyze(
                 plot_points.ai_l1[0].append(ai_l1)
                 plot_points.ai_l1[1].append(performance)
 
-            plot_points.kernelNames.append(f"K{kernel_id}")
-            console_debug("roofline", f"Added kernel {kernel_id} to plot points")
+            plot_points.kernelNames.append(kernel_name)
+            console_debug(
+                "roofline",
+                f"Added kernel {kernel_id}: {kernel_name[:50]} to plot points",
+            )
         else:
             console_debug(
-                "roofline", f"Skipping kernel {kernel_id} - no performance data"
+                "roofline",
+                f"Skipping kernel {kernel_id}: {kernel_name[:50]}"
+                f" - no performance data",
             )
 
         # store metrics for display
@@ -476,7 +477,7 @@ def construct_roof(
     headers: list[str] = []
 
     try:
-        with open(benchmark_results) as csvfile:
+        with open(benchmark_results, newline="", encoding="utf-8") as csvfile:
             csv_reader = csv.reader(csvfile, delimiter=",")
             row_count = 0
 

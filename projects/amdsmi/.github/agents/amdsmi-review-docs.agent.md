@@ -32,6 +32,8 @@ Project structure and API cascade path are stored in repo memories.
 | **💡 SUGGESTION** | Comment clarity, doc formatting, additional examples |
 | **📋 FUTURE WORK** | Docs improvements for untouched code |
 
+Don't flag bullet-vs-paragraph style preferences.
+
 ## Output
 
 Return findings as a markdown list:

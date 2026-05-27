@@ -28,7 +28,7 @@
  *   HIPFILE_ALLOW_COMPAT_MODE=1 ./no-odirect-write OUTPUT
  */
 
-#include "basics_common.h"
+#include "examples_common.h"
 
 #include <hipfile.h>
 #include <hip/hip_runtime_api.h>
@@ -48,10 +48,6 @@
 #ifndef NOW_SIZE
 #define NOW_SIZE (128UL * 1024UL)
 #endif
-
-/// @brief Alignment used for the registered GPU buffer (must be a power of two).
-#define BLOCK_ALIGN ((size_t)4096)
-static_assert(is_power_of_two(BLOCK_ALIGN), "BLOCK_ALIGN must be a power of two");
 
 int
 main(int argc, char *argv[])
