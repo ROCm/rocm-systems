@@ -504,7 +504,7 @@ add_test(
 add_test(
     NAME test_mi_gpu_spec
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m mi_gpu_spec
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
         --junitxml=tests/test_mi_gpu_spec.xml ${COV_OPTION} tests/test_mi_gpu_spec.py
         ${WORKING_DIR_OPTION}
 )

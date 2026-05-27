@@ -5,12 +5,11 @@
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
+import common  # noqa: F401 — adds src/ to sys.path
 
-from src.utils.mi_gpu_spec import MIGPUSpecs
+from utils.mi_gpu_spec import MIGPUSpecs
 
 
-@pytest.mark.mi_gpu_spec
 class TestMIGPUSpecs:
     # -- YAML parsing / initialization ---------------------------------------
 
