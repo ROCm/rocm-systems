@@ -417,19 +417,11 @@ __device__ __forceinline__ void copy_bulk(void* dst, void* src,
   for (; offset + chunk_batch <= n_chunks; offset += chunk_batch) {
     #pragma unroll
     for (int u = 0; u < Unroll; ++u) {
-      // if constexpr (LoadPolicy != CachePolicy::Standard) {
-      //   wait_on_vmem_and_lds(Unroll - 1);
-      // }
-      // regs[u] = Acc::load(static_cast<uint8_t*>(src) + (offset + tid + u * stride) * ChunkSize);
       regs[u] = Acc::load_buffer(src, buf_bytes,
           static_cast<uint32_t>((offset + tid + u * stride) * ChunkSize));
     }
     #pragma unroll
     for (int u = 0; u < Unroll; ++u) {
-      // if constexpr (LoadPolicy != CachePolicy::Standard) {
-      //   wait_on_vmem_and_lds(Unroll - 1);
-      // }
-      // Acc::store(static_cast<uint8_t*>(dst) + (offset + tid + u * stride) * ChunkSize, regs[u]);
       Acc::store_buffer(dst, buf_bytes,
           static_cast<uint32_t>((offset + tid + u * stride) * ChunkSize), regs[u]);
     }
@@ -439,11 +431,6 @@ __device__ __forceinline__ void copy_bulk(void* dst, void* src,
 
   // Tail: remaining chunks that don't fill a full unrolled batch
   for (int i = offset + tid; i < n_chunks; i += stride) {
-    // T val = Acc::load(static_cast<uint8_t*>(src) + i * ChunkSize);
-    // if constexpr (LoadPolicy != CachePolicy::Standard) {
-    //   wait_on_vmem_and_lds(0);
-    // }
-    // Acc::store(static_cast<uint8_t*>(dst) + i * ChunkSize, val);
     T val = Acc::load_buffer(src, buf_bytes, static_cast<uint32_t>(i * ChunkSize));
     Acc::store_buffer(dst, buf_bytes, static_cast<uint32_t>(i * ChunkSize), val);
   }
@@ -460,44 +447,36 @@ __device__ __forceinline__ void copy_remainder(uint8_t* dst,
 
   if (remainder & 8) {
     auto val = AsmAccess<8, LP, SP>::load(src);
-    // auto val = AsmAccess<8, LP, SP>::load(src);
     if constexpr (LP != CachePolicy::Standard) {
       wait_on_vmem_loads(0);
     }
-    // AsmAccess<8, LP, SP>::store(dst, val);
     AsmAccess<8, LP, SP>::store(dst, val);
     dst += 8;
     src += 8;
   }
   if (remainder & 4) {
     auto val = AsmAccess<4, LP, SP>::load(src);
-    // auto val = AsmAccess<4, LP, SP>::load(src);
     if constexpr (LP != CachePolicy::Standard) {
       wait_on_vmem_loads(0);
     }
-    // AsmAccess<4, LP, SP>::store(dst, val);
     AsmAccess<4, LP, SP>::store(dst, val);
     dst += 4;
     src += 4;
   }
   if (remainder & 2) {
     auto val = AsmAccess<2, LP, SP>::load(src);
-    // auto val = AsmAccess<2, LP, SP>::load(src);
     if constexpr (LP != CachePolicy::Standard) {
       wait_on_vmem_loads(0);
     }
-    // AsmAccess<2, LP, SP>::store(dst, val);
     AsmAccess<2, LP, SP>::store(dst, val);
     dst += 2;
     src += 2;
   }
   if (remainder & 1) {
     auto val = AsmAccess<1, LP, SP>::load(src);
-    // auto val = AsmAccess<1, LP, SP>::load(src);
     if constexpr (LP != CachePolicy::Standard) {
       wait_on_vmem_loads(0);
     }
-    // AsmAccess<1, LP, SP>::store(dst, val);
     AsmAccess<1, LP, SP>::store(dst, val);
   }
 }
@@ -562,9 +541,9 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   constexpr int Unroll = 16;
 
   constexpr CachePolicy LP =
-      is_put(Kind) ? CachePolicy::FlatCache : CachePolicy::SystemScope;
+      is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
   constexpr CachePolicy SP =
-      is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::FlatCache;
+      is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard;
 
   int wave_tid = get_flat_block_id() % WF_SIZE;
   int wave_size{wave_SZ()};
@@ -592,9 +571,9 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   constexpr int Unroll = 16;
 
   constexpr CachePolicy LP =
-      is_put(Kind) ? CachePolicy::FlatCache : CachePolicy::SystemScope;
+      is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
   constexpr CachePolicy SP =
-      is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::FlatCache;
+      is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard;
 
   int thread_id = get_flat_block_id();
   int block_size = get_flat_block_size();
