@@ -58,6 +58,8 @@ include(ExternalProject)
 include(GNUInstallDirs)
 include(utils.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/asan_build_dependencies.cmake)
+include(cmake/sanitizers.cmake)
+enable_sanitizer_gpu_target_munging()
 
 set(BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides")
 set(BUILD_DEBIAN_PKGING_FLAG
@@ -114,6 +116,7 @@ set(PYTHON_TEST_COMMAND
     CACHE STRING
     "Python command for running tests (portable)"
 )
+enable_sanitizer_python_launcher(PYTHON_TEST_COMMAND)
 message(STATUS "Python test command: ${PYTHON_TEST_COMMAND}")
 
 # ----------------------
