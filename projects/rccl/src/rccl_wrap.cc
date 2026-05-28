@@ -511,7 +511,6 @@ bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
 
 void rcclSetPxn(struct ncclComm* comm,  int& rcclPxnDisable) {
   comm->enableCustColl = false;
-  int pxnDisable;
   const char *inputStr = getenv("NCCL_PXN_DISABLE");
   const bool archGfx942 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942");
   const bool archGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
@@ -522,7 +521,7 @@ void rcclSetPxn(struct ncclComm* comm,  int& rcclPxnDisable) {
     return;
   }
   const int ranksThreshold = (archGfx942)? 64 : 32;
-  pxnDisable = (comm->nRanks >= ranksThreshold)? 0 : 1;
+  int pxnDisable = (comm->nRanks >= ranksThreshold)? 0 : 1;
   INFO(NCCL_INIT, "RCCL PXN set as %s (nRanks=%d threshold=%d)",
        !pxnDisable ? "enabled" : "disabled", comm->nRanks, ranksThreshold);
   rcclPxnDisable = pxnDisable;

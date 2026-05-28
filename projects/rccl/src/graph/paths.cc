@@ -657,16 +657,14 @@ NCCL_PARAM(PxnDisable, "PXN_DISABLE", 1);
 // Net v4 plugins don't have non-blocking connect/accept. We can't therefore use
 // remote proxies without risking deadlocks
 int ncclPxnDisable(struct ncclComm* comm) {
-  if (comm == NULL) return ncclParamPxnDisable();
-  if (comm->pxnDisable == -1) {
-    if (comm->ncclNetVer == 4) {
-      INFO(NCCL_INIT, "PXN Disabled as plugin is v4");
-      comm->pxnDisable = 1;
-    } else {
-      int v = -1;
-      rcclSetPxn(comm, v);
-      comm->pxnDisable = (v > RCCL_VALUE_INVALID) ? v : ncclParamPxnDisable();
-    }
+  if (comm->pxnDisable > -1) return comm->pxnDisable;
+  if (comm->ncclNetVer == 4) {
+    INFO(NCCL_INIT, "PXN Disabled as plugin is v4");
+    comm->pxnDisable = 1;
+  } else {
+    int v = -1;
+    rcclSetPxn(comm, v);
+    comm->pxnDisable = (v > RCCL_VALUE_INVALID) ? v : ncclParamPxnDisable();
   }
   return comm->pxnDisable;
 }
