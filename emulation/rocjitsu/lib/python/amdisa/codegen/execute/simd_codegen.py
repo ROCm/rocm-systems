@@ -788,6 +788,15 @@ SIMD_VOP3_CNDMASK: set[str] = {
     "v_cndmask_b32_vop3",
 }
 
+# VOP3 div_fmas: fma(src0, src1, src2) followed by a VCC-bit-gated
+# ldexp(result, 32) (f32) or ldexp(result, 64) (f64). Fixed-op / functorless.
+SIMD_VOP3_DIV_FMAS_FP32: set[str] = {
+    "v_div_fmas_f32_vop3",
+}
+SIMD_VOP3_DIV_FMAS_FP64: set[str] = {
+    "v_div_fmas_f64_vop3",
+}
+
 
 # --- VOPC compare -> VCC ---------------------------------------------------
 #
@@ -1343,6 +1352,14 @@ SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
     "v_fma_f32_vop3": "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }",
     "v_mad_f32_vop3": "[](auto a, auto b, auto c) { return a * b + c; }",
     "v_mad_legacy_f32_vop3": "[](auto a, auto b, auto c) { return a * b + c; }",
+    # v_div_fixup_f32: per-AMD-spec `else if` cascade selecting the result
+    # among NaN/Inf/zero copysign cases. Lives as a helper in simd_glue.h
+    # (div_fixup_f32_simd) — bit-exact match to the scalar body's predicate
+    # tree applied lowest-priority-first so higher-priority `where` blends
+    # overwrite. Omod/clamp DO apply (scalar applies them at end).
+    "v_div_fixup_f32_vop3": (
+        "[](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f32_simd(p, b, c); }"
+    ),
 }
 
 # f16 ternary — widen each src to f32, op in f32, narrow back. Same NaN
@@ -1357,6 +1374,11 @@ SIMD_VOP3_TERNARY_FP16: dict[str, str] = {
 # f64 ternary FMA.
 SIMD_VOP3_TERNARY_FP64: dict[str, str] = {
     "v_fma_f64_vop3": "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }",
+    # v_div_fixup_f64: 64-bit-lane div_fixup cascade (same shape as f32, see
+    # SIMD_VOP3_TERNARY_FP32 above).
+    "v_div_fixup_f64_vop3": (
+        "[](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f64_simd(p, b, c); }"
+    ),
 }
 
 # --- VOP3 dst-accumulate FMA / MAC (vdst is the accumulator) ----------------
@@ -1594,6 +1616,10 @@ def simd_probe_line(template_name: str) -> str | None:
     spec3tf64 = SIMD_VOP3_TERNARY_FP64.get(template_name)
     if spec3tf64 is not None:
         return f"  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP64({spec3tf64});"
+    if template_name in SIMD_VOP3_DIV_FMAS_FP32:
+        return "  ROCJITSU_TRY_SIMD_DIV_FMAS_VOP3_FP32();"
+    if template_name in SIMD_VOP3_DIV_FMAS_FP64:
+        return "  ROCJITSU_TRY_SIMD_DIV_FMAS_VOP3_FP64();"
     # VOP3 dst-accumulate FMA/MAC (vdst is the third operand). Per-isa class
     # has no src2; the accumulate glue reads vdst instead.
     specfmacf32 = SIMD_VOP3_FMAC_FP32.get(template_name)
