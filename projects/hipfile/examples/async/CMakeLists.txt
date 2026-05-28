@@ -38,3 +38,46 @@ foreach(example ${ASYNC_EXAMPLES})
     target_include_directories(${example} SYSTEM PRIVATE ${HIPFILE_INCLUDE_PATH})
     target_link_libraries(${example} PRIVATE examples_common)
 endforeach()
+
+# CTest wrappers: run each async example as a hipFile system test.
+# Gated on BUILD_TESTING; AIS_INSTALL_EXAMPLES is already enforced by the
+# parent CMakeLists which only adds this subdirectory when examples are built.
+if(BUILD_TESTING)
+    set(ASYNC_TEST_DIR "${AIS_CAPABLE_DIR}/hipfile_async_tests")
+    set(ASYNC_INPUT "${ASYNC_TEST_DIR}/input.bin")
+
+    add_test(
+        NAME async_setup_dir
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${ASYNC_TEST_DIR}
+    )
+    add_test(
+        NAME async_setup_input
+        COMMAND sh -c "dd if=/dev/urandom of='${ASYNC_INPUT}' bs=4096 count=64 status=none"
+    )
+    add_test(
+        NAME async_cleanup
+        COMMAND ${CMAKE_COMMAND} -E rm -rf ${ASYNC_TEST_DIR}
+    )
+    set_tests_properties(async_setup_dir PROPERTIES
+        FIXTURES_SETUP async_scratch
+    )
+    set_tests_properties(async_setup_input PROPERTIES
+        FIXTURES_SETUP async_scratch
+        DEPENDS async_setup_dir
+    )
+    set_tests_properties(async_cleanup PROPERTIES
+        FIXTURES_CLEANUP async_scratch
+    )
+
+    foreach(example ${ASYNC_EXAMPLES})
+        add_test(
+            NAME async_${example}
+            COMMAND $<TARGET_FILE:${example}> ${ASYNC_INPUT} out_${example}.bin
+            WORKING_DIRECTORY ${ASYNC_TEST_DIR}
+        )
+        set_tests_properties(async_${example} PROPERTIES
+            FIXTURES_REQUIRED async_scratch
+            LABELS "system;hipfile;async"
+        )
+    endforeach()
+endif()
