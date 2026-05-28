@@ -93,9 +93,8 @@ struct Case {
   Kind kind;
 };
 
-// v_mov_b32 is intentionally absent: its VOP3 scalar body truncates float->int
-// (a codegen quirk), so it is left scalar — see _VOP3_UNARY_SKIP in simd_codegen.
-const std::array<Case, 9> kCases = {{
+const std::array<Case, 10> kCases = {{
+    {"v_mov_b32", 321, Kind::FP},
     {"v_floor_f32", 351, Kind::FP},
     {"v_ceil_f32", 349, Kind::FP},
     {"v_trunc_f32", 348, Kind::FP},
@@ -214,6 +213,43 @@ TEST(Vop3UnarySimdCorrectness, Plain_FullAndPartialExec) {
       continue;
     check(c, 0, 0, 0, 0, /*exec=*/~0ULL);
     check(c, 0, 0, 0, 0, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
+  }
+}
+
+// Absolute scalar-behavior regression for the v_mov_b32 VOP3 codegen fix: with no
+// modifiers it must MOVE the bits (not truncate float->int). Before the fix the
+// generated body returned the f32 value to a uint32 write_lane without a
+// bit_cast, so 0.5 (0x3F000000) wrote 0; neg must flip the sign bit. Runs
+// forced-scalar so it pins the generated body independent of the SIMD path.
+TEST(Vop3UnarySimdCorrectness, MovB32_Scalar_PreservesBits) {
+  Fixture fx;
+  ASSERT_NE(fx.cu, nullptr);
+  ASSERT_NE(fx.wf, nullptr);
+  struct Sub {
+    uint32_t abs, neg, omod, clamp, in, expect;
+  };
+  const std::array<Sub, 4> subs = {{
+      {0, 0, 0, 0, 0x3F000000u, 0x3F000000u}, // 0.5 -> 0.5 (bits preserved)
+      {0, 0, 0, 0, 0x12345678u, 0x12345678u}, // arbitrary bits preserved
+      {0, 1, 0, 0, 0x3F000000u, 0xBF000000u}, // neg: flip sign -> -0.5
+      {1, 0, 0, 0, 0xBF000000u, 0x3F000000u}, // abs: clear sign -> 0.5
+  }};
+  for (const auto &s : subs) {
+    uint32_t words[4] = {0u, 0u, 0u, 0u};
+    vop3_encode(/*op=v_mov_b32=*/321, /*vdst=*/kDstVgpr, /*src0=*/256, s.abs, s.neg, s.omod,
+                s.clamp, words);
+    Instruction *inst = fx.decoder->decode(words);
+    ASSERT_NE(inst, nullptr);
+    amdgpu::simd_force_scalar() = true;
+    uint32_t vb = fx.wf->vgpr_alloc().base;
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+      fx.cu->write_vgpr(vb + 0, lane, s.in);
+    fx.wf->set_exec(~0ULL);
+    fx.cu->execute_instruction(inst, *fx.wf);
+    amdgpu::simd_force_scalar() = false;
+    EXPECT_EQ(fx.cu->read_vgpr(vb + kDstVgpr, 0), s.expect)
+        << "v_mov_b32 abs=" << s.abs << " neg=" << s.neg << " in=0x" << std::hex << s.in;
+    delete inst;
   }
 }
 

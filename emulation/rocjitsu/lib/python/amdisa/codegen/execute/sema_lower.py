@@ -832,6 +832,23 @@ def _rhs_is_float_expr(node: SemaNode) -> int:
     Checks if the RHS expression evaluates to a float in C++, meaning the
     dst write needs bit_cast<uint32_t> to store it as a register value.
     """
+    # VOP3 result modifiers (apply_omod/apply_clamp) always emit a float/double
+    # lambda regardless of the declared dst type, so a write to a non-float
+    # register (e.g. v_mov_b32 with omod/clamp) still needs the bit_cast back —
+    # without it the float is truncated float->int at the integer write_lane.
+    # apply_src_mod only produces a float lambda when it actually applies abs/neg
+    # to a float source; otherwise it passes its operand through unchanged.
+    if node.kind == SemaNodeKind.CALL:
+        if node.call_name in ("apply_omod", "apply_clamp"):
+            return 64 if (node.ty and node.ty.size == 64) else 32
+        if node.call_name == "apply_src_mod":
+            src = node.children[1] if len(node.children) > 1 else None
+            has_neg = len(node.children) > 3 and node.children[3].lit_value == "1"
+            has_abs = len(node.children) > 4 and node.children[4].lit_value == "1"
+            src_is_int = src is not None and src.ty and src.ty.base in ("I", "U")
+            if (has_neg or has_abs) and not src_is_int:
+                return 64 if (node.ty and node.ty.size == 64) else 32
+            return _rhs_is_float_expr(src) if src is not None else 0
     if node.ty and node.ty.base in ("F", "BF") and node.ty.size in (32, 64):
         if node.kind in (
             SemaNodeKind.ADD,
