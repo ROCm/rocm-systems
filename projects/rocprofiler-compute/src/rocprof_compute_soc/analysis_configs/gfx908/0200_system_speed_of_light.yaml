@@ -17,6 +17,7 @@ Panel Config:
           value: None
           unit: GFLOP/s
           peak: (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000)
+          pop: false
         MFMA FLOPs (BF16):
           value: None
           unit: GFLOP/s

@@ -11,6 +11,7 @@ import pandas as pd
 import pytest
 
 from utils.metrics.aggregation import (
+    calc_pct_of_peak,
     to_concat,
     to_int,
     to_max,
@@ -146,6 +147,23 @@ class TestAggregation:
         assert to_mod(10, 3) == 1, (
             "to_mod should return the modulo of two scalar arguments"
         )
+
+    def test_calc_pct_of_peak_returns_correct_percentage(self):
+        """calc_pct_of_peak returns 100.0 * value / peak for valid inputs."""
+        assert calc_pct_of_peak(50.0, 200.0) == pytest.approx(25.0)
+
+    def test_calc_pct_of_peak_returns_none_for_zero_peak(self):
+        """calc_pct_of_peak returns None when peak is zero."""
+        assert calc_pct_of_peak(50.0, 0.0) is None
+
+    def test_calc_pct_of_peak_returns_none_for_nan_input(self):
+        """calc_pct_of_peak returns None for NaN inputs."""
+        assert calc_pct_of_peak(np.nan, 200.0) is None
+        assert calc_pct_of_peak(50.0, np.nan) is None
+
+    def test_calc_pct_of_peak_returns_none_for_non_numeric(self):
+        """calc_pct_of_peak returns None for non-numeric inputs."""
+        assert calc_pct_of_peak("N/A", 200.0) is None
 
 
 # =============================================================================

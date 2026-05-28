@@ -21,6 +21,8 @@ from utils.metrics.noise_clamper import (
     get_noise_clamp_warnings,
     print_noise_clamp_summary,
 )
+from utils.mi_gpu_spec import mi_gpu_specs
+from utils.utils_analysis import PEAK_COL_PREFERENCE, VALUE_COL_PREFERENCE
 from utils.utils_common import SUPPORTED_FIELD, calc_builtin_var
 from utils.utils_counter_defs import get_build_in_vars
 
@@ -193,7 +195,10 @@ def eval_metric(
         if dfs_type[df_id] == "metric_table":
             for row_id, row in df.iterrows():
                 for expr in df.columns:
-                    if expr in SUPPORTED_FIELD and expr.lower() != "alias":
+                    if expr in SUPPORTED_FIELD and expr.lower() not in {
+                        "alias",
+                        "pct of peak",
+                    }:
                         if row[expr]:
                             exprs_to_eval.append((df_id, row_id, expr, row[expr]))
 
@@ -238,10 +243,7 @@ def eval_metric(
 
 
 def compute_pct_of_peak(dfs: dict, dfs_type: dict) -> None:
-    """
-    Reads the pop flag and, when *True*,
-    overwrites the cell with ``100 * value / peak``.
-    """
+    """Compute and store 100 * value / peak for each row where pop is True."""
     pop_col = "Pct of Peak"
     for df_id, df in dfs.items():
         if dfs_type[df_id] != "metric_table":
@@ -249,24 +251,19 @@ def compute_pct_of_peak(dfs: dict, dfs_type: dict) -> None:
         if pop_col not in df.columns:
             continue
 
-        # Detect value and peak columns by name
-        value_col = (
-            "Value"
-            if "Value" in df.columns
-            else ("Avg" if "Avg" in df.columns else None)
+        # Detect value and peak columns using canonical preference order
+        value_col = next(
+            (col for col in VALUE_COL_PREFERENCE if col in df.columns), None
         )
-        peak_col = (
-            "Peak (Empirical)"
-            if "Peak (Empirical)" in df.columns
-            else ("Peak" if "Peak" in df.columns else None)
-        )
+        peak_col = next((col for col in PEAK_COL_PREFERENCE if col in df.columns), None)
         if not value_col or not peak_col:
             continue
 
-        mask = df[pop_col].apply(lambda v: v is True)
+        # astype(bool) handles both Python bool and numpy.bool_ from pandas dtypes
+        mask = df[pop_col].astype(bool)
         df[pop_col] = ""
         df.loc[mask, pop_col] = [
-            calc_pct_of_peak(v, p)
+            pct if (pct := calc_pct_of_peak(v, p)) is not None else ""
             for v, p in zip(df.loc[mask, value_col], df.loc[mask, peak_col])
         ]
 

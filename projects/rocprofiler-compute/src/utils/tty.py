@@ -96,7 +96,7 @@ def scale_bw_columns(
                 pct = calc_pct_of_peak(
                     df_copy.loc[idx, value_col], df_copy.loc[idx, peak_col]
                 )
-                if pct != "":
+                if pct is not None:
                     df_copy.loc[idx, pct_col] = round(pct, decimal)
 
         df_copy.loc[idx, "Unit"] = unit
