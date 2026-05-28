@@ -789,6 +789,7 @@ struct ncclComm {
   // custom collective [RCCL]
   bool enableCustColl;
   int pxnDisable;  // per-comm PXN-disable cache: -1 uninit, 0 enabled, 1 disabled
+  int p2pNetChunkSize;  // per-comm P2P NET chunk size cache: RCCL_VALUE_UNSET uninit
   // gfx name from hipDeviceProp_t [RCCL] , Memory resource owned by comm allocated in ncclCommInitRankFunc
   char* archName;
   // multiProcessorCount from hipDeviceProp_t [RCCL]
