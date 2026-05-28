@@ -1,0 +1,36 @@
+{
+  "name": "cdna4",
+  "wave_size": 64,
+  "simds_per_cu": 4,
+  "wave_slots_per_simd": 8,
+  "front_end_issue_per_simd": 1,
+  "vgprs_per_simd": 1536,
+  "sgprs_per_cu": 4096,
+  "lds_bytes_per_cu": 163840,
+  "lds_banks": 32,
+  "lds_bytes_per_bank": 5120,
+
+  "valu":     { "issue_rate": 1,  "base_latency": 4 },
+  "salu":     { "issue_rate": 1,  "base_latency": 1 },
+  "smem":     { "issue_rate": 1,  "base_latency": 20 },
+  "vmem":     { "issue_rate": 1,  "base_latency": 200 },
+  "lds_pipe": { "issue_rate": 1,  "base_latency": 24 },
+  "mfma":     { "issue_rate": 16, "base_latency": 16 },
+  "has_mfma": true, "has_wmma": false, "has_vopd": false,
+
+  "l1v": { "size_kb": 32,   "ways": 4,  "line_bytes": 128, "hit_latency": 6,  "miss_to_next_level": 200 },
+  "l1s": { "size_kb": 16,   "ways": 4,  "line_bytes": 64,  "hit_latency": 4,  "miss_to_next_level": 200 },
+  "l2":  { "size_kb": 4096, "ways": 16, "line_bytes": 128, "hit_latency": 80, "miss_to_next_level": 400 },
+  "mshrs_per_l1v": 16, "hbm_channels": 8,
+  "l2_bytes_per_cycle": 1024, "hbm_access_latency": 300,
+  "hbm_bytes_per_channel_per_cycle": 396,
+
+  "opcode_latency": {
+    "v_mfma_f32_16x16x16_f16":     { "issue_rate": 16, "base_latency": 16 },
+    "v_mfma_f32_32x32x8_f16":      { "issue_rate": 32, "base_latency": 32 },
+    "v_mfma_f32_16x16x32_bf8_bf8": { "issue_rate": 16, "base_latency": 16 }
+  },
+  "dep_rules": [
+    { "producer": "v_mfma_f32_16x16x16_f16", "consumer": "v_*", "min_gap_cyc": 16, "same_dest_only": true }
+  ]
+}

@@ -34,6 +34,8 @@ set(RJ_OBJECT_LIBS
 add_executable(
     rocjitsu_tests
     rvsim_test.cpp
+    cu_cycle_model_test.cpp
+    mem_sys_cycle_model_test.cpp
     amdgpu_vm_test.cpp
     config_test.cpp
     matmul_test.cpp
@@ -52,6 +54,8 @@ add_executable(
     instruction_execution_harness_test.cpp
     decode_execute_benchmark.cpp
     execution_plugin_test.cpp
+    mem_descriptor_test.cpp
+    runtime_set_assoc_tags_test.cpp
 )
 target_link_libraries(
     rocjitsu_tests

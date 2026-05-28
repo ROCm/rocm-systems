@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/kmd/linux/simulated_driver.h"
+#include "plugins/cu_cycle_model.h"
+#include "plugins/cycle_model_plugin.h"
+#include "plugins/mem_sys_cycle_model.h"
 #include "plugins/kernel_logging_plugin.h"
 #include "plugins/race_detection_plugin.h"
 #include "rocjitsu/config/config_loader.h"
@@ -26,6 +29,7 @@
 #include <sys/syscall.h>
 #include <thread>
 #include <unistd.h>
+#include <unordered_map>
 #include <vector>
 
 namespace rocjitsu {
@@ -174,6 +178,12 @@ std::unique_ptr<SimulatedDriver> SimulatedDriver::create_default() {
     add_plugin(std::make_unique<amdgpu::RaceDetectionPlugin>());
     fprintf(stderr, "[rocjitsu] Race detection enabled (RJ_RACE)\n");
   }
+
+  const char *cycle = std::getenv("RJ_CYCLE");
+  if (cycle && std::string(cycle) == "1") {
+    add_plugin(std::make_unique<amdgpu::CycleModelPlugin>());
+    fprintf(stderr, "[rocjitsu] Cycle model enabled (RJ_CYCLE)\n");
+  }
   soc->set_plugin_group(pg);
 
   // Override max_ticks: the KFD driver runs the engine indefinitely, waiting for
@@ -186,6 +196,50 @@ std::unique_ptr<SimulatedDriver> SimulatedDriver::create_default() {
   // Wire L2→HBM backing store links (must happen after set_memory populates
   // the standalone HBM controller, and before the engine runs).
   soc->wire_backing(state->engine->topology());
+  // RJ_CYCLE: register one clocked timing shell under each CU, in a CU clock
+  // domain, while the topology is still mutable (pre-build). Each shell's
+  // ArchModel is configured lazily by CycleModelPlugin on first dispatch.
+  if (cycle && std::string(cycle) == "1") {
+    // CU core clock from the device config (max_engine_clk_fcompute, MHz -> Hz;
+    // cdna4 = 2.7 GHz), replacing the prior 1 GHz placeholder. Cycle COUNTS stay
+    // frequency-independent — cu_cycle advances one per edge, all timing math is in
+    // cu-cycle units, and the HBM:CU ratio is pre-baked into the cycle config
+    // (hbm_bytes_per_channel_per_cycle); the frequency only sets the engine-tick
+    // timestamps used for message-delivery ordering. The HBM clock (mem_clk_max) is
+    // therefore not plumbed separately — it would have no consumer.
+    const uint32_t cu_mhz = state->loaded.device.max_engine_clk_fcompute;
+    const uint64_t cu_clock_hz = (cu_mhz ? cu_mhz : 1000ull) * 1'000'000ull;
+    auto &topology = state->engine->topology();
+    auto *cu_clk = topology.add_clock_domain("cu_clk", cu_clock_hz);
+    // One shared MemSysCycleModel per Xcd (owns the L2/HBM SharedMemModel). The
+    // SharedMemModel is configured later, lazily, by CycleModelPlugin on first
+    // dispatch; here we only build the component + wire the per-CU Links.
+    std::unordered_map<amdgpu::Xcd *, amdgpu::MemSysCycleModel *> xcd_mem;
+    for (auto *comp : topology.collect_all_components()) {
+      auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(comp);
+      if (!cu) continue;
+      auto *cu_cycle = dynamic_cast<amdgpu::CuCycleModel *>(cu->add_child(
+          std::make_unique<amdgpu::CuCycleModel>(cu->name() + ".cycle_model", *cu_clk)));
+      // Resolve the owning Xcd (CU -> ShaderEngine -> Xcd) and memoize one
+      // MemSysCycleModel per Xcd, wiring this CU's req/cpl Link pair to it.
+      amdgpu::Xcd *xcd = nullptr;
+      if (auto *se = cu->parent()) xcd = dynamic_cast<amdgpu::Xcd *>(se->parent());
+      if (!xcd || !cu_cycle) continue;
+      auto mit = xcd_mem.find(xcd);
+      amdgpu::MemSysCycleModel *ms = nullptr;
+      if (mit == xcd_mem.end()) {
+        ms = dynamic_cast<amdgpu::MemSysCycleModel *>(xcd->add_child(
+            std::make_unique<amdgpu::MemSysCycleModel>(xcd->name() + ".mem_sys")));
+        xcd_mem.emplace(xcd, ms);
+      } else {
+        ms = mit->second;
+      }
+      if (!ms) continue;
+      auto ports = ms->add_cu_ports();
+      topology.add_link(cu_cycle->req_out(), ports.req_in, /*latency=*/1);
+      topology.add_link(ports.cpl_out, cu_cycle->cpl_in(), /*latency=*/1);
+    }
+  }
   state->engine->build();
 
   // Start the simulation engine in a background thread. The engine runs

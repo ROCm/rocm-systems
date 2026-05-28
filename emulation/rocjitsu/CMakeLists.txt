@@ -207,6 +207,10 @@ add_subdirectory(
     ${CMAKE_CURRENT_SOURCE_DIR}/../plugins/race-detector
     ${CMAKE_BINARY_DIR}/race-detector
 )
+add_subdirectory(
+    ${CMAKE_CURRENT_SOURCE_DIR}/../plugins/cycle-model
+    ${CMAKE_BINARY_DIR}/cycle-model
+)
 add_subdirectory(plugins)
 
 # Main shared library - assembles all object libraries.
