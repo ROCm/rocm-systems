@@ -177,6 +177,8 @@ TopoExplResult topoExplCreate(
     for (int i = 0; i < ctx->nRanks; i++) {
       ctx->comms[i].rank = i;
       ctx->comms[i].nRanks = ctx->nRanks;
+      ctx->comms[i].pxnDisable      = RCCL_VALUE_UNSET;
+      ctx->comms[i].p2pNetChunkSize = RCCL_VALUE_UNSET;
       TOPO_NCCLCHECK(ncclCalloc(&ctx->comms[i].connectSend, NCCL_MAX_CONNS * ctx->nRanks));
       TOPO_NCCLCHECK(ncclCalloc(&ctx->comms[i].connectRecv, NCCL_MAX_CONNS * ctx->nRanks));
       

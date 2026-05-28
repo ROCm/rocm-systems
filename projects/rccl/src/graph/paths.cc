@@ -661,17 +661,16 @@ NCCL_PARAM(PxnDisable, "PXN_DISABLE", 1);
 // remote proxies without risking deadlocks
 int ncclPxnDisable(struct ncclComm* comm) {
 #if defined(NCCL_OS_LINUX)
-  static int pxnDisable = -1;
-  if (pxnDisable == -1) {
-    if (comm && comm->ncclNetVer == 4) {
-      INFO(NCCL_INIT, "PXN Disabled as plugin is v4");
-      pxnDisable = 1;
-    } else {
-      rcclSetPxn(comm, pxnDisable);
-      pxnDisable = (pxnDisable > RCCL_VALUE_INVALID)? pxnDisable : ncclParamPxnDisable();
-    }
+  if (comm->pxnDisable > RCCL_VALUE_INVALID) return comm->pxnDisable;
+  if (comm->ncclNetVer == 4) {
+    INFO(NCCL_INIT, "PXN Disabled as plugin is v4");
+    comm->pxnDisable = 1;
+  } else {
+    int v = -1;
+    rcclSetPxn(comm, v);
+    comm->pxnDisable = (v > RCCL_VALUE_INVALID) ? v : ncclParamPxnDisable();
   }
-  return pxnDisable;
+  return comm->pxnDisable;
 #else
   return 1;
 #endif
