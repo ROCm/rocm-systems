@@ -677,17 +677,18 @@ write_perfetto(
                             (*it)->end_timestamp     = mid;
                             (*next)->start_timestamp = mid;
 
-                            // The modified start may have pushed *next rightward in sort
-                            // order. Bubble the pointer forward to restore sorted order so
-                            // subsequent iterations see correct neighbors.
-                            auto bubble_it = next;
-                            while(std::next(bubble_it) != qitr.second.end() &&
-                                  (*bubble_it)->start_timestamp >
-                                      (*std::next(bubble_it))->start_timestamp)
-                            {
-                                std::iter_swap(bubble_it, std::next(bubble_it));
-                                ++bubble_it;
-                            }
+                            // The modified start may have pushed *next behind multiple later
+                            // records. Find the correct insertion point and rotate in one
+                            // shot so subsequent iterations see correct neighbors.
+                            auto insert_it =
+                                std::upper_bound(std::next(next),
+                                                 qitr.second.end(),
+                                                 (*next)->start_timestamp,
+                                                 [](rocprofiler_timestamp_t lhs, const auto* rhs) {
+                                                     return lhs < rhs->start_timestamp;
+                                                 });
+                            if(insert_it != std::next(next))
+                                std::rotate(next, std::next(next), insert_it);
                         }
 
                         if(demangled.find(name) == demangled.end())
