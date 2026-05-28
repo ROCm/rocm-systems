@@ -945,13 +945,11 @@ namespace __hip_internal {
 template <>
 struct NumericLimits<__half> {
     static constexpr __half maximum() {
-      __half_raw raw {};
-      raw.x = 0x7BFF;
+      __half_raw raw { .x = 0x7BFF };
       return __half(raw);
     }
     static constexpr __half lowest() {
-      __half_raw raw {};
-      raw.x = 0xFBFF;
+      __half_raw raw { .x = 0xFBFF };
       return __half(raw);
     }
 };
