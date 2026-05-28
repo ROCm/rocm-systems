@@ -74,6 +74,7 @@ def run_gcovr(
         "--exclude-throw-branches",
         "--gcov-ignore-parse-errors",
         "--merge-lines",
+        "--merge-mode-functions=merge-use-line-max",
         "-s",
         "-p",
         "--json",
