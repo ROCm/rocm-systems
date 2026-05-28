@@ -795,6 +795,7 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->rank = rank;
   comm->nRanks = ndev;
   comm->pxnDisable = -1;
+  comm->p2pNetChunkSize = RCCL_VALUE_UNSET;
 
   comm->hierarchicalIntraComm = nullptr;
   comm->hierarchicalInterComm = nullptr;

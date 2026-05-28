@@ -529,24 +529,28 @@ void rcclSetPxn(struct ncclComm* comm,  int& rcclPxnDisable) {
 }
 
 void rcclSetP2pNetChunkSize(struct ncclComm* comm,  int& rcclP2pNetChunkSize) {
-  static int p2pNetChunkSize = RCCL_VALUE_UNSET;
-  if(p2pNetChunkSize == RCCL_VALUE_UNSET) {
-    const char *inputStr = getenv("NCCL_P2P_NET_CHUNKSIZE");
-    const bool archGfx942 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942");
-    const bool archGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
-    if((!archGfx942 && !archGfx950) || inputStr) {
-      rcclP2pNetChunkSize = p2pNetChunkSize = RCCL_VALUE_INVALID;
-      return;
-    }
-
-    if(archGfx942)
-      p2pNetChunkSize = (comm->nRanks >= 64)? (1 << 19) : (1 << 17);
-    else  if(archGfx950)
-      p2pNetChunkSize = (comm->nRanks >= 32) ? (1 << 19) : (comm->nRanks >= 16 ? (1 << 18) : (1 << 17));
-    else
-      WARN("RCCL P2P attempt to set P2P net chunk size for unsupported arch: %s", comm->topo->nodes[GPU].nodes[0].gpu.gcn);
-    INFO(NCCL_INIT, "RCCL P2P net chunk size default set to: %d", p2pNetChunkSize);
+  if (comm->p2pNetChunkSize != RCCL_VALUE_UNSET) {
+    rcclP2pNetChunkSize = comm->p2pNetChunkSize;
+    return;
   }
+  const char *inputStr = getenv("NCCL_P2P_NET_CHUNKSIZE");
+  const bool archGfx942 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942");
+  const bool archGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
+  if((!archGfx942 && !archGfx950) || inputStr) {
+    rcclP2pNetChunkSize = comm->p2pNetChunkSize = RCCL_VALUE_INVALID;
+    return;
+  }
+
+  int p2pNetChunkSize = RCCL_VALUE_UNSET;
+  if(archGfx942)
+    p2pNetChunkSize = (comm->nRanks >= 64)? (1 << 19) : (1 << 17);
+  else if(archGfx950)
+    p2pNetChunkSize = (comm->nRanks >= 32) ? (1 << 19) : (comm->nRanks >= 16 ? (1 << 18) : (1 << 17));
+  else
+    WARN("RCCL P2P attempt to set P2P net chunk size for unsupported arch: %s", comm->topo->nodes[GPU].nodes[0].gpu.gcn);
+  INFO(NCCL_INIT, "RCCL P2P net chunk size default set to: %d (nRanks=%d)",
+       p2pNetChunkSize, comm->nRanks);
+  comm->p2pNetChunkSize = p2pNetChunkSize;
   rcclP2pNetChunkSize = p2pNetChunkSize;
 }
 #ifdef ENABLE_WARP_SPEED
