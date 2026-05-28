@@ -24,12 +24,6 @@ public:
 class EnvInputParameters : public InputParameters
 {
 public:
-    static constexpr std::string_view kDefaultOutputPath{"./workloads/"};
-    static constexpr std::string_view kDefaultRequestedCounters{""};
-    static constexpr std::string_view kDefaultIterationMultiplexingMode{""};
-    static constexpr std::string_view kDefaultKernelFilterIncludeRegex{""};
-    static constexpr std::string_view kDefaultKernelFilterRange{""};
-
     static std::string_view get_default_output_path() { return kDefaultOutputPath; }
 
     static std::string_view get_default_requested_counters() { return kDefaultRequestedCounters; }
@@ -54,6 +48,12 @@ public:
     std::string_view get_kernel_filter_range() override;
 
 private:
+    static constexpr std::string_view kDefaultOutputPath{"./"};
+    static constexpr std::string_view kDefaultRequestedCounters{""};
+    static constexpr std::string_view kDefaultIterationMultiplexingMode{""};
+    static constexpr std::string_view kDefaultKernelFilterIncludeRegex{""};
+    static constexpr std::string_view kDefaultKernelFilterRange{""};
+
     std::string_view get_or_warn(std::string_view env_var_name, std::string_view default_value);
 
     std::shared_ptr<const EnvironCache> m_environ;
