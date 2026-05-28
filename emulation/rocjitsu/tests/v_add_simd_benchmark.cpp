@@ -645,6 +645,21 @@ TEST(VAddSimdBenchmark, Cdna4_VCeilF16_Vop3) {
   run_words("v_ceil_f16_e64 v2, v0", w0, w1, /*sanitize_finite=*/false);
 }
 
+// v_rcp_f16_e64 v2, v0  (CDNA4 VOP3 opcode 381) — f16 transcendental; widen
+// f16->f32, FTZ-flush input, IEEE 1/x, FTZ-flush output, narrow f32->f16. Pays
+// the f16<->f32 round-trip on top of the rcp helper. Same NaN-passthrough
+// (input NaN bits preserved) in both scalar and SIMD paths, so the bit-exact
+// pre-check holds on raw random inputs (no `sanitize_finite` needed).
+TEST(VAddSimdBenchmark, Cdna4_VRcpF16_Vop3) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  uint32_t w0, w1;
+  vop3_bin_encode(381, /*vdst=*/2, /*src0=*/256, /*src1=*/0, 0, 0, 0, 0, w0, w1);
+  run_words("v_rcp_f16_e64 v2, v0", w0, w1, /*sanitize_finite=*/false);
+}
+
 // v_fma_f32_e64 v6, v0, v1, v2  (CDNA4 VOP3 opcode 459) — f32 ternary FMA via
 // the new try_execute_ternary_vop3_fp_simd glue. Encoded with src2=v2 (NOT
 // dst-accumulate; the v_fmac form is deferred to a separate slice).
