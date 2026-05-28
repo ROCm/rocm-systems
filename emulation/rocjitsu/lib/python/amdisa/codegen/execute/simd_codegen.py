@@ -1067,6 +1067,18 @@ def simd_probe_line(template_name: str) -> str | None:
     if specvopc64 is not None:
         lane_t, cpp_op = specvopc64
         return f"  ROCJITSU_TRY_SIMD_VOPC64({lane_t}, {cpp_op});"
+    # VOP3-encoded twins of the SIMD VOP2 binary ops. Same operator/lane type;
+    # the VOP3 form reads src0/src1 and carries abs/neg/omod/clamp modifiers.
+    # f32 ops apply the modifiers in-vector (bit-exact); integer/bitwise ops
+    # apply none (their scalar bodies ignore them), so the plain op suffices.
+    if template_name.endswith("_vop3"):
+        vop2_twin = template_name[: -len("_vop3")] + "_vop2"
+        spec2v3 = SIMD_VOP2_BINARY.get(vop2_twin)
+        if spec2v3 is not None:
+            cpp_t, cpp_op = spec2v3
+            if cpp_t == "float32_t":
+                return f"  ROCJITSU_TRY_SIMD_VOP3_BINARY_FP({cpp_t}, {cpp_op});"
+            return f"  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT({cpp_t}, {cpp_op});"
     return None
 
 
