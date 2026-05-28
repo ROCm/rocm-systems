@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <stdexcept>
 #include <timemory/components/base/declaration.hpp>
+#include <type_traits>
 
 #include "logger/debug.hpp"
 
@@ -92,40 +93,17 @@ struct pthread_mutex_gotcha : tim::component::base<pthread_mutex_gotcha<Policy>,
 
     static void resume() { s_is_paused.store(false, std::memory_order_relaxed); }
 
-    int operator()(int (*_callee)(pthread_mutex_t*), pthread_mutex_t* _mutex) const
+    template <typename Lock,
+              std::enable_if_t<std::disjunction_v<std::is_same<Lock, pthread_mutex_t>,
+                                                  std::is_same<Lock, pthread_spinlock_t>,
+                                                  std::is_same<Lock, pthread_rwlock_t>,
+                                                  std::is_same<Lock, pthread_barrier_t>>,
+                               int> = 0>
+    [[nodiscard]] int operator()(int (*_callee)(Lock*), Lock* _lock) const
     {
-        if(Policy::inactive_state() || m_protect)
-        {
-            return (*_callee)(_mutex);
-        }
-        return (*this)(reinterpret_cast<uintptr_t>(_mutex), _callee, _mutex);
-    }
-
-    int operator()(int (*_callee)(pthread_spinlock_t*), pthread_spinlock_t* _lock) const
-    {
-        if(Policy::inactive_state() || m_protect)
-        {
-            return (*_callee)(_lock);
-        }
-        return (*this)(reinterpret_cast<uintptr_t>(_lock), _callee, _lock);
-    }
-
-    int operator()(int (*_callee)(pthread_rwlock_t*), pthread_rwlock_t* _lock) const
-    {
-        if(Policy::inactive_state() || m_protect)
-        {
-            return (*_callee)(_lock);
-        }
-        return (*this)(reinterpret_cast<uintptr_t>(_lock), _callee, _lock);
-    }
-
-    int operator()(int (*_callee)(pthread_barrier_t*), pthread_barrier_t* _barrier) const
-    {
-        if(Policy::inactive_state() || m_protect)
-        {
-            return (*_callee)(_barrier);
-        }
-        return (*this)(reinterpret_cast<uintptr_t>(_barrier), _callee, _barrier);
+        return (Policy::inactive_state() || m_protect)
+                   ? (*_callee)(_lock)
+                   : (*this)(reinterpret_cast<uintptr_t>(_lock), _callee, _lock);
     }
 
     int operator()(int (*_callee)(pthread_t, void**), pthread_t _thr, void** _tinfo) const
