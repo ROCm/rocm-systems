@@ -1701,6 +1701,30 @@ __host__ int rocshmem_test(T *ivars, int cmp, T val) {
     return rocshmem_test<T>(ivars, cmp, val);                                 \
   }
 
+#define REDUCTION_ON_STREAM_IMP_GEN(T, TNAME, Op, Op_API) \
+    int rocshmem_##TNAME##_##Op##_reduce_on_stream(rocshmem_team_t team, T *dest, \
+                                                   const T *source, size_t nreduce, \
+                                                   hipStream_t stream){             \
+    return get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->reduce_on_stream<T, Op_API>(team, \
+                                                        dest, source, static_cast<int>(nreduce), stream); \
+   }
+#define REDUCTION_ON_STREAM_IMP_GEN_ARITH(T, TNAME) \
+    REDUCTION_ON_STREAM_IMP_GEN(T, TNAME, sum, ROCSHMEM_SUM) \
+    REDUCTION_ON_STREAM_IMP_GEN(T, TNAME, min, ROCSHMEM_MIN) \
+    REDUCTION_ON_STREAM_IMP_GEN(T, TNAME, max, ROCSHMEM_MAX) \
+    REDUCTION_ON_STREAM_IMP_GEN(T, TNAME, prod, ROCSHMEM_PROD)
+
+#define REDUCTION_ON_STREAM_IMP_GEN_BITWISE(T, TNAME)  \
+  REDUCTION_ON_STREAM_IMP_GEN(T, TNAME, or, ROCSHMEM_OR)  \
+  REDUCTION_ON_STREAM_IMP_GEN(T, TNAME, and, ROCSHMEM_AND) \
+  REDUCTION_ON_STREAM_IMP_GEN(T, TNAME, xor, ROCSHMEM_XOR)
+
+#define INT_REDUCTION_ON_STREAM_GEN_IMP(T, TNAME) \
+  REDUCTION_ON_STREAM_IMP_GEN_ARITH(T, TNAME)     \
+  REDUCTION_ON_STREAM_IMP_GEN_BITWISE(T, TNAME)
+
+#define FLOAT_REDUCTION_ON_STREAM_GEN_IMP(T, TNAME) REDUCTION_ON_STREAM_IMP_GEN_ARITH(T, TNAME)
+
 /******************************************************************************
  ************************* Macro Invocation Per Type **************************
  *****************************************************************************/
@@ -1853,6 +1877,30 @@ WAIT_DEF_GEN(unsigned int, uint)
 WAIT_DEF_GEN(unsigned long, ulong)
 WAIT_DEF_GEN(unsigned long long, ulonglong)
 WAIT_DEF_GEN(uint64_t, uint64)
+
+INT_REDUCTION_ON_STREAM_GEN_IMP(int, int)
+INT_REDUCTION_ON_STREAM_GEN_IMP(long, long)
+INT_REDUCTION_ON_STREAM_GEN_IMP(long long, longlong)
+INT_REDUCTION_ON_STREAM_GEN_IMP(short, short)
+INT_REDUCTION_ON_STREAM_GEN_IMP(char, char)
+INT_REDUCTION_ON_STREAM_GEN_IMP(int8_t, int8)
+INT_REDUCTION_ON_STREAM_GEN_IMP(int16_t, int16)
+INT_REDUCTION_ON_STREAM_GEN_IMP(int32_t, int32)
+INT_REDUCTION_ON_STREAM_GEN_IMP(int64_t, int64)
+INT_REDUCTION_ON_STREAM_GEN_IMP(unsigned int, uint)
+INT_REDUCTION_ON_STREAM_GEN_IMP(unsigned long, ulong)
+INT_REDUCTION_ON_STREAM_GEN_IMP(unsigned long long, ulonglong)
+INT_REDUCTION_ON_STREAM_GEN_IMP(unsigned short, ushort)
+INT_REDUCTION_ON_STREAM_GEN_IMP(signed char, schar)
+INT_REDUCTION_ON_STREAM_GEN_IMP(unsigned char, uchar)
+INT_REDUCTION_ON_STREAM_GEN_IMP(uint8_t, uint8)
+INT_REDUCTION_ON_STREAM_GEN_IMP(uint16_t, uint16)
+INT_REDUCTION_ON_STREAM_GEN_IMP(uint32_t, uint32)
+INT_REDUCTION_ON_STREAM_GEN_IMP(uint64_t, uint64)
+INT_REDUCTION_ON_STREAM_GEN_IMP(size_t, size)
+
+FLOAT_REDUCTION_ON_STREAM_GEN_IMP(float, float)
+FLOAT_REDUCTION_ON_STREAM_GEN_IMP(double, double)
 // clang-format on
 
 }  // namespace rocshmem

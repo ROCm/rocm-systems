@@ -162,6 +162,10 @@ class ROHostContext : public Context {
 
   __host__ void sync_all();
 
+  template <typename T, ROCSHMEM_OP Op>
+  __host__ int reduce_on_stream(rocshmem_team_t team, T *dest, const T *source, 
+                                int nreduce, hipStream_t stream);
+
   template <typename T>
   __host__ void broadcast(T *dest, const T *source, int nelems, int pe_root,
                           int pe_start, int log_pe_stride, int pe_size,
