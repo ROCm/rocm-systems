@@ -6,11 +6,12 @@ This example exercises HIP managed-memory (`hipMallocManaged`) access patterns
 that intentionally trigger KFD page-fault and page-migration events. It runs a
 sequence of workloads -- single-allocation host/device alternation, ping-pong
 access, prefetch-driven migration, memory-pressure scenarios, and
-concurrent-kernel access -- chosen to populate every direction bucket
-(host-to-device, device-to-host) and every fault trigger (`gpu_page_fault`,
-`cpu_page_fault`, `prefetch`) in the unified-memory report. It is the reference
-workload for validating `ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING` in the
-pytest/CTest validation suite.
+concurrent-kernel access. On systems that expose KFD migrations, these
+workloads populate the host-to-device and device-to-host direction buckets. They
+also populate every fault trigger (`gpu_page_fault`, `cpu_page_fault`,
+`prefetch`) in the unified-memory report. It is the reference workload for
+validating `ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING` in the pytest/CTest
+validation suite.
 
 ## Source Files
 
@@ -81,10 +82,19 @@ Output files (written to the standard rocprofiler-systems output directory):
 
 | File | Contents |
 | ------ | ---------- |
-| `unified_memory.txt` | Human-readable per-GPU summary: total page faults, trigger breakdown (`gpu_page_fault`, `cpu_page_fault`, `prefetch`), and Host-to-Device / Device-to-Host effective migration throughput. |
-| `unified_memory.json` | Machine-readable equivalent with the same fields, plus an `xnack_enabled` flag and an always-present `device_to_device` bucket for schema stability. |
-| `perfetto-trace.proto` | Standard Perfetto trace, including KFD page-fault and migration tracks. |
+| `unified_memory.txt` | Human-readable per-GPU summary: total page faults, trigger breakdown (`gpu_page_fault`, `cpu_page_fault`, `prefetch`), and Host-to-Device / Device-to-Host effective migration throughput when migration events are present. |
+| `unified_memory.json` | Machine-readable equivalent with the same fields, plus an `xnack_enabled` flag and an always-present `device_to_device` bucket for schema stability. Migration buckets can remain at zero on systems that do not generate KFD migration events. |
+| `perfetto-trace.proto` | Standard Perfetto trace, including KFD page-fault tracks and migration tracks when migration events are present. |
 | `rocpd.db` *(optional)* | Standard ROCpd database; KFD events are recorded in the `kfd_page_fault` / `kfd_page_migrate` tables. |
+
+### Shared-HBM Systems
+
+On MI300A and other systems where CPU and GPU agents point to the same physical
+HBM, page faults can occur without page migrations because there is no separate
+CPU memory and GPU memory to migrate between. In that topology, a valid
+unified-memory profile can be fault-only: page-fault totals and trigger
+breakdowns populate, migration counters remain zero, and the Perfetto
+migration-throughput track is not shown.
 
 ### Recommended Configuration
 
