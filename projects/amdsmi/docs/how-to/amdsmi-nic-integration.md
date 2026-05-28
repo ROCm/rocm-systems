@@ -78,7 +78,7 @@ System
 ```
 
 Vendor-specific processor types for third-party NICs are also supported and are
-assigned distinct `processor_type_t` identifiers during device discovery (see
+assigned distinct `amdsmi_processor_type_t` identifiers during device discovery (see
 the [Processor types](#processor-types) section).
 
 Each NIC is represented as a **processor handle** (`amdsmi_processor_handle`).
@@ -97,7 +97,7 @@ flowchart TD
 
 ### Processor types
 
-The `processor_type_t` enum defines all device types detectable by AMD SMI.
+The `amdsmi_processor_type_t` enum defines all device types detectable by AMD SMI.
 The values relevant to NIC devices are:
 
 ```c
@@ -111,17 +111,12 @@ typedef enum {
     AMDSMI_PROCESSOR_TYPE_AMD_APU,       // AMD APU (GPU + CPU on a single die)
     AMDSMI_PROCESSOR_TYPE_AMD_NIC,       // AMD NIC (for example, Pensando)
     // Additional vendor-specific NIC types follow here
-} processor_type_t;
+} amdsmi_processor_type_t;
 ```
 
 Third-party NIC vendors are assigned their own processor type values appended
 to this enum, enabling the dispatch layer to route API calls to the correct
 device implementation.
-
-:::{note}
-The type name is `processor_type_t` (not prefixed with `amdsmi_`), which is
-consistent with the current public header.
-:::
 
 ### Initialization flags
 
@@ -518,7 +513,7 @@ amdsmi_status_t amdsmi_get_socket_handles(uint32_t *socket_count,
 // Supports: AMDSMI_PROCESSOR_TYPE_AMD_NIC and other vendor-specific NIC types
 amdsmi_status_t amdsmi_get_processor_handles_by_type(
     amdsmi_socket_handle socket_handle,
-    processor_type_t processor_type,
+    amdsmi_processor_type_t processor_type,
     amdsmi_processor_handle *processor_handles,
     uint32_t *processor_count);
 ```
@@ -615,7 +610,7 @@ query Broadcom NICs the same way as AMD NICs:
   returns processor handles for every NIC backend registered with the
   dispatch layer (AMD AI NIC and any enabled vendor NICs such as BRCM).
   Where a backend distinction is needed, vendor processor types may be
-  appended to `processor_type_t` (for example, a `*_BRCM_NIC` value) and
+  appended to `amdsmi_processor_type_t` (for example, a `*_BRCM_NIC` value) and
   used as the type argument; the public query APIs remain the same.
 - **Queries**: the existing `amdsmi_get_nic_asic_info()`,
   `amdsmi_get_nic_bus_info()`, `amdsmi_get_nic_numa_info()`,
@@ -964,7 +959,7 @@ any future vendor module.
 ```mermaid
 flowchart LR
     App[User Application / CLI / Python] --> AmdSmi[libamd_smi.so<br/>Public API: amdsmi.h]
-    AmdSmi --> Dispatch{Dispatch by<br/>processor_type_t}
+    AmdSmi --> Dispatch{Dispatch by<br/>amdsmi_processor_type_t}
     Dispatch --> AmdNic[AMD NIC backend<br/>src/nic/ai-nic/]
     Dispatch --> Brcm[BRCM SMI Module<br/>brcm-smi/<br/>ENABLE_BRCM_SMI=ON]
     Dispatch --> VendorX[Other Vendor Module<br/>vendor-smi/]
@@ -1262,7 +1257,7 @@ AMD SMI dispatch — **no new vendor-specific symbols are added to the public
    - Define `ENABLE_<VENDOR>_SMI=1` as a compile definition.
 
 3. **Register with the dispatch layer** in `src/amd_smi/amd_smi.cc`:
-   - If needed, add a vendor processor-type value to `processor_type_t` in
+   - If needed, add a vendor processor-type value to `amdsmi_processor_type_t` in
      `amdsmi.h` (for example, `AMDSMI_PROCESSOR_TYPE_<VENDOR>_NIC`).
    - Wire device discovery into `amdsmi_init()` so the backend's handles are
      returned by `amdsmi_get_processor_handles_by_type()`.
