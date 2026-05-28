@@ -141,7 +141,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       env:
-        LLVM_PROFILE_FILE: "${{ github.workspace }}/projects/rocprofiler-systems/build/coverage/profraw/unit/%p-%m.profraw"
+        LLVM_PROFILE_FILE: "${{ github.workspace }}/projects/rocprofiler-systems/build/coverage/profraw/unit/%c%p-%m.profraw"
       run: |
         mkdir -p build/coverage/profraw/unit
         ./build/coverage/bin/rocprof-sys-unit-tests
@@ -165,7 +165,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       env:
-        LLVM_PROFILE_FILE: "${{ github.workspace }}/projects/rocprofiler-systems/build/coverage/profraw/e2e/%p-%m.profraw"
+        LLVM_PROFILE_FILE: "${{ github.workspace }}/projects/rocprofiler-systems/build/coverage/profraw/e2e/%c%p-%m.profraw"
       run: |
         find build/coverage/profraw -name '*.profraw' -delete
         mkdir -p build/coverage/profraw/e2e
