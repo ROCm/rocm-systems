@@ -412,6 +412,16 @@ hsa_status_t HSA_API hsa_amd_enable_logging(uint8_t* flags, void* file);
 hsa_status_t HSA_API hsa_amd_signal_get_event_id(hsa_signal_t signal, uint32_t *event_id);
 
 // Mirrors Amd Extension Apis
+hsa_status_t hsa_amd_external_semaphore_handle_open(
+    hsa_agent_t agent,
+    const hsa_amd_external_semaphore_handle_descriptor_t *desc,
+    hsa_amd_external_semaphore_t *out_sem);
+
+// Mirrors Amd Extension Apis
+hsa_status_t hsa_amd_external_semaphore_handle_close(
+    hsa_amd_external_semaphore_t sem);
+  
+// Mirrors Amd Extension Apis
 hsa_status_t HSA_API hsa_amd_sdma_queue_create(hsa_agent_t agent, uint32_t flags,
                                                hsa_amd_sdma_engine_id_t engine_id_mask,
                                                size_t queue_size,
@@ -427,6 +437,7 @@ hsa_status_t HSA_API hsa_amd_sdma_queue_get_info(hsa_amd_sdma_queue_t queue,
 // Mirrors Amd Extension Apis
 hsa_status_t HSA_API hsa_amd_sdma_queue_ring_doorbell(hsa_amd_sdma_queue_t queue,
                                                       uint64_t write_index);
+
 }  // namespace amd
 }  // namespace rocr
 

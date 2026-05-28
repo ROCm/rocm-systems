@@ -19,13 +19,13 @@ target_compile_options(parallel-overhead-compile-options INTERFACE -g)
 add_executable(parallel-overhead parallel-overhead.cpp)
 target_link_libraries(
     parallel-overhead
-    PRIVATE Threads::Threads parallel-overhead-compile-options
+    PRIVATE Threads::Threads pthread parallel-overhead-compile-options
 )
 
 add_executable(parallel-overhead-locks parallel-overhead.cpp)
 target_link_libraries(
     parallel-overhead-locks
-    PRIVATE Threads::Threads parallel-overhead-compile-options
+    PRIVATE Threads::Threads pthread parallel-overhead-compile-options
 )
 target_compile_definitions(parallel-overhead-locks PRIVATE USE_LOCKS=1)
 

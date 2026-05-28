@@ -85,7 +85,7 @@ TEST(Alloc, ncclCuMemAlloc)
             void*                      handle = reinterpret_cast<void*>(0x5678);
             size_t                     size   = 1024;
             hipMemAllocationHandleType type   = hipMemHandleTypeNone;
-            ncclResult_t               result = ncclCuMemAlloc(&ptr, &handle, type, size);
+            ncclResult_t               result = ncclCuMemAlloc(&ptr, &handle, type, size, /*manager=*/nullptr);
             EXPECT_EQ(result, ncclInternalError);
         }
     );
@@ -98,7 +98,7 @@ TEST(Alloc, ncclCuMemFree)
         []()
         {
             void*        dummyPtr = reinterpret_cast<void*>(0xdeadbeef);
-            ncclResult_t result   = ncclCuMemFree(dummyPtr);
+            ncclResult_t result   = ncclCuMemFree(dummyPtr, /*manager=*/nullptr);
             EXPECT_EQ(result, ncclInternalError);
         }
     );
@@ -127,7 +127,7 @@ TEST(Alloc, ncclCuMemFreeAddr)
         []()
         {
             void*        testPtr = reinterpret_cast<void*>(0xbeefcafe);
-            ncclResult_t result  = ncclCuMemFreeAddr(testPtr);
+            ncclResult_t result  = ncclCuMemFreeAddr(testPtr, /*manager=*/nullptr);
             ASSERT_EQ(result, ncclInternalError);
         }
     );
