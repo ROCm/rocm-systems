@@ -246,7 +246,7 @@ read_schema_file(rocpd_sql_schema_kind_t schema_kind)
 {
     auto _variables     = common::init_public_api_struct(rocpd_sql_schema_jinja_variables_t{});
     auto _options       = ROCPD_SQL_OPTIONS_NONE;
-    auto _version       = rocpd_version_triplet_t{4, 0, 0};  // default schema version
+    auto _version       = rocpd_version_triplet_t{4, 1, 0};  // default schema version
     auto _schema_result = std::string{};
 
     _variables.uuid = get_uuid().c_str();
