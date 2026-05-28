@@ -45,13 +45,15 @@ bool is_f16_nan(uint32_t u) { return ((u >> 10) & 0x1Fu) == 0x1Fu && (u & 0x3FFu
 bool is_f32_zero(uint32_t u) { return (u & 0x7FFFFFFFu) == 0u; }
 bool is_f16_zero(uint32_t u) { return (u & 0x7FFFu) == 0u; }
 
-// Edge operand pairs (src0, vsrc1) for the low lanes, as f32 bit patterns. The
-// pairing exercises ±0 ties in both orders, NaN in either slot, and ordinary
-// ordering. For the f16 cases the low 16 bits of each are reinterpreted.
+// Edge operand pairs (src0, vsrc1) for the low lanes.
+// - kEdgesF32 entries are f32 bit patterns.
+// - kEdgesF16 entries are f16 bit patterns stored in the low 16 bits.
+// The pairing exercises ±0 ties in both orders, NaN in either slot, and
+// ordinary ordering.
 struct Pair {
   uint32_t a, b;
 };
-const std::array<Pair, 14> kEdges = {{
+const std::array<Pair, 14> kEdgesF32 = {{
     {0x80000000u, 0x00000000u}, // -0, +0
     {0x00000000u, 0x80000000u}, // +0, -0
     {0x80000000u, 0x80000000u}, // -0, -0
@@ -66,6 +68,22 @@ const std::array<Pair, 14> kEdges = {{
     {0x7F7FFFFFu, 0xFF7FFFFFu}, // FLT_MAX, -FLT_MAX
     {0xC0490FDBu, 0x40490FDBu}, // -pi, +pi
     {0x42280000u, 0x42280000u}, // 42.0, 42.0
+}};
+const std::array<Pair, 14> kEdgesF16 = {{
+    {0x00008000u, 0x00000000u}, // -0, +0
+    {0x00000000u, 0x00008000u}, // +0, -0
+    {0x00008000u, 0x00008000u}, // -0, -0
+    {0x00003C00u, 0x0000BC00u}, // 1.0, -1.0
+    {0x00007C00u, 0x00003C00u}, // +Inf, 1.0
+    {0x0000FC00u, 0x00003C00u}, // -Inf, 1.0
+    {0x00007E00u, 0x00003C00u}, // QNaN, 1.0  (skipped)
+    {0x00003C00u, 0x00007E00u}, // 1.0, QNaN  (skipped)
+    {0x00007D00u, 0x00004000u}, // SNaN, 2.0  (skipped)
+    {0x00000400u, 0x00000001u}, // smallest normal, smallest denormal
+    {0x000003FFu, 0x00008000u}, // largest denormal, -0
+    {0x00007BFFu, 0x0000FBFFu}, // HALF_MAX, -HALF_MAX
+    {0x0000C248u, 0x00004248u}, // -pi, +pi
+    {0x00005140u, 0x00005140u}, // 42.0, 42.0
 }};
 
 struct Fixture {
@@ -93,9 +111,10 @@ struct Fixture {
     uint32_t vbase = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       uint32_t r0, r1;
-      if (lane < kEdges.size()) {
-        r0 = kEdges[lane].a;
-        r1 = kEdges[lane].b;
+      const auto &edges = is_f16 ? kEdgesF16 : kEdgesF32;
+      if (lane < edges.size()) {
+        r0 = edges[lane].a;
+        r1 = edges[lane].b;
       } else {
         r0 = static_cast<uint32_t>(rng());
         r1 = static_cast<uint32_t>(rng());
