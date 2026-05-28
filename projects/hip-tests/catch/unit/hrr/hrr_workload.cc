@@ -1296,18 +1296,32 @@ TEST_CASE("Unit_HRR_HostAliases_Direct", "[.][hrr-direct]") {
   HIP_CHECK(hipFreeHost(dah));
 
   // hipMallocArray — 1D array (width × height)
-  hipArray_t arr1d = nullptr;
+  // Some GPUs/drivers return hipErrorOperationNotSupported for texture arrays.
   hipChannelFormatDesc desc = hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
-  HIP_CHECK(hipMallocArray(&arr1d, &desc, N, 1, hipArrayDefault));
-  REQUIRE(arr1d != nullptr);
-  HIP_CHECK(hipFreeArray(arr1d));
+  hipArray_t arr1d = nullptr;
+  {
+    hipError_t e = hipMallocArray(&arr1d, &desc, N, 1, hipArrayDefault);
+    if (e == hipErrorOperationNotSupported) {
+      arr1d = nullptr;
+    } else {
+      HIP_CHECK(e);
+      REQUIRE(arr1d != nullptr);
+      HIP_CHECK(hipFreeArray(arr1d));
+      arr1d = nullptr;
+    }
+  }
 
   // hipMalloc3DArray — 3D array
-  hipArray_t arr3d = nullptr;
-  hipExtent ext3d = make_hipExtent(16, 16, 4);
-  HIP_CHECK(hipMalloc3DArray(&arr3d, &desc, ext3d, hipArrayDefault));
-  REQUIRE(arr3d != nullptr);
-  HIP_CHECK(hipFreeArray(arr3d));
+  {
+    hipArray_t arr3d = nullptr;
+    hipExtent ext3d = make_hipExtent(16, 16, 4);
+    hipError_t e = hipMalloc3DArray(&arr3d, &desc, ext3d, hipArrayDefault);
+    if (e != hipErrorOperationNotSupported) {
+      HIP_CHECK(e);
+      REQUIRE(arr3d != nullptr);
+      HIP_CHECK(hipFreeArray(arr3d));
+    }
+  }
 
   // hipMalloc3D — pitched 3D allocation
   hipPitchedPtr pp{};
