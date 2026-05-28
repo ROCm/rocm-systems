@@ -43,7 +43,7 @@ jobs:
           # and we need to parse "rocm.docs.amd.com/projects/project_slug/xyz..." to "project_slug"
 
           comment=$(gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
-            --jq '[.[] | select(.user.login == "assistant-librarian[bot]" and (.body | contains("rocm.docs.amd.com/projects/")))] | last | .body')
+            --jq '[.[] | select(.user.login == "systems-assistant[bot]" and (.body | contains("rocm.docs.amd.com/projects/")))] | last | .body')
 
           if [ -z "$comment" ] || [ "$comment" = "null" ]; then
             echo "No preview comment found, skipping cleanup."
