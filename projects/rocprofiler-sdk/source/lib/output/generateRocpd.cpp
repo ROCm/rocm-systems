@@ -241,12 +241,18 @@ read_file(rocpd_sql_engine_t                        engine,
     *static_cast<std::string*>(user_data) = replace_placeholders(schema_content);
 }
 
+rocpd_version_triplet_t
+get_schema_version()
+{
+    return rocpd_version_triplet_t{4, 1, 0};
+}
+
 std::string
 read_schema_file(rocpd_sql_schema_kind_t schema_kind)
 {
     auto _variables     = common::init_public_api_struct(rocpd_sql_schema_jinja_variables_t{});
     auto _options       = ROCPD_SQL_OPTIONS_NONE;
-    auto _version       = rocpd_version_triplet_t{4, 1, 0};  // default schema version
+    auto _version       = get_schema_version();  // default schema version
     auto _schema_result = std::string{};
 
     _variables.uuid = get_uuid().c_str();
@@ -609,6 +615,16 @@ write_rocpd(
         SQLITE3_CHECK(sqlite3_open_v2(
             output_file.c_str(), &conn, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr));
         SQLITE3_CHECK(sqlite3_busy_handler(conn, &sql::busy_handler, nullptr));
+
+        {
+            auto sv = get_schema_version();
+            if(sv.major == 4 && sv.minor >= 1)
+            {
+                // v4.1+: exclusive locking (must precede first transaction) and FK enforcement off
+                execute_raw_sql_statements(conn, "PRAGMA locking_mode = EXCLUSIVE;");
+                execute_raw_sql_statements(conn, "PRAGMA foreign_keys = OFF;");
+            }
+        }
 
         ROCP_ERROR << fmt::format("Opened result file: {} (UUID={})", output_file, uuid_v7);
 
