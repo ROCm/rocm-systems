@@ -1344,6 +1344,117 @@ template <typename Inst, typename FmaOp>
   return false;
 }
 
+/// VOP3 dst-accumulate FMA fast path (f32). Counterpart of
+/// try_execute_ternary_vop3_fp_simd for the v_fmac / v_mac family, where the
+/// third FMA operand IS the destination register (no separate src2 Operand
+/// in the per-isa codegen class). The scalar body reads vdst as the
+/// accumulator without applying abs/neg to it (per scalar; verified for
+/// v_fmac_f32_vop3 + v_mac_f32_vop3). SIMD mirrors: read inst.vdst as the
+/// third operand, apply abs/neg to src0/src1 only, run `tern_op`, apply
+/// result omod/clamp, masked-store back to inst.vdst (overwriting accumulator).
+template <typename Inst, typename FmaOp>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_fmac_vop3_fp_simd(Inst &inst, Wavefront &wf, FmaOp tern_op) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.vdst.simd_capable())
+    return false;
+  using T = float32_t;
+  const uint32_t abs = inst.inst_.abs;
+  const uint32_t neg = inst.inst_.neg;
+  const uint32_t omod = inst.inst_.omod;
+  const uint32_t clamp = inst.inst_.clamp;
+  constexpr std::size_t W = util::native_width_v<T>;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto a = apply_vop3_src_mod_f32<0>(read_simd<T>(inst.src0, wf, base), abs, neg);
+    const auto b = apply_vop3_src_mod_f32<1>(read_simd<T>(inst.src1, wf, base), abs, neg);
+    const auto c = read_simd<T>(inst.vdst, wf, base); // accumulator, NO modifier
+    const auto r = apply_vop3_dst_mod_f32(tern_op(a, b, c), omod, clamp);
+    write_simd<T>(inst.vdst, wf, base, r, chunk);
+  }
+  return true;
+}
+
+template <typename Inst, typename FmaOp>
+[[nodiscard]] inline bool try_execute_fmac_vop3_fp_simd(Inst &, Wavefront &, FmaOp) {
+  return false;
+}
+
+/// VOP3 dst-accumulate FMA fast path (f16). f16 widen chain across src0/src1
+/// + vdst (accumulator). NO abs/neg on accumulator (per scalar).
+template <typename Inst, typename FmaOp>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_fmac_vop3_fp16_simd(Inst &inst, Wavefront &wf,
+                                                          FmaOp tern_op) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.vdst.simd_capable())
+    return false;
+  using T = uint32_t;
+  const uint32_t abs = inst.inst_.abs;
+  const uint32_t neg = inst.inst_.neg;
+  const uint32_t omod = inst.inst_.omod;
+  const uint32_t clamp = inst.inst_.clamp;
+  constexpr std::size_t W = util::native_width_v<T>;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto a = apply_vop3_src_mod_f32<0>(
+        util::f16_to_f32_simd(read_simd<T>(inst.src0, wf, base)), abs, neg);
+    const auto b = apply_vop3_src_mod_f32<1>(
+        util::f16_to_f32_simd(read_simd<T>(inst.src1, wf, base)), abs, neg);
+    const auto c = util::f16_to_f32_simd(read_simd<T>(inst.vdst, wf, base)); // accumulator, no mod
+    const auto r = apply_vop3_dst_mod_f32(tern_op(a, b, c), omod, clamp);
+    write_simd<T>(inst.vdst, wf, base, util::f32_to_f16_simd(r), chunk);
+  }
+  return true;
+}
+
+template <typename Inst, typename FmaOp>
+[[nodiscard]] inline bool try_execute_fmac_vop3_fp16_simd(Inst &, Wavefront &, FmaOp) {
+  return false;
+}
+
+/// VOP3 dst-accumulate FMA fast path (f64).
+template <typename Inst, typename FmaOp>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_fmac_vop3_fp64_simd(Inst &inst, Wavefront &wf,
+                                                          FmaOp tern_op) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.vdst.simd_capable())
+    return false;
+  using T = double;
+  const uint32_t abs = inst.inst_.abs;
+  const uint32_t neg = inst.inst_.neg;
+  const uint32_t omod = inst.inst_.omod;
+  const uint32_t clamp = inst.inst_.clamp;
+  constexpr std::size_t W = util::native_width64;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto a = apply_vop3_src_mod_f64<0>(read_simd64<T>(inst.src0, wf, base), abs, neg);
+    const auto b = apply_vop3_src_mod_f64<1>(read_simd64<T>(inst.src1, wf, base), abs, neg);
+    const auto c = read_simd64<T>(inst.vdst, wf, base); // accumulator, no mod
+    const auto r = apply_vop3_dst_mod_f64(tern_op(a, b, c), omod, clamp);
+    write_simd64<T>(inst.vdst, wf, base, r, chunk);
+  }
+  return true;
+}
+
+template <typename Inst, typename FmaOp>
+[[nodiscard]] inline bool try_execute_fmac_vop3_fp64_simd(Inst &, Wavefront &, FmaOp) {
+  return false;
+}
+
 /// VOP3 f32 unary SIMD fast path. Reads `src0` as f32, applies the src0 abs/neg
 /// modifiers, runs `un_op` (`native<float> -> native<float>`), then applies the
 /// result omod/clamp — the scalar body's order (abs->neg, op, omod->clamp). Tin
@@ -1556,6 +1667,23 @@ template <typename Tin, typename Tout, typename Inst, typename UnOp>
 /// Variadic.
 #define ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP64(...)                                                   \
   if (::rocjitsu::amdgpu::try_execute_ternary_vop3_fp64_simd(inst, wf, __VA_ARGS__))               \
+  return
+
+/// VOP3 dst-accumulate FMA counterpart (f32). Per-isa class has no src2;
+/// vdst is the accumulator. abs/neg apply to src0/src1 only.
+#define ROCJITSU_TRY_SIMD_FMAC_VOP3_FP32(...)                                                      \
+  if (::rocjitsu::amdgpu::try_execute_fmac_vop3_fp_simd(inst, wf, __VA_ARGS__))                    \
+  return
+
+/// VOP3 dst-accumulate FMA counterpart (f16). Widen chain, vdst is the
+/// (widened) accumulator.
+#define ROCJITSU_TRY_SIMD_FMAC_VOP3_FP16(...)                                                      \
+  if (::rocjitsu::amdgpu::try_execute_fmac_vop3_fp16_simd(inst, wf, __VA_ARGS__))                  \
+  return
+
+/// VOP3 dst-accumulate FMA counterpart (f64).
+#define ROCJITSU_TRY_SIMD_FMAC_VOP3_FP64(...)                                                      \
+  if (::rocjitsu::amdgpu::try_execute_fmac_vop3_fp64_simd(inst, wf, __VA_ARGS__))                  \
   return
 
 /// VOP3 f64 binary counterpart (read_simd64, per-source abs/neg, omod/clamp on
