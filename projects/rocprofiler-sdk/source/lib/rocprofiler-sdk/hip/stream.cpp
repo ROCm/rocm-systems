@@ -30,6 +30,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/hip/details/tracing_helpers.hpp"
 #include "lib/rocprofiler-sdk/hip/utils.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
@@ -194,205 +195,107 @@ get_ids(std::vector<uint32_t>& _id_list, std::index_sequence<OpIdx, OpIdxTail...
 
 }  // namespace
 
-template <size_t TableIdx,
-          size_t OpIdx,
-          typename RetT,
-          typename... Args,
-          typename FuncT = RetT (*)(Args...)>
-FuncT create_write_functor(RetT (*func)(Args...))
+// Build the HIP_STREAM payload (used by CREATE / DESTROY callbacks). For
+// CREATE the stream pointer is the hipStream_t* out-parameter; for DESTROY
+// it's the hipStream_t in-parameter. `add_stream(*stream)` registers a new
+// stream id for CREATE; `get_stream_id(stream)` looks up an existing one for
+// DESTROY. Both produce a populated payload only when there are subscribers
+// (the wrapper helper invokes the builder only inside that gate).
+template <typename StreamT>
+auto
+make_stream_payload(StreamT stream)
 {
-    using function_type = FuncT;
-
-    static function_type next_func = func;
-
-    return [](Args... args) -> RetT {
-        using function_args_type = common::mpl::type_list<Args...>;
-
-        using callback_api_data_t = rocprofiler_callback_tracing_hip_stream_data_t;
-
-        constexpr auto external_corr_id_domain_idx =
-            hip_domain_info<TableIdx>::external_correlation_id_domain_idx;
-
-        auto thr_id            = common::get_tid();
-        auto callback_contexts = tracing::callback_context_data_vec_t{};
-        auto buffered_contexts = tracing::buffered_context_data_vec_t{};
-        auto external_corr_ids = tracing::external_correlation_id_map_t{};
-
-        tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,
-                                   ROCPROFILER_BUFFER_TRACING_HIP_STREAM,
-                                   callback_contexts,
-                                   buffered_contexts,
-                                   external_corr_ids);
-        assert(buffered_contexts.empty() && "Stream tracing should not have any buffered contexts");
-
-        auto internal_corr_id = 0;
-        auto ancestor_corr_id = 0;
-        auto tracer_data      = common::init_public_api_struct(callback_api_data_t{},
-                                                          rocprofiler_stream_id_t{.handle = 0},
-                                                          rocprofiler_address_t{.value = 0});
-
-        constexpr auto stream_idx = common::mpl::index_of<hipStream_t*, function_args_type>::value;
-        auto           stream = std::get<stream_idx>(std::make_tuple(std::forward<Args>(args)...));
-
-        tracing::update_external_correlation_ids(
-            external_corr_ids, thr_id, external_corr_id_domain_idx);
-
-        auto _ret = next_func(std::forward<Args>(args)...);
-        if(!callback_contexts.empty())
+    using callback_api_data_t = rocprofiler_callback_tracing_hip_stream_data_t;
+    auto payload              = common::init_public_api_struct(
+        callback_api_data_t{},
+        rocprofiler_stream_id_t{.handle = 0},
+        rocprofiler_address_t{.value = 0});
+    if constexpr(std::is_pointer<StreamT>::value &&
+                 std::is_same<StreamT, hipStream_t*>::value)
+    {
+        // CREATE: out-parameter, populate with the just-created handle.
+        if(stream)
         {
-            if(stream)
-            {
-                tracer_data.stream_id        = add_stream(*stream);
-                tracer_data.stream_value.ptr = *stream;
-            }
-            tracing::execute_phase_none_callbacks(callback_contexts,
-                                                  thr_id,
-                                                  internal_corr_id,
-                                                  external_corr_ids,
-                                                  ancestor_corr_id,
-                                                  ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,
-                                                  ROCPROFILER_HIP_STREAM_CREATE,
-                                                  tracer_data);
+            payload.stream_id        = add_stream(*stream);
+            payload.stream_value.ptr = *stream;
         }
-
-        if constexpr(!std::is_void<RetT>::value) return _ret;
-    };
+    }
+    else
+    {
+        // DESTROY / SET: in-parameter, look up the existing handle.
+        payload.stream_id        = get_stream_id(stream);
+        payload.stream_value.ptr = stream;
+    }
+    return payload;
 }
 
-template <size_t TableIdx,
-          size_t OpIdx,
-          typename RetT,
-          typename... Args,
+template <size_t TableIdx, size_t OpIdx, typename RetT, typename... Args,
           typename FuncT = RetT (*)(Args...)>
-FuncT create_destroy_functor(RetT (*func)(Args...))
+FuncT
+create_write_functor(RetT (*func)(Args...))
 {
-    using function_type = FuncT;
+    using function_args_type  = common::mpl::type_list<Args...>;
+    using callback_api_data_t = rocprofiler_callback_tracing_hip_stream_data_t;
+    constexpr auto stream_idx = common::mpl::index_of<hipStream_t*, function_args_type>::value;
 
-    static function_type next_func = func;
-
-    return [](Args... args) -> RetT {
-        using function_args_type  = common::mpl::type_list<Args...>;
-        constexpr auto stream_idx = common::mpl::index_of<hipStream_t, function_args_type>::value;
-
-        using callback_api_data_t = rocprofiler_callback_tracing_hip_stream_data_t;
-
-        constexpr auto external_corr_id_domain_idx =
-            hip_domain_info<TableIdx>::external_correlation_id_domain_idx;
-
-        auto thr_id            = common::get_tid();
-        auto callback_contexts = tracing::callback_context_data_vec_t{};
-        auto buffered_contexts = tracing::buffered_context_data_vec_t{};
-        auto external_corr_ids = tracing::external_correlation_id_map_t{};
-
-        tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,
-                                   ROCPROFILER_BUFFER_TRACING_HIP_STREAM,
-                                   callback_contexts,
-                                   buffered_contexts,
-                                   external_corr_ids);
-        assert(buffered_contexts.empty() && "Stream tracing should not have any buffered contexts");
-
-        auto internal_corr_id = 0;
-        auto ancestor_corr_id = 0;
-        auto tracer_data      = common::init_public_api_struct(callback_api_data_t{},
-                                                          rocprofiler_stream_id_t{.handle = 0},
-                                                          rocprofiler_address_t{.value = 0});
-
-        auto stream = std::get<stream_idx>(std::make_tuple(std::forward<Args>(args)...));
-
-        tracing::update_external_correlation_ids(
-            external_corr_ids, thr_id, external_corr_id_domain_idx);
-
-        auto _ret = next_func(std::forward<Args>(args)...);
-
-        if(!callback_contexts.empty())
-        {
-            tracer_data.stream_id        = get_stream_id(stream);
-            tracer_data.stream_value.ptr = stream;
-            tracing::execute_phase_none_callbacks(callback_contexts,
-                                                  thr_id,
-                                                  internal_corr_id,
-                                                  external_corr_ids,
-                                                  ancestor_corr_id,
-                                                  ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,
-                                                  ROCPROFILER_HIP_STREAM_DESTROY,
-                                                  tracer_data);
-        }
-
-        if constexpr(!std::is_void<RetT>::value) return _ret;
-    };
+    return tracing_helpers::create_traced_wrapper_none_phase<TableIdx,
+                                                             OpIdx,
+                                                             callback_api_data_t>(
+        func,
+        ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,
+        ROCPROFILER_BUFFER_TRACING_HIP_STREAM,
+        ROCPROFILER_HIP_STREAM_CREATE,
+        hip_domain_info<TableIdx>::external_correlation_id_domain_idx,
+        [](Args... args, RetT) {
+            auto stream = std::get<stream_idx>(std::make_tuple(std::forward<Args>(args)...));
+            return make_stream_payload(stream);
+        });
 }
 
-template <size_t TableIdx,
-          size_t OpIdx,
-          typename RetT,
-          typename... Args,
+template <size_t TableIdx, size_t OpIdx, typename RetT, typename... Args,
           typename FuncT = RetT (*)(Args...)>
-FuncT create_read_functor(RetT (*func)(Args...))
+FuncT
+create_destroy_functor(RetT (*func)(Args...))
 {
-    using function_type = FuncT;
+    using function_args_type  = common::mpl::type_list<Args...>;
+    using callback_api_data_t = rocprofiler_callback_tracing_hip_stream_data_t;
+    constexpr auto stream_idx = common::mpl::index_of<hipStream_t, function_args_type>::value;
 
-    static function_type next_func = func;
+    return tracing_helpers::create_traced_wrapper_none_phase<TableIdx,
+                                                             OpIdx,
+                                                             callback_api_data_t>(
+        func,
+        ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,
+        ROCPROFILER_BUFFER_TRACING_HIP_STREAM,
+        ROCPROFILER_HIP_STREAM_DESTROY,
+        hip_domain_info<TableIdx>::external_correlation_id_domain_idx,
+        [](Args... args, RetT) {
+            auto stream = std::get<stream_idx>(std::make_tuple(std::forward<Args>(args)...));
+            return make_stream_payload(stream);
+        });
+}
 
-    return [](Args... args) -> RetT {
-        using function_args_type  = common::mpl::type_list<Args...>;
-        constexpr auto stream_idx = common::mpl::index_of<hipStream_t, function_args_type>::value;
+template <size_t TableIdx, size_t OpIdx, typename RetT, typename... Args,
+          typename FuncT = RetT (*)(Args...)>
+FuncT
+create_read_functor(RetT (*func)(Args...))
+{
+    using function_args_type  = common::mpl::type_list<Args...>;
+    using callback_api_data_t = rocprofiler_callback_tracing_hip_stream_data_t;
+    constexpr auto stream_idx = common::mpl::index_of<hipStream_t, function_args_type>::value;
 
-        using callback_api_data_t = rocprofiler_callback_tracing_hip_stream_data_t;
-
-        constexpr auto external_corr_id_domain_idx =
-            hip_domain_info<TableIdx>::external_correlation_id_domain_idx;
-
-        auto thr_id            = common::get_tid();
-        auto callback_contexts = tracing::callback_context_data_vec_t{};
-        auto buffered_contexts = tracing::buffered_context_data_vec_t{};
-        auto external_corr_ids = tracing::external_correlation_id_map_t{};
-
-        tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,
-                                   ROCPROFILER_BUFFER_TRACING_HIP_STREAM,
-                                   callback_contexts,
-                                   buffered_contexts,
-                                   external_corr_ids);
-
-        assert(buffered_contexts.empty() && "Stream tracing should not have any buffered contexts");
-
-        auto internal_corr_id = 0;
-        auto ancestor_corr_id = 0;
-        auto tracer_data      = common::init_public_api_struct(callback_api_data_t{},
-                                                          rocprofiler_stream_id_t{.handle = 0},
-                                                          rocprofiler_address_t{.value = 0});
-
-        auto stream = std::get<stream_idx>(std::make_tuple(std::forward<Args>(args)...));
-
-        if(!callback_contexts.empty())
-        {
-            tracer_data.stream_id        = get_stream_id(stream);
-            tracer_data.stream_value.ptr = stream;
-            tracing::execute_phase_enter_callbacks(callback_contexts,
-                                                   thr_id,
-                                                   internal_corr_id,
-                                                   external_corr_ids,
-                                                   ancestor_corr_id,
-                                                   ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,
-                                                   ROCPROFILER_HIP_STREAM_SET,
-                                                   tracer_data);
-        }
-
-        tracing::update_external_correlation_ids(
-            external_corr_ids, thr_id, external_corr_id_domain_idx);
-
-        auto _ret = next_func(std::forward<Args>(args)...);
-
-        if(!callback_contexts.empty())
-        {
-            tracing::execute_phase_exit_callbacks(callback_contexts,
-                                                  external_corr_ids,
-                                                  ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,
-                                                  ROCPROFILER_HIP_STREAM_SET,
-                                                  tracer_data);
-        }
-
-        if constexpr(!std::is_void<RetT>::value) return _ret;
-    };
+    return tracing_helpers::create_traced_wrapper_enter_exit_phase<TableIdx,
+                                                                   OpIdx,
+                                                                   callback_api_data_t>(
+        func,
+        ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,
+        ROCPROFILER_BUFFER_TRACING_HIP_STREAM,
+        ROCPROFILER_HIP_STREAM_SET,
+        hip_domain_info<TableIdx>::external_correlation_id_domain_idx,
+        [](Args... args) {
+            auto stream = std::get<stream_idx>(std::make_tuple(std::forward<Args>(args)...));
+            return make_stream_payload(stream);
+        });
 }
 }  // namespace stream
 }  // namespace hip
