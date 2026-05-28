@@ -1,0 +1,82 @@
+# Clean up documentation preview versions from Read the Docs
+# ---------------------------------------------------------
+# This workflow triggers when a PR is closed (merged or abandoned).
+# It checks if a docs preview was created by parsing PR comments posted
+# by the bot, then deactivates the corresponding version on Read the Docs.
+
+name: Docs Preview Cleanup
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout docs-config only
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            .github/docs-config.json
+          sparse-checkout-cone-mode: false
+
+      - name: Generate a token
+        id: generate-token
+        uses: actions/create-github-app-token@a8d616148505b5069dccd32f177bb87d7f39123b # v2.1.1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Get project slug from preview comment
+        id: rtd
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          # Extract project identifier from the bot's comment.
+          # The JSON output for a valid commit will have "assistant-librarian[bot]"
+          # for key `user.login` and contain "rocm.docs.amd.com/projects/" for key `body`
+          # and we need to parse "rocm.docs.amd.com/projects/project_slug/xyz..." to "project_slug"
+
+          comment=$(gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
+            --jq '[.[] | select(.user.login == "assistant-librarian[bot]" and (.body | contains("rocm.docs.amd.com/projects/")))] | last | .body')
+
+          if [ -z "$comment" ] || [ "$comment" = "null" ]; then
+            echo "No preview comment found, skipping cleanup."
+            exit 0
+          fi
+
+          # Extract the string immediately following "projects/" (up to the next "/") from $comment
+          project_alias=$(echo "$comment" | grep --only-matching --perl-regexp 'projects/\K[^/]+')
+
+          # Load the map and look up the rtd_slug by rtd_alias
+          project_slug=$(jq -r --arg alias "$project_alias" \
+            '.projects[] | select(.rtd_alias == $alias) | .rtd_slug' \
+            .github/docs-config.json)
+
+          echo "project_slug=$project_slug" >> $GITHUB_OUTPUT
+
+      - name: Deactivate RTD preview version
+        if: steps.rtd.outputs.project_slug
+        env:
+          RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
+        run: |
+          branch_name="${{ github.head_ref }}"
+          # Generate slug like 'user-me-my_test_branch' from 'user/me/my_test_branch'
+          version_slug="${branch_name//\//-}"
+
+          response=$(curl \
+            --connect-timeout 180 \
+            --silent \
+            --output /dev/null \
+            --write-out "%{http_code}" \
+            --request PATCH \
+            --header "Authorization: Token $RTD_TOKEN" \
+            --header "Content-Type: application/json" \
+            --data '{"active": false}' \
+            "https://app.readthedocs.com/api/v3/projects/${{ steps.rtd.outputs.project_slug }}/versions/${version_slug}/")
+          echo "RTD PATCH responded with HTTP $response"

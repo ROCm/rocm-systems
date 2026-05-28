@@ -30,6 +30,7 @@
 #include <hip/hip_runtime_api.h>
 #include <hip/hip_runtime.h>
 
+#ifndef CHECK_HIP
 #define CHECK_HIP(condition) {                                            \
     hipError_t error = condition;                                         \
     if(error != hipSuccess){                                              \
@@ -38,6 +39,7 @@
         exit(error);                                                      \
     }                                                                     \
 }
+#endif
 
 #define ASSERT(condition) {                                               \
   if (!(condition)) {                                                     \

@@ -476,8 +476,7 @@ SBitset0B32Sop1::SBitset0B32Sop1(const MachineInst *inst)
 }
 
 void SBitset0B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  sdst.write_scalar(wf, (sdst.read_scalar(wf) & (~(1u << (ssrc0.read_scalar(wf) & 31u)))));
 }
 
 SBitset0B64Sop1::SBitset0B64Sop1(const MachineInst *inst)
@@ -497,8 +496,8 @@ SBitset0B64Sop1::SBitset0B64Sop1(const MachineInst *inst)
 }
 
 void SBitset0B64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  sdst.write_scalar64(wf, (static_cast<uint64_t>(sdst.read_scalar64(wf)) &
+                           (~(1ULL << (ssrc0.read_scalar64(wf) & 63u)))));
 }
 
 SBitset1B32Sop1::SBitset1B32Sop1(const MachineInst *inst)
@@ -518,8 +517,7 @@ SBitset1B32Sop1::SBitset1B32Sop1(const MachineInst *inst)
 }
 
 void SBitset1B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  sdst.write_scalar(wf, (sdst.read_scalar(wf) | (1u << (ssrc0.read_scalar(wf) & 31u))));
 }
 
 SBitset1B64Sop1::SBitset1B64Sop1(const MachineInst *inst)
@@ -539,8 +537,8 @@ SBitset1B64Sop1::SBitset1B64Sop1(const MachineInst *inst)
 }
 
 void SBitset1B64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  sdst.write_scalar64(wf, (static_cast<uint64_t>(sdst.read_scalar64(wf)) |
+                           (1ULL << (ssrc0.read_scalar64(wf) & 63u))));
 }
 
 SGetpcB64Sop1::SGetpcB64Sop1(const MachineInst *inst)
