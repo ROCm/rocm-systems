@@ -657,17 +657,18 @@ NCCL_PARAM(PxnDisable, "PXN_DISABLE", 1);
 // Net v4 plugins don't have non-blocking connect/accept. We can't therefore use
 // remote proxies without risking deadlocks
 int ncclPxnDisable(struct ncclComm* comm) {
-  static int pxnDisable = -1;
-  if (pxnDisable == -1) {
-    if (comm && comm->ncclNetVer == 4) {
+  if (comm == NULL) return ncclParamPxnDisable();
+  if (comm->pxnDisable == -1) {
+    if (comm->ncclNetVer == 4) {
       INFO(NCCL_INIT, "PXN Disabled as plugin is v4");
-      pxnDisable = 1;
+      comm->pxnDisable = 1;
     } else {
-      rcclSetPxn(comm, pxnDisable);
-      pxnDisable = (pxnDisable > RCCL_VALUE_INVALID)? pxnDisable : ncclParamPxnDisable();
+      int v = -1;
+      rcclSetPxn(comm, v);
+      comm->pxnDisable = (v > RCCL_VALUE_INVALID) ? v : ncclParamPxnDisable();
     }
   }
-  return pxnDisable;
+  return comm->pxnDisable;
 }
 
 ncclResult_t ncclTopoGetPxnRanks(struct ncclComm* comm, int** intermediateRanks, int* nranks) {
