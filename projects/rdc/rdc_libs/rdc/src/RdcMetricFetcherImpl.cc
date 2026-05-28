@@ -527,6 +527,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
         {RDC_FI_PCIE_NAK_SENT_COUNT_ACC, gpu_metrics.pcie_nak_sent_count_acc},
         {RDC_FI_GFX_ACTIVITY_ACC, gpu_metrics.gfx_activity_acc},
         {RDC_FI_MEM_ACTIVITY_ACC, gpu_metrics.mem_activity_acc},
+        {RDC_FI_ACCUMULATION_COUNTER, gpu_metrics.accumulation_counter},
     };
 
     // In gpu_metrics,the max value means not supported
