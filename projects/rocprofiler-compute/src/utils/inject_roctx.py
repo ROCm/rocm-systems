@@ -62,7 +62,6 @@ _TORCH_ROOT = ""
 
 try:
     import torch
-
     import torch._C  # noqa: F401  -- verify C backend loaded
 
     console_log("torch trace", f"PyTorch version: {torch.__version__}")
@@ -1111,7 +1110,7 @@ def install_tensor_method_wrappers() -> None:
 
 
 def install_extra_structural_wrappers() -> None:
-    """Wrap EXTRA_STRUCTURAL_WRAPS, tensor methods, cuda.{Event,Stream}, Function.apply."""
+    """Wrap EXTRA_STRUCTURAL_WRAPS, tensor methods, cuda.{Event,Stream}."""
     wrapped = []
     for module_path, attr_name, marker_name in EXTRA_STRUCTURAL_WRAPS:
         try:

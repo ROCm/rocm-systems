@@ -261,7 +261,20 @@ target_compile_options(
 
 # Export artifact path so parent can pin CTest via ROCPROFCOMPUTE_ROCTX_RECORDFN_SO.
 if(NOT _rcfn_standalone)
+    # Install the prebuilt under <libdir>/rocprofiler-compute to match the
+    # native-tool discovery convention (lib* glob over install prefix).
+    install(
+        TARGETS ${_so_name}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${CMAKE_PROJECT_NAME} COMPONENT main
+    )
+
     set(ROCTX_RECORDFN_SO_PATH "$<TARGET_FILE:${_so_name}>" PARENT_SCOPE)
+endif()
+
+# Producer-side leaf-label contract tests. Guard on gtest availability because
+# roctx_recordfn can still be configured standalone by the runtime cmake-tier.
+if(NOT _rcfn_standalone AND ENABLE_TESTS AND TARGET gtest_main)
+    add_subdirectory(tests)
 endif()
 
 message(STATUS "roctx_recordfn: target ${_so_name} configured")

@@ -5,7 +5,8 @@
 
 Samples ATen + structural ops, runs torch.profiler as ground truth,
 runs rocprof-compute --torch-trace, compares per-op. Sampling via
---coverage-seed / --coverage-n; strict C++ tier checks with skip-on-absence for local envs. Needs GPU.
+--coverage-seed / --coverage-n; strict C++ tier checks with
+skip-on-absence for local envs. Needs GPU.
 """
 
 import json
@@ -425,9 +426,7 @@ def test_cpp_tier_push_pop_balance_under_forward(roctx_recordfn_so):
 
 
 @pytest.mark.torch_trace
-def test_cpp_tier_seqnr_correlation_across_worker_thread(
-    roctx_recordfn_so
-):
+def test_cpp_tier_seqnr_correlation_across_worker_thread(roctx_recordfn_so):
     """fwd+bwd must save >= 1 snapshot, consume >= 1, with 0 errors."""
     require_torch(gpu=True)
     mod = roctx_recordfn_so
@@ -487,9 +486,7 @@ def test_cpp_tier_stats_pending_per_call_bounded(roctx_recordfn_so):
 
 
 @pytest.mark.torch_trace
-def test_cpp_tier_new_leaf_labels_replace_legacy_dispatcher_label(
-    roctx_recordfn_so
-):
+def test_cpp_tier_new_leaf_labels_replace_legacy_dispatcher_label(roctx_recordfn_so):
     """Every leaf must carry one of the four C++-tier labels (aten:0,
     aten.nested:0, autograd.bwd:0, autograd.engine:0) or a USER_SCOPE
     file:line. The legacy 'dispatcher:0' sentinel must not appear."""
@@ -527,9 +524,9 @@ def test_cpp_tier_new_leaf_labels_replace_legacy_dispatcher_label(
     seen = {_leaf_label(m) for m in captured}
     cpp_seen = seen & expected_cpp_labels
 
-    assert "dispatcher:0" not in {
-        label.split("@")[-1] for label in seen
-    }, f"legacy 'dispatcher:0' leaked into a marker (seen leaves: {seen})"
+    assert "dispatcher:0" not in {label.split("@")[-1] for label in seen}, (
+        f"legacy 'dispatcher:0' leaked into a marker (seen leaves: {seen})"
+    )
     assert "aten:0" in cpp_seen, (
         f"no top-level aten:0 leaf observed -- label classifier broken "
         f"(seen leaves: {seen})"
@@ -545,9 +542,7 @@ def test_cpp_tier_new_leaf_labels_replace_legacy_dispatcher_label(
 
 
 @pytest.mark.torch_trace
-def test_cpp_tier_user_scope_propagates_to_autograd_worker(
-    roctx_recordfn_so
-):
+def test_cpp_tier_user_scope_propagates_to_autograd_worker(roctx_recordfn_so):
     """USER_SCOPE pushed on the main thread must prefix BACKWARD records
     emitted on the autograd worker. This is the c10::ThreadLocalDebugInfo
     propagation channel; without it the worker would see an empty chain
@@ -592,9 +587,7 @@ def test_cpp_tier_user_scope_propagates_to_autograd_worker(
 
 
 @pytest.mark.torch_trace
-def test_cpp_tier_common_prefix_dedup_when_scope_wraps_fwd_and_bwd(
-    roctx_recordfn_so
-):
+def test_cpp_tier_common_prefix_dedup_when_scope_wraps_fwd_and_bwd(roctx_recordfn_so):
     """A single USER_SCOPE that wraps BOTH forward and backward must not
     appear twice in the backward marker (snapshot already has it; the
     TLS overlay must skip the common prefix)."""
@@ -689,9 +682,7 @@ def test_cpp_tier_detached_forward_does_not_explode(roctx_recordfn_so):
 
 
 @pytest.mark.torch_trace
-def test_cpp_tier_concurrent_threads_no_callback_errors(
-    roctx_recordfn_so
-):
+def test_cpp_tier_concurrent_threads_no_callback_errors(roctx_recordfn_so):
     """Concurrent worker threads must emit C++-tier markers and keep
     callback/push-pop invariants intact."""
     require_torch(gpu=True)
@@ -742,9 +733,7 @@ def test_cpp_tier_concurrent_threads_no_callback_errors(
 
 
 @pytest.mark.torch_trace
-def test_cpp_tier_user_spawned_python_thread_emits_markers(
-    roctx_recordfn_so
-):
+def test_cpp_tier_user_spawned_python_thread_emits_markers(roctx_recordfn_so):
     """A plain user-spawned Python thread running ATen forward ops should
     emit at least one captured C++-tier marker."""
     require_torch(gpu=True)

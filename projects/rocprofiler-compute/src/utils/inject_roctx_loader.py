@@ -25,12 +25,7 @@ _SO_SOURCE_DIR = _THIS_DIR.parent / "lib" / "roctx_recordfn"
 _SO_SOURCE = _SO_SOURCE_DIR / "roctx_recordfn.cpp"
 _SO_BUILDFILE = _SO_SOURCE_DIR / "CMakeLists.txt"
 
-try:
-    from utils._install_metadata import (
-        INSTALL_PROJECT_NAME as _INSTALL_TREE_PROJECT_NAME,
-    )
-except Exception:
-    _INSTALL_TREE_PROJECT_NAME = "rocprofiler-compute"
+_INSTALL_TREE_PROJECT_NAME = "rocprofiler-compute"
 
 _CMAKE_TIER_NAME = "cmake-build"
 _CPPEXT_TIER_NAME = "cpp-extension"
@@ -41,15 +36,13 @@ TIER_JIT_CACHED = "jit_cached"
 TIER_CMAKE_BUILD = "cmake_build"
 TIER_CPP_EXTENSION = "cpp_extension"
 
-C_TIER_NAMES = frozenset(
-    (
-        TIER_EXPLICIT,
-        TIER_PREBUILT,
-        TIER_JIT_CACHED,
-        TIER_CMAKE_BUILD,
-        TIER_CPP_EXTENSION,
-    )
-)
+C_TIER_NAMES = frozenset((
+    TIER_EXPLICIT,
+    TIER_PREBUILT,
+    TIER_JIT_CACHED,
+    TIER_CMAKE_BUILD,
+    TIER_CPP_EXTENSION,
+))
 
 
 _LAST_LOAD_DIAGNOSTICS: list[tuple[str, str]] = []
@@ -150,13 +143,13 @@ def _import_module_from_path(name: str, path: Path) -> types.ModuleType:
 
 
 def _install_tree_prebuilt_candidates(tag: str) -> list[Path]:
-    """Packager-baked .so candidates under <prefix>/lib[64]/<project>/."""
+    """Packager-baked .so candidates under <install-prefix>/lib*/<project>/."""
     install_root = _THIS_DIR.parent.parent.parent
     so_name = f"roctx_recordfn-{tag}.so"
-    return [
-        install_root / "lib" / _INSTALL_TREE_PROJECT_NAME / so_name,
-        install_root / "lib64" / _INSTALL_TREE_PROJECT_NAME / so_name,
-    ]
+    # lib* glob pattern handles CMAKE_INSTALL_LIBDIR variations (lib, lib64,
+    # distro multiarch layouts) in the same way as NativeToolFinder.
+    pattern = f"lib*/{_INSTALL_TREE_PROJECT_NAME}/{so_name}"
+    return sorted(install_root.glob(pattern))
 
 
 def _try_explicit_so(tag: str) -> Optional[types.ModuleType]:
@@ -210,7 +203,7 @@ def _jit_cache_dir() -> Path:
 
 _PREBUILT_HINT = (
     "ship a prebuilt roctx_recordfn-{tag}.so under "
-    "<libdir>/" + _INSTALL_TREE_PROJECT_NAME + "/ (resolved by the "
+    "<install-prefix>/lib*/" + _INSTALL_TREE_PROJECT_NAME + "/ (resolved by the "
     "loader's prebuilt tier), or pin one explicitly via "
     "ROCPROFCOMPUTE_ROCTX_RECORDFN_SO=<path>"
 )
@@ -253,7 +246,10 @@ def _explain_cppext_failure(err: Exception) -> tuple[str, str]:
 def _explain_cmake_failure(
     phase: str, err: Exception, stderr_tail: str
 ) -> tuple[str, str]:
-    """Classify cmake-tier failure into (reason, hint). phase: invoke/configure/build/missing-output/load."""
+    """Classify cmake-tier failure into (reason, hint).
+
+    phase: invoke/configure/build/missing-output/load.
+    """
     text = (str(err) + "\n" + (stderr_tail or "")).lower()
     if "could not find torch" in text or "torch_dir" in text:
         return (
@@ -517,7 +513,10 @@ def _try_cmake_build(tag: str) -> Optional[types.ModuleType]:
 
 
 def _try_jit_build(tag: str) -> Optional[types.ModuleType]:
-    """Fallback build via torch.utils.cpp_extension.load. Skipped when it would need ninja."""
+    """Fallback build via torch.utils.cpp_extension.load.
+
+    Skipped when it would need ninja.
+    """
     if not _SO_SOURCE.exists():
         _safe_log("log", f"source not found at {_SO_SOURCE}; cannot JIT-compile")
         return None

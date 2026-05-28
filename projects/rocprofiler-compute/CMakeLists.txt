@@ -695,15 +695,6 @@ add_test(
 )
 set_tests_properties(test_inject_roctx_loader PROPERTIES TIMEOUT 300)
 
-add_test(
-    NAME test_torch_trace_coverage_utils
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_torch_trace_coverage_utils.xml ${COV_OPTION}
-        tests/test_torch_trace_coverage_utils.py ${WORKING_DIR_OPTION}
-)
-set_tests_properties(test_torch_trace_coverage_utils PROPERTIES TIMEOUT 60)
-
 # ---------------------------------------
 # Pure csv compatibility layer for pandas
 # ---------------------------------------
@@ -792,7 +783,6 @@ if(${ENABLE_COVERAGE})
         test_torch_trace_analysis
         test_torch_trace_coverage
         test_inject_roctx_loader
-        test_torch_trace_coverage_utils
     )
 
     string(REPLACE ";" ";" ALL_TESTS_STRING "${ALL_TEST_NAMES}")
@@ -861,27 +851,14 @@ install(
     PATTERN src/rocprof_compute_analyze/tests EXCLUDE
     PATTERN "__pycache__" EXCLUDE
 )
-# Generate install metadata consumed by utils/inject_roctx_loader.py.
-set(ROCTX_UTILS_GENERATED_DIR "${PROJECT_BINARY_DIR}/generated/utils")
-file(MAKE_DIRECTORY ${ROCTX_UTILS_GENERATED_DIR})
-configure_file(
-    ${PROJECT_SOURCE_DIR}/src/utils/_install_metadata.py.in
-    ${ROCTX_UTILS_GENERATED_DIR}/_install_metadata.py
-    @ONLY
-)
-
 # src/utils
 install(
     DIRECTORY src/utils
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
+    PATTERN "_install_metadata.py.in" EXCLUDE
     PATTERN "rooflines*" EXCLUDE
     PATTERN "__pycache__" EXCLUDE
-)
-install(
-    FILES ${ROCTX_UTILS_GENERATED_DIR}/_install_metadata.py
-    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/utils
-    COMPONENT main
 )
 # Always install the roctx_recordfn sources next to the loader's
 # search path so the runtime cmake-tier (utils/inject_roctx_loader.py:

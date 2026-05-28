@@ -8,6 +8,8 @@
 // c10::ThreadLocalDebugInfo (main thread -> worker scope chain).
 // Leaf sentinels: aten:0, aten.nested:0, autograd.engine:0, autograd.bwd:0.
 
+#include "leaf_context.h"
+
 // Avoid torch/extension.h: pulls torch/all.h, stripped from some ROCm wheels.
 #include <ATen/record_function.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
@@ -129,15 +131,6 @@ void maybe_capture(const std::string& s)
     {
         g_captured.push_back(s);
     }
-}
-
-const char* default_leaf_context(at::RecordScope scope, std::int64_t seq, bool stack_was_empty)
-{
-    if (scope == at::RecordScope::BACKWARD_FUNCTION)
-    {
-        return (seq >= 0) ? "#1@autograd.bwd:0" : "#1@autograd.engine:0";
-    }
-    return stack_was_empty ? "#1@aten:0" : "#1@aten.nested:0";
 }
 
 // "<marker1>/.../<markerN>:<context1>/.../<contextN>", split on ":#".
@@ -324,8 +317,9 @@ std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& fn)
         }
 
         StackEntry leaf;
-        leaf.marker  = name;
-        leaf.context = default_leaf_context(scope, seq, stack_was_empty_for_leaf);
+        leaf.marker                  = name;
+        const bool is_backward_scope = (scope == at::RecordScope::BACKWARD_FUNCTION);
+        leaf.context = roctx_recordfn::default_leaf_context(is_backward_scope, seq, stack_was_empty_for_leaf);
         g_stack.push_back(std::move(leaf));
         ctx->pushed_leaf = true;
 

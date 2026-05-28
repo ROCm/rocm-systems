@@ -42,31 +42,28 @@ class ProfileModeImportGuard:
     """
 
     # Project modules that are allowed (non-stdlib)
-    ALLOWED_PROJECT_MODULES = frozenset(
-        [
-            "rocprof_compute",
-            "rocprof_compute_profile",
-            "rocprof_compute_analyze",
-            "rocprof_compute_soc",
-            "rocprof_compute_tui",
-            "utils",
-            "vendored",
-            "roofline",
-            "config",
-            "argparser",  # src/argparser.py, not stdlib argparse
-            "rocprof_compute_base",
-        ]
-    )
+    ALLOWED_PROJECT_MODULES = frozenset([
+        "rocprof_compute",
+        "rocprof_compute_profile",
+        "rocprof_compute_analyze",
+        "rocprof_compute_soc",
+        "rocprof_compute_tui",
+        "utils",
+        "vendored",
+        "roofline",
+        "config",
+        "argparser",  # src/argparser.py, not stdlib argparse
+        "rocprof_compute_base",
+    ])
 
     # ROCm system libraries (not pip packages)
-    ALLOWED_ROCM_MODULES = frozenset(
-        [
-            "amdsmi",  # AMD System Management Interface
-            "hip",  # HIP runtime Python bindings
-            "rocprofv3",  # rocprofv3 python modules such as avail
-            "rocprofv3_avail_module",  # Alternative avail module for backward compatibility
-        ]
-    )
+    ALLOWED_ROCM_MODULES = frozenset([
+        "amdsmi",  # AMD System Management Interface
+        "hip",  # HIP runtime Python bindings
+        "rocprofv3",  # rocprofv3 python modules such as avail
+        "rocprofv3_avail_module",  # Alternative avail module for
+        # backward compatibility
+    ])
 
     def __enter__(self):
         """
