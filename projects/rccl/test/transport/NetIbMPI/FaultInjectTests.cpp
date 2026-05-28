@@ -1838,15 +1838,17 @@ TEST_F(NetIbMPITest, RecoverySuccessRestoresTraffic) {
     }
     MPI_Barrier(MPI_COMM_WORLD);
 
-    // ── Phase 2: wait for recovery to complete (recoveryCount increments) ──
+    // ── Phase 2: wait for recovery to restore devState[0] ──
+    // Poll devState (set directly by recovery thread) rather than recoveryCount
+    // (which requires IbCastResiliencyProgress to be called from an active request).
     if (rank == 1) {
         struct ncclIbCastResiliencyState resState = {};
         for (int poll = 0; poll < kRecoveryPollIters; poll++) {
             ncclIbCastGetResiliencyState(sendComm, &resState);
-            if (resState.recoveryCount[0] >= 1) break;
+            if (resState.devState[0] == kDevStateOk || resState.devState[0] == kDevStateRecovered) break;
             usleep(10000);  // 10 ms
         }
-        rp.recoveryCount0 = resState.recoveryCount[0];
+        rp.recoveryCount0 = resState.devState[0];
         MPI_Send(&rp, sizeof(rp), MPI_BYTE, 0, kPostRecoveryMpiTag, MPI_COMM_WORLD);
     } else {
         MPI_Recv(&rp, sizeof(rp), MPI_BYTE, 1, kPostRecoveryMpiTag, MPI_COMM_WORLD,
@@ -1856,9 +1858,9 @@ TEST_F(NetIbMPITest, RecoverySuccessRestoresTraffic) {
 
     // ── Phase 3: send 20 messages to verify sustained traffic on restored QPs ──
     if (rank == 0) {
-        EXPECT_GE(rp.recoveryCount0, 1)
-            << "Recovery did not complete for device 0 within timeout; "
-            << "recoveryCount[0]=" << rp.recoveryCount0;
+        EXPECT_TRUE(rp.recoveryCount0 == kDevStateOk || rp.recoveryCount0 == kDevStateRecovered)
+            << "Recovery did not restore device 0 within timeout; "
+            << "devState[0]=" << rp.recoveryCount0;
     }
 
     if (rp.recoveryCount0 < 1) {
@@ -2227,10 +2229,10 @@ TEST_F(NetIbMPITest, RecoveryDeviceOneFailure) {
         struct ncclIbCastResiliencyState resState = {};
         for (int poll = 0; poll < kRecoveryPollIters; poll++) {
             ncclIbCastGetResiliencyState(sendComm, &resState);
-            if (resState.recoveryCount[1] >= 1) break;
+            if (resState.devState[1] == kDevStateOk || resState.devState[1] == kDevStateRecovered) break;
             usleep(10000);
         }
-        devState1AfterRecovery = resState.recoveryCount[1];
+        devState1AfterRecovery = resState.devState[1];
         MPI_Send(&devState1AfterRecovery, 1, MPI_INT, 0, kDev1PostRecoveryMpiTag, MPI_COMM_WORLD);
     } else {
         MPI_Recv(&devState1AfterRecovery, 1, MPI_INT, 1, kDev1PostRecoveryMpiTag, MPI_COMM_WORLD,
@@ -2297,9 +2299,9 @@ TEST_F(NetIbMPITest, RecoveryDeviceOneFailure) {
         MPI_Recv(&pr, sizeof(pr), MPI_BYTE, 1, kDev1Phase3MpiTag, MPI_COMM_WORLD,
                  MPI_STATUS_IGNORE);
 
-        EXPECT_GE(devState1AfterRecovery, 1)
-            << "Recovery did not complete for device 1 within timeout; "
-            << "recoveryCount[1]=" << devState1AfterRecovery;
+        EXPECT_TRUE(devState1AfterRecovery == kDevStateOk || devState1AfterRecovery == kDevStateRecovered)
+            << "Recovery did not restore device 1 within timeout; "
+            << "devState[1]=" << devState1AfterRecovery;
 
         EXPECT_EQ(pr.sendRet, static_cast<int>(ncclSuccess))
             << "Post-recovery send failed (sendRet=" << pr.sendRet << ")";

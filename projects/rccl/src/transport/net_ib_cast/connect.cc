@@ -430,6 +430,7 @@ void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, s
   out->cq = devBase->cq;
   out->pd = devBase->pd;
   out->ibDevN = devBase->ibDevN;
+  out->useIonic = IbCastAinicRoce;
   if (base->isSend) {
     out->maxRecvWorkRequest = 0;
     out->maxSendWorkRequest = 2 * NET_IB_MAX_REQUESTS;
@@ -446,7 +447,7 @@ ncclResult_t IbCastQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* crea
      NCCLCHECK(ncclIbCreateQpMlx5(createQpAttrs, qp));
      return ncclSuccess;
   }
-  if (IbCastAinicRoce && createQpAttrs->type != IBV_QPT_UD) {
+  if (createQpAttrs->useIonic && createQpAttrs->type != IBV_QPT_UD) {
     NCCLCHECK(ncclIbCreateQpIonic(createQpAttrs, qp));
     return ncclSuccess;
   }
@@ -610,6 +611,7 @@ static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
     qpCreateAttrs.isDataQp = true;
     qpCreateAttrs.channelId = channelId;
     qpCreateAttrs.ibDevN = commDev->base.ibDevN;
+    qpCreateAttrs.useIonic = IbCastAinicRoce;
 
     if (ibDev->ibProvider == IB_PROVIDER_MLX5 && ncclParamIbCastOooRq()) {
       if (ibDev->ar == 0) {
@@ -1101,6 +1103,7 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
     qpCreateAttrs.isDataQp = false;
     qpCreateAttrs.channelId = channelId;
     qpCreateAttrs.ibDevN = rCommDev->base.ibDevN;
+    qpCreateAttrs.useIonic = IbCastAinicRoce;
 
     if (rComm->base.resiliency) {
       IbCastResiliencyDataRqSizeGet(rComm->base.resiliency, devIndex, &qpCreateAttrs.maxRecvWorkRequest);
@@ -1213,6 +1216,7 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
       qpCreateAttrs.isDataQp = true;
       qpCreateAttrs.channelId = channelId;
       qpCreateAttrs.ibDevN = rCommDev->base.ibDevN;
+      qpCreateAttrs.useIonic = IbCastAinicRoce;
 
       NCCLCHECK(IbCastQpCreate(&rCommDev->gpuFlush.qp, &qpCreateAttrs));
       rCommDev->gpuFlush.qp.channelId = channelId;
