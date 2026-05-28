@@ -1032,11 +1032,31 @@ static ncclResult_t ncclTopoGetNchannels(struct ncclComm* comm, int g /*local gp
     path = system->nodes[GPU].nodes[peer].paths[GPU]+g;
     if (path->type == PATH_NVL) {
       float nvlBw = ncclTopoXGMISpeed(system->nodes[GPU].nodes[g].gpu.gcn);
-      *nChannels = ((IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx942") || IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) ? 4 : 2)*std::max(1, (int)(path->bw / nvlBw));
+      *nChannels = ((IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx942") ||
+                     IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx950") ||
+                     IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx1250")) ? 4 : 2) * std::max(1, (int)(path->bw / nvlBw));
     } else {
       *nChannels = 2;
     }
   } else {
+    // Remote rank — check for MNNVL fabric peer before falling back to NIC channel math.
+    // MNNVL cross-node peers are not in the local topology so RankToIndex fails, but their
+    // effective bandwidth matches intra-node XGMI; use the same formula as PATH_NVL.
+    if (comm && comm->MNNVL) {
+      bool isMnnvlPeer = false;
+      for (int ci = 0; ci < comm->clique.size; ci++) {
+        if (comm->clique.ranks[ci] == peerRank) { isMnnvlPeer = true; break; }
+      }
+      if (isMnnvlPeer) {
+        float nvlBw = ncclTopoXGMISpeed(system->nodes[GPU].nodes[g].gpu.gcn);
+        *nChannels = ((IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx942") ||
+                       IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx950") ||
+                       IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx1250")) ? 4 : 2);
+        // MNNVL fabric runs at one XGMI link width per direction; no bw multiplier here.
+        (void)nvlBw;
+        return ncclSuccess;
+      }
+    }
     // Remote rank, use network
     int nNetChannels = comm->config.nChannelsPerNetPeer;
     if (nNetChannels == NCCL_CONFIG_UNDEF_INT) {
@@ -1098,7 +1118,10 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     // Round to next pow2 nChannelsPerPeer and nChannels
     comm->p2pnChannelsPerPeer = pow2Up(minChannels);
     // Doubling P2P channels per peer on single node
-    if (comm->topo->nodes[GPU].count == comm->topo->nRanks && (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") || IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950"))) comm->p2pnChannelsPerPeer *= 2;
+    if (comm->topo->nodes[GPU].count == comm->topo->nRanks &&
+        (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") ||
+         IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") ||
+         IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250"))) comm->p2pnChannelsPerPeer *= 2;
     // p2pnChannels must be >= p2pnChannelsPerPeer: the device-side inverse
     // ncclP2pChannelToPart cannot recover part indices >= nP2pChannels, so
     // higher parts silently alias onto lower ones and produce wrong data

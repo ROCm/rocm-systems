@@ -373,7 +373,7 @@ template<typename Coop, typename Uint>
 NCCL_DEVICE_INLINE void ncclGin_BackendMask<beMask>::waitSignalFollowShadow(Coop coop, ncclGinSignal_t signal, Uint leastDelta, Uint* before, Uint* delta, int bits, cuda::memory_order ord) const {
   coop.sync();
   uint64_t before64 = this->_signalShadows[signal];
-  uint64_t after64;
+  uint64_t after64 = 0;  // must be initialized: non-root threads pass it to ncclCoopBcast (undefined behavior if uninitialized)
   if (coop.thread_rank() == 0) {
     uint64_t* ptr = ncclGinCall<ncclGinApi_GetSignalPtr>(this->_makeCtx(), this->comm.ginSignalBase + signal);
     #pragma unroll 1

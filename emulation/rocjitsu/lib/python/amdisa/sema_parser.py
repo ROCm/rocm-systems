@@ -41,8 +41,7 @@ _log = logging.getLogger(__name__)
 _SUPPORTED_SCHEMA_MAJOR = 1
 
 _OP_TYPE_MAP: dict[str, SemaNodeKind] = {
-    k.value: k for k in SemaNodeKind
-    if not k.value.startswith('_')
+    k.value: k for k in SemaNodeKind if not k.value.startswith('_')
 }
 
 
@@ -97,14 +96,16 @@ def _parse_instruction(name: str, sema_elem: ET.Element) -> SemaBlock | None:
     op_type = root_op.get('type', '')
     if not op_type:
         return SemaBlock(
-            name, ExecModel.UNKNOWN,
+            name,
+            ExecModel.UNKNOWN,
             SemaNode(SemaNodeKind.SEQ, children=()),
         )
 
     root_node = _parse_node(root_op)
     if root_node is None:
         return SemaBlock(
-            name, ExecModel.UNKNOWN,
+            name,
+            ExecModel.UNKNOWN,
             SemaNode(SemaNodeKind.SEQ, children=()),
         )
 
@@ -117,8 +118,11 @@ def _parse_instruction(name: str, sema_elem: ET.Element) -> SemaBlock | None:
                 pragma = ExecModel(first.lit_value)
             except ValueError:
                 pragma = ExecModel.UNKNOWN
-        body = root_node.children[1] if len(root_node.children) >= 2 else \
-            SemaNode(SemaNodeKind.SEQ, children=())
+        body = (
+            root_node.children[1]
+            if len(root_node.children) >= 2
+            else SemaNode(SemaNodeKind.SEQ, children=())
+        )
     else:
         body = root_node
 

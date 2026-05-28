@@ -20,12 +20,15 @@
 
 #include <array>
 #include <atomic>
+#include <cerrno>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <memory>
 #include <optional>
 #include <string>
 #include <thread>
+#include <type_traits>
 
 /**
  * @namespace MPIHelpers
@@ -33,6 +36,19 @@
  */
 namespace MPIHelpers
 {
+
+// Returns the MPI world rank as a string for diagnostic messages.
+// Probes OpenMPI, MPICH/PMIx, and SLURM env vars in order; returns "?" if none set.
+inline const char* getMpiRankStr()
+{
+    for(const char* var : {"OMPI_COMM_WORLD_RANK", "PMI_RANK", "PMIX_RANK", "SLURM_PROCID"})
+    {
+        const char* val = std::getenv(var);
+        if(val)
+            return val;
+    }
+    return "?";
+}
 
 /**
  * @struct MPIContext
@@ -242,8 +258,15 @@ struct TestLogAssertionOptions
     int mpi_rank{0};
 
     bool capture_nccl_debug_file{false};
-    /** If capture_nccl_debug_file and empty, uses /tmp/rccl_assert_nccl_rank_<r>_pid_<p>.log */
+    /** If capture_nccl_debug_file and empty, auto-path is built from getLogBaseDir()
+     *  (priority: RCCL_TEST_LOG_DIR env var → binary directory → /tmp):
+     *    GTest binary : <logdir>/rccl_<Suite>.<Test>_rank<R>_pid<P>.log
+     *    Standalone   : <logdir>/rccl_rank<R>_pid<P>.log
+     *  Path is derived from GTest current_test_info() at construction time. */
     std::string nccl_debug_file_path;
+    /** When true, the log file is unlinked after a PASSING test.
+     *  Failing tests always keep their log so it is available for post-mortem
+     *  inspection.  Set RCCL_KEEP_TEST_LOGS=1 to keep all logs regardless. */
     bool unlink_auto_generated_nccl_path{true};
     bool unlink_explicit_nccl_path{false};
 
@@ -283,6 +306,7 @@ public:
 private:
     TestLogAssertionOptions opts_;
     std::string             nccl_path_;
+    std::string             test_label_;           ///< "Suite/Test" or "pid_<P>" for standalone
     std::string             saved_nccl_debug_env_;
     bool                    saved_nccl_debug_present_{false};
     bool                    env_modified_{false};
@@ -301,6 +325,82 @@ TestLogAssertionOptions makePerRankStderrAssertionOptions(int mpi_rank);
 
 /** Both: NCCL debug file + per-rank stderr log (either read may contain the line) */
 TestLogAssertionOptions makeCombinedAssertionLogOptions(int mpi_rank);
+
+/**
+ * @brief Return the effective value of a numeric NCCL env var (mirrors NCCL_PARAM semantics).
+ * @param name        Env var name (e.g. "NCCL_CTA_POLICY").
+ * @param ncclDefault NCCL compiled-in default (returned when the var is unset or empty).
+ *
+ * Mirrors ncclLoadParam behaviour: uses base 0 so that "0x10" parses as 16, "010" as 8, etc.
+ * An empty string is treated as unset (returns ncclDefault), consistent with RCCL's param code.
+ */
+template<typename T>
+inline T getEnvParam(const char* name, T ncclDefault)
+{
+    static_assert(std::is_integral_v<T>, "getEnvParam: T must be an integer type");
+    const char* v = std::getenv(name);
+    if(!v || v[0] == '\0') return ncclDefault;
+
+    char* endptr = nullptr;
+    errno        = 0;
+    if constexpr(std::is_unsigned_v<T>)
+    {
+        const unsigned long long val = std::strtoull(v, &endptr, 0);
+        if(errno == ERANGE || endptr == v) return ncclDefault;
+        return static_cast<T>(val);
+    }
+    else
+    {
+        const long long val = std::strtoll(v, &endptr, 0);
+        if(errno == ERANGE || endptr == v) return ncclDefault;
+        return static_cast<T>(val);
+    }
+}
+
+/** RAII scoped set/restore of a single env var; restores (or unsets) on destruction.
+ *
+ *  Warns on stderr (via getMpiRankStr()) when overriding an existing value so the
+ *  caller knows the in-test override is active.  The original value is always restored
+ *  on destruction regardless of test outcome.
+ */
+struct MpiEnvGuard
+{
+    const char* name;
+    std::string saved;
+    bool        had{false};
+
+    MpiEnvGuard(const char* n, const char* v) : name(n)
+    {
+        const char* prev = std::getenv(n);
+        had              = (prev != nullptr);
+        if(had)
+        {
+            saved = prev;
+            if(saved != v)
+            {
+#ifdef RCCL_TEST_CHECKS_HPP
+                TEST_INFO("MpiEnvGuard overriding %s: '%s' -> '%s' (will restore on scope exit)",
+                          n, saved.c_str(), v);
+#else
+                fprintf(stderr,
+                        "[MpiEnvGuard rank %s] overriding %s: '%s' -> '%s' (will restore on scope exit)\n",
+                        getMpiRankStr(), n, saved.c_str(), v);
+#endif
+            }
+        }
+        ::setenv(n, v, /*overwrite=*/1);
+    }
+    ~MpiEnvGuard()
+    {
+        if(had)
+            ::setenv(name, saved.c_str(), 1);
+        else
+            ::unsetenv(name);
+    }
+
+    MpiEnvGuard(const MpiEnvGuard&)            = delete;
+    MpiEnvGuard& operator=(const MpiEnvGuard&) = delete;
+};
 
 } // namespace MPIHelpers
 

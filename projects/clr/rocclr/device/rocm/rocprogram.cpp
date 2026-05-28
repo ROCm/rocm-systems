@@ -239,10 +239,22 @@ bool Program::setKernels(void* binary, size_t binSize, amd::Os::FileDesc fdesc,
     return false;
   }
 
-  // Load the code object, either with file descriptor and offset
-  // or binary image and binary size with URI
-  // or binary image and binary size
-  status = Hsa::code_object_reader_create_from_memory(binary, binSize, &hsaCodeObjectReader_);
+  // If we received a file descriptor, hand the code object's file region to
+  // rocr via the vendor extension so it can mmap it itself (and resolve the
+  // URI directly from the fd). Fall back to from_memory when the fd is
+  // invalid or the vendor extension isn't available in the linked rocr.
+  // The fd is owned by setKernels in all cases: closed before returning.
+  auto* create_from_file =
+      Device::loaderExtensionTable()
+          .hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size;
+  if (fdesc != amd::Os::FDescInit() && create_from_file != nullptr) {
+    status = create_from_file(fdesc, foffset, binSize, &hsaCodeObjectReader_);
+  } else {
+    status = Hsa::code_object_reader_create_from_memory(binary, binSize, &hsaCodeObjectReader_);
+  }
+  if (fdesc != amd::Os::FDescInit()) {
+    amd::Os::CloseFileHandle(fdesc);
+  }
   if (status != HSA_STATUS_SUCCESS) {
     buildLog_ += "Error: AMD HSA Code Object Reader create failed: ";
     buildLog_ += hsa_strerror(status);
