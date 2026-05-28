@@ -1231,6 +1231,119 @@ template <typename T, typename Inst, typename TernOp>
   return false;
 }
 
+/// VOP3 f32 ternary SIMD fast path (FMA / MAD family). Reads src0/src1/src2 as
+/// `native<float>`, applies the per-source abs/neg VOP3 modifiers, runs
+/// `tern_op(a, b, c)`, applies the result omod/clamp. NaN-payload divergence
+/// between stdx::fma and std::fma is the standard accepted carve-out (the A/B
+/// test skips NaN-input lanes), same as the existing VOP2 ternary path.
+template <typename Inst, typename FmaOp>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_ternary_vop3_fp_simd(Inst &inst, Wavefront &wf,
+                                                           FmaOp tern_op) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+    return false;
+  using T = float32_t;
+  const uint32_t abs = inst.inst_.abs;
+  const uint32_t neg = inst.inst_.neg;
+  const uint32_t omod = inst.inst_.omod;
+  const uint32_t clamp = inst.inst_.clamp;
+  constexpr std::size_t W = util::native_width_v<T>;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto a = apply_vop3_src_mod_f32<0>(read_simd<T>(inst.src0, wf, base), abs, neg);
+    const auto b = apply_vop3_src_mod_f32<1>(read_simd<T>(inst.src1, wf, base), abs, neg);
+    const auto c = apply_vop3_src_mod_f32<2>(read_simd<T>(inst.src2, wf, base), abs, neg);
+    const auto r = apply_vop3_dst_mod_f32(tern_op(a, b, c), omod, clamp);
+    write_simd<T>(inst.vdst, wf, base, r, chunk);
+  }
+  return true;
+}
+
+template <typename Inst, typename FmaOp>
+[[nodiscard]] inline bool try_execute_ternary_vop3_fp_simd(Inst &, Wavefront &, FmaOp) {
+  return false;
+}
+
+/// VOP3 f16 ternary SIMD fast path. Mirrors the scalar f16 chain across three
+/// sources: widen each via util::f16_to_f32_simd, apply f32 abs/neg, run
+/// `tern_op` on native<float>, apply omod/clamp, narrow via f32_to_f16_simd.
+template <typename Inst, typename FmaOp>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_ternary_vop3_fp16_simd(Inst &inst, Wavefront &wf,
+                                                             FmaOp tern_op) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+    return false;
+  using T = uint32_t;
+  const uint32_t abs = inst.inst_.abs;
+  const uint32_t neg = inst.inst_.neg;
+  const uint32_t omod = inst.inst_.omod;
+  const uint32_t clamp = inst.inst_.clamp;
+  constexpr std::size_t W = util::native_width_v<T>;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto a = apply_vop3_src_mod_f32<0>(
+        util::f16_to_f32_simd(read_simd<T>(inst.src0, wf, base)), abs, neg);
+    const auto b = apply_vop3_src_mod_f32<1>(
+        util::f16_to_f32_simd(read_simd<T>(inst.src1, wf, base)), abs, neg);
+    const auto c = apply_vop3_src_mod_f32<2>(
+        util::f16_to_f32_simd(read_simd<T>(inst.src2, wf, base)), abs, neg);
+    const auto r = apply_vop3_dst_mod_f32(tern_op(a, b, c), omod, clamp);
+    write_simd<T>(inst.vdst, wf, base, util::f32_to_f16_simd(r), chunk);
+  }
+  return true;
+}
+
+template <typename Inst, typename FmaOp>
+[[nodiscard]] inline bool try_execute_ternary_vop3_fp16_simd(Inst &, Wavefront &, FmaOp) {
+  return false;
+}
+
+/// VOP3 f64 ternary SIMD fast path. 64-bit-lane counterpart: read src0/src1/src2
+/// via read_simd64<double>, apply abs/neg in f64, run `tern_op`, apply
+/// omod/clamp, write_simd64.
+template <typename Inst, typename FmaOp>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_ternary_vop3_fp64_simd(Inst &inst, Wavefront &wf,
+                                                             FmaOp tern_op) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+    return false;
+  using T = double;
+  const uint32_t abs = inst.inst_.abs;
+  const uint32_t neg = inst.inst_.neg;
+  const uint32_t omod = inst.inst_.omod;
+  const uint32_t clamp = inst.inst_.clamp;
+  constexpr std::size_t W = util::native_width64;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto a = apply_vop3_src_mod_f64<0>(read_simd64<T>(inst.src0, wf, base), abs, neg);
+    const auto b = apply_vop3_src_mod_f64<1>(read_simd64<T>(inst.src1, wf, base), abs, neg);
+    const auto c = apply_vop3_src_mod_f64<2>(read_simd64<T>(inst.src2, wf, base), abs, neg);
+    const auto r = apply_vop3_dst_mod_f64(tern_op(a, b, c), omod, clamp);
+    write_simd64<T>(inst.vdst, wf, base, r, chunk);
+  }
+  return true;
+}
+
+template <typename Inst, typename FmaOp>
+[[nodiscard]] inline bool try_execute_ternary_vop3_fp64_simd(Inst &, Wavefront &, FmaOp) {
+  return false;
+}
+
 /// VOP3 f32 unary SIMD fast path. Reads `src0` as f32, applies the src0 abs/neg
 /// modifiers, runs `un_op` (`native<float> -> native<float>`), then applies the
 /// result omod/clamp — the scalar body's order (abs->neg, op, omod->clamp). Tin
@@ -1425,6 +1538,24 @@ template <typename Tin, typename Tout, typename Inst, typename UnOp>
 /// modifiers). `T` is the 32-bit integer lane type; variadic in the functor.
 #define ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(T, ...)                                                 \
   if (::rocjitsu::amdgpu::try_execute_ternary_vop3_simd<T>(inst, wf, __VA_ARGS__))                 \
+  return
+
+/// VOP3 f32 ternary counterpart (per-source abs/neg, result omod/clamp).
+/// Functor takes already-modified `native<float>` arguments; variadic.
+#define ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32(...)                                                   \
+  if (::rocjitsu::amdgpu::try_execute_ternary_vop3_fp_simd(inst, wf, __VA_ARGS__))                 \
+  return
+
+/// VOP3 f16 ternary counterpart (raw uint32 lanes; widen f16->f32 each src,
+/// abs/neg, op, omod/clamp, narrow). Variadic.
+#define ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16(...)                                                   \
+  if (::rocjitsu::amdgpu::try_execute_ternary_vop3_fp16_simd(inst, wf, __VA_ARGS__))               \
+  return
+
+/// VOP3 f64 ternary counterpart (read_simd64, per-source abs/neg, omod/clamp).
+/// Variadic.
+#define ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP64(...)                                                   \
+  if (::rocjitsu::amdgpu::try_execute_ternary_vop3_fp64_simd(inst, wf, __VA_ARGS__))               \
   return
 
 /// VOP3 f64 binary counterpart (read_simd64, per-source abs/neg, omod/clamp on

@@ -645,6 +645,20 @@ TEST(VAddSimdBenchmark, Cdna4_VCeilF16_Vop3) {
   run_words("v_ceil_f16_e64 v2, v0", w0, w1, /*sanitize_finite=*/false);
 }
 
+// v_fma_f32_e64 v6, v0, v1, v2  (CDNA4 VOP3 opcode 459) — f32 ternary FMA via
+// the new try_execute_ternary_vop3_fp_simd glue. Encoded with src2=v2 (NOT
+// dst-accumulate; the v_fmac form is deferred to a separate slice).
+TEST(VAddSimdBenchmark, Cdna4_VFmaF32_Vop3) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  // VOP3 ternary: word0 vdst|op<<16|0x34<<26; word1 src0|src1<<9|src2<<18.
+  uint32_t w0 = (6u) | ((459u & 0x3FF) << 16) | (0x34u << 26);
+  uint32_t w1 = 256u | (1u << 9) | (2u << 18); // src0=v0 src1=v1 src2=v2
+  run_words("v_fma_f32_e64 v6, v0, v1, v2", w0, w1, /*sanitize_finite=*/true);
+}
+
 // Diagnostic: report whether the SIMD fast path is compiled in.
 TEST(VAddSimdBenchmark, SimdCompileTimeReport) {
 #if __has_include(<experimental/simd>)
