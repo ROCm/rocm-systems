@@ -71,6 +71,14 @@ jobs:
           echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99-disable-check-valid-until
           apt update
 
+      - name: Install netlink dev packages
+        run: |
+          set -e
+          if [ "${{ matrix.os }}" != "Debian10" ]; then
+            apt update
+          fi
+          apt install -y libnl-3-dev libnl-genl-3-dev libmnl-dev
+
       - name: Build AMDSMI
         run: |
           set -e
@@ -85,9 +93,9 @@ jobs:
             cd $BUILD_FOLDER
 
             # Configure, build, and package
-            if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON 2>&1 | tee cmake.log && \
-               make -j $(nproc) 2>&1 | tee make.log && \
-               make package 2>&1 | tee package.log; then
+            if (set -o pipefail; cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON 2>&1 | tee cmake.log) && \
+               (set -o pipefail; make -j $(nproc) 2>&1 | tee make.log) && \
+               (set -o pipefail; make package 2>&1 | tee package.log); then
 
               # Parse and report warnings as GitHub annotations
               echo "::group::Build Warnings"
@@ -201,6 +209,14 @@ jobs:
           EOF
           echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99-disable-check-valid-until
           apt update
+
+      - name: Install netlink dev packages
+        run: |
+          set -e
+          if [ "${{ matrix.os }}" != "Debian10" ]; then
+            apt update
+          fi
+          apt install -y libnl-3-dev libnl-genl-3-dev libmnl-dev
 
       - name: Build and Install for Test
         run: |
@@ -455,6 +471,21 @@ jobs:
           echo 'Installing more_itertools on ${{ matrix.os }}'
           python3 -m pip install more_itertools
 
+      - name: Install netlink dev packages
+        run: |
+          set -e
+          case "${{ matrix.os }}" in
+            SLES)
+              zypper --non-interactive install libnl3-devel libmnl-devel
+              ;;
+            AzureLinux3)
+              tdnf install -y libnl3-devel libmnl-devel || dnf install -y libnl3-devel libmnl-devel
+              ;;
+            *)
+              dnf install -y libnl3-devel libmnl-devel
+              ;;
+          esac
+
       - name: Build AMDSMI(RHEL10 & AlmaLinux8)
         if: matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8'
         run: |
@@ -512,9 +543,9 @@ jobs:
             cd $BUILD_FOLDER
 
             # Capture build output to parse warnings
-            if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON 2>&1 | tee cmake.log && \
-               make -j $(nproc) 2>&1 | tee make.log && \
-               make package 2>&1 | tee package.log; then
+            if (set -o pipefail; cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON 2>&1 | tee cmake.log) && \
+               (set -o pipefail; make -j $(nproc) 2>&1 | tee make.log) && \
+               (set -o pipefail; make package 2>&1 | tee package.log); then
 
               # Parse and report warnings as GitHub annotations
               echo "::group::Build Warnings"
@@ -682,6 +713,21 @@ jobs:
           set -e
           echo 'Installing more_itertools on ${{ matrix.os }}'
           python3 -m pip install more_itertools
+
+      - name: Install netlink dev packages
+        run: |
+          set -e
+          case "${{ matrix.os }}" in
+            SLES)
+              zypper --non-interactive install libnl3-devel libmnl-devel
+              ;;
+            AzureLinux3)
+              tdnf install -y libnl3-devel libmnl-devel || dnf install -y libnl3-devel libmnl-devel
+              ;;
+            *)
+              dnf install -y libnl3-devel libmnl-devel
+              ;;
+          esac
 
       - name: Build and Install for Tests (RHEL10 & AlmaLinux8)
         if: matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8'
