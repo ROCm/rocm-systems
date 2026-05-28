@@ -4133,4 +4133,92 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
 device::UriLocator* Device::createUriLocator() const { return new roc::UriLocator(); }
 #endif
 #endif
+
+// ================================================================================================
+namespace {
+
+inline bool MapHandleType(amd::ExternalSemaphoreHandleType t,
+                          hsa_amd_external_semaphore_handle_type_t* out) {
+  switch (t) {
+    case amd::ExternalSemaphoreHandleType::OpaqueFd:
+      *out = HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD;
+      return true;
+    case amd::ExternalSemaphoreHandleType::OpaqueWin32:
+      *out = HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32;
+      return true;
+    case amd::ExternalSemaphoreHandleType::OpaqueWin32Kmt:
+      *out = HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_KMT;
+      return true;
+    default:
+      // Reject amd:: enum values with no HSA counterpart
+      // (D3D11/D3D12Fence, NvSciSync, KeyedMutex*, TimelineSemaphore*).
+      // Types we do map (e.g. OpaqueFd, OpaqueWin32Kmt) may still fail
+      // at libhsakmt import time on platforms without KMD support;
+      // capability ground-truth lives in the lower layer.
+      return false;
+  }
+}
+
+}  // namespace
+
+// ================================================================================================
+bool Device::importExtSemaphore(void** extSemaphore, const amd::Os::FileDesc& handle,
+                                amd::ExternalSemaphoreHandleType sem_handle_type) {
+  if (extSemaphore == nullptr) return false;
+
+  hsa_amd_external_semaphore_handle_descriptor_t desc = {};
+  if (!MapHandleType(sem_handle_type, &desc.type)) return false;
+
+  // Populate the descriptor union by the *mapped* HSA type, not by
+  // build platform: amd::Os::FileDesc is void* on Windows and int on
+  // POSIX, but the HSA layer reads the union member dictated by
+  // desc.type. Reading a member that wasn't written is undefined
+  // behaviour, so reject combinations where the platform's FileDesc
+  // shape doesn't match the requested handle type.
+  switch (desc.type) {
+    case HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32:
+    case HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_KMT:
+#if defined(_WIN32)
+      desc.handle.win32_handle = handle;
+      break;
+#else
+      // Win32 NT handles aren't routable through a non-Windows KMD.
+      return false;
+#endif
+    case HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD:
+#if defined(_WIN32)
+      // POSIX FDs aren't routable through WDDM.
+      return false;
+#else
+      desc.handle.fd = handle;
+      break;
+#endif
+    default:
+      return false;
+  }
+
+  // Heap-allocated holder so the caller gets an opaque pointer for
+  // DestroyExtSemaphore. Storing the hsa_amd_external_semaphore_t
+  // preserves the syncobj identity that submitExternalSemaphoreCmd
+  // will consume once the queue signal/wait submission path lands.
+  auto* holder = new hsa_amd_external_semaphore_t{};
+
+  hsa_status_t s = hsa_amd_external_semaphore_handle_open(bkendDevice_, &desc, holder);
+  if (s != HSA_STATUS_SUCCESS) {
+    delete holder;
+    return false;
+  }
+
+  *extSemaphore = holder;
+  return true;
+}
+
+// ================================================================================================
+void Device::DestroyExtSemaphore(void* extSemaphore) {
+  if (extSemaphore == nullptr) return;
+  auto* holder = static_cast<hsa_amd_external_semaphore_t*>(extSemaphore);
+  hsa_amd_external_semaphore_handle_close(*holder);
+  delete holder;
+}
+
 }  // namespace amd::roc
