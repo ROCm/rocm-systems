@@ -136,6 +136,7 @@ declare -A TEST_NUMBERS=(
   ["fence_putlargesmall"]="100"
   ["fence_fanout"]="101"
   ["fence_putwavenbichunks"]="102"
+  ["reduce_on_stream"]="103"
 )
 
 ExecTest() {
@@ -562,6 +563,7 @@ TestOnStream() {
   ExecTest  "sync_all_on_stream"     2  1           1
   ExecTest  "alltoallmem_on_stream"  2  1           64        1048576
   ExecTest  "broadcastmem_on_stream" 2  1           64        1048576
+  ExecTest  "reduce_on_stream"       2  1           64        1048576
 }
 
 TestOther() {

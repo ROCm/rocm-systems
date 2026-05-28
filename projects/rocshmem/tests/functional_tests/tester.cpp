@@ -71,6 +71,7 @@
 #include "device_bitcode_tester.hpp"
 #include "library_info_tester.hpp"
 #include "fence_ordering_tester.hpp"
+#include "reduce_on_stream_tester.hpp"
 
 #include "backend_bc.hpp"
 extern Backend* backend;
@@ -650,6 +651,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Fence PutWaveNbiChunks Ordering";
       testers.push_back(new FenceOrderingTester(args));
       break;
+    case ReduceOnStreamTestType:
+      test_name = "Reduce On Stream Sum";
+      testers.push_back(new ReduceOnStreamTester(args)); // TODO: Make template class
+      break;
     default:
       test_name = "Empty";
       break;
@@ -752,6 +757,7 @@ bool Tester::peLaunchesKernel() {
    * Some test types are active on both sides.
    */
   switch (_type) {
+    case ReduceOnStreamTestType:
     case TeamReductionTestType:
     case TeamBroadcastTestType:
     case TeamCtxInfraTestType:
