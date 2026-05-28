@@ -76,6 +76,8 @@ bool roc::Device::isHsaInitialized_ = false;
 std::vector<hsa_agent_t> roc::Device::gpu_agents_;
 std::vector<AgentInfo> roc::Device::cpu_agents_;
 
+std::atomic<bool> Device::skipHsaShutdown_{false};
+
 address Device::mg_sync_ = nullptr;
 
 bool NullDevice::create(const amd::Isa& isa) {
@@ -222,17 +224,25 @@ Device::~Device() {
   delete xferQueue_;
   xferQueue_ = nullptr;
 
-  for (auto& it : queuePool_) {
-    for (auto qIter = it.begin(); qIter != it.end();) {
-      hsa_queue_t* queue = qIter->first;
-      auto& qInfo = qIter->second;
-      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Deleting hardware queue %p with refCount 0",
-              queue->base_address);
-      qIter = it.erase(qIter);
-      Hsa::queue_destroy(queue);
+#if defined(_WIN32)
+  if (hasSchedulerQueue_.load(std::memory_order_acquire) > 0) {
+    skipHsaShutdown_.store(true, std::memory_order_release);
+    queuePool_.clear();
+  } else
+#endif  // _WIN32
+  {
+    for (auto& it : queuePool_) {
+      for (auto qIter = it.begin(); qIter != it.end();) {
+        hsa_queue_t* queue = qIter->first;
+        auto& qInfo = qIter->second;
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Deleting hardware queue %p with refCount 0",
+                queue->base_address);
+        qIter = it.erase(qIter);
+        Hsa::queue_destroy(queue);
+      }
     }
+    queuePool_.clear();
   }
-  queuePool_.clear();
 
   delete blitProgram_;
 
@@ -340,7 +350,7 @@ hsa_status_t Device::iterateAgentCallback(hsa_agent_t agent, void* data) {
   return stat;
 }
 
-hsa_ven_amd_loader_1_00_pfn_t Device::amd_loader_ext_table = {nullptr};
+hsa_ven_amd_loader_1_03_pfn_t Device::amd_loader_ext_table = {nullptr};
 
 hsa_status_t Device::loaderQueryHostAddress(const void* device, const void** host) {
   return amd_loader_ext_table.hsa_ven_amd_loader_query_host_address
@@ -350,6 +360,9 @@ hsa_status_t Device::loaderQueryHostAddress(const void* device, const void** hos
 
 // ================================================================================================
 bool Device::init() {
+#if defined(_WIN32)
+  skipHsaShutdown_.store(false, std::memory_order_release);
+#endif
   if (!Hsa::LoadLib()) {
     LogPrintfWarning("Failed to load rocr library!");
     return false;
@@ -532,6 +545,11 @@ extern const char* SchedulerSourceCode;
 
 void Device::tearDown() {
   NullDevice::tearDown();
+#if defined(_WIN32)
+  if (skipHsaShutdown_.load(std::memory_order_acquire)) {
+    return;
+  }
+#endif  // _WIN32
   Hsa::shut_down();
 }
 
@@ -3732,6 +3750,16 @@ void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
     } else if (patch.dep_slot == HwEventPatch::kCompletionSignal) {
       auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
       pkt->completion_signal = sig;
+
+      // Prepare this signal for profiling: mark it as active and classify
+      // the packet type so checkGpuTime → addTimestamps only fires for
+      // kernel dispatches (not synthetic barriers).
+      ps->flags_.done_ = false;
+      uint16_t hdr;
+      memcpy(&hdr, raw, sizeof(hdr));
+      uint8_t pktType = hdr & ((1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1);
+      ps->flags_.isPacketDispatch_ =
+          (pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH);
     } else {
       // dep_slot >= 0: patch a barrier's dependency signal slot (cross-segment wait)
       auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);

@@ -1143,6 +1143,14 @@ configure_settings(bool _init)
         _combine_perfetto_traces->second->set(_config->get<bool>("collapse_processes"));
     }
 
+    auto _merge_perfetto_files = _config->find("ROCPROFSYS_MERGE_PERFETTO_FILES");
+    if(!_merge_perfetto_files->second->get_environ_updated() &&
+       !_merge_perfetto_files->second->get_config_updated())
+    {
+        _merge_perfetto_files->second->set(
+            static_cast<tim::tsettings<bool>&>(*_combine_perfetto_traces->second).get());
+    }
+
     handle_deprecated_setting("ROCPROFSYS_AMD_SMI_DEVICES", "ROCPROFSYS_SAMPLING_GPUS");
     handle_deprecated_setting("ROCPROFSYS_USE_THREAD_SAMPLING",
                               "ROCPROFSYS_USE_PROCESS_SAMPLING");

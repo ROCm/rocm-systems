@@ -702,6 +702,86 @@ HIP_TEST_CASE(Unit_hipMemMap_Capture) {
 }
 
 /**
+ * Test Description
+ * ------------------------
+ * - APU-only. Reserves a VA, creates a physical handle expected to exceed
+ *   the dedicated-VRAM carveout, maps it, grants access, and exercises the
+ *   buffer end-to-end (memset, copy back, verify head and tail). Mirrors
+ *   Unit_hipMalloc_Positive_APU_LargeAllocSpill but through the VMEM API
+ *   path that hipGraphAddMemAllocNode ultimately uses, so it guards the
+ *   same spill behaviour for graph-based allocations.
+ * Test source
+ * ------------------------
+ * - unit/virtualMemoryManagement/hipMemMap.cc
+ */
+HIP_TEST_CASE(Unit_hipMemMap_Positive_APU_LargeAllocSpill) {
+  hipDeviceProp_t prop{};
+  HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+  if (!prop.integrated) {
+    HIP_SKIP_TEST("dGPU --- APU spill regression test does not apply");
+    return;
+  }
+  int vmm_supported = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&vmm_supported,
+                                  hipDeviceAttributeVirtualMemoryManagementSupported, 0));
+  if (!vmm_supported) {
+    HIP_SKIP_TEST("Device does not support virtual memory management");
+    return;
+  }
+  // Assumes the dedicated-VRAM carveout is smaller than 5 GiB.
+  constexpr size_t requested = static_cast<size_t>(5) << 30;
+  constexpr size_t headroom = static_cast<size_t>(1) << 30;
+  if (prop.totalGlobalMem < requested + headroom) {
+    HIP_SKIP_TEST("APU totalGlobalMem too small for this allocation plus headroom");
+    return;
+  }
+
+  hipMemAllocationProp aprop{};
+  aprop.type = hipMemAllocationTypePinned;
+  aprop.location.type = hipMemLocationTypeDevice;
+  aprop.location.id = 0;
+
+  size_t granularity = 0;
+  HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &aprop,
+                                           hipMemAllocationGranularityMinimum));
+  REQUIRE(granularity > 0);
+  const size_t size = ((requested + granularity - 1) / granularity) * granularity;
+
+  void* va = nullptr;
+  HIP_CHECK(hipMemAddressReserve(&va, size, 0, nullptr, 0));
+  REQUIRE(va != nullptr);
+
+  hipMemGenericAllocationHandle_t handle = nullptr;
+  HIP_CHECK(hipMemCreate(&handle, size, &aprop, 0));
+  REQUIRE(handle != nullptr);
+
+  HIP_CHECK(hipMemMap(va, size, 0, handle, 0));
+
+  hipMemAccessDesc access{};
+  access.location.type = hipMemLocationTypeDevice;
+  access.location.id = 0;
+  access.flags = hipMemAccessFlagsProtReadWrite;
+  HIP_CHECK(hipMemSetAccess(va, size, &access, 1));
+
+  constexpr int fill = 0xCD;
+  HIP_CHECK(hipMemset(va, fill, size));
+
+  constexpr size_t sample = static_cast<size_t>(64) * 1024;
+  std::vector<char> head(sample), tail(sample);
+  HIP_CHECK(hipMemcpy(head.data(), va, sample, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(tail.data(), static_cast<char*>(va) + (size - sample), sample,
+                      hipMemcpyDeviceToHost));
+  for (size_t i = 0; i < sample; ++i) {
+    REQUIRE(head[i] == static_cast<char>(fill));
+    REQUIRE(tail[i] == static_cast<char>(fill));
+  }
+
+  HIP_CHECK(hipMemUnmap(va, size));
+  HIP_CHECK(hipMemRelease(handle));
+  HIP_CHECK(hipMemAddressFree(va, size));
+}
+
+/**
  * End doxygen group VirtualMemoryManagementTest.
  * @}
  */

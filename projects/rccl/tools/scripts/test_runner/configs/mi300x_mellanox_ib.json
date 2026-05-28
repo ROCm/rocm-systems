@@ -1001,6 +1001,18 @@
       ]
     },
 
+    "net_ib_branch_coverage": {
+      "extends": "net_ib_base",
+      "timeout": 60,
+      "tests": [
+        { "name": "NetIB_Branch_InvalidRecvCount",  "description": "irecv n>8 returns ncclInternalError (net_ib.cc early-return branch)",               "test_filter": "NetIbMPITest.InvalidRecvCount" },
+        { "name": "NetIB_Branch_MrCacheRefCount",   "description": "Double-register same buffer: refs reach 2, first dereg keeps MR, second frees it",  "test_filter": "NetIbMPITest.MrCacheRefCount" },
+        { "name": "NetIB_Branch_SendSizeClamping",  "description": "isend with size > maxRecvs*maxSize is clamped to maxSize, data integrity verified",  "test_filter": "NetIbMPITest.SendSizeClamping" },
+        { "name": "NetIB_Branch_NullCommClose",     "description": "closeSend/closeRecv/closeListen on NULL comm returns ncclSuccess without crash",     "test_filter": "NetIbMPITest.NullCommClose" },
+        { "name": "NetIB_Branch_SetNetAttrNoOp",    "description": "ncclNetPlugin_v9.setAttr returns ncclSuccess for all known attribute types",         "test_filter": "NetIbMPITest.SetNetAttrNoOp" }
+      ]
+    },
+
     "net_ib_stress": {
       "extends": "net_ib_base",
       "timeout": 600,

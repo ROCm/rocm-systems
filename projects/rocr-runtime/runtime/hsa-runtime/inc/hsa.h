@@ -336,9 +336,15 @@ typedef enum {
 } hsa_access_permission_t;
 
 /**
- * @brief POSIX file descriptor.
+ * @brief OS file handle. A POSIX file descriptor on Unix-like systems, a Win32
+ * HANDLE (as returned by CreateFile) on Windows. Declared as void* on Windows
+ * to avoid pulling windows.h into the public header.
  */
+#if defined(_WIN32) || defined(_WIN64)
+typedef void* hsa_file_t;
+#else
 typedef int hsa_file_t;
+#endif
 
 /** @} **/
 
