@@ -254,7 +254,7 @@ without shared templates, resulting in larger files with duplicated code.
 Hand-written files (`isa.h`, `insts.h`, `mfma_exec.h`, `addr_calc.h/.cpp`) are
 not overwritten by the generator.
 
-You can find the MR ISA in the artifacts directory.
+You can find the MR ISA in `rocm-systems/shared/machine-readable-isa/isa`.
 
 ### Regenerating DBT files
 
