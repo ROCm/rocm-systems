@@ -2,7 +2,12 @@ name: new_CI_image
 run-name: Build the Docker image for hipFile CI
 
 env:
+  AIS_INPUT_CI_IMAGE_NAME: ${{ inputs.ci_image_name }}
+  AIS_INPUT_CI_IMAGE_CACHE: ${{ inputs.ci_image_cache }}
+  AIS_INPUT_CI_IMAGE_NAME_NVIDIA: ${{ inputs.ci_image_name_nvidia }}
+  AIS_INPUT_CI_IMAGE_CACHE_NVIDIA: ${{ inputs.ci_image_cache_nvidia }}
   AIS_INPUT_ROCM_VERSION: ${{ inputs.rocm_version }}
+  AIS_INPUT_PLATFORM: ${{ inputs.platform }}
 
 on:
   workflow_call:
@@ -72,25 +77,25 @@ jobs:
       - name: Build base image for AIS CI
         run: |
           docker buildx build \
-            -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.ais_ci_${{ inputs.platform }}" \
+            -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.ais_ci_${AIS_INPUT_PLATFORM}" \
             --target base \
             --build-arg BUILDKIT_INLINE_CACHE=1 \
             --build-arg ROCM_VERSION=${AIS_INPUT_ROCM_VERSION} \
-            --cache-from=type=registry,ref="${{ inputs.ci_image_name }}" \
-            --cache-from=type=registry,ref="${{ inputs.ci_image_cache }}" \
+            --cache-from=type=registry,ref="${AIS_INPUT_CI_IMAGE_NAME}" \
+            --cache-from=type=registry,ref="${AIS_INPUT_CI_IMAGE_CACHE}" \
             --push \
-            -t "${{ inputs.ci_image_name }}" \
+            -t "${AIS_INPUT_CI_IMAGE_NAME}" \
             "${GITHUB_WORKSPACE}/projects/hipfile/util/docker"
 
       - name: Build NVIDIA image for AIS CI
         run: |
           docker buildx build \
-            -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.ais_ci_${{ inputs.platform }}" \
+            -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.ais_ci_${AIS_INPUT_PLATFORM}}" \
             --target nvidia \
             --build-arg BUILDKIT_INLINE_CACHE=1 \
             --build-arg ROCM_VERSION=${AIS_INPUT_ROCM_VERSION} \
-            --cache-from=type=registry,ref="${{ inputs.ci_image_name_nvidia }}" \
-            --cache-from=type=registry,ref="${{ inputs.ci_image_cache_nvidia }}" \
+            --cache-from=type=registry,ref="${AIS_INPUT_CI_IMAGE_NAME_NVIDIA}" \
+            --cache-from=type=registry,ref="${AIS_INPUT_CI_IMAGE_CACHE_NVIDIA}" \
             --push \
-            -t "${{ inputs.ci_image_name_nvidia }}" \
+            -t "${AIS_INPUT_CI_IMAGE_NAME_NVIDIA}" \
             "${GITHUB_WORKSPACE}/projects/hipfile/util/docker"
