@@ -1475,13 +1475,12 @@ def simd_probe_line(template_name: str) -> str | None:
             return f"  ROCJITSU_TRY_SIMD_VOP1_UNARY({cpp_tin}, {cpp_tout}, {cpp_op});"
         # VOP3 twins of the mixed-width f64<->b32 cvt ops. Their generated VOP3
         # bodies drop the abs/neg/omod/clamp modifier reads (verified per-op),
-        # so routing through the existing cvt glue is bit-exact.
-        spec1f64out = SIMD_VOP1_UNARY_F64.get(base + "_vop1")
-        if spec1f64out is not None:
-            # Currently no f64 unary VOP3 forms route here; left as a forward
-            # hook for symmetry with the b32<->f64 ones below.
-            lane_t, cpp_op = spec1f64out
-            return f"  ROCJITSU_TRY_SIMD_VOP1_UNARY_F64({lane_t}, {cpp_op});"
+        # so routing through the existing cvt glue is bit-exact. (A symmetric
+        # SIMD_VOP1_UNARY_F64 fallback was considered but explicitly NOT added:
+        # the f64-unary VOP3 forms apply modifiers via apply_vop3_*_mod_f64 —
+        # routed through SIMD_VOP3_UNARY_FP64 above instead — and the rcp/rsq
+        # forms use transcendental::*_f64 with NaN/±0/±Inf carve-outs not
+        # present in the plain VOP1 functors.)
         speccvtoutv3 = SIMD_CVT_F64_TO_B32.get(base + "_vop1")
         if speccvtoutv3 is not None:
             out_t, cpp_op = speccvtoutv3
