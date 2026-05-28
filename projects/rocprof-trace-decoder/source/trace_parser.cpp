@@ -159,6 +159,7 @@ std::unique_ptr<SQTTParser> AnalyseBinary_internal(
     CppReturnInfo& info, const uint8_t* buffer, uint64_t BUFFER_SIZE, int gfx9_target_cu, class Stitcher& stitch
 )
 {
+    abort();
     if (gfx9_target_cu < 0)
     {
         auto gfx9_header = *reinterpret_cast<const rocprof_trace_decoder_gfx9_header_t*>(buffer);
