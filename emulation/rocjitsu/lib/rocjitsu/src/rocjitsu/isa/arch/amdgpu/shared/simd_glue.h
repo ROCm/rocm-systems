@@ -50,6 +50,23 @@ inline util::native<float> apply_vop3_src_mod_f32(util::native<float> v, uint32_
   return std::bit_cast<util::native<float>>(b);
 }
 
+/// In-vector VOP3 source modifier (f64), the f64 counterpart of
+/// apply_vop3_src_mod_f32: abs first (std::fabs = sign-bit clear), then neg
+/// (unary minus = sign-bit flip). Both are sign-bit-only on IEEE binary64, so
+/// the vector form is a pure AND/XOR — bit-identical incl. NaN payload,
+/// matching the scalar lambda the f64 VOP3 bodies emit.
+template <unsigned SrcIdx>
+inline util::native<double> apply_vop3_src_mod_f64(util::native<double> v, uint32_t abs,
+                                                   uint32_t neg) {
+  using U = util::native<uint64_t>;
+  U b = std::bit_cast<U>(v);
+  if (abs & (1u << SrcIdx))
+    b = b & 0x7FFFFFFFFFFFFFFFull;
+  if (neg & (1u << SrcIdx))
+    b = b ^ 0x8000000000000000ull;
+  return std::bit_cast<util::native<double>>(b);
+}
+
 /// In-vector VOP3 destination modifier (f32), bit-exact with the scalar tail:
 /// `omod` scales by an exact power of two (1->*2, 2->*4, 3->*0.5; IEEE-exact,
 /// no rounding), then `clamp` saturates to [0,1]. The clamp uses ordered
@@ -1004,6 +1021,50 @@ template <typename Inst, typename CmpOp>
   return false;
 }
 
+/// VOP3 f64 VOPC compare SIMD fast path. 64-bit-lane counterpart of the f32
+/// path: reads src0/src1 as `native<double>` through the split lo/hi VGPR-pair
+/// path (read_simd64), applies the per-source abs/neg modifiers in the f64
+/// domain (apply_vop3_src_mod_f64; sign-bit AND/XOR — bit-identical incl. NaN
+/// payload), and calls the compare functor on `native<double>` operands. The
+/// SGPR-pair merge is the same VCC-style pack as the other VOP3 VOPC paths,
+/// processed `native_width64` lanes per chunk. Bit-identical to the scalar
+/// body for every input.
+template <typename Inst, typename CmpOp>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_vopc64_vop3_fp64_simd(Inst &inst, Wavefront &wf,
+                                                            CmpOp cmp_op) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable())
+    return false;
+  using T = double;
+  const uint32_t abs = inst.inst_.abs;
+  const uint32_t neg = inst.inst_.neg;
+  constexpr std::size_t W = util::native_width64;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  uint64_t dst = inst.vdst.read_scalar64(wf);
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto a = apply_vop3_src_mod_f64<0>(read_simd64<T>(inst.src0, wf, base), abs, neg);
+    const auto b = apply_vop3_src_mod_f64<1>(read_simd64<T>(inst.src1, wf, base), abs, neg);
+    const auto m = cmp_op(a, b);
+    uint64_t cmp_bits = 0;
+    for (std::size_t i = 0; i < W; ++i)
+      if (m[i])
+        cmp_bits |= (1ULL << i);
+    dst = (dst & ~(chunk << base)) | ((cmp_bits & chunk) << base);
+  }
+  inst.vdst.write_scalar64(wf, dst);
+  return true;
+}
+
+/// Unconstrained fallback for the VOP3 f64 VOPC path; see the binary-path note.
+template <typename Inst, typename CmpOp>
+[[nodiscard]] inline bool try_execute_vopc64_vop3_fp64_simd(Inst &, Wavefront &, CmpOp) {
+  return false;
+}
+
 /// VOP3 f32 unary SIMD fast path. Reads `src0` as f32, applies the src0 abs/neg
 /// modifiers, runs `un_op` (`native<float> -> native<float>`), then applies the
 /// result omod/clamp — the scalar body's order (abs->neg, op, omod->clamp). Tin
@@ -1184,6 +1245,14 @@ template <typename Tin, typename Tout, typename Inst, typename UnOp>
 /// arguments as the f32 path; variadic in the functor.
 #define ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16(...)                                                      \
   if (::rocjitsu::amdgpu::try_execute_vopc_vop3_fp16_simd(inst, wf, __VA_ARGS__))                  \
+  return
+
+/// VOP3 f64 VOPC compare counterpart (per-source abs/neg modifiers, 64-bit
+/// lane via split lo/hi VGPR-pair, SGPR-pair dst). Lane type is fixed to
+/// `double`; the functor takes already-modified `native<double>` arguments
+/// and is variadic so its commas pass through.
+#define ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64(...)                                                    \
+  if (::rocjitsu::amdgpu::try_execute_vopc64_vop3_fp64_simd(inst, wf, __VA_ARGS__))                \
   return
 
 #endif // ROCJITSU_ISA_AMDGPU_SHARED_SIMD_GLUE_H_

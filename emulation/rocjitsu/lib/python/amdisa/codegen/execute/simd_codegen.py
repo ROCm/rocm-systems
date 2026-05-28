@@ -1135,6 +1135,23 @@ def _build_simd_vopc_vop3_f16() -> dict[str, str]:
 SIMD_VOPC_VOP3_F16: dict[str, str] = _build_simd_vopc_vop3_f16()
 
 
+def _build_simd_vopc_vop3_f64() -> dict[str, str]:
+    """VOP3 form of the f64 VOPC relations (17 — same set as f32/f16).
+
+    Lane type `double`; the glue applies abs/neg outside the functor on the
+    f64 value, so the functor itself takes already-modified `native<double>`
+    arguments and reuses the VOPC64 f64 builder (identity operand conversion).
+    """
+    table: dict[str, str] = {}
+    _, conv = _VOPC_SUFFIX["f64"]
+    for rel in _VOP3_FLOAT_RELS:
+        table[f"v_cmp_{rel}_f64_vop3"] = _vopc_functor(conv, rel)
+    return table
+
+
+SIMD_VOPC_VOP3_F64: dict[str, str] = _build_simd_vopc_vop3_f64()
+
+
 def simd_probe_line(template_name: str) -> str | None:
     """Return the SIMD fast-path probe block for a kernel, or None."""
     if template_name in SIMD_VOP2_CNDMASK:
@@ -1214,6 +1231,11 @@ def simd_probe_line(template_name: str) -> str | None:
     specvopcv3f16 = SIMD_VOPC_VOP3_F16.get(template_name)
     if specvopcv3f16 is not None:
         return f"  ROCJITSU_TRY_SIMD_VOPC_VOP3_FP16({specvopcv3f16});"
+    # VOP3 form of the f64 VOPC relational compares (17 ops). 64-bit-lane,
+    # per-source abs/neg modifiers applied in the f64 domain outside the functor.
+    specvopcv3f64 = SIMD_VOPC_VOP3_F64.get(template_name)
+    if specvopcv3f64 is not None:
+        return f"  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64({specvopcv3f64});"
     # VOP3-encoded twins of the SIMD VOP2 binary ops. Same operator/lane type;
     # the VOP3 form reads src0/src1 and carries abs/neg/omod/clamp modifiers.
     # f32 ops apply the modifiers in-vector (bit-exact); integer/bitwise ops
