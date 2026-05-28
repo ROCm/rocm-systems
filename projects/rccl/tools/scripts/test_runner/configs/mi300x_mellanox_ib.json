@@ -971,6 +971,93 @@
       ]
     },
 
+    "resiliency_failover": {
+      "extends": "cast_base",
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
+        "NCCL_IB_MERGE_NICS": "1",
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      },
+      "tests": [
+        {
+          "name": "Resiliency_FailoverErrorCodeWhitelist",
+          "description": "Validate non-fatal error code classification (WR_FLUSH_ERR, RETRY_EXC_ERR)",
+          "test_filter": "NetIbMPITest.FailoverErrorCodeWhitelist"
+        },
+        {
+          "name": "Resiliency_FailoverCqeErrorRecovered",
+          "description": "Core failover: inject CQE error on one device, traffic continues on surviving device",
+          "test_filter": "NetIbMPITest.FailoverCqeErrorRecovered"
+        },
+        {
+          "name": "Resiliency_FailoverSingleDeviceTopology",
+          "description": "Single-device topology (ndevs=1): error is fatal, no failover possible",
+          "test_filter": "NetIbMPITest.FailoverSingleDeviceTopology"
+        },
+        {
+          "name": "Resiliency_FailoverAllDevicesFailed",
+          "description": "All devices driven to ERR: connection becomes fatal",
+          "test_filter": "NetIbMPITest.FailoverAllDevicesFailed"
+        },
+        {
+          "name": "Resiliency_FailoverLargeMessageDataIntegrity",
+          "description": "Large message data integrity preserved after failover to surviving device",
+          "test_filter": "NetIbMPITest.FailoverLargeMessageDataIntegrity"
+        },
+        {
+          "name": "Resiliency_FailoverDeviceOneFailure",
+          "description": "Device 1 failure: device 0 continues sending, data integrity verified",
+          "test_filter": "NetIbMPITest.FailoverDeviceOneFailure"
+        },
+        {
+          "name": "Resiliency_FailoverMultiRequestInFlight",
+          "description": "Multiple in-flight requests during failover: all complete with correct data",
+          "test_filter": "NetIbMPITest.FailoverMultiRequestInFlight"
+        }
+      ]
+    },
+
+    "resiliency_recovery": {
+      "extends": "cast_base",
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
+        "NCCL_IB_RESILIENCY_PORT_RECOVERY": "1",
+        "NCCL_IB_MERGE_NICS": "1",
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      },
+      "tests": [
+        {
+          "name": "Resiliency_RecoveryThreadStartedOnlyWithParam",
+          "description": "Recovery thread enabled only when PORT_RECOVERY=1 is set",
+          "test_filter": "NetIbMPITest.RecoveryThreadStartedOnlyWithParam"
+        },
+        {
+          "name": "Resiliency_RecoverySuccessRestoresTraffic",
+          "description": "Core recovery: inject error, QP destroy+recreate, traffic restored on recovered device",
+          "test_filter": "NetIbMPITest.RecoverySuccessRestoresTraffic"
+        },
+        {
+          "name": "Resiliency_RecoveryPendingWhileLinkDown",
+          "description": "Recovery stays in pending state while link remains down",
+          "test_filter": "NetIbMPITest.RecoveryPendingWhileLinkDown"
+        },
+        {
+          "name": "Resiliency_RecoveryDeviceOneFailure",
+          "description": "Device 1 recovery with per-device recovery counter verification",
+          "test_filter": "NetIbMPITest.RecoveryDeviceOneFailure"
+        },
+        {
+          "name": "Resiliency_RecoveryUdTimeoutExhaustsAttempts",
+          "description": "UD recovery timeout exhausts max attempts, device stays failed",
+          "test_filter": "NetIbMPITest.RecoveryUdTimeoutExhaustsAttempts"
+        }
+      ]
+    },
+
     "graph_capture_multi_node": {
       "extends": "default",
       "is_gtest": true,
@@ -1720,6 +1807,18 @@
       "name": "NET IB - Fault Injection (CAST path, QPS=4, splitData=1)",
       "description": "Per-QP fault injection on CAST multi-QP path: error propagation, RTT rebalancing, data integrity under delay",
       "config": "fault_inject_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Resiliency Port Failover",
+      "description": "Port failover tests: error classification, CQE recovery, multi-device failover, data integrity under failure",
+      "config": "resiliency_failover",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Resiliency Port Recovery",
+      "description": "Port recovery tests: QP destroy+recreate, UD-based QPN exchange, recovery timeout exhaustion",
+      "config": "resiliency_recovery",
       "enabled": true
     },
     {
