@@ -65,10 +65,10 @@ public:
 
     void exit()
     {
+        std::unique_lock<std::mutex> lk(mut);
+
         valid.store(false);
         cv.notify_all();
-
-        auto lk = std::unique_lock{mut};
         cv.wait(lk, [&] { return exited >= consumers.size(); });
         for(auto& consumer : consumers) if(consumer.joinable()) consumer.join();
     }
