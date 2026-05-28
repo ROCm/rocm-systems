@@ -28,6 +28,7 @@
 #include "common.h"
 #include "api_trace.h"
 #include "rccl_common.h"
+#include "cpu_kernel_launcher.h"
 
 #include <cstring> // std::memcpy
 #include <cinttypes> // PRIx64
@@ -1903,6 +1904,10 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   dim3 block = {(unsigned)plan->threadPerBlock, 1, 1};
   int smem = rcclShmemDynamicSize(comm->cudaArch, comm->WarpSize);
   cudaStream_t launchStream = planner->streams->stream;
+
+  if (rcclCpuKernelEnabled() && rcclCpuKernelPlanSupported(plan)) {
+    return rcclLaunchKernelCpu(comm, plan, grid.x, block.x, launchStream);
+  }
 
   NCCLCHECK(ncclProfilerStartKernelLaunchEvent(plan, launchStream));
 

@@ -28,6 +28,12 @@ set(SRC_FILES
   dda_all_reduce_ipc.cu
   device_buffer.cc
   enqueue.cc
+  cpu_kernel/cpu_kernel_launcher.cc
+  cpu_kernel/cpu_kernel_main.cc
+  cpu_kernel/cpu_device_context.cc
+  cpu_kernel/cpu_dev_comm_mirror.cc
+  cpu_kernel/cpu_work_loader.cc
+  cpu_kernel/cpu_dispatch.cc
   group.cc
   ipc_gpu_barrier.cu
   ipc_init.cu
@@ -572,6 +578,7 @@ target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src)                    # 
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/device)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/device/network/unpack)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include)
+target_include_directories(rccl PRIVATE ${RCCL_SOURCE_DIR}/src/cpu_kernel/include)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/mlx5)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/nccl_device)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/ionic)
