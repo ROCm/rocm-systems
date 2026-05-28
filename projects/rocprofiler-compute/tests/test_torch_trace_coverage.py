@@ -783,7 +783,11 @@ def test_cpp_tier_function_apply_no_double_wrap_on_grandchild(
     assert inject_roctx.install_function_apply_wrappers() is True
 
     # With the MRO-aware guard, only Foo carries the wrapped staticmethod.
-    assert getattr(Foo.__dict__.get("apply"), "_roctx_wrapped", False)
+    assert getattr(
+        getattr(Foo.__dict__.get("apply"), "__func__", None),
+        "_roctx_wrapped",
+        False,
+    )
     assert "apply" not in Bar.__dict__
 
     x = torch.tensor(1.0, requires_grad=True)

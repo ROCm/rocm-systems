@@ -1015,7 +1015,10 @@ def install_function_apply_wrappers() -> bool:
         try:
             for ancestor in cls.__mro__:
                 existing = ancestor.__dict__.get("apply")
-                if existing is not None and getattr(existing, "_roctx_wrapped", False):
+                existing_fn = getattr(existing, "__func__", existing)
+                if existing is not None and getattr(
+                    existing_fn, "_roctx_wrapped", False
+                ):
                     return
         except Exception:
             return
