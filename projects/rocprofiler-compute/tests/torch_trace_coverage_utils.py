@@ -207,10 +207,8 @@ def native_batch_norm_backward_args(
 
 
 def batch_norm_backward_args(device: str) -> Tuple[List[Any], Dict[str, Any]]:
-    # aten::batch_norm_backward (PyTorch >= 2.9) adds a trailing Tensor
-    # 'reserve' that backends use to carry training-time state (MIOpen
-    # workspace, cuDNN reserve). An empty tensor is accepted by the
-    # native fallback and surfaces a real dispatch on ROCm.
+    # Pass an empty reserve tensor for compatibility with schemas that expose
+    # a trailing reserve argument on this op.
     args, kwargs = native_batch_norm_backward_args(device)
     args.append(torch.empty(0, device=device))  # reserve
     return args, kwargs
@@ -1256,11 +1254,9 @@ OP_SPECS: Dict[str, OpSpec] = {
             {},
         ),
     ),
-    # _convert_weight_to_int4pack (PyTorch >= 2.5) expects weight of
-    # shape [N][K/2] uint8 and innerKTiles in {2, 4, 8}; the 128 used
-    # earlier hit the impl's innerKTiles assertion before any kernel
-    # launch. n=128, k=128 (so weight is [128][64] uint8), and the
-    # smallest legal innerKTiles keep the tile-shape constraints loose.
+    # _convert_weight_to_int4pack expects uint8 weight shaped [N][K/2] and
+    # legal innerKTiles values; use a shape/value pair that satisfies those
+    # constraints and reaches dispatch.
     "_convert_weight_to_int4pack": OpSpec(
         build=lambda d: (
             [torch.randint(0, 255, (128, 64), device=d, dtype=torch.uint8), 8],
@@ -1377,22 +1373,9 @@ OP_SPECS: Dict[str, OpSpec] = {
 # -----------------------------------------------------------------------------
 # Bulk-registered builders
 # -----------------------------------------------------------------------------
-#
-# Many short names share a single-line argument template. Rather than
-# inlining 100+ near-identical OpSpec entries into the table above we
-# register them in bulk below from hand-curated, ROCm-verified
-# allowlists. Each allowlist is documented next to the corresponding
-# registration loop.
-#
-# Bulk entries respect any explicit OP_SPECS entry that already exists:
-# we only insert when OP_SPECS.get(name) is None (via dict.setdefault),
-# so per-op overrides (domain clamps, custom shapes, skip reasons) in
-# the main table always win.
-#
-# These builders cover the "elementwise unary float", "whole-tensor
-# reduction", "binary elementwise", and "unary special_*" Pareto buckets.
-# The remaining buckets — autograd backward, linalg, sparse, distributions,
-# polynomials, etc. — need per-op design and stay in the main table.
+# Register repetitive short-name builders in bulk to avoid OP_SPECS bloat.
+# dict.setdefault preserves explicit per-op overrides in the main table.
+# Buckets that need custom argument design remain explicitly listed there.
 
 
 def _register_bulk_unary_float_builders() -> None:
@@ -1962,69 +1945,16 @@ def aten_packet_call_path(op_name: str) -> str:
 # with no entry at all, are reported as SKIP. Structural entries carry no
 # arguments.
 #
-# Rationale: arguments that satisfy an operator's ATen type schema may still
-# violate kernel-level constraints (value ranges, shape invariants, index
-# bounds, backend-specific layouts). On ROCm, violating such a constraint
-# can trigger an illegal memory access that places the HIP context in a
-# sticky-error state, forcing the host process to abort. Restricting
-# argument generation to per-operator builders verified on ROCm makes this
-# failure mode structurally unreachable.
-#
-# Two structural mechanisms extend coverage without compromising that
-# guarantee:
-#
-#   * .out / output-buffer mechanism. When the overload suffix is in
-#     _SINGLE_TENSOR_OUT_OVERLOAD_SUFFIXES (the set of suffixes whose
-#     schema output parameter is literally named ``out``) and a
-#     short-name builder already exists, we reuse the short-name
-#     builder's (args, kwargs) and inject
-#     out=torch.empty(0, dtype=<first-arg dtype>, device=device).
-#     PyTorch's ".out" contract resizes the empty buffer to the actual
-#     output shape; deriving the dtype from the first Tensor arg of
-#     the verified builder is what keeps integer-typed ops (gcd, lcm,
-#     bitwise_*) and complex-typed ops dtype-compatible. Two gates
-#     protect against the unsafe cases:
-#       - _OUT_MECHANISM_EXCLUDED_SHORT_NAMES blocks ops whose output
-#         dtype is unrelated to their input (predicates, argsort,
-#         all/any, nonzero, *_indices).
-#       - _schema_returns_single_tensor blocks ops whose schema
-#         declares multiple returns — their .out variants expect
-#         out=(t1, t2[, t3]) tuples and would TypeError on a single
-#         buffer.
-#
-#   * In-place mechanism. When the short name ends with a single
-#     trailing underscore (e.g. "sin_", "add_", "addcmul_"), we reuse
-#     the corresponding out-of-place builder (short_name[:-1]) when it
-#     exists. In-place variants share the exact ATen signature of their
-#     out-of-place sibling, so re-using the builder is structurally
-#     safe.
-#
-# Both mechanisms only fire when the underlying short-name builder is
-# already in OP_SPECS — i.e. they multiply the coverage of
-# already-verified builders rather than synthesizing new ones.
+# Keep ROCm-safe argument generation in per-op verified builders.
+# Two coverage extensions reuse existing builders:
+#   * .out overloads: add out=torch.empty(0, ...) when schema/shape guards pass
+#   * in-place overloads: reuse the out-of-place sibling builder
+# Both only apply when a base short-name builder already exists in OP_SPECS.
 
 
-# Overload suffixes whose ".out" semantics accept a single
-# torch.empty(0, ...) buffer that PyTorch will resize at call time.
-#
-# Every suffix below corresponds to a schema whose output parameter is
-# literally named ``out`` (the suffix encodes the input-overload selector,
-# e.g. ".Tensor_out" = "the Tensor overload's .out variant"). The packet
-# ``torch.ops.aten.<short>(..., out=t)`` binds ``out`` by parameter name,
-# so the kwarg passes cleanly to all of them.
-#
-# Suffixes deliberately NOT in this set:
-#   * ".grad_input" — schema parameter is named ``grad_input``, not
-#     ``out``. 19 ops with this suffix already PASS via short-name
-#     marker matching in the current run; injecting ``out=`` for them
-#     risks a TypeError if the packet binds by parameter name. Held
-#     for follow-up once the binding semantics are verified.
-#   * ".result" — same uncertainty (parameter named ``result``), and
-#     only covers 2 private linalg ops, so the risk/reward is bad.
-#   * Multi-output suffixes (.values, .values_stable, .U, .X,
-#     .dim_max, .dim_min, .eigenvalues, .no_stats_out, ...) — these
-#     would need an out=(t1, t2, ...) tuple and are filtered by the
-#     schema-return-count check anyway.
+# Overload suffixes whose .out variant accepts a single out=Tensor argument.
+# Suffixes that bind a different parameter name or return multiple tensors are
+# intentionally excluded and handled by the schema guards.
 _SINGLE_TENSOR_OUT_OVERLOAD_SUFFIXES: frozenset = frozenset({
     "out",
     "Tensor_out",
@@ -2034,21 +1964,9 @@ _SINGLE_TENSOR_OUT_OVERLOAD_SUFFIXES: frozenset = frozenset({
 })
 
 
-# Short names whose ".out" variant cannot be served by the generic
-# out=torch.empty(0, dtype=<first-arg-dtype>) injection because their
-# output dtype is unrelated to their input dtype:
-#
-#   * predicates — output is bool regardless of input dtype.
-#   * argsort family — output is int64 regardless of input dtype.
-#   * bool-output reductions — output is always bool.
-#   * index-builder ops — output is int64 but input args may be float
-#     (nonzero) or have no Tensor args at all (tril_indices,
-#     triu_indices), defeating the first-arg dtype heuristic.
-#
-# Multi-output ".out" variants (aminmax, std_mean, frexp, ...) are NOT
-# listed here; they are detected at runtime by the schema-return count
-# check in the .out mechanism, which is more reliable than an
-# enumeration that has to stay synchronized with PyTorch releases.
+# Short names excluded from generic .out injection because output dtype does not
+# follow input dtype (predicates, argsort family, bool reductions, index ops).
+# Multi-output .out variants are filtered by schema-return-count checks.
 _OUT_MECHANISM_EXCLUDED_SHORT_NAMES: frozenset = frozenset({
     "eq",
     "ne",
@@ -2125,26 +2043,10 @@ def build_args_for_op(
         return [], {}
 
     # Lookup order:
-    #   1) overload-specific key  <op>.<overload>  (rare; reserved for
-    #      cases where a single overload needs custom args or an
-    #      overload-specific skip),
-    #   2) .out / output-buffer overload mechanism — when the overload
-    #      suffix is a single-Tensor output buffer and the short-name
-    #      builder is registered, wrap the short-name builder's
-    #      (args, kwargs) with out=torch.empty(0). This must precede
-    #      the short-name fallback so the workload dispatches to the
-    #      .out overload (not the default), which is what the profiler
-    #      needs to attribute the marker correctly.
-    #   3) packet/short-name key  <op>  (the default — same builder
-    #      covers every default-style overload of the wrapped packet
-    #      because the workload always calls torch.ops.aten.<op> and
-    #      the dispatcher picks the overload from the synthesized
-    #      argument types).
-    #   4) In-place mechanism — short name ends in a single trailing
-    #      underscore and the out-of-place sibling (short_name[:-1]) is
-    #      registered. We pass the sibling's args unchanged; the
-    #      workload calls the in-place packet, and ATen dispatches to
-    #      the in-place overload because of the in-place short name.
+    #   1) overload-specific key (<op>.<overload>)
+    #   2) .out mechanism (single-Tensor out= reuse of short-name builder)
+    #   3) packet/short-name key (<op>)
+    #   4) in-place mechanism (reuse out-of-place sibling builder)
     overload_key = aten_overload_key(op.name)
     short_name = aten_op_short_name(op.name) or op.name.rsplit(".", 1)[-1]
 

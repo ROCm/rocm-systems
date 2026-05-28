@@ -48,7 +48,8 @@ C_TIER_NAMES = frozenset((
 _LAST_LOAD_DIAGNOSTICS: list[tuple[str, str]] = []
 _LAST_LOADED_TIER: Optional[str] = None
 
-# Any new build input MUST be appended or edits to it will load a stale .so.
+# Any new build inputs must be included here so source/build edits
+# invalidate the cache tag.
 _FINGERPRINT_INPUTS = (_SO_SOURCE, _SO_BUILDFILE)
 
 _REBUILD_ENV_VAR = "ROCPROFCOMPUTE_REBUILD_ROCTX"

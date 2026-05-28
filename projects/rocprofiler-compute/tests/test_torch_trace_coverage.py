@@ -340,35 +340,16 @@ def test_random_operator_kernel_coverage(
 # -----------------------------------
 # C++ tier API contract tests
 # -----------------------------------
-#
-# Folded in from the former test_torch_trace_worker_thread.py and
-# test_torch_trace_seqnr_correlation.py. These exercise the roctx_recordfn
-# .so directly rather than through `rocprof-compute --torch-trace`, so they
-# live next to the coverage suite that does cover the CLI: per-test budgets
-# are small (a single fwd+bwd) and the contracts checked here are the ones
-# the integration test above cannot observe (snapshot counters, push/pop
-# balance, capture-buffer contents, TLS DebugInfo propagation across the
-# autograd worker, soft-cap and multi-thread safety).
-#
-# Counters from dump_stats() are the source of truth; wire-string shape is
-# additionally covered by test_random_operator_kernel_coverage above.
+# Direct .so contract tests for counters/capture/TLS behavior that the
+# end-to-end --torch-trace integration test cannot observe.
+# Wire-string shape is covered by test_random_operator_kernel_coverage above.
 
 
 @pytest.fixture(scope="module")
 def roctx_recordfn_so():
-    """Load roctx_recordfn.so once for the cpp_tier_* tests below.
-
-    Skips on CPU-only / toolchain-less hosts. Duplicates the GPU + torch
-    checks done by the per-test require_torch(gpu=True) call because
-    pytest does not guarantee a function-scoped fixture resolves before
-    a module-scoped one; without this, a host where this fixture happens
-    to resolve first would call into the loader (and reference the
-    module-level inject_roctx_loader name, unbound on CPU-only hosts)
-    before require_torch had a chance to skip.
-
-    Each test calls install() explicitly so the fixture itself stays
-    test-state-free; uninstall() runs best-effort on teardown.
-    """
+    """Load roctx_recordfn.so once for the cpp_tier_* tests below."""
+    # Repeat skip checks here because module-scoped fixtures can resolve before
+    # per-test require_torch(gpu=True) runs.
     if torch is None:
         pytest.skip("PyTorch is not installed")
     if not torch.cuda.is_available():
@@ -463,12 +444,9 @@ def test_cpp_tier_seqnr_correlation_across_worker_thread(roctx_recordfn_so):
 
 @pytest.mark.torch_trace
 def test_cpp_tier_stats_pending_per_call_bounded(roctx_recordfn_so):
-    """A small fwd+bwd should not leak more than a handful of pending
-    snapshots. Delta-based (not absolute) because earlier tests in this
-    module share the fixture and may have left residue; <=4 absorbs the
-    handful of autograd internals that legitimately don't backward.
-    (saved - consumed > pending because same-seqNr overwrites also tick
-    saved -- see the dump_stats contract in roctx_recordfn.cpp.)"""
+    """A small fwd+bwd should not leak more than a handful of snapshots."""
+    # Use delta (not absolute) because module-scoped fixture tests share state.
+    # Allow a small margin for autograd internals that do not backward.
     require_torch(gpu=True)
     mod = roctx_recordfn_so
     mod.install()

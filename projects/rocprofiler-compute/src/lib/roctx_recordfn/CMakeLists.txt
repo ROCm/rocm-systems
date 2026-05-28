@@ -222,8 +222,8 @@ endforeach()
 
 target_link_libraries(${_so_name} PRIVATE ${_torch_resolved_libs} ${ROCTX_LIB})
 
-# PyTorch >= ~2.7 makes c10::DebugInfoKind constructible from string_view*
-# for private TLDI slots; older builds fall back to TEST_INFO_2.
+# Probe whether c10::DebugInfoKind accepts custom string_view-backed keys.
+# When unavailable, fall back to TEST_INFO_2.
 include(CheckCXXSourceCompiles)
 set(_rcfn_saved_required_flags ${CMAKE_REQUIRED_FLAGS})
 set(_rcfn_saved_required_libs ${CMAKE_REQUIRED_LIBRARIES})
