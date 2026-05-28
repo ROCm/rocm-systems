@@ -1338,12 +1338,23 @@ SIMD_VOP3_TERNARY_FP64: dict[str, str] = {
     "v_fma_f64_vop3": "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }",
 }
 
-# NOTE: v_fmac / v_mac (dst-accumulate variants) are NOT in the tables above:
-# their per-isa codegen classes only initialize src0 + src1 + vdst (the 3rd FMA
-# arg comes from vdst, not src2 — there's no src2 Operand member), so a glue
-# template that reads inst.src2 fails to instantiate. They need a separate
-# "accumulate-form" glue path that reads vdst as the third operand; deferred to
-# a follow-up slice.
+# --- VOP3 dst-accumulate FMA / MAC (vdst is the accumulator) ----------------
+#
+# v_fmac / v_mac per-isa classes only initialize src0+src1+vdst; the third FMA
+# operand IS vdst (no src2 Operand). The accumulate-form glue reads inst.vdst
+# as the third operand and applies abs/neg only to src0/src1 (per scalar body).
+# NaN payload divergence accepted, same as the non-accumulate ternary slice.
+SIMD_VOP3_FMAC_FP32: dict[str, str] = {
+    "v_fmac_f32_vop3": "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }",
+    "v_mac_f32_vop3": "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }",
+}
+SIMD_VOP3_FMAC_FP16: dict[str, str] = {
+    "v_fmac_f16_vop3": "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }",
+    "v_mac_f16_vop3": "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }",
+}
+SIMD_VOP3_FMAC_FP64: dict[str, str] = {
+    "v_fmac_f64_vop3": "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }",
+}
 
 
 SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
@@ -1536,6 +1547,17 @@ def simd_probe_line(template_name: str) -> str | None:
     spec3tf64 = SIMD_VOP3_TERNARY_FP64.get(template_name)
     if spec3tf64 is not None:
         return f"  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP64({spec3tf64});"
+    # VOP3 dst-accumulate FMA/MAC (vdst is the third operand). Per-isa class
+    # has no src2; the accumulate glue reads vdst instead.
+    specfmacf32 = SIMD_VOP3_FMAC_FP32.get(template_name)
+    if specfmacf32 is not None:
+        return f"  ROCJITSU_TRY_SIMD_FMAC_VOP3_FP32({specfmacf32});"
+    specfmacf16 = SIMD_VOP3_FMAC_FP16.get(template_name)
+    if specfmacf16 is not None:
+        return f"  ROCJITSU_TRY_SIMD_FMAC_VOP3_FP16({specfmacf16});"
+    specfmacf64 = SIMD_VOP3_FMAC_FP64.get(template_name)
+    if specfmacf64 is not None:
+        return f"  ROCJITSU_TRY_SIMD_FMAC_VOP3_FP64({specfmacf64});"
     # Extra plain integer binary VOP3 ops without a VOP2 twin (add_i32/i16,
     # sub_*, nc_* variants). Routed through the int VOP3 binary glue.
     spec3binx = SIMD_VOP3_BINARY_INT_EXTRA.get(template_name)
