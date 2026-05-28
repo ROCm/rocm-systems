@@ -67,6 +67,25 @@ inline util::native<double> apply_vop3_src_mod_f64(util::native<double> v, uint3
   return std::bit_cast<util::native<double>>(b);
 }
 
+/// In-vector VOP3 destination modifier (f64), counterpart of
+/// apply_vop3_dst_mod_f32: omod scales by an exact power of two then clamp
+/// saturates to [0, 1]. Ordered compares are false for NaN, so NaN passes
+/// through unchanged — matches `std::clamp(v, 0.0, 1.0)`.
+inline util::native<double> apply_vop3_dst_mod_f64(util::native<double> v, uint32_t omod,
+                                                   uint32_t clamp) {
+  if (omod == 1)
+    v = v * 2.0;
+  else if (omod == 2)
+    v = v * 4.0;
+  else if (omod == 3)
+    v = v * 0.5;
+  if (clamp) {
+    util::stdx::where(v < 0.0, v) = 0.0;
+    util::stdx::where(v > 1.0, v) = 1.0;
+  }
+  return v;
+}
+
 /// In-vector VOP3 destination modifier (f32), bit-exact with the scalar tail:
 /// `omod` scales by an exact power of two (1->*2, 2->*4, 3->*0.5; IEEE-exact,
 /// no rounding), then `clamp` saturates to [0,1]. The clamp uses ordered
@@ -1065,6 +1084,80 @@ template <typename Inst, typename CmpOp>
   return false;
 }
 
+/// VOP3 f64 binary SIMD fast path. 64-bit-lane counterpart of
+/// try_execute_binary_vop3_fp_simd: reads src0/src1 as `native<double>` through
+/// the split lo/hi VGPR-pair path (read_simd64), applies the per-source abs/neg
+/// VOP3 modifiers in the f64 domain (apply_vop3_src_mod_f64), runs `bin_op`,
+/// applies the result omod/clamp (apply_vop3_dst_mod_f64), and masked-stores the
+/// result through write_simd64. All modifier helpers are bit-exact, so the fast
+/// path stays correct even with modifiers set; no bail.
+template <typename Inst, typename BinOp>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_binary_vop3_fp64_simd(Inst &inst, Wavefront &wf,
+                                                            BinOp bin_op) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.vdst.simd_capable())
+    return false;
+  using T = double;
+  const uint32_t abs = inst.inst_.abs;
+  const uint32_t neg = inst.inst_.neg;
+  const uint32_t omod = inst.inst_.omod;
+  const uint32_t clamp = inst.inst_.clamp;
+  constexpr std::size_t W = util::native_width64;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto a = apply_vop3_src_mod_f64<0>(read_simd64<T>(inst.src0, wf, base), abs, neg);
+    const auto b = apply_vop3_src_mod_f64<1>(read_simd64<T>(inst.src1, wf, base), abs, neg);
+    const auto r = apply_vop3_dst_mod_f64(bin_op(a, b), omod, clamp);
+    write_simd64<T>(inst.vdst, wf, base, r, chunk);
+  }
+  return true;
+}
+
+/// Unconstrained fallback for the VOP3 f64 binary path; see the binary-path note.
+template <typename Inst, typename BinOp>
+[[nodiscard]] inline bool try_execute_binary_vop3_fp64_simd(Inst &, Wavefront &, BinOp) {
+  return false;
+}
+
+/// VOP3 f64 unary SIMD fast path. 64-bit-lane counterpart of
+/// try_execute_unary_vop3_fp_simd: reads `src0` as `native<double>`, applies
+/// the src0 abs/neg modifiers (apply_vop3_src_mod_f64), runs `un_op`, applies
+/// the result omod/clamp (apply_vop3_dst_mod_f64). All bit-exact.
+template <typename Inst, typename UnOp>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_unary_vop3_fp64_simd(Inst &inst, Wavefront &wf, UnOp un_op) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.vdst.simd_capable())
+    return false;
+  using T = double;
+  const uint32_t abs = inst.inst_.abs;
+  const uint32_t neg = inst.inst_.neg;
+  const uint32_t omod = inst.inst_.omod;
+  const uint32_t clamp = inst.inst_.clamp;
+  constexpr std::size_t W = util::native_width64;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto a = apply_vop3_src_mod_f64<0>(read_simd64<T>(inst.src0, wf, base), abs, neg);
+    const auto r = apply_vop3_dst_mod_f64(un_op(a), omod, clamp);
+    write_simd64<T>(inst.vdst, wf, base, r, chunk);
+  }
+  return true;
+}
+
+/// Unconstrained fallback for the VOP3 f64 unary path; see the binary-path note.
+template <typename Inst, typename UnOp>
+[[nodiscard]] inline bool try_execute_unary_vop3_fp64_simd(Inst &, Wavefront &, UnOp) {
+  return false;
+}
+
 /// VOP3 integer/bitwise ternary SIMD fast path. Reads `src0`/`src1`/`src2`,
 /// runs `tern_op(a, b, c)`, and masked-stores the result. The generated scalar
 /// bodies for these ternary integer ops apply no source/result modifiers (abs/
@@ -1293,6 +1386,19 @@ template <typename Tin, typename Tout, typename Inst, typename UnOp>
 /// modifiers). `T` is the 32-bit integer lane type; variadic in the functor.
 #define ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(T, ...)                                                 \
   if (::rocjitsu::amdgpu::try_execute_ternary_vop3_simd<T>(inst, wf, __VA_ARGS__))                 \
+  return
+
+/// VOP3 f64 binary counterpart (read_simd64, per-source abs/neg, omod/clamp on
+/// the result). Variadic in the functor so its commas pass through as one
+/// token sequence.
+#define ROCJITSU_TRY_SIMD_VOP3_BINARY_FP64(...)                                                    \
+  if (::rocjitsu::amdgpu::try_execute_binary_vop3_fp64_simd(inst, wf, __VA_ARGS__))                \
+  return
+
+/// VOP3 f64 unary counterpart (read_simd64, src0 abs/neg, omod/clamp on
+/// the result). Variadic in the functor.
+#define ROCJITSU_TRY_SIMD_VOP3_UNARY_FP64(...)                                                     \
+  if (::rocjitsu::amdgpu::try_execute_unary_vop3_fp64_simd(inst, wf, __VA_ARGS__))                 \
   return
 
 #endif // ROCJITSU_ISA_AMDGPU_SHARED_SIMD_GLUE_H_
