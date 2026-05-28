@@ -1163,6 +1163,47 @@ SIMD_VOPC_VOP3_F64: dict[str, str] = _build_simd_vopc_vop3_f64()
 # bfe ops (branchy mask), the byte-permute ops (perm/alignbyte/lerp/sad/msad —
 # byte-wise / table-driven), and 64-bit-lane ternary (would need a 64-bit
 # ternary glue).
+# --- Extra plain integer/bitwise binary VOP3 ops ---------------------------
+#
+# VOP3-only integer/bitwise binary ops that have no VOP2 twin (so the existing
+# _vop3 -> _vop2 fallback doesn't pick them up). All read src0/src1 and apply
+# no modifiers; routed through try_execute_binary_vop3_simd<T>.
+#
+# 16-bit forms compute a 32-bit add/sub and mask the low 16 bits, matching the
+# scalar body's `uint32_t(uint16_t(int16_t(low16(a)+low16(b))))` (or the u16
+# variant) — both reduce to `(a + b) & 0xFFFFu` / `(a - b) & 0xFFFFu` because
+# unsigned 32-bit wrap-around at the low 16 bits is identical to signed/unsigned
+# 16-bit wrap. 32-bit forms use the wrap-around add/sub on uint32 lanes;
+# signed-vs-unsigned wraps the same way.
+SIMD_VOP3_BINARY_INT_EXTRA: dict[str, tuple[str, str]] = {
+    "v_add_i32_vop3": ("uint32_t", "[](auto a, auto b) { return a + b; }"),
+    "v_sub_i32_vop3": ("uint32_t", "[](auto a, auto b) { return a - b; }"),
+    "v_add_nc_i32_vop3": ("uint32_t", "[](auto a, auto b) { return a + b; }"),
+    "v_add_nc_u32_vop3": ("uint32_t", "[](auto a, auto b) { return a + b; }"),
+    "v_sub_nc_i32_vop3": ("uint32_t", "[](auto a, auto b) { return a - b; }"),
+    "v_sub_nc_u32_vop3": ("uint32_t", "[](auto a, auto b) { return a - b; }"),
+    "v_subrev_nc_u32_vop3": ("uint32_t", "[](auto a, auto b) { return b - a; }"),
+    "v_add_i16_vop3": ("uint32_t", "[](auto a, auto b) { return (a + b) & 0xFFFFu; }"),
+    "v_sub_i16_vop3": ("uint32_t", "[](auto a, auto b) { return (a - b) & 0xFFFFu; }"),
+    "v_add_nc_i16_vop3": (
+        "uint32_t",
+        "[](auto a, auto b) { return (a + b) & 0xFFFFu; }",
+    ),
+    "v_add_nc_u16_vop3": (
+        "uint32_t",
+        "[](auto a, auto b) { return (a + b) & 0xFFFFu; }",
+    ),
+    "v_sub_nc_i16_vop3": (
+        "uint32_t",
+        "[](auto a, auto b) { return (a - b) & 0xFFFFu; }",
+    ),
+    "v_sub_nc_u16_vop3": (
+        "uint32_t",
+        "[](auto a, auto b) { return (a - b) & 0xFFFFu; }",
+    ),
+}
+
+
 SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
     "v_add3_u32_vop3": (
         "uint32_t",
@@ -1289,6 +1330,12 @@ def simd_probe_line(template_name: str) -> str | None:
     if spec3tern is not None:
         cpp_t, cpp_op = spec3tern
         return f"  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT({cpp_t}, {cpp_op});"
+    # Extra plain integer binary VOP3 ops without a VOP2 twin (add_i32/i16,
+    # sub_*, nc_* variants). Routed through the int VOP3 binary glue.
+    spec3binx = SIMD_VOP3_BINARY_INT_EXTRA.get(template_name)
+    if spec3binx is not None:
+        cpp_t, cpp_op = spec3binx
+        return f"  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT({cpp_t}, {cpp_op});"
     # VOP3-encoded twins of the SIMD VOP2 binary ops. Same operator/lane type;
     # the VOP3 form reads src0/src1 and carries abs/neg/omod/clamp modifiers.
     # f32 ops apply the modifiers in-vector (bit-exact); integer/bitwise ops
