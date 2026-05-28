@@ -1899,16 +1899,14 @@ class GraphMemcpyNode : public GraphNode {
     return false;
   }
 
-  // Returns true when this memcpy will be dispatched through the shader
-  // staging-blit path (compute queue) instead of the SDMA engine. Callers
-  // use this to skip SDMA-specific cross-engine sync (system-scope flush +
-  // attached completion signal) when the upcoming uncaptured memcpy is
-  // going to land on the compute queue anyway.
+  // Returns true when this memcpy will NOT use the SDMA engine, so no
+  // cross-engine sync (system-scope flush + attached completion signal)
+  // is needed when this node follows a captured flat batch.
   //
-  // Default is false (conservatively assume SDMA) so generic 3D memcpys
-  // preserve the existing behavior; GraphMemcpyNode1D overrides with a
-  // precise check based on the effective MemcpyType and copy size.
-  virtual bool WillUseStagingBlitPath() const { return false; }
+  // Default false (conservatively assumes SDMA) preserves existing behavior
+  // for generic 3D memcpys; GraphMemcpyNode1D overrides with a precise check
+  // based on MemcpyType and copy size.
+  virtual bool WillBypassSdmaEngine() const { return false; }
 };
 
 class GraphMemcpyNode1D : public GraphMemcpyNode {
@@ -2187,11 +2185,14 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
     return false;
   }
 
-  // Mirrors the path selection inside KernelBlitManager::{read,write}Buffer and
-  // GraphMemcpyNode1D::CreateCommand so callers can predict, without creating
-  // the command, whether the upcoming dispatch will land on the compute queue
-  // (shader staging-blit) instead of the SDMA engine.
-  virtual bool WillUseStagingBlitPath() const override {
+  // Predicts whether this 1D memcpy will bypass the SDMA engine so the
+  // caller can skip SDMA-specific cross-engine sync setup.
+  //
+  // The H2D/D2H size threshold deliberately mirrors GPU_FORCE_BLIT_COPY_SIZE
+  // used by KernelBlitManager::{read,write}Buffer. That flag is a process-wide
+  // runtime constant, so sharing it keeps both decisions in sync without
+  // introducing a separate source of truth.
+  virtual bool WillBypassSdmaEngine() const override {
     size_t sOffset = 0, dOffset = 0;
     amd::Memory* srcMemory = getMemoryObject(src_, sOffset);
     amd::Memory* dstMemory = getMemoryObject(dst_, dOffset);
@@ -2204,8 +2205,7 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
     } else if (srcMemory != nullptr) {
       type = ihipGetMemcpyType(srcMemory, dst_);  // D2H
     } else {
-      // H2H runs on CPU via ihipHtoHMemcpy — no GPU engine, so it's not an
-      // SDMA follower from the captured batch's perspective.
+      // Pure H2H runs on the CPU — no GPU engine involved, so no SDMA sync needed.
       return true;
     }
 
