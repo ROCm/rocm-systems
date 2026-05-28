@@ -81,6 +81,7 @@ add_executable(
     vop3_fp16_transcendental_simd_correctness_test.cpp
     vop3_cndmask_pack_simd_correctness_test.cpp
     vop3_div_helpers_simd_correctness_test.cpp
+    vop3_b16_rdna_simd_correctness_test.cpp
     vop3_ternary_fp_simd_correctness_test.cpp
     vop3_fmac_simd_correctness_test.cpp
     vop3_ldexp_simd_correctness_test.cpp
