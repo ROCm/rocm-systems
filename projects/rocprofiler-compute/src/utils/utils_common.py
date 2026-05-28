@@ -128,9 +128,8 @@ def resolve_rocm_library_path(library_path: Optional[str]) -> Optional[str]:
     # Use iterdir to avoid glob metacharacter issues in library_path.
     if not path.parent.is_dir():
         return None
-    matches = [
-        str(p) for p in path.parent.iterdir() if p.name.startswith(path.name + ".")
-    ]
+    prefix = f"{path.name}."
+    matches = [str(p) for p in path.parent.iterdir() if p.name.startswith(prefix)]
 
     # First pass: filter to numeric versions and collect version tuples
     version_tuples: list[tuple[list[int], str]] = []
@@ -923,7 +922,7 @@ def convert_metric_id_to_panel_info(
     return (file_id, panel_id, metric_id_int)
 
 
-def load_yaml(filepath: str) -> dict[str, Any]:
+def load_yaml(filepath: Union[str, os.PathLike]) -> dict[str, Any]:
     """Load YAML file and return as dictionary."""
     with open(filepath, encoding="utf-8") as f:
         return yaml.safe_load(f)
