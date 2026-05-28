@@ -211,10 +211,6 @@ PYBIND11_MODULE(_rocshmem4py, m) {
     "Translate a PE index from src_team to dst_team. Returns -1 if unmappable.",
     py::arg("src_team"), py::arg("src_pe"), py::arg("dest_team"));
 
-  m.def("rocshmem_team_world", []() -> intptr_t {
-    return reinterpret_cast<intptr_t>(ROCSHMEM_TEAM_WORLD);
-  }, "Return the runtime ROCSHMEM_TEAM_WORLD handle.");
-
   // -------------------------------------------------------------------------
   // sync_all (host-side ordering)
   // -------------------------------------------------------------------------

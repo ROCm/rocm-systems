@@ -51,7 +51,6 @@ try:
         rocshmem_putmem_signal_on_stream,
         rocshmem_signal_wait_until_on_stream,
         TeamConfig,
-        rocshmem_team_world,
         rocshmem_sync_all,
         rocshmem_sync_all_on_stream,
         # TODO: rocshmem_ctx_{create,destroy,fence,quiet} to be added later

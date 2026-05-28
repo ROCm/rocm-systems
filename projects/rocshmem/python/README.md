@@ -149,7 +149,11 @@ handles come from `rocshmem_team_split_strided`.
 | `rocshmem_team_split_strided(parent, start, stride, size, config=None, mask=0)` | Split a parent team into a strided sub-team; returns `(status, team_handle)`. Non-members receive `ROCSHMEM_TEAM_INVALID` (`-1`), not `0` |
 | `rocshmem_team_destroy(team)` | Destroy a team (no-op for `ROCSHMEM_TEAM_WORLD` / `ROCSHMEM_TEAM_INVALID`) |
 | `rocshmem_team_translate_pe(src_team, src_pe, dest_team)` | Map a PE index between teams; returns `-1` if unmappable |
-| `rocshmem_team_world()` | Return the runtime `ROCSHMEM_TEAM_WORLD` handle (prefer the `ROCSHMEM_TEAM_WORLD` sentinel `0` in application code) |
+
+Pass `ROCSHMEM_TEAM_WORLD` (`0`) for world-scope team operations. The C
+binding's `resolve_team_handle()` translates this sentinel to the runtime
+handle; use the constant rather than a raw runtime pointer so
+`rocshmem_team_destroy` and the tracked split/destroy wrappers stay safe.
 
 `finalize_with_torch()` and `finalize_with_mpi()` automatically destroy any
 teams created via the tracked `rocshmem_team_split_strided` wrapper before
