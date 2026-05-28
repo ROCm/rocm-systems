@@ -229,17 +229,17 @@ ncclResult_t p2pCanConnect(int* ret, struct ncclComm* comm, struct ncclTopoGraph
   } while (0)
 
 // cuMem API support
-// Extra peerRank/manager/memtype params (NCCL 2.29.x) are accepted for ABI compatibility
-// with the upstream signature but are intentionally ignored on the AMD/HIP path.
 ncclResult_t ncclP2pAllocateShareableBuffer(size_t size, int refcount, ncclIpcDesc *ipcDesc, void **ptr, int peerRank, struct ncclMemManager* manager, ncclMemType_t memtype) {
-  (void)peerRank; (void)manager; (void)memtype;
   if (ncclCuMemEnable()) {
 #if ROCM_VERSION >= 70000
     CUmemAllocationHandleType type = ncclCuMemHandleType;
 
     // cuMem API support
     CUmemGenericAllocationHandle handle;
-    NCCLCHECK(ncclCuMemAlloc(ptr, &handle, type, size));
+    NCCLCHECK(ncclCuMemAlloc(ptr, &handle, type, size, manager, memtype));
+    if (manager != nullptr && peerRank >= 0 && memtype != ncclMemPersist) {
+      NCCLCHECK(ncclDynMemMarkExportToPeer(manager, *ptr, peerRank));
+    }
     if (type == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
       // Return the native cuMem handle for later Export/Import via UDS
       memcpy(&ipcDesc->cuDesc.data, &handle, sizeof(handle));
@@ -271,14 +271,14 @@ ncclResult_t ncclP2pAllocateShareableBuffer(size_t size, int refcount, ncclIpcDe
   } else {
     // Allocate a CUDA buffer and generate an IPC handle for it
 #if defined(HIP_UNCACHED_MEMORY)
-    NCCLCHECK(ncclCudaCalloc((char **)ptr, size, hipDeviceMallocUncached));
+    NCCLCHECK(ncclCudaCalloc((char **)ptr, size, manager, memtype, hipDeviceMallocUncached));
 #else
-    NCCLCHECK(ncclCudaCalloc((char **)ptr, size, hipDeviceMallocFinegrained));
+    NCCLCHECK(ncclCudaCalloc((char **)ptr, size, manager, memtype, hipDeviceMallocFinegrained));
 #endif
     cudaError_t res = cudaIpcGetMemHandle(&ipcDesc->devIpc, *ptr);
     if (res != cudaSuccess) {
       WARN("cudaIpcGetMemHandle failed : %s", cudaGetErrorString(res));
-      ncclCudaFree(*ptr);
+      ncclCudaFree(*ptr, manager);
       CUDACHECK(res);
     }
   }
@@ -410,6 +410,12 @@ static ncclResult_t p2pMap(struct ncclComm *comm, struct ncclProxyConnector* pro
         NCCLCHECK(ncclCuMemAllocAddr(devMem, &p2pBuff->ipcDesc.memHandle, p2pBuff->size));
         CUCHECK(cuMemRelease(p2pBuff->ipcDesc.memHandle));
         *ipcPtr = *devMem;
+
+        // Track as imported peer memory for dynamic memory management.
+        // Pass handle=0 since we already released the reference above; suspend shouldn't release again.
+        NCCLCHECK(ncclMemTrackImportFromPeer(comm->memManager, *devMem, p2pBuff->size,
+                                             0, ncclCuMemHandleType, ncclMemOffload,
+                                             peerInfo->rank, peerInfo->cudaDev, p2pBuff->directPtr));
 #endif
       } else {
         *devMem = p2pBuff->directPtr;
@@ -647,22 +653,24 @@ ncclResult_t p2pRecvConnect(struct ncclComm* comm, struct ncclConnect* connectIn
 
 ncclResult_t p2pSendFree(struct ncclComm* comm, struct ncclConnector* send) {
   struct p2pResources* resources = (struct p2pResources*)send->transportResources;
+  // RCCL: check if the communicator was provided
+  struct ncclMemManager* mgr = comm ? comm->memManager : nullptr;
   if (resources) {
     if (ncclCuMemEnable()) {
       // cuMem API support
       if (resources->sendMemIpc) {
         if (resources->sendMemSameProc) {
-          NCCLCHECK(ncclCuMemFreeAddr(resources->sendMemIpc));
+          NCCLCHECK(ncclCuMemFreeAddr(resources->sendMemIpc, mgr));
         } else {
-          NCCLCHECK(ncclCudaFree(resources->sendMemIpc, comm->memManager));
+          NCCLCHECK(ncclCudaFree(resources->sendMemIpc, mgr));
         }
       }
 
       if (resources->recvMemIpc) {
         if (resources->recvMemSameProc) {
-          NCCLCHECK(ncclCuMemFreeAddr(resources->recvMemIpc));
+          NCCLCHECK(ncclCuMemFreeAddr(resources->recvMemIpc, mgr));
         } else {
-          NCCLCHECK(ncclCudaFree(resources->recvMemIpc, comm->memManager));
+          NCCLCHECK(ncclCudaFree(resources->recvMemIpc, mgr));
         }
       }
     }
@@ -677,22 +685,24 @@ ncclResult_t p2pSendFree(struct ncclComm* comm, struct ncclConnector* send) {
 
 ncclResult_t p2pRecvFree(struct ncclComm* comm, struct ncclConnector* recv) {
   struct p2pResources* resources = (struct p2pResources*)recv->transportResources;
+  // RCCL: check if the communicator was provided
+  struct ncclMemManager* mgr = comm ? comm->memManager : nullptr;
   if (resources) {
     if (ncclCuMemEnable()) {
       // cuMem API support
       if (resources->sendMemIpc) {
         if (resources->sendMemSameProc) {
-          NCCLCHECK(ncclCuMemFreeAddr(resources->sendMemIpc));
+          NCCLCHECK(ncclCuMemFreeAddr(resources->sendMemIpc, mgr));
         } else {
-          NCCLCHECK(ncclCudaFree(resources->sendMemIpc, comm->memManager));
+          NCCLCHECK(ncclCudaFree(resources->sendMemIpc, mgr));
         }
       }
 
       if (resources->recvMemIpc) {
         if (resources->recvMemSameProc) {
-          NCCLCHECK(ncclCuMemFreeAddr(resources->recvMemIpc));
+          NCCLCHECK(ncclCuMemFreeAddr(resources->recvMemIpc, mgr));
         } else {
-          NCCLCHECK(ncclCudaFree(resources->recvMemIpc, comm->memManager));
+          NCCLCHECK(ncclCudaFree(resources->recvMemIpc, mgr));
         }
       }
     }
@@ -719,9 +729,9 @@ static ncclResult_t p2pSendProxySetup(struct ncclProxyConnection* connection, st
     connection->transportResources = proxyInfo;
 
 #if defined(HIP_UNCACHED_MEMORY)
-    NCCLCHECK(ncclCudaCalloc(&proxyInfo->ceDevBuff, proxyState->buffSizes[NCCL_PROTO_SIMPLE], hipDeviceMallocUncached));
+    NCCLCHECK(ncclCudaCalloc(&proxyInfo->ceDevBuff, proxyState->buffSizes[NCCL_PROTO_SIMPLE], proxyState->memManager, ncclMemPersist, hipDeviceMallocUncached));
 #else
-    NCCLCHECK(ncclCudaCalloc(&proxyInfo->ceDevBuff, proxyState->buffSizes[NCCL_PROTO_SIMPLE], hipDeviceMallocFinegrained));
+    NCCLCHECK(ncclCudaCalloc(&proxyInfo->ceDevBuff, proxyState->buffSizes[NCCL_PROTO_SIMPLE], proxyState->memManager, ncclMemPersist, hipDeviceMallocFinegrained));
 #endif
 
     // Create a SHM segment for the peer to attach to
@@ -792,7 +802,7 @@ static ncclResult_t p2pDeregisterMemHandle(struct ncclProxyConnection* connectio
     CUDACHECK(cudaIpcCloseMemHandle((void*)((uintptr_t)ipcInfo->rmtRegAddr - ipcInfo->offset)));
   } else {
     if (connection->sameProcess) {
-      NCCLCHECK(ncclCuMemFreeAddr((void*)((uintptr_t)ipcInfo->rmtRegAddr - ipcInfo->offset), ipcInfo->numSegments));
+      NCCLCHECK(ncclCuMemFreeAddr((void*)((uintptr_t)ipcInfo->rmtRegAddr - ipcInfo->offset), proxyState->memManager, ipcInfo->numSegments));
     } else {
       NCCLCHECK(ncclCudaFree((void*)((uintptr_t)ipcInfo->rmtRegAddr - ipcInfo->offset), proxyState->memManager, ipcInfo->numSegments));
     }
@@ -1163,19 +1173,20 @@ static ncclResult_t ipcRegisterBuffer(ncclComm* comm, const void* userbuff, size
     }
 
     if (*regBufFlag) {
-      if (needUpdate) {
-        cudaStream_t hostStream, deviceStream;
-        NCCLCHECKGOTO(ncclStrongStreamAcquire(ncclCudaGraphNone(comm->config.graphUsageMode), &comm->sharedRes->hostStream, /*concurrent=*/false, &hostStream), ret, fail);
-        NCCLCHECKGOTO(ncclStrongStreamAcquire(ncclCudaGraphNone(comm->config.graphUsageMode), &comm->sharedRes->deviceStream, /*concurrent=*/false, &deviceStream), ret, fail);
-        if (regRecord->regIpcAddrs.devPeerRmtAddrs == NULL)
-          NCCLCHECKGOTO(ncclCudaCallocAsync(&regRecord->regIpcAddrs.devPeerRmtAddrs, comm->localRanks, hostStream, comm->memManager), ret, fail);
-        NCCLCHECKGOTO(ncclCudaMemcpyAsync(regRecord->regIpcAddrs.devPeerRmtAddrs, regRecord->regIpcAddrs.hostPeerRmtAddrs, comm->localRanks, hostStream), ret, fail);
-        NCCLCHECKGOTO(ncclStreamWaitStream(deviceStream, hostStream, comm->sharedRes->scratchEvent), ret, fail);
-        NCCLCHECKGOTO(ncclStrongStreamRelease(ncclCudaGraphNone(comm->config.graphUsageMode), &comm->sharedRes->hostStream, /*concurrent=*/false), ret, fail);
-        NCCLCHECKGOTO(ncclStrongStreamRelease(ncclCudaGraphNone(comm->config.graphUsageMode), &comm->sharedRes->deviceStream, /*concurrent=*/false), ret, fail);
-      }
       if (type == NCCL_IPC_COLLECTIVE) {
-        // for collective, registered remote buffers are copied to dev memory for future reference
+        // for collective, store registered remote buffers into dev memory for future reference
+        if (regRecord->regIpcAddrs.devPeerRmtAddrs == NULL || needUpdate) {
+          cudaStream_t hostStream, deviceStream;
+          NCCLCHECKGOTO(ncclStrongStreamAcquire(ncclCudaGraphNone(comm->config.graphUsageMode), &comm->sharedRes->hostStream, /*concurrent=*/false, &hostStream), ret, fail);
+          NCCLCHECKGOTO(ncclStrongStreamAcquire(ncclCudaGraphNone(comm->config.graphUsageMode), &comm->sharedRes->deviceStream, /*concurrent=*/false, &deviceStream), ret, fail);
+          if (regRecord->regIpcAddrs.devPeerRmtAddrs == NULL)
+            NCCLCHECKGOTO(ncclCudaCallocAsync(&regRecord->regIpcAddrs.devPeerRmtAddrs, comm->localRanks, hostStream, comm->memManager), ret, fail);
+          if (needUpdate)
+            NCCLCHECKGOTO(ncclCudaMemcpyAsync(regRecord->regIpcAddrs.devPeerRmtAddrs, regRecord->regIpcAddrs.hostPeerRmtAddrs, comm->localRanks, hostStream), ret, fail);
+          NCCLCHECKGOTO(ncclStreamWaitStream(deviceStream, hostStream, comm->sharedRes->scratchEvent), ret, fail);
+          NCCLCHECKGOTO(ncclStrongStreamRelease(ncclCudaGraphNone(comm->config.graphUsageMode), &comm->sharedRes->hostStream, /*concurrent=*/false), ret, fail);
+          NCCLCHECKGOTO(ncclStrongStreamRelease(ncclCudaGraphNone(comm->config.graphUsageMode), &comm->sharedRes->deviceStream, /*concurrent=*/false), ret, fail);
+        }
         peerRmtAddrs = regRecord->regIpcAddrs.devPeerRmtAddrs;
       } else {
         assert(nPeers == 1);

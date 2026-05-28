@@ -647,20 +647,24 @@ static ncclResult_t sendConnect(struct ncclComm* comm, struct ncclConnect* conne
     if (!map->sameProcess) NCCLCHECK(netMapShm(comm, &send->proxyConn, map->mems + NCCL_NET_MAP_HOSTMEM));
     if (map->mems[NCCL_NET_MAP_DEVMEM].size) {
       map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr = NULL;
+      // NET transport import: No ownerVA available, mark as Persist (do not release)
       NCCLCHECK(ncclP2pImportShareableBuffer(comm, send->proxyConn.rank,
                                             map->mems[NCCL_NET_MAP_DEVMEM].size,
                                             &map->mems[NCCL_NET_MAP_DEVMEM].ipcDesc,
-                                            (void**)&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr));
+                                            (void**)&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr,
+                                            nullptr, ncclMemPersist));
       map->mems[NCCL_NET_MAP_DEVMEM].cpuPtr = NULL;
     }
     if (map->mems[NCCL_NET_MAP_SHARED_DEVMEM].size) {
       void** sharedDevMemPtr = comm->proxyState->sharedDevMems + send->proxyConn.tpLocalRank;
       if (*sharedDevMemPtr == NULL) {
         map->mems[NCCL_NET_MAP_SHARED_DEVMEM].gpuPtr = NULL;
+        // NET transport shared import: No ownerVA, mark as Persist (do not release)
         NCCLCHECK(ncclP2pImportShareableBuffer(comm, send->proxyConn.rank,
                                               map->mems[NCCL_NET_MAP_SHARED_DEVMEM].size,
                                               &map->mems[NCCL_NET_MAP_SHARED_DEVMEM].ipcDesc,
-                                              sharedDevMemPtr));
+                                              sharedDevMemPtr,
+                                              nullptr, ncclMemPersist));
       }
       map->mems[NCCL_NET_MAP_SHARED_DEVMEM].gpuPtr = (char*)(*sharedDevMemPtr);
       map->mems[NCCL_NET_MAP_SHARED_DEVMEM].cpuPtr = NULL;
@@ -784,6 +788,8 @@ static ncclResult_t recvConnect(struct ncclComm* comm, struct ncclConnect* conne
 
 static ncclResult_t sendFree(struct ncclComm* comm, struct ncclConnector* send) {
   struct connectMap* map = (struct connectMap*)(send->transportResources);
+  // RCCL: check if the communicator was provided
+  struct ncclMemManager* mgr = comm ? comm->memManager : nullptr;
   if (map) {
     int cudaDev;
     CUDACHECK(cudaGetDevice(&cudaDev));
@@ -791,7 +797,7 @@ static ncclResult_t sendFree(struct ncclComm* comm, struct ncclConnector* send) 
       if (ncclCuMemEnable()) {
         // cuMem API support
         NCCLCHECK(ncclP2pFreeShareableBuffer(&map->mems[NCCL_NET_MAP_DEVMEM].ipcDesc));
-        NCCLCHECK(ncclCuMemFree(map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, comm->memManager));
+        NCCLCHECK(ncclCuMemFree(map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, mgr));
       } else {
         // Legacy CUDA IPC support
         CUDACHECK(cudaIpcCloseMemHandle(map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr));
@@ -838,18 +844,18 @@ static ncclResult_t sharedNetBuffersInit(struct ncclProxyState* proxyState, int 
 
   if (cuda && state->cudaBuff == NULL) {
     if (sameProcess == 0 || ncclCuMemEnable()) {
-      NCCLCHECK(ncclP2pAllocateShareableBuffer(state->size, 0, &state->ipcDesc, (void**)&state->cudaBuff));
+      NCCLCHECK(ncclP2pAllocateShareableBuffer(state->size, 0, &state->ipcDesc, (void**)&state->cudaBuff, /*peerRank=*/-1, proxyState->memManager));
     } else {
 #if defined(HIP_UNCACHED_MEMORY)
 #if defined(HIP_CONTIGUOUS_MEMORY)
-      NCCLCHECK(ncclCudaCalloc(&state->cudaBuff, state->size,
+      NCCLCHECK(ncclCudaCalloc(&state->cudaBuff, state->size, proxyState->memManager, ncclMemPersist,
         cuda ? (rcclParamNetContiguousMem() ? hipDeviceMallocContiguous : hipDeviceMallocUncached) : hipDeviceMallocDefault));
 #else
-      NCCLCHECK(ncclCudaCalloc(&state->cudaBuff, state->size,
+      NCCLCHECK(ncclCudaCalloc(&state->cudaBuff, state->size, proxyState->memManager, ncclMemPersist,
         cuda ? hipDeviceMallocUncached : hipDeviceMallocDefault));
 #endif
 #else
-      NCCLCHECK(ncclCudaCalloc(&state->cudaBuff, state->size,
+      NCCLCHECK(ncclCudaCalloc(&state->cudaBuff, state->size, proxyState->memManager, ncclMemPersist,
         cuda ? hipDeviceMallocFinegrained : hipDeviceMallocDefault));
 #endif
     }
@@ -1161,7 +1167,7 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
       if (!map->sameProcess || ncclCuMemEnable()) {
         ALIGN_SIZE(map->mems[NCCL_NET_MAP_DEVMEM].size, CUDA_IPC_MIN);
         NCCLCHECK(ncclP2pAllocateShareableBuffer(map->mems[NCCL_NET_MAP_DEVMEM].size, 0, &map->mems[NCCL_NET_MAP_DEVMEM].ipcDesc,
-                                                (void**)&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr));
+                                                (void**)&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, /*peerRank=*/-1, proxyState->memManager));
 #if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
         // Get DMA-BUF fd for cuMem VMM allocations via cuMemGetHandleForAddressRange.
         // Required even when DMA-BUF is globally disabled: ibv_reg_mr on cuMem RDMA
@@ -1178,14 +1184,14 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
       } else {
 #if defined(HIP_UNCACHED_MEMORY)
 #if defined(HIP_CONTIGUOUS_MEMORY)
-        NCCLCHECK(ncclCudaCalloc(&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, map->mems[NCCL_NET_MAP_DEVMEM].size,
+        NCCLCHECK(ncclCudaCalloc(&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, map->mems[NCCL_NET_MAP_DEVMEM].size, proxyState->memManager, ncclMemPersist,
           resources->useGdr ? (rcclParamNetContiguousMem() ? hipDeviceMallocContiguous : hipDeviceMallocUncached) : hipDeviceMallocDefault));
 #else
-        NCCLCHECK(ncclCudaCalloc(&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, map->mems[NCCL_NET_MAP_DEVMEM].size,
+        NCCLCHECK(ncclCudaCalloc(&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, map->mems[NCCL_NET_MAP_DEVMEM].size, proxyState->memManager, ncclMemPersist,
           resources->useGdr ? hipDeviceMallocUncached : hipDeviceMallocDefault));
 #endif
 #else
-        NCCLCHECK(ncclCudaCalloc(&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, map->mems[NCCL_NET_MAP_DEVMEM].size,
+        NCCLCHECK(ncclCudaCalloc(&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, map->mems[NCCL_NET_MAP_DEVMEM].size, proxyState->memManager, ncclMemPersist,
           resources->useGdr ? hipDeviceMallocFinegrained : hipDeviceMallocDefault));
 #endif
       }
@@ -1387,7 +1393,7 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
     if (resources->shared == 0) {
       if (ncclCuMemEnable()) {
         NCCLCHECK(ncclP2pAllocateShareableBuffer(map->mems[NCCL_NET_MAP_DEVMEM].size, 0, &map->mems[NCCL_NET_MAP_DEVMEM].ipcDesc,
-                                                (void**)&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr));
+                                                (void**)&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, /*peerRank=*/-1, proxyState->memManager));
 #if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
         // Get DMA-BUF fd for cuMem VMM allocations. Required even when DMA-BUF is
         // globally disabled to avoid ibv_reg_mr on VMM memory.
@@ -1402,14 +1408,14 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
       } else {
 #if defined(HIP_UNCACHED_MEMORY)
 #if defined(HIP_CONTIGUOUS_MEMORY)
-        NCCLCHECK(ncclCudaCalloc(&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, map->mems[NCCL_NET_MAP_DEVMEM].size,
+        NCCLCHECK(ncclCudaCalloc(&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, map->mems[NCCL_NET_MAP_DEVMEM].size, proxyState->memManager, ncclMemPersist,
           resources->useGdr ? (rcclParamNetContiguousMem() ? hipDeviceMallocContiguous : hipDeviceMallocUncached) : hipDeviceMallocDefault));
 #else
-        NCCLCHECK(ncclCudaCalloc(&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, map->mems[NCCL_NET_MAP_DEVMEM].size,
+        NCCLCHECK(ncclCudaCalloc(&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, map->mems[NCCL_NET_MAP_DEVMEM].size, proxyState->memManager, ncclMemPersist,
           resources->useGdr ? hipDeviceMallocUncached : hipDeviceMallocDefault));
 #endif
 #else
-        NCCLCHECK(ncclCudaCalloc(&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, map->mems[NCCL_NET_MAP_DEVMEM].size,
+        NCCLCHECK(ncclCudaCalloc(&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, map->mems[NCCL_NET_MAP_DEVMEM].size, proxyState->memManager, ncclMemPersist,
           resources->useGdr ? hipDeviceMallocFinegrained : hipDeviceMallocDefault));
 #endif
       }
@@ -1512,14 +1518,14 @@ static ncclResult_t sendProxyFree(struct ncclProxyConnection* connection, struct
       (void)close(mems[NCCL_NET_MAP_DEVMEM].dmaBufFd);
       mems[NCCL_NET_MAP_DEVMEM].dmaBufFd = -1;
     }
-    NCCLCHECK(ncclCudaFree(mems[NCCL_NET_MAP_DEVMEM].cpuPtr));
+    NCCLCHECK(ncclCudaFree(mems[NCCL_NET_MAP_DEVMEM].cpuPtr, proxyState->memManager));
     if (!resources->map.sameProcess || ncclCuMemEnable()) {
       // cuMem API support
       if (mems[NCCL_NET_MAP_DEVMEM].size) {
         NCCLCHECK(ncclP2pFreeShareableBuffer(&mems[NCCL_NET_MAP_DEVMEM].ipcDesc));
       }
     }
-    if (mems[NCCL_NET_MAP_GDCMEM].cpuPtr) NCCLCHECK(ncclGdrCudaFree(resources->gdrDesc));
+    if (mems[NCCL_NET_MAP_GDCMEM].cpuPtr) NCCLCHECK(ncclGdrCudaFree(resources->gdrDesc, proxyState->memManager));
     if (resources->shared) {
       NCCLCHECK(sharedNetBuffersDestroy(proxyState, resources->tpLocalRank, 0, connection));
       if (resources->maxRecvs > 1 && ncclParamNetSharedComms()) {
@@ -1564,14 +1570,14 @@ static ncclResult_t recvProxyFree(struct ncclProxyConnection* connection, struct
       (void)close(mems[NCCL_NET_MAP_DEVMEM].dmaBufFd);
       mems[NCCL_NET_MAP_DEVMEM].dmaBufFd = -1;
     }
-    NCCLCHECK(ncclCudaFree(mems[NCCL_NET_MAP_DEVMEM].cpuPtr));
+    NCCLCHECK(ncclCudaFree(mems[NCCL_NET_MAP_DEVMEM].cpuPtr, proxyState->memManager));
     if (!resources->map.sameProcess || ncclCuMemEnable()) {
       // cuMem API support
       if (mems[NCCL_NET_MAP_DEVMEM].size) {
         NCCLCHECK(ncclP2pFreeShareableBuffer(&mems[NCCL_NET_MAP_DEVMEM].ipcDesc));
       }
     }
-    if (mems[NCCL_NET_MAP_GDCMEM].cpuPtr) NCCLCHECK(ncclGdrCudaFree(resources->gdrDesc));
+    if (mems[NCCL_NET_MAP_GDCMEM].cpuPtr) NCCLCHECK(ncclGdrCudaFree(resources->gdrDesc, proxyState->memManager));
     if (resources->shared) {
       NCCLCHECK(sharedNetBuffersDestroy(proxyState, resources->tpLocalRank, 1, connection));
       if (resources->maxRecvs > 1 && ncclParamNetSharedComms()) {

@@ -410,9 +410,20 @@ include(Packages) # finds third-party libraries
 rocprofiler_systems_activate_clang_tidy()
 
 # custom visibility settings
-if(ROCPROFSYS_BUILD_HIDDEN_VISIBILITY)
-    set(CMAKE_C_VISIBILITY_PRESET "internal")
-    set(CMAKE_CXX_VISIBILITY_PRESET "internal")
+#
+# When building with a sanitizer, keep default (not hidden) visibility.
+# Hidden visibility combined with sanitizer builds causes lld to reject
+# mismatched COMDAT group leaders; the complementary fix for timemory's
+# explicit instantiations is in cmake/Packages.cmake.  Non-sanitizer builds
+# keep hidden visibility for a smaller .dynsym and to prevent unintended
+# symbol export.
+#
+# Detect sanitizer via CMAKE_CXX_FLAGS because the flag is injected by the
+# super-project before this build is configured.
+string(FIND "${CMAKE_CXX_FLAGS}" "-fsanitize" _rocprofsys_sanitizer_flag_pos)
+if(ROCPROFSYS_BUILD_HIDDEN_VISIBILITY AND _rocprofsys_sanitizer_flag_pos EQUAL -1)
+    set(CMAKE_C_VISIBILITY_PRESET "hidden")
+    set(CMAKE_CXX_VISIBILITY_PRESET "hidden")
     set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 endif()
 

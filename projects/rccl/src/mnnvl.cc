@@ -94,13 +94,13 @@ ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
     // it was removed, so future maintainers don't re-add it expecting it to work.
       const char *errStr;
       (void) cuGetErrorString(err, &errStr);
-      NCCLCHECK(ncclCuMemFree(ptr));
+      NCCLCHECK(ncclCuMemFree(ptr, comm->memManager));
       // Return an error if this is a MNNVL capable system but it's not working
       WARN("MNNVL rank%d (cliqueSize %d) is available but not working on this system: cuMemExportToShareableHandle/cuMemImportFromShareableHandle failed: %s. Check afmctl. Set NCCL_MNNVL_ENABLE=0 to ignore this issue.",
           comm->rank, comm->clique.size, errStr);
       return ncclSystemError;
     }
-    NCCLCHECK(ncclCuMemFree(ptr));
+    NCCLCHECK(ncclCuMemFree(ptr, comm->memManager));
 
     // Force the CUMEM handle type to be FABRIC for MNNVL
     ncclCuMemHandleType = CU_MEM_HANDLE_TYPE_FABRIC;

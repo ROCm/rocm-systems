@@ -910,6 +910,9 @@ struct ncclComm {
   // Temporary Buffer [RCCL]
   void* tempBuff;
 
+  struct ncclIntruQueue<struct ncclMemManagerTask, &ncclMemManagerTask::next> suspendTaskQueue;
+  struct ncclIntruQueue<struct ncclMemManagerTask, &ncclMemManagerTask::next> resumeTaskQueue;
+
   uint64_t endMagic;
 };
 

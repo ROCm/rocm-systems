@@ -527,13 +527,13 @@ static ncclResult_t commFree(ncclComm_t comm) {
   // tempBuff is allocated per-communicator for direct ReduceScatter on gfx950.
   // It is owned by the communicator; free it during communicator teardown.
   if (comm->tempBuff) {
-    NCCLCHECK(ncclCudaFree(comm->tempBuff));
+    NCCLCHECK(ncclCudaFree(comm->tempBuff, comm->memManager));
     comm->tempBuff = nullptr;
   }
 
   // Free hierarchical AG resources
   if (comm->hierarchicalAGTempBuffer) {
-    NCCLCHECK(ncclCudaFree(comm->hierarchicalAGTempBuffer));
+    NCCLCHECK(ncclCudaFree(comm->hierarchicalAGTempBuffer, comm->memManager));
     comm->hierarchicalAGTempBuffer = nullptr;
   }
   if (comm->hierarchicalIntraComm) {
@@ -563,8 +563,15 @@ static ncclResult_t commFree(ncclComm_t comm) {
     }
   }
 
-  // Destroy dynamic memory manager only after all proxy threads have been joined
-  NCCLCHECK(ncclMemManagerDestroy(comm));
+  // Free any pending suspend/resume tasks
+  while (!ncclIntruQueueEmpty(&comm->suspendTaskQueue)) {
+    struct ncclMemManagerTask* task = ncclIntruQueueDequeue(&comm->suspendTaskQueue);
+    free(task);
+  }
+  while (!ncclIntruQueueEmpty(&comm->resumeTaskQueue)) {
+    struct ncclMemManagerTask* task = ncclIntruQueueDequeue(&comm->resumeTaskQueue);
+    free(task);
+  }
 
   if (comm->memPool) CUDACHECK(cudaMemPoolDestroy(comm->memPool));
 
@@ -612,7 +619,7 @@ skip_profiling:
     else
       ncclCommThreadMain((void *)comm);
   }
-  NCCLCHECK(ncclCudaFree((void *)comm->collTrace));
+  NCCLCHECK(ncclCudaFree((void *)comm->collTrace, comm->memManager));
   NCCLCHECK(ncclCudaHostFree((void *)comm->collTraceTail));
 #endif
 
@@ -670,6 +677,10 @@ skip_profiling:
     NCCLCHECK(dtor->fn(dtor));
     dtor = dtor->next;
   }
+
+  // RCCL: deferred from earlier in commFree. All ncclCudaFree callers have
+  // run by now, so it is safe to reclaim Released-entry VAs and free the manager.
+  NCCLCHECK(ncclMemManagerDestroy(comm));
 
   ncclMemoryStackDestruct(&comm->memScoped);
   ncclMemoryStackDestruct(&comm->memPermanent);
@@ -869,9 +880,9 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
 #ifdef ENABLE_COLLTRACE
   NCCLCHECK(ncclCudaHostCalloc(&comm->collTraceTail, MAXCHANNELS));
 #if defined(HIP_UNCACHED_MEMORY)
-  NCCLCHECK(ncclCudaCalloc(&comm->collTrace, COLLTRACE_NUM_ITEMS*MAXCHANNELS, hipDeviceMallocUncached));
+  NCCLCHECK(ncclCudaCalloc(&comm->collTrace, COLLTRACE_NUM_ITEMS*MAXCHANNELS, comm->memManager, ncclMemPersist, hipDeviceMallocUncached));
 #else
-  NCCLCHECK(ncclCudaCalloc(&comm->collTrace, COLLTRACE_NUM_ITEMS*MAXCHANNELS));
+  NCCLCHECK(ncclCudaCalloc(&comm->collTrace, COLLTRACE_NUM_ITEMS*MAXCHANNELS, comm->memManager, ncclMemPersist));
 #endif
   comm->collTraceExit = 0;
   comm->collTraceEnabled = false; // we can enable colltrace without starting a thread
@@ -940,6 +951,8 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   ncclIntruQueueMpscConstruct(&comm->callbackQueue);
   ncclIntruQueueConstruct(&comm->legacyRegCleanupQueue);
   ncclIntruQueueConstruct(&comm->ceInitTaskQueue);
+  ncclIntruQueueConstruct(&comm->suspendTaskQueue);
+  ncclIntruQueueConstruct(&comm->resumeTaskQueue);
 
   comm->regCache.pageSize = ncclOsGetPageSize();
 
@@ -1078,7 +1091,7 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
 #endif
 
 #ifdef ENABLE_PROFILING
-  NCCLCHECK(ncclCudaCalloc(&tmpCommAndChans.comm.devProf, MAXCHANNELS*PROFILE_NUM_LAUNCHES));
+  NCCLCHECK(ncclCudaCalloc(&tmpCommAndChans.comm.devProf, MAXCHANNELS*PROFILE_NUM_LAUNCHES, comm->memManager, ncclMemPersist));
 #endif
 
 #ifdef ENABLE_FAULT_INJECTION
@@ -2581,7 +2594,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
 
   // Allocate Temp Buffer for Direct Reduce Scatter
   if (IsArchMatch(archName,"gfx950")) {
-    NCCLCHECK(ncclCudaMalloc(&(comm->tempBuff), TEMP_BUFF_SIZE));
+    NCCLCHECK(ncclCudaMalloc(&(comm->tempBuff), TEMP_BUFF_SIZE, comm->memManager));
   }
 
   NCCLCHECKGOTO(latency_profiler::collTraceInit(comm), res, fail);
@@ -2601,7 +2614,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
       NCCLCHECKGOTO(ncclCommSplit(comm, local_rank, node_id, &comm->hierarchicalInterComm, NULL), res, fail);
       comm->forcePatEnable = false;
       size_t tempBufSize = (comm->nNodes >= 16) ? HIERARCHICAL_AG_TEMP_BUFFER_SIZE : HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2;
-      NCCLCHECKGOTO(ncclCudaMalloc(&(comm->hierarchicalAGTempBuffer), tempBufSize), res, fail);
+      NCCLCHECKGOTO(ncclCudaMalloc(&(comm->hierarchicalAGTempBuffer), tempBufSize, comm->memManager), res, fail);
       comm->hierarchicalCommsInitialized = true;
       INFO(NCCL_INIT, "Hierarchical AllGather: intraComm (nRanks=%d) and interComm (nRanks=%d) Initialized",
         comm->hierarchicalIntraComm->nRanks, comm->hierarchicalInterComm->nRanks);

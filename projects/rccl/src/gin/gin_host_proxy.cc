@@ -79,7 +79,7 @@ template <typename T>
 static ncclResult_t allocMemCPUAccessible(T **ptr, T **devPtr, size_t nelem, int host_flags,
                                           void **gdrHandle, bool forceHost = false) {
   if (ncclGdrCopy && !forceHost) {
-    NCCLCHECK(ncclGdrCudaCalloc(ptr, devPtr, nelem, gdrHandle));
+    NCCLCHECK(ncclGdrCudaCalloc(ptr, devPtr, nelem, gdrHandle, NULL));
   } else {
     NCCLCHECK(ncclCuMemHostAlloc((void **)ptr, NULL, nelem * sizeof(T)));
     memset((void *)*ptr, 0, nelem * sizeof(T));
@@ -103,7 +103,7 @@ static ncclResult_t allocMemCPUAccessible(T **ptr, T **devPtr, size_t nelem, int
 template <typename T>
 static ncclResult_t freeMemCPUAccessible(T *ptr, void *gdrHandle) {
   if (gdrHandle != NULL) {  // If a GDR handle exists, it was GDR memory
-    NCCLCHECK(ncclGdrCudaFree(gdrHandle));
+    NCCLCHECK(ncclGdrCudaFree(gdrHandle, NULL));
   } else {  // Otherwise, it was host memory (or GDR was off)
     NCCLCHECK(ncclCuMemHostFree(ptr));
   }
