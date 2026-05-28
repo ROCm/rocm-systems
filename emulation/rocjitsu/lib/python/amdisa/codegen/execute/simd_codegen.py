@@ -788,6 +788,12 @@ SIMD_VOP3_CNDMASK: set[str] = {
     "v_cndmask_b32_vop3",
 }
 
+# 16-bit variant — RDNA3+. Low-16 of each source selected per lane, high-16
+# zero (matches scalar `uint32_t(uint16_t(...))` write pattern).
+SIMD_VOP3_CNDMASK_B16: set[str] = {
+    "v_cndmask_b16_vop3",
+}
+
 # VOP3 div_fmas: fma(src0, src1, src2) followed by a VCC-bit-gated
 # ldexp(result, 32) (f32) or ldexp(result, 64) (f64). Fixed-op / functorless.
 SIMD_VOP3_DIV_FMAS_FP32: set[str] = {
@@ -1255,6 +1261,26 @@ SIMD_VOP3_BINARY_INT_EXTRA: dict[str, tuple[str, str]] = {
         "uint32_t",
         "[](auto a, auto b) { return (a & 0xFFFFu) | ((b & 0xFFFFu) << 16); }",
     ),
+    # 16-bit-lane bitwise binary VOP3 ops (RDNA3+; CDNA4 does not decode).
+    # The scalar body computes `uint16_t(uint16_t(a) OP uint16_t(b))` and
+    # writes the result as a zero-extended uint32; SIMD reproduces with a
+    # 32-bit `& 0xFFFFu` mask on the result. No modifiers (integer ops).
+    "v_and_b16_vop3": ("uint32_t", "[](auto a, auto b) { return (a & b) & 0xFFFFu; }"),
+    "v_or_b16_vop3": ("uint32_t", "[](auto a, auto b) { return (a | b) & 0xFFFFu; }"),
+    "v_xor_b16_vop3": ("uint32_t", "[](auto a, auto b) { return (a ^ b) & 0xFFFFu; }"),
+}
+
+# VOP3 unary integer ops without a VOP1 twin. Reuse the VOP1 unary glue
+# (operand shape is identical: src0 in, vdst out, 32-bit lanes) — only the
+# probe routing key differs. RDNA3+; CDNA4 does not decode.
+SIMD_VOP3_UNARY_INT_EXTRA: dict[str, tuple[str, str, str]] = {
+    # v_not_b16: `uint16_t(~src0)`, zero-extended. Same shape as v_not_b32 but
+    # masked to 16 bits.
+    "v_not_b16_vop3": (
+        "uint32_t",
+        "uint32_t",
+        "[](auto a) { return (~a) & 0xFFFFu; }",
+    ),
 }
 
 
@@ -1518,6 +1544,8 @@ def simd_probe_line(template_name: str) -> str | None:
         return "  ROCJITSU_TRY_SIMD_VOP2_CNDMASK();"
     if template_name in SIMD_VOP3_CNDMASK:
         return "  ROCJITSU_TRY_SIMD_VOP3_CNDMASK();"
+    if template_name in SIMD_VOP3_CNDMASK_B16:
+        return "  ROCJITSU_TRY_SIMD_VOP3_CNDMASK_B16();"
     spec2 = SIMD_VOP2_BINARY.get(template_name)
     if spec2 is not None:
         cpp_t, cpp_op = spec2
@@ -1638,6 +1666,12 @@ def simd_probe_line(template_name: str) -> str | None:
     specldexpf64 = SIMD_VOP3_LDEXP_FP64.get(template_name)
     if specldexpf64 is not None:
         return f"  ROCJITSU_TRY_SIMD_LDEXP_VOP3_FP64({specldexpf64});"
+    # VOP3 unary integer ops with no VOP1 twin (e.g. v_not_b16). Reuse the
+    # VOP1 unary glue — operand shape (src0, vdst, 32-bit lanes) matches.
+    spec3unai = SIMD_VOP3_UNARY_INT_EXTRA.get(template_name)
+    if spec3unai is not None:
+        cpp_tin, cpp_tout, cpp_op = spec3unai
+        return f"  ROCJITSU_TRY_SIMD_VOP1_UNARY({cpp_tin}, {cpp_tout}, {cpp_op});"
     # Extra plain integer binary VOP3 ops without a VOP2 twin (add_i32/i16,
     # sub_*, nc_* variants). Routed through the int VOP3 binary glue.
     spec3binx = SIMD_VOP3_BINARY_INT_EXTRA.get(template_name)
