@@ -918,40 +918,56 @@ fail:
 // Pre-process the string so that running "strings" on the lib can quickly reveal the version.
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 #define VERSION_STRING "RCCL version : " STR(NCCL_MAJOR) "." STR(NCCL_MINOR) "." STR(NCCL_PATCH) NCCL_SUFFIX
-#define VERSION_STRING_EXTENDED "HIP version  : " HIP_BUILD_INFO "\nROCm version : " ROCM_BUILD_INFO
+#define HIP_VERSION_STRING  "HIP version  : " HIP_BUILD_INFO
+#define ROCM_VERSION_STRING "ROCm version : " ROCM_BUILD_INFO
+#define VERSION_STRING_EXTENDED HIP_VERSION_STRING "\n" ROCM_VERSION_STRING
 #else
 #define VERSION_STRING "NCCL version " STR(NCCL_MAJOR) "." STR(NCCL_MINOR) "." STR(NCCL_PATCH) NCCL_SUFFIX
 #define VERSION_STRING_EXTENDED "CUDA version " STR(CUDA_MAJOR) "." STR(CUDA_MINOR)
 #endif
 static void showVersion() {
-  char versionInfo[2048+2*HOST_NAME_MAX], hostInfo[HOST_NAME_MAX], libPathInfo[2048];
-
   // Retrieve Hostname info
-  if (gethostname(hostInfo, sizeof(hostInfo)-1) != 0) {
-    // Returns Unknown in hostInfo if function call unsuccessful
-    strncpy(hostInfo, "Unknown", sizeof(hostInfo)-1);
-  }
+  char hostBuf[HOST_NAME_MAX];
+  std::string hostInfo = (gethostname(hostBuf, sizeof(hostBuf)-1) == 0) ? hostBuf : "Unknown";
 
   // Retrieve librccl path
   Dl_info pathInfo;
-  if (dladdr((void*)ncclCommInitRank, &pathInfo)) {
-    strncpy(libPathInfo, pathInfo.dli_fname, sizeof(libPathInfo)-1);
-  } else {
-    // Sets libPath to Unknown if the above function call is not successful
-    strncpy(libPathInfo, "Unknown", sizeof(libPathInfo)-1);
-  }
+  std::string libPathInfo =
+      dladdr((void*)ncclCommInitRank, &pathInfo) ? pathInfo.dli_fname : "Unknown";
 
-  snprintf(versionInfo, sizeof(versionInfo),
-    "%s-%s\n%s\n"
-    "%-12s : %s\n%12s : %s",
-    VERSION_STRING, rcclGitHash, VERSION_STRING_EXTENDED,
-    "Hostname", hostInfo, "Librccl path", libPathInfo
-  );
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // Query the active HIP/ROCm runtime to report alongside the compile-time
+  // versions when they differ.
+  VersionInfo hipRt{};
+  int hipRuntimeVer = 0;
+  if (hipRuntimeGetVersion(&hipRuntimeVer) == hipSuccess)
+    hipRt = decodeHipVer(hipRuntimeVer);
+  const VersionInfo hipCt = {true, HIP_VERSION_MAJOR, HIP_VERSION_MINOR, HIP_VERSION_PATCH};
+
+  VersionInfo rocmRt{}, rocmCt{};
+#if ROCM_VERSION >= 60000
+  // getROCmVersion() is provided by librocm-core.
+  unsigned int rocmMajor = 0, rocmMinor = 0, rocmPatch = 0;
+  if (getROCmVersion(&rocmMajor, &rocmMinor, &rocmPatch) == VerSuccess)
+    rocmRt = VersionInfo{true, rocmMajor, rocmMinor, rocmPatch};
+  rocmCt = VersionInfo{true, ROCM_VERSION_MAJOR, ROCM_VERSION_MINOR, ROCM_VERSION_PATCH};
+#endif
+
+  std::string extendedInfo = fmtExtVer(HIP_VERSION_STRING, hipRt, hipCt,
+                                       ROCM_VERSION_STRING, rocmRt, rocmCt);
+#else
+  std::string extendedInfo = VERSION_STRING_EXTENDED;
+#endif
+
+  std::string versionInfo = fmt::format(
+    "{}-{}\n{}\n{:<12} : {}\n{:>12} : {}",
+    VERSION_STRING, rcclGitHash, extendedInfo,
+    "Hostname", hostInfo, "Librccl path", libPathInfo);
 
   if (ncclDebugLevel == NCCL_LOG_VERSION || ncclDebugLevel == NCCL_LOG_WARN) {
-    VERSION("%s", versionInfo);
+    VERSION("%s", versionInfo.c_str());
   } else {
-    INFO(NCCL_ALL,"%s", versionInfo);
+    INFO(NCCL_ALL,"%s", versionInfo.c_str());
   }
 }
 

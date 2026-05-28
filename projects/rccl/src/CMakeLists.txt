@@ -988,6 +988,10 @@ else()
 endif()
 target_link_libraries(rccl PRIVATE   dl)
 target_link_libraries(rccl PRIVATE   ${SMI_LIBRARIES})
+# librocm-core provides getROCmVersion() for reporting the runtime ROCm version.
+if(ROCM_MAJOR_VERSION GREATER_EQUAL 6)
+  target_link_libraries(rccl PRIVATE -L${ROCM_PATH}/lib -lrocm-core)
+endif()
 # Wrap fmt in $<BUILD_INTERFACE:...> so it's only used while building rccl
 # and is omitted from the exported rccl-targets export set. Without this,
 # a FetchContent-built fmt-header-only target leaks into rccl's link
