@@ -1702,11 +1702,10 @@ __host__ int rocshmem_test(T *ivars, int cmp, T val) {
   }
 
 #define REDUCTION_ON_STREAM_IMP_GEN(T, TNAME, Op, Op_API) \
-    int rocshmem_##TNAME##_##Op##_reduce_on_stream(rocshmem_team_t team, T *dest, \
-                                                   const T *source, size_t nreduce, \
-                                                   hipStream_t stream){             \
-    return get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->reduce_on_stream<T, Op_API>(team, \
-                                                        dest, source, static_cast<int>(nreduce), stream); \
+    int rocshmem_ctx_##TNAME##_##Op##_reduce_on_stream(rocshmem_ctx_t ctx, rocshmem_team_t team, \ 
+      T *dest, const T *source, size_t nreduce, hipStream_t stream){                             \
+      return get_internal_ctx(ctx)->reduce_on_stream<T, Op_API>(team, dest, source,              \
+        static_cast<int>(nreduce), stream);                                                      \
    }
 #define REDUCTION_ON_STREAM_IMP_GEN_ARITH(T, TNAME) \
     REDUCTION_ON_STREAM_IMP_GEN(T, TNAME, sum, ROCSHMEM_SUM) \

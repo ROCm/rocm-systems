@@ -767,6 +767,23 @@ __global__ ATTR_NO_INLINE void rocshmem_alltoallmem_kernel(rocshmem_team_t team,
                                                            size_t size);
 
 /**
+ * @brief kernel for performing a reduce on stream operation.
+ *
+ * @param[in] team    The team participating in the collective.
+ * @param[in] dest    Destination address. Must be an address on the symmetric
+ *                    heap.
+ * @param[in] source  Source address. Must be an address on the symmetric heap.
+ * @param[in] size    Number of bytes to transfer per pair of PEs.
+ *
+ * @return void
+ */
+template <typename T, ROCSHMEM_OP Op>
+__global__ ATTR_NO_INLINE void rocshmem_reduce_on_stream_kernel(rocshmem_team_t team,
+                                                                T *dest,
+                                                                const T *source,
+                                                                int nreduce);
+
+/**
  * @brief kernel for performing a broadcast collective operation.
  * Caller enqueues the kernel on given stream
  *
@@ -980,6 +997,65 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_sync_wave(
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_sync_wg(
     rocshmem_ctx_t ctx, rocshmem_team_t team);
+
+/**
+ * @name SHMEM_REDUCTIONS_ON_STREAM
+ * @brief 
+ *
+ * @param[in] team         The team participating in the collective.
+ * @param[in] dest         Destination address. Must be an address on the
+ *                         symmetric heap.
+ * @param[in] source       Source address. Must be an address on the symmetric
+                           heap.
+ * @param[in] nreduce      Size of the buffer to participate in the reduction.
+ *
+ * @return int (Zero on successful local completion. Nonzero otherwise.)
+ */
+#define REDUCTION_ON_STREAM_DEF_GEN(T, TNAME, Op, Op_API)  \
+    int rocshmem_ctx_##TNAME##_##Op##_reduce_on_stream(    \
+        rocshmem_ctx_t ctx, rocshmem_team_t team,          \
+        T *dest, const T *source, size_t nreduce, hipStream_t stream);
+
+#define REDUCTION_ON_STREAM_DEF_GEN_ARITH(T, TNAME) \
+    REDUCTION_ON_STREAM_DEF_GEN(T, TNAME, sum, ROCSHMEM_SUM) \
+    REDUCTION_ON_STREAM_DEF_GEN(T, TNAME, min, ROCSHMEM_MIN) \
+    REDUCTION_ON_STREAM_DEF_GEN(T, TNAME, max, ROCSHMEM_MAX) \
+    REDUCTION_ON_STREAM_DEF_GEN(T, TNAME, prod, ROCSHMEM_PROD)
+
+#define REDUCTION_ON_STREAM_DEF_GEN_BITWISE(T, TNAME)  \
+  REDUCTION_ON_STREAM_DEF_GEN(T, TNAME, or, ROCSHMEM_OR)  \
+  REDUCTION_ON_STREAM_DEF_GEN(T, TNAME, and, ROCSHMEM_AND) \
+  REDUCTION_ON_STREAM_DEF_GEN(T, TNAME, xor, ROCSHMEM_XOR)
+
+#define INT_REDUCTION_ON_STREAM_GEN(T, TNAME) \
+  REDUCTION_ON_STREAM_DEF_GEN_ARITH(T, TNAME)     \
+  REDUCTION_ON_STREAM_DEF_GEN_BITWISE(T, TNAME)
+
+#define FLOAT_REDUCTION_ON_STREAM_GEN(T, TNAME) REDUCTION_ON_STREAM_DEF_GEN_ARITH(T, TNAME)
+
+INT_REDUCTION_ON_STREAM_GEN(int, int)
+INT_REDUCTION_ON_STREAM_GEN(long, long)
+INT_REDUCTION_ON_STREAM_GEN(long long, longlong)
+INT_REDUCTION_ON_STREAM_GEN(short, short)
+INT_REDUCTION_ON_STREAM_GEN(char, char)
+INT_REDUCTION_ON_STREAM_GEN(int8_t, int8)
+INT_REDUCTION_ON_STREAM_GEN(int16_t, int16)
+INT_REDUCTION_ON_STREAM_GEN(int32_t, int32)
+INT_REDUCTION_ON_STREAM_GEN(int64_t, int64)
+INT_REDUCTION_ON_STREAM_GEN(unsigned int, uint)
+INT_REDUCTION_ON_STREAM_GEN(unsigned long, ulong)
+INT_REDUCTION_ON_STREAM_GEN(unsigned long long, ulonglong)
+INT_REDUCTION_ON_STREAM_GEN(unsigned short, ushort)
+INT_REDUCTION_ON_STREAM_GEN(signed char, schar)
+INT_REDUCTION_ON_STREAM_GEN(unsigned char, uchar)
+INT_REDUCTION_ON_STREAM_GEN(uint8_t, uint8)
+INT_REDUCTION_ON_STREAM_GEN(uint16_t, uint16)
+INT_REDUCTION_ON_STREAM_GEN(uint32_t, uint32)
+INT_REDUCTION_ON_STREAM_GEN(uint64_t, uint64)
+INT_REDUCTION_ON_STREAM_GEN(size_t, size)
+
+FLOAT_REDUCTION_ON_STREAM_GEN(float, float)
+FLOAT_REDUCTION_ON_STREAM_GEN(double, double)
 
 }  // namespace rocshmem
 
