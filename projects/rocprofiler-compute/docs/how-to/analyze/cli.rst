@@ -31,8 +31,8 @@ Walkthrough
 
 .. note::
 
-   By default, analyze only evaluates blocks that were profiled. Analyze-mode
-   ``-b`` overrides this and may produce missing-counter warnings for blocks
+   By default, analyze only evaluates the profiled blocks. Analyze-mode
+   ``-b`` overrides this and might produce missing-counter warnings for blocks
    whose counters were not collected.
 
 There are three high-level GPU analysis views:
