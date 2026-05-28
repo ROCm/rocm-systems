@@ -5,7 +5,6 @@ import argparse
 import csv
 import ctypes
 import errno
-import glob
 import io
 import os
 import pty
@@ -135,8 +134,11 @@ def resolve_rocm_library_path(library_path: Optional[str]) -> Optional[str]:
         console_debug(f"Resolved library (exact match): {path}")
         return str(path)
 
-    # Escape the input path so any glob metacharacters are treated literally.
-    matches = glob.glob(f"{glob.escape(library_path)}.*")
+    # Use iterdir to avoid glob metacharacter issues in library_path.
+    if not path.parent.is_dir():
+        return None
+    prefix = f"{path.name}."
+    matches = [str(p) for p in path.parent.iterdir() if p.name.startswith(prefix)]
 
     # First pass: filter to numeric versions and collect version tuples
     version_tuples: list[tuple[list[int], str]] = []
@@ -930,7 +932,7 @@ def convert_metric_id_to_panel_info(
     return (file_id, panel_id, metric_id_int)
 
 
-def load_yaml(filepath: str) -> dict[str, Any]:
+def load_yaml(filepath: Union[str, os.PathLike]) -> dict[str, Any]:
     """Load YAML file and return as dictionary."""
     with open(filepath, encoding="utf-8") as f:
         return yaml.safe_load(f)
@@ -940,12 +942,11 @@ def get_arch_panel_id_to_alias(arch: str) -> dict[str, str]:
     """Return panel_id_str -> alias from the *_config_template.yaml whose
     filename prefix matches arch. Empty/None aliases stay as "".
     Returns {} when no template matches the arch."""
-    template_glob = (
-        f"{config.rocprof_compute_home}"
-        "/rocprof_compute_soc/analysis_configs/*_config_template.yaml"
+    analysis_dir = (
+        Path(config.rocprof_compute_home) / "rocprof_compute_soc" / "analysis_configs"
     )
-    for path in sorted(glob.glob(template_glob)):
-        m = re.match(r".*(gfx\d+)_config_template\.yaml$", path)
+    for path in sorted(analysis_dir.glob("*_config_template.yaml")):
+        m = re.match(r"(gfx\d+)_config_template\.yaml$", path.name)
         if m and arch.startswith(m.group(1)):
             panel_yaml = load_yaml(path) or {}
             panels = panel_yaml.get("panels") or []
