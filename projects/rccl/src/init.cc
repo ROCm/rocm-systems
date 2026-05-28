@@ -2522,7 +2522,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
         NCCLCHECKGOTO(ncclCommSplit(comm, local_rank, node_id, &comm->hierarchicalInterComm, NULL), res, fail);
         comm->forcePatEnable = false;
         size_t tempBufSize = (comm->nNodes >= 16) ? HIERARCHICAL_AG_TEMP_BUFFER_SIZE : HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2;
-        NCCLCHECKGOTO(ncclCudaMalloc(&(comm->hierarchicalAGTempBuffer), tempBufSize), comm->memManager, res, fail);
+        NCCLCHECKGOTO(ncclCudaMalloc(&(comm->hierarchicalAGTempBuffer), tempBufSize, comm->memManager), res, fail);
         comm->hierarchicalCommsInitialized = true;
         INFO(NCCL_INIT, "Hierarchical AllGather: intraComm (nRanks=%d) and interComm (nRanks=%d) Initialized",
           comm->hierarchicalIntraComm->nRanks, comm->hierarchicalInterComm->nRanks);
