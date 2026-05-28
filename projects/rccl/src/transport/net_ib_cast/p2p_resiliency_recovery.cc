@@ -34,15 +34,6 @@ extern int64_t ncclParamIbCastPkey();
 
 #define NCCL_IB_RECOVERY_QKEY 0x1234ABCD
 
-// UD receives prepend a 40-byte Global Routing Header (GRH).
-#define NCCL_IB_UD_GRH_SIZE 40
-
-// Entry for exchanging new QPNs during AINIC destroy+recreate recovery.
-struct RecoveryQpnEntry {
-  uint32_t qpIndex;
-  uint32_t newQpn;
-};
-
 // Max QPN entries for recovery exchange. Both send and recv buffers are
 // sized to NCCL_IB_MAX_QPS entries, accommodating the worst case where
 // all QPs belong to the failed device.
