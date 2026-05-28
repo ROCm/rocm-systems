@@ -126,6 +126,23 @@ bool alloc_kernel_memory(HsaRsrcFactory* rsrc, const AgentInfo* gpu,
   return true;
 }
 
+//Mirror alloc_kernel_memory
+void dealloc_kernel_memory(HsaRsrcFactory* rsrc, simple_convolution& kernel) {
+  for (auto& [buf_id, des] : kernel.GetMemMap()) {
+    switch (des.id) {
+      case TestKernel::LOCAL_DES_ID:
+      case TestKernel::KERNARG_DES_ID:
+      case TestKernel::SYS_DES_ID:
+        if (des.ptr) rsrc->FreeMemory(des.ptr);
+        break;
+      case TestKernel::NULL_DES_ID:
+        break;
+      default:
+        break;
+    }
+  }
+}
+
 struct PmcCreateResult {
   aqlprofile_handle_t handle;
   aqlprofile_pmc_aql_packets_t packets;
@@ -350,11 +367,6 @@ bool run_new_test_flow() {
 
         auto total = 0;
         for (auto& pmc_result : pmc_results) {
-          //std::cout << "block_name " << pmc_result.block_name 
-          //          << " block_index " << pmc_result.block_index 
-          //          << " event_id " << pmc_result.event_id
-          //          << " value " << pmc_result.value 
-          //           <<std::endl;
           total += pmc_result.value;
         }
         TEST_ASSERT_EQUAL(total, 0, "counter_result_value_beforedoorbell");
@@ -397,10 +409,7 @@ bool run_new_test_flow() {
         rsrc->FreeMemory(output);
 
         // --- Cleanup kernel resources ---
-        //TODO: This code crashes for some reason. Not sure why
-        //for (auto& [buf_id, des] : kr.conv.GetMemMap()) {
-        //  if (des.ptr) rsrc->FreeMemory(des.ptr);
-        //}
+        dealloc_kernel_memory(rsrc, kr.conv);
         hsa_executable_destroy(kr.hsa_exec);
         aqlprofile_pmc_delete_packets(pmc_handle);
 
