@@ -483,6 +483,8 @@ std::string readTextFile(const std::string& path)
 
 std::string readRankLogFile(int rank)
 {
+    if(!isPerRankLoggingEnabled())
+        return {};
     std::fflush(stdout);
     std::fflush(stderr);
     return readTextFile(getRankLogFilePath(rank));
@@ -710,7 +712,7 @@ std::string TestLogAssertionContext::readNcclDebugLog() const
 
 std::string TestLogAssertionContext::readPerRankStderrLog() const
 {
-    if(!read_per_rank_)
+    if(!read_per_rank_ || !isPerRankLoggingEnabled())
     {
         return {};
     }

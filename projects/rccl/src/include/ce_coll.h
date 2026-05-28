@@ -16,6 +16,10 @@
 #define NCCL_CE_SYNC_OPS_PER_RANK_UC 3
 #define RCCL_CE_NUM_COPY_STREAMS 8
 
+// hipMemcpyBatchAsync is available in ROCm 7.12+ and was backported to 7.0.2.x.
+// ROCM_VERSION encodes as (MAJOR*10000 + MINOR*100 + PATCH), so 7.0.2 → 70002.
+#define CE_BATCH_API_SUPPORTED (ROCM_VERSION >= 71200 || ROCM_VERSION == 70002)
+
 struct ncclCeColl {
   uint8_t* baseUCSymReadyPtr;
   uint8_t* baseUCSymComplPtr;
@@ -29,6 +33,9 @@ struct ncclCeColl {
   int nCopyStreams;
   cudaStream_t copyStreams[RCCL_CE_NUM_COPY_STREAMS];
   cudaEvent_t copyEvents[RCCL_CE_NUM_COPY_STREAMS];
+#ifdef ENABLE_FAULT_INJECTION
+  uint32_t ceFaults;  // bitmask of CE_FAULT_* bits; see ce_fault_inject.h
+#endif
 };
 
 struct ncclCeInitTask {
@@ -53,8 +60,8 @@ struct ncclCeBatchOpsParams {
   size_t* sizes;
   size_t numOps;
   bool intraBatchSync;
-#if ROCM_VERSION >= 71200
-  cudaMemcpyAttributes* attrs;
+#if CE_BATCH_API_SUPPORTED
+  hipMemcpyAttributes* attrs;
   size_t* attrIdxs;
   size_t numAttrs;
 #endif
