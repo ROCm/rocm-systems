@@ -20,22 +20,32 @@
  * THE SOFTWARE.
  */
 
-#ifndef __FDINFO__
-#define __FDINFO__
+#ifndef TESTS_AMD_SMI_TEST_FUNCTIONAL_FABRIC_READ_H_
+#define TESTS_AMD_SMI_TEST_FUNCTIONAL_FABRIC_READ_H_
 
-#include <vector>
+#include "../test_base.h"
 
-#include "amd_smi/amdsmi.h"
+class TestFabricRead : public TestBase {
+ public:
+  TestFabricRead();
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+  // @Brief: Destructor for test case of TestFabricRead
+  virtual ~TestFabricRead();
 
-amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
-                                     amdsmi_proc_info_t& info);
+  // @Brief: Setup the environment for measurement
+  virtual void SetUp();
 
-#ifdef __cplusplus
-}  // extern "C"
-#endif
+  // @Brief: Core measurement execution
+  virtual void Run();
 
-#endif
+  // @Brief: Clean up and retrieve the resource
+  virtual void Close();
+
+  // @Brief: Display results
+  virtual void DisplayResults() const;
+
+  // @Brief: Display information about what this test does
+  virtual void DisplayTestInfo(void);
+};
+
+#endif  // TESTS_AMD_SMI_TEST_FUNCTIONAL_FABRIC_READ_H_

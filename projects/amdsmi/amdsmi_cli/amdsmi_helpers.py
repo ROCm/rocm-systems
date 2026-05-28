@@ -2966,6 +2966,19 @@ class AMDSMIHelpers:
             amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_11_HBM_D,
             amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDD_USR,
             amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_11_E32,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_04_HBM_B,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_04_HBM_D,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_075_HBM_B,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_075_HBM_D,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_11_GTA_A,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_11_GTA_C,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDAN_075_GTA_A,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDAN_075_GTA_C,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_075_UCIE,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_065_UCIEAA,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_065_UCIEAM_A,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_065_UCIEAM_C,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDAN_075,
         ]
 
         for temp_type in gpu_board_temp_types:

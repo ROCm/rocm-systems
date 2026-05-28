@@ -20,22 +20,32 @@
  * THE SOFTWARE.
  */
 
-#ifndef __FDINFO__
-#define __FDINFO__
+#ifndef TESTS_AMD_SMI_TEST_FUNCTIONAL_IFOE_INFO_READ_H_
+#define TESTS_AMD_SMI_TEST_FUNCTIONAL_IFOE_INFO_READ_H_
 
-#include <vector>
+#include "../test_base.h"
 
-#include "amd_smi/amdsmi.h"
+class TestIfoeInfoRead : public TestBase {
+ public:
+  TestIfoeInfoRead();
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+  // @Brief: Destructor for test case of TestIfoeInfoRead
+  virtual ~TestIfoeInfoRead();
 
-amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
-                                     amdsmi_proc_info_t& info);
+  // @Brief: Setup the environment for measurement
+  void SetUp() override;
 
-#ifdef __cplusplus
-}  // extern "C"
-#endif
+  // @Brief: Core measurement execution
+  void Run() override;
 
-#endif
+  // @Brief: Clean up and retrieve the resource
+  void Close() override;
+
+  // @Brief: Display  results
+  void DisplayResults() const override;
+
+  // @Brief: Display information about what this test does
+  void DisplayTestInfo() override;
+};
+
+#endif  // TESTS_AMD_SMI_TEST_FUNCTIONAL_IFOE_INFO_READ_H_
