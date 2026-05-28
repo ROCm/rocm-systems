@@ -46,9 +46,9 @@ ncclResult_t NpKit::Init(int rank) {
 
   // Init event data structures
   NCCLCHECK(ncclCalloc(&gpu_event_buffers_, kNumGpuEventBuffers));
-  NCCLCHECK(ncclCudaCalloc(&gpu_collect_contexts_, kNumGpuEventBuffers));
+  NCCLCHECK(ncclCudaCalloc(&gpu_collect_contexts_, kNumGpuEventBuffers, /*manager=*/nullptr));
   for (i = 0; i < kNumGpuEventBuffers; i++) {
-    NCCLCHECK(ncclCudaCalloc(gpu_event_buffers_ + i, kMaxNumGpuEventsPerBuffer));
+    NCCLCHECK(ncclCudaCalloc(gpu_event_buffers_ + i, kMaxNumGpuEventsPerBuffer, /*manager=*/nullptr));
     ctx.event_buffer = gpu_event_buffers_[i];
     NCCLCHECK(ncclCudaMemcpy(gpu_collect_contexts_ + i, &ctx, 1));
   }
