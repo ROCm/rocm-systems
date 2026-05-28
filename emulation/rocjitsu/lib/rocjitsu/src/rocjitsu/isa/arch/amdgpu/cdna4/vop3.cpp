@@ -1069,7 +1069,7 @@ void VExpLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
                       float v = [&]() {
-                        float v = std::exp2([&]() {
+                        float v = amdgpu::transcendental::exp_f32([&]() {
                           float sv = std::bit_cast<float>(src0.read_lane(wf, lane));
                           if (inst_.abs & (1u << 0))
                             sv = std::fabs(sv);
@@ -1110,7 +1110,7 @@ void VLogLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
                       float v = [&]() {
-                        float v = std::log2([&]() {
+                        float v = amdgpu::transcendental::log_f32([&]() {
                           float sv = std::bit_cast<float>(src0.read_lane(wf, lane));
                           if (inst_.abs & (1u << 0))
                             sv = std::fabs(sv);
@@ -5358,8 +5358,8 @@ void VMinimum3F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
                       float v = [&]() {
-                        float v = std::min(
-                            std::min(
+                        float v = std::fmin(
+                            std::fmin(
                                 [&]() {
                                   float sv = std::bit_cast<float>(src0.read_lane(wf, lane));
                                   if (inst_.abs & (1u << 0))
@@ -5421,8 +5421,8 @@ void VMaximum3F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
                       float v = [&]() {
-                        float v = std::max(
-                            std::max(
+                        float v = std::fmax(
+                            std::fmax(
                                 [&]() {
                                   float sv = std::bit_cast<float>(src0.read_lane(wf, lane));
                                   if (inst_.abs & (1u << 0))
