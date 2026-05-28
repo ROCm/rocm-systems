@@ -167,7 +167,11 @@ public:
   uint32_t NumXcc() const { return device_info_.num_xcc; }
 
   bool CreateSyncobj(D3DKMT_HANDLE *handle, uint64_t **addr);
-  void DestroySyncobj(D3DKMT_HANDLE handle);
+  // Returns true on STATUS_SUCCESS. Internal cleanup callers (queue
+  // teardown / rollback) intentionally ignore the result; the external
+  // semaphore close path propagates it so silent leaks become visible.
+  bool DestroySyncobj(D3DKMT_HANDLE handle);
+  bool OpenSyncobjFromNtHandle(void *nt_handle, D3DKMT_HANDLE *out_handle);
 
   bool CreateQueue(WDDMQueue *queue, uint64_t debugger_data = 0);
   void DestroyQueue(WDDMQueue *queue);
