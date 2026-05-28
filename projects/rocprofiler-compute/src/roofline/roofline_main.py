@@ -1032,7 +1032,6 @@ class Roofline:
         self.__ceiling_data = construct_roof(
             roofline_parameters=self.__run_parameters,
             dtype=dtype,
-            ai_data=self.__ai_data,
         )
 
         self.roof_setup()
