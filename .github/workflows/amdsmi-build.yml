@@ -67,9 +67,13 @@ jobs:
           cat > /etc/apt/sources.list << EOF
           deb http://archive.debian.org/debian buster main
           deb http://archive.debian.org/debian-security buster/updates main
+          deb http://archive.debian.org/debian buster-backports main
           EOF
           echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99-disable-check-valid-until
           apt update
+          # ualoe_lib needs <linux/time_types.h> (kernel >= 4.20); stock buster
+          # ships linux-libc-dev 4.19 which lacks it. Pull a 5.10 from backports.
+          apt -t buster-backports install -y linux-libc-dev
 
       - name: Install netlink dev packages
         run: |
@@ -207,9 +211,13 @@ jobs:
           cat > /etc/apt/sources.list << EOF
           deb http://archive.debian.org/debian buster main
           deb http://archive.debian.org/debian-security buster/updates main
+          deb http://archive.debian.org/debian buster-backports main
           EOF
           echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99-disable-check-valid-until
           apt update
+          # ualoe_lib needs <linux/time_types.h> (kernel >= 4.20); stock buster
+          # ships linux-libc-dev 4.19 which lacks it. Pull a 5.10 from backports.
+          apt -t buster-backports install -y linux-libc-dev
 
       - name: Install netlink dev packages
         run: |
@@ -475,6 +483,10 @@ jobs:
       - name: Install netlink dev packages
         run: |
           set -e
+          # AlmaLinux8 image bakes a stale amdgpu-rpm-local repo whose build-id
+          # URL eventually 404s. Disable any mkmartifactory repos so dnf metadata
+          # refresh doesn't fail. No-op when the plugin/repo isn't present.
+          dnf config-manager --disable 'mkmartifactory*' 2>/dev/null || true
           case "${{ matrix.os }}" in
             SLES)
               zypper --non-interactive install libnl3-devel libmnl-devel
@@ -719,6 +731,10 @@ jobs:
       - name: Install netlink dev packages
         run: |
           set -e
+          # AlmaLinux8 image bakes a stale amdgpu-rpm-local repo whose build-id
+          # URL eventually 404s. Disable any mkmartifactory repos so dnf metadata
+          # refresh doesn't fail. No-op when the plugin/repo isn't present.
+          dnf config-manager --disable 'mkmartifactory*' 2>/dev/null || true
           case "${{ matrix.os }}" in
             SLES)
               zypper --non-interactive install libnl3-devel libmnl-devel
