@@ -80,6 +80,7 @@ add_executable(
     vop3_fp16_unary_simd_correctness_test.cpp
     vop3_ternary_fp_simd_correctness_test.cpp
     vop3_fmac_simd_correctness_test.cpp
+    vop3_ldexp_simd_correctness_test.cpp
     execution_plugin_test.cpp
 )
 target_link_libraries(
