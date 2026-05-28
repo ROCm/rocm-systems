@@ -8104,6 +8104,8 @@ inline void execute_v_cvt_f32_f64_vop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_f32_f64_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(
+      float32_t, [](auto s) { return util::stdx::static_simd_cast<util::narrow32<float32_t>>(s); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -8348,6 +8350,8 @@ inline void execute_v_cvt_f64_f32_vop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_f64_f32_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_CVT_B32_TO_F64(
+      float32_t, [](auto in) { return util::stdx::static_simd_cast<util::native<double>>(in); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -8376,6 +8380,8 @@ inline void execute_v_cvt_f64_i32_vop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_f64_i32_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_CVT_B32_TO_F64(
+      int32_t, [](auto in) { return util::stdx::static_simd_cast<util::native<double>>(in); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -8403,6 +8409,8 @@ inline void execute_v_cvt_f64_u32_vop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_f64_u32_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_CVT_B32_TO_F64(
+      uint32_t, [](auto in) { return util::stdx::static_simd_cast<util::native<double>>(in); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -8652,6 +8660,13 @@ inline void execute_v_cvt_i32_f64_vop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_i32_f64_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(int32_t, [](auto s) {
+    auto r = s;
+    util::stdx::where(util::stdx::isnan(s), r) = 0.0;
+    util::stdx::where(s >= 2147483648.0, r) = 2147483647.0;
+    util::stdx::where(s < -2147483648.0, r) = -2147483648.0;
+    return util::stdx::static_simd_cast<util::narrow32<int32_t>>(r);
+  });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -9206,6 +9221,12 @@ inline void execute_v_cvt_u32_f64_vop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_u32_f64_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(uint32_t, [](auto s) {
+    auto r = s;
+    util::stdx::where(util::stdx::isnan(s) || s < 0.0, r) = 0.0;
+    util::stdx::where(s >= 4294967296.0, r) = 4294967295.0;
+    return util::stdx::static_simd_cast<util::narrow32<uint32_t>>(r);
+  });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
