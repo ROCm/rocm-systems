@@ -581,6 +581,21 @@ TEST(VAddSimdBenchmark, Cdna4_VCmpEqF64_Vop3) {
   run_words("v_cmp_eq_f64_e64 vcc, v0:v1, v2:v3", w0, w1, /*sanitize_finite=*/false);
 }
 
+// === VOP3 integer ternary (src0/src1/src2, no modifiers) ===
+//
+// v_add3_u32 v2, v0, v1, v3  (CDNA4 VOP3 opcode 511) — plain element-wise
+// a + b + c on 32-bit lanes. src2 is wired through the ternary VOP3 glue.
+TEST(VAddSimdBenchmark, Cdna4_VAdd3U32_Vop3) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  // VOP3: word0 = vdst|op<<16|0x34<<26; word1 = src0|src1<<9|src2<<18.
+  uint32_t w0 = (2u) | ((511u & 0x3FF) << 16) | (0x34u << 26);
+  uint32_t w1 = 256u | (1u << 9) | (3u << 18); // src0=v0 src1=v1 src2=v3
+  run_words("v_add3_u32_e64 v2, v0, v1, v3", w0, w1, /*sanitize_finite=*/false);
+}
+
 // Diagnostic: report whether the SIMD fast path is compiled in.
 TEST(VAddSimdBenchmark, SimdCompileTimeReport) {
 #if __has_include(<experimental/simd>)

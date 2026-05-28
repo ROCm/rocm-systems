@@ -72,6 +72,7 @@ add_executable(
     vopc_vop3_fp32_simd_correctness_test.cpp
     vopc_vop3_fp16_simd_correctness_test.cpp
     vopc_vop3_fp64_simd_correctness_test.cpp
+    vop3_ternary_int_simd_correctness_test.cpp
     execution_plugin_test.cpp
 )
 target_link_libraries(
