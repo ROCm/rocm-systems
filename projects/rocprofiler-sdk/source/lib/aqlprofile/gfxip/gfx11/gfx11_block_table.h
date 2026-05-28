@@ -688,7 +688,7 @@ static const GpuBlockInfo TdCounterBlockInfo = {
     TdCounterBlockNumCounters,
     TdCounterRegAddr,
     gfx11_cntx_prim::select_value_TD_PERFCOUNTER0_SELECT,
-    CounterBlockSeAttr | CounterBlockTcAttr,
+    CounterBlockSeAttr | CounterBlockSaAttr | CounterBlockWgpAttr | CounterBlockTcAttr,
     BLOCK_DELAY_NONE};
 
 }  // namespace gfx11
