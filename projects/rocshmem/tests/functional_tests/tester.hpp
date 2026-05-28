@@ -145,9 +145,22 @@
   X(FenceOrderPutLargeSmall,   100) \
   X(FenceOrderFanout,          101) \
   X(FenceOrderPutWaveNbiChunks, 102) \
-  X(ReduceOnStream,             103) \
-  X(CtxCreate,                  104) \
-
+  X(TilePutContiguous,         103)  \
+  X(TilePutRowMajor,           104)  \
+  X(TilePutColumnMajor,        105)  \
+  X(TilePutArbitrary,          106)  \
+  X(TilePutWaveContiguous,     107)  \
+  X(TilePutWGContiguous,       108)  \
+  X(TileGetContiguous,         109)  \
+  X(TileGetWGContiguous,       110)  \
+  X(TilePut1D,                 111)  \
+  X(TileGet1D,                 112)  \
+  X(TileGetWaveContiguous,     113)  \
+  X(TileGetRowMajor,           114)  \
+  X(TileGetColumnMajor,        115)  \
+  X(TileGetArbitrary,          116)  \
+  X(ReduceOnStream,            117)  \
+  X(CtxCreate,                 118) 
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {
   ROCSHMEM_FOREACH_TEST_TYPE(_ROCSHMEM_ENUM_ENTRY)

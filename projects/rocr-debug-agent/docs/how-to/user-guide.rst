@@ -1,12 +1,11 @@
 .. meta::
    :description: A library that can be loaded by ROCr to print the AMDGPU wavefront states
-   :keywords: ROCdebug-agent user guide, ROCR Debug Agent user guide, using ROCdebug-agent, using ROCR Debug Agent,
-    ROCdebug-agent user manual, ROCR Debug Agent user manual
+   :keywords: rocr, debug agent, how to, user guide, usage, manual, example, env, var, environment, option
 
 .. _debug-agent-user-guide:
 
 ============================
-ROCR Debug Agent user guide
+ROCr Debug Agent user guide
 ============================
 
 To display the source text location with the machine code instructions around the wavefront's Program Counter (PC), compile the AMD GPU code objects with ``-ggdb``.  In addition, you can optionally use ``-O0`` to achieve a more intuitive display of the source text location, as higher optimization levels can help to reorder machine code instructions. When ``-ggdb`` isn't used, the source line information is unavailable, and only machine code instructions starting at the
@@ -16,7 +15,7 @@ wavefront's PC are printed.
 
     /opt/rocm/bin/hipcc -O0 -ggdb -o my_program my_program.cpp
 
-To use the ROCdebug-agent, set the ``HSA_TOOLS_LIB`` environment variable to the file name or path of the library:
+To use the ROCr Debug Agent, set the ``HSA_TOOLS_LIB`` environment variable to the file name or path of the library:
 
 .. code:: shell
 

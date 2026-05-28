@@ -198,3 +198,41 @@ struct formatter<hsa_ext_control_directives_t>
 };
 }  // namespace fmt
 #endif
+
+#if ROCPROFILER_HSA_RUNTIME_EXT_AMD_VERSION >= 12200
+namespace fmt
+{
+template <>
+struct formatter<hsa_amd_external_semaphore_t>
+: rocprofiler::hsa::utils::handle_formatter<hsa_amd_external_semaphore_t>
+{};
+
+template <>
+struct formatter<hsa_amd_external_semaphore_handle_descriptor_t>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename Ctx>
+    auto format(const hsa_amd_external_semaphore_handle_descriptor_t& v, Ctx& ctx) const
+    {
+        auto label = [v]() -> std::string_view {
+            switch(v.type)
+            {
+                case HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32: return "OPAQUE_WIN32";
+                case HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_KMT:
+                    return "OPAQUE_WIN32_KMT";
+                case HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD: return "OPAQUE_FD";
+            }
+            return "UNKNOWN";
+        }();
+        if(v.type == HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD)
+            return fmt::format_to(ctx.out(), "type={}, fd={}", label, v.handle.fd);
+        return fmt::format_to(ctx.out(), "type={}, win32_handle={}", label, v.handle.win32_handle);
+    }
+};
+}  // namespace fmt
+#endif
