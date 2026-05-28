@@ -633,6 +633,18 @@ TEST(VAddSimdBenchmark, Cdna4_VCeilF64_Vop3) {
   run_words("v_ceil_f64_e64 v2:v3, v0:v1", w0, w1, /*sanitize_finite=*/false);
 }
 
+// v_ceil_f16_e64 v2, v0  (CDNA4 VOP3 opcode 389) — f16 unary; widen-then-narrow
+// VOP3 glue. Pays the f16<->f32 round-trip on top of the rounding op.
+TEST(VAddSimdBenchmark, Cdna4_VCeilF16_Vop3) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  uint32_t w0, w1;
+  vop3_bin_encode(389, /*vdst=*/2, /*src0=*/256, /*src1=*/0, 0, 0, 0, 0, w0, w1);
+  run_words("v_ceil_f16_e64 v2, v0", w0, w1, /*sanitize_finite=*/false);
+}
+
 // Diagnostic: report whether the SIMD fast path is compiled in.
 TEST(VAddSimdBenchmark, SimdCompileTimeReport) {
 #if __has_include(<experimental/simd>)
