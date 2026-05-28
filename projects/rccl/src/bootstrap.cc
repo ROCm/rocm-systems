@@ -146,7 +146,9 @@ static inline bool bootstrapNetEnabledEffective(int nranks) {
 // Socket path runs at any nranks>=3. Net path is tristate; when set to -1 the ring-count
 // threshold gates it, since the net plugin's MR registration + reverse-pair connect
 // overhead must be amortised over enough ranks. Defaults are documented above.
-static inline bool bootstrapBidirEnabled(int nranks, int kind) {
+//
+// Exposed (non-static) so test/BootstrapBidirTests.cpp can verify the env-var contract.
+bool bootstrapBidirEnabled(int nranks, int kind) {
   if (nranks < 3) return false;
   bool netOn = bootstrapNetEnabledEffective(nranks);
   if (kind == 0) return (ncclParamBootstrapBidirAllGather() != 0) && !netOn;
