@@ -1455,6 +1455,77 @@ template <typename Inst, typename FmaOp>
   return false;
 }
 
+/// VOP3 mixed-width ldexp fast path (f32 = std::ldexp(f32 src0, int32 src1)).
+/// Reads src0 as native<float>, applies src0 abs/neg in f32, reads src1 as
+/// native<int32_t> (per-lane exponent), runs `op(a, e)` (stdx::ldexp), applies
+/// result omod/clamp, write_simd. stdx::ldexp is bit-exact to std::ldexp for
+/// every input incl. NaN (proven via the VOP2 v_ldexp_f16 path).
+template <typename Inst, typename Op>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_ldexp_vop3_fp32_simd(Inst &inst, Wavefront &wf, Op op) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.vdst.simd_capable())
+    return false;
+  using T = float32_t;
+  const uint32_t abs = inst.inst_.abs;
+  const uint32_t neg = inst.inst_.neg;
+  const uint32_t omod = inst.inst_.omod;
+  const uint32_t clamp = inst.inst_.clamp;
+  constexpr std::size_t W = util::native_width_v<T>;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto a = apply_vop3_src_mod_f32<0>(read_simd<T>(inst.src0, wf, base), abs, neg);
+    const auto e = read_simd<int32_t>(inst.src1, wf, base);
+    const auto r = apply_vop3_dst_mod_f32(op(a, e), omod, clamp);
+    write_simd<T>(inst.vdst, wf, base, r, chunk);
+  }
+  return true;
+}
+
+template <typename Inst, typename Op>
+[[nodiscard]] inline bool try_execute_ldexp_vop3_fp32_simd(Inst &, Wavefront &, Op) {
+  return false;
+}
+
+/// VOP3 mixed-width ldexp fast path (f64 = std::ldexp(f64 src0, int32 src1)).
+/// Reads src0 as native<double> via read_simd64, applies src0 abs/neg in f64,
+/// reads src1 as narrow32<int32_t> (native_width64-wide), runs `op(a, e)`,
+/// applies result omod/clamp, write_simd64.
+template <typename Inst, typename Op>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_ldexp_vop3_fp64_simd(Inst &inst, Wavefront &wf, Op op) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.vdst.simd_capable())
+    return false;
+  using T = double;
+  const uint32_t abs = inst.inst_.abs;
+  const uint32_t neg = inst.inst_.neg;
+  const uint32_t omod = inst.inst_.omod;
+  const uint32_t clamp = inst.inst_.clamp;
+  constexpr std::size_t W = util::native_width64;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto a = apply_vop3_src_mod_f64<0>(read_simd64<T>(inst.src0, wf, base), abs, neg);
+    const auto e = read_narrow<int32_t>(inst.src1, wf, base);
+    const auto r = apply_vop3_dst_mod_f64(op(a, e), omod, clamp);
+    write_simd64<T>(inst.vdst, wf, base, r, chunk);
+  }
+  return true;
+}
+
+template <typename Inst, typename Op>
+[[nodiscard]] inline bool try_execute_ldexp_vop3_fp64_simd(Inst &, Wavefront &, Op) {
+  return false;
+}
+
 /// VOP3 f32 unary SIMD fast path. Reads `src0` as f32, applies the src0 abs/neg
 /// modifiers, runs `un_op` (`native<float> -> native<float>`), then applies the
 /// result omod/clamp — the scalar body's order (abs->neg, op, omod->clamp). Tin
@@ -1684,6 +1755,16 @@ template <typename Tin, typename Tout, typename Inst, typename UnOp>
 /// VOP3 dst-accumulate FMA counterpart (f64).
 #define ROCJITSU_TRY_SIMD_FMAC_VOP3_FP64(...)                                                      \
   if (::rocjitsu::amdgpu::try_execute_fmac_vop3_fp64_simd(inst, wf, __VA_ARGS__))                  \
+  return
+
+/// VOP3 ldexp counterpart (f32 src0 + int32 src1 exp). Variadic functor.
+#define ROCJITSU_TRY_SIMD_LDEXP_VOP3_FP32(...)                                                     \
+  if (::rocjitsu::amdgpu::try_execute_ldexp_vop3_fp32_simd(inst, wf, __VA_ARGS__))                 \
+  return
+
+/// VOP3 ldexp counterpart (f64 src0 + int32 src1 exp). Variadic functor.
+#define ROCJITSU_TRY_SIMD_LDEXP_VOP3_FP64(...)                                                     \
+  if (::rocjitsu::amdgpu::try_execute_ldexp_vop3_fp64_simd(inst, wf, __VA_ARGS__))                 \
   return
 
 /// VOP3 f64 binary counterpart (read_simd64, per-source abs/neg, omod/clamp on
