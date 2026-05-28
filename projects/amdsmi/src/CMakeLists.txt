@@ -239,6 +239,10 @@ install(
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/amdsmi_unified/interface
     COMPONENT dev
 )
+# Public impl/ header amd_smi_system.h includes <amdsmi_unified/interface/...>
+# as a bare path. Install at that bare path so installed consumers (e.g. the
+# standalone example rebuild in CI) can resolve it from /opt/rocm/include.
+install(FILES ${UNIFIED_NIC_INCLUDES} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amdsmi_unified/interface COMPONENT dev)
 set(UNIFIED_NIC_INCLUDES
     "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_devlink_netlink.h"
     "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_ethtool_ioctl.h"
@@ -251,6 +255,18 @@ install(
     FILES ${UNIFIED_NIC_INCLUDES}
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/amdsmi_unified/inc/
     COMPONENT dev
+)
+
+# UALOE headers are pulled in transitively by public impl/ headers
+# (amd_smi_gpu_device.h includes <ualoe_lib/ualoe_lib.h>), so they must be
+# installed alongside the other public-facing headers. Use DIRECTORY to
+# preserve the cbl_cfg/ subdirectory referenced by ualoe_lib.h.
+install(
+    DIRECTORY ${UALOE_INCLUDE_DIR}/
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ualoe_lib
+    COMPONENT dev
+    FILES_MATCHING
+    PATTERN "*.h"
 )
 
 file(GLOB ESMI_HEADERS "${PROJECT_SOURCE_DIR}/esmi_ib_library/include/e_smi/*.h")
