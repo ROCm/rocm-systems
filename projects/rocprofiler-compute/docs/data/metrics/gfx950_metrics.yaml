@@ -985,12 +985,6 @@ L2 - Fabric interface detailed metrics:
   Read (Uncached):
     rst: The total number of L2 requests to Infinity Fabric to read :ref:`uncached data <memory-type>` from any memory location, per :ref:`normalization unit <normalization-units>`. 64B requests for uncached data are counted as two 32B uncached data requests. See :ref:`l2-request-flow` for more detail.
     unit: Req per Normalization Unit
-  HBM Read:
-    rst: The total number of L2 requests to Infinity Fabric to read 32B or 64B of data from the accelerator's local HBM, per :ref:`normalization unit <normalization-units>`. See :ref:`l2-request-flow` for more detail.
-    unit: Req per Normalization Unit
-  Remote Read:
-    rst: The total number of L2 requests to Infinity Fabric to read 32B or 64B of data from any source other than the accelerator's local HBM, per :ref:`normalization unit <normalization-units>`. See :ref:`l2-request-flow` for more detail.
-    unit: Req per Normalization Unit
   Read Bandwidth - PCIe:
     rst: Total number of bytes due to L2 read requests due to PCIe traffic, divided by total duration.
     unit: Gbps
@@ -1008,12 +1002,6 @@ L2 - Fabric interface detailed metrics:
     unit: Req per Normalization Unit
   Write and Atomic (64B):
     rst: The total number of L2 requests to Infinity Fabric to write or atomically update 64B of data in any memory location, per :ref:`normalization unit <normalization-units>`. See :ref:`l2-request-flow` for more detail.
-    unit: Req per Normalization Unit
-  HBM Write and Atomic:
-    rst: The total number of L2 requests to Infinity Fabric to write or atomically update 32B or 64B of data in the accelerator's local HBM, per :ref:`normalization unit <normalization-units>`. See :ref:`l2-request-flow` for more detail. plain
-    unit: Req per Normalization Unit
-  Remote Write and Atomic:
-    rst: The total number of L2 requests to Infinity Fabric to write or atomically update 32B or 64B of data in any memory location other than the accelerator's local HBM, per :ref:`normalization unit <normalization-units>`. See :ref:`l2-request-flow` for more detail.
     unit: Req per Normalization Unit
   Write Bandwidth - PCIe:
     rst: Total number of bytes due to L2 write requests due to PCIe traffic, divided by total duration.
@@ -1033,9 +1021,21 @@ L2 - Fabric interface detailed metrics:
   Atomic Bandwidth - HBM:
     rst: Total number of bytes due to L2 atomic requests due to HBM traffic, divided by total duration.
     unit: Gbps
-  Atomic - HBM:
-    rst: The total number of L2 atomic requests (either 32-byte or 64-byte) destined for the accelerator's local high-bandwidth memory (HBM), per normalization unit. These are read-modify-write operations that update memory atomically.
-    unit: Req per Normalization Unit
   Atomic:
     rst: The total number of L2 requests to Infinity Fabric to atomically update 32B or 64B of data in any memory location, per :ref:`normalization unit <normalization-units>`. See :ref:`l2-request-flow` for more detail. Note that on current CDNA accelerators, such as the :ref:`MI2XX <mixxx-note>`, requests are only considered *atomic* by Infinity Fabric if they are targeted at non-write-cacheable memory, such as :ref:`fine-grained memory <memory-type>` allocations or :ref:`uncached memory <memory-type>` allocations on the MI2XX.
+    unit: Req per Normalization Unit
+  HBM Read:
+    rst: The total number of L2 requests to Infinity Fabric to read 32B or 64B of data from the accelerator's local HBM, per :ref:`normalization unit <normalization-units>`. See :ref:`l2-request-flow` for more detail.
+    unit: Req per Normalization Unit
+  Remote Read:
+    rst: The total number of L2 requests to Infinity Fabric to read 32B or 64B of data from any source other than the accelerator's local HBM, per :ref:`normalization unit <normalization-units>`. See :ref:`l2-request-flow` for more detail.
+    unit: Req per Normalization Unit
+  HBM Write and Atomic:
+    rst: The total number of L2 requests to Infinity Fabric to write or atomically update 32B or 64B of data in the accelerator's local HBM, per :ref:`normalization unit <normalization-units>`. See :ref:`l2-request-flow` for more detail. plain
+    unit: Req per Normalization Unit
+  Remote Write and Atomic:
+    rst: The total number of L2 requests to Infinity Fabric to write or atomically update 32B or 64B of data in any memory location other than the accelerator's local HBM, per :ref:`normalization unit <normalization-units>`. See :ref:`l2-request-flow` for more detail.
+    unit: Req per Normalization Unit
+  Atomic - HBM:
+    rst: The total number of L2 atomic requests (either 32-byte or 64-byte) destined for the accelerator's local high-bandwidth memory (HBM), per normalization unit. These are read-modify-write operations that update memory atomically.
     unit: Req per Normalization Unit

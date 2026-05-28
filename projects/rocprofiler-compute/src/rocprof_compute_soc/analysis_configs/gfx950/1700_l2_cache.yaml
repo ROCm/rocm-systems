@@ -362,16 +362,6 @@ Panel Config:
           min: MIN((TCC_EA0_RD_UNCACHED_32B_sum / $denom))
           max: MAX((TCC_EA0_RD_UNCACHED_32B_sum / $denom))
           unit: (Req + $normUnit)
-        HBM Read:
-          avg: SUM(TCC_EA0_RDREQ_DRAM_sum) / SUM($denom)
-          min: MIN((TCC_EA0_RDREQ_DRAM_sum / $denom))
-          max: MAX((TCC_EA0_RDREQ_DRAM_sum / $denom))
-          unit: (Req + $normUnit)
-        Remote Read:
-          avg: SUM(NOISE_CLAMP(TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum, TCC_EA0_RDREQ_sum)) / SUM($denom)
-          min: MIN((NOISE_CLAMP((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), TCC_EA0_RDREQ_sum) / $denom))
-          max: MAX((NOISE_CLAMP((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), TCC_EA0_RDREQ_sum) / $denom))
-          unit: (Req + $normUnit)
         Read Bandwidth - PCIe:
           avg: SUM(TCC_EA0_RDREQ_IO_32B_sum * 32) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(TCC_EA0_RDREQ_IO_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
@@ -402,16 +392,6 @@ Panel Config:
           min: MIN((TCC_EA0_WRREQ_64B_sum / $denom))
           max: MAX((TCC_EA0_WRREQ_64B_sum / $denom))
           unit: (Req + $normUnit)
-        HBM Write and Atomic:
-          avg: SUM(TCC_EA0_WRREQ_WRITE_DRAM_sum) / SUM($denom)
-          min: MIN((TCC_EA0_WRREQ_WRITE_DRAM_sum / $denom))
-          max: MAX((TCC_EA0_WRREQ_WRITE_DRAM_sum / $denom))
-          unit: (Req + $normUnit)
-        Remote Write and Atomic:
-          avg: SUM(NOISE_CLAMP(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum, TCC_EA0_WRREQ_sum)) / SUM($denom)
-          min: MIN((NOISE_CLAMP((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), TCC_EA0_WRREQ_sum) / $denom))
-          max: MAX((NOISE_CLAMP((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), TCC_EA0_WRREQ_sum) / $denom))
-          unit: (Req + $normUnit)
         Write Bandwidth - PCIe:
           avg: SUM(TCC_EA0_WRREQ_WRITE_IO_32B_sum * 32) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(TCC_EA0_WRREQ_WRITE_IO_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
@@ -431,11 +411,6 @@ Panel Config:
           avg: SUM(TCC_EA0_ATOMIC_sum) / SUM($denom)
           min: MIN((TCC_EA0_ATOMIC_sum / $denom))
           max: MAX((TCC_EA0_ATOMIC_sum / $denom))
-          unit: (Req + $normUnit)
-        Atomic - HBM:
-          avg: SUM(TCC_EA0_WRREQ_ATOMIC_DRAM_sum) / SUM($denom)
-          min: MIN((TCC_EA0_WRREQ_ATOMIC_DRAM_sum / $denom))
-          max: MAX((TCC_EA0_WRREQ_ATOMIC_DRAM_sum / $denom))
           unit: (Req + $normUnit)
         Atomic Bandwidth - PCIe:
           avg: SUM(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum * 32) / SUM(End_Timestamp - Start_Timestamp)
@@ -603,11 +578,6 @@ Panel Config:
     Read (Uncached): The total number of L2 requests to Infinity Fabric to read uncached
       data from any memory location, per normalization unit. 64B requests for uncached
       data are counted as two 32B uncached data requests.
-    HBM Read: The total number of L2 requests to Infinity Fabric to read 32B or 64B
-      of data from the accelerator's local HBM, per normalization unit.
-    Remote Read: The total number of L2 requests to Infinity Fabric to read 32B or
-      64B of data from any source other than the accelerator's local HBM, per normalization
-      unit.
     Read Bandwidth - PCIe: Total number of bytes due to L2 read requests due to PCIe
       traffic, divided by total duration.
     "Read Bandwidth - Infinity Fabric\u2122": Total number of bytes due to L2 read
@@ -623,12 +593,6 @@ Panel Config:
     Write and Atomic (64B): The total number of L2 requests to Infinity Fabric to
       write or atomically update 64B of data in any memory location, per normalization
       unit.
-    HBM Write and Atomic: The total number of L2 requests to Infinity Fabric to write
-      or atomically update 32B or 64B of data in the accelerator's local HBM, per
-      normalization unit.
-    Remote Write and Atomic: The total number of L2 requests to Infinity Fabric to
-      write or atomically update 32B or 64B of data in any memory location other than
-      the accelerator's local HBM, per normalization unit.
     Write Bandwidth - PCIe: Total number of bytes due to L2 write requests due to
       PCIe traffic, divided by total duration.
     "Write Bandwidth - Infinity Fabric\u2122": Total number of bytes due to L2 write
@@ -641,9 +605,6 @@ Panel Config:
       requests due to Infinity Fabric traffic, divided by total duration.
     Atomic Bandwidth - HBM: Total number of bytes due to L2 atomic requests due to
       HBM traffic, divided by total duration.
-    Atomic - HBM: The total number of L2 atomic requests (either 32-byte or 64-byte)
-      destined for the accelerator's local high-bandwidth memory (HBM), per normalization
-      unit. These are read-modify-write operations that update memory atomically.
     Atomic: The total number of L2 requests to Infinity Fabric to atomically update
       32B or 64B of data in any memory location, per normalization unit. See Request
       flow for more detail. Note that on current CDNA accelerators, such as the MI2XX,
