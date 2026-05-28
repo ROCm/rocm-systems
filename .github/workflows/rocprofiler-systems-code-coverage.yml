@@ -105,7 +105,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run: |
-        pip3 install -r requirements.txt
+        pip3 install 'gcovr>=8.4'
         env_dir=/opt/conda/envs/py3.12/
         if [ -d "${env_dir}" ] && [ -x "${env_dir}bin/python3" ]; then
           echo "Installing requirements into ${env_dir}"
