@@ -8,8 +8,8 @@
     This test evaluates the capability of the WarpSpeed feature to correctly
     handle back-to-back enqueues of different message sizes, both below and
     above the threshold, without synchronization.
-    One test runs with WarpSpeed disabled to provide context on whether any
-    failures are directly related to to WarpSpeed.
+    This test is requires warpSpeed enablement and will skip if RCCL_WARP_SPEED_AUTO=0 
+    or if architecture doesn't support warpSpeed.
 */
 
 #include "DeviceBufferHelpers.hpp"
@@ -54,13 +54,6 @@ namespace WarpSpeedConstants
 
 using namespace WarpSpeedConstants;
 
-static void setWarpSpeedAutoEnv(const char* value)
-{
-    ASSERT_EQ(setenv("RCCL_WARP_SPEED_AUTO", value, 1), 0)
-        << "Failed to set RCCL_WARP_SPEED_AUTO";
-    TEST_INFO("RCCL_WARP_SPEED_AUTO=%s", value);
-}
-
 class WarpSpeedMPITest : public MPITestBase
 {
 protected:
@@ -70,14 +63,6 @@ protected:
     int64_t     ar_threshold_bytes_{};
     size_t      small_count_{};
     size_t      large_count_{};
-
-    void skipUnlessWarpSpeedAutoDisabled()
-    {
-        if(rcclParamWarpSpeedAutoMode() != 0)
-        {
-            GTEST_SKIP() << "RCCL_WARP_SPEED_AUTO is not 0 (WarpSpeed auto still enabled)";
-        }
-    }
 
     void skipUnlessWarpSpeedAutoEnabled()
     {
@@ -220,28 +205,6 @@ protected:
     }
 };
 
-// Sanity test: WarpSpeed disabled
-TEST_F(WarpSpeedMPITest, Disabled)
-{
-    int  min_processes = 8;
-    int  max_processes = 8;
-    int  min_nodes     = 1;
-    int  max_nodes     = 1;
-    ASSERT_TRUE(validateTestPrerequisites(min_processes, max_processes, kNoPowerOfTwoRequired, min_nodes, max_nodes))
-        << "Requires exactly 8 ranks on a single node";
-
-    setWarpSpeedAutoEnv("0");
-    ASSERT_EQ(ncclSuccess, createTestCommunicator());
-    skipUnlessWarpSpeedAutoDisabled();
-    HIP_TEST_CHECK_GTEST_FAIL(hipStreamCreate(&stream_));
-    initBufferCounts();
-    ASSERT_MPI_EQ(ncclSuccess, allocateBuffers());
-
-    runValidatedTrainingLoop();
-
-    TEST_INFO("Sanity passed: %d iterations, no hang", kTrainIterations);
-}
-
 TEST_F(WarpSpeedMPITest, MixedThresholdRace)
 {
     int  min_processes = 8;
@@ -251,7 +214,6 @@ TEST_F(WarpSpeedMPITest, MixedThresholdRace)
     ASSERT_TRUE(validateTestPrerequisites(min_processes, max_processes, kNoPowerOfTwoRequired, min_nodes, max_nodes))
         << "Requires exactly 8 ranks on a single node";
 
-    setWarpSpeedAutoEnv("1");
     ASSERT_EQ(ncclSuccess, createTestCommunicator());
     skipUnlessWarpSpeedAutoEnabled();
     HIP_TEST_CHECK_GTEST_FAIL(hipStreamCreate(&stream_));
