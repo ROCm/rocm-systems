@@ -533,6 +533,30 @@ TEST(VAddSimdBenchmark, Cdna4_VCmpLtI64_Vop3) {
   run_words("v_cmp_lt_i64_e64 vcc, v0:v1, v2:v3", w0, w1, /*sanitize_finite=*/false);
 }
 
+// v_cmp_eq_f32_e64 vcc, v0, v1  (CDNA4 VOP3 opcode 66) — f32 with no modifiers.
+TEST(VAddSimdBenchmark, Cdna4_VCmpEqF32_Vop3) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  uint32_t w0, w1;
+  vop3_bin_encode(66, /*vdst=*/106, /*src0=*/256, /*src1=*/257, 0, 0, 0, 0, w0, w1);
+  run_words("v_cmp_eq_f32_e64 vcc, v0, v1", w0, w1, /*sanitize_finite=*/true);
+}
+
+// v_cmp_eq_f32_e64 vcc, |v0|, -v1  (opcode 66) — both src abs/neg modifiers
+// set; shows the in-vector apply_vop3_src_mod_f32 cost vs the no-modifier form.
+TEST(VAddSimdBenchmark, Cdna4_VCmpEqF32_Vop3_Modifiers) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  uint32_t w0, w1;
+  vop3_bin_encode(66, /*vdst=*/106, /*src0=*/256, /*src1=*/257, /*abs=*/0x1, /*neg=*/0x2, 0, 0, w0,
+                  w1);
+  run_words("v_cmp_eq_f32_e64 vcc, |v0|, -v1", w0, w1, /*sanitize_finite=*/true);
+}
+
 // Diagnostic: report whether the SIMD fast path is compiled in.
 TEST(VAddSimdBenchmark, SimdCompileTimeReport) {
 #if __has_include(<experimental/simd>)
