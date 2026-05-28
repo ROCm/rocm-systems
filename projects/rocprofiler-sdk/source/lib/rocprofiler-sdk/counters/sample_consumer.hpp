@@ -53,24 +53,23 @@ public:
         std::unique_lock<std::mutex> lk(mut);
 
         if(valid.exchange(true)) return;
-        exited.store(0);
+        exited = 0;
 
-        internal_threading::notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
-        consumers.at(0) = std::thread{&consumer_thread_t::consumer_loop, this};
-        internal_threading::notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
-        internal_threading::notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
-        consumers.at(1) = std::thread{&consumer_thread_t::consumer_loop, this};
-        internal_threading::notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
+        for (auto& consumer : consumers)
+        {
+            internal_threading::notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
+            consumer = std::thread{&consumer_thread_t::consumer_loop, this};
+            internal_threading::notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
+        }
     }
 
     void exit()
     {
-        std::unique_lock<std::mutex> lk(mut);
-
         valid.store(false);
         cv.notify_all();
 
-        cv.wait(lk, [&] { return exited.load() >= consumers.size(); });
+        auto lk = std::unique_lock{mut};
+        cv.wait(lk, [&] { return exited >= consumers.size(); });
         for(auto& consumer : consumers) if(consumer.joinable()) consumer.join();
     }
 
@@ -114,12 +113,13 @@ protected:
         }
     }
 
+    size_t exited{0};
+    size_t write_ptr{0};
+    size_t read_ptr{0};
+
     consume_func_t             consume_fn{};
     std::atomic<bool>          valid{false};
-    std::atomic<size_t>        exited{0};
     std::mutex                 mut;
-    std::atomic<size_t>        write_ptr{0};
-    std::atomic<size_t>        read_ptr{0};
     std::array<DataType, SIZE> buffer{};
     std::array<std::thread, 2> consumers{};
     std::condition_variable    cv{};
