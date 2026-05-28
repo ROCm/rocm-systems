@@ -45,8 +45,6 @@
 #endif
 #endif
 
-#include "host_defines.h"  // __hip_internal::
-
 #if !defined(__HIPCC_RTC__)
 #include "amd_hip_bf16.h"
 #include "amd_hip_mx_common.h"
@@ -54,6 +52,7 @@
 #include <hip/amd_detail/amd_hip_common.h>
 #include <climits>
 
+#include "host_defines.h"
 #include "amd_hip_vector_types.h"  // float2 etc
 #include "amd_hip_fp16.h"          // __half_raw
 #include "math_fwd.h"              // ocml device functions
