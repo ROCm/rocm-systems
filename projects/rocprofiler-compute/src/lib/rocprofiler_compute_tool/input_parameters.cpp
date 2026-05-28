@@ -21,9 +21,11 @@ std::string_view EnvInputParameters::get_or_warn(std::string_view env_var_name,
     if (v && !v->empty())
         return *v;
 
+#ifndef NDEBUG
     const auto reason = v ? std::string_view{"empty"} : std::string_view{"unset"};
-    std::clog << "\033[33m[rocprofiler-compute] WARNING: " << env_var_name << " is " << reason
-              << "; defaulting to \"" << default_value << "\"\033[0m" << std::endl;
+    std::clog << "[rocprofiler-compute] DEBUG: " << env_var_name << " is " << reason
+              << "; defaulting to \"" << default_value << "\"" << std::endl;
+#endif
     return default_value;
 }
 
