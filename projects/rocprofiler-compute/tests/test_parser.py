@@ -90,9 +90,10 @@ class TestResolveFilterBlocksToPanelIds:
 
 
 def _two_block_config() -> schema.ArchConfig:
-    """Config with system panel (100), block 2 metric_table, block 11 metric_table."""
+    """Config with data_source-0 (1), system panel (100), block 2, block 11."""
     return _make_arch_config(
         [
+            (0, _raw_csv_panel(0, 1, "kernel_top.csv")),
             (100, _raw_csv_panel(100, 101, "sysinfo.csv")),
             (
                 200,
@@ -122,11 +123,11 @@ class TestBuildDfs:
         ac = _two_block_config()
         build_dfs(ac, filter_metrics=None, sys_info=_sys_info(), profiling_config={})
 
-        assert set(ac.dfs.keys()) == {101, 201, 1101}
+        assert set(ac.dfs.keys()) == {1, 101, 201, 1101}
         assert len(ac.dfs[201]) == 2
         assert len(ac.dfs[1101]) == 1
 
-    def test_filter_metrics_keeps_only_matching_block(self):
+    def test_filter_metrics_overrides_profiling_filter_blocks(self):
         ac = _two_block_config()
         build_dfs(
             ac,
@@ -135,8 +136,8 @@ class TestBuildDfs:
             profiling_config={"filter_blocks": ["11"]},  # ignored
         )
 
-        # System panel (100) and matching block (200) only.
-        assert set(ac.dfs.keys()) == {101, 201}
+        # filter_metrics wins -> block 200 present, block 1100 absent.
+        assert set(ac.dfs.keys()) == {1, 101, 201}
         assert len(ac.dfs[201]) == 2
 
     def test_profiling_filter_blocks_keeps_only_matching_block(self):
@@ -149,43 +150,18 @@ class TestBuildDfs:
         )
 
         # System panel always present; block 1100 in filter; block 200 dropped.
-        assert set(ac.dfs.keys()) == {101, 1101}
-
-    def test_filter_metrics_overrides_profiling_filter_blocks(self):
-        ac = _two_block_config()
-        build_dfs(
-            ac,
-            filter_metrics=["2"],
-            sys_info=_sys_info(),
-            profiling_config={"filter_blocks": ["11"]},
-        )
-
-        # filter_metrics wins -> block 200 present, block 1100 absent.
-        assert set(ac.dfs.keys()) == {101, 201}
+        assert set(ac.dfs.keys()) == {1, 101, 1101}
 
     def test_system_panels_and_data_source_zero_always_present(self):
-        ac = _make_arch_config(
-            [
-                (0, _raw_csv_panel(0, 1, "kernel_top.csv")),  # data_source_idx "0"
-                (100, _raw_csv_panel(100, 101, "sysinfo.csv")),  # panel_id <= 100
-                (
-                    200,
-                    _metric_panel(
-                        200,
-                        201,
-                        metrics={"M1": {"value": "AVG(A)"}},
-                    ),
-                ),
-            ]
-        )
+        ac = _two_block_config()
         build_dfs(
             ac,
             filter_metrics=None,
             sys_info=_sys_info(),
-            profiling_config={"filter_blocks": ["11"]},  # no match for block 2
+            profiling_config={"filter_blocks": ["99"]},  # excludes blocks 2 and 11
         )
 
-        # data_source 0 and system panel survive; block 2 is filtered out.
+        # data_source 0 and system panel survive; M-blocks filtered out.
         assert set(ac.dfs.keys()) == {1, 101}
 
     def test_placeholder_range_entries_are_expanded(self):
@@ -207,22 +183,7 @@ class TestBuildDfs:
         assert set(df["Metric"]) == {"Channel_0", "Channel_1", "Channel_2"}
 
     def test_metric_level_filter_drops_siblings_keeps_headers(self):
-        ac = _make_arch_config(
-            [
-                (
-                    200,
-                    _metric_panel(
-                        200,
-                        201,
-                        metrics={
-                            "M0": {"value": "AVG(COUNTER_A)"},
-                            "M1": {"value": "AVG(COUNTER_B)"},
-                            "M2": {"value": "AVG(COUNTER_C)"},
-                        },
-                    ),
-                ),
-            ]
-        )
+        ac = _two_block_config()
         build_dfs(
             ac, filter_metrics=["2.1.0"], sys_info=_sys_info(), profiling_config={}
         )
@@ -231,28 +192,14 @@ class TestBuildDfs:
         # Headers preserved
         assert list(df.columns) == ["Metric", "Avg"]
         # Only the matching metric remains
-        assert list(df["Metric"]) == ["M0"]
+        assert list(df["Metric"]) == ["M1"]
 
     def test_whole_block_filter_keeps_every_metric_in_block(self):
-        ac = _make_arch_config(
-            [
-                (
-                    200,
-                    _metric_panel(
-                        200,
-                        201,
-                        metrics={
-                            "M0": {"value": "AVG(COUNTER_A)"},
-                            "M1": {"value": "AVG(COUNTER_B)"},
-                        },
-                    ),
-                ),
-            ]
-        )
+        ac = _two_block_config()
         build_dfs(ac, filter_metrics=["2"], sys_info=_sys_info(), profiling_config={})
 
         df = ac.dfs[201]
-        assert list(df["Metric"]) == ["M0", "M1"]
+        assert list(df["Metric"]) == ["M1", "M2"]
 
     def test_metric_counters_only_for_built_metrics(self):
         ac = _make_arch_config(
