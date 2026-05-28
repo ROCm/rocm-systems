@@ -1223,7 +1223,7 @@ hipError_t hipStreamEndCapture_common(hipStream_t stream, hip::Graph** pGraph) {
     // When capture is invalidated, graph should be deleted, otherwise it leaks
     s->ReleaseCaptureGraph();
     // Reset capture state to None so the stream is usable after a failed capture
-    [[maybe_unused]] const auto err = s->EndCapture();
+    (void)s->EndCapture();
     return hipErrorStreamCaptureInvalidated;
   }
 
