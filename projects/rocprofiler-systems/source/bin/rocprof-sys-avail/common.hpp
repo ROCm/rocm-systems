@@ -4,6 +4,7 @@
 #pragma once
 
 #include "defines.hpp"
+#include <cstdint>
 
 #include <timemory/components/types.hpp>
 #include <timemory/mpl/concepts.hpp>
@@ -14,10 +15,12 @@
 
 #include <array>
 #include <cstddef>
+#include <optional>
 #include <regex>
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 //--------------------------------------------------------------------------------------//
@@ -68,7 +71,7 @@ extern bool              csv;
 extern bool              markdown;
 extern bool              case_insensitive;
 extern bool              regex_hl;
-extern int32_t           verbose_level;
+extern std::int32_t      verbose_level;
 extern str_vec_t         regex_keys;
 extern str_vec_t         category_regex_keys;
 extern str_set_t         category_view;
@@ -79,20 +82,20 @@ extern std::set<std::string> settings_exclude;
 
 struct format_options
 {
-    std::string delim          = "|";
-    bool        csv            = false;
-    bool        markdown       = false;
-    bool        alphabetical   = false;
-    bool        available_only = false;
-    bool        all_info       = false;
-    bool        force_brief    = false;
-    bool        expand_keys    = false;
-    bool        force_config   = false;
-    bool        print_advanced = false;
-    int32_t     max_width      = 0;
-    int32_t     num_cols       = 0;
-    int32_t     min_width      = 40;
-    int32_t     padding        = 4;
+    std::string  delim          = "|";
+    bool         csv            = false;
+    bool         markdown       = false;
+    bool         alphabetical   = false;
+    bool         available_only = false;
+    bool         all_info       = false;
+    bool         force_brief    = false;
+    bool         expand_keys    = false;
+    bool         force_config   = false;
+    bool         print_advanced = false;
+    std::int32_t max_width      = 0;
+    std::int32_t num_cols       = 0;
+    std::int32_t min_width      = 40;
+    std::int32_t padding        = 4;
     // Preset export metadata (used with -F json)
     std::string preset_name;
     std::string preset_description;
@@ -129,6 +132,23 @@ remove(std::string inp, const std::set<std::string>& entries);
 
 bool
 file_exists(const std::string&);
+
+// ROCm operation-list settings follow the env-var shape
+// ROCPROFSYS_ROCM_<DOMAIN>_OPERATIONS. These helpers are the single source of
+// truth for that mapping; do not reconstruct the prefix/suffix elsewhere.
+
+// Returns the lowercased <DOMAIN> if _env_var_name matches the shape exactly,
+// or std::nullopt otherwise (e.g. companion settings such as
+// _OPERATIONS_EXCLUDE return nullopt).
+std::optional<std::string>
+rocm_domain_from_setting_name(std::string_view _env_var_name);
+
+// Builds ROCPROFSYS_ROCM_<DOMAIN>_OPERATIONS from any-case domain name.
+std::string
+rocm_setting_name_for_domain(std::string_view _domain);
+
+void
+filter_operations(const std::string& env_var_name, std::vector<std::string>& choices);
 
 // control debug printf statements
 #define errprintf(LEVEL, ...)                                                            \

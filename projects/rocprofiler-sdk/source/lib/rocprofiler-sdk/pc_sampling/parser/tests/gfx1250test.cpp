@@ -33,8 +33,6 @@
 #include <gtest/gtest.h>
 #include <cstddef>
 
-#define GFXIP_MAJOR 12
-
 #define RECORD_INST_TYPE(x)                                                                        \
     {                                                                                              \
         PcSamplingRecordT sample{};                                                                \
@@ -255,7 +253,7 @@ class WaveIssueAndErrorTestGFX1250
         perf_snapshot_data.valid  = valid;
         perf_snapshot_data.issued = issued;
 
-        perf_sample_snapshot_v1 pss;
+        perf_sample_snapshot_v1 pss{};
         pss.perf_snapshot_data = perf_snapshot_data.raw;
         pss.correlation_id     = this->dispatch->getMockId().raw;
         this->dispatch->submit(std::move(pss));
@@ -333,7 +331,7 @@ class HwIdTestGFX1250 : public WaveSnapTest<GFX1250, PcSamplingRecordT>
 
     void CheckBuffers() override
     {
-        auto parsed = this->buffer->get_parsed_buffer(GFXIP_MAJOR);  // GFXIP==12
+        auto parsed = this->buffer->get_parsed_buffer(GFX1250::gfx_ip_major, GFX1250::gfx_ip_minor);
         EXPECT_EQ(parsed.size(), 1);
         EXPECT_EQ(parsed[0].size(), 3);
         EXPECT_EQ(compare.size(), 3);
@@ -382,7 +380,8 @@ class HwIdTestGFX1250 : public WaveSnapTest<GFX1250, PcSamplingRecordT>
         // raw register value
         snap.hw_id          = hw_id.raw;
         snap.correlation_id = this->dispatch->getMockId().raw;
-        snap.perf_snapshot_data |= 0x1;  // sample is valid
+        snap.perf_snapshot_data |= 0x1;                   // sample is valid
+        snap.perf_snapshot_data |= (hw_id.wave_id << 9);  // encode wave_id in bits 13:9
 
         EXPECT_NE(this->dispatch.get(), nullptr);
         this->dispatch->submit(snap);

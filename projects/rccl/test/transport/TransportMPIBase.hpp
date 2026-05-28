@@ -42,7 +42,7 @@ struct TransportSendResourceDeleter
     {
         if(connector && transport)
         {
-            transport->send.free(connector);
+            transport->send.free(/*comm=*/nullptr, connector);
         }
     }
 };
@@ -55,7 +55,7 @@ struct TransportRecvResourceDeleter
     {
         if(connector && transport)
         {
-            transport->recv.free(connector);
+            transport->recv.free(/*comm=*/nullptr, connector);
         }
     }
 };
@@ -79,11 +79,11 @@ public:
     {
         if(recv_connector_ && transport_)
         {
-            transport_->recv.free(recv_connector_);
+            transport_->recv.free(/*comm=*/nullptr, recv_connector_);
         }
         if(send_connector_ && transport_)
         {
-            transport_->send.free(send_connector_);
+            transport_->send.free(/*comm=*/nullptr, send_connector_);
         }
     }
 

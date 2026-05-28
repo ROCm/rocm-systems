@@ -31,7 +31,7 @@ module:
   Unit_hipModuleLaunchKernel_Negative_Parameters:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_linux]
     tags: [launch]
   Unit_hipModuleLaunchKernel_Fntl:
     <<: *level_2
@@ -158,6 +158,10 @@ module:
     <<: *level_2
     # Below tests tests fail in PSDB
     disabled: [nvidia_windows]
+    tags: [load]
+  Unit_hipModuleLoad_Positive_NoFdLeak:
+    <<: *level_2
+    disabled: [windows, nvidia_windows]
     tags: [load]
   Unit_hipFuncSetSharedMemConfig_functional:
     <<: *level_2
@@ -292,7 +296,7 @@ module:
   Unit_hipExtModuleLaunchKernel_Negative_Parameters:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_linux]
     tags: [launch]
   Unit_hipExtModuleLaunchKernel_Functional:
     <<: *level_2

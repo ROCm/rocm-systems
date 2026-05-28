@@ -70,6 +70,7 @@
 #include "hipmodule_init_tester.hpp"
 #include "device_bitcode_tester.hpp"
 #include "library_info_tester.hpp"
+#include "fence_ordering_tester.hpp"
 
 #include "backend_bc.hpp"
 extern Backend* backend;
@@ -234,6 +235,11 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case TeamCtxSharedInfraTestType:
       test_name = "Team Ctx Infra Shared test";
       args.team_type = ROCSHMEM_TEST_TEAM_SHARED;
+      testers.push_back(new TeamCtxInfraTester(args));
+      break;
+    case TeamCtxSubsetParentInfraTestType:
+      test_name = "Team Ctx Infra Subset Parent test";
+      args.team_type = ROCSHMEM_TEST_TEAM_SUBSET_PARENT;
       testers.push_back(new TeamCtxInfraTester(args));
       break;
     case TeamCtxGetTestType:
@@ -628,6 +634,22 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Library Info Test";
       testers.push_back(new LibraryInfoTester(args));
       break;
+    case FenceOrderPutWaveSignalTestType:
+      test_name = "Fence PutWaveSignal Ordering";
+      testers.push_back(new FenceOrderingTester(args));
+      break;
+    case FenceOrderPutLargeSmallTestType:
+      test_name = "Fence PutLargeSmall Ordering";
+      testers.push_back(new FenceOrderingTester(args));
+      break;
+    case FenceOrderFanoutTestType:
+      test_name = "Fence Fanout Ordering";
+      testers.push_back(new FenceOrderingTester(args));
+      break;
+    case FenceOrderPutWaveNbiChunksTestType:
+      test_name = "Fence PutWaveNbiChunks Ordering";
+      testers.push_back(new FenceOrderingTester(args));
+      break;
     default:
       test_name = "Empty";
       break;
@@ -713,7 +735,8 @@ void Tester::execute() {
         _type != TeamCtxInfraSingleTestType &&
         _type != TeamCtxInfraBlockTestType  &&
         _type != TeamCtxInfraOddEvenTestType &&
-        _type != TeamCtxSharedInfraTestType ) {
+        _type != TeamCtxSharedInfraTestType &&
+        _type != TeamCtxSubsetParentInfraTestType ) {
       print(size);
     }
   }
@@ -736,6 +759,7 @@ bool Tester::peLaunchesKernel() {
     case TeamCtxInfraBlockTestType:
     case TeamCtxInfraOddEvenTestType:
     case TeamCtxSharedInfraTestType:
+    case TeamCtxSubsetParentInfraTestType:
     case TeamAllToAllTestType:
     case TeamAllToAllvTestType:
     case TeamFCollectTestType:
@@ -774,6 +798,10 @@ bool Tester::peLaunchesKernel() {
     case FloodFAddTestType:
     case FloodWaitAmoTestType:
     case DeviceBitcodeTestType:
+    case FenceOrderPutWaveSignalTestType:
+    case FenceOrderPutLargeSmallTestType:
+    case FenceOrderFanoutTestType:
+    case FenceOrderPutWaveNbiChunksTestType:
       is_launcher = true;
       break;
     default:
@@ -874,6 +902,8 @@ double Tester::timerAvgInMicroseconds() {
 
 void* Tester::alloc_test_buffer(size_t size, enum UserBufType user_buf_type) {
   void *buffer;
+  int err = ROCSHMEM_SUCCESS;
+
   switch (user_buf_type) {
     case USER_BUF_TYPE_HOST:
       CHECK_HIP(hipHostMalloc(&buffer, size));
@@ -904,25 +934,40 @@ void* Tester::alloc_test_buffer(size_t size, enum UserBufType user_buf_type) {
         std::cerr << "buffer: " << (uintptr_t) buffer << std::endl;
         exit(-1);
       }
-      break;
+      return buffer;
   }
+
+  err = rocshmem_buffer_register(buffer, size);
+
+  if (ROCSHMEM_SUCCESS != err) {
+    return nullptr;
+  }
+
   return buffer;
 }
 
 void Tester::free_test_buffer(void *buffer, enum UserBufType user_buf_type) {
+  int err = ROCSHMEM_SUCCESS;
+
   switch (user_buf_type) {
     case USER_BUF_TYPE_HOST:
+      err = rocshmem_buffer_unregister(buffer);
       CHECK_HIP(hipHostFree(buffer));
       break;
     case USER_BUF_TYPE_DEVICE:
     case USER_BUF_TYPE_FINE:
     case USER_BUF_TYPE_UNCACHED:
     case USER_BUF_TYPE_MANAGED:
+      err = rocshmem_buffer_unregister(buffer);
       CHECK_HIP(hipFree(buffer));
       break;
     case USER_BUF_TYPE_HEAP:
     default:
       rocshmem_free(buffer);
       break;
+  }
+
+  if (ROCSHMEM_SUCCESS != err) {
+    fprintf(stderr, "Deregistration Error");
   }
 }

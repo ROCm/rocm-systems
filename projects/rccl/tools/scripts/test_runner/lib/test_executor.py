@@ -25,6 +25,36 @@ from pathlib import Path
 sys.stdout.reconfigure(line_buffering=True)
 
 
+def glob_filter_matches(name: str, pattern_str: str) -> bool:
+    """Return True if *name* matches the gtest-style glob filter *pattern_str*.
+
+    Syntax (same as GTest's --gtest_filter):
+      *     matches any substring
+      ?     matches any single character
+      :     separates patterns (OR)
+      -     prefix on a token negates it (exclude)
+
+    Matching is anchored to the full name and is case-sensitive.
+
+    Examples:
+      glob_filter_matches("P2P_AllTests", "P2P_*")          → True
+      glob_filter_matches("SHM_Basic",    "P2P_*")          → False
+      glob_filter_matches("P2P_AllTests", "*:-P2P*")        → False  (excluded)
+      glob_filter_matches("SHM_Basic",    "P2P_*:SHM_*")   → True   (OR)
+    """
+    def _to_re(pat: str) -> re.Pattern:
+        escaped = re.sub(r'([.+^${}()|\\])', r'\\\1', pat)
+        return re.compile('^' + escaped.replace('*', '.*').replace('?', '.') + '$')
+
+    pos, neg = [], []
+    for token in pattern_str.split(':'):
+        (neg if token.startswith('-') else pos).append(_to_re(token.lstrip('-')))
+
+    if neg and any(p.match(name) for p in neg):
+        return False
+    return (not pos) or any(p.match(name) for p in pos)
+
+
 class ExitCode(IntEnum):
     """Exit codes for processes"""
     EXIT_SUCCESS = 0
@@ -369,8 +399,14 @@ class TestExecutor:
             lib_path = os.path.join(self.build_dir, "librccl.so")
             if not os.path.isfile(lib_path):
                 errors.append(f"RCCL library not found: {lib_path}")
-            elif self.args.verbose:
-                print(f"Found RCCL library: {lib_path}")
+            else:
+                if self.args.verbose:
+                    print(f"Found RCCL library: {lib_path}")
+                # Fail fast: --coverage-report requires an instrumented library,
+                # but with --no-build / custom lib we cannot rebuild it ourselves.
+                if self.args.coverage_report and not self._check_coverage_instrumentation(lib_path):
+                    self._print_coverage_missing_error(lib_path)
+                    return False
 
         if errors:
             print("ERROR: Environment check failed:")
@@ -381,6 +417,52 @@ class TestExecutor:
         if self.args.verbose:
             print("Environment validation passed")
         return True
+
+    def _check_coverage_instrumentation(self, lib_path):
+        """
+        Verify librccl.so was built with LLVM source-based code coverage
+        instrumentation by looking for the ``__llvm_prf_*`` ELF sections that
+        clang adds when ``-fprofile-instr-generate -fcoverage-mapping`` is in
+        effect (i.e. when RCCL was built with -DENABLE_CODE_COVERAGE=ON).
+
+        Returns:
+            bool: True if instrumented; True (with warning) if the check could
+                not be performed (e.g. readelf missing); False if confirmed
+                non-instrumented.
+        """
+        try:
+            result = subprocess.run(
+                ['readelf', '-S', lib_path],
+                capture_output=True, text=True, timeout=30
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+            print(f"WARNING: Could not run 'readelf -S {lib_path}' to verify "
+                  f"coverage instrumentation: {e}")
+            print("         Proceeding under the assumption it is instrumented.")
+            return True
+        if result.returncode != 0:
+            print(f"WARNING: 'readelf -S {lib_path}' exited with "
+                  f"{result.returncode}; skipping coverage instrumentation check.")
+            return True
+        return '__llvm_prf_' in result.stdout
+
+    def _print_coverage_missing_error(self, lib_path):
+        """Emit a clear, actionable message when --coverage-report is requested
+        but the RCCL library lacks LLVM coverage instrumentation."""
+        print("=" * 80)
+        print("ERROR: --coverage-report was requested, but the RCCL library is")
+        print("       not instrumented for LLVM source-based code coverage:")
+        print(f"           {lib_path}")
+        print()
+        print("Rebuild RCCL with coverage instrumentation, then retry. Options:")
+        print("  - Use install.sh directly:")
+        print("        ./install.sh --enable-code-coverage <other flags...>")
+        print("  - Or have the runner build it by adding the flag to your")
+        print("    config's 'build_configuration.install_flags':")
+        print('        "--enable-code-coverage"')
+        print("  - Or pass the CMake option through install.sh:")
+        print('        ./install.sh --cmake-options "-DENABLE_CODE_COVERAGE=ON" ...')
+        print("=" * 80)
 
     def build_rccl(self):
         """
@@ -428,6 +510,21 @@ class TestExecutor:
             else:
                 cmake_options = "-DENABLE_MPI_TESTS=OFF"
             print("NOTE: MPI tests disabled in build (--skip-mpi-check)")
+
+        # Drop code coverage instrumentation when no coverage report is requested.
+        # Coverage instrumentation slows down both runtime (counter updates) and
+        # process exit (profraw file write per PID), which is significant when
+        # many short-lived test processes are spawned.
+        if not self.args.coverage_report:
+            if "--enable-code-coverage" in install_flags:
+                install_flags.remove("--enable-code-coverage")
+            # Explicitly disable to override any cached CMake value from prior builds
+            if cmake_options:
+                cmake_options += " -DENABLE_CODE_COVERAGE=OFF"
+            else:
+                cmake_options = "-DENABLE_CODE_COVERAGE=OFF"
+            print("NOTE: Code coverage instrumentation disabled in build "
+                  "(use --coverage-report to enable)")
 
         # Build install.sh command
         install_script = os.path.join(workdir, "install.sh")
@@ -478,6 +575,18 @@ class TestExecutor:
                 return False
 
             print("Build completed successfully")
+
+            # If --coverage-report was requested, verify the freshly built library
+            # actually contains coverage instrumentation. The user's build_configuration
+            # in the JSON config may not include --enable-code-coverage, in which
+            # case we must abort before running tests (otherwise no profraw files
+            # would be produced and the coverage step would silently produce nothing).
+            if self.args.coverage_report:
+                lib_path = os.path.join(self.build_dir, "librccl.so")
+                if os.path.isfile(lib_path) and not self._check_coverage_instrumentation(lib_path):
+                    self._print_coverage_missing_error(lib_path)
+                    return False
+
             return True
 
         except Exception as e:
@@ -661,28 +770,55 @@ class TestExecutor:
         # Setup environment
         env = os.environ.copy()
 
-        # Build LD_LIBRARY_PATH with build dir and MPI lib (if available)
-        mpi_path = self.paths.get("mpi_path", "")
+        # Build LD_LIBRARY_PATH.  Priority order (highest → lowest):
+        #   1. build_dir          – always first so the test-built librccl.so wins
+        #   2. test JSON value    – per-test custom lib dir (e.g. a backport HIP stack)
+        #   3. caller environment – LD_LIBRARY_PATH already set in the shell lets
+        #                           users point at a custom libamdhip64.so.7 without
+        #                           any special variable:
+        #                             LD_LIBRARY_PATH=/path/to/hip python3 test_runner.py ...
+        #   4. {rocm_path}/lib    – default ROCm/HIP fallback
+        #   5. mpi_path/lib       – MPI runtime
+        #
+        # LD_LIBRARY_PATH from the JSON config is consumed here (not in the
+        # merged_env loop below) so that build_dir always stays first.
+        mpi_path  = self.paths.get("mpi_path", "")
+        rocm_path = self.paths.get("rocm_path", "/opt/rocm")
+
         ld_library_path_parts = [self.build_dir]
+        test_ld = merged_env.get('LD_LIBRARY_PATH')
+        if test_ld:
+            ld_library_path_parts.append(str(test_ld))
+        if env.get('LD_LIBRARY_PATH'):
+            ld_library_path_parts.append(env['LD_LIBRARY_PATH'])
+        ld_library_path_parts.append(os.path.join(rocm_path, "lib"))
         if mpi_path:
             ld_library_path_parts.append(os.path.join(mpi_path, "lib"))
-        if env.get('LD_LIBRARY_PATH'):
-            ld_library_path_parts.append(env.get('LD_LIBRARY_PATH'))
         env['LD_LIBRARY_PATH'] = ":".join(ld_library_path_parts)
 
-        # Set LLVM_PROFILE_FILE for code coverage (prevents default.profraw collision)
-        env['LLVM_PROFILE_FILE'] = "rccl_tests_%p_%m.profraw"
+        # Set LLVM_PROFILE_FILE for code coverage (prevents default.profraw
+        # collision). Only do this when coverage reporting is requested -- with
+        # an instrumented binary, writing per-PID profraw files on every process
+        # exit is a significant overhead when many short-lived test processes
+        # are spawned.
+        if self.args.coverage_report:
+            env['LLVM_PROFILE_FILE'] = "rccl_tests_%p_%m.profraw"
 
-        # Add test-specific env vars
+        # Add test-specific env vars.  LD_LIBRARY_PATH is already merged above.
         for key, value in merged_env.items():
-            env[key] = str(value)
+            if key != 'LD_LIBRARY_PATH':
+                env[key] = str(value)
 
         # Build command based on test type
         if num_ranks == 1:
-            # Non-MPI test - prepend environment variables to the command
+            # Non-MPI test - prepend environment variables to the command.
+            # LD_LIBRARY_PATH is already merged with correct priority order above,
+            # so skip it in the merged_env loop and use the final env value instead.
             env_prefix = ""
             for key, value in merged_env.items():
-                env_prefix += f"{key}={value} "
+                if key != 'LD_LIBRARY_PATH':
+                    env_prefix += f"{key}={value} "
+            env_prefix += f"LD_LIBRARY_PATH={env['LD_LIBRARY_PATH']} "
 
             if is_gtest:
                 # GTest-based test - use --gtest_filter syntax
@@ -756,7 +892,10 @@ class TestExecutor:
                 mpi_args += " " + env_fmt.format(key=key, value=value)
 
             mpi_args += " " + env_fmt.format(key="LD_LIBRARY_PATH", value=env['LD_LIBRARY_PATH'])
-            mpi_args += " " + env_fmt.format(key="LLVM_PROFILE_FILE", value="rccl_tests_%p_%m.profraw")
+            if self.args.coverage_report:
+                mpi_args += " " + env_fmt.format(
+                    key="LLVM_PROFILE_FILE", value="rccl_tests_%p_%m.profraw"
+                )
 
             # Forward LD_PRELOAD so UCX core libraries are preloaded with
             # global visibility on remote ranks (required for UCX PML)
@@ -896,9 +1035,9 @@ class TestExecutor:
                     print(f"\nStopping test suite execution due to rerun failure (--stop-on-rerun-failure)")
                 break
 
-            # Filter by test name if specified
+            # Filter by test name if specified (gtest-style glob; see glob_filter_matches).
             test_name = test.get("name")
-            if self.args.test_name and test_name != self.args.test_name:
+            if self.args.test_name and not glob_filter_matches(test_name, self.args.test_name):
                 skipped_count += 1
                 continue
 
@@ -1063,7 +1202,14 @@ class TestExecutor:
             print("="*120)
 
     def generate_coverage_report(self):
-        """Generate code coverage report"""
+        """Generate code coverage report.
+
+        Supports the report-only workflow: when invoked with
+        ``--no-build --skip-tests --coverage-report`` after a previous run that
+        executed an instrumented binary, this method picks up the existing
+        ``*.profraw`` files left in ``<build_dir>/test/`` and produces a fresh
+        HTML/text report under the current run's workspace ``report/``.
+        """
         if not self.args.coverage_report:
             return
 
@@ -1075,10 +1221,29 @@ class TestExecutor:
         import glob
         import shutil
 
+        # Tests run with cwd=<build_dir>/test, so profraw files are written
+        # there. A recursive glob also picks up any files written elsewhere
+        # under the build tree (e.g. by ad-hoc runs).
         profraw_files = glob.glob(os.path.join(self.build_dir, "**/*.profraw"), recursive=True)
 
         if not profraw_files:
-            print("WARNING: No profraw files found. Cannot generate coverage report.")
+            print("ERROR: No .profraw files found under the build directory:")
+            print(f"           {self.build_dir}")
+            if self.args.skip_tests:
+                print()
+                print("--coverage-report --skip-tests was requested, so this run did")
+                print("not execute any tests. Run the tests at least once with")
+                print("--coverage-report (without --skip-tests) so the instrumented")
+                print("binary writes .profraw files, then re-run with")
+                print("--no-build --skip-tests --coverage-report to regenerate the")
+                print("report from those files.")
+            else:
+                print()
+                print("Tests ran but produced no coverage data. Confirm that the RCCL")
+                print("library and test binaries were built with coverage instrumentation")
+                print("(--enable-code-coverage / -DENABLE_CODE_COVERAGE=ON) and that the")
+                print("test processes terminated cleanly so the runtime could flush the")
+                print("profraw files.")
             return
 
         print(f"Found {len(profraw_files)} profraw files")
