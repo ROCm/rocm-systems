@@ -291,6 +291,36 @@ TEST_F(TestRocprofilerComputeTool, HsaInterceptCallback_StartsContextAndConfigur
     reg.callback(ROCPROFILER_HSA_TABLE, 0, 0, nullptr, 0, reg.user_data);
     EXPECT_EQ(m_sdk_wrapper->get_started_contexts().size(), 1u);
     EXPECT_EQ(m_sdk_wrapper->get_dispatch_counting_service_info().size(), 1u);
+    compare_counter_config_ids(m_sdk_wrapper->get_created_contexts(),
+                               m_sdk_wrapper->get_started_contexts());
+}
+
+// The SDK may fire the HSA intercept callback more than once. Counter setup
+// and context start must run exactly once per process.
+TEST_F(TestRocprofilerComputeTool, HsaInterceptCallback_IsIdempotent)
+{
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
+    ASSERT_EQ(m_sdk_wrapper->get_hsa_intercept_registration_info().size(), 1u);
+    const auto reg = m_sdk_wrapper->get_hsa_intercept_registration_info()[0];
+    reg.callback(ROCPROFILER_HSA_TABLE, 0, 0, nullptr, 0, reg.user_data);
+    reg.callback(ROCPROFILER_HSA_TABLE, 0, 0, nullptr, 0, reg.user_data);
+    EXPECT_EQ(m_sdk_wrapper->get_started_contexts().size(), 1u);
+    EXPECT_EQ(m_sdk_wrapper->get_dispatch_counting_service_info().size(), 1u);
+}
+
+// If HSA loads after tool_fini has run, the callback must not dereference
+// the freed tool_data pointer it captured at registration time.
+TEST_F(TestRocprofilerComputeTool, HsaInterceptCallback_AfterToolFini_IsNoOp)
+{
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
+    ASSERT_EQ(m_sdk_wrapper->get_hsa_intercept_registration_info().size(), 1u);
+    cfg->finalize(cfg->tool_data);
+    const auto reg = m_sdk_wrapper->get_hsa_intercept_registration_info()[0];
+    reg.callback(ROCPROFILER_HSA_TABLE, 0, 0, nullptr, 0, reg.user_data);
+    EXPECT_TRUE(m_sdk_wrapper->get_started_contexts().empty());
+    EXPECT_TRUE(m_sdk_wrapper->get_dispatch_counting_service_info().empty());
 }
 
 //////////////////////////////////////////////////////////////////////////

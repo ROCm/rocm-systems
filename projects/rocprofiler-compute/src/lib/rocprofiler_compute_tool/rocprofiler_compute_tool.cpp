@@ -10,6 +10,7 @@
 
 #include <unistd.h>
 
+#include <atomic>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -22,6 +23,8 @@ static std::shared_ptr<SdkWrapper>      g_sdk_wrapper      = std::make_shared<Sd
 static std::shared_ptr<SdkCallbacks> g_sdk_callbacks = std::make_shared<SdkCallbacksImpl>(g_sdk_wrapper);
 static std::shared_ptr<CountersWriter> g_counters_writer = std::make_shared<CsvCountersWriter>();
 static std::shared_ptr<rocprofiler_tool_configure_result_t> g_cfg;
+static std::atomic<bool>                                    g_tool_shutting_down{false};
+static std::atomic<bool>                                    g_hsa_intercept_done{false};
 
 void test_knobs::set_input_parameters(const std::shared_ptr<InputParameters>& input_parameters)
 {
@@ -41,6 +44,8 @@ void test_knobs::set_csv_writer(const std::shared_ptr<CountersWriter>& csv_write
 void test_knobs::reset_cfg()
 {
     g_cfg.reset();
+    g_tool_shutting_down.store(false, std::memory_order_release);
+    g_hsa_intercept_done.store(false, std::memory_order_release);
 }
 
 namespace rocprofiler_compute_tool
@@ -96,6 +101,12 @@ void on_hsa_runtime_loaded(rocprofiler_intercept_table_t /*type*/,
     // them until HSA actually loads so that LD_PRELOAD'd shells (which never
     // touch HSA) do not initialize HSA worker threads, which would otherwise
     // deadlock on fork() inside subshell/command-substitution.
+    if (g_tool_shutting_down.load(std::memory_order_acquire))
+        return;
+
+    if (g_hsa_intercept_done.exchange(true, std::memory_order_acq_rel))
+        return;
+
     g_sdk_wrapper->configure_callback_dispatch_counting_service(get_client_ctx(),
                                                                 dispatch_callback,
                                                                 user_data,
@@ -148,6 +159,7 @@ void generate_output(tool_data_t* tool_data)
 
 void tool_fini(void* user_data)
 {
+    g_tool_shutting_down.store(true, std::memory_order_release);
     assert(user_data);
     std::clog << "[rocprofiler-compute] In tool fini\n";
     rocprofiler_stop_context(get_client_ctx());
