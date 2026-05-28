@@ -65,6 +65,7 @@ add_executable(
     vop1_cvt_f64_simd_correctness_test.cpp
     vopc_simd_correctness_test.cpp
     vopc_cmp_class_simd_correctness_test.cpp
+    vop3_modifier_simd_test.cpp
     execution_plugin_test.cpp
 )
 target_link_libraries(
