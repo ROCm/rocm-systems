@@ -517,7 +517,7 @@ public:
         return event;
     }
 
-    rocprofiler_thread_trace_decoder_dispatch_t PopulateDispatch(int time, int me, int pipe, int tt_version = 0)
+    rocprofiler_thread_trace_decoder_dispatch_t PopulateDispatch(int64_t time, int me, int pipe, int tt_version = 0)
     {
         rocprofiler_thread_trace_decoder_dispatch_t event{};
         event.size = sizeof(rocprofiler_thread_trace_decoder_dispatch_t);
