@@ -86,7 +86,7 @@ def build_dfs(
                 file_data_source_idx = str(table_id // 100)
 
                 if table_type == "metric_table":
-                    result = _build_metric_table_df(
+                    df, expressions = _build_metric_table_df(
                         panel=panel,
                         data_config=data_config,
                         simple_box=simple_box,
@@ -95,9 +95,9 @@ def build_dfs(
                         profile_panel_filter=profile_panel_filter,
                         metric_counters=metric_counters,
                     )
-                    if result is None:
+                    if data_config["metric"] and df.empty:
                         continue
-                    df, dfs_expressions[table_id] = result
+                    dfs_expressions[table_id] = expressions
 
                 elif table_type == "raw_csv_table":
                     if not _metric_passes_filter(
@@ -174,11 +174,10 @@ def _build_metric_table_df(
     user_metric_filter: Optional[list[str]],
     profile_panel_filter: set[int],
     metric_counters: dict[str, list[str]],
-) -> Optional[tuple[pd.DataFrame, list[str]]]:
+) -> tuple[pd.DataFrame, list[str]]:
     """Build the metric_table dataframe and its list of formula strings for
-    data_config, dropping rows the active filter excludes. Returns None when
-    an active filter dropped every metric in a non-empty config; otherwise
-    returns (df, expressions) and updates metric_counters in place.
+    data_config, dropping rows the active filter excludes. Updates
+    metric_counters in place.
     """
     table_id = data_config["id"]
     table_data_source_idx = f"{table_id // 100}.{table_id % 100}"
@@ -251,11 +250,6 @@ def _build_metric_table_df(
 
         if filtered_counters or formula_visited:
             metric_counters[key] = list(filtered_counters)
-
-    # Empty-by-config tables keep a placeholder df for multi-arch baseline.
-    always_pass = panel_id <= 100 or str(data_config["id"] // 100) == "0"
-    if not always_pass and metric_entries and not rows:
-        return None
 
     df = pd.DataFrame(rows, columns=headers)
     df.set_index("Metric_ID", inplace=True)
