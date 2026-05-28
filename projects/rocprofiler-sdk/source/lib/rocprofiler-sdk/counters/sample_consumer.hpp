@@ -53,10 +53,13 @@ public:
         std::unique_lock<std::mutex> lk(mut);
 
         if(valid.exchange(true)) return;
-        exited.store(false);
+        exited.store(0);
 
         internal_threading::notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
-        consumer = std::thread{&consumer_thread_t::consumer_loop, this};
+        consumers.at(0) = std::thread{&consumer_thread_t::consumer_loop, this};
+        internal_threading::notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
+        internal_threading::notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
+        consumers.at(1) = std::thread{&consumer_thread_t::consumer_loop, this};
         internal_threading::notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
     }
 
@@ -67,8 +70,8 @@ public:
         valid.store(false);
         cv.notify_all();
 
-        if(!exited) cv.wait(lk, [&] { return exited.load(); });
-        if(consumer.joinable()) consumer.join();
+        cv.wait(lk, [&] { return exited.load() >= consumers.size(); });
+        for(auto& consumer : consumers) if(consumer.joinable()) consumer.join();
     }
 
     void add(DataType&& params)
@@ -78,8 +81,8 @@ public:
             auto lk = std::unique_lock{mut};
             if(valid && read_ptr + buffer.size() > write_ptr)
             {
-                buffer.at(write_ptr.fetch_add(1) % buffer.size()) = std::move(params);
-                selfconsume                                       = false;
+                buffer.at((write_ptr++) % buffer.size()) = std::move(params);
+                selfconsume                              = false;
             }
         }
         if(selfconsume)
@@ -93,32 +96,33 @@ protected:
     {
         while(true)
         {
+            DataType retrieved{};
             {
                 auto lk = std::unique_lock{mut};
                 cv.wait(lk, [&] { return read_ptr != write_ptr || !valid; });
                 if(read_ptr == write_ptr)
                 {
-                    exited.store(true);
+                    exited++;
                     cv.notify_all();
                     return;
                 }
+
+                retrieved = std::move(buffer.at((read_ptr++) % buffer.size()));
             }
 
-            auto retrieved = std::move(buffer.at(read_ptr % buffer.size()));
-            read_ptr.fetch_add(1);
             consume_fn(std::move(retrieved));
         }
     }
 
-    consume_func_t             consume_fn;
+    consume_func_t             consume_fn{};
     std::atomic<bool>          valid{false};
-    std::atomic<bool>          exited{true};
+    std::atomic<size_t>        exited{0};
     std::mutex                 mut;
     std::atomic<size_t>        write_ptr{0};
     std::atomic<size_t>        read_ptr{0};
-    std::array<DataType, SIZE> buffer;
-    std::thread                consumer;
-    std::condition_variable    cv;
+    std::array<DataType, SIZE> buffer{};
+    std::array<std::thread, 2> consumers{};
+    std::condition_variable    cv{};
 };
 
 }  // namespace counters
