@@ -37,11 +37,11 @@ test_categories:
   standard:
     description: "Core functionality - Run on every PR (target: ~15-20 min, ~121 tests)"
     test_patterns:
-      # Extended RMA tests (various rank counts, 8 workgroups, 1 thread/wg)
-      - "put_n.*_w8_z1_.*"
-      - "get_n.*_w8_z1_.*"
-      - "putnbi_n.*_w8_z1_.*"
-      - "getnbi_n.*_w8_z1_.*"
+      # Extended RMA tests (various rank counts, 1 or 8 workgroups)
+      - "put_n.*_w[18]_z1_.*"
+      - "get_n.*_w[18]_z1_.*"
+      - "putnbi_n.*_w[18]_z1_.*"
+      - "getnbi_n.*_w[18]_z1_.*"
 
       # AMO operations (basic)
       - "amo_add_.*"
@@ -57,13 +57,15 @@ test_categories:
       - "wgbarrierall_.*"
       - "wavesyncall_.*"
       - "wgsyncall_.*"
+      - "teamsync_.*"
 
       # Signal operations
-      - "putsignal_n.*_w8_z1_.*"
+      - "putsignal_.*"
       - "signalfetch_.*"
 
       # Stream tests (basic)
       - "putmem_on_stream_.*"
+      - "putmem_signal_on_stream_.*"
       - "barrier_all_on_stream_.*"
       - "signal_wait_until_on_stream_.*"
 
@@ -78,6 +80,12 @@ test_categories:
   comprehensive:
     description: "Extended testing - Run nightly (target: ~30-40 min, ~208 tests)"
     test_patterns:
+      # Extended RMA tests with more workgroups (16, 32, 64)
+      - "put_n.*_w(16|32|64)_.*"
+      - "get_n.*_w(16|32|64)_.*"
+      - "putnbi_n.*_w(16|32|64)_.*"
+      - "getnbi_n.*_w(16|32|64)_.*"
+
       # Workgroup-level RMA operations
       - "wgput_.*"
       - "wgget_.*"
@@ -159,6 +167,10 @@ test_categories:
       - "defaultctxp_.*"
       - "defaultctxg_.*"
 
+      # Tile RMA tests (2D/strided operations, IPC-only)
+      - "tile_put_.*"
+      - "tile_get_.*"
+
     labels:
       - "nightly"
 
@@ -174,6 +186,11 @@ test_categories:
       - "flood_wgget_.*"
       - "flood_wgadd_.*"
       - "flood_wgfadd_.*"
+      - "flood_putnbi_.*"
+      - "flood_getnbi_.*"
+      - "flood_p_.*"
+      - "flood_g_.*"
+      - "flood_waitadd_.*"
 
       # Fence tests (synchronization patterns)
       - "fence_putwavesignal_.*"

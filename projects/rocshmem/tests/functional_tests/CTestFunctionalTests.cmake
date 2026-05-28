@@ -118,6 +118,20 @@ set(TEST_fence_putwavesignal 99)
 set(TEST_fence_putlargesmall 100)
 set(TEST_fence_fanout 101)
 set(TEST_fence_putwavenbichunks 102)
+set(TEST_tile_put_contiguous 103)
+set(TEST_tile_put_rowmajor 104)
+set(TEST_tile_put_colmajor 105)
+set(TEST_tile_put_arbitrary 106)
+set(TEST_tile_put_wave_contiguous 107)
+set(TEST_tile_put_wg_contiguous 108)
+set(TEST_tile_get_contiguous 109)
+set(TEST_tile_get_wg_contiguous 110)
+set(TEST_tile_put_1d 111)
+set(TEST_tile_get_1d 112)
+set(TEST_tile_get_wave_contiguous 113)
+set(TEST_tile_get_rowmajor 114)
+set(TEST_tile_get_colmajor 115)
+set(TEST_tile_get_arbitrary 116)
 
 # Find MPI runtime
 find_program(MPIRUN_EXECUTABLE NAMES mpirun mpiexec)
@@ -1003,6 +1017,44 @@ function(add_heatmap_tests)
 endfunction()
 
 ###############################################################################
+# Tile RMA Tests (2D/strided operations)
+###############################################################################
+
+function(add_tile_tests)
+    # Tile tests are only supported on IPC backend
+    # These tests use 2D strided memory access patterns
+    begin_test_group(CATEGORY "TILE;RMA;PUT" TIER comprehensive BACKENDS "ipc" GPUS "all")
+        add_rocshmem_functional_test(NAME tile_put_contiguous RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME tile_put_rowmajor RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME tile_put_colmajor RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME tile_put_arbitrary RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME tile_put_1d RANKS 2 WORKGROUPS 1 THREADS 1)
+    end_test_group()
+
+    # Wavefront and workgroup tile put tests
+    begin_test_group(CATEGORY "TILE;RMA;PUT" TIER comprehensive BACKENDS "ipc" GPUS "all")
+        # Note: WAVE_SIZE is typically 64 on most AMD GPUs, 32 on gfx11xx
+        add_rocshmem_functional_test(NAME tile_put_wave_contiguous RANKS 2 WORKGROUPS 1 THREADS 64)
+        add_rocshmem_functional_test(NAME tile_put_wg_contiguous RANKS 2 WORKGROUPS 1 THREADS 1024)
+    end_test_group()
+
+    begin_test_group(CATEGORY "TILE;RMA;GET" TIER comprehensive BACKENDS "ipc" GPUS "all")
+        add_rocshmem_functional_test(NAME tile_get_contiguous RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME tile_get_rowmajor RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME tile_get_colmajor RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME tile_get_arbitrary RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME tile_get_1d RANKS 2 WORKGROUPS 1 THREADS 1)
+    end_test_group()
+
+    # Wavefront and workgroup tile get tests
+    begin_test_group(CATEGORY "TILE;RMA;GET" TIER comprehensive BACKENDS "ipc" GPUS "all")
+        add_rocshmem_functional_test(NAME tile_get_wave_contiguous RANKS 2 WORKGROUPS 1 THREADS 64)
+        add_rocshmem_functional_test(NAME tile_get_wg_contiguous RANKS 2 WORKGROUPS 1 THREADS 1024)
+        add_rocshmem_functional_test(NAME tile_get_wg_contiguous RANKS 2 WORKGROUPS 4 THREADS 1024)
+    end_test_group()
+endfunction()
+
+###############################################################################
 # Register all tests
 ###############################################################################
 
@@ -1015,4 +1067,5 @@ function(register_all_functional_tests)
     add_stream_tests()
     add_other_tests()
     add_heatmap_tests()
+    add_tile_tests()
 endfunction()
