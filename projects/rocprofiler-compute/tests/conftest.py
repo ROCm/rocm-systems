@@ -196,20 +196,16 @@ def pytest_addoption(parser):
     )
 
 
-@pytest.fixture
-def require_torch():
-    """Factory: callable that skips when PyTorch (or, with gpu=True, GPU) is unavailable."""
+def require_torch(*, gpu: bool = False) -> None:
+    """Skip when PyTorch (or, with gpu=True, GPU) is unavailable."""
 
-    def _check(*, gpu: bool = False) -> None:
-        if importlib.util.find_spec("torch") is None:
-            pytest.skip("PyTorch is not installed")
-        if gpu:
-            import torch
+    if importlib.util.find_spec("torch") is None:
+        pytest.skip("PyTorch is not installed")
+    if gpu:
+        import torch
 
-            if not torch.cuda.is_available():
-                pytest.skip("torch.cuda.is_available() is False")
-
-    return _check
+        if not torch.cuda.is_available():
+            pytest.skip("torch.cuda.is_available() is False")
 
 
 @pytest.fixture(autouse=True)

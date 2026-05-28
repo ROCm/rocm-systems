@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Tuple
 
 import common
 import pytest
+from conftest import require_torch
 
 # Best-effort fallbacks so collection succeeds on CPU-only hosts.
 try:
@@ -49,7 +50,6 @@ def torch_trace_coverage_sampling(request):
 
 @pytest.mark.torch_trace
 def test_random_operator_kernel_coverage(
-    require_torch,
     request,
     binary_handler_profile_rocprof_compute,
     torch_trace_coverage_sampling,
@@ -393,7 +393,7 @@ def _leaf_label(marker: str) -> str:
 
 
 @pytest.mark.torch_trace
-def test_cpp_tier_install_idempotent(require_torch, roctx_recordfn_so):
+def test_cpp_tier_install_idempotent(roctx_recordfn_so):
     """install() is idempotent: two calls return the same handle and
     is_installed() remains true."""
     require_torch(gpu=True)
@@ -405,7 +405,7 @@ def test_cpp_tier_install_idempotent(require_torch, roctx_recordfn_so):
 
 
 @pytest.mark.torch_trace
-def test_cpp_tier_push_pop_balance_under_forward(require_torch, roctx_recordfn_so):
+def test_cpp_tier_push_pop_balance_under_forward(roctx_recordfn_so):
     """Pushes == pops + zero callback errors after a forward-only workload."""
     require_torch(gpu=True)
     mod = roctx_recordfn_so
@@ -426,7 +426,7 @@ def test_cpp_tier_push_pop_balance_under_forward(require_torch, roctx_recordfn_s
 
 @pytest.mark.torch_trace
 def test_cpp_tier_seqnr_correlation_across_worker_thread(
-    require_torch, roctx_recordfn_so
+    roctx_recordfn_so
 ):
     """fwd+bwd must save >= 1 snapshot, consume >= 1, with 0 errors."""
     require_torch(gpu=True)
@@ -463,7 +463,7 @@ def test_cpp_tier_seqnr_correlation_across_worker_thread(
 
 
 @pytest.mark.torch_trace
-def test_cpp_tier_stats_pending_per_call_bounded(require_torch, roctx_recordfn_so):
+def test_cpp_tier_stats_pending_per_call_bounded(roctx_recordfn_so):
     """A small fwd+bwd should not leak more than a handful of pending
     snapshots. Delta-based (not absolute) because earlier tests in this
     module share the fixture and may have left residue; <=4 absorbs the
@@ -488,7 +488,7 @@ def test_cpp_tier_stats_pending_per_call_bounded(require_torch, roctx_recordfn_s
 
 @pytest.mark.torch_trace
 def test_cpp_tier_new_leaf_labels_replace_legacy_dispatcher_label(
-    require_torch, roctx_recordfn_so
+    roctx_recordfn_so
 ):
     """Every leaf must carry one of the four C++-tier labels (aten:0,
     aten.nested:0, autograd.bwd:0, autograd.engine:0) or a USER_SCOPE
@@ -546,7 +546,7 @@ def test_cpp_tier_new_leaf_labels_replace_legacy_dispatcher_label(
 
 @pytest.mark.torch_trace
 def test_cpp_tier_user_scope_propagates_to_autograd_worker(
-    require_torch, roctx_recordfn_so
+    roctx_recordfn_so
 ):
     """USER_SCOPE pushed on the main thread must prefix BACKWARD records
     emitted on the autograd worker. This is the c10::ThreadLocalDebugInfo
@@ -593,7 +593,7 @@ def test_cpp_tier_user_scope_propagates_to_autograd_worker(
 
 @pytest.mark.torch_trace
 def test_cpp_tier_common_prefix_dedup_when_scope_wraps_fwd_and_bwd(
-    require_torch, roctx_recordfn_so
+    roctx_recordfn_so
 ):
     """A single USER_SCOPE that wraps BOTH forward and backward must not
     appear twice in the backward marker (snapshot already has it; the
@@ -638,7 +638,7 @@ def _tiny_train_step():
 
 
 @pytest.mark.torch_trace
-def test_cpp_tier_correlation_under_many_steps(require_torch, roctx_recordfn_so):
+def test_cpp_tier_correlation_under_many_steps(roctx_recordfn_so):
     """Most saved snapshots should be consumed (>=50%) and the soft cap
     must not fire on a workload this small."""
     require_torch(gpu=True)
@@ -666,7 +666,7 @@ def test_cpp_tier_correlation_under_many_steps(require_torch, roctx_recordfn_so)
 
 
 @pytest.mark.torch_trace
-def test_cpp_tier_detached_forward_does_not_explode(require_torch, roctx_recordfn_so):
+def test_cpp_tier_detached_forward_does_not_explode(roctx_recordfn_so):
     """Detached forwards leak snapshots by design; the soft cap
     (10k/shard * 64 shards = 640k slots) must hold and the callback
     must not crash."""
@@ -690,7 +690,7 @@ def test_cpp_tier_detached_forward_does_not_explode(require_torch, roctx_recordf
 
 @pytest.mark.torch_trace
 def test_cpp_tier_concurrent_threads_no_callback_errors(
-    require_torch, roctx_recordfn_so
+    roctx_recordfn_so
 ):
     """Concurrent worker threads must emit C++-tier markers and keep
     callback/push-pop invariants intact."""
@@ -743,7 +743,7 @@ def test_cpp_tier_concurrent_threads_no_callback_errors(
 
 @pytest.mark.torch_trace
 def test_cpp_tier_user_spawned_python_thread_emits_markers(
-    require_torch, roctx_recordfn_so
+    roctx_recordfn_so
 ):
     """A plain user-spawned Python thread running ATen forward ops should
     emit at least one captured C++-tier marker."""
@@ -783,7 +783,6 @@ def test_cpp_tier_user_spawned_python_thread_emits_markers(
 
 @pytest.mark.torch_trace
 def test_cpp_tier_function_apply_no_double_wrap_on_grandchild(
-    require_torch,
     monkeypatch,
 ):
     """A grandchild Function subclass should not get a second apply wrapper."""

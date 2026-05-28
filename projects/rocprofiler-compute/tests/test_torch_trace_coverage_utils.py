@@ -13,6 +13,7 @@ import importlib.util
 import common  # noqa: F401  -- adds src/ to sys.path
 import pandas as pd
 import pytest
+from conftest import require_torch
 
 # Guard the symbol import so this module loads CPU-only; tests skip
 # individually via _require_torch_present (module-level skip exits 5).
@@ -29,7 +30,7 @@ if importlib.util.find_spec("torch") is not None:
 
 
 @pytest.fixture(autouse=True)
-def _require_torch_present(require_torch):
+def _require_torch_present():
     require_torch()
 
 
