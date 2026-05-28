@@ -342,8 +342,9 @@ amdsmi_status_t AMDSmiSystem::populate_amd_gpu_devices() {
   AMDSmiSystem::cleanup();
   // init rsmi — forward the test flag so the mutex becomes non-blocking
   rsmi_driver_state_t state;
-  uint64_t rsmi_flags =
-      (init_flag_ & AMD_SMI_INIT_FLAG_RESRV_TEST1) ? RSMI_INIT_FLAG_RESRV_TEST1 : 0;
+  uint64_t rsmi_flags = (init_flag_ & AMD_SMI_INIT_FLAG_RESRV_TEST1)
+                            ? static_cast<uint64_t>(RSMI_INIT_FLAG_RESRV_TEST1)
+                            : 0ULL;
   rsmi_status_t ret = rsmi_init(rsmi_flags);
   if (ret != RSMI_STATUS_SUCCESS) {
     if (rsmi_driver_status(&state) == RSMI_STATUS_SUCCESS &&

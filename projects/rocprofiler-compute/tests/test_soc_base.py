@@ -16,9 +16,9 @@ from rocprof_compute_soc.soc_base import (
     CounterFile,
     LimitedSet,
     OmniSoC_Base,
-    _flat_counters_in_perfmon_file,
     _rebuild_tcc_channel_file_map,
     _trial_counter_file_with_extra,
+    flat_counters_in_perfmon_file,
 )
 
 # =============================================================================
@@ -94,16 +94,49 @@ def test_limited_set_tcc_channel_coalescing():
     assert len(ls.elements) == 3
 
 
+def test_limited_set_reserve_succeeds_within_capacity():
+    """`reserve(n)` debits avail by n and returns True when capacity remains."""
+    ls = LimitedSet(4)
+    assert ls.add("SQ_WAVES") is True
+    assert ls.reserve(2) is True
+
+
+def test_limited_set_reserve_refuses_when_insufficient():
+    """`reserve(n)` returns False and leaves avail untouched when n > avail."""
+    ls = LimitedSet(2)
+    assert ls.reserve(3) is False
+    assert ls.avail == 2
+    assert ls.elements == []
+
+
+def test_limited_set_reserve_does_not_add_elements():
+    """
+    Reservation is opaque: it does not record a counter name and leaves
+    subsequent add() free to use whatever capacity remains.
+    """
+    ls = LimitedSet(3)
+    assert ls.reserve(2) is True
+    assert ls.elements == []
+    assert ls.avail == 1
+    assert ls.add("SQ_WAVES") is True
+    assert ls.elements == ["SQ_WAVES"]
+    assert ls.avail == 0
+
+
 # =============================================================================
 # B. CounterFile
 # =============================================================================
 
 
-def test_counter_file_naming(perfmon_config):
-    cf = CounterFile("my_bucket", perfmon_config)
-    assert cf.file_name_txt == "pmc_perf_my_bucket.txt"
-    assert cf.pmc_filename == "pmc_perf_my_bucket.yaml"
-    assert cf.counter_def_filename == "counter_def_my_bucket.yaml"
+def test_counter_file_exposes_name_attribute(perfmon_config):
+    """The per-block LimitedSet map is exposed via `blocks`."""
+    cf = CounterFile("SQ_LEVEL_WAVES_ACCUM", perfmon_config)
+    assert cf.name == "SQ_LEVEL_WAVES_ACCUM"
+    assert set(cf.blocks.keys()) == set(perfmon_config.keys())
+    for block, limited_set in cf.blocks.items():
+        assert isinstance(limited_set, LimitedSet)
+        assert limited_set.avail == perfmon_config[block]
+        assert limited_set.elements == []
 
 
 def test_counter_file_add_and_block_mapping(perfmon_config):
@@ -125,21 +158,41 @@ def test_counter_file_add_and_block_mapping(perfmon_config):
     assert cf.blocks["TCP"].avail == 3
 
 
+def test_counter_file_reserve_delegates_to_block(perfmon_config):
+    """
+    `reserve(counter, n)` debits the LimitedSet for the block selected by
+    counter_to_block(counter) and returns the underlying boolean.
+    """
+    cf = CounterFile("0", perfmon_config)
+    assert cf.add("SQ_WAVES") is True  # SQ avail: 8 -> 7
+
+    assert cf.reserve("SQ_INSTS", 2) is True
+    assert cf.blocks["SQ"].avail == 5  # 7 - 2
+
+    # TA capacity is 2 in the fixture, so reserving 3 must fail.
+    assert cf.reserve("TA_EXTRA", 3) is False
+    assert cf.blocks["TA"].avail == 2  # unchanged after failed reserve
+
+    # Reserve must never record a counter name in the block's elements.
+    assert cf.blocks["SQ"].elements == ["SQ_WAVES"]
+    assert cf.blocks["TA"].elements == []
+
+
 # =============================================================================
-# C. _flat_counters_in_perfmon_file
+# C. flat_counters_in_perfmon_file
 # =============================================================================
 
 
 def test_flat_counters_in_perfmon_file(perfmon_config):
     # Empty file returns empty list
     cf = CounterFile("0", perfmon_config)
-    assert _flat_counters_in_perfmon_file(cf) == []
+    assert flat_counters_in_perfmon_file(cf) == []
 
     # Add counters across blocks and verify flattened order
     cf.add("SQ_WAVES")
     cf.add("TA_ADDR")
     cf.add("TCP_READ")
-    result = _flat_counters_in_perfmon_file(cf)
+    result = flat_counters_in_perfmon_file(cf)
     assert "SQ_WAVES" in result
     assert "TA_ADDR" in result
     assert "TCP_READ" in result
@@ -159,11 +212,11 @@ def test_trial_counter_file_with_extra_fits(perfmon_config):
     extras = ["TCP_READ", "TCC_HIT[0]"]
     trial = _trial_counter_file_with_extra(basis, perfmon_config, extras)
     assert trial is not None
-    flat = _flat_counters_in_perfmon_file(trial)
+    flat = flat_counters_in_perfmon_file(trial)
     assert set(flat) == {"SQ_WAVES", "TA_ADDR", "TCP_READ", "TCC_HIT[0]"}
 
     # Original basis is unchanged
-    assert set(_flat_counters_in_perfmon_file(basis)) == {"SQ_WAVES", "TA_ADDR"}
+    assert set(flat_counters_in_perfmon_file(basis)) == {"SQ_WAVES", "TA_ADDR"}
 
 
 def test_trial_counter_file_with_extra_overflow(perfmon_config):
@@ -207,25 +260,40 @@ def test_rebuild_tcc_channel_file_map(perfmon_config):
 
 def test_allocate_level_counters_get_dedicated_files(perfmon_config):
     soc = _make_soc(perfmon_config)
-    counters = {"SQ_LEVEL_WAVES", "TCP_LEVEL_READ", "TA_ADDR"}
+    counters = {
+        "SQ_LEVEL_WAVES_ACCUM",
+        "SQC_DCACHE_INFLIGHT_LEVEL_ACCUM",
+        "TA_ADDR",
+    }
 
     with patch.object(soc, "_same_bucket_priority_metric_ids", return_value=()):
         files, file_count, accu_count = soc._allocate_perfmon_counter_files(counters)
 
-    # 2 LEVEL counters → 2 dedicated files with _ACCUM pairs
-    level_files = [f for f in files if "LEVEL" in f.file_name_txt]
-    assert len(level_files) == 2
+    accum_files = [f for f in files if f.name.endswith("_ACCUM")]
     assert accu_count == 2
+    assert len(accum_files) == 2
+    assert {f.name for f in accum_files} == {
+        "SQ_LEVEL_WAVES_ACCUM",
+        "SQC_DCACHE_INFLIGHT_LEVEL_ACCUM",
+    }
 
-    for lf in level_files:
-        flat = set(_flat_counters_in_perfmon_file(lf))
-        # Each LEVEL file has the counter + its _ACCUM pair
-        assert any(n.endswith("_ACCUM") for n in flat)
+    for af in accum_files:
+        assert af.name in set(flat_counters_in_perfmon_file(af))
+
+    # Both accumulators land in the SQ block (SQC routes via BLOCK_REMAP). Each
+    # file loses 2 SQ slots: 1 for add() + 1 for reserve(counter, 1) (the
+    # paired level event the hardware programs alongside the accumulator).
+    sq_waves_accum = next(f for f in accum_files if f.name == "SQ_LEVEL_WAVES_ACCUM")
+    assert sq_waves_accum.blocks["SQ"].avail == perfmon_config["SQ"] - 2
+    sqc_dcache_accum = next(
+        f for f in accum_files if f.name == "SQC_DCACHE_INFLIGHT_LEVEL_ACCUM"
+    )
+    assert sqc_dcache_accum.blocks["SQ"].avail == perfmon_config["SQ"] - 2
 
     # TA_ADDR placed somewhere (first-fit into a LEVEL file or its own)
     all_ctrs = set()
     for f in files:
-        all_ctrs.update(_flat_counters_in_perfmon_file(f))
+        all_ctrs.update(flat_counters_in_perfmon_file(f))
     assert "TA_ADDR" in all_ctrs
 
 
@@ -240,7 +308,7 @@ def test_allocate_first_fit_packing(perfmon_config):
     assert accu_count == 0
     assert len(files) == 1
     assert file_count == 1
-    flat = set(_flat_counters_in_perfmon_file(files[0]))
+    flat = set(flat_counters_in_perfmon_file(files[0]))
     assert flat == counters
 
 
@@ -255,12 +323,12 @@ def test_allocate_tcc_channel_coalescing(perfmon_config):
     # All TCC_HIT channels should be in the same file
     tcc_file = None
     for f in files:
-        flat = _flat_counters_in_perfmon_file(f)
+        flat = flat_counters_in_perfmon_file(f)
         if any("TCC_HIT" in c for c in flat):
             tcc_file = f
             break
     assert tcc_file is not None
-    tcc_ctrs = [c for c in _flat_counters_in_perfmon_file(tcc_file) if "TCC_HIT" in c]
+    tcc_ctrs = [c for c in flat_counters_in_perfmon_file(tcc_file) if "TCC_HIT" in c]
     assert set(tcc_ctrs) == {"TCC_HIT[0]", "TCC_HIT[1]", "TCC_HIT[2]"}
 
 

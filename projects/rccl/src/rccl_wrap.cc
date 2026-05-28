@@ -430,11 +430,6 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
     return false;
   }
 
-  if (comm->nNodes > 32) {
-    INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER disabled when using more than 32 nodes.");
-    return false;
-  }
-
   // Check if user explicitly set threshold
   static int userThresholdInput = -2;
   if (userThresholdInput == -2) {

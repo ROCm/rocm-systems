@@ -16,7 +16,7 @@ For advanced workflows, source builds, or custom configurations, see
 
 .. _install-rocm:
 
-Install the ROCm Core SDK
+Install ROCm Core SDK
 =========================
 
 ROCprofiler-SDK and the rocprofv3 CLI are included with the ROCm Core SDK on
@@ -29,7 +29,7 @@ environment.
 
 .. _install-base:
 
-Install the ROCm profiler base package on Linux
+Install ROCm profiler base package on Linux
 ===============================================
 
 Alternatively, if you want to install ROCprofiler-SDK as part of the ROCm Profiler

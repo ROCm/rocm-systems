@@ -1,0 +1,19 @@
+{
+    "required_tables": [
+        {
+            "name": "regions",
+            "required_columns": [
+                "name"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "All recursive frames were recorded (RECURSION_DEPTH=100 -> 101 frames)",
+                    "error_message": "Expected 101 'recurse' rows: the initial recurse(100) call plus 100 recursive descents. Fewer rows indicate the per-thread region cache is collapsing same-name nested calls.",
+                    "expected_result": 101,
+                    "query": "SELECT COUNT(*) FROM regions WHERE name = 'recurse'"
+                }
+            ]
+        }
+    ]
+}

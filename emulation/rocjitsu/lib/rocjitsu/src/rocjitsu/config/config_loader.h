@@ -43,7 +43,7 @@ struct TopologyBuildResult {
 /// convenience accessors for the SoC and GPU memory. After loading, wire
 /// the topology into a SimulationEngine:
 /// @code
-///   auto loaded = load_config("config.json", "schema.fbs");
+///   auto loaded = load_config("config.json", kEmbeddedSchema);
 ///   SimulationEngine engine(loaded.engine_config);
 ///   engine.topology().set_root(loaded.take_root());
 ///   loaded.wire_links(engine.topology());
@@ -112,17 +112,17 @@ const char *arch_to_string(rj_code_arch_t arch);
 
 /// @brief Load simulation config from a JSON file.
 /// @param json_path Path to the JSON config file.
-/// @param schema_path Path to the simulation_config.fbs schema file.
+/// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @returns LoadedConfig with engine parameters and built topology.
 /// @throws std::runtime_error on file I/O, parse errors, or invalid config.
-LoadedConfig load_config(const std::string &json_path, const std::string &schema_path);
+LoadedConfig load_config(const std::string &json_path, const std::string &schema_text);
 
 /// @brief Load simulation config from a JSON string.
 /// @param json JSON configuration string.
-/// @param schema_path Path to the simulation_config.fbs schema file.
+/// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @returns LoadedConfig with engine parameters and built topology.
 /// @throws std::runtime_error on parse errors or invalid config.
-LoadedConfig load_config_from_string(const std::string &json, const std::string &schema_path);
+LoadedConfig load_config_from_string(const std::string &json, const std::string &schema_text);
 
 } // namespace config
 } // namespace rocjitsu

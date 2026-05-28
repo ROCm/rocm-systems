@@ -17,11 +17,9 @@ function(rj_add_device_kernel name offload_arch)
 
     add_custom_command(
         OUTPUT ${out}
-        COMMAND ${AMDCLANG} -x hip
-                --offload-arch=${offload_arch}
-                --rocm-path=${ROCM_PATH}
-                -fPIC -c -O2
-                -o ${out} ${src}
+        COMMAND
+            ${AMDCLANG} -x hip --offload-arch=${offload_arch}
+            --rocm-path=${ROCM_PATH} -fPIC -c -O2 -o ${out} ${src}
         DEPENDS ${src}
         COMMENT "Compiling device kernel: ${name} (${offload_arch})"
     )
