@@ -501,6 +501,14 @@ add_test(
         tests/test_gpu_specs.py ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_mi_gpu_spec
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_mi_gpu_spec.xml ${COV_OPTION} tests/test_mi_gpu_spec.py
+        ${WORKING_DIR_OPTION}
+)
+
 # ---------------------------
 # Utils tests
 # ---------------------------
@@ -709,6 +717,7 @@ if(${ENABLE_COVERAGE})
         test_L1_cache_counters
         test_num_xcds_spec_class
         test_num_xcds_cli_output
+        test_mi_gpu_spec
         test_utils
         test_mem_chart
         test_roofline_calc_ai_analyze
