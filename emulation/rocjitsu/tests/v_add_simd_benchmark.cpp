@@ -52,6 +52,16 @@ constexpr uint32_t vop1_encode(uint32_t opcode, uint32_t vdst, uint32_t src0) {
   return (0x3Fu << 25) | ((vdst & 0xFF) << 17) | ((opcode & 0xFF) << 9) | (src0 & 0x1FF);
 }
 
+// CDNA4 VOP3 binary encoding ([31:26]=0x34): word0 = vdst[7:0] | abs[10:8] |
+// clamp[15] | op[25:16]; word1 = src0[8:0] | src1[17:9] | omod[28:27] | neg[31:29].
+constexpr void vop3_bin_encode(uint32_t op, uint32_t vdst, uint32_t src0, uint32_t src1,
+                               uint32_t abs, uint32_t neg, uint32_t omod, uint32_t clamp,
+                               uint32_t &w0, uint32_t &w1) {
+  w0 = (vdst & 0xFF) | ((abs & 0x7) << 8) | ((clamp & 0x1) << 15) | ((op & 0x3FF) << 16) |
+       (0x34u << 26);
+  w1 = (src0 & 0x1FF) | ((src1 & 0x1FF) << 9) | ((omod & 0x3) << 27) | ((neg & 0x7) << 29);
+}
+
 struct BenchFixture {
   amdgpu::GpuMemory gpu_mem;
   amdgpu::L2Cache l2;
@@ -392,6 +402,68 @@ TEST(VAddSimdBenchmark, Cdna4_VCmpClassF32_Vop3) {
   uint32_t w0 = (106u & 0xFF) | ((16u & 0x3FF) << 16) | (0x34u << 26); // vdst=VCC, op=16
   uint32_t w1 = 256u | (1u << 9);                                      // src0=v0, src1=v1
   run_words("v_cmp_class_f32_e64 v0, v1 -> vcc", w0, w1, /*sanitize_finite=*/false);
+}
+
+// === VOP3-encoded binary twins (src0/src1, abs/neg/omod/clamp modifiers) ===
+
+// v_add_f32_e64 v2, v0, v1  (CDNA4 VOP3 opcode 257) — no modifiers. Baseline
+// VOP3 f32 binary; should match the VOP2 v_add_f32 speedup (same functor, the
+// fp glue's modifier reads are zero-cost when all modifier fields are 0).
+TEST(VAddSimdBenchmark, Cdna4_VAddF32_Vop3) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  uint32_t w0, w1;
+  vop3_bin_encode(257, /*vdst=*/2, /*src0=*/256, /*src1=*/257, 0, 0, 0, 0, w0, w1);
+  run_words("v_add_f32_e64 v2, v0, v1", w0, w1, /*sanitize_finite=*/true);
+}
+
+// v_add_f32_e64 v2, |v0|, -v1 *2 clamp  (CDNA4 VOP3 opcode 257) — all four
+// modifier kinds active. Shows the in-vector abs/neg/omod/clamp cost vs the
+// no-modifier form above. abs=src0, neg=src1, omod=1 (*2), clamp=1.
+TEST(VAddSimdBenchmark, Cdna4_VAddF32_Vop3_Modifiers) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  uint32_t w0, w1;
+  vop3_bin_encode(257, /*vdst=*/2, /*src0=*/256, /*src1=*/257, /*abs=*/0x1, /*neg=*/0x2, /*omod=*/1,
+                  /*clamp=*/1, w0, w1);
+  run_words("v_add_f32_e64 |v0|,-v1 *2 clamp", w0, w1, /*sanitize_finite=*/true);
+}
+
+// v_mul_f32_e64 v2, v0, v1  (CDNA4 VOP3 opcode 261) — no modifiers.
+TEST(VAddSimdBenchmark, Cdna4_VMulF32_Vop3) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  uint32_t w0, w1;
+  vop3_bin_encode(261, /*vdst=*/2, /*src0=*/256, /*src1=*/257, 0, 0, 0, 0, w0, w1);
+  run_words("v_mul_f32_e64 v2, v0, v1", w0, w1, /*sanitize_finite=*/true);
+}
+
+// v_and_b32_e64 v2, v0, v1  (CDNA4 VOP3 opcode 275) — integer/bitwise, plain.
+TEST(VAddSimdBenchmark, Cdna4_VAndB32_Vop3) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  uint32_t w0, w1;
+  vop3_bin_encode(275, /*vdst=*/2, /*src0=*/256, /*src1=*/257, 0, 0, 0, 0, w0, w1);
+  run_words("v_and_b32_e64 v2, v0, v1", w0, w1, /*sanitize_finite=*/false);
+}
+
+// v_add_u32_e64 v2, v0, v1  (CDNA4 VOP3 opcode 308) — integer, plain.
+TEST(VAddSimdBenchmark, Cdna4_VAddU32_Vop3) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  uint32_t w0, w1;
+  vop3_bin_encode(308, /*vdst=*/2, /*src0=*/256, /*src1=*/257, 0, 0, 0, 0, w0, w1);
+  run_words("v_add_u32_e64 v2, v0, v1", w0, w1, /*sanitize_finite=*/false);
 }
 
 // Diagnostic: report whether the SIMD fast path is compiled in.
