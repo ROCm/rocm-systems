@@ -17,14 +17,12 @@
 namespace {
 
 const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/amdgpu_cdna4.json";
-const std::string SCHEMA_PATH = std::string(SCHEMA_DIR) + "/simulation_config.fbs";
 constexpr uint32_t kGpuId = 38144;
 
 class KfdIoctlTest : public ::testing::Test {
 protected:
   void SetUp() override {
     setenv("RJ_CONFIG", CONFIG_PATH.c_str(), 1);
-    setenv("RJ_SCHEMA", SCHEMA_PATH.c_str(), 1);
     driver_ = rocjitsu::SimulatedDriver::create_default();
     ASSERT_NE(driver_, nullptr);
     int fd = driver_->open();

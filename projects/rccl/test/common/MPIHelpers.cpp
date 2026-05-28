@@ -10,9 +10,11 @@
 
     #include "MPITestCore.hpp"
     #include "MPIEnvironment.hpp"
+    #include <cctype>
     #include <cerrno>
     #include <cstdlib>
     #include <cstring>
+    #include <dlfcn.h>
     #include <fcntl.h>
     #include <fstream>
     #include <hip/hip_runtime.h>
@@ -21,6 +23,34 @@
     #include <sstream>
     #include <sys/stat.h>
     #include <unistd.h>
+    // RCCL_MPIHelpers_HAS_GTEST is set by the build system (CMakeLists.txt) for
+    // targets that actually link against GTest, so this guard is guaranteed to
+    // match the link graph rather than relying on header presence alone.
+    #if defined(RCCL_MPIHelpers_HAS_GTEST)
+        #include <gtest/gtest.h>
+    #endif
+
+    // resetNcclDebugFile() calls ncclResetDebugInit() via dlsym so that we
+    // never reference the deprecated symbol by name at compile or link time.
+    //
+    // Why dlsym instead of a direct call:
+    //   - ncclResetDebugInit is marked __attribute__((deprecated)) in nccl.h,
+    //     so a direct call triggers -Wdeprecated-declarations and requires a
+    //     #pragma GCC diagnostic suppression.
+    //   - pncclResetDebugInit (the non-deprecated profiling wrapper) is NOT
+    //     exported from librccl.so, so it cannot be linked against directly.
+    //   - dlsym(RTLD_DEFAULT, ...) resolves the symbol from the already-loaded
+    //     librccl.so at runtime — no pragma, no link-time dependency.
+    //   - If RCCL removes the API in a future release the call becomes a no-op
+    //     (the static fn pointer stays null) rather than a link or build error.
+    static void resetNcclDebugFile()
+    {
+        using NcclResetFn = void (*)();
+        static NcclResetFn fn = reinterpret_cast<NcclResetFn>(
+            ::dlsym(RTLD_DEFAULT, "ncclResetDebugInit"));
+        if(fn)
+            fn();
+    }
 
 namespace MPIHelpers
 {
@@ -33,6 +63,85 @@ namespace
             return {};
         }
         return full.substr(static_cast<std::size_t>(off));
+    }
+
+    // Determine the base directory for per-rank and NCCL debug log files.
+    //
+    // Priority:
+    //   1. RCCL_TEST_LOG_DIR env var — explicit override, useful in CI.
+    //   2. Directory of the test binary (/proc/self/exe) — ties logs to the
+    //      specific build that produced them; different builds never share logs.
+    //      Skipped if not writable (e.g. system-installed or read-only prefix).
+    //   3. /tmp — last-resort fallback.
+    std::string getLogBaseDir()
+    {
+        const char* env = std::getenv("RCCL_TEST_LOG_DIR");
+        if(env && env[0] != '\0')
+            return env;
+
+        char buf[4096];
+        const ssize_t len = ::readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+        if(len > 0)
+        {
+            buf[len]    = '\0';
+            char* slash = ::strrchr(buf, '/');
+            if(slash)
+            {
+                *slash = '\0';
+                if(::access(buf, W_OK) == 0)
+                    return std::string{buf};
+                // Binary dir is not writable; fall through to /tmp.
+            }
+        }
+
+        return "/tmp";
+    }
+
+    // Replace every character that is not alphanumeric, '.', or '-' with '_'
+    // so that test-suite and test-case names are safe to embed in a file path.
+    std::string sanitizeForFilename(const std::string& s)
+    {
+        std::string out;
+        out.reserve(s.size());
+        for(unsigned char c : s)
+        {
+            out += (std::isalnum(c) || c == '.' || c == '-') ? static_cast<char>(c) : '_';
+        }
+        return out;
+    }
+
+    // Build a per-test, per-rank NCCL debug log path.
+    //
+    // Pattern: <logdir>/rccl_<TestSuite>.<TestName>_rank<R>_pid<P>.log
+    // PID suffix ensures each process invocation gets a unique file so that
+    // stale files from a different user or a previous run never block fopen("w").
+    std::string makeTestNameLogPath(int rank)
+    {
+        const auto        pid     = std::to_string(::getpid());
+        const std::string logdir  = getLogBaseDir();
+#if defined(RCCL_MPIHelpers_HAS_GTEST)
+        std::string suite;
+        std::string test;
+
+        const ::testing::TestInfo* info
+            = ::testing::UnitTest::GetInstance()->current_test_info();
+        if(info)
+        {
+            if(info->test_suite_name())
+                suite = info->test_suite_name();
+            if(info->name())
+                test = info->name();
+        }
+
+        if(!suite.empty() && !test.empty())
+        {
+            return logdir + "/rccl_" + sanitizeForFilename(suite) + "."
+                   + sanitizeForFilename(test) + "_rank" + std::to_string(rank)
+                   + "_pid" + pid + ".log";
+        }
+#endif
+        return logdir + "/rccl_rank" + std::to_string(rank)
+               + "_pid" + pid + ".log";
     }
 } // namespace
 
@@ -210,9 +319,7 @@ std::optional<RankLogConfig> setupRankLogging(int rank)
 
         if(per_rank_logging_enabled)
         {
-            // Per-rank logging enabled: Redirect to log file
-            const auto log_filename
-                = std::string{"rccl_test_rank_"} + std::to_string(rank) + ".log";
+            const auto log_filename = getRankLogFilePath(rank);
 
             const auto log_fd = ::open(log_filename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
 
@@ -269,9 +376,8 @@ std::optional<RankLogConfig> setupRankLogging(int rank)
     }
 
     // Create log file for rank 0
-    const auto log_filename = std::string{"rccl_test_rank_"} + std::to_string(rank) + ".log";
+    const auto log_filename = getRankLogFilePath(rank);
 
-    // Debug: Print to stderr BEFORE creating log file
     TEST_TRACE("Rank %d (rank 0 tee mode) opening log file: %s", rank, log_filename.c_str());
 
     const auto log_fd = ::open(log_filename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -292,8 +398,8 @@ std::optional<RankLogConfig> setupRankLogging(int rank)
     // Print banner before redirection
     TEST_INFO("Per-Rank Logging ENABLED (RCCL_MPI_LOG_ALL_RANKS=1)");
     TEST_INFO("Rank 0     : Output to BOTH console AND %s", log_filename.c_str());
-    TEST_INFO("Ranks 1-N  : Output redirected to rccl_test_rank_<N>.log");
-    TEST_INFO("Location   : Log files created in current working directory");
+    TEST_INFO("Ranks 1-N  : Output redirected to per-rank log files");
+    TEST_INFO("Log dir    : %s  (override: RCCL_TEST_LOG_DIR)", getLogBaseDir().c_str());
 
     // Save original stdout/stderr for tee thread
     config.saved_stdout = FileDescriptor{::dup(STDOUT_FILENO)};
@@ -346,7 +452,8 @@ std::optional<RankLogConfig> setupRankLogging(int rank)
 
 std::string getRankLogFilePath(int rank)
 {
-    return std::string{"rccl_test_rank_"} + std::to_string(rank) + ".log";
+    return getLogBaseDir() + "/rccl_test_rank_" + std::to_string(rank)
+           + "_pid" + std::to_string(::getpid()) + ".log";
 }
 
 std::uintmax_t getFileSizeBytes(const std::string& path)
@@ -376,6 +483,8 @@ std::string readTextFile(const std::string& path)
 
 std::string readRankLogFile(int rank)
 {
+    if(!isPerRankLoggingEnabled())
+        return {};
     std::fflush(stdout);
     std::fflush(stderr);
     return readTextFile(getRankLogFilePath(rank));
@@ -384,9 +493,13 @@ std::string readRankLogFile(int rank)
 TestLogAssertionOptions makeNcclDebugFileAssertionOptions(int mpi_rank)
 {
     TestLogAssertionOptions o;
-    o.mpi_rank                  = mpi_rank;
-    o.capture_nccl_debug_file   = true;
-    o.read_per_rank_stderr_log = false;
+    o.mpi_rank                        = mpi_rank;
+    o.capture_nccl_debug_file         = true;
+    o.read_per_rank_stderr_log        = false;
+    // Test-name-based paths are unique per test, so there is no truncation risk,
+    // auto-unlink log files on pass, keep on failure is implemented in the destructor.
+    // Set RCCL_KEEP_TEST_LOGS=1 to retain all logs unconditionally.
+    o.unlink_auto_generated_nccl_path = true;
     return o;
 }
 
@@ -415,12 +528,26 @@ TestLogAssertionContext::TestLogAssertionContext(const TestLogAssertionOptions& 
 {
     const int rank = opts.mpi_rank;
 
+    // Capture the test label for use in the log-file header (written in the
+    // destructor).  GTest tests get "Suite/TestName"; standalone binaries
+    // that don't link against GTest get "pid_<PID>" as a fallback so the
+    // log can still be correlated to the process that produced it.
+#if defined(RCCL_MPIHelpers_HAS_GTEST)
+    {
+        const ::testing::TestInfo* info
+            = ::testing::UnitTest::GetInstance()->current_test_info();
+        if(info && info->test_suite_name() && info->name())
+            test_label_ = std::string{info->test_suite_name()} + "/" + info->name();
+    }
+#endif
+    if(test_label_.empty())
+        test_label_ = std::string{"pid_"} + std::to_string(::getpid());
+
     if(capture_nccl_)
     {
         if(opts_.nccl_debug_file_path.empty())
         {
-            nccl_path_ = std::string{"/tmp/rccl_assert_nccl_rank_"} + std::to_string(rank) + "_pid_"
-                         + std::to_string(::getpid()) + ".log";
+            nccl_path_      = makeTestNameLogPath(rank);
             auto_nccl_path_ = true;
         }
         else
@@ -442,10 +569,27 @@ TestLogAssertionContext::TestLogAssertionContext(const TestLogAssertionOptions& 
         else
         {
             env_modified_ = true;
+            // Tell NCCL to close its current log file and re-read NCCL_DEBUG_FILE
+            // on the next log output.  Without this the global ncclDebugFile remains
+            // pointed at the previous test's (possibly already-unlinked) file handle.
+            resetNcclDebugFile();
+        }
+
+        // Remove any log file left over from a previous test run (e.g. a
+        // skipped run that kept its log).  NCCL always opens the file with
+        // fopen("w") which truncates, so if we recorded the OLD file's size
+        // as nccl_start_offset_, readNcclDebugLog() would slice past all of
+        // the new content and return an empty string on every subsequent run.
+        // Only unlink auto-generated paths; do not clobber a user-supplied file.
+        if(auto_nccl_path_)
+        {
+            (void)::unlink(nccl_path_.c_str());
         }
 
         if(opts_.isolate_new_output)
         {
+            // File was just unlinked; getFileSizeBytes always returns 0 here.
+            // The assignment is kept for symmetry and clarity.
             nccl_start_offset_ = getFileSizeBytes(nccl_path_);
         }
     }
@@ -473,15 +617,80 @@ TestLogAssertionContext::~TestLogAssertionContext()
         {
             (void)::unsetenv("NCCL_DEBUG_FILE");
         }
+        // Flush all stdio streams (including NCCL's internal FILE* buffer) before
+        // reading the log file.  resetNcclDebugFile() arms the lazy close but does
+        // not flush or close the handle immediately; fflush(nullptr) ensures every
+        // pending byte has been written to disk before we read and rewrite the file.
+        std::fflush(nullptr);
+        resetNcclDebugFile();
     }
 
     if(capture_nccl_ && !nccl_path_.empty())
     {
-        const bool unlink_it = (auto_nccl_path_ && opts_.unlink_auto_generated_nccl_path)
-                               || (!auto_nccl_path_ && opts_.unlink_explicit_nccl_path);
+        // ---------------------------------------------------------------
+        // Decide whether this log will be kept or deleted BEFORE doing
+        // any file I/O: large NCCL_DEBUG=INFO logs on passing tests would
+        // otherwise add avoidable teardown I/O and rank skew if we read
+        // and rewrite a file we are about to delete.
+        // ---------------------------------------------------------------
+
+        // Treat RCCL_KEEP_TEST_LOGS=0 (or empty) as "don't keep"; any other
+        // non-empty value (typically "1") activates unconditional retention.
+        const char* keep_env = std::getenv("RCCL_KEEP_TEST_LOGS");
+        const bool  keep_all = keep_env && keep_env[0] != '\0' && keep_env[0] != '0';
+
+        bool test_passed = false; // conservative default: keep when uncertain
+#if defined(RCCL_MPIHelpers_HAS_GTEST)
+        {
+            const ::testing::TestInfo* info
+                = ::testing::UnitTest::GetInstance()->current_test_info();
+            if(info && info->result())
+                test_passed = info->result()->Passed();
+        }
+#endif
+
+        const bool unlink_it
+            = !keep_all
+              && test_passed
+              && ((auto_nccl_path_ && opts_.unlink_auto_generated_nccl_path)
+                  || (!auto_nccl_path_ && opts_.unlink_explicit_nccl_path));
+
         if(unlink_it)
         {
             (void)::unlink(nccl_path_.c_str());
+        }
+        else
+        {
+            // ---------------------------------------------------------------
+            // Prepend a one-line header to the log file so it is
+            // self-identifying regardless of whether the name is human-readable
+            // (GTest path) or opaque (pid-based standalone path).
+            //
+            // The header is written here (destructor) rather than in the
+            // constructor because NCCL opens the file with fopen("w") on its
+            // first lazy-init log call, which would truncate anything written
+            // earlier.  By writing in the destructor — after the communicator
+            // has already been torn down and fflush(nullptr) has drained NCCL's
+            // internal buffer — the file is complete and safe to rewrite.
+            // ---------------------------------------------------------------
+            const std::string content = readTextFile(nccl_path_);
+            if(!content.empty())
+            {
+                std::ostringstream header;
+                header << "=== RCCL Test Log"
+                       << " | Test: "  << test_label_
+                       << " | Rank: "  << opts_.mpi_rank
+                       << " | PID: "   << ::getpid()
+                       << " ===\n";
+                const std::string hdr = header.str();
+
+                if(FILE* f = std::fopen(nccl_path_.c_str(), "w"))
+                {
+                    std::fwrite(hdr.c_str(),     1, hdr.size(),     f);
+                    std::fwrite(content.c_str(), 1, content.size(), f);
+                    std::fclose(f);
+                }
+            }
         }
     }
 }
@@ -492,13 +701,18 @@ std::string TestLogAssertionContext::readNcclDebugLog() const
     {
         return {};
     }
+    // NCCL writes to a stdio FILE* with block-buffering.  Flush all open
+    // streams so that any bytes still sitting in the libc buffer (e.g.
+    // "Init CE" / "CE: rank" lines written during the most recent collective)
+    // are committed to disk before we read the file back.
+    std::fflush(nullptr);
     const std::string full = readTextFile(nccl_path_);
     return opts_.isolate_new_output ? sliceFromOffset(full, nccl_start_offset_) : full;
 }
 
 std::string TestLogAssertionContext::readPerRankStderrLog() const
 {
-    if(!read_per_rank_)
+    if(!read_per_rank_ || !isPerRankLoggingEnabled())
     {
         return {};
     }
