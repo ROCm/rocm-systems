@@ -14,8 +14,6 @@
  * - fillPatternBytes / verifyPatternBytes for byte-level test patterns on CPU-accessible
  *   (fine-grain) memory
  *
- * Fine-grain memory allocated via ncclMemAlloc is CPU-accessible on ROCm, so
- * fillPattern / verifyPattern operate directly on the pointer without hipMemcpy.
  */
 
 #ifndef HOST_API_HELPERS_HPP
@@ -151,8 +149,8 @@ inline void FillBuf(void* buf, size_t size, int seed)
     std::vector<uint8_t> tmp(size);
     for(size_t i = 0; i < size; ++i)
         tmp[i] = static_cast<uint8_t>((seed + i) % 256);
-    (void)hipMemcpy(buf, tmp.data(), size, hipMemcpyHostToDevice);
-    (void)hipDeviceSynchronize();
+    ASSERT_EQ(hipMemcpy(buf, tmp.data(), size, hipMemcpyHostToDevice), hipSuccess);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 }
 
 /** Return true iff buf matches (seed + i) % 256 for all i. */
@@ -161,7 +159,7 @@ inline bool VerifyBuf(const void* buf, size_t size, int seed)
     std::vector<uint8_t> staging(size);
     if(hipMemcpy(staging.data(), buf, size, hipMemcpyDeviceToHost) != hipSuccess)
         return false;
-    (void)hipDeviceSynchronize();
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
     for(size_t i = 0; i < size; ++i)
     {
         if(staging[i] != static_cast<uint8_t>((seed + i) % 256))
@@ -181,8 +179,8 @@ inline bool VerifyBuf(const void* buf, size_t size, int seed)
 /** Fill buf with a constant sentinel byte via hipMemset. */
 inline void FillSentinel(void* buf, size_t size, uint8_t value)
 {
-    (void)hipMemset(buf, value, size);
-    (void)hipDeviceSynchronize();
+    ASSERT_EQ(hipMemset(buf, value, size), hipSuccess);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 }
 
 /** Return true iff every byte in buf equals value. */
@@ -191,7 +189,7 @@ inline bool AllSentinel(const void* buf, size_t size, uint8_t value)
     std::vector<uint8_t> staging(size);
     if(hipMemcpy(staging.data(), buf, size, hipMemcpyDeviceToHost) != hipSuccess)
         return false;
-    (void)hipDeviceSynchronize();
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
     for(size_t i = 0; i < size; ++i)
     {
         if(staging[i] != value)

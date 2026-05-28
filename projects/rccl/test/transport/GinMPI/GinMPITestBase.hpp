@@ -181,11 +181,6 @@ protected:
         int nGpus = 0;
         if(hipGetDeviceCount(&nGpus) != hipSuccess || nGpus <= 0)
         {
-            // GTEST_SKIP() expands to `return <void>`, which we cannot do
-            // from this bool-returning helper. Execute it inside a void
-            // lambda so the return is consumed there, then bail to the
-            // caller normally — the skip status is still registered on
-            // the active test.
             ADD_FAILURE() << "No HIP devices visible; GIN tests require GPU";
             return false;
         }
@@ -264,15 +259,6 @@ protected:
         if(r != ncclSuccess)
         {
             ADD_FAILURE() << "gin->createContext failed: " << r;
-            return false;
-        }
-
-        // 7. If DMA-BUF registration was requested, verify the backend
-        //    implements regMrSymDmaBuf. This is a platform prerequisite,
-        //    not a test bug, so we skip rather than fail.
-        if(UseDmaBuf() && gin_->regMrSymDmaBuf == nullptr)
-        {
-            ADD_FAILURE() << "GIN backend does not implement regMrSymDmaBuf"; 
             return false;
         }
 

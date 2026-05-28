@@ -679,7 +679,8 @@ TEST_F(HostApiTest, PutSignalNullWindow)
         ASSERT_EQ(ncclSuccess, allocFineGrainBuffer(&srcBuf, kOneMB));
     }
     auto srcBufGuard = makeScopeGuard([&]() { if(srcBuf) freeFineGrainBuffer(srcBuf); });
-
+    
+    ncclResult_t res = ncclInvalidArgument;
     if(myRank == 0)
     {
         res = ncclPutSignal(
