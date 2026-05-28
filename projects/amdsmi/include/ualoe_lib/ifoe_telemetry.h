@@ -899,7 +899,7 @@
 #define IFOE_TELEM_ID_PFC_REQ_Q_RX_TOTAL_PACKETS 0x3003
 /* enum: Number of packets dropped for IFoE Request RX queue */
 #define IFOE_TELEM_ID_PFC_REQ_Q_RX_DROPPED_PACKETS 0x3004
-/* enum: Total number of truncated packets received fpr IFoE Request RX queue
+/* enum: Total number of truncated packets received for IFoE Request RX queue
  */
 #define IFOE_TELEM_ID_PFC_REQ_Q_RX_TRUNCATED_PACKETS 0x3005
 /* enum: Count of time XOFF was applied for IFoE Request RX queue */
