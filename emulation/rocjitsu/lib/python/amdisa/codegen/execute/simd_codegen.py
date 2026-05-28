@@ -1304,6 +1304,42 @@ SIMD_VOP3_UNARY_FP16: dict[str, str] = {
 }
 
 
+# --- VOP3 floating-point ternary (FMA / MAD family) ------------------------
+#
+# v_fma_*: util::stdx::fma (fused multiply-add, single-rounded). v_fmac/v_mac:
+# same body (the scalar generator emits std::fma for both because of dst-
+# accumulate semantics — src2 == vdst). v_mad: non-fused `a * b + c`. NaN-input
+# divergence between stdx::fma and std::fma (gcc-13 packed FMA picks a
+# different NaN operand to quiet) is accepted, same as the existing VOP2
+# ternary FMA slice — the A/B test skips NaN-input lanes.
+SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
+    "v_fma_f32_vop3": "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }",
+    "v_mad_f32_vop3": "[](auto a, auto b, auto c) { return a * b + c; }",
+    "v_mad_legacy_f32_vop3": "[](auto a, auto b, auto c) { return a * b + c; }",
+}
+
+# f16 ternary — widen each src to f32, op in f32, narrow back. Same NaN
+# carve-out as the f32 path.
+SIMD_VOP3_TERNARY_FP16: dict[str, str] = {
+    "v_fma_f16_vop3": "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }",
+    "v_mad_f16_vop3": "[](auto a, auto b, auto c) { return a * b + c; }",
+    "v_mad_legacy_f16_vop3": "[](auto a, auto b, auto c) { return a * b + c; }",
+    "v_fma_legacy_f16_vop3": "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }",
+}
+
+# f64 ternary FMA.
+SIMD_VOP3_TERNARY_FP64: dict[str, str] = {
+    "v_fma_f64_vop3": "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }",
+}
+
+# NOTE: v_fmac / v_mac (dst-accumulate variants) are NOT in the tables above:
+# their per-isa codegen classes only initialize src0 + src1 + vdst (the 3rd FMA
+# arg comes from vdst, not src2 — there's no src2 Operand member), so a glue
+# template that reads inst.src2 fails to instantiate. They need a separate
+# "accumulate-form" glue path that reads vdst as the third operand; deferred to
+# a follow-up slice.
+
+
 SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
     "v_add3_u32_vop3": (
         "uint32_t",
@@ -1442,6 +1478,18 @@ def simd_probe_line(template_name: str) -> str | None:
     if spec3tern is not None:
         cpp_t, cpp_op = spec3tern
         return f"  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT({cpp_t}, {cpp_op});"
+    # VOP3 fp ternary (FMA / MAD family). Per-source abs/neg + omod/clamp in
+    # the f32 / f16 / f64 domain. NaN-input lanes skipped by test (gcc-13
+    # packed FMA quiets a different NaN operand vs scalar std::fma).
+    spec3tf32 = SIMD_VOP3_TERNARY_FP32.get(template_name)
+    if spec3tf32 is not None:
+        return f"  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32({spec3tf32});"
+    spec3tf16 = SIMD_VOP3_TERNARY_FP16.get(template_name)
+    if spec3tf16 is not None:
+        return f"  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16({spec3tf16});"
+    spec3tf64 = SIMD_VOP3_TERNARY_FP64.get(template_name)
+    if spec3tf64 is not None:
+        return f"  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP64({spec3tf64});"
     # Extra plain integer binary VOP3 ops without a VOP2 twin (add_i32/i16,
     # sub_*, nc_* variants). Routed through the int VOP3 binary glue.
     spec3binx = SIMD_VOP3_BINARY_INT_EXTRA.get(template_name)
