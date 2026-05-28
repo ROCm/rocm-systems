@@ -38,5 +38,4 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 45
     FIXTURES_REQUIRED kernel-tracing
     DISCOVERY_ARGS ${PYTEST_ARGS}
-    ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/kernel-tracing-test.json
-    UNSTABLE)
+    ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/kernel-tracing-test.json)
