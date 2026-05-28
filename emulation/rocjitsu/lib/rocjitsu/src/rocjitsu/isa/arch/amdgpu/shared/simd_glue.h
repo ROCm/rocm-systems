@@ -916,6 +916,49 @@ template <typename T, typename Inst, typename CmpOp>
   return false;
 }
 
+/// VOP3 f32 VOPC compare SIMD fast path. Same SGPR-pair-dst merge as the
+/// integer VOP3 path but reads src0/src1 as `native<float>` and applies the
+/// per-source abs/neg VOP3 modifiers — bit-identical to the scalar body which
+/// does `std::fabs` then unary minus per source before comparing. The compare
+/// itself is the existing VOPC f32 functor (omod/clamp are not applied because
+/// the compare result is a single bit, not an f32; the scalar bodies for these
+/// kernels likewise ignore omod/clamp). NaN handling mirrors the scalar
+/// `<`/`==`/etc. exactly. Returns true when the SIMD path executed.
+template <typename Inst, typename CmpOp>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_vopc_vop3_fp32_simd(Inst &inst, Wavefront &wf, CmpOp cmp_op) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable())
+    return false;
+  using T = float32_t;
+  const uint32_t abs = inst.inst_.abs;
+  const uint32_t neg = inst.inst_.neg;
+  constexpr std::size_t W = util::native_width_v<T>;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  uint64_t dst = inst.vdst.read_scalar64(wf);
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto a = apply_vop3_src_mod_f32<0>(read_simd<T>(inst.src0, wf, base), abs, neg);
+    const auto b = apply_vop3_src_mod_f32<1>(read_simd<T>(inst.src1, wf, base), abs, neg);
+    const auto m = cmp_op(a, b);
+    uint64_t cmp_bits = 0;
+    for (std::size_t i = 0; i < W; ++i)
+      if (m[i])
+        cmp_bits |= (1ULL << i);
+    dst = (dst & ~(chunk << base)) | ((cmp_bits & chunk) << base);
+  }
+  inst.vdst.write_scalar64(wf, dst);
+  return true;
+}
+
+/// Unconstrained fallback for the VOP3 f32 VOPC path; see the binary-path note.
+template <typename Inst, typename CmpOp>
+[[nodiscard]] inline bool try_execute_vopc_vop3_fp32_simd(Inst &, Wavefront &, CmpOp) {
+  return false;
+}
+
 /// VOP3 f32 unary SIMD fast path. Reads `src0` as f32, applies the src0 abs/neg
 /// modifiers, runs `un_op` (`native<float> -> native<float>`), then applies the
 /// result omod/clamp — the scalar body's order (abs->neg, op, omod->clamp). Tin
@@ -1081,6 +1124,13 @@ template <typename Tin, typename Tout, typename Inst, typename UnOp>
 /// variadic in the functor.
 #define ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT(T, ...)                                                  \
   if (::rocjitsu::amdgpu::try_execute_vopc64_vop3_int_simd<T>(inst, wf, __VA_ARGS__))              \
+  return
+
+/// VOP3 f32 VOPC compare counterpart (per-source abs/neg modifiers, SGPR-pair
+/// dst). Lane type is fixed to float32_t; the functor takes already-modified
+/// `native<float>` arguments and is variadic so its commas pass through.
+#define ROCJITSU_TRY_SIMD_VOPC_VOP3_FP32(...)                                                      \
+  if (::rocjitsu::amdgpu::try_execute_vopc_vop3_fp32_simd(inst, wf, __VA_ARGS__))                  \
   return
 
 #endif // ROCJITSU_ISA_AMDGPU_SHARED_SIMD_GLUE_H_
