@@ -55,7 +55,7 @@ public:
         if(valid.exchange(true)) return;
         exited = 0;
 
-        for (auto& consumer : consumers)
+        for(auto& consumer : consumers)
         {
             internal_threading::notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
             consumer = std::thread{&consumer_thread_t::consumer_loop, this};
@@ -70,7 +70,8 @@ public:
         valid.store(false);
         cv.notify_all();
         cv.wait(lk, [&] { return exited >= consumers.size(); });
-        for(auto& consumer : consumers) if(consumer.joinable()) consumer.join();
+        for(auto& consumer : consumers)
+            if(consumer.joinable()) consumer.join();
     }
 
     void add(DataType&& params)
