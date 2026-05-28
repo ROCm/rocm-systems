@@ -1,3 +1,5 @@
+#include <amd_smi/amdsmi.h>
+
 #include <iomanip>
 #include <iostream>
 #include <ostream>
@@ -5,8 +7,6 @@
 #include <string_view>
 #include <tuple>
 #include <vector>
-
-#include "amdsmi.h"
 
 #define CHK_AMDSMI_RET(RET)                                                                \
   {                                                                                        \
