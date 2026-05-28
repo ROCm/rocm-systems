@@ -250,6 +250,10 @@
 //       : gfx12 - ttmp7 - 31:16 : workgroup_z[15:0]  (SPI) and 15:0 : workgroup_y[15:0]  (SPI)
 
 trap_entry:
+  // Clear ttmp13 at trap entry - GFX9 does not use ttmp13 for VGPR MSBs (unlike GFX12.5)
+  // This prevents stale PC sampling flags from previous wave context causing misrouting
+  s_mov_b32                             ttmp13, 0
+
   // Extract trap_id from ttmp2
   s_bfe_u32                             ttmp2, ttmp1, SQ_WAVE_PC_HI_TRAP_ID_BFE
   s_cbranch_scc0                        .not_s_trap                      // If trap_id == 0, it's not an s_trap nor host trap
@@ -292,11 +296,7 @@ trap_entry:
 
   s_load_dwordx2                        ttmp[2:3], ttmp[14:15], 0   // ttmp[2:3] = host_trap_buffers base
 .if .amdgcn.gfx_generation_minor >= 4
-  // GFX9.4+ (multi-XCC): Clear stale flags and compute per-XCC offset
-  // Clear ttmp13 PC sampling flags at trap entry to prevent stale flags from
-  // previous wave context causing misrouting.
-  s_andn2_b32                           ttmp13, ttmp13, 0x00600000      // Clear PC sampling flags [22:21] only
-
+  // GFX9.4+ (multi-XCC): ttmp13 already cleared at trap_entry
   // Multi-XCC: Load per_xcc_size and XCC_ID for offset calculation
   s_load_dword                          ttmp4, ttmp[14:15], 0x10        // ttmp4 = per_xcc_size
   s_getreg_b32                          ttmp5, hwreg(HW_REG_XCC_ID)     // ttmp5 = XCC_ID
@@ -309,13 +309,9 @@ trap_entry:
   s_cmp_eq_u64                          ttmp[2:3], 0
   s_cbranch_scc1                        .check_stochastic_gfx94
 
-  // Calculate offset using DIFFERENT registers to avoid corrupting TMA2 pointer (ttmp14:15)
-  s_mul_i32                             ttmp6, ttmp4, ttmp5             // ttmp6 = lo32(offset)
-  s_mul_hi_u32                          ttmp7, ttmp4, ttmp5             // ttmp7 = hi32(offset)
-
-  // Now copy to ttmp14:15 for final address calculation
-  s_mov_b32                             ttmp14, ttmp6
-  s_mov_b32                             ttmp15, ttmp7
+  // Calculate offset directly into ttmp14:15 (TMA2 pointer no longer needed after loads complete)
+  s_mul_i32                             ttmp14, ttmp4, ttmp5            // ttmp14 = lo32(offset)
+  s_mul_hi_u32                          ttmp15, ttmp4, ttmp5            // ttmp15 = hi32(offset)
 
   // ttmp14:15 = base (ttmp2:3) + offset (ttmp14:15)
   s_add_u32                             ttmp14, ttmp2, ttmp14
@@ -366,9 +362,7 @@ trap_entry:
   s_bitcmp1_b32                         ttmp7, SQ_WAVE_TRAPSTS_PERF_SNAPSHOT_SHIFT   // is stochastic_sample_trap
   s_cbranch_scc0                        .no_skip_debugtrap
 
-  // Handle stochastic trap
-  // Clear ttmp13 PC sampling flags first (may have stale data if coming from .not_s_trap)
-  s_andn2_b32                           ttmp13, ttmp13, 0x00600000      // Clear PC sampling flags [22:21] only
+  // Handle stochastic trap (ttmp13 already cleared at trap_entry)
   s_setreg_imm32_b32                    hwreg(HW_REG_TRAPSTS, SQ_WAVE_TRAPSTS_PERF_SNAPSHOT_SHIFT, 1), 0
   s_load_dwordx2                        ttmp[2:3], ttmp[14:15], 0x8     // ttmp[2:3] = stochastic_trap_buffers base
   // Multi-XCC: Load per_xcc_size and XCC_ID for offset calculation
@@ -382,13 +376,9 @@ trap_entry:
   s_cmp_eq_u64                          ttmp[2:3], 0
   s_cbranch_scc1                        .no_skip_debugtrap
 
-  // Calculate offset using DIFFERENT registers to avoid corrupting TMA2 pointer (ttmp14:15)
-  s_mul_i32                             ttmp6, ttmp4, ttmp5             // ttmp6 = lo32(offset)
-  s_mul_hi_u32                          ttmp7, ttmp4, ttmp5             // ttmp7 = hi32(offset)
-
-  // Now copy to ttmp14:15 for final address calculation
-  s_mov_b32                             ttmp14, ttmp6
-  s_mov_b32                             ttmp15, ttmp7
+  // Calculate offset directly into ttmp14:15 (TMA2 pointer no longer needed after loads complete)
+  s_mul_i32                             ttmp14, ttmp4, ttmp5            // ttmp14 = lo32(offset)
+  s_mul_hi_u32                          ttmp15, ttmp4, ttmp5            // ttmp15 = hi32(offset)
 
   // ttmp14:15 = base (ttmp2:3) + offset (ttmp14:15)
   s_add_u32                             ttmp14, ttmp2, ttmp14

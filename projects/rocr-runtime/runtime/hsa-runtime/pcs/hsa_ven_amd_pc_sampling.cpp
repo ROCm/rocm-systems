@@ -152,29 +152,6 @@ hsa_status_t hsa_ven_amd_pcs_flush(hsa_ven_amd_pcs_t handle) {
   CATCH;
 }
 
-hsa_status_t hsa_ven_amd_pcs_get_capabilities(hsa_agent_t hsa_agent, uint64_t* capabilities) {
-  TRY;
-  IS_OPEN();
-
-  if (capabilities == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-
-  core::Agent* agent = core::Agent::Convert(hsa_agent);
-  if (agent == nullptr || !agent->IsValid() || agent->device_type() != core::Agent::kAmdGpuDevice)
-    return HSA_STATUS_ERROR_INVALID_AGENT;
-
-  AMD::GpuAgent* gpu_agent = static_cast<AMD::GpuAgent*>(agent);
-
-  *capabilities = 0;
-
-  // Set multithreaded callback capability flag if device has more than one XCC
-  if (gpu_agent->properties().NumXcc > 1) {
-    *capabilities |= HSA_VEN_AMD_PCS_CAPABILITY_MULTITHREADED_CALLBACKS;
-  }
-
-  return HSA_STATUS_SUCCESS;
-  CATCH;
-}
-
 void LoadPcSampling(core::PcSamplingExtTableInternal* pcs_api) {
   pcs_api->hsa_ven_amd_pcs_iterate_configuration_fn = hsa_ven_amd_pcs_iterate_configuration;
   pcs_api->hsa_ven_amd_pcs_create_fn = hsa_ven_amd_pcs_create;
@@ -183,7 +160,6 @@ void LoadPcSampling(core::PcSamplingExtTableInternal* pcs_api) {
   pcs_api->hsa_ven_amd_pcs_start_fn = hsa_ven_amd_pcs_start;
   pcs_api->hsa_ven_amd_pcs_stop_fn = hsa_ven_amd_pcs_stop;
   pcs_api->hsa_ven_amd_pcs_flush_fn = hsa_ven_amd_pcs_flush;
-  pcs_api->hsa_ven_amd_pcs_get_capabilities_fn = hsa_ven_amd_pcs_get_capabilities;
 }
 
 }  //  namespace pcs

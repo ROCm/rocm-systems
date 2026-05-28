@@ -190,7 +190,6 @@ struct PcSamplingExtTable {
   decltype(hsa_ven_amd_pcs_start)* hsa_ven_amd_pcs_start_fn;
   decltype(hsa_ven_amd_pcs_stop)* hsa_ven_amd_pcs_stop_fn;
   decltype(hsa_ven_amd_pcs_flush)* hsa_ven_amd_pcs_flush_fn;
-  decltype(hsa_ven_amd_pcs_get_capabilities)* hsa_ven_amd_pcs_get_capabilities_fn;
 };
 
 

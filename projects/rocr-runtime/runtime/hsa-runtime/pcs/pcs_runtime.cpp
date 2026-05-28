@@ -206,6 +206,12 @@ hsa_status_t PcsRuntime::PcSamplingSession::HandleSampleData(uint8_t* buf1, size
   // Store buffer info in thread-local storage for DataCopyCallback.
   // Each XCC thread has its own pending_sample_copy, so no mutex is needed.
   // The user's callback runs on this same thread and can safely call DataCopyCallback.
+  //
+  // Save and restore previous state to handle nested reentry safely.
+  // If data_ready_callback triggers another HandleSampleData on the same thread,
+  // the inner call's cleanup won't clobber the outer call's data.
+  data_ready_info_t saved_copy = pending_sample_copy;
+
   pending_sample_copy.buf1 = buf1;
   pending_sample_copy.buf1_sz = buf1_sz;
   pending_sample_copy.buf2 = buf2;
@@ -252,9 +258,9 @@ hsa_status_t PcsRuntime::PcSamplingSession::HandleSampleData(uint8_t* buf1, size
                           &PcSamplingDataCopyCallback,
                           /* hsa_callback_data*/ this);
 
-  // Clear thread-local storage after callback returns to catch deferred/off-thread calls.
-  // If user incorrectly calls DataCopyCallback after this point, it will return an error.
-  pending_sample_copy = {};
+  // Restore previous thread-local storage state (handles nested reentry correctly).
+  // If this was the outermost call, saved_copy is empty, which catches deferred/off-thread calls.
+  pending_sample_copy = saved_copy;
 
   return HSA_STATUS_SUCCESS;
 }

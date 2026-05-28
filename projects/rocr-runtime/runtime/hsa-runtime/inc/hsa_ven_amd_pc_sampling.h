@@ -146,8 +146,9 @@ typedef hsa_status_t (*hsa_ven_amd_pcs_data_copy_callback_t)(void* hsa_callback_
  *
  * This callback must not call ::hsa_ven_amd_pcs_flush.
  *
- * On multi-XCC GPUs, this callback may be invoked concurrently from multiple internal threads.
- * Clients must ensure their callback implementation is thread-safe.
+ * Callbacks are serialized by the runtime and will not be invoked concurrently. On multi-XCC GPUs,
+ * data from all XCCs is aggregated internally before invoking the callback, so clients receive a
+ * unified data stream regardless of the underlying hardware topology.
  *
  * @param[in] client_callback_data client private data passed in via
  * hsa_ven_amd_pcs_create/hsa_ven_amd_pcs_create_from_id
@@ -389,41 +390,6 @@ hsa_status_t hsa_ven_amd_pcs_stop(hsa_ven_amd_pcs_t pc_sampling);
  */
 hsa_status_t hsa_ven_amd_pcs_flush(hsa_ven_amd_pcs_t pc_sampling);
 
-/**
- * @brief PC Sampling capability flags
- *
- * These flags indicate the capabilities of the PC sampling implementation
- * for a given agent. Tools can query these capabilities to adapt their
- * behavior without breaking ABI compatibility.
- */
-typedef enum {
-  /**
-   * When set, indicates that on multi-XCC GPUs, the data_ready_callback may be
-   * invoked concurrently from multiple internal threads (one per XCC). Clients
-   * must ensure their callback implementation is thread-safe when this flag is
-   * set. On single-XCC GPUs, this flag is not set, as callbacks happen on the
-   * same thread.
-   */
-  HSA_VEN_AMD_PCS_CAPABILITY_MULTITHREADED_CALLBACKS = (1 << 0)
-} hsa_ven_amd_pcs_capability_t;
-
-/**
- * @brief Query PC Sampling capabilities for an agent
- *
- * Returns a bitmask of capability flags indicating the PC sampling features
- * supported by the specified agent. Tools can use this to detect multi-XCC
- * behavior and adapt accordingly.
- *
- * @param[in] agent Target agent to query capabilities for
- * @param[out] capabilities Bitmask of hsa_ven_amd_pcs_capability_t flags
- *
- * @retval ::HSA_STATUS_SUCCESS Capabilities queried successfully
- * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED Runtime not initialized
- * @retval ::HSA_STATUS_ERROR_INVALID_AGENT Invalid agent or non-GPU agent
- * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT capabilities is NULL
- */
-hsa_status_t hsa_ven_amd_pcs_get_capabilities(hsa_agent_t agent, uint64_t* capabilities);
-
 #define hsa_ven_amd_pc_sampling_1_00
 
 /**
@@ -455,8 +421,6 @@ typedef struct hsa_ven_amd_pc_sampling_1_00_pfn_t {
   hsa_status_t (*hsa_ven_amd_pcs_stop)(hsa_ven_amd_pcs_t pc_sampling);
 
   hsa_status_t (*hsa_ven_amd_pcs_flush)(hsa_ven_amd_pcs_t pc_sampling);
-
-  hsa_status_t (*hsa_ven_amd_pcs_get_capabilities)(hsa_agent_t agent, uint64_t* capabilities);
 
 } hsa_ven_amd_pc_sampling_1_00_pfn_t;
 

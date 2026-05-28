@@ -307,12 +307,12 @@
   .endif
 .endm
 
-// For gfx12.5 (multi-XCC): SE_ID in HW_ID1 can be used to identify XCC.
-// HW_ID1 layout: SE_ID is in bits [19:16] (4 bits, but typically only bits 17:16 used)
-// On single-XCC gfx12.0, SE_ID is always 0 and per_xcc_size is 0.
-// On multi-XCC gfx12.5, SE_ID maps to XCC index (0, 1, 2, ... up to NumXcc-1).
-.set HW_ID1_SE_ID_SHIFT                        , 16
-.set HW_ID1_SE_ID_MASK                         , 0xF0000  // bits [19:16]
+// For gfx12.5 (multi-XCC): Virtual_XCC_ID in HW_ID1 bits [19:16] identifies the XCC.
+// On single-XCC gfx12.0, this field is always 0 and per_xcc_size is 0.
+// On multi-XCC gfx12.5, Virtual_XCC_ID maps to XCC index (0, 1, 2, ... up to NumXcc-1).
+// Note: This is NOT SE_ID (Shader Engine ID) - SE_ID is a different concept for wave placement.
+.set HW_ID1_VIRT_XCC_ID_SHIFT                  , 16
+.set HW_ID1_VIRT_XCC_ID_MASK                   , 0xF0000  // bits [19:16]
 
   // Macro to store the Correlation ID (Dispatch ID and Doorbell ID) into the current sample slot
   //
@@ -450,17 +450,22 @@
   .endif
   s_mov_b32           ttmp3, 0
 
+  // Clear stale PC sampling path flags from previous wave context at trap entry.
+  // ttmp registers are NOT automatically cleared when a new wave occupies a SIMD slot,
+  // so garbage in bits 21-22 can cause misrouting to wrong sampling path.
+  // GFX12.0: Can zero ttmp13 entirely (no VGPR MSB or XNACK_MASK storage)
+  // GFX12.5: Must preserve bits [21:14] (MODE VGPR MSBs) and [13:0] (XNACK_MASK)
+.if .amdgcn.gfx_generation_minor < 5
+  s_mov_b32           ttmp13, 0                             // GFX12.0: safe to zero
+.else
+  s_andn2_b32         ttmp13, ttmp13, 0x00600000            // GFX12.5: clear only PC sampling flags [22:21]
+.endif
+
 .check_hosttrap:
 
   // ttmp[14:15] points to TMA2.
   // Scratch registers: ttmp[2:3], ttmp[4:5], ttmp10, ttmp13
   s_getreg_b32      ttmp2, hwreg(HW_REG_EXCP_FLAG_PRIV)     // On gfx12, EXCP_FLAG_PRIV.b7
-
-  // Clear stale PC sampling path flags from previous wave context.
-  // ttmp registers are NOT automatically cleared when a new wave occupies a SIMD slot,
-  // so garbage in bits 21-22 can cause misrouting to wrong sampling path.
-  // Bit 21 = TTMP13_STOCH_FLAG_BIT, Bit 22 = TTMP13_HT_FLAG_BIT
-  s_andn2_b32       ttmp13, ttmp13, 0x00600000              // Clear ttmp13[22:21]
   s_bitcmp1_b32     ttmp2, SQ_WAVE_EXCP_FLAG_PRIV_HT_SHIFT  // Test Host Trap bit.
   s_cbranch_scc0    .check_stochastic                       // If not HT, check for stochastic sampling
 
@@ -484,19 +489,19 @@
   s_cmp_eq_u32      ttmp4, 0
   s_cbranch_scc1    .hosttrap_single_xcc                     // If per_xcc_size == 0, single XCC mode
 
-  // Multi-XCC: Calculate per-XCC buffer offset using SE_ID from HW_ID1
-  // SE_ID bits [19:16] of HW_ID1 identify the XCC (shader engine)
+  // Multi-XCC: Calculate per-XCC buffer offset using Virtual_XCC_ID from HW_ID1
+  // Virtual_XCC_ID in bits [19:16] of HW_ID1 identifies the XCC
   s_getreg_b32      ttmp6, hwreg(HW_REG_HW_ID1)              // Get HW_ID1
-  s_and_b32         ttmp6, ttmp6, HW_ID1_SE_ID_MASK          // Extract SE_ID bits [19:16]
-  s_lshr_b32        ttmp6, ttmp6, HW_ID1_SE_ID_SHIFT         // ttmp6 = XCC_ID (0, 1, 2, ...)
+  s_and_b32         ttmp6, ttmp6, HW_ID1_VIRT_XCC_ID_MASK    // Extract Virtual_XCC_ID bits [19:16]
+  s_lshr_b32        ttmp6, ttmp6, HW_ID1_VIRT_XCC_ID_SHIFT   // ttmp6 = XCC_ID (0, 1, 2, ...)
 
-  // Calculate offset: xcc_id * per_xcc_size
-  s_mul_i32         ttmp5, ttmp4, ttmp6                      // ttmp5 = offset_lo = per_xcc_size * xcc_id
-  s_mul_hi_u32      ttmp4, ttmp4, ttmp6                      // ttmp4 = offset_hi (for large offsets)
+  // Calculate offset directly into ttmp14:15 (TMA2 pointer no longer needed after loads complete)
+  s_mul_i32         ttmp14, ttmp4, ttmp6                     // ttmp14 = offset_lo = per_xcc_size * xcc_id
+  s_mul_hi_u32      ttmp15, ttmp4, ttmp6                     // ttmp15 = offset_hi (for large offsets)
 
   // Final address: base + offset -> this XCC's pcs_sampling_data_t
-  s_add_u32         ttmp14, ttmp2, ttmp5                     // ttmp14 = base_lo + offset_lo
-  s_addc_u32        ttmp15, ttmp3, ttmp4                     // ttmp15 = base_hi + offset_hi + carry
+  s_add_u32         ttmp14, ttmp2, ttmp14                    // ttmp14 = base_lo + offset_lo
+  s_addc_u32        ttmp15, ttmp3, ttmp15                    // ttmp15 = base_hi + offset_hi + carry
   s_branch          .profile_trap_handlers
 
 .hosttrap_single_xcc:
@@ -530,18 +535,18 @@
   s_cmp_eq_u32      ttmp4, 0
   s_cbranch_scc1    .stochastic_single_xcc                   // If per_xcc_size == 0, single XCC mode
 
-  // Multi-XCC: Calculate per-XCC buffer offset using SE_ID from HW_ID1
+  // Multi-XCC: Calculate per-XCC buffer offset using Virtual_XCC_ID from HW_ID1
   s_getreg_b32      ttmp6, hwreg(HW_REG_HW_ID1)              // Get HW_ID1
-  s_and_b32         ttmp6, ttmp6, HW_ID1_SE_ID_MASK          // Extract SE_ID bits [19:16]
-  s_lshr_b32        ttmp6, ttmp6, HW_ID1_SE_ID_SHIFT         // ttmp6 = XCC_ID
+  s_and_b32         ttmp6, ttmp6, HW_ID1_VIRT_XCC_ID_MASK    // Extract Virtual_XCC_ID bits [19:16]
+  s_lshr_b32        ttmp6, ttmp6, HW_ID1_VIRT_XCC_ID_SHIFT   // ttmp6 = XCC_ID
 
-  // Calculate offset: xcc_id * per_xcc_size
-  s_mul_i32         ttmp5, ttmp4, ttmp6                      // ttmp5 = offset_lo
-  s_mul_hi_u32      ttmp4, ttmp4, ttmp6                      // ttmp4 = offset_hi
+  // Calculate offset directly into ttmp14:15 (TMA2 pointer no longer needed after loads complete)
+  s_mul_i32         ttmp14, ttmp4, ttmp6                     // ttmp14 = offset_lo = per_xcc_size * xcc_id
+  s_mul_hi_u32      ttmp15, ttmp4, ttmp6                     // ttmp15 = offset_hi
 
   // Final address: base + offset -> this XCC's pcs_sampling_data_t
-  s_add_u32         ttmp14, ttmp2, ttmp5                     // ttmp14 = base_lo + offset_lo
-  s_addc_u32        ttmp15, ttmp3, ttmp4                     // ttmp15 = base_hi + offset_hi + carry
+  s_add_u32         ttmp14, ttmp2, ttmp14                    // ttmp14 = base_lo + offset_lo
+  s_addc_u32        ttmp15, ttmp3, ttmp15                    // ttmp15 = base_hi + offset_hi + carry
   s_branch          .profile_trap_handlers
 
 .stochastic_single_xcc:
@@ -1022,15 +1027,15 @@
 
   // Store wave_in_group and chiplet (XCC ID) information in the following format:
   // Bits [5:0]   = wave_in_wg (5 bits from ttmp8[29:25])
-  // bits [10:8]  = chiplet/XCC ID (SE_ID from HW_ID1 bits [19:16])
+  // bits [10:8]  = chiplet/XCC ID (Virtual_XCC_ID from HW_ID1 bits [19:16])
   // Bits [7:6] and [31:11] = reserved and must be zero
 
   s_bfe_u32         ttmp6, ttmp8, (WAVE_ID_WG_BIT_POSITION | (5 << 16)) // Extract 5 bits for wave_in_wg
 
-  // Extract SE_ID (XCC ID) from HW_ID1 and store in bits [10:8]
+  // Extract Virtual_XCC_ID from HW_ID1 and store in bits [10:8]
   s_getreg_b32      ttmp7, hwreg(HW_REG_HW_ID1)              // Get HW_ID1
-  s_and_b32         ttmp7, ttmp7, HW_ID1_SE_ID_MASK          // Extract SE_ID bits [19:16]
-  s_lshr_b32        ttmp7, ttmp7, (HW_ID1_SE_ID_SHIFT - 8)   // Shift SE_ID to bits [10:8]
+  s_and_b32         ttmp7, ttmp7, HW_ID1_VIRT_XCC_ID_MASK    // Extract Virtual_XCC_ID bits [19:16]
+  s_lshr_b32        ttmp7, ttmp7, (HW_ID1_VIRT_XCC_ID_SHIFT - 8)  // Shift to bits [10:8]
   s_or_b32          ttmp6, ttmp6, ttmp7                      // Combine wave_in_wg and chiplet
 
   v_writelane_b32   v2, ttmp6, 0                            // Store combined value in v2

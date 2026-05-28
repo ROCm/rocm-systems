@@ -79,8 +79,6 @@ hsa_status_t hsa_ven_amd_pcs_stop(hsa_ven_amd_pcs_t pc_sampling);
 
 hsa_status_t hsa_ven_amd_pcs_flush(hsa_ven_amd_pcs_t pc_sampling);
 
-hsa_status_t hsa_ven_amd_pcs_get_capabilities(hsa_agent_t agent, uint64_t* capabilities);
-
 // Update Api table with func pointers that implement functionality
 void LoadPcSampling(core::PcSamplingExtTableInternal* pcs_api);
 

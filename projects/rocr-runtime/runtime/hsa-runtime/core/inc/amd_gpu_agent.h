@@ -46,6 +46,9 @@
 #define HSA_RUNTIME_CORE_INC_AMD_GPU_AGENT_H_
 
 #include <atomic>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
 #include <vector>
 #include <list>
 #include <map>
@@ -945,28 +948,41 @@ class GpuAgent : public GpuAgentInt {
     uint64_t reserved_pad;                         // [0x18] Alignment padding
   } pcs_tma2_t;
 
+  // Static asserts to ensure struct layouts match trap handler expectations.
+  // Trap handler code reads these offsets directly - any mismatch causes silent corruption.
+  static_assert(sizeof(pcs_sampling_data_t) == 0x40,
+                "pcs_sampling_data_t must be 64 bytes; trap handler expects buffers at offset 0x40");
+  static_assert(offsetof(pcs_sampling_data_t, buf_write_val) == 0x00, "buf_write_val offset mismatch");
+  static_assert(offsetof(pcs_sampling_data_t, buf_size) == 0x08, "buf_size offset mismatch");
+  static_assert(offsetof(pcs_sampling_data_t, buf_written_val0) == 0x10, "buf_written_val0 offset mismatch");
+  static_assert(offsetof(pcs_sampling_data_t, done_sig0) == 0x18, "done_sig0 offset mismatch");
+  static_assert(offsetof(pcs_sampling_data_t, buf_written_val1) == 0x20, "buf_written_val1 offset mismatch");
+  static_assert(offsetof(pcs_sampling_data_t, done_sig1) == 0x28, "done_sig1 offset mismatch");
+  static_assert(offsetof(pcs_tma2_t, host_trap_buffers) == 0x00, "host_trap_buffers offset mismatch");
+  static_assert(offsetof(pcs_tma2_t, stochastic_trap_buffers) == 0x08, "stochastic_trap_buffers offset mismatch");
+  static_assert(offsetof(pcs_tma2_t, per_xcc_size) == 0x10, "per_xcc_size offset mismatch");
+
   // Per-XCC sampling data - cache-line aligned (64 bytes) to prevent false sharing.
   // Each XCC accesses only its own struct, avoiding cross-XCC cache line contention.
   // The alignas(64) ensures the struct starts at a cache line boundary, and the
   // compiler will pad the struct size to a multiple of 64 bytes automatically.
   //
-  // Threading model: Each XCC has exactly one dedicated monitoring thread. The per-XCC
-  // mutex only serializes access between that thread and PcSamplingFlush() calls from
-  // the user. There is no cross-XCC contention because:
-  //   - Each XCC thread only accesses its own xcc_data[xcc_id]
-  //   - Host buffer is partitioned: XCC N writes to [N * per_xcc_size, (N+1) * per_xcc_size)
-  //   - A lockless multi-producer queue is not needed (single producer per XCC)
+  // Threading model:
+  //   - Each XCC has one dedicated thread that flushes device->host buffers
+  //   - Per-XCC mutex serializes XCC thread vs consumer thread for each XCC's buffer
+  //   - Consumer thread aggregates data and delivers callbacks when SUM(pending) >= buffer_size
+  //   - Callbacks contain data from whichever XCCs have pending samples at threshold time
   struct alignas(64) per_xcc_pcs_data_t {
     pcs_sampling_data_t* device_data;         // This XCC's device buffer region
-    os::Thread thread;                        // Thread handle for this XCC
+    os::Thread thread;                        // Thread handle for this XCC's flush thread
     uint32_t which_buffer;                    // Current buffer selector (0 or 1)
     hsa_signal_t done_sig0;                   // Signal for buffer 0 completion
     hsa_signal_t done_sig1;                   // Signal for buffer 1 completion
     uint64_t host_write_offset;               // Write offset into host buffer (mutex-protected)
     uint64_t host_read_offset;                // Read offset from host buffer (mutex-protected)
-    std::mutex host_buffer_mutex;             // Serializes this XCC's thread vs PcSamplingFlush()
+    std::mutex host_buffer_mutex;             // Serializes XCC thread vs PcSamplingFlush()
     uint8_t* host_buffer_begin;               // Cached: start of this XCC's host buffer partition
-    size_t lost_sample_count;                 // Per-XCC lost sample counter (mutex-protected)
+    std::atomic<size_t> lost_sample_count;    // Per-XCC lost sample counter (atomic for lock-free access)
 
     /* PM4 fallback resources (per-XCC to avoid races on multi-XCC non-large-BAR systems) */
     uint64_t* old_val;                        // Staging area for PM4 atomic return value
@@ -981,17 +997,29 @@ class GpuAgent : public GpuAgentInt {
     pcs_sampling_data_t* device_data_base;  // Base of contiguous allocation
     size_t per_xcc_device_stride;           // Device memory stride per XCC (for trap handler)
 
-    /* Per-XCC host buffers */
+    /* Host buffers - total size = 2 * session.buffer_size() */
     uint8_t* host_buffer;
     size_t host_buffer_size;
     size_t per_xcc_host_buffer_size;  // Cached: host_buffer_size / num_xcc
     size_t samples_per_trap_buffer;   // Cached: trap buffer capacity in samples (from device init)
+
+    /* Staging buffer for combined callback delivery */
+    uint8_t* staging_buffer;          // Buffer to combine data from all XCCs before callback
+    size_t staging_buffer_size;       // Size = session.buffer_size()
 
     /* Per-XCC data array - cache-line aligned AoS for optimal cache behavior */
     per_xcc_pcs_data_t* xcc_data;  // Array of per-XCC structs (size = num_xcc)
 
     /* PM4 fallback flag (resources are per-XCC in per_xcc_pcs_data_t) */
     bool use_pm4_fallback;           // true if large-BAR not available
+
+    /* Consumer thread for aggregated callback delivery */
+    std::thread consumer_thread;            // Aggregates data and delivers callbacks
+    std::mutex consumer_mutex;              // Protects consumer_cv and pending_flush_count
+    std::condition_variable consumer_cv;    // Wakes consumer when XCC threads have new data
+    std::atomic<bool> consumer_exit;        // Signal consumer thread to exit
+    std::atomic<uint32_t> pending_flush_count;  // How many XCCs have notified consumer
+    std::mutex delivery_mutex;              // Serializes callback delivery (consumer vs Flush)
 
     pcs::PcsRuntime::PcSamplingSession* session;
   } pcs_data_t;
@@ -1001,8 +1029,15 @@ class GpuAgent : public GpuAgentInt {
                                         pcs_sampling_data_t* pcs_stochastic_buffers,
                                         uint32_t per_xcc_size);
 
-  // @brief Per-XCC thread function for PC sampling (monitors one XCC's device buffers)
+  // @brief Per-XCC thread function (flushes device->host only, notifies consumer)
   void PcSamplingThreadPerXCC(pcs_data_t& pcs_data, uint32_t xcc_id, const char* thread_name);
+
+  // @brief Consumer thread function (aggregates data and delivers callbacks)
+  void PcSamplingConsumerThread(pcs_data_t& pcs_data);
+
+  // @brief Deliver aggregated samples when threshold reached
+  void PcSamplingDeliverAggregatedSamples(pcs_data_t& pcs_data,
+                                          pcs::PcsRuntime::PcSamplingSession& session);
 
   // @brief Flush device buffers for per-XCC PC sampling architecture (CPU atomic path)
   hsa_status_t PcSamplingFlushDeviceBuffersPerXCC(pcs_data_t* pcs_data,
