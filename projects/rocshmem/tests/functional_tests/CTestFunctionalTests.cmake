@@ -130,16 +130,16 @@ endif()
 # Variant Definitions
 ###############################################################################
 
-# Tier-level variants: Apply to ALL tests in specified tiers
-# Format: variant_name|tier_min|tier_max|env_var|label
-set(TIER_VARIANT_uuid "uuid|standard|full|ROCSHMEM_TEST_UUID=1|variant_uuid")
+# Global variants: Apply to ALL tests (via variant multiplication)
+# Format: variant_name|env_var|label
+set(GLOBAL_VARIANT_uuid "uuid|ROCSHMEM_TEST_UUID=1|variant_uuid")
 
 # Test-specific variants: Apply only when explicitly requested
 # Format: variant_name|env_var|label
 set(TEST_VARIANT_default_stream "default_stream|ROCSHMEM_TEST_USE_DEFAULT_STREAM=1|variant_default_stream;STREAM")
 
-# List of all tier variant names (order matters)
-set(ALL_TIER_VARIANT_NAMES uuid)
+# List of all global variant names
+set(ALL_GLOBAL_VARIANT_NAMES uuid)
 
 # List of all test-specific variant names
 set(ALL_TEST_VARIANT_NAMES default_stream)
@@ -148,64 +148,16 @@ set(ALL_TEST_VARIANT_NAMES default_stream)
 # Helper Functions for Multi-Dimensional Labels
 ###############################################################################
 
-# Convert tier name to numeric level for comparison
-function(tier_to_level tier output_var)
-    if(tier STREQUAL "quick")
-        set(${output_var} 0 PARENT_SCOPE)
-    elseif(tier STREQUAL "standard")
-        set(${output_var} 1 PARENT_SCOPE)
-    elseif(tier STREQUAL "comprehensive")
-        set(${output_var} 2 PARENT_SCOPE)
-    elseif(tier STREQUAL "full")
-        set(${output_var} 3 PARENT_SCOPE)
-    else()
-        set(${output_var} 3 PARENT_SCOPE)  # Default to full
-    endif()
-endfunction()
-
-# Check if a tier falls within a range
-function(tier_in_range test_tier min_tier max_tier output_var)
-    tier_to_level("${test_tier}" test_level)
-    tier_to_level("${min_tier}" min_level)
-    tier_to_level("${max_tier}" max_level)
-
-    if(test_level GREATER_EQUAL min_level AND test_level LESS_EQUAL max_level)
-        set(${output_var} TRUE PARENT_SCOPE)
-    else()
-        set(${output_var} FALSE PARENT_SCOPE)
-    endif()
-endfunction()
-
-# Get tier-level variants applicable to a specific tier
-function(get_tier_variants tier output_var)
-    set(TIER_VARIANTS "")
-
-    foreach(variant_name ${ALL_TIER_VARIANT_NAMES})
-        # Parse variant config
-        string(REPLACE "|" ";" variant_config "${TIER_VARIANT_${variant_name}}")
-        list(GET variant_config 1 tier_min)
-        list(GET variant_config 2 tier_max)
-
-        # Check if this tier falls in the variant's range
-        tier_in_range("${tier}" "${tier_min}" "${tier_max}" applies)
-        if(applies)
-            list(APPEND TIER_VARIANTS ${variant_name})
-        endif()
-    endforeach()
-
-    set(${output_var} "${TIER_VARIANTS}" PARENT_SCOPE)
-endfunction()
-
-# Generate all combinations of tier and test variants
-function(generate_variant_combinations tier_variants test_variants output_var)
+# Generate all combinations of global and test variants
+function(generate_variant_combinations global_variants test_variants output_var)
     set(ALL_COMBINATIONS "")
 
-    # Always include base variant (no tier variants, no test variants)
+    # Always include base variant (no global variants, no test variants)
     list(APPEND ALL_COMBINATIONS "base")
 
-    # Add tier-only variants
-    foreach(tier_var ${tier_variants})
-        list(APPEND ALL_COMBINATIONS "${tier_var}")
+    # Add global-only variants
+    foreach(global_var ${global_variants})
+        list(APPEND ALL_COMBINATIONS "${global_var}")
     endforeach()
 
     # Add test-only variants
@@ -213,10 +165,10 @@ function(generate_variant_combinations tier_variants test_variants output_var)
         list(APPEND ALL_COMBINATIONS "${test_var}")
     endforeach()
 
-    # Add combinations of tier + test variants
-    foreach(tier_var ${tier_variants})
+    # Add combinations of global + test variants
+    foreach(global_var ${global_variants})
         foreach(test_var ${test_variants})
-            list(APPEND ALL_COMBINATIONS "${tier_var}+${test_var}")
+            list(APPEND ALL_COMBINATIONS "${global_var}+${test_var}")
         endforeach()
     endforeach()
 
@@ -224,7 +176,7 @@ function(generate_variant_combinations tier_variants test_variants output_var)
 endfunction()
 
 # Parse a variant combination string and get env vars + labels + suffix
-function(parse_variant_combination combo tier_variants test_variants env_vars_var labels_var suffix_var)
+function(parse_variant_combination combo global_variants test_variants env_vars_var labels_var suffix_var)
     set(ENV_VARS "")
     set(LABELS "variant_base")
     set(SUFFIX "")
@@ -243,12 +195,12 @@ function(parse_variant_combination combo tier_variants test_variants env_vars_va
     set(suffix_parts "")
 
     foreach(variant_part ${combo_parts})
-        # Check if it's a tier variant
-        list(FIND tier_variants "${variant_part}" tier_idx)
-        if(NOT tier_idx EQUAL -1)
-            string(REPLACE "|" ";" variant_config "${TIER_VARIANT_${variant_part}}")
-            list(GET variant_config 3 env_var)
-            list(GET variant_config 4 label)
+        # Check if it's a global variant
+        list(FIND global_variants "${variant_part}" global_idx)
+        if(NOT global_idx EQUAL -1)
+            string(REPLACE "|" ";" variant_config "${GLOBAL_VARIANT_${variant_part}}")
+            list(GET variant_config 1 env_var)
+            list(GET variant_config 2 label)
 
             if(env_var)
                 list(APPEND ENV_VARS "${env_var}")
@@ -288,21 +240,6 @@ function(parse_variant_combination combo tier_variants test_variants env_vars_va
     set(${suffix_var} "${SUFFIX}" PARENT_SCOPE)
 endfunction()
 
-# Compute tier labels (propagate upwards)
-function(compute_tier_labels base_tier output_var)
-    if(base_tier STREQUAL "quick")
-        set(${output_var} "quick;standard;comprehensive;full" PARENT_SCOPE)
-    elseif(base_tier STREQUAL "standard")
-        set(${output_var} "standard;comprehensive;full" PARENT_SCOPE)
-    elseif(base_tier STREQUAL "comprehensive")
-        set(${output_var} "comprehensive;full" PARENT_SCOPE)
-    elseif(base_tier STREQUAL "full")
-        set(${output_var} "full" PARENT_SCOPE)
-    else()
-        set(${output_var} "full" PARENT_SCOPE)
-    endif()
-endfunction()
-
 # Compute backend labels
 function(compute_backend_labels backends output_var)
     if(NOT backends OR backends STREQUAL "all")
@@ -334,7 +271,7 @@ endfunction()
 ###############################################################################
 
 function(begin_test_group)
-    set(oneValueArgs CATEGORY TIER)
+    set(oneValueArgs CATEGORY TIER)  # TIER kept for backward compatibility but ignored
     set(multiValueArgs BACKENDS GPUS EXTRA_LABELS)
     cmake_parse_arguments(GROUP "" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
@@ -351,15 +288,13 @@ function(begin_test_group)
         list(APPEND ALL_GROUP_LABELS ${GROUP_EXTRA_LABELS})
     endif()
 
-    # Store in parent scope
-    set(CURRENT_GROUP_TIER "${GROUP_TIER}" PARENT_SCOPE)
+    # Store in parent scope (TIER is ignored but kept for backward compatibility)
     set(CURRENT_GROUP_BACKENDS "${GROUP_BACKENDS}" PARENT_SCOPE)
     set(CURRENT_GROUP_GPUS "${GROUP_GPUS}" PARENT_SCOPE)
     set(CURRENT_GROUP_LABELS "${ALL_GROUP_LABELS}" PARENT_SCOPE)
 endfunction()
 
 function(end_test_group)
-    unset(CURRENT_GROUP_TIER PARENT_SCOPE)
     unset(CURRENT_GROUP_BACKENDS PARENT_SCOPE)
     unset(CURRENT_GROUP_GPUS PARENT_SCOPE)
     unset(CURRENT_GROUP_LABELS PARENT_SCOPE)
@@ -372,14 +307,11 @@ endfunction()
 function(add_rocshmem_functional_test)
     set(options NO_VERIFY)
     set(oneValueArgs NAME RANKS WORKGROUPS THREADS MAX_MSG_SIZE VOLUME_SIZE
-                     LOCALBUFTYPE TIMEOUT TIER)
+                     LOCALBUFTYPE TIMEOUT TIER)  # TIER kept for backward compatibility but ignored
     set(multiValueArgs ENV_VARS EXTRA_LABELS BACKENDS GPUS TEST_VARIANTS)
     cmake_parse_arguments(TEST "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
     # Use group defaults if not specified
-    if(NOT DEFINED TEST_TIER AND DEFINED CURRENT_GROUP_TIER)
-        set(TEST_TIER "${CURRENT_GROUP_TIER}")
-    endif()
     if(NOT DEFINED TEST_BACKENDS AND DEFINED CURRENT_GROUP_BACKENDS)
         set(TEST_BACKENDS "${CURRENT_GROUP_BACKENDS}")
     endif()
@@ -391,9 +323,6 @@ function(add_rocshmem_functional_test)
     endif()
 
     # Set defaults
-    if(NOT DEFINED TEST_TIER)
-        set(TEST_TIER "full")
-    endif()
     if(NOT DEFINED TEST_BACKENDS)
         set(TEST_BACKENDS "all")
     endif()
@@ -401,8 +330,8 @@ function(add_rocshmem_functional_test)
         set(TEST_GPUS "all")
     endif()
 
-    # Get tier-level variants
-    get_tier_variants("${TEST_TIER}" tier_variants)
+    # Global variants are always applied to all tests
+    set(global_variants ${ALL_GLOBAL_VARIANT_NAMES})
 
     # Get test-specific variants (if any)
     if(DEFINED TEST_TEST_VARIANTS)
@@ -412,14 +341,14 @@ function(add_rocshmem_functional_test)
     endif()
 
     # Generate all variant combinations
-    generate_variant_combinations("${tier_variants}" "${test_variants}" variant_combinations)
+    generate_variant_combinations("${global_variants}" "${test_variants}" variant_combinations)
 
     # Create a CTest test for each variant combination
     foreach(combo ${variant_combinations})
         # Parse combination to get env vars and labels
         parse_variant_combination(
             "${combo}"
-            "${tier_variants}"
+            "${global_variants}"
             "${test_variants}"
             variant_env_vars
             variant_labels
@@ -433,12 +362,12 @@ function(add_rocshmem_functional_test)
         endif()
 
         # Build multi-dimensional labels
-        compute_tier_labels("${TEST_TIER}" TIER_LABELS)
+        # NOTE: Tier labels (quick/standard/comprehensive/full) are now applied
+        # via YAML-based categorization in test_categories.yaml
         compute_backend_labels("${TEST_BACKENDS}" BACKEND_LABELS)
         compute_gpu_labels("${TEST_GPUS}" GPU_LABELS)
 
         set(all_labels "functional")
-        list(APPEND all_labels ${TIER_LABELS})
         list(APPEND all_labels ${BACKEND_LABELS})
         list(APPEND all_labels ${GPU_LABELS})
         list(APPEND all_labels ${variant_labels})

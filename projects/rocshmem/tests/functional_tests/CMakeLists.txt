@@ -143,6 +143,13 @@ if(ROCSHMEM_USE_CTEST)
     include(${CMAKE_CURRENT_SOURCE_DIR}/CTestFunctionalTests.cmake)
     register_all_functional_tests()
 
+    # Apply YAML-based tier labels
+    set(_test_categories_yaml "${CMAKE_SOURCE_DIR}/tests/test_categories.yaml")
+    include(${ROCM_SYSTEMS_ROOT}/shared/ctest/TestCategories.cmake OPTIONAL)
+    if(COMMAND apply_ctest_category_labels AND EXISTS "${_test_categories_yaml}")
+        apply_ctest_category_labels("${_test_categories_yaml}")
+    endif()
+
     # Print summary
     get_directory_property(all_tests TESTS)
     list(LENGTH all_tests num_tests)

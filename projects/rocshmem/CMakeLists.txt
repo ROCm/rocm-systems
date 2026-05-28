@@ -24,6 +24,9 @@
 
 cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
 
+# Set root directory for ROCm Systems shared files
+set(ROCM_SYSTEMS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+
 ###############################################################################
 # AVOID IN SOURCE BUILD
 ###############################################################################

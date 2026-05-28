@@ -96,11 +96,13 @@ function(register_all_unit_tests)
     set(TEST_WITH_TWO_PES "${TEST_WITH_TWO_PES}:SdmaSimpleCoarse/*:SdmaSimpleFine/*:SdmaTiledFine/*")
 
     # All unit tests (4 ranks) - runs everything EXCEPT the 2-PE specific tests
+    # NOTE: Tier labels (quick/standard/comprehensive/full) are now applied
+    # via YAML-based categorization in test_categories.yaml
     add_rocshmem_unit_test(
         NAME unit_tests
         RANKS 4
         GTEST_FILTER "-${TEST_WITH_TWO_PES}"
-        LABELS "ALL;IPC;SDMA;quick;standard;comprehensive;full"
+        LABELS "ALL;IPC;SDMA"
     )
 
     # Note: 2-rank tests are commented out in driver.sh
