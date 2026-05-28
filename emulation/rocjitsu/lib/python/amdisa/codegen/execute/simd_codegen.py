@@ -243,14 +243,10 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
 # inexact transcendentals (sin/cos) are excluded.
 # VOP1 base mnemonics whose VOP3 form applies float abs/neg/omod/clamp modifiers
 # over an f32 source and result (so the VOP3 twin routes through the f32 unary
-# modifier glue rather than reusing the plain VOP1 path).
-#
-# NOTE: v_mov_b32 is deliberately excluded. Its generated VOP3 scalar body
-# returns the (modified) f32 value directly to write_lane (a uint32 sink) without
-# a bit_cast, so it truncates float->int (0.5->0) instead of moving the bits — a
-# scalar codegen quirk we cannot match with a bit-preserving SIMD path, so the
-# VOP3 form is left scalar.
+# modifier glue rather than reusing the plain VOP1 path). v_mov_b32's VOP3 body
+# treats src0 as f32 and applies the same modifiers, so it belongs here too.
 _VOP3_UNARY_FP_F32 = {
+    "v_mov_b32",
     "v_floor_f32",
     "v_ceil_f32",
     "v_trunc_f32",
@@ -265,10 +261,8 @@ _VOP3_UNARY_FP_F32 = {
 }
 
 # VOP1 base mnemonics whose VOP3 twin stays scalar: the f16 rounding/transcendental
-# forms carry modifiers applied around an f16<->f32 round trip (not yet handled),
-# and v_mov_b32 has the float-truncation scalar quirk noted above.
+# forms carry modifiers applied around an f16<->f32 round trip (not yet handled).
 _VOP3_UNARY_SKIP = {
-    "v_mov_b32",
     "v_floor_f16",
     "v_ceil_f16",
     "v_trunc_f16",

@@ -2005,28 +2005,28 @@ inline void execute_v_accvgpr_mov_b32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane(wf, lane, [&]() {
-      float v = [&]() {
-        float v = [&]() {
-          float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-          if (inst.inst_.abs & (1u << 0))
-            sv = std::fabs(sv);
-          if (inst.inst_.neg & (1u << 0))
-            sv = -sv;
-          return sv;
-        }();
-        if (inst.inst_.omod == 1)
-          v *= 2.0f;
-        else if (inst.inst_.omod == 2)
-          v *= 4.0f;
-        else if (inst.inst_.omod == 3)
-          v *= 0.5f;
-        return v;
-      }();
-      if (inst.inst_.clamp)
-        v = std::clamp(v, 0.0f, 1.0f);
-      return v;
-    }());
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = [&]() {
+                               float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                               if (inst.inst_.abs & (1u << 0))
+                                 sv = std::fabs(sv);
+                               if (inst.inst_.neg & (1u << 0))
+                                 sv = -sv;
+                               return sv;
+                             }();
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -11179,34 +11179,34 @@ inline void execute_v_frexp_exp_i32_f64_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane(wf, lane, [&]() {
-      float v = [&]() {
-        float v = [&]() {
-          double s = [&]() {
-            double sv = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-            if (inst.inst_.abs & (1u << 0))
-              sv = std::fabs(sv);
-            if (inst.inst_.neg & (1u << 0))
-              sv = -sv;
-            return sv;
-          }();
-          int exp = 0;
-          if (s != 0.0 && !std::isnan(s) && !std::isinf(s))
-            std::frexp(s, &exp);
-          return static_cast<uint32_t>(exp);
-        }();
-        if (inst.inst_.omod == 1)
-          v *= 2.0f;
-        else if (inst.inst_.omod == 2)
-          v *= 4.0f;
-        else if (inst.inst_.omod == 3)
-          v *= 0.5f;
-        return v;
-      }();
-      if (inst.inst_.clamp)
-        v = std::clamp(v, 0.0f, 1.0f);
-      return v;
-    }());
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = [&]() {
+                               double s = [&]() {
+                                 double sv = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+                                 if (inst.inst_.abs & (1u << 0))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 0))
+                                   sv = -sv;
+                                 return sv;
+                               }();
+                               int exp = 0;
+                               if (s != 0.0 && !std::isnan(s) && !std::isinf(s))
+                                 std::frexp(s, &exp);
+                               return static_cast<uint32_t>(exp);
+                             }();
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -13803,32 +13803,33 @@ inline void execute_v_mov_b32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_mov_b32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(float32_t, float32_t, [](auto a) { return a; });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane(wf, lane, [&]() {
-      float v = [&]() {
-        float v = [&]() {
-          float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-          if (inst.inst_.abs & (1u << 0))
-            sv = std::fabs(sv);
-          if (inst.inst_.neg & (1u << 0))
-            sv = -sv;
-          return sv;
-        }();
-        if (inst.inst_.omod == 1)
-          v *= 2.0f;
-        else if (inst.inst_.omod == 2)
-          v *= 4.0f;
-        else if (inst.inst_.omod == 3)
-          v *= 0.5f;
-        return v;
-      }();
-      if (inst.inst_.clamp)
-        v = std::clamp(v, 0.0f, 1.0f);
-      return v;
-    }());
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = [&]() {
+                               float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                               if (inst.inst_.abs & (1u << 0))
+                                 sv = std::fabs(sv);
+                               if (inst.inst_.neg & (1u << 0))
+                                 sv = -sv;
+                               return sv;
+                             }();
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -13849,28 +13850,29 @@ inline void execute_v_mov_b64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane64(wf, lane, [&]() {
-      double v = [&]() {
-        double v = [&]() {
-          double sv = std::bit_cast<double>(static_cast<uint64_t>(inst.src0.read_lane64(wf, lane)));
-          if (inst.inst_.abs & (1u << 0))
-            sv = std::fabs(sv);
-          if (inst.inst_.neg & (1u << 0))
-            sv = -sv;
-          return sv;
-        }();
-        if (inst.inst_.omod == 1)
-          v *= 2.0;
-        else if (inst.inst_.omod == 2)
-          v *= 4.0;
-        else if (inst.inst_.omod == 3)
-          v *= 0.5;
-        return v;
-      }();
-      if (inst.inst_.clamp)
-        v = std::clamp(v, 0.0, 1.0);
-      return v;
-    }());
+    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>([&]() {
+                             double v = [&]() {
+                               double v = [&]() {
+                                 double sv = std::bit_cast<double>(
+                                     static_cast<uint64_t>(inst.src0.read_lane64(wf, lane)));
+                                 if (inst.inst_.abs & (1u << 0))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 0))
+                                   sv = -sv;
+                                 return sv;
+                               }();
+                               if (inst.inst_.omod == 1)
+                                 v *= 2.0;
+                               else if (inst.inst_.omod == 2)
+                                 v *= 4.0;
+                               else if (inst.inst_.omod == 3)
+                                 v *= 0.5;
+                               return v;
+                             }();
+                             if (inst.inst_.clamp)
+                               v = std::clamp(v, 0.0, 1.0);
+                             return v;
+                           }()));
   }
 }
 
