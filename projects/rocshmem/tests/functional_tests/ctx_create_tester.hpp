@@ -21,8 +21,8 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  *****************************************************************************/
-#ifndef _CTX_CREATE_DESTROY_TESTER_HPP_
-#define _CTX_CREATE_DESTROY_TESTER_HPP_
+#ifndef _CTX_CREATE_TESTER_HPP_
+#define _CTX_CREATE_TESTER_HPP_
 
 #include "tester.hpp"
 
@@ -50,6 +50,6 @@ class CtxCreateTester : public Tester {
   rocshmem_ctx_t _ctx{};
 };
 
-#include "ctx_create_tester.hpp"
+#include "ctx_create_tester.cpp"
 
-#endif  // _CTX_CREATE_DESTROY_TESTER_HPP_
+#endif  // _CTX_CREATE_TESTER_HPP_

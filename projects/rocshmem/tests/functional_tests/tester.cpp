@@ -803,7 +803,8 @@ void Tester::execute() {
         _type != TeamCtxInfraBlockTestType  &&
         _type != TeamCtxInfraOddEvenTestType &&
         _type != TeamCtxSharedInfraTestType &&
-        _type != TeamCtxSubsetParentInfraTestType ) {
+        _type != TeamCtxSubsetParentInfraTestType &&
+        _type != CtxCreateTestType) {
       print(size);
     }
   }
