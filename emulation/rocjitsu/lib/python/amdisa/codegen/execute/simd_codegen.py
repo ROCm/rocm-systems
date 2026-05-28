@@ -1292,9 +1292,12 @@ SIMD_VOP3_UNARY_FP64: dict[str, str] = {
 
 
 # VOP3 f16 unary: widen f16->f32, apply abs/neg, op, omod/clamp, narrow back.
-# The 5 rounding ops below have no FTZ; the transcendentals (rcp/rsq/exp/log)
-# would need flush_denorm_f32 around them and are deferred to a future slice.
-# sqrt is fine (transcendental::sqrt_f32 has no FTZ).
+# Rounding ops (ceil/floor/trunc/rndne) have no FTZ. sqrt is also no-FTZ
+# (transcendental::sqrt_f32 keeps denormals). The four transcendentals
+# (rcp/rsq/exp/log) reuse util::*_f32_simd which already wraps the scalar
+# transcendental::flush_denorm_f32 carve-outs (FTZ input + matching ±0/Inf
+# blends + NaN-passthrough), so the f16 scalar
+# f32_to_f16(transcendental::op_f32(f16_to_f32(...))) maps directly.
 SIMD_VOP3_UNARY_FP16: dict[str, str] = {
     "v_ceil_f16_vop3": "[](auto a) { return util::stdx::ceil(a); }",
     "v_floor_f16_vop3": "[](auto a) { return util::stdx::floor(a); }",
@@ -1307,6 +1310,10 @@ SIMD_VOP3_UNARY_FP16: dict[str, str] = {
         " util::stdx::where(a < 0.0f, r) = std::numeric_limits<float>::quiet_NaN();"
         " return r; }"
     ),
+    "v_rcp_f16_vop3": "[](auto a) { return util::rcp_f32_simd(a); }",
+    "v_rsq_f16_vop3": "[](auto a) { return util::rsq_f32_simd(a); }",
+    "v_exp_f16_vop3": "[](auto a) { return util::exp_f32_simd(a); }",
+    "v_log_f16_vop3": "[](auto a) { return util::log_f32_simd(a); }",
 }
 
 
