@@ -20,6 +20,12 @@ typedef ncclGin_t* getNcclGin_t(void* ginPluginLib);
 extern getNcclGin_t getNcclGin_v11;
 extern getNcclGin_t getNcclGin_v12;
 NCCL_PARAM(GinPluginRefCount, "GIN_PLUGIN_REF_COUNT", 0);
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// RCCL: src/transport/net_ib_cast/gin.cc (which normally defines this param upstream)
+// is excluded from the ROCm build because it depends on CUDA/NCCL-only headers.
+// Provide ncclParamGinType() here so plugin/net.cc and rma/rma_proxy.cc can link.
+NCCL_PARAM(GinType, "GIN_TYPE", -1);
+#endif
 #define NCCL_GIN_VERSION_COUNT 2
 int ncclGinVersion[NCCL_GIN_VERSION_COUNT] = {12, 11};
 getNcclGin_t* getNcclGin[NCCL_GIN_VERSION_COUNT] = {getNcclGin_v12, getNcclGin_v11};
