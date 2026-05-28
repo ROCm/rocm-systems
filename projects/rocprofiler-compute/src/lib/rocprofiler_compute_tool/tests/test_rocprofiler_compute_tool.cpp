@@ -9,10 +9,16 @@
 
 using namespace rocprofiler_compute_tool;
 
-TEST_F(TestRocprofilerComputeTool, ProvidedEmptyOutputPath_Throws)
+TEST_F(TestRocprofilerComputeTool, ProvidedEmptyOutputPath_UsesDefault)
 {
     m_input_parameters->set_output_path("");
-    EXPECT_THROW(rocprofiler_configure(1, "", 1, &m_client_id), std::runtime_error);
+    EXPECT_NO_THROW(rocprofiler_configure(1, "", 1, &m_client_id));
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto tool_data = get_tool_data(cfg);
+    EXPECT_TRUE(tool_data->output_filename.find(EnvInputParameters::kDefaultOutputPath) !=
+                std::string::npos);
+    EXPECT_TRUE(tool_data->output_filename.find(
+                    std::to_string(getpid()) + "_native_counter_collection.csv") != std::string::npos);
 }
 
 TEST_F(TestRocprofilerComputeTool, ProvidedNoRequestedCounters_Throws)
@@ -37,6 +43,53 @@ TEST_F(TestRocprofilerComputeTool, ProvidedEmptyKernelFilterRange_DoesntThrow)
 {
     m_input_parameters->set_kernel_filter_range("");
     EXPECT_NO_THROW(rocprofiler_configure(1, "", 1, &m_client_id));
+}
+
+TEST_F(TestRocprofilerComputeTool, ProvidedUnsetOutputPath_UsesDefault)
+{
+    m_input_parameters->unset_output_path();
+    EXPECT_NO_THROW(rocprofiler_configure(1, "", 1, &m_client_id));
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto tool_data = get_tool_data(cfg);
+    EXPECT_TRUE(tool_data->output_filename.find(EnvInputParameters::kDefaultOutputPath) !=
+                std::string::npos);
+    EXPECT_TRUE(tool_data->output_filename.find(
+                    std::to_string(getpid()) + "_native_counter_collection.csv") != std::string::npos);
+}
+
+TEST_F(TestRocprofilerComputeTool, ProvidedUnsetRequestedCounters_UsesDefault)
+{
+    m_input_parameters->unset_requested_counters();
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto tool_data = get_tool_data(cfg);
+    EXPECT_EQ(tool_data->requested_counters, EnvInputParameters::kDefaultRequestedCounters);
+}
+
+TEST_F(TestRocprofilerComputeTool, ProvidedUnsetIterationMultiplexingMode_UsesDefault)
+{
+    m_input_parameters->unset_iteration_multiplexing_mode();
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto tool_data = get_tool_data(cfg);
+    EXPECT_EQ(tool_data->iteration_multiplexing_mode,
+              iteration_multiplexing_mode(EnvInputParameters::kDefaultIterationMultiplexingMode));
+}
+
+TEST_F(TestRocprofilerComputeTool, ProvidedUnsetKernelFilterIncludeRegex_UsesDefault)
+{
+    m_input_parameters->unset_kernel_filter_include_regex();
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto tool_data = get_tool_data(cfg);
+    EXPECT_EQ(tool_data->kernel_filter_include_regex,
+              EnvInputParameters::kDefaultKernelFilterIncludeRegex);
+}
+
+TEST_F(TestRocprofilerComputeTool, ProvidedUnsetKernelFilterRange_UsesDefault)
+{
+    m_input_parameters->unset_kernel_filter_range();
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto tool_data = get_tool_data(cfg);
+    EXPECT_TRUE(EnvInputParameters::kDefaultKernelFilterRange.empty());
+    EXPECT_TRUE(tool_data->kernel_filter_ranges.empty());
 }
 
 TEST_F(TestRocprofilerComputeTool, ProvidedNonEmptyOutputPath_ReturnsItExtended)

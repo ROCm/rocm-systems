@@ -8,20 +8,29 @@
 
 #include <gmock/gmock.h>
 
+#include <string>
+#include <string_view>
+
 class MockInputParameters : public rocprofiler_compute_tool::InputParameters
 {
 public:
-    const char* get_output_path() override;
-    const char* get_requested_counters() override;
-    const char* get_iteration_multiplexing_mode() override;
-    const char* get_kernel_filter_include_regex() override;
-    const char* get_kernel_filter_range() override;
+    std::string_view get_output_path() override;
+    std::string_view get_requested_counters() override;
+    std::string_view get_iteration_multiplexing_mode() override;
+    std::string_view get_kernel_filter_include_regex() override;
+    std::string_view get_kernel_filter_range() override;
 
     void set_output_path(const std::string& output_path);
     void set_requested_counters(const std::string& counters);
     void set_iteration_multiplexing_mode(const std::string& mode);
     void set_kernel_filter_include_regex(const std::string& regex);
     void set_kernel_filter_range(const std::string& range);
+
+    void unset_output_path();
+    void unset_requested_counters();
+    void unset_iteration_multiplexing_mode();
+    void unset_kernel_filter_include_regex();
+    void unset_kernel_filter_range();
 
 private:
     const char* m_non_empty_str               = "non empty string";
@@ -30,6 +39,12 @@ private:
     std::string m_iteration_multiplexing_mode = m_non_empty_str;
     std::string m_kernel_filter_include_regex = m_non_empty_str;
     std::string m_kernel_filter_range         = m_non_empty_str;
+
+    bool m_output_path_set                 = true;
+    bool m_requested_counters_set          = true;
+    bool m_iteration_multiplexing_mode_set = true;
+    bool m_kernel_filter_include_regex_set = true;
+    bool m_kernel_filter_range_set         = true;
 };
 
 class MockSdkWrapper : public rocprofiler_compute_tool::SdkWrapper
