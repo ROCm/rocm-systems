@@ -262,8 +262,8 @@ setup(int pid)
         if(target_tid < 0)
         {
             ROCP_ERROR << "[rocprofiler-sdk-rocattach] Cannot attach to process " << pid
-                       << ": 'rocp-bg-attach' thread not found. The target process was not "
-                          "started with attach support enabled. Start the target with "
+                       << ": 'rocp-bg-attach' thread not found. The target process does not "
+                          "appear to have attach support enabled. Start the target with "
                           "ROCP_TOOL_ATTACH=1, or use a rocprofiler-register build configured "
                           "with ROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON.";
             return ROCATTACH_STATUS_ERROR;
