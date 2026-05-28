@@ -147,7 +147,19 @@ jobs:
             ${GITHUB_WORKSPACE}/hipfile-build-dir/test/hipfile_system_tests \
             ${GITHUB_WORKSPACE}/hipfile-build-dir/test/amd_detail/batch_mt \
             ${GITHUB_WORKSPACE}/hipfile-build-dir/test/amd_detail/state_mt \
-            ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/aiscp/aiscp
+            ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/aiscp/aiscp \
+            ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/basics/bufregister-write \
+            ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/basics/no-bufregister-write \
+            ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/basics/no-odirect-write \
+            ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/basics/iterative-read \
+            ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/basics/iterative-devmem-offset-read \
+            ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/basics/various-mem-rw \
+            ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/basics/subregion-write \
+            ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/basics/roundtrip-verify \
+            ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/async/roundtrip-async \
+            ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/async/roundtrip-async-nonblocking-stream \
+            ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/async/roundtrip-async-multi-stream \
+            ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/async/roundtrip-async-multi-stream-registered
       - name: Copy the hipFile build directory into the container
         run: |
           docker cp \
