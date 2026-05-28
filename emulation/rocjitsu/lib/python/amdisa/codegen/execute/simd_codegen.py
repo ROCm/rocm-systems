@@ -1267,6 +1267,21 @@ SIMD_VOP3_UNARY_FP64: dict[str, str] = {
         " util::stdx::where(a < 0.0, r) = std::numeric_limits<double>::quiet_NaN();"
         " return r; }"
     ),
+    # v_fract_f64: scalar = v - std::floor(v); stdx::floor on native<double>
+    # matches std::floor bit-exact (NaN-floor(NaN) = NaN; NaN result skipped
+    # by the test like any other NaN-result lane).
+    "v_fract_f64_vop3": "[](auto a) { return a - util::stdx::floor(a); }",
+    # v_rcp_f64 / v_rsq_f64: scalar uses transcendental::*_f64 with explicit
+    # NaN passthrough, ±0 -> copysign(Inf, x), ±Inf -> copysign(0, x); negative
+    # rsq inputs -> qNaN. Plain 1.0 / x and 1.0 / sqrt match the IEEE result
+    # for all non-NaN inputs; NaN-result lanes are skipped by the A/B test.
+    "v_rcp_f64_vop3": "[](auto a) { return util::native<double>(1.0) / a; }",
+    "v_rsq_f64_vop3": "[](auto a) { return util::native<double>(1.0) / util::stdx::sqrt(a); }",
+    # v_mov_b64 with VOP3 modifiers: scalar bit_casts to double, applies
+    # abs/neg/omod/clamp, bit_casts back. The f64 unary glue operates entirely
+    # in native<double> domain, so an identity functor + the same modifier
+    # helpers reproduce the scalar bit pattern exactly.
+    "v_mov_b64_vop3": "[](auto a) { return a; }",
 }
 
 
