@@ -435,10 +435,8 @@ void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, s
     out->maxRecvWorkRequest = 0;
     out->maxSendWorkRequest = 2 * NET_IB_MAX_REQUESTS;
   } else {
-    out->maxRecvWorkRequest = NET_IB_MAX_REQUESTS;
-    // Receiver needs send WRs for CTS messages. With resiliency, every CTS is
-    // signaled so NET_IB_MAX_REQUESTS suffices; without, need 2x.
-    out->maxSendWorkRequest = NET_IB_MAX_REQUESTS * (base->resiliency ? 1 : 2);
+    IbCastResiliencyDataRqSizeGet(base->resiliency, devIndex, &out->maxRecvWorkRequest);
+    out->maxSendWorkRequest = NET_IB_MAX_REQUESTS;
   }
 }
 
