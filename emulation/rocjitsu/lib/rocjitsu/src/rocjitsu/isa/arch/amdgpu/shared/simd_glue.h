@@ -32,6 +32,44 @@ using float32_t = float;
 /// kernels that have one. Forwards to util::force_scalar().
 inline bool &simd_force_scalar() { return util::force_scalar(); }
 
+/// In-vector VOP3 source modifier (f32), bit-exact with the scalar lambda the
+/// generated bodies emit per source: `abs` first (`std::fabs`), then `neg`
+/// (`-x`). `abs`/`neg` are the raw VOP3 modifier fields; the bit for source
+/// index `SrcIdx` selects whether the modifier applies. std::fabs clears the
+/// sign bit and unary minus flips it (both NaN-payload preserving), so the
+/// vector form is a pure sign-bit AND/XOR — bit-identical on every input.
+template <unsigned SrcIdx>
+inline util::native<float> apply_vop3_src_mod_f32(util::native<float> v, uint32_t abs,
+                                                  uint32_t neg) {
+  using U = util::native<uint32_t>;
+  U b = std::bit_cast<U>(v);
+  if (abs & (1u << SrcIdx))
+    b = b & 0x7FFFFFFFu;
+  if (neg & (1u << SrcIdx))
+    b = b ^ 0x80000000u;
+  return std::bit_cast<util::native<float>>(b);
+}
+
+/// In-vector VOP3 destination modifier (f32), bit-exact with the scalar tail:
+/// `omod` scales by an exact power of two (1->*2, 2->*4, 3->*0.5; IEEE-exact,
+/// no rounding), then `clamp` saturates to [0,1]. The clamp uses ordered
+/// comparisons (`v < 0`, `v > 1`), which are false for NaN, so NaN passes
+/// through unchanged — matching `std::clamp(v, 0.f, 1.f)`.
+inline util::native<float> apply_vop3_dst_mod_f32(util::native<float> v, uint32_t omod,
+                                                  uint32_t clamp) {
+  if (omod == 1)
+    v = v * 2.0f;
+  else if (omod == 2)
+    v = v * 4.0f;
+  else if (omod == 3)
+    v = v * 0.5f;
+  if (clamp) {
+    util::stdx::where(v < 0.0f, v) = 0.0f;
+    util::stdx::where(v > 1.0f, v) = 1.0f;
+  }
+  return v;
+}
+
 /// SIMD load of an operand at `lane_base`. Returns a contiguous SIMD
 /// load when the operand resolves to per-lane VGPR storage; otherwise
 /// broadcasts the operand's scalar value. Constrained on
