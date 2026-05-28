@@ -767,6 +767,76 @@ template <typename Inst, typename CmpOp>
   return false;
 }
 
+/// VOP3 integer/bitwise binary SIMD fast path. Same shape as
+/// try_execute_binary_vop2_simd but reads the VOP3 operands `src0`/`src1`
+/// (instead of `src0`/`vsrc1`). The generated integer/bitwise VOP3 bodies apply
+/// no source/result modifiers (abs/neg/omod are float-only; clamp on an integer
+/// op means saturate, which these wrap-around/bitwise twins do not request), so
+/// the plain op is bit-identical to the scalar body on every input. T is a
+/// 32-bit integer lane type.
+template <typename T, typename Inst, typename BinOp>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_binary_vop3_simd(Inst &inst, Wavefront &wf, BinOp bin_op) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.vdst.simd_capable())
+    return false;
+  constexpr std::size_t W = util::native_width_v<T>;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto a = read_simd<T>(inst.src0, wf, base);
+    const auto b = read_simd<T>(inst.src1, wf, base);
+    write_simd<T>(inst.vdst, wf, base, bin_op(a, b), chunk);
+  }
+  return true;
+}
+
+/// Unconstrained fallback for the VOP3 integer binary path; see the VOP2
+/// binary-path note above.
+template <typename T, typename Inst, typename BinOp>
+[[nodiscard]] inline bool try_execute_binary_vop3_simd(Inst &, Wavefront &, BinOp) {
+  return false;
+}
+
+/// VOP3 f32 binary SIMD fast path. Reads `src0`/`src1`, applies the per-source
+/// abs/neg modifiers, runs `bin_op`, then applies the result omod/clamp — the
+/// exact order of the generated scalar body (abs->neg per source, op,
+/// omod->clamp on the result). The modifier helpers are bit-exact, so unlike the
+/// VOP2 path this fast path stays correct even when modifiers are set; no bail.
+template <typename T, typename Inst, typename BinOp>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_binary_vop3_fp_simd(Inst &inst, Wavefront &wf, BinOp bin_op) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.vdst.simd_capable())
+    return false;
+  const uint32_t abs = inst.inst_.abs;
+  const uint32_t neg = inst.inst_.neg;
+  const uint32_t omod = inst.inst_.omod;
+  const uint32_t clamp = inst.inst_.clamp;
+  constexpr std::size_t W = util::native_width_v<T>;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto a = apply_vop3_src_mod_f32<0>(read_simd<T>(inst.src0, wf, base), abs, neg);
+    const auto b = apply_vop3_src_mod_f32<1>(read_simd<T>(inst.src1, wf, base), abs, neg);
+    const auto r = apply_vop3_dst_mod_f32(bin_op(a, b), omod, clamp);
+    write_simd<T>(inst.vdst, wf, base, r, chunk);
+  }
+  return true;
+}
+
+/// Unconstrained fallback for the VOP3 f32 binary path.
+template <typename T, typename Inst, typename BinOp>
+[[nodiscard]] inline bool try_execute_binary_vop3_fp_simd(Inst &, Wavefront &, BinOp) {
+  return false;
+}
+
 } // namespace amdgpu
 } // namespace rocjitsu
 
@@ -865,6 +935,18 @@ template <typename Inst, typename CmpOp>
 /// (0x8000000000000000); the class functor is variadic.
 #define ROCJITSU_TRY_SIMD_VOP3_CLASS_F64(SM, ...)                                                  \
   if (::rocjitsu::amdgpu::try_execute_vop3_class_f64_simd(inst, wf, SM, __VA_ARGS__))              \
+  return
+
+/// VOP3 integer/bitwise binary counterpart (reads src0/src1, no modifiers).
+/// `T` is the 32-bit integer lane type; variadic in the functor.
+#define ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(T, ...)                                                  \
+  if (::rocjitsu::amdgpu::try_execute_binary_vop3_simd<T>(inst, wf, __VA_ARGS__))                  \
+  return
+
+/// VOP3 f32 binary counterpart (reads src0/src1, applies abs/neg/omod/clamp).
+/// `T` is the 32-bit float lane type; variadic in the functor.
+#define ROCJITSU_TRY_SIMD_VOP3_BINARY_FP(T, ...)                                                   \
+  if (::rocjitsu::amdgpu::try_execute_binary_vop3_fp_simd<T>(inst, wf, __VA_ARGS__))               \
   return
 
 #endif // ROCJITSU_ISA_AMDGPU_SHARED_SIMD_GLUE_H_
