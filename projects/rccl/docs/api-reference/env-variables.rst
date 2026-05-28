@@ -34,6 +34,36 @@ in the following table.
       - | String value for host identification
         | Used for host hash generation
 
+    * - | ``NCCL_BOOTSTRAP_BIDIR_ALLGATHER``
+        | Enables the bidirectional ring AllGather (N/2 steps) on the socket OOB path
+          during bootstrap. The unidirectional ring (N-1 steps) is kept as a fallback.
+          Has no effect when net OOB is in use; see ``NCCL_BOOTSTRAP_BIDIR_NET``.
+      - | ``0``: Force unidirectional ring.
+        | ``1``: Force bidirectional ring (default).
+
+    * - | ``NCCL_BOOTSTRAP_BIDIR_NET``
+        | Enables the bidirectional ring AllGather on the net OOB path during bootstrap.
+          Requires net OOB to be active (``NCCL_OOB_NET_ENABLE``). The net plugin's MR
+          registration plus the reverse-pair connect setup is heavy enough that small
+          comms regress, hence the threshold gate when set to ``-1``.
+      - | ``-1``: Auto — enabled when ``nranks >= NCCL_BOOTSTRAP_BIDIR_THRESHOLD``.
+        | ``0``: Force off (default).
+        | ``1``: Force on regardless of scale.
+
+    * - | ``NCCL_BOOTSTRAP_BIDIR_THRESHOLD``
+        | Rank-count threshold consulted by ``NCCL_BOOTSTRAP_BIDIR_NET`` and
+          ``NCCL_OOB_NET_ENABLE`` when those knobs are in auto (``-1``) mode.
+      - | Positive integer rank count.
+        | Default: ``128`` (≈ 16 nodes at 8 ppn).
+
+    * - | ``NCCL_OOB_NET_ENABLE``
+        | Selects the out-of-band transport used by the bootstrap AllGather. ``0`` uses
+          the TCP socket OOB path; ``1`` uses the IB/OFI net plugin; ``-1`` enables
+          net OOB once ``nranks >= NCCL_BOOTSTRAP_BIDIR_THRESHOLD``.
+      - | ``-1``: Auto, threshold-gated.
+        | ``0``: Socket OOB (default).
+        | ``1``: Net OOB.
+
 Logging and debugging
 =====================
 

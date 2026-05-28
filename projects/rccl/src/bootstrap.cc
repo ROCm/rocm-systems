@@ -115,12 +115,19 @@ static std::mutex bootstrapNetMutex;
 // Off by default; opt in explicitly via env var or set to -1 to use the threshold gate.
 NCCL_PARAM(BootstrapNetEnable,"OOB_NET_ENABLE", 0);
 
-// Bidirectional ring AllGather (N/2 steps). All three knobs are opt-in: socket-bidir
-// (BOOTSTRAP_BIDIR_ALLGATHER) is an on/off flag; net-bidir (BOOTSTRAP_BIDIR_NET) is a
-// tristate (-1 auto by threshold, 0 off, 1 on) and additionally requires net OOB to be
-// on. Defaults are all off; the threshold is consulted only when the corresponding
-// knob is set to -1 (auto).
-NCCL_PARAM(BootstrapBidirAllGather, "BOOTSTRAP_BIDIR_ALLGATHER",  0);
+// Bidirectional ring AllGather (N/2 steps).
+//   BOOTSTRAP_BIDIR_ALLGATHER : on/off flag for the socket OOB path. Default on; setting
+//                               it to 0 falls back to the unidirectional ring. Has no
+//                               effect when net OOB is enabled (the net path uses
+//                               BOOTSTRAP_BIDIR_NET instead).
+//   BOOTSTRAP_BIDIR_NET       : tristate for the net OOB path (-1 auto by threshold,
+//                               0 off, 1 on). Off by default; opt in explicitly. Also
+//                               requires net OOB itself to be active (NCCL_OOB_NET_ENABLE).
+//   BOOTSTRAP_BIDIR_THRESHOLD : rank threshold consulted only when the corresponding
+//                               knob is set to -1 (auto). Default 128 ranks (16 nodes
+//                               at 8 ppn), motivated by net-OOB plugin regMr/connect
+//                               setup overhead being too heavy to amortise below that.
+NCCL_PARAM(BootstrapBidirAllGather, "BOOTSTRAP_BIDIR_ALLGATHER",  1);
 NCCL_PARAM(BootstrapBidirNet,       "BOOTSTRAP_BIDIR_NET",        0);
 NCCL_PARAM(BootstrapBidirThreshold, "BOOTSTRAP_BIDIR_THRESHOLD", 128);
 
@@ -136,6 +143,9 @@ static inline bool bootstrapNetEnabledEffective(int nranks) {
 }
 
 // kind: 0 = socket OOB, 1 = net (IB) OOB. Setup, dispatch and cleanup all consult this.
+// Socket path runs at any nranks>=3. Net path is tristate; when set to -1 the ring-count
+// threshold gates it, since the net plugin's MR registration + reverse-pair connect
+// overhead must be amortised over enough ranks. Defaults are documented above.
 static inline bool bootstrapBidirEnabled(int nranks, int kind) {
   if (nranks < 3) return false;
   bool netOn = bootstrapNetEnabledEffective(nranks);
@@ -145,6 +155,7 @@ static inline bool bootstrapBidirEnabled(int nranks, int kind) {
     int64_t v = ncclParamBootstrapBidirNet();
     if (v == 0) return false;
     if (v >= 1) return true;
+    // v == -1: auto, threshold-gated.
     int64_t thr = ncclParamBootstrapBidirThreshold();
     return thr > 0 && nranks >= (int)thr;
   }
@@ -952,8 +963,8 @@ static ncclResult_t bootstrapBidirRingSetupFinish(struct ncclComm* comm, struct 
 static ncclResult_t bootstrapBidirRingSetup(struct ncclComm* comm, struct bootstrapState* state,
                                             const char* prevRevHandlePiggyback) {
   // Cheap exit when bidirectional net bootstrap is disabled, pointless (≤2 ranks) or below
-  // the BOOTSTRAP_BIDIR_THRESHOLD: the net plugin's regMr/connect setup is heavy enough that
-  // small comms regress without the threshold.
+  // the BOOTSTRAP_BIDIR_THRESHOLD in auto mode: the net plugin's regMr/connect setup is
+  // heavy enough that small comms regress.
   bool wantNetBidir = bootstrapBidirEnabled(state->nranks, 1);
   if (!wantNetBidir) return ncclSuccess;
 
@@ -1560,7 +1571,7 @@ exit:
   return res;
 }
 // Classic unidirectional ring AllGather over the socket OOB path (N-1 rounds).
-// Kept as the fallback when BOOTSTRAP_BIDIR_ALLGATHER=0 is set explicitly.
+// Used when BOOTSTRAP_BIDIR_ALLGATHER=0 is set explicitly.
 static ncclResult_t socketRingAllGatherUnidir(struct ncclSocket* sendSock, struct ncclSocket* recvSock, int rank, int nranks, char* data, int size) {
   ncclResult_t res = ncclSuccess;
   uint64_t tFirst = 0, tRest = 0;
@@ -1801,7 +1812,7 @@ ncclResult_t bootstrapIntraNodeAllGather(void* commState, int* ranks, int rank, 
 
   // Intra-node AllGather is socket-only and so cannot reuse bootstrapBidirEnabled
   // (its `!netOn` clause is geared to inter-node OOB selection). Gate purely on the
-  // BOOTSTRAP_BIDIR_ALLGATHER opt-in; socketRingAllGather handles nranks<3 itself
+  // BOOTSTRAP_BIDIR_ALLGATHER knob; socketRingAllGather handles nranks<3 itself
   // (nranks==2 → single bidirectional socketSendRecv; nranks==1 is short-circuited
   // earlier in this function).
   if (ncclParamBootstrapBidirAllGather() != 0) {
