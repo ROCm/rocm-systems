@@ -1147,6 +1147,11 @@ typedef struct _HsaClockCounters
     HSAuint64   SystemClockFrequencyHz;
 } HsaClockCounters;
 
+typedef struct _HsaFabricHandle
+{
+    HSAuint64   handle[2];
+} HsaFabricHandle;
+
 #ifndef DEFINE_GUID
 typedef struct _HSA_UUID
 {
@@ -1155,11 +1160,6 @@ typedef struct _HSA_UUID
     HSAuint16   Data3;
     HSAuint8    Data4[8];
 } HSA_UUID;
-
-typedef struct _HsaFabricHandle
-{
-    HSAuint64   handle[2];
-} HsaFabricHandle;
 
 #define HSA_DEFINE_UUID(name, dw, w1, w2, b1, b2, b3, b4, b5, b6, b7, b8) \
     static const HSA_UUID name = {dw, w1, w2, {b1, b2, b3, b4, b5, b6, b7, b8}}
