@@ -74,8 +74,6 @@
 .else
   .set SQ_WAVE_PC_HI_ADDRESS_MASK                  , 0x1FFFFFF
 .endif
-// The PC is dword (32bit) aligned, so the 2 LSBs are always zero.
-.set SQ_WAVE_PC_LO_ADDRESS_MASK                    , 0xFFFFFFFC
 .set SQ_WAVE_PC_HI_TRAP_ID_BFE                     , (SQ_WAVE_PC_HI_TRAP_ID_SHIFT | (SQ_WAVE_PC_HI_TRAP_ID_SIZE << 16))
 .set SQ_WAVE_PC_HI_TRAP_ID_SHIFT                   , 28
 .set SQ_WAVE_PC_HI_TRAP_ID_SIZE                    , 4
@@ -837,12 +835,9 @@
   // ttmp[14:15]=tma, ttmp1[25] = buf_to_use
   // EXEC is 0x1
 
-  // Clear out 2 LSBs of the PC_LO (used as scratch bits in ttmp0)
   v_writelane_b32   v2, ttmp0, 0                             // v[2] = PC_LO
-  v_and_b32         v2, v2, SQ_WAVE_PC_LO_ADDRESS_MASK       // clear out scratch bits
-  // Clear out 7 MSBs of PC_HI (used as scratch bits in ttmp1)
   v_writelane_b32   v3, ttmp1, 0                             // v[3] = PC_HI
-  v_and_b32         v3, v3, SQ_WAVE_PC_HI_ADDRESS_MASK       // clear out scratch bits
+  v_and_b32         v3, v3, SQ_WAVE_PC_HI_ADDRESS_MASK       // clear out PC_HI's MSBs scratch bits
   global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_PC_HOST, scope:SCOPE_SYS  // store out PC
 
   // Ensure all stores have completed before returning and incrementing written_val
@@ -1121,7 +1116,6 @@
   //    will be re-executed and properly processed in the trap handler reentry.
   // 2. host-trap occured - trap_id is zero for host-trap, so the following would clean only scratch bits.
   s_and_b32         ttmp1, ttmp1, SQ_WAVE_PC_HI_ADDRESS_MASK
-  s_and_b32         ttmp0, ttmp0, SQ_WAVE_PC_LO_ADDRESS_MASK  // Zero out 2 LSBs scratch bits of PC_LO in ttmp0
   s_load_b64        ttmp[14:15], ttmp[0:1], 0, scope:SCOPE_CU // Load the 2 instruction DW we are returning to
   s_wait_kmcnt      0
   s_load_b64        ttmp[2:3], ttmp[0:1], 8, scope:SCOPE_CU // Load the next 2 instruction DW, just in case
