@@ -47,15 +47,10 @@ endforeach()
 # parent CMakeLists which only adds this subdirectory when examples are built.
 if(BUILD_TESTING)
     set(BASICS_TEST_DIR "${AIS_CAPABLE_DIR}/hipfile_basics_tests")
-    set(BASICS_INPUT "${BASICS_TEST_DIR}/input.bin")
 
     add_test(
         NAME basics_setup_dir
         COMMAND ${CMAKE_COMMAND} -E make_directory ${BASICS_TEST_DIR}
-    )
-    add_test(
-        NAME basics_setup_input
-        COMMAND sh -c "dd if=/dev/urandom of='${BASICS_INPUT}' bs=4096 count=64 status=none"
     )
     add_test(
         NAME basics_cleanup
@@ -64,14 +59,14 @@ if(BUILD_TESTING)
     set_tests_properties(basics_setup_dir PROPERTIES
         FIXTURES_SETUP basics_scratch
     )
-    set_tests_properties(basics_setup_input PROPERTIES
-        FIXTURES_SETUP basics_scratch
-        DEPENDS basics_setup_dir
-    )
     set_tests_properties(basics_cleanup PROPERTIES
         FIXTURES_CLEANUP basics_scratch
     )
 
+    # Every basics example calls seed_read_file() (or O_TRUNC's its input),
+    # so each test gets its own READ_FILE path to avoid races under
+    # `ctest --parallel`. The binaries create/truncate/seed the file
+    # themselves; no upfront dd seed is needed.
     function(_basics_add_test name)
         add_test(
             NAME basics_${name}
@@ -87,9 +82,9 @@ if(BUILD_TESTING)
     _basics_add_test(bufregister-write            out_bufregister.bin)
     _basics_add_test(no-bufregister-write         out_no_bufregister.bin)
     _basics_add_test(no-odirect-write             out_no_odirect.bin)
-    _basics_add_test(iterative-read               ${BASICS_INPUT} out_iter.bin)
-    _basics_add_test(iterative-devmem-offset-read ${BASICS_INPUT} out_iter_off.bin)
-    _basics_add_test(subregion-write              ${BASICS_INPUT} out_subregion.bin)
+    _basics_add_test(iterative-read               in_iter.bin out_iter.bin)
+    _basics_add_test(iterative-devmem-offset-read in_iter_off.bin out_iter_off.bin)
+    _basics_add_test(subregion-write              in_subregion.bin out_subregion.bin)
     _basics_add_test(roundtrip-verify             rtv_created.bin rtv_copied.bin)
 
     # various-mem-rw exercises MODE = 1 (device), 2 (managed), 3 (pinned-host).
@@ -99,7 +94,7 @@ if(BUILD_TESTING)
         add_test(
             NAME basics_various-mem-rw_${mode_name}
             COMMAND
-                $<TARGET_FILE:various-mem-rw> ${BASICS_INPUT}
+                $<TARGET_FILE:various-mem-rw> in_vmrw_${mode_name}.bin
                 out_vmrw_${mode_name}.bin ${mode_num}
             WORKING_DIRECTORY ${BASICS_TEST_DIR}
         )
