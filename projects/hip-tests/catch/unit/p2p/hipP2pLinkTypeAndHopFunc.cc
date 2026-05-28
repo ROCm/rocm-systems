@@ -195,13 +195,15 @@ bool testhipLinkTypeHopcountDevice(int numDevices) {
   rsmi_status_t (*fntopo_init)(uint64_t);
   rsmi_status_t (*fntopo_shut_down)();
 
-  // Use ROCM_SMI_LIB_DIR from CMake instead of hardcoding to /opt/rocm
-#ifdef ROCM_SMI_LIB_DIR
-  std::string rocm_smi_path = std::string(ROCM_SMI_LIB_DIR) + "/librocm_smi64.so";
-#else
-  std::string rocm_smi_path = "librocm_smi64.so";
-#endif
-  lib_rocm_smi_hdl = dlopen(rocm_smi_path.c_str(), RTLD_LAZY);
+  lib_rocm_smi_hdl = dlopen("librocm_smi64.so", RTLD_LAZY);
+  if (lib_rocm_smi_hdl == nullptr) {
+    if (const char* rocmPath = std::getenv("ROCM_PATH")) {
+      std::string libPath = std::string(rocmPath) + "/lib/librocm_smi64.so";
+      lib_rocm_smi_hdl = dlopen(libPath.c_str(), RTLD_LAZY);
+    } else {
+      lib_rocm_smi_hdl = dlopen("/opt/rocm/lib/librocm_smi64.so", RTLD_LAZY);
+    }
+  }
   REQUIRE(lib_rocm_smi_hdl);
 
   void* fnsym = dlsym(lib_rocm_smi_hdl, "rsmi_topo_get_link_type");
