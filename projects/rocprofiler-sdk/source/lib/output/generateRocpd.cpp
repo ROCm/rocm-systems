@@ -1142,30 +1142,57 @@ write_rocpd(
                                  .extdata   = std::nullopt,
                              });
 
-            auto start_id = get_timestamp_id(conn, start_timestamp, phase_enter, track_id);
-            auto end_id   = get_timestamp_id(conn, end_timestamp, phase_exit, track_id);
-
             // Insert into kernel dispatch table
-            auto stmt = get_insert_statement(
-                "rocpd_kernel_dispatch{{uuid}}",
-                {
-                    insert_value("id", dispatch_id),
-                    insert_value("track_id", track_id),
-                    insert_value("kernel_id", kernel_id),
-                    insert_value("dispatch_id", dispatch_id),
-                    insert_value("start_id", start_id),
-                    insert_value("end_id", end_id),
-                    insert_value("private_segment_size", info.private_segment_size),
-                    insert_value("group_segment_size", info.group_segment_size),
-                    insert_value("workgroup_size_x", workgroup.x),
-                    insert_value("workgroup_size_y", workgroup.y),
-                    insert_value("workgroup_size_z", workgroup.z),
-                    insert_value("grid_size_x", grid.x),
-                    insert_value("grid_size_y", grid.y),
-                    insert_value("grid_size_z", grid.z),
-                    insert_value("region_name_id", string_entries.at(region_name)),
-                    insert_value("event_id", evt_id),
-                });
+            auto sv_kd = get_schema_version();
+            sql::bind_statement stmt;
+            if(sv_kd.major == 4 && sv_kd.minor >= 1)
+            {
+                stmt = get_insert_statement(
+                    "rocpd_kernel_dispatch{{uuid}}",
+                    {
+                        insert_value("id", dispatch_id),
+                        insert_value("track_id", track_id),
+                        insert_value("kernel_id", kernel_id),
+                        insert_value("dispatch_id", dispatch_id),
+                        insert_value("start", start_timestamp),
+                        insert_value("end", end_timestamp),
+                        insert_value("private_segment_size", info.private_segment_size),
+                        insert_value("group_segment_size", info.group_segment_size),
+                        insert_value("workgroup_size_x", workgroup.x),
+                        insert_value("workgroup_size_y", workgroup.y),
+                        insert_value("workgroup_size_z", workgroup.z),
+                        insert_value("grid_size_x", grid.x),
+                        insert_value("grid_size_y", grid.y),
+                        insert_value("grid_size_z", grid.z),
+                        insert_value("region_name_id", string_entries.at(region_name)),
+                        insert_value("event_id", evt_id),
+                    });
+            }
+            else
+            {
+                auto start_id = get_timestamp_id(conn, start_timestamp, phase_enter, track_id);
+                auto end_id   = get_timestamp_id(conn, end_timestamp, phase_exit, track_id);
+                stmt          = get_insert_statement(
+                    "rocpd_kernel_dispatch{{uuid}}",
+                    {
+                        insert_value("id", dispatch_id),
+                        insert_value("track_id", track_id),
+                        insert_value("kernel_id", kernel_id),
+                        insert_value("dispatch_id", dispatch_id),
+                        insert_value("start_id", start_id),
+                        insert_value("end_id", end_id),
+                        insert_value("private_segment_size", info.private_segment_size),
+                        insert_value("group_segment_size", info.group_segment_size),
+                        insert_value("workgroup_size_x", workgroup.x),
+                        insert_value("workgroup_size_y", workgroup.y),
+                        insert_value("workgroup_size_z", workgroup.z),
+                        insert_value("grid_size_x", grid.x),
+                        insert_value("grid_size_y", grid.y),
+                        insert_value("grid_size_z", grid.z),
+                        insert_value("region_name_id", string_entries.at(region_name)),
+                        insert_value("event_id", evt_id),
+                    });
+            }
 
             execute_raw_sql_statements(conn, stmt);
         };
@@ -1308,29 +1335,54 @@ write_rocpd(
                             .extdata   = std::nullopt,
                         });
 
-                    auto start_id =
-                        get_timestamp_id(conn, itr.start_timestamp, phase_enter, track_id);
-                    auto end_id = get_timestamp_id(conn, itr.end_timestamp, phase_exit, track_id);
+                    auto sv_mc = get_schema_version();
+                    sql::bind_statement mc_stmt;
+                    if(sv_mc.major == 4 && sv_mc.minor >= 1)
+                    {
+                        mc_stmt = get_insert_statement(
+                            "rocpd_memory_copy{{uuid}}",
+                            {
+                                insert_value("id", copy_idx++),
+                                insert_value("track_id", track_id),
+                                insert_value("start", itr.start_timestamp),
+                                insert_value("end", itr.end_timestamp),
+                                insert_value("name_id", string_entries.at(name)),
+                                insert_value("dst_agent_id",
+                                             tool_metadata.get_agent(itr.dst_agent_id)->node_id),
+                                insert_value("src_agent_id",
+                                             tool_metadata.get_agent(itr.src_agent_id)->node_id),
+                                insert_value("dst_address", itr.dst_address.value),
+                                insert_value("src_address", itr.src_address.value),
+                                insert_value("size", itr.bytes),
+                                insert_value("event_id", evt_id),
+                            });
+                    }
+                    else
+                    {
+                        auto start_id =
+                            get_timestamp_id(conn, itr.start_timestamp, phase_enter, track_id);
+                        auto end_id =
+                            get_timestamp_id(conn, itr.end_timestamp, phase_exit, track_id);
+                        mc_stmt = get_insert_statement(
+                            "rocpd_memory_copy{{uuid}}",
+                            {
+                                insert_value("id", copy_idx++),
+                                insert_value("track_id", track_id),
+                                insert_value("start_id", start_id),
+                                insert_value("end_id", end_id),
+                                insert_value("name_id", string_entries.at(name)),
+                                insert_value("dst_agent_id",
+                                             tool_metadata.get_agent(itr.dst_agent_id)->node_id),
+                                insert_value("src_agent_id",
+                                             tool_metadata.get_agent(itr.src_agent_id)->node_id),
+                                insert_value("dst_address", itr.dst_address.value),
+                                insert_value("src_address", itr.src_address.value),
+                                insert_value("size", itr.bytes),
+                                insert_value("event_id", evt_id),
+                            });
+                    }
 
-                    auto stmt = get_insert_statement(
-                        "rocpd_memory_copy{{uuid}}",
-                        {
-                            insert_value("id", copy_idx++),
-                            insert_value("track_id", track_id),
-                            insert_value("start_id", start_id),
-                            insert_value("end_id", end_id),
-                            insert_value("name_id", string_entries.at(name)),
-                            insert_value("dst_agent_id",
-                                         tool_metadata.get_agent(itr.dst_agent_id)->node_id),
-                            insert_value("src_agent_id",
-                                         tool_metadata.get_agent(itr.src_agent_id)->node_id),
-                            insert_value("dst_address", itr.dst_address.value),
-                            insert_value("src_address", itr.src_address.value),
-                            insert_value("size", itr.bytes),
-                            insert_value("event_id", evt_id),
-                        });
-
-                    execute_raw_sql_statements(conn, stmt);
+                    execute_raw_sql_statements(conn, mc_stmt);
                 }
             }
         };
@@ -1520,25 +1572,48 @@ write_rocpd(
                                                  .extdata   = std::nullopt,
                                              });
 
-                auto start_id = get_timestamp_id(conn, itr.start_timestamp, phase_enter, track_id);
-                auto end_id   = get_timestamp_id(conn, itr.end_timestamp, phase_exit, track_id);
+                auto sv_ma = get_schema_version();
+                sql::bind_statement ma_stmt;
+                if(sv_ma.major == 4 && sv_ma.minor >= 1)
+                {
+                    ma_stmt =
+                        get_insert_statement("rocpd_memory_allocate{{uuid}}",
+                                             {
+                                                 insert_value("track_id", track_id),
+                                                 insert_value("start", itr.start_timestamp),
+                                                 insert_value("end", itr.end_timestamp),
+                                                 insert_value("name_id", string_entries.at(_name)),
+                                                 insert_value("type", _type),
+                                                 insert_value("level", _level),
+                                                 insert_value("event_id", evt_id),
+                                                 insert_value("address", _address_value),
+                                                 insert_value("size", _allocation_size),
+                                                 insert_value("extdata", _extdata),
+                                             });
+                }
+                else
+                {
+                    auto start_id =
+                        get_timestamp_id(conn, itr.start_timestamp, phase_enter, track_id);
+                    auto end_id =
+                        get_timestamp_id(conn, itr.end_timestamp, phase_exit, track_id);
+                    ma_stmt =
+                        get_insert_statement("rocpd_memory_allocate{{uuid}}",
+                                             {
+                                                 insert_value("track_id", track_id),
+                                                 insert_value("start_id", start_id),
+                                                 insert_value("end_id", end_id),
+                                                 insert_value("name_id", string_entries.at(_name)),
+                                                 insert_value("type", _type),
+                                                 insert_value("level", _level),
+                                                 insert_value("event_id", evt_id),
+                                                 insert_value("address", _address_value),
+                                                 insert_value("size", _allocation_size),
+                                                 insert_value("extdata", _extdata),
+                                             });
+                }
 
-                auto stmt =
-                    get_insert_statement("rocpd_memory_allocate{{uuid}}",
-                                         {
-                                             insert_value("track_id", track_id),
-                                             insert_value("start_id", start_id),
-                                             insert_value("end_id", end_id),
-                                             insert_value("name_id", string_entries.at(_name)),
-                                             insert_value("type", _type),
-                                             insert_value("level", _level),
-                                             insert_value("event_id", evt_id),
-                                             insert_value("address", _address_value),
-                                             insert_value("size", _allocation_size),
-                                             insert_value("extdata", _extdata),
-                                         });
-
-                execute_raw_sql_statements(conn, stmt);
+                execute_raw_sql_statements(conn, ma_stmt);
             }
         }
     };
@@ -1640,20 +1715,38 @@ write_rocpd(
                                                      .extdata   = std::nullopt,
                                                  });
 
-                    auto start_id =
-                        get_timestamp_id(conn, itr.start_timestamp, phase_enter, track_id);
-                    auto end_id = get_timestamp_id(conn, itr.end_timestamp, phase_exit, track_id);
-
-                    auto region_stmt =
-                        get_insert_statement("rocpd_region{{uuid}}",
-                                             {
-                                                 insert_value("id", itr.correlation_id.internal),
-                                                 insert_value("track_id", track_id),
-                                                 insert_value("name_id", string_entries.at(name)),
-                                                 insert_value("start_id", start_id),
-                                                 insert_value("end_id", end_id),
-                                                 insert_value("event_id", evt_id),
-                                             });
+                    auto sv_rg = get_schema_version();
+                    sql::bind_statement region_stmt;
+                    if(sv_rg.major == 4 && sv_rg.minor >= 1)
+                    {
+                        region_stmt =
+                            get_insert_statement("rocpd_region{{uuid}}",
+                                                 {
+                                                     insert_value("id", itr.correlation_id.internal),
+                                                     insert_value("track_id", track_id),
+                                                     insert_value("name_id", string_entries.at(name)),
+                                                     insert_value("start", itr.start_timestamp),
+                                                     insert_value("end", itr.end_timestamp),
+                                                     insert_value("event_id", evt_id),
+                                                 });
+                    }
+                    else
+                    {
+                        auto start_id =
+                            get_timestamp_id(conn, itr.start_timestamp, phase_enter, track_id);
+                        auto end_id =
+                            get_timestamp_id(conn, itr.end_timestamp, phase_exit, track_id);
+                        region_stmt =
+                            get_insert_statement("rocpd_region{{uuid}}",
+                                                 {
+                                                     insert_value("id", itr.correlation_id.internal),
+                                                     insert_value("track_id", track_id),
+                                                     insert_value("name_id", string_entries.at(name)),
+                                                     insert_value("start_id", start_id),
+                                                     insert_value("end_id", end_id),
+                                                     insert_value("event_id", evt_id),
+                                                 });
+                    }
 
                     execute_raw_sql_statements(conn, region_stmt);
                 }
