@@ -3,13 +3,11 @@
 
 """Instrument PyTorch with ROCTX ranges for rocprof-compute --torch-trace.
 
-Loaded by rocprofv3 as ``python inject_roctx.py main.py [args...]``.
-Forward + backward ATen ops are covered by the C++ RecordFunction tier
-(roctx_recordfn.so) when install_global_wraps() initializes it, with a
-Python TorchDispatchMode fallback otherwise; structural wraps
-(nn.Module, Optimizer, distributed collectives, CUDA graph, Triton,
-torch.compile) run on both tiers. Plain ``import utils.inject_roctx``
-from test/tooling code stays inert.
+Loaded by rocprofv3 as `python inject_roctx.py main.py [args...]`.
+ATen ops use the C++ RecordFunction tier (roctx_recordfn.so) when
+install_global_wraps() initializes it, with a Python TorchDispatchMode
+fallback. Structural wraps (nn.Module, Optimizer, distributed,
+CUDA graph, Triton, torch.compile) run on both tiers.
 """
 
 import importlib
@@ -22,12 +20,10 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-# Make the sibling 'utils' package importable when rocprofv3 launches
-# this script directly.
+# sibling 'utils' package importable when rocprofv3 launches this directly
 script_dir = Path(__file__).resolve().parent
 sys.path.insert(0, str(script_dir.parent))
 
-# Locate rocprofiler-sdk's roctx Python bindings under ROCM_PATH.
 rocm_root = os.environ.get("ROCM_PATH", "/opt/rocm")
 python_version = f"python{sys.version_info.major}.{sys.version_info.minor}"
 candidate_paths = [
@@ -67,8 +63,7 @@ _TORCH_ROOT = ""
 try:
     import torch
 
-    # Verify the C backend loaded, not just the Python wrappers.
-    import torch._C  # noqa: F401
+    import torch._C  # noqa: F401  -- verify C backend loaded
 
     console_log("torch trace", f"PyTorch version: {torch.__version__}")
     try:
@@ -84,9 +79,7 @@ except ImportError:
     )
     sys.exit(0)
 
-# Optional torch submodules + triton. Bound to None on failure so each
-# patch site can early-return; broad Exception keeps import-time issues
-# from breaking module load.
+# Optional deps: bound to None on failure so each patch site can early-return.
 try:
     import torch.distributed as dist
 except Exception:
@@ -132,7 +125,6 @@ try:
 except Exception:
     CompiledKernel = None
 
-# Loader entry points for roctx_recordfn.so.
 try:
     from utils import inject_roctx_loader as _roctx_loader_module
     from utils.inject_roctx_loader import load as _load_roctx_recordfn
@@ -196,14 +188,7 @@ def _initialize_c_tier() -> bool:
 
 
 def _emit_python_tier_fallback_warning() -> None:
-    """Single user-facing WARNING when the C++ tier didn't load.
-
-    Folds in the loader's per-tier diagnostic trail so the cause is
-    visible at default verbosity without a separate -VVV re-run, and
-    emits exactly once per process (the loader's per-tier WHY lines
-    stay at LOG to avoid multiplying noise on multi-pass PMC sweeps).
-    Called by install_global_wraps() after _initialize_c_tier().
-    """
+    """One WARNING when the C++ tier didn't load, with the loader trail folded in."""
     if _USING_C_TIER:
         return
     loader_trail = ""
@@ -214,8 +199,6 @@ def _emit_python_tier_fallback_warning() -> None:
                 diagnostics,
             )
         except Exception:
-            # Diagnostic drain is best-effort; the surrounding WARNING
-            # is the actionable signal and must always fire.
             loader_trail = ""
     trail_block = f"\nLoader trail:\n{loader_trail}" if loader_trail else ""
     console_warning(
@@ -229,12 +212,10 @@ def _emit_python_tier_fallback_warning() -> None:
     )
 
 
-# Per-thread marker/context stacks. Source of truth on the Python tier;
-# a defensive mirror of the C++ thread_local stack on the C++ tier.
+# Per-thread stacks. Source of truth on Python tier; mirror on C++ tier.
 _thread_local = threading.local()
 
-# Active TorchDispatchMode (Python tier). Held at module scope so it
-# outlives install_dispatcher_hook(); __exit__ is never called.
+# Held at module scope so it outlives install_dispatcher_hook().
 _active_dispatch_mode = None
 
 
@@ -251,25 +232,15 @@ def get_context_stack() -> list[str]:
 
 
 def get_tier_stack() -> list[bool]:
-    # Per-thread record of which tier handled each _push_scope (True =
-    # C++ push_user_scope, False = Python rangePush). _pop_scope uses
-    # the popped value to call the matching pop path, so a one-off
-    # C++-tier failure that fell through to the Python tier still
-    # pairs correctly on the way back out.
+    # True = C++ push_user_scope, False = Python rangePush. _pop_scope
+    # uses this to pair pops with their pushes across tier fallthrough.
     if not hasattr(_thread_local, "tier_stack"):
         _thread_local.tier_stack = []
     return _thread_local.tier_stack
 
 
 def resolve_user_caller_location() -> str:
-    """'file:line' for the nearest user frame, or 'python.dispatch:0'.
-
-    Skips this module and (when known) the torch install dir. The
-    sentinel is deliberately distinct from C++ tier leaf labels so
-    analyzers can tell which tier produced the marker. If _TORCH_ROOT
-    is empty, degrade to "first frame outside this file" rather than
-    losing user-frame attribution entirely.
-    """
+    """'file:line' for the nearest user frame, or 'python.dispatch:0'."""
     this_file = __file__
     frame = inspect.currentframe()
     while frame is not None:
@@ -282,9 +253,7 @@ def resolve_user_caller_location() -> str:
     return "python.dispatch:0"
 
 
-# Unified push/pop used by every structural wrap below. Tier is decided
-# once at module load. Wire format: "<op_path>:#N@file:line/...", split
-# by utils_analysis.py on the literal ":#".
+# Wire format: "<op_path>:#N@file:line/..." split on ":#" by utils_analysis.py.
 
 
 def _push_scope(marker: str, context: str) -> None:
@@ -298,14 +267,10 @@ def _push_scope(marker: str, context: str) -> None:
             _roctx_recordfn.push_user_scope(marker, context)
             used_cpp = True
         except Exception:
-            # Fall through so the scope isn't silently dropped. The
-            # C++ side rolled back any partial commit before raising,
-            # so it's safe to push on the Python tier instead.
             pass
 
     if not used_cpp:
-        # Build the full marker BEFORE mutating the stacks so the
-        # emitted string includes this frame exactly once.
+        # Build full marker before mutating stacks so this frame appears once.
         full = (
             "/".join([*marker_stack, marker])
             + ":"
@@ -313,8 +278,7 @@ def _push_scope(marker: str, context: str) -> None:
         )
         rangePush(full)
 
-    # Record bookkeeping last so a rangePush/push_user_scope failure
-    # leaves nothing for _pop_scope to undo on this call.
+    # Bookkeeping last: a push failure leaves nothing for _pop_scope to undo.
     tier_stack.append(used_cpp)
     marker_stack.append(marker)
     context_stack.append(context)
@@ -325,8 +289,7 @@ def _pop_scope() -> None:
     context_stack = get_context_stack()
     tier_stack = get_tier_stack()
 
-    # Underflow: an unmatched _pop_scope. No-op so we don't over-pop
-    # roctx ranges or shadow a real exception in a caller's finally.
+    # Unmatched _pop_scope: no-op so we don't over-pop or mask caller exceptions.
     if not tier_stack:
         return
 
@@ -343,16 +306,14 @@ def _pop_scope() -> None:
             context_stack.pop()
 
 
-# Structural wrappers installed at module load. These entry points bypass
-# the ATen dispatcher, so neither tier's automatic coverage sees them.
+# Structural wrappers: bypass the ATen dispatcher, so neither tier sees them.
 
 
 def roctx_wrapper(
     func: Callable[..., Any],
     name: Optional[str] = None,
 ) -> Callable[..., Any]:
-    """Wrap func with a ROCTX range. Idempotent: a func already carrying
-    ``_roctx_wrapped = True`` is returned unchanged."""
+    """Wrap func with a ROCTX range. Idempotent via _roctx_wrapped."""
     if getattr(func, "_roctx_wrapped", False):
         return func
     func_name = name or func.__name__
@@ -373,12 +334,10 @@ def roctx_wrapper(
 
 
 def _marker_only_init_wrapper(name: str) -> Callable[..., Any]:
-    """Return an ``__init__`` replacement that emits a ROCTX range and
-    delegates to ``object.__init__(self)`` -- i.e. it never forwards
-    ctor args to the underlying slot. Used for classes whose real
-    construction lives in ``__new__`` (e.g. torch.cuda.Event / Stream),
-    where ``__init__`` is inherited from ``object`` and would otherwise
-    reject the forwarded kwargs.
+    """__init__ that emits a ROCTX range, then calls object.__init__(self).
+
+    For classes whose real construction lives in __new__ (cuda.Event/Stream),
+    where __init__ inherits from object and would reject forwarded kwargs.
     """
     call_counter = {"count": 0}
 
@@ -402,8 +361,7 @@ def _walk_subclasses(cls: type, fn: Callable[[type], None]) -> None:
         _walk_subclasses(sub, fn)
 
 
-# torch.distributed.* collectives. Anything not listed lands in the trace
-# without an enclosing operator marker.
+# torch.distributed.* collectives; unlisted ones land without a marker.
 DISTRIBUTED_COLLECTIVE_NAMES = (
     "all_reduce",
     "all_gather",
@@ -428,9 +386,7 @@ DISTRIBUTED_COLLECTIVE_NAMES = (
     "monitored_barrier",
 )
 
-# ProcessGroup methods FSDP2 / DTensor call directly, bypassing the
-# torch.distributed.* facade. Wrapped per subclass to also cover
-# user-defined backends and FakeProcessGroup.
+# ProcessGroup methods FSDP2/DTensor call directly. Wrapped per subclass.
 PROCESS_GROUP_METHODS = (
     "allreduce",
     "allgather",
@@ -452,8 +408,7 @@ PROCESS_GROUP_METHODS = (
 
 
 def patch_distributed_collectives() -> None:
-    """Wrap DISTRIBUTED_COLLECTIVE_NAMES plus every entry point defined in
-    torch.distributed._functional_collectives. Missing entries are skipped."""
+    """Wrap DISTRIBUTED_COLLECTIVE_NAMES + every entry in _functional_collectives."""
     if dist is None:
         console_warning(
             "torch trace",
@@ -477,8 +432,6 @@ def patch_distributed_collectives() -> None:
                 f"Could not patch torch.distributed.{fn_name}: {e}",
             )
 
-    # torch.distributed._functional_collectives is used by FSDP2 and
-    # DTensor; it is not present on every PyTorch build.
     if fc is not None:
         for fn_name in dir(fc):
             if fn_name.startswith("_"):
@@ -514,8 +467,7 @@ def patch_distributed_collectives() -> None:
 
 
 def patch_process_group_methods() -> None:
-    """Wrap ProcessGroup.* methods on every subclass plus a base-class
-    ``__init_subclass__`` hook so backends registered later are caught too."""
+    """Wrap ProcessGroup.* per subclass + __init_subclass__ hook for late backends."""
     if ProcessGroup is None:
         return
 
@@ -574,8 +526,7 @@ def patch_process_group_methods() -> None:
         try:
             ProcessGroup.__init_subclass__ = classmethod(init_subclass_hook)
         except Exception:
-            # C-defined on some builds; the per-subclass walk above still
-            # covers existing backends.
+            # C-defined on some builds; per-subclass walk above covers existing.
             pass
 
     if wrapped_method_count["count"]:
@@ -587,9 +538,8 @@ def patch_process_group_methods() -> None:
 
 
 def patch_cuda_graph() -> None:
-    """Wrap CUDAGraph.capture_begin / capture_end / replay. replay() is
-    critical: replayed kernels run as one hipGraphLaunch with no per-op
-    dispatch records, so without this wrap they are silent in the trace."""
+    """Wrap CUDAGraph capture_begin/capture_end/replay. replay is critical:
+    replayed kernels run as one hipGraphLaunch with no per-op records."""
     if cuda_mod is None:
         return
 
@@ -624,9 +574,7 @@ def patch_cuda_graph() -> None:
 
 
 def patch_triton_launcher() -> None:
-    """Wrap triton.compiler.CompiledKernel.__call__ so Triton / Inductor
-    kernel launches show up in the marker stream (they bypass the ATen
-    dispatcher entirely)."""
+    """Wrap CompiledKernel.__call__ so Triton/Inductor launches show in markers."""
     if CompiledKernel is None:
         return
 
@@ -667,8 +615,7 @@ def patch_triton_launcher() -> None:
 
 
 def patch_compile_callable() -> None:
-    """Wrap torch.compile so the returned callable opens a ROCTX range at
-    each invocation, not just at construction time."""
+    """Wrap torch.compile + the returned callable so each invocation is bracketed."""
     original_compile = getattr(torch, "compile", None)
     if original_compile is None:
         return
@@ -681,7 +628,6 @@ def patch_compile_callable() -> None:
         *args: Any,
         **kwargs: Any,
     ) -> Any:  # noqa: ANN401
-        # Bracket both the construction call and the returned callable.
         location = resolve_user_caller_location()
         _push_scope("torch.compile", f"#1@{location}")
         try:
@@ -720,13 +666,11 @@ def patch_compile_callable() -> None:
         )
 
 
-# Dispatcher coverage.
-#   C++ tier:    handled by the .so for FUNCTION + BACKWARD_FUNCTION.
-#   Python tier: TorchDispatchMode covers forward ATen ops.
+# Dispatcher: C++ tier covers fwd+bwd; Python tier covers forward only.
 
 
 def next_dispatcher_index(op_name: str) -> int:
-    """Next per-thread occurrence count for op_name."""
+    """Per-thread occurrence count for op_name."""
     counters = getattr(_thread_local, "dispatcher_counters", None)
     if counters is None:
         counters = {}
@@ -736,8 +680,7 @@ def next_dispatcher_index(op_name: str) -> int:
 
 
 def warn_dispatcher_failure_once(phase: str, error: Exception) -> None:
-    """One console_warning per (thread, phase); silently suppress repeats.
-    Dispatcher callbacks must not propagate exceptions."""
+    """One warning per (thread, phase); dispatcher callbacks must not raise."""
     flag_attr = f"warned_dispatcher_failure_{phase}"
     if getattr(_thread_local, flag_attr, False):
         return
@@ -753,9 +696,7 @@ def warn_dispatcher_failure_once(phase: str, error: Exception) -> None:
 
 
 def dispatcher_marker_name_for(func: Callable[..., Any]) -> str:
-    """Marker name for an OpOverload dispatch target. ATen ops are emitted
-    as ``torch.ops.aten.<op>`` (matches torch_trace_coverage_utils.
-    marker_matches_op); other namespaces pass through as ``<ns>::<op>``."""
+    """ATen -> torch.ops.aten.<op>; other namespaces -> <ns>::<op>."""
     try:
         packet = getattr(func, "overloadpacket", None) or getattr(
             func, "_overloadpacket", None
@@ -781,11 +722,7 @@ def dispatcher_marker_name_for(func: Callable[..., Any]) -> str:
 
 
 def install_dispatcher_hook() -> str:
-    """C++ tier: no-op. Python tier: enter a TorchDispatchMode that emits
-    a ROCTX range per dispatched ATen op on the calling thread only.
-
-    TorchDispatchMode is not entered on other Python threads; autograd
-    worker coverage requires the C++ RecordFunction tier (default)."""
+    """C++ tier: no-op. Python tier: enter TorchDispatchMode on this thread."""
     if _USING_C_TIER:
         console_log(
             "torch trace",
@@ -864,18 +801,13 @@ def install_dispatcher_hook() -> str:
     _active_dispatch_mode = mode
     console_log(
         "torch trace",
-        "Operator coverage: TorchDispatchMode (Python tier; backward "
-        "worker context degraded without the .so).",
+        "Operator coverage: TorchDispatchMode (Python tier).",
     )
     return "torch_dispatch_mode"
 
 
-# Per-call structural wrappers installed from __main__.
-
-
 def install_tensor_backward_wrapper() -> None:
-    """Wrap torch.Tensor.backward. The boundary itself is not a dispatch;
-    per-op backward dispatches are captured by the active tier."""
+    """Wrap torch.Tensor.backward; per-op backward dispatches go to the tier."""
     if getattr(torch.Tensor.backward, "_roctx_wrapped", False):
         return
 
@@ -905,11 +837,10 @@ def wrap_method_on_subclasses(
     method_name: str,
     wrapper_factory: Callable[..., Any],
 ) -> int:
-    """Wrap method_name on every class that defines it (each definition at
-    most once; inheritors share their ancestor's wrap). Existing subclasses
-    are wrapped eagerly; later ones via a base_class.__init__ hook
-    (subclasses overriding __init__ must call super().__init__()). Returns
-    the number of method definitions newly wrapped in this process."""
+    """Wrap method on every defining class; future subclasses via __init__ hook.
+
+    Returns the count of method definitions newly wrapped.
+    """
     wrapped_classes = set()
     wrapped_method_count = {"count": 0}
 
@@ -992,9 +923,7 @@ def wrap_module_function(
     attr_name: str,
     marker_name: str,
 ) -> bool:
-    """Replace ``module.attr_name`` with a ROCTX-wrapped version.
-    Returns False (never raises) when the attribute is missing, not
-    callable, already wrapped, or the assignment is rejected."""
+    """Replace module.attr_name with a ROCTX-wrapped version. Never raises."""
     fn = getattr(module, attr_name, None)
     if fn is None or not callable(fn):
         return False
@@ -1012,10 +941,7 @@ def wrap_module_function(
     return True
 
 
-# Dispatch-bypass entry points enumerated in
-# tests/torch_trace_coverage_utils.py:STRUCTURAL_BUILDERS.
 EXTRA_STRUCTURAL_WRAPS = (
-    # Functional autograd entry points.
     ("torch.autograd", "grad", "torch.autograd.grad"),
     ("torch.autograd.functional", "hessian", "torch.autograd.functional.hessian"),
     ("torch.autograd.functional", "jacobian", "torch.autograd.functional.jacobian"),
@@ -1023,7 +949,6 @@ EXTRA_STRUCTURAL_WRAPS = (
     ("torch.autograd.functional", "vjp", "torch.autograd.functional.vjp"),
     ("torch.autograd.functional", "hvp", "torch.autograd.functional.hvp"),
     ("torch.autograd.functional", "vhp", "torch.autograd.functional.vhp"),
-    # CUDA control surface.
     ("torch.cuda", "synchronize", "torch.cuda.synchronize"),
     ("torch.cuda", "current_device", "torch.cuda.current_device"),
     ("torch.cuda", "device_count", "torch.cuda.device_count"),
@@ -1032,35 +957,24 @@ EXTRA_STRUCTURAL_WRAPS = (
     ("torch.cuda", "memory_allocated", "torch.cuda.memory_allocated"),
     ("torch.cuda", "reset_peak_memory_stats", "torch.cuda.reset_peak_memory_stats"),
     ("torch.cuda", "set_device", "torch.cuda.set_device"),
-    # torch.jit capture model-setup boundaries.
     ("torch.jit", "script", "torch.jit.script"),
     ("torch.jit", "trace", "torch.jit.trace"),
-    # High-traffic top-level ATen wrappers. Each is also reachable as a
-    # Tensor method (see TENSOR_METHOD_WRAPS); both routes get bracketed
-    # so the analyzer can attribute kernels by user-frame in either call
-    # style.
+    # Top-level ATen wrappers also reachable as Tensor methods; both routes bracketed.
     ("torch", "argmax", "torch.argmax"),
     ("torch", "sum", "torch.sum"),
     ("torch", "eq", "torch.eq"),
     ("torch", "mean", "torch.mean"),
     ("torch", "max", "torch.max"),
-    # Functional losses that wrap aten:: behind a thin Python facade.
-    # The dispatcher sees the inner aten calls; the wrap adds user-frame
-    # attribution to the outer call site.
+    # Functional losses: outer Python facade gets user-frame attribution.
     ("torch.nn.functional", "nll_loss", "torch.nn.functional.nll_loss"),
     ("torch.nn.functional", "cross_entropy", "torch.nn.functional.cross_entropy"),
     ("torch.nn.functional", "mse_loss", "torch.nn.functional.mse_loss"),
     ("torch.nn.functional", "log_softmax", "torch.nn.functional.log_softmax"),
     ("torch.nn.functional", "softmax", "torch.nn.functional.softmax"),
-    # Note: torch.compile is wrapped in patch_compile_callable() so each
-    # invocation of the returned compiled callable is bracketed too.
 )
 
 
-# Tensor methods that frequently land in user code as the entry point
-# for an ATen op (e.g. ``output.argmax(dim=1)``, ``loss.item()``).
-# Wrapping them adds a USER_SCOPE frame so enclosed aten:: dispatch
-# records inherit the user file:line.
+# Tensor methods often used as entry points (e.g. output.argmax(dim=1)).
 TENSOR_METHOD_WRAPS = (
     "item",
     "argmax",
@@ -1094,8 +1008,7 @@ def _selected_tensor_method_wraps() -> tuple[str, ...]:
 
 
 def install_function_apply_wrappers() -> bool:
-    """Per-subclass shadow of torch.autograd.Function.apply, plus an
-    __init_subclass__ hook for subclasses defined later."""
+    """Per-subclass shadow of Function.apply + __init_subclass__ hook."""
     if Function is None:
         return False
 
@@ -1159,16 +1072,10 @@ def install_function_apply_wrappers() -> bool:
 
 
 def install_tensor_method_wrappers() -> None:
-    """Wrap selected tensor methods on torch.Tensor. Each wrap adds a
-    USER_SCOPE frame around the call, so the ATen dispatch records that
-    fire inside inherit the user file:line via the C++ tier's
-    aten.nested:0 label (or the Python tier's frame walker).
+    """Wrap selected Tensor methods so inner ATen dispatches inherit user frame.
 
-    Methods in DEEP_TENSOR_METHOD_WRAPS are opt-in via
-    ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS=1.
-
-    Methods that are read-only descriptors (``Tensor.shape``-style) or
-    that refuse Python-level reassignment are silently skipped."""
+    DEEP_TENSOR_METHOD_WRAPS are opt-in via ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS=1.
+    """
     wrapped = []
     selected_methods = _selected_tensor_method_wraps()
     if not _deep_tensor_method_wraps_enabled():
@@ -1189,8 +1096,7 @@ def install_tensor_method_wrappers() -> None:
             setattr(torch.Tensor, method_name, wrapped_fn)
             wrapped.append(method_name)
         except (TypeError, AttributeError) as e:
-            # Some Tensor methods are slot-defined in C and refuse
-            # Python reassignment; degrade silently.
+            # C-slot methods refuse Python reassignment.
             console_warning(
                 "torch trace",
                 f"Could not patch torch.Tensor.{method_name}: {e}",
@@ -1205,9 +1111,7 @@ def install_tensor_method_wrappers() -> None:
 
 
 def install_extra_structural_wrappers() -> None:
-    """Wrap EXTRA_STRUCTURAL_WRAPS, selected tensor methods,
-    torch.cuda.{Event,Stream}.__init__, and torch.autograd.Function.apply.
-    Each wrap is independent: a single failure does not block the others."""
+    """Wrap EXTRA_STRUCTURAL_WRAPS, tensor methods, cuda.{Event,Stream}, Function.apply."""
     wrapped = []
     for module_path, attr_name, marker_name in EXTRA_STRUCTURAL_WRAPS:
         try:
@@ -1228,15 +1132,8 @@ def install_extra_structural_wrappers() -> None:
             if init is None or getattr(init, "_roctx_wrapped", False):
                 continue
             try:
-                # torch.cuda.{Event,Stream} are C-extension subclasses
-                # that consume their ctor kwargs (enable_timing=...,
-                # device=..., priority=...) in __new__; their __init__
-                # is inherited straight from object, which rejects any
-                # forwarded args. Forwarding via roctx_wrapper would
-                # turn Event(enable_timing=True) into
-                # object.__init__(self, enable_timing=True) -> TypeError.
-                # Detect that case and emit the marker without touching
-                # the inherited slot's argument contract.
+                # cuda.{Event,Stream} consume ctor kwargs in __new__;
+                # __init__ is inherited from object and rejects forwarded args.
                 if init is object.__init__:
                     cls.__init__ = _marker_only_init_wrapper(f"torch.cuda.{cls_name}")
                 else:
@@ -1267,8 +1164,7 @@ def install_extra_structural_wrappers() -> None:
 
 
 def inject_roctx_into_model() -> None:
-    """Wrap torch.nn.Module.__call__ (not forward(), so hooks are covered
-    too). Each invocation gets a per-instance call counter."""
+    """Wrap nn.Module.__call__ (not forward(), so hooks are covered)."""
     if nn is None:
         return
     if getattr(nn.Module.__call__, "_roctx_wrapped", False):
@@ -1302,7 +1198,6 @@ def inject_roctx_into_model() -> None:
         console_log("torch trace", "Wrapped nn.Module forward() with ROCTX markers\n")
 
 
-# Public test surface.
 def using_c_tier() -> bool:
     """True if the C++ RecordFunction tier is active."""
     return _USING_C_TIER
@@ -1319,12 +1214,7 @@ def dump_recordfn_stats() -> Optional[dict[str, Any]]:  # noqa: ANN401
 
 
 def install_global_wraps() -> None:
-    """Apply every process-global PyTorch monkey-patch this module owns.
-
-    Dispatcher hook runs first so structural wraps inherit ATen-dispatch
-    markers. Idempotent (each patch_* / inject_* stamps ``_roctx_wrapped``
-    on the replacement).
-    """
+    """Apply every process-global monkey-patch. Idempotent."""
     _initialize_c_tier()
     _emit_python_tier_fallback_warning()
     install_dispatcher_hook()

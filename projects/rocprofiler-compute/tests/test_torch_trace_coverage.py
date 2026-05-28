@@ -3,17 +3,10 @@
 
 """ROCTX marker coverage test for inject_roctx.py.
 
-Samples ATen + structural ops, builds a workload, runs torch.profiler
-as ground truth, runs rocprof-compute --torch-trace, and compares
-markers + kernel correlations per op. Sampling is controlled by
---coverage-seed / --coverage-n; the strict C++ tier check is on by
-default and can be relaxed with --no-require-cpp-tier.
-
-CI: runs in every test category (quick, standard, comprehensive, full)
-    via test_categories.yaml; needs a GPU; ctest timeout 1800 s.
-Coverage: included in the coverage XML.
-Why: the only end-to-end check that the --torch-trace marker stream
-    matches torch.profiler ground truth at the per-op level.
+Samples ATen + structural ops, runs torch.profiler as ground truth,
+runs rocprof-compute --torch-trace, compares per-op. Sampling via
+--coverage-seed / --coverage-n; strict C++ tier on by default
+(--no-require-cpp-tier to relax). Needs GPU.
 """
 
 import json
@@ -27,9 +20,7 @@ from typing import Any, Dict, List, Tuple
 import common
 import pytest
 
-# Eager imports are safe now that C++ tier loading is deferred to
-# install_global_wraps(); keep best-effort fallbacks so collection
-# still succeeds on hosts without PyTorch.
+# Best-effort fallbacks so collection succeeds on CPU-only hosts.
 try:
     import torch  # noqa: E402
 except Exception:
@@ -63,14 +54,10 @@ def test_random_operator_kernel_coverage(
     binary_handler_profile_rocprof_compute,
     torch_trace_coverage_sampling,
 ):
-    """Verify --torch-trace ROCTX output matches profiler ground truth.
+    """Verify --torch-trace ROCTX output matches torch.profiler per op.
 
-    Steps: sample ops → emit workload + runner → run runner for JSON → run
-    rocprof-compute on the workload → parse CSVs → compare per op. Per-op
-    mismatches are reported (stdout + UserWarning) and fail the test.
-    SKIPs (builder gaps, ground-truth errors, etc.) do not fail individually,
-    but at least one operator must PASS — an all-SKIP run fails as a
-    regression guard.
+    Mismatches fail; per-op SKIPs (builder gaps etc.) don't; but at least
+    one op must PASS (all-SKIP is a regression).
     """
     require_torch(gpu=True)
     from collections import Counter, defaultdict
@@ -106,13 +93,7 @@ def test_random_operator_kernel_coverage(
         request.config.getoption("--torch-trace-match-verbose"),
     )
 
-    # Pre-flight: probe the loader in this Python env. The workload
-    # subprocess shares the same JIT cache + source fingerprint, so a
-    # parent-side miss is a near-certain predictor of subprocess
-    # degradation; failing fast here avoids wasted workload time and
-    # gives the cleanest diagnostic trail. The post-workload sentinel
-    # scan below covers the second axis (did the subprocess actually
-    # emit C++ markers?). Both axes are gated by require_cpp_tier.
+    # Pre-flight loader probe; subprocess shares JIT cache + fingerprint.
     inject_roctx_loader.load()
     loader_tier = inject_roctx_loader.loaded_tier()
     _, loader_diagnostic_trail = inject_roctx_loader.consume_diagnostics()
@@ -132,10 +113,8 @@ def test_random_operator_kernel_coverage(
 
     if not loader_cpp_tier_active:
         warnings.warn(
-            "torch_trace coverage: loader returned the Python fallback "
-            f"in the test runner's env (loaded_tier={loader_tier!r}); "
-            "the subprocess will almost certainly fall through too. See "
-            "the preceding [torch trace loader] trail for the cause.",
+            f"loader returned Python fallback (loaded_tier={loader_tier!r}); "
+            "subprocess will likely fall through too.",
             UserWarning,
             stacklevel=1,
         )
@@ -145,18 +124,13 @@ def test_random_operator_kernel_coverage(
             loader_diagnostic_trail,
         )
         pytest.fail(
-            "strict C++ tier (loader axis): pre-flight loader probe "
-            f"returned loaded_tier={loader_tier!r} (Python fallback). "
-            "Fix the .so build or pass --no-require-cpp-tier.\n"
+            f"strict C++ tier (loader axis): loaded_tier={loader_tier!r}.\n"
             f"Loader trail:\n{trail_str or '  (no diagnostic lines captured)'}"
         )
 
-    # discover_operators drops hardware-incompatible CUDA-only ATen ops;
-    # the excluded count is reported in the session header.
     aten_ops, structural_ops, excluded_aten_ops = discover_operators()
 
-    # sample_budget caps the ATen sample only; structural entries are
-    # always included.
+    # sample_budget caps ATen only; structural entries always included.
     n_aten = min(
         max(0, sample_budget - len(structural_ops)),
         len(aten_ops),
@@ -225,9 +199,7 @@ def test_random_operator_kernel_coverage(
 
         roctx_kernels_map, roctx_marker_names = parse_roctx_markers(workload_dir)
 
-        # Sentinel-based C++ tier signature check on the raw marker
-        # stream. compare_single_op() PASSes on either tier, so this
-        # is the only proof the C++ tier actually ran.
+        # Sentinel check: the only proof C++ tier ran (PASS works on either).
         cpp_tier_active, cpp_tier_sentinel_counts = detect_cpp_tier_signature(
             workload_dir,
         )
@@ -236,12 +208,10 @@ def test_random_operator_kernel_coverage(
             for name in C_TIER_BACKWARD_SENTINELS
         )
 
-        # Parent loaded the .so but the subprocess emitted no C++
-        # sentinels -- usually a different sys.executable, install()
-        # raised inside inject_roctx.py, or the workload bypassed it.
+        # Parent loaded .so but subprocess didn't: different sys.executable,
+        # install() raised, or workload bypassed inject_roctx.py.
         loader_subprocess_mismatch = loader_cpp_tier_active and not cpp_tier_active
 
-        # Per-operator comparison
         failure_detail: List[Tuple[str, str]] = []
         skip_categories: "Counter[str]" = Counter()
         skip_op_names: Dict[str, List[str]] = defaultdict(list)
@@ -565,9 +535,9 @@ def test_cpp_tier_new_leaf_labels_replace_legacy_dispatcher_label(
     seen = {_leaf_label(m) for m in captured}
     cpp_seen = seen & expected_cpp_labels
 
-    assert "dispatcher:0" not in {label.split("@")[-1] for label in seen}, (
-        f"legacy 'dispatcher:0' leaked into a marker (seen leaves: {seen})"
-    )
+    assert "dispatcher:0" not in {
+        label.split("@")[-1] for label in seen
+    }, f"legacy 'dispatcher:0' leaked into a marker (seen leaves: {seen})"
     assert "aten:0" in cpp_seen, (
         f"no top-level aten:0 leaf observed -- label classifier broken "
         f"(seen leaves: {seen})"

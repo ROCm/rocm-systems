@@ -1,21 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Unit tests for C++ RecordFunction tier signature detection.
+"""Unit tests for detect_cpp_tier_signature() sentinel scan.
 
-Pins the contract that detect_cpp_tier_signature() correctly identifies
-C++ tier markers via the leaf sentinels aten:0, aten.nested:0,
-autograd.engine:0, autograd.bwd:0 (and never matches the Python tier's
-python.dispatch:0). Used by test_torch_trace_coverage to gate the
-strict C++ tier assertion.
-
-CI: registered with ctest; not in test_categories.yaml so it runs only
-    on the full ctest invocation (and on the coverage job). No GPU,
-    ctest timeout 60 s.
-Coverage: included in the coverage XML.
-Why: detection lives in coverage_utils and is consumed by the strict
-    C++ tier assertion; pinned separately so a regression in the
-    sentinel scan can't slip through the GPU-only coverage test.
+Pins identification of C++ tier markers via aten:0, aten.nested:0,
+autograd.engine:0, autograd.bwd:0; never matches python.dispatch:0.
+No GPU. Consumed by test_torch_trace_coverage's strict-tier assertion.
 """
 
 import importlib.util
@@ -24,13 +14,8 @@ import common  # noqa: F401  -- adds src/ to sys.path
 import pandas as pd
 import pytest
 
-# torch_trace_coverage_utils imports torch unconditionally. Guard the
-# symbol import so this module still loads on CPU-only hosts; each test
-# below skips via the autouse _require_torch_present fixture when torch
-# is unavailable. A module-level
-# pytest.skip(..., allow_module_level=True) would collect zero items and
-# make pytest exit with code 5 ("no tests collected"), which CTest reads
-# as a test failure.
+# Guard the symbol import so this module loads CPU-only; tests skip
+# individually via _require_torch_present (module-level skip exits 5).
 if importlib.util.find_spec("torch") is not None:
     from torch_trace_coverage_utils import (  # noqa: E402
         C_TIER_BACKWARD_SENTINELS,
@@ -49,9 +34,7 @@ def _require_torch_present(require_torch):
 
 
 def _marker_df(*function_cells):
-    """Helper: build a DataFrame with the single Function column the
-    detection inspects. The real rocprof-compute CSV has additional
-    columns; the detection ignores them so the test fixture stays minimal."""
+    """DataFrame with the single Function column the detection inspects."""
     return pd.DataFrame({"Function": list(function_cells)})
 
 
@@ -172,9 +155,9 @@ def test_signature_does_not_match_sentinel_substring_in_filepath():
     contains the bytes 'aten:0' but not the '@aten:0' delimiter."""
     df = _marker_df("some.op:#1@my_aten:0_dir/file.py:42")
     cpp, counts = cpp_tier_signature_in_markers(df)
-    assert cpp is False, (
-        f"substring match must not trigger sentinel detection; saw {counts}"
-    )
+    assert (
+        cpp is False
+    ), f"substring match must not trigger sentinel detection; saw {counts}"
     assert counts == {}
 
 
@@ -224,13 +207,15 @@ def test_detect_reads_marker_csv_and_detects_signature(tmp_path):
     silently regress this without coverage."""
     csv_path = tmp_path / "subdir" / "0001_marker_api_trace.csv"
     csv_path.parent.mkdir(parents=True)
-    df = pd.DataFrame({
-        "Function": [
-            "torch.mm:#1@aten:0",
-            "node:#1@autograd.bwd:0",
-        ],
-        "Correlation_ID": [1, 2],
-    })
+    df = pd.DataFrame(
+        {
+            "Function": [
+                "torch.mm:#1@aten:0",
+                "node:#1@autograd.bwd:0",
+            ],
+            "Correlation_ID": [1, 2],
+        }
+    )
     df.to_csv(csv_path, index=False)
     cpp, counts = detect_cpp_tier_signature(str(tmp_path))
     assert cpp is True
@@ -242,10 +227,12 @@ def test_detect_concatenates_multiple_csvs(tmp_path):
     iteration; detect_cpp_tier_signature must sum across them.
     Concretely: a multi-rank run that emits the C++ sentinel only in
     rank 0's CSV must still come back as cpp_tier_active=True."""
-    for i, fn in enumerate([
-        "torch.add:#1@python.dispatch:0",
-        "torch.mm:#1@aten:0",
-    ]):
+    for i, fn in enumerate(
+        [
+            "torch.add:#1@python.dispatch:0",
+            "torch.mm:#1@aten:0",
+        ]
+    ):
         path = tmp_path / f"rank{i}_marker_api_trace.csv"
         pd.DataFrame({"Function": [fn]}).to_csv(path, index=False)
     cpp, counts = detect_cpp_tier_signature(str(tmp_path))

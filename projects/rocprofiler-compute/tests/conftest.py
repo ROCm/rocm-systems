@@ -42,27 +42,31 @@ class ProfileModeImportGuard:
     """
 
     # Project modules that are allowed (non-stdlib)
-    ALLOWED_PROJECT_MODULES = frozenset([
-        "rocprof_compute",
-        "rocprof_compute_profile",
-        "rocprof_compute_analyze",
-        "rocprof_compute_soc",
-        "rocprof_compute_tui",
-        "utils",
-        "vendored",
-        "roofline",
-        "config",
-        "argparser",  # src/argparser.py, not stdlib argparse
-        "rocprof_compute_base",
-    ])
+    ALLOWED_PROJECT_MODULES = frozenset(
+        [
+            "rocprof_compute",
+            "rocprof_compute_profile",
+            "rocprof_compute_analyze",
+            "rocprof_compute_soc",
+            "rocprof_compute_tui",
+            "utils",
+            "vendored",
+            "roofline",
+            "config",
+            "argparser",  # src/argparser.py, not stdlib argparse
+            "rocprof_compute_base",
+        ]
+    )
 
     # ROCm system libraries (not pip packages)
-    ALLOWED_ROCM_MODULES = frozenset([
-        "amdsmi",  # AMD System Management Interface
-        "hip",  # HIP runtime Python bindings
-        "rocprofv3",  # rocprofv3 python modules such as avail
-        "rocprofv3_avail_module",  # Alternative avail module for backward compatibility
-    ])
+    ALLOWED_ROCM_MODULES = frozenset(
+        [
+            "amdsmi",  # AMD System Management Interface
+            "hip",  # HIP runtime Python bindings
+            "rocprofv3",  # rocprofv3 python modules such as avail
+            "rocprofv3_avail_module",  # Alternative avail module for backward compatibility
+        ]
+    )
 
     def __enter__(self):
         """
@@ -182,47 +186,31 @@ def pytest_addoption(parser):
         "--coverage-seed",
         type=int,
         default=random.randrange(2**32),
-        help=(
-            "RNG seed for test_torch_trace_coverage operator sampling "
-            "(default: a fresh random 32-bit seed per pytest invocation)"
-        ),
+        help="RNG seed for test_torch_trace_coverage sampling.",
     )
     parser.addoption(
         "--coverage-n",
         type=int,
         default=100,
-        help=(
-            "Random ATen operator sample budget for "
-            "test_torch_trace_coverage (default: 100)."
-        ),
+        help="Random ATen sample budget (default 100).",
     )
     parser.addoption(
         "--no-require-cpp-tier",
         action="store_true",
         default=False,
-        help="Relax strict C++ RecordFunction tier validation.",
+        help="Relax strict C++ tier validation.",
     )
     parser.addoption(
         "--torch-trace-match-verbose",
         action="store_true",
         default=False,
-        help="Per-op match logging in test_random_operator_kernel_coverage.",
+        help="Per-op match logging.",
     )
 
 
 @pytest.fixture
 def require_torch():
-    """Factory fixture: returns a callable that skips when PyTorch (or,
-    with ``gpu=True``, a CUDA-capable GPU) is unavailable.
-
-    Callers invoke ``require_torch()`` for CPU-only tests or
-    ``require_torch(gpu=True)`` when CUDA is also required.
-
-    A module-level ``pytest.skip(..., allow_module_level=True)`` collects
-    zero items and makes pytest exit with code 5 ("no tests collected"),
-    which CTest interprets as a test failure; per-test skips via this
-    factory leave the session at exit 0.
-    """
+    """Factory: callable that skips when PyTorch (or, with gpu=True, GPU) is unavailable."""
 
     def _check(*, gpu: bool = False) -> None:
         if importlib.util.find_spec("torch") is None:
@@ -238,12 +226,7 @@ def require_torch():
 
 @pytest.fixture(autouse=True)
 def skip_monkeypatch_with_binary(request):
-    """Auto-skip tests using monkeypatch when --call-binary is used.
-
-    Tests that use monkeypatch to patch Python functions/classes/modules
-    cannot work with --call-binary mode because the binary runs in a separate
-    process where Python patches don't apply.
-    """
+    """Skip monkeypatch tests under --call-binary (patches don't cross processes)."""
     if (
         request.config.getoption("--call-binary")
         and "monkeypatch" in request.fixturenames

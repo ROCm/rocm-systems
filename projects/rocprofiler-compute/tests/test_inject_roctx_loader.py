@@ -1,19 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Unit tests for utils.inject_roctx_loader and the Python-tier fallback.
-
-No GPU required. The loader's resolution order, tag computation, and the
-Python tier are exercised by stubbing the loader. The cmake build path
-is exercised end-to-end by test_torch_trace_coverage.py.
-
-CI: registered with ctest; not in test_categories.yaml so it runs only
-    on the full ctest invocation (and on the coverage job). No GPU,
-    ctest timeout 300 s.
-Coverage: included in the coverage XML.
-Why: pins loader contracts (tier order, cache fingerprint, REBUILD
-    env var, no-ninja policy) without depending on a real cmake build
-    or a GPU, so most loader regressions fail fast in CI.
+"""Unit tests for utils.inject_roctx_loader. No GPU. CMake build is end-to-end
+in test_torch_trace_coverage; this file stubs the loader to pin contracts:
+tier order, cache fingerprint, REBUILD env var, no-ninja policy.
 """
 
 import importlib
@@ -27,14 +17,8 @@ from utils import inject_roctx_loader
 
 @pytest.fixture(autouse=True)
 def _isolate_explicit_so_env(monkeypatch):
-    """Clear ROCPROFCOMPUTE_ROCTX_RECORDFN_SO for every test in this file.
-
-    The CTest registration for test_torch_trace_coverage pins this env
-    var to the configure-time .so path; if a developer runs the whole
-    test suite under one pytest invocation that inherits that env, the
-    explicit-tier short-circuit in load() would mask every tier-resolution
-    test below. The unset is unconditional so manual pytest runs that
-    happen to have the env exported (e.g. shell rcfile) behave the same.
+    """Unset ROCPROFCOMPUTE_ROCTX_RECORDFN_SO; otherwise the explicit-tier
+    short-circuit in load() would mask every tier-resolution test.
     """
     monkeypatch.delenv(inject_roctx_loader._EXPLICIT_SO_ENV_VAR, raising=False)
 
@@ -50,9 +34,9 @@ def test_compute_tag_returns_well_formed_string():
     assert any(p.startswith("abi") for p in parts)
     # _src{12 hex} guards against stale .so loads after a source edit.
     src_components = [p for p in parts if p.startswith("src")]
-    assert len(src_components) == 1, (
-        f"expected exactly one '_src...' component in tag {tag!r}"
-    )
+    assert (
+        len(src_components) == 1
+    ), f"expected exactly one '_src...' component in tag {tag!r}"
     src_value = src_components[0][len("src") :]
     # 12-char lowercase hex, or "missing" if no inputs were readable.
     assert src_value == "missing" or (
@@ -65,9 +49,7 @@ def test_compute_tag_is_stable_across_calls():
 
 
 def test_source_fingerprint_changes_when_inputs_change(tmp_path, monkeypatch):
-    """A one-byte edit to any fingerprint input must change the tag,
-    so the on-disk cache misses after a source edit.
-    """
+    """One-byte edit must change the tag so the on-disk cache misses."""
     cpp = tmp_path / "roctx_recordfn.cpp"
     cmake = tmp_path / "CMakeLists.txt"
     cpp.write_text("// fingerprint test source\n")
@@ -85,21 +67,19 @@ def test_source_fingerprint_changes_when_inputs_change(tmp_path, monkeypatch):
         original = input_path.read_bytes()
         input_path.write_bytes(original + b"\n# mutation\n")
         mutated = inject_roctx_loader._source_fingerprint()
-        assert mutated != baseline, (
-            f"editing {input_path.name} did not change the fingerprint"
-        )
+        assert (
+            mutated != baseline
+        ), f"editing {input_path.name} did not change the fingerprint"
         input_path.write_bytes(original)
         assert inject_roctx_loader._source_fingerprint() == baseline
 
 
 def test_source_fingerprint_excludes_tool_version_file():
-    """VERSION must not be in _FINGERPRINT_INPUTS (would invalidate
-    the cache on every release; escape hatch is the REBUILD env var).
-    """
+    """VERSION must not be a fingerprint input (would bust cache every release)."""
     for path in inject_roctx_loader._FINGERPRINT_INPUTS:
-        assert path.name != "VERSION", (
-            f"VERSION should not be in _FINGERPRINT_INPUTS; saw {path}"
-        )
+        assert (
+            path.name != "VERSION"
+        ), f"VERSION should not be in _FINGERPRINT_INPUTS; saw {path}"
 
 
 def test_source_fingerprint_is_missing_sentinel_when_no_inputs_readable(
@@ -118,10 +98,7 @@ def test_source_fingerprint_is_missing_sentinel_when_no_inputs_readable(
 
 
 def test_source_fingerprint_is_length_delimited(tmp_path, monkeypatch):
-    """Moving bytes across an input boundary (``"AB"+"C"`` ->
-    ``"A"+"BC"``) must change the hash; the per-file length prefix
-    is what prevents that collision.
-    """
+    """Moving bytes across input boundary ("AB"+"C" -> "A"+"BC") must change hash."""
     a = tmp_path / "a.cpp"
     b = tmp_path / "b.txt"
     monkeypatch.setattr(inject_roctx_loader, "_FINGERPRINT_INPUTS", (a, b))
@@ -140,10 +117,7 @@ def test_force_python_fallback_returns_none():
 
 
 def test_install_cached_so_overwrites_stale_artifact(tmp_path):
-    """The cache copy must overwrite an existing cached .so; otherwise
-    a forced rebuild would load fresh in-process but leave the stale
-    binary for the next run.
-    """
+    """Cache copy must overwrite existing cached .so."""
     src = tmp_path / "build" / "roctx_recordfn.so"
     src.parent.mkdir()
     src.write_bytes(b"new content")
@@ -152,25 +126,19 @@ def test_install_cached_so_overwrites_stale_artifact(tmp_path):
     cached.write_bytes(b"STALE content -- must be overwritten")
 
     inject_roctx_loader._install_cached_so(src, cached)
-    assert cached.read_bytes() == b"new content", (
-        "cache copy did not overwrite the existing cached .so"
-    )
+    assert (
+        cached.read_bytes() == b"new content"
+    ), "cache copy did not overwrite the existing cached .so"
 
 
 def test_cmake_and_runtime_compute_identical_fingerprint():
-    """Pin the loader and CMake to the same _source_fingerprint().
-    Drift here makes a prebuilt .so silently invisible and forces the
-    Python fallback.
-    """
+    """Loader and CMake must agree on _source_fingerprint()."""
     import subprocess
 
     cmake_dir = inject_roctx_loader._SO_SOURCE_DIR
-    assert cmake_dir.is_dir(), (
-        f"expected the cmake source dir at {cmake_dir}; if the layout "
-        f"moved, the CMakeLists.txt sys.path computation must move too"
-    )
+    assert cmake_dir.is_dir(), f"missing cmake source dir at {cmake_dir}"
 
-    # Mirror exactly the inline -c argument from CMakeLists.txt.
+    # Mirror the inline -c argument from CMakeLists.txt.
     snippet = (
         "import sys, pathlib; "
         f"sys.path.insert(0, str(pathlib.Path('{cmake_dir}/../..').resolve())); "
@@ -185,23 +153,17 @@ def test_cmake_and_runtime_compute_identical_fingerprint():
     )
     cmake_side = result.stdout.strip()
     runtime_side = inject_roctx_loader._source_fingerprint()
-    assert cmake_side == runtime_side, (
-        f"install-time fingerprint {cmake_side!r} != runtime "
-        f"fingerprint {runtime_side!r}; prebuilt .so will never be "
-        f"resolved. Check the import path in "
-        f"src/lib/roctx_recordfn/CMakeLists.txt."
-    )
+    assert (
+        cmake_side == runtime_side
+    ), f"install-time fingerprint {cmake_side!r} != runtime {runtime_side!r}"
 
 
 def test_roctx_recordfn_source_avoids_torch_umbrella_headers():
-    """Forbid <torch/extension.h>, <torch/all.h>, and <torch/torch.h>.
-    Some ROCm nightly wheels strip the umbrella; only narrow ATen +
-    c10 + pybind11 includes are portable.
-    """
+    """Forbid <torch/{extension,all,torch}.h>; ROCm nightlies may strip them."""
 
     cpp_path = inject_roctx_loader._SO_SOURCE
-    assert cpp_path.is_file(), f"expected the C++ source at {cpp_path}"
-    # Strip line comments so the rationale prose doesn't false-positive.
+    assert cpp_path.is_file(), f"missing C++ source at {cpp_path}"
+    # Strip line comments to avoid matching prose.
     active_lines = [
         line
         for line in cpp_path.read_text().splitlines()
@@ -216,20 +178,13 @@ def test_roctx_recordfn_source_avoids_torch_umbrella_headers():
     )
     for header in forbidden:
         directive = f"#include {header}"
-        assert directive not in active_src, (
-            f"roctx_recordfn.cpp must not include {header}; use the "
-            f"narrow <ATen/...>, <c10/...>, <pybind11/...> includes."
-        )
+        assert directive not in active_src, f"must not include {header}"
 
 
 def test_cmake_buildfile_does_not_override_output_name():
-    """CMakeLists must not pin OUTPUT_NAME (would strip the tag from
-    the artifact filename, making it invisible to the tag-keyed
-    runtime probes).
-    """
+    """CMakeLists must not pin OUTPUT_NAME (would strip the tag)."""
     cmake_path = inject_roctx_loader._SO_BUILDFILE
-    assert cmake_path.is_file(), f"expected CMakeLists.txt at {cmake_path}"
-    # Strip line comments so rationale text doesn't false-positive.
+    assert cmake_path.is_file(), f"missing CMakeLists.txt at {cmake_path}"
     active_lines = [
         line
         for line in cmake_path.read_text().splitlines()
@@ -237,17 +192,11 @@ def test_cmake_buildfile_does_not_override_output_name():
     ]
     active_src = "\n".join(active_lines)
 
-    assert "OUTPUT_NAME" not in active_src, (
-        "CMakeLists.txt must not set OUTPUT_NAME on roctx_recordfn "
-        "(would strip the tag and hide the artifact from the loader)."
-    )
+    assert "OUTPUT_NAME" not in active_src, "must not set OUTPUT_NAME"
 
 
 def test_cmake_buildfile_strips_lib_prefix():
-    """Pin PREFIX="" so the artifact is `roctx_recordfn-${tag}.so`,
-    matching the loader's tag-keyed probes (not the CMake default
-    `libroctx_recordfn-${tag}.so`).
-    """
+    """PREFIX="" so artifact is roctx_recordfn-${tag}.so, not lib-prefixed."""
     import re
 
     cmake_path = inject_roctx_loader._SO_BUILDFILE
@@ -258,70 +207,39 @@ def test_cmake_buildfile_strips_lib_prefix():
     ]
     active_src = "\n".join(active_lines)
 
-    # Accept PREFIX "" or PREFIX="" (set_target_properties syntax).
-    assert re.search(r'PREFIX\s+""', active_src), (
-        'CMakeLists.txt must set PREFIX "" on roctx_recordfn so the '
-        "artifact matches the loader's tag-keyed probes."
-    )
+    assert re.search(r'PREFIX\s+""', active_src), 'must set PREFIX ""'
 
 
 def test_loader_and_cmake_agree_on_artifact_filename_shape():
-    """Pin the filename shape used by both the loader and CMakeLists,
-    catching drift where one side rotates and the other doesn't.
-    """
+    """Loader and cmake must agree on roctx_recordfn-{tag}.so filename."""
     import inspect
 
-    # The loader-side expected-output line lives in _try_cmake_build:
-    #     produced = build_dir / f"roctx_recordfn-{tag}.so"
-    # We don't want to invoke _try_cmake_build (it would spawn cmake);
-    # we just inspect its source for the literal expectation. This is
-    # fragile to refactors but exactly the kind of bug we want pinned
-    # -- if someone changes the filename shape on one side and not
-    # the other, the test fails and the message points at the right
-    # commit.
     src = inspect.getsource(inject_roctx_loader._try_cmake_build)
     assert 'f"roctx_recordfn-{tag}.so"' in src, (
-        "inject_roctx_loader._try_cmake_build no longer references "
-        "the literal `roctx_recordfn-{tag}.so` filename shape. If "
-        "this name shape moved (e.g. into a module-level constant), "
-        "update this test to compare against the new source of "
-        "truth. The corresponding cmake-side contract is enforced "
-        "by test_cmake_buildfile_does_not_override_output_name and "
-        "test_cmake_buildfile_strips_lib_prefix."
+        "filename shape moved; update this test and check the cmake-side "
+        "tests still pin the new constant."
     )
 
 
 def test_roctx_recordfn_source_uses_narrow_includes():
-    """Counterpart to the umbrella-header ban: positively pin the
-    narrow includes that replace it. Without this, a future refactor
-    could pass the negative test by deleting <torch/extension.h>
-    while also accidentally dropping <pybind11/pybind11.h>, leaving
-    the source uncompilable for the opposite reason."""
+    """Positively pin the narrow includes that replace <torch/extension.h>."""
 
     cpp_path = inject_roctx_loader._SO_SOURCE
     src = cpp_path.read_text()
 
     required = (
-        # ATen RecordFunction API.
         "#include <ATen/record_function.h>",
-        # c10 ThreadLocalDebugInfo for the autograd-worker chain.
         "#include <c10/util/ThreadLocalDebugInfo.h>",
-        # pybind11 module surface (replaces <torch/extension.h>).
         "#include <pybind11/pybind11.h>",
-        # STL casters needed for std::vector<std::string> return from
-        # stop_capture(); without this pybind11 has no registered
-        # caster and the module-init fails at import time.
+        # pybind11/stl: vector<string> caster for stop_capture().
         "#include <pybind11/stl.h>",
     )
     for directive in required:
-        assert directive in src, f"roctx_recordfn.cpp must include {directive}"
+        assert directive in src, f"must include {directive}"
 
 
 def test_loader_source_never_recommends_installing_ninja():
-    """Static audit: the loader's source must not recommend installing
-    ninja (CONTRIBUTING.md: Profile Mode Dependency Policy). Naming
-    ninja in prose is fine; action verbs targeting installation are not.
-    """
+    """Profile Mode Dependency Policy: loader must not direct users to install ninja."""
     import inspect as _stdlib_inspect
 
     src = _stdlib_inspect.getsource(inject_roctx_loader).lower()
@@ -335,18 +253,13 @@ def test_loader_source_never_recommends_installing_ninja():
         "ninja==",
     )
     for token in forbidden:
-        assert token not in src, (
-            f"loader source contains {token!r}; this violates the "
-            f"Profile Mode Dependency Policy (CONTRIBUTING.md). "
-            f"Recovery messaging must direct users at the prebuilt "
-            f".so path, never at expanding the dependency surface."
-        )
+        assert (
+            token not in src
+        ), f"loader source contains {token!r}; violates Profile Mode Dependency Policy"
 
 
 def test_explain_cppext_failure_never_recommends_installing_ninja():
-    """Recovery hints on ninja-flavoured failures must steer the user
-    at the cmake tier or the prebuilt path, never at installing ninja.
-    """
+    """Ninja-flavoured failures must steer to cmake tier or prebuilt."""
     samples = [
         RuntimeError("Ninja is required to load C++ extensions"),
         RuntimeError("ninja: command not found"),
@@ -354,9 +267,9 @@ def test_explain_cppext_failure_never_recommends_installing_ninja():
     ]
     for err in samples:
         reason, hint = inject_roctx_loader._explain_cppext_failure(err)
-        assert "ninja" in reason.lower(), (
-            f"ninja-flavoured failure must be classified as such: {reason!r}"
-        )
+        assert (
+            "ninja" in reason.lower()
+        ), f"ninja-flavoured failure must be classified as such: {reason!r}"
         forbidden = ("install ninja", "pip install ninja", "apt install ninja")
         joined = (reason + " " + hint).lower()
         for token in forbidden:
@@ -364,9 +277,9 @@ def test_explain_cppext_failure_never_recommends_installing_ninja():
                 f"recovery hint must not recommend installing ninja "
                 f"(found {token!r} in: {hint!r})"
             )
-        assert "cmake" in hint.lower() or "prebuilt" in hint.lower(), (
-            f"ninja-class hint must mention cmake or prebuilt: {hint!r}"
-        )
+        assert (
+            "cmake" in hint.lower() or "prebuilt" in hint.lower()
+        ), f"ninja-class hint must mention cmake or prebuilt: {hint!r}"
 
 
 def test_explain_cppext_failure_classifies_compiler_and_header_cases():
@@ -379,12 +292,12 @@ def test_explain_cppext_failure_classifies_compiler_and_header_cases():
     ]
     for err, expected_keyword in cases:
         reason, hint = inject_roctx_loader._explain_cppext_failure(err)
-        assert expected_keyword in reason.lower(), (
-            f"{err!r}: reason {reason!r} missing {expected_keyword!r}"
-        )
-        assert "prebuilt" in hint.lower(), (
-            f"{err!r}: hint should mention prebuilt fallback: {hint!r}"
-        )
+        assert (
+            expected_keyword in reason.lower()
+        ), f"{err!r}: reason {reason!r} missing {expected_keyword!r}"
+        assert (
+            "prebuilt" in hint.lower()
+        ), f"{err!r}: hint should mention prebuilt fallback: {hint!r}"
 
 
 def test_jit_compile_viable_true_when_use_ninja_in_signature(monkeypatch):
@@ -501,9 +414,9 @@ def test_install_cached_so_is_a_noop_when_src_missing(tmp_path):
     cached.write_bytes(b"good content")
 
     inject_roctx_loader._install_cached_so(src, cached)
-    assert cached.read_bytes() == b"good content", (
-        "missing src must leave cached .so untouched"
-    )
+    assert (
+        cached.read_bytes() == b"good content"
+    ), "missing src must leave cached .so untouched"
 
 
 # Synthetic tag for routing tests; stubs compute_tag so these tests
@@ -621,9 +534,9 @@ def test_default_load_path_still_tries_prebuilt_first(monkeypatch):
         lambda tag: calls.append("jit_build") or None,
     )
     assert inject_roctx_loader.load() is sentinel
-    assert calls == ["prebuilt"], (
-        f"expected prebuilt to short-circuit before cached/cmake/jit; saw {calls!r}"
-    )
+    assert calls == [
+        "prebuilt"
+    ], f"expected prebuilt to short-circuit before cached/cmake/jit; saw {calls!r}"
 
 
 def test_default_load_path_walks_all_four_tiers_in_order(monkeypatch):
@@ -658,9 +571,11 @@ def test_default_load_path_walks_all_four_tiers_in_order(monkeypatch):
         ),
     )
     assert inject_roctx_loader.load() is sentinel
-    assert calls == ["prebuilt", "cached", "cmake_build"], (
-        f"expected order prebuilt -> cached -> cmake_build, saw {calls!r}"
-    )
+    assert calls == [
+        "prebuilt",
+        "cached",
+        "cmake_build",
+    ], f"expected order prebuilt -> cached -> cmake_build, saw {calls!r}"
 
 
 def test_default_load_path_falls_through_to_cppext_when_cmake_misses(monkeypatch):
@@ -968,9 +883,9 @@ def test_try_cmake_build_skips_when_cmake_not_on_path(monkeypatch, tmp_path):
 
     monkeypatch.setattr(inject_roctx_loader.subprocess, "run", fail_subprocess)
     assert inject_roctx_loader._try_cmake_build(_FAKE_TAG) is None
-    assert inject_roctx_loader._previous_jit_failure(_FAKE_TAG) is None, (
-        "cmake-not-on-PATH must not veto cpp_extension via the marker"
-    )
+    assert (
+        inject_roctx_loader._previous_jit_failure(_FAKE_TAG) is None
+    ), "cmake-not-on-PATH must not veto cpp_extension via the marker"
 
 
 def test_try_cmake_build_short_circuits_on_prior_failure(monkeypatch, tmp_path):
@@ -1031,13 +946,13 @@ def test_try_cmake_build_passes_runtime_python_to_cmake(monkeypatch, tmp_path):
     assert len(invocations) == 2, f"expected two cmake invocations, saw {invocations!r}"
     configure_argv = invocations[0]
     runtime_python_flag = f"-DTORCH_TRACE_PYTHON={sys.executable}"
-    assert runtime_python_flag in configure_argv, (
-        f"-DTORCH_TRACE_PYTHON must equal sys.executable; saw {configure_argv!r}"
-    )
+    assert (
+        runtime_python_flag in configure_argv
+    ), f"-DTORCH_TRACE_PYTHON must equal sys.executable; saw {configure_argv!r}"
     build_argv = invocations[1]
-    assert build_argv[1] == "--build", (
-        f"second invocation must be `cmake --build`, saw {build_argv!r}"
-    )
+    assert (
+        build_argv[1] == "--build"
+    ), f"second invocation must be `cmake --build`, saw {build_argv!r}"
 
 
 def test_try_cmake_build_records_failure_marker_on_configure_failure(
@@ -1066,9 +981,9 @@ def test_try_cmake_build_records_failure_marker_on_configure_failure(
     marker = inject_roctx_loader._previous_jit_failure(_FAKE_TAG)
     assert marker is not None
     assert inject_roctx_loader._CMAKE_TIER_NAME in marker
-    assert "Could not find Torch" in marker, (
-        f"marker must preserve stderr tail; saw {marker!r}"
-    )
+    assert (
+        "Could not find Torch" in marker
+    ), f"marker must preserve stderr tail; saw {marker!r}"
 
 
 def test_try_cmake_build_records_failure_marker_on_build_failure(monkeypatch, tmp_path):
@@ -1158,13 +1073,13 @@ def test_try_cmake_build_cleans_build_dir_on_success(monkeypatch, tmp_path):
 
     result = inject_roctx_loader._try_cmake_build(_FAKE_TAG)
     assert result is not None
-    assert not build_dir.exists(), (
-        "build dir must be removed on success to bound cache disk usage"
-    )
+    assert (
+        not build_dir.exists()
+    ), "build dir must be removed on success to bound cache disk usage"
     cached_so = cache_dir / f"roctx_recordfn-{_FAKE_TAG}.so"
-    assert cached_so.exists() and cached_so.read_bytes() == b"stub-so", (
-        "produced .so must have been copied to the cache before cleanup"
-    )
+    assert (
+        cached_so.exists() and cached_so.read_bytes() == b"stub-so"
+    ), "produced .so must have been copied to the cache before cleanup"
 
 
 def test_try_cmake_build_keeps_build_dir_on_failure(monkeypatch, tmp_path):
@@ -1303,9 +1218,9 @@ def test_load_resets_diagnostics_on_entry(monkeypatch):
     inject_roctx_loader.load()
     _tier, diagnostics = inject_roctx_loader.consume_diagnostics()
     for level, msg in diagnostics:
-        assert "STALE LINE" not in msg, (
-            f"pre-existing diagnostic leaked across load() boundary: ({level}, {msg!r})"
-        )
+        assert (
+            "STALE LINE" not in msg
+        ), f"pre-existing diagnostic leaked across load() boundary: ({level}, {msg!r})"
 
 
 def test_safe_log_tees_into_accumulator(monkeypatch):
@@ -1384,9 +1299,9 @@ def test_format_load_diagnostic_trail_caps_lines():
         max_lines=12,
     )
     lines = rendered.splitlines()
-    assert len(lines) == 12, (
-        f"expected max_lines=12 to cap output, saw {len(lines)} lines"
-    )
+    assert (
+        len(lines) == 12
+    ), f"expected max_lines=12 to cap output, saw {len(lines)} lines"
     assert "line 99" in rendered, "must keep the trailing (latest) lines"
     assert "line 0" not in rendered, "must drop the leading (oldest) lines"
 

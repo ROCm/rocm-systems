@@ -1,20 +1,9 @@
 ## Copyright (c) Advanced Micro Devices, Inc.
 ## SPDX-License-Identifier:  MIT
 ##
-## Builds the tagged roctx_recordfn-<tag>.so for the --torch-trace
-# C++ tier. Two consumers, both producing the same filename (tag
-# scheme is computed by the loader's _source_fingerprint()):
-#   A. parent rocprof-compute project's add_subdirectory() -- gated on
-#      ENABLE_TESTS. The .so is a CI test fixture so pytest can pin the
-#      loader to a known artifact via ROCPROFCOMPUTE_ROCTX_RECORDFN_SO
-#      and never shell out to cmake / torch.utils.cpp_extension at test
-#      time. Production installs ship sources only (parent's
-#      install(DIRECTORY src/lib/roctx_recordfn ...) under
-#      ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/lib/roctx_recordfn/)
-#      and the runtime loader's cmake-tier builds the .so on first
-#      --torch-trace use in the user's PyTorch env.
-#   B. standalone, invoked by inject_roctx_loader.py's cmake-tier at
-#      runtime. Always proceeds; this is the production degraded path.
+## Builds roctx_recordfn-<tag>.so for --torch-trace.
+##   A. parent add_subdirectory() under ENABLE_TESTS (CI fixture).
+##   B. standalone (runtime cmake-tier from inject_roctx_loader.py).
 set(_rcfn_standalone OFF)
 if(NOT PROJECT_NAME)
     cmake_minimum_required(VERSION 3.20)
@@ -22,16 +11,11 @@ if(NOT PROJECT_NAME)
     set(_rcfn_standalone ON)
 endif()
 
-# Parent-project mode: gate on ENABLE_TESTS. Tests are the only in-tree
-# consumer; production installs rely on the runtime loader. Standalone
-# mode always proceeds because the loader is its only caller.
 if(NOT _rcfn_standalone AND NOT ENABLE_TESTS)
     return()
 endif()
 
-# Resolve the interpreter we'll build the .so against. Explicit
-# -DTORCH_TRACE_PYTHON wins (set by the loader's cmake-tier); otherwise
-# pick whatever find_package(Python3) returns.
+# -DTORCH_TRACE_PYTHON wins (set by loader cmake-tier); else find_package.
 if(TORCH_TRACE_PYTHON)
     set(_rcfn_python "${TORCH_TRACE_PYTHON}")
 else()
@@ -43,9 +27,7 @@ else()
     endif()
 endif()
 
-# Probe torch in the resolved interpreter. Missing torch is a soft skip
-# in both modes: torch-trace tests skip via the loader's None return,
-# and the standalone runtime caller already handles None gracefully.
+# Missing torch is a soft skip in both modes.
 set(_rcfn_torch_ok OFF)
 if(_rcfn_python)
     execute_process(
@@ -76,8 +58,7 @@ if(NOT _rcfn_torch_ok)
     return()
 endif()
 
-# Pin TORCH_TRACE_PYTHON to the resolved interpreter so every downstream
-# find_package / probe consults the same Python.
+# Pin so every downstream find_package / probe consults the same Python.
 set(TORCH_TRACE_PYTHON
     "${_rcfn_python}"
     CACHE FILEPATH
@@ -107,9 +88,7 @@ if(NOT _torch_probe_rc EQUAL 0)
     message(
         FATAL_ERROR
         "TORCH_TRACE_PYTHON probe failed: ${TORCH_TRACE_PYTHON} could not "
-        "report (python, torch, abi). This is a real configuration error "
-        "(torch imported but the introspection script crashed); please "
-        "report with the CMake log."
+        "report (python, torch, abi); torch imported but introspection crashed."
     )
 endif()
 
@@ -121,13 +100,7 @@ list(GET _probe_list 3 _cxx11_abi)
 list(GET _probe_list 4 _torch_includes)
 list(GET _probe_list 5 _torch_libs)
 
-# Compute the source-content fingerprint via the loader's own
-# _source_fingerprint(). Keeping the formula in exactly one place
-# means a future change to what counts as a "build input" (e.g.
-# adding a private header) automatically rotates both the runtime
-# resolved filename AND this install-time produced filename in lock
-# step -- no risk of the two drifting and silently breaking the
-# prebuilt tier.
+# Single source of truth for the source fingerprint formula.
 execute_process(
     COMMAND
         "${TORCH_TRACE_PYTHON}" -c
@@ -143,8 +116,7 @@ if(NOT _fp_rc EQUAL 0)
     message(
         FATAL_ERROR
         "roctx_recordfn: failed to compute source fingerprint via "
-        "${TORCH_TRACE_PYTHON}; cannot guarantee the prebuilt .so "
-        "filename matches what the runtime loader resolves."
+        "${TORCH_TRACE_PYTHON}; .so filename may not match the loader."
     )
 endif()
 
@@ -153,9 +125,7 @@ set(_tag
 )
 set(_so_name "roctx_recordfn-${_tag}")
 
-# Pin find_package(Python3 ...) to TORCH_TRACE_PYTHON so the pybind11
-# Development.Module headers come from the same interpreter we probed
-# for torch/abi above.
+# Pin so Development.Module headers come from the same interpreter.
 set(Python3_EXECUTABLE
     "${TORCH_TRACE_PYTHON}"
     CACHE FILEPATH
@@ -190,13 +160,7 @@ find_path(
 
 add_library(${_so_name} MODULE roctx_recordfn.cpp)
 
-# Emit "roctx_recordfn-${_tag}.so" (no "lib" prefix, tag in the
-# filename). The loader resolves by tag via spec_from_file_location,
-# so a bare "roctx_recordfn.so" would be invisible to it; keeping the
-# tag also lets multiple (python, torch, abi, src) cells coexist in
-# the cache without collision. Output flat under the build dir so the
-# loader's cmake-tier (which builds in a fresh tmp dir and reads the
-# .so back from there) doesn't need to know about a sub-folder.
+# No "lib" prefix, tag in filename: loader resolves by tag via spec_from_file_location.
 set_target_properties(
     ${_so_name}
     PROPERTIES
@@ -212,18 +176,10 @@ target_include_directories(
     PRIVATE ${_torch_includes} ${ROCTX_INCLUDE_DIR} ${Python3_INCLUDE_DIRS}
 )
 
-# Resolve each torch .so by absolute path via find_library() instead
-# of `-L<dir> -ltorch`. ROCm wheels have been observed to report
-# library_paths() directories that lack the expected symlinks, which
-# makes the linker fail opaquely; doing the resolution in CMake lets
-# us search the wheel's own lib dir as a fallback and fail configure
-# with a clear message naming the missing .so.
+# Absolute-path resolution + wheel-lib fallback: some ROCm wheels report
+# library_paths() dirs that lack symlinks, making -L<dir> fail opaquely.
 message(STATUS "roctx_recordfn: torch lib dirs reported by probe: ${_torch_libs}")
 
-# Always fold in the wheel's own lib dir as a fallback. library_paths()
-# is supposed to include it but some stripped ROCm nightlies have been
-# observed to either omit it or report a sibling directory that lacks
-# the libtorch*.so set; we'd rather over-search than fail opaquely.
 execute_process(
     COMMAND
         "${TORCH_TRACE_PYTHON}" -c
@@ -241,10 +197,7 @@ message(
 set(_torch_required_libs torch torch_cpu torch_python c10)
 set(_torch_resolved_libs "")
 foreach(_libname IN LISTS _torch_required_libs)
-    # Per-library cache var so a later configure pass can't reuse a
-    # stale find from a different torch wheel. The tag (which includes
-    # the torch version + ABI + source fingerprint) makes the cache key
-    # specific to this exact wheel.
+    # Per-wheel cache key prevents stale finds across configure passes.
     set(_cachevar "_TORCH_RESOLVED_${_libname}_${_tag}")
     find_library(
         ${_cachevar}
@@ -255,14 +208,9 @@ foreach(_libname IN LISTS _torch_required_libs)
     if(NOT ${_cachevar})
         message(
             FATAL_ERROR
-            "roctx_recordfn: could not find lib${_libname}.so in any of "
-            "the torch lib search dirs:\n  ${_torch_lib_search_dirs}\n"
-            "This is unusual -- libtorch wheels normally ship "
-            "libtorch.so, libtorch_cpu.so, libtorch_python.so, and "
-            "libc10.so under torch/lib/. If this is a stripped or "
-            "partial wheel, the runtime loader cannot build the .so "
-            "and torch_trace will fall back to the Python-only "
-            "injector. Verify with: \n"
+            "roctx_recordfn: lib${_libname}.so not found in any of:\n  "
+            "${_torch_lib_search_dirs}\n"
+            "Likely a stripped wheel. Verify with:\n"
             "  ${TORCH_TRACE_PYTHON} -c \"import os, torch; "
             "p=os.path.join(os.path.dirname(torch.__file__), 'lib'); "
             "print(p, sorted(os.listdir(p)))\""
@@ -274,12 +222,8 @@ endforeach()
 
 target_link_libraries(${_so_name} PRIVATE ${_torch_resolved_libs} ${ROCTX_LIB})
 
-# Feature probe: PyTorch >= 2.7-ish ships c10::DebugInfoKind as a class
-# constructible from `const std::string_view*`, which lets downstream
-# tools allocate their own private TLDI slot by pointer identity. Older
-# PyTorch ships it as an `enum class` with fixed members; in that case
-# we fall back to TEST_INFO_2 (used only inside PyTorch's own gtest
-# suite, dormant in production training/inference workloads).
+# PyTorch >= ~2.7 makes c10::DebugInfoKind constructible from string_view*
+# for private TLDI slots; older builds fall back to TEST_INFO_2.
 include(CheckCXXSourceCompiles)
 set(_rcfn_saved_required_flags ${CMAKE_REQUIRED_FLAGS})
 set(_rcfn_saved_required_libs ${CMAKE_REQUIRED_LIBRARIES})
@@ -303,19 +247,9 @@ if(ROCPROF_TORCHTRACE_HAS_CUSTOM_DBGINFOKIND)
         ${_so_name}
         PRIVATE ROCPROF_TORCHTRACE_HAS_CUSTOM_DBGINFOKIND=1
     )
-    message(
-        STATUS
-        "roctx_recordfn: using private DebugInfoKind slot "
-        "ROCPROF_TORCHTRACE_INFO (pointer-identity)"
-    )
+    message(STATUS "roctx_recordfn: private DebugInfoKind slot ROCPROF_TORCHTRACE_INFO")
 else()
-    message(
-        STATUS
-        "roctx_recordfn: PyTorch DebugInfoKind is the legacy enum form; "
-        "falling back to c10::DebugInfoKind::TEST_INFO_2 (safe in "
-        "training/inference workloads, may collide with PyTorch's own "
-        "gtest suite if profiled directly)"
-    )
+    message(STATUS "roctx_recordfn: legacy enum; using TEST_INFO_2")
 endif()
 
 target_compile_definitions(${_so_name} PRIVATE _GLIBCXX_USE_CXX11_ABI=${_cxx11_abi})
@@ -325,15 +259,7 @@ target_compile_options(
     PRIVATE -fvisibility=hidden -Wno-deprecated-declarations
 )
 
-# Parent-project mode: expose the artifact path to the parent so it can
-# pin torch-trace CTest entries via ROCPROFCOMPUTE_ROCTX_RECORDFN_SO.
-# Standalone mode (the loader's runtime cmake-tier) reads the .so back
-# directly from the build dir and does not need this export.
-#
-# No install(TARGETS ...) rule: the .so is a CI test fixture, not a
-# production artifact. Production installs ship the sources (parent
-# CMakeLists install(DIRECTORY src/lib/roctx_recordfn ...)) and the
-# runtime loader builds the .so on first --torch-trace use.
+# Export artifact path so parent can pin CTest via ROCPROFCOMPUTE_ROCTX_RECORDFN_SO.
 if(NOT _rcfn_standalone)
     set(ROCTX_RECORDFN_SO_PATH "$<TARGET_FILE:${_so_name}>" PARENT_SCOPE)
 endif()
