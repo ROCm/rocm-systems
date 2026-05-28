@@ -133,6 +133,7 @@ jobs:
           echo "code_name=${CODE_NAME}" >> $GITHUB_OUTPUT
 
       - name: Install amdgpu and dependencies
+        if: false
         shell: bash
         run: |
           ROCM_MAJOR=$(echo ${{ env.ROCM_VERSION }} | sed 's/\./ /g' | awk '{print $1}')
@@ -145,6 +146,7 @@ jobs:
           echo "✅ amdgpu and ROCm dependencies Installed!"
 
       - name: Install MPI
+        if: false
         run: |
           apt install -y libopenmpi-dev
           echo "✅ MPI Installed!"
