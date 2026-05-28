@@ -1356,6 +1356,30 @@ SIMD_VOP3_FMAC_FP64: dict[str, str] = {
     "v_fmac_f64_vop3": "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }",
 }
 
+# --- VOP3 ldexp (mixed-width: fp src0 + int32 src1 exp) --------------------
+#
+# stdx::ldexp on native<float|double> with same-size int simd is bit-exact to
+# std::ldexp for every input including NaN (proven in the v_ldexp_f16 VOP2
+# slice).
+SIMD_VOP3_LDEXP_FP32: dict[str, str] = {
+    # stdx::ldexp wants the integer arg as fixed_size_simd<int, size> matching
+    # the float abi, not the native<int32_t> the operand reader returns.
+    "v_ldexp_f32_vop3": (
+        "[](auto a, auto e) {"
+        " return util::stdx::ldexp(a, util::stdx::static_simd_cast<"
+        "util::stdx::fixed_size_simd<int, util::native<float>::size()>>(e)); }"
+    ),
+}
+SIMD_VOP3_LDEXP_FP64: dict[str, str] = {
+    # narrow32<int32_t> is already an 8-wide fixed_size_simd; just re-cast to
+    # the int-typed equivalent so stdx::ldexp accepts the matching abi.
+    "v_ldexp_f64_vop3": (
+        "[](auto a, auto e) {"
+        " return util::stdx::ldexp(a, util::stdx::static_simd_cast<"
+        "util::stdx::fixed_size_simd<int, util::native_width64>>(e)); }"
+    ),
+}
+
 
 SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
     "v_add3_u32_vop3": (
@@ -1558,6 +1582,13 @@ def simd_probe_line(template_name: str) -> str | None:
     specfmacf64 = SIMD_VOP3_FMAC_FP64.get(template_name)
     if specfmacf64 is not None:
         return f"  ROCJITSU_TRY_SIMD_FMAC_VOP3_FP64({specfmacf64});"
+    # VOP3 ldexp: mixed-width fp src0 + int32 src1 exp.
+    specldexpf32 = SIMD_VOP3_LDEXP_FP32.get(template_name)
+    if specldexpf32 is not None:
+        return f"  ROCJITSU_TRY_SIMD_LDEXP_VOP3_FP32({specldexpf32});"
+    specldexpf64 = SIMD_VOP3_LDEXP_FP64.get(template_name)
+    if specldexpf64 is not None:
+        return f"  ROCJITSU_TRY_SIMD_LDEXP_VOP3_FP64({specldexpf64});"
     # Extra plain integer binary VOP3 ops without a VOP2 twin (add_i32/i16,
     # sub_*, nc_* variants). Routed through the int VOP3 binary glue.
     spec3binx = SIMD_VOP3_BINARY_INT_EXTRA.get(template_name)
