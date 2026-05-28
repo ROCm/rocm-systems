@@ -195,12 +195,6 @@ def pytest_addoption(parser):
         help="Random ATen sample budget (default 100).",
     )
     parser.addoption(
-        "--no-require-cpp-tier",
-        action="store_true",
-        default=False,
-        help="Relax strict C++ tier validation.",
-    )
-    parser.addoption(
         "--torch-trace-match-verbose",
         action="store_true",
         default=False,
