@@ -466,6 +466,44 @@ TEST(VAddSimdBenchmark, Cdna4_VAddU32_Vop3) {
   run_words("v_add_u32_e64 v2, v0, v1", w0, w1, /*sanitize_finite=*/false);
 }
 
+// === VOP3-encoded unary twins ===
+
+// v_floor_f32_e64 v2, v0  (CDNA4 VOP3 opcode 351) — f32 unary, no modifiers.
+TEST(VAddSimdBenchmark, Cdna4_VFloorF32_Vop3) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  uint32_t w0, w1;
+  vop3_bin_encode(351, /*vdst=*/2, /*src0=*/256, /*src1=*/0, 0, 0, 0, 0, w0, w1);
+  run_words("v_floor_f32_e64 v2, v0", w0, w1, /*sanitize_finite=*/true);
+}
+
+// v_floor_f32_e64 v2, -|v0| *2 clamp  (opcode 351) — full modifier set, shows
+// the in-vector abs/neg/omod/clamp cost on the unary fp path.
+TEST(VAddSimdBenchmark, Cdna4_VFloorF32_Vop3_Modifiers) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  uint32_t w0, w1;
+  vop3_bin_encode(351, /*vdst=*/2, /*src0=*/256, /*src1=*/0, /*abs=*/0x1, /*neg=*/0x1, /*omod=*/1,
+                  /*clamp=*/1, w0, w1);
+  run_words("v_floor_f32_e64 -|v0| *2 clamp", w0, w1, /*sanitize_finite=*/true);
+}
+
+// v_cvt_f32_i32_e64 v2, v0  (CDNA4 VOP3 opcode 325) — plain int->float cvt
+// (reuses the VOP1 unary path, no modifiers).
+TEST(VAddSimdBenchmark, Cdna4_VCvtF32I32_Vop3) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  uint32_t w0, w1;
+  vop3_bin_encode(325, /*vdst=*/2, /*src0=*/256, /*src1=*/0, 0, 0, 0, 0, w0, w1);
+  run_words("v_cvt_f32_i32_e64 v2, v0", w0, w1, /*sanitize_finite=*/false);
+}
+
 // Diagnostic: report whether the SIMD fast path is compiled in.
 TEST(VAddSimdBenchmark, SimdCompileTimeReport) {
 #if __has_include(<experimental/simd>)
