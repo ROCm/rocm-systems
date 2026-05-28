@@ -645,6 +645,21 @@ TEST(VAddSimdBenchmark, Cdna4_VCeilF16_Vop3) {
   run_words("v_ceil_f16_e64 v2, v0", w0, w1, /*sanitize_finite=*/false);
 }
 
+// v_cndmask_b32_e64 v2, v0, v1, vcc  (CDNA4 VOP3 opcode 256) — VOP3 form of
+// the VCC-driven select; selector is an SGPR-pair operand (src2=VCC=106), so
+// the path is bit-identical to the VOP2 form. No modifiers applied by scalar.
+TEST(VAddSimdBenchmark, Cdna4_VCndmaskB32_Vop3) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  // VOP3 ternary encoding: word0 = vdst|op<<16|0x34<<26; word1 = src0|src1<<9|
+  // src2<<18. src2=VCC=106. Selector pattern is set by seed_inputs (vcc init).
+  uint32_t w0 = (2u) | ((256u & 0x3FF) << 16) | (0x34u << 26);
+  uint32_t w1 = 256u | (1u << 9) | (106u << 18);
+  run_words("v_cndmask_b32_e64 v2, v0, v1, vcc", w0, w1, /*sanitize_finite=*/false);
+}
+
 // v_rcp_f16_e64 v2, v0  (CDNA4 VOP3 opcode 381) — f16 transcendental; widen
 // f16->f32, FTZ-flush input, IEEE 1/x, FTZ-flush output, narrow f32->f16. Pays
 // the f16<->f32 round-trip on top of the rcp helper. Same NaN-passthrough

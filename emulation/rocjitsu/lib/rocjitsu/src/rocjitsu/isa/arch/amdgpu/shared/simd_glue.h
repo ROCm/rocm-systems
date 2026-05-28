@@ -582,6 +582,48 @@ template <typename Inst>
   return false;
 }
 
+/// v_cndmask_b32 VOP3 form: dst[lane] = (sel[lane]) ? src1 : src0, where `sel`
+/// is the 64-bit value read from the SGPR-pair `src2` (instead of the fixed VCC
+/// used by the VOP2 form). The scalar body applies no modifiers (the result is
+/// a bit-exact integer select on whichever operand the selector picks), so the
+/// VOP3 modifier fields are intentionally not consulted here — bit-identical to
+/// the scalar body regardless of abs/neg/omod/clamp encoding. `src2` is an
+/// SGPR/inline operand, not a VGPR, so it does not participate in the
+/// simd_capable gate; src0/src1/vdst do.
+template <typename Inst>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_cndmask_vop3_simd(Inst &inst, Wavefront &wf) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.vdst.simd_capable())
+    return false;
+  using T = uint32_t;
+  constexpr std::size_t W = util::native_width_v<T>;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  const uint64_t sel64 = inst.src2.read_scalar64(wf);
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto a = read_simd<T>(inst.src0, wf, base);
+    const auto b = read_simd<T>(inst.src1, wf, base);
+    const uint64_t sel_bits = (sel64 >> base) & chunk_full;
+    alignas(util::native<T>) uint32_t selbuf[W];
+    for (std::size_t i = 0; i < W; ++i)
+      selbuf[i] = static_cast<uint32_t>((sel_bits >> i) & 1u);
+    auto r = a;
+    util::stdx::where(util::load<T>(selbuf) != 0u, r) = b;
+    write_simd<T>(inst.vdst, wf, base, r, chunk);
+  }
+  return true;
+}
+
+/// Unconstrained fallback for the VOP3 cndmask path; see the binary-path note.
+template <typename Inst>
+[[nodiscard]] inline bool try_execute_cndmask_vop3_simd(Inst &, Wavefront &) {
+  return false;
+}
+
 /// VOPC compare SIMD fast path: per active EXEC lane, `cmp_op(src0, vsrc1)`
 /// produces a `simd_mask` whose bit is packed into VCC at the lane position;
 /// inactive-lane VCC bits are preserved (mirroring the scalar body, which
@@ -1599,6 +1641,12 @@ template <typename Tin, typename Tout, typename Inst, typename UnOp>
 /// functor argument.
 #define ROCJITSU_TRY_SIMD_VOP2_CNDMASK()                                                           \
   if (::rocjitsu::amdgpu::try_execute_cndmask_vop2_simd(inst, wf))                                 \
+  return
+
+/// v_cndmask_b32 VOP3 counterpart. Same shape, but the selector comes from the
+/// SGPR-pair `src2` instead of fixed VCC.
+#define ROCJITSU_TRY_SIMD_VOP3_CNDMASK()                                                           \
+  if (::rocjitsu::amdgpu::try_execute_cndmask_vop3_simd(inst, wf))                                 \
   return
 
 /// 64-bit-lane VOP2 FMA counterpart (v_fmac_f64). Lane type is fixed to double,
