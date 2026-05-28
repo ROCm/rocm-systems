@@ -2605,7 +2605,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   comm->initState = ncclSuccess;
 
   // Initialize hierarchical sub-communicators and temp buffer
-  if (!job->parent && comm->nNodes >= 8 && rcclParamHierarchicalAllGather() == 1) {
+  if (!job->parent && !comm->isGrow && comm->nNodes >= 8 && rcclParamHierarchicalAllGather() == 1) {
     if (comm->minLocalRanks != comm->maxLocalRanks) {
       INFO(NCCL_INIT, "Hierarchical AllGather: non-uniform GPU count per node, skipping hierarchical allgather");
     } else {
