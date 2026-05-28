@@ -109,10 +109,10 @@ endif()
 
 include(GNUInstallDirs)
 
-option(BUILD_TESTS "Build test suite" ON)
+option(BUILD_TESTS "Build test suite" OFF)
 option(ENABLE_ASAN_PACKAGING "" OFF)
 option(ENABLE_ESMI_LIB "Build ESMI Library" ON)
-option(BUILD_EXAMPLES "Build examples" ON)
+option(BUILD_EXAMPLES "Build examples" OFF)
 
 # If amdsmi is built as a static library, it should support being embedded in other programs. The setting below essentially enables the -fPIC flag.
 set(CMAKE_POSITION_INDEPENDENT_CODE ON CACHE BOOL "Enable position independent code for all targets")
