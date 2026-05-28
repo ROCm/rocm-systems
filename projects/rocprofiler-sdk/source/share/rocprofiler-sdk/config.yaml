@@ -3364,18 +3364,6 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 267
-    - name: SQG_ACCUM_PREV
-      description: For SQG counter N, increment by the value of counter N-1. Used by derived 
-        counters to accumulate over time. (per shader engine). SQG_PERF_SEL_ACCUM_PREV.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-            - gfx1153
-          block: SQG
-          event: 14
     - name: SQG_BUSY_CYCLES
       description: Number of clock cycles SQG is reporting that it is busy (per shader engine). 
         SQG_PERF_SEL_BUSY_CYCLES.
