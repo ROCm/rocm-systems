@@ -36,16 +36,12 @@ subtrees:
   - file: reference/amdsmi-cpp-api/index.md
     title: C/C++ API
     entries:
-    - file: doxygen/docBin/html/topics
-      title: Modules
-    - file: doxygen/docBin/html/files
-      title: Files
-    - file: doxygen/docBin/html/globals
-      title: Globals
-    - file: doxygen/docBin/html/annotated
-      title: Data structures
-    - file: doxygen/docBin/html/functions_data_fields
-      title: Data fields
+    - file: reference/amdsmi-cpp-api/functions.md
+      title: Functions
+    - file: reference/amdsmi-cpp-api/types.md
+      title: Types
+    - file: reference/amdsmi-cpp-api/defines.md
+      title: Defines
   - file: reference/amdsmi-py-api.md
     title: Python API
   - file: reference/amdsmi-go-api.md

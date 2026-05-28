@@ -55,7 +55,13 @@ html_css_files = ["amdsmi_docs.css"]
 
 # Extension-related settings
 sys.path.append(str(DOCS_DIR / "extension"))
-extensions = ["rocm_docs", "rocm_docs.doxygen", "amdsmi_docs.go_api_ref", "sphinxcontrib.mermaid"]
+extensions = [
+    "rocm_docs",
+    "rocm_docs.doxygen",
+    "amdsmi_docs.doxygen",
+    "amdsmi_docs.go_api_ref",
+    "sphinxcontrib.mermaid",
+]
 
 external_toc_path = "sphinx/_toc.yml"
 external_projects_current_project = "amdsmi"
@@ -70,6 +76,10 @@ myst_fence_as_directive = ["mermaid"]
 myst_substitutions = {"AMDSMI_VERSION": version}
 
 # Builder-related settings
+exclude_patterns = [
+    "CLAUDE.md",
+    "AGENTS.md",
+]
 # suppress_warnings = ["etoc.toctree"]
 
 # Doxygen-related settings
@@ -81,13 +91,15 @@ doxygen_project = {
 breathe_projects = {"amdsmi": doxygen_project["path"]}
 breathe_projects_source = {"amdsmi": (AMDSMI_H.parent, [AMDSMI_H.name])}
 breathe_default_project = "amdsmi"
+breathe_domain_by_extension = {"h": "c"}
+amdsmi_doxygen_tagfile = doxygen_root / "_out" / "tagfile.xml"
 doxysphinx_enabled = False
 
 
 # Make Doxyfile consistent with this Sphinx config
-def generate_doxyfile():
-    doxyfile_in = DOCS_DIR / doxygen_root / "Doxyfile.in"
-    doxyfile_out = DOCS_DIR / doxygen_root / "Doxyfile"
+def generate_doxyfile(_app, _config):
+    doxyfile_in = doxygen_root / "Doxyfile.in"
+    doxyfile_out = doxygen_root / "Doxyfile"
 
     if not doxyfile_in.exists():
         raise ConfigError(f"Missing Doxyfile.in at {doxyfile_in}")
@@ -95,16 +107,20 @@ def generate_doxyfile():
     replacements = {
         "@PROJECT_NUMBER@": version,
         "@INPUT@": str(AMDSMI_H),
-        "@GENERATE_TAGFILE@": "_doxygen/tagfile.xml",
-        "@OUTPUT_DIRECTORY@": "_doxygen/xml"
+        "@OUTPUT_DIRECTORY@": str(doxygen_root / "_out"),
+        "@GENERATE_TAGFILE@": str(amdsmi_doxygen_tagfile),
     }
 
-    content = doxyfile_in.read_text()
+    def _replace(m):
+        key = m.group(0)
+        if key not in replacements:
+            raise ConfigError(f"Unknown template variable {key} in Doxyfile.in")
+        return replacements[key]
 
-    for template, value in replacements.items():
-        content = content.replace(template, value)
-
+    content = re.sub(r"@\w+@", _replace, doxyfile_in.read_text())
     doxyfile_out.write_text(content)
 
 
-generate_doxyfile()
+def setup(app):
+    app.connect("config-inited", generate_doxyfile, priority=100)
+    return {"parallel_read_safe": True, "parallel_write_safe": True}

@@ -5,17 +5,14 @@ myst:
     "keywords": "api, smi, lib, cpp, header, system, management, interface, ROCm"
 ---
 
-# AMD SMI C++ API reference
+# AMD SMI C/C++ API reference
 
 This section provides comprehensive documentation for the AMD SMI C++ API.
 Explore these sections to understand the full scope of available
 functionalities and how to implement them in your applications.
 
-- {doc}`Modules <../doxygen/docBin/html/topics>`
+- [Functions](functions.md)
 
-- {doc}`Files <../doxygen/docBin/html/files>`
+- [Types](types.md)
 
-- {doc}`Globals <../doxygen/docBin/html/globals>`
-
-- {doc}`Data structures <../doxygen/docBin/html/annotated>`
-
+- [Defines](defines.md)
