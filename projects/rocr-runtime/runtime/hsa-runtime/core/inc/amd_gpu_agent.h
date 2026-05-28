@@ -49,7 +49,6 @@
 #include <vector>
 #include <list>
 #include <map>
-#include <mutex>
 #include <unordered_set>
 
 #include "hsakmt/hsakmt.h"
@@ -71,7 +70,6 @@
 
 namespace rocr {
 namespace AMD {
-class BlitSdmaBase;
 class MemoryRegion;
 
 typedef ScratchCache::ScratchInfo ScratchInfo;

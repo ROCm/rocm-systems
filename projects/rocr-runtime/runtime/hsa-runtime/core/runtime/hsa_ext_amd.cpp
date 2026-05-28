@@ -63,7 +63,6 @@
 #include "core/inc/runtime.h"
 #include "core/inc/signal.h"
 #include "core/inc/counted_queue_manager.h"
-#include "core/inc/amd_blit_sdma.h"
 
 namespace rocr {
 
