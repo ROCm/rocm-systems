@@ -3,6 +3,7 @@
 
 #include "aql_queue.h"
 
+#include "embedded_schema.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mfma_exec.h"
 #include "rocjitsu/vm/rj_vm.h"
@@ -25,8 +26,6 @@ RJ_DIAGNOSTIC_POP
 #include <vector>
 
 namespace {
-
-const std::string SCHEMA_PATH = std::string(SCHEMA_DIR) + "/simulation_config.fbs";
 
 // SOPP encoding: bits[31:23] = 0x17F (SOPP prefix), bits[22:16] = op.
 constexpr uint32_t SOPP_S_NOP = 0xBF800000;
@@ -70,7 +69,7 @@ struct VmFixture {
                        R"({"key":"lds_size_kb","value":"64"})"
                        R"(]}]}]}]},"links":[)" +
                        links + R"(]}})";
-    auto loaded = config::load_config_from_string(json, SCHEMA_PATH);
+    auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
     soc_ptr = loaded.soc();
     gpu_mem = loaded.memory();
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
@@ -210,7 +209,7 @@ TEST(VmLifecycleTest, CreateAndDestroy) {
       ]
     }
   })";
-  auto loaded = config::load_config_from_string(json, SCHEMA_PATH);
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
   auto *soc = loaded.soc();
 
   auto *xcd = soc->xcd(0);
@@ -222,13 +221,13 @@ TEST(VmLifecycleTest, CreateAndDestroy) {
 TEST(VmLifecycleTest, MissingArchFails) {
   const char *json = R"({"vm":{"gpu":{"num_shader_engines":1}}})";
   rj_vm_t *handle = nullptr;
-  EXPECT_NE(rj_vm_create_from_string(json, SCHEMA_PATH.c_str(), &handle), ROCJITSU_STATUS_SUCCESS);
+  EXPECT_NE(rj_vm_create_from_string(json, &handle), ROCJITSU_STATUS_SUCCESS);
 }
 
 TEST(VmLifecycleTest, InvalidArchFails) {
   const char *json = R"({"vm":{"arch":"bogus"}})";
   rj_vm_t *handle = nullptr;
-  EXPECT_NE(rj_vm_create_from_string(json, SCHEMA_PATH.c_str(), &handle), ROCJITSU_STATUS_SUCCESS);
+  EXPECT_NE(rj_vm_create_from_string(json, &handle), ROCJITSU_STATUS_SUCCESS);
 }
 
 class IsaTest : public ::testing::TestWithParam<std::string> {
@@ -380,8 +379,7 @@ TEST_P(IsaTest, RunToCompletion) {
                      R"(]}})";
 
   rj_vm_t *handle = nullptr;
-  ASSERT_EQ(rj_vm_create_from_string(json.c_str(), SCHEMA_PATH.c_str(), &handle),
-            ROCJITSU_STATUS_SUCCESS);
+  ASSERT_EQ(rj_vm_create_from_string(json.c_str(), &handle), ROCJITSU_STATUS_SUCCESS);
 
   uint64_t ticks = 0;
   EXPECT_EQ(rj_vm_run(handle, &ticks), ROCJITSU_STATUS_SUCCESS);

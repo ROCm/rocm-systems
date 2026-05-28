@@ -74,7 +74,7 @@ template <typename T>
 static ncclResult_t allocMemCPUAccessible(T **ptr, T **devPtr, size_t nelem, int host_flags,
                                           void **gdrHandle, bool forceHost = false) {
   if (ncclGdrCopy && !forceHost) {
-    NCCLCHECK(ncclGdrCudaCalloc(ptr, devPtr, nelem, gdrHandle));
+    NCCLCHECK(ncclGdrCudaCalloc(ptr, devPtr, nelem, gdrHandle, NULL));
   } else {
     NCCLCHECK(ncclCuMemHostAlloc((void **)ptr, NULL, nelem * sizeof(T)));
     memset((void *)*ptr, 0, nelem * sizeof(T));
@@ -88,7 +88,7 @@ static ncclResult_t allocMemCPUAccessible(T **ptr, T **devPtr, size_t nelem, int
 template <typename T>
 static ncclResult_t freeMemCPUAccessible(T *ptr, void *gdrHandle) {
   if (gdrHandle != NULL) {  // If a GDR handle exists, it was GDR memory
-    NCCLCHECK(ncclGdrCudaFree(gdrHandle));
+    NCCLCHECK(ncclGdrCudaFree(gdrHandle, NULL));
   } else {  // Otherwise, it was host memory (or GDR was off)
     NCCLCHECK(ncclCuMemHostFree(ptr));
   }
@@ -378,7 +378,7 @@ ncclResult_t ncclGinProxyCreateContext(struct ncclComm *comm, void *collComm, in
   // signals.
   size_t signalsBufSize = nSignals * sizeof(uint64_t);
   NCCLCHECK(ncclCuMemAlloc((void **)&proxyCtx->signalsDev, &proxyCtx->signalsCumemhandle,
-                           CU_MEM_HANDLE_TYPE_NONE, signalsBufSize));
+                           CU_MEM_HANDLE_TYPE_NONE, signalsBufSize, NULL));
   CUDACHECK(cudaMemset(proxyCtx->signalsDev, 0, signalsBufSize));
   NCCLCHECK(ncclGinProxyRegMrSym(ginComm, proxyCtx, proxyCtx->signalsDev, signalsBufSize,
                                  NCCL_PTR_CUDA, NCCL_NET_MR_FLAG_FORCE_SO,
@@ -401,7 +401,7 @@ ncclResult_t ncclGinProxyCreateContext(struct ncclComm *comm, void *collComm, in
   devGpuCtx_h.queueSize = hostGpuCtx->queueSize;
   devGpuCtx_h.counters = proxyCtx->countersDev;
   devGpuCtx_h.signals = proxyCtx->signalsDev;
-  NCCLCHECK(ncclCudaCalloc(&devGpuCtx_h.pis, comm->nRanks));
+  NCCLCHECK(ncclCudaCalloc(&devGpuCtx_h.pis, comm->nRanks, NULL));
 
   // Allocate the GFD queues, CIs, counters, signals and test/wait variables on the either the CPU
   // or GPU.
@@ -411,7 +411,7 @@ ncclResult_t ncclGinProxyCreateContext(struct ncclComm *comm, void *collComm, in
                                         CU_MEMHOSTALLOC_WRITECOMBINED, &hostGpuCtx->cisGdrHandle));
 
   ncclGinProxyGpuCtx_t *devGpuCtx_d = NULL;
-  NCCLCHECK(ncclCudaCalloc(&devGpuCtx_d, 1));
+  NCCLCHECK(ncclCudaCalloc(&devGpuCtx_d, 1, NULL));
   // Copy the proxy's devGpuCtx to the GPU
   NCCLCHECK(ncclCudaMemcpy(devGpuCtx_d, &devGpuCtx_h, 1));
 
@@ -458,7 +458,7 @@ ncclResult_t ncclGinProxyDestroyContext(ncclGin_t *ginComm, void *ginCtx) {
     // Free signals
     if (ginComm && ctx->collComm && ctx->signalsMhandle)
       ginComm->deregMrSym(ctx->collComm, ctx->signalsMhandle);
-    if (ctx->signalsDev) ncclCudaFree(ctx->signalsDev);
+    if (ctx->signalsDev) ncclCudaFree(ctx->signalsDev, NULL);
 
     // Free hostGpuCtx and its allocations
     struct ginProxyHostGpuCtx *hostGpuCtx = ctx->hostGpuCtx;
@@ -477,7 +477,7 @@ ncclResult_t ncclGinProxyDestroyContext(ncclGin_t *ginComm, void *ginCtx) {
 
     ncclNetDeviceHandle_v11_t *devHandle = (ncclNetDeviceHandle_v11_t *)ctx->devHandle;
     if (devHandle) {
-      if (devHandle->handle) ncclCudaFree((void *)devHandle->handle);
+      if (devHandle->handle) ncclCudaFree((void *)devHandle->handle, NULL);
       free(devHandle);
     }
 

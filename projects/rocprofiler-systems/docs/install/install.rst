@@ -1,320 +1,122 @@
 .. meta::
-   :description: ROCm Systems Profiler installation documentation and reference
-   :keywords: rocprof-sys, rocprofiler-systems, Omnitrace, ROCm, installation, installer, profiler, tracking, visualization, tool, Instinct, accelerator, AMD
+   :description: Installation instructions for ROCm Systems Profiler (rocprofiler-systems)
+   :keywords: rocprof, sys, rocprofiler, systems, rocm, tool, profiler, install
 
-*************************************
-ROCm Systems Profiler installation
-*************************************
+.. _installation:
 
-If you have problems using ROCm Systems Profiler after installation,
-consult the :ref:`post-installation-troubleshooting` section.
+*****************************
+Install ROCm Systems Profiler
+*****************************
 
+Before you begin, verify that your system is supported. For more information,
+see :ref:`ROCm Core SDK components <rocm:release-components>`.
 
-Operating system support
-========================================
+For advanced workflows, source builds, or custom configurations, see
+:doc:`./build`.
 
-ROCm Systems Profiler is only supported on Linux. See
-`Supported operating systems <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html#supported-operating-systems>`_
-for ROCm supported operating systems.
+.. _install-rocm:
 
-Identifying the operating system
------------------------------------
+Install the ROCm Core SDK
+=========================
 
-If you are unsure of the Linux distribution and version, the ``/etc/os-release`` and
-``/usr/lib/os-release`` files contain this information.
+ROCm Systems Profiler (rocprofiler-systems) is included with the ROCm Core SDK
+on Linux. For the most complete installation, we recommend that developers use
+the ``amdrocm-core-sdk`` meta package.
 
-.. code-block:: shell
+For instructions, see :doc:`Install AMD ROCm <rocm:install/rocm>`. Use the
+selector panel on that page to view instructions appropriate for your system
+environment.
 
-   $ cat /etc/os-release
-   NAME="Ubuntu"
-   VERSION_ID="24.04"
-   VERSION="24.04.3 LTS (Noble Numbat)"
-   VERSION_CODENAME=noble
-   ID=ubuntu
+.. note::
 
-The relevant fields are ``ID`` and the ``VERSION_ID``.
+   The `TheRock <https://github.com/ROCm/TheRock>`__ build system also publishes
+   nightly builds for the ROCm Core SDK and its components, including ROCm Systems
+   Profiler. See `Nightly release status
+   <https://github.com/ROCm/TheRock#nightly-release-status>`__ for details.
 
-Install via package manager
-============================
+.. _install-base:
 
-If you have ROCm version 6.3 or higher installed, you can use the package manager to install a pre-built copy of ROCm Systems Profiler.
+Install ROCm profilers on Linux
+===============================
 
-.. tab-set::
+Alternatively, if you want to install ROCm Systems Profiler as part of the ROCm
+Profiler package (a subset of the ROCm Core SDK ``amdrocm-core-sdk``) without
+additional ROCm libraries and tools, install the ``amdrocm-profiler`` package.
+This includes the ROCm profilers, dependencies, and base packages.
 
-   .. tab-item:: Ubuntu
+1. Complete the :doc:`ROCm installation prerequisites <rocm:install/rocm>` to
+   install dependencies and configure GPU access permissions.
 
-      .. code-block:: shell
+2. Install the ROCm Profiler package that matches your desired ROCm version.
 
-         $ sudo apt install rocprofiler-systems
+   .. tab-set::
 
-   .. tab-item:: Red Hat Enterprise Linux
+      .. tab-item:: Package manager
 
-      .. code-block:: shell
+         On Linux, package names use the following format:
 
-         $ sudo dnf install rocprofiler-systems
+         .. code-block:: shell-session
 
-   .. tab-item:: SUSE Linux Enterprise Server
+            amdrocm-profiler<rocm_version>
 
-      .. code-block:: shell
+         ``<rocm_version>`` represents the ROCm Core SDK version to install. Omit
+         this suffix to install the latest available version.
 
-         $ sudo zypper install rocprofiler-systems
+         For example, to install the latest ROCm Profiler package release for
+         supported GPU architectures:
 
-Building ROCm Systems Profiler from source
-==========================================
+         .. tab-set::
 
-ROCm Systems Profiler needs a GCC compiler with full support for C++17 and CMake v3.25 or higher.
-The Clang compiler may be used instead of the GCC compiler if `Dyninst <https://github.com/dyninst/dyninst>`_
-is already installed.
+            .. tab-item:: Debian-based distros
 
-Build requirements
------------------------------------
+               Use the following command on Ubuntu and other Debian-based Linux
+               distributions to install ROCm profilers:
 
-* GCC compiler v10+
+               .. code-block:: bash
 
-  * Older GCC compilers may be supported but are not tested
-  * Clang compilers are generally supported for ROCm Systems Profiler but not Dyninst
+                  sudo apt install amdrocm-profiler
 
-* `CMake <https://cmake.org/>`_ v3.25 or later
+            .. tab-item:: RHEL-based distros
 
-  .. note::
-     If the ``CMake`` installed on the system is too old, you can install a new
-     version using various methods. One of the easiest options is to use PyPi (Python's pip).
+               Use the following command on RHEL, Oracle Linux, and other RHEL-based
+               Linux distributions to install ROCm profilers:
 
-     .. code-block:: shell
+               .. code-block:: bash
 
-        pip install --user 'cmake==3.25.0'
-        export PATH=${HOME}/.local/bin:${PATH}
+                  sudo dnf install amdrocm-profiler
 
-Required third-party packages
------------------------------------
+            .. tab-item:: SLES
 
-* `Dyninst <https://github.com/dyninst/dyninst>`_ for dynamic or static instrumentation.
-  Dyninst uses the following required and optional components.
+               Use the following command on SLES to install ROCm profilers:
 
-  * `TBB <https://github.com/oneapi-src/oneTBB>`_ (required)
-  * `Elfutils <https://sourceware.org/elfutils/>`_ (required)
-  * `Libiberty <https://github.com/gcc-mirror/gcc/tree/master/libiberty>`_ (required)
-  * `OpenMP <https://www.openmp.org/>`_ (optional)
+               .. code-block:: bash
 
-  The Dyninst sources bundled with ROCm Systems Profiler do not use Boost.
-  If you build against an external, older Dyninst install instead, that layout may still require Boost development packages.
+                  sudo zypper install amdrocm-profiler
 
-* `libunwind <https://www.nongnu.org/libunwind/>`_ for call-stack sampling
-* `SQLite <https://github.com/sqlite/sqlite>`_ for database output
-* `spdlog <https://github.com/gabime/spdlog>`_ for logging
+      .. tab-item:: pip
 
-Any of the third-party packages required by Dyninst, along with Dyninst itself, can be built and installed
-during the ROCm Systems Profiler build. The following list indicates the package, the version,
-the application that requires the package (for example, ROCm Systems Profiler requires Dyninst
-while Dyninst requires TBB), and the CMake option to build the package alongside ROCm Systems Profiler:
+         Use the following commands to create and activate a Python virtual
+         environment, then install ROCm with the ``[profiler]`` extra:
 
-.. csv-table::
-   :header: "Third-Party Library", "Minimum Version", "Required By", "CMake Option"
+         .. code-block:: bash
 
-   "Dyninst", "13.0", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_DYNINST`` (default: OFF)"
-   "Libunwind", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_LIBUNWIND`` (default: ON)"
-   "Nlohmann/JSON", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_NLOHMANN_JSON`` (default: ON)"
-   "spdlog", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_SPDLOG`` (default: ON)"
-   "SQLite", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_SQLITE`` (default: OFF)"
-   "TBB", "2018.6", "Dyninst", "``ROCPROFSYS_BUILD_TBB`` (default: OFF)"
-   "ElfUtils", "0.178", "Dyninst", "``ROCPROFSYS_BUILD_ELFUTILS`` (default: OFF)"
-   "LibIberty",  "", "Dyninst", "``ROCPROFSYS_BUILD_LIBIBERTY`` (default: OFF)"
-   "OpenMP", "4.x", "Dyninst", ""
-
-Optional third-party packages
------------------------------------
-
-* `ROCm <https://rocm.docs.amd.com/projects/install-on-linux/en/latest>`_
-
-  * AMD SMI Lib for GPU and AI NIC monitoring
-  * ROCprofiler SDK for GPU hardware counters and ROCm tracing
-
-* Python
-
-  * ``ROCPROFSYS_USE_PYTHON`` enables Python support.
-
-* `PAPI <https://icl.utk.edu/papi/>`_
-* MPI
-
-  * ``ROCPROFSYS_USE_MPI`` enables full MPI support
-  * ``ROCPROFSYS_USE_MPI_HEADERS`` enables wrapping of the dynamically-linked MPI C function calls.
-    (By default, if ROCm Systems Profiler cannot find an OpenMPI MPI distribution, it uses a local copy
-    of the OpenMPI ``mpi.h``.)
-
-.. csv-table::
-   :header: "Third-Party Library", "CMake Enable Option"
-   :widths: 15, 45
-
-   "PAPI", "``ROCPROFSYS_USE_PAPI`` (default: ON)"
-   "MPI", "``ROCPROFSYS_USE_MPI`` (default: OFF)"
-   "MPI (header-only)", "``ROCPROFSYS_USE_MPI_HEADERS`` (default: ON)"
-
-Installing Dyninst
------------------------------------
-
-The easiest way to install Dyninst is alongside ROCm Systems Profiler, but it can also be installed using Spack.
-
-Building Dyninst alongside ROCm Systems Profiler
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-To install Dyninst alongside ROCm Systems Profiler, configure ROCm Systems Profiler with ``ROCPROFSYS_BUILD_DYNINST=ON``.
-Depending on the version of Ubuntu, the ``apt`` package manager might have current enough
-versions of the Dyninst TBB and LibIberty dependencies
-(use ``apt-get install libtbb-dev libiberty-dev``).
-However, it is possible to also build and install the Dyninst dependencies
-via ``ROCPROFSYS_BUILD_<DEP>=ON``, as follows:
-
-.. code-block:: shell
-
-   git clone https://github.com/ROCm/rocm-systems.git
-   cmake -B rocprof-sys-build -DROCPROFSYS_BUILD_DYNINST=ON \
-         -DROCPROFSYS_BUILD_{TBB,ELFUTILS,LIBIBERTY}=ON \
-         -S rocm-systems/projects/rocprofiler-systems
-
-where ``-DROCPROFSYS_BUILD_{TBB,ELFUTILS,LIBIBERTY}=ON`` is expanded by
-the shell to ``-DROCPROFSYS_BUILD_TBB=ON -DROCPROFSYS_BUILD_ELFUTILS=ON ...``
-
-Installing Dyninst via Spack
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-`Spack <https://github.com/spack/spack>`_ is another option to install Dyninst and its dependencies:
-
-.. code-block:: shell
-
-   git clone https://github.com/spack/spack.git
-   source ./spack/share/spack/setup-env.sh
-   spack compiler find
-   spack external find --all --not-buildable
-   spack spec -I --reuse dyninst
-   spack install --reuse dyninst
-   spack load -r dyninst
-
-.. _cmake-options:
-
-Building and installing ROCm Systems Profiler
----------------------------------------------
-
-ROCm Systems Profiler has CMake configuration options for MPI support (``ROCPROFSYS_USE_MPI`` or
-``ROCPROFSYS_USE_MPI_HEADERS``), OpenMP-Tools (``ROCPROFSYS_USE_OMPT``),
-hardware counters via PAPI (``ROCPROFSYS_USE_PAPI``), among other features.
-ROCm support is always enabled.
-Various additional features can be enabled via the
-``TIMEMORY_USE_*`` `CMake options <https://timemory.readthedocs.io/en/develop/installation.html#cmake-options>`_.
-Any ``ROCPROFSYS_USE_<VAL>`` option which has a corresponding ``TIMEMORY_USE_<VAL>``
-option means that the Timemory support for this feature has been integrated
-into Perfetto support for ROCm Systems Profiler, for example, ``ROCPROFSYS_USE_PAPI=<VAL>`` also configures
-``TIMEMORY_USE_PAPI=<VAL>``. This means the data that Timemory is able to collect via this package
-is passed along to Perfetto and is displayed when the ``.proto`` file is visualized
-in `the Perfetto UI <https://ui.perfetto.dev>`_.
-
-.. code-block:: shell
-
-   git clone https://github.com/ROCm/rocm-systems.git
-   cmake                                                 \
-       -B rocprof-sys-build                              \
-       -D CMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems  \
-       -D ROCPROFSYS_USE_PYTHON=ON                       \
-       -D ROCPROFSYS_USE_OMPT=ON                         \
-       -D ROCPROFSYS_USE_MPI_HEADERS=ON                  \
-       -D ROCPROFSYS_BUILD_PAPI=ON                       \
-       -D ROCPROFSYS_BUILD_LIBUNWIND=ON                  \
-       -D ROCPROFSYS_BUILD_DYNINST=ON                    \
-       -D ROCPROFSYS_BUILD_TBB=ON                        \
-       -D ROCPROFSYS_BUILD_ELFUTILS=ON                   \
-       -D ROCPROFSYS_BUILD_LIBIBERTY=ON                  \
-       -S rocm-systems/projects/rocprofiler-systems
-   cmake --build rocprof-sys-build --target all --parallel 8
-   cmake --build rocprof-sys-build --target install
-   source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
-
-.. _build-script:
-
-Using the build script
-^^^^^^^^^^^^^^^^^^^^^^
-
-This method automates the CMake process with a script that wraps the CMake
-commands and handles build logic, environment variables, and packaging. Run
-``./scripts/build-release.sh`` with your desired options to generate packages.
-
-Use ``./scripts/build-release.sh --help`` for more information.
-
-.. code-block:: shell-session
-
-   ./scripts/build-release.sh --help
-   Options:
-       --core       [+nopython] [+python]                    Core (Use '+nopython' to build w/o python, use '+python' to python build with python)
-       --mpi        [+nopython] [+python]                    MPI (Use '+nopython' to build w/o python, use '+python' to python build with python)
-       --rocm       [+nopython] [+python]                    ROCm (Use '+nopython' to build w/o python, use '+python' to python build with python)
-       --rocm-mpi   [+nopython] [+python]                    ROCm + MPI (Use '+nopython' to build w/o python, use '+python' to python build with python)
-       --mpi-impl   [openmpi|mpich]                          MPI implementation
-
-       --lto                  [on|off]                       Enable LTO (default: off)
-       --strip                [on|off]                       Strip libraries (default: off)
-       --perfetto-tools       [on|off]                       Install perfetto tools (default: on)
-       --static-libgcc        [on|off]                       Build with static libgcc (default: on)
-       --static-libstdcxx     [on|off]                       Build with static libstdc++ (default: on)
-       --hidden-visibility    [on|off]                       Build with hidden visibility (default: on)
-       --max-threads          N                              Max number of threads supported (default: 2048)
-       --parallel             N                              Number of parallel build jobs (default: 12)
-       --generators           [STGZ][DEB][RPM][+others]      CPack generators (default: stgz deb rpm)
-
-.. _mpi-support-rocprof-sys:
-
-MPI support within ROCm Systems Profiler
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-ROCm Systems Profiler can have full (``ROCPROFSYS_USE_MPI=ON``) or partial (``ROCPROFSYS_USE_MPI_HEADERS=ON``) MPI support.
-The only difference between these two modes is whether or not the results collected
-via Timemory and/or Perfetto can be aggregated into a single
-output file during finalization. When full MPI support is enabled, combining the
-Timemory results always occurs, whereas combining the Perfetto
-results is configurable via the ``ROCPROFSYS_PERFETTO_COMBINE_TRACES`` setting.
-
-The primary benefits of partial or full MPI support are the automatic wrapping
-of MPI functions and the ability
-to label output with suffixes which correspond to the ``MPI_COMM_WORLD`` rank ID
-instead of having to use the system process identifier (i.e. ``PID``).
-In general, it's recommended to use partial MPI support with the OpenMPI
-headers as this is the most portable configuration.
-If full MPI support is selected, make sure your target application is built
-against the same MPI distribution as ROCm Systems Profiler.
-For example, do not build ROCm Systems Profiler with MPICH and use it on a target application built against OpenMPI.
-If partial support is selected, the reason the OpenMPI headers are recommended instead of the MPICH headers is
-because the ``MPI_COMM_WORLD`` in OpenMPI is a pointer to ``ompi_communicator_t`` (8 bytes),
-whereas ``MPI_COMM_WORLD`` in MPICH is an ``int`` (4 bytes). Building ROCm Systems Profiler with partial MPI support
-and the MPICH headers and then using
-ROCm Systems Profiler on an application built against OpenMPI causes a segmentation fault.
-This happens because the value of the ``MPI_COMM_WORLD`` is truncated
-during the function wrapping before being passed along to the underlying MPI function.
-
-Python support within ROCm Systems Profiler
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-ROCm Systems Profiler supports profiling Python code via the ``ROCPROFSYS_USE_PYTHON`` CMake option.
-Python support is enabled via the ``ROCPROFSYS_USE_PYTHON`` and the
-``ROCPROFSYS_PYTHON_VERSIONS="<MAJOR>.<MINOR>`` CMake options.
-Alternatively, to build multiple Python versions, use
-``ROCPROFSYS_PYTHON_VERSIONS="<MAJOR>.<MINOR>;[<MAJOR>.<MINOR>]"``,
-and ``ROCPROFSYS_PYTHON_ROOT_DIRS="/path/to/version;[/path/to/version]"`` instead of just ``ROCPROFSYS_PYTHON_VERSIONS``.
-When building multiple Python versions, the length of the ``ROCPROFSYS_PYTHON_VERSIONS``
-and ``ROCPROFSYS_PYTHON_ROOT_DIRS`` lists must
-be the same size.
-
-.. code-block:: shell
-
-   cmake --preset release -D ROCPROFSYS_PYTHON_ROOT_DIRS="/usr/bin;/usr/bin" -D ROCPROFSYS_PYTHON_VERSIONS="3.10;3.12"
+            # Create and activate a Python virtual environment.
+            python3 -m venv .venv
+            source .venv/bin/activate
 
+            # Install ROCm and the profilers from the AMD package repository.
+            python -m pip install --index-url https://repo.amd.com/rocm/whl-multi-arch/ "rocm[profiler]"
 
 .. _post-installation-steps:
 
 Post-installation steps
-========================================
+=======================
 
 After installation, you can optionally configure the ROCm Systems Profiler environment.
 You should also test the executables to confirm ROCm Systems Profiler is correctly installed.
 
 Configure the environment
------------------------------------
+-------------------------
 
 If environment modules are available and preferred, then add them using these commands:
 
@@ -349,13 +151,13 @@ issues locating the installed libraries:
 
 .. _post-installation-troubleshooting:
 
-Post-installation troubleshooting
-========================================
+Troubleshooting
+===============
 
 This section explains how to resolve certain issues that might happen when you first use ROCm Systems Profiler.
 
 Issues with RHEL and SELinux
-----------------------------------------------------
+----------------------------
 
 RHEL (Red Hat Enterprise Linux) and related distributions of Linux automatically enable a security feature
 named SELinux (Security-Enhanced Linux) that prevents ROCm Systems Profiler from running.
@@ -399,7 +201,7 @@ either ``Permissive`` or ``Disabled``.
    Ensure you review your system security settings before making any changes.
 
 Modifying RPATH details
-----------------------------------------------------
+-----------------------
 
 If you're experiencing problems loading your application with an instrumented library,
 then you might have to check and modify the RPATH specified in your application.
@@ -407,7 +209,7 @@ See the section on `troubleshooting RPATHs <../how-to/instrumenting-rewriting-bi
 for further details.
 
 Configuring PAPI to collect hardware counters
-----------------------------------------------------
+---------------------------------------------
 
 To use PAPI to collect the majority of hardware counters, ensure
 the ``/proc/sys/kernel/perf_event_paranoid`` setting has a value less than or equal to ``2``.

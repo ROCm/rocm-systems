@@ -20,6 +20,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand saddr;
 };
 
 class FlatLoadI8Flat : public Flat {
@@ -28,6 +29,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand saddr;
 };
 
 class FlatLoadU16Flat : public Flat {
@@ -36,6 +38,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand saddr;
 };
 
 class FlatLoadI16Flat : public Flat {
@@ -44,6 +47,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand saddr;
 };
 
 class FlatLoadB32Flat : public Flat {
@@ -52,6 +56,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand saddr;
 };
 
 class FlatLoadB64Flat : public Flat {
@@ -60,6 +65,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand saddr;
 };
 
 class FlatLoadB96Flat : public Flat {
@@ -68,6 +74,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand saddr;
 };
 
 class FlatLoadB128Flat : public Flat {
@@ -76,6 +83,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand saddr;
 };
 
 class FlatStoreB8Flat : public Flat {
@@ -84,6 +92,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatStoreB16Flat : public Flat {
@@ -92,6 +101,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatStoreB32Flat : public Flat {
@@ -100,6 +110,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatStoreB64Flat : public Flat {
@@ -108,6 +119,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatStoreB96Flat : public Flat {
@@ -116,6 +128,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatStoreB128Flat : public Flat {
@@ -124,6 +137,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatLoadD16U8Flat : public Flat {
@@ -132,6 +146,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand saddr;
 };
 
 class FlatLoadD16I8Flat : public Flat {
@@ -140,6 +155,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand saddr;
 };
 
 class FlatLoadD16B16Flat : public Flat {
@@ -148,6 +164,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand saddr;
 };
 
 class FlatLoadD16HiU8Flat : public Flat {
@@ -156,6 +173,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand saddr;
 };
 
 class FlatLoadD16HiI8Flat : public Flat {
@@ -164,6 +182,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand saddr;
 };
 
 class FlatLoadD16HiB16Flat : public Flat {
@@ -172,6 +191,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
+  Operand saddr;
 };
 
 class FlatStoreD16HiB8Flat : public Flat {
@@ -180,6 +200,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatStoreD16HiB16Flat : public Flat {
@@ -188,6 +209,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatAtomicSwapB32Flat : public Flat {
@@ -197,6 +219,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatAtomicCmpswapB32Flat : public Flat {
@@ -206,6 +229,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatAtomicAddU32Flat : public Flat {
@@ -215,6 +239,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatAtomicSubU32Flat : public Flat {
@@ -224,6 +249,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatAtomicMinI32Flat : public Flat {
@@ -233,6 +259,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatAtomicMinU32Flat : public Flat {
@@ -242,6 +269,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatAtomicMaxI32Flat : public Flat {
@@ -251,6 +279,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatAtomicMaxU32Flat : public Flat {
@@ -260,6 +289,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatAtomicAndB32Flat : public Flat {
@@ -269,6 +299,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatAtomicOrB32Flat : public Flat {
@@ -278,6 +309,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatAtomicXorB32Flat : public Flat {
@@ -287,6 +319,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatAtomicIncU32Flat : public Flat {
@@ -296,6 +329,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatAtomicDecU32Flat : public Flat {
@@ -305,6 +339,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatAtomicSwapB64Flat : public Flat {
@@ -314,6 +349,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatAtomicCmpswapB64Flat : public Flat {
@@ -323,6 +359,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatAtomicAddU64Flat : public Flat {
@@ -332,6 +369,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatAtomicSubU64Flat : public Flat {
@@ -341,6 +379,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatAtomicMinI64Flat : public Flat {
@@ -350,6 +389,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatAtomicMinU64Flat : public Flat {
@@ -359,6 +399,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatAtomicMaxI64Flat : public Flat {
@@ -368,6 +409,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatAtomicMaxU64Flat : public Flat {
@@ -377,6 +419,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatAtomicAndB64Flat : public Flat {
@@ -386,6 +429,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatAtomicOrB64Flat : public Flat {
@@ -395,6 +439,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatAtomicXorB64Flat : public Flat {
@@ -404,6 +449,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatAtomicIncU64Flat : public Flat {
@@ -413,6 +459,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatAtomicDecU64Flat : public Flat {
@@ -422,6 +469,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatAtomicCmpswapF32Flat : public Flat {
@@ -431,6 +479,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatAtomicMinF32Flat : public Flat {
@@ -440,6 +489,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatAtomicMaxF32Flat : public Flat {
@@ -449,6 +499,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 class FlatAtomicAddF32Flat : public Flat {
@@ -458,6 +509,7 @@ public:
   Operand vdst;
   Operand addr;
   Operand data;
+  Operand saddr;
 };
 
 } // namespace rdna3
