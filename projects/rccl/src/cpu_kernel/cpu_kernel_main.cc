@@ -38,7 +38,7 @@ ncclResult_t rcclCpuExecuteBlock(
   NCCLCHECK(rcclCpuLoadWorkBatch(&ctx, args, blockId, &bar));
 
   while (ctx.aborted == 0) {
-    NCCLCHECK(rcclCpuDispatchWork(&ctx, &bar));
+    NCCLCHECK(rcclCpuDispatchWork(&ctx, &bar, 0, threadCount));
     if (ctx.nextBatchIx < 0) break;
     int batchIx = ctx.nextBatchIx;
     rcclCpuBlockBarrierWait(&bar, 0, threadCount);

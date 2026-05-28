@@ -15,7 +15,7 @@ ncclResult_t rcclCpuLoadWorkBatch(
     int batchIx,
     struct rcclCpuBlockBarrier* bar);
 
-ncclResult_t rcclCpuDispatchWork(struct rcclCpuBlockContext* ctx, struct rcclCpuBlockBarrier* bar);
+ncclResult_t rcclCpuDispatchWork(struct rcclCpuBlockContext* ctx, struct rcclCpuBlockBarrier* bar, int tid, int tn);
 
 ncclResult_t rcclCpuExecuteBlock(
     struct ncclComm* comm,

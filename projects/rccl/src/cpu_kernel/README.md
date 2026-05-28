@@ -35,14 +35,24 @@ CPU launch is used only when:
 - `RCCL_CPU_KERNEL_ENABLE` is set
 - Plan is not CE, symmetric, persistent, or persistent work storage
 
-## Limitations
+## Collective execution
 
-Device collective bodies (`RunWorkColl`, `Primitives`, etc.) are not yet fully
-ported to host. The CPU path executes kernel **orchestration** (channel mapping,
-work-batch loading, barriers, counter writeback) with MI300 memory fences.
-Intranode transport still relies on the existing proxy/network path where
-applicable. Full correctness for all algorithms/protocols requires extending
-`cpu_dispatch.cc` with host ports of the device primitive templates.
+When enabled, `cpu_dispatch.cc` decodes `funcId` via `cpu_func_decode.cc` (using
+the same `ncclDevFuncNameToId` table as device code) and runs host equivalents
+of ring/tree collectives through `cpu_primitives.cc` (SIMPLE protocol, MI300
+ordering) and `cpu_coll_exec.cc`.
+
+Supported collectives (RING/TREE/PAT/CollNet/NVLS channel work via ring primitives):
+
+- AllReduce, Broadcast, Reduce, AllGather, ReduceScatter
+- SendRecv / P2p
+- AlltoAllPivot / GDA (ring/simple path)
+
+LL/LL128 batches are executed using the SIMPLE CPU transport path (same
+algorithms; LL fifo timing is not reimplemented on host).
+
+Device pointers in user buffers are staged through `cpu_mem.cc` when not
+host-accessible.
 
 ## Files
 

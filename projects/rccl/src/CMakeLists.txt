@@ -34,6 +34,11 @@ set(SRC_FILES
   cpu_kernel/cpu_dev_comm_mirror.cc
   cpu_kernel/cpu_work_loader.cc
   cpu_kernel/cpu_dispatch.cc
+  cpu_kernel/cpu_func_decode.cc
+  cpu_kernel/cpu_mem.cc
+  cpu_kernel/cpu_reduce.cc
+  cpu_kernel/cpu_primitives.cc
+  cpu_kernel/cpu_coll_exec.cc
   group.cc
   ipc_gpu_barrier.cu
   ipc_init.cu

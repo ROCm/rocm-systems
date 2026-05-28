@@ -5,15 +5,15 @@
  * MI300 memory ordering via the CPU primitives layer.
  ************************************************************************/
 
-#include "cpu_device_context.h"
+#include "cpu_kernel_internal.h"
+#include "cpu_coll_exec.h"
+#include "cpu_func_decode.h"
 #include "cpu_memory_model.h"
 
 #include "checks.h"
 #include "collectives.h"
 #include "debug.h"
 #include "device.h"
-
-#include <cstring>
 
 namespace {
 
@@ -22,40 +22,66 @@ ncclResult_t rcclCpuRunWorkColl(
     struct rcclCpuBlockBarrier* bar,
     int tid,
     int tn) {
+  struct rcclCpuFuncDesc desc{};
+  if (!rcclCpuDecodeFuncId(ctx->funcId, &desc)) {
+    WARN("rcclCpuRunWorkColl: unknown funcId %u", ctx->funcId);
+    return ncclInternalError;
+  }
+
+  if (ctx->workType == ncclDevWorkTypeCollReg) {
+    auto* reg = reinterpret_cast<struct ncclDevWorkCollReg*>(ctx->workStorage);
+    int subtn = reg->coll.nWarps * ctx->warpSize;
+    if (tid < subtn) {
+      NCCLCHECK(rcclCpuExecuteCollWork(ctx, bar, tid, subtn, &reg->coll, desc));
+    }
+    return ncclSuccess;
+  }
+
   for (int w = 0; w < ctx->nWorks; w++) {
     struct ncclDevWorkColl* work =
         reinterpret_cast<struct ncclDevWorkColl*>(ctx->workStorage + w * ctx->workSize);
     int subtn = work->nWarps * ctx->warpSize;
-    if (tid >= subtn) continue;
+  if (tid >= subtn) continue;
 
-    // Device kernels execute transport protocols in-place. On CPU we preserve
-    // ordering by finishing the block barrier scope before proxy/device peers
-    // observe step updates. Full protocol port lives in cpu_primitives*.cc;
-    // until a specialized path exists we advance work counters and honor abort.
-    if (ctx->comm.abortFlag && rcclCpuLoadSeqCstU32(const_cast<uint32_t*>(ctx->comm.abortFlag))) {
-      ctx->aborted = 1;
-      return ncclSuccess;
-    }
+  if (w != 0) {
+    struct ncclDevWorkColl* workPrev =
+        reinterpret_cast<struct ncclDevWorkColl*>(ctx->workStorage + (w - 1) * ctx->workSize);
+    if (work->nWarps != workPrev->nWarps) rcclCpuBlockBarrierWait(bar, tid, tn);
+  }
 
-    (void)work;
-    (void)bar;
-    (void)tn;
-    rcclCpuFenceSystem();
+  NCCLCHECK(rcclCpuExecuteCollWork(ctx, bar, tid, subtn, work, desc));
+  }
+  return ncclSuccess;
+}
+
+ncclResult_t rcclCpuRunWorkP2p(
+    struct rcclCpuBlockContext* ctx,
+    struct rcclCpuBlockBarrier* bar,
+    int tid,
+    int tn) {
+  struct rcclCpuFuncDesc desc{};
+  if (!rcclCpuDecodeFuncId(ctx->funcId, &desc)) {
+    desc.coll = ncclFuncSendRecv;
+    desc.proto = NCCL_PROTO_SIMPLE;
+    desc.datatype = ncclInt8;
+    desc.devRedOp = ncclDevSum;
+    desc.valid = true;
+  }
+
+  for (int w = 0; w < ctx->nWorks; w++) {
+    struct ncclDevWorkP2p* work =
+        reinterpret_cast<struct ncclDevWorkP2p*>(ctx->workStorage + w * ctx->workSize);
+    NCCLCHECK(rcclCpuExecuteP2pWork(ctx, bar, tid, tn, work, desc));
   }
   return ncclSuccess;
 }
 
 }  // namespace
 
-ncclResult_t rcclCpuDispatchWork(struct rcclCpuBlockContext* ctx, struct rcclCpuBlockBarrier* bar) {
-  int tid = 0;
-  int tn = ctx->threadCount;
-
-  // Parallelize across threads when block is wide enough.
-  if (tn > 1) {
-    // For now run collective body on thread 0; barriers still model block scope.
-    tid = 0;
-    tn = 1;
+ncclResult_t rcclCpuDispatchWork(struct rcclCpuBlockContext* ctx, struct rcclCpuBlockBarrier* bar, int tid, int tn) {
+  if (ctx->comm.abortFlag && rcclCpuLoadSeqCstU32(const_cast<uint32_t*>(ctx->comm.abortFlag))) {
+    ctx->aborted = 1;
+    return ncclSuccess;
   }
 
   switch (ctx->workType) {
@@ -64,11 +90,10 @@ ncclResult_t rcclCpuDispatchWork(struct rcclCpuBlockContext* ctx, struct rcclCpu
     NCCLCHECK(rcclCpuRunWorkColl(ctx, bar, tid, tn));
     break;
   case ncclDevWorkTypeP2p:
-    // P2P uses the same step/barrier ordering contract; body delegated to proxy.
-    rcclCpuFenceSystem();
+    NCCLCHECK(rcclCpuRunWorkP2p(ctx, bar, tid, tn));
     break;
   default:
-  return ncclInternalError;
+    return ncclInternalError;
   }
 
   ctx->channel.workCounter += ctx->nWorks;
