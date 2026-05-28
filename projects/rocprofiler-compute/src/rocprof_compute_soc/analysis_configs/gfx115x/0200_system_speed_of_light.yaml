@@ -32,7 +32,6 @@ Panel Config:
           unit: Wavefronts
           peak: ($max_waves_per_cu * $cu_per_gpu)
           pop: true
-            / (($max_waves_per_cu * $cu_per_gpu)))
         GL2 Cache Hit Rate:
           value: SUM(100 * GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
           unit: Percent

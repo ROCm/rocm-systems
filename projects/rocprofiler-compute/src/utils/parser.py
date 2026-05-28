@@ -129,11 +129,11 @@ def build_dfs(
                                         for bv in simple_box.values():
                                             values.append(bv[0] + v + bv[1])
                                     else:
-                                        if k != "alias":
+                                        if k not in {"coll_level", "alias"}:
                                             values.append(v)
                             else:
                                 for k, v in entries.items():
-                                    if k != "alias":
+                                    if k not in {"coll_level", "alias"}:
                                         values.append(v)
                                         eqn_content.append(v)
 
