@@ -597,9 +597,9 @@ TEST_CASE("Unit_HRR_AllApis_Direct", "[.][hrr-direct]") {
   // skip gracefully on hardware that reports no texture support.
   // =========================================================================
   {
-    int maxTex1D = 0;
-    hipDeviceGetAttribute(&maxTex1D, hipDeviceAttributeMaxTexture1DWidth, 0);
-    if (maxTex1D > 0) {
+    int supportsImages = 0;
+    hipDeviceGetAttribute(&supportsImages, hipDeviceAttributeImageSupport, 0);
+    if (supportsImages) {
       HIP_ARRAY_DESCRIPTOR desc1d{};
       desc1d.Width       = static_cast<size_t>(N);
       desc1d.Height      = 0;   // 1-D
@@ -1589,36 +1589,41 @@ TEST_CASE("Unit_HRR_MemcpyExtra_Direct", "[.][hrr-direct]") {
   }
 
   // Array-based copies: hipMallocArray + hipMemcpyToArray/FromArray
+  // Requires image support — skip on GPUs that don't support texture arrays.
   {
-    hipChannelFormatDesc desc = hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
-    hipArray_t arr = nullptr;
-    HIP_CHECK(hipMallocArray(&arr, &desc, N, 1, hipArrayDefault));
+    int supportsImages = 0;
+    hipDeviceGetAttribute(&supportsImages, hipDeviceAttributeImageSupport, 0);
+    if (supportsImages) {
+      hipChannelFormatDesc desc = hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
+      hipArray_t arr = nullptr;
+      HIP_CHECK(hipMallocArray(&arr, &desc, N, 1, hipArrayDefault));
 
-    // hipMemcpyToArray (H→Array)
-    HIP_CHECK(hipMemcpyToArray(arr, 0, 0, h_src, SZ, hipMemcpyHostToDevice));
+      // hipMemcpyToArray (H→Array)
+      HIP_CHECK(hipMemcpyToArray(arr, 0, 0, h_src, SZ, hipMemcpyHostToDevice));
 
-    // hipMemcpyFromArray (Array→H)
-    int h_arr[N] = {};
-    HIP_CHECK(hipMemcpyFromArray(h_arr, arr, 0, 0, SZ, hipMemcpyDeviceToHost));
-    REQUIRE(h_arr[0] == 55);
+      // hipMemcpyFromArray (Array→H)
+      int h_arr[N] = {};
+      HIP_CHECK(hipMemcpyFromArray(h_arr, arr, 0, 0, SZ, hipMemcpyDeviceToHost));
+      REQUIRE(h_arr[0] == 55);
 
-    // hipMemcpy2DToArray (H→Array via 2D)
-    HIP_CHECK(hipMemcpy2DToArray(arr, 0, 0, h_src, SZ, SZ, 1, hipMemcpyHostToDevice));
+      // hipMemcpy2DToArray (H→Array via 2D)
+      HIP_CHECK(hipMemcpy2DToArray(arr, 0, 0, h_src, SZ, SZ, 1, hipMemcpyHostToDevice));
 
-    // hipMemcpy2DFromArray (Array→H via 2D)
-    int h_arr2[N] = {};
-    HIP_CHECK(hipMemcpy2DFromArray(h_arr2, SZ, arr, 0, 0, SZ, 1, hipMemcpyDeviceToHost));
-    REQUIRE(h_arr2[0] == 55);
+      // hipMemcpy2DFromArray (Array→H via 2D)
+      int h_arr2[N] = {};
+      HIP_CHECK(hipMemcpy2DFromArray(h_arr2, SZ, arr, 0, 0, SZ, 1, hipMemcpyDeviceToHost));
+      REQUIRE(h_arr2[0] == 55);
 
-    // hipMemcpyAtoH (Array→host, driver-style)
-    int h_ato[N] = {};
-    HIP_CHECK(hipMemcpyAtoH(h_ato, arr, 0, SZ));
-    REQUIRE(h_ato[0] == 55);
+      // hipMemcpyAtoH (Array→host, driver-style)
+      int h_ato[N] = {};
+      HIP_CHECK(hipMemcpyAtoH(h_ato, arr, 0, SZ));
+      REQUIRE(h_ato[0] == 55);
 
-    // hipMemcpyHtoA (host→Array, driver-style)
-    HIP_CHECK(hipMemcpyHtoA(arr, 0, h_src, SZ));
+      // hipMemcpyHtoA (host→Array, driver-style)
+      HIP_CHECK(hipMemcpyHtoA(arr, 0, h_src, SZ));
 
-    HIP_CHECK(hipFreeArray(arr));
+      HIP_CHECK(hipFreeArray(arr));
+    }
   }
 
   // Symbol _spt H2D variants — exercise capture path for symbol memcpy _spt APIs
