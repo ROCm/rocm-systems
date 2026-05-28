@@ -32,7 +32,6 @@ from .types import (
     SHT_RELA,
     SHT_REL,
     SHF_ALLOC,
-    R_X86_64_RELATIVE,
     ArchConfig,
     get_arch_config,
     get_section_name,

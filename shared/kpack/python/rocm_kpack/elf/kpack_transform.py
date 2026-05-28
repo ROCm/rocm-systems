@@ -191,7 +191,7 @@ def verify_no_fatbin_relocations(
 
     After redirecting wrapper pointers to .rocm_kpack_ref, there should be
     no relocations that still point into the .hip_fatbin section. This
-    function checks all R_X86_64_RELATIVE relocations.
+    function checks all R_RELATIVE relocations.
 
     Args:
         surgery: ElfSurgery instance to operate on
@@ -352,9 +352,10 @@ def kpack_offload_binary(
                 f"ERROR: {len(problematic)} relocation(s) still point "
                 f"into .hip_fatbin section:",
             ]
+            r_relative = surgery.arch_config.r_relative
             for p in problematic:
                 type_name = (
-                    "R_X86_64_RELATIVE" if p.reloc_type == 8 else f"type={p.reloc_type}"
+                    "R_RELATIVE" if p.reloc_type == r_relative else f"type={p.reloc_type}"
                 )
                 error_lines.append(
                     f"  - offset 0x{p.r_offset:x} -> 0x{p.target:x} ({type_name})"
