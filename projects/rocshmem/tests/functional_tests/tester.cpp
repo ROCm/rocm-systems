@@ -72,6 +72,7 @@
 #include "library_info_tester.hpp"
 #include "fence_ordering_tester.hpp"
 #include "reduce_on_stream_tester.hpp"
+#include "ctx_create_tester.hpp"
 
 #include "backend_bc.hpp"
 extern Backend* backend;
@@ -652,8 +653,12 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       testers.push_back(new FenceOrderingTester(args));
       break;
     case ReduceOnStreamTestType:
-      test_name = "Reduce On Stream Sum";
-      testers.push_back(new ReduceOnStreamTester(args)); // TODO: Make template class
+      test_name = "Reduce On Stream";
+      testers.push_back(new ReduceOnStreamTester(args));
+      break;
+    case CtxCreateTestType:
+      test_name = "Host CTX Create";
+      testers.push_back(new CtxCreateTester(args));
       break;
     default:
       test_name = "Empty";

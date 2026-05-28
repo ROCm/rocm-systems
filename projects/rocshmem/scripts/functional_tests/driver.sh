@@ -563,7 +563,11 @@ TestOnStream() {
   ExecTest  "sync_all_on_stream"     2  1           1
   ExecTest  "alltoallmem_on_stream"  2  1           64        1048576
   ExecTest  "broadcastmem_on_stream" 2  1           64        1048576
+  export ROCSHMEM_MAX_NUM_CONTEXTS=1024
+  export ROCSHMEM_MAX_NUM_HOST_CONTEXTS=1024
   ExecTest  "reduce_on_stream"       2  1           64        1048576
+  unset ROCSHMEM_MAX_NUM_CONTEXTS
+  unset ROCSHMEM_MAX_NUM_HOST_CONTEXTS
 }
 
 TestOther() {

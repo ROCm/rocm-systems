@@ -145,7 +145,8 @@
   X(FenceOrderPutLargeSmall,   100) \
   X(FenceOrderFanout,          101) \
   X(FenceOrderPutWaveNbiChunks, 102) \
-  X(ReduceOnStream,             103)
+  X(ReduceOnStream,             103) \
+  X(CtxCreate,                  104) \
 
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {

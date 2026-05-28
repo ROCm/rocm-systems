@@ -50,12 +50,14 @@ ReduceOnStreamTester::ReduceOnStreamTester(TesterArguments args)
   start_events_timed.resize(num_streams);
   stop_events_timed.resize(num_streams);
 
+  
   for (int i = 0; i < num_streams; i++) {
-    rocshmem_ctx_create(0, &ctxs[i]);
+
     CHECK_HIP(hipStreamCreate(&streams[i]));
     CHECK_HIP(hipEventCreate(&start_events_timed[i]));
     CHECK_HIP(hipEventCreate(&stop_events_timed[i]));
   }
+  
 }
 
 ReduceOnStreamTester::~ReduceOnStreamTester() {
@@ -63,7 +65,6 @@ ReduceOnStreamTester::~ReduceOnStreamTester() {
     CHECK_HIP(hipEventDestroy(stop_events_timed[i]));
     CHECK_HIP(hipEventDestroy(start_events_timed[i]));
     CHECK_HIP(hipStreamDestroy(streams[i]));
-    rocshmem_ctx_destroy(ctxs[i]);
   }
   free_test_buffer(source_buf, args.local_buf_type);
   free_test_buffer(dest_buf);
@@ -73,6 +74,7 @@ void ReduceOnStreamTester::preLaunchKernel() {
   bw_factor = n_pes;
 
   for (int i = 0; i < num_streams; i++) {
+    rocshmem_ctx_create(0, &ctxs[i]);
     team_world_dup[i] = ROCSHMEM_TEAM_INVALID;
     rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, n_pes, nullptr, 0,
                                 &team_world_dup[i]);
@@ -86,6 +88,9 @@ void ReduceOnStreamTester::preLaunchKernel() {
 void ReduceOnStreamTester::postLaunchKernel() {
   for (int i = 0; i < num_streams; i++)
     CHECK_HIP(hipStreamSynchronize(streams[i]));
+  
+  for (int i =0; i < num_streams; i++)
+    rocshmem_ctx_destroy(ctxs[i]);
 
   for (int i = 0; i < num_streams && i < static_cast<int>(num_timers); i++) {
     float elapsed_time_ms = 0.0f;
