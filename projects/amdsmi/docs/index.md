@@ -5,7 +5,7 @@ myst:
     "keywords": "amdsmi, lib, cli, system, management, interface, amdgpu, admin, sys"
 ---
 
-# AMD SMI documentation
+# AMD SMI {{ AMDSMI_VERSION }}
 
 The AMD System Management Interface (AMD SMI) library offers a unified tool for
 managing and monitoring GPUs, particularly in high-performance computing
