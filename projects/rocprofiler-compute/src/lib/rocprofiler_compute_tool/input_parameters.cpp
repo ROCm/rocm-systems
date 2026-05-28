@@ -13,8 +13,7 @@ EnvInputParameters::EnvInputParameters(std::shared_ptr<const EnvironCache> envir
 {
 }
 
-std::string_view EnvInputParameters::get(std::string_view env_var_name,
-                                         std::string_view default_value)
+std::string_view EnvInputParameters::get(std::string_view env_var_name, std::string_view default_value)
 {
     const auto v = m_environ->get(env_var_name);
     if (v && !v->empty())
