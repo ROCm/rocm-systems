@@ -652,6 +652,14 @@ struct bootstrapRing_t {
     struct {
       struct ncclSocket recv; // recv from prev
       struct ncclSocket send; // send to next
+      // Dedicated reverse pair for bidir socket AllGather. Decoupling Ring1
+      // traffic onto its own TCP pair removes per-FD lock contention that
+      // bottlenecked the previous shared-pair multiOp design; the kernel
+      // can now progress forward and reverse traffic concurrently. Both
+      // remain in ncclSocketStateNone when socket bidir is disabled or the
+      // comm wasn't built via bootstrapInit (e.g. bootstrapSplit).
+      struct ncclSocket revRecv; // reverse: recv from next
+      struct ncclSocket revSend; // reverse: send to prev
     } socket;
   };
 };
@@ -668,6 +676,7 @@ struct bootstrapListen_t {
     } net;
     struct {
       struct ncclSocket fwd; // forward ring listen
+      struct ncclSocket rev; // reverse ring listen (bidir socket only)
     } socket;
   };
 };
@@ -792,6 +801,17 @@ static ncclResult_t netRingConnectFinish(void* ctx, ncclNet_t* net, struct boots
   return ncclSuccess;
 }
 
+// True when 'addr' is a usable (non-zero) socket address. The root memsets revHandle to
+// zero in the rendezvous send loop when a rank's predecessor info isn't ready yet. For
+// nranks>=3 the reverse handle is always populated, but guard against the zero case so we
+// never kick off a reverse-pair connect to 0.0.0.0:0 (which socketRingConnectFinish would
+// then spin on forever).
+static inline bool socketAddrUsable(const union ncclSocketAddress* addr) {
+  union ncclSocketAddress zero;
+  memset(&zero, 0, sizeof(zero));
+  return memcmp(addr, &zero, sizeof(zero)) != 0;
+}
+
 // Start the socket ring connect in non-blocking mode. This lets bootstrapInit overlap
 // TCP connect/accept handshakes with local proxy/P2P socket setup, without adding
 // threads. socketRingConnect() below keeps the old blocking semantics for callers that
@@ -819,6 +839,32 @@ static ncclResult_t socketRingConnectFinish(struct ncclSocket* sendSocket, struc
     if (!sendReady || !recvReady) sched_yield();
   } while (!sendReady || !recvReady);
   return ncclSuccess;
+}
+
+// Best-effort finish for the OPTIONAL reverse socket pair. Unlike the forward ring (which
+// must complete), the reverse pair is only a latency optimisation: socketRingAllGather
+// transparently falls back to the shared forward pair when the reverse sockets aren't
+// ready. So bound the wait — if the peer never shows up (e.g. it saw a zeroed revHandle
+// and skipped its half of the symmetric handshake), don't hang the whole bootstrap: tear
+// the reverse sockets down and let the AllGather use the shared path.
+static ncclResult_t socketRingRevFinishBestEffort(struct ncclSocket* sendSocket, struct ncclSocket* recvSocket, volatile uint32_t* abortFlag) {
+  const uint64_t timeoutNs = 5ULL * 1000 * 1000 * 1000;  // 5s; LAN-local, normally completes in <ms
+  uint64_t start = clockNano();
+  int abortCounter = 0, sendReady = 0, recvReady = 0;
+  do {
+    NCCLCHECK(checkAbort(abortFlag, &abortCounter));
+    if (!sendReady) NCCLCHECK(ncclSocketReady(sendSocket, &sendReady));
+    if (!recvReady) NCCLCHECK(ncclSocketReady(recvSocket, &recvReady));
+    if (sendReady && recvReady) return ncclSuccess;
+    if (clockNano() - start > timeoutNs) {
+      WARN("Bootstrap: reverse socket pair did not come up within %llus; falling back to shared-pair AllGather",
+           (unsigned long long)(timeoutNs / 1000000000ULL));
+      (void)ncclSocketClose(sendSocket);
+      (void)ncclSocketClose(recvSocket);
+      return ncclSuccess;
+    }
+    sched_yield();
+  } while (true);
 }
 
 static ncclResult_t socketRingConnect(ncclSocketAddress* addr, struct ncclSocket* sendSocket, struct ncclSocket* listenSock, struct ncclSocket* recvSocket, uint64_t magic, volatile uint32_t* abortFlag) {
@@ -1043,7 +1089,12 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm) {
 
   uint64_t timers[BOOTSTRAP_INIT_TIME_N] = {0};
   // Multi-root rendezvous can't propagate revHandle cross-root; bidir requires nHandles==1.
-  bool wantNetBidir = (nHandles == 1) && bootstrapBidirEnabled(nranks, 1);
+  bool wantNetBidir    = (nHandles == 1) && bootstrapBidirEnabled(nranks, 1);
+  bool wantSocketBidir = (nHandles == 1) && bootstrapBidirEnabled(nranks, 0);
+  // Set once the reverse socket pair handshake is actually kicked off (a valid prev
+  // revHandle was piggybacked). Gates the matching finish so we never poll a pair we
+  // never started.
+  bool socketRevPairStarted = false;
 
   NCCLCHECK(ncclCalloc(&state, 1));
   state->rank = rank;
@@ -1084,6 +1135,17 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm) {
     }
   } else {
     NCCLCHECK(createListenSocket(comm, comm->magic, &STATE_LISTEN(state, socket.fwd), &info.connectInfo.fwd.addr, ncclSocketTypeBootstrap));
+    // Eager reverse listen + piggyback through the root rendezvous (single-root only).
+    // Reuses the existing revHandle slot in connectInfo so we add no extra netSendRecv
+    // exchange on the hot path: each rank's reverse-listen address travels to the
+    // ring-prev rank via the same one-shot info forwarding the root already does.
+    if (wantSocketBidir) {
+      union ncclSocketAddress revAddr;
+      static_assert(sizeof(revAddr) <= NCCL_NET_HANDLE_MAXSIZE,
+                    "ncclSocketAddress must fit in ringConnectInfo::revHandle");
+      NCCLCHECK(createListenSocket(comm, comm->magic, &STATE_LISTEN(state, socket.rev), &revAddr, ncclSocketTypeBootstrap));
+      memcpy(info.connectInfo.revHandle, &revAddr, sizeof(revAddr));
+    }
   }
   // Create socket for root to contact me using the root's magic
   int curr_root = rootIdFromRank(rank, nranks, nHandles);
@@ -1141,6 +1203,26 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm) {
                                      &STATE_RING(state, net.recvComm), &STATE_RING(state, net.recvDevHandle), &ringConnectDone));
   } else {
     NCCLCHECK(socketRingConnectStart(&nextPeer.fwd.addr, &STATE_RING(state, socket.send), &STATE_LISTEN(state, socket.fwd), &STATE_RING(state, socket.recv), comm->magic, state->abortFlag));
+    if (wantSocketBidir) {
+      // Reverse pair: send to ring-prev (whose listen address we just received
+      // piggybacked in nextPeer.revHandle) and accept from ring-next on our own
+      // reverse listen. Both handshakes are kicked off non-blocking and progress
+      // in parallel with the forward ring, proxy/UDS/peer/RAS setup below.
+      union ncclSocketAddress prevRevAddr;
+      memcpy(&prevRevAddr, nextPeer.revHandle, sizeof(prevRevAddr));
+      if (socketAddrUsable(&prevRevAddr)) {
+        NCCLCHECK(socketRingConnectStart(&prevRevAddr,
+                                         &STATE_RING(state, socket.revSend),
+                                         &STATE_LISTEN(state, socket.rev),
+                                         &STATE_RING(state, socket.revRecv),
+                                         comm->magic, state->abortFlag));
+        socketRevPairStarted = true;
+      } else {
+        // Prev's reverse listen address wasn't propagated (zeroed by the root). Skip the
+        // dedicated reverse pair; socketRingAllGather will use the shared forward pair.
+        INFO(NCCL_BOOTSTRAP, "Bootstrap rank reverse handle unset; using shared-pair AllGather");
+      }
+    }
   }
 
   // [RCCL] Bidirectional net OOB: kick off the reverse-ring connect()/accept() now so
@@ -1198,6 +1280,12 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm) {
                   result, fail);
   } else {
     NCCLCHECKGOTO(socketRingConnectFinish(&STATE_RING(state, socket.send), &STATE_RING(state, socket.recv), state->abortFlag), result, fail);
+    if (socketRevPairStarted) {
+      // Best-effort: a peer that skipped its half (zeroed revHandle) must not hang us.
+      NCCLCHECKGOTO(socketRingRevFinishBestEffort(&STATE_RING(state, socket.revSend),
+                                                  &STATE_RING(state, socket.revRecv),
+                                                  state->abortFlag), result, fail);
+    }
   }
 
   // Optionally bring up the second (reverse) ring used by the bidirectional bootstrap
@@ -1504,16 +1592,22 @@ static ncclResult_t socketRingAllGatherUnidir(struct ncclSocket* sendSock, struc
 exit:
   return res;
 }
-// Bidirectional ring AllGather over sockets, mirrors NCCL 2.28.7.
-// Single shared forward pair drives both ring directions via socketDoubleSendRecv
-// (TCP is full-duplex). Algorithmic ⌊N/2⌋ steps vs N-1 for unidirectional
-// (for even N the final step is single-directional, so total slices == N-1
-// in both even and odd cases).
+// Bidirectional ring AllGather over sockets. When 'revSendSock'/'revRecvSock' are
+// non-NULL, Ring1 (the reverse direction) is driven over a *dedicated* TCP pair so
+// the kernel can progress forward and reverse traffic in parallel without per-FD
+// lock contention. When NULL, Ring1 falls back to the shared forward pair (legacy
+// behaviour preserved for bootstrapIntraNodeAllGather and any bootstrapSplit-built
+// comm that only has the forward pair set up). Algorithmic ⌊N/2⌋ steps vs N-1 for
+// unidirectional (for even N the final step is single-directional, so total slices
+// == N-1 in both even and odd cases).
 static ncclResult_t socketRingAllGather(struct ncclSocket* nextSock, struct ncclSocket* prevSock,
+                                        struct ncclSocket* revSendSock, struct ncclSocket* revRecvSock,
                                         int rank, int nranks, char* data, int size) {
   ncclResult_t res = ncclSuccess;
   uint64_t tFirst = 0, tRest = 0;
-  TRACE(NCCL_BOOTSTRAP, "socketRingAllGather started: rank=%d nranks=%d", rank, nranks);
+  struct ncclSocket* ring1SendSock = revSendSock != NULL ? revSendSock : prevSock;
+  struct ncclSocket* ring1RecvSock = revRecvSock != NULL ? revRecvSock : nextSock;
+  TRACE(NCCL_BOOTSTRAP, "socketRingAllGather started: rank=%d nranks=%d sepPair=%d", rank, nranks, revSendSock != NULL);
   int totalSteps = nranks / 2;
   BOOTSTRAP_PROF_OPEN(tFirst);
   for (int step = 0; step < totalSteps; step++) {
@@ -1525,11 +1619,13 @@ static ncclResult_t socketRingAllGather(struct ncclSocket* nextSock, struct nccl
     if (isFinalUnidirectional) {
       NCCLCHECKGOTO(socketSendRecv(nextSock, data + sendSliceRing0 * size, size, prevSock, data + recvSliceRing0 * size, size), res, exit);
     } else {
+      // Ring0 over forward pair; Ring1 over the dedicated reverse pair if one was
+      // set up, otherwise multiplexed onto the forward pair (shared-pair fallback).
       struct ncclSocketOp ops[4] = {
-        {NCCL_SOCKET_SEND, nextSock, data + sendSliceRing0 * size, size, 0},
-        {NCCL_SOCKET_RECV, prevSock, data + recvSliceRing0 * size, size, 0},
-        {NCCL_SOCKET_SEND, prevSock, data + sendSliceRing1 * size, size, 0},
-        {NCCL_SOCKET_RECV, nextSock, data + recvSliceRing1 * size, size, 0}
+        {NCCL_SOCKET_SEND, nextSock,      data + sendSliceRing0 * size, size, 0},
+        {NCCL_SOCKET_RECV, prevSock,      data + recvSliceRing0 * size, size, 0},
+        {NCCL_SOCKET_SEND, ring1SendSock, data + sendSliceRing1 * size, size, 0},
+        {NCCL_SOCKET_RECV, ring1RecvSock, data + recvSliceRing1 * size, size, 0}
       };
       NCCLCHECKGOTO(socketDoubleSendRecv(ops), res, exit);
     }
@@ -1661,7 +1757,16 @@ ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
     }
   } else {
     if (bootstrapBidirEnabled(nranks, 0)) {
+      // Use the dedicated reverse pair only when it was actually set up by
+      // bootstrapInit. bootstrapSplit (and any future shrunk-comm path) leaves
+      // the reverse sockets in ncclSocketStateNone, in which case we fall back
+      // to the shared-pair multiplex internally.
+      struct ncclSocket* revSendSock = (STATE_RING(state, socket.revSend).state == ncclSocketStateReady)
+                                       ? &STATE_RING(state, socket.revSend) : NULL;
+      struct ncclSocket* revRecvSock = (STATE_RING(state, socket.revRecv).state == ncclSocketStateReady)
+                                       ? &STATE_RING(state, socket.revRecv) : NULL;
       NCCLCHECKGOTO(socketRingAllGather(&STATE_RING(state, socket.send), &STATE_RING(state, socket.recv),
+                                        revSendSock, revRecvSock,
                                         rank, nranks, (char*)allData, size), res, exit);
     } else {
       NCCLCHECKGOTO(socketRingAllGatherUnidir(&STATE_RING(state, socket.send), &STATE_RING(state, socket.recv), rank, nranks, (char*)allData, size), res, exit);
@@ -1721,13 +1826,13 @@ ncclResult_t bootstrapIntraNodeAllGather(void* commState, int* ranks, int rank, 
   NCCLCHECK(socketConnect(commState, nextRank, BOOTSTRAP_TAG_INTRANODE_ALLGATHER, &sendSocket));
   NCCLCHECK(socketAccept(commState, prevRank, BOOTSTRAP_TAG_INTRANODE_ALLGATHER, &recvSocket));
 
-  // Intra-node AllGather is socket-only and so cannot reuse bootstrapBidirEnabled
-  // (its `!netOn` clause is geared to inter-node OOB selection). Gate purely on the
-  // BOOTSTRAP_BIDIR_ALLGATHER knob; socketRingAllGather handles nranks<3 itself
-  // (nranks==2 → single bidirectional socketSendRecv; nranks==1 is short-circuited
-  // earlier in this function).
+  // Intra-node AllGather is socket-only and uses a single TCP pair (no dedicated
+  // reverse pair available — pass NULL/NULL so socketRingAllGather falls back to the
+  // shared-pair multiplex path internally). Gate purely on the BOOTSTRAP_BIDIR_ALLGATHER
+  // knob; socketRingAllGather handles nranks<3 itself (nranks==2 → single bidirectional
+  // socketSendRecv; nranks==1 is short-circuited earlier).
   if (ncclParamBootstrapBidirAllGather() != 0) {
-    NCCLCHECK(socketRingAllGather(&sendSocket, &recvSocket, rank, nranks, (char*)allData, size));
+    NCCLCHECK(socketRingAllGather(&sendSocket, &recvSocket, NULL, NULL, rank, nranks, (char*)allData, size));
   } else {
     NCCLCHECK(socketRingAllGatherUnidir(&sendSocket, &recvSocket, rank, nranks, (char*)allData, size));
   }
@@ -1793,7 +1898,16 @@ ncclResult_t bootstrapClose(void* commState) {
   } else {
     NCCLCHECK(ncclSocketClose(&STATE_RING(state, socket.send)));
     NCCLCHECK(ncclSocketClose(&STATE_RING(state, socket.recv)));
+    if (STATE_RING(state, socket.revSend).state >= ncclSocketStateInitialized) {
+      NCCLCHECK(ncclSocketClose(&STATE_RING(state, socket.revSend)));
+    }
+    if (STATE_RING(state, socket.revRecv).state >= ncclSocketStateInitialized) {
+      NCCLCHECK(ncclSocketClose(&STATE_RING(state, socket.revRecv)));
+    }
     NCCLCHECK(ncclSocketClose(&STATE_LISTEN(state, socket.fwd)));
+    if (STATE_LISTEN(state, socket.rev).state >= ncclSocketStateInitialized) {
+      NCCLCHECK(ncclSocketClose(&STATE_LISTEN(state, socket.rev)));
+    }
   }
   // close the p2p socket
   NCCLCHECK(ncclSocketClose(&STATE_LISTEN(state, peerSocket)));
