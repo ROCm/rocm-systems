@@ -59,6 +59,10 @@ protected:
                 { "tx_rdma_ucast_pkts", 0 },
                 { "rx_rdma_cnp_pkts", 0 },
                 { "tx_rdma_cnp_pkts", 0 },
+                { "tx_rdma_ack_timeout", 0 },
+                { "resp_tx_pkt_seq_err", 0 },
+                { "req_rx_pkt_seq_err", 0 },
+                { "req_rx_impl_nak_seq_err", 0 },
             }));
     }
 
@@ -75,6 +79,10 @@ protected:
                 { "tx_rdma_ucast_pkts", 6000 },
                 { "rx_rdma_cnp_pkts", 100 },
                 { "tx_rdma_cnp_pkts", 200 },
+                { "tx_rdma_ack_timeout", 50 },
+                { "resp_tx_pkt_seq_err", 150 },
+                { "req_rx_pkt_seq_err", 250 },
+                { "req_rx_impl_nak_seq_err", 350 },
             }));
     }
 
@@ -132,6 +140,10 @@ TEST_F(NicDeviceTest, GetSupportedMetrics_AllEnabled)
     EXPECT_TRUE(supported.bits.tx_rdma_ucast_pkts);
     EXPECT_TRUE(supported.bits.rx_rdma_cnp_pkts);
     EXPECT_TRUE(supported.bits.tx_rdma_cnp_pkts);
+    EXPECT_TRUE(supported.bits.tx_rdma_ack_timeout);
+    EXPECT_TRUE(supported.bits.resp_tx_pkt_seq_err);
+    EXPECT_TRUE(supported.bits.req_rx_pkt_seq_err);
+    EXPECT_TRUE(supported.bits.req_rx_impl_nak_seq_err);
 }
 
 TEST_F(NicDeviceTest, GetNicMetrics_ReturnsCorrectValues)
@@ -147,6 +159,10 @@ TEST_F(NicDeviceTest, GetNicMetrics_ReturnsCorrectValues)
     EXPECT_EQ(m.tx_rdma_ucast_pkts, 6000ULL);
     EXPECT_EQ(m.rx_rdma_cnp_pkts, 100ULL);
     EXPECT_EQ(m.tx_rdma_cnp_pkts, 200ULL);
+    EXPECT_EQ(m.tx_rdma_ack_timeout, 50ULL);
+    EXPECT_EQ(m.resp_tx_pkt_seq_err, 150ULL);
+    EXPECT_EQ(m.req_rx_pkt_seq_err, 250ULL);
+    EXPECT_EQ(m.req_rx_impl_nak_seq_err, 350ULL);
 }
 
 TEST_F(NicDeviceTest, GetNicMetrics_ReturnsZeros_WhenNoRdmaPorts)
@@ -190,6 +206,10 @@ TEST_F(NicDeviceTest, GetNicMetrics_ReturnsZeros_WhenStatisticsQueryThrows)
             { "tx_rdma_ucast_pkts", 0 },
             { "rx_rdma_cnp_pkts", 0 },
             { "tx_rdma_cnp_pkts", 0 },
+            { "tx_rdma_ack_timeout", 0 },
+            { "resp_tx_pkt_seq_err", 0 },
+            { "req_rx_pkt_seq_err", 0 },
+            { "req_rx_impl_nak_seq_err", 0 },
         }))
         .WillOnce(Throw(std::runtime_error("stats query failed")));
 
@@ -203,6 +223,10 @@ TEST_F(NicDeviceTest, GetNicMetrics_ReturnsZeros_WhenStatisticsQueryThrows)
     EXPECT_EQ(m.tx_rdma_ucast_pkts, 0ULL);
     EXPECT_EQ(m.rx_rdma_cnp_pkts, 0ULL);
     EXPECT_EQ(m.tx_rdma_cnp_pkts, 0ULL);
+    EXPECT_EQ(m.tx_rdma_ack_timeout, 0ULL);
+    EXPECT_EQ(m.resp_tx_pkt_seq_err, 0ULL);
+    EXPECT_EQ(m.req_rx_pkt_seq_err, 0ULL);
+    EXPECT_EQ(m.req_rx_impl_nak_seq_err, 0ULL);
 }
 
 TEST_F(NicDeviceTest, GetNicMetrics_IgnoresUnknownStatNames)
@@ -227,6 +251,10 @@ TEST_F(NicDeviceTest, GetNicMetrics_IgnoresUnknownStatNames)
     EXPECT_EQ(m.tx_rdma_ucast_pkts, 0ULL);
     EXPECT_EQ(m.rx_rdma_cnp_pkts, 0ULL);
     EXPECT_EQ(m.tx_rdma_cnp_pkts, 0ULL);
+    EXPECT_EQ(m.tx_rdma_ack_timeout, 0ULL);
+    EXPECT_EQ(m.resp_tx_pkt_seq_err, 0ULL);
+    EXPECT_EQ(m.req_rx_pkt_seq_err, 0ULL);
+    EXPECT_EQ(m.req_rx_impl_nak_seq_err, 0ULL);
 }
 
 TEST_F(NicDeviceTest, GetNicMetrics_HandlesPartialStats)
@@ -249,6 +277,10 @@ TEST_F(NicDeviceTest, GetNicMetrics_HandlesPartialStats)
     EXPECT_EQ(m.rx_rdma_ucast_pkts, 0ULL);
     EXPECT_EQ(m.tx_rdma_ucast_pkts, 0ULL);
     EXPECT_EQ(m.rx_rdma_cnp_pkts, 0ULL);
+    EXPECT_EQ(m.tx_rdma_ack_timeout, 0ULL);
+    EXPECT_EQ(m.resp_tx_pkt_seq_err, 0ULL);
+    EXPECT_EQ(m.req_rx_pkt_seq_err, 0ULL);
+    EXPECT_EQ(m.req_rx_impl_nak_seq_err, 0ULL);
 }
 
 TEST_F(NicDeviceTest, DeviceInitializes_WhenAsicInfoThrows)
