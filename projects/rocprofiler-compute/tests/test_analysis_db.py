@@ -498,6 +498,167 @@ def test_calc_expressions_noise_clamp():
 
 
 # =============================================================================
+# _derive_pop_values tests
+# =============================================================================
+
+
+class TestDerivePopValues:
+    """Tests for db_analysis._derive_pop_values."""
+
+    def _make_analyzer(
+        self,
+        workload_path: str,
+        metrics_info_df: pd.DataFrame,
+        kernel_values_df: pd.DataFrame,
+        workload_values_df: pd.DataFrame,
+    ):
+        """Build a db_analysis instance wired for _derive_pop_values testing."""
+        analyzer = db_analysis(MagicMock(), {})
+        analyzer._metrics_info_data_per_workload = {workload_path: metrics_info_df}
+        analyzer._kernel_values_data_per_workload = {workload_path: kernel_values_df}
+        analyzer._workload_values_data_per_workload = {
+            workload_path: workload_values_df
+        }
+        return analyzer
+
+    def _make_values_df(
+        self,
+        metric_ids: list[str],
+        value_names: list[str],
+        values: list[float],
+        kernel_names: list[str] | None = None,
+    ):
+        """Build a long-format values DataFrame as produced by calc_expressions."""
+        data = {
+            "metric_id": metric_ids,
+            "value_name": value_names,
+            "value": values,
+        }
+        if kernel_names is not None:
+            data["kernel_name"] = kernel_names
+        return pd.DataFrame(data)
+
+    def test_pop_true_metric_appends_pct_of_peak_row(self):
+        """A metric with pop=True gets one new 'Pct of Peak' row per DataFrame."""
+        workload_path = "/fake/workload"
+        metrics_info = pd.DataFrame({"metric_id": ["1.1"], "pop": [True]})
+
+        # Workload-level: no kernel_name column
+        workload_values = self._make_values_df(
+            metric_ids=["1.1", "1.1"],
+            value_names=["Avg", "Peak"],
+            values=[50.0, 200.0],
+        )
+        # Kernel-level: has kernel_name column (single kernel)
+        kernel_values = self._make_values_df(
+            metric_ids=["1.1", "1.1"],
+            value_names=["Avg", "Peak"],
+            values=[50.0, 200.0],
+            kernel_names=["kernel_a", "kernel_a"],
+        )
+
+        analyzer = self._make_analyzer(
+            workload_path, metrics_info, kernel_values, workload_values
+        )
+        kernel_result, workload_result = analyzer._derive_pop_values()
+
+        workload_pct_rows = workload_result[workload_path][
+            workload_result[workload_path]["value_name"] == "Pct of Peak"
+        ]
+        assert len(workload_pct_rows) == 1
+        assert workload_pct_rows.iloc[0]["value"] == pytest.approx(25.0)
+
+        kernel_pct_rows = kernel_result[workload_path][
+            kernel_result[workload_path]["value_name"] == "Pct of Peak"
+        ]
+        assert len(kernel_pct_rows) == 1
+        assert kernel_pct_rows.iloc[0]["value"] == pytest.approx(25.0)
+
+    def test_multi_kernel_produces_one_row_per_kernel(self):
+        """Two kernels for the same metric produce two separate 'Pct of Peak' rows."""
+        workload_path = "/fake/workload"
+        metrics_info = pd.DataFrame({"metric_id": ["1.1"], "pop": [True]})
+
+        kernel_values = self._make_values_df(
+            metric_ids=["1.1", "1.1", "1.1", "1.1"],
+            value_names=["Avg", "Peak", "Avg", "Peak"],
+            values=[100.0, 200.0, 60.0, 300.0],
+            kernel_names=["kernel_a", "kernel_a", "kernel_b", "kernel_b"],
+        )
+        workload_values = self._make_values_df(
+            metric_ids=["1.1", "1.1"],
+            value_names=["Avg", "Peak"],
+            values=[80.0, 200.0],
+        )
+
+        analyzer = self._make_analyzer(
+            workload_path, metrics_info, kernel_values, workload_values
+        )
+        kernel_result, _ = analyzer._derive_pop_values()
+
+        pct_rows = kernel_result[workload_path][
+            kernel_result[workload_path]["value_name"] == "Pct of Peak"
+        ].set_index("kernel_name")["value"]
+
+        assert len(pct_rows) == 2
+        assert pct_rows["kernel_a"] == pytest.approx(50.0)  # 100/200*100
+        assert pct_rows["kernel_b"] == pytest.approx(20.0)  # 60/300*100
+
+    def test_pop_false_metric_produces_no_pct_row(self):
+        """A metric with pop=False must not get a 'Pct of Peak' row."""
+        workload_path = "/fake/workload"
+        metrics_info = pd.DataFrame({"metric_id": ["1.1"], "pop": [False]})
+
+        values = self._make_values_df(
+            metric_ids=["1.1", "1.1"],
+            value_names=["Avg", "Peak"],
+            values=[50.0, 100.0],
+        )
+
+        analyzer = self._make_analyzer(
+            workload_path, metrics_info, values.copy(), values.copy()
+        )
+        kernel_result, workload_result = analyzer._derive_pop_values()
+
+        for result in (kernel_result, workload_result):
+            pct_rows = result[workload_path][
+                result[workload_path]["value_name"] == "Pct of Peak"
+            ]
+            assert len(pct_rows) == 0
+
+    def test_incomplete_data_skips_metric(self):
+        """A pop=True metric missing Peak or Avg/Value must be skipped gracefully."""
+        workload_path = "/fake/workload"
+        metrics_info = pd.DataFrame({"metric_id": ["1.1"], "pop": [True]})
+
+        incomplete_cases = [
+            # Only "Avg" present — no "Peak" row
+            self._make_values_df(
+                metric_ids=["1.1"], value_names=["Avg"], values=[50.0]
+            ),
+            # Only "Peak" present — no "Avg" or "Value" row
+            self._make_values_df(
+                metric_ids=["1.1"], value_names=["Peak"], values=[100.0]
+            ),
+        ]
+
+        for incomplete_values in incomplete_cases:
+            analyzer = self._make_analyzer(
+                workload_path,
+                metrics_info,
+                incomplete_values.copy(),
+                incomplete_values.copy(),
+            )
+            kernel_result, workload_result = analyzer._derive_pop_values()
+
+            for result in (kernel_result, workload_result):
+                pct_rows = result[workload_path][
+                    result[workload_path]["value_name"] == "Pct of Peak"
+                ]
+                assert len(pct_rows) == 0
+
+
+# =============================================================================
 # Dual-issue VALU validation tests
 # =============================================================================
 
