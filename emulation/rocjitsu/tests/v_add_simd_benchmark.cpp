@@ -504,6 +504,35 @@ TEST(VAddSimdBenchmark, Cdna4_VCvtF32I32_Vop3) {
   run_words("v_cvt_f32_i32_e64 v2, v0", w0, w1, /*sanitize_finite=*/false);
 }
 
+// === VOP3 form of the VOPC integer compares ===
+// dst is the SGPR-pair (we point at VCC=106) instead of the fixed VCC. v2 stays
+// untouched, so the correctness pre-check is a no-op (the compare result lands in
+// VCC); timing is the point.
+
+// v_cmp_lt_i32_e64 vcc, v0, v1  (CDNA4 VOP3 opcode 193) — 32-bit-lane integer.
+TEST(VAddSimdBenchmark, Cdna4_VCmpLtI32_Vop3) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  uint32_t w0, w1;
+  vop3_bin_encode(193, /*vdst=*/106, /*src0=*/256, /*src1=*/257, 0, 0, 0, 0, w0, w1);
+  run_words("v_cmp_lt_i32_e64 vcc, v0, v1", w0, w1, /*sanitize_finite=*/false);
+}
+
+// v_cmp_lt_i64_e64 vcc, v0:v1, v2:v3  (CDNA4 VOP3 opcode 225) — 64-bit-lane
+// integer; exercises the split lo/hi VGPR-pair gather/scatter path (~half the
+// 32-bit speedup because 8-wide chunks + scalar lo/hi reads).
+TEST(VAddSimdBenchmark, Cdna4_VCmpLtI64_Vop3) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  uint32_t w0, w1;
+  vop3_bin_encode(225, /*vdst=*/106, /*src0=*/256, /*src1=*/258, 0, 0, 0, 0, w0, w1);
+  run_words("v_cmp_lt_i64_e64 vcc, v0:v1, v2:v3", w0, w1, /*sanitize_finite=*/false);
+}
+
 // Diagnostic: report whether the SIMD fast path is compiled in.
 TEST(VAddSimdBenchmark, SimdCompileTimeReport) {
 #if __has_include(<experimental/simd>)
