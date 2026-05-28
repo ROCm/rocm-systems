@@ -86,10 +86,17 @@ parse_memory_operation_name(std::string_view memory_operation_name)
 void
 rocpd_processor_t::handle(const kernel_dispatch_sample& _kds)
 {
-    auto& n_info  = node_info::get_instance();
-    auto  process = m_metadata->get_process_info();
-    auto  agent_primary_key =
-        m_agent_manager->get_agent_by_handle(_kds.agent_id_handle).base_id;
+    auto& n_info      = node_info::get_instance();
+    auto  process     = m_metadata->get_process_info();
+    auto  found_agent = m_agent_manager->find_agent_by_handle(_kds.agent_id_handle);
+    if(!found_agent)
+    {
+        LOG_WARNING("Kernel dispatch event skipped: agent lookup failed for "
+                    "agent_id_handle={}",
+                    _kds.agent_id_handle);
+        return;
+    }
+    auto agent_primary_key = found_agent->get().base_id;
 
     auto thread_primary_key =
         m_data_processor->map_thread_id_to_primary_key(_kds.thread_id);
@@ -133,8 +140,15 @@ rocpd_processor_t::handle(const scratch_memory_sample& _sms)
         static_cast<rocprofiler_buffer_tracing_kind_t>(_sms.kind),
         static_cast<rocprofiler_tracing_operation_t>(_sms.operation));
 
-    auto agent_primary_key =
-        m_agent_manager->get_agent_by_handle(_sms.agent_id_handle).base_id;
+    auto found_agent = m_agent_manager->find_agent_by_handle(_sms.agent_id_handle);
+    if(!found_agent)
+    {
+        LOG_WARNING("Scratch memory event skipped: agent lookup failed for "
+                    "agent_id_handle={}",
+                    _sms.agent_id_handle);
+        return;
+    }
+    auto agent_primary_key = found_agent->get().base_id;
 
     auto thread_primary_key =
         m_data_processor->map_thread_id_to_primary_key(_sms.thread_id);
@@ -178,10 +192,17 @@ rocpd_processor_t::handle(const memory_copy_sample& _mcs)
     auto thread_primary_key =
         m_data_processor->map_thread_id_to_primary_key(_mcs.thread_id);
 
-    auto dst_agent_primary_key =
-        m_agent_manager->get_agent_by_handle(_mcs.dst_agent_id_handle).base_id;
-    auto src_agent_primary_key =
-        m_agent_manager->get_agent_by_handle(_mcs.src_agent_id_handle).base_id;
+    auto found_dst = m_agent_manager->find_agent_by_handle(_mcs.dst_agent_id_handle);
+    auto found_src = m_agent_manager->find_agent_by_handle(_mcs.src_agent_id_handle);
+    if(!found_dst || !found_src)
+    {
+        LOG_WARNING("Memory copy event skipped: agent lookup failed (dst_handle={}, "
+                    "src_handle={})",
+                    _mcs.dst_agent_id_handle, _mcs.src_agent_id_handle);
+        return;
+    }
+    auto dst_agent_primary_key = found_dst->get().base_id;
+    auto src_agent_primary_key = found_src->get().base_id;
 
     auto stack_id        = _mcs.correlation_id_internal;
     auto parent_stack_id = _mcs.correlation_id_ancestor;
@@ -211,10 +232,15 @@ rocpd_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas)
     const auto invalid_context = ROCPROFILER_CONTEXT_NONE;
     if(_mas.agent_id_handle != invalid_context.handle)
     {
+        auto found_agent = m_agent_manager->find_agent_by_handle(_mas.agent_id_handle);
+        if(!found_agent)
         {
-            agent_primary_key =
-                m_agent_manager->get_agent_by_handle(_mas.agent_id_handle).base_id;
+            LOG_WARNING("Memory allocate event skipped: agent lookup failed for "
+                        "agent_id_handle={}",
+                        _mas.agent_id_handle);
+            return;
         }
+        agent_primary_key = found_agent->get().base_id;
         const auto* _name = m_metadata->get_buffer_name_info().at(
             static_cast<rocprofiler_buffer_tracing_kind_t>(_mas.kind),
             static_cast<rocprofiler_tracing_operation_t>(_mas.operation));
@@ -311,11 +337,16 @@ rocpd_processor_t::handle(const pmc_event_with_sample& _pmc)
 {
     auto track_primary_key = m_data_processor->insert_string(_pmc.track_name.c_str());
 
-    auto agent_primary_key =
-        m_agent_manager
-            ->get_agent_by_type_index(_pmc.device_id,
-                                      static_cast<agent_type>(_pmc.device_type))
-            .base_id;
+    auto found_agent = m_agent_manager->find_agent_by_type_index(
+        _pmc.device_id, static_cast<agent_type>(_pmc.device_type));
+    if(!found_agent)
+    {
+        LOG_WARNING("PMC sample skipped: agent lookup failed for device_id={}, "
+                    "device_type={}",
+                    _pmc.device_id, _pmc.device_type);
+        return;
+    }
+    auto agent_primary_key = found_agent->get().base_id;
 
     auto event_id = m_data_processor->insert_event(
         track_primary_key, _pmc.stack_id, _pmc.parent_stack_id, _pmc.correlation_id,
@@ -335,9 +366,15 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
     auto        name_primary_key = m_data_processor->insert_string(_name);
     auto        event_id = m_data_processor->insert_event(name_primary_key, 0, 0, 0);
 
-    auto base_id =
-        m_agent_manager->get_agent_by_type_index(_gpu_pmc.device_id, agent_type::GPU)
-            .base_id;
+    auto found_agent =
+        m_agent_manager->find_agent_by_type_index(_gpu_pmc.device_id, agent_type::GPU);
+    if(!found_agent)
+    {
+        LOG_WARNING("GPU PMC sample skipped: GPU agent lookup failed for device_id={}",
+                    _gpu_pmc.device_id);
+        return;
+    }
+    auto base_id = found_agent->get().base_id;
 
     auto insert_metric = [&](bool enabled, const char* pmc_name, const char* track_name,
                              double value) {
@@ -488,9 +525,15 @@ rocpd_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sample)
     auto        event_id = m_data_processor->insert_event(name_primary_key, 0, 0, 0);
 
     // We should create a cache for this in the future
-    auto base_id =
-        m_agent_manager->get_agent_by_type_index(_nic_sample.device_id, agent_type::NIC)
-            .base_id;
+    auto found_agent =
+        m_agent_manager->find_agent_by_type_index(_nic_sample.device_id, agent_type::NIC);
+    if(!found_agent)
+    {
+        LOG_WARNING("NIC PMC sample skipped: NIC agent lookup failed for device_id={}",
+                    _nic_sample.device_id);
+        return;
+    }
+    auto base_id = found_agent->get().base_id;
 
     auto insert_metric = [&](bool enabled, const char* pmc_name, const char* track_name,
                              std::uint64_t value) {
@@ -549,10 +592,16 @@ rocpd_processor_t::handle(
     auto        name_primary_key = m_data_processor->insert_string(_name);
     auto        event_id = m_data_processor->insert_event(name_primary_key, 0, 0, 0);
 
-    auto base_id =
-        m_agent_manager
-            ->get_agent_by_type_index(_gpu_perf_counter.device_id, agent_type::GPU)
-            .base_id;
+    auto found_agent = m_agent_manager->find_agent_by_type_index(
+        _gpu_perf_counter.device_id, agent_type::GPU);
+    if(!found_agent)
+    {
+        LOG_WARNING("GPU perf counter sample skipped: GPU agent lookup failed for "
+                    "device_id={}",
+                    _gpu_perf_counter.device_id);
+        return;
+    }
+    auto base_id = found_agent->get().base_id;
 
     for(const auto& entry : _gpu_perf_counter.entries)
     {
@@ -622,8 +671,15 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& _cpu_pmc_sample
 
     const auto device_id = static_cast<size_t>(_cpu_pmc_sample.device_id);
 
-    auto base_id =
-        m_agent_manager->get_agent_by_type_index(device_id, agent_type::CPU).base_id;
+    auto found_agent =
+        m_agent_manager->find_agent_by_type_index(device_id, agent_type::CPU);
+    if(!found_agent)
+    {
+        LOG_WARNING("CPU PMC sample skipped: CPU agent lookup failed for device_id={}",
+                    device_id);
+        return;
+    }
+    auto base_id = found_agent->get().base_id;
 
     auto insert_event_and_sample = [&](const char* name, double value) {
         m_data_processor->insert_pmc_event(event_id, base_id, name, value);
@@ -861,9 +917,15 @@ rocpd_processor_t::post_process_metadata()
     auto _code_object_list = m_metadata->get_code_object_list();
     for(const auto& code_object : _code_object_list)
     {
-        auto dev_id =
-            m_agent_manager->get_agent_by_handle(get_handle_from_code_object(code_object))
-                .base_id;
+        auto handle      = get_handle_from_code_object(code_object);
+        auto found_agent = m_agent_manager->find_agent_by_handle(handle);
+        if(!found_agent)
+        {
+            LOG_WARNING("Code object skipped: agent lookup failed for device_handle={}",
+                        handle);
+            continue;
+        }
+        auto dev_id = found_agent->get().base_id;
 
         const char* strg_type = "UNKNOWN";
         switch(code_object.storage_type)
@@ -937,24 +999,27 @@ rocpd_processor_t::post_process_metadata()
             agent_type::CPU,
         };
 
-        size_t agent_primary_key;
-
         const bool is_cpu_gpu_agent = std::find(agent_types.begin(), agent_types.end(),
                                                 pmc_info.type) != agent_types.end();
 
-        if(is_cpu_gpu_agent)
+        // Skip the PMC description if the referenced agent was never registered
+        // (e.g. KFD/GPU events were enabled but no GPU is visible at runtime).
+        // Without this guard the ensuing std::out_of_range escapes the rocpd
+        // worker thread and aborts the whole process during finalization.
+        auto found_agent = is_cpu_gpu_agent
+                               ? m_agent_manager->find_agent_by_type_index(
+                                     pmc_info.agent_type_index, pmc_info.type)
+                               : m_agent_manager->find_agent_by_id(
+                                     pmc_info.agent_type_index, pmc_info.type);
+        if(!found_agent)
         {
-            agent_primary_key =
-                m_agent_manager
-                    ->get_agent_by_type_index(pmc_info.agent_type_index, pmc_info.type)
-                    .base_id;
+            LOG_WARNING("PMC description skipped: agent lookup failed for "
+                        "agent_type_index={}, type={} (pmc='{}')",
+                        pmc_info.agent_type_index, to_string(pmc_info.type),
+                        pmc_info.name);
+            continue;
         }
-        else
-        {
-            agent_primary_key =
-                m_agent_manager->get_agent_by_id(pmc_info.agent_type_index, pmc_info.type)
-                    .base_id;
-        }
+        size_t agent_primary_key = found_agent->get().base_id;
 
         const auto* target_arch = pmc_info.target_arch.c_str();
         if(!is_cpu_gpu_agent)

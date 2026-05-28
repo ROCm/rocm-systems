@@ -36,32 +36,38 @@ agent_manager::insert_agent(agent& _agent)
 const agent&
 agent_manager::get_agent_by_type_index(size_t type_index, agent_type type) const
 {
-    auto _agent =
-        std::find_if(_agents.begin(), _agents.end(), [&](const auto& agent_ptr) {
-            return agent_ptr->type == type && agent_ptr->device_type_index == type_index;
-        });
-    if(_agent == _agents.end())
-    {
-        throw std::out_of_range(fmt::format(
-            "Agent not found for type index: {}, type: {}", type_index, to_string(type)));
-    }
-    return **_agent;
+    if(auto found = find_agent_by_type_index(type_index, type)) return found->get();
+    throw std::out_of_range(fmt::format("Agent not found for type index: {}, type: {}",
+                                        type_index, to_string(type)));
+}
+
+std::optional<agent_manager::agent_ref>
+agent_manager::find_agent_by_type_index(size_t type_index, agent_type type) const noexcept
+{
+    auto it = std::find_if(_agents.begin(), _agents.end(), [&](const auto& agent_ptr) {
+        return agent_ptr->type == type && agent_ptr->device_type_index == type_index;
+    });
+    if(it == _agents.end()) return std::nullopt;
+    return std::cref(**it);
 }
 
 const agent&
 agent_manager::get_agent_by_id(size_t device_id, agent_type type) const
 {
     LOG_TRACE("Getting agent for device id: {}, type {}", device_id, to_string(type));
-    auto _agent =
-        std::find_if(_agents.begin(), _agents.end(), [&](const auto& agent_ptr) {
-            return agent_ptr->type == type && agent_ptr->device_id == device_id;
-        });
-    if(_agent == _agents.end())
-    {
-        throw std::out_of_range(fmt::format("Agent not found for device id: {}, type: {}",
-                                            device_id, to_string(type)));
-    }
-    return **_agent;
+    if(auto found = find_agent_by_id(device_id, type)) return found->get();
+    throw std::out_of_range(fmt::format("Agent not found for device id: {}, type: {}",
+                                        device_id, to_string(type)));
+}
+
+std::optional<agent_manager::agent_ref>
+agent_manager::find_agent_by_id(size_t device_id, agent_type type) const noexcept
+{
+    auto it = std::find_if(_agents.begin(), _agents.end(), [&](const auto& agent_ptr) {
+        return agent_ptr->type == type && agent_ptr->device_id == device_id;
+    });
+    if(it == _agents.end()) return std::nullopt;
+    return std::cref(**it);
 }
 
 const agent&
@@ -86,16 +92,19 @@ const agent&
 agent_manager::get_agent_by_handle(size_t device_handle) const
 {
     LOG_TRACE("Getting agent for device handle: {}", device_handle);
-    auto _agent =
-        std::find_if(_agents.begin(), _agents.end(), [&](const auto& agent_ptr) {
-            return agent_ptr->handle == device_handle;
-        });
-    if(_agent == _agents.end())
-    {
-        throw std::out_of_range(
-            fmt::format("Agent not found for device handle: {}", device_handle));
-    }
-    return **_agent;
+    if(auto found = find_agent_by_handle(device_handle)) return found->get();
+    throw std::out_of_range(
+        fmt::format("Agent not found for device handle: {}", device_handle));
+}
+
+std::optional<agent_manager::agent_ref>
+agent_manager::find_agent_by_handle(size_t device_handle) const noexcept
+{
+    auto it = std::find_if(_agents.begin(), _agents.end(), [&](const auto& agent_ptr) {
+        return agent_ptr->handle == device_handle;
+    });
+    if(it == _agents.end()) return std::nullopt;
+    return std::cref(**it);
 }
 
 std::vector<std::shared_ptr<agent>>

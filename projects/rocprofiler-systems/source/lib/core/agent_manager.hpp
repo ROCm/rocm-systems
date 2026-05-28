@@ -3,7 +3,9 @@
 
 #pragma once
 #include <cstddef>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -14,6 +16,8 @@ namespace rocprofsys
 
 struct agent_manager
 {
+    using agent_ref = std::reference_wrapper<const agent>;
+
     agent_manager() = default;
     agent_manager(std::vector<std::shared_ptr<agent>> agents);
     agent_manager(const agent_manager&)            = delete;
@@ -27,6 +31,15 @@ struct agent_manager
     const agent& get_agent_by_id(size_t device_id, agent_type type) const;
     const agent& get_agent_by_handle(size_t device_handle, agent_type type) const;
     const agent& get_agent_by_handle(size_t device_handle) const;
+
+    // Nothrow lookups: return std::nullopt when the agent is not registered.
+    // Useful in post-processing paths where the absence of an agent (e.g. no GPU
+    // visible at runtime) should produce a warning + skip rather than abort.
+    std::optional<agent_ref> find_agent_by_type_index(size_t     type_index,
+                                                      agent_type type) const noexcept;
+    std::optional<agent_ref> find_agent_by_id(size_t     device_id,
+                                              agent_type type) const noexcept;
+    std::optional<agent_ref> find_agent_by_handle(size_t device_handle) const noexcept;
 
     std::vector<std::shared_ptr<agent>> get_agents_by_type(agent_type type) const;
 
