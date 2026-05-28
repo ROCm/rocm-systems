@@ -3419,7 +3419,7 @@ void VLshlrevB64Vop2::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     vdst.write_lane64(wf, lane,
                       (static_cast<uint64_t>(vsrc1.read_lane64(wf, lane))
-                       << (static_cast<uint64_t>(src0.read_lane64(wf, lane)) & 63u)));
+                       << (static_cast<uint64_t>(src0.read_lane(wf, lane)) & 63u)));
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = 0;
