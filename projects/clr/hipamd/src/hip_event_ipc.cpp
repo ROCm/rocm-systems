@@ -249,6 +249,17 @@ hipError_t IPCEvent::GetHandle(ihipIpcEventHandle_t* handle) {
 }
 
 // ================================================================================================
+// CPU-side completion callback for IPC events. Invoked from the marker's
+// HSA async-handler thread when the recording barrier completes on the GPU.
+static void CL_CALLBACK IpcSignalCallback(cl_event event, int32_t status,
+                                              void* user_data) {
+  auto* ipc_signal = reinterpret_cast<amd::device::Signal*>(user_data);
+  if (ipc_signal != nullptr) {
+    ipc_signal->Reset(0);
+  }
+}
+
+// ================================================================================================
 hipError_t IPCEvent::OpenHandle(ihipIpcEventHandle_t* handle) {
   if (handle->type != kIpcEventHandleROCr) {
     return hipErrorInvalidValue;
@@ -282,7 +293,8 @@ hipError_t IPCEvent::recordCommand(amd::Command*& command, amd::HostQueue* strea
   }
 
   auto* marker = new amd::Marker(*stream, kMarkerDisableFlush);
-  marker->setIpcCompletionSignal(ipc_signal_);
+
+  marker->event().SetProfiling();
   command = marker;
   return hipSuccess;
 }
@@ -291,6 +303,8 @@ hipError_t IPCEvent::recordCommand(amd::Command*& command, amd::HostQueue* strea
 hipError_t IPCEvent::enqueueRecordCommand(hip::Stream* stream, amd::Command* command) {
   // Re-arm the signal; GPU barrier will decrement to 0 when work completes
   ipc_signal_->Reset(1);
+
+  command->event().setCallback(CL_COMPLETE, &IpcSignalCallback, ipc_signal_, false);
 
   command->enqueue();
 
