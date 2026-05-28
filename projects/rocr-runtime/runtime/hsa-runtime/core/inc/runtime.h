@@ -48,7 +48,7 @@
 #include <cstdint>
 #include <vector>
 #include <map>
-#include <set>
+#include <unordered_set>
 #include <memory>
 #include <tuple>
 #include <utility>
@@ -1002,7 +1002,8 @@ class Runtime {
     ~MemoryHandle();
 
     static __forceinline hsa_amd_vmem_alloc_handle_t Convert(MemoryHandle* memHandle) {
-      return hsa_amd_vmem_alloc_handle_t{ .handle = reinterpret_cast<uint64_t>(memHandle) };
+      hsa_amd_vmem_alloc_handle_t ret_handle = { .handle = static_cast<uint64_t>(reinterpret_cast<uint64_t>(memHandle)) };
+      return ret_handle;
     }
 
     static __forceinline MemoryHandle* Convert(hsa_amd_vmem_alloc_handle_t handle) {
@@ -1023,7 +1024,10 @@ class Runtime {
     hsa_fabric_handle_t fabric_handle;
     MemoryRegion::AllocateFlags alloc_flag;
   };
-  std::set<MemoryHandle*> memory_handles;
+  std::unordered_set<std::unique_ptr<MemoryHandle>> memory_handles;
+
+  MemoryHandle* FindMemoryHandle(MemoryHandle* handle);
+  void ReleaseMemoryHandle(MemoryHandle* handle);
 
   struct MappedHandle;
   struct MappedHandleAllowedAgent {

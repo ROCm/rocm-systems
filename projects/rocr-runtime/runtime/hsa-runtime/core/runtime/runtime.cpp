@@ -41,6 +41,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <cassert>
+#include <algorithm>
 #include <chrono>
 #include <thread>
 #include <cstring>
@@ -3747,6 +3748,22 @@ hsa_status_t Runtime::VMemoryAddressFree(void* va, size_t size) {
   return HSA_STATUS_SUCCESS;
 }
 
+Runtime::MemoryHandle* Runtime::FindMemoryHandle(Runtime::MemoryHandle* handle) {
+  auto it = std::find_if(memory_handles.begin(), memory_handles.end(),
+                         [handle](const std::unique_ptr<MemoryHandle>& ptr) {
+                           return ptr.get() == handle;
+                         });
+  return it == memory_handles.end() ? nullptr : it->get();
+}
+
+void Runtime::ReleaseMemoryHandle(Runtime::MemoryHandle* handle) {
+  auto it = std::find_if(memory_handles.begin(), memory_handles.end(),
+                         [handle](const std::unique_ptr<MemoryHandle>& ptr) {
+                           return ptr.get() == handle;
+                         });
+  if (it != memory_handles.end()) memory_handles.erase(it);
+}
+
 hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t size,
                                           MemoryRegion::AllocateFlags alloc_flags,
                                           uint64_t flags_unused,
@@ -3772,34 +3789,34 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
       return ret;
     }
 
-    auto memoryHandle = new MemoryHandle(region, size, flags_unused, shareable_handle, dmabuf_fd, mmap_offset, alloc_flags);
-    memory_handles.insert(memoryHandle);
-    *memoryOnlyHandle = MemoryHandle::Convert(memoryHandle);
+    auto memoryHandle = std::make_unique<MemoryHandle>(region, size, flags_unused, shareable_handle, dmabuf_fd, mmap_offset, alloc_flags);
+    MemoryHandle* memoryHandlePtr = memoryHandle.get();
+    memory_handles.insert(std::move(memoryHandle));
+    *memoryOnlyHandle = MemoryHandle::Convert(memoryHandlePtr);
   }
   return status;
 }
 
 hsa_status_t Runtime::VMemoryHandleRelease(hsa_amd_vmem_alloc_handle_t memoryOnlyHandle) {
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
-  auto memoryHandleIt = memory_handles.find(MemoryHandle::Convert(memoryOnlyHandle));
+  MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(memoryOnlyHandle));
 
-  if (memoryHandleIt == memory_handles.end()) {
+  if (memoryHandle == nullptr) {
     debug_warning(false && "Can't find memory handle");
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
 
-  if (!(*memoryHandleIt)->ref_count) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  if (!memoryHandle->ref_count) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
-  if ((--(*memoryHandleIt)->ref_count) == 0) {
+  if ((--memoryHandle->ref_count) == 0) {
     // From documentation, the handle can be released while there are still outstanding mappings. If
     // there are outstanding mappings, then we just decrement the ref count and exit. We will free
     // this handle when the last MappedHandle is deleted
     // and use_count == 0 and ref_count == 0.
 
-    if ((*memoryHandleIt)->use_count > 0) return HSA_STATUS_SUCCESS;
+    if (memoryHandle->use_count > 0) return HSA_STATUS_SUCCESS;
 
-    memory_handles.erase(memoryHandleIt);
-    delete *memoryHandleIt;
+    ReleaseMemoryHandle(memoryHandle);
   }
   return HSA_STATUS_SUCCESS;
 }
@@ -3827,14 +3844,14 @@ hsa_status_t Runtime::VMemoryHandleMap(void* va, size_t size, size_t in_offset,
     if (reinterpret_cast<uint8_t*>(va) + size > lowerMappedHandleIt->first) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
-  auto memoryHandleIt = memory_handles.find(MemoryHandle::Convert(memoryOnlyHandle));
-  if (memoryHandleIt == memory_handles.end()) {
+  MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(memoryOnlyHandle));
+  if (memoryHandle == nullptr) {
     debug_warning(false && "Can't find memory handle");
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
-  if (!(*memoryHandleIt)->imported) {
-   auto *agent = (*memoryHandleIt)->agentOwner();
+  if (!memoryHandle->imported) {
+   auto *agent = memoryHandle->agentOwner();
 
   if (agent->device_type() == core::Agent::DeviceType::kAmdCpuDevice)
     return HSA_STATUS_ERROR_INVALID_AGENT;
@@ -3843,10 +3860,10 @@ hsa_status_t Runtime::VMemoryHandleMap(void* va, size_t size, size_t in_offset,
   uint64_t offset = 0;
   // Register the mapping
   mapped_handle_map_.emplace(std::piecewise_construct, std::forward_as_tuple(va),
-                             std::forward_as_tuple(*memoryHandleIt, addressHandle, va, offset, size,
+                             std::forward_as_tuple(memoryHandle, addressHandle, va, offset, size,
                               HSA_ACCESS_PERMISSION_NONE));
   addressHandle->use_count++;
-  (*memoryHandleIt)->use_count++;
+  memoryHandle->use_count++;
   return HSA_STATUS_SUCCESS;
 }
 
@@ -3895,8 +3912,7 @@ hsa_status_t Runtime::VMemoryHandleUnmap(void* va, size_t size) {
       // User called VMemoryHandleRelease while this mapping was still
       // outstanding. We need to delete the MemoryHandle as it is the last
       // MappedHandle that was using it.
-      memory_handles.erase(mappedHandleIt.second->mem_handle);
-      delete mappedHandleIt.second->mem_handle;
+      ReleaseMemoryHandle(mappedHandleIt.second->mem_handle);
     }
     mapped_handle_map_.erase(mappedHandleIt.first);
   }
@@ -4251,18 +4267,18 @@ hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
                                                    uint64_t flags) {
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   *dmabuf_fd = -1;
-  auto memoryHandleIt = memory_handles.find(MemoryHandle::Convert(handle));
-  if (memoryHandleIt == memory_handles.end()) {
+  MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(handle));
+  if (memoryHandle == nullptr) {
     debug_warning(false && "Can't find memory handle");
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
 
   /* We cannot export a handle for an imported memory handle */
-  if ((*memoryHandleIt)->imported)
+  if (memoryHandle->imported)
     return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
 
 #ifndef _WIN32
-  *dmabuf_fd = fcntl((*memoryHandleIt)->dmabuf_fd, F_DUPFD_CLOEXEC, 0);
+  *dmabuf_fd = fcntl(memoryHandle->dmabuf_fd, F_DUPFD_CLOEXEC, 0);
   if (*dmabuf_fd == -1) return HSA_STATUS_ERROR;
   return HSA_STATUS_SUCCESS;
 #else
@@ -4273,9 +4289,10 @@ hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
 hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
                                                    hsa_amd_vmem_alloc_handle_t* memoryOnlyHandle) {
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
-  auto memoryHandle = new MemoryHandle(dmabuf_fd);
-  memory_handles.insert(memoryHandle);
-  *memoryOnlyHandle = MemoryHandle::Convert(memoryHandle);
+  auto memoryHandle = std::make_unique<MemoryHandle>(dmabuf_fd);
+  MemoryHandle* memoryHandlePtr = memoryHandle.get();
+  memory_handles.insert(std::move(memoryHandle));
+  *memoryOnlyHandle = MemoryHandle::Convert(memoryHandlePtr);
   return HSA_STATUS_SUCCESS;
 }
 
@@ -4283,29 +4300,30 @@ hsa_status_t Runtime::VMemoryExportFabricHandle(hsa_fabric_handle_t* fabric_hand
                                                hsa_amd_vmem_alloc_handle_t handle,
                                                 uint64_t flags) {
   (void)flags;
-  auto memoryHandleIt = memory_handles.find(MemoryHandle::Convert(handle));
-  if (memoryHandleIt == memory_handles.end()) {
+  MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(handle));
+  if (memoryHandle == nullptr) {
     debug_warning(false && "Can't find memory handle");
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
 
   /* We cannot export a fabric handle for an imported memory handle */
-  if ((*memoryHandleIt)->imported)
+  if (memoryHandle->imported)
     return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
 
-  auto agentOwner = (*memoryHandleIt)->region->owner();
+  auto agentOwner = memoryHandle->region->owner();
 
   return agentOwner->driver().ExportFabricHandle(*agentOwner,
-                                                 &(*memoryHandleIt)->shareable_handle,
-                                                 (*memoryHandleIt)->size, fabric_handle);
+                                                 &memoryHandle->shareable_handle,
+                                                 memoryHandle->size, fabric_handle);
 }
 
 hsa_status_t Runtime::VMemoryImportFabricHandle(hsa_fabric_handle_t fabric_handle,
                                                hsa_amd_vmem_alloc_handle_t* memoryOnlyHandle) {
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
-  auto memoryHandle = new MemoryHandle(fabric_handle);
-  memory_handles.insert(memoryHandle);
-  *memoryOnlyHandle = MemoryHandle::Convert(memoryHandle);
+  auto memoryHandle = std::make_unique<MemoryHandle>(fabric_handle);
+  MemoryHandle* memoryHandlePtr = memoryHandle.get();
+  memory_handles.insert(std::move(memoryHandle));
+  *memoryOnlyHandle = MemoryHandle::Convert(memoryHandlePtr);
   return HSA_STATUS_SUCCESS;
 }
 
@@ -4325,12 +4343,12 @@ hsa_status_t Runtime::VMemoryGetAllocPropertiesFromHandle(hsa_amd_vmem_alloc_han
                                                           const core::MemoryRegion** mem_region,
                                                           hsa_amd_memory_type_t* type) {
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
-  auto memoryHandleIt = memory_handles.find(MemoryHandle::Convert(allocHandle));
-  if (memoryHandleIt == memory_handles.end()) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(allocHandle));
+  if (memoryHandle == nullptr) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
-  if (!(*memoryHandleIt)->imported) {
-    *mem_region = (*memoryHandleIt)->region;
-    *type = ((*memoryHandleIt)->alloc_flag & core::MemoryRegion::AllocatePinned)
+  if (!memoryHandle->imported) {
+    *mem_region = memoryHandle->region;
+    *type = (memoryHandle->alloc_flag & core::MemoryRegion::AllocatePinned)
       ? MEMORY_TYPE_PINNED
       : MEMORY_TYPE_NONE;
   } else {
