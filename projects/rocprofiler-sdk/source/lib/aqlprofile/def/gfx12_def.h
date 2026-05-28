@@ -23,30 +23,50 @@
 #ifndef _GFX12_DEF_H_
 #define _GFX12_DEF_H_
 
+#define GFX12_VARIANT_1200 0x1200
+#define GFX12_VARIANT_1201 0x1201
+#define GFX12_VARIANT_1250 0x1250
+
+#if !defined(GFX12_VARIANT)
+#    define GFX12_VARIANT GFX12_VARIANT_1200
+#endif
+
 #include "lib/aqlprofile/linux/soc24_enum.h"
 #include "lib/aqlprofile/util/soc15_common.h"
 #include "lib/aqlprofile/util/reg_offsets.h"
-#include "lib/aqlprofile/linux/registers/gc/gc_12_0_0_offset.h"
-#include "lib/aqlprofile/linux/registers/gc/gc_12_0_0_sh_mask.h"
-#include "lib/aqlprofile/linux/registers/athub/athub_4_1_0_offset.h"
-#include "lib/aqlprofile/linux/registers/athub/athub_4_1_0_sh_mask.h"
+#if GFX12_VARIANT == GFX12_VARIANT_1250
+#    include "lib/aqlprofile/linux/registers/gc/gc_12_1_0_offset.h"
+#    include "lib/aqlprofile/linux/registers/gc/gc_12_1_0_sh_mask.h"
+#    include "lib/aqlprofile/linux/registers/gc/gc_12_1_1_offset.h"
+#    include "lib/aqlprofile/linux/registers/gc/gc_12_1_1_sh_mask.h"
+#else
+#    include "lib/aqlprofile/linux/registers/gc/gc_12_0_0_offset.h"
+#    include "lib/aqlprofile/linux/registers/gc/gc_12_0_0_sh_mask.h"
+#    include "lib/aqlprofile/linux/registers/athub/athub_4_1_0_offset.h"
+#    include "lib/aqlprofile/linux/registers/athub/athub_4_1_0_sh_mask.h"
 // Rename CP_PERFMON_CNTL_1 to CP_PERFMON_CNTL for better compatibility
-// CP_PERFMON_CNTL_1
-#define regCP_PERFMON_CNTL_BASE_IDX                 regCP_PERFMON_CNTL_1_BASE_IDX
-#define regCP_PERFMON_CNTL                          regCP_PERFMON_CNTL_1
-#define CP_PERFMON_CNTL__PERFMON_STATE__SHIFT       CP_PERFMON_CNTL_1__PERFMON_STATE__SHIFT
-#define CP_PERFMON_CNTL__SPM_PERFMON_STATE__SHIFT   CP_PERFMON_CNTL_1__SPM_PERFMON_STATE__SHIFT
-#define CP_PERFMON_CNTL__PERFMON_ENABLE_MODE__SHIFT CP_PERFMON_CNTL_1__PERFMON_ENABLE_MODE__SHIFT
-#define CP_PERFMON_CNTL__PERFMON_SAMPLE_ENABLE__SHIFT                                              \
-    CP_PERFMON_CNTL_1__PERFMON_SAMPLE_ENABLE__SHIFT
-#define CP_PERFMON_CNTL__PERFMON_STATE_MASK         CP_PERFMON_CNTL_1__PERFMON_STATE_MASK
-#define CP_PERFMON_CNTL__SPM_PERFMON_STATE_MASK     CP_PERFMON_CNTL_1__SPM_PERFMON_STATE_MASK
-#define CP_PERFMON_CNTL__PERFMON_ENABLE_MODE_MASK   CP_PERFMON_CNTL_1__PERFMON_ENABLE_MODE_MASK
-#define CP_PERFMON_CNTL__PERFMON_SAMPLE_ENABLE_MASK CP_PERFMON_CNTL_1__PERFMON_SAMPLE_ENABLE_MASK
-#include "lib/aqlprofile/linux/packets/nvd.h"
+#    define regCP_PERFMON_CNTL_BASE_IDX               regCP_PERFMON_CNTL_1_BASE_IDX
+#    define regCP_PERFMON_CNTL                        regCP_PERFMON_CNTL_1
+#    define CP_PERFMON_CNTL__PERFMON_STATE__SHIFT     CP_PERFMON_CNTL_1__PERFMON_STATE__SHIFT
+#    define CP_PERFMON_CNTL__SPM_PERFMON_STATE__SHIFT CP_PERFMON_CNTL_1__SPM_PERFMON_STATE__SHIFT
+#    define CP_PERFMON_CNTL__PERFMON_ENABLE_MODE__SHIFT                                            \
+        CP_PERFMON_CNTL_1__PERFMON_ENABLE_MODE__SHIFT
+#    define CP_PERFMON_CNTL__PERFMON_SAMPLE_ENABLE__SHIFT                                          \
+        CP_PERFMON_CNTL_1__PERFMON_SAMPLE_ENABLE__SHIFT
+#    define CP_PERFMON_CNTL__PERFMON_STATE_MASK       CP_PERFMON_CNTL_1__PERFMON_STATE_MASK
+#    define CP_PERFMON_CNTL__SPM_PERFMON_STATE_MASK   CP_PERFMON_CNTL_1__SPM_PERFMON_STATE_MASK
+#    define CP_PERFMON_CNTL__PERFMON_ENABLE_MODE_MASK CP_PERFMON_CNTL_1__PERFMON_ENABLE_MODE_MASK
+#    define CP_PERFMON_CNTL__PERFMON_SAMPLE_ENABLE_MASK                                            \
+        CP_PERFMON_CNTL_1__PERFMON_SAMPLE_ENABLE_MASK
+#endif
+#include "lib/aqlprofile/linux/packets/gfx_v12_1_pkt.h"
 #include "lib/aqlprofile/gfxip/gfx12/gfx12_block_info.h"
 using namespace gfxip::gfx12;
+#if GFX12_VARIANT == GFX12_VARIANT_1250
+using namespace gfxip::gfx12::gfx1250;
+#else
 using namespace gfxip::gfx12::gfx1200;
+#endif
 #include "lib/aqlprofile/gfxip/gfx12/gfx12_primitives.h"
 #include "lib/aqlprofile/gfxip/gfx12/gfx12_block_table.h"
 

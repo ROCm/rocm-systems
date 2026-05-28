@@ -87,3 +87,15 @@ kernel:
     <<: *level_2
     disabled: [amd_windows, amd_linux]
     tags: [launch]
+  Unit_hipExtDynDataPrefetch_NegativeTests:
+    <<: *level_2
+    tags: [launch]
+  Unit_hipExtDynDataPrefetch_FunctionalDaxpy:
+    <<: *level_2
+    tags: [launch]
+  Unit_hipExtDynDataPrefetch_SingleRegion:
+    <<: *level_2
+    tags: [launch]
+  Unit_hipExtDynDataPrefetch_TemporalHints:
+    <<: *level_2
+    tags: [launch]

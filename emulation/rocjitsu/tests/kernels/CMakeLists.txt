@@ -11,13 +11,33 @@
 # found the kernel targets are silently skipped and tests that depend on them
 # are disabled at runtime via the HAS_DEVICE_KERNELS compile definition.
 
-find_program(AMDCLANG amdclang++
-    HINTS /opt/rocm/bin ENV ROCM_PATH
+# Prefer the compiler from the ROCm tree selected by ROCM_PATH. Some systems
+# also expose /usr/bin/amdclang++ through alternatives; deriving --rocm-path
+# from that wrapper gives /usr, which mixes headers and device libraries from
+# different installs.
+find_program(
+    AMDCLANG
+    amdclang++
+    HINTS
+    ENV ROCM_PATH
+    /opt/rocm
+    PATH_SUFFIXES bin
     DOC "Path to the ROCm amdclang++ compiler"
 )
 
 if(NOT AMDCLANG)
-    message(STATUS "amdclang++ not found - device kernel tests will be disabled")
+    message(
+        STATUS
+        "amdclang++ not found - device kernel tests will be disabled"
+    )
+    return()
+endif()
+
+if(DEFINED SKIP_DEVICE_KERNELS AND SKIP_DEVICE_KERNELS)
+    message(
+        STATUS
+        "SKIP_DEVICE_KERNELS set - device kernel tests will be disabled"
+    )
     return()
 endif()
 
@@ -39,12 +59,14 @@ rj_add_device_kernel(matmul_tiled gfx950)
 rj_add_device_kernel(vector_add gfx950)
 
 # Umbrella target for all device kernels.
-add_custom_target(device_kernels DEPENDS
-    kernel_matmul_naive
-    kernel_matmul_mfma
-    kernel_matmul_mfma_16x16
-    kernel_matmul_tiled
-    kernel_vector_add
+add_custom_target(
+    device_kernels
+    DEPENDS
+        kernel_matmul_naive
+        kernel_matmul_mfma
+        kernel_matmul_mfma_16x16
+        kernel_matmul_tiled
+        kernel_vector_add
 )
 
 # Export variables to the parent scope so the test executable can use them.

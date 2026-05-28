@@ -87,6 +87,16 @@ ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclAlltoAll_fn, 41)
 ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclAlltoAllv_fn, 42)
 #endif
 
+#if RCCL_API_TRACE_VERSION_PATCH >= 4
+ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclCommRevoke_fn, 43)
+#endif
+
+#if RCCL_API_TRACE_VERSION_PATCH >= 5
+ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclCommSuspend_fn, 44)
+ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclCommResume_fn, 45)
+ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclCommMemStats_fn, 46)
+#endif
+
 #if RCCL_API_TRACE_VERSION_PATCH == 0
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::rcclApiFuncTable, 37)
 #elif RCCL_API_TRACE_VERSION_PATCH == 1
@@ -95,6 +105,10 @@ ROCP_SDK_ENFORCE_ABI_VERSIONING(::rcclApiFuncTable, 38)
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::rcclApiFuncTable, 41)
 #elif RCCL_API_TRACE_VERSION_PATCH == 3
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::rcclApiFuncTable, 43)
+#elif RCCL_API_TRACE_VERSION_PATCH == 4
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::rcclApiFuncTable, 44)
+#elif RCCL_API_TRACE_VERSION_PATCH == 5
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::rcclApiFuncTable, 47)
 #else
 INTERNAL_CI_ROCP_SDK_ENFORCE_ABI_VERSIONING(::rcclApiFuncTable, 0)
 #endif

@@ -997,3 +997,97 @@ class TestArtifactSplitterIntegration:
         assert not (output_dir / "miopen_lib_gfx90a").exists(), (
             "gfx90a per-arch directory should not exist when filtered out"
         )
+
+    def test_gpu_targets_filters_fat_binary_kernels(self, toolchain, tmp_path):
+        """
+        Test that gpu_targets filters code objects extracted from fat binaries.
+
+        When a fat binary contains code objects for multiple architectures
+        (e.g., gfx906 and gfx1100), only the architectures in gpu_targets
+        should produce kpack artifacts. Without this filter, a cross-arch
+        build can produce spurious per-arch kpack artifacts.
+        """
+        # Set up a fake prefix with a placeholder binary
+        prefix = "math-libs/BLAS/rocSOLVER/stage"
+        prefix_path = tmp_path / prefix
+        lib_dir = prefix_path / "lib"
+        lib_dir.mkdir(parents=True)
+
+        fat_binary = lib_dir / "librocsolver.so.0"
+        fat_binary.write_text("placeholder")
+
+        # Create mock unbundled code objects for two architectures
+        mock_dest_dir = tmp_path / "unbundled"
+        mock_dest_dir.mkdir()
+        mock_targets = [
+            ("hipv4-amdgcn-amd-amdhsa--gfx906", "gfx906.hsaco"),
+            ("hipv4-amdgcn-amd-amdhsa--gfx1100", "gfx1100.hsaco"),
+        ]
+        for _, fname in mock_targets:
+            (mock_dest_dir / fname).write_bytes(b"\x00" * 100)
+
+        mock_unbundled = type(
+            "MockUnbundled",
+            (),
+            {
+                "target_list": mock_targets,
+                "dest_dir": mock_dest_dir,
+                "__enter__": lambda s: s,
+                "__exit__": lambda s, *a: None,
+            },
+        )()
+
+        with patch(
+            "rocm_kpack.artifact_splitter.BundledBinary"
+        ) as MockBinary:
+            MockBinary.return_value.unbundle.return_value = mock_unbundled
+
+            # With gpu_targets=["gfx1100"], only gfx1100 kernels should appear
+            splitter = ArtifactSplitter(
+                artifact_prefix="blas_lib",
+                toolchain=toolchain,
+                database_handlers=[],
+                verbose=True,
+                gpu_targets=["gfx1100"],
+            )
+            result_filtered = splitter.process_fat_binaries(
+                [fat_binary], prefix, prefix_path
+            )
+
+            # Recreate mock files consumed by the first call
+            for _, fname in mock_targets:
+                (mock_dest_dir / fname).write_bytes(b"\x00" * 100)
+
+            # Without gpu_targets, both architectures should appear
+            splitter_all = ArtifactSplitter(
+                artifact_prefix="blas_lib",
+                toolchain=toolchain,
+                database_handlers=[],
+                verbose=True,
+                gpu_targets=None,
+            )
+            result_unfiltered = splitter_all.process_fat_binaries(
+                [fat_binary], prefix, prefix_path
+            )
+
+        # Filtered: only targeted architecture should be present
+        assert "gfx1100" in result_filtered, (
+            "gfx1100 should be in filtered results (in gpu_targets)"
+        )
+        assert len(result_filtered["gfx1100"]) == 1, (
+            "gfx1100 kernel should be preserved intact"
+        )
+        assert result_filtered["gfx1100"][0].kernel_data == b"\x00" * 100, (
+            "gfx1100 kernel data should be unchanged by filtering"
+        )
+        assert "gfx906" not in result_filtered, (
+            "gfx906 should not be in filtered results (not in gpu_targets)"
+        )
+
+        # Unfiltered: all architectures should be present
+        assert "gfx1100" in result_unfiltered, (
+            "gfx1100 should be in unfiltered results"
+        )
+        assert "gfx906" in result_unfiltered, (
+            "gfx906 should be in unfiltered results"
+        )
