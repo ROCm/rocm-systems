@@ -440,17 +440,25 @@ if(ROCPROFSYS_BUILD_CODECOV)
         )
     endforeach()
 
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        set(_CODECOV_FLAGS
+            "-Og -g3 -fno-omit-frame-pointer -fprofile-instr-generate -fcoverage-mapping"
+        )
+        set(_CODECOV_LINK_FLAGS "-fprofile-instr-generate")
+    else()
+        set(_CODECOV_FLAGS
+            "-Og -g3 -fno-omit-frame-pointer -fprofile-abs-path -fprofile-arcs -ftest-coverage"
+        )
+        set(_CODECOV_LINK_FLAGS "--coverage")
+    endif()
+
     foreach(_BUILD_TYPE DEBUG MINSIZEREL RELWITHDEBINFO RELEASE)
-        set(CMAKE_C_FLAGS_${_BUILD_TYPE}
-            "-Og -g3 -fno-omit-frame-pointer -fprofile-abs-path -fprofile-arcs -ftest-coverage"
-        )
-        set(CMAKE_CXX_FLAGS_${_BUILD_TYPE}
-            "-Og -g3 -fno-omit-frame-pointer -fprofile-abs-path -fprofile-arcs -ftest-coverage"
-        )
+        set(CMAKE_C_FLAGS_${_BUILD_TYPE} "${_CODECOV_FLAGS}")
+        set(CMAKE_CXX_FLAGS_${_BUILD_TYPE} "${_CODECOV_FLAGS}")
     endforeach()
 
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} --coverage")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --coverage")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${_CODECOV_LINK_FLAGS}")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${_CODECOV_LINK_FLAGS}")
 endif()
 
 add_subdirectory(source)
