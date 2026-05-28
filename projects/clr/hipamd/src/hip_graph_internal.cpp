@@ -1955,9 +1955,6 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
     }
 
     if (!flatData->empty()) {
-      if (attach_signal) {
-        stream->vdev()->addSystemScope();
-      }
       bool batchStatus = stream->vdev()->dispatchAqlPacketBatchFlat(
           *flatData, *flatHdrs, accumulate, attach_signal, kernelNamesToDispatch, true);
       if (!batchStatus) {
@@ -2043,6 +2040,9 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
           // (e.g. GraphDrvMemcpyNode) fall back to the conservative
           // "assume SDMA" behavior.
           sdma_follows = (memcpyNode == nullptr) || !memcpyNode->WillBypassSdmaEngine();
+        }
+        if (sdma_follows && !packetBatch.dispatchPackets.empty()) {
+          stream->vdev()->addSystemScope();
         }
         status = dispatchCurrentBatch(sdma_follows);
         if (status != hipSuccess) return status;
