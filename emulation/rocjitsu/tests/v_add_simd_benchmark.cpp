@@ -609,6 +609,30 @@ TEST(VAddSimdBenchmark, Cdna4_VCvtI32F64_Vop3) {
   run_words("v_cvt_i32_f64_e64 v2, v0:v1", w0, w1, /*sanitize_finite=*/false);
 }
 
+// v_add_f64_e64 v2:v3, v0:v1, v4:v5  (CDNA4 VOP3 opcode 640) — 64-bit-lane f64
+// binary via the new try_execute_binary_vop3_fp64_simd glue.
+TEST(VAddSimdBenchmark, Cdna4_VAddF64_Vop3) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  uint32_t w0, w1;
+  vop3_bin_encode(640, /*vdst=*/2, /*src0=*/256, /*src1=*/260, 0, 0, 0, 0, w0, w1);
+  run_words("v_add_f64_e64 v2:v3, v0:v1, v4:v5", w0, w1, /*sanitize_finite=*/false);
+}
+
+// v_ceil_f64_e64 v2:v3, v0:v1  (CDNA4 VOP3 opcode 344) — f64 unary; uses the
+// new try_execute_unary_vop3_fp64_simd glue (stdx::ceil on native<double>).
+TEST(VAddSimdBenchmark, Cdna4_VCeilF64_Vop3) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  uint32_t w0, w1;
+  vop3_bin_encode(344, /*vdst=*/2, /*src0=*/256, /*src1=*/0, 0, 0, 0, 0, w0, w1);
+  run_words("v_ceil_f64_e64 v2:v3, v0:v1", w0, w1, /*sanitize_finite=*/false);
+}
+
 // Diagnostic: report whether the SIMD fast path is compiled in.
 TEST(VAddSimdBenchmark, SimdCompileTimeReport) {
 #if __has_include(<experimental/simd>)
