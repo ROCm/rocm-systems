@@ -1229,6 +1229,47 @@ SIMD_VOP3_BINARY_INT_EXTRA: dict[str, tuple[str, str]] = {
 }
 
 
+# --- VOP3 f64 binary + unary -----------------------------------------------
+#
+# VOP3 f64 ops carry per-source abs/neg and result omod/clamp modifiers, all
+# applied in the f64 domain (apply_vop3_src_mod_f64 / apply_vop3_dst_mod_f64).
+# The VOPC table key convention is preserved: dict[name] -> functor string.
+#
+# For v_max_f64 / v_min_f64, stdx::fmax / stdx::fmin match scalar std::fmax /
+# std::fmin for all finite/Inf inputs except (a) NaN payload and (b) signed-zero
+# tie (matching the f32 finding) — accepted divergences, with the A/B test
+# skipping NaN-input and zero-tie lanes (same convention as v_max_f32 / v_min_f32
+# in SIMD_VOP2_BINARY).
+SIMD_VOP3_BINARY_FP64: dict[str, str] = {
+    "v_add_f64_vop3": "[](auto a, auto b) { return a + b; }",
+    "v_mul_f64_vop3": "[](auto a, auto b) { return a * b; }",
+    "v_max_f64_vop3": "[](auto a, auto b) { return util::stdx::fmax(a, b); }",
+    "v_min_f64_vop3": "[](auto a, auto b) { return util::stdx::fmin(a, b); }",
+}
+
+# Plain f64 unary: scalar bodies are std::ceil / std::floor / std::trunc /
+# std::nearbyint applied to the (modifier-applied) double, then omod/clamp on
+# the result. stdx provides ceil/floor/trunc/nearbyint as native<double>
+# primitives — bit-identical to the scalar libm calls for every finite/Inf
+# input (and the NaN result has the same payload because the scalar libm
+# rounding ops are sign/payload preserving on NaN inputs).
+SIMD_VOP3_UNARY_FP64: dict[str, str] = {
+    "v_ceil_f64_vop3": "[](auto a) { return util::stdx::ceil(a); }",
+    "v_floor_f64_vop3": "[](auto a) { return util::stdx::floor(a); }",
+    "v_trunc_f64_vop3": "[](auto a) { return util::stdx::trunc(a); }",
+    "v_rndne_f64_vop3": "[](auto a) { return util::stdx::nearbyint(a); }",
+    # sqrt_f64 is correctly-rounded IEEE (scalar uses transcendental::sqrt_f64
+    # which is `std::sqrt` after NaN/negative guards); stdx::sqrt matches.
+    "v_sqrt_f64_vop3": (
+        "[](auto a) {"
+        " auto r = util::stdx::sqrt(a);"
+        " util::stdx::where(util::stdx::isnan(a), r) = a;"
+        " util::stdx::where(a < 0.0, r) = std::numeric_limits<double>::quiet_NaN();"
+        " return r; }"
+    ),
+}
+
+
 SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
     "v_add3_u32_vop3": (
         "uint32_t",
@@ -1373,6 +1414,15 @@ def simd_probe_line(template_name: str) -> str | None:
     if spec3binx is not None:
         cpp_t, cpp_op = spec3binx
         return f"  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT({cpp_t}, {cpp_op});"
+    # VOP3 f64 binary (add/mul/max/min). Per-source abs/neg + result omod/clamp
+    # in the f64 domain.
+    spec3binf64 = SIMD_VOP3_BINARY_FP64.get(template_name)
+    if spec3binf64 is not None:
+        return f"  ROCJITSU_TRY_SIMD_VOP3_BINARY_FP64({spec3binf64});"
+    # VOP3 f64 unary (ceil/floor/trunc/rndne/sqrt). Same modifier policy.
+    spec3unaf64 = SIMD_VOP3_UNARY_FP64.get(template_name)
+    if spec3unaf64 is not None:
+        return f"  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP64({spec3unaf64});"
     # VOP3-encoded twins of the SIMD VOP2 binary ops. Same operator/lane type;
     # the VOP3 form reads src0/src1 and carries abs/neg/omod/clamp modifiers.
     # f32 ops apply the modifiers in-vector (bit-exact); integer/bitwise ops
