@@ -37,8 +37,8 @@ const char* GetGraphNodeTypeString(uint32_t op) {
 
 namespace hip {
 
-int GraphNode::nextID = 0;
-int Graph::nextID = 0;
+std::atomic<int> GraphNode::nextID{0};
+std::atomic<int> Graph::nextID{0};
 std::unordered_set<GraphNode*> GraphNode::nodeSet_;
 // Guards global node set
 amd::Monitor GraphNode::nodeSetLock_{};
@@ -52,6 +52,7 @@ std::recursive_mutex GraphExec::graphExecSetLock_;
 // Serialize the creation of internal streams from multiple threads, ensuring that each stream is
 // mapped to different HSA queues.
 std::recursive_mutex GraphExec::graphExecStreamCreateLock_;
+std::shared_mutex GraphExec::graphExecTrimLock_;
 std::unordered_set<UserObject*> UserObject::ObjectSet_;
 // Guards global user object
 amd::Monitor UserObject::UserObjectLock_{};
@@ -532,19 +533,10 @@ void GraphExec::BuildSyncPlan() {
           {completion_barrier, nullptr, segment.id,
            amd::Device::HwEventPatch::kCompletionSignal});
     } else if (!lastBatch.dispatchPackets.empty()) {
-      // All nodes are capturable — append a real completion barrier packet so that
-      // ApplyHwEventPatches patches the barrier's completion signal, not the last
-      // kernel dispatch's. Patching the last kernel dispatch directly causes
-      // dispatchAqlPacketBatchFlat to see a pre-patched non-zero signal and skip
-      // profiling setup (reserved2 / isPacketDispatch_) for that kernel.
-      uint8_t* completion_barrier = device->CreateBarrierPacket();
-      sync_plan_.barrier_packets.push_back(completion_barrier);
-
-      lastBatch.dispatchPackets.push_back(completion_barrier);
-      lastBatch.dispatchKernelNames.push_back(kBarrierKernelNamePtr);
-
+      // Safe to patch the last kernel dispatch directly
+      uint8_t* last_pkt = lastBatch.dispatchPackets.back();
       sync_plan_.patch_list.push_back(
-          {completion_barrier, nullptr, segment.id,
+          {last_pkt, nullptr, segment.id,
            amd::Device::HwEventPatch::kCompletionSignal});
     }
 
@@ -2318,6 +2310,13 @@ hipError_t ihipGraphDebugDotPrint(hip::Graph* graph, const char* path, unsigned 
 hipError_t GraphExec::Run(hip::Stream* launch_stream) {
   hipError_t status = hipSuccess;
 
+  // Retain under shared lock so hipDeviceGraphMemTrim's refcount check is accurate.
+  // The lock blocks only while trim holds the exclusive (write) lock.
+  {
+    std::shared_lock<std::shared_mutex> trim_guard(graphExecTrimLock_);
+    this->retain();
+  }
+
   // Get the first node based on scheduling mode
   Node firstNode = nullptr;
   if (use_segment_scheduling_ && !segments_.empty() && !segments_[0].nodes.empty()) {
@@ -2349,6 +2348,7 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
   // If this is a repeat launch, make sure corresponding MemFreeNode exists for a MemAlloc node
   if (repeatLaunch_ == true) {
     if (firstNode != nullptr && firstNode->GetParentGraph()->GetMemAllocNodeCount() > 0) {
+      this->release();
       return hipErrorInvalidValue;
     }
   } else {
@@ -2398,6 +2398,7 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
     // Execute all nodes in the graph
     if (!RunNodes()) {
       LogError("Failed to launch nodes!");
+      this->release();
       return hipErrorOutOfMemory;
     }
   }
@@ -2410,7 +2411,6 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE, "[hipGraph] graph dump:%s", filename.c_str());
     }
   }
-  this->retain();
   amd::Command* CallbackCommand = new amd::Marker(*launch_stream, kMarkerDisableFlush, {});
   // we may not need to flush any caches.
   CallbackCommand->setCommandEntryScope(amd::Device::kCacheStateIgnore);

@@ -1551,6 +1551,10 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
               }
               Barriers().GetLastSignal()->flags_.isPacketDispatch_ = true;
             }
+          } else if (has_prepatched_signal &&
+                     pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH &&
+                     amd::activity_prof::IsEnabled(OP_ID_DISPATCH)) {
+            slot->reserved2 = timestamp_->command().profilingInfo().correlation_id_;
           }
         }
         if (kernelNames != nullptr && i < kernelNames->size() &&
@@ -1928,7 +1932,33 @@ VirtualGPU::~VirtualGPU() {
 
   delete blitMgr_;
 
-  if (tracking_created_) {
+  bool skip_fence_barrier = false;
+  if (nullptr != schedulerQueue_) {
+#if defined(_WIN32)
+    if (isSchedulerQueueThreadRunning()) {
+      schedulerQueueThreadRunning_.store(false, std::memory_order_release);
+      {
+        std::lock_guard<std::mutex> lock(scheduler_mutex_);
+        pendingSchedulerEvents_.clear();
+        scheduler_cv_.notify_one();
+      }
+      if (schedulerQueueThread_.joinable()) {
+        schedulerQueueThread_.join();
+      }
+    }
+    if (!dev().IsPm4Emulation()) {
+      roc_device_.hasSchedulerQueue_.fetch_add(1, std::memory_order_release);
+      skip_fence_barrier = true;
+    } else {
+      Hsa::queue_destroy(schedulerQueue_);
+    }
+#else
+    Hsa::queue_destroy(schedulerQueue_);
+#endif  // _WIN32
+    schedulerQueue_ = nullptr;
+  }
+
+  if (tracking_created_ && !skip_fence_barrier) {
     std::scoped_lock l(execution());
     // Dedicated queues keep their HW queue, never acquire from pool
     if (!dedicated_queue_ && gpu_queue_ == nullptr) {
@@ -1951,23 +1981,6 @@ VirtualGPU::~VirtualGPU() {
   }
 
   delete printfdbg_;
-
-  if (nullptr != schedulerQueue_) {
-#if defined(_WIN32)
-    // Stop the monitor thread before destroying the queue
-    if (isSchedulerQueueThreadRunning()) {
-      schedulerQueueThreadRunning_.store(false, std::memory_order_relaxed);
-      {
-        std::lock_guard<std::mutex> lock(scheduler_mutex_);
-        scheduler_cv_.notify_one();
-      }
-      if (schedulerQueueThread_.joinable()) {
-        schedulerQueueThread_.join();
-      }
-    }
-#endif  // _WIN32
-    Hsa::queue_destroy(schedulerQueue_);
-  }
 
   if (nullptr != virtualQueue_) {
     virtualQueue_->release();
@@ -2003,6 +2016,10 @@ bool VirtualGPU::create() {
   SetGpuQueue(roc_device_.acquireQueue(queue_size, cooperative_, cuMask_, priority_, false,
                                        dedicated_queue_, nullptr, nullptr, &md_rb), md_rb);
   if (!gpu_queue_) return false;
+
+  if (dev().isa().versionMajor() == 12 && dev().isa().versionMinor() >= 5) {
+    metadata_preloader_.SetLaunchDescriptorVersion(AMD_LAUNCH_DESCRIPTOR_VERSION_GFX1250);
+  }
 
   if (!managed_kernarg_buffer_.Create(Device::MemorySegment::kKernArg)) {
     LogError("Couldn't allocate arguments/signals for the queue");
@@ -3114,12 +3131,10 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
   }
 
   // Synchronize the launch (compute) stream with SDMA engines.
-  // Reset active engine to Compute before the barrier — the barrier runs on the
-  // AQL compute queue, not an SDMA engine.  Without this, the barrier's profiling
-  // signal inherits an SDMA engine type, causing CacheTimingData to call
-  // hsa_amd_profiling_get_async_copy_time (wrong API) and corrupt the timestamps.
+  // WaitingSignal(Compute) inside dispatchBarrierPacket detects the engine switch
+  // from SDMA→Compute, collects the SDMA completion signal as a barrier dependency,
+  // and updates engine_ to Compute before ActiveSignal tags the profiling signal.
   if (result) {
-    Barriers().SetActiveEngine(HwQueueEngine::Compute);
     dispatchBarrierPacket(kNopPacketHeader);
   }
 
@@ -4505,6 +4520,10 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
 
     profilingBegin(vcmd);
 
+    if (vcmd.dynDataPrefetchConfig().isEnabled()) {
+      metadata_preloader_.SetDynDataPrefetchRegions(vcmd.dynDataPrefetchConfig());
+    }
+
     // Submit kernel to HW
     if (!submitKernelInternal(vcmd.sizes(), vcmd.kernel(), vcmd.parameters(),
                               static_cast<void*>(as_cl(&vcmd.event())), vcmd.sharedMemBytes(),
@@ -4512,6 +4531,8 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
       LogError("AQL dispatch failed!");
       vcmd.setStatus(CL_INVALID_OPERATION);
     }
+
+    metadata_preloader_.ClearDynDataPrefetchConfig();
 
     profilingEnd();
   }
@@ -4587,6 +4608,21 @@ void VirtualGPU::submitAccumulate(amd::AccumulateCommand& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
   std::scoped_lock lock(execution());
   profilingBegin(vcmd);
+
+  // Register pre-patched HW event signals with the Timestamp for profiling.
+  // These signals were configured by ApplyHwEventPatches (isPacketDispatch_,
+  // done_ flags set there) but bypass ActiveSignal, so they must be added
+  // here so checkGpuTime → ExtractSignalTiming → addTimestamps picks them up.
+  if (timestamp_ != nullptr) {
+    for (const auto& [_, events] : vcmd.getHwEvents()) {
+      for (void* hw_event : events) {
+        auto* ps = reinterpret_cast<ProfilingSignal*>(hw_event);
+        if (ps != nullptr) {
+          timestamp_->AddProfilingSignal(ps);
+        }
+      }
+    }
+  }
 
   const Settings& settings = dev().settings();
   if (settings.barrier_value_packet_) {
@@ -4762,15 +4798,46 @@ void *VirtualGPU::getOrCreateHostcallBuffer() {
 }
 
 // ================================================================================================
+static void convertDynDataPrefetchToHsa(const amd::DynDataPrefetchRegion* regions,
+                                        uint8_t hints,
+                                        amd_data_prefetch_t* hw,
+                                        uint32_t numRegions) {
+  for (uint32_t i = 0; i < numRegions && i < amd::kDynDataPrefetchMaxRegions; ++i) {
+    const auto& r = regions[i];
+
+    uintptr_t addr = reinterpret_cast<uintptr_t>(r.baseAddress);
+    // addr_lo is VA[31:8] (256B aligned), addr_hi is VA[56:32]
+    hw[i].addr_lo = static_cast<uint32_t>((addr >> 8) & 0xFFFFFFu);
+    hw[i].addr_hi = static_cast<uint32_t>((addr >> 32) & 0x1FFFFFFu);
+    // 256B is the hardware prefetch engine request unit
+    hw[i].burst_size = static_cast<uint32_t>((r.burstSize / 256u) - 1u);
+    hw[i].num_burst = r.numBursts - 1u;
+    hw[i].stride = static_cast<uint32_t>(r.stride / 256u);
+    hw[i].cooperative = 1;
+    hw[i].temporal = hints & 0x3u;
+    hw[i].scope = 2; // DEVICE
+    hw[i].mode = 1; // ABSOLUTE_VA
+  }
+}
+
 void VirtualGPU::MetaDataPreloader::SetPacket(
     hsa_kernel_dispatch_packet_t* aql,  uint16_t header,
-    hsa_amd_metadata_kernel_dispatch_packet_t* metadata) const {
+    hsa_amd_metadata_kernel_dispatch_packet_t* metadata) {
   assert(pending_descriptor_ != nullptr);
 
   // Headers must remain HSA_PACKET_TYPE_INVALID until we publish valid metadata headers
   // at the end. Only clear fields that could otherwise contain stale required-zero data.
   std::memset(metadata->reserved0, 0, sizeof(metadata->reserved0));
-  std::memset(metadata->reserved1, 0, sizeof(metadata->reserved1));
+  std::memset(&metadata->launch_descriptor, 0, sizeof(metadata->launch_descriptor));
+
+  if (dyn_data_prefetch_enabled_ && dyn_data_prefetch_num_regions_ > 0) {
+    metadata->launch_descriptor.version = launch_descriptor_version_;
+    convertDynDataPrefetchToHsa(
+        dyn_data_prefetch_regions_,
+        dyn_data_prefetch_hints_,
+        metadata->launch_descriptor.prefetch,
+        dyn_data_prefetch_num_regions_);
+  }
 
   // Write event_id from amd_signal_t directly (non-interrupt signals have event_id == 0).
   if (aql->completion_signal.handle) {

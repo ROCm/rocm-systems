@@ -11,6 +11,18 @@
 #include "rocmwrap.h"
 #include "ce_coll.h"
 #include "alloc.h"
+#include "ce_fault_inject.h"
+
+#ifdef ENABLE_FAULT_INJECTION
+// Common fault check helper
+static ncclResult_t ceFaultCheck(struct ncclComm* comm, uint32_t bit, const char* fnName) {
+  if (comm->ceColl.ceFaults & bit) {
+    WARN("CE: fault injection: %s returning ncclSystemError (rank %d)", fnName, comm->rank);
+    return ncclSystemError;
+  }
+  return ncclSuccess;
+}
+#endif
 
 RCCL_PARAM(CeMultiStreams, "CE_MULTI_STREAMS", 0);
 // Static constant for graph synchronization
@@ -32,6 +44,10 @@ static void ceDestroyCopyStreams(struct ncclComm* comm, int nPairs) {
 
 ncclResult_t ncclCeInit(struct ncclComm* comm) {
   ncclResult_t ret = ncclSuccess;
+
+#ifdef ENABLE_FAULT_INJECTION
+  NCCLCHECK(ceFaultCheck(comm, CE_FAULT_INIT, "ncclCeInit"));
+#endif
 
   uint8_t* ceDevBase = nullptr;
   size_t ceDevBaseSize = alignUp(comm->nRanks*sizeof(uint32_t), 16) * 2;
@@ -118,9 +134,12 @@ bool ncclCeImplemented(ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_
   int driverVersion;
   if (ncclCudaDriverVersion(&driverVersion) != ncclSuccess) return false;
 
-  // CE is supported in ROCm 7.12 and later
-  // hipDriverGetVersion() returns 71200000 for ROCm 7.12
-  if (driverVersion >= 71200000) {
+  // CE is supported in ROCm 7.12+ and the 7.0.2.x range [7.0.2.2, 7.0.3.0).
+  // hipDriverGetVersion() encodes as MAJOR*10000000 + MINOR*100000 + PATCH*1000 + BUILD;
+  //   ROCm 7.12.0   → 71200000
+  //   ROCm 7.0.2.2  → 70051831  (lower bound of the 7.0.2.x backport range)
+  //   ROCm 7.0.3.0  → 70060000  (exclusive upper bound)
+  if (driverVersion >= 71200000 || (driverVersion >= 70051831 && driverVersion < 70060000)) {
     switch (coll) {
     case ncclFuncAllGather:
     case ncclFuncAlltoAll:
@@ -183,6 +202,10 @@ ncclResult_t ncclPrepUCSync(struct ncclComm* comm, bool isComplete,
                                hipStreamBatchMemOpParams* batchParams,
                                size_t* opIdx) {
   ncclResult_t ret = ncclSuccess;
+
+#ifdef ENABLE_FAULT_INJECTION
+  NCCLCHECK(ceFaultCheck(comm, CE_FAULT_SYNC_PREP, "ncclPrepUCSync"));
+#endif
 
   uint32_t* readyPtrs    = (uint32_t*)comm->ceColl.baseUCSymReadyPtr;
   uint32_t* completePtrs = (uint32_t*)comm->ceColl.baseUCSymComplPtr;
@@ -284,7 +307,7 @@ ncclResult_t ncclCeInitBatchOpsParams(struct ncclCeBatchOpsParams* params, int n
   params->sizes = nullptr;
   params->numOps = 0;
   params->intraBatchSync = false;
-#if ROCM_VERSION >= 71200
+#if CE_BATCH_API_SUPPORTED
   params->attrs = nullptr;
   params->attrIdxs = nullptr;
   params->numAttrs = 0;
@@ -293,7 +316,7 @@ ncclResult_t ncclCeInitBatchOpsParams(struct ncclCeBatchOpsParams* params, int n
   NCCLCHECKGOTO(ncclCalloc(&params->srcs, nRanks), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&params->dsts, nRanks), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&params->sizes, nRanks), ret, fail);
-#if ROCM_VERSION >= 71200
+#if CE_BATCH_API_SUPPORTED
   NCCLCHECKGOTO(ncclCalloc(&params->attrs, nRanks), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&params->attrIdxs, nRanks), ret, fail);
 #endif
@@ -307,7 +330,7 @@ void ncclCeFreeBatchOpsParams(struct ncclCeBatchOpsParams* params) {
   if (params->srcs) free(params->srcs);
   if (params->dsts) free(params->dsts);
   if (params->sizes) free(params->sizes);
-#if ROCM_VERSION >= 71200
+#if CE_BATCH_API_SUPPORTED
   if (params->attrs) free(params->attrs);
   if (params->attrIdxs) free(params->attrIdxs);
 #endif
@@ -315,6 +338,10 @@ void ncclCeFreeBatchOpsParams(struct ncclCeBatchOpsParams* params) {
 
 ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsParams* params, cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
+
+#ifdef ENABLE_FAULT_INJECTION
+  NCCLCHECK(ceFaultCheck(comm, CE_FAULT_LAUNCH_OP, "ncclCeLaunchBatchOps"));
+#endif
 
   // Check if there are any operations to perform
   if (params->numOps == 0) {
@@ -345,13 +372,19 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
   }
   //--------------No graph capture--------------
   else {
-    // driverVersion is reported as 71200000 for ROCm 7.12 when using hipDriverGetVersion().
-    if (ROCM_VERSION >= 71200 && driverVersion >= 71200000) {
-#if ROCM_VERSION >= 71200
-    // For ROCm 7.12+, use batch memory copy for better performance
+    // driverVersion is reported as ~71200000 for ROCm 7.12 and values in
+    // [70051831, 70060000) for ROCm 7.0.2.x backport builds.
+    if (CE_BATCH_API_SUPPORTED &&
+        (driverVersion >= 71200000 || (driverVersion >= 70051831 && driverVersion < 70060000))) {
+#if CE_BATCH_API_SUPPORTED
     params->attrs[0] = {};
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+    params->attrs[0].srcAccessOrder = hipMemcpySrcAccessOrderStream;
+    params->attrs[0].flags = hipMemcpyFlagPreferOverlapWithCompute;
+#else
     params->attrs[0].srcAccessOrder = cudaMemcpySrcAccessOrderStream;
     params->attrs[0].flags = cudaMemcpyFlagPreferOverlapWithCompute;
+#endif
     params->attrIdxs[0] = 0;
     params->numAttrs = 1;
 
@@ -360,8 +393,12 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
       int batchSize = comm->ceColl.intraBatchSyncFreq;
       for (int i = 0; i < params->numOps; i += batchSize) {
         int currentBatchSize = (i + batchSize <= params->numOps) ? batchSize : params->numOps - i;
-        INFO(NCCL_COLL, "CE: rank %d -> Batch path with intraBatchSync (cudaMemcpyBatchAsync, intraBatchSync), numOps=%zu, batchSize=%d", comm->rank, params->numOps, currentBatchSize);
+        INFO(NCCL_COLL, "CE: rank %d -> Batch path with intraBatchSync (hipMemcpyBatchAsync, intraBatchSync), numOps=%zu, batchSize=%d", comm->rank, params->numOps, currentBatchSize);
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+        CUDACHECKGOTO(hipMemcpyBatchAsync(
+#else
         CUDACHECKGOTO(cudaMemcpyBatchAsync(
+#endif
           (void**)&params->dsts[i], (void**)&params->srcs[i], &params->sizes[i], currentBatchSize,
           params->attrs, params->attrIdxs, params->numAttrs, nullptr, stream), ret, fail);
         // Sync after each batch
@@ -371,8 +408,12 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
       }
     } else {
       // Use single batch for all operations
-      INFO(NCCL_COLL, "CE: rank %d -> Batch path without intraBatchSync (cudaMemcpyBatchAsync), numOps=%zu", comm->rank, params->numOps);
+      INFO(NCCL_COLL, "CE: rank %d -> Batch path without intraBatchSync (hipMemcpyBatchAsync), numOps=%zu", comm->rank, params->numOps);
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+      CUDACHECKGOTO(hipMemcpyBatchAsync(
+#else
       CUDACHECKGOTO(cudaMemcpyBatchAsync(
+#endif
         (void**)params->dsts, (void**)params->srcs, params->sizes, params->numOps,
         params->attrs, params->attrIdxs, params->numAttrs, nullptr, stream), ret, fail);
     }

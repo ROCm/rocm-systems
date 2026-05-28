@@ -43,11 +43,11 @@ class MemoryCoherencyModel(Enum):
     CDNA3/4. GFX10/11/12 cover RDNA generations.
     """
 
-    GFX9_GLC        = auto()  # CDNA1, CDNA2 — GLC bit only, all memory
+    GFX9_GLC = auto()  # CDNA1, CDNA2 — GLC bit only, all memory
     GFX940_SC0_SC1_NT = auto()  # CDNA3, CDNA4 — SC0/SC1+NT vector; GLC scalar
     GFX10_GLC_DLC_SLC = auto()  # RDNA1, RDNA2 — GLC + DLC + SLC
-    GFX11_SC0_SC1_TH  = auto()  # RDNA3, RDNA3.5 — SC0+SC1 scope + TH hint
-    GFX12_SCOPE_TH    = auto()  # RDNA4 — 2-bit SCOPE + TH hint
+    GFX11_SC0_SC1_TH = auto()  # RDNA3, RDNA3.5 — SC0+SC1 scope + TH hint
+    GFX12_SCOPE_TH = auto()  # RDNA4 — 2-bit SCOPE + TH hint
 
 
 @dataclass
@@ -354,12 +354,14 @@ class IsaProfile(ABC):
         """
         ...
 
+
 _VOP_E32_RULE = MnemonicRule(suffix='_e32')
 
 # GFX940 (CDNA3/4): SC0+SC1+NT coherency model.
 _SMEM_MODIFIERS = [
     EncodingModifier(
-        'offset', is_offset=True,
+        'offset',
+        is_offset=True,
         condition='inst->soffset_en && inst->imm',
     ),
     EncodingModifier('glc'),
@@ -386,7 +388,8 @@ _MTBUF_MODIFIERS = [
 
 _FLAT_MODIFIERS = [
     EncodingModifier(
-        'flat_offset', is_offset=True,
+        'flat_offset',
+        is_offset=True,
         preamble=(
             'int flat_offset = (inst->seg != 0) ?'
             ' (inst->offset | (inst->pad_12 << 12)) : inst->offset;'
@@ -416,7 +419,8 @@ _MTBUF_MODIFIERS_GLC = [
 
 _FLAT_MODIFIERS_GLC = [
     EncodingModifier(
-        'flat_offset', is_offset=True,
+        'flat_offset',
+        is_offset=True,
         preamble=(
             'int flat_offset = (inst->seg != 0) ?'
             ' (inst->offset | (inst->pad_12 << 12)) : inst->offset;'
@@ -527,8 +531,7 @@ class _AmdgpuProfileBase(IsaProfile):
     def has_abs_modifier(self, enc_name: str) -> bool:
         """VOP3 has abs, but VOP3_SDST_ENC does not."""
         upper = enc_name.upper()
-        return ('VOP3' in upper and 'VOP3P' not in upper
-                and 'SDST_ENC' not in upper)
+        return 'VOP3' in upper and 'VOP3P' not in upper and 'SDST_ENC' not in upper
 
     def mnemonic_rule(self, enc_name: str) -> MnemonicRule:
         """Default AMDGPU mnemonic rules.
@@ -550,15 +553,17 @@ class _AmdgpuProfileBase(IsaProfile):
         if parts[0] != 'ENC':
             return True
         return (
-            len(parts) == 3
-            and parts[1] == 'FLAT'
-            and parts[2] in self._FLAT_SEGMENTS
+            len(parts) == 3 and parts[1] == 'FLAT' and parts[2] in self._FLAT_SEGMENTS
         )
 
     def derive_parent_enc_name(self, enc_name: str) -> str:
         parts = enc_name.split('_')
-        if (parts[0] == 'ENC' and len(parts) >= 3
-                and parts[1] == 'FLAT' and parts[2] in self._FLAT_SEGMENTS):
+        if (
+            parts[0] == 'ENC'
+            and len(parts) >= 3
+            and parts[1] == 'FLAT'
+            and parts[2] in self._FLAT_SEGMENTS
+        ):
             return 'ENC_FLAT'
         return f'ENC_{parts[0]}'
 
