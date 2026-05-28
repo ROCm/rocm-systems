@@ -136,6 +136,20 @@ declare -A TEST_NUMBERS=(
   ["fence_putlargesmall"]="100"
   ["fence_fanout"]="101"
   ["fence_putwavenbichunks"]="102"
+  ["tile_put_contiguous"]="103"
+  ["tile_put_rowmajor"]="104"
+  ["tile_put_colmajor"]="105"
+  ["tile_put_arbitrary"]="106"
+  ["tile_put_wave_contiguous"]="107"
+  ["tile_put_wg_contiguous"]="108"
+  ["tile_get_contiguous"]="109"
+  ["tile_get_wg_contiguous"]="110"
+  ["tile_put_1d"]="111"
+  ["tile_get_1d"]="112"
+  ["tile_get_wave_contiguous"]="113"
+  ["tile_get_rowmajor"]="114"
+  ["tile_get_colmajor"]="115"
+  ["tile_get_arbitrary"]="116"
 )
 
 ExecTest() {
@@ -638,6 +652,38 @@ TestOther() {
   else echo "Skip:   fence_* (AIROCSHMEM-418: fence tests not supported on RO)"; fi
 }
 
+TestTiles() {
+  ##############################################################################
+  #       | Name                      | Ranks | Workgroups | Threads | Max Message Size #
+  ##############################################################################
+
+  # Detect wavefront size based on GPU architecture
+  # gfx1100 and gfx1201 have wavefront size 32, most others have 64
+  WAVE_SIZE=64
+  if command -v rocminfo >/dev/null 2>&1; then
+    if rocminfo | grep -qE "Name:.*(gfx1100|gfx1201)"; then
+      WAVE_SIZE=32
+    fi
+  fi
+
+  ExecTest  "tile_put_contiguous"       2       1            1
+  ExecTest  "tile_put_rowmajor"         2       1            1
+  ExecTest  "tile_put_colmajor"         2       1            1
+  ExecTest  "tile_put_arbitrary"        2       1            1
+  ExecTest  "tile_put_wave_contiguous"  2       1            $WAVE_SIZE
+  ExecTest  "tile_put_wg_contiguous"    2       1            $((WAVE_SIZE * 16))
+  ExecTest  "tile_put_wg_contiguous"    2       4            $((WAVE_SIZE * 16))
+  ExecTest  "tile_get_contiguous"       2       1            1
+  ExecTest  "tile_get_rowmajor"         2       1            1
+  ExecTest  "tile_get_colmajor"         2       1            1
+  ExecTest  "tile_get_arbitrary"        2       1            1
+  ExecTest  "tile_get_wg_contiguous"    2       1            $((WAVE_SIZE * 16))
+  ExecTest  "tile_get_wg_contiguous"    2       4            $((WAVE_SIZE * 16))
+  ExecTest  "tile_put_1d"               2       1            1
+  ExecTest  "tile_get_1d"               2       1            1
+  ExecTest  "tile_get_wave_contiguous"  2       1            $WAVE_SIZE
+}
+
 TestHeatMapRMA() {
   NOTIMEOUT=1
   NOVERIF=1
@@ -821,6 +867,10 @@ case $TEST in
     TestColl
     TestOther
     TestOnStream
+    # Tile tests are only supported on IPC backend
+    if [[ ! "$TEST" =~ ^(gda|ro) ]]; then
+      TestTiles
+    fi
     ;;
   *"rma")
     TestRMA
@@ -845,6 +895,9 @@ case $TEST in
     ;;
   *"other")
     TestOther
+    ;;
+  *"tiles")
+    TestTiles
     ;;
   *)
     #######################################################################################

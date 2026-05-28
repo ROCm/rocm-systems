@@ -74,7 +74,7 @@ template <typename T>
 static ncclResult_t allocMemCPUAccessible(T **ptr, T **devPtr, size_t nelem, int host_flags,
                                           void **gdrHandle, bool forceHost = false) {
   if (ncclGdrCopy && !forceHost) {
-    NCCLCHECK(ncclGdrCudaCalloc(ptr, devPtr, nelem, gdrHandle));
+    NCCLCHECK(ncclGdrCudaCalloc(ptr, devPtr, nelem, gdrHandle, NULL));
   } else {
     NCCLCHECK(ncclCuMemHostAlloc((void **)ptr, NULL, nelem * sizeof(T)));
     memset((void *)*ptr, 0, nelem * sizeof(T));
@@ -88,7 +88,7 @@ static ncclResult_t allocMemCPUAccessible(T **ptr, T **devPtr, size_t nelem, int
 template <typename T>
 static ncclResult_t freeMemCPUAccessible(T *ptr, void *gdrHandle) {
   if (gdrHandle != NULL) {  // If a GDR handle exists, it was GDR memory
-    NCCLCHECK(ncclGdrCudaFree(gdrHandle));
+    NCCLCHECK(ncclGdrCudaFree(gdrHandle, NULL));
   } else {  // Otherwise, it was host memory (or GDR was off)
     NCCLCHECK(ncclCuMemHostFree(ptr));
   }
@@ -99,7 +99,9 @@ static ncclResult_t getDmaBufFd(void *addr, size_t length, int *fd,
                                 bool forceNonDataDirect = false) {
   if (ncclParamDmaBufEnable() == 0) return ncclInvalidUsage;
 
-#if CUDA_VERSION >= 11070
+  // GIN's symmetric windows are cuMem/VMM allocations registered with the NIC via ibv_reg_dmabuf_mr.
+  // the cuMem/hipMemGetHandleForAddressRange that exports the DMA-BUF FD requires this HIP version.
+#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
   static size_t hostPageSize = sysconf(_SC_PAGESIZE);
   size_t alignedSize = length;
   ALIGN_SIZE(alignedSize, hostPageSize);
@@ -112,8 +114,16 @@ static ncclResult_t getDmaBufFd(void *addr, size_t length, int *fd,
     if (status == CUDA_SUCCESS) return ncclSuccess;
   }
 #endif
+
+#if defined(__HIP_PLATFORM_AMD__)
+  // Direct call: hipified to hipMemGetHandleForAddressRange on HIP at build time.
+  // Same pattern as transport/net.cc and transport/coll_net.cc.
+  CUresult status = cuMemGetHandleForAddressRange((void *)fd, (CUdeviceptr)addr, alignedSize,
+                                                  CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0);
+#else
   CUresult status = pfn_cuMemGetHandleForAddressRange((void *)fd, (CUdeviceptr)addr, alignedSize,
                                                       CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0);
+#endif
   if (status == CUDA_SUCCESS) return ncclSuccess;
 #endif
 
@@ -192,9 +202,20 @@ static int proxyGinPollGfd(struct ginProxyCtx *ctx, ginProxyHostGpuCtx *hostGpuC
   // Now we have the full GFD in the local struct.
 
   // Reset the GFD in the queue. This lets the producer know that the GFD is consumed.
+  // On HIP, NT-stores avoid an RFO stall behind in-flight PCIe writes from the GPU
+  // (can cost 80-200us under multi-GPU contention).
+#if defined(__HIP_PLATFORM_AMD__)
+  for (int k = 0; k < ncclGinProxyGfdQwords; k++) {
+    __builtin_nontemporal_store((uint64_t)0, &q[idx].qword[k].raw);
+  }
+  // Drain WC buffers so the NT-zero stores are visible before the credit (ci) advance,
+  // otherwise the GPU producer could overwrite the slot before the zeros land.
+  wc_store_fence();
+#else
   for (int k = 0; k < ncclGinProxyGfdQwords; k++) {
     __atomic_store_n(&q[idx].qword[k].raw, 0, __ATOMIC_RELAXED);
   }
+#endif
 
   // set the counter_id into the state
   uint32_t stateIdx = targetRank * hostGpuCtx->queueSize + idx;
@@ -222,8 +243,13 @@ static int proxyGinPollGfd(struct ginProxyCtx *ctx, ginProxyHostGpuCtx *hostGpuC
 }
 
 static int mapGfdOpToCollNetOp(ncclGinProxyGfd_t *gfd) {
+  // Mask down to the signal-op bits only. WithInline and WithCounter are
+  // orthogonal modifiers and must be excluded -- otherwise an inline put
+  // with SignalInc (op = Put|WithInline|WithSignalInc = 0x0b) masks to
+  // 0x0a and falls through to default, silently demoting iputSignal to a
+  // plain iput so the remote signal cell never gets bumped.
   switch (gfd->qword[ncclGinProxyGfdHeader].header.op &
-          (ncclGinProxyOpComplMask & ~ncclGinProxyOpWithCounter)) {
+          (ncclGinProxyOpWithSignalInc | ncclGinProxyOpWithSignalAdd)) {
     case ncclGinProxyOpWithSignalInc:
       return NCCL_NET_SIGNAL_OP_INC;
     case ncclGinProxyOpWithSignalAdd:
@@ -243,8 +269,13 @@ static ncclResult_t proxyGinProcessGfd(ncclGin_t *ginComm, void *collComm, struc
   uint64_t srcOff;
   void *srcHandle;
   if (gfd->qword[ncclGinProxyGfdHeader].header.op & ncclGinProxyOpWithInline) {
-    uint64_t *inlineVal = &hostGpuCtx->inlines[gfd - hostGpuCtx->queues];
-    srcOff = (uint64_t)&inlineVal[0] - (uint64_t)hostGpuCtx->inlines;
+    // `gfd` is a stack-local copy filled by proxyGinPollGfd, not a pointer
+    // into hostGpuCtx->queues, so we cannot do `gfd - hostGpuCtx->queues` to
+    // recover its slot index. Recover it from `state` instead, which is a
+    // real heap pointer (`*state = &hostGpuCtx->states[stateIdx]`).
+    size_t slotIdx = state - hostGpuCtx->states;
+    uint64_t *inlineVal = &hostGpuCtx->inlines[slotIdx];
+    srcOff = slotIdx * sizeof(uint64_t);
     // reconstruct the inline value from the two qwords
     *inlineVal = gfd->qword[ncclGinProxyGfdInlineLow].inlineLow.inlineValLow;
     if (size == 8) {
@@ -378,7 +409,7 @@ ncclResult_t ncclGinProxyCreateContext(struct ncclComm *comm, void *collComm, in
   // signals.
   size_t signalsBufSize = nSignals * sizeof(uint64_t);
   NCCLCHECK(ncclCuMemAlloc((void **)&proxyCtx->signalsDev, &proxyCtx->signalsCumemhandle,
-                           CU_MEM_HANDLE_TYPE_NONE, signalsBufSize));
+                           CU_MEM_HANDLE_TYPE_NONE, signalsBufSize, NULL));
   CUDACHECK(cudaMemset(proxyCtx->signalsDev, 0, signalsBufSize));
   NCCLCHECK(ncclGinProxyRegMrSym(ginComm, proxyCtx, proxyCtx->signalsDev, signalsBufSize,
                                  NCCL_PTR_CUDA, NCCL_NET_MR_FLAG_FORCE_SO,
@@ -401,7 +432,7 @@ ncclResult_t ncclGinProxyCreateContext(struct ncclComm *comm, void *collComm, in
   devGpuCtx_h.queueSize = hostGpuCtx->queueSize;
   devGpuCtx_h.counters = proxyCtx->countersDev;
   devGpuCtx_h.signals = proxyCtx->signalsDev;
-  NCCLCHECK(ncclCudaCalloc(&devGpuCtx_h.pis, comm->nRanks));
+  NCCLCHECK(ncclCudaCalloc(&devGpuCtx_h.pis, comm->nRanks, NULL));
 
   // Allocate the GFD queues, CIs, counters, signals and test/wait variables on the either the CPU
   // or GPU.
@@ -411,7 +442,7 @@ ncclResult_t ncclGinProxyCreateContext(struct ncclComm *comm, void *collComm, in
                                         CU_MEMHOSTALLOC_WRITECOMBINED, &hostGpuCtx->cisGdrHandle));
 
   ncclGinProxyGpuCtx_t *devGpuCtx_d = NULL;
-  NCCLCHECK(ncclCudaCalloc(&devGpuCtx_d, 1));
+  NCCLCHECK(ncclCudaCalloc(&devGpuCtx_d, 1, NULL));
   // Copy the proxy's devGpuCtx to the GPU
   NCCLCHECK(ncclCudaMemcpy(devGpuCtx_d, &devGpuCtx_h, 1));
 
@@ -458,7 +489,7 @@ ncclResult_t ncclGinProxyDestroyContext(ncclGin_t *ginComm, void *ginCtx) {
     // Free signals
     if (ginComm && ctx->collComm && ctx->signalsMhandle)
       ginComm->deregMrSym(ctx->collComm, ctx->signalsMhandle);
-    if (ctx->signalsDev) ncclCudaFree(ctx->signalsDev);
+    if (ctx->signalsDev) ncclCudaFree(ctx->signalsDev, NULL);
 
     // Free hostGpuCtx and its allocations
     struct ginProxyHostGpuCtx *hostGpuCtx = ctx->hostGpuCtx;
@@ -477,7 +508,7 @@ ncclResult_t ncclGinProxyDestroyContext(ncclGin_t *ginComm, void *ginCtx) {
 
     ncclNetDeviceHandle_v11_t *devHandle = (ncclNetDeviceHandle_v11_t *)ctx->devHandle;
     if (devHandle) {
-      if (devHandle->handle) ncclCudaFree((void *)devHandle->handle);
+      if (devHandle->handle) ncclCudaFree((void *)devHandle->handle, NULL);
       free(devHandle);
     }
 
