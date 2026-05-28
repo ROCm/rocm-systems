@@ -49,13 +49,18 @@ struct Case {
   bool ternary;
 };
 
-const std::array<Case, 6> kCases = {{
+const std::array<Case, 11> kCases = {{
     {"v_mul_lo_u32_vop3", 645, false},
     {"v_mul_hi_u32_vop3", 646, false},
     {"v_mul_hi_i32_vop3", 647, false},
     {"v_xad_u32_vop3", 499, true},
     {"v_and_or_b32_vop3", 513, true},
     {"v_lshl_or_b32_vop3", 512, true},
+    {"v_bfm_b32_vop3", 659, false},
+    {"v_mad_i32_i24_vop3", 450, true},
+    {"v_mad_u32_u24_vop3", 451, true},
+    {"v_alignbit_b32_vop3", 462, true},
+    {"v_alignbyte_b32_vop3", 463, true},
 }};
 
 const std::array<uint32_t, 14> kVals = {{

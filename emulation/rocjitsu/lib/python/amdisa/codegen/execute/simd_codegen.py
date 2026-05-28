@@ -1226,6 +1226,12 @@ SIMD_VOP3_BINARY_INT_EXTRA: dict[str, tuple[str, str]] = {
         " auto pb = util::stdx::static_simd_cast<I64>(sb);"
         " return util::stdx::static_simd_cast<util::native<uint32_t>>((pa * pb) >> 32); }",
     ),
+    # v_bfm_b32: ((1 << (a & 31)) - 1) << (b & 31). Two shift counts both
+    # masked to low 5 bits — same vpsllvd-vs-shl rationale as v_lshl_add_u32.
+    "v_bfm_b32_vop3": (
+        "uint32_t",
+        "[](auto a, auto b) { return ((util::native<uint32_t>(1u) << (a & 31u)) - 1u) << (b & 31u); }",
+    ),
 }
 
 
@@ -1364,6 +1370,46 @@ SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
     "v_lshl_or_b32_vop3": (
         "uint32_t",
         "[](auto a, auto b, auto c) { return (a << (b & 31u)) | c; }",
+    ),
+    # v_mad_i32_i24: low-24 sign-extended a, b -> int32 multiply (low 32 of the
+    # 48-bit product, identical signed/unsigned for the low half) + int32(c).
+    "v_mad_i32_i24_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) {"
+        " auto sa = (util::stdx::static_simd_cast<util::native<int32_t>>(a) << 8) >> 8;"
+        " auto sb = (util::stdx::static_simd_cast<util::native<int32_t>>(b) << 8) >> 8;"
+        " return util::stdx::static_simd_cast<util::native<uint32_t>>("
+        "sa * sb + util::stdx::static_simd_cast<util::native<int32_t>>(c)); }",
+    ),
+    # v_mad_u32_u24: low-24 mask a, b, multiply, add c.
+    "v_mad_u32_u24_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) { return (a & 0x00FFFFFFu) * (b & 0x00FFFFFFu) + c; }",
+    ),
+    # v_alignbit_b32: low 32 of ((u64(a) << 32) | b) >> (c & 31). Per-lane
+    # variable shift on a 64-bit-lane fixed_size_simd<u64> — proven on the
+    # widening mul_hi pattern; shift count is masked to [0, 31] so vpsrlvq
+    # and scalar shr agree on the result.
+    "v_alignbit_b32_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) {"
+        " using U64 = util::stdx::fixed_size_simd<uint64_t, util::native<uint32_t>::size()>;"
+        " auto va = util::stdx::static_simd_cast<U64>(a);"
+        " auto vb = util::stdx::static_simd_cast<U64>(b);"
+        " auto val = (va << 32) | vb;"
+        " auto sh = util::stdx::static_simd_cast<U64>(c & 31u);"
+        " return util::stdx::static_simd_cast<util::native<uint32_t>>(val >> sh); }",
+    ),
+    # v_alignbyte_b32: same widen but shift count is (c & 3) * 8 = {0,8,16,24}.
+    "v_alignbyte_b32_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) {"
+        " using U64 = util::stdx::fixed_size_simd<uint64_t, util::native<uint32_t>::size()>;"
+        " auto va = util::stdx::static_simd_cast<U64>(a);"
+        " auto vb = util::stdx::static_simd_cast<U64>(b);"
+        " auto val = (va << 32) | vb;"
+        " auto sh = util::stdx::static_simd_cast<U64>((c & 3u) * 8u);"
+        " return util::stdx::static_simd_cast<util::native<uint32_t>>(val >> sh); }",
     ),
     # The shift count is masked to the low 5 bits to match the scalar body's
     # x86 `shl` semantics (which mask cl to 5 bits) — stdx's `<<` on native<u32>
