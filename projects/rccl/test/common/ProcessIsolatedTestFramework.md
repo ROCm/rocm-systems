@@ -274,7 +274,7 @@ By default, tests run one at a time (`maxParallelJobs = 1`). Setting `maxParalle
 ```cpp
 ProcessIsolatedTestRunner::ExecutionOptions opts;
 opts.maxParallelJobs = 4;   // up to 4 tests run at the same time
-                            // 0 = std::thread::hardware_concurrency()
+                            // 0 = GPU pool size (or hardware_concurrency() if no pool)
                             // 1 = sequential (default)
 
 RUN_ISOLATED_TESTS_WITH_OPTIONS(opts,
@@ -291,15 +291,16 @@ RUN_ISOLATED_TESTS_WITH_OPTIONS(opts,
 
 ### GPU-aware scheduling
 
-When tests run in parallel, multiple child processes would otherwise all try to use the same GPU (e.g., device 0), conflicting with each other. The runner solves this by maintaining a **GPU slot pool** and assigning each child process a non-overlapping subset of physical device indices, injected as `HIP_VISIBLE_DEVICES` and `ROCR_VISIBLE_DEVICES` before `execv()`.
+When tests run in parallel, multiple child processes would otherwise all try to use the same GPU (e.g., device 0), conflicting with each other. The runner solves this by maintaining a **GPU slot pool** and assigning each child process a non-overlapping subset of physical device indices, injected as `HIP_VISIBLE_DEVICES` before `execv()`.
 
 #### How the pool is built
 
 `ExecutionOptions::gpuPool` holds the physical device indices to distribute. If left empty (the default), the runner auto-detects the pool in this priority order:
 
 1. Parse `HIP_VISIBLE_DEVICES` from the environment (comma-separated indices)
-2. Parse `ROCR_VISIBLE_DEVICES` from the environment
-3. Count `/dev/dri/renderD*` nodes → pool `[0, 1, ..., N-1]`
+2. Count GPU nodes in `/sys/class/kfd/kfd/topology/nodes` with a non-zero `gpu_id` → pool `[0, 1, ..., N-1]`
+
+If neither source yields a non-empty pool, `executeAllTests()` records a non-fatal GTest failure and returns `false` immediately.
 
 ```cpp
 // Override auto-detection to use only GPUs 0 and 1:
@@ -317,7 +318,7 @@ Each `TestConfig` declares how many GPU slots it needs via `withNumGpus()`:
 | `N` | exactly N GPU slots |
 | `N > pool size` | clamped to the full pool — test runs exclusively (all slots held) to prevent contention with restricted siblings |
 
-Before launching each child, the runner atomically waits until **both** a concurrency slot (`active < maxParallelJobs`) **and** enough free GPU slots are available. The assigned indices are written into `HIP_VISIBLE_DEVICES`/`ROCR_VISIBLE_DEVICES` inside the fork child so the re-exec'd process sees only its GPUs. When the child exits the slots are released and the next waiting test can proceed.
+Before launching each child, the runner atomically waits until **both** a concurrency slot (`active < maxParallelJobs`) **and** enough free GPU slots are available. The assigned indices are written into `HIP_VISIBLE_DEVICES` inside the fork child so the re-exec'd process sees only its GPUs. When the child exits the slots are released and the next waiting test can proceed.
 
 #### Example: parallel tests with per-test GPU declaration
 
@@ -481,7 +482,7 @@ static bool executeAllTests(
 **Execution mode** is controlled by `ExecutionOptions::maxParallelJobs`:
 - `1` (default) — sequential, one test at a time
 - `N > 1` — up to N tests run simultaneously with GPU-aware scheduling
-- `0` — parallelism = `std::thread::hardware_concurrency()`
+- `0` — parallelism = GPU pool size, or `std::thread::hardware_concurrency()` when no GPU pool is available
 
 **Note:** This method automatically clears all test registrations and results after execution, ensuring a clean state for the next test suite. Users do not need to call `clear()` manually.
 
@@ -549,7 +550,7 @@ TEST(MyTest, VerifyExecution) {
 |---|---|---|---|
 | `stopOnFirstFailure` | `bool` | `false` | Stop launching new tests after the first failure (in-flight tests finish) |
 | `verboseLogging` | `bool` | `true` | Print per-test status lines |
-| `maxParallelJobs` | `size_t` | `1` | Max concurrent child processes. `0` = `hardware_concurrency`, `1` = sequential |
+| `maxParallelJobs` | `size_t` | `1` | Max concurrent child processes. `0` = GPU pool size (or `hardware_concurrency` if no pool), `1` = sequential |
 | `gpuPool` | `vector<int>` | `{}` | Physical GPU indices to distribute. Empty = auto-detect |
 
 ### TestConfig Methods
@@ -596,7 +597,7 @@ TestConfig& withNumGpus(size_t n);
 | `N` | exactly N GPU slots — test blocks until N slots are free |
 | `0` | entire pool — test runs exclusively (no other test runs concurrently) |
 
-The runner injects `HIP_VISIBLE_DEVICES` / `ROCR_VISIBLE_DEVICES` into the child process with the assigned device indices. Has no effect in sequential mode (`maxParallelJobs = 1`).
+The runner injects `HIP_VISIBLE_DEVICES` into the child process with the assigned device indices. Has no effect in sequential mode (`maxParallelJobs = 1`).
 
 ```cpp
 ProcessIsolatedTestRunner::TestConfig("MultiGpuTest", []() {
@@ -1143,11 +1144,11 @@ EXPECT_EQ(results.size(), expectedTestCount)
    - Each test gets a `TestConfig` with name, logic, and environment
 
 2. **Execution Phase (exec-only isolation):**
-   - Parent detects the GPU pool (once, before the loop)
+   - Parent detects the GPU pool once (from `HIP_VISIBLE_DEVICES` or KFD sysfs); fails with a non-fatal GTest error and returns `false` if the pool is empty
    - For each test the parent:
      1. Acquires a concurrency slot (`active < maxParallelJobs`) and GPU slots (`numGpus` free indices) — atomically under one condition variable
      2. `fork()` creates a child
-     3. Inside the fork child: environment variables are applied, then `HIP_VISIBLE_DEVICES` / `ROCR_VISIBLE_DEVICES` is set to the assigned GPU indices, then `execv("/proc/self/exe")` re-executes the binary with `--gtest_filter` pointing at the parent test and a sentinel env var naming the specific isolated test to run
+     3. Inside the fork child: environment variables are applied, then `HIP_VISIBLE_DEVICES` is set to the assigned GPU indices, then `execv("/proc/self/exe")` re-executes the binary with `--gtest_filter` pointing at the parent test and a sentinel env var naming the specific isolated test to run
      4. The re-exec'd process finds the sentinel, runs the matching lambda, flushes coverage, and calls `_exit()`
      5. Parent thread drains stdout/stderr pipes and calls `waitpid()` for its child
      6. Concurrency and GPU slots are released; the next waiting test can start
@@ -1165,6 +1166,8 @@ EXPECT_EQ(results.size(), expectedTestCount)
 ### Why `fork()+execv()` instead of plain `fork()`
 
 Plain `fork()` after HIP has been initialized is unsafe — the GPU runtime state (device contexts, memory handles, threads) is copied into the child but is not valid there. `execv()` replaces the child's entire address space with a fresh binary image, so the child starts with no inherited runtime state. This also ensures the LLVM profile runtime initializes with the correct child PID. Before `execv()` the fork child sets `LLVM_PROFILE_FILE=rccl_tests_%p_%m.profraw` (with `overwrite=0`) so each re-exec'd process writes a unique file. A `LLVM_PROFILE_FILE` already in the environment — from CI or via `withEnvironment()` — takes precedence.
+
+The re-exec'd child skips GPU enumeration calls in `EnvVars` (e.g., `hipGetDeviceCount`, `getArchInfo`) because they are irrelevant there and concurrent `hipGetDeviceCount` forks cause KFD file-descriptor contention.
 
 ### Exit Codes
 
