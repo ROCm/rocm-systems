@@ -879,6 +879,7 @@ ncclResult_t ncclIbResiliencySenderCreateQps(struct ncclIbResiliency* resCtx,
     qpCreateAttrs.pd = sendCommDev->base.pd;
     qpCreateAttrs.qpContext = qpContext;
     NCCLCHECK(ncclIbQpCreate(localQp, &qpCreateAttrs));
+    localQp->devIndex = localDevIndex;
     // Populate the info that will be delivered to the remote receiver peer
     ncclIbQpInfo* localQpInfo = &localResiliencyInfo->probingQpsInfo[localQpIndex];
     localQpInfo->qpn = localQp->qp->qp_num;
@@ -971,6 +972,7 @@ ncclResult_t ncclIbResiliencyReceiverQpsCreateToRts(struct ncclIbResiliency* res
     qpCreateAttrs.qpContext = qpContext;
     qpCreateAttrs.qpContext = qpContext;
     NCCLCHECK(ncclIbQpCreate(localQp, &qpCreateAttrs));
+    localQp->devIndex = localDevIndex;
     localResiliencyInfo->probingQpsInfo[localQpIndex].qpn = localQp->qp->qp_num;
     localResiliencyInfo->probingQpsInfo[localQpIndex].devIndex = localDevIndex;
 

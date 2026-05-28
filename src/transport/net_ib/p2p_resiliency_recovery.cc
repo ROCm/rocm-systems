@@ -361,6 +361,7 @@ ncclResult_t ncclIbPortRecoverySenderQpsCreate(struct ncclIbResiliency* resCtx,
     qpCreateAttrs.pd = sendCommDev->base.pd;
     qpCreateAttrs.qpContext = qpContext;
     NCCLCHECK(ncclIbQpCreate(localQp, &qpCreateAttrs));
+    localQp->devIndex = localDevIndex;
     // Populate the info that will be delivered to the remote receiver peer
     ncclIbQpInfo* localQpInfo = &localPortRecoveryQpsInfo[localQpIndex];
     localQpInfo->qpn = localQp->qp->qp_num;
@@ -448,6 +449,7 @@ ncclResult_t ncclIbPortRecoveryReceiverQpsCreateToRts(struct ncclIbResiliency* r
     qpCreateAttrs.pd = recvCommDev->base.pd;
     qpCreateAttrs.qpContext = qpContext;
     NCCLCHECK(ncclIbQpCreate(localQp, &qpCreateAttrs));
+    localQp->devIndex = localDevIndex;
     localPortRecoveryQpsInfo[localQpIndex].qpn = localQp->qp->qp_num;
     localPortRecoveryQpsInfo[localQpIndex].devIndex = localDevIndex;
 
