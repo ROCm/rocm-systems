@@ -68,6 +68,7 @@ add_executable(
     vop3_modifier_simd_test.cpp
     vop3_binary_simd_correctness_test.cpp
     vop3_unary_simd_correctness_test.cpp
+    vopc_vop3_int_simd_correctness_test.cpp
     execution_plugin_test.cpp
 )
 target_link_libraries(
