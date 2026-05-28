@@ -237,6 +237,7 @@ if(BUILD_TESTS)
       AllocTests.cpp
       ParamTests.cpp
       ArgCheckTests.cpp
+      BootstrapBidirTests.cpp
       EnqueueTests.cpp
       IpcsocketTests.cpp
       NetSocketTests.cpp
