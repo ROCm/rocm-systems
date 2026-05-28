@@ -884,6 +884,7 @@ struct ncclComm {
   int unroll;
   // custom collective [RCCL]
   bool enableCustColl;
+  int pxnDisable;  // per-comm PXN-disable cache: -1 uninit, 0 enabled, 1 disabled
   // gfx name from hipDeviceProp_t [RCCL] , Memory resource owned by comm allocated in ncclCommInitRankFunc
   char* archName;
   // multiProcessorCount from hipDeviceProp_t [RCCL]
