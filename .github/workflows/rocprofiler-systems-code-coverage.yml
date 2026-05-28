@@ -80,7 +80,6 @@ jobs:
       shell: bash
       run: |
         echo "/opt/rocm/bin" >> $GITHUB_PATH
-        echo "/opt/rocm/lib/llvm/bin" >> $GITHUB_PATH
         echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV
         echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
@@ -96,7 +95,7 @@ jobs:
           apt-get remove -y --purge 'libopenmpi-dev' 'libopenmpi3' 'openmpi-bin' 'openmpi-common' &&
           apt-get autoremove -y --purge &&
           apt-get upgrade -y &&
-          apt-get install -y libomp-dev libtbb-dev rocm-llvm-dev \
+          apt-get install -y libomp-dev libtbb-dev \
             libdw-dev libdwarf-dev libelf-dev libiberty-dev \
             libmpich-dev mpich &&
           apt-get autoclean
@@ -106,11 +105,20 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run: |
+        pip3 install -r requirements.txt
         env_dir=/opt/conda/envs/py3.12/
         if [ -d "${env_dir}" ] && [ -x "${env_dir}bin/python3" ]; then
           echo "Installing requirements into ${env_dir}"
           "${env_dir}bin/python3" -m pip install -r requirements.txt
         fi
+
+    - name: Sync gcov with GCC
+      shell: bash
+      run: |
+        GCC_VER=$(gcc -dumpversion | cut -d. -f1)
+        echo "GCC version: ${GCC_VER}"
+        update-alternatives \
+          --install /usr/bin/gcov gcov /usr/bin/gcov-${GCC_VER} 500
 
     - name: Configure
       timeout-minutes: 15
@@ -122,7 +130,7 @@ jobs:
         git config --global --add safe.directory ${GITHUB_WORKSPACE}
         git config --global --add safe.directory ${PWD}
         echo "CMake version: $(cmake --version | head -n 1)"
-        echo "Compiler version: $(amdclang++ --version | head -n 1)"
+        echo "Compiler version: $(gcc --version | head -n 1)"
         cmake --preset coverage \
           -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
           -DROCPROFSYS_PYTHON_ENVS=py3.12 \
@@ -140,10 +148,7 @@ jobs:
       timeout-minutes: 10
       shell: bash
       working-directory: projects/rocprofiler-systems/
-      env:
-        LLVM_PROFILE_FILE: "${{ github.workspace }}/projects/rocprofiler-systems/build/coverage/profraw/unit/%c%p-%m.profraw"
       run: |
-        mkdir -p build/coverage/profraw/unit
         ./build/coverage/bin/rocprof-sys-unit-tests
 
     - name: Generate Unit Test Coverage
@@ -153,22 +158,17 @@ jobs:
       working-directory: projects/rocprofiler-systems/
       run: |
         python3 scripts/generate-coverage.py \
-          --mode llvm \
-          --profraw-dir build/coverage/profraw/unit \
-          --binary-dir  build/coverage \
-          --source-dir  . \
-          --output-dir  .codecov \
+          --build-dir build/coverage \
+          --source-dir . \
+          --output-dir .codecov \
           --label unit-tests
 
     - name: E2E Tests
       timeout-minutes: 60
       shell: bash
       working-directory: projects/rocprofiler-systems/
-      env:
-        LLVM_PROFILE_FILE: "${{ github.workspace }}/projects/rocprofiler-systems/build/coverage/profraw/e2e/%c%p-%m.profraw"
       run: |
-        find build/coverage/profraw -name '*.profraw' -delete
-        mkdir -p build/coverage/profraw/e2e
+        find build/coverage -name '*.gcda' -delete
         ctest --test-dir build/coverage \
           --output-on-failure \
           -LE "network|gpu" \
@@ -181,11 +181,9 @@ jobs:
       working-directory: projects/rocprofiler-systems/
       run: |
         python3 scripts/generate-coverage.py \
-          --mode llvm \
-          --profraw-dir build/coverage/profraw/e2e \
-          --binary-dir  build/coverage \
-          --source-dir  . \
-          --output-dir  .codecov \
+          --build-dir build/coverage \
+          --source-dir . \
+          --output-dir .codecov \
           --label e2e-tests
 
     - name: Generate Coverage Comment

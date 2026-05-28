@@ -71,9 +71,8 @@
             "binaryDir": "${sourceDir}/build/coverage",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
-                "CMAKE_CXX_COMPILER": "amdclang++",
-                "CMAKE_C_COMPILER": "amdclang",
                 "CMAKE_INSTALL_PREFIX": "/opt/rocprofiler-systems-dev",
+                "ROCPROFSYS_BUILD_CI": "ON",
                 "ROCPROFSYS_BUILD_CODECOV": "ON",
                 "ROCPROFSYS_BUILD_ELFUTILS": "OFF",
                 "ROCPROFSYS_BUILD_GTEST": "ON",
@@ -84,6 +83,7 @@
                 "ROCPROFSYS_MAX_THREADS": "64",
                 "ROCPROFSYS_STRIP_LIBRARIES": "OFF",
                 "ROCPROFSYS_USE_MPI": "ON",
+                "ROCPROFSYS_USE_PYTESTS": "ON",
                 "USE_CLANG_OMP": "OFF"
             },
             "description": "Build with GCC code coverage instrumentation",
