@@ -206,13 +206,39 @@ jobs:
           echo "${ci_images}" | jq .
           echo "ci_images=${ci_images}" >> "${GITHUB_OUTPUT}"
 
+  build_CI_image:
+    if: ${{ needs.Precheck.outputs.changed_dockerfile == '1' }}
+    needs: Precheck
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.Precheck.outputs.build_ci_image_matrix) }}
+    uses: ./.github/workflows/hipfile-image-build.yml
+    with:
+      ci_image_name: ${{ fromJSON(needs.Precheck.outputs.ci_images)[format('{0}-{1}', matrix.supported_platforms, matrix.rocm_versions)].ci_image }}
+      ci_image_cache: ${{ fromJSON(needs.Precheck.outputs.ci_images)[format('{0}-{1}', matrix.supported_platforms, matrix.rocm_versions)].ci_image_cache }}
+      ci_image_name_nvidia: ${{ fromJSON(needs.Precheck.outputs.ci_images)[format('{0}-{1}', matrix.supported_platforms, matrix.rocm_versions)].ci_image_nvidia }}
+      ci_image_cache_nvidia: ${{ fromJSON(needs.Precheck.outputs.ci_images)[format('{0}-{1}', matrix.supported_platforms, matrix.rocm_versions)].ci_image_nvidia_cache }}
+      platform: ${{ matrix.supported_platforms }}
+      rocm_version: ${{ matrix.rocm_versions }}
+
   Linux:
-    needs: [Precheck]
+    if: >-
+      ${{
+        !cancelled() && (
+          needs.build_CI_image.result == 'success' ||
+          needs.build_CI_image.result == 'skipped'
+        )
+      }}
+    needs: [Precheck, build_CI_image]
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.Precheck.outputs.ci_matrix) }}
     uses: ./.github/workflows/hipfile-ci.yml
     with:
-      dockerfile_changed: ${{ needs.Precheck.outputs.changed_dockerfile == '1' }}
+      ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)[format('{0}-{1}', matrix.supported_platforms, matrix.rocm_versions)].ci_image }}
+      ci_image_nvidia: ${{ fromJSON(needs.Precheck.outputs.ci_images)[format('{0}-{1}', matrix.supported_platforms, matrix.rocm_versions)].ci_image_nvidia }}
       platform: ${{ matrix.supported_platforms }}
       rocm_version: ${{ matrix.rocm_versions }}
