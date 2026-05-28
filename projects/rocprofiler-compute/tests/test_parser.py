@@ -91,28 +91,30 @@ class TestResolveFilterBlocksToPanelIds:
 
 def _two_block_config() -> schema.ArchConfig:
     """Config with system panel (100), block 2 metric_table, block 11 metric_table."""
-    return _make_arch_config([
-        (100, _raw_csv_panel(100, 101, "sysinfo.csv")),
-        (
-            200,
-            _metric_panel(
+    return _make_arch_config(
+        [
+            (100, _raw_csv_panel(100, 101, "sysinfo.csv")),
+            (
                 200,
-                201,
-                metrics={
-                    "M1": {"value": "AVG(COUNTER_A)"},
-                    "M2": {"value": "AVG(COUNTER_B)"},
-                },
+                _metric_panel(
+                    200,
+                    201,
+                    metrics={
+                        "M1": {"value": "AVG(COUNTER_A)"},
+                        "M2": {"value": "AVG(COUNTER_B)"},
+                    },
+                ),
             ),
-        ),
-        (
-            1100,
-            _metric_panel(
+            (
                 1100,
-                1101,
-                metrics={"X1": {"value": "AVG(COUNTER_C)"}},
+                _metric_panel(
+                    1100,
+                    1101,
+                    metrics={"X1": {"value": "AVG(COUNTER_C)"}},
+                ),
             ),
-        ),
-    ])
+        ]
+    )
 
 
 class TestBuildDfs:
@@ -162,18 +164,20 @@ class TestBuildDfs:
         assert set(ac.dfs.keys()) == {101, 201}
 
     def test_system_panels_and_data_source_zero_always_present(self):
-        ac = _make_arch_config([
-            (0, _raw_csv_panel(0, 1, "kernel_top.csv")),  # data_source_idx "0"
-            (100, _raw_csv_panel(100, 101, "sysinfo.csv")),  # panel_id <= 100
-            (
-                200,
-                _metric_panel(
+        ac = _make_arch_config(
+            [
+                (0, _raw_csv_panel(0, 1, "kernel_top.csv")),  # data_source_idx "0"
+                (100, _raw_csv_panel(100, 101, "sysinfo.csv")),  # panel_id <= 100
+                (
                     200,
-                    201,
-                    metrics={"M1": {"value": "AVG(A)"}},
+                    _metric_panel(
+                        200,
+                        201,
+                        metrics={"M1": {"value": "AVG(A)"}},
+                    ),
                 ),
-            ),
-        ])
+            ]
+        )
         build_dfs(
             ac,
             filter_metrics=None,
@@ -190,9 +194,11 @@ class TestBuildDfs:
             "Channel_::_1": {"value": "AVG(TCC_HIT[::_1])"},
             "placeholder_range": {"::_1": 3},
         }
-        ac = _make_arch_config([
-            (1800, _metric_panel(1800, 1801, metrics=metrics)),
-        ])
+        ac = _make_arch_config(
+            [
+                (1800, _metric_panel(1800, 1801, metrics=metrics)),
+            ]
+        )
         build_dfs(ac, filter_metrics=None, sys_info=_sys_info(), profiling_config={})
 
         df = ac.dfs[1801]
@@ -201,20 +207,22 @@ class TestBuildDfs:
         assert set(df["Metric"]) == {"Channel_0", "Channel_1", "Channel_2"}
 
     def test_metric_level_filter_drops_siblings_keeps_headers(self):
-        ac = _make_arch_config([
-            (
-                200,
-                _metric_panel(
+        ac = _make_arch_config(
+            [
+                (
                     200,
-                    201,
-                    metrics={
-                        "M0": {"value": "AVG(COUNTER_A)"},
-                        "M1": {"value": "AVG(COUNTER_B)"},
-                        "M2": {"value": "AVG(COUNTER_C)"},
-                    },
+                    _metric_panel(
+                        200,
+                        201,
+                        metrics={
+                            "M0": {"value": "AVG(COUNTER_A)"},
+                            "M1": {"value": "AVG(COUNTER_B)"},
+                            "M2": {"value": "AVG(COUNTER_C)"},
+                        },
+                    ),
                 ),
-            ),
-        ])
+            ]
+        )
         build_dfs(
             ac, filter_metrics=["2.1.0"], sys_info=_sys_info(), profiling_config={}
         )
@@ -226,38 +234,42 @@ class TestBuildDfs:
         assert list(df["Metric"]) == ["M0"]
 
     def test_whole_block_filter_keeps_every_metric_in_block(self):
-        ac = _make_arch_config([
-            (
-                200,
-                _metric_panel(
+        ac = _make_arch_config(
+            [
+                (
                     200,
-                    201,
-                    metrics={
-                        "M0": {"value": "AVG(COUNTER_A)"},
-                        "M1": {"value": "AVG(COUNTER_B)"},
-                    },
+                    _metric_panel(
+                        200,
+                        201,
+                        metrics={
+                            "M0": {"value": "AVG(COUNTER_A)"},
+                            "M1": {"value": "AVG(COUNTER_B)"},
+                        },
+                    ),
                 ),
-            ),
-        ])
+            ]
+        )
         build_dfs(ac, filter_metrics=["2"], sys_info=_sys_info(), profiling_config={})
 
         df = ac.dfs[201]
         assert list(df["Metric"]) == ["M0", "M1"]
 
     def test_metric_counters_only_for_built_metrics(self):
-        ac = _make_arch_config([
-            (
-                200,
-                _metric_panel(
+        ac = _make_arch_config(
+            [
+                (
                     200,
-                    201,
-                    metrics={
-                        "Kept": {"value": "AVG(COUNTER_KEPT)"},
-                        "Dropped": {"value": "AVG(COUNTER_DROPPED)"},
-                    },
+                    _metric_panel(
+                        200,
+                        201,
+                        metrics={
+                            "Kept": {"value": "AVG(COUNTER_KEPT)"},
+                            "Dropped": {"value": "AVG(COUNTER_DROPPED)"},
+                        },
+                    ),
                 ),
-            ),
-        ])
+            ]
+        )
         build_dfs(
             ac, filter_metrics=["2.1.0"], sys_info=_sys_info(), profiling_config={}
         )
@@ -265,6 +277,7 @@ class TestBuildDfs:
         assert "Kept" in ac.metric_counters
         assert "Dropped" not in ac.metric_counters
         assert ac.metric_counters["Kept"] == ["COUNTER_KEPT"]
+        assert ac.dfs_expressions[201] == ["AVG(COUNTER_KEPT)"]
 
 
 # =============================================================================

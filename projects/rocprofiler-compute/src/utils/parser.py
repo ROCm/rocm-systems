@@ -63,6 +63,7 @@ def build_dfs(
 
     dfs: dict[int, pd.DataFrame] = {}
     dfs_type: dict[int, str] = {}
+    dfs_expressions: dict[int, list[str]] = {}
     metric_counters: dict[str, list[str]] = {}
 
     if filter_metrics:
@@ -85,7 +86,7 @@ def build_dfs(
                 file_data_source_idx = str(table_id // 100)
 
                 if table_type == "metric_table":
-                    df = _build_metric_table_df(
+                    result = _build_metric_table_df(
                         panel=panel,
                         data_config=data_config,
                         simple_box=simple_box,
@@ -94,8 +95,9 @@ def build_dfs(
                         profile_panel_filter=profile_panel_filter,
                         metric_counters=metric_counters,
                     )
-                    if df is None:
+                    if result is None:
                         continue
+                    df, dfs_expressions[table_id] = result
 
                 elif table_type == "raw_csv_table":
                     if not _metric_passes_filter(
@@ -135,6 +137,7 @@ def build_dfs(
 
     arch_configs.dfs = dfs
     arch_configs.dfs_type = dfs_type
+    arch_configs.dfs_expressions = dfs_expressions
     arch_configs.metric_counters = metric_counters
 
 
@@ -171,11 +174,11 @@ def _build_metric_table_df(
     user_metric_filter: Optional[list[str]],
     profile_panel_filter: set[int],
     metric_counters: dict[str, list[str]],
-) -> Optional[pd.DataFrame]:
-    """Build the metric_table dataframe for data_config, dropping rows the
-    active filter excludes. Returns None when an active filter dropped every
-    metric in a non-empty config; otherwise returns a Metric_ID-indexed
-    dataframe and updates metric_counters in place.
+) -> Optional[tuple[pd.DataFrame, list[str]]]:
+    """Build the metric_table dataframe and its list of formula strings for
+    data_config, dropping rows the active filter excludes. Returns None when
+    an active filter dropped every metric in a non-empty config; otherwise
+    returns (df, expressions) and updates metric_counters in place.
     """
     table_id = data_config["id"]
     table_data_source_idx = f"{table_id // 100}.{table_id % 100}"
@@ -195,6 +198,7 @@ def _build_metric_table_df(
         headers.append("Description")
 
     rows: list[list[Any]] = []
+    expressions: list[str] = []
     metric_entries = data_config["metric"]
     for i, (key, entries) in enumerate(metric_entries.items()):
         metric_idx = f"{table_data_source_idx}.{i}"
@@ -215,6 +219,7 @@ def _build_metric_table_df(
                 if k == "expr":
                     for bv in simple_box.values():
                         values.append(bv[0] + v + bv[1])
+                    eqn_content.append(v)
                 elif k != "alias":
                     values.append(v)
         else:
@@ -222,6 +227,9 @@ def _build_metric_table_df(
                 if k != "alias":
                     values.append(v)
                     eqn_content.append(v)
+        expressions.extend(
+            v for v in eqn_content if isinstance(v, str) and v and v != "None"
+        )
 
         if "alias" in entries:
             values.append(entries["alias"])
@@ -251,7 +259,7 @@ def _build_metric_table_df(
 
     df = pd.DataFrame(rows, columns=headers)
     df.set_index("Metric_ID", inplace=True)
-    return df
+    return df, expressions
 
 
 @demarcate
@@ -610,16 +618,18 @@ def load_pc_sampling_data_per_kernel(
         dispatch_ids,
     ) in records:
         for dispatch_id in dispatch_ids:
-            rows.append({
-                "dispatch_id": dispatch_id,
-                "code_object_id": code_object_id,
-                "offset": offset,
-                "inst_index": inst_index,
-                "count": count,
-                "count_issued": count_issued,
-                "count_stalled": count_stalled,
-                "stall_reason": stall_reasons,
-            })
+            rows.append(
+                {
+                    "dispatch_id": dispatch_id,
+                    "code_object_id": code_object_id,
+                    "offset": offset,
+                    "inst_index": inst_index,
+                    "count": count,
+                    "count_issued": count_issued,
+                    "count_stalled": count_stalled,
+                    "stall_reason": stall_reasons,
+                }
+            )
 
     df = pd.DataFrame(rows)
     if df.empty:
@@ -658,14 +668,16 @@ def load_pc_sampling_data_per_kernel(
         return sorted(merged_counts.items(), key=lambda item: item[1], reverse=True)
 
     # Group and aggregate
-    df = df.groupby(["code_object_id", "offset", "kernel_id"], as_index=False).agg({
-        "inst_index": "first",
-        "count": "sum",
-        "count_issued": "sum",
-        "count_stalled": "sum",
-        "stall_reason": merge_stall_reasons,
-        "kernel_name": "first",
-    })
+    df = df.groupby(["code_object_id", "offset", "kernel_id"], as_index=False).agg(
+        {
+            "inst_index": "first",
+            "count": "sum",
+            "count_issued": "sum",
+            "count_stalled": "sum",
+            "stall_reason": merge_stall_reasons,
+            "kernel_name": "first",
+        }
+    )
 
     # Filter DataFrame to only include rows matching the requested kernel_name
     df = df[df["kernel_name"] == kernel_name]
@@ -792,8 +804,7 @@ def load_pc_sampling_data(
 
         # Group by Instruction_Comment and aggregate
         grouped_counts = (
-            merged_df
-            .groupby("Instruction_Comment")
+            merged_df.groupby("Instruction_Comment")
             .agg(
                 count=("Instruction_Comment", "count"),
                 instruction=("Instruction", "first"),
@@ -948,6 +959,7 @@ def load_table_data(
     dir_path: str,
     is_gui: bool,
     args: argparse.Namespace,
+    dfs_expressions: dict[int, list[str]],
     skip_kernel_top: bool = False,
 ) -> None:
     """
@@ -961,6 +973,7 @@ def load_table_data(
     eval_metric(
         workload.dfs,
         workload.dfs_type,
+        dfs_expressions,
         workload.sys_info.iloc[0],
         workload.roofline_peaks,
         apply_filters(workload, dir_path, is_gui, args.debug),

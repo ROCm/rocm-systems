@@ -234,11 +234,13 @@ class webui_analysis(OmniAnalyze_Base):
                     }
 
                 # All filtering will occur here
+                gpu_arch = run_workload.sys_info.iloc[0]["gpu_arch"]
                 parser.load_table_data(
                     workload=run_workload,
                     dir_path=self.dest_dir,
                     is_gui=True,
                     args=args,
+                    dfs_expressions=self._arch_configs[gpu_arch].dfs_expressions,
                 )
 
             # ~~~~~~~~~~~~~~~~~~~~~~~
@@ -544,9 +546,9 @@ def determine_chart_type(
             content.append(html.Div(className="float-container", children=temp_obj))
         # Normal formatting if < 2 graphs
         else:
-            content.extend([
-                dcc.Graph(figure=fig, style={"margin": "2%"}) for fig in d_figs
-            ])
+            content.extend(
+                [dcc.Graph(figure=fig, style={"margin": "2%"}) for fig in d_figs]
+            )
 
     # b) Tablechart
     else:

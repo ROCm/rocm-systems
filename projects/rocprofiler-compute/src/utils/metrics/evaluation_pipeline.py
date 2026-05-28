@@ -164,6 +164,7 @@ def calc_builtin_vars(
 def eval_metric(
     dfs: dict,
     dfs_type: dict,
+    dfs_expressions: dict[int, list[str]],
     sys_info: pd.Series,
     empirical_peaks_df: pd.DataFrame,
     raw_pmc_df: pd.DataFrame,
@@ -183,11 +184,10 @@ def eval_metric(
     sys_vars = create_sys_vars(sys_info)
     empirical_peaks = create_empirical_peaks_dict(empirical_peaks_df)
     expressions = [
-        value
-        for df_id, df in dfs.items()
+        expr
+        for df_id in dfs
         if dfs_type.get(df_id) == "metric_table"
-        for value in df.to_numpy().ravel()
-        if isinstance(value, str) and value and value != "None"
+        for expr in dfs_expressions.get(df_id, [])
     ]
     builtin_vars = calc_builtin_vars(
         raw_pmc_df, sys_vars, sys_info["gpu_arch"], expressions

@@ -24,6 +24,9 @@ class ArchConfig:
     # [id: df_type] pairs
     dfs_type: dict[int, str] = field(default_factory=dict)
 
+    # [id: list of formula strings] pairs
+    dfs_expressions: dict[int, list[str]] = field(default_factory=dict)
+
     # [Index: Metric name] pairs
     metric_list: dict[str, str] = field(default_factory=dict)
 
