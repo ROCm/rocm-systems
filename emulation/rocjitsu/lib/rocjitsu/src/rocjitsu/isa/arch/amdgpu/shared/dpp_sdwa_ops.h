@@ -304,13 +304,14 @@ inline uint32_t sdwa_dst_merge(uint32_t result, uint32_t old_dst, uint32_t dst_s
     uint32_t shift = dst_sel * 8;
     uint32_t mask = 0xFFu << shift;
     uint32_t merged = (result & 0xFF) << shift;
+    uint32_t upper_mask = static_cast<uint32_t>(~((uint64_t{1} << (shift + 8)) - 1));
     uint32_t fill;
     if (dst_unused == UNUSED_PRESERVE)
       fill = old_dst & ~mask;
     else if (dst_unused == UNUSED_SEXT && (result & 0x80))
-      fill = ~mask; // sign-extend 1s
+      fill = upper_mask;
     else
-      fill = 0; // zero-pad
+      fill = 0;
     return fill | merged;
   }
 
@@ -318,11 +319,12 @@ inline uint32_t sdwa_dst_merge(uint32_t result, uint32_t old_dst, uint32_t dst_s
   uint32_t shift = (dst_sel & 1) * 16;
   uint32_t mask = 0xFFFFu << shift;
   uint32_t merged = (result & 0xFFFF) << shift;
+  uint32_t upper_mask = static_cast<uint32_t>(~((uint64_t{1} << (shift + 16)) - 1));
   uint32_t fill;
   if (dst_unused == UNUSED_PRESERVE)
     fill = old_dst & ~mask;
   else if (dst_unused == UNUSED_SEXT && (result & 0x8000))
-    fill = ~mask;
+    fill = upper_mask;
   else
     fill = 0;
   return fill | merged;
