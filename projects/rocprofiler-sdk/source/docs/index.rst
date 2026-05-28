@@ -5,7 +5,7 @@
 .. _index:
 
 ********************************
-ROCprofiler-SDK documentation (preview)
+ROCprofiler-SDK documentation (preview v2)
 ********************************
 
 ROCprofiler-SDK is a tooling infrastructure for profiling general-purpose GPU compute applications running on the ROCm software.
