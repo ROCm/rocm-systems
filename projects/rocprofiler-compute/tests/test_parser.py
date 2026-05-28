@@ -83,6 +83,30 @@ class TestResolveFilterBlocksToPanelIds:
         result = resolve_filter_blocks_to_panel_ids(["2", "11.1", "11.1.5"])
         assert result == {200, 1100}
 
+    def test_alias_tokens_resolve_via_arch_map(self, monkeypatch):
+        monkeypatch.setattr(
+            "utils.utils_common.get_arch_alias_to_panel_id",
+            lambda arch: {"lds": "10", "roofline": "4"},
+        )
+        result = resolve_filter_blocks_to_panel_ids(["lds", "roofline"], arch="gfx942")
+        assert result == {1000, 400}
+
+    def test_mixed_alias_and_numeric_tokens(self, monkeypatch):
+        monkeypatch.setattr(
+            "utils.utils_common.get_arch_alias_to_panel_id",
+            lambda arch: {"lds": "10"},
+        )
+        result = resolve_filter_blocks_to_panel_ids(["lds", "2", "11.1"], arch="gfx942")
+        assert result == {1000, 200, 1100}
+
+    def test_unknown_alias_raises(self, monkeypatch):
+        monkeypatch.setattr(
+            "utils.utils_common.get_arch_alias_to_panel_id",
+            lambda arch: {"lds": "10"},
+        )
+        with pytest.raises(KeyError):
+            resolve_filter_blocks_to_panel_ids(["bogus"], arch="gfx942")
+
 
 # =============================================================================
 # build_dfs
@@ -200,6 +224,54 @@ class TestBuildDfs:
 
         df = ac.dfs[201]
         assert list(df["Metric"]) == ["M1", "M2"]
+
+    def test_profile_side_alias_resolves_to_panel_id(self, monkeypatch):
+        monkeypatch.setattr(
+            "utils.utils_common.get_arch_alias_to_panel_id",
+            lambda arch: {"lds": "11"},
+        )
+        ac = _two_block_config()
+        build_dfs(
+            ac,
+            filter_metrics=None,
+            sys_info=_sys_info(),
+            profiling_config={"filter_blocks": ["lds"]},
+            arch="gfx942",
+        )
+        assert set(ac.dfs.keys()) == {1, 101, 1101}
+
+    def test_analyze_side_alias_resolves_to_panel_id(self, monkeypatch):
+        monkeypatch.setattr(
+            "utils.utils_common.get_arch_alias_to_panel_id",
+            lambda arch: {"lds": "11"},
+        )
+        ac = _two_block_config()
+        build_dfs(
+            ac,
+            filter_metrics=["lds"],
+            sys_info=_sys_info(),
+            profiling_config={"filter_blocks": ["2"]},  # ignored
+            arch="gfx942",
+        )
+        assert set(ac.dfs.keys()) == {1, 101, 1101}
+
+    def test_analyze_mixed_numeric_and_alias_filter(self, monkeypatch):
+        monkeypatch.setattr(
+            "utils.utils_common.get_arch_alias_to_panel_id",
+            lambda arch: {"lds": "11"},
+        )
+        ac = _two_block_config()
+        build_dfs(
+            ac,
+            filter_metrics=["2.1.0", "lds"],
+            sys_info=_sys_info(),
+            profiling_config={},
+            arch="gfx942",
+        )
+        # Numeric token keeps only M1 in block 2; alias keeps block 11.
+        assert set(ac.dfs.keys()) == {1, 101, 201, 1101}
+        assert list(ac.dfs[201]["Metric"]) == ["M1"]
+        assert list(ac.dfs[1101]["Metric"]) == ["X1"]
 
     def test_metric_counters_only_for_built_metrics(self):
         ac = _make_arch_config(

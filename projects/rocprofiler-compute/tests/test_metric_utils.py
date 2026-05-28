@@ -745,9 +745,9 @@ class TestMetricEvaluator:
     def test_eval_expression_divide_by_zero_silenced_and_logged_at_debug(self):
         """
         Divide-by-zero (x/0 -> inf, 0/0 -> NaN) emits a numpy RuntimeWarning
-        that is captured and logged via console_debug. The misleading
-        "missing counter data" console_warning must not fire; the function
-        still returns 'N/A' for both cases.
+        that is captured and logged via console_debug. The "evaluated to N/A"
+        console_warning must not fire when a RuntimeWarning was caught; the
+        function still returns 'N/A' for both cases.
         """
         cases = [
             # x/0 -> inf, taken by the np.isinf branch

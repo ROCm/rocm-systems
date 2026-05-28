@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import warnings
 from typing import Any
 
 import numpy as np
@@ -72,12 +71,11 @@ def to_avg(
 def to_median(a: pd.Series | None) -> float:
     if a is None:
         return np.nan
-    elif isinstance(a, pd.Series):
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", category=RuntimeWarning)
-            return a.median()
-    else:
-        raise Exception("to_median: unsupported type.")
+    if isinstance(a, pd.Series):
+        if a.empty or np.isnan(a).all():
+            return np.nan
+        return a.median()
+    raise Exception("to_median: unsupported type.")
 
 
 def to_std(a: pd.Series) -> float:

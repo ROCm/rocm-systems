@@ -39,10 +39,12 @@ def make_dual_issue_arch_config(metric_name: str, peak_col: str = "Peak"):
 
 def test_evaluate_parse_false_basic_expressions():
     """Test parse=False mode with basic expressions and substitutions."""
-    pmc_df = pd.DataFrame({
-        "Counter1": [10, 20, 30],
-        "Counter2": [1, 2, 3],
-    })
+    pmc_df = pd.DataFrame(
+        {
+            "Counter1": [10, 20, 30],
+            "Counter2": [1, 2, 3],
+        }
+    )
     sys_info = {"numCUs": 64, "clock_speed": 1500}
 
     # Test raw_pmc_df -> pmc_df substitution on flat single-index columns
@@ -79,10 +81,12 @@ def test_evaluate_parse_false_basic_expressions():
 
 def test_evaluate_parse_true_basic_expressions():
     """Test parse=True mode with $ substitution and AST transformation."""
-    pmc_df = pd.DataFrame({
-        "Counter1": [10, 20, 30],
-        "Counter2": [2, 4, 6],
-    })
+    pmc_df = pd.DataFrame(
+        {
+            "Counter1": [10, 20, 30],
+            "Counter2": [2, 4, 6],
+        }
+    )
     sys_info = {"numCUs": 64, "multiplier": 2}
 
     # Test $variable substitution
@@ -177,10 +181,12 @@ def test_evaluate_with_none_in_formula_does_not_nullify_valid_result():
     .where(..., None) were incorrectly returning None even when
     the actual result was valid.
     """
-    pmc_df = pd.DataFrame({
-        "Counter1": [10, 20, 30],
-        "Counter2": [1, 0, 3],  # Has a zero for conditional
-    })
+    pmc_df = pd.DataFrame(
+        {
+            "Counter1": [10, 20, 30],
+            "Counter2": [1, 0, 3],  # Has a zero for conditional
+        }
+    )
     sys_info = {}
 
     # Expression with None as fallback in .where() - should return valid result
@@ -212,8 +218,8 @@ def test_evaluate_with_none_in_formula_does_not_nullify_valid_result():
 def test_evaluate_divide_by_zero_silenced_and_logged_at_debug():
     """
     Divide-by-zero (x/0 -> inf, 0/0 -> NaN) emits a numpy RuntimeWarning
-    that is captured and logged via console_debug. The misleading
-    "missing counter data" console_warning must not fire.
+    that is captured and logged via console_debug. The "evaluated to N/A"
+    console_warning must not fire when a RuntimeWarning was caught.
     """
     pmc_df = pd.DataFrame({"Counter1": [10, 20, 30]})
     sys_info = {}
@@ -260,9 +266,11 @@ def test_calc_builtin_vars_processes_per_xcd_first():
     Test that PER_XCD variables are processed before non-PER_XCD variables,
     allowing non-PER_XCD vars to reference PER_XCD vars via $placeholder.
     """
-    pmc_df = pd.DataFrame({
-        "Counter1": [100, 200],
-    })
+    pmc_df = pd.DataFrame(
+        {
+            "Counter1": [100, 200],
+        }
+    )
     sys_info = {"base_value": 10, "gpu_arch": "gfx942"}
 
     # Mock BUILD_IN_VARS with dependency chain:
@@ -303,9 +311,11 @@ def test_calc_builtin_vars_processes_per_xcd_first():
 
 def test_calc_builtin_vars_with_dataframe_expressions():
     """Test builtin vars that operate on DataFrame columns."""
-    pmc_df = pd.DataFrame({
-        "Counter1": [10, 20, 30],
-    })
+    pmc_df = pd.DataFrame(
+        {
+            "Counter1": [10, 20, 30],
+        }
+    )
     sys_info = {"multiplier": 2, "gpu_arch": "gfx942"}
 
     # Use SUPPORTED_CALL function names (SUM -> to_sum via CodeTransformer)
@@ -343,20 +353,24 @@ def test_calc_builtin_vars_with_dataframe_expressions():
 
 def test_calc_dataframe_expressions_applies_evaluate_to_rows():
     """Test that expressions are evaluated for each row of expression_df."""
-    pmc_df = pd.DataFrame({
-        "Counter1": [10, 20, 30],
-        "Counter2": [1, 2, 3],
-    })
+    pmc_df = pd.DataFrame(
+        {
+            "Counter1": [10, 20, 30],
+            "Counter2": [1, 2, 3],
+        }
+    )
     sys_info = {"scale": 100, "gpu_arch": "gfx942"}
 
-    expression_df = pd.DataFrame({
-        "metric_id": ["1.1", "1.2"],
-        "value_name": ["sum", "scaled"],
-        "value": [
-            "to_sum(raw_pmc_df['Counter1'])",
-            "ammolite__scale * 2",
-        ],
-    })
+    expression_df = pd.DataFrame(
+        {
+            "metric_id": ["1.1", "1.2"],
+            "value_name": ["sum", "scaled"],
+            "value": [
+                "to_sum(raw_pmc_df['Counter1'])",
+                "ammolite__scale * 2",
+            ],
+        }
+    )
 
     with patch(
         "rocprof_compute_analyze.analysis_db.get_build_in_vars", return_value={}
@@ -379,14 +393,16 @@ def test_calc_dataframe_expressions_with_builtin_vars():
         "COMPUTED_VAR": "$base * 10",  # 50
     }
 
-    expression_df = pd.DataFrame({
-        "metric_id": ["1.1", "1.2"],
-        "value_name": ["test", "none_result"],
-        "value": [
-            "ammolite__COMPUTED_VAR + 1",  # Should be 51
-            "None",
-        ],
-    })
+    expression_df = pd.DataFrame(
+        {
+            "metric_id": ["1.1", "1.2"],
+            "value_name": ["test", "none_result"],
+            "value": [
+                "ammolite__COMPUTED_VAR + 1",  # Should be 51
+                "None",
+            ],
+        }
+    )
 
     with (
         patch(
@@ -429,16 +445,20 @@ def test_calc_expressions_noise_clamp():
     # Two distinct kernels so groupby yields two kernel-level evaluate calls
     # in addition to one workload-level call. Without the kwarg gate the
     # unguarded code would emit three warnings; with the gate, exactly one.
-    pmc_df = pd.DataFrame({
-        "Kernel_Name": ["kernel_a", "kernel_b"],
-        "DIFF": [-100.0, -100.0],
-        "REF": [1000.0, 1000.0],
-    })
-    expression_template = pd.DataFrame({
-        "metric_id": ["1.1"],
-        "value_name": ["clamped"],
-        "value": [noise_clamp_expression],
-    })
+    pmc_df = pd.DataFrame(
+        {
+            "Kernel_Name": ["kernel_a", "kernel_b"],
+            "DIFF": [-100.0, -100.0],
+            "REF": [1000.0, 1000.0],
+        }
+    )
+    expression_template = pd.DataFrame(
+        {
+            "metric_id": ["1.1"],
+            "value_name": ["clamped"],
+            "value": [noise_clamp_expression],
+        }
+    )
     sys_info_df = pd.DataFrame([{"placeholder": 1, "gpu_arch": "gfx942"}])
 
     analyzer = db_analysis(MagicMock(), {})
@@ -520,11 +540,13 @@ def test_calc_expressions_noise_clamp():
 def test_validate_dual_issue_metrics_emits_warning_above_peak():
     """Long-format VALU Utilization above peak triggers the dual-issue warning."""
     arch_config = make_dual_issue_arch_config("VALU Utilization")
-    workload_values_df = pd.DataFrame({
-        "metric_id": ["1.1", "1.1"],
-        "value_name": ["Value", "Peak"],
-        "value": [150.0, 100.0],
-    })
+    workload_values_df = pd.DataFrame(
+        {
+            "metric_id": ["1.1", "1.1"],
+            "value_name": ["Value", "Peak"],
+            "value": [150.0, 100.0],
+        }
+    )
     pmc_df = pd.DataFrame({"GRBM_GUI_ACTIVE": [1000]})
 
     with patch("utils.metrics.common.console_warning") as console_warning_mock:
@@ -543,11 +565,13 @@ def test_validate_dual_issue_metrics_emits_warning_above_peak():
 def test_validate_dual_issue_metrics_silent_below_peak():
     """Below-peak VALU Utilization stays silent."""
     arch_config = make_dual_issue_arch_config("VALU Utilization")
-    workload_values_df = pd.DataFrame({
-        "metric_id": ["1.1", "1.1"],
-        "value_name": ["Value", "Peak"],
-        "value": [80.0, 100.0],
-    })
+    workload_values_df = pd.DataFrame(
+        {
+            "metric_id": ["1.1", "1.1"],
+            "value_name": ["Value", "Peak"],
+            "value": [80.0, 100.0],
+        }
+    )
     pmc_df = pd.DataFrame({"GRBM_GUI_ACTIVE": [1000]})
 
     with patch("utils.metrics.common.console_warning") as console_warning_mock:
@@ -566,11 +590,13 @@ def test_validate_dual_issue_metrics_uses_peak_empirical_fallback():
     arch_config = make_dual_issue_arch_config(
         "VALU FLOPs (F64)", peak_col="Peak (Empirical)"
     )
-    workload_values_df = pd.DataFrame({
-        "metric_id": ["1.1", "1.1"],
-        "value_name": ["Value", "Peak (Empirical)"],
-        "value": [600.0, 400.0],
-    })
+    workload_values_df = pd.DataFrame(
+        {
+            "metric_id": ["1.1", "1.1"],
+            "value_name": ["Value", "Peak (Empirical)"],
+            "value": [600.0, 400.0],
+        }
+    )
     pmc_df = pd.DataFrame({"GRBM_GUI_ACTIVE": [1000]})
 
     with patch("utils.metrics.common.console_warning") as console_warning_mock:
@@ -589,11 +615,13 @@ def test_validate_dual_issue_metrics_uses_peak_empirical_fallback():
 def test_validate_dual_issue_metrics_appends_valu2_suffix_on_gfx950():
     """gfx950 with non-zero SQ_ACTIVE_INST_VALU2 appends the confirmation."""
     arch_config = make_dual_issue_arch_config("VALU Utilization")
-    workload_values_df = pd.DataFrame({
-        "metric_id": ["1.1", "1.1"],
-        "value_name": ["Value", "Peak"],
-        "value": [150.0, 100.0],
-    })
+    workload_values_df = pd.DataFrame(
+        {
+            "metric_id": ["1.1", "1.1"],
+            "value_name": ["Value", "Peak"],
+            "value": [150.0, 100.0],
+        }
+    )
     pmc_df = pd.DataFrame({"SQ_ACTIVE_INST_VALU2": [1, 2, 3]})
 
     with patch("utils.metrics.common.console_warning") as console_warning_mock:
@@ -612,11 +640,13 @@ def test_validate_dual_issue_metrics_skips_non_metric_table_dfs():
     """dfs entries whose dfs_type is not metric_table are ignored."""
     arch_config = make_dual_issue_arch_config("VALU Utilization")
     arch_config.dfs_type = {201: "raw_csv_table"}
-    workload_values_df = pd.DataFrame({
-        "metric_id": ["1.1", "1.1"],
-        "value_name": ["Value", "Peak"],
-        "value": [150.0, 100.0],
-    })
+    workload_values_df = pd.DataFrame(
+        {
+            "metric_id": ["1.1", "1.1"],
+            "value_name": ["Value", "Peak"],
+            "value": [150.0, 100.0],
+        }
+    )
     pmc_df = pd.DataFrame({"GRBM_GUI_ACTIVE": [1000]})
 
     with patch("utils.metrics.common.console_warning") as console_warning_mock:

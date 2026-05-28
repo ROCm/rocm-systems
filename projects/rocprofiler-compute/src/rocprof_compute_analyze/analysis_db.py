@@ -558,8 +558,8 @@ class db_analysis(OmniAnalyze_Base):
                     )
                 elif not caught:
                     console_warning(
-                        f"Could not evaluate expression for {name}: {value} - "
-                        "likely due to missing counter data."
+                        f"Expression for {name}: {value} evaluated to N/A "
+                        "(divide-by-zero or empty counter data)."
                     )
                 return None
 

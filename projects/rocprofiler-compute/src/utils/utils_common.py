@@ -865,13 +865,28 @@ def format_scientific_notation_if_needed(
     return formatted
 
 
-def resolve_filter_blocks_to_panel_ids(filter_blocks: list[str]) -> set[int]:
+def resolve_filter_blocks_to_panel_ids(
+    filter_blocks: list[str], arch: Optional[str] = None
+) -> set[int]:
     """Inverse of convert_metric_id_to_panel_info: map metric ids like
     "2" or "11.1" to the set of file_id integers (e.g. {200, 1100}).
+    Tokens that are not metric ids are looked up as panel aliases (e.g.
+    "lds", "roofline") for the given arch.
     """
-    return {
-        int(convert_metric_id_to_panel_info(str(bid))[0]) for bid in filter_blocks
-    }
+    alias_map: dict[str, str] = (
+        get_arch_alias_to_panel_id(arch)
+        if arch and any(not METRIC_ID_RE.match(str(bid)) for bid in filter_blocks)
+        else {}
+    )
+    resolved: set[int] = set()
+    for bid in filter_blocks:
+        token = str(bid)
+        if not METRIC_ID_RE.match(token):
+            if token not in alias_map:
+                raise KeyError(f"Unknown panel alias: {token!r}")
+            token = alias_map[token]
+        resolved.add(int(convert_metric_id_to_panel_info(token)[0]))
+    return resolved
 
 
 def convert_metric_id_to_panel_info(

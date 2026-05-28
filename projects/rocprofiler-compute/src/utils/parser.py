@@ -16,6 +16,7 @@ from utils.metrics.expression import gen_counter_list
 from utils.pattern_matching import PatternMatcherEngine
 from utils.specs import MachineSpecs
 from utils.utils_common import (
+    METRIC_ID_RE,
     SUPPORTED_FIELD,
     convert_metric_id_to_panel_info,
     expand_placeholder_ranges,
@@ -47,10 +48,12 @@ def build_dfs(
     filter_metrics: Optional[list[str]],
     sys_info: pd.Series,
     profiling_config: dict[str, Any],
+    arch: Optional[str] = None,
 ) -> None:
     """Build a dataframe template for each table in each panel. Analyze-mode
     filter_metrics overrides profile-mode filter_blocks; tables that fail the
-    active filter are omitted from arch_configs.dfs.
+    active filter are omitted from arch_configs.dfs. Alias tokens (e.g. "lds",
+    "roofline") in either filter are resolved against arch's panel aliases.
     """
 
     simple_box = {
@@ -67,12 +70,16 @@ def build_dfs(
     metric_counters: dict[str, list[str]] = {}
 
     if filter_metrics:
-        user_metric_filter: Optional[list[str]] = filter_metrics
-        profile_panel_filter: set[int] = set()
+        numeric_tokens = [t for t in filter_metrics if METRIC_ID_RE.match(str(t))]
+        alias_tokens = [t for t in filter_metrics if not METRIC_ID_RE.match(str(t))]
+        user_metric_filter: Optional[list[str]] = numeric_tokens or None
+        profile_panel_filter: set[int] = resolve_filter_blocks_to_panel_ids(
+            alias_tokens, arch
+        )
     else:
         user_metric_filter = None
         profile_panel_filter = resolve_filter_blocks_to_panel_ids(
-            profiling_config.get("filter_blocks", [])
+            profiling_config.get("filter_blocks", []), arch
         )
 
     arch_configs.panel_configs = expand_placeholder_ranges(
@@ -154,16 +161,18 @@ def _metric_passes_filter(
     """
     if panel_id <= 100 or data_source_idx == "0":
         return True
-    if user_metric_filter is not None:
-        return (
-            metric_id in user_metric_filter
-            or data_source_idx in user_metric_filter
-            or str(panel_id // 100) in user_metric_filter
-        )
+    if user_metric_filter is None and not profile_panel_filter:
+        return True
+    if user_metric_filter and (
+        metric_id in user_metric_filter
+        or data_source_idx in user_metric_filter
+        or str(panel_id // 100) in user_metric_filter
+    ):
+        return True
     if profile_panel_filter:
         file_id, _, _ = convert_metric_id_to_panel_info(metric_id)
         return int(file_id) in profile_panel_filter
-    return True
+    return False
 
 
 def _build_metric_table_df(
