@@ -706,23 +706,19 @@ XdnaDriver::AllocateMemory(const core::MemoryRegion &mem_region,
 
   if (use_bo_share) {
     if (alloc_flags & core::MemoryRegion::AllocateMemoryOnly) {
-      /// TODO: We create an anonymous mapping to get a unique virtual address since the memory
-      /// handle mapping, i.e., Runtime::memory_handle_map_, is indexed using DriverHandle which is
-      /// driver-agnostic and just a pointer to the virtual address space. We waste a page, but it
-      /// ensures uniqueness across drivers.
-      bo_handle.vaddr =
-          mmap(nullptr, MemoryRegion::GetPageSize(), PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-      if (bo_handle.vaddr == MAP_FAILED) {
-        return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-      }
+      // We do not map the BO.
+      bo_handle.vaddr = nullptr;
+      bo_handle.unmap_vaddr = false;
     } else {
+      // We map the BO to the host address space. The BO will be automatically unmapped when the BO
+      // handle is destroyed.
       bo_handle.vaddr =
           mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd_, get_bo_info_args.map_offset);
       if (bo_handle.vaddr == MAP_FAILED) {
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
       }
+      bo_handle.unmap_vaddr = true;
     }
-    bo_handle.unmap_vaddr = true;
   } else {
     /// This is dev heap and is already mapped. See InitDeviceHeap().
     bo_handle.vaddr = reinterpret_cast<void*>(get_bo_info_args.vaddr);
