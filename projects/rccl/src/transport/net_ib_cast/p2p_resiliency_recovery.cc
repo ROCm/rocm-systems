@@ -215,7 +215,7 @@ static inline ncclResult_t IbCastPortRecoveryQpsToError(ncclIbPortRecoveryContex
 inline static ncclResult_t IbCastPortRecoveryPostRecvWorkRequest(struct ibv_qp* qp, struct ncclIbResiliencyDev* resDev) {
   struct ibv_sge sge;
   sge.addr = (uintptr_t)resDev->portRecoveryGrhBuf;
-  sge.length = sizeof(resDev->portRecoveryGrhBuf); // 128 bytes: GRH (40) + QPN payload (up to 88)
+  sge.length = sizeof(resDev->portRecoveryGrhBuf);
   sge.lkey = resDev->portRecoveryGrhMr->lkey;
   struct ibv_recv_wr wr;
   memset(&wr, 0, sizeof(wr));
