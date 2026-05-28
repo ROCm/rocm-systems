@@ -1,0 +1,20 @@
+# Ignore Python cache and virtual environment folders
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore pytest cache
+.pytest_cache/
+.cache/
+
+# Ignore log folders
+logs/
+log/
+*.log
+
+# Ignore virtual environment folders
+venv/
+
+# Ignore build artifacts
+build/

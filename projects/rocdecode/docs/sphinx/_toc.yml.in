@@ -1,0 +1,70 @@
+defaults:
+  numbered: False
+root: index
+subtrees:
+- entries:
+  - file: what-is-rocDecode.rst
+    title: What is rocDecode?
+
+- caption: Install
+  entries:
+  - file: install/rocDecode-prerequisites.rst
+    title: rocDecode prerequisites
+  - file: install/rocDecode-package-install.rst
+    title: Installing rocDecode with the package installer
+  - file: install/rocDecode-build-and-install.rst
+    title: Installing rocDecode from its source code
+  - url: https://github.com/ROCm/rocDecode/tree/develop/docker
+    title: rocDecode Docker containers
+
+- caption: Conceptual
+  entries:
+  - file: conceptual/video-decoding-pipeline.rst
+    title: Video decoding pipeline
+  - file: conceptual/rocDecode-memory-types.rst
+    title: rocDecode surface memory locations
+
+- caption: Samples
+  entries:
+  - file: tutorials/rocDecode-samples.rst
+    title: rocDecode samples
+
+- caption: How to
+  entries:
+  - file: how-to/using-rocDecode-videodecode-sample.rst
+    title: Understand the videodecode sample
+  - file: how-to/using-rocDecode-rocdecdecoder.rst
+    title: Understand the rocdecdecode.cpp sample    
+  - file: how-to/using-rocDecode-video-decoder.rst
+    title: Use RocVideoDecoder
+  - file: how-to/using-rocDecode-ffmpeg.rst
+    title: Use the FFmpeg demultiplexer
+  - file: how-to/using-rocDecode-bitstream.rst
+    title: Use the bitstream reader APIs 
+
+- caption: Reference
+  entries:
+  - file: reference/rocDecode-core-APIs.rst
+    title: Core APIs 
+    subtrees:
+    - entries:
+      - file: reference/rocDecode-parser.rst
+        title: Parser API
+      - file: reference/rocDecode-hw-decoder.rst
+        title: Hardware decoder API
+      - file: reference/rocDecode-sw-decoder.rst
+        title: Software decoder API
+  - file: reference/rocDecode-logging-control.rst
+    title: Logging levels 
+  - file: reference/rocDecode-formats-and-architectures.rst
+    title: rocDecode supported codecs and architectures
+  - file: doxygen/html/files
+    title: rocDecode API library
+  - file: doxygen/html/globals
+    title: rocDecode functions
+  - file: doxygen/html/annotated
+    title: rocDecode data structures
+
+- caption: About
+  entries:
+  - file: license.md

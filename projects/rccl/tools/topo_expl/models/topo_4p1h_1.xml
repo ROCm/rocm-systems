@@ -1,0 +1,50 @@
+<!--
+ - Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+ - See LICENSE.txt for license information
+ -->
+<system version="2">
+  <cpu numaid="0" affinity="0003ff,f0003fff" arch="x86_64" vendor="GenuineIntel" familyid="6" modelid="85">
+    <pci busid="0000:18:00.0" class="0x060400" link_speed="8 GT/s" link_width="16">
+      <pci busid="0000:1a:00.0" class="0x038000" link_speed="16 GT/s" link_width="16">
+        <gpu dev="0" sm="64" gcn="906" arch="38911" rank="0" gdr="0">
+          <xgmi target="0000:3d:00.0" count="1" tclass="0x038000"/>
+          <xgmi target="0000:b1:00.0" count="1" tclass="0x038000"/>
+        </gpu>
+      </pci>
+    </pci>
+    <pci busid="0000:3b:00.0" class="0x060400" link_speed="8 GT/s" link_width="16">
+      <pci busid="0000:3d:00.0" class="0x038000" link_speed="16 GT/s" link_width="16">
+        <gpu dev="1" sm="64" gcn="906" arch="38911" rank="1" gdr="0">
+          <xgmi target="0000:1a:00.0" count="1" tclass="0x038000"/>
+          <xgmi target="0000:88:00.0" count="1" tclass="0x038000"/>
+        </gpu>
+      </pci>
+    </pci>
+    <pci busid="0000:01:00.0" class="0x020000" link_speed="8 GT/s" link_width="4">
+      <nic>
+        <net name="eno1" dev="0" speed="10000" port="0" guid="0x0" maxconn="65536" gdr="0"/>
+      </nic>
+    </pci>
+    <nic>
+      <net name="virbr0" dev="1" speed="10000" port="0" guid="0x1" maxconn="65536" gdr="0"/>
+    </nic>
+  </cpu>
+  <cpu numaid="1" affinity="fffc00,0fffc000" arch="x86_64" vendor="GenuineIntel" familyid="6" modelid="85">
+    <pci busid="0000:86:00.0" class="0x060400" link_speed="8 GT/s" link_width="16">
+      <pci busid="0000:88:00.0" class="0x038000" link_speed="16 GT/s" link_width="16">
+        <gpu dev="2" sm="64" gcn="906" arch="38911" rank="2" gdr="0">
+          <xgmi target="0000:3d:00.0" count="1" tclass="0x038000"/>
+          <xgmi target="0000:b1:00.0" count="1" tclass="0x038000"/>
+        </gpu>
+      </pci>
+    </pci>
+    <pci busid="0000:af:00.0" class="0x060400" link_speed="8 GT/s" link_width="16">
+      <pci busid="0000:b1:00.0" class="0x038000" link_speed="16 GT/s" link_width="16">
+        <gpu dev="3" sm="64" gcn="906" arch="38911" rank="3" gdr="0">
+          <xgmi target="0000:1a:00.0" count="1" tclass="0x038000"/>
+          <xgmi target="0000:88:00.0" count="1" tclass="0x038000"/>
+        </gpu>
+      </pci>
+    </pci>
+  </cpu>
+</system>

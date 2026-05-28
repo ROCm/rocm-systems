@@ -1,0 +1,27 @@
+/*! \mainpage RCCL Documentation
+
+\tableofcontents
+
+\section intro_sec Introduction
+
+RCCL (pronounced "Rickle") is a stand-alone library of standard collective communication routines for GPUs, implementing all-reduce, all-gather, reduce, broadcast, reduce-scatter, gather, scatter, and all-to-all. There is also initial support for direct GPU-to-GPU send and receive operations. It has been optimized to achieve high bandwidth on platforms using PCIe, xGMI as well as networking using InfiniBand Verbs or TCP/IP sockets. RCCL supports an arbitrary number of GPUs installed in a single node or multiple nodes, and can be used in either single- or multi-process (e.g., MPI) applications.
+
+The collective operations are implemented using ring and tree algorithms and have been optimized for throughput and latency. For best performance, small operations can be either batched into larger operations or aggregated through the API.
+
+\section API RCCL API Contents
+- @ref rccl_api_version
+- @ref rccl_result_code
+- @ref rccl_config_type
+- @ref rccl_api_communicator
+- @ref rccl_api_errcheck
+- @ref rccl_api_comminfo
+- @ref rccl_api_enumerations
+- @ref rccl_api_custom_redop
+- @ref rccl_collective_api
+- @ref rccl_group_api
+- @ref msccl_api
+
+\section Full RCCL API File
+- nccl.h.in
+
+*/

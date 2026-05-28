@@ -1,0 +1,46 @@
+defaults:
+  numbered: False
+root: index
+subtrees:
+- entries:
+  - file: what-is-rocJPEG.rst
+    title: What is rocJPEG?
+
+- caption: Install
+  entries:
+  - file: install/rocjpeg-prerequisites.rst
+    title: Installation prerequisites
+  - file: install/rocjpeg-package-install.rst
+    title: Installing with the package installer
+  - file: install/rocjpeg-build-and-install.rst
+    title: Building and installing from source code
+
+- caption: How to
+  entries:
+  - file: how-to/using-rocjpeg.rst
+    title: Use rocJPEG
+  - file: how-to/rocjpeg-retrieve-image-info.rst
+    title: Retrieve image information
+  - file: how-to/rocjpeg-decoding-a-jpeg-stream.rst
+    title: Decode a JPEG stream
+
+- caption: Samples
+  entries:
+  - url: https://github.com/ROCm/rocJPEG/tree/develop/samples
+    title: rocJPEG samples on GitHub
+
+    
+- caption: Reference
+  entries:
+  - file: reference/rocjpeg-formats-and-architectures.rst
+    title: Subsampling and hardware capabilities
+  - file: doxygen/html/files
+    title: API library
+  - file: doxygen/html/globals
+    title: Functions
+  - file: doxygen/html/annotated
+    title: Data structures
+
+- caption: About
+  entries:
+  - file: license.md
