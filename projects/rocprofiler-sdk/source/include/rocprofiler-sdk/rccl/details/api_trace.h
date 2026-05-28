@@ -47,7 +47,7 @@
 #define RCCL_API_TRACE_VERSION_MAJOR 0
 
 // should be increased every time new members are added to existing dispatch tables
-#define RCCL_API_TRACE_VERSION_PATCH 4
+#define RCCL_API_TRACE_VERSION_PATCH 5
 
 #if !defined(RCCL_EXTERN_C_INIT)
 #    ifdef __cplusplus
@@ -265,6 +265,14 @@ typedef ncclResult_t (*ncclAlltoAllv_fn_t)(const void*    sendbuff,
                                            ncclComm_t     comm,
                                            hipStream_t    stream);
 
+typedef ncclResult_t (*ncclCommSuspend_fn_t)(ncclComm_t comm, int flags);
+
+typedef ncclResult_t (*ncclCommResume_fn_t)(ncclComm_t comm);
+
+typedef ncclResult_t (*ncclCommMemStats_fn_t)(ncclComm_t        comm,
+                                              ncclCommMemStat_t stat,
+                                              uint64_t*         value);
+
 typedef struct rcclApiFuncTable
 {
     uint64_t                      size;
@@ -312,6 +320,9 @@ typedef struct rcclApiFuncTable
     ncclAlltoAll_fn_t             ncclAlltoAll_fn;
     ncclAlltoAllv_fn_t            ncclAlltoAllv_fn;
     ncclCommRevoke_fn_t           ncclCommRevoke_fn;
+    ncclCommSuspend_fn_t          ncclCommSuspend_fn;
+    ncclCommResume_fn_t           ncclCommResume_fn;
+    ncclCommMemStats_fn_t         ncclCommMemStats_fn;
 } rcclApiFuncTable;
 
 RCCL_EXTERN_C_FINI

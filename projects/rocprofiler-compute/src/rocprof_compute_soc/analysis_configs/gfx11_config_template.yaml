@@ -1,0 +1,220 @@
+latest_arch: gfx1151
+panels:
+- file: top_stats.yaml
+  panel_id: 0
+  panel_title: Top Stats
+  panel_alias: topstats
+  data_sources:
+  - type: raw_csv_table
+    id: 1
+    title: Top Kernels
+  - type: raw_csv_table
+    id: 2
+    title: Dispatch List
+- file: system_info.yaml
+  panel_id: 1
+  panel_title: System Info
+  panel_alias: sysinfo
+  data_sources:
+  - type: raw_csv_table
+    id: 1
+    title: System Info
+- file: system_speed_of_light.yaml
+  panel_id: 2
+  panel_title: System Speed-of-Light
+  panel_alias: sol
+  data_sources:
+  - type: metric_table
+    id: 1
+    title: System Speed-of-Light
+- file: memory_chart.yaml
+  panel_id: 3
+  panel_title: Memory Chart
+  panel_alias: memchart
+  data_sources:
+  - type: metric_table
+    id: 1
+    title: Instruction Cache
+  - type: metric_table
+    id: 2
+    title: Scalar Data Cache
+  - type: metric_table
+    id: 3
+    title: TCP Cache (GL0 Vector Cache)
+  - type: metric_table
+    id: 4
+    title: LDS (Local Data Share)
+  - type: metric_table
+    id: 5
+    title: TCP-GL1 Interface
+  - type: metric_table
+    id: 6
+    title: GL1 Cache (L1)
+  - type: metric_table
+    id: 7
+    title: GL1-GL2 Interface
+  - type: metric_table
+    id: 8
+    title: GL2 Cache (L2)
+  - type: metric_table
+    id: 9
+    title: Graphics Core Efficiency Arbiter (GCEA) to System Memory
+- file: roofline.yaml
+  panel_id: 4
+  panel_title: Roofline
+  panel_alias: roof
+  data_sources:
+  - type: metric_table
+    id: 1
+    title: Roofline Performance Rates
+  - type: metric_table
+    id: 2
+    title: Roofline Plot Points
+- file: command_processor_cpc.yaml
+  panel_id: 5
+  panel_title: Command Processor Compute (CPC)
+  panel_alias: cpc
+  data_sources:
+  - type: metric_table
+    id: 1
+    title: CPC Utilization
+  - type: metric_table
+    id: 2
+    title: CPC Interface Utilization
+  - type: metric_table
+    id: 3
+    title: MEC Stall Cycles
+  - type: metric_table
+    id: 4
+    title: CPC Memory Requests
+  - type: metric_table
+    id: 5
+    title: MEC Instruction Cache
+- file: workgroup_manager_spi.yaml
+  panel_id: 6
+  panel_title: Workgroup Manager (SPI)
+  panel_alias: spi
+  data_sources:
+  - type: metric_table
+    id: 1
+    title: SPI Utilization
+  - type: metric_table
+    id: 2
+    title: Wave Dispatch Statistics
+- file: workgroup_processor.yaml
+  panel_id: 7
+  panel_title: Workgroup Processor (WGP)
+  panel_alias: wgp
+  data_sources:
+  - type: metric_table
+    id: 1
+    title: Utilization
+  - type: metric_table
+    id: 2
+    title: Wavefront Launch Stats
+  - type: metric_table
+    id: 3
+    title: Wave Dispatch
+  - type: metric_table
+    id: 4
+    title: Wave Life
+  - type: metric_table
+    id: 5
+    title: Wave Instruction Mix
+  - type: metric_table
+    id: 6
+    title: VMEM Instruction Mix
+  - type: metric_table
+    id: 7
+    title: LDS Instruction Mix
+  - type: metric_table
+    id: 9
+    title: Wait State Analysis
+  - type: metric_table
+    id: 10
+    title: Instruction Cache
+  - type: metric_table
+    id: 11
+    title: Scalar Data Cache
+- file: l0_cache.yaml
+  panel_id: 9
+  panel_title: GL0 Cache (TCP Cache)
+  panel_alias: gl0
+  data_sources:
+  - type: metric_table
+    id: 1
+    title: GL0 Utilization
+  - type: metric_table
+    id: 2
+    title: GL0 Request Statistics
+  - type: metric_table
+    id: 3
+    title: GL0 Cache Performance
+  - type: metric_table
+    id: 4
+    title: GL0-GL1 Interface
+  - type: metric_table
+    id: 5
+    title: GL0 Stalls
+- file: l1_cache.yaml
+  panel_id: 11
+  panel_title: GL1 Cache (L1)
+  panel_alias: gl1
+  data_sources:
+  - type: metric_table
+    id: 1
+    title: GL1 Cache Utilization
+  - type: metric_table
+    id: 2
+    title: GL1 Cache Request Statistics
+  - type: metric_table
+    id: 3
+    title: GL1 Cache Performance
+  - type: metric_table
+    id: 4
+    title: GL1-GL2 Interface
+  - type: metric_table
+    id: 5
+    title: GL1 Cache Stalls
+- file: l2_cache.yaml
+  panel_id: 13
+  panel_title: GL2 Cache (L2)
+  panel_alias: gl2
+  data_sources:
+  - type: metric_table
+    id: 1
+    title: GL2 Cache Performance
+  - type: metric_table
+    id: 2
+    title: GL2 Cache Request Statistics
+  - type: metric_table
+    id: 3
+    title: GL2 Cache Bandwidth
+- file: graphics_core_efficiency_arbiter.yaml
+  panel_id: 14
+  panel_title: Graphics Core Efficiency Arbiter (GCEA)
+  panel_alias: gcea
+  data_sources:
+  - type: metric_table
+    id: 1
+    title: DRAM Read Interface
+  - type: metric_table
+    id: 2
+    title: DRAM Write Interface
+  - type: metric_table
+    id: 4
+    title: System Arbiter (SARB)
+  - type: metric_table
+    id: 5
+    title: Return Interface
+- file: graphics_register_bus_manager.yaml
+  panel_id: 17
+  panel_title: Graphics Register Bus Manager (GRBM)
+  panel_alias: grbm
+  data_sources:
+  - type: metric_table
+    id: 1
+    title: GPU Utilization
+  - type: metric_table
+    id: 2
+    title: Shader Engine Utilization

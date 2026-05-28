@@ -64,10 +64,6 @@ __host__ GDAContext::GDAContext(Backend *b, unsigned int ctx_id)
                       num_qps * sizeof(QueuePair),
                       hipMemcpyDefault));
 
-  for (uint32_t i = 0; i < num_qps; i++) {
-    qps[i].base_heap = base_heap;
-  }
-
   ipcImpl_.ipc_bases = backend->ipcImpl.ipc_bases;
   ipcImpl_.shm_size = backend->ipcImpl.shm_size;
   ipcImpl_.shm_rank = backend->ipcImpl.shm_rank;
@@ -622,6 +618,16 @@ __device__ void GDAContext::internal_getmem_nbi_wave(void *dest, const void *sou
     uint64_t L_offset = const_cast<char *>(src_typed) - base_heap[my_pe];
     qps[qp_index].get_nbi(dest, base_heap[pe] + L_offset, nelems, pe, wf_info);
   }
+}
+
+/******************************************************************************
+ **************** TILE API STUB IMPLEMENTATION (NOT IMPLEMENTED) **************
+ *****************************************************************************/
+
+__device__ int GDAContext::tile_collective_wait([[maybe_unused]] rocshmem_team_t team,
+                                                 [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
 }
 
 }  // namespace rocshmem

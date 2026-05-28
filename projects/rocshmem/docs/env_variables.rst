@@ -172,6 +172,16 @@ control the behavior of rocSHMEM.
       - ``1``
       - Number of QPs per PE for each user context.
 
+
+    * - | ``ROCSHMEM_GDA_NUM_USER_BUFFERS``
+        | GDA supports ``rocshmem_buffer_register`` and ``rocshmem_buffer_unregister``
+        | for user buffers. This variable sets the number of user buffers an
+        | application may register when using the GDA backend.
+        | If the application uses more user buffers than what is defined with
+        | this variable, then the behavior is undefined.
+      - ``4``
+      - Maximum number of user buffer registrations for GDA
+
     * - | ``ROCSHMEM_MAX_WF_BUFFERS``
         | Maximum number of wavefront buffer arrays in default context (determines size of status, return, and atomic return buffers)
       - ``1024``

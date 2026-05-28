@@ -46,10 +46,17 @@ endif()
 set(HPC_EXAMPLE_NAME "matrix-exponential-streams-sync-hip")
 add_executable(${HPC_EXAMPLE_NAME} mat_exp.cpp)
 
+# Derive the rocblas include directory from the library path so that the
+# compiler can find <rocblas/rocblas.h> regardless of which ROCm tree the
+# library was found in (system /opt/rocm vs TheRock dist).
+get_filename_component(_rocblas_lib_dir "${ROCBLAS_LIBRARY}" DIRECTORY)
+get_filename_component(_rocblas_prefix "${_rocblas_lib_dir}" DIRECTORY)
+
 target_compile_options(
     ${HPC_EXAMPLE_NAME}
     PRIVATE ${OpenMP_CXX_FLAGS} -Wno-vla-cxx-extension
 )
+target_include_directories(${HPC_EXAMPLE_NAME} PRIVATE "${_rocblas_prefix}/include")
 target_link_options(${HPC_EXAMPLE_NAME} PRIVATE -fopenmp)
 target_link_libraries(${HPC_EXAMPLE_NAME} PRIVATE ${ROCBLAS_LIBRARY} ${ROCTX_SDK_LIBRARY})
 
