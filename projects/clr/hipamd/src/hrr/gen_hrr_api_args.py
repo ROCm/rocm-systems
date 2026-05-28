@@ -71,7 +71,7 @@ Contains:
 import argparse
 import re
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -133,10 +133,6 @@ MANUAL_APIS = MANUAL_CAPTURE_APIS
 PASSTHROUGH_ONLY: Set[str] = {
     "hipModuleGetFunction",
 }
-
-# APIs where the generated shim writes event BEFORE calling real fn
-# (so we capture input args even if the call fails; default is AFTER)
-PRE_CALL_APIS: Set[str] = set()
 
 # ---------------------------------------------------------------------------
 # Playback manual APIs — implemented by hand in hip_playback.cpp
