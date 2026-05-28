@@ -645,6 +645,19 @@ TEST(VAddSimdBenchmark, Cdna4_VCeilF16_Vop3) {
   run_words("v_ceil_f16_e64 v2, v0", w0, w1, /*sanitize_finite=*/false);
 }
 
+// v_div_fmas_f32_e64 v6, v0, v1, v2  (CDNA4 VOP3 opcode 482) — fma(s0,s1,s2)
+// followed by a VCC-bit-gated ldexp(result, 32); no omod/clamp. Tests the
+// new try_execute_div_fmas_f32_simd glue and its VCC input-mask path.
+TEST(VAddSimdBenchmark, Cdna4_VDivFmasF32_Vop3) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  uint32_t w0 = (6u) | ((482u & 0x3FF) << 16) | (0x34u << 26);
+  uint32_t w1 = 256u | (1u << 9) | (2u << 18); // src0=v0 src1=v1 src2=v2
+  run_words("v_div_fmas_f32_e64 v6, v0, v1, v2", w0, w1, /*sanitize_finite=*/true);
+}
+
 // v_cndmask_b32_e64 v2, v0, v1, vcc  (CDNA4 VOP3 opcode 256) — VOP3 form of
 // the VCC-driven select; selector is an SGPR-pair operand (src2=VCC=106), so
 // the path is bit-identical to the VOP2 form. No modifiers applied by scalar.
