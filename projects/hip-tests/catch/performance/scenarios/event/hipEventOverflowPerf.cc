@@ -35,7 +35,7 @@ void rocm_null_gpu_job(void* stream) {
 std::vector<std::vector<hipStream_t>> stream_pool;
 std::atomic<int> counter(0);
 bool do_kill = false;
-std::chrono::system_clock::time_point thread_reports[16];
+std::vector<std::chrono::system_clock::time_point> thread_reports;
 void thread_job(int dev, int virt) {
   HIP_CHECK_PERF(hipSetDevice(dev));  // use dev
   uint8_t* mem;
@@ -96,7 +96,7 @@ HIP_TEST_CASE(Performance_hipEventOverflow) {
   HIP_CHECK_PERF(hipGetDeviceCount(&mgpu));
   stream_pool.resize(mgpu);
   HIP_CHECK_PERF(hipSetDeviceFlags(hipDeviceScheduleSpin));
-  std::vector<uint8_t*> memory_buffers[2];
+  std::vector<std::vector<uint8_t*>> memory_buffers(mgpu);
   for (int i = 0; i < mgpu; i++) {
     HIP_CHECK_PERF(hipSetDevice(i));
     stream_pool[i].resize(12);
@@ -106,6 +106,7 @@ HIP_TEST_CASE(Performance_hipEventOverflow) {
     for (int j = 0; j < 128; j++)
       HIP_CHECK_PERF(hipMalloc(&memory_buffers[i][j], 4096 * ((j & 1) + 1)));
   }
+  thread_reports.resize(mgpu * 4);
   for (int nDev = 1; nDev <= mgpu; nDev++) {
     counter = 0;
     printf("RUNNING ON %d DEVICES\n", nDev);
@@ -140,6 +141,11 @@ HIP_TEST_CASE(Performance_hipEventOverflow) {
       HIP_CHECK_PERF(hipSetDevice(i));
       HIP_CHECK_PERF(hipDeviceSynchronize());
     }
+  }
+  for (int i = 0; i < mgpu; i++) {
+    HIP_CHECK_PERF(hipSetDevice(i));
+    for (auto* buf : memory_buffers[i]) HIP_CHECK_PERF(hipFree(buf));
+    for (auto s : stream_pool[i]) HIP_CHECK_PERF(hipStreamDestroy(s));
   }
 }
 /**
