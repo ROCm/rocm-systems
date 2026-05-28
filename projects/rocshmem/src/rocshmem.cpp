@@ -1702,7 +1702,7 @@ __host__ int rocshmem_test(T *ivars, int cmp, T val) {
   }
 
 #define REDUCTION_ON_STREAM_IMP_GEN(T, TNAME, Op, Op_API) \
-    int rocshmem_ctx_##TNAME##_##Op##_reduce_on_stream(rocshmem_ctx_t ctx, rocshmem_team_t team, \ 
+    int rocshmem_ctx_##TNAME##_##Op##_reduce_on_stream(rocshmem_ctx_t ctx, rocshmem_team_t team, \
       T *dest, const T *source, size_t nreduce, hipStream_t stream){                             \
       return get_internal_ctx(ctx)->reduce_on_stream<T, Op_API>(team, dest, source,              \
         static_cast<int>(nreduce), stream);                                                      \
@@ -1881,22 +1881,6 @@ INT_REDUCTION_ON_STREAM_GEN_IMP(int, int)
 INT_REDUCTION_ON_STREAM_GEN_IMP(long, long)
 INT_REDUCTION_ON_STREAM_GEN_IMP(long long, longlong)
 INT_REDUCTION_ON_STREAM_GEN_IMP(short, short)
-INT_REDUCTION_ON_STREAM_GEN_IMP(char, char)
-INT_REDUCTION_ON_STREAM_GEN_IMP(int8_t, int8)
-INT_REDUCTION_ON_STREAM_GEN_IMP(int16_t, int16)
-INT_REDUCTION_ON_STREAM_GEN_IMP(int32_t, int32)
-INT_REDUCTION_ON_STREAM_GEN_IMP(int64_t, int64)
-INT_REDUCTION_ON_STREAM_GEN_IMP(unsigned int, uint)
-INT_REDUCTION_ON_STREAM_GEN_IMP(unsigned long, ulong)
-INT_REDUCTION_ON_STREAM_GEN_IMP(unsigned long long, ulonglong)
-INT_REDUCTION_ON_STREAM_GEN_IMP(unsigned short, ushort)
-INT_REDUCTION_ON_STREAM_GEN_IMP(signed char, schar)
-INT_REDUCTION_ON_STREAM_GEN_IMP(unsigned char, uchar)
-INT_REDUCTION_ON_STREAM_GEN_IMP(uint8_t, uint8)
-INT_REDUCTION_ON_STREAM_GEN_IMP(uint16_t, uint16)
-INT_REDUCTION_ON_STREAM_GEN_IMP(uint32_t, uint32)
-INT_REDUCTION_ON_STREAM_GEN_IMP(uint64_t, uint64)
-INT_REDUCTION_ON_STREAM_GEN_IMP(size_t, size)
 
 FLOAT_REDUCTION_ON_STREAM_GEN_IMP(float, float)
 FLOAT_REDUCTION_ON_STREAM_GEN_IMP(double, double)
