@@ -342,11 +342,17 @@ static void initPluginLibsOnceFunc() {
     } else {
 #endif
       netPluginLibs[pluginCounter].ncclNet = &ncclNetIb;
-      // [RCCL] NCCL 2.29.7 moved GIN/RMA plugin selection (and the
-      // NCCL_GIN_TYPE param) into plugin/gin.cc::initGinPluginLibsOnceFunc().
-      // Leaving the ncclGin / ncclRma fields zero-initialised here is
-      // intentional: plugin/gin.cc owns them now.
+      netPluginLibs[pluginCounter].ncclGin = NULL;
+      if (ncclParamGinType() == -1)
+        netPluginLibs[pluginCounter].ncclGin = (ncclGin_t *)-1;
+      else if (ncclParamGinType() == NCCL_NET_DEVICE_GIN_PROXY)
+        netPluginLibs[pluginCounter].ncclGin = &ncclGinIbProxy;
+#if !defined(__HIP_PLATFORM_AMD__)
+      else if (ncclParamGinType() == NCCL_NET_DEVICE_GIN_GDAKI)
+        netPluginLibs[pluginCounter].ncclGin = &ncclGinIbGdaki;
+#endif
       netPluginLibs[pluginCounter].ncclNetPluginState = ncclNetPluginStateInitReady;
+      netPluginLibs[pluginCounter].ncclGinPluginState = netPluginLibs[pluginCounter].ncclGin ? ncclNetPluginStateInitReady : ncclNetPluginStateLoadFailed;
       ++pluginCounter;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
     }
