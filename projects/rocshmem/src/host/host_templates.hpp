@@ -335,7 +335,8 @@ __host__ T HostInterface::amo_fetch_add(void* dst, T value, int pe,
     hdp_policy_->hdp_flush();
     uint64_t u_val{}, u_ret{};
     std::memcpy(&u_val, &value, sizeof(T));
-    u_ret = ipc_amo_fetch_add(dst, u_val, sizeof(T) == 4);
+    u_ret = ipc_amo_fetch_add(dst, u_val, sizeof(T) == 4,
+                               window_info->get_ipc_staging_buf());
     T ret{};
     std::memcpy(&ret, &u_ret, sizeof(T));
     return ret;
@@ -374,7 +375,8 @@ __host__ T HostInterface::amo_fetch_cas(void* dst, T value, T cond, int pe,
     uint64_t u_val{}, u_cond{}, u_ret{};
     std::memcpy(&u_val, &value, sizeof(T));
     std::memcpy(&u_cond, &cond, sizeof(T));
-    u_ret = ipc_amo_fetch_cas(dst, u_cond, u_val, sizeof(T) == 4);
+    u_ret = ipc_amo_fetch_cas(dst, u_cond, u_val, sizeof(T) == 4,
+                               window_info->get_ipc_staging_buf());
     T ret{};
     std::memcpy(&ret, &u_ret, sizeof(T));
     return ret;

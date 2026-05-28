@@ -47,9 +47,15 @@ __host__ HostContextWindowInfo::HostContextWindowInfo(MPI_Comm comm_world,
 __host__ HostContextWindowInfo::HostContextWindowInfo(SymmetricHeap* heap) {
   window_info_ =
       new WindowInfo(heap->get_local_heap_base(), heap->get_size());
+  CHECK_HIP(hipExtMallocWithFlags(
+      reinterpret_cast<void**>(&window_info_->ipc_staging_buf_),
+      sizeof(uint64_t), hipDeviceMallocFinegrained));
 }
 
 __host__ HostContextWindowInfo::~HostContextWindowInfo() {
+  if (window_info_->ipc_staging_buf_ != nullptr) {
+    CHECK_HIP(hipFree(window_info_->ipc_staging_buf_));
+  }
   delete window_info_;
 }
 
@@ -161,12 +167,6 @@ __host__ HostInterface::HostInterface(HdpPolicy* hdp_policy,
    */
   hdp_policy_ = hdp_policy;
 
-  /* Fine-grain staging buffer: GPU kernel writes the AMO result here;
-   * CPU reads it directly after hipDeviceSynchronize (no hipMemcpy needed). */
-  CHECK_HIP(hipExtMallocWithFlags(reinterpret_cast<void**>(&ipc_staging_buf_),
-                                  sizeof(uint64_t),
-                                  hipDeviceMallocFinegrained));
-
   /*
    * Allocate and initialize pool of windows for contexts
    */
@@ -204,9 +204,6 @@ __host__ HostInterface::~HostInterface() {
     mpilib_ftable_.Comm_free(&host_comm_world_);
   }
 
-  if (ipc_staging_buf_ != nullptr) {
-    CHECK_HIP(hipFree(ipc_staging_buf_));
-  }
 }
 
 __host__ void HostInterface::putmem_nbi(void* dest, const void* source,
@@ -535,38 +532,40 @@ __global__ static void ipc_amo_fetch_cas_64_kernel(unsigned long long* dst,
 
 __host__ uint64_t HostInterface::ipc_amo_fetch_add(void* dst,
                                                    uint64_t val,
-                                                   bool is_32bit) {
+                                                   bool is_32bit,
+                                                   uint64_t* staging_buf) {
   if (is_32bit) {
     uint32_t u_val = static_cast<uint32_t>(val);
     ipc_amo_fetch_add_32_kernel<<<1, 1>>>(reinterpret_cast<uint32_t*>(dst),
                                           u_val,
-                                          reinterpret_cast<uint32_t*>(ipc_staging_buf_));
+                                          reinterpret_cast<uint32_t*>(staging_buf));
   } else {
     ipc_amo_fetch_add_64_kernel<<<1, 1>>>(reinterpret_cast<unsigned long long*>(dst),
                                           static_cast<unsigned long long>(val),
-                                          reinterpret_cast<unsigned long long*>(ipc_staging_buf_));
+                                          reinterpret_cast<unsigned long long*>(staging_buf));
   }
   CHECK_HIP(hipDeviceSynchronize());
-  return *ipc_staging_buf_;
+  return *staging_buf;
 }
 
 __host__ uint64_t HostInterface::ipc_amo_fetch_cas(void* dst,
                                                    uint64_t cond,
                                                    uint64_t val,
-                                                   bool is_32bit) {
+                                                   bool is_32bit,
+                                                   uint64_t* staging_buf) {
   if (is_32bit) {
     ipc_amo_fetch_cas_32_kernel<<<1, 1>>>(reinterpret_cast<uint32_t*>(dst),
                                           static_cast<uint32_t>(cond),
                                           static_cast<uint32_t>(val),
-                                          reinterpret_cast<uint32_t*>(ipc_staging_buf_));
+                                          reinterpret_cast<uint32_t*>(staging_buf));
   } else {
     ipc_amo_fetch_cas_64_kernel<<<1, 1>>>(reinterpret_cast<unsigned long long*>(dst),
                                           static_cast<unsigned long long>(cond),
                                           static_cast<unsigned long long>(val),
-                                          reinterpret_cast<unsigned long long*>(ipc_staging_buf_));
+                                          reinterpret_cast<unsigned long long*>(staging_buf));
   }
   CHECK_HIP(hipDeviceSynchronize());
-  return *ipc_staging_buf_;
+  return *staging_buf;
 }
 
 }  // namespace rocshmem

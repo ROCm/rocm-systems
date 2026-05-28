@@ -125,6 +125,15 @@ class WindowInfo {
     return reinterpret_cast<ptrdiff_t>(reinterpret_cast<char*>(const_cast<void*>(dest)) - reinterpret_cast<char*>(win_start_));
   }
 
+ /**
+  * @brief Per-context staging buffer for IPC non-MPI GPU atomic operations.
+  * Allocated by HostContextWindowInfo for the non-MPI path; null otherwise.
+  * Each context owns its own staging buffer to avoid races between contexts.
+  */
+  uint64_t* ipc_staging_buf_{nullptr};
+
+  uint64_t* get_ipc_staging_buf() const { return ipc_staging_buf_; }
+
  protected:
   /**
    * @brief Raw pointer marking the start of window
