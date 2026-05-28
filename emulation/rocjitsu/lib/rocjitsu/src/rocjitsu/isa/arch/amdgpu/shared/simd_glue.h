@@ -1065,6 +1065,40 @@ template <typename Inst, typename CmpOp>
   return false;
 }
 
+/// VOP3 integer/bitwise ternary SIMD fast path. Reads `src0`/`src1`/`src2`,
+/// runs `tern_op(a, b, c)`, and masked-stores the result. The generated scalar
+/// bodies for these ternary integer ops apply no source/result modifiers (abs/
+/// neg/omod are float-only; clamp is unused on integer 3-source ops), so the
+/// plain functor is bit-identical to the scalar body. T is a 32-bit integer
+/// lane type (typically uint32_t). Same SIMD-capable / EXEC-chunk loop as the
+/// binary VOP3 path.
+template <typename T, typename Inst, typename TernOp>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_ternary_vop3_simd(Inst &inst, Wavefront &wf, TernOp tern_op) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+    return false;
+  constexpr std::size_t W = util::native_width_v<T>;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto a = read_simd<T>(inst.src0, wf, base);
+    const auto b = read_simd<T>(inst.src1, wf, base);
+    const auto c = read_simd<T>(inst.src2, wf, base);
+    write_simd<T>(inst.vdst, wf, base, tern_op(a, b, c), chunk);
+  }
+  return true;
+}
+
+/// Unconstrained fallback for the VOP3 integer ternary path; see binary-path note.
+template <typename T, typename Inst, typename TernOp>
+[[nodiscard]] inline bool try_execute_ternary_vop3_simd(Inst &, Wavefront &, TernOp) {
+  return false;
+}
+
 /// VOP3 f32 unary SIMD fast path. Reads `src0` as f32, applies the src0 abs/neg
 /// modifiers, runs `un_op` (`native<float> -> native<float>`), then applies the
 /// result omod/clamp — the scalar body's order (abs->neg, op, omod->clamp). Tin
@@ -1253,6 +1287,12 @@ template <typename Tin, typename Tout, typename Inst, typename UnOp>
 /// and is variadic so its commas pass through.
 #define ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64(...)                                                    \
   if (::rocjitsu::amdgpu::try_execute_vopc64_vop3_fp64_simd(inst, wf, __VA_ARGS__))                \
+  return
+
+/// VOP3 integer/bitwise ternary counterpart (reads src0/src1/src2, no
+/// modifiers). `T` is the 32-bit integer lane type; variadic in the functor.
+#define ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(T, ...)                                                 \
+  if (::rocjitsu::amdgpu::try_execute_ternary_vop3_simd<T>(inst, wf, __VA_ARGS__))                 \
   return
 
 #endif // ROCJITSU_ISA_AMDGPU_SHARED_SIMD_GLUE_H_

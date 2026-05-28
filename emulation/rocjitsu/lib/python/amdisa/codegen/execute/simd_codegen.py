@@ -1152,6 +1152,53 @@ def _build_simd_vopc_vop3_f64() -> dict[str, str]:
 SIMD_VOPC_VOP3_F64: dict[str, str] = _build_simd_vopc_vop3_f64()
 
 
+# --- VOP3 integer/bitwise ternary (3-source) -------------------------------
+#
+# A handful of integer 3-source VOP3 ops are plain element-wise functions of
+# (src0, src1, src2) with no modifiers and no widening: routed through
+# try_execute_ternary_vop3_simd<T>. Functor sig: `(native<T> a, native<T> b,
+# native<T> c) -> native<T>`. Excluded from this table: the float ternary
+# family (fma/mad/mad_mix — needs modifier glue), med3/min3/max3 (NaN /
+# signed-integer-vs-fmin semantics — see project_pr6470_review_findings), the
+# bfe ops (branchy mask), the byte-permute ops (perm/alignbyte/lerp/sad/msad —
+# byte-wise / table-driven), and 64-bit-lane ternary (would need a 64-bit
+# ternary glue).
+SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
+    "v_add3_u32_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) { return a + b + c; }",
+    ),
+    "v_or3_b32_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) { return a | b | c; }",
+    ),
+    "v_xor3_b32_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) { return a ^ b ^ c; }",
+    ),
+    # The shift count is masked to the low 5 bits to match the scalar body's
+    # x86 `shl` semantics (which mask cl to 5 bits) — stdx's `<<` on native<u32>
+    # lowers to vpsllvd, which zeros out lanes where the count is >= 32 rather
+    # than masking, so SIMD without the explicit `& 31u` diverges from scalar
+    # whenever src1 (or src2 below) is >= 32 (verified empirically on the test
+    # value 0x80000000). The scalar body's `<<` is C++ UB at those counts; the
+    # masked SIMD form reproduces the x86 scalar result for every value of the
+    # shift operand on this host.
+    "v_lshl_add_u32_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) { return (a << (b & 31u)) + c; }",
+    ),
+    "v_add_lshl_u32_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) { return (a + b) << (c & 31u); }",
+    ),
+    "v_bfi_b32_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) { return (a & b) | (~a & c); }",
+    ),
+}
+
+
 def simd_probe_line(template_name: str) -> str | None:
     """Return the SIMD fast-path probe block for a kernel, or None."""
     if template_name in SIMD_VOP2_CNDMASK:
@@ -1236,6 +1283,12 @@ def simd_probe_line(template_name: str) -> str | None:
     specvopcv3f64 = SIMD_VOPC_VOP3_F64.get(template_name)
     if specvopcv3f64 is not None:
         return f"  ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64({specvopcv3f64});"
+    # VOP3 integer/bitwise ternary ops (add3/or3/xor3/lshl_add/add_lshl/bfi).
+    # Plain element-wise functor of (src0, src1, src2); no modifiers.
+    spec3tern = SIMD_VOP3_TERNARY_INT.get(template_name)
+    if spec3tern is not None:
+        cpp_t, cpp_op = spec3tern
+        return f"  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT({cpp_t}, {cpp_op});"
     # VOP3-encoded twins of the SIMD VOP2 binary ops. Same operator/lane type;
     # the VOP3 form reads src0/src1 and carries abs/neg/omod/clamp modifiers.
     # f32 ops apply the modifiers in-vector (bit-exact); integer/bitwise ops
