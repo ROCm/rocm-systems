@@ -241,6 +241,46 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
 # correctly-rounded IEEE operations (div, sqrt, and — verified per toolchain
 # via the parity test — exp2/log2). NaN/clamp-bearing conversions and the
 # inexact transcendentals (sin/cos) are excluded.
+# VOP1 base mnemonics whose VOP3 form applies float abs/neg/omod/clamp modifiers
+# over an f32 source and result (so the VOP3 twin routes through the f32 unary
+# modifier glue rather than reusing the plain VOP1 path).
+#
+# NOTE: v_mov_b32 is deliberately excluded. Its generated VOP3 scalar body
+# returns the (modified) f32 value directly to write_lane (a uint32 sink) without
+# a bit_cast, so it truncates float->int (0.5->0) instead of moving the bits — a
+# scalar codegen quirk we cannot match with a bit-preserving SIMD path, so the
+# VOP3 form is left scalar.
+_VOP3_UNARY_FP_F32 = {
+    "v_floor_f32",
+    "v_ceil_f32",
+    "v_trunc_f32",
+    "v_rndne_f32",
+    "v_fract_f32",
+    "v_rcp_f32",
+    "v_rcp_iflag_f32",
+    "v_rsq_f32",
+    "v_sqrt_f32",
+    "v_exp_f32",
+    "v_log_f32",
+}
+
+# VOP1 base mnemonics whose VOP3 twin stays scalar: the f16 rounding/transcendental
+# forms carry modifiers applied around an f16<->f32 round trip (not yet handled),
+# and v_mov_b32 has the float-truncation scalar quirk noted above.
+_VOP3_UNARY_SKIP = {
+    "v_mov_b32",
+    "v_floor_f16",
+    "v_ceil_f16",
+    "v_trunc_f16",
+    "v_rndne_f16",
+    "v_fract_f16",
+    "v_rcp_f16",
+    "v_rsq_f16",
+    "v_sqrt_f16",
+    "v_exp_f16",
+    "v_log_f16",
+}
+
 SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
     # --- bitwise / move (uint32, bit-identical) ---
     "v_mov_b32_vop1": ("uint32_t", "uint32_t", "[](auto a) { return a; }"),
@@ -1072,13 +1112,27 @@ def simd_probe_line(template_name: str) -> str | None:
     # f32 ops apply the modifiers in-vector (bit-exact); integer/bitwise ops
     # apply none (their scalar bodies ignore them), so the plain op suffices.
     if template_name.endswith("_vop3"):
-        vop2_twin = template_name[: -len("_vop3")] + "_vop2"
-        spec2v3 = SIMD_VOP2_BINARY.get(vop2_twin)
+        base = template_name[: -len("_vop3")]
+        spec2v3 = SIMD_VOP2_BINARY.get(base + "_vop2")
         if spec2v3 is not None:
             cpp_t, cpp_op = spec2v3
             if cpp_t == "float32_t":
                 return f"  ROCJITSU_TRY_SIMD_VOP3_BINARY_FP({cpp_t}, {cpp_op});"
             return f"  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT({cpp_t}, {cpp_op});"
+        # VOP3-encoded twins of the SIMD VOP1 unary ops. The plain int/cvt forms
+        # apply no modifiers and read the same src0/vdst operands as VOP1, so they
+        # reuse the VOP1 unary path verbatim. The f32 forms (and the float-domain
+        # v_mov_b32) carry abs/neg/omod/clamp and route through the f32 unary glue.
+        # The f16 forms also carry modifiers, but applying them around the f16<->f32
+        # round trip is not yet handled, so they are left scalar (_VOP3_UNARY_SKIP).
+        spec1v3 = SIMD_VOP1_UNARY.get(base + "_vop1")
+        if spec1v3 is not None:
+            cpp_tin, cpp_tout, cpp_op = spec1v3
+            if base in _VOP3_UNARY_SKIP:
+                return None
+            if base in _VOP3_UNARY_FP_F32:
+                return f"  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(float32_t, float32_t, {cpp_op});"
+            return f"  ROCJITSU_TRY_SIMD_VOP1_UNARY({cpp_tin}, {cpp_tout}, {cpp_op});"
     return None
 
 

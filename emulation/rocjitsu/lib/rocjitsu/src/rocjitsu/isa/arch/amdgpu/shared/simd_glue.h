@@ -837,6 +837,41 @@ template <typename T, typename Inst, typename BinOp>
   return false;
 }
 
+/// VOP3 f32 unary SIMD fast path. Reads `src0` as f32, applies the src0 abs/neg
+/// modifiers, runs `un_op` (`native<float> -> native<float>`), then applies the
+/// result omod/clamp — the scalar body's order (abs->neg, op, omod->clamp). Tin
+/// and Tout are both float32_t (the plain int/cvt unary VOP3 forms apply no
+/// modifiers and reuse the VOP1 unary path directly). The modifier helpers are
+/// bit-exact, so the fast path stays correct with modifiers set; no bail.
+template <typename Tin, typename Tout, typename Inst, typename UnOp>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_unary_vop3_fp_simd(Inst &inst, Wavefront &wf, UnOp un_op) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.vdst.simd_capable())
+    return false;
+  const uint32_t abs = inst.inst_.abs;
+  const uint32_t neg = inst.inst_.neg;
+  const uint32_t omod = inst.inst_.omod;
+  const uint32_t clamp = inst.inst_.clamp;
+  constexpr std::size_t W = util::native_width_v<Tout>;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto a = apply_vop3_src_mod_f32<0>(read_simd<Tin>(inst.src0, wf, base), abs, neg);
+    const auto r = apply_vop3_dst_mod_f32(un_op(a), omod, clamp);
+    write_simd<Tout>(inst.vdst, wf, base, r, chunk);
+  }
+  return true;
+}
+
+/// Unconstrained fallback for the VOP3 f32 unary path.
+template <typename Tin, typename Tout, typename Inst, typename UnOp>
+[[nodiscard]] inline bool try_execute_unary_vop3_fp_simd(Inst &, Wavefront &, UnOp) {
+  return false;
+}
+
 } // namespace amdgpu
 } // namespace rocjitsu
 
@@ -947,6 +982,12 @@ template <typename T, typename Inst, typename BinOp>
 /// `T` is the 32-bit float lane type; variadic in the functor.
 #define ROCJITSU_TRY_SIMD_VOP3_BINARY_FP(T, ...)                                                   \
   if (::rocjitsu::amdgpu::try_execute_binary_vop3_fp_simd<T>(inst, wf, __VA_ARGS__))               \
+  return
+
+/// VOP3 f32 unary counterpart (reads src0, applies abs/neg/omod/clamp). `Tin`
+/// and `Tout` are both float32_t; variadic in the functor.
+#define ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(Tin, Tout, ...)                                            \
+  if (::rocjitsu::amdgpu::try_execute_unary_vop3_fp_simd<Tin, Tout>(inst, wf, __VA_ARGS__))        \
   return
 
 #endif // ROCJITSU_ISA_AMDGPU_SHARED_SIMD_GLUE_H_
