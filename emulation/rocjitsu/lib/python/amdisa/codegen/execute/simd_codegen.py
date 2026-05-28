@@ -782,6 +782,12 @@ SIMD_VOP2_CNDMASK: set[str] = {
     "v_cndmask_b32_vop2",
 }
 
+# VOP3 form of v_cndmask_b32: same per-lane select, but the 64-bit selector is
+# read from the SGPR-pair `src2` instead of VCC. Also fixed-op / functorless.
+SIMD_VOP3_CNDMASK: set[str] = {
+    "v_cndmask_b32_vop3",
+}
+
 
 # --- VOPC compare -> VCC ---------------------------------------------------
 #
@@ -1232,6 +1238,14 @@ SIMD_VOP3_BINARY_INT_EXTRA: dict[str, tuple[str, str]] = {
         "uint32_t",
         "[](auto a, auto b) { return ((util::native<uint32_t>(1u) << (a & 31u)) - 1u) << (b & 31u); }",
     ),
+    # v_pack_b32_f16: pack two f16 halves into a b32. low16(src0) into the low
+    # half, low16(src1) into the high half. The scalar body applies no abs/neg
+    # despite the f16 typing (it pre-masks the operands to 16 bits before the
+    # shift), and clamp/omod are likewise unused. Pure integer bit-pack.
+    "v_pack_b32_f16_vop3": (
+        "uint32_t",
+        "[](auto a, auto b) { return (a & 0xFFFFu) | ((b & 0xFFFFu) << 16); }",
+    ),
 }
 
 
@@ -1480,6 +1494,8 @@ def simd_probe_line(template_name: str) -> str | None:
     """Return the SIMD fast-path probe block for a kernel, or None."""
     if template_name in SIMD_VOP2_CNDMASK:
         return "  ROCJITSU_TRY_SIMD_VOP2_CNDMASK();"
+    if template_name in SIMD_VOP3_CNDMASK:
+        return "  ROCJITSU_TRY_SIMD_VOP3_CNDMASK();"
     spec2 = SIMD_VOP2_BINARY.get(template_name)
     if spec2 is not None:
         cpp_t, cpp_op = spec2

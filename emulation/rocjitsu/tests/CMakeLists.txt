@@ -79,6 +79,7 @@ add_executable(
     vop3_fp64_simd_correctness_test.cpp
     vop3_fp16_unary_simd_correctness_test.cpp
     vop3_fp16_transcendental_simd_correctness_test.cpp
+    vop3_cndmask_pack_simd_correctness_test.cpp
     vop3_ternary_fp_simd_correctness_test.cpp
     vop3_fmac_simd_correctness_test.cpp
     vop3_ldexp_simd_correctness_test.cpp
