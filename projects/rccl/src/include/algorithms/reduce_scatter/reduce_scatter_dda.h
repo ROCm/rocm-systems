@@ -29,19 +29,13 @@ __global__ void ddaReduceScatterIpc(
   barrier.syncOnSameBlockIdx<
       false /* hasPreviousMemAccess */,
       true /* hasSubsequentMemAccess */>();
-  	
+
   constexpr auto countPerThread = sizeof(uint4) / sizeof(T);
   const auto gtIdx = blockDim.x * blockIdx.x + threadIdx.x;
 
   const auto idxStart = gtIdx * countPerThread;
   const auto idxEnd = count;
   const auto idxStride = gridDim.x * blockDim.x * countPerThread;
-
-  /*if (count * sizeof(T) <= 262144) {
-      copyFromSrcToDest<T>(
-          sendbuff, ipcbuffs[selfRank], idxStart, idxEnd, idxStride);*/
-
-  //}
 
   reduceScatter<T, NRANKS, hasAcc>(
       ipcbuffs, recvbuff, nullptr, selfRank, idxStart, idxEnd, idxStride, 0);
