@@ -94,7 +94,6 @@ list(REMOVE_ITEM RAS_DECODE_SOURCES "main.c")
 set(SRC_LIST ${SRC_LIST} ${RAS_DECODE_SOURCES})
 set(INC_LIST ${INC_LIST} ${RAS_DECODE_INCLUDES})
 
-
 # Include UALOE library - always required
 set(UALOE_LIB "ualoe_lib")
 set(UALOE_LIB_SRC_DIR "${PROJECT_SOURCE_DIR}/src/${UALOE_LIB}")
@@ -136,13 +135,7 @@ endif()
 foreach(_TARGET IN LISTS _AMD_SMI_ALL_TARGETS)
     target_link_libraries(
         ${_TARGET}
-        PRIVATE
-            rt
-            Threads::Threads
-            ${CMAKE_DL_LIBS}
-            amdsminic
-            ${FILESYSTEM_LIB}
-            ${UALOE_LINK_LIBRARIES}
+        PRIVATE rt Threads::Threads ${CMAKE_DL_LIBS} amdsminic ${FILESYSTEM_LIB} ${UALOE_LINK_LIBRARIES}
     )
 
     target_include_directories(
@@ -167,11 +160,7 @@ foreach(_TARGET IN LISTS _AMD_SMI_ALL_TARGETS)
             "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
     )
 
-    target_link_directories(
-        ${_TARGET}
-        PRIVATE
-            ${CMAKE_CURRENT_BINARY_DIR}/nic/ai-nic/amdsmi_unified/build/
-    )
+    target_link_directories(${_TARGET} PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/nic/ai-nic/amdsmi_unified/build/)
 endforeach()
 
 #

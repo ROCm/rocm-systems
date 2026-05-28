@@ -101,19 +101,19 @@ struct amdgpu_baseboard_temp_metrics_v1_0 {
 };
 
 struct gpu_metrics_attr {
-        uint64_t encoded_attr;
+  uint64_t encoded_attr;
 };
 
 struct amdgpu_gpuboard_temp_metrics_v1_1 {
-        struct metrics_table_header_t common_header;
-        uint32_t attr_count;
-        struct gpu_metrics_attr metrics_attrs[];
+  struct metrics_table_header_t common_header;
+  uint32_t attr_count;
+  struct gpu_metrics_attr metrics_attrs[];
 };
 
 struct amdgpu_baseboard_temp_metrics_v1_1 {
-        struct metrics_table_header_t common_header;
-        uint32_t attr_count;
-        struct gpu_metrics_attr metrics_attrs[];
+  struct metrics_table_header_t common_header;
+  uint32_t attr_count;
+  struct gpu_metrics_attr metrics_attrs[];
 };
 
 rsmi_status_t read_gpuboard_temp_metrics(const char* filename,

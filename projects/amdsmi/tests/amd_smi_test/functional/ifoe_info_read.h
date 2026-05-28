@@ -20,32 +20,32 @@
  * THE SOFTWARE.
  */
 
- #ifndef TESTS_AMD_SMI_TEST_FUNCTIONAL_IFOE_INFO_READ_H_
- #define TESTS_AMD_SMI_TEST_FUNCTIONAL_IFOE_INFO_READ_H_
+#ifndef TESTS_AMD_SMI_TEST_FUNCTIONAL_IFOE_INFO_READ_H_
+#define TESTS_AMD_SMI_TEST_FUNCTIONAL_IFOE_INFO_READ_H_
 
- #include "../test_base.h"
+#include "../test_base.h"
 
- class TestIfoeInfoRead : public TestBase {
-  public:
-     TestIfoeInfoRead();
+class TestIfoeInfoRead : public TestBase {
+ public:
+  TestIfoeInfoRead();
 
-   // @Brief: Destructor for test case of TestIfoeInfoRead
-   virtual ~TestIfoeInfoRead();
+  // @Brief: Destructor for test case of TestIfoeInfoRead
+  virtual ~TestIfoeInfoRead();
 
-   // @Brief: Setup the environment for measurement
-    void SetUp() override;
+  // @Brief: Setup the environment for measurement
+  void SetUp() override;
 
-   // @Brief: Core measurement execution
-   void Run() override;
+  // @Brief: Core measurement execution
+  void Run() override;
 
-   // @Brief: Clean up and retrive the resource
-   void Close() override;
+  // @Brief: Clean up and retrieve the resource
+  void Close() override;
 
-   // @Brief: Display  results
-   void DisplayResults() const override;
+  // @Brief: Display  results
+  void DisplayResults() const override;
 
-   // @Brief: Display information about what this test does
-   void DisplayTestInfo() override;
- };
+  // @Brief: Display information about what this test does
+  void DisplayTestInfo() override;
+};
 
- #endif  // TESTS_AMD_SMI_TEST_FUNCTIONAL_IFOE_INFO_READ_H_
+#endif  // TESTS_AMD_SMI_TEST_FUNCTIONAL_IFOE_INFO_READ_H_

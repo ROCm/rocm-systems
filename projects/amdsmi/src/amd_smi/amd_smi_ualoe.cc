@@ -1,21 +1,21 @@
-#include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/amd_smi_gpu_device.h"
 #include "amd_smi/impl/amd_smi_system.h"
+#include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_utils.h"
 
 extern "C" {
-#include "ualoe_lib/ualoe_lib.h"
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
 #include <time.h>
+
+#include "ualoe_lib/ualoe_lib.h"
 }
 
 #include <algorithm>
 #include <unordered_map>
-
 
 /**
  * @brief Complete telemetry ID to string mapping using unordered_map for O(1) lookup
@@ -50,12 +50,18 @@ static const std::unordered_map<uint64_t, const char*> telemetry_id_map = {
     {IFOE_TELEM_ID_IFOE_SDP_TX_PACK_RD_RSP_DATA_ERROR, "IFOE_SDP_TX_PACK_RD_RSP_DATA_ERROR"},
     {IFOE_TELEM_ID_IFOE_SDP_TX_PACK_REQ_CREDIT_CONSUMED, "IFOE_SDP_TX_PACK_REQ_CREDIT_CONSUMED"},
     {IFOE_TELEM_ID_IFOE_SDP_TX_PACK_REQ_CREDIT_RELEASED, "IFOE_SDP_TX_PACK_REQ_CREDIT_RELEASED"},
-    {IFOE_TELEM_ID_IFOE_SDP_TX_PACK_ORIG_DATA_CREDIT_CONSUMED, "IFOE_SDP_TX_PACK_ORIG_DATA_CREDIT_CONSUMED"},
-    {IFOE_TELEM_ID_IFOE_SDP_TX_PACK_ORIG_DATA_CREDIT_RELEASED, "IFOE_SDP_TX_PACK_ORIG_DATA_CREDIT_RELEASED"},
-    {IFOE_TELEM_ID_IFOE_SDP_TX_PACK_WR_RSP_CREDIT_CONSUMED, "IFOE_SDP_TX_PACK_WR_RSP_CREDIT_CONSUMED"},
-    {IFOE_TELEM_ID_IFOE_SDP_TX_PACK_WR_RSP_CREDIT_RELEASED, "IFOE_SDP_TX_PACK_WR_RSP_CREDIT_RELEASED"},
-    {IFOE_TELEM_ID_IFOE_SDP_TX_PACK_RD_RSP_CREDIT_CONSUMED, "IFOE_SDP_TX_PACK_RD_RSP_CREDIT_CONSUMED"},
-    {IFOE_TELEM_ID_IFOE_SDP_TX_PACK_RD_RSP_CREDIT_RELEASED, "IFOE_SDP_TX_PACK_RD_RSP_CREDIT_RELEASED"},
+    {IFOE_TELEM_ID_IFOE_SDP_TX_PACK_ORIG_DATA_CREDIT_CONSUMED,
+     "IFOE_SDP_TX_PACK_ORIG_DATA_CREDIT_CONSUMED"},
+    {IFOE_TELEM_ID_IFOE_SDP_TX_PACK_ORIG_DATA_CREDIT_RELEASED,
+     "IFOE_SDP_TX_PACK_ORIG_DATA_CREDIT_RELEASED"},
+    {IFOE_TELEM_ID_IFOE_SDP_TX_PACK_WR_RSP_CREDIT_CONSUMED,
+     "IFOE_SDP_TX_PACK_WR_RSP_CREDIT_CONSUMED"},
+    {IFOE_TELEM_ID_IFOE_SDP_TX_PACK_WR_RSP_CREDIT_RELEASED,
+     "IFOE_SDP_TX_PACK_WR_RSP_CREDIT_RELEASED"},
+    {IFOE_TELEM_ID_IFOE_SDP_TX_PACK_RD_RSP_CREDIT_CONSUMED,
+     "IFOE_SDP_TX_PACK_RD_RSP_CREDIT_CONSUMED"},
+    {IFOE_TELEM_ID_IFOE_SDP_TX_PACK_RD_RSP_CREDIT_RELEASED,
+     "IFOE_SDP_TX_PACK_RD_RSP_CREDIT_RELEASED"},
     {IFOE_TELEM_ID_IFOE_WENG_BSTATE_FREE_BLK_DELAY_REQ, "IFOE_WENG_BSTATE_FREE_BLK_DELAY_REQ"},
     {IFOE_TELEM_ID_IFOE_WENG_BSTATE_FREE_BLK_DELAY_RES, "IFOE_WENG_BSTATE_FREE_BLK_DELAY_RES"},
     {IFOE_TELEM_ID_IFOE_WENG_OP_SDP_REQ, "IFOE_WENG_OP_SDP_REQ"},
@@ -80,77 +86,127 @@ static const std::unordered_map<uint64_t, const char*> telemetry_id_map = {
     {IFOE_TELEM_ID_IFOE_WENG_EVICTION_EXPIRY_RES, "IFOE_WENG_EVICTION_EXPIRY_RES"},
     {IFOE_TELEM_ID_IFOE_WENG_EVICTION_CHAIN_DELAY_REQ, "IFOE_WENG_EVICTION_CHAIN_DELAY_REQ"},
     {IFOE_TELEM_ID_IFOE_WENG_EVICTION_CHAIN_DELAY_RES, "IFOE_WENG_EVICTION_CHAIN_DELAY_RES"},
-    {IFOE_TELEM_ID_IFOE_WENG_EVICTION_FORCE_CHAIN_DELAY_REQ, "IFOE_WENG_EVICTION_FORCE_CHAIN_DELAY_REQ"},
-    {IFOE_TELEM_ID_IFOE_WENG_EVICTION_FORCE_CHAIN_DELAY_RES, "IFOE_WENG_EVICTION_FORCE_CHAIN_DELAY_RES"},
+    {IFOE_TELEM_ID_IFOE_WENG_EVICTION_FORCE_CHAIN_DELAY_REQ,
+     "IFOE_WENG_EVICTION_FORCE_CHAIN_DELAY_REQ"},
+    {IFOE_TELEM_ID_IFOE_WENG_EVICTION_FORCE_CHAIN_DELAY_RES,
+     "IFOE_WENG_EVICTION_FORCE_CHAIN_DELAY_RES"},
     {IFOE_TELEM_ID_IFOE_WENG_EVICTION_MTU_HOLD_DELAY_REQ, "IFOE_WENG_EVICTION_MTU_HOLD_DELAY_REQ"},
     {IFOE_TELEM_ID_IFOE_WENG_EVICTION_MTU_HOLD_DELAY_RES, "IFOE_WENG_EVICTION_MTU_HOLD_DELAY_RES"},
-    {IFOE_TELEM_ID_IFOE_WENG_EVICTION_FORCE_HOLD_DELAY_REQ, "IFOE_WENG_EVICTION_FORCE_HOLD_DELAY_REQ"},
-    {IFOE_TELEM_ID_IFOE_WENG_EVICTION_FORCE_HOLD_DELAY_RES, "IFOE_WENG_EVICTION_FORCE_HOLD_DELAY_RES"},
+    {IFOE_TELEM_ID_IFOE_WENG_EVICTION_FORCE_HOLD_DELAY_REQ,
+     "IFOE_WENG_EVICTION_FORCE_HOLD_DELAY_REQ"},
+    {IFOE_TELEM_ID_IFOE_WENG_EVICTION_FORCE_HOLD_DELAY_RES,
+     "IFOE_WENG_EVICTION_FORCE_HOLD_DELAY_RES"},
     {IFOE_TELEM_ID_IFOE_RENG_READ_SCH_IN, "IFOE_RENG_READ_SCH_IN"},
     {IFOE_TELEM_ID_IFOE_RENG_READ_PKT_OUT, "IFOE_RENG_READ_PKT_OUT"},
     {IFOE_TELEM_ID_IFOE_RENG_FREE_SCH_IN, "IFOE_RENG_FREE_SCH_IN"},
     {IFOE_TELEM_ID_IFOE_RENG_FREE_PKT_OUT, "IFOE_RENG_FREE_PKT_OUT"},
     {IFOE_TELEM_ID_IFOE_RENG_FREE_BLK_OUT, "IFOE_RENG_FREE_BLK_OUT"},
-    {IFOE_TELEM_ID_IFOE_TX_ENCAP_PKT_EGRESS_XRSEC_NPORT_0, "IFOE_TX_ENCAP_PKT_EGRESS_XRSEC_NPORT_0"},
-    {IFOE_TELEM_ID_IFOE_TX_ENCAP_PKT_EGRESS_XRSEC_NPORT_1, "IFOE_TX_ENCAP_PKT_EGRESS_XRSEC_NPORT_1"},
-    {IFOE_TELEM_ID_IFOE_TX_ENCAP_PKT_EGRESS_XRSEC_NPORT_2, "IFOE_TX_ENCAP_PKT_EGRESS_XRSEC_NPORT_2"},
-    {IFOE_TELEM_ID_IFOE_TX_ENCAP_PKT_EGRESS_XRSEC_NPORT_3, "IFOE_TX_ENCAP_PKT_EGRESS_XRSEC_NPORT_3"},
-    {IFOE_TELEM_ID_IFOE_TX_ENCAP_PAYL_LEN_EGRESS_XRSEC_NPORT_0, "IFOE_TX_ENCAP_PAYL_LEN_EGRESS_XRSEC_NPORT_0"},
-    {IFOE_TELEM_ID_IFOE_TX_ENCAP_PAYL_LEN_EGRESS_XRSEC_NPORT_1, "IFOE_TX_ENCAP_PAYL_LEN_EGRESS_XRSEC_NPORT_1"},
-    {IFOE_TELEM_ID_IFOE_TX_ENCAP_PAYL_LEN_EGRESS_XRSEC_NPORT_2, "IFOE_TX_ENCAP_PAYL_LEN_EGRESS_XRSEC_NPORT_2"},
-    {IFOE_TELEM_ID_IFOE_TX_ENCAP_PAYL_LEN_EGRESS_XRSEC_NPORT_3, "IFOE_TX_ENCAP_PAYL_LEN_EGRESS_XRSEC_NPORT_3"},
-    {IFOE_TELEM_ID_IFOE_TX_ENCAP_HDR_LEN_EGRESS_XRSEC_NPORT_0, "IFOE_TX_ENCAP_HDR_LEN_EGRESS_XRSEC_NPORT_0"},
-    {IFOE_TELEM_ID_IFOE_TX_ENCAP_HDR_LEN_EGRESS_XRSEC_NPORT_1, "IFOE_TX_ENCAP_HDR_LEN_EGRESS_XRSEC_NPORT_1"},
-    {IFOE_TELEM_ID_IFOE_TX_ENCAP_HDR_LEN_EGRESS_XRSEC_NPORT_2, "IFOE_TX_ENCAP_HDR_LEN_EGRESS_XRSEC_NPORT_2"},
-    {IFOE_TELEM_ID_IFOE_TX_ENCAP_HDR_LEN_EGRESS_XRSEC_NPORT_3, "IFOE_TX_ENCAP_HDR_LEN_EGRESS_XRSEC_NPORT_3"},
+    {IFOE_TELEM_ID_IFOE_TX_ENCAP_PKT_EGRESS_XRSEC_NPORT_0,
+     "IFOE_TX_ENCAP_PKT_EGRESS_XRSEC_NPORT_0"},
+    {IFOE_TELEM_ID_IFOE_TX_ENCAP_PKT_EGRESS_XRSEC_NPORT_1,
+     "IFOE_TX_ENCAP_PKT_EGRESS_XRSEC_NPORT_1"},
+    {IFOE_TELEM_ID_IFOE_TX_ENCAP_PKT_EGRESS_XRSEC_NPORT_2,
+     "IFOE_TX_ENCAP_PKT_EGRESS_XRSEC_NPORT_2"},
+    {IFOE_TELEM_ID_IFOE_TX_ENCAP_PKT_EGRESS_XRSEC_NPORT_3,
+     "IFOE_TX_ENCAP_PKT_EGRESS_XRSEC_NPORT_3"},
+    {IFOE_TELEM_ID_IFOE_TX_ENCAP_PAYL_LEN_EGRESS_XRSEC_NPORT_0,
+     "IFOE_TX_ENCAP_PAYL_LEN_EGRESS_XRSEC_NPORT_0"},
+    {IFOE_TELEM_ID_IFOE_TX_ENCAP_PAYL_LEN_EGRESS_XRSEC_NPORT_1,
+     "IFOE_TX_ENCAP_PAYL_LEN_EGRESS_XRSEC_NPORT_1"},
+    {IFOE_TELEM_ID_IFOE_TX_ENCAP_PAYL_LEN_EGRESS_XRSEC_NPORT_2,
+     "IFOE_TX_ENCAP_PAYL_LEN_EGRESS_XRSEC_NPORT_2"},
+    {IFOE_TELEM_ID_IFOE_TX_ENCAP_PAYL_LEN_EGRESS_XRSEC_NPORT_3,
+     "IFOE_TX_ENCAP_PAYL_LEN_EGRESS_XRSEC_NPORT_3"},
+    {IFOE_TELEM_ID_IFOE_TX_ENCAP_HDR_LEN_EGRESS_XRSEC_NPORT_0,
+     "IFOE_TX_ENCAP_HDR_LEN_EGRESS_XRSEC_NPORT_0"},
+    {IFOE_TELEM_ID_IFOE_TX_ENCAP_HDR_LEN_EGRESS_XRSEC_NPORT_1,
+     "IFOE_TX_ENCAP_HDR_LEN_EGRESS_XRSEC_NPORT_1"},
+    {IFOE_TELEM_ID_IFOE_TX_ENCAP_HDR_LEN_EGRESS_XRSEC_NPORT_2,
+     "IFOE_TX_ENCAP_HDR_LEN_EGRESS_XRSEC_NPORT_2"},
+    {IFOE_TELEM_ID_IFOE_TX_ENCAP_HDR_LEN_EGRESS_XRSEC_NPORT_3,
+     "IFOE_TX_ENCAP_HDR_LEN_EGRESS_XRSEC_NPORT_3"},
     {IFOE_TELEM_ID_IFOE_TX_ENCAP_VALID_EGRESS_XRSEC, "IFOE_TX_ENCAP_VALID_EGRESS_XRSEC"},
     {IFOE_TELEM_ID_IFOE_TX_ENCAP_STALL_EGRESS_XRSEC, "IFOE_TX_ENCAP_STALL_EGRESS_XRSEC"},
     {IFOE_TELEM_ID_IFOE_TX_ENCAP_PKT_INGRESS, "IFOE_TX_ENCAP_PKT_INGRESS"},
     {IFOE_TELEM_ID_IFOE_TX_ENCAP_VALID_INGRESS, "IFOE_TX_ENCAP_VALID_INGRESS"},
     {IFOE_TELEM_ID_IFOE_TX_ENCAP_STALL_INGRESS, "IFOE_TX_ENCAP_STALL_INGRESS"},
-    {IFOE_TELEM_ID_IFOE_TX_ENCAP_VALID_CNTXT_INGRESS_NPORT_0, "IFOE_TX_ENCAP_VALID_CNTXT_INGRESS_NPORT_0"},
-    {IFOE_TELEM_ID_IFOE_TX_ENCAP_VALID_CNTXT_INGRESS_NPORT_1, "IFOE_TX_ENCAP_VALID_CNTXT_INGRESS_NPORT_1"},
-    {IFOE_TELEM_ID_IFOE_TX_ENCAP_VALID_CNTXT_INGRESS_NPORT_2, "IFOE_TX_ENCAP_VALID_CNTXT_INGRESS_NPORT_2"},
-    {IFOE_TELEM_ID_IFOE_TX_ENCAP_VALID_CNTXT_INGRESS_NPORT_3, "IFOE_TX_ENCAP_VALID_CNTXT_INGRESS_NPORT_3"},
+    {IFOE_TELEM_ID_IFOE_TX_ENCAP_VALID_CNTXT_INGRESS_NPORT_0,
+     "IFOE_TX_ENCAP_VALID_CNTXT_INGRESS_NPORT_0"},
+    {IFOE_TELEM_ID_IFOE_TX_ENCAP_VALID_CNTXT_INGRESS_NPORT_1,
+     "IFOE_TX_ENCAP_VALID_CNTXT_INGRESS_NPORT_1"},
+    {IFOE_TELEM_ID_IFOE_TX_ENCAP_VALID_CNTXT_INGRESS_NPORT_2,
+     "IFOE_TX_ENCAP_VALID_CNTXT_INGRESS_NPORT_2"},
+    {IFOE_TELEM_ID_IFOE_TX_ENCAP_VALID_CNTXT_INGRESS_NPORT_3,
+     "IFOE_TX_ENCAP_VALID_CNTXT_INGRESS_NPORT_3"},
     {IFOE_TELEM_ID_IFOE_TX_ENCAP_STALL_CNTXT_INGRESS, "IFOE_TX_ENCAP_STALL_CNTXT_INGRESS"},
     {IFOE_TELEM_ID_IFOE_TX_SCHED_INACTIVE_STREAMS, "IFOE_TX_SCHED_INACTIVE_STREAMS"},
     {IFOE_TELEM_ID_IFOE_TX_SCHED_ACTIVE_STREAMS, "IFOE_TX_SCHED_ACTIVE_STREAMS"},
     {IFOE_TELEM_ID_IFOE_TX_SCHED_PAUSED_STREAMS, "IFOE_TX_SCHED_PAUSED_STREAMS"},
     {IFOE_TELEM_ID_IFOE_TX_SCHED_BOOSTED_PRI_STREAMS, "IFOE_TX_SCHED_BOOSTED_PRI_STREAMS"},
     {IFOE_TELEM_ID_IFOE_TX_SCHED_EMPTY_QUEUE_STREAMS, "IFOE_TX_SCHED_EMPTY_QUEUE_STREAMS"},
-    {IFOE_TELEM_ID_IFOE_TX_SCHED_EMPTY_SEND_QUEUE_STREAMS, "IFOE_TX_SCHED_EMPTY_SEND_QUEUE_STREAMS"},
+    {IFOE_TELEM_ID_IFOE_TX_SCHED_EMPTY_SEND_QUEUE_STREAMS,
+     "IFOE_TX_SCHED_EMPTY_SEND_QUEUE_STREAMS"},
     {IFOE_TELEM_ID_IFOE_TX_SCHED_REQ_PKTS, "IFOE_TX_SCHED_REQ_PKTS"},
     {IFOE_TELEM_ID_IFOE_TX_SCHED_RES_PKTS, "IFOE_TX_SCHED_RES_PKTS"},
-    {IFOE_TELEM_ID_IFOE_TX_SCHED_LOW_PRI_REQ_PKTS_NPORT_0, "IFOE_TX_SCHED_LOW_PRI_REQ_PKTS_NPORT_0"},
-    {IFOE_TELEM_ID_IFOE_TX_SCHED_HIGH_PRI_REQ_PKTS_NPORT_0, "IFOE_TX_SCHED_HIGH_PRI_REQ_PKTS_NPORT_0"},
-    {IFOE_TELEM_ID_IFOE_TX_SCHED_LOW_PRI_RES_PKTS_NPORT_0, "IFOE_TX_SCHED_LOW_PRI_RES_PKTS_NPORT_0"},
-    {IFOE_TELEM_ID_IFOE_TX_SCHED_HIGH_PRI_RES_PKTS_NPORT_0, "IFOE_TX_SCHED_HIGH_PRI_RES_PKTS_NPORT_0"},
-    {IFOE_TELEM_ID_IFOE_TX_SCHED_LOW_PRI_REQ_PKTS_NPORT_1, "IFOE_TX_SCHED_LOW_PRI_REQ_PKTS_NPORT_1"},
-    {IFOE_TELEM_ID_IFOE_TX_SCHED_HIGH_PRI_REQ_PKTS_NPORT_1, "IFOE_TX_SCHED_HIGH_PRI_REQ_PKTS_NPORT_1"},
-    {IFOE_TELEM_ID_IFOE_TX_SCHED_LOW_PRI_RES_PKTS_NPORT_1, "IFOE_TX_SCHED_LOW_PRI_RES_PKTS_NPORT_1"},
-    {IFOE_TELEM_ID_IFOE_TX_SCHED_HIGH_PRI_RES_PKTS_NPORT_1, "IFOE_TX_SCHED_HIGH_PRI_RES_PKTS_NPORT_1"},
-    {IFOE_TELEM_ID_IFOE_TX_SCHED_LOW_PRI_REQ_PKTS_NPORT_2, "IFOE_TX_SCHED_LOW_PRI_REQ_PKTS_NPORT_2"},
-    {IFOE_TELEM_ID_IFOE_TX_SCHED_HIGH_PRI_REQ_PKTS_NPORT_2, "IFOE_TX_SCHED_HIGH_PRI_REQ_PKTS_NPORT_2"},
-    {IFOE_TELEM_ID_IFOE_TX_SCHED_LOW_PRI_RES_PKTS_NPORT_2, "IFOE_TX_SCHED_LOW_PRI_RES_PKTS_NPORT_2"},
-    {IFOE_TELEM_ID_IFOE_TX_SCHED_HIGH_PRI_RES_PKTS_NPORT_2, "IFOE_TX_SCHED_HIGH_PRI_RES_PKTS_NPORT_2"},
-    {IFOE_TELEM_ID_IFOE_TX_SCHED_LOW_PRI_REQ_PKTS_NPORT_3, "IFOE_TX_SCHED_LOW_PRI_REQ_PKTS_NPORT_3"},
-    {IFOE_TELEM_ID_IFOE_TX_SCHED_HIGH_PRI_REQ_PKTS_NPORT_3, "IFOE_TX_SCHED_HIGH_PRI_REQ_PKTS_NPORT_3"},
-    {IFOE_TELEM_ID_IFOE_TX_SCHED_LOW_PRI_RES_PKTS_NPORT_3, "IFOE_TX_SCHED_LOW_PRI_RES_PKTS_NPORT_3"},
-    {IFOE_TELEM_ID_IFOE_TX_SCHED_HIGH_PRI_RES_PKTS_NPORT_3, "IFOE_TX_SCHED_HIGH_PRI_RES_PKTS_NPORT_3"},
-    {IFOE_TELEM_ID_IFOE_TX_SCHED_ACTIVE_TX_ACK_RES_STREAMS, "IFOE_TX_SCHED_ACTIVE_TX_ACK_RES_STREAMS"},
+    {IFOE_TELEM_ID_IFOE_TX_SCHED_LOW_PRI_REQ_PKTS_NPORT_0,
+     "IFOE_TX_SCHED_LOW_PRI_REQ_PKTS_NPORT_0"},
+    {IFOE_TELEM_ID_IFOE_TX_SCHED_HIGH_PRI_REQ_PKTS_NPORT_0,
+     "IFOE_TX_SCHED_HIGH_PRI_REQ_PKTS_NPORT_0"},
+    {IFOE_TELEM_ID_IFOE_TX_SCHED_LOW_PRI_RES_PKTS_NPORT_0,
+     "IFOE_TX_SCHED_LOW_PRI_RES_PKTS_NPORT_0"},
+    {IFOE_TELEM_ID_IFOE_TX_SCHED_HIGH_PRI_RES_PKTS_NPORT_0,
+     "IFOE_TX_SCHED_HIGH_PRI_RES_PKTS_NPORT_0"},
+    {IFOE_TELEM_ID_IFOE_TX_SCHED_LOW_PRI_REQ_PKTS_NPORT_1,
+     "IFOE_TX_SCHED_LOW_PRI_REQ_PKTS_NPORT_1"},
+    {IFOE_TELEM_ID_IFOE_TX_SCHED_HIGH_PRI_REQ_PKTS_NPORT_1,
+     "IFOE_TX_SCHED_HIGH_PRI_REQ_PKTS_NPORT_1"},
+    {IFOE_TELEM_ID_IFOE_TX_SCHED_LOW_PRI_RES_PKTS_NPORT_1,
+     "IFOE_TX_SCHED_LOW_PRI_RES_PKTS_NPORT_1"},
+    {IFOE_TELEM_ID_IFOE_TX_SCHED_HIGH_PRI_RES_PKTS_NPORT_1,
+     "IFOE_TX_SCHED_HIGH_PRI_RES_PKTS_NPORT_1"},
+    {IFOE_TELEM_ID_IFOE_TX_SCHED_LOW_PRI_REQ_PKTS_NPORT_2,
+     "IFOE_TX_SCHED_LOW_PRI_REQ_PKTS_NPORT_2"},
+    {IFOE_TELEM_ID_IFOE_TX_SCHED_HIGH_PRI_REQ_PKTS_NPORT_2,
+     "IFOE_TX_SCHED_HIGH_PRI_REQ_PKTS_NPORT_2"},
+    {IFOE_TELEM_ID_IFOE_TX_SCHED_LOW_PRI_RES_PKTS_NPORT_2,
+     "IFOE_TX_SCHED_LOW_PRI_RES_PKTS_NPORT_2"},
+    {IFOE_TELEM_ID_IFOE_TX_SCHED_HIGH_PRI_RES_PKTS_NPORT_2,
+     "IFOE_TX_SCHED_HIGH_PRI_RES_PKTS_NPORT_2"},
+    {IFOE_TELEM_ID_IFOE_TX_SCHED_LOW_PRI_REQ_PKTS_NPORT_3,
+     "IFOE_TX_SCHED_LOW_PRI_REQ_PKTS_NPORT_3"},
+    {IFOE_TELEM_ID_IFOE_TX_SCHED_HIGH_PRI_REQ_PKTS_NPORT_3,
+     "IFOE_TX_SCHED_HIGH_PRI_REQ_PKTS_NPORT_3"},
+    {IFOE_TELEM_ID_IFOE_TX_SCHED_LOW_PRI_RES_PKTS_NPORT_3,
+     "IFOE_TX_SCHED_LOW_PRI_RES_PKTS_NPORT_3"},
+    {IFOE_TELEM_ID_IFOE_TX_SCHED_HIGH_PRI_RES_PKTS_NPORT_3,
+     "IFOE_TX_SCHED_HIGH_PRI_RES_PKTS_NPORT_3"},
+    {IFOE_TELEM_ID_IFOE_TX_SCHED_ACTIVE_TX_ACK_RES_STREAMS,
+     "IFOE_TX_SCHED_ACTIVE_TX_ACK_RES_STREAMS"},
     {IFOE_TELEM_ID_IFOE_TX_SCHED_ACTIVE_RX_ACK_PKTS, "IFOE_TX_SCHED_ACTIVE_RX_ACK_PKTS"},
-    {IFOE_TELEM_ID_IFOE_RX_DECAP_PKT_XRSEC_INGRESS_NPORT_0, "IFOE_RX_DECAP_PKT_XRSEC_INGRESS_NPORT_0"},
-    {IFOE_TELEM_ID_IFOE_RX_DECAP_PKT_XRSEC_INGRESS_NPORT_1, "IFOE_RX_DECAP_PKT_XRSEC_INGRESS_NPORT_1"},
-    {IFOE_TELEM_ID_IFOE_RX_DECAP_PKT_XRSEC_INGRESS_NPORT_2, "IFOE_RX_DECAP_PKT_XRSEC_INGRESS_NPORT_2"},
-    {IFOE_TELEM_ID_IFOE_RX_DECAP_PKT_XRSEC_INGRESS_NPORT_3, "IFOE_RX_DECAP_PKT_XRSEC_INGRESS_NPORT_3"},
-    {IFOE_TELEM_ID_IFOE_RX_DECAP_PKT_LEN_XRSEC_INGRESS_NPORT_0, "IFOE_RX_DECAP_PKT_LEN_XRSEC_INGRESS_NPORT_0"},
-    {IFOE_TELEM_ID_IFOE_RX_DECAP_PKT_LEN_XRSEC_INGRESS_NPORT_1, "IFOE_RX_DECAP_PKT_LEN_XRSEC_INGRESS_NPORT_1"},
-    {IFOE_TELEM_ID_IFOE_RX_DECAP_PKT_LEN_XRSEC_INGRESS_NPORT_2, "IFOE_RX_DECAP_PKT_LEN_XRSEC_INGRESS_NPORT_2"},
-    {IFOE_TELEM_ID_IFOE_RX_DECAP_PKT_LEN_XRSEC_INGRESS_NPORT_3, "IFOE_RX_DECAP_PKT_LEN_XRSEC_INGRESS_NPORT_3"},
-    {IFOE_TELEM_ID_IFOE_RX_DECAP_PAYL_LEN_XRSEC_INGRESS_NPORT_0, "IFOE_RX_DECAP_PAYL_LEN_XRSEC_INGRESS_NPORT_0"},
-    {IFOE_TELEM_ID_IFOE_RX_DECAP_PAYL_LEN_XRSEC_INGRESS_NPORT_1, "IFOE_RX_DECAP_PAYL_LEN_XRSEC_INGRESS_NPORT_1"},
-    {IFOE_TELEM_ID_IFOE_RX_DECAP_PAYL_LEN_XRSEC_INGRESS_NPORT_2, "IFOE_RX_DECAP_PAYL_LEN_XRSEC_INGRESS_NPORT_2"},
-    {IFOE_TELEM_ID_IFOE_RX_DECAP_PAYL_LEN_XRSEC_INGRESS_NPORT_3, "IFOE_RX_DECAP_PAYL_LEN_XRSEC_INGRESS_NPORT_3"},
+    {IFOE_TELEM_ID_IFOE_RX_DECAP_PKT_XRSEC_INGRESS_NPORT_0,
+     "IFOE_RX_DECAP_PKT_XRSEC_INGRESS_NPORT_0"},
+    {IFOE_TELEM_ID_IFOE_RX_DECAP_PKT_XRSEC_INGRESS_NPORT_1,
+     "IFOE_RX_DECAP_PKT_XRSEC_INGRESS_NPORT_1"},
+    {IFOE_TELEM_ID_IFOE_RX_DECAP_PKT_XRSEC_INGRESS_NPORT_2,
+     "IFOE_RX_DECAP_PKT_XRSEC_INGRESS_NPORT_2"},
+    {IFOE_TELEM_ID_IFOE_RX_DECAP_PKT_XRSEC_INGRESS_NPORT_3,
+     "IFOE_RX_DECAP_PKT_XRSEC_INGRESS_NPORT_3"},
+    {IFOE_TELEM_ID_IFOE_RX_DECAP_PKT_LEN_XRSEC_INGRESS_NPORT_0,
+     "IFOE_RX_DECAP_PKT_LEN_XRSEC_INGRESS_NPORT_0"},
+    {IFOE_TELEM_ID_IFOE_RX_DECAP_PKT_LEN_XRSEC_INGRESS_NPORT_1,
+     "IFOE_RX_DECAP_PKT_LEN_XRSEC_INGRESS_NPORT_1"},
+    {IFOE_TELEM_ID_IFOE_RX_DECAP_PKT_LEN_XRSEC_INGRESS_NPORT_2,
+     "IFOE_RX_DECAP_PKT_LEN_XRSEC_INGRESS_NPORT_2"},
+    {IFOE_TELEM_ID_IFOE_RX_DECAP_PKT_LEN_XRSEC_INGRESS_NPORT_3,
+     "IFOE_RX_DECAP_PKT_LEN_XRSEC_INGRESS_NPORT_3"},
+    {IFOE_TELEM_ID_IFOE_RX_DECAP_PAYL_LEN_XRSEC_INGRESS_NPORT_0,
+     "IFOE_RX_DECAP_PAYL_LEN_XRSEC_INGRESS_NPORT_0"},
+    {IFOE_TELEM_ID_IFOE_RX_DECAP_PAYL_LEN_XRSEC_INGRESS_NPORT_1,
+     "IFOE_RX_DECAP_PAYL_LEN_XRSEC_INGRESS_NPORT_1"},
+    {IFOE_TELEM_ID_IFOE_RX_DECAP_PAYL_LEN_XRSEC_INGRESS_NPORT_2,
+     "IFOE_RX_DECAP_PAYL_LEN_XRSEC_INGRESS_NPORT_2"},
+    {IFOE_TELEM_ID_IFOE_RX_DECAP_PAYL_LEN_XRSEC_INGRESS_NPORT_3,
+     "IFOE_RX_DECAP_PAYL_LEN_XRSEC_INGRESS_NPORT_3"},
     {IFOE_TELEM_ID_IFOE_RX_DECAP_VALID_INGRESS_XRSEC, "IFOE_RX_DECAP_VALID_INGRESS_XRSEC"},
     {IFOE_TELEM_ID_IFOE_RX_DECAP_STALL_INGRESS_XRSEC, "IFOE_RX_DECAP_STALL_INGRESS_XRSEC"},
     {IFOE_TELEM_ID_IFOE_RX_DECAP_PKT_EGRESS_REQ, "IFOE_RX_DECAP_PKT_EGRESS_REQ"},
@@ -168,24 +224,40 @@ static const std::unordered_map<uint64_t, const char*> telemetry_id_map = {
     {IFOE_TELEM_ID_IFOE_RX_DECAP_RX_NAK_EGRESS_RSP, "IFOE_RX_DECAP_RX_NAK_EGRESS_RSP"},
     {IFOE_TELEM_ID_IFOE_RX_DECAP_DROPPED_PKTS, "IFOE_RX_DECAP_DROPPED_PKTS"},
     {IFOE_TELEM_ID_IFOE_RX_DECAP_INIT_BUSY, "IFOE_RX_DECAP_INIT_BUSY"},
-    {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_REQ_TOTAL_CREDITS_CONSUMED, "IFOE_SDP_RX_UNPACK_REQ_TOTAL_CREDITS_CONSUMED"},
-    {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_REQ_PAYLOAD_CREDITS_RETURNED, "IFOE_SDP_RX_UNPACK_REQ_PAYLOAD_CREDITS_RETURNED"},
-    {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_REQ_EXCESS_CREDITS_RETURNED, "IFOE_SDP_RX_UNPACK_REQ_EXCESS_CREDITS_RETURNED"},
-    {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_RSP_TOTAL_CREDITS_CONSUMED, "IFOE_SDP_RX_UNPACK_RSP_TOTAL_CREDITS_CONSUMED"},
-    {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_RSP_PAYLOAD_CREDITS_RETURNED, "IFOE_SDP_RX_UNPACK_RSP_PAYLOAD_CREDITS_RETURNED"},
-    {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_RSP_EXCESS_CREDITS_RETURNED, "IFOE_SDP_RX_UNPACK_RSP_EXCESS_CREDITS_RETURNED"},
-    {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_REQ_CREDITS_CONSUMED, "IFOE_SDP_RX_UNPACK_REQ_CREDITS_CONSUMED"},
-    {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_REQ_CREDITS_RETURNED, "IFOE_SDP_RX_UNPACK_REQ_CREDITS_RETURNED"},
-    {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_ORIGDATA_CREDITS_CONSUMED, "IFOE_SDP_RX_UNPACK_ORIGDATA_CREDITS_CONSUMED"},
-    {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_ORIGDATA_CREDITS_RETURNED, "IFOE_SDP_RX_UNPACK_ORIGDATA_CREDITS_RETURNED"},
-    {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_WRRSP_CREDITS_CONSUMED, "IFOE_SDP_RX_UNPACK_WRRSP_CREDITS_CONSUMED"},
-    {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_WRRSP_CREDITS_RETURNED, "IFOE_SDP_RX_UNPACK_WRRSP_CREDITS_RETURNED"},
-    {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_RDRSP_CREDITS_CONSUMED, "IFOE_SDP_RX_UNPACK_RDRSP_CREDITS_CONSUMED"},
-    {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_RDRSP_CREDITS_RETURNED, "IFOE_SDP_RX_UNPACK_RDRSP_CREDITS_RETURNED"},
+    {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_REQ_TOTAL_CREDITS_CONSUMED,
+     "IFOE_SDP_RX_UNPACK_REQ_TOTAL_CREDITS_CONSUMED"},
+    {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_REQ_PAYLOAD_CREDITS_RETURNED,
+     "IFOE_SDP_RX_UNPACK_REQ_PAYLOAD_CREDITS_RETURNED"},
+    {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_REQ_EXCESS_CREDITS_RETURNED,
+     "IFOE_SDP_RX_UNPACK_REQ_EXCESS_CREDITS_RETURNED"},
+    {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_RSP_TOTAL_CREDITS_CONSUMED,
+     "IFOE_SDP_RX_UNPACK_RSP_TOTAL_CREDITS_CONSUMED"},
+    {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_RSP_PAYLOAD_CREDITS_RETURNED,
+     "IFOE_SDP_RX_UNPACK_RSP_PAYLOAD_CREDITS_RETURNED"},
+    {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_RSP_EXCESS_CREDITS_RETURNED,
+     "IFOE_SDP_RX_UNPACK_RSP_EXCESS_CREDITS_RETURNED"},
+    {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_REQ_CREDITS_CONSUMED,
+     "IFOE_SDP_RX_UNPACK_REQ_CREDITS_CONSUMED"},
+    {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_REQ_CREDITS_RETURNED,
+     "IFOE_SDP_RX_UNPACK_REQ_CREDITS_RETURNED"},
+    {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_ORIGDATA_CREDITS_CONSUMED,
+     "IFOE_SDP_RX_UNPACK_ORIGDATA_CREDITS_CONSUMED"},
+    {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_ORIGDATA_CREDITS_RETURNED,
+     "IFOE_SDP_RX_UNPACK_ORIGDATA_CREDITS_RETURNED"},
+    {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_WRRSP_CREDITS_CONSUMED,
+     "IFOE_SDP_RX_UNPACK_WRRSP_CREDITS_CONSUMED"},
+    {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_WRRSP_CREDITS_RETURNED,
+     "IFOE_SDP_RX_UNPACK_WRRSP_CREDITS_RETURNED"},
+    {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_RDRSP_CREDITS_CONSUMED,
+     "IFOE_SDP_RX_UNPACK_RDRSP_CREDITS_CONSUMED"},
+    {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_RDRSP_CREDITS_RETURNED,
+     "IFOE_SDP_RX_UNPACK_RDRSP_CREDITS_RETURNED"},
     {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_REQ_CYCLES_STALLED, "IFOE_SDP_RX_UNPACK_REQ_CYCLES_STALLED"},
     {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_RSP_CYCLES_STALLED, "IFOE_SDP_RX_UNPACK_RSP_CYCLES_STALLED"},
-    {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_REQ_CYCLES_STALLED_CNT, "IFOE_SDP_RX_UNPACK_REQ_CYCLES_STALLED_CNT"},
-    {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_RSP_CYCLES_STALLED_CNT, "IFOE_SDP_RX_UNPACK_RSP_CYCLES_STALLED_CNT"},
+    {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_REQ_CYCLES_STALLED_CNT,
+     "IFOE_SDP_RX_UNPACK_REQ_CYCLES_STALLED_CNT"},
+    {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_RSP_CYCLES_STALLED_CNT,
+     "IFOE_SDP_RX_UNPACK_RSP_CYCLES_STALLED_CNT"},
     {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_RETAG_USED, "IFOE_SDP_RX_UNPACK_RETAG_USED"},
     {IFOE_TELEM_ID_IFOE_SDP_RX_UNPACK_RETAG_FREED, "IFOE_SDP_RX_UNPACK_RETAG_FREED"},
     {IFOE_TELEM_ID_SWITCH_RX_NONIFOE_PKTS, "SWITCH_RX_NONIFOE_PKTS"},
@@ -395,9 +467,11 @@ static const std::unordered_map<uint64_t, const char*> telemetry_id_map = {
     {IFOE_TELEM_ID_NETPORT_TX_LLR_NACK_CTLOS, "NETPORT_TX_LLR_NACK_CTLOS"},
     {IFOE_TELEM_ID_NETPORT_TX_LLR_INIT_CTLOS, "NETPORT_TX_LLR_INIT_CTLOS"},
     {IFOE_TELEM_ID_NETPORT_TX_LLR_INIT_ECHO_CTLOS, "NETPORT_TX_LLR_INIT_ECHO_CTLOS"},
-    {IFOE_TELEM_ID_NETPORT_TX_LLR_RCVD_ACK_NACK_SEQ_ERROR, "NETPORT_TX_LLR_RCVD_ACK_NACK_SEQ_ERROR"},
+    {IFOE_TELEM_ID_NETPORT_TX_LLR_RCVD_ACK_NACK_SEQ_ERROR,
+     "NETPORT_TX_LLR_RCVD_ACK_NACK_SEQ_ERROR"},
     {IFOE_TELEM_ID_NETPORT_TX_LLR_REPLAYS_COMPLETED, "NETPORT_TX_LLR_REPLAYS_COMPLETED"},
-    {IFOE_TELEM_ID_NETPORT_TX_LLR_FLUSH_DISCARDED_PACKETS, "NETPORT_TX_LLR_FLUSH_DISCARDED_PACKETS"},
+    {IFOE_TELEM_ID_NETPORT_TX_LLR_FLUSH_DISCARDED_PACKETS,
+     "NETPORT_TX_LLR_FLUSH_DISCARDED_PACKETS"},
     {IFOE_TELEM_ID_NETPORT_TX_LLR_INIT_DISCARDED_PACKETS, "NETPORT_TX_LLR_INIT_DISCARDED_PACKETS"},
     {IFOE_TELEM_ID_NETPORT_TX_LLR_OK_PACKETS, "NETPORT_TX_LLR_OK_PACKETS"},
     {IFOE_TELEM_ID_NETPORT_TX_LLR_POISONED_PACKETS, "NETPORT_TX_LLR_POISONED_PACKETS"},
@@ -411,7 +485,8 @@ static const std::unordered_map<uint64_t, const char*> telemetry_id_map = {
     {IFOE_TELEM_ID_NETPORT_RX_LLR_DUPL_SEQ_PACKETS, "NETPORT_RX_LLR_DUPL_SEQ_PACKETS"},
     {IFOE_TELEM_ID_NETPORT_RX_LLR_EXP_SEQ_BAD_PACKETS, "NETPORT_RX_LLR_EXP_SEQ_BAD_PACKETS"},
     {IFOE_TELEM_ID_NETPORT_RX_LLR_EXP_SEQ_GOOD_PACKETS, "NETPORT_RX_LLR_EXP_SEQ_GOOD_PACKETS"},
-    {IFOE_TELEM_ID_NETPORT_RX_LLR_EXP_SEQ_POISONED_PACKETS, "NETPORT_RX_LLR_EXP_SEQ_POISONED_PACKETS"},
+    {IFOE_TELEM_ID_NETPORT_RX_LLR_EXP_SEQ_POISONED_PACKETS,
+     "NETPORT_RX_LLR_EXP_SEQ_POISONED_PACKETS"},
     {IFOE_TELEM_ID_NETPORT_RX_LLR_MISS_SEQ_PACKETS, "NETPORT_RX_LLR_MISS_SEQ_PACKETS"},
     {IFOE_TELEM_ID_NETPORT_RX_LLR_OK_PACKETS, "NETPORT_RX_LLR_OK_PACKETS"},
     {IFOE_TELEM_ID_NETPORT_RX_LLR_POISONED_PACKETS, "NETPORT_RX_LLR_POISONED_PACKETS"},
@@ -459,17 +534,17 @@ static const std::unordered_map<uint64_t, const char*> telemetry_id_map = {
     {IFOE_TELEM_ID_NETPORT_FEC_CW_SYMBOL_ERRS_13, "NETPORT_FEC_CW_SYMBOL_ERRS_13"},
     {IFOE_TELEM_ID_NETPORT_FEC_CW_SYMBOL_ERRS_14, "NETPORT_FEC_CW_SYMBOL_ERRS_14"},
     {IFOE_TELEM_ID_NETPORT_FEC_CW_SYMBOL_ERRS_15, "NETPORT_FEC_CW_SYMBOL_ERRS_15"},
-    {IFOE_TELEM_ID_NETPORT_FEC_CW_SYMBOL_ERRS_UNCORRECTABLE, "NETPORT_FEC_CW_SYMBOL_ERRS_UNCORRECTABLE"},
+    {IFOE_TELEM_ID_NETPORT_FEC_CW_SYMBOL_ERRS_UNCORRECTABLE,
+     "NETPORT_FEC_CW_SYMBOL_ERRS_UNCORRECTABLE"},
 
 };
 
-
 const char* amdsmi_fabric_telem_id_to_string(uint64_t telem_id) {
-    auto it = telemetry_id_map.find(telem_id);
-    if (it != telemetry_id_map.end()) {
-        return it->second;
-    }
-    return "UNKNOWN";
+  auto it = telemetry_id_map.find(telem_id);
+  if (it != telemetry_id_map.end()) {
+    return it->second;
+  }
+  return "UNKNOWN";
 }
 
 // Note: AMDSMI and UALoE telemetry structures are now designed to be binary compatible
@@ -477,163 +552,160 @@ const char* amdsmi_fabric_telem_id_to_string(uint64_t telem_id) {
 
 // Convert AMDSMI status to match errno-style returns
 static amdsmi_status_t convert_errno_to_amdsmi_status(int errno_val) {
-    switch (errno_val) {
-        case 0:
-            return AMDSMI_STATUS_SUCCESS;
-        case EINVAL:
-            return AMDSMI_STATUS_INVAL;
-        case ENOTSUP:
-            return AMDSMI_STATUS_NOT_SUPPORTED;
-        case ENOMEM:
-            return AMDSMI_STATUS_OUT_OF_RESOURCES;
-        case EBUSY:
-            return AMDSMI_STATUS_BUSY;
-        case ENOENT:
-            return AMDSMI_STATUS_NOT_FOUND;
-        case ETIMEDOUT:
-            return AMDSMI_STATUS_TIMEOUT;
-        case EIO:
-            return AMDSMI_STATUS_IO;
-        case EPERM:
-        case EACCES:
-            return AMDSMI_STATUS_NO_PERM;
-        default:
-            return AMDSMI_STATUS_UNKNOWN_ERROR;
-    }
+  switch (errno_val) {
+    case 0:
+      return AMDSMI_STATUS_SUCCESS;
+    case EINVAL:
+      return AMDSMI_STATUS_INVAL;
+    case ENOTSUP:
+      return AMDSMI_STATUS_NOT_SUPPORTED;
+    case ENOMEM:
+      return AMDSMI_STATUS_OUT_OF_RESOURCES;
+    case EBUSY:
+      return AMDSMI_STATUS_BUSY;
+    case ENOENT:
+      return AMDSMI_STATUS_NOT_FOUND;
+    case ETIMEDOUT:
+      return AMDSMI_STATUS_TIMEOUT;
+    case EIO:
+      return AMDSMI_STATUS_IO;
+    case EPERM:
+    case EACCES:
+      return AMDSMI_STATUS_NO_PERM;
+    default:
+      return AMDSMI_STATUS_UNKNOWN_ERROR;
+  }
 }
 
-
 amdsmi_status_t amdsmi_alloc_fabric_telemetry(amdsmi_processor_handle processor_handle,
-                                                   uint32_t category_mask,
-                                                   amdsmi_fabric_telemetry_t **telemetry) {
-    if (!processor_handle || !telemetry) {
-        return AMDSMI_STATUS_INVAL;
-    }
+                                              uint32_t category_mask,
+                                              amdsmi_fabric_telemetry_t** telemetry) {
+  if (!processor_handle || !telemetry) {
+    return AMDSMI_STATUS_INVAL;
+  }
 
-    // Get AMDSmiGPUDevice from processor handle using helper function
-    amd::smi::AMDSmiGPUDevice *device = nullptr;
-    amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &device);
-    if (r != AMDSMI_STATUS_SUCCESS) return r;
+  // Get AMDSmiGPUDevice from processor handle using helper function
+  amd::smi::AMDSmiGPUDevice* device = nullptr;
+  amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &device);
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
 
-    // Acquire device mutex for UALoE API protection
-    SMIGPUDEVICE_MUTEX(device->get_mutex());
+  // Acquire device mutex for UALoE API protection
+  SMIGPUDEVICE_MUTEX(device->get_mutex());
 
-    ualoe_handle_t ualoe_handle = device->get_ualoe_handle();
+  ualoe_handle_t ualoe_handle = device->get_ualoe_handle();
 
-    if (ualoe_handle == -1) {
-        return AMDSMI_STATUS_NOT_INIT;
-    }
+  if (ualoe_handle == -1) {
+    return AMDSMI_STATUS_NOT_INIT;
+  }
 
-    uint32_t ualoe_category_mask = category_mask;
+  uint32_t ualoe_category_mask = category_mask;
 
-    // Allocate UALoE telemetry directly
-    ualoe_telemetry_t *ualoe_tel = nullptr;
-    int ret = ualoe_telemetry_alloc(ualoe_handle, ualoe_category_mask, &ualoe_tel);
-    if (ret != 0) {
-        return convert_errno_to_amdsmi_status(ret);
-    }
+  // Allocate UALoE telemetry directly
+  ualoe_telemetry_t* ualoe_tel = nullptr;
+  int ret = ualoe_telemetry_alloc(ualoe_handle, ualoe_category_mask, &ualoe_tel);
+  if (ret != 0) {
+    return convert_errno_to_amdsmi_status(ret);
+  }
 
-    // Cast UALoE telemetry directly to AMDSMI telemetry since structures are now binary compatible
-    *telemetry = reinterpret_cast<amdsmi_fabric_telemetry_t*>(ualoe_tel);
+  // Cast UALoE telemetry directly to AMDSMI telemetry since structures are now binary compatible
+  *telemetry = reinterpret_cast<amdsmi_fabric_telemetry_t*>(ualoe_tel);
 
-    return AMDSMI_STATUS_SUCCESS;
+  return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t amdsmi_get_fabric_telemetry_data(amdsmi_processor_handle processor_handle,
-                                                  amdsmi_fabric_telemetry_t *telemetry) {
-    if (!processor_handle || !telemetry) {
-        return AMDSMI_STATUS_INVAL;
-    }
+                                                 amdsmi_fabric_telemetry_t* telemetry) {
+  if (!processor_handle || !telemetry) {
+    return AMDSMI_STATUS_INVAL;
+  }
 
-    // Get AMDSmiGPUDevice from processor handle using helper function
-    amd::smi::AMDSmiGPUDevice *device = nullptr;
-    amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &device);
-    if (r != AMDSMI_STATUS_SUCCESS) return r;
+  // Get AMDSmiGPUDevice from processor handle using helper function
+  amd::smi::AMDSmiGPUDevice* device = nullptr;
+  amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &device);
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
 
-    // Acquire device mutex for UALoE API protection
-    SMIGPUDEVICE_MUTEX(device->get_mutex());
+  // Acquire device mutex for UALoE API protection
+  SMIGPUDEVICE_MUTEX(device->get_mutex());
 
-    ualoe_handle_t ualoe_handle = device->get_ualoe_handle();
+  ualoe_handle_t ualoe_handle = device->get_ualoe_handle();
 
-    if (ualoe_handle == -1) {
-        return AMDSMI_STATUS_NOT_INIT;
-    }
+  if (ualoe_handle == -1) {
+    return AMDSMI_STATUS_NOT_INIT;
+  }
 
-    // Cast AMDSMI telemetry directly to UALoE telemetry since structures are now binary compatible
-    ualoe_telemetry_t *ualoe_tel = (ualoe_telemetry_t*)telemetry;
+  // Cast AMDSMI telemetry directly to UALoE telemetry since structures are now binary compatible
+  ualoe_telemetry_t* ualoe_tel = (ualoe_telemetry_t*)telemetry;
 
-    // Get the latest telemetry data directly
-    int ret = ualoe_telemetry_get(ualoe_handle, ualoe_tel);
-    if (ret != 0) {
-        return convert_errno_to_amdsmi_status(ret);
-    }
+  // Get the latest telemetry data directly
+  int ret = ualoe_telemetry_get(ualoe_handle, ualoe_tel);
+  if (ret != 0) {
+    return convert_errno_to_amdsmi_status(ret);
+  }
 
-    return AMDSMI_STATUS_SUCCESS;
+  return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t amdsmi_free_fabric_telemetry(amdsmi_processor_handle processor_handle,
-                                              amdsmi_fabric_telemetry_t *telemetry) {
-    if (!processor_handle || !telemetry) {
-        return AMDSMI_STATUS_INVAL;
-    }
+                                             amdsmi_fabric_telemetry_t* telemetry) {
+  if (!processor_handle || !telemetry) {
+    return AMDSMI_STATUS_INVAL;
+  }
 
-    // Get AMDSmiGPUDevice from processor handle using helper function
-    amd::smi::AMDSmiGPUDevice *device = nullptr;
-    amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &device);
-    if (r != AMDSMI_STATUS_SUCCESS) return r;
+  // Get AMDSmiGPUDevice from processor handle using helper function
+  amd::smi::AMDSmiGPUDevice* device = nullptr;
+  amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &device);
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
 
-    // Acquire device mutex for UALoE API protection
-    SMIGPUDEVICE_MUTEX(device->get_mutex());
+  // Acquire device mutex for UALoE API protection
+  SMIGPUDEVICE_MUTEX(device->get_mutex());
 
-    ualoe_handle_t ualoe_handle = device->get_ualoe_handle();
+  ualoe_handle_t ualoe_handle = device->get_ualoe_handle();
 
-    if (ualoe_handle == -1) {
-        return AMDSMI_STATUS_NOT_INIT;
-    }
+  if (ualoe_handle == -1) {
+    return AMDSMI_STATUS_NOT_INIT;
+  }
 
-    // Cast AMDSMI telemetry directly to UALoE telemetry since structures are now binary compatible
-    ualoe_telemetry_t *ualoe_tel = (ualoe_telemetry_t*)telemetry;
+  // Cast AMDSMI telemetry directly to UALoE telemetry since structures are now binary compatible
+  ualoe_telemetry_t* ualoe_tel = (ualoe_telemetry_t*)telemetry;
 
-    // Free UALoE telemetry directly
-    int ret = ualoe_telemetry_free(ualoe_handle, ualoe_tel);
-    if (ret != 0) {
-        return convert_errno_to_amdsmi_status(ret);
-    }
+  // Free UALoE telemetry directly
+  int ret = ualoe_telemetry_free(ualoe_handle, ualoe_tel);
+  if (ret != 0) {
+    return convert_errno_to_amdsmi_status(ret);
+  }
 
-    return AMDSMI_STATUS_SUCCESS;
+  return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t amdsmi_get_gpu_fabric_info(amdsmi_processor_handle processor_handle,
-                                           amdsmi_fabric_info_t* info)
-{
-    std::ostringstream outstream;
-    outstream   << __PRETTY_FUNCTION__ << " | ======= start =======";
+                                           amdsmi_fabric_info_t* info) {
+  std::ostringstream outstream;
+  outstream << __PRETTY_FUNCTION__ << " | ======= start =======";
+  LOG_DEBUG(outstream);
+
+  if (!processor_handle || !info) {
+    return amdsmi_status_t::AMDSMI_STATUS_INVAL;
+  }
+
+  // Get AMDSmiGPUDevice from processor handle using helper function
+  auto status_code(amdsmi_status_t::AMDSMI_STATUS_SUCCESS);
+
+  amd::smi::AMDSmiGPUDevice* device = nullptr;
+  if (auto api_status = get_gpu_device_from_handle(processor_handle, &device);
+      (api_status != amdsmi_status_t::AMDSMI_STATUS_SUCCESS)) {
+    outstream << __PRETTY_FUNCTION__ << " | get_gpu_device_from_handle() failed: " << api_status;
     LOG_DEBUG(outstream);
+    return api_status;
+  }
 
-    if (!processor_handle || !info) {
-        return amdsmi_status_t::AMDSMI_STATUS_INVAL;
-    }
+  outstream << __PRETTY_FUNCTION__ << " | get_gpu_device_from_handle(): " << device;
+  LOG_DEBUG(outstream);
 
-    // Get AMDSmiGPUDevice from processor handle using helper function
-    auto status_code(amdsmi_status_t::AMDSMI_STATUS_SUCCESS);
+  // Serialize with other per-GPU UALoE/fabric paths; fabric info is 'sysfs-only'
+  // and does not require a successful ualoe_open() netlink session (telemetry does)
+  // ualoe_handle_t ualoe_handle = device->get_ualoe_handle();
+  SMIGPUDEVICE_MUTEX(device->get_mutex());
+  status_code = device->get_fabric_info_from_ualoe(*info);
 
-    amd::smi::AMDSmiGPUDevice* device = nullptr;
-    if (auto api_status = get_gpu_device_from_handle(processor_handle, &device);
-        (api_status != amdsmi_status_t::AMDSMI_STATUS_SUCCESS)) {
-        outstream   << __PRETTY_FUNCTION__ << " | get_gpu_device_from_handle() failed: " << api_status;
-        LOG_DEBUG(outstream);
-        return api_status;
-    }
-
-    outstream << __PRETTY_FUNCTION__ << " | get_gpu_device_from_handle(): " << device;
-    LOG_DEBUG(outstream);
-
-    // Serialize with other per-GPU UALoE/fabric paths; fabric info is 'sysfs-only'
-    // and does not require a successful ualoe_open() netlink session (telemetry does)
-    // ualoe_handle_t ualoe_handle = device->get_ualoe_handle();
-    SMIGPUDEVICE_MUTEX(device->get_mutex());
-    status_code = device->get_fabric_info_from_ualoe(*info);
-
-    return status_code;
+  return status_code;
 }
-

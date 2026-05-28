@@ -32,13 +32,9 @@ auto g_amdsmi_init_ref_count = int32_t(0);
 
 namespace amd::smi {
 
-bool amdsmi_library_initialized() {
-  return (g_amdsmi_init_ref_count > 0);
-}
+bool amdsmi_library_initialized() { return (g_amdsmi_init_ref_count > 0); }
 
-void amdsmi_library_init_ref_acquire() {
-  ++g_amdsmi_init_ref_count;
-}
+void amdsmi_library_init_ref_acquire() { ++g_amdsmi_init_ref_count; }
 
 bool amdsmi_library_init_ref_release() {
   if (g_amdsmi_init_ref_count == 0) {

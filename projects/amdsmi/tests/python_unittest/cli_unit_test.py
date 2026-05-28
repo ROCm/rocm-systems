@@ -1332,11 +1332,13 @@ class TestAmdSmiCli(unittest.TestCase):
         return
 
     def test_fabric(self):
-        self.common.print_func_name('')
-        msg = f'{self.tab}### amd-smi fabric'
+        self.common.print_func_name("")
+        msg = f"{self.tab}### amd-smi fabric"
         self.common.print(msg)
 
-        cmds = self.CreateCmds('fabric', 'Fabric arguments:', 'Device Arguments:', 'Command Modifiers:', '')
+        cmds = self.CreateCmds(
+            "fabric", "Fabric arguments:", "Device Arguments:", "Command Modifiers:", ""
+        )
         self.RunCmds(cmds)
         return
 
@@ -1345,10 +1347,11 @@ class TestAmdSmiCli(unittest.TestCase):
         self.common.print_func_name("")
         msg = f"{self.tab}### amd-smi static --mem-carveout and node --gtt"
         self.common.print(msg)
-        cmds = self.CreateCmds('fabric', 'Fabric arguments:', 'Device Arguments:', 'Command Modifiers:', '')
+        cmds = self.CreateCmds(
+            "fabric", "Fabric arguments:", "Device Arguments:", "Command Modifiers:", ""
+        )
         self.RunCmds(cmds)
         return
-
 
         # Test mem-carveout display (static subcommand)
         cmd = "amd-smi static --mem-carveout"

@@ -2978,7 +2978,7 @@ class AMDSMIHelpers:
             amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_065_UCIEAA,
             amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_065_UCIEAM_A,
             amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_065_UCIEAM_C,
-            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDAN_075
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDAN_075,
         ]
 
         for temp_type in gpu_board_temp_types:

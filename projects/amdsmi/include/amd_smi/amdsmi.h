@@ -28,7 +28,6 @@
  * @brief AMD System Management Interface API
  */
 
-#include <time.h>
 #include <stdbool.h>
 #include <time.h>
 
@@ -54,7 +53,7 @@ typedef enum {
   AMDSMI_INIT_NON_AMD_GPUS = (1 << 3),      //!< Initialize Non-AMD GPUS
   AMDSMI_INIT_AMD_APUS = (AMDSMI_INIT_AMD_CPUS | AMDSMI_INIT_AMD_GPUS), /**< Initialize AMD CPUS and
                                                                            GPUS (Default option) */
-    AMDSMI_INIT_AMD_NICS       = (1 << 4)     //!< Initialize NIC's
+  AMDSMI_INIT_AMD_NICS = (1 << 4)                                       //!< Initialize NIC's
 } amdsmi_init_flags_t;
 
 /**
@@ -583,21 +582,34 @@ typedef enum {
                                                         temperature */
   AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDD_USR,        //!< VDD USR voltage regulator temperature
   AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_11_E32,   //!< VDDIO 1.1V E32 voltage regulator temperature
-  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_04_HBM_B,    //!< VDDIO 0.4V HBM B voltage regulator temperature
-  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_04_HBM_D,    //!< VDDIO 0.4V HBM D voltage regulator temperature
-  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_075_HBM_B,   //!< VDDCR 0.75V HBM B voltage regulator temperature
-  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_075_HBM_D,   //!< VDDCR 0.75V HBM D voltage regulator temperature
-  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_11_GTA_A,    //!< VDDIO 1.1V GTA A voltage regulator temperature
-  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_11_GTA_C,    //!< VDDIO 1.1V GTA C voltage regulator temperature
-  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDAN_075_GTA_A,   //!< VDDAN 0.75V GTA A voltage regulator temperature
-  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDAN_075_GTA_C,   //!< VDDAN 0.75V GTA C voltage regulator temperature
-  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_075_UCIE,    //!< VDDCR 0.75V UCIE voltage regulator temperature
-  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_065_UCIEAA,  //!< VDDIO 0.65V UCIEAA voltage regulator temperature
-  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_065_UCIEAM_A,//!< VDDIO 0.65V UCIEAM A voltage regulator temperature
-  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_065_UCIEAM_C,//!< VDDIO 0.65V UCIEAM C voltage regulator temperature
-  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDAN_075,         //!< VDDAN 0.75V voltage regulator temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_04_HBM_B,      //!< VDDIO 0.4V HBM B voltage regulator
+                                                        //!< temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_04_HBM_D,      //!< VDDIO 0.4V HBM D voltage regulator
+                                                        //!< temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_075_HBM_B,     //!< VDDCR 0.75V HBM B voltage regulator
+                                                        //!< temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_075_HBM_D,     //!< VDDCR 0.75V HBM D voltage regulator
+                                                        //!< temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_11_GTA_A,      //!< VDDIO 1.1V GTA A voltage regulator
+                                                        //!< temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_11_GTA_C,      //!< VDDIO 1.1V GTA C voltage regulator
+                                                        //!< temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDAN_075_GTA_A,     //!< VDDAN 0.75V GTA A voltage regulator
+                                                        //!< temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDAN_075_GTA_C,     //!< VDDAN 0.75V GTA C voltage regulator
+                                                        //!< temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_075_UCIE,      //!< VDDCR 0.75V UCIE voltage regulator
+                                                        //!< temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_065_UCIEAA,    //!< VDDIO 0.65V UCIEAA voltage regulator
+                                                        //!< temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_065_UCIEAM_A,  //!< VDDIO 0.65V UCIEAM A voltage regulator
+                                                        //!< temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_065_UCIEAM_C,  //!< VDDIO 0.65V UCIEAM C voltage regulator
+                                                        //!< temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDAN_075,  //!< VDDAN 0.75V voltage regulator temperature
   AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VR_LAST = 199,
-  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_LAST = AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDAN_075, //!< Last GPU board temperature type
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_LAST =
+      AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDAN_075,  //!< Last GPU board temperature type
 
   // Baseboard System temperature
   AMDSMI_TEMPERATURE_TYPE_BASEBOARD_FIRST = 200,
@@ -5438,43 +5450,45 @@ amdsmi_status_t amdsmi_clean_gpu_local_data(amdsmi_processor_handle processor_ha
  *
  */
 typedef enum {
-    AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN            = 0xFFFFFFFF,   //!< Unknown telemetry
-    AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE              = 0,    //!< UALOE telemetry
-    AMDSMI_FABRIC_TELEMETRY_CATEGORY_SWITCH             = 1,    //!< Switch telemetry
-    AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO             = 2,    //!< Crypto telemetry
-    AMDSMI_FABRIC_TELEMETRY_CATEGORY_PFC                = 3,    //!< PFC telemetry
-    AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT            = 4,    //!< Network Port telemetry
-    AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE      = 5,    //!< Derived UALOE telemetry
-    AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT    = 6,    //!< Derived Network Port telemetry
-    AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX                = 7     //!< Maximum number of categories
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN = 0xFFFFFFFF,  //!< Unknown telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE = 0,             //!< UALOE telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_SWITCH = 1,            //!< Switch telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO = 2,            //!< Crypto telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_PFC = 3,               //!< PFC telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT = 4,           //!< Network Port telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE = 5,     //!< Derived UALOE telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT = 6,   //!< Derived Network Port telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX = 7                //!< Maximum number of categories
 } amdsmi_fabric_telemetry_category_t;
 
 /**
  * @brief Fabric telemetry category bitmask constructor
  *
  */
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_UALOE             (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE)
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_SWITCH            (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_SWITCH)
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_CRYPTO            (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO)
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_PFC               (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_PFC)
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_NETPORT           (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT)
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_UALOE     (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE)
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_NETPORT   (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT)
+#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_UALOE (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE)
+#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_SWITCH (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_SWITCH)
+#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_CRYPTO (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO)
+#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_PFC (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_PFC)
+#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_NETPORT \
+  (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT)
+#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_UALOE \
+  (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE)
+#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_NETPORT \
+  (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT)
 
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_ALL_KNOWN         (AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_UALOE         | \
-                                                                 AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_SWITCH        | \
-                                                                 AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_CRYPTO        | \
-                                                                 AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_PFC           | \
-                                                                 AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_NETPORT       | \
-                                                                 AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_UALOE | \
-                                                                 AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_NETPORT)  //!< All known categories
+#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_ALL_KNOWN                                         \
+  (AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_UALOE | AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_SWITCH | \
+   AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_CRYPTO | AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_PFC |   \
+   AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_NETPORT |                                              \
+   AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_UALOE |                                        \
+   AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_NETPORT)  //!< All known categories
 
 /**
  * @brief Fabric telemetry item structure
  */
 typedef struct {
-    uint64_t id;      //!< Identifier of the telemetry item
-    uint64_t value;   //!< Value of the telemetry item
+  uint64_t id;     //!< Identifier of the telemetry item
+  uint64_t value;  //!< Value of the telemetry item
 } amdsmi_fabric_telemetry_item_t;
 
 /**
@@ -5482,10 +5496,11 @@ typedef struct {
  *
  * Labels must be null terminated
  */
-#define AMDSMI_FABRIC_LABEL_MAX_LENGTH 32      //!< Maximum length of the textual label (must be null terminated)
+#define AMDSMI_FABRIC_LABEL_MAX_LENGTH \
+  32  //!< Maximum length of the textual label (must be null terminated)
 
 typedef struct {
-    char text[AMDSMI_FABRIC_LABEL_MAX_LENGTH];  //!< Textual label content
+  char text[AMDSMI_FABRIC_LABEL_MAX_LENGTH];  //!< Textual label content
 } amdsmi_fabric_label_t;
 
 /**
@@ -5494,10 +5509,10 @@ typedef struct {
  * Collection of telemetry data items for an instance of a category of telemetry
  */
 typedef struct {
-    amdsmi_fabric_label_t name;                 //!< Name for this instance
-    unsigned logical_idx;                       //!< Logical index for this instance
-    unsigned item_count;                        //!< Number of telemetry items in the set
-    amdsmi_fabric_telemetry_item_t *items;      //!< Pointer to array of telemetry items
+  amdsmi_fabric_label_t name;             //!< Name for this instance
+  unsigned logical_idx;                   //!< Logical index for this instance
+  unsigned item_count;                    //!< Number of telemetry items in the set
+  amdsmi_fabric_telemetry_item_t* items;  //!< Pointer to array of telemetry items
 } amdsmi_fabric_telemetry_instance_t;
 
 /**
@@ -5506,11 +5521,11 @@ typedef struct {
  * Contains all telemetry for one category
  */
 typedef struct {
-    amdsmi_fabric_telemetry_category_t category;        //!< Telemetry category
-    uint64_t generation_count;                          //!< Sequence number incremented each time telemetry is written
-    struct timespec timestamp;                          //!< UTC timestamp seconds since epoch
-    unsigned instance_count;                            //!< Number of instances for this category
-    amdsmi_fabric_telemetry_instance_t *instances;      //!< Array of pointers to instances
+  amdsmi_fabric_telemetry_category_t category;  //!< Telemetry category
+  uint64_t generation_count;  //!< Sequence number incremented each time telemetry is written
+  struct timespec timestamp;  //!< UTC timestamp seconds since epoch
+  unsigned instance_count;    //!< Number of instances for this category
+  amdsmi_fabric_telemetry_instance_t* instances;  //!< Array of pointers to instances
 } amdsmi_fabric_telemetry_dataset_t;
 
 /**
@@ -5521,7 +5536,8 @@ typedef struct {
  * available for that category.
  */
 typedef struct {
-    amdsmi_fabric_telemetry_dataset_t *datasets[AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX]; //!< Dataset for each telemetry category
+  amdsmi_fabric_telemetry_dataset_t*
+      datasets[AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX];  //!< Dataset for each telemetry category
 } amdsmi_fabric_telemetry_t;
 
 /**
@@ -5545,8 +5561,8 @@ typedef struct {
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_alloc_fabric_telemetry(amdsmi_processor_handle processor_handle,
-                                                   uint32_t category_mask,
-                                                   amdsmi_fabric_telemetry_t **telemetry);
+                                              uint32_t category_mask,
+                                              amdsmi_fabric_telemetry_t** telemetry);
 
 /**
  *  @brief Get Fabric telemetry data
@@ -5565,7 +5581,7 @@ amdsmi_status_t amdsmi_alloc_fabric_telemetry(amdsmi_processor_handle processor_
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_fabric_telemetry_data(amdsmi_processor_handle processor_handle,
-                                                  amdsmi_fabric_telemetry_t *telemetry);
+                                                 amdsmi_fabric_telemetry_t* telemetry);
 
 /**
  *  @brief Get string name for a telemetry item ID
@@ -5603,84 +5619,84 @@ const char* amdsmi_fabric_telem_id_to_string(uint64_t telem_id);
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_free_fabric_telemetry(amdsmi_processor_handle processor_handle,
-                                              amdsmi_fabric_telemetry_t *telemetry);
-
+                                             amdsmi_fabric_telemetry_t* telemetry);
 
 #define AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE 32
 #define AMDSMI_FABRIC_MAX_LOCAL_GPUS 8
 
 /**
-* @brief Fabric type
-*
-* @cond @tag{gpu_bm_linux} @tag{host} @endcond
-*/
+ * @brief Fabric type
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
 typedef enum {
-    AMDSMI_FABRIC_TYPE_UALOE,
-    AMDSMI_FABRIC_TYPE_UALLINK,
-    AMDSMI_FABRIC_TYPE_UNKNOWN
+  AMDSMI_FABRIC_TYPE_UALOE,
+  AMDSMI_FABRIC_TYPE_UALLINK,
+  AMDSMI_FABRIC_TYPE_UNKNOWN
 } amdsmi_fabric_type_t;
 
 /**
-* @brief Fabric NPA address mode
-*
-* @cond @tag{gpu_bm_linux} @tag{host} @endcond
-*/
+ * @brief Fabric NPA address mode
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
 typedef enum {
-    AMDSMI_FABRIC_NPA_ADDRESS_MODE_SOURCE_ALIASING,
-    AMDSMI_FABRIC_NPA_ADDRESS_MODE_SOURCE_IDENTIFICATION,
-    AMDSMI_FABRIC_NPA_ADDRESS_MODE_UNKNOWN
+  AMDSMI_FABRIC_NPA_ADDRESS_MODE_SOURCE_ALIASING,
+  AMDSMI_FABRIC_NPA_ADDRESS_MODE_SOURCE_IDENTIFICATION,
+  AMDSMI_FABRIC_NPA_ADDRESS_MODE_UNKNOWN
 } amdsmi_fabric_npa_address_mode_t;
 
 /**
-* @brief Fabric accelerator vPoD state
-*
-* @cond @tag{gpu_bm_linux} @tag{host} @endcond
-*/
+ * @brief Fabric accelerator vPoD state
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
 typedef enum {
-    AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNCONFIGURED,
-    AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_CONFIGURED,
-    AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY,
-    AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE,
-    AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ERROR,
-    AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNKNOWN
+  AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNCONFIGURED,
+  AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_CONFIGURED,
+  AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY,
+  AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE,
+  AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ERROR,
+  AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNKNOWN
 } amdsmi_fabric_accelerator_vpod_state_t;
 
 /**
-* @brief Fabric device configuration information (version 1)
-*
-* @cond @tag{gpu_bm_linux} @tag{host} @endcond
-*/
+ * @brief Fabric device configuration information (version 1)
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
 typedef struct {
-    uint32_t accelerator_id;            //!< Accelerator identifier (range 0 to 1023)
-    amdsmi_fabric_type_t fabric_type;   //!< UALOE or UALLINK
-    uint32_t bandwidth;                 //!< Station bandwidth share in Mb/s
-    uint32_t latency;                   //!< Latency in nanoseconds (depends on switch presence and type)
-    uint8_t ppod_id[AMDSMI_MAX_UUID_ELEMENTS];      //!< Physical PoD Identifier (16 bytes)
-    uint32_t ppod_size;                 //!< Physical PoD size
-    uint32_t vpod_id;                   //!< Virtual PoD Identifier
-    uint32_t vpod_size;                 //!< Virtual PoD size
-    uint32_t vpod_active_accelerators[AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE];   //!< 1024-bit list (32 x 32-bit words): bit N set = accelerator ID N is active
-    uint32_t local_accelerators[AMDSMI_FABRIC_MAX_LOCAL_GPUS];  //!< Local Accelerator IDs
-    amdsmi_fabric_npa_address_mode_t addr_mode;                 //!< Source aliasing or identification mode
-    amdsmi_fabric_accelerator_vpod_state_t accel_state;         //!< Accelerator vPoD State
+  uint32_t accelerator_id;           //!< Accelerator identifier (range 0 to 1023)
+  amdsmi_fabric_type_t fabric_type;  //!< UALOE or UALLINK
+  uint32_t bandwidth;                //!< Station bandwidth share in Mb/s
+  uint32_t latency;  //!< Latency in nanoseconds (depends on switch presence and type)
+  uint8_t ppod_id[AMDSMI_MAX_UUID_ELEMENTS];  //!< Physical PoD Identifier (16 bytes)
+  uint32_t ppod_size;                         //!< Physical PoD size
+  uint32_t vpod_id;                           //!< Virtual PoD Identifier
+  uint32_t vpod_size;                         //!< Virtual PoD size
+  uint32_t vpod_active_accelerators
+      [AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE];  //!< 1024-bit list (32 x 32-bit words): bit
+                                                        //!< N set = accelerator ID N is active
+  uint32_t local_accelerators[AMDSMI_FABRIC_MAX_LOCAL_GPUS];  //!< Local Accelerator IDs
+  amdsmi_fabric_npa_address_mode_t addr_mode;          //!< Source aliasing or identification mode
+  amdsmi_fabric_accelerator_vpod_state_t accel_state;  //!< Accelerator vPoD State
 } amdsmi_fabric_info_v1_t;
 
 typedef struct {
-    uint32_t version;
-    union fabric_info_ {
-        amdsmi_fabric_info_v1_t v1;
-    } fabric_version;
+  uint32_t version;
+  union fabric_info_ {
+    amdsmi_fabric_info_v1_t v1;
+  } fabric_version;
 } amdsmi_fabric_info_ver_t;
-
 
 /**
  * @brief Fabric device information structure
  *
  */
 typedef struct {
-    amdsmi_bdf_t bdf;                       //!< BDF (Bus, Device, Function) of the Fabric device
-    amdsmi_fabric_info_ver_t fabric_info;   //!< Fabric information structure (version 1)
-    uint32_t reserved[15];                  //!< Reserved for future use
+  amdsmi_bdf_t bdf;                      //!< BDF (Bus, Device, Function) of the Fabric device
+  amdsmi_fabric_info_ver_t fabric_info;  //!< Fabric information structure (version 1)
+  uint32_t reserved[15];                 //!< Reserved for future use
 } amdsmi_fabric_info_t;
 
 /**

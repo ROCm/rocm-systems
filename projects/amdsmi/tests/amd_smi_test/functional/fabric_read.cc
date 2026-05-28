@@ -20,21 +20,21 @@
  * THE SOFTWARE.
  */
 
+#include "fabric_read.h"
+
+#include <gtest/gtest.h>
+
 #include <cstdint>
 #include <iostream>
 
-#include <gtest/gtest.h>
 #include "amd_smi/amdsmi.h"
-#include "fabric_read.h"
 
 // Category mask covering all telemetry categories
 static constexpr uint32_t kAllCategories =
-    AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_UALOE           |
-    AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_SWITCH          |
-    AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_CRYPTO          |
-    AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_PFC             |
-    AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_NETPORT         |
-    AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_UALOE   |
+    AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_UALOE | AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_SWITCH |
+    AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_CRYPTO | AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_PFC |
+    AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_NETPORT |
+    AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_UALOE |
     AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_NETPORT;
 
 TestFabricRead::TestFabricRead() : TestBase() {
@@ -46,17 +46,14 @@ TestFabricRead::TestFabricRead() : TestBase() {
       "amdsmi_free_fabric_telemetry(), and amdsmi_fabric_telem_id_to_string().");
 }
 
-TestFabricRead::~TestFabricRead(void) {
-}
+TestFabricRead::~TestFabricRead(void) {}
 
 void TestFabricRead::SetUp(void) {
   TestBase::SetUp();
   return;
 }
 
-void TestFabricRead::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestFabricRead::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestFabricRead::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -74,9 +71,7 @@ void TestFabricRead::Run(void) {
 
   TestBase::Run();
   if (setup_failed_) {
-    IF_VERB(STANDARD) {
-      std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl; }
     return;
   }
 
@@ -85,9 +80,7 @@ void TestFabricRead::Run(void) {
     PrintDeviceHeader(device);
 
     // ── amdsmi_get_gpu_fabric_info ─────────────────────────────────────────
-    IF_VERB(STANDARD) {
-      std::cout << "\t** Testing amdsmi_get_gpu_fabric_info()" << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "\t** Testing amdsmi_get_gpu_fabric_info()" << std::endl; }
 
     amdsmi_fabric_info_t fabric_info = {};
     err = amdsmi_get_gpu_fabric_info(device, &fabric_info);
@@ -95,7 +88,8 @@ void TestFabricRead::Run(void) {
     if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) {
         std::cout << "\t**amdsmi_get_gpu_fabric_info() is not supported"
-                     " on this system" << std::endl;
+                     " on this system"
+                  << std::endl;
       }
       continue;
     } else if (err != AMDSMI_STATUS_SUCCESS && err != AMDSMI_STATUS_NO_DATA) {
@@ -104,19 +98,20 @@ void TestFabricRead::Run(void) {
       IF_VERB(STANDARD) {
         if (err == AMDSMI_STATUS_NO_DATA) {
           std::cout << "\t**amdsmi_get_gpu_fabric_info() returned NO_DATA "
-                       "(no UALoE sysfs content); BDF may still be valid" << std::endl;
+                       "(no UALoE sysfs content); BDF may still be valid"
+                    << std::endl;
         }
-        const auto &v1 = fabric_info.fabric_info.fabric_version.v1;
-        std::cout << "\t\tversion:        " << fabric_info.fabric_info.version  << "\n"
-                  << "\t\taccelerator_id: " << v1.accelerator_id               << "\n"
-                  << "\t\tfabric_type:    " << v1.fabric_type                  << "\n"
-                  << "\t\tbandwidth:      " << v1.bandwidth  << " Mb/s"        << "\n"
-                  << "\t\tlatency:        " << v1.latency    << " ns"          << "\n"
-                  << "\t\tvpod_id:        " << v1.vpod_id                      << "\n"
-                  << "\t\tvpod_size:      " << v1.vpod_size                    << "\n"
-                  << "\t\tppod_size:      " << v1.ppod_size                    << "\n"
-                  << "\t\taddr_mode:      " << v1.addr_mode                    << "\n"
-                  << "\t\taccel_state:    " << v1.accel_state                  << "\n";
+        const auto& v1 = fabric_info.fabric_info.fabric_version.v1;
+        std::cout << "\t\tversion:        " << fabric_info.fabric_info.version << "\n"
+                  << "\t\taccelerator_id: " << v1.accelerator_id << "\n"
+                  << "\t\tfabric_type:    " << v1.fabric_type << "\n"
+                  << "\t\tbandwidth:      " << v1.bandwidth << " Mb/s" << "\n"
+                  << "\t\tlatency:        " << v1.latency << " ns" << "\n"
+                  << "\t\tvpod_id:        " << v1.vpod_id << "\n"
+                  << "\t\tvpod_size:      " << v1.vpod_size << "\n"
+                  << "\t\tppod_size:      " << v1.ppod_size << "\n"
+                  << "\t\taddr_mode:      " << v1.addr_mode << "\n"
+                  << "\t\taccel_state:    " << v1.accel_state << "\n";
       }
     }
 
@@ -128,16 +123,18 @@ void TestFabricRead::Run(void) {
     IF_VERB(STANDARD) {
       std::cout << "\t** Testing amdsmi_alloc_fabric_telemetry() / "
                    "amdsmi_get_fabric_telemetry_data() / "
-                   "amdsmi_free_fabric_telemetry()" << std::endl;
+                   "amdsmi_free_fabric_telemetry()"
+                << std::endl;
     }
 
-    amdsmi_fabric_telemetry_t *tel = nullptr;
+    amdsmi_fabric_telemetry_t* tel = nullptr;
     err = amdsmi_alloc_fabric_telemetry(device, kAllCategories, &tel);
 
     if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) {
         std::cout << "\t**amdsmi_alloc_fabric_telemetry() is not supported"
-                     " on this machine" << std::endl;
+                     " on this machine"
+                  << std::endl;
       }
       continue;
     }
@@ -148,7 +145,8 @@ void TestFabricRead::Run(void) {
     if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) {
         std::cout << "\t**amdsmi_get_fabric_telemetry_data() is not supported"
-                     " on this machine" << std::endl;
+                     " on this machine"
+                  << std::endl;
       }
       // Still free the allocated buffer before continuing
       amdsmi_free_fabric_telemetry(device, tel);
@@ -160,26 +158,22 @@ void TestFabricRead::Run(void) {
       // Walk datasets and print a sample of telemetry items
       for (uint32_t cat = 0; cat < AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX; ++cat) {
         if (!tel->datasets[cat]) continue;
-        const auto &ds = *tel->datasets[cat];
+        const auto& ds = *tel->datasets[cat];
         std::cout << "\t\tcategory[" << cat << "]"
-                  << "  instances=" << ds.instance_count
-                  << "  gen_count=" << ds.generation_count << "\n";
+                  << "  instances=" << ds.instance_count << "  gen_count=" << ds.generation_count
+                  << "\n";
 
         for (uint32_t inst = 0; inst < ds.instance_count; ++inst) {
-          const auto &in = ds.instances[inst];
-          std::cout << "\t\t  instance[" << inst << "] "
-                    << in.name.text
-                    << "  logical_idx=" << in.logical_idx
-                    << "  items=" << in.item_count << "\n";
+          const auto& in = ds.instances[inst];
+          std::cout << "\t\t  instance[" << inst << "] " << in.name.text
+                    << "  logical_idx=" << in.logical_idx << "  items=" << in.item_count << "\n";
 
           // ── amdsmi_fabric_telem_id_to_string ─────────────────────────────
           for (uint32_t item = 0; item < in.item_count; ++item) {
-            const auto &it = in.items[item];
-            const char *name = amdsmi_fabric_telem_id_to_string(it.id);
-            std::cout << "\t\t    [" << item << "] id=0x" << std::hex << it.id
-                      << std::dec
-                      << "  name=" << (name ? name : "NULL")
-                      << "  value=" << it.value << "\n";
+            const auto& it = in.items[item];
+            const char* name = amdsmi_fabric_telem_id_to_string(it.id);
+            std::cout << "\t\t    [" << item << "] id=0x" << std::hex << it.id << std::dec
+                      << "  name=" << (name ? name : "NULL") << "  value=" << it.value << "\n";
 
             // amdsmi_fabric_telem_id_to_string must return a non-null string
             // for any valid id obtained from the driver

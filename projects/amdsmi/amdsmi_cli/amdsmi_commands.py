@@ -12870,7 +12870,9 @@ class AMDSMICommands:
                 raw = amdsmi_interface.amdsmi_get_gpu_fabric_info(gpu_handle)
                 ppod_uuid = _fabric_ppod_id_to_uuid_string(raw["ppod_id"])
                 local_accels_line = _fabric_local_accelerators_to_line(raw["local_accelerators"])
-                local_active_rows = _fabric_local_active_accelerators_rows(raw["vpod_active_accelerators"])
+                local_active_rows = _fabric_local_active_accelerators_rows(
+                    raw["vpod_active_accelerators"]
+                )
                 if local_active_rows is None:
                     local_active_human = "N/A"
                     local_active_json = "N/A"
@@ -12881,57 +12883,59 @@ class AMDSMICommands:
                     local_active_csv = "; ".join(local_active_rows)
                 if self.logger.is_human_readable_format():
                     fabric_info = {
-                        "bdf":              raw["bdf"],
-                        "version":          raw["version"],
-                        "accelerator_id":   raw["accelerator_id"],
-                        "fabric_type":      raw["fabric_type"],
-                        "bandwidth":        f"{raw['bandwidth']} Mb/s",
-                        "latency":          f"{raw['latency']} ns",
-                        "ppod_id":          ppod_uuid,
-                        "ppod_size":        raw["ppod_size"],
-                        "vpod_id":          raw["vpod_id"],
-                        "vpod_size":        raw["vpod_size"],
+                        "bdf": raw["bdf"],
+                        "version": raw["version"],
+                        "accelerator_id": raw["accelerator_id"],
+                        "fabric_type": raw["fabric_type"],
+                        "bandwidth": f"{raw['bandwidth']} Mb/s",
+                        "latency": f"{raw['latency']} ns",
+                        "ppod_id": ppod_uuid,
+                        "ppod_size": raw["ppod_size"],
+                        "vpod_id": raw["vpod_id"],
+                        "vpod_size": raw["vpod_size"],
                         "local_accelerators": local_accels_line,
                         "local_active_accelerators": local_active_human,
-                        "addr_mode":        raw["addr_mode"],
-                        "accel_state":      raw["accel_state"],
+                        "addr_mode": raw["addr_mode"],
+                        "accel_state": raw["accel_state"],
                     }
                 elif self.logger.is_json_format():
                     fabric_info = {
-                        "bdf":              raw["bdf"],
-                        "version":          raw["version"],
-                        "accelerator_id":   raw["accelerator_id"],
-                        "fabric_type":      raw["fabric_type"],
-                        "bandwidth":        {"value": raw["bandwidth"], "unit": "Mb/s"},
-                        "latency":          {"value": raw["latency"],   "unit": "ns"},
-                        "ppod_id":          ppod_uuid,
-                        "ppod_size":        raw["ppod_size"],
-                        "vpod_id":          raw["vpod_id"],
-                        "vpod_size":        raw["vpod_size"],
+                        "bdf": raw["bdf"],
+                        "version": raw["version"],
+                        "accelerator_id": raw["accelerator_id"],
+                        "fabric_type": raw["fabric_type"],
+                        "bandwidth": {"value": raw["bandwidth"], "unit": "Mb/s"},
+                        "latency": {"value": raw["latency"], "unit": "ns"},
+                        "ppod_id": ppod_uuid,
+                        "ppod_size": raw["ppod_size"],
+                        "vpod_id": raw["vpod_id"],
+                        "vpod_size": raw["vpod_size"],
                         "local_accelerators": local_accels_line,
                         "local_active_accelerators": local_active_json,
-                        "addr_mode":        raw["addr_mode"],
-                        "accel_state":      raw["accel_state"],
+                        "addr_mode": raw["addr_mode"],
+                        "accel_state": raw["accel_state"],
                     }
                 elif self.logger.is_csv_format():
                     fabric_info = {
-                        "bdf":              raw["bdf"],
-                        "version":          raw["version"],
-                        "accelerator_id":   raw["accelerator_id"],
-                        "fabric_type":      raw["fabric_type"],
-                        "bandwidth_mb_s":   raw["bandwidth"],
-                        "latency_ns":       raw["latency"],
-                        "ppod_id":          ppod_uuid,
-                        "ppod_size":        raw["ppod_size"],
-                        "vpod_id":          raw["vpod_id"],
-                        "vpod_size":        raw["vpod_size"],
+                        "bdf": raw["bdf"],
+                        "version": raw["version"],
+                        "accelerator_id": raw["accelerator_id"],
+                        "fabric_type": raw["fabric_type"],
+                        "bandwidth_mb_s": raw["bandwidth"],
+                        "latency_ns": raw["latency"],
+                        "ppod_id": ppod_uuid,
+                        "ppod_size": raw["ppod_size"],
+                        "vpod_id": raw["vpod_id"],
+                        "vpod_size": raw["vpod_size"],
                         "local_accelerators": local_accels_line,
                         "local_active_accelerators": local_active_csv,
-                        "addr_mode":        raw["addr_mode"],
-                        "accel_state":      raw["accel_state"],
+                        "addr_mode": raw["addr_mode"],
+                        "accel_state": raw["accel_state"],
                     }
             except amdsmi_exception.AmdSmiLibraryException as e:
-                logging.debug("Failed to get fabric info for GPU %s | %s", gpu_id, e.get_error_info())
+                logging.debug(
+                    "Failed to get fabric info for GPU %s | %s", gpu_id, e.get_error_info()
+                )
             values["fabric_info"] = fabric_info
 
         # --topology ─────────────────────────────────────────────────────────
@@ -12939,19 +12943,21 @@ class AMDSMICommands:
             fabric_telemetry = "N/A"
             try:
                 category_mask = (
-                    amdsmi_interface.amdsmi_wrapper.AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_UALOE |
-                    amdsmi_interface.amdsmi_wrapper.AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_SWITCH |
-                    amdsmi_interface.amdsmi_wrapper.AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_CRYPTO |
-                    amdsmi_interface.amdsmi_wrapper.AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_PFC |
-                    amdsmi_interface.amdsmi_wrapper.AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_NETPORT |
-                    amdsmi_interface.amdsmi_wrapper.AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_UALOE |
-                    amdsmi_interface.amdsmi_wrapper.AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_NETPORT
+                    amdsmi_interface.amdsmi_wrapper.AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_UALOE
+                    | amdsmi_interface.amdsmi_wrapper.AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_SWITCH
+                    | amdsmi_interface.amdsmi_wrapper.AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_CRYPTO
+                    | amdsmi_interface.amdsmi_wrapper.AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_PFC
+                    | amdsmi_interface.amdsmi_wrapper.AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_NETPORT
+                    | amdsmi_interface.amdsmi_wrapper.AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_UALOE
+                    | amdsmi_interface.amdsmi_wrapper.AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_NETPORT
                 )
                 fabric_telemetry = amdsmi_interface.amdsmi_get_fabric_telemetry(
                     gpu_handle, category_mask
                 )
             except amdsmi_exception.AmdSmiLibraryException as e:
-                logging.debug("Failed to get fabric telemetry for GPU %s | %s", gpu_id, e.get_error_info())
+                logging.debug(
+                    "Failed to get fabric telemetry for GPU %s | %s", gpu_id, e.get_error_info()
+                )
             values["fabric_telemetry"] = fabric_telemetry
 
         self.logger.store_output(gpu_handle, "fabric", values)
@@ -12960,7 +12966,6 @@ class AMDSMICommands:
             return
 
         self.logger.print_output(multiple_device_enabled=False)
-
 
     def rocm_smi(self, args):
         """

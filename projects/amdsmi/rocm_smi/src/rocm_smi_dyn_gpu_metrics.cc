@@ -224,8 +224,8 @@ auto AMDGpuDynamicMetrics_t::parse_from_buffer(const std::byte* data, std::size_
       return RSMI_STATUS_UNEXPECTED_SIZE;
     }
 
-    // Schema lookup - use actual type from driver data, not schema type (schema_type_validate = false)
-    // This allows different pmfw versions having different data types for same attribute ID
+    // Schema lookup - use actual type from driver data, not schema type (schema_type_validate =
+    // false) This allows different pmfw versions having different data types for same attribute ID
     AMDGpuMetricAttributeInstance_t inst{};
     status = schema_lookup_instance(attr_id, attr_type, inst, false);
     if (status != RSMI_STATUS_SUCCESS) {

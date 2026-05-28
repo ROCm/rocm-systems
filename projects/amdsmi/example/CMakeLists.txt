@@ -88,12 +88,7 @@ endif()
 set(SMI_AINIC_EXAMPLE_EXE "amd_smi_ainic_ex")
 add_executable(${SMI_AINIC_EXAMPLE_EXE} amd_smi_nic.cc)
 target_compile_definitions(${SMI_AINIC_EXAMPLE_EXE} PRIVATE ENABLE_ESMI_LIB)
-target_include_directories(
-    ${SMI_AINIC_EXAMPLE_EXE}
-    PRIVATE
-        ${ROCM_DIR}/include
-        ${CMAKE_SOURCE_DIR}/src/nic/ai-nic
-)
+target_include_directories(${SMI_AINIC_EXAMPLE_EXE} PRIVATE ${ROCM_DIR}/include ${CMAKE_SOURCE_DIR}/src/nic/ai-nic)
 target_link_libraries(${SMI_AINIC_EXAMPLE_EXE} PRIVATE ${_AMDSMI_LINK_TARGET})
 target_link_directories(${SMI_AINIC_EXAMPLE_EXE} PRIVATE ${ROCM_DIR}/lib)
 

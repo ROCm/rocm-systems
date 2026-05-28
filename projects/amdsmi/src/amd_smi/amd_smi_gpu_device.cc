@@ -51,12 +51,6 @@
 #include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_utils.h"
 
-#include "amd_smi/impl/amd_smi_utils.h"
-#include "amd_smi/impl/fdinfo.h"
-#include "rocm_smi/rocm_smi_kfd.h"
-#include "rocm_smi/rocm_smi_logger.h"
-#include "rocm_smi/rocm_smi_utils.h"
-
 namespace amd::smi {
 
 // Constant for KFD context directory prefix
@@ -1206,8 +1200,8 @@ auto AMDSmiGPUDevice::get_fabric_info_from_ualoe(amdsmi_fabric_info_t& fabric_in
   }
 
   /**
-   * For cases where the 'ualink' directory exists in the sysfs path, but we can read any usable content,
-   * return AMDSMI_STATUS_NO_DATA.
+   * For cases where the 'ualink' directory exists in the sysfs path, but we can read any usable
+   * content, return AMDSMI_STATUS_NO_DATA.
    */
   fabric_info = local_fabric_info;
   if (link_info_files_in_scope == 0) {
@@ -1215,8 +1209,9 @@ auto AMDSmiGPUDevice::get_fabric_info_from_ualoe(amdsmi_fabric_info_t& fabric_in
   }
 
   /**
-   * For cases where the 'ualink' directory exists in the sysfs path, and we can read all files with usable content,
-   * return AMDSMI_STATUS_SUCCESS. Otherwise, return AMDSMI_STATUS_UNEXPECTED_DATA (some files are missing or empty).
+   * For cases where the 'ualink' directory exists in the sysfs path, and we can read all files with
+   * usable content, return AMDSMI_STATUS_SUCCESS. Otherwise, return AMDSMI_STATUS_UNEXPECTED_DATA
+   * (some files are missing or empty).
    */
   return (link_info_files_with_usable_content == link_info_files_in_scope)
              ? amdsmi_status_t::AMDSMI_STATUS_SUCCESS

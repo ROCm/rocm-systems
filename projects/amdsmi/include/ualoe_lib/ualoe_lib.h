@@ -48,9 +48,10 @@
 #ifndef UALOE_LIB_H
 #define UALOE_LIB_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <time.h>
+
 #include "ifoe_telemetry_hostapp.h"
 #include "ualoe_mcdi_defs.h"
 
@@ -267,15 +268,15 @@ typedef struct ualoe_crypto_key_s {
 /** Flags indicating items that have been configured by a client (as opposed
  * to being at the firmware default)
  */
-#define IFOE_ACCELERATOR_ID_CONFIGURED (1<<0)
-#define IFOE_VIRT_MODE_CONFIGURED (1<<2)
-#define IFOE_ENCAP_MODE_CONFIGURED (1<<3)
-#define IFOE_FAILOVER_MODE_CONFIGURED (1<<4)
-#define IFOE_CRYPTO_MODE_CONFIGURED (1<<5)
-#define IFOE_LOOPBACK_MODE_CONFIGURED (1<<6)
-#define IFOE_ACTIVE_ACCELERATORS_CONFIGURED (1<<7)
-#define IFOE_LOCAL_ACCELERATORS_CONFIGURED (1<<8)
-#define IFOE_ENABLED_ACCELERATORS_CONFIGURED (1<<9)
+#define IFOE_ACCELERATOR_ID_CONFIGURED (1 << 0)
+#define IFOE_VIRT_MODE_CONFIGURED (1 << 2)
+#define IFOE_ENCAP_MODE_CONFIGURED (1 << 3)
+#define IFOE_FAILOVER_MODE_CONFIGURED (1 << 4)
+#define IFOE_CRYPTO_MODE_CONFIGURED (1 << 5)
+#define IFOE_LOOPBACK_MODE_CONFIGURED (1 << 6)
+#define IFOE_ACTIVE_ACCELERATORS_CONFIGURED (1 << 7)
+#define IFOE_LOCAL_ACCELERATORS_CONFIGURED (1 << 8)
+#define IFOE_ENABLED_ACCELERATORS_CONFIGURED (1 << 9)
 
 /** Structure defining the global IFoE configuration */
 typedef struct ifoe_config_s {
@@ -311,7 +312,7 @@ typedef struct ifoe_config_s {
 typedef struct ifoe_station_desc_s {
   /** Label of IFoE station */
   ualoe_label_t name;
-  /** Logical index of the IFoE Station within the device. Logical indices are 
+  /** Logical index of the IFoE Station within the device. Logical indices are
    * numbered sequentially from zero. */
   unsigned logical_idx;
   /** Physical index of the IFoE Station within the device */
@@ -346,7 +347,7 @@ typedef struct ifoe_station_state_s {
    * is degraded due to an issue with one of the underlying Network Ports,
    * this bandwidth will be reduced. */
   unsigned bandwidth;
-  /** Logical index of the IFoE Station within the device. Logical indices are 
+  /** Logical index of the IFoE Station within the device. Logical indices are
    * numbered sequentially from zero. */
   unsigned logical_idx;
   /** Physical index of the IFoE Station within the device */
@@ -360,7 +361,7 @@ typedef struct ifoe_station_state_s {
     /** When true, indicates that there is a fault on the network port. */
     bool fault;
     /** Count of number of streams currently in a failover state which have been
-     * remapped to an alternatve Network Port. */
+     * remapped to an alternative Network Port. */
     unsigned streams_failover;
     /** Count of number of streams currently in a paused state due to a
      * retransmission timeout where failover was either not possible or
@@ -436,9 +437,9 @@ typedef struct ifoe_netport_state_s {
 
 /** Enum defining the type of used network address */
 typedef enum ifoe_network_addr_type {
-    IFOE_NETWORK_ADDR_TYPE_MAC,
-    IFOE_NETWORK_ADDR_TYPE_IP,
-    IFOE_NETWORK_ADDR_TYPE_MAC_IP,
+  IFOE_NETWORK_ADDR_TYPE_MAC,
+  IFOE_NETWORK_ADDR_TYPE_IP,
+  IFOE_NETWORK_ADDR_TYPE_MAC_IP,
 } ifoe_network_addr_type_e;
 
 /** Structure defining a mapping from accelerator ID to destination address */
@@ -464,7 +465,7 @@ typedef enum ualoe_telemetry_category {
 } ualoe_telemetry_category_e;
 
 /** Define used to construct a bitmask for selected Telemetry categories */
-#define UALOE_TELEMETRY_CATEGORY_MASK(cat) (1U << UALOE_TELEMETRY_CATEGORY_ ## cat)
+#define UALOE_TELEMETRY_CATEGORY_MASK(cat) (1U << UALOE_TELEMETRY_CATEGORY_##cat)
 
 /** Definition of an item of telemetry */
 typedef struct ualoe_telemetry_item_s {
@@ -483,7 +484,7 @@ typedef struct ualoe_telemetry_instance_s {
   /** Number of telemetry items in the set */
   unsigned item_count;
   /** Set of telemetry items */
-  ualoe_telemetry_item_t *items;
+  ualoe_telemetry_item_t* items;
 } ualoe_telemetry_instance_t;
 
 /** Definition of a Telemetry dataset. This contains the all telemetry for one
@@ -499,7 +500,7 @@ typedef struct ualoe_telemetry_dataset_s {
   /** Number of instances of telemetry data for this category */
   unsigned instance_count;
   /** Array of instances of data */
-  ualoe_telemetry_instance_t *instances;
+  ualoe_telemetry_instance_t* instances;
 } ualoe_telemetry_dataset_t;
 
 /** Top level structure defining the telemetry data for IFoE. Telemetry data
@@ -540,7 +541,7 @@ typedef struct ualoe_telemetry_dataset_s {
  */
 typedef struct ualoe_telemetry_s {
   /** Dataset for each category of telemetry */
-  ualoe_telemetry_dataset_t *datasets[UALOE_TELEMETRY_CATEGORY_MAX];
+  ualoe_telemetry_dataset_t* datasets[UALOE_TELEMETRY_CATEGORY_MAX];
 } ualoe_telemetry_t;
 
 /** Type for an L2Ping handle. */
@@ -579,7 +580,7 @@ typedef struct ualoe_ping_netport_results_s {
    * indicates all pings completed successfully. */
   uint8_t resp_failures;
   /** Count of non-IFOE failures on the non-IFoE traffic PFC channel. A value
-   * of 0 indicates all pings completed sucessfully. */
+   * of 0 indicates all pings completed successfully. */
   uint8_t non_ifoe_failures;
 } ualoe_ping_netport_result_t;
 
@@ -591,7 +592,7 @@ typedef struct ualoe_ping_accel_result_s {
   /** Array of network port results. This is either indexed by logical network
    * port index or, if a specific network port was specified for the ping test,
    * a single result for that network port. */
-  ualoe_ping_netport_result_t *netports;
+  ualoe_ping_netport_result_t* netports;
 } ualoe_ping_accel_result_t;
 
 /** Context for a L2Ping test. */
@@ -613,8 +614,8 @@ typedef struct ualoe_ping_s {
    * each ualoe_ping_netport_result_t array. */
   unsigned num_netports;
   /** Array of results for each accelerator included in the test. If a specific
-   * acclerator was defined in the test spec, this will be an array of 1 entry. */
-  ualoe_ping_accel_result_t *accels;
+   * accelerator was defined in the test spec, this will be an array of 1 entry. */
+  ualoe_ping_accel_result_t* accels;
 } ualoe_ping_t;
 
 /** Enumeration defining the different UALoE events */
@@ -670,7 +671,7 @@ typedef struct ualoe_event_s {
         /** When true, indicates that there is a fault on the network port. */
         bool fault;
         /** Count of number of streams currently in a failover state which have
-         * been remapped to an alternatve Network Port. */
+         * been remapped to an alternative Network Port. */
         unsigned streams_failover;
         /** Count of number of streams currently in a paused state due to a
          * retransmission timeout where failover was either not possible or
@@ -693,7 +694,6 @@ typedef struct ualoe_event_s {
   } u;
 } ualoe_event_t;
 
-
 /* ------------------- */
 /* Function Prototypes */
 /* ------------------- */
@@ -711,7 +711,7 @@ typedef struct ualoe_event_s {
  * @param handle Handle to be used for subsequent configuration calls
  * @return 0 on success. errno on failure.
  */
-int ualoe_open(const char *pci_addr, ualoe_handle_t *handle);
+int ualoe_open(const char* pci_addr, ualoe_handle_t* handle);
 
 /**
  * @brief Close a connection to an UALoE driver.
@@ -731,9 +731,8 @@ int ualoe_close(ualoe_handle_t handle);
  * @param telemetry_version Pointer to structure for Telemetry version
  * @return 0 on success. errno on failure.
  */
-int ualoe_get_version(ualoe_handle_t handle, ualoe_version_t *lib_version,
-                      ualoe_version_t *fw_version,
-                      ualoe_version_t *telemetry_version);
+int ualoe_get_version(ualoe_handle_t handle, ualoe_version_t* lib_version,
+                      ualoe_version_t* fw_version, ualoe_version_t* telemetry_version);
 
 /**
  * @brief Reset the UALoE datapath and configuration. The behaviour of this
@@ -750,7 +749,7 @@ int ualoe_get_version(ualoe_handle_t handle, ualoe_version_t *lib_version,
  * clear the set of enabled accelerators, clear the crypto keys, disable
  * encryption and return the configuration phase back to Tenant phase.
  * This is a blocking call and will only return when complete.
- * 
+ *
  * @param handle UALoE driver handle
  * @return 0 on success. errno on failure.
  */
@@ -766,13 +765,13 @@ int ualoe_reset(ualoe_handle_t handle);
  * @param capabilities Pointer to capabilities structure to be populated
  * @return 0 on success. errno on failure.
  */
-int ualoe_get_capabilities(ualoe_handle_t handle, ualoe_capabilities_t *capabilities);
+int ualoe_get_capabilities(ualoe_handle_t handle, ualoe_capabilities_t* capabilities);
 
 /**
  * @brief Set an UALoE instance's identity, specifically the ID for the local
  * accelerator.
  * This command is only permitted in the Provider configuration phase.
- * 
+ *
  * @note This command is not required long-term as this information will be
  * retrieved through a different mechanism.
  *
@@ -821,8 +820,7 @@ int ualoe_set_accelerator_config(ualoe_handle_t handle, unsigned bitmask_size,
  * @param loopback_mode Network port loopback mode
  */
 int ualoe_set_ifoe_config(ualoe_handle_t handle, ifoe_virt_mode_e virt_mode,
-                          ifoe_encap_type_e encap_type,
-                          ifoe_failover_mode_e failover_mode,
+                          ifoe_encap_type_e encap_type, ifoe_failover_mode_e failover_mode,
                           ifoe_loopback_mode_e loopback_mode);
 
 /**
@@ -840,8 +838,7 @@ int ualoe_set_ifoe_config(ualoe_handle_t handle, ifoe_virt_mode_e virt_mode,
  * @param enabled_accelerator_bitmask Bitmask of the Accelerators enabled for
  * communication
  */
-int ualoe_get_ifoe_config(ualoe_handle_t handle, ifoe_config_t *config,
-                          unsigned bitmask_size,
+int ualoe_get_ifoe_config(ualoe_handle_t handle, ifoe_config_t* config, unsigned bitmask_size,
                           uint32_t active_accelerator_bitmask[],
                           uint32_t local_accelerator_bitmask[],
                           uint32_t enabled_accelerator_bitmask[]);
@@ -867,8 +864,7 @@ int ualoe_next_config_phase(ualoe_handle_t handle, ualoe_config_phase_e next_pha
  * @param phase Pointer to location to return current configuration phase
  * @return 0 on success. errno on failure
  */
-int ualoe_get_current_config_phase(ualoe_handle_t handle,
-                                   ualoe_config_phase_e *phase);
+int ualoe_get_current_config_phase(ualoe_handle_t handle, ualoe_config_phase_e* phase);
 
 /**
  * @brief Configure the set of accelerator IDs that should be enabled for
@@ -896,7 +892,7 @@ int ualoe_enable_accelerators(ualoe_handle_t handle, unsigned bitmask_size,
  * is carried out by the tenant in virtualization mode. In bare-metal mode
  * mode the provider will carry out this operation but may do so only after
  * completing the Provider configuration and transitioning to the tenant
- * configuration phase. Encrpytion can be disabled or enabled with one of
+ * configuration phase. Encryption can be disabled or enabled with one of
  * the encryption modes supported by the datapath.
  * This command is only permitted in the Tenant configuration phase and if
  * attempted in any other phase, will fail with EBUSY.
@@ -920,7 +916,7 @@ int ualoe_config_crypto(ualoe_handle_t handle, ualoe_crypto_mode_e mode);
  * @return 0 on success. errno on failure
  */
 int ualoe_set_tx_crypto_key(ualoe_handle_t handle, ualoe_crypto_key_id_e key_id,
-                            ualoe_crypto_key_t *key);
+                            ualoe_crypto_key_t* key);
 
 /**
  * @brief Disables the specified key for RX decryption. For the UALoE receive
@@ -936,8 +932,7 @@ int ualoe_set_tx_crypto_key(ualoe_handle_t handle, ualoe_crypto_key_id_e key_id,
  * @param key_id Key ID to be used for TX encryption
  * @return 0 on success. errno on failure
  */
-int ualoe_disable_rx_crypto_key(ualoe_handle_t handle,
-                                ualoe_crypto_key_id_e key_id);
+int ualoe_disable_rx_crypto_key(ualoe_handle_t handle, ualoe_crypto_key_id_e key_id);
 
 /**
  * @brief Set and enable an encryption key for UALoE RX / ingress datapath.
@@ -954,7 +949,7 @@ int ualoe_disable_rx_crypto_key(ualoe_handle_t handle,
  * @return 0 on success. errno on failure
  */
 int ualoe_set_rx_crypto_key(ualoe_handle_t handle, ualoe_crypto_key_id_e key_id,
-                            ualoe_crypto_key_t *key);
+                            ualoe_crypto_key_t* key);
 
 /**
  * @brief Get a set of descriptors for the IFoE Stations in this device. Each
@@ -971,8 +966,7 @@ int ualoe_set_rx_crypto_key(ualoe_handle_t handle, ualoe_crypto_key_id_e key_id,
  * caller and will be populated by this function.
  * @return 0 on success. errno on failure
  */
-int ifoe_get_station_list(ualoe_handle_t handle, unsigned desc_count,
-                          ifoe_station_desc_t descs[]);
+int ifoe_get_station_list(ualoe_handle_t handle, unsigned desc_count, ifoe_station_desc_t descs[]);
 
 /**
  * @brief Function to control an IFoE station. This can be used to
@@ -985,8 +979,7 @@ int ifoe_get_station_list(ualoe_handle_t handle, unsigned desc_count,
  * @param state The state to set the IFoE station into
  * @return 0 on success. errno on failure
  */
-int ifoe_station_ctrl(ualoe_handle_t handle, unsigned station_idx,
-                      ifoe_station_state_e state);
+int ifoe_station_ctrl(ualoe_handle_t handle, unsigned station_idx, ifoe_station_state_e state);
 
 /**
  * @brief Function to get information about the state of an IFoE Station.
@@ -999,7 +992,7 @@ int ifoe_station_ctrl(ualoe_handle_t handle, unsigned station_idx,
  * @return 0 on success. errno on failure
  */
 int ifoe_station_get_state(ualoe_handle_t handle, unsigned station_idx,
-                           ifoe_station_state_t *state);
+                           ifoe_station_state_t* state);
 
 /**
  * @brief Set the Path to Port mapping for the IFoE datapath. This can be done
@@ -1022,11 +1015,9 @@ int ifoe_station_get_state(ualoe_handle_t handle, unsigned station_idx,
  * @param map Array of Network Port logical indices, indexed by the IFoE Path.
  * @return 0 on success. errno on failure
  */
-int ifoe_set_path_to_port_map(ualoe_handle_t handle,
-                              bool specify_station, bool specify_accelerator,
-                              bool reenable_streams, unsigned station_idx,
-                              unsigned accelerator_id, unsigned path_count,
-                              unsigned map[]);
+int ifoe_set_path_to_port_map(ualoe_handle_t handle, bool specify_station, bool specify_accelerator,
+                              bool reenable_streams, unsigned station_idx, unsigned accelerator_id,
+                              unsigned path_count, unsigned map[]);
 
 /**
  * @brief Get the Path to Port mapping for a specified IFoE Station and
@@ -1042,11 +1033,8 @@ int ifoe_set_path_to_port_map(ualoe_handle_t handle,
  * @param map Array of Network Port logical indices, indexed by IFoE Path.
  * @return 0 on success. errno on failure
  */
-int ifoe_get_path_to_port_map(ualoe_handle_t handle,
-                              unsigned station_idx,
-                              unsigned accelerator_id,
-                              unsigned path_count,
-                              unsigned map[]);
+int ifoe_get_path_to_port_map(ualoe_handle_t handle, unsigned station_idx, unsigned accelerator_id,
+                              unsigned path_count, unsigned map[]);
 
 /**
  * @brief Get the Network Port properties. Note that the port properties
@@ -1058,8 +1046,7 @@ int ifoe_get_path_to_port_map(ualoe_handle_t handle,
  * @param properties Pointer to location to write port properties
  * @return 0 on success. errno on failure
  */
-int ifoe_get_netport_properties(ualoe_handle_t handle,
-                                ualoe_netport_properties_t *properties);
+int ifoe_get_netport_properties(ualoe_handle_t handle, ualoe_netport_properties_t* properties);
 
 /**
  * @brief Get a set of descriptors for the Network Ports associated with the
@@ -1077,9 +1064,7 @@ int ifoe_get_netport_properties(ualoe_handle_t handle,
  * caller and will be populated by this function.
  * @return 0 on success. errno on failure
  */
-int ifoe_get_netport_list(ualoe_handle_t handle,
-                          unsigned desc_count,
-                          ifoe_netport_desc_t descs[]);
+int ifoe_get_netport_list(ualoe_handle_t handle, unsigned desc_count, ifoe_netport_desc_t descs[]);
 
 /**
  * @brief Function to control a Network Port. This can be used to disable a
@@ -1092,8 +1077,7 @@ int ifoe_get_netport_list(ualoe_handle_t handle,
  * @param state The state to set the Network Port into
  * @return 0 on success. errno on failure
  */
-int ifoe_netport_ctrl(ualoe_handle_t handle, unsigned netport_idx,
-                      ifoe_netport_state_e state);
+int ifoe_netport_ctrl(ualoe_handle_t handle, unsigned netport_idx, ifoe_netport_state_e state);
 
 /**
  * @brief Function to configure a Network Port link to use Auto-Negotiation.
@@ -1113,8 +1097,7 @@ int ifoe_netport_ctrl(ualoe_handle_t handle, unsigned netport_idx,
  * @return 0 on success. errno on failure
  */
 int ifoe_netport_config_link_auto(ualoe_handle_t handle, unsigned netport_idx,
-                                  bool parallel_detect_enable,
-                                  __uint128_t advertised_eth_techs,
+                                  bool parallel_detect_enable, __uint128_t advertised_eth_techs,
                                   ualoe_fec_mode_e requested_fec_mode);
 
 /**
@@ -1132,8 +1115,7 @@ int ifoe_netport_config_link_auto(ualoe_handle_t handle, unsigned netport_idx,
  * @return 0 on success. errno on failure
  */
 int ifoe_netport_config_link_manual(ualoe_handle_t handle, unsigned netport_idx,
-                                    ualoe_eth_tech_e eth_tech,
-                                    ualoe_fec_mode_e fec_mode,
+                                    ualoe_eth_tech_e eth_tech, ualoe_fec_mode_e fec_mode,
                                     ualoe_netport_loopback_mode_e loopback_mode);
 
 /**
@@ -1161,8 +1143,7 @@ int ifoe_netport_config_link_manual(ualoe_handle_t handle, unsigned netport_idx,
  * type that is not compatible with the currently used encapsulation mode.
  */
 int ifoe_netport_set_addr(ualoe_handle_t handle, unsigned netport_idx,
-                         ifoe_network_addr_type_e addr_type,
-                         uint8_t mac_addr[], uint32_t ip_addr);
+                          ifoe_network_addr_type_e addr_type, uint8_t mac_addr[], uint32_t ip_addr);
 
 /**
  * @brief Function to set the Accelerator to destination MAC address mapping
@@ -1182,11 +1163,9 @@ int ifoe_netport_set_addr(ualoe_handle_t handle, unsigned netport_idx,
  * ifoe_netport_set_addr apply to this function and the address values used
  * in ifoe_accelerator_addr_map_t.
  */
-int ifoe_netport_set_accelerator_addr_map(ualoe_handle_t handle,
-                                         unsigned netport_idx,
-                                         ifoe_network_addr_type_e map_addr_type,
-                                         unsigned map_count,
-                                         ifoe_accelerator_addr_map_t map[]);
+int ifoe_netport_set_accelerator_addr_map(ualoe_handle_t handle, unsigned netport_idx,
+                                          ifoe_network_addr_type_e map_addr_type,
+                                          unsigned map_count, ifoe_accelerator_addr_map_t map[]);
 
 /**
  * @brief Function to get IFoE-specific state of a Network Port.
@@ -1199,7 +1178,7 @@ int ifoe_netport_set_accelerator_addr_map(ualoe_handle_t handle,
  * @return 0 on success. errno on failure
  */
 int ifoe_netport_get_state(ualoe_handle_t handle, unsigned netport_idx,
-                           ifoe_netport_state_t *state);
+                           ifoe_netport_state_t* state);
 
 /**
  * @brief Allocate storage for Telemetry. This is called specify a set of
@@ -1219,9 +1198,8 @@ int ifoe_netport_get_state(ualoe_handle_t handle, unsigned netport_idx,
  * @param telemetry Returned telemetry structure
  * @return 0 on success. errno on failure
  */
-int ualoe_telemetry_alloc(ualoe_handle_t handle,
-                          unsigned category_mask,
-                          ualoe_telemetry_t **telemetry);
+int ualoe_telemetry_alloc(ualoe_handle_t handle, unsigned category_mask,
+                          ualoe_telemetry_t** telemetry);
 
 /**
  * @brief Get a copy of the latest telemetry data snapshot
@@ -1233,7 +1211,7 @@ int ualoe_telemetry_alloc(ualoe_handle_t handle,
  * ualoe_telemetry_alloc()
  * @return 0 on success. errno on failure
  */
-int ualoe_telemetry_get(ualoe_handle_t handle, ualoe_telemetry_t *telemetry);
+int ualoe_telemetry_get(ualoe_handle_t handle, ualoe_telemetry_t* telemetry);
 
 /**
  * @brief Free the storage allocated for the telemetry data
@@ -1244,7 +1222,7 @@ int ualoe_telemetry_get(ualoe_handle_t handle, ualoe_telemetry_t *telemetry);
  * @param telemetry Telemetry data to be freed
  * @return 0 on success. errno on failure
  */
-int ualoe_telemetry_free(ualoe_handle_t handle, ualoe_telemetry_t *telemetry);
+int ualoe_telemetry_free(ualoe_handle_t handle, ualoe_telemetry_t* telemetry);
 
 /**
  * @brief Configure an L2 Ping test, allocate the context for the test and
@@ -1262,8 +1240,7 @@ int ualoe_telemetry_free(ualoe_handle_t handle, ualoe_telemetry_t *telemetry);
  * @param ping Pointer to the ping context which will be allocated for the test
  * @return 0 on success. errno on failure
  */
-int ualoe_l2ping_start(ualoe_handle_t handle, ualoe_ping_spec_t *spec,
-                       ualoe_ping_t **ping);
+int ualoe_l2ping_start(ualoe_handle_t handle, ualoe_ping_spec_t* spec, ualoe_ping_t** ping);
 
 /**
  * @brief Update the ping context with the status and progress. If the ping
@@ -1275,7 +1252,7 @@ int ualoe_l2ping_start(ualoe_handle_t handle, ualoe_ping_spec_t *spec,
  * @param ping Pointer to the context for the ping currently in progress
  * @return 0 on success. errno on failure
  */
-int ualoe_l2ping_update(ualoe_handle_t handle, ualoe_ping_t *ping);
+int ualoe_l2ping_update(ualoe_handle_t handle, ualoe_ping_t* ping);
 
 /**
  * @brief Stop the current ping test if not already finished and free the
@@ -1286,7 +1263,7 @@ int ualoe_l2ping_update(ualoe_handle_t handle, ualoe_ping_t *ping);
  * @param ping Pointer to the ping context to be freed
  * @return 0 on success. errno on failure
  */
-int ualoe_l2ping_fini(ualoe_handle_t handle, ualoe_ping_t *ping);
+int ualoe_l2ping_fini(ualoe_handle_t handle, ualoe_ping_t* ping);
 
 /**
  * @brief Prototype of callback function to notify the client that
@@ -1295,10 +1272,10 @@ int ualoe_l2ping_fini(ualoe_handle_t handle, ualoe_ping_t *ping);
  * @param user_context Context supplied by the user when the callback
  * was subscribed to
  * @param handle UALoE driver handle
- * @param event Strcture containing the event
+ * @param event Structure containing the event
  */
-typedef void (*ualoe_event_callback_t)(void *user_context, ualoe_handle_t handle,
-	                                     ualoe_event_t event);
+typedef void (*ualoe_event_callback_t)(void* user_context, ualoe_handle_t handle,
+                                       ualoe_event_t event);
 
 /**
  * @brief Register a callback to be notified of UALoE events
@@ -1309,9 +1286,8 @@ typedef void (*ualoe_event_callback_t)(void *user_context, ualoe_handle_t handle
  * @param user_context Context that will be passed back in callbacks
  * @return 0 on success. errno on failure
  */
-int ualoe_register_event_callback(ualoe_handle_t handle,
-                                  ualoe_event_callback_t callback,
-                                  void *user_context);
+int ualoe_register_event_callback(ualoe_handle_t handle, ualoe_event_callback_t callback,
+                                  void* user_context);
 
 /** Functions for diagnostics operations */
 
@@ -1351,19 +1327,17 @@ typedef struct ualoe_prbs_results {
  * @param rx_polarity Specifies polarity of RX lane
  * @return 0 on success. errno on failure
  */
-int ualoe_diag_config_pma_lane(ualoe_handle_t handle, unsigned netport_idx,
-                               unsigned lane_idx, bool enable,
-                               ualoe_pma_rate_e pma_rate,
+int ualoe_diag_config_pma_lane(ualoe_handle_t handle, unsigned netport_idx, unsigned lane_idx,
+                               bool enable, ualoe_pma_rate_e pma_rate,
                                ualoe_netport_loopback_mode_e loopback_mode,
-                               ualoe_pma_polarity_e tx_polarity,
-                               ualoe_pma_polarity_e rx_polarity);
+                               ualoe_pma_polarity_e tx_polarity, ualoe_pma_polarity_e rx_polarity);
 
 /**
  * @brief Configure PRBS TX on a network port serdes lane. This operation will
  * configure the PMA to start transmitting the selected PRBS sequence. Before
  * enabling PRBS, the lane should be configured using the function
  * ualoe_diag_config_pma_lane(). To stop PRBS, the function can be called
- * again with enable false, whereby the PMA will be reconfigured to the 
+ * again with enable false, whereby the PMA will be reconfigured to the
  * normal state where it processes transitions from the PCS.
  * This operation can only be performed in Diagnostics mode.
  *
@@ -1375,52 +1349,49 @@ int ualoe_diag_config_pma_lane(ualoe_handle_t handle, unsigned netport_idx,
  * @param user_pattern User supplied pattern if pattern is set to user defined
  * @return 0 on success. errno on failure
  */
-int ualoe_diag_config_prbs_tx(ualoe_handle_t handle, unsigned netport_idx,
-                              unsigned lane_idx, bool enable,
-                              ualoe_prbs_pattern_e pattern,
+int ualoe_diag_config_prbs_tx(ualoe_handle_t handle, unsigned netport_idx, unsigned lane_idx,
+                              bool enable, ualoe_prbs_pattern_e pattern, __uint128_t user_pattern);
+
+/**
+ * @brief Start PRBS RX on a network port serdes lane. This operation will
+ * configure the PMA to listen for the specified PRBS sequence. Before enabling
+ * PRBS, the lane should be configured using the function
+ * ualoe_diag_config_pma_lane(). When enabling PRBS RX, a preliminary RX
+ * equalization using the resync flag. After enabling PRBS, IFoE will continue
+ * to collect results until PRBS is disabled by a subsequent call with enable
+ * set to false. While running, results can be fetched using the function
+ * ualoe_diag_get_prbs_results().
+ * This operation can only be performed in Diagnostics mode.
+ *
+ * @param handle UALoE driver handle
+ * @param netport_idx Logical index of the Network Port
+ * @param lane_idx Netport relative index of the serdes lane to configure
+ * @param enable Boolean indicating whether to enable/disable PRBS
+ * @param resync If true, perform an RX equalization operation on the lane
+ * before starting PRBS RX.
+ * @param pattern PRBS pattern to emit
+ * @param user_pattern User supplied pattern if pattern is set to user defined
+ * @return 0 on success. errno on failure
+ */
+int ualoe_diag_config_prbs_rx(ualoe_handle_t handle, unsigned netport_idx, unsigned lane_idx,
+                              bool enable, bool resync, ualoe_prbs_pattern_e pattern,
                               __uint128_t user_pattern);
 
 /**
-* @brief Start PRBS RX on a network port serdes lane. This operation will
-* configure the PMA to listen for the specified PRBS sequence. Before enabling
-* PRBS, the lane should be configured using the function
-* ualoe_diag_config_pma_lane(). When enabling PRBS RX, a preliminary RX
-* equalization using the resync flag. After enabling PRBS, IFoE will continue
-* to collect results until PRBS is disabled by a subsequent call with enable
-* set to false. While running, results can be fetched using the function
-* ualoe_diag_get_prbs_results().
-* This operation can only be performed in Diagnostics mode.
-*
-* @param handle UALoE driver handle
-* @param netport_idx Logical index of the Network Port
-* @param lane_idx Netport relative index of the serdes lane to configure
-* @param enable Boolean indicating whether to enable/disable PRBS
-* @param resync If true, perform an RX equalization operation on the lane
-* before starting PRBS RX.
-* @param pattern PRBS pattern to emit
-* @param user_pattern User supplied pattern if pattern is set to user defined
-* @return 0 on success. errno on failure
-*/
-int ualoe_diag_config_prbs_rx(ualoe_handle_t handle, unsigned netport_idx,
-                              unsigned lane_idx, bool enable,
-                              bool resync, ualoe_prbs_pattern_e pattern,
-                              __uint128_t user_pattern);
+ * @brief When PRBS RX is enabled, this operation gets a snapshot of the
+ * results. Note that taking a snapshot of the results will clear the
+ * counters in the firmware to minimize the possibility of overflow.
+ * Therefore, if cumulative results are required this is the responsibility
+ * of the client.
+ * This operation can only be performed in Diagnostics mode.
+ *
+ * @param handle UALoE driver handle
+ * @param netport_idx Logical index of the Network Port
+ * @param lane_idx Netport relative index of the serdes lane to configure
+ * @param results Pointer to structure where results will be written.
+ * @return 0 on success. errno on failure
+ */
+int ualoe_diag_get_prbs_results(ualoe_handle_t handle, unsigned netport_idx, unsigned lane_idx,
+                                ualoe_prbs_results_t* results);
 
-/**
-* @brief When PRBS RX is enabled, this operation gets a snapshot of the
-* results. Note that taking a snapshot of the results will clear the
-* counters in the firmware to minimize the possibility of overflow.
-* Therefore, if cumulative results are required this is the responsibility
-* of the client.
-* This operation can only be performed in Diagnostics mode.
-*
-* @param handle UALoE driver handle
-* @param netport_idx Logical index of the Network Port
-* @param lane_idx Netport relative index of the serdes lane to configure
-* @param results Pointer to structure where results will be written.
-* @return 0 on success. errno on failure
-*/
-int ualoe_diag_get_prbs_results(ualoe_handle_t handle, unsigned netport_idx,
-                                unsigned lane_idx, ualoe_prbs_results_t *results);
-
-#endif // UALOE_LIB_H
+#endif  // UALOE_LIB_H

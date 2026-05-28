@@ -9,12 +9,7 @@ if(PkgConfig_FOUND)
 endif()
 
 # Define source files for ualoe library
-set(UALOE_SRC_LIST
-    ualoe_lib.c
-    ualoe_cdev.c
-    ualoe_cb.c
-    ualoe_nl.c
-)
+set(UALOE_SRC_LIST ualoe_lib.c ualoe_cdev.c ualoe_cb.c ualoe_nl.c)
 
 # Convert relative paths to absolute paths
 set(UALOE_ABS_SRC_LIST)
@@ -52,6 +47,9 @@ elseif(LIBNL3_FOUND AND LIBNLGENL3_FOUND AND LIBMNL_FOUND)
     set(UALOE_DEPENDENCIES_FOUND TRUE PARENT_SCOPE)
     message(STATUS "UALOE using system netlink libraries")
 else()
-    message(FATAL_ERROR "Required UALOE libraries not found: libnl-3.0, libnl-genl-3.0, or libmnl. These are mandatory dependencies.")
+    message(
+        FATAL_ERROR
+        "Required UALOE libraries not found: libnl-3.0, libnl-genl-3.0, or libmnl. These are mandatory dependencies."
+    )
     set(UALOE_DEPENDENCIES_FOUND FALSE PARENT_SCOPE)
 endif()
