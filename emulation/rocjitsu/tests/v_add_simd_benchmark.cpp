@@ -557,6 +557,18 @@ TEST(VAddSimdBenchmark, Cdna4_VCmpEqF32_Vop3_Modifiers) {
   run_words("v_cmp_eq_f32_e64 vcc, |v0|, -v1", w0, w1, /*sanitize_finite=*/true);
 }
 
+// v_cmp_eq_f16_e64 vcc, v0, v1  (CDNA4 VOP3 opcode 34) — f16 widen-then-compare.
+// Pays the f16_to_f32_simd widen tax on both operands; no modifiers.
+TEST(VAddSimdBenchmark, Cdna4_VCmpEqF16_Vop3) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  uint32_t w0, w1;
+  vop3_bin_encode(34, /*vdst=*/106, /*src0=*/256, /*src1=*/257, 0, 0, 0, 0, w0, w1);
+  run_words("v_cmp_eq_f16_e64 vcc, v0, v1", w0, w1, /*sanitize_finite=*/false);
+}
+
 // Diagnostic: report whether the SIMD fast path is compiled in.
 TEST(VAddSimdBenchmark, SimdCompileTimeReport) {
 #if __has_include(<experimental/simd>)
