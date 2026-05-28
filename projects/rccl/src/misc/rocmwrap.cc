@@ -97,8 +97,14 @@ error:
 }
 
 int ncclCuMemEnable() {
+#if HIP_VERSION < 71260540
+  if (ncclParamCuMemEnable() > 0)
+    WARN("NCCL_CUMEM_ENABLE=1 is set but cuMem VMM APIs require ROCm 7.0 or later (HIP_VERSION=%d); disabling cuMem", HIP_VERSION);
+  return 0;
+#else
   int param = ncclParamCuMemEnable();
   return param >= 0 ? param : (param == -2 && ncclCuMemSupported);
+#endif
 }
 
 static int ncclCumemHostEnable = -1;

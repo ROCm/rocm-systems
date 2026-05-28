@@ -1285,6 +1285,217 @@
           "test_filter": "RevokeMPITest.RepeatedRevokeShrinkCycles_ResourceCleanup"
         }
       ]
+    },
+
+    "ce_base": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_nodes": 1,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "INIT,COLL",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "NCCL_CTA_POLICY": "2",
+        "NCCL_LOCAL_REGISTER": "0",
+        "NCCL_CUMEM_ENABLE": "1"
+      }
+    },
+
+    "ce_2rank": {
+      "extends": "ce_base",
+      "num_ranks": 2,
+      "num_gpus": 2,
+      "timeout": 120,
+      "tests": [
+        {
+          "name": "CE_AllGather_2Ranks",
+          "description": "AllGather CE correctness and 'Init CE' log marker (2 ranks)",
+          "test_filter": "CeMPI_AllGather.TwoRanks"
+        },
+        {
+          "name": "CE_AllGather_SingleElement",
+          "description": "AllGather edge case: single element per rank",
+          "test_filter": "CeMPI_AllGather.SingleElement"
+        },
+        {
+          "name": "CE_AlltoAll_2Ranks",
+          "description": "AlltoAll CE correctness and 'Init CE' log marker (2 ranks)",
+          "test_filter": "CeMPI_AlltoAll.TwoRanks"
+        },
+        {
+          "name": "CE_Fallback_AllReduce",
+          "description": "AllReduce must NOT take CE path; verifies SM fallback",
+          "test_filter": "CeMPI_Fallback.AllReduceNeverUsesCE"
+        },
+        {
+          "name": "CE_Fallback_AllGatherUnregistered",
+          "description": "AllGather with plain hipMalloc (no symmetric window) falls back to SM",
+          "test_filter": "CeMPI_Fallback.AllGatherFallbackToSMWhenCEDisabled"
+        },
+        {
+          "name": "CE_Fallback_RecvNotRegistered",
+          "description": "AllGather with only send registered; missing recvWin forces SM fallback",
+          "test_filter": "CeMPI_Fallback.AllGatherRecvNotRegisteredFallsBackToSM"
+        },
+        {
+          "name": "CE_Stress_BackToBack",
+          "description": "20 consecutive AllGather calls; validates ceSeqNum never desyncs",
+          "test_filter": "CeMPI_Stress.AllGatherBackToBack20x",
+          "timeout": 300
+        },
+        {
+          "name": "CE_Stress_Interleaved",
+          "description": "Interleaved CE AllGather and SM AllReduce on same comm; validates no state corruption",
+          "test_filter": "CeMPI_Stress.InterleavedCEAllGatherAndSMAllReduce",
+          "timeout": 300
+        }
+      ]
+    },
+
+    "ce_3rank": {
+      "extends": "ce_base",
+      "num_ranks": 3,
+      "num_gpus": 3,
+      "timeout": 120,
+      "tests": [
+        {
+          "name": "CE_AlltoAll_3Ranks",
+          "description": "AlltoAll CE correctness with odd (non-power-of-two) rank count",
+          "test_filter": "CeMPI_AlltoAll.ThreeRanks"
+        }
+      ]
+    },
+
+    "ce_4rank": {
+      "extends": "ce_base",
+      "num_ranks": 4,
+      "num_gpus": 4,
+      "timeout": 180,
+      "tests": [
+        {
+          "name": "CE_AllGather_4Ranks",
+          "description": "AllGather CE correctness and 'Init CE' log marker (4 ranks)",
+          "test_filter": "CeMPI_AllGather.FourRanks"
+        },
+        {
+          "name": "CE_AlltoAll_4Ranks",
+          "description": "AlltoAll CE correctness and 'Init CE' log marker (4 ranks)",
+          "test_filter": "CeMPI_AlltoAll.FourRanks"
+        },
+        {
+          "name": "CE_Scatter_4Ranks_Root0",
+          "description": "Scatter CE correctness, root=0 (4 ranks)",
+          "test_filter": "CeMPI_Scatter.FourRanksRoot0"
+        },
+        {
+          "name": "CE_Scatter_4Ranks_Root1",
+          "description": "Scatter CE correctness, non-zero root=1 (4 ranks)",
+          "test_filter": "CeMPI_Scatter.FourRanksRoot1"
+        },
+        {
+          "name": "CE_Gather_4Ranks_Root0",
+          "description": "Gather CE correctness, root=0 (4 ranks)",
+          "test_filter": "CeMPI_Gather.FourRanksRoot0"
+        },
+        {
+          "name": "CE_Gather_4Ranks_Root1",
+          "description": "Gather CE correctness, non-zero root=1 (4 ranks)",
+          "test_filter": "CeMPI_Gather.FourRanksRoot1"
+        }
+      ]
+    },
+
+    "ce_8rank": {
+      "extends": "ce_base",
+      "num_ranks": 8,
+      "num_gpus": 8,
+      "timeout": 240,
+      "tests": [
+        {
+          "name": "CE_AllGather_8Ranks",
+          "description": "AllGather CE correctness — default production topology (8 ranks)",
+          "test_filter": "CeMPI_AllGather.EightRanks"
+        },
+        {
+          "name": "CE_AlltoAll_8Ranks",
+          "description": "AlltoAll CE correctness — default production topology (8 ranks)",
+          "test_filter": "CeMPI_AlltoAll.EightRanks"
+        },
+        {
+          "name": "CE_Scatter_8Ranks",
+          "description": "Scatter CE correctness, root=0 — default production topology (8 ranks)",
+          "test_filter": "CeMPI_Scatter.EightRanksRoot0"
+        },
+        {
+          "name": "CE_Gather_8Ranks",
+          "description": "Gather CE correctness, root=0 — default production topology (8 ranks)",
+          "test_filter": "CeMPI_Gather.EightRanksRoot0"
+        }
+      ]
+    },
+
+    "ce_internal": {
+      "extends": "ce_base",
+      "num_ranks": 2,
+      "num_gpus": 2,
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "INIT,COLL",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "CE_Internal_Init",
+          "description": "ncclCeInit lifecycle: allocates sync window; ncclCeFinalize tears it down; double-fini is safe; independent state per comm",
+          "test_filter": "CeInternalMPITest.InitSetsWindowPointers:CeInternalMPITest.FiniNullsPointers:CeInternalMPITest.DoubleFiniIsSafe:CeInternalMPITest.IndependentCeStatePerComm:CeInternalMPITest.FiniAfterZeroCollectives"
+        },
+        {
+          "name": "CE_Internal_Sync",
+          "description": "ncclPrepUCSync: ceSeqNum increments, correct op-count, no self-target ops, wrap-around via direct call and via collective",
+          "test_filter": "CeInternalMPITest.PrepUCSync*:CeInternalMPITest.SeqNum*"
+        },
+        {
+          "name": "CE_Internal_Launch",
+          "description": "ncclCeLaunchBatchOps: empty batch succeeds; 4-op batch transfers data correctly",
+          "test_filter": "CeInternalMPITest.Launch*"
+        },
+        {
+          "name": "CE_Internal_Neg",
+          "description": "ncclCeImplemented returns false for non-CE collectives; true on supported driver",
+          "test_filter": "CeInternalNeg.*"
+        }
+      ]
+    },
+
+    "ce_fault_injection": {
+      "extends": "ce_base",
+      "num_ranks": 2,
+      "num_gpus": 2,
+      "timeout": 120,
+      "tests": [
+        {
+          "name": "CE_FaultInj_SyncPrepError",
+          "description": "CE_FAULT_SYNC_PREP: ncclPrepUCSync returns ncclSystemError; clears and resumes correctly",
+          "test_filter": "CeFaultInjTest.SyncPrepErrorPropagates"
+        },
+        {
+          "name": "CE_FaultInj_LaunchOpError",
+          "description": "CE_FAULT_LAUNCH_OP: ncclCeLaunchBatchOps returns ncclSystemError; clears and resumes correctly",
+          "test_filter": "CeFaultInjTest.LaunchBatchOpsErrorPropagates"
+        },
+        {
+          "name": "CE_FaultInj_InitError",
+          "description": "CE_FAULT_INIT: ncclCeInit returns ncclSystemError; leaves baseUCSymReadyPtr null",
+          "test_filter": "CeFaultInjTest.InitErrorPreventsSetup"
+        },
+        {
+          "name": "CE_FaultInj_MultipleFaults",
+          "description": "Multiple CE_FAULT_* bits simultaneously; all target functions return ncclSystemError; ncclCeFaultClear restores all",
+          "test_filter": "CeFaultInjTest.MultipleFaultsArmedAndCleared"
+        }
+      ]
     }
   },
   "test_suites": [
@@ -1514,6 +1725,42 @@
       "name": "Revoke MPI Tests - Multi-Node (4-rank, 2-node)",
       "description": "ncclCommRevoke multi-node scenarios: asymmetric shrink across nodes (ring-only topology after revoke) and repeated revoke/shrink generations to verify no leaked resources",
       "config": "revoke_mpi_tests_multinode",
+      "enabled": true
+    },
+    {
+      "name": "CE Tests - 2-Rank (AllGather, AlltoAll, Fallback, Stress)",
+      "description": "CE collective tests on 2 GPUs/ranks: correctness, log-marker verification, SM fallback, and stress. Skips automatically on unsupported driver version.",
+      "config": "ce_2rank",
+      "enabled": true
+    },
+    {
+      "name": "CE Tests - 3-Rank (AlltoAll odd topology)",
+      "description": "CE AlltoAll with a non-power-of-two rank count. Skips automatically on unsupported driver version.",
+      "config": "ce_3rank",
+      "enabled": true
+    },
+    {
+      "name": "CE Tests - 4-Rank (AllGather, AlltoAll, Scatter, Gather)",
+      "description": "CE collective tests on 4 GPUs/ranks including non-zero root variants. Skips automatically on unsupported driver version.",
+      "config": "ce_4rank",
+      "enabled": true
+    },
+    {
+      "name": "CE Tests - 8-Rank (AllGather, AlltoAll, Scatter, Gather)",
+      "description": "CE collective tests on 8 GPUs/ranks — default production topology. Skips automatically on unsupported driver version.",
+      "config": "ce_8rank",
+      "enabled": true
+    },
+    {
+      "name": "CE Internal Tests (white-box, Debug build only)",
+      "description": "White-box CE internal function tests (ncclCeInit, ncclPrepUCSync, ncclCeLaunchBatchOps). Requires Debug build for symbol visibility. Skips on unsupported driver version.",
+      "config": "ce_internal",
+      "enabled": true
+    },
+    {
+      "name": "CE Fault Injection Tests",
+      "description": "Per-function error injection for CE code paths (ENABLE_FAULT_INJECTION build). Verifies ncclSystemError propagation and recovery for Init, SyncPrep, and LaunchOp faults.",
+      "config": "ce_fault_injection",
       "enabled": true
     }
   ]
