@@ -378,35 +378,41 @@ void Graph::ResolveSegmentDependencies() {
   for (size_t i = 0; i < segments_.size(); ++i) {
     auto& segment = segments_[i];
 
-    // Only check first node for incoming dependencies
-    if (segment.first_node != nullptr) {
-      const auto& dependencies = segment.first_node->GetDependencies();
+    // Use a set for O(1) duplicate detection instead of linear search on the vector
+    std::unordered_set<int> dep_set(segment.segment_ids_dependencies.begin(),
+                                    segment.segment_ids_dependencies.end());
 
-      // Use a set for O(1) duplicate detection instead of linear search on the vector
-      std::unordered_set<int> dep_set(segment.segment_ids_dependencies.begin(),
-                                      segment.segment_ids_dependencies.end());
-
-      for (const auto& dep_node : dependencies) {
-        // Find which segment this dependency belongs to (within this graph)
+    // Walk all nodes in the segment: mid-segment wait-event nodes introduce
+    // cross-stream dependencies that are invisible if we only inspect first_node.
+    for (const auto& cur_node : segment.nodes) {
+      for (const auto& dep_node : cur_node->GetDependencies()) {
+        // Only cross-segment dependencies matter here
         auto dep_it = node_to_segment_id_.find(dep_node);
-        if (dep_it != node_to_segment_id_.end()) {
-          int dep_segment_id = dep_it->second;
+        if (dep_it == node_to_segment_id_.end()) {
+          continue;
+        }
 
-          // Validate segment ID is within bounds
-          if (dep_segment_id < 0 || dep_segment_id >= static_cast<int>(segments_.size())) {
-            ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
-                    "[hipGraph] Invalid segment ID %d (segments size: %zu)",
-                    dep_segment_id, segments_.size());
-            continue;  // Skip invalid segment ID
-          }
+        int dep_segment_id = dep_it->second;
 
-          // Add dependency if not already present (O(1) lookup)
-          if (dep_set.insert(dep_segment_id).second) {
-            segment.segment_ids_dependencies.push_back(dep_segment_id);
+        // Skip intra-segment edges (same segment)
+        if (dep_segment_id == static_cast<int>(i)) {
+          continue;
+        }
 
-            // Also add this segment as an edge of the dependency segment
-            segments_[dep_segment_id].segment_ids_edges.push_back(i);
-          }
+        // Validate segment ID is within bounds
+        if (dep_segment_id < 0 || dep_segment_id >= static_cast<int>(segments_.size())) {
+          ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+                  "[hipGraph] Invalid segment ID %d (segments size: %zu)",
+                  dep_segment_id, segments_.size());
+          continue;
+        }
+
+        // Add dependency if not already present (O(1) lookup)
+        if (dep_set.insert(dep_segment_id).second) {
+          segment.segment_ids_dependencies.push_back(dep_segment_id);
+
+          // Also add this segment as an edge of the dependency segment
+          segments_[dep_segment_id].segment_ids_edges.push_back(i);
         }
       }
     }
@@ -1151,30 +1157,14 @@ void GraphExec::FindStreamsReqPerDevForSegments() {
 
 // ================================================================================================
 void GraphExec::PrecomputeStreamAssignment() {
-  // max_streams_dev_ holds the raw parallelism count per device as computed by
-  // FindStreamsReqPerDev[ForSegments]() and capped in Init(). CreateStreams() handles
-  // the -1 adjustment for the instantiation device internally, so the value here
-  // represents the total stream pool size for every device uniformly.
-  auto getPoolSize = [&](int dev_id) -> size_t {
-    auto it = max_streams_dev_.find(dev_id);
-    return (it != max_streams_dev_.end() && it->second > 0)
-               ? static_cast<size_t>(it->second) : 1;
-  };
-
-  for (int level = 0; level <= max_dependency_level_; ++level) {
-    auto it = segments_per_level_.find(level);
-    if (it == segments_per_level_.end()) continue;
-
-    // Per-device round-robin counters, reset per level so parallel segments on
-    // the same device spread evenly across that device's stream pool.
-    std::unordered_map<int, size_t> dev_idx;
-
-    for (int seg_id : it->second) {
-      if (seg_id >= 0 && seg_id < static_cast<int>(segments_.size())) {
-        auto& seg = segments_[seg_id];
-        seg.stream_id = static_cast<int>(dev_idx[seg.dev_id]++ % getPoolSize(seg.dev_id));
-      }
-    }
+  // Derive each segment's stream_id from its first node's capture-time stream_id_.
+  // ScheduleOneNode assigns stream_id_ once per node based on which capture stream
+  // it was enqueued on, so this is stable across all dependency levels. Using a
+  // per-level round-robin reset instead caused segments from different capture streams
+  // to collide onto the same stream_id at later levels, causing BuildSyncPlan to
+  // incorrectly drop cross-stream barriers between them.
+  for (auto& seg : segments_) {
+    seg.stream_id = (seg.first_node != nullptr) ? seg.first_node->stream_id_ : 0;
   }
 
   const bool leaf_sync_required = IsLeafNodeSyncRequired();
