@@ -192,6 +192,9 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
             --test-command "videodecode"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4
   )
+  if(USING_THE_ROCK)
+    set_property(TEST video_decode-HEVC PROPERTY ENVIRONMENT "LD_PRELOAD=${ROCM_PATH}/lib/rocm_sysdeps/lib/librocm_sysdeps_va.so.2:${ROCM_PATH}/lib/rocm_sysdeps/lib/librocm_sysdeps_va-drm.so.2;LIBVA_DRIVERS_PATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
+  endif()
 
   # 8 - videoDecode AVC
   add_test(
@@ -205,6 +208,9 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
             --test-command "videodecode"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H264.mp4
   )
+  if(USING_THE_ROCK)
+    set_property(TEST video_decode-AVC PROPERTY ENVIRONMENT "LD_PRELOAD=${ROCM_PATH}/lib/rocm_sysdeps/lib/librocm_sysdeps_va.so.2:${ROCM_PATH}/lib/rocm_sysdeps/lib/librocm_sysdeps_va-drm.so.2;LIBVA_DRIVERS_PATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
+  endif()
 
   # 9 - videoDecode AV1
   add_test(
@@ -218,6 +224,9 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
             --test-command "videodecode"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-AV1.mp4
   )
+  if(USING_THE_ROCK)
+    set_property(TEST video_decode-AV1 PROPERTY ENVIRONMENT "LD_PRELOAD=${ROCM_PATH}/lib/rocm_sysdeps/lib/librocm_sysdeps_va.so.2:${ROCM_PATH}/lib/rocm_sysdeps/lib/librocm_sysdeps_va-drm.so.2;LIBVA_DRIVERS_PATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
+  endif()
 
   # 10 - videoDecode VP9
   add_test(
@@ -231,6 +240,9 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
             --test-command "videodecode"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-VP9.ivf
   )
+  if(USING_THE_ROCK)
+    set_property(TEST video_decode-VP9 PROPERTY ENVIRONMENT "LD_PRELOAD=${ROCM_PATH}/lib/rocm_sysdeps/lib/librocm_sysdeps_va.so.2:${ROCM_PATH}/lib/rocm_sysdeps/lib/librocm_sysdeps_va-drm.so.2;LIBVA_DRIVERS_PATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
+  endif()
 
   # 11 - videoDecodePerf
   add_test(
@@ -244,6 +256,9 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
             --test-command "videodecodeperf"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4
   )
+  if(USING_THE_ROCK)
+    set_property(TEST video_decodePerf-HEVC PROPERTY ENVIRONMENT "LD_PRELOAD=${ROCM_PATH}/lib/rocm_sysdeps/lib/librocm_sysdeps_va.so.2:${ROCM_PATH}/lib/rocm_sysdeps/lib/librocm_sysdeps_va-drm.so.2;LIBVA_DRIVERS_PATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
+  endif()
 
   # 12 - videoDecodeBatch
   add_test(
@@ -257,6 +272,9 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
             --test-command "videodecodebatch"
             -i ${ROCM_PATH}/share/rocdecode/video/ -t 2
   )
+  if(USING_THE_ROCK)
+    set_property(TEST video_decodeBatch PROPERTY ENVIRONMENT "LD_PRELOAD=${ROCM_PATH}/lib/rocm_sysdeps/lib/librocm_sysdeps_va.so.2:${ROCM_PATH}/lib/rocm_sysdeps/lib/librocm_sysdeps_va-drm.so.2;LIBVA_DRIVERS_PATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
+  endif()
 
   # 13 - videoDecodeRGB
   add_test(
@@ -270,6 +288,9 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
             --test-command "videodecodergb"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4 -of rgb
   )
+  if(USING_THE_ROCK)
+    set_property(TEST video_decodeRGB-HEVC PROPERTY ENVIRONMENT "LD_PRELOAD=${ROCM_PATH}/lib/rocm_sysdeps/lib/librocm_sysdeps_va.so.2:${ROCM_PATH}/lib/rocm_sysdeps/lib/librocm_sysdeps_va-drm.so.2;LIBVA_DRIVERS_PATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
+  endif()
 
   # 14 - videoDecodeMem
   add_test(
@@ -283,6 +304,9 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
             --test-command "videodecodemem"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4
   )
+  if(USING_THE_ROCK)
+    set_property(TEST video_decodeMem-HEVC PROPERTY ENVIRONMENT "LD_PRELOAD=${ROCM_PATH}/lib/rocm_sysdeps/lib/librocm_sysdeps_va.so.2:${ROCM_PATH}/lib/rocm_sysdeps/lib/librocm_sysdeps_va-drm.so.2;LIBVA_DRIVERS_PATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
+  endif()
 
   # 15 - videoDecodeRGBResize
   add_test(
@@ -296,6 +320,9 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
             --test-command "videodecodergb"
             -i "${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4" -resize 640x360 -of rgb
   )
+  if(USING_THE_ROCK)
+    set_property(TEST video_decodeRGB-Resize PROPERTY ENVIRONMENT "LD_PRELOAD=${ROCM_PATH}/lib/rocm_sysdeps/lib/librocm_sysdeps_va.so.2:${ROCM_PATH}/lib/rocm_sysdeps/lib/librocm_sysdeps_va-drm.so.2;LIBVA_DRIVERS_PATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
+  endif()
 
   if(rocdecode-host_FOUND AND NOT USING_THE_ROCK)
     # 16 - videoDecode Host backend
