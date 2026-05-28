@@ -57,6 +57,7 @@ def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, f
             "HBMBw",
             "L2Bw",
             "L1Bw",
+            "L0Bw",
             "LDSBw",
         ]
         # initialize peaks to NaN

@@ -25,6 +25,7 @@ class Bench_gfx11(benchmark_base.Bench_base):
 
         self.unsupported_data_types = [
             "HBM",
+            "L1",
             "I8",
             "I32",
             "I64",
@@ -47,6 +48,7 @@ class Bench_gfx11(benchmark_base.Bench_base):
             "MALL": super().mall_bw_bench,
             "L2": super().l2_bw_bench,
             "L1": super().l1_bw_bench,
+            "L0": super().l0_bw_bench,
             "LDS": super().lds_bw_benchmark,
             "F16": super().fp16_benchmark,
             "F32": super().fp32_benchmark,
@@ -70,6 +72,7 @@ class Bench_gfx11(benchmark_base.Bench_base):
             "MALL": "MALLBw",
             "L2": "L2Bw",
             "L1": "L1Bw",
+            "L0": "L0Bw",
             "LDS": "LDSBw",
             "F16": "FP16Flops",
             "F32": "FP32Flops",

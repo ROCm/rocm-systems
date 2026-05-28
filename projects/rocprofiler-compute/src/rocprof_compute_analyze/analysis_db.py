@@ -170,6 +170,7 @@ class db_analysis(OmniAnalyze_Base):
                 Database.get_session().add(
                     orm.KernelRooflineData(
                         total_flops=getattr(roofline_data, "total_flops", None),
+                        l0_cache_data=getattr(roofline_data, "l0_cache_data", None),
                         l1_cache_data=getattr(roofline_data, "l1_cache_data", None),
                         l2_cache_data=getattr(roofline_data, "l2_cache_data", None),
                         hbm_cache_data=getattr(roofline_data, "hbm_cache_data", None),
@@ -184,6 +185,7 @@ class db_analysis(OmniAnalyze_Base):
                 Database.get_session().add(
                     orm.WorkloadRooflineData(
                         total_flops=workload_roofline.get("total_flops"),
+                        l0_cache_data=workload_roofline.get("l0_cache_data"),
                         l1_cache_data=workload_roofline.get("l1_cache_data"),
                         l2_cache_data=workload_roofline.get("l2_cache_data"),
                         hbm_cache_data=workload_roofline.get("hbm_cache_data"),
@@ -360,7 +362,9 @@ class db_analysis(OmniAnalyze_Base):
                 self._runs[workload_path].sys_info.iloc[0]["gpu_series"]
             )
 
-            for mem_level in CACHE_HIERARCHY:
+            for mem_level in CACHE_HIERARCHY[
+                self._runs[workload_path].sys_info.iloc[0]["gpu_arch"]
+            ]:
                 keys.append(f"{mem_level}Bw")
             for dtype in SUPPORTED_DATATYPES[
                 self._runs[workload_path].sys_info.iloc[0]["gpu_arch"]
@@ -921,6 +925,7 @@ class db_analysis(OmniAnalyze_Base):
                 "total_flops": roofline_data_expressions.get(
                     "Performance (GFLOPs)", ""
                 ),
+                "l0_cache_data": roofline_data_expressions.get("AI L0", ""),
                 "l1_cache_data": roofline_data_expressions.get("AI L1", ""),
                 "l2_cache_data": roofline_data_expressions.get("AI L2", ""),
                 "hbm_cache_data": roofline_data_expressions.get("AI HBM", ""),

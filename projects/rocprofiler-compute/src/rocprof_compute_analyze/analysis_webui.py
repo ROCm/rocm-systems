@@ -279,6 +279,7 @@ class webui_analysis(OmniAnalyze_Base):
                         run_parameters={
                             "workload_dir": self.dest_dir,
                             "device_id": 0,
+                            "gpu_arch": self.arch,
                             "sort_type": str(args.sort),
                             "mem_level": mem_level,
                             "include_kernel_names": True,

@@ -187,7 +187,14 @@ class cli_analysis(OmniAnalyze_Base):
 
             # Generate roofline plot for single-path, compatible architectures
             if (len(args.path)) == 1:
-                if gpu_arch in ["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"]:
+                if gpu_arch in [
+                    "gfx90a",
+                    "gfx940",
+                    "gfx941",
+                    "gfx942",
+                    "gfx950",
+                    "gfx1151",
+                ]:
                     is_roofline_valid, roofline_error_msg = validate_roofline_csv(
                         Path(workload_path)
                     )
@@ -214,6 +221,7 @@ class cli_analysis(OmniAnalyze_Base):
                             run_parameters={
                                 "workload_dir": workload_path,
                                 "device_id": 0,
+                                "gpu_arch": gpu_arch,
                                 "sort_type": str(args.sort),
                                 "mem_level": mem_level,
                                 "is_standalone": True,

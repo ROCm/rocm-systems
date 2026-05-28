@@ -515,7 +515,7 @@ class Roofline:
         #######################
         mem_level_config = self.__run_parameters.get("mem_level", "ALL")
         cache_hierarchy = (
-            CACHE_HIERARCHY
+            CACHE_HIERARCHY[self.__run_parameters["gpu_arch"]]
             if mem_level_config == "ALL" or mem_level_config == ["ALL"]
             else (
                 mem_level_config
@@ -1048,6 +1048,8 @@ class Roofline:
 
         self.__ai_data = ai_data
 
+        print(f"ai_data:\n{self.__ai_data}")
+
         workload_dir = self.__run_parameters.get("workload_dir", "")
         if not (Path(workload_dir) / "roofline.csv").is_file():
             console_log(
@@ -1060,6 +1062,8 @@ class Roofline:
             roofline_parameters=self.__run_parameters,
             dtype=dtype,
         )
+
+        print(f"ceiling data:\n{self.__ceiling_data}")
 
         self.roof_setup()
 
@@ -1087,11 +1091,14 @@ class Roofline:
 
         # Plot bandwidth lines
         cache_hierarchy = (
-            CACHE_HIERARCHY if mem_level == "ALL" or mem_level == ["ALL"] else mem_level
+            CACHE_HIERARCHY[self.__run_parameters["gpu_arch"]]
+            if mem_level == "ALL" or mem_level == ["ALL"]
+            else mem_level
         )
 
         for cache_level in cache_hierarchy:
             cache_key = cache_level.lower()
+            print(f"cache key: {cache_key}")
             if self.__ceiling_data[cache_key][0] is None:
                 continue
             plt.plot(
@@ -1119,13 +1126,18 @@ class Roofline:
             )
 
         # Plot VALU and Matrix Ops Peak
-        if dtype in PEAK_OPS_DATATYPES and self.__ceiling_data["valu"][0] is not None:
+        if (
+            dtype in PEAK_OPS_DATATYPES
+            and self.__ceiling_data["valu"]
+            and self.__ceiling_data["valu"][0] is not None
+        ):
+            valu_y = [
+                max(self.__ceiling_data["valu"][1][0] - 0.1, 1e-9),
+                max(self.__ceiling_data["valu"][1][1] - 0.1, 1e-9),
+            ]
             plt.plot(
                 self.__ceiling_data["valu"][0],
-                [
-                    self.__ceiling_data["valu"][1][0] - 0.1,
-                    self.__ceiling_data["valu"][1][1] - 0.1,
-                ],
+                valu_y,
                 label=f"Peak VALU-{dtype}",
                 marker="braille",
                 color=get_color("valu", backend="cli"),
@@ -1151,17 +1163,19 @@ class Roofline:
 
         if (
             dtype in MATRIX_DATATYPES
+            and self.__ceiling_data["matrix_ops"]
             and self.__ceiling_data["matrix_ops"][0] is not None
         ):
             matrix_ops_type = get_matrix_ops_type(
                 getattr(self.__mspec, "gpu_series", "unknown_series")
             )
+            matrix_y = [
+                max(self.__ceiling_data["matrix_ops"][1][0] - 0.1, 1e-9),
+                max(self.__ceiling_data["matrix_ops"][1][1] - 0.1, 1e-9),
+            ]
             plt.plot(
                 self.__ceiling_data["matrix_ops"][0],
-                [
-                    self.__ceiling_data["matrix_ops"][1][0] - 0.1,
-                    self.__ceiling_data["matrix_ops"][1][1] - 0.1,
-                ],
+                matrix_y,
                 label=f"Peak {matrix_ops_type}-{dtype}",
                 marker="braille",
                 color=get_color("matrix_ops", backend="cli"),
