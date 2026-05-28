@@ -28,6 +28,11 @@
 #include "cudawrap.h"
 #endif
 
+#if ROCM_VERSION >= 71200
+#include <hip/hip_runtime.h>
+#include "rocmwrap.h"
+#endif
+
 // Global flag to detect process shutdown. Set by atexit handler before
 // HIP runtime static destructors run. This prevents use-after-free crashes
 // when RCCL proxy threads try to free GPU memory during process exit.
@@ -126,7 +131,7 @@ static inline ncclResult_t getSideStream(cudaStream_t *stream) {
   return ncclSuccess;
 }
 
-#if CUDART_VERSION >= 12020
+#if CUDART_VERSION >= 12020 || ROCM_VERSION >= 71200
 
 static inline ncclResult_t ncclCuMemHostAlloc(void** ptr, CUmemGenericAllocationHandle *handlep, size_t size) {
   ncclResult_t result = ncclSuccess;
@@ -146,10 +151,19 @@ static inline ncclResult_t ncclCuMemHostAlloc(void** ptr, CUmemGenericAllocation
   CUCHECK(cuDeviceGet(&currentDev, cudaDev));
   CUCHECK(cuDeviceGetAttribute(&cpuNumaNodeId, CU_DEVICE_ATTRIBUTE_HOST_NUMA_ID, currentDev));
   if (cpuNumaNodeId < 0) cpuNumaNodeId = 0;
+#if defined(__HIP_PLATFORM_AMD__)
+  // CLR rejects HostNuma; only Device or Host are accepted.
+  prop.location.type = CU_MEM_LOCATION_TYPE_HOST;
+  prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+  prop.requestedHandleTypes = type; // So it can be exported
+  // HIP/CLR requires host id to be 0. cpuNumaNodeId can exceed GPU count and fail.
+  prop.location.id = 0;             // ignored on the Host path
+#else
   prop.location.type = CU_MEM_LOCATION_TYPE_HOST_NUMA;
   prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
   prop.requestedHandleTypes = type; // So it can be exported
   prop.location.id = cpuNumaNodeId;
+#endif
   CUCHECK(cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM));
   ALIGN_SIZE(size, granularity);
   /* Allocate the physical memory on the device */
@@ -168,13 +182,19 @@ static inline ncclResult_t ncclCuMemHostAlloc(void** ptr, CUmemGenericAllocation
   CUCHECKGOTO(cuMemSetAccess((CUdeviceptr)*ptr, size, &accessDesc, 1), result, fail);
 
   /* Now allow RW access to the newly mapped memory from the CPU */
+#if defined(__HIP_PLATFORM_AMD__)
+  // CLR rejects HostNuma here too; mirror the Host fallback used at allocation.
+  accessDesc.location.type = CU_MEM_LOCATION_TYPE_HOST;
+  accessDesc.location.id = 0;
+#else
   accessDesc.location.type = CU_MEM_LOCATION_TYPE_HOST_NUMA;
   accessDesc.location.id = cpuNumaNodeId;
+#endif
   accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
   CUCHECKGOTO(cuMemSetAccess((CUdeviceptr)*ptr, size, &accessDesc, 1), result, fail);
 
   if (handlep) *handlep = handle;
-  INFO(NCCL_ALLOC, "CUMEM Host Alloc Size %zi pointer %p handle %llx numa %d dev %d granularity %ld", size, *ptr, handle, cpuNumaNodeId, cudaDev, granularity);
+  INFO(NCCL_ALLOC, "CUMEM Host Alloc Size %zi pointer %p handle %p numa %d dev %d granularity %ld", size, *ptr, (void*)(uintptr_t)handle, cpuNumaNodeId, cudaDev, granularity);
   return result;
 fail:
   WARN("ncclCuMemHostAlloc failed (size %zu, dev %d): cleaning up partial allocation", size, cudaDev);
@@ -196,7 +216,7 @@ static inline ncclResult_t ncclCuMemHostFree(void* ptr) {
   CUCHECK(cuMemRetainAllocationHandle(&handle, ptr));
   CUCHECK(cuMemRelease(handle));
   CUCHECK(cuMemGetAddressRange(&base, &size, (CUdeviceptr)ptr));
-  TRACE(NCCL_ALLOC, "CUMEM Host Free Size %zi pointer %p handle 0x%llx", size, ptr, handle);
+  TRACE(NCCL_ALLOC, "CUMEM Host Free Size %zi pointer %p handle %p", size, ptr, (void*)(uintptr_t)handle);
   CUCHECK(cuMemUnmap((CUdeviceptr)ptr, size));
   CUCHECK(cuMemRelease(handle));
   CUCHECK(cuMemAddressFree((CUdeviceptr)ptr, size));
