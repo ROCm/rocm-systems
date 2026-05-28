@@ -64,6 +64,10 @@ def main() -> int:
 
     for arch in _all_archs(CONFIGS_ROOT):
         if arch in new_archs:
+            errors.append(
+                f"New arch '{arch}' has no entry in .config_hashes.json.\n"
+                "Run hash_manager.py --compute-all to refresh the DB."
+            )
             continue
 
         cur_panels = _cur_panels(CONFIGS_ROOT / arch)
