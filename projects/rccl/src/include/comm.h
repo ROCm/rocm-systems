@@ -884,7 +884,7 @@ struct ncclComm {
   int unroll;
   // custom collective [RCCL]
   bool enableCustColl;
-  int pxnDisable;  // per-comm PXN-disable cache: -1 uninit, 0 enabled, 1 disabled
+  int pxnDisable;  // per-comm PXN-disable cache: RCCL_VALUE_UNSET uninit, RCCL_VALUE_INVALID = arch/env override, otherwise 0/1
   int p2pNetChunkSize;  // per-comm P2P NET chunk size cache: RCCL_VALUE_UNSET uninit
   // gfx name from hipDeviceProp_t [RCCL] , Memory resource owned by comm allocated in ncclCommInitRankFunc
   char* archName;
