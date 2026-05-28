@@ -265,6 +265,8 @@ class ThunkLoader {
                                       HSAuint64 TrapHandlerSizeInBytes, \
                                       void* TrapBufferBaseAddress, \
                                       HSAuint64 TrapBufferSizeInBytes);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtSetSigbusDelay))(HSAuint32 NodeId, \
+                                      HSAuint32 DelayMs);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtGetTileConfig))(HSAuint32 NodeId, \
                                       HsaGpuTileConfig* config);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtQueryPointerInfo))(const void* Pointer, \
@@ -492,6 +494,7 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtMapGraphicHandle)* HSAKMT_PFN(hsaKmtMapGraphicHandle);
     HSAKMT_DEF(hsaKmtUnmapGraphicHandle)* HSAKMT_PFN(hsaKmtUnmapGraphicHandle);
     HSAKMT_DEF(hsaKmtSetTrapHandler)* HSAKMT_PFN(hsaKmtSetTrapHandler);
+    HSAKMT_DEF(hsaKmtSetSigbusDelay)* HSAKMT_PFN(hsaKmtSetSigbusDelay);
     HSAKMT_DEF(hsaKmtGetTileConfig)* HSAKMT_PFN(hsaKmtGetTileConfig);
     HSAKMT_DEF(hsaKmtQueryPointerInfo)* HSAKMT_PFN(hsaKmtQueryPointerInfo);
     HSAKMT_DEF(hsaKmtSetMemoryUserData)* HSAKMT_PFN(hsaKmtSetMemoryUserData);

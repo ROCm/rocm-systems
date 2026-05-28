@@ -329,6 +329,15 @@ public:
   virtual hsa_status_t SetTrapHandler(uint32_t node_id, const void* base, uint64_t base_size,
                                       const void* buffer_base, uint64_t buffer_base_size) const = 0;
 
+  /// @brief Forward the RAS-poison SIGBUS delay to the kernel driver for a node.
+  /// @param[in] node_id  Node ID of the agent.
+  /// @param[in] delay_ms Delay in ms (UINT32_MAX disables the opt-in).
+  /// @return HSA_STATUS_SUCCESS, or HSA_STATUS_ERROR if the kernel/driver does
+  ///         not support the opt-in (callers may treat as non-fatal).
+  virtual hsa_status_t SetSigbusDelay(uint32_t /*node_id*/, uint32_t /*delay_ms*/) const {
+    return HSA_STATUS_SUCCESS;
+  }
+
   /// @brief Gets the device handle for a specific node.
   /// @param node_id Node ID of the agent
   /// @param device_handle Device handle
