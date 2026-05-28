@@ -596,6 +596,19 @@ TEST(VAddSimdBenchmark, Cdna4_VAdd3U32_Vop3) {
   run_words("v_add3_u32_e64 v2, v0, v1, v3", w0, w1, /*sanitize_finite=*/false);
 }
 
+// v_cvt_i32_f64_e64 v2, v0:v1  (CDNA4 VOP3 opcode 323) — VOP3 form of the f64
+// cvt. Routed through the existing SIMD_CVT_F64_TO_B32 glue via a _vop3->_vop1
+// fallback (the scalar body drops the abs/neg/omod/clamp modifier reads).
+TEST(VAddSimdBenchmark, Cdna4_VCvtI32F64_Vop3) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  uint32_t w0, w1;
+  vop3_bin_encode(323, /*vdst=*/2, /*src0=*/256, /*src1=*/0, 0, 0, 0, 0, w0, w1);
+  run_words("v_cvt_i32_f64_e64 v2, v0:v1", w0, w1, /*sanitize_finite=*/false);
+}
+
 // Diagnostic: report whether the SIMD fast path is compiled in.
 TEST(VAddSimdBenchmark, SimdCompileTimeReport) {
 #if __has_include(<experimental/simd>)
