@@ -131,8 +131,8 @@ bool ncclReduceScatterDdaIpcEligible(
     return false;
   }
 
-  // Check per-rank count
-  if (recvcount % 1 || ((recvcount * ncclTypeSize(datatype)) % 16)) {
+  // Check per-rank byte alignment
+  if ((recvcount * ncclTypeSize(datatype)) % 16) {
     return false;
   }
 
