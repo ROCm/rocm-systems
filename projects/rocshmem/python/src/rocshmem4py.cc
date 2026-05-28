@@ -406,25 +406,27 @@ PYBIND11_MODULE(_rocshmem4py, m) {
   // -------------------------------------------------------------------------
 
   m.def("rocshmem_alltoallmem_on_stream",
-    [](intptr_t team, intptr_t dest, intptr_t source, size_t nelems,
+    [](intptr_t team, intptr_t dest, intptr_t source, size_t bytes_per_pe,
        intptr_t stream) {
       rocshmem_alltoallmem_on_stream(
           resolve_team_handle(team), (void *)dest, (const void *)source,
-          nelems, (hipStream_t)stream);
+          bytes_per_pe, (hipStream_t)stream);
     },
-    "Stream-ordered all-to-all over a team.",
-    py::arg("team"), py::arg("dest"), py::arg("source"), py::arg("nelems"),
-    py::arg("stream"));
+    "Stream-ordered all-to-all over a team. bytes_per_pe is the number of "
+    "bytes transferred to each PE in the team.",
+    py::arg("team"), py::arg("dest"), py::arg("source"),
+    py::arg("bytes_per_pe"), py::arg("stream"));
 
   m.def("rocshmem_broadcastmem_on_stream",
-    [](intptr_t team, intptr_t dest, intptr_t source, size_t nelems,
+    [](intptr_t team, intptr_t dest, intptr_t source, size_t nbytes,
        int pe_root, intptr_t stream) {
       rocshmem_broadcastmem_on_stream(
           resolve_team_handle(team), (void *)dest, (const void *)source,
-          nelems, pe_root, (hipStream_t)stream);
+          nbytes, pe_root, (hipStream_t)stream);
     },
-    "Stream-ordered broadcast over a team. pe_root is in the team's PE space.",
-    py::arg("team"), py::arg("dest"), py::arg("source"), py::arg("nelems"),
+    "Stream-ordered broadcast over a team. nbytes is the number of bytes "
+    "broadcast. pe_root is in the team's PE space.",
+    py::arg("team"), py::arg("dest"), py::arg("source"), py::arg("nbytes"),
     py::arg("pe_root"), py::arg("stream"));
 
   m.def("rocshmem_query_thread", []() -> int {
