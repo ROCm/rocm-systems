@@ -819,6 +819,10 @@ endif()
 if(LL128_ENABLED)
   target_compile_definitions(rccl PRIVATE ENABLE_LL128)
 endif()
+if(CE_ENABLED)
+  target_compile_definitions(rccl PRIVATE CE_BATCH_ASYNC_SUPPORTED)
+  message(STATUS "CE_BATCH_ASYNC_SUPPORTED compile definition enabled")
+endif()
 
 ## Set RCCL compile options
 if (HAVE_PARALLEL_JOBS)
