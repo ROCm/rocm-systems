@@ -51,6 +51,7 @@
 #include <unordered_map>
 #include <memory>
 #include <tuple>
+#include <unordered_map>
 #include <utility>
 #include <thread>
 #include <mutex>
@@ -1036,6 +1037,7 @@ class Runtime {
     bool is_fabric_handle;
     MemoryRegion::AllocateFlags alloc_flag;
   };
+
   // hsa_amd_vmem_alloc_handle_t (MemoryHandle*) to MemoryHandle mapping. Owns MemoryHandle
   // lifetime. Uniqueness is guaranteed by the runtime, independent of any driver-supplied
   // identifier.
