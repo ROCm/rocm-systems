@@ -44,15 +44,10 @@ endforeach()
 # parent CMakeLists which only adds this subdirectory when examples are built.
 if(BUILD_TESTING)
     set(ASYNC_TEST_DIR "${AIS_CAPABLE_DIR}/hipfile_async_tests")
-    set(ASYNC_INPUT "${ASYNC_TEST_DIR}/input.bin")
 
     add_test(
         NAME async_setup_dir
         COMMAND ${CMAKE_COMMAND} -E make_directory ${ASYNC_TEST_DIR}
-    )
-    add_test(
-        NAME async_setup_input
-        COMMAND sh -c "dd if=/dev/urandom of='${ASYNC_INPUT}' bs=4096 count=64 status=none"
     )
     add_test(
         NAME async_cleanup
@@ -61,18 +56,17 @@ if(BUILD_TESTING)
     set_tests_properties(async_setup_dir PROPERTIES
         FIXTURES_SETUP async_scratch
     )
-    set_tests_properties(async_setup_input PROPERTIES
-        FIXTURES_SETUP async_scratch
-        DEPENDS async_setup_dir
-    )
     set_tests_properties(async_cleanup PROPERTIES
         FIXTURES_CLEANUP async_scratch
     )
 
+    # Each async example calls seed_read_file() to truncate+seed its READ_FILE,
+    # so we give every test its own input path. This avoids parallel-run races
+    # on a shared input file and removes the need for an upfront dd seeding.
     foreach(example ${ASYNC_EXAMPLES})
         add_test(
             NAME async_${example}
-            COMMAND $<TARGET_FILE:${example}> ${ASYNC_INPUT} out_${example}.bin
+            COMMAND $<TARGET_FILE:${example}> in_${example}.bin out_${example}.bin
             WORKING_DIRECTORY ${ASYNC_TEST_DIR}
         )
         set_tests_properties(async_${example} PROPERTIES
