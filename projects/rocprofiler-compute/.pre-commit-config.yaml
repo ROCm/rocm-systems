@@ -80,3 +80,14 @@ repos:
         files: ^projects/rocprofiler-compute/
         pass_filenames: false
         stages: [pre-commit]
+
+  # Local hook: AI harness integrity check
+  - repo: local
+    hooks:
+      - id: rocprofiler-compute-ai-dev-guide
+        name: AI harness integrity check (rocprofiler-compute)
+        entry: bash -lc 'cd projects/rocprofiler-compute && python3 scripts/ai_dev_guide.py'
+        language: system
+        files: ^projects/rocprofiler-compute/(\.ai/|openspec/|docs/design/spec-driven-development-proposal\.md|AGENTS\.md|scripts/ai_dev_guide\.py)
+        pass_filenames: false
+        stages: [pre-commit]

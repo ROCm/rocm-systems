@@ -70,6 +70,11 @@ for rocprofiler-compute.
 - **Enforced process** (design approval before code, red-green tests where feasible, root-cause debugging).
 - **Context hygiene:** After spec is written, new sessions load files—not 50k tokens of brainstorming.
 - Alignment with existing **`.ai/rules/`**, **Ruff**, **pre-commit**, **graphify**, and **rocm-systems** contribution norms.
+- A small **AI harness** to keep the workflow stable over time:
+  - **Domain invariants** for profiling/trace work (`.ai/rules/profiling_infra.md`)
+  - **Agent safety policy** for tool-using workflows (`.ai/rules/security.md`)
+  - A **pre-commit/CI integrity check** (`scripts/ai_dev_guide.py`) so these entry
+    points don’t silently disappear as the repo evolves.
 
 ---
 
