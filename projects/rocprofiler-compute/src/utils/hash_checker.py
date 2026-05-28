@@ -24,62 +24,32 @@ CONFIGS_ROOT: Path = PROJECT_ROOT / "src" / "rocprof_compute_soc" / "analysis_co
 HASH_FILE: Path = PROJECT_ROOT / "src" / "utils" / ".config_hashes.json"
 
 
-def _all_archs(cfg_root: Path) -> list[str]:
-    if not cfg_root.is_dir():
-        return []
-    return sorted(
-        p.name for p in cfg_root.iterdir() if p.is_dir() and p.name.startswith("gfx")
-    )
-
-
-def _cur_panels(arch_dir: Path) -> dict[str, str]:
-    """Current (on-disk) panel-file hashes via hash_manager.compute_arch_hashes."""
-    return dict(hash_manager.compute_arch_hashes(arch_dir).get("files") or {})
-
-
-def _prev_panels(hashes_path: Path, arch_name: str) -> dict[str, str]:
-    """Previous panel-file hashes saved in .config_hashes.json."""
-    db: dict = hash_manager.load_hash_db(hashes_path)
-    prev_arch: dict = (db.get("archs") or {}).get(arch_name, {})  # type: ignore[assignment]
-    return dict(prev_arch.get("files") or {})
-
-
-def _changed_panel_files(cur: dict[str, str], prev: dict[str, str]) -> list[str]:
-    """Return a small list of changed panel filenames (added/removed/modified)."""
-    changed = sorted(set(cur) ^ set(prev))
-    if not changed:
-        changed = sorted(k for k in cur.keys() & prev.keys() if cur[k] != prev[k])
-    return changed
-
-
 def main() -> int:
     if not CONFIGS_ROOT.is_dir():
         print(f"ERROR: analysis_configs directory not found at: {CONFIGS_ROOT}")
         return 2
 
     changes: dict = hash_manager.detect_changes(CONFIGS_ROOT, HASH_FILE)
-    new_archs: list = changes.get("new_archs") or []
 
-    errors: list[str] = []
+    errors: list[str] = [
+        f"Arch '{arch}' removed from disk but still in .config_hashes.json.\n"
+        "Run hash_manager.py --compute-all to refresh the DB."
+        for arch in (changes.get("deleted_archs") or [])
+    ]
 
-    for arch in _all_archs(CONFIGS_ROOT):
-        if arch in new_archs:
-            errors.append(
-                f"New arch '{arch}' has no entry in .config_hashes.json.\n"
-                "Run hash_manager.py --compute-all to refresh the DB."
-            )
-            continue
+    for arch in changes.get("new_archs") or []:
+        errors.append(
+            f"New arch '{arch}' has no entry in .config_hashes.json.\n"
+            "Run hash_manager.py --compute-all to refresh the DB."
+        )
 
-        cur_panels = _cur_panels(CONFIGS_ROOT / arch)
-        prev_panels = _prev_panels(HASH_FILE, arch)
-
-        if cur_panels != prev_panels:
-            snippet = ", ".join(_changed_panel_files(cur_panels, prev_panels)[:5])
-            errors.append(
-                f"Panels changed in arch '{arch}' but hash DB was not refreshed.\n"
-                f"Changed panels (sample): {snippet}\n"
-                "Run hash_manager.py --compute-all to refresh the DB."
-            )
+    for arch, changed_files in (changes.get("modified_archs") or {}).items():
+        snippet = ", ".join(changed_files[:5])
+        errors.append(
+            f"Panels changed in arch '{arch}' but hash DB was not refreshed.\n"
+            f"Changed panels (sample): {snippet}\n"
+            "Run hash_manager.py --compute-all to refresh the DB."
+        )
 
     if errors:
         print("\nHASH CONSISTENCY ERRORS:")
