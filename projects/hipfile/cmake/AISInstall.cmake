@@ -13,7 +13,7 @@ rocm_install(TARGETS hipfile)
 
 # Install the headers
 rocm_install(
-    DIRECTORY ${HIPFILE_ROOT_PATH}/include/
+    DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/include/"
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 

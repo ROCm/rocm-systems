@@ -77,17 +77,17 @@ extern "C" {
  * @brief hipFile major version number
  * @ingroup core
  */
-#define HIPFILE_VERSION_MAJOR 0
+#define HIPFILE_VERSION_MAJOR @HIPFILE_LIBRARY_MAJOR@
 /*!
  * @brief hipFile minor version number
  * @ingroup core
  */
-#define HIPFILE_VERSION_MINOR 2
+#define HIPFILE_VERSION_MINOR @HIPFILE_LIBRARY_MINOR@
 /*!
  * @brief hipFile patch version number
  * @ingroup core
  */
-#define HIPFILE_VERSION_PATCH 0
+#define HIPFILE_VERSION_PATCH @HIPFILE_LIBRARY_PATCH@
 
 // ***********************************************************************
 //  PLATFORM-INDEPENDENT TYPES

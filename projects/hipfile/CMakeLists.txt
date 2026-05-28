@@ -16,20 +16,23 @@ endif()
 
 # Set the library version in a variable so we can use
 # it in *.in files and avoid version mismatch.
-set(AIS_LIBRARY_MAJOR 0)
-set(AIS_LIBRARY_MINOR 2)
-set(AIS_LIBRARY_PATCH 0)
-set(AIS_LIBRARY_VERSION "${AIS_LIBRARY_MAJOR}.${AIS_LIBRARY_MINOR}.${AIS_LIBRARY_PATCH}")
+set(HIPFILE_LIBRARY_MAJOR 0)
+set(HIPFILE_LIBRARY_MINOR 2)
+set(HIPFILE_LIBRARY_PATCH 0)
+set(HIPFILE_LIBRARY_VERSION "${HIPFILE_LIBRARY_MAJOR}.${HIPFILE_LIBRARY_MINOR}.${HIPFILE_LIBRARY_PATCH}")
+
+# Create the header file
+configure_file("include/hipfile.h.in" "${CMAKE_CURRENT_BINARY_DIR}/include/hipfile.h")
 
 # Set the SOVERSION to the major library version (this is the default
 # but we set it explicitly to convey intent).
 #
 # Changes to minor and patch releases must NEVER break the ABI. This
 # includes things like reordering struct fields that don't break the API.
-set(AIS_LIBRARY_SOVERSION "${AIS_LIBRARY_MAJOR}")
+set(HIPFILE_LIBRARY_SOVERSION "${HIPFILE_LIBRARY_MAJOR}")
 
 project("hipfile"
-    VERSION ${AIS_LIBRARY_VERSION}
+    VERSION ${HIPFILE_LIBRARY_VERSION}
     DESCRIPTION "Direct-to-GPU IO for AMD's ROCm platform"
     LANGUAGES C CXX HIP
 )
@@ -40,7 +43,7 @@ option(BUILD_SHARED_LIBS "Build using shared libraries" ON)
 # Set the path to the include directories for later use
 # Do this early so we can use these later, in functions, etc.
 set(HIPFILE_ROOT_PATH "${CMAKE_CURRENT_SOURCE_DIR}")
-set(HIPFILE_INCLUDE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/include")
+set(HIPFILE_INCLUDE_PATH "${CMAKE_CURRENT_BINARY_DIR}/include")
 set(HIPFILE_AMD_SOURCE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/amd_detail")
 set(HIPFILE_NVIDIA_SOURCE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/nvidia_detail")
 set(HIPFILE_SRC_COMMON_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/common")

@@ -35,9 +35,9 @@ function(ais_add_libraries)
     set_target_properties(${arg_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
     # Add version numbers
-    set_target_properties(${arg_NAME} PROPERTIES VERSION ${AIS_LIBRARY_VERSION})
+    set_target_properties(${arg_NAME} PROPERTIES VERSION ${HIPFILE_LIBRARY_VERSION})
     if(BUILD_SHARED_LIBS)
-        set_target_properties(${arg_NAME} PROPERTIES SOVERSION ${AIS_LIBRARY_SOVERSION})
+        set_target_properties(${arg_NAME} PROPERTIES SOVERSION ${HIPFILE_LIBRARY_SOVERSION})
     endif()
 
     # Add dependencies on external libraries

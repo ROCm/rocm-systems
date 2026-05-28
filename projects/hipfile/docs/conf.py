@@ -86,7 +86,7 @@ def generate_doxyfile(app, _):
         content = f.read()
 
     # Fix up version
-    content = content.replace("@AIS_LIBRARY_VERSION@", version_number)
+    content = content.replace("@HIPFILE_LIBRARY_VERSION@", version_number)
 
     # Fix up Doxygen markup location
     content = content.replace("@AIS_DOXYFILE_INPUT@", "../../include/hipfile.h")
