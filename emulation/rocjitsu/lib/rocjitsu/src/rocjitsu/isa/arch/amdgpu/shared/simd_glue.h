@@ -1603,6 +1603,165 @@ template <typename Tin, typename Tout, typename Inst, typename UnOp>
   return false;
 }
 
+/// v_div_fixup_f32 SIMD helper. Mirrors the scalar `else if` cascade
+/// (execute_shared.h:execute_v_div_fixup_f32_vop3): given three already-
+/// modified f32 operands `p` (the fma scaffold input), `b` (numerator), and
+/// `c` (denominator), pick the result among NaN/Inf/zero copysign cases
+/// according to AMD's div_fixup ULP table. The cascade is applied lowest-
+/// priority first so that the higher-priority `where` blends overwrite —
+/// equivalent to scalar's first-match `else if`. The sign-of-quotient
+/// `b ^ c` is computed once in the integer domain and reinterpreted as
+/// float, matching the scalar's `bit_cast<float>(bits(b) ^ bits(c))`. Both
+/// `std::copysign(Inf, bxc)` and `std::copysign(0, bxc)` reduce to
+/// `stdx::copysign(target, bxc)`.
+inline util::native<float> div_fixup_f32_simd(util::native<float> p, util::native<float> b,
+                                              util::native<float> c) {
+  using F = util::native<float>;
+  using U = util::native<uint32_t>;
+  const auto bxc = std::bit_cast<F>(std::bit_cast<U>(b) ^ std::bit_cast<U>(c));
+  const auto inf_val = util::stdx::copysign(F(std::numeric_limits<float>::infinity()), bxc);
+  const auto zero_val = util::stdx::copysign(F(0.0f), bxc);
+  const auto qnan = F(std::numeric_limits<float>::quiet_NaN());
+  const auto b_nan = util::stdx::isnan(b);
+  const auto c_nan = util::stdx::isnan(c);
+  const auto b_inf = util::stdx::isinf(b);
+  const auto c_inf = util::stdx::isinf(c);
+  const auto b_zero = (b == F(0.0f));
+  const auto c_zero = (c == F(0.0f));
+  F r = p;
+  util::stdx::where(b_inf, r) = zero_val;
+  util::stdx::where(c_inf, r) = inf_val;
+  util::stdx::where(c_zero, r) = zero_val;
+  util::stdx::where(b_zero, r) = inf_val;
+  util::stdx::where(b_inf && c_inf, r) = qnan;
+  util::stdx::where(b_zero && c_zero, r) = qnan;
+  util::stdx::where(c_nan, r) = c;
+  util::stdx::where(b_nan, r) = b;
+  return r;
+}
+
+/// f64 counterpart of div_fixup_f32_simd — same cascade, 64-bit-lane domain.
+inline util::native<double> div_fixup_f64_simd(util::native<double> p, util::native<double> b,
+                                               util::native<double> c) {
+  using D = util::native<double>;
+  using U = util::native<uint64_t>;
+  const auto bxc = std::bit_cast<D>(std::bit_cast<U>(b) ^ std::bit_cast<U>(c));
+  const auto inf_val = util::stdx::copysign(D(std::numeric_limits<double>::infinity()), bxc);
+  const auto zero_val = util::stdx::copysign(D(0.0), bxc);
+  const auto qnan = D(std::numeric_limits<double>::quiet_NaN());
+  const auto b_nan = util::stdx::isnan(b);
+  const auto c_nan = util::stdx::isnan(c);
+  const auto b_inf = util::stdx::isinf(b);
+  const auto c_inf = util::stdx::isinf(c);
+  const auto b_zero = (b == D(0.0));
+  const auto c_zero = (c == D(0.0));
+  D r = p;
+  util::stdx::where(b_inf, r) = zero_val;
+  util::stdx::where(c_inf, r) = inf_val;
+  util::stdx::where(c_zero, r) = zero_val;
+  util::stdx::where(b_zero, r) = inf_val;
+  util::stdx::where(b_inf && c_inf, r) = qnan;
+  util::stdx::where(b_zero && c_zero, r) = qnan;
+  util::stdx::where(c_nan, r) = c;
+  util::stdx::where(b_nan, r) = b;
+  return r;
+}
+
+/// VOP3 div_fmas SIMD fast path (f32). The scalar body is `fma(s0, s1, s2)`
+/// followed by a per-lane `ldexp(result, 32)` gated by the VCC bit; no
+/// omod/clamp are applied (the encoded modifier fields are intentionally
+/// ignored). Per-source abs/neg modifiers ARE applied (matching scalar).
+/// This is a dedicated glue (rather than routing through the existing
+/// ternary fp glue) because the omod/clamp policy differs and the VCC-
+/// driven ldexp gate is unique to div_fmas. NaN-input lanes skipped by test
+/// (gcc-13 packed FMA quiets a different NaN operand vs scalar std::fma —
+/// same accepted carve-out as the rest of the ternary fp suite).
+template <typename Inst>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_div_fmas_f32_simd(Inst &inst, Wavefront &wf) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+    return false;
+  using T = float32_t;
+  const uint32_t abs = inst.inst_.abs;
+  const uint32_t neg = inst.inst_.neg;
+  constexpr std::size_t W = util::native_width_v<T>;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  const uint64_t vcc = wf.vcc();
+  using IExp = util::stdx::fixed_size_simd<int, util::native<float>::size()>;
+  const IExp shift_32 = IExp(32);
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto a = apply_vop3_src_mod_f32<0>(read_simd<T>(inst.src0, wf, base), abs, neg);
+    const auto b = apply_vop3_src_mod_f32<1>(read_simd<T>(inst.src1, wf, base), abs, neg);
+    const auto c = apply_vop3_src_mod_f32<2>(read_simd<T>(inst.src2, wf, base), abs, neg);
+    auto r = util::stdx::fma(a, b, c);
+    const auto scaled = util::stdx::ldexp(r, shift_32);
+    const uint64_t sel_bits = (vcc >> base) & chunk_full;
+    alignas(util::native<uint32_t>) uint32_t selbuf[W];
+    for (std::size_t i = 0; i < W; ++i)
+      selbuf[i] = static_cast<uint32_t>((sel_bits >> i) & 1u);
+    const auto vcc_mask_u = util::load<uint32_t>(selbuf) != 0u;
+    util::stdx::where(simd_mask_as<float>(vcc_mask_u), r) = scaled;
+    write_simd<T>(inst.vdst, wf, base, r, chunk);
+  }
+  return true;
+}
+
+template <typename Inst>
+[[nodiscard]] inline bool try_execute_div_fmas_f32_simd(Inst &, Wavefront &) {
+  return false;
+}
+
+/// f64 counterpart of try_execute_div_fmas_f32_simd. Same VCC-gated ldexp
+/// shape with shift=64 (per AMD spec for div_fmas_f64). 64-bit-lane reads,
+/// abs/neg in f64 domain via apply_vop3_src_mod_f64.
+template <typename Inst>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_div_fmas_f64_simd(Inst &inst, Wavefront &wf) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+    return false;
+  using T = double;
+  const uint32_t abs = inst.inst_.abs;
+  const uint32_t neg = inst.inst_.neg;
+  constexpr std::size_t W = util::native_width64;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  const uint64_t vcc = wf.vcc();
+  using IExp = util::stdx::fixed_size_simd<int, util::native_width64>;
+  const IExp shift_64 = IExp(64);
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto a = apply_vop3_src_mod_f64<0>(read_simd64<T>(inst.src0, wf, base), abs, neg);
+    const auto b = apply_vop3_src_mod_f64<1>(read_simd64<T>(inst.src1, wf, base), abs, neg);
+    const auto c = apply_vop3_src_mod_f64<2>(read_simd64<T>(inst.src2, wf, base), abs, neg);
+    auto r = util::stdx::fma(a, b, c);
+    const auto scaled = util::stdx::ldexp(r, shift_64);
+    // VCC mask built directly in the f64 abi via a generator; avoids a
+    // cross-abi mask cast (the f32 path can ride load+simd_mask_as because
+    // native<uint32_t> shares abi with native<float>, but native<uint64_t>
+    // does not match native<double>::abi on AVX-512).
+    const uint64_t vcc_chunk = vcc >> base;
+    const auto vcc_mask = util::native<double>([&](std::size_t i) {
+                            return ((vcc_chunk >> i) & 1ULL) ? 1.0 : 0.0;
+                          }) != 0.0;
+    util::stdx::where(vcc_mask, r) = scaled;
+    write_simd64<T>(inst.vdst, wf, base, r, chunk);
+  }
+  return true;
+}
+
+template <typename Inst>
+[[nodiscard]] inline bool try_execute_div_fmas_f64_simd(Inst &, Wavefront &) {
+  return false;
+}
+
 } // namespace amdgpu
 } // namespace rocjitsu
 
@@ -1813,6 +1972,17 @@ template <typename Tin, typename Tout, typename Inst, typename UnOp>
 /// VOP3 ldexp counterpart (f64 src0 + int32 src1 exp). Variadic functor.
 #define ROCJITSU_TRY_SIMD_LDEXP_VOP3_FP64(...)                                                     \
   if (::rocjitsu::amdgpu::try_execute_ldexp_vop3_fp64_simd(inst, wf, __VA_ARGS__))                 \
+  return
+
+/// VOP3 div_fmas counterpart (fma(s0,s1,s2) followed by VCC-gated ldexp; no
+/// omod/clamp). No functor — the op is fixed (operand order, ldexp shift) and
+/// distinct for f32 vs f64.
+#define ROCJITSU_TRY_SIMD_DIV_FMAS_VOP3_FP32()                                                     \
+  if (::rocjitsu::amdgpu::try_execute_div_fmas_f32_simd(inst, wf))                                 \
+  return
+
+#define ROCJITSU_TRY_SIMD_DIV_FMAS_VOP3_FP64()                                                     \
+  if (::rocjitsu::amdgpu::try_execute_div_fmas_f64_simd(inst, wf))                                 \
   return
 
 /// VOP3 f64 binary counterpart (read_simd64, per-source abs/neg, omod/clamp on
