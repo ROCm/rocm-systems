@@ -1270,6 +1270,25 @@ SIMD_VOP3_UNARY_FP64: dict[str, str] = {
 }
 
 
+# VOP3 f16 unary: widen f16->f32, apply abs/neg, op, omod/clamp, narrow back.
+# The 5 rounding ops below have no FTZ; the transcendentals (rcp/rsq/exp/log)
+# would need flush_denorm_f32 around them and are deferred to a future slice.
+# sqrt is fine (transcendental::sqrt_f32 has no FTZ).
+SIMD_VOP3_UNARY_FP16: dict[str, str] = {
+    "v_ceil_f16_vop3": "[](auto a) { return util::stdx::ceil(a); }",
+    "v_floor_f16_vop3": "[](auto a) { return util::stdx::floor(a); }",
+    "v_trunc_f16_vop3": "[](auto a) { return util::stdx::trunc(a); }",
+    "v_rndne_f16_vop3": "[](auto a) { return util::stdx::nearbyint(a); }",
+    "v_sqrt_f16_vop3": (
+        "[](auto a) {"
+        " auto r = util::stdx::sqrt(a);"
+        " util::stdx::where(util::stdx::isnan(a), r) = a;"
+        " util::stdx::where(a < 0.0f, r) = std::numeric_limits<float>::quiet_NaN();"
+        " return r; }"
+    ),
+}
+
+
 SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
     "v_add3_u32_vop3": (
         "uint32_t",
@@ -1423,6 +1442,11 @@ def simd_probe_line(template_name: str) -> str | None:
     spec3unaf64 = SIMD_VOP3_UNARY_FP64.get(template_name)
     if spec3unaf64 is not None:
         return f"  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP64({spec3unaf64});"
+    # VOP3 f16 unary (widen-then-modify-then-narrow). FTZ-free ops only:
+    # ceil/floor/trunc/rndne/sqrt. Transcendentals deferred.
+    spec3unaf16 = SIMD_VOP3_UNARY_FP16.get(template_name)
+    if spec3unaf16 is not None:
+        return f"  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16({spec3unaf16});"
     # VOP3-encoded twins of the SIMD VOP2 binary ops. Same operator/lane type;
     # the VOP3 form reads src0/src1 and carries abs/neg/omod/clamp modifiers.
     # f32 ops apply the modifiers in-vector (bit-exact); integer/bitwise ops
