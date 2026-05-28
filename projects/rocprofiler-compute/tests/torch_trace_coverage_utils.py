@@ -2025,15 +2025,13 @@ def aten_packet_call_path(op_name: str) -> str:
 #     .dim_max, .dim_min, .eigenvalues, .no_stats_out, ...) — these
 #     would need an out=(t1, t2, ...) tuple and are filtered by the
 #     schema-return-count check anyway.
-_SINGLE_TENSOR_OUT_OVERLOAD_SUFFIXES: frozenset = frozenset(
-    {
-        "out",
-        "Tensor_out",
-        "OutTensor",
-        "m_out",
-        "out_mode",
-    }
-)
+_SINGLE_TENSOR_OUT_OVERLOAD_SUFFIXES: frozenset = frozenset({
+    "out",
+    "Tensor_out",
+    "OutTensor",
+    "m_out",
+    "out_mode",
+})
 
 
 # Short names whose ".out" variant cannot be served by the generic
@@ -2051,35 +2049,33 @@ _SINGLE_TENSOR_OUT_OVERLOAD_SUFFIXES: frozenset = frozenset(
 # listed here; they are detected at runtime by the schema-return count
 # check in the .out mechanism, which is more reliable than an
 # enumeration that has to stay synchronized with PyTorch releases.
-_OUT_MECHANISM_EXCLUDED_SHORT_NAMES: frozenset = frozenset(
-    {
-        "eq",
-        "ne",
-        "lt",
-        "gt",
-        "ge",
-        "le",
-        "isnan",
-        "isinf",
-        "isfinite",
-        "isneginf",
-        "isposinf",
-        "logical_and",
-        "logical_or",
-        "logical_xor",
-        "logical_not",
-        "isclose",
-        "isin",
-        "argmax",
-        "argmin",
-        "argsort",
-        "all",
-        "any",
-        "nonzero",
-        "tril_indices",
-        "triu_indices",
-    }
-)
+_OUT_MECHANISM_EXCLUDED_SHORT_NAMES: frozenset = frozenset({
+    "eq",
+    "ne",
+    "lt",
+    "gt",
+    "ge",
+    "le",
+    "isnan",
+    "isinf",
+    "isfinite",
+    "isneginf",
+    "isposinf",
+    "logical_and",
+    "logical_or",
+    "logical_xor",
+    "logical_not",
+    "isclose",
+    "isin",
+    "argmax",
+    "argmin",
+    "argsort",
+    "all",
+    "any",
+    "nonzero",
+    "tril_indices",
+    "triu_indices",
+})
 
 
 def _first_tensor_dtype(args: List[Any]) -> Optional[torch.dtype]:
@@ -4111,115 +4107,111 @@ def missing_builder_family(op_name: str) -> str:
 # words), but they all accept the same minimal builder signature, so
 # bucketing them lets the report flag a single template that knocks
 # out the entire group.
-_KNOWN_UNARY_FLOAT_ELEMENTWISE: frozenset = frozenset(
-    {
-        # trig / hyperbolic
-        "acos",
-        "acosh",
-        "asin",
-        "asinh",
-        "atan",
-        "atanh",
-        "cos",
-        "cosh",
-        "sin",
-        "sinc",
-        "sinh",
-        "tan",
-        "tanh",
-        # exponentials / logs
-        "exp",
-        "exp2",
-        "expm1",
-        "log",
-        "log10",
-        "log1p",
-        "log2",
-        "logit",
-        # roots, powers, reciprocals
-        "reciprocal",
-        "rsqrt",
-        "sqrt",
-        "square",
-        # rounding / sign
-        "ceil",
-        "floor",
-        "frac",
-        "neg",
-        "round",
-        "sgn",
-        "sign",
-        "signbit",
-        "trunc",
-        "positive",
-        # gamma / bessel-ish
-        "digamma",
-        "erf",
-        "erfc",
-        "erfinv",
-        "i0",
-        "lgamma",
-        "polygamma",
-        # complex / angle
-        "angle",
-        "conj_physical",
-        # predicates → BoolTensor
-        "isfinite",
-        "isinf",
-        "isnan",
-        "isneginf",
-        "isposinf",
-        "isreal",
-        # angle conversion
-        "deg2rad",
-        "rad2deg",
-        # activations
-        "elu",
-        "gelu",
-        "glu",
-        "hardshrink",
-        "hardsigmoid",
-        "hardswish",
-        "hardtanh",
-        "leaky_relu",
-        "mish",
-        "relu",
-        "sigmoid",
-        "silu",
-        "softplus",
-        "softshrink",
-        "threshold",
-        # other
-        "nonzero",
-    }
-)
+_KNOWN_UNARY_FLOAT_ELEMENTWISE: frozenset = frozenset({
+    # trig / hyperbolic
+    "acos",
+    "acosh",
+    "asin",
+    "asinh",
+    "atan",
+    "atanh",
+    "cos",
+    "cosh",
+    "sin",
+    "sinc",
+    "sinh",
+    "tan",
+    "tanh",
+    # exponentials / logs
+    "exp",
+    "exp2",
+    "expm1",
+    "log",
+    "log10",
+    "log1p",
+    "log2",
+    "logit",
+    # roots, powers, reciprocals
+    "reciprocal",
+    "rsqrt",
+    "sqrt",
+    "square",
+    # rounding / sign
+    "ceil",
+    "floor",
+    "frac",
+    "neg",
+    "round",
+    "sgn",
+    "sign",
+    "signbit",
+    "trunc",
+    "positive",
+    # gamma / bessel-ish
+    "digamma",
+    "erf",
+    "erfc",
+    "erfinv",
+    "i0",
+    "lgamma",
+    "polygamma",
+    # complex / angle
+    "angle",
+    "conj_physical",
+    # predicates → BoolTensor
+    "isfinite",
+    "isinf",
+    "isnan",
+    "isneginf",
+    "isposinf",
+    "isreal",
+    # angle conversion
+    "deg2rad",
+    "rad2deg",
+    # activations
+    "elu",
+    "gelu",
+    "glu",
+    "hardshrink",
+    "hardsigmoid",
+    "hardswish",
+    "hardtanh",
+    "leaky_relu",
+    "mish",
+    "relu",
+    "sigmoid",
+    "silu",
+    "softplus",
+    "softshrink",
+    "threshold",
+    # other
+    "nonzero",
+})
 
-_KNOWN_WHOLE_TENSOR_REDUCTIONS: frozenset = frozenset(
-    {
-        "all",
-        "any",
-        "amax",
-        "amin",
-        "aminmax",
-        "argmax",
-        "argmin",
-        "max",
-        "min",
-        "median",
-        "mode",
-        "nanmedian",
-        "prod",
-        "sum",
-        "mean",
-        "nansum",
-        "trace",
-        "std",
-        "var",
-        "std_mean",
-        "var_mean",
-        "norm",
-    }
-)
+_KNOWN_WHOLE_TENSOR_REDUCTIONS: frozenset = frozenset({
+    "all",
+    "any",
+    "amax",
+    "amin",
+    "aminmax",
+    "argmax",
+    "argmin",
+    "max",
+    "min",
+    "median",
+    "mode",
+    "nanmedian",
+    "prod",
+    "sum",
+    "mean",
+    "nansum",
+    "trace",
+    "std",
+    "var",
+    "std_mean",
+    "var_mean",
+    "norm",
+})
 
 
 def format_missing_arg_builder_report(

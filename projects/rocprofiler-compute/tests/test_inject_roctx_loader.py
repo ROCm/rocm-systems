@@ -34,9 +34,9 @@ def test_compute_tag_returns_well_formed_string():
     assert any(p.startswith("abi") for p in parts)
     # _src{12 hex} guards against stale .so loads after a source edit.
     src_components = [p for p in parts if p.startswith("src")]
-    assert (
-        len(src_components) == 1
-    ), f"expected exactly one '_src...' component in tag {tag!r}"
+    assert len(src_components) == 1, (
+        f"expected exactly one '_src...' component in tag {tag!r}"
+    )
     src_value = src_components[0][len("src") :]
     # 12-char lowercase hex, or "missing" if no inputs were readable.
     assert src_value == "missing" or (
@@ -67,9 +67,9 @@ def test_source_fingerprint_changes_when_inputs_change(tmp_path, monkeypatch):
         original = input_path.read_bytes()
         input_path.write_bytes(original + b"\n# mutation\n")
         mutated = inject_roctx_loader._source_fingerprint()
-        assert (
-            mutated != baseline
-        ), f"editing {input_path.name} did not change the fingerprint"
+        assert mutated != baseline, (
+            f"editing {input_path.name} did not change the fingerprint"
+        )
         input_path.write_bytes(original)
         assert inject_roctx_loader._source_fingerprint() == baseline
 
@@ -77,9 +77,9 @@ def test_source_fingerprint_changes_when_inputs_change(tmp_path, monkeypatch):
 def test_source_fingerprint_excludes_tool_version_file():
     """VERSION must not be a fingerprint input (would bust cache every release)."""
     for path in inject_roctx_loader._FINGERPRINT_INPUTS:
-        assert (
-            path.name != "VERSION"
-        ), f"VERSION should not be in _FINGERPRINT_INPUTS; saw {path}"
+        assert path.name != "VERSION", (
+            f"VERSION should not be in _FINGERPRINT_INPUTS; saw {path}"
+        )
 
 
 def test_source_fingerprint_is_missing_sentinel_when_no_inputs_readable(
@@ -126,9 +126,9 @@ def test_install_cached_so_overwrites_stale_artifact(tmp_path):
     cached.write_bytes(b"STALE content -- must be overwritten")
 
     inject_roctx_loader._install_cached_so(src, cached)
-    assert (
-        cached.read_bytes() == b"new content"
-    ), "cache copy did not overwrite the existing cached .so"
+    assert cached.read_bytes() == b"new content", (
+        "cache copy did not overwrite the existing cached .so"
+    )
 
 
 def test_cmake_and_runtime_compute_identical_fingerprint():
@@ -153,9 +153,9 @@ def test_cmake_and_runtime_compute_identical_fingerprint():
     )
     cmake_side = result.stdout.strip()
     runtime_side = inject_roctx_loader._source_fingerprint()
-    assert (
-        cmake_side == runtime_side
-    ), f"install-time fingerprint {cmake_side!r} != runtime {runtime_side!r}"
+    assert cmake_side == runtime_side, (
+        f"install-time fingerprint {cmake_side!r} != runtime {runtime_side!r}"
+    )
 
 
 def test_roctx_recordfn_source_avoids_torch_umbrella_headers():
@@ -253,9 +253,9 @@ def test_loader_source_never_recommends_installing_ninja():
         "ninja==",
     )
     for token in forbidden:
-        assert (
-            token not in src
-        ), f"loader source contains {token!r}; violates Profile Mode Dependency Policy"
+        assert token not in src, (
+            f"loader source contains {token!r}; violates Profile Mode Dependency Policy"
+        )
 
 
 def test_explain_cppext_failure_never_recommends_installing_ninja():
@@ -267,9 +267,9 @@ def test_explain_cppext_failure_never_recommends_installing_ninja():
     ]
     for err in samples:
         reason, hint = inject_roctx_loader._explain_cppext_failure(err)
-        assert (
-            "ninja" in reason.lower()
-        ), f"ninja-flavoured failure must be classified as such: {reason!r}"
+        assert "ninja" in reason.lower(), (
+            f"ninja-flavoured failure must be classified as such: {reason!r}"
+        )
         forbidden = ("install ninja", "pip install ninja", "apt install ninja")
         joined = (reason + " " + hint).lower()
         for token in forbidden:
@@ -277,9 +277,9 @@ def test_explain_cppext_failure_never_recommends_installing_ninja():
                 f"recovery hint must not recommend installing ninja "
                 f"(found {token!r} in: {hint!r})"
             )
-        assert (
-            "cmake" in hint.lower() or "prebuilt" in hint.lower()
-        ), f"ninja-class hint must mention cmake or prebuilt: {hint!r}"
+        assert "cmake" in hint.lower() or "prebuilt" in hint.lower(), (
+            f"ninja-class hint must mention cmake or prebuilt: {hint!r}"
+        )
 
 
 def test_explain_cppext_failure_classifies_compiler_and_header_cases():
@@ -292,12 +292,12 @@ def test_explain_cppext_failure_classifies_compiler_and_header_cases():
     ]
     for err, expected_keyword in cases:
         reason, hint = inject_roctx_loader._explain_cppext_failure(err)
-        assert (
-            expected_keyword in reason.lower()
-        ), f"{err!r}: reason {reason!r} missing {expected_keyword!r}"
-        assert (
-            "prebuilt" in hint.lower()
-        ), f"{err!r}: hint should mention prebuilt fallback: {hint!r}"
+        assert expected_keyword in reason.lower(), (
+            f"{err!r}: reason {reason!r} missing {expected_keyword!r}"
+        )
+        assert "prebuilt" in hint.lower(), (
+            f"{err!r}: hint should mention prebuilt fallback: {hint!r}"
+        )
 
 
 def test_jit_compile_viable_true_when_use_ninja_in_signature(monkeypatch):
@@ -414,9 +414,9 @@ def test_install_cached_so_is_a_noop_when_src_missing(tmp_path):
     cached.write_bytes(b"good content")
 
     inject_roctx_loader._install_cached_so(src, cached)
-    assert (
-        cached.read_bytes() == b"good content"
-    ), "missing src must leave cached .so untouched"
+    assert cached.read_bytes() == b"good content", (
+        "missing src must leave cached .so untouched"
+    )
 
 
 # Synthetic tag for routing tests; stubs compute_tag so these tests
@@ -534,9 +534,9 @@ def test_default_load_path_still_tries_prebuilt_first(monkeypatch):
         lambda tag: calls.append("jit_build") or None,
     )
     assert inject_roctx_loader.load() is sentinel
-    assert calls == [
-        "prebuilt"
-    ], f"expected prebuilt to short-circuit before cached/cmake/jit; saw {calls!r}"
+    assert calls == ["prebuilt"], (
+        f"expected prebuilt to short-circuit before cached/cmake/jit; saw {calls!r}"
+    )
 
 
 def test_default_load_path_walks_all_four_tiers_in_order(monkeypatch):
@@ -883,9 +883,9 @@ def test_try_cmake_build_skips_when_cmake_not_on_path(monkeypatch, tmp_path):
 
     monkeypatch.setattr(inject_roctx_loader.subprocess, "run", fail_subprocess)
     assert inject_roctx_loader._try_cmake_build(_FAKE_TAG) is None
-    assert (
-        inject_roctx_loader._previous_jit_failure(_FAKE_TAG) is None
-    ), "cmake-not-on-PATH must not veto cpp_extension via the marker"
+    assert inject_roctx_loader._previous_jit_failure(_FAKE_TAG) is None, (
+        "cmake-not-on-PATH must not veto cpp_extension via the marker"
+    )
 
 
 def test_try_cmake_build_short_circuits_on_prior_failure(monkeypatch, tmp_path):
@@ -946,13 +946,13 @@ def test_try_cmake_build_passes_runtime_python_to_cmake(monkeypatch, tmp_path):
     assert len(invocations) == 2, f"expected two cmake invocations, saw {invocations!r}"
     configure_argv = invocations[0]
     runtime_python_flag = f"-DTORCH_TRACE_PYTHON={sys.executable}"
-    assert (
-        runtime_python_flag in configure_argv
-    ), f"-DTORCH_TRACE_PYTHON must equal sys.executable; saw {configure_argv!r}"
+    assert runtime_python_flag in configure_argv, (
+        f"-DTORCH_TRACE_PYTHON must equal sys.executable; saw {configure_argv!r}"
+    )
     build_argv = invocations[1]
-    assert (
-        build_argv[1] == "--build"
-    ), f"second invocation must be `cmake --build`, saw {build_argv!r}"
+    assert build_argv[1] == "--build", (
+        f"second invocation must be `cmake --build`, saw {build_argv!r}"
+    )
 
 
 def test_try_cmake_build_records_failure_marker_on_configure_failure(
@@ -981,9 +981,9 @@ def test_try_cmake_build_records_failure_marker_on_configure_failure(
     marker = inject_roctx_loader._previous_jit_failure(_FAKE_TAG)
     assert marker is not None
     assert inject_roctx_loader._CMAKE_TIER_NAME in marker
-    assert (
-        "Could not find Torch" in marker
-    ), f"marker must preserve stderr tail; saw {marker!r}"
+    assert "Could not find Torch" in marker, (
+        f"marker must preserve stderr tail; saw {marker!r}"
+    )
 
 
 def test_try_cmake_build_records_failure_marker_on_build_failure(monkeypatch, tmp_path):
@@ -1073,13 +1073,13 @@ def test_try_cmake_build_cleans_build_dir_on_success(monkeypatch, tmp_path):
 
     result = inject_roctx_loader._try_cmake_build(_FAKE_TAG)
     assert result is not None
-    assert (
-        not build_dir.exists()
-    ), "build dir must be removed on success to bound cache disk usage"
+    assert not build_dir.exists(), (
+        "build dir must be removed on success to bound cache disk usage"
+    )
     cached_so = cache_dir / f"roctx_recordfn-{_FAKE_TAG}.so"
-    assert (
-        cached_so.exists() and cached_so.read_bytes() == b"stub-so"
-    ), "produced .so must have been copied to the cache before cleanup"
+    assert cached_so.exists() and cached_so.read_bytes() == b"stub-so", (
+        "produced .so must have been copied to the cache before cleanup"
+    )
 
 
 def test_try_cmake_build_keeps_build_dir_on_failure(monkeypatch, tmp_path):
@@ -1218,9 +1218,9 @@ def test_load_resets_diagnostics_on_entry(monkeypatch):
     inject_roctx_loader.load()
     _tier, diagnostics = inject_roctx_loader.consume_diagnostics()
     for level, msg in diagnostics:
-        assert (
-            "STALE LINE" not in msg
-        ), f"pre-existing diagnostic leaked across load() boundary: ({level}, {msg!r})"
+        assert "STALE LINE" not in msg, (
+            f"pre-existing diagnostic leaked across load() boundary: ({level}, {msg!r})"
+        )
 
 
 def test_safe_log_tees_into_accumulator(monkeypatch):
@@ -1299,9 +1299,9 @@ def test_format_load_diagnostic_trail_caps_lines():
         max_lines=12,
     )
     lines = rendered.splitlines()
-    assert (
-        len(lines) == 12
-    ), f"expected max_lines=12 to cap output, saw {len(lines)} lines"
+    assert len(lines) == 12, (
+        f"expected max_lines=12 to cap output, saw {len(lines)} lines"
+    )
     assert "line 99" in rendered, "must keep the trailing (latest) lines"
     assert "line 0" not in rendered, "must drop the leading (oldest) lines"
 
