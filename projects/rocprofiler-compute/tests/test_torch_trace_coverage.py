@@ -9,6 +9,7 @@ runs rocprof-compute --torch-trace, compares per-op. Sampling via
 """
 
 import json
+import os
 import random
 import sys
 import threading
@@ -83,9 +84,13 @@ def test_random_operator_kernel_coverage(
     seed, sample_budget = torch_trace_coverage_sampling
     rng = random.Random(seed)
 
-    match_verbose = bool(
-        request.config.getoption("--torch-trace-match-verbose"),
-    )
+    # Enable with ROCPROF_OPERATOR_MATCH_VERBOSE=1 (or true/yes/on).
+    match_verbose = os.getenv("ROCPROF_OPERATOR_MATCH_VERBOSE", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
     # Pre-flight loader probe; subprocess shares JIT cache + fingerprint.
     inject_roctx_loader.load()

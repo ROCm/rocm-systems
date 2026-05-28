@@ -194,12 +194,6 @@ def pytest_addoption(parser):
         default=100,
         help="Random ATen sample budget (default 100).",
     )
-    parser.addoption(
-        "--torch-trace-match-verbose",
-        action="store_true",
-        default=False,
-        help="Per-op match logging.",
-    )
 
 
 @pytest.fixture
