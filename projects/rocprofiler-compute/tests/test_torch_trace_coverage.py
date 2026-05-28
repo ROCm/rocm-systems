@@ -24,8 +24,8 @@ import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-import pytest
 import common
+import pytest
 
 COVERAGE_TEST_CONFIG: Dict[str, Any] = {"cleanup": True}
 
