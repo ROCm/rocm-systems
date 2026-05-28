@@ -2,14 +2,14 @@
 #
 # How it works:
 #   1. Sparse-checkout emulation/rocjitsu
-#   2. Download a TheRock nightly tarball (provides hipcc, amdclang++,
-#      device libraries, and rocBLAS for compiling and running tests)
-#   3. Build with clang + ninja in Release mode
+#   2. Download a TheRock nightly tarball (provides amdclang++, device
+#      libraries, and rocBLAS for compiling and running tests)
+#   3. Build with TheRock's clang + ninja in Release mode
 #   4. Run the full ctest suite on the CPU emulator
 #
 # No GPU hardware is needed. rocjitsu's tests run on its built-in
 # CPU emulator, which simulates AMD GPU execution. HIP kernels are
-# compiled for gfx950 by hipcc, then loaded and executed by the
+# compiled for gfx950 by amdclang++, then loaded and executed by the
 # emulator at test time.
 #
 # Excluded tests:
@@ -37,7 +37,7 @@ permissions:
 
 jobs:
   build-test:
-    name: Linux (clang, Release)
+    name: Linux (TheRock clang, Release)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -45,7 +45,7 @@ jobs:
           sparse-checkout: emulation/rocjitsu
 
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y ninja-build clang libdrm-dev
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libdrm-dev
 
       - name: Install ROCm (TheRock tarball)
         run: |
@@ -61,17 +61,17 @@ jobs:
           echo "LD_LIBRARY_PATH=$PWD/rocm/lib" >> $GITHUB_ENV
 
           # Sanity check
-          rocm/bin/hipcc --version
+          rocm/bin/amdclang++ --version
           echo '__global__ void k(){}' \
-            | rocm/bin/hipcc -x hip --offload-arch=gfx950 \
+            | rocm/bin/amdclang++ -x hip --offload-arch=gfx950 \
               --cuda-device-only -c -o /dev/null -
 
       - name: Configure
         run: >
           cmake -B build -G Ninja
           -S emulation/rocjitsu
-          -DCMAKE_C_COMPILER=clang
-          -DCMAKE_CXX_COMPILER=clang++
+          -DCMAKE_C_COMPILER=$ROCM_PATH/lib/llvm/bin/clang
+          -DCMAKE_CXX_COMPILER=$ROCM_PATH/lib/llvm/bin/clang++
           -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_CXX_FLAGS="-Werror"
 
