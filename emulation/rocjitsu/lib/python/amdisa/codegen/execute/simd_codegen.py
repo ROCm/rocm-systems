@@ -1201,6 +1201,31 @@ SIMD_VOP3_BINARY_INT_EXTRA: dict[str, tuple[str, str]] = {
         "uint32_t",
         "[](auto a, auto b) { return (a - b) & 0xFFFFu; }",
     ),
+    # 32-bit integer multiply: low 32 bits of the product is just `a * b`
+    # (uint32 wrap is identical signed/unsigned for the low half).
+    "v_mul_lo_u32_vop3": ("uint32_t", "[](auto a, auto b) { return a * b; }"),
+    # High 32 bits of the 32x32 -> 64 multiply, via the same widening pattern
+    # as v_mul_hi_u32_u24: cast lanes to a 64-bit fixed_size_simd, multiply,
+    # shift right by 32, narrow back. Unsigned uses uint64_t / logical shift;
+    # signed uses int64_t / arithmetic shift (preserves the sign).
+    "v_mul_hi_u32_vop3": (
+        "uint32_t",
+        "[](auto a, auto b) {"
+        " using U64 = util::stdx::fixed_size_simd<uint64_t, util::native<uint32_t>::size()>;"
+        " auto pa = util::stdx::static_simd_cast<U64>(a);"
+        " auto pb = util::stdx::static_simd_cast<U64>(b);"
+        " return util::stdx::static_simd_cast<util::native<uint32_t>>((pa * pb) >> 32); }",
+    ),
+    "v_mul_hi_i32_vop3": (
+        "uint32_t",
+        "[](auto a, auto b) {"
+        " using I64 = util::stdx::fixed_size_simd<int64_t, util::native<int32_t>::size()>;"
+        " auto sa = util::stdx::static_simd_cast<util::native<int32_t>>(a);"
+        " auto sb = util::stdx::static_simd_cast<util::native<int32_t>>(b);"
+        " auto pa = util::stdx::static_simd_cast<I64>(sa);"
+        " auto pb = util::stdx::static_simd_cast<I64>(sb);"
+        " return util::stdx::static_simd_cast<util::native<uint32_t>>((pa * pb) >> 32); }",
+    ),
 }
 
 
@@ -1216,6 +1241,18 @@ SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
     "v_xor3_b32_vop3": (
         "uint32_t",
         "[](auto a, auto b, auto c) { return a ^ b ^ c; }",
+    ),
+    "v_xad_u32_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) { return (a ^ b) + c; }",
+    ),
+    "v_and_or_b32_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) { return (a & b) | c; }",
+    ),
+    "v_lshl_or_b32_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) { return (a << (b & 31u)) | c; }",
     ),
     # The shift count is masked to the low 5 bits to match the scalar body's
     # x86 `shl` semantics (which mask cl to 5 bits) — stdx's `<<` on native<u32>
