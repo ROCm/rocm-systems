@@ -49,10 +49,6 @@ static ncclResult_t ncclAllToAllDdaIpcTyped(
     return ncclInvalidArgument;
   }
 
-  const size_t messageSizeBytes = count * sizeof(T);
-  const size_t totalSizeBytes = totalCount * sizeof(T);
-  const unsigned threads = 512;
-
   const int nBlocksMax = ddaMaxNBlocksForScratch();
   // For alltoall, we use count for grid calculation (data per rank pair)
   auto gridBlock = meta::comms::getGridAndBlockDims(count, sizeof(T), nBlocksMax);
