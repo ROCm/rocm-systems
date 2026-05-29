@@ -1004,6 +1004,109 @@ SIMD_VOP3P_FMA_MIX_F16_HI: set[str] = {
     "v_mad_mixhi_f16_vop3p",
 }
 
+# VOP3P packed-16 integer binary family. Each 32-bit lane holds {low16,
+# high16}. The glue gates op_sel == 0 && op_sel_hi == 3 (default packing)
+# and bails to scalar otherwise; the functor receives the two u32 simd
+# vectors as packed pairs and returns the same shape with the per-half op
+# applied. Scalar bodies for these ops do NOT apply neg/neg_hi/clamp on
+# integer operands, so the SIMD path also passes through. mul_lo / shift
+# functors mask each half to 16 bits before packing to drop any product
+# overflow / shift-into-bit-16 leakage between halves.
+SIMD_VOP3P_PK_BINARY_INT: dict[str, str] = {
+    "v_pk_add_u16_vop3p": (
+        "[](auto a, auto b) {"
+        " auto lo = (a + b) & 0xFFFFu;"
+        " auto hi = ((a >> 16) + (b >> 16)) & 0xFFFFu;"
+        " return lo | (hi << 16); }"
+    ),
+    # add_i16 is bit-identical to add_u16 (mod-2^16 wrap matches).
+    "v_pk_add_i16_vop3p": (
+        "[](auto a, auto b) {"
+        " auto lo = (a + b) & 0xFFFFu;"
+        " auto hi = ((a >> 16) + (b >> 16)) & 0xFFFFu;"
+        " return lo | (hi << 16); }"
+    ),
+    "v_pk_sub_u16_vop3p": (
+        "[](auto a, auto b) {"
+        " auto lo = (a - b) & 0xFFFFu;"
+        " auto hi = ((a >> 16) - (b >> 16)) & 0xFFFFu;"
+        " return lo | (hi << 16); }"
+    ),
+    "v_pk_sub_i16_vop3p": (
+        "[](auto a, auto b) {"
+        " auto lo = (a - b) & 0xFFFFu;"
+        " auto hi = ((a >> 16) - (b >> 16)) & 0xFFFFu;"
+        " return lo | (hi << 16); }"
+    ),
+    "v_pk_mul_lo_u16_vop3p": (
+        "[](auto a, auto b) {"
+        " auto lo = ((a & 0xFFFFu) * (b & 0xFFFFu)) & 0xFFFFu;"
+        " auto hi = ((a >> 16) * (b >> 16)) & 0xFFFFu;"
+        " return lo | (hi << 16); }"
+    ),
+    # Reverse-shift forms: src1 holds the value, src0 holds the count.
+    # Shift count masked to low 4 bits per scalar (`& 15u`).
+    "v_pk_lshlrev_b16_vop3p": (
+        "[](auto a, auto b) {"
+        " auto lo = ((b & 0xFFFFu) << (a & 15u)) & 0xFFFFu;"
+        " auto hi = (((b >> 16) & 0xFFFFu) << ((a >> 16) & 15u)) & 0xFFFFu;"
+        " return lo | (hi << 16); }"
+    ),
+    "v_pk_lshrrev_b16_vop3p": (
+        "[](auto a, auto b) {"
+        " auto lo = ((b & 0xFFFFu) >> (a & 15u)) & 0xFFFFu;"
+        " auto hi = ((b >> 16) >> ((a >> 16) & 15u)) & 0xFFFFu;"
+        " return lo | (hi << 16); }"
+    ),
+    # Arithmetic right shift on i16: sign-extend each half to int32 via
+    # (x << 16) >> 16, shift, mask back to 16.
+    "v_pk_ashrrev_i16_vop3p": (
+        "[](auto a, auto b) {"
+        " using I = util::native<int32_t>;"
+        " auto bv_lo = (util::stdx::static_simd_cast<I>(b & 0xFFFFu) << 16) >> 16;"
+        " auto bv_hi = (util::stdx::static_simd_cast<I>(b >> 16) << 16) >> 16;"
+        " auto sh_lo = util::stdx::static_simd_cast<I>(a & 15u);"
+        " auto sh_hi = util::stdx::static_simd_cast<I>((a >> 16) & 15u);"
+        " auto rlo = util::stdx::static_simd_cast<util::native<uint32_t>>(bv_lo >> sh_lo) & 0xFFFFu;"
+        " auto rhi = util::stdx::static_simd_cast<util::native<uint32_t>>(bv_hi >> sh_hi) & 0xFFFFu;"
+        " return rlo | (rhi << 16); }"
+    ),
+    "v_pk_min_u16_vop3p": (
+        "[](auto a, auto b) {"
+        " auto lo = util::stdx::min(a & 0xFFFFu, b & 0xFFFFu);"
+        " auto hi = util::stdx::min(a >> 16, b >> 16);"
+        " return (lo & 0xFFFFu) | ((hi & 0xFFFFu) << 16); }"
+    ),
+    "v_pk_max_u16_vop3p": (
+        "[](auto a, auto b) {"
+        " auto lo = util::stdx::max(a & 0xFFFFu, b & 0xFFFFu);"
+        " auto hi = util::stdx::max(a >> 16, b >> 16);"
+        " return (lo & 0xFFFFu) | ((hi & 0xFFFFu) << 16); }"
+    ),
+    "v_pk_min_i16_vop3p": (
+        "[](auto a, auto b) {"
+        " using I = util::native<int32_t>;"
+        " auto a_lo = (util::stdx::static_simd_cast<I>(a & 0xFFFFu) << 16) >> 16;"
+        " auto a_hi = (util::stdx::static_simd_cast<I>(a >> 16) << 16) >> 16;"
+        " auto b_lo = (util::stdx::static_simd_cast<I>(b & 0xFFFFu) << 16) >> 16;"
+        " auto b_hi = (util::stdx::static_simd_cast<I>(b >> 16) << 16) >> 16;"
+        " auto rlo = util::stdx::static_simd_cast<util::native<uint32_t>>(util::stdx::min(a_lo, b_lo)) & 0xFFFFu;"
+        " auto rhi = util::stdx::static_simd_cast<util::native<uint32_t>>(util::stdx::min(a_hi, b_hi)) & 0xFFFFu;"
+        " return rlo | (rhi << 16); }"
+    ),
+    "v_pk_max_i16_vop3p": (
+        "[](auto a, auto b) {"
+        " using I = util::native<int32_t>;"
+        " auto a_lo = (util::stdx::static_simd_cast<I>(a & 0xFFFFu) << 16) >> 16;"
+        " auto a_hi = (util::stdx::static_simd_cast<I>(a >> 16) << 16) >> 16;"
+        " auto b_lo = (util::stdx::static_simd_cast<I>(b & 0xFFFFu) << 16) >> 16;"
+        " auto b_hi = (util::stdx::static_simd_cast<I>(b >> 16) << 16) >> 16;"
+        " auto rlo = util::stdx::static_simd_cast<util::native<uint32_t>>(util::stdx::max(a_lo, b_lo)) & 0xFFFFu;"
+        " auto rhi = util::stdx::static_simd_cast<util::native<uint32_t>>(util::stdx::max(a_hi, b_hi)) & 0xFFFFu;"
+        " return rlo | (rhi << 16); }"
+    ),
+}
+
 
 # --- VOPC compare -> VCC ---------------------------------------------------
 #
@@ -2076,6 +2179,12 @@ def simd_probe_line(template_name: str) -> str | None:
     specv3carry_src2 = SIMD_VOP3_CARRY_SRC2.get(template_name)
     if specv3carry_src2 is not None:
         return f"  ROCJITSU_TRY_SIMD_VOP3_CARRY_SRC2({specv3carry_src2});"
+    # VOP3P packed-16 integer binary family (pk_add/sub/mul_lo/min/max for
+    # i16/u16 + pk_lshlrev/lshrrev/ashrrev for b16/i16). Gated on default
+    # op_sel = 0 / op_sel_hi = 3 inside the glue.
+    specpk = SIMD_VOP3P_PK_BINARY_INT.get(template_name)
+    if specpk is not None:
+        return f"  ROCJITSU_TRY_SIMD_VOP3P_PK_BINARY_INT({specpk});"
     # VOP3P fma_mix / mad_mix (six ops, three destination shapes). Same body
     # for all; the routing picks the matching glue specialization.
     if template_name in SIMD_VOP3P_FMA_MIX_F32:

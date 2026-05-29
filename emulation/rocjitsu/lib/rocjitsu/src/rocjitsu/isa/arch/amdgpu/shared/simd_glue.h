@@ -2047,6 +2047,51 @@ template <FmaMixDst DstMode, typename Inst>
   return false;
 }
 
+/// VOP3P packed-16 binary integer SIMD fast path. Covers the pk_add /
+/// pk_sub / pk_mul_lo / pk_min / pk_max / pk_*shrev family on i16/u16/b16.
+/// Scalar pattern (verified across pk_add_i16, pk_add_u16, pk_mul_lo_u16,
+/// pk_lshlrev_b16, pk_min/max_*_16, etc.): two packed 16-bit values per
+/// 32-bit lane, each output half computed from the matching halves of
+/// src0/src1 picked by op_sel (low half) / op_sel_hi (high half). Default
+/// packing is op_sel = 0 (both srcs feed their low half into the low
+/// output) and op_sel_hi = 3 (both srcs feed their high half into the
+/// high output) — the LLVM-AS encoder emits this for the default-mode
+/// pk mnemonics, and the SIMD fast path bails when any other combination
+/// is requested. The scalar bodies do NOT apply neg / neg_hi / clamp on
+/// these integer pk ops, so the SIMD path also passes through. Functor
+/// receives the two source u32 lane vectors (each holding {low16, high16}
+/// packed) and returns the same shape; the per-half decompose / recompose
+/// lives inside the functor for op-specific flexibility (e.g. mul_lo
+/// requires the wider product to be masked to 16 bits before pack).
+template <typename Inst, typename Op>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_vop3p_pk_binary_int_simd(Inst &inst, Wavefront &wf, Op op) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.vdst.simd_capable())
+    return false;
+  if (inst.inst_.op_sel != 0u || inst.inst_.op_sel_hi != 3u)
+    return false;
+  using T = uint32_t;
+  constexpr std::size_t W = util::native_width_v<T>;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto a = read_simd<T>(inst.src0, wf, base);
+    const auto b = read_simd<T>(inst.src1, wf, base);
+    const auto r = op(a, b);
+    write_simd<T>(inst.vdst, wf, base, r, chunk);
+  }
+  return true;
+}
+
+template <typename Inst, typename Op>
+[[nodiscard]] inline bool try_execute_vop3p_pk_binary_int_simd(Inst &, Wavefront &, Op) {
+  return false;
+}
+
 } // namespace amdgpu
 } // namespace rocjitsu
 
@@ -2331,6 +2376,14 @@ template <FmaMixDst DstMode, typename Inst>
 #define ROCJITSU_TRY_SIMD_VOP3P_FMA_MIX_F16_HI()                                                   \
   if (::rocjitsu::amdgpu::try_execute_vop3p_fma_mix_simd<::rocjitsu::amdgpu::FmaMixDst::F16_HI>(   \
           inst, wf))                                                                               \
+  return
+
+/// VOP3P packed-16 integer binary probe. Functor takes two u32 simd vectors
+/// (each holding {low16, high16} packed) and returns the same shape with
+/// the per-half op applied; the glue gates op_sel/op_sel_hi to the default
+/// packing (0 / 3) and falls back to scalar otherwise.
+#define ROCJITSU_TRY_SIMD_VOP3P_PK_BINARY_INT(...)                                                 \
+  if (::rocjitsu::amdgpu::try_execute_vop3p_pk_binary_int_simd(inst, wf, __VA_ARGS__))             \
   return
 
 #endif // ROCJITSU_ISA_AMDGPU_SHARED_SIMD_GLUE_H_
