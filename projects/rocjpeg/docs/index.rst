@@ -3,7 +3,7 @@
   :keywords: rocJPEG, ROCm, API, documentation
 
 ********************************************************************
-rocJPEG documentation
+rocJPEG documentation (preview)
 ********************************************************************
 
 rocJPEG provides APIs and samples that you can use to easily access the JPEG decoding
