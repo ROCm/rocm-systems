@@ -122,6 +122,6 @@ jobs:
         run: . '${{ github.workspace }}\build_tools\github_actions\cleanup_processes.ps1'
 
       - name: Post-job cleanup GPU processes on Linux
-        if: ${{ runner.os == 'Linux' }}
+        if: ${{ always() && runner.os == 'Linux' }}
         timeout-minutes: 5
         run: bash ./build_tools/github_actions/cleanup_processes.sh
