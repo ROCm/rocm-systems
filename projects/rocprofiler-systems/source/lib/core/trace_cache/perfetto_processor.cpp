@@ -191,8 +191,8 @@ using amd_smi_nic_req_rx_impl_nak_seq_err_track =
     perfetto_counter_track<category::amd_smi_nic_req_rx_impl_nak_seq_err>;
 
 // Unified Memory counter tracks
-using unified_memory_bandwidth_track =
-    perfetto_counter_track<category::unified_memory_bandwidth>;
+using unified_memory_migration_throughput_track =
+    perfetto_counter_track<category::unified_memory_migration_throughput>;
 using unified_memory_fault_rate_track =
     perfetto_counter_track<category::unified_memory_fault_rate>;
 
@@ -1644,7 +1644,7 @@ perfetto_processor_t::handle_kfd_page_migrate(const kfd_sample& sample)
         resolve_kfd_migration_gpu_bucket(sample.args_str, m_kfd_node_type_cache);
     if(!gpu_node_id.has_value())
     {
-        LOG_TRACE("Failed to resolve unified memory bandwidth track for KFD "
+        LOG_TRACE("Failed to resolve unified memory migration throughput track for KFD "
                   "migration args '{}'",
                   sample.args_str);
         return;
@@ -1655,26 +1655,27 @@ perfetto_processor_t::handle_kfd_page_migrate(const kfd_sample& sample)
     if(gpu_index_it == m_kfd_node_to_gpu_index_cache.end())
     {
         LOG_TRACE("KFD node {} has no associated GPU device index; skipping "
-                  "unified memory bandwidth sample",
+                  "unified memory migration throughput sample",
                   *gpu_node_id);
         return;
     }
     const auto gpu_device_index = gpu_index_it->second;
 
-    if(!unified_memory_bandwidth_track::exists(gpu_device_index))
+    if(!unified_memory_migration_throughput_track::exists(gpu_device_index))
     {
-        auto track_name =
-            fmt::format("Unified Memory Bandwidth [Device {}]", gpu_device_index);
-        unified_memory_bandwidth_track::emplace(
+        auto track_name = fmt::format("Unified Memory Migration Throughput [Device {}]",
+                                      gpu_device_index);
+        unified_memory_migration_throughput_track::emplace(
             gpu_device_index, track_name, "GB/s",
-            trait::name<category::unified_memory_bandwidth>::value);
+            trait::name<category::unified_memory_migration_throughput>::value);
     }
 
     // bytes / ns == GB/s (decimal)
-    const double bandwidth_gbps = sample.value / static_cast<double>(duration_ns);
-    TRACE_COUNTER(trait::name<category::unified_memory_bandwidth>::value,
-                  unified_memory_bandwidth_track::at(gpu_device_index, 0),
-                  sample.end_timestamp, bandwidth_gbps);
+    const double migration_throughput_gbps =
+        sample.value / static_cast<double>(duration_ns);
+    TRACE_COUNTER(trait::name<category::unified_memory_migration_throughput>::value,
+                  unified_memory_migration_throughput_track::at(gpu_device_index, 0),
+                  sample.end_timestamp, migration_throughput_gbps);
 }
 
 void
