@@ -381,11 +381,26 @@ inline native<float> rsq_f32_simd(native<float> a) {
 }
 
 inline native<float> sqrt_f32_simd(native<float> a) {
-  const native<float> kQNaN = std::bit_cast<native<float>>(native<uint32_t>(0x7FC00000u));
+  using U = native<uint32_t>;
+  const U kQNaNBits(0x7FC00000u);
   native<float> r = stdx::sqrt(a); // no FTZ flush: scalar sqrt_f32 keeps denormals
-  stdx::where(a < native<float>(0.0f), r) = kQNaN;
-  stdx::where(stdx::isnan(a), r) = a;
-  return r;
+  U bits = std::bit_cast<U>(r);
+  // Mask in the uint32 domain so the blend does not depend on
+  // `where(simd_mask<float>, native<float>) = native<float>`
+  // semantics, which can collapse under `-O3` on some libstdc++ backends.
+  const U bits_a = std::bit_cast<U>(a);
+  const U exp = (bits_a >> 23) & 0xFFu;
+  const U mant = bits_a & 0x7FFFFFu;
+  const auto is_nan = (exp == 0xFFu && mant != 0u);
+  const auto is_zero = ((bits_a & 0x7FFFFFFFu) == 0u);
+  const auto sign_set = ((bits_a & 0x80000000u) != 0u);
+  // Negative non-NaN non-(-0) input (e.g. -finite, -Inf, -denormal): force
+  // canonical positive qNaN, matching transcendental::sqrt_f32's `x < 0`
+  // branch. -0 stays at stdx::sqrt(-0) = -0 (IEEE).
+  stdx::where(sign_set && !is_nan && !is_zero, bits) = kQNaNBits;
+  // NaN input: preserve input bits (sign + payload).
+  stdx::where(is_nan, bits) = bits_a;
+  return std::bit_cast<native<float>>(bits);
 }
 
 inline native<float> log_f32_simd(native<float> a) {
@@ -403,12 +418,76 @@ inline native<float> exp_f32_simd(native<float> a) {
   stdx::where(stdx::isnan(a), r) = a;
   return r;
 }
+
+/// Quiet a possibly-signalling NaN by setting the IEEE qNaN-indicator
+/// bit (bit 22 for f32, bit 51 for f64) directly in the bit representation.
+/// Payload, sign, and exponent bits are unchanged, so the result is a qNaN
+/// whose payload matches the input NaN exactly. Used by the rounding
+/// wrappers below; chosen over `a + V(0)` because the addition is
+/// constant-folded out by `-O3` on some non-NaN inputs, defeating its
+/// quieting side-effect, while bit-OR survives every optimisation level.
+template <class V> inline V quieted_nan_simd(V a) {
+  using T = typename V::value_type;
+  static_assert(sizeof(T) == 4 || sizeof(T) == 8, "quieted_nan_simd: 32- or 64-bit lane");
+  if constexpr (sizeof(T) == 4) {
+    using Bits = native<uint32_t>;
+    static_assert(Bits::size() == V::size());
+    return std::bit_cast<V>(std::bit_cast<Bits>(a) | native<uint32_t>(0x00400000u));
+  } else {
+    using Bits = native<uint64_t>;
+    static_assert(Bits::size() == V::size());
+    return std::bit_cast<V>(std::bit_cast<Bits>(a) | native<uint64_t>(0x0008000000000000ull));
+  }
+}
+
+/// IEEE-compliant ceil/floor/trunc/rndne wrappers around stdx::{ceil,floor,
+/// trunc,nearbyint}. libstdc++ stdx ships an AVX-512 backend that lowers
+/// these to vrndscale{ps,pd,sh}, but its non-AVX-512 backends pass sNaN
+/// inputs through unchanged and can clear the sign of ±0 outputs, both of
+/// which diverge from scalar `std::{ceil,floor,trunc,nearbyint}` (which
+/// quiet sNaN to qNaN and preserve ±0 sign). Each wrapper does two blends:
+/// first `where(isnan(a), r) = quieted_nan_simd(a)` injects the
+/// payload-preserving qNaN on NaN-input lanes, then
+/// `where(r == 0, r) = copysign(0, a)` restores the sign on lanes whose
+/// rounded value is exactly ±0 — covering both `±0` inputs and tiny inputs
+/// that round to ±0. The NaN blend runs first; `r == 0` is always false
+/// for NaN lanes so the sign fixup never disturbs them. Bit-identical to
+/// scalar across AVX-512/AVX2/SSE.
+template <class V> inline V ceil_simd(V a) {
+  V r = stdx::ceil(a);
+  stdx::where(stdx::isnan(a), r) = quieted_nan_simd(a);
+  stdx::where(r == V(0), r) = stdx::copysign(V(0), a);
+  return r;
+}
+template <class V> inline V floor_simd(V a) {
+  V r = stdx::floor(a);
+  stdx::where(stdx::isnan(a), r) = quieted_nan_simd(a);
+  stdx::where(r == V(0), r) = stdx::copysign(V(0), a);
+  return r;
+}
+template <class V> inline V trunc_simd(V a) {
+  V r = stdx::trunc(a);
+  stdx::where(stdx::isnan(a), r) = quieted_nan_simd(a);
+  stdx::where(r == V(0), r) = stdx::copysign(V(0), a);
+  return r;
+}
+template <class V> inline V rndne_simd(V a) {
+  V r = stdx::nearbyint(a);
+  stdx::where(stdx::isnan(a), r) = quieted_nan_simd(a);
+  stdx::where(r == V(0), r) = stdx::copysign(V(0), a);
+  return r;
+}
 #endif // __has_include(<experimental/simd>)
 
 #if !__has_include(<experimental/simd>)
-// Fallback stub for non-template gtest callers (e.g. UtilSimd.FlushDenormF32),
+// Fallback stubs for non-template gtest callers (e.g. UtilSimd.FlushDenormF32),
 // whose discarded `if constexpr (has_stdx_simd)` branch is still type-checked.
 template <class T> inline native<T> flush_denorm_f32_simd(native<T>) { return {}; }
+template <class V> inline V quieted_nan_simd(V) { return {}; }
+template <class V> inline V ceil_simd(V) { return {}; }
+template <class V> inline V floor_simd(V) { return {}; }
+template <class V> inline V trunc_simd(V) { return {}; }
+template <class V> inline V rndne_simd(V) { return {}; }
 #endif
 
 } // namespace util
