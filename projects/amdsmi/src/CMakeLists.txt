@@ -257,18 +257,6 @@ install(
     COMPONENT dev
 )
 
-# UALOE headers are pulled in transitively by public impl/ headers
-# (amd_smi_gpu_device.h includes <ualoe_lib/ualoe_lib.h>), so they must be
-# installed alongside the other public-facing headers. Use DIRECTORY to
-# preserve the cbl_cfg/ subdirectory referenced by ualoe_lib.h.
-install(
-    DIRECTORY ${UALOE_INCLUDE_DIR}/
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ualoe_lib
-    COMPONENT dev
-    FILES_MATCHING
-    PATTERN "*.h"
-)
-
 file(GLOB ESMI_HEADERS "${PROJECT_SOURCE_DIR}/esmi_ib_library/include/e_smi/*.h")
 install(FILES ${ESMI_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/e_smi/ COMPONENT dev)
 
