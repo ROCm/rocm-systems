@@ -99,7 +99,9 @@ static ncclResult_t getDmaBufFd(void *addr, size_t length, int *fd,
                                 bool forceNonDataDirect = false) {
   if (ncclParamDmaBufEnable() == 0) return ncclInvalidUsage;
 
-#if CUDA_VERSION >= 11070
+  // GIN's symmetric windows are cuMem/VMM allocations registered with the NIC via ibv_reg_dmabuf_mr.
+  // the cuMem/hipMemGetHandleForAddressRange that exports the DMA-BUF FD requires this HIP version.
+#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
   static size_t hostPageSize = sysconf(_SC_PAGESIZE);
   size_t alignedSize = length;
   ALIGN_SIZE(alignedSize, hostPageSize);
@@ -112,8 +114,16 @@ static ncclResult_t getDmaBufFd(void *addr, size_t length, int *fd,
     if (status == CUDA_SUCCESS) return ncclSuccess;
   }
 #endif
+
+#if defined(__HIP_PLATFORM_AMD__)
+  // Direct call: hipified to hipMemGetHandleForAddressRange on HIP at build time.
+  // Same pattern as transport/net.cc and transport/coll_net.cc.
+  CUresult status = cuMemGetHandleForAddressRange((void *)fd, (CUdeviceptr)addr, alignedSize,
+                                                  CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0);
+#else
   CUresult status = pfn_cuMemGetHandleForAddressRange((void *)fd, (CUdeviceptr)addr, alignedSize,
                                                       CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0);
+#endif
   if (status == CUDA_SUCCESS) return ncclSuccess;
 #endif
 
@@ -192,9 +202,20 @@ static int proxyGinPollGfd(struct ginProxyCtx *ctx, ginProxyHostGpuCtx *hostGpuC
   // Now we have the full GFD in the local struct.
 
   // Reset the GFD in the queue. This lets the producer know that the GFD is consumed.
+  // On HIP, NT-stores avoid an RFO stall behind in-flight PCIe writes from the GPU
+  // (can cost 80-200us under multi-GPU contention).
+#if defined(__HIP_PLATFORM_AMD__)
+  for (int k = 0; k < ncclGinProxyGfdQwords; k++) {
+    __builtin_nontemporal_store((uint64_t)0, &q[idx].qword[k].raw);
+  }
+  // Drain WC buffers so the NT-zero stores are visible before the credit (ci) advance,
+  // otherwise the GPU producer could overwrite the slot before the zeros land.
+  wc_store_fence();
+#else
   for (int k = 0; k < ncclGinProxyGfdQwords; k++) {
     __atomic_store_n(&q[idx].qword[k].raw, 0, __ATOMIC_RELAXED);
   }
+#endif
 
   // set the counter_id into the state
   uint32_t stateIdx = targetRank * hostGpuCtx->queueSize + idx;
@@ -222,8 +243,13 @@ static int proxyGinPollGfd(struct ginProxyCtx *ctx, ginProxyHostGpuCtx *hostGpuC
 }
 
 static int mapGfdOpToCollNetOp(ncclGinProxyGfd_t *gfd) {
+  // Mask down to the signal-op bits only. WithInline and WithCounter are
+  // orthogonal modifiers and must be excluded -- otherwise an inline put
+  // with SignalInc (op = Put|WithInline|WithSignalInc = 0x0b) masks to
+  // 0x0a and falls through to default, silently demoting iputSignal to a
+  // plain iput so the remote signal cell never gets bumped.
   switch (gfd->qword[ncclGinProxyGfdHeader].header.op &
-          (ncclGinProxyOpComplMask & ~ncclGinProxyOpWithCounter)) {
+          (ncclGinProxyOpWithSignalInc | ncclGinProxyOpWithSignalAdd)) {
     case ncclGinProxyOpWithSignalInc:
       return NCCL_NET_SIGNAL_OP_INC;
     case ncclGinProxyOpWithSignalAdd:
@@ -243,8 +269,13 @@ static ncclResult_t proxyGinProcessGfd(ncclGin_t *ginComm, void *collComm, struc
   uint64_t srcOff;
   void *srcHandle;
   if (gfd->qword[ncclGinProxyGfdHeader].header.op & ncclGinProxyOpWithInline) {
-    uint64_t *inlineVal = &hostGpuCtx->inlines[gfd - hostGpuCtx->queues];
-    srcOff = (uint64_t)&inlineVal[0] - (uint64_t)hostGpuCtx->inlines;
+    // `gfd` is a stack-local copy filled by proxyGinPollGfd, not a pointer
+    // into hostGpuCtx->queues, so we cannot do `gfd - hostGpuCtx->queues` to
+    // recover its slot index. Recover it from `state` instead, which is a
+    // real heap pointer (`*state = &hostGpuCtx->states[stateIdx]`).
+    size_t slotIdx = state - hostGpuCtx->states;
+    uint64_t *inlineVal = &hostGpuCtx->inlines[slotIdx];
+    srcOff = slotIdx * sizeof(uint64_t);
     // reconstruct the inline value from the two qwords
     *inlineVal = gfd->qword[ncclGinProxyGfdInlineLow].inlineLow.inlineValLow;
     if (size == 8) {

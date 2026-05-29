@@ -11,6 +11,34 @@
 #include "common_cast.h"
 #include "ibvwrap.h"
 
+enum ncclIbCommState {
+  ncclIbCommStateStart = 0,
+  ncclIbCommStateConnect = 1,
+  ncclIbCommStateAccept = 3,
+  ncclIbCommStateSend = 4,
+  ncclIbCommStateRecv = 5,
+  ncclIbCommStateConnecting = 6,
+  ncclIbCommStateConnected = 7,
+  ncclIbCommStatePendingReady = 8,
+  ncclIbCommStateSendDevList = 9,
+  ncclIbCommStateRecvDevList = 10,
+};
+
+struct ncclIbCommStage {
+  enum ncclIbCommState state;
+  int offset;
+  void* buffer;
+  void* comm;
+};
+
+struct ncclIbHandle {
+  union ncclSocketAddress connectAddr; // Filled by the target
+  uint64_t magic; // random number to help debugging
+  int isP2p;
+  bool isRMA;
+  struct ncclIbCommStage stage; // Used by the other side when connecting
+};
+
 struct ncclIbQpCreateAttr {
   void* qpContext;
   enum ibv_qp_type type;
@@ -71,6 +99,7 @@ struct ncclIbConnectionMetadata {
   int tc;
   int sl;
   int isP2p;
+  bool isRMA;
 };
 
 ncclResult_t IbCastQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs);

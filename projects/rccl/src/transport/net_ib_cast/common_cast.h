@@ -819,4 +819,3 @@ int IbCastQpSchedGetEffectiveTxNqps(struct ncclIbRequest* req, int *startQpIndex
 ncclResult_t IbCastQpSchedGetRemap(struct ncclIbNetCommBase* base, uint64_t wrId, int qpIndex, struct ncclIbRemapWrId** remap);
 ncclResult_t IbCastQpSchedFreeRemap(struct ncclIbRemapWrId* r);
 #endif
-
