@@ -329,6 +329,7 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
     status = HSAKMT_CALL(hsaKmtAllocMemory(node_id, size, kmt_alloc_flags, mem));
   }
   if (status == HSAKMT_STATUS_SUCCESS) {
+    MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
     if (kmt_alloc_flags.ui32.NoAddress) {
       // returns mem
       return HSA_STATUS_SUCCESS;
