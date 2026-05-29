@@ -221,7 +221,7 @@ if(DEFINED rocprofiler-sdk_VERSION)
 
     message(
         STATUS
-        "rocprofiler-sdk version: ${ROCPROFSYS_ROCPROFILER_SDK_COMPILE_VERSION_MAJOR}.${ROCPROFSYS_ROCPROFILER_SDK_COMPILE_VERSION_MINOR}.${ROCPROFSYS_ROCPROFILER_SDK_COMPILE_VERSION_PATCH}"
+        "rocprofiler-sdk version: ${rocprofiler-sdk_VERSION_MAJOR}.${rocprofiler-sdk_VERSION_MINOR}.${rocprofiler-sdk_VERSION_PATCH}"
     )
 else()
     message(WARNING "rocprofiler-sdk version not found: ${rocprofiler-sdk_VERSION}")
@@ -415,7 +415,7 @@ if(rocprofiler-sdk-rocpd_FOUND)
 
             message(
                 STATUS
-                "rocprofiler-sdk-rocpd version: ${ROCPROFSYS_ROCPD_COMPILE_VERSION_MAJOR}.${ROCPROFSYS_ROCPD_COMPILE_VERSION_MINOR}.${ROCPROFSYS_ROCPD_COMPILE_VERSION_PATCH}"
+                "rocprofiler-sdk-rocpd version: ${rocprofiler-sdk-rocpd_VERSION_MAJOR}.${rocprofiler-sdk-rocpd_VERSION_MINOR}.${rocprofiler-sdk-rocpd_VERSION_PATCH}"
             )
         else()
             message(
