@@ -1801,6 +1801,95 @@ template <typename Inst>
   return false;
 }
 
+/// Destination shape for the VOP3P fma_mix / mad_mix family. F32 writes a
+/// full 32-bit float into vdst; F16_LO writes the f16-narrowed result into
+/// the low half of vdst (high half preserved); F16_HI writes it into the
+/// high half (low half preserved). Selected by the per-mnemonic glue probe.
+enum class FmaMixDst { F32, F16_LO, F16_HI };
+
+/// VOP3P fma_mix / mad_mix SIMD fast path. Six ops share one body because
+/// the scalar reference computes `a * b + c` (plain `*+`, not std::fma) for
+/// all six and differs only in (a) the f16-vs-f32 widening shape per source
+/// and (b) the f16-lo/f16-hi/f32 narrowing shape on the destination.
+///
+/// Per-source data fetch is gated by `op_sel_hi` (src0/src1) and
+/// `op_sel_hi_2` (src2): when the bit is 0 the source is read as f32; when
+/// 1 the source is read as a 32-bit word and the low or high f16 half
+/// (selected by the matching `op_sel` bit) is widened via f16_to_f32_simd.
+/// Per-source sign-flip is gated by `neg` (xor of bit 31). VOP3P does not
+/// carry abs or omod. Result-clamp saturates to [0, 1] via stdx::where.
+///
+/// All modifier fields are uniform across the wave so the per-source mode
+/// branches live outside the chunk loop and feed into the same `a*b+c`
+/// inner kernel regardless of fetch shape, keeping the SIMD path branch-
+/// predictable on every chunk.
+template <FmaMixDst DstMode, typename Inst>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_vop3p_fma_mix_simd(Inst &inst, Wavefront &wf) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+    return false;
+  using T = float32_t;
+  const uint32_t op_sel = inst.inst_.op_sel;
+  const uint32_t op_sel_hi = inst.inst_.op_sel_hi;
+  const uint32_t op_sel_hi_2 = inst.inst_.op_sel_hi_2;
+  const uint32_t neg = inst.inst_.neg;
+  const uint32_t clamp = inst.inst_.clamp;
+  constexpr std::size_t W = util::native_width_v<T>;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  using U = util::native<uint32_t>;
+  using F = util::native<float>;
+  const F kZero(0.0f);
+  const F kOne(1.0f);
+  const U kSignBit(0x80000000u);
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    auto load_src = [&](auto &op, uint32_t sel_hi_bit, uint32_t sel_bit, uint32_t neg_bit) -> F {
+      F v;
+      if (sel_hi_bit) {
+        U raw = read_simd<uint32_t>(op, wf, base);
+        U halves = sel_bit ? (raw >> 16) : (raw & 0xFFFFu);
+        v = util::f16_to_f32_simd(halves);
+      } else {
+        v = read_simd<float>(op, wf, base);
+      }
+      if (neg_bit)
+        v = std::bit_cast<F>(std::bit_cast<U>(v) ^ kSignBit);
+      return v;
+    };
+    F a = load_src(inst.src0, op_sel_hi & 1u, op_sel & 1u, neg & 1u);
+    F b = load_src(inst.src1, (op_sel_hi >> 1) & 1u, (op_sel >> 1) & 1u, (neg >> 1) & 1u);
+    F c = load_src(inst.src2, op_sel_hi_2, (op_sel >> 2) & 1u, (neg >> 2) & 1u);
+    F r = a * b + c;
+    if (clamp) {
+      util::stdx::where(r < kZero, r) = kZero;
+      util::stdx::where(r > kOne, r) = kOne;
+    }
+    if constexpr (DstMode == FmaMixDst::F32) {
+      write_simd<float>(inst.vdst, wf, base, r, chunk);
+    } else {
+      U h = util::f32_to_f16_simd(r); // low16 = f16, high16 zero
+      U prev = read_simd<uint32_t>(inst.vdst, wf, base);
+      U packed;
+      if constexpr (DstMode == FmaMixDst::F16_LO) {
+        packed = (prev & 0xFFFF0000u) | h;
+      } else { // F16_HI
+        packed = (prev & 0x0000FFFFu) | (h << 16);
+      }
+      write_simd<uint32_t>(inst.vdst, wf, base, packed, chunk);
+    }
+  }
+  return true;
+}
+
+template <FmaMixDst DstMode, typename Inst>
+[[nodiscard]] inline bool try_execute_vop3p_fma_mix_simd(Inst &, Wavefront &) {
+  return false;
+}
+
 } // namespace amdgpu
 } // namespace rocjitsu
 
@@ -2048,6 +2137,25 @@ template <typename Inst>
 /// modified `native<float>` and returns `native<float>`; variadic.
 #define ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16(...)                                                     \
   if (::rocjitsu::amdgpu::try_execute_unary_vop3_fp16_simd(inst, wf, __VA_ARGS__))                 \
+  return
+
+/// VOP3P fma_mix / mad_mix probes. The destination shape is the only thing
+/// that differs across the six ops, so the probe is parameterised by
+/// `FmaMixDst::{F32,F16_LO,F16_HI}` and the shared scalar formula `a*b+c`
+/// (incl. clamp) lives in the glue. No functor argument.
+#define ROCJITSU_TRY_SIMD_VOP3P_FMA_MIX_F32()                                                      \
+  if (::rocjitsu::amdgpu::try_execute_vop3p_fma_mix_simd<::rocjitsu::amdgpu::FmaMixDst::F32>(inst, \
+                                                                                             wf))  \
+  return
+
+#define ROCJITSU_TRY_SIMD_VOP3P_FMA_MIX_F16_LO()                                                   \
+  if (::rocjitsu::amdgpu::try_execute_vop3p_fma_mix_simd<::rocjitsu::amdgpu::FmaMixDst::F16_LO>(   \
+          inst, wf))                                                                               \
+  return
+
+#define ROCJITSU_TRY_SIMD_VOP3P_FMA_MIX_F16_HI()                                                   \
+  if (::rocjitsu::amdgpu::try_execute_vop3p_fma_mix_simd<::rocjitsu::amdgpu::FmaMixDst::F16_HI>(   \
+          inst, wf))                                                                               \
   return
 
 #endif // ROCJITSU_ISA_AMDGPU_SHARED_SIMD_GLUE_H_
