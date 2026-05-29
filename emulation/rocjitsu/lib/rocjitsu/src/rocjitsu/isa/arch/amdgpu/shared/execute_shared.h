@@ -2113,6 +2113,10 @@ inline void execute_v_add_co_u32_vop2([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_v_add_co_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP3_CARRY([](auto a, auto b, auto) {
+    auto s = a + b;
+    return make_simd_carry(s, s < a);
+  });
   uint64_t exec = wf.exec();
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -16450,6 +16454,7 @@ inline void execute_v_sub_co_u32_vop2([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_v_sub_co_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP3_CARRY([](auto a, auto b, auto) { return make_simd_carry(a - b, a < b); });
   uint64_t exec = wf.exec();
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -16894,6 +16899,7 @@ inline void execute_v_subrev_co_u32_vop2([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_subrev_co_u32_vop3([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP3_CARRY([](auto a, auto b, auto) { return make_simd_carry(b - a, b < a); });
   uint64_t exec = wf.exec();
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
