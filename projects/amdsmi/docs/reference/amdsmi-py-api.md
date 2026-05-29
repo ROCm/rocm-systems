@@ -5578,7 +5578,7 @@ Input parameters:
 * `processor_handle` the device handle
 * `compute_partition` the type of compute_partition to set
 
-Output: String of the partition type
+Output: `None`
 
 Exceptions that can be thrown by `amdsmi_set_gpu_compute_partition` function:
 
@@ -5662,7 +5662,7 @@ Input parameters:
 * `processor_handle` the device handle
 * `memory_partition` the type of memory_partition to set
 
-Output: String of the partition type
+Output: `None`
 
 Exceptions that can be thrown by `amdsmi_set_gpu_memory_partition` function:
 
@@ -6100,7 +6100,7 @@ Field | Description
 ---|---
 `num_profiles` | Total number of supported accelerator partition profiles
 `num_resource_profiles` | Number of resource profile entries
-`resource_profiles` | List of resource allocation dicts (see `resources` below)
+`resource_profiles` | Flattened list of all resource allocation dicts across profiles (see `resources` below)
 `default_profile_index` | Index of the default profile
 `profiles` | List of profile dicts (see below)
 

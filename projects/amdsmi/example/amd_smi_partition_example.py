@@ -368,9 +368,11 @@ def main() -> None:
         # Pick the highest supported NPS mode, preferring NPS4 > NPS2 > NPS1.
         # Query the caps from GPU 0 (memory partition is hive-wide, so any GPU works).
         target_memory_partition = amdsmi.AmdSmiMemoryPartitionType.NPS1
+        current_nps = None
         try:
             mem_config = amdsmi.amdsmi_get_gpu_memory_partition_config(gpus[0])
             caps = mem_config.get("partition_caps", [])
+            current_nps = mem_config.get("mp_mode")
             if "NPS4" in caps:
                 target_memory_partition = amdsmi.AmdSmiMemoryPartitionType.NPS4
             elif "NPS2" in caps:
@@ -378,16 +380,21 @@ def main() -> None:
         except amdsmi.AmdSmiException as e:
             print(f"  [warn] Could not query NPS capabilities: {e}; defaulting to NPS1")
         print(f"  Selected NPS target: {target_memory_partition.name}")
-        mem_changed = set_memory_partition(gpus[0], target_memory_partition)
-
-        if mem_changed:
-            if not reload_driver():
-                print(
-                    "[warn] Driver reload failed; memory partition change "
-                    "may not have taken effect."
-                )
+        if current_nps == target_memory_partition.name:
+            print(
+                f"\n[info] Current NPS mode is already {current_nps}; "
+                f"skipping set and driver reload."
+            )
         else:
-            print("\n[info] Memory partition unchanged; skipping driver reload.")
+            mem_changed = set_memory_partition(gpus[0], target_memory_partition)
+            if mem_changed:
+                if not reload_driver():
+                    print(
+                        "[warn] Driver reload failed; memory partition change "
+                        "may not have taken effect."
+                    )
+            else:
+                print("\n[info] Memory partition unchanged; skipping driver reload.")
 
     # -----------------------------------------------------------------------
     # Phase 2: Re-enumerate to get fresh handles and accurate device count after
