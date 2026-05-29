@@ -4575,7 +4575,12 @@ finally:
 ### amdsmi_get_gpu_ecc_enabled
 
 Description: Retrieve the enabled ECC bit-mask. It is not supported on virtual
-machine guest
+machine guest.
+
+Note that whether a block has ECC enabled or not in the device is independent
+of whether there is kernel support for error counting for that block. Although
+a block may be enabled, there may not be kernel support for reading error
+counters for that block.
 
 See [RAS Error Count sysfs Interface (AMDGPU RAS Support - Linux Kernel
 documentation)](https://docs.kernel.org/gpu/amdgpu/ras.html#ras-error-count-sysfs-interface)

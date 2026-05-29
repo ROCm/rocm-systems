@@ -3398,6 +3398,27 @@ AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE = 5
 AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT = 6
 AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX = 7
 amdsmi_fabric_telemetry_category_t = ctypes.c_uint32 # enum
+
+# values for enumeration 'amdsmi_fabric_telemetry_category_mask_t'
+amdsmi_fabric_telemetry_category_mask_t__enumvalues = {
+    1: 'AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_UALOE',
+    2: 'AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_SWITCH',
+    4: 'AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_CRYPTO',
+    8: 'AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_PFC',
+    16: 'AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_NETPORT',
+    32: 'AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_UALOE',
+    64: 'AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_NETPORT',
+    127: 'AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_ALL_KNOWN',
+}
+AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_UALOE = 1
+AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_SWITCH = 2
+AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_CRYPTO = 4
+AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_PFC = 8
+AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_NETPORT = 16
+AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_UALOE = 32
+AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_NETPORT = 64
+AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_ALL_KNOWN = 127
+amdsmi_fabric_telemetry_category_mask_t = ctypes.c_uint32 # enum
 class struct_amdsmi_fabric_telemetry_item_t(Structure):
     pass
 
@@ -3486,6 +3507,15 @@ try:
     amdsmi_free_fabric_telemetry.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_fabric_telemetry_t)]
 except AttributeError:
     pass
+
+# values for enumeration 'amdsmi_fabric_size_constants_t'
+amdsmi_fabric_size_constants_t__enumvalues = {
+    32: 'AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE',
+    8: 'AMDSMI_FABRIC_MAX_LOCAL_GPUS',
+}
+AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE = 32
+AMDSMI_FABRIC_MAX_LOCAL_GPUS = 8
+amdsmi_fabric_size_constants_t = ctypes.c_uint32 # enum
 
 # values for enumeration 'amdsmi_fabric_type_t'
 amdsmi_fabric_type_t__enumvalues = {
@@ -4641,12 +4671,22 @@ __all__ = \
     'AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY',
     'AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNCONFIGURED',
     'AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNKNOWN',
+    'AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE',
+    'AMDSMI_FABRIC_MAX_LOCAL_GPUS',
     'AMDSMI_FABRIC_NPA_ADDRESS_MODE_SOURCE_ALIASING',
     'AMDSMI_FABRIC_NPA_ADDRESS_MODE_SOURCE_IDENTIFICATION',
     'AMDSMI_FABRIC_NPA_ADDRESS_MODE_UNKNOWN',
     'AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO',
     'AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT',
     'AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE',
+    'AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_ALL_KNOWN',
+    'AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_CRYPTO',
+    'AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_NETPORT',
+    'AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_UALOE',
+    'AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_NETPORT',
+    'AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_PFC',
+    'AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_SWITCH',
+    'AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_UALOE',
     'AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX',
     'AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT',
     'AMDSMI_FABRIC_TELEMETRY_CATEGORY_PFC',
@@ -4913,7 +4953,9 @@ __all__ = \
     'amdsmi_fabric_accelerator_vpod_state_t', 'amdsmi_fabric_info_t',
     'amdsmi_fabric_info_v1_t', 'amdsmi_fabric_info_ver_t',
     'amdsmi_fabric_label_t', 'amdsmi_fabric_npa_address_mode_t',
+    'amdsmi_fabric_size_constants_t',
     'amdsmi_fabric_telem_id_to_string',
+    'amdsmi_fabric_telemetry_category_mask_t',
     'amdsmi_fabric_telemetry_category_t',
     'amdsmi_fabric_telemetry_dataset_t',
     'amdsmi_fabric_telemetry_instance_t',
