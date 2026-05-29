@@ -5547,11 +5547,8 @@ Exceptions that can be thrown by `amdsmi_get_gpu_compute_partition` function:
 #### Possible Library Exceptions
 
 - `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
-- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
-- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
 - `AMDSMI_STATUS_INVAL` - Invalid parameters
-- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
-- `AMDSMI_COMPUTE_PARTITION_INVALID` - Invalid compute partition type
+- `AMDSMI_STATUS_UNEXPECTED_DATA` - Data provided to function is not valid
 
 Example:
 
@@ -5591,12 +5588,9 @@ Exceptions that can be thrown by `amdsmi_set_gpu_compute_partition` function:
 #### Possible Library Exceptions
 
 - `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
-- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
-- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
 - `AMDSMI_STATUS_INVAL` - Invalid parameters
 - `AMDSMI_STATUS_NO_PERM` - Permission Denied
 - `AMDSMI_STATUS_SETTING_UNAVAILABLE` - Setting is not available
-- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
 
 Example:
 
@@ -5636,10 +5630,9 @@ Exceptions that can be thrown by `amdsmi_get_gpu_memory_partition` function:
 #### Possible Library Exceptions
 
 - `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
-- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
-- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
 - `AMDSMI_STATUS_INVAL` - Invalid parameters
-- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_UNEXPECTED_DATA` - Data read from device was unexpected
+- `AMDSMI_STATUS_INSUFFICIENT_SIZE` - Buffer too small to hold partition string
 
 Example:
 
@@ -5679,11 +5672,9 @@ Exceptions that can be thrown by `amdsmi_set_gpu_memory_partition` function:
 #### Possible Library Exceptions
 
 - `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
-- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
-- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
 - `AMDSMI_STATUS_INVAL` - Invalid parameters
 - `AMDSMI_STATUS_NO_PERM` - Permission Denied
-- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_BUSY` - Device is busy, could not acquire resource or mutex
 
 Example:
 
@@ -5730,6 +5721,7 @@ Exceptions that can be thrown by `amdsmi_get_gpu_memory_partition_config` functi
 
 - `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
 - `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_UNEXPECTED_DATA` - Data read from device was unexpected
 
 Example:
 
@@ -5778,6 +5770,7 @@ Exceptions that can be thrown by `amdsmi_set_gpu_memory_partition_mode` function
 - `AMDSMI_STATUS_NO_PERM` - Permission Denied
 - `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
 - `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_BUSY` - Device is busy, could not acquire resource or mutex
 
 Example:
 
@@ -6060,10 +6053,8 @@ Exceptions that can be thrown by `amdsmi_get_gpu_accelerator_partition_profile` 
 #### Possible Library Exceptions
 
 - `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
-- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
-- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
 - `AMDSMI_STATUS_INVAL` - Invalid parameters
-- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_UNEXPECTED_DATA` - Data read from device was unexpected
 
 Example:
 
@@ -6143,6 +6134,7 @@ Exceptions that can be thrown by `amdsmi_get_gpu_accelerator_partition_profile_c
 - `AMDSMI_STATUS_NO_PERM` - Permission Denied
 - `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
 - `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_UNEXPECTED_DATA` - Data read from device was unexpected
 
 Example:
 
@@ -6196,8 +6188,9 @@ Exceptions that can be thrown by `amdsmi_set_gpu_accelerator_partition_profile` 
 #### Possible Library Exceptions
 
 - `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
-- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_INVAL` - Invalid parameters or profile index out of range
 - `AMDSMI_STATUS_NO_PERM` - Permission Denied
+- `AMDSMI_STATUS_BUSY` - Device is busy, could not acquire resource or mutex
 
 Example:
 

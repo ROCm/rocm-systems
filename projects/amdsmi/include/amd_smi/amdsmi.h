@@ -6839,7 +6839,7 @@ amdsmi_status_t amdsmi_get_gpu_compute_partition(amdsmi_processor_handle process
  *  updated to.
  *
  *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
- *  @retval ::AMDSMI_STATUS_PERMISSION function requires admin/sudo privileges
+ *  @retval ::AMDSMI_STATUS_NO_PERM function requires admin/sudo privileges
  *  @retval ::AMDSMI_STATUS_INVAL the provided arguments are not valid
  *  @retval ::AMDSMI_STATUS_SETTING_UNAVAILABLE the provided setting is
  *  unavailable for current device
@@ -6915,11 +6915,11 @@ amdsmi_status_t amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processo
  *  define what the selected device's current mode setting should be updated to.
  *
  *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
- *  @retval ::AMDSMI_STATUS_PERMISSION function requires admin/sudo privileges
+ *  @retval ::AMDSMI_STATUS_NO_PERM function requires admin/sudo privileges
  *  @retval ::AMDSMI_STATUS_INVAL the provided arguments are not valid
  *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function
- *  @retval ::AMDSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart the amdgpu driver
+ *  @retval ::AMDSMI_STATUS_BUSY device is busy, a resource or mutex could not be acquired
  *  @return ::amdsmi_status_t
  *
  */
