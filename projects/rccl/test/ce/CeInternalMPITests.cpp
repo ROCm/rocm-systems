@@ -456,6 +456,9 @@ TEST(CeInternalNeg, CeImplementedReturnsTrueOnSupportedDriver)
 {
     if(!isCeDriverSupported())
         GTEST_SKIP() << "CE not available (binary not compiled with CE_BATCH_ASYNC_SUPPORTED)";
+    if(!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE not supported on this runtime driver "
+                        "(need ROCm >= 7.12 or 7.0.2.x backport [70051831, 70060000))";
 
     EXPECT_TRUE(ncclCeImplemented(ncclFuncAllGather, ncclDevSum, ncclFloat32));
     EXPECT_TRUE(ncclCeImplemented(ncclFuncAlltoAll,  ncclDevSum, ncclFloat32));

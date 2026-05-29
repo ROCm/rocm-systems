@@ -7,6 +7,7 @@
 #include "comm.h"
 #include "register_inline.h"
 #include <algorithm>
+#include <atomic>
 #include <cuda.h>
 #include "rocmwrap.h"
 #include "ce_coll.h"
@@ -41,16 +42,19 @@ static int ncclCeBatchAsyncSupported() {
 #endif
 
 static int ncclCeBatchAsyncEnable() {
+  // Called once per CE collective; warn at most once to avoid flooding the log.
+  static std::atomic<bool> warnedUnsupported{false};
 #ifdef CE_BATCH_ASYNC_SUPPORTED
   int param = rcclParamCeBatchAsyncEnable();
   int supported = ncclCeBatchAsyncSupported();
   if (param > 0 && !supported) {
-    WARN("RCCL_CE_BATCH_ASYNC_ENABLE=1 is set but hipMemcpyBatchAsync is not supported at runtime; disabling CE batch path");
+    if (!warnedUnsupported.exchange(true))
+      WARN("RCCL_CE_BATCH_ASYNC_ENABLE=1 is set but hipMemcpyBatchAsync is not supported at runtime; disabling CE batch path");
     return 0;
   }
   return param >= 0 ? param : (param == -2 && supported);
 #else
-  if (rcclParamCeBatchAsyncEnable() > 0)
+  if (rcclParamCeBatchAsyncEnable() > 0 && !warnedUnsupported.exchange(true))
     WARN("RCCL_CE_BATCH_ASYNC_ENABLE=1 is set but CE batch API not available; disabling");
   return 0;
 #endif
