@@ -50,6 +50,17 @@ constexpr void rdna3_vop3_encode(uint32_t op, uint32_t vdst, uint32_t src0, uint
   words[1] = (src0 & 0x1FF) | ((src1 & 0x1FF) << 9) | ((src2 & 0x1FF) << 18);
 }
 
+// Same as rdna3_vop3_encode but also sets the per-instruction clamp and omod
+// modifier fields. Used by v_mov_b16, which is the only op in this file that
+// honours omod / clamp (the bitwise b16 ops ignore both).
+constexpr void rdna3_vop3_encode_mod(uint32_t op, uint32_t vdst, uint32_t src0, uint32_t src1,
+                                     uint32_t src2, uint32_t clamp, uint32_t omod,
+                                     uint32_t words[2]) {
+  words[0] = (vdst & 0xFF) | ((clamp & 0x1u) << 15) | ((op & 0x3FF) << 16) | (0x35u << 26);
+  words[1] =
+      (src0 & 0x1FF) | ((src1 & 0x1FF) << 9) | ((src2 & 0x1FF) << 18) | ((omod & 0x3u) << 27);
+}
+
 const std::array<uint32_t, 16> kSrcA = {{
     0x00000000u,
     0xFFFFFFFFu,
@@ -264,6 +275,52 @@ TEST(Vop3B16RdnaSimdCorrectness, CndmaskB16_PartialExec) {
   for (uint64_t sel :
        {uint64_t{0}, uint64_t{~0ULL}, uint64_t{0xAAAAAAAAULL}, uint64_t{0x12345678ULL}})
     check_cndmask_b16(/*exec=*/0xA5A58001ULL, sel);
+}
+
+// --- v_mov_b16: u16 src0 -> f32 -> omod / clamp -> u16 dst (zero-extended) ---
+
+void check_mov_b16(uint64_t exec, uint32_t omod, uint32_t clamp) {
+  Fixture fx;
+  ASSERT_NE(fx.cu, nullptr);
+  ASSERT_NE(fx.wf, nullptr);
+  uint32_t words[4] = {0u, 0u, 0u, 0u};
+  rdna3_vop3_encode_mod(/*op=*/412, /*vdst=*/kDstVgpr, /*src0=*/256, /*src1=*/0, /*src2=*/0, clamp,
+                        omod, words);
+  Instruction *inst = fx.decoder->decode(words);
+  ASSERT_NE(inst, nullptr) << "v_mov_b16_vop3 decode failed";
+  auto sc = fx.run(inst, true, 0, exec);
+  auto sd = fx.run(inst, false, 0, exec);
+  for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+    const bool active = (exec >> lane) & 1ULL;
+    if (!active) {
+      EXPECT_EQ(sd[lane], DST_SENTINEL) << "v_mov_b16 omod=" << omod << " clamp=" << clamp
+                                        << " SIMD clobbered inactive lane " << lane;
+      continue;
+    }
+    EXPECT_EQ(sc[lane], sd[lane]) << "v_mov_b16 omod=" << omod << " clamp=" << clamp
+                                  << " lane=" << lane << ": sc=0x" << std::hex << sc[lane]
+                                  << " sd=0x" << sd[lane];
+  }
+  delete inst;
+}
+
+TEST(Vop3B16RdnaSimdCorrectness, MovB16_FullExec) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable";
+    return;
+  }
+  for (uint32_t omod : {0u, 1u, 2u, 3u})
+    for (uint32_t clamp : {0u, 1u})
+      check_mov_b16(/*exec=*/0xFFFFFFFFULL, omod, clamp);
+}
+TEST(Vop3B16RdnaSimdCorrectness, MovB16_PartialExec) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable";
+    return;
+  }
+  for (uint32_t omod : {0u, 1u, 2u, 3u})
+    for (uint32_t clamp : {0u, 1u})
+      check_mov_b16(/*exec=*/0xA5A58001ULL, omod, clamp);
 }
 
 } // namespace
