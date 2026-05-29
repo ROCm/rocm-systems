@@ -428,7 +428,7 @@ constexpr uint64_t nextPowerOf2(uint64_t v) {
 template <class T, class Op>
 T calculateExpected(T* output,
                     const T* input,
-                    Op& op,
+                    Op op,
                     unsigned long long mask,
                     AggregationType aggType)
 {
@@ -445,9 +445,17 @@ T calculateExpected(T* output,
   std::memset(lastAggregation, 0, 64 * sizeof(T));
 
   if constexpr (std::is_same<Op, MinOp<T>>::value) {
-    id = std::numeric_limits<T>::max();
+    if constexpr (std::is_same<T, __half>::value) {
+      id = 65504;
+    } else {
+      id = std::numeric_limits<T>::max();
+    }
   } else if constexpr (std::is_same<Op, MaxOp<T>>::value) {
-    id = std::numeric_limits<T>::lowest();
+    if constexpr (std::is_same<T, __half>::value) {
+      id = -65504;
+    } else {
+      id = std::numeric_limits<T>::lowest();
+    }
   } else if constexpr (std::is_same<Op, std::bit_and<T>>::value) {
     id = ~id;
   } else if constexpr (std::is_same<Op, std::bit_or<T>>::value) {
@@ -589,6 +597,12 @@ void compareFloatingPoint(const T& result, const T& expected, unsigned long long
     float absDifference = fabs(resultFloat - expectedFloat);
     float relativeEpsilon = 0.1 * fmax(resultFloat, expectedFloat);
     float eps = 0.01f;
+
+    if constexpr (std::is_same<T, __half>::value) {
+      INFO("result: 0x" << std::hex << __half_as_ushort(result));
+    } else {
+      INFO("result: 0x" << std::hex << result);
+    }
 
     REQUIRE(!__hisnan(result));
     REQUIRE(!__hisinf(result));
