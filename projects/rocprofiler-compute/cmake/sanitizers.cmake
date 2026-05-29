@@ -104,6 +104,10 @@ function(enable_sanitizer_gpu_target_munging)
         return()
     endif()
     if(NOT DEFINED GPU_TARGETS)
+        message(
+            WARNING
+            "${ENABLE_SANITIZER}: GPU_TARGETS is not set; skipping the gfx942/gfx950 -> :xnack+ rewrite. Pass -DGPU_TARGETS=... for device-side sanitizer instrumentation."
+        )
         return()
     endif()
     list(TRANSFORM GPU_TARGETS REPLACE "^(gfx942|gfx950)$" "\\1:xnack+")
@@ -118,7 +122,7 @@ function(enable_sanitizer_python_launcher out_var)
     if(NOT DEFINED THEROCK_SANITIZER_LAUNCHER)
         set(THEROCK_SANITIZER_LAUNCHER)
     endif()
-    set(_launcher ${THEROCK_SANITIZER_LAUNCHER} ${PYTHON_TEST_COMMAND})
+    set(_launcher ${THEROCK_SANITIZER_LAUNCHER} ${${out_var}})
     if(ENABLE_SANITIZER STREQUAL "ASAN" OR ENABLE_SANITIZER STREQUAL "HOST_ASAN")
         list(
             PREPEND
