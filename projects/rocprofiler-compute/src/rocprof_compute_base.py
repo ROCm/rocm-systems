@@ -8,7 +8,6 @@ import socket
 import sys
 import tempfile
 import time
-import traceback
 from pathlib import Path
 from typing import Any, Optional
 
@@ -709,9 +708,7 @@ class RocProfCompute:
                     self.__args.device, tmp_csv, self.__mspec.cache_sizes
                 )
             except Exception as e:
-                console_error(
-                    f"Benchmark execution failed: {e}\n{traceback.format_exc()}"
-                )
+                console_error(f"Benchmark execution failed: {e}")
 
             is_valid, error_message = validate_roofline_csv(tmp_dir)
             if not is_valid:

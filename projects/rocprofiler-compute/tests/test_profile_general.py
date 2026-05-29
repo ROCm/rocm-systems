@@ -1470,7 +1470,7 @@ def test_roofline_plot_points_data_generation():
     - Memory/Compute bound status
     - Cache level information
 
-    Simulates a CDNA4 roofline run- has HMB, L1, and L2 cache levels.
+    Simulates a CDNA4 roofline run- has HBM, L1, and L2 cache levels.
     """
     skip_unsupported_roofline_soc()
 
