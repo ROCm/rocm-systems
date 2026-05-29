@@ -865,7 +865,7 @@ def format_scientific_notation_if_needed(
     return formatted
 
 
-def resolve_filter_blocks_to_panel_ids(
+def convert_filter_blocks_to_panel_ids(
     filter_blocks: list[str], arch: Optional[str] = None
 ) -> set[int]:
     """Inverse of convert_metric_id_to_panel_info: map metric ids like

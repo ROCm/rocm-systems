@@ -13,7 +13,7 @@ from utils import schema
 from utils.parser import build_dfs
 from utils.utils_common import (
     expand_placeholder_ranges,
-    resolve_filter_blocks_to_panel_ids,
+    convert_filter_blocks_to_panel_ids,
 )
 
 # =============================================================================
@@ -71,16 +71,16 @@ def _sys_info() -> dict[str, Any]:
 
 
 # =============================================================================
-# resolve_filter_blocks_to_panel_ids
+# convert_filter_blocks_to_panel_ids
 # =============================================================================
 
 
 class TestResolveFilterBlocksToPanelIds:
     def test_empty_list_returns_empty_set(self):
-        assert resolve_filter_blocks_to_panel_ids([]) == set()
+        assert convert_filter_blocks_to_panel_ids([]) == set()
 
     def test_numeric_ids_resolve_to_file_ids(self):
-        result = resolve_filter_blocks_to_panel_ids(["2", "11.1", "11.1.5"])
+        result = convert_filter_blocks_to_panel_ids(["2", "11.1", "11.1.5"])
         assert result == {200, 1100}
 
     def test_alias_tokens_resolve_via_arch_map(self, monkeypatch):
@@ -88,7 +88,7 @@ class TestResolveFilterBlocksToPanelIds:
             "utils.utils_common.get_arch_alias_to_panel_id",
             lambda arch: {"lds": "10", "roofline": "4"},
         )
-        result = resolve_filter_blocks_to_panel_ids(["lds", "roofline"], arch="gfx942")
+        result = convert_filter_blocks_to_panel_ids(["lds", "roofline"], arch="gfx942")
         assert result == {1000, 400}
 
     def test_mixed_alias_and_numeric_tokens(self, monkeypatch):
@@ -96,7 +96,7 @@ class TestResolveFilterBlocksToPanelIds:
             "utils.utils_common.get_arch_alias_to_panel_id",
             lambda arch: {"lds": "10"},
         )
-        result = resolve_filter_blocks_to_panel_ids(["lds", "2", "11.1"], arch="gfx942")
+        result = convert_filter_blocks_to_panel_ids(["lds", "2", "11.1"], arch="gfx942")
         assert result == {1000, 200, 1100}
 
     def test_unknown_alias_raises(self, monkeypatch):
@@ -105,7 +105,7 @@ class TestResolveFilterBlocksToPanelIds:
             lambda arch: {"lds": "10"},
         )
         with pytest.raises(SystemExit):
-            resolve_filter_blocks_to_panel_ids(["bogus"], arch="gfx942")
+            convert_filter_blocks_to_panel_ids(["bogus"], arch="gfx942")
 
 
 # =============================================================================
@@ -115,29 +115,31 @@ class TestResolveFilterBlocksToPanelIds:
 
 def _two_block_config() -> schema.ArchConfig:
     """Config with data_source-0 (1), system panel (100), block 2, block 11."""
-    return _make_arch_config([
-        (0, _raw_csv_panel(0, 1, "kernel_top.csv")),
-        (100, _raw_csv_panel(100, 101, "sysinfo.csv")),
-        (
-            200,
-            _metric_panel(
+    return _make_arch_config(
+        [
+            (0, _raw_csv_panel(0, 1, "kernel_top.csv")),
+            (100, _raw_csv_panel(100, 101, "sysinfo.csv")),
+            (
                 200,
-                201,
-                metrics={
-                    "M1": {"value": "AVG(COUNTER_A)"},
-                    "M2": {"value": "AVG(COUNTER_B)"},
-                },
+                _metric_panel(
+                    200,
+                    201,
+                    metrics={
+                        "M1": {"value": "AVG(COUNTER_A)"},
+                        "M2": {"value": "AVG(COUNTER_B)"},
+                    },
+                ),
             ),
-        ),
-        (
-            1100,
-            _metric_panel(
+            (
                 1100,
-                1101,
-                metrics={"X1": {"value": "AVG(COUNTER_C)"}},
+                _metric_panel(
+                    1100,
+                    1101,
+                    metrics={"X1": {"value": "AVG(COUNTER_C)"}},
+                ),
             ),
-        ),
-    ])
+        ]
+    )
 
 
 class TestBuildDfs:
@@ -192,9 +194,11 @@ class TestBuildDfs:
             "Channel_::_1": {"value": "AVG(TCC_HIT[::_1])"},
             "placeholder_range": {"::_1": 3},
         }
-        ac = _make_arch_config([
-            (1800, _metric_panel(1800, 1801, metrics=metrics)),
-        ])
+        ac = _make_arch_config(
+            [
+                (1800, _metric_panel(1800, 1801, metrics=metrics)),
+            ]
+        )
         build_dfs(ac, filter_metrics=None, sys_info=_sys_info(), profiling_config={})
 
         df = ac.dfs[1801]
@@ -270,19 +274,21 @@ class TestBuildDfs:
         assert list(ac.dfs[1101]["Metric"]) == ["X1"]
 
     def test_metric_counters_only_for_built_metrics(self):
-        ac = _make_arch_config([
-            (
-                200,
-                _metric_panel(
+        ac = _make_arch_config(
+            [
+                (
                     200,
-                    201,
-                    metrics={
-                        "Kept": {"value": "AVG(COUNTER_KEPT)"},
-                        "Dropped": {"value": "AVG(COUNTER_DROPPED)"},
-                    },
+                    _metric_panel(
+                        200,
+                        201,
+                        metrics={
+                            "Kept": {"value": "AVG(COUNTER_KEPT)"},
+                            "Dropped": {"value": "AVG(COUNTER_DROPPED)"},
+                        },
+                    ),
                 ),
-            ),
-        ])
+            ]
+        )
         build_dfs(
             ac, filter_metrics=["2.1.0"], sys_info=_sys_info(), profiling_config={}
         )

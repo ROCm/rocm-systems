@@ -296,11 +296,13 @@ def calc_ceilings(
         # Plot FMA roof
         x0 = min(x2, dynamic_xmax) if x2 < dynamic_xmax else dynamic_xmax
 
-        graph_points["valu"].extend([
-            [x0, dynamic_xmax],
-            [peak_ops, peak_ops],
-            peak_ops,
-        ])
+        graph_points["valu"].extend(
+            [
+                [x0, dynamic_xmax],
+                [peak_ops, peak_ops],
+                peak_ops,
+            ]
+        )
 
     # Plot Matrix Ops roof
     if dtype in MATRIX_DATATYPES:  # assert that "matrix_ops" has been assigned
@@ -308,11 +310,13 @@ def calc_ceilings(
             min(x2_matrix, dynamic_xmax) if x2_matrix < dynamic_xmax else dynamic_xmax
         )
 
-        graph_points["matrix_ops"].extend([
-            [x0_matrix, dynamic_xmax],
-            [peak_matrix, peak_matrix],
-            peak_matrix,
-        ])
+        graph_points["matrix_ops"].extend(
+            [
+                [x0_matrix, dynamic_xmax],
+                [peak_matrix, peak_matrix],
+                peak_matrix,
+            ]
+        )
 
     return graph_points
 
@@ -386,7 +390,7 @@ def calc_ai_analyze(
                 kernel_dfs[table_id] = arch_config.dfs[table_id].copy()
                 kernel_dfs_type[table_id] = arch_config.dfs_type[table_id]
 
-        # eval metrics for single kernel only
+        # eval_metric keys off kernel_dfs; extra dfs_expressions entries are ignored.
         eval_metric(
             kernel_dfs,
             kernel_dfs_type,
