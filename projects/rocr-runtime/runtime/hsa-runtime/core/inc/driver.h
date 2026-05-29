@@ -230,8 +230,7 @@ public:
   virtual hsa_status_t ExportFabricHandle(core::Agent& agent, core::ShareableHandle* handle,
                                           size_t size, hsa_fabric_handle_t* fabric_handle) = 0;
   virtual hsa_status_t ImportFabricHandle(core::Agent& agent, hsa_fabric_handle_t fabric_handle,
-                                          core::ShareableHandle* handle, int* dmabuf_fd,
-                                          size_t* size) = 0;
+                                          core::ShareableHandle* handle, size_t* size) = 0;
 
   /// @brief Maps the memory associated with the handle.
   ///

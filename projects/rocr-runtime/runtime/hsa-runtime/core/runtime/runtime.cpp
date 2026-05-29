@@ -3929,8 +3929,7 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
 
   hsa_status_t status;
   if (memHandle->imported && memHandle->is_fabric_handle) {
-    int dmabuf_fd_unused = -1;
-    status = targetAgent->driver().ImportFabricHandle(*targetAgent, memHandle->fabric_handle, &shareable_handle, &dmabuf_fd_unused, &alloc_size);
+    status = targetAgent->driver().ImportFabricHandle(*targetAgent, memHandle->fabric_handle, &shareable_handle, &alloc_size);
   } else {
     status = targetAgent->driver().ImportDMABuf(memHandle->dmabuf_fd, *targetAgent, &shareable_handle, &alloc_size);
   }

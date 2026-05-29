@@ -504,7 +504,7 @@ hsa_status_t KfdVirtioDriver::ExportFabricHandle(core::Agent &agent, core::Share
   return HSA_STATUS_ERROR;
 }
 
-hsa_status_t KfdVirtioDriver::ImportFabricHandle(core::Agent &agent, hsa_fabric_handle_t fabric_handle, core::ShareableHandle *handle, int *dmabuf_fd, size_t *size) {
+hsa_status_t KfdVirtioDriver::ImportFabricHandle(core::Agent &agent, hsa_fabric_handle_t fabric_handle, core::ShareableHandle *handle, size_t *size) {
   return HSA_STATUS_ERROR;
 }
 
