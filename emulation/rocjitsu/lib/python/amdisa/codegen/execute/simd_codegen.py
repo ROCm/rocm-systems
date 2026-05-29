@@ -763,6 +763,7 @@ SIMD_VOP2_TERNARY: dict[str, tuple[str, str, str]] = {
     "v_mac_f16_vop2": ("uint32_t", "0u", _FMA_ACC_F16),
     # --- f16 inline literal ---
     "v_madak_f16_vop2": ("uint32_t", "inst.simm32.encoding_value_", _FMA_ADDK_F16),
+    "v_fmaak_f16_vop2": ("uint32_t", "inst.simm32_", _FMA_ADDK_F16),
     "v_fmamk_f16_vop2": ("uint32_t", "inst.simm32_", _FMA_MULK_F16),
     "v_madmk_f16_vop2": ("uint32_t", "inst.simm32.encoding_value_", _FMA_MULK_F16),
 }

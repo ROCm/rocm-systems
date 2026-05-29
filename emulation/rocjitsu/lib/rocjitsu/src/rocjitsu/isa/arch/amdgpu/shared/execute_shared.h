@@ -10906,6 +10906,10 @@ inline void execute_v_fma_mixlo_f16_vop3p([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_v_fmaak_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP2_TERNARY(uint32_t, inst.simm32_, [](auto a, auto b, auto, auto k) {
+    return util::f32_to_f16_simd(util::stdx::fma(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b),
+                                                 util::f16_to_f32_simd(k)));
+  });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
