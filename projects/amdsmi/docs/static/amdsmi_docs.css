@@ -2,6 +2,10 @@ strong {
   font-weight: 600;
 }
 
+code:not(nav.page-toc code) .pre {
+  font-size: 1rem;
+}
+
 /* secondary sidebar toc (right side) */
 nav.page-toc code {
   border: none;
@@ -9,7 +13,7 @@ nav.page-toc code {
 }
 
 /* xrefs to types, etc. in breathe doc output */
-span.std.std-ref {
+dl[class] span.std.std-ref {
   font-family: var(--pst-font-family-monospace);
 }
 
@@ -17,7 +21,7 @@ span.std.std-ref {
 dl[class]:not(.var, .enumerator, .option-list, .field-list, .footnote, .glossary, .simple):not(:last-child) {
   margin-bottom: 1rem;
   padding-bottom: 2rem;
-  border-bottom: 2px solid var(--pst-color-border);
+  border-bottom: 1px solid var(--pst-color-border);
 }
 
 dl[class]:not(.var, .enumerator, .option-list, .field-list, .footnote, .glossary, .simple):not(:last-child) > dd {
