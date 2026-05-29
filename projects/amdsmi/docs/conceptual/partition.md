@@ -174,11 +174,11 @@ presented to the operating system as one or more independent logical GPU devices
 
 | Mode | Name | Description |
 | :--- | :--- | :--- |
-| `SPX` | Single GPU mode | All XCCs work together as one logical GPU with shared memory |
-| `DPX` | Dual GPU mode | Half the XCCs form each of 2 logical GPUs with shared memory |
-| `TPX` | Triple GPU mode | One-third of the XCCs form each of 3 logical GPUs with shared memory |
-| `QPX` | Quad GPU mode | One-quarter of the XCCs form each of 4 logical GPUs with shared memory |
-| `CPX` | Core GPU mode | Each XCC is its own logical GPU with shared memory |
+| `SPX` | Single GPU mode | All XCCs work together as one logical GPU |
+| `DPX` | Dual GPU mode | Half the XCCs form each of 2 logical GPUs |
+| `TPX` | Triple GPU mode | One-third of the XCCs form each of 3 logical GPUs |
+| `QPX` | Quad GPU mode | One-quarter of the XCCs form each of 4 logical GPUs |
+| `CPX` | Core GPU mode | Each XCC is its own logical GPU |
 
 On an MI300X (8 XCDs), this translates to:
 
