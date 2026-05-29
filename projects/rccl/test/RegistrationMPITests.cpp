@@ -576,7 +576,6 @@ protected:
 
         size_t granularity = 0;
         HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
-        printf("granularity: %zu\n", granularity);
 
         const size_t segSize   = ((requestedSegmentSize + granularity - 1) / granularity) * granularity;
         const size_t totalSize = segSize * numSegments;
