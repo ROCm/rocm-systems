@@ -803,6 +803,13 @@ SIMD_VOP3_DIV_FMAS_FP64: set[str] = {
     "v_div_fmas_f64_vop3",
 }
 
+# VOP3 v_mov_b16 — RDNA3+ only. Reads low 16 of src0 as an integer, treats it
+# as a float for omod (*2 / *4 / *0.5) + clamp ([0, 1]), then truncate-casts
+# back through int32 and masks 16. No abs/neg/op_sel; functorless / fixed-op.
+SIMD_VOP3_MOV_B16: set[str] = {
+    "v_mov_b16_vop3",
+}
+
 # VOP3P fma_mix / mad_mix family. The six ops share one body (`a*b + c` plus
 # optional clamp to [0,1]); only the destination shape differs:
 #  - F32     -> v_fma_mix_f32_vop3p (RDNA3+), v_mad_mix_f32_vop3p (CDNA1-4)
@@ -1705,6 +1712,8 @@ def simd_probe_line(template_name: str) -> str | None:
         return "  ROCJITSU_TRY_SIMD_DIV_FMAS_VOP3_FP32();"
     if template_name in SIMD_VOP3_DIV_FMAS_FP64:
         return "  ROCJITSU_TRY_SIMD_DIV_FMAS_VOP3_FP64();"
+    if template_name in SIMD_VOP3_MOV_B16:
+        return "  ROCJITSU_TRY_SIMD_VOP3_MOV_B16();"
     # VOP3P fma_mix / mad_mix (six ops, three destination shapes). Same body
     # for all; the routing picks the matching glue specialization.
     if template_name in SIMD_VOP3P_FMA_MIX_F32:
