@@ -1050,7 +1050,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaHandleImportDesc* import_des
 			return HSAKMT_STATUS_NOT_SUPPORTED;
 	}
 	
-	ret = amdgpu_bo_import(devhandle, type, import_desc->dmabuf_fd, &res);
+	ret = amdgpu_bo_import(devhandle, type, shared_handle, &res);
 	if (ret)
 		return HSAKMT_STATUS_ERROR;
 
