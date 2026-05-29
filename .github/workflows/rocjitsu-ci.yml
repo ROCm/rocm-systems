@@ -2,8 +2,8 @@
 #
 # How it works:
 #   1. Sparse-checkout emulation/rocjitsu
-#   2. Download a TheRock nightly tarball (provides amdclang++, device
-#      libraries, and rocBLAS for compiling and running tests)
+#   2. Fetch the latest TheRock nightly tarball (provides amdclang++,
+#      device libraries, and rocBLAS for compiling and running tests)
 #   3. Build with TheRock's clang + ninja in Release mode
 #   4. Run the full ctest suite on the CPU emulator
 #
@@ -40,22 +40,31 @@ jobs:
     name: Linux (TheRock clang, Release)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: emulation/rocjitsu
 
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y ninja-build libdrm-dev
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libdrm-dev python3-pip
+
+      - name: Find latest TheRock tarball
+        id: therock
+        run: |
+          python3 -m pip install -U awscli
+          export PATH=~/.local/bin:$PATH
+          KEY=$(aws s3api list-objects-v2 \
+                --bucket therock-nightly-tarball \
+                --no-sign-request \
+                --output json \
+                --query "sort_by(Contents[?contains(Key, 'linux-multiarch')], &LastModified)[-1].Key")
+          KEY=${KEY//\"/}
+          test -n "$KEY" || { echo "No multiarch tarball found"; exit 1; }
+          echo "tarball=${KEY}" >> $GITHUB_OUTPUT
 
       - name: Install ROCm (TheRock tarball)
         run: |
-          # TheRock multiarch nightly: includes gfx942 (CDNA3) and
-          # gfx950 (CDNA4) device libraries and Tensile kernels.
-          # Browse available tarballs at:
-          #   https://rocm.nightlies.amd.com/tarball-multi-arch/
-          # TODO: pin to a stable release once TheRock publishes one.
-          TARBALL=therock-dist-linux-multiarch-7.14.0a20260527.tar.gz
-          wget -q "https://rocm.nightlies.amd.com/tarball-multi-arch/$TARBALL"
+          wget -q "https://therock-nightly-tarball.s3.us-east-2.amazonaws.com/${{ steps.therock.outputs.tarball }}"
+          TARBALL=$(basename "${{ steps.therock.outputs.tarball }}")
           mkdir rocm && tar xf "$TARBALL" -C rocm
           echo "ROCM_PATH=$PWD/rocm" >> $GITHUB_ENV
           echo "LD_LIBRARY_PATH=$PWD/rocm/lib" >> $GITHUB_ENV
