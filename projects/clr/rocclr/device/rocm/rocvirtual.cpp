@@ -3653,8 +3653,18 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
       if (phys_mem_obj->getMemFlags() & ROCCLR_MEM_INTERPROCESS) {
         vaddr_sub_obj->setVmmImported(true);
       }
+      // hsa_amd_vmem_map is synchronous on the calling host thread; once it
+      // returns HSA_STATUS_SUCCESS the GPU page tables are already updated
+      // and the command has no asynchronous GPU completion to wait on. Mark
+      // the event CL_COMPLETE here so that a subsequent awaitCompletion()
+      // short-circuits and never enqueues a Marker on the device's NullStream. 
+      // Without this, the Marker's releaseGpuMemoryFence() / HwQueueTracker::WaitCurrent()   
+      // can transitively block on an unrelated in-flight collective kernel,
+      // producing a distributed deadlock under multi-rank IPC registration.
+      vcmd.setStatus(CL_COMPLETE);
     } else {
       LogError("HSA Command: hsa_amd_vmem_map failed!");
+      vcmd.setStatus(CL_INVALID_OPERATION);
     }
   } else {
     dispatchBarrierPacket(kBarrierPacketHeader, false);
@@ -3676,8 +3686,10 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
       // Release sub_obj now that HW unmap is complete.
       // ~Memory releases parent va_ via parent_->release().
       vaddr_sub_obj->release();
+      vcmd.setStatus(CL_COMPLETE);
     } else {
       LogError("HSA Command: hsa_amd_vmem_unmap failed");
+      vcmd.setStatus(CL_INVALID_OPERATION);
     }
   }
 
