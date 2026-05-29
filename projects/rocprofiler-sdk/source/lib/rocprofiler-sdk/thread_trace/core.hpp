@@ -74,7 +74,10 @@ struct thread_trace_parameter_pack
     uint64_t buffer_size        = DEFAULT_BUFFER_SIZE;
     uint64_t perf_exclude_mask  = 0;
     bool     no_detail_simd     = false;
-    bool     triple_buffering   = false;
+    /// Number of CPU staging buffers in the producer/consumer pipeline.
+    /// 1 = single buffer (synchronous, no async copy).
+    /// Values >= 3 enable the async copy pipeline. 2 is rejected at the API layer.
+    size_t num_buffers = 1;
 
     bool bSerialize = false;
 
@@ -133,7 +136,7 @@ private:
     std::unique_ptr<hsa::TraceControlAQLPacket>           control_packet{nullptr};
     std::unique_ptr<code_object::CodeobjCallbackRegistry> codeobj_reg{nullptr};
 
-    std::thread                       consumer{};
+    std::vector<std::thread>          consumers{};
     std::thread                       producer{};
     std::shared_ptr<std::atomic<int>> worker_flag{nullptr};
 };
