@@ -22,6 +22,7 @@
 from subcommands.bad_pages import BadPagesCommands
 from subcommands.default import DefaultCommands
 from subcommands.event import EventCommands
+from subcommands.fabric import FabricCommands
 from subcommands.firmware import FirmwareCommands
 from subcommands.list_devices import ListDevicesCommands
 from subcommands.metric import MetricCommands
@@ -46,6 +47,7 @@ __all__ = [
     "MetricCommands",
     "ProcessCommands",
     "EventCommands",
+    "FabricCommands",
     "TopologyCommands",
     "SetValueCommands",
     "ResetCommands",
