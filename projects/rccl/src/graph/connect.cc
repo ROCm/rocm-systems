@@ -1160,7 +1160,8 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes > 1) {
     int userMax = ncclParamMaxNchannels();
     if (userMax != -2) {
-      maxChannels = std::max(std::min(userMax, 64), 1);
+      // Honor NCCL_MAX_NCHANNELS up to MAXCHANNELS (was hard-capped at 64).
+      maxChannels = std::max(std::min(userMax, MAXCHANNELS), 1);
       INFO(NCCL_TUNING, "RCCL MaxChannels is capped to: %d", maxChannels);
     } else {
       maxChannels = 48;
@@ -1175,10 +1176,17 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   }
 #else
   // Skip the 64-channel cap for gfx1250 single-node P2P and for MNNVL transports.
-  // Retain the 64-channel cap for gfx1250 multi-node non-MNNVL (NET path) and all other arches.
-  if (!comm->MNNVL && !(isGfx1250 && comm->nNodes == 1) &&
-      (graphs[NCCL_ALGO_RING]->nIntraChannels > 0 || comm->nNodes > 1)) {
-    maxChannels = std::min(64, maxChannels);
+  // Also skip when the user explicitly raised NCCL_MAX_NCHANNELS past 64 — the
+  // request is then taken as an opt-in to the extended upper bound.
+  // Otherwise retain the 64-channel cap for gfx1250 multi-node non-MNNVL (NET
+  // path) and all other arches.
+  {
+    int userMax = (int)ncclParamMaxNchannels();
+    bool userOptedHigher = (userMax != -2 && userMax > 64);
+    if (!userOptedHigher && !comm->MNNVL && !(isGfx1250 && comm->nNodes == 1) &&
+        (graphs[NCCL_ALGO_RING]->nIntraChannels > 0 || comm->nNodes > 1)) {
+      maxChannels = std::min(64, maxChannels);
+    }
   }
 #endif
   // Duplicate ringPrev/ringNext for ncclBuildRing
@@ -1268,7 +1276,9 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
 
   minNchannels = ncclMinNchannels();
   if (comm->nNodes > 1 && !comm->MNNVL) {
-    minNchannels = std::min(64, minNchannels);
+    // Was hard-capped at 64; lift to MAXCHANNELS so multi-node runs can opt
+    // into the extended channel range via NCCL_MIN_NCHANNELS.
+    minNchannels = std::min((int)MAXCHANNELS, minNchannels);
   }
   // gfx1250 can support high channel counts with fewer than 8 GPUs;
   // skip the nRanks < 8 clamp so NCCL_MIN_NCHANNELS is respected.
