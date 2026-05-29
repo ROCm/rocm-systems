@@ -62,22 +62,26 @@ __host__ void IPCHostContext::get_nbi(T *dest, const T *source, size_t nelems, i
 
 template <typename T>
 __host__ void IPCHostContext::amo_add(void *dst, T value, int pe) {
-  host_interface->amo_add(shmem_ptr(dst, pe), value, pe, context_window_info);
+  bool is_mpi = dynamic_cast<WindowInfoMPI*>(context_window_info) != nullptr;
+  host_interface->amo_add(is_mpi ? dst : shmem_ptr(dst, pe), value, pe, context_window_info);
 }
 
 template <typename T>
 __host__ void IPCHostContext::amo_cas(void *dst, T value, T cond, int pe) {
-  host_interface->amo_cas(shmem_ptr(dst, pe), value, cond, pe, context_window_info);
+  bool is_mpi = dynamic_cast<WindowInfoMPI*>(context_window_info) != nullptr;
+  host_interface->amo_cas(is_mpi ? dst : shmem_ptr(dst, pe), value, cond, pe, context_window_info);
 }
 
 template <typename T>
 __host__ T IPCHostContext::amo_fetch_add(void *dst, T value, int pe) {
-  return host_interface->amo_fetch_add(shmem_ptr(dst, pe), value, pe, context_window_info);
+  bool is_mpi = dynamic_cast<WindowInfoMPI*>(context_window_info) != nullptr;
+  return host_interface->amo_fetch_add(is_mpi ? dst : shmem_ptr(dst, pe), value, pe, context_window_info);
 }
 
 template <typename T>
 __host__ T IPCHostContext::amo_fetch_cas(void *dst, T value, T cond, int pe) {
-  return host_interface->amo_fetch_cas(shmem_ptr(dst, pe), value, cond, pe, context_window_info);
+  bool is_mpi = dynamic_cast<WindowInfoMPI*>(context_window_info) != nullptr;
+  return host_interface->amo_fetch_cas(is_mpi ? dst : shmem_ptr(dst, pe), value, cond, pe, context_window_info);
 }
 
 template <typename T>
