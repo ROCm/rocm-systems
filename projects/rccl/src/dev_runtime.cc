@@ -137,19 +137,28 @@ ncclResult_t ncclDevrFinalize(struct ncclComm* comm) {
       CUDACHECKIGNORE(cudaStreamDestroy(stream));
     }
   }
-  // Drain leaked windows so every per-peer slice is unmapped before VA free.
-  // Without this, on HIP cuMemAddressFree over a still-mapped range returns
-  // hipErrorInvalidValue, which then cascades into ibv_dealloc_pd EBUSY at teardown.
+  // Drain memories whose owning windows were never explicitly destroyed
+  // (e.g. resource windows created by ncclDevCommCreate when the caller
+  // skips the matching ncclDevCommDestroy). Without this, every per-rank
+  // cuMemMap slice inside lsaFlatBase is still live when cuMemAddressFree
+  // is called below, and HIP returns hipErrorInvalidValue (AICOMRCCL-835).
+  if (devr->memHead != nullptr) {
+    int leftover = 0;
+    for (struct ncclDevrMemory* m = devr->memHead; m != nullptr; m = m->next) leftover++;
+    INFO(NCCL_INIT, "ncclDevrFinalize: draining %d leftover device-API memory record(s)", leftover);
+  }
   while (devr->memHead != nullptr) {
     struct ncclDevrMemory* m = devr->memHead;
     m->refCount = 1; // force drop on the next call
     symMemoryDropRef(comm, m);
   }
   if (devr->lsaFlatBase != nullptr) {
+    // The drain above unmapped every per-rank slice via symMemoryDropRef,
+    // so this is now expected to succeed. Surface failures instead of
+    // masking with CUCHECKIGNORE — a regression in the drain path should
+    // not be silently swallowed (AICOMRCCL-835).
     CUdeviceptr flatAddr = reinterpret_cast<CUdeviceptr>(devr->lsaFlatBase);
-  // Returns error: invalid argument. Already unmapped by symMemoryDropRef
-  // CUCHECKIGNORE(cuMemUnmap(flatAddr, devr->lsaSize*devr->bigSize));
-    CUCHECKIGNORE(cuMemAddressFree(flatAddr, devr->lsaSize*devr->bigSize));
+    CUCHECK(cuMemAddressFree(flatAddr, devr->lsaSize*devr->bigSize));
   }
   ncclShadowPoolDestruct(&devr->shadows);
   ncclSpaceDestruct(&devr->bigSpace);

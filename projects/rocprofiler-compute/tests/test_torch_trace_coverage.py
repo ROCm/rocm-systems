@@ -24,8 +24,8 @@ import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+import common
 import pytest
-import test_utils
 
 COVERAGE_TEST_CONFIG: Dict[str, Any] = {"cleanup": True}
 
@@ -92,12 +92,12 @@ def test_random_operator_kernel_coverage(
         len(structural_ops),
     )
 
-    gt_work_dir = test_utils.get_output_dir(
+    gt_work_dir = common.get_output_dir(
         param_id=unique_get_output_param_id("torch_trace_gt"),
         suffix="_tmp",
         clean_existing=True,
     )
-    workload_dir = test_utils.get_output_dir(
+    workload_dir = common.get_output_dir(
         param_id=unique_get_output_param_id("random_op_coverage"),
         clean_existing=True,
     )
@@ -189,11 +189,11 @@ def test_random_operator_kernel_coverage(
             f"(sampled={len(sampled)}, FAIL={len(failure_detail)}, SKIP={skipped})"
         )
     finally:
-        test_utils.clean_output_dir(
+        common.clean_output_dir(
             COVERAGE_TEST_CONFIG["cleanup"],
             workload_dir,
         )
-        test_utils.clean_output_dir(
+        common.clean_output_dir(
             COVERAGE_TEST_CONFIG["cleanup"],
             gt_work_dir,
         )

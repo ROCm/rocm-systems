@@ -58,16 +58,17 @@ struct Wave : public group_id
         pipe = get_bits(16, 17);
         me = get_bits(18, 19);
         count = get_bits(22, 28);
+        tg_id = get_bits(29, 31);
     };
 
-    int16_t pipe, me, count;
+    int16_t pipe, me, count, tg_id;
 };
 
 struct Regfields
 {
     uint32_t regdata;
     uint16_t regaddr;
-    int8_t pipe, me;
+    int8_t pipe, me, disable, type;
 };
 
 struct Reg : public Regfields
@@ -78,7 +79,11 @@ struct Reg : public Regfields
         me = (get_bits(7, 8) + 1) & 0x1;
         regaddr = get_bits(16, 31);
         regdata = get_bits(32, 63);
+        disable = !(get_bits(15, 15));
+        type = get_bits(10, 12);
     }
+
+    static constexpr int8_t REG_TYPE_USERDATA = 3;
 };
 
 struct RegCs : public Regfields
@@ -89,6 +94,8 @@ struct RegCs : public Regfields
         me = (get_bits(7, 8) + 1) & 0x1;
         regaddr = get_bits(9, 15);
         regdata = get_bits(16, 47);
+        disable = 0;
+        type = 0;
     }
 };
 
@@ -230,9 +237,9 @@ public:
             delta = get_bits(4, 4);
     }
 
-    int64_t time  : 46;
-    int64_t delta : 12;
-    int64_t type  : 6;
+    int64_t time  : 49;
+    int64_t delta : 10;
+    int64_t type  : 5;
 
     TokenFields fields;
 };
@@ -254,6 +261,17 @@ private:
 
     std::deque<Token> lookahead{};
     size_t cur_len = 0;
+};
+
+enum sqtt_misc_type_t
+{
+    MISC_TYPE_TIME = 0,
+    MISC_TYPE_TIME_RESET,
+    MISC_TYPE_PACKET_LOST,
+    MISC_TYPE_RESERVED,
+    MISC_TYPE_TT_STALL_BEGIN,
+    MISC_TYPE_TT_STALL_END,
+    MISC_TYPE_SAVE_CONTEXT
 };
 
 }; // namespace gfx9

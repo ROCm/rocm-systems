@@ -27,6 +27,7 @@
 #include "functional/cross_process_serialization.h"
 #include "functional/err_cnt_read.h"
 #include "functional/evt_notif_read_write.h"
+#include "functional/fabric_read.h"
 #include "functional/fan_read.h"
 #include "functional/fan_read_write.h"
 #include "functional/frequencies_read.h"
@@ -327,6 +328,12 @@ TEST(amdsmitstReadWrite, TestMemoryReadWrite) {
   TestMemoryReadWrite tst;
   RunGenericTest(&tst);
 }
+
+TEST(amdsmitstReadOnly, TestFabricRead) {
+  TestFabricRead tst;
+  RunGenericTest(&tst);
+}
+
 /*
 TEST(amdsmitstReadOnly, TestConcurrentInit) {
   TestConcurrentInit tst;
