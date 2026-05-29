@@ -473,7 +473,7 @@ def calc_ai_analyze(
             f"AI_HBM={ai_hbm:.2f}, "
             f"AI_L2={ai_l2:.2f}, "
             f"AI_L1={ai_l1:.2f}, "
-            f"AI_L0={ai_l1:.2f}, "
+            f"AI_L0={ai_l0:.2f}, "
             f"AI_LDS={ai_lds:.2f}, "
             f"Performance={performance:.2e} GFLOP/s",
         )

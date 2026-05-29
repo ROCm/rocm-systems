@@ -1048,8 +1048,6 @@ class Roofline:
 
         self.__ai_data = ai_data
 
-        print(f"ai_data:\n{self.__ai_data}")
-
         workload_dir = self.__run_parameters.get("workload_dir", "")
         if not (Path(workload_dir) / "roofline.csv").is_file():
             console_log(
