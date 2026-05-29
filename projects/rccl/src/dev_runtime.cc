@@ -1558,6 +1558,21 @@ ncclResult_t ncclCommWindowRegister_impl(
   ncclIntruQueueEnqueue(&comm->devrState.regTaskQueue, task);
   ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // RCCL: Enqueue RMA CE init on the first window register. Matches the
+  // lazy enqueue in rmaTaskAppend (src/enqueue.cc) which fires on the first
+  // ncclPutSignal/Signal/WaitSignal. ncclRmaCeInit is collective
+  // (signals window + bootstrap barrier), so we cannot call it from the
+  // non-collective Host API entry point.
+  if (!comm->rmaState.rmaCeState.initialized &&
+      ncclIntruQueueEmpty(&comm->rmaCeInitTaskQueue)) {
+    struct ncclRmaCeInitTask* ceTask;
+    NCCLCHECKGOTO(ncclCalloc(&ceTask, 1), ret, fail);
+    ceTask->comm = comm;
+    ncclIntruQueueEnqueue(&comm->rmaCeInitTaskQueue, ceTask);
+  }
+#endif
+
 exit:
   ncclGroupErrCheck(ret);
   NCCLCHECK(ncclGroupEndInternal());
