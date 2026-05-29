@@ -25,9 +25,9 @@
 #include <iostream>
 #include <sstream>
 #include <vector>
-#include "common.hpp"
 #include "gfx11/gfx11parser.h"
 #include "gfx11/gfx11token.h"
+#include "rocprof_trace_decoder/cxx/common.hpp"
 
 namespace gfx12
 {
@@ -120,7 +120,7 @@ union wstart_type
         uint64_t wid        : 5;
         uint64_t dispatcher : 5;
         uint64_t count      : 7;
-        uint64_t zero       : 1;
+        uint64_t extlds     : 1;
         uint64_t wgid       : 5;
         uint64_t last       : 1;
         uint64_t dvg        : 1;
@@ -129,6 +129,7 @@ union wstart_type
 
     wstart_type_common get() const
     {
+        bool wgext = isExt && !extlds;
         return wstart_type_common{
             .tm = tm,
             .sa = sa,
@@ -138,10 +139,10 @@ union wstart_type
             .pipe = dispatcher & 0x3ul,
             .me = (dispatcher >> 2ul) & 1ul,
             .count = count,
-            .isExt = isExt,
-            .wgid = wgid,
-            .last = last,
-            .dynvgpr = dvg};
+            .isExt = wgext,
+            .wgid = wgext ? wgid : 0,
+            .last = wgext ? last : 0,
+            .dynvgpr = wgext ? dvg : 0};
     }
 
 #ifdef SQTT_LOGGING

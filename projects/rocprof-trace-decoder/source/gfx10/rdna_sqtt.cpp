@@ -179,7 +179,15 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                         {
                             if (slot.empty() || slot.back().bIsComplete)
                                 slot.push_back(wave_t(
-                                    target_sa_wgp, start.simd, start.wid, pcinfo_t{0, 0}, token, exclude_barrier_wait
+                                    target_sa_wgp,
+                                    start.simd,
+                                    start.wid,
+                                    pcinfo_t{0, 0},
+                                    token,
+                                    exclude_barrier_wait,
+                                    (uint8_t) start.me,
+                                    (uint8_t) start.pipe,
+                                    (uint8_t) start.wgid
                                 ));
 
                             auto& wave = slot.back();
@@ -201,7 +209,18 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                         auto it = running_waves.find(start.getGPULocation());
                         if (it != running_waves.end())
                         {
-                            occupancy.push_back({it->second, token.time, start.SACU(), start.simd, start.wid, 0});
+                            occupancy.push_back(
+                                {it->second,
+                                 token.time,
+                                 start.SACU(),
+                                 start.simd,
+                                 start.wid,
+                                 0,
+                                 (uint64_t) start.me,
+                                 (uint64_t) start.pipe,
+                                 start.isExt,
+                                 (uint64_t) start.wgid}
+                            );
                             saved_waves[start.getGPULocation()] = it->second;
                         }
                     }
@@ -213,7 +232,18 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
 
                         saved_waves.erase(start.getGPULocation());
                         running_waves[start.getGPULocation()] = addr;
-                        occupancy.push_back({addr, token.time, start.SACU(), start.simd, start.wid, 1});
+                        occupancy.push_back(
+                            {addr,
+                             token.time,
+                             start.SACU(),
+                             start.simd,
+                             start.wid,
+                             1,
+                             (uint64_t) start.me,
+                             (uint64_t) start.pipe,
+                             start.isExt,
+                             (uint64_t) start.wgid}
+                        );
                     }
 
                     break;
@@ -221,7 +251,18 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
 
                 running_waves[start.getGPULocation()] = wave_addr;
 
-                occupancy.push_back({wave_addr, token.time, start.SACU(), start.simd, start.wid, 1});
+                occupancy.push_back(
+                    {wave_addr,
+                     token.time,
+                     start.SACU(),
+                     start.simd,
+                     start.wid,
+                     1,
+                     (uint64_t) start.me,
+                     (uint64_t) start.pipe,
+                     start.isExt,
+                     (uint64_t) start.wgid}
+                );
                 if (double_buffer && occupancy.size() >= MAX_ACCUM_RECORDS) send_occupancy();
 
                 if (bIsTarget)
@@ -233,9 +274,17 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                         stitch.stitch(wave);
                         SIMD[start.wid].pop_back();
                     }
-                    SIMD[start.wid].push_back(
-                        wave_t(target_sa_wgp, start.simd, start.wid, wave_addr, token, exclude_barrier_wait)
-                    );
+                    SIMD[start.wid].push_back(wave_t(
+                        target_sa_wgp,
+                        start.simd,
+                        start.wid,
+                        wave_addr,
+                        token,
+                        exclude_barrier_wait,
+                        (uint8_t) start.me,
+                        (uint8_t) start.pipe,
+                        (uint8_t) start.wgid
+                    ));
                 }
                 break;
             }
@@ -262,9 +311,9 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                     running_waves.erase(end.getGPULocation());
                 }
                 else
-                    occupancy.insert(occupancy.begin(), {startpc, 0, end.SACU(), end.simd, end.wid, 1});
+                    occupancy.insert(occupancy.begin(), {startpc, 0, end.SACU(), end.simd, end.wid, 1, 0, 0, 0, 0});
 
-                occupancy.push_back({startpc, token.time, end.SACU(), end.simd, end.wid, 0});
+                occupancy.push_back({startpc, token.time, end.SACU(), end.simd, end.wid, 0, 0, 0, 0, 0});
                 break;
             }
             case RdnaType::INST:
@@ -377,7 +426,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                 gfx10::new_pc_type pc{.raw = token.contents};
                 DEBUGPRINT(pc);
                 if (pc.wave < SIMD.size() && SIMD[pc.wave].size())
-                    SIMD[pc.wave].back().new_pc((uint64_t) token.time, pc.pc, csregister.table);
+                    SIMD[pc.wave].back().new_pc((uint64_t) token.time, pc.pc, csregister.table.write());
                 break;
             }
             case RdnaType::NEW_PC_GFX12:
@@ -385,7 +434,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                 gfx12::new_pc_type pc{.raw = token.contents};
                 DEBUGPRINT(pc);
                 if (pc.wave < SIMD.size() && SIMD[pc.wave].size())
-                    SIMD[pc.wave].back().new_pc((uint64_t) token.time, pc.pc, csregister.table);
+                    SIMD[pc.wave].back().new_pc((uint64_t) token.time, pc.pc, csregister.table.write());
                 break;
             }
             case RdnaType::REG:

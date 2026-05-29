@@ -239,6 +239,9 @@ rocprofiler_systems_add_option(CMAKE_INSTALL_RPATH_USE_LINK_PATH
 set(CMAKE_INSTALL_MESSAGE "LAZY" CACHE STRING "Installation message")
 mark_as_advanced(CMAKE_INSTALL_MESSAGE)
 
+rocprofiler_systems_add_option(ROCPROFSYS_USE_CCACHE
+    "Auto-wire ccache as the compiler launcher when present" ON
+)
 rocprofiler_systems_add_option(ROCPROFSYS_USE_CLANG_TIDY "Enable clang-tidy" OFF)
 rocprofiler_systems_add_option(ROCPROFSYS_USE_BFD
     "Enable BFD support (map call-stack samples to LOC)" ON

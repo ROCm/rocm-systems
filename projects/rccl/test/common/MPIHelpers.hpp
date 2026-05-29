@@ -378,9 +378,14 @@ struct MpiEnvGuard
             saved = prev;
             if(saved != v)
             {
+#ifdef RCCL_TEST_CHECKS_HPP
+                TEST_INFO("MpiEnvGuard overriding %s: '%s' -> '%s' (will restore on scope exit)",
+                          n, saved.c_str(), v);
+#else
                 fprintf(stderr,
                         "[MpiEnvGuard rank %s] overriding %s: '%s' -> '%s' (will restore on scope exit)\n",
                         getMpiRankStr(), n, saved.c_str(), v);
+#endif
             }
         }
         ::setenv(n, v, /*overwrite=*/1);

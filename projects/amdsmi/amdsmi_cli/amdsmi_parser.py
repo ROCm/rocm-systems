@@ -120,6 +120,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         partition,
         ras,
         node,
+        fabric,
         _rocm_smi,
         default,
         sys_argv=None,
@@ -225,6 +226,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             "partition",
             "ras",
             "node",
+            "fabric",
             "default",
         ]
 
@@ -248,6 +250,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 self._add_partition_parser(self.subparsers, partition)
                 self._add_ras_parser(self.subparsers, ras)
                 self._add_node_parser(self.subparsers, node)
+                self._add_fabric_parser(self.subparsers, fabric)
             elif any(arg in sys_argv for arg in ["version"]):
                 self._add_version_parser(self.subparsers, version)
             elif any(arg in sys_argv for arg in ["list"]):
@@ -282,6 +285,8 @@ class AMDSMIParser(argparse.ArgumentParser):
                 self._add_ras_parser(self.subparsers, ras)
             elif any(arg in sys_argv for arg in ["node"]):
                 self._add_node_parser(self.subparsers, node)
+            elif any(arg in sys_argv for arg in ["fabric"]):
+                self._add_fabric_parser(self.subparsers, fabric)
             else:
                 # If no subcommand is given, add the default parser
                 self._add_default_parser(self.subparsers, default)
@@ -3281,6 +3286,40 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Add Universal Arguments
         self._add_command_modifiers(node_parser)
+
+    def _add_fabric_parser(self, subparsers: argparse._SubParsersAction, func):
+        if not self.helpers.is_amdgpu_initialized():
+            return
+
+        # Subparser help text
+        fabric_help = "Displays fabric (UALoE/UALink over Ethernet) information of the devices"
+        fabric_subcommand_help = f"{self.description}\n\nIf no GPU is specified, returns information for all GPUs on the system.\
+                                \nIf no fabric argument is provided, all fabric information will be displayed."
+        fabric_optionals_title = "Fabric arguments"
+
+        # Help text for arguments
+        topology_help = "Display fabric topology data (counters per category, instance, and item)"
+        info_help = "Display fabric device configuration (BDF, bandwidth, latency, vPoD/pPoD, accelerator state)"
+
+        # Create fabric subparser
+        fabric_parser = subparsers.add_parser(
+            "fabric", help=fabric_help, description=fabric_subcommand_help
+        )
+        fabric_parser._optionals.title = fabric_optionals_title
+        fabric_parser.formatter_class = lambda prog: AMDSMISubparserHelpFormatter(prog)
+        fabric_parser.set_defaults(func=func)
+
+        # Optional Args
+        fabric_parser.add_argument(
+            "-t", "--topology", action="store_true", required=False, help=topology_help
+        )
+        fabric_parser.add_argument(
+            "-i", "--info", action="store_true", required=False, help=info_help
+        )
+
+        # Add Universal Arguments
+        self._add_device_arguments(fabric_parser, required=False)
+        self._add_command_modifiers(fabric_parser)
 
     def error(self, message):
         outputformat = self.helpers.get_output_format()
