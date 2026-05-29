@@ -45,6 +45,12 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
     "v_add_u32_vop2": ("uint32_t", "std::plus<>{}"),
     "v_sub_u32_vop2": ("uint32_t", "std::minus<>{}"),
     "v_subrev_u32_vop2": ("uint32_t", "[](auto a, auto b) { return b - a; }"),
+    # RDNA-style "no-carry" int add/sub — same body as plain add_u32/sub_u32/
+    # subrev_u32, just renamed (the scalar bodies are bit-identical add/sub
+    # without any VCC interaction).
+    "v_add_nc_u32_vop2": ("uint32_t", "std::plus<>{}"),
+    "v_sub_nc_u32_vop2": ("uint32_t", "std::minus<>{}"),
+    "v_subrev_nc_u32_vop2": ("uint32_t", "[](auto a, auto b) { return b - a; }"),
     "v_and_b32_vop2": ("uint32_t", "std::bit_and<>{}"),
     "v_or_b32_vop2": ("uint32_t", "std::bit_or<>{}"),
     "v_xor_b32_vop2": ("uint32_t", "std::bit_xor<>{}"),
@@ -553,6 +559,59 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         " util::stdx::where(simd_mask_as<uint32_t>(util::stdx::isnan(s) || s < 0.0f), o) = 0u;"
         " return o & 0xFFFFu; }",
     ),
+    # --- VOP1 b16 unary (RDNA3+ only): low-16 mov / not. The scalar bodies
+    # ignore the high 16 bits of src0 and zero-extend the 16-bit result. No
+    # modifiers in VOP1 form (cf. the VOP3 mov_b16 form which carries omod/
+    # clamp — handled by the dedicated try_execute_mov_b16_vop3_simd glue).
+    "v_mov_b16_vop1": (
+        "uint32_t",
+        "uint32_t",
+        "[](auto a) { return a & 0xFFFFu; }",
+    ),
+    "v_not_b16_vop1": (
+        "uint32_t",
+        "uint32_t",
+        "[](auto a) { return (~a) & 0xFFFFu; }",
+    ),
+    # --- int16 / uint16 → 32-bit zero/sign extend. Scalar:
+    #   cvt_i32_i16: (int32_t)(int16_t)(src0 & 0xFFFF)  (sign-extend)
+    #   cvt_u32_u16: src0 & 0xFFFF                       (zero-extend)
+    "v_cvt_i32_i16_vop1": (
+        "uint32_t",
+        "uint32_t",
+        "[](auto a) {"
+        " auto x = util::stdx::static_simd_cast<util::native<int32_t>>(a & 0xFFFFu);"
+        " return util::stdx::static_simd_cast<util::native<uint32_t>>((x << 16) >> 16); }",
+    ),
+    "v_cvt_u32_u16_vop1": (
+        "uint32_t",
+        "uint32_t",
+        "[](auto a) { return a & 0xFFFFu; }",
+    ),
+    # --- aliases for v_cvt_flr_i32_f32 / v_cvt_rpi_i32_f32 (same scalar body,
+    # RDNA naming). Reuse the floor / ceil(s - 0.5) functors verbatim.
+    "v_cvt_floor_i32_f32_vop1": (
+        "float32_t",
+        "int32_t",
+        "[](auto s) {"
+        " auto r = util::floor_simd(s);"
+        " util::native<int32_t> out = util::stdx::static_simd_cast<util::native<int32_t>>(r);"
+        " util::stdx::where(simd_mask_as<int32_t>(r >= 2147483648.0f), out) = 2147483647;"
+        " util::stdx::where(simd_mask_as<int32_t>(r < -2147483648.0f), out) = (-2147483647 - 1);"
+        " util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(r)), out) = 0;"
+        " return out; }",
+    ),
+    "v_cvt_nearest_i32_f32_vop1": (
+        "float32_t",
+        "int32_t",
+        "[](auto s) {"
+        " auto r = util::ceil_simd(s - util::native<float32_t>(0.5f));"
+        " util::native<int32_t> out = util::stdx::static_simd_cast<util::native<int32_t>>(r);"
+        " util::stdx::where(simd_mask_as<int32_t>(r >= 2147483648.0f), out) = 2147483647;"
+        " util::stdx::where(simd_mask_as<int32_t>(r < -2147483648.0f), out) = (-2147483647 - 1);"
+        " util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(r)), out) = 0;"
+        " return out; }",
+    ),
 }
 
 
@@ -600,6 +659,26 @@ SIMD_VOP2_CARRY: dict[str, str] = {
         " return make_simd_carry(t2, bw1 | bw2); }"
     ),
     "v_subbrev_co_u32_vop2": (
+        "[](auto a, auto b, auto cin) {"
+        " auto t1 = b - a; auto bw1 = b < a;"
+        " auto t2 = t1 - cin; auto bw2 = t1 < cin;"
+        " return make_simd_carry(t2, bw1 | bw2); }"
+    ),
+    # RDNA-style co/ci VOP2 carry-cin forms — bit-identical to the addc/subb/
+    # subbrev_co bodies above (cin read from VCC, co written to VCC).
+    "v_add_co_ci_u32_vop2": (
+        "[](auto a, auto b, auto cin) {"
+        " auto t1 = a + b; auto c1 = t1 < a;"
+        " auto t2 = t1 + cin; auto c2 = t2 < t1;"
+        " return make_simd_carry(t2, c1 | c2); }"
+    ),
+    "v_sub_co_ci_u32_vop2": (
+        "[](auto a, auto b, auto cin) {"
+        " auto t1 = a - b; auto bw1 = a < b;"
+        " auto t2 = t1 - cin; auto bw2 = t1 < cin;"
+        " return make_simd_carry(t2, bw1 | bw2); }"
+    ),
+    "v_subrev_co_ci_u32_vop2": (
         "[](auto a, auto b, auto cin) {"
         " auto t1 = b - a; auto bw1 = b < a;"
         " auto t2 = t1 - cin; auto bw2 = t1 < cin;"
@@ -1674,6 +1753,125 @@ SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
         "uint32_t",
         "[](auto a, auto b, auto c) { return (a & b) | (~a & c); }",
     ),
+    # --- int min3 / max3 / med3 (u32 / i32 / u16 / i16). Scalar bodies route
+    # through std::min/max on the typed (16/32-bit) values. SIMD analogs use
+    # stdx::min/max on the matching simd type, then truncate/sign-extend back
+    # to uint32_t to match the scalar's zero/sign-extension semantics.
+    "v_min3_u32_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) {"
+        " return util::stdx::min(util::stdx::min(a, b), c); }",
+    ),
+    "v_max3_u32_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) {"
+        " return util::stdx::max(util::stdx::max(a, b), c); }",
+    ),
+    "v_med3_u32_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) {"
+        " return util::stdx::max(util::stdx::min(util::stdx::max(a, b), c),"
+        " util::stdx::min(a, b)); }",
+    ),
+    "v_min3_i32_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) {"
+        " using I = util::native<int32_t>;"
+        " auto sa = util::stdx::static_simd_cast<I>(a);"
+        " auto sb = util::stdx::static_simd_cast<I>(b);"
+        " auto sc = util::stdx::static_simd_cast<I>(c);"
+        " return util::stdx::static_simd_cast<util::native<uint32_t>>("
+        "util::stdx::min(util::stdx::min(sa, sb), sc)); }",
+    ),
+    "v_max3_i32_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) {"
+        " using I = util::native<int32_t>;"
+        " auto sa = util::stdx::static_simd_cast<I>(a);"
+        " auto sb = util::stdx::static_simd_cast<I>(b);"
+        " auto sc = util::stdx::static_simd_cast<I>(c);"
+        " return util::stdx::static_simd_cast<util::native<uint32_t>>("
+        "util::stdx::max(util::stdx::max(sa, sb), sc)); }",
+    ),
+    "v_med3_i32_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) {"
+        " using I = util::native<int32_t>;"
+        " auto sa = util::stdx::static_simd_cast<I>(a);"
+        " auto sb = util::stdx::static_simd_cast<I>(b);"
+        " auto sc = util::stdx::static_simd_cast<I>(c);"
+        " auto r = util::stdx::max(util::stdx::min(util::stdx::max(sa, sb), sc),"
+        " util::stdx::min(sa, sb));"
+        " return util::stdx::static_simd_cast<util::native<uint32_t>>(r); }",
+    ),
+    # 16-bit forms: scalar masks low 16 bits + casts to i16 / u16, runs the
+    # 3-source min/max/med, then zero-extends back to uint32_t. SIMD: do the
+    # mask + signed shift to sign-extend (i16 path), run the op, then mask
+    # 0xFFFF on the result.
+    "v_min3_u16_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) {"
+        " auto ua = a & 0xFFFFu;"
+        " auto ub = b & 0xFFFFu;"
+        " auto uc = c & 0xFFFFu;"
+        " return util::stdx::min(util::stdx::min(ua, ub), uc); }",
+    ),
+    "v_max3_u16_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) {"
+        " auto ua = a & 0xFFFFu;"
+        " auto ub = b & 0xFFFFu;"
+        " auto uc = c & 0xFFFFu;"
+        " return util::stdx::max(util::stdx::max(ua, ub), uc); }",
+    ),
+    "v_med3_u16_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) {"
+        " auto ua = a & 0xFFFFu;"
+        " auto ub = b & 0xFFFFu;"
+        " auto uc = c & 0xFFFFu;"
+        " return util::stdx::max(util::stdx::min(util::stdx::max(ua, ub), uc),"
+        " util::stdx::min(ua, ub)); }",
+    ),
+    "v_min3_i16_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) {"
+        " using I = util::native<int32_t>;"
+        " auto sa = (util::stdx::static_simd_cast<I>(a & 0xFFFFu) << 16) >> 16;"
+        " auto sb = (util::stdx::static_simd_cast<I>(b & 0xFFFFu) << 16) >> 16;"
+        " auto sc = (util::stdx::static_simd_cast<I>(c & 0xFFFFu) << 16) >> 16;"
+        " auto r = util::stdx::min(util::stdx::min(sa, sb), sc);"
+        " return util::stdx::static_simd_cast<util::native<uint32_t>>(r) & 0xFFFFu; }",
+    ),
+    "v_max3_i16_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) {"
+        " using I = util::native<int32_t>;"
+        " auto sa = (util::stdx::static_simd_cast<I>(a & 0xFFFFu) << 16) >> 16;"
+        " auto sb = (util::stdx::static_simd_cast<I>(b & 0xFFFFu) << 16) >> 16;"
+        " auto sc = (util::stdx::static_simd_cast<I>(c & 0xFFFFu) << 16) >> 16;"
+        " auto r = util::stdx::max(util::stdx::max(sa, sb), sc);"
+        " return util::stdx::static_simd_cast<util::native<uint32_t>>(r) & 0xFFFFu; }",
+    ),
+    "v_med3_i16_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) {"
+        " using I = util::native<int32_t>;"
+        " auto sa = (util::stdx::static_simd_cast<I>(a & 0xFFFFu) << 16) >> 16;"
+        " auto sb = (util::stdx::static_simd_cast<I>(b & 0xFFFFu) << 16) >> 16;"
+        " auto sc = (util::stdx::static_simd_cast<I>(c & 0xFFFFu) << 16) >> 16;"
+        " auto r = util::stdx::max(util::stdx::min(util::stdx::max(sa, sb), sc),"
+        " util::stdx::min(sa, sb));"
+        " return util::stdx::static_simd_cast<util::native<uint32_t>>(r) & 0xFFFFu; }",
+    ),
+    # v_minmax / v_maxmin int forms DEFERRED. The scalar body uses
+    # std::fmin/std::fmax on integer operands → double round-trip; for
+    # negative int32 the resulting double, when cast back through
+    # vdst.write_lane (uint32_t), goes through an implementation-defined
+    # double→uint conversion that GCC saturates to UINT_MAX. The vector
+    # path computes the correct integer-domain result, so SIMD vs scalar
+    # diverges on negative-int32 inputs (test demonstrated lane=26 rot=13
+    # case). Pending PR 6470 scalar fix.
 }
 
 
