@@ -324,8 +324,7 @@ hsa_status_t Runtime::AllocateMemory(const MemoryRegion* region, size_t size,
                                      MemoryRegion::AllocateFlags alloc_flags,
                                      void** address, int agent_node_id) {
   size_t size_requested = size;  // region->Allocate(...) may align-up size to granularity
-  uint64_t mmap_offset; //unused
-  hsa_status_t status = region->Allocate(size, alloc_flags, address, /* &mmap_offset,*/ agent_node_id);
+  hsa_status_t status = region->Allocate(size, alloc_flags, address, agent_node_id);
   // Track the allocation result so that it could be freed properly.
   if (status == HSA_STATUS_SUCCESS) {
     std::lock_guard<std::shared_mutex> lock(memory_lock_);
