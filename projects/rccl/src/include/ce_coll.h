@@ -19,7 +19,7 @@
 
 // hipMemcpyBatchAsync is available in ROCm 7.12+ and was backported to 7.0.2.x.
 // ROCM_VERSION encodes as (MAJOR*10000 + MINOR*100 + PATCH), so 7.0.2 → 70002.
-#define CE_BATCH_API_SUPPORTED (ROCM_VERSION >= 71200 || ROCM_VERSION == 70002)
+#define CE_BATCH_API_SUPPORTED 0
 
 struct ncclCeColl {
   uint8_t* baseUCSymReadyPtr;
