@@ -2698,6 +2698,21 @@ inline void execute_v_bcnt_u32_b32_vop3([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_v_bfe_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t, [](auto a, auto b, auto c) {
+    using I = util::native<int32_t>;
+    using U = util::native<uint32_t>;
+    auto off = b & 31u;
+    auto w = c & 31u;
+    auto sa = util::stdx::static_simd_cast<I>(a);
+    auto soff = util::stdx::static_simd_cast<I>(off);
+    auto mask = (U(1u) << w) - 1u;
+    auto smask = util::stdx::static_simd_cast<I>(mask);
+    auto val = (sa >> soff) & smask;
+    auto top = util::stdx::static_simd_cast<I>(U(1u) << ((w - 1u) & 31u));
+    util::stdx::where((val & top) != I(0), val) = val | ~smask;
+    util::stdx::where(simd_mask_as<int32_t>(w == 0u), val) = I(0);
+    return util::stdx::static_simd_cast<U>(val);
+  });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2718,6 +2733,12 @@ inline void execute_v_bfe_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_bfe_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t, [](auto a, auto b, auto c) {
+    auto off = b & 31u;
+    auto w = c & 31u;
+    auto mask = (util::native<uint32_t>(1u) << w) - 1u;
+    return (a >> off) & mask;
+  });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))

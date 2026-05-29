@@ -49,12 +49,14 @@ struct Case {
 
 // Five cdna4-decodable ops; v_xor3_b32 is RDNA-only so omitted here even
 // though the SIMD probe ships for cross-ISA correctness.
-const std::array<Case, 5> kCases = {{
+const std::array<Case, 7> kCases = {{
     {"v_add3_u32_vop3", 511},
     {"v_or3_b32_vop3", 514},
     {"v_lshl_add_u32_vop3", 509},
     {"v_add_lshl_u32_vop3", 510},
     {"v_bfi_b32_vop3", 458},
+    {"v_bfe_u32_vop3", 456},
+    {"v_bfe_i32_vop3", 457},
 }};
 
 // 14 mixed uint32 values; shift-count cases include small (<32) and full-low
