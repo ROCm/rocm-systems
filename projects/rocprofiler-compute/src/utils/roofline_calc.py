@@ -283,7 +283,7 @@ def calc_ceilings(
             continue
 
         if peak_bw <= 0:
-            console_warning(
+            console_debug(
                 f"Invalid peak bandwidth ({peak_bw}) for {cache_level}. Skipping."
             )
             continue
@@ -291,10 +291,8 @@ def calc_ceilings(
         x1 = float(XMIN)
         y1 = float(XMIN) * peak_bw
 
-        x1_matrix = float(XMIN)
-        y1_matrix = 0.0
-        x2_matrix = float(XMIN)
-        y2_matrix = 0.0
+        x1_matrix = x2_matrix = float(XMIN)
+        y1_matrix = y2_matrix = 0.0
 
         if dtype in PEAK_OPS_DATATYPES:
             x2 = peak_ops / peak_bw

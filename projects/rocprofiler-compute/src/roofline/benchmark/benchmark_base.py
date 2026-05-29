@@ -539,8 +539,6 @@ class Bench_base(ABC):
         return self.cache_bw_bench(device, "MALL", 1)
 
     # L0 cache bandwidth benchmark
-    # WARNING: we are currently redirecting L0 to L1 source because GL0 = previous
-    # architecture L1
     def l0_bw_bench(self, device: int) -> PerfMetrics:
         return self.cache_bw_bench(device, "L0", 100)
 
