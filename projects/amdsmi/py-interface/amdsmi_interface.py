@@ -345,6 +345,45 @@ class AmdSmiTemperatureType(IntEnum):
     GPUBOARD_VDDCR_11_HBM_D = (
         amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_11_HBM_D
     )  # VDDCR 1.1V HBM D voltage regulator temperature
+    GPUBOARD_VDDIO_04_HBM_B = (
+        amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_04_HBM_B
+    )  # VDDIO 0.4V HBM B voltage regulator temperature
+    GPUBOARD_VDDIO_04_HBM_D = (
+        amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_04_HBM_D
+    )  # VDDIO 0.4V HBM D voltage regulator temperature
+    GPUBOARD_VDDCR_075_HBM_B = (
+        amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_075_HBM_B
+    )  # VDDCR 0.75V HBM B voltage regulator temperature
+    GPUBOARD_VDDCR_075_HBM_D = (
+        amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_075_HBM_D
+    )  # VDDCR 0.75V HBM D voltage regulator temperature
+    GPUBOARD_VDDIO_11_GTA_A = (
+        amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_11_GTA_A
+    )  # VDDIO 1.1V GTA A voltage regulator temperature
+    GPUBOARD_VDDIO_11_GTA_C = (
+        amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_11_GTA_C
+    )  # VDDIO 1.1V GTA C voltage regulator temperature
+    GPUBOARD_VDDAN_075_GTA_A = (
+        amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDAN_075_GTA_A
+    )  # VDDAN 0.75V GTA A voltage regulator temperature
+    GPUBOARD_VDDAN_075_GTA_C = (
+        amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDAN_075_GTA_C
+    )  # VDDAN 0.75V GTA C voltage regulator temperature
+    GPUBOARD_VDDCR_075_UCIE = (
+        amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_075_UCIE
+    )  # VDDCR 0.75V UCIE voltage regulator temperature
+    GPUBOARD_VDDIO_065_UCIEAA = (
+        amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_065_UCIEAA
+    )  # VDDIO 0.65V UCIEAA voltage regulator temperature
+    GPUBOARD_VDDIO_065_UCIEAM_A = (
+        amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_065_UCIEAM_A
+    )  # VDDIO 0.65V UCIEAM A voltage regulator temperature
+    GPUBOARD_VDDIO_065_UCIEAM_C = (
+        amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_065_UCIEAM_C
+    )  # VDDIO 0.65V UCIEAM C voltage regulator temperature
+    GPUBOARD_VDDAN_075 = (
+        amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDAN_075
+    )  # VDDAN 0.75V voltage regulator temperature
     GPUBOARD_VDD_USR = (
         amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDD_USR
     )  # VDD USR voltage regulator temperature
@@ -6944,6 +6983,130 @@ def amdsmi_stop_gpu_event_notification(processor_handle: processor_handle_t):
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
     _check_res(amdsmi_wrapper.amdsmi_stop_gpu_event_notification(processor_handle))
+
+
+_FABRIC_CATEGORY_NAMES = [
+    "UALOE",
+    "SWITCH",
+    "CRYPTO",
+    "PFC",
+    "NETPORT",
+    "DERIVED_UALOE",
+    "DERIVED_NETPORT",
+]
+
+_FABRIC_TYPE_NAMES = {0: "UALOE", 1: "UALLINK", 2: "UNKNOWN"}
+_FABRIC_ADDR_MODE_NAMES = {0: "SOURCE_ALIASING", 1: "SOURCE_IDENTIFICATION", 2: "UNKNOWN"}
+_FABRIC_ACCEL_STATE_NAMES = {
+    0: "UNCONFIGURED",
+    1: "CONFIGURED",
+    2: "READY",
+    3: "ACTIVE",
+    4: "ERROR",
+    5: "UNKNOWN",
+}
+
+
+def amdsmi_get_fabric_telemetry(
+    processor_handle: processor_handle_t, category_mask: int
+) -> List[Dict[str, Any]]:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+    if not isinstance(category_mask, int):
+        raise AmdSmiParameterException(category_mask, int)
+
+    tel_ptr = ctypes.POINTER(amdsmi_wrapper.amdsmi_fabric_telemetry_t)()
+    _check_res(
+        amdsmi_wrapper.amdsmi_alloc_fabric_telemetry(
+            processor_handle, ctypes.c_uint32(category_mask), ctypes.byref(tel_ptr)
+        )
+    )
+
+    try:
+        _check_res(amdsmi_wrapper.amdsmi_get_fabric_telemetry_data(processor_handle, tel_ptr))
+
+        results = []
+        tel = tel_ptr.contents
+        for cat_idx in range(amdsmi_wrapper.AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX):
+            dataset_ptr = tel.datasets[cat_idx]
+            if not dataset_ptr:
+                continue
+            dataset = dataset_ptr.contents
+            instances = []
+            for inst_idx in range(dataset.instance_count):
+                inst = dataset.instances[inst_idx]
+                items = []
+                for item_idx in range(inst.item_count):
+                    item = inst.items[item_idx]
+                    telem_id = item.id
+                    name_bytes = amdsmi_wrapper.amdsmi_fabric_telem_id_to_string(telem_id)
+                    items.append(
+                        {
+                            "id": telem_id,
+                            "name": name_bytes.decode("utf-8") if name_bytes else "UNKNOWN",
+                            "value": item.value,
+                        }
+                    )
+                instances.append(
+                    {
+                        "name": inst.name.text.decode("utf-8").rstrip("\x00"),
+                        "logical_idx": inst.logical_idx,
+                        "items": items,
+                    }
+                )
+            results.append(
+                {
+                    "category": _FABRIC_CATEGORY_NAMES[cat_idx],
+                    "generation_count": dataset.generation_count,
+                    "timestamp": {
+                        "tv_sec": dataset.timestamp.tv_sec,
+                        "tv_nsec": dataset.timestamp.tv_nsec,
+                    },
+                    "instances": instances,
+                }
+            )
+    finally:
+        amdsmi_wrapper.amdsmi_free_fabric_telemetry(processor_handle, tel_ptr)
+
+    return results
+
+
+def amdsmi_get_gpu_fabric_info(processor_handle: processor_handle_t) -> Dict[str, Any]:
+    """
+    Return fabric info from UALoE sysfs (partial reads).
+
+    The C API may return AMDSMI_STATUS_NO_DATA when no sysfs files produced usable
+    lines; the struct is still populated with BDF and sentinel/default fabric fields.
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    info = amdsmi_wrapper.amdsmi_fabric_info_t()
+    ret = amdsmi_wrapper.amdsmi_get_gpu_fabric_info(processor_handle, ctypes.byref(info))
+    if ret == amdsmi_wrapper.AMDSMI_STATUS_RETRY:
+        raise AmdSmiRetryException()
+    if ret == amdsmi_wrapper.AMDSMI_STATUS_TIMEOUT:
+        raise AmdSmiTimeoutException()
+    if ret not in (amdsmi_wrapper.AMDSMI_STATUS_SUCCESS, amdsmi_wrapper.AMDSMI_STATUS_NO_DATA):
+        raise AmdSmiLibraryException(ret)
+
+    v1 = info.fabric_info.fabric_version.v1
+    return {
+        "bdf": _format_bdf(info.bdf),
+        "version": info.fabric_info.version,
+        "accelerator_id": v1.accelerator_id,
+        "fabric_type": _FABRIC_TYPE_NAMES.get(v1.fabric_type, "UNKNOWN"),
+        "bandwidth": v1.bandwidth,
+        "latency": v1.latency,
+        "ppod_id": list(v1.ppod_id),
+        "ppod_size": v1.ppod_size,
+        "vpod_id": v1.vpod_id,
+        "vpod_size": v1.vpod_size,
+        "local_accelerators": list(v1.local_accelerators),
+        "vpod_active_accelerators": list(v1.vpod_active_accelerators),
+        "addr_mode": _FABRIC_ADDR_MODE_NAMES.get(v1.addr_mode, "UNKNOWN"),
+        "accel_state": _FABRIC_ACCEL_STATE_NAMES.get(v1.accel_state, "UNKNOWN"),
+    }
 
 
 def amdsmi_get_gpu_busy_percent(processor_handle: processor_handle_t):

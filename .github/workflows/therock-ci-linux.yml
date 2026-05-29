@@ -41,7 +41,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: users/dravindr/tr_hiptests # WIP: revert to pinned SHA before merge
+          ref: 94675052fd427fd2cc6ec9180079b3a0dc7d26b2 # 2025-05-27 commit
 
       - name: Install python deps
         run: |
