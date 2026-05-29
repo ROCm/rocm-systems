@@ -1,13 +1,18 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+# Multi-Arch CI Host ASAN for rocm-systems
+#
+# This workflow runs host Address Sanitizer (ASAN) builds and tests
+# using TheRock's multi-arch CI pipeline.
+
 name: TheRock Multi-Arch CI ASAN
 
 on:
   push:
     branches:
       - develop
-      - users/geomin12/host-asan # TODO: remove after testing
+      - users/geomin12/host-asan
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:
@@ -50,16 +55,44 @@ jobs:
   linux_build_and_test:
     name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
     needs: setup
-    if: ${{ needs.setup.outputs.linux_build_config != '' && needs.setup.outputs.enable_build_jobs == 'true' }}
+    if: >-
+      ${{
+        needs.setup.outputs.linux_build_config != '' &&
+        needs.setup.outputs.enable_build_jobs == 'true'
+      }}
     uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@685f8c3b89006309b34a7c16de17e841400f0d76 # 2026-05-29 commit
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
-      rocm_deb_package_version: ${{ needs.setup.outputs.rocm_deb_package_version }}
-      rocm_rpm_package_version: ${{ needs.setup.outputs.rocm_rpm_package_version }}
       test_type: ${{ needs.setup.outputs.test_type }}
+      external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
+      repository: ROCm/TheRock
+      ref: "685f8c3b89006309b34a7c16de17e841400f0d76" # 2026-05-29 commit
     permissions:
       contents: read
       id-token: write
+
+  multi_arch_ci_summary:
+    name: Multi-Arch CI Summary
+    if: always()
+    needs:
+      - setup
+      - linux_build_and_test
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout TheRock repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: "ROCm/TheRock"
+          ref: "685f8c3b89006309b34a7c16de17e841400f0d76" # 2026-05-29 commit
+          sparse-checkout: build_tools/github_actions
+          sparse-checkout-cone-mode: true
+
+      - name: Evaluate workflow results
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python build_tools/github_actions/workflow_summary.py \
+            --needs-json '${{ toJSON(needs) }}'
