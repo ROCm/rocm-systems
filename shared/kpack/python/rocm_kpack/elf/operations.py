@@ -124,7 +124,8 @@ def map_section_to_load(
     # Apply PHDR changes
     phdr_result = manager.apply()
 
-    # Update section header
+    # Update section header: set SHF_ALLOC so the loader maps this section into
+    # the process address space (required for the PT_LOAD segment we just added).
     new_shdr = SectionHeader(
         sh_name=section.header.sh_name,
         sh_type=section.header.sh_type,
@@ -138,6 +139,19 @@ def map_section_to_load(
         sh_entsize=section.header.sh_entsize,
     )
     surgery.update_section_header(section.index, new_shdr)
+
+    # Reorder the section header table so this newly-ALLOC section appears
+    # before all non-allocatable sections (e.g. .debug_*).
+    #
+    # Tools like ``dwz`` (DWARF debuginfo compressor, invoked by ``dh_dwz``
+    # in Debian packaging) enforce the ELF convention that SHF_ALLOC sections
+    # must precede non-ALLOC sections in the section header table.  Because
+    # add_section() appended .rocm_kpack_ref at the end of the table and only
+    # now is SHF_ALLOC being set, the ordering invariant is violated until we
+    # fix it here.  This call rewrites the SHT in place and updates all
+    # cross-references (sh_link, sh_info, e_shstrndx, st_shndx) without
+    # touching file content positions.
+    surgery.reorder_section_headers_alloc_first()
 
     return MapSectionResult(
         success=True,
