@@ -3749,19 +3749,14 @@ hsa_status_t Runtime::VMemoryAddressFree(void* va, size_t size) {
 }
 
 Runtime::MemoryHandle* Runtime::FindMemoryHandle(Runtime::MemoryHandle* handle) {
-  auto it = std::find_if(memory_handles.begin(), memory_handles.end(),
-                         [handle](const std::unique_ptr<MemoryHandle>& ptr) {
-                           return ptr.get() == handle;
-                         });
-  return it == memory_handles.end() ? nullptr : it->get();
+  if (handle == nullptr) return nullptr;
+  auto it = memory_handles.find(MemoryHandle::Convert(handle));
+  return it == memory_handles.end() ? nullptr : it->second.get();
 }
 
 void Runtime::ReleaseMemoryHandle(Runtime::MemoryHandle* handle) {
-  auto it = std::find_if(memory_handles.begin(), memory_handles.end(),
-                         [handle](const std::unique_ptr<MemoryHandle>& ptr) {
-                           return ptr.get() == handle;
-                         });
-  if (it != memory_handles.end()) memory_handles.erase(it);
+  if (handle == nullptr) return;
+  memory_handles.erase(MemoryHandle::Convert(handle));
 }
 
 hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t size,
@@ -3790,9 +3785,8 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
     }
 
     auto memoryHandle = std::make_unique<MemoryHandle>(region, size, flags_unused, shareable_handle, dmabuf_fd, mmap_offset, alloc_flags);
-    MemoryHandle* memoryHandlePtr = memoryHandle.get();
-    memory_handles.insert(std::move(memoryHandle));
-    *memoryOnlyHandle = MemoryHandle::Convert(memoryHandlePtr);
+    memory_handles.emplace(*memoryOnlyHandle, std::move(memoryHandle));
+    *memoryOnlyHandle = MemoryHandle::Convert(memoryHandle.get());
   }
   return status;
 }
@@ -4290,9 +4284,8 @@ hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
                                                    hsa_amd_vmem_alloc_handle_t* memoryOnlyHandle) {
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   auto memoryHandle = std::make_unique<MemoryHandle>(dmabuf_fd);
-  MemoryHandle* memoryHandlePtr = memoryHandle.get();
-  memory_handles.insert(std::move(memoryHandle));
-  *memoryOnlyHandle = MemoryHandle::Convert(memoryHandlePtr);
+  memory_handles.emplace(*memoryOnlyHandle, std::move(memoryHandle));
+  *memoryOnlyHandle = MemoryHandle::Convert(memoryHandle.get());
   return HSA_STATUS_SUCCESS;
 }
 
@@ -4321,9 +4314,8 @@ hsa_status_t Runtime::VMemoryImportFabricHandle(hsa_fabric_handle_t fabric_handl
                                                hsa_amd_vmem_alloc_handle_t* memoryOnlyHandle) {
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   auto memoryHandle = std::make_unique<MemoryHandle>(fabric_handle);
-  MemoryHandle* memoryHandlePtr = memoryHandle.get();
-  memory_handles.insert(std::move(memoryHandle));
-  *memoryOnlyHandle = MemoryHandle::Convert(memoryHandlePtr);
+  memory_handles.emplace(*memoryOnlyHandle, std::move(memoryHandle));
+  *memoryOnlyHandle = MemoryHandle::Convert(memoryHandle.get());
   return HSA_STATUS_SUCCESS;
 }
 
