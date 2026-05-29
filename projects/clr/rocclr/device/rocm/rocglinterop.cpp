@@ -71,43 +71,58 @@ static void LegacyInitEGL() {
 bool Init(MESA_INTEROP_KIND Kind) {
   static std::once_flag gGlFuncInit;
   std::call_once(gGlFuncInit, [&]() {
-    auto glx_procaddr_fn =
-        reinterpret_cast<PFNGLXGETPROCADDRESSPROC>(dlsym(RTLD_DEFAULT, "glXGetProcAddress"));
-    auto egl_procaddr_fn =
-        reinterpret_cast<PFNEGLGETPROCADDRESSPROC>(dlsym(RTLD_DEFAULT, "eglGetProcAddress"));
+    // RTLD_NOLOAD returns a handle to lib.so if it is already loaded by any
+    // means (including RTLD_LOCAL linkage), without loading it if absent.
+    void* glx_handle = dlopen("libGLX.so", RTLD_NOW | RTLD_NOLOAD);
+    void* egl_handle = dlopen("libEGL.so", RTLD_NOW | RTLD_NOLOAD);
 
-    if (glx_procaddr_fn) {
-      GlxInfo = reinterpret_cast<PFNMESAGLINTEROPGLXQUERYDEVICEINFOPROC*>(
-          glx_procaddr_fn(reinterpret_cast<const GLubyte*>("glXGLInteropQueryDeviceInfoMESA")));
-      GlxExport = reinterpret_cast<PFNMESAGLINTEROPGLXEXPORTOBJECTPROC*>(
-          glx_procaddr_fn(reinterpret_cast<const GLubyte*>("glXGLInteropExportObjectMESA")));
+    if (glx_handle || egl_handle) {
+      auto glx_procaddr_fn =
+          reinterpret_cast<PFNGLXGETPROCADDRESSPROC>(dlsym(RTLD_DEFAULT, "glXGetProcAddress"));
+      auto egl_procaddr_fn =
+          reinterpret_cast<PFNEGLGETPROCADDRESSPROC>(dlsym(RTLD_DEFAULT, "eglGetProcAddress"));
+
+      if (glx_procaddr_fn) {
+        GlxInfo = reinterpret_cast<PFNMESAGLINTEROPGLXQUERYDEVICEINFOPROC*>(
+            glx_procaddr_fn(reinterpret_cast<const GLubyte*>("glXGLInteropQueryDeviceInfoMESA")));
+        GlxExport = reinterpret_cast<PFNMESAGLINTEROPGLXEXPORTOBJECTPROC*>(
+            glx_procaddr_fn(reinterpret_cast<const GLubyte*>("glXGLInteropExportObjectMESA")));
+      }
+
+      if (egl_procaddr_fn) {
+        EglInfo = reinterpret_cast<PFNMESAGLINTEROPEGLQUERYDEVICEINFOPROC*>(
+            egl_procaddr_fn("eglGLInteropQueryDeviceInfoMESA"));
+        EglExport = reinterpret_cast<PFNMESAGLINTEROPEGLEXPORTOBJECTPROC*>(
+            egl_procaddr_fn("eglGLInteropExportObjectMESA"));
+      }
+
+      if (!GlxInfo || !GlxExport) {
+        LegacyInitGLX();
+      }
+
+      if (!EglInfo || !EglExport) {
+        LegacyInitEGL();
+      }
+
+      uint32_t ret = MESA_INTEROP_NONE;
+      if (GlxInfo && GlxExport) {
+        ret |= MESA_INTEROP_GLX;
+      }
+
+      if (EglInfo && EglExport) {
+        ret |= MESA_INTEROP_EGL;
+      }
+
+      loadedGLAPITypes = MESA_INTEROP_KIND(ret);
+
+      // dlopen incremented refcount even with RTLD_NOLOAD
+      if (glx_handle) {
+        dlclose(glx_handle);
+      }
+      if (egl_handle) {
+        dlclose(egl_handle);
+      }
     }
-
-    if (egl_procaddr_fn) {
-      EglInfo = reinterpret_cast<PFNMESAGLINTEROPEGLQUERYDEVICEINFOPROC*>(
-          egl_procaddr_fn("eglGLInteropQueryDeviceInfoMESA"));
-      EglExport = reinterpret_cast<PFNMESAGLINTEROPEGLEXPORTOBJECTPROC*>(
-          egl_procaddr_fn("eglGLInteropExportObjectMESA"));
-    }
-
-    if (!GlxInfo || !GlxExport) {
-      LegacyInitGLX();
-    }
-
-    if (!EglInfo || !EglExport) {
-      LegacyInitEGL();
-    }
-
-    uint32_t ret = MESA_INTEROP_NONE;
-    if (GlxInfo && GlxExport) {
-      ret |= MESA_INTEROP_GLX;
-    }
-
-    if (EglInfo && EglExport) {
-      ret |= MESA_INTEROP_EGL;
-    }
-
-    loadedGLAPITypes = MESA_INTEROP_KIND(ret);
   });
 
   return ((loadedGLAPITypes & Kind) == Kind);
@@ -181,22 +196,17 @@ bool glAssociate(Device* device, uint flags, void* gfxContext, void* glDevice) {
 
   mesa_glinterop_device_info info = {.version = MESA_GLINTEROP_DEVICE_INFO_VERSION};
 
-  if (!Init(kind) || !GetInfo(info, kind, display, context))
-    return false;
+  if (!Init(kind) || !GetInfo(info, kind, display, context)) return false;
 
   const auto& pcie = device->info().deviceTopology_.pcie;
   const auto& dev_info = device->info();
-  return pcie.bus == info.pci_bus &&
-         pcie.device == info.pci_device &&
-         pcie.function == info.pci_function &&
-         dev_info.vendorId_ == info.vendor_id &&
+  return pcie.bus == info.pci_bus && pcie.device == info.pci_device &&
+         pcie.function == info.pci_function && dev_info.vendorId_ == info.vendor_id &&
          dev_info.pcieDeviceId_ == info.device_id;
 }
 
 // ================================================================================================
-bool glDissociate(Device*, void*, void*) {
-  return true;
-}
+bool glDissociate(Device*, void*, void*) { return true; }
 
 }  // namespace GlInterop
 }  // namespace amd::roc
