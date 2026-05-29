@@ -507,6 +507,9 @@ bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation 
     // by the ordinary VGPR count. KernelDescriptorTranslator decides whether the
     // base must move up to make room for semantic-lowering scratch; the patcher
     // only materializes that already-translated target base.
+    assert(translation.target_accvgpr_base >= 4 &&
+           "ACCUM_OFFSET base must encode at least 4 VGPRs");
+    assert(translation.target_accvgpr_base % 4 == 0 && "ACCUM_OFFSET base must be 4-VGPR aligned");
     AMDHSA_BITS_SET(desc->compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
                     (translation.target_accvgpr_base / 4 - 1));
   }

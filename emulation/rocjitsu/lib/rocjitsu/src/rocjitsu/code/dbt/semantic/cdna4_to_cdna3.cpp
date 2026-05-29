@@ -202,7 +202,9 @@ void emit_s_mov_b64(std::vector<uint32_t> &words, uint8_t sdst, uint16_t ssrc0) 
   words.push_back(build_s_mov_b64(sdst, ssrc0));
 }
 
-[[maybe_unused]] void emit_cdna3_exec_mask(std::vector<uint32_t> &words, uint64_t mask) {
+void emit_cdna3_exec_mask(std::vector<uint32_t> &words, uint64_t mask) {
+  // TODO: Optimize the common all-lanes case by emitting one s_mov_b64 -1
+  // instead of two literal s_mov_b32 instructions.
   emit_s_mov_b32_lit(words, kExecLo, static_cast<uint32_t>(mask));
   emit_s_mov_b32_lit(words, kExecLo + 1, static_cast<uint32_t>(mask >> 32));
 }
@@ -860,6 +862,9 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
   emit_cdna3_vop3(words, kCdna3OpOrB32, halfword_selector, vgpr_src(halfword_selector),
                   vgpr_src(tmp));
 
+  // TODO: Gather both destination halfword pairs in one pass to reduce the
+  // number of dependent ds_bpermute/VALU operations in this correctness-first
+  // lowering.
   emit_cdna3_b16_transpose_halfword(words, halfword_lo, gather_tmp, lane_base, raw_lo, raw_hi,
                                     halfword_selector);
   emit_cdna3_vop3(words, kCdna3OpAddU32, tmp, scalar_positive_inline_u32(16), vgpr_src(lane_base));
@@ -913,6 +918,12 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
          "Treat the LDS write as the architectural destination; do not assume raw VDATA is "
          "a real VGPR result when lds=1."});
   }
+  if (num_dwords == 2) {
+    return failed_existing_expand_rule(
+        inst, "CDNA4 LDS-destination MUBUF docs do not list buffer_load_dwordx2",
+        {"CDNA4 LDS-destination MUBUF documentation does not list buffer_load_dwordx2.",
+         "Add an ISA-backed test before enabling a synthetic dwordx2 LDS lowering."});
+  }
 
   const uint8_t data_count = num_dwords;
   // LDS-destination MUBUF loads use the vector address operands for the global
@@ -952,12 +963,6 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
   // uses inside buffer descriptors, and clobbering one of those descriptors for
   // a temporary save can redirect later global loads.
   const uint8_t saved_exec = static_cast<uint8_t>((context.num_sgprs + 1u) & ~1u);
-  if (num_dwords == 2) {
-    return failed_existing_expand_rule(
-        inst, "CDNA4 LDS-destination MUBUF docs do not list buffer_load_dwordx2",
-        {"CDNA4 LDS-destination MUBUF documentation does not list buffer_load_dwordx2.",
-         "Add an ISA-backed test before enabling a synthetic dwordx2 LDS lowering."});
-  }
 
   const uint8_t load_op = static_cast<uint8_t>(19 + num_dwords);
   uint8_t ds_op = kCdna3DsOpWriteB32;
