@@ -261,6 +261,33 @@ __host__ void *rocshmem_malloc(size_t size);
 __host__ void *rocshmem_align(size_t alignment, size_t size);
 
 /**
+ * @brief Allocate memory for an array of \p count elements of \p size bytes
+ * each from the symmetric heap and zero-initialize the allocation. This is a
+ * collective operation and must be called by all PEs with identical \p count
+ * and \p size arguments.
+ *
+ * Mirrors OpenSHMEM ``shmem_calloc`` semantics: the returned buffer holds
+ * ``count * size`` bytes, every byte set to ``0``. The pointer satisfies the
+ * same default symmetric-heap alignment as ::rocshmem_malloc.
+ *
+ * Returns ``NULL`` (and emits a warning) when:
+ *   - \p count is \c 0,
+ *   - \p size is \c 0,
+ *   - ``count * size`` would overflow ``size_t``, or
+ *   - the underlying allocation cannot be satisfied.
+ *
+ * The collective barrier is still entered on the NULL-return paths so that
+ * other PEs do not deadlock.
+ *
+ * @param[in] count Number of elements to allocate.
+ * @param[in] size  Size of each element in bytes.
+ *
+ * @return A pointer to the zero-initialized allocation on the symmetric
+ *         heap, or \c NULL on the failure conditions described above.
+ */
+__host__ void *rocshmem_calloc(size_t count, size_t size);
+
+/**
  * @brief Free a memory allocation from the symmetric heap.
  * This is a collective operation and must be called by all PEs.
  *

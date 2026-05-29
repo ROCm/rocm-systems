@@ -59,6 +59,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <cstdint>
 #include <functional>
 #include <random>
 #include <cassert>
@@ -544,6 +545,49 @@ static void setFilesLimit() {
    * rocshmem_align is collective: every PE must reach this barrier. We do
    * not early-return on invalid alignment, otherwise the failing PE would
    * leave the others blocked here forever.
+   */
+  rocshmem_barrier_all();
+
+  return ptr;
+}
+
+[[maybe_unused]] __host__ void *rocshmem_calloc(size_t count, size_t size) {
+  VERIFY_BACKEND();
+
+  /*
+   * OpenSHMEM shmem_calloc returns NULL when either argument is 0. We also
+   * have to guard the count * size multiplication against size_t overflow,
+   * otherwise we would silently allocate a much smaller (wrapped) buffer.
+   *
+   * The overflow check `count > SIZE_MAX / size` is only safe once we know
+   * size != 0, so it sits behind the zero guards.
+   */
+  bool valid_args = (count != 0) && (size != 0) &&
+                    (count <= SIZE_MAX / size);
+
+  void *ptr{nullptr};
+  if (valid_args) {
+    size_t bytes = count * size;
+    backend->heap.malloc(&ptr, bytes);
+    if (ptr) {
+      /*
+       * The symmetric heap is HIP-allocated and may be backed by VMM or
+       * device-only memory depending on the build configuration (see
+       * memory/default_allocator.hpp). hipMemset works for every supported
+       * backing; a host memset would not.
+       */
+      CHECK_HIP(hipMemset(ptr, 0, bytes));
+    }
+  } else if (count != 0 && size != 0) {
+    LOG_WARN("rocshmem_calloc: count * size overflows size_t "
+             "(count=%zu, size=%zu); returning NULL",
+             count, size);
+  }
+
+  /*
+   * Collective: every PE must reach this barrier, even on the NULL-return
+   * paths, mirroring rocshmem_align. Otherwise a PE that hit invalid
+   * arguments would leave the others blocked here forever.
    */
   rocshmem_barrier_all();
 

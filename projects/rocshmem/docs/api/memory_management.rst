@@ -62,6 +62,34 @@ Notes:
   alignment (128 bytes) yield a 128-byte aligned pointer, identical to
   :ref:`rocshmem_malloc`.
 
+ROCSHMEM_CALLOC
+---------------
+
+.. cpp:function:: __host__ void *rocshmem_calloc(size_t count, size_t size)
+
+  :param count: Number of elements.
+  :param size:  Size of each element in bytes.
+  :returns: A pointer to ``count * size`` bytes of zero-initialized memory
+            on the symmetric heap, or ``NULL`` if ``count`` or ``size`` is
+            ``0``, if ``count * size`` overflows ``size_t``, or if the
+            allocation cannot be satisfied.
+
+**Description:**
+This routine allocates memory for an array of ``count`` elements of ``size``
+bytes each from the symmetric heap and zero-initializes the allocation.
+It is a collective operation and must be called by all PEs with identical
+``count`` and ``size`` arguments.
+
+The returned pointer satisfies the same default symmetric-heap alignment as
+:ref:`rocshmem_malloc`. Mirrors OpenSHMEM ``shmem_calloc`` semantics.
+
+Notes:
+
+* If ``count`` is ``0``, ``size`` is ``0``, or ``count * size`` would
+  overflow ``size_t``, this routine returns ``NULL`` (and emits a warning
+  for the overflow case). The collective barrier is still entered on every
+  return path so other PEs do not deadlock.
+
 ROCSHMEM_FREE
 -------------
 
