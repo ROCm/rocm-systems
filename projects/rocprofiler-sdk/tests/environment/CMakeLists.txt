@@ -15,9 +15,9 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-  # Note: bash is invoked unconditionally (no find_program guard) because these
-  # tests are the regression coverage for the bash-specific getenv() bug —
-  # silently skipping them when bash is absent would hide the bug they exist to catch.
+# Note: bash is invoked unconditionally (no find_program guard) because these tests are
+# the regression coverage for the bash-specific getenv() bug — silently skipping them when
+# bash is absent would hide the bug they exist to catch.
 
 # Test 1: Invalid ROCPROFILER_METRICS_PATH with bash should show warning This verifies
 # that the environment variable is actually read (not ignored).
