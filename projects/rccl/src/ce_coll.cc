@@ -120,7 +120,7 @@ bool ncclCeImplemented(ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_
 
   // CE is supported in ROCm 7.12 and later
   // hipDriverGetVersion() returns 71200000 for ROCm 7.12
-  if (driverVersion >= 71200000) {
+  if (driverVersion >= 70200000) {
     switch (coll) {
     case ncclFuncAllGather:
     case ncclFuncAlltoAll:
@@ -346,7 +346,7 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
   //--------------No graph capture--------------
   else {
     // driverVersion is reported as 71200000 for ROCm 7.12 when using hipDriverGetVersion().
-    if (ROCM_VERSION >= 71200 && driverVersion >= 71200000) {
+    if (ROCM_VERSION >= 71200 && driverVersion >= 70200000) {
 #if ROCM_VERSION >= 71200
     // For ROCm 7.12+, use batch memory copy for better performance
     params->attrs[0] = {};
