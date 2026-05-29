@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-from typing import Any
+from typing import Any, Optional, Union
 
 from dash import html
 from dash_svg import G, Path, Rect, Svg, Text
@@ -2030,8 +2030,8 @@ def get_memchart(
 
 
 def format_value_for_display(
-    value: Any, max_length: int = DEFAULT_MAX_LENGTH
-) -> str:  # noqa: ANN401
+    value: Optional[Union[int, float, str]], max_length: int = DEFAULT_MAX_LENGTH
+) -> str:
     """
     Format a value (int, float, or str) into a concise string suitable for display.
 
