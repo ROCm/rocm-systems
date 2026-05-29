@@ -116,7 +116,7 @@ jobs:
         run: |
           python TheRock/build_tools/artifact_manager.py push \
             --run-id ${{ github.run_id }} \
-            --build-dir build \
+            --build-dir TheRock/build \
             --stage all
 
       - name: Post Build Upload
