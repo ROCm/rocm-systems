@@ -1386,6 +1386,15 @@ graph:
     # SWDEV-434878: Below tests failed in stress test on 24/11/23
     disabled: [amd_windows, amd_wsl]
     tags: [exec]
+  Unit_hipGraphCrossDeviceLaunch_CrossStreamDependencyOrdering:
+    <<: *level_2
+    tags: [exec, multigpu]
+  Unit_hipGraphCrossDeviceLaunch_ExplicitNodes:
+    <<: *level_2
+    tags: [exec, multigpu]
+  Unit_hipGraphCrossDeviceLaunch_LaunchStreamStartOrdering:
+    <<: *level_2
+    tags: [exec, multigpu]
   Unit_hipGraphKernelNodeCopyAttributes_Functional:
     <<: *level_2
     tags: [node]

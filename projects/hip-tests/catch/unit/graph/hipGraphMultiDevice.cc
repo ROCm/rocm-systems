@@ -106,7 +106,7 @@ HIP_TEST_CASE(Unit_hipGraphMultiDevice) {
   HIP_CHECK(hipStreamSynchronize(streamdev1));
 
   HIP_CHECK(hipSetDevice(1));
-  HIP_CHECK(hipMemcpy(outbuf_h, buf_d2, sizeof(int) * buffer_size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(outbuf_h, buf_d2, sizeof(int) * buffer_size, hipMemcpyDeviceToHost));
   check_output(ibuf_h, outbuf_h, buffer_size);
 
   HIP_CHECK(hipGraphExecDestroy(graph_exec));

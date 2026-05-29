@@ -59,6 +59,97 @@ amd::Monitor UserObject::UserObjectLock_{};
 // Guards mem map add/remove against work thread
 amd::Monitor GraphNode::WorkerThreadLock_{};
 
+static hip::Stream* FindExecStreamForNode(
+    Node node, hip::Stream* launch_stream,
+    const std::unordered_map<int, std::vector<hip::Stream*>>& parallel_streams) {
+  if (node->GetDeviceId() == launch_stream->DeviceId()) {
+    return launch_stream;
+  }
+  auto streams = parallel_streams.find(node->GetDeviceId());
+  if (streams == parallel_streams.end() || streams->second.empty()) {
+    return nullptr;
+  }
+  return streams->second.front();
+}
+
+static hipError_t SyncRootNodesWithLaunchStream(
+    const std::vector<Node>& topo_order, hip::Stream* launch_stream,
+    const std::unordered_map<int, std::vector<hip::Stream*>>& parallel_streams) {
+  constexpr bool kRetainCommand = true;
+  amd::Command* launch_last = launch_stream->getLastQueuedCommand(kRetainCommand);
+  if (launch_last == nullptr) {
+    return hipSuccess;
+  }
+
+  std::unordered_set<hip::Stream*> fenced_streams;
+  amd::Command::EventWaitList wait_list;
+  wait_list.push_back(launch_last);
+
+  for (auto* node : topo_order) {
+    if (!node->GetDependencies().empty()) {
+      continue;
+    }
+    hip::Stream* stream = FindExecStreamForNode(node, launch_stream, parallel_streams);
+    if (stream == nullptr) {
+      launch_last->release();
+      LogPrintfError("No internal graph stream for device id:%d", node->GetDeviceId());
+      return hipErrorInvalidDevice;
+    }
+    if (stream == launch_stream) {
+      continue;
+    }
+    if (fenced_streams.insert(stream).second) {
+      auto* start_marker = new amd::Marker(*stream, true, wait_list);
+      start_marker->enqueue();
+      start_marker->release();
+    }
+  }
+
+  launch_last->release();
+  return hipSuccess;
+}
+
+static hipError_t EnqueueNodeOnExecStream(
+    Node node, hip::Stream* launch_stream,
+    const std::unordered_map<int, std::vector<hip::Stream*>>& parallel_streams) {
+  hip::Stream* stream = FindExecStreamForNode(node, launch_stream, parallel_streams);
+  if (stream == nullptr) {
+    LogPrintfError("No internal graph stream for device id:%d", node->GetDeviceId());
+    return hipErrorInvalidDevice;
+  }
+
+  amd::Command::EventWaitList wait_list;
+  for (auto* dep : node->GetDependencies()) {
+    for (auto* command : dep->GetCommands()) {
+      wait_list.push_back(command);
+    }
+  }
+
+  node->SetStream(stream);
+  hipError_t status = node->CreateCommand(node->GetQueue());
+  if (status != hipSuccess) {
+    for (auto* command : wait_list) {
+      command->release();
+    }
+    return status;
+  }
+
+  if (!wait_list.empty()) {
+    node->UpdateEventWaitLists(wait_list);
+  }
+  node->EnqueueCommands(stream);
+  for (auto* command : wait_list) {
+    command->release();
+  }
+
+  for (size_t i = 0; i < node->GetEdges().size(); ++i) {
+    for (auto* command : node->GetCommands()) {
+      command->retain();
+    }
+  }
+  return hipSuccess;
+}
+
 hipError_t GraphMemcpyNode1D::ValidateParams(void* dst, const void* src, size_t count,
                                              hipMemcpyKind kind) {
   if (dst == nullptr || src == nullptr) {
@@ -1018,8 +1109,9 @@ hipError_t GraphExec::CreateStreams(uint32_t num_streams, int devId) {
   // num_streams is already capped by Init() but guard here defensively.
   // For the instantiation device one slot is occupied by the launch stream,
   // so create one fewer extra stream. Other devices use all slots as parallel streams.
+  // Keep the single slot when capped == 1 so cross-device launches still have a stream.
   uint32_t capped = std::min(num_streams, DEBUG_HIP_FORCE_GRAPH_QUEUES);
-  uint32_t max_streams = (devId == instantiateDeviceId_ && capped > 0) ? capped - 1 : capped;
+  uint32_t max_streams = (devId == instantiateDeviceId_ && capped > 1) ? capped - 1 : capped;
   if (max_streams == 0) {
     return hipSuccess;
   }
@@ -2513,11 +2605,50 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
     // already imply all parallel work is done). Our reference is released after
     // the callback is registered below; the queue keeps it alive until done.
     completion_cmd = last_cmd;
-  } else if (max_streams_ == 1 && instantiateDeviceId_ != launch_stream->DeviceId()) {
-    for (int i = 0; i < topoOrder_.size(); i++) {
-      topoOrder_[i]->SetStream(launch_stream);
-      status = topoOrder_[i]->CreateCommand(topoOrder_[i]->GetQueue());
-      topoOrder_[i]->EnqueueCommands(launch_stream);
+  } else if (instantiateDeviceId_ != launch_stream->DeviceId()) {
+    // Cross-device launch: graph was instantiated on one device but launched from another.
+    // Route each node to the stream that matches the device it was captured on so that
+    // helper kernels (fillBuffer, copyBuffer) resolve against the correct device's program
+    // and kernarg pool. Covers both max_streams==1 and max_streams>1 cases - the latter
+    // would otherwise fall into RunNodes which asserts on stream_id_==-1 for explicitly
+    // added nodes (hipGraphAdd* does not initialize stream_id_).
+    ClPrint(amd::LOG_DEBUG, amd::LOG_CODE,
+            "[hipGraph] Cross-device launch: instantiateDeviceId_=%d launch_stream->DeviceId()=%d"
+            " launch_stream=%p",
+            instantiateDeviceId_, launch_stream->DeviceId(), launch_stream);
+    status = SyncRootNodesWithLaunchStream(topoOrder_, launch_stream, parallel_streams_);
+    if (status != hipSuccess) {
+      this->release();
+      return status;
+    }
+    for (auto* node : topoOrder_) {
+      status = EnqueueNodeOnExecStream(node, launch_stream, parallel_streams_);
+      if (status != hipSuccess) {
+        this->release();
+        return status;
+      }
+    }
+    // Completion fence: make launch_stream wait for all non-launch streams so that
+    // hipStreamSynchronize(launch_stream) and the ref-count callback marker both
+    // observe full graph completion. Pattern mirrors Graph::RunNodes leaf-collection.
+    amd::Command::EventWaitList end_wl;
+    for (auto& [dev, streams] : parallel_streams_) {
+      for (auto* ps : streams) {
+        if (ps == launch_stream) continue;
+        if (amd::Command* last = ps->getLastQueuedCommand(true)) {
+          end_wl.push_back(last);
+        }
+      }
+    }
+    if (!end_wl.empty()) {
+      auto* fence = new amd::Marker(*launch_stream, kMarkerDisableFlush, end_wl);
+      fence->enqueue();
+      fence->release();
+      for (auto* cmd : end_wl) cmd->release();
+      ClPrint(amd::LOG_DEBUG, amd::LOG_CODE,
+              "[hipGraph] Cross-device launch: completion fence enqueued on launch_stream=%p"
+              " waiting on %zu cross-stream command(s)",
+              launch_stream, end_wl.size());
     }
   } else {
     // Execute all nodes in the graph
