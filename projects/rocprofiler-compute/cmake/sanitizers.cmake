@@ -1,82 +1,70 @@
 include_guard(GLOBAL)
 
-# ENABLE_SANITIZER drives the native tool library and ctest invocations.
-# Accepted values: OFF, ASAN, HOST_ASAN, TSAN.
-#   ASAN      - host + device address sanitizer (xnack+ GPU_TARGETS on gfx942/gfx950)
-#   HOST_ASAN - host-only address sanitizer; no GPU_TARGETS rewrite
-#   TSAN      - thread sanitizer; xnack+ GPU_TARGETS on gfx942/gfx950
-set(ENABLE_SANITIZER
-    "OFF"
-    CACHE STRING
-    "Sanitizer for the native tool library: OFF, ASAN, HOST_ASAN, or TSAN"
-)
-set_property(
-    CACHE ENABLE_SANITIZER
-    PROPERTY STRINGS OFF ASAN HOST_ASAN TSAN
-)
-
-# TheRock owns the sanitizer choice when it drives the build. Promote
-# THEROCK_SANITIZER over ENABLE_SANITIZER so a single variable is the source of
-# truth in the rest of this build.
-set(_san_valid
-    ""
-    "OFF"
-    "ASAN"
-    "HOST_ASAN"
-    "TSAN"
-)
-
-# Validate THEROCK_SANITIZER eagerly so the FATAL_ERROR names the real source
-# of a bad value, rather than blaming ENABLE_SANITIZER after promotion.
-if(DEFINED THEROCK_SANITIZER AND NOT THEROCK_SANITIZER IN_LIST _san_valid)
-    message(
-        FATAL_ERROR
-        "THEROCK_SANITIZER='${THEROCK_SANITIZER}' is not one of: OFF, ASAN, HOST_ASAN, TSAN"
+# Resolve the sanitizer selection in place (normalize, validate, write back via
+# PARENT_SCOPE), mirroring the PYTHON_TEST_COMMAND pattern. THEROCK_SANITIZER is
+# promoted over the passed variable so TheRock-driven builds have a single source
+# of truth.
+function(resolve_sanitizer out_var)
+    set(_san_valid
+        ""
+        "OFF"
+        "ASAN"
+        "HOST_ASAN"
+        "TSAN"
     )
-endif()
 
-set(_san_provenance "ENABLE_SANITIZER")
-if(DEFINED THEROCK_SANITIZER AND NOT THEROCK_SANITIZER STREQUAL "")
-    set(ENABLE_SANITIZER
-        "${THEROCK_SANITIZER}"
-        CACHE STRING
-        "Sanitizer for the native tool library (driven by THEROCK_SANITIZER)"
-        FORCE
-    )
-    set(_san_provenance "THEROCK_SANITIZER")
-endif()
+    # Validated before promotion so the error names THEROCK_SANITIZER, not ${out_var}.
+    if(DEFINED THEROCK_SANITIZER AND NOT THEROCK_SANITIZER IN_LIST _san_valid)
+        message(
+            FATAL_ERROR
+            "THEROCK_SANITIZER='${THEROCK_SANITIZER}' is not one of: OFF, ASAN, HOST_ASAN, TSAN"
+        )
+    endif()
 
-# Normalize OFF -> "" so downstream code only checks for emptiness or the mode.
-if(ENABLE_SANITIZER STREQUAL "OFF")
-    set(ENABLE_SANITIZER "" CACHE STRING "" FORCE)
-endif()
+    set(_san_provenance "${out_var}")
+    if(DEFINED THEROCK_SANITIZER AND NOT THEROCK_SANITIZER STREQUAL "")
+        set(${out_var}
+            "${THEROCK_SANITIZER}"
+            CACHE STRING
+            "Sanitizer for the native tool library (driven by THEROCK_SANITIZER)"
+            FORCE
+        )
+        set(_san_provenance "THEROCK_SANITIZER")
+    endif()
 
-if(NOT ENABLE_SANITIZER IN_LIST _san_valid)
-    message(
-        FATAL_ERROR
-        "ENABLE_SANITIZER='${ENABLE_SANITIZER}' is not one of: OFF, ASAN, HOST_ASAN, TSAN"
-    )
-endif()
+    # Normalize OFF -> "" so downstream code only tests for emptiness.
+    if(${out_var} STREQUAL "OFF")
+        set(${out_var} "" CACHE STRING "" FORCE)
+    endif()
 
-# Nuitka onefile is incompatible with sanitizers (it execs a stripped binary
-# from a temp dir; the sanitizer runtime cannot be located).
-if(ENABLE_SANITIZER AND STANDALONEBINARY)
-    message(
-        FATAL_ERROR
-        "ENABLE_SANITIZER=${ENABLE_SANITIZER} cannot be combined with STANDALONEBINARY=ON"
-    )
-endif()
+    if(NOT ${out_var} IN_LIST _san_valid)
+        message(
+            FATAL_ERROR
+            "${out_var}='${${out_var}}' is not one of: OFF, ASAN, HOST_ASAN, TSAN"
+        )
+    endif()
 
-if(ENABLE_SANITIZER)
-    message(STATUS "Sanitizer: ${ENABLE_SANITIZER} (from ${_san_provenance})")
-else()
-    message(STATUS "Sanitizer: OFF")
-endif()
+    # Nuitka onefile is incompatible with sanitizers (it execs a stripped binary
+    # from a temp dir; the sanitizer runtime cannot be located).
+    if(${out_var} AND STANDALONEBINARY)
+        message(
+            FATAL_ERROR
+            "${out_var}=${${out_var}} cannot be combined with STANDALONEBINARY=ON"
+        )
+    endif()
 
-# Apply -fsanitize=... flags and link options to the current scope. Intended to
-# be called from src/lib/CMakeLists.txt. No-ops when ENABLE_SANITIZER is empty
-# or when TheRock has already injected -fsanitize= via CMAKE_CXX_FLAGS_INIT
-# (avoid double-instrumentation).
+    if(${out_var})
+        message(STATUS "Sanitizer: ${${out_var}} (from ${_san_provenance})")
+    else()
+        message(STATUS "Sanitizer: OFF")
+    endif()
+
+    set(${out_var} "${${out_var}}" PARENT_SCOPE)
+endfunction()
+
+# Apply -fsanitize=... flags and link options to the current scope (call from
+# src/lib/CMakeLists.txt). No-op when off, or when TheRock already injected
+# -fsanitize= via CMAKE_CXX_FLAGS_INIT (avoid double-instrumentation).
 function(enable_sanitizer)
     if(NOT ENABLE_SANITIZER)
         return()
@@ -124,10 +112,8 @@ function(enable_sanitizer_gpu_target_munging)
     message(STATUS "${ENABLE_SANITIZER}: GPU_TARGETS rewritten -> ${GPU_TARGETS}")
 endfunction()
 
-# Build the command-list prefix used in front of every ctest python invocation.
-# Honors THEROCK_SANITIZER_LAUNCHER (set by TheRock) and prepends env wrappers
-# that quiet known false positives when system python loads the instrumented
-# native tool library (Python intentionally leaks on exit -> detect_leaks=0).
+# Wrap the ctest python command with THEROCK_SANITIZER_LAUNCHER plus env that
+# quiets known false positives (python intentionally leaks on exit -> detect_leaks=0).
 function(enable_sanitizer_python_launcher out_var)
     if(NOT DEFINED THEROCK_SANITIZER_LAUNCHER)
         set(THEROCK_SANITIZER_LAUNCHER)
@@ -156,3 +142,14 @@ function(enable_sanitizer_python_launcher out_var)
     endif()
     set(${out_var} "${_launcher}" PARENT_SCOPE)
 endfunction()
+
+set(ENABLE_SANITIZER
+    "OFF"
+    CACHE STRING
+    "Sanitizer for the native tool library: OFF, ASAN, HOST_ASAN, or TSAN"
+)
+set_property(
+    CACHE ENABLE_SANITIZER
+    PROPERTY STRINGS OFF ASAN HOST_ASAN TSAN
+)
+resolve_sanitizer(ENABLE_SANITIZER)
