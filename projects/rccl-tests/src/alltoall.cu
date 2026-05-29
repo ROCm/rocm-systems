@@ -11,6 +11,34 @@
 #include "nccl_device.h"
 #include "rccl_vector_types.h"
 #endif
+#ifdef ENABLE_ROCSHMEM
+#include <rocshmem/rocshmem.hpp>
+#ifdef MPI_SUPPORT
+#include <mpi.h>
+#endif
+// Initialize rocshmem before ncclCommInit so that rocshmem_malloc etc. work.
+// Called via test_pre_init_callback from common.cu's main(), after MPI_Init.
+static void rocshmemPreInit(int rank, int nranks) {
+  // Set the correct GPU before rocshmem_init so that device symbols
+  // (ROCSHMEM_CTX_DEFAULT etc.) are initialized on the right device.
+  int nGpus = 0;
+  hipGetDeviceCount(&nGpus);
+  if (nGpus > 0) hipSetDevice(rank % nGpus);
+
+  rocshmem::rocshmem_uniqueid_t uid;
+  if (rank == 0) rocshmem::rocshmem_get_uniqueid(&uid);
+#ifdef MPI_SUPPORT
+  MPI_Bcast(&uid, sizeof(uid), MPI_BYTE, 0, MPI_COMM_WORLD);
+#endif
+  rocshmem::rocshmem_init_attr_t attr;
+  rocshmem::rocshmem_set_attr_uniqueid_args(rank, nranks, &uid, &attr);
+  rocshmem::rocshmem_init_attr(rocshmem::ROCSHMEM_INIT_WITH_UNIQUEID, &attr);
+}
+// Register the callback at static init time (before main)
+static struct RocshmemCallbackRegistrar {
+  RocshmemCallbackRegistrar() { test_pre_init_callback = rocshmemPreInit; }
+} _rocshmemReg;
+#endif
 
 void AlltoAllGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, size_t eltSize, int nranks) {
   *paramcount = (count/nranks) & -(16/eltSize);

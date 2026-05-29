@@ -33,6 +33,7 @@
     (((x)+(y)-1)/(y))
 
 int test_ncclVersion = 0; // init'd with ncclGetVersion()
+void (*test_pre_init_callback)(int rank, int nranks) = nullptr;
 int32_t gpu_block3;
 size_t cache_bytes = 192 * 1024 * 1024; // Use 192MB
 
@@ -1816,6 +1817,15 @@ int main(int argc, char* argv[], char **envp) {
 #ifdef MPI_SUPPORT
   MPI_Init(&argc, &argv);
 #endif
+
+  if (test_pre_init_callback) {
+    int rank = 0, nranks = 1;
+#ifdef MPI_SUPPORT
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &nranks);
+#endif
+    test_pre_init_callback(rank, nranks);
+  }
 
   const output_file_type_t output_file_type = classifyOutputFile(output_file);
   outputFileInit(output_file_type, output_file, argc, argv, envp);
