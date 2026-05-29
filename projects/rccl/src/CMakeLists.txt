@@ -894,7 +894,7 @@ else()  # Enable hidden visibility for library without tests/code coverage enabl
   target_compile_options(rccl PRIVATE -fvisibility=hidden)
 endif()
 
-if (HAVE_KERNARG_PRELOAD)
+if (HAVE_KERNARG_PRELOAD AND NOT DISABLE_KERNARG_PRELOAD)
   target_compile_options(rccl PRIVATE -mllvm --amdgpu-kernarg-preload-count=16)
 endif()
 
@@ -1101,7 +1101,7 @@ if(NOT BUILD_SHARED_LIBS)
 else()
   message(STATUS "Building shared RCCL library")
 endif()
-if (HAVE_KERNARG_PRELOAD AND NOT ENABLE_DEVICE_LINKER)
+if (HAVE_KERNARG_PRELOAD AND NOT ENABLE_DEVICE_LINKER AND NOT DISABLE_KERNARG_PRELOAD)
   target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker -mllvm=-amdgpu-kernarg-preload-count=16")
 endif()
 
