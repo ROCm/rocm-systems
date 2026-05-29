@@ -447,14 +447,14 @@ hsa_status_t KfdDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
 }
 
 hsa_status_t KfdDriver::ExportDMABuf(const core::Agent& agent,
-                                     core::ShareableHandle* handle, size_t size, int* dmabuf_fd,
+                                     const core::ShareableHandle& handle, size_t size, int* dmabuf_fd,
                                      size_t* offset) {
   const auto &gpu_agent = static_cast<const GpuAgent &>(agent);
 
   HsaHandleExportDesc desc = {};
   desc.device_handle = gpu_agent.libThunkDev();
   desc.type = HSA_EXTERNAL_HANDLE_DMA_BUF;
-  desc.buf_handle = (HsaMemoryObjectHandle)handle->handle; /* amdgpu_bo_handle */
+  desc.buf_handle = (HsaMemoryObjectHandle)handle.handle; /* amdgpu_bo_handle */
   desc.size = size;
 
   HsaHandleExportFlags flags = {};
@@ -592,7 +592,7 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
   assert(imported_size == size);
 
   int target_fd = -1;
-  ret = ExportDMABuf(agent, &targetHandle, size, &target_fd, mmap_offset);
+  ret = ExportDMABuf(agent, targetHandle, size, &target_fd, mmap_offset);
   if (ret != HSA_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
   }

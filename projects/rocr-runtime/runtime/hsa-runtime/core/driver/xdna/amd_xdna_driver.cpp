@@ -816,8 +816,8 @@ hsa_status_t XdnaDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
   return HSA_STATUS_ERROR_INVALID_QUEUE;
 }
 
-hsa_status_t XdnaDriver::ExportDMABuf(const core::Agent& agent, core::ShareableHandle *handle, size_t size, int* dmabuf_fd, size_t* offset) {
-  auto bo_handle = FindBOHandle(handle);
+hsa_status_t XdnaDriver::ExportDMABuf(const core::Agent& agent, const core::ShareableHandle& handle, size_t size, int* dmabuf_fd, size_t* offset) {
+  auto bo_handle = FindBOHandle(const_cast<void*>(reinterpret_cast<const void*>(&handle)));
   if (!bo_handle.IsValid()) {
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
@@ -832,7 +832,7 @@ hsa_status_t XdnaDriver::ExportDMABuf(const core::Agent& agent, core::ShareableH
   }
 
   *dmabuf_fd = export_params.fd;
-  *offset = reinterpret_cast<uintptr_t>(handle->handle) - reinterpret_cast<uintptr_t>(bo_handle.vaddr);
+  *offset = reinterpret_cast<uintptr_t>(handle.handle) - reinterpret_cast<uintptr_t>(bo_handle.vaddr);
 
   return HSA_STATUS_SUCCESS;
 }

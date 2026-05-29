@@ -101,7 +101,7 @@ class KfdVirtioDriver final : public core::Driver {
   hsa_status_t SetQueueCUMask(HSA_QUEUEID queue_id, uint32_t num_cu_mask,
                               uint32_t* cu_mask) const override;
   hsa_status_t AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_GWS, uint32_t* GWS) const override;
-  hsa_status_t ExportDMABuf(const core::Agent& agent, core::ShareableHandle *handle, size_t size, int* dmabuf_fd, size_t* offset) override;
+  hsa_status_t ExportDMABuf(const core::Agent& agent, const core::ShareableHandle& handle, size_t size, int* dmabuf_fd, size_t* offset) override;
   hsa_status_t ImportDMABuf(int dmabuf_fd, const core::Agent& agent, core::ShareableHandle* handle,
                             void* mem) override;
   hsa_status_t DestroyImportedShareableHandle(core::ShareableHandle* handle) override;
