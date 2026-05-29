@@ -28,9 +28,9 @@
 #include <sstream>
 #include <vector>
 
+#include "gfx12/gfx12token.h"
 #include "gfx9/build_standalone.h"
 #include "gfx9/gfx9token.h" // gfx9::Reg, gfx9::RegCs
-#include "gfx12/gfx12token.h"
 #include "mi400/mi400token.h"
 #include "quick_scan_export.hpp"
 
@@ -44,7 +44,23 @@
 #    define DELTA(x)
 #endif
 
-#define PUBLIC_API extern "C" __attribute__((visibility("default")))
+namespace quick_scan
+{
+bool avx512_available()
+{
+#if (defined(__GNUC__) || defined(__clang__)) && (defined(__x86_64__) || defined(__i386__))
+    static const bool ok = []
+    {
+        __builtin_cpu_init();
+        return __builtin_cpu_supports("avx512vbmi") && __builtin_cpu_supports("avx512bw") &&
+               __builtin_cpu_supports("avx512f");
+    }();
+    return ok;
+#else
+    return false;
+#endif
+}
+} // namespace quick_scan
 
 namespace
 {
@@ -72,7 +88,8 @@ inline int extract_gfxip(uint64_t header)
 {
     {
         rocprof_trace_decoder_gfx9_header_t h{.raw = header};
-        if ((h.legacy_version == 0 || h.legacy_version == 0x11) && (h.gfx9_version2 >= 4 && h.gfx9_version2 <= 6)) return 9;
+        if ((h.legacy_version == 0 || h.legacy_version == 0x11) && (h.gfx9_version2 >= 4 && h.gfx9_version2 <= 6))
+            return 9;
     }
 
     auto hw_header = mi400::header_type{.raw = header};
@@ -160,7 +177,9 @@ template <bool EmitEvents> rocprofiler_thread_trace_decoder_status_t process_eve
 
 } // namespace
 
-PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_quick_scan(
+extern "C"
+{
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_quick_scan(
     rocprof_trace_decoder_handle_t handle,
     uint64_t chunk_index,
     const void* data,
@@ -171,8 +190,17 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_quick
 {
     thread_local std::vector<quick_scan::QuickToken> raw{1u << 18};
 
-    if (!data || data_size < 8 || !trace_callback)
-        return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+    // Availability probe: `data == nullptr` queries whether the SIMD scanner
+    // can run on this CPU/build without performing any actual work. Returns
+    // SUCCESS when available, NOT_IMPLEMENTED otherwise. All other arguments
+    // are ignored on the probe path.
+    if (!data)
+        return quick_scan::avx512_available() ? ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
+                                              : ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
+
+    if (data_size < 8 || !trace_callback) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    if (!quick_scan::avx512_available()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
 
     TIMING(t0);
 
@@ -222,8 +250,7 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_quick
         auto decoder = HandleData::get_read_handle(handle);
         if (!decoder.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
-        if (decoder->gfxip == 0)
-            decoder->gfxip = extract_gfxip(static_cast<const uint64_t*>(data)[0]);
+        if (decoder->gfxip == 0) decoder->gfxip = extract_gfxip(static_cast<const uint64_t*>(data)[0]);
 
         gfxip = decoder->gfxip;
     }
@@ -308,7 +335,7 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_quick
     return status;
 }
 
-PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_build_standalone(
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_build_standalone(
     rocprof_trace_decoder_handle_t handle,
     uint64_t chunk_index,
     const void* data,
@@ -354,6 +381,8 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_build
 
     thread_local std::vector<quick_scan::QuickToken> raw{1u << 16};
 
+    if (!quick_scan::avx512_available()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
+
     size_t ntokens = quick_scan::scan_gfx9(buf, offset_begin, raw.data(), raw.size());
     while (ntokens == raw.size())
     {
@@ -398,3 +427,5 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_build
     *size_out = used;
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
 }
+
+} // extern "C"
