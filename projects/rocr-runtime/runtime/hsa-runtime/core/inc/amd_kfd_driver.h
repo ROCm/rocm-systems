@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -141,6 +141,11 @@ public:
   hsa_status_t MakeMemoryUnresident(const void* mem) const override;
 
   hsa_status_t OpenSMI(uint32_t node_id, int* fd) const override;
+
+  hsa_status_t ImportExternalSemaphore(uint32_t node_id, void* nt_handle,
+                                       hsa_amd_external_semaphore_handle_type_t type,
+                                       hsa_amd_external_semaphore_t* out_sem) const override;
+  hsa_status_t DestroyExternalSemaphore(hsa_amd_external_semaphore_t sem) const override;
 
   hsa_status_t IsModelEnabled(bool* enable) const override;
 
