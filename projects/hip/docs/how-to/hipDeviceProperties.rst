@@ -24,7 +24,7 @@ This document combines conceptual explanations with HIP and HSA examples to
 help developers understand and leverage these hardware characteristics.
 
 ------------------------------------------------------------
-1. Basic HIP Device Properties
+Basic HIP Device Properties
 ------------------------------------------------------------
 
 Use HIP runtime APIs to query fundamental device attributes:
