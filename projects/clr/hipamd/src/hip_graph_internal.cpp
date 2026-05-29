@@ -331,6 +331,21 @@ hipError_t Graph::ScheduleNodesIntoBatches() {
     return hipErrorInvalidValue;
   }
 
+  // Verify that every graph node was assigned to a segment. The iterative DFS
+  // in FindPathsDFS uses a shared mutable current_path across stack frames; for
+  // fork-join graphs this can silently drop event/wait nodes that carry cache-
+  // coherency ordering. Missing nodes are never dispatched as AQL packets, so
+  // the GPU sees stale memory and produces wrong results. Fall back to the
+  // classic scheduling path which handles fork-join graphs correctly.
+  if (node_to_segment_id_.size() < static_cast<size_t>(GetNodeCount()) &&
+      DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING != 2) {
+    ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+            "[hipGraph] Segment DFS missed %zu/%zu node(s) - falling back to classic path",
+            static_cast<size_t>(GetNodeCount()) - node_to_segment_id_.size(),
+            static_cast<size_t>(GetNodeCount()));
+    return hipErrorNotReady;
+  }
+
   // Check if this is a complex graph that would benefit from classic path
   // Complex graphs: 16+ segments with average segment length < 8
   const size_t kSegmentSizeThreshold = 16;
@@ -378,41 +393,35 @@ void Graph::ResolveSegmentDependencies() {
   for (size_t i = 0; i < segments_.size(); ++i) {
     auto& segment = segments_[i];
 
-    // Use a set for O(1) duplicate detection instead of linear search on the vector
-    std::unordered_set<int> dep_set(segment.segment_ids_dependencies.begin(),
-                                    segment.segment_ids_dependencies.end());
+    // Only check first node for incoming dependencies
+    if (segment.first_node != nullptr) {
+      const auto& dependencies = segment.first_node->GetDependencies();
 
-    // Walk all nodes in the segment: mid-segment wait-event nodes introduce
-    // cross-stream dependencies that are invisible if we only inspect first_node.
-    for (const auto& cur_node : segment.nodes) {
-      for (const auto& dep_node : cur_node->GetDependencies()) {
-        // Only cross-segment dependencies matter here
+      // Use a set for O(1) duplicate detection instead of linear search on the vector
+      std::unordered_set<int> dep_set(segment.segment_ids_dependencies.begin(),
+                                      segment.segment_ids_dependencies.end());
+
+      for (const auto& dep_node : dependencies) {
+        // Find which segment this dependency belongs to (within this graph)
         auto dep_it = node_to_segment_id_.find(dep_node);
-        if (dep_it == node_to_segment_id_.end()) {
-          continue;
-        }
+        if (dep_it != node_to_segment_id_.end()) {
+          int dep_segment_id = dep_it->second;
 
-        int dep_segment_id = dep_it->second;
+          // Validate segment ID is within bounds
+          if (dep_segment_id < 0 || dep_segment_id >= static_cast<int>(segments_.size())) {
+            ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+                    "[hipGraph] Invalid segment ID %d (segments size: %zu)",
+                    dep_segment_id, segments_.size());
+            continue;  // Skip invalid segment ID
+          }
 
-        // Skip intra-segment edges (same segment)
-        if (dep_segment_id == static_cast<int>(i)) {
-          continue;
-        }
+          // Add dependency if not already present (O(1) lookup)
+          if (dep_set.insert(dep_segment_id).second) {
+            segment.segment_ids_dependencies.push_back(dep_segment_id);
 
-        // Validate segment ID is within bounds
-        if (dep_segment_id < 0 || dep_segment_id >= static_cast<int>(segments_.size())) {
-          ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
-                  "[hipGraph] Invalid segment ID %d (segments size: %zu)",
-                  dep_segment_id, segments_.size());
-          continue;
-        }
-
-        // Add dependency if not already present (O(1) lookup)
-        if (dep_set.insert(dep_segment_id).second) {
-          segment.segment_ids_dependencies.push_back(dep_segment_id);
-
-          // Also add this segment as an edge of the dependency segment
-          segments_[dep_segment_id].segment_ids_edges.push_back(i);
+            // Also add this segment as an edge of the dependency segment
+            segments_[dep_segment_id].segment_ids_edges.push_back(i);
+          }
         }
       }
     }
@@ -1157,14 +1166,30 @@ void GraphExec::FindStreamsReqPerDevForSegments() {
 
 // ================================================================================================
 void GraphExec::PrecomputeStreamAssignment() {
-  // Derive each segment's stream_id from its first node's capture-time stream_id_.
-  // ScheduleOneNode assigns stream_id_ once per node based on which capture stream
-  // it was enqueued on, so this is stable across all dependency levels. Using a
-  // per-level round-robin reset instead caused segments from different capture streams
-  // to collide onto the same stream_id at later levels, causing BuildSyncPlan to
-  // incorrectly drop cross-stream barriers between them.
-  for (auto& seg : segments_) {
-    seg.stream_id = (seg.first_node != nullptr) ? seg.first_node->stream_id_ : 0;
+  // Assign stream IDs via a per-device round-robin that is NOT reset between
+  // dependency levels. FindStreamsReqPerDevForSegments() sizes the pool to the
+  // maximum parallel fan-out at any single level, so the pool is always large
+  // enough to give each segment at a given level a distinct stream ID.
+  // Resetting dev_idx inside the level loop (the previous bug) caused segments
+  // at different levels to collide onto the same stream_id, leading
+  // BuildSyncPlan to incorrectly drop cross-stream barriers between them.
+  auto getPoolSize = [&](int dev_id) -> size_t {
+    auto it = max_streams_dev_.find(dev_id);
+    return (it != max_streams_dev_.end() && it->second > 0)
+               ? static_cast<size_t>(it->second) : 1;
+  };
+
+  std::unordered_map<int, size_t> dev_idx;
+  for (int level = 0; level <= max_dependency_level_; ++level) {
+    auto it = segments_per_level_.find(level);
+    if (it == segments_per_level_.end()) continue;
+
+    for (int seg_id : it->second) {
+      if (seg_id >= 0 && seg_id < static_cast<int>(segments_.size())) {
+        auto& seg = segments_[seg_id];
+        seg.stream_id = static_cast<int>(dev_idx[seg.dev_id]++ % getPoolSize(seg.dev_id));
+      }
+    }
   }
 
   const bool leaf_sync_required = IsLeafNodeSyncRequired();
@@ -2132,6 +2157,17 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
       }
     } else {
       // Node doesn't support capture - execute individually.
+      // If the leading batch (batchIndex == 0) has pending content — in particular,
+      // dependency barrier packets prepended by BuildSyncPlan — dispatch it now,
+      // BEFORE the non-captured node's commands reach the HW queue.  Without this,
+      // the leading batch is only dispatched in the "drain remaining" loop after all
+      // nodes, meaning cross-stream barriers fire too late and the non-captured node
+      // (e.g. a memcpy) reads stale GPU memory written by parallel segments.
+      if (batchIndex == 0) {
+        status = dispatchCurrentBatch();
+        if (status != hipSuccess) return status;
+      }
+
       // Flat dispatch bypasses the Barriers() tracker (ActiveSignal is skipped).
       // Enqueue Markers before and after the non-captured node to:
       //   Before: resync the Barriers() tracker so releaseGpuMemoryFence/WaitCurrent
