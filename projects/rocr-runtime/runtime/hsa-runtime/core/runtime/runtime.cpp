@@ -47,6 +47,7 @@
 #include <cstring>
 #include <regex>
 #include <string>
+#include <algorithm>
 #if defined(__linux__)
 #include <link.h>
 #include <dlfcn.h>
@@ -672,7 +673,13 @@ hsa_status_t Runtime::FillMemory(void* ptr, uint32_t value, size_t count) {
 
   // Host and unmapped SVM addresses copy via host.
   if (info.hostBaseAddress <= ptr && endPtr <= (ptrdiff_t)info.hostBaseAddress + info.sizeInBytes) {
-    memset(ptr, value, count * sizeof(uint32_t));
+    // fast-path memset check
+    uint8_t byte = static_cast<uint8_t>(value);
+    if ((uint32_t(byte) * 0x01010101u) == value) {
+      std::memset(ptr, value, count * sizeof(uint32_t));
+    } else {
+      std::fill_n(static_cast<uint32_t*>(ptr), count, value);
+    }
     return HSA_STATUS_SUCCESS;
   }
 
