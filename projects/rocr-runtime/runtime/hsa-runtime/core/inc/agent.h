@@ -332,7 +332,7 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
 
   /// @brief Returns the nearest CPU agent to this agent.
   ///
-  /// @retval pointer to the nearest CPU agent. If there is no CPU agent
+  /// @retval pointer to the nearest CPU agent
   virtual Agent* GetNearestCpuAgent() const = 0;
 
   // @brief Initialize secondary CUID for this agent.
