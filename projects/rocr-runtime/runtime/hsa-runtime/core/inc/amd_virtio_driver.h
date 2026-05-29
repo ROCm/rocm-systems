@@ -108,7 +108,7 @@ class KfdVirtioDriver final : public core::Driver {
   hsa_status_t ExportFabricHandle(core::Agent& agent, core::ShareableHandle* handle, size_t size,
                                   hsa_fabric_handle_t* fabric_handle) override;
   hsa_status_t ImportFabricHandle(core::Agent& agent, hsa_fabric_handle_t fabric_handle,
-                                  core::ShareableHandle* handle, int* dmabuf_fd, size_t* size) override;
+                                  core::ShareableHandle* handle, size_t* size) override;
   hsa_status_t Map(core::ShareableHandle handle, void* mem, size_t offset, size_t size,
                    hsa_access_permission_t perms) override;
   hsa_status_t Unmap(core::ShareableHandle handle, void* mem, size_t offset, size_t size) override;
