@@ -9618,7 +9618,7 @@ class AMDSMICommands:
                         sys.argv[1] if len(sys.argv) > 1 else "unknown",
                         None,
                         self.helpers.get_output_format(),
-                        hint=results_clk_lvl,
+                        hint=error_msg,
                     )
 
                 # Check if already set
