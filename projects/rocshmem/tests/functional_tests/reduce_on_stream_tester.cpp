@@ -28,6 +28,14 @@
 #include <hip/hip_runtime.h>
 #include <cstring>
 #include <vector>
+#include <stdlib.h>
+
+#define CHECKROCSHMEM(x)                                   \
+do                                                         \
+{                                                          \
+  if ((x) != ROCSHMEM_SUCCESS)                             \
+    throw std::runtime_error("CHECKROCSHMEM failed: " #x); \
+} while (0);
 
 /******************************************************************************
  * HOST TESTER CLASS METHODS
@@ -74,10 +82,10 @@ void ReduceOnStreamTester::preLaunchKernel() {
   bw_factor = n_pes;
 
   for (int i = 0; i < num_streams; i++) {
-    rocshmem_ctx_create(0, &ctxs[i]);
+    CHECKROCSHMEM(rocshmem_ctx_create(0, &ctxs[i]));
     team_world_dup[i] = ROCSHMEM_TEAM_INVALID;
-    rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, n_pes, nullptr, 0,
-                                &team_world_dup[i]);
+    CHECKROCSHMEM(rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, n_pes, nullptr, 0,
+                                &team_world_dup[i]));
     if (team_world_dup[i] == ROCSHMEM_TEAM_INVALID) {
       std::cerr << "Team " << i << " is invalid!" << std::endl;
       abort();
@@ -128,10 +136,10 @@ void ReduceOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize,
     for (int s = 0; s < num_streams; s++) {
       int *wg_source = source_buf + s * n_pes * size;
       int *wg_dest   = dest_buf   + s * n_pes * size;
-      rocshmem_ctx_int_sum_reduce_on_stream(ctxs[s],
+      CHECKROCSHMEM(rocshmem_ctx_int_sum_reduce_on_stream(ctxs[s],
                                             team_world_dup[s],
                                             wg_dest, wg_source, size,
-                                            streams[s]);
+                                            streams[s]));
     }
   }
 
@@ -145,10 +153,10 @@ void ReduceOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize,
 
       int *wg_source = source_buf + s * n_pes * size;
       int *wg_dest   = dest_buf   + s * n_pes * size;
-      rocshmem_ctx_int_sum_reduce_on_stream(ctxs[s],
+      CHECKROCSHMEM(rocshmem_ctx_int_sum_reduce_on_stream(ctxs[s],
                                             team_world_dup[s],
                                             wg_dest, wg_source, size,
-                                            streams[s]);
+                                            streams[s]));
 
       if (i == loop - 1)
         CHECK_HIP(hipEventRecord(stop_events_timed[s], streams[s]));
