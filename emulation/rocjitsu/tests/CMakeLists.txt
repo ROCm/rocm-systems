@@ -90,6 +90,7 @@ add_executable(
     vop_alias_rdna_simd_correctness_test.cpp
     vop3p_pk_binary_int_simd_correctness_test.cpp
     vop3p_pk_binary_fp16_simd_correctness_test.cpp
+    vop3p_mov_b32_simd_correctness_test.cpp
     execution_plugin_test.cpp
 )
 target_link_libraries(

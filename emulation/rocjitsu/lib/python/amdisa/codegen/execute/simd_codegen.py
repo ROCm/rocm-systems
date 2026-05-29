@@ -1156,6 +1156,12 @@ SIMD_VOP3P_PK_TERNARY_FP16: dict[str, str] = {
     "v_pk_fma_f16_vop3p": "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }",
 }
 
+# v_pk_mov_b32 — default-packing-only fast path. Each src is a 64-bit pair
+# (consecutive VGPRs), result is (src0_lo, src1_hi). Functorless / fixed-op.
+SIMD_VOP3P_MOV_B32: set[str] = {
+    "v_pk_mov_b32_vop3p",
+}
+
 
 # --- VOPC compare -> VCC ---------------------------------------------------
 #
@@ -2255,6 +2261,8 @@ def simd_probe_line(template_name: str) -> str | None:
     specpkf16t = SIMD_VOP3P_PK_TERNARY_FP16.get(template_name)
     if specpkf16t is not None:
         return f"  ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_FP16({specpkf16t});"
+    if template_name in SIMD_VOP3P_MOV_B32:
+        return "  ROCJITSU_TRY_SIMD_VOP3P_MOV_B32();"
     # VOP3P fma_mix / mad_mix (six ops, three destination shapes). Same body
     # for all; the routing picks the matching glue specialization.
     if template_name in SIMD_VOP3P_FMA_MIX_F32:
