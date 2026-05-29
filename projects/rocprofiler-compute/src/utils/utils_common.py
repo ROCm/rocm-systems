@@ -883,7 +883,10 @@ def resolve_filter_blocks_to_panel_ids(
         token = str(bid)
         if not METRIC_ID_RE.match(token):
             if token not in alias_map:
-                raise KeyError(f"Unknown panel alias: {token!r}")
+                console_error(
+                    f"Invalid --block value {token}. "
+                    "Run rocprof-compute --list-blocks to see valid values."
+                )
             token = alias_map[token]
         resolved.add(int(convert_metric_id_to_panel_info(token)[0]))
     return resolved
