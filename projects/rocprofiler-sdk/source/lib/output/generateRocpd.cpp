@@ -1143,7 +1143,7 @@ write_rocpd(
                              });
 
             // Insert into kernel dispatch table
-            auto sv_kd = get_schema_version();
+            auto                sv_kd = get_schema_version();
             sql::bind_statement stmt;
             if(sv_kd.major == 4 && sv_kd.minor >= 1)
             {
@@ -1335,7 +1335,7 @@ write_rocpd(
                             .extdata   = std::nullopt,
                         });
 
-                    auto sv_mc = get_schema_version();
+                    auto                sv_mc = get_schema_version();
                     sql::bind_statement mc_stmt;
                     if(sv_mc.major == 4 && sv_mc.minor >= 1)
                     {
@@ -1572,7 +1572,7 @@ write_rocpd(
                                                  .extdata   = std::nullopt,
                                              });
 
-                auto sv_ma = get_schema_version();
+                auto                sv_ma = get_schema_version();
                 sql::bind_statement ma_stmt;
                 if(sv_ma.major == 4 && sv_ma.minor >= 1)
                 {
@@ -1595,8 +1595,7 @@ write_rocpd(
                 {
                     auto start_id =
                         get_timestamp_id(conn, itr.start_timestamp, phase_enter, track_id);
-                    auto end_id =
-                        get_timestamp_id(conn, itr.end_timestamp, phase_exit, track_id);
+                    auto end_id = get_timestamp_id(conn, itr.end_timestamp, phase_exit, track_id);
                     ma_stmt =
                         get_insert_statement("rocpd_memory_allocate{{uuid}}",
                                              {
@@ -1715,20 +1714,20 @@ write_rocpd(
                                                      .extdata   = std::nullopt,
                                                  });
 
-                    auto sv_rg = get_schema_version();
+                    auto                sv_rg = get_schema_version();
                     sql::bind_statement region_stmt;
                     if(sv_rg.major == 4 && sv_rg.minor >= 1)
                     {
-                        region_stmt =
-                            get_insert_statement("rocpd_region{{uuid}}",
-                                                 {
-                                                     insert_value("id", itr.correlation_id.internal),
-                                                     insert_value("track_id", track_id),
-                                                     insert_value("name_id", string_entries.at(name)),
-                                                     insert_value("start", itr.start_timestamp),
-                                                     insert_value("end", itr.end_timestamp),
-                                                     insert_value("event_id", evt_id),
-                                                 });
+                        region_stmt = get_insert_statement(
+                            "rocpd_region{{uuid}}",
+                            {
+                                insert_value("id", itr.correlation_id.internal),
+                                insert_value("track_id", track_id),
+                                insert_value("name_id", string_entries.at(name)),
+                                insert_value("start", itr.start_timestamp),
+                                insert_value("end", itr.end_timestamp),
+                                insert_value("event_id", evt_id),
+                            });
                     }
                     else
                     {
@@ -1736,16 +1735,16 @@ write_rocpd(
                             get_timestamp_id(conn, itr.start_timestamp, phase_enter, track_id);
                         auto end_id =
                             get_timestamp_id(conn, itr.end_timestamp, phase_exit, track_id);
-                        region_stmt =
-                            get_insert_statement("rocpd_region{{uuid}}",
-                                                 {
-                                                     insert_value("id", itr.correlation_id.internal),
-                                                     insert_value("track_id", track_id),
-                                                     insert_value("name_id", string_entries.at(name)),
-                                                     insert_value("start_id", start_id),
-                                                     insert_value("end_id", end_id),
-                                                     insert_value("event_id", evt_id),
-                                                 });
+                        region_stmt = get_insert_statement(
+                            "rocpd_region{{uuid}}",
+                            {
+                                insert_value("id", itr.correlation_id.internal),
+                                insert_value("track_id", track_id),
+                                insert_value("name_id", string_entries.at(name)),
+                                insert_value("start_id", start_id),
+                                insert_value("end_id", end_id),
+                                insert_value("event_id", evt_id),
+                            });
                     }
 
                     execute_raw_sql_statements(conn, region_stmt);
