@@ -2092,6 +2092,44 @@ template <typename Inst, typename Op>
   return false;
 }
 
+/// VOP3P packed-16 ternary integer SIMD fast path (3-source). Same default-
+/// packing gate as the binary form: op_sel == 0, op_sel_hi == 3, and the
+/// third source's high-half selector op_sel_hi_2 == 1 (per the scalar body
+/// `sel2_hi = inst.inst_.op_sel_hi_2`, which is a single bit — value 1 picks
+/// the high half for the high-output computation). For pk_mad_i16/u16 the
+/// scalar bodies also do not apply neg/neg_hi/clamp; the SIMD path passes
+/// through. Functor receives three u32 packed lane vectors and returns the
+/// per-half-masked packed result.
+template <typename Inst, typename Op>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_vop3p_pk_ternary_int_simd(Inst &inst, Wavefront &wf, Op op) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+    return false;
+  if (inst.inst_.op_sel != 0u || inst.inst_.op_sel_hi != 3u || inst.inst_.op_sel_hi_2 != 1u)
+    return false;
+  using T = uint32_t;
+  constexpr std::size_t W = util::native_width_v<T>;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto a = read_simd<T>(inst.src0, wf, base);
+    const auto b = read_simd<T>(inst.src1, wf, base);
+    const auto c = read_simd<T>(inst.src2, wf, base);
+    const auto r = op(a, b, c);
+    write_simd<T>(inst.vdst, wf, base, r, chunk);
+  }
+  return true;
+}
+
+template <typename Inst, typename Op>
+[[nodiscard]] inline bool try_execute_vop3p_pk_ternary_int_simd(Inst &, Wavefront &, Op) {
+  return false;
+}
+
 } // namespace amdgpu
 } // namespace rocjitsu
 
@@ -2384,6 +2422,11 @@ template <typename Inst, typename Op>
 /// packing (0 / 3) and falls back to scalar otherwise.
 #define ROCJITSU_TRY_SIMD_VOP3P_PK_BINARY_INT(...)                                                 \
   if (::rocjitsu::amdgpu::try_execute_vop3p_pk_binary_int_simd(inst, wf, __VA_ARGS__))             \
+  return
+
+/// VOP3P packed-16 integer ternary probe (3-source pk_mad family).
+#define ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_INT(...)                                                \
+  if (::rocjitsu::amdgpu::try_execute_vop3p_pk_ternary_int_simd(inst, wf, __VA_ARGS__))            \
   return
 
 #endif // ROCJITSU_ISA_AMDGPU_SHARED_SIMD_GLUE_H_
