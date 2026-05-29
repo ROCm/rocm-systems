@@ -912,7 +912,6 @@ struct ncclComm {
   // Temporary Buffer [RCCL]
   void* tempBuff;
 
-  struct ncclMemManager* memManager;  // Memory manager
   struct ncclIntruQueue<struct ncclMemManagerTask, &ncclMemManagerTask::next> suspendTaskQueue;
   struct ncclIntruQueue<struct ncclMemManagerTask, &ncclMemManagerTask::next> resumeTaskQueue;
 

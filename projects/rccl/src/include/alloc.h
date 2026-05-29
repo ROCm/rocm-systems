@@ -615,13 +615,6 @@ static inline ncclResult_t ncclCuMemFree(void *ptr, struct ncclMemManager* manag
   return result;
 }
 
-// [RCCL] Manager-aware overload added in NCCL 2.29.7. AMD does not currently
-// route allocations through ncclMemManager so we ignore the manager and
-// forward to the existing implementation.
-static inline ncclResult_t ncclCuMemFree(void *ptr, struct ncclMemManager* /*manager*/, int numSegments = 1) {
-  return ncclCuMemFree(ptr, numSegments);
-}
-
 // Get the base and size of all segments that span a given user buffer
 static inline ncclResult_t ncclCuMemGetAddressRange(CUdeviceptr userBuff, size_t userBuffSize, CUdeviceptr* mappedPtrBase, size_t* totalMappedBufferSize, int* numSegments) {
   *totalMappedBufferSize = 0;
@@ -956,13 +949,5 @@ inline ncclResult_t ncclIbMallocDebug(void** ptr, size_t size, const char *filef
   return ncclSuccess;
 }
 #define ncclIbMalloc(...) ncclIbMallocDebug(__VA_ARGS__, __FILE__, __LINE__)
-
-// [RCCL] Manager-aware overload for ncclCudaFree -- ignores the manager,
-// see the note above ncclCudaMallocDebug for the rationale. Defined here
-// (after the primary template) so the recursive call resolves correctly.
-template <typename T>
-ncclResult_t ncclCudaFree(T* ptr, struct ncclMemManager* /*manager*/, int numSegments = 1) {
-  return ncclCudaFree(ptr, numSegments);
-}
 
 #endif
