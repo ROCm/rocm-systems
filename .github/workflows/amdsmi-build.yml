@@ -51,12 +51,12 @@ jobs:
         run: |
           # Find the directory containing the main CMakeLists.txt for AMDSMI
           TARGET_DIR=$(find $GITHUB_WORKSPACE -path "*/projects/amdsmi/CMakeLists.txt" -exec dirname {} \;)
-          
+
           if [ -z "$TARGET_DIR" ]; then
             echo "Could not find CMakeLists.txt in projects/amdsmi. Searching root..."
             TARGET_DIR=$(find $GITHUB_WORKSPACE -maxdepth 2 -name "CMakeLists.txt" -exec dirname {} \; | head -n 1)
           fi
-          
+
           echo "PROJECT_DIR=$TARGET_DIR" >> $GITHUB_ENV
 
       - name: Update repositories for Debian10
@@ -67,11 +67,24 @@ jobs:
           cat > /etc/apt/sources.list << EOF
           deb http://archive.debian.org/debian buster main
           deb http://archive.debian.org/debian-security buster/updates main
+          deb http://archive.debian.org/debian buster-backports main
           EOF
           echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99-disable-check-valid-until
           apt update
+          # ualoe_lib needs <linux/time_types.h> (kernel >= 4.20); stock buster
+          # ships linux-libc-dev 4.19 which lacks it. Pull a 5.10 from backports.
+          apt -t buster-backports install -y linux-libc-dev
+
+      - name: Install netlink dev packages
+        run: |
+          set -e
+          if [ "${{ matrix.os }}" != "Debian10" ]; then
+            apt update
+          fi
+          apt install -y libnl-3-dev libnl-genl-3-dev libmnl-dev
 
       - name: Build AMDSMI
+        shell: bash
         run: |
           set -e
           echo 'Building on ${{ matrix.os }}'
@@ -85,9 +98,9 @@ jobs:
             cd $BUILD_FOLDER
 
             # Configure, build, and package
-            if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON 2>&1 | tee cmake.log && \
-               make -j $(nproc) 2>&1 | tee make.log && \
-               make package 2>&1 | tee package.log; then
+            if (set -o pipefail; cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON 2>&1 | tee cmake.log) && \
+               (set -o pipefail; make -j $(nproc) 2>&1 | tee make.log) && \
+               (set -o pipefail; make package 2>&1 | tee package.log); then
 
               # Parse and report warnings as GitHub annotations
               echo "::group::Build Warnings"
@@ -181,7 +194,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set Project Directory
         run: |
           TARGET_DIR=$(find $GITHUB_WORKSPACE -path "*/projects/amdsmi/CMakeLists.txt" -exec dirname {} \;)
@@ -198,9 +211,21 @@ jobs:
           cat > /etc/apt/sources.list << EOF
           deb http://archive.debian.org/debian buster main
           deb http://archive.debian.org/debian-security buster/updates main
+          deb http://archive.debian.org/debian buster-backports main
           EOF
           echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99-disable-check-valid-until
           apt update
+          # ualoe_lib needs <linux/time_types.h> (kernel >= 4.20); stock buster
+          # ships linux-libc-dev 4.19 which lacks it. Pull a 5.10 from backports.
+          apt -t buster-backports install -y linux-libc-dev
+
+      - name: Install netlink dev packages
+        run: |
+          set -e
+          if [ "${{ matrix.os }}" != "Debian10" ]; then
+            apt update
+          fi
+          apt install -y libnl-3-dev libnl-genl-3-dev libmnl-dev
 
       - name: Build and Install for Test
         run: |
@@ -455,6 +480,25 @@ jobs:
           echo 'Installing more_itertools on ${{ matrix.os }}'
           python3 -m pip install more_itertools
 
+      - name: Install netlink dev packages
+        run: |
+          set -e
+          # AlmaLinux8 image bakes a stale amdgpu-rpm-local repo whose build-id
+          # URL eventually 404s. Disable any mkmartifactory repos so dnf metadata
+          # refresh doesn't fail. No-op when the plugin/repo isn't present.
+          dnf config-manager --disable 'mkmartifactory*' 2>/dev/null || true
+          case "${{ matrix.os }}" in
+            SLES)
+              zypper --non-interactive install libnl3-devel libmnl-devel
+              ;;
+            AzureLinux3)
+              tdnf install -y libnl3-devel libmnl-devel || dnf install -y libnl3-devel libmnl-devel
+              ;;
+            *)
+              dnf install -y libnl3-devel libmnl-devel
+              ;;
+          esac
+
       - name: Build AMDSMI(RHEL10 & AlmaLinux8)
         if: matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8'
         run: |
@@ -499,6 +543,7 @@ jobs:
 
       - name: Build AMDSMI
         if: matrix.os != 'RHEL10' && matrix.os != 'AlmaLinux8'
+        shell: bash
         run: |
           set -e
           echo 'Building on ${{ matrix.os }}'
@@ -512,9 +557,9 @@ jobs:
             cd $BUILD_FOLDER
 
             # Capture build output to parse warnings
-            if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON 2>&1 | tee cmake.log && \
-               make -j $(nproc) 2>&1 | tee make.log && \
-               make package 2>&1 | tee package.log; then
+            if (set -o pipefail; cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON 2>&1 | tee cmake.log) && \
+               (set -o pipefail; make -j $(nproc) 2>&1 | tee make.log) && \
+               (set -o pipefail; make package 2>&1 | tee package.log); then
 
               # Parse and report warnings as GitHub annotations
               echo "::group::Build Warnings"
@@ -682,6 +727,25 @@ jobs:
           set -e
           echo 'Installing more_itertools on ${{ matrix.os }}'
           python3 -m pip install more_itertools
+
+      - name: Install netlink dev packages
+        run: |
+          set -e
+          # AlmaLinux8 image bakes a stale amdgpu-rpm-local repo whose build-id
+          # URL eventually 404s. Disable any mkmartifactory repos so dnf metadata
+          # refresh doesn't fail. No-op when the plugin/repo isn't present.
+          dnf config-manager --disable 'mkmartifactory*' 2>/dev/null || true
+          case "${{ matrix.os }}" in
+            SLES)
+              zypper --non-interactive install libnl3-devel libmnl-devel
+              ;;
+            AzureLinux3)
+              tdnf install -y libnl3-devel libmnl-devel || dnf install -y libnl3-devel libmnl-devel
+              ;;
+            *)
+              dnf install -y libnl3-devel libmnl-devel
+              ;;
+          esac
 
       - name: Build and Install for Tests (RHEL10 & AlmaLinux8)
         if: matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8'

@@ -29,7 +29,7 @@
  */
 
 #include <stdbool.h>
-#include <stdlib.h>
+#include <time.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -582,7 +582,34 @@ typedef enum {
                                                         temperature */
   AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDD_USR,        //!< VDD USR voltage regulator temperature
   AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_11_E32,   //!< VDDIO 1.1V E32 voltage regulator temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_04_HBM_B,      //!< VDDIO 0.4V HBM B voltage regulator
+                                                        //!< temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_04_HBM_D,      //!< VDDIO 0.4V HBM D voltage regulator
+                                                        //!< temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_075_HBM_B,     //!< VDDCR 0.75V HBM B voltage regulator
+                                                        //!< temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_075_HBM_D,     //!< VDDCR 0.75V HBM D voltage regulator
+                                                        //!< temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_11_GTA_A,      //!< VDDIO 1.1V GTA A voltage regulator
+                                                        //!< temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_11_GTA_C,      //!< VDDIO 1.1V GTA C voltage regulator
+                                                        //!< temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDAN_075_GTA_A,     //!< VDDAN 0.75V GTA A voltage regulator
+                                                        //!< temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDAN_075_GTA_C,     //!< VDDAN 0.75V GTA C voltage regulator
+                                                        //!< temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_075_UCIE,      //!< VDDCR 0.75V UCIE voltage regulator
+                                                        //!< temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_065_UCIEAA,    //!< VDDIO 0.65V UCIEAA voltage regulator
+                                                        //!< temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_065_UCIEAM_A,  //!< VDDIO 0.65V UCIEAM A voltage regulator
+                                                        //!< temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_065_UCIEAM_C,  //!< VDDIO 0.65V UCIEAM C voltage regulator
+                                                        //!< temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDAN_075,  //!< VDDAN 0.75V voltage regulator temperature
   AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VR_LAST = 199,
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_LAST =
+      AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDAN_075,  //!< Last GPU board temperature type
 
   // Baseboard System temperature
   AMDSMI_TEMPERATURE_TYPE_BASEBOARD_FIRST = 200,
@@ -5412,6 +5439,300 @@ amdsmi_status_t amdsmi_set_gpu_process_isolation(amdsmi_processor_handle process
 amdsmi_status_t amdsmi_clean_gpu_local_data(amdsmi_processor_handle processor_handle);
 
 /** @} End tagClkPowerPerfControl */
+
+/*****************************************************************************/
+/** @defgroup tagFabric Fabric (The Fabric used for scale up networking)
+ *  @{
+ */
+
+/**
+ * @brief Fabric telemetry categories
+ *
+ */
+typedef enum {
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN = 0xFFFFFFFF,  //!< Unknown telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE = 0,             //!< UALOE telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_SWITCH = 1,            //!< Switch telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO = 2,            //!< Crypto telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_PFC = 3,               //!< PFC telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT = 4,           //!< Network Port telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE = 5,     //!< Derived UALOE telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT = 6,   //!< Derived Network Port telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX = 7                //!< Maximum number of categories
+} amdsmi_fabric_telemetry_category_t;
+
+/**
+ * @brief Fabric telemetry category bitmask constructor
+ *
+ */
+#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_UALOE (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE)
+#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_SWITCH (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_SWITCH)
+#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_CRYPTO (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO)
+#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_PFC (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_PFC)
+#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_NETPORT \
+  (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT)
+#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_UALOE \
+  (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE)
+#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_NETPORT \
+  (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT)
+
+#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_ALL_KNOWN                                         \
+  (AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_UALOE | AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_SWITCH | \
+   AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_CRYPTO | AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_PFC |   \
+   AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_NETPORT |                                              \
+   AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_UALOE |                                        \
+   AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_NETPORT)  //!< All known categories
+
+/**
+ * @brief Fabric telemetry item structure
+ */
+typedef struct {
+  uint64_t id;     //!< Identifier of the telemetry item
+  uint64_t value;  //!< Value of the telemetry item
+} amdsmi_fabric_telemetry_item_t;
+
+/**
+ * @brief Fabric textual label structure
+ *
+ * Labels must be null terminated
+ */
+#define AMDSMI_FABRIC_LABEL_MAX_LENGTH \
+  32  //!< Maximum length of the textual label (must be null terminated)
+
+typedef struct {
+  char text[AMDSMI_FABRIC_LABEL_MAX_LENGTH];  //!< Textual label content
+} amdsmi_fabric_label_t;
+
+/**
+ * @brief Fabric telemetry instance structure
+ *
+ * Collection of telemetry data items for an instance of a category of telemetry
+ */
+typedef struct {
+  amdsmi_fabric_label_t name;             //!< Name for this instance
+  unsigned logical_idx;                   //!< Logical index for this instance
+  unsigned item_count;                    //!< Number of telemetry items in the set
+  amdsmi_fabric_telemetry_item_t* items;  //!< Pointer to array of telemetry items
+} amdsmi_fabric_telemetry_instance_t;
+
+/**
+ * @brief Fabric telemetry dataset structure
+ *
+ * Contains all telemetry for one category
+ */
+typedef struct {
+  amdsmi_fabric_telemetry_category_t category;  //!< Telemetry category
+  uint64_t generation_count;  //!< Sequence number incremented each time telemetry is written
+  struct timespec timestamp;  //!< UTC timestamp seconds since epoch
+  unsigned instance_count;    //!< Number of instances for this category
+  amdsmi_fabric_telemetry_instance_t* instances;  //!< Array of pointers to instances
+} amdsmi_fabric_telemetry_dataset_t;
+
+/**
+ * @brief Fabric telemetry structure
+ *
+ * Top level structure defining telemetry data for Fabric. Contains datasets
+ * for each category of telemetry. A null pointer means no telemetry is
+ * available for that category.
+ */
+typedef struct {
+  amdsmi_fabric_telemetry_dataset_t*
+      datasets[AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX];  //!< Dataset for each telemetry category
+} amdsmi_fabric_telemetry_t;
+
+/**
+ *  @brief Allocate storage for Fabric telemetry data
+ *
+ *  @ingroup tagFabric
+ *
+ *  @platform{gpu_bm_linux} @platform{host}
+ *
+ *  @details This function allocates storage for Fabric telemetry data for the
+ *  specified categories. The allocated storage can be reused for multiple
+ *  telemetry retrievals.
+ *
+ *  @param[in] processor_handle - Handle for the target processor
+ *
+ *  @param[in] category_mask - Bitmask of telemetry categories to allocate,
+ *  constructed using AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK(cat)
+ *
+ *  @param[out] telemetry - Pointer to allocated telemetry structure
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_alloc_fabric_telemetry(amdsmi_processor_handle processor_handle,
+                                              uint32_t category_mask,
+                                              amdsmi_fabric_telemetry_t** telemetry);
+
+/**
+ *  @brief Get Fabric telemetry data
+ *
+ *  @ingroup tagFabric
+ *
+ *  @platform{gpu_bm_linux} @platform{host}
+ *
+ *  @details This function retrieves the latest Fabric telemetry data snapshot
+ *  into pre-allocated storage.
+ *
+ *  @param[in] processor_handle - Handle for the target processor
+ *
+ *  @param[in,out] telemetry - Pre-allocated telemetry structure to populate
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_fabric_telemetry_data(amdsmi_processor_handle processor_handle,
+                                                 amdsmi_fabric_telemetry_t* telemetry);
+
+/**
+ *  @brief Get string name for a telemetry item ID
+ *
+ *  @ingroup tagFabric
+ *
+ *  @platform{gpu_bm_linux} @platform{host}
+ *
+ *  @details Given a telemetry item ID @p telem_id,
+ *  this function returns a pointer to a string containing the human-readable name
+ *  for the specified telemetry item. The returned string is statically allocated
+ *  and should not be freed by the caller.
+ *
+ *
+ *  @param[in] telem_id The telemetry item ID for which the name is requested
+ *
+ *  @return const char* | Pointer to string containing the telemetry item name,
+ *  or UNKNOWN if the category or telemetry ID is not recognized
+ */
+const char* amdsmi_fabric_telem_id_to_string(uint64_t telem_id);
+
+/**
+ *  @brief Free Fabric telemetry storage
+ *
+ *  @ingroup tagFabric
+ *
+ *  @platform{gpu_bm_linux} @platform{host}
+ *
+ *  @details This function frees the storage allocated for Fabric telemetry data.
+ *
+ *  @param[in] processor_handle - Handle for the target processor
+ *
+ *  @param[in] telemetry - Telemetry structure to free
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_free_fabric_telemetry(amdsmi_processor_handle processor_handle,
+                                             amdsmi_fabric_telemetry_t* telemetry);
+
+#define AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE 32
+#define AMDSMI_FABRIC_MAX_LOCAL_GPUS 8
+
+/**
+ * @brief Fabric type
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef enum {
+  AMDSMI_FABRIC_TYPE_UALOE,
+  AMDSMI_FABRIC_TYPE_UALLINK,
+  AMDSMI_FABRIC_TYPE_UNKNOWN
+} amdsmi_fabric_type_t;
+
+/**
+ * @brief Fabric NPA address mode
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef enum {
+  AMDSMI_FABRIC_NPA_ADDRESS_MODE_SOURCE_ALIASING,
+  AMDSMI_FABRIC_NPA_ADDRESS_MODE_SOURCE_IDENTIFICATION,
+  AMDSMI_FABRIC_NPA_ADDRESS_MODE_UNKNOWN
+} amdsmi_fabric_npa_address_mode_t;
+
+/**
+ * @brief Fabric accelerator vPoD state
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef enum {
+  AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNCONFIGURED,
+  AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_CONFIGURED,
+  AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY,
+  AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE,
+  AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ERROR,
+  AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNKNOWN
+} amdsmi_fabric_accelerator_vpod_state_t;
+
+/**
+ * @brief Fabric device configuration information (version 1)
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+  uint32_t accelerator_id;           //!< Accelerator identifier (range 0 to 1023)
+  amdsmi_fabric_type_t fabric_type;  //!< UALOE or UALLINK
+  uint32_t bandwidth;                //!< Station bandwidth share in Mb/s
+  uint32_t latency;  //!< Latency in nanoseconds (depends on switch presence and type)
+  uint8_t ppod_id[AMDSMI_MAX_UUID_ELEMENTS];  //!< Physical PoD Identifier (16 bytes)
+  uint32_t ppod_size;                         //!< Physical PoD size
+  uint32_t vpod_id;                           //!< Virtual PoD Identifier
+  uint32_t vpod_size;                         //!< Virtual PoD size
+  uint32_t vpod_active_accelerators
+      [AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE];  //!< 1024-bit list (32 x 32-bit words): bit
+                                                        //!< N set = accelerator ID N is active
+  uint32_t local_accelerators[AMDSMI_FABRIC_MAX_LOCAL_GPUS];  //!< Local Accelerator IDs
+  amdsmi_fabric_npa_address_mode_t addr_mode;          //!< Source aliasing or identification mode
+  amdsmi_fabric_accelerator_vpod_state_t accel_state;  //!< Accelerator vPoD State
+} amdsmi_fabric_info_v1_t;
+
+typedef struct {
+  uint32_t version;
+  union fabric_info_ {
+    amdsmi_fabric_info_v1_t v1;
+  } fabric_version;
+} amdsmi_fabric_info_ver_t;
+
+/**
+ * @brief Fabric device information structure
+ *
+ */
+typedef struct {
+  amdsmi_bdf_t bdf;                      //!< BDF (Bus, Device, Function) of the Fabric device
+  amdsmi_fabric_info_ver_t fabric_info;  //!< Fabric information structure (version 1)
+  uint32_t reserved[15];                 //!< Reserved for future use
+} amdsmi_fabric_info_t;
+
+/**
+ *  @brief Get Fabric device information
+ *
+ *  @ingroup tagFabric
+ *
+ *  @platform{gpu_bm_linux} @platform{host}
+ *
+ *  @details Reads optional UALoE fabric attributes from sysfs (one file per field).
+ *  Missing or unreadable files are skipped so the call can return partial data:
+ *    - any field that was not updated from sysfs keeps its sentinel value (ie:
+ *      numeric fields at their maximum representable value, and unknown enumeration
+ *      values where documented for ::amdsmi_fabric_info_v1_t).
+ *    - The device BDF in @p info is always filled when the call completes successfully
+ *      or returns ::AMDSMI_STATUS_NO_DATA.
+ *
+ *  @param[in] processor_handle - Handle for the target processor
+ *
+ *  @param[out] info - Pointer to Fabric information structure to be populated.
+ *  Must be allocated by the caller. Written on every return except errors such
+ *  as ::AMDSMI_STATUS_INVAL.
+ *
+ *  @return ::amdsmi_status_t
+ *  - ::AMDSMI_STATUS_SUCCESS if at least one sysfs file yielded usable content.
+ *  - ::AMDSMI_STATUS_NO_DATA if no sysfs file yielded usable lines (output still
+ *    contains BDF and default/sentinel fabric fields).
+ *  - Other codes (e.g. invalid processor handle) on failure.
+ *
+ *  @note This path reads sysfs only. It does not require UALoE netlink
+ *  (::ualoe_open) to succeed; that handle is still needed for fabric telemetry APIs.
+ */
+amdsmi_status_t amdsmi_get_gpu_fabric_info(amdsmi_processor_handle processor_handle,
+                                           amdsmi_fabric_info_t* info);
+
+/** @} End tagFabric */
 
 /*****************************************************************************/
 /** @defgroup tagVersionQuery Version Queries

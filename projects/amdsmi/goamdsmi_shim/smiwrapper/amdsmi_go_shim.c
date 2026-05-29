@@ -25,6 +25,7 @@
 
 #include <amd_smi/amdsmi.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #define nullptr ((void*)0)

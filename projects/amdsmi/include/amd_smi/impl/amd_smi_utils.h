@@ -25,9 +25,14 @@
 
 #include <dirent.h>
 
+#include <algorithm>
+#include <cctype>
+#include <charconv>
+#include <cstdint>
 #include <limits>
+#include <optional>
 #include <string>
-#include <type_traits>
+#include <string_view>
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_gpu_device.h"
@@ -149,6 +154,9 @@ amdsmi_status_t smi_amdgpu_get_ainic_processor_handle_by_index(
 amdsmi_status_t smi_amdgpu_get_processor_handle_by_index(uint32_t device_index,
                                                          amdsmi_processor_handle* processor_handle);
 
+amdsmi_status_t get_gpu_device_from_handle(amdsmi_processor_handle processor_handle,
+                                           amd::smi::AMDSmiGPUDevice** gpudevice);
+
 /**
  *  @brief Get an int environment var or return default if does not exist
  *
@@ -214,6 +222,25 @@ void fill_2d_array(A& arr, T value) {
   }
 }
 
+std::string_view trim(std::string_view str);
+
+template <typename Tp, typename = std::enable_if_t<std::is_integral_v<Tp>>>
+std::optional<Tp> parse_number_from_string(std::string_view str) {
+  auto trimmed_str = trim(str);
+  if (trimmed_str.empty()) {
+    return std::nullopt;
+  }
+
+  auto value = Tp{};
+  auto [ptr, error_code] =
+      std::from_chars(trimmed_str.data(), (trimmed_str.data() + trimmed_str.size()), value);
+  if ((error_code == std::errc{}) && (ptr == (trimmed_str.data() + trimmed_str.size()))) {
+    return value;
+  }
+
+  return std::nullopt;
+}
+
 /**
  *  @brief Get the product serial number given the processor handle.
  *
@@ -224,6 +251,25 @@ void fill_2d_array(A& arr, T value) {
  *          ::0 if it cannot be determined
  */
 uint64_t get_product_serial_number(amdsmi_processor_handle processor_handle);
+
+/*
+ *  Note:
+ *      - A full 128-bit UUID is 16 bytes
+ *      - Therefore, the total number of hexadecimal digits needed to represent a full 128-bit UUID
+ * is 32
+ *          - (16 bytes * 2 hexadecimal digits per byte)
+ */
+constexpr auto HIP_UUID_BYTES_SIZE = size_t(16);
+constexpr auto HIP_UUID_STRING_FULL_SIZE = size_t(HIP_UUID_BYTES_SIZE * 2);
+typedef struct hipUUID_t {
+  // Pointer to raw UUID bytes (length = HIP_UUID_BYTES_SIZE), not null-terminated
+  char bytes[HIP_UUID_BYTES_SIZE];
+} hipUUID_t;
+
+const char* from_uuid_to_cstring(const hipUUID_t& uuid) noexcept;
+std::optional<amdsmi_bdf_t> from_cstring_to_bdf(const char* bdf_str) noexcept;
+std::optional<hipUUID_t> from_cstring_to_uuid(const char* uuid_str) noexcept;
+std::string stringify_bdf(const amdsmi_bdf_t& bdf);
 
 /**
  *  @brief Tokenize bdfid into components.
