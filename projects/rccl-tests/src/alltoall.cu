@@ -68,6 +68,7 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
       }
       reqs->barrierCount = deviceCtaCount;
       reqs->ginSignalCount = deviceCtaCount;
+      reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
       return testSuccess;
     default:
       return testNotImplemented;
