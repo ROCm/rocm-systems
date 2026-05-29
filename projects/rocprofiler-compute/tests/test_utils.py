@@ -19,6 +19,7 @@ from common import SRC
 import utils.utils_analysis as utils_analysis
 import utils.utils_common as utils_common
 import utils.utils_profile as utils_profile
+from rocprof_compute_profile.pc_sampling_profiler import PCSamplingProfiler
 from utils.amdsmi_interface import _per_device_query
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.tty import (
@@ -4101,14 +4102,29 @@ def test_v3_to_v2_default_accum_vgpr_count(mock_console_debug, tmp_path):
 
 
 # ===================================================================
-# Test PC_sampling function
+# Test PCSamplingProfiler class
 # ===================================================================
 
 
-@mock.patch("utils.utils_profile.capture_subprocess_output")
-@mock.patch("utils.utils_profile.console_error")
-@mock.patch("utils.utils_profile.console_debug")
-def test_pc_sampling_prof_sdk_path_nonexistent_librocprofiler_sdk_tool(
+def _make_pc_sampling_profiler(method, interval, workload_dir, profiler):
+    """Build a PCSamplingProfiler with a minimal args namespace for launch tests."""
+    return PCSamplingProfiler(
+        args=MockArgs(
+            pc_sampling_method=method,
+            pc_sampling_interval=interval,
+            filter_blocks=["21"],
+        ),
+        profiler=profiler,
+        workload_dir=workload_dir,
+    )
+
+
+@mock.patch(
+    "rocprof_compute_profile.pc_sampling_profiler.capture_subprocess_output"
+)
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_error")
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_debug")
+def test_pc_sampling_profiler_sdk_path_nonexistent_librocprofiler_sdk_tool(
     mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path
 ):
     """
@@ -4118,40 +4134,44 @@ def test_pc_sampling_prof_sdk_path_nonexistent_librocprofiler_sdk_tool(
     file existence before `capture_subprocess_output` is not in the provided snippet,
     but we test the path construction.
     """
-    with mock.patch("utils.utils_common._rocprof_cmd", "rocprofiler-sdk"):
-        method = "host_trap"
-        interval = 1000
-        workload_dir = str(tmp_path)
-        options = {"APP_CMD": "my_app --arg"}
+    method = "host_trap"
+    interval = 1000
+    workload_dir = str(tmp_path)
+    options = {"APP_CMD": "my_app --arg"}
 
-        sdk_lib_dir = tmp_path / "rocm_sdk" / "lib"
-        sdk_lib_dir.mkdir(parents=True, exist_ok=True)
-        rocprofiler_sdk_tool_path = str(sdk_lib_dir / "librocprofiler_sdk.so")
-        Path(rocprofiler_sdk_tool_path).touch()
+    sdk_lib_dir = tmp_path / "rocm_sdk" / "lib"
+    sdk_lib_dir.mkdir(parents=True, exist_ok=True)
+    rocprofiler_sdk_tool_path = str(sdk_lib_dir / "librocprofiler_sdk.so")
+    Path(rocprofiler_sdk_tool_path).touch()
 
-        expected_tool_path = str(
-            sdk_lib_dir / "rocprofiler-sdk" / "librocprofiler-sdk-tool.so"
-        )
+    expected_tool_path = str(
+        sdk_lib_dir / "rocprofiler-sdk" / "librocprofiler-sdk-tool.so"
+    )
 
-        options["LD_PRELOAD"] = expected_tool_path
+    options["LD_PRELOAD"] = expected_tool_path
 
-        mock_capture_subprocess.return_value = (True, "Success output")
+    mock_capture_subprocess.return_value = (True, "Success output")
 
-        utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
+    profiler = _make_pc_sampling_profiler(
+        method, interval, workload_dir, "rocprofiler-sdk"
+    )
+    profiler._launch(options)
 
-        assert mock_capture_subprocess.called
-        call_args = mock_capture_subprocess.call_args
-        called_env = call_args.kwargs.get("new_env", {})
+    assert mock_capture_subprocess.called
+    call_args = mock_capture_subprocess.call_args
+    called_env = call_args.kwargs.get("new_env", {})
 
-        assert "LD_PRELOAD" in called_env
-        assert called_env["LD_PRELOAD"] == expected_tool_path
+    assert "LD_PRELOAD" in called_env
+    assert called_env["LD_PRELOAD"] == expected_tool_path
 
-        mock_console_error.assert_not_called()
+    mock_console_error.assert_not_called()
 
 
-@mock.patch("utils.utils_profile.capture_subprocess_output")
-@mock.patch("utils.utils_profile.console_debug")
-def test_pc_sampling_prof_subprocess_fails(
+@mock.patch(
+    "rocprof_compute_profile.pc_sampling_profiler.capture_subprocess_output"
+)
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_debug")
+def test_pc_sampling_profiler_subprocess_fails(
     mock_console_debug, mock_capture_subprocess, tmp_path, monkeypatch
 ):
     """
@@ -4165,7 +4185,10 @@ def test_pc_sampling_prof_subprocess_fails(
         if exit:
             raise RuntimeError("console_error called")
 
-    monkeypatch.setattr("utils.utils_profile.console_error", mock_console_error)
+    monkeypatch.setattr(
+        "rocprof_compute_profile.pc_sampling_profiler.console_error",
+        mock_console_error,
+    )
 
     with mock.patch("utils.utils_common._rocprof_cmd", "rocprof_cli_tool"):
         method = "stochastic"
@@ -4173,8 +4196,11 @@ def test_pc_sampling_prof_subprocess_fails(
         workload_dir = str(tmp_path)
         options = ["another_app"]
 
+        profiler = _make_pc_sampling_profiler(
+            method, interval, workload_dir, "rocprofv3"
+        )
         with pytest.raises(RuntimeError, match="console_error called"):
-            utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
+            profiler._launch(options)
 
         mock_capture_subprocess.assert_not_called()
         assert console_error_calls == [
@@ -4184,33 +4210,37 @@ def test_pc_sampling_prof_subprocess_fails(
 
     mock_capture_subprocess.reset_mock()
     console_error_calls.clear()
-    with mock.patch("utils.utils_common._rocprof_cmd", "rocprofiler-sdk"):
-        options = {"APP_CMD": "another_app"}
-        sdk_lib_dir = tmp_path / "rocm_sdk_fail" / "lib"
-        sdk_lib_dir.mkdir(parents=True, exist_ok=True)
-        rocprofiler_sdk_tool_path_sdk = str(sdk_lib_dir / "librocprofiler_sdk.so")
-        Path(rocprofiler_sdk_tool_path_sdk).touch()
+    options = {"APP_CMD": "another_app"}
+    sdk_lib_dir = tmp_path / "rocm_sdk_fail" / "lib"
+    sdk_lib_dir.mkdir(parents=True, exist_ok=True)
+    rocprofiler_sdk_tool_path_sdk = str(sdk_lib_dir / "librocprofiler_sdk.so")
+    Path(rocprofiler_sdk_tool_path_sdk).touch()
 
-        tool_dir = sdk_lib_dir / "rocprofiler-sdk"
-        tool_dir.mkdir(parents=True, exist_ok=True)
-        (tool_dir / "librocprofiler-sdk-tool.so").touch()
+    tool_dir = sdk_lib_dir / "rocprofiler-sdk"
+    tool_dir.mkdir(parents=True, exist_ok=True)
+    (tool_dir / "librocprofiler-sdk-tool.so").touch()
 
-        mock_capture_subprocess.return_value = (
-            False,
-            "Error output from SDK subprocess",
-        )
+    mock_capture_subprocess.return_value = (
+        False,
+        "Error output from SDK subprocess",
+    )
 
-        with pytest.raises(RuntimeError, match="console_error called"):
-            utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
+    profiler = _make_pc_sampling_profiler(
+        method, interval, workload_dir, "rocprofiler-sdk"
+    )
+    with pytest.raises(RuntimeError, match="console_error called"):
+        profiler._launch(options)
 
-        mock_capture_subprocess.assert_called_once()
-        assert console_error_calls == ["PC sampling failed."]
+    mock_capture_subprocess.assert_called_once()
+    assert console_error_calls == ["PC sampling failed."]
 
 
-@mock.patch("utils.utils_profile.capture_subprocess_output")
-@mock.patch("utils.utils_profile.console_error")
-@mock.patch("utils.utils_profile.console_debug")
-def test_pc_sampling_prof_empty_appcmd(
+@mock.patch(
+    "rocprof_compute_profile.pc_sampling_profiler.capture_subprocess_output"
+)
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_error")
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_debug")
+def test_pc_sampling_profiler_empty_appcmd(
     mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path
 ):
     """
@@ -4218,16 +4248,19 @@ def test_pc_sampling_prof_empty_appcmd(
     The function should still attempt to run it. The behavior of
     capture_subprocess_output with an empty command is external to this function.
     """
+    method = "host_trap"
+    interval = 100
+    workload_dir = str(tmp_path)
     with mock.patch("utils.utils_common._rocprof_cmd", "rocprof_cli_tool"):
-        method = "host_trap"
-        interval = 100
-        workload_dir = str(tmp_path)
         options = ["--"]
         rocprofiler_sdk_tool_path = "/some/path/librocprofiler_sdk.so"  # noqa: F841
 
         mock_capture_subprocess.return_value = (True, "Output with empty appcmd")
 
-        utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
+        profiler = _make_pc_sampling_profiler(
+            method, interval, workload_dir, "rocprofv3"
+        )
+        profiler._launch(options)
 
         assert mock_capture_subprocess.called
         options_list = mock_capture_subprocess.call_args[0][0]
@@ -4236,29 +4269,33 @@ def test_pc_sampling_prof_empty_appcmd(
 
     mock_capture_subprocess.reset_mock()
     mock_console_error.reset_mock()
-    with mock.patch("utils.utils_common._rocprof_cmd", "rocprofiler-sdk"):
-        sdk_lib_dir = tmp_path / "rocm_sdk_empty" / "lib"
-        sdk_lib_dir.mkdir(parents=True, exist_ok=True)
-        rocprofiler_sdk_tool_path_sdk = str(sdk_lib_dir / "librocprofiler_sdk.so")
-        Path(rocprofiler_sdk_tool_path_sdk).touch()
-        tool_dir = sdk_lib_dir / "rocprofiler-sdk"
-        tool_dir.mkdir(parents=True, exist_ok=True)
-        (tool_dir / "librocprofiler-sdk-tool.so").touch()
+    sdk_lib_dir = tmp_path / "rocm_sdk_empty" / "lib"
+    sdk_lib_dir.mkdir(parents=True, exist_ok=True)
+    rocprofiler_sdk_tool_path_sdk = str(sdk_lib_dir / "librocprofiler_sdk.so")
+    Path(rocprofiler_sdk_tool_path_sdk).touch()
+    tool_dir = sdk_lib_dir / "rocprofiler-sdk"
+    tool_dir.mkdir(parents=True, exist_ok=True)
+    (tool_dir / "librocprofiler-sdk-tool.so").touch()
 
-        mock_capture_subprocess.return_value = (True, "Output with empty appcmd SDK")
-        options = {"APP_CMD": ""}
+    mock_capture_subprocess.return_value = (True, "Output with empty appcmd SDK")
+    options = {"APP_CMD": ""}
 
-        utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
+    profiler = _make_pc_sampling_profiler(
+        method, interval, workload_dir, "rocprofiler-sdk"
+    )
+    profiler._launch(options)
 
-        assert mock_capture_subprocess.called
-        assert mock_capture_subprocess.call_args[0][0] == ""
-        mock_console_error.assert_not_called()
+    assert mock_capture_subprocess.called
+    assert mock_capture_subprocess.call_args[0][0] == ""
+    mock_console_error.assert_not_called()
 
 
-@mock.patch("utils.utils_profile.capture_subprocess_output")
-@mock.patch("utils.utils_profile.console_error")
-@mock.patch("utils.utils_profile.console_debug")
-def test_pc_sampling_prof_multiarg_appcmd(
+@mock.patch(
+    "rocprof_compute_profile.pc_sampling_profiler.capture_subprocess_output"
+)
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_error")
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_debug")
+def test_pc_sampling_profiler_multiarg_appcmd(
     mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path
 ):
     """All arguments after '--' in profiler_options must appear
@@ -4271,13 +4308,109 @@ def test_pc_sampling_prof_multiarg_appcmd(
 
         mock_capture_subprocess.return_value = (True, "Success")
 
-        utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
+        profiler = _make_pc_sampling_profiler(
+            method, interval, workload_dir, "rocprofv3"
+        )
+        profiler._launch(options)
 
         assert mock_capture_subprocess.called
         options_list = mock_capture_subprocess.call_args[0][0]
         separator_index = options_list.index("--")
         assert options_list[separator_index:] == ["--", "./myapp", "arg1", "arg2"]
         mock_console_error.assert_not_called()
+
+
+def test_pc_sampling_profiler_is_requested():
+    workload_dir = "/tmp"
+    for blocks in (["21"], ["pc_sampling"], ["2", "21"]):
+        profiler = PCSamplingProfiler(
+            args=MockArgs(filter_blocks=blocks),
+            profiler="rocprofv3",
+            workload_dir=workload_dir,
+        )
+        assert profiler.is_requested() is True
+
+    profiler = PCSamplingProfiler(
+        args=MockArgs(filter_blocks=["2"]),
+        profiler="rocprofv3",
+        workload_dir=workload_dir,
+    )
+    assert profiler.is_requested() is False
+
+
+def test_pc_sampling_profiler_is_exclusive():
+    workload_dir = "/tmp"
+    exclusive = PCSamplingProfiler(
+        args=MockArgs(filter_blocks=["21"]),
+        profiler="rocprofv3",
+        workload_dir=workload_dir,
+    )
+    assert exclusive.is_exclusive() is True
+
+    mixed = PCSamplingProfiler(
+        args=MockArgs(filter_blocks=["2", "21"]),
+        profiler="rocprofv3",
+        workload_dir=workload_dir,
+    )
+    assert mixed.is_exclusive() is False
+
+
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_debug")
+def test_pc_sampling_profiler_cleanup_stale_output_removes_dir(
+    mock_console_debug, tmp_path
+):
+    """Exclusive sdk run with a dict ROCPROF_OUTPUT_PATH removes the stale dir."""
+    stale = tmp_path / "out" / "pmc_1"
+    stale.mkdir(parents=True, exist_ok=True)
+    options = {"ROCPROF_OUTPUT_PATH": str(stale)}
+
+    profiler = PCSamplingProfiler(
+        args=MockArgs(filter_blocks=["21"]),
+        profiler="rocprofiler-sdk",
+        workload_dir=str(tmp_path),
+    )
+    profiler._cleanup_stale_output(options)
+
+    assert not stale.exists()
+
+
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_debug")
+def test_pc_sampling_profiler_cleanup_stale_output_noop_cases(
+    mock_console_debug, tmp_path
+):
+    """Cleanup is a no-op outside the exclusive-sdk-dict-with-key case."""
+    sdk_args = MockArgs(filter_blocks=["21"])
+
+    # Non-sdk profiler: no removal even when exclusive.
+    stale = tmp_path / "non_sdk"
+    stale.mkdir(parents=True, exist_ok=True)
+    PCSamplingProfiler(
+        args=sdk_args, profiler="rocprofv3", workload_dir=str(tmp_path)
+    )._cleanup_stale_output({"ROCPROF_OUTPUT_PATH": str(stale)})
+    assert stale.exists()
+
+    # Non-exclusive: no removal.
+    stale = tmp_path / "mixed"
+    stale.mkdir(parents=True, exist_ok=True)
+    PCSamplingProfiler(
+        args=MockArgs(filter_blocks=["2", "21"]),
+        profiler="rocprofiler-sdk",
+        workload_dir=str(tmp_path),
+    )._cleanup_stale_output({"ROCPROF_OUTPUT_PATH": str(stale)})
+    assert stale.exists()
+
+    # List options (v3): no removal.
+    stale = tmp_path / "list_opts"
+    stale.mkdir(parents=True, exist_ok=True)
+    PCSamplingProfiler(
+        args=sdk_args, profiler="rocprofiler-sdk", workload_dir=str(tmp_path)
+    )._cleanup_stale_output(["--kernel-trace"])
+    assert stale.exists()
+
+    # Missing key: no error, no removal.
+    PCSamplingProfiler(
+        args=sdk_args, profiler="rocprofiler-sdk", workload_dir=str(tmp_path)
+    )._cleanup_stale_output({"APP_CMD": "app"})
 
 
 def test_set_parser():

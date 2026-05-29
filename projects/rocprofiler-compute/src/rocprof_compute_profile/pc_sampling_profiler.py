@@ -100,7 +100,7 @@ class PCSamplingProfiler:
         interval = self._args.pc_sampling_interval
         unit = "time" if method == "host_trap" else "cycles"
 
-        if get_rocprof_cmd() == "rocprofiler-sdk":
+        if self._profiler == "rocprofiler-sdk":
             self._launch_sdk(profiler_options, method, interval, unit)
         else:
             self._launch_v3(profiler_options, method, interval, unit)
