@@ -3717,6 +3717,35 @@ void Device::DestroyHwEvent(void* hw_event) const {
 }
 
 // ================================================================================================
+void Device::ResetHwEvents(const std::vector<void*>& hw_events) const {
+  // Re-arm pooled signals for reuse by a new graph launch. The caller
+  // guarantees these signals belong to a completed (drained) launch, so this
+  // cannot corrupt an in-flight launch. Avoids signal_create/destroy on the
+  // hot launch path.
+  for (void* hw_event : hw_events) {
+    if (hw_event != nullptr) {
+      auto* ps = reinterpret_cast<ProfilingSignal*>(hw_event);
+      Hsa::signal_silent_store_relaxed(ps->signal_, 1);
+      ps->flags_.done_ = true;
+      ps->ResetCachedTiming();
+    }
+  }
+}
+
+// ================================================================================================
+void Device::QuiesceHwEvents(const std::vector<void*>& hw_events) const {
+  // Pooled signals rest in the armed state (value 1). Before destruction, store
+  // the completed value (0) so ~ProfilingSignal does not block waiting on a
+  // signal that is armed but idle (no GPU work will ever drain it).
+  for (void* hw_event : hw_events) {
+    if (hw_event != nullptr) {
+      auto* ps = reinterpret_cast<ProfilingSignal*>(hw_event);
+      Hsa::signal_silent_store_relaxed(ps->signal_, 0);
+    }
+  }
+}
+
+// ================================================================================================
 uint8_t* Device::CreateBarrierPacket() const {
   static constexpr uint16_t kBarrierNopHeader =
       (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE) |

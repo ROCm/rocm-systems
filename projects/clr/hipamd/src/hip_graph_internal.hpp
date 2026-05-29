@@ -174,6 +174,30 @@ class GraphKernelArgManager : public amd::ReferenceCountedObject,
   using KernelArgImpl = device::Settings::KernelArgImpl;
 };
 
+//! Per-GraphExec pool of HW event sets.
+class GraphSignalManager : public amd::ReferenceCountedObject {
+ public:
+  GraphSignalManager() : amd::ReferenceCountedObject() {}
+  ~GraphSignalManager();
+
+  //! Pre-create `num_sets` signal sets of `count` signals each at instantiate
+  //! time, so launches never pay signal creation on the hot path.
+  bool Prepopulate(amd::Device* device, int count, int num_sets);
+
+  //! Acquire a ready signal set for a single launch. Pops from the free pool;
+  //! only creates a new set as a fallback if the pool is unexpectedly empty.
+  bool AcquireSet(amd::Device* device, int count, std::vector<void*>& out_set);
+
+  //! Re-arm a used set and return it to the free pool. Called from the launch
+  //! completion callback, which guarantees the launch's GPU work has finished.
+  void ReleaseSet(amd::Device* device, std::vector<void*>& set);
+
+ private:
+  std::mutex lock_;
+  //! Per-device stack of free signal sets available for reuse.
+  std::unordered_map<amd::Device*, std::vector<std::vector<void*>>> free_sets_;
+};
+
 class GraphNode : public hipGraphNodeDOTAttribute {
  protected:
   /// Copy Constructor. This is protected to prevent accidental copies causing unexpected behaviors.
@@ -977,6 +1001,10 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
         kernArgManager_->release();
       }
     }
+    if (signalManager_ != nullptr) {
+      signalManager_->release();
+      signalManager_ = nullptr;
+    }
 
     segmentBatches_.clear();
   }
@@ -1015,13 +1043,21 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     kernArgManager_ = kernArgManager;
   }
   GraphKernelArgManager* GetKernelArgManager() { return kernArgManager_; }
-  static void DecrementRefCount(cl_event event, cl_int command_exec_status, void* user_data);
+  // Completion callback for a graph launch: re-arms and returns the launch's
+  // pooled signals, then drops the launch's reference on the GraphExec.
+  static void OnLaunchComplete(cl_event event, cl_int command_exec_status, void* user_data);
   hipError_t CaptureAndFormPacketsForGraph();
   void GetKernelArgSizeForGraph(std::unordered_map<int, size_t>& kernArgSizeForGraph);
 
+  //! out_signal_set, when non-null, marks the top-level launch path: signals
+  //! are taken from the per-graph pool and returned via this out-parameter so
+  //! the completion callback can re-arm and recycle them. When null (legacy /
+  //! recursive child-graph path), signals are created locally and destroyed by
+  //! the AccumulateCommand destructor.
   amd::Command* EnqueueSegmentedGraph(hip::Stream* launch_stream,
                                       const std::vector<hip::Stream*>& streams,
-                                      hipError_t* out_status = nullptr);
+                                      hipError_t* out_status = nullptr,
+                                      std::vector<void*>* out_signal_set = nullptr);
   hipError_t EnqueueSegment(const Segment& segment, hip::Stream* stream,
                             amd::AccumulateCommand* accumulate);
 
@@ -1047,6 +1083,7 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   std::unordered_map<int, std::vector<hip::Stream*>> parallel_streams_;
   uint64_t flags_ = 0;
   GraphKernelArgManager* kernArgManager_ = nullptr;  //!< Kernel Arg manager for graph.
+  GraphSignalManager* signalManager_ = nullptr;      //!< HW event signal pool for graph launches.
   bool hasHiddenHeap_ = false;  //!< Hidden heap indicator for Kernel node
   std::unordered_set<int> hiddenHeapInitializedDevices_;
   bool repeatLaunch_ = false;
