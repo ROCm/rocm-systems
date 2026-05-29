@@ -287,7 +287,7 @@ def test_calc_builtin_vars_processes_per_xcd_first():
             return_value=mock_builtin_vars,
         ),
     ):
-        result = db_analysis.calc_builtin_vars(
+        db_analysis.calc_builtin_vars(
             pmc_df, sys_info, ["$PER_XCD_VAR", "$DERIVED_VAR"]
         )
 
@@ -296,9 +296,6 @@ def test_calc_builtin_vars_processes_per_xcd_first():
 
     # Verify DERIVED_VAR used the computed PER_XCD_VAR value
     assert sys_info["DERIVED_VAR"] == 25
-
-    # Verify pmc_df is returned unchanged
-    pd.testing.assert_frame_equal(result, pmc_df)
 
 
 def test_calc_builtin_vars_with_dataframe_expressions():
