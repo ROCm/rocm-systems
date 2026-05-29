@@ -1113,13 +1113,14 @@ configure_settings(bool _init)
 
         auto fitr = settings::format(itr, _config->get_tag());
 
-        // Timemory's read() silently drops JSON config files without proper root
-        if(_main_proc && config_json_missing_expected_root(fitr))
+        // Timemory's read() will silently drop JSON config files without proper root
+        if(config_json_missing_expected_root(fitr))
         {
-            LOG_WARNING("Config file '{}' is missing the expected '{}' root object and "
-                        "will not be applied. If this is a hierarchical preset "
-                        "configuration, pass it via --preset instead.",
-                        fitr, TIMEMORY_PROJECT_NAME);
+            LOG_CRITICAL("Config file '{}' is missing the expected '{}' root object and "
+                         "cannot be loaded. If this is a hierarchical preset "
+                         "configuration, pass it via --preset instead.",
+                         fitr, TIMEMORY_PROJECT_NAME);
+            std::exit(EXIT_FAILURE);
         }
 
         LOG_DEBUG("Reading config file {}", itr);
