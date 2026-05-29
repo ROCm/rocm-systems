@@ -1,3 +1,6 @@
+## Copyright (c) Advanced Micro Devices, Inc.
+## SPDX-License-Identifier:  MIT
+
 include_guard(GLOBAL)
 
 # Resolve the sanitizer selection in place (normalize, validate, write back via
@@ -20,7 +23,7 @@ function(resolve_sanitizer out_var)
         )
     endif()
 
-    set(sanitizer_provenance "${out_var}")
+    set(sanitizer_provenance "-D${out_var}")
     if(DEFINED THEROCK_SANITIZER AND NOT THEROCK_SANITIZER STREQUAL "")
         set(${out_var}
             "${THEROCK_SANITIZER}"
@@ -33,7 +36,12 @@ function(resolve_sanitizer out_var)
 
     # Normalize OFF -> "" so downstream code only tests for emptiness.
     if(${out_var} STREQUAL "OFF")
-        set(${out_var} "" CACHE STRING "" FORCE)
+        set(${out_var}
+            ""
+            CACHE STRING
+            "Sanitizer for the native tool library: OFF, ASAN, HOST_ASAN, or TSAN"
+            FORCE
+        )
     endif()
 
     if(NOT ${out_var} IN_LIST sanitizer_valid)
@@ -62,7 +70,7 @@ function(resolve_sanitizer out_var)
 endfunction()
 
 # Apply -fsanitize=... flags and link options to the current scope
-# No-op when off, or when TheRock already injected -fsanitize= 
+# No-op when off, or when TheRock already injected -fsanitize=
 # via CMAKE_CXX_FLAGS_INIT (avoid double-instrumentation).
 function(enable_sanitizer)
     if(NOT ENABLE_SANITIZER)
