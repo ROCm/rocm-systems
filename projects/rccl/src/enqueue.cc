@@ -758,14 +758,7 @@ static ncclResult_t scheduleCollTasksToPlan(
   int nChannels[2*2] = {0, 0, 0, 0}; // [collnet][nvls]
   int const nMaxChannels[2*2] = {comm->nChannels, comm->nvlsChannels, // [collnet][nvls]
                                  comm->nChannels, std::min(comm->nChannels, comm->nvlsChannels)};
-  // Collective-aware minimum traffic-per-channel floor.
-  // AllReduce uses 16K so the planner spreads small messages over more channels
-  // (this fixes the 4K-16K AllReduce regression that came in with the 32K bump).
-  // Other collectives keep the original 32K floor; lowering it to 16K showed
-  // small regressions in AllGather/ReduceScatter at 256K and 256M.
-  auto minTrafficPerChannelFor = [](ncclFunc_t func) -> size_t {
-    return (func == ncclFuncAllReduce) ? (size_t)(16 << 10) : (size_t)(32 << 10);
-  };
+  constexpr size_t MinTrafficPerChannel = 16 << 10; // 16K traffic as minimal (matches develop)
   do {
     size_t workBytes = 0;
     struct ncclTaskColl* task = ncclIntruQueueHead(&planner->collTaskQueue);
@@ -777,7 +770,7 @@ static ncclResult_t scheduleCollTasksToPlan(
       nPlanColls += 1;
       workBytes += workNode->size;
       int kind = 2*task->isCollnet + task->isNvls;
-      trafficBytes[kind] += std::max(minTrafficPerChannelFor(task->func), task->trafficBytes);
+      trafficBytes[kind] += std::max(MinTrafficPerChannel, task->trafficBytes);
       nChannels[kind] += task->nMaxChannels;
       nChannels[kind] = std::min(nChannels[kind], nMaxChannels[kind]);
       task = task->next;
@@ -804,7 +797,7 @@ static ncclResult_t scheduleCollTasksToPlan(
 
     int kind = 2*task->isCollnet + task->isNvls;
     if (kind != kindPrev) {
-      trafficPerChannel = std::max<size_t>(minTrafficPerChannelFor(task->func), divUp(trafficBytes[kind] / nChannels[kind], 16) * 16);
+      trafficPerChannel = std::max<size_t>(MinTrafficPerChannel, divUp(trafficBytes[kind] / nChannels[kind], 16) * 16);
       kindPrev = kind;
       channelId = 0;
       currentTraffic = 0;
@@ -851,7 +844,7 @@ static ncclResult_t scheduleCollTasksToPlan(
     } else { // not task->isCollnet
       int trafficPerByte = ncclFuncTrafficPerByte(task->func, comm->nRanks);
       if (task->protocol == NCCL_PROTO_LL) trafficPerByte *= 4;
-      size_t cellSize = divUp(divUp(minTrafficPerChannelFor(task->func), (size_t)trafficPerByte), 16) * 16;
+      size_t cellSize = divUp(divUp(MinTrafficPerChannel, (size_t)trafficPerByte), 16) * 16;
       int elementsPerCell = cellSize/elementSize;
       size_t cells = divUp(task->count*elementSize, cellSize);
       size_t trafficPerElement = elementSize*trafficPerByte;
