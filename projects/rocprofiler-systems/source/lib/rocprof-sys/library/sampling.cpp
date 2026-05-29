@@ -567,6 +567,19 @@ start_duration_thread()
                 }
                 else if(_finalized)
                 {
+                    if(_premature)
+                    {
+                        LOG_INFO("Sampling duration of {:.6f} seconds was "
+                                 "interrupted by finalization. Shutting down "
+                                 "sampling...",
+                                 config::get_sampling_duration());
+                    }
+                    else
+                    {
+                        LOG_INFO("Sampling duration of {:.6f} seconds has "
+                                 "elapsed. Shutting down sampling...",
+                                 config::get_sampling_duration());
+                    }
                     break;
                 }
                 else

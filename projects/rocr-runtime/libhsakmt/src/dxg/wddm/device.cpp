@@ -152,6 +152,8 @@ bool WDDMDevice::QuerySegmentInfo()
 
     SegmentInfo info;
     info.segment_id = i;
+    info.is_aperture = seg.Aperture;
+    info.is_system_memory = seg.SegmentProperties.SystemMemory;
 
     if (seg.Aperture) {
       info.kind = SegmentKind::kAperture;
@@ -239,19 +241,43 @@ hsa_status_t WDDMDevice::VramAvail(uint64_t* available_bytes) {
 
     *available_bytes = LocalHeapSize() - usedVis - usedInv;
   } else {
-    // APU - NonLocal memory
-    if (!FindSegmentId(SegmentKind::kSystemMemory, &segmentId))
+    // APU: the shared-system-memory budget is exposed as aperture segments
+    // with the SystemMemory bit set (collapsed to kAperture above), so
+    // FindSegmentId(kSystemMemory) always missed. Sum BytesResident across
+    // every aperture+system_memory segment for the residency footprint.
+    const uint64_t budget = NonLocalHeapSize();
+    if (budget == 0) {
+      // No budget from WKMI — bail rather than underflow VramAvail.
       return HSA_STATUS_ERROR;
+    }
 
-    memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
-    stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
-    stats.AdapterLuid = adapter_luid_;
-    stats.QuerySegment.SegmentId = segmentId;
-    ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
-    if (ret == 0)
-      usedNonLocal = stats.QueryResult.SegmentInformation.BytesResident;
+    bool found_any = false;
+    bool queried_any = false;
+    for (const auto& seg_info : segment_infos_) {
+      if (!seg_info.is_aperture || !seg_info.is_system_memory) {
+        continue;
+      }
+      found_any = true;
 
-    *available_bytes = NonLocalHeapSize() - usedNonLocal;
+      memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
+      stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
+      stats.AdapterLuid = adapter_luid_;
+      stats.QuerySegment.SegmentId = seg_info.segment_id;
+      ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
+      if (ret != 0) {
+        continue;
+      }
+      queried_any = true;
+      usedNonLocal += stats.QueryResult.SegmentInformation.BytesResident;
+    }
+
+    if (!found_any || !queried_any) {
+      return HSA_STATUS_ERROR;
+    }
+
+    // Virtual apertures can double-count residency — saturate at zero
+    // instead of underflowing.
+    *available_bytes = (usedNonLocal >= budget) ? 0 : (budget - usedNonLocal);
   }
 
   return HSA_STATUS_SUCCESS;
