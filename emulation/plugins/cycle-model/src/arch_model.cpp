@@ -304,4 +304,22 @@ void ArchModel::flush_to_quiescence() {
   }
 }
 
+void ArchModel::drive_to_quiescence_passive() {
+  // Alternate: drive what can issue now, then synchronously land the deferred async
+  // memory that the (un-ticked) MemSys would otherwise have delivered. Each landed
+  // request lowers an outstanding wait-counter, so the next flush clears the waitcnt
+  // gate that was blocking the wave and issues its tail. Repeat until nothing is left
+  // to issue AND nothing is left to land.
+  for (;;) {
+    flush_to_quiescence();
+    if (mem_out_.empty()) break;   // no deferred async work left to land -> done
+    // mem_out_ holds every shared request produced-but-never-sent (their in_flight
+    // entries carry complete_cyc==UINT64_MAX). Land them at the current cycle.
+    std::vector<MemReq> pending;
+    pending.swap(mem_out_);
+    for (auto& req : pending)
+      on_mem_completion(req.rid, cu_.cu_cycle);  // sets complete_cyc, RAW mark, fills
+  }
+}
+
 }  // namespace cycle_model

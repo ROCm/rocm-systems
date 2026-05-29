@@ -92,6 +92,8 @@ private:
 
   // Cache of resolved CuCycleModel children, keyed on the owning ComputeUnitCore.
   std::unordered_map<const ComputeUnitCore *, CuCycleModel *> cu_models_;
+  // Last cu_cycle observed per CU at a dispatch-end, for the per-dispatch delta dump.
+  std::unordered_map<const CuCycleModel *, uint64_t> last_cu_cycle_;
   // One parsed JSON config per arch (gfx_target_version), shared by its CUs.
   std::unordered_map<uint32_t, cycle_model::UarchConfig> cfg_by_arch_;
   // Shared L2/HBM timing component per Xcd, resolved + configured lazily on first

@@ -88,6 +88,15 @@ class ArchModel {
 
   // Kernel-end tail drain: advances cu_cycle until all pending FIFOs are empty.
   void                flush_to_quiescence();
+  // Passive-path drain (LD_PRELOAD): the simdojo cu_clk domain is starved (the
+  // functional sim never yields enough clock edges), so the engine-driven async memory
+  // completion (on_mem_completion over the MemSys port) never arrives and waitcnt gates
+  // would deadlock flush_to_quiescence. This drives quiescence AND synchronously
+  // completes the deferred async memory still queued in mem_out_, so gates clear and the
+  // whole pending backlog is issued + counted. Accuracy bound: shared L2/HBM contention
+  // latency is NOT applied to these force-completed requests (they retire at cu_cycle);
+  // synchronous (compute / L1-hit) latencies and intra-CU issue/stall timing are exact.
+  void                drive_to_quiescence_passive();
   // Per-dispatch reset of the CU memory submodel (cold caches, full MSHR pool, idle BW
   // queues). cu_cycle and pipe state are monotonic and intentionally untouched.
   void                reset_memory() { mem_.reset(); rid_owner_.clear(); }

@@ -291,12 +291,43 @@ void CycleModelPlugin::onAmdgpuDispatchExecutionBegin(uint32_t) {
   }
 }
 
-void CycleModelPlugin::onAmdgpuDispatchExecutionEnd(uint32_t) {
+void CycleModelPlugin::onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
   if (!enabled_)
     return;
-  // No action needed: the idle gate at dispatch-begin handles per-kernel reset, and the
-  // CuCycleModel clock drains the ArchModel naturally (ticks while has_work()). Per-dispatch
-  // counter/summary emission will go here once those stats are wired.
+  // The idle gate at dispatch-begin handles per-kernel reset, and the CuCycleModel clock
+  // drains the ArchModel naturally (ticks while has_work()). Read-only counter dump: cu_cycle
+  // is monotonic across dispatches (never reset), so we report the absolute CU clock plus the
+  // delta since the prior dispatch end. RJ_CYCLE_DUMP=0 silences the per-dispatch line.
+  const char *dump_env = std::getenv("RJ_CYCLE_DUMP");
+  if (dump_env != nullptr && std::string_view(dump_env) == "0")
+    return;
+  uint32_t n_cu = 0;
+  uint64_t max_cycle = 0, sum_delta = 0, sched_stall = 0, pipe_busy = 0;
+  for (auto &kv : cu_models_) {
+    CuCycleModel *cm = kv.second;
+    if (!cm || !cm->configured())
+      continue;
+    // Drain the model's pending FIFOs / in-flight tail so cu_cycle reflects all of
+    // this dispatch's work. The engine clock only delivers sparse edges to the cu_clk
+    // domain (functional sim collapses time), so without this the model under-counts.
+    cm->model().drive_to_quiescence_passive();
+    cycle_model::CUState &cu = cm->model().cu();
+    ++n_cu;
+    max_cycle = std::max(max_cycle, cu.cu_cycle);
+    uint64_t &prev = last_cu_cycle_[cm];
+    sum_delta += (cu.cu_cycle >= prev) ? (cu.cu_cycle - prev) : 0;
+    prev = cu.cu_cycle;
+    sched_stall += cu.stalls.sched;
+    pipe_busy += cu.stalls.pipe_busy;
+  }
+  if (n_cu == 0)
+    return;
+  std::fprintf(stderr,
+               "[rocjitsu] cycle: dispatch %u end — CUs=%u max_cu_cycle=%llu "
+               "delta_this_dispatch=%llu sched_stall=%llu pipe_busy=%llu\n",
+               dispatch_id, n_cu, (unsigned long long)max_cycle,
+               (unsigned long long)sum_delta, (unsigned long long)sched_stall,
+               (unsigned long long)pipe_busy);
 }
 
 void CycleModelPlugin::onAmdgpuWorkgroupDispatched(uint32_t, uint32_t, uint32_t vgpr_count,
@@ -328,6 +359,15 @@ void CycleModelPlugin::onAmdgpuWavefrontHalted(Wavefront &wf) {
   CuCycleModel *cm = cycle_model_for(wf);
   if (!cm || !cm->configured())
     return;
+  // Drive the CU model to quiescence with the full resident wave set still intact, so
+  // this wave's (and its co-resident waves') pending FIFOs are actually issued and
+  // counted. The simdojo cu_clk domain is starved in the passive LD_PRELOAD path (the
+  // functional sim delivers a wave's whole instruction stream and halts it far faster
+  // than the engine services clock edges), so without this drive the pending backlog is
+  // discarded uncounted when drain_wave_at_halt removes the wave below. The passive
+  // variant also force-lands deferred async memory (the MemSys clock is starved too),
+  // so waitcnt gates clear and each wave's post-load tail is issued, not dropped.
+  cm->model().drive_to_quiescence_passive();
   cm->model().drain_wave_at_halt(st->st);
 }
 
