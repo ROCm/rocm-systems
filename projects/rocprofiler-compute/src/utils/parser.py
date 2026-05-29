@@ -18,10 +18,10 @@ from utils.specs import MachineSpecs
 from utils.utils_common import (
     METRIC_ID_RE,
     SUPPORTED_FIELD,
+    convert_filter_blocks_to_panel_ids,
     convert_metric_id_to_panel_info,
     expand_placeholder_ranges,
     normalize_filter_to_str_list,
-    convert_filter_blocks_to_panel_ids,
 )
 
 # ------------------------------------------------------------------------------
@@ -102,7 +102,7 @@ def build_dfs(
                         profile_panel_filter=profile_panel_filter,
                         metric_counters=metric_counters,
                     )
-                    # Filter has excluded every metric in this panel; skip the empty table.
+                    # Filter excluded every metric in this panel; skip the empty table.
                     if data_config["metric"] and df.empty:
                         continue
                     dfs_expressions[table_id] = expressions
@@ -622,18 +622,16 @@ def load_pc_sampling_data_per_kernel(
         dispatch_ids,
     ) in records:
         for dispatch_id in dispatch_ids:
-            rows.append(
-                {
-                    "dispatch_id": dispatch_id,
-                    "code_object_id": code_object_id,
-                    "offset": offset,
-                    "inst_index": inst_index,
-                    "count": count,
-                    "count_issued": count_issued,
-                    "count_stalled": count_stalled,
-                    "stall_reason": stall_reasons,
-                }
-            )
+            rows.append({
+                "dispatch_id": dispatch_id,
+                "code_object_id": code_object_id,
+                "offset": offset,
+                "inst_index": inst_index,
+                "count": count,
+                "count_issued": count_issued,
+                "count_stalled": count_stalled,
+                "stall_reason": stall_reasons,
+            })
 
     df = pd.DataFrame(rows)
     if df.empty:
@@ -672,16 +670,14 @@ def load_pc_sampling_data_per_kernel(
         return sorted(merged_counts.items(), key=lambda item: item[1], reverse=True)
 
     # Group and aggregate
-    df = df.groupby(["code_object_id", "offset", "kernel_id"], as_index=False).agg(
-        {
-            "inst_index": "first",
-            "count": "sum",
-            "count_issued": "sum",
-            "count_stalled": "sum",
-            "stall_reason": merge_stall_reasons,
-            "kernel_name": "first",
-        }
-    )
+    df = df.groupby(["code_object_id", "offset", "kernel_id"], as_index=False).agg({
+        "inst_index": "first",
+        "count": "sum",
+        "count_issued": "sum",
+        "count_stalled": "sum",
+        "stall_reason": merge_stall_reasons,
+        "kernel_name": "first",
+    })
 
     # Filter DataFrame to only include rows matching the requested kernel_name
     df = df[df["kernel_name"] == kernel_name]
@@ -808,7 +804,8 @@ def load_pc_sampling_data(
 
         # Group by Instruction_Comment and aggregate
         grouped_counts = (
-            merged_df.groupby("Instruction_Comment")
+            merged_df
+            .groupby("Instruction_Comment")
             .agg(
                 count=("Instruction_Comment", "count"),
                 instruction=("Instruction", "first"),
