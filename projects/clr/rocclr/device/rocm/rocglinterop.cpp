@@ -78,9 +78,9 @@ bool Init(MESA_INTEROP_KIND Kind) {
 
     if (glx_handle || egl_handle) {
       auto glx_procaddr_fn =
-          reinterpret_cast<PFNGLXGETPROCADDRESSPROC>(dlsym(RTLD_DEFAULT, "glXGetProcAddress"));
+          reinterpret_cast<PFNGLXGETPROCADDRESSPROC>(dlsym(glx_handle, "glXGetProcAddress"));
       auto egl_procaddr_fn =
-          reinterpret_cast<PFNEGLGETPROCADDRESSPROC>(dlsym(RTLD_DEFAULT, "eglGetProcAddress"));
+          reinterpret_cast<PFNEGLGETPROCADDRESSPROC>(dlsym(egl_handle, "eglGetProcAddress"));
 
       if (glx_procaddr_fn) {
         GlxInfo = reinterpret_cast<PFNMESAGLINTEROPGLXQUERYDEVICEINFOPROC*>(
