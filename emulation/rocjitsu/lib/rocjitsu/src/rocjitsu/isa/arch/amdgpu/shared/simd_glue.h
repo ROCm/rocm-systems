@@ -1801,6 +1801,61 @@ template <typename Inst>
   return false;
 }
 
+/// VOP3 binary carry SIMD fast path (sdst-enc forms: add_co / sub_co /
+/// subrev_co / addc_co / subb_co / subbrev_co). Mirrors the VOP2 carry
+/// glue (read incoming VCC as carry-in, run the per-lane carry op via
+/// SimdCarry, merge the per-lane carry-out into a 64-bit mask), but
+/// reads src0/src1 from the VOP3 operand layout and writes the
+/// resulting carry mask into the per-instruction SGPR-pair sdst rather
+/// than wf.vcc(). Inactive-lane bits in the carry mask are preserved
+/// from the incoming VCC, matching the scalar `uint64_t vcc = wf.vcc();
+/// ... inst.sdst.write_scalar64(wf, vcc)` pattern. No abs/neg/omod/
+/// clamp — the scalar bodies ignore modifiers on the integer carry ops.
+template <typename Inst, typename CarryOp>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_binary_vop3_carry_simd(Inst &inst, Wavefront &wf,
+                                                             CarryOp carry_op) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.vdst.simd_capable())
+    return false;
+  using T = uint32_t;
+  constexpr std::size_t W = util::native_width_v<T>;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  // sdst-enc carry ops seed the merged carry word from the incoming VCC so
+  // inactive lanes are preserved through to sdst, matching the scalar
+  // `uint64_t vcc = wf.vcc()` init. The carry-in forms also read each chunk's
+  // VCC bits into a per-lane 0/1 vector that the functor accepts as `cin`.
+  const uint64_t vcc_in = wf.vcc();
+  uint64_t sdst_out = vcc_in;
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto a = read_simd<T>(inst.src0, wf, base);
+    const auto b = read_simd<T>(inst.src1, wf, base);
+    const uint64_t cin_bits = (vcc_in >> base) & chunk_full;
+    alignas(util::native<T>) uint32_t cinbuf[W];
+    for (std::size_t i = 0; i < W; ++i)
+      cinbuf[i] = static_cast<uint32_t>((cin_bits >> i) & 1u);
+    const auto cin = util::load<T>(cinbuf);
+    const auto r = carry_op(a, b, cin);
+    write_simd<T>(inst.vdst, wf, base, r.value, chunk);
+    uint64_t carry_bits = 0;
+    for (std::size_t i = 0; i < W; ++i)
+      if (r.carry[i])
+        carry_bits |= (1ULL << i);
+    sdst_out = (sdst_out & ~(chunk << base)) | ((carry_bits & chunk) << base);
+  }
+  inst.sdst.write_scalar64(wf, sdst_out);
+  return true;
+}
+
+template <typename Inst, typename CarryOp>
+[[nodiscard]] inline bool try_execute_binary_vop3_carry_simd(Inst &, Wavefront &, CarryOp) {
+  return false;
+}
+
 /// VOP3 v_mov_b16 SIMD fast path. Single op (RDNA3+ only), fixed-shape body:
 /// read u32 src0, mask the low 16 bits, convert to f32 (exact for every u16
 /// value), apply the uniform omod (`*2 / *4 / *0.5`) and clamp ([0, 1])
@@ -2187,6 +2242,12 @@ template <FmaMixDst DstMode, typename Inst>
 /// modified `native<float>` and returns `native<float>`; variadic.
 #define ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16(...)                                                     \
   if (::rocjitsu::amdgpu::try_execute_unary_vop3_fp16_simd(inst, wf, __VA_ARGS__))                 \
+  return
+
+/// VOP3 binary carry probe. Functor takes (a, b, cin) and returns a
+/// SimdCarry-shaped struct, same contract as the VOP2 carry path.
+#define ROCJITSU_TRY_SIMD_VOP3_CARRY(...)                                                          \
+  if (::rocjitsu::amdgpu::try_execute_binary_vop3_carry_simd(inst, wf, __VA_ARGS__))               \
   return
 
 /// VOP3 v_mov_b16 probe (RDNA3+ only).
