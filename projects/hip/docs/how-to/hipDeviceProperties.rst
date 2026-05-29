@@ -8,7 +8,6 @@
 HIP Device Properties and Topology on CDNA Architectures
 ==========================================================
 
-
 Understanding GPU device properties is essential for writing performant and
 scalable HIP applications. Modern AMD GPUs such as MI300 (CDNA3) expose a
 a hierarchical, chiplet-based topology with multiple layers of compute, cache, and memory resources.
@@ -18,8 +17,8 @@ Key architectural components include:
 - XCCs (Accelerated Compute Cores)
 - XCDs (Compute Dies)
 - Partitioned L2 cache regions
+- High-bandwidth memory (HBM) channels and subsystems.
 - NUMA-like HBM memory domains
-- High-bandwidth memory channels and subsystems.
 
 This document combines conceptual explanations with HIP and HSA examples to
 help developers understand and leverage these hardware characteristics.
