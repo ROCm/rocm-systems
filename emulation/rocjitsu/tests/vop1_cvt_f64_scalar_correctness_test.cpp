@@ -35,7 +35,7 @@ namespace {
 
 using namespace rocjitsu;
 
-constexpr uint32_t WF_SIZE = 64;
+[[maybe_unused]] constexpr uint32_t WF_SIZE = 64;
 constexpr uint32_t SGPRS_PER_WF = 106;
 constexpr uint32_t VGPRS_PER_WF = 256;
 

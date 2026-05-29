@@ -40,8 +40,8 @@ using namespace rocjitsu;
 constexpr uint32_t WF_SIZE = 64;
 constexpr uint32_t SGPRS_PER_WF = 106;
 constexpr uint32_t VGPRS_PER_WF = 256;
-constexpr uint64_t LO_SENTINEL = 0xDEADBEEFu;
-constexpr uint64_t HI_SENTINEL = 0xFEEDFACEu;
+[[maybe_unused]] constexpr uint64_t LO_SENTINEL = 0xDEADBEEFu;
+[[maybe_unused]] constexpr uint64_t HI_SENTINEL = 0xFEEDFACEu;
 
 // CDNA4 VOP2: opcode[30:25], vdst[24:17], vsrc1[16:9], src0[8:0]. Bit 31 = 0.
 constexpr uint32_t vop2_encode(uint32_t opcode, uint32_t vdst, uint32_t vsrc1, uint32_t src0) {
