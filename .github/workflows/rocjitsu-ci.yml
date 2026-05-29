@@ -70,12 +70,12 @@ jobs:
         run: >
           cmake -B build -G Ninja
           -S emulation/rocjitsu
-          -DCMAKE_C_COMPILER=$ROCM_PATH/lib/llvm/bin/clang
-          -DCMAKE_CXX_COMPILER=$ROCM_PATH/lib/llvm/bin/clang++
+          -DCMAKE_C_COMPILER="$ROCM_PATH/lib/llvm/bin/clang"
+          -DCMAKE_CXX_COMPILER="$ROCM_PATH/lib/llvm/bin/clang++"
           -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
-        run: cmake --build build -j$(nproc)
+        run: cmake --build build
 
       - name: Test
         run: >
