@@ -1063,6 +1063,16 @@ get_bdf_info(const rocprofiler_agent_t* agent)
 // Attempt V2 agent registration with cu_bitmap from DRM for WGP harvesting support.
 // Returns true on success, false if any step fails (caller should fall back to V1).
 //
+// V2 is gated to GFX11+ because the cu_bitmap is only consumed by the SQ-counter
+// WGP iteration path in source/lib/aqlprofile/pm4/pmc_builder.h (bIsWGPcounter11);
+// on GFX9 (MI100/200/300) and GFX10 the bitmap is unused, and a per-process
+// drmOpenRender + amdgpu_device_initialize on the shared /dev/dri/renderD* node
+// serializes on the kernel DRM mutex, inflating CI runtime under parallel loads.
+// gfx_target_version is the KFD-populated numeric encoding
+// (major*10000 + minor*100 + patch) already used elsewhere in this file
+// (see _set_default_agent_names) and across the SDK (pc_sampling, evaluate_ast),
+// so the >= 110000 threshold cleanly selects GFX11 / GFX12 / future families.
+//
 // Only compiled for internal-aqlprofile builds. External-aqlprofile builds
 // (ROCPROFILER_BUILD_AQLPROFILE=OFF) link against the ROCm-release-shipped
 // libhsa-amd-aqlprofile64.so which neither exposes aqlprofile_register_agent_info
@@ -1072,6 +1082,8 @@ get_bdf_info(const rocprofiler_agent_t* agent)
 bool
 try_register_agent_v2(const rocprofiler_agent_t* agent, aqlprofile_agent_handle_t* handle)
 {
+    if(agent->gfx_target_version < 110000) return false;
+
     int drm_fd = drmOpenRender(agent->drm_render_minor);
     if(drm_fd < 0) return false;
 

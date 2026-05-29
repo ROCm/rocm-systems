@@ -41,6 +41,16 @@ namespace
 // rocprofiler-sdk/agent.cpp::try_register_agent_v2), which bypasses this
 // fallback entirely.
 //
+// The cu_bitmap is only consumed by the SQ-counter WGP iteration path in
+// pm4/pmc_builder.h (bIsWGPcounter11), which only runs on GFX11+. On GFX9
+// (MI100/200/300) and GFX10 the bitmap is unused, so the 64-entry DRM scan
+// here would be pure overhead serializing on the kernel DRM mutex under
+// parallel ctest -- skip it. GetGpuId() is the same chip-family resolver
+// used elsewhere in aqlprofile (>= GFX10_GPU_ID for sa_number selection,
+// >= GFX12_GPU_ID for trace status2, etc.); the gpu_id_t enum is ordered
+// so >= GFX11_GPU_ID covers GFX11 / GFX115X / GFX12 / MI450 and excludes
+// the GFX9 family (which sits at enum values 1..5) and GFX10 (=6).
+//
 // Heuristic match: we iterate render nodes /dev/dri/renderD128..renderD191
 // and pick the first one whose (cu_active_number, num_shader_engines,
 // num_shader_arrays_per_engine) matches this AgentInfo. That is unambiguous
@@ -54,6 +64,8 @@ namespace
 void
 populate_cu_bitmap_from_drm(AgentInfo& agent_info)
 {
+    if(Pm4Factory::GetGpuId(agent_info.name) < GFX11_GPU_ID) return;
+
     for(int minor = 128; minor < 192; ++minor)
     {
         char path[64];
