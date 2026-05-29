@@ -39,11 +39,9 @@ Use HIP runtime APIs to query fundamental device attributes:
     printf("Compute Units: %d\n", props.multiProcessorCount);
     printf("L2 Cache Size: %zu\n", props.l2CacheSize);
 
-Notes:
+.. note::
 
-- HIP exposes aggregate properties at the device level
-- Detailed topology (XCC/XCD/NUMA) is not directly exposed
-- Additional insight requires HSA APIs or profiling tools
+   HIP exposes aggregate properties at the device level. Detailed topology (XCC/XCD/NUMA) is not directly exposed. Additional insight requires HSA APIs or profiling tools.
 
 ------------------------------------------------------------
 2. CDNA Topology Overview
