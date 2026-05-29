@@ -26,6 +26,11 @@
 set -e
 
 src_path=$(dirname "$(realpath $0)")/../../
+ASAN_FLAG=""
+if [[ "${ASAN}" == true ]]; then
+    ASAN_FLAG="-DASAN=ON"
+    export HSA_XNACK=1
+fi
 
 cmake \
     -DBUILD_CODE_COVERAGE=${CODE_COV:-OFF} \
@@ -47,6 +52,7 @@ cmake \
     -DUSE_HDP_FLUSH=OFF \
     -DUSE_HDP_FLUSH_HOST_SIDE=OFF \
     -DUSE_SINGLE_NODE=ON \
+    ${ASAN_FLAG} \
     $* $src_path
 cmake --build . --parallel 8
 cmake --install .

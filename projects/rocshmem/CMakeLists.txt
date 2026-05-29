@@ -381,6 +381,13 @@ if (NOT BUILD_TESTS_ONLY)
   if (ASAN)
     message(STATUS "Removing xnack- from GPU_TARGET as these are invalid with ASAN address sanitizer")
     list(FILTER GPU_TARGETS EXCLUDE REGEX ".*:xnack-$")
+
+    # Add ASAN runtime directory to RPATH so executables can find libclang_rt.asan at runtime
+    target_link_options(
+      ${PROJECT_NAME}
+      PUBLIC
+        -Wl,-rpath,${ASAN_RUNTIME_DIR}
+    )
   endif()
 
   if(${ROCM_MAJOR_VERSION} LESS 7)
