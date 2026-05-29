@@ -13,7 +13,7 @@
 struct ncclComm;
 
 /**
- * Check if DDa reduce-scatter is eligible for the given parameters
+ * Check if DDA reduce-scatter is eligible for the given parameters
  */
 bool ncclReduceScatterDdaIpcEligible(
     ncclComm* comm,
@@ -24,7 +24,7 @@ bool ncclReduceScatterDdaIpcEligible(
     ncclRedOp_t op);
 
 /**
- * Execute DDa reduce-scatter operation using IPC
+ * Execute DDA reduce-scatter operation using IPC
  */
 ncclResult_t ncclReduceScatterDdaIpc(
     const void* sendbuff,

@@ -13,7 +13,7 @@
 struct ncclComm;
 
 /**
- * Check if DDa allgather is eligible for the given parameters
+ * Check if DDA allgather is eligible for the given parameters
  */
 bool ncclAllGatherDdaIpcEligible(
     ncclComm* comm,
@@ -23,7 +23,7 @@ bool ncclAllGatherDdaIpcEligible(
     ncclDataType_t datatype);
 
 /**
- * Execute DDa allgather operation using IPC
+ * Execute DDA allgather operation using IPC
  */
 ncclResult_t ncclAllGatherDdaIpc(
     const void* sendbuff,

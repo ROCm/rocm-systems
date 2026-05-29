@@ -13,7 +13,7 @@
 struct ncclComm;
 
 /**
- * Check if DDa alltoall is eligible for the given parameters
+ * Check if DDA alltoall is eligible for the given parameters
  */
 bool ncclAllToAllDdaIpcEligible(
     ncclComm* comm,
@@ -23,7 +23,7 @@ bool ncclAllToAllDdaIpcEligible(
     ncclDataType_t datatype);
 
 /**
- * Execute DDa alltoall operation using IPC
+ * Execute DDA alltoall operation using IPC
  */
 ncclResult_t ncclAllToAllDdaIpc(
     const void* sendbuff,
