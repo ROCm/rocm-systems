@@ -35,7 +35,17 @@ mapped_inst_t map_to_common_type(int einst, int dprate, int derate);
 
 struct wave_t : public WaveDataInternal
 {
-    wave_t(int tg_cu, int tg_simd, int slot, pcinfo_t addr, class Token&, bool exbarw);
+    wave_t(
+        int tg_cu,
+        int tg_simd,
+        int slot,
+        pcinfo_t addr,
+        class Token&,
+        bool exbarw,
+        uint8_t me = 0,
+        uint8_t pipe = 0,
+        uint8_t wg = 0
+    );
 
     int64_t last_state_cycle = 0;
     WaveslotState cur_state = WaveslotState::WS_IDLE;
@@ -51,7 +61,7 @@ struct wave_t : public WaveDataInternal
     void apply_inst(int64_t token_time, int enum_inst, mapped_inst_t mapped, int tt_version);
     void apply_valu_inst(int64_t token_time);
     void apply_immediate(int64_t token_time);
-    void new_pc(int64_t time, int64_t pc_value, class CodeobjTableTranslator& table);
+    void new_pc(int64_t time, int64_t pc_value, CodeobjTableTranslator& table);
 };
 
 using CSRegisterHandler = ::CSRegisterHandler;

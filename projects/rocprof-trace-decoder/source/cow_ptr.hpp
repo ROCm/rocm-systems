@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,25 +22,37 @@
 
 #pragma once
 
-#include "att_lib_wrapper.hpp"
+#include <memory>
+#include <utility>
 
-#include <map>
-#include <vector>
-#include "util.hpp"
-
-namespace rocprofiler
+template <typename T> class CowPtr
 {
-namespace att_wrapper
-{
-namespace OccupancyFile
-{
-using AddressTable = rocprof_trace_decoder::codeobj::CodeobjAddressTranslate;
+public:
+    CowPtr() = default;
 
-void
-OccupancyFile(const Fspath&                                     dir,
-              std::shared_ptr<AddressTable>&                    table,
-              const std::map<size_t, std::vector<occupancy_t>>& occ);
-};  // namespace OccupancyFile
+    const T& read() const
+    {
+        if (!ptr_) return empty();
+        return *ptr_;
+    }
 
-}  // namespace att_wrapper
-}  // namespace rocprofiler
+    T& write()
+    {
+        if (!ptr_)
+            ptr_ = std::make_shared<T>();
+        else if (ptr_.use_count() > 1)
+            ptr_ = std::make_shared<T>(*ptr_);
+        return const_cast<T&>(*ptr_);
+    }
+
+    bool null() const { return !ptr_; }
+
+private:
+    static const T& empty()
+    {
+        static const T value{};
+        return value;
+    }
+
+    std::shared_ptr<const T> ptr_{};
+};

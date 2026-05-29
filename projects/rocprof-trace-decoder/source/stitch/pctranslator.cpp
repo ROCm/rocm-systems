@@ -31,9 +31,9 @@
 PCTranslator::PCTranslator(std::vector<assemblyLinePtr>& _code, std::shared_ptr<ICodeServicer>& _service, int _gfxip) :
 service(_service), code(_code), gfxip(_gfxip)
 {
-    std::unique_lock<SharedMutex> lk(jump_mut);
+    std::unique_lock<SharedMutex> jump_lock(jump_mut);
     {
-        std::unique_lock<SharedMutex> lk(code_mut);
+        std::unique_lock<SharedMutex> code_lock(code_mut);
         for (auto& c : code) addrmap[c->addr] = c;
     }
 }

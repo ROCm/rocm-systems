@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,25 +22,23 @@
 
 #pragma once
 
-#include "att_lib_wrapper.hpp"
-
-#include <map>
+#include <cstddef>
+#include <cstdint>
 #include <vector>
-#include "util.hpp"
 
-namespace rocprofiler
-{
-namespace att_wrapper
-{
-namespace OccupancyFile
-{
-using AddressTable = rocprof_trace_decoder::codeobj::CodeobjAddressTranslate;
+class CSRegisterHandler;
 
-void
-OccupancyFile(const Fspath&                                     dir,
-              std::shared_ptr<AddressTable>&                    table,
-              const std::map<size_t, std::vector<occupancy_t>>& occ);
-};  // namespace OccupancyFile
+namespace gfx9::build_standalone
+{
 
-}  // namespace att_wrapper
-}  // namespace rocprofiler
+struct StatusToken
+{
+    uint64_t bits;
+    uint8_t bytes;
+};
+
+std::vector<StatusToken> build_status_tokens(const CSRegisterHandler& reg);
+
+size_t write_tokens(uint8_t* out, const std::vector<StatusToken>& tokens);
+
+} // namespace gfx9::build_standalone
