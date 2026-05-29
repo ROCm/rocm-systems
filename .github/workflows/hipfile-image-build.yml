@@ -90,7 +90,7 @@ jobs:
       - name: Build NVIDIA image for AIS CI
         run: |
           docker buildx build \
-            -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.ais_ci_${AIS_INPUT_PLATFORM}}" \
+            -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.ais_ci_${AIS_INPUT_PLATFORM}" \
             --target nvidia \
             --build-arg BUILDKIT_INLINE_CACHE=1 \
             --build-arg ROCM_VERSION=${AIS_INPUT_ROCM_VERSION} \
