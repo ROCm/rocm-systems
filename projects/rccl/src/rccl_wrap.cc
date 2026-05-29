@@ -415,7 +415,7 @@ ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
         *algoName = "Direct";
         break;
       case rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER:
-        *algoName = "Hie";
+        *algoName = "Hier";
         break;
 #ifdef ENABLE_WARP_SPEED
       case rcclAddonAlgos_t::RCCL_WARP_SPEED:
