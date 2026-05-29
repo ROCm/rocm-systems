@@ -148,7 +148,11 @@ union ncclLLFifoLine {
 #ifdef ENABLE_WARP_SPEED
 #define MAXCHANNELS 512
 #else
-#define MAXCHANNELS 128
+// Raised from 128 -> 256 to let single- and multi-node configurations request
+// up to 256 channels via NCCL_MAX_NCHANNELS / NCCL_MIN_NCHANNELS. The actual
+// per-call channel count is still picked by the existing tuner; this only
+// lifts the upper bound.
+#define MAXCHANNELS 256
 #endif
 #define CHANNEL_LIMIT 16 // this is used to limit channels for pre MI3xx GPUs
 #define NCCL_MAX_LOCAL_RANKS 72
@@ -741,7 +745,9 @@ typedef ncclDevKernelArgsStorage<(4<<10)> ncclDevKernelArgs4K;
 // 5KB should be sufficient for now
 typedef ncclDevKernelArgs5K ncclDevKernelArgsDefaultStorage;
 #else
-typedef ncclDevKernelArgs4K ncclDevKernelArgsDefaultStorage;
+// 5KB needed so 256-channel non-WarpSpeed builds can fit one batch per channel
+// in the kernel-args buffer (4KB only fits ~252 batches).
+typedef ncclDevKernelArgs5K ncclDevKernelArgsDefaultStorage;
 #endif
 __host__ __device__ constexpr int ncclMaxKernelArgsSize(/*int cudaDriver, */int cudaArch=NCCL_CUDA_ARCH) {
   //return (cudaArch < 700 || cudaDriver < 12010) ? 4<<10 : (32<<10)-4;
