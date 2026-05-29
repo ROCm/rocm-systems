@@ -1952,7 +1952,9 @@ RUNTIME_ENTRY(cl_int, clGetKernelSubGroupInfo,
       }
 
       // Get the subgroup size. GPU devices sub-groups are wavefronts.
-      size_t subGroupSize = as_amd(device)->info().wavefrontWidth_;
+      // Use the kernel's wavefront size — it can differ from the device's
+      // native width when the kernel is built with -mwavefrontsize32/64.
+      size_t subGroupSize = devKernel->workGroupInfo()->wavefrontSize_;
 
       size_t numSubGroups = (workGroupSize + subGroupSize - 1) / subGroupSize;
 
@@ -1967,7 +1969,7 @@ RUNTIME_ENTRY(cl_int, clGetKernelSubGroupInfo,
       return amd::clGetInfo(numSubGroups, param_value_size, param_value, param_value_size_ret);
     }
     case CL_KERNEL_MAX_NUM_SUB_GROUPS: {
-      size_t waveSize = as_amd(device)->info().wavefrontWidth_;
+      size_t waveSize = devKernel->workGroupInfo()->wavefrontSize_;
       size_t numSubGroups = (devKernel->workGroupInfo()->size_ + waveSize - 1) / waveSize;
       return amd::clGetInfo(numSubGroups, param_value_size, param_value, param_value_size_ret);
     }
@@ -1985,7 +1987,7 @@ RUNTIME_ENTRY(cl_int, clGetKernelSubGroupInfo,
       *not_null(param_value_size_ret) = param_value_size;
 
       size_t localSize;
-      localSize = numSubGroups * as_amd(device)->info().wavefrontWidth_;
+      localSize = numSubGroups * devKernel->workGroupInfo()->wavefrontSize_;
       if (localSize > devKernel->workGroupInfo()->size_) {
         ::memset(param_value, '\0', dims * sizeof(size_t));
         return CL_SUCCESS;
