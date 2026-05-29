@@ -42,7 +42,7 @@ class RocpdSchema:
         variables.uuid = f"{uuid}"
         variables.guid = f"{guid}"
 
-        self.supported_schema_versions = libpyrocpd.list_schema_versions(
+        self.supported_schema_versions = libpyrocpd.get_supported_schema_versions(
             libpyrocpd.sql_engine.sqlite3
         )
 
@@ -111,7 +111,7 @@ class RocpdSchema:
 
 
 def get_supported_schema_versions(engine=libpyrocpd.sql_engine.sqlite3):
-    return libpyrocpd.list_schema_versions(engine)
+    return libpyrocpd.get_supported_schema_versions(engine)
 
 
 def main(create=None):

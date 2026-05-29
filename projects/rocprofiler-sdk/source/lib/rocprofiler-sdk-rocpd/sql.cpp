@@ -179,7 +179,6 @@ load_version_file_map(const std::string&       _schema_paths,
                       version_file_map_t&      version_file_map,
                       rocpd_version_triplet_t& latest_version)
 {
-    namespace fs = ::rocpd::sql::fs;
 
     auto _schema_versions_file = std::optional<std::string>{};
     for(const auto& itr : rocprofiler::sdk::parse::tokenize(_schema_paths, ":"))
@@ -401,11 +400,11 @@ rocpd_sql_load_schema(rocpd_sql_engine_t                        engine,
 }
 
 rocpd_status_t
-rocpd_iterate_schema_versions(rocpd_sql_engine_t                 engine,
-                              const char**                       schema_path_hints,
-                              uint64_t                           num_schema_path_hints,
-                              rocpd_iterate_schema_versions_cb_t callback,
-                              void*                              user_data)
+rocpd_get_supported_schema_versions(rocpd_sql_engine_t                       engine,
+                                    const char**                             schema_path_hints,
+                                    uint64_t                                 num_schema_path_hints,
+                                    rocpd_get_supported_schema_versions_cb_t callback,
+                                    void*                                    user_data)
 {
     switch(engine)
     {

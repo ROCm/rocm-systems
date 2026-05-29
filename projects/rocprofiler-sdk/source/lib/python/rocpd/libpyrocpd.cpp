@@ -416,8 +416,8 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                 });
 
     pyrocpd.def(
-        "list_schema_versions",
-        [](rocpd_sql_engine_t engine, const py::object& hints_opt) -> py::list {
+        "get_supported_schema_versions",
+        [](rocpd_sql_engine_t engine, const py::sequence& hints_opt) -> py::list {
             std::vector<std::string> storage;
             std::vector<const char*> hints;
             if(!hints_opt.is_none())
@@ -443,12 +443,12 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                 }
                 return ROCPD_STATUS_SUCCESS;
             };
-            ROCPD_CHECK(rocpd_iterate_schema_versions(
+            ROCPD_CHECK(rocpd_get_supported_schema_versions(
                 engine, hints.empty() ? nullptr : hints.data(), hints.size(), _callback, &out));
             return out;
         },
         py::arg("engine")            = ROCPD_SQL_ENGINE_SQLITE3,
-        py::arg("schema_path_hints") = py::none(),
+        py::arg("schema_path_hints") = py::list{},
         "Return supported rocpd SQL schema versions (from versions.yml) as a list of "
         "schema_version objects. Call str() on each entry to get a \"major.minor.patch\" string.");
 
