@@ -7,6 +7,9 @@ on:
         type: string
       artifact_group:
         type: string
+      package_version:
+        type: string
+        required: true
       cmake_options:
         type: string
 
@@ -73,7 +76,7 @@ jobs:
       - name: Configure Projects
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
-          package_version: ADHOCBUILD
+          package_version: ${{ inputs.package_version }}
           extra_cmake_options: "-DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
           BUILD_DIR: build
         run: |
