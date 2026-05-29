@@ -298,46 +298,41 @@ private:
     }
 
     // Populate active_wgp_indices_[se][sa] for the per-WGP read loop in
-    // bIsWGPcounter11 below.
+    // bIsWGPcounter11 below. With the DRM cu_bitmap (V2 on GFX11+) the
+    // highest set bit caps the WGP range and harvested WGPs are skipped
+    // automatically; otherwise we synthesize a fully-active mask of
+    // wgp_per_sa_ contiguous WGPs.
     //
-    // When the DRM cu_bitmap is available (V2 registration on GFX11+ parts
-    // with (se, sa) inside the kernel ABI window of [NUM_SE][NUM_SA_PER_SE]),
-    // the highest set bit gives the max WGP coordinate to consider, and
-    // harvested WGPs (no CU bits set in their pair-window) are skipped
-    // automatically. That avoids the aliased reads previously produced on
-    // GFX11+ parts with WGP harvesting.
-    //
-    // For any (se, sa) where the bitmap is unavailable (V0/V1 agents,
-    // pre-GFX11 parts, or coordinates outside the DRM ABI window such as
-    // Navi31's SE >= 4), synthesize a fully-active bitmap of wgp_per_sa_
-    // contiguous WGPs (two CU bits per WGP). That collapses the fallback
-    // path into the same loop and preserves pre-fix sequential iteration.
-    //
-    // The (se < bitmap_se_lim && sa < bitmap_sa_lim) guard on the element
-    // read is a hard correctness requirement: aqlprofile_cu_bitmap_t::bits
-    // is a C uint32_t array sized by the kernel-ABI-fixed dimensions, so
-    // reading agent_info->cu_bitmap.bits[se][sa] for out-of-window indices
-    // would be UB on the C array, not a guaranteed zero. Derive the
-    // iteration bounds from the type itself so they cannot drift from the
-    // bitmap layout.
+    // Logical -> raw translation for cu_bitmap indexing (chips with > NUM_SE
+    // logical SEs fold upper banks into upper SA columns; see kernel's
+    // mqd_symmetrically_map_cu_mask in kfd_mqd_manager.c). Without this,
+    // Navi31's logical SE 4-5 silently miss the bitmap and fall back to
+    // the synthesized mask, reinstating the WGP-aliasing bug on those SEs.
+    // The raw-coordinate bounds check is required because cu_bitmap.bits
+    // is a C array sized by the kernel ABI [NUM_SE][NUM_SA_PER_SE]; reading
+    // out of window is UB, not a guaranteed zero.
     void build_active_wgp_indices(const AgentInfo* agent_info)
     {
-        // Size the per-(SE, SA) WGP index tables to the actual chip topology.
-        // This fits Navi31 (6 x 2), MI200 (8 x 1), and future GPUs with larger
-        // SE x SA-per-SE topologies, none of which fit in a hardcoded kMaxSA bound.
+        // Fits Navi31 (6 x 2), MI200 (8 x 1), and any future SE x SA-per-SE
+        // topology too large for a hardcoded kMaxSA.
         active_wgp_indices_.assign(se_number_, std::vector<std::vector<uint32_t>>(sarrays_per_se_));
 
         constexpr uint32_t kMaxWgpPerSa  = 16;
         constexpr uint32_t bitmap_se_lim = std::extent_v<decltype(aqlprofile_cu_bitmap_t::bits), 0>;
         constexpr uint32_t bitmap_sa_lim = std::extent_v<decltype(aqlprofile_cu_bitmap_t::bits), 1>;
+        // Matches the kernel's cu_bitmap_sh_mul (== SAs per SE: always 2 on GFX11).
+        const uint32_t cu_bitmap_sh_mul = sarrays_per_se_;
         for(uint32_t se = 0; se < se_number_; ++se)
         {
             for(uint32_t sa = 0; sa < sarrays_per_se_; ++sa)
             {
                 auto& indices = active_wgp_indices_.at(se).at(sa);
 
-                uint32_t cu_bm = (se < bitmap_se_lim && sa < bitmap_sa_lim)
-                                     ? agent_info->cu_bitmap.bits[se][sa]
+                const uint32_t raw_se = se % bitmap_se_lim;
+                const uint32_t raw_sa = sa + (se / bitmap_se_lim) * cu_bitmap_sh_mul;
+
+                uint32_t cu_bm = (raw_se < bitmap_se_lim && raw_sa < bitmap_sa_lim)
+                                     ? agent_info->cu_bitmap.bits[raw_se][raw_sa]
                                      : 0u;
                 if(cu_bm == 0)
                 {
