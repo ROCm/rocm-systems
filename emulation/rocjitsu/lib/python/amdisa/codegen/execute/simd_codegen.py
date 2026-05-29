@@ -1533,6 +1533,7 @@ SIMD_VOP3_UNARY_FP16: dict[str, str] = {
     "v_floor_f16_vop3": "[](auto a) { return util::floor_simd(a); }",
     "v_trunc_f16_vop3": "[](auto a) { return util::trunc_simd(a); }",
     "v_rndne_f16_vop3": "[](auto a) { return util::rndne_simd(a); }",
+    "v_fract_f16_vop3": "[](auto a) { return a - util::floor_simd(a); }",
     "v_sqrt_f16_vop3": (
         "[](auto a) {"
         " auto r = util::stdx::sqrt(a);"
@@ -1872,6 +1873,53 @@ SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
     # path computes the correct integer-domain result, so SIMD vs scalar
     # diverges on negative-int32 inputs (test demonstrated lane=26 rot=13
     # case). Pending PR 6470 scalar fix.
+    # --- int16 / uint16 mad (low-16 mul-add, result masked to 16 bits) and
+    # mad_legacy_i16 / mad_legacy_u16 (identical scalar bodies; legacy
+    # naming). SIMD operates in int32 width — 16x16 mul + add stays within
+    # 32 bits, sign/zero-extend on inputs and mask 0xFFFF on output.
+    "v_mad_i16_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) {"
+        " using I = util::native<int32_t>;"
+        " auto sa = (util::stdx::static_simd_cast<I>(a & 0xFFFFu) << 16) >> 16;"
+        " auto sb = (util::stdx::static_simd_cast<I>(b & 0xFFFFu) << 16) >> 16;"
+        " auto sc = (util::stdx::static_simd_cast<I>(c & 0xFFFFu) << 16) >> 16;"
+        " return util::stdx::static_simd_cast<util::native<uint32_t>>(sa * sb + sc) & 0xFFFFu; }",
+    ),
+    "v_mad_legacy_i16_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) {"
+        " using I = util::native<int32_t>;"
+        " auto sa = (util::stdx::static_simd_cast<I>(a & 0xFFFFu) << 16) >> 16;"
+        " auto sb = (util::stdx::static_simd_cast<I>(b & 0xFFFFu) << 16) >> 16;"
+        " auto sc = (util::stdx::static_simd_cast<I>(c & 0xFFFFu) << 16) >> 16;"
+        " return util::stdx::static_simd_cast<util::native<uint32_t>>(sa * sb + sc) & 0xFFFFu; }",
+    ),
+    "v_mad_u16_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) {"
+        " return ((a & 0xFFFFu) * (b & 0xFFFFu) + (c & 0xFFFFu)) & 0xFFFFu; }",
+    ),
+    "v_mad_legacy_u16_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) {"
+        " return ((a & 0xFFFFu) * (b & 0xFFFFu) + (c & 0xFFFFu)) & 0xFFFFu; }",
+    ),
+    # Widening 16x16+32 → 32-bit forms. src0/src1 are 16-bit (sign or zero
+    # extended to int32), src2 is full 32-bit, result is 32-bit.
+    "v_mad_i32_i16_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) {"
+        " using I = util::native<int32_t>;"
+        " auto sa = (util::stdx::static_simd_cast<I>(a & 0xFFFFu) << 16) >> 16;"
+        " auto sb = (util::stdx::static_simd_cast<I>(b & 0xFFFFu) << 16) >> 16;"
+        " auto sc = util::stdx::static_simd_cast<I>(c);"
+        " return util::stdx::static_simd_cast<util::native<uint32_t>>(sa * sb + sc); }",
+    ),
+    "v_mad_u32_u16_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) {" " return (a & 0xFFFFu) * (b & 0xFFFFu) + c; }",
+    ),
 }
 
 
