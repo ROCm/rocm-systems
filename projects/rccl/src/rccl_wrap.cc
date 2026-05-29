@@ -735,7 +735,7 @@ ncclResult_t commSetUnrollFactor(struct ncclComm* comm) {
   if( rcclParamUnrollFactor() != -1 ) {
     comm->unroll = rcclParamUnrollFactor(); //-1 to map to 0 based indexing
     if(comm->unroll < NCCL_UNROLL_1 || comm->unroll >= NCCL_NUM_UNROLLS) {
-      WARN("Invalid RCCL_UNROLL_FACTOR %d specified. Valid values are 0 to 2 corresponding to unroll factors of 1, 2, and 4 respectively.", comm->unroll);
+      WARN("Invalid RCCL_UNROLL_FACTOR %d specified. Valid values are 0 to %d corresponding to unroll factors of 1, 2, 4, 8, and 16 respectively.", comm->unroll, NCCL_NUM_UNROLLS - 1);
       return ncclInvalidArgument;
     }
     INFO(NCCL_INIT, "RCCL Unroll Factor (user set): %d", (int) (pow(2.0, (double)comm->unroll)));
