@@ -3,6 +3,7 @@ set(SUBCOMMAND_FILES
     bad_pages.py
     default.py
     event.py
+    fabric.py
     firmware.py
     list_devices.py
     metric.py
