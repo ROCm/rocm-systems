@@ -3844,13 +3844,6 @@ hsa_status_t Runtime::VMemoryHandleMap(void* va, size_t size, size_t in_offset,
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
-  if (!memoryHandle->imported) {
-   auto *agent = memoryHandle->agentOwner();
-
-  if (agent->device_type() == core::Agent::DeviceType::kAmdCpuDevice)
-    return HSA_STATUS_ERROR_INVALID_AGENT;
-  }
-
   uint64_t offset = 0;
   // Register the mapping
   mapped_handle_map_.emplace(std::piecewise_construct, std::forward_as_tuple(va),
@@ -4070,7 +4063,7 @@ Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
 }
 
 Runtime::MemoryHandle::~MemoryHandle() {
-  if (shareable_handle.handle != 0)
+  if (shareable_handle.handle != 0 && region != nullptr)
     agentOwner()->driver().DestroyShareableHandle(&shareable_handle);
 
   if (dmabuf_fd != -1)
@@ -4292,6 +4285,7 @@ hsa_status_t Runtime::VMemoryExportFabricHandle(hsa_fabric_handle_t* fabric_hand
                                                hsa_amd_vmem_alloc_handle_t handle,
                                                 uint64_t flags) {
   (void)flags;
+  std::lock_guard<std::shared_mutex> lock(memory_lock_);
   MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(handle));
   if (memoryHandle == nullptr) {
     debug_warning(false && "Can't find memory handle");
