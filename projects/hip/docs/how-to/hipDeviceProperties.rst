@@ -246,10 +246,6 @@ In multi-XCC configurations:
 - Each XCC may execute workloads at different times
 - Profiling tools often report only master XCC timing
 
-Future enhancements include:
-
-- Per-XCC timestamp collection
-- Aggregated execution timing (min start, max end)
 
 ------------------------------------------------------------
 Optimization Strategy
