@@ -1107,6 +1107,38 @@ SIMD_VOP3P_PK_BINARY_INT: dict[str, str] = {
     ),
 }
 
+# VOP3P packed-16 integer ternary (pk_mad_i16 / pk_mad_u16). Same default
+# packing gate as the binary table (op_sel/op_sel_hi/op_sel_hi_2). Scalar
+# truncates to 16 bits via uint16_t cast, so the SIMD path masks each half
+# to 16 bits before pack.
+SIMD_VOP3P_PK_TERNARY_INT: dict[str, str] = {
+    "v_pk_mad_i16_vop3p": (
+        "[](auto a, auto b, auto c) {"
+        " using I = util::native<int32_t>;"
+        " auto a_lo = (util::stdx::static_simd_cast<I>(a & 0xFFFFu) << 16) >> 16;"
+        " auto a_hi = (util::stdx::static_simd_cast<I>(a >> 16) << 16) >> 16;"
+        " auto b_lo = (util::stdx::static_simd_cast<I>(b & 0xFFFFu) << 16) >> 16;"
+        " auto b_hi = (util::stdx::static_simd_cast<I>(b >> 16) << 16) >> 16;"
+        " auto c_lo = (util::stdx::static_simd_cast<I>(c & 0xFFFFu) << 16) >> 16;"
+        " auto c_hi = (util::stdx::static_simd_cast<I>(c >> 16) << 16) >> 16;"
+        " auto rlo = util::stdx::static_simd_cast<util::native<uint32_t>>(a_lo * b_lo + c_lo) & 0xFFFFu;"
+        " auto rhi = util::stdx::static_simd_cast<util::native<uint32_t>>(a_hi * b_hi + c_hi) & 0xFFFFu;"
+        " return rlo | (rhi << 16); }"
+    ),
+    "v_pk_mad_u16_vop3p": (
+        "[](auto a, auto b, auto c) {"
+        " auto a_lo = a & 0xFFFFu;"
+        " auto a_hi = a >> 16;"
+        " auto b_lo = b & 0xFFFFu;"
+        " auto b_hi = b >> 16;"
+        " auto c_lo = c & 0xFFFFu;"
+        " auto c_hi = c >> 16;"
+        " auto rlo = (a_lo * b_lo + c_lo) & 0xFFFFu;"
+        " auto rhi = (a_hi * b_hi + c_hi) & 0xFFFFu;"
+        " return rlo | (rhi << 16); }"
+    ),
+}
+
 
 # --- VOPC compare -> VCC ---------------------------------------------------
 #
@@ -2185,6 +2217,9 @@ def simd_probe_line(template_name: str) -> str | None:
     specpk = SIMD_VOP3P_PK_BINARY_INT.get(template_name)
     if specpk is not None:
         return f"  ROCJITSU_TRY_SIMD_VOP3P_PK_BINARY_INT({specpk});"
+    specpkt = SIMD_VOP3P_PK_TERNARY_INT.get(template_name)
+    if specpkt is not None:
+        return f"  ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_INT({specpkt});"
     # VOP3P fma_mix / mad_mix (six ops, three destination shapes). Same body
     # for all; the routing picks the matching glue specialization.
     if template_name in SIMD_VOP3P_FMA_MIX_F32:
