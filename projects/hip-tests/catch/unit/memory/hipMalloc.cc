@@ -165,27 +165,22 @@ HIP_TEST_CASE(Unit_hipMalloc_Allocate90PercentOfDeviceMemory) {
 /**
  * Test Description
  * ------------------------
- * - APU-only. Allocates a single device buffer expected to exceed the
- *   dedicated-VRAM carveout, then exercises it with memory operations
- *   (memset, copy back, verify head and tail). Validates that hipMalloc
- *   honours the spill path for large allocations on unified memory and
- *   that the resulting buffer remains accessible for those operations.
+ * - Allocates a single device buffer large enough to exercise the spill
+ *   path into non-local (GART) memory, then validates it with memory
+ *   operations (memset, copy back, verify head and tail). Exercises the
+ *   spill on APUs whose dedicated-VRAM carveout is smaller than the
+ *   request, and on dGPUs whose VRAM is smaller than the request.
  * Test source
  * ------------------------
  * - unit/memory/hipMalloc.cc
  */
-HIP_TEST_CASE(Unit_hipMalloc_Positive_APU_LargeAllocSpill) {
+HIP_TEST_CASE(Unit_hipMalloc_Positive_LargeAllocSpill) {
   hipDeviceProp_t prop{};
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
-  if (!prop.integrated) {
-    HIP_SKIP_TEST("dGPU --- APU spill regression test does not apply");
-    return;
-  }
-  // Assumes the dedicated-VRAM carveout is smaller than 5 GiB.
   constexpr size_t size = static_cast<size_t>(5) << 30;
   constexpr size_t headroom = static_cast<size_t>(1) << 30;
   if (prop.totalGlobalMem < size + headroom) {
-    HIP_SKIP_TEST("APU totalGlobalMem too small for this allocation plus headroom");
+    HIP_SKIP_TEST("totalGlobalMem too small for this allocation plus headroom");
     return;
   }
 

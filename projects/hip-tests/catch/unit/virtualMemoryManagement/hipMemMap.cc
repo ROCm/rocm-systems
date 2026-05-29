@@ -704,23 +704,19 @@ HIP_TEST_CASE(Unit_hipMemMap_Capture) {
 /**
  * Test Description
  * ------------------------
- * - APU-only. Reserves a VA, creates a physical handle expected to exceed
- *   the dedicated-VRAM carveout, maps it, grants access, and exercises the
- *   buffer end-to-end (memset, copy back, verify head and tail). Mirrors
- *   Unit_hipMalloc_Positive_APU_LargeAllocSpill but through the VMEM API
- *   path that hipGraphAddMemAllocNode ultimately uses, so it guards the
- *   same spill behaviour for graph-based allocations.
+ * - Reserves a VA, creates a physical handle large enough to exercise the
+ *   spill path into non-local (GART) memory, maps it, grants access, and
+ *   exercises the buffer end-to-end (memset, copy back, verify head and
+ *   tail). Mirrors Unit_hipMalloc_Positive_LargeAllocSpill but through the
+ *   VMEM API path that hipGraphAddMemAllocNode ultimately uses, so it
+ *   guards the same spill behaviour for graph-based allocations.
  * Test source
  * ------------------------
  * - unit/virtualMemoryManagement/hipMemMap.cc
  */
-HIP_TEST_CASE(Unit_hipMemMap_Positive_APU_LargeAllocSpill) {
+HIP_TEST_CASE(Unit_hipMemMap_Positive_LargeAllocSpill) {
   hipDeviceProp_t prop{};
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
-  if (!prop.integrated) {
-    HIP_SKIP_TEST("dGPU --- APU spill regression test does not apply");
-    return;
-  }
   int vmm_supported = 0;
   HIP_CHECK(hipDeviceGetAttribute(&vmm_supported,
                                   hipDeviceAttributeVirtualMemoryManagementSupported, 0));
@@ -728,11 +724,10 @@ HIP_TEST_CASE(Unit_hipMemMap_Positive_APU_LargeAllocSpill) {
     HIP_SKIP_TEST("Device does not support virtual memory management");
     return;
   }
-  // Assumes the dedicated-VRAM carveout is smaller than 5 GiB.
   constexpr size_t requested = static_cast<size_t>(5) << 30;
   constexpr size_t headroom = static_cast<size_t>(1) << 30;
   if (prop.totalGlobalMem < requested + headroom) {
-    HIP_SKIP_TEST("APU totalGlobalMem too small for this allocation plus headroom");
+    HIP_SKIP_TEST("totalGlobalMem too small for this allocation plus headroom");
     return;
   }
 
