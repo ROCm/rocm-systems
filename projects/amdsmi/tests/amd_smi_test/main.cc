@@ -38,6 +38,7 @@
 #include "functional/gpu_partition_metrics_read.h"
 #include "functional/hw_topology_read.h"
 #include "functional/id_info_read.h"
+#include "functional/ifoe_info_read.h"
 #include "functional/mem_page_info_read.h"
 #include "functional/mem_util_read.h"
 #include "functional/memory_read_write.h"
@@ -331,6 +332,11 @@ TEST(amdsmitstReadWrite, TestMemoryReadWrite) {
 
 TEST(amdsmitstReadOnly, TestFabricRead) {
   TestFabricRead tst;
+  RunGenericTest(&tst);
+}
+
+TEST(amdsmitstReadOnly, TestIfoeInfoRead) {
+  TestIfoeInfoRead tst;
   RunGenericTest(&tst);
 }
 
