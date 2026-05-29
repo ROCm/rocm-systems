@@ -9,9 +9,9 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 # top-level rocprofiler-compute project. The runtime "native tool" path
 # (rocprof-compute compiling src/lib standalone at first use) does not have
 # the parent cmake/ dir and is not an ASAN target.
-set(_rpc_sanitizers_module "${CMAKE_SOURCE_DIR}/cmake/sanitizers.cmake")
-if(EXISTS "${_rpc_sanitizers_module}")
-    include("${_rpc_sanitizers_module}")
+set(rocprofiler_compute_sanitizers_module "${CMAKE_SOURCE_DIR}/cmake/sanitizers.cmake")
+if(EXISTS "${rocprofiler_compute_sanitizers_module}")
+    include("${rocprofiler_compute_sanitizers_module}")
     enable_sanitizer()
 endif()
 

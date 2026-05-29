@@ -5,7 +5,7 @@ include_guard(GLOBAL)
 # promoted over the passed variable so TheRock-driven builds have a single source
 # of truth.
 function(resolve_sanitizer out_var)
-    set(_san_valid
+    set(sanitizer_valid
         ""
         "OFF"
         "ASAN"
@@ -14,14 +14,14 @@ function(resolve_sanitizer out_var)
     )
 
     # Validated before promotion so the error names THEROCK_SANITIZER, not ${out_var}.
-    if(DEFINED THEROCK_SANITIZER AND NOT THEROCK_SANITIZER IN_LIST _san_valid)
+    if(DEFINED THEROCK_SANITIZER AND NOT THEROCK_SANITIZER IN_LIST sanitizer_valid)
         message(
             FATAL_ERROR
             "THEROCK_SANITIZER='${THEROCK_SANITIZER}' is not one of: OFF, ASAN, HOST_ASAN, TSAN"
         )
     endif()
 
-    set(_san_provenance "${out_var}")
+    set(sanitizer_provenance "${out_var}")
     if(DEFINED THEROCK_SANITIZER AND NOT THEROCK_SANITIZER STREQUAL "")
         set(${out_var}
             "${THEROCK_SANITIZER}"
@@ -29,7 +29,7 @@ function(resolve_sanitizer out_var)
             "Sanitizer for the native tool library (driven by THEROCK_SANITIZER)"
             FORCE
         )
-        set(_san_provenance "THEROCK_SANITIZER")
+        set(sanitizer_provenance "THEROCK_SANITIZER")
     endif()
 
     # Normalize OFF -> "" so downstream code only tests for emptiness.
@@ -37,7 +37,7 @@ function(resolve_sanitizer out_var)
         set(${out_var} "" CACHE STRING "" FORCE)
     endif()
 
-    if(NOT ${out_var} IN_LIST _san_valid)
+    if(NOT ${out_var} IN_LIST sanitizer_valid)
         message(
             FATAL_ERROR
             "${out_var}='${${out_var}}' is not one of: OFF, ASAN, HOST_ASAN, TSAN"
@@ -54,7 +54,7 @@ function(resolve_sanitizer out_var)
     endif()
 
     if(${out_var})
-        message(STATUS "Sanitizer: ${${out_var}} (from ${_san_provenance})")
+        message(STATUS "Sanitizer: ${${out_var}} (from ${sanitizer_provenance})")
     else()
         message(STATUS "Sanitizer: OFF")
     endif()

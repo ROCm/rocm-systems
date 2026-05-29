@@ -30,7 +30,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added backward compatibility for live attach mode to work with older ROCm 7.x.x releases.
 
-* Added opt-in sanitizer builds via CMake ``-DENABLE_SANITIZER=ASAN|HOST_ASAN|TSAN`` for the native ``rocprofiler-compute-tool`` library, including compiler flag wiring, GPU-target ``xnack+`` rewrite for full ASAN/TSAN, and ctest launcher environment defaults. Defaults to ``OFF``; non-sanitizer builds are unaffected.
+* Added opt-in sanitizer builds via CMake ``-DENABLE_SANITIZER=ASAN|HOST_ASAN|TSAN``. Defaults to ``OFF``; non-sanitizer builds are unaffected.
 
 ### Changed
 
