@@ -53,12 +53,13 @@ struct Case {
   uint32_t opcode;
 };
 
-const std::array<Case, 5> kCases = {{
+const std::array<Case, 6> kCases = {{
     {"v_ceil_f16_vop3", 389},
     {"v_floor_f16_vop3", 388},
     {"v_trunc_f16_vop3", 390},
     {"v_rndne_f16_vop3", 391},
     {"v_sqrt_f16_vop3", 382},
+    {"v_fract_f16_vop3", 392},
 }};
 
 // f16 inputs across every IEEE class + values that exercise clamp / omod

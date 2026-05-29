@@ -47,11 +47,9 @@ struct Case {
   uint32_t opcode;
 };
 
-// CDNA4-decodable VOP3 integer 3-source ops (the original Slice T set plus
-// the Slice AE int min3/max3/med3 family added 2026-05-29). v_xor3_b32 is
-// RDNA-only so omitted here even though the SIMD probe ships for cross-ISA
-// correctness.
-const std::array<Case, 19> kCases = {{
+// CDNA4-decodable VOP3 integer 3-source ops. v_xor3_b32 is RDNA-only so
+// omitted here even though the SIMD probe ships for cross-ISA correctness.
+const std::array<Case, 25> kCases = {{
     {"v_add3_u32_vop3", 511},
     {"v_or3_b32_vop3", 514},
     {"v_lshl_add_u32_vop3", 509},
@@ -72,6 +70,13 @@ const std::array<Case, 19> kCases = {{
     {"v_min3_i16_vop3", 501},
     {"v_max3_i16_vop3", 504},
     {"v_med3_i16_vop3", 507},
+    // 16-bit mad family
+    {"v_mad_i16_vop3", 517},
+    {"v_mad_u16_vop3", 516},
+    {"v_mad_legacy_i16_vop3", 492},
+    {"v_mad_legacy_u16_vop3", 491},
+    {"v_mad_i32_i16_vop3", 498},
+    {"v_mad_u32_u16_vop3", 497},
 }};
 
 // 14 mixed uint32 values; shift-count cases include small (<32) and full-low
