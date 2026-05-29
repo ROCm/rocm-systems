@@ -2243,53 +2243,78 @@ void BlitSdma<useGCR, scopeFields>::BuildWaitSignalCopyCommand(
     const bool do_wait = is_first && (wait_signal != nullptr);
     const bool do_signal = is_last && (signal_signal != nullptr);
 
-    SDMA_PKT_COPY_LINEAR_WAITSIGNAL_GFX1250* pkt =
-        reinterpret_cast<SDMA_PKT_COPY_LINEAR_WAITSIGNAL_GFX1250*>(cmd_addr);
-    memset(pkt, 0, sizeof(SDMA_PKT_COPY_LINEAR_WAITSIGNAL_GFX1250));
+    uint32_t pkt_dwords = 1 + 6;
+    if (do_wait) pkt_dwords += 7;
+    if (do_signal) pkt_dwords += 5;
 
-    pkt->HEADER_UNION.op = SDMA_OP_COPY;
-    pkt->HEADER_UNION.sub_op = SDMA_SUBOP_COPY_LINEAR;
-    pkt->HEADER_UNION.wait = do_wait ? 1 : 0;
-    pkt->HEADER_UNION.signal = do_signal ? 1 : 0;
+    SDMA_PKT_COPY_LINEAR_WAITSIGNAL_GFX1250 pkt = {};
+    pkt.HEADER_UNION.op = SDMA_OP_COPY;
+    pkt.HEADER_UNION.sub_op = SDMA_SUBOP_COPY_LINEAR;
+    pkt.HEADER_UNION.wait = do_wait ? 1 : 0;
+    pkt.HEADER_UNION.signal = do_signal ? 1 : 0;
 
     if (do_wait) {
-      pkt->WAIT_FUNCTION_UNION.wait_function = 0x3;  // Equal
+      pkt.WAIT_FUNCTION_UNION.wait_function = 0x3;  // Equal
       void* wait_addr = const_cast<core::Signal*>(wait_signal)->ValueLocation();
-      pkt->WAIT_ADDR_LO_UNION.wait_addr_31_3 = ptrlow32(wait_addr) >> 3;
-      pkt->WAIT_ADDR_HI_UNION.wait_addr_63_32 = ptrhigh32(wait_addr);
-      pkt->WAIT_REFERENCE_LO_UNION.wait_reference_31_0 = 0;
-      pkt->WAIT_REFERENCE_HI_UNION.wait_reference_63_32 = 0;
-      pkt->WAIT_MASK_LO_UNION.wait_mask_31_0 = 0xffffffff;
-      pkt->WAIT_MASK_HI_UNION.wait_mask_63_32 = 0xffffffff;
+      pkt.WAIT_ADDR_LO_UNION.wait_addr_31_3 = ptrlow32(wait_addr) >> 3;
+      pkt.WAIT_ADDR_HI_UNION.wait_addr_63_32 = ptrhigh32(wait_addr);
+      pkt.WAIT_REFERENCE_LO_UNION.wait_reference_31_0 = 0;
+      pkt.WAIT_REFERENCE_HI_UNION.wait_reference_63_32 = 0;
+      pkt.WAIT_MASK_LO_UNION.wait_mask_31_0 = 0xffffffff;
+      pkt.WAIT_MASK_HI_UNION.wait_mask_63_32 = 0xffffffff;
     }
 
-    pkt->COPY_COUNT_UNION.copy_count = copy_size - 1;
-    pkt->COPY_PARAMETER_UNION.dst_scope = SDMA_MEMORY_SCOPE_SYS;
-    pkt->COPY_PARAMETER_UNION.src_scope = SDMA_MEMORY_SCOPE_SYS;
+    pkt.COPY_COUNT_UNION.copy_count = copy_size - 1;
+    pkt.COPY_PARAMETER_UNION.dst_scope = SDMA_MEMORY_SCOPE_SYS;
+    pkt.COPY_PARAMETER_UNION.src_scope = SDMA_MEMORY_SCOPE_SYS;
 
     const char* cur_src = reinterpret_cast<const char*>(src) + cur_size;
     char* cur_dst = reinterpret_cast<char*>(dst) + cur_size;
-    pkt->SRC_ADDR_LO_UNION.src_addr_31_0 = ptrlow32(cur_src);
-    pkt->SRC_ADDR_HI_UNION.src_addr_63_32 = ptrhigh32(cur_src);
-    pkt->DST_ADDR_LO_UNION.dst_addr_31_0 = ptrlow32(cur_dst);
-    pkt->DST_ADDR_HI_UNION.dst_addr_63_32 = ptrhigh32(cur_dst);
+    pkt.SRC_ADDR_LO_UNION.src_addr_31_0 = ptrlow32(cur_src);
+    pkt.SRC_ADDR_HI_UNION.src_addr_63_32 = ptrhigh32(cur_src);
+    pkt.DST_ADDR_LO_UNION.dst_addr_31_0 = ptrlow32(cur_dst);
+    pkt.DST_ADDR_HI_UNION.dst_addr_63_32 = ptrhigh32(cur_dst);
 
     if (do_signal) {
-      pkt->SIGNAL_OPERATION_UNION.signal_operation = 0x70;  // 64b sub
-      pkt->SIGNAL_OPERATION_UNION.signal_scope = SDMA_MEMORY_SCOPE_SYS;
+      pkt.SIGNAL_OPERATION_UNION.signal_operation = 0x70;  // 64b sub
+      pkt.SIGNAL_OPERATION_UNION.signal_scope = SDMA_MEMORY_SCOPE_SYS;
       void* sig_addr = signal_signal->ValueLocation();
-      pkt->SIGNAL_ADDR_LO_UNION.signal_addr_31_3 = ptrlow32(sig_addr) >> 3;
-      pkt->SIGNAL_ADDR_HI_UNION.signal_addr_63_32 = ptrhigh32(sig_addr);
-      pkt->SIGNAL_DATA_LO_UNION.signal_data_31_0 = 1;
-      pkt->SIGNAL_DATA_HI_UNION.signal_data_63_32 = 0;
+      pkt.SIGNAL_ADDR_LO_UNION.signal_addr_31_3 = ptrlow32(sig_addr) >> 3;
+      pkt.SIGNAL_ADDR_HI_UNION.signal_addr_63_32 = ptrhigh32(sig_addr);
+      pkt.SIGNAL_DATA_LO_UNION.signal_data_31_0 = 1;
+      pkt.SIGNAL_DATA_HI_UNION.signal_data_63_32 = 0;
     }
 
-    // Advance by the actual DW count used for this packet variant.
-    // Base copy is DW8-DW13 (6 DWs for count+param+src+dst), header is DW0.
-    // Total: 1 (header) + wait_dws + 6 (copy) + signal_dws
-    uint32_t pkt_dwords = 1 + 6;
-    if (do_wait) pkt_dwords += 7;   // DW1-DW7
-    if (do_signal) pkt_dwords += 5; // DW14-DW18
+    uint32_t* pkt_dw = reinterpret_cast<uint32_t*>(cmd_addr);
+    memset(pkt_dw, 0, pkt_dwords * sizeof(uint32_t));
+
+    // The gfx1250 packet is variable length: when WAIT=0, the copy DWs start
+    // immediately after the header, and SIGNAL DWs follow the copy DWs.
+    uint32_t dw = 0;
+    pkt_dw[dw++] = pkt.HEADER_UNION.DW_0_DATA;
+    if (do_wait) {
+      pkt_dw[dw++] = pkt.WAIT_FUNCTION_UNION.DW_1_DATA;
+      pkt_dw[dw++] = pkt.WAIT_ADDR_LO_UNION.DW_2_DATA;
+      pkt_dw[dw++] = pkt.WAIT_ADDR_HI_UNION.DW_3_DATA;
+      pkt_dw[dw++] = pkt.WAIT_REFERENCE_LO_UNION.DW_4_DATA;
+      pkt_dw[dw++] = pkt.WAIT_REFERENCE_HI_UNION.DW_5_DATA;
+      pkt_dw[dw++] = pkt.WAIT_MASK_LO_UNION.DW_6_DATA;
+      pkt_dw[dw++] = pkt.WAIT_MASK_HI_UNION.DW_7_DATA;
+    }
+    pkt_dw[dw++] = pkt.COPY_COUNT_UNION.DW_8_DATA;
+    pkt_dw[dw++] = pkt.COPY_PARAMETER_UNION.DW_9_DATA;
+    pkt_dw[dw++] = pkt.SRC_ADDR_LO_UNION.DW_10_DATA;
+    pkt_dw[dw++] = pkt.SRC_ADDR_HI_UNION.DW_11_DATA;
+    pkt_dw[dw++] = pkt.DST_ADDR_LO_UNION.DW_12_DATA;
+    pkt_dw[dw++] = pkt.DST_ADDR_HI_UNION.DW_13_DATA;
+    if (do_signal) {
+      pkt_dw[dw++] = pkt.SIGNAL_OPERATION_UNION.DW_14_DATA;
+      pkt_dw[dw++] = pkt.SIGNAL_ADDR_LO_UNION.DW_15_DATA;
+      pkt_dw[dw++] = pkt.SIGNAL_ADDR_HI_UNION.DW_16_DATA;
+      pkt_dw[dw++] = pkt.SIGNAL_DATA_LO_UNION.DW_17_DATA;
+      pkt_dw[dw++] = pkt.SIGNAL_DATA_HI_UNION.DW_18_DATA;
+    }
+    assert(dw == pkt_dwords);
     cmd_addr += pkt_dwords * sizeof(uint32_t);
     cur_size += copy_size;
   }
@@ -2317,45 +2342,71 @@ void BlitSdma<useGCR, scopeFields>::BuildWaitSignalSwapCommand(
     const char* p_a = reinterpret_cast<const char*>(addr_a) + cur_a;
     const char* p_b = reinterpret_cast<const char*>(addr_b) + cur_b;
 
-    // gfx1250 packet — single COUNT, addr_b stored as full 32-bit pointer.
-    SDMA_PKT_COPY_LINEAR_SWAP_WAITSIGNAL_GFX1250* pkt =
-        reinterpret_cast<SDMA_PKT_COPY_LINEAR_SWAP_WAITSIGNAL_GFX1250*>(cmd_addr);
-    memset(pkt, 0, sizeof(SDMA_PKT_COPY_LINEAR_SWAP_WAITSIGNAL_GFX1250));
+    uint32_t pkt_dwords = 1 + 6;
+    if (do_wait) pkt_dwords += 7;
+    if (do_signal) pkt_dwords += 5;
 
-    pkt->HEADER_UNION.op     = SDMA_OP_COPY;
-    pkt->HEADER_UNION.sub_op = SDMA_SUBOP_COPY_SWAP;
-    pkt->HEADER_UNION.wait   = do_wait   ? 1 : 0;
-    pkt->HEADER_UNION.signal = do_signal ? 1 : 0;
+    // gfx1250 packet: single COUNT, addr_b stored as full 32-bit pointer.
+    SDMA_PKT_COPY_LINEAR_SWAP_WAITSIGNAL_GFX1250 pkt = {};
+    pkt.HEADER_UNION.op     = SDMA_OP_COPY;
+    pkt.HEADER_UNION.sub_op = SDMA_SUBOP_COPY_SWAP;
+    pkt.HEADER_UNION.wait   = do_wait   ? 1 : 0;
+    pkt.HEADER_UNION.signal = do_signal ? 1 : 0;
 
     if (do_wait) {
-      pkt->WAIT_FUNCTION_UNION.wait_function  = 0x3;  // Equal
+      pkt.WAIT_FUNCTION_UNION.wait_function  = 0x3;  // Equal
       void* wa = const_cast<core::Signal*>(wait_signal)->ValueLocation();
-      pkt->WAIT_ADDR_LO_UNION.wait_addr_31_3  = ptrlow32(wa) >> 3;
-      pkt->WAIT_ADDR_HI_UNION.wait_addr_63_32 = ptrhigh32(wa);
-      pkt->WAIT_MASK_LO_UNION.wait_mask_31_0  = 0xffffffff;
-      pkt->WAIT_MASK_HI_UNION.wait_mask_63_32 = 0xffffffff;
+      pkt.WAIT_ADDR_LO_UNION.wait_addr_31_3  = ptrlow32(wa) >> 3;
+      pkt.WAIT_ADDR_HI_UNION.wait_addr_63_32 = ptrhigh32(wa);
+      pkt.WAIT_MASK_LO_UNION.wait_mask_31_0  = 0xffffffff;
+      pkt.WAIT_MASK_HI_UNION.wait_mask_63_32 = 0xffffffff;
     }
 
-    pkt->COUNT_UNION.count                    = chunk_a - 1;
-    pkt->COPY_PARAMETER_UNION.scope_a         = SDMA_MEMORY_SCOPE_SYS;
-    pkt->COPY_PARAMETER_UNION.scope_b         = SDMA_MEMORY_SCOPE_SYS;
-    pkt->ADDR_A_LO_UNION.addr_a_31_0          = ptrlow32(p_a);
-    pkt->ADDR_A_HI_UNION.addr_a_63_32         = ptrhigh32(p_a);
-    pkt->ADDR_B_LO_UNION.addr_b_31_0          = ptrlow32(p_b);
-    pkt->ADDR_B_HI_UNION.addr_b_63_32         = ptrhigh32(p_b);
+    pkt.COUNT_UNION.count                    = chunk_a - 1;
+    pkt.COPY_PARAMETER_UNION.scope_a         = SDMA_MEMORY_SCOPE_SYS;
+    pkt.COPY_PARAMETER_UNION.scope_b         = SDMA_MEMORY_SCOPE_SYS;
+    pkt.ADDR_A_LO_UNION.addr_a_31_0          = ptrlow32(p_a);
+    pkt.ADDR_A_HI_UNION.addr_a_63_32         = ptrhigh32(p_a);
+    pkt.ADDR_B_LO_UNION.addr_b_31_0          = ptrlow32(p_b);
+    pkt.ADDR_B_HI_UNION.addr_b_63_32         = ptrhigh32(p_b);
 
     if (do_signal) {
-      pkt->SIGNAL_OPERATION_UNION.signal_operation = 0x70;  // 64b sub
-      pkt->SIGNAL_OPERATION_UNION.signal_scope     = SDMA_MEMORY_SCOPE_SYS;
+      pkt.SIGNAL_OPERATION_UNION.signal_operation = 0x70;  // 64b sub
+      pkt.SIGNAL_OPERATION_UNION.signal_scope     = SDMA_MEMORY_SCOPE_SYS;
       void* sa = signal_signal->ValueLocation();
-      pkt->SIGNAL_ADDR_LO_UNION.signal_addr_31_3   = ptrlow32(sa) >> 3;
-      pkt->SIGNAL_ADDR_HI_UNION.signal_addr_63_32  = ptrhigh32(sa);
-      pkt->SIGNAL_DATA_LO_UNION.signal_data_31_0   = 1;
+      pkt.SIGNAL_ADDR_LO_UNION.signal_addr_31_3   = ptrlow32(sa) >> 3;
+      pkt.SIGNAL_ADDR_HI_UNION.signal_addr_63_32  = ptrhigh32(sa);
+      pkt.SIGNAL_DATA_LO_UNION.signal_data_31_0   = 1;
     }
 
-    uint32_t pkt_dwords = 1 + 6;  // header + copy (6 DWs for gfx1250)
-    if (do_wait)   pkt_dwords += 7;
-    if (do_signal) pkt_dwords += 5;
+    uint32_t* pkt_dw = reinterpret_cast<uint32_t*>(cmd_addr);
+    memset(pkt_dw, 0, pkt_dwords * sizeof(uint32_t));
+
+    uint32_t dw = 0;
+    pkt_dw[dw++] = pkt.HEADER_UNION.DW_0_DATA;
+    if (do_wait) {
+      pkt_dw[dw++] = pkt.WAIT_FUNCTION_UNION.DW_1_DATA;
+      pkt_dw[dw++] = pkt.WAIT_ADDR_LO_UNION.DW_2_DATA;
+      pkt_dw[dw++] = pkt.WAIT_ADDR_HI_UNION.DW_3_DATA;
+      pkt_dw[dw++] = pkt.WAIT_REFERENCE_LO_UNION.DW_4_DATA;
+      pkt_dw[dw++] = pkt.WAIT_REFERENCE_HI_UNION.DW_5_DATA;
+      pkt_dw[dw++] = pkt.WAIT_MASK_LO_UNION.DW_6_DATA;
+      pkt_dw[dw++] = pkt.WAIT_MASK_HI_UNION.DW_7_DATA;
+    }
+    pkt_dw[dw++] = pkt.COUNT_UNION.DW_8_DATA;
+    pkt_dw[dw++] = pkt.COPY_PARAMETER_UNION.DW_9_DATA;
+    pkt_dw[dw++] = pkt.ADDR_A_LO_UNION.DW_10_DATA;
+    pkt_dw[dw++] = pkt.ADDR_A_HI_UNION.DW_11_DATA;
+    pkt_dw[dw++] = pkt.ADDR_B_LO_UNION.DW_12_DATA;
+    pkt_dw[dw++] = pkt.ADDR_B_HI_UNION.DW_13_DATA;
+    if (do_signal) {
+      pkt_dw[dw++] = pkt.SIGNAL_OPERATION_UNION.DW_14_DATA;
+      pkt_dw[dw++] = pkt.SIGNAL_ADDR_LO_UNION.DW_15_DATA;
+      pkt_dw[dw++] = pkt.SIGNAL_ADDR_HI_UNION.DW_16_DATA;
+      pkt_dw[dw++] = pkt.SIGNAL_DATA_LO_UNION.DW_17_DATA;
+      pkt_dw[dw++] = pkt.SIGNAL_DATA_HI_UNION.DW_18_DATA;
+    }
+    assert(dw == pkt_dwords);
     cmd_addr += pkt_dwords * sizeof(uint32_t);
 
     cur_a += chunk_a;
