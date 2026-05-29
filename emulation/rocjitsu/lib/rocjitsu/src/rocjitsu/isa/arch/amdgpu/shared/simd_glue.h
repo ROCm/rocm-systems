@@ -1801,6 +1801,56 @@ template <typename Inst>
   return false;
 }
 
+/// VOP3 v_mov_b16 SIMD fast path. Single op (RDNA3+ only), fixed-shape body:
+/// read u32 src0, mask the low 16 bits, convert to f32 (exact for every u16
+/// value), apply the uniform omod (`*2 / *4 / *0.5`) and clamp ([0, 1])
+/// modifiers, truncating-cast back to int32, mask 16, write u32. No abs/neg/
+/// op_sel — the scalar body ignores them. Functorless / fixed-op.
+template <typename Inst>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_mov_b16_vop3_simd(Inst &inst, Wavefront &wf) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.vdst.simd_capable())
+    return false;
+  using T = uint32_t;
+  const uint32_t omod = inst.inst_.omod;
+  const uint32_t clamp = inst.inst_.clamp;
+  constexpr std::size_t W = util::native_width_v<T>;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  using F = util::native<float>;
+  using I = util::native<int32_t>;
+  using U = util::native<uint32_t>;
+  const F kZero(0.0f);
+  const F kOne(1.0f);
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    U raw = read_simd<uint32_t>(inst.src0, wf, base);
+    U u16 = raw & 0xFFFFu;
+    F f = util::stdx::static_simd_cast<F>(u16);
+    if (omod == 1)
+      f = f * F(2.0f);
+    else if (omod == 2)
+      f = f * F(4.0f);
+    else if (omod == 3)
+      f = f * F(0.5f);
+    if (clamp) {
+      util::stdx::where(f < kZero, f) = kZero;
+      util::stdx::where(f > kOne, f) = kOne;
+    }
+    I i = util::stdx::static_simd_cast<I>(f);
+    U out = util::stdx::static_simd_cast<U>(i) & 0xFFFFu;
+    write_simd<uint32_t>(inst.vdst, wf, base, out, chunk);
+  }
+  return true;
+}
+
+template <typename Inst>
+[[nodiscard]] inline bool try_execute_mov_b16_vop3_simd(Inst &, Wavefront &) {
+  return false;
+}
+
 /// Destination shape for the VOP3P fma_mix / mad_mix family. F32 writes a
 /// full 32-bit float into vdst; F16_LO writes the f16-narrowed result into
 /// the low half of vdst (high half preserved); F16_HI writes it into the
@@ -2137,6 +2187,11 @@ template <FmaMixDst DstMode, typename Inst>
 /// modified `native<float>` and returns `native<float>`; variadic.
 #define ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16(...)                                                     \
   if (::rocjitsu::amdgpu::try_execute_unary_vop3_fp16_simd(inst, wf, __VA_ARGS__))                 \
+  return
+
+/// VOP3 v_mov_b16 probe (RDNA3+ only).
+#define ROCJITSU_TRY_SIMD_VOP3_MOV_B16()                                                           \
+  if (::rocjitsu::amdgpu::try_execute_mov_b16_vop3_simd(inst, wf))                                 \
   return
 
 /// VOP3P fma_mix / mad_mix probes. The destination shape is the only thing
