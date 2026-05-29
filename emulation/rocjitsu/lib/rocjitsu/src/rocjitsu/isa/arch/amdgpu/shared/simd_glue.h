@@ -2256,6 +2256,45 @@ template <typename Inst, typename Op>
   return false;
 }
 
+/// VOP3P v_pk_mov_b32 SIMD fast path. Default packing only (op_sel == 0,
+/// op_sel_hi == 3): the result is a 64-bit pair `(src0_lo, src1_hi)`,
+/// where the per-source pair is the consecutive {base, base+1} VGPRs
+/// when the encoding points at the VGPR range. SGPR / literal sources
+/// broadcast both halves identically (handled by read_simd64's
+/// broadcast64 fallback). Reads each src as a 64-bit pair, picks the low
+/// half of src0 and the high half of src1 via mask, packs, writes via
+/// write_simd64. Functorless / fixed-op.
+template <typename Inst>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_vop3p_mov_b32_simd(Inst &inst, Wavefront &wf) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.vdst.simd_capable())
+    return false;
+  if (inst.inst_.op_sel != 0u || inst.inst_.op_sel_hi != 3u)
+    return false;
+  constexpr std::size_t W = util::native_width64;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  using U64 = util::native<uint64_t>;
+  const U64 kHiMask(0xFFFFFFFF00000000ULL);
+  const U64 kLoMask(0x00000000FFFFFFFFULL);
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const U64 s0 = read_simd64<uint64_t>(inst.src0, wf, base);
+    const U64 s1 = read_simd64<uint64_t>(inst.src1, wf, base);
+    const U64 out = (s0 & kLoMask) | (s1 & kHiMask);
+    write_simd64<uint64_t>(inst.vdst, wf, base, out, chunk);
+  }
+  return true;
+}
+
+template <typename Inst>
+[[nodiscard]] inline bool try_execute_vop3p_mov_b32_simd(Inst &, Wavefront &) {
+  return false;
+}
+
 } // namespace amdgpu
 } // namespace rocjitsu
 
@@ -2565,6 +2604,11 @@ template <typename Inst, typename Op>
 /// VOP3P packed-16 f16 ternary probe (3-source pk_fma_f16).
 #define ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_FP16(...)                                               \
   if (::rocjitsu::amdgpu::try_execute_vop3p_pk_ternary_fp16_simd(inst, wf, __VA_ARGS__))           \
+  return
+
+/// VOP3P v_pk_mov_b32 probe. Functorless / fixed-op.
+#define ROCJITSU_TRY_SIMD_VOP3P_MOV_B32()                                                          \
+  if (::rocjitsu::amdgpu::try_execute_vop3p_mov_b32_simd(inst, wf))                                \
   return
 
 #endif // ROCJITSU_ISA_AMDGPU_SHARED_SIMD_GLUE_H_
