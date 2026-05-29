@@ -74,7 +74,7 @@ struct migration_stats
     {
         return count > 0 ? static_cast<double>(total_size_bytes) / count : 0.0;
     }
-    [[nodiscard]] double bandwidth_gbps() const noexcept
+    [[nodiscard]] double migration_throughput_gbps() const noexcept
     {
         // bytes / ns == GB/s (decimal)
         return total_time_ns > 0 ? static_cast<double>(total_size_bytes) / total_time_ns

@@ -21,11 +21,11 @@ control the behavior of rocSHMEM.
 
     * - | ``ROCSHMEM_DEBUG_LEVEL``
         | Debug output level
-      - ``WARN``
+      - ``ERROR``
       - | Levels (from least to most verbose):
         | ``NONE``: Suppress all output.
-        | ``ERROR``: Print error messages only.
-        | ``WARN``: Print warnings and errors (default).
+        | ``ERROR``: Print error messages only (default).
+        | ``WARN``: Print warnings and errors.
         | ``ENV``: Print modified environment variables at startup.
         | ``VERSION``: Print build/version information at startup.
         | ``INFO``: Print informational messages and above.

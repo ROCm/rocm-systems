@@ -593,13 +593,12 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
     }
   }
 
+  ++total_dispatched_;
   {
-    static uint32_t dispatch_count = 0;
-    ++dispatch_count;
     util::Logger::vm([&](auto &os) {
       os << std::format("dispatch #{} d={} \"{}\" grid=[{},{},{}] wg=[{},{},{}] wgs={} "
                         "lds={} sgpr={} vgpr={} sig={:#x}",
-                        dispatch_count, dp.dispatch_id, kernel_sym.empty() ? "?" : kernel_sym,
+                        total_dispatched_, dp.dispatch_id, kernel_sym.empty() ? "?" : kernel_sym,
                         pkt.grid_size_x, pkt.grid_size_y, pkt.grid_size_z, pkt.workgroup_size_x,
                         pkt.workgroup_size_y, pkt.workgroup_size_z, total_wgs,
                         kd.group_segment_fixed_size, dp.sgprs_per_wf, dp.vgprs_per_wf,
@@ -616,7 +615,6 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
     }
   }
 
-  ++total_dispatched_;
   qs.entries.push_back(std::move(dp));
 }
 
