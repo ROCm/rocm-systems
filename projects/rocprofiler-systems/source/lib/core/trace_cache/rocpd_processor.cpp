@@ -362,10 +362,6 @@ rocpd_processor_t::handle(const pmc_event_with_sample& _pmc)
 void
 rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
 {
-    const auto* _name            = trait::name<category::amd_smi>::value;
-    auto        name_primary_key = m_data_processor->insert_string(_name);
-    auto        event_id = m_data_processor->insert_event(name_primary_key, 0, 0, 0);
-
     auto found_agent =
         m_agent_manager->find_agent_by_type_index(_gpu_pmc.device_id, agent_type::GPU);
     if(!found_agent)
@@ -375,6 +371,10 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
         return;
     }
     auto base_id = found_agent->get().base_id;
+
+    const auto* _name            = trait::name<category::amd_smi>::value;
+    auto        name_primary_key = m_data_processor->insert_string(_name);
+    auto        event_id = m_data_processor->insert_event(name_primary_key, 0, 0, 0);
 
     auto insert_metric = [&](bool enabled, const char* pmc_name, const char* track_name,
                              double value) {
@@ -519,11 +519,6 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
 void
 rocpd_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sample)
 {
-    // Insert NIC RDMA metrics into rocpd database
-    const auto* _name            = "ainic";
-    auto        name_primary_key = m_data_processor->insert_string(_name);
-    auto        event_id = m_data_processor->insert_event(name_primary_key, 0, 0, 0);
-
     // We should create a cache for this in the future
     auto found_agent =
         m_agent_manager->find_agent_by_type_index(_nic_sample.device_id, agent_type::NIC);
@@ -534,6 +529,11 @@ rocpd_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sample)
         return;
     }
     auto base_id = found_agent->get().base_id;
+
+    // Insert NIC RDMA metrics into rocpd database
+    const auto* _name            = "ainic";
+    auto        name_primary_key = m_data_processor->insert_string(_name);
+    auto        event_id = m_data_processor->insert_event(name_primary_key, 0, 0, 0);
 
     auto insert_metric = [&](bool enabled, const char* pmc_name, const char* track_name,
                              std::uint64_t value) {
@@ -588,10 +588,6 @@ rocpd_processor_t::handle(
 {
     if(_gpu_perf_counter.entries.empty()) return;
 
-    const auto* _name            = "rocm_counter_collection";
-    auto        name_primary_key = m_data_processor->insert_string(_name);
-    auto        event_id = m_data_processor->insert_event(name_primary_key, 0, 0, 0);
-
     auto found_agent = m_agent_manager->find_agent_by_type_index(
         _gpu_perf_counter.device_id, agent_type::GPU);
     if(!found_agent)
@@ -602,6 +598,10 @@ rocpd_processor_t::handle(
         return;
     }
     auto base_id = found_agent->get().base_id;
+
+    const auto* _name            = "rocm_counter_collection";
+    auto        name_primary_key = m_data_processor->insert_string(_name);
+    auto        event_id = m_data_processor->insert_event(name_primary_key, 0, 0, 0);
 
     for(const auto& entry : _gpu_perf_counter.entries)
     {
