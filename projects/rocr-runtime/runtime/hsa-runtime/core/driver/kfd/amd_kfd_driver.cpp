@@ -329,11 +329,17 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
     status = HSAKMT_CALL(hsaKmtAllocMemory(node_id, size, kmt_alloc_flags, mem));
   }
   if (status == HSAKMT_STATUS_SUCCESS) {
-    MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
     if (kmt_alloc_flags.ui32.NoAddress) {
       // returns mem
       return HSA_STATUS_SUCCESS;
     }
+
+    MAKE_NAMED_SCOPE_GUARD(memoryGuard, [&]() {
+      if (*mem != nullptr) {
+        HSAKMT_CALL(hsaKmtFreeMemory(*mem, size));
+        *mem = nullptr;
+      }
+    });
 
     // Commit the memory.
     // For system memory, on non-restricted allocation, map it to all GPUs. On
@@ -374,16 +380,15 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
          m_region.IsScratch());
 
     if (require_pinning && !is_resident) {
-      HSAKMT_CALL(hsaKmtFreeMemory(*mem, size));
-      *mem = nullptr;
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     }
 
     if ((alloc_flags & core::MemoryRegion::AllocateAsan) &&
         HSAKMT_CALL(hsaKmtReplaceAsanHeaderPage(*mem)) != HSAKMT_STATUS_SUCCESS) {
-      HSAKMT_CALL(hsaKmtFreeMemory(*mem, size));
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     }
+
+    memoryGuard.Dismiss();
     return HSA_STATUS_SUCCESS;
   }
 
