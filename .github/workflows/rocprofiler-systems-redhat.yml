@@ -60,9 +60,16 @@ jobs:
       fail-fast: false
       matrix:
         compiler: ['g++']
-        os-release: [ '8.10', '9' ]
+        os-release: [ '8.10', '9', '10' ]
         rocm-version: [ '6.3', '6.4', '7.0', '7.1', '7.2' ]
         build-type: ['Release']
+        exclude:
+          - os-release: '10'
+            rocm-version: '6.3'
+          - os-release: '10'
+            rocm-version: '6.4'
+          - os-release: '10'
+            rocm-version: '7.0'
 
     steps:
     - uses: actions/checkout@v6
@@ -92,6 +99,11 @@ jobs:
             chmod +x /opt/trace_processor/bin/trace_processor_shell
             # Set env var so validate_perfetto_trace() uses the downloaded binary
             echo "ROCPROFSYS_TRACE_PROC_SHELL=/opt/trace_processor/bin/trace_processor_shell" >> $GITHUB_ENV
+          fi
+          if [ $OS_VERSION_MAJOR -eq 10 ]; then
+            # TODO: Move package install to the docker.
+            dnf install -y --enablerepo=crb mpich mpich-devel
+            echo "/usr/lib64/mpich/bin" >> $GITHUB_PATH
           fi
 
     - name: Configure, Build, and Test

@@ -200,7 +200,7 @@ TEST(TransportTest, CollNetFreeTest) {
 
   // Setup dummy ncclTransportComm with only `free` implemented
   static ncclTransportComm dummyTransportComm = {};
-  dummyTransportComm.free = [](ncclConnector* conn) -> ncclResult_t {
+  dummyTransportComm.free = [](ncclComm* /*comm*/, ncclConnector* conn) -> ncclResult_t {
     if (conn && conn->transportResources) {
       free(conn->transportResources);
       conn->transportResources = nullptr;

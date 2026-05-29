@@ -1577,6 +1577,18 @@ typedef struct _HsaStructureSizes {
   HSAuint16 SizeOfHsaExternalHandleDesc; // sizeof(HsaExternalHandleDesc)
   HSAuint16 Reserved[5];
 } HsaStructureSizes;
+
+typedef enum _HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE {
+    HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32     = 0,
+    HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_KMT = 1,
+    HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD        = 2,  // Linux only
+} HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE;
+
+typedef struct _HSA_EXTERNAL_SEMAPHORE_HANDLE {
+    HSAuint64 handle;  // opaque, encodes (D3DKMT syncobj << 32 | NodeId) on Windows
+} HSA_EXTERNAL_SEMAPHORE_HANDLE;
+
+
 #pragma pack(pop, hsakmttypes_h)
 
 #ifdef __cplusplus

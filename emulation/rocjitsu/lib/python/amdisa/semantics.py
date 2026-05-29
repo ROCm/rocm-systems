@@ -91,6 +91,8 @@ _DTYPE_SUFFIXES = [
     'F32_UBYTE3',
     'FLR_I32_F32',
     'RPI_I32_F32',
+    'NEAREST_I32_F32',
+    'FLOOR_I32_F32',
     'F64_I32',
     'I32_F64',
     'F64_U32',
@@ -168,6 +170,8 @@ _DTYPE_MAP = {
     'I16_F16': 'i16_f16',
     'FLR_I32_F32': 'flr_i32_f32',
     'RPI_I32_F32': 'rpi_i32_f32',
+    'NEAREST_I32_F32': 'rpi_i32_f32',
+    'FLOOR_I32_F32': 'flr_i32_f32',
     'F32_UBYTE0': 'f32_ubyte0',
     'F32_UBYTE1': 'f32_ubyte1',
     'F32_UBYTE2': 'f32_ubyte2',
@@ -355,9 +359,9 @@ _SOP1_SPECIAL = {
     # RDNA4-exclusive SOP1 instructions:
     'S_CTZ_I32': ('scalar_unary', 'ctz'),
     'S_CLZ_I32_U32': ('scalar_unary', 'clz'),
-    'S_CLZ_I32_U64': ('scalar_unary', 'clz64'),
+    'S_CLZ_I32_U64': ('scalar_unary', 'clz64', 'u64'),
     'S_CLS_I32': ('scalar_unary', 'cls'),
-    'S_CLS_I32_I64': ('scalar_unary', 'cls64'),
+    'S_CLS_I32_I64': ('scalar_unary', 'cls64', 'i64'),
     'S_MOVRELSD2': ('nop', None),
     'S_MOVRELSD2_B32': ('nop', None),
     'S_MOVRELSD_2': ('nop', None),
@@ -445,8 +449,10 @@ def _derive_sop1(name: str) -> InstructionSemantics | None:
         stem, dtype = _split_dtype(name)
     entry = _SOP1_SPECIAL.get(stem)
     if entry is not None:
-        cls, op = entry
-        # SCC for unary ops: bitset0/1 produce no SCC, most others → nonzero
+        cls, op = entry[0], entry[1]
+        entry_dtype = entry[2] if len(entry) > 2 else None
+        if entry_dtype:
+            dtype = entry_dtype
         scc = None
         if cls == 'scalar_unary':
             if op in ('bitset0', 'bitset1'):

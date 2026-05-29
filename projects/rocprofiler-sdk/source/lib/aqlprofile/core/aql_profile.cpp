@@ -696,6 +696,7 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
         aql_profile::Pm4Factory* pm4_factory   = aql_profile::Pm4Factory::Create(profile);
         const bool               is_concurrent = pm4_factory->IsConcurrent();
         const uint32_t           xcc_num       = pm4_factory->GetXccNumber();
+        const uint32_t           xcc_per_aid   = pm4_factory->GetXccPerAid();
         const uint32_t           se_number     = pm4_factory->GetShaderEnginesNumber() / xcc_num;
         const uint32_t           sa_number     = pm4_factory->GetShaderArraysNumber();
 
@@ -749,6 +750,7 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
                     // this check needs to be the first check as it takes care of a corner case
                     // in which a UMC event is the last event in profile->events
                     if(pm4_factory->GetBlockInfo(p)->attr & CounterBlockAidAttr) continue;
+                    if(pm4_factory->GetBlockInfo(p)->attr & CounterBlockGrbmaAttr) continue;
 
                     if((char*) samples >
                        (char*) profile->output_buffer.ptr + profile->output_buffer.size)
@@ -779,6 +781,49 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
                             *samples);
 #endif
 
+                        sample_info.pmc_data.result = *samples;
+                        status = callback(HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA, &sample_info, data);
+                        if(status == HSA_STATUS_INFO_BREAK)
+                        {
+                            status = HSA_STATUS_SUCCESS;
+                            break;
+                        }
+                        if(status != HSA_STATUS_SUCCESS) break;
+                        samples++;
+                    }
+                }
+            }
+            // AIGC blocks
+            for(uint32_t xcc_index = 0; xcc_index < xcc_num; xcc_index += xcc_per_aid)
+            {
+                for(const hsa_ven_amd_aqlprofile_event_t* p = profile->events;
+                    p < profile->events + profile->event_count;
+                    ++p)
+                {
+                    if(!(pm4_factory->GetBlockInfo(p)->attr & CounterBlockGrbmaAttr)) continue;
+
+                    if((char*) samples >
+                       (char*) profile->output_buffer.ptr + profile->output_buffer.size)
+                        return HSA_STATUS_ERROR;
+
+                    // AIGC counter event
+                    uint32_t block_samples_count = 1;
+
+                    for(uint32_t blk = 0; blk < block_samples_count; ++blk)
+                    {
+                        hsa_ven_amd_aqlprofile_info_data_t sample_info;
+                        sample_info.sample_id      = blk;
+                        sample_info.pmc_data.event = *p;
+#if DEBUG_TRACE == 2
+                        printf(
+                            "DATA: xcc(%u) id(%u) bloc id(%u) index(%u) counter id(%u) res(%lu)\n",
+                            xcc_index,
+                            blk,
+                            p->block_name,
+                            p->block_index,
+                            p->counter_id,
+                            *samples);
+#endif
                         sample_info.pmc_data.result = *samples;
                         status = callback(HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA, &sample_info, data);
                         if(status == HSA_STATUS_INFO_BREAK)

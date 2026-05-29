@@ -58,6 +58,17 @@ repos:
         files: ^projects/rocprofiler-compute/.*\.(py|hip|cpp)$
         stages: [pre-commit]
 
+  # Local hook: sets metric ID validation
+  - repo: local
+    hooks:
+      - id: sets-metric-id-check
+        name: Sets metric ID validation
+        entry: bash -lc 'cd projects/rocprofiler-compute && python3 tools/validate_sets_metric_ids.py'
+        language: system
+        files: (sets/gfx.*_sets\.yaml|analysis_configs/gfx.*/\d{4}_.*\.yaml|mi_gpu_spec\.yaml)$
+        pass_filenames: false
+        stages: [pre-commit]
+
   # Local hook: hash consistency check
   - repo: local
     hooks:

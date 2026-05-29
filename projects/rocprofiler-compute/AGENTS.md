@@ -13,6 +13,12 @@ for enforced rules including type annotations, f-strings, and `pathlib` usage.
 
 ## Git Workflows
 
+Prefer the **`gh` CLI** for all GitHub interactions (pull requests, issues,
+reviews, and authenticated git operations) over any MCP server or tool that
+relies on classic PATs (`ghp_*`), tokens in remote URLs, or pasted credentials.
+If `gh` is not authenticated, ask the user to run `gh auth login` rather than
+supplying a token yourself.
+
 When asked to commit changes, follow **[`.ai/rules/commit-workflow.md`](.ai/rules/commit-workflow.md)**
 for staging, commit message conventions, pre-commit hook handling, and branch safety.
 
