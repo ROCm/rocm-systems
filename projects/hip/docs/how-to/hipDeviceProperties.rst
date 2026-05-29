@@ -44,7 +44,7 @@ Use HIP runtime APIs to query fundamental device attributes:
    HIP exposes aggregate properties at the device level. Detailed topology (XCC/XCD/NUMA) is not directly exposed. Additional insight requires HSA APIs or profiling tools.
 
 ------------------------------------------------------------
-2. CDNA Topology Overview
+CDNA Topology Overview
 ------------------------------------------------------------
 
 CDNA GPUs employ a chiplet-based architecture:
@@ -58,7 +58,7 @@ These characteristics influence memory locality, scheduling behavior, and
 overall performance.
 
 ------------------------------------------------------------
-3. XCC (Accelerated Compute Core)
+XCC (Accelerated Compute Core)
 ------------------------------------------------------------
 
 An XCC is the fundamental execution unit in CDNA architectures.
@@ -76,9 +76,9 @@ Related architectural elements:
 - **XCP**: Logical compute partition consisting of one or more XCCs
 - **AID**: Interconnect die linking XCDs and enabling high-bandwidth communication
 
-------------------------------------------------------------
-4. XCC Partitioning Modes
-------------------------------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+XCC Partitioning Modes
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 XCC partitioning is configured at system initialization:
 
@@ -93,9 +93,9 @@ Example:
 Partitioning directly affects how applications perceive and utilize hardware
 resources.
 
-------------------------------------------------------------
-5. XCC in HIP Runtime
-------------------------------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+XCC in HIP Runtime
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Device visibility:
 
@@ -117,7 +117,7 @@ Key runtime identifiers:
 - ``NUM_XCC_IN_XCP``: number of XCCs in a partition
 
 ------------------------------------------------------------
-6. Compute Dies (XCDs)
+Compute Dies (XCDs)
 ------------------------------------------------------------
 
 XCDs aggregate XCCs into higher-level compute domains.
@@ -152,7 +152,7 @@ Interpretation:
 - SPX mode: one agent ≈ full device
 
 ------------------------------------------------------------
-7. L2 Cache Regions
+L2 Cache Regions
 ------------------------------------------------------------
 
 HIP provides only total L2 cache size:
@@ -168,7 +168,7 @@ Notes:
 - Cross-domain accesses may increase latency
 
 ------------------------------------------------------------
-8. NUMA Memory Domains
+NUMA Memory Domains
 ------------------------------------------------------------
 
 HBM memory behaves similarly to NUMA systems.
@@ -184,7 +184,7 @@ Implications:
 - Remote memory accesses incur higher latency
 
 ------------------------------------------------------------
-9. Memory Channels
+Memory Channels
 ------------------------------------------------------------
 
 The number of memory channels is not directly exposed.
@@ -199,7 +199,7 @@ Estimate using memory bus width:
     printf("Estimated memory channels: %d\n", channels);
 
 ------------------------------------------------------------
-10. Atomic Throughput
+Atomic Throughput
 ------------------------------------------------------------
 
 Atomic throughput limits must be measured empirically.
@@ -219,7 +219,7 @@ Guidelines:
 - Use hierarchical reductions to reduce pressure on global memory
 
 ------------------------------------------------------------
-11. Cache Line Alignment
+Cache Line Alignment
 ------------------------------------------------------------
 
 Typical cache line size: 64 bytes
@@ -238,7 +238,7 @@ Benefits:
 - Increased memory access efficiency
 
 ------------------------------------------------------------
-12. Multi-XCC Profiling
+Multi-XCC Profiling
 ------------------------------------------------------------
 
 In multi-XCC configurations:
@@ -252,7 +252,7 @@ Future enhancements include:
 - Aggregated execution timing (min start, max end)
 
 ------------------------------------------------------------
-13. Optimization Strategy
+Optimization Strategy
 ------------------------------------------------------------
 
 To optimize performance on CDNA GPUs such as MI300:
