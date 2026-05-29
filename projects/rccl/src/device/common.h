@@ -688,15 +688,23 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
         ncclDevFuncTable_1[ncclShmem.funcId]();
       else if (COLL_UNROLL == 2)
         ncclDevFuncTable_2[ncclShmem.funcId]();
-      else
+      else if (COLL_UNROLL == 4)
         ncclDevFuncTable_4[ncclShmem.funcId]();
+      else if (COLL_UNROLL == 8)
+        ncclDevFuncTable_8[ncclShmem.funcId]();
+      else
+        ncclDevFuncTable_16[ncclShmem.funcId]();
 #else
       if (COLL_UNROLL == 1)
         NCCL_CALL_FUNCTIONS_1(ncclShmem.funcId);
       else if (COLL_UNROLL == 2)
         NCCL_CALL_FUNCTIONS_2(ncclShmem.funcId);
-      else
+      else if (COLL_UNROLL == 4)
         NCCL_CALL_FUNCTIONS_4(ncclShmem.funcId);
+      else if (COLL_UNROLL == 8)
+        NCCL_CALL_FUNCTIONS_8(ncclShmem.funcId);
+      else
+        NCCL_CALL_FUNCTIONS_16(ncclShmem.funcId);
 #endif
 #endif
     }
