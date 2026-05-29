@@ -571,6 +571,7 @@ void
 DeviceThreadTracer::start_context()
 {
     ROCP_INFO << "Start device thread trace context";
+    CHECK_NOTNULL(worker_flag);
     std::unique_lock<std::mutex> lk(agent_mut);
 
     if(agents.empty())
@@ -578,9 +579,12 @@ DeviceThreadTracer::start_context()
         ROCP_WARNING << "Thread trace context not present for agent!";
         return;
     }
-
     int expected = WORKER_FLAG_STOP;
-    CHECK_NOTNULL(worker_flag)->compare_exchange_strong(expected, WORKER_FLAG_RUNNING);
+    if (!worker_flag->compare_exchange_strong(expected, WORKER_FLAG_RUNNING))
+    {
+        ROCP_ERROR << "Unable to start thread trace worker thread";
+        return;
+    }
     auto wait_list = std::vector<std::shared_ptr<hsa_signal_t>>{};
 
     for(auto& [_, tracer] : agents)
@@ -636,7 +640,8 @@ flush_and_stop()
     {
         if(ctx->device_thread_trace)
         {
-            CHECK_NOTNULL(ctx->device_thread_trace->worker_flag)->store(WORKER_FLAG_DESTRUCTOR);
+            if (CHECK_NOTNULL(ctx->device_thread_trace->worker_flag)->load() != WORKER_FLAG_ERROR)
+                ctx->device_thread_trace->worker_flag->store(WORKER_FLAG_DESTRUCTOR);
             ctx->device_thread_trace->stop_context();
         }
         if(ctx->dispatch_thread_trace) ctx->dispatch_thread_trace->stop_context();

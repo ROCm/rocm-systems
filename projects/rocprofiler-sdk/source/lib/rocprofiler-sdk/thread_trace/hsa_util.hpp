@@ -44,8 +44,8 @@ void
 signal_destroy(hsa_signal_t sig);
 
 // Operations
-void
-signal_wait(hsa_signal_t sig);
+bool
+signal_wait(hsa_signal_t sig, int64_t timeout = INT64_MAX);
 
 void
 signal_reset(hsa_signal_t sig);

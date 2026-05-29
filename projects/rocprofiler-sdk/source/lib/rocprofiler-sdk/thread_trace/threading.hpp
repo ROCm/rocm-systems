@@ -128,7 +128,8 @@ enum worker_flag_status_t
 {
     WORKER_FLAG_STOP = 0,
     WORKER_FLAG_RUNNING,
-    WORKER_FLAG_DESTRUCTOR
+    WORKER_FLAG_DESTRUCTOR,
+    WORKER_FLAG_ERROR
 };
 
 void

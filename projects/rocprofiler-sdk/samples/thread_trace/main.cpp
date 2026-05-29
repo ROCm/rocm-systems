@@ -30,6 +30,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <future>
 
 #include <rocprofiler-sdk-roctx/roctx.h>
 
@@ -121,8 +122,54 @@ public:
 };
 
 int
+run(int device, double run_seconds, std::atomic<int>* count)
+{
+    HIP_API_CALL(hipSetDevice(device));
+
+    std::array<HipStream, 3> streams{};
+    const auto               fixed_iterations = streams.size() * 2;
+
+    uint64_t iter = 0;
+
+    auto launch = [&]() {
+        auto& s = streams.at(iter % streams.size());
+        auto& kernel = (iter % 2 == 0) ? divide_kernel : looping_lds_kernel;
+        hipLaunchKernelGGL(
+            kernel, DATA_SIZE / 512, 512, 0, s.stream, s.dst.ptr, s.src1.ptr, s.src2.ptr, 10);
+        HIP_API_CALL(hipGetLastError());
+        iter++;
+    };
+
+    // Warmup so the trace covers steady-state work, not first-launch noise.
+    for(uint64_t i = 0; i < fixed_iterations; i++)
+        launch();
+    HIP_API_CALL(hipDeviceSynchronize());
+
+    roctxProfilerResume(0);
+
+    count->fetch_sub(1);
+    while (count->load() != 0) sched_yield();
+
+    auto       start    = std::chrono::steady_clock::now();
+    const auto deadline = start + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                                      std::chrono::duration<double>(run_seconds));
+
+    while((run_seconds > 0.0 && std::chrono::steady_clock::now() < deadline) ||
+          (run_seconds == 0.0 && iter < fixed_iterations))
+    {
+        launch();
+    }
+
+    roctxProfilerPause(0);
+
+    return iter;
+}
+
+int
 main(int /*argc*/, char** /*argv*/)
 {
+    int dev_count = 1;
+
     // RUN_SECONDS unset or 0 -> one short alternating pass. Positive value
     // -> the same alternating pass repeated until the time budget expires.
     double run_seconds = 0.0;
@@ -130,45 +177,22 @@ main(int /*argc*/, char** /*argv*/)
     {
         char*  end = nullptr;
         double v   = std::strtod(env, &end);
-        if(end != env && v > 0.0) run_seconds = v;
+        if(end != env && v > 0.0)
+        {
+            run_seconds = v;
+            HIP_API_CALL(hipGetDeviceCount(&dev_count));
+        }
     }
 
-    std::array<HipStream, 3> streams{};
-    const auto               fixed_iterations = streams.size() * 2;
+    auto start = std::chrono::steady_clock::now();
+    std::atomic<int> thread_count{dev_count};
+    auto threads = std::vector<std::future<int>>{};
+    for (int i=0; i<dev_count; i++)
+        threads.push_back(std::async(std::launch::async, run, i, run_seconds, &thread_count));
 
-    auto launch = [](uint64_t iter, HipStream& s, hipStream_t stream) {
-        auto& kernel = (iter % 2 == 0) ? divide_kernel : looping_lds_kernel;
-        hipLaunchKernelGGL(
-            kernel, DATA_SIZE / 512, 512, 0, stream, s.dst.ptr, s.src1.ptr, s.src2.ptr, 10);
-        HIP_API_CALL(hipGetLastError());
-    };
+    int iter = 0;
+    for (auto& thread : threads) iter += thread.get();
 
-    // Warmup so the trace covers steady-state work, not first-launch noise.
-    for(uint64_t i = 0; i < fixed_iterations; i++)
-        launch(i, streams.at(i % streams.size()), streams.at(i % streams.size()).stream);
-    HIP_API_CALL(hipDeviceSynchronize());
-
-    roctxProfilerResume(0);
-
-    auto       start    = std::chrono::steady_clock::now();
-    uint64_t   iter     = 0;
-    const auto deadline = start + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                                      std::chrono::duration<double>(run_seconds));
-
-    while((run_seconds > 0.0 && std::chrono::steady_clock::now() < deadline) ||
-          (run_seconds == 0.0 && iter < fixed_iterations))
-    {
-        auto& s = streams.at(iter % streams.size());
-        launch(iter, s, s.stream);
-        iter++;
-    }
-
-    HIP_API_CALL(hipDeviceSynchronize());
-    roctxProfilerPause(0);
-
-    std::cout << "[main] launched " << iter << " kernels over "
-              << std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count()
-              << "s\n";
-
+    std::cout << "[main] launched " << iter << " kernels over " << std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() << "s" << std::endl;
     return 0;
 }

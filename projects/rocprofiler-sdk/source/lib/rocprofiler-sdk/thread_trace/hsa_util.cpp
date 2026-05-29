@@ -65,12 +65,23 @@ signal_destroy(hsa_signal_t sig)
     ROCP_CI_LOG_IF(WARNING, _status != HSA_STATUS_SUCCESS) << "Failed: " << _status;
 }
 
-void
-signal_wait(hsa_signal_t sig)
+bool
+signal_wait(hsa_signal_t sig, int64_t timeout)
 {
-    auto wait_fn = hsa::get_core_table()->hsa_signal_wait_scacquire_fn;
-    while(wait_fn(sig, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED) != 0)
+    auto wait_fn = CHECK_NOTNULL(hsa::get_core_table()->hsa_signal_wait_scacquire_fn);
+    auto t0 = std::chrono::steady_clock::now();
+
+    while(wait_fn(sig, HSA_SIGNAL_CONDITION_EQ, 0, timeout, HSA_WAIT_STATE_BLOCKED) != 0)
+    {
+        if(timeout < INT64_MAX && (std::chrono::steady_clock::now() - t0).count() > timeout)
+        {
+            CHECK_NOTNULL(hsa::get_core_table()->hsa_signal_store_screlease_fn)(sig, 0);
+            ROCP_ERROR << "Signal timeout reached!";
+            return false;
+        }
         sched_yield();
+    }
+    return true;
 }
 
 void

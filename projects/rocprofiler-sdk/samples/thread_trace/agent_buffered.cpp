@@ -169,14 +169,16 @@ event_callback(rocprofiler_thread_trace_decoder_record_type_t type,
         {
             const auto& ev = events[i];
             if(cl->cut_target_in_call && !cl->cut_ready &&
-               ev.type == ROCPROF_TRACE_DECODER_EVENT_CS_PARTIAL_FLUSH &&
                ev.me_id == cl->target_me && ev.pipe_id == cl->target_pipe &&
                ev.byte_offset > cl->cut_offset_begin)
             {
-                if(++cl->pf_count_after_target == 2)
+                if (ev.type == ROCPROF_TRACE_DECODER_EVENT_CS_PARTIAL_FLUSH || cl->pf_count_after_target != 0)
                 {
-                    cl->cut_offset_end = ev.byte_offset;
-                    cl->cut_ready      = true;
+                    if(++cl->pf_count_after_target == 2)
+                    {
+                        cl->cut_offset_end = ev.byte_offset;
+                        cl->cut_ready      = true;
+                    }
                 }
             }
         }
@@ -424,15 +426,9 @@ shader_data_callback(rocprofiler_agent_id_t /*agent*/,
     if(flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END)
         ScanState::flag_end.fetch_add(1, std::memory_order_relaxed);
     if(flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL)
-    {
-        std::cout << "GPU full for chunk: " << chunk_index << std::endl;
         ScanState::flag_gpu_full.fetch_add(1, std::memory_order_relaxed);
-    }
     if(flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL)
-    {
-        std::cout << "CPU full for chunk: " << chunk_index << std::endl;
         ScanState::flag_cpu_full.fetch_add(1, std::memory_order_relaxed);
-    }
 
     if(data_size == 0 || se_data == nullptr) return;
 

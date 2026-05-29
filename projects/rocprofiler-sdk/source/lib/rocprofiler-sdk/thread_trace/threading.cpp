@@ -156,6 +156,7 @@ producer_loop(
     triple_buffer_producer_data_t parameters)  // NOLINT(performance-unnecessary-value-param)
 {
     CHECK_NOTNULL(parameters.copy_data_fn);
+    CHECK_NOTNULL(parameters.start_pkt_signal);
 
     auto& queue       = *CHECK_NOTNULL(parameters.shared->queue);
     auto& worker_flag = *CHECK_NOTNULL(parameters.producer_running);
@@ -262,7 +263,7 @@ producer_loop(
     send_header();
 
     // Wait until ATT start packets have been executed
-    signal_wait(*CHECK_NOTNULL(parameters.start_pkt_signal));
+    signal_wait(*parameters.start_pkt_signal);
 
     while(worker_flag.load() == WORKER_FLAG_RUNNING)
     {
@@ -271,7 +272,11 @@ producer_loop(
 
         // PHASE 1: Poll SQTT buffer status
         att_queue_submit(queue, &buffer_packet.query_status, &submit_signal.sig);
-        signal_wait(submit_signal.sig);
+        if (!signal_wait(submit_signal.sig, 1<<30))
+        {
+            worker_flag.store(WORKER_FLAG_ERROR);
+            continue;
+        }
 
         if(auto status = buffer_packet.query_buffer_status())
         {
@@ -311,8 +316,11 @@ producer_loop(
             signal_wait(submit_signal.sig);
         }
     }
-    stop_trace();
-    iterate_trace();
+    if(worker_flag.load() != WORKER_FLAG_ERROR)
+    {
+        stop_trace();
+        iterate_trace();
+    }
 
     // Signal all consumers to exit. Setting `stopping` under each slot's
     // mutex ensures consumers about to enter cv.wait() observe it; the
