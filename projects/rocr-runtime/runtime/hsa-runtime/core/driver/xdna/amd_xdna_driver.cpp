@@ -725,13 +725,19 @@ XdnaDriver::AllocateMemory(const core::MemoryRegion &mem_region,
     bo_handle.unmap_vaddr = false;
   }
 
-  // We keep a mapping from VA memory addresses to BO handles because some operations, e.g.,
-  // FreeMemory, pass only the memory address and not a BO handle.
-  vmem_addr_mappings.emplace(bo_handle.vaddr, bo_handle);
+  // FreeMemory, pass only the memory address and not a BO handle so we need something that looks like an address. When
+  // there is no mapped vaddr (AllocateMemoryOnly), synthesize a unique key from the BO handle with the MSB set so
+  // it cannot collide with a real userspace virtual address and so multiple unmapped BOs each get their own entry.
+  void* map_key = bo_handle.vaddr;
+  if (map_key == nullptr) {
+    map_key = reinterpret_cast<void*>(static_cast<uint64_t>(bo_handle.handle) |
+                                      (uint64_t{1} << 63));
+  }
+  vmem_addr_mappings.emplace(map_key, bo_handle);
 
   bo_guard.Dismiss();
 
-  *mem = bo_handle.vaddr;
+  *mem = map_key;
 
   return HSA_STATUS_SUCCESS;
 }
