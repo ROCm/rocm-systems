@@ -5462,26 +5462,26 @@ typedef enum {
 } amdsmi_fabric_telemetry_category_t;
 
 /**
- * @brief Fabric telemetry category bitmask constructor
+ * @brief Fabric telemetry category bitmask values
  *
  */
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_UALOE (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE)
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_SWITCH (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_SWITCH)
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_CRYPTO (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO)
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_PFC (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_PFC)
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_NETPORT \
-  (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT)
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_UALOE \
-  (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE)
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_NETPORT \
-  (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT)
-
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_ALL_KNOWN                                         \
-  (AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_UALOE | AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_SWITCH | \
-   AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_CRYPTO | AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_PFC |   \
-   AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_NETPORT |                                              \
-   AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_UALOE |                                        \
-   AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_NETPORT)  //!< All known categories
+typedef enum {
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_UALOE = (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE),
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_SWITCH = (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_SWITCH),
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_CRYPTO = (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO),
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_PFC = (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_PFC),
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_NETPORT = (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT),
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_UALOE =
+      (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE),
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_NETPORT =
+      (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT),
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_ALL_KNOWN =
+      (AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_UALOE | AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_SWITCH |
+       AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_CRYPTO | AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_PFC |
+       AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_NETPORT |
+       AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_UALOE |
+       AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_NETPORT)  //!< All known categories
+} amdsmi_fabric_telemetry_category_mask_t;
 
 /**
  * @brief Fabric telemetry item structure
@@ -5621,8 +5621,16 @@ const char* amdsmi_fabric_telem_id_to_string(uint64_t telem_id);
 amdsmi_status_t amdsmi_free_fabric_telemetry(amdsmi_processor_handle processor_handle,
                                              amdsmi_fabric_telemetry_t* telemetry);
 
-#define AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE 32
-#define AMDSMI_FABRIC_MAX_LOCAL_GPUS 8
+/**
+ * @brief Fabric size constants
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef enum {
+  AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE =
+      32,  //!< Active accelerators bitmap size (32 x 32-bit words = 1024 bits)
+  AMDSMI_FABRIC_MAX_LOCAL_GPUS = 8  //!< Maximum local GPUs in fabric
+} amdsmi_fabric_size_constants_t;
 
 /**
  * @brief Fabric type
@@ -5812,11 +5820,12 @@ amdsmi_status_t amdsmi_get_gpu_ecc_count(amdsmi_processor_handle processor_handl
  *  enabled_mask, this function will write bits to memory pointed to by
  *  @p enabled_blocks. Upon a successful call, @p enabled_blocks can then be
  *  AND'd with elements of the ::amdsmi_gpu_block_t ennumeration to determine if
- *  the corresponding block has ECC enabled. Note that whether a block has ECC
- *  enabled or not in the device is independent of whether there is kernel
- *  support for error counting for that block. Although a block may be enabled,
- *  but there may not be kernel support for reading error counters for that
- *  block.
+ *  the corresponding block has ECC enabled.
+ *
+ *  @note Whether a block has ECC enabled or not in the device is independent
+ *  of whether there is kernel support for error counting for that block.
+ *  Although a block may be enabled, but there may not be kernel support for
+ *  reading error counters for that block.
  *
  *  @param[in] processor_handle a processor handle
  *

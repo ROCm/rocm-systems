@@ -7039,14 +7039,22 @@ def amdsmi_get_fabric_telemetry(
                 for item_idx in range(inst.item_count):
                     item = inst.items[item_idx]
                     telem_id = item.id
-                    name_bytes = amdsmi_wrapper.amdsmi_fabric_telem_id_to_string(telem_id)
-                    items.append(
-                        {
-                            "id": telem_id,
-                            "name": name_bytes.decode("utf-8") if name_bytes else "UNKNOWN",
-                            "value": item.value,
-                        }
-                    )
+                    name_ptr = amdsmi_wrapper.amdsmi_fabric_telem_id_to_string(telem_id)
+                    # Handle both c_char_p (string) and POINTER(c_char) (pointer) return types
+                    if name_ptr:
+                        if isinstance(name_ptr, bytes):
+                            name_str = name_ptr.decode("utf-8")
+                        elif hasattr(name_ptr, "value"):
+                            # c_char_p has a .value attribute
+                            name_str = (
+                                name_ptr.value.decode("utf-8") if name_ptr.value else "UNKNOWN"
+                            )
+                        else:
+                            # POINTER(c_char) - dereference and convert to string
+                            name_str = ctypes.string_at(name_ptr).decode("utf-8")
+                    else:
+                        name_str = "UNKNOWN"
+                    items.append({"id": telem_id, "name": name_str, "value": item.value})
                 instances.append(
                     {
                         "name": inst.name.text.decode("utf-8").rstrip("\x00"),

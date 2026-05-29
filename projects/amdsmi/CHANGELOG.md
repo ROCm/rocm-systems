@@ -18,6 +18,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ### Changed
 
 - **Renamed `processor_type_t` enum typedef to `amdsmi_processor_type_t`**.
+
+### Fixed
+
+- **Fixed `amd-smi static` hanging indefinitely on gfx1153 and gfx950**.  
+  - Added a 60-second timeout to `amdsmi_init()` in the CLI so the process exits with a clear error message instead of hanging when the GPU driver is unresponsive.
+  - Added `O_NONBLOCK` to DRM device open during initialization so `open()` returns immediately if the device is wedged.
   - The unprefixed typedef name did not follow the `amdsmi_*_t` convention used throughout `amdsmi.h` and was easy to collide with identifiers defined by other system-management libraries. New code should use `amdsmi_processor_type_t`. The old name is preserved as a backward-compatibility typedef alias, so existing callers continue to compile unchanged.
 
 ### Added
