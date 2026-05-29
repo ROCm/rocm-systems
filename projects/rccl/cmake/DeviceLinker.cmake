@@ -238,6 +238,15 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
     ${DL_OPT_FLAGS}
     -std=c++17
     ${DL_HIP_COMPILER_FLAGS}
+    # -fPIC is required so amdclang++ emits GOT-relative relocations for
+    # cross-function calls inside the device .o files. Without it, larger
+    # ncclDevFunc_* bodies (e.g. unroll=8/16 reductions on f8e4m3/f8e5m2 or
+    # PAT/LL ReduceScatter) exceed the compiler's inlining threshold and
+    # produce R_AMDGPU_REL64 references, which `ld.lld -shared` then rejects
+    # against default-visibility symbols ("recompile with -fPIC"). Every
+    # other device compile step in this file already passes -fPIC; this
+    # brings the per-kernel OBJECT build in line with the rest.
+    -fPIC
   )
   target_compile_definitions(${_dev_target} PRIVATE RCCL_DEVICE_LINKER)
   target_link_libraries(${_dev_target} PRIVATE rccl_device_defs)
