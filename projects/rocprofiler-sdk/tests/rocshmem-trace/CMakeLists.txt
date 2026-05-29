@@ -45,7 +45,8 @@ if(NOT MPIRUN_EXECUTABLE)
     set(IS_DISABLED ON)
 endif()
 
-set(MPI_ENV_VARS OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1)
+set(MPI_ENV_VARS OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
+                 OMPI_MCA_btl=self,vader OMPI_MCA_pml=ob1 PSM3_DEVICES=self,shm)
 
 # Build the LD_PRELOAD value: the rocprofiler-sdk-json-tool library captures every tracing
 # domain it knows about (including ROCSHMEM_API on this branch) and writes a single JSON

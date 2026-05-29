@@ -414,11 +414,16 @@ if(MPI_CXX_FOUND AND rocprofiler-register_FOUND)
                  ${rocm_version_DIR} ${ROCM_PATH})
 endif()
 
-if(rocshmem_FOUND AND TARGET roc::rocshmem)
-    rocprofiler_config_nolink_target(rocprofiler-sdk-rocshmem-nolink roc::rocshmem
-                                     INTERFACE ROCPROFILER_SDK_USE_SYSTEM_ROCSHMEM=1)
+if(rocshmem_FOUND
+   AND TARGET roc::rocshmem
+   AND rocshmem_INCLUDE_DIR
+   AND EXISTS "${rocshmem_INCLUDE_DIR}/rocshmem/api_trace.h")
+    target_include_directories(rocprofiler-sdk-rocshmem-nolink SYSTEM
+                               INTERFACE ${rocshmem_INCLUDE_DIR})
+
+    target_compile_definitions(rocprofiler-sdk-rocshmem-nolink
+                               INTERFACE ROCPROFILER_SDK_USE_SYSTEM_ROCSHMEM=1)
 else()
     target_compile_definitions(rocprofiler-sdk-rocshmem-nolink
                                INTERFACE ROCPROFILER_SDK_USE_SYSTEM_ROCSHMEM=0)
-
 endif()
