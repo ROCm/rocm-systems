@@ -4616,7 +4616,7 @@ def amdsmi_get_gpu_accelerator_partition_profile_config(
     )
 
     profiles = []
-    resources = []
+    resource_profiles = []
     resource_idx = 0
     for i in range(config.num_profiles):
         profile = config.profiles[i]
@@ -4643,7 +4643,9 @@ def amdsmi_get_gpu_accelerator_partition_profile_config(
             mem_caps_list.append("N/A")
 
         resources = []
-        for _ in range(config.num_resource_profiles):
+        for _ in range(profile.num_resources):
+            if resource_idx >= config.num_resource_profiles:
+                break
             res_profile = config.resource_profiles[resource_idx]
             resource_profiles_ret = (
                 amdsmi_wrapper.amdsmi_accelerator_partition_resource_type_t__enumvalues[
@@ -4657,6 +4659,7 @@ def amdsmi_get_gpu_accelerator_partition_profile_config(
                 "num_partitions_share_resource": res_profile.num_partitions_share_resource,
             }
             resources.append(resource_profile_dict)
+            resource_profiles.append(resource_profile_dict)
             resource_idx += 1
 
         profile_dict = {
@@ -4672,7 +4675,7 @@ def amdsmi_get_gpu_accelerator_partition_profile_config(
     config_dict = {
         "num_profiles": config.num_profiles,
         "num_resource_profiles": config.num_resource_profiles,
-        "resource_profiles": resources,
+        "resource_profiles": resource_profiles,
         "default_profile_index": config.default_profile_index,
         "profiles": profiles,
     }

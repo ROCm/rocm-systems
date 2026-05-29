@@ -232,7 +232,7 @@ class AmdsmiSession {
 // partition config; sub-partition handles return NOT_SUPPORTED. Calling set on
 // a sub-partition handle is a no-op (NOT_SUPPORTED), so filter them out first.
 // Each entry is {amd-smi GPU index, handle}.
-using PrimaryGpuList = std::vector<std::pair<uint32_t, amdsmi_processor_handle>>;
+using PrimaryGpuList = std::vector<std::pair<size_t, amdsmi_processor_handle>>;
 
 [[nodiscard]] static PrimaryGpuList get_primary_gpu_handles(
     const std::vector<amdsmi_processor_handle>& all_handles) {
@@ -241,7 +241,7 @@ using PrimaryGpuList = std::vector<std::pair<uint32_t, amdsmi_processor_handle>>
     amdsmi_accelerator_partition_profile_config_t cfg{};
     if (amdsmi_get_gpu_accelerator_partition_profile_config(all_handles[i], &cfg) ==
         AMDSMI_STATUS_SUCCESS)
-      primary.emplace_back(static_cast<uint32_t>(i), all_handles[i]);
+      primary.emplace_back(i, all_handles[i]);
   }
   return primary;
 }
@@ -304,6 +304,9 @@ static void print_available_modes(uint32_t idx, amdsmi_processor_handle gpu) {
                   << ", shared_by=" << res.num_partitions_share_resource << "\n";
       }
     }
+  } else {
+    std::cout << "    amdsmi_get_gpu_accelerator_partition_profile_config: " << status_str(ret)
+              << '\n';
   }
 }
 
@@ -490,9 +493,11 @@ int main() {
     // Query the caps from GPU 0 (memory partition is hive-wide, so any GPU works).
     amdsmi_memory_partition_config_t mem_caps_cfg{};
     amdsmi_memory_partition_type_t target_memory_partition = AMDSMI_MEMORY_PARTITION_NPS1;
+    amdsmi_memory_partition_type_t current_nps = AMDSMI_MEMORY_PARTITION_UNKNOWN;
     if (amdsmi_get_gpu_memory_partition_config(gpus.front(), &mem_caps_cfg) ==
         AMDSMI_STATUS_SUCCESS) {
       const auto& f = mem_caps_cfg.partition_caps.nps_flags;
+      current_nps = mem_caps_cfg.mp_mode;
       if (f.nps4_cap) {
         target_memory_partition = AMDSMI_MEMORY_PARTITION_NPS4;
       } else if (f.nps2_cap) {
@@ -503,14 +508,18 @@ int main() {
     }
     std::cout << "  Selected NPS target: " << mem_partition_type_str(target_memory_partition)
               << '\n';
-    mem_changed = set_memory_partition(gpus.front(), target_memory_partition);
-
-    if (mem_changed) {
-      if (!reload_driver())
-        std::cout
-            << "[warn] Driver reload failed; memory partition change may not have taken effect.\n";
+    if (current_nps == target_memory_partition) {
+      std::cout << "\n[info] Current NPS mode is already " << mem_partition_type_str(current_nps)
+                << "; skipping set and driver reload.\n";
     } else {
-      std::cout << "\n[info] Memory partition unchanged; skipping driver reload.\n";
+      mem_changed = set_memory_partition(gpus.front(), target_memory_partition);
+      if (mem_changed) {
+        if (!reload_driver())
+          std::cout << "[warn] Driver reload failed; memory partition change may not have "
+                       "taken effect.\n";
+      } else {
+        std::cout << "\n[info] Memory partition unchanged; skipping driver reload.\n";
+      }
     }
   }  // ~AmdsmiSession() -> amdsmi_shut_down()
 

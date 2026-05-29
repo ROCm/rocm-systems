@@ -186,8 +186,12 @@ On an MI300X (8 XCDs), this translates to:
 | :--- | :---: | :---: |
 | SPX | 1 | 8 |
 | DPX | 2 | 4 |
+| TPX | N/A | N/A |
 | QPX | 4 | 2 |
 | CPX | 8 | 1 |
+
+TPX is unavailable on MI300X because 8 XCDs cannot be split evenly into three
+equal partitions.
 
 Each box below represents one logical GPU (XCP). The same 8 XCCs are present in every mode
 — only how they are grouped changes:
@@ -269,6 +273,9 @@ following table reflects MI300X support:
 | **DPX** | ✅ | ✅ | -- |
 | **QPX** | ✅ | -- | ✅ |
 | **CPX** | ✅ | -- | ✅ |
+
+NPS8 is defined in the API but is not a supported configuration on MI300X and is
+omitted from this matrix.
 
 ```{note}
 NPS4 requires QPX or CPX mode, and NPS2 requires DPX mode, because the number of memory
