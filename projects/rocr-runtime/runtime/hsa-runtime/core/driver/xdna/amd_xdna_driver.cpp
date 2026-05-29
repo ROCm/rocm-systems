@@ -1375,7 +1375,8 @@ hsa_status_t XdnaDriver::GetDeviceHandle(uint32_t node_id, void** device_handle)
 }
 
 hsa_status_t XdnaDriver::GetDeviceFd(uint32_t node_id, int *fd) const {
-  return HSA_STATUS_ERROR;
+  *fd = fd_;
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t XdnaDriver::GetClockCounters(uint32_t node_id, HsaClockCounters* clock_counter) const {
