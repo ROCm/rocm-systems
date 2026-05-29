@@ -6536,8 +6536,27 @@ class AMDSMICommands:
                     self.logger.store_multiple_device_output()
             self.logger.print_output(multiple_device_enabled=True, watching_output=watching_output)
 
+    def _write_via_logger_destination(self, text):
+        """Write text to the logger's destination (stdout or output file).
+
+        Used for content that does not fit the logger's structured output path
+        but must still honor --file redirection.
+        """
+        if self.logger.destination == "stdout":
+            print(text)
+        else:
+            with self.logger.destination.open("a", encoding="utf-8") as f:
+                f.write(text + "\n")
+
     def _monitor_inject_sort_by_pid(self, args, watching_output):
-        """Inject PID-grouped process table into monitor's multiple_device_output."""
+        """Render PID-grouped process info for monitor --process --sort-by-pid.
+
+        For JSON/CSV the rows are pushed into the logger's multiple_device_output
+        so they flow through print_output() like every other monitor row. For
+        human-readable output an ASCII table is stored in
+        self._sort_by_pid_secondary_table; the caller is responsible for writing
+        it via _write_via_logger_destination after the primary table.
+        """
         handles = args.gpu if isinstance(args.gpu, list) else [args.gpu]
         try:
             pid_list = amdsmi_interface.amdsmi_get_gpu_process_list_by_pid(handles)
@@ -6545,17 +6564,17 @@ class AMDSMICommands:
             logging.debug("Failed to get process list by pid | %s", e.get_error_info())
             return
 
-        # Build process_list entries in the same format the tabular renderer expects.
-        # Each entry: {"process_info": {"name":..,"pid":..,"memory_usage":..,"mem_usage":..,...}}
-        # The renderer reads "gpu" from the outer dict for the GPU column.
-        # For PID-grouped output we emit one row per PID+GPU combination,
-        # grouped so all GPUs for a PID appear together.
+        # Unit string constants — hoisted out of the loop (style cleanup)
+        memory_usage_unit_default = "B"
+        evicted_time_unit = "ms"
+        sdma_usage_unit = "us"
+
+        # Build one entry per PID+GPU combination, grouped so all GPUs for a PID
+        # appear together.
         filtered = []
         for proc in pid_list:
             for gpu_entry in proc["gpus"]:
-                memory_usage_unit = "B"
-                evicted_time_unit = "ms"
-                sdma_usage_unit = "us"
+                memory_usage_unit = memory_usage_unit_default
 
                 mem_usage = gpu_entry["mem"]
                 mem_dict = {
@@ -6607,10 +6626,36 @@ class AMDSMICommands:
         if not filtered:
             filtered.append({"gpu_index": "N/A", "process_info": "No running processes detected"})
 
-        # The tabular renderer is GPU-centric — it reads the GPU column from the
-        # outer dict, so distributing per-GPU would give GPU-sorted output (same as
-        # default). Instead, render the PID-grouped secondary table directly and
-        # store it for printing after the primary table.
+        # JSON / CSV: push rows into the logger's multiple_device_output so they
+        # flow through print_output() — never write a raw ASCII tail that would
+        # corrupt structured output.
+        if self.logger.is_json_format() or self.logger.is_csv_format():
+            for item in filtered:
+                info = item["process_info"]
+                if isinstance(info, str):
+                    row = {"gpu_index": item["gpu_index"], "message": info}
+                else:
+                    row = {
+                        "gpu_index": item["gpu_index"],
+                        "pid": info["pid"],
+                        "name": info["name"],
+                        "mem_usage": info.get("mem_usage", "N/A"),
+                        "cu_occupancy": info.get("cu_occupancy", "N/A"),
+                        "sdma_usage": info.get("sdma_usage", "N/A"),
+                        "evicted_time": info.get("evicted_time", "N/A"),
+                    }
+                    mu = info.get("memory_usage", {})
+                    if isinstance(mu, dict):
+                        if self.logger.is_csv_format():
+                            row.update(self.logger.flatten_dict(mu))
+                        else:
+                            row["memory_usage"] = mu
+                self.logger.output = row
+                self.logger.store_multiple_device_output()
+            return
+
+        # Human-readable: build the ASCII secondary table; the caller writes it
+        # via _write_via_logger_destination after print_output().
         header = (
             "\nPROCESS INFO (grouped by PID):\n"
             + "GPU".rjust(3)
@@ -6644,8 +6689,6 @@ class AMDSMICommands:
             row += str(info.get("evicted_time", "N/A")).rjust(8)
             rows.append(row)
 
-        # Store the rendered table — the monitor caller will print it
-        # after the primary table by checking this attribute.
         self._sort_by_pid_secondary_table = header + "\n" + "\n".join(rows)
 
     def profile(self, args):
@@ -10564,33 +10607,35 @@ class AMDSMICommands:
                 for gpu in args.gpu:
                     stored_gpus.append(gpu)
 
-                # When --sort-by-pid, suppress per-GPU process collection
+                # When --sort-by-pid, suppress per-GPU process collection in the
+                # recursive monitor() calls. Use an instance attribute so args is
+                # not mutated (exception-safe with try/finally).
                 sort_by_pid = getattr(args, "sort_by_pid", False) and args.process
-                if sort_by_pid:
-                    args.process = False
+                self._monitor_suppress_process_collection = sort_by_pid
 
-                # Store output from multiple devices without printing to console
-                for device_handle in args.gpu:
-                    self.monitor(
-                        args,
-                        multiple_devices=True,
-                        watching_output=watching_output,
-                        gpu=device_handle,
-                    )
+                try:
+                    # Store output from multiple devices without printing to console
+                    for device_handle in args.gpu:
+                        self.monitor(
+                            args,
+                            multiple_devices=True,
+                            watching_output=watching_output,
+                            gpu=device_handle,
+                        )
+                finally:
+                    self._monitor_suppress_process_collection = False
 
                 # Reload original gpus
                 args.gpu = stored_gpus
-
-                # Restore args.process if we suppressed it
-                if sort_by_pid:
-                    args.process = True
 
                 dual_csv_output = False
                 if args.process:
                     if self.logger.is_csv_format():
                         dual_csv_output = True
 
-                # When --sort-by-pid, build the PID-grouped secondary table
+                # When --sort-by-pid, route PID-grouped data through the logger:
+                #   - JSON/CSV: rows appended to multiple_device_output
+                #   - human-readable: ASCII table stored in _sort_by_pid_secondary_table
                 if sort_by_pid:
                     self._sort_by_pid_secondary_table = None
                     self._monitor_inject_sort_by_pid(args, watching_output)
@@ -10603,9 +10648,10 @@ class AMDSMICommands:
                     dual_csv_output=dual_csv_output,
                 )
 
-                # Print PID-grouped secondary table after the primary table
+                # Human-readable PID-grouped table: route via logger destination
+                # so --file redirection is honored (only populated in HR mode).
                 if sort_by_pid and self._sort_by_pid_secondary_table:
-                    print(self._sort_by_pid_secondary_table)
+                    self._write_via_logger_destination(self._sort_by_pid_secondary_table)
 
                 # Add output to total watch output and clear multiple device output
                 if watching_output:
@@ -11170,7 +11216,10 @@ class AMDSMICommands:
         dual_csv_output = False
 
         # Store process list separately
-        if args.process:
+        # _monitor_suppress_process_collection is set by the multi-GPU dispatcher
+        # when --sort-by-pid is active; per-GPU collection is replaced by the
+        # PID-grouped aggregation rendered after the loop.
+        if args.process and not getattr(self, "_monitor_suppress_process_collection", False):
             # Populate initial processes
             try:
                 process_list = amdsmi_interface.amdsmi_get_gpu_process_list(args.gpu)
