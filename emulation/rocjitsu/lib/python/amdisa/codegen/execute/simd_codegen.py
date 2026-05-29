@@ -1535,6 +1535,43 @@ SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
         " auto sh = util::stdx::static_simd_cast<U64>((c & 3u) * 8u);"
         " return util::stdx::static_simd_cast<util::native<uint32_t>>(val >> sh); }",
     ),
+    # v_bfe_u32: unsigned bitfield extract. off = src1 & 31, w = src2 & 31.
+    # Scalar returns 0 when w == 0; the mask formula `(1 << w) - 1` evaluates
+    # to 0 at w == 0 so `(src >> off) & 0 == 0` already matches without a
+    # special case. Per-lane shift counts are pre-masked to 5 bits (scalar
+    # body's `& 31u`) so vpsrlvd / vpsllvd produce the same result as scalar
+    # shr / shl. Functorless / direct uint32 expression.
+    "v_bfe_u32_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) {"
+        " auto off = b & 31u;"
+        " auto w = c & 31u;"
+        " auto mask = (util::native<uint32_t>(1u) << w) - 1u;"
+        " return (a >> off) & mask; }",
+    ),
+    # v_bfe_i32: signed bitfield extract. After the unsigned extract step
+    # (mask-and-shift in the int32 domain to keep the shift arithmetic), if
+    # the extracted field's top bit (bit w-1) is set then the upper bits are
+    # OR'd with ~mask, matching the scalar `val |= -(1 << w)` sign-extend.
+    # `(w - 1) & 31u` keeps the top-bit shift well-defined when w == 0; the
+    # whole result is then forced to 0 on that lane.
+    "v_bfe_i32_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) {"
+        " using I = util::native<int32_t>;"
+        " using U = util::native<uint32_t>;"
+        " auto off = b & 31u;"
+        " auto w = c & 31u;"
+        " auto sa = util::stdx::static_simd_cast<I>(a);"
+        " auto soff = util::stdx::static_simd_cast<I>(off);"
+        " auto mask = (U(1u) << w) - 1u;"
+        " auto smask = util::stdx::static_simd_cast<I>(mask);"
+        " auto val = (sa >> soff) & smask;"
+        " auto top = util::stdx::static_simd_cast<I>(U(1u) << ((w - 1u) & 31u));"
+        " util::stdx::where((val & top) != I(0), val) = val | ~smask;"
+        " util::stdx::where(simd_mask_as<int32_t>(w == 0u), val) = I(0);"
+        " return util::stdx::static_simd_cast<U>(val); }",
+    ),
     # The shift count is masked to the low 5 bits to match the scalar body's
     # x86 `shl` semantics (which mask cl to 5 bits) — stdx's `<<` on native<u32>
     # lowers to vpsllvd, which zeros out lanes where the count is >= 32 rather
