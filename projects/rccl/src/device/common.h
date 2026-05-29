@@ -692,8 +692,10 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
         ncclDevFuncTable_4[ncclShmem.funcId]();
       else if (COLL_UNROLL == 8)
         ncclDevFuncTable_8[ncclShmem.funcId]();
-      else
+      else if (COLL_UNROLL == 16)
         ncclDevFuncTable_16[ncclShmem.funcId]();
+      else
+        ncclDevFuncTable_32[ncclShmem.funcId]();
 #else
       if (COLL_UNROLL == 1)
         NCCL_CALL_FUNCTIONS_1(ncclShmem.funcId);
@@ -703,8 +705,10 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
         NCCL_CALL_FUNCTIONS_4(ncclShmem.funcId);
       else if (COLL_UNROLL == 8)
         NCCL_CALL_FUNCTIONS_8(ncclShmem.funcId);
-      else
+      else if (COLL_UNROLL == 16)
         NCCL_CALL_FUNCTIONS_16(ncclShmem.funcId);
+      else
+        NCCL_CALL_FUNCTIONS_32(ncclShmem.funcId);
 #endif
 #endif
     }
@@ -744,12 +748,14 @@ __global__ void ncclDevKernel_Generic_2(ncclDevKernelArgsDefaultStorage NCCL_GRI
 __global__ void ncclDevKernel_Generic_4(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
 __global__ void ncclDevKernel_Generic_8(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
 __global__ void ncclDevKernel_Generic_16(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
+__global__ void ncclDevKernel_Generic_32(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
 #ifdef ENABLE_COLLTRACE
 __global__ void ncclDevKernelDebug_Generic_1(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
 __global__ void ncclDevKernelDebug_Generic_2(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
 __global__ void ncclDevKernelDebug_Generic_4(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
 __global__ void ncclDevKernelDebug_Generic_8(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
 __global__ void ncclDevKernelDebug_Generic_16(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
+__global__ void ncclDevKernelDebug_Generic_32(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
 #endif
 
 #define DEFINE_ncclDevKernel_nop(suffix, coll, redop, ty, algo, proto, specializedFnId) \

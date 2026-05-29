@@ -14,7 +14,7 @@ all_protos    = ["LL","LL128","SIMPLE"]
 all_algos     = ["TREE","RING", "", "", "", "", "PAT"]
 all_accs      = ["0", "1"]
 all_pipelines = ["0", "1"]
-all_unrolls   = ["1", "2", "4", "8", "16"]
+all_unrolls   = ["1", "2", "4", "8", "16", "32"]
 
 all_params = [all_colls, all_algos, all_protos, all_redops, all_tys, all_accs, all_pipelines, all_unrolls]
 
@@ -233,9 +233,9 @@ def calc_unroll_and_pipeline_for_local_arch():
       return (["2"], all_pipelines)
     elif "gfx1250" == gfx_name:
       # gfx1250 (MI450) benefits from larger unrolls; keep 4 as the safe default
-      # and additionally build 8/16 so RCCL_UNROLL_FACTOR=3 or =4 is usable
-      # without falling off into empty ncclDevFuncTable_8/_16 slots.
-      return (["4", "8", "16"], all_pipelines)
+      # and additionally build 8/16/32 so RCCL_UNROLL_FACTOR=3, =4 or =5 is
+      # usable without falling off into empty ncclDevFuncTable_8/_16/_32 slots.
+      return (["4", "8", "16", "32"], all_pipelines)
     else:
       return (["4"], all_pipelines)
   else:
