@@ -13,6 +13,18 @@
 #include "rma/rma.h"
 
 static bool isLsaAccessible(struct ncclComm* comm, int rank) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // RCCL: on the non-symmetric (host API) path, route any same-node peer through
+  // the CE/IPC path using the intra-node CE team
+  if (!comm->symmetricSupport) {
+    for (int i = 0; i < comm->devrState.ceSize; i++) {
+      if (comm->devrState.ceRankList[i] == rank) {
+        return true;
+      }
+    }
+    return false;
+  }
+#endif
   for (int i = 0; i < comm->devrState.lsaSize; i++) {
     if (comm->devrState.lsaRankList[i] == rank) {
       return true;
