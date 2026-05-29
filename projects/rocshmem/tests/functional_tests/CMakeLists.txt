@@ -71,6 +71,7 @@ target_sources(
     device_bitcode_tester.cpp
     library_info_tester.cpp
     fence_ordering_tester.cpp
+    host_amo_tester.cpp
 )
 
 ###############################################################################

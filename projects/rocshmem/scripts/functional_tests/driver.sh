@@ -136,6 +136,9 @@ declare -A TEST_NUMBERS=(
   ["fence_putlargesmall"]="100"
   ["fence_fanout"]="101"
   ["fence_putwavenbichunks"]="102"
+  ["host_amo_fadd"]="103"
+  ["host_amo_fcswap"]="104"
+  ["host_amo_fence_quiet"]="105"
 )
 
 ExecTest() {
@@ -462,6 +465,11 @@ TestAMO() {
   ExecTest  "amo_fetchand"     2       1            1
 
   ExecTest  "amo_xor"          2       1            1
+
+  # JIRA-419: host-side AMO/fence/quiet in non-MPI IPC mode
+  ExecTest  "host_amo_fadd"        2       1            1
+  ExecTest  "host_amo_fcswap"      2       1            1
+  ExecTest  "host_amo_fence_quiet" 2       1            1
 }
 
 TestSigOps() {

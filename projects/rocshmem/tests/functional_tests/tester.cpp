@@ -71,6 +71,7 @@
 #include "device_bitcode_tester.hpp"
 #include "library_info_tester.hpp"
 #include "fence_ordering_tester.hpp"
+#include "host_amo_tester.hpp"
 
 #include "backend_bc.hpp"
 extern Backend* backend;
@@ -649,6 +650,18 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case FenceOrderPutWaveNbiChunksTestType:
       test_name = "Fence PutWaveNbiChunks Ordering";
       testers.push_back(new FenceOrderingTester(args));
+      break;
+    case HostAMOFAddTestType:
+      test_name = "Host AMO Fetch-Add (JIRA-419)";
+      testers.push_back(new HostAMOTester(args));
+      break;
+    case HostAMOFCswapTestType:
+      test_name = "Host AMO Fetch-CAS (JIRA-419)";
+      testers.push_back(new HostAMOTester(args));
+      break;
+    case HostAMOFenceQuietTestType:
+      test_name = "Host AMO Fence+Quiet (JIRA-419)";
+      testers.push_back(new HostAMOTester(args));
       break;
     default:
       test_name = "Empty";
