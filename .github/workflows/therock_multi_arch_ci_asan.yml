@@ -9,6 +9,23 @@ on:
       - develop
       - users/geomin12/host-asan # TODO: remove after testing
   workflow_dispatch:
+    inputs:
+      linux_amdgpu_families:
+        type: string
+        description: "Insert comma-separated list of Linux GPU families to build and test. ex: gfx94X, gfx120X"
+        default: ""
+      linux_test_labels:
+        type: string
+        description: "If enabled, reduce test set on Linux to the list of labels prefixed with 'test:'. ex: test:rocprim, test:hipcub"
+        default: ""
+      prebuilt_stages:
+        type: string
+        default: ""
+        description: "Comma-separated build stages to skip (or 'all' for all stages); artifacts are copied from baseline_run_id instead"
+      baseline_run_id:
+        type: string
+        default: ""
+        description: "Workflow run ID to copy prebuilt stage artifacts from; required when prebuilt_stages is set"
 
 permissions:
   contents: read
@@ -22,6 +39,13 @@ jobs:
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@685f8c3b89006309b34a7c16de17e841400f0d76 # 2026-05-29 commit
     with:
       build_variant: "host-asan"
+      linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950' }}
+      linux_test_labels: ${{ inputs.linux_test_labels || '' }}
+      prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
+      baseline_run_id: ${{ inputs.baseline_run_id || '' }}
+      repository: ROCm/TheRock
+      ref: "685f8c3b89006309b34a7c16de17e841400f0d76" # 2026-05-29 commit
+      external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
 
   linux_build_and_test:
     name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
