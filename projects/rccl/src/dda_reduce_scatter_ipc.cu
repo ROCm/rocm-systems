@@ -118,10 +118,7 @@ bool ncclReduceScatterDdaIpcEligible(
   }
 
   size_t totalCount = recvcount * comm->nRanks;
-  size_t need = totalCount * 4;
-  if (datatype == ncclFloat16 || datatype == ncclBfloat16) {
-    need = totalCount * 2;
-  }
+  size_t need = totalCount * ncclTypeSize(datatype);
   if (need > comm->ddaIpcScratchBytes) {
     return false;
   }
