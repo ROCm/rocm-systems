@@ -108,7 +108,7 @@ struct triple_buffer_consumer_data_t
     rocprofiler_user_data_t                         userdata{};
     std::shared_ptr<triple_buffer_shared_data_t>    shared{};
     /// Index of the slot this consumer thread owns.
-    size_t                                          slot_index{0};
+    size_t slot_index{0};
 };
 
 /// Parameters passed into the producer worker thread.

@@ -116,9 +116,9 @@ rocprofiler_add_integration_execute_test(
     DISABLED ${TRIPLE_BUFFER_DISABLED})
 
 # gfx9 emits periodic RT_TIMESTAMP_LO32 markers from query_status packets in
-# double/triple-buffer mode. Confirm the decoder surfaces more than the two
-# Begin/End anchor REALTIME records. gfx9-only; gfx10+ uses different in-trace
-# timestamping mechanisms and would only see two records.
+# double/triple-buffer mode. Confirm the decoder surfaces more than the two Begin/End
+# anchor REALTIME records. gfx9-only; gfx10+ uses different in-trace timestamping
+# mechanisms and would only see two records.
 list(GET rocprofiler-sdk-tests-gfx-info 0 _RT_LO32_GPU0)
 if(NOT "${_RT_LO32_GPU0}" MATCHES "^gfx9[0-9a-f]+$")
     set(RT_LO32_DISABLED True)
@@ -131,5 +131,6 @@ rocprofiler_add_integration_execute_test(
     TARGET thread-trace-test-app
     TIMEOUT 240
     PRELOAD "$<TARGET_FILE:thread-trace-triple-buffer-tool>"
-    ENVIRONMENT "TRIPLEBUFFER=1;ATT_NODETAIL=0;ATT_SLOW_CALLBACK=0;EXPECT_PERIODIC_REALTIME=1"
+    ENVIRONMENT
+        "TRIPLEBUFFER=1;ATT_NODETAIL=0;ATT_SLOW_CALLBACK=0;EXPECT_PERIODIC_REALTIME=1"
     DISABLED ${RT_LO32_DISABLED})

@@ -69,7 +69,7 @@ bool
 signal_wait(hsa_signal_t sig, int64_t timeout)
 {
     auto wait_fn = CHECK_NOTNULL(hsa::get_core_table()->hsa_signal_wait_scacquire_fn);
-    auto t0 = std::chrono::steady_clock::now();
+    auto t0      = std::chrono::steady_clock::now();
 
     while(wait_fn(sig, HSA_SIGNAL_CONDITION_EQ, 0, timeout, HSA_WAIT_STATE_BLOCKED) != 0)
     {
@@ -190,9 +190,9 @@ att_queue_create(const hsa::AgentCache& agent, size_t buffer_size, size_t num_bu
         q.cpu_buffers.resize(num_buffers, nullptr);
         for(auto& memory : q.cpu_buffers)
         {
-            CHECK_HSA(ext->hsa_amd_memory_pool_allocate_fn(
-                          agent.cpu_pool(), buffer_size, 0, &memory),
-                      "failed to allocate contiguous memory");
+            CHECK_HSA(
+                ext->hsa_amd_memory_pool_allocate_fn(agent.cpu_pool(), buffer_size, 0, &memory),
+                "failed to allocate contiguous memory");
             CHECK_HSA(ext->hsa_amd_agents_allow_access_fn(1, &q.near_cpu, nullptr, memory),
                       "failed to allow cpu access");
             CHECK_HSA(ext->hsa_amd_agents_allow_access_fn(1, &q.hsa_agent, nullptr, memory),

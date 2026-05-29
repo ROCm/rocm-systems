@@ -58,8 +58,7 @@ add_custom_command(
 # thread-trace tool libraries
 set(THREAD_TRACE_TOOL_LINK_LIBRARIES
     rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
-    rocprofiler-sdk::tests-common-library
-    rocprof-trace-decoder::rocprof-trace-decoder)
+    rocprofiler-sdk::tests-common-library rocprof-trace-decoder::rocprof-trace-decoder)
 
 # single dispatch thread trace tool
 add_library(thread-trace-single-tool SHARED)

@@ -32,7 +32,6 @@ namespace rocprofiler
 {
 namespace thread_trace
 {
-
 // Lifecycle
 hsa_signal_t
 signal_create();
@@ -66,7 +65,7 @@ make_signal(hsa_ext_amd_aql_pm4_packet_t* packet);
 /// Plain data struct for the async DMA queue used by thread trace copies.
 struct att_queue_t
 {
-    hsa_queue_t*           hsa_queue{nullptr};
+    hsa_queue_t* hsa_queue{nullptr};
     /// CPU staging buffers; size matches the user-supplied NUM_BUFFERS. Empty
     /// in single-buffer (synchronous) mode.
     std::vector<void*>     cpu_buffers{};

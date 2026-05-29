@@ -154,9 +154,9 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
     auto control_packet = factory->construct_control_packet();
     auto buffer_packet  = std::make_unique<MockPackets>(control_packet->GetHandle(), query_fn);
 
-    auto mock_queue    = make_mock_queue(*agent);
-    auto worker_data   = std::make_shared<triple_buffer_shared_data_t>();
-    worker_data->queue = mock_queue.get();
+    auto mock_queue          = make_mock_queue(*agent);
+    auto worker_data         = std::make_shared<triple_buffer_shared_data_t>();
+    worker_data->queue       = mock_queue.get();
     worker_data->num_buffers = MOCK_NUM_BUFFERS;
 
     // Initialize buffer memory pointers from the queue's CPU staging buffers.
@@ -293,7 +293,10 @@ TEST(thread_trace, multiple_calls)
     threads.flag->store(rocprofiler::thread_trace::WORKER_FLAG_STOP);
     threads.join_all();
 
-    EXPECT_EQ(data_received.load(), status_called.load() * BUFFER_SIZE);
+    // The producer always emits a 32-byte warmup header at chunk_index 0 before
+    // any GPU-sourced buffers, so user-visible bytes include that header.
+    constexpr size_t HEADER_BYTES = 4 * sizeof(uint64_t);
+    EXPECT_EQ(data_received.load(), status_called.load() * BUFFER_SIZE + HEADER_BYTES);
 }
 
 TEST(thread_trace, data_integrity)
@@ -304,8 +307,8 @@ TEST(thread_trace, data_integrity)
     // [0, 1, 2, ...] confirms no chunk was dropped or corrupted.
     struct state_t
     {
-        std::atomic<int>                       received{0};
-        std::mutex                             mut;
+        std::atomic<int>                        received{0};
+        std::mutex                              mut;
         std::map<uint64_t, std::vector<size_t>> chunks;
     };
 
@@ -321,8 +324,8 @@ TEST(thread_trace, data_integrity)
                        size_t   data_size,
                        rocprofiler_thread_trace_shader_data_flags_t,
                        rocprofiler_user_data_t userdata) {
-        auto* s    = static_cast<state_t*>(userdata.ptr);
-        auto* data = static_cast<size_t*>(datain);
+        auto* s     = static_cast<state_t*>(userdata.ptr);
+        auto* data  = static_cast<size_t*>(datain);
         auto  chunk = std::vector<size_t>(data, data + data_size / sizeof(size_t));
         {
             std::lock_guard lk{s->mut};
@@ -357,20 +360,31 @@ TEST(thread_trace, data_integrity)
     threads.flag->store(rocprofiler::thread_trace::WORKER_FLAG_STOP);
     threads.join_all();
 
-    size_t total_words = 0;
-    for(const auto& [_, chunk] : state.chunks)
-        total_words += chunk.size();
-    EXPECT_EQ(total_words * sizeof(size_t), status_called.load() * BUFFER_SIZE);
+    // The producer always emits a 32-byte warmup header at chunk_index 0 ahead
+    // of the GPU-sourced chunks; the test verifies the trailing real chunks.
+    constexpr size_t HEADER_BYTES = 4 * sizeof(uint64_t);
 
-    // std::map iterates in chunk_index order, so the reassembled stream must
-    // be the strictly increasing sequence 0, 1, 2, ...
+    size_t total_words = 0;
+    for(const auto& [idx, chunk] : state.chunks)
+    {
+        if(idx == 0) continue;  // warmup header, not a GPU chunk
+        total_words += chunk.size();
+    }
+    EXPECT_EQ(total_words * sizeof(size_t), status_called.load() * BUFFER_SIZE);
+    EXPECT_EQ(state.chunks.at(0).size() * sizeof(size_t), HEADER_BYTES);
+
+    // std::map iterates in chunk_index order; skipping the header chunk, the
+    // reassembled stream must be the strictly increasing sequence 0, 1, 2, ...
     size_t expected = 0;
-    for(const auto& [_, chunk] : state.chunks)
+    for(const auto& [idx, chunk] : state.chunks)
+    {
+        if(idx == 0) continue;
         for(size_t v : chunk)
         {
             ASSERT_EQ(expected, v);
             expected++;
         }
+    }
 }
 
 TEST(thread_trace, slow_cpu)

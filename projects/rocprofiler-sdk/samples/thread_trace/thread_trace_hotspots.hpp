@@ -141,8 +141,7 @@ accumulate(rocprofiler_thread_trace_decoder_record_type_t record_type_id,
     else if(record_type_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_WAVE)
     {
         std::lock_guard<std::mutex> guard(lock());
-        auto*                       waves =
-            static_cast<rocprofiler_thread_trace_decoder_wave_t*>(events);
+        auto* waves = static_cast<rocprofiler_thread_trace_decoder_wave_t*>(events);
         for(uint64_t w = 0; w < num_events; w++)
         {
             auto& wave = waves[w];

@@ -172,8 +172,8 @@ producer_loop(
 
     auto submit_signal = scoped_signal_t{};
 
-    auto start_t0 = std::chrono::system_clock::now();
-    bool do_sleep{false};
+    auto     start_t0 = std::chrono::system_clock::now();
+    bool     do_sleep{false};
     uint64_t next_chunk_index = 0;
     int64_t  shader_engine_id = parameters.shader_engine_id;
 
@@ -240,17 +240,15 @@ producer_loop(
         auto   wptr = iterate_data(parameters.control_packet->GetHandle());
         buffer_packet.reset_current_buffer();
         ROCP_INFO << "Iterate data with size: " << wptr.size;
-        send_to_consumer(
-            wptr.data, wptr.size, ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END, idx);
+        send_to_consumer(wptr.data, wptr.size, ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END, idx);
     };
 
-    std::array<uint64_t, 4> header_plus_zeros{}; // Used for warmup the decoder path
+    std::array<uint64_t, 4> header_plus_zeros{};  // Used for warmup the decoder path
     header_plus_zeros.at(0) = buffer_packet.header;
 
-    auto send_header = [&]
-    {
+    auto send_header = [&] {
         ROCP_INFO << "Restarting the trace!";
-        if (buffer_packet.header == 0) return;
+        if(buffer_packet.header == 0) return;
 
         size_t hidx = wait_for_free_slot();
         send_to_consumer(header_plus_zeros.data(),
@@ -272,7 +270,7 @@ producer_loop(
 
         // PHASE 1: Poll SQTT buffer status
         att_queue_submit(queue, &buffer_packet.query_status, &submit_signal.sig);
-        if (!signal_wait(submit_signal.sig, 1<<30))
+        if(!signal_wait(submit_signal.sig, 1 << 30))
         {
             worker_flag.store(WORKER_FLAG_ERROR);
             continue;
@@ -307,8 +305,7 @@ producer_loop(
                 iterate_trace();
                 send_header();
 
-                att_queue_submit_and_wait_last(queue,
-                                               parameters.control_packet->before_krn_pkt);
+                att_queue_submit_and_wait_last(queue, parameters.control_packet->before_krn_pkt);
             }
             // The status_query test verifies we immediately poll again after consuming a
             // buffer, so skip the backoff when a flip just occurred.

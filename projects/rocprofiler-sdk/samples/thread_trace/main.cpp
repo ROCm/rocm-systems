@@ -29,8 +29,8 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
-#include <iostream>
 #include <future>
+#include <iostream>
 
 #include <rocprofiler-sdk-roctx/roctx.h>
 
@@ -60,8 +60,8 @@ divide_kernel(float* a, const float* b, const float* c, int loopcnt)
         {
             float cdx2 = cdx + 1;
             float bdx2 = bdx * 1.5f;
-            bdx = bdx2 / (cdx2 + 1);
-            cdx = cdx2 / (bdx2 + 1);
+            bdx        = bdx2 / (cdx2 + 1);
+            cdx        = cdx2 / (bdx2 + 1);
         }
     }
 
@@ -132,7 +132,7 @@ run(int device, double run_seconds, std::atomic<int>* count)
     uint64_t iter = 0;
 
     auto launch = [&]() {
-        auto& s = streams.at(iter % streams.size());
+        auto& s      = streams.at(iter % streams.size());
         auto& kernel = (iter % 2 == 0) ? divide_kernel : looping_lds_kernel;
         hipLaunchKernelGGL(
             kernel, DATA_SIZE / 512, 512, 0, s.stream, s.dst.ptr, s.src1.ptr, s.src2.ptr, 10);
@@ -148,7 +148,8 @@ run(int device, double run_seconds, std::atomic<int>* count)
     roctxProfilerResume(0);
 
     count->fetch_sub(1);
-    while (count->load() != 0) sched_yield();
+    while(count->load() != 0)
+        sched_yield();
 
     auto       start    = std::chrono::steady_clock::now();
     const auto deadline = start + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
@@ -184,15 +185,18 @@ main(int /*argc*/, char** /*argv*/)
         }
     }
 
-    auto start = std::chrono::steady_clock::now();
+    auto             start = std::chrono::steady_clock::now();
     std::atomic<int> thread_count{dev_count};
-    auto threads = std::vector<std::future<int>>{};
-    for (int i=0; i<dev_count; i++)
+    auto             threads = std::vector<std::future<int>>{};
+    for(int i = 0; i < dev_count; i++)
         threads.push_back(std::async(std::launch::async, run, i, run_seconds, &thread_count));
 
     int iter = 0;
-    for (auto& thread : threads) iter += thread.get();
+    for(auto& thread : threads)
+        iter += thread.get();
 
-    std::cout << "[main] launched " << iter << " kernels over " << std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() << "s" << std::endl;
+    std::cout << "[main] launched " << iter << " kernels over "
+              << std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count()
+              << "s" << std::endl;
     return 0;
 }

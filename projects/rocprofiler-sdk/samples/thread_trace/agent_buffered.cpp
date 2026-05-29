@@ -69,8 +69,8 @@
     if(auto ec = (result); ec != ROCPROFILER_STATUS_SUCCESS)                                       \
     {                                                                                              \
         std::cerr << "rocprofiler-sdk error at " << __FILE__ << ":" << __LINE__                    \
-                  << " :: " << #result << " :: " << msg << " :: "                                  \
-                  << rocprofiler_get_status_string(ec) << std::endl;                               \
+                  << " :: " << #result << " :: " << msg                                            \
+                  << " :: " << rocprofiler_get_status_string(ec) << std::endl;                     \
         abort();                                                                                   \
     }
 
@@ -118,10 +118,10 @@ std::atomic<bool>     cut_captured{false};
 
 struct CutTrace
 {
-    rocprof_trace_decoder_handle_t decoder      = {};
-    uint64_t                       chunk_index  = 0;
-    uint64_t                       begin        = 0;
-    uint64_t                       end          = 0;
+    rocprof_trace_decoder_handle_t decoder     = {};
+    uint64_t                       chunk_index = 0;
+    uint64_t                       begin       = 0;
+    uint64_t                       end         = 0;
     std::vector<uint8_t>           bytes;
 };
 inline CutTrace&
@@ -145,10 +145,8 @@ event_callback(rocprofiler_thread_trace_decoder_record_type_t type,
             static_cast<const rocprofiler_thread_trace_decoder_dispatch_t*>(records);
         for(uint64_t i = 0; i < n; ++i)
         {
-            uint64_t my_id =
-                dispatch_counter.fetch_add(1, std::memory_order_relaxed) + 1;
-            if(my_id >= TARGET_DISPATCH_ID &&
-               !cut_captured.load(std::memory_order_acquire) &&
+            uint64_t my_id = dispatch_counter.fetch_add(1, std::memory_order_relaxed) + 1;
+            if(my_id >= TARGET_DISPATCH_ID && !cut_captured.load(std::memory_order_acquire) &&
                !cl->cut_target_in_call)
             {
                 cl->cut_target_in_call = true;
@@ -162,17 +160,16 @@ event_callback(rocprofiler_thread_trace_decoder_record_type_t type,
 
     if(type == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT)
     {
-        const auto* events =
-            static_cast<const rocprofiler_thread_trace_decoder_event_t*>(records);
+        const auto* events = static_cast<const rocprofiler_thread_trace_decoder_event_t*>(records);
         events_seen.fetch_add(n, std::memory_order_relaxed);
         for(uint64_t i = 0; i < n; ++i)
         {
             const auto& ev = events[i];
-            if(cl->cut_target_in_call && !cl->cut_ready &&
-               ev.me_id == cl->target_me && ev.pipe_id == cl->target_pipe &&
-               ev.byte_offset > cl->cut_offset_begin)
+            if(cl->cut_target_in_call && !cl->cut_ready && ev.me_id == cl->target_me &&
+               ev.pipe_id == cl->target_pipe && ev.byte_offset > cl->cut_offset_begin)
             {
-                if (ev.type == ROCPROF_TRACE_DECODER_EVENT_CS_PARTIAL_FLUSH || cl->pf_count_after_target != 0)
+                if(ev.type == ROCPROF_TRACE_DECODER_EVENT_CS_PARTIAL_FLUSH ||
+                   cl->pf_count_after_target != 0)
                 {
                     if(++cl->pf_count_after_target == 2)
                     {
@@ -223,14 +220,14 @@ try_capture_cut(rocprof_trace_decoder_handle_t handle,
 
     if(!cl.cut_ready)
     {
-        std::fprintf(
-            stderr,
-            "[scan] skip cut: chunk=%lu begin=%lu, only %lu CS_PARTIAL_FLUSH(me=%u,pipe=%u) seen, need 2\n",
-            (unsigned long) chunk_index,
-            (unsigned long) cl.cut_offset_begin,
-            (unsigned long) cl.pf_count_after_target,
-            (unsigned) cl.target_me,
-            (unsigned) cl.target_pipe);
+        std::fprintf(stderr,
+                     "[scan] skip cut: chunk=%lu begin=%lu, only %lu "
+                     "CS_PARTIAL_FLUSH(me=%u,pipe=%u) seen, need 2\n",
+                     (unsigned long) chunk_index,
+                     (unsigned long) cl.cut_offset_begin,
+                     (unsigned long) cl.pf_count_after_target,
+                     (unsigned) cl.target_me,
+                     (unsigned) cl.target_pipe);
         return;
     }
 
@@ -255,9 +252,9 @@ try_capture_cut(rocprof_trace_decoder_handle_t handle,
         return;
     }
 
-    size_t bytes = out.size();
-    auto&  ct    = cut_trace();
-    ct.decoder   = handle;
+    size_t bytes   = out.size();
+    auto&  ct      = cut_trace();
+    ct.decoder     = handle;
     ct.chunk_index = chunk_index;
     ct.begin       = cl.cut_offset_begin;
     ct.end         = cl.cut_offset_end;
@@ -302,12 +299,12 @@ namespace ATTClient
 {
 struct AgentTraceState
 {
-    rocprofiler_context_id_t      context{};
+    rocprofiler_context_id_t       context{};
     rocprof_trace_decoder_handle_t decoder{};
-    const char*                   agent_name = "unknown";
-    bool                          started = false;
-    uint64_t                      start_ns = 0;
-    uint64_t                      stop_ns  = 0;
+    const char*                    agent_name = "unknown";
+    bool                           started    = false;
+    uint64_t                       start_ns   = 0;
+    uint64_t                       stop_ns    = 0;
 };
 
 // Leaked because tool_fini runs after static destructors.
@@ -352,7 +349,7 @@ start_agent_context(uint64_t agent_handle)
     if(!state.started)
     {
         ROCPROFILER_CALL(rocprofiler_start_context(state.context), "starting context");
-        state.started = true;
+        state.started  = true;
         state.start_ns = now_ns();
     }
 
@@ -374,7 +371,7 @@ stop_started_agent_contexts()
            status != ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND)
             ROCPROFILER_CALL(status, "stopping context");
         state.started = false;
-        state.stop_ns  = now_ns();
+        state.stop_ns = now_ns();
     }
 }
 
@@ -396,10 +393,10 @@ trace_active_span_ns()
     return (begin != 0 && end > begin) ? end - begin : 0;
 }
 
-constexpr uint64_t TARGET_CU                 = 1;
-constexpr uint64_t SHADER_MASK               = 0x1;
-constexpr uint64_t GPU_BUFFER_SIZE_DEFAULT   = 64ul << 20;
-constexpr size_t   NUM_BUFFERS               = 6;
+constexpr uint64_t TARGET_CU               = 1;
+constexpr uint64_t SHADER_MASK             = 0x1;
+constexpr uint64_t GPU_BUFFER_SIZE_DEFAULT = 64ul << 20;
+constexpr size_t   NUM_BUFFERS             = 6;
 
 // Allow override at startup for sweeping.  GPU_BUFFER_SIZE_MB=N picks N MB.
 inline uint64_t
@@ -438,10 +435,8 @@ shader_data_callback(rocprofiler_agent_id_t /*agent*/,
     auto* state = static_cast<AgentTraceState*>(userdata.ptr);
     if(state == nullptr) return;
 
-    ScanState::scan_inline(state->decoder,
-                           chunk_index,
-                           static_cast<const uint8_t*>(se_data),
-                           data_size);
+    ScanState::scan_inline(
+        state->decoder, chunk_index, static_cast<const uint8_t*>(se_data), data_size);
 }
 
 rocprofiler_status_t
@@ -454,8 +449,10 @@ query_available_agents(rocprofiler_agent_version_t /*version*/,
     parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, {TARGET_CU}});
     parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {SHADER_MASK}});
     uint64_t buf_size = gpu_buffer_size();
-    std::fprintf(stderr, "[scan] GPU_BUFFER_SIZE = %lu bytes (%lu MB)\n",
-                 (unsigned long) buf_size, (unsigned long) (buf_size >> 20));
+    std::fprintf(stderr,
+                 "[scan] GPU_BUFFER_SIZE = %lu bytes (%lu MB)\n",
+                 (unsigned long) buf_size,
+                 (unsigned long) (buf_size >> 20));
     parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, {buf_size}});
     parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_NUM_BUFFERS, {NUM_BUFFERS}});
 
@@ -464,7 +461,7 @@ query_available_agents(rocprofiler_agent_version_t /*version*/,
         const auto* agent = static_cast<const rocprofiler_agent_v0_t*>(agents[idx]);
         if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
 
-        auto& state = agent_states()[agent->id.handle];
+        auto& state      = agent_states()[agent->id.handle];
         state.agent_name = (agent->name != nullptr) ? agent->name : "unknown";
 
         ROCPROFILER_CALL(rocprofiler_create_context(&state.context), "context creation");
@@ -472,8 +469,8 @@ query_available_agents(rocprofiler_agent_version_t /*version*/,
         auto dst = rocprof_trace_decoder_create_handle(&state.decoder);
         if(dst != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS)
         {
-            std::cerr << "Decoder error at " << __FILE__ << ":" << __LINE__ << " :: "
-                      << rocprof_trace_decoder_get_status_string(dst) << std::endl;
+            std::cerr << "Decoder error at " << __FILE__ << ":" << __LINE__
+                      << " :: " << rocprof_trace_decoder_get_status_string(dst) << std::endl;
             abort();
         }
 
@@ -481,14 +478,13 @@ query_available_agents(rocprofiler_agent_version_t /*version*/,
         // the hot path doesn't have to do a per-chunk map lookup.
         rocprofiler_user_data_t user{};
         user.ptr = &state;
-        ROCPROFILER_CALL(
-            rocprofiler_configure_device_thread_trace_service(state.context,
-                                                              agent->id,
-                                                              parameters.data(),
-                                                              parameters.size(),
-                                                              shader_data_callback,
-                                                              user),
-            "thread trace service configure");
+        ROCPROFILER_CALL(rocprofiler_configure_device_thread_trace_service(state.context,
+                                                                           agent->id,
+                                                                           parameters.data(),
+                                                                           parameters.size(),
+                                                                           shader_data_callback,
+                                                                           user),
+                         "thread trace service configure");
     }
     return ROCPROFILER_STATUS_SUCCESS;
 }
@@ -555,14 +551,14 @@ tool_init(rocprofiler_client_finalize_t /*fini_func*/, void* /*tool_data*/)
     // agent context on first code-object load.
     ROCPROFILER_CALL(rocprofiler_create_context(&tracing_ctx), "context creation");
 
-    ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
-                         tracing_ctx,
-                         ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,
-                         nullptr,
-                         0,
-                         codeobj_tracing_callback,
-                         nullptr),
-                     "code object tracing callback service configure");
+    ROCPROFILER_CALL(
+        rocprofiler_configure_callback_tracing_service(tracing_ctx,
+                                                       ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,
+                                                       nullptr,
+                                                       0,
+                                                       codeobj_tracing_callback,
+                                                       nullptr),
+        "code object tracing callback service configure");
 
     ROCPROFILER_CALL(rocprofiler_query_available_agents(ROCPROFILER_AGENT_INFO_VERSION_0,
                                                         &query_available_agents,
@@ -574,8 +570,7 @@ tool_init(rocprofiler_client_finalize_t /*fini_func*/, void* /*tool_data*/)
     for(auto& [agent_handle, state] : agent_states())
     {
         (void) agent_handle;
-        ROCPROFILER_CALL(rocprofiler_context_is_valid(state.context, &valid_ctx),
-                         "validity check");
+        ROCPROFILER_CALL(rocprofiler_context_is_valid(state.context, &valid_ctx), "validity check");
         if(valid_ctx == 0) throw std::runtime_error("agent context is not valid!");
     }
     ROCPROFILER_CALL(rocprofiler_context_is_valid(tracing_ctx, &valid_ctx), "validity check");
@@ -599,19 +594,14 @@ tool_fini(void* /*tool_data*/)
     size_t active_ns   = trace_active_span_ns();
 
     double bytes_gb = static_cast<double>(bytes) / (1024.0 * 1024.0 * 1024.0);
-    std::cout << "\n[scan] chunks=" << chunks
-              << " bytes=" << bytes
-              << " (" << bytes_gb << " GB)"
-              << " events=" << events
-              << " dispatches=" << dispatches << "\n";
+    std::cout << "\n[scan] chunks=" << chunks << " bytes=" << bytes << " (" << bytes_gb << " GB)"
+              << " events=" << events << " dispatches=" << dispatches << "\n";
 
     auto report = [bytes](const char* label, size_t ns) {
         if(ns == 0 || bytes == 0) return;
         double seconds  = ns / 1e9;
         double gb_per_s = (double) bytes / seconds / (1024.0 * 1024.0 * 1024.0);
-        std::printf(
-            "[scan] %-8s  wall=%.3fs  throughput=%.2f GB/s\n",
-            label, seconds, gb_per_s);
+        std::printf("[scan] %-8s  wall=%.3fs  throughput=%.2f GB/s\n", label, seconds, gb_per_s);
     };
     report("scan", callback_ns);
     report("trace", active_ns);
@@ -623,8 +613,7 @@ tool_fini(void* /*tool_data*/)
     uint64_t cpu_n = ScanState::flag_cpu_full.load();
     std::cout << "[scan] flags: END=" << end_n << " GPU_BUFFER_FULL=" << gpu_n
               << " CPU_BUFFER_FULL=" << cpu_n;
-    if(gpu_n != 0 || cpu_n != 0)
-        std::cout << "  *** TRACE INTERRUPTED — data was lost ***";
+    if(gpu_n != 0 || cpu_n != 0) std::cout << "  *** TRACE INTERRUPTED — data was lost ***";
     std::cout << "\n";
 
     // Post-mortem parse of the standalone trace cut at TARGET_DISPATCH_ID.
@@ -634,9 +623,10 @@ tool_fini(void* /*tool_data*/)
         auto& ct = ScanState::cut_trace();
         if(ct.bytes.empty())
         {
-            std::printf("[scan] cut trace: NOT CAPTURED (TARGET_DISPATCH_ID=%lu, %lu dispatches seen)\n",
-                        (unsigned long) ScanState::TARGET_DISPATCH_ID,
-                        (unsigned long) ScanState::dispatch_counter.load());
+            std::printf(
+                "[scan] cut trace: NOT CAPTURED (TARGET_DISPATCH_ID=%lu, %lu dispatches seen)\n",
+                (unsigned long) ScanState::TARGET_DISPATCH_ID,
+                (unsigned long) ScanState::dispatch_counter.load());
         }
         else
         {
@@ -650,9 +640,7 @@ tool_fini(void* /*tool_data*/)
             {
                 ofs.write(reinterpret_cast<const char*>(ct.bytes.data()),
                           static_cast<std::streamsize>(ct.bytes.size()));
-                std::printf("[scan] wrote %lu B to %s\n",
-                            (unsigned long) ct.bytes.size(),
-                            path);
+                std::printf("[scan] wrote %lu B to %s\n", (unsigned long) ct.bytes.size(), path);
             }
             else
             {
@@ -668,15 +656,14 @@ tool_fini(void* /*tool_data*/)
             // top-N report identical in format to the simple agent.
             auto pst = rocprof_trace_decoder_parse(
                 ct.decoder, ct.bytes.data(), ct.bytes.size(), &hotspots::accumulate, nullptr);
-            std::printf(
-                "[scan] cut trace: dispatch #%lu chunk=%lu range=%lu..%lu "
-                "(%lu B standalone) parse=%s\n",
-                (unsigned long) ScanState::TARGET_DISPATCH_ID,
-                (unsigned long) ct.chunk_index,
-                (unsigned long) ct.begin,
-                (unsigned long) ct.end,
-                (unsigned long) ct.bytes.size(),
-                rocprof_trace_decoder_get_status_string(pst));
+            std::printf("[scan] cut trace: dispatch #%lu chunk=%lu range=%lu..%lu "
+                        "(%lu B standalone) parse=%s\n",
+                        (unsigned long) ScanState::TARGET_DISPATCH_ID,
+                        (unsigned long) ct.chunk_index,
+                        (unsigned long) ct.begin,
+                        (unsigned long) ct.end,
+                        (unsigned long) ct.bytes.size(),
+                        rocprof_trace_decoder_get_status_string(pst));
         }
     }
 

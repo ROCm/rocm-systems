@@ -82,10 +82,10 @@ struct agent_output_buffer_t
     static constexpr size_t BUFFER_SIZE = 256ul << 20;
 };
 
-rocprof_trace_decoder_handle_t        decoder{};
-rocprofiler_context_id_t              agent_ctx{};
-rocprofiler_context_id_t              tracing_ctx{};
-std::vector<agent_output_buffer_t>*   agent_buffers{};
+rocprof_trace_decoder_handle_t      decoder{};
+rocprofiler_context_id_t            agent_ctx{};
+rocprofiler_context_id_t            tracing_ctx{};
+std::vector<agent_output_buffer_t>* agent_buffers{};
 
 // Tracks REALTIME records to verify that the gfx9 query_status path emits
 // periodic RT_TIMESTAMP_LO32 markers in addition to the Begin/End anchors.
@@ -128,8 +128,8 @@ void
 shader_data_callback(rocprofiler_agent_id_t /* agent */,
                      int64_t /* se_id */,
                      uint64_t chunk_index,
-                     void*  se_data,
-                     size_t data_size,
+                     void*    se_data,
+                     size_t   data_size,
                      rocprofiler_thread_trace_shader_data_flags_t /* flags */,
                      rocprofiler_user_data_t userdata)
 {
@@ -311,7 +311,7 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
         {
             parse_state_t state{};
             auto&         buffer = output_buffer.output_buffer;
-            size_t output_size = std::min(output_buffer.output_size.exchange(0), buffer.size());
+            size_t output_size   = std::min(output_buffer.output_size.exchange(0), buffer.size());
             rocprof_trace_decoder_parse(decoder, buffer.data(), output_size, parse, &state);
             total_size += output_size;
 
@@ -330,8 +330,7 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
             size_t prev_max = realtime_max_per_pass.load();
             while(state.realtime_count > prev_max &&
                   !realtime_max_per_pass.compare_exchange_weak(prev_max, state.realtime_count))
-            {
-            }
+            {}
             if(state.monotonicity_bad) realtime_monotonicity_violation = true;
         }
 
@@ -397,8 +396,7 @@ tool_fini(void*)
 {
     if(realtime_monotonicity_violation.load())
     {
-        std::cerr << "Error: REALTIME records were not monotonic within a decode pass"
-                  << std::endl;
+        std::cerr << "Error: REALTIME records were not monotonic within a decode pass" << std::endl;
         abort();
     }
 
@@ -415,8 +413,8 @@ tool_fini(void*)
         if(max_pass <= 2)
         {
             std::cerr << "Error: expected periodic REALTIME records within a single pass (>2), "
-                      << "got max-per-pass=" << max_pass
-                      << " total=" << realtime_total_count.load() << std::endl;
+                      << "got max-per-pass=" << max_pass << " total=" << realtime_total_count.load()
+                      << std::endl;
             abort();
         }
     }

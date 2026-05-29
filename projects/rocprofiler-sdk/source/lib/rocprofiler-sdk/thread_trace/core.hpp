@@ -77,7 +77,7 @@ struct thread_trace_parameter_pack
     /// Number of CPU staging buffers in the producer/consumer pipeline.
     /// 1 = single buffer (synchronous, no async copy).
     /// Values >= 3 enable the async copy pipeline. 2 is rejected at the API layer.
-    size_t   num_buffers        = 1;
+    size_t num_buffers = 1;
 
     bool bSerialize = false;
 

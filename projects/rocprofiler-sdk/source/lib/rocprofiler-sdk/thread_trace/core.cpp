@@ -65,10 +65,10 @@ constexpr uint64_t MIN_BUFFER_SIZE = 1 << 20;  // 1MB minimum to give the GPU ro
 
 struct cbdata_t
 {
-    rocprofiler_agent_id_t                          agent       = {.handle = 0};
-    rocprofiler_thread_trace_shader_data_callback_t cb_fn       = nullptr;
-    const rocprofiler_user_data_t*                  userdata    = nullptr;
-    uint64_t                                        next_chunk  = 0;
+    rocprofiler_agent_id_t                          agent      = {.handle = 0};
+    rocprofiler_thread_trace_shader_data_callback_t cb_fn      = nullptr;
+    const rocprofiler_user_data_t*                  userdata   = nullptr;
+    uint64_t                                        next_chunk = 0;
 };
 
 // Keeps track of a single client registering for serialized thread trace
@@ -295,8 +295,8 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
         // before the main payload arrives. The header is chunk_index 0; the
         // producer thread continues the sequence from 1.
 
-        auto worker_data   = std::make_shared<triple_buffer_shared_data_t>();
-        worker_data->queue = queue.get();  // non-owning; ThreadTracerAgent owns queue
+        auto worker_data         = std::make_shared<triple_buffer_shared_data_t>();
+        worker_data->queue       = queue.get();  // non-owning; ThreadTracerAgent owns queue
         worker_data->num_buffers = params.num_buffers;
 
         // Wire each slot to its CPU staging buffer. Slots default to FREE.
@@ -580,7 +580,7 @@ DeviceThreadTracer::start_context()
         return;
     }
     int expected = WORKER_FLAG_STOP;
-    if (!worker_flag->compare_exchange_strong(expected, WORKER_FLAG_RUNNING))
+    if(!worker_flag->compare_exchange_strong(expected, WORKER_FLAG_RUNNING))
     {
         ROCP_ERROR << "Unable to start thread trace worker thread";
         return;
@@ -640,7 +640,7 @@ flush_and_stop()
     {
         if(ctx->device_thread_trace)
         {
-            if (CHECK_NOTNULL(ctx->device_thread_trace->worker_flag)->load() != WORKER_FLAG_ERROR)
+            if(CHECK_NOTNULL(ctx->device_thread_trace->worker_flag)->load() != WORKER_FLAG_ERROR)
                 ctx->device_thread_trace->worker_flag->store(WORKER_FLAG_DESTRUCTOR);
             ctx->device_thread_trace->stop_context();
         }

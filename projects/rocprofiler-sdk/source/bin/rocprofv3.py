@@ -1090,7 +1090,8 @@ def parse_input(input_file):
 
     _, extension = os.path.splitext(input_file)
     if extension == ".txt" or extension == ".text":
-        warning("""
+        warning(
+            """
             Text file format for counter collection is deprecated and will be removed in a future release.
             Please use JSON or YAML format instead.
 
@@ -1107,7 +1108,8 @@ def parse_input(input_file):
 
             JSON file (recommended):
                 {"jobs":[{"pmc": ["SQ_WAVES"]},{ "pmc":["GRBM_COUNT"]}]}
-            """)
+            """
+        )
         text_input = parse_text(input_file)
         text_input_lst = [{"pmc": itr, "sub_directory": "pmc_"} for itr in text_input]
         return [dotdict(itr) for itr in text_input_lst]
