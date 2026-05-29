@@ -78,19 +78,8 @@
 // a global instance of std::mutex to protect data passed during threads
 std::mutex myMutex;
 
-// To enable multiple init and shutdown calls, the reference count is used
-// to track the number of times the library has been initialized.
-static int init_ref_count = 0;
-
 #define SIZE 10
 char proc_id[SIZE] = "\0";
-
-#define AMDSMI_CHECK_INIT()          \
-  do {                               \
-    if (init_ref_count == 0) {       \
-      return AMDSMI_STATUS_NOT_INIT; \
-    }                                \
-  } while (0)
 
 static const std::map<amdsmi_accelerator_partition_type_t, std::string> partition_types_map = {
     {AMDSMI_ACCELERATOR_PARTITION_SPX, "SPX"}, {AMDSMI_ACCELERATOR_PARTITION_DPX, "DPX"},
@@ -117,31 +106,6 @@ static const std::map<amdsmi_memory_partition_type_t, rsmi_memory_partition_type
                           {AMDSMI_MEMORY_PARTITION_NPS4, RSMI_MEMORY_PARTITION_NPS4},
                           {AMDSMI_MEMORY_PARTITION_NPS8, RSMI_MEMORY_PARTITION_NPS8}};
 
-static amdsmi_status_t get_gpu_device_from_handle(amdsmi_processor_handle processor_handle,
-                                                  amd::smi::AMDSmiGPUDevice** gpudevice) {
-  AMDSMI_CHECK_INIT();
-  std::ostringstream ss;
-
-  if (processor_handle == nullptr || gpudevice == nullptr) {
-    ss << __PRETTY_FUNCTION__ << " | processor_handle is NULL; returning: AMDSMI_STATUS_INVAL";
-    LOG_ERROR(ss);
-    return AMDSMI_STATUS_INVAL;
-  }
-
-  amd::smi::AMDSmiProcessor* device = nullptr;
-  amdsmi_status_t r =
-      amd::smi::AMDSmiSystem::getInstance().handle_to_processor(processor_handle, &device);
-  if (r != AMDSMI_STATUS_SUCCESS) return r;
-
-  if (device->get_processor_type() == AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
-    *gpudevice = static_cast<amd::smi::AMDSmiGPUDevice*>(device);
-    return AMDSMI_STATUS_SUCCESS;
-  }
-
-  ss << __PRETTY_FUNCTION__ << " | returning AMDSMI_STATUS_NOT_SUPPORTED";
-  LOG_ERROR(ss);
-  return AMDSMI_STATUS_NOT_SUPPORTED;
-}
 template <typename F, typename... Args>
 amdsmi_status_t rsmi_wrapper(F&& f, amdsmi_processor_handle processor_handle,
                              uint32_t increment_gpu_id, Args&&... args) {
@@ -329,31 +293,22 @@ amdsmi_status_t rsmi_switch_wrapper(F&& f, amdsmi_processor_handle processor_han
 #endif  // BRCM_NIC
 
 amdsmi_status_t amdsmi_init(uint64_t flags) {
-  if (init_ref_count > 0) {
-    init_ref_count++;
+  if (amd::smi::amdsmi_library_initialized()) {
+    amd::smi::amdsmi_library_init_ref_acquire();
     return AMDSMI_STATUS_SUCCESS;
   }
-
   amdsmi_status_t status = amd::smi::AMDSmiSystem::getInstance().init(flags);
   if (status == AMDSMI_STATUS_SUCCESS) {
-    init_ref_count++;
+    amd::smi::amdsmi_library_init_ref_acquire();
   }
   return status;
 }
 
 amdsmi_status_t amdsmi_shut_down() {
-  if (init_ref_count == 0) {
+  if (!amd::smi::amdsmi_library_init_ref_release()) {
     return AMDSMI_STATUS_SUCCESS;
   }
-  // Decrement the reference count
-  init_ref_count--;
-  // If the reference count is still greater than 0, return success
-  if (init_ref_count > 0) {
-    return AMDSMI_STATUS_SUCCESS;
-  }
-  amdsmi_status_t status = amd::smi::AMDSmiSystem::getInstance().cleanup();
-
-  return status;
+  return amd::smi::AMDSmiSystem::getInstance().cleanup();
 }
 
 amdsmi_status_t amdsmi_status_code_to_string(amdsmi_status_t status, const char** status_string) {

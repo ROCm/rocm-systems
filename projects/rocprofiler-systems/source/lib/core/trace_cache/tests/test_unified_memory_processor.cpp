@@ -5,6 +5,7 @@
 // recording output sink.
 
 #include "common/tests/filesystem.hpp"
+#include "core/categories.hpp"
 #include "core/trace_cache/unified_memory_processor.hpp"
 #include "unified_memory_test_helpers.hpp"
 #include <cstdint>
@@ -209,7 +210,7 @@ TEST(MigrationStats, ArithmeticAndSentinels)
     EXPECT_EQ(s.max_size_bytes, 0u);
     EXPECT_EQ(s.min_size_bytes, std::numeric_limits<std::uint64_t>::max());  // sentinel
     EXPECT_DOUBLE_EQ(s.avg_size_bytes(), 0.0);
-    EXPECT_DOUBLE_EQ(s.bandwidth_gbps(), 0.0);  // zero-division guard
+    EXPECT_DOUBLE_EQ(s.migration_throughput_gbps(), 0.0);  // zero-division guard
 
     s.add_migration(/*size=*/1000, /*duration_ns=*/100);
     s.add_migration(/*size=*/3000, /*duration_ns=*/300);
@@ -220,7 +221,18 @@ TEST(MigrationStats, ArithmeticAndSentinels)
     EXPECT_EQ(s.min_size_bytes, 1000u);
     EXPECT_EQ(s.max_size_bytes, 3000u);
     EXPECT_DOUBLE_EQ(s.avg_size_bytes(), 2000.0);
-    EXPECT_DOUBLE_EQ(s.bandwidth_gbps(), 10.0);  // 4000 bytes / 400 ns = 10 GB/s
+    EXPECT_DOUBLE_EQ(s.migration_throughput_gbps(),
+                     10.0);  // 4000 bytes / 400 ns = 10 GB/s
+}
+
+TEST(UnifiedMemoryCategory, MigrationThroughputNameAndCompatibilityAlias)
+{
+    using category_type = tim::category::unified_memory_migration_throughput;
+
+    EXPECT_STREQ(tim::trait::name<category_type>::value,
+                 "unified_memory_migration_throughput");
+    EXPECT_EQ(rocprofsys::category_enum_id<category_type>::value,
+              ROCPROFSYS_CATEGORY_UNIFIED_MEMORY_MIGRATION_THROUGHPUT);
 }
 
 TEST_F(UnifiedMemoryProcessorTest, JsonSchemaAlwaysEmitsAllDirections)
@@ -242,7 +254,7 @@ TEST_F(UnifiedMemoryProcessorTest, JsonSchemaAlwaysEmitsAllDirections)
         ASSERT_TRUE(migrations.contains(dir)) << "missing direction key: " << dir;
         for(const char* k :
             { "count", "total_size_bytes", "min_size_bytes", "max_size_bytes",
-              "avg_size_bytes", "total_time_ns", "bandwidth_gbps" })
+              "avg_size_bytes", "total_time_ns", "migration_throughput_gbps" })
         {
             EXPECT_TRUE(migrations[dir].contains(k)) << dir << " missing stat: " << k;
         }

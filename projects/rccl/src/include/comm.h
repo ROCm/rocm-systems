@@ -815,6 +815,8 @@ struct ncclComm {
   void* tempBuff;
 
   struct ncclMemManager* memManager;  // Memory manager
+  struct ncclIntruQueue<struct ncclMemManagerTask, &ncclMemManagerTask::next> suspendTaskQueue;
+  struct ncclIntruQueue<struct ncclMemManagerTask, &ncclMemManagerTask::next> resumeTaskQueue;
 
   uint64_t endMagic;
 };
