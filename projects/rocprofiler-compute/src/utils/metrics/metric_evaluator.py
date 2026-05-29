@@ -51,22 +51,20 @@ class MetricEvaluator:
             local_expr_context.update(self.empirical_peaks)
 
             # Add utility functions to local context
-            local_expr_context.update(
-                {
-                    "to_min": to_min,
-                    "to_max": to_max,
-                    "to_avg": to_avg,
-                    "to_median": to_median,
-                    "to_std": to_std,
-                    "to_int": to_int,
-                    "to_sum": to_sum,
-                    "to_round": to_round,
-                    "to_quantile": to_quantile,
-                    "to_mod": to_mod,
-                    "to_concat": to_concat,
-                    "to_noise_clamp": to_noise_clamp,
-                }
-            )
+            local_expr_context.update({
+                "to_min": to_min,
+                "to_max": to_max,
+                "to_avg": to_avg,
+                "to_median": to_median,
+                "to_std": to_std,
+                "to_int": to_int,
+                "to_sum": to_sum,
+                "to_round": to_round,
+                "to_quantile": to_quantile,
+                "to_mod": to_mod,
+                "to_concat": to_concat,
+                "to_noise_clamp": to_noise_clamp,
+            })
 
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always", RuntimeWarning)

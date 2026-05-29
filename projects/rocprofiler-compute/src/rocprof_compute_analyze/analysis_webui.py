@@ -549,9 +549,9 @@ def determine_chart_type(
             content.append(html.Div(className="float-container", children=temp_obj))
         # Normal formatting if < 2 graphs
         else:
-            content.extend(
-                [dcc.Graph(figure=fig, style={"margin": "2%"}) for fig in d_figs]
-            )
+            content.extend([
+                dcc.Graph(figure=fig, style={"margin": "2%"}) for fig in d_figs
+            ])
 
     # b) Tablechart
     else:

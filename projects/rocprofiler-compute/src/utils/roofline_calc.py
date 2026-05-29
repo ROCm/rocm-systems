@@ -296,13 +296,11 @@ def calc_ceilings(
         # Plot FMA roof
         x0 = min(x2, dynamic_xmax) if x2 < dynamic_xmax else dynamic_xmax
 
-        graph_points["valu"].extend(
-            [
-                [x0, dynamic_xmax],
-                [peak_ops, peak_ops],
-                peak_ops,
-            ]
-        )
+        graph_points["valu"].extend([
+            [x0, dynamic_xmax],
+            [peak_ops, peak_ops],
+            peak_ops,
+        ])
 
     # Plot Matrix Ops roof
     if dtype in MATRIX_DATATYPES:  # assert that "matrix_ops" has been assigned
@@ -310,13 +308,11 @@ def calc_ceilings(
             min(x2_matrix, dynamic_xmax) if x2_matrix < dynamic_xmax else dynamic_xmax
         )
 
-        graph_points["matrix_ops"].extend(
-            [
-                [x0_matrix, dynamic_xmax],
-                [peak_matrix, peak_matrix],
-                peak_matrix,
-            ]
-        )
+        graph_points["matrix_ops"].extend([
+            [x0_matrix, dynamic_xmax],
+            [peak_matrix, peak_matrix],
+            peak_matrix,
+        ])
 
     return graph_points
 

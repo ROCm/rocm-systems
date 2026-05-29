@@ -621,18 +621,16 @@ def load_pc_sampling_data_per_kernel(
         dispatch_ids,
     ) in records:
         for dispatch_id in dispatch_ids:
-            rows.append(
-                {
-                    "dispatch_id": dispatch_id,
-                    "code_object_id": code_object_id,
-                    "offset": offset,
-                    "inst_index": inst_index,
-                    "count": count,
-                    "count_issued": count_issued,
-                    "count_stalled": count_stalled,
-                    "stall_reason": stall_reasons,
-                }
-            )
+            rows.append({
+                "dispatch_id": dispatch_id,
+                "code_object_id": code_object_id,
+                "offset": offset,
+                "inst_index": inst_index,
+                "count": count,
+                "count_issued": count_issued,
+                "count_stalled": count_stalled,
+                "stall_reason": stall_reasons,
+            })
 
     df = pd.DataFrame(rows)
     if df.empty:
@@ -671,16 +669,14 @@ def load_pc_sampling_data_per_kernel(
         return sorted(merged_counts.items(), key=lambda item: item[1], reverse=True)
 
     # Group and aggregate
-    df = df.groupby(["code_object_id", "offset", "kernel_id"], as_index=False).agg(
-        {
-            "inst_index": "first",
-            "count": "sum",
-            "count_issued": "sum",
-            "count_stalled": "sum",
-            "stall_reason": merge_stall_reasons,
-            "kernel_name": "first",
-        }
-    )
+    df = df.groupby(["code_object_id", "offset", "kernel_id"], as_index=False).agg({
+        "inst_index": "first",
+        "count": "sum",
+        "count_issued": "sum",
+        "count_stalled": "sum",
+        "stall_reason": merge_stall_reasons,
+        "kernel_name": "first",
+    })
 
     # Filter DataFrame to only include rows matching the requested kernel_name
     df = df[df["kernel_name"] == kernel_name]
@@ -807,7 +803,8 @@ def load_pc_sampling_data(
 
         # Group by Instruction_Comment and aggregate
         grouped_counts = (
-            merged_df.groupby("Instruction_Comment")
+            merged_df
+            .groupby("Instruction_Comment")
             .agg(
                 count=("Instruction_Comment", "count"),
                 instruction=("Instruction", "first"),

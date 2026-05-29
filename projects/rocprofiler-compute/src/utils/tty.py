@@ -825,7 +825,8 @@ def format_table_output(
             mem_data = mem_data_override
         else:
             mem_data = (
-                pd.DataFrame([df["Metric"], df["Value"]])
+                pd
+                .DataFrame([df["Metric"], df["Value"]])
                 .transpose()
                 .set_index("Metric")
                 .to_dict()["Value"]
