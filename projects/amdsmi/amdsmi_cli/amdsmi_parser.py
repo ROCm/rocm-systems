@@ -1421,13 +1421,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         command_modifier_group.add_argument(
             "--append", action="store_true", required=False, help="Append to the file"
         )
-        command_modifier_group.add_argument(
-            "--sort-by-pid",
-            action="store_true",
-            default=False,
-            help="Group process output by PID instead of GPU. "
-            "Applies to any command that shows process information.",
-        )
         # Placing loglevel outside the subcommands so it can be used with any subcommand
         command_modifier_group.add_argument(
             "--loglevel",
@@ -2275,6 +2268,13 @@ class AMDSMIParser(argparse.ArgumentParser):
             help=name_help,
         )
 
+        process_parser.add_argument(
+            "--sort-by-pid",
+            action="store_true",
+            default=False,
+            help="Group process output by PID instead of GPU.",
+        )
+
         # Add Universal Arguments & watch Args
         self._add_watch_arguments(process_parser)
         self._add_device_arguments(process_parser, required=False)
@@ -3078,6 +3078,13 @@ class AMDSMIParser(argparse.ArgumentParser):
             monitor_parser.add_argument(
                 "-V", "--violation", action="store_true", required=False, help=violation_help
             )
+
+        monitor_parser.add_argument(
+            "--sort-by-pid",
+            action="store_true",
+            default=False,
+            help="Group process output by PID instead of GPU. Only applies when --process is used.",
+        )
 
         # Add Universal Arguments & Watch Args
         self._add_watch_arguments(monitor_parser)
