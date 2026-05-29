@@ -1638,8 +1638,9 @@ pc_sampling_callback(rocprofiler_context_id_t /* context_id*/,
 }
 
 void
-att_shader_data_callback(rocprofiler_agent_id_t                       agent,
-                         int64_t                                      se_id,
+att_shader_data_callback(rocprofiler_agent_id_t agent,
+                         int64_t                se_id,
+                         uint64_t /* chunk_index */,
                          void*                                        se_data,
                          size_t                                       data_size,
                          rocprofiler_thread_trace_shader_data_flags_t flags,
