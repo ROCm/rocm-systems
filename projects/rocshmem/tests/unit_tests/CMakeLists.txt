@@ -74,13 +74,6 @@ if (USE_IPC)
   )
 endif()
 
-# Pass -DJIRA_419_FIXED=1 at cmake time to compile the post-fix functional
-# tests instead of the pre-fix death tests.
-if (JIRA_419_FIXED)
-  target_compile_definitions(${PROJECT_NAME} PRIVATE JIRA_419_FIXED)
-endif()
-
-
 if (USE_GDA)
   target_sources(
     ${PROJECT_NAME}

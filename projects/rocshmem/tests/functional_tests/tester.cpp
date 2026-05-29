@@ -652,15 +652,15 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       testers.push_back(new FenceOrderingTester(args));
       break;
     case HostAMOFAddTestType:
-      test_name = "Host AMO Fetch-Add (JIRA-419)";
+      test_name = "Host AMO Fetch-Add";
       testers.push_back(new HostAMOTester(args));
       break;
     case HostAMOFCswapTestType:
-      test_name = "Host AMO Fetch-CAS (JIRA-419)";
+      test_name = "Host AMO Fetch-CAS";
       testers.push_back(new HostAMOTester(args));
       break;
     case HostAMOFenceQuietTestType:
-      test_name = "Host AMO Fence+Quiet (JIRA-419)";
+      test_name = "Host AMO Fence+Quiet";
       testers.push_back(new HostAMOTester(args));
       break;
     default:

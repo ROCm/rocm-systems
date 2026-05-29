@@ -466,7 +466,6 @@ TestAMO() {
 
   ExecTest  "amo_xor"          2       1            1
 
-  # JIRA-419: host-side AMO/fence/quiet in non-MPI IPC mode
   ExecTest  "host_amo_fadd"        2       1            1
   ExecTest  "host_amo_fcswap"      2       1            1
   ExecTest  "host_amo_fence_quiet" 2       1            1

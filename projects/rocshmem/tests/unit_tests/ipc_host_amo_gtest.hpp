@@ -10,28 +10,21 @@
 /**
  * @file ipc_host_amo_gtest.hpp
  *
- * Tests for JIRA-419: host-side AMO, fence, and quiet in IPC non-MPI mode.
+ * Tests for host-side AMO, fence, and quiet in IPC non-MPI mode.
  *
  * The fixture builds the exact same object graph that IPCBackend(TcpBootstrap*)
  * builds at runtime, but without the full backend init overhead:
  *
- *   HeapMemoryType      — allocates fine-grain GPU heap per PE
- *   RemoteHeapInfo<CommunicatorTCP>
- *                       — exchanges heap base pointers via TcpBootstrap
+ *   SymmetricHeap(MPI_COMM_NULL, bootstrap)
+ *                       — allocates fine-grain GPU heap, exchanges base ptrs
  *   IpcOnImpl           — opens IPC handles, builds ipc_bases[]
  *   HostInterface(bootstrap, heap)
  *                       — non-MPI constructor → plain WindowInfo pool
  *   IPCHostContext      — acquires window context + copies ipc_bases to host
  *
- * Before the JIRA-419 fix:
- *   calling amo_fetch_add / amo_fetch_cas / fence / quiet on the context
- *   hits dynamic_cast<WindowInfoMPI*> → nullptr → abort().
- *   The tests are written so that the pre-fix behavior produces a death
- *   (EXPECT_DEATH) and the post-fix behavior produces correct results.
- *
  * Launch with 2 MPI ranks (same node), IPC backend build:
  *   mpirun -np 2 ./rocshmem_unit_tests \
- *       --gtest_filter=IPCHostAMOTestFixture/*
+ *       --gtest_filter=IPCHostAMOFixture/*
  */
 
 #include "gtest/gtest.h"
