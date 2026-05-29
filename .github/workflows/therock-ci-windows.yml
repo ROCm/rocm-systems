@@ -100,8 +100,8 @@ jobs:
           ccache -z
           python TheRock/build_tools/github_actions/build_configure.py
 
-      - name: Build therock-archives and therock-dist
-        run: cmake --build "${{ env.BUILD_DIR }}" --target therock-archives therock-dist -- -k 0
+      - name: Build therock-artifacts and therock-dist
+        run: cmake --build "${{ env.BUILD_DIR }}" --target therock-artifacts therock-dist -- -k 0
 
       - name: Report
         if: ${{ !cancelled() }}
@@ -135,6 +135,13 @@ jobs:
           aws-region: us-east-2
           role-to-assume: arn:aws:iam::692859939525:role/therock-ci-external
           special-characters-workaround: true
+
+      - name: Push artifacts
+        run: |
+          python TheRock/build_tools/artifact_manager.py push \
+            --run-id ${{ github.run_id }} \
+            --build-dir build \
+            --stage all
 
       - name: Post Build Upload
         if: always()
