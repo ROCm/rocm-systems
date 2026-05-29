@@ -800,6 +800,15 @@ static ncclResult_t scheduleCollTasksToPlan(
       // task to forceCh contiguous channels starting at channel 0. Counts are
       // distributed evenly; any remainder lands on the "lo" channel.
       int nChannels = forceCh;
+      // Cap effective channel count so every channel gets at least one element.
+      // For tiny payloads we'd otherwise pass nBytes=0 into calcCollChunking
+      // for the mid/hi segments and divide-by-zero downstream. The user
+      // accepted "may fail below 1KB"; this turns that failure into a graceful
+      // degradation to (count) channels instead of a SIGFPE.
+      if ((size_t)nChannels > task->count) {
+        nChannels = (int)task->count;
+        if (nChannels < 1) nChannels = 1;
+      }
       if (!testBudget(budget, plan->nWorkBatches + nChannels, plan->workBytes + workNode->size)) {
         return ncclSuccess;
       }
@@ -2594,6 +2603,20 @@ rccl_static ncclResult_t getAlgoInfo(
     int forceCh = (int)rcclParamForceChannels();
     if (forceCh > 0) {
       info->nMaxChannels = std::min(forceCh, (int)comm->nChannels);
+      // Pin algorithm to RING. TREE/CollNet/NVLS don't subdivide cleanly
+      // across hundreds of tiny per-channel chunks, and cross-node TREE
+      // produces incorrect results when forced to many channels. RING scales
+      // to the full channel count in both single- and multi-node setups.
+      if (info->algorithm != NCCL_ALGO_RING) {
+        info->algorithm = NCCL_ALGO_RING;
+        // Pick a protocol that's compatible with RING for this datatype.
+        // Default to SIMPLE; the user can still override via NCCL_PROTO.
+        if (info->protocol != NCCL_PROTO_SIMPLE &&
+            info->protocol != NCCL_PROTO_LL &&
+            info->protocol != NCCL_PROTO_LL128) {
+          info->protocol = NCCL_PROTO_SIMPLE;
+        }
+      }
     }
   }
   return ncclSuccess;
