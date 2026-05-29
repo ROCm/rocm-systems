@@ -521,8 +521,7 @@ hsa_status_t KfdDriver::ExportFabricHandle(core::Agent& agent, core::ShareableHa
 }
 
 hsa_status_t KfdDriver::ImportFabricHandle(core::Agent& agent, hsa_fabric_handle_t fabric_handle,
-                                           core::ShareableHandle* handle, int* dmabuf_fd,
-                                           size_t* size) {
+                                           core::ShareableHandle* handle, size_t* size) {
 #if !defined(__linux__)
   assert(!"Unimplemented!");
   return HSA_STATUS_ERROR;
@@ -542,7 +541,7 @@ hsa_status_t KfdDriver::ImportFabricHandle(core::Agent& agent, hsa_fabric_handle
   if (status != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
   handle->handle = reinterpret_cast<uint64_t>(res.buf_handle);
-  *dmabuf_fd = res.dmabuf_fd;
+  core::Runtime::runtime_singleton_->DmaBufClose(res.dmabuf_fd);
   *size = res.alloc_size;
 
   return HSA_STATUS_SUCCESS;
