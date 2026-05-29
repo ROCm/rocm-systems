@@ -208,7 +208,7 @@ public:
   /// @param[in] size memory size in bytes
   /// @param[out] dmabuf_fd dma-buf file descriptor
   /// @param[out] offset memory offset in bytes
-  virtual hsa_status_t ExportDMABuf(const core::Agent& agent, core::ShareableHandle *handle, size_t size, int *dmabuf_fd,
+  virtual hsa_status_t ExportDMABuf(const core::Agent& agent, const core::ShareableHandle &handle, size_t size, int *dmabuf_fd,
                                     size_t *offset) = 0;
 
   /// @brief Imports a memory object via dma-buf.
