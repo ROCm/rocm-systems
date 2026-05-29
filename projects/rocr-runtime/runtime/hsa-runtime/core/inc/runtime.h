@@ -48,7 +48,7 @@
 #include <cstdint>
 #include <vector>
 #include <map>
-#include <unordered_set>
+#include <unordered_map>
 #include <memory>
 #include <tuple>
 #include <utility>
@@ -93,6 +93,25 @@
 #define SANITIZER_AMDGPU 1
 #endif
 #endif
+
+inline bool operator==(const hsa_amd_vmem_alloc_handle_t& lhs,
+                       const hsa_amd_vmem_alloc_handle_t& rhs) {
+  return lhs.handle == rhs.handle;
+}
+
+inline bool operator!=(const hsa_amd_vmem_alloc_handle_t& lhs,
+                       const hsa_amd_vmem_alloc_handle_t& rhs) {
+  return !(lhs == rhs);
+}
+
+namespace std {
+template <>
+struct hash<hsa_amd_vmem_alloc_handle_t> {
+  size_t operator()(const hsa_amd_vmem_alloc_handle_t& x) const {
+    return hash<uint64_t>()(x.handle);
+  }
+};
+}  // namespace std
 
 //---------------------------------------------------------------------------//
 //    Constants                                                              //
@@ -1024,7 +1043,10 @@ class Runtime {
     hsa_fabric_handle_t fabric_handle;
     MemoryRegion::AllocateFlags alloc_flag;
   };
-  std::unordered_set<std::unique_ptr<MemoryHandle>> memory_handles;
+  // hsa_amd_vmem_alloc_handle_t (MemoryHandle*) to MemoryHandle mapping. Owns MemoryHandle
+  // lifetime. Uniqueness is guaranteed by the runtime, independent of any driver-supplied
+  // identifier.
+  std::unordered_map<hsa_amd_vmem_alloc_handle_t, std::unique_ptr<MemoryHandle>> memory_handles;
 
   MemoryHandle* FindMemoryHandle(MemoryHandle* handle);
   void ReleaseMemoryHandle(MemoryHandle* handle);
