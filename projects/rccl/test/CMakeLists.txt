@@ -213,6 +213,7 @@ if(BUILD_TESTS)
       MiscTests.cpp
       RomeTopoConsensusTests.cpp
       EnqueueCountTests.cpp
+      DdaCollCommonTests.cpp
       device/TestOp128.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
@@ -236,6 +237,7 @@ if(BUILD_TESTS)
       AllocTests.cpp
       ParamTests.cpp
       ArgCheckTests.cpp
+      DdaIpcEligibilityTests.cpp
       EnqueueTests.cpp
       IpcsocketTests.cpp
       NetSocketTests.cpp
