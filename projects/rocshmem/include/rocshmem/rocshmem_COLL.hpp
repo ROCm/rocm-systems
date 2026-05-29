@@ -769,11 +769,11 @@ __global__ ATTR_NO_INLINE void rocshmem_alltoallmem_kernel(rocshmem_team_t team,
 /**
  * @brief kernel for performing a reduce on stream operation.
  *
- * @param[in] team    The team participating in the collective.
- * @param[in] dest    Destination address. Must be an address on the symmetric
- *                    heap.
- * @param[in] source  Source address. Must be an address on the symmetric heap.
- * @param[in] size    Number of bytes to transfer per pair of PEs.
+ * @param[in] team     The team participating in the collective.
+ * @param[in] dest     Destination address. Must be an address on the symmetric
+ *                     heap.
+ * @param[in] source   Source address. Must be an address on the symmetric heap.
+ * @param[in] nreduce  Number of elements to reduce.
  *
  * @return void
  */
@@ -999,22 +999,25 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_sync_wg(
     rocshmem_ctx_t ctx, rocshmem_team_t team);
 
 /**
- * @name SHMEM_REDUCTIONS_ON_STREAM
- * @brief 
+ * @name ROCSHMEM_REDUCE_ON_STREAM
+ * @brief Performs a reduction across all PEs in a team on the specified HIP
+  * stream.
  *
+ * @param[in] ctx          The ROCSHMEM context associated with this operation.
  * @param[in] team         The team participating in the collective.
  * @param[in] dest         Destination address. Must be an address on the
  *                         symmetric heap.
  * @param[in] source       Source address. Must be an address on the symmetric
                            heap.
  * @param[in] nreduce      Size of the buffer to participate in the reduction.
+ * @param[in] stream       HIP stream on which the reduction is issued.
  *
  * @return int (Zero on successful local completion. Nonzero otherwise.)
  */
 #define REDUCTION_ON_STREAM_DEF_GEN(T, TNAME, Op, Op_API)  \
     int rocshmem_ctx_##TNAME##_##Op##_reduce_on_stream(    \
         rocshmem_ctx_t ctx, rocshmem_team_t team,          \
-        T *dest, const T *source, size_t nreduce, hipStream_t stream);
+        T *dest, const T *source, int nreduce, hipStream_t stream);
 
 #define REDUCTION_ON_STREAM_DEF_GEN_ARITH(T, TNAME) \
     REDUCTION_ON_STREAM_DEF_GEN(T, TNAME, sum, ROCSHMEM_SUM) \

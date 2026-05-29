@@ -821,7 +821,6 @@ __global__ ATTR_NO_INLINE void rocshmem_reduce_on_stream_kernel(rocshmem_team_t 
 {
   __shared__ rocshmem_ctx_t ctx;
   __shared__ int ctx_result;
-  // __shared__ int kernel_result;
 
   ctx_result = rocshmem_wg_team_create_ctx(team, 0, &ctx);
 

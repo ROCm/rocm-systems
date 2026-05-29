@@ -102,8 +102,8 @@ enum rocshmem_stats {
   NUM_PUT_SIGNAL_NBI,
   NUM_PUT_SIGNAL_NBI_WG,
   NUM_PUT_SIGNAL_NBI_WAVE,
+  NUM_REDUCE,
   NUM_STATS,
-  NUM_REDUCE
 };
 
 enum rocshmem_host_stats {
@@ -145,8 +145,8 @@ enum rocshmem_host_stats {
   NUM_HOST_SYNC_ALL,
   NUM_HOST_BROADCAST,
   NUM_HOST_ALLTOALL,
-  NUM_HOST_STATS,
-  NUM_HOST_REDUCE
+  NUM_HOST_REDUCE,
+  NUM_HOST_STATS
 };
 
 typedef unsigned long long StatType;

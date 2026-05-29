@@ -441,7 +441,8 @@ __host__ int HostInterface::reduce_on_stream(rocshmem_team_t team,
                                                                               dest,
                                                                               source,
                                                                               nreduce);
-  return 0;
+  hipError_t launch_status = hipGetLastError();
+  return launch_status;
 
 }
 
