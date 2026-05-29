@@ -135,7 +135,7 @@ public:
                               uint32_t* queue_cu_mask) const override;
   hsa_status_t AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
                              uint32_t* first_gws) const override;
-  hsa_status_t ExportDMABuf(const core::Agent& agent, core::ShareableHandle *handle, size_t size, int *dmabuf_fd,
+  hsa_status_t ExportDMABuf(const core::Agent& agent, const core::ShareableHandle& handle, size_t size, int *dmabuf_fd,
                             size_t *offset) override;
   hsa_status_t ImportDMABuf(int dmabuf_fd, const core::Agent& agent, core::ShareableHandle* handle, size_t *size,
                             void* mem) override;

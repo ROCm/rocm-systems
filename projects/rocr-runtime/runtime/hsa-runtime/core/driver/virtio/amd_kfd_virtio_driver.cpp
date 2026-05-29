@@ -467,11 +467,12 @@ hsa_status_t KfdVirtioDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_G
   return HSA_STATUS_ERROR;
 }
 
-hsa_status_t KfdVirtioDriver::ExportDMABuf(const core::Agent& agent, core::ShareableHandle *handle, size_t size, int* dmabuf_fd, size_t* offset) {
+hsa_status_t KfdVirtioDriver::ExportDMABuf(const core::Agent& agent, const core::ShareableHandle& handle, size_t size, int* dmabuf_fd, size_t* offset) {
   int dmabuf_fd_res = -1;
   size_t offset_res = 0;
   HSAKMT_STATUS status =
-      vhsaKmtExportDMABufHandle(handle, size, &dmabuf_fd_res, &offset_res);
+      vhsaKmtExportDMABufHandle(const_cast<void*>(reinterpret_cast<const void*>(&handle)), size,
+                                &dmabuf_fd_res, &offset_res);
   if (status != HSAKMT_STATUS_SUCCESS) {
     if (status == HSAKMT_STATUS_INVALID_PARAMETER) {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
