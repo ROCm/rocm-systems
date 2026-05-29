@@ -74,16 +74,6 @@ jobs:
           projects/rocprofiler-systems/
           .gitmodules
 
-    - name: Install ccache
-      timeout-minutes: 10
-      uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 #v4.0.0
-      with:
-        retry_wait_seconds: 30
-        timeout_minutes: 10
-        max_attempts: 3
-        command: |
-          apt-get update && apt-get install -y ccache && apt-get autoclean
-
     - name: Restore ccache
       uses: actions/cache@v4
       with:

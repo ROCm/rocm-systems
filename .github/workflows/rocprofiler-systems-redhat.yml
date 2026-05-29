@@ -106,9 +106,6 @@ jobs:
             dnf install -y --enablerepo=crb mpich mpich-devel
             echo "/usr/lib64/mpich/bin" >> $GITHUB_PATH
           fi
-          # ccache lives in EPEL on RHEL; enable it then install.
-          dnf install -y epel-release || true
-          dnf install -y ccache
 
     - name: Restore ccache
       uses: actions/cache@v4

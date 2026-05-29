@@ -96,7 +96,7 @@ jobs:
           cd projects/rocprofiler-systems/
           apt-get update &&
           apt-get upgrade -y &&
-          apt-get install -y ${{ matrix.compiler }} ccache &&
+          apt-get install -y ${{ matrix.compiler }} &&
           apt-get autoclean
 
     - name: Restore ccache
@@ -318,7 +318,7 @@ jobs:
           cd projects/rocprofiler-systems/
           apt-get update &&
           apt-get upgrade -y &&
-          apt-get install -y g++ ccache \
+          apt-get install -y g++ \
             binutils-dev libboost-all-dev libtbb-dev \
             libdw-dev libdwarf-dev libelf-dev libiberty-dev &&
           apt-get autoclean
@@ -327,9 +327,9 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ${{ github.workspace }}/.ccache
-        key: ccache-ubuntu-jammy-${{ github.job }}-${{ matrix.compiler }}-${{ github.sha }}
+        key: ccache-ubuntu-jammy-system-deps-${{ github.job }}-${{ matrix.compiler }}-${{ github.sha }}
         restore-keys: |
-          ccache-ubuntu-jammy-${{ github.job }}-${{ matrix.compiler }}-
+          ccache-ubuntu-jammy-system-deps-${{ github.job }}-${{ matrix.compiler }}-
 
     - *configure-ccache
 

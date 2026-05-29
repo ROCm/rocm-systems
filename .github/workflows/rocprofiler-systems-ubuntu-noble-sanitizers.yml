@@ -91,7 +91,7 @@ jobs:
           command: |
             apt-get update &&
             apt-get install -y autoconf autotools-dev bash-completion binutils-dev bison \
-              build-essential bzip2 ccache chrpath cmake curl environment-modules flex gettext \
+              build-essential bzip2 chrpath cmake curl environment-modules flex gettext \
               git-core gnupg2 gzip iproute2 libboost-all-dev libdw-dev libdwarf-dev \
               libelf-dev libgmock-dev libgtest-dev libiberty-dev libpapi-dev libpfm4-dev \
               libsqlite3-dev libtbb-dev libtool locales lsb-release m4 ninja-build \
