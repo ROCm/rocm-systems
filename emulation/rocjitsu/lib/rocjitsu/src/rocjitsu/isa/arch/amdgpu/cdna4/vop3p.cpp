@@ -981,10 +981,12 @@ VAccvgprReadVop3p::VAccvgprReadVop3p(const MachineInst *inst)
 }
 
 void VAccvgprReadVop3p::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t n = wf.wf_size();
-  alignas(64) uint32_t buf[64];
-  src0.read_lane_chunk(wf, 0, n, buf);
-  vdst.write_lane_chunk(wf, 0, n, buf, wf.exec());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    vdst.write_lane(wf, lane, src0.read_lane(wf, lane));
+  }
 }
 
 VAccvgprWriteVop3p::VAccvgprWriteVop3p(const MachineInst *inst)
@@ -999,10 +1001,12 @@ VAccvgprWriteVop3p::VAccvgprWriteVop3p(const MachineInst *inst)
 }
 
 void VAccvgprWriteVop3p::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t n = wf.wf_size();
-  alignas(64) uint32_t buf[64];
-  src0.read_lane_chunk(wf, 0, n, buf);
-  vdst.write_lane_chunk(wf, 0, n, buf, wf.exec());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    vdst.write_lane(wf, lane, src0.read_lane(wf, lane));
+  }
 }
 
 VMfmaF3216x16x128F8f6f4Vop3pMfma::VMfmaF3216x16x128F8f6f4Vop3pMfma(const MachineInst *inst)
@@ -2106,9 +2110,9 @@ void VMfmaF3216x16x32F16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t const_acc;
   uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
                                     [&] { return src2.read_scalar(wf); });
-  amdgpu::exec_f32_mfma_16x16x32_f16(cu, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                                     amdgpu::src_base(vb, src1.encoding_value_), s2, const_acc,
-                                     inst_.cbsz, inst_.abid, inst_.blgp);
+  amdgpu::exec_f32(cu, 16, 16, 32, 1, 16, dst, amdgpu::src_base(vb, src0.encoding_value_),
+                   amdgpu::src_base(vb, src1.encoding_value_), s2, amdgpu::extract_f16,
+                   amdgpu::extract_f16, const_acc, inst_.cbsz, inst_.abid, inst_.blgp);
 }
 
 VMfmaF3232x32x16F16Vop3pMfma::VMfmaF3232x32x16F16Vop3pMfma(const MachineInst *inst)
