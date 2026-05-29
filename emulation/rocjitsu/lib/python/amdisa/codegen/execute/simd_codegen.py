@@ -803,6 +803,26 @@ SIMD_VOP3_DIV_FMAS_FP64: set[str] = {
     "v_div_fmas_f64_vop3",
 }
 
+# VOP3P fma_mix / mad_mix family. The six ops share one body (`a*b + c` plus
+# optional clamp to [0,1]); only the destination shape differs:
+#  - F32     -> v_fma_mix_f32_vop3p (RDNA3+), v_mad_mix_f32_vop3p (CDNA1-4)
+#  - F16_LO  -> v_fma_mixlo_f16_vop3p, v_mad_mixlo_f16_vop3p
+#  - F16_HI  -> v_fma_mixhi_f16_vop3p, v_mad_mixhi_f16_vop3p
+# Per-source op_sel_hi gates the f16<->f32 widening shape; op_sel picks the f16
+# half. neg flips the sign bit. No abs, no omod. Functorless / fixed-op.
+SIMD_VOP3P_FMA_MIX_F32: set[str] = {
+    "v_fma_mix_f32_vop3p",
+    "v_mad_mix_f32_vop3p",
+}
+SIMD_VOP3P_FMA_MIX_F16_LO: set[str] = {
+    "v_fma_mixlo_f16_vop3p",
+    "v_mad_mixlo_f16_vop3p",
+}
+SIMD_VOP3P_FMA_MIX_F16_HI: set[str] = {
+    "v_fma_mixhi_f16_vop3p",
+    "v_mad_mixhi_f16_vop3p",
+}
+
 
 # --- VOPC compare -> VCC ---------------------------------------------------
 #
@@ -1648,6 +1668,14 @@ def simd_probe_line(template_name: str) -> str | None:
         return "  ROCJITSU_TRY_SIMD_DIV_FMAS_VOP3_FP32();"
     if template_name in SIMD_VOP3_DIV_FMAS_FP64:
         return "  ROCJITSU_TRY_SIMD_DIV_FMAS_VOP3_FP64();"
+    # VOP3P fma_mix / mad_mix (six ops, three destination shapes). Same body
+    # for all; the routing picks the matching glue specialization.
+    if template_name in SIMD_VOP3P_FMA_MIX_F32:
+        return "  ROCJITSU_TRY_SIMD_VOP3P_FMA_MIX_F32();"
+    if template_name in SIMD_VOP3P_FMA_MIX_F16_LO:
+        return "  ROCJITSU_TRY_SIMD_VOP3P_FMA_MIX_F16_LO();"
+    if template_name in SIMD_VOP3P_FMA_MIX_F16_HI:
+        return "  ROCJITSU_TRY_SIMD_VOP3P_FMA_MIX_F16_HI();"
     # VOP3 dst-accumulate FMA/MAC (vdst is the third operand). Per-isa class
     # has no src2; the accumulate glue reads vdst instead.
     specfmacf32 = SIMD_VOP3_FMAC_FP32.get(template_name)
