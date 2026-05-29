@@ -1122,14 +1122,24 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
         (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") ||
          IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") ||
          IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250"))) comm->p2pnChannelsPerPeer *= 2;
-    comm->p2pnChannels = std::min(pow2Up(comm->p2pnChannels), 4*CHANNEL_LIMIT);
-    // p2pnChannelsPerPeer cannot be greater than MAXCHANNELS
-    // Capping the comm->p2pnChannels to 32 for send/recv based collectives on multi-node MI350 (2 and 4 nodes)
-    if (((comm->nNodes == 2 && comm->topo->nRanks == 16) || (comm->nNodes == 4 && comm->topo->nRanks == 32)) && (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950"))) comm->p2pnChannels = std::min(comm->p2pnChannels, 32);
-    // Capping the comm->p2pnChannels to 16 for send/recv based collectives with half-subscription (4 GPUs per node) multi-node MI350 (2 and 4 nodes)
-    if (((comm->nNodes == 2 && comm->topo->nRanks == 8) || (comm->nNodes == 4 && comm->topo->nRanks == 16)) && (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950"))) comm->p2pnChannels = std::min(comm->p2pnChannels, 16);
-    // Opt-in P2P CU reduction on gfx950 (MI350) at scale: cap p2pnChannels to 16 when nNodes >= 16
-    if (ncclParamP2pCuReduceScaleEnable() && comm->nNodes >= 16 && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) comm->p2pnChannels = std::min(comm->p2pnChannels, 16);
+    // When the user explicitly raises NCCL_MAX_P2P_NCHANNELS past 4*CHANNEL_LIMIT
+    // (=64), treat it as an opt-in to the extended upper bound (up to MAXCHANNELS).
+    // Otherwise keep the historical 64 cap and per-arch multi-node caps below.
+    {
+      int userMaxP2p = (int)ncclParamMaxP2pNChannels();
+      int defaultMax = 4*CHANNEL_LIMIT;
+      int upper = (userMaxP2p > defaultMax) ? std::min(userMaxP2p, (int)MAXCHANNELS) : defaultMax;
+      comm->p2pnChannels = std::min(pow2Up(comm->p2pnChannels), upper);
+      if (upper == defaultMax) {
+        // p2pnChannelsPerPeer cannot be greater than MAXCHANNELS
+        // Capping the comm->p2pnChannels to 32 for send/recv based collectives on multi-node MI350 (2 and 4 nodes)
+        if (((comm->nNodes == 2 && comm->topo->nRanks == 16) || (comm->nNodes == 4 && comm->topo->nRanks == 32)) && (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950"))) comm->p2pnChannels = std::min(comm->p2pnChannels, 32);
+        // Capping the comm->p2pnChannels to 16 for send/recv based collectives with half-subscription (4 GPUs per node) multi-node MI350 (2 and 4 nodes)
+        if (((comm->nNodes == 2 && comm->topo->nRanks == 8) || (comm->nNodes == 4 && comm->topo->nRanks == 16)) && (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950"))) comm->p2pnChannels = std::min(comm->p2pnChannels, 16);
+        // Opt-in P2P CU reduction on gfx950 (MI350) at scale: cap p2pnChannels to 16 when nNodes >= 16
+        if (ncclParamP2pCuReduceScaleEnable() && comm->nNodes >= 16 && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) comm->p2pnChannels = std::min(comm->p2pnChannels, 16);
+      }
+    }
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, MAXCHANNELS);
   }
 

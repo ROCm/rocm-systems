@@ -773,8 +773,9 @@ static ncclResult_t scheduleCollTasksToPlan(
       devWork->channelLo = 0;
       devWork->channelHi = nChannels-1;
       // RCCL: CollNet path never set task->nChannels; profiler received 0.
-      // Clamp to UINT8_MAX: ENABLE_WARP_SPEED pushes MAXCHANNELS to 512 which wraps uint8.
-      task->nChannels = (nChannels <= UINT8_MAX) ? (uint8_t)nChannels : UINT8_MAX;
+      // task->nChannels is uint16_t — clamp to UINT16_MAX so ENABLE_WARP_SPEED
+      // (MAXCHANNELS=512) doesn't wrap.
+      task->nChannels = (nChannels <= UINT16_MAX) ? (uint16_t)nChannels : UINT16_MAX;
       devWork->collnet.count = task->count;
       devWork->collnet.chunkCount = chunkSize/ncclTypeSize(task->datatype);
       devWork->direct = directFlags;
@@ -834,12 +835,9 @@ static ncclResult_t scheduleCollTasksToPlan(
       (countHi != 0 ? countHi : countLo) -= cells*elementsPerCell - task->count;
 
       nChannels = (countLo!=0 ? 1 : 0) + nMidChannels + (cellsHi!=0 ? 1 : 0);
-      // Update number of channels propagated to the profiler
-#ifdef ENABLE_WARP_SPEED
-      task->nChannels = nChannels;
-#else
-      task->nChannels = (uint8_t) nChannels;
-#endif
+      // Update number of channels propagated to the profiler. task->nChannels
+      // is uint16_t — wide enough for MAXCHANNELS=256 without wrap.
+      task->nChannels = (uint16_t) nChannels;
       // Ensure room for worst case of one new batch per channel
       if (!testBudget(budget, plan->nWorkBatches + nChannels, plan->workBytes + workNode->size)) {
         return ncclSuccess;
@@ -2384,8 +2382,18 @@ static ncclResult_t topoGetAlgoInfo(
   } else if (info->algorithm == NCCL_ALGO_TREE) {
     nc = std::min(nc, 64); // Tree uses at most 64 channels as we don't support WarpSpeed Tree.
 #else
+    // Mirror the WarpSpeed cap: TREE multi-node correctness has not been
+    // validated past 64 channels even though MAXCHANNELS now permits 256.
+    // Cap nc to 64 here so an opt-in NCCL_MAX_NCHANNELS=256 doesn't push TREE
+    // into the unvalidated regime; RING is unaffected and scales to 256.
+    nc = std::min(nc, 64);
     info->nMaxChannels = nc;
 #endif
+  } else if (info->algorithm == NCCL_ALGO_TREE) {
+    // Same TREE cap for the non-AllReduce path (in case a tree-only collective
+    // ends up here under an opt-in higher max).
+    nc = std::min(nc, 64);
+    info->nMaxChannels = nc;
   } else {
     info->nMaxChannels = nc;
   }
