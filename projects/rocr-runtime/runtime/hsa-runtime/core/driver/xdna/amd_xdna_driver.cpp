@@ -725,13 +725,14 @@ XdnaDriver::AllocateMemory(const core::MemoryRegion &mem_region,
     bo_handle.unmap_vaddr = false;
   }
 
-  // FreeMemory, pass only the memory address and not a BO handle so we need something that looks like an address. When
-  // there is no mapped vaddr (AllocateMemoryOnly), synthesize a unique key from the BO handle with the MSB set so
-  // it cannot collide with a real userspace virtual address and so multiple unmapped BOs each get their own entry.
+  // FreeMemory, pass only the memory address and not a BO handle so we need something that looks
+  // like an address. When there is no mapped vaddr (AllocateMemoryOnly), synthesize a unique key
+  // from the BO handle with the MSB set so it cannot collide with a real userspace virtual address
+  // and so multiple unmapped BOs each get their own entry.
   void* map_key = bo_handle.vaddr;
   if (map_key == nullptr) {
-    map_key = reinterpret_cast<void*>(static_cast<uint64_t>(bo_handle.handle) |
-                                      (uint64_t{1} << 63));
+    map_key =
+        reinterpret_cast<void*>(static_cast<uint64_t>(bo_handle.handle) | (uint64_t{1} << 63));
   }
   vmem_addr_mappings.emplace(map_key, bo_handle);
 
