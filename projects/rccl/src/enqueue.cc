@@ -3350,7 +3350,10 @@ static ncclResult_t rmaTaskAppend(
       return ncclInvalidArgument;
     }
 
-    if (comm->symmetricSupport) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+    // RCCL: decode peerWin like register path; shadow pool for sym/IPC, type-pun for proxy.
+    bool useShadowPool = comm->symmetricSupport || comm->devrState.ceSize > 1;
+    if (useShadowPool) {
       struct ncclWindow_vidmem* peerWinDevHost = NULL;
       NCCLCHECK(ncclShadowPoolToHost(&comm->devrState.shadows, info->peerWin, &peerWinDevHost));
       peerWinHost = (struct ncclDevrWindow*)peerWinDevHost->winHost;
@@ -3358,6 +3361,11 @@ static ncclResult_t rmaTaskAppend(
       // hostRmaSupport path: handle is already a host pointer (type-punned in ncclDevrWindowRegisterInGroup)
       peerWinHost = reinterpret_cast<struct ncclDevrWindow*>(info->peerWin);
     }
+#else
+    struct ncclWindow_vidmem* peerWinDevHost = NULL;
+    NCCLCHECK(ncclShadowPoolToHost(&comm->devrState.shadows, info->peerWin, &peerWinDevHost));
+    peerWinHost = (struct ncclDevrWindow*)peerWinDevHost->winHost;
+#endif
 
     // Validate source buffer and window
     if (srcBuff == NULL) {
@@ -3368,23 +3376,21 @@ static ncclResult_t rmaTaskAppend(
       WARN("ncclPutSignal: peerWinOffset %zu is greater than peerWin size %zu", info->peerWinOffset, peerWinHost->size);
       return ncclInvalidArgument;
     }
-    if (comm->symmetricSupport) {
-      NCCLCHECK(ncclDevrFindWindow(comm, srcBuff, &srcWinHost));
-      if (srcWinHost == NULL || !(srcWinHost->winFlags & NCCL_WIN_COLL_SYMMETRIC)) {
-        WARN("ncclPutSignal: srcWinHost is not in a valid symmetric window");
-        return ncclInvalidArgument;
-      }
-      srcWinOffset = (char*)srcBuff - (char*)srcWinHost->userPtr;
-    } else {
-      // hostRmaSupport path: source buffer must be inside a registered window so
-      // the GIN proxy can resolve its MR handle.  Look it up the same way.
-      NCCLCHECK(ncclDevrFindWindow(comm, srcBuff, &srcWinHost));
-      if (srcWinHost == NULL) {
-        WARN("ncclPutSignal: srcBuff is not inside a registered ncclWindow");
-        return ncclInvalidArgument;
-      }
-      srcWinOffset = (char*)srcBuff - (char*)srcWinHost->userPtr;
+
+    // RCCL: Source buffer must be inside a registered window. The winFlags
+    // symmetric hint is enforced only on the sym VMM path (user contract:
+    // offsets symmetric across ranks); IPC and proxy do not require the flag.
+    NCCLCHECK(ncclDevrFindWindow(comm, srcBuff, &srcWinHost));
+    if (srcWinHost == NULL) {
+      WARN("ncclPutSignal: srcBuff is not inside a registered ncclWindow");
+      return ncclInvalidArgument;
     }
+    if (comm->symmetricSupport &&
+        !(srcWinHost->winFlags & NCCL_WIN_COLL_SYMMETRIC)) {
+      WARN("ncclPutSignal: srcWinHost is not in a valid symmetric window");
+      return ncclInvalidArgument;
+    }
+    srcWinOffset = (char*)srcBuff - (char*)srcWinHost->userPtr;
 
     // Relevant for symmetric window only
     bool isMultiSegment = (comm->symmetricSupport)
@@ -3432,8 +3438,18 @@ static ncclResult_t rmaTaskAppend(
     }
   }
 
-  // Check if RMA CE needs initialization
-  if (!comm->rmaState.rmaCeState.initialized && ncclIntruQueueEmpty(&comm->rmaCeInitTaskQueue)) {
+  // Check if RMA CE needs initialization. CE (Copy-Engine) handles intra-node and
+  // self-targeted ops via IPC/copy. CE init registers the signals window collectively
+  // over the WHOLE comm, so the gate must be comm-uniform or the allgather deadlocks.
+  // RCCL non-sym: self is always CE-accessible (ceRankList always contains self), so
+  // CE is always needed; init unconditionally. Sym path keeps the lsaSize>1 skip.
+#if defined(__HIP_PLATFORM_AMD__)
+  int ceInitActive = comm->symmetricSupport ? (comm->devrState.lsaSize > 1) : 1;
+#else
+  int ceInitActive = comm->devrState.lsaSize > 1;
+#endif
+  if (ceInitActive &&
+      !comm->rmaState.rmaCeState.initialized && ncclIntruQueueEmpty(&comm->rmaCeInitTaskQueue)) {
     struct ncclRmaCeInitTask* ceTask;
     NCCLCHECK(ncclCalloc(&ceTask, 1));
     ceTask->comm = comm;
