@@ -156,7 +156,6 @@ foreach(_TARGET IN LISTS _AMD_SMI_ALL_TARGETS)
         ${_TARGET}
         PUBLIC
             "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-            "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/nic/ai-nic/amdsmi_unified/interface>"
             "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
     )
 
@@ -232,17 +231,13 @@ install(FILES ${IMPL_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/im
 
 install(FILES ${NIC_INCLUDES} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/ COMPONENT dev)
 
-set(UNIFIED_NIC_INCLUDES ${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/interface/smi_nic_interface.h)
+set(UNIFIED_NIC_INCLUDES ${PROJECT_SOURCE_DIR}/include/amd_smi/impl/nic/amdsmi_unified/interface/smi_nic_interface.h)
 install(FILES ${UNIFIED_NIC_INCLUDES} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/ COMPONENT dev)
 install(
     FILES ${UNIFIED_NIC_INCLUDES}
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/amdsmi_unified/interface
     COMPONENT dev
 )
-# Public impl/ header amd_smi_system.h includes <amdsmi_unified/interface/...>
-# as a bare path. Install at that bare path so installed consumers (e.g. the
-# standalone example rebuild in CI) can resolve it from /opt/rocm/include.
-install(FILES ${UNIFIED_NIC_INCLUDES} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amdsmi_unified/interface COMPONENT dev)
 set(UNIFIED_NIC_INCLUDES
     "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_devlink_netlink.h"
     "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_ethtool_ioctl.h"
