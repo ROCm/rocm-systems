@@ -9643,24 +9643,6 @@ hipError_t hipDrvGraphExecMemcpyNodeSetParams(hipGraphExec_t hGraphExec, hipGrap
 hipError_t hipDrvGraphExecMemsetNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
                                               const hipMemsetParams* memsetParams, hipCtx_t ctx);
 
-/**
- * @brief Launches a HIP kernel using the driver API with the specified configuration.
- * @ingroup Execution
- *
- * This function dispatches the device kernel represented by a HIP function object.
- * It passes both the kernel parameters and any extra configuration arguments to the kernel launch.
- *
- * @param [in] config  Pointer to the kernel launch configuration structure.
- * @param [in] f       HIP function object representing the device kernel to be launched.
- * @param [in] params  Array of pointers to the kernel parameters.
- * @param [in] extra   Array of pointers for additional launch parameters or extra configuration
- * data.
- *
- * @returns #hipSuccess if the kernel is launched successfully, otherwise an appropriate error code.
- */
-hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f, void** params,
-                                void** extra);
-
 // doxygen end graph API
 /**
  * @}
@@ -10043,37 +10025,6 @@ hipError_t hipExtDisableLogging();
  * @see hipExtEnableLogging, hipExtDisableLogging
  */
 hipError_t hipExtSetLoggingParams(size_t log_level, size_t log_size, size_t log_mask);
-/**
- * @brief Launches a HIP kernel using a generic function pointer and the specified configuration.
- * @ingroup Execution
- *
- * This function is equivalent to hipLaunchKernelEx but accepts the kernel as a generic function
- * pointer.
- *
- * @param [in] config                 Pointer to the kernel launch configuration structure.
- * @param [in] fPtr                   Pointer to the device kernel function.
- * @param [in] args                   Array of pointers to the kernel arguments.
- *
- * @returns #hipSuccess if the kernel is launched successfully, otherwise an appropriate error code.
- */
-hipError_t hipLaunchKernelExC(const hipLaunchConfig_t* config, const void* fPtr, void** args);
-/**
- * @brief Launches a HIP kernel using the driver API with the specified configuration.
- * @ingroup Execution
- *
- * This function dispatches the device kernel represented by a HIP function object.
- * It passes both the kernel parameters and any extra configuration arguments to the kernel launch.
- *
- * @param [in] config  Pointer to the kernel launch configuration structure.
- * @param [in] f       HIP function object representing the device kernel to be launched.
- * @param [in] params  Array of pointers to the kernel parameters.
- * @param [in] extra   Array of pointers for additional launch parameters or extra configuration
- * data.
- *
- * @returns #hipSuccess if the kernel is launched successfully, otherwise an appropriate error code.
- */
-hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f, void** params,
-                                void** extra);
 /**
 * @}
 */
