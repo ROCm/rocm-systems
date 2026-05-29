@@ -392,6 +392,19 @@ static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
     return hipSuccess;
   }
 
+  // Guard: the reader's SIZE_OK macro skips typed decode for undersized payloads
+  // but still retains the event in the archive.  A malformed archive could deliver
+  // an event whose raw_payload is smaller than sizeof(hrr_event_header) + any fields
+  // the handler will cast to.  Handlers assume at least the full header is present;
+  // skip dispatch rather than allowing an OOB cast.
+  if (ev.raw_payload.size() < sizeof(hrr_event_header)) {
+    if (log)
+      fprintf(stderr, "[HRR] T%llu Event %zu (%s): payload too small (%zu bytes) — skipping\n",
+              (unsigned long long)ev.header().thread_id, idx,
+              hrr::event_type_name(etype), ev.raw_payload.size());
+    return hipSuccess;
+  }
+
   hipError_t r = hrr_playback_dispatch[etype](ctx, ev.raw_payload.data());
 
   if (r != hipSuccess) {

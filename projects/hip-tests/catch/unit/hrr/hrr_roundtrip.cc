@@ -31,6 +31,8 @@
 
 #include <hip_test_common.hh>
 #include <hip_test_process.hh>
+#include "hrr_reader.h"
+#include "hrr_api_args.h"
 
 #include <filesystem>
 #include <string>
@@ -167,6 +169,13 @@ HIP_TEST_CASE(Unit_HRR_CaptureReplayRoundtrip) {
   INFO("Blob count: " << blob_count);
   REQUIRE(blob_count >= 1);
 
+  {
+    hrr::Archive arc;
+    REQUIRE(hrr::load_archive(cap.path.string(), arc));
+    INFO("Event count: " << arc.events.size());
+    REQUIRE(arc.events.size() >= 10);  // malloc + H2D + kernel×n + D2H + free minimum
+  }
+
   // -------------------------------------------------------------------------
   // Step 3: playback + D2H validation
   //   hrr-playback replays every event; for each D2H memcpy it copies the
@@ -220,6 +229,13 @@ HIP_TEST_CASE(Unit_HRR_AllApisRoundtrip) {
   INFO("Blob count: " << blob_count);
   REQUIRE(blob_count >= 1);
 
+  {
+    hrr::Archive arc;
+    REQUIRE(hrr::load_archive(cap.path.string(), arc));
+    INFO("Event count: " << arc.events.size());
+    REQUIRE(arc.events.size() >= 40);  // ~55 distinct APIs exercised
+  }
+
   // -------------------------------------------------------------------------
   // Step 3: playback + D2H validation (d2[i] == 94)
   // -------------------------------------------------------------------------
@@ -266,6 +282,13 @@ HIP_TEST_CASE(Unit_HRR_HostMemRoundtrip) {
     ++blob_count;
   INFO("Blob count: " << blob_count);
   REQUIRE(blob_count >= 1);
+
+  {
+    hrr::Archive arc;
+    REQUIRE(hrr::load_archive(cap.path.string(), arc));
+    INFO("Event count: " << arc.events.size());
+    REQUIRE(arc.events.size() >= 5);  // malloc + H2D(init) + kernel + D2H + free minimum
+  }
 
   // -------------------------------------------------------------------------
   // Step 3: playback + D2H validation
@@ -367,6 +390,13 @@ HIP_TEST_CASE(Unit_HRR_StressApisRoundtrip) {
   INFO("Blob count: " << blob_count);
   REQUIRE(blob_count >= 1);
 
+  {
+    hrr::Archive arc;
+    REQUIRE(hrr::load_archive(cap.path.string(), arc));
+    INFO("Event count: " << arc.events.size());
+    REQUIRE(arc.events.size() >= 200);  // 500+ API calls: alloc/free loops, memset/memcpy, kernels
+  }
+
   // -------------------------------------------------------------------------
   // Step 3: playback + D2H validation (h_out[i] == 2.0f)
   // -------------------------------------------------------------------------
@@ -375,9 +405,15 @@ HIP_TEST_CASE(Unit_HRR_StressApisRoundtrip) {
 
 // ---------------------------------------------------------------------------
 // Helper: shared roundtrip body — capture → verify archive → playback.
+//
+// min_events: minimum number of events expected in events.bin.  Every workload
+// must produce at least a few events (malloc, memcpy, kernel, free) — a value
+// of 5 is a conservative floor that would catch a totally empty capture.
+// Use a higher value for workloads known to emit many events (StressApis, etc.).
 // ---------------------------------------------------------------------------
 static void hrr_run_roundtrip(const std::string& direct_case,
-                               const fs::path& cap_path) {
+                               const fs::path& cap_path,
+                               size_t min_events = 5) {
   { hip::SpawnProc proc(HRR_TEST_EXE);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());
     { set_proc_search_path(proc); }
@@ -389,6 +425,16 @@ static void hrr_run_roundtrip(const std::string& direct_case,
   for ([[maybe_unused]] const auto& _ :
        fs::recursive_directory_iterator(cap_path / "blobs")) ++bc;
   INFO("Blob count: " << bc); REQUIRE(bc >= 1);
+
+  // Load the archive and assert a minimum event count.  This catches generator
+  // bugs that silently produce empty or near-empty archives while still writing
+  // at least one blob (which would otherwise satisfy the blob_count >= 1 check).
+  hrr::Archive arc;
+  bool arc_ok = hrr::load_archive(cap_path.string(), arc);
+  INFO("Archive event count: " << arc.events.size());
+  REQUIRE(arc_ok);
+  REQUIRE(arc.events.size() >= min_events);
+
   hrr_run_playback(cap_path);
 }
 
@@ -425,9 +471,13 @@ HIP_TEST_CASE(Unit_HRR_OccupancyRoundtrip) {
   for ([[maybe_unused]] const auto& _ :
        fs::recursive_directory_iterator(cap.path / "blobs")) ++bc;
   INFO("Blob count: " << bc); REQUIRE(bc >= 1);
-  // On Linux the fat-binary code object is not captured at static init time,
-  // so kernel replay is a no-op and D2H bytes will not match.
-  // Run playback without D2H validation on non-Windows.
+  // KNOWN LIMITATION (Linux): fat-binary code objects are not captured at static
+  // init time on Linux, so kernel replay is a no-op and D2H bytes will not match.
+  // On Linux we only assert that capture produced events and playback did not crash
+  // (exit < 128).  D2H correctness is NOT verified on Linux for this workload.
+  // This is a regression risk: a Linux-only kernel replay bug would not be caught
+  // here.  Tracked as a known gap — fix requires resolving fat-binary static-init
+  // capture timing on Linux.
 #ifdef _WIN32
   hrr_run_playback(cap.path);
 #else
@@ -578,11 +628,16 @@ HIP_TEST_CASE(Unit_HRR_MultiThreadRoundtrip) {
 #else
     std::string mt_path_arg = cap.path.string();
 #endif
-    proc.run(mt_path_arg + " --skip-device-sync" +
-             (extra_args.empty() ? "" : " " + extra_args));
+    int ret = proc.run(mt_path_arg + " --skip-device-sync" +
+                       (extra_args.empty() ? "" : " " + extra_args));
     std::string out = proc.getOutput();
     INFO("Playback args: " + extra_args);
     INFO("Playback stdout:\n" << out);
+    INFO("Playback exit code: " << ret);
+    // Exit code: fat-binary kernel replay requires the capture DLL to be present,
+    // so a D2H mismatch (exit 1) is accepted in CI.  A crash (signal, exit >= 128)
+    // is always a hard failure.
+    REQUIRE(ret < 128);
     // Must print the archive header line — confirms hrr-playback read events.bin.
     REQUIRE(out.find("[HRR] Archive") != std::string::npos);
   };

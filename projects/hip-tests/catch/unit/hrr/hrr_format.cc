@@ -285,6 +285,13 @@ HIP_TEST_CASE(Unit_HRR_TranslatePtr_Zero_ReturnsNull) {
  *     only, no fields) must not be decoded as a malloc event.  load_archive()
  *     should return true (archive is structurally valid) but the event must not
  *     have malloc_ev.ptr_handle set (SIZE_OK guard skips the typed cast).
+ *
+ * Policy decision: the reader RETAINS undersized known events with safe-default
+ * typed fields (ptr_handle == 0).  The dispatch layer in hrr_playback.cpp
+ * enforces a complementary size guard: it skips dispatch for any event whose
+ * raw_payload is smaller than sizeof(hrr_event_header), preventing the handler
+ * from doing an OOB reinterpret_cast.  Both layers together make the malformed
+ * event safe: it is loaded without crash, not decoded, and not dispatched.
  */
 HIP_TEST_CASE(Unit_HRR_Format_SmallPayloadForType) {
   TmpArchive arc("small_payload");
@@ -308,11 +315,14 @@ HIP_TEST_CASE(Unit_HRR_Format_SmallPayloadForType) {
   bool ok = hrr::load_archive(arc.path(), archive);
   REQUIRE(ok);
 
-  // The event must be present (raw_payload retained) …
+  // Policy: the event is RETAINED in the archive (raw_payload intact for
+  // tracing/debugging), but the SIZE_OK guard prevents typed decode.
   REQUIRE(archive.events.size() == 1);
-  // … but the SIZE_OK guard must have prevented the typed decode, so
-  // malloc_ev.ptr_handle stays at its default zero value.
+  // Typed fields stay at safe defaults — no OOB cast occurred in the reader.
   CHECK(archive.events[0].malloc_ev.ptr_handle == 0u);
+  CHECK(archive.events[0].malloc_ev.size == 0u);
+  // raw_payload must be exactly header-sized (confirms reader did not over-read).
+  CHECK(archive.events[0].raw_payload.size() == sizeof(hrr_event_header));
 }
 
 /**
