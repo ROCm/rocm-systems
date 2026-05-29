@@ -49,29 +49,14 @@ __device__ static inline char* ipc_resolve_remote(void *dest, int pe,
     uintptr_t base = ipc_user_buf_table[b].local_base;
     if (addr >= base && addr < base + ipc_user_buf_table[b].length) {
       uint64_t offset = addr - base;
-      char* remote = reinterpret_cast<char*>(ipc_user_buf_table[b].remote_bases[pe] + offset);
-      if (threadIdx.x == 0 && blockIdx.x == 0) {
-        printf("[ipc_resolve] HIT user_buf[%d]: dest=%p pe=%d local_base=%p remote_base=%p offset=%lu -> remote=%p\n",
-               b, dest, pe, (void*)base, (void*)ipc_user_buf_table[b].remote_bases[pe], offset, remote);
-      }
-      return remote;
+      return reinterpret_cast<char*>(ipc_user_buf_table[b].remote_bases[pe] + offset);
     }
   }
-  // Symmetric heap fallback — should only be used for addresses on the
-  // rocshmem symmetric heap. If we get here for a user-registered buffer,
-  // the user buffer table was not populated correctly.
+  // Symmetric heap fallback for addresses on the rocshmem symmetric heap.
   char* my_base = heap_bases ? heap_bases[my_pe] : nullptr;
   char* pe_base = heap_bases ? heap_bases[pe] : nullptr;
   uint64_t offset = reinterpret_cast<char*>(dest) - my_base;
-  char* remote = pe_base + offset;
-  if (threadIdx.x == 0 && blockIdx.x == 0) {
-    printf("[ipc_resolve] MISS user_bufs (count=%d): dest=%p pe=%d my_pe=%d heap_base[my]=%p heap_base[pe]=%p offset=%lu -> remote=%p\n",
-           ipc_user_buf_count, dest, pe, my_pe, my_base, pe_base, offset, remote);
-  }
-  // Assert that dest is actually on the symmetric heap
-  assert(my_base != nullptr && reinterpret_cast<char*>(dest) >= my_base &&
-         "ipc_resolve_remote: dest is not on symmetric heap and not in user_buf_table");
-  return remote;
+  return pe_base + offset;
 }
 
 __host__ IPCContext::IPCContext(Backend *b, unsigned int ctx_id)
