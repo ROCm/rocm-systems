@@ -1746,6 +1746,18 @@ SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
     "v_div_fixup_f32_vop3": (
         "[](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f32_simd(p, b, c); }"
     ),
+    # v_div_fixup_f16 / v_div_fixup_legacy_f16: the SCALAR bodies read src0/1/2
+    # as raw f32 (no f16<->f32 widening — they bit_cast<float>(read_lane(uint32))
+    # and write the f32 result back through bit_cast<uint32>). Verified inline
+    # at line 9389 (f16) and 9570 (legacy_f16). Effectively the same operation
+    # as v_div_fixup_f32_vop3, just under a different mnemonic. Reuses the
+    # helper verbatim.
+    "v_div_fixup_f16_vop3": (
+        "[](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f32_simd(p, b, c); }"
+    ),
+    "v_div_fixup_legacy_f16_vop3": (
+        "[](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f32_simd(p, b, c); }"
+    ),
 }
 
 # f16 ternary — widen each src to f32, op in f32, narrow back. Same NaN

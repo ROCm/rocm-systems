@@ -9388,6 +9388,8 @@ inline void execute_v_cvt_u32_u16_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_div_fixup_f16_vop3([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32(
+      [](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f32_simd(p, b, c); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -9569,6 +9571,8 @@ inline void execute_v_div_fixup_f64_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_div_fixup_legacy_f16_vop3([[maybe_unused]] Inst &inst,
                                                 [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32(
+      [](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f32_simd(p, b, c); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
