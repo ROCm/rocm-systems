@@ -1,9 +1,8 @@
 include_guard(GLOBAL)
 
 # Resolve the sanitizer selection in place (normalize, validate, write back via
-# PARENT_SCOPE), mirroring the PYTHON_TEST_COMMAND pattern. THEROCK_SANITIZER is
-# promoted over the passed variable so TheRock-driven builds have a single source
-# of truth.
+# PARENT_SCOPE). THEROCK_SANITIZER is promoted over the passed variable
+# so TheRock-driven builds have a single source of truth.
 function(resolve_sanitizer out_var)
     set(sanitizer_valid
         ""
@@ -13,7 +12,7 @@ function(resolve_sanitizer out_var)
         "TSAN"
     )
 
-    # Validated before promotion so the error names THEROCK_SANITIZER, not ${out_var}.
+    # Validated before promotion.
     if(DEFINED THEROCK_SANITIZER AND NOT THEROCK_SANITIZER IN_LIST sanitizer_valid)
         message(
             FATAL_ERROR
@@ -62,9 +61,9 @@ function(resolve_sanitizer out_var)
     set(${out_var} "${${out_var}}" PARENT_SCOPE)
 endfunction()
 
-# Apply -fsanitize=... flags and link options to the current scope (call from
-# src/lib/CMakeLists.txt). No-op when off, or when TheRock already injected
-# -fsanitize= via CMAKE_CXX_FLAGS_INIT (avoid double-instrumentation).
+# Apply -fsanitize=... flags and link options to the current scope
+# No-op when off, or when TheRock already injected -fsanitize= 
+# via CMAKE_CXX_FLAGS_INIT (avoid double-instrumentation).
 function(enable_sanitizer)
     if(NOT ENABLE_SANITIZER)
         return()
@@ -97,8 +96,7 @@ function(enable_sanitizer)
 endfunction()
 
 # Rewrite GPU_TARGETS for full ASAN and TSAN modes (gfx942/gfx950 -> :xnack+).
-# Mirrors TheRock/cmake/therock_sanitizers.cmake. No-op for HOST_ASAN or when
-# TheRock has already rewritten the targets upstream.
+# No-op for HOST_ASAN or when TheRock has already rewritten the targets upstream.
 function(enable_sanitizer_gpu_target_munging)
     if(NOT (ENABLE_SANITIZER STREQUAL "ASAN" OR ENABLE_SANITIZER STREQUAL "TSAN"))
         return()
@@ -117,7 +115,7 @@ function(enable_sanitizer_gpu_target_munging)
 endfunction()
 
 # Wrap the ctest python command with THEROCK_SANITIZER_LAUNCHER plus env that
-# quiets known false positives (python intentionally leaks on exit -> detect_leaks=0).
+# quiets known false positives.
 function(enable_sanitizer_python_launcher out_var)
     if(NOT DEFINED THEROCK_SANITIZER_LAUNCHER)
         set(THEROCK_SANITIZER_LAUNCHER)
