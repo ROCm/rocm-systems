@@ -37,7 +37,7 @@ extern "C" {
 #endif
 
 extern "C" {
-#include <amdsmi_unified/interface/smi_nic_interface.h>
+#include "nic/ai-nic/amdsmi_unified/interface/smi_nic_interface.h"
 }
 namespace amd::smi {
 
@@ -125,6 +125,31 @@ const std::map<smi_nic_status_t, amdsmi_status_t> ainic_status_map = {
     {SMI_NIC_STATUS_DRIVER_NOT_LOADED, AMDSMI_STATUS_DRIVER_NOT_LOADED}};
 amdsmi_status_t ainic_to_amdsmi_status(smi_nic_status_t status);
 
+/**
+ *  AMDSMI Library init reference count (amdsmi_init / amdsmi_shut_down)
+ *      - Lives in amd_smi_common.cc
+ */
+bool amdsmi_library_initialized();
+void amdsmi_library_init_ref_acquire();
+
+/**
+ *  AMDSMI Decrements init ref; should run (count reached zero).
+ *      - Returns true if AMDSmiSystem::cleanup()
+ *
+ */
+
+bool amdsmi_library_init_ref_release();
+
 }  // namespace amd::smi
+
+// Verifies AMD SMI is initialized; returns AMDSMI_STATUS_NOT_INIT from the enclosing function.
+#ifndef AMDSMI_CHECK_INIT
+#define AMDSMI_CHECK_INIT()                        \
+  do {                                             \
+    if (!amd::smi::amdsmi_library_initialized()) { \
+      return AMDSMI_STATUS_NOT_INIT;               \
+    }                                              \
+  } while (0)
+#endif
 
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_COMMON_H_

@@ -3313,14 +3313,18 @@ rsmi_status_t rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
 
     amd::smi::amdgpu_gpuboard_temp_metrics_v1_0 gpuboard_metric;
     ret = read_gpuboard_temp_metrics(file_path.c_str(), gpuboard_metric);
-    if (ret != RSMI_STATUS_SUCCESS) {
-      std::string err_msg = "Failed to read GPU board temperature metrics at " + file_path;
-      LOG_ERROR(err_msg);
+    if (ret == RSMI_STATUS_SUCCESS) {
+      ret = get_gpuboard_temp_value(gpuboard_metric,
+                                    static_cast<rsmi_temperature_type_t>(sensor_type), temperature);
       return ret;
     }
 
-    ret = get_gpuboard_temp_value(gpuboard_metric,
-                                  static_cast<rsmi_temperature_type_t>(sensor_type), temperature);
+    ret = amd::smi::get_gpuboard_temp_value_dynamic(
+        file_path.c_str(), static_cast<rsmi_temperature_type_t>(sensor_type), temperature);
+    if (ret != RSMI_STATUS_SUCCESS && ret != RSMI_STATUS_NOT_SUPPORTED) {
+      std::string err_msg = "Failed to read GPU board temperature metrics at " + file_path;
+      LOG_ERROR(err_msg);
+    }
     return ret;
   }
 
@@ -3340,14 +3344,18 @@ rsmi_status_t rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
 
     amd::smi::amdgpu_baseboard_temp_metrics_v1_0 baseboard_metric;
     ret = read_baseboard_temp_metrics(file_path.c_str(), baseboard_metric);
-    if (ret != RSMI_STATUS_SUCCESS) {
-      std::string err_msg = "Failed to read baseboard temperature metrics at " + file_path;
-      LOG_ERROR(err_msg);
+    if (ret == RSMI_STATUS_SUCCESS) {
+      ret = get_baseboard_temp_value(
+          baseboard_metric, static_cast<rsmi_temperature_type_t>(sensor_type), temperature);
       return ret;
     }
 
-    ret = get_baseboard_temp_value(baseboard_metric,
-                                   static_cast<rsmi_temperature_type_t>(sensor_type), temperature);
+    ret = amd::smi::get_baseboard_temp_value_dynamic(
+        file_path.c_str(), static_cast<rsmi_temperature_type_t>(sensor_type), temperature);
+    if (ret != RSMI_STATUS_SUCCESS && ret != RSMI_STATUS_NOT_SUPPORTED) {
+      std::string err_msg = "Failed to read baseboard temperature metrics at " + file_path;
+      LOG_ERROR(err_msg);
+    }
     return ret;
   }
 

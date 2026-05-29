@@ -33,7 +33,6 @@ namespace spm
 struct spm_interface
 {
     using spm_create_packets_fn_t             = decltype(aqlprofile_spm_create_packets);
-    using spm_delete_packets_fn_t             = decltype(aqlprofile_spm_delete_packets);
     using spm_start_fn_t                      = decltype(aqlprofile_spm_start);
     using spm_stop_fn_t                       = decltype(aqlprofile_spm_stop);
     using spm_decode_stream_v1_fn_t           = decltype(aqlprofile_spm_decode_stream_v1);
@@ -42,7 +41,6 @@ struct spm_interface
     using spm_query_agent_configurations_fn_t = decltype(aqlprofile_spm_query_agent_configurations);
 
     spm_create_packets_fn_t*             spm_create_packets             = nullptr;
-    spm_delete_packets_fn_t*             spm_delete_packets             = nullptr;
     spm_start_fn_t*                      spm_start                      = nullptr;
     spm_stop_fn_t*                       spm_stop                       = nullptr;
     spm_decode_stream_v1_fn_t*           spm_decode_stream_v1           = nullptr;

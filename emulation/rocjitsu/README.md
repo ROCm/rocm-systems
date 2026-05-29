@@ -168,9 +168,8 @@ It intercepts `/dev/kfd` and the KFD sysfs topology, routing all KFD ioctls
 to the simulator.
 
 ```bash
-# Required environment variables
+# Required environment variable
 export RJ_CONFIG=configs/amdgpu_cdna4.json
-export RJ_SCHEMA=schemas/simulation_config.fbs
 
 # Run an HSA application
 LD_PRELOAD=build/lib/rocjitsu/src/rocjitsu/kmd/librocjitsu_kmd.so \
@@ -255,7 +254,7 @@ without shared templates, resulting in larger files with duplicated code.
 Hand-written files (`isa.h`, `insts.h`, `mfma_exec.h`, `addr_calc.h/.cpp`) are
 not overwritten by the generator.
 
-You can find the MR ISA in the artifacts directory.
+You can find the MR ISA in `rocm-systems/shared/machine-readable-isa/isa`.
 
 ### Regenerating DBT files
 
@@ -306,8 +305,7 @@ See `lib/python/amdisa/README.md` for details on the amdisa codegen pipeline.
 #include <rocjitsu/rocjitsu.h>
 
 rj_vm_t *vm = NULL;
-rj_vm_create("configs/amdgpu_cdna4.json",
-             "schemas/simulation_config.fbs", &vm);
+rj_vm_create("configs/amdgpu_cdna4.json", &vm);
 
 uint64_t ticks = 0;
 rj_vm_run(vm, &ticks);

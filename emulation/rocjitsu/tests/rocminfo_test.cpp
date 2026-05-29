@@ -5,7 +5,7 @@
 /// @brief Verifies that rocminfo runs successfully against the simulated GPU
 ///        via the LD_PRELOAD KMD interposer and reports expected topology.
 ///
-/// Requires LD_PRELOAD=librocjitsu_kmd.so, RJ_CONFIG/RJ_SCHEMA env vars,
+/// Requires LD_PRELOAD=librocjitsu_kmd.so, RJ_CONFIG env var,
 /// and the rocminfo binary installed (typically at /opt/rocm/bin/rocminfo).
 
 #include <gtest/gtest.h>

@@ -88,8 +88,16 @@ enum class SegmentKind {
 struct SegmentInfo {
   uint32_t segment_id;
   SegmentKind kind;
+  // Raw segment flags — kind collapses aperture+system_memory into kAperture,
+  // so preserve the source bits to identify non-local-heap segments later.
+  bool is_aperture;
+  bool is_system_memory;
 
-  SegmentInfo() : segment_id(0), kind(SegmentKind::kUnknown) {}
+  SegmentInfo()
+      : segment_id(0),
+        kind(SegmentKind::kUnknown),
+        is_aperture(false),
+        is_system_memory(false) {}
 };
 
 class WDDMDevice {
@@ -167,7 +175,11 @@ public:
   uint32_t NumXcc() const { return device_info_.num_xcc; }
 
   bool CreateSyncobj(D3DKMT_HANDLE *handle, uint64_t **addr);
-  void DestroySyncobj(D3DKMT_HANDLE handle);
+  // Returns true on STATUS_SUCCESS. Internal cleanup callers (queue
+  // teardown / rollback) intentionally ignore the result; the external
+  // semaphore close path propagates it so silent leaks become visible.
+  bool DestroySyncobj(D3DKMT_HANDLE handle);
+  bool OpenSyncobjFromNtHandle(void *nt_handle, D3DKMT_HANDLE *out_handle);
 
   bool CreateQueue(WDDMQueue *queue, uint64_t debugger_data = 0);
   void DestroyQueue(WDDMQueue *queue);

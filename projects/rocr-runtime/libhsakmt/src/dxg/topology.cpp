@@ -766,11 +766,10 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
   props.NumGws = 0;
   /*
    * In Native Linux, if the asic is APU, this value will be set to 1,
-   * if the asic is dGPU, this value will be set to 0. clr use this info
-   * to set hostUnifiedMemory_, but for now wsl does not support this feature.
-   * Therefore, force vaule to 0 temporarily.
+   * if the asic is dGPU, this value will be set to 0. clr uses this info
+   * to set hostUnifiedMemory_.
    */
-  props.Integrated = 0;
+  props.Integrated = !device->IsDgpu();
   props.Domain = device->Domain();
   props.UniqueID = device->Uuid();
   props.NumXcc = device->NumXcc();
@@ -842,6 +841,11 @@ HSAKMT_STATUS topology_sysfs_get_mem_props(uint32_t node_id, uint32_t mem_id,
 
   props.HeapType = HSA_HEAPTYPE_FRAME_BUFFER_PRIVATE;
   props.SizeInBytes = device->LocalHeapSize();
+  // On APU, allocations can spill from local to non-local via the GART fallback,
+  // so the effective per-allocation cap is local + non-local.
+  if (!device->IsDgpu()) {
+    props.SizeInBytes += device->NonLocalHeapSize();
+  }
   props.Width = device->MemoryBusWidth();
   props.MemoryClockMax = device->MaxMemoryClockMhz();
 

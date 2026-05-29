@@ -159,6 +159,10 @@ module:
     # Below tests tests fail in PSDB
     disabled: [nvidia_windows]
     tags: [load]
+  Unit_hipModuleLoad_Positive_NoFdLeak:
+    <<: *level_2
+    disabled: [windows, nvidia_windows]
+    tags: [load]
   Unit_hipFuncSetSharedMemConfig_functional:
     <<: *level_2
     tags: [function]
