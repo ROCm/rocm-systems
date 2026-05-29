@@ -274,7 +274,7 @@ By default, tests run one at a time (`maxParallelJobs = 1`). Setting `maxParalle
 ```cpp
 ProcessIsolatedTestRunner::ExecutionOptions opts;
 opts.maxParallelJobs = 4;   // up to 4 tests run at the same time
-                            // 0 = GPU pool size (or hardware_concurrency() if no pool)
+                            // kAutoParallelism = GPU pool size (or hardware_concurrency() if no pool)
                             // 1 = sequential (default)
 
 RUN_ISOLATED_TESTS_WITH_OPTIONS(opts,
@@ -482,7 +482,7 @@ static bool executeAllTests(
 **Execution mode** is controlled by `ExecutionOptions::maxParallelJobs`:
 - `1` (default) — sequential, one test at a time
 - `N > 1` — up to N tests run simultaneously with GPU-aware scheduling
-- `0` — parallelism = GPU pool size, or `std::thread::hardware_concurrency()` when no GPU pool is available
+- `ExecutionOptions::kAutoParallelism` (`0`) — parallelism = GPU pool size, or `std::thread::hardware_concurrency()` when no GPU pool is available
 
 **Note:** This method automatically clears all test registrations and results after execution, ensuring a clean state for the next test suite. Users do not need to call `clear()` manually.
 
@@ -550,7 +550,7 @@ TEST(MyTest, VerifyExecution) {
 |---|---|---|---|
 | `stopOnFirstFailure` | `bool` | `false` | Stop launching new tests after the first failure (in-flight tests finish) |
 | `verboseLogging` | `bool` | `true` | Print per-test status lines |
-| `maxParallelJobs` | `size_t` | `1` | Max concurrent child processes. `0` = GPU pool size (or `hardware_concurrency` if no pool), `1` = sequential |
+| `maxParallelJobs` | `size_t` | `1` | Max concurrent child processes. `kAutoParallelism` (`0`) = GPU pool size (or `hardware_concurrency` if no pool), `1` = sequential |
 | `gpuPool` | `vector<int>` | `{}` | Physical GPU indices to distribute. Empty = auto-detect |
 
 ### TestConfig Methods

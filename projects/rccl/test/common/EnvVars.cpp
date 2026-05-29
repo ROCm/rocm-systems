@@ -6,6 +6,7 @@
 
 #include "EnvVars.hpp"
 #include "CollectiveArgs.hpp"
+#include "ProcessIsolatedTestRunner.hpp"
 #include <cstdlib>
 #include <unistd.h>
 #include <sys/wait.h>
@@ -208,7 +209,7 @@ namespace RcclUnitTesting
   {
     // Skip fork+HIP calls in re-exec'd children: GPU enumeration is irrelevant
     // there and concurrent hipGetDeviceCount forks cause KFD contention.
-    const bool isIsolatedChild = (std::getenv("RCCL_PIT_REEXEC_TEST") != nullptr);
+    const bool isIsolatedChild = (std::getenv(ProcessIsolatedTestRunner::kReexecMarkerEnvVar) != nullptr);
 
     // Collect number of GPUs available
     // NOTE: Cannot use HIP call prior to launching unless it is inside another child process

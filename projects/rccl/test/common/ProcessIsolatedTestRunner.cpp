@@ -11,17 +11,18 @@
 #include <poll.h>
 #include <unistd.h>
 
-#include <dirent.h>
-
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <future>
 #include <iostream>
 #include <mutex>
+#include <numeric>
 #include <sstream>
 #include <thread>
 
@@ -35,10 +36,6 @@ extern "C" int __llvm_profile_write_file(void);
 namespace RcclUnitTesting
 {
 
-// Env var set by fork child before execv(); signals the re-exec'd process to
-// run the named test lambda inline and _exit() with the result.
-static constexpr const char* kReexecMarkerEnvVar = "RCCL_PIT_REEXEC_TEST";
-
 // Exit codes for test process results
 enum RcclTestCode
 {
@@ -49,6 +46,19 @@ enum RcclTestCode
     RCCL_TEST_TIMEOUT           = 3,
     RCCL_TEST_SKIPPED           = 4
 };
+
+// Grace period given to a timed-out child after SIGTERM before SIGKILL.
+static constexpr int kSigtermGraceSeconds = 2;
+
+// Maximum poll(2) slice when draining child output with an active deadline.
+// Caps the wait so the deadline is re-checked regularly even if output is slow.
+static constexpr long long kPollSliceMs = 5000LL;
+
+// Number of pipe file descriptors polled per child process (stdout + stderr).
+static constexpr int kNumPipeFds = 2;
+
+// POSIX waitpid(2): exit code is stored in bits [15:8] of the status word.
+static constexpr int kWaitStatusExitShift = 8;
 
 // Define static members
 std::mutex                                         ProcessIsolatedTestRunner::testConfigsMutex_;
@@ -111,69 +121,66 @@ ProcessIsolatedTestRunner::TestConfig& ProcessIsolatedTestRunner::TestConfig::wi
     return *this;
 }
 
+// Returns GPU indices from HIP_VISIBLE_DEVICES, or empty if unset/invalid.
+static std::vector<int> gpuPoolFromEnv()
+{
+    const char* val = std::getenv("HIP_VISIBLE_DEVICES");
+    if(!val || !*val)
+        return {};
+
+    std::vector<int>   pool;
+    std::istringstream ss(val);
+    std::string        token;
+    while(std::getline(ss, token, ','))
+    {
+        try
+        {
+            pool.push_back(std::stoi(token));
+        }
+        catch(...)
+        {
+        }
+    }
+    return pool;
+}
+
+// Returns GPU indices from KFD topology sysfs, or empty if unavailable.
+// KFD topology nodes with gpu_id == 0 represent CPU or bridge nodes and are
+// skipped; only nodes with a non-zero gpu_id correspond to physical GPUs.
+// Uses sysfs rather than opening a KFD device file to avoid inheriting GPU
+// file descriptors in child processes.
+static std::vector<int> gpuPoolFromKfd()
+{
+    namespace fs = std::filesystem;
+    const fs::path nodesDir{"/sys/class/kfd/kfd/topology/nodes"};
+
+    int kfdCount = 0;
+    std::error_code ec;
+    for(const auto& entry : fs::directory_iterator(nodesDir, ec))
+    {
+        if(std::ifstream f{entry.path() / "gpu_id"})
+        {
+            unsigned gpuId = 0;
+            if(f >> gpuId && gpuId != 0)
+                ++kfdCount;
+        }
+    }
+    if(kfdCount == 0)
+        return {};
+
+    std::vector<int> pool(static_cast<size_t>(kfdCount));
+    std::iota(pool.begin(), pool.end(), 0);
+    return pool;
+}
+
 // Detects available GPU indices: first from HIP_VISIBLE_DEVICES, then from
 // KFD sysfs. Returns empty if neither source yields a pool.
 static std::vector<int> detectGpuPool()
 {
-    // Priority 1: HIP_VISIBLE_DEVICES
-    {
-        const char* val = std::getenv("HIP_VISIBLE_DEVICES");
-        if(val && *val)
-        {
-            std::vector<int>  pool;
-            std::istringstream ss(val);
-            std::string        token;
-            while(std::getline(ss, token, ','))
-            {
-                try
-                {
-                    pool.push_back(std::stoi(token));
-                }
-                catch(...)
-                {
-                }
-            }
-            if(!pool.empty())
-                return pool;
-        }
-    }
-
-    // Priority 2: KFD topology sysfs — counts GPU nodes with non-zero gpu_id.
-    // Does not open any GPU device file, avoiding KFD FD inheritance in children.
-    {
-        int kfdCount = 0;
-        if(DIR* dir = opendir("/sys/class/kfd/kfd/topology/nodes"))
-        {
-            while(struct dirent* e = readdir(dir))
-            {
-                if(e->d_name[0] == '.') continue;
-                char gpuIdPath[512];
-                std::snprintf(
-                    gpuIdPath, sizeof(gpuIdPath),
-                    "/sys/class/kfd/kfd/topology/nodes/%s/gpu_id", e->d_name
-                );
-                FILE* f = std::fopen(gpuIdPath, "r");
-                if(f)
-                {
-                    unsigned gpuId = 0;
-                    if(std::fscanf(f, "%u", &gpuId) == 1 && gpuId != 0)
-                        ++kfdCount;
-                    std::fclose(f);
-                }
-            }
-            closedir(dir);
-        }
-        if(kfdCount > 0)
-        {
-            std::vector<int> pool;
-            pool.reserve(static_cast<size_t>(kfdCount));
-            for(int i = 0; i < kfdCount; ++i)
-                pool.push_back(i);
-            return pool;
-        }
-    }
-
-    return {};
+    auto pool = gpuPoolFromEnv();
+    if(pool.empty())
+        pool = gpuPoolFromKfd();
+    return pool;
 }
 
 // Tracks which physical GPU device indices from a fixed pool are in use.
@@ -282,7 +289,6 @@ void ProcessIsolatedTestRunner::applyEnvironmentVariables(const TestConfig& conf
     }
 }
 
-// Execute a single test in a separate process
 int ProcessIsolatedTestRunner::runTestInProcess(const TestConfig& config)
 {
     pid_t processId = getpid();
@@ -295,9 +301,6 @@ int ProcessIsolatedTestRunner::runTestInProcess(const TestConfig& config)
 
     try
     {
-        // Environment was already applied before execv(); do NOT call
-        // applyEnvironmentVariables() again — it would wipe HIP_VISIBLE_DEVICES.
-
         // Thread-safe test execution with timeout protection
         std::atomic<bool>  testCompleted{false};
         std::exception_ptr testException = nullptr;
@@ -520,10 +523,10 @@ ProcessIsolatedTestRunner::CapturedOutput ProcessIsolatedTestRunner::captureProc
 
     // Drain stdout and stderr interleaved via poll() to avoid deadlock when
     // the child fills one pipe buffer (~64 KB) while the parent reads the other.
-    struct pollfd pfds[2];
+    struct pollfd pfds[kNumPipeFds];
     pfds[0] = {stdoutPipe[0], POLLIN, 0};
     pfds[1] = {stderrPipe[0], POLLIN, 0};
-    int openFds = 2;
+    int openFds = kNumPipeFds;
 
     bool timedOut = false;
 
@@ -540,12 +543,12 @@ ProcessIsolatedTestRunner::CapturedOutput ProcessIsolatedTestRunner::captureProc
                 timedOut = true;
                 break;
             }
-            // Cap to 5 s slices so we re-check the deadline regularly.
-            auto capMs = std::min<long long>(remaining.count(), 5000LL);
+            // Cap to kPollSliceMs so we re-check the deadline regularly.
+            auto capMs = std::min<long long>(remaining.count(), kPollSliceMs);
             pollMs     = static_cast<int>(capMs);
         }
 
-        int ready = poll(pfds, 2, pollMs);
+        int ready = poll(pfds, kNumPipeFds, pollMs);
         if(ready < 0)
         {
             if(errno == EINTR) continue;
@@ -556,7 +559,7 @@ ProcessIsolatedTestRunner::CapturedOutput ProcessIsolatedTestRunner::captureProc
             // poll timed out — re-check deadline next iteration
             continue;
         }
-        for(int i = 0; i < 2; ++i)
+        for(int i = 0; i < kNumPipeFds; ++i)
         {
             if(pfds[i].fd < 0) continue;
 
@@ -584,11 +587,11 @@ ProcessIsolatedTestRunner::CapturedOutput ProcessIsolatedTestRunner::captureProc
     {
         // Give the child a chance to exit cleanly, then force-kill it.
         kill(pid, SIGTERM);
-        std::this_thread::sleep_for(std::chrono::seconds(2));
+        std::this_thread::sleep_for(std::chrono::seconds(kSigtermGraceSeconds));
         kill(pid, SIGKILL);
 
         // Drain any last output flushed before death.
-        for(int i = 0; i < 2; ++i)
+        for(int i = 0; i < kNumPipeFds; ++i)
         {
             if(pfds[i].fd < 0) continue;
             // Non-blocking drain
@@ -603,9 +606,10 @@ ProcessIsolatedTestRunner::CapturedOutput ProcessIsolatedTestRunner::captureProc
 
         waitpid(pid, status, 0);
 
-        // Encode as if the child exited with RCCL_TEST_TIMEOUT so the caller
-        // path that checks WIFEXITED / WEXITSTATUS reports a TIMEOUT result.
-        *status = RCCL_TEST_TIMEOUT << 8;
+        // Synthesise a waitpid(2) status as if the child called exit(RCCL_TEST_TIMEOUT).
+        // POSIX encodes the exit code in bits [15:8] of the status word, so
+        // WIFEXITED(*status) is true and WEXITSTATUS(*status) == RCCL_TEST_TIMEOUT.
+        *status = RCCL_TEST_TIMEOUT << kWaitStatusExitShift;
         return output;
     }
 
@@ -1014,10 +1018,11 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
         return false;
     }
 
-    // When maxParallelJobs is 0, default to pool size (or hardware_concurrency()
-    // for CPU-only suites) to avoid threads piling up waiting for GPU slots.
+    // When maxParallelJobs is kAutoParallelism, default to pool size (or
+    // hardware_concurrency() for CPU-only suites) to avoid threads piling up
+    // waiting for GPU slots.
     const size_t parallelism
-        = (options.maxParallelJobs == 0)
+        = (options.maxParallelJobs == ExecutionOptions::kAutoParallelism)
               ? (detectedPool.empty()
                      ? static_cast<size_t>(std::thread::hardware_concurrency())
                      : detectedPool.size())

@@ -30,6 +30,9 @@ namespace RcclUnitTesting
 class ProcessIsolatedTestRunner
 {
 public:
+    /// Env var set before execv(); its presence in a re-exec'd child selects the test to run.
+    static constexpr const char* kReexecMarkerEnvVar = "RCCL_PIT_REEXEC_TEST";
+
     /**
      * @brief Test execution result structure
      */
@@ -135,11 +138,16 @@ public:
      */
     struct ExecutionOptions
     {
+        /// Special value for maxParallelJobs: use GPU pool size as the degree of
+        /// parallelism, falling back to std::thread::hardware_concurrency() when
+        /// no GPU pool is available.
+        static constexpr size_t kAutoParallelism = 0;
+
         bool   stopOnFirstFailure; ///< Stop execution on first test failure
         bool   verboseLogging;     ///< Enable verbose logging
         size_t maxParallelJobs;    ///< Maximum number of concurrent child processes.
                                    ///< 1 = sequential (default).
-                                   ///< 0 = GPU pool size, or hardware_concurrency() if no pool.
+                                   ///< kAutoParallelism (0) = GPU pool size, or hardware_concurrency() if no pool.
                                    ///< N > 1 = up to N tests run simultaneously.
                                    ///< Results are always reported in registration order.
 
