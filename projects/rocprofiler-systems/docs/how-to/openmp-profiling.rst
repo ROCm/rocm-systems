@@ -17,6 +17,19 @@ Only a subset of OMPT callbacks are processed. The list of supported callbacks c
 
     rocprof-sys-avail --list-operations ompt
 
+.. note::
+
+    On versions prior to ROCm 7.14, ``--list-operations ompt`` is not available.
+    The list of supported callbacks can instead be obtained by generating a
+    configuration file with:
+
+    .. code-block:: shell
+
+        rocprof-sys-avail -G config.cfg --categories settings::rocprofiler-sdk --all --advanced
+
+    and inspecting the ``ROCPROFSYS_ROCM_OMPT_OPERATIONS`` entry in the
+    generated ``config.cfg``.
+
 Profiling a Fortran program that uses GPU offloading
 =====================================================
 
@@ -69,6 +82,12 @@ To collect a trace for the Jacobi example, run the following command:
 .. code-block:: shell
 
     rocprof-sys-run --preset=trace-openmp -- "$JACOBI_FORTRAN_BIN"
+
+.. note::
+
+    ``--preset=trace-openmp`` requires ROCm 7.13.0 or later. On earlier
+    versions, use the equivalent environment variables (see
+    :ref:`openmp-env-var-config`).
 
 Once the command completes, an output directory will be generated:
 
@@ -187,10 +206,10 @@ The image below shows the standard way that flow events are displayed in Perfett
     :alt: An ``omp_target_data_op_emi`` event with ``optype = target_data_transfer_to_device`` pointing to its corresponding ``MEMORY_COPY_HOST_TO_DEVICE``
     :width: 800
 
-Instrumenting the application with rocprof-sys-instrument
--------------------------------------------------------------
+Optional: Instrumenting the application with rocprof-sys-instrument
+--------------------------------------------------------------------
 
-The application can be instrumented using ``rocprof-sys-instrument`` to gather more data than would be obtained from tracing using ``rocprof-sys-run`` alone.
+The application can be instrumented with ``rocprof-sys-instrument`` to also capture user-defined functions alongside the OMPT events.
 More details on ``rocprof-sys-instrument`` and the data it gathers can be found in the :doc:`data collection modes <../conceptual/data-collection-modes>` document.
 
 .. code-block:: shell
@@ -217,18 +236,25 @@ Compared to the trace from the preset-only run, the instrumented trace additiona
     With ``rocprof-sys-instrument``, data on user-defined functions can be gathered. However, default values on certain settings
     may prevent the expected function from being instrumented. For details, see the :doc:`Instrumenting and rewriting a binary application <instrumenting-rewriting-binary-application>` guide (in particular, its "Selective instrumentation" section).
 
-Environment variable configuration
-===================================
+.. _openmp-env-var-config:
 
-The ``--preset=trace-openmp`` option enables OMPT capture automatically. When you
-are not using a preset, or you want to fine-tune what is captured, the corresponding
-environment variables can be set instead.
+Optional: Environment variable configuration
+=============================================
 
-To enable OMPT callback capture without a preset:
+The following environment variables are equivalent to ``--preset=trace-openmp``:
 
 .. code-block:: shell
 
-    export ROCPROFSYS_USE_OMPT=ON
+    export ROCPROFSYS_USE_OMPT=true  # enable OMPT callback capture
+    export ROCPROFSYS_TRACE=true     # enable the Perfetto tracing backend (produces the .proto trace)
+    export ROCPROFSYS_PROFILE=false  # disable the timemory profiling backend (statistical text/JSON summaries)
+    export ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,marker_api,memory_copy  # ROCm API domains to trace
+
+Once these are set, ``rocprof-sys-run`` can be invoked without ``--preset``:
+
+.. code-block:: shell
+
+    rocprof-sys-run -- "$JACOBI_FORTRAN_BIN"
 
 .. tip::
 
@@ -239,10 +265,10 @@ To enable OMPT callback capture without a preset:
 
     If you are interested in seeing how the compiler translates the OpenMP offload
     constructs into ``hsa`` function calls, you can use either the more detailed
-    ``--preset=trace-hpc`` preset or add ``hsa_api`` to the ``ROCPROFSYS_ROCM_DOMAINS``
-    environment variable. Because setting ``ROCPROFSYS_ROCM_DOMAINS`` *replaces*
-    the default domain list, include the default domains alongside ``hsa_api``:
+    ``--preset=trace-hpc`` preset or add ``hsa_api`` to ``ROCPROFSYS_ROCM_DOMAINS``.
+    Because the variable *replaces* the active domain list, include it alongside the
+    domains shown above:
 
     .. code-block:: shell
 
-        export ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,kernel_dispatch,memory_copy,scratch_memory,hsa_api
+        export ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,marker_api,memory_copy,hsa_api
