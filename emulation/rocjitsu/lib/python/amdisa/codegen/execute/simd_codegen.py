@@ -806,9 +806,7 @@ SIMD_VOP3_DIV_FMAS_FP64: set[str] = {
 # VOP3 sdst-enc carry forms (no-carry-in subset). Same per-lane carry/borrow
 # functor as the VOP2 carry family — the glue layer
 # (try_execute_binary_vop3_carry_simd) handles the VOP3 src1/sdst differences
-# (the functor is identical). The cin-form ops (addc_co / subb_co / subbrev_co
-# on CDNA4, plus add/sub/subrev_co_ci on RDNA3+) read carry-in from src2 / VCC
-# and need a different glue shape that loads cin word per call — deferred.
+# (the functor is identical).
 SIMD_VOP3_CARRY: dict[str, str] = {
     "v_add_co_u32_vop3": (
         "[](auto a, auto b, auto) {"
@@ -820,6 +818,63 @@ SIMD_VOP3_CARRY: dict[str, str] = {
     ),
     "v_subrev_co_u32_vop3": (
         "[](auto a, auto b, auto) { return make_simd_carry(b - a, b < a); }"
+    ),
+}
+
+# VOP3 sdst-enc carry forms with src2 carry-in. Six ops sharing one shape:
+# CDNA4 sdst-enc `addc_co_u32 / subb_co_u32 / subbrev_co_u32` and the RDNA-only
+# `add_co_ci_u32 / sub_co_ci_u32 / subrev_co_ci_u32`. All read per-lane cin from
+# `inst.src2.read_scalar64(wf)` and write co into `inst.sdst.write_scalar64`
+# (the RDNA decoder binds src2/sdst to VCC, but the body is uniform across the
+# six). Glue `try_execute_binary_vop3_carry_src2_simd` handles the cin source.
+SIMD_VOP3_CARRY_SRC2: dict[str, str] = {
+    "v_addc_co_u32_vop3": (
+        "[](auto a, auto b, auto cin) {"
+        " auto t1 = a + b;"
+        " auto c1 = t1 < a;"
+        " auto t2 = t1 + cin;"
+        " auto c2 = t2 < t1;"
+        " return make_simd_carry(t2, c1 | c2); }"
+    ),
+    "v_subb_co_u32_vop3": (
+        "[](auto a, auto b, auto cin) {"
+        " auto t1 = a - b;"
+        " auto bw1 = a < b;"
+        " auto t2 = t1 - cin;"
+        " auto bw2 = t1 < cin;"
+        " return make_simd_carry(t2, bw1 | bw2); }"
+    ),
+    "v_subbrev_co_u32_vop3": (
+        "[](auto a, auto b, auto cin) {"
+        " auto t1 = b - a;"
+        " auto bw1 = b < a;"
+        " auto t2 = t1 - cin;"
+        " auto bw2 = t1 < cin;"
+        " return make_simd_carry(t2, bw1 | bw2); }"
+    ),
+    "v_add_co_ci_u32_vop3": (
+        "[](auto a, auto b, auto cin) {"
+        " auto t1 = a + b;"
+        " auto c1 = t1 < a;"
+        " auto t2 = t1 + cin;"
+        " auto c2 = t2 < t1;"
+        " return make_simd_carry(t2, c1 | c2); }"
+    ),
+    "v_sub_co_ci_u32_vop3": (
+        "[](auto a, auto b, auto cin) {"
+        " auto t1 = a - b;"
+        " auto bw1 = a < b;"
+        " auto t2 = t1 - cin;"
+        " auto bw2 = t1 < cin;"
+        " return make_simd_carry(t2, bw1 | bw2); }"
+    ),
+    "v_subrev_co_ci_u32_vop3": (
+        "[](auto a, auto b, auto cin) {"
+        " auto t1 = b - a;"
+        " auto bw1 = b < a;"
+        " auto t2 = t1 - cin;"
+        " auto bw2 = t1 < cin;"
+        " return make_simd_carry(t2, bw1 | bw2); }"
     ),
 }
 
@@ -1738,6 +1793,12 @@ def simd_probe_line(template_name: str) -> str | None:
     specv3carry = SIMD_VOP3_CARRY.get(template_name)
     if specv3carry is not None:
         return f"  ROCJITSU_TRY_SIMD_VOP3_CARRY({specv3carry});"
+    # VOP3 sdst-enc carry forms with src2 carry-in (CDNA4 addc/subb/subbrev +
+    # RDNA add/sub/subrev_co_ci). All six share the same shape; cin is loaded
+    # from inst.src2.read_scalar64 inside the glue.
+    specv3carry_src2 = SIMD_VOP3_CARRY_SRC2.get(template_name)
+    if specv3carry_src2 is not None:
+        return f"  ROCJITSU_TRY_SIMD_VOP3_CARRY_SRC2({specv3carry_src2});"
     # VOP3P fma_mix / mad_mix (six ops, three destination shapes). Same body
     # for all; the routing picks the matching glue specialization.
     if template_name in SIMD_VOP3P_FMA_MIX_F32:
