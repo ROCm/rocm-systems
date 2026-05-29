@@ -169,6 +169,18 @@ class Roofline:
         else:
             return "Compute Bound"
 
+    def l0_l1_label_workaround(self, label: str) -> str:
+        """
+        On gfx1151 the benchmark reports L0 cache and L1 buffer; remap L0 to L1
+            for displaying on the roofline plots. Goal is to not confuse users by
+            keeping the cache level labels consistent, despite differing hardware
+            block layouts between gfx9 and gfx10+ (gfx10+ renamed GL1->GL0 and
+            introduced a GL1 intermediate buffer).
+        """
+        if self.__mspec.gpu_arch == "gfx1151" and label == "L0":
+            return "L1"
+        return label
+
     @demarcate
     def construct_plotly_figures(
         self, ai_data: dict[str, Any]
@@ -1101,7 +1113,7 @@ class Roofline:
             plt.plot(
                 self.__ceiling_data[cache_key][0],
                 self.__ceiling_data[cache_key][1],
-                label=f"{cache_level}-{dtype}",
+                label=f"{self.l0_l1_label_workaround(cache_level)}-{dtype}",
                 marker="braille",
                 color=get_color(cache_level, backend="cli"),
             )
