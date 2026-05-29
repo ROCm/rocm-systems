@@ -4,19 +4,21 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#ifdef ENABLE_ROCSHMEM
+#ifdef ENABLE_ROCSHMEM_GIN
 
 #include "gin/gin_host_rocshmem.h"
 #include "comm.h"
+#include "dev_runtime.h"
 #include "nccl_device/gin/rocshmem/gin_rocshmem_device_host_common.h"
 
 #include <rocshmem/rocshmem.hpp>
 #include <hip/hip_runtime.h>
 #include <map>
 
-// Refcount for rocshmem_buffer_register: ncclGinRegister calls us once per
-// GIN context for the same buffer, but rocshmem expects a single registration.
+// Refcount for buffer registration: ncclGinRegister calls us once per
+// GIN context for the same buffer.
 static std::map<void*, int> bufferRegRefcount;
+
 
 struct ginRocshmemCtx {
   struct ncclComm *comm;
@@ -136,35 +138,58 @@ ncclResult_t ncclGinRocshmemDestroyContext(ncclGin_t *ginComm, void *ginCtx) {
 
 ncclResult_t ncclGinRocshmemRegister(ncclGin_t *ginComm, void *ginCtx, void *addr, size_t size,
                                      int type, int mr_flags, void **mhandle, void **ginHandle) {
+  struct ginRocshmemCtx *ctx = (struct ginRocshmemCtx *)ginCtx;
   struct ginRocshmemMemHandle *mh = NULL;
   NCCLCHECK(ncclCalloc(&mh, 1));
 
-  auto &refcount = bufferRegRefcount[addr]; // inserts 0 if new
+  auto &refcount = bufferRegRefcount[addr];
+  // lsaSelfAddr: the LSA flat VA for self rank for this memory region.
+  // All cross-PE memory access goes through the LSA flat space (cuMemSetAccess
+  // is only called for the LSA flat mappings, not for primaryAddr).
+  // We must register and address-reference the buffer at its LSA flat VA so
+  // that ipc_resolve_remote can translate to other ranks' LSA flat VAs.
+  void* lsaSelfAddr = nullptr;
+  NCCLCHECK(ncclDevrGetLsaSelfAddr(ctx->comm, addr, &lsaSelfAddr));
+  if (lsaSelfAddr == nullptr) {
+    WARN("GIN rocshmem: could not resolve LSA flat addr for %p", addr);
+    free(mh);
+    return ncclSystemError;
+  }
+
   if (refcount == 0) {
-    int rc = rocshmem::rocshmem_buffer_register(addr, size);
+    struct ncclDevrState* devr = &ctx->comm->devrState;
+
+    // Always use stride-based VMM registration: each PE's LSA flat VA differs
+    // by exactly bigSize, so remote_bases[pe] = lsaSelfAddr + (pe-lsaSelf)*bigSize.
+    int rc = rocshmem::rocshmem_buffer_register_vmm(lsaSelfAddr, size, devr->lsaSelf,
+                 devr->lsaSize, (ptrdiff_t)devr->bigSize);
     if (rc != 0) {
-      WARN("GIN rocshmem: rocshmem_buffer_register failed for %p size %zu", addr, size);
+      WARN("GIN rocshmem: buffer register failed for %p (lsaSelf=%p) size %zu",
+           addr, lsaSelfAddr, size);
       bufferRegRefcount.erase(addr);
       free(mh);
       return ncclSystemError;
     }
+
+    INFO(NCCL_INIT, "GIN rocshmem: registered addr=%p lsaSelf=%p +%zu", addr, lsaSelfAddr, size);
   }
   refcount++;
   mh->addr = addr;
   mh->size = size;
 
   if (hipMalloc(&mh->devHandle, sizeof(ncclGinRocshmemMemHandle)) != hipSuccess) {
-    rocshmem::rocshmem_buffer_unregister(addr);
     free(mh);
     return ncclSystemError;
   }
 
+  // Store the LSA flat VA for self rank. The device-side code will use this as
+  // the local_base to compute offsets, and ipc_resolve_remote will translate to
+  // the remote rank's LSA flat VA (which is P2P accessible).
   ncclGinRocshmemMemHandle hostMh;
-  hostMh.baseAddr = (uintptr_t)addr;
+  hostMh.baseAddr = (uintptr_t)lsaSelfAddr;
 
   if (hipMemcpy(mh->devHandle, &hostMh, sizeof(ncclGinRocshmemMemHandle),
                 hipMemcpyHostToDevice) != hipSuccess) {
-    rocshmem::rocshmem_buffer_unregister(addr);
     hipFree(mh->devHandle);
     free(mh);
     return ncclSystemError;
@@ -183,7 +208,8 @@ ncclResult_t ncclGinRocshmemDeregister(ncclGin_t *ginComm, void *ginCtx, void *m
     auto &refcount = bufferRegRefcount[mh->addr];
     refcount--;
     if (refcount <= 0) {
-      rocshmem::rocshmem_buffer_unregister(mh->addr);
+      // Registered via rocshmem_buffer_register_vmm (constant-memory table),
+      // no corresponding rocshmem_buffer_unregister needed.
       bufferRegRefcount.erase(mh->addr);
     }
   }
@@ -201,6 +227,79 @@ ncclResult_t ncclGinRocshmemQueryLastError(ncclGin_t *ginComm, void *ginCtx, boo
   *hasError = ctx ? ctx->hasError : false;
   return ncclSuccess;
 }
+
+////////////////////////////////////////////////////////////////////////////////
+// ncclGin_t vtable for rocshmem: provides the plugin interface so that
+// gin_host.cc's ncclGinConnectOnce can drive init/listen/connect.
+// Rocshmem transport is already established via rocshmem_init(), so
+// listen/connect/closeListen are stubs.
+////////////////////////////////////////////////////////////////////////////////
+
+static ncclResult_t ncclGinRocshmemInit(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction) {
+  *ctx = nullptr;
+  return ncclSuccess;
+}
+
+static ncclResult_t ncclGinRocshmemDevices(int* ndev) {
+  *ndev = 1;
+  return ncclSuccess;
+}
+
+static ncclResult_t ncclGinRocshmemGetProperties(int dev, ncclNetProperties_t* props) {
+  memset(props, 0, sizeof(*props));
+  props->name = (char*)"rocshmem";
+  props->pciPath = NULL;
+  props->guid = 0;
+  props->ptrSupport = NCCL_PTR_CUDA;
+  props->netDeviceType = NCCL_NET_DEVICE_GIN_ROCSHMEM;
+  props->netDeviceVersion = NCCL_GIN_ROCSHMEM_VERSION;
+  return ncclSuccess;
+}
+
+static ncclResult_t ncclGinRocshmemListen(void* ctx, int dev, void* handle, void** listenComm) {
+  *listenComm = (void*)0x1;
+  return ncclSuccess;
+}
+
+static ncclResult_t ncclGinRocshmemConnect(void* ctx, void* handles[], int nranks, int rank,
+                                           void* listenComm, void** collComm) {
+  *collComm = (void*)0x1;
+  return ncclSuccess;
+}
+
+static ncclResult_t ncclGinRocshmemCloseListen(void* listenComm) {
+  return ncclSuccess;
+}
+
+static ncclResult_t ncclGinRocshmemCloseColl(void* collComm) {
+  return ncclSuccess;
+}
+
+static ncclResult_t ncclGinRocshmemFinalize(void* ctx) {
+  return ncclSuccess;
+}
+
+ncclGin_t ncclGinRocshmem = {
+  "GIN_ROCSHMEM",
+  ncclGinRocshmemInit,
+  ncclGinRocshmemDevices,
+  ncclGinRocshmemGetProperties,
+  ncclGinRocshmemListen,
+  ncclGinRocshmemConnect,
+  NULL, // createContext - handled by ncclGinRocshmemCreateContext in gin_host.cc
+  NULL, // regMrSym - handled by ncclGinRocshmemRegister in gin_host.cc
+  NULL, // regMrSymDmaBuf
+  NULL, // deregMrSym - handled by ncclGinRocshmemDeregister in gin_host.cc
+  NULL, // destroyContext - handled by ncclGinRocshmemDestroyContext in gin_host.cc
+  ncclGinRocshmemCloseColl,
+  ncclGinRocshmemCloseListen,
+  NULL, // iput
+  NULL, // iputSignal
+  NULL, // test
+  NULL, // ginProgress
+  NULL, // queryLastError
+  ncclGinRocshmemFinalize
+};
 
 ///////////////////////////////////////////////////////////////////////////////
 // Plugin-facing variants (no ncclComm available)
@@ -226,4 +325,4 @@ ncclResult_t ncclGinRocshmemDestroyContextFromPlugin(void *ginCtx) {
   return ncclGinRocshmemDestroyContext(NULL, ginCtx);
 }
 
-#endif // ENABLE_ROCSHMEM
+#endif // ENABLE_ROCSHMEM_GIN

@@ -82,7 +82,7 @@ void* ncclGinProgress(struct ncclGinState* ginState_) {
         ncclResult_t ret;
         if (ginState->ginType == NCCL_GIN_TYPE_PROXY) {
           ret = ncclGinProxyProgress(ginState->ncclGin, ginState->ginCtx[n]);
-#ifdef ENABLE_ROCSHMEM
+#ifdef ENABLE_ROCSHMEM_GIN
         } else if (ginState->ginType == NCCL_NET_DEVICE_GIN_ROCSHMEM) {
           ret = ncclGinRocshmemProgress(ginState->ncclGin, ginState->ginCtx[n]);
 #endif
@@ -241,7 +241,7 @@ ncclResult_t ncclGinConnectOnce(struct ncclComm* comm, ncclGinConnectionType_t r
                                               ginState->counterSpaceSize, nContextsPerComm,
                                               &ginState->ginCtx[n], &ginState->ginDevHandles[n]),
                     ret, fail);
-#ifdef ENABLE_ROCSHMEM
+#ifdef ENABLE_ROCSHMEM_GIN
     } else if (ginState->ginType == NCCL_NET_DEVICE_GIN_ROCSHMEM) {
       NCCLCHECKGOTO(ncclGinRocshmemCreateContext(comm, ginState->ginComms[n], localNets[n%nLocalNets],
                                                   ginState->signalSpaceSize, ginState->counterSpaceSize,
@@ -314,7 +314,7 @@ ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) {
       }
     }
   }
-#ifdef ENABLE_ROCSHMEM
+#ifdef ENABLE_ROCSHMEM_GIN
   if (ginState->ginType == NCCL_NET_DEVICE_GIN_ROCSHMEM) {
     for (int n = 0; n < ginState->ginCommCount; n++) {
       if (ginState->ginCtx[n] != NULL) {
@@ -365,7 +365,7 @@ ncclResult_t ncclGinDeregister(struct ncclComm* comm, void* ginHostWins[NCCL_GIN
   for (int n = 0; n < ginState->ginCommCount; n++) {
     if (ginState->ginType == NCCL_GIN_TYPE_PROXY) {
       NCCLCHECK(ncclGinProxyDeregister(ginState->ncclGin, ginState->ginCtx[n], ginHostWins[n]));
-#ifdef ENABLE_ROCSHMEM
+#ifdef ENABLE_ROCSHMEM_GIN
     } else if (ginState->ginType == NCCL_NET_DEVICE_GIN_ROCSHMEM) {
       NCCLCHECK(ncclGinRocshmemDeregister(ginState->ncclGin, ginState->ginCtx[n], ginHostWins[n]));
 #endif
@@ -413,7 +413,7 @@ ncclResult_t ncclGinQueryLastError(struct ncclGinState* ginState, bool* hasError
   for (int n = 0; n < ginState->ginCommCount; n++) {
     if (ginState->ginType == NCCL_GIN_TYPE_PROXY)
       NCCLCHECK(ncclGinProxyQueryLastError(ginState->ncclGin, ginState->ginCtx[n], &hasError_));
-#ifdef ENABLE_ROCSHMEM
+#ifdef ENABLE_ROCSHMEM_GIN
     else if (ginState->ginType == NCCL_NET_DEVICE_GIN_ROCSHMEM)
       NCCLCHECK(ncclGinRocshmemQueryLastError(ginState->ncclGin, ginState->ginCtx[n], &hasError_));
 #endif
