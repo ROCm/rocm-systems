@@ -169,7 +169,25 @@ inline namespace config
 namespace
 {
 auto cfg_fini_callbacks = std::vector<std::function<void()>>{};
+
+// Returns true if `path` is a .json file that lacks the top-level TIMEMORY_PROJECT_NAME
+// ("rocprofiler-systems") root object that timemory's cereal reader requires.
+bool
+config_json_missing_expected_root(const std::string& path)
+{
+    if(path.find(".json") == std::string::npos) return false;
+    std::ifstream ifs{ path };
+    if(!ifs.is_open()) return false;
+    try
+    {
+        auto json = nlohmann::json::parse(ifs);
+        return json.is_object() && !json.contains(TIMEMORY_PROJECT_NAME);
+    } catch(const nlohmann::json::exception&)
+    {
+        return false;
+    }
 }
+}  // namespace
 
 void
 finalize()
@@ -1093,12 +1111,22 @@ configure_settings(bool _init)
     {
         if(_config->get_suppress_config()) continue;
 
+        auto fitr = settings::format(itr, _config->get_tag());
+
+        // Timemory's read() silently drops JSON config files without proper root
+        if(_main_proc && config_json_missing_expected_root(fitr))
+        {
+            LOG_WARNING("Config file '{}' is missing the expected '{}' root object and "
+                        "will not be applied. If this is a hierarchical preset "
+                        "configuration, pass it via --preset instead.",
+                        fitr, TIMEMORY_PROJECT_NAME);
+        }
+
         LOG_DEBUG("Reading config file {}", itr);
         if(_config->read(itr) && _main_proc &&
            ((_config->get<bool>("ROCPROFSYS_CI") && settings::verbose() >= 0) ||
             settings::verbose() >= 1 || settings::debug()))
         {
-            auto              fitr = settings::format(itr, _config->get_tag());
             std::ifstream     _in{ fitr };
             std::stringstream _iss{};
             while(_in)
