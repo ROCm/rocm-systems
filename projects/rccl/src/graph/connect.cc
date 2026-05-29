@@ -1033,6 +1033,15 @@ static ncclResult_t repairMissingChannels(struct ncclTopoRanks** allTopoRanks, i
 
 NCCL_PARAM(UnpackDoubleNChannels, "UNPACK_DOUBLE_NCHANNELS", 1);
 RCCL_PARAM(OutputTrees, "OUTPUT_TREES", 0);
+// Opt-in override that bypasses platform/topology channel caps and per-call
+// tuning, pinning the channel count at the requested value end-to-end.
+// Only honored in non-WarpSpeed builds (ENABLE_WARP_SPEED not defined).
+//   RCCL_FORCE_CHANNELS=1   -> use MAXCHANNELS
+//   RCCL_FORCE_CHANNELS=N>1 -> use min(N, MAXCHANNELS)
+//   RCCL_FORCE_CHANNELS=0   -> default behavior
+// Very small messages (e.g. <1KB) may fail when there isn't enough data to
+// distribute across the requested channel count — this is expected.
+RCCL_PARAM(ForceChannels, "FORCE_CHANNELS", 0);
 
 ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePatterns, struct ncclTopoRanks** allTopoRanks, int* rings, struct ncclTopoGraph** graphs, struct ncclComm* parent, int nc) {
   // Gather data from all ranks
@@ -1047,12 +1056,23 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   int minNchannels, maxNchannels;
   int duplicateCount = 1;
   int channelMultiplier = 1;
+  // Resolve RCCL_FORCE_CHANNELS up front so the goto chain below doesn't
+  // jump past its initializer (C++ forbids that).
+  int forceChannels = 0;
 #ifdef ENABLE_WARP_SPEED
   int adjustedMaxNchannels = (int)ncclMaxNchannels(); // has to add it here to avoid GOTO fail label error
   bool userUpdatedMaxChannels = adjustedMaxNchannels != MAXCHANNELS;
   const int wsEnabled = comm->topo->warpSpeedEnabled;
   const bool singleNode = comm->nNodes == 1;
   const bool isGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
+#else
+  {
+    int v = (int)rcclParamForceChannels();
+    if (v == 1) v = MAXCHANNELS;
+    else if (v > MAXCHANNELS) v = MAXCHANNELS;
+    else if (v < 0) v = 0;
+    forceChannels = v;
+  }
 #endif
   const bool isGfx1250 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250");
   NCCLCHECK(ncclCalloc(&ringRecv, nNodes*MAXCHANNELS));
@@ -1150,14 +1170,24 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
     }
   }
 
+  // forceChannels was resolved at function entry (see top of function).
+  //   == 0 -> off; > 0 -> requested channel count, clamped to MAXCHANNELS.
+  // Only honored in non-WarpSpeed builds (ENABLE_WARP_SPEED undefined).
+
   // Only use full MAXCHANNELS for gfx942, gfx950, and gfx1250
   // pre-gfx942 GPUs are capped at 2*CHANNEL_LIMIT
-  maxChannels = (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") ||
-                 IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") ||
-                 IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250"))
-                 ? std::min(comm->topo->nodes[GPU].nodes[0].gpu.cu, MAXCHANNELS) : 2*CHANNEL_LIMIT;
+  if (forceChannels > 0) {
+    // Platform-insensitive override: skip the cu / pre-MI3XX cap.
+    maxChannels = forceChannels;
+  } else {
+    maxChannels = (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") ||
+                   IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") ||
+                   IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250"))
+                   ? std::min(comm->topo->nodes[GPU].nodes[0].gpu.cu, MAXCHANNELS) : 2*CHANNEL_LIMIT;
+  }
 
-  if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes > 1) {
+  if (forceChannels == 0 &&
+      IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes > 1) {
     int userMax = ncclParamMaxNchannels();
     if (userMax != -2) {
       maxChannels = std::max(std::min(userMax, 64), 1);
@@ -1174,9 +1204,9 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
     maxChannels = std::min(64, maxChannels);
   }
 #else
-  // Skip the 64-channel cap for gfx1250 single-node P2P and for MNNVL transports.
-  // Retain the 64-channel cap for gfx1250 multi-node non-MNNVL (NET path) and all other arches.
-  if (!comm->MNNVL && !(isGfx1250 && comm->nNodes == 1) &&
+  // Skip the 64-channel cap for gfx1250 single-node P2P, for MNNVL transports,
+  // and when RCCL_FORCE_CHANNELS asked us to go wider.
+  if (forceChannels == 0 && !comm->MNNVL && !(isGfx1250 && comm->nNodes == 1) &&
       (graphs[NCCL_ALGO_RING]->nIntraChannels > 0 || comm->nNodes > 1)) {
     maxChannels = std::min(64, maxChannels);
   }
@@ -1219,8 +1249,15 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   }
 #else
   maxNchannels = std::min((int)ncclMaxNchannels(), maxChannels);
-  nc = std::min(maxNchannels/comm->nChannels, nc);
-  nc *= comm->nChannels;
+  if (forceChannels > 0) {
+    // Bypass the per-arch derived multiplier and drive nc straight to the requested value.
+    nc = std::min(forceChannels, maxNchannels);
+    INFO(NCCL_TUNING, "RCCL_FORCE_CHANNELS: maxChannels=%d maxNchannels=%d nc=%d",
+         maxChannels, maxNchannels, nc);
+  } else {
+    nc = std::min(maxNchannels/comm->nChannels, nc);
+    nc *= comm->nChannels;
+  }
 #endif
   // Set ring prev/next for my rank
   for (int c=0; c<nChannels; c++) {

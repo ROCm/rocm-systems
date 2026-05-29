@@ -92,6 +92,7 @@ constexpr int rcclShmemDynamicSize(int cudaArch = NCCL_CUDA_ARCH, int WarpSize =
 }
 
 NCCL_PARAM(L1SharedMemoryCarveout, "L1_SHARED_MEMORY_CARVEOUT", 0);
+extern int64_t rcclParamForceChannels();
 
 // Returns maximum kernel stack size of all CUDA kernels
 ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* maxStackSize) {
@@ -510,7 +511,10 @@ ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool
   int fnOpTyIndices[ncclNumFuncs*ncclNumDevRedOps*ncclNumTypes];
   int fnOpTyCount = 0;
 
-  if (comm->symmetricSupport) {
+  // RCCL_FORCE_CHANNELS: route every task through the standard dispatch (which
+  // honors the force) instead of the symmetric scheduler, whose own kernel
+  // picker would otherwise override the channel count.
+  if (comm->symmetricSupport && rcclParamForceChannels() == 0) {
     NCCLCHECK(ncclMakeSymmetricTaskList(comm, task, &planner->collSymTaskQueue, &task));
   }
 
@@ -729,6 +733,10 @@ static ncclResult_t scheduleCollTasksToPlan(
   size_t trafficPerChannel = 0;
   int channelId = 0;
   size_t currentTraffic = 0;
+  // Cached once per plan: RCCL_FORCE_CHANNELS skips traffic-based dispatch
+  // and pins every coll to exactly this many channels.
+  int forceCh = (int)rcclParamForceChannels();
+  if (forceCh > 0 && forceCh > comm->nChannels) forceCh = comm->nChannels;
 
 #ifdef ENABLE_TRACE
   size_t channelCounts[MAXCHANNELS];
@@ -764,8 +772,8 @@ static ncclResult_t scheduleCollTasksToPlan(
       devWork->channelLo = 0;
       devWork->channelHi = nChannels-1;
       // RCCL: CollNet path never set task->nChannels; profiler received 0.
-      // Clamp to UINT8_MAX: ENABLE_WARP_SPEED pushes MAXCHANNELS to 512 which wraps uint8.
-      task->nChannels = (nChannels <= UINT8_MAX) ? (uint8_t)nChannels : UINT8_MAX;
+      // Clamp to UINT16_MAX: ENABLE_WARP_SPEED pushes MAXCHANNELS to 512 which would wrap uint16.
+      task->nChannels = (nChannels <= UINT16_MAX) ? (uint16_t)nChannels : UINT16_MAX;
       devWork->collnet.count = task->count;
       devWork->collnet.chunkCount = chunkSize/ncclTypeSize(task->datatype);
       devWork->direct = directFlags;
@@ -785,6 +793,104 @@ static ncclResult_t scheduleCollTasksToPlan(
         if (!isDRS && task->func != ncclFuncAlltoAllGda && task->func != ncclFuncAlltoAllvGda) {
             NCCLCHECK(addProxyOpIfNeeded(comm, plan, &proxyOp));
             NCCLCHECK(addProfilerProxyOpIfNeeded(comm, plan, &proxyOp));
+        }
+      }
+    } else if (forceCh > 0) {
+      // RCCL_FORCE_CHANNELS: bypass cell/traffic-based scheduling and pin this
+      // task to forceCh contiguous channels starting at channel 0. Counts are
+      // distributed evenly; any remainder lands on the "lo" channel.
+      int nChannels = forceCh;
+      if (!testBudget(budget, plan->nWorkBatches + nChannels, plan->workBytes + workNode->size)) {
+        return ncclSuccess;
+      }
+      size_t per = task->count / nChannels;
+      size_t rem = task->count - per * nChannels;
+      size_t countLo, countMid, countHi;
+      int nMidChannels;
+      if (nChannels == 1) {
+        countLo = task->count; countMid = 0; countHi = 0;
+        nMidChannels = 0;
+      } else if (nChannels == 2) {
+        countLo = per + rem; countMid = 0; countHi = per;
+        nMidChannels = 0;
+      } else {
+        countLo = per + rem; countMid = per; countHi = per;
+        nMidChannels = nChannels - 2;
+      }
+      task->nChannels = (uint16_t) nChannels;
+      devWork->channelLo = 0;
+      devWork->channelHi = nChannels - 1;
+      devWork->cbd.countLo = countLo;
+      devWork->cbd.countMid = countMid;
+      devWork->cbd.countHi = countHi;
+
+      size_t globalBytesPerElement = elementSize*ncclFuncMaxSendRecvCount(task->func, comm->nRanks, 1);
+      size_t nBytes = globalBytesPerElement*task->count;
+      devWork->connIndex = 0;
+      if (task->protocol == NCCL_PROTO_SIMPLE && task->algorithm == NCCL_ALGO_RING) {
+        if (comm->useIntraNet && nBytes > rcclParamIntraNetThreshold()) {
+          devWork->connIndex = NCCL_CONN_IDX_P2P_NET;
+        }
+      }
+
+      uint32_t chunkSize, directFlags = 0;
+      size_t grainSize = rcclProtoGrainSize(task->protocol, comm);
+      struct ncclProxyOp proxyOpLo, proxyOpMid, proxyOpHi;
+      if (countLo != 0) {
+        NCCLCHECK(calcCollChunking(comm, task, /*nChannels=*/1, globalBytesPerElement*countLo, &chunkSize, &directFlags, &proxyOpLo));
+        devWork->cbd.chunkGrainsLo = chunkSize/grainSize;
+      }
+      if (countHi != 0) {
+        NCCLCHECK(calcCollChunking(comm, task, /*nChannels=*/1, globalBytesPerElement*countHi, &chunkSize, &directFlags, &proxyOpHi));
+        devWork->cbd.chunkGrainsHi = chunkSize/grainSize;
+      }
+      if (nMidChannels != 0) {
+        NCCLCHECK(calcCollChunking(comm, task, /*nChannels=*/1, globalBytesPerElement*countMid, &chunkSize, &directFlags, &proxyOpMid));
+        devWork->cbd.chunkGrainsMid = chunkSize/grainSize;
+      }
+      devWork->direct = directFlags;
+
+      uint64_t proxyOpId = uint64_t(plan->collOpCount++)<<1 | 0;
+      for (int c = devWork->channelLo; c <= (int)devWork->channelHi; c++) {
+        struct ncclProxyOp* proxyOp;
+        if (c == (int)devWork->channelLo) {
+          proxyOp = &proxyOpLo;
+          proxyOp->loopOffset = 0;
+          proxyOp->channelSize = countLo * elementSize;
+        } else if (c == (int)devWork->channelHi) {
+          proxyOp = &proxyOpHi;
+          proxyOp->loopOffset = (countLo + nMidChannels * countMid) * elementSize;
+          proxyOp->channelSize = countHi * elementSize;
+        } else {
+          proxyOp = &proxyOpMid;
+          proxyOp->loopOffset = (countLo + (c - devWork->channelLo - 1) * countMid) * elementSize;
+          proxyOp->channelSize = countMid * elementSize;
+        }
+        proxyOp->channelId = c;
+        proxyOp->opCount = proxyOpId;
+        proxyOp->task.coll = task;
+        proxyOp->rank = comm->rank;
+        proxyOp->ringAlgo = NULL;
+        if (proxyOp->reg && task->algorithm == NCCL_ALGO_RING && (task->recvNetHandles[c] || task->sendNetHandles[c])) {
+          if (task->func == ncclFuncAllGather) {
+            proxyOp->ringAlgo = new RingAGAlgorithm(task->sendbuff, task->recvbuff, comm->nRanks, comm->channels[c].ring.userRanks, proxyOp->chunkSteps, proxyOp->sliceSteps, proxyOp->chunkSize, proxyOp->sliceSize, proxyOp->loopOffset, proxyOp->channelSize, elementSize, task->count * elementSize, task->sendNetHandles[c], task->recvNetHandles[c], task->srecvNetHandles[c]);
+          } else if (task->func == ncclFuncAllReduce) {
+            proxyOp->ringAlgo = new RingARAlgorithm(task->sendbuff, task->recvbuff, comm->nRanks, comm->channels[c].ring.index, proxyOp->chunkSteps, proxyOp->sliceSteps, proxyOp->chunkSize, proxyOp->sliceSize, proxyOp->loopOffset, proxyOp->channelSize, elementSize, task->sendNetHandles[c], task->recvNetHandles[c], task->srecvNetHandles[c]);
+          } else if (task->func == ncclFuncBroadcast) {
+            proxyOp->ringAlgo = new RingBCAlgorithm(task->sendbuff, task->recvbuff, comm->rank, task->root, comm->nRanks, comm->channels[c].ring.userRanks, proxyOp->chunkSteps, proxyOp->sliceSteps, proxyOp->chunkSize, proxyOp->sliceSize, proxyOp->loopOffset, proxyOp->channelSize, task->sendNetHandles[c], task->recvNetHandles[c], task->srecvNetHandles[c]);
+          }
+          proxyOp->ringAlgo->incRefCount();
+        }
+        proxyOp->eActivationMask = task->eActivationMask;
+        proxyOp->incWorkCounter = true;
+        proxyOp->nChannels = nChannels;
+        proxyOp->connIndex = devWork->connIndex;
+        addWorkBatchToPlan(comm, plan, c, workNode->workType, task->devFuncId, plan->workBytes);
+        // coverity[uninit_use_in_call:FALSE]
+        bool isDRS = task->func == ncclFuncReduceScatter && comm->enableDirectReduceScatter;
+        if (!isDRS && task->func != ncclFuncAlltoAllGda && task->func != ncclFuncAlltoAllvGda) {
+          NCCLCHECK(addProxyOpIfNeeded(comm, plan, proxyOp));
+          NCCLCHECK(addProfilerProxyOpIfNeeded(comm, plan, proxyOp));
         }
       }
     } else { // not task->isCollnet
@@ -825,12 +931,9 @@ static ncclResult_t scheduleCollTasksToPlan(
       (countHi != 0 ? countHi : countLo) -= cells*elementsPerCell - task->count;
 
       nChannels = (countLo!=0 ? 1 : 0) + nMidChannels + (cellsHi!=0 ? 1 : 0);
-      // Update number of channels propagated to the profiler
-#ifdef ENABLE_WARP_SPEED
-      task->nChannels = nChannels;
-#else
-      task->nChannels = (uint8_t) nChannels;
-#endif
+      // Update number of channels propagated to the profiler. task->nChannels is
+      // uint16_t — wide enough for MAXCHANNELS=256 without wrap.
+      task->nChannels = (uint16_t) nChannels;
       // Ensure room for worst case of one new batch per channel
       if (!testBudget(budget, plan->nWorkBatches + nChannels, plan->workBytes + workNode->size)) {
         return ncclSuccess;
@@ -2395,6 +2498,15 @@ static ncclResult_t topoGetAlgoInfo(
     rcclSetWarpSpeedCUs(comm, info->algorithm, info->nWarps * comm->WarpSize, nc);
   }
   info->nMaxChannels = nc;
+#else
+  // RCCL_FORCE_CHANNELS: ignore every algorithm/size-based reduction above and
+  // pin nMaxChannels to the requested count (capped at the comm's channel pool).
+  {
+    int forceCh = (int)rcclParamForceChannels();
+    if (forceCh > 0) {
+      info->nMaxChannels = std::min(forceCh, (int)comm->nChannels);
+    }
+  }
 #endif
   return ncclSuccess;
 }
@@ -2476,6 +2588,14 @@ rccl_static ncclResult_t getAlgoInfo(
   }
 
   info->nMaxChannels = nMaxChannels == 0 ? info->nMaxChannels : nMaxChannels;
+  // RCCL_FORCE_CHANNELS wins over the tuner plugin too — the whole point of
+  // the env var is to ignore tuning end-to-end.
+  {
+    int forceCh = (int)rcclParamForceChannels();
+    if (forceCh > 0) {
+      info->nMaxChannels = std::min(forceCh, (int)comm->nChannels);
+    }
+  }
   return ncclSuccess;
 }
 
