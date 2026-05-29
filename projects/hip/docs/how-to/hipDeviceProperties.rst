@@ -8,8 +8,6 @@
 HIP Device Properties and Topology on CDNA Architectures
 ==========================================================
 
-Overview
---------
 
 Understanding GPU device properties is essential for writing performant and
 scalable HIP applications. Modern AMD GPUs such as MI300 (CDNA3) expose a
