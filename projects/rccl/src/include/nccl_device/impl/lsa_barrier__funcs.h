@@ -6,10 +6,10 @@
 
 #ifndef _NCCL_DEVICE_MEM_BARRIER__FUNCS_H_
 #define _NCCL_DEVICE_MEM_BARRIER__FUNCS_H_
+#include "../hip_compat.h"
 #include "lsa_barrier__types.h"
 #include "comm__types.h"
-
-#define __CUDACC__ 0
+#include <atomic>
 
 #if __CUDACC__
 template<typename Coop>
@@ -64,13 +64,13 @@ template<typename Coop>
 NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::arrive(Coop, cuda::memory_order order) {
   this->coop.sync();
   if (this->multimem) {
-  #if __CUDA_ARCH__ >= 900
+  #if NCCL_ARCH_HAS_MULTIMEM
     if (this->coop.thread_rank() == 0) {
       uint32_t* inbox = this->mcInbox(/*multimem=*/true);
       if (nccl::utility::releaseOrderOf(order) != cuda::memory_order_relaxed) {
-        asm volatile("multimem.red.release.sys.add.u32 [%0],1;" :: "l"(inbox));
+        nccl_multimem_red_release_add_u32(inbox);
       } else {
-        asm volatile("multimem.red.relaxed.sys.add.u32 [%0],1;" :: "l"(inbox));
+        nccl_multimem_red_relaxed_add_u32(inbox);
       }
     }
   #endif
@@ -89,7 +89,7 @@ NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::arrive(Coop, cuda::memory_o
 template<typename Coop>
 NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::wait(Coop, cuda::memory_order order) {
   if (this->multimem) {
-  #if __CUDA_ARCH__ >= 900
+  #if NCCL_ARCH_HAS_MULTIMEM
     if (this->coop.thread_rank() == 0) {
       cuda::atomic_ref<uint32_t> inbox(*this->mcInbox(/*multimem=*/false));
       #pragma unroll 1

@@ -1505,6 +1505,9 @@ memory:
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows]
     tags: [alloc]
+  Unit_hipMalloc_Positive_APU_LargeAllocSpill:
+    <<: *level_2
+    tags: [alloc]
   Unit_hipMalloc_Allocate110PercentOfDeviceMemory: *level_2
   Unit_hipMalloc_AllocateAvailableVRAMAndPossibleRAM: *level_2
   Unit_hipMalloc_AllocateMoreThanTotalRAM: *level_2

@@ -40,3 +40,4 @@ __pycache__
 .claude
 
 CMakePresets.json
+.cache/

@@ -175,6 +175,20 @@ else()
 endif()
 
 set(GPU_TARGETS "${SUPPORTED_GPUS}")
+
+# Fail fast if we ended up with no GPU targets at all
+if(NOT GPU_TARGETS OR "${GPU_TARGETS}" STREQUAL "NOTFOUND")
+  message(FATAL_ERROR
+    "GPU_TARGETS is empty (resolved to '${GPU_TARGETS}').\n"
+    "This usually means ./install.sh -l was used on a host with no visible "
+    "AMD GPU (no /dev/kfd, no /dev/dri), so local-arch detection found "
+    "nothing to target.\n"
+    "\n"
+    "If you wish to build here anyway, re-run with an explicit GPU "
+    "architecture, e.g.:\n"
+    "    ./install.sh --amdgpu_targets gfx1201\n")
+endif()
+
 message(STATUS "Compiling for ${GPU_TARGETS}")
 
 ## NOTE: Reload rocm-cmake in order to update GPU_TARGETS
