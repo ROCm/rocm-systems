@@ -18,6 +18,15 @@ bool bypass_l1(const MemAccess& m) {
   return m.mtype == 0 /*UC*/ || m.mtype == 4 /*NT*/ || m.non_temporal;
 }
 bool bypass_l2(const MemAccess& m) { return m.mtype == 0 /*UC*/; }
+
+// A memory InstrEvent built by the adapter always carries a heap MemAccess; a few
+// lib tests construct memory events with a null mem (don't care about addresses).
+// Map null -> a shared empty access (lane_mask=0 => no active lanes), matching the
+// old inline default-constructed MemAccess so those paths behave identically.
+const MemAccess& access_of(const InstrEvent& inst) {
+  static const MemAccess kEmpty{};
+  return inst.mem ? *inst.mem : kEmpty;
+}
 }  // namespace
 
 // L1-local walk only. Resident ready lines hit; pending fills coalesce (finding ①).
@@ -27,7 +36,8 @@ bool bypass_l2(const MemAccess& m) { return m.mtype == 0 /*UC*/; }
 // back via on_mem_completion -> resolve_fills. LDS / unconfigured stay flat.
 MemorySystem::AccessResult MemorySystem::access(const InstrEvent& inst, uint64_t now, CycleWaveState& ws) {
   AccessResult out;
-  if (inst.kind == InstrKind::LDS) { out.local_ready_cyc = now + lds_latency(inst.mem); return out; }
+  const MemAccess& ma = access_of(inst);   // heap mem for adapter-built events; empty for null
+  if (inst.kind == InstrKind::LDS) { out.local_ready_cyc = now + lds_latency(ma); return out; }
 
   TimedTagCache& l1 = (inst.kind == InstrKind::SMEM) ? l1s_ : l1v_;
   if (!l1.configured()) {
@@ -35,10 +45,10 @@ MemorySystem::AccessResult MemorySystem::access(const InstrEvent& inst, uint64_t
                                                                 : cfg_.vmem.base_latency);
     return out;
   }
-  const bool skip_l1 = bypass_l1(inst.mem);
-  const bool skip_l2 = bypass_l2(inst.mem);
+  const bool skip_l1 = bypass_l1(ma);
+  const bool skip_l2 = bypass_l2(ma);
   const bool uses_mshr = is_vector_mem(inst.kind) && !mshr_free_.empty();
-  std::vector<uint64_t> lines = coalesce(inst.mem, l1.line_bytes);
+  std::vector<uint64_t> lines = coalesce(ma, l1.line_bytes);
   if (lines.empty()) { out.local_ready_cyc = now + l1.hit_latency; return out; }  // no active lanes (defensive)
 
   out.local_ready_cyc = now;   // bumped by any L1-resolved line; shared lines dominate via max at completion
@@ -118,7 +128,7 @@ uint64_t MemorySystem::lds_latency(const MemAccess& m) const {
 
 uint32_t MemorySystem::vector_misses_needing_mshr(const InstrEvent& inst) const {
   uint32_t needed = 0;
-  for (uint64_t base : coalesce(inst.mem, l1v_.line_bytes))
+  for (uint64_t base : coalesce(access_of(inst), l1v_.line_bytes))
     if (!l1v_.present(base)) ++needed;                                 // tag-absent -> needs a new MSHR
   return needed;
 }
@@ -138,7 +148,7 @@ void MemorySystem::release_wave_mshrs(const CycleWaveState* owner, uint64_t now)
 // Mutates nothing. Non-vector / bypass / unconfigured -> always admit (return now).
 uint64_t MemorySystem::admit_probe(const InstrEvent& inst, uint64_t now,
                                    const CycleWaveState& /*ws*/) const {
-  if (!is_vector_mem(inst.kind) || bypass_l1(inst.mem) || !l1v_.configured() ||
+  if (!is_vector_mem(inst.kind) || bypass_l1(access_of(inst)) || !l1v_.configured() ||
       mshr_free_.empty())
     return now;
 

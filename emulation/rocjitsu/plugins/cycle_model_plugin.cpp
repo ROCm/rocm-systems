@@ -231,7 +231,8 @@ PendingEvent CycleModelPlugin::make_pending_event(const Instruction &inst, Wavef
     fill_reg_set(inst, e.instr.regs);
     if (cycle_model::ArchModel::is_memory(e.instr.kind)) {
       e.instr.wcnt = wcnt_slot_of(e.instr.kind);
-      fill_mem_access(inst, e.instr.mem); // per-lane addresses for cache submodels
+      e.instr.mem = std::make_unique<cycle_model::MemAccess>();
+      fill_mem_access(inst, *e.instr.mem); // per-lane addresses for cache submodels
     }
   }
   return e;
@@ -379,7 +380,7 @@ void CycleModelPlugin::onAmdgpuBarrierResolved(std::span<Wavefront *> wavefronts
     return;
   for (Wavefront *wf : wavefronts) {
     if (CycleWavefrontState *st = state_of(*wf))
-      st->st.barrier_signaled = true; // positional BarrierGate clears on next step
+      st->st.barrier_signals++; // positional BarrierGate clears on next step (counter: passive path queues >=2)
   }
   cm->resume_clock(
       now_ticks(*wavefronts.front())); // wake clock to replay now-unblocked barrier gates

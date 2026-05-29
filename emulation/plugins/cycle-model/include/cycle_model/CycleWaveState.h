@@ -41,9 +41,13 @@ struct CycleWaveState {
   // drain synchronously). Incremented at memop commit, decremented at retire.
   WaitCounters outstanding;
 
-  // Set true by the adapter on onAmdgpuBarrierResolved; consumed (reset) when the
-  // head BarrierGate clears. 1:1 with barrier-resolve events in program order.
-  bool barrier_signaled = false;
+  // Incremented by the adapter on each onAmdgpuBarrierResolved; one count consumed
+  // when the head BarrierGate clears. A COUNTER (not a bool) because the passive
+  // LD_PRELOAD path does not drain the FIFO between hooks: a wave with >=2 s_barrier
+  // accumulates multiple resolves before the first drain, and a bool would collapse
+  // them — the 2nd+ BarrierGate would then block forever and the wave tail would be
+  // silently skipped (undercount). 1:1 with barrier-resolve events in program order.
+  uint32_t barrier_signals = 0;
 
   // Model-owned in-flight memory requests + tombstones for dup/late detection.
   std::unordered_map<MemReqId, MemReqEntry> in_flight;
@@ -64,7 +68,7 @@ struct CycleWaveState {
     pending.clear();
     in_flight.clear();
     outstanding.clear();
-    barrier_signaled = false;
+    barrier_signals = 0;
     next_ready_cyc = 0;
     cyc_at_dispatch = cu_cycle;
   }

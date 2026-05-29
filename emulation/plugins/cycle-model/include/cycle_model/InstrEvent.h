@@ -15,6 +15,7 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -67,7 +68,13 @@ struct InstrEvent {
 
   // Memory-only fields (read only when kind in {SMEM,VMEM,FLAT,GLOBAL,LDS}).
   WaitCounter  wcnt = WaitCounter::VMCNT;   // counter slot this memop increments
-  MemAccess    mem;                          // per-lane address stream
+  // Per-lane address stream — heap-allocated ONLY for memory instructions. MemAccess is
+  // 528 bytes (the 64-entry lane_addr array); inlining it here would force every event
+  // for the ~90% non-memory instruction stream to zero-init + memcpy 528 bytes on the
+  // per-instruction ingest hot path. A null pointer for non-memory ops keeps InstrEvent
+  // small (move-only). Allocated by the adapter's make_pending_event for memory kinds;
+  // only ever dereferenced on is_memory()-guarded paths, where it is non-null.
+  std::unique_ptr<MemAccess> mem;
 };
 
 /// Positional waitcnt gate: blocks the wave only once it reaches the FIFO head

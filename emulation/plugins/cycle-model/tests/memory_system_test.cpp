@@ -43,10 +43,11 @@ InstrEvent mem_instr(InstrKind k, uint64_t addr = 0x1000, uint32_t elem_bytes = 
   InstrEvent e;
   e.kind = k;
   e.mnemonic = "test_mem";
-  e.mem.lane_addr[0] = addr;
-  e.mem.lane_mask = 1;
-  e.mem.elem_bytes = elem_bytes;
-  e.mem.mtype = mtype;
+  e.mem = std::make_unique<MemAccess>();
+  e.mem->lane_addr[0] = addr;
+  e.mem->lane_mask = 1;
+  e.mem->elem_bytes = elem_bytes;
+  e.mem->mtype = mtype;
   return e;
 }
 
@@ -184,7 +185,8 @@ TEST_F(MemSys, DefaultMemAccessIsCachedNotBypass) {
   InstrEvent e;
   e.kind = InstrKind::VMEM;
   e.mnemonic = "global_load_dword";
-  e.mem.lane_addr[0] = 0x5000; e.mem.lane_mask = 1; e.mem.elem_bytes = 4;  // mtype left default
+  e.mem = std::make_unique<MemAccess>();
+  e.mem->lane_addr[0] = 0x5000; e.mem->lane_mask = 1; e.mem->elem_bytes = 4;  // mtype left default
   EXPECT_EQ(mem_latency(mem, shared, e, 0, ws), VMEM_COLD);       // cached cold (L1+L2 miss), not L1-bypass
 }
 
@@ -254,12 +256,13 @@ InstrEvent strided_access(uint32_t n, uint64_t stride, uint64_t base = 0x100000)
   InstrEvent e;
   e.kind = InstrKind::VMEM;
   e.mnemonic = "test_mem";
+  e.mem = std::make_unique<MemAccess>();
   for (uint32_t i = 0; i < n; ++i) {
-    e.mem.lane_addr[i] = base + uint64_t(i) * stride;
-    e.mem.lane_mask |= (1ull << i);
+    e.mem->lane_addr[i] = base + uint64_t(i) * stride;
+    e.mem->lane_mask |= (1ull << i);
   }
-  e.mem.elem_bytes = 4;
-  e.mem.mtype = MTYPE_RW;
+  e.mem->elem_bytes = 4;
+  e.mem->mtype = MTYPE_RW;
   return e;
 }
 
@@ -297,16 +300,17 @@ InstrEvent lds_access(std::initializer_list<uint64_t> addrs) {
   InstrEvent e;
   e.kind = InstrKind::LDS;
   e.mnemonic = "ds_op";
+  e.mem = std::make_unique<MemAccess>();
   uint32_t lane = 0;
-  for (uint64_t a : addrs) { e.mem.lane_addr[lane] = a; e.mem.lane_mask |= (1ull << lane); ++lane; }
-  e.mem.elem_bytes = 4;
-  e.mem.mtype = MTYPE_RW;
+  for (uint64_t a : addrs) { e.mem->lane_addr[lane] = a; e.mem->lane_mask |= (1ull << lane); ++lane; }
+  e.mem->elem_bytes = 4;
+  e.mem->mtype = MTYPE_RW;
   return e;
 }
 InstrEvent lds_strided(uint32_t n, uint64_t stride) {
   InstrEvent e;
-  e.kind = InstrKind::LDS; e.mnemonic = "ds_op"; e.mem.elem_bytes = 4;
-  for (uint32_t i = 0; i < n; ++i) { e.mem.lane_addr[i] = uint64_t(i) * stride; e.mem.lane_mask |= (1ull << i); }
+  e.kind = InstrKind::LDS; e.mnemonic = "ds_op"; e.mem = std::make_unique<MemAccess>(); e.mem->elem_bytes = 4;
+  for (uint32_t i = 0; i < n; ++i) { e.mem->lane_addr[i] = uint64_t(i) * stride; e.mem->lane_mask |= (1ull << i); }
   return e;
 }
 

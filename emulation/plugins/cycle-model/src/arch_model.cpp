@@ -218,8 +218,8 @@ IssueDecision ArchModel::try_issue_head_at(CycleWaveState& ws, uint64_t now) {
   // Positional barrier gate: clears only when the adapter has signalled this wave's
   // workgroup barrier resolved. No internal event unblocks it (retry == MAX).
   if (e.kind == PendingKind::BarrierGate) {
-    if (ws.barrier_signaled) {
-      ws.barrier_signaled = false;
+    if (ws.barrier_signals > 0) {
+      ws.barrier_signals--;          // consume one resolve; multiple are queued in the passive path
       ws.pending.pop_front();
       return {IssueResult::GATE_CLEARED, now};
     }

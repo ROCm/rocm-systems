@@ -167,7 +167,7 @@ TEST(TryIssue, BlocksOnScoreboard) {
   auto* ws = make_wave(m, 0);
   InstrRegSet w; w.vgprs_written = {2}; ws->scoreboard.mark_writes(w, 30);
   PendingEvent e = valu_instr(); e.instr.regs.vgprs_read = {2};
-  ws->pending.push_back(e);
+  ws->pending.push_back(std::move(e));
   auto d = m.try_issue_head_at(*ws, /*now=*/5);
   EXPECT_EQ(d.result, IssueResult::BLOCKED_SCOREBOARD);
   EXPECT_EQ(d.earliest_retry, 30u);
@@ -207,7 +207,7 @@ TEST(TickLoop, DependentChainLetsOtherWaveFill) {
   auto* a = make_wave(m, 0);                 // 3-instr dependent chain on v0
   for (int i = 0; i < 3; ++i) {
     auto e = valu_instr(); e.instr.regs.vgprs_read = {0}; e.instr.regs.vgprs_written = {0};
-    a->pending.push_back(e);
+    a->pending.push_back(std::move(e));
   }
   auto* b = make_wave(m, 1);                 // 3 independent instrs on SIMD1
   for (int i = 0; i < 3; ++i) b->pending.push_back(valu_instr());
@@ -238,7 +238,7 @@ TEST(Scheduler, LivelockGuardHolds) {
   ArchModel m(tiny_cfg());
   auto* a = make_wave(m, 0);
   auto e = valu_instr(); e.instr.regs.vgprs_read = {0}; e.instr.regs.vgprs_written = {0};
-  a->pending.push_back(e);
+  a->pending.push_back(std::move(e));
   InstrRegSet w; w.vgprs_written = {0}; a->scoreboard.mark_writes(w, 5);   // ready at cyc 5
   run_cycles(m, 50);                   // 50 cycles; must terminate, not spin
   EXPECT_TRUE(a->pending.empty());
@@ -391,10 +391,27 @@ TEST(Gates, BarrierBlocksUntilSignaled) {
   ws->pending.push_back(valu_instr());
   run_cycles(m, 50);                                     // unsignaled: blocked, no spin
   EXPECT_EQ(ws->pending.size(), 2u);                     // still parked at barrier
-  ws->barrier_signaled = true;                           // adapter's onAmdgpuBarrierResolved
+  ws->barrier_signals++;                                 // adapter's onAmdgpuBarrierResolved
   m.tick_cycle();                                        // one edge to replay
   EXPECT_TRUE(ws->pending.empty());                      // barrier cleared + tail issued
-  EXPECT_FALSE(ws->barrier_signaled);                    // signal consumed
+  EXPECT_EQ(ws->barrier_signals, 0u);                    // signal consumed
+}
+
+// Passive LD_PRELOAD path: a wave with two s_barrier accumulates BOTH resolves on its
+// signal counter before the FIFO is ever drained. A bool would collapse the 2nd resolve
+// and park the wave at BarrierGate #2 forever, silently dropping the tail (undercount).
+// The counter must let both gates clear and the tail issue.
+TEST(Gates, MultipleBarrierResolvesDoNotCollapse) {
+  ArchModel m(tiny_cfg());
+  auto* ws = make_wave(m, 0);
+  ws->pending.push_back(barrier_gate());                 // barrier #1
+  ws->pending.push_back(valu_instr());                   // body
+  ws->pending.push_back(barrier_gate());                 // barrier #2
+  ws->pending.push_back(valu_instr());                   // tail (dropped under the bool bug)
+  ws->barrier_signals += 2;                              // both resolved before any drain
+  m.flush_to_quiescence();
+  EXPECT_TRUE(ws->pending.empty());                      // both gates cleared, tail issued
+  EXPECT_EQ(ws->barrier_signals, 0u);                    // both signals consumed
 }
 
 TEST(Gates, FlushTerminatesOnBarrierBlockedWave) {       // guard: no infinite +1 spin
