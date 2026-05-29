@@ -130,7 +130,7 @@ struct Case {
   Kind kind;
 };
 
-const std::array<Case, 9> kCases = {{
+const std::array<Case, 10> kCases = {{
     {"v_add_f32", 257, Kind::F32},
     {"v_sub_f32", 258, Kind::F32},
     {"v_mul_f32", 261, Kind::F32},
@@ -140,6 +140,7 @@ const std::array<Case, 9> kCases = {{
     {"v_or_b32", 276, Kind::INT},
     {"v_xor_b32", 277, Kind::INT},
     {"v_add_u32", 308, Kind::INT},
+    {"v_mul_legacy_f32", 673, Kind::F32},
 }};
 
 struct Fixture {

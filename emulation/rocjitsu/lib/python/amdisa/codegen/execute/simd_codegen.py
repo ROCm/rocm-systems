@@ -41,6 +41,26 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
     "v_sub_f32_vop2": ("float32_t", "std::minus<>{}"),
     "v_subrev_f32_vop2": ("float32_t", "[](auto a, auto b) { return b - a; }"),
     "v_mul_f32_vop2": ("float32_t", "std::multiplies<>{}"),
+    # Legacy / DX9 zero multiply: `(a == 0 || b == 0) ? 0 : a * b`. The scalar
+    # bodies for `v_mul_legacy_f32` and `v_mul_dx9_zero_f32` are bit-identical.
+    # The where-blend respects ±0 (== 0 matches both -0 and +0), matching
+    # the scalar `a == 0.0f`. Routed via the VOP3 binary fp glue for the
+    # vop3 form (which applies abs/neg/omod/clamp around this functor,
+    # matching the modifier-bearing scalar body).
+    "v_mul_legacy_f32_vop2": (
+        "float32_t",
+        "[](auto a, auto b) {"
+        " auto r = a * b;"
+        " util::stdx::where(a == 0.0f || b == 0.0f, r) = util::native<float32_t>(0.0f);"
+        " return r; }",
+    ),
+    "v_mul_dx9_zero_f32_vop2": (
+        "float32_t",
+        "[](auto a, auto b) {"
+        " auto r = a * b;"
+        " util::stdx::where(a == 0.0f || b == 0.0f, r) = util::native<float32_t>(0.0f);"
+        " return r; }",
+    ),
     # --- uint32 (wrap-around / bitwise, bit-identical to scalar body) ---
     "v_add_u32_vop2": ("uint32_t", "std::plus<>{}"),
     "v_sub_u32_vop2": ("uint32_t", "std::minus<>{}"),
@@ -1560,6 +1580,12 @@ SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
     "v_fma_f32_vop3": "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }",
     "v_mad_f32_vop3": "[](auto a, auto b, auto c) { return a * b + c; }",
     "v_mad_legacy_f32_vop3": "[](auto a, auto b, auto c) { return a * b + c; }",
+    # v_fma_dx9_zero_f32: the scalar body uses plain std::fma without any
+    # zero-killing semantics — DX9 zero rules are NOT actually applied in
+    # the generated body (verified in execute_shared.h). Alias of fma.
+    "v_fma_dx9_zero_f32_vop3": (
+        "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }"
+    ),
     # v_div_fixup_f32: per-AMD-spec `else if` cascade selecting the result
     # among NaN/Inf/zero copysign cases. Lives as a helper in simd_glue.h
     # (div_fixup_f32_simd) — bit-exact match to the scalar body's predicate
@@ -1598,6 +1624,11 @@ SIMD_VOP3_TERNARY_FP64: dict[str, str] = {
 SIMD_VOP3_FMAC_FP32: dict[str, str] = {
     "v_fmac_f32_vop3": "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }",
     "v_mac_f32_vop3": "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }",
+    # v_fmac_dx9_zero_f32: scalar body uses plain std::fma — DX9 zero
+    # semantics NOT applied (verified). Alias of fmac.
+    "v_fmac_dx9_zero_f32_vop3": (
+        "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }"
+    ),
 }
 SIMD_VOP3_FMAC_FP16: dict[str, str] = {
     "v_fmac_f16_vop3": "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }",
