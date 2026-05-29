@@ -313,8 +313,8 @@ hipError_t Graph::ScheduleNodesIntoBatches() {
     return hipSuccess;
   }
 
-  // Find execution paths hierarchically (new approach)
-  auto hierarchical_paths = FindExecutionPathsHierarchical();
+  // Find execution paths via topological traversal (handles fork-join correctly)
+  auto hierarchical_paths = FindExecutionPathsTopological();
   if (hierarchical_paths.paths.empty()) {
     // If we have nodes but no paths, this indicates an invalid graph (likely a cycle)
     ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
@@ -331,18 +331,19 @@ hipError_t Graph::ScheduleNodesIntoBatches() {
     return hipErrorInvalidValue;
   }
 
-  // Verify that every graph node was assigned to a segment. The iterative DFS
-  // in FindPathsDFS uses a shared mutable current_path across stack frames; for
-  // fork-join graphs this can silently drop event/wait nodes that carry cache-
-  // coherency ordering. Missing nodes are never dispatched as AQL packets, so
-  // the GPU sees stale memory and produces wrong results. Fall back to the
-  // classic scheduling path which handles fork-join graphs correctly.
+  // Safety net: verify that every graph node was assigned to a segment.
+  // FindExecutionPathsTopological() should guarantee full coverage via Kahn's
+  // BFS, but if a cycle or other anomaly causes nodes to be skipped, fall back
+  // to the classic scheduling path rather than silently producing wrong results.
   if (node_to_segment_id_.size() < static_cast<size_t>(GetNodeCount()) &&
       DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING != 2) {
-    ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-            "[hipGraph] Segment DFS missed %zu/%zu node(s) - falling back to classic path",
+    ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+            "[hipGraph] Topological traversal missed %zu/%zu node(s) - "
+            "graph likely contains a cycle; falling back to classic path",
             static_cast<size_t>(GetNodeCount()) - node_to_segment_id_.size(),
             static_cast<size_t>(GetNodeCount()));
+    // hipErrorNotReady is used here as an internal sentinel: ScheduleNodes()
+    // catches it and falls back to the classic (non-segment) scheduling path.
     return hipErrorNotReady;
   }
 
@@ -672,181 +673,92 @@ void Graph::CalculateSegmentTopoDependencyLevels() {
 }
 
 // ================================================================================================
-hip::Graph::GraphExecutionPaths Graph::FindExecutionPathsHierarchical() {
+hip::Graph::GraphExecutionPaths Graph::FindExecutionPathsTopological() {
   hip::Graph::GraphExecutionPaths graph_paths;
   graph_paths.graph_ptr = this;
 
-  // Find all root nodes (nodes with no dependencies)
-  const auto& root_nodes = GetRootNodes();
-
-  std::unordered_set<unsigned int> visited;
-  for (const auto& root : root_nodes) {
-    // For each root, find all possible paths starting from it
-    std::vector<Node> current_path;
-    FindPathsDFS(root, current_path, visited, graph_paths);
-  }
-  return graph_paths;
-}
-
-// ================================================================================================
-void Graph::FindPathsDFS(Node start, std::vector<Node>& current_path,
-                         std::unordered_set<unsigned int>& visited,
-                         hip::Graph::GraphExecutionPaths& graph_paths) {
-  // Lambda to save current path as a HierarchicalPath
-  auto savePath = [&graph_paths](std::vector<Node> path, int device_id,
-                                  Node child_node = nullptr, int child_index = -1) {
+  // Helper: emit a non-empty accumulated segment into graph_paths.
+  auto flushSegment = [&](std::vector<Node>& seg) {
+    if (seg.empty()) return;
     hip::Graph::HierarchicalPath h_path;
-    h_path.nodes = std::move(path);
-    h_path.device_id = device_id;
-    h_path.child_graph_node = child_node;
-    h_path.child_graph_paths_index = child_index;
+    h_path.device_id = seg.front()->GetDeviceId();
+    h_path.nodes = std::move(seg);
     graph_paths.paths.push_back(std::move(h_path));
+    seg.clear();
   };
 
-  if (!start) return;
+  // Kahn's BFS topological traversal — identical structure to TopologicalOrder()
+  // but used here to assign nodes to segments.  Every node is visited exactly
+  // once, in an order where all predecessors have already been processed, so
+  // fork-join diamonds are handled correctly.
+  std::queue<Node> q;
+  std::unordered_map<Node, int> in_degree;
+  in_degree.reserve(vertices_.size());
+  for (auto* v : vertices_) {
+    in_degree[v] = static_cast<int>(v->GetDependencies().size());
+    if (in_degree[v] == 0) q.push(v);
+  }
 
-  // Stack of nodes to process.
-  std::vector<Node> st;
-  st.push_back(start);
+  std::vector<Node> current_seg;
 
-  while (!st.empty()) {
-    Node node = st.back();
-    st.pop_back();
-    if (!node) continue;
+  while (!q.empty()) {
+    Node node = q.front();
+    q.pop();
 
-    // Check if already visited
-    if (visited.find(node->GetID()) != visited.end()) {
-      // Save any remaining path (treat visited as a branch end)
-      if (!current_path.empty()) {
-        int dev = current_path.back()->GetDeviceId();
-        savePath(std::move(current_path), dev);
-        current_path.clear();
-      }
-      continue;
+    const auto& edges = node->GetEdges();
+    const auto& deps  = node->GetDependencies();
+
+    bool is_fork = edges.size() > 1;
+    bool is_join = deps.size() > 1;
+
+    // A device change always forces a segment boundary before this node.
+    bool device_changed = !current_seg.empty() &&
+                          current_seg.back()->GetDeviceId() != node->GetDeviceId();
+
+    if (device_changed || is_join) {
+      flushSegment(current_seg);
     }
 
-    // Mark regular nodes as visited
-    visited.insert(node->GetID());
-
-    // Check if device ID changed from previous node in path
-    bool device_changed = false;
-    int current_device_id = node->GetDeviceId();
-    if (!current_path.empty()) {
-      int prev_device_id = current_path.back()->GetDeviceId();
-      if (prev_device_id != current_device_id) {
-        device_changed = true;
-        // Save current path before device change
-        savePath(std::move(current_path), prev_device_id);
-        current_path.clear();
-      }
-    }
-
-    // Handle child graph nodes specially
+    // Child-graph nodes are always their own segment (they expand recursively).
     if (node->GetType() == hipGraphNodeTypeGraph) {
-      // Save path before child graph node (if any)
-      if (!current_path.empty()) {
-        int dev = current_path.back()->GetDeviceId();
-        savePath(std::move(current_path), dev);
-        current_path.clear();
-      }
+      flushSegment(current_seg);
 
-      // Get the child graph and recursively process it
-      auto childGraphNode = reinterpret_cast<hip::ChildGraphNode*>(node);
-      auto childGraph = childGraphNode->GetChildGraph();
+      auto* childGraphNode = reinterpret_cast<hip::ChildGraphNode*>(node);
+      auto* childGraph     = childGraphNode->GetChildGraph();
 
       if (childGraph != nullptr) {
-        // Create a new GraphExecutionPaths for this child graph
-        hip::Graph::GraphExecutionPaths child_graph_exec_paths;
-        child_graph_exec_paths.graph_ptr = childGraph;
+        hip::Graph::GraphExecutionPaths child_paths =
+            childGraph->FindExecutionPathsTopological();
 
-        // Find all root nodes in the child graph
-        const auto& child_root_nodes = childGraph->GetRootNodes();
-        std::unordered_set<unsigned int> child_visited;
+        int child_index = static_cast<int>(graph_paths.child_graph_paths.size());
+        graph_paths.child_graph_paths.push_back(std::move(child_paths));
 
-        for (const auto& child_root : child_root_nodes) {
-          std::vector<Node> child_current_path;
-          childGraph->FindPathsDFS(child_root, child_current_path, child_visited,
-                                   child_graph_exec_paths);
-        }
-
-        // Store the child graph paths
-        int child_graph_index = static_cast<int>(graph_paths.child_graph_paths.size());
-        graph_paths.child_graph_paths.push_back(std::move(child_graph_exec_paths));
-
-        // Create a path containing just the child graph node
-        std::vector<Node> child_node_path = {childGraphNode};
-        savePath(child_node_path, current_device_id, childGraphNode, child_graph_index);
+        hip::Graph::HierarchicalPath h_path;
+        h_path.device_id              = node->GetDeviceId();
+        h_path.nodes                  = {childGraphNode};
+        h_path.child_graph_node       = childGraphNode;
+        h_path.child_graph_paths_index = child_index;
+        graph_paths.paths.push_back(std::move(h_path));
       }
-
-      // Clear current path and continue with edges from the child graph node
-      current_path.clear();
-      const auto& edges = node->GetEdges();
-      for (int i = static_cast<int>(edges.size()) - 1; i >= 0; --i) {
-        st.push_back(edges[static_cast<size_t>(i)]);
-      }
-
-      continue;
+    } else {
+      current_seg.push_back(node);
     }
 
-    // Regular node - add to current path
-    current_path.push_back(node);
-
-    // Edges are out degrees, Dependencies are in degrees
-    const auto& edges = node->GetEdges();
-    const auto& dependencies = node->GetDependencies();
-
-    // Check if this is a fork node (multiple outgoing edges)
-    bool is_fork = edges.size() > 1;
-    // Check if this is a join node (multiple incoming dependencies)
-    bool is_join = dependencies.size() > 1;
-
-    if (is_fork || is_join) {
-      // Save current path as a separate segment
-      if (!current_path.empty()) {
-        Node saved_join_node = nullptr;
-
-        // For join nodes, save path without the join node itself
-        // For fork nodes, save the complete path
-        if (is_join) {
-          saved_join_node = current_path.back();
-          current_path.pop_back();
-        }
-
-        if (!current_path.empty()) {
-          int dev = current_path.back()->GetDeviceId();
-          savePath(current_path, dev);
-        }
-        current_path.clear();
-
-        // For nodes that are both fork and join, save them as their own segment
-        if (saved_join_node != nullptr && is_fork) {
-          std::vector<Node> fork_join_segment = {saved_join_node};
-          savePath(std::move(fork_join_segment), saved_join_node->GetDeviceId());
-        }
-
-        // Put the join node back in current_path for further traversal
-        // But not if it's also a fork node, because we'll traverse branches separately
-        if (saved_join_node != nullptr && !is_fork) {
-          current_path.push_back(saved_join_node);
-        }
-      }
-
-      // Traverse each branch until it hits a join
-      for (int i = static_cast<int>(edges.size()) - 1; i >= 0; --i) {
-        st.push_back(edges[static_cast<size_t>(i)]);
-      }
-    } else if (edges.size() == 1) {
-      // Single edge - continue on same path
-      st.push_back(edges[0]);
+    // A fork or a leaf always closes the current segment.
+    if (is_fork || edges.empty()) {
+      flushSegment(current_seg);
     }
 
-    // Save any remaining path (handles leaf nodes and leaf join nodes)
-    if (!current_path.empty() && edges.size() == 0) {
-      int dev = current_path.back()->GetDeviceId();
-      savePath(std::move(current_path), dev);
-      current_path.clear();
+    // Enqueue successors whose in-degree reaches zero.
+    for (auto* edge : edges) {
+      if (--in_degree[edge] == 0) q.push(edge);
     }
   }
+
+  // Flush any trailing linear tail.
+  flushSegment(current_seg);
+
+  return graph_paths;
 }
 
 // ================================================================================================

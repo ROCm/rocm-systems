@@ -723,15 +723,12 @@ class Graph {
   //! Schedules nodes into batches for optimized execution
   hipError_t ScheduleNodesIntoBatches();
 
-  //! Find execution paths hierarchically, keeping child graphs separate
-  GraphExecutionPaths FindExecutionPathsHierarchical();
+  //! Find execution paths using a topological (Kahn's BFS) traversal.
+  //! Correctly handles fork-join graphs: every node is visited exactly once
+  //! after all its predecessors, so no node is ever silently dropped.
+  GraphExecutionPaths FindExecutionPathsTopological();
 
-  //! Find all paths from a node using an explicit DFS over a node stack, with
-  //! hierarchical handling of child graphs (only child graphs recurse)
-  void FindPathsDFS(Node node, std::vector<Node>& current_path,
-                    std::unordered_set<unsigned int>& visited, GraphExecutionPaths& graph_paths);
-
-  //! Create segments from hierarchical execution paths
+//! Create segments from hierarchical execution paths
   void CreateSegmentsFromPaths(const GraphExecutionPaths& exec_paths);
 
   //! Resolve dependencies between segments
