@@ -115,7 +115,7 @@ class MemoryRegion : public Checked<0x9C961F19EE175BB3> {
 
   typedef uint32_t AllocateFlags;
 
-  virtual hsa_status_t Allocate(size_t& size, AllocateFlags alloc_flags, void** address, /*uint64_t *mmap_offset,*/ int agent_node_id) const = 0;
+  virtual hsa_status_t Allocate(size_t& size, AllocateFlags alloc_flags, void** address, int agent_node_id) const = 0;
 
   virtual hsa_status_t Free(void* address, size_t size) const = 0;
 
