@@ -134,7 +134,6 @@ jobs:
           echo "code_name=${CODE_NAME}" >> $GITHUB_OUTPUT
 
       - name: Install amdgpu and dependencies
-        if: false
         shell: bash
         run: |
           ROCM_MAJOR=$(echo ${{ env.ROCM_VERSION }} | sed 's/\./ /g' | awk '{print $1}')
@@ -147,7 +146,6 @@ jobs:
           echo "✅ amdgpu and ROCm dependencies Installed!"
 
       - name: Install MPI
-        if: false
         run: |
           apt install -y libopenmpi-dev
           echo "✅ MPI Installed!"
@@ -164,9 +162,9 @@ jobs:
         if: true
         run: |
           set -e
-          mkdir ${{ env.ROCM_PATH }}
           TARBALL_ROCM_VERSION=$(ls /opt/*.tar.gz | grep -Eo '*([0-9]+\.[0-9]+\.[0-9]+)*')
-          tar -xf ${{ env.ROCM_PATH }}-${TARBALL_ROCM_VERSION}-multiarch.tar.gz -C ${{ env.ROCM_PATH }}
+          tar -xf ${{ env.ROCM_PATH }}-${TARBALL_ROCM_VERSION}-multiarch.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
+          ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
           echo "ROCm installed to: ${{ env.ROCM_PATH }}"
           echo "✅ ROCm Installation Complete!"
 
