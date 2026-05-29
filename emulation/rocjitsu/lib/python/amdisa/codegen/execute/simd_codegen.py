@@ -803,6 +803,26 @@ SIMD_VOP3_DIV_FMAS_FP64: set[str] = {
     "v_div_fmas_f64_vop3",
 }
 
+# VOP3 sdst-enc carry forms (no-carry-in subset). Same per-lane carry/borrow
+# functor as the VOP2 carry family — the glue layer
+# (try_execute_binary_vop3_carry_simd) handles the VOP3 src1/sdst differences
+# (the functor is identical). The cin-form ops (addc_co / subb_co / subbrev_co
+# on CDNA4, plus add/sub/subrev_co_ci on RDNA3+) read carry-in from src2 / VCC
+# and need a different glue shape that loads cin word per call — deferred.
+SIMD_VOP3_CARRY: dict[str, str] = {
+    "v_add_co_u32_vop3": (
+        "[](auto a, auto b, auto) {"
+        " auto s = a + b;"
+        " return make_simd_carry(s, s < a); }"
+    ),
+    "v_sub_co_u32_vop3": (
+        "[](auto a, auto b, auto) { return make_simd_carry(a - b, a < b); }"
+    ),
+    "v_subrev_co_u32_vop3": (
+        "[](auto a, auto b, auto) { return make_simd_carry(b - a, b < a); }"
+    ),
+}
+
 # VOP3 v_mov_b16 — RDNA3+ only. Reads low 16 of src0 as an integer, treats it
 # as a float for omod (*2 / *4 / *0.5) + clamp ([0, 1]), then truncate-casts
 # back through int32 and masks 16. No abs/neg/op_sel; functorless / fixed-op.
@@ -1714,6 +1734,10 @@ def simd_probe_line(template_name: str) -> str | None:
         return "  ROCJITSU_TRY_SIMD_DIV_FMAS_VOP3_FP64();"
     if template_name in SIMD_VOP3_MOV_B16:
         return "  ROCJITSU_TRY_SIMD_VOP3_MOV_B16();"
+    # VOP3 sdst-enc carry forms.
+    specv3carry = SIMD_VOP3_CARRY.get(template_name)
+    if specv3carry is not None:
+        return f"  ROCJITSU_TRY_SIMD_VOP3_CARRY({specv3carry});"
     # VOP3P fma_mix / mad_mix (six ops, three destination shapes). Same body
     # for all; the routing picks the matching glue specialization.
     if template_name in SIMD_VOP3P_FMA_MIX_F32:

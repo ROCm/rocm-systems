@@ -83,6 +83,7 @@ add_executable(
     vop3_div_helpers_simd_correctness_test.cpp
     vop3_b16_rdna_simd_correctness_test.cpp
     vop3p_fma_mix_simd_correctness_test.cpp
+    vop3_carry_simd_correctness_test.cpp
     vop3_ternary_fp_simd_correctness_test.cpp
     vop3_fmac_simd_correctness_test.cpp
     vop3_ldexp_simd_correctness_test.cpp
