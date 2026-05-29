@@ -44,7 +44,7 @@ private:
     // @brief Return a Type 3 PM4 packet header
     static uint32_t MakePacket3Header(uint32_t opcode, size_t packet_size)
     {
-        uint32_t count  = packet_size / sizeof(uint32_t) - 2;
+        uint32_t count  = packet_size / sizeof(uint32_t) - PACKET3_COUNT_ADJUSTMENT;
         uint32_t header = PACKET3(opcode, count);
         return header;
     }
@@ -215,9 +215,10 @@ private:
                 if(chiplet_id == CHIPLET_XCD0 || chiplet_id == CHIPLET_XCD4)
                 {
                     // bit32: 1 = Remote DIE
-                    dword5 |= 0x40000000;
+                    dword5 |= COPY_DATA_REMOTE_DIE_BIT;
                     // bit34-39: 1 = AID0; 2 = AID1
-                    dword6 = chiplet_id == CHIPLET_XCD0 ? 1 : 2;
+                    dword6 = chiplet_id == CHIPLET_XCD0 ? COPY_DATA_DIE_ID_AID0
+                                                         : COPY_DATA_DIE_ID_AID1;
                 }
         }
 
@@ -296,9 +297,10 @@ private:
                 if(chiplet_id == CHIPLET_XCD0 || chiplet_id == CHIPLET_XCD4)
                 {
                     // bit32: 1 = Remote DIE
-                    dword3 |= 0x40000000;
+                    dword3 |= COPY_DATA_REMOTE_DIE_BIT;
                     // bit34-39: 1 = AID0; 2 = AID1
-                    dword4 = chiplet_id == CHIPLET_XCD0 ? 1 : 2;
+                    dword4 = chiplet_id == CHIPLET_XCD0 ? COPY_DATA_DIE_ID_AID0
+                                                         : COPY_DATA_DIE_ID_AID1;
                 }
         }
 
@@ -309,6 +311,15 @@ private:
     }
 
     static const bool enable_copy_data_remote_mode_ = false;
+
+    static constexpr uint32_t PACKET3_COUNT_ADJUSTMENT  = 2;
+    static constexpr uint32_t COPY_DATA_REMOTE_DIE_BIT  = 0x40000000;
+    static constexpr uint32_t COPY_DATA_DIE_ID_AID0     = 1;
+    static constexpr uint32_t COPY_DATA_DIE_ID_AID1     = 2;
+    static constexpr uint32_t DWORD_ALIGN_MASK          = 0x3;
+    static constexpr uint32_t DW_BOTH_MASK              = 0x3;
+    static constexpr uint32_t DW0_MASK                  = 0x1;
+    static constexpr uint32_t DW1_MASK                  = 0x2;
 
 public:
     Gfx12CmdBuilder(const reg_base_offset_table* _table)
@@ -362,31 +373,36 @@ public:
     void BuildCacheFlushPacket(CmdBuffer* cmdbuf, size_t addr, size_t size)
     {
         // Initialize the command header
+        static constexpr uint32_t ALIGN_SHIFT     = 8;
+        static constexpr uint32_t ALIGN_SIZE      = 256;
+        static constexpr uint32_t ALIGN_MASK      = 0xFF;
+        static constexpr uint32_t POLL_INTERVAL   = 0x10;
+        static constexpr uint32_t GCR_SEQ_FORWARD = 0x00010000L;
+        static constexpr uint32_t GCR_SEQ_MASK    = 0x00030000L;
+        static constexpr uint32_t GCR_GL2_WB_MASK = 0x00008000L;
+
         uint32_t header = MakePacket3Header(PACKET3_ACQUIRE_MEM, 8 * sizeof(uint32_t));
 
         // Specify the base address of memory to invalidate.
         // The address must be 256 byte aligned.
-        uint32_t dword5 = PACKET3_ACQUIRE_MEM__COHER_BASE_LO((uint32_t(addr >> 8)));
+        uint32_t dword5 = PACKET3_ACQUIRE_MEM__COHER_BASE_LO((uint32_t(addr >> ALIGN_SHIFT)));
         uint32_t dword6 = PACKET3_ACQUIRE_MEM__COHER_BASE_HI((uint8_t(addr >> 40)));
 
         // Specify the size of memory to invalidate.
-        // Size is specified in terms of 256 byte chunks. A coher_size
-        // of 0xFFFFFFFF actually specified 0xFFFFFFFF00 (40 bits)
-        // of memory. The field coher_size_hi specifies memory from
-        // bits 40-64 for a total of 256 TB.
-        size            = ((addr % 256 + size) >> 8) + ((size + 0xFF) >> 8) - (size >> 8);
+        // Size is specified in terms of 256 byte chunks.
+        size =
+            ((addr % ALIGN_SIZE + size) >> ALIGN_SHIFT) + ((size + ALIGN_MASK) >> ALIGN_SHIFT) -
+            (size >> ALIGN_SHIFT);
         uint32_t dword3 = PACKET3_ACQUIRE_MEM__COHER_SIZE((uint32_t(size)));
         uint32_t dword4 = PACKET3_ACQUIRE_MEM__COHER_SIZE_HI((uint32_t(size >> 32)));
 
-        // Specify the poll interval for determing if operation is complete
-        uint32_t dword7 = PACKET3_ACQUIRE_MEM__POLL_INTERVAL(0x10);
+        // Specify the poll interval for determining if operation is complete
+        uint32_t dword7 = PACKET3_ACQUIRE_MEM__POLL_INTERVAL(POLL_INTERVAL);
 
         // Program GCR Control Register. Initialize L2 Cache flush
         // for Non-Coherent memory blocks
-        // uint32_t dword8 = PACKET3_ACQUIRE_MEM__GCR_CNTL(((GCR_CNTL__SEQ_FORWARD &
-        // GCR_CNTL__SEQ_MASK) | GCR_CNTL__GL2_WB_MASK));
         uint32_t dword8 =
-            PACKET3_ACQUIRE_MEM__GCR_CNTL(((0x00010000L & 0x00030000L) | 0x00008000L));
+            PACKET3_ACQUIRE_MEM__GCR_CNTL(((GCR_SEQ_FORWARD & GCR_SEQ_MASK) | GCR_GL2_WB_MASK));
 
         // build the pm4mec_acquire_mem command which has 8 Dwords
         uint32_t pm4mec_acquire_mem_cmd[8] = {
@@ -405,7 +421,8 @@ public:
         // Initialize the command header
         uint32_t header = MakePacket3Header(PACKET3_WAIT_REG_MEM, 7 * sizeof(uint32_t));
 
-        uint32_t dword7 = PACKET3_WAIT_REG_MEM__POLL_INTERVAL(0x04);
+        static constexpr uint32_t POLL_INTERVAL = 0x04;
+        uint32_t dword7 = PACKET3_WAIT_REG_MEM__POLL_INTERVAL(POLL_INTERVAL);
         uint32_t dword2_operation =
             PACKET3_WAIT_REG_MEM__OPERATION(PACKET3_WAIT_REG_MEM__OPERATION__WAIT_REG_MEM);
 
@@ -436,7 +453,8 @@ public:
         uint32_t dword4 = 0;
         if(mem_space)
         {
-            assert(!(wait_addr & 0x3) && "WaitRegMem address must be 4 byte aligned");
+            assert(!(wait_addr & DWORD_ALIGN_MASK) &&
+                   "WaitRegMem address must be 4 byte aligned");
             dword3 = PACKET3_WAIT_REG_MEM__MEM_POLL_ADDR_LO((Low32(wait_addr) >> 2));
             dword4 = PACKET3_WAIT_REG_MEM__MEM_POLL_ADDR_HI(High32(wait_addr));
         }
@@ -522,8 +540,9 @@ public:
                                         const uint32_t* dst_addr,
                                         uint32_t        dw_mask)
     {
-        if(dw_mask == 0x3 && src_reg_addr_hi == src_reg_addr_lo + 1 &&
-           (reinterpret_cast<std::uintptr_t>(dst_addr) % 8) == 0)
+        static constexpr uint32_t QWORD_ALIGN = 8;
+        if(dw_mask == DW_BOTH_MASK && src_reg_addr_hi == src_reg_addr_lo + 1 &&
+           (reinterpret_cast<std::uintptr_t>(dst_addr) % QWORD_ALIGN) == 0)
         {
             BuildCopyRegDataPacket(cmdbuf,
                                    src_reg_addr_lo,
@@ -534,7 +553,7 @@ public:
         }
 
         uint32_t read_counter = 0;
-        if(dw_mask & 0x1)
+        if(dw_mask & DW0_MASK)
         {
             BuildCopyRegDataPacket(cmdbuf,
                                    src_reg_addr_lo,
@@ -543,7 +562,7 @@ public:
                                    false);
             ++read_counter;
         }
-        if(dw_mask & 0x2)
+        if(dw_mask & DW1_MASK)
         {
             BuildCopyRegDataPacket(cmdbuf,
                                    src_reg_addr_hi,
@@ -564,7 +583,7 @@ public:
                                                    bool            copy_from_aid = true) override
     {
         uint32_t read_counter = 0;
-        if(dw_mask & 0x1)
+        if(dw_mask & DW0_MASK)
         {
             BuildCopyRegDataPacketImpl(cmdbuf,
                                        get_addr(reg_lo),
@@ -575,7 +594,7 @@ public:
                                        copy_from_aid);
             ++read_counter;
         }
-        if(dw_mask & 0x2)
+        if(dw_mask & DW1_MASK)
         {
             BuildCopyRegDataPacketImpl(cmdbuf,
                                        get_addr(reg_hi),
@@ -648,7 +667,8 @@ public:
     void BuildIndirectBufferCmd(CmdBuffer* cmdbuf, const void* cmd_addr, std::size_t cmd_size)
     {
         // Verify the address is 4-byte aligned
-        assert(!(uintptr_t(cmd_addr) & 0x3) && "IndirectBuffer address must be 4 byte aligned");
+        assert(!(uintptr_t(cmd_addr) & DWORD_ALIGN_MASK) &&
+               "IndirectBuffer address must be 4 byte aligned");
 
         // Initialize the command header
         uint32_t header = MakePacket3Header(PACKET3_INDIRECT_BUFFER, 4 * sizeof(uint32_t));
@@ -691,7 +711,8 @@ public:
         uint32_t dword2 =
             PACKET3_ATOMIC_MEM__COMMAND(PACKET3_ATOMIC_MEM__COMMAND__LOOP_UNTIL_COMPARE_SATISFIED) |
             PACKET3_ATOMIC_MEM__ATOMIC(GL2_OP_ATOMIC_CMPSWAP_RTN_32);
-        uint32_t dword9 = PACKET3_ATOMIC_MEM__LOOP_INTERVAL(16);
+        static constexpr uint32_t LOOP_INTERVAL = 16;
+        uint32_t dword9 = PACKET3_ATOMIC_MEM__LOOP_INTERVAL(LOOP_INTERVAL);
 
         uint32_t dword3 = PACKET3_ATOMIC_MEM__ADDR_LO(uint32_t(addr));
         uint32_t dword4 = PACKET3_ATOMIC_MEM__ADDR_HI((addr >> 32));
@@ -730,7 +751,8 @@ public:
         prime.bitfields2.cache_perm = cache_perm__mec_prime_utcl2__write;
         prime.bitfields2.prime_mode = prime_mode__mec_prime_utcl2__dont_wait_for_xack;
 
-        prime.bitfields5.requested_pages = 15;
+        static constexpr uint32_t REQUESTED_PAGES = 15;
+        prime.bitfields5.requested_pages = REQUESTED_PAGES;
         prime.addr_lo                    = (uint32_t) addr;
         prime.addr_hi                    = addr >> 32;
 #endif
@@ -758,8 +780,8 @@ public:
                                     uint32_t        mask)
     {
         BuildCopyCounterDataPacket(cmd,
-                                   (mask & 1 << 0) ? get_addr(reg_lo) : 0,
-                                   (mask & 1 << 1) ? get_addr(reg_hi) : 0,
+                                   (mask & DW0_MASK) ? get_addr(reg_lo) : 0,
+                                   (mask & DW1_MASK) ? get_addr(reg_hi) : 0,
                                    dst_addr,
                                    mask);
     }
