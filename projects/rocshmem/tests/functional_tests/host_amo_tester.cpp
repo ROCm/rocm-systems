@@ -44,36 +44,28 @@ void HostAMOTester::execute() {
   resetBuffers(sizeof(int));
   rocshmem_barrier_all();
 
-  rocshmem_ctx_t ctx;
-  rocshmem_ctx_create(0, &ctx);
-
   auto wall_start = std::chrono::high_resolution_clock::now();
 
   if (myid == 0) {
     for (int i = 0; i < num_loops + args.skip; i++) {
       switch (_type) {
         case HostAMOFAddTestType:
-          // PE 0 atomically adds 1 to PE 1's dest_
-          rocshmem_ctx_int_atomic_fetch_add(ctx, dest_, 1, /*pe=*/1);
+          rocshmem_int_atomic_fetch_add(dest_, 1, /*pe=*/1);
           break;
         case HostAMOFCswapTestType:
-          // PE 0 CAS: swap dest_ from i to i+1; succeeds each loop
-          rocshmem_ctx_int_atomic_compare_swap(ctx, dest_, i, i + 1, /*pe=*/1);
+          rocshmem_int_atomic_compare_swap(dest_, i, i + 1, /*pe=*/1);
           break;
         case HostAMOFenceQuietTestType:
-          // Verify fence and quiet do not crash in non-MPI IPC mode
-          rocshmem_ctx_int_atomic_fetch_add(ctx, dest_, 1, /*pe=*/1);
-          rocshmem_ctx_fence(ctx);
-          rocshmem_ctx_quiet(ctx);
+          rocshmem_int_atomic_fetch_add(dest_, 1, /*pe=*/1);
+          rocshmem_fence();
+          rocshmem_quiet();
           break;
         default:
           break;
       }
     }
-    rocshmem_ctx_quiet(ctx);
+    rocshmem_quiet();
   }
-
-  rocshmem_ctx_destroy(ctx);
 
   rocshmem_barrier_all();
 
@@ -97,7 +89,6 @@ void HostAMOTester::verifyResults([[maybe_unused]] uint64_t size) {
 
   if (myid != 1) return;
 
-  // All three test types perform (num_loops + args.skip) additions of 1 to dest_ on PE 1
   int expected = num_loops + args.skip;
 
   if (*dest_ != expected) {
