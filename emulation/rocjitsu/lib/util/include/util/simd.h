@@ -9,7 +9,6 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <type_traits>
 
 #if __has_include(<experimental/simd>)
@@ -31,14 +30,8 @@ inline constexpr bool has_stdx_simd =
 
 /// Per-thread switch that callers check before taking the SIMD fast
 /// path. Used by tests/benchmarks to A/B SIMD vs scalar in one process.
-/// Initial value seeded once per thread from `RJ_FORCE_SCALAR` env var
-/// (treats unset/empty/"0" as false, any other value as true), so e2e
-/// runs can force the scalar codepath without recompiling.
 inline bool &force_scalar() {
-  static thread_local bool flag = [] {
-    const char *e = std::getenv("RJ_FORCE_SCALAR");
-    return e && e[0] && !(e[0] == '0' && e[1] == '\0');
-  }();
+  static thread_local bool flag = false;
   return flag;
 }
 
