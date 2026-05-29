@@ -1496,6 +1496,67 @@
           "test_filter": "CeFaultInjTest.MultipleFaultsArmedAndCleared"
         }
       ]
+    },
+
+    "net_ib_initialization_cast": {
+      "extends": "net_ib_initialization",
+      "env_variables": { "NCCL_NET": "ib-cast" }
+    },
+    "net_ib_properties_cast": {
+      "extends": "net_ib_properties",
+      "env_variables": { "NCCL_NET": "ib-cast" }
+    },
+    "net_ib_connection_cast": {
+      "extends": "net_ib_connection",
+      "env_variables": { "NCCL_NET": "ib-cast" }
+    },
+    "net_ib_memory_cast": {
+      "extends": "net_ib_memory",
+      "env_variables": { "NCCL_NET": "ib-cast" }
+    },
+    "net_ib_transfer_cast": {
+      "extends": "net_ib_transfer",
+      "env_variables": { "NCCL_NET": "ib-cast" }
+    },
+    "net_ib_multirecv_cast": {
+      "extends": "net_ib_multirecv",
+      "env_variables": { "NCCL_NET": "ib-cast" }
+    },
+    "net_ib_cts_stress_cast": {
+      "extends": "net_ib_cts_stress",
+      "env_variables": { "NCCL_NET": "ib-cast" }
+    },
+    "net_ib_branch_coverage_cast": {
+      "extends": "net_ib_branch_coverage",
+      "env_variables": { "NCCL_NET": "ib-cast" }
+    },
+    "net_ib_stress_cast": {
+      "extends": "net_ib_stress",
+      "env_variables": { "NCCL_NET": "ib-cast" }
+    },
+    "net_ib_stress_4rank_cast": {
+      "extends": "net_ib_stress_4rank",
+      "env_variables": { "NCCL_NET": "ib-cast" }
+    },
+    "net_ib_stress_multi_qp_split_cast": {
+      "extends": "net_ib_stress_multi_qp_split",
+      "env_variables": { "NCCL_NET": "ib-cast" }
+    },
+    "net_ib_stress_multi_qp_nosplit_cast": {
+      "extends": "net_ib_stress_multi_qp_nosplit",
+      "env_variables": { "NCCL_NET": "ib-cast" }
+    },
+    "net_ib_stress_multi_qp_fanin_cast": {
+      "extends": "net_ib_stress_multi_qp_fanin",
+      "env_variables": { "NCCL_NET": "ib-cast" }
+    },
+    "net_ib_stress_ar_cast": {
+      "extends": "net_ib_stress_ar",
+      "env_variables": { "NCCL_NET": "ib-cast" }
+    },
+    "net_ib_stress_inline_cast": {
+      "extends": "net_ib_stress_inline",
+      "env_variables": { "NCCL_NET": "ib-cast" }
     }
   },
   "test_suites": [
@@ -1761,6 +1822,96 @@
       "name": "CE Fault Injection Tests",
       "description": "Per-function error injection for CE code paths (ENABLE_FAULT_INJECTION build). Verifies ncclSystemError propagation and recovery for Init, SyncPrep, and LaunchOp faults.",
       "config": "ce_fault_injection",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Initialization Tests (ib-cast)",
+      "description": "InfiniBand plugin initialization and device enumeration via ib-cast plugin (NCCL_NET=ib-cast)",
+      "config": "net_ib_initialization_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Device Properties (ib-cast)",
+      "description": "InfiniBand device properties via ib-cast plugin (NCCL_NET=ib-cast)",
+      "config": "net_ib_properties_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Connection Setup (ib-cast)",
+      "description": "InfiniBand connection setup via ib-cast plugin (NCCL_NET=ib-cast)",
+      "config": "net_ib_connection_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Memory Registration (ib-cast)",
+      "description": "InfiniBand memory registration via ib-cast plugin (NCCL_NET=ib-cast)",
+      "config": "net_ib_memory_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Data Transfer (ib-cast)",
+      "description": "InfiniBand data transfer via ib-cast plugin (NCCL_NET=ib-cast)",
+      "config": "net_ib_transfer_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - MultiRecv (ib-cast)",
+      "description": "InfiniBand multi-recv path via ib-cast plugin (NCCL_NET=ib-cast)",
+      "config": "net_ib_multirecv_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CTS Depth Stress (ib-cast)",
+      "description": "InfiniBand CTS depth stress via ib-cast plugin (NCCL_NET=ib-cast)",
+      "config": "net_ib_cts_stress_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Branch Coverage (ib-cast)",
+      "description": "InfiniBand branch coverage tests via ib-cast plugin (NCCL_NET=ib-cast)",
+      "config": "net_ib_branch_coverage_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Stress (2-rank) (ib-cast)",
+      "description": "InfiniBand 2-rank stress via ib-cast plugin (NCCL_NET=ib-cast)",
+      "config": "net_ib_stress_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Stress (4-rank) (ib-cast)",
+      "description": "InfiniBand 4-rank stress via ib-cast plugin (NCCL_NET=ib-cast)",
+      "config": "net_ib_stress_4rank_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Stress Multi-QP Split (ib-cast)",
+      "description": "InfiniBand multi-QP split-data stress via ib-cast plugin (NCCL_NET=ib-cast)",
+      "config": "net_ib_stress_multi_qp_split_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Stress Multi-QP NoSplit (ib-cast)",
+      "description": "InfiniBand multi-QP no-split stress via ib-cast plugin (NCCL_NET=ib-cast)",
+      "config": "net_ib_stress_multi_qp_nosplit_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Stress Multi-QP Fan-In (ib-cast)",
+      "description": "InfiniBand multi-QP fan-in stress via ib-cast plugin (NCCL_NET=ib-cast)",
+      "config": "net_ib_stress_multi_qp_fanin_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Stress AR Threshold (ib-cast)",
+      "description": "InfiniBand AR threshold stress via ib-cast plugin (NCCL_NET=ib-cast)",
+      "config": "net_ib_stress_ar_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Stress Inline CTS (ib-cast)",
+      "description": "InfiniBand inline CTS stress via ib-cast plugin (NCCL_NET=ib-cast)",
+      "config": "net_ib_stress_inline_cast",
       "enabled": true
     }
   ]

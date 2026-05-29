@@ -75,8 +75,11 @@ jobs:
               ;;
           esac
 
+      # Only needed for gfx94X, which runs CVS tests directly from this workflow
+      # and can leave orphan MPI/RCCL processes after failures or cancellations.
+      # gfx950 uses the Slurm-backed ci-entrypoint.sh flow, so Slurm handles cleanup.
       - name: Cleanup orphan RCCL/MPI processes
-        if: always()
+        if: ${{ inputs.amdgpu_families == 'gfx94X-dcgpu' }}
         run: |
           echo "Cleaning up orphan processes..."
           pkill -9 -f prterun || true

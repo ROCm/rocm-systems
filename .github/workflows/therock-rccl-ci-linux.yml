@@ -120,7 +120,8 @@ jobs:
 
   therock-test-linux-multi-node:
     name: "Test multi-node"
-    if: ${{ inputs.amdgpu_families == 'gfx94X-dcgpu' }}
+    # TODO: Re-enable gfx94X-dcgpu multi-node tests once the cluster is stable again.
+    if: ${{ inputs.amdgpu_families == 'gfx950-dcgpu' }}
     permissions:
       contents: read
       id-token: write
@@ -129,7 +130,7 @@ jobs:
     with:
       amdgpu_families: ${{ inputs.amdgpu_families }}
       artifact_group: ${{ inputs.artifact_group }}
-      test_runs_on: linux-vultr-mi325-scale-runner # Disabling gfx950 runner till lab move completes
+      test_runs_on: ruby-linux-slurm-scale-runner
       artifact_run_id: ${{ github.run_id }}
 
   therock-test-linux-single-node:

@@ -8,6 +8,8 @@ if(BUILD_TESTS)
   option(OPENMP_TESTS_ENABLED "Enable OpenMP for unit tests" OFF)
   option(ENABLE_MPI_TESTS "Enable MPI-based tests" OFF)
   option(RCCL_HAS_GIN_IB_PROXY "Build the IB Proxy GIN transport-level tests" OFF)
+  option(ENABLE_HOST_API_TESTS "Build the host-API tests" OFF)
+
 
   message("Building rccl unit tests (Installed in /test/rccl-UnitTests)")
   if(ENABLE_MPI_TESTS)
@@ -117,6 +119,9 @@ if(BUILD_TESTS)
     list(APPEND RCCL_COMMON_COMPILE_DEFS MPI_TESTS_ENABLED)
     if(RCCL_HAS_GIN_IB_PROXY)
       list(APPEND RCCL_COMMON_COMPILE_DEFS RCCL_HAS_GIN_IB_PROXY)
+    endif()
+    if(ENABLE_HOST_API_TESTS)
+      list(APPEND RCCL_COMMON_COMPILE_DEFS RCCL_ENABLE_HOST_API_TESTS)
     endif()
   endif()
   list(APPEND RCCL_COMMON_COMPILE_DEFS __HIP_PLATFORM_AMD__)
@@ -303,6 +308,7 @@ if(BUILD_TESTS)
       ImplicitLaunchOrderMPITests.cpp
       CommMPITests.cpp
       RegistrationMPITests.cpp
+      HostApiMPITests.cpp
       mem_manager/SuspendResumeMPITests.cpp
       RevokeMPITests.cpp
       ce/CeMPITests.cpp
