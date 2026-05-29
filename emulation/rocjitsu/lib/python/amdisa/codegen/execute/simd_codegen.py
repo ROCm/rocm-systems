@@ -1139,6 +1139,23 @@ SIMD_VOP3P_PK_TERNARY_INT: dict[str, str] = {
     ),
 }
 
+# VOP3P packed-16 f16 binary family. Each 32-bit lane holds 2 f16 values.
+# Glue widens halves to f32, applies neg/neg_hi (sign-bit toggle), runs the
+# per-half functor in f32, narrows back to f16, packs. No clamp on any
+# pk_*_f16 scalar body (verified line 15109, 15519). NaN-input lanes can
+# diverge in payload (same as the existing f16 ternary slice).
+SIMD_VOP3P_PK_BINARY_FP16: dict[str, str] = {
+    "v_pk_add_f16_vop3p": "[](auto a, auto b) { return a + b; }",
+    "v_pk_mul_f16_vop3p": "[](auto a, auto b) { return a * b; }",
+    "v_pk_max_f16_vop3p": "[](auto a, auto b) { return util::stdx::fmax(a, b); }",
+    "v_pk_min_f16_vop3p": "[](auto a, auto b) { return util::stdx::fmin(a, b); }",
+}
+
+# pk_fma_f16 — 3-source FMA per half. NaN-input payload divergence accepted.
+SIMD_VOP3P_PK_TERNARY_FP16: dict[str, str] = {
+    "v_pk_fma_f16_vop3p": "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }",
+}
+
 
 # --- VOPC compare -> VCC ---------------------------------------------------
 #
@@ -2220,6 +2237,12 @@ def simd_probe_line(template_name: str) -> str | None:
     specpkt = SIMD_VOP3P_PK_TERNARY_INT.get(template_name)
     if specpkt is not None:
         return f"  ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_INT({specpkt});"
+    specpkf16 = SIMD_VOP3P_PK_BINARY_FP16.get(template_name)
+    if specpkf16 is not None:
+        return f"  ROCJITSU_TRY_SIMD_VOP3P_PK_BINARY_FP16({specpkf16});"
+    specpkf16t = SIMD_VOP3P_PK_TERNARY_FP16.get(template_name)
+    if specpkf16t is not None:
+        return f"  ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_FP16({specpkf16t});"
     # VOP3P fma_mix / mad_mix (six ops, three destination shapes). Same body
     # for all; the routing picks the matching glue specialization.
     if template_name in SIMD_VOP3P_FMA_MIX_F32:
