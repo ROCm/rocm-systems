@@ -69,12 +69,12 @@ enum class DriverType {
 };
 
 /// @brief Handle for exported / imported memory.
-struct ShareableHandle {
+struct DriverMemoryHandle {
   uint64_t handle{};
 
   bool IsValid() const { return handle != 0; }
 
-  bool operator()(const ShareableHandle& a, const ShareableHandle& b) const {
+  bool operator()(const DriverMemoryHandle& a, const DriverMemoryHandle& b) const {
     return a.handle > b.handle;
   }
 };
@@ -208,7 +208,7 @@ public:
   /// @param[in] size memory size in bytes
   /// @param[out] dmabuf_fd dma-buf file descriptor
   /// @param[out] offset memory offset in bytes
-  virtual hsa_status_t ExportDMABuf(const core::Agent& agent, const core::ShareableHandle &handle, size_t size, int *dmabuf_fd,
+  virtual hsa_status_t ExportDMABuf(const core::Agent& agent, const core::DriverMemoryHandle &handle, size_t size, int *dmabuf_fd,
                                     size_t *offset) = 0;
 
   /// @brief Imports a memory object via dma-buf.
@@ -220,17 +220,17 @@ public:
   /// @param[out] handle handle to the imported memory
   /// @param[in] mem address of existing buffer, used to bypass import
   virtual hsa_status_t ImportDMABuf(int dmabuf_fd, const core::Agent& agent,
-                                    core::ShareableHandle* handle, size_t *size, void* mem = nullptr) = 0;
+                                    core::DriverMemoryHandle* handle, size_t *size, void* mem = nullptr) = 0;
 
   /// @brief Destroys the handle created during @ref ImportDMABuf.
   ///
   /// @param[in] handle handle of the object to release
-  virtual hsa_status_t DestroyImportedShareableHandle(core::ShareableHandle* handle) = 0;
+  virtual hsa_status_t DestroyImportedShareableHandle(core::DriverMemoryHandle* handle) = 0;
 
-  virtual hsa_status_t ExportFabricHandle(core::Agent& agent, core::ShareableHandle* handle,
+  virtual hsa_status_t ExportFabricHandle(core::Agent& agent, core::DriverMemoryHandle* handle,
                                           size_t size, hsa_fabric_handle_t* fabric_handle) = 0;
   virtual hsa_status_t ImportFabricHandle(core::Agent& agent, hsa_fabric_handle_t fabric_handle,
-                                          core::ShareableHandle* handle, size_t* size) = 0;
+                                          core::DriverMemoryHandle* handle, size_t* size) = 0;
 
   /// @brief Maps the memory associated with the handle.
   ///
@@ -239,7 +239,7 @@ public:
   /// @param[in] offset memory offset in bytes
   /// @param[in] size memory size in bytes
   /// @param[out] perms new permissions
-  virtual hsa_status_t Map(core::ShareableHandle handle, void *mem,
+  virtual hsa_status_t Map(core::DriverMemoryHandle handle, void *mem,
                            size_t offset, size_t size,
                            hsa_access_permission_t perms) = 0;
 
@@ -249,7 +249,7 @@ public:
   /// @param[in] mem virtual address associated with the handle
   /// @param[in] offset memory offset in bytes
   /// @param[in] size memory size in bytes
-  virtual hsa_status_t Unmap(core::ShareableHandle handle, void *mem,
+  virtual hsa_status_t Unmap(core::DriverMemoryHandle handle, void *mem,
                              size_t offset, size_t size) = 0;
 
   /// @brief Maps the virtual address to the physical address and creates a handle to share this
@@ -267,13 +267,13 @@ public:
   /// @param[out] drm_fd_offset offset in @p drm_fd
   virtual hsa_status_t CreateShareableHandle(void* va, void* mem, size_t size,
                                              const core::Agent& agent,
-                                             core::ShareableHandle* handle, uint64_t* offset,
+                                             core::DriverMemoryHandle* handle, uint64_t* offset,
                                              int* drm_fd, uint64_t* drm_fd_offset) = 0;
 
   /// @brief Destroys the handle created during @ref CreateShareableHandle.
   ///
   /// @param[in] handle handle of the object to destroy
-  virtual hsa_status_t DestroyShareableHandle(core::ShareableHandle* handle) = 0;
+  virtual hsa_status_t DestroyShareableHandle(core::DriverMemoryHandle* handle) = 0;
 
   /// @brief Acquire a streaming performance monitor on an agent.
   /// @param[in] preferred_node_id Node ID of the preferred agent.

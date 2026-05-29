@@ -3774,7 +3774,7 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
   if (status == HSA_STATUS_SUCCESS) {
     uint64_t offset;
     uint64_t mmap_offset = 0;
-    core::ShareableHandle shareable_handle = {};
+    core::DriverMemoryHandle shareable_handle = {};
     auto agentOwner = region->owner();
     int dmabuf_fd;
     auto ret = agentOwner->driver().CreateShareableHandle(nullptr, mem, size, *agentOwner, &shareable_handle, &offset, &dmabuf_fd, &mmap_offset);
@@ -4015,7 +4015,7 @@ Runtime::MappedHandle::MappedHandle(MemoryHandle *mem_handle, AddressHandle *add
 }
 
 Runtime::MemoryHandle::MemoryHandle(const MemoryRegion* region, size_t size, uint64_t flags_unused,
-                 ShareableHandle shareable_handle, int dmabuf_fd, uint64_t mmap_offset,
+                 DriverMemoryHandle shareable_handle, int dmabuf_fd, uint64_t mmap_offset,
                  MemoryRegion::AllocateFlags alloc_flag)
           : region(region),
           size(size),

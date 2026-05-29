@@ -467,7 +467,7 @@ hsa_status_t KfdVirtioDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_G
   return HSA_STATUS_ERROR;
 }
 
-hsa_status_t KfdVirtioDriver::ExportDMABuf(const core::Agent& agent, const core::ShareableHandle& handle, size_t size, int* dmabuf_fd, size_t* offset) {
+hsa_status_t KfdVirtioDriver::ExportDMABuf(const core::Agent& agent, const core::DriverMemoryHandle& handle, size_t size, int* dmabuf_fd, size_t* offset) {
   int dmabuf_fd_res = -1;
   size_t offset_res = 0;
   HSAKMT_STATUS status =
@@ -487,7 +487,7 @@ hsa_status_t KfdVirtioDriver::ExportDMABuf(const core::Agent& agent, const core:
 }
 
 hsa_status_t KfdVirtioDriver::ImportDMABuf(int dmabuf_fd, const core::Agent& agent,
-                                           core::ShareableHandle* handle, size_t *size, void* mem) {
+                                           core::DriverMemoryHandle* handle, size_t *size, void* mem) {
   const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
   amdgpu_bo_import_result res;
   auto ret = vamdgpu_bo_import(
@@ -495,25 +495,25 @@ hsa_status_t KfdVirtioDriver::ImportDMABuf(int dmabuf_fd, const core::Agent& age
   if (ret)
     return HSA_STATUS_ERROR;
 
-  *handle = core::ShareableHandle{reinterpret_cast<uint64_t>(res.buf_handle)};
+  *handle = core::DriverMemoryHandle{reinterpret_cast<uint64_t>(res.buf_handle)};
   *size = res.alloc_size;
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::ExportFabricHandle(core::Agent &agent, core::ShareableHandle *handle, size_t size, hsa_fabric_handle_t *fabric_handle) {
+hsa_status_t KfdVirtioDriver::ExportFabricHandle(core::Agent &agent, core::DriverMemoryHandle *handle, size_t size, hsa_fabric_handle_t *fabric_handle) {
   return HSA_STATUS_ERROR;
 }
 
-hsa_status_t KfdVirtioDriver::ImportFabricHandle(core::Agent &agent, hsa_fabric_handle_t fabric_handle, core::ShareableHandle *handle, size_t *size) {
+hsa_status_t KfdVirtioDriver::ImportFabricHandle(core::Agent &agent, hsa_fabric_handle_t fabric_handle, core::DriverMemoryHandle *handle, size_t *size) {
   return HSA_STATUS_ERROR;
 }
 
-hsa_status_t KfdVirtioDriver::DestroyImportedShareableHandle(core::ShareableHandle* handle) {
+hsa_status_t KfdVirtioDriver::DestroyImportedShareableHandle(core::DriverMemoryHandle* handle) {
   // Calls DestroyShareableHandle, as an amdgpu_bo_handle object is created during ImportDMABuf.
   return DestroyShareableHandle(handle);
 }
 
-hsa_status_t KfdVirtioDriver::Map(core::ShareableHandle handle, void* mem, size_t offset,
+hsa_status_t KfdVirtioDriver::Map(core::DriverMemoryHandle handle, void* mem, size_t offset,
                                   size_t size, hsa_access_permission_t perms) {
   const auto ldrm_bo = reinterpret_cast<amdgpu_bo_handle>(handle.handle);
   if (!ldrm_bo)
@@ -526,7 +526,7 @@ hsa_status_t KfdVirtioDriver::Map(core::ShareableHandle handle, void* mem, size_
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::Unmap(core::ShareableHandle handle, void* mem, size_t offset,
+hsa_status_t KfdVirtioDriver::Unmap(core::DriverMemoryHandle handle, void* mem, size_t offset,
                                     size_t size) {
   const auto ldrm_bo = reinterpret_cast<amdgpu_bo_handle>(handle.handle);
   if (!ldrm_bo)
@@ -541,12 +541,12 @@ hsa_status_t KfdVirtioDriver::Unmap(core::ShareableHandle handle, void* mem, siz
 
 hsa_status_t KfdVirtioDriver::CreateShareableHandle(void* va, void* mem, size_t size,
                                                     const core::Agent& agent,
-                                                    core::ShareableHandle* handle, uint64_t* offset,
+                                                    core::DriverMemoryHandle* handle, uint64_t* offset,
                                                     int* drm_fd, uint64_t* drm_fd_offset) {
   return HSA_STATUS_ERROR;
 }
 
-hsa_status_t KfdVirtioDriver::DestroyShareableHandle(core::ShareableHandle* handle) {
+hsa_status_t KfdVirtioDriver::DestroyShareableHandle(core::DriverMemoryHandle* handle) {
   const auto ldrm_bo = reinterpret_cast<amdgpu_bo_handle>(handle.handle);
   if (!ldrm_bo)
     return HSA_STATUS_ERROR;
