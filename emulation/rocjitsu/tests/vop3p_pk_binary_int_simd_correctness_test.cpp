@@ -43,35 +43,42 @@ constexpr uint32_t VGPRS_PER_WF = 256;
 constexpr uint32_t kDstVgpr = 6;
 constexpr uint32_t DST_SENTINEL = 0xCDCDCDCDu;
 
-// CDNA4 VOP3P encoding (op_sel=0, op_sel_hi=3 = default packing). Source
-// reads (src0, src1) live in word1 bits 0:8, 9:17; op_sel_hi for srcs lives
-// in word1 bits 27:28.
-constexpr void vop3p_encode_default(uint32_t op, uint32_t vdst, uint32_t src0, uint32_t src1,
-                                    uint32_t words[2]) {
-  // op_sel = 0 (low halves into low result), op_sel_hi = 0b11 = 3 (high
-  // halves into high result). neg / neg_hi / clamp / op_sel_hi_2 left at 0.
+// CDNA4 VOP3P encoding (op_sel=0, op_sel_hi=3 = default packing for srcs
+// 0/1; for ternary pk_mad the third source's high-half pick op_sel_hi_2
+// must be 1 to mirror op_sel_hi=3's behaviour on the binary form).
+constexpr void vop3p_encode_default_binary(uint32_t op, uint32_t vdst, uint32_t src0, uint32_t src1,
+                                           uint32_t words[2]) {
   words[0] = (vdst & 0xFFu) | ((op & 0x7Fu) << 16) | (0x1A7u << 23);
-  words[1] = (src0 & 0x1FFu) | ((src1 & 0x1FFu) << 9) | ((0x3u & 0x3u) << 27);
+  words[1] = (src0 & 0x1FFu) | ((src1 & 0x1FFu) << 9) | (0x3u << 27);
+}
+constexpr void vop3p_encode_default_ternary(uint32_t op, uint32_t vdst, uint32_t src0,
+                                            uint32_t src1, uint32_t src2, uint32_t words[2]) {
+  // op_sel_hi_2 = bit 14 of word0 (must be 1 for default high-half pick on src2).
+  words[0] = (vdst & 0xFFu) | ((1u & 0x1u) << 14) | ((op & 0x7Fu) << 16) | (0x1A7u << 23);
+  words[1] = (src0 & 0x1FFu) | ((src1 & 0x1FFu) << 9) | ((src2 & 0x1FFu) << 18) | (0x3u << 27);
 }
 
 struct Case {
   const char *name;
   uint32_t opcode;
+  bool ternary;
 };
 
-const std::array<Case, 12> kCases = {{
-    {"v_pk_add_u16_vop3p", 10},
-    {"v_pk_add_i16_vop3p", 2},
-    {"v_pk_sub_u16_vop3p", 11},
-    {"v_pk_sub_i16_vop3p", 3},
-    {"v_pk_mul_lo_u16_vop3p", 1},
-    {"v_pk_lshlrev_b16_vop3p", 4},
-    {"v_pk_lshrrev_b16_vop3p", 5},
-    {"v_pk_ashrrev_i16_vop3p", 6},
-    {"v_pk_max_i16_vop3p", 7},
-    {"v_pk_min_i16_vop3p", 8},
-    {"v_pk_max_u16_vop3p", 12},
-    {"v_pk_min_u16_vop3p", 13},
+const std::array<Case, 14> kCases = {{
+    {"v_pk_add_u16_vop3p", 10, false},
+    {"v_pk_add_i16_vop3p", 2, false},
+    {"v_pk_sub_u16_vop3p", 11, false},
+    {"v_pk_sub_i16_vop3p", 3, false},
+    {"v_pk_mul_lo_u16_vop3p", 1, false},
+    {"v_pk_lshlrev_b16_vop3p", 4, false},
+    {"v_pk_lshrrev_b16_vop3p", 5, false},
+    {"v_pk_ashrrev_i16_vop3p", 6, false},
+    {"v_pk_max_i16_vop3p", 7, false},
+    {"v_pk_min_i16_vop3p", 8, false},
+    {"v_pk_max_u16_vop3p", 12, false},
+    {"v_pk_min_u16_vop3p", 13, false},
+    {"v_pk_mad_i16_vop3p", 0, true},
+    {"v_pk_mad_u16_vop3p", 9, true},
 }};
 
 // Inputs hand-picked to exercise low/high overflow independently, sign
@@ -117,6 +124,7 @@ struct Fixture {
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       cu->write_vgpr(vb + 0, lane, kVals[lane % kVals.size()]);
       cu->write_vgpr(vb + 1, lane, kVals[(lane + rot) % kVals.size()]);
+      cu->write_vgpr(vb + 2, lane, kVals[(lane + 2 * rot) % kVals.size()]);
       cu->write_vgpr(vb + kDstVgpr, lane, DST_SENTINEL);
     }
     wf->set_exec(exec);
@@ -141,7 +149,11 @@ void check_case(const Case &c, uint64_t exec) {
   ASSERT_NE(fx.cu, nullptr);
   ASSERT_NE(fx.wf, nullptr);
   uint32_t words[2] = {0u, 0u};
-  vop3p_encode_default(c.opcode, kDstVgpr, /*src0=*/256, /*src1=*/257, words);
+  if (c.ternary)
+    vop3p_encode_default_ternary(c.opcode, kDstVgpr, /*src0=*/256, /*src1=*/257, /*src2=*/258,
+                                 words);
+  else
+    vop3p_encode_default_binary(c.opcode, kDstVgpr, /*src0=*/256, /*src1=*/257, words);
   Instruction *inst = fx.decoder->decode(words);
   ASSERT_NE(inst, nullptr) << c.name << " decode failed";
   for (uint32_t rot = 0; rot < kVals.size(); ++rot) {
