@@ -212,6 +212,18 @@ const std::vector<MockSdkWrapper::create_counter_config_info>& MockSdkWrapper::g
     return m_create_counter_config_info;
 }
 
+void MockSdkWrapper::at_intercept_table_registration_hsa(rocprofiler_intercept_library_cb_t callback,
+                                                         void* user_data)
+{
+    m_hsa_intercept_registration_info.push_back({callback, user_data});
+}
+
+const std::vector<MockSdkWrapper::hsa_intercept_registration_info>&
+    MockSdkWrapper::get_hsa_intercept_registration_info() const
+{
+    return m_hsa_intercept_registration_info;
+}
+
 const std::vector<MockSdkWrapper::query_counter_record_info>& MockSdkWrapper::get_query_counter_record_info() const
 {
     return m_query_counter_record_info;
