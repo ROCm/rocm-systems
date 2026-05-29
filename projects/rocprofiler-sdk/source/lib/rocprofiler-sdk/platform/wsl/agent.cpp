@@ -23,6 +23,7 @@
 #include "lib/rocprofiler-sdk/platform/wsl/agent.hpp"
 
 #include "lib/common/logging.hpp"
+#include "lib/common/scope_destructor.hpp"
 #include "lib/common/string_entry.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
@@ -369,6 +370,13 @@ enumerate()
     {
         const auto& a = infos[i];
 
+        // Close the adapter on every exit path (early continues, query
+        // failures, exceptions from new below).
+        auto _closer = common::scope_destructor{[&dxc, h = a.hAdapter]() {
+            DxcCloseAdapter cl{h};
+            dxc.close_adapter(&cl);
+        }};
+
         DxcQueryDeviceIds devids{};
         if(query_one(dxc.query_adapter,
                      a.hAdapter,
@@ -376,8 +384,6 @@ enumerate()
                      &devids,
                      sizeof(devids)) != kNtSuccess)
         {
-            DxcCloseAdapter cl{a.hAdapter};
-            dxc.close_adapter(&cl);
             continue;
         }
 
@@ -387,21 +393,56 @@ enumerate()
                 "wsl::enumerate: skipping non-AMD adapter (vendor=0x{:04x} device=0x{:04x})",
                 devids.DeviceIds.VendorID,
                 devids.DeviceIds.DeviceID);
-            DxcCloseAdapter cl{a.hAdapter};
-            dxc.close_adapter(&cl);
             continue;
         }
 
+        // The remaining queries populate fields the agent struct cannot
+        // sensibly do without (BDF / adapter name / VRAM size). Treat any
+        // failure as a reason to discard the adapter rather than publish a
+        // half-filled rocprofiler_agent_t.
         DxcAdapterAddress addr{};
-        query_one(
-            dxc.query_adapter, a.hAdapter, DXC_KMTQAITYPE_ADAPTERADDRESS, &addr, sizeof(addr));
+        if(query_one(
+               dxc.query_adapter, a.hAdapter, DXC_KMTQAITYPE_ADAPTERADDRESS, &addr, sizeof(addr)) !=
+           kNtSuccess)
+        {
+            ROCP_WARNING << fmt::format("wsl::enumerate: discarding adapter {} "
+                                        "(vendor=0x{:04x} device=0x{:04x}): "
+                                        "ADAPTERADDRESS query failed",
+                                        i,
+                                        devids.DeviceIds.VendorID,
+                                        devids.DeviceIds.DeviceID);
+            continue;
+        }
 
         DxcAdapterRegistryInfo reg{};
-        query_one(
-            dxc.query_adapter, a.hAdapter, DXC_KMTQAITYPE_ADAPTERREGISTRYINFO, &reg, sizeof(reg));
+        if(query_one(dxc.query_adapter,
+                     a.hAdapter,
+                     DXC_KMTQAITYPE_ADAPTERREGISTRYINFO,
+                     &reg,
+                     sizeof(reg)) != kNtSuccess)
+        {
+            ROCP_WARNING << fmt::format("wsl::enumerate: discarding adapter {} "
+                                        "(vendor=0x{:04x} device=0x{:04x}): "
+                                        "ADAPTERREGISTRYINFO query failed",
+                                        i,
+                                        devids.DeviceIds.VendorID,
+                                        devids.DeviceIds.DeviceID);
+            continue;
+        }
 
         DxcSegmentSizeInfo seg{};
-        query_one(dxc.query_adapter, a.hAdapter, DXC_KMTQAITYPE_GETSEGMENTSIZE, &seg, sizeof(seg));
+        if(query_one(
+               dxc.query_adapter, a.hAdapter, DXC_KMTQAITYPE_GETSEGMENTSIZE, &seg, sizeof(seg)) !=
+           kNtSuccess)
+        {
+            ROCP_WARNING << fmt::format("wsl::enumerate: discarding adapter {} "
+                                        "(vendor=0x{:04x} device=0x{:04x}): "
+                                        "GETSEGMENTSIZE query failed",
+                                        i,
+                                        devids.DeviceIds.VendorID,
+                                        devids.DeviceIds.DeviceID);
+            continue;
+        }
 
         auto info                 = common::init_public_api_struct(rocprofiler_agent_t{});
         info.type                 = ROCPROFILER_AGENT_TYPE_GPU;
@@ -462,9 +503,6 @@ enumerate()
             }
             delete p;
         });
-
-        DxcCloseAdapter cl{a.hAdapter};
-        dxc.close_adapter(&cl);
     }
 
     return out;
