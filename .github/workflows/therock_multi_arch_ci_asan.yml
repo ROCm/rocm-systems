@@ -7,6 +7,7 @@ on:
   push:
     branches:
       - develop
+      - users/geomin12/host-asan # TODO: remove after testing
   workflow_dispatch:
 
 permissions:
