@@ -49,9 +49,6 @@ static ncclResult_t ncclReduceScatterDdaIpcTyped(
     return ncclInvalidArgument;
   }
 
-  const size_t totalSizeBytes = totalCount * sizeof(T);
-  const unsigned threads = 512;
-
   const int nBlocksMax = ddaMaxNBlocksForScratch();
   // For reduce-scatter, we use recvcount for grid calculation since each rank processes its portion
   auto gridBlock = meta::comms::getGridAndBlockDims(recvcount, sizeof(T), nBlocksMax);

@@ -40,18 +40,14 @@ static ncclResult_t ncclAllGatherDdaIpcTyped(
   }
 
   const size_t totalCount = sendcount * comm->nRanks;
-  if (sendcount * sizeof(T) > comm->ddaIpcScratchBytes) {
+  if (totalCount * sizeof(T) > comm->ddaIpcScratchBytes) {
     WARN(
         "DDA IPC allgather: send element count %zu needs %zu bytes; comm scratch is %zu bytes",
         sendcount,
-        sendcount * sizeof(T),
+        totalCount * sizeof(T),
         comm->ddaIpcScratchBytes);
     return ncclInvalidArgument;
   }
-
-  const size_t sendSizeBytes = sendcount * sizeof(T);
-  const size_t totalSizeBytes = totalCount * sizeof(T);
-  const unsigned threads = 512;
 
   const int nBlocksMax = ddaMaxNBlocksForScratch();
   // For allgather, we use sendcount for grid calculation
@@ -109,10 +105,7 @@ bool ncclAllGatherDdaIpcEligible(
     return false;
   }
 
-  size_t need = sendcount * 4;
-  if (datatype == ncclFloat16 || datatype == ncclBfloat16) {
-    need = sendcount * 2;
-  }
+  size_t need = sendcount * ncclTypeSize(datatype);
   if (need > comm->ddaIpcScratchBytes) {
     return false;
   }
