@@ -90,7 +90,7 @@ class KfdVirtioDriver final : public core::Driver {
                                   const HsaMemMapFlags* mem_flags, uint32_t num_nodes,
                                   const uint32_t* nodes) const override;
   hsa_status_t MakeMemoryUnresident(const void* mem) const override;
-  hsa_status_t Queue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
+  hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
                            HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id, void* queue_addr,
                            uint64_t queue_size_bytes, HsaEvent* event,
                            HsaQueueResource& queue_resource) const override;
