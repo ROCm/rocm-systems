@@ -733,18 +733,24 @@ enum class CachePolicy {
 
 // Maps a CachePolicy to the AMDGCN buffer instruction aux bits (sc0/sc1/nt).
 __host__ __device__ constexpr uint32_t cache_policy_aux(CachePolicy p) {
-#if defined(__gfx1201__)
-  return p == CachePolicy::DeviceScope  ? 0b10000 :
-         p == CachePolicy::NonTemporal  ? 0b00100 : // NT_RT
-         p == CachePolicy::SystemScope  ? 0b11000 : 
-         p == CachePolicy::SystemScopeNT? 0b11100 :
-                                          0b00000;  // Standard / FlatCache
+#if defined(__gfx942__) || defined(__gfx950__)
+  return p == CachePolicy::DeviceScope   ? 0b10000 :  // DEVICE_NT0: sc1
+         p == CachePolicy::NonTemporal   ? 0b10010 :  // DEVICE_NT1: sc1|nt
+         p == CachePolicy::SystemScope   ? 0b10001 :  // SYSTEM_NT0: sc1|sc0
+         p == CachePolicy::SystemScopeNT ? 0b10011 :  // SYSTEM_NT1: sc1|sc0|nt
+                                           0b00000;   // Standard / FlatCache (wave scope)
+#elif defined(__gfx1201__)
+  return p == CachePolicy::DeviceScope   ? 0b10000 :  // DEVICE_RT  = scope:DEV | temporal:RT
+         p == CachePolicy::NonTemporal   ? 0b10001 :  // DEVICE_NT  = scope:DEV | temporal:NT
+         p == CachePolicy::SystemScope   ? 0b11000 :  // SYSTEM_RT  = scope:SYS | temporal:RT
+         p == CachePolicy::SystemScopeNT ? 0b11001 :  // SYSTEM_NT  = scope:SYS | temporal:NT
+                                           0b00000;   // Standard / FlatCache (CU_RT)
 #else
-  return p == CachePolicy::DeviceScope  ? 0b00001 :
-         p == CachePolicy::NonTemporal  ? 0b00010 :
-         p == CachePolicy::SystemScope  ? 0b10001 :
-         p == CachePolicy::SystemScopeNT? 0b10011 :
-                                          0b00000;  // Standard / FlatCache
+  return p == CachePolicy::DeviceScope   ? 0b01 :  // glc
+         p == CachePolicy::NonTemporal   ? 0b11 :  // glc slc (closest available)
+         p == CachePolicy::SystemScope   ? 0b11 :  // glc slc
+         p == CachePolicy::SystemScopeNT ? 0b11 :  // glc slc
+                                           0b00;   // Standard / FlatCache
 #endif
 }
 
@@ -755,7 +761,11 @@ make_buffer_resource(const void* base, uint32_t num_bytes) {
   rsrc[0] = static_cast<int32_t>(addr & 0xFFFFFFFFu);
   rsrc[1] = static_cast<int32_t>(addr >> 32);
   rsrc[2] = static_cast<int32_t>(num_bytes);
+#if defined(__gfx1201__) || defined(__gfx1100__)
+  rsrc[3] = 0x31014000;  // raw buffer descriptor: no stride/swizzle
+#else
   rsrc[3] = 0x00020000;  // raw buffer descriptor: no stride/swizzle
+#endif
   return rsrc;
 }
 
