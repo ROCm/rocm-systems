@@ -15,6 +15,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/isa_traits.h"
+#include "util/bit.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -418,11 +419,6 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
   return (registers + granularity - 1) / granularity - 1;
 }
 
-[[nodiscard]] uint32_t align_up(uint32_t value, uint32_t alignment) {
-  alignment = std::max(alignment, 1u);
-  return ((value + alignment - 1) / alignment) * alignment;
-}
-
 [[nodiscard]] uint16_t accum_vgpr_base(const KD &desc, rj_code_arch_t guest_arch) {
   if (!uses_gfx90a_accum_offset(guest_arch) || !arch_has_accvgpr(guest_arch))
     return 0;
@@ -619,7 +615,7 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   if (arch_has_accvgpr(guest_arch) && arch_has_accvgpr(host_arch) &&
       uses_gfx90a_accum_offset(host_arch) && result.accvgpr_base != 0) {
     if (result.target_agpr_count != 0 && options.minimum_vgprs > result.accvgpr_base) {
-      result.target_accvgpr_base = align_up(options.minimum_vgprs, 4);
+      result.target_accvgpr_base = util::align_up(options.minimum_vgprs, 4u);
       if (result.target_accvgpr_base > 256) {
         append_descriptor_error(result,
                                 "required AccVGPR offset exceeds GFX90A descriptor field range; "
@@ -704,6 +700,18 @@ std::vector<KdTranslation> KernelDescriptorTranslator::translate_image(
       });
 
   return translations;
+}
+
+std::optional<KdTranslation> KernelDescriptorTranslator::translate_descriptor(
+    std::span<const uint8_t> image, uint64_t descriptor_file_offset, uint64_t entry_text_offset,
+    const KernelDescriptorTranslationOptions &options) const {
+  if (descriptor_file_offset > image.size() || image.size() - descriptor_file_offset < sizeof(KD))
+    return std::nullopt;
+
+  KD desc{};
+  std::memcpy(&desc, image.data() + descriptor_file_offset, sizeof(desc));
+  return translate_one_descriptor(guest_arch_, host_arch_, descriptor_file_offset,
+                                  entry_text_offset, desc, options);
 }
 
 } // namespace rocjitsu

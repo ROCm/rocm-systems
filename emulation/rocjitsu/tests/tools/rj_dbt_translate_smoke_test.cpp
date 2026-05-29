@@ -7,6 +7,8 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/rj_code.h"
 
+#include <gtest/gtest.h>
+
 #include <array>
 #include <cstdint>
 #include <cstdlib>
@@ -18,12 +20,25 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <sys/wait.h>
 #include <unistd.h>
 
 namespace {
+
+std::filesystem::path g_translate_tool;
+
+struct TempDir {
+  std::filesystem::path path;
+
+  explicit TempDir(std::filesystem::path temp_path) : path(std::move(temp_path)) {
+    std::filesystem::create_directories(path);
+  }
+
+  ~TempDir() { std::filesystem::remove_all(path); }
+};
 
 uint32_t add_elf_name(std::vector<uint8_t> &names, std::string_view name) {
   const uint32_t offset = static_cast<uint32_t>(names.size());
@@ -205,20 +220,14 @@ bool command_succeeded(int status) {
 
 } // namespace
 
-int main(int argc, char **argv) {
-  if (argc != 2) {
-    std::cerr << "usage: rj_dbt_translate_smoke_test <rj_dbt_translate>\n";
-    return 2;
-  }
-
-  const std::filesystem::path temp_dir =
+TEST(RjDbtTranslate, Smoke) {
+  const TempDir temp_dir(
       std::filesystem::temp_directory_path() /
-      ("rj_dbt_translate_smoke_" + std::to_string(static_cast<long long>(getpid())));
-  std::filesystem::create_directories(temp_dir);
+      ("rj_dbt_translate_smoke_" + std::to_string(static_cast<long long>(getpid()))));
 
-  const auto input = temp_dir / "smoke_gfx950.co";
-  const auto output = temp_dir / "stdout.txt";
-  const auto error = temp_dir / "stderr.txt";
+  const auto input = temp_dir.path / "smoke_gfx950.co";
+  const auto output = temp_dir.path / "stdout.txt";
+  const auto error = temp_dir.path / "stderr.txt";
 
   {
     const auto image = make_smoke_code_object();
@@ -228,7 +237,7 @@ int main(int argc, char **argv) {
   }
 
   const std::string command =
-      shell_quote(argv[1]) + " " + shell_quote(input.string()) +
+      shell_quote(g_translate_tool.string()) + " " + shell_quote(input.string()) +
       " --input-target gfx950 --output-target gfx1200 --output-mode diff > " +
       shell_quote(output.string()) + " 2> " + shell_quote(error.string());
 
@@ -236,30 +245,29 @@ int main(int argc, char **argv) {
   const std::string stdout_text = read_text_file(output);
   const std::string stderr_text = read_text_file(error);
 
-  std::filesystem::remove_all(temp_dir);
-
-  if (!command_succeeded(status)) {
-    std::cerr << "rj_dbt_translate failed\nstderr:\n"
-              << stderr_text << "\nstdout:\n"
-              << stdout_text;
-    return 1;
-  }
-
-  if (!stderr_text.empty()) {
-    std::cerr << "expected empty stderr, got:\n" << stderr_text;
-    return 1;
-  }
+  ASSERT_TRUE(command_succeeded(status)) << "stderr:\n"
+                                         << stderr_text << "\nstdout:\n"
+                                         << stdout_text;
+  EXPECT_TRUE(stderr_text.empty()) << stderr_text;
 
   const std::array<std::string_view, 5> expected = {
       "rj_dbt_translate: ok", "source_words: bf8cc07f", "source: s_waitcnt",
       "target_words:",        "target: s_wait",
   };
   for (const std::string_view needle : expected) {
-    if (!contains(stdout_text, needle)) {
-      std::cerr << "missing expected output fragment: " << needle << "\noutput:\n" << stdout_text;
-      return 1;
-    }
+    EXPECT_TRUE(contains(stdout_text, needle))
+        << "missing expected output fragment: " << needle << "\noutput:\n"
+        << stdout_text;
+  }
+}
+
+int main(int argc, char **argv) {
+  if (argc < 2) {
+    std::cerr << "usage: rj_dbt_translate_smoke_test <rj_dbt_translate>\n";
+    return 2;
   }
 
-  return 0;
+  g_translate_tool = argv[1];
+  ::testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
 }

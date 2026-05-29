@@ -473,42 +473,42 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       descriptor_options.minimum_vgprs = scope.translation->target_vgpr_count;
       descriptor_options.minimum_sgprs = scope.translation->target_sgpr_count;
 
-      // Descriptor growth is intentionally done after instruction lowering so each
-      // kernel is translated once. The descriptor translator keeps ordinary
-      // VGPR count and CDNA AccVGPR allocation windows separate, so an ordinary
-      // VGPR growth request can move ACCUM_OFFSET without pretending AGPRs are
-      // part of target_vgpr_count.
-      const auto final_translations = descriptor_translator.translate_image(
-          patcher.image_bytes(), patcher.text_offset(), patcher.text_size(), descriptor_options);
-      const auto final_translation =
-          std::ranges::find_if(final_translations, [&](const KdTranslation &candidate) {
-            return candidate.descriptor_file_offset == scope.translation->descriptor_file_offset;
-          });
-      if (final_translation == final_translations.end()) {
-        append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
-                     "kernel descriptor translation could not be recomputed; leaving code object "
-                     "unchanged");
-        return leave_unchanged();
-      }
-
-      append_diagnostics(result.diagnostics, final_translation->diagnostics);
-      if (!final_translation->supported) {
-        append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
-                     "kernel descriptor translation requires unsupported resource or ABI "
-                     "virtualization; leaving code object unchanged");
-        return leave_unchanged();
-      }
-
+      // Descriptor growth is intentionally done after instruction lowering so
+      // each kernel is translated once. Only descriptors that enter this code
+      // scope need the larger floor; rescanning the whole image would also
+      // recompute unrelated kernels and risks mixing diagnostics across scopes.
+      bool recomputed_descriptor = false;
       for (KdTranslation &translation : descriptor_translations) {
         if (translation.entry_text_offset != scope.translation->entry_text_offset)
           continue;
 
-        const auto updated =
-            std::ranges::find_if(final_translations, [&](const KdTranslation &candidate) {
-              return candidate.descriptor_file_offset == translation.descriptor_file_offset;
-            });
-        if (updated != final_translations.end())
-          translation = *updated;
+        auto updated = descriptor_translator.translate_descriptor(
+            patcher.image_bytes(), translation.descriptor_file_offset,
+            translation.entry_text_offset, descriptor_options);
+        if (!updated) {
+          append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                       "kernel descriptor translation could not be recomputed; leaving code object "
+                       "unchanged");
+          return leave_unchanged();
+        }
+
+        append_diagnostics(result.diagnostics, updated->diagnostics);
+        if (!updated->supported) {
+          append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                       "kernel descriptor translation requires unsupported resource or ABI "
+                       "virtualization; leaving code object unchanged");
+          return leave_unchanged();
+        }
+
+        translation = std::move(*updated);
+        recomputed_descriptor = true;
+      }
+
+      if (!recomputed_descriptor) {
+        append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                     "kernel descriptor translation could not be recomputed; leaving code object "
+                     "unchanged");
+        return leave_unchanged();
       }
     }
   }

@@ -29,16 +29,26 @@ build_rdna_vop3(uint16_t op, uint8_t vdst, uint16_t src0, uint16_t src1 = 0, uin
   return {w0, w1};
 }
 
-std::vector<uint32_t> lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_arch) {
+ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_arch) {
   const auto *raw = inst.raw_encoding();
   if (!raw || inst.size() < 8)
-    return {};
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " cannot lower v_lshl_add_u64 without a complete 64-bit raw "
+                                "encoding");
 
   cdna4::Vop3MachineInst src{};
   std::memcpy(&src, raw, sizeof(src));
   const uint16_t vdst = src.vdst;
   const uint16_t src0 = src.src0;
   const uint16_t src2 = src.src2;
+
+  if (host_arch != ROCJITSU_CODE_ARCH_RDNA3 && host_arch != ROCJITSU_CODE_ARCH_RDNA4)
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " v_lshl_add_u64 lowering only supports RDNA3/RDNA4 hosts");
+  if (vdst == 255)
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " v_lshl_add_u64 lowering needs two destination VGPRs but vdst "
+                                "is v255");
 
   constexpr uint16_t kVccLo = 106;
   constexpr uint16_t kOpAddCoU32 = 768;
@@ -75,7 +85,7 @@ std::vector<uint32_t> lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch
     words.push_back(w1);
   }
 
-  return words;
+  return ExpandResult::success(std::move(words));
 }
 
 } // namespace
@@ -84,12 +94,7 @@ ExpandResult expand_cdna4_v_lshl_add_u64_for_rdna(const Instruction &inst, uint3
                                                   uint64_t, const LivenessAnalysis &,
                                                   TranslationContext &, const LaneLayout *,
                                                   const LaneLayout *) {
-  auto words = lower_v_lshl_add_u64(inst, static_cast<rj_code_arch_t>(host_arch));
-  if (!words.empty())
-    return ExpandResult::success(std::move(words));
-  return ExpandResult::failed(std::string(inst.mnemonic()) +
-                              " matched a semantic expansion rule, but the rule rejected "
-                              "this instruction form as unsupported.");
+  return lower_v_lshl_add_u64(inst, static_cast<rj_code_arch_t>(host_arch));
 }
 
 } // namespace rocjitsu

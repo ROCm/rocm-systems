@@ -34,36 +34,84 @@ namespace rocjitsu {
 class Instruction;
 class LivenessAnalysis;
 
-/// @brief Per-kernel resource feedback collected while semantic lowerings run.
+/// @brief Per-kernel register resource state shared by semantic lowerings.
 ///
-/// @details Descriptor translation happens before instruction translation, but
-/// semantic lowerings only know their actual scratch choices after liveness has
-/// been computed. Each kernel is lowered once while recording the highest
-/// SGPR/VGPR count required by those lowerings here; BinaryTranslator then
-/// recomputes the affected descriptor translations with those larger minimums
-/// before patching descriptors into the output image. A second instruction pass
-/// is only needed if a future lowering depends on descriptor-derived register
-/// numbers that can change during that recomputation.
+/// @details TranslationContext is created once per kernel from the current
+/// target kernel descriptor translation, then passed through every semantic
+/// EXPAND rule for that kernel. The `num_*` fields describe the descriptor
+/// state the lowering started from. The `required_*` fields are feedback from
+/// lowerings that allocated scratch registers beyond those descriptor counts.
+///
+/// Descriptor translation happens before instruction translation, but semantic
+/// lowerings only know their actual scratch choices after liveness has been
+/// computed. Each kernel is lowered once while recording the highest SGPR/VGPR
+/// count required by those lowerings here; BinaryTranslator then recomputes the
+/// affected descriptor translations with those larger minimums before patching
+/// descriptors into the output image. A second instruction pass is only needed
+/// if a future lowering depends on descriptor-derived register numbers that can
+/// change during that recomputation.
 struct TranslationContext {
+  /// @brief Initial target ordinary VGPR count from descriptor translation.
   uint32_t num_vgprs = 0;
+
+  /// @brief Initial target AccVGPR count from descriptor translation.
   uint32_t num_agprs = 0;
+
+  /// @brief Initial target AccVGPR base used by descriptor-backed AccVGPR allocation.
   uint32_t accum_offset = 0;
+
+  /// @brief Initial target SGPR count from descriptor translation.
   uint32_t num_sgprs = 0;
+
+  /// @brief Minimum ordinary VGPR count required after all semantic lowerings.
+  ///
+  /// @details Lowerings update this with require_vgprs() when a chosen scratch
+  /// VGPR is outside the descriptor's initial ordinary VGPR allocation. The
+  /// value is a count, not a register index, so callers pass the highest used
+  /// VGPR index plus one.
   uint32_t required_vgpr_count = 0;
+
+  /// @brief Minimum SGPR count required after all semantic lowerings.
+  ///
+  /// @details Lowerings update this with require_sgprs() when a chosen scratch
+  /// SGPR is outside the descriptor's initial SGPR allocation. The value is a
+  /// count, not a register index, so callers pass the highest used SGPR index
+  /// plus one.
   uint32_t required_sgpr_count = 0;
 
+  /// @brief Construct an empty context for tests or call sites without descriptor feedback.
   TranslationContext() = default;
+
+  /// @brief Construct a context for kernels that only need VGPR/SGPR descriptor state.
+  ///
+  /// @param vgprs Initial target ordinary VGPR count.
+  /// @param sgprs Initial target SGPR count.
   TranslationContext(uint32_t vgprs, uint32_t sgprs)
       : num_vgprs(vgprs), num_sgprs(sgprs), required_vgpr_count(0), required_sgpr_count(0) {}
+
+  /// @brief Construct a full context from target kernel descriptor translation.
+  ///
+  /// @param vgprs Initial target ordinary VGPR count.
+  /// @param agprs Initial target AccVGPR count.
+  /// @param accum_base Initial target AccVGPR base.
+  /// @param sgprs Initial target SGPR count.
   TranslationContext(uint32_t vgprs, uint32_t agprs, uint32_t accum_base, uint32_t sgprs)
       : num_vgprs(vgprs), num_agprs(agprs), accum_offset(accum_base), num_sgprs(sgprs),
         required_vgpr_count(0), required_sgpr_count(0) {}
 
+  /// @brief Record that semantic lowering requires at least @p count ordinary VGPRs.
+  ///
+  /// @details This is monotonic across all lowerings for the kernel. It only
+  /// raises the required count and never reduces an earlier requirement.
   void require_vgprs(uint32_t count) {
     if (required_vgpr_count < count)
       required_vgpr_count = count;
   }
 
+  /// @brief Record that semantic lowering requires at least @p count SGPRs.
+  ///
+  /// @details This is monotonic across all lowerings for the kernel. It only
+  /// raises the required count and never reduces an earlier requirement.
   void require_sgprs(uint32_t count) {
     if (required_sgpr_count < count)
       required_sgpr_count = count;

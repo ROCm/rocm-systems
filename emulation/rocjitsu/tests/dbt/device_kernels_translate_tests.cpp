@@ -467,6 +467,7 @@ TEST(BinaryTranslatorE2E, DescriptorPrologueRedirectsEntryWithoutOverwritingOrig
   BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
   auto result = translator.translate(*co);
   ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok());
 
   rocjitsu::AmdGpuCodeObject translated_co(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(translated_co.is_valid());
@@ -485,8 +486,6 @@ TEST(BinaryTranslatorE2E, DescriptorPrologueRedirectsEntryWithoutOverwritingOrig
 
   EXPECT_GT(translated_info->entry_text_offset, original_info->entry_text_offset)
       << "CDNA4 workgroup-id SGPRs must be materialized from RDNA4's TTMP launch payload";
-  EXPECT_GE(translated_info->guest_vgpr_count, 128u)
-      << "DBT semantic lowerings need conservative temporary VGPR headroom in the descriptor";
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);

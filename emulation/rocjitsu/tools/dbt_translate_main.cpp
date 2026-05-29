@@ -7,6 +7,7 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/executable.h"
 
+#include <array>
 #include <charconv>
 #include <cstdint>
 #include <iomanip>
@@ -37,6 +38,15 @@ struct TargetInfo {
   rj_code_target_id_t code_object_target;
 };
 
+constexpr std::array<TargetInfo, 4> kTargetInfos = {{
+    {"gfx942", ROCJITSU_CODE_ARCH_CDNA3, EF_AMDGPU_MACH_AMDGCN_GFX942, ROCJITSU_CODE_TARGET_GFX942},
+    {"gfx950", ROCJITSU_CODE_ARCH_CDNA4, EF_AMDGPU_MACH_AMDGCN_GFX950, ROCJITSU_CODE_TARGET_GFX950},
+    {"gfx1200", ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1200,
+     ROCJITSU_CODE_TARGET_GFX1200},
+    {"gfx1201", ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1201,
+     ROCJITSU_CODE_TARGET_GFX1201},
+}};
+
 struct CliOptions {
   TranslateOptions translate;
   std::string input_target_name;
@@ -49,6 +59,14 @@ struct CliOptions {
   bool saw_output_target = false;
 };
 
+void print_supported_targets(std::ostream &os) {
+  for (size_t i = 0; i < kTargetInfos.size(); ++i) {
+    if (i != 0)
+      os << ", ";
+    os << kTargetInfos[i].name;
+  }
+}
+
 void print_help() {
   std::cout
       << "Usage: rj_dbt_translate INPUT --input-target TARGET --output-target TARGET "
@@ -58,12 +76,13 @@ void print_help() {
       << "  --output-target TARGET          Output LLVM machine, e.g. gfx1200\n"
       << "  --code-object-index N           Code-object index for executable input (default: 0)\n"
       << "  --output-mode MODE              disasm, code-object, or diff (default: disasm)\n"
-      << "  --debug-conservative-liveness N  Only allocate free VGPR scratch at or above N\n"
+      << "  --debug-conservative-liveness N Only allocate free VGPR scratch at or above N\n"
       << "  --debug-continue-after-failure Continue collecting diagnostics after failures\n"
       << "  --list-code-objects             List extractable code objects and exit\n"
       << "  --help                          Show this help\n\n"
-      << "Supported target names: gfx908, gfx90a, gfx940, gfx941, gfx942, gfx950, "
-         "gfx1010, gfx1030, gfx1100, gfx1150, gfx1200, gfx1201.\n";
+      << "Supported target names: ";
+  print_supported_targets(std::cout);
+  std::cout << ".\n";
 }
 
 [[nodiscard]] bool parse_u32(std::string_view text, uint32_t &value) {
@@ -79,42 +98,10 @@ void print_help() {
 }
 
 [[nodiscard]] std::optional<TargetInfo> parse_target_info(std::string_view value) {
-  if (value == "gfx908")
-    return TargetInfo{value, ROCJITSU_CODE_ARCH_CDNA1, EF_AMDGPU_MACH_AMDGCN_GFX908,
-                      ROCJITSU_CODE_TARGET_INVALID};
-  if (value == "gfx90a")
-    return TargetInfo{value, ROCJITSU_CODE_ARCH_CDNA2, EF_AMDGPU_MACH_AMDGCN_GFX90A,
-                      ROCJITSU_CODE_TARGET_INVALID};
-  if (value == "gfx940")
-    return TargetInfo{value, ROCJITSU_CODE_ARCH_CDNA3, EF_AMDGPU_MACH_AMDGCN_GFX940,
-                      ROCJITSU_CODE_TARGET_INVALID};
-  if (value == "gfx941")
-    return TargetInfo{value, ROCJITSU_CODE_ARCH_CDNA3, EF_AMDGPU_MACH_AMDGCN_GFX941,
-                      ROCJITSU_CODE_TARGET_INVALID};
-  if (value == "gfx942")
-    return TargetInfo{value, ROCJITSU_CODE_ARCH_CDNA3, EF_AMDGPU_MACH_AMDGCN_GFX942,
-                      ROCJITSU_CODE_TARGET_GFX942};
-  if (value == "gfx950")
-    return TargetInfo{value, ROCJITSU_CODE_ARCH_CDNA4, EF_AMDGPU_MACH_AMDGCN_GFX950,
-                      ROCJITSU_CODE_TARGET_GFX950};
-  if (value == "gfx1010")
-    return TargetInfo{value, ROCJITSU_CODE_ARCH_RDNA1, EF_AMDGPU_MACH_AMDGCN_GFX1010,
-                      ROCJITSU_CODE_TARGET_INVALID};
-  if (value == "gfx1030")
-    return TargetInfo{value, ROCJITSU_CODE_ARCH_RDNA2, EF_AMDGPU_MACH_AMDGCN_GFX1030,
-                      ROCJITSU_CODE_TARGET_INVALID};
-  if (value == "gfx1100")
-    return TargetInfo{value, ROCJITSU_CODE_ARCH_RDNA3, EF_AMDGPU_MACH_AMDGCN_GFX1100,
-                      ROCJITSU_CODE_TARGET_INVALID};
-  if (value == "gfx1150")
-    return TargetInfo{value, ROCJITSU_CODE_ARCH_RDNA3_5, EF_AMDGPU_MACH_AMDGCN_GFX1150,
-                      ROCJITSU_CODE_TARGET_INVALID};
-  if (value == "gfx1200")
-    return TargetInfo{value, ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1200,
-                      ROCJITSU_CODE_TARGET_INVALID};
-  if (value == "gfx1201")
-    return TargetInfo{value, ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1201,
-                      ROCJITSU_CODE_TARGET_INVALID};
+  for (const TargetInfo &target : kTargetInfos) {
+    if (value == target.name)
+      return target;
+  }
   return std::nullopt;
 }
 
@@ -481,8 +468,10 @@ int list_code_objects(const CliOptions &options) {
 
   Executable executable(options.translate.input_path);
   if (executable.is_valid()) {
-    std::cout << "gfx942: " << executable.num_code_objects(ROCJITSU_CODE_TARGET_GFX942) << "\n";
-    std::cout << "gfx950: " << executable.num_code_objects(ROCJITSU_CODE_TARGET_GFX950) << "\n";
+    for (const TargetInfo &target : kTargetInfos) {
+      std::cout << target.name << ": " << executable.num_code_objects(target.code_object_target)
+                << "\n";
+    }
     return 0;
   }
 
