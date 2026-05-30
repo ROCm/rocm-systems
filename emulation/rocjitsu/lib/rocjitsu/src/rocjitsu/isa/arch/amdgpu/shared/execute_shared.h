@@ -8496,6 +8496,14 @@ inline void execute_v_cvt_f64_u32_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_floor_i32_f32_vop1([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, int32_t, [](auto s) {
+    auto r = util::stdx::floor(s);
+    util::native<int32_t> out = util::stdx::static_simd_cast<util::native<int32_t>>(r);
+    util::stdx::where(simd_mask_as<int32_t>(r >= 2147483648.0f), out) = 2147483647;
+    util::stdx::where(simd_mask_as<int32_t>(r < -2147483648.0f), out) = (-2147483647 - 1);
+    util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(r)), out) = 0;
+    return out;
+  });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -8517,6 +8525,14 @@ inline void execute_v_cvt_floor_i32_f32_vop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_floor_i32_f32_vop3([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, int32_t, [](auto s) {
+    auto r = util::stdx::floor(s);
+    util::native<int32_t> out = util::stdx::static_simd_cast<util::native<int32_t>>(r);
+    util::stdx::where(simd_mask_as<int32_t>(r >= 2147483648.0f), out) = 2147483647;
+    util::stdx::where(simd_mask_as<int32_t>(r < -2147483648.0f), out) = (-2147483647 - 1);
+    util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(r)), out) = 0;
+    return out;
+  });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -8794,6 +8810,14 @@ inline void execute_v_cvt_i32_i16_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_nearest_i32_f32_vop1([[maybe_unused]] Inst &inst,
                                                [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, int32_t, [](auto s) {
+    auto r = util::stdx::ceil(s - util::native<float32_t>(0.5f));
+    util::native<int32_t> out = util::stdx::static_simd_cast<util::native<int32_t>>(r);
+    util::stdx::where(simd_mask_as<int32_t>(r >= 2147483648.0f), out) = 2147483647;
+    util::stdx::where(simd_mask_as<int32_t>(r < -2147483648.0f), out) = (-2147483647 - 1);
+    util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(r)), out) = 0;
+    return out;
+  });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -8815,6 +8839,14 @@ inline void execute_v_cvt_nearest_i32_f32_vop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_nearest_i32_f32_vop3([[maybe_unused]] Inst &inst,
                                                [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, int32_t, [](auto s) {
+    auto r = util::stdx::ceil(s - util::native<float32_t>(0.5f));
+    util::native<int32_t> out = util::stdx::static_simd_cast<util::native<int32_t>>(r);
+    util::stdx::where(simd_mask_as<int32_t>(r >= 2147483648.0f), out) = 2147483647;
+    util::stdx::where(simd_mask_as<int32_t>(r < -2147483648.0f), out) = (-2147483647 - 1);
+    util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(r)), out) = 0;
+    return out;
+  });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))

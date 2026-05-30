@@ -313,6 +313,32 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         " return util::stdx::static_simd_cast<util::native<uint32_t>>((x << 16) >> 16); }",
     ),
     "v_cvt_u32_u16_vop1": ("uint32_t", "uint32_t", "[](auto a) { return a & 0xFFFFu; }"),
+    # RDNA f32->i32 round-toward-floor / round-to-nearest-even conversions
+    # (cdna4 spells these v_cvt_flr_i32_f32 / v_cvt_rpi_i32_f32). floor via
+    # stdx::floor; nearest via ceil(s - 0.5) (round-half-to-even on the .5 path).
+    # Out-of-range saturates to INT32_MIN/MAX and NaN -> 0, matching the scalar.
+    "v_cvt_floor_i32_f32_vop1": (
+        "float32_t",
+        "int32_t",
+        "[](auto s) {"
+        " auto r = util::stdx::floor(s);"
+        " util::native<int32_t> out = util::stdx::static_simd_cast<util::native<int32_t>>(r);"
+        " util::stdx::where(simd_mask_as<int32_t>(r >= 2147483648.0f), out) = 2147483647;"
+        " util::stdx::where(simd_mask_as<int32_t>(r < -2147483648.0f), out) = (-2147483647 - 1);"
+        " util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(r)), out) = 0;"
+        " return out; }",
+    ),
+    "v_cvt_nearest_i32_f32_vop1": (
+        "float32_t",
+        "int32_t",
+        "[](auto s) {"
+        " auto r = util::stdx::ceil(s - util::native<float32_t>(0.5f));"
+        " util::native<int32_t> out = util::stdx::static_simd_cast<util::native<int32_t>>(r);"
+        " util::stdx::where(simd_mask_as<int32_t>(r >= 2147483648.0f), out) = 2147483647;"
+        " util::stdx::where(simd_mask_as<int32_t>(r < -2147483648.0f), out) = (-2147483647 - 1);"
+        " util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(r)), out) = 0;"
+        " return out; }",
+    ),
     # v_bfrev_b32: reverse the 32 bits of src0. The scalar body loops bit-by-bit;
     # this is the branchless swap-by-strides equivalent (1/2/4/8/16-bit groups),
     # bit-identical for every input. Pure uint32 bitwise ops.
