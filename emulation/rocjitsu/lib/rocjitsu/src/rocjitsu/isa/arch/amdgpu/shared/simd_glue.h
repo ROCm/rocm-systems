@@ -966,14 +966,26 @@ template <typename T, typename Inst, typename BinOp>
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
+  // Resolve operand base pointers once; see try_execute_binary_vop2_simd.
+  const uint32_t *p0 = SimdAccess::lane_ptr(inst.src0, wf, 0);
+  const uint32_t *p1 = SimdAccess::lane_ptr(inst.src1, wf, 0);
+  uint32_t *pd = SimdAccess::dst_ptr(inst.vdst, wf, 0);
+  const auto a_bcast = p0 ? util::native<T>{} : util::broadcast<T>(inst.src0.read_scalar(wf));
+  const auto b_bcast = p1 ? util::native<T>{} : util::broadcast<T>(inst.src1.read_scalar(wf));
   for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const auto a = apply_vop3_src_mod_f32<0>(read_simd<T>(inst.src0, wf, base), abs, neg);
-    const auto b = apply_vop3_src_mod_f32<1>(read_simd<T>(inst.src1, wf, base), abs, neg);
+    const auto a = apply_vop3_src_mod_f32<0>(p0 ? util::load<T>(p0 + base) : a_bcast, abs, neg);
+    const auto b = apply_vop3_src_mod_f32<1>(p1 ? util::load<T>(p1 + base) : b_bcast, abs, neg);
     const auto r = apply_vop3_dst_mod_f32(bin_op(a, b), omod, clamp);
-    write_simd<T>(inst.vdst, wf, base, r, chunk);
+    if (pd) {
+      util::masked_store<T>(pd + base, r, chunk);
+    } else {
+      alignas(util::native<T>) uint32_t buf[W];
+      util::blit_to_buffer<T>(buf, r);
+      inst.vdst.write_lane_chunk(wf, base, static_cast<uint32_t>(W), buf, chunk);
+    }
   }
   return true;
 }
@@ -1362,15 +1374,29 @@ template <typename Inst, typename FmaOp>
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
+  // Resolve operand base pointers once; see try_execute_binary_vop2_simd.
+  const uint32_t *p0 = SimdAccess::lane_ptr(inst.src0, wf, 0);
+  const uint32_t *p1 = SimdAccess::lane_ptr(inst.src1, wf, 0);
+  const uint32_t *p2 = SimdAccess::lane_ptr(inst.src2, wf, 0);
+  uint32_t *pd = SimdAccess::dst_ptr(inst.vdst, wf, 0);
+  const auto a_bcast = p0 ? util::native<T>{} : util::broadcast<T>(inst.src0.read_scalar(wf));
+  const auto b_bcast = p1 ? util::native<T>{} : util::broadcast<T>(inst.src1.read_scalar(wf));
+  const auto c_bcast = p2 ? util::native<T>{} : util::broadcast<T>(inst.src2.read_scalar(wf));
   for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const auto a = apply_vop3_src_mod_f32<0>(read_simd<T>(inst.src0, wf, base), abs, neg);
-    const auto b = apply_vop3_src_mod_f32<1>(read_simd<T>(inst.src1, wf, base), abs, neg);
-    const auto c = apply_vop3_src_mod_f32<2>(read_simd<T>(inst.src2, wf, base), abs, neg);
+    const auto a = apply_vop3_src_mod_f32<0>(p0 ? util::load<T>(p0 + base) : a_bcast, abs, neg);
+    const auto b = apply_vop3_src_mod_f32<1>(p1 ? util::load<T>(p1 + base) : b_bcast, abs, neg);
+    const auto c = apply_vop3_src_mod_f32<2>(p2 ? util::load<T>(p2 + base) : c_bcast, abs, neg);
     const auto r = apply_vop3_dst_mod_f32(tern_op(a, b, c), omod, clamp);
-    write_simd<T>(inst.vdst, wf, base, r, chunk);
+    if (pd) {
+      util::masked_store<T>(pd + base, r, chunk);
+    } else {
+      alignas(util::native<T>) uint32_t buf[W];
+      util::blit_to_buffer<T>(buf, r);
+      inst.vdst.write_lane_chunk(wf, base, static_cast<uint32_t>(W), buf, chunk);
+    }
   }
   return true;
 }
@@ -1477,15 +1503,29 @@ template <typename Inst, typename FmaOp>
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
+  // Resolve operand base pointers once; see try_execute_binary_vop2_simd. vdst
+  // is both the third (accumulator) source and the destination — one pointer.
+  const uint32_t *p0 = SimdAccess::lane_ptr(inst.src0, wf, 0);
+  const uint32_t *p1 = SimdAccess::lane_ptr(inst.src1, wf, 0);
+  uint32_t *pd = SimdAccess::dst_ptr(inst.vdst, wf, 0);
+  const auto a_bcast = p0 ? util::native<T>{} : util::broadcast<T>(inst.src0.read_scalar(wf));
+  const auto b_bcast = p1 ? util::native<T>{} : util::broadcast<T>(inst.src1.read_scalar(wf));
+  const auto c_bcast = pd ? util::native<T>{} : util::broadcast<T>(inst.vdst.read_scalar(wf));
   for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const auto a = apply_vop3_src_mod_f32<0>(read_simd<T>(inst.src0, wf, base), abs, neg);
-    const auto b = apply_vop3_src_mod_f32<1>(read_simd<T>(inst.src1, wf, base), abs, neg);
-    const auto c = read_simd<T>(inst.vdst, wf, base); // accumulator, NO modifier
+    const auto a = apply_vop3_src_mod_f32<0>(p0 ? util::load<T>(p0 + base) : a_bcast, abs, neg);
+    const auto b = apply_vop3_src_mod_f32<1>(p1 ? util::load<T>(p1 + base) : b_bcast, abs, neg);
+    const auto c = pd ? util::load<T>(pd + base) : c_bcast; // accumulator, NO modifier
     const auto r = apply_vop3_dst_mod_f32(tern_op(a, b, c), omod, clamp);
-    write_simd<T>(inst.vdst, wf, base, r, chunk);
+    if (pd) {
+      util::masked_store<T>(pd + base, r, chunk);
+    } else {
+      alignas(util::native<T>) uint32_t buf[W];
+      util::blit_to_buffer<T>(buf, r);
+      inst.vdst.write_lane_chunk(wf, base, static_cast<uint32_t>(W), buf, chunk);
+    }
   }
   return true;
 }
