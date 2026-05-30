@@ -1,0 +1,10 @@
+# LeakSanitizer suppressions for hipFile tests.
+#
+# The HIP/HSA runtime allocates process-global state during initialization
+# that is not released by hipDeviceReset and has no documented teardown API.
+# These allocations show up under libhsa-runtime64 / libamdhip64 / libamd_comgr
+# and are irreducible per process — not a hipFile leak.
+
+leak:libhsa-runtime64
+leak:libamdhip64
+leak:libamd_comgr

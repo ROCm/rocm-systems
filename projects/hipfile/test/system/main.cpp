@@ -9,6 +9,7 @@
 #include <chrono> // IWYU pragma: keep
 #include <cstdlib>
 #include <gtest/gtest.h>
+#include <hip/hip_runtime_api.h>
 #include <thread>
 
 extern SystemTestOptions test_env;
@@ -26,10 +27,29 @@ sleepOnExit()
     }
 }
 
+// Reset every HIP device once all tests have finished, so per-device runtime
+// allocations are released before LSan reports leaks. The irreducible HSA-init
+// allocations that survive hipDeviceReset are handled by lsan.supp.
+class HipDeviceResetEnv : public ::testing::Environment {
+public:
+    void TearDown() override
+    {
+        int device_count = 0;
+        if (::hipGetDeviceCount(&device_count) != hipSuccess) {
+            return;
+        }
+        for (int i = 0; i < device_count; ++i) {
+            (void)::hipSetDevice(i);
+            (void)::hipDeviceReset();
+        }
+    }
+};
+
 int
 main(int argc, char **argv)
 {
     testing::InitGoogleTest(&argc, argv);
+    ::testing::AddGlobalTestEnvironment(new HipDeviceResetEnv);
 
     test_env.parseTestOptions(argc, argv);
     std::atexit(sleepOnExit);
