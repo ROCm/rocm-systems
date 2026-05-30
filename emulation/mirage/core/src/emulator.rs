@@ -38,7 +38,7 @@ pub trait Emulator {
     fn discover_plugins() -> Vec<PluginsDef>;
 
     /// get healthly status of the emulator, e.g. check if the underlying runtime is responsive
-    fn health(&self) -> bool;
+    fn healthly(&self) -> bool;
 
     /// get extra env varibles and files to inject into the environment
     fn injection_def(&self) -> InjectionDef;
