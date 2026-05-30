@@ -887,17 +887,88 @@ inline void exec_f64(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
 
 /// Fast path for v_mfma_f32_16x16x32_f16. This single MFMA shape is the only
 /// MFMA variant fired by OPT-125M fp16 eager forward (488k invocations per
-/// forward; ~4B internal MACs in shared/mfma_exec.h).
-///
-/// Thin forwarder kept for the generated call site. The generic exec_f32 now
-/// carries the same SIMD fast path (stack-allocated aligned A/B/C buffers,
-/// native-width FMA over N, batched VGPR gather/scatter via vgpr_words), so
-/// this shape no longer needs a hand-rolled specialization.
+/// forward; ~4B internal MACs in shared/mfma_exec.h). Kept as a dedicated
+/// specialization (rather than forwarding to generic exec_f32) because the
+/// compile-time M/N/K/B let the compiler fully unroll the 16-row x 32-K inner
+/// matmul into straight-line AVX-512 FMAs — a runtime-dimension loop is
+/// materially slower on this hot path. Hoists A and B into dense f32 buffers
+/// via extract_f16, runs the matmul as 16 zmm-wide f32 FMA rows (512 zmm FMAs
+/// per MFMA), and scatters directly back to VGPRs (no Result staging vector).
+/// VGPR access is batched through vgpr_words (one base pointer per operand, no
+/// per-element virtual read_vgpr/write_vgpr). Falls back to the generic
+/// exec_f32 when:
+///   - <experimental/simd> is unavailable
+///   - host native_simd<float> is not 16 lanes (i.e. no AVX-512)
+///   - cbsz/blgp lane permutation is non-default
+///   - RJ_FORCE_SCALAR is set
 inline void exec_f32_mfma_16x16x32_f16(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
                                        uint32_t s1, uint32_t s2, uint32_t const_acc,
                                        uint32_t cbsz, uint32_t abid, uint32_t blgp) {
-  exec_f32(cu, /*M=*/16, /*N=*/16, /*K=*/32, /*B=*/1, /*in_bits=*/16, dst, s0, s1, s2,
-           amdgpu::extract_f16, amdgpu::extract_f16, const_acc, cbsz, abid, blgp);
+  constexpr uint32_t M = 16, N = 16, K = 32, B = 1, in_bits = 16;
+  if constexpr (!util::has_stdx_simd) {
+    exec_f32(cu, M, N, K, B, in_bits, dst, s0, s1, s2, amdgpu::extract_f16, amdgpu::extract_f16,
+             const_acc, cbsz, abid, blgp);
+    return;
+  } else {
+    if (util::force_scalar() || cbsz != 0 || blgp != 0 || util::native<float>::size() != 16) {
+      exec_f32(cu, M, N, K, B, in_bits, dst, s0, s1, s2, amdgpu::extract_f16, amdgpu::extract_f16,
+               const_acc, cbsz, abid, blgp);
+      return;
+    }
+    const uint32_t wf = cu.wf_size();
+    const uint32_t *a_words = cu.vgpr_words(s0);
+    const uint32_t *b_words = cu.vgpr_words(s1);
+    const uint32_t *c_words = cu.vgpr_words(s2);
+    alignas(64) float A_buf[M * K]; // A[row][k]
+    alignas(64) float B_buf[K * N]; // B[k][col]
+    alignas(64) float C_buf[M * N]; // C[row][col]
+    for (uint32_t row = 0; row < M; ++row)
+      for (uint32_t col = 0; col < N; ++col) {
+        auto out = output_loc_32(M, N, row, col, 0);
+        C_buf[row * N + col] = (const_acc != ACC_FROM_VGPR)
+                                   ? std::bit_cast<float>(const_acc)
+                                   : std::bit_cast<float>(c_words[out.reg * wf + out.lane]);
+      }
+    for (uint32_t row = 0; row < M; ++row)
+      for (uint32_t k = 0; k < K; ++k) {
+        auto al = input_loc(M, K, B, row, k, 0, in_bits);
+        A_buf[row * K + k] = extract_f16(a_words, wf, al);
+      }
+    for (uint32_t k = 0; k < K; ++k)
+      for (uint32_t col = 0; col < N; ++col) {
+        auto bl = input_loc(N, K, B, col, k, 0, in_bits);
+        B_buf[k * N + col] = extract_f16(b_words, wf, bl);
+      }
+    // Dense 16x32 * 32x16 -> 16x16 matmul, 16-lane stdx FMA per row.
+    for (uint32_t row = 0; row < M; ++row) {
+      util::native<float> c_row;
+      c_row.copy_from(&C_buf[row * N], util::stdx::vector_aligned);
+      for (uint32_t k = 0; k < K; ++k) {
+        util::native<float> a_bcast(A_buf[row * K + k]);
+        util::native<float> b_row;
+        b_row.copy_from(&B_buf[k * N], util::stdx::vector_aligned);
+        c_row = util::stdx::fma(a_bcast, b_row, c_row);
+      }
+      c_row.copy_to(&C_buf[row * N], util::stdx::vector_aligned);
+    }
+    // Scatter directly back to VGPRs (no Result staging vector).
+    uint32_t *d_words = cu.vgpr_words(dst);
+    bool has_nan_or_inf = false;
+    for (uint32_t row = 0; row < M; ++row)
+      for (uint32_t col = 0; col < N; ++col) {
+        auto out = output_loc_32(M, N, row, col, 0);
+        float fv = C_buf[row * N + col];
+        d_words[out.reg * wf + out.lane] = std::bit_cast<uint32_t>(fv);
+        if (std::isnan(fv) || std::isinf(fv))
+          has_nan_or_inf = true;
+      }
+    if (has_nan_or_inf) {
+      util::Logger::vm([&](auto &os) {
+        os << std::format("MFMA_NAN_DETECTED (simd) dst=v{} s0=v{} s1=v{} s2=v{} 16x16x32_f16", dst,
+                          s0, s1, s2);
+      });
+    }
+  }
 }
 
 } // namespace amdgpu
