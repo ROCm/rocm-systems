@@ -3992,7 +3992,8 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
 #endif
     auto agentOwner = mappedHandle->mem_handle->agentOwner();
     int mmap_fd = -1;
-    if (agentOwner->driver().GetDeviceFd(agentOwner->node_id(), &mmap_fd) != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+    /* Do not check the return value of GetDeviceFd. We do not need mmap_fd so it is valid for mmap_fd to be -1*/
+    agentOwner->driver().GetDeviceFd(agentOwner->node_id(), &mmap_fd);
 
     if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mmap_fd,
                              mappedHandle->mem_handle->mmap_offset)) {
