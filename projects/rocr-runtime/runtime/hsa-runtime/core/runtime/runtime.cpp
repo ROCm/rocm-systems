@@ -691,10 +691,12 @@ hsa_status_t Runtime::AllowAccess(uint32_t num_agents,
     std::map<const void*, AllocationRegion>::const_iterator it = allocation_map_.find(ptr);
 
     if (it == allocation_map_.end()) {
+      printf("[%s] Calling VMemoryMapAllowAccess\n", __func__);
       /* See if this address was mapped via VMM */
       return VMemoryMapAllowAccess(ptr, HSA_ACCESS_PERMISSION_RW, agents,
                                    num_agents);
     }
+    printf("[%s] Found in allocation_map_\n", __func__);
 
     amd_region = reinterpret_cast<const AMD::MemoryRegion*>(it->second.region);
 
