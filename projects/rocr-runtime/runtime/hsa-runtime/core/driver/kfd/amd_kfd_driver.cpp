@@ -623,7 +623,8 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
   if (err != HSA_STATUS_SUCCESS) return err;
 
   // Import memory.
-  err = ImportDMABuf(dmabuf_fd, agent, handle, mem);
+  size_t imported_size;
+  err = ImportDMABuf(dmabuf_fd, agent, handle, &imported_size, mem);
   core::Runtime::runtime_singleton_->DmaBufClose(dmabuf_fd);
   if (err != HSA_STATUS_SUCCESS) return err;
   #endif
