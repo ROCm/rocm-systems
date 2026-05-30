@@ -371,6 +371,12 @@ inline native<float> flush_denorm_f32_simd(native<float> v) {
 /// returns the input NaN unchanged) and the negative-domain canonical qNaN
 /// (0x7FC00000) need explicit blends. The 16-bit (f16) ops reuse these on the
 /// f16->f32 intermediate, matching the scalar `f32_to_f16(rcp_f32(f16_to_f32))`.
+// Canonical positive quiet-NaN (f32), broadcast across the vector. Shared by
+// the transcendental fast paths below, which blend it into out-of-domain
+// lanes (negative sqrt/rsqrt, log of a negative) to match the scalar refs.
+inline const native<float> kQNaN =
+    std::bit_cast<native<float>>(native<uint32_t>(0x7FC00000u));
+
 inline native<float> rcp_f32_simd(native<float> a) {
   native<float> x = flush_denorm_f32_simd(a);
   native<float> r = flush_denorm_f32_simd(native<float>(1.0f) / x);
@@ -379,7 +385,6 @@ inline native<float> rcp_f32_simd(native<float> a) {
 }
 
 inline native<float> rsq_f32_simd(native<float> a) {
-  const native<float> kQNaN = std::bit_cast<native<float>>(native<uint32_t>(0x7FC00000u));
   native<float> x = flush_denorm_f32_simd(a);
   native<float> r = flush_denorm_f32_simd(native<float>(1.0f) / stdx::sqrt(x));
   stdx::where(x < native<float>(0.0f), r) = kQNaN; // negatives incl -Inf -> qNaN
@@ -388,7 +393,6 @@ inline native<float> rsq_f32_simd(native<float> a) {
 }
 
 inline native<float> sqrt_f32_simd(native<float> a) {
-  const native<float> kQNaN = std::bit_cast<native<float>>(native<uint32_t>(0x7FC00000u));
   native<float> r = stdx::sqrt(a); // no FTZ flush: scalar sqrt_f32 keeps denormals
   stdx::where(a < native<float>(0.0f), r) = kQNaN;
   stdx::where(stdx::isnan(a), r) = a;
@@ -396,7 +400,6 @@ inline native<float> sqrt_f32_simd(native<float> a) {
 }
 
 inline native<float> log_f32_simd(native<float> a) {
-  const native<float> kQNaN = std::bit_cast<native<float>>(native<uint32_t>(0x7FC00000u));
   native<float> x = flush_denorm_f32_simd(a);
   native<float> r = stdx::log2(x); // input-flush only; scalar log_f32 has no out-flush
   stdx::where(x < native<float>(0.0f), r) = kQNaN;
