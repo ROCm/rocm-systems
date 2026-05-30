@@ -3804,8 +3804,8 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
     }
 
     auto memoryHandle = std::make_unique<MemoryHandle>(region, size, flags_unused, shareable_handle, dmabuf_fd, mmap_offset, alloc_flags);
-    memory_handles.emplace(*memoryOnlyHandle, std::move(memoryHandle));
     *memoryOnlyHandle = MemoryHandle::Convert(memoryHandle.get());
+    memory_handles.emplace(*memoryOnlyHandle, std::move(memoryHandle));
     printf("[%s] Inserted memoryOnlyHandle: %p\n", __func__, *memoryOnlyHandle);
   }
   printf("[%s] Exit success\n", __func__);
@@ -4352,8 +4352,8 @@ hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
   printf("[%s] Enter\n", __func__);
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   auto memoryHandle = std::make_unique<MemoryHandle>(dmabuf_fd);
-  memory_handles.emplace(*memoryOnlyHandle, std::move(memoryHandle));
   *memoryOnlyHandle = MemoryHandle::Convert(memoryHandle.get());
+  memory_handles.emplace(*memoryOnlyHandle, std::move(memoryHandle));
   printf("[%s] Exit\n", __func__);
   return HSA_STATUS_SUCCESS;
 }
@@ -4384,8 +4384,8 @@ hsa_status_t Runtime::VMemoryImportFabricHandle(hsa_fabric_handle_t fabric_handl
                                                hsa_amd_vmem_alloc_handle_t* memoryOnlyHandle) {
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   auto memoryHandle = std::make_unique<MemoryHandle>(fabric_handle);
-  memory_handles.emplace(*memoryOnlyHandle, std::move(memoryHandle));
   *memoryOnlyHandle = MemoryHandle::Convert(memoryHandle.get());
+  memory_handles.emplace(*memoryOnlyHandle, std::move(memoryHandle));
   return HSA_STATUS_SUCCESS;
 }
 
