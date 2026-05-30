@@ -20,4 +20,13 @@ namespace rocprofsys::output::perfetto_log_filter
 void
 register_with_perfetto_logger();
 
+// Disables the filter and clears perfetto's log message callback.
+// Must be called from finalize before the spdlog logger's
+// function-local-static destructor runs, otherwise a perfetto worker
+// thread emitting a late log message can dereference a destroyed
+// logger (use-after-destruction UB). Safe to call multiple times and
+// safe to call when no registration has happened.
+void
+unregister_from_perfetto_logger();
+
 }  // namespace rocprofsys::output::perfetto_log_filter
