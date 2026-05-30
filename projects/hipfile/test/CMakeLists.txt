@@ -50,9 +50,18 @@ ais_add_test_executable(
 target_link_libraries(hipfile_tests PRIVATE GTest::gtest)
 target_link_libraries(hipfile_tests PRIVATE GTest::gtest_main)
 
+# LeakSanitizer suppressions for HIP/HSA runtime init allocations that have no
+# documented teardown API. Passed via PROPERTIES so it applies to every test
+# discovered by gtest_discover_tests (the TEST_LIST variable is unreliable
+# here — gtest_discover_tests defaults to POST_BUILD discovery, so the list
+# isn't populated at configure time). Defined locally because this CMakeLists
+# and test/amd_detail/CMakeLists.txt are added as siblings from the root
+# CMakeLists — variables don't cross over.
+set(HIPFILE_LSAN_ENV "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp:print_suppressions=0")
+
 ais_gtest_discover_tests(
     hipfile_tests
-    PROPERTIES "LABELS;unit;LABELS;hipfile"
+    PROPERTIES "LABELS;unit;LABELS;hipfile;ENVIRONMENT;${HIPFILE_LSAN_ENV}"
     TEST_LIST hipfile_unit_tests
 )
 
@@ -68,7 +77,7 @@ target_link_libraries(hipfile_system_tests PRIVATE Boost::program_options)
 ais_gtest_discover_tests(
     hipfile_system_tests
     EXTRA_ARGS --ais-capable-dir ${AIS_CAPABLE_DIR}
-    PROPERTIES "LABELS;system;LABELS;hipfile"
+    PROPERTIES "LABELS;system;LABELS;hipfile;ENVIRONMENT;${HIPFILE_LSAN_ENV}"
     TEST_LIST hipfile_system_tests
 )
 

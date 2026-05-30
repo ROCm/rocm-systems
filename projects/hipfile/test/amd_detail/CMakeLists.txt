@@ -52,9 +52,15 @@ target_link_libraries(internal_tests PRIVATE GTest::gmock)
 target_link_libraries(internal_tests PRIVATE GTest::gtest)
 target_link_libraries(internal_tests PRIVATE Boost::program_options)
 
+# LeakSanitizer suppressions for HIP/HSA runtime init allocations. The
+# suppression file lives one directory up (test/lsan.supp); this CMakeLists is
+# a sibling of test/CMakeLists.txt in the root build, so we define the env var
+# locally rather than relying on variable scope from the parent.
+set(HIPFILE_LSAN_ENV "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../lsan.supp:print_suppressions=0")
+
 ais_gtest_discover_tests(
     internal_tests
-    PROPERTIES "LABELS;unit;LABELS;internal"
+    PROPERTIES "LABELS;unit;LABELS;internal;ENVIRONMENT;${HIPFILE_LSAN_ENV}"
     TEST_LIST internal_unit_tests
 )
 
