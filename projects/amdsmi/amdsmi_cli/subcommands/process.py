@@ -88,6 +88,12 @@ class ProcessCommands:
             self.helpers.handle_watch(args=args, subcommand=self.process, logger=self.logger)
             return
 
+        # Handle --sort-by-pid: group process output by PID across all GPUs
+        if getattr(args, "sort_by_pid", False):
+            handles = args.gpu if isinstance(args.gpu, list) else [args.gpu]
+            self._process_sort_by_pid(args, handles, watching_output)
+            return
+
         # Handle multiple GPUs
         if isinstance(args.gpu, list):
             if len(args.gpu) > 1:
@@ -283,3 +289,112 @@ class ProcessCommands:
 
         if watching_output:  # End of single gpu add to watch_output
             self.logger.store_watch_output(multiple_device_enabled=multiple_devices)
+
+    def _process_sort_by_pid(self, args, handles, watching_output):
+        """Process output grouped by PID instead of GPU."""
+        try:
+            pid_list = amdsmi_interface.amdsmi_get_gpu_process_list_by_pid(handles)
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            logging.debug("Failed to get process list by pid | %s", e.get_error_info())
+            raise e
+
+        # Apply --pid filter
+        if getattr(args, "pid", None):
+            pid_list = [p for p in pid_list if p["pid"] == args.pid]
+
+        # Apply --name filter
+        if getattr(args, "name", None):
+            pid_list = [p for p in pid_list if p["name"].lower() == str(args.name).lower()]
+
+        engine_usage_unit = "ns"
+        memory_usage_unit = "B"
+        evicted_time_unit = "ms"
+        sdma_usage_unit = "us"
+
+        for proc in pid_list:
+            for gpu_entry in proc["gpus"]:
+                if self.logger.is_human_readable_format():
+                    gpu_entry["mem"] = self.helpers.convert_bytes_to_readable(gpu_entry["mem"])
+                    for key in ("gtt_mem", "cpu_mem", "vram_mem"):
+                        gpu_entry["memory_usage"][key] = self.helpers.convert_bytes_to_readable(
+                            gpu_entry["memory_usage"][key]
+                        )
+
+                mem_unit = "" if self.logger.is_human_readable_format() else memory_usage_unit
+                gpu_entry["mem"] = self.helpers.unit_format(self.logger, gpu_entry["mem"], mem_unit)
+                gpu_entry["evicted_time"] = self.helpers.unit_format(
+                    self.logger, gpu_entry["evicted_time"], evicted_time_unit
+                )
+                gpu_entry["sdma_usage"] = self.helpers.unit_format(
+                    self.logger, gpu_entry["sdma_usage"], sdma_usage_unit
+                )
+                for key in gpu_entry["engine_usage"]:
+                    gpu_entry["engine_usage"][key] = self.helpers.unit_format(
+                        self.logger, gpu_entry["engine_usage"][key], engine_usage_unit
+                    )
+                for key in gpu_entry["memory_usage"]:
+                    gpu_entry["memory_usage"][key] = self.helpers.unit_format(
+                        self.logger, gpu_entry["memory_usage"][key], mem_unit
+                    )
+
+        if not pid_list:
+            pid_list = [
+                {
+                    "pid": "N/A",
+                    "name": "N/A",
+                    "gpus": [],
+                    "message": "No running processes detected",
+                }
+            ]
+
+        if self.logger.is_json_format():
+            for proc in pid_list:
+                self.logger.output = proc
+                self.logger.store_multiple_device_output()
+            self.logger.print_output(multiple_device_enabled=True)
+            return
+
+        if self.logger.is_human_readable_format():
+            lines = []
+            for proc in pid_list:
+                if proc.get("message"):
+                    lines.append(proc["message"])
+                    continue
+
+                lines.append(f"PID: {proc['pid']}  NAME: {proc['name']}")
+                for gpu_entry in proc["gpus"]:
+                    gpu_idx = gpu_entry["gpu_index"]
+                    parts = [f"GPU: {gpu_idx}"]
+                    if isinstance(gpu_entry["mem"], dict):
+                        parts.append(f"MEM: {gpu_entry['mem']['value']} {gpu_entry['mem']['unit']}")
+                    else:
+                        parts.append(f"MEM: {gpu_entry['mem']}")
+                    eng = gpu_entry.get("engine_usage", {})
+                    if isinstance(eng.get("gfx"), dict):
+                        parts.append(f"GFX: {eng['gfx']['value']} {eng['gfx']['unit']}")
+                        parts.append(f"ENC: {eng['enc']['value']} {eng['enc']['unit']}")
+                    else:
+                        parts.append(f"GFX: {eng.get('gfx', 'N/A')}")
+                        parts.append(f"ENC: {eng.get('enc', 'N/A')}")
+                    lines.append("    " + "  ".join(parts))
+                lines.append("")  # blank line between PIDs
+
+            print("\n".join(lines))
+
+            if watching_output:
+                self.logger.store_watch_output(multiple_device_enabled=False)
+            return
+
+        if self.logger.is_csv_format():
+            for proc in pid_list:
+                for gpu_entry in proc["gpus"]:
+                    row = {"pid": proc["pid"], "name": proc["name"]}
+                    row["gpu_index"] = gpu_entry["gpu_index"]
+                    row.update(self.logger.flatten_dict(gpu_entry["memory_usage"]))
+                    row.update(self.logger.flatten_dict(gpu_entry["engine_usage"]))
+                    row["sdma_usage"] = gpu_entry["sdma_usage"]
+                    row["cu_occupancy"] = gpu_entry["cu_occupancy"]
+                    row["evicted_time"] = gpu_entry["evicted_time"]
+                    self.logger.output = row
+                    self.logger.store_multiple_device_output()
+            self.logger.print_output(multiple_device_enabled=True, watching_output=watching_output)

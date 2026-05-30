@@ -211,14 +211,23 @@ class MonitorCommands:
                 for gpu in args.gpu:
                     stored_gpus.append(gpu)
 
-                # Store output from multiple devices without printing to console
-                for device_handle in args.gpu:
-                    self.monitor(
-                        args,
-                        multiple_devices=True,
-                        watching_output=watching_output,
-                        gpu=device_handle,
-                    )
+                # When --sort-by-pid, suppress per-GPU process collection in the
+                # recursive monitor() calls. Use an instance attribute so args is
+                # not mutated (exception-safe with try/finally).
+                sort_by_pid = getattr(args, "sort_by_pid", False) and args.process
+                self._monitor_suppress_process_collection = sort_by_pid
+
+                try:
+                    # Store output from multiple devices without printing to console
+                    for device_handle in args.gpu:
+                        self.monitor(
+                            args,
+                            multiple_devices=True,
+                            watching_output=watching_output,
+                            gpu=device_handle,
+                        )
+                finally:
+                    self._monitor_suppress_process_collection = False
 
                 # Reload original gpus
                 args.gpu = stored_gpus
@@ -228,6 +237,13 @@ class MonitorCommands:
                     if self.logger.is_csv_format():
                         dual_csv_output = True
 
+                # When --sort-by-pid, route PID-grouped data through the logger:
+                #   - JSON/CSV: rows appended to multiple_device_output
+                #   - human-readable: ASCII table stored in _sort_by_pid_secondary_table
+                if sort_by_pid:
+                    self._sort_by_pid_secondary_table = None
+                    self._monitor_inject_sort_by_pid(args, watching_output)
+
                 # Flush the output
                 self.logger.print_output(
                     multiple_device_enabled=True,
@@ -235,6 +251,11 @@ class MonitorCommands:
                     tabular=True,
                     dual_csv_output=dual_csv_output,
                 )
+
+                # Human-readable PID-grouped table: route via logger destination
+                # so --file redirection is honored (only populated in HR mode).
+                if sort_by_pid and self._sort_by_pid_secondary_table:
+                    self._write_via_logger_destination(self._sort_by_pid_secondary_table)
 
                 # Add output to total watch output and clear multiple device output
                 if watching_output:
@@ -799,7 +820,10 @@ class MonitorCommands:
         dual_csv_output = False
 
         # Store process list separately
-        if args.process:
+        # _monitor_suppress_process_collection is set by the multi-GPU dispatcher
+        # when --sort-by-pid is active; per-GPU collection is replaced by the
+        # PID-grouped aggregation rendered after the loop.
+        if args.process and not getattr(self, "_monitor_suppress_process_collection", False):
             # Populate initial processes
             try:
                 process_list = amdsmi_interface.amdsmi_get_gpu_process_list(args.gpu)
@@ -1150,3 +1174,158 @@ class MonitorCommands:
                 tabular=True,
                 dual_csv_output=dual_csv_output,
             )
+
+    def _write_via_logger_destination(self, text):
+        """Write text to the logger's destination (stdout or output file).
+
+        Used for content that does not fit the logger's structured output path
+        but must still honor --file redirection.
+        """
+        if self.logger.destination == "stdout":
+            print(text)
+        else:
+            with self.logger.destination.open("a", encoding="utf-8") as f:
+                f.write(text + "\n")
+
+    def _monitor_inject_sort_by_pid(self, args, watching_output):
+        """Render PID-grouped process info for monitor --process --sort-by-pid.
+
+        For JSON/CSV the rows are pushed into the logger's multiple_device_output
+        so they flow through print_output() like every other monitor row. For
+        human-readable output an ASCII table is stored in
+        self._sort_by_pid_secondary_table; the caller is responsible for writing
+        it via _write_via_logger_destination after the primary table.
+        """
+        handles = args.gpu if isinstance(args.gpu, list) else [args.gpu]
+        try:
+            pid_list = amdsmi_interface.amdsmi_get_gpu_process_list_by_pid(handles)
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            logging.debug("Failed to get process list by pid | %s", e.get_error_info())
+            return
+
+        # Unit string constants — hoisted out of the loop (style cleanup)
+        memory_usage_unit_default = "B"
+        evicted_time_unit = "ms"
+        sdma_usage_unit = "us"
+
+        # Build one entry per PID+GPU combination, grouped so all GPUs for a PID
+        # appear together.
+        filtered = []
+        for proc in pid_list:
+            for gpu_entry in proc["gpus"]:
+                memory_usage_unit = memory_usage_unit_default
+
+                mem_usage = gpu_entry["mem"]
+                mem_dict = {
+                    "gtt_mem": gpu_entry["memory_usage"]["gtt_mem"],
+                    "cpu_mem": gpu_entry["memory_usage"]["cpu_mem"],
+                    "vram_mem": gpu_entry["memory_usage"]["vram_mem"],
+                }
+
+                if self.logger.is_human_readable_format():
+                    mem_usage = self.helpers.convert_bytes_to_readable(mem_usage)
+                    for k in mem_dict:
+                        mem_dict[k] = self.helpers.convert_bytes_to_readable(mem_dict[k])
+                    memory_usage_unit = ""
+
+                mem_usage = self.helpers.unit_format(self.logger, mem_usage, memory_usage_unit)
+                for k in mem_dict:
+                    mem_dict[k] = self.helpers.unit_format(
+                        self.logger, mem_dict[k], memory_usage_unit
+                    )
+
+                cu = gpu_entry["cu_occupancy"]
+                if cu == "N/A":
+                    cu_str = "N/A"
+                else:
+                    cu_str = self.helpers.unit_format(self.logger, cu, "")
+
+                if self.logger.is_human_readable_format():
+                    sdma = self.helpers.convert_time_to_readable(gpu_entry["sdma_usage"], "us")
+                    evict = self.helpers.convert_time_to_readable(gpu_entry["evicted_time"], "ms")
+                else:
+                    sdma = self.helpers.unit_format(
+                        self.logger, gpu_entry["sdma_usage"], sdma_usage_unit
+                    )
+                    evict = self.helpers.unit_format(
+                        self.logger, gpu_entry["evicted_time"], evicted_time_unit
+                    )
+
+                info = {
+                    "name": proc["name"],
+                    "pid": proc["pid"],
+                    "memory_usage": mem_dict,
+                    "mem_usage": mem_usage,
+                    "cu_occupancy": cu_str,
+                    "sdma_usage": sdma,
+                    "evicted_time": evict,
+                }
+                filtered.append({"gpu_index": gpu_entry["gpu_index"], "process_info": info})
+
+        if not filtered:
+            filtered.append({"gpu_index": "N/A", "process_info": "No running processes detected"})
+
+        # JSON / CSV: push rows into the logger's multiple_device_output so they
+        # flow through print_output() — never write a raw ASCII tail that would
+        # corrupt structured output.
+        if self.logger.is_json_format() or self.logger.is_csv_format():
+            for item in filtered:
+                info = item["process_info"]
+                if isinstance(info, str):
+                    row = {"gpu_index": item["gpu_index"], "message": info}
+                else:
+                    row = {
+                        "gpu_index": item["gpu_index"],
+                        "pid": info["pid"],
+                        "name": info["name"],
+                        "mem_usage": info.get("mem_usage", "N/A"),
+                        "cu_occupancy": info.get("cu_occupancy", "N/A"),
+                        "sdma_usage": info.get("sdma_usage", "N/A"),
+                        "evicted_time": info.get("evicted_time", "N/A"),
+                    }
+                    mu = info.get("memory_usage", {})
+                    if isinstance(mu, dict):
+                        if self.logger.is_csv_format():
+                            row.update(self.logger.flatten_dict(mu))
+                        else:
+                            row["memory_usage"] = mu
+                self.logger.output = row
+                self.logger.store_multiple_device_output()
+            return
+
+        # Human-readable: build the ASCII secondary table; the caller writes it
+        # via _write_via_logger_destination after print_output().
+        header = (
+            "\nPROCESS INFO (grouped by PID):\n"
+            + "GPU".rjust(3)
+            + "NAME".rjust(19)
+            + "PID".rjust(9)
+            + "GTT_MEM".rjust(10)
+            + "CPU_MEM".rjust(10)
+            + "VRAM_MEM".rjust(10)
+            + "MEM_USG".rjust(10)
+            + "CU%".rjust(9)
+            + "SDMA".rjust(8)
+            + "EVICT".rjust(8)
+        )
+        rows = []
+        for item in filtered:
+            info = item["process_info"]
+            if isinstance(info, str):
+                rows.append("  " + info)
+                continue
+            name = str(info.get("name", "N/A")).split("/")[-1][:17]
+            row = str(item["gpu_index"]).rjust(3)
+            row += name.rjust(19)
+            row += str(info["pid"]).rjust(9)
+            mu = info.get("memory_usage", {})
+            row += str(mu.get("gtt_mem", "N/A")).rjust(10)
+            row += str(mu.get("cpu_mem", "N/A")).rjust(10)
+            row += str(mu.get("vram_mem", "N/A")).rjust(10)
+            row += str(info.get("mem_usage", "N/A")).rjust(10)
+            row += str(info.get("cu_occupancy", "N/A")).rjust(9)
+            row += str(info.get("sdma_usage", "N/A")).rjust(8)
+            row += str(info.get("evicted_time", "N/A")).rjust(8)
+            rows.append(row)
+
+        self._sort_by_pid_secondary_table = header + "\n" + "\n".join(rows)
