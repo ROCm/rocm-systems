@@ -18,6 +18,11 @@ from rocshmem4py import (
     rocshmem_team_destroy,
     rocshmem_team_translate_pe,
     rocshmem_barrier_all,
+    rocshmem_barrier,
+    rocshmem_team_sync,
+    rocshmem_barrier_on_stream,
+    rocshmem_team_sync_on_stream,
+    hip_device_synchronize,
 )
 from conftest import requires_multi_pe
 
@@ -261,6 +266,74 @@ def test_team_destroy_idempotent_on_special_handles():
     rocshmem_team_destroy(ROCSHMEM_TEAM_INVALID)
     rocshmem_team_destroy(ROCSHMEM_TEAM_WORLD)
     # Just survives without segfault.
+
+
+@requires_multi_pe
+def test_team_barrier_and_sync_on_split_team():
+    """Members participate in team sync/barrier; non-members can no-op safely."""
+    n = rocshmem_n_pes()
+    if n < 4:
+        pytest.skip("requires >= 4 PEs to exercise member/non-member behavior")
+
+    cfg = TeamConfig()
+    cfg.num_contexts = 1
+    even_size = (n + 1) // 2
+    status, even_team = rocshmem_team_split_strided(
+        ROCSHMEM_TEAM_WORLD, 0, 2, even_size, cfg, 0,
+    )
+    assert status == ROCSHMEM_SUCCESS
+
+    # Members call into the team-scoped primitives; non-members pass INVALID
+    # and rely on no-op semantics.
+    rocshmem_team_sync(even_team)
+    rocshmem_barrier(even_team)
+
+    rocshmem_barrier_all()
+    rocshmem_team_destroy(even_team)
+    rocshmem_barrier_all()
+
+
+def test_team_barrier_sync_on_stream_symbols_exported():
+    """The stream-ordered team barrier/sync bindings are exported."""
+    assert hasattr(rocshmem4py, "rocshmem_barrier_on_stream")
+    assert hasattr(rocshmem4py, "rocshmem_team_sync_on_stream")
+
+
+@requires_multi_pe
+def test_team_barrier_and_sync_on_stream_on_split_team():
+    """Stream-ordered team sync/barrier; members enqueue, non-members no-op.
+
+    Uses the default stream (handle 0) so this exercises the real binding
+    path on both the torch and the mpi4py bootstraps (no torch dependency).
+    """
+    n = rocshmem_n_pes()
+    if n < 4:
+        pytest.skip("requires >= 4 PEs to exercise member/non-member behavior")
+
+    cfg = TeamConfig()
+    cfg.num_contexts = 1
+    even_size = (n + 1) // 2
+    status, even_team = rocshmem_team_split_strided(
+        ROCSHMEM_TEAM_WORLD, 0, 2, even_size, cfg, 0,
+    )
+    assert status == ROCSHMEM_SUCCESS
+
+    # Members enqueue the team collective on the default stream; non-members
+    # pass ROCSHMEM_TEAM_INVALID and rely on the documented no-op (nothing
+    # enqueued).  Synchronizing the device then re-joining barrier_all confirms
+    # the enqueued kernels completed without a hang.
+    rocshmem_team_sync_on_stream(even_team, 0)
+    rocshmem_barrier_on_stream(even_team, 0)
+    hip_device_synchronize()
+
+    # Passing the INVALID sentinel explicitly must be a no-op for every rank.
+    rocshmem_barrier_on_stream(ROCSHMEM_TEAM_INVALID, 0)
+    rocshmem_team_sync_on_stream(ROCSHMEM_TEAM_INVALID, 0)
+    hip_device_synchronize()
+
+    rocshmem_barrier_all()
+    rocshmem_team_destroy(even_team)
+    rocshmem_barrier_all()
 
 
 @requires_multi_pe

@@ -152,6 +152,7 @@ declare -A TEST_NUMBERS=(
   ["reduce_on_stream"]="117"
   ["host_ctx_create"]="118"
   ["teamsplit2d"]="119"
+  ["hostteamsyncbarrier"]="120"
 )
 
 ExecTest() {
@@ -640,6 +641,9 @@ TestOther() {
   ExecTest  "teamctxsubsetparentinfra" 5  1            1
   export ROCSHMEM_MAX_NUM_HOST_CONTEXTS=1024
   ExecTest  "host_ctx_create"          2       1            1
+  ExecTest  "hostteamsyncbarrier"      2  1            1
+  ExecTest  "hostteamsyncbarrier"      4  1            1
+  ExecTest  "hostteamsyncbarrier"      8  1            1
   unset ROCSHMEM_MAX_NUM_CONTEXTS
   unset ROCSHMEM_MAX_NUM_HOST_CONTEXTS
   
