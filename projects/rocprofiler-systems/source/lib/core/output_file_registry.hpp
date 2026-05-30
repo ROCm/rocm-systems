@@ -57,7 +57,8 @@ public:
 
     void register_file(std::string path, output_format format,
                        std::optional<pid_t> pid = std::nullopt);
-    void register_file(std::string path, output_format format, std::string component_name,
+    void register_file(std::string path, output_format format,
+                       const std::string&   component_name,
                        std::optional<pid_t> pid = std::nullopt);
 
     // Filtered to the current session. Older records stay in internal

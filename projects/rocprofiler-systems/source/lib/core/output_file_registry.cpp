@@ -96,7 +96,8 @@ output_file_registry::register_file(std::string path, output_format format,
 
 void
 output_file_registry::register_file(std::string path, output_format format,
-                                    std::string component_name, std::optional<pid_t> pid)
+                                    const std::string&   component_name,
+                                    std::optional<pid_t> pid)
 {
     push_entry(make_entry(std::move(path), format, component_name), pid);
 }
