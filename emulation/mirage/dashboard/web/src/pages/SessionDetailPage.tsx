@@ -1,172 +1,192 @@
-import { useEffect, useState, useRef } from "react";
-import { useParams, Link } from "react-router-dom";
-import { getSessionDetail, getSessionLog } from "../api/client";
-import type { SessionDetail } from "../api/types";
-import { StatusBadge } from "../components/StatusBadge";
-import { PhaseBadge } from "../components/PhaseBadge";
-
-function formatUptime(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  return `${h}h ${m}m`;
-}
-
-function LogStatusBadge({ status }: { status: string }) {
-  const map: Record<string, { label: string; cls: string }> = {
-    pulling: { label: "Pulling Image", cls: "badge-pulling" },
-    starting: { label: "Starting", cls: "badge-starting" },
-    ready: { label: "Ready", cls: "badge-ready" },
-    error: { label: "Error", cls: "badge-error" },
-  };
-  const info = map[status] ?? { label: status || "–", cls: "" };
-  return <span className={`session-log-badge ${info.cls}`}>{info.label}</span>;
-}
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { Link, useParams } from "react-router-dom";
+import * as api from "../api/client";
+import type { ExecListItem, SessionState, StreamPacket } from "../api/types";
 
 export function SessionDetailPage() {
-  const { name } = useParams<{ name: string }>();
-  const [detail, setDetail] = useState<SessionDetail | null>(null);
+  const { id } = useParams<{ id: string }>();
+  const [session, setSession] = useState<SessionState | null>(null);
+  const [execs, setExecs] = useState<ExecListItem[]>([]);
   const [error, setError] = useState("");
-  const [sessionLog, setSessionLog] = useState("");
-  const [logStatus, setLogStatus] = useState("");
-  const logRef = useRef<HTMLPreElement>(null);
+  const [command, setCommand] = useState("/bin/sh -c 'echo hello'");
+  const [activeExecId, setActiveExecId] = useState<string | null>(null);
 
-  // Poll session detail (fast during pulling/starting)
-  useEffect(() => {
-    if (!name) return;
-    getSessionDetail(name)
-      .then(setDetail)
-      .catch((e) => setError(String(e)));
-
-    const booting =
-      detail?.phase === "Pulling" || detail?.phase === "Starting";
-    const interval = booting ? 1000 : 5000;
-    const id = setInterval(() => {
-      getSessionDetail(name).then(setDetail).catch(() => {});
-    }, interval);
-    return () => clearInterval(id);
-  }, [name, detail?.phase]);
-
-  // Poll session log (fast while pulling, slow once ready)
-  useEffect(() => {
-    if (!name) return;
-    let active = true;
-    const poll = () => {
-      if (!active) return;
-      getSessionLog(name).then((snap) => {
-        if (!active) return;
-        setSessionLog(snap.log);
-        setLogStatus(snap.status);
-        // Poll fast while pulling/starting, slow once ready/error
-        const interval =
-          snap.status === "pulling" ? 500 :
-          snap.status === "starting" ? 1000 : 5000;
-        setTimeout(poll, interval);
-      }).catch(() => {
-        if (active) setTimeout(poll, 5000);
-      });
-    };
-    poll();
-    return () => {
-      active = false;
-    };
-  }, [name]);
-
-  // Auto-scroll log to bottom
-  useEffect(() => {
-    if (logRef.current) {
-      logRef.current.scrollTop = logRef.current.scrollHeight;
+  const refresh = useCallback(async () => {
+    if (!id) return;
+    try {
+      const [s, e] = await Promise.all([api.getSession(id), api.listExecs(id)]);
+      setSession(s);
+      setExecs(e);
+    } catch (err) {
+      setError(String(err));
     }
-  }, [sessionLog]);
+  }, [id]);
 
-  if (error) return <div className="error">{error}</div>;
-  if (!detail) return <div className="loading">Loading...</div>;
+  useEffect(() => {
+    refresh();
+    const t = setInterval(refresh, 2000);
+    return () => clearInterval(t);
+  }, [refresh]);
+
+  async function onRun(e: FormEvent) {
+    e.preventDefault();
+    if (!id) return;
+    setError("");
+    const parts = command.trim().split(/\s+/);
+    if (!parts.length || !parts[0]) {
+      setError("command is required");
+      return;
+    }
+    try {
+      const r = await api.createExec(id, {
+        command: parts[0],
+        args: parts.slice(1),
+        keep: true,
+      });
+      setActiveExecId(r.id);
+      await refresh();
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
+  async function onRemove(execId: string) {
+    if (!id) return;
+    try {
+      await api.deleteExec(id, execId);
+      if (activeExecId === execId) setActiveExecId(null);
+      await refresh();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  if (!id) return <div className="page">missing id</div>;
 
   return (
     <div className="page">
       <Link to="/sessions" className="back-link">
-        &larr; Sessions
+        &larr; back to sessions
       </Link>
-      <div className="page-header">
-        <h2>{detail.name}</h2>
-        <PhaseBadge phase={detail.phase} message={detail.progress_message} />
-        <StatusBadge status={detail.health} />
-      </div>
-
-      {detail.error_message && (
-        <div className="error">{detail.error_message}</div>
+      <h2>
+        Session <code>{id}</code>
+      </h2>
+      {error && <div className="error" role="alert">{error}</div>}
+      {session && (
+        <p>
+          <strong>Health:</strong> {session.health.healthy ? "healthy" : "not ready"}
+          {" — "}
+          <strong>State:</strong> {session.health.state ?? ""}
+        </p>
       )}
 
-      <div className="detail-grid">
-        <div className="detail-item">
-          <label>Simulator</label>
-          <span>{detail.simulator}</span>
-        </div>
-        <div className="detail-item">
-          <label>Profile</label>
-          <span>{detail.profile.name}</span>
-        </div>
-        <div className="detail-item">
-          <label>GPU</label>
-          <span>
-            <code>{detail.profile.gpu}</code>
-          </span>
-        </div>
-        <div className="detail-item">
-          <label>Mode</label>
-          <span>{detail.profile.mode}</span>
-        </div>
-        <div className="detail-item">
-          <label>Cluster</label>
-          <span>
-            {detail.profile.num_gpus} GPU(s) &times;{" "}
-            {detail.profile.num_nodes} node(s)
-          </span>
-        </div>
-        <div className="detail-item">
-          <label>Image</label>
-          <span>
-            <code>{detail.image}</code>
-          </span>
-        </div>
-      </div>
+      <h3>Execs</h3>
+      {execs.length === 0 ? (
+        <p data-testid="no-execs">(no execs)</p>
+      ) : (
+        <table className="data-table" data-testid="execs-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Started</th>
+              <th>Ended</th>
+              <th>Exit</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {execs.map((e) => (
+              <tr key={e.id} data-testid={`exec-row-${e.id}`}>
+                <td>
+                  <code>{e.id}</code>
+                </td>
+                <td>{e.status.started ? "yes" : "no"}</td>
+                <td>{e.status.ended ? "yes" : "no"}</td>
+                <td>{e.status.exit_code ?? "-"}</td>
+                <td>
+                  <button
+                    type="button"
+                    onClick={() => setActiveExecId(e.id)}
+                    data-testid={`attach-${e.id}`}
+                  >
+                    Attach
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onRemove(e.id)}
+                    data-testid={`remove-${e.id}`}
+                  >
+                    Remove
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
 
-      <h3>Performance</h3>
-      <div className="card-grid">
-        <div className="stat-card">
-          <span className="stat-value">
-            {formatUptime(detail.uptime.seconds)}
-          </span>
-          <span className="stat-label">Uptime</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-value">{detail.ticks.toLocaleString()}</span>
-          <span className="stat-label">Ticks</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-value">{detail.ipc.toFixed(2)}</span>
-          <span className="stat-label">IPC</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-value">
-            {detail.simulation_speed.toFixed(2)}x
-          </span>
-          <span className="stat-label">Speed</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-value">{detail.active_contexts}</span>
-          <span className="stat-label">Active Contexts</span>
-        </div>
-      </div>
+      <h3>Run a command</h3>
+      <form onSubmit={onRun} className="form" data-testid="run-exec">
+        <label>
+          Command
+          <input
+            value={command}
+            onChange={(e) => setCommand(e.target.value)}
+            data-testid="exec-command"
+          />
+        </label>
+        <button type="submit" data-testid="submit-exec">
+          Run
+        </button>
+      </form>
 
-      <div className="session-log-header">
-        <h3>Docker Output</h3>
-        <LogStatusBadge status={logStatus} />
-      </div>
-      <pre className="session-log" ref={logRef}>
-        {sessionLog || "Waiting for output…"}
-      </pre>
+      {activeExecId && id && (
+        <AttachView sessionId={id} execId={activeExecId} />
+      )}
     </div>
+  );
+}
+
+function AttachView(props: { sessionId: string; execId: string }) {
+  const [output, setOutput] = useState("");
+  const [exitCode, setExitCode] = useState<number | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+
+  useEffect(() => {
+    setOutput("");
+    setExitCode(null);
+    const ws = new WebSocket(api.attachUrl(props.sessionId, props.execId));
+    wsRef.current = ws;
+    ws.onmessage = (ev) => {
+      try {
+        const pkt = JSON.parse(ev.data as string) as StreamPacket;
+        if ("Output" in pkt) {
+          const text = new TextDecoder().decode(
+            new Uint8Array(pkt.Output.data),
+          );
+          setOutput((cur) => cur + text);
+        } else if ("ExecExit" in pkt) {
+          setExitCode(pkt.ExecExit.exit_code);
+        }
+      } catch {
+        // ignore malformed frames
+      }
+    };
+    return () => {
+      ws.close();
+      wsRef.current = null;
+    };
+  }, [props.sessionId, props.execId]);
+
+  return (
+    <>
+      <h3>Attached: {props.execId}</h3>
+      <pre className="terminal-output" data-testid="attach-output">
+        {output || "(no output yet)"}
+      </pre>
+      {exitCode !== null && (
+        <p data-testid="attach-exit">Exited with code {exitCode}</p>
+      )}
+    </>
   );
 }

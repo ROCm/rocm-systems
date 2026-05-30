@@ -1,115 +1,77 @@
-/// TypeScript types matching the simulator.fbs FlatBuffer schema.
-/// These mirror mirage.simulator.* exactly.
-
-// ── Enums ──────────────────────────────────────────────────────────────────
-
-export type GpuFamily = "Unknown" | "AmdCdna" | "AmdRdna" | "RiscV";
-
-export type SimulatorMode = "Functional" | "Clocked" | "CycleAccurate";
-
-export type HealthStatus = "Unknown" | "Healthy" | "Unhealthy";
-
-export type SessionPhase =
-  | "Pulling"
-  | "Starting"
-  | "Running"
-  | "Failed"
-  | "ShuttingDown"
-  | "Stale";
-
-// ── Core types (from common.fbs) ───────────────────────────────────────────
-
-export interface GpuDef {
-  name: string;
-  arch: string;
-  family: GpuFamily;
-  description: string;
-}
+/// TypeScript types matching the new mirage_core / mirage_ctl API.
+///
+/// These are intentionally a thin echo of the Rust types. Fields that
+/// the dashboard doesn't render are still typed loosely as
+/// `Record<string, unknown>` so future schema changes don't break the
+/// build.
 
 export interface ProfileDef {
   name: string;
-  simulator: string;
-  mode: SimulatorMode;
-  gpu: string;
-  num_gpus: number;
-  num_nodes: number;
+  description?: string;
+  emulator: EmulatorDef;
+}
+
+export interface EmulatorDef {
+  emulator: string;
+  plugins: Record<string, Record<string, unknown>>;
+  nodes: number;
+  gpus_per_node: number;
+  exec_mode: "Functional" | "Clocked";
+  options: Record<string, unknown>;
+  topology: Record<string, unknown>;
+}
+
+export interface SessionHealth {
+  timestamp: string;
+  healthy: boolean;
+  state?: string;
+  terminal: boolean;
+  message?: string;
 }
 
 export interface SessionDef {
-  name: string;
-  profile: string;
-  image: string;
-}
-
-export interface Time {
-  seconds: number;
-  picoseconds: number;
-}
-
-// ── Dashboard types (from simulator.fbs) ───────────────────────────────────
-
-export interface OverviewData {
-  simulator_count: number;
-  profile_count: number;
-  session_count: number;
-}
-
-export interface SimulatorSummary {
-  name: string;
-  version: string;
-  description: string;
-  supported_gpus: GpuDef[];
-  supports_custom_gpus: boolean;
-  supported_modes: SimulatorMode[];
-  active_session_count: number;
-}
-
-export interface SessionSummary {
-  name: string;
-  profile: string;
-  simulator: string;
-  image: string;
-  health_status: HealthStatus;
-  phase: SessionPhase;
-  progress_message: string;
-}
-
-export interface SessionDetail {
-  name: string;
-  profile: ProfileDef;
-  simulator: string;
-  image: string;
-  health: HealthStatus;
-  uptime: Time;
-  error_message: string;
-  ticks: number;
-  ipc: number;
-  simulation_speed: number;
-  active_contexts: number;
-  phase: SessionPhase;
-  progress_message: string;
-}
-
-export interface ServiceResult {
-  ok: boolean;
-  error: string;
-}
-
-// ── Run types (from simulator.fbs — Dashboard.ListRuns / CreateRun) ────────
-
-export interface RunRecord {
   id: string;
-  session: string;
-  command: string;
-  status: string;
-  exit_code: number;
-  output: string;
+  profile: unknown;
+  container?: unknown;
+  workdir: string;
+  created_at: string;
 }
 
-// ── Terminal types (from simulator.fbs — Dashboard.Terminal* RPCs) ─────────
+export interface SessionState {
+  def: SessionDef;
+  health: SessionHealth;
+}
 
-export interface TerminalInfo {
+export interface NodeStatus {
+  pid?: number;
+  exit_code?: number;
+}
+
+export interface ExecStatus {
+  started: boolean;
+  ended: boolean;
+  exit_code?: number;
+  started_at?: string;
+  ended_at?: string;
+  nodes: Record<string, NodeStatus>;
+}
+
+export interface ExecListItem {
   id: string;
-  session: string;
-  alive: boolean;
+  status: ExecStatus;
 }
+
+export interface PathsInfo {
+  config: string;
+  runtime: string;
+  state: string;
+  profiles: string;
+  sessions: string;
+}
+
+export type StreamPacket =
+  | {
+      Output: { node: number; stream: "Stdout" | "Stderr" | "Stdin"; data: number[] };
+    }
+  | { NodeExit: { node: number; exit_code: number } }
+  | { ExecExit: { exit_code: number } };

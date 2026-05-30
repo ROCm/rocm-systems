@@ -453,14 +453,22 @@ async fn session_start<C: MirageCtl>(
     Ok(ExitCode::from(0))
 }
 
-fn spawn_host_for(id: &SessionId) -> anyhow::Result<()> {
+fn find_host_bin_for_session_spawn() -> std::path::PathBuf {
+    match std::env::var_os("MIRAGE_BIN") {
+        Some(b) => std::path::PathBuf::from(b),
+        None => std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("mirage")),
+    }
+}
+
+/// Spawn the per-session `mirage host` process for `id` and detach it.
+///
+/// This is `pub` so other binaries (notably `mirage_daemon`) can reuse
+/// the exact same host-spawning logic the CLI uses.
+pub fn spawn_host_for(id: &SessionId) -> anyhow::Result<()> {
     // The unified `mirage` binary is its own host: we re-exec
     // ourselves with the `host` subcommand. Tests may override which
     // binary is used via `MIRAGE_BIN`.
-    let bin = match std::env::var_os("MIRAGE_BIN") {
-        Some(b) => std::path::PathBuf::from(b),
-        None => std::env::current_exe()?,
-    };
+    let bin = find_host_bin_for_session_spawn();
     let layout = mirage_core::paths::SessionLayout::for_id(id);
     // ensure host.log file exists for stderr redirect
     let log = std::fs::OpenOptions::new()
