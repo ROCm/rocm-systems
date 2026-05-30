@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "output/perfetto_log_filter.hpp"
+#include "output/perfetto_log_filter_detail.hpp"
 
 #include "logger/debug.hpp"
 

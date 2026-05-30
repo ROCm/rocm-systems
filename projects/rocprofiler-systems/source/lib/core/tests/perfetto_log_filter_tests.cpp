@@ -4,6 +4,7 @@
 #include "gtest/gtest.h"
 
 #include "core/output/perfetto_log_filter.hpp"
+#include "core/output/perfetto_log_filter_detail.hpp"
 
 #include <perfetto.h>
 
