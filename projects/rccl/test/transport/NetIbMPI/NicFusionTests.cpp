@@ -78,6 +78,45 @@ TEST_F(NetIbMPITest, MakeVirtualDeviceOutOfRangeDev) {
     EXPECT_EQ(result, ncclInvalidUsage) << "Out-of-range physical device must be rejected";
 }
 
+TEST_F(NetIbMPITest, MakeVirtualDeviceDuplicateDevs) {
+    // Listing the same physical device twice must be deduped into a single-device
+    // vNIC rather than rejected or double-counted.
+    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
+        << "Test requirements not met";
+
+    // Dedup yields a 1-device vNIC, which requires merging to be enabled
+    // (NCCL_IB_MERGE_NICS defaults to 1). Skip only when it is explicitly off,
+    // otherwise the merge must succeed so the dedup arm is actually exercised.
+    const char* mergeEnv = getenv("NCCL_IB_MERGE_NICS");
+    if (mergeEnv && atoi(mergeEnv) == 0) {
+        GTEST_SKIP() << "NIC merging disabled (NCCL_IB_MERGE_NICS=0)";
+    }
+
+    int ndev = 0;
+    AssertInitAndGetDevices(&ndev);
+    if (ndev < 1) {
+        GTEST_SKIP() << "Need at least 1 device";
+    }
+
+    ncclNetVDeviceProps_t vProps;
+    vProps.ndevs = 2;
+    vProps.devs[0] = 0;
+    vProps.devs[1] = 0;  // duplicate -> exercises the used[] continue arm
+
+    int vdev = -1;
+    ASSERT_EQ(MakeVirtualDevice(&vdev, &vProps), ncclSuccess)
+        << "Deduped vNIC (same device twice) should be created";
+    ASSERT_GE(vdev, 0) << "Deduped virtual device ID should be non-negative";
+
+    // Verify the dedup actually collapsed the duplicate: the resulting vNIC must
+    // contain exactly one physical device. Without this, a silently-broken dedup
+    // (both entries added) would still return ncclSuccess and pass.
+    ncclNetProperties_t props;
+    memset(&props, 0, sizeof(props));
+    ASSERT_EQ(GetDeviceProperties(vdev, &props), ncclSuccess);
+    EXPECT_EQ(props.vProps.ndevs, 1) << "Dedup should yield a single-device vNIC";
+}
 
 // NIC Fusion (vNIC) Tests
 
