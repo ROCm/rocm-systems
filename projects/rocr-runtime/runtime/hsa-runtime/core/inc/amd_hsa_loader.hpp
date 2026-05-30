@@ -151,6 +151,14 @@ struct CodeObjectReaderImpl final {
   size_t code_object_size{0};
   std::string uri{};
   bool is_mmap{false};
+#if defined(_WIN32) || defined(_WIN64)
+  // Bookkeeping for MapViewOfFile-backed mappings (file-backed code objects on
+  // Windows). map_base is the unadjusted pointer returned by MapViewOfFile and
+  // map_handle is the file-mapping HANDLE from CreateFileMappingW. Stored as
+  // void* so this header stays free of windows.h.
+  void *map_base{nullptr};
+  void *map_handle{nullptr};
+#endif
 };
 
 //===----------------------------------------------------------------------===//

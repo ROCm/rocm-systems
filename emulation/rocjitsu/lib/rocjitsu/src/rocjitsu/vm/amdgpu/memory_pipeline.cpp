@@ -104,6 +104,12 @@ void vector_complete(VectorMemState &d, ComputeUnitCore &cu) {
       uint32_t copy_size =
           is_atomic ? std::min(d.elem_size - i * 4, 4u) : std::min(d.elem_size, 4u);
       std::memcpy(&val, &d.response_data[data_offset], copy_size);
+      if (d.sign_extend && i == 0 && d.elem_size < 4) {
+        if (d.elem_size == 1)
+          val = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int8_t>(val)));
+        else if (d.elem_size == 2)
+          val = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(val)));
+      }
       if (copy_size <= 2 && (d.d16_hi || d.d16_lo)) {
         if (cu.sram_ecc()) {
           if (d.d16_hi)

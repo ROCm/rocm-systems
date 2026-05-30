@@ -1496,6 +1496,8 @@ uint32_t vgpr_index(OperandType opr_type, int ev) {
 std::optional<uint32_t> Isa::resolved_vgpr_offset(OperandType opr_type, int ev) {
   if (is_vgpr_only_type(opr_type))
     return vgpr_index(opr_type, ev);
+  if (is_immediate_type(opr_type))
+    return std::nullopt;
   if (ev >= 256 && ev <= 511)
     return static_cast<uint32_t>(ev - 256);
   if (opr_type == OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST &&
