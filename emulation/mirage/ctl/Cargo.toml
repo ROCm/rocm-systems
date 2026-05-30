@@ -7,6 +7,7 @@ edition = "2024"
 mirage_core = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
+dialoguer = { version = "0.11", default-features = false }
 serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }

@@ -17,11 +17,10 @@ use std::time::Duration;
 use clap::{Args, Subcommand};
 use mirage_core::common::MaybeRef;
 use mirage_core::ctl::{CreateSessionRequest, MirageCtl, StdStream, StreamPacket};
-use mirage_core::emulator::{EmulatorDef, ExecMode};
 use mirage_core::exec::{ExecArgs, ExecDef, ExecId, ExecRef};
 use mirage_core::profile::ProfileDef;
+use mirage_core::registry;
 use mirage_core::session::SessionId;
-use mirage_core::topology::TopologyDef;
 use tokio_stream::StreamExt;
 
 /// Initialize the global tracing subscriber. Honours `MIRAGE_LOG` if
@@ -92,9 +91,11 @@ pub enum ProfileCmd {
     /// Create a new profile.
     Create {
         name: String,
-        /// Emulator name (e.g. `rocjitsu`, `noop`).
-        #[arg(long, default_value = "noop")]
-        emulator: String,
+        /// Emulator name (e.g. `rocjitsu`, `noop`). Defaults to the
+        /// first installed emulator (rocjitsu if present, otherwise
+        /// noop).
+        #[arg(long)]
+        emulator: Option<String>,
         /// Number of nodes.
         #[arg(long, default_value_t = 1)]
         nodes: u32,
@@ -104,6 +105,11 @@ pub enum ProfileCmd {
         /// Optional description.
         #[arg(long)]
         description: Option<String>,
+    },
+    /// Interactive wizard: prompts for every field.
+    Wizard {
+        /// Name for the new profile.
+        name: Option<String>,
     },
     /// Import a profile from a JSON file.
     Import {
@@ -136,6 +142,8 @@ pub enum SessionCmd {
     },
     /// Start a new session and its host process.
     Start(StartArgs),
+    /// Interactive wizard for starting a session.
+    Wizard,
     /// Stop a session and remove its state.
     Stop {
         id: SessionId,
@@ -151,19 +159,19 @@ pub enum SessionCmd {
 pub struct StartArgs {
     /// Profile to use (by name).
     #[arg(long)]
-    profile: String,
+    pub profile: String,
     /// Explicit session id; auto-generated if omitted.
     #[arg(long)]
-    id: Option<SessionId>,
+    pub id: Option<SessionId>,
     /// Working directory for execs in the session.
     #[arg(long)]
-    workdir: Option<String>,
+    pub workdir: Option<String>,
     /// Don't spawn the host (the caller is expected to start it).
     #[arg(long)]
-    no_host: bool,
+    pub no_host: bool,
     /// How long to wait for the host to report ready (seconds).
     #[arg(long, default_value_t = 10)]
-    ready_timeout: u64,
+    pub ready_timeout: u64,
 }
 
 // ----- exec ------------------------------------------------------------------
@@ -320,18 +328,25 @@ fn profile_cmd(ctl: &dyn MirageCtl, cmd: ProfileCmd, json: bool) -> anyhow::Resu
             gpus_per_node,
             description,
         } => {
+            // Resolve emulator: explicit > registry default.
+            let spec = match emulator.as_deref() {
+                Some(n) => match registry::find(n) {
+                    Some(s) => s,
+                    None => anyhow::bail!(
+                        "unknown emulator: {n}. Known: {}",
+                        registry::builtins()
+                            .iter()
+                            .map(|e| e.name)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                },
+                None => registry::default_emulator(),
+            };
             let p = ProfileDef {
                 name: name.clone(),
                 description,
-                emulator: EmulatorDef {
-                    emulator,
-                    plugins: Default::default(),
-                    nodes,
-                    gpus_per_node,
-                    exec_mode: ExecMode::default(),
-                    options: Default::default(),
-                    topology: MaybeRef::Owned(TopologyDef::default()),
-                },
+                emulator: registry::make_def(spec, nodes, gpus_per_node),
             };
             ctl.profile_put(&p)?;
             if json {
@@ -339,6 +354,9 @@ fn profile_cmd(ctl: &dyn MirageCtl, cmd: ProfileCmd, json: bool) -> anyhow::Resu
             } else {
                 println!("created profile {name}");
             }
+        }
+        ProfileCmd::Wizard { name } => {
+            return profile_wizard(ctl, name, json);
         }
         ProfileCmd::Import { file } => {
             let bytes = if file == "-" {
@@ -408,6 +426,7 @@ async fn session_cmd<C: MirageCtl>(
             println!("{}", serde_json::to_string_pretty(&h)?);
         }
         SessionCmd::Start(args) => return session_start(ctl, args, json).await,
+        SessionCmd::Wizard => return session_wizard(ctl, json).await,
         SessionCmd::Stop { id, force } => {
             if !force && !confirm(&format!("stop session {id}?"))? {
                 return Ok(ExitCode::from(0));
@@ -727,6 +746,170 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
     Ok(code)
 }
 
+// ----- wizards ---------------------------------------------------------------
+
+/// Interactive `profile wizard` command.
+///
+/// Prompts the user for every field, defaulting to the registry's
+/// recommended emulator (rocjitsu if installed, else noop). The
+/// resulting profile is persisted via the standard `profile_put`
+/// path so it's indistinguishable from a non-wizard creation.
+fn profile_wizard(
+    ctl: &dyn MirageCtl,
+    suggested_name: Option<String>,
+    json: bool,
+) -> anyhow::Result<ExitCode> {
+    use dialoguer::{Confirm, Input, Select};
+
+    let theme = dialoguer::theme::ColorfulTheme::default();
+
+    let name: String = Input::with_theme(&theme)
+        .with_prompt("Profile name")
+        .with_initial_text(suggested_name.unwrap_or_default())
+        .validate_with(|s: &String| -> Result<(), &str> {
+            if s.trim().is_empty() {
+                Err("name required")
+            } else {
+                Ok(())
+            }
+        })
+        .interact_text()?;
+
+    let specs = registry::builtins();
+    let default_idx = specs
+        .iter()
+        .position(|s| s.name == registry::default_emulator().name)
+        .unwrap_or(0);
+    let labels: Vec<String> = specs
+        .iter()
+        .map(|s| {
+            let installed = if (s.installed)() {
+                "[installed]"
+            } else {
+                "[not installed]"
+            };
+            format!("{:<10} {installed}  {}", s.name, s.description)
+        })
+        .collect();
+    let pick = Select::with_theme(&theme)
+        .with_prompt("Emulator")
+        .items(&labels)
+        .default(default_idx)
+        .interact()?;
+    let spec = &specs[pick];
+
+    let nodes: u32 = Input::with_theme(&theme)
+        .with_prompt("Number of nodes")
+        .default(1)
+        .interact_text()?;
+    let gpus_per_node: u32 = Input::with_theme(&theme)
+        .with_prompt("GPUs per node")
+        .default(1)
+        .interact_text()?;
+    let description: String = Input::with_theme(&theme)
+        .with_prompt("Description (optional)")
+        .allow_empty(true)
+        .interact_text()?;
+
+    let proceed = Confirm::with_theme(&theme)
+        .with_prompt(format!(
+            "Create profile {name} using {} ({nodes} node(s) x {gpus_per_node} GPU(s))?",
+            spec.name
+        ))
+        .default(true)
+        .interact()?;
+    if !proceed {
+        eprintln!("aborted");
+        return Ok(ExitCode::from(1));
+    }
+
+    let p = ProfileDef {
+        name: name.clone(),
+        description: if description.is_empty() {
+            None
+        } else {
+            Some(description)
+        },
+        emulator: registry::make_def(spec, nodes, gpus_per_node),
+    };
+    ctl.profile_put(&p)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&p)?);
+    } else {
+        println!("created profile {name}");
+    }
+    Ok(ExitCode::from(0))
+}
+
+/// Interactive `session wizard` command.
+///
+/// Prompts for the profile (from `profile_list`), an optional id,
+/// the working directory, and a ready-timeout, then delegates to
+/// the standard `session_start` path so the host is spawned and the
+/// session becomes ready before the wizard returns.
+async fn session_wizard<C: MirageCtl>(ctl: &C, json: bool) -> anyhow::Result<ExitCode> {
+    use dialoguer::{Confirm, Input, Select};
+
+    let theme = dialoguer::theme::ColorfulTheme::default();
+
+    let profiles = ctl.profile_list()?;
+    if profiles.is_empty() {
+        anyhow::bail!("no profiles found; run `mirage profile wizard` first");
+    }
+    let pick = Select::with_theme(&theme)
+        .with_prompt("Profile")
+        .items(&profiles)
+        .default(0)
+        .interact()?;
+    let profile = profiles[pick].clone();
+
+    let id_raw: String = Input::with_theme(&theme)
+        .with_prompt("Session id (blank for auto)")
+        .allow_empty(true)
+        .interact_text()?;
+    let id = if id_raw.trim().is_empty() {
+        None
+    } else {
+        Some(SessionId::new(id_raw)?)
+    };
+
+    let workdir: String = Input::with_theme(&theme)
+        .with_prompt("Working directory")
+        .with_initial_text(
+            std::env::current_dir()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| "/".into()),
+        )
+        .interact_text()?;
+
+    let ready_timeout: u64 = Input::with_theme(&theme)
+        .with_prompt("Host ready timeout (seconds)")
+        .default(10)
+        .interact_text()?;
+
+    let go = Confirm::with_theme(&theme)
+        .with_prompt(format!("Start session using profile {profile}?"))
+        .default(true)
+        .interact()?;
+    if !go {
+        eprintln!("aborted");
+        return Ok(ExitCode::from(1));
+    }
+
+    session_start(
+        ctl,
+        StartArgs {
+            profile,
+            id,
+            workdir: Some(workdir),
+            no_host: false,
+            ready_timeout,
+        },
+        json,
+    )
+    .await
+}
+
 // ----- misc helpers ----------------------------------------------------------
 
 fn confirm(prompt: &str) -> anyhow::Result<bool> {
@@ -775,16 +958,11 @@ fn print_schema(what: &str) {
     let example = match what {
         "profile" => serde_json::to_string_pretty(&ProfileDef {
             name: "example".to_string(),
-            description: Some("a single-node noop emulator".to_string()),
-            emulator: EmulatorDef {
-                emulator: "noop".to_string(),
-                plugins: Default::default(),
-                nodes: 1,
-                gpus_per_node: 1,
-                exec_mode: ExecMode::default(),
-                options: Default::default(),
-                topology: MaybeRef::Owned(TopologyDef::default()),
-            },
+            description: Some(format!(
+                "a single-node {} profile",
+                registry::default_emulator().name
+            )),
+            emulator: registry::make_def(registry::default_emulator(), 1, 1),
         })
         .unwrap(),
         "exec" => serde_json::to_string_pretty(&ExecDef {
