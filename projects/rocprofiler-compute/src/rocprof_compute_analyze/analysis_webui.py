@@ -283,7 +283,6 @@ class webui_analysis(OmniAnalyze_Base):
                             "sort_type": str(args.sort),
                             "mem_level": mem_level,
                             "include_kernel_names": True,
-                            "is_standalone": False,
                             "roofline_data_type": self.__roofline_data_type,
                             # WebUI handles kernel filtering
                             # client-side via Dash/Plotly

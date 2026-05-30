@@ -728,6 +728,15 @@ that contains both ``roofline.csv`` and application performance counters
 (see :doc:`../analyze/mode`). Visualization options (``--sort``, ``--mem-level``,
 ``--roofline-data-type``) are available in analyze mode.
 
+.. note::
+   Matrix multiplication benchmarking and counter collection will vary depending on which architecture is profiled:
+   * gfx9 (CDNA1/2/3/4) supports Matrix Fused MultiplyAdd (MFMA).
+   * gfx10+ (RDNA3+) supports Wave Matrix Multiply Accumulate (WMMA).
+
+   Additionally, cache levels will vary by the architecture being profiled:
+   * CDNA architectures have High Bandwidth Memory (HBM); RDNA APUs do not.
+   * Certain architectures have L3/Last Level Cache/MALL.
+
 Roofline options (profile)
 --------------------------
 
