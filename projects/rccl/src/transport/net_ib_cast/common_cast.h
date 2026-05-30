@@ -420,6 +420,8 @@ struct ncclIbQp {
   // to.
   int remDevIdx;
   int8_t ctsQpSlot;
+  int channelId;
+  bool isDataQp;
 };
 
 // We need to support NCCL_NET_MAX_REQUESTS for each concurrent receive

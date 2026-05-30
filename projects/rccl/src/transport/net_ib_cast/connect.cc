@@ -418,12 +418,34 @@ static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs
   return ncclSuccess;
 }
 
+// Build base QP creation attributes from comm context. Callers MUST set
+// channelId and isDataQp from the saved ncclIbQp fields — these control
+// AINIC driver behavior (UDMA load balancing and sq_sig_all feature flags)
+// and differ between sender QPs (isDataQp=true) and receiver QPs (isDataQp=false).
+void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, struct ncclIbQpCreateAttr* out) {
+  memset(out, 0, sizeof(*out));
+  out->type = IBV_QPT_RC;
+  out->qpContext = (void*)&base->stats;
+  struct ncclIbNetCommDevBase* devBase = IbCastGetNetCommDevBase(base, devIndex);
+  out->cq = devBase->cq;
+  out->pd = devBase->pd;
+  out->ibDevN = devBase->ibDevN;
+  out->useIonic = IbCastAinicRoce;
+  if (base->isSend) {
+    out->maxRecvWorkRequest = 0;
+    out->maxSendWorkRequest = 2 * NET_IB_MAX_REQUESTS;
+  } else {
+    IbCastResiliencyDataRqSizeGet(base->resiliency, devIndex, &out->maxRecvWorkRequest);
+    out->maxSendWorkRequest = NET_IB_MAX_REQUESTS;
+  }
+}
+
 ncclResult_t IbCastQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs) {
   if (createQpAttrs->oooRq) {
      NCCLCHECK(ncclIbCreateQpMlx5(createQpAttrs, qp));
      return ncclSuccess;
   }
-  if (IbCastAinicRoce) {
+  if (createQpAttrs->useIonic && createQpAttrs->type != IBV_QPT_UD) {
     NCCLCHECK(ncclIbCreateQpIonic(createQpAttrs, qp));
     return ncclSuccess;
   }
@@ -587,6 +609,7 @@ static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
     qpCreateAttrs.isDataQp = true;
     qpCreateAttrs.channelId = channelId;
     qpCreateAttrs.ibDevN = commDev->base.ibDevN;
+    qpCreateAttrs.useIonic = IbCastAinicRoce;
 
     if (ibDev->ibProvider == IB_PROVIDER_MLX5 && ncclParamIbCastOooRq()) {
       if (ibDev->ar == 0) {
@@ -602,6 +625,7 @@ static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
     }
 
     NCCLCHECK(IbCastQpCreate(localQp, &qpCreateAttrs));
+
     INFO(NCCL_NET, "NET/IB: %s: QP created: port=%d dev=%d devName=%s ndevs=%d nmdevs=%d qp_num=%u pkey=%u pd=%p oooRq=%d",
         __func__,
         ibDev->portNum,
@@ -614,6 +638,8 @@ static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
         commDev->base.pd,
         qpCreateAttrs.oooRq);
     localQp->devIndex = devIndex;
+    localQp->channelId = channelId;
+    localQp->isDataQp = qpCreateAttrs.isDataQp;
 
     // Populate the metadata that will be delivered to the remote peer
     localQpInfo->qpn      = localQp->qp->qp_num;
@@ -1075,6 +1101,7 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
     qpCreateAttrs.isDataQp = false;
     qpCreateAttrs.channelId = channelId;
     qpCreateAttrs.ibDevN = rCommDev->base.ibDevN;
+    qpCreateAttrs.useIonic = IbCastAinicRoce;
 
     if (rComm->base.resiliency) {
       IbCastResiliencyDataRqSizeGet(rComm->base.resiliency, devIndex, &qpCreateAttrs.maxRecvWorkRequest);
@@ -1099,6 +1126,9 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
       }
     }
     NCCLCHECK(IbCastQpCreate(localQp, &qpCreateAttrs));
+    localQp->channelId = channelId;
+    localQp->isDataQp = qpCreateAttrs.isDataQp;
+
     INFO(NCCL_NET, "NET/IB: %s: QP created: port=%d dev=%d devName=%s ndevs=%d nmdevs=%d qp_num=%u pkey=%u pd=%p oooRq=%d",
         __func__,
         ibDev->portNum,
@@ -1184,8 +1214,12 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
       qpCreateAttrs.isDataQp = true;
       qpCreateAttrs.channelId = channelId;
       qpCreateAttrs.ibDevN = rCommDev->base.ibDevN;
+      qpCreateAttrs.useIonic = IbCastAinicRoce;
 
       NCCLCHECK(IbCastQpCreate(&rCommDev->gpuFlush.qp, &qpCreateAttrs));
+      rCommDev->gpuFlush.qp.channelId = channelId;
+      rCommDev->gpuFlush.qp.isDataQp = qpCreateAttrs.isDataQp;
+
       INFO(NCCL_NET, "NET/IB: %s: Flush QP created: port=%d dev=%d devName=%s ndevs=%d nmdevs=%d qp_num=%u pkey=%u pd=%p",
           __func__,
           ibDev->portNum,

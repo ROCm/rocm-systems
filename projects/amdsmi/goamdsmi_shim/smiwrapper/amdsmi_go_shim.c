@@ -373,8 +373,10 @@ uint32_t goamdsmi_cpu_threads_per_core_get() {
   bool readSuccess = false;
   uint32_t threads_per_core_temp = GOAMDSMI_VALUE_0;
 
+#ifdef ENABLE_ESMI_LIB
   if ((AMDSMI_STATUS_SUCCESS == amdsmi_get_threads_per_core(&threads_per_core_temp)))
     readSuccess = true;
+#endif
   if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
     printf("AMDSMI, %s, CpuThreadsPerCore:%lu\n", readSuccess ? "Success" : "Failed",
            (unsigned long)(threads_per_core_temp));
@@ -411,11 +413,13 @@ uint64_t goamdsmi_cpu_core_energy_get(uint32_t thread_index) {
   uint64_t core_energy_temp = GOAMDSMI_UINT64_MAX;
   uint32_t physicalCore_index = thread_index % num_cpu_physicalCore_inAllSocket;
 
+#ifdef ENABLE_ESMI_LIB
   if (AMDSMI_STATUS_SUCCESS ==
       amdsmi_get_cpu_core_energy(
           amdsmi_processor_handle_all_cpu_physicalCore_across_socket[physicalCore_index],
           &core_energy_temp))
     readSuccess = true;
+#endif
   if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
     printf(
         "AMDSMI, %s for Thread:%d PC:%d, CpuCoreEnergy:%llu, CpuCoreEnergyJoules:%.6f, "
@@ -431,10 +435,14 @@ uint64_t goamdsmi_cpu_core_energy_get(uint32_t thread_index) {
 uint64_t goamdsmi_cpu_socket_energy_get(uint32_t socket_index) {
   bool readSuccess = false;
   uint64_t socket_energy_temp = GOAMDSMI_UINT64_MAX;
+#ifdef ENABLE_ESMI_LIB
   if ((AMDSMI_STATUS_SUCCESS ==
        amdsmi_get_cpu_socket_energy(amdsmi_processor_handle_all_cpu_across_socket[socket_index],
                                     &socket_energy_temp)))
     readSuccess = true;
+#else
+  (void)socket_index;
+#endif
   if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
     printf(
         "AMDSMI, %s for Socket:%d, CpuSocketEnergy:%llu, CpuSocketEnergyJoules:%.6f, "
@@ -449,10 +457,14 @@ uint64_t goamdsmi_cpu_socket_energy_get(uint32_t socket_index) {
 uint32_t goamdsmi_cpu_prochot_status_get(uint32_t socket_index) {
   bool readSuccess = false;
   uint32_t prochot_temp = GOAMDSMI_UINT32_MAX;
+#ifdef ENABLE_ESMI_LIB
   if ((AMDSMI_STATUS_SUCCESS ==
        amdsmi_get_cpu_prochot_status(amdsmi_processor_handle_all_cpu_across_socket[socket_index],
                                      &prochot_temp)))
     readSuccess = true;
+#else
+  (void)socket_index;
+#endif
   if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
     printf("AMDSMI, %s for Socket:%d, CpuProchotStatus:%lu\n", readSuccess ? "Success" : "Failed",
            socket_index, (unsigned long)(prochot_temp));
@@ -496,11 +508,13 @@ uint32_t goamdsmi_cpu_core_boostlimit_get(uint32_t thread_index) {
   uint32_t core_boostlimit_temp = GOAMDSMI_UINT32_MAX;
   uint32_t physicalCore_index = thread_index % num_cpu_physicalCore_inAllSocket;
 
+#ifdef ENABLE_ESMI_LIB
   if (AMDSMI_STATUS_SUCCESS ==
       amdsmi_get_cpu_core_boostlimit(
           amdsmi_processor_handle_all_cpu_physicalCore_across_socket[physicalCore_index],
           &core_boostlimit_temp))
     readSuccess = true;
+#endif
   if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
     printf("AMDSMI, %s for Thread:%d PC:%d, CpuCoreBoostLimit:%lu\n",
            readSuccess ? "Success" : "Failed", thread_index, physicalCore_index,
@@ -677,14 +691,14 @@ uint64_t goamdsmi_gpu_dev_power_get(uint32_t dv_ind) {
 uint64_t goamdsmi_gpu_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor, uint32_t metric) {
   bool readSuccess = false;
   uint64_t gpu_temperature = GOAMDSMI_UINT64_MAX;
-  uint64_t gpu_temperature_temp = GOAMDSMI_UINT64_MAX;
+  int64_t gpu_temperature_temp = (int64_t)GOAMDSMI_UINT64_MAX;
 
   if ((dv_ind < num_gpu_devices_inAllSocket) &&
       (AMDSMI_STATUS_SUCCESS ==
        amdsmi_get_temp_metric(amdsmi_processor_handle_all_gpu_device_across_socket[dv_ind], sensor,
                               metric, &gpu_temperature_temp))) {
     readSuccess = true;
-    gpu_temperature = gpu_temperature_temp;
+    gpu_temperature = (uint64_t)gpu_temperature_temp;
     gpu_temperature =
         (gpu_temperature) * 1000;  // to maintain backward compatibility with old ROCM SMI
     if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {

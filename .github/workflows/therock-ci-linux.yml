@@ -95,6 +95,9 @@ jobs:
           echo "Full SDK du:"
           echo "------------"
           du -h -d 1 TheRock/build/dist/rocm
+          echo "Artifacts:"
+          echo "----------"
+          du -h -d 1 TheRock/build/artifacts
           echo "CCache Stats:"
           echo "-------------"
           ccache -s
@@ -108,7 +111,7 @@ jobs:
 
       - name: Push artifacts
         run: |
-          python TheRock/build_tools/artifact_manager.py push \
+          python3 TheRock/build_tools/artifact_manager.py push \
             --run-id ${{ github.run_id }} \
             --build-dir TheRock/build \
             --stage all
