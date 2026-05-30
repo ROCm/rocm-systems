@@ -52,6 +52,7 @@ add_executable(
     decode_execute_benchmark.cpp
     util_simd_test.cpp
     v_add_simd_benchmark.cpp
+    mfma_simd_benchmark.cpp
     vop1_cvt_f64_scalar_correctness_test.cpp
     vopc_cmp_class_scalar_correctness_test.cpp
     vop2_simd_correctness_test.cpp
@@ -82,15 +83,9 @@ add_executable(
     vop3_cndmask_pack_simd_correctness_test.cpp
     vop3_div_helpers_simd_correctness_test.cpp
     vop3_b16_rdna_simd_correctness_test.cpp
-    vop3p_fma_mix_simd_correctness_test.cpp
-    vop3_carry_simd_correctness_test.cpp
     vop3_ternary_fp_simd_correctness_test.cpp
     vop3_fmac_simd_correctness_test.cpp
     vop3_ldexp_simd_correctness_test.cpp
-    vop_alias_rdna_simd_correctness_test.cpp
-    vop3p_pk_binary_int_simd_correctness_test.cpp
-    vop3p_pk_binary_fp16_simd_correctness_test.cpp
-    vop3p_mov_b32_simd_correctness_test.cpp
     execution_plugin_test.cpp
 )
 target_link_libraries(
