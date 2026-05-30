@@ -11,6 +11,13 @@
 
 #include "scheduler.h"
 
+static inline int ncclProtoGrainSizeHost(int proto) {
+  return proto == NCCL_PROTO_LL ? 16 :
+         proto == NCCL_PROTO_LL128 ? WARP_SIZE*NCCL_LL128_SHMEM_ELEMS_PER_THREAD/NCCL_LL128_LINEELEMS*NCCL_LL128_DATAELEMS*sizeof(uint64_t) :
+         proto == NCCL_PROTO_SIMPLE ? 512 :
+         -1;
+}
+
 ncclResult_t ncclScheduleBcastTasksToPlan(
     struct ncclComm* comm, struct ncclKernelPlan* plan, struct ncclKernelPlanBudget* budget
 ) {
@@ -61,7 +68,7 @@ ncclResult_t ncclScheduleBcastTasksToPlan(
     int chunkSize = chunkSteps*stepSize;
     if (proto == NCCL_PROTO_LL) chunkSize = chunkSize/2;
     if (proto == NCCL_PROTO_LL128) chunkSize = (chunkSize/NCCL_LL128_LINEELEMS)*NCCL_LL128_DATAELEMS;
-    size_t grainSize = ncclProtoGrainSize(proto);
+    size_t grainSize = ncclProtoGrainSizeHost(proto);
     nChannels = tcoll.nMaxChannels;
     chunkSize = chunkSize / grainSize * grainSize;
 
@@ -70,12 +77,8 @@ ncclResult_t ncclScheduleBcastTasksToPlan(
     int threadPerBlock = std::max((unsigned long)(tcoll.nWarps * WARP_SIZE), 64 * sizeof(ncclDevWorkBcast) / 16 + 3 * WARP_SIZE);
     plan->threadPerBlock = threadPerBlock;
 
-    // Choose kernel for plan. Based on proto, algo=ring
+    // Choose kernel for plan. RCCL uses generic kernels selected by unroll factor.
     int funcIndex = ncclDevFuncId(ncclFuncAllGatherV, /*devRedOp,type=*/0,0, NCCL_ALGO_RING, proto);
-    if (!plan->kernelSpecialized) {
-      plan->kernelFn = ncclDevKernelForFunc[funcIndex];
-      plan->kernelSpecialized = ncclDevKernelForFuncIsSpecialized[funcIndex];
-    }
 
     // Compute opCount for proxy work.
     uint64_t proxyOpCount = uint64_t(comm->collOpCount++)<<1 | /*bcast=*/0;
@@ -126,7 +129,7 @@ ncclResult_t ncclScheduleBcastTasksToPlan(
           if (offset_hi == offset_lo) {
             continue;
           }
-          plan->channelMask |= uint64_t(1)<<channelId;
+          plan->channelMask.masks[channelId/64] |= uint64_t(1)<<(channelId%64);
           struct ncclWorkList* workNode = ncclMemoryStackAllocInlineArray<ncclWorkList, ncclDevWorkBcast>(&comm->memScoped, 1);
           workNode->workType = ncclDevWorkTypeBcast;
           workNode->size = sizeof(struct ncclDevWorkBcast);
@@ -152,7 +155,7 @@ ncclResult_t ncclScheduleBcastTasksToPlan(
             channelWorkBytes[channelId] += sizeof(ncclDevWorkBcast);
           }
           nBcasts += 1;
-          ncclAddWorkBatchToPlan(comm, plan, channelId, ncclDevWorkTypeBcast, funcIndex, plan->workBytes, /*p2pEpoch=*/-1, /*p2pRound=*/-1, newBatch);
+          ncclAddWorkBatchToPlan(comm, plan, channelId, ncclDevWorkTypeBcast, funcIndex, plan->workBytes);
           newBatch = false;
           plan->workBytes += sizeof(ncclDevWorkBcast);
       }

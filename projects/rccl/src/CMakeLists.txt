@@ -363,6 +363,7 @@ set(SRC_FILES
   register/coll_reg.cc
   register/register.cc
   register/sendrecv_reg.cc
+  scheduler/allgatherv_sched.cc
   scheduler/symmetric_sched.cc
   transport/coll_net.cc
   transport/generic.cc

@@ -327,11 +327,6 @@ void rcclSetPipelining(struct ncclComm* comm, size_t const& nBytes, struct ncclT
   }
 }
 
-extern ncclResult_t getAlgoInfo(
-    struct ncclComm* comm, struct ncclTaskColl* task,
-    int collNetSupport, int nvlsSupport, int numPipeOps, ncclSimInfo_t* simInfo = NULL
-);
-
 ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,
                              int collNetSupport, int nvlsSupport, int numPipeOps,
                              int* algo, int* protocol, int* maxChannels) {
@@ -349,7 +344,7 @@ ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
   task.func = coll;
   task.count = count;
   task.datatype = dataType;
-  NCCLCHECK(getAlgoInfo(comm, &task, collNetSupport, nvlsSupport, numPipeOps));
+  NCCLCHECK(ncclGetAlgoInfo(comm, &task, collNetSupport, nvlsSupport, numPipeOps));
   *protocol = task.protocol;
 #ifdef ENABLE_WARP_SPEED
   *maxChannels = task.useWarpSpeed? task.nMaxChannels / task.nWarps : task.nMaxChannels;
