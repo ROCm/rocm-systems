@@ -46,9 +46,11 @@
 [submodule "projects/rocprofiler-sdk/external/elfio"]
 	path = projects/rocprofiler-sdk/external/elfio
 	url = https://github.com/serge1/ELFIO.git
+	ignore = all
 [submodule "projects/rocprofiler-sdk/external/yaml-cpp"]
 	path = projects/rocprofiler-sdk/external/yaml-cpp
 	url = https://github.com/jbeder/yaml-cpp.git
+	ignore = all
 [submodule "projects/rocprofiler-sdk/external/json"]
 	path = projects/rocprofiler-sdk/external/json
 	url = https://github.com/nlohmann/json.git
@@ -66,6 +68,7 @@
 	url = https://github.com/ROCm/timemory.git
 	branch = rocprofiler-systems
 	shallow = true
+	ignore = all
 [submodule "projects/rocprofiler-systems/external/perfetto"]
 	path = projects/rocprofiler-systems/external/perfetto
 	url = https://github.com/google/perfetto.git
@@ -79,6 +82,7 @@
 	url = https://github.com/ROCm/dyninst.git
 	branch = dyninst_13
 	shallow = true
+	ignore = all
 [submodule "projects/rocprofiler-systems/external/kokkos"]
 	path = projects/rocprofiler-systems/examples/lulesh/external/kokkos
 	url = https://github.com/kokkos/kokkos.git
