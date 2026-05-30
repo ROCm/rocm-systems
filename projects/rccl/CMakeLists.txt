@@ -326,6 +326,9 @@ check_cxx_source_compiles("
   }
 " HIP_FABRIC_HANDLE_TYPE)
 
+### Check for hipMemcpyBatchAsync support (Copy Engine batch API)
+check_symbol_exists("hipMemcpyBatchAsync" "hip/hip_runtime_api.h" HIP_MEMCPY_BATCH_ASYNC)
+
 unset(CMAKE_REQUIRED_LIBRARIES)
 
 ### Check for indirect function call support
@@ -347,6 +350,17 @@ if("${hip_version_string}" VERSION_GREATER_EQUAL "6.1.33591")
   message(STATUS "RCCL LL128 protocol enabled")
 else()
   message(STATUS "RCCL LL128 protocol disabled - requires HIP version >= 6.1.33591")
+endif()
+
+## Check for Copy Engine (CE) batch API support
+## hipMemcpyBatchAsync symbol presence is the sole gate: if the SDK exposes the
+## symbol, CE is supported regardless of the exact version string.
+if(HIP_MEMCPY_BATCH_ASYNC)
+  set(CE_ENABLED ON)
+  message(STATUS "Copy Engine (CE) batch API enabled")
+else()
+  set(CE_ENABLED OFF)
+  message(STATUS "Copy Engine (CE) batch API disabled - hipMemcpyBatchAsync not found in hip/hip_runtime_api.h")
 endif()
 
 ## Check for hsa-runtime64

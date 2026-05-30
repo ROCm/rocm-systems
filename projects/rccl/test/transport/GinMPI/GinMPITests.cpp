@@ -720,11 +720,12 @@ TEST_F(GinMPIStressTest, IPutSignalStress10k)
 namespace
 {
 
-// Pretty per-instance suffix: e.g. "Ctx2_64KiB"
-inline std::string CtxSizeName(const ::testing::TestParamInfo<std::tuple<int, size_t>>& info)
+// Pretty per-instance suffix: e.g. "Ctx2_64KiB_DmaBuf"
+inline std::string CtxSizeName(const ::testing::TestParamInfo<std::tuple<int, size_t, bool>>& info)
 {
-    const int    nCtx = std::get<0>(info.param);
-    const size_t sz   = std::get<1>(info.param);
+    const int    nCtx    = std::get<0>(info.param);
+    const size_t sz      = std::get<1>(info.param);
+    const bool   dmaBuf  = std::get<2>(info.param);
     std::string  sizeStr;
     if(sz % (1024 * 1024) == 0)
     {
@@ -738,12 +739,16 @@ inline std::string CtxSizeName(const ::testing::TestParamInfo<std::tuple<int, si
     {
         sizeStr = std::to_string(sz) + "B";
     }
-    return "Ctx" + std::to_string(nCtx) + "_" + sizeStr;
+    return "Ctx" + std::to_string(nCtx) + "_" + sizeStr
+           + (dmaBuf ? "_DmaBuf" : "_RegMr");
 }
 
-inline std::string CtxOnlyName(const ::testing::TestParamInfo<int>& info)
+inline std::string CtxOnlyName(const ::testing::TestParamInfo<std::tuple<int, bool>>& info)
 {
-    return "Ctx" + std::to_string(info.param);
+    const int  nCtx   = std::get<0>(info.param);
+    const bool dmaBuf = std::get<1>(info.param);
+    return "Ctx" + std::to_string(nCtx)
+           + (dmaBuf ? "_DmaBuf" : "_RegMr");
 }
 
 } // namespace
@@ -755,13 +760,16 @@ INSTANTIATE_TEST_SUITE_P(
         ::testing::Values(1, 2),
         ::testing::Values(static_cast<size_t>(4 * 1024),
                           static_cast<size_t>(64 * 1024),
-                          static_cast<size_t>(1 * 1024 * 1024))),
+                          static_cast<size_t>(1 * 1024 * 1024)),
+        ::testing::Bool()),
     CtxSizeName);
 
 INSTANTIATE_TEST_SUITE_P(
     CtxOnly,
     GinMPIFixedSizeTest,
-    ::testing::Values(1, 2),
+    ::testing::Combine(
+        ::testing::Values(1, 2),
+        ::testing::Bool()),
     CtxOnlyName);
 
 } // namespace RCCLGinTests

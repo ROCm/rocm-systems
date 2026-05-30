@@ -29,6 +29,9 @@ struct ncclCeColl {
   int nCopyStreams;
   cudaStream_t copyStreams[RCCL_CE_NUM_COPY_STREAMS];
   cudaEvent_t copyEvents[RCCL_CE_NUM_COPY_STREAMS];
+#ifdef ENABLE_FAULT_INJECTION
+  uint32_t ceFaults;  // bitmask of CE_FAULT_* bits; see ce_fault_inject.h
+#endif
 };
 
 struct ncclCeInitTask {
@@ -53,8 +56,8 @@ struct ncclCeBatchOpsParams {
   size_t* sizes;
   size_t numOps;
   bool intraBatchSync;
-#if ROCM_VERSION >= 71200
-  cudaMemcpyAttributes* attrs;
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+  hipMemcpyAttributes* attrs;
   size_t* attrIdxs;
   size_t numAttrs;
 #endif
