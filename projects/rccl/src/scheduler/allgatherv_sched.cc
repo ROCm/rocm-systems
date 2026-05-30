@@ -11,6 +11,17 @@
 
 #include "scheduler.h"
 
+// Host-callable equivalent of device.h's __device__ ncclProtoGrainSize().
+// Mirrors enqueue.cc's static rcclProtoGrainSize() (which is file-local there).
+static int rcclProtoGrainSize(int proto, ncclComm* comm) {
+  switch (proto) {
+    case NCCL_PROTO_LL: return 16;
+    case NCCL_PROTO_LL128: return comm->WarpSize*NCCL_LL128_SHMEM_ELEMS_PER_THREAD*comm->ll128DataElems*sizeof(uint64_t)/comm->ll128LineElems;
+    case NCCL_PROTO_SIMPLE: return 512;
+    default: return -1;
+  }
+}
+
 ncclResult_t ncclScheduleBcastTasksToPlan(
     struct ncclComm* comm, struct ncclKernelPlan* plan, struct ncclKernelPlanBudget* budget
 ) {
@@ -61,7 +72,7 @@ ncclResult_t ncclScheduleBcastTasksToPlan(
     int chunkSize = chunkSteps*stepSize;
     if (proto == NCCL_PROTO_LL) chunkSize = chunkSize/2;
     if (proto == NCCL_PROTO_LL128) chunkSize = (chunkSize/NCCL_LL128_LINEELEMS)*NCCL_LL128_DATAELEMS;
-    size_t grainSize = ncclProtoGrainSize(proto);
+    size_t grainSize = rcclProtoGrainSize(proto, comm);
     nChannels = tcoll.nMaxChannels;
     chunkSize = chunkSize / grainSize * grainSize;
 
@@ -73,8 +84,11 @@ ncclResult_t ncclScheduleBcastTasksToPlan(
     // Choose kernel for plan. Based on proto, algo=ring
     int funcIndex = ncclDevFuncId(ncclFuncAllGatherV, /*devRedOp,type=*/0,0, NCCL_ALGO_RING, proto);
     if (!plan->kernelSpecialized) {
-      plan->kernelFn = ncclDevKernelForFunc[funcIndex];
-      plan->kernelSpecialized = ncclDevKernelForFuncIsSpecialized[funcIndex];
+      // RCCL doesn't expose the upstream ncclDevKernelForFunc[] lookup. The
+      // unroll-indexed ncclKerns table (file-local in enqueue.cc) is the
+      // canonical RCCL pattern (see enqueue.cc:1010-1011, :1413-1414); we go
+      // through a wrapper because the table is static.
+      ncclPlanSetDefaultKernel(comm, plan);
     }
 
     // Compute opCount for proxy work.
@@ -126,7 +140,7 @@ ncclResult_t ncclScheduleBcastTasksToPlan(
           if (offset_hi == offset_lo) {
             continue;
           }
-          plan->channelMask |= uint64_t(1)<<channelId;
+          plan->channelMask.masks[channelId/64] |= uint64_t(1) << (channelId % 64);
           struct ncclWorkList* workNode = ncclMemoryStackAllocInlineArray<ncclWorkList, ncclDevWorkBcast>(&comm->memScoped, 1);
           workNode->workType = ncclDevWorkTypeBcast;
           workNode->size = sizeof(struct ncclDevWorkBcast);

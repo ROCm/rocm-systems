@@ -26,6 +26,10 @@ extern int64_t ncclParamIbCastUseInline();
 static int IbCastGetNumaNodeFromPath(const char* pciPath);
 static ncclResult_t IbCastGetPciRootFromPath(const char* pciPath, char* root, size_t rootLen);
 
+// Forward declaration for the 2-arg pciPathToInt64 defined in src/misc/utils.cc.
+// Matches the resolution pattern used by net_ib/init.cc (via common.h).
+ncclResult_t pciPathToInt64(char* path, int64_t* id);
+
 NCCL_PARAM(IbCastPciRelaxedOrdering, "IB_PCI_RELAXED_ORDERING", 2);
 NCCL_PARAM(IbCastAdaptiveRouting, "IB_ADAPTIVE_ROUTING", -2);
 NCCL_PARAM(IbCastDataDirect,"IB_DATA_DIRECT",1);
