@@ -12,7 +12,7 @@ on:
         required: true
       test_runs_on:
         type: string
-        default: "linux-gfx942-1gpu-ossci-rocm"
+        default: "linux-gfx942-1gpu-core42-ossci-rocm"
 
 
 permissions:
