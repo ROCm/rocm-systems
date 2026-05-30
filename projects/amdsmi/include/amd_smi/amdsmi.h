@@ -1414,6 +1414,44 @@ typedef struct {
 } amdsmi_proc_info_t;
 
 /**
+ * @brief Per-GPU process entry within a PID-grouped result.
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef struct {
+  uint32_t gpu_index;  //!< GPU index
+  uint64_t mem;        //!< Total memory in bytes
+  struct {
+    uint64_t gfx;  //!< GFX engine usage in nanoseconds
+    uint64_t enc;  //!< ENC engine usage in nanoseconds
+    uint32_t reserved[12];
+  } engine_usage;
+  struct {
+    uint64_t gtt_mem;   //!< GTT memory in bytes
+    uint64_t cpu_mem;   //!< CPU memory in bytes
+    uint64_t vram_mem;  //!< VRAM memory in bytes
+    uint32_t reserved[10];
+  } memory_usage;
+  uint32_t cu_occupancy;  //!< Number of CUs utilized
+  uint32_t evicted_time;  //!< Queue eviction time in milliseconds
+  uint64_t sdma_usage;    //!< SDMA usage in microseconds
+  uint32_t reserved[8];
+} amdsmi_proc_gpu_entry_t;
+
+/**
+ * @brief Process info aggregated across all GPUs, keyed by PID.
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef struct {
+  amdsmi_process_handle_t pid;
+  char name[AMDSMI_MAX_STRING_LENGTH];
+  char container_name[AMDSMI_MAX_STRING_LENGTH];
+  uint32_t num_gpus;                                 //!< Number of GPU entries populated
+  amdsmi_proc_gpu_entry_t gpus[AMDSMI_MAX_DEVICES];  //!< Per-GPU data, num_gpus entries valid
+} amdsmi_proc_info_by_pid_t;
+
+/**
  * @brief IO Link P2P Capability
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
@@ -7575,6 +7613,34 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
  */
 amdsmi_status_t amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_handle,
                                             uint32_t* max_processes, amdsmi_proc_info_t* list);
+
+/**
+ *  @brief Get the list of processes running on one or more GPUs, grouped by PID.
+ *
+ *  @details Aggregates per-GPU process lists across all provided processor handles
+ *  and returns one entry per unique PID. Each entry contains the per-GPU breakdown
+ *  for every GPU that PID is active on. Results are sorted ascending by PID.
+ *
+ *  @ingroup tagProcessInfo
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @param[in]  processor_handles  Array of processor handles to query
+ *  @param[in]  num_processors     Number of handles in processor_handles
+ *  @param[out] procs              Caller-allocated buffer of amdsmi_proc_info_by_pid_t.
+ *                                 Pass NULL to query the required size via max_processes.
+ *  @param[in,out] max_processes   On input: capacity of procs. On output: number of
+ *                                 unique PIDs written (or required if procs is NULL).
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
+ *                            | ::AMDSMI_STATUS_OUT_OF_RESOURCES if max_processes was too small,
+ *                            | ::AMDSMI_STATUS_INVAL if processor_handles is NULL or num_processors
+ * is 0
+ */
+amdsmi_status_t amdsmi_get_gpu_process_list_by_pid(amdsmi_processor_handle* processor_handles,
+                                                   uint32_t num_processors,
+                                                   amdsmi_proc_info_by_pid_t* procs,
+                                                   uint32_t* max_processes);
 
 /** @} End tagProcessInfo */
 
