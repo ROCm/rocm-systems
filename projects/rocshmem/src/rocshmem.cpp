@@ -522,6 +522,17 @@ __host__ int rocshmem_buffer_unregister(void *addr) {
   return backend->buffer_unregister(addr);
 }
 
+__host__ int rocshmem_sym_buffer_register(void *addr, size_t length,
+                                          int my_pe, int n_pes, ptrdiff_t stride) {
+  VERIFY_BACKEND();
+  return backend->sym_buffer_register(addr, length, my_pe, n_pes, stride);
+}
+
+__host__ int rocshmem_sym_buffer_unregister(void *addr) {
+  VERIFY_BACKEND();
+  return backend->sym_buffer_unregister(addr);
+}
+
 [[maybe_unused]] __host__ void rocshmem_free(void *ptr) {
   VERIFY_BACKEND();
 

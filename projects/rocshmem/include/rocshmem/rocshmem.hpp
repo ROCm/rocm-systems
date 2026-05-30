@@ -264,6 +264,30 @@ __host__ int rocshmem_buffer_register_vmm(void *addr, size_t length,
 __host__ int rocshmem_buffer_unregister(void *addr);
 
 /**
+ * @brief Register a symmetric user buffer with known per-PE layout.
+ * Handles lkey (local RDMA MR) and rkey/VA allgather for whichever backend is active.
+ * IPC: stride-based constant-memory VA table.
+ * GDA: ibv_reg_mr per NIC + allgather rkeys + allgather remote VAs.
+ *
+ * @param[in] addr    This PE's base address
+ * @param[in] length  Buffer size in bytes
+ * @param[in] my_pe   This PE's index
+ * @param[in] n_pes   Total PE count
+ * @param[in] stride  Signed byte stride between consecutive PE bases
+ * @return 0 on success, non-zero on error
+ */
+__host__ int rocshmem_sym_buffer_register(void *addr, size_t length,
+                                          int my_pe, int n_pes, ptrdiff_t stride);
+
+/**
+ * @brief Unregister a buffer previously registered via rocshmem_sym_buffer_register.
+ *
+ * @param[in] addr This PE's base address (same as passed to rocshmem_sym_buffer_register)
+ * @return 0 on success, non-zero on error
+ */
+__host__ int rocshmem_sym_buffer_unregister(void *addr);
+
+/**
  * @brief Query for the number of PEs.
  *
  * @return Number of PEs.

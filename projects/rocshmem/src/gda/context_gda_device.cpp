@@ -31,8 +31,10 @@
 #include "log.hpp"
 #include "context_gda_device.hpp"
 #include "context_gda_tmpl_device.hpp"
+#include "gda_sym_buf.hpp"
 
 namespace rocshmem {
+
 
 __host__ GDAContext::GDAContext(Backend *b, unsigned int ctx_id)
     : Context(b) {
@@ -70,6 +72,8 @@ __host__ GDAContext::GDAContext(Backend *b, unsigned int ctx_id)
   ipcImpl_.pes_with_ipc_avail = backend->ipcImpl.pes_with_ipc_avail;
   ipcImpl_.ipc_first_pe = backend->ipcImpl.ipc_first_pe;
   ipcImpl_.ipc_stride = backend->ipcImpl.ipc_stride;
+
+  base_heap_size = backend->heap.get_size();
 }
 
 __host__ GDAContext::~GDAContext() {
@@ -87,8 +91,22 @@ __device__ void GDAContext::putmem(void *dest, const void *source, size_t nelems
   }
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
-  uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[my_pe];
-  qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, pe, wf_info);
+  uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
+
+  // Fast path: symmetric heap.
+  if (dst >= reinterpret_cast<uintptr_t>(base_heap[my_pe]) &&
+      dst <  reinterpret_cast<uintptr_t>(base_heap[my_pe]) + base_heap_size) {
+    uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[my_pe];
+    qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, pe, wf_info);
+    qps[qp_index].quiet(wf_info);
+    return;
+  }
+  // Sym-registered buffer: resolve remote VA and rkey.
+  uintptr_t raddr;
+  int buf_idx = gda_find_sym_buf(dst, &raddr, pe);
+  uint32_t sym_rkey = qps[qp_index].keys[buf_idx].rkey;
+  qps[qp_index].put_nbi(reinterpret_cast<void*>(raddr), source, nelems, pe,
+                        wf_info, sym_rkey);
   qps[qp_index].quiet(wf_info);
 }
 
@@ -118,8 +136,19 @@ __device__ void GDAContext::putmem_nbi(void *dest, const void *source,
   }
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
-  uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[my_pe];
-  qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, pe, wf_info);
+  uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
+
+  if (dst >= reinterpret_cast<uintptr_t>(base_heap[my_pe]) &&
+      dst <  reinterpret_cast<uintptr_t>(base_heap[my_pe]) + base_heap_size) {
+    uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[my_pe];
+    qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, pe, wf_info);
+    return;
+  }
+  uintptr_t raddr;
+  int buf_idx = gda_find_sym_buf(dst, &raddr, pe);
+  uint32_t sym_rkey = qps[qp_index].keys[buf_idx].rkey;
+  qps[qp_index].put_nbi(reinterpret_cast<void*>(raddr), source, nelems, pe,
+                        wf_info, sym_rkey);
 }
 
 __device__ void GDAContext::getmem_nbi(void *dest, const void *source,
@@ -456,8 +485,19 @@ __device__ void GDAContext::internal_putmem(void *dest, const void *source, size
     ipcImpl_.ipcCopy<MemcpyKind::PutBlocking>(ipcImpl_.ipc_bases[local_pe] + L_offset, const_cast<void *>(source), nelems, local_pe);
     return;
   }
-  uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[my_pe];
-  qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, pe, wf_info);
+  uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
+  if (dst >= reinterpret_cast<uintptr_t>(base_heap[my_pe]) &&
+      dst <  reinterpret_cast<uintptr_t>(base_heap[my_pe]) + base_heap_size) {
+    uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[my_pe];
+    qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, pe, wf_info);
+    qps[qp_index].quiet(wf_info);
+    return;
+  }
+  uintptr_t raddr;
+  int buf_idx = gda_find_sym_buf(dst, &raddr, pe);
+  uint32_t sym_rkey = qps[qp_index].keys[buf_idx].rkey;
+  qps[qp_index].put_nbi(reinterpret_cast<void*>(raddr), source, nelems, pe,
+                        wf_info, sym_rkey);
   qps[qp_index].quiet(wf_info);
 }
 
@@ -545,8 +585,18 @@ __device__ void GDAContext::internal_putmem_nbi(void *dest, const void *source, 
     ipcImpl_.ipcCopy<MemcpyKind::Put>(ipcImpl_.ipc_bases[local_pe] + L_offset, const_cast<void *>(source), nelems, local_pe);
     return;
   }
-  uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[my_pe];
-  qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, pe, wf_info);
+  uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
+  if (dst >= reinterpret_cast<uintptr_t>(base_heap[my_pe]) &&
+      dst <  reinterpret_cast<uintptr_t>(base_heap[my_pe]) + base_heap_size) {
+    uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[my_pe];
+    qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, pe, wf_info);
+    return;
+  }
+  uintptr_t raddr;
+  int buf_idx = gda_find_sym_buf(dst, &raddr, pe);
+  uint32_t sym_rkey = qps[qp_index].keys[buf_idx].rkey;
+  qps[qp_index].put_nbi(reinterpret_cast<void*>(raddr), source, nelems, pe,
+                        wf_info, sym_rkey);
 }
 
 __device__ void GDAContext::internal_getmem_nbi(void *dest, const void *source, size_t nelems,

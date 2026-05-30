@@ -339,4 +339,16 @@ int Backend::buffer_unregister(void *addr) {
   return ROCSHMEM_ERROR;
 }
 
+int Backend::sym_buffer_register([[maybe_unused]] void *addr,
+                                 [[maybe_unused]] size_t length,
+                                 [[maybe_unused]] int my_pe,
+                                 [[maybe_unused]] int n_pes,
+                                 [[maybe_unused]] ptrdiff_t stride) {
+  return ROCSHMEM_ERROR;
+}
+
+int Backend::sym_buffer_unregister([[maybe_unused]] void *addr) {
+  return ROCSHMEM_ERROR;
+}
+
 }  // namespace rocshmem

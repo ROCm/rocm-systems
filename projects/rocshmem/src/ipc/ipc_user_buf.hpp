@@ -30,6 +30,9 @@ void ipc_user_buf_update_table(const ipc_user_buf_entry_t* entries, int count);
 // Add a single entry to the master table and sync to device constant memory
 int ipc_user_buf_add_entry(const ipc_user_buf_entry_t* entry);
 
+// Remove entry by local_base, compact table, sync to device. Returns 0 on success, -1 if not found.
+int ipc_user_buf_remove_entry(uintptr_t local_base);
+
 }  // namespace rocshmem
 
 #endif  // LIBRARY_SRC_IPC_USER_BUF_HPP_

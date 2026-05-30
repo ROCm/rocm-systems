@@ -28,6 +28,7 @@
 #include "context.hpp"
 #include "team.hpp"
 #include "queue_pair.hpp"
+#include "gda_sym_buf.hpp"
 
 namespace rocshmem {
 
@@ -396,6 +397,12 @@ class GDAContext : public Context {
    * @brief Base heap pointers of all PEs
    */
   char *const *base_heap{nullptr};
+
+  /**
+   * @brief Symmetric heap size (bytes) — used to distinguish heap vs sym-registered buffers.
+   */
+  size_t base_heap_size{0};
+
 
   //TODO(Avinash):
   //Make tinfo private variable, it requires changes to the context

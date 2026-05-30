@@ -41,6 +41,7 @@
 
 #include "ibv_wrapper.hpp"
 
+#include "gda/gda_sym_buf.hpp"
 #include "gda/ionic/provider_gda_ionic.hpp"
 #include "gda/mlx5/provider_gda_mlx5.hpp"
 #include "gda/bnxt/provider_gda_bnxt.hpp"
@@ -53,12 +54,6 @@
 namespace rocshmem {
 
 class GDABackend;
-
-struct user_buf_info_t {
-  uintptr_t addr;
-  size_t    length;
-  uint32_t  lkey;
-};
 
 /**
  * @brief Scope at which WQEs are issued and completed. This is used to
@@ -150,6 +145,12 @@ class QueuePair {
  public:
   friend GDABackend;
 
+  // Paired rkey+lkey for each sym-registered buffer (buf_idx=0 is the heap).
+  // Inline array: one cache line covers all entries; rkey and lkey for the same
+  // buffer land adjacent so a single load services both sides of the RDMA WQE.
+  struct sym_keys_t { uint32_t rkey; uint32_t lkey; };
+  sym_keys_t keys[GDA_MAX_SYM_BUFS] = {};
+
   /**
    * @brief Constructor.
    */
@@ -171,6 +172,8 @@ class QueuePair {
    */
   __device__ void put_nbi(void *dest, const void *source, size_t nelems,
       int pe, ActiveWFInfo &wf_info);
+  __device__ void put_nbi(void *dest, const void *source, size_t nelems,
+      int pe, ActiveWFInfo &wf_info, uint32_t rkey);
 
   __device__ void put_nbi_single(void *dest, const void *source, size_t nelems,
       bool ring_db);
@@ -216,6 +219,8 @@ class QueuePair {
    */
   __device__ int64_t atomic_fetch(void *dest, int64_t value, int64_t cond,
       ActiveWFInfo &wf_info);
+  __device__ int64_t atomic_fetch(void *dest, int64_t value, int64_t cond,
+      ActiveWFInfo &wf_info, uint32_t rkey);
 
   /**
    * @brief Create and enqueue an atomic fetch work queue entry (wqe).
@@ -227,6 +232,8 @@ class QueuePair {
    */
   __device__ void atomic_nofetch(void *dest, int64_t value, int64_t cond,
       ActiveWFInfo &wf_info);
+  __device__ void atomic_nofetch(void *dest, int64_t value, int64_t cond,
+      ActiveWFInfo &wf_info, uint32_t rkey);
 
   __device__ void atomic_nofetch_single(void *dest, int64_t value);
 
@@ -242,6 +249,8 @@ class QueuePair {
    */
   __device__ int64_t atomic_cas(void *dest, int64_t atomic_data,
       int64_t atomic_cmp, ActiveWFInfo &wf_info);
+  __device__ int64_t atomic_cas(void *dest, int64_t atomic_data,
+      int64_t atomic_cmp, ActiveWFInfo &wf_info, uint32_t rkey);
 
   /**
    * @brief Create and enqueue an atomic cas work queue entry (wqe).
@@ -253,6 +262,8 @@ class QueuePair {
    */
   __device__ int64_t atomic_cas_nofetch(void *dest, int64_t atomic_data,
       int64_t atomic_cmp, ActiveWFInfo &wf_info);
+  __device__ int64_t atomic_cas_nofetch(void *dest, int64_t atomic_data,
+      int64_t atomic_cmp, ActiveWFInfo &wf_info, uint32_t rkey);
 
   uintptr_t base_heap = 0;
   size_t base_heap_size = 0;
@@ -273,6 +284,10 @@ class QueuePair {
   post_wqe_amo(int32_t size, uintptr_t raddr, uint8_t opcode,
       int64_t atomic_data, int64_t atomic_cmp, bool fetch,
       ActiveWFInfo &wf_info);
+  __device__ __attribute__((noinline)) uint64_t
+  post_wqe_amo(int32_t size, uintptr_t raddr, uint8_t opcode,
+      int64_t atomic_data, int64_t atomic_cmp, bool fetch,
+      ActiveWFInfo &wf_info, uint32_t rkey);
 
   __device__ __attribute__((noinline)) uint64_t post_wqe_amo_single(uintptr_t raddr,
       uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching);
@@ -289,7 +304,7 @@ class QueuePair {
    */
   __device__ __attribute__((noinline)) void
   post_wqe_rma(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr,
-      uint8_t opcode, ActiveWFInfo &wf_info);
+      uint8_t opcode, uint32_t rkey, ActiveWFInfo &wf_info);
 
   __device__ __attribute__((noinline)) void
   post_wqe_rma_single(int32_t size, uintptr_t laddr, uintptr_t raddr,
@@ -298,12 +313,12 @@ class QueuePair {
 #if defined(GDA_MLX5)
   __device__ uint64_t mlx5_post_wqe_amo(int32_t size, uintptr_t raddr,
       uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetch,
-      ActiveWFInfo &wf_info);
+      ActiveWFInfo &wf_info, uint32_t rkey = 0);
   __device__ uint64_t mlx5_post_wqe_amo_single(int32_t size, uintptr_t raddr,
       uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
       bool fetch);
   __device__ void mlx5_post_wqe_rma(int32_t size, uintptr_t laddr,
-      uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info);
+      uintptr_t raddr, uint8_t opcode, uint32_t rkey, ActiveWFInfo &wf_info);
   __device__ void mlx5_post_wqe_rma_single(int32_t size, uintptr_t laddr,
       uintptr_t raddr, uint8_t opcode, bool ring_db);
   __device__ void mlx5_quiet();
@@ -312,18 +327,18 @@ class QueuePair {
 #if defined(GDA_BNXT)
 
   __device__ void bnxt_write_rma_wqe(uintptr_t raddr, uintptr_t laddr,
-      int32_t length, uint8_t opcode);
+      int32_t length, uint8_t opcode, uint32_t rkey);
   __device__ uint32_t bnxt_write_amo_wqe(uintptr_t raddr, uint8_t opcode,
-      int64_t atomic_data, int64_t atomic_cmp, bool fetching);
+      int64_t atomic_data, int64_t atomic_cmp, bool fetching, uint32_t rkey);
 
   __device__ uint64_t bnxt_post_wqe_amo_single(uintptr_t raddr, uint8_t opcode,
       int64_t atomic_data, int64_t atomic_cmp, bool fetching);
   __device__ uint64_t bnxt_post_wqe_amo(uintptr_t raddr, uint8_t opcode,
       int64_t atomic_data, int64_t atomic_cmp, bool fetching,
-      ActiveWFInfo &wf_info);
+      ActiveWFInfo &wf_info, uint32_t rkey = 0);
 
   __device__ void bnxt_post_wqe_rma(int32_t size, uintptr_t laddr,
-      uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info);
+      uintptr_t raddr, uint8_t opcode, uint32_t rkey, ActiveWFInfo &wf_info);
 
   __device__ void bnxt_post_wqe_rma_single(int32_t size, uintptr_t laddr,
       uintptr_t raddr, uint8_t opcode, bool ring_db);
@@ -333,12 +348,12 @@ class QueuePair {
 #if defined(GDA_IONIC)
   __device__ uint64_t ionic_post_wqe_amo(int32_t size, uintptr_t raddr,
       uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetch,
-      ActiveWFInfo &wf_info);
+      ActiveWFInfo &wf_info, uint32_t rkey = 0);
   __device__ uint64_t ionic_post_wqe_amo_single(int32_t size,
       uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
       bool fetch);
   __device__ void ionic_post_wqe_rma(int32_t size, uintptr_t laddr,
-      uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info);
+      uintptr_t raddr, uint8_t opcode, uint32_t rkey, ActiveWFInfo &wf_info);
   __device__ void ionic_post_wqe_rma_single(int32_t size,
       uintptr_t laddr, uintptr_t raddr, uint8_t opcode);
   __device__ void ionic_quiet(ActiveWFInfo &wf_info);
@@ -456,8 +471,6 @@ class QueuePair {
 
   char dev_name[24];
   uint32_t qp_num{0};
-  uint32_t rkey{0};
-  uint32_t lkey{0};
 
   uint64_t* nonfetching_atomic{nullptr};
   uint32_t nonfetching_atomic_lkey{0};
@@ -482,9 +495,6 @@ class QueuePair {
 
   struct ibv_pd* pd_;
   std::map<uintptr_t, struct ibv_mr*> user_buffer_mrs;
-
-  struct user_buf_info_t *user_buf_info = nullptr;
-  size_t num_user_buffers = 0;
 
   int buffer_register(uintptr_t addr, size_t length);
   int buffer_unregister(uintptr_t addr);
