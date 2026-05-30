@@ -456,6 +456,7 @@ hsa_status_t KfdDriver::ExportDMABuf(const core::Agent& agent,
                                      const core::DriverMemoryHandle& handle, size_t size, int* dmabuf_fd,
                                      size_t* offset) {
   printf("[%s] Enter\n", __func__);
+  #if __linux__
   const auto &gpu_agent = static_cast<const GpuAgent &>(agent);
 
   HsaHandleExportDesc desc = {};
@@ -473,7 +474,23 @@ hsa_status_t KfdDriver::ExportDMABuf(const core::Agent& agent,
   }
   *dmabuf_fd = res.dmabuf_fd;
   *offset = 0;
+  #else // __windows__
+  int dmabuf_fd_res = -1;
+  size_t offset_res = 0;
+  printf("[%s] Handle: %p size:%zu\n", __func__, handle.handle, size);
+  HSAKMT_STATUS status =
+      HSAKMT_CALL(hsaKmtExportDMABufHandle(handle.handle, size, &dmabuf_fd_res, &offset_res));
+  if (status != HSAKMT_STATUS_SUCCESS) {
+    if (status == HSAKMT_STATUS_INVALID_PARAMETER) {
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
+  *dmabuf_fd = dmabuf_fd_res;
+  *offset = offset_res;
   printf("[%s] Exit success dmabuf_fd:%d offset:%zu\n", __func__, *dmabuf_fd, *offset);
+  #endif
   return HSA_STATUS_SUCCESS;
 }
 
