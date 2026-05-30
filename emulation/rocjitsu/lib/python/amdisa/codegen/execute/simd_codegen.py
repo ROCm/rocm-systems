@@ -284,6 +284,12 @@ _VOP3_UNARY_FP_F32 = {
 
 # VOP1 base mnemonics whose VOP3 twin stays scalar: the f16 rounding/transcendental
 # forms carry modifiers applied around an f16<->f32 round trip (not yet handled).
+# v_mov_b16 is here for the same reason — its VOP3 body reads src0 as a u16 value,
+# widens it to f32, applies omod/clamp, then narrows back to u16 (a 16-bit->f32->16-bit
+# modifier round trip). The plain `a & 0xFFFFu` VOP1 functor it would otherwise reuse
+# ignores those modifiers, so with clamp/omod set the SIMD path diverged from scalar
+# (clamp=1: scalar 0x1 vs simd 0xffff). Leaving the VOP3 twin scalar keeps it correct;
+# the modifier-free VOP1 form still takes the fast path.
 _VOP3_UNARY_SKIP = {
     "v_floor_f16",
     "v_ceil_f16",
@@ -295,6 +301,7 @@ _VOP3_UNARY_SKIP = {
     "v_sqrt_f16",
     "v_exp_f16",
     "v_log_f16",
+    "v_mov_b16",
 }
 
 SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
@@ -302,7 +309,9 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
     "v_mov_b32_vop1": ("uint32_t", "uint32_t", "[](auto a) { return a; }"),
     "v_not_b32_vop1": ("uint32_t", "uint32_t", "[](auto a) { return ~a; }"),
     # RDNA3+ 16-bit move / not / int16<->int32 conversions (low-16, zero-extend
-    # to the 32-bit VGPR). The _vop3 twins auto-route through the same VOP1 path.
+    # to the 32-bit VGPR). The _vop3 twins auto-route through the same VOP1 path,
+    # except v_mov_b16 whose VOP3 form applies float omod/clamp (see
+    # _VOP3_UNARY_SKIP above).
     "v_mov_b16_vop1": ("uint32_t", "uint32_t", "[](auto a) { return a & 0xFFFFu; }"),
     "v_not_b16_vop1": ("uint32_t", "uint32_t", "[](auto a) { return (~a) & 0xFFFFu; }"),
     "v_cvt_i32_i16_vop1": (
