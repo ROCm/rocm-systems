@@ -235,40 +235,46 @@ inline uint32_t permute_b_lane(uint32_t lane, uint32_t blgp) {
 
 // ---------------------------------------------------------------------------
 // Element extraction functions
+//
+// These read from a word-typed view of an operand's VGPR base
+// (cu.vgpr_words(base)); `wf` is the wavefront size (lanes per register), so
+// register offset `o`, lane `l` is at words[o * wf + l]. The caller fetches the
+// base pointer once per operand, turning the MFMA gather into plain indexed
+// loads instead of one virtual read_vgpr per element.
 // ---------------------------------------------------------------------------
 
-inline float extract_f32(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  return std::bit_cast<float>(cu.read_vgpr(base + loc.vgpr_offset, loc.lane));
+inline float extract_f32(const uint32_t *words, uint32_t wf, const InputLoc &loc) {
+  return std::bit_cast<float>(words[loc.vgpr_offset * wf + loc.lane]);
 }
 
-inline float extract_f16(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  uint32_t raw = cu.read_vgpr(base + loc.vgpr_offset, loc.lane);
+inline float extract_f16(const uint32_t *words, uint32_t wf, const InputLoc &loc) {
+  uint32_t raw = words[loc.vgpr_offset * wf + loc.lane];
   return util::f16_to_f32(static_cast<uint16_t>((raw >> (loc.sub_element * 16)) & 0xFFFF));
 }
 
-inline float extract_bf16(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  uint32_t raw = cu.read_vgpr(base + loc.vgpr_offset, loc.lane);
+inline float extract_bf16(const uint32_t *words, uint32_t wf, const InputLoc &loc) {
+  uint32_t raw = words[loc.vgpr_offset * wf + loc.lane];
   return util::bf16_to_f32(static_cast<uint16_t>((raw >> (loc.sub_element * 16)) & 0xFFFF));
 }
 
-inline int32_t extract_i8(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  uint32_t raw = cu.read_vgpr(base + loc.vgpr_offset, loc.lane);
+inline int32_t extract_i8(const uint32_t *words, uint32_t wf, const InputLoc &loc) {
+  uint32_t raw = words[loc.vgpr_offset * wf + loc.lane];
   return static_cast<int32_t>(static_cast<int8_t>((raw >> (loc.sub_element * 8)) & 0xFF));
 }
 
-inline float extract_fp8(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  uint32_t raw = cu.read_vgpr(base + loc.vgpr_offset, loc.lane);
+inline float extract_fp8(const uint32_t *words, uint32_t wf, const InputLoc &loc) {
+  uint32_t raw = words[loc.vgpr_offset * wf + loc.lane];
   return util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw >> (loc.sub_element * 8)) & 0xFF));
 }
 
-inline float extract_bf8(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  uint32_t raw = cu.read_vgpr(base + loc.vgpr_offset, loc.lane);
+inline float extract_bf8(const uint32_t *words, uint32_t wf, const InputLoc &loc) {
+  uint32_t raw = words[loc.vgpr_offset * wf + loc.lane];
   return util::bf8_e5m2_to_f32(static_cast<uint8_t>((raw >> (loc.sub_element * 8)) & 0xFF));
 }
 
-inline double extract_f64(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  uint32_t lo = cu.read_vgpr(base + loc.vgpr_offset, loc.lane);
-  uint32_t hi = cu.read_vgpr(base + loc.vgpr_offset + 1, loc.lane);
+inline double extract_f64(const uint32_t *words, uint32_t wf, const InputLoc &loc) {
+  uint32_t lo = words[loc.vgpr_offset * wf + loc.lane];
+  uint32_t hi = words[(loc.vgpr_offset + 1) * wf + loc.lane];
   return std::bit_cast<double>(static_cast<uint64_t>(hi) << 32 | lo);
 }
 
@@ -297,6 +303,14 @@ void exec_f32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K, u
   std::vector<Result> results;
   results.reserve(M * N * B);
 
+  // Word-typed views of the operand register files, fetched once. Reg offset o,
+  // lane l of an operand is at [o * wf + l]; turns the gather/scatter into plain
+  // indexed loads/stores (no per-element virtual read_vgpr/write_vgpr).
+  const uint32_t wf = cu.wf_size();
+  const uint32_t *a_words = cu.vgpr_words(s0);
+  const uint32_t *b_words = cu.vgpr_words(s1);
+  const uint32_t *c_words = cu.vgpr_words(s2);
+
   // Scalar reference: D[i][j] = C[i][j] + sum_k A[i][k] * B[k][j], accumulated
   // per output in K order (non-fused multiply-add).
   auto run_scalar = [&]() {
@@ -307,7 +321,7 @@ void exec_f32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K, u
           auto out = output_loc_32(M, N, row, col, b);
           float acc = (const_acc != ACC_FROM_VGPR)
                           ? std::bit_cast<float>(const_acc)
-                          : std::bit_cast<float>(cu.read_vgpr(s2 + out.reg, out.lane));
+                          : std::bit_cast<float>(c_words[out.reg * wf + out.lane]);
           for (uint32_t k = 0; k < K; ++k) {
             auto al = input_loc(M, K, B, row, k, b, in_bits);
             auto bl = input_loc(N, K, B, col, k, b, in_bits);
@@ -317,8 +331,8 @@ void exec_f32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K, u
             // Apply blgp lane permutation to B input.
             if (blgp != 0)
               bl.lane = permute_b_lane(bl.lane, blgp);
-            float a_val = ea(cu, s0, al);
-            float b_val = eb(cu, s1, bl);
+            float a_val = ea(a_words, wf, al);
+            float b_val = eb(b_words, wf, bl);
             acc += a_val * b_val;
           }
           results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
@@ -364,21 +378,21 @@ void exec_f32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K, u
               Cbuf[row * stride + col] =
                   (const_acc != ACC_FROM_VGPR)
                       ? std::bit_cast<float>(const_acc)
-                      : std::bit_cast<float>(cu.read_vgpr(s2 + out.reg, out.lane));
+                      : std::bit_cast<float>(c_words[out.reg * wf + out.lane]);
             }
           for (uint32_t row = 0; row < M; ++row)
             for (uint32_t k = 0; k < K; ++k) {
               auto al = input_loc(M, K, B, row, k, b, in_bits);
               if (cbsz != 0)
                 al.lane = permute_a_lane(al.lane, cbsz, abid);
-              Abuf[row * K + k] = ea(cu, s0, al);
+              Abuf[row * K + k] = ea(a_words, wf, al);
             }
           for (uint32_t k = 0; k < K; ++k)
             for (uint32_t col = 0; col < N; ++col) {
               auto bl = input_loc(N, K, B, col, k, b, in_bits);
               if (blgp != 0)
                 bl.lane = permute_b_lane(bl.lane, blgp);
-              Bbuf[k * stride + col] = eb(cu, s1, bl);
+              Bbuf[k * stride + col] = eb(b_words, wf, bl);
             }
           for (uint32_t row = 0; row < M; ++row) {
             uint32_t col = 0;
@@ -413,9 +427,10 @@ void exec_f32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K, u
     run_scalar();
   }
 
+  uint32_t *d_words = cu.vgpr_words(dst);
   bool has_nan = false;
   for (const auto &r : results) {
-    cu.write_vgpr(dst + r.reg, r.lane, r.val);
+    d_words[r.reg * wf + r.lane] = r.val;
     float fval = std::bit_cast<float>(r.val);
     if (std::isnan(fval) || std::isinf(fval))
       has_nan = true;
@@ -477,11 +492,19 @@ void exec_f32_scaled(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
   results.reserve(M * N * B);
   uint32_t num_blocks = (K + BLOCK_K - 1) / BLOCK_K;
 
+  // Word-typed views of the operand register files, fetched once (see exec_f32).
+  const uint32_t wf = cu.wf_size();
+  const uint32_t *a_words = cu.vgpr_words(s0);
+  const uint32_t *b_words = cu.vgpr_words(s1);
+  const uint32_t *c_words = cu.vgpr_words(s2);
+  const uint32_t *sa_words = cu.vgpr_words(scale_a_base);
+  const uint32_t *sb_words = cu.vgpr_words(scale_b_base);
+
   // Per-block E8M0 scale factor for output (row,col,b) in K-block blk.
   auto scale_exp_for = [&](uint32_t row, uint32_t col, uint32_t b, uint32_t blk) -> int {
     auto out = output_loc_32(M, N, row, col, b);
-    uint32_t sa_raw = cu.read_vgpr(scale_a_base, out.lane);
-    uint32_t sb_raw = cu.read_vgpr(scale_b_base, out.lane);
+    uint32_t sa_raw = sa_words[out.lane];
+    uint32_t sb_raw = sb_words[out.lane];
     uint8_t sa_e8m0 = static_cast<uint8_t>((sa_raw >> (blk * 8)) & 0xFF);
     uint8_t sb_e8m0 = static_cast<uint8_t>((sb_raw >> (blk * 8)) & 0xFF);
     return static_cast<int>(sa_e8m0) + static_cast<int>(sb_e8m0) - 254;
@@ -494,7 +517,7 @@ void exec_f32_scaled(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
           auto out = output_loc_32(M, N, row, col, b);
           float acc = (const_acc != ACC_FROM_VGPR)
                           ? std::bit_cast<float>(const_acc)
-                          : std::bit_cast<float>(cu.read_vgpr(s2 + out.reg, out.lane));
+                          : std::bit_cast<float>(c_words[out.reg * wf + out.lane]);
           for (uint32_t blk = 0; blk < num_blocks; ++blk) {
             float block_sum = 0.0f;
             uint32_t k_start = blk * BLOCK_K;
@@ -506,7 +529,7 @@ void exec_f32_scaled(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
                 al.lane = permute_a_lane(al.lane, cbsz, abid);
               if (blgp != 0)
                 bl.lane = permute_b_lane(bl.lane, blgp);
-              block_sum += ea(cu, s0, al) * eb(cu, s1, bl);
+              block_sum += ea(a_words, wf, al) * eb(b_words, wf, bl);
             }
             acc += std::ldexp(block_sum, scale_exp_for(row, col, b, blk));
           }
@@ -546,14 +569,14 @@ void exec_f32_scaled(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
               auto al = input_loc(M, K, B, row, k, b, in_bits);
               if (cbsz != 0)
                 al.lane = permute_a_lane(al.lane, cbsz, abid);
-              Abuf[row * K + k] = ea(cu, s0, al);
+              Abuf[row * K + k] = ea(a_words, wf, al);
             }
           for (uint32_t k = 0; k < K; ++k)
             for (uint32_t col = 0; col < N; ++col) {
               auto bl = input_loc(N, K, B, col, k, b, in_bits);
               if (blgp != 0)
                 bl.lane = permute_b_lane(bl.lane, blgp);
-              Bbuf[k * stride + col] = eb(cu, s1, bl);
+              Bbuf[k * stride + col] = eb(b_words, wf, bl);
             }
           for (uint32_t row = 0; row < M; ++row)
             for (uint32_t col = 0; col < N; ++col) {
@@ -561,7 +584,7 @@ void exec_f32_scaled(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
               Cacc[row * N + col] =
                   (const_acc != ACC_FROM_VGPR)
                       ? std::bit_cast<float>(const_acc)
-                      : std::bit_cast<float>(cu.read_vgpr(s2 + out.reg, out.lane));
+                      : std::bit_cast<float>(c_words[out.reg * wf + out.lane]);
             }
           for (uint32_t row = 0; row < M; ++row) {
             for (uint32_t blk = 0; blk < num_blocks; ++blk) {
@@ -601,8 +624,9 @@ void exec_f32_scaled(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
     run_scalar();
   }
 
+  uint32_t *d_words = cu.vgpr_words(dst);
   for (const auto &r : results)
-    cu.write_vgpr(dst + r.reg, r.lane, r.val);
+    d_words[r.reg * wf + r.lane] = r.val;
 }
 
 /// MFMA execute for i32 output with i8 input: D = C + A x B.
@@ -624,6 +648,12 @@ inline void exec_i32_i8(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uin
   std::vector<Result> results;
   results.reserve(M * N * B);
 
+  // Word-typed views of the operand register files, fetched once (see exec_f32).
+  const uint32_t wf = cu.wf_size();
+  const uint32_t *a_words = cu.vgpr_words(s0);
+  const uint32_t *b_words = cu.vgpr_words(s1);
+  const uint32_t *c_words = cu.vgpr_words(s2);
+
   auto run_scalar = [&]() {
     for (uint32_t b = 0; b < B; ++b) {
       for (uint32_t row = 0; row < M; ++row) {
@@ -632,11 +662,11 @@ inline void exec_i32_i8(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uin
           auto out = output_loc_32(M, N, row, col, b);
           int32_t acc = (const_acc != ACC_FROM_VGPR)
                             ? static_cast<int32_t>(const_acc)
-                            : static_cast<int32_t>(cu.read_vgpr(s2 + out.reg, out.lane));
+                            : static_cast<int32_t>(c_words[out.reg * wf + out.lane]);
           for (uint32_t k = 0; k < K; ++k) {
             auto al = input_loc(M, K, B, row, k, b, 8);
             auto bl = input_loc(N, K, B, col, k, b, 8);
-            acc += extract_i8(cu, s0, al) * extract_i8(cu, s1, bl);
+            acc += extract_i8(a_words, wf, al) * extract_i8(b_words, wf, bl);
           }
           results.push_back({out.reg, out.lane, static_cast<uint32_t>(acc)});
         }
@@ -669,17 +699,17 @@ inline void exec_i32_i8(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uin
               Cbuf[row * stride + col] =
                   (const_acc != ACC_FROM_VGPR)
                       ? static_cast<int32_t>(const_acc)
-                      : static_cast<int32_t>(cu.read_vgpr(s2 + out.reg, out.lane));
+                      : static_cast<int32_t>(c_words[out.reg * wf + out.lane]);
             }
           for (uint32_t row = 0; row < M; ++row)
             for (uint32_t k = 0; k < K; ++k) {
               auto al = input_loc(M, K, B, row, k, b, 8);
-              Abuf[row * K + k] = extract_i8(cu, s0, al);
+              Abuf[row * K + k] = extract_i8(a_words, wf, al);
             }
           for (uint32_t k = 0; k < K; ++k)
             for (uint32_t col = 0; col < N; ++col) {
               auto bl = input_loc(N, K, B, col, k, b, 8);
-              Bbuf[k * stride + col] = extract_i8(cu, s1, bl);
+              Bbuf[k * stride + col] = extract_i8(b_words, wf, bl);
             }
           for (uint32_t row = 0; row < M; ++row) {
             uint32_t col = 0;
@@ -714,8 +744,9 @@ inline void exec_i32_i8(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uin
     run_scalar();
   }
 
+  uint32_t *d_words = cu.vgpr_words(dst);
   for (const auto &r : results)
-    cu.write_vgpr(dst + r.reg, r.lane, r.val);
+    d_words[r.reg * wf + r.lane] = r.val;
 }
 
 /// MFMA execute for f64 output with f64 input: D = C + A x B.
@@ -736,6 +767,12 @@ inline void exec_f64(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
   std::vector<Result> results;
   results.reserve(M * N * B);
 
+  // Word-typed views of the operand register files, fetched once (see exec_f32).
+  const uint32_t wf = cu.wf_size();
+  const uint32_t *a_words = cu.vgpr_words(s0);
+  const uint32_t *b_words = cu.vgpr_words(s1);
+  const uint32_t *c_words = cu.vgpr_words(s2);
+
   auto run_scalar = [&]() {
     for (uint32_t b = 0; b < B; ++b) {
       for (uint32_t row = 0; row < M; ++row) {
@@ -746,14 +783,14 @@ inline void exec_f64(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
           if (const_acc != ACC_FROM_VGPR) {
             acc = static_cast<double>(std::bit_cast<float>(const_acc));
           } else {
-            uint32_t lo = cu.read_vgpr(s2 + out.reg, out.lane);
-            uint32_t hi = cu.read_vgpr(s2 + out.reg + 1, out.lane);
+            uint32_t lo = c_words[out.reg * wf + out.lane];
+            uint32_t hi = c_words[(out.reg + 1) * wf + out.lane];
             acc = std::bit_cast<double>(static_cast<uint64_t>(hi) << 32 | lo);
           }
           for (uint32_t k = 0; k < K; ++k) {
             auto al = input_loc(M, K, B, row, k, b, 64);
             auto bl = input_loc(N, K, B, col, k, b, 64);
-            acc += extract_f64(cu, s0, al) * extract_f64(cu, s1, bl);
+            acc += extract_f64(a_words, wf, al) * extract_f64(b_words, wf, bl);
           }
           uint64_t bits = std::bit_cast<uint64_t>(acc);
           results.push_back(
@@ -793,8 +830,8 @@ inline void exec_f64(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
               if (const_acc != ACC_FROM_VGPR) {
                 Cbuf[row * stride + col] = static_cast<double>(std::bit_cast<float>(const_acc));
               } else {
-                uint32_t lo = cu.read_vgpr(s2 + out.reg, out.lane);
-                uint32_t hi = cu.read_vgpr(s2 + out.reg + 1, out.lane);
+                uint32_t lo = c_words[out.reg * wf + out.lane];
+                uint32_t hi = c_words[(out.reg + 1) * wf + out.lane];
                 Cbuf[row * stride + col] =
                     std::bit_cast<double>(static_cast<uint64_t>(hi) << 32 | lo);
               }
@@ -802,12 +839,12 @@ inline void exec_f64(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
           for (uint32_t row = 0; row < M; ++row)
             for (uint32_t k = 0; k < K; ++k) {
               auto al = input_loc(M, K, B, row, k, b, 64);
-              Abuf[row * K + k] = extract_f64(cu, s0, al);
+              Abuf[row * K + k] = extract_f64(a_words, wf, al);
             }
           for (uint32_t k = 0; k < K; ++k)
             for (uint32_t col = 0; col < N; ++col) {
               auto bl = input_loc(N, K, B, col, k, b, 64);
-              Bbuf[k * stride + col] = extract_f64(cu, s1, bl);
+              Bbuf[k * stride + col] = extract_f64(b_words, wf, bl);
             }
           for (uint32_t row = 0; row < M; ++row) {
             uint32_t col = 0;
@@ -841,93 +878,26 @@ inline void exec_f64(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
     run_scalar();
   }
 
+  uint32_t *d_words = cu.vgpr_words(dst);
   for (const auto &r : results) {
-    cu.write_vgpr(dst + r.reg, r.lane, r.lo);
-    cu.write_vgpr(dst + r.reg + 1, r.lane, r.hi);
+    d_words[r.reg * wf + r.lane] = r.lo;
+    d_words[(r.reg + 1) * wf + r.lane] = r.hi;
   }
 }
 
 /// Fast path for v_mfma_f32_16x16x32_f16. This single MFMA shape is the only
 /// MFMA variant fired by OPT-125M fp16 eager forward (488k invocations per
-/// forward; ~4B internal MACs in shared/mfma_exec.h). Hoists A and B into
-/// dense f32 buffers via existing extract_f16, then runs the 16x32x16 inner
-/// matmul as 16 zmm-wide f32 FMA rows (16 rows * 32 K * 1 FMA = 512 zmm FMAs
-/// per MFMA). Falls back to the generic exec_f32 when:
-///   - <experimental/simd> is unavailable
-///   - host native_simd<float> is not 16 lanes (i.e. no AVX-512)
-///   - cbsz/blgp lane permutation is non-default (extra logic in scalar path)
-///   - RJ_FORCE_SCALAR is set
+/// forward; ~4B internal MACs in shared/mfma_exec.h).
+///
+/// Thin forwarder kept for the generated call site. The generic exec_f32 now
+/// carries the same SIMD fast path (stack-allocated aligned A/B/C buffers,
+/// native-width FMA over N, batched VGPR gather/scatter via vgpr_words), so
+/// this shape no longer needs a hand-rolled specialization.
 inline void exec_f32_mfma_16x16x32_f16(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
                                        uint32_t s1, uint32_t s2, uint32_t const_acc,
                                        uint32_t cbsz, uint32_t abid, uint32_t blgp) {
-  constexpr uint32_t M = 16, N = 16, K = 32, B = 1, in_bits = 16;
-  if constexpr (!util::has_stdx_simd) {
-    exec_f32(cu, M, N, K, B, in_bits, dst, s0, s1, s2, amdgpu::extract_f16, amdgpu::extract_f16,
-             const_acc, cbsz, abid, blgp);
-    return;
-  } else {
-    if (util::force_scalar() || cbsz != 0 || blgp != 0 ||
-        util::native<float>::size() != 16) {
-      exec_f32(cu, M, N, K, B, in_bits, dst, s0, s1, s2, amdgpu::extract_f16, amdgpu::extract_f16,
-               const_acc, cbsz, abid, blgp);
-      return;
-    }
-    alignas(64) float A_buf[M * K];  // A[row][k]
-    alignas(64) float B_buf[K * N];  // B[k][col]
-    alignas(64) float C_buf[M * N];  // C[row][col]
-    // Load existing accumulator: C[row][col] = (const_acc | read_vgpr(s2 + out.reg, out.lane))
-    for (uint32_t row = 0; row < M; ++row) {
-      for (uint32_t col = 0; col < N; ++col) {
-        auto out = output_loc_32(M, N, row, col, 0);
-        C_buf[row * N + col] = (const_acc != ACC_FROM_VGPR)
-                                   ? std::bit_cast<float>(const_acc)
-                                   : std::bit_cast<float>(cu.read_vgpr(s2 + out.reg, out.lane));
-      }
-    }
-    // Hoist A in row-major (row, k) order
-    for (uint32_t row = 0; row < M; ++row) {
-      for (uint32_t k = 0; k < K; ++k) {
-        auto al = input_loc(M, K, B, row, k, 0, in_bits);
-        A_buf[row * K + k] = extract_f16(cu, s0, al);
-      }
-    }
-    // Hoist B in row-major (k, col) order. B is indexed by col along the N dim;
-    // input_loc(N, K, ...) takes i=col, k=k.
-    for (uint32_t k = 0; k < K; ++k) {
-      for (uint32_t col = 0; col < N; ++col) {
-        auto bl = input_loc(N, K, B, col, k, 0, in_bits);
-        B_buf[k * N + col] = extract_f16(cu, s1, bl);
-      }
-    }
-    // Dense 16x32 * 32x16 -> 16x16 matmul, 16-lane stdx FMA per row.
-    for (uint32_t row = 0; row < M; ++row) {
-      util::native<float> c_row;
-      c_row.copy_from(&C_buf[row * N], util::stdx::vector_aligned);
-      for (uint32_t k = 0; k < K; ++k) {
-        util::native<float> a_bcast(A_buf[row * K + k]);
-        util::native<float> b_row;
-        b_row.copy_from(&B_buf[k * N], util::stdx::vector_aligned);
-        c_row = util::stdx::fma(a_bcast, b_row, c_row);
-      }
-      c_row.copy_to(&C_buf[row * N], util::stdx::vector_aligned);
-    }
-    // Scatter back to VGPRs.
-    bool has_nan_or_inf = false;
-    for (uint32_t row = 0; row < M; ++row) {
-      for (uint32_t col = 0; col < N; ++col) {
-        auto out = output_loc_32(M, N, row, col, 0);
-        float fv = C_buf[row * N + col];
-        cu.write_vgpr(dst + out.reg, out.lane, std::bit_cast<uint32_t>(fv));
-        if (std::isnan(fv) || std::isinf(fv)) has_nan_or_inf = true;
-      }
-    }
-    if (has_nan_or_inf) {
-      util::Logger::vm([&](auto &os) {
-        os << std::format("MFMA_NAN_DETECTED (simd) dst=v{} s0=v{} s1=v{} s2=v{} 16x16x32_f16",
-                          dst, s0, s1, s2);
-      });
-    }
-  }
+  exec_f32(cu, /*M=*/16, /*N=*/16, /*K=*/32, /*B=*/1, /*in_bits=*/16, dst, s0, s1, s2,
+           amdgpu::extract_f16, amdgpu::extract_f16, const_acc, cbsz, abid, blgp);
 }
 
 } // namespace amdgpu
