@@ -922,6 +922,16 @@ inline void exec_f32_mfma_16x16x32_f16(amdgpu::ComputeUnitCore &cu, uint32_t dst
     alignas(64) float A_buf[M * K]; // A[row][k]
     alignas(64) float B_buf[K * N]; // B[k][col]
     alignas(64) float C_buf[M * N]; // C[row][col]
+    // The A/B inputs each occupy 4 VGPRs x wf lanes = 2*4*wf packed f16. Bulk
+    // convert the whole region to f32 once with F16C (one vector op per 16
+    // halves) instead of 1024 branchy scalar f16_to_f32 calls, then the hoist
+    // below is a pure f32 index-shuffle (f16 j of word w sub s -> flat j=w*2+s).
+    constexpr uint32_t NUM_IN_REGS = 4;
+    const uint32_t n_halves = 2 * NUM_IN_REGS * wf;
+    alignas(64) float A_f32[2 * NUM_IN_REGS * 64];
+    alignas(64) float B_f32[2 * NUM_IN_REGS * 64];
+    util::f16_to_f32_block(reinterpret_cast<const uint16_t *>(a_words), A_f32, n_halves);
+    util::f16_to_f32_block(reinterpret_cast<const uint16_t *>(b_words), B_f32, n_halves);
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = output_loc_32(M, N, row, col, 0);
@@ -932,12 +942,12 @@ inline void exec_f32_mfma_16x16x32_f16(amdgpu::ComputeUnitCore &cu, uint32_t dst
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t k = 0; k < K; ++k) {
         auto al = input_loc(M, K, B, row, k, 0, in_bits);
-        A_buf[row * K + k] = extract_f16(a_words, wf, al);
+        A_buf[row * K + k] = A_f32[(al.vgpr_offset * wf + al.lane) * 2 + al.sub_element];
       }
     for (uint32_t k = 0; k < K; ++k)
       for (uint32_t col = 0; col < N; ++col) {
         auto bl = input_loc(N, K, B, col, k, 0, in_bits);
-        B_buf[k * N + col] = extract_f16(b_words, wf, bl);
+        B_buf[k * N + col] = B_f32[(bl.vgpr_offset * wf + bl.lane) * 2 + bl.sub_element];
       }
     // Dense 16x32 * 32x16 -> 16x16 matmul, 16-lane stdx FMA per row.
     for (uint32_t row = 0; row < M; ++row) {

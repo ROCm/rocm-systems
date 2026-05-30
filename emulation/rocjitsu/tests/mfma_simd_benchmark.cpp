@@ -238,6 +238,22 @@ TEST(MfmaSimdBenchmark, F32_16x16x32_f16) {
   bench("v_mfma_f32_16x16x32_f16", fx, run, double(M) * N * K * B, /*is_int=*/false);
 }
 
+// Dedicated hot-path specialization (the function the generated OPT-125M call
+// site actually invokes): constexpr dims + F16C bulk f16->f32 conversion.
+TEST(MfmaSimdBenchmark, F32_16x16x32_f16_Specialized) {
+  SKIP_IF_NO_SIMD();
+  BenchFixture fx;
+  constexpr uint32_t M = 16, N = 16, K = 32, B = 1, bits = 16;
+  fx.seed(S0_OFF, /*regs=*/8, bits, SmallGen(1));
+  fx.seed(S1_OFF, /*regs=*/8, bits, SmallGen(2));
+  auto run = [&] {
+    amdgpu::exec_f32_mfma_16x16x32_f16(*fx.cu, fx.vbase + DST_OFF, fx.vbase + S0_OFF,
+                                       fx.vbase + S1_OFF, 0, /*const_acc=*/0, /*cbsz=*/0,
+                                       /*abid=*/0, /*blgp=*/0);
+  };
+  bench("v_mfma_f32_16x16x32_f16 [specialized]", fx, run, double(M) * N * K * B, /*is_int=*/false);
+}
+
 // v_mfma_f32_32x32x16_f16: N=32 == two AVX-512 f32 lane groups.
 TEST(MfmaSimdBenchmark, F32_32x32x16_f16) {
   SKIP_IF_NO_SIMD();
