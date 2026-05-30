@@ -112,6 +112,9 @@ jobs:
           echo "Build dir:"
           echo "------------"
           ls -lh "${{ env.BUILD_DIR }}"
+          echo "Artifacts:"
+          echo "----------"
+          du -h -d 1 "${{ env.BUILD_DIR }}"/artifacts
           echo "CCache Stats:"
           echo "-------------"
           ccache -s
@@ -135,10 +138,10 @@ jobs:
 
       - name: Push artifacts
         run: |
-          python TheRock/build_tools/artifact_manager.py push \
+          python3 TheRock/build_tools/artifact_manager.py push \
             --run-id ${{ github.run_id }} \
-            --build-dir "${{ env.BUILD_DIR }}" \
-            --stage all
+            --build-dir=${{ env.BUILD_DIR }} \
+            --stage=all
 
       - name: Post Build Upload
         if: always()
