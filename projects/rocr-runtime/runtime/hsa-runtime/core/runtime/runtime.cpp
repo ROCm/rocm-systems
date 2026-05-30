@@ -4334,6 +4334,7 @@ hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
   uint64_t offset;
 
   hsa_status_t err = memoryHandle->region->owner()->driver().ExportDMABuf(
+     *memoryHandle->region->owner(),
       *memoryHandle->shareable_handle, memoryHandle->size, dmabuf_fd, &offset);
   if (err != HSA_STATUS_SUCCESS) {
     printf("[%s] Exit error \n", __func__);
