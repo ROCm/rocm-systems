@@ -639,21 +639,30 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
   core::DriverMemoryHandle targetHandle = {.handle = reinterpret_cast<uint64_t>(mem)};
   int target_fd = -1;
   hsa_status_t err = ExportDMABuf(agent, targetHandle, size, &target_fd, offset);
-  if (err != HSA_STATUS_SUCCESS) return err;
+  if (err != HSA_STATUS_SUCCESS) { 
+    printf("[%s] Exit error  status: %d\n", __func__, err);
+    return err;
+  }
 
   // Import memory.
   size_t imported_size;
   err = ImportDMABuf(target_fd, agent, handle, &imported_size, mem);
-  if (err != HSA_STATUS_SUCCESS) return err;
+  if (err != HSA_STATUS_SUCCESS) {
+    printf("[%s] Exit error  status: %d\n", __func__, err);
+    return err;
+  }
   #endif
 
   // Get address that memory is mapped to.
   auto devhandle = static_cast<const GpuAgent&>(agent).libThunkDev();
   auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(targetHandle.handle);
 
+  printf("[%s] Calling hsaKmtMemoryGetCpuAddr: %p\n", __func__, mmap_offset);
   HSAKMT_STATUS hsakmt_err = HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(
       devhandle, memhandle, reinterpret_cast<HSAuint64*>(mmap_offset)));
+  printf("[%s] hsaKmtMemoryGetCpuAddr status: %d\n", __func__, hsakmt_err);
   if (hsakmt_err != HSAKMT_STATUS_SUCCESS) {
+    printf("[%s] Exit error  status: %d\n", __func__, hsakmt_err);
     return HSA_STATUS_ERROR;
   }
 
