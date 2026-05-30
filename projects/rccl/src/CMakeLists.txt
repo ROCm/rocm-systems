@@ -364,6 +364,7 @@ set(SRC_FILES
   register/register.cc
   register/sendrecv_reg.cc
   scheduler/symmetric_sched.cc
+  scheduler/allgatherv_sched.cc
   transport/coll_net.cc
   transport/generic.cc
   transport/net.cc
