@@ -57,6 +57,28 @@ TEST_F(NetIbMPITest, MakeVirtualDeviceInvalidProps) {
     EXPECT_EQ(result, ncclInvalidUsage) << "Should fail with zero devices";
 }
 
+TEST_F(NetIbMPITest, MakeVirtualDeviceOutOfRangeDev) {
+    // Covers the physical-device bounds check in ncclIbMakeVDeviceInternal:
+    // `if (props->devs[i] < 0 || props->devs[i] >= ncclNIbDevs) return ncclInvalidUsage;`
+    // (net_ib.cc:724). Passing a device index >= ncclNIbDevs must be rejected.
+    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
+        << "Test requirements not met";
+
+    int ndev = 0;
+    AssertInitAndGetDevices(&ndev);
+
+    ncclNetVDeviceProps_t vProps;
+    vProps.ndevs = 2;
+    vProps.devs[0] = 0;
+    vProps.devs[1] = ndev;  // >= physical count -> guaranteed out of range
+
+    int vdev = -1;
+    ncclResult_t result = MakeVirtualDevice(&vdev, &vProps);
+    EXPECT_EQ(result, ncclInvalidUsage) << "Out-of-range physical device must be rejected";
+}
+
+
 // NIC Fusion (vNIC) Tests
 
 TEST_F(NetIbMPITest, ConnectAndTransfer_VNic) {
