@@ -455,7 +455,6 @@ hsa_status_t KfdDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
 hsa_status_t KfdDriver::ExportDMABuf(const core::Agent& agent,
                                      const core::DriverMemoryHandle& handle, size_t size, int* dmabuf_fd,
                                      size_t* offset) {
-  printf("[%s] Enter\n", __func__);
   #if __linux__
   const auto &gpu_agent = static_cast<const GpuAgent &>(agent);
 
@@ -469,7 +468,6 @@ hsa_status_t KfdDriver::ExportDMABuf(const core::Agent& agent,
   HsaMemoryExportResult res = {};
 
   if (HSAKMT_CALL(hsaKmtHandleExport(&desc, &res, &flags)) != HSAKMT_STATUS_SUCCESS) {
-    printf("[%s] Exit error  status: %d\n", __func__, HSAKMT_STATUS_ERROR);
     return HSA_STATUS_ERROR;
   }
   *dmabuf_fd = res.dmabuf_fd;
@@ -477,7 +475,6 @@ hsa_status_t KfdDriver::ExportDMABuf(const core::Agent& agent,
   #else // __windows__
   int dmabuf_fd_res = -1;
   size_t offset_res = 0;
-  printf("[%s] Handle: %p size:%zu\n", __func__, handle.handle, size);
   HSAKMT_STATUS status =
       HSAKMT_CALL(hsaKmtExportDMABufHandle((void*)handle.handle, size, &dmabuf_fd_res, &offset_res));
   if (status != HSAKMT_STATUS_SUCCESS) {
@@ -489,14 +486,12 @@ hsa_status_t KfdDriver::ExportDMABuf(const core::Agent& agent,
 
   *dmabuf_fd = dmabuf_fd_res;
   *offset = offset_res;
-  printf("[%s] Exit success dmabuf_fd:%d offset:%zu\n", __func__, *dmabuf_fd, *offset);
   #endif
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdDriver::ImportDMABuf(int dmabuf_fd, const core::Agent& agent,
                                      core::DriverMemoryHandle* handle, size_t *size, void* mem) {
-  printf("[%s] Enter\n", __func__);
   const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
   HsaHandleImportDesc desc;
   desc.device_handle = gpu_agent.libThunkDev();
@@ -508,12 +503,10 @@ hsa_status_t KfdDriver::ImportDMABuf(int dmabuf_fd, const core::Agent& agent,
   HsaHandleImportResult res;
   HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtHandleImport(&desc, &res, &hflags));
   if (status != HSAKMT_STATUS_SUCCESS) {
-    printf("[%s] Exit error  status: %d\n", __func__, status);
     return HSA_STATUS_ERROR;
   }
   handle->handle = reinterpret_cast<uint64_t>(res.buf_handle);
   *size = res.alloc_size;
-  printf("[%s] Exit success handle:%p size:%zu\n", __func__, handle->handle, *size);
   return HSA_STATUS_SUCCESS;
 }
 
@@ -651,16 +644,13 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
 }
 
 hsa_status_t KfdDriver::DestroyShareableHandle(core::DriverMemoryHandle* handle) {
-  printf("[%s] Enter\n", __func__);
   auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle->handle);
 
   HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemHandleFree(memhandle));
   if (status != HSAKMT_STATUS_SUCCESS) {
-    printf("[%s] Exit error  status: %d\n", __func__, status);
     return HSA_STATUS_ERROR;
   }
   *handle = {};
-  printf("[%s] Exit success\n", __func__);
   return HSA_STATUS_SUCCESS;
 }
 
