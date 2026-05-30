@@ -613,29 +613,17 @@ dependencies = [
 name = "mirage"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "assert_cmd",
- "mirage_cli",
+ "clap",
+ "mirage_core",
+ "mirage_ctl",
+ "mirage_daemon",
+ "mirage_host",
  "predicates",
  "serde_json",
  "tempfile",
-]
-
-[[package]]
-name = "mirage_cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "clap",
- "futures",
- "libc",
- "mirage_core",
- "nix",
- "serde",
- "serde_json",
  "tokio",
- "tokio-stream",
- "tracing",
  "tracing-subscriber",
 ]
 
@@ -655,6 +643,25 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "tracing",
+]
+
+[[package]]
+name = "mirage_ctl"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "futures",
+ "libc",
+ "mirage_core",
+ "nix",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

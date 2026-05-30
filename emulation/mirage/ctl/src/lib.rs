@@ -1,23 +1,22 @@
-//! `mirage_cli`: the user-facing CLI implementation.
+//! `mirage_ctl`: the user-facing control plane (the `ctl` half of
+//! `mirage`).
 //!
-//! The CLI is intentionally thin: it parses arguments with `clap`,
-//! delegates all operations to a `mirage_core::ctl::MirageCtl`
-//! implementation (by default `FileCtl`), and renders the result for
-//! humans (table/text) or machines (`--json`).
+//! This crate is a **library**: it defines the top-level
+//! [`CtlCmd`] subcommand enum and an async [`dispatch`] function that
+//! drives a [`mirage_core::ctl::MirageCtl`] implementation (by default
+//! `FileCtl`). The unified `mirage` binary wires this up alongside the
+//! `host` and `daemon` subcommands.
 //!
-//! All commands are documented in `docs/cli.md`. The entry point is
-//! [`main`], which is invoked by the `mirage` binary in the workspace
-//! root.
+//! All commands are documented in `docs/cli.md`.
 
 use std::io::Write;
-use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
-use clap::{Args, CommandFactory, Parser, Subcommand};
+use clap::{Args, Subcommand};
 use mirage_core::common::MaybeRef;
-use mirage_core::ctl::{CreateSessionRequest, FileCtl, MirageCtl, StdStream, StreamPacket};
+use mirage_core::ctl::{CreateSessionRequest, MirageCtl, StdStream, StreamPacket};
 use mirage_core::emulator::{EmulatorDef, ExecMode};
 use mirage_core::exec::{ExecArgs, ExecDef, ExecId, ExecRef};
 use mirage_core::profile::ProfileDef;
@@ -25,27 +24,9 @@ use mirage_core::session::SessionId;
 use mirage_core::topology::TopologyDef;
 use tokio_stream::StreamExt;
 
-/// Re-export so the root binary doesn't have to depend on `clap`.
-pub fn main() -> ExitCode {
-    match run() {
-        Ok(code) => code,
-        Err(e) => {
-            eprintln!("error: {e:#}");
-            ExitCode::from(1)
-        }
-    }
-}
-
-fn run() -> anyhow::Result<ExitCode> {
-    let cli = Cli::parse();
-    init_logging(cli.verbose);
-    let ctl = FileCtl::new();
-    let json = cli.json;
-    let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(async move { dispatch(cli.command, ctl, json).await })
-}
-
-fn init_logging(verbose: u8) {
+/// Initialize the global tracing subscriber. Honours `MIRAGE_LOG` if
+/// set, otherwise uses the level implied by `-v` / `-vv`.
+pub fn init_logging(verbose: u8) {
     let level = match verbose {
         0 => "warn",
         1 => "info",
@@ -60,42 +41,13 @@ fn init_logging(verbose: u8) {
 }
 
 // =============================================================================
-// Top-level CLI definition
+// Top-level ctl subcommand enum
 // =============================================================================
 
-/// `mirage` — a UX for the rocjitsu (and other) GPU emulators.
-///
-/// Mirage stores all its state on disk under your XDG directories:
-///
-/// * profiles in `$XDG_CONFIG_HOME/mirage/profile/<name>.json`
-/// * sessions in `$XDG_RUNTIME_DIR/mirage/session/<id>/`
-///
-/// A typical flow is:
-///
-/// 1. Define a profile: `mirage profile create my-cdna3 --emulator rocjitsu`
-/// 2. Start a session:  `mirage session start --profile my-cdna3`
-/// 3. Run a command:    `mirage exec <session> -- ./my-app --flag`
-/// 4. Or all-in-one:    `mirage run --profile my-cdna3 -- ./my-app --flag`
-///
-/// Use `mirage <command> --help` for details on every subcommand.
-#[derive(Parser, Debug)]
-#[command(name = "mirage", version, about, long_about, propagate_version = true)]
-struct Cli {
-    /// Emit machine-readable JSON output where applicable.
-    #[arg(long, global = true)]
-    json: bool,
-
-    /// Increase logging verbosity (-v info, -vv debug). Can also set
-    /// `MIRAGE_LOG=debug`.
-    #[arg(short, long, action = clap::ArgAction::Count, global = true)]
-    verbose: u8,
-
-    #[command(subcommand)]
-    command: Cmd,
-}
-
+/// All user-facing `mirage` control subcommands. These are flattened
+/// into the top-level `mirage` subcommand list by the root binary.
 #[derive(Subcommand, Debug)]
-enum Cmd {
+pub enum CtlCmd {
     /// Manage profiles (reusable emulator presets).
     #[command(subcommand)]
     Profile(ProfileCmd),
@@ -128,7 +80,7 @@ enum Cmd {
 // ----- profile ---------------------------------------------------------------
 
 #[derive(Subcommand, Debug)]
-enum ProfileCmd {
+pub enum ProfileCmd {
     /// List available profiles.
     List {
         /// Show long form (description, emulator).
@@ -170,7 +122,7 @@ enum ProfileCmd {
 // ----- session ---------------------------------------------------------------
 
 #[derive(Subcommand, Debug)]
-enum SessionCmd {
+pub enum SessionCmd {
     /// List sessions.
     List,
     /// Show a session's state.
@@ -196,7 +148,7 @@ enum SessionCmd {
 }
 
 #[derive(Args, Debug)]
-struct StartArgs {
+pub struct StartArgs {
     /// Profile to use (by name).
     #[arg(long)]
     profile: String,
@@ -209,9 +161,6 @@ struct StartArgs {
     /// Don't spawn the host (the caller is expected to start it).
     #[arg(long)]
     no_host: bool,
-    /// Override the `mirage-host` binary path.
-    #[arg(long, env = "MIRAGE_HOST_BIN")]
-    host_bin: Option<PathBuf>,
     /// How long to wait for the host to report ready (seconds).
     #[arg(long, default_value_t = 10)]
     ready_timeout: u64,
@@ -220,7 +169,7 @@ struct StartArgs {
 // ----- exec ------------------------------------------------------------------
 
 #[derive(Subcommand, Debug)]
-enum ExecCmd {
+pub enum ExecCmd {
     /// List execs in a session.
     List { session: SessionId },
     /// Show an exec's status.
@@ -242,7 +191,7 @@ enum ExecCmd {
 }
 
 #[derive(Args, Debug)]
-struct ExecStartArgs {
+pub struct ExecStartArgs {
     session: SessionId,
     /// Keep the exec on disk after it finishes.
     #[arg(long)]
@@ -259,7 +208,7 @@ struct ExecStartArgs {
 // ----- run -------------------------------------------------------------------
 
 #[derive(Args, Debug)]
-struct RunArgs {
+pub struct RunArgs {
     /// Profile to use.
     #[arg(long)]
     profile: String,
@@ -269,9 +218,6 @@ struct RunArgs {
     /// Keep the session running after the exec finishes.
     #[arg(long)]
     keep_session: bool,
-    /// Override the `mirage-host` binary path.
-    #[arg(long, env = "MIRAGE_HOST_BIN")]
-    host_bin: Option<PathBuf>,
     /// Working directory.
     #[arg(long)]
     workdir: Option<String>,
@@ -283,13 +229,13 @@ struct RunArgs {
 // ----- attach / logs ---------------------------------------------------------
 
 #[derive(Args, Debug)]
-struct AttachArgs {
+pub struct AttachArgs {
     session: SessionId,
     exec: ExecId,
 }
 
 #[derive(Args, Debug)]
-struct LogsArgs {
+pub struct LogsArgs {
     session: SessionId,
     exec: ExecId,
     /// Follow output as it is appended.
@@ -307,24 +253,26 @@ struct LogsArgs {
 // Dispatch
 // =============================================================================
 
-async fn dispatch<C: MirageCtl + 'static>(
-    cmd: Cmd,
+/// Dispatch a parsed [`CtlCmd`] against an arbitrary [`MirageCtl`]
+/// implementation. Returns the exit code the process should use.
+pub async fn dispatch<C: MirageCtl + 'static>(
+    cmd: CtlCmd,
     ctl: C,
     json: bool,
 ) -> anyhow::Result<ExitCode> {
     let ctl = Arc::new(ctl);
     match cmd {
-        Cmd::Profile(c) => profile_cmd(&*ctl, c, json),
-        Cmd::Session(c) => session_cmd(&*ctl, c, json).await,
-        Cmd::Exec(c) => exec_cmd(ctl.clone(), c, json).await,
-        Cmd::Run(a) => run_cmd(ctl.clone(), a).await,
-        Cmd::Attach(a) => attach_cmd(ctl.clone(), a).await,
-        Cmd::Logs(a) => logs_cmd(ctl.clone(), a).await,
-        Cmd::Paths => {
+        CtlCmd::Profile(c) => profile_cmd(&*ctl, c, json),
+        CtlCmd::Session(c) => session_cmd(&*ctl, c, json).await,
+        CtlCmd::Exec(c) => exec_cmd(ctl.clone(), c, json).await,
+        CtlCmd::Run(a) => run_cmd(ctl.clone(), a).await,
+        CtlCmd::Attach(a) => attach_cmd(ctl.clone(), a).await,
+        CtlCmd::Logs(a) => logs_cmd(ctl.clone(), a).await,
+        CtlCmd::Paths => {
             print_paths(json);
             Ok(ExitCode::from(0))
         }
-        Cmd::Schema { what } => {
+        CtlCmd::Schema { what } => {
             print_schema(&what);
             Ok(ExitCode::from(0))
         }
@@ -493,7 +441,7 @@ async fn session_start<C: MirageCtl>(
         container: None,
     })?;
     if !args.no_host {
-        spawn_host_for(&def.id, args.host_bin.as_deref())?;
+        spawn_host_for(&def.id)?;
         ctl.session_wait_ready(&def.id, Duration::from_secs(args.ready_timeout))?;
     }
     if json {
@@ -505,10 +453,13 @@ async fn session_start<C: MirageCtl>(
     Ok(ExitCode::from(0))
 }
 
-fn spawn_host_for(id: &SessionId, override_bin: Option<&std::path::Path>) -> anyhow::Result<()> {
-    let bin = match override_bin {
-        Some(b) => b.to_path_buf(),
-        None => find_host_bin()?,
+fn spawn_host_for(id: &SessionId) -> anyhow::Result<()> {
+    // The unified `mirage` binary is its own host: we re-exec
+    // ourselves with the `host` subcommand. Tests may override which
+    // binary is used via `MIRAGE_BIN`.
+    let bin = match std::env::var_os("MIRAGE_BIN") {
+        Some(b) => std::path::PathBuf::from(b),
+        None => std::env::current_exe()?,
     };
     let layout = mirage_core::paths::SessionLayout::for_id(id);
     // ensure host.log file exists for stderr redirect
@@ -516,14 +467,14 @@ fn spawn_host_for(id: &SessionId, override_bin: Option<&std::path::Path>) -> any
         .create(true)
         .append(true)
         .open(layout.host_log())?;
-    // double-fork-ish: just spawn and detach.
+    // spawn and detach via setsid()
     let mut cmd = std::process::Command::new(bin);
-    cmd.arg("--session")
+    cmd.arg("host")
+        .arg("--session")
         .arg(id.as_str())
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::from(log));
-    // detach: new session leader via setsid()
     use std::os::unix::process::CommandExt;
     unsafe {
         cmd.pre_exec(|| {
@@ -533,23 +484,6 @@ fn spawn_host_for(id: &SessionId, override_bin: Option<&std::path::Path>) -> any
     }
     cmd.spawn()?;
     Ok(())
-}
-
-fn find_host_bin() -> anyhow::Result<PathBuf> {
-    if let Ok(p) = std::env::var("MIRAGE_HOST_BIN") {
-        return Ok(PathBuf::from(p));
-    }
-    // Try alongside this binary.
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(dir) = exe.parent()
-    {
-        let candidate = dir.join("mirage-host");
-        if candidate.exists() {
-            return Ok(candidate);
-        }
-    }
-    // Fall back to PATH.
-    Ok(PathBuf::from("mirage-host"))
 }
 
 // ----- exec dispatch ---------------------------------------------------------
@@ -757,7 +691,7 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
                 }),
                 container: None,
             })?;
-            spawn_host_for(&def.id, a.host_bin.as_deref())?;
+            spawn_host_for(&def.id)?;
             ctl.session_wait_ready(&def.id, Duration::from_secs(10))?;
             (def.id, true)
         }
@@ -874,11 +808,4 @@ fn print_schema(what: &str) {
         }
     };
     println!("{example}");
-}
-
-/// Print the long-form help (used by `mirage --help`).
-pub fn long_help() -> String {
-    let mut s = Vec::new();
-    let _ = Cli::command().write_long_help(&mut s);
-    String::from_utf8(s).unwrap_or_default()
 }

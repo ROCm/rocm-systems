@@ -4,9 +4,9 @@
 //!
 //! * Creates a fresh tempdir and points `XDG_CONFIG_HOME`,
 //!   `XDG_RUNTIME_DIR`, and `XDG_STATE_HOME` at it.
-//! * Sets `MIRAGE_HOST_BIN` to the freshly built `mirage-host` binary
-//!   in `target/<profile>/`.
-//! * Drives `mirage` as a subprocess via `assert_cmd`.
+//! * Drives the unified `mirage` binary as a subprocess via
+//!   `assert_cmd`. The CLI re-execs itself with the `host` subcommand
+//!   to spawn per-session hosts \u2014 no separate host binary needed.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -19,7 +19,6 @@ struct Env {
     _dir: TempDir,
     config: PathBuf,
     runtime: PathBuf,
-    host_bin: PathBuf,
     mirage_bin: PathBuf,
 }
 
@@ -28,26 +27,12 @@ impl Env {
         let dir = tempfile::tempdir().unwrap();
         let config = dir.path().join("config");
         let runtime = dir.path().join("runtime");
-        // The integration tests are compiled into the same target dir
-        // as the bins.  Use `CARGO_BIN_EXE_*` to locate them.
         let mirage_bin = PathBuf::from(env!("CARGO_BIN_EXE_mirage"));
-        // mirage-host lives in the same directory:
-        let host_bin = mirage_bin.parent().unwrap().join("mirage-host");
-        if !host_bin.exists() {
-            // Build it on demand so a bare `cargo test` works.
-            let status = Command::new(env!("CARGO"))
-                .args(["build", "--bin", "mirage-host"])
-                .status()
-                .expect("invoke cargo to build mirage-host");
-            assert!(status.success(), "failed to build mirage-host");
-        }
-        assert!(host_bin.exists(), "mirage-host not built: {host_bin:?}");
         Self {
             _dir: dir,
             config,
             runtime,
             mirage_bin,
-            host_bin,
         }
     }
 
@@ -56,7 +41,10 @@ impl Env {
         c.env("XDG_CONFIG_HOME", &self.config)
             .env("XDG_RUNTIME_DIR", &self.runtime)
             .env("XDG_STATE_HOME", self._dir.path().join("state"))
-            .env("MIRAGE_HOST_BIN", &self.host_bin)
+            // ensure the CLI re-execs the same binary when spawning
+            // hosts (covers the case where it lives in a non-standard
+            // location during testing).
+            .env("MIRAGE_BIN", &self.mirage_bin)
             // make sure user env doesn't leak through.
             .env_remove("MIRAGE_LOG");
         c
