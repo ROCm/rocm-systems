@@ -327,6 +327,7 @@ class GDABackend : public Backend {
    */
   void accumulate_ctx_device_stats() override;
   void accumulate_default_host_ctx_stats() override;
+  void reset_backend_stats() override;
 
 
 

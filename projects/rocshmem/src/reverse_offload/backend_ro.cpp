@@ -309,8 +309,7 @@ void ROBackend::accumulate_ctx_device_stats() {
 }
 
 void ROBackend::accumulate_default_host_ctx_stats() {
-  if (default_host_ctx)
-    globalHostStats.accumulateStats(default_host_ctx->ctxHostStats);
+  globalHostStats.accumulateStats(default_host_ctx->ctxHostStats);
 }
 
 void ROBackend::reset_backend_stats() {
