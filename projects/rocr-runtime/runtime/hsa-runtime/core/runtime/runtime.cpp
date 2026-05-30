@@ -684,6 +684,7 @@ hsa_status_t Runtime::AllowAccess(uint32_t num_agents,
                                   const hsa_agent_t* agents, const void* ptr) {
   const AMD::MemoryRegion* amd_region = NULL;
   size_t alloc_size = 0;
+  printf("[%s] Enter ptr: %p\n", __func__, ptr);
 
   {
     std::lock_guard<std::shared_mutex> lock(memory_lock_);
@@ -708,6 +709,7 @@ hsa_status_t Runtime::AllowAccess(uint32_t num_agents,
     alloc_size = it->second.size;
   }
 
+  printf("[%s] Calling amd_region->AllowAccess\n", __func__);
   return amd_region->AllowAccess(num_agents, agents, ptr, alloc_size);
 }
 
