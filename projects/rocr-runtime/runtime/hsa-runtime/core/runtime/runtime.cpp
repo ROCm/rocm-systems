@@ -3719,7 +3719,7 @@ hsa_status_t Runtime::VMemoryAddressReserve(void** va, size_t size, uint64_t add
   }
 
   reserved_address_map_[addr] = AddressHandle(addr, size, true);
-  *va = addr;
+  *va = addr; 
   return HSA_STATUS_SUCCESS;
 }
 
@@ -3732,16 +3732,24 @@ hsa_status_t Runtime::VMemoryAddressFree(void* va, size_t size) {
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
 
-  if (size != it->second.size) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (size != it->second.size) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
-  if (it->second.use_count > 0) return HSA_STATUS_ERROR_RESOURCE_FREE;
+  if (it->second.use_count > 0) {
+    return HSA_STATUS_ERROR_RESOURCE_FREE;
+  }
 
   if (it->second.registered) {
     if (HSAKMT_CALL(hsaKmtFreeMemory(it->second.os_addr, size)) != HSAKMT_STATUS_SUCCESS)
+    {
       return HSA_STATUS_ERROR;
+    }
   }
   else if (!rocr::os::ReleaseMemory(it->second.os_addr, size))
-      return HSA_STATUS_ERROR;
+  {
+    return HSA_STATUS_ERROR;
+  }
 
   reserved_address_map_.erase(it);
   return HSA_STATUS_SUCCESS;
@@ -3763,9 +3771,10 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
                                           uint64_t flags_unused,
                                           hsa_amd_vmem_alloc_handle_t* memoryOnlyHandle) {
   const AMD::MemoryRegion* memRegion = static_cast<const AMD::MemoryRegion*>(region);
-
   if (!IsMultipleOf(size, memRegion->GetPageSize()))
+  {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   void *mem;
@@ -3784,8 +3793,8 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
     }
 
     auto memoryHandle = std::make_unique<MemoryHandle>(region, size, flags_unused, shareable_handle, dmabuf_fd, mmap_offset, alloc_flags);
-    memory_handles.emplace(*memoryOnlyHandle, std::move(memoryHandle));
     *memoryOnlyHandle = MemoryHandle::Convert(memoryHandle.get());
+    memory_handles.emplace(*memoryOnlyHandle, std::move(memoryHandle));
   }
   return status;
 }
@@ -3830,11 +3839,15 @@ hsa_status_t Runtime::VMemoryHandleMap(void* va, size_t size, size_t in_offset,
   if (upperMappedHandleIt != mapped_handle_map_.begin()) {
     upperMappedHandleIt--;
     if ((reinterpret_cast<const uint8_t*>(upperMappedHandleIt->first) + upperMappedHandleIt->second.size) > va)
+    {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
   }
   auto lowerMappedHandleIt = mapped_handle_map_.lower_bound(va);
   if (lowerMappedHandleIt != mapped_handle_map_.end()) {
-    if (reinterpret_cast<uint8_t*>(va) + size > lowerMappedHandleIt->first) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    if (reinterpret_cast<uint8_t*>(va) + size > lowerMappedHandleIt->first) {
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
   }
 
   MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(memoryOnlyHandle));
@@ -3953,7 +3966,8 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
 #endif
     auto agentOwner = mappedHandle->mem_handle->agentOwner();
     int mmap_fd = -1;
-    if (agentOwner->driver().GetDeviceFd(agentOwner->node_id(), &mmap_fd) != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+    /* Do not check the return value of GetDeviceFd. We do not need mmap_fd so it is valid for mmap_fd to be -1*/
+    agentOwner->driver().GetDeviceFd(agentOwner->node_id(), &mmap_fd);
 
     if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mmap_fd,
                              mappedHandle->mem_handle->mmap_offset)) {
@@ -4103,7 +4117,9 @@ Runtime::VMemorySetAccessPerHandle(void *va, MappedHandle &mappedHandle,
 
       /* Permissions are different - update access */
       if (agentPermsIt->second.RemoveAccess() != HSA_STATUS_SUCCESS)
+      {
         throw AMD::hsa_exception(HSA_STATUS_ERROR, "Failed to remove access for memory handle.");
+      }
 
       if (agentPermsIt->second.EnableAccess(perm) != HSA_STATUS_SUCCESS) {
         mappedHandle.allowed_agents.erase(agentPermsIt);
@@ -4152,7 +4168,9 @@ hsa_status_t Runtime::VMemorySetAccess(void* va, size_t size,
     status = VMemorySetAccessPerHandle(mappedHandleIt.first,
                                        *mappedHandleIt.second, desc, desc_cnt);
     if (status != HSA_STATUS_SUCCESS)
+    {
       return status;
+    }
   }
   return HSA_STATUS_SUCCESS;
 }
@@ -4202,14 +4220,18 @@ hsa_status_t Runtime::VMemoryMapAllowAccess(const void *va,
   }
 
   if (mappedHandles.empty())
+  {
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  }
 
   hsa_status_t status;
   for (auto mappedHandleIt : mappedHandles) {
     status = VMemorySetAccessPerHandle(
         mappedHandleIt.first, *mappedHandleIt.second, desc, num_agents);
     if (status != HSA_STATUS_SUCCESS)
+    {
       return status;
+    }
   }
   return HSA_STATUS_SUCCESS;
 }
@@ -4250,6 +4272,7 @@ hsa_status_t Runtime::VMemoryGetAccess(const void* va, hsa_access_permission_t* 
 hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
                                                    hsa_amd_vmem_alloc_handle_t handle,
                                                    uint64_t flags) {
+  (void)flags;
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   *dmabuf_fd = -1;
   MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(handle));
@@ -4267,7 +4290,15 @@ hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
   if (*dmabuf_fd == -1) return HSA_STATUS_ERROR;
   return HSA_STATUS_SUCCESS;
 #else
-  return HSA_STATUS_ERROR_NOT_SUPPORTED;
+  uint64_t offset;
+
+  hsa_status_t err = memoryHandle->region->owner()->driver().ExportDMABuf(
+     *memoryHandle->region->owner(),
+      memoryHandle->shareable_handle, memoryHandle->size, dmabuf_fd, &offset);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
+  }
+  return HSA_STATUS_SUCCESS;
 #endif
 }
 
@@ -4275,8 +4306,8 @@ hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
                                                    hsa_amd_vmem_alloc_handle_t* memoryOnlyHandle) {
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   auto memoryHandle = std::make_unique<MemoryHandle>(dmabuf_fd);
-  memory_handles.emplace(*memoryOnlyHandle, std::move(memoryHandle));
   *memoryOnlyHandle = MemoryHandle::Convert(memoryHandle.get());
+  memory_handles.emplace(*memoryOnlyHandle, std::move(memoryHandle));
   return HSA_STATUS_SUCCESS;
 }
 
@@ -4306,8 +4337,8 @@ hsa_status_t Runtime::VMemoryImportFabricHandle(hsa_fabric_handle_t fabric_handl
                                                hsa_amd_vmem_alloc_handle_t* memoryOnlyHandle) {
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   auto memoryHandle = std::make_unique<MemoryHandle>(fabric_handle);
-  memory_handles.emplace(*memoryOnlyHandle, std::move(memoryHandle));
   *memoryOnlyHandle = MemoryHandle::Convert(memoryHandle.get());
+  memory_handles.emplace(*memoryOnlyHandle, std::move(memoryHandle));
   return HSA_STATUS_SUCCESS;
 }
 
