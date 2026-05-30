@@ -209,6 +209,23 @@ class Backend {
   virtual int buffer_unregister(void *addr);
 
   /**
+   * @brief Register a symmetric user buffer (known per-PE layout).
+   * Handles both address resolution and RDMA key setup for whichever backend is active.
+   * @param addr    This PE's base address.
+   * @param length  Buffer size.
+   * @param my_pe   This PE's index.
+   * @param n_pes   Total PE count.
+   * @param stride  Signed byte stride between consecutive PE bases.
+   * @return 0 on success, non-zero on error.
+   */
+  virtual int sym_buffer_register(void *addr, size_t length, int my_pe, int n_pes, ptrdiff_t stride);
+
+  /**
+   * @brief Unregister a symmetric user buffer previously registered via sym_buffer_register.
+   */
+  virtual int sym_buffer_unregister(void *addr);
+
+  /**
    * @brief High level device stats that do not depend on backend type.
    */
   ROCStats globalStats{};

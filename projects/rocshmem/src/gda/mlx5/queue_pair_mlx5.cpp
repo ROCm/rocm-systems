@@ -259,7 +259,8 @@ __device__ void QueuePair::mlx5_quiet_single() {
 
 // can be called with all active lanes using any number of different QPs, don't assume anything
 __device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t laddr, uintptr_t raddr,
-                                             uint8_t opcode, ActiveWFInfo &wf_info) {
+                                             uint8_t opcode, uint32_t rkey,
+                                             ActiveWFInfo &wf_info) {
   if (wf_info.is_pe_group_last) {
     // get SQ lock
     acquire_lock(&mlx5_sq.lock);
@@ -310,7 +311,7 @@ __device__ void QueuePair::mlx5_post_wqe_rma_single(int32_t length, uintptr_t la
 
   // construct the WQE on the stack
   gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, MLX5_WQE_CTRL_CQ_UPDATE,
-                   raddr, rkey, laddr, get_lkey(laddr), static_cast<uint32_t>(length), send_inline};
+                   raddr, keys[0].rkey, laddr, get_lkey(laddr), static_cast<uint32_t>(length), send_inline};
 
   // copy to SQ
   mlx5_sq.buf[sq_idx] = wqe;
@@ -333,7 +334,8 @@ __device__ void QueuePair::mlx5_post_wqe_rma_single(int32_t length, uintptr_t la
 __device__ uint64_t QueuePair::mlx5_post_wqe_amo([[maybe_unused]] int32_t length,
                                                  uintptr_t raddr, uint8_t opcode,
                                                  int64_t atomic_data, int64_t atomic_cmp,
-                                                 bool fetching, ActiveWFInfo &wf_info) {
+                                                 bool fetching, ActiveWFInfo &wf_info,
+                                                 uint32_t rkey) {
   if (wf_info.is_pe_group_last) {
     // get SQ lock
     acquire_lock(&mlx5_sq.lock);
@@ -405,7 +407,7 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo_single([[maybe_unused]] int32_t
 
   // construct the WQE on the stack
   gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, MLX5_WQE_CTRL_CQ_UPDATE,
-                   raddr, rkey,
+                   raddr, keys[0].rkey,  // single path: always heap
                    static_cast<uint64_t>(atomic_data), static_cast<uint64_t>(atomic_cmp),
                    reinterpret_cast<uintptr_t>(atomic_laddr), atomic_lkey};
 

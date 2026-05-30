@@ -120,6 +120,8 @@ class IPCBackend : public Backend {
 
   int buffer_register(void *addr, size_t length) override;
   int buffer_unregister(void *addr) override;
+  int sym_buffer_register(void *addr, size_t length, int my_pe, int n_pes, ptrdiff_t stride) override;
+  int sym_buffer_unregister(void *addr) override;
 
   /**
    * @brief Accessor for work/sync bases

@@ -52,6 +52,21 @@ void ipc_user_buf_update_table(const ipc_user_buf_entry_t* entries, int count) {
                                sizeof(int), 0, hipMemcpyHostToDevice));
 }
 
+int ipc_user_buf_remove_entry(uintptr_t local_base) {
+  int found = -1;
+  for (int i = 0; i < master_entry_count; i++) {
+    if (master_entries[i].local_base == local_base) { found = i; break; }
+  }
+  if (found < 0) return -1;
+
+  for (int i = found; i < master_entry_count - 1; i++) {
+    master_entries[i] = master_entries[i + 1];
+  }
+  master_entry_count--;
+  sync_master_to_device();
+  return 0;
+}
+
 int rocshmem_buffer_register_vmm(void *addr, size_t length,
                                  int my_pe, int n_pes,
                                  ptrdiff_t stride) {

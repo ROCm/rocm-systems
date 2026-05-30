@@ -83,8 +83,6 @@ void GDABackend::bnxt_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   CHECK_HIP(hipHostGetDevicePointer((void**) &gpu_qp->bnxt_dbr, bnxt_qps[conn_num].db_region_attr->dbr, 0));
 
   /* Export Memory Keys */
-  gpu_qp->lkey = nic.heap_mr->lkey;
-  gpu_qp->rkey = heap_rkey[pe * num_nics_ + nic_idx];
 
   /* Export Inline Threshold */
   gpu_qp->inline_threshold = inline_threshold;

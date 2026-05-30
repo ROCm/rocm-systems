@@ -721,4 +721,13 @@ void IPCBackend::teams_init() {
   }
 }
 
+int IPCBackend::sym_buffer_register(void *addr, size_t length,
+                                    int my_pe, int n_pes, ptrdiff_t stride) {
+  return rocshmem_buffer_register_vmm(addr, length, my_pe, n_pes, stride);
+}
+
+int IPCBackend::sym_buffer_unregister(void *addr) {
+  return ipc_user_buf_remove_entry(reinterpret_cast<uintptr_t>(addr));
+}
+
 }  // namespace rocshmem
