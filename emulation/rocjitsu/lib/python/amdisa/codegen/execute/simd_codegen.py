@@ -41,10 +41,32 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
     "v_sub_f32_vop2": ("float32_t", "std::minus<>{}"),
     "v_subrev_f32_vop2": ("float32_t", "[](auto a, auto b) { return b - a; }"),
     "v_mul_f32_vop2": ("float32_t", "std::multiplies<>{}"),
+    # Legacy / DX9 zero-multiply: (a==0 || b==0) ? 0 : a*b. The ==0 matches both
+    # ±0 (as the scalar `a == 0.0f` does). Routed via the VOP3 binary fp glue for
+    # the _vop3 twin (which applies abs/neg/omod/clamp around this functor).
+    "v_mul_legacy_f32_vop2": (
+        "float32_t",
+        "[](auto a, auto b) {"
+        " auto r = a * b;"
+        " util::stdx::where(a == 0.0f || b == 0.0f, r) = util::native<float32_t>(0.0f);"
+        " return r; }",
+    ),
+    "v_mul_dx9_zero_f32_vop2": (
+        "float32_t",
+        "[](auto a, auto b) {"
+        " auto r = a * b;"
+        " util::stdx::where(a == 0.0f || b == 0.0f, r) = util::native<float32_t>(0.0f);"
+        " return r; }",
+    ),
     # --- uint32 (wrap-around / bitwise, bit-identical to scalar body) ---
     "v_add_u32_vop2": ("uint32_t", "std::plus<>{}"),
     "v_sub_u32_vop2": ("uint32_t", "std::minus<>{}"),
     "v_subrev_u32_vop2": ("uint32_t", "[](auto a, auto b) { return b - a; }"),
+    # RDNA "no-carry" int add/sub — bit-identical to add_u32/sub_u32/subrev_u32
+    # (no VCC interaction), just renamed.
+    "v_add_nc_u32_vop2": ("uint32_t", "std::plus<>{}"),
+    "v_sub_nc_u32_vop2": ("uint32_t", "std::minus<>{}"),
+    "v_subrev_nc_u32_vop2": ("uint32_t", "[](auto a, auto b) { return b - a; }"),
     "v_and_b32_vop2": ("uint32_t", "std::bit_and<>{}"),
     "v_or_b32_vop2": ("uint32_t", "std::bit_or<>{}"),
     "v_xor_b32_vop2": ("uint32_t", "std::bit_xor<>{}"),
@@ -279,6 +301,18 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
     # --- bitwise / move (uint32, bit-identical) ---
     "v_mov_b32_vop1": ("uint32_t", "uint32_t", "[](auto a) { return a; }"),
     "v_not_b32_vop1": ("uint32_t", "uint32_t", "[](auto a) { return ~a; }"),
+    # RDNA3+ 16-bit move / not / int16<->int32 conversions (low-16, zero-extend
+    # to the 32-bit VGPR). The _vop3 twins auto-route through the same VOP1 path.
+    "v_mov_b16_vop1": ("uint32_t", "uint32_t", "[](auto a) { return a & 0xFFFFu; }"),
+    "v_not_b16_vop1": ("uint32_t", "uint32_t", "[](auto a) { return (~a) & 0xFFFFu; }"),
+    "v_cvt_i32_i16_vop1": (
+        "uint32_t",
+        "uint32_t",
+        "[](auto a) {"
+        " auto x = util::stdx::static_simd_cast<util::native<int32_t>>(a & 0xFFFFu);"
+        " return util::stdx::static_simd_cast<util::native<uint32_t>>((x << 16) >> 16); }",
+    ),
+    "v_cvt_u32_u16_vop1": ("uint32_t", "uint32_t", "[](auto a) { return a & 0xFFFFu; }"),
     # v_bfrev_b32: reverse the 32 bits of src0. The scalar body loops bit-by-bit;
     # this is the branchless swap-by-strides equivalent (1/2/4/8/16-bit groups),
     # bit-identical for every input. Pure uint32 bitwise ops.
@@ -605,6 +639,11 @@ SIMD_VOP2_CARRY: dict[str, str] = {
         " auto t2 = t1 - cin; auto bw2 = t1 < cin;"
         " return make_simd_carry(t2, bw1 | bw2); }"
     ),
+    # NOTE: the RDNA VOP2 carry-in aliases (v_add_co_ci / sub_co_ci /
+    # subrev_co_ci _vop2) are intentionally NOT wired here. On RDNA their decoded
+    # form shares routing with the VOP3 add_co_ci path, and a VOP2-carry probe
+    # (carry-in from VCC) diverges from the VOP3 src2 carry-in the kernels feed;
+    # the _vop3 forms in SIMD_VOP3_CARRY_CIN cover these ops correctly.
 }
 
 
@@ -1387,6 +1426,9 @@ SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
     # for all finite/Inf inputs except NaN-payload and signed-zero tie (same
     # accepted carve-out as v_max_f32 / v_min_f32; the A/B test skips NaN-input
     # lanes and uses no ±0 inputs). omod/clamp applied by the glue.
+    # v_fma_dx9_zero_f32: the scalar body is a plain fused multiply-add (the
+    # DX9 zero-multiply special-case is not applied to the FMA form).
+    "v_fma_dx9_zero_f32_vop3": "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }",
     "v_max3_f32_vop3": "[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmax(a, b), c); }",
     "v_min3_f32_vop3": "[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmin(a, b), c); }",
     "v_med3_f32_vop3": "[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(util::stdx::fmax(a, b), c), util::stdx::fmin(a, b)); }",
@@ -1443,6 +1485,7 @@ SIMD_VOP3_TERNARY_FP64: dict[str, str] = {
 SIMD_VOP3_FMAC_FP32: dict[str, str] = {
     "v_fmac_f32_vop3": "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }",
     "v_mac_f32_vop3": "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }",
+    "v_fmac_dx9_zero_f32_vop3": "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }",
 }
 SIMD_VOP3_FMAC_FP16: dict[str, str] = {
     "v_fmac_f16_vop3": "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }",
