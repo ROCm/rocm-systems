@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 
 use crate::common::SimpleMap;
-use serde::{Deserialize, Serialize};
 
 pub type PluginsDef = BTreeMap<String, SimpleMap>;
 
