@@ -1166,13 +1166,17 @@ hsa_status_t hsa_amd_agents_allow_access(uint32_t num_agents, const hsa_agent_t*
                                          const uint32_t* flags, const void* ptr) {
   TRY;
   IS_OPEN();
+  printf("[%s] Enter ptr: %p\n", __func__, ptr);
 
   if (num_agents == 0 || agents == NULL || flags != NULL || ptr == NULL) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
-  return core::Runtime::runtime_singleton_->AllowAccess(num_agents, agents,
+  printf("[%s] Calling core::Runtime::runtime_singleton_->AllowAccess\n", __func__);
+  auto ret =  core::Runtime::runtime_singleton_->AllowAccess(num_agents, agents,
                                                         ptr);
+  printf("[%s] Exit ret: %d\n", __func__, ret);
+  return ret;
   CATCH;
 }
 
@@ -1692,7 +1696,7 @@ hsa_status_t hsa_amd_vmem_set_access(void* va, size_t size,
   IS_ZERO(size);
   IS_BAD_PTR(desc);
   IS_ZERO(desc_cnt);
-
+  printf("[%s] Enter va: %p size: %zu desc_cnt: %zu\n", __func__, va, size, desc_cnt);
   return core::Runtime::runtime_singleton_->VMemorySetAccess(va, size, desc, desc_cnt);
   CATCH;
 }
