@@ -479,7 +479,7 @@ hsa_status_t KfdDriver::ExportDMABuf(const core::Agent& agent,
   size_t offset_res = 0;
   printf("[%s] Handle: %p size:%zu\n", __func__, handle.handle, size);
   HSAKMT_STATUS status =
-      HSAKMT_CALL(hsaKmtExportDMABufHandle(handle.handle, size, &dmabuf_fd_res, &offset_res));
+      HSAKMT_CALL(hsaKmtExportDMABufHandle((void*)handle.handle, size, &dmabuf_fd_res, &offset_res));
   if (status != HSAKMT_STATUS_SUCCESS) {
     if (status == HSAKMT_STATUS_INVALID_PARAMETER) {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
