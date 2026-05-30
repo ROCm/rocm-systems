@@ -295,7 +295,25 @@ impl MirageCtl for FileCtl {
         if !layout.root.exists() {
             return Err(MirageError::SessionNotFound(id.to_string()));
         }
-        // signal the host process if any
+
+        // If this session is containerised and we know the container
+        // id, ask the configured provider to remove it. This is the
+        // authoritative shutdown for containerised sessions: killing
+        // the container terminates the host, all execs, and their
+        // children. We do it before signalling the host so the
+        // container runtime sees the request first.
+        let def: Option<crate::session::SessionDef> =
+            crate::state::read_json_opt(&layout.def())?;
+        if let Some(def) = def.as_ref()
+            && let Some(container) = def.container.as_ref()
+            && let Some(cid) = crate::state::read_small_str(&layout.container_id())?
+        {
+            stop_container(&container.provider, &cid);
+        }
+
+        // signal the host process if any (this is also the fallback
+        // path when there is no container, or when the container has
+        // already exited).
         if let Some(pid_str) = crate::state::read_small_str(&layout.host_pid())? {
             if let Ok(pid) = pid_str.parse::<i32>() {
                 let _ = nix::sys::signal::kill(
@@ -426,30 +444,14 @@ impl MirageCtl for FileCtl {
         if !layout.root.exists() {
             return Err(MirageError::ExecNotFound(exec.exec.to_string()));
         }
-        let node_root = layout.node_root();
-        if !node_root.exists() {
-            return Ok(());
+        // Validate the signal so we don't ask the host to deliver
+        // something that nix would refuse later.
+        if nix::sys::signal::Signal::try_from(sig).is_err() {
+            return Err(MirageError::other(format!("invalid signal: {sig}")));
         }
-        let signal = match nix::sys::signal::Signal::try_from(sig) {
-            Ok(s) => s,
-            Err(_) => return Err(MirageError::other(format!("invalid signal: {sig}"))),
-        };
-        for entry in std::fs::read_dir(&node_root).map_err(|e| MirageError::Io {
-            path: node_root.clone(),
-            source: e,
-        })? {
-            let entry = entry.map_err(|e| MirageError::Io {
-                path: node_root.clone(),
-                source: e,
-            })?;
-            let pid_path = entry.path().join("pid");
-            if let Some(pid_str) = crate::state::read_small_str(&pid_path)?
-                && let Ok(pid) = pid_str.parse::<i32>()
-            {
-                let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), signal);
-            }
-        }
-        Ok(())
+        // Write the request file. The host's poll loop picks it up,
+        // forwards the signal to every node pid, and removes the file.
+        crate::state::write_bytes(&layout.signal(), sig.to_string().as_bytes())
     }
 
     fn exec_remove(&self, exec: &ExecRef) -> Result<()> {
@@ -479,6 +481,19 @@ impl MirageCtl for FileCtl {
 
 fn process_alive(pid: i32) -> bool {
     nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_ok()
+}
+
+/// Best-effort container removal. Runs `<provider> rm -f <id>` and
+/// ignores any error: the caller still proceeds to remove the
+/// on-disk session, and signalling the host pid catches any case
+/// where the container runtime is unavailable.
+fn stop_container(provider: &str, container_id: &str) {
+    let _ = std::process::Command::new(provider)
+        .args(["rm", "-f", container_id])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
 }
 
 fn next_exec_id(exec_root: &Path) -> Result<ExecId> {
@@ -632,5 +647,157 @@ mod tests {
         assert_eq!(r1.exec.as_str(), "e-000001");
         let list = ctl.exec_list(&s).unwrap();
         assert_eq!(list.len(), 2);
+    }
+
+    fn make_exec_dir(ctl: &FileCtl, session: &SessionId) -> ExecRef {
+        let def = ExecDef {
+            timestamp: Utc::now(),
+            session: session.clone(),
+            exec: crate::exec::ExecArgs {
+                command: "/bin/true".to_string(),
+                args: vec![],
+                env: Default::default(),
+                workdir: None,
+            },
+            worker_exec: None,
+            keep: true,
+        };
+        ctl.session_exec(&def).unwrap()
+    }
+
+    #[test]
+    fn exec_signal_writes_request_file() {
+        let (ctl, _env) = fresh_ctl();
+        let s = SessionId::new("sigs").unwrap();
+        ctl.session_create(CreateSessionRequest {
+            id: Some(s.clone()),
+            profile: MaybeRef::Ref("p".to_string()),
+            workdir: "/tmp".to_string(),
+            container: None,
+        })
+        .unwrap();
+        let r = make_exec_dir(&ctl, &s);
+        // Even with no node pids yet, the request must be enqueued
+        // for the host to pick up later.
+        ctl.exec_signal(&r, libc::SIGTERM).unwrap();
+        let layout = crate::paths::SessionLayout::for_id(&s).exec(&r.exec);
+        let raw = std::fs::read_to_string(layout.signal()).unwrap();
+        assert_eq!(raw.trim().parse::<i32>().unwrap(), libc::SIGTERM);
+    }
+
+    #[test]
+    fn exec_signal_rejects_invalid_number() {
+        let (ctl, _env) = fresh_ctl();
+        let s = SessionId::new("sigi").unwrap();
+        ctl.session_create(CreateSessionRequest {
+            id: Some(s.clone()),
+            profile: MaybeRef::Ref("p".to_string()),
+            workdir: "/tmp".to_string(),
+            container: None,
+        })
+        .unwrap();
+        let r = make_exec_dir(&ctl, &s);
+        let err = ctl.exec_signal(&r, 9999).unwrap_err();
+        assert!(matches!(err, MirageError::Other(_)), "got {err:?}");
+        // and no signal file should have been written
+        let layout = crate::paths::SessionLayout::for_id(&s).exec(&r.exec);
+        assert!(!layout.signal().exists());
+    }
+
+    #[test]
+    fn exec_signal_missing_exec_returns_not_found() {
+        let (ctl, _env) = fresh_ctl();
+        let s = SessionId::new("nope").unwrap();
+        ctl.session_create(CreateSessionRequest {
+            id: Some(s.clone()),
+            profile: MaybeRef::Ref("p".to_string()),
+            workdir: "/tmp".to_string(),
+            container: None,
+        })
+        .unwrap();
+        let r = ExecRef {
+            session: s,
+            exec: ExecId::new("e-999999").unwrap(),
+        };
+        assert!(matches!(
+            ctl.exec_signal(&r, libc::SIGTERM),
+            Err(MirageError::ExecNotFound(_))
+        ));
+    }
+
+    #[test]
+    fn session_destroy_container_invokes_provider() {
+        let (ctl, env) = fresh_ctl();
+        // Mock provider script: appends every invocation to a log
+        // file so we can assert it was called with "rm -f <id>".
+        let tmp_dir = env._dir.path();
+        let log = tmp_dir.join("provider.log");
+        let provider = tmp_dir.join("mock-provider.sh");
+        std::fs::write(
+            &provider,
+            format!("#!/bin/sh\necho \"$@\" >> {}\n", log.display()),
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let s = SessionId::new("c1").unwrap();
+        ctl.session_create(CreateSessionRequest {
+            id: Some(s.clone()),
+            profile: MaybeRef::Ref("p".to_string()),
+            workdir: "/tmp".to_string(),
+            container: Some(crate::container::ContainerizedDef {
+                provider: provider.to_string_lossy().to_string(),
+                image: "ignored:latest".to_string(),
+                files: vec![],
+                network: crate::container::NetworkConfigDef::None,
+            }),
+        })
+        .unwrap();
+        // Simulate the host having recorded a container id.
+        let layout = crate::paths::SessionLayout::for_id(&s);
+        crate::state::write_bytes(&layout.container_id(), b"mirage-c1-xyz").unwrap();
+
+        ctl.session_destroy(&s).unwrap();
+
+        let recorded = std::fs::read_to_string(&log).unwrap();
+        assert!(
+            recorded.contains("rm -f mirage-c1-xyz"),
+            "expected provider call, got: {recorded:?}"
+        );
+        assert!(!layout.root.exists(), "session dir should be removed");
+    }
+
+    #[test]
+    fn session_destroy_without_container_id_skips_provider() {
+        let (ctl, env) = fresh_ctl();
+        let tmp_dir = env._dir.path();
+        let log = tmp_dir.join("provider.log");
+        let provider = tmp_dir.join("mock-provider.sh");
+        std::fs::write(
+            &provider,
+            format!("#!/bin/sh\necho \"$@\" >> {}\n", log.display()),
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let s = SessionId::new("c2").unwrap();
+        ctl.session_create(CreateSessionRequest {
+            id: Some(s.clone()),
+            profile: MaybeRef::Ref("p".to_string()),
+            workdir: "/tmp".to_string(),
+            container: Some(crate::container::ContainerizedDef {
+                provider: provider.to_string_lossy().to_string(),
+                image: "ignored:latest".to_string(),
+                files: vec![],
+                network: crate::container::NetworkConfigDef::None,
+            }),
+        })
+        .unwrap();
+        // No container.id was ever written → provider must not be
+        // called.
+        ctl.session_destroy(&s).unwrap();
+        assert!(!log.exists(), "provider must not be invoked");
     }
 }

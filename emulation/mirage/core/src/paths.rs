@@ -136,6 +136,11 @@ impl SessionLayout {
     pub fn host_log(&self) -> PathBuf {
         self.root.join("host.log")
     }
+    /// File written by whoever launches the container; contains the
+    /// container id/name that the configured provider can `rm -f`.
+    pub fn container_id(&self) -> PathBuf {
+        self.root.join("container.id")
+    }
     pub fn exec_root(&self) -> PathBuf {
         self.root.join("exec")
     }
@@ -161,6 +166,12 @@ impl ExecLayout {
     }
     pub fn status(&self) -> PathBuf {
         self.root.join("status.json")
+    }
+    /// Single-shot signal request file. Written by the ctl, consumed
+    /// by the host: the host reads the signal number from this file,
+    /// forwards it to every node pid, then removes the file.
+    pub fn signal(&self) -> PathBuf {
+        self.root.join("signal")
     }
     pub fn node_root(&self) -> PathBuf {
         self.root.join("node")

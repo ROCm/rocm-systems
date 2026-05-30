@@ -112,6 +112,9 @@ pub async fn run(config: HostConfig, shutdown: Arc<Notify>) -> Result<()> {
             }
         }
 
+        // Handle pending signal requests across all execs.
+        process_signal_requests(&layout);
+
         // Wait for either shutdown or the next poll tick.
         let woke = tokio::select! {
             _ = shutdown.notified() => true,
@@ -159,17 +162,53 @@ fn signal_all_execs(layout: &SessionLayout, sig: nix::sys::signal::Signal) {
     };
     for e in rd.flatten() {
         let exec_layout = ExecLayout::for_root(e.path());
-        let Ok(nodes) = std::fs::read_dir(exec_layout.node_root()) else {
+        signal_exec_nodes(&exec_layout, sig);
+    }
+}
+
+/// Forward `sig` to every node process that has published a pid file.
+fn signal_exec_nodes(exec_layout: &ExecLayout, sig: nix::sys::signal::Signal) {
+    let Ok(nodes) = std::fs::read_dir(exec_layout.node_root()) else {
+        return;
+    };
+    for n in nodes.flatten() {
+        let pid_path = n.path().join("pid");
+        if let Ok(Some(s)) = read_small_str(&pid_path)
+            && let Ok(pid) = s.parse::<i32>()
+        {
+            let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), sig);
+        }
+    }
+}
+
+/// Scan every exec directory for a pending `signal` request file. Each
+/// file holds a single signal number as text; the host parses it,
+/// forwards the signal to every node pid in that exec, and removes
+/// the file. Removal is the consumed-acknowledgement and is what
+/// distinguishes "signal handled" from "signal still pending" to
+/// outside observers.
+fn process_signal_requests(layout: &SessionLayout) {
+    let Ok(rd) = std::fs::read_dir(layout.exec_root()) else {
+        return;
+    };
+    for e in rd.flatten() {
+        let exec_layout = ExecLayout::for_root(e.path());
+        let signal_path = exec_layout.signal();
+        let Ok(Some(raw)) = read_small_str(&signal_path) else {
             continue;
         };
-        for n in nodes.flatten() {
-            let pid_path = n.path().join("pid");
-            if let Ok(Some(s)) = read_small_str(&pid_path)
-                && let Ok(pid) = s.parse::<i32>()
-            {
-                let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), sig);
+        let Ok(num) = raw.parse::<i32>() else {
+            // bogus payload: drop it so we don't loop forever.
+            let _ = std::fs::remove_file(&signal_path);
+            continue;
+        };
+        match nix::sys::signal::Signal::try_from(num) {
+            Ok(sig) => signal_exec_nodes(&exec_layout, sig),
+            Err(_) => {
+                tracing::warn!("ignoring invalid signal request {num}");
             }
         }
+        let _ = std::fs::remove_file(&signal_path);
     }
 }
 
