@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::{common::MaybeRef, session::SessionId};
@@ -33,8 +34,8 @@ pub struct ExecArgs {
 /// variables or wrapper commands before the exec is actually started.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecDef {
-    /// a timestamp of when this exec was requested, in milliseconds since the unix epoch
-    pub timestamp: u64,
+    /// a timestamp of when this exec was requested
+    pub timestamp: DateTime<Utc>,
 
     /// session
     pub session: SessionId,

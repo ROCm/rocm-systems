@@ -1,11 +1,12 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::{common::MaybeRef, container::ContainerizedDef, profile::ProfileDef};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct SessionHealth {
-    /// a timestamp of this health status, in milliseconds since the unix epoch
-    pub timestamp: u64,
+    /// a timestamp of this health status
+    pub timestamp: DateTime<Utc>,
 
     /// whether the session is healthy (i.e. ready to run execs)
     pub healthy: bool,
