@@ -49,7 +49,7 @@ struct Case {
   bool ternary;
 };
 
-const std::array<Case, 11> kCases = {{
+const std::array<Case, 17> kCases = {{
     {"v_mul_lo_u32_vop3", 645, false},
     {"v_mul_hi_u32_vop3", 646, false},
     {"v_mul_hi_i32_vop3", 647, false},
@@ -61,6 +61,14 @@ const std::array<Case, 11> kCases = {{
     {"v_mad_u32_u24_vop3", 451, true},
     {"v_alignbit_b32_vop3", 462, true},
     {"v_alignbyte_b32_vop3", 463, true},
+    // 16-bit multiply-add family: mixed-width (i32_i16/u32_u16) and 16-bit-wrap
+    // (i16/u16, incl. _legacy twins).
+    {"v_mad_i32_i16_vop3", 498, true},
+    {"v_mad_u32_u16_vop3", 497, true},
+    {"v_mad_i16_vop3", 517, true},
+    {"v_mad_u16_vop3", 516, true},
+    {"v_mad_legacy_i16_vop3", 492, true},
+    {"v_mad_legacy_u16_vop3", 491, true},
 }};
 
 const std::array<uint32_t, 14> kVals = {{

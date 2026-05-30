@@ -2212,6 +2212,223 @@ template <typename Inst>
   return false;
 }
 
+/// VOP3 64-bit-lane reverse-shift fast path (v_lshlrev_b64 / v_lshrrev_b64 /
+/// v_ashrrev_i64). The shift amount is a 32-bit src0 (read as a native_width64
+/// narrow lane, widened to 64-bit and masked to [0,63]); the shifted value is
+/// the 64-bit src1; the result is 64-bit. `shift_op(value, shift)` receives both
+/// as `native<uint64_t>` (shift already widened+masked), so the functor is a
+/// plain `v << sh` / `v >> sh` (logical) or an arithmetic-shift cast for the
+/// signed form — bit-identical to the scalar body's `& 63u` shift.
+template <typename Inst, typename ShiftOp>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_shift64_vop3_simd(Inst &inst, Wavefront &wf,
+                                                        ShiftOp shift_op) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.vdst.simd_capable())
+    return false;
+  constexpr std::size_t W = util::native_width64;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  // src0 = 32-bit shift amount (narrow lane), src1 = 64-bit value, dst = 64-bit.
+  const uint32_t *ps = SimdAccess::lane_ptr(inst.src0, wf, 0);
+  auto [lo1, hi1] = SimdAccess::lane_ptr64(inst.src1, wf, 0);
+  auto [dlo, dhi] = SimdAccess::dst_ptr64(inst.vdst, wf, 0);
+  const auto s_bcast =
+      ps ? util::narrow32<uint32_t>{} : util::broadcast_narrow<uint32_t>(inst.src0.read_scalar(wf));
+  const auto v_bcast =
+      lo1 ? util::native<uint64_t>{} : util::broadcast64<uint64_t>(inst.src1.read_scalar64(wf));
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto s = ps ? util::load_narrow<uint32_t>(ps + base) : s_bcast;
+    const auto v = lo1 ? util::load64<uint64_t>(lo1 + base, hi1 + base) : v_bcast;
+    const auto sh = util::stdx::static_simd_cast<util::native<uint64_t>>(s) & 63ull;
+    write_simd64_at<uint64_t>(dlo, dhi, inst.vdst, wf, base, shift_op(v, sh), chunk);
+  }
+  return true;
+}
+template <typename Inst, typename ShiftOp>
+[[nodiscard]] inline bool try_execute_shift64_vop3_simd(Inst &, Wavefront &, ShiftOp) {
+  return false;
+}
+
+/// VOP3 v_lshl_add_u64 fast path: dst = (src0 << (src1 & 63)) + src2, all 64-bit
+/// except the 32-bit shift amount src1. The scalar body shifts by the raw src1
+/// (C++ UB at >=64, but x86 masks the count to 6 bits); masking to 63 here
+/// reproduces that x86 scalar result for every shift value.
+template <typename Inst>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_lshl_add_u64_simd(Inst &inst, Wavefront &wf) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+    return false;
+  constexpr std::size_t W = util::native_width64;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  // src0 = 64-bit value, src1 = 32-bit shift (narrow), src2 = 64-bit addend.
+  auto [lo0, hi0] = SimdAccess::lane_ptr64(inst.src0, wf, 0);
+  const uint32_t *ps = SimdAccess::lane_ptr(inst.src1, wf, 0);
+  auto [lo2, hi2] = SimdAccess::lane_ptr64(inst.src2, wf, 0);
+  auto [dlo, dhi] = SimdAccess::dst_ptr64(inst.vdst, wf, 0);
+  const auto v_bcast =
+      lo0 ? util::native<uint64_t>{} : util::broadcast64<uint64_t>(inst.src0.read_scalar64(wf));
+  const auto s_bcast =
+      ps ? util::narrow32<uint32_t>{} : util::broadcast_narrow<uint32_t>(inst.src1.read_scalar(wf));
+  const auto c_bcast =
+      lo2 ? util::native<uint64_t>{} : util::broadcast64<uint64_t>(inst.src2.read_scalar64(wf));
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto v = lo0 ? util::load64<uint64_t>(lo0 + base, hi0 + base) : v_bcast;
+    const auto s = ps ? util::load_narrow<uint32_t>(ps + base) : s_bcast;
+    const auto c = lo2 ? util::load64<uint64_t>(lo2 + base, hi2 + base) : c_bcast;
+    const auto sh = util::stdx::static_simd_cast<util::native<uint64_t>>(s) & 63ull;
+    write_simd64_at<uint64_t>(dlo, dhi, inst.vdst, wf, base, (v << sh) + c, chunk);
+  }
+  return true;
+}
+template <typename Inst>
+[[nodiscard]] inline bool try_execute_lshl_add_u64_simd(Inst &, Wavefront &) {
+  return false;
+}
+
+/// VOP3 wide 32x32->64 multiply-add fast path (v_mad_u64_u32 / v_mad_i64_i32).
+/// src0/src1 are 32-bit multiplicands (read as narrow lanes), src2 is the 64-bit
+/// addend, dst is 64-bit. `mad_op(s0, s1, c)` receives the two narrow operands
+/// and the 64-bit addend and does the (signedness-aware) widen, 64-bit multiply
+/// (low 64), and add — matching the scalar `(wide)s0 * (wide)s1 + s2`.
+template <typename Inst, typename MadOp>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_mad_wide64_vop3_simd(Inst &inst, Wavefront &wf,
+                                                           MadOp mad_op) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+    return false;
+  constexpr std::size_t W = util::native_width64;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  const uint32_t *p0 = SimdAccess::lane_ptr(inst.src0, wf, 0);
+  const uint32_t *p1 = SimdAccess::lane_ptr(inst.src1, wf, 0);
+  auto [lo2, hi2] = SimdAccess::lane_ptr64(inst.src2, wf, 0);
+  auto [dlo, dhi] = SimdAccess::dst_ptr64(inst.vdst, wf, 0);
+  const auto a_bcast = p0 ? util::narrow32<uint32_t>{}
+                          : util::broadcast_narrow<uint32_t>(inst.src0.read_scalar(wf));
+  const auto b_bcast = p1 ? util::narrow32<uint32_t>{}
+                          : util::broadcast_narrow<uint32_t>(inst.src1.read_scalar(wf));
+  const auto c_bcast =
+      lo2 ? util::native<uint64_t>{} : util::broadcast64<uint64_t>(inst.src2.read_scalar64(wf));
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto a = p0 ? util::load_narrow<uint32_t>(p0 + base) : a_bcast;
+    const auto b = p1 ? util::load_narrow<uint32_t>(p1 + base) : b_bcast;
+    const auto c = lo2 ? util::load64<uint64_t>(lo2 + base, hi2 + base) : c_bcast;
+    write_simd64_at<uint64_t>(dlo, dhi, inst.vdst, wf, base, mad_op(a, b, c), chunk);
+  }
+  return true;
+}
+template <typename Inst, typename MadOp>
+[[nodiscard]] inline bool try_execute_mad_wide64_vop3_simd(Inst &, Wavefront &, MadOp) {
+  return false;
+}
+
+/// VOP3 carry-OUT binary fast path (v_add_co/sub_co/subrev_co_u32). No carry-in
+/// (the SimdCarry functor's third arg is a zero vector); the per-lane carry-out
+/// is merged into a copy of the current VCC and written to the SGPR-pair `sdst`
+/// (not the fixed VCC) — exactly the scalar body's `inst.sdst.write_scalar64`.
+/// `sdst` is an SGPR operand, so it does not participate in the simd_capable
+/// gate; src0/src1/vdst do. (These VOP3 forms carry no `src2` member, so the
+/// carry-in path lives in the separate _cin glue below.)
+template <typename Inst, typename CarryOp>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_binary_vop3_co_simd(Inst &inst, Wavefront &wf,
+                                                          CarryOp carry_op) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.vdst.simd_capable())
+    return false;
+  using T = uint32_t;
+  constexpr std::size_t W = util::native_width_v<T>;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  uint64_t carry_out = wf.vcc();
+  const uint32_t *p0 = SimdAccess::lane_ptr(inst.src0, wf, 0);
+  const uint32_t *p1 = SimdAccess::lane_ptr(inst.src1, wf, 0);
+  const auto a_bcast = p0 ? util::native<T>{} : util::broadcast<T>(inst.src0.read_scalar(wf));
+  const auto b_bcast = p1 ? util::native<T>{} : util::broadcast<T>(inst.src1.read_scalar(wf));
+  const auto zero_cin = util::broadcast<T>(0u);
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto a = p0 ? util::load<T>(p0 + base) : a_bcast;
+    const auto b = p1 ? util::load<T>(p1 + base) : b_bcast;
+    const auto r = carry_op(a, b, zero_cin);
+    write_simd<T>(inst.vdst, wf, base, r.value, chunk);
+    uint64_t carry_bits = 0;
+    for (std::size_t i = 0; i < W; ++i)
+      if (r.carry[i])
+        carry_bits |= (1ULL << i);
+    carry_out = (carry_out & ~(chunk << base)) | ((carry_bits & chunk) << base);
+  }
+  inst.sdst.write_scalar64(wf, carry_out);
+  return true;
+}
+template <typename Inst, typename CarryOp>
+[[nodiscard]] inline bool try_execute_binary_vop3_co_simd(Inst &, Wavefront &, CarryOp) {
+  return false;
+}
+
+/// VOP3 carry-IN binary fast path (v_addc_co/subb_co/subbrev_co_u32). Same as
+/// the _co glue but the per-lane carry-in is read from the SGPR-pair `src2`
+/// (these forms have a src2 member) and expanded to a 0/1-per-lane vector;
+/// carry-out goes to `sdst`. src2/sdst are SGPR operands (not gated).
+template <typename Inst, typename CarryOp>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_binary_vop3_cin_simd(Inst &inst, Wavefront &wf,
+                                                           CarryOp carry_op) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.vdst.simd_capable())
+    return false;
+  using T = uint32_t;
+  constexpr std::size_t W = util::native_width_v<T>;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  const uint64_t cin_all = inst.src2.read_scalar64(wf);
+  uint64_t carry_out = wf.vcc();
+  const uint32_t *p0 = SimdAccess::lane_ptr(inst.src0, wf, 0);
+  const uint32_t *p1 = SimdAccess::lane_ptr(inst.src1, wf, 0);
+  const auto a_bcast = p0 ? util::native<T>{} : util::broadcast<T>(inst.src0.read_scalar(wf));
+  const auto b_bcast = p1 ? util::native<T>{} : util::broadcast<T>(inst.src1.read_scalar(wf));
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto a = p0 ? util::load<T>(p0 + base) : a_bcast;
+    const auto b = p1 ? util::load<T>(p1 + base) : b_bcast;
+    const uint64_t cin_bits = (cin_all >> base) & chunk_full;
+    alignas(util::native<T>) uint32_t cinbuf[W];
+    for (std::size_t i = 0; i < W; ++i)
+      cinbuf[i] = static_cast<uint32_t>((cin_bits >> i) & 1u);
+    const auto cin = util::load<T>(cinbuf);
+    const auto r = carry_op(a, b, cin);
+    write_simd<T>(inst.vdst, wf, base, r.value, chunk);
+    uint64_t carry_bits = 0;
+    for (std::size_t i = 0; i < W; ++i)
+      if (r.carry[i])
+        carry_bits |= (1ULL << i);
+    carry_out = (carry_out & ~(chunk << base)) | ((carry_bits & chunk) << base);
+  }
+  inst.sdst.write_scalar64(wf, carry_out);
+  return true;
+}
+template <typename Inst, typename CarryOp>
+[[nodiscard]] inline bool try_execute_binary_vop3_cin_simd(Inst &, Wavefront &, CarryOp) {
+  return false;
+}
+
 } // namespace amdgpu
 } // namespace rocjitsu
 
@@ -2459,6 +2676,37 @@ template <typename Inst>
 /// modified `native<float>` and returns `native<float>`; variadic.
 #define ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16(...)                                                     \
   if (::rocjitsu::amdgpu::try_execute_unary_vop3_fp16_simd(inst, wf, __VA_ARGS__))                 \
+  return
+
+/// VOP3 64-bit reverse-shift counterpart (v_lshlrev_b64 / v_lshrrev_b64 /
+/// v_ashrrev_i64). src0 = 32-bit shift, src1 = 64-bit value; the functor takes
+/// `(native<uint64_t> value, native<uint64_t> shift)`. Variadic.
+#define ROCJITSU_TRY_SIMD_SHIFT64_VOP3(...)                                                        \
+  if (::rocjitsu::amdgpu::try_execute_shift64_vop3_simd(inst, wf, __VA_ARGS__))                     \
+  return
+
+/// VOP3 v_lshl_add_u64 counterpart. Fixed op ((src0 << (src1 & 63)) + src2).
+#define ROCJITSU_TRY_SIMD_LSHL_ADD_U64()                                                           \
+  if (::rocjitsu::amdgpu::try_execute_lshl_add_u64_simd(inst, wf))                                  \
+  return
+
+/// VOP3 wide 32x32->64 multiply-add counterpart (v_mad_u64_u32 / v_mad_i64_i32).
+/// The functor takes `(narrow32<uint32_t> s0, narrow32<uint32_t> s1,
+/// native<uint64_t> c)`; variadic so its commas pass through.
+#define ROCJITSU_TRY_SIMD_MAD_WIDE64_VOP3(...)                                                     \
+  if (::rocjitsu::amdgpu::try_execute_mad_wide64_vop3_simd(inst, wf, __VA_ARGS__))                  \
+  return
+
+/// VOP3 carry-OUT counterpart (no carry-in; carry-out to SGPR sdst). Lane type
+/// fixed to uint32_t; variadic in the SimdCarry functor.
+#define ROCJITSU_TRY_SIMD_VOP3_CO(...)                                                             \
+  if (::rocjitsu::amdgpu::try_execute_binary_vop3_co_simd(inst, wf, __VA_ARGS__))                   \
+  return
+
+/// VOP3 carry-IN counterpart (carry-in from SGPR src2, carry-out to SGPR sdst).
+/// Lane type fixed to uint32_t; variadic in the SimdCarry functor.
+#define ROCJITSU_TRY_SIMD_VOP3_CIN(...)                                                            \
+  if (::rocjitsu::amdgpu::try_execute_binary_vop3_cin_simd(inst, wf, __VA_ARGS__))                  \
   return
 
 #endif // ROCJITSU_ISA_AMDGPU_SHARED_SIMD_GLUE_H_
