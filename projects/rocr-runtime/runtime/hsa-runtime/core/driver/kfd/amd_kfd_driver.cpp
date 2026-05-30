@@ -633,6 +633,7 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
    * so we can free new_alloc Kernel-Mode-Drivers
    */
    hsaKmtFreeMemory(mem, size);
+   auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(targetHandle.handle);
   #else // __windows__
   // Export memory.
   printf("[%s] mem: %p size: %zu\n", __func__, mem, size);
@@ -651,11 +652,12 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
     printf("[%s] Exit error  status: %d\n", __func__, err);
     return err;
   }
+  auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle->handle);
   #endif
 
   // Get address that memory is mapped to.
   auto devhandle = static_cast<const GpuAgent&>(agent).libThunkDev();
-  auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(targetHandle.handle);
+  
 
   printf("[%s] Calling hsaKmtMemoryGetCpuAddr: %p\n", __func__, mmap_offset);
   HSAKMT_STATUS hsakmt_err = HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(
