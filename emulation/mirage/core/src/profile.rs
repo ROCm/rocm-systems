@@ -9,7 +9,4 @@ pub struct ProfileDef {
 
     /// the emulator to use for this profile
     pub emulator: EmulatorDef,
-
-    /// run the execs in a container with this image
-    pub image: Option<String>,
 }

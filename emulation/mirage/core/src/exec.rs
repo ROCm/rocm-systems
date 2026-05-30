@@ -20,6 +20,10 @@ pub struct ExecArgs {
     /// Extra environment variables to set for this run.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub env: BTreeMap<String, String>,
+
+    /// Optional working directory for this command.  If `None`, the command
+    /// will run in the session's default working directory.
+    pub workdir: Option<String>,
 }
 
 /// A request to start an exec inside an existing session.
@@ -29,6 +33,9 @@ pub struct ExecArgs {
 /// variables or wrapper commands before the exec is actually started.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecDef {
+    /// a timestamp of when this exec was requested, in milliseconds since the unix epoch
+    pub timestamp: u64,
+
     /// session
     pub session: SessionId,
 
@@ -39,6 +46,9 @@ pub struct ExecDef {
     /// run any command.
     #[serde(default)]
     pub worker_exec: Option<ExecArgs>,
+
+    /// should this exec be kept around after it finishes, or should it be cleaned up immediately?
+    pub keep: bool,
 }
 
 pub struct ExecStatus {
