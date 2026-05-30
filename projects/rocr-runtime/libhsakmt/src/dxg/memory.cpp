@@ -1109,6 +1109,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaHandleImportDesc* import_des
       }
       import_res->buf_handle = reinterpret_cast<HsaMemoryObjectHandle>(
                                phys_mem->GetGpuMemoryHandle());
+      import_res->alloc_size = phys_mem->Size();
       return HSAKMT_STATUS_SUCCESS;
     }
   }
@@ -1134,6 +1135,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaHandleImportDesc* import_des
   if (ret == HSAKMT_STATUS_SUCCESS) {
     //use GpuMemory object handle as drm buf handle
     import_res->buf_handle = reinterpret_cast<HsaMemoryObjectHandle>(mem_handle);
+    import_res->alloc_size =
+        wsl::thunk::GpuMemory::Convert(mem_handle)->Size();
     return HSAKMT_STATUS_SUCCESS;
   }
   return HSAKMT_STATUS_ERROR;

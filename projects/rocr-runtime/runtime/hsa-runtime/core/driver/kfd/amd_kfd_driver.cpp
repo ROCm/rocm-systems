@@ -625,7 +625,6 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
 #endif
   if (ret != HSA_STATUS_SUCCESS)
     return ret;
-  printf("[%s] imported_size: %zu size: %zu\n", __func__, imported_size, size);
   assert(imported_size == size);
 
   int shareable_fd = source_fd;
