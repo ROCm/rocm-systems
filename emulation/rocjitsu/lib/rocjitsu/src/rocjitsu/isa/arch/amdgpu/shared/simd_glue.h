@@ -67,43 +67,35 @@ inline util::native<double> apply_vop3_src_mod_f64(util::native<double> v, uint3
   return std::bit_cast<util::native<double>>(b);
 }
 
-/// In-vector VOP3 destination modifier (f64), counterpart of
-/// apply_vop3_dst_mod_f32: omod scales by an exact power of two then clamp
-/// saturates to [0, 1]. Ordered compares are false for NaN, so NaN passes
-/// through unchanged — matches `std::clamp(v, 0.0, 1.0)`.
-inline util::native<double> apply_vop3_dst_mod_f64(util::native<double> v, uint32_t omod,
-                                                   uint32_t clamp) {
+/// In-vector VOP3 destination modifier, bit-exact with the scalar tail: `omod`
+/// scales by an exact power of two (1->*2, 2->*4, 3->*0.5; IEEE-exact, no
+/// rounding), then `clamp` saturates to [0,1]. The clamp uses ordered compares
+/// (`v < 0`, `v > 1`), which are false for NaN, so NaN passes through unchanged —
+/// matching `std::clamp(v, T(0), T(1))`. Instantiated for float and double; the
+/// `_f32`/`_f64` wrappers below name the two lane types the VOP3 paths use.
+template <typename T>
+inline util::native<T> apply_vop3_dst_mod(util::native<T> v, uint32_t omod, uint32_t clamp) {
   if (omod == 1)
-    v = v * 2.0;
+    v = v * T(2);
   else if (omod == 2)
-    v = v * 4.0;
+    v = v * T(4);
   else if (omod == 3)
-    v = v * 0.5;
+    v = v * T(0.5);
   if (clamp) {
-    util::stdx::where(v < 0.0, v) = 0.0;
-    util::stdx::where(v > 1.0, v) = 1.0;
+    util::stdx::where(v < T(0), v) = T(0);
+    util::stdx::where(v > T(1), v) = T(1);
   }
   return v;
 }
 
-/// In-vector VOP3 destination modifier (f32), bit-exact with the scalar tail:
-/// `omod` scales by an exact power of two (1->*2, 2->*4, 3->*0.5; IEEE-exact,
-/// no rounding), then `clamp` saturates to [0,1]. The clamp uses ordered
-/// comparisons (`v < 0`, `v > 1`), which are false for NaN, so NaN passes
-/// through unchanged — matching `std::clamp(v, 0.f, 1.f)`.
+inline util::native<double> apply_vop3_dst_mod_f64(util::native<double> v, uint32_t omod,
+                                                   uint32_t clamp) {
+  return apply_vop3_dst_mod<double>(v, omod, clamp);
+}
+
 inline util::native<float> apply_vop3_dst_mod_f32(util::native<float> v, uint32_t omod,
                                                   uint32_t clamp) {
-  if (omod == 1)
-    v = v * 2.0f;
-  else if (omod == 2)
-    v = v * 4.0f;
-  else if (omod == 3)
-    v = v * 0.5f;
-  if (clamp) {
-    util::stdx::where(v < 0.0f, v) = 0.0f;
-    util::stdx::where(v > 1.0f, v) = 1.0f;
-  }
-  return v;
+  return apply_vop3_dst_mod<float>(v, omod, clamp);
 }
 
 /// SIMD load of an operand at `lane_base`. Returns a contiguous SIMD
@@ -137,6 +129,27 @@ inline void write_simd(const Op &op, Wavefront &wf, uint32_t lane_base, util::na
   alignas(util::native<T>) uint32_t buf[W];
   util::blit_to_buffer<T>(buf, v);
   op.write_lane_chunk(wf, lane_base, static_cast<uint32_t>(W), buf, mask);
+}
+
+/// Pre-resolved-pointer counterpart of write_simd, for the 32-bit fast paths that
+/// resolve the dst's VGPR base pointer ONCE (dst_ptr at lane 0) before the chunk
+/// loop and index it per chunk (`pd + base`). `pd` is that hoisted base pointer,
+/// or null when the dst is not contiguous VGPR storage (then fall back to the
+/// operand's write_lane_chunk). Identical masked-store / fallback semantics to
+/// write_simd — the 32-bit sibling of write_simd64_at.
+template <typename T, typename Op>
+  requires(util::has_stdx_simd)
+inline void write_simd_at(uint32_t *pd, const Op &op, Wavefront &wf, uint32_t base,
+                          util::native<T> v, uint64_t mask) {
+  static_assert(sizeof(T) == sizeof(uint32_t));
+  constexpr std::size_t W = util::native_width_v<T>;
+  if (pd) {
+    util::masked_store<T>(pd + base, v, mask);
+    return;
+  }
+  alignas(util::native<T>) uint32_t buf[W];
+  util::blit_to_buffer<T>(buf, v);
+  op.write_lane_chunk(wf, base, static_cast<uint32_t>(W), buf, mask);
 }
 
 /// 64-bit-lane load of an operand at `lane_base` (T is double / uint64_t).
@@ -244,13 +257,7 @@ template <typename T, typename Inst, typename BinOp>
     const auto a = p0 ? util::load<T>(p0 + base) : a_bcast;
     const auto b = p1 ? util::load<T>(p1 + base) : b_bcast;
     const auto r = bin_op(a, b);
-    if (pd) {
-      util::masked_store<T>(pd + base, r, chunk);
-    } else {
-      alignas(util::native<T>) uint32_t buf[W];
-      util::blit_to_buffer<T>(buf, r);
-      inst.vdst.write_lane_chunk(wf, base, static_cast<uint32_t>(W), buf, chunk);
-    }
+    write_simd_at<T>(pd, inst.vdst, wf, base, r, chunk);
   }
   return true;
 }
@@ -299,13 +306,7 @@ template <typename Tin, typename Tout, typename Inst, typename UnOp>
       continue;
     const auto a = p0 ? util::load<Tin>(p0 + base) : a_bcast;
     const auto r = un_op(a);
-    if (pd) {
-      util::masked_store<Tout>(pd + base, r, chunk);
-    } else {
-      alignas(util::native<Tout>) uint32_t buf[W];
-      util::blit_to_buffer<Tout>(buf, r);
-      inst.vdst.write_lane_chunk(wf, base, static_cast<uint32_t>(W), buf, chunk);
-    }
+    write_simd_at<Tout>(pd, inst.vdst, wf, base, r, chunk);
   }
   return true;
 }
@@ -376,13 +377,7 @@ template <typename Inst, typename CarryOp>
       cinbuf[i] = static_cast<uint32_t>((cin_bits >> i) & 1u);
     const auto cin = util::load<T>(cinbuf);
     const auto r = carry_op(a, b, cin);
-    if (pd) {
-      util::masked_store<T>(pd + base, r.value, chunk);
-    } else {
-      alignas(util::native<T>) uint32_t buf[W];
-      util::blit_to_buffer<T>(buf, r.value);
-      inst.vdst.write_lane_chunk(wf, base, static_cast<uint32_t>(W), buf, chunk);
-    }
+    write_simd_at<T>(pd, inst.vdst, wf, base, r.value, chunk);
     // Pack the per-lane carry mask into the low W bits, then merge into VCC for
     // active lanes only (clear active bits, set from carry; preserve the rest).
     uint64_t carry_bits = 0;
@@ -443,13 +438,7 @@ template <typename T, typename Inst, typename FmaOp>
     const auto b = p1 ? util::load<T>(p1 + base) : b_bcast;
     const auto d = pd ? util::load<T>(pd + base) : d_bcast; // dst-accumulate source
     const auto r = fma_op(a, b, d, k);
-    if (pd) {
-      util::masked_store<T>(pd + base, r, chunk);
-    } else {
-      alignas(util::native<T>) uint32_t buf[W];
-      util::blit_to_buffer<T>(buf, r);
-      inst.vdst.write_lane_chunk(wf, base, static_cast<uint32_t>(W), buf, chunk);
-    }
+    write_simd_at<T>(pd, inst.vdst, wf, base, r, chunk);
   }
   return true;
 }
@@ -687,13 +676,7 @@ template <typename Inst>
       selbuf[i] = static_cast<uint32_t>((sel_bits >> i) & 1u);
     auto r = a;
     util::stdx::where(util::load<T>(selbuf) != 0u, r) = b;
-    if (pd) {
-      util::masked_store<T>(pd + base, r, chunk);
-    } else {
-      alignas(util::native<T>) uint32_t buf[W];
-      util::blit_to_buffer<T>(buf, r);
-      inst.vdst.write_lane_chunk(wf, base, static_cast<uint32_t>(W), buf, chunk);
-    }
+    write_simd_at<T>(pd, inst.vdst, wf, base, r, chunk);
   }
   return true;
 }
@@ -741,13 +724,7 @@ template <typename Inst>
       selbuf[i] = static_cast<uint32_t>((sel_bits >> i) & 1u);
     auto r = a;
     util::stdx::where(util::load<T>(selbuf) != 0u, r) = b;
-    if (pd) {
-      util::masked_store<T>(pd + base, r, chunk);
-    } else {
-      alignas(util::native<T>) uint32_t buf[W];
-      util::blit_to_buffer<T>(buf, r);
-      inst.vdst.write_lane_chunk(wf, base, static_cast<uint32_t>(W), buf, chunk);
-    }
+    write_simd_at<T>(pd, inst.vdst, wf, base, r, chunk);
   }
   return true;
 }
@@ -793,13 +770,7 @@ template <typename Inst>
     auto r = a;
     util::stdx::where(util::load<T>(selbuf) != 0u, r) = b;
     r = r & util::native<T>(0xFFFFu);
-    if (pd) {
-      util::masked_store<T>(pd + base, r, chunk);
-    } else {
-      alignas(util::native<T>) uint32_t buf[W];
-      util::blit_to_buffer<T>(buf, r);
-      inst.vdst.write_lane_chunk(wf, base, static_cast<uint32_t>(W), buf, chunk);
-    }
+    write_simd_at<T>(pd, inst.vdst, wf, base, r, chunk);
   }
   return true;
 }
@@ -1093,13 +1064,7 @@ template <typename T, typename Inst, typename BinOp>
     const auto a = p0 ? util::load<T>(p0 + base) : a_bcast;
     const auto b = p1 ? util::load<T>(p1 + base) : b_bcast;
     const auto r = bin_op(a, b);
-    if (pd) {
-      util::masked_store<T>(pd + base, r, chunk);
-    } else {
-      alignas(util::native<T>) uint32_t buf[W];
-      util::blit_to_buffer<T>(buf, r);
-      inst.vdst.write_lane_chunk(wf, base, static_cast<uint32_t>(W), buf, chunk);
-    }
+    write_simd_at<T>(pd, inst.vdst, wf, base, r, chunk);
   }
   return true;
 }
@@ -1142,13 +1107,7 @@ template <typename T, typename Inst, typename BinOp>
     const auto a = apply_vop3_src_mod_f32<0>(p0 ? util::load<T>(p0 + base) : a_bcast, abs, neg);
     const auto b = apply_vop3_src_mod_f32<1>(p1 ? util::load<T>(p1 + base) : b_bcast, abs, neg);
     const auto r = apply_vop3_dst_mod_f32(bin_op(a, b), omod, clamp);
-    if (pd) {
-      util::masked_store<T>(pd + base, r, chunk);
-    } else {
-      alignas(util::native<T>) uint32_t buf[W];
-      util::blit_to_buffer<T>(buf, r);
-      inst.vdst.write_lane_chunk(wf, base, static_cast<uint32_t>(W), buf, chunk);
-    }
+    write_simd_at<T>(pd, inst.vdst, wf, base, r, chunk);
   }
   return true;
 }
@@ -1522,13 +1481,7 @@ template <typename Inst, typename UnOp>
     const auto a = apply_vop3_src_mod_f32<0>(in, abs, neg);
     const auto r = apply_vop3_dst_mod_f32(un_op(a), omod, clamp);
     const auto out = util::f32_to_f16_simd(r);
-    if (pd) {
-      util::masked_store<T>(pd + base, out, chunk);
-    } else {
-      alignas(util::native<T>) uint32_t buf[W];
-      util::blit_to_buffer<T>(buf, out);
-      inst.vdst.write_lane_chunk(wf, base, static_cast<uint32_t>(W), buf, chunk);
-    }
+    write_simd_at<T>(pd, inst.vdst, wf, base, out, chunk);
   }
   return true;
 }
@@ -1571,13 +1524,7 @@ template <typename T, typename Inst, typename TernOp>
     const auto b = p1 ? util::load<T>(p1 + base) : b_bcast;
     const auto c = p2 ? util::load<T>(p2 + base) : c_bcast;
     const auto r = tern_op(a, b, c);
-    if (pd) {
-      util::masked_store<T>(pd + base, r, chunk);
-    } else {
-      alignas(util::native<T>) uint32_t buf[W];
-      util::blit_to_buffer<T>(buf, r);
-      inst.vdst.write_lane_chunk(wf, base, static_cast<uint32_t>(W), buf, chunk);
-    }
+    write_simd_at<T>(pd, inst.vdst, wf, base, r, chunk);
   }
   return true;
 }
@@ -1624,13 +1571,7 @@ template <typename Inst, typename FmaOp>
     const auto b = apply_vop3_src_mod_f32<1>(p1 ? util::load<T>(p1 + base) : b_bcast, abs, neg);
     const auto c = apply_vop3_src_mod_f32<2>(p2 ? util::load<T>(p2 + base) : c_bcast, abs, neg);
     const auto r = apply_vop3_dst_mod_f32(tern_op(a, b, c), omod, clamp);
-    if (pd) {
-      util::masked_store<T>(pd + base, r, chunk);
-    } else {
-      alignas(util::native<T>) uint32_t buf[W];
-      util::blit_to_buffer<T>(buf, r);
-      inst.vdst.write_lane_chunk(wf, base, static_cast<uint32_t>(W), buf, chunk);
-    }
+    write_simd_at<T>(pd, inst.vdst, wf, base, r, chunk);
   }
   return true;
 }
@@ -1678,13 +1619,7 @@ template <typename Inst, typename FmaOp>
         util::f16_to_f32_simd(p2 ? util::load<T>(p2 + base) : c_bcast), abs, neg);
     const auto r = apply_vop3_dst_mod_f32(tern_op(a, b, c), omod, clamp);
     const auto out = util::f32_to_f16_simd(r);
-    if (pd) {
-      util::masked_store<T>(pd + base, out, chunk);
-    } else {
-      alignas(util::native<T>) uint32_t buf[W];
-      util::blit_to_buffer<T>(buf, out);
-      inst.vdst.write_lane_chunk(wf, base, static_cast<uint32_t>(W), buf, chunk);
-    }
+    write_simd_at<T>(pd, inst.vdst, wf, base, out, chunk);
   }
   return true;
 }
@@ -1779,13 +1714,7 @@ template <typename Inst, typename FmaOp>
     const auto b = apply_vop3_src_mod_f32<1>(p1 ? util::load<T>(p1 + base) : b_bcast, abs, neg);
     const auto c = pd ? util::load<T>(pd + base) : c_bcast; // accumulator, NO modifier
     const auto r = apply_vop3_dst_mod_f32(tern_op(a, b, c), omod, clamp);
-    if (pd) {
-      util::masked_store<T>(pd + base, r, chunk);
-    } else {
-      alignas(util::native<T>) uint32_t buf[W];
-      util::blit_to_buffer<T>(buf, r);
-      inst.vdst.write_lane_chunk(wf, base, static_cast<uint32_t>(W), buf, chunk);
-    }
+    write_simd_at<T>(pd, inst.vdst, wf, base, r, chunk);
   }
   return true;
 }
@@ -1831,13 +1760,7 @@ template <typename Inst, typename FmaOp>
     const auto c = util::f16_to_f32_simd(pd ? util::load<T>(pd + base) : c_bcast); // accum, no mod
     const auto r = apply_vop3_dst_mod_f32(tern_op(a, b, c), omod, clamp);
     const auto out = util::f32_to_f16_simd(r);
-    if (pd) {
-      util::masked_store<T>(pd + base, out, chunk);
-    } else {
-      alignas(util::native<T>) uint32_t buf[W];
-      util::blit_to_buffer<T>(buf, out);
-      inst.vdst.write_lane_chunk(wf, base, static_cast<uint32_t>(W), buf, chunk);
-    }
+    write_simd_at<T>(pd, inst.vdst, wf, base, out, chunk);
   }
   return true;
 }
@@ -1924,13 +1847,7 @@ template <typename Inst, typename Op>
     const auto a = apply_vop3_src_mod_f32<0>(p0 ? util::load<T>(p0 + base) : a_bcast, abs, neg);
     const auto e = pe ? util::load<int32_t>(pe + base) : e_bcast;
     const auto r = apply_vop3_dst_mod_f32(op(a, e), omod, clamp);
-    if (pd) {
-      util::masked_store<T>(pd + base, r, chunk);
-    } else {
-      alignas(util::native<T>) uint32_t buf[W];
-      util::blit_to_buffer<T>(buf, r);
-      inst.vdst.write_lane_chunk(wf, base, static_cast<uint32_t>(W), buf, chunk);
-    }
+    write_simd_at<T>(pd, inst.vdst, wf, base, r, chunk);
   }
   return true;
 }
@@ -2011,13 +1928,7 @@ template <typename Tin, typename Tout, typename Inst, typename UnOp>
       continue;
     const auto a = apply_vop3_src_mod_f32<0>(p0 ? util::load<Tin>(p0 + base) : a_bcast, abs, neg);
     const auto r = apply_vop3_dst_mod_f32(un_op(a), omod, clamp);
-    if (pd) {
-      util::masked_store<Tout>(pd + base, r, chunk);
-    } else {
-      alignas(util::native<Tout>) uint32_t buf[W];
-      util::blit_to_buffer<Tout>(buf, r);
-      inst.vdst.write_lane_chunk(wf, base, static_cast<uint32_t>(W), buf, chunk);
-    }
+    write_simd_at<Tout>(pd, inst.vdst, wf, base, r, chunk);
   }
   return true;
 }
@@ -2139,13 +2050,7 @@ template <typename Inst>
       selbuf[i] = static_cast<uint32_t>((sel_bits >> i) & 1u);
     const auto vcc_mask_u = util::load<uint32_t>(selbuf) != 0u;
     util::stdx::where(simd_mask_as<float>(vcc_mask_u), r) = scaled;
-    if (pd) {
-      util::masked_store<T>(pd + base, r, chunk);
-    } else {
-      alignas(util::native<T>) uint32_t buf[W];
-      util::blit_to_buffer<T>(buf, r);
-      inst.vdst.write_lane_chunk(wf, base, static_cast<uint32_t>(W), buf, chunk);
-    }
+    write_simd_at<T>(pd, inst.vdst, wf, base, r, chunk);
   }
   return true;
 }
