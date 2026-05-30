@@ -1221,9 +1221,13 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryGetCpuAddr(HsaAMDGPUDeviceHandle DeviceHandl
               HsaMemoryObjectHandle MemoryHandle, HSAuint64* cpu_addr)
 {
 	CHECK_DXG_OPEN();
+  printf("[%s] Enter\n", __func__);
   wsl::thunk::GpuMemory* gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory*>(MemoryHandle);
+  printf("[%s] gpu_mem: %p\n", __func__, gpu_mem);
   assert(gpu_mem != nullptr);
+  printf("[%s] gpu_mem->CpuAddress(): %p\n", __func__, gpu_mem->CpuAddress());
   cpu_addr =  static_cast<HSAuint64*>(gpu_mem->CpuAddress());
+  printf("[%s] cpu_addr: %p\n", __func__, cpu_addr);
   return HSAKMT_STATUS_SUCCESS;
 }
 
