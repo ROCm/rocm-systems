@@ -635,6 +635,7 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
    hsaKmtFreeMemory(mem, size);
   #else // __windows__
   // Export memory.
+  printf("[%s] mem: %p size: %zu\n", __func__, mem, size);
   core::DriverMemoryHandle targetHandle = {.handle = reinterpret_cast<uint64_t>(mem)};
   int target_fd = -1;
   hsa_status_t err = ExportDMABuf(agent, targetHandle, size, &target_fd, offset);
