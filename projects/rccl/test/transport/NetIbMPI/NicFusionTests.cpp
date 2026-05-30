@@ -57,6 +57,35 @@ TEST_F(NetIbMPITest, MakeVirtualDeviceInvalidProps) {
     EXPECT_EQ(result, ncclInvalidUsage) << "Should fail with zero devices";
 }
 
+TEST_F(NetIbMPITest, MakeVirtualDeviceMergeDisabled) {
+    // A multi-device merge must be rejected when NIC merging is disabled.
+    // Requires NCCL_IB_MERGE_NICS=0 (config default is 1) so GTEST_SKIP otherwise.
+    const char* mergeEnv = getenv("NCCL_IB_MERGE_NICS");
+    if (!mergeEnv || atoi(mergeEnv) != 0) {
+        GTEST_SKIP() << "Set NCCL_IB_MERGE_NICS=0 to exercise the merge-disabled guard";
+    }
+
+    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
+        << "Test requirements not met";
+
+    int ndev = 0;
+    AssertInitAndGetDevices(&ndev);
+    if (ndev < 2) {
+        GTEST_SKIP() << "Need at least 2 devices to request a 2-device merge";
+    }
+
+    ncclNetVDeviceProps_t vProps;
+    vProps.ndevs = 2;
+    vProps.devs[0] = 0;
+    vProps.devs[1] = 1;
+
+    int vdev = -1;
+    ncclResult_t result = MakeVirtualDevice(&vdev, &vProps);
+    EXPECT_EQ(result, ncclInvalidUsage)
+        << "Multi-device merge with NCCL_IB_MERGE_NICS=0 must be rejected";
+}
+
 TEST_F(NetIbMPITest, MakeVirtualDeviceOutOfRangeDev) {
     // Covers the physical-device bounds check in ncclIbMakeVDeviceInternal:
     // `if (props->devs[i] < 0 || props->devs[i] >= ncclNIbDevs) return ncclInvalidUsage;`
