@@ -170,11 +170,13 @@ const VopCase kCases[] = {
     {"v_cvt_u32_u16_vop3", VopCase::Kind::VOP3_UNARY, 491},
     {"v_cvt_nearest_i32_f32_vop3", VopCase::Kind::VOP3_UNARY, 396},
     {"v_cvt_floor_i32_f32_vop3", VopCase::Kind::VOP3_UNARY, 397},
-    // VOP3 ternary int minmax / maxmin DEFERRED — scalar uses std::fmin/fmax
-    // (double round-trip) and diverges from the integer SIMD path for
-    // negative-int32 inputs. Pending PR 6470 scalar fix; the SIMD path is
-    // disabled (no entry in SIMD_VOP3_TERNARY_INT) so the scalar reference
-    // remains authoritative.
+    // VOP3 ternary int minmax / maxmin remain scalar-only: their scalar bodies
+    // use std::fmin/fmax on ints and write back through a double->uint32 cast
+    // that saturates negatives to 0xFFFFFFFF (x86 overflow), which the integer
+    // SIMD min/max cannot match. The fp minmax/maxmin f32/f16 forms ARE wired
+    // (SIMD_VOP3_TERNARY_FP32/_FP16, same fmax/fmin as the verified min3/max3),
+    // but are not exercised here: this fixture's values alias to f32 NaNs and
+    // the comparison has no NaN skip.
 };
 
 const uint64_t kVccPatterns[] = {
