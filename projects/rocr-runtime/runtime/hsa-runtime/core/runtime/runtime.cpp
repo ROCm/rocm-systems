@@ -3806,6 +3806,7 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
     auto memoryHandle = std::make_unique<MemoryHandle>(region, size, flags_unused, shareable_handle, dmabuf_fd, mmap_offset, alloc_flags);
     memory_handles.emplace(*memoryOnlyHandle, std::move(memoryHandle));
     *memoryOnlyHandle = MemoryHandle::Convert(memoryHandle.get());
+    printf("[%s] Inserted memoryOnlyHandle: %p\n", __func__, *memoryOnlyHandle);
   }
   printf("[%s] Exit success\n", __func__);
   return status;
@@ -3813,6 +3814,7 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
 
 hsa_status_t Runtime::VMemoryHandleRelease(hsa_amd_vmem_alloc_handle_t memoryOnlyHandle) {
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
+  printf("[%s] Enter memoryOnlyHandle: %p\n", __func__, memoryOnlyHandle);
   MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(memoryOnlyHandle));
 
   if (memoryHandle == nullptr) {
