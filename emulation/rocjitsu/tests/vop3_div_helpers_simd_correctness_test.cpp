@@ -177,31 +177,42 @@ void check_div_fixup_f32(uint64_t exec) {
   Fixture fx;
   ASSERT_NE(fx.cu, nullptr);
   ASSERT_NE(fx.wf, nullptr);
-  uint32_t words[4] = {0u, 0u, 0u, 0u};
-  vop3_tern_encode(/*op=*/478, /*vdst=*/kDstVgpr32, /*src0=*/256, /*src1=*/257,
-                   /*src2=*/258, words);
-  Instruction *inst = fx.decoder->decode(words);
-  ASSERT_NE(inst, nullptr) << "v_div_fixup_f32_vop3 decode failed";
-  // Sweep rotations so every (b,c) class pairing hits the cascade.
-  for (uint32_t r1 = 0; r1 < kF32.size(); ++r1)
-    for (uint32_t r2 = 0; r2 < kF32.size(); r2 += 3) {
-      auto sc = fx.run32(inst, true, 0, r1, r2, exec, /*vcc=*/0);
-      auto sd = fx.run32(inst, false, 0, r1, r2, exec, /*vcc=*/0);
-      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-        const bool active = (exec >> lane) & 1ULL;
-        if (!active) {
-          EXPECT_EQ(sd[lane], DST_SENTINEL_32) << "v_div_fixup_f32 r1=" << r1 << " r2=" << r2
-                                               << ": SIMD clobbered inactive lane " << lane;
-          continue;
+  // v_div_fixup_f32 (478) plus the _f16 / _legacy_f16 twins (519 / 495): the
+  // generated CDNA4 bodies for the f16 forms read/write raw f32 (bit_cast,
+  // not f16_to_f32), so all three share the f32 div_fixup cascade and are
+  // verified with the same f32 special-value sweep.
+  struct Op {
+    uint32_t opcode;
+    const char *name;
+  };
+  for (const Op &o : {Op{478, "v_div_fixup_f32_vop3"}, Op{519, "v_div_fixup_f16_vop3"},
+                      Op{495, "v_div_fixup_legacy_f16_vop3"}}) {
+    uint32_t words[4] = {0u, 0u, 0u, 0u};
+    vop3_tern_encode(o.opcode, /*vdst=*/kDstVgpr32, /*src0=*/256, /*src1=*/257,
+                     /*src2=*/258, words);
+    Instruction *inst = fx.decoder->decode(words);
+    ASSERT_NE(inst, nullptr) << o.name << " decode failed";
+    // Sweep rotations so every (b,c) class pairing hits the cascade.
+    for (uint32_t r1 = 0; r1 < kF32.size(); ++r1)
+      for (uint32_t r2 = 0; r2 < kF32.size(); r2 += 3) {
+        auto sc = fx.run32(inst, true, 0, r1, r2, exec, /*vcc=*/0);
+        auto sd = fx.run32(inst, false, 0, r1, r2, exec, /*vcc=*/0);
+        for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+          const bool active = (exec >> lane) & 1ULL;
+          if (!active) {
+            EXPECT_EQ(sd[lane], DST_SENTINEL_32) << o.name << " r1=" << r1 << " r2=" << r2
+                                                 << ": SIMD clobbered inactive lane " << lane;
+            continue;
+          }
+          if (is_f32_nan(sc[lane]) || is_f32_nan(sd[lane]))
+            continue; // NaN payload may differ
+          EXPECT_EQ(sc[lane], sd[lane])
+              << o.name << " r1=" << r1 << " r2=" << r2 << " lane=" << lane << ": sc=0x"
+              << std::hex << sc[lane] << " sd=0x" << sd[lane];
         }
-        if (is_f32_nan(sc[lane]) || is_f32_nan(sd[lane]))
-          continue; // NaN payload may differ
-        EXPECT_EQ(sc[lane], sd[lane])
-            << "v_div_fixup_f32 r1=" << r1 << " r2=" << r2 << " lane=" << lane << ": sc=0x"
-            << std::hex << sc[lane] << " sd=0x" << sd[lane];
       }
-    }
-  delete inst;
+    delete inst;
+  }
 }
 
 void check_div_fixup_f64(uint64_t exec) {
@@ -231,39 +242,6 @@ void check_div_fixup_f64(uint64_t exec) {
         EXPECT_EQ(sc[lane], sd[lane])
             << "v_div_fixup_f64 r1=" << r1 << " r2=" << r2 << " lane=" << lane << ": sc=0x"
             << std::hex << sc[lane] << " sd=0x" << sd[lane];
-      }
-    }
-  delete inst;
-}
-
-// v_div_fixup_f16 / v_div_fixup_legacy_f16: the scalar bodies read src
-// values as f32 directly (no f16<->f32 widening — verified inline). The
-// SIMD path routes through SIMD_VOP3_TERNARY_FP32 with the same
-// div_fixup_f32_simd helper. Same exhaustive (b, c) class sweep as
-// check_div_fixup_f32.
-void check_div_fixup_f16_like(uint32_t op, const char *label, uint64_t exec) {
-  Fixture fx;
-  ASSERT_NE(fx.cu, nullptr);
-  ASSERT_NE(fx.wf, nullptr);
-  uint32_t words[4] = {0u, 0u, 0u, 0u};
-  vop3_tern_encode(op, /*vdst=*/kDstVgpr32, /*src0=*/256, /*src1=*/257, /*src2=*/258, words);
-  Instruction *inst = fx.decoder->decode(words);
-  ASSERT_NE(inst, nullptr) << label << " decode failed";
-  for (uint32_t r1 = 0; r1 < kF32.size(); ++r1)
-    for (uint32_t r2 = 0; r2 < kF32.size(); r2 += 3) {
-      auto sc = fx.run32(inst, true, 0, r1, r2, exec, /*vcc=*/0);
-      auto sd = fx.run32(inst, false, 0, r1, r2, exec, /*vcc=*/0);
-      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-        const bool active = (exec >> lane) & 1ULL;
-        if (!active) {
-          EXPECT_EQ(sd[lane], DST_SENTINEL_32)
-              << label << " r1=" << r1 << " r2=" << r2 << ": SIMD clobbered inactive lane " << lane;
-          continue;
-        }
-        if (is_f32_nan(sc[lane]) || is_f32_nan(sd[lane]))
-          continue;
-        EXPECT_EQ(sc[lane], sd[lane]) << label << " r1=" << r1 << " r2=" << r2 << " lane=" << lane
-                                      << ": sc=0x" << std::hex << sc[lane] << " sd=0x" << sd[lane];
       }
     }
   delete inst;
@@ -390,36 +368,6 @@ TEST(Vop3DivHelpersSimdCorrectness, DivFmasF64_PartialExec) {
     return;
   }
   check_div_fmas_f64(/*exec=*/0xA5A5'F0F0'1234'8001ULL);
-}
-
-TEST(Vop3DivHelpersSimdCorrectness, DivFixupF16_FullExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
-  check_div_fixup_f16_like(/*op=*/519, "v_div_fixup_f16", /*exec=*/~0ULL);
-}
-TEST(Vop3DivHelpersSimdCorrectness, DivFixupF16_PartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
-  check_div_fixup_f16_like(/*op=*/519, "v_div_fixup_f16", /*exec=*/0xA5A5'F0F0'1234'8001ULL);
-}
-TEST(Vop3DivHelpersSimdCorrectness, DivFixupLegacyF16_FullExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
-  check_div_fixup_f16_like(/*op=*/495, "v_div_fixup_legacy_f16", /*exec=*/~0ULL);
-}
-TEST(Vop3DivHelpersSimdCorrectness, DivFixupLegacyF16_PartialExec) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-    return;
-  }
-  check_div_fixup_f16_like(/*op=*/495, "v_div_fixup_legacy_f16",
-                           /*exec=*/0xA5A5'F0F0'1234'8001ULL);
 }
 
 } // namespace
