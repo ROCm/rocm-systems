@@ -66,7 +66,7 @@ class TopologyCommands:
             self.group_check_printed = True
 
         is_single_nic_request = False  # -N option
-        is_single_switch_request = False  # -bs option
+        is_single_switch_request = False  # --switch option
         is_single_gpu_request = False  # -g option
 
         gpucount = 0

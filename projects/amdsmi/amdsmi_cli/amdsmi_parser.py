@@ -1357,7 +1357,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         if self.helpers.is_brcm_switch_initialized():
             switch_help = f"Select a SWITCH ID, BDF, or UUID from the possible choices:\n{self.switch_choices_str}"
             device_args.add_argument(
-                "-bs",
                 "--switch",
                 action=self._switch_select(self.switch_choices),
                 nargs="+",
@@ -1696,7 +1695,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
         if self.helpers.is_brcm_nic_initialized():
             firmware_parser.add_argument(
-                "-nic", "--brcm_nic", action="store_true", required=False, help=nic_firmware_help
+                "--brcm_nic", action="store_true", required=False, help=nic_firmware_help
             )
 
         # Options to only display on a Hypervisor
@@ -2177,15 +2176,11 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Add BRCM NIC/Switch Arguments
         if self.helpers.is_brcm_nic_initialized():
             metric_parser.add_argument(
-                "-nic", "--brcm_nic", action="store_true", required=False, help=nic_metric_help
+                "--brcm_nic", action="store_true", required=False, help=nic_metric_help
             )
         if self.helpers.is_brcm_switch_initialized():
             metric_parser.add_argument(
-                "-switch",
-                "--brcm_switch",
-                action="store_true",
-                required=False,
-                help=switch_metric_help,
+                "--brcm_switch", action="store_true", required=False, help=switch_metric_help
             )
 
         # Add Universal Arguments & watch Args
@@ -2375,15 +2370,11 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
         if self.helpers.is_brcm_nic_initialized():
             topology_parser.add_argument(
-                "-nic", "--nic_topo", action="store_true", required=False, help=nic_topo_help
+                "--nic_topo", action="store_true", required=False, help=nic_topo_help
             )
         if self.helpers.is_brcm_switch_initialized():
             topology_parser.add_argument(
-                "-nic_switch",
-                "--nic_switch",
-                action="store_true",
-                required=False,
-                help=nic_shownuma_help,
+                "--nic_switch", action="store_true", required=False, help=nic_shownuma_help
             )
 
     def _add_set_value_parser(self, subparsers: argparse._SubParsersAction, func):
@@ -3059,15 +3050,11 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
         if self.helpers.is_brcm_nic_initialized():
             monitor_parser.add_argument(
-                "-nic", "--brcm_nic", action="store_true", required=False, help=nic_monitor_help
+                "--brcm_nic", action="store_true", required=False, help=nic_monitor_help
             )
         if self.helpers.is_brcm_switch_initialized():
             monitor_parser.add_argument(
-                "-switch",
-                "--brcm_switch",
-                action="store_true",
-                required=False,
-                help=switch_monitor_help,
+                "--brcm_switch", action="store_true", required=False, help=switch_monitor_help
             )
         if not self.helpers.is_virtual_os():
             monitor_parser.add_argument(
