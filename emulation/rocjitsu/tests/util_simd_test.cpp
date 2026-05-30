@@ -394,27 +394,27 @@ void expect_f64_unary_bit_exact(ScalarFn scalar_fn, VectorFn vector_fn) {
 TEST(UtilSimd, CeilF64_VectorMatchesScalar_BitExact) {
   SKIP_IF_NO_SIMD();
   expect_f64_unary_bit_exact([](double x) { return std::ceil(x); },
-                             [](util::native<double> x) { return util::ceil_simd(x); });
+                             [](util::native<double> x) { return util::stdx::ceil(x); });
 }
 TEST(UtilSimd, FloorF64_VectorMatchesScalar_BitExact) {
   SKIP_IF_NO_SIMD();
   expect_f64_unary_bit_exact([](double x) { return std::floor(x); },
-                             [](util::native<double> x) { return util::floor_simd(x); });
+                             [](util::native<double> x) { return util::stdx::floor(x); });
 }
 TEST(UtilSimd, TruncF64_VectorMatchesScalar_BitExact) {
   SKIP_IF_NO_SIMD();
   expect_f64_unary_bit_exact([](double x) { return std::trunc(x); },
-                             [](util::native<double> x) { return util::trunc_simd(x); });
+                             [](util::native<double> x) { return util::stdx::trunc(x); });
 }
 TEST(UtilSimd, RndneF64_VectorMatchesScalar_BitExact) {
   SKIP_IF_NO_SIMD();
   expect_f64_unary_bit_exact([](double x) { return std::nearbyint(x); },
-                             [](util::native<double> x) { return util::rndne_simd(x); });
+                             [](util::native<double> x) { return util::stdx::nearbyint(x); });
 }
 TEST(UtilSimd, FractF64_VectorMatchesScalar_BitExact) {
   SKIP_IF_NO_SIMD();
   expect_f64_unary_bit_exact([](double x) { return x - std::floor(x); },
-                             [](util::native<double> x) { return x - util::floor_simd(x); });
+                             [](util::native<double> x) { return x - util::stdx::floor(x); });
 }
 TEST(UtilSimd, RcpF64_VectorMatchesScalar_BitExact) {
   SKIP_IF_NO_SIMD();
