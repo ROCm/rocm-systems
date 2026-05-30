@@ -2603,6 +2603,16 @@ rccl_static ncclResult_t getAlgoInfo(
   return ncclSuccess;
 }
 
+// External entry point matching the declaration in include/enqueue.h.
+// Forwards to RCCL's getAlgoInfo so out-of-TU callers (e.g. the scheduler
+// sources synced from upstream NCCL) can link.
+ncclResult_t ncclGetAlgoInfo(
+    struct ncclComm* comm, struct ncclTaskColl* task,
+    int collNetSupport, int nvlsSupport, int numPipeOps, ncclSimInfo_t* simInfo
+  ) {
+  return getAlgoInfo(comm, task, collNetSupport, nvlsSupport, numPipeOps, simInfo);
+}
+
 NCCL_PARAM(NvlsTreeMaxChunkSize, "NVLSTREE_MAX_CHUNKSIZE", -2);
 
 static ncclResult_t calcCollChunking(
