@@ -1458,6 +1458,9 @@ SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
     "v_max3_f32_vop3": "[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmax(a, b), c); }",
     "v_min3_f32_vop3": "[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmin(a, b), c); }",
     "v_med3_f32_vop3": "[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(util::stdx::fmax(a, b), c), util::stdx::fmin(a, b)); }",
+    # minmax = max(min(a,b),c); maxmin = min(max(a,b),c). (RDNA3+.)
+    "v_minmax_f32_vop3": "[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(a, b), c); }",
+    "v_maxmin_f32_vop3": "[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmax(a, b), c); }",
     # v_div_fixup_f32: per-AMD-spec `else if` cascade selecting the result
     # among NaN/Inf/zero copysign cases. Lives as a helper in simd_glue.h
     # (div_fixup_f32_simd) — bit-exact match to the scalar body's predicate
@@ -1490,6 +1493,8 @@ SIMD_VOP3_TERNARY_FP16: dict[str, str] = {
     "v_max3_f16_vop3": "[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmax(a, b), c); }",
     "v_min3_f16_vop3": "[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmin(a, b), c); }",
     "v_med3_f16_vop3": "[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(util::stdx::fmax(a, b), c), util::stdx::fmin(a, b)); }",
+    "v_minmax_f16_vop3": "[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(a, b), c); }",
+    "v_maxmin_f16_vop3": "[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmax(a, b), c); }",
 }
 
 # f64 ternary FMA.
@@ -1667,6 +1672,12 @@ SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
         " return util::stdx::max(util::stdx::min(util::stdx::max(a, b), c),"
         " util::stdx::min(a, b)); }",
     ),
+    # NOTE: integer v_minmax/v_maxmin i32/u32 are intentionally NOT wired. Unlike
+    # min3/max3 (whose scalar uses std::max/std::min), the minmax/maxmin scalar
+    # bodies use std::fmax/std::fmin on *ints* and write the double result back
+    # through a double->uint32 conversion that saturates negatives to 0xFFFFFFFF
+    # (x86 cvttsd2si overflow). That scalar is UB and the integer SIMD min/max
+    # cannot match it — left scalar-authoritative (see project_pr6470 findings).
     # 16-bit: the scalar body sign-/zero-extends the low 16 bits, takes the
     # min/max, then truncates to uint16 and zero-extends to uint32. SIMD lane is
     # the raw uint32; i16 sign-extends via (cast<int32> << 16) >> 16 (same
