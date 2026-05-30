@@ -33,6 +33,9 @@ public:
     /// Env var set before execv(); its presence in a re-exec'd child selects the test to run.
     static constexpr const char* kReexecMarkerEnvVar = "RCCL_PIT_REEXEC_TEST";
 
+    /// Special value for captureProcessOutput timeout: no deadline, wait indefinitely.
+    static constexpr int kNoTimeoutSeconds = 0;
+
     /**
      * @brief Test execution result structure
      */
@@ -58,6 +61,9 @@ public:
      */
     struct TestConfig
     {
+        /// Special value for numGpus: CPU-only test, no GPU slot acquired.
+        static constexpr size_t kCpuOnly = 0;
+
         std::string           name;      ///< Test name
         std::function<void()> testLogic; ///< Test function to execute
         std::unordered_map<std::string, std::string>
@@ -65,13 +71,7 @@ public:
         std::chrono::seconds     timeout;              ///< Test timeout
         bool                     inheritParentEnv;     ///< Whether to inherit parent environment
         std::vector<std::string> clearEnvVars; ///< Environment variables to explicitly clear
-        size_t                   numGpus; ///< GPU slots this test needs.
-                                         ///< 0 = no GPU slot needed (default); test runs
-                                         ///<     without any HIP_VISIBLE_DEVICES restriction
-                                         ///<     and does not consume a pool slot.
-                                         ///< 1 = one dedicated GPU from the pool.
-                                         ///< N = exactly N GPUs from the pool.
-                                         ///< GPU tests should call withNumGpus(n) explicitly.
+        size_t                   numGpus; ///< GPU slots needed; see withNumGpus(). Default: kCpuOnly.
 
         /**
          * @brief Constructor
@@ -80,55 +80,34 @@ public:
          */
         TestConfig(const std::string& testName, std::function<void()> logic);
 
-        /**
-         * @brief Set environment variables for this test
-         * @param env Map of environment variable name-value pairs
-         * @return Reference to this TestConfig for method chaining
-         */
+        /// Set environment variables for this test.
         TestConfig& withEnvironment(const std::unordered_map<std::string, std::string>& env);
 
-        /**
-         * @brief Set timeout for this test
-         * @param timeoutSeconds Timeout in seconds
-         * @return Reference to this TestConfig for method chaining
-         */
+        /// Set the wall-clock timeout for this test.
         TestConfig& withTimeout(std::chrono::seconds timeoutSeconds);
 
         /**
-         * @brief Configure environment inheritance
-         * @param inherit Whether to inherit parent environment variables
-         * @return Reference to this TestConfig for method chaining
+         * @brief Configure environment inheritance.
+         * @param cleanEnv true (default) = start with a clean environment;
+         *                 false = inherit all parent environment variables.
          */
-        TestConfig& withCleanEnvironment(bool inherit = false);
+        TestConfig& withCleanEnvironment(bool cleanEnv = true);
 
-        /**
-         * @brief Clear a specific environment variable
-         * @param varName Name of the variable to clear
-         * @return Reference to this TestConfig for method chaining
-         */
+        /// Clear a specific environment variable before the test runs.
         TestConfig& clearVariable(const std::string& varName);
 
-        /**
-         * @brief Set a specific environment variable
-         * @param name Variable name
-         * @param value Variable value
-         * @return Reference to this TestConfig for method chaining
-         */
+        /// Set a specific environment variable for this test.
         TestConfig& setVariable(const std::string& name, const std::string& value);
 
         /**
          * @brief Declare how many GPU slots this test requires during parallel execution.
          *
-         * When the runner executes tests in parallel it partitions the GPU pool
-         * (see ExecutionOptions::gpuPool) into non-overlapping subsets and injects
-         * HIP_VISIBLE_DEVICES into each child so that concurrent tests never
-         * share a physical device.
+         * The runner partitions the GPU pool into non-overlapping subsets and injects
+         * HIP_VISIBLE_DEVICES so concurrent tests never share a physical device.
          *
-         * @param n Number of GPUs needed.
-         *          0 = CPU-only test, no GPU slot acquired (runs freely in parallel). Default.
-         *          1 = one dedicated GPU from the pool.
-         *          N = exactly N GPUs from the pool.
-         * @return Reference to this TestConfig for method chaining
+         * @param n kCpuOnly (0) = no slot acquired, runs freely in parallel (default).
+         *          1           = one dedicated GPU from the pool.
+         *          N           = exactly N GPUs from the pool.
          */
         TestConfig& withNumGpus(size_t n);
     };
@@ -225,7 +204,7 @@ private:
         int                  stderrPipe[2],
         pid_t                pid,
         int*                 status,
-        std::chrono::seconds timeout = std::chrono::seconds(0)
+        std::chrono::seconds timeout = std::chrono::seconds(kNoTimeoutSeconds)
     );
 
     /**
@@ -276,6 +255,15 @@ private:
         const std::vector<int>&        gpuPool,
         const SpawnFn&                 spawnFn);
 
+    /**
+     * @brief Generate and display test report
+     * @param options          Execution options used for the test run
+     * @param totalRegistered  Total number of tests registered (may differ from
+     *                         the number run when stopOnFirstFailure is active)
+     * @return True if no tests failed
+     */
+    static bool generateReport(const ExecutionOptions& options, size_t totalRegistered);
+
 public:
     /**
      * @brief Register a test configuration
@@ -316,16 +304,6 @@ public:
      *       after execution, ensuring a clean state for the next test suite.
      */
     static bool executeAllTests(const ExecutionOptions& options = ExecutionOptions());
-
-    /**
-     * @brief Generate and display test report
-     * @param options          Execution options used for the test run
-     * @param totalRegistered  Total number of tests that were registered (may
-     *                         differ from the number actually run when
-     *                         stopOnFirstFailure is active)
-     * @return True if no tests failed; tests not run due to stopOnFirstFailure do not count as failures
-     */
-    static bool generateReport(const ExecutionOptions& options, size_t totalRegistered);
 
     /**
      * @brief Get detailed test results (thread-safe)

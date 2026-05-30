@@ -313,10 +313,10 @@ Each `TestConfig` declares how many GPU slots it needs via `withNumGpus()`:
 
 | `numGpus` value | Meaning |
 |---|---|
-| `0` | no GPU slot needed — CPU-only test, runs freely without `HIP_VISIBLE_DEVICES` restriction |
-| `1` (default) | one dedicated GPU slot |
-| `N` | exactly N GPU slots |
-| `N > pool size` | clamped to the full pool — test runs exclusively (all slots held) to prevent contention with restricted siblings |
+| `0` (default) | CPU-only test — no GPU slot acquired, runs freely without `HIP_VISIBLE_DEVICES` restriction |
+| `1` | one dedicated GPU from the pool |
+| `N` | exactly N GPU slots — test blocks until N slots are free |
+| `N > pool size` | clamped to the full pool — test runs exclusively (all slots held) to prevent contention with siblings |
 
 Before launching each child, the runner atomically waits until **both** a concurrency slot (`active < maxParallelJobs`) **and** enough free GPU slots are available. The assigned indices are written into `HIP_VISIBLE_DEVICES` inside the fork child so the re-exec'd process sees only its GPUs. When the child exits the slots are released and the next waiting test can proceed.
 
@@ -346,10 +346,11 @@ RUN_ISOLATED_TESTS_WITH_OPTIONS(opts,
         /* ... */
     }).withNumGpus(2),
 
-    // This test requires exclusive access to all GPUs
+    // This test requires all 4 GPUs — blocks until every slot is free,
+    // so no other GPU test can run concurrently (exclusive execution).
     ProcessIsolatedTestRunner::TestConfig("ExclusiveTest", []() {
         /* ... */
-    }).withNumGpus(0)   // 0 = consume entire pool
+    }).withNumGpus(4)   // request entire 4-GPU pool → runs exclusively
 );
 ```
 
@@ -593,9 +594,10 @@ TestConfig& withNumGpus(size_t n);
 
 | Value | Meaning |
 |---|---|
-| `1` (default) | one GPU slot |
+| `0` (default) | CPU-only — no GPU slot acquired; `HIP_VISIBLE_DEVICES` is not overridden |
+| `1` | one dedicated GPU from the pool |
 | `N` | exactly N GPU slots — test blocks until N slots are free |
-| `0` | entire pool — test runs exclusively (no other test runs concurrently) |
+| `N > pool size` | clamped to pool size — test runs exclusively (holds all slots) |
 
 The runner injects `HIP_VISIBLE_DEVICES` into the child process with the assigned device indices. Has no effect in sequential mode (`maxParallelJobs = 1`).
 

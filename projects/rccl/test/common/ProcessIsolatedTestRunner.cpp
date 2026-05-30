@@ -60,6 +60,24 @@ static constexpr int kNumPipeFds = 2;
 // POSIX waitpid(2): exit code is stored in bits [15:8] of the status word.
 static constexpr int kWaitStatusExitShift = 8;
 
+// Read buffer size for draining child stdout/stderr pipes.
+static constexpr int kPipeReadBufferSize = 4096;
+
+// poll(2) timeout sentinel: block indefinitely until an fd becomes ready.
+static constexpr int kPollBlockIndefinitely = -1;
+
+// pollfd.fd sentinel: poll(2) ignores entries with a negative fd.
+static constexpr int kDisabledFd = -1;
+
+// Default test timeout (seconds) if none is specified in TestConfig.
+static constexpr int kDefaultTestTimeoutSeconds = 30;
+
+// Unset process ID — used before a child is forked or when fork fails.
+static constexpr pid_t kInvalidPid = -1;
+
+// maxParallelJobs value that selects single-child sequential execution.
+static constexpr size_t kSequentialExecution = 1;
+
 // Define static members
 std::mutex                                         ProcessIsolatedTestRunner::testConfigsMutex_;
 std::vector<ProcessIsolatedTestRunner::TestConfig> ProcessIsolatedTestRunner::testConfigs_;
@@ -68,14 +86,14 @@ std::vector<ProcessIsolatedTestRunner::TestResult> ProcessIsolatedTestRunner::te
 
 // TestResult implementation
 ProcessIsolatedTestRunner::TestResult::TestResult()
-    : passed(false), skipped(false), exitCode(-1), processId(-1), duration(0)
+    : passed(false), skipped(false), exitCode(RCCL_TEST_INVALID), processId(kInvalidPid), duration(0)
 {}
 
 // TestConfig implementation
 ProcessIsolatedTestRunner::TestConfig::TestConfig(
     const std::string& testName, std::function<void()> logic
 )
-    : name(testName), testLogic(logic), timeout(30), inheritParentEnv(true), numGpus(0)
+    : name(testName), testLogic(logic), timeout(kDefaultTestTimeoutSeconds), inheritParentEnv(true), numGpus(0)
 {}
 
 ProcessIsolatedTestRunner::TestConfig& ProcessIsolatedTestRunner::TestConfig::withEnvironment(
@@ -94,9 +112,9 @@ ProcessIsolatedTestRunner::TestConfig&
 }
 
 ProcessIsolatedTestRunner::TestConfig&
-    ProcessIsolatedTestRunner::TestConfig::withCleanEnvironment(bool inherit)
+    ProcessIsolatedTestRunner::TestConfig::withCleanEnvironment(bool cleanEnv)
 {
-    inheritParentEnv = inherit;
+    inheritParentEnv = !cleanEnv;
     return *this;
 }
 
@@ -252,41 +270,21 @@ private:
 
 // ExecutionOptions implementation
 ProcessIsolatedTestRunner::ExecutionOptions::ExecutionOptions()
-    : stopOnFirstFailure(false), verboseLogging(true), maxParallelJobs(1)
+    : stopOnFirstFailure(false), verboseLogging(true), maxParallelJobs(kSequentialExecution)
 {}
 
 // Apply environment variables to current process
 void ProcessIsolatedTestRunner::applyEnvironmentVariables(const TestConfig& config)
 {
-    // Clear specified environment variables first
     for(const auto& varName : config.clearEnvVars)
-    {
         unsetenv(varName.c_str());
-    }
 
-    // If not inheriting parent environment, clear all environment variables
     if(!config.inheritParentEnv)
-    {
-        // Clear all existing environment variables
         if(clearenv() != 0)
-        {
-            std::cerr << "Warning: Failed to clear environment variables" << std::endl;
-        }
+            std::cerr << "Warning: Failed to clear environment variables\n";
 
-        // Set only the specified variables
-        for(const auto& [name, value] : config.environmentVariables)
-        {
-            setenv(name.c_str(), value.c_str(), 1);
-        }
-    }
-    else
-    {
-        // Just set/override the specified variables
-        for(const auto& [name, value] : config.environmentVariables)
-        {
-            setenv(name.c_str(), value.c_str(), 1);
-        }
-    }
+    for(const auto& [name, value] : config.environmentVariables)
+        setenv(name.c_str(), value.c_str(), 1);
 }
 
 int ProcessIsolatedTestRunner::runTestInProcess(const TestConfig& config)
@@ -301,93 +299,41 @@ int ProcessIsolatedTestRunner::runTestInProcess(const TestConfig& config)
 
     try
     {
-        // Thread-safe test execution with timeout protection
-        std::atomic<bool>  testCompleted{false};
-        std::exception_ptr testException = nullptr;
-        bool               testPassed    = true;
-        bool               testSkipped   = false;
+        const ::testing::UnitTest* unitTest            = ::testing::UnitTest::GetInstance();
+        const size_t               initialFailureCount = unitTest->failed_test_count();
+        const size_t               initialSkippedCount = unitTest->skipped_test_count();
 
-        // Run test in a separate thread to allow timeout handling
-        std::thread testThread(
-            [&]()
+        // Package the test as a future so wait_for() can enforce the deadline
+        // without a busy-wait loop.
+        std::packaged_task<int()> task(
+            [&]() -> int
             {
-                try
-                {
-                    // Get initial test state
-                    const ::testing::UnitTest* unitTest = ::testing::UnitTest::GetInstance();
-                    size_t                     initialFailureCount = unitTest->failed_test_count();
-                    size_t                     initialSkippedCount = unitTest->skipped_test_count();
-
-                    // Execute the test logic
-                    config.testLogic();
-
-                    // Check if any new test failures occurred
-                    size_t finalFailureCount = unitTest->failed_test_count();
-                    size_t finalSkippedCount = unitTest->skipped_test_count();
-
-                    testPassed  = (finalFailureCount == initialFailureCount);
-                    testSkipped = (finalSkippedCount > initialSkippedCount);
-
-                    testCompleted = true;
-                }
-                catch(...)
-                {
-                    testException = std::current_exception();
-                    testPassed    = false;
-                    testCompleted = true;
-                }
+                config.testLogic();
+                const bool passed  = (unitTest->failed_test_count()  == initialFailureCount);
+                const bool skipped = (unitTest->skipped_test_count()  >  initialSkippedCount);
+                return skipped ? RCCL_TEST_SKIPPED
+                     : passed  ? RCCL_TEST_SUCCESS
+                               : RCCL_TEST_FAILURE;
             }
         );
+        auto fut = task.get_future();
+        std::thread testThread(std::move(task));
 
-        // Wait for test completion with timeout
-        auto       start   = std::chrono::steady_clock::now();
-        const auto timeout = config.timeout;
-
-        while(!testCompleted.load())
+        if(fut.wait_for(config.timeout) == std::future_status::timeout)
         {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            if(std::chrono::steady_clock::now() - start > timeout)
-            {
-                // Test timed out
-                TEST_INFO(
-                    "Test '%s' TIMED OUT after %ld seconds",
-                    config.name.c_str(),
-                    timeout.count()
-                );
-                fflush(NULL);
-                testThread.detach();
-                return RCCL_TEST_TIMEOUT;
-            }
+            TEST_INFO(
+                "Test '%s' TIMED OUT after %ld seconds",
+                config.name.c_str(),
+                config.timeout.count()
+            );
+            fflush(NULL);
+            testThread.detach();
+            return RCCL_TEST_TIMEOUT;
         }
 
-        // Wait for thread completion
-        if(testThread.joinable())
-        {
-            testThread.join();
-        }
-
-        // Check if test threw an exception
-        if(testException)
-        {
-            std::rethrow_exception(testException);
-        }
-
-        // Flush output before returning (needed before _exit())
+        testThread.join();
         fflush(NULL);
-
-        // Return appropriate exit code based on test result
-        if(testSkipped)
-        {
-            return RCCL_TEST_SKIPPED;
-        }
-        else if(testPassed)
-        {
-            return RCCL_TEST_SUCCESS;
-        }
-        else
-        {
-            return RCCL_TEST_FAILURE;
-        }
+        return fut.get(); // re-throws if the task threw
     }
     catch(const std::exception& e)
     {
@@ -511,7 +457,7 @@ ProcessIsolatedTestRunner::CapturedOutput ProcessIsolatedTestRunner::captureProc
     close(stderrPipe[1]);
 
     CapturedOutput output;
-    char           buffer[4096];
+    char           buffer[kPipeReadBufferSize];
     ssize_t        nbytes;
 
     using Clock    = std::chrono::steady_clock;
@@ -532,7 +478,7 @@ ProcessIsolatedTestRunner::CapturedOutput ProcessIsolatedTestRunner::captureProc
 
     while(openFds > 0)
     {
-        int pollMs = -1; // block indefinitely by default
+        int pollMs = kPollBlockIndefinitely;
         if(hasTimeout)
         {
             auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -576,7 +522,7 @@ ProcessIsolatedTestRunner::CapturedOutput ProcessIsolatedTestRunner::captureProc
                 {
                     // EOF or error -- no more data from this fd.
                     close(pfds[i].fd);
-                    pfds[i].fd = -1; // poll ignores negative fds
+                    pfds[i].fd = kDisabledFd;
                     --openFds;
                 }
             }
@@ -621,21 +567,16 @@ ProcessIsolatedTestRunner::CapturedOutput ProcessIsolatedTestRunner::captureProc
 
 // Helper method: Display captured output
 void ProcessIsolatedTestRunner::displayCapturedOutput(
-    const CapturedOutput& output, const std::string& testName
+    const CapturedOutput& output, const std::string& /*testName*/
 )
 {
-    if(!output.stdoutContent.empty())
-    {
-        std::cout << output.stdoutContent;
-        if(output.stdoutContent.back() != '\n')
-            std::cout << '\n';
-    }
-    if(!output.stderrContent.empty())
-    {
-        std::cerr << output.stderrContent;
-        if(output.stderrContent.back() != '\n')
-            std::cerr << '\n';
-    }
+    auto flush = [](std::ostream& os, const std::string& s) {
+        if(s.empty()) return;
+        os << s;
+        if(s.back() != '\n') os << '\n';
+    };
+    flush(std::cout, output.stdoutContent);
+    flush(std::cerr, output.stderrContent);
 }
 
 // Re-exec child entrypoint: if kReexecMarkerEnvVar is set, runs the named test
@@ -821,18 +762,20 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
     auto spawnOne = [&](const TestConfig& cfg, const std::vector<int>& assignedGpus)
         -> SpawnOutcome
     {
-        auto startTime = std::chrono::steady_clock::now();
-
-        int stdout_fd[2], stderr_fd[2];
-        if(!createOutputPipes(stdout_fd, stderr_fd))
-        {
+        auto makeError = [&](const char* msg) -> SpawnOutcome {
             TestResult r;
             r.testName     = cfg.name;
             r.passed       = false;
             r.exitCode     = RCCL_TEST_INVALID;
-            r.errorMessage = "Failed to create output pipes";
+            r.errorMessage = msg;
             return {r, {}};
-        }
+        };
+
+        auto startTime = std::chrono::steady_clock::now();
+
+        int stdout_fd[2], stderr_fd[2];
+        if(!createOutputPipes(stdout_fd, stderr_fd))
+            return makeError("Failed to create output pipes");
 
         // Flush all output before fork to prevent child from inheriting
         // unflushed stdio buffers.
@@ -891,19 +834,10 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
         }
         else if(pid < 0)
         {
-            close(stdout_fd[0]);
-            close(stdout_fd[1]);
-            close(stderr_fd[0]);
-            close(stderr_fd[1]);
-            TestResult r;
-            r.testName     = cfg.name;
-            r.passed       = false;
-            r.exitCode     = RCCL_TEST_INVALID;
-            r.processId    = RCCL_TEST_INVALID;
-            r.duration     = std::chrono::milliseconds(0);
-            r.errorMessage = "Failed to fork process";
+            close(stdout_fd[0]); close(stdout_fd[1]);
+            close(stderr_fd[0]); close(stderr_fd[1]);
             TEST_INFO("Failed to fork process for test '%s'", cfg.name.c_str());
-            return {r, {}};
+            return makeError("Failed to fork process");
         }
 
         // Parent: log launch, drain pipes, wait for child.
@@ -911,22 +845,12 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
             std::string extras;
             if(!assignedGpus.empty())
                 extras += " GPUs: " + GpuSlotManager::formatList(assignedGpus);
-            if(!cfg.environmentVariables.empty())
-            {
-                std::string envVars;
-                for(const auto& [name, value] : cfg.environmentVariables)
-                {
-                    if(!envVars.empty())
-                        envVars += ", ";
-                    envVars += name + "=" + value;
-                }
-                extras += " env: " + envVars;
-            }
+            for(const auto& [name, value] : cfg.environmentVariables)
+                extras += (extras.empty() ? " env: " : ", ") + name + "=" + value;
+
             if(!extras.empty())
-                TEST_INFO(
-                    "Running isolated test '%s' (PID: %d) with%s",
-                    cfg.name.c_str(), pid, extras.c_str()
-                );
+                TEST_INFO("Running isolated test '%s' (PID: %d) with%s",
+                          cfg.name.c_str(), pid, extras.c_str());
             else
                 TEST_INFO("Running isolated test '%s' (PID: %d)", cfg.name.c_str(), pid);
         }
@@ -1008,15 +932,6 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
     // manager always operate on the same snapshot.
     const std::vector<int> detectedPool
         = options.gpuPool.empty() ? detectGpuPool() : options.gpuPool;
-    if(detectedPool.empty())
-    {
-        TEST_INFO("Could not determine GPU pool.");
-        TEST_INFO("  Tried: HIP_VISIBLE_DEVICES (not set or empty),");
-        TEST_INFO("         /sys/class/kfd/kfd/topology/nodes (not found or no GPU nodes).");
-        TEST_INFO("  Fix: set HIP_VISIBLE_DEVICES=0,1,...  or ensure the KFD sysfs is mounted.");
-        ADD_FAILURE() << "Set HIP_VISIBLE_DEVICES or ensure /sys/class/kfd is mounted.";
-        return false;
-    }
 
     // When maxParallelJobs is kAutoParallelism, default to pool size (or
     // hardware_concurrency() for CPU-only suites) to avoid threads piling up
@@ -1028,8 +943,25 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
                      : detectedPool.size())
               : options.maxParallelJobs;
 
+    // A GPU pool is only required when running in parallel with tests that
+    // actually request GPU slots. Sequential runs and CPU-only suites proceed
+    // without one; kAutoParallelism falls back to hardware_concurrency().
+    const bool anyTestNeedsGpu = std::any_of(
+        testsToRun.begin(), testsToRun.end(),
+        [](const TestConfig& c) { return c.numGpus > TestConfig::kCpuOnly; }
+    );
+    if(detectedPool.empty() && parallelism > kSequentialExecution && anyTestNeedsGpu)
+    {
+        TEST_INFO("Could not determine GPU pool for parallel GPU tests.");
+        TEST_INFO("  Tried: HIP_VISIBLE_DEVICES (not set or empty),");
+        TEST_INFO("         /sys/class/kfd/kfd/topology/nodes (not found or no GPU nodes).");
+        TEST_INFO("  Fix: set HIP_VISIBLE_DEVICES=0,1,...  or ensure the KFD sysfs is mounted.");
+        ADD_FAILURE() << "Set HIP_VISIBLE_DEVICES or ensure /sys/class/kfd is mounted.";
+        return false;
+    }
+
     SpawnFn spawn = spawnOne;
-    if(parallelism <= 1)
+    if(parallelism <= kSequentialExecution)
         runSequential(testsToRun, options, spawn);
     else
         runParallel(testsToRun, options, parallelism, detectedPool, spawn);
@@ -1057,20 +989,21 @@ bool ProcessIsolatedTestRunner::generateReport(
     int                       failedTests  = 0;
     int                       skippedTests = 0;
     std::chrono::milliseconds totalDuration{0};
+    // Collect failure details inside the lock so we don't need a second pass.
+    std::vector<std::pair<std::string, std::string>> failureDetails;
 
     {
         std::lock_guard<std::mutex> lock(resultsMutex_);
         totalTests = static_cast<int>(testResults_.size());
-
         for(const auto& result : testResults_)
         {
-            if(result.skipped)
-                skippedTests++;
-            else if(result.passed)
-                passedTests++;
+            if(result.skipped)       ++skippedTests;
+            else if(result.passed)   ++passedTests;
             else
-                failedTests++;
-
+            {
+                ++failedTests;
+                failureDetails.emplace_back(result.testName, result.errorMessage);
+            }
             totalDuration += result.duration;
         }
     }
@@ -1083,36 +1016,16 @@ bool ProcessIsolatedTestRunner::generateReport(
             TEST_INFO(
                 "Process-Isolated Tests: %d passed, %d failed, %d skipped, "
                 "%d not run (stopped on first failure) (%ld ms total)",
-                passedTests,
-                failedTests,
-                skippedTests,
-                notRunTests,
-                totalDuration.count()
+                passedTests, failedTests, skippedTests, notRunTests, totalDuration.count()
             );
         else
             TEST_INFO(
                 "Process-Isolated Tests: %d passed, %d failed, %d skipped (%ld ms total)",
-                passedTests,
-                failedTests,
-                skippedTests,
-                totalDuration.count()
+                passedTests, failedTests, skippedTests, totalDuration.count()
             );
 
-        if(failedTests > 0)
-        {
-            std::lock_guard<std::mutex> lock(resultsMutex_);
-            for(const auto& result : testResults_)
-            {
-                if(!result.passed && !result.skipped)
-                {
-                    TEST_INFO(
-                        "  Failed: %s - %s",
-                        result.testName.c_str(),
-                        result.errorMessage.c_str()
-                    );
-                }
-            }
-        }
+        for(const auto& [name, msg] : failureDetails)
+            TEST_INFO("  Failed: %s - %s", name.c_str(), msg.c_str());
     }
 
     // notRunTests is shown in the summary but is not itself a failure;
@@ -1133,35 +1046,25 @@ void ProcessIsolatedTestRunner::clear()
     size_t registeredCount = 0;
     size_t executedCount   = 0;
 
-    // Check for unexecuted tests before clearing
     {
         std::lock_guard<std::mutex> lock(testConfigsMutex_);
         registeredCount = testConfigs_.size();
+        testConfigs_.clear();
     }
     {
         std::lock_guard<std::mutex> lock(resultsMutex_);
         executedCount = testResults_.size();
+        testResults_.clear();
     }
 
-    // Warn if tests were registered but not all executed
     if(registeredCount > 0 && executedCount < registeredCount)
     {
-        std::cerr << "\n⚠️  WARNING: ProcessIsolatedTestRunner::clear() called with "
+        std::cerr << "\n WARNING: ProcessIsolatedTestRunner::clear() called with "
                   << (registeredCount - executedCount) << " unexecuted test(s)!\n"
                   << "   Registered: " << registeredCount << " test(s)\n"
                   << "   Executed:   " << executedCount << " test(s)\n"
                   << "   Did you forget to call executeAllTests()?\n"
                   << std::endl;
-    }
-
-    // Clear the registrations and results
-    {
-        std::lock_guard<std::mutex> lock(testConfigsMutex_);
-        testConfigs_.clear();
-    }
-    {
-        std::lock_guard<std::mutex> lock(resultsMutex_);
-        testResults_.clear();
     }
 }
 
