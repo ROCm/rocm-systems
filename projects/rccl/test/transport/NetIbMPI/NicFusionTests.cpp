@@ -6,7 +6,12 @@
 
 #include "NetIbMPITestBase.hpp"
 
+#include <chrono>
+
 #ifdef MPI_TESTS_ENABLED
+
+// Deadline for the vNIC accept/connect poll loops in this file.
+static constexpr int kConnectPollTimeoutSec = 30;
 
 // Virtual Device Tests
 
@@ -86,10 +91,73 @@ TEST_F(NetIbMPITest, MakeVirtualDeviceMergeDisabled) {
         << "Multi-device merge with NCCL_IB_MERGE_NICS=0 must be rejected";
 }
 
+// Reads the NUMA node of a physical IB device from its sysfs pciPath
+// (<pciPath>/numa_node), mirroring ncclIbGetNumaNodeFromPath in net_ib.cc.
+// Returns -1 if unknown. Used to pick a genuinely cross-NUMA device pair
+// instead of hard-coding indices that assume a specific topology.
+static int ReadDeviceNumaNode(const ncclNetProperties_t& props) {
+    if (props.pciPath == nullptr) return -1;
+    std::string numaPath = std::string(props.pciPath) + "/numa_node";
+    FILE* f = fopen(numaPath.c_str(), "r");
+    if (f == nullptr) return -1;
+    int numa = -1;
+    if (fscanf(f, "%d", &numa) != 1) numa = -1;
+    fclose(f);
+    return numa;
+}
+
+TEST_F(NetIbMPITest, MakeVirtualDeviceCrossNuma) {
+    // Merging NICs on different NUMA nodes is warning-only, so the merge must
+    // still succeed. Picks a cross-NUMA pair by reading each device's numa_node
+    // from sysfs (correct on any layout, no fixed indices); skips when no such
+    // pair exists or merging is disabled.
+    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
+        << "Test requirements not met";
+
+    const char* mergeEnv = getenv("NCCL_IB_MERGE_NICS");
+    if (mergeEnv && atoi(mergeEnv) == 0) {
+        GTEST_SKIP() << "NIC merging disabled (NCCL_IB_MERGE_NICS=0)";
+    }
+
+    int ndev = 0;
+    AssertInitAndGetDevices(&ndev);
+
+    // Find two PHYSICAL devices on different NUMA nodes. Skip merged vNICs
+    // (vProps.ndevs > 1) that earlier tests may have left in the device table —
+    // they have no single NUMA node and their indices are order-dependent.
+    int devA = -1, numaA = -1, devB = -1;
+    for (int i = 0; i < ndev && devB < 0; i++) {
+        ncclNetProperties_t pi;
+        memset(&pi, 0, sizeof(pi));
+        if (GetDeviceProperties(i, &pi) != ncclSuccess) continue;
+        if (pi.vProps.ndevs > 1) continue;  // merged vNIC, not a physical NIC
+        int numaI = ReadDeviceNumaNode(pi);
+        if (numaI < 0) continue;
+        if (devA < 0) { devA = i; numaA = numaI; continue; }
+        if (numaI != numaA) devB = i;
+    }
+    if (devA < 0 || devB < 0) {
+        GTEST_SKIP() << "No cross-NUMA physical NIC pair available on this node";
+    }
+
+    ncclNetVDeviceProps_t vProps;
+    vProps.ndevs = 2;
+    vProps.devs[0] = devA;
+    vProps.devs[1] = devB;
+
+    int vdev = -1;
+    // Cross-NUMA is a warning, not an error: the merge must succeed.
+    ASSERT_EQ(MakeVirtualDevice(&vdev, &vProps), ncclSuccess)
+        << "Cross-NUMA vNIC (devs " << devA << "," << devB << ") should still be created";
+    EXPECT_GE(vdev, 0) << "Cross-NUMA vNIC ID should be non-negative";
+}
+
 TEST_F(NetIbMPITest, MakeVirtualDeviceOutOfRangeDev) {
-    // Covers the physical-device bounds check in ncclIbMakeVDeviceInternal:
-    // `if (props->devs[i] < 0 || props->devs[i] >= ncclNIbDevs) return ncclInvalidUsage;`
-    // (net_ib.cc:724). Passing a device index >= ncclNIbDevs must be rejected.
+    // Covers the device bounds check in ncclIbMakeVDeviceInternal that rejects a
+    // physical index >= the physical device count. The reported device count
+    // (merged) is always >= the physical count, so using it as the index is
+    // guaranteed out of range regardless of how many vNICs already exist.
     ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
                                          kRequirePowerOfTwo, 1, kNoNodeLimit))
         << "Test requirements not met";
