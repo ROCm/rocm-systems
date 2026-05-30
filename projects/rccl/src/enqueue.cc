@@ -2613,6 +2613,28 @@ ncclResult_t ncclGetAlgoInfo(
   return getAlgoInfo(comm, task, collNetSupport, nvlsSupport, numPipeOps, simInfo);
 }
 
+// Out-of-TU shims for the upstream symbols ncclAddWorkBatchToPlan and the
+// ncclDevKernelForFunc[] / ncclDevKernelForFuncIsSpecialized[] kernel lookup.
+// RCCL's equivalents (static addWorkBatchToPlan, file-local ncclKerns table)
+// aren't reachable from sources synced verbatim from upstream NCCL.
+
+void ncclAddWorkBatchToPlan(
+    struct ncclComm* comm, struct ncclKernelPlan* plan, int channelId,
+    enum ncclDevWorkType workType, int devFuncId, uint32_t workOffset,
+    int /*p2pEpoch*/, int p2pRound, bool /*newBatch*/
+  ) {
+  // RCCL's static addWorkBatchToPlan determines new-batch internally from
+  // chan->workBatchQueue.tail and has no notion of p2pEpoch. Forwarding the
+  // remaining args matches the call patterns at enqueue.cc:835, :985, :1329.
+  addWorkBatchToPlan(comm, plan, channelId, workType, devFuncId, workOffset,
+                     p2pRound, /*batchP2P=*/false);
+}
+
+void ncclPlanSetDefaultKernel(struct ncclComm* comm, struct ncclKernelPlan* plan) {
+  plan->kernelFn = ncclKerns[ncclGetKernelIndex(comm)].kernelFn;
+  plan->kernelSpecialized = ncclKerns[ncclGetKernelIndex(comm)].specialized;
+}
+
 NCCL_PARAM(NvlsTreeMaxChunkSize, "NVLSTREE_MAX_CHUNKSIZE", -2);
 
 static ncclResult_t calcCollChunking(

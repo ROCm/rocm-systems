@@ -49,6 +49,12 @@ bool ncclTestBudget(struct ncclKernelPlanBudget* budget, int nWorkBatches, ssize
 
 void ncclAddWorkBatchToPlan(struct ncclComm* comm, struct ncclKernelPlan* plan, int channelId, enum ncclDevWorkType workType, int devFuncId, uint32_t workOffset, int p2pEpoch =-1, int p2pRound = -1, bool newBatch = false);
 
+// RCCL-only shim: sets plan->kernelFn / kernelSpecialized using the file-local
+// ncclKerns table in enqueue.cc, for upstream-style schedulers (e.g.
+// scheduler/allgatherv_sched.cc) that would otherwise reference the absent
+// ncclDevKernelForFunc[] / ncclDevKernelForFuncIsSpecialized[] arrays.
+void ncclPlanSetDefaultKernel(struct ncclComm* comm, struct ncclKernelPlan* plan);
+
 ncclResult_t ncclAddProxyOpIfNeeded(struct ncclComm* comm, struct ncclKernelPlan* plan, struct ncclProxyOp* op);
 
 ncclResult_t ncclAddProfilerProxyOpIfNeeded(struct ncclComm* comm, struct ncclKernelPlan* plan, struct ncclProxyOp* op);
