@@ -334,13 +334,6 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
       return HSA_STATUS_SUCCESS;
     }
 
-    MAKE_NAMED_SCOPE_GUARD(memoryGuard, [&]() {
-      if (*mem != nullptr) {
-        HSAKMT_CALL(hsaKmtFreeMemory(*mem, size));
-        *mem = nullptr;
-      }
-    });
-
     // Commit the memory.
     // For system memory, on non-restricted allocation, map it to all GPUs. On
     // restricted allocation, only CPU is allowed to access by default, so
@@ -368,6 +361,13 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
         return HSA_STATUS_SUCCESS;
       }
     }
+
+    MAKE_NAMED_SCOPE_GUARD(memoryGuard, [&]() {
+      if (*mem != nullptr) {
+        HSAKMT_CALL(hsaKmtFreeMemory(*mem, size));
+        *mem = nullptr;
+      }
+    });
 
     uint64_t alternate_va = 0;
 
