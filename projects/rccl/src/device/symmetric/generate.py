@@ -3,6 +3,7 @@
 
 #!/usr/bin/env python3
 import os
+import platform
 import sys
 import shutil
 
@@ -17,10 +18,11 @@ if os.path.exists(gensrc):
     path = os.path.join(gensrc, name)
     if os.path.isfile(path):
       os.remove(path)
-    elif os.path.isdir(path):
-      shutil.rmtree(path)
 else:
   os.mkdir(gensrc)
+
+# On Windows, GIN device code is excluded; do not generate or build any GIN kernels.
+exclude_gin = platform.system() == "Windows"
 
 def paste(sep, *args):
   return sep.join(args)
@@ -50,9 +52,10 @@ class Rec(object):
 # Edit this region for introducing new algos etc
 
 reductions = ["AllReduce","ReduceScatter"]
-all_reds = ["sum"]
+all_reds = ["sum", "avg"]
 all_tys = ["f32","f16","bf16","f8e4m3","f8e5m2"]
 gin_algos = ["RailA2A_LsaLD", "RailA2A_LsaLDMC", "RailRing_LsaSTMC"]
+tma_algos = ["TmaST", "TmaSTMC", "TmaLD", "RSxTmaLD_AGxTmaST"]
 
 nvls_algos_by_coll = {
   "AllReduce": ["AGxLLMC_R","RSxLDMC_AGxSTMC"],
@@ -67,10 +70,12 @@ coll_to_lower = {
 }
 
 red_to_ncclDevRedOp = {
-  "sum": "ncclDevSum"
+  "sum": "ncclDevSum",
+  "avg": "ncclDevSumPostDiv"
 }
 red_to_Func = {
-  "sum": "FuncSum"
+  "sum": "FuncSum",
+  "avg": "FuncSumPostDiv"
 }
 
 ty_to_ncclDataType = {
@@ -78,17 +83,20 @@ ty_to_ncclDataType = {
   "f16": "ncclFloat16",
   "bf16": "ncclBfloat16",
   "f8e4m3": "ncclFloat8e4m3",
-  "f8e5m2": "ncclFloat8e5m2"
+  "f8e5m2": "ncclFloat8e5m2",
 }
 ty_to_cxxtype = {
   "f32": "float",
   "f16": "half",
+  # [RCCL] HIP types: hip_bfloat16 / rccl_float8 / rccl_bfloat8 (no upstream nv_* equivalents on AMD).
   "bf16": "hip_bfloat16",
   "f8e4m3": "rccl_float8",
   "f8e5m2": "rccl_bfloat8"
 }
 
 def enumerate_kernels():
+  # [RCCL] Algo set restricted to LL/ST/LD/AGxLL_R/RSxLD_AGxST: NVIDIA multimem (LLMC/STMC),
+  # TMA (Tma*), and GIN rail variants (RailA2A_*/RailRing_*) have no AMD-backed primitives.
   for algo in ["LL","ST"]:
     yield Rec(coll="AllGather", algo=algo)
   for red in all_reds:
@@ -100,6 +108,10 @@ def enumerate_kernels():
 
 def required_cuda(k):
   cudart, arch, specific_sms  = 0, 600, None
+  is_tma = k.algo in tma_algos
+  if is_tma:
+    cudart = max(cudart, 12000)
+    arch = 900
   is_nvls = k.algo in nvls_algos_by_coll.get(k.coll, [])
   if is_nvls:
     cudart = max(cudart, 12010)
@@ -188,6 +200,9 @@ def partition(vals, keyfn):
   return ans
 
 
+# [RCCL] Kept HEAD's file-partition scheme using `(kernel_fname(k), k.coll)` and the .cpp
+# extension; upstream's `kernels_to_build` / `kernel_fbase` machinery + .cu extensions assume
+# multimem/TMA/GIN algos that RCCL doesn't enumerate (see `enumerate_kernels()` divergence above).
 kernels_by_file = partition(enumerate_kernels(), lambda k: (kernel_fname(k), k.coll))
 
 # Add dependency only files (e.g. allreduce.cpp)
@@ -208,14 +223,15 @@ for (fname, coll), ks in kernels_by_file.items():
     for k in ks:
       emitln(f, instantiate(k))
 
-# Generate <gensrc>/sym_kernels_host.cc
+# Generate <gensrc>/sym_kernels_host.cc (kernel list already excludes GIN when exclude_gin)
 with open(os.path.join(gensrc, "sym_kernels_host.cc"), "w") as f:
   print("-- Generating %s" % os.path.join(gensrc, "symmetric_kernels.cc"))
   emitln(f, '#include "sym_kernels.h"')
   emitln(f, '#include "device.h"')
+  emitln(f, '#include "debug.h"')
   emitln(f, '')
 
-  kernel_list = list(enumerate_kernels())
+  kernel_list = kernels_to_build
   for k in kernel_list:
     emitln(f, prototype(k))
   emitln(f, '')
@@ -241,7 +257,7 @@ with open(os.path.join(gensrc, "sym_kernels_host.cc"), "w") as f:
   emitln(f, 'int ncclSymkGetKernelIndex(ncclSymkKernelId id, int red, ncclDataType_t ty) {')
   indents += 1
   emitln(f, 'switch (id) {')
-  emitln(f, 'default: return -1;')
+  emitln(f, 'default: WARN("ncclSymkGetKernelIndex: unknown kernel id %d", (int)id); return -1;')
   for (coll, algo), coll_algo_ks in partition(kernel_list, lambda k: (k.coll, k.algo)).items():
     emitln(f, 'case ncclSymkKernelId_'+coll+'_'+algo+':')
     indents += 1
@@ -249,12 +265,12 @@ with open(os.path.join(gensrc, "sym_kernels_host.cc"), "w") as f:
       emitln(f, 'return %d;' % kernel_list.index(coll_algo_ks[0]))
     else:
       emitln(f, 'switch ((ncclDevRedOp_t)red) {')
-      emitln(f, 'default: return -1;')
+      emitln(f, 'default: WARN("ncclSymkGetKernelIndex: unknown red op %d for id %d", red, (int)id); return -1;')
       for red, coll_algo_red_ks in partition(coll_algo_ks, lambda k: k.red).items():
         emitln(f, 'case '+red_to_ncclDevRedOp[red]+':')
         indents += 1
         emitln(f, 'switch (ty) {')
-        emitln(f, 'default: return -1;')
+        emitln(f, 'default: WARN("ncclSymkGetKernelIndex: unknown type %d for id %d red %d", (int)ty, (int)id, red); return -1;')
         for k in coll_algo_red_ks:
           emitln(f, 'case %s: return %d;' % (ty_to_ncclDataType[k.ty], kernel_list.index(k)))
         emitln(f, '}')
@@ -264,3 +280,8 @@ with open(os.path.join(gensrc, "sym_kernels_host.cc"), "w") as f:
   emitln(f, '}')
   indents -= 1
   emitln(f, '}')
+
+# [RCCL] Upstream's rules.mk + CMake file-list printout block dropped: it depends on
+# `kernels_to_build` / `kernel_fbase` which RCCL doesn't define (see partition divergence above).
+# RCCL's symmetric kernels are picked up by the enumerate-sources pipeline in src/CMakeLists.txt.
+

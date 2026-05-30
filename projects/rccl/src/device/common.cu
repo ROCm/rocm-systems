@@ -45,3 +45,5 @@ __device__ void ncclDevFunc_Nop();
 #else
 __device__ __attribute__((noinline)) void ncclDevFunc_Nop();
 #endif
+
+__device__ void ncclDevFunc_Nop() {}

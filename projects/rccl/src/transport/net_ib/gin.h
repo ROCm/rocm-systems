@@ -13,17 +13,20 @@
 #include "nccl.h"
 
 struct ncclGinIbCollComm {
+  void*         ctx;
   int           rank;
   int           nranks;
-  int           connectionId;
-  int           nConnections;
-  int           queueDepth;
   void*         recvComm;
   void*         sendComm;
-  void**        fullRecvComm;
+  // [RCCL] per-peer send/recv comm arrays (RCCL-only, used by net_ib.cc's fully-connected setup)
   void**        fullSendComm;
+  void**        fullRecvComm;
   int           dev;
   void*         ginCtx;
+  struct {
+    struct ibv_context* context;
+    struct ibv_pd *pd;
+  }ib;
   ncclResult_t (*getProperties)(int dev, void *props);
   ncclResult_t (*allGather)(struct ncclGinIbCollComm *cComm, void *srcBuf, void *recvBuf, size_t len);
   ncclResult_t (*allToAll)(struct ncclGinIbCollComm *cComm, void *srcBuf, void *recvBuf, size_t len);

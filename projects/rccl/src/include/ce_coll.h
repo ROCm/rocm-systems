@@ -37,6 +37,7 @@ struct ncclCeColl {
 #ifdef ENABLE_FAULT_INJECTION
   uint32_t ceFaults;  // bitmask of CE_FAULT_* bits; see ce_fault_inject.h
 #endif
+  uint32_t* ceSeqNumDev; // Index 0 for the current value, 1 for GRAPH_SYNC_VALUE
 };
 
 struct ncclCeInitTask {

@@ -10,6 +10,11 @@ ext-profiler/inspector/librccl-profiler-inspector.so
 ext-profiler/inspector/version.cc
 plugins/profiler/inspector/librccl-profiler-inspector.so
 plugins/profiler/inspector/version.cc
+failed/
+junits/
+*.xml
+tags
+*.swp
 
 # Visual Studio Code
 .vscode

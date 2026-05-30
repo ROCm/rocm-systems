@@ -11,7 +11,13 @@ set(TRANSPORT_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/generic.cc
 )
 
-add_subdirectory(net_ib)
+# Real net_ib on Linux; stub on Windows (and other non-Linux) so ncclNetIb is defined exactly once
+if(NCCL_OS_LINUX)
+    add_subdirectory(net_ib)
+else()
+    list(APPEND TRANSPORT_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/net_ib_stub.cc)
+endif()
+# [RCCL] net_ib_cast is RCCL-only (NIC fusion casting variant). Linux-only, no upstream counterpart.
 add_subdirectory(net_ib_cast)
 
 # Add transport sources to parent scope

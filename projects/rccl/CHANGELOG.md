@@ -2,6 +2,19 @@
 
 Full documentation for RCCL is available at [https://rccl.readthedocs.io](https://rccl.readthedocs.io)
 
+## Unreleased - RCCL 2.30.3 for ROCm 7.11
+
+### Known issues
+* GPU-Initiated Networking (GIN) is not enabled on the ROCm build. `src/transport/net_ib_cast/gin.cc` is excluded from the build (CUDA/NCCL-only headers); `NCCL_GIN_TYPE` is forced to `-1` and GIN device-side APIs fall back to host-driven paths.
+* The RCCL GIN-IB transport vtables (`ncclGinIb`, `ncclGinIbProxy`, and their `rocmGinIb*` aliases in `net_ib_rocm.cc`) are stubbed: `init` returns `ncclSystemError` and all other entry points are `NULL`. Reconciling the RCCL GIN-IB implementation with the new NCCL 2.30 `ncclGin_v13_t` ABI (createContext/destroyContext, `iget`, `iflush`, `queryLastError`, expanded put/iputSignal signatures) is owned by the GIN SME and tracked under AICOMRCCL-1123.
+* The `test/device/GinDeviceTests.cpp` unit test is disabled in `test/CMakeLists.txt` pending an SME update for the new 128-byte GFD layout, the removed `op` field, and the renamed `reserved` field in `ncclGinProxyQword_t`.
+* New NCCL 2.30 features are unverified on ROCm and have no AMD-equivalent implementation: TMA symmetric kernels (`NCCL_SYM_TMA_ENABLE`), Dynamic Direct Path (`NCCL_IB_OOO_RQ`), IB port recovery (`NCCL_IB_RESILIENCY_PORT_RECOVERY`), cross-clique NVLINK support (`NCCL_MNNVL_CROSS_CLIQUE`), and `gin.get` with nonblocking flush.
+* `ncclTopoNeedFlush` temporarily returns `ncclTopoFlushAlways` on the HIP path, losing the RCCL PR #2766 GDR-flush short-circuit. This is correctness-safe (over-flushes) but may regress GDR small-message performance until the caller-side fix lands in `transport/net.cc`. Tracked under AICOMRCCL-1123 follow-up.
+* NCCL Inspector P2P event support and the Graphana inspector dashboard template are unverified on RCCL.
+
+### Changed
+* Compatibility with NCCL 2.30.3.
+
 ## Unreleased - RCCL 2.28.3 for ROCm 7.11
 
 ### Known issues

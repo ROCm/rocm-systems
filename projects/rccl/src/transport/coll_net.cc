@@ -130,7 +130,7 @@ struct recvResources {
   int netDev;
   enum ncclTopoGdrMode useGdr;
   int useDmaBuf;
-  int needFlush;
+  enum ncclTopoFlushType needFlush;
   uint64_t* gdcSync;
   uint64_t* gdcFlush;
   void* gdrDesc;
@@ -161,7 +161,7 @@ static inline int getHandleForAddressRangeFlags(ncclTopoGdrMode useGdr) {
 struct setupReq {
   int netDev;
   enum ncclTopoGdrMode useGdr;
-  int needFlush;
+  enum ncclTopoFlushType needFlush;
   struct ncclCollNetSharedRes* collNet;
 };
 
@@ -197,7 +197,9 @@ static ncclResult_t recvSetup(struct ncclComm* comm, struct ncclTopoGraph* graph
   NCCLCHECK(ncclTopoCheckGdr(comm->topo, myInfo->rank, netId, 0, &req.useGdr));
   recv->conn.flags |= req.useGdr ? NCCL_DIRECT_NIC : 0;
   // Determine whether we need to flush the GDR buffer on recv or not
-  if (req.useGdr) NCCLCHECK(ncclTopoNeedFlush(comm, netId, req.netDev, myInfo->rank, false, &req.needFlush));
+  // [RCCL] v2.30 sync: ncclTopoNeedFlush dropped the `bool netManaged` arg; the false-case here
+  // corresponds to ncclTopoFlushAlways (over-flush) which the HIP branch returns by default.
+  if (req.useGdr) NCCLCHECK(ncclTopoNeedFlush(comm, netId, req.netDev, myInfo->rank, &req.needFlush));
 
   recv->proxyConn.tpLocalRank = comm->topParentLocalRanks[comm->localRank];
   NCCLCHECK(ncclProxyConnect(comm, TRANSPORT_COLLNET, 0, myInfo->rank, &recv->proxyConn));
@@ -590,9 +592,12 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
   map->mems[NCCL_NET_MAP_HOSTMEM].gpuPtr = map->mems[NCCL_NET_MAP_HOSTMEM].cpuPtr;
   if (ncclGdrCopy) {
     uint64_t *cpuPtr, *gpuPtr;
-    NCCLCHECK(ncclGdrCudaCalloc(&cpuPtr, &gpuPtr, 2, &resources->gdrDesc, proxyState->memManager));
+    uint32_t gdcFlag = ncclGdcPinFlag(resources->needFlush);
+    NCCLCHECK(ncclGdrCudaCalloc(&cpuPtr, &gpuPtr, 2, &resources->gdrDesc, proxyState->memManager, gdcFlag));
 
     if (ncclParamGdrCopySyncEnable()) {
+      // No flush needed if control flow is mapped on the PCIe instead of C2C
+      if (gdcFlag == GDR_PIN_FLAG_FORCE_PCIE) resources->needFlush = ncclTopoFlushNone;
       resources->gdcSync = cpuPtr;
       struct connectMapMem* gdcMem = map->mems+NCCL_NET_MAP_GDCMEM;
       gdcMem->cpuPtr = (char*)cpuPtr;

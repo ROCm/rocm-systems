@@ -13,7 +13,6 @@
 #include "lsa_barrier__types.h"
 #include "gin_barrier__types.h"
 
-struct ncclDevCommWindowTable;
 #if __cplusplus
 struct ncclDevCommWindowTable {
   struct Entry {
@@ -23,17 +22,22 @@ struct ncclDevCommWindowTable {
   struct ncclDevCommWindowTable* next;
 };
 #endif
+typedef struct ncclDevCommWindowTable* ncclDevCommWindowTable_t;
 
 struct ncclDevComm {
+  // Internal NCCL structure versioning metadata.  Do not modify.
+  unsigned int magic;
+  unsigned int version;
+
   int rank, nRanks;
   uint32_t nRanks_rcp32;
   int lsaRank, lsaSize;
   uint32_t lsaSize_rcp32;
 
-  struct ncclDevCommWindowTable* windowTable;
+  ncclDevCommWindowTable_t windowTable;
 
   ncclWindow_t resourceWindow;
-  struct ncclWindow_vidmem resourceWindow_inlined;
+  ncclWindow_vidmem_t resourceWindow_inlined;
 
   ncclMultimemHandle_t lsaMultimem;
   ncclLsaBarrierHandle_t lsaBarrier;
@@ -42,17 +46,19 @@ struct ncclDevComm {
   uint8_t ginConnectionCount;
   uint8_t ginNetDeviceTypes[NCCL_GIN_MAX_CONNECTIONS];
   void* ginHandles[NCCL_GIN_MAX_CONNECTIONS];
-  uint32_t ginSignalBase;
   int ginSignalCount;
-  uint32_t ginCounterBase;
   int ginCounterCount;
   uint64_t* ginSignalShadows;
   uint32_t ginContextCount;
-  uint32_t ginContextBase;
   bool ginIsRailed; // Whether the GIN connections are railed
 
   // FT related
   uint32_t* abortFlag;
+
+  ncclLsaBarrierHandle_t hybridLsaBarrier;
+  ncclGinBarrierHandle_t hybridRailGinBarrier;
+
+  ncclGinBarrierHandle_t worldGinBarrier;
 };
 
 #endif // _NCCL_DEVICE_COMM__TYPES_H_

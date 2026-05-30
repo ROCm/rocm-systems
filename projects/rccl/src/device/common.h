@@ -411,7 +411,7 @@ __device__ __forceinline__ void loadWorkBatchToShmem(
     } else {
       if (tid == 0) {
         ncclShmem.batchIx = batchIx;
-        ncclShmem.nextBatchIx = (batch.nextJump == 0) ? -1 : batchIx + batch.nextJump;
+        ncclShmem.nextBatchIx = (batch.nextJump == 0) ? -1 : (int)(batchIx + batch.nextJump);
         ncclShmem.workType = (enum ncclDevWorkType)batch.workType;
         ncclShmem.nWorks = workCursor;
         ncclShmem.funcId = batch.funcId;

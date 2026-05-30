@@ -29,12 +29,17 @@
 #include "mem_manager.h"
 #include "latency_profiler/CollTrace.h"
 #include "rccl_common.h"
+#include "nccl_device/core_tmp.h"  // ncclGinType_t for ncclPeerInfo::supportedGinType
 #include "recorder.h"
 #include "ipc_init_detail.h"
 #include "mem_manager.h"
 
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
+#endif
+
+#if defined(NCCL_OS_WINDOWS)
+#include "gin/gin_host_win_stub.h"
 #endif
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
@@ -317,8 +322,8 @@ struct ncclTaskRma {
 
   // Signal operations
   ncclSignalMode_t signalMode;
-  int*peers;
-  int*nsignals;
+  int* peers;
+  int* nsignals;
   int npeers;
 
   // Profiler plugin
@@ -410,7 +415,8 @@ inline void ncclTaskCollSorterInsert(
   constexpr size_t MaxSize = ncclTaskCollSorter::MaxSize;
   constexpr int BitsPerPow2 = ncclTaskCollSorter::BitsPerPow2;
   constexpr int BinCount = ncclTaskCollSorter::BinCount;
-  int bin = u32fpEncode(std::min(MaxSize, size)>>UnitLog2, BitsPerPow2);
+  // Value is bounded by MaxSize>>UnitLog2 which fits in uint32_t
+  int bin = u32fpEncode(static_cast<uint32_t>(std::min(MaxSize, size)>>UnitLog2), BitsPerPow2);
   bin = BinCount-1 - bin; // descending bin
 
   if (me->bins[bin] == nullptr) {
@@ -553,6 +559,11 @@ struct ncclPeerInfo {
 #endif
   int cuMemSupport;
   int version;
+  // [Upstream v2.30] per-peer support flags aggregated into globalXxx booleans in init.cc.
+  ncclGinType_t supportedGinType;
+  bool crossNicSupport;
+  bool rmaPluginAvailable;
+  bool cuMemGdrSupport;
 };
 
 typedef enum ncclGroupTaskType {
@@ -595,6 +606,7 @@ struct ncclComm {
   ncclNet_t* ncclNet;
   void* netContext;
   void* ginContext;
+  void* rmaGinContext;
   int netPluginIndex;
   int ginPluginIndex;
   int ncclNetVer;
@@ -665,6 +677,7 @@ struct ncclComm {
 
   // MNNVL: Multi-Node NVLink
   int MNNVL; // true when MNNVL is available
+  bool isMultiRankGpu; // true when multiple ranks use the same GPU device on the same host
   struct cliqueInfo clique; // Our MNNVL clique information
   int cliqueRank; // Our rank within the MNNVL clique
 
@@ -684,12 +697,16 @@ struct ncclComm {
   int nChannels; // connection nChannels
   int collChannels; // enqueue nChannels
   int nvlsChannels; // enqueue nChannels
+  int nvlsTreeMaxChunkSize;
+
   // all nvls heads stored to check if we can splitShare
   int nvlsHeads[MAXCHANNELS];
   // Channels (per peer) for p2p
   int p2pnChannels;
   int p2pnChannelsPerPeer;
   int p2pChannelShiftSize;
+  int p2pSchedGroupSize;
+  int p2pMaxPeers;
 
   // Should this comm allocate LL buffers for network P2P connections?
   bool allocP2pNetLLBuffers;
@@ -698,6 +715,11 @@ struct ncclComm {
   int buffSizes[NCCL_NUM_PROTOCOLS];
   int p2pChunkSize;
   int nvlsChunkSize;
+
+  // Cross-clique P2P: when true, use global rank for IPC buffer indexing
+  bool p2pCrossClique;
+  // NVL Domain size: number of ranks in the same NVLink domain (same clusterUuid)
+  int nvlDomainSize;
 
   // Tuner values
   ncclTunerConstants_t tunerConstants;
@@ -776,7 +798,6 @@ struct ncclComm {
   struct ncclMemoryPool memPool_ncclTaskRma;
   struct ncclMemoryPool memPool_ncclProxyOp;
   struct ncclMemoryPool memPool_ncclKernelPlan;
-  struct ncclMemoryPool memPool_ncclRmaProxyDesc;
 
   // Next comm in this thread's active ncclGroup[Start|End](). Holds "0x1" when
   // this comm is not yet in a group.
@@ -879,6 +900,8 @@ struct ncclComm {
   struct ncclSymkState symkState; // The symmetric kernels state (built on previous)
 
   struct ncclMemManager* memManager;  // Memory manager
+  struct ncclIntruQueue<struct ncclMemManagerTask, &ncclMemManagerTask::next> suspendTaskQueue;
+  struct ncclIntruQueue<struct ncclMemManagerTask, &ncclMemManagerTask::next> resumeTaskQueue;
 
   // unroll factor for comm [RCCL]
   int unroll;
@@ -909,9 +932,6 @@ struct ncclComm {
   bool enableDirectReduceScatter;
   // Temporary Buffer [RCCL]
   void* tempBuff;
-
-  struct ncclIntruQueue<struct ncclMemManagerTask, &ncclMemManagerTask::next> suspendTaskQueue;
-  struct ncclIntruQueue<struct ncclMemManagerTask, &ncclMemManagerTask::next> resumeTaskQueue;
 
   uint64_t endMagic;
 };
@@ -981,7 +1001,7 @@ inline void ncclCommIntraBarrierIn(struct ncclComm* comm, uint32_t x) {
     uint64_t count = COMPILER_ATOMIC_ADD_FETCH(&comm0->intraBarrierCounter, (uint64_t(x)<<32) + 1, std::memory_order_release);
     if (uint32_t(count) == uint32_t(comm->intraRanks)) {
       // Reset.
-      COMPILER_ATOMIC_STORE(&comm0->intraBarrierCounter, 0, std::memory_order_relaxed);
+      COMPILER_ATOMIC_STORE(&comm0->intraBarrierCounter, 0ULL, std::memory_order_relaxed);
       // Release everyone.
       COMPILER_ATOMIC_STORE(&comm0->intraBarrierGate, (count>>32<<32) | (phase^1), std::memory_order_release);
     }

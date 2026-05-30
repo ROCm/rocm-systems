@@ -272,6 +272,9 @@ struct context {
   int proxyCtrlPoolBase;
   int proxyCtrlPoolIndex;
   struct proxyCtrl* proxyCtrlPool;
+
+  // Set during communicator teardown to stop accepting new event updates.
+  int finalizing;
 };
 
 template <typename T>

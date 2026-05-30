@@ -615,7 +615,7 @@ static inline ncclResult_t ncclCuMemFree(void *ptr, struct ncclMemManager* manag
 
 // Get the base and size of all segments that span a given user buffer.
 // [RCCL] Helper introduced in NCCL 2.29 sync.
-static inline ncclResult_t ncclCuMemGetAddressRange(CUdeviceptr userBuff, size_t userBuffSize, CUdeviceptr* mappedPtrBase, size_t* totalMappedBufferSize, int* numSegments) {
+static inline ncclResult_t ncclCuMemGetAddressRange(CUdeviceptr userBuff, size_t userBuffSize, CUdeviceptr* mappedPtrBase, size_t* totalMappedBufferSize, int* numSegments, bool* hasSysmemSegment = nullptr) {
   *totalMappedBufferSize = 0;
   *mappedPtrBase = 0;
   if (numSegments) *numSegments = 0;
@@ -625,14 +625,39 @@ static inline ncclResult_t ncclCuMemGetAddressRange(CUdeviceptr userBuff, size_t
   CUdeviceptr baseSend;
   size_t baseSendSize;
 
-  while ((char*)mappedPtrEnd < (char*)userBuffEnd) {
+  if (hasSysmemSegment != nullptr) {
+    *hasSysmemSegment = false;
+  }
+
+  while (mappedPtrEnd < userBuffEnd) {
     CUCHECK(cuMemGetAddressRange(&baseSend, &baseSendSize, mappedPtrEnd));
 
+    if (hasSysmemSegment != nullptr && *hasSysmemSegment == false) {
+      CUmemGenericAllocationHandle handle;
+      CUmemAllocationProp prop;
+      CUCHECK(cuMemRetainAllocationHandle(&handle, (void *) mappedPtrEnd));
+      CUCHECK(cuMemGetAllocationPropertiesFromHandle(&prop, handle));
+      if (prop.location.type == CU_MEM_LOCATION_TYPE_HOST_NUMA) {
+        *hasSysmemSegment = true;
+      }
+      CUCHECK(cuMemRelease(handle));
+    }
+
     if (*totalMappedBufferSize == 0) {
-      *mappedPtrBase = baseSend;
+      // Workaround for CPU backed buffers since baseSend can be 0 in some CUDA driver versions
+      if (baseSend == 0) {
+        *mappedPtrBase = userBuffStart;
+      } else {
+        *mappedPtrBase = baseSend;
+      }
     }
     *totalMappedBufferSize += baseSendSize;
-    mappedPtrEnd = (CUdeviceptr)((char*)baseSend + baseSendSize);
+    // Workaround for CPU backed buffers since baseSend can be 0 in some CUDA driver versions
+    if (baseSend == 0) {
+      mappedPtrEnd = (CUdeviceptr)((char*)mappedPtrEnd + baseSendSize);
+    } else {
+      mappedPtrEnd = (CUdeviceptr)((char*)baseSend + baseSendSize);
+    }
 
     if (numSegments) *numSegments = *numSegments + 1;
   }
@@ -897,13 +922,20 @@ finish:
 // and if they are shared, that could cause a crash in a child process
 inline ncclResult_t ncclIbMallocDebug(void** ptr, size_t size, const char *filefunc, int line) {
   if (size > 0) {
-    long page_size = ncclOsGetPageSize();
-    if (page_size < 0) return ncclSystemError;
-    void* p;
-    int size_aligned = ROUNDUP(size, page_size);
+    void* p = NULL;
+    size_t page_size = ncclOsGetPageSize();
+#if defined(NCCL_OS_LINUX)
+    size_t size_aligned = ROUNDUP(size, page_size);
     int ret = posix_memalign(&p, page_size, size_aligned);
     if (ret != 0) return ncclSystemError;
-    memset(p, 0, size);
+#elif defined(NCCL_OS_WINDOWS)
+    size_t size_aligned = ROUNDUP(size, page_size);
+    p = _aligned_malloc(size_aligned, page_size);
+    if (p == NULL) return ncclSystemError;
+#endif
+    if (p != NULL) {
+      memset(p, 0, size);
+    }
     *ptr = p;
   } else {
     *ptr = NULL;
@@ -912,5 +944,6 @@ inline ncclResult_t ncclIbMallocDebug(void** ptr, size_t size, const char *filef
   return ncclSuccess;
 }
 #define ncclIbMalloc(...) ncclIbMallocDebug(__VA_ARGS__, __FILE__, __LINE__)
+
 
 #endif

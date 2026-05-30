@@ -3717,53 +3717,36 @@ ncclResult_t ncclGinIbProxyTest(void *collComm, void *request, int *done) {
   return ncclSuccess;
 }
 
-// No support for NCCL_IB_SPLIT_DATA_ON_QPS or NCCL_IB_MERGE_NICS
+// [RCCL] STUB for NCCL 2.30.3 sync (AICOMRCCL-1123): the GIN-IB vtables below
+// previously populated the upstream `ncclGin_t` with RCCL's GIN-IB function
+// pointers, but NCCL 2.30 evolved `ncclGin_t` (now `ncclGin_v13_t`) with new
+// parameter shapes (createContext/destroyContext, iget, iflush, queryLastError,
+// extra context/rank/signal args on iput/iputSignal). Reconciling the RCCL
+// GIN-IB implementation with the new ABI is a real piece of work for the GIN
+// SME and is not in scope for this sync. To keep the build green, both vtables
+// are stubbed with an `init` that returns ncclSystemError; callers in
+// `plugin/net.cc` and `plugin/gin.cc` already fall back gracefully when init
+// fails. See CHANGELOG.md "GPU-Initiated Networking (GIN) is not enabled".
+static ncclResult_t ncclGinIbInitStub(void** /*ctx*/, uint64_t /*commId*/,
+                                      ncclDebugLogger_t /*logFunction*/) {
+  WARN("NET/IB: GIN is not supported on this RCCL build (NCCL 2.30 ABI not yet ported)");
+  return ncclSystemError;
+}
+
 ncclGin_t ncclGinIbProxy = {
   "GIN_IB_PROXY",
-  ncclGinIbInit,
+  ncclGinIbInitStub,
   ncclIbDevices,
-  ncclGinIbProxyGetProperties,
-  ncclIbListen,
-  ncclGinIbConnect,
-  NULL,
-  ncclGinIbProxyRegMrSym,
-  ncclGinIbProxyRegMrSymDmaBuf,
-  ncclGinIbProxyDeregMrSym,
-  NULL,
-  ncclGinIbCloseColl,
-  ncclIbCloseListen,
-  ncclGinIbProxyIPut,
-  ncclGinIbProxyIPutSignal,
-  ncclGinIbProxyTest,
-  NULL,
-  NULL,
-  ncclGinIbFinalize
+  NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+  NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+  NULL, NULL
 };
 
-// [RCCL] NCCL 2.29.7 introduced a top-level "ncclGinIb" dispatcher that
-// picks between GDAKI and Proxy at runtime. AMD doesn't ship the GDAKI
-// driver-mode kernels yet, so we point ncclGinIb at the Proxy
-// implementation -- this is a strict subset that always works on ROCm
-// HCAs and matches the existing behaviour. Whoever wires up GDAKI in
-// the future can replace this with a real dispatcher.
 ncclGin_t ncclGinIb = {
   "GIN_IB",
-  ncclGinIbInit,
+  ncclGinIbInitStub,
   ncclIbDevices,
-  ncclGinIbProxyGetProperties,
-  ncclIbListen,
-  ncclGinIbConnect,
-  NULL,
-  ncclGinIbProxyRegMrSym,
-  ncclGinIbProxyRegMrSymDmaBuf,
-  ncclGinIbProxyDeregMrSym,
-  NULL,
-  ncclGinIbCloseColl,
-  ncclIbCloseListen,
-  ncclGinIbProxyIPut,
-  ncclGinIbProxyIPutSignal,
-  ncclGinIbProxyTest,
-  NULL,
-  NULL,
-  ncclGinIbFinalize
+  NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+  NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+  NULL, NULL
 };

@@ -58,6 +58,58 @@ __hidden double gettime(void) {
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static pid_t pid;
 static int* eActivationMaskPtr;
+// Note: upstream v2.30.3-1 added a deferred-context-free mechanism
+// (freeContextPools / deferContextFree / freeDeferredContexts) tied to its
+// CE (Copy-Engine) tail-processing path. RCCL strips CE entirely, so those
+// helpers are intentionally omitted; finalize() frees the context inline.
+// The `finalizing` flag and contextFromEventHandle/getTaskEventCtx helpers
+// are kept so that Start/Stop/RecordEventState still honor the new
+// teardown-safety contract.
+
+static inline struct context* getTaskEventCtx(struct taskEventBase* base) {
+  if (!base || !base->parent) return nullptr;
+  if (base->type == ncclProfileColl) return ((struct collApi*)base->parent)->ctx;
+  if (base->type == ncclProfileP2p) return ((struct p2pApi*)base->parent)->ctx;
+  return nullptr;
+}
+
+static struct context* contextFromEventHandle(void* eHandle) {
+  if (!eHandle) return nullptr;
+  uint64_t type = *(uint64_t*)eHandle;
+  switch (type) {
+  case ncclProfileGroupApi: return ((struct groupApi*)eHandle)->ctx;
+  case ncclProfileCollApi: return ((struct collApi*)eHandle)->ctx;
+  case ncclProfileP2pApi: return ((struct p2pApi*)eHandle)->ctx;
+  case ncclProfileKernelLaunch: {
+    struct kernelLaunch* ev = (struct kernelLaunch*)eHandle;
+    return ev->parent ? ev->parent->ctx : nullptr;
+  }
+  case ncclProfileGroup: return ((struct group*)eHandle)->ctx;
+  case ncclProfileColl:
+  case ncclProfileP2p: return getTaskEventCtx((struct taskEventBase*)eHandle);
+  case ncclProfileProxyCtrl: return ((struct proxyCtrl*)eHandle)->ctx;
+  case ncclProfileProxyOp: {
+    struct proxyOp* ev = (struct proxyOp*)eHandle;
+    return ev->parent ? getTaskEventCtx(ev->parent) : nullptr;
+  }
+  case ncclProfileProxyStep: {
+    struct proxyStep* ev = (struct proxyStep*)eHandle;
+    return (ev->parent && ev->parent->parent) ? getTaskEventCtx(ev->parent->parent) : nullptr;
+  }
+  case ncclProfileNetPlugin: {
+    struct netPlugin* ev = (struct netPlugin*)eHandle;
+    return (ev->parent && ev->parent->parent && ev->parent->parent->parent)
+             ? getTaskEventCtx(ev->parent->parent->parent)
+             : nullptr;
+  }
+  case ncclProfileKernelCh: {
+    struct kernelCh* ev = (struct kernelCh*)eHandle;
+    return getTaskEventCtx(ev->parent);
+  }
+  // CE event types (ncclProfileCeColl/CeSync/CeBatch) are stripped from RCCL.
+  default: return nullptr;
+  }
+}
 
 __hidden ncclResult_t exampleProfilerInit(void** context, uint64_t commId, int* eActivationMask, const char* commName, int nNodes, int nranks, int rank, ncclDebugLogger_t logfn) {
   pthread_mutex_lock(&lock);
@@ -154,6 +206,8 @@ __hidden ncclResult_t exampleProfilerInit(void** context, uint64_t commId, int* 
   //fprintf(stdout, "Profiler: Proxy pool size (bytes): %lu\n", sizeof(struct proxyCtrl)*proxyCtrlPoolSize);
   //fprintf(stdout, "Profiler: PXN   pool size (bytes): %lu\n", sizeof(struct proxyOp)*detachPoolSize);
 
+  ctx->finalizing = 0;
+
   *context = ctx;
   return ncclSuccess;
 
@@ -184,7 +238,10 @@ __hidden ncclResult_t exampleProfilerFinalize(void* context) {
     fh = fopen(filename, "w");
     fprintf(fh, "[\n");
   }
-  INFO(NCCL_INIT, "PROFILER/Plugin: finalize commName: %s commHash: %lu nranks: %d rank: %d", ctx->commName ? ctx->commName : "", ctx->commHash, ctx->nranks, ctx->rank);
+  INFO(NCCL_DESTROY, "PROFILER/Plugin: finalize commName: %s commHash: %lu nranks: %d rank: %d", ctx->commName ? ctx->commName : "", ctx->commHash, ctx->nranks, ctx->rank);
+
+  // Stop accepting any further updates for this context while dumping.
+  __atomic_store_n(&ctx->finalizing, 1, __ATOMIC_RELAXED);
 
   // print last N groups/collectives/p2ps
   // Note that since the v5 version of the profiler, group API events are now at the top of the hierarchy.
@@ -232,6 +289,12 @@ __hidden void updateEvent(void* handle);
 __hidden ncclResult_t exampleProfilerStartEvent(void* context, void** eHandle, ncclProfilerEventDescr_t* eDescr) {
   *eHandle = NULL;
   struct context* ctx = (struct context *)context;
+  if (ctx == NULL) {
+    return ncclSuccess;
+  }
+  if (__atomic_load_n(&ctx->finalizing, __ATOMIC_RELAXED)) {
+    return ncclSuccess;
+  }
   if (eDescr->type == ncclProfileGroupApi) {
     struct groupApi* event;
     int groupApiId = __atomic_fetch_add(&ctx->groupApiPoolIndex, 1, __ATOMIC_RELAXED);
@@ -703,6 +766,10 @@ void updateEvent(void* handle) {
 __hidden ncclResult_t exampleProfilerStopEvent(void* eHandle) {
   // the event handle might be null if we run out of events
   if (eHandle == NULL) return ncclSuccess;
+  struct context* eventCtx = contextFromEventHandle(eHandle);
+  if (eventCtx && __atomic_load_n(&eventCtx->finalizing, __ATOMIC_RELAXED)) {
+    return ncclSuccess;
+  }
 
   uint64_t type = *(uint64_t *)eHandle;
   // Stopping API events, Kernel Launch events, collective/p2p task events
@@ -745,6 +812,10 @@ __hidden ncclResult_t exampleProfilerStopEvent(void* eHandle) {
 __hidden ncclResult_t exampleProfilerRecordEventState(void* eHandle, ncclProfilerEventState_t eState, ncclProfilerEventStateArgs_t* eStateArgs) {
   // the event handle might be null if we run out of events
   if (eHandle == NULL) return ncclSuccess;
+  struct context* eventCtx = contextFromEventHandle(eHandle);
+  if (eventCtx && __atomic_load_n(&eventCtx->finalizing, __ATOMIC_RELAXED)) {
+    return ncclSuccess;
+  }
 
   uint64_t type = *(uint64_t *)eHandle;
   if (type == ncclProfileGroupApi) {

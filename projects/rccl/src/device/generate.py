@@ -29,8 +29,6 @@ if os.path.exists(gensrc):
     path = os.path.join(gensrc, name)
     if os.path.isfile(path):
       os.remove(path)
-    elif os.path.isdir(path):
-      shutil.rmtree(path)
 else:
   os.makedirs(gensrc)
 
