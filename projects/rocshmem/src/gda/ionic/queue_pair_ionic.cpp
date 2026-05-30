@@ -289,7 +289,7 @@ __device__ void QueuePair::ionic_quiet_single() {
 }
 
 __device__ void QueuePair::ionic_post_wqe_rma(int32_t size, uintptr_t laddr,
-    uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info) {
+    uintptr_t raddr, uint8_t opcode, uint32_t rkey, ActiveWFInfo &wf_info) {
   uint32_t num_wqes = 1;
   if (wf_info.scope == ThreadScope::thread) {
     num_wqes = wf_info.num_pe_group_lanes;
@@ -373,7 +373,7 @@ __device__ void QueuePair::ionic_post_wqe_rma_single(int32_t size,
 
   wqe->common.rdma.remote_va_high = byteswap<uint32_t>(raddr >> 32);
   wqe->common.rdma.remote_va_low = byteswap<uint32_t>(raddr);
-  wqe->common.rdma.remote_rkey = byteswap<uint32_t>(rkey);
+  wqe->common.rdma.remote_rkey = byteswap<uint32_t>(keys[0].rkey);
   wqe->common.length = byteswap<uint32_t>(size);
 
   if (size) {
@@ -400,7 +400,7 @@ __device__ void QueuePair::ionic_post_wqe_rma_single(int32_t size,
 
 __device__ uint64_t QueuePair::ionic_post_wqe_amo([[maybe_unused]] int32_t size, uintptr_t raddr,
     uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
-    bool fetching, ActiveWFInfo &wf_info) {
+    bool fetching, ActiveWFInfo &wf_info, uint32_t rkey) {
   uint32_t num_wqes = wf_info.num_pe_group_lanes;
   uint32_t my_sq_prod = reserve_sq(wf_info, num_wqes);
   uint32_t my_sq_pos = my_sq_prod + wf_info.pe_group_logical_lane_id;
@@ -502,7 +502,7 @@ __device__ uint64_t QueuePair::ionic_post_wqe_amo_single([[maybe_unused]] int32_
 
   wqe->atomic_v2.remote_va_high = byteswap<uint32_t>(raddr >> 32);
   wqe->atomic_v2.remote_va_low = byteswap<uint32_t>(raddr);
-  wqe->atomic_v2.remote_rkey = byteswap<uint32_t>(rkey);
+  wqe->atomic_v2.remote_rkey = byteswap<uint32_t>(keys[0].rkey);
   wqe->atomic_v2.swap_add_high = byteswap<uint32_t>(atomic_data >> 32);
   wqe->atomic_v2.swap_add_low = byteswap<uint32_t>(atomic_data);
   wqe->atomic_v2.compare_high = byteswap<uint32_t>(atomic_cmp >> 32);
