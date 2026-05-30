@@ -47,36 +47,31 @@ struct Case {
   uint32_t opcode;
 };
 
-// CDNA4-decodable VOP3 integer 3-source ops. v_xor3_b32 is RDNA-only so
-// omitted here even though the SIMD probe ships for cross-ISA correctness.
-const std::array<Case, 25> kCases = {{
+// cdna4-decodable 3-source integer ops; v_xor3_b32 is RDNA-only so omitted here
+// even though the SIMD probe ships for cross-ISA correctness. The min3/max3/med3
+// family (i16/i32/u16/u32) is included: the scalar bodies use std::max/min (and
+// the int minmax/maxmin use std::fmax/fmin on integers, order-preserving) so the
+// integer SIMD min/max is bit-identical for every input.
+const std::array<Case, 19> kCases = {{
     {"v_add3_u32_vop3", 511},
     {"v_or3_b32_vop3", 514},
     {"v_lshl_add_u32_vop3", 509},
     {"v_add_lshl_u32_vop3", 510},
     {"v_bfi_b32_vop3", 458},
+    {"v_max3_i32_vop3", 468},
+    {"v_min3_i32_vop3", 465},
+    {"v_med3_i32_vop3", 471},
+    {"v_max3_u32_vop3", 469},
+    {"v_min3_u32_vop3", 466},
+    {"v_med3_u32_vop3", 472},
+    {"v_max3_i16_vop3", 504},
+    {"v_min3_i16_vop3", 501},
+    {"v_med3_i16_vop3", 507},
+    {"v_max3_u16_vop3", 505},
+    {"v_min3_u16_vop3", 502},
+    {"v_med3_u16_vop3", 508},
     {"v_bfe_u32_vop3", 456},
     {"v_bfe_i32_vop3", 457},
-    // int min3/max3/med3 family
-    {"v_min3_u32_vop3", 466},
-    {"v_max3_u32_vop3", 469},
-    {"v_med3_u32_vop3", 472},
-    {"v_min3_i32_vop3", 465},
-    {"v_max3_i32_vop3", 468},
-    {"v_med3_i32_vop3", 471},
-    {"v_min3_u16_vop3", 502},
-    {"v_max3_u16_vop3", 505},
-    {"v_med3_u16_vop3", 508},
-    {"v_min3_i16_vop3", 501},
-    {"v_max3_i16_vop3", 504},
-    {"v_med3_i16_vop3", 507},
-    // 16-bit mad family
-    {"v_mad_i16_vop3", 517},
-    {"v_mad_u16_vop3", 516},
-    {"v_mad_legacy_i16_vop3", 492},
-    {"v_mad_legacy_u16_vop3", 491},
-    {"v_mad_i32_i16_vop3", 498},
-    {"v_mad_u32_u16_vop3", 497},
 }};
 
 // 14 mixed uint32 values; shift-count cases include small (<32) and full-low

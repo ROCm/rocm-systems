@@ -69,11 +69,20 @@ struct Case {
   Kind kind;
 };
 
-const std::array<Case, 4> kCases = {{
+const std::array<Case, 10> kCases = {{
     {"v_fma_f32_vop3", 459, Kind::F32},
     {"v_fma_f16_vop3", 518, Kind::F16},
     {"v_mad_f16_vop3", 515, Kind::F16},
     {"v_fma_f64_vop3", 460, Kind::F64},
+    // min3/max3/med3: fmax/fmin compositions. Inputs are finite non-zero
+    // normals, so the fmax/fmin NaN-payload / signed-zero-tie carve-out never
+    // triggers — bit-exact vs scalar on every lane.
+    {"v_max3_f32_vop3", 467, Kind::F32},
+    {"v_min3_f32_vop3", 464, Kind::F32},
+    {"v_med3_f32_vop3", 470, Kind::F32},
+    {"v_max3_f16_vop3", 503, Kind::F16},
+    {"v_min3_f16_vop3", 500, Kind::F16},
+    {"v_med3_f16_vop3", 506, Kind::F16},
 }};
 
 // Finite-normal f32 sanitized inputs (avoid NaN/Inf for cleaner FMA bit-equality

@@ -41,36 +41,10 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
     "v_sub_f32_vop2": ("float32_t", "std::minus<>{}"),
     "v_subrev_f32_vop2": ("float32_t", "[](auto a, auto b) { return b - a; }"),
     "v_mul_f32_vop2": ("float32_t", "std::multiplies<>{}"),
-    # Legacy / DX9 zero multiply: `(a == 0 || b == 0) ? 0 : a * b`. The scalar
-    # bodies for `v_mul_legacy_f32` and `v_mul_dx9_zero_f32` are bit-identical.
-    # The where-blend respects ±0 (== 0 matches both -0 and +0), matching
-    # the scalar `a == 0.0f`. Routed via the VOP3 binary fp glue for the
-    # vop3 form (which applies abs/neg/omod/clamp around this functor,
-    # matching the modifier-bearing scalar body).
-    "v_mul_legacy_f32_vop2": (
-        "float32_t",
-        "[](auto a, auto b) {"
-        " auto r = a * b;"
-        " util::stdx::where(a == 0.0f || b == 0.0f, r) = util::native<float32_t>(0.0f);"
-        " return r; }",
-    ),
-    "v_mul_dx9_zero_f32_vop2": (
-        "float32_t",
-        "[](auto a, auto b) {"
-        " auto r = a * b;"
-        " util::stdx::where(a == 0.0f || b == 0.0f, r) = util::native<float32_t>(0.0f);"
-        " return r; }",
-    ),
     # --- uint32 (wrap-around / bitwise, bit-identical to scalar body) ---
     "v_add_u32_vop2": ("uint32_t", "std::plus<>{}"),
     "v_sub_u32_vop2": ("uint32_t", "std::minus<>{}"),
     "v_subrev_u32_vop2": ("uint32_t", "[](auto a, auto b) { return b - a; }"),
-    # RDNA-style "no-carry" int add/sub — same body as plain add_u32/sub_u32/
-    # subrev_u32, just renamed (the scalar bodies are bit-identical add/sub
-    # without any VCC interaction).
-    "v_add_nc_u32_vop2": ("uint32_t", "std::plus<>{}"),
-    "v_sub_nc_u32_vop2": ("uint32_t", "std::minus<>{}"),
-    "v_subrev_nc_u32_vop2": ("uint32_t", "[](auto a, auto b) { return b - a; }"),
     "v_and_b32_vop2": ("uint32_t", "std::bit_and<>{}"),
     "v_or_b32_vop2": ("uint32_t", "std::bit_or<>{}"),
     "v_xor_b32_vop2": ("uint32_t", "std::bit_xor<>{}"),
@@ -102,7 +76,7 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
         " using U64 = util::stdx::fixed_size_simd<uint64_t, util::native<uint32_t>::size()>;"
         " auto pa = util::stdx::static_simd_cast<U64>(a & 0x00FFFFFFu);"
         " auto pb = util::stdx::static_simd_cast<U64>(b & 0x00FFFFFFu);"
-        " return util::stdx::static_simd_cast<util::native<uint32_t>>((pa * pb) >> decltype(pa)(32)); }",
+        " return util::stdx::static_simd_cast<util::native<uint32_t>>((pa * pb) >> 32); }",
     ),
     "v_mul_hi_i32_i24_vop2": (
         "uint32_t",
@@ -112,7 +86,7 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
         " using I64 = util::stdx::fixed_size_simd<int64_t, util::native<int32_t>::size()>;"
         " auto pa = util::stdx::static_simd_cast<I64>(sa);"
         " auto pb = util::stdx::static_simd_cast<I64>(sb);"
-        " return util::stdx::static_simd_cast<util::native<uint32_t>>((pa * pb) >> decltype(pa)(32)); }",
+        " return util::stdx::static_simd_cast<util::native<uint32_t>>((pa * pb) >> 32); }",
     ),
     "v_max_u32_vop2": (
         "uint32_t",
@@ -360,27 +334,27 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
     "v_floor_f32_vop1": (
         "float32_t",
         "float32_t",
-        "[](auto a) { return util::floor_simd(a); }",
+        "[](auto a) { return util::stdx::floor(a); }",
     ),
     "v_ceil_f32_vop1": (
         "float32_t",
         "float32_t",
-        "[](auto a) { return util::ceil_simd(a); }",
+        "[](auto a) { return util::stdx::ceil(a); }",
     ),
     "v_trunc_f32_vop1": (
         "float32_t",
         "float32_t",
-        "[](auto a) { return util::trunc_simd(a); }",
+        "[](auto a) { return util::stdx::trunc(a); }",
     ),
     "v_rndne_f32_vop1": (
         "float32_t",
         "float32_t",
-        "[](auto a) { return util::rndne_simd(a); }",
+        "[](auto a) { return util::stdx::nearbyint(a); }",
     ),
     "v_fract_f32_vop1": (
         "float32_t",
         "float32_t",
-        "[](auto a) { return a - util::floor_simd(a); }",
+        "[](auto a) { return a - util::stdx::floor(a); }",
     ),
     # --- transcendental div / sqrt. These mirror amdgpu::transcendental::*_f32
     # exactly via util::*_f32_simd (FTZ input/output flush + canonical-qNaN and
@@ -448,7 +422,7 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         "float32_t",
         "int32_t",
         "[](auto s) {"
-        " auto r = util::floor_simd(s);"
+        " auto r = util::stdx::floor(s);"
         " util::native<int32_t> out = util::stdx::static_simd_cast<util::native<int32_t>>(r);"
         " util::stdx::where(simd_mask_as<int32_t>(r >= 2147483648.0f), out) = 2147483647;"
         " util::stdx::where(simd_mask_as<int32_t>(r < -2147483648.0f), out) = (-2147483647 - 1);"
@@ -459,7 +433,7 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         "float32_t",
         "int32_t",
         "[](auto s) {"
-        " auto r = util::ceil_simd(s - util::native<float32_t>(0.5f));"
+        " auto r = util::stdx::ceil(s - util::native<float32_t>(0.5f));"
         " util::native<int32_t> out = util::stdx::static_simd_cast<util::native<int32_t>>(r);"
         " util::stdx::where(simd_mask_as<int32_t>(r >= 2147483648.0f), out) = 2147483647;"
         " util::stdx::where(simd_mask_as<int32_t>(r < -2147483648.0f), out) = (-2147483647 - 1);"
@@ -474,30 +448,30 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
     "v_floor_f16_vop1": (
         "uint32_t",
         "uint32_t",
-        "[](auto a) { return util::f32_to_f16_simd(util::floor_simd(util::f16_to_f32_simd(a))); }",
+        "[](auto a) { return util::f32_to_f16_simd(util::stdx::floor(util::f16_to_f32_simd(a))); }",
     ),
     "v_ceil_f16_vop1": (
         "uint32_t",
         "uint32_t",
-        "[](auto a) { return util::f32_to_f16_simd(util::ceil_simd(util::f16_to_f32_simd(a))); }",
+        "[](auto a) { return util::f32_to_f16_simd(util::stdx::ceil(util::f16_to_f32_simd(a))); }",
     ),
     "v_trunc_f16_vop1": (
         "uint32_t",
         "uint32_t",
-        "[](auto a) { return util::f32_to_f16_simd(util::trunc_simd(util::f16_to_f32_simd(a))); }",
+        "[](auto a) { return util::f32_to_f16_simd(util::stdx::trunc(util::f16_to_f32_simd(a))); }",
     ),
     "v_rndne_f16_vop1": (
         "uint32_t",
         "uint32_t",
         "[](auto a) {"
-        " return util::f32_to_f16_simd(util::rndne_simd(util::f16_to_f32_simd(a))); }",
+        " return util::f32_to_f16_simd(util::stdx::nearbyint(util::f16_to_f32_simd(a))); }",
     ),
     "v_fract_f16_vop1": (
         "uint32_t",
         "uint32_t",
         "[](auto a) {"
         " auto f = util::f16_to_f32_simd(a);"
-        " return util::f32_to_f16_simd(f - util::floor_simd(f)); }",
+        " return util::f32_to_f16_simd(f - util::stdx::floor(f)); }",
     ),
     # f16 transcendentals mirror the scalar f32_to_f16(<op>_f32(f16_to_f32(x)))
     # by applying the f32-domain util::*_f32_simd helper (FTZ flush + canonical
@@ -579,59 +553,6 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         " util::stdx::where(simd_mask_as<uint32_t>(util::stdx::isnan(s) || s < 0.0f), o) = 0u;"
         " return o & 0xFFFFu; }",
     ),
-    # --- VOP1 b16 unary (RDNA3+ only): low-16 mov / not. The scalar bodies
-    # ignore the high 16 bits of src0 and zero-extend the 16-bit result. No
-    # modifiers in VOP1 form (cf. the VOP3 mov_b16 form which carries omod/
-    # clamp — handled by the dedicated try_execute_mov_b16_vop3_simd glue).
-    "v_mov_b16_vop1": (
-        "uint32_t",
-        "uint32_t",
-        "[](auto a) { return a & 0xFFFFu; }",
-    ),
-    "v_not_b16_vop1": (
-        "uint32_t",
-        "uint32_t",
-        "[](auto a) { return (~a) & 0xFFFFu; }",
-    ),
-    # --- int16 / uint16 → 32-bit zero/sign extend. Scalar:
-    #   cvt_i32_i16: (int32_t)(int16_t)(src0 & 0xFFFF)  (sign-extend)
-    #   cvt_u32_u16: src0 & 0xFFFF                       (zero-extend)
-    "v_cvt_i32_i16_vop1": (
-        "uint32_t",
-        "uint32_t",
-        "[](auto a) {"
-        " auto x = util::stdx::static_simd_cast<util::native<int32_t>>(a & 0xFFFFu);"
-        " return util::stdx::static_simd_cast<util::native<uint32_t>>((x << 16) >> 16); }",
-    ),
-    "v_cvt_u32_u16_vop1": (
-        "uint32_t",
-        "uint32_t",
-        "[](auto a) { return a & 0xFFFFu; }",
-    ),
-    # --- aliases for v_cvt_flr_i32_f32 / v_cvt_rpi_i32_f32 (same scalar body,
-    # RDNA naming). Reuse the floor / ceil(s - 0.5) functors verbatim.
-    "v_cvt_floor_i32_f32_vop1": (
-        "float32_t",
-        "int32_t",
-        "[](auto s) {"
-        " auto r = util::floor_simd(s);"
-        " util::native<int32_t> out = util::stdx::static_simd_cast<util::native<int32_t>>(r);"
-        " util::stdx::where(simd_mask_as<int32_t>(r >= 2147483648.0f), out) = 2147483647;"
-        " util::stdx::where(simd_mask_as<int32_t>(r < -2147483648.0f), out) = (-2147483647 - 1);"
-        " util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(r)), out) = 0;"
-        " return out; }",
-    ),
-    "v_cvt_nearest_i32_f32_vop1": (
-        "float32_t",
-        "int32_t",
-        "[](auto s) {"
-        " auto r = util::ceil_simd(s - util::native<float32_t>(0.5f));"
-        " util::native<int32_t> out = util::stdx::static_simd_cast<util::native<int32_t>>(r);"
-        " util::stdx::where(simd_mask_as<int32_t>(r >= 2147483648.0f), out) = 2147483647;"
-        " util::stdx::where(simd_mask_as<int32_t>(r < -2147483648.0f), out) = (-2147483647 - 1);"
-        " util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(r)), out) = 0;"
-        " return out; }",
-    ),
 }
 
 
@@ -679,26 +600,6 @@ SIMD_VOP2_CARRY: dict[str, str] = {
         " return make_simd_carry(t2, bw1 | bw2); }"
     ),
     "v_subbrev_co_u32_vop2": (
-        "[](auto a, auto b, auto cin) {"
-        " auto t1 = b - a; auto bw1 = b < a;"
-        " auto t2 = t1 - cin; auto bw2 = t1 < cin;"
-        " return make_simd_carry(t2, bw1 | bw2); }"
-    ),
-    # RDNA-style co/ci VOP2 carry-cin forms — bit-identical to the addc/subb/
-    # subbrev_co bodies above (cin read from VCC, co written to VCC).
-    "v_add_co_ci_u32_vop2": (
-        "[](auto a, auto b, auto cin) {"
-        " auto t1 = a + b; auto c1 = t1 < a;"
-        " auto t2 = t1 + cin; auto c2 = t2 < t1;"
-        " return make_simd_carry(t2, c1 | c2); }"
-    ),
-    "v_sub_co_ci_u32_vop2": (
-        "[](auto a, auto b, auto cin) {"
-        " auto t1 = a - b; auto bw1 = a < b;"
-        " auto t2 = t1 - cin; auto bw2 = t1 < cin;"
-        " return make_simd_carry(t2, bw1 | bw2); }"
-    ),
-    "v_subrev_co_ci_u32_vop2": (
         "[](auto a, auto b, auto cin) {"
         " auto t1 = b - a; auto bw1 = b < a;"
         " auto t2 = t1 - cin; auto bw2 = t1 < cin;"
@@ -763,7 +664,6 @@ SIMD_VOP2_TERNARY: dict[str, tuple[str, str, str]] = {
     "v_mac_f16_vop2": ("uint32_t", "0u", _FMA_ACC_F16),
     # --- f16 inline literal ---
     "v_madak_f16_vop2": ("uint32_t", "inst.simm32.encoding_value_", _FMA_ADDK_F16),
-    "v_fmaak_f16_vop2": ("uint32_t", "inst.simm32_", _FMA_ADDK_F16),
     "v_fmamk_f16_vop2": ("uint32_t", "inst.simm32_", _FMA_MULK_F16),
     "v_madmk_f16_vop2": ("uint32_t", "inst.simm32.encoding_value_", _FMA_MULK_F16),
 }
@@ -796,11 +696,11 @@ SIMD_VOP2_FMA_F64: dict[str, str] = {
 # the glue note + UtilSimd.*F64*_BitExact guards). v_mov_b64 is a pure 64-bit
 # copy (T = uint64_t).
 SIMD_VOP1_UNARY_F64: dict[str, tuple[str, str]] = {
-    "v_ceil_f64_vop1": ("double", "[](auto a) { return util::ceil_simd(a); }"),
-    "v_floor_f64_vop1": ("double", "[](auto a) { return util::floor_simd(a); }"),
-    "v_trunc_f64_vop1": ("double", "[](auto a) { return util::trunc_simd(a); }"),
-    "v_rndne_f64_vop1": ("double", "[](auto a) { return util::rndne_simd(a); }"),
-    "v_fract_f64_vop1": ("double", "[](auto a) { return a - util::floor_simd(a); }"),
+    "v_ceil_f64_vop1": ("double", "[](auto a) { return util::stdx::ceil(a); }"),
+    "v_floor_f64_vop1": ("double", "[](auto a) { return util::stdx::floor(a); }"),
+    "v_trunc_f64_vop1": ("double", "[](auto a) { return util::stdx::trunc(a); }"),
+    "v_rndne_f64_vop1": ("double", "[](auto a) { return util::stdx::nearbyint(a); }"),
+    "v_fract_f64_vop1": ("double", "[](auto a) { return a - util::stdx::floor(a); }"),
     "v_rcp_f64_vop1": (
         "double",
         "[](auto a) { return util::native<double>(1.0) / a; }",
@@ -901,266 +801,6 @@ SIMD_VOP3_DIV_FMAS_FP32: set[str] = {
 }
 SIMD_VOP3_DIV_FMAS_FP64: set[str] = {
     "v_div_fmas_f64_vop3",
-}
-
-# VOP3 sdst-enc carry forms (no-carry-in subset). Same per-lane carry/borrow
-# functor as the VOP2 carry family — the glue layer
-# (try_execute_binary_vop3_carry_simd) handles the VOP3 src1/sdst differences
-# (the functor is identical).
-SIMD_VOP3_CARRY: dict[str, str] = {
-    "v_add_co_u32_vop3": (
-        "[](auto a, auto b, auto) {"
-        " auto s = a + b;"
-        " return make_simd_carry(s, s < a); }"
-    ),
-    "v_sub_co_u32_vop3": (
-        "[](auto a, auto b, auto) { return make_simd_carry(a - b, a < b); }"
-    ),
-    "v_subrev_co_u32_vop3": (
-        "[](auto a, auto b, auto) { return make_simd_carry(b - a, b < a); }"
-    ),
-}
-
-# VOP3 sdst-enc carry forms with src2 carry-in. Six ops sharing one shape:
-# CDNA4 sdst-enc `addc_co_u32 / subb_co_u32 / subbrev_co_u32` and the RDNA-only
-# `add_co_ci_u32 / sub_co_ci_u32 / subrev_co_ci_u32`. All read per-lane cin from
-# `inst.src2.read_scalar64(wf)` and write co into `inst.sdst.write_scalar64`
-# (the RDNA decoder binds src2/sdst to VCC, but the body is uniform across the
-# six). Glue `try_execute_binary_vop3_carry_src2_simd` handles the cin source.
-SIMD_VOP3_CARRY_SRC2: dict[str, str] = {
-    "v_addc_co_u32_vop3": (
-        "[](auto a, auto b, auto cin) {"
-        " auto t1 = a + b;"
-        " auto c1 = t1 < a;"
-        " auto t2 = t1 + cin;"
-        " auto c2 = t2 < t1;"
-        " return make_simd_carry(t2, c1 | c2); }"
-    ),
-    "v_subb_co_u32_vop3": (
-        "[](auto a, auto b, auto cin) {"
-        " auto t1 = a - b;"
-        " auto bw1 = a < b;"
-        " auto t2 = t1 - cin;"
-        " auto bw2 = t1 < cin;"
-        " return make_simd_carry(t2, bw1 | bw2); }"
-    ),
-    "v_subbrev_co_u32_vop3": (
-        "[](auto a, auto b, auto cin) {"
-        " auto t1 = b - a;"
-        " auto bw1 = b < a;"
-        " auto t2 = t1 - cin;"
-        " auto bw2 = t1 < cin;"
-        " return make_simd_carry(t2, bw1 | bw2); }"
-    ),
-    "v_add_co_ci_u32_vop3": (
-        "[](auto a, auto b, auto cin) {"
-        " auto t1 = a + b;"
-        " auto c1 = t1 < a;"
-        " auto t2 = t1 + cin;"
-        " auto c2 = t2 < t1;"
-        " return make_simd_carry(t2, c1 | c2); }"
-    ),
-    "v_sub_co_ci_u32_vop3": (
-        "[](auto a, auto b, auto cin) {"
-        " auto t1 = a - b;"
-        " auto bw1 = a < b;"
-        " auto t2 = t1 - cin;"
-        " auto bw2 = t1 < cin;"
-        " return make_simd_carry(t2, bw1 | bw2); }"
-    ),
-    "v_subrev_co_ci_u32_vop3": (
-        "[](auto a, auto b, auto cin) {"
-        " auto t1 = b - a;"
-        " auto bw1 = b < a;"
-        " auto t2 = t1 - cin;"
-        " auto bw2 = t1 < cin;"
-        " return make_simd_carry(t2, bw1 | bw2); }"
-    ),
-}
-
-# VOP3 v_mov_b16 — RDNA3+ only. Reads low 16 of src0 as an integer, treats it
-# as a float for omod (*2 / *4 / *0.5) + clamp ([0, 1]), then truncate-casts
-# back through int32 and masks 16. No abs/neg/op_sel; functorless / fixed-op.
-SIMD_VOP3_MOV_B16: set[str] = {
-    "v_mov_b16_vop3",
-}
-
-# VOP3P fma_mix / mad_mix family. The six ops share one body (`a*b + c` plus
-# optional clamp to [0,1]); only the destination shape differs:
-#  - F32     -> v_fma_mix_f32_vop3p (RDNA3+), v_mad_mix_f32_vop3p (CDNA1-4)
-#  - F16_LO  -> v_fma_mixlo_f16_vop3p, v_mad_mixlo_f16_vop3p
-#  - F16_HI  -> v_fma_mixhi_f16_vop3p, v_mad_mixhi_f16_vop3p
-# Per-source op_sel_hi gates the f16<->f32 widening shape; op_sel picks the f16
-# half. neg flips the sign bit. No abs, no omod. Functorless / fixed-op.
-SIMD_VOP3P_FMA_MIX_F32: set[str] = {
-    "v_fma_mix_f32_vop3p",
-    "v_mad_mix_f32_vop3p",
-}
-SIMD_VOP3P_FMA_MIX_F16_LO: set[str] = {
-    "v_fma_mixlo_f16_vop3p",
-    "v_mad_mixlo_f16_vop3p",
-}
-SIMD_VOP3P_FMA_MIX_F16_HI: set[str] = {
-    "v_fma_mixhi_f16_vop3p",
-    "v_mad_mixhi_f16_vop3p",
-}
-
-# VOP3P packed-16 integer binary family. Each 32-bit lane holds {low16,
-# high16}. The glue gates op_sel == 0 && op_sel_hi == 3 (default packing)
-# and bails to scalar otherwise; the functor receives the two u32 simd
-# vectors as packed pairs and returns the same shape with the per-half op
-# applied. Scalar bodies for these ops do NOT apply neg/neg_hi/clamp on
-# integer operands, so the SIMD path also passes through. mul_lo / shift
-# functors mask each half to 16 bits before packing to drop any product
-# overflow / shift-into-bit-16 leakage between halves.
-SIMD_VOP3P_PK_BINARY_INT: dict[str, str] = {
-    "v_pk_add_u16_vop3p": (
-        "[](auto a, auto b) {"
-        " auto lo = (a + b) & 0xFFFFu;"
-        " auto hi = ((a >> 16) + (b >> 16)) & 0xFFFFu;"
-        " return lo | (hi << 16); }"
-    ),
-    # add_i16 is bit-identical to add_u16 (mod-2^16 wrap matches).
-    "v_pk_add_i16_vop3p": (
-        "[](auto a, auto b) {"
-        " auto lo = (a + b) & 0xFFFFu;"
-        " auto hi = ((a >> 16) + (b >> 16)) & 0xFFFFu;"
-        " return lo | (hi << 16); }"
-    ),
-    "v_pk_sub_u16_vop3p": (
-        "[](auto a, auto b) {"
-        " auto lo = (a - b) & 0xFFFFu;"
-        " auto hi = ((a >> 16) - (b >> 16)) & 0xFFFFu;"
-        " return lo | (hi << 16); }"
-    ),
-    "v_pk_sub_i16_vop3p": (
-        "[](auto a, auto b) {"
-        " auto lo = (a - b) & 0xFFFFu;"
-        " auto hi = ((a >> 16) - (b >> 16)) & 0xFFFFu;"
-        " return lo | (hi << 16); }"
-    ),
-    "v_pk_mul_lo_u16_vop3p": (
-        "[](auto a, auto b) {"
-        " auto lo = ((a & 0xFFFFu) * (b & 0xFFFFu)) & 0xFFFFu;"
-        " auto hi = ((a >> 16) * (b >> 16)) & 0xFFFFu;"
-        " return lo | (hi << 16); }"
-    ),
-    # Reverse-shift forms: src1 holds the value, src0 holds the count.
-    # Shift count masked to low 4 bits per scalar (`& 15u`).
-    "v_pk_lshlrev_b16_vop3p": (
-        "[](auto a, auto b) {"
-        " auto lo = ((b & 0xFFFFu) << (a & 15u)) & 0xFFFFu;"
-        " auto hi = (((b >> 16) & 0xFFFFu) << ((a >> 16) & 15u)) & 0xFFFFu;"
-        " return lo | (hi << 16); }"
-    ),
-    "v_pk_lshrrev_b16_vop3p": (
-        "[](auto a, auto b) {"
-        " auto lo = ((b & 0xFFFFu) >> (a & 15u)) & 0xFFFFu;"
-        " auto hi = ((b >> 16) >> ((a >> 16) & 15u)) & 0xFFFFu;"
-        " return lo | (hi << 16); }"
-    ),
-    # Arithmetic right shift on i16: sign-extend each half to int32 via
-    # (x << 16) >> 16, shift, mask back to 16.
-    "v_pk_ashrrev_i16_vop3p": (
-        "[](auto a, auto b) {"
-        " using I = util::native<int32_t>;"
-        " auto bv_lo = (util::stdx::static_simd_cast<I>(b & 0xFFFFu) << 16) >> 16;"
-        " auto bv_hi = (util::stdx::static_simd_cast<I>(b >> 16) << 16) >> 16;"
-        " auto sh_lo = util::stdx::static_simd_cast<I>(a & 15u);"
-        " auto sh_hi = util::stdx::static_simd_cast<I>((a >> 16) & 15u);"
-        " auto rlo = util::stdx::static_simd_cast<util::native<uint32_t>>(bv_lo >> sh_lo) & 0xFFFFu;"
-        " auto rhi = util::stdx::static_simd_cast<util::native<uint32_t>>(bv_hi >> sh_hi) & 0xFFFFu;"
-        " return rlo | (rhi << 16); }"
-    ),
-    "v_pk_min_u16_vop3p": (
-        "[](auto a, auto b) {"
-        " auto lo = util::stdx::min(a & 0xFFFFu, b & 0xFFFFu);"
-        " auto hi = util::stdx::min(a >> 16, b >> 16);"
-        " return (lo & 0xFFFFu) | ((hi & 0xFFFFu) << 16); }"
-    ),
-    "v_pk_max_u16_vop3p": (
-        "[](auto a, auto b) {"
-        " auto lo = util::stdx::max(a & 0xFFFFu, b & 0xFFFFu);"
-        " auto hi = util::stdx::max(a >> 16, b >> 16);"
-        " return (lo & 0xFFFFu) | ((hi & 0xFFFFu) << 16); }"
-    ),
-    "v_pk_min_i16_vop3p": (
-        "[](auto a, auto b) {"
-        " using I = util::native<int32_t>;"
-        " auto a_lo = (util::stdx::static_simd_cast<I>(a & 0xFFFFu) << 16) >> 16;"
-        " auto a_hi = (util::stdx::static_simd_cast<I>(a >> 16) << 16) >> 16;"
-        " auto b_lo = (util::stdx::static_simd_cast<I>(b & 0xFFFFu) << 16) >> 16;"
-        " auto b_hi = (util::stdx::static_simd_cast<I>(b >> 16) << 16) >> 16;"
-        " auto rlo = util::stdx::static_simd_cast<util::native<uint32_t>>(util::stdx::min(a_lo, b_lo)) & 0xFFFFu;"
-        " auto rhi = util::stdx::static_simd_cast<util::native<uint32_t>>(util::stdx::min(a_hi, b_hi)) & 0xFFFFu;"
-        " return rlo | (rhi << 16); }"
-    ),
-    "v_pk_max_i16_vop3p": (
-        "[](auto a, auto b) {"
-        " using I = util::native<int32_t>;"
-        " auto a_lo = (util::stdx::static_simd_cast<I>(a & 0xFFFFu) << 16) >> 16;"
-        " auto a_hi = (util::stdx::static_simd_cast<I>(a >> 16) << 16) >> 16;"
-        " auto b_lo = (util::stdx::static_simd_cast<I>(b & 0xFFFFu) << 16) >> 16;"
-        " auto b_hi = (util::stdx::static_simd_cast<I>(b >> 16) << 16) >> 16;"
-        " auto rlo = util::stdx::static_simd_cast<util::native<uint32_t>>(util::stdx::max(a_lo, b_lo)) & 0xFFFFu;"
-        " auto rhi = util::stdx::static_simd_cast<util::native<uint32_t>>(util::stdx::max(a_hi, b_hi)) & 0xFFFFu;"
-        " return rlo | (rhi << 16); }"
-    ),
-}
-
-# VOP3P packed-16 integer ternary (pk_mad_i16 / pk_mad_u16). Same default
-# packing gate as the binary table (op_sel/op_sel_hi/op_sel_hi_2). Scalar
-# truncates to 16 bits via uint16_t cast, so the SIMD path masks each half
-# to 16 bits before pack.
-SIMD_VOP3P_PK_TERNARY_INT: dict[str, str] = {
-    "v_pk_mad_i16_vop3p": (
-        "[](auto a, auto b, auto c) {"
-        " using I = util::native<int32_t>;"
-        " auto a_lo = (util::stdx::static_simd_cast<I>(a & 0xFFFFu) << 16) >> 16;"
-        " auto a_hi = (util::stdx::static_simd_cast<I>(a >> 16) << 16) >> 16;"
-        " auto b_lo = (util::stdx::static_simd_cast<I>(b & 0xFFFFu) << 16) >> 16;"
-        " auto b_hi = (util::stdx::static_simd_cast<I>(b >> 16) << 16) >> 16;"
-        " auto c_lo = (util::stdx::static_simd_cast<I>(c & 0xFFFFu) << 16) >> 16;"
-        " auto c_hi = (util::stdx::static_simd_cast<I>(c >> 16) << 16) >> 16;"
-        " auto rlo = util::stdx::static_simd_cast<util::native<uint32_t>>(a_lo * b_lo + c_lo) & 0xFFFFu;"
-        " auto rhi = util::stdx::static_simd_cast<util::native<uint32_t>>(a_hi * b_hi + c_hi) & 0xFFFFu;"
-        " return rlo | (rhi << 16); }"
-    ),
-    "v_pk_mad_u16_vop3p": (
-        "[](auto a, auto b, auto c) {"
-        " auto a_lo = a & 0xFFFFu;"
-        " auto a_hi = a >> 16;"
-        " auto b_lo = b & 0xFFFFu;"
-        " auto b_hi = b >> 16;"
-        " auto c_lo = c & 0xFFFFu;"
-        " auto c_hi = c >> 16;"
-        " auto rlo = (a_lo * b_lo + c_lo) & 0xFFFFu;"
-        " auto rhi = (a_hi * b_hi + c_hi) & 0xFFFFu;"
-        " return rlo | (rhi << 16); }"
-    ),
-}
-
-# VOP3P packed-16 f16 binary family. Each 32-bit lane holds 2 f16 values.
-# Glue widens halves to f32, applies neg/neg_hi (sign-bit toggle), runs the
-# per-half functor in f32, narrows back to f16, packs. No clamp on any
-# pk_*_f16 scalar body (verified line 15109, 15519). NaN-input lanes can
-# diverge in payload (same as the existing f16 ternary slice).
-SIMD_VOP3P_PK_BINARY_FP16: dict[str, str] = {
-    "v_pk_add_f16_vop3p": "[](auto a, auto b) { return a + b; }",
-    "v_pk_mul_f16_vop3p": "[](auto a, auto b) { return a * b; }",
-    "v_pk_max_f16_vop3p": "[](auto a, auto b) { return util::stdx::fmax(a, b); }",
-    "v_pk_min_f16_vop3p": "[](auto a, auto b) { return util::stdx::fmin(a, b); }",
-}
-
-# pk_fma_f16 — 3-source FMA per half. NaN-input payload divergence accepted.
-SIMD_VOP3P_PK_TERNARY_FP16: dict[str, str] = {
-    "v_pk_fma_f16_vop3p": "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }",
-}
-
-# v_pk_mov_b32 — default-packing-only fast path. Each src is a 64-bit pair
-# (consecutive VGPRs), result is (src0_lo, src1_hi). Functorless / fixed-op.
-SIMD_VOP3P_MOV_B32: set[str] = {
-    "v_pk_mov_b32_vop3p",
 }
 
 
@@ -1595,7 +1235,7 @@ SIMD_VOP3_BINARY_INT_EXTRA: dict[str, tuple[str, str]] = {
         " using U64 = util::stdx::fixed_size_simd<uint64_t, util::native<uint32_t>::size()>;"
         " auto pa = util::stdx::static_simd_cast<U64>(a);"
         " auto pb = util::stdx::static_simd_cast<U64>(b);"
-        " return util::stdx::static_simd_cast<util::native<uint32_t>>((pa * pb) >> decltype(pa)(32)); }",
+        " return util::stdx::static_simd_cast<util::native<uint32_t>>((pa * pb) >> 32); }",
     ),
     "v_mul_hi_i32_vop3": (
         "uint32_t",
@@ -1605,7 +1245,7 @@ SIMD_VOP3_BINARY_INT_EXTRA: dict[str, tuple[str, str]] = {
         " auto sb = util::stdx::static_simd_cast<util::native<int32_t>>(b);"
         " auto pa = util::stdx::static_simd_cast<I64>(sa);"
         " auto pb = util::stdx::static_simd_cast<I64>(sb);"
-        " return util::stdx::static_simd_cast<util::native<uint32_t>>((pa * pb) >> decltype(pa)(32)); }",
+        " return util::stdx::static_simd_cast<util::native<uint32_t>>((pa * pb) >> 32); }",
     ),
     # v_bfm_b32: ((1 << (a & 31)) - 1) << (b & 31). Two shift counts both
     # masked to low 5 bits — same vpsllvd-vs-shl rationale as v_lshl_add_u32.
@@ -1669,10 +1309,10 @@ SIMD_VOP3_BINARY_FP64: dict[str, str] = {
 # input (and the NaN result has the same payload because the scalar libm
 # rounding ops are sign/payload preserving on NaN inputs).
 SIMD_VOP3_UNARY_FP64: dict[str, str] = {
-    "v_ceil_f64_vop3": "[](auto a) { return util::ceil_simd(a); }",
-    "v_floor_f64_vop3": "[](auto a) { return util::floor_simd(a); }",
-    "v_trunc_f64_vop3": "[](auto a) { return util::trunc_simd(a); }",
-    "v_rndne_f64_vop3": "[](auto a) { return util::rndne_simd(a); }",
+    "v_ceil_f64_vop3": "[](auto a) { return util::stdx::ceil(a); }",
+    "v_floor_f64_vop3": "[](auto a) { return util::stdx::floor(a); }",
+    "v_trunc_f64_vop3": "[](auto a) { return util::stdx::trunc(a); }",
+    "v_rndne_f64_vop3": "[](auto a) { return util::stdx::nearbyint(a); }",
     # sqrt_f64 is correctly-rounded IEEE (scalar uses transcendental::sqrt_f64
     # which is `std::sqrt` after NaN/negative guards); stdx::sqrt matches.
     "v_sqrt_f64_vop3": (
@@ -1685,7 +1325,7 @@ SIMD_VOP3_UNARY_FP64: dict[str, str] = {
     # v_fract_f64: scalar = v - std::floor(v); stdx::floor on native<double>
     # matches std::floor bit-exact (NaN-floor(NaN) = NaN; NaN result skipped
     # by the test like any other NaN-result lane).
-    "v_fract_f64_vop3": "[](auto a) { return a - util::floor_simd(a); }",
+    "v_fract_f64_vop3": "[](auto a) { return a - util::stdx::floor(a); }",
     # v_rcp_f64 / v_rsq_f64: scalar uses transcendental::*_f64 with explicit
     # NaN passthrough, ±0 -> copysign(Inf, x), ±Inf -> copysign(0, x); negative
     # rsq inputs -> qNaN. Plain 1.0 / x and 1.0 / sqrt match the IEEE result
@@ -1708,11 +1348,10 @@ SIMD_VOP3_UNARY_FP64: dict[str, str] = {
 # blends + NaN-passthrough), so the f16 scalar
 # f32_to_f16(transcendental::op_f32(f16_to_f32(...))) maps directly.
 SIMD_VOP3_UNARY_FP16: dict[str, str] = {
-    "v_ceil_f16_vop3": "[](auto a) { return util::ceil_simd(a); }",
-    "v_floor_f16_vop3": "[](auto a) { return util::floor_simd(a); }",
-    "v_trunc_f16_vop3": "[](auto a) { return util::trunc_simd(a); }",
-    "v_rndne_f16_vop3": "[](auto a) { return util::rndne_simd(a); }",
-    "v_fract_f16_vop3": "[](auto a) { return a - util::floor_simd(a); }",
+    "v_ceil_f16_vop3": "[](auto a) { return util::stdx::ceil(a); }",
+    "v_floor_f16_vop3": "[](auto a) { return util::stdx::floor(a); }",
+    "v_trunc_f16_vop3": "[](auto a) { return util::stdx::trunc(a); }",
+    "v_rndne_f16_vop3": "[](auto a) { return util::stdx::nearbyint(a); }",
     "v_sqrt_f16_vop3": (
         "[](auto a) {"
         " auto r = util::stdx::sqrt(a);"
@@ -1724,6 +1363,9 @@ SIMD_VOP3_UNARY_FP16: dict[str, str] = {
     "v_rsq_f16_vop3": "[](auto a) { return util::rsq_f32_simd(a); }",
     "v_exp_f16_vop3": "[](auto a) { return util::exp_f32_simd(a); }",
     "v_log_f16_vop3": "[](auto a) { return util::log_f32_simd(a); }",
+    # v_fract_f16: x - floor(x) in the widened f32 domain (the glue widens/narrows
+    # and applies abs/neg/omod/clamp), mirroring the covered v_fract_f16_vop1.
+    "v_fract_f16_vop3": "[](auto a) { return a - util::stdx::floor(a); }",
 }
 
 
@@ -1739,12 +1381,15 @@ SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
     "v_fma_f32_vop3": "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }",
     "v_mad_f32_vop3": "[](auto a, auto b, auto c) { return a * b + c; }",
     "v_mad_legacy_f32_vop3": "[](auto a, auto b, auto c) { return a * b + c; }",
-    # v_fma_dx9_zero_f32: the scalar body uses plain std::fma without any
-    # zero-killing semantics — DX9 zero rules are NOT actually applied in
-    # the generated body (verified in execute_shared.h). Alias of fma.
-    "v_fma_dx9_zero_f32_vop3": (
-        "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }"
-    ),
+    # min3/max3/med3 (f32): the scalar body composes std::fmax/std::fmin
+    # (max3 = fmax(fmax(a,b),c); min3 = fmin(fmin(a,b),c);
+    # med3 = fmax(fmin(fmax(a,b),c), fmin(a,b))). stdx::fmax/fmin match scalar
+    # for all finite/Inf inputs except NaN-payload and signed-zero tie (same
+    # accepted carve-out as v_max_f32 / v_min_f32; the A/B test skips NaN-input
+    # lanes and uses no ±0 inputs). omod/clamp applied by the glue.
+    "v_max3_f32_vop3": "[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmax(a, b), c); }",
+    "v_min3_f32_vop3": "[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmin(a, b), c); }",
+    "v_med3_f32_vop3": "[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(util::stdx::fmax(a, b), c), util::stdx::fmin(a, b)); }",
     # v_div_fixup_f32: per-AMD-spec `else if` cascade selecting the result
     # among NaN/Inf/zero copysign cases. Lives as a helper in simd_glue.h
     # (div_fixup_f32_simd) — bit-exact match to the scalar body's predicate
@@ -1753,12 +1398,10 @@ SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
     "v_div_fixup_f32_vop3": (
         "[](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f32_simd(p, b, c); }"
     ),
-    # v_div_fixup_f16 / v_div_fixup_legacy_f16: the SCALAR bodies read src0/1/2
-    # as raw f32 (no f16<->f32 widening — they bit_cast<float>(read_lane(uint32))
-    # and write the f32 result back through bit_cast<uint32>). Verified inline
-    # at line 9389 (f16) and 9570 (legacy_f16). Effectively the same operation
-    # as v_div_fixup_f32_vop3, just under a different mnemonic. Reuses the
-    # helper verbatim.
+    # v_div_fixup_f16 / _legacy_f16: despite the _f16 name, the generated CDNA4
+    # scalar body reads/writes the operands as raw f32 (std::bit_cast<float>, not
+    # f16_to_f32) — bit-identical to the f32 div_fixup body — so it routes through
+    # the same f32 ternary glue + div_fixup_f32_simd cascade.
     "v_div_fixup_f16_vop3": (
         "[](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f32_simd(p, b, c); }"
     ),
@@ -1774,6 +1417,11 @@ SIMD_VOP3_TERNARY_FP16: dict[str, str] = {
     "v_mad_f16_vop3": "[](auto a, auto b, auto c) { return a * b + c; }",
     "v_mad_legacy_f16_vop3": "[](auto a, auto b, auto c) { return a * b + c; }",
     "v_fma_legacy_f16_vop3": "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }",
+    # min3/max3/med3 (f16): widened to f32 by the glue; same fmax/fmin
+    # composition as the f32 forms (see SIMD_VOP3_TERNARY_FP32).
+    "v_max3_f16_vop3": "[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmax(a, b), c); }",
+    "v_min3_f16_vop3": "[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmin(a, b), c); }",
+    "v_med3_f16_vop3": "[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(util::stdx::fmax(a, b), c), util::stdx::fmin(a, b)); }",
 }
 
 # f64 ternary FMA.
@@ -1795,11 +1443,6 @@ SIMD_VOP3_TERNARY_FP64: dict[str, str] = {
 SIMD_VOP3_FMAC_FP32: dict[str, str] = {
     "v_fmac_f32_vop3": "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }",
     "v_mac_f32_vop3": "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }",
-    # v_fmac_dx9_zero_f32: scalar body uses plain std::fma — DX9 zero
-    # semantics NOT applied (verified). Alias of fmac.
-    "v_fmac_dx9_zero_f32_vop3": (
-        "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }"
-    ),
 }
 SIMD_VOP3_FMAC_FP16: dict[str, str] = {
     "v_fmac_f16_vop3": "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }",
@@ -1899,43 +1542,6 @@ SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
         " auto sh = util::stdx::static_simd_cast<U64>((c & 3u) * 8u);"
         " return util::stdx::static_simd_cast<util::native<uint32_t>>(val >> sh); }",
     ),
-    # v_bfe_u32: unsigned bitfield extract. off = src1 & 31, w = src2 & 31.
-    # Scalar returns 0 when w == 0; the mask formula `(1 << w) - 1` evaluates
-    # to 0 at w == 0 so `(src >> off) & 0 == 0` already matches without a
-    # special case. Per-lane shift counts are pre-masked to 5 bits (scalar
-    # body's `& 31u`) so vpsrlvd / vpsllvd produce the same result as scalar
-    # shr / shl. Functorless / direct uint32 expression.
-    "v_bfe_u32_vop3": (
-        "uint32_t",
-        "[](auto a, auto b, auto c) {"
-        " auto off = b & 31u;"
-        " auto w = c & 31u;"
-        " auto mask = (util::native<uint32_t>(1u) << w) - 1u;"
-        " return (a >> off) & mask; }",
-    ),
-    # v_bfe_i32: signed bitfield extract. After the unsigned extract step
-    # (mask-and-shift in the int32 domain to keep the shift arithmetic), if
-    # the extracted field's top bit (bit w-1) is set then the upper bits are
-    # OR'd with ~mask, matching the scalar `val |= -(1 << w)` sign-extend.
-    # `(w - 1) & 31u` keeps the top-bit shift well-defined when w == 0; the
-    # whole result is then forced to 0 on that lane.
-    "v_bfe_i32_vop3": (
-        "uint32_t",
-        "[](auto a, auto b, auto c) {"
-        " using I = util::native<int32_t>;"
-        " using U = util::native<uint32_t>;"
-        " auto off = b & 31u;"
-        " auto w = c & 31u;"
-        " auto sa = util::stdx::static_simd_cast<I>(a);"
-        " auto soff = util::stdx::static_simd_cast<I>(off);"
-        " auto mask = (U(1u) << w) - 1u;"
-        " auto smask = util::stdx::static_simd_cast<I>(mask);"
-        " auto val = (sa >> soff) & smask;"
-        " auto top = util::stdx::static_simd_cast<I>(U(1u) << ((w - 1u) & 31u));"
-        " util::stdx::where((val & top) != I(0), val) = val | ~smask;"
-        " util::stdx::where(simd_mask_as<int32_t>(w == 0u), val) = I(0);"
-        " return util::stdx::static_simd_cast<U>(val); }",
-    ),
     # The shift count is masked to the low 5 bits to match the scalar body's
     # x86 `shl` semantics (which mask cl to 5 bits) — stdx's `<<` on native<u32>
     # lowers to vpsllvd, which zeros out lanes where the count is >= 32 rather
@@ -1956,19 +1562,35 @@ SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
         "uint32_t",
         "[](auto a, auto b, auto c) { return (a & b) | (~a & c); }",
     ),
-    # --- int min3 / max3 / med3 (u32 / i32 / u16 / i16). Scalar bodies route
-    # through std::min/max on the typed (16/32-bit) values. SIMD analogs use
-    # stdx::min/max on the matching simd type, then truncate/sign-extend back
-    # to uint32_t to match the scalar's zero/sign-extension semantics.
-    "v_min3_u32_vop3": (
-        "uint32_t",
+    # min3/max3/med3 (integer). The scalar body uses std::max/std::min for the
+    # 16/32-bit forms (and the minmax/maxmin scalar bodies use std::fmax/fmin on
+    # *integers* — order-preserving and exactly representable, so the integer
+    # min/max here matches for every input; this is the correct SIMD form, NOT
+    # the std::fmin-on-int pattern flagged in project_pr6470_review_findings).
+    # 32-bit: signed lane type for i32 (signed compare), unsigned for u32.
+    # max3 = max(max(a,b),c); min3 = min(min(a,b),c);
+    # med3 = max(min(max(a,b),c), min(a,b)).
+    "v_max3_i32_vop3": (
+        "int32_t",
+        "[](auto a, auto b, auto c) { return util::stdx::max(util::stdx::max(a, b), c); }",
+    ),
+    "v_min3_i32_vop3": (
+        "int32_t",
+        "[](auto a, auto b, auto c) { return util::stdx::min(util::stdx::min(a, b), c); }",
+    ),
+    "v_med3_i32_vop3": (
+        "int32_t",
         "[](auto a, auto b, auto c) {"
-        " return util::stdx::min(util::stdx::min(a, b), c); }",
+        " return util::stdx::max(util::stdx::min(util::stdx::max(a, b), c),"
+        " util::stdx::min(a, b)); }",
     ),
     "v_max3_u32_vop3": (
         "uint32_t",
-        "[](auto a, auto b, auto c) {"
-        " return util::stdx::max(util::stdx::max(a, b), c); }",
+        "[](auto a, auto b, auto c) { return util::stdx::max(util::stdx::max(a, b), c); }",
+    ),
+    "v_min3_u32_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) { return util::stdx::min(util::stdx::min(a, b), c); }",
     ),
     "v_med3_u32_vop3": (
         "uint32_t",
@@ -1976,153 +1598,202 @@ SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
         " return util::stdx::max(util::stdx::min(util::stdx::max(a, b), c),"
         " util::stdx::min(a, b)); }",
     ),
-    "v_min3_i32_vop3": (
+    # 16-bit: the scalar body sign-/zero-extends the low 16 bits, takes the
+    # min/max, then truncates to uint16 and zero-extends to uint32. SIMD lane is
+    # the raw uint32; i16 sign-extends via (cast<int32> << 16) >> 16 (same
+    # pattern as v_mad_i32_i24's 24-bit extend), u16 masks & 0xFFFF; the result
+    # is masked back to the low 16 bits.
+    "v_max3_i16_vop3": (
         "uint32_t",
         "[](auto a, auto b, auto c) {"
         " using I = util::native<int32_t>;"
-        " auto sa = util::stdx::static_simd_cast<I>(a);"
-        " auto sb = util::stdx::static_simd_cast<I>(b);"
-        " auto sc = util::stdx::static_simd_cast<I>(c);"
+        " auto sa = (util::stdx::static_simd_cast<I>(a) << 16) >> 16;"
+        " auto sb = (util::stdx::static_simd_cast<I>(b) << 16) >> 16;"
+        " auto sc = (util::stdx::static_simd_cast<I>(c) << 16) >> 16;"
         " return util::stdx::static_simd_cast<util::native<uint32_t>>("
-        "util::stdx::min(util::stdx::min(sa, sb), sc)); }",
-    ),
-    "v_max3_i32_vop3": (
-        "uint32_t",
-        "[](auto a, auto b, auto c) {"
-        " using I = util::native<int32_t>;"
-        " auto sa = util::stdx::static_simd_cast<I>(a);"
-        " auto sb = util::stdx::static_simd_cast<I>(b);"
-        " auto sc = util::stdx::static_simd_cast<I>(c);"
-        " return util::stdx::static_simd_cast<util::native<uint32_t>>("
-        "util::stdx::max(util::stdx::max(sa, sb), sc)); }",
-    ),
-    "v_med3_i32_vop3": (
-        "uint32_t",
-        "[](auto a, auto b, auto c) {"
-        " using I = util::native<int32_t>;"
-        " auto sa = util::stdx::static_simd_cast<I>(a);"
-        " auto sb = util::stdx::static_simd_cast<I>(b);"
-        " auto sc = util::stdx::static_simd_cast<I>(c);"
-        " auto r = util::stdx::max(util::stdx::min(util::stdx::max(sa, sb), sc),"
-        " util::stdx::min(sa, sb));"
-        " return util::stdx::static_simd_cast<util::native<uint32_t>>(r); }",
-    ),
-    # 16-bit forms: scalar masks low 16 bits + casts to i16 / u16, runs the
-    # 3-source min/max/med, then zero-extends back to uint32_t. SIMD: do the
-    # mask + signed shift to sign-extend (i16 path), run the op, then mask
-    # 0xFFFF on the result.
-    "v_min3_u16_vop3": (
-        "uint32_t",
-        "[](auto a, auto b, auto c) {"
-        " auto ua = a & 0xFFFFu;"
-        " auto ub = b & 0xFFFFu;"
-        " auto uc = c & 0xFFFFu;"
-        " return util::stdx::min(util::stdx::min(ua, ub), uc); }",
-    ),
-    "v_max3_u16_vop3": (
-        "uint32_t",
-        "[](auto a, auto b, auto c) {"
-        " auto ua = a & 0xFFFFu;"
-        " auto ub = b & 0xFFFFu;"
-        " auto uc = c & 0xFFFFu;"
-        " return util::stdx::max(util::stdx::max(ua, ub), uc); }",
-    ),
-    "v_med3_u16_vop3": (
-        "uint32_t",
-        "[](auto a, auto b, auto c) {"
-        " auto ua = a & 0xFFFFu;"
-        " auto ub = b & 0xFFFFu;"
-        " auto uc = c & 0xFFFFu;"
-        " return util::stdx::max(util::stdx::min(util::stdx::max(ua, ub), uc),"
-        " util::stdx::min(ua, ub)); }",
+        "util::stdx::max(util::stdx::max(sa, sb), sc)) & 0xFFFFu; }",
     ),
     "v_min3_i16_vop3": (
         "uint32_t",
         "[](auto a, auto b, auto c) {"
         " using I = util::native<int32_t>;"
-        " auto sa = (util::stdx::static_simd_cast<I>(a & 0xFFFFu) << 16) >> 16;"
-        " auto sb = (util::stdx::static_simd_cast<I>(b & 0xFFFFu) << 16) >> 16;"
-        " auto sc = (util::stdx::static_simd_cast<I>(c & 0xFFFFu) << 16) >> 16;"
-        " auto r = util::stdx::min(util::stdx::min(sa, sb), sc);"
-        " return util::stdx::static_simd_cast<util::native<uint32_t>>(r) & 0xFFFFu; }",
-    ),
-    "v_max3_i16_vop3": (
-        "uint32_t",
-        "[](auto a, auto b, auto c) {"
-        " using I = util::native<int32_t>;"
-        " auto sa = (util::stdx::static_simd_cast<I>(a & 0xFFFFu) << 16) >> 16;"
-        " auto sb = (util::stdx::static_simd_cast<I>(b & 0xFFFFu) << 16) >> 16;"
-        " auto sc = (util::stdx::static_simd_cast<I>(c & 0xFFFFu) << 16) >> 16;"
-        " auto r = util::stdx::max(util::stdx::max(sa, sb), sc);"
-        " return util::stdx::static_simd_cast<util::native<uint32_t>>(r) & 0xFFFFu; }",
+        " auto sa = (util::stdx::static_simd_cast<I>(a) << 16) >> 16;"
+        " auto sb = (util::stdx::static_simd_cast<I>(b) << 16) >> 16;"
+        " auto sc = (util::stdx::static_simd_cast<I>(c) << 16) >> 16;"
+        " return util::stdx::static_simd_cast<util::native<uint32_t>>("
+        "util::stdx::min(util::stdx::min(sa, sb), sc)) & 0xFFFFu; }",
     ),
     "v_med3_i16_vop3": (
         "uint32_t",
         "[](auto a, auto b, auto c) {"
         " using I = util::native<int32_t>;"
-        " auto sa = (util::stdx::static_simd_cast<I>(a & 0xFFFFu) << 16) >> 16;"
-        " auto sb = (util::stdx::static_simd_cast<I>(b & 0xFFFFu) << 16) >> 16;"
-        " auto sc = (util::stdx::static_simd_cast<I>(c & 0xFFFFu) << 16) >> 16;"
-        " auto r = util::stdx::max(util::stdx::min(util::stdx::max(sa, sb), sc),"
-        " util::stdx::min(sa, sb));"
-        " return util::stdx::static_simd_cast<util::native<uint32_t>>(r) & 0xFFFFu; }",
+        " auto sa = (util::stdx::static_simd_cast<I>(a) << 16) >> 16;"
+        " auto sb = (util::stdx::static_simd_cast<I>(b) << 16) >> 16;"
+        " auto sc = (util::stdx::static_simd_cast<I>(c) << 16) >> 16;"
+        " return util::stdx::static_simd_cast<util::native<uint32_t>>("
+        "util::stdx::max(util::stdx::min(util::stdx::max(sa, sb), sc),"
+        " util::stdx::min(sa, sb))) & 0xFFFFu; }",
     ),
-    # v_minmax / v_maxmin int forms DEFERRED. The scalar body uses
-    # std::fmin/std::fmax on integer operands → double round-trip; for
-    # negative int32 the resulting double, when cast back through
-    # vdst.write_lane (uint32_t), goes through an implementation-defined
-    # double→uint conversion that GCC saturates to UINT_MAX. The vector
-    # path computes the correct integer-domain result, so SIMD vs scalar
-    # diverges on negative-int32 inputs (test demonstrated lane=26 rot=13
-    # case). Pending PR 6470 scalar fix.
-    # --- int16 / uint16 mad (low-16 mul-add, result masked to 16 bits) and
-    # mad_legacy_i16 / mad_legacy_u16 (identical scalar bodies; legacy
-    # naming). SIMD operates in int32 width — 16x16 mul + add stays within
-    # 32 bits, sign/zero-extend on inputs and mask 0xFFFF on output.
-    "v_mad_i16_vop3": (
+    "v_max3_u16_vop3": (
         "uint32_t",
         "[](auto a, auto b, auto c) {"
-        " using I = util::native<int32_t>;"
-        " auto sa = (util::stdx::static_simd_cast<I>(a & 0xFFFFu) << 16) >> 16;"
-        " auto sb = (util::stdx::static_simd_cast<I>(b & 0xFFFFu) << 16) >> 16;"
-        " auto sc = (util::stdx::static_simd_cast<I>(c & 0xFFFFu) << 16) >> 16;"
-        " return util::stdx::static_simd_cast<util::native<uint32_t>>(sa * sb + sc) & 0xFFFFu; }",
+        " auto sa = a & 0xFFFFu; auto sb = b & 0xFFFFu; auto sc = c & 0xFFFFu;"
+        " return util::stdx::max(util::stdx::max(sa, sb), sc) & 0xFFFFu; }",
     ),
-    "v_mad_legacy_i16_vop3": (
+    "v_min3_u16_vop3": (
         "uint32_t",
         "[](auto a, auto b, auto c) {"
-        " using I = util::native<int32_t>;"
-        " auto sa = (util::stdx::static_simd_cast<I>(a & 0xFFFFu) << 16) >> 16;"
-        " auto sb = (util::stdx::static_simd_cast<I>(b & 0xFFFFu) << 16) >> 16;"
-        " auto sc = (util::stdx::static_simd_cast<I>(c & 0xFFFFu) << 16) >> 16;"
-        " return util::stdx::static_simd_cast<util::native<uint32_t>>(sa * sb + sc) & 0xFFFFu; }",
+        " auto sa = a & 0xFFFFu; auto sb = b & 0xFFFFu; auto sc = c & 0xFFFFu;"
+        " return util::stdx::min(util::stdx::min(sa, sb), sc) & 0xFFFFu; }",
     ),
-    "v_mad_u16_vop3": (
+    "v_med3_u16_vop3": (
         "uint32_t",
         "[](auto a, auto b, auto c) {"
-        " return ((a & 0xFFFFu) * (b & 0xFFFFu) + (c & 0xFFFFu)) & 0xFFFFu; }",
+        " auto sa = a & 0xFFFFu; auto sb = b & 0xFFFFu; auto sc = c & 0xFFFFu;"
+        " return util::stdx::max(util::stdx::min(util::stdx::max(sa, sb), sc),"
+        " util::stdx::min(sa, sb)) & 0xFFFFu; }",
     ),
-    "v_mad_legacy_u16_vop3": (
-        "uint32_t",
-        "[](auto a, auto b, auto c) {"
-        " return ((a & 0xFFFFu) * (b & 0xFFFFu) + (c & 0xFFFFu)) & 0xFFFFu; }",
-    ),
-    # Widening 16x16+32 → 32-bit forms. src0/src1 are 16-bit (sign or zero
-    # extended to int32), src2 is full 32-bit, result is 32-bit.
+    # v_mad_i32_i16: sign-extend the low 16 bits of src0/src1 to int32, multiply
+    # (the int16 product fits in int32), add the full int32 src2, store as uint32
+    # — matches the scalar `(int16)a * (int16)b + (int32)c`.
     "v_mad_i32_i16_vop3": (
         "uint32_t",
         "[](auto a, auto b, auto c) {"
         " using I = util::native<int32_t>;"
-        " auto sa = (util::stdx::static_simd_cast<I>(a & 0xFFFFu) << 16) >> 16;"
-        " auto sb = (util::stdx::static_simd_cast<I>(b & 0xFFFFu) << 16) >> 16;"
+        " auto sa = (util::stdx::static_simd_cast<I>(a) << 16) >> 16;"
+        " auto sb = (util::stdx::static_simd_cast<I>(b) << 16) >> 16;"
         " auto sc = util::stdx::static_simd_cast<I>(c);"
         " return util::stdx::static_simd_cast<util::native<uint32_t>>(sa * sb + sc); }",
     ),
+    # v_mad_u32_u16: zero-extend low 16 of src0/src1, multiply, add full uint32 c.
     "v_mad_u32_u16_vop3": (
         "uint32_t",
-        "[](auto a, auto b, auto c) {" " return (a & 0xFFFFu) * (b & 0xFFFFu) + c; }",
+        "[](auto a, auto b, auto c) { return (a & 0xFFFFu) * (b & 0xFFFFu) + c; }",
+    ),
+    # v_mad_i16 / v_mad_u16 (and the _legacy twins): 16-bit multiply-add, result
+    # truncated to the low 16 bits and zero-extended. The low 16 bits of the
+    # product+add are independent of operand sign, so masking the operands and
+    # the result to 16 bits reproduces the int16 and uint16 scalar bodies alike.
+    "v_mad_i16_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) { return ((a & 0xFFFFu) * (b & 0xFFFFu) + (c & 0xFFFFu)) & 0xFFFFu; }",
+    ),
+    "v_mad_u16_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) { return ((a & 0xFFFFu) * (b & 0xFFFFu) + (c & 0xFFFFu)) & 0xFFFFu; }",
+    ),
+    "v_mad_legacy_i16_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) { return ((a & 0xFFFFu) * (b & 0xFFFFu) + (c & 0xFFFFu)) & 0xFFFFu; }",
+    ),
+    "v_mad_legacy_u16_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) { return ((a & 0xFFFFu) * (b & 0xFFFFu) + (c & 0xFFFFu)) & 0xFFFFu; }",
+    ),
+    # v_bfe_u32: bitfield extract. off = src1 & 31, w = src2 & 31, result =
+    # (src >> off) & ((1<<w)-1). The scalar `if (w==0) return 0` is redundant —
+    # ((1u<<w)-1) is already 0 for w==0 — and `w>=32` is dead since w is masked
+    # to 31, so the SIMD form is branchless. Variable logical shift (vpsrlvd /
+    # vpsllvd) matches scalar for every count in [0,31].
+    "v_bfe_u32_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) {"
+        " auto off = b & 31u; auto w = c & 31u;"
+        " auto mask = (util::native<uint32_t>(1u) << w) - 1u;"
+        " return (a >> off) & mask; }",
+    ),
+    # v_bfe_i32: signed bitfield extract. Same off/width masking; the field is
+    # extracted with an arithmetic shift (vpsravd, so off+w>32 sign-fill matches
+    # the scalar int32 `src >> off`) then sign-extended from bit w-1 via the
+    # branchless `(x ^ s) - s` trick (s = 1<<(w-1) = (mask+1)>>1, which is 0 for
+    # w==0 so the result is 0, matching the scalar early return).
+    "v_bfe_i32_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) {"
+        " using I = util::native<int32_t>;"
+        " auto off = b & 31u; auto w = c & 31u;"
+        " auto mask = (util::native<uint32_t>(1u) << w) - 1u;"
+        " auto ext = util::stdx::static_simd_cast<util::native<uint32_t>>("
+        "util::stdx::static_simd_cast<I>(a) >> util::stdx::static_simd_cast<I>(off)) & mask;"
+        " auto signbit = (mask + 1u) >> 1;"
+        " return (ext ^ signbit) - signbit; }",
     ),
 }
+
+
+# --- VOP3 64-bit reverse shifts --------------------------------------------
+#
+# v_lshlrev_b64 / v_lshrrev_b64 / v_ashrrev_i64: shift the 64-bit src1 by the
+# 32-bit src0 (masked to [0,63]). Routed through try_execute_shift64_vop3_simd,
+# whose functor receives (native<uint64_t> value, native<uint64_t> shift) with
+# the count already widened+masked. Logical shifts are plain `<< / >>` on the
+# uint64 lane; the signed (arithmetic) form casts through int64.
+SIMD_SHIFT64_VOP3: dict[str, str] = {
+    "v_lshlrev_b64_vop3": "[](auto v, auto sh) { return v << sh; }",
+    "v_lshrrev_b64_vop3": "[](auto v, auto sh) { return v >> sh; }",
+    "v_ashrrev_i64_vop3": (
+        "[](auto v, auto sh) {"
+        " return util::stdx::static_simd_cast<util::native<uint64_t>>("
+        "util::stdx::static_simd_cast<util::native<int64_t>>(v) >>"
+        " util::stdx::static_simd_cast<util::native<int64_t>>(sh)); }"
+    ),
+}
+
+# v_lshl_add_u64: (src0 << (src1 & 63)) + src2 — 64-bit value/addend, 32-bit
+# shift. Fixed op, dedicated glue (operand widths differ from the rev-shifts).
+SIMD_LSHL_ADD_U64: set[str] = {"v_lshl_add_u64_vop3"}
+
+# --- VOP3 wide 32x32->64 multiply-add (v_mad_u64_u32 / v_mad_i64_i32) -------
+#
+# 32-bit src0/src1 multiplicands widened to 64 (zero-/sign-extend), 64-bit
+# low-half product, plus the 64-bit src2 addend. Routed through
+# try_execute_mad_wide64_vop3_simd; the functor receives the two narrow operands
+# and the 64-bit addend.
+SIMD_MAD_WIDE64: dict[str, str] = {
+    "v_mad_u64_u32_vop3": (
+        "[](auto a, auto b, auto c) {"
+        " return util::stdx::static_simd_cast<util::native<uint64_t>>(a)"
+        " * util::stdx::static_simd_cast<util::native<uint64_t>>(b) + c; }"
+    ),
+    "v_mad_i64_i32_vop3": (
+        "[](auto a, auto b, auto c) {"
+        " auto wa = util::stdx::static_simd_cast<util::native<uint64_t>>("
+        "util::stdx::static_simd_cast<util::native<int64_t>>("
+        "util::stdx::static_simd_cast<util::narrow32<int32_t>>(a)));"
+        " auto wb = util::stdx::static_simd_cast<util::native<uint64_t>>("
+        "util::stdx::static_simd_cast<util::native<int64_t>>("
+        "util::stdx::static_simd_cast<util::narrow32<int32_t>>(b)));"
+        " return wa * wb + c; }"
+    ),
+}
+
+# --- VOP3 carry binary (carry-out -> SGPR sdst, carry-in <- SGPR src2) ------
+#
+# Same SimdCarry functors as the VOP2 carry family, keyed by _vop3, split by
+# whether the form has a carry-in (and thus a src2 member): the carry-OUT forms
+# (add_co/sub_co/subrev_co) have no src2 and route through the _co glue; the
+# carry-IN forms (addc/subb/subbrev) read src2 and route through the _cin glue.
+_VOP3_CARRY_CIN_NAMES = {"v_addc_co_u32", "v_subb_co_u32", "v_subbrev_co_u32"}
+SIMD_VOP3_CARRY_CO: dict[str, str] = {
+    name.replace("_vop2", "_vop3"): functor
+    for name, functor in SIMD_VOP2_CARRY.items()
+    if name.replace("_vop2", "") not in _VOP3_CARRY_CIN_NAMES
+}
+SIMD_VOP3_CARRY_CIN: dict[str, str] = {
+    name.replace("_vop2", "_vop3"): functor
+    for name, functor in SIMD_VOP2_CARRY.items()
+    if name.replace("_vop2", "") in _VOP3_CARRY_CIN_NAMES
+}
+# RDNA-only carry-in aliases (add_co_ci / sub_co_ci / subrev_co_ci): same
+# per-lane add/sub-with-carry functor as the CDNA addc / subb / subbrev forms;
+# the decoder binds src2/sdst to VCC, but the body is uniform.
+SIMD_VOP3_CARRY_CIN.update(
+    {
+        "v_add_co_ci_u32_vop3": SIMD_VOP2_CARRY["v_addc_co_u32_vop2"],
+        "v_sub_co_ci_u32_vop3": SIMD_VOP2_CARRY["v_subb_co_u32_vop2"],
+        "v_subrev_co_ci_u32_vop3": SIMD_VOP2_CARRY["v_subbrev_co_u32_vop2"],
+    }
+)
 
 
 def simd_probe_line(template_name: str) -> str | None:
@@ -2219,6 +1890,21 @@ def simd_probe_line(template_name: str) -> str | None:
     if spec3tern is not None:
         cpp_t, cpp_op = spec3tern
         return f"  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT({cpp_t}, {cpp_op});"
+    # 64-bit reverse shifts (src0 = 32-bit count, src1 = 64-bit value).
+    specshift64 = SIMD_SHIFT64_VOP3.get(template_name)
+    if specshift64 is not None:
+        return f"  ROCJITSU_TRY_SIMD_SHIFT64_VOP3({specshift64});"
+    if template_name in SIMD_LSHL_ADD_U64:
+        return "  ROCJITSU_TRY_SIMD_LSHL_ADD_U64();"
+    specmad64 = SIMD_MAD_WIDE64.get(template_name)
+    if specmad64 is not None:
+        return f"  ROCJITSU_TRY_SIMD_MAD_WIDE64_VOP3({specmad64});"
+    specv3co = SIMD_VOP3_CARRY_CO.get(template_name)
+    if specv3co is not None:
+        return f"  ROCJITSU_TRY_SIMD_VOP3_CO({specv3co});"
+    specv3cin = SIMD_VOP3_CARRY_CIN.get(template_name)
+    if specv3cin is not None:
+        return f"  ROCJITSU_TRY_SIMD_VOP3_CIN({specv3cin});"
     # VOP3 fp ternary (FMA / MAD family). Per-source abs/neg + omod/clamp in
     # the f32 / f16 / f64 domain. NaN-input lanes skipped by test (gcc-13
     # packed FMA quiets a different NaN operand vs scalar std::fma).
@@ -2235,43 +1921,6 @@ def simd_probe_line(template_name: str) -> str | None:
         return "  ROCJITSU_TRY_SIMD_DIV_FMAS_VOP3_FP32();"
     if template_name in SIMD_VOP3_DIV_FMAS_FP64:
         return "  ROCJITSU_TRY_SIMD_DIV_FMAS_VOP3_FP64();"
-    if template_name in SIMD_VOP3_MOV_B16:
-        return "  ROCJITSU_TRY_SIMD_VOP3_MOV_B16();"
-    # VOP3 sdst-enc carry forms.
-    specv3carry = SIMD_VOP3_CARRY.get(template_name)
-    if specv3carry is not None:
-        return f"  ROCJITSU_TRY_SIMD_VOP3_CARRY({specv3carry});"
-    # VOP3 sdst-enc carry forms with src2 carry-in (CDNA4 addc/subb/subbrev +
-    # RDNA add/sub/subrev_co_ci). All six share the same shape; cin is loaded
-    # from inst.src2.read_scalar64 inside the glue.
-    specv3carry_src2 = SIMD_VOP3_CARRY_SRC2.get(template_name)
-    if specv3carry_src2 is not None:
-        return f"  ROCJITSU_TRY_SIMD_VOP3_CARRY_SRC2({specv3carry_src2});"
-    # VOP3P packed-16 integer binary family (pk_add/sub/mul_lo/min/max for
-    # i16/u16 + pk_lshlrev/lshrrev/ashrrev for b16/i16). Gated on default
-    # op_sel = 0 / op_sel_hi = 3 inside the glue.
-    specpk = SIMD_VOP3P_PK_BINARY_INT.get(template_name)
-    if specpk is not None:
-        return f"  ROCJITSU_TRY_SIMD_VOP3P_PK_BINARY_INT({specpk});"
-    specpkt = SIMD_VOP3P_PK_TERNARY_INT.get(template_name)
-    if specpkt is not None:
-        return f"  ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_INT({specpkt});"
-    specpkf16 = SIMD_VOP3P_PK_BINARY_FP16.get(template_name)
-    if specpkf16 is not None:
-        return f"  ROCJITSU_TRY_SIMD_VOP3P_PK_BINARY_FP16({specpkf16});"
-    specpkf16t = SIMD_VOP3P_PK_TERNARY_FP16.get(template_name)
-    if specpkf16t is not None:
-        return f"  ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_FP16({specpkf16t});"
-    if template_name in SIMD_VOP3P_MOV_B32:
-        return "  ROCJITSU_TRY_SIMD_VOP3P_MOV_B32();"
-    # VOP3P fma_mix / mad_mix (six ops, three destination shapes). Same body
-    # for all; the routing picks the matching glue specialization.
-    if template_name in SIMD_VOP3P_FMA_MIX_F32:
-        return "  ROCJITSU_TRY_SIMD_VOP3P_FMA_MIX_F32();"
-    if template_name in SIMD_VOP3P_FMA_MIX_F16_LO:
-        return "  ROCJITSU_TRY_SIMD_VOP3P_FMA_MIX_F16_LO();"
-    if template_name in SIMD_VOP3P_FMA_MIX_F16_HI:
-        return "  ROCJITSU_TRY_SIMD_VOP3P_FMA_MIX_F16_HI();"
     # VOP3 dst-accumulate FMA/MAC (vdst is the third operand). Per-isa class
     # has no src2; the accumulate glue reads vdst instead.
     specfmacf32 = SIMD_VOP3_FMAC_FP32.get(template_name)
