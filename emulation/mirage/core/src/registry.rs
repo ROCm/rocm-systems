@@ -200,30 +200,13 @@ mod tests {
     }
 
     #[test]
-    fn default_falls_back_to_noop() {
-        // Unset every variable that could make rocjitsu look installed.
-        // The known library paths are unlikely to exist in CI; the
-        // env vars are scoped to this test.
-        // SAFETY: single-threaded by the test runner default; we
-        // restore after.
-        let prev_lib = std::env::var_os("ROCJITSU_LIB_DIR");
-        let prev_root = std::env::var_os("ROCJITSU_ROOT");
-        unsafe {
-            std::env::remove_var("ROCJITSU_LIB_DIR");
-            std::env::remove_var("ROCJITSU_ROOT");
-        }
-        // We can't control which side wins if rocjitsu actually is
-        // present on this machine, so only assert when it isn't.
-        if !(ROCJITSU.installed)() {
+    fn default_matches_installation_state() {
+        // Assert in *both* branches so this test isn't a no-op on
+        // any particular host.
+        if (ROCJITSU.installed)() {
+            assert_eq!(default_emulator().name, "rocjitsu");
+        } else {
             assert_eq!(default_emulator().name, "noop");
-        }
-        unsafe {
-            if let Some(v) = prev_lib {
-                std::env::set_var("ROCJITSU_LIB_DIR", v);
-            }
-            if let Some(v) = prev_root {
-                std::env::set_var("ROCJITSU_ROOT", v);
-            }
         }
     }
 

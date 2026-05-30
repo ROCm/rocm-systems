@@ -28,6 +28,7 @@ futures-util = "0.3"
 tokio = { workspace = true }
 tungstenite = "0.24"
 libc = { workspace = true }
+mirage_rocjitsu = { path = "rocjitsu" }
 
 [workspace]
 members = ["core", "ctl", "daemon", "dashboard", "host", "rocjitsu", "rocjitsu_sys"]

@@ -141,14 +141,32 @@ impl Emulator for RocjitsuEmulator {
     }
 
     fn injection_def(&self) -> InjectionDef {
-        let ld_preload = std::env::var("ROCJITSU_LD_PRELOAD").ok();
         let mut env = std::collections::BTreeMap::new();
-        if let Some(root) = std::env::var_os("ROCJITSU_ROOT") {
+        let root = rocjitsu_root();
+        if root.exists() {
             env.insert(
                 "ROCJITSU_ROOT".to_string(),
                 root.to_string_lossy().into_owned(),
             );
         }
+        // Always advertise the JSON config + schema we actually
+        // loaded; the kmd interposer reads these at process start.
+        if let Ok(cfg) = resolve_config(&self.def.options) {
+            env.insert("RJ_CONFIG".to_string(), cfg.to_string_lossy().into_owned());
+        }
+        let schema = std::path::PathBuf::from(rocjitsu_sys::SCHEMA_DIR)
+            .join("simulation_config.fbs");
+        if schema.exists() {
+            env.insert(
+                "RJ_SCHEMA".to_string(),
+                schema.to_string_lossy().into_owned(),
+            );
+        }
+        // Prefer an explicit override; otherwise probe known build /
+        // install locations for the KMD interposer.
+        let ld_preload = std::env::var("ROCJITSU_LD_PRELOAD")
+            .ok()
+            .or_else(|| discover_kmd_preload(&root).map(|p| p.to_string_lossy().into_owned()));
         InjectionDef {
             wrapper: None,
             ld_preload,
@@ -156,6 +174,24 @@ impl Emulator for RocjitsuEmulator {
             env,
         }
     }
+}
+
+/// Discover `librocjitsu_kmd.so` (the KFD interposer) on disk. The
+/// kmd library makes real HIP / torch / rocminfo / hsa apps talk to
+/// the rocjitsu VM instead of `/dev/kfd`.
+fn discover_kmd_preload(root: &Path) -> Option<std::path::PathBuf> {
+    let lib_name = "librocjitsu_kmd.so";
+    let candidates = [
+        root.join("build/lib/rocjitsu/src/rocjitsu/kmd").join(lib_name),
+        root.join("build-clean/lib/rocjitsu/src/rocjitsu/kmd").join(lib_name),
+        root.join("build/lib").join(lib_name),
+        root.join("artifacts/lib").join(lib_name),
+        std::path::PathBuf::from("/usr/local/lib").join(lib_name),
+        std::path::PathBuf::from("/usr/lib").join(lib_name),
+        std::path::PathBuf::from("/usr/lib/x86_64-linux-gnu").join(lib_name),
+        std::path::PathBuf::from("/opt/rocm/lib").join(lib_name),
+    ];
+    candidates.into_iter().find(|p| p.exists())
 }
 
 fn resolve_config(opts: &SimpleMap) -> Result<PathBuf, RocjitsuError> {
@@ -175,9 +211,13 @@ fn resolve_config(opts: &SimpleMap) -> Result<PathBuf, RocjitsuError> {
         Some(SimpleValue::String(s)) => s.as_str(),
         _ => "cdna4",
     };
+    // Use the _kmd config variants: they are the topologies
+    // rocjitsu ships specifically for LD_PRELOAD'd ROCR apps (matches
+    // rocjitsu/tests/CMakeLists.txt RJ_KMD_PRELOAD_ENV), and they
+    // also work for the embedded Vm path.
     let filename = match arch {
-        "cdna3" => "amdgpu_cdna3.json",
-        "cdna4" => "amdgpu_cdna4.json",
+        "cdna3" => "amdgpu_cdna3_kmd.json",
+        "cdna4" => "amdgpu_cdna4_kmd.json",
         other => return Err(RocjitsuError::UnknownArch(other.to_string())),
     };
     let path = rocjitsu_root().join("configs").join(filename);
@@ -225,6 +265,43 @@ pub fn is_installed() -> bool {
 /// Returns the discovered rocjitsu source/install root.
 pub fn root() -> PathBuf {
     rocjitsu_root()
+}
+
+/// Returns the discovered path to `librocjitsu_kmd.so`, the LD_PRELOAD
+/// interposer that routes real HIP/HSA syscalls into the rocjitsu
+/// simulator. `None` if the kmd library has not been built/installed.
+pub fn kmd_preload() -> Option<PathBuf> {
+    discover_kmd_preload(&rocjitsu_root())
+}
+
+/// Returns the bundled simulation config + schema flatbuffer paths
+/// for `arch` (`"cdna3"` or `"cdna4"`), if both files exist. These are
+/// the values an LD_PRELOAD'd workload sets as `RJ_CONFIG` / `RJ_SCHEMA`.
+pub fn kmd_config(arch: &str) -> Option<(PathBuf, PathBuf)> {
+    let filename = match arch {
+        "cdna3" => "amdgpu_cdna3_kmd.json",
+        "cdna4" => "amdgpu_cdna4_kmd.json",
+        _ => return None,
+    };
+    let root = rocjitsu_root();
+    let cfg = root.join("configs").join(filename);
+    let schema = root.join("schemas").join("simulation_config.fbs");
+    if cfg.exists() && schema.exists() {
+        Some((cfg, schema))
+    } else {
+        None
+    }
+}
+
+/// The hipcc `--offload-arch` value that matches the `arch` preset
+/// used by [`kmd_config`]. Mirrors the value rocjitsu's own
+/// `tests/CMakeLists.txt` passes to hipcc.
+pub fn hipcc_offload_arch(arch: &str) -> Option<&'static str> {
+    match arch {
+        "cdna3" => Some("gfx942"),
+        "cdna4" => Some("gfx950"),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

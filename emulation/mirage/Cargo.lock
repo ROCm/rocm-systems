@@ -1141,6 +1141,7 @@ dependencies = [
  "mirage_ctl",
  "mirage_daemon",
  "mirage_host",
+ "mirage_rocjitsu",
  "predicates",
  "reqwest",
  "serde_json",

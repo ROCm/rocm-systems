@@ -207,6 +207,10 @@ pub struct ExecStartArgs {
     /// Don't attach to the exec; just submit and return its id.
     #[arg(long)]
     detach: bool,
+    /// Extra environment variables to inject into the exec, in
+    /// `KEY=VALUE` form. May be repeated.
+    #[arg(long = "env", value_name = "KEY=VALUE")]
+    envs: Vec<String>,
     /// The command and its arguments. Use `--` to separate from
     /// mirage flags.
     #[arg(trailing_var_arg = true, required = true, allow_hyphen_values = true)]
@@ -229,6 +233,10 @@ pub struct RunArgs {
     /// Working directory.
     #[arg(long)]
     workdir: Option<String>,
+    /// Extra environment variables to inject into the exec, in
+    /// `KEY=VALUE` form. May be repeated.
+    #[arg(long = "env", value_name = "KEY=VALUE")]
+    envs: Vec<String>,
     /// The command and its arguments.
     #[arg(trailing_var_arg = true, required = true, allow_hyphen_values = true)]
     argv: Vec<String>,
@@ -573,13 +581,14 @@ async fn exec_start<C: MirageCtl + 'static>(
     a: ExecStartArgs,
 ) -> anyhow::Result<ExitCode> {
     let (cmd, args) = split_argv(&a.argv);
+    let env = parse_envs(&a.envs)?;
     let def = ExecDef {
         timestamp: chrono::Utc::now(),
         session: a.session.clone(),
         exec: ExecArgs {
             command: cmd,
             args,
-            env: Default::default(),
+            env,
             workdir: None,
         },
         worker_exec: None,
@@ -604,6 +613,23 @@ fn split_argv(argv: &[String]) -> (String, Vec<String>) {
     let mut it = argv.iter().cloned();
     let cmd = it.next().unwrap_or_default();
     (cmd, it.collect())
+}
+
+/// Parse repeated `KEY=VALUE` pairs from the CLI into the env map
+/// used by [`ExecArgs`]. Rejects entries without an `=` so a typo
+/// surfaces immediately instead of silently being dropped.
+fn parse_envs(entries: &[String]) -> anyhow::Result<std::collections::BTreeMap<String, String>> {
+    let mut out = std::collections::BTreeMap::new();
+    for raw in entries {
+        let Some((k, v)) = raw.split_once('=') else {
+            anyhow::bail!("--env expects KEY=VALUE, got: {raw}");
+        };
+        if k.is_empty() {
+            anyhow::bail!("--env key is empty in: {raw}");
+        }
+        out.insert(k.to_string(), v.to_string());
+    }
+    Ok(out)
 }
 
 fn parse_signal(s: &str) -> anyhow::Result<i32> {
@@ -724,13 +750,14 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
         }
     };
     let (cmd, args) = split_argv(&a.argv);
+    let env = parse_envs(&a.envs)?;
     let def = ExecDef {
         timestamp: chrono::Utc::now(),
         session: sid.clone(),
         exec: ExecArgs {
             command: cmd,
             args,
-            env: Default::default(),
+            env,
             workdir: a.workdir.clone(),
         },
         worker_exec: None,
