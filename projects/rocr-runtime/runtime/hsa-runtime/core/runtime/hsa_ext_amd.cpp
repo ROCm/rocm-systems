@@ -1123,6 +1123,7 @@ hsa_status_t hsa_amd_memory_pool_allocate(hsa_amd_memory_pool_t memory_pool, siz
                                           uint32_t flags, void** ptr) {
   TRY;
   IS_OPEN();
+  printf("[%s] Enter size: %zu flags: %u ptr: %p\n", __func__, size, flags, ptr);
 
   if (size == 0 || ptr == NULL) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -1154,7 +1155,9 @@ hsa_status_t hsa_amd_memory_pool_allocate(hsa_amd_memory_pool_t memory_pool, siz
     alloc_flag |= core::MemoryRegion::AllocateAsan;
 #endif
 
-  return core::Runtime::runtime_singleton_->AllocateMemory(mem_region, size, alloc_flag, ptr);
+  auto ret = core::Runtime::runtime_singleton_->AllocateMemory(mem_region, size, alloc_flag, ptr);
+  printf("[%s] Exit ret: %d ptr: %p\n", __func__, ret, *ptr);
+  return ret;
   CATCH;
 }
 
