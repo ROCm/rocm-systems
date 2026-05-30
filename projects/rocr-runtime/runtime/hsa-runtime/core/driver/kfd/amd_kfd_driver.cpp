@@ -619,14 +619,13 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
   #else // __windows__
   // Export memory.
   core::DriverMemoryHandle targetHandle = {.handle = reinterpret_cast<uint64_t>(mem)};
-  int dmabuf_fd = 0;
-  hsa_status_t err = ExportDMABuf(agent, targetHandle, size, &dmabuf_fd, offset);
+  int target_fd = -1;
+  hsa_status_t err = ExportDMABuf(agent, targetHandle, size, &target_fd, offset);
   if (err != HSA_STATUS_SUCCESS) return err;
 
   // Import memory.
   size_t imported_size;
-  err = ImportDMABuf(dmabuf_fd, agent, handle, &imported_size, mem);
-  core::Runtime::runtime_singleton_->DmaBufClose(dmabuf_fd);
+  err = ImportDMABuf(target_fd, agent, handle, &imported_size, mem);
   if (err != HSA_STATUS_SUCCESS) return err;
   #endif
 
