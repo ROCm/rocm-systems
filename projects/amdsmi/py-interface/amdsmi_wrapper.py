@@ -1484,6 +1484,57 @@ struct_amdsmi_proc_info_t._fields_ = [
 ]
 
 amdsmi_proc_info_t = struct_amdsmi_proc_info_t
+class struct_amdsmi_proc_gpu_entry_t(Structure):
+    pass
+
+class struct_amdsmi_proc_gpu_entry_t_engine_usage(Structure):
+    pass
+
+struct_amdsmi_proc_gpu_entry_t_engine_usage._pack_ = 1 # source:False
+struct_amdsmi_proc_gpu_entry_t_engine_usage._fields_ = [
+    ('gfx', ctypes.c_uint64),
+    ('enc', ctypes.c_uint64),
+    ('reserved', ctypes.c_uint32 * 12),
+]
+
+class struct_amdsmi_proc_gpu_entry_t_memory_usage(Structure):
+    pass
+
+struct_amdsmi_proc_gpu_entry_t_memory_usage._pack_ = 1 # source:False
+struct_amdsmi_proc_gpu_entry_t_memory_usage._fields_ = [
+    ('gtt_mem', ctypes.c_uint64),
+    ('cpu_mem', ctypes.c_uint64),
+    ('vram_mem', ctypes.c_uint64),
+    ('reserved', ctypes.c_uint32 * 10),
+]
+
+struct_amdsmi_proc_gpu_entry_t._pack_ = 1 # source:False
+struct_amdsmi_proc_gpu_entry_t._fields_ = [
+    ('gpu_index', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('mem', ctypes.c_uint64),
+    ('engine_usage', struct_amdsmi_proc_gpu_entry_t_engine_usage),
+    ('memory_usage', struct_amdsmi_proc_gpu_entry_t_memory_usage),
+    ('cu_occupancy', ctypes.c_uint32),
+    ('evicted_time', ctypes.c_uint32),
+    ('sdma_usage', ctypes.c_uint64),
+    ('reserved', ctypes.c_uint32 * 8),
+]
+
+amdsmi_proc_gpu_entry_t = struct_amdsmi_proc_gpu_entry_t
+class struct_amdsmi_proc_info_by_pid_t(Structure):
+    pass
+
+struct_amdsmi_proc_info_by_pid_t._pack_ = 1 # source:False
+struct_amdsmi_proc_info_by_pid_t._fields_ = [
+    ('pid', ctypes.c_uint32),
+    ('name', ctypes.c_char * 256),
+    ('container_name', ctypes.c_char * 256),
+    ('num_gpus', ctypes.c_uint32),
+    ('gpus', struct_amdsmi_proc_gpu_entry_t * 32),
+]
+
+amdsmi_proc_info_by_pid_t = struct_amdsmi_proc_info_by_pid_t
 class struct_amdsmi_p2p_capability_t(Structure):
     pass
 
@@ -4052,6 +4103,12 @@ try:
 except AttributeError:
     pass
 try:
+    amdsmi_get_gpu_process_list_by_pid = _libraries['libamd_smi.so'].amdsmi_get_gpu_process_list_by_pid
+    amdsmi_get_gpu_process_list_by_pid.restype = amdsmi_status_t
+    amdsmi_get_gpu_process_list_by_pid.argtypes = [ctypes.POINTER(ctypes.POINTER(None)), uint32_t, ctypes.POINTER(struct_amdsmi_proc_info_by_pid_t), ctypes.POINTER(ctypes.c_uint32)]
+except AttributeError:
+    pass
+try:
     amdsmi_gpu_driver_reload = _libraries['libamd_smi.so'].amdsmi_gpu_driver_reload
     amdsmi_gpu_driver_reload.restype = amdsmi_status_t
     amdsmi_gpu_driver_reload.argtypes = []
@@ -5040,6 +5097,7 @@ __all__ = \
     'amdsmi_get_gpu_pm_metrics_info',
     'amdsmi_get_gpu_power_profile_presets',
     'amdsmi_get_gpu_process_isolation', 'amdsmi_get_gpu_process_list',
+    'amdsmi_get_gpu_process_list_by_pid',
     'amdsmi_get_gpu_ptl_formats', 'amdsmi_get_gpu_ptl_state',
     'amdsmi_get_gpu_ras_block_features_enabled',
     'amdsmi_get_gpu_ras_feature_info',
@@ -5104,7 +5162,8 @@ __all__ = \
     'amdsmi_pcie_info_t', 'amdsmi_power_cap_info_t',
     'amdsmi_power_cap_type_t', 'amdsmi_power_info_t',
     'amdsmi_power_profile_preset_masks_t',
-    'amdsmi_power_profile_status_t', 'amdsmi_proc_info_t',
+    'amdsmi_power_profile_status_t', 'amdsmi_proc_gpu_entry_t',
+    'amdsmi_proc_info_by_pid_t', 'amdsmi_proc_info_t',
     'amdsmi_process_handle_t', 'amdsmi_process_info_t',
     'amdsmi_processor_handle', 'amdsmi_processor_type_t',
     'amdsmi_ptl_data_format_t', 'amdsmi_range_t',
@@ -5204,8 +5263,12 @@ __all__ = \
     'struct_amdsmi_pcie_bandwidth_t', 'struct_amdsmi_pcie_info_t',
     'struct_amdsmi_power_cap_info_t', 'struct_amdsmi_power_info_t',
     'struct_amdsmi_power_profile_status_t',
-    'struct_amdsmi_proc_info_t', 'struct_amdsmi_process_info_t',
-    'struct_amdsmi_range_t', 'struct_amdsmi_ras_feature_t',
+    'struct_amdsmi_proc_gpu_entry_t',
+    'struct_amdsmi_proc_gpu_entry_t_engine_usage',
+    'struct_amdsmi_proc_gpu_entry_t_memory_usage',
+    'struct_amdsmi_proc_info_by_pid_t', 'struct_amdsmi_proc_info_t',
+    'struct_amdsmi_process_info_t', 'struct_amdsmi_range_t',
+    'struct_amdsmi_ras_feature_t',
     'struct_amdsmi_retired_page_record_t',
     'struct_amdsmi_smu_fw_version_t', 'struct_amdsmi_sock_info_t',
     'struct_amdsmi_temp_range_refresh_rate_t',
