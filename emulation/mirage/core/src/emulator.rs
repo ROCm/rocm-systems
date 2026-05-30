@@ -8,6 +8,8 @@ use crate::{
     exec::InjectionDef,
     plugin::PluginsDef,
     profile::ProfileDef,
+    session::SessionHealth,
+    topology::TopologyDef,
 };
 
 fn one() -> u32 {
@@ -15,6 +17,13 @@ fn one() -> u32 {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum ExecMode {
+    #[default]
+    Functional,
+    Clocked,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EmulatorDef {
     /// name of the emulator, e.g. "rocjitsu"
     pub emulator: String,
@@ -32,8 +41,13 @@ pub struct EmulatorDef {
     #[serde(default = "one")]
     pub gpus_per_node: u32,
 
+    pub exec_mode: ExecMode,
+
     /// extra options to configure the emulator, e.g. {"gpu_model": "cdna3"}
     pub options: SimpleMap,
+
+    /// the topology of the emulated system
+    pub topology: MaybeRef<TopologyDef>,
 }
 
 /// a description of the emulator, including its name, version, and a brief description.
@@ -68,8 +82,8 @@ pub trait Emulator {
     /// Discovers available plugins for the emulator.
     fn discover_plugins() -> Vec<PluginsDef>;
 
-    /// get healthly status of the emulator, e.g. check if the underlying runtime is responsive
-    fn healthly(&self) -> bool;
+    /// get health status of the emulator, e.g. check if the underlying runtime is responsive
+    fn health(&self) -> SessionHealth;
 
     /// get extra env varibles and files to inject into the environment
     fn injection_def(&self) -> InjectionDef;

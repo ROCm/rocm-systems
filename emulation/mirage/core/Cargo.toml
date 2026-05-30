@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
+tokio-stream = "0.1"

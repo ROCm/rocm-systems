@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::common::MaybeRef;
+use crate::{common::MaybeRef, session::SessionId};
 
 /// Concrete process arguments for one program invocation.
 ///
@@ -29,6 +29,9 @@ pub struct ExecArgs {
 /// variables or wrapper commands before the exec is actually started.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecDef {
+    /// session
+    pub session: SessionId,
+
     /// What to run on the head node.
     pub exec: ExecArgs,
 
@@ -36,6 +39,19 @@ pub struct ExecDef {
     /// run any command.
     #[serde(default)]
     pub worker_exec: Option<ExecArgs>,
+}
+
+pub struct ExecStatus {
+    // has the exec been started?
+    pub started: bool,
+
+    // the exit code of the exec, if it has finished
+    pub exit_code: Option<i32>,
+}
+
+pub struct ExecId {
+    pub session: SessionId,
+    pub exec: u32,
 }
 
 /// modifcations to an exec
@@ -48,9 +64,6 @@ pub struct InjectionDef {
 
     /// ensure that the given files are available in the environment
     pub files: BTreeMap<String, MaybeRef<Vec<u8>>>,
-
-    /// sockets
-    pub sockets: Vec<String>,
 
     /// env varibles
     pub env: BTreeMap<String, String>,
