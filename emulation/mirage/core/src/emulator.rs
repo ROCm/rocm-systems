@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{borrow::Cow, collections::BTreeMap};
 
 use serde::{Deserialize, Serialize};
 
@@ -14,7 +14,7 @@ fn one() -> u32 {
     1
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct EmulatorDef {
     /// name of the emulator, e.g. "rocjitsu"
     pub emulator: String,
@@ -36,7 +36,18 @@ pub struct EmulatorDef {
     pub options: SimpleMap,
 }
 
+/// a description of the emulator, including its name, version, and a brief description.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EmulatorDescription {
+    pub name: String,
+    pub version: String,
+    pub description: String,
+}
+
 pub trait Emulator {
+    /// Returns a description of the emulator, including its name, version, and a brief description.
+    fn description() -> EmulatorDescription;
+
     /// Creates a new instance of the emulator with the given definition.
     fn new(def: ProfileDef) -> Self;
 

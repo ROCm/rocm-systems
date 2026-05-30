@@ -1,6 +1,9 @@
+use serde::{Deserialize, Serialize};
+
 use crate::{common::MaybeRef, exec::ExecDef, profile::ProfileDef};
 
-struct Workload {
-    profile: MaybeRef<ProfileDef>,
-    execution: ExecDef,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Workload {
+    pub profile: MaybeRef<ProfileDef>,
+    pub execution: ExecDef,
 }

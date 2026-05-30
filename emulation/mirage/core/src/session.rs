@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::profile::ProfileDef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-enum SessionHealth {
+pub enum SessionHealth {
     #[default]
     Unknown,
     Healthy,
@@ -11,7 +11,8 @@ enum SessionHealth {
     Degraded,
 }
 
-struct SessionDef {
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct SessionDef {
     /// The name of the session, used for display and logging purposes.
     name: String,
 
@@ -20,7 +21,8 @@ struct SessionDef {
     profile: ProfileDef,
 }
 
-struct SessionState {
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct SessionState {
     def: SessionDef,
     health: SessionHealth,
 }

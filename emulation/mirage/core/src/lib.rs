@@ -1,5 +1,6 @@
 pub mod common;
 pub mod config;
+pub mod ctl;
 pub mod emulator;
 pub mod exec;
 pub mod metric;
