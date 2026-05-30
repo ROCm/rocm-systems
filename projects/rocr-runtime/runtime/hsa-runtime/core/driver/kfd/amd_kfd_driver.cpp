@@ -619,7 +619,7 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
   #else // __windows__
   // Export memory.
   int dmabuf_fd = 0;
-  hsa_status_t err = ExportDMABuf(mem, size, &dmabuf_fd, offset);
+  hsa_status_t err = ExportDMABuf(agent, mem, size, &dmabuf_fd, offset);
   if (err != HSA_STATUS_SUCCESS) return err;
 
   // Import memory.
