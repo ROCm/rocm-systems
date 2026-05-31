@@ -3918,9 +3918,13 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
 
   hsa_status_t status;
   if (memHandle->imported && memHandle->is_fabric_handle) {
-    status = targetAgent->driver().ImportFabricHandle(*targetAgent, memHandle->fabric_handle, &driver_handle, &alloc_size);
+    status = targetAgent->driver().ImportMemoryHandle(
+        *targetAgent, &driver_handle, &alloc_size, ShareableHandleType::FABRIC_HANDLE,
+        &memHandle->fabric_handle);
   } else {
-    status = targetAgent->driver().ImportDMABuf(memHandle->driver_handle.dmabuf_fd, *targetAgent, &driver_handle, &alloc_size);
+    status = targetAgent->driver().ImportMemoryHandle(
+        *targetAgent, &driver_handle, &alloc_size, ShareableHandleType::DMABUF_FD,
+        &memHandle->driver_handle.dmabuf_fd);
   }
   if (status != HSA_STATUS_SUCCESS) 
     throw AMD::hsa_exception(status, "Failed to import memory");
@@ -4262,15 +4266,11 @@ hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
   if (memoryHandle->imported)
     return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
 
-  uint64_t offset;
+  auto agentOwner = memoryHandle->region->owner();
 
-  hsa_status_t err = memoryHandle->region->owner()->driver().ExportDMABuf(
-     *memoryHandle->region->owner(),
-      memoryHandle->driver_handle, memoryHandle->size, dmabuf_fd, &offset);
-  if (err != HSA_STATUS_SUCCESS) {
-    return err;
-  }
-  return HSA_STATUS_SUCCESS;
+  return agentOwner->driver().ExportMemoryHandle(*agentOwner, memoryHandle->driver_handle,
+                                                 memoryHandle->size, ShareableHandleType::DMABUF_FD,
+                                                 0, dmabuf_fd);
 }
 
 hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
@@ -4299,9 +4299,9 @@ hsa_status_t Runtime::VMemoryExportFabricHandle(hsa_fabric_handle_t* fabric_hand
 
   auto agentOwner = memoryHandle->region->owner();
 
-  return agentOwner->driver().ExportFabricHandle(*agentOwner,
-                                                 &memoryHandle->driver_handle,
-                                                 memoryHandle->size, fabric_handle);
+  return agentOwner->driver().ExportMemoryHandle(*agentOwner, memoryHandle->driver_handle,
+                                                 memoryHandle->size, ShareableHandleType::FABRIC_HANDLE,
+                                                 0, fabric_handle);
 }
 
 hsa_status_t Runtime::VMemoryImportFabricHandle(hsa_fabric_handle_t fabric_handle,

@@ -101,14 +101,13 @@ class KfdVirtioDriver final : public core::Driver {
   hsa_status_t SetQueueCUMask(HSA_QUEUEID queue_id, uint32_t num_cu_mask,
                               uint32_t* cu_mask) const override;
   hsa_status_t AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_GWS, uint32_t* GWS) const override;
-  hsa_status_t ExportDMABuf(const core::Agent& agent, const core::DriverMemoryHandle& handle, size_t size, int* dmabuf_fd, size_t* offset) override;
-  hsa_status_t ImportDMABuf(int dmabuf_fd, const core::Agent& agent, core::DriverMemoryHandle* handle,
-                            void* mem) override;
+  hsa_status_t ExportMemoryHandle(const core::Agent& agent, const core::DriverMemoryHandle& handle,
+                                  size_t size, core::ShareableHandleType type, uint32_t flags,
+                                  void* export_handle) override;
+  hsa_status_t ImportMemoryHandle(const core::Agent& agent, core::DriverMemoryHandle* handle,
+                                  size_t* size, core::ShareableHandleType type, void* import_handle,
+                                  void* mem = nullptr) override;
   hsa_status_t DestroyImportedShareableHandle(core::DriverMemoryHandle* handle) override;
-  hsa_status_t ExportFabricHandle(core::Agent& agent, core::DriverMemoryHandle* handle, size_t size,
-                                  hsa_fabric_handle_t* fabric_handle) override;
-  hsa_status_t ImportFabricHandle(core::Agent& agent, hsa_fabric_handle_t fabric_handle,
-                                  core::DriverMemoryHandle* handle, size_t* size) override;
   hsa_status_t Map(core::DriverMemoryHandle handle, void* mem, size_t offset, size_t size,
                    hsa_access_permission_t perms) override;
   hsa_status_t Unmap(core::DriverMemoryHandle handle, void* mem, size_t offset, size_t size) override;
