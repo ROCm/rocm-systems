@@ -31,6 +31,9 @@ use crate::state::AppState;
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/paths", get(get_paths))
+        .route("/system", get(get_system))
+        .route("/emulators", get(list_emulators))
+        .route("/metrics", get(get_metrics))
         .route("/profiles", get(list_profiles))
         .route("/profiles/{name}", get(get_profile))
         .route("/profiles/{name}", put(put_profile))
@@ -137,6 +140,99 @@ async fn get_paths() -> Json<PathsResponse> {
         profiles: mirage_core::paths::profile_root().display().to_string(),
         sessions: mirage_core::paths::session_root().display().to_string(),
     })
+}
+
+// ---- system / emulators / metrics -----------------------------------------
+
+#[derive(Serialize)]
+struct SystemResponse {
+    daemon_version: &'static str,
+    default_emulator: &'static str,
+}
+
+async fn get_system() -> Json<SystemResponse> {
+    Json(SystemResponse {
+        daemon_version: env!("CARGO_PKG_VERSION"),
+        default_emulator: mirage_core::registry::default_emulator().name,
+    })
+}
+
+#[derive(Serialize)]
+struct EmulatorEntry {
+    name: &'static str,
+    description: &'static str,
+    installed: bool,
+    is_default: bool,
+    available_plugins: Vec<&'static str>,
+}
+
+async fn list_emulators() -> Json<Vec<EmulatorEntry>> {
+    let default_name = mirage_core::registry::default_emulator().name;
+    let entries = mirage_core::registry::builtins()
+        .iter()
+        .map(|spec| EmulatorEntry {
+            name: spec.name,
+            description: spec.description,
+            installed: (spec.installed)(),
+            is_default: spec.name == default_name,
+            // Plugin discovery requires constructing a live backend
+            // instance; the registry doesn't expose a static plugin
+            // list yet, so we return an empty set here. Future work:
+            // surface declared plugin slots on `EmulatorSpec`.
+            available_plugins: Vec::new(),
+        })
+        .collect();
+    Json(entries)
+}
+
+#[derive(Serialize)]
+struct MetricsResponse {
+    profiles: usize,
+    sessions: usize,
+    sessions_healthy: usize,
+    sessions_starting: usize,
+    execs_running: usize,
+    execs_total: usize,
+}
+
+async fn get_metrics(State(s): State<Arc<AppState>>) -> Result<Json<MetricsResponse>, ApiError> {
+    let profiles = s.ctl.profile_list()?.len();
+    let session_ids = s.ctl.session_list().unwrap_or_default();
+    let mut healthy = 0usize;
+    let mut starting = 0usize;
+    let mut execs_running = 0usize;
+    let mut execs_total = 0usize;
+    for id in &session_ids {
+        if let Ok(state) = s.ctl.session_state(id) {
+            if state.health.healthy {
+                healthy += 1;
+            } else if !state.health.terminal {
+                starting += 1;
+            }
+        }
+        if let Ok(eids) = s.ctl.exec_list(id) {
+            execs_total += eids.len();
+            for eid in eids {
+                let r = ExecRef {
+                    session: id.clone(),
+                    exec: eid,
+                };
+                if let Ok(status) = s.ctl.exec_status(&r) {
+                    if status.started && !status.ended {
+                        execs_running += 1;
+                    }
+                }
+            }
+        }
+    }
+    Ok(Json(MetricsResponse {
+        profiles,
+        sessions: session_ids.len(),
+        sessions_healthy: healthy,
+        sessions_starting: starting,
+        execs_running,
+        execs_total,
+    }))
 }
 
 // ---- profiles --------------------------------------------------------------

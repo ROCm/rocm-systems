@@ -5,12 +5,15 @@
 /// `mirage_core::ctl::MirageCtl`.
 
 import type {
+  EmulatorEntry,
   ExecListItem,
   ExecStatus,
+  Metrics,
   PathsInfo,
   ProfileDef,
   SessionDef,
   SessionState,
+  SystemInfo,
 } from "./types";
 
 const API = "/api";
@@ -47,6 +50,9 @@ export const del = <T>(p: string) => req<T>("DELETE", p);
 // ── Paths ──────────────────────────────────────────────────────────────────
 
 export const getPaths = () => get<PathsInfo>("/paths");
+export const getSystem = () => get<SystemInfo>("/system");
+export const listEmulators = () => get<EmulatorEntry[]>("/emulators");
+export const getMetrics = () => get<Metrics>("/metrics");
 
 // ── Profiles ───────────────────────────────────────────────────────────────
 

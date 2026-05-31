@@ -69,6 +69,28 @@ export interface PathsInfo {
   sessions: string;
 }
 
+export interface SystemInfo {
+  daemon_version: string;
+  default_emulator: string;
+}
+
+export interface EmulatorEntry {
+  name: string;
+  description: string;
+  installed: boolean;
+  is_default: boolean;
+  available_plugins: string[];
+}
+
+export interface Metrics {
+  profiles: number;
+  sessions: number;
+  sessions_healthy: number;
+  sessions_starting: number;
+  execs_running: number;
+  execs_total: number;
+}
+
 export type StreamPacket =
   | {
       Output: { node: number; stream: "Stdout" | "Stderr" | "Stdin"; data: number[] };

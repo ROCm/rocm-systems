@@ -149,14 +149,16 @@ impl Emulator for RocjitsuEmulator {
                 root.to_string_lossy().into_owned(),
             );
         }
-        // Always advertise the JSON config + schema we actually
-        // loaded; the kmd interposer reads these at process start.
-        if let Ok(cfg) = resolve_config(&self.def.options) {
+        // Advertise the KMD-mode JSON config + schema for the
+        // LD_PRELOAD'd workload. We deliberately use the `_kmd.json`
+        // variants here (not the standalone-VM configs used by the
+        // embedded `Vm`): the kmd interposer expects them.
+        let arch = match self.def.options.get("arch") {
+            Some(SimpleValue::String(s)) => s.clone(),
+            _ => "cdna4".to_string(),
+        };
+        if let Some((cfg, schema)) = kmd_config(&arch) {
             env.insert("RJ_CONFIG".to_string(), cfg.to_string_lossy().into_owned());
-        }
-        let schema = std::path::PathBuf::from(rocjitsu_sys::SCHEMA_DIR)
-            .join("simulation_config.fbs");
-        if schema.exists() {
             env.insert(
                 "RJ_SCHEMA".to_string(),
                 schema.to_string_lossy().into_owned(),
@@ -211,13 +213,13 @@ fn resolve_config(opts: &SimpleMap) -> Result<PathBuf, RocjitsuError> {
         Some(SimpleValue::String(s)) => s.as_str(),
         _ => "cdna4",
     };
-    // Use the _kmd config variants: they are the topologies
-    // rocjitsu ships specifically for LD_PRELOAD'd ROCR apps (matches
-    // rocjitsu/tests/CMakeLists.txt RJ_KMD_PRELOAD_ENV), and they
-    // also work for the embedded Vm path.
+    // Vm::create_with_default_schema expects the standalone-VM
+    // configs (the `_kmd.json` variants are rejected by the embedded
+    // schema validator). The LD_PRELOAD interposer pipeline uses the
+    // `_kmd.json` variants instead -- see [`kmd_config`].
     let filename = match arch {
-        "cdna3" => "amdgpu_cdna3_kmd.json",
-        "cdna4" => "amdgpu_cdna4_kmd.json",
+        "cdna3" => "amdgpu_cdna3.json",
+        "cdna4" => "amdgpu_cdna4.json",
         other => return Err(RocjitsuError::UnknownArch(other.to_string())),
     };
     let path = rocjitsu_root().join("configs").join(filename);
@@ -243,6 +245,7 @@ fn installed_check() -> bool {
     {
         return true;
     }
+    // System install locations.
     for candidate in [
         "/usr/local/lib/librocjitsu.so",
         "/usr/lib/librocjitsu.so",
@@ -252,6 +255,12 @@ fn installed_check() -> bool {
         if Path::new(candidate).exists() {
             return true;
         }
+    }
+    // In-repo build: if the KMD interposer can be discovered (which
+    // probes the same dirs the LD_PRELOAD pipeline uses), we treat
+    // rocjitsu as installed for this workspace.
+    if discover_kmd_preload(&rocjitsu_root()).is_some() {
+        return true;
     }
     false
 }

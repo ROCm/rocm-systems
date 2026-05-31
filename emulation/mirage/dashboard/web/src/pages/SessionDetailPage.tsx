@@ -1,14 +1,53 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { Link, useParams } from "react-router-dom";
+import { FitAddon } from "@xterm/addon-fit";
+import { Terminal as XTerm } from "@xterm/xterm";
+import "@xterm/xterm/css/xterm.css";
 import * as api from "../api/client";
 import type { ExecListItem, SessionState, StreamPacket } from "../api/types";
+import { Pill, StatusDot } from "../components/ui/Status";
+import { useToast } from "../components/ui/Toast";
+
+function execTone(e: ExecListItem): "ok" | "warn" | "bad" | "muted" {
+  if (!e.status.started) return "muted";
+  if (!e.status.ended) return "warn";
+  if (e.status.exit_code === 0) return "ok";
+  return "bad";
+}
+
+function execLabel(e: ExecListItem): string {
+  if (!e.status.started) return "queued";
+  if (!e.status.ended) return "running";
+  return `exit ${e.status.exit_code ?? "?"}`;
+}
+
+function shortAge(iso?: string): string {
+  if (!iso) return "—";
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "—";
+  const s = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  return `${Math.floor(s / 3600)}h`;
+}
 
 export function SessionDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const toast = useToast();
   const [session, setSession] = useState<SessionState | null>(null);
   const [execs, setExecs] = useState<ExecListItem[]>([]);
   const [error, setError] = useState("");
   const [command, setCommand] = useState("/bin/sh -c 'echo hello'");
+  const [keep, setKeep] = useState(true);
+  const [envInput, setEnvInput] = useState("");
+  const [envs, setEnvs] = useState<string[]>([]);
   const [activeExecId, setActiveExecId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -28,25 +67,40 @@ export function SessionDetailPage() {
     return () => clearInterval(t);
   }, [refresh]);
 
+  function addEnv() {
+    const v = envInput.trim();
+    if (!v.includes("=")) {
+      toast.error("env must be KEY=VALUE");
+      return;
+    }
+    setEnvs((cur) => [...cur, v]);
+    setEnvInput("");
+  }
+
   async function onRun(e: FormEvent) {
     e.preventDefault();
     if (!id) return;
     setError("");
     const parts = command.trim().split(/\s+/);
     if (!parts.length || !parts[0]) {
-      setError("command is required");
+      const msg = "command is required";
+      setError(msg);
+      toast.error(msg);
       return;
     }
     try {
       const r = await api.createExec(id, {
         command: parts[0],
         args: parts.slice(1),
-        keep: true,
+        keep,
       });
       setActiveExecId(r.id);
+      toast.success(`Exec ${r.id} started`);
       await refresh();
     } catch (err) {
-      setError(String(err));
+      const msg = String(err);
+      setError(msg);
+      toast.error(msg);
     }
   }
 
@@ -55,108 +109,240 @@ export function SessionDetailPage() {
     try {
       await api.deleteExec(id, execId);
       if (activeExecId === execId) setActiveExecId(null);
+      toast.info(`Exec ${execId} removed`);
       await refresh();
     } catch (e) {
-      setError(String(e));
+      const msg = String(e);
+      setError(msg);
+      toast.error(msg);
     }
   }
 
   if (!id) return <div className="page">missing id</div>;
 
+  const healthy = session?.health.healthy ?? false;
+  const stateLabel = session?.health.state ?? (healthy ? "ready" : "pending");
+
   return (
-    <div className="page">
+    <div className="page page-wide">
       <Link to="/sessions" className="back-link">
         &larr; back to sessions
       </Link>
-      <h2>
-        Session <code>{id}</code>
-      </h2>
+
+      <div className="session-hero">
+        <div>
+          <h2 className="session-hero-id">
+            Session <code>{id}</code>
+          </h2>
+          {session && (
+            <div className="session-hero-meta">
+              <span>Workdir <code>{session.def.workdir}</code></span>
+              <span>·</span>
+              <span>Created {shortAge(session.def.created_at)} ago</span>
+            </div>
+          )}
+        </div>
+        <div className="session-hero-status">
+          <StatusDot
+            tone={healthy ? "ok" : "warn"}
+            ariaLabel={healthy ? "healthy" : "starting"}
+          />
+          <Pill tone={healthy ? "ok" : "warn"}>{stateLabel}</Pill>
+        </div>
+      </div>
+
       {error && <div className="error" role="alert">{error}</div>}
-      {session && (
-        <p>
-          <strong>Health:</strong> {session.health.healthy ? "healthy" : "not ready"}
-          {" — "}
-          <strong>State:</strong> {session.health.state ?? ""}
-        </p>
-      )}
 
-      <h3>Execs</h3>
-      {execs.length === 0 ? (
-        <p data-testid="no-execs">(no execs)</p>
-      ) : (
-        <table className="data-table" data-testid="execs-table">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Started</th>
-              <th>Ended</th>
-              <th>Exit</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {execs.map((e) => (
-              <tr key={e.id} data-testid={`exec-row-${e.id}`}>
-                <td>
-                  <code>{e.id}</code>
-                </td>
-                <td>{e.status.started ? "yes" : "no"}</td>
-                <td>{e.status.ended ? "yes" : "no"}</td>
-                <td>{e.status.exit_code ?? "-"}</td>
-                <td>
-                  <button
-                    type="button"
-                    onClick={() => setActiveExecId(e.id)}
-                    data-testid={`attach-${e.id}`}
+      <div className="session-grid-2col">
+        <section className="panel">
+          <header className="panel-header">
+            <h3>Execs</h3>
+            <span className="muted">{execs.length} total</span>
+          </header>
+          {execs.length === 0 ? (
+            <div className="empty-state-sm" data-testid="no-execs">
+              No execs yet. Run a command below.
+            </div>
+          ) : (
+            <ul className="exec-list" data-testid="execs-table">
+              {execs.map((e) => {
+                const tone = execTone(e);
+                return (
+                  <li
+                    key={e.id}
+                    className={`exec-row${activeExecId === e.id ? " is-active" : ""}`}
+                    data-testid={`exec-row-${e.id}`}
                   >
-                    Attach
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onRemove(e.id)}
-                    data-testid={`remove-${e.id}`}
-                  >
-                    Remove
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+                    <button
+                      type="button"
+                      className="exec-row-main"
+                      onClick={() => setActiveExecId(e.id)}
+                      data-testid={`attach-${e.id}`}
+                    >
+                      <StatusDot tone={tone} ariaLabel={execLabel(e)} />
+                      <div>
+                        <div className="exec-row-id"><code>{e.id}</code></div>
+                        <div className="exec-row-meta">
+                          {execLabel(e)} · {shortAge(e.status.started_at)} ago
+                        </div>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-danger-sm"
+                      onClick={() => onRemove(e.id)}
+                      data-testid={`remove-${e.id}`}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
 
-      <h3>Run a command</h3>
-      <form onSubmit={onRun} className="form" data-testid="run-exec">
-        <label>
-          Command
+        <section className="panel terminal-panel">
+          <header className="panel-header">
+            <h3>{activeExecId ? `Attached: ${activeExecId}` : "Terminal"}</h3>
+            {activeExecId && (
+              <button
+                type="button"
+                className="link-button"
+                onClick={() => setActiveExecId(null)}
+                data-testid="detach-exec"
+              >
+                detach
+              </button>
+            )}
+          </header>
+          {activeExecId ? (
+            <AttachView sessionId={id} execId={activeExecId} />
+          ) : (
+            <div className="empty-state-sm">
+              Pick an exec on the left or run a new one to attach.
+            </div>
+          )}
+        </section>
+      </div>
+
+      <section className="panel command-palette">
+        <header className="panel-header">
+          <h3>Run a command</h3>
+          <span className="muted">Streams stdout/stderr into the terminal</span>
+        </header>
+        <form onSubmit={onRun} className="command-form" data-testid="run-exec">
           <input
+            className="command-input"
             value={command}
             onChange={(e) => setCommand(e.target.value)}
             data-testid="exec-command"
+            placeholder="/bin/sh -c 'echo hi'"
           />
-        </label>
-        <button type="submit" data-testid="submit-exec">
-          Run
-        </button>
-      </form>
-
-      {activeExecId && id && (
-        <AttachView sessionId={id} execId={activeExecId} />
-      )}
+          <label className="keep-toggle">
+            <input
+              type="checkbox"
+              checked={keep}
+              onChange={(e) => setKeep(e.target.checked)}
+              data-testid="exec-keep"
+            />
+            keep
+          </label>
+          <button
+            type="submit"
+            className="btn-primary"
+            data-testid="submit-exec"
+          >
+            Run
+          </button>
+        </form>
+        <div className="env-chip-row">
+          {envs.map((kv, i) => (
+            <span
+              key={`${kv}-${i}`}
+              className="env-chip"
+              data-testid={`env-chip-${i}`}
+            >
+              {kv}
+              <button
+                type="button"
+                aria-label={`remove ${kv}`}
+                onClick={() => setEnvs((cur) => cur.filter((_, j) => j !== i))}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+          <input
+            className="env-input"
+            placeholder="KEY=VALUE"
+            value={envInput}
+            data-testid="env-input"
+            onChange={(e) => setEnvInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                addEnv();
+              }
+            }}
+          />
+        </div>
+      </section>
     </div>
   );
 }
 
 function AttachView(props: { sessionId: string; execId: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const termRef = useRef<XTerm | null>(null);
+  const fitRef = useRef<FitAddon | null>(null);
   const [output, setOutput] = useState("");
   const [exitCode, setExitCode] = useState<number | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
+
+  // Mount xterm once per (session, exec).
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const term = new XTerm({
+      convertEol: true,
+      cursorBlink: true,
+      fontFamily:
+        '"JetBrains Mono", "Fira Code", "Cascadia Code", Consolas, monospace',
+      fontSize: 13,
+      theme: { background: "#0d0d0d", foreground: "#e8e8e8" },
+    });
+    const fit = new FitAddon();
+    term.loadAddon(fit);
+    term.open(containerRef.current);
+    try {
+      fit.fit();
+    } catch {
+      /* container not measurable yet */
+    }
+    termRef.current = term;
+    fitRef.current = fit;
+    const ro = new ResizeObserver(() => {
+      try {
+        fit.fit();
+      } catch {
+        /* ignore */
+      }
+    });
+    ro.observe(containerRef.current);
+    return () => {
+      ro.disconnect();
+      term.dispose();
+      termRef.current = null;
+      fitRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     setOutput("");
     setExitCode(null);
+    if (termRef.current) {
+      termRef.current.clear();
+    }
     const ws = new WebSocket(api.attachUrl(props.sessionId, props.execId));
-    wsRef.current = ws;
     ws.onmessage = (ev) => {
       try {
         const pkt = JSON.parse(ev.data as string) as StreamPacket;
@@ -164,28 +350,40 @@ function AttachView(props: { sessionId: string; execId: string }) {
           const text = new TextDecoder().decode(
             new Uint8Array(pkt.Output.data),
           );
+          if (termRef.current) termRef.current.write(text);
           setOutput((cur) => cur + text);
         } else if ("ExecExit" in pkt) {
           setExitCode(pkt.ExecExit.exit_code);
         }
       } catch {
-        // ignore malformed frames
+        // malformed frames are dropped
       }
     };
     return () => {
       ws.close();
-      wsRef.current = null;
     };
   }, [props.sessionId, props.execId]);
 
+  const exitTone = useMemo<"ok" | "bad" | "muted">(() => {
+    if (exitCode === null) return "muted";
+    return exitCode === 0 ? "ok" : "bad";
+  }, [exitCode]);
+
   return (
     <>
-      <h3>Attached: {props.execId}</h3>
-      <pre className="terminal-output" data-testid="attach-output">
+      <div className="xterm-frame" ref={containerRef} />
+      {/* Mirror output as plain text for accessibility + tests. */}
+      <pre
+        className="attach-output-mirror"
+        data-testid="attach-output"
+        aria-live="polite"
+      >
         {output || "(no output yet)"}
       </pre>
       {exitCode !== null && (
-        <p data-testid="attach-exit">Exited with code {exitCode}</p>
+        <div className="attach-exit" data-testid="attach-exit">
+          <Pill tone={exitTone}>exit {exitCode}</Pill>
+        </div>
       )}
     </>
   );

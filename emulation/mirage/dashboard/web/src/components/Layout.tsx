@@ -1,6 +1,13 @@
+import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
+import * as api from "../api/client";
+import type { SystemInfo } from "../api/types";
 
 export function Layout() {
+  const [sys, setSys] = useState<SystemInfo | null>(null);
+  useEffect(() => {
+    api.getSystem().then(setSys).catch(() => setSys(null));
+  }, []);
   return (
     <div className="layout">
       <aside className="sidebar">
@@ -18,6 +25,18 @@ export function Layout() {
           <NavLink to="/sessions">Sessions</NavLink>
           <NavLink to="/topology">Topology</NavLink>
         </nav>
+        <div className="sidebar-footer">
+          {sys && (
+            <>
+              <div className="sidebar-version" data-testid="daemon-version">
+                v{sys.daemon_version}
+              </div>
+              <div className="sidebar-default-emu" data-testid="default-emulator">
+                default: {sys.default_emulator}
+              </div>
+            </>
+          )}
+        </div>
       </aside>
       <main className="content">
         <Outlet />

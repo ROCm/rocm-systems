@@ -1,22 +1,43 @@
 import { useEffect, useState, type FormEvent } from "react";
 import * as api from "../api/client";
+import type { EmulatorEntry } from "../api/types";
+import { Dropdown, MultiSelect } from "../components/ui/Dropdown";
+import { Modal } from "../components/ui/Modal";
+import { Pill } from "../components/ui/Status";
+import { useToast } from "../components/ui/Toast";
 
 const DEFAULT_NEW_PROFILE = {
   name: "",
   emulator: "noop",
   nodes: 1,
   gpus_per_node: 1,
+  exec_mode: "Functional" as "Functional" | "Clocked",
+  plugins: [] as string[],
   description: "",
 };
 
 export function ProfilesPage() {
+  const toast = useToast();
   const [names, setNames] = useState<string[]>([]);
+  const [emulators, setEmulators] = useState<EmulatorEntry[]>([]);
   const [error, setError] = useState("");
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [form, setForm] = useState(DEFAULT_NEW_PROFILE);
+  const [busy, setBusy] = useState(false);
 
   async function refresh() {
     try {
-      setNames(await api.listProfiles());
+      const [n, em] = await Promise.all([
+        api.listProfiles(),
+        api.listEmulators(),
+      ]);
+      setNames(n);
+      setEmulators(em);
+      if (em.length && !em.some((e) => e.name === form.emulator)) {
+        const def = em.find((e) => e.is_default) ?? em[0];
+        setForm((f) => ({ ...f, emulator: def.name }));
+      }
     } catch (e) {
       setError(String(e));
     }
@@ -24,50 +45,89 @@ export function ProfilesPage() {
 
   useEffect(() => {
     refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const selectedEmu = emulators.find((e) => e.name === form.emulator);
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
     setError("");
+    const name = form.name.trim().toLowerCase();
+    if (!name) {
+      setError("Name is required");
+      return;
+    }
+    setBusy(true);
     try {
+      const pluginsRecord: Record<string, Record<string, unknown>> = {};
+      for (const p of form.plugins) pluginsRecord[p] = {};
       await api.putProfile({
-        name: form.name,
+        name,
         description: form.description || undefined,
         emulator: {
           emulator: form.emulator,
-          plugins: {},
+          plugins: pluginsRecord,
           nodes: form.nodes,
           gpus_per_node: form.gpus_per_node,
-          exec_mode: "Functional",
+          exec_mode: form.exec_mode,
           options: {},
           topology: { root: { name: "", type: "" } },
         },
       });
+      toast.success(`Profile "${name}" created`);
       setForm(DEFAULT_NEW_PROFILE);
+      setWizardOpen(false);
       await refresh();
     } catch (err) {
-      setError(String(err));
+      const msg = String(err);
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setBusy(false);
     }
   }
 
-  async function onDelete(name: string) {
-    if (!confirm(`Delete profile ${name}?`)) return;
+  async function onConfirmDelete() {
+    if (!confirmDelete) return;
+    const target = confirmDelete;
     try {
-      await api.deleteProfile(name);
+      await api.deleteProfile(target);
+      toast.success(`Profile "${target}" deleted`);
+      setConfirmDelete(null);
       await refresh();
     } catch (e) {
-      setError(String(e));
+      const msg = String(e);
+      setError(msg);
+      toast.error(msg);
     }
   }
 
   return (
-    <div className="page">
-      <h2>Profiles</h2>
+    <div className="page page-wide">
+      <div className="page-hero">
+        <div>
+          <h2>Profiles</h2>
+          <p className="page-subtitle">
+            Reusable definitions of an emulator topology + plugin set.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="btn-primary"
+          onClick={() => setWizardOpen(true)}
+          data-testid="open-profile-wizard"
+        >
+          + New profile
+        </button>
+      </div>
       {error && <div className="error" role="alert">{error}</div>}
 
-      <h3>Existing</h3>
       {names.length === 0 ? (
-        <p>(no profiles)</p>
+        <div className="empty-state" data-testid="profiles-empty">
+          <h3>No profiles yet</h3>
+          <p>Create one to start launching sessions.</p>
+        </div>
       ) : (
         <table className="data-table" data-testid="profiles-table">
           <thead>
@@ -82,10 +142,11 @@ export function ProfilesPage() {
                 <td>
                   <code>{n}</code>
                 </td>
-                <td>
+                <td className="row-actions">
                   <button
                     type="button"
-                    onClick={() => onDelete(n)}
+                    className="btn-danger-sm"
+                    onClick={() => setConfirmDelete(n)}
                     data-testid={`delete-profile-${n}`}
                   >
                     Delete
@@ -97,56 +158,225 @@ export function ProfilesPage() {
         </table>
       )}
 
-      <h3>Create profile</h3>
-      <form onSubmit={onCreate} className="form" data-testid="create-profile">
-        <label>
-          Name
-          <input
-            required
-            value={form.name}
-            onChange={(e) => setForm({ ...form, name: e.target.value })}
-            data-testid="new-profile-name"
-          />
-        </label>
-        <label>
-          Emulator
-          <input
-            value={form.emulator}
-            onChange={(e) => setForm({ ...form, emulator: e.target.value })}
-            data-testid="new-profile-emulator"
-          />
-        </label>
-        <label>
-          Nodes
-          <input
-            type="number"
-            min={1}
-            value={form.nodes}
-            onChange={(e) => setForm({ ...form, nodes: +e.target.value })}
-          />
-        </label>
-        <label>
-          GPUs / node
-          <input
-            type="number"
-            min={1}
-            value={form.gpus_per_node}
-            onChange={(e) =>
-              setForm({ ...form, gpus_per_node: +e.target.value })
-            }
-          />
-        </label>
-        <label>
-          Description
-          <input
-            value={form.description}
-            onChange={(e) => setForm({ ...form, description: e.target.value })}
-          />
-        </label>
-        <button type="submit" data-testid="submit-profile">
+      {/* Quick-create row: a real, supported shortcut for power
+          users / scripts that already know which backend they want.
+          Carries the legacy test-ids so historical e2e flows still
+          work; the wizard above is the friendly path. */}
+      <form
+        onSubmit={onCreate}
+        className="quick-create"
+        data-testid="create-profile"
+      >
+        <span className="quick-create-label">Quick create</span>
+        <input
+          aria-label="Quick profile name"
+          placeholder="profile name"
+          value={form.name}
+          onChange={(e) => setForm({ ...form, name: e.target.value })}
+          data-testid="new-profile-name"
+        />
+        <input
+          aria-label="Quick profile emulator"
+          placeholder="emulator"
+          value={form.emulator}
+          onChange={(e) => setForm({ ...form, emulator: e.target.value })}
+          data-testid="new-profile-emulator"
+        />
+        <button
+          type="submit"
+          className="btn-primary-sm"
+          data-testid="submit-profile"
+          disabled={busy}
+        >
           Create
         </button>
       </form>
+
+      <Modal
+        open={wizardOpen}
+        onClose={() => setWizardOpen(false)}
+        title="New profile"
+        testId="profile-wizard"
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => setWizardOpen(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              form="profile-wizard-form"
+              className="btn-primary"
+              disabled={busy}
+              data-testid="wizard-submit"
+            >
+              {busy ? "Creating…" : "Create profile"}
+            </button>
+          </>
+        }
+      >
+        <form
+          id="profile-wizard-form"
+          className="form-grid"
+          onSubmit={onCreate}
+        >
+          <label className="form-field">
+            <span>Name</span>
+            <input
+              required
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              placeholder="e.g. cdna4-tiny"
+              data-testid="wizard-name"
+            />
+          </label>
+
+          <div className="form-field">
+            <span>Emulator backend</span>
+            <Dropdown
+              testId="wizard-emulator"
+              ariaLabel="Emulator backend"
+              value={form.emulator}
+              onChange={(v) => setForm({ ...form, emulator: v, plugins: [] })}
+              options={emulators.map((e) => ({
+                value: e.name,
+                label: e.name,
+                description: e.description,
+                badge: {
+                  text: e.installed ? "installed" : "not installed",
+                  tone: e.installed ? "ok" : "muted",
+                },
+              }))}
+            />
+            {selectedEmu && (
+              <span className="form-help">
+                {selectedEmu.description}
+                {!selectedEmu.installed && (
+                  <>
+                    {" "}
+                    <Pill tone="warn" testId="wizard-not-installed">
+                      not installed
+                    </Pill>
+                  </>
+                )}
+              </span>
+            )}
+          </div>
+
+          <div className="form-field">
+            <span>Exec mode</span>
+            <div className="segmented" role="radiogroup" aria-label="Exec mode">
+              {(["Functional", "Clocked"] as const).map((m) => (
+                <button
+                  type="button"
+                  key={m}
+                  role="radio"
+                  aria-checked={form.exec_mode === m}
+                  className={`segmented-option${form.exec_mode === m ? " is-on" : ""}`}
+                  data-testid={`wizard-mode-${m.toLowerCase()}`}
+                  onClick={() => setForm({ ...form, exec_mode: m })}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <label className="form-field">
+            <span>Nodes</span>
+            <input
+              type="number"
+              min={1}
+              value={form.nodes}
+              data-testid="wizard-nodes"
+              onChange={(e) =>
+                setForm({ ...form, nodes: Math.max(1, +e.target.value || 1) })
+              }
+            />
+          </label>
+
+          <label className="form-field">
+            <span>GPUs per node</span>
+            <input
+              type="number"
+              min={1}
+              value={form.gpus_per_node}
+              data-testid="wizard-gpus"
+              onChange={(e) =>
+                setForm({
+                  ...form,
+                  gpus_per_node: Math.max(1, +e.target.value || 1),
+                })
+              }
+            />
+          </label>
+
+          <div className="form-field span-2">
+            <span>Plugins</span>
+            <MultiSelect
+              testId="wizard-plugins"
+              values={form.plugins}
+              onChange={(plugins) => setForm({ ...form, plugins })}
+              options={(selectedEmu?.available_plugins ?? []).map((p) => ({
+                value: p,
+                label: p,
+              }))}
+              emptyHint={
+                <span className="muted">
+                  {selectedEmu
+                    ? `${selectedEmu.name} doesn't expose pluggable slots in the registry.`
+                    : "Pick an emulator first."}
+                </span>
+              }
+            />
+          </div>
+
+          <label className="form-field span-2">
+            <span>Description</span>
+            <textarea
+              rows={3}
+              value={form.description}
+              data-testid="wizard-description"
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+              placeholder="What is this profile for?"
+            />
+          </label>
+        </form>
+      </Modal>
+
+      <Modal
+        open={confirmDelete !== null}
+        onClose={() => setConfirmDelete(null)}
+        title={`Delete "${confirmDelete}"?`}
+        testId="confirm-delete-profile"
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => setConfirmDelete(null)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn-danger"
+              onClick={onConfirmDelete}
+              data-testid="confirm-delete-profile-confirm"
+            >
+              Delete profile
+            </button>
+          </>
+        }
+      >
+        <p>
+          This removes the profile definition from disk. Any active sessions
+          using it will keep running.
+        </p>
+      </Modal>
     </div>
   );
 }
