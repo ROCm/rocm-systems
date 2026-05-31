@@ -89,12 +89,36 @@ add_library(${GOAMDSMI_SHIM_TARGET} SHARED ${go_amd_smi_sources} ${go_amd_smi_he
 
 target_link_libraries(${GOAMDSMI_SHIM_TARGET} pthread rt m)
 
+if(NOT TARGET amd_smi)
+    # Standalone build (not add_subdirectory'd by the parent project): consume
+    # the exported amd_smi CMake config package. The imported target records
+    # the actual installed library path and include dir, so there is no need to
+    # guess lib vs lib64 (which previously pulled in a 32-bit libamd_smi on
+    # systems where CMAKE_INSTALL_LIBDIR disagreed with the install layout).
+    find_package(
+        amd_smi
+        CONFIG
+        REQUIRED
+        HINTS ${AMDSMI_DIR} $ENV{ROCM_PATH} /opt/rocm
+        PATH_SUFFIXES lib/cmake/amd_smi lib64/cmake/amd_smi
+    )
+endif()
+
+# Link the amd_smi target (in-tree target or the config package's imported
+# target). It propagates both the link path and the public include dir.
 target_link_libraries(${GOAMDSMI_SHIM_TARGET} amd_smi)
-# Use GNUInstallDirs' CMAKE_INSTALL_LIBDIR so the search path follows the
-# system convention (lib64 on 64-bit RPM-based distros, lib elsewhere).
-# This avoids picking up 32-bit libraries from /lib on systems that have
-# both /lib and /lib64 populated.
-target_link_libraries(${GOAMDSMI_SHIM_TARGET} -L${AMDSMI_DIR}/${CMAKE_INSTALL_LIBDIR})
+
+# The smiwrapper OBJECT library compiles the same source and #includes
+# <amd_smi/amdsmi.h>. Cross-directory target_link_libraries requires CMP0079
+# (CMake 3.13+), so instead give it amd_smi's include dirs directly, which is
+# allowed cross-directory. In-tree builds also inherit these from the parent
+# project's directory-scope include_directories().
+if(TARGET go_amd_smi_)
+    get_target_property(_amd_smi_includes amd_smi INTERFACE_INCLUDE_DIRECTORIES)
+    if(_amd_smi_includes)
+        target_include_directories(go_amd_smi_ PRIVATE ${_amd_smi_includes})
+    endif()
+endif()
 
 ## Set the VERSION and SOVERSION values
 set_property(TARGET ${GOAMDSMI_SHIM_TARGET} PROPERTY SOVERSION "${VERSION_MAJOR}")
