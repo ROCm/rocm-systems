@@ -73,6 +73,8 @@ struct DriverMemoryHandle {
   uint64_t handle{};
   int dmabuf_fd{-1};
   uint64_t mmap_offset{0};
+  size_t size{0};
+  hsa_fabric_handle_t fabric_handle{};
 
   bool IsValid() const { return handle != 0; }
 
@@ -213,13 +215,12 @@ public:
   ///
   /// @param[in] agent agent that owns the memory
   /// @param[in] handle driver memory handle to export
-  /// @param[in] size memory size in bytes
   /// @param[in] type shareable handle type to export
   /// @param[in] flags reserved for future use
   /// @param[out] export_handle output handle; @p int* for @p DMABUF_FD,
   ///             @p hsa_fabric_handle_t* for @p FABRIC_HANDLE
   virtual hsa_status_t ExportMemoryHandle(const core::Agent& agent, const DriverMemoryHandle& handle,
-                                          size_t size, ShareableHandleType type, uint32_t flags,
+                                          ShareableHandleType type, uint32_t flags,
                                           void* export_handle) = 0;
 
   /// @brief Imports a memory object from a shareable handle.
@@ -227,15 +228,15 @@ public:
   /// @note The handle must be destroyed with @ref DestroyImportedShareableHandle.
   ///
   /// @param[in] agent agent to import the memory for
-  /// @param[out] handle handle to the imported memory
-  /// @param[out] size imported allocation size in bytes
+  /// @param[out] handle handle to the imported memory; @p handle->size is set to the
+  ///             imported allocation size in bytes
   /// @param[in] type shareable handle type to import
   /// @param[in] import_handle input handle; @p int* for @p DMABUF_FD,
   ///             @p hsa_fabric_handle_t* for @p FABRIC_HANDLE
   /// @param[in] mem address of existing buffer, used to bypass import
   virtual hsa_status_t ImportMemoryHandle(const core::Agent& agent, DriverMemoryHandle* handle,
-                                          size_t* size, ShareableHandleType type,
-                                          void* import_handle, void* mem = nullptr) = 0;
+                                          ShareableHandleType type, void* import_handle,
+                                          void* mem = nullptr) = 0;
 
   /// @brief Destroys the handle created during @ref ImportMemoryHandle.
   ///

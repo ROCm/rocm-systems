@@ -468,7 +468,7 @@ hsa_status_t KfdVirtioDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_G
 }
 
 hsa_status_t KfdVirtioDriver::ExportMemoryHandle(const core::Agent& agent, const core::DriverMemoryHandle& handle,
-                                                 size_t size, core::ShareableHandleType type, uint32_t flags,
+                                                 core::ShareableHandleType type, uint32_t flags,
                                                  void* export_handle) {
   (void)agent;
   (void)flags;
@@ -479,7 +479,7 @@ hsa_status_t KfdVirtioDriver::ExportMemoryHandle(const core::Agent& agent, const
     int dmabuf_fd_res = -1;
     size_t offset_res = 0;
     HSAKMT_STATUS status =
-        vhsaKmtExportDMABufHandle(const_cast<void*>(reinterpret_cast<const void*>(&handle)), size,
+        vhsaKmtExportDMABufHandle(const_cast<void*>(reinterpret_cast<const void*>(&handle)), handle.size,
                                   &dmabuf_fd_res, &offset_res);
     if (status != HSAKMT_STATUS_SUCCESS) {
       if (status == HSAKMT_STATUS_INVALID_PARAMETER) {
@@ -499,10 +499,10 @@ hsa_status_t KfdVirtioDriver::ExportMemoryHandle(const core::Agent& agent, const
 }
 
 hsa_status_t KfdVirtioDriver::ImportMemoryHandle(const core::Agent& agent, core::DriverMemoryHandle* handle,
-                                                 size_t* size, core::ShareableHandleType type,
-                                                 void* import_handle, void* mem) {
+                                                 core::ShareableHandleType type, void* import_handle,
+                                                 void* mem) {
   (void)mem;
-  if (handle == nullptr || size == nullptr || import_handle == nullptr)
+  if (handle == nullptr || import_handle == nullptr)
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   switch (type) {
@@ -516,7 +516,7 @@ hsa_status_t KfdVirtioDriver::ImportMemoryHandle(const core::Agent& agent, core:
       return HSA_STATUS_ERROR;
 
     *handle = core::DriverMemoryHandle{reinterpret_cast<uint64_t>(res.buf_handle)};
-    *size = res.alloc_size;
+    handle->size = res.alloc_size;
     return HSA_STATUS_SUCCESS;
   }
   case core::ShareableHandleType::FABRIC_HANDLE:
