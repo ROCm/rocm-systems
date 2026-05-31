@@ -4066,11 +4066,11 @@ Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
 }
 
 Runtime::MemoryHandle::~MemoryHandle() {
-  if (driver_handle.handle != 0 && region != nullptr)
-    agentOwner()->driver().DestroyShareableHandle(&driver_handle);
-
   if (driver_handle.dmabuf_fd != -1)
     core::Runtime::runtime_singleton_->DmaBufClose(driver_handle.dmabuf_fd);
+
+  if (driver_handle.handle != 0 && region != nullptr)
+    agentOwner()->driver().DestroyShareableHandle(&driver_handle);
 }
 
 
