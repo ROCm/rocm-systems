@@ -1164,7 +1164,7 @@ if(BUILD_SHARED_LIBS AND RCCL_HIP_FATBIN_AT_TAIL)
   # if the layout regresses so it's easy to spot in CI output.
   add_custom_command(TARGET rccl POST_BUILD
     COMMAND ${Python3_EXECUTABLE}
-            ${RCCL_SOURCE_DIR}/cmake/scripts/check_hip_fatbin_tail.py
+            ${PROJECT_SOURCE_DIR}/cmake/scripts/check_hip_fatbin_tail.py
             $<TARGET_FILE:rccl>
     COMMENT "Verifying .hip_fatbin is at the tail of librccl.so"
     VERBATIM
