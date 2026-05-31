@@ -3776,7 +3776,7 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
       return ret;
     }
 
-    auto memoryHandle = std::make_unique<MemoryHandle>(region, size, flags_unused, driver_handle, alloc_flags);
+    auto memoryHandle = std::make_unique<MemoryHandle>(region, flags_unused, driver_handle, alloc_flags);
     *memoryOnlyHandle = MemoryHandle::Convert(memoryHandle.get());
     memory_handles.emplace(*memoryOnlyHandle, std::move(memoryHandle));
   }
@@ -3913,17 +3913,14 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
 
   MemoryHandle *memHandle = mappedHandle->mem_handle;
 
-  // Export memory from owner agent.
-  size_t alloc_size = 0; //Unused
-
   hsa_status_t status;
   if (memHandle->imported && memHandle->is_fabric_handle) {
     status = targetAgent->driver().ImportMemoryHandle(
-        *targetAgent, &driver_handle, &alloc_size, ShareableHandleType::FABRIC_HANDLE,
+        *targetAgent, &driver_handle, ShareableHandleType::FABRIC_HANDLE,
         &memHandle->fabric_handle);
   } else {
     status = targetAgent->driver().ImportMemoryHandle(
-        *targetAgent, &driver_handle, &alloc_size, ShareableHandleType::DMABUF_FD,
+        *targetAgent, &driver_handle, ShareableHandleType::DMABUF_FD,
         &memHandle->driver_handle.dmabuf_fd);
   }
   if (status != HSA_STATUS_SUCCESS) 
@@ -4016,10 +4013,9 @@ Runtime::MappedHandle::MappedHandle(MemoryHandle *mem_handle, AddressHandle *add
   }
 }
 
-Runtime::MemoryHandle::MemoryHandle(const MemoryRegion* region, size_t size, uint64_t flags_unused,
+Runtime::MemoryHandle::MemoryHandle(const MemoryRegion* region, uint64_t flags_unused,
                  DriverMemoryHandle driver_handle, MemoryRegion::AllocateFlags alloc_flag)
           : region(region),
-          size(size),
           ref_count(1),
           use_count(0),
           driver_handle(driver_handle),
@@ -4029,12 +4025,10 @@ Runtime::MemoryHandle::MemoryHandle(const MemoryRegion* region, size_t size, uin
           alloc_flag(alloc_flag) {
 
   assert(driver_handle.handle != 0);
-  assert(size >= 0);
 }
 
 Runtime::MemoryHandle::MemoryHandle(int dmabuf_fd)
   : region(nullptr),
-    size(0),
     ref_count(1),
     use_count(0),
     driver_handle({.dmabuf_fd = dmabuf_fd}),
@@ -4046,7 +4040,6 @@ Runtime::MemoryHandle::MemoryHandle(int dmabuf_fd)
 
 Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
   : region(nullptr),
-    size(0),
     ref_count(1),
     use_count(0),
     driver_handle({.dmabuf_fd = -1}),
@@ -4269,7 +4262,7 @@ hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
   auto agentOwner = memoryHandle->region->owner();
 
   return agentOwner->driver().ExportMemoryHandle(*agentOwner, memoryHandle->driver_handle,
-                                                 memoryHandle->size, ShareableHandleType::DMABUF_FD,
+                                                 ShareableHandleType::DMABUF_FD,
                                                  0, dmabuf_fd);
 }
 
@@ -4300,7 +4293,7 @@ hsa_status_t Runtime::VMemoryExportFabricHandle(hsa_fabric_handle_t* fabric_hand
   auto agentOwner = memoryHandle->region->owner();
 
   return agentOwner->driver().ExportMemoryHandle(*agentOwner, memoryHandle->driver_handle,
-                                                 memoryHandle->size, ShareableHandleType::FABRIC_HANDLE,
+                                                 ShareableHandleType::FABRIC_HANDLE,
                                                  0, fabric_handle);
 }
 

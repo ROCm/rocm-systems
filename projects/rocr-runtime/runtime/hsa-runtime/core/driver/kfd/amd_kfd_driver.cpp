@@ -455,7 +455,7 @@ hsa_status_t KfdDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
 }
 
 hsa_status_t KfdDriver::ExportMemoryHandle(const core::Agent& agent, const core::DriverMemoryHandle& handle,
-                                           size_t size, core::ShareableHandleType type, uint32_t flags,
+                                           core::ShareableHandleType type, uint32_t flags,
                                            void* export_handle) {
   (void)flags;
   if (export_handle == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -475,7 +475,7 @@ hsa_status_t KfdDriver::ExportMemoryHandle(const core::Agent& agent, const core:
     desc.device_handle = gpu_agent.libThunkDev();
     desc.type = HSA_EXTERNAL_HANDLE_DMA_BUF;
     desc.buf_handle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
-    desc.size = size;
+    desc.size = handle.size;
 
     HsaHandleExportFlags export_flags = {};
     HsaMemoryExportResult res = {};
@@ -498,7 +498,7 @@ hsa_status_t KfdDriver::ExportMemoryHandle(const core::Agent& agent, const core:
     desc.device_handle = gpu_agent.libThunkDev();
     desc.type = HSA_EXTERNAL_HANDLE_FABRIC;
     desc.buf_handle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
-    desc.size = size;
+    desc.size = handle.size;
 
     HsaHandleExportFlags export_flags = {};
     HsaMemoryExportResult res = {};
@@ -517,9 +517,9 @@ hsa_status_t KfdDriver::ExportMemoryHandle(const core::Agent& agent, const core:
 }
 
 hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::DriverMemoryHandle* handle,
-                                           size_t* size, core::ShareableHandleType type,
-                                           void* import_handle, void* mem) {
-  if (handle == nullptr || size == nullptr || import_handle == nullptr)
+                                           core::ShareableHandleType type, void* import_handle,
+                                           void* mem) {
+  if (handle == nullptr || import_handle == nullptr)
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   switch (type) {
@@ -540,7 +540,7 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
       return HSA_STATUS_ERROR;
     }
     handle->handle = reinterpret_cast<uint64_t>(res.buf_handle);
-    *size = res.alloc_size;
+    handle->size = res.alloc_size;
     return HSA_STATUS_SUCCESS;
   }
   case core::ShareableHandleType::FABRIC_HANDLE: {
@@ -564,7 +564,7 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
 
     handle->handle = reinterpret_cast<uint64_t>(res.buf_handle);
     rocr::os::DmaBufClose(res.dmabuf_fd);
-    *size = res.alloc_size;
+    handle->size = res.alloc_size;
     return HSA_STATUS_SUCCESS;
   }
   default:
@@ -619,20 +619,19 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
     return HSA_STATUS_ERROR;
 
   core::DriverMemoryHandle targetHandle = {};
-  size_t imported_size = 0;
-  hsa_status_t ret = ImportMemoryHandle(agent, &targetHandle, &imported_size,
-                                        core::ShareableHandleType::DMABUF_FD, &source_fd, mem);
+  hsa_status_t ret = ImportMemoryHandle(agent, &targetHandle, core::ShareableHandleType::DMABUF_FD,
+                                        &source_fd, mem);
 #if defined(__linux__)
   rocr::os::DmaBufClose(source_fd);
 #endif
   if (ret != HSA_STATUS_SUCCESS)
     return ret;
-  assert(imported_size == size);
+  assert(targetHandle.size == size);
 
   int shareable_fd = source_fd;
 #if defined(__linux__)
   // Re-export from DRM; the KFD fd was transient and is already closed.
-  ret = ExportMemoryHandle(agent, targetHandle, size, core::ShareableHandleType::DMABUF_FD, 0,
+  ret = ExportMemoryHandle(agent, targetHandle, core::ShareableHandleType::DMABUF_FD, 0,
                            &shareable_fd);
   if (ret != HSA_STATUS_SUCCESS)
     return ret;
@@ -650,6 +649,7 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
 
   handle->handle = targetHandle.handle;
   handle->dmabuf_fd = shareable_fd;
+  handle->size = size;
   return HSA_STATUS_SUCCESS;
 }
 
