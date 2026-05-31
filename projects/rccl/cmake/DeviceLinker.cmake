@@ -20,9 +20,21 @@ list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 enable_language(RCCLDEV)
 
 # Tell the driver where to find the real compiler.
+#
+# When ENABLE_DEVICE_COVERAGE=ON we pin DL_CLANG to CMAKE_CXX_COMPILER: the
+# user picked their compiler precisely because it carries the in-tree HSA
+# introspection drain + the per-arch device profile RT (libclang_rt.profile.a
+# under <resource-dir>/lib/amdgcn-amd-amdhsa/). Falling back to the ROCm
+# amdclang++ at this point would silently regress to a toolchain without the
+# device profile RT and no -fcoverage-mapping forwarding.
 get_filename_component(_dl_compiler_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
-find_program(DL_CLANG NAMES amdclang++ clang++
-  HINTS "${_dl_compiler_dir}" "${ROCM_PATH}/bin" REQUIRED)
+if(ENABLE_DEVICE_COVERAGE)
+  set(DL_CLANG "${CMAKE_CXX_COMPILER}" CACHE FILEPATH "Device-linker clang driver" FORCE)
+  message(STATUS "Device Linker: DL_CLANG pinned to CMAKE_CXX_COMPILER for device coverage = ${DL_CLANG}")
+else()
+  find_program(DL_CLANG NAMES amdclang++ clang++
+    HINTS "${_dl_compiler_dir}" "${ROCM_PATH}/bin" REQUIRED)
+endif()
 find_program(DL_BUNDLER NAMES clang-offload-bundler
   HINTS "${_dl_compiler_dir}" "${_dl_compiler_dir}/../lib/llvm/bin"
         "${ROCM_PATH}/llvm/bin" REQUIRED)
@@ -60,11 +72,58 @@ message(STATUS "Device Linker: GPU targets = ${DL_GPU_TARGETS}")
 
 # ---------------------------------------------------------------------------
 # Optimization flags (passed to both compile and link modes of the driver)
+#
+# When the top-level CMakeLists.txt auto-forces lite debug for coverage
+# (RCCL_COVERAGE_FORCED_LITE_DEBUG=ON), match it here: full DWARF on
+# coverage-instrumented per-kernel TUs balloons the .s and crushes build
+# time. An explicit Debug + coverage build (user passed --debug) still
+# gets -g so debugging works.
 # ---------------------------------------------------------------------------
-if(CMAKE_BUILD_TYPE MATCHES "Debug")
+if(RCCL_COVERAGE_FORCED_LITE_DEBUG)
+  set(DL_OPT_FLAGS -O1 -gline-tables-only)
+elseif(CMAKE_BUILD_TYPE MATCHES "Debug")
   set(DL_OPT_FLAGS -O1 -g)
 else()
   set(DL_OPT_FLAGS -O3)
+endif()
+
+# ---------------------------------------------------------------------------
+# Device-side coverage instrumentation (ENABLE_DEVICE_COVERAGE).
+#
+# We thread -fprofile-instr-generate / -fcoverage-mapping through every
+# device compile in this pipeline (per-kernel RCCLDEV compiles, dispatcher
+# compile inside --link, and the standalone fat-object compiles below).
+# The assembly-extract pass passes them through to the underlying clang
+# invocation; the LLVM profile metadata sections (__llvm_prf_*, __llvm_cov*)
+# survive extraction because the extractor only strips the amdhsa_kernel /
+# amdgpu_metadata ranges.
+#
+# For the per-arch device.elf to link cleanly we must also resolve the
+# `__llvm_profile_runtime` reference emitted by each instrumented TU. We
+# locate the per-arch device profile runtime archive (libclang_rt.profile.a
+# under the amdgcn-amd-amdhsa resource sub-directory) and pass it to the
+# rccl-device-compile driver, which forwards it to ld.lld.
+# ---------------------------------------------------------------------------
+set(DL_COVERAGE_FLAGS "")
+set(DL_DEVICE_PROFILE_RT "")
+if(ENABLE_DEVICE_COVERAGE)
+  set(DL_COVERAGE_FLAGS -fprofile-instr-generate -fcoverage-mapping)
+  execute_process(
+    COMMAND ${DL_CLANG} --target=amdgcn-amd-amdhsa -print-resource-dir
+    OUTPUT_VARIABLE _dl_amdgcn_resource_dir
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE _dl_amdgcn_resource_rc)
+  if(NOT _dl_amdgcn_resource_rc EQUAL 0 OR _dl_amdgcn_resource_dir STREQUAL "")
+    message(WARNING "Device Linker: failed to query amdgcn resource-dir from ${DL_CLANG}")
+  else()
+    set(_dl_candidate "${_dl_amdgcn_resource_dir}/lib/amdgcn-amd-amdhsa/libclang_rt.profile.a")
+    if(EXISTS "${_dl_candidate}")
+      set(DL_DEVICE_PROFILE_RT "${_dl_candidate}")
+      message(STATUS "Device Linker: coverage enabled, device profile RT = ${DL_DEVICE_PROFILE_RT}")
+    else()
+      message(WARNING "Device Linker: ENABLE_DEVICE_COVERAGE=ON but no archive at ${_dl_candidate}")
+    endif()
+  endif()
 endif()
 
 # ---------------------------------------------------------------------------
@@ -236,6 +295,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
     --arch=${DL_GPU_TARGET}
     --clang=${DL_CLANG}
     ${DL_OPT_FLAGS}
+    ${DL_COVERAGE_FLAGS}
     -std=c++17
     ${DL_HIP_COMPILER_FLAGS}
   )
@@ -309,6 +369,11 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
     endif()
   endif()
 
+  set(_dl_profile_rt_arg "")
+  if(DL_DEVICE_PROFILE_RT)
+    set(_dl_profile_rt_arg "--profile-rt=${DL_DEVICE_PROFILE_RT}")
+  endif()
+
   add_custom_command(
     OUTPUT  ${ARCH_DEVICE_ELF}
     COMMAND ${CMAKE_RCCLDEV_COMPILER}
@@ -318,9 +383,11 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
       ${DL_HIP_COMPILER_FLAGS}
       --dispatcher=${HIPIFY_DIR}/src/device/common.cu.cpp
       ${_rocshmem_bitcode_arg}
+      ${_dl_profile_rt_arg}
       ${_link_def_flags}
       ${_link_inc_flags}
       ${DL_OPT_FLAGS}
+      ${DL_COVERAGE_FLAGS}
       -std=c++17
       -o ${ARCH_DEVICE_ELF}
       @${_link_rsp}
@@ -333,6 +400,21 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   list(APPEND ALL_DEVICE_ELFS "${ARCH_DEVICE_ELF}")
   list(APPEND DL_BUNDLER_TARGETS "hip-amdgcn-amd-amdhsa--${DL_GPU_TARGET}")
   list(APPEND DL_BUNDLER_INPUTS "--input=${ARCH_DEVICE_ELF}")
+
+  # Friendly symlink next to librccl.so: device-${arch}.elf -> device_build/<dir>/device.elf
+  # Lets coverage workflows (and inspection in general) reference the per-arch
+  # device ELF without the leading-hyphen directory wart we use for CDNA build
+  # scheduling. Same byte content that ends up packed into .hip_fatbin; llvm-cov
+  # only needs this file + the merged .profdata for device-side reports.
+  set(_dev_elf_link "${PROJECT_BINARY_DIR}/device-${DL_GPU_TARGET}.elf")
+  add_custom_command(
+    OUTPUT  ${_dev_elf_link}
+    COMMAND ${CMAKE_COMMAND} -E create_symlink ${ARCH_DEVICE_ELF} ${_dev_elf_link}
+    DEPENDS ${ARCH_DEVICE_ELF}
+    COMMENT "DL [${DL_GPU_TARGET}] symlink: device-${DL_GPU_TARGET}.elf -> device_build/.../device.elf"
+    VERBATIM
+  )
+  list(APPEND DEVICE_ELF_SYMLINKS "${_dev_elf_link}")
 
   # =========================================================================
   # Optional: emit LLVM IR for specialized kernels (ninja device_ir)
@@ -438,6 +520,7 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
+    ${DL_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
     -w
@@ -463,6 +546,7 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
+    ${DL_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
     -w
@@ -497,6 +581,7 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.20")
       ${_link_def_flags}
       ${_host_inc_flags}
       ${DL_OPT_FLAGS}
+      ${DL_COVERAGE_FLAGS}
       -std=c++17
       -fPIC
       -w
@@ -518,6 +603,7 @@ else()
       ${_link_def_flags}
       ${_host_inc_flags}
       ${DL_OPT_FLAGS}
+      ${DL_COVERAGE_FLAGS}
       -std=c++17
       -fPIC
       -w
@@ -545,6 +631,7 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
+    ${DL_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
     -w
@@ -589,6 +676,7 @@ if(GENERATE_SYM_KERNELS)
         ${_link_def_flags}
         ${_host_inc_flags}
         ${DL_OPT_FLAGS}
+        ${DL_COVERAGE_FLAGS}
         -std=c++17
         -fPIC
         -w
@@ -606,7 +694,7 @@ endif()
 # Top-level target
 # ===========================================================================
 add_custom_target(device_linker_build ALL
-  DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ} ${COLLECTIVES_FAT_OBJ} ${DDA_ALL_REDUCE_IPC_FAT_OBJ} ${SYM_FAT_OBJS}
+  DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ} ${COLLECTIVES_FAT_OBJ} ${DDA_ALL_REDUCE_IPC_FAT_OBJ} ${SYM_FAT_OBJS} ${DEVICE_ELF_SYMLINKS}
 )
 add_dependencies(device_linker_build hipify_all)
 

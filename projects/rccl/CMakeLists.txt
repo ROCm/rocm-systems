@@ -73,6 +73,28 @@ option(BUILD_EXT_EXAMPLES                      "Build ext-{net,tuner,profiler} e
 option(COLLTRACE                               "Collective Trace Option"                       ON)
 option(DUMP_ASM                                "Disassemble and dump"                          OFF)
 option(ENABLE_CODE_COVERAGE                    "Enable code coverage"                          OFF)
+option(ENABLE_DEVICE_COVERAGE                  "Enable device-side coverage (implies ENABLE_CODE_COVERAGE)" OFF)
+if(ENABLE_DEVICE_COVERAGE AND NOT ENABLE_CODE_COVERAGE)
+  message(STATUS "ENABLE_DEVICE_COVERAGE=ON implies ENABLE_CODE_COVERAGE=ON")
+  set(ENABLE_CODE_COVERAGE ON CACHE BOOL "Enable code coverage" FORCE)
+endif()
+
+# Coverage requires Debug build type (src/CMakeLists.txt enforces it).
+# When the caller asked for coverage but didn't pick a build type, default
+# to Debug and replace the toolchain's -g -O1 with -gline-tables-only -O1:
+# llvm-cov needs line tables for source mapping, but full DWARF on
+# coverage-instrumented per-kernel TUs explodes assembly size. If the
+# caller explicitly picked Debug they get the toolchain's -g (they asked
+# for it). Explicit non-Debug + coverage still hits the fatal_error below.
+if(ENABLE_CODE_COVERAGE AND NOT CMAKE_BUILD_TYPE)
+  message(STATUS "ENABLE_CODE_COVERAGE=ON: forcing CMAKE_BUILD_TYPE=Debug with CMAKE_CXX_FLAGS_DEBUG=\"-gline-tables-only -O1\"")
+  set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type forced by coverage" FORCE)
+  set(CMAKE_CXX_FLAGS_DEBUG "-gline-tables-only -O1" CACHE STRING "Coverage debug flags" FORCE)
+  set(CMAKE_C_FLAGS_DEBUG   "-gline-tables-only -O1" CACHE STRING "Coverage debug flags" FORCE)
+  # Signal to DeviceLinker.cmake so DL_OPT_FLAGS matches (the RCCLDEV
+  # custom language has its own hardcoded -O1 -g default it'll otherwise use).
+  set(RCCL_COVERAGE_FORCED_LITE_DEBUG ON CACHE BOOL "Coverage auto-forced lite debug" FORCE)
+endif()
 option(ENABLE_NPKIT                            "Enable NPKit"                                  OFF)
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
 option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     ON)

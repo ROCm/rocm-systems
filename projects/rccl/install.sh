@@ -14,6 +14,7 @@ build_local_gpu_only=false
 build_amdgpu_targets=""
 build_package=false
 build_release=true
+debug_explicit=false
 debug_fast=false
 build_static=false
 build_tests=false
@@ -22,6 +23,7 @@ clean_build=true
 collective_trace=true
 dump_asm=false
 enable_code_coverage=false
+enable_device_coverage=false
 enable_ninja=""
 install_dependencies=false
 install_library=false
@@ -63,7 +65,12 @@ function display_help()
     echo "       --disable-roctx         Build without ROCTX logging"
     echo "       --disable-warp-speed    Disable WARP_SPEED kernel optimizations"
     echo "       --dump-asm              Disassemble code and dump assembly with inline code"
-    echo "    -c|--enable-code-coverage  Enable code coverage"
+    echo "    -c|--enable-code-coverage  Enable host-side code coverage instrumentation"
+    echo "       --enable-device-coverage Enable host + device code coverage (in-tree HSA introspection drain;"
+    echo "                                 requires a clang built from llvm-decouple or equivalent)."
+    echo "                                 Forces Debug build type. Without explicit --debug uses"
+    echo "                                 -gline-tables-only -O1 (enough for llvm-cov source mapping,"
+    echo "                                 no per-kernel .s blow-up). Pass --debug to opt in to full -g."
     echo "       --enable_backtrace      Build with custom backtrace support"
     echo "       --enable-mpi-tests      Enable MPI-based tests (requires --debug and MPI installation; set MPI_PATH if not in /opt/ompi)"
     echo "    -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace, and collective trace support)"
@@ -119,7 +126,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,roctx-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-warp-speed,dump-asm,enable-code-coverage,enable-device-coverage,enable_backtrace,enable-mpi-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,roctx-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -137,8 +144,8 @@ while true; do
          --address-sanitizer)        build_address_sanitizer=true;                                                                     shift ;;
          --amdgpu_targets)           build_amdgpu_targets=${2};                                                                        shift 2 ;;
          --cmake-options)            custom_cmake_options=${2};                                                                        shift 2 ;;
-         --debug)                    build_release=false;                                                                              shift ;;
-         --debug-fast)               build_release=false; debug_fast=true;                                                             shift ;;
+         --debug)                    build_release=false; debug_explicit=true;                                                         shift ;;
+         --debug-fast)               build_release=false; debug_fast=true; debug_explicit=true;                                        shift ;;
     -d | --dependencies)             install_dependencies=true;                                                                        shift ;;
          --device-linker)            device_linker=true;                                                                               shift ;;
          --disable-colltrace)        collective_trace=false;                                                                           shift ;;
@@ -146,6 +153,7 @@ while true; do
          --disable-warp-speed)       warp_speed_enabled=false;                                                                         shift ;;
          --dump-asm)                 dump_asm=true;                                                                                    shift ;;
     -c | --enable-code-coverage)     enable_code_coverage=true;                                                                        shift ;;
+         --enable-device-coverage)   enable_code_coverage=true; enable_device_coverage=true;                                            shift ;;
          --enable_backtrace)         build_bfd=true;                                                                                   shift ;;
          --enable-mpi-tests)         enable_mpi_tests=true;                                                                            shift ;;
     -f | --fast)                     build_local_gpu_only=true; collective_trace=false;                                                shift ;;
@@ -299,6 +307,21 @@ fi
 mkdir -p build; cd build
 
 # Create and go to build type directory
+# Coverage requires Debug build type (src/CMakeLists.txt has a fatal_error
+# otherwise). If the caller asked for coverage but didn't pass --debug,
+# *don't* pass -DCMAKE_BUILD_TYPE=Debug here: leave CMAKE_BUILD_TYPE unset
+# so the CMakeLists.txt coverage block can set Debug *and* override
+# CMAKE_CXX_FLAGS_DEBUG to "-gline-tables-only -O1" (avoids the full-DWARF
+# per-kernel assembly blow-up under -fcoverage-mapping). We still cd into
+# the debug/ build dir so subsequent install/test paths line up. Explicit
+# --debug means the caller wants -g; honor it.
+coverage_forced_debug=false
+if [[ "${enable_code_coverage}" == true && "${debug_explicit}" == false ]]; then
+    build_release=false
+    coverage_forced_debug=true
+    echo "install.sh: coverage requested without --debug; CMakeLists.txt will default CMAKE_BUILD_TYPE=Debug with -gline-tables-only -O1 (pass --debug to opt in to full -g)"
+fi
+
 if [[ "${build_release}" == true ]]; then
     mkdir -p release; cd release
 else
@@ -308,12 +331,12 @@ fi
 # build type
 if [[ "${build_release}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DCMAKE_BUILD_TYPE=Release"
+elif [[ "${coverage_forced_debug}" == true ]]; then
+    : # CMAKE_BUILD_TYPE intentionally unset; CMakeLists.txt coverage block sets Debug + lite-debug flags
+elif [[ "${debug_fast}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DCMAKE_BUILD_TYPE=Debug -DCMAKE_BUILD_SUBTYPE=DebugFast"
 else
-    if [[ "${debug_fast}" == true ]]; then
-	cmake_common_options="${cmake_common_options} -DCMAKE_BUILD_TYPE=Debug -DCMAKE_BUILD_SUBTYPE=DebugFast"
-    else
-	cmake_common_options="${cmake_common_options} -DCMAKE_BUILD_TYPE=Debug"
-    fi
+    cmake_common_options="${cmake_common_options} -DCMAKE_BUILD_TYPE=Debug"
 fi
 
 # Address sanitizer
@@ -324,6 +347,11 @@ fi
 # Enable code coverage
 if [[ "${enable_code_coverage}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DENABLE_CODE_COVERAGE=ON"
+fi
+
+# Enable device-side code coverage (in-tree HSA introspection drain)
+if [[ "${enable_device_coverage}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DENABLE_DEVICE_COVERAGE=ON"
 fi
 
 # Backtrace support

@@ -142,6 +142,16 @@ ifeq ($(ENABLE_DEVICE_API), 1)
 HIPCUFLAGS += -DENABLE_DEVICE_API
 endif
 
+# Enable LLVM source-based coverage instrumentation on both host and device
+# sides. The patched clang driver in llvm-decouple auto-links the per-arch
+# device profile runtime (libclang_rt.profile.a) and force-links the host-side
+# drain symbol (__llvm_profile_hip_collect_device_data), which registers an
+# atexit handler to walk loaded ELF code objects via HSA introspection.
+ifeq ($(ENABLE_DEVICE_COVERAGE), 1)
+HIPCUFLAGS += -fprofile-instr-generate -fcoverage-mapping
+HIPLDFLAGS += -fprofile-generate
+endif
+
 LIBRARIES += rccl dl
 HIPLDFLAGS += $(LIBRARIES:%=-l%)
 

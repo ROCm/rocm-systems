@@ -871,10 +871,24 @@ if(ENABLE_CODE_COVERAGE)
 
   message(STATUS "Code coverage is enabled with build type '${CMAKE_BUILD_TYPE}'.")
 
-  target_compile_options(rccl PRIVATE
-    -fvisibility=default
-    "SHELL:-Xarch_host -fprofile-instr-generate"
-    "SHELL:-Xarch_host -fcoverage-mapping")
+  if(ENABLE_DEVICE_COVERAGE)
+    message(STATUS "Device-side coverage is enabled (host + device instrumented).")
+    # Apply coverage flags to both host and device compilation. Sam Crow's
+    # clang-driver work forwards -fcoverage-mapping/-fprofile-instr-generate
+    # to the per-arch device cc1 invocation, so we deliberately drop the
+    # -Xarch_host qualifier here. The device-side libclang_rt.profile.a is
+    # auto-linked by the driver when -fprofile-instr-generate is set for
+    # offload arches.
+    target_compile_options(rccl PRIVATE
+      -fvisibility=default
+      -fprofile-instr-generate
+      -fcoverage-mapping)
+  else()
+    target_compile_options(rccl PRIVATE
+      -fvisibility=default
+      "SHELL:-Xarch_host -fprofile-instr-generate"
+      "SHELL:-Xarch_host -fcoverage-mapping")
+  endif()
 
   set(COVERAGE_SHARED_LINKER_FLAGS
     -fprofile-generate
@@ -888,6 +902,24 @@ if(ENABLE_CODE_COVERAGE)
 
   target_link_options(rccl PRIVATE ${COVERAGE_SHARED_LINKER_FLAGS})
   target_link_options(rccl PRIVATE ${COVERAGE_EXE_LINKER_FLAGS})
+
+  # Force-link the HIP device-data drain symbol so the host profile RT's
+  # InstrProfilingPlatformROCm.cpp.o gets pulled in (it's only included on
+  # demand). That .o registers the atexit hook which walks loaded HSA code
+  # objects, reads each device.elf's __llvm_prf_cnts via HSA introspection,
+  # and merges device counters into the same .profraw the host writes.
+  # Without this, .profraw contains host counters only and llvm-cov reports
+  # 0% on every device kernel.
+  #
+  # We add it on librccl's link rather than relying on the clang driver
+  # heuristic (the driver only force-links it for explicit `-x hip` link
+  # invocations; .o-only links from rccl-tests and friends don't qualify).
+  # One reference anywhere in the process is sufficient — once librccl is
+  # loaded, the atexit handler is registered for the whole process.
+  if(ENABLE_DEVICE_COVERAGE)
+    target_link_options(rccl PRIVATE
+      "LINKER:-u,__llvm_profile_hip_collect_device_data")
+  endif()
 elseif(BUILD_TESTS) # Enable default/hidden visibility based on build type and ROCM_VERSION
   if (ROCM_VERSION VERSION_GREATER_EQUAL "60400" AND CMAKE_BUILD_TYPE MATCHES "Debug")
     target_compile_options(rccl PRIVATE -fvisibility=default)
