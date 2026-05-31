@@ -149,8 +149,7 @@ public:
   hsa_status_t Unmap(core::DriverMemoryHandle handle, void *mem, size_t offset,
                      size_t size) override;
   hsa_status_t CreateShareableHandle(void* va, void* mem, size_t size, const core::Agent& agent,
-                                     core::DriverMemoryHandle* handle, uint64_t* offset, int* drm_fd,
-                                     uint64_t* drm_fd_offset) override;
+                                     core::DriverMemoryHandle* handle, uint64_t* offset) override;
   hsa_status_t DestroyShareableHandle(core::DriverMemoryHandle* handle) override;
 
   /// @brief Submits packets to the driver for execution.

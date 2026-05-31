@@ -592,8 +592,7 @@ hsa_status_t KfdDriver::Unmap(core::DriverMemoryHandle handle, void *mem,
 
 hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
                                               const core::Agent& agent,
-                                              core::DriverMemoryHandle* handle, uint64_t* offset,
-                                              int* handle_fd, uint64_t* mmap_offset) {
+                                              core::DriverMemoryHandle* handle, uint64_t* offset) {
   // Create handle by exporting and importing the memory from the owning agent.
   (void)va;
 
@@ -623,11 +622,11 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
   int shareable_fd = source_fd;
 #if defined(__linux__)
   // Re-export from DRM; the KFD fd was transient and is already closed.
-  ret = ExportDMABuf(agent, targetHandle, size, &shareable_fd, mmap_offset);
+  ret = ExportDMABuf(agent, targetHandle, size, &shareable_fd, &handle->mmap_offset);
   if (ret != HSA_STATUS_SUCCESS)
     return ret;
   /*
-   * We converted mem into a shareable_handle. The shareable_handle will keep the reference count
+   * We converted mem into a driver handle. The driver handle will keep the reference count
    * inside the KMD so we can free the original KFD allocation.
    */
   HSAKMT_CALL(hsaKmtFreeMemory(mem, size));
@@ -635,11 +634,11 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
 
   const auto devhandle = static_cast<const GpuAgent&>(agent).libThunkDev();
   const auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(targetHandle.handle);
-  if (HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(devhandle, memhandle, mmap_offset)) != HSAKMT_STATUS_SUCCESS)
+  if (HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(devhandle, memhandle, &handle->mmap_offset)) != HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
 
   handle->handle = targetHandle.handle;
-  *handle_fd = shareable_fd;
+  handle->dmabuf_fd = shareable_fd;
   return HSA_STATUS_SUCCESS;
 }
 

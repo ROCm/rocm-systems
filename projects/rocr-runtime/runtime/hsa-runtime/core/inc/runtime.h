@@ -1014,8 +1014,7 @@ class Runtime {
 
   struct MemoryHandle {
     MemoryHandle(const MemoryRegion* region, size_t size, uint64_t flags_unused,
-                 DriverMemoryHandle shareable_handle, int dmabuf_fd, uint64_t mmap_offset,
-                 MemoryRegion::AllocateFlags alloc_flag);
+                 DriverMemoryHandle driver_handle, MemoryRegion::AllocateFlags alloc_flag);
     MemoryHandle(int dmabuf_fd);
     MemoryHandle(hsa_fabric_handle_t fabric_handle);
     ~MemoryHandle();
@@ -1035,9 +1034,7 @@ class Runtime {
     size_t size;
     int ref_count;
     int use_count;
-    DriverMemoryHandle shareable_handle;  // handle returned by Driver::Allocate(NoAddress = 1)
-    int dmabuf_fd;
-    uint64_t mmap_offset;
+    DriverMemoryHandle driver_handle;  // handle returned by Driver::Allocate(NoAddress = 1)
     bool imported; /* True is this BO was imported from another process */
     bool is_fabric_handle;
     hsa_fabric_handle_t fabric_handle;
@@ -1065,7 +1062,7 @@ class Runtime {
     Agent* targetAgent;
     hsa_access_permission_t permissions;
     MappedHandle* mappedHandle;
-    DriverMemoryHandle shareable_handle;
+    DriverMemoryHandle driver_handle;
   };
 
   struct MappedHandle {
