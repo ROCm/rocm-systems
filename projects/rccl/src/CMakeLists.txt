@@ -491,13 +491,17 @@ foreach(SRC_FILE ${SRC_FILES})
   endif()
 endforeach()
 
-set(NCCL_DEVICE_HEADER "${PROJECT_BINARY_DIR}/include/rccl/nccl_device.h")
+# Use a stamp as OUTPUT: copy_if_different preserves mtimes (so OUTPUT would
+# lag DEPENDS forever) and copy_directory bumps every header's mtime on each
+# refire => forcing recompile of most rccl objects.
+# Touching a stamp at end keeps OUTPUT >= DEPENDS, so the rule only fires on real header changes.
+set(NCCL_DEVICE_HEADER_STAMP "${PROJECT_BINARY_DIR}/include/.nccl_device_headers.stamp")
 # Copy hip_compat.h as-is (no hipification — contains both CUDA and HIP paths)
 set(HIP_COMPAT_SRC "${RCCL_SOURCE_DIR}/src/include/nccl_device/hip_compat.h")
 set(HIP_COMPAT_DST "${HIPIFY_DIR}/src/include/nccl_device/hip_compat.h")
 add_custom_command(
   OUTPUT ${HIP_COMPAT_DST}
-  COMMAND ${CMAKE_COMMAND} -E copy ${HIP_COMPAT_SRC} ${HIP_COMPAT_DST}
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${HIP_COMPAT_SRC} ${HIP_COMPAT_DST}
   MAIN_DEPENDENCY ${HIP_COMPAT_SRC}
   COMMENT "Copying hip_compat.h (no hipification)"
 )
@@ -505,14 +509,16 @@ list(APPEND HIP_SOURCES ${HIP_COMPAT_DST})
 list(APPEND NCCL_DEVICE_HIP_FILES ${HIP_COMPAT_DST})
 
 add_custom_command(
-  OUTPUT ${NCCL_DEVICE_HEADER}
+  OUTPUT ${NCCL_DEVICE_HEADER_STAMP}
   COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_BINARY_DIR}/include"
-  COMMAND ${CMAKE_COMMAND} -E copy "${HIPIFY_DIR}/src/include/nccl_device.h" "${PROJECT_BINARY_DIR}/include/"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different "${HIPIFY_DIR}/src/include/nccl_device.h" "${PROJECT_BINARY_DIR}/include/"
   COMMAND ${CMAKE_COMMAND} -E copy_directory "${HIPIFY_DIR}/src/include/nccl_device" "${PROJECT_BINARY_DIR}/include/nccl_device"
+  COMMAND ${CMAKE_COMMAND} -E touch ${NCCL_DEVICE_HEADER_STAMP}
   DEPENDS ${NCCL_DEVICE_HIP_FILES}
+  COMMENT "Staging nccl_device headers into include/"
   VERBATIM
 )
-add_custom_target(copy_nccl_device_headers DEPENDS ${NCCL_DEVICE_HEADER})
+add_custom_target(copy_nccl_device_headers DEPENDS ${NCCL_DEVICE_HEADER_STAMP})
 
 # Adding custom target to hipify all the source files
 # This is required to make sure that all the hipified source files are
@@ -799,8 +805,10 @@ if (HAVE_PARALLEL_JOBS)
 endif()
 
 if (ROCM_VERSION VERSION_GREATER_EQUAL "60200")
-  target_compile_options(rccl PRIVATE --offload-compress)    # Compress GPU code at compile time.
-  target_link_libraries(rccl PRIVATE --offload-compress)     # Compress GPU code at link time.
+  # Compress the .hip_fatbin offload bundle at link only.
+  # If used as compile option, host-only .cc TUs skip the
+  # bundler and emit -Wunused-command-line-argument.
+  target_link_options(rccl PRIVATE --offload-compress)
   message(STATUS "--offload-compress enabled - ROCm version >= 6.2.0")
 else()
   message(STATUS "--offload-compress disabled - ROCm version < 6.2.0")

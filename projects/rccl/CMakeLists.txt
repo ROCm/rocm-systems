@@ -632,13 +632,18 @@ endif()
 rocm_install_targets(TARGETS rccl)
 rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/rccl/rccl.h src/include/plugin/nccl_net.h
              DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)
+# Install nccl.h alongside rccl.h: hipified device headers (core_tmp.h, etc.)
+# include <nccl.h> verbatim because hipify treats angle-bracket includes as
+# system headers and won't rewrite them. Identical content to rccl.h.
+rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/nccl.h
+             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)
 rocm_install(FILES       src/include/api_trace.h
              DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl/amd_detail)
-rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/nccl.h
-                         ${PROJECT_BINARY_DIR}/include/nccl_device.h
-             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-rocm_install(DIRECTORY   ${PROJECT_BINARY_DIR}/include/nccl_device/
-             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/nccl_device)
+rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/nccl_device.h
+             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)
+rocm_install(DIRECTORY   ${PROJECT_BINARY_DIR}/include/nccl_device
+             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl
+             FILES_MATCHING PATTERN "*.h")
 ## Optional: install LLVM bitcode artifacts when EMIT_LLVM_IR is enabled.
 ## librccl_device.bc, nccl_device_wrapper.h, hipified nccl_device headers,
 ## and nccl.h (same as rccl.h; nccl_device #includes <nccl.h>) are produced
