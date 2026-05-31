@@ -373,12 +373,24 @@ hsa_status_t MacAqlQueue::SubmitKernel(const hsa_kernel_dispatch_packet_t& packe
 
   uint64_t kernarg_gpu = 0;
   std::vector<std::pair<uint64_t, uint64_t>> kernarg_translations;
-  if (packet.kernarg_address != nullptr && kd->kernarg_size != 0) {
+  size_t kernarg_stage_size = kd->kernarg_size;
+  // rocBLAS/Tensile UserArgs kernels request the kernarg-pointer SGPR
+  // (kPropKernargPtr) but report kernarg_size==0; without a staged buffer they
+  // dispatch with kernarg_gpu=0 and the kernel faults reading kernargs from
+  // address 0 (queue 0x1000 abort, e.g. hipBLAS SGEMM). Stage a fallback-size
+  // blob from the host kernargs so the kernarg-pointer SGPR is valid.
+  if (packet.kernarg_address != nullptr && kd->kernarg_size == 0 &&
+      (kd->kernel_code_properties & kPropKernargPtr) != 0) {
+    const char* env = std::getenv("ROCR_MACOS_AQL_ZERO_KERNARG_SIZE");
+    kernarg_stage_size =
+        env != nullptr ? static_cast<size_t>(std::strtoul(env, nullptr, 0)) : 512;
+  }
+  if (packet.kernarg_address != nullptr && kernarg_stage_size != 0) {
     void* kernarg_cpu = nullptr;
-    status = AllocateDispatchScratch(kd->kernarg_size, 16, &kernarg_cpu, &kernarg_gpu);
+    status = AllocateDispatchScratch(kernarg_stage_size, 16, &kernarg_cpu, &kernarg_gpu);
     if (status != HSA_STATUS_SUCCESS) return status;
 
-    std::vector<uint8_t> kernargs(kd->kernarg_size);
+    std::vector<uint8_t> kernargs(kernarg_stage_size);
     std::memcpy(kernargs.data(), packet.kernarg_address, kernargs.size());
     for (size_t off = 0; off + sizeof(uint64_t) <= kernargs.size(); off += sizeof(uint64_t)) {
       uint64_t value = 0;
