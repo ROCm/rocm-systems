@@ -43,6 +43,9 @@ constexpr uint32_t regCP_HQD_PQ_DOORBELL_CONTROL = 0x1fb8;
 constexpr uint32_t regCP_HQD_PQ_CONTROL = 0x1fba;
 constexpr uint32_t regCP_HQD_GFX_CONTROL = 0x1e9f;
 constexpr uint32_t regCP_HQD_DEQUEUE_REQUEST = 0x1fc1;
+// Pair RESET_WAVES dequeue with an SPI compute-queue reset (matches tinygrad's
+// gfx12 _dequeue_hqds). GC BASE_IDX=0.
+constexpr uint32_t regSPI_COMPUTE_QUEUE_RESET = 0x1f73;
 constexpr uint32_t regCP_MQD_CONTROL = 0x1fcb;
 constexpr uint32_t regCP_HQD_EOP_BASE_ADDR = 0x1fce;
 constexpr uint32_t regCP_HQD_EOP_BASE_ADDR_HI = 0x1fcf;
@@ -329,6 +332,7 @@ hsa_status_t ReclaimActiveHqd(const DirectQueuePlatform& platform,
     }
     platform.WriteMmio32(kGcBase0, regCP_HQD_DEQUEUE_REQUEST,
                          kCpHqdDequeueResetWaves);
+    platform.WriteMmio32(kGcBase0, regSPI_COMPUTE_QUEUE_RESET, 1);
     uint32_t now_active = active;
     for (uint32_t i = 0; i < 1000; ++i) {
       platform.ReadMmio32(kGcBase0, regCP_HQD_ACTIVE, &now_active);
@@ -1668,7 +1672,7 @@ DirectQueueMqd BuildPm4DirectQueueMqd(const DirectQueueLayout& layout,
   mqd[1] = 1;
   constexpr uint32_t kStaticThreadMgmtDwords[] = {0x17u, 0x18u, 0x1Au, 0x1Bu};
   for (uint32_t dw : kStaticThreadMgmtDwords) mqd[dw] = 0xFFFFFFFFu;
-  mqd[0x2C] = 7;
+  mqd[0x20] = 7;  // compute_misc_reserved (dword 0x2C was a static_thread_mgmt_se4 slip)
 
   const uint64_t eop_base_shifted = layout.eop_gpu >> 8;
   mqd[0xA5] = static_cast<uint32_t>(eop_base_shifted);
@@ -2075,6 +2079,7 @@ hsa_status_t DestroyDirectQueue(const DirectQueuePlatform& platform,
   if (options.use_firmware_dequeue) {
     platform.WriteMmio32(kGcBase0, regCP_HQD_DEQUEUE_REQUEST,
                          kCpHqdDequeueResetWaves);
+    platform.WriteMmio32(kGcBase0, regSPI_COMPUTE_QUEUE_RESET, 1);
     for (uint32_t i = 0; i < 100; ++i) {
       platform.ReadMmio32(kGcBase0, regCP_HQD_ACTIVE, &active);
       if (active == 0) break;
@@ -2188,11 +2193,20 @@ hsa_status_t SubmitDirectQueue(const DirectQueuePlatform& platform,
     DeselectHqd(platform);
     return HSA_STATUS_ERROR;
   }
-  status = platform.WriteMmio32(kGcBase0, regCP_HQD_PQ_WPTR_LO,
-                                static_cast<uint32_t>(new_wptr));
-  if (status == HSA_STATUS_SUCCESS) {
-    status = platform.WriteMmio32(kGcBase0, regCP_HQD_PQ_WPTR_HI,
-                                  static_cast<uint32_t>(new_wptr >> 32));
+  // Optionally skip the MMIO wptr poke: tinygrad/Linux deliver wptr only via the
+  // VRAM wptr + doorbell value, and writing CP_HQD_PQ_WPTR_* on a live HQD races
+  // the CP's own use of the context window. Default preserves the existing poke;
+  // ROCR_MACOS_DIRECT_QUEUE_MMIO_WPTR=0 skips it (doorbell value latches wptr).
+  const char* mmio_wptr_env = std::getenv("ROCR_MACOS_DIRECT_QUEUE_MMIO_WPTR");
+  const bool skip_mmio_wptr =
+      mmio_wptr_env != nullptr && std::strcmp(mmio_wptr_env, "0") == 0;
+  if (!skip_mmio_wptr) {
+    status = platform.WriteMmio32(kGcBase0, regCP_HQD_PQ_WPTR_LO,
+                                  static_cast<uint32_t>(new_wptr));
+    if (status == HSA_STATUS_SUCCESS) {
+      status = platform.WriteMmio32(kGcBase0, regCP_HQD_PQ_WPTR_HI,
+                                    static_cast<uint32_t>(new_wptr >> 32));
+    }
   }
   if (options.trace) {
     uint32_t active = 0;
