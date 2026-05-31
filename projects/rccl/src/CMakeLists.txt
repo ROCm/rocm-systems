@@ -1139,6 +1139,38 @@ if(TIMETRACE)
   target_link_options(rccl PRIVATE -ftime-trace)
 endif()
 
+# .hip_fatbin tail-placement linker script.
+#
+# Splices the merged .hip_fatbin output section to the end of librccl.so via
+# lld's INSERT AFTER directive (the default linker script is preserved).
+# Keeps text<->data distances small so host PC32/PLT32/GOTPCRELX/32S
+# relocations stay in range when the bundled device image grows past
+# INT32_MAX.  Applies to the host link only; the offload device-link does
+# not see the script, so it works identically for ENABLE_DEVICE_LINKER=ON
+# (custom pipeline) and OFF (-fgpu-rdc --hip-link).  No-op for static builds
+# (which go through --emit-static-lib and never run ld).
+if(BUILD_SHARED_LIBS AND RCCL_HIP_FATBIN_AT_TAIL)
+  set(_rccl_fatbin_script "${RCCL_SOURCE_DIR}/cmake/linker_scripts/hip_fatbin_tail.ld")
+  if(NOT EXISTS "${_rccl_fatbin_script}")
+    message(FATAL_ERROR "RCCL_HIP_FATBIN_AT_TAIL=ON but linker script not found: ${_rccl_fatbin_script}")
+  endif()
+  target_link_options(rccl PRIVATE "LINKER:-T,${_rccl_fatbin_script}")
+  set_property(TARGET rccl APPEND PROPERTY LINK_DEPENDS "${_rccl_fatbin_script}")
+  message(STATUS "RCCL: .hip_fatbin will be placed at end of librccl.so (${_rccl_fatbin_script})")
+
+  # Informational post-build check: verify .hip_fatbin really is the last
+  # alloc PROGBITS section.  Never fails the build (a future toolchain may
+  # legitimately add a new tail section); just prints a WARNING to the log
+  # if the layout regresses so it's easy to spot in CI output.
+  add_custom_command(TARGET rccl POST_BUILD
+    COMMAND ${Python3_EXECUTABLE}
+            ${RCCL_SOURCE_DIR}/cmake/scripts/check_hip_fatbin_tail.py
+            $<TARGET_FILE:rccl>
+    COMMENT "Verifying .hip_fatbin is at the tail of librccl.so"
+    VERBATIM
+  )
+endif()
+
 if(NOT BUILD_SHARED_LIBS)
   message(STATUS "Building static RCCL library")
 else()
