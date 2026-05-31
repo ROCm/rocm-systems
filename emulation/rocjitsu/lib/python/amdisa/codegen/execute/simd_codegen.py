@@ -267,8 +267,10 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
 # over an f32 source and result (so the VOP3 twin routes through the f32 unary
 # modifier glue rather than reusing the plain VOP1 path). v_mov_b32's VOP3 body
 # treats src0 as f32 and applies the same modifiers, so it belongs here too.
+# v_accvgpr_mov_b32 (acc<->acc move) has the identical f32-modifier VOP3 body.
 _VOP3_UNARY_FP_F32 = {
     "v_mov_b32",
+    "v_accvgpr_mov_b32",
     "v_floor_f32",
     "v_ceil_f32",
     "v_trunc_f32",
@@ -307,6 +309,7 @@ _VOP3_UNARY_SKIP = {
 SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
     # --- bitwise / move (uint32, bit-identical) ---
     "v_mov_b32_vop1": ("uint32_t", "uint32_t", "[](auto a) { return a; }"),
+    "v_accvgpr_mov_b32_vop1": ("uint32_t", "uint32_t", "[](auto a) { return a; }"),
     "v_not_b32_vop1": ("uint32_t", "uint32_t", "[](auto a) { return ~a; }"),
     # RDNA3+ 16-bit move / not / int16<->int32 conversions (low-16, zero-extend
     # to the 32-bit VGPR). The _vop3 twins auto-route through the same VOP1 path,

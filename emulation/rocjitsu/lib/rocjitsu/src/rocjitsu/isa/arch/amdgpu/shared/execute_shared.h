@@ -1990,6 +1990,7 @@ inline void execute_s_xor_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_accvgpr_mov_b32_vop1([[maybe_unused]] Inst &inst,
                                            [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, [](auto a) { return a; });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2001,6 +2002,7 @@ inline void execute_v_accvgpr_mov_b32_vop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_accvgpr_mov_b32_vop3([[maybe_unused]] Inst &inst,
                                            [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(float32_t, float32_t, [](auto a) { return a; });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
