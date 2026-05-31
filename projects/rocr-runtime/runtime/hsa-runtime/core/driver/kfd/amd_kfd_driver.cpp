@@ -54,6 +54,7 @@
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/amd_memory_region.h"
 #include "core/inc/runtime.h"
+#include "core/util/os.h"
 
 #if defined(_WIN32)
 #include "loader/executable.hpp"
@@ -556,7 +557,7 @@ hsa_status_t KfdDriver::ImportFabricHandle(core::Agent& agent, hsa_fabric_handle
   if (status != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
   handle->handle = reinterpret_cast<uint64_t>(res.buf_handle);
-  core::Runtime::runtime_singleton_->DmaBufClose(res.dmabuf_fd);
+  rocr::os::DmaBufClose(res.dmabuf_fd);
   *size = res.alloc_size;
 
   return HSA_STATUS_SUCCESS;
@@ -607,7 +608,7 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
   size_t imported_size = 0;
   hsa_status_t ret = ImportDMABuf(source_fd, agent, &targetHandle, &imported_size, mem);
 #if defined(__linux__)
-  core::Runtime::runtime_singleton_->DmaBufClose(source_fd);
+  rocr::os::DmaBufClose(source_fd);
 #endif
   if (ret != HSA_STATUS_SUCCESS)
     return ret;
