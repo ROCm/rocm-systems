@@ -7,14 +7,20 @@ from pathlib import Path
 
 import common
 import pandas as pd
+import pytest
 
+from utils.file_io import write_pmc_perf_from_rocpd
 from utils.rocpd_data import (
     COUNTERS_COLLECTION_QUERY,
     MARKER_API_TRACE_QUERY,
-    convert_dbs_to_csv,
+    build_pass_db,
+    get_rocpd_pass_db_paths,
+    read_counter_collection_rows,
+    read_marker_api_trace_rows,
 )
 from utils.utils_analysis import (
     build_call_trees_with_kernel_ids,
+    normalize_rocpd_counter_dataframe,
     process_torch_trace_output,
     write_torch_trace_consolidated_csv,
 )
@@ -130,15 +136,21 @@ def test_marker_query_uses_stack_id():
     assert "\n    correlation_id" not in query_lower
 
 
-# ---- Test 2: convert_dbs_to_csv populates Correlation_Id from stack_id ----
+# ---- Test 2: rocpd reads populate Correlation_Id from stack_id ----
 
 
-def create_rocpd_test_db(workload_dir):
+def create_rocpd_test_db(
+    workload_dir,
+    db_name="test.db",
+    counter_rows=None,
+    include_regions=True,
+):
     """
     Build a minimal rocpd-style SQLite database with counters_collection
     and regions tables whose schemas match the production queries.
     """
-    db_path = str(Path(workload_dir) / "test.db")
+    rows = COUNTER_ROWS if counter_rows is None else counter_rows
+    db_path = str(Path(workload_dir) / db_name)
     conn = sqlite3.connect(db_path)
     conn.execute(
         """CREATE TABLE counters_collection (
@@ -152,39 +164,46 @@ def create_rocpd_test_db(workload_dir):
     )
     conn.executemany(
         "INSERT INTO counters_collection VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        COUNTER_ROWS,
+        rows,
     )
-    conn.execute(
-        """CREATE TABLE regions (
-            category TEXT, extdata TEXT, pid INTEGER, tid INTEGER,
-            stack_id INTEGER, guid TEXT, start INTEGER, end INTEGER
-        )"""
-    )
-    region_rows = [
-        (cat, json.dumps({"message": func}), pid, tid, sid, guid, s, e)
-        for cat, func, pid, tid, sid, guid, s, e in MARKER_ROWS
-    ]
-    conn.executemany(
-        "INSERT INTO regions VALUES (?,?,?,?,?,?,?,?)",
-        region_rows,
-    )
+    if include_regions:
+        conn.execute(
+            """CREATE TABLE regions (
+                category TEXT, extdata TEXT, pid INTEGER, tid INTEGER,
+                stack_id INTEGER, guid TEXT, start INTEGER, end INTEGER
+            )"""
+        )
+        region_rows = [
+            (cat, json.dumps({"message": func}), pid, tid, sid, guid, s, e)
+            for cat, func, pid, tid, sid, guid, s, e in MARKER_ROWS
+        ]
+        conn.executemany(
+            "INSERT INTO regions VALUES (?,?,?,?,?,?,?,?)",
+            region_rows,
+        )
     conn.commit()
     conn.close()
     return db_path
 
 
-def test_counter_csv_has_correlation_id_from_stack_id():
-    """Test that the counter CSV has correlation_id from stack_id."""
+def create_perfmon_pass_config(workload_dir, pass_name="pmc_perf_0"):
+    """Create a minimal perfmon pass config matching a root pass DB name."""
+    perfmon_dir = Path(workload_dir) / "perfmon"
+    perfmon_dir.mkdir(parents=True, exist_ok=True)
+    pass_config_path = perfmon_dir / f"{pass_name}.yaml"
+    pass_config_path.write_text("pmc: []\n")
+    return pass_config_path
+
+
+def test_counter_rows_have_correlation_id_from_stack_id():
+    """Test that counter rows have correlation_id from stack_id."""
     workload_dir = common.get_output_dir()
     Path(workload_dir).mkdir(parents=True, exist_ok=True)
 
-    counter_csv = str(Path(workload_dir) / "counter_collection.csv")
-    marker_csv = str(Path(workload_dir) / "marker_api_trace.csv")
-
     db_path = create_rocpd_test_db(workload_dir)
-    convert_dbs_to_csv([db_path], counter_csv, marker_csv)
+    rows = read_counter_collection_rows([db_path])
 
-    df = pd.read_csv(counter_csv)
+    df = pd.DataFrame(rows)
     assert "Correlation_Id" in df.columns
 
     expected_ids = [row[2] for row in COUNTER_ROWS]
@@ -193,22 +212,294 @@ def test_counter_csv_has_correlation_id_from_stack_id():
     common.clean_output_dir(True, workload_dir)
 
 
-def test_marker_csv_has_correlation_id_from_stack_id():
-    """Test that the marker CSV has correlation_id from stack_id."""
+def test_marker_rows_have_correlation_id_from_stack_id():
+    """Test that marker rows have correlation_id from stack_id."""
     workload_dir = common.get_output_dir()
     Path(workload_dir).mkdir(parents=True, exist_ok=True)
 
-    counter_csv = str(Path(workload_dir) / "counter_collection.csv")
-    marker_csv = str(Path(workload_dir) / "marker_api_trace.csv")
-
     db_path = create_rocpd_test_db(workload_dir)
-    convert_dbs_to_csv([db_path], counter_csv, marker_csv)
+    rows = read_marker_api_trace_rows([db_path])
 
-    df = pd.read_csv(marker_csv)
+    df = pd.DataFrame(rows)
     assert "Correlation_Id" in df.columns
 
     expected_ids = sorted(row[4] for row in MARKER_ROWS)
     assert sorted(df["Correlation_Id"].tolist()) == expected_ids
+
+    common.clean_output_dir(True, workload_dir)
+
+
+def test_build_pass_db_preserves_rocpd_query_surfaces():
+    """Test that pass DB creation keeps query surfaces used by analysis."""
+    workload_dir = common.get_output_dir()
+    Path(workload_dir).mkdir(parents=True, exist_ok=True)
+
+    db_path = create_rocpd_test_db(workload_dir)
+    pass_db_path = str(Path(workload_dir) / "pmc_perf_0.db")
+    build_pass_db([db_path], pass_db_path)
+
+    counter_rows = read_counter_collection_rows([pass_db_path])
+    marker_rows = read_marker_api_trace_rows([pass_db_path])
+
+    assert len(counter_rows) == len(COUNTER_ROWS)
+    assert len(marker_rows) == len(MARKER_ROWS)
+
+    common.clean_output_dir(True, workload_dir)
+
+
+def test_build_pass_db_merges_multiple_rocpd_databases():
+    """Test same-pass DB merge across multiple profiler-produced DB files."""
+    workload_dir = common.get_output_dir()
+    first_dir = Path(workload_dir) / "first"
+    second_dir = Path(workload_dir) / "second"
+    first_dir.mkdir(parents=True, exist_ok=True)
+    second_dir.mkdir(parents=True, exist_ok=True)
+
+    first_db_path = create_rocpd_test_db(first_dir)
+    second_db_path = create_rocpd_test_db(second_dir)
+    pass_db_path = str(Path(workload_dir) / "pmc_perf_0.db")
+    build_pass_db([first_db_path, second_db_path], pass_db_path)
+
+    counter_rows = read_counter_collection_rows([pass_db_path])
+    marker_rows = read_marker_api_trace_rows([pass_db_path])
+
+    assert len(counter_rows) == len(COUNTER_ROWS) * 2
+    assert len(marker_rows) == len(MARKER_ROWS) * 2
+
+    common.clean_output_dir(True, workload_dir)
+
+
+def test_build_pass_db_tolerates_missing_regions_surface():
+    """Test pass DB creation keeps counters when optional regions are absent."""
+    workload_dir = common.get_output_dir()
+    first_dir = Path(workload_dir) / "first"
+    second_dir = Path(workload_dir) / "second"
+    first_dir.mkdir(parents=True, exist_ok=True)
+    second_dir.mkdir(parents=True, exist_ok=True)
+
+    first_db_path = create_rocpd_test_db(first_dir, include_regions=False)
+    second_db_path = create_rocpd_test_db(second_dir)
+    pass_db_path = str(Path(workload_dir) / "pmc_perf_0.db")
+    build_pass_db([first_db_path, second_db_path], pass_db_path)
+
+    counter_rows = read_counter_collection_rows([pass_db_path])
+    marker_rows = read_marker_api_trace_rows([pass_db_path])
+
+    assert len(counter_rows) == len(COUNTER_ROWS) * 2
+    assert len(marker_rows) == len(MARKER_ROWS)
+
+    common.clean_output_dir(True, workload_dir)
+
+
+def test_write_pmc_perf_from_rocpd_loads_database_without_results_csv():
+    """Test that analyze can build pmc_perf.csv directly from a rocpd database."""
+    workload_dir = common.get_output_dir()
+    Path(workload_dir).mkdir(parents=True, exist_ok=True)
+
+    create_perfmon_pass_config(workload_dir)
+    create_rocpd_test_db(workload_dir, db_name="pmc_perf_0.db")
+    pmc_perf_path = Path(workload_dir) / "pmc_perf.csv"
+
+    returned_df = write_pmc_perf_from_rocpd(workload_dir, str(pmc_perf_path))
+    assert returned_df is not None
+
+    pmc_df = pd.read_csv(pmc_perf_path)
+    assert returned_df.equals(pmc_df)
+    assert "SQ_WAVES" in pmc_df.columns
+    assert "Counter_Name" not in pmc_df.columns
+    assert list(pmc_df["Dispatch_ID"]) == [0, 1, 2]
+
+    common.clean_output_dir(True, workload_dir)
+
+
+def test_get_rocpd_pass_db_paths_uses_perfmon_pass_names():
+    """Test rocpd discovery ignores unrelated root DB files."""
+    workload_dir = common.get_output_dir()
+    Path(workload_dir).mkdir(parents=True, exist_ok=True)
+
+    create_perfmon_pass_config(workload_dir)
+    expected_db_path = Path(create_rocpd_test_db(workload_dir, db_name="pmc_perf_0.db"))
+    create_rocpd_test_db(workload_dir, db_name="unrelated.db")
+
+    assert get_rocpd_pass_db_paths(Path(workload_dir)) == [expected_db_path]
+
+    common.clean_output_dir(True, workload_dir)
+
+
+def test_write_pmc_perf_from_rocpd_ignores_unmatched_database():
+    """Test analyze does not consume arbitrary root SQLite databases."""
+    workload_dir = common.get_output_dir()
+    Path(workload_dir).mkdir(parents=True, exist_ok=True)
+
+    create_rocpd_test_db(workload_dir, db_name="unrelated.db")
+    pmc_perf_path = Path(workload_dir) / "pmc_perf.csv"
+
+    assert write_pmc_perf_from_rocpd(workload_dir, str(pmc_perf_path)) is None
+    assert not pmc_perf_path.exists()
+
+    common.clean_output_dir(True, workload_dir)
+
+
+def test_write_pmc_perf_from_rocpd_rejects_empty_counter_database():
+    """Test empty pass DBs do not become successful pmc_perf.csv artifacts."""
+    workload_dir = common.get_output_dir()
+    Path(workload_dir).mkdir(parents=True, exist_ok=True)
+
+    create_perfmon_pass_config(workload_dir)
+    create_rocpd_test_db(
+        workload_dir,
+        db_name="pmc_perf_0.db",
+        counter_rows=[],
+    )
+    pmc_perf_path = Path(workload_dir) / "pmc_perf.csv"
+
+    assert write_pmc_perf_from_rocpd(workload_dir, str(pmc_perf_path)) is None
+    assert not pmc_perf_path.exists()
+
+    common.clean_output_dir(True, workload_dir)
+
+
+def test_write_pmc_perf_from_rocpd_normalizes_dispatch_ids_per_pass():
+    """Dispatch_IDs restart per pass within each kernel group.
+
+    rocprof can split counter collection across multiple passes when the
+    requested set does not fit in a single pass. Each pass re-runs the same
+    workload, so the i-th invocation of a kernel in pass 0 corresponds to
+    the i-th invocation in pass 1 (logical kernel identity). Numbering
+    Dispatch_IDs per pass ensures process_rocpd_csv's pivot can merge the
+    counter columns from every pass into one wide row per logical kernel
+    invocation.
+    """
+    workload_dir = common.get_output_dir()
+    Path(workload_dir).mkdir(parents=True, exist_ok=True)
+
+    create_perfmon_pass_config(workload_dir, "pmc_perf_0")
+    create_perfmon_pass_config(workload_dir, "pmc_perf_1")
+    second_process_rows = [
+        (*row[:4], 200, *row[5:16], "GRBM_COUNT", row[17] + 100) for row in COUNTER_ROWS
+    ]
+    create_rocpd_test_db(workload_dir, db_name="pmc_perf_0.db")
+    create_rocpd_test_db(
+        workload_dir,
+        db_name="pmc_perf_1.db",
+        counter_rows=second_process_rows,
+    )
+    pmc_perf_path = Path(workload_dir) / "pmc_perf.csv"
+
+    returned_df = write_pmc_perf_from_rocpd(workload_dir, str(pmc_perf_path))
+    assert returned_df is not None
+
+    pmc_df = pd.read_csv(pmc_perf_path)
+    assert returned_df.equals(pmc_df)
+    # Counters from both pass DBs are joined into one row per logical
+    # dispatch, rather than appended as another set of long-format rows.
+    assert list(pmc_df["Dispatch_ID"]) == [0, 1, 2]
+    assert list(pmc_df["SQ_WAVES"]) == [42, 50, 30]
+    assert list(pmc_df["GRBM_COUNT"]) == [142, 150, 130]
+
+    common.clean_output_dir(True, workload_dir)
+
+
+def test_normalize_rocpd_counter_dataframe_aligns_dispatches_across_passes():
+    """Per-pass Dispatch_ID + stable Kernel_ID across multiple passes.
+
+    Inputs a synthetic 3-pass long-form DataFrame where each pass has the
+    same 2 logical kernels invoked twice each (4 dispatches per pass, 12
+    rows total: 2 kernels x 2 invocations x 3 passes). Asserts:
+
+    - Dispatch_ID is the per-kernel-group, per-pass cumcount (0..1 for
+      each (Pass_ID, Kernel_Name) combination).
+    - Kernel_ID is stable across passes for the same kernel group.
+    - Pass_ID column is dropped from the returned frame.
+    - Input frame is not mutated.
+    """
+    rows = []
+    for pass_id in range(3):
+        # kernel_a: 2 invocations
+        for invocation in range(2):
+            rows.append({
+                "Pass_ID": pass_id,
+                "Kernel_Name": "kernel_a",
+                "Grid_Size": 256,
+                "Workgroup_Size": 64,
+                "LDS_Per_Workgroup": 0,
+                "Start_Timestamp": 1000 + invocation * 100,
+                "End_Timestamp": 1050 + invocation * 100,
+                "Counter_Name": "SQ_WAVES",
+                "Counter_Value": 10 + pass_id,
+            })
+        # kernel_b: 2 invocations
+        for invocation in range(2):
+            rows.append({
+                "Pass_ID": pass_id,
+                "Kernel_Name": "kernel_b",
+                "Grid_Size": 512,
+                "Workgroup_Size": 128,
+                "LDS_Per_Workgroup": 0,
+                "Start_Timestamp": 2000 + invocation * 100,
+                "End_Timestamp": 2050 + invocation * 100,
+                "Counter_Name": "SQ_WAVES",
+                "Counter_Value": 20 + pass_id,
+            })
+    input_df = pd.DataFrame(rows)
+    input_df_before = input_df.copy()
+
+    normalized = normalize_rocpd_counter_dataframe(input_df)
+
+    # input not mutated
+    assert input_df.equals(input_df_before)
+    # Pass_ID dropped from output
+    assert "Pass_ID" not in normalized.columns
+    assert "Dispatch_ID" in normalized.columns
+    assert "Kernel_ID" in normalized.columns
+
+    # Dispatch_ID is per-kernel, per-pass cumcount across the unique dispatches.
+    # Within each pass: kernel_a dispatch 0 and 1, kernel_b dispatch 0 and 1.
+    for kernel in ("kernel_a", "kernel_b"):
+        ids = sorted(
+            normalized
+            .loc[normalized["Kernel_Name"] == kernel, "Dispatch_ID"]
+            .unique()
+            .tolist()
+        )
+        assert ids == [0, 1], f"{kernel} Dispatch_IDs were {ids}"
+
+    # Kernel_ID is stable per kernel-group across all 3 passes.
+    kernel_a_ids = normalized.loc[
+        normalized["Kernel_Name"] == "kernel_a", "Kernel_ID"
+    ].unique()
+    kernel_b_ids = normalized.loc[
+        normalized["Kernel_Name"] == "kernel_b", "Kernel_ID"
+    ].unique()
+    assert len(kernel_a_ids) == 1, kernel_a_ids
+    assert len(kernel_b_ids) == 1, kernel_b_ids
+    assert kernel_a_ids[0] != kernel_b_ids[0]
+
+
+def test_check_profile_output_files_rejects_unmatched_rocpd_database():
+    """Test profile validation does not accept arbitrary root DB files."""
+    workload_dir = common.get_output_dir()
+    Path(workload_dir).mkdir(parents=True, exist_ok=True)
+
+    create_rocpd_test_db(workload_dir, db_name="unrelated.db")
+
+    with pytest.raises(AssertionError):
+        common.check_profile_output_files(workload_dir, 1, 1)
+
+    common.clean_output_dir(True, workload_dir)
+
+
+def test_check_profile_output_files_validates_rocpd_counter_rows():
+    """Test rocpd DB validation mirrors the CSV minimum-row check."""
+    workload_dir = common.get_output_dir()
+    Path(workload_dir).mkdir(parents=True, exist_ok=True)
+
+    create_perfmon_pass_config(workload_dir)
+    create_rocpd_test_db(workload_dir, db_name="pmc_perf_0.db")
+
+    common.check_profile_output_files(workload_dir, 1, len(COUNTER_ROWS))
+    with pytest.raises(AssertionError):
+        common.check_profile_output_files(workload_dir, 1, len(COUNTER_ROWS) + 1)
 
     common.clean_output_dir(True, workload_dir)
 

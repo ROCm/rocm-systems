@@ -27,11 +27,25 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Unified accumulator handling across profile and analyze so each `_ACCUM`-suffixed counter is preserved instead of collapsing to `SQ_ACCUM_PREV_HIRES`
 
+* Profile mode output format:
+  * `--format-rocprof-output rocpd` (default) no longer writes intermediate
+    `results_*.csv` files. Each profiling pass produces a single
+    `<workload>/<fbase>.db` at the workload root, and the intermediate `out/`
+    directory is removed.
+  * `rocprof-compute analyze` reads rocpd `.db` files and creates
+    `pmc_perf.csv` artifact during pre-processing.
+    `--format-rocprof-output csv` remains supported for environments without
+    rocpd support and for paths such as PC sampling that still use CSV/JSON
+    outputs.
+
 ### Removed
 
 * ``--path`` and ``--subpath`` options have been removed from profile mode. Use ``--output-directory`` instead.
 
 * Removed redundant `if (X != 0) else None` divide-by-zero guards from metric equations across all analysis YAML configurations. Division by zero is already handled by the metric evaluation engine, which returns `"N/A"` for `inf` and `NaN` results.
+
+* Removed `--retain-rocpd-output` profile-mode option. `.db` files are now
+  retained by default on the rocpd path.
 
 ### Optimized
 
@@ -81,10 +95,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Standardized unit naming in analysis configs and Python utilities: `pct`/`Pct` → `Percent`, `instr` → `Instructions`.
 
-* Profile mode output format:
-  * Profile mode now creates separate counter collection files for each application replay (pmc_perf_*.csv or results_*.csv).
-  * Analyze mode automatically merges these files into a unified pmc_perf.csv containing information from all application replays during pre-processing.
-
 * ROCm Compute Profiler now builds and runs profile mode with vanilla Python without requiring any Python dependencies to be installed via `pip`.
   * Note that analysis mode will still require Python dependencies and will report any missing packages.
 
@@ -106,8 +116,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Upcoming changes
 
 * `--path` and `--subpath` options are deprecated and will be removed in a future release.
-* Intermediate CSV generation (`results_*.csv`) from rocpd databases during profiling is deprecated and will be removed in a future release. The analyze step will read `.db` files directly.
-* `--retain-rocpd-output` is deprecated and will be removed in a future release. `.db` files will be retained by default.
 
 ### Known issues
 
@@ -303,8 +311,6 @@ A proposed long-term solution uses threshold-based clamping, distinguishing betw
   * Use '--attach-duration-msec' to specify time duration.
 
 * Add `rocpd` choice for `--format-rocprof-output` option in profile mode
-
-* Add `--retain-rocpd-output` option in profile mode to save large raw rocpd databases in workload directory
 
 * Show description of metrics during analysis
   * Use `--include-cols Description` to show the Description column, which is excluded by default from the

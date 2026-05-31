@@ -77,7 +77,7 @@ VALIDATE_METRICS = {
         ],
         # Ignore warmup dispatch
         # Collect roofline block
-        "profile_options": ["-d", "2:1001", "-b", "4"],
+        "profile_options": ["-d", "2-1001", "-b", "4"],
         "roof": True,
     }
 }
@@ -112,7 +112,7 @@ def test_validate_metrics(
                 app_name=workload,
             )
             # Ensure non zero length of profile df
-            _ = common.check_csv_files(
+            _ = common.check_profile_output_files(
                 profile_workload_dir, num_devices=1, num_kernels=1
             )
 

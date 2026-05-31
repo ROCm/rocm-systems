@@ -211,9 +211,8 @@ Notice the two main stages in ROCm Compute Profiler's **default** profiling rout
 2. The second stage collects data for the roofline analysis (this stage can be
    disabled using ``--no-roof``).
 
-At the end of profiling, you can find all resulting ``csv`` files in a
-:ref:`SoC <def-soc>`-specific target directory; for
-example:
+At the end of profiling, you can find all resulting profile artifacts in a
+:ref:`SoC <def-soc>`-specific target directory; for example:
 
 * "MI300A" or "MI300X" for the AMD Instinct MI300 Series GPUs
 * "MI200" for the AMD Instinct MI200 Series GPUs
@@ -238,7 +237,10 @@ an Instinct MI210 vs an Instinct MI250.
    total 408
    -rw-r--r-- 1 auser agroup   55771 Mar 21 23:49 log.txt
    drwxr-xr-x 1 auser agroup    4096 Mar 21 23:47 perfmon
-   -rw-r--r-- 1 auser agroup  348790 Mar 21 23:48 pmc_perf.csv
+   -rw-r--r-- 1 auser agroup  348790 Mar 21 23:48 pmc_perf_0.db
+   -rw-r--r-- 1 auser agroup  348790 Mar 21 23:48 pmc_perf_1.db
+   -rw-r--r-- 1 auser agroup  348790 Mar 21 23:48 pmc_perf_2.db
+   -rw-r--r-- 1 auser agroup  348790 Mar 21 23:48 pmc_perf_SQ_LEVEL_WAVES.db
    -rw-r--r-- 1 auser agroup    1119 Mar 21 23:47 profiling_config.yaml
    -rw-r--r-- 1 auser agroup    1684 Mar 21 23:49 roofline.csv
    -rw-r--r-- 1 auser agroup     899 Mar 21 23:47 sysinfo.csv
@@ -305,15 +307,20 @@ Examples:
     │   ├── pmc_perf_SQ_INST_LEVEL_VMEM.yaml
     │   └── pmc_perf_SQ_LEVEL_WAVES.yaml
     ├── profiling_config.yaml
-    ├── results_pmc_perf_0.csv
-    ├── results_pmc_perf_1.csv
-    ├── results_pmc_perf_2.csv
-    ├── results_pmc_perf_SQ_LEVEL_WAVES.csv
+    ├── pmc_perf_0.db
+    ├── pmc_perf_1.db
+    ├── pmc_perf_2.db
+    ├── pmc_perf_SQ_LEVEL_WAVES.db
     ├── roofline.csv
     └── sysinfo.csv
 
-The output files use the default ``rocpd`` format. See :ref:`profiling-output-format` for details
-on available output formats and when the final ``pmc_perf.csv`` is created.
+The default ``rocpd`` format produces one ``.db`` file per profiling pass at
+the workload root (``<workload>/<fbase>.db``). Staged per-process or per-host
+outputs from a pass are merged with SQLite ``ATTACH`` and ``INSERT`` before the
+intermediate ``out/`` directory is removed. ``rocprof-compute analyze`` reads
+the root-level ``.db`` files and writes ``pmc_perf.csv`` during
+pre-processing. See :ref:`profiling-output-format` for the legacy
+``--format-rocprof-output csv`` layout.
 
 * Profiling with MPI at host ``amd-ryzen``:
 
@@ -353,10 +360,10 @@ on available output formats and when the final ``pmc_perf.csv`` is created.
     │   ├── pmc_perf_SQ_INST_LEVEL_VMEM.yaml
     │   └── pmc_perf_SQ_LEVEL_WAVES.yaml
     ├── profiling_config.yaml
-    ├── results_pmc_perf_0.csv
-    ├── results_pmc_perf_1.csv
-    ├── results_pmc_perf_2.csv
-    ├── results_pmc_perf_SQ_LEVEL_WAVES.csv
+    ├── pmc_perf_0.db
+    ├── pmc_perf_1.db
+    ├── pmc_perf_2.db
+    ├── pmc_perf_SQ_LEVEL_WAVES.db
     ├── roofline.csv
     └── sysinfo.csv
 
@@ -376,15 +383,22 @@ of raw performance counter data produced by the underlying
 
 * ``rocpd`` format (default):
    * Instructs ROCprofiler-SDK to write raw performance counter data in rocpd (SQLite) format.
-   * The rocpd database files are converted to CSV files (``results_pmc_perf_0.csv``, ``results_pmc_perf_SQ_*.csv``, etc.) for each profiling run, after which the database files are removed.
-   * These files are merged into a single ``pmc_perf.csv`` file when running ``rocprof-compute analyze``.
-   * Use ``--retain-rocpd-output`` to preserve the ``rocpd`` database(s) in the workload folder for custom analysis.
+   * Each profiling pass produces a single ``<workload>/<fbase>.db`` at the
+     workload root. Staged per-process or per-host outputs from the same pass
+     are merged with SQLite ``ATTACH`` and ``INSERT``, the intermediate
+     ``<workload>/out/`` directory is removed. No intermediate
+     ``results_*.csv`` is materialized during profiling.
+   * ``rocprof-compute analyze`` reads the root-level ``.db`` files and writes
+     the unified ``pmc_perf.csv`` artifact during pre-processing.
+   * Requires a rocprofiler-sdk build with the rocpd public API. On ROCm
+     releases without rocpd support, ``rocprof-compute`` automatically falls
+     back to the ``csv`` format below.
 
 .. note::
 
-   Intermediate CSV generation (``results_*.csv``) in ``rocpd`` mode and
-   ``--retain-rocpd-output`` are deprecated and will be removed in a future release.
-   ``.db`` files will be retained by default and the analyze step will read them directly.
+   If rocpd output is unavailable with the current ROCm installation,
+   rocprofiler-compute falls back to CSV output. Upgrade to a ROCm version with
+   rocpd support to use the default database workflow.
 
 
 .. _filtering:
@@ -1253,9 +1267,9 @@ The example above produces:
     │   ├── pmc_perf_SQ_INST_LEVEL_SMEM.yaml
     │   ├── pmc_perf_SQ_INST_LEVEL_VMEM.yaml
     │   └── pmc_perf_SQ_LEVEL_WAVES.yaml
-    ├── pmc_perf_0.csv
-    ├── pmc_perf_1.csv
-    ├── pmc_perf_2.csv
+    ├── pmc_perf_0.db
+    ├── pmc_perf_1.db
+    ├── pmc_perf_2.db
     ├── profiling_config.yaml
     ├── roofline.csv
     └── sysinfo.csv
@@ -1304,9 +1318,9 @@ The example above produces:
     │   ├── pmc_perf_SQ_INST_LEVEL_SMEM.yaml
     │   ├── pmc_perf_SQ_INST_LEVEL_VMEM.yaml
     │   └── pmc_perf_SQ_LEVEL_WAVES.yaml
-    ├── pmc_perf_0.csv
-    ├── pmc_perf_1.csv
-    ├── pmc_perf_2.csv
+    ├── pmc_perf_0.db
+    ├── pmc_perf_1.db
+    ├── pmc_perf_2.db
     ├── profiling_config.yaml
     ├── roofline.csv
     └── sysinfo.csv
@@ -1353,9 +1367,9 @@ to your output directory. The following example is run on the host ``amd-ryzen``
     │   ├── pmc_perf_SQ_INST_LEVEL_SMEM.yaml
     │   ├── pmc_perf_SQ_INST_LEVEL_VMEM.yaml
     │   └── pmc_perf_SQ_LEVEL_WAVES.yaml
-    ├── pmc_perf_0.csv
-    ├── pmc_perf_1.csv
-    ├── pmc_perf_2.csv
+    ├── pmc_perf_0.db
+    ├── pmc_perf_1.db
+    ├── pmc_perf_2.db
     ├── profiling_config.yaml
     ├── roofline.csv
     └── sysinfo.csv

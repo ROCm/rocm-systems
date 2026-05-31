@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import importlib
 import inspect
 import os
 import re
@@ -18,6 +19,8 @@ SRC = src_candidate if os.path.isdir(src_candidate) else ROOT
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
+rocpd_data = importlib.import_module("utils.rocpd_data")
+
 SUPPORTED_ARCHS = {
     "gfx908": {"mi100": ["MI100"]},
     "gfx90a": {"mi200": ["MI210", "MI250", "MI250X"]},
@@ -25,9 +28,7 @@ SUPPORTED_ARCHS = {
     "gfx941": {"mi300": ["MI300X_A0"]},
     "gfx942": {"mi300": ["MI300A_A1", "MI300X_A1"]},
     "gfx950": {"mi350": ["MI350"]},
-    "gfx1150": {"rdna35_point_1": ["RDNA35_POINT_1"]},
     "gfx1151": {"rdna35_halo": ["RDNA35_HALO"]},
-    "gfx1152": {"rdna35_point_2": ["RDNA35_POINT_2"]},
 }
 
 
@@ -141,33 +142,37 @@ def clean_output_dir(cleanup, output_dir):
     return
 
 
-def check_csv_files(output_dir, num_devices, num_kernels):
-    """Check profiling output csv files for expected
-    number of entries (based on kernel invocations)
+def check_profile_output_files(output_dir, num_devices, num_kernels):
+    """Check profile output files for expected PMC and metadata artifacts.
 
     Args:
-        output_dir (string): output directory containing csv files
+        output_dir (string): output directory containing profile artifacts
         num_kernels (int): number of kernels expected to have been profiled
 
     Returns:
         dict: dictionary housing file contents as pandas dataframe
               (excludes PMC files - those are validated internally)
     """
+    output_path = Path(output_dir)
     files_in_workload = os.listdir(output_dir)
+    rocpd_db_paths = rocpd_data.get_rocpd_pass_db_paths(output_path)
 
-    # Validate PMC data exists (profile creates pmc_perf_*.csv or results_*.csv)
+    # Validate PMC data exists. rocpd profile creates pass .db files; explicit
+    # CSV profile creates pmc_perf_*.csv or results_*.csv.
     has_separate = any(
         f.startswith("pmc_perf_") and f.endswith(".csv") for f in files_in_workload
     )
     has_results = any(
         f.startswith("results_") and f.endswith(".csv") for f in files_in_workload
     )
+    has_rocpd_db = rocpd_data.has_rocpd_pass_counter_data(output_path)
 
-    assert has_separate or has_results, (
-        "Expected pmc_perf_*.csv or results_*.csv from profile mode"
+    assert has_separate or has_results or has_rocpd_db, (
+        "Expected rocpd pass .db files or CSV profiling output "
+        "(pmc_perf_*.csv/results_*.csv) from profile mode"
     )
 
-    # Validate row counts for PMC files (but don't add to return dict)
+    # Validate row counts for PMC artifacts (but don't add to return dict)
     for file in files_in_workload:
         is_pmc = file.startswith("pmc_perf_") or file.startswith("results_")
         if is_pmc and file.endswith(".csv"):
@@ -177,6 +182,14 @@ def check_csv_files(output_dir, num_devices, num_kernels):
                 f"{len(df.index)} < {num_kernels}"
             )
             assert len(df.index) >= num_kernels, err_msg
+
+    for db_path in rocpd_db_paths:
+        row_count = rocpd_data.count_counter_collection_rows(str(db_path))
+        err_msg = (
+            f"PMC database {db_path.name} has insufficient rows: "
+            f"{row_count} < {num_kernels}"
+        )
+        assert row_count >= num_kernels, err_msg
 
     # Check and return non-PMC files
     return check_non_pmc_files(output_dir, num_devices, num_kernels)
@@ -264,7 +277,7 @@ def skip_unsupported_pc_sampling_soc(is_stochastic=False):
     """Skip PC-sampling tests on SoCs that do not support the selected mode."""
     _, soc = gpu_soc()
 
-    unsupported_socs = {"MI100", "RDNA35_POINT_1", "RDNA35_HALO", "RDNA35_POINT_2"}
+    unsupported_socs = {"MI100", "RDNA35_HALO"}
     if is_stochastic:
         unsupported_socs.add("MI200")
 

@@ -6,7 +6,7 @@ dispatch: null
 experimental: false
 filter_blocks:
 - '21'
-format_rocprof_output: rocpd
+format_rocprof_output: csv
 iteration_multiplexing: null
 join_type: grid
 kernel: null
@@ -26,7 +26,6 @@ pc_sampling_interval: 1048576
 pc_sampling_method: stochastic
 quiet: false
 remaining: tests/vcopy -n 1048576 -b 256 -i 3
-retain_rocpd_output: false
 rocprofiler_sdk_tool_path: /rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so
 roof_only: false
 set_selected: null

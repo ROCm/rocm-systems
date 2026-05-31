@@ -4,7 +4,7 @@ config_dir: /home/abchoudh/rocm/iteration_multiplexing/projects/rocprofiler-comp
 device: 0
 dispatch: null
 filter_blocks: []
-format_rocprof_output: rocpd
+format_rocprof_output: csv
 iteration_multiplexing: kernel
 join_type: grid
 kernel: null
@@ -25,7 +25,6 @@ pc_sampling_interval: 1048576
 pc_sampling_method: stochastic
 quiet: false
 remaining: ./vcopy -i 20 -n 1048576 -b 256
-retain_rocpd_output: false
 rocprofiler_sdk_tool_path: /opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so
 roof_only: false
 roofline_data_type:

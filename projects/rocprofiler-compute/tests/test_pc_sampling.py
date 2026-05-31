@@ -334,7 +334,7 @@ def test_pc_sampling_with_sol_block(binary_handler_profile_rocprof_compute):
     _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
 
     assert code == 0
-    file_dict = common.check_csv_files(workload_dir, num_devices, 1)
+    file_dict = common.check_profile_output_files(workload_dir, num_devices, 1)
     assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_HOST_TRAP_FILES)
 
     assert common.check_file_pattern("- '21'", f"{workload_dir}/profiling_config.yaml")

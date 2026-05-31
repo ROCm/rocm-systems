@@ -25,7 +25,6 @@ indirs = [
     "tests/workloads/vcopy/MI300A_A1",
     "tests/workloads/vcopy/MI300X_A1",
     "tests/workloads/vcopy/MI350",
-    "tests/workloads/vcopy/RDNA35_HALO",
 ]
 
 roofline_dir = "tests/workloads/mem_levels_HBM/MI200"
@@ -259,9 +258,8 @@ def test_roof_mem_levels(binary_handler_analyze_rocprof_compute, mem_level):
 def test_roofline_missing_file_handling():
     """cli_generate_plot with empty ai_data returns None."""
 
-    import pandas as pd
-
     from roofline.roofline_main import Roofline
+    from utils.file_io import load_sys_info
     from utils.specs import generate_machine_specs
 
     class MockArgs:
@@ -273,7 +271,7 @@ def test_roofline_missing_file_handling():
 
     args = MockArgs()
     workload_dir = common.setup_workload_dir(roofline_dir)
-    sys_info = pd.read_csv(f"{workload_dir}/sysinfo.csv")
+    sys_info = load_sys_info(f"{workload_dir}/sysinfo.csv")
     sys_info_dict = {key: value[0] for key, value in sys_info.to_dict("list").items()}
     mspec = generate_machine_specs(args, sys_info_dict)
 
@@ -296,9 +294,8 @@ def test_roofline_missing_file_handling():
 def test_roofline_invalid_datatype_cli():
     """cli_generate_plot with invalid datatype returns None."""
 
-    import pandas as pd
-
     from roofline.roofline_main import Roofline
+    from utils.file_io import load_sys_info
     from utils.specs import generate_machine_specs
 
     class MockArgs:
@@ -311,7 +308,7 @@ def test_roofline_invalid_datatype_cli():
     args = MockArgs()
 
     workload_dir = common.setup_workload_dir(roofline_dir)
-    sys_info = pd.read_csv(f"{workload_dir}/sysinfo.csv")
+    sys_info = load_sys_info(f"{workload_dir}/sysinfo.csv")
     sys_info_dict = {key: value[0] for key, value in sys_info.to_dict("list").items()}
     mspec = generate_machine_specs(args, sys_info_dict)
 
@@ -716,10 +713,7 @@ def test_dispatch_5(binary_handler_analyze_rocprof_compute):
 @pytest.mark.misc
 def test_gpu_ids(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        if (
-            dir == "tests/workloads/vcopy/MI350"
-            or dir == "tests/workloads/vcopy/RDNA35_HALO"
-        ):
+        if dir == "tests/workloads/vcopy/MI350":
             gpu_id = "0"
         else:
             gpu_id = "2"
@@ -2206,3 +2200,19 @@ def test_join_prof_renames_sq_accum_prev_hires_to_bucket_target(tmp_path):
     assert "SQ_ACCUM_PREV_HIRES" not in merged.columns
     assert set(merged["SQ_LEVEL_WAVES_ACCUM"].tolist()) == {100, 200}
     assert "SQ_WAVES" in merged.columns
+
+
+def test_join_prof_rocpd_falls_back_to_results_csv(tmp_path):
+    """rocpd workloads with only results_*.csv remain analyzable."""
+    (tmp_path / "profiling_config.yaml").write_text("format_rocprof_output: rocpd\n")
+    results_file = tmp_path / "results_pmc_perf_0.csv"
+    results_file.write_text(
+        "Dispatch_ID,Kernel_Name,Counter_Name,Counter_Value\n0,kernel_a,SQ_WAVES,10\n"
+    )
+
+    inst = cli_analysis.__new__(cli_analysis)
+    inst.join_prof(tmp_path, out=str(tmp_path / "pmc_perf.csv"))
+    merged = pd.read_csv(tmp_path / "pmc_perf.csv")
+
+    assert merged["Counter_Name"].tolist() == ["SQ_WAVES"]
+    assert merged["Counter_Value"].tolist() == [10]

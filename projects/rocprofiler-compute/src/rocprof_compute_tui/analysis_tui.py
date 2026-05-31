@@ -83,6 +83,7 @@ class tui_analysis(OmniAnalyze_Base):
             self.args.kernel_verbose,
             self.args.verbose,
             self._profiling_config,
+            self._joined_pmc_df_by_directory,
         )
 
         if self.args.spatial_multiplexing:

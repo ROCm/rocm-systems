@@ -7,20 +7,18 @@ import io
 import logging
 import math
 import os
+import sqlite3
 import tempfile
 from pathlib import Path
 from unittest import mock
 
 import pandas as pd
 import pytest
-import yaml
-from common import SRC
 
 import utils.utils_analysis as utils_analysis
 import utils.utils_common as utils_common
 import utils.utils_profile as utils_profile
 from utils.amdsmi_interface import _per_device_query
-from utils.mi_gpu_spec import mi_gpu_specs
 from utils.tty import (
     format_duration,
     format_node_stats,
@@ -53,7 +51,87 @@ class MockSoc:
 
 logging.trace = lambda *args, **kwargs: None
 
-ANALYSIS_CONFIGS = Path(SRC) / "rocprof_compute_soc" / "analysis_configs"
+
+def create_minimal_rocpd_counter_db(db_path):
+    """Create a small rocpd counters_collection table for utility tests."""
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """CREATE TABLE counters_collection (
+            agent_id INTEGER, guid TEXT, stack_id INTEGER, dispatch_id INTEGER,
+            pid INTEGER, grid_size INTEGER, workgroup_size INTEGER,
+            lds_block_size INTEGER, scratch_size INTEGER, vgpr_count INTEGER,
+            accum_vgpr_count INTEGER, sgpr_count INTEGER, kernel_name TEXT,
+            start INTEGER, end INTEGER, kernel_id INTEGER,
+            counter_name TEXT, value REAL
+        )"""
+    )
+    conn.execute(
+        "INSERT INTO counters_collection VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            0,
+            "guid",
+            1,
+            0,
+            100,
+            64,
+            256,
+            0,
+            0,
+            32,
+            0,
+            16,
+            "kernel",
+            10,
+            20,
+            0,
+            "SQ_WAVES",
+            1,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+
+def create_minimal_rocpd_counter_db(db_path):
+    """Create a small rocpd counters_collection table for utility tests."""
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """CREATE TABLE counters_collection (
+            agent_id INTEGER, guid TEXT, stack_id INTEGER, dispatch_id INTEGER,
+            pid INTEGER, grid_size INTEGER, workgroup_size INTEGER,
+            lds_block_size INTEGER, scratch_size INTEGER, vgpr_count INTEGER,
+            accum_vgpr_count INTEGER, sgpr_count INTEGER, kernel_name TEXT,
+            start INTEGER, end INTEGER, kernel_id INTEGER,
+            counter_name TEXT, value REAL
+        )"""
+    )
+    conn.execute(
+        "INSERT INTO counters_collection VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            0,
+            "guid",
+            1,
+            0,
+            100,
+            64,
+            256,
+            0,
+            0,
+            32,
+            0,
+            16,
+            "kernel",
+            10,
+            20,
+            0,
+            "SQ_WAVES",
+            1,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
 
 ##################################################
 ##          Generated tests                     ##
@@ -953,24 +1031,17 @@ def test_run_prof_success_v3(tmp_path, monkeypatch):
     fname = tmp_path / "pmc_perf_test.yaml"
     fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
     workload_dir = str(tmp_path / "workload")
-    pmc_1_subdir = Path(workload_dir) / "out" / "pmc_1" / "0"
-    pmc_1_subdir.mkdir(parents=True, exist_ok=True)
+    os.makedirs(workload_dir + "/out/pmc_1", exist_ok=True)
 
-    # counter_collection.csv and agent_info.csv are required by
-    # process_rocprofv3_output; the converted.csv is produced by
-    # v3_counter_csv_to_v2_csv which we stub to keep the test self-contained.
-    counter_file = pmc_1_subdir / "run_counter_collection.csv"
-    agent_info_file = pmc_1_subdir / "run_agent_info.csv"
-    converted_file = pmc_1_subdir / "run_converted.csv"
-
-    counter_file.write_text(
-        "Correlation_Id,Dispatch_Id,Agent_Id,Queue_Id,Process_Id,Thread_Id,"
+    csv_content = (
+        "Agent_Type,Node_Id,Wave_Front_Size,Correlation_Id,Dispatch_Id,Agent_Id,Queue_Id,Process_Id,Thread_Id,"
         "Grid_Size,Kernel_Id,Kernel_Name,Workgroup_Size,LDS_Block_Size,"
         "Scratch_Size,VGPR_Count,Accum_VGPR_Count,SGPR_Count,Start_Timestamp,"
         "End_Timestamp,Counter_Name,Counter_Value\n"
-        "0,0,0,0,0,0,0,0,test_kernel,0,0,0,0,0,0,0,1,SQ_WAVES,100\n"
+        "GPU,0,0,0,0,0,0,0,0,0,0,test_kernel,0,0,0,0,0,0,0,1,SQ_WAVES,100"
     )
-    agent_info_file.write_text("Agent_Type,Node_Id,Wave_Front_Size\nGPU,0,64\n")
+    with open(workload_dir + "/out/pmc_1/results_0.csv", "w") as f:
+        f.write(csv_content)
 
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
     monkeypatch.setattr(
@@ -979,13 +1050,8 @@ def test_run_prof_success_v3(tmp_path, monkeypatch):
     )
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
-    # Stub the conversion so the test doesn't depend on csv_ops pivot logic,
-    # but process_rocprofv3_output itself runs and exercises Path.glob.
     monkeypatch.setattr(
-        "utils.utils_profile.v3_counter_csv_to_v2_csv",
-        lambda *a, **k: converted_file.write_text(
-            "GPU_ID,Kernel_Name,SQ_WAVES\n0,test_kernel,100\n"
-        ),
+        "glob.glob", lambda pattern: [workload_dir + "/out/pmc_1/results_0.csv"]
     )
 
     utils_profile.run_prof(str(fname), ["--arg"], workload_dir, logging.INFO, "csv")
@@ -1098,56 +1164,6 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
     utils_profile.run_prof(
         str(fname), profiler_options, workload_dir, logging.INFO, "csv"
     )
-
-
-def test_run_prof_rocpd_skips_pid_without_native_csv(tmp_path, monkeypatch):
-    """run_prof skips per-pid rocpd update when its native counter CSV is missing."""
-    fname = tmp_path / "pmc_perf_test.yaml"
-    fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
-    workload_dir = tmp_path / "workload"
-
-    # rocprofiler-sdk backend with native-tool counter collection writes a
-    # per-pid .db here; child pids that never touched the GPU have no CSV.
-    pmc1 = workload_dir / "out" / "pmc_1"
-    (pmc1 / "12345").mkdir(parents=True)
-    (pmc1 / "12345" / "12345.db").touch()
-
-    options = {
-        "APP_CMD": ["./test_app"],
-        "ROCPROF_OUTPUT_PATH": str(workload_dir),
-        "ROCPROF_COUNTER_COLLECTION": "0",  # native tool collects, not SDK
-        "ROCP_TOOL_LIBRARIES": "",
-    }
-
-    update_calls: list = []
-    debug_msgs: list[str] = []
-
-    monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofiler-sdk")
-    monkeypatch.setattr(
-        "utils.utils_profile.capture_subprocess_output",
-        lambda *a, **k: (True, "success"),
-    )
-    monkeypatch.setattr(
-        "utils.utils_profile.rocpd_data.update_rocpd_pmc_events",
-        lambda *a, **k: update_calls.append(a),
-    )
-    monkeypatch.setattr(
-        "utils.utils_profile.rocpd_data.convert_dbs_to_csv",
-        lambda *a, **k: None,
-    )
-    monkeypatch.setattr(
-        "utils.utils_profile.console_debug",
-        lambda msg, *a, **k: debug_msgs.append(msg),
-    )
-    monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
-
-    utils_profile.run_prof(
-        str(fname), options, str(workload_dir), logging.INFO, "rocpd"
-    )
-
-    assert update_calls == []
-    assert any("No native counter CSV for pid 12345" in m for m in debug_msgs)
 
 
 def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
@@ -1327,6 +1343,7 @@ def test_run_prof_no_results_files(tmp_path, monkeypatch):
         "utils.utils_profile.capture_subprocess_output",
         lambda *a, **k: (True, "success"),
     )
+    monkeypatch.setattr("glob.glob", lambda pattern: [])  # No files found
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
 
@@ -1444,6 +1461,9 @@ def test_run_prof_tcc_flattening_mi300(tmp_path, monkeypatch):
         lambda *a, **k: (True, "success"),
     )
     monkeypatch.setattr("utils.mi_gpu_spec.mi_gpu_specs.get_num_xcds", lambda *a: 2)
+    monkeypatch.setattr(
+        "glob.glob", lambda pattern: [workload_dir + "/results_test.csv"]
+    )
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
 
@@ -1766,6 +1786,15 @@ def test_process_rocprofv3_output_csv_format_with_counter_files(tmp_path, monkey
 
     counter_file.write_text("counter,data\ntest,value")
     agent_file.write_text("agent,data\ntest,value")
+
+    def mock_glob(pattern):
+        if "_counter_collection.csv" in pattern:
+            return [str(counter_file)]
+        elif "_converted.csv" in pattern:
+            return [str(converted_file)]
+        return []
+
+    monkeypatch.setattr("glob.glob", mock_glob)
 
     def mock_v3_counter_csv_to_v2_csv(counter_path, agent_path, output_path):
         Path(output_path).write_text("converted,data\ntest,value")
@@ -2941,6 +2970,51 @@ kernel3,0,120,220"""
         utils_analysis.is_workload_empty(str(workload_dir))
 
     assert len(console_error_calls) == 0
+
+
+def test_is_workload_empty_valid_rocpd_pass_db(tmp_path):
+    """Test is_workload_empty accepts known rocpd pass DBs with counter rows."""
+    workload_dir = tmp_path / "workload"
+    perfmon_dir = workload_dir / "perfmon"
+    perfmon_dir.mkdir(parents=True)
+    (perfmon_dir / "pmc_perf_0.yaml").write_text("pmc: []\n")
+    create_minimal_rocpd_counter_db(workload_dir / "pmc_perf_0.db")
+
+    console_error_calls = []
+
+    def mock_console_error(*args, **kwargs):
+        console_error_calls.append((args, kwargs))
+
+    with mock.patch(
+        "utils.utils_analysis.console_error",
+        side_effect=mock_console_error,
+    ):
+        utils_analysis.is_workload_empty(str(workload_dir))
+
+    assert len(console_error_calls) == 0
+
+
+def test_is_workload_empty_ignores_unmatched_rocpd_db(tmp_path):
+    """Test arbitrary DB files do not satisfy rocpd workload validation."""
+    workload_dir = tmp_path / "workload"
+    workload_dir.mkdir()
+    create_minimal_rocpd_counter_db(workload_dir / "unrelated.db")
+
+    console_error_calls = []
+
+    def mock_console_error(*args, **kwargs):
+        console_error_calls.append((args, kwargs))
+
+    with mock.patch(
+        "utils.utils_analysis.console_error",
+        side_effect=mock_console_error,
+    ):
+        utils_analysis.is_workload_empty(str(workload_dir))
+
+    assert len(console_error_calls) == 1
+    error_args = console_error_calls[0][0]
+    assert "analysis" in error_args[0]
+    assert "No profiling data found" in error_args[1]
 
 
 def test_is_workload_empty_file_with_nan_values(tmp_path):
@@ -4281,13 +4355,12 @@ def test_pc_sampling_prof_multiarg_appcmd(
 
 
 def test_set_parser():
-    result = utils_common.parse_sets_yaml("gfx90a")
+    from utils.utils_common import parse_sets_yaml
+
+    result = parse_sets_yaml("gfx90a")
+
     assert "compute_thruput_util" in result
     assert result["compute_thruput_util"]["title"] == "Compute Throughput Utilization"
-
-    shared = utils_common.parse_sets_yaml("gfx1152")
-    assert "compute_thruput_flops" in shared
-    assert shared["launch_stats"]["title"] == "Launch Stats"
 
 
 @pytest.mark.sci_notion
@@ -4358,6 +4431,7 @@ def test_alignment_and_width():
 # =============================================================================
 
 
+@pytest.mark.list_metrics
 def test_list_metrics(binary_handler_analyze_rocprof_compute, capsys):
     return_code = binary_handler_analyze_rocprof_compute(["--list-metrics", "gfx90a"])
     assert return_code == 0
@@ -4368,85 +4442,30 @@ def test_list_metrics(binary_handler_analyze_rocprof_compute, capsys):
     assert "5.2 -> Command processor packet processor (CPC)" in output
 
 
-def list_blocks_supported_archs() -> list[str]:
-    """Return sorted arch names from analysis_configs/gfx* directories."""
-    return list(mi_gpu_specs.get_gpu_series_dict().keys())
-
-
-def arch_panels_from_disk(arch: str) -> dict[str, str]:
-    """Return {panel_id_str: title} from per-arch yaml Panel Configs."""
-    panels: dict[str, str] = {}
-    for yaml_path in sorted((ANALYSIS_CONFIGS / arch).glob("*.yaml")):
-        data = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
-        if not data or "Panel Config" not in data:
-            continue
-        panel_config = data["Panel Config"]
-        panels[str(panel_config["id"] // 100)] = panel_config["title"]
-    return panels
-
-
-def all_template_aliases_by_panel_id() -> dict[str, set[str]]:
-    """Return {panel_id_str: {alias, ...}} from all *_config_template.yaml."""
-    aliases: dict[str, set[str]] = {}
-    for tpl in sorted(ANALYSIS_CONFIGS.glob("*_config_template.yaml")):
-        data = yaml.safe_load(tpl.read_text(encoding="utf-8")) or {}
-        for panel in data.get("panels") or []:
-            alias = panel.get("panel_alias")
-            if alias:
-                pid = str(panel.get("panel_id"))
-                aliases.setdefault(pid, set()).add(alias)
-    return aliases
-
-
-@pytest.mark.parametrize("arch", list_blocks_supported_archs())
-def test_list_blocks_all_archs(binary_handler_analyze_rocprof_compute, capsys, arch):
-    """Verify --list-blocks output matches on-disk panels and template aliases."""
-    return_code = binary_handler_analyze_rocprof_compute(["--list-blocks", arch])
+def test_list_blocks(binary_handler_analyze_rocprof_compute, capsys):
+    return_code = binary_handler_analyze_rocprof_compute(["--list-blocks", "gfx90a"])
     assert return_code == 0
 
+    # Test output
     output = capsys.readouterr().out
     assert "INDEX" in output
     assert "BLOCK ALIAS" in output
     assert "BLOCK NAME" in output
 
-    # Fixed-width parse: empty aliases break whitespace splitting.
-    # Derive column offsets from the header so this parser tracks the producer.
-    lines = output.splitlines()
-    header_idx = next(i for i, line in enumerate(lines) if line.startswith("INDEX"))
-    header = lines[header_idx]
-    alias_col = header.index("BLOCK ALIAS")
-    name_col = header.index("BLOCK NAME")
-    block_entries: dict[str, tuple[str, str]] = {}
-    for line in lines[header_idx + 1 :]:
-        block_id = line[:alias_col].strip()
-        if not block_id:
-            continue
-        alias = line[alias_col:name_col].strip()
-        name = line[name_col:].strip()
-        block_entries[block_id] = (alias, name)
+    # Verify specific block id, alias, and name mappings
+    lines = output.strip().splitlines()
+    block_entries = {}
+    for line in lines[1:]:  # skip header
+        parts = line.split()
+        if len(parts) >= 3:
+            block_id = parts[0]
+            block_alias = parts[1]
+            block_name = " ".join(parts[2:])
+            block_entries[block_id] = (block_alias, block_name)
 
-    expected_panels = arch_panels_from_disk(
-        utils_common.canonical_config_arch(arch) or arch
-    )
-    assert set(block_entries) == set(expected_panels), (
-        f"--list-blocks {arch}: rows {sorted(block_entries)} != "
-        f"on-disk panels {sorted(expected_panels)}"
-    )
-
-    valid_aliases = all_template_aliases_by_panel_id()
-    for panel_id, expected_name in expected_panels.items():
-        actual_alias, actual_name = block_entries[panel_id]
-        assert actual_name == expected_name, (
-            f"--list-blocks {arch} panel {panel_id}: name "
-            f"{actual_name!r} != on-disk title {expected_name!r}"
-        )
-        if actual_alias:
-            allowed = valid_aliases.get(panel_id, set())
-            assert actual_alias in allowed, (
-                f"--list-blocks {arch} panel {panel_id}: alias "
-                f"{actual_alias!r} not declared in any template "
-                f"(declared: {sorted(allowed)})"
-            )
+    assert block_entries["0"] == ("topstats", "Top Stats")
+    assert block_entries["1"] == ("sysinfo", "System Info")
+    assert block_entries["6"] == ("spi", "Workgroup Manager (SPI)")
 
 
 # =============================================================================

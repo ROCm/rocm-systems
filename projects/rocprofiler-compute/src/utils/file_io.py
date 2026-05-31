@@ -1,8 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import os
 import re
 from collections import OrderedDict
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Any, Optional
 
@@ -10,7 +12,7 @@ import pandas as pd
 import yaml
 
 import config
-from utils import schema, utils_analysis
+from utils import rocpd_data, schema, utils_analysis
 from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import (
     console_debug,
@@ -19,10 +21,24 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.utils_common import canonical_config_arch, normalize_filter_to_str_list
+from utils.utils_common import normalize_filter_to_str_list
 
 # TODO: use pandas chunksize or dask to read really large csv file
 # from dask import dataframe as dd
+
+
+def load_sys_info(f: str) -> pd.DataFrame:
+    """
+    Load sys running info from csv file to a df.
+    """
+    from utils.utils_common import canonical_config_arch
+
+    df = pd.read_csv(f)
+    if "gpu_arch" in df.columns and not df.empty:
+        df["gpu_arch"] = df["gpu_arch"].map(
+            lambda x: canonical_config_arch(str(x)) if pd.notna(x) else x
+        )
+    return df
 
 
 def load_panel_configs(
@@ -269,6 +285,74 @@ def process_pc_sampling_kernel_trace(
 
 
 @demarcate
+def write_pmc_perf_from_rocpd(
+    raw_data_dir: str, output_file: str
+) -> Optional[pd.DataFrame]:
+    """Write pmc_perf.csv from rocpd database counters and return its DataFrame."""
+    workload_dir = Path(raw_data_dir)
+    pass_db_paths = rocpd_data.get_rocpd_pass_db_paths(workload_dir)
+    if not pass_db_paths:
+        return None
+
+    counter_df = _read_rocpd_counter_dataframes(pass_db_paths)
+    if counter_df.empty:
+        return None
+
+    pmc_df = utils_analysis.build_rocpd_pmc_dataframe(counter_df)
+    if pmc_df.empty:
+        return None
+
+    pmc_df.to_csv(output_file, index=False)
+    return pmc_df
+
+
+def _read_one_pass_db(
+    pass_id: int,
+    pass_db_path: Path,
+) -> Optional[pd.DataFrame]:
+    """Read one rocpd pass DB and tag rows with Pass_ID / Pass_Name."""
+    counter_df = rocpd_data.read_counter_collection_df([str(pass_db_path)])
+    if counter_df.empty:
+        return None
+    counter_df["Pass_ID"] = pass_id
+    counter_df["Pass_Name"] = pass_db_path.stem
+    return counter_df
+
+
+def _read_rocpd_counter_dataframes(pass_db_paths: list[Path]) -> pd.DataFrame:
+    """Read all pass DBs into one long-form counter DataFrame.
+
+    Pass DBs are read concurrently across processes using
+    ``ProcessPoolExecutor``. Process-level parallelism (rather than threads)
+    is required. For workloads with a single pass DB or non-rocpd format, this
+    falls back to the serial path to avoid the process-spawn overhead.
+    """
+    sorted_paths = sorted(pass_db_paths)
+    if not sorted_paths:
+        return pd.DataFrame()
+
+    if len(sorted_paths) == 1:
+        counter_df = _read_one_pass_db(0, sorted_paths[0])
+        return counter_df if counter_df is not None else pd.DataFrame()
+
+    workers = min(len(sorted_paths), os.cpu_count() or 1)
+    with ProcessPoolExecutor(max_workers=workers) as executor:
+        results = list(
+            executor.map(
+                _read_one_pass_db,
+                range(len(sorted_paths)),
+                sorted_paths,
+            )
+        )
+    counter_dataframes = [
+        counter_df for counter_df in results if counter_df is not None
+    ]
+    if not counter_dataframes:
+        return pd.DataFrame()
+    return pd.concat(counter_dataframes, ignore_index=True)
+
+
+@demarcate
 def create_df_pmc(
     raw_data_root_dir: str,
     nodes: Optional[list[str]],
@@ -276,6 +360,7 @@ def create_df_pmc(
     kernel_verbose: int,
     verbose: int,
     config_dict: dict[str, Any],
+    preloaded_dataframes: Optional[dict[str, pd.DataFrame]] = None,
 ) -> pd.DataFrame:
     """
     Load all raw pmc counters and join into one df.
@@ -285,13 +370,25 @@ def create_df_pmc(
         raw_data_dir: str, node_name: Optional[str], kernel_verbose: int, verbose: int
     ) -> pd.DataFrame:
         pmc_perf_path = Path(raw_data_dir) / f"{schema.PMC_PERF_FILE_PREFIX}.csv"
-        if not pmc_perf_path.is_file():
+        preloaded_df = (
+            preloaded_dataframes.get(str(Path(raw_data_dir).resolve()))
+            if preloaded_dataframes is not None
+            else None
+        )
+        if preloaded_df is None and not pmc_perf_path.is_file():
             return pd.DataFrame()
 
-        df = pd.read_csv(pmc_perf_path)
+        df = (
+            preloaded_df.copy()
+            if preloaded_df is not None
+            else pd.read_csv(pmc_perf_path)
+        )
 
         if config_dict.get("format_rocprof_output") == "rocpd":
             df = utils_analysis.process_rocpd_csv(df)
+
+        if df.empty:
+            return df
 
         # Demangle original KernelNames
         # Skip for Standalone Roofline with -1 to keep full kernel names
@@ -396,9 +493,7 @@ def is_single_panel_config(
     archs, or one for each arch.
     """
     # If not single config, verify all supported archs have defined configs
-    arch_names = {
-        canonical_config_arch(arch) or arch for arch in supported_archs.keys()
-    }
+    arch_names = list(supported_archs.keys())
     root_path = Path(root_dir)
     arch_count = sum(1 for arch in arch_names if (root_path / arch).exists())
 

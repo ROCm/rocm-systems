@@ -329,7 +329,6 @@ class RocProfCompute_Base:
                 loglevel=args.loglevel,
                 format_rocprof_output=args.format_rocprof_output,
                 torch_trace_enabled=getattr(args, "torch_trace", False),
-                retain_rocpd_output=args.retain_rocpd_output,
             )
 
             end_time = time.time()
