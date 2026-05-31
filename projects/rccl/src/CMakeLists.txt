@@ -1150,7 +1150,7 @@ endif()
 # (custom pipeline) and OFF (-fgpu-rdc --hip-link).  No-op for static builds
 # (which go through --emit-static-lib and never run ld).
 if(BUILD_SHARED_LIBS AND RCCL_HIP_FATBIN_AT_TAIL)
-  set(_rccl_fatbin_script "${RCCL_SOURCE_DIR}/cmake/linker_scripts/hip_fatbin_tail.ld")
+  set(_rccl_fatbin_script "${PROJECT_SOURCE_DIR}/cmake/linker_scripts/hip_fatbin_tail.ld")
   if(NOT EXISTS "${_rccl_fatbin_script}")
     message(FATAL_ERROR "RCCL_HIP_FATBIN_AT_TAIL=ON but linker script not found: ${_rccl_fatbin_script}")
   endif()
