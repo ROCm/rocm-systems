@@ -1,15 +1,16 @@
 /*************************************************************************
- * Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef _NCCL_DEVICE_GIN_SESSION_H_
 #define _NCCL_DEVICE_GIN_SESSION_H_
 #include "core_tmp.h"
 #include "gin/gin_device_common.h"
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 struct ncclGinCtx; // Definition in nccl_device/gin/gin_device_host_common.h
 template<unsigned> struct ncclGinCtx_M; // ...
 
@@ -17,6 +18,9 @@ struct ncclGinDescriptorSmem; // A type user allocates in __shared__ memory
 
 // Used as completion actions for ncclGinSession::put
 struct ncclGin_None {};
+
+struct ncclGin_VASignalInc { ncclWindow_t signalWindow; size_t signalOffset; };
+struct ncclGin_VASignalAdd { ncclWindow_t signalWindow; size_t signalOffset; uint64_t value; };
 
 struct ncclGin_SignalAdd { ncclGinSignal_t signal; uint64_t value; };
 // SignalInc: equivalent to SignalAdd{+1} except it may not be mixed with any
@@ -40,11 +44,136 @@ using ncclGin = ncclGin_BackendMask<NCCL_GIN_BACKEND_MASK_ALL>;
 
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
+struct ncclGin_C {
+  ncclDevComm const& comm;
+  uint32_t nConnections:8, connectionId:8, _ginBackend:8;
+  uint32_t contextId;
+
+  //////////////////////////////////////////////////////////////////////////////
+  // internal:
+  void* _ginHandle;
+  uint64_t* _signalShadows;
+  unsigned backendMask;
+
+  NCCL_DEVICE_INLINE ncclGin_C(ncclDevComm const& comm_, unsigned backendMask_, int contextIndex);
+};
+
+// Helper init function that wraps placement new
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGin_C_init(
+  ncclGin_C* net, unsigned backendMask, ncclDevComm const& comm, int contextIndex);
+
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinPut(
+  ncclGin_C* net,
+  ncclTeam team, int peer,
+  ncclWindow_t dstWin, size_t dstOffset,
+  ncclWindow_t srcWin, size_t srcOffset, size_t bytes,
+  bool isSignal, ncclGinSignal_t signalId, ncclGinSignalOp_t signalOp, uint64_t signalOpArg,
+  bool isCounter, ncclGinCounter_t counterId,
+  ncclCoopAny coop,
+  bool isDescriptor, ncclGinDescriptorSmem* descriptor,
+  cuda::thread_scope givenRelease, cuda::thread_scope requiredRelease);
+
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinSignal(
+  ncclGin_C* net,
+  ncclTeam team, int peer,
+  bool isSignal, ncclGinSignal_t signalId, ncclGinSignalOp_t signalOp, uint64_t signalOpArg,
+  ncclCoopAny coop,
+  bool isDescriptor, ncclGinDescriptorSmem* descriptor,
+  cuda::thread_scope givenRelease, cuda::thread_scope requiredRelease);
+
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinPut_v2(
+  ncclGin_C* net,
+  ncclTeam team, int peer,
+  ncclWindow_t dstWin, size_t dstOffset,
+  ncclWindow_t srcWin, size_t srcOffset, size_t bytes,
+  bool isSignal, ncclGinSignal_t signalId, ncclGinSignalOp_t signalOp, uint64_t signalOpArg,
+  bool isCounter, ncclGinCounter_t counterId,
+  ncclCoopAny coop,
+  bool isDescriptor, ncclGinDescriptorSmem* descriptor,
+  cuda::thread_scope givenRelease, cuda::thread_scope requiredRelease,
+  uint32_t optFlags);
+
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinSignal_v2(
+  ncclGin_C* net,
+  ncclTeam team, int peer,
+  bool isSignal, ncclGinSignal_t signalId, ncclGinSignalOp_t signalOp, uint64_t signalOpArg,
+  ncclCoopAny coop,
+  bool isDescriptor, ncclGinDescriptorSmem* descriptor,
+  cuda::thread_scope givenRelease, cuda::thread_scope requiredRelease,
+  uint32_t optFlags);
+
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinFlush(
+  ncclGin_C* net,
+  ncclCoopAny coop,
+  cuda::memory_order ord);
+
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE uint64_t ncclGinReadCounter(
+  ncclGin_C* net,
+  ncclGinCounter_t counter,
+  int bits,
+  cuda::memory_order ord);
+
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinWaitCounter(
+  ncclGin_C* net,
+  ncclCoopAny coop,
+  ncclGinCounter_t counter,
+  uint64_t least,
+  int bits,
+  cuda::memory_order ord);
+
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE uint64_t ncclGinReadSignal(
+  ncclGin_C* net,
+  ncclGinSignal_t signal,
+  int bits,
+  cuda::memory_order ord);
+
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinWaitSignal(
+  ncclGin_C* net,
+  ncclCoopAny coop,
+  ncclGinSignal_t signal,
+  uint64_t least,
+  int bits,
+  cuda::memory_order ord);
+
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinResetCounter(
+  ncclGin_C* net,
+  ncclGinCounter_t counter);
+
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinResetSignal(
+  ncclGin_C* net,
+  ncclGinSignal_t signal);
+
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinPutValue(
+  ncclGin_C* net,
+  ncclTeam team, int peer,
+  ncclWindow_t dstWin, size_t dstOffset,
+  uint64_t value, size_t size,
+  bool isSignal, ncclGinSignal_t signalId, ncclGinSignalOp_t signalOp, uint64_t signalOpArg,
+  ncclCoopAny coop,
+  bool isDescriptor, ncclGinDescriptorSmem* descriptor,
+  cuda::thread_scope givenRelease, cuda::thread_scope requiredRelease);
+
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinPutValue_v2(
+  ncclGin_C* net,
+  ncclTeam team, int peer,
+  ncclWindow_t dstWin, size_t dstOffset,
+  uint64_t value, size_t size,
+  bool isSignal, ncclGinSignal_t signalId, ncclGinSignalOp_t signalOp, uint64_t signalOpArg,
+  ncclCoopAny coop,
+  bool isDescriptor, ncclGinDescriptorSmem* descriptor,
+  cuda::thread_scope givenRelease, cuda::thread_scope requiredRelease,
+  uint32_t optFlags);
+
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE uint64_t* ncclGinGetSignalShadowPtr(
+  ncclGin_C* net,
+  ncclGinSignal_t signal);
+
 template<unsigned backendMask>
 struct ncclGin_BackendMask {
   ncclDevComm const& comm;
-  uint32_t nContexts:8, contextId:8, _ginBackend:8;
+  uint32_t nConnections:8, connectionId:8, _ginBackend:8;
+  uint32_t contextId;
 
   // Loads GIN context into registers. Each context has one QP per peer.
   NCCL_DEVICE_INLINE ncclGin_BackendMask(ncclDevComm const&, int contextIndex);
@@ -69,8 +198,9 @@ struct ncclGin_BackendMask {
     LocalAction localAction = ncclGin_None{},
     Coop coop = ncclCoopThread{},
     DescriptorSmem descriptor = ncclGin_None{},
-    cuda::thread_scope alreadyReleased = cuda::thread_scope_thread,
-    cuda::thread_scope expected_scope = cuda::thread_scope_device
+    cuda::thread_scope givenRelease = cuda::thread_scope_thread,
+    cuda::thread_scope requiredRelease = cuda::thread_scope_device,
+    uint32_t optFlags = ncclGinOptFlagsDefault
   ) const;
 
   template<
@@ -93,8 +223,9 @@ struct ncclGin_BackendMask {
     LocalAction localAction = ncclGin_None{},
     Coop coop = ncclCoopThread{},
     DescriptorSmem descriptor = ncclGin_None{},
-    cuda::thread_scope alreadyReleased = cuda::thread_scope_thread,
-    cuda::thread_scope expected_scope = cuda::thread_scope_device
+    cuda::thread_scope givenRelease = cuda::thread_scope_thread,
+    cuda::thread_scope requiredRelease = cuda::thread_scope_device,
+    uint32_t optFlags = ncclGinOptFlagsDefault
   ) const;
 
   template<
@@ -110,8 +241,9 @@ struct ncclGin_BackendMask {
     RemoteAction remoteAction = ncclGin_None{},
     Coop coop = ncclCoopThread{},
     DescriptorSmem descriptor = ncclGin_None{},
-    cuda::thread_scope alreadyReleased = cuda::thread_scope_thread,
-    cuda::thread_scope expected_scope = cuda::thread_scope_device
+    cuda::thread_scope givenRelease = cuda::thread_scope_thread,
+    cuda::thread_scope requiredRelease = cuda::thread_scope_device,
+    uint32_t optFlags = ncclGinOptFlagsDefault
   ) const;
 
   template<
@@ -127,8 +259,9 @@ struct ncclGin_BackendMask {
     RemoteAction remoteAction = ncclGin_None{},
     Coop coop = ncclCoopThread{},
     DescriptorSmem descriptor = ncclGin_None{},
-    cuda::thread_scope alreadyReleased = cuda::thread_scope_thread,
-    cuda::thread_scope expected_scope = cuda::thread_scope_device
+    cuda::thread_scope givenRelease = cuda::thread_scope_thread,
+    cuda::thread_scope requiredRelease = cuda::thread_scope_device,
+    uint32_t optFlags = ncclGinOptFlagsDefault
   ) const;
 
   template<typename RemoteAction,
@@ -138,8 +271,9 @@ struct ncclGin_BackendMask {
     ncclTeam, int peer, RemoteAction remoteAction,
     Coop coop = ncclCoopThread(),
     DescriptorSmem descriptor = ncclGin_None{},
-    cuda::thread_scope alreadyReleased = cuda::thread_scope_thread,
-    cuda::thread_scope expected_scope = cuda::thread_scope_device
+    cuda::thread_scope givenRelease = cuda::thread_scope_thread,
+    cuda::thread_scope requiredRelease = cuda::thread_scope_device,
+    uint32_t optFlags = ncclGinOptFlagsDefault
   ) const;
 
   // All source buffers from put's from any thread in this coop will be safe to reuse.
@@ -175,9 +309,16 @@ struct ncclGin_BackendMask {
   // Returns current value of signal with all but bottom bits set to zero.
   NCCL_DEVICE_INLINE uint64_t readSignal(ncclGinSignal_t signal, int bits=64, cuda::memory_order ord = cuda::memory_order_acquire) const;
 
+  // Returns current value of VA signal at given window and offset with all but bottom bits set to zero.
+  NCCL_DEVICE_INLINE uint64_t readSignal(ncclWindow_t signalWindow, size_t signalOffset, int bits=64, cuda::memory_order ord = cuda::memory_order_acquire) const;
+
   // Wait for signal to meet or exceed value.
   template<typename Coop>
   NCCL_DEVICE_INLINE void waitSignal(Coop, ncclGinSignal_t signal, uint64_t least, int bits=64, cuda::memory_order ord = cuda::memory_order_acquire) const;
+
+  // Wait for VA signal at given window and offset to meet or exceed value.
+  template<typename Coop>
+  NCCL_DEVICE_INLINE void waitSignal(Coop, ncclWindow_t signalWindow, size_t signalOffset, uint64_t least, int bits=64, cuda::memory_order ord = cuda::memory_order_acquire) const;
 
   // Wait for signal to meet or exceed shadow value.
   template<typename Coop>
@@ -193,6 +334,8 @@ struct ncclGin_BackendMask {
   NCCL_DEVICE_INLINE void resetCounter(ncclGinCounter_t counter) const;
   // Sets signal and shadow to zero. May not race with concurrent modifcations to signal.
   NCCL_DEVICE_INLINE void resetSignal(ncclGinSignal_t signal) const;
+  // Resets a VA signal at the given window and offset.
+  NCCL_DEVICE_INLINE void resetSignal(ncclWindow_t signalWindow, size_t signalOffset) const;
 
   //////////////////////////////////////////////////////////////////////////////
   // internal:

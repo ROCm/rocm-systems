@@ -50,7 +50,7 @@ void AlltoAllGetBw(size_t count, int typesize, double sec, double* algBw, double
   *busBw = baseBw * factor;
 }
 
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
 // set devComm reqs for alltoall device kernels
 testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs, ncclCommProperties_t* commProperties) {
   if (!reqs || !commProperties) return testInternalError;
@@ -68,6 +68,11 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
       }
       reqs->barrierCount = deviceCtaCount;
       reqs->ginSignalCount = deviceCtaCount;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,7)
+      reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+#else
+      reqs->ginForceEnable = true;
+#endif
       return testSuccess;
     default:
       return testNotImplemented;

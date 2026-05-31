@@ -144,7 +144,7 @@ struct testEngine {
   testResult_t (*runTest)(struct threadArgs* args, int root, ncclDataType_t type,
       const char* typeName, ncclRedOp_t op, const char* opName);
 
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
   testResult_t (*getDevCommRequirements)(int deviceImpl, ncclDevCommRequirements* reqs, ncclCommProperties_t* commProperties);
 #elif defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
   bool (*getDevCommRequirements)(int deviceImpl, ncclDevCommRequirements* reqs);

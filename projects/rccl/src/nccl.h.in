@@ -32,6 +32,7 @@ extern "C" {
 #endif
 
 #include <limits.h>
+#include <stdint.h>
 
 /*! @brief      Opaque handle to communicator
     @details    A communicator contains information required to facilitate collective communications calls */
@@ -68,9 +69,13 @@ typedef struct { char internal[NCCL_UNIQUE_ID_BYTES]; /*!< Opaque array>*/} nccl
 #define NCCL_SPLIT_NOCOLOR -1
 #define NCCL_UNDEF_FLOAT -1.0f
 
+/* Internal use only */
+#define NCCL_API_MAGIC 0xcafebeef
+
 /* Window Registration flags */
 #define NCCL_WIN_DEFAULT 0x00
 #define NCCL_WIN_COLL_SYMMETRIC 0x01
+#define NCCL_WIN_STRICT_ORDERING 0x02
 
 #define NCCL_WIN_REQUIRED_ALIGNMENT 4096
 
@@ -112,13 +117,15 @@ typedef struct ncclConfig_v22800 {
   int nvlsCTAs;                /*!< Number of NVLS cooperative thread arrays (blocks)*/
   int nChannelsPerNetPeer;     /*!< Number of channels per NET peer*/
   int nvlinkCentricSched;      /*!< nvlinkCentricSched*/
+  int graphUsageMode;          /*!< CUDA Graph usage mode hint*/
+  int numRmaCtx;               /*!< Number of RMA contexts*/
 } ncclConfig_t;
 
 /* Config initializer must be assigned to initialize config structure when it is created.
  * Not initialized config will result in an error. */
 #define NCCL_CONFIG_INITIALIZER {                                               \
   sizeof(ncclConfig_t),                             /* size */                  \
-  0xcafebeef,                                       /* magic */                 \
+  NCCL_API_MAGIC,                                   /* magic */                 \
   NCCL_VERSION(NCCL_MAJOR, NCCL_MINOR, NCCL_PATCH), /* version */               \
   NCCL_CONFIG_UNDEF_INT,                            /* blocking */              \
   NCCL_CONFIG_UNDEF_INT,                            /* cgaClusterSize */        \
@@ -134,6 +141,8 @@ typedef struct ncclConfig_v22800 {
   NCCL_CONFIG_UNDEF_INT,                            /* nvlsCTAs */              \
   NCCL_CONFIG_UNDEF_INT,                            /* nChannelsPerNetPeer */   \
   NCCL_CONFIG_UNDEF_INT,                            /* nvlinkCentricSched */    \
+  NCCL_CONFIG_UNDEF_INT,                            /* graphUsageMode */        \
+  NCCL_CONFIG_UNDEF_INT,                            /* numRmaCtx */             \
 }
 /*! @} */
 
@@ -345,6 +354,23 @@ ncclResult_t pncclCommSplit(ncclComm_t comm, int color, int key, ncclComm_t *new
 ncclResult_t  ncclCommShrink(ncclComm_t comm, int* excludeRanksList, int excludeRanksCount, ncclComm_t* newcomm, ncclConfig_t* config, int shrinkFlags);
 ncclResult_t pncclCommShrink(ncclComm_t comm, int* excludeRanksList, int excludeRanksCount, ncclComm_t* newcomm, ncclConfig_t* config, int shrinkFlags);
 
+/* Generate per-communicator unique ID for grow.
+ * Constraints:
+ * - Cannot generate a new UID while a previous UID is unconsumed
+ * - Each UID can only be used once (no reuse after consumption)
+ * - Must wait for grow operation to complete before calling again */
+ncclResult_t ncclCommGetUniqueId(ncclComm_t comm, ncclUniqueId* uniqueId);
+ncclResult_t pncclCommGetUniqueId(ncclComm_t comm, ncclUniqueId* uniqueId);
+
+/* Grow communicator by adding new ranks.
+ * Parameter usage:
+ * - Existing non-root: comm, uniqueId=NULL, rank=-1
+ * - Existing root: comm, uniqueId=&id, rank=-1
+ * - New ranks: comm=NULL, uniqueId=&id, rank=assigned
+ * The UID is consumed upon successful grow and cannot be reused. */
+ncclResult_t  ncclCommGrow(ncclComm_t comm, int nRanks, const ncclUniqueId* uniqueId, int rank, ncclComm_t* newcomm, ncclConfig_t* config);
+ncclResult_t pncclCommGrow(ncclComm_t comm, int nRanks, const ncclUniqueId* uniqueId, int rank, ncclComm_t* newcomm, ncclConfig_t* config);
+
 /*! @brief      Creates a new communicator (multi thread/process version), similar to ncclCommInitRankConfig.
      @details    Allows to use more than one ncclUniqueId (up to one per rank), 
                  indicated by nId, to accelerate the init operation.
@@ -516,6 +542,10 @@ ncclResult_t  ncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win);
 /*! @cond       include_hidden */
 ncclResult_t pncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win);
 /*! @endcond */
+
+/* Get the user pointer from the window */
+ncclResult_t ncclWinGetUserPtr(ncclComm_t comm, ncclWindow_t win, void** outUserPtr);
+ncclResult_t pncclWinGetUserPtr(ncclComm_t comm, ncclWindow_t win, void** outUserPtr);
 
 /*! @defgroup   rccl_api_enumerations API Enumerations
     @details    Enumerations used by collective communication calls
@@ -960,6 +990,50 @@ ncclResult_t  ncclRecv(void* recvbuff, size_t count, ncclDataType_t datatype, in
 ncclResult_t pncclRecv(void* recvbuff, size_t count, ncclDataType_t datatype, int peer,
     ncclComm_t comm, hipStream_t stream);
 /*! @endcond */
+
+/*
+ * Put
+ *
+ * One-sided communication operation that writes data from the local buffer to a
+ * remote peer's registered memory window without explicit participation from the
+ * target process.
+ */
+ncclResult_t ncclPutSignal(const void* localbuff, size_t count, ncclDataType_t datatype,
+    int peer, ncclWindow_t peerWin, size_t peerWinOffset,
+    int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, hipStream_t stream);
+
+ncclResult_t pncclPutSignal(const void* localbuff, size_t count, ncclDataType_t datatype,
+    int peer, ncclWindow_t peerWin, size_t peerWinOffset,
+    int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, hipStream_t stream);
+
+/*
+ * Signal
+ *
+ * Sends a signal to the specified peer without transferring data.
+ */
+ncclResult_t ncclSignal(int peer, int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, hipStream_t stream);
+ncclResult_t pncclSignal(int peer, int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, hipStream_t stream);
+
+/*
+ * Wait Signal Descriptor
+ *
+ * Describes how many signal operations to wait for from a particular rank
+ * on a given signal index and context.
+ */
+typedef struct {
+  int opCnt;    // Number of signal operations to wait for
+  int peer;     // Target peer to wait for signals from
+  int sigIdx;   // Signal index identifier
+  int ctx;      // Context identifier
+} ncclWaitSignalDesc_t;
+
+/*
+ * Wait Signal
+ *
+ * Waits for signals as described in the signal descriptor array.
+ */
+ncclResult_t ncclWaitSignal(int nDesc, ncclWaitSignalDesc_t* signalDescs, ncclComm_t comm, hipStream_t stream);
+ncclResult_t pncclWaitSignal(int nDesc, ncclWaitSignalDesc_t* signalDescs, ncclComm_t comm, hipStream_t stream);
 
 /*! @} */
 
