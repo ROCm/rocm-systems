@@ -71,6 +71,8 @@ enum class DriverType {
 /// @brief Handle for exported / imported memory.
 struct DriverMemoryHandle {
   uint64_t handle{};
+  int dmabuf_fd{-1};
+  uint64_t mmap_offset{0};
 
   bool IsValid() const { return handle != 0; }
 
@@ -263,12 +265,10 @@ public:
   /// @param[in] agent agent associated with @p mem
   /// @param[out] handle handle of the memory object
   /// @param[out] offset memory offset in bytes
-  /// @param[out] drm_fd file descriptor
-  /// @param[out] drm_fd_offset offset in @p drm_fd
   virtual hsa_status_t CreateShareableHandle(void* va, void* mem, size_t size,
                                              const core::Agent& agent,
-                                             core::DriverMemoryHandle* handle, uint64_t* offset,
-                                             int* drm_fd, uint64_t* drm_fd_offset) = 0;
+                                             core::DriverMemoryHandle* handle,
+                                             uint64_t* offset) = 0;
 
   /// @brief Destroys the handle created during @ref CreateShareableHandle.
   ///
