@@ -74,6 +74,7 @@ struct DriverMemoryHandle {
   int dmabuf_fd{-1};
   uint64_t mmap_offset{0};
   size_t size{0};
+  hsa_fabric_handle_t fabric_handle{};
 
   bool IsValid() const { return handle != 0; }
 

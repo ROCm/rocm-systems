@@ -1034,7 +1034,6 @@ class Runtime {
     DriverMemoryHandle driver_handle;  // handle returned by Driver::Allocate(NoAddress = 1)
     bool imported; /* True is this BO was imported from another process */
     bool is_fabric_handle;
-    hsa_fabric_handle_t fabric_handle;
     MemoryRegion::AllocateFlags alloc_flag;
   };
   // hsa_amd_vmem_alloc_handle_t (MemoryHandle*) to MemoryHandle mapping. Owns MemoryHandle

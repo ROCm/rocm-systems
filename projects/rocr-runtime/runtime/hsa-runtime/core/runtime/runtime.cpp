@@ -3917,7 +3917,7 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
   if (memHandle->imported && memHandle->is_fabric_handle) {
     status = targetAgent->driver().ImportMemoryHandle(
         *targetAgent, &driver_handle, ShareableHandleType::FABRIC_HANDLE,
-        &memHandle->fabric_handle);
+        &memHandle->driver_handle.fabric_handle);
   } else {
     status = targetAgent->driver().ImportMemoryHandle(
         *targetAgent, &driver_handle, ShareableHandleType::DMABUF_FD,
@@ -4021,7 +4021,6 @@ Runtime::MemoryHandle::MemoryHandle(const MemoryRegion* region, uint64_t flags_u
           driver_handle(driver_handle),
           imported(false),
           is_fabric_handle(false),
-          fabric_handle({}),
           alloc_flag(alloc_flag) {
 
   assert(driver_handle.handle != 0);
@@ -4034,7 +4033,6 @@ Runtime::MemoryHandle::MemoryHandle(int dmabuf_fd)
     driver_handle({.dmabuf_fd = dmabuf_fd}),
     imported(true),
     is_fabric_handle(false),
-    fabric_handle({}),
     alloc_flag(MemoryRegion::AllocateNoFlags) {
 }
 
@@ -4042,10 +4040,9 @@ Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
   : region(nullptr),
     ref_count(1),
     use_count(0),
-    driver_handle({.dmabuf_fd = -1}),
+    driver_handle({.dmabuf_fd = -1, .fabric_handle = fabric_handle}),
     imported(true),
     is_fabric_handle(true),
-    fabric_handle(fabric_handle),
     alloc_flag(MemoryRegion::AllocateNoFlags) {
 }
 
