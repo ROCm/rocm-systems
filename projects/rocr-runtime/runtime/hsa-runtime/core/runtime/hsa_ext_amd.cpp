@@ -1171,8 +1171,7 @@ hsa_status_t hsa_amd_agents_allow_access(uint32_t num_agents, const hsa_agent_t*
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
-  return core::Runtime::runtime_singleton_->AllowAccess(num_agents, agents,
-                                                        ptr);
+  return core::Runtime::runtime_singleton_->AllowAccess(num_agents, agents, ptr);
   CATCH;
 }
 
@@ -1692,7 +1691,6 @@ hsa_status_t hsa_amd_vmem_set_access(void* va, size_t size,
   IS_ZERO(size);
   IS_BAD_PTR(desc);
   IS_ZERO(desc_cnt);
-
   return core::Runtime::runtime_singleton_->VMemorySetAccess(va, size, desc, desc_cnt);
   CATCH;
 }
