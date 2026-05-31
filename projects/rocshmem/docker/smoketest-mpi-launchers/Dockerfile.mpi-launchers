@@ -1,0 +1,443 @@
+## rocSHMEM MPI launcher smoke-test Dockerfile
+##
+## Validates rocSHMEM MPI portability across two MPI libraries (MPICH and
+## Open MPI), three USE_EXTERNAL_MPI build variants (OFF/ON/AUTO), and three
+## launcher families (mpiexec/prte, mpiexec/hydra, srun --mpi=pmix/pmi2).
+##
+## Open MPI and MPICH are both built from source with ROCm+UCX support.
+## PMIx 5.0.1 is built from source (matching Slurm 23.11) so that srun
+## --mpi=pmix and Open MPI's prrte use the same PMIx rendezvous mechanism.
+##
+## Expected CMake AUTO detection results:
+##   MPICH   → HAVE_EXTERNAL_MPI=ON  (no OPEN_MPI marker in mpi.h)
+##   OpenMPI → HAVE_EXTERNAL_MPI=OFF (OPEN_MPI >= 4 detected → dlopen path)
+##
+## Cache structure:
+##   base-rocm  — ROCm + toolchain + Slurm + system PMIx runtime
+##   base-ucx   — base-rocm + UCX from source
+##   base-pmix  — base-ucx + PMIx 5.0.1 from source (/opt/pmix)
+##   base-mpich — base-ucx + MPICH from source (/opt/mpich)
+##   base-ompi  — base-pmix + Open MPI from source (/opt/ompi)
+##   base-src   — base-rocm + rocSHMEM source tree (scripts excluded)
+##   mpich-{off,on,auto} / ompi-{off,on,auto} — per-variant rocSHMEM builds
+##   final      — base-ompi + MPICH + all six build trees + test scripts
+##
+## Build (run from projects/rocshmem/):
+##
+##   # All variants, from upstream git:
+##   docker build -f docker/smoketest-mpi-launchers/Dockerfile.mpi-launchers \
+##          -t rocshmem-mpi-ci --build-arg GPU_TARGETS=gfx950 .
+##
+##   # All variants, from local sources:
+##   docker build -f docker/smoketest-mpi-launchers/Dockerfile.mpi-launchers \
+##          -t rocshmem-mpi-ci --build-arg GPU_TARGETS=gfx950 \
+##          --build-arg USE_LOCAL_SRC=1 .
+##
+##   # Single variant (for iteration):
+##   docker build -f docker/smoketest-mpi-launchers/Dockerfile.mpi-launchers \
+##          --target ompi-auto -t rocshmem-ompi-auto \
+##          --build-arg GPU_TARGETS=gfx950 --build-arg USE_LOCAL_SRC=1 .
+##
+## Run smoke tests (requires GPU devices and --privileged for Slurm):
+##
+##   docker run --rm --network host --ipc host --privileged \
+##          --shm-size 64G \
+##          --device /dev/kfd --device /dev/dri --group-add video \
+##          rocshmem-mpi-ci
+##
+##   # With verbose test output:
+##   docker run --rm --network host --ipc host --privileged \
+##          --shm-size 64G \
+##          --device /dev/kfd --device /dev/dri --group-add video \
+##          -e VERBOSE=1 rocshmem-mpi-ci
+##
+##   # Subset of launcher sections (ompi, mpich, slurm):
+##   docker run --rm --network host --ipc host \
+##          --shm-size 64G \
+##          --device /dev/kfd --device /dev/dri --group-add video \
+##          -e VARIANTS="ompi mpich" rocshmem-mpi-ci
+##
+## Note: Slurm tests require --privileged and ports 6817/6818 free on the host
+## (--network host shares the host network namespace).
+
+## ==========================================================================
+## base-rocm: ROCm + build toolchain + Slurm — no MPI, no sources
+## This stage is the base for both MPI stages and must not contain any
+## source COPY so that MPI builds are not invalidated by source changes.
+## ==========================================================================
+ARG ROCM_VERSION=7.13
+
+FROM ubuntu:24.04 AS base-rocm
+
+ARG ROCM_VERSION
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+ && apt-get install -y sudo wget curl gpg ca-certificates \
+ && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+## AMD ROCm apt repository
+RUN mkdir --parents --mode=0755 /etc/apt/keyrings \
+ && wget https://repo.amd.com/rocm/packages/gpg/rocm.gpg -O - | gpg --dearmor | tee /etc/apt/keyrings/amdrocm.gpg > /dev/null \
+ && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/amdrocm.gpg] https://repo.amd.com/rocm/packages-multi-arch/ubuntu2404 stable main" > /etc/apt/sources.list.d/rocm.list
+
+RUN apt-get update \
+ && apt-get install -y amdrocm-core${ROCM_VERSION}-gfx950 amdrocm-core${ROCM_VERSION}-gfx942 amdrocm-core-dev${ROCM_VERSION} amdrocm-developer-tools${ROCM_VERSION} amdrocm-runtime-dev \
+ && ln -s /opt/rocm/core/.info /opt/rocm/.info \
+ && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+    build-essential autoconf automake libtool flex bison m4 \
+    git make cmake ninja-build pkg-config \
+    libnuma-dev libpthread-stubs0-dev libzstd-dev \
+    zip zlib1g-dev wget unzip \
+    libssl-dev curl \
+    python3-pip python3-setuptools python3-venv python3-dev python3-yaml \
+    vim less \
+    libibverbs-dev ibverbs-utils libibumad-dev libpci-dev librdmacm-dev rdma-core infiniband-diags \
+ && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+## Slurm — started at runtime by start_slurm.sh
+## libpmix2: runtime library for Slurm's mpi/pmix_v5 plugin (built against
+## the system libpmix.so.2); must be present alongside the Slurm packages.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends slurmctld slurmd slurm-client munge libpmix2 \
+ && apt-get clean && rm -rf /var/lib/apt/lists/*
+RUN dd if=/dev/urandom bs=1 count=1024 > /etc/munge/munge.key \
+ && chmod 400 /etc/munge/munge.key \
+ && mkdir -p /var/spool/slurmctld /var/log/slurm /var/run/slurm /etc/slurm
+
+ENV ROCM_PATH=/opt/rocm
+ENV PATH="${ROCM_PATH}/bin:${ROCM_PATH}/llvm/bin:${PATH}"
+## /opt/rocm/core → /etc/alternatives/core → /opt/rocm/core-VERSION (via update-alternatives)
+ENV LD_LIBRARY_PATH="${ROCM_PATH}/core/lib:${ROCM_PATH}/lib"
+WORKDIR /workspace
+
+## ==========================================================================
+## base-ucx: ROCm-enabled UCX built from source — shared by both MPI stages
+## ==========================================================================
+FROM base-rocm AS base-ucx
+
+ARG UCX_COMMIT=18770fdc1c3b5de202d14a088a14b734d2c4bbf3
+ARG UCX_INSTALL=/opt/ucx
+
+RUN git clone https://github.com/ROCm/ucx.git /tmp/ucx \
+ && cd /tmp/ucx && git checkout ${UCX_COMMIT} \
+ && ./autogen.sh \
+ && ./contrib/configure-release \
+      --prefix=${UCX_INSTALL} \
+      --with-rocm=${ROCM_PATH} \
+      --enable-mt \
+      --without-go --without-java --without-cuda --without-knem \
+ && make -j$(nproc) install \
+ && rm -rf /tmp/ucx
+
+ENV PATH="${UCX_INSTALL}/bin:${PATH}"
+ENV LD_LIBRARY_PATH="${UCX_INSTALL}/lib:${LD_LIBRARY_PATH}"
+ENV PKG_CONFIG_PATH="${UCX_INSTALL}/lib/pkgconfig"
+
+RUN echo "${UCX_INSTALL}/lib" > /etc/ld.so.conf.d/ucx.conf && ldconfig
+
+## ==========================================================================
+## base-mpich: MPICH built from source with UCX+ROCm support
+## Inherits base-ucx — source changes don't bust this cache.
+## Installed to /opt/mpich; libmpi.so is at /opt/mpich/lib/libmpi.so.
+## ==========================================================================
+FROM base-ucx AS base-mpich
+
+## PMIx needed so HAVE_PMIX is defined in rocSHMEM tests and UUID init works
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libpmix-dev \
+ && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+ARG MPICH_VERSION=4.2.0
+ARG MPICH_INSTALL=/opt/mpich
+ENV PMIX_ROOT=/usr/lib/x86_64-linux-gnu/pmix2
+
+RUN wget -q https://www.mpich.org/static/downloads/${MPICH_VERSION}/mpich-${MPICH_VERSION}.tar.gz \
+ && tar -xzf mpich-${MPICH_VERSION}.tar.gz \
+ && cd mpich-${MPICH_VERSION} \
+ && ./configure \
+      --prefix=${MPICH_INSTALL} \
+      --with-device=ch4:ucx \
+      --with-ucx=${UCX_INSTALL} \
+      --with-pm=hydra \
+      --enable-shared \
+      --disable-fortran \
+      --disable-static \
+ && make -j$(nproc) install \
+ && cd .. && rm -rf mpich-${MPICH_VERSION} mpich-${MPICH_VERSION}.tar.gz \
+ && rm -f ${MPICH_INSTALL}/lib/libucp*.so* \
+          ${MPICH_INSTALL}/lib/libucs*.so* \
+          ${MPICH_INSTALL}/lib/libuct*.so* \
+          ${MPICH_INSTALL}/lib/libucm*.so*
+
+ENV PATH="${MPICH_INSTALL}/bin:${PATH}"
+ENV LD_LIBRARY_PATH="${MPICH_INSTALL}/lib:${LD_LIBRARY_PATH}"
+
+RUN echo "${MPICH_INSTALL}/lib" > /etc/ld.so.conf.d/mpich.conf && ldconfig
+
+RUN ${MPICH_INSTALL}/bin/mpiexec --version 2>&1 \
+ && ls ${MPICH_INSTALL}/lib/libmpi* \
+ && echo "Source-built MPICH confirmed"
+
+## ==========================================================================
+## base-pmix: PMIx built from source at the same version as the system Slurm
+## (5.0.1 on Ubuntu 24.04 / Slurm 23.11).  Installing to /opt/pmix gives
+## prrte access to internal headers (src/util/pmix_argv.h etc.) that
+## libpmix-dev omits, while producing the same ABI that slurmctld/slurmd link.
+## hwloc and libevent must also be external when PMIx is external.
+## ==========================================================================
+FROM base-ucx AS base-pmix
+
+ARG PMIX_VERSION=5.0.1
+ARG PMIX_INSTALL=/opt/pmix
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libhwloc-dev libevent-dev \
+ && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+## PMIx configure --with-libevent=DIR checks DIR/lib for libevent_core, but on
+## Ubuntu the multiarch path is /usr/lib/x86_64-linux-gnu.  Create a staging
+## prefix with lib/ at the expected location so configure finds the library.
+## PMIx configure --with-FOO=DIR checks DIR/lib and DIR/include specifically.
+## Ubuntu puts libraries in the multiarch path (/usr/lib/x86_64-linux-gnu) so
+## we stage symlinks under /opt/pmix-deps/{libevent,hwloc} with a flat lib/.
+RUN MULTIARCH=$(dpkg-architecture -qDEB_HOST_MULTIARCH) \
+ && mkdir -p /opt/pmix-deps/libevent/lib /opt/pmix-deps/libevent/include \
+ && ln -s /usr/lib/${MULTIARCH}/libevent*.so* /usr/lib/${MULTIARCH}/libevent*.a /opt/pmix-deps/libevent/lib/ 2>/dev/null || true \
+ && cp -r /usr/include/event*.h /usr/include/event2 /opt/pmix-deps/libevent/include/ 2>/dev/null || true \
+ && mkdir -p /opt/pmix-deps/hwloc/lib /opt/pmix-deps/hwloc/include \
+ && ln -s /usr/lib/${MULTIARCH}/libhwloc*.so* /usr/lib/${MULTIARCH}/libhwloc*.a /opt/pmix-deps/hwloc/lib/ 2>/dev/null || true \
+ && cp -r /usr/include/hwloc*.h /usr/include/hwloc /opt/pmix-deps/hwloc/include/ 2>/dev/null || true
+
+RUN wget -q https://github.com/openpmix/openpmix/releases/download/v${PMIX_VERSION}/pmix-${PMIX_VERSION}.tar.bz2 \
+ && tar -xjf pmix-${PMIX_VERSION}.tar.bz2 \
+ && cd pmix-${PMIX_VERSION} \
+ && ./configure \
+      --prefix=${PMIX_INSTALL} \
+      --with-hwloc=/opt/pmix-deps/hwloc \
+      --with-libevent=/opt/pmix-deps/libevent \
+      --disable-static \
+ && make -j$(nproc) install \
+ && cd .. && rm -rf pmix-${PMIX_VERSION} pmix-${PMIX_VERSION}.tar.bz2
+
+ENV PATH="${PMIX_INSTALL}/bin:${PATH}"
+ENV PKG_CONFIG_PATH="${PMIX_INSTALL}/lib/pkgconfig:${PKG_CONFIG_PATH}"
+## Register /opt/pmix/lib FIRST, then re-register the system multiarch path
+## AFTER so that ldconfig resolves libpmix.so.2 to the system library
+## (/usr/lib/x86_64-linux-gnu/libpmix.so.2 built against Slurm 23.11).
+## Slurm's mpi/pmix_v5 plugin requires the exact system libpmix ABI.
+## Test binaries linked against libpmix find it via the system path too.
+## /opt/pmix/lib is still available as a fallback and for pkg-config.
+## ldconfig processes .conf files alphabetically; last entry for a given soname
+## wins.  Name the source conf "zzz-pmix-src" so the system multiarch path
+## (registered by the distro's base conf) takes precedence for libpmix.so.2,
+## keeping Slurm's mpi/pmix_v5 plugin happy, while /opt/pmix/lib is still
+## visible for pkg-config and header lookups.
+## ldconfig processes .conf files alphabetically; last entry for a soname wins.
+## "aaa-pmix-src.conf" sorts before "x86_64-linux-gnu.conf" (the system entry),
+## so the system /usr/lib/x86_64-linux-gnu/libpmix.so.2 wins the soname race.
+## Slurm's mpi/pmix_v5 plugin (built against the system libpmix) works.
+## Test binaries also find libpmix via the system path.
+## /opt/pmix/lib is still searchable for pkg-config and prrte internal headers.
+RUN echo "${PMIX_INSTALL}/lib" > /etc/ld.so.conf.d/aaa-pmix-src.conf \
+ && ldconfig
+RUN ldconfig -p | grep libpmix
+RUN pkg-config --modversion pmix && echo "Source-built PMIx confirmed"
+
+## ==========================================================================
+## base-ompi: ROCm-enabled Open MPI built from source with UCX
+## Inherits base-pmix — source changes don't bust this cache.
+## Installed to /opt/ompi; libmpi.so is at /opt/ompi/lib/libmpi.so.
+## ==========================================================================
+FROM base-pmix AS base-ompi
+
+ARG OMPI_COMMIT=697a596dde68815fe50db3c2a75a42ddb41b5ef4
+ARG OMPI_INSTALL=/opt/ompi
+
+## --with-prrte=internal --with-pmix=/opt/pmix: prrte uses the source-built
+## PMIx (full headers available) whose ABI matches Slurm's system PMIx,
+## so srun --mpi=pmix can reach the same rendezvous file.
+RUN git clone --recursive https://github.com/ROCm/ompi.git /tmp/ompi \
+ && cd /tmp/ompi && git checkout ${OMPI_COMMIT} \
+ && git submodule update --init --recursive \
+ && python3 -m venv /tmp/ompi-venv \
+ && /tmp/ompi-venv/bin/pip install -r docs/requirements.txt \
+ && ./autogen.pl \
+ && ./configure \
+      --prefix=${OMPI_INSTALL} \
+      --with-rocm=${ROCM_PATH} \
+      --with-ucx=${UCX_INSTALL} \
+      --disable-oshmem \
+      --with-prrte=internal \
+      --with-pmix=${PMIX_INSTALL} \
+      --with-hwloc=external \
+      --with-libevent=external \
+      --without-cuda \
+      --disable-mpi-fortran \
+      --without-ofi \
+ && make -j$(nproc) install \
+ && rm -rf /tmp/ompi /tmp/ompi-venv
+
+ENV PATH="${OMPI_INSTALL}/bin:${PATH}"
+ENV LD_LIBRARY_PATH="${OMPI_INSTALL}/lib:${LD_LIBRARY_PATH}"
+
+RUN echo "${OMPI_INSTALL}/lib" > /etc/ld.so.conf.d/ompi.conf && ldconfig
+
+RUN grep -q "OPEN_MPI" ${OMPI_INSTALL}/include/mpi.h \
+ && pkg-config --modversion pmix \
+ && echo "ROCm-enabled Open MPI + PMIx confirmed"
+
+ENV OMPI_ALLOW_RUN_AS_ROOT=1
+ENV OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
+ENV UCX_WARN_UNUSED_ENV_VARS=n
+
+## ==========================================================================
+## base-src: rocSHMEM sources + helper scripts
+## Inherits base-rocm. Changing sources only invalidates build stages,
+## not the expensive MPI builds above.
+## ==========================================================================
+FROM base-rocm AS base-src
+
+ARG ROCM_REPO=https://github.com/ROCm/rocm-systems.git
+ARG ROCSHMEM_BRANCH=develop
+ARG ROCSHMEM_CACHE_BUST=1
+ARG USE_LOCAL_SRC=0
+
+## Copy source tree excluding docker/ so that changes to run_tests.sh /
+## start_slurm.sh do not bust this layer and force recompilation of all 6
+## rocSHMEM build variants.  docker/ scripts are injected in the final stage.
+COPY cmake/         /tmp/local/projects/rocshmem/cmake/
+COPY examples/      /tmp/local/projects/rocshmem/examples/
+COPY include/       /tmp/local/projects/rocshmem/include/
+COPY python/        /tmp/local/projects/rocshmem/python/
+COPY scripts/       /tmp/local/projects/rocshmem/scripts/
+COPY src/           /tmp/local/projects/rocshmem/src/
+COPY tests/         /tmp/local/projects/rocshmem/tests/
+COPY tools/         /tmp/local/projects/rocshmem/tools/
+COPY utils/         /tmp/local/projects/rocshmem/utils/
+COPY CMakeLists.txt AUTHORS.md CHANGELOG.md CONTRIBUTING.md LICENSE.md README.md \
+     /tmp/local/projects/rocshmem/
+
+RUN if [ "${USE_LOCAL_SRC}" = "1" ]; then \
+      find /tmp/local/projects/rocshmem -name CMakeCache.txt -delete; \
+      find /tmp/local/projects/rocshmem -name CMakeFiles -type d -exec rm -rf {} + 2>/dev/null; \
+      find /tmp/local/projects/rocshmem -name build     -type d -exec rm -rf {} + 2>/dev/null; \
+      mkdir -p /workspace/src/projects && \
+      cp -r /tmp/local/projects/rocshmem /workspace/src/projects/rocshmem; \
+    else \
+      git clone --no-checkout --filter=blob:none ${ROCM_REPO} /workspace/src && \
+      cd /workspace/src && \
+      git sparse-checkout set --cone projects/rocshmem && \
+      git checkout ${ROCSHMEM_BRANCH}; \
+    fi
+
+ENV ROCSHMEM_SRC=/workspace/src/projects/rocshmem
+
+## ==========================================================================
+## MPICH build variants — MPI from base-mpich, sources from base-src
+## ==========================================================================
+
+FROM base-mpich AS mpich-off
+ARG GPU_TARGETS=gfx950
+COPY --from=base-src /workspace/src /workspace/src
+
+ENV ROCSHMEM_SRC=/workspace/src/projects/rocshmem
+RUN cd ${ROCSHMEM_SRC} && mkdir -p build-mpich-off && cd build-mpich-off \
+ && INSTALL_PREFIX=/opt/rocshmem-mpich-off \
+    ../scripts/build_configs/all_backends -DUSE_EXTERNAL_MPI=OFF -DUSE_IPC=ON -DBUILD_UNIT_TESTS=OFF -DGPU_TARGETS="${GPU_TARGETS}" \
+ && echo "=== MPICH + OFF: OK ==="
+
+FROM base-mpich AS mpich-on
+ARG GPU_TARGETS=gfx950
+COPY --from=base-src /workspace/src /workspace/src
+ENV ROCSHMEM_SRC=/workspace/src/projects/rocshmem
+RUN cd ${ROCSHMEM_SRC} && mkdir -p build-mpich-on && cd build-mpich-on \
+ && INSTALL_PREFIX=/opt/rocshmem-mpich-on \
+    ../scripts/build_configs/all_backends -DUSE_EXTERNAL_MPI=ON -DUSE_IPC=ON -DBUILD_UNIT_TESTS=OFF -DGPU_TARGETS="${GPU_TARGETS}" \
+ && echo "=== MPICH + ON: OK ==="
+
+FROM base-mpich AS mpich-auto
+ARG GPU_TARGETS=gfx950
+COPY --from=base-src /workspace/src /workspace/src
+ENV ROCSHMEM_SRC=/workspace/src/projects/rocshmem
+RUN cd ${ROCSHMEM_SRC} && mkdir -p build-mpich-auto && cd build-mpich-auto \
+ && INSTALL_PREFIX=/opt/rocshmem-mpich-auto \
+    ../scripts/build_configs/all_backends -DUSE_IPC=ON -DBUILD_UNIT_TESTS=OFF -DGPU_TARGETS="${GPU_TARGETS}" \
+ && grep "^#define HAVE_EXTERNAL_MPI" include/rocshmem/rocshmem_config.h \
+ || { echo "FAIL: MPICH AUTO expected HAVE_EXTERNAL_MPI defined"; exit 1; } \
+ && echo "=== MPICH + AUTO: OK (HAVE_EXTERNAL_MPI=ON as expected) ==="
+
+## ==========================================================================
+## Open MPI build variants — MPI from base-ompi, sources from base-src
+## ==========================================================================
+
+FROM base-ompi AS ompi-off
+ARG GPU_TARGETS=gfx950
+COPY --from=base-src /workspace/src /workspace/src
+ENV ROCSHMEM_SRC=/workspace/src/projects/rocshmem
+RUN cd ${ROCSHMEM_SRC} && mkdir -p build-ompi-off && cd build-ompi-off \
+ && INSTALL_PREFIX=/opt/rocshmem-ompi-off \
+    ../scripts/build_configs/all_backends -DUSE_EXTERNAL_MPI=OFF -DUSE_IPC=ON -DBUILD_UNIT_TESTS=OFF -DGPU_TARGETS="${GPU_TARGETS}" \
+ && echo "=== Open MPI + OFF: OK ==="
+
+FROM base-ompi AS ompi-on
+ARG GPU_TARGETS=gfx950
+COPY --from=base-src /workspace/src /workspace/src
+ENV ROCSHMEM_SRC=/workspace/src/projects/rocshmem
+RUN cd ${ROCSHMEM_SRC} && mkdir -p build-ompi-on && cd build-ompi-on \
+ && INSTALL_PREFIX=/opt/rocshmem-ompi-on \
+    ../scripts/build_configs/all_backends -DUSE_EXTERNAL_MPI=ON -DUSE_IPC=ON -DBUILD_UNIT_TESTS=OFF -DGPU_TARGETS="${GPU_TARGETS}" \
+ && echo "=== Open MPI + ON: OK ==="
+
+FROM base-ompi AS ompi-auto
+ARG GPU_TARGETS=gfx950
+COPY --from=base-src /workspace/src /workspace/src
+ENV ROCSHMEM_SRC=/workspace/src/projects/rocshmem
+RUN cd ${ROCSHMEM_SRC} && mkdir -p build-ompi-auto && cd build-ompi-auto \
+ && INSTALL_PREFIX=/opt/rocshmem-ompi-auto \
+    ../scripts/build_configs/all_backends -DUSE_IPC=ON -DBUILD_UNIT_TESTS=OFF -DGPU_TARGETS="${GPU_TARGETS}" \
+ && ! grep "^#define HAVE_EXTERNAL_MPI" include/rocshmem/rocshmem_config.h \
+ || { echo "FAIL: Open MPI AUTO expected HAVE_EXTERNAL_MPI NOT defined"; exit 1; } \
+ && echo "=== Open MPI + AUTO: OK (HAVE_EXTERNAL_MPI=OFF as expected) ==="
+
+## ==========================================================================
+## final: Open MPI base + source-built MPICH copied in + all six build trees
+## PATH and LD_LIBRARY_PATH are set per MPI context in run_tests.sh.
+## Default build target.
+## ==========================================================================
+FROM base-ompi AS final
+
+## Copy source-built MPICH from base-mpich
+COPY --from=base-mpich /opt/mpich /opt/mpich
+COPY --from=base-mpich /opt/ucx   /opt/ucx
+
+## Re-register ldconfig entries (ompi.conf already present from base-ompi)
+RUN echo "/opt/mpich/lib" > /etc/ld.so.conf.d/mpich.conf \
+ && echo "/opt/ucx/lib"   > /etc/ld.so.conf.d/ucx.conf   \
+ && ldconfig
+
+## Scripts copied directly from build context — changes here don't bust the
+## rocSHMEM build cache (base-src only holds source code, not scripts).
+COPY docker/smoketest-mpi-launchers/run_tests.sh   /usr/local/bin/run_tests.sh
+COPY docker/smoketest-mpi-launchers/start_slurm.sh /usr/local/bin/start_slurm.sh
+RUN chmod +x /usr/local/bin/run_tests.sh /usr/local/bin/start_slurm.sh
+
+COPY --from=base-src /workspace/src /workspace/src
+COPY --from=mpich-off  /workspace/src/projects/rocshmem/build-mpich-off  /workspace/src/projects/rocshmem/build-mpich-off
+COPY --from=mpich-on   /workspace/src/projects/rocshmem/build-mpich-on   /workspace/src/projects/rocshmem/build-mpich-on
+COPY --from=mpich-auto /workspace/src/projects/rocshmem/build-mpich-auto /workspace/src/projects/rocshmem/build-mpich-auto
+COPY --from=ompi-off   /workspace/src/projects/rocshmem/build-ompi-off   /workspace/src/projects/rocshmem/build-ompi-off
+COPY --from=ompi-on    /workspace/src/projects/rocshmem/build-ompi-on    /workspace/src/projects/rocshmem/build-ompi-on
+COPY --from=ompi-auto  /workspace/src/projects/rocshmem/build-ompi-auto  /workspace/src/projects/rocshmem/build-ompi-auto
+
+ENV ROCSHMEM_SRC=/workspace/src/projects/rocshmem
+ENV OMPI_ALLOW_RUN_AS_ROOT=1
+ENV OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
+ENV ROCSHMEM_DEBUG_LEVEL=info:noversion
+ENV PMIX_MCA_psec=native
+WORKDIR ${ROCSHMEM_SRC}
+CMD ["run_tests.sh"]
