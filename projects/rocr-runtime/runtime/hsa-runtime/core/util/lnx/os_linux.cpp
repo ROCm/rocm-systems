@@ -880,6 +880,11 @@ bool MapMemory(void* va, size_t size, MemProt perms, int fd, uint64_t cpu_addr) 
   return true;
 }
 
+bool DmaBufClose(int dmabuf) {
+  if (dmabuf < 0) return true;
+  return ::close(dmabuf) == 0;
+}
+
 void* ReserveMemory(void* start, size_t size, size_t alignment, MemProt prot) {
   size = AlignUp(size, PageSize());
   // check for invalid input size

@@ -1292,7 +1292,7 @@ void Runtime::AsyncIPCSockServerConnLoop(void*) {
       uint64_t fragOffset;
       void *ptr = NULL;
       size_t len = 0;
-      MAKE_SCOPE_GUARD([&]() { runtime_singleton_->DmaBufClose(dmabuf_fd); })
+      MAKE_SCOPE_GUARD([&]() { os::DmaBufClose(dmabuf_fd); })
       std::lock_guard<std::mutex> lock(ipc_sock_server_lock_);
       for (auto& conns : ipc_sock_server_conns_) {
         if (conn_handle == conns.first) {
@@ -1411,7 +1411,7 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
     HsaHandleImportResult res = {};
     HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtHandleImport(&desc, &res, &hflags));
     if (status != HSAKMT_STATUS_SUCCESS) {
-      runtime_singleton_->DmaBufClose(dmabuf_fd);
+      os::DmaBufClose(dmabuf_fd);
       return HSA_STATUS_ERROR;
     }
     // Reuse token already stored on the BO
@@ -1419,7 +1419,7 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
     allocation_map_[ptr].thunk_bo = res.buf_handle;
   }
 
-  runtime_singleton_->DmaBufClose(dmabuf_fd);
+  os::DmaBufClose(dmabuf_fd);
 
   std::lock_guard<std::mutex> lock(ipc_sock_server_lock_);
   if (!ipc_sock_server_conns_.size()) {
@@ -1510,7 +1510,7 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
       if (status != HSAKMT_STATUS_SUCCESS) {
         fprintf(stderr, "IPC Client Import: Invalid IPC handle! expected %u, got %u\n",
                 shared_handle, res.metadata);
-        runtime_singleton_->DmaBufClose(static_cast<int>(dmabuf_fd));
+        os::DmaBufClose(static_cast<int>(dmabuf_fd));
         return -1;
       }
 
@@ -1526,7 +1526,7 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
         }
         it->second.thunk_bo = res.buf_handle;
       }
-      runtime_singleton_->DmaBufClose(static_cast<int>(dmabuf_fd));
+      os::DmaBufClose(static_cast<int>(dmabuf_fd));
     }
 
     // Ping socket server to close exporter
@@ -3663,19 +3663,6 @@ hsa_status_t Runtime::DmaBufExport(const void* ptr, size_t size, int* dmabuf, ui
   return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 }
 
-hsa_status_t Runtime::DmaBufClose(int dmabuf) {
-#ifdef __linux__
-  int err = 0;
-  if (dmabuf >= 0) {
-    err = close(dmabuf);
-  }
-  if (err == 0) return HSA_STATUS_SUCCESS;
-  return HSA_STATUS_ERROR_RESOURCE_FREE;
-#else
-  return HSA_STATUS_SUCCESS;
-#endif
-}
-
 hsa_status_t Runtime::VMemoryAddressReserve(void** va, size_t size, uint64_t address,
                                             uint64_t alignment, uint64_t flags) {
   void* addr = (void*)address;
@@ -4067,7 +4054,7 @@ Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
 
 Runtime::MemoryHandle::~MemoryHandle() {
   if (driver_handle.dmabuf_fd != -1)
-    core::Runtime::runtime_singleton_->DmaBufClose(driver_handle.dmabuf_fd);
+    os::DmaBufClose(driver_handle.dmabuf_fd);
 
   if (driver_handle.handle != 0 && region != nullptr)
     agentOwner()->driver().DestroyShareableHandle(&driver_handle);
