@@ -1146,11 +1146,32 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleExport(const HsaHandleExportDesc* desc,
                                           HsaMemoryExportResult* res,
                                           HsaHandleExportFlags* flags)
 {
-  (void)desc;
-  (void)res;
   (void)flags;
-  // TODO: Implement me
-  return HSAKMT_STATUS_ERROR;
+  CHECK_DXG_OPEN();
+  if (!desc || !res || desc->device_handle == NULL)
+    return HSAKMT_STATUS_INVALID_HANDLE;
+
+  if (desc->type != HSA_EXTERNAL_HANDLE_DMA_BUF)
+    return HSAKMT_STATUS_NOT_SUPPORTED;
+
+  wsl::thunk::GpuMemory* gpu_mem = wsl::thunk::GpuMemory::Convert(
+      reinterpret_cast<wsl::thunk::GpuMemoryHandle>(desc->buf_handle));
+  if (!gpu_mem)
+    return HSAKMT_STATUS_INVALID_HANDLE;
+
+  if (!gpu_mem->IsPhysicalCreated()) {
+    auto code = gpu_mem->CreatePhysicalMemory();
+    if (code != ErrorCode::Success)
+      return HSAKMT_STATUS_OUT_OF_RESOURCES;
+  }
+
+  int dmabuf_fd = -1;
+  auto code = gpu_mem->ExportPhysicalHandle(&dmabuf_fd);
+  if (code != ErrorCode::Success)
+    return HSAKMT_STATUS_ERROR;
+
+  res->dmabuf_fd = dmabuf_fd;
+  return HSAKMT_STATUS_SUCCESS;
 }
 
 
