@@ -375,7 +375,6 @@ class ThunkLoader {
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemHandleFree))(HsaMemoryObjectHandle Handle);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemoryGetCpuAddr))(HsaAMDGPUDeviceHandle DeviceHandle, \
                                       HsaMemoryObjectHandle MemoryHandle, \
-                                      /*HSAint32* fd, */\
                                       HSAuint64* cpu_addr);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemoryCpuMap))(HsaMemoryObjectHandle Handle, \
                                       void** out_cpu_ptr);

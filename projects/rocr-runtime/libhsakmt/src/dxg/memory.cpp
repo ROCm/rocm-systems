@@ -1109,6 +1109,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaHandleImportDesc* import_des
       }
       import_res->buf_handle = reinterpret_cast<HsaMemoryObjectHandle>(
                                phys_mem->GetGpuMemoryHandle());
+      import_res->alloc_size = phys_mem->Size();
       return HSAKMT_STATUS_SUCCESS;
     }
   }
@@ -1134,6 +1135,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaHandleImportDesc* import_des
   if (ret == HSAKMT_STATUS_SUCCESS) {
     //use GpuMemory object handle as drm buf handle
     import_res->buf_handle = reinterpret_cast<HsaMemoryObjectHandle>(mem_handle);
+    import_res->alloc_size =
+        wsl::thunk::GpuMemory::Convert(mem_handle)->Size();
     return HSAKMT_STATUS_SUCCESS;
   }
   return HSAKMT_STATUS_ERROR;
@@ -1218,12 +1221,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryCpuMap(HsaMemoryObjectHandle Handle,
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryGetCpuAddr(HsaAMDGPUDeviceHandle DeviceHandle,
-              HsaMemoryObjectHandle MemoryHandle, HSAint32* fd, HSAuint64* cpu_addr)
+              HsaMemoryObjectHandle MemoryHandle, HSAuint64* cpu_addr)
 {
 	CHECK_DXG_OPEN();
   wsl::thunk::GpuMemory* gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory*>(MemoryHandle);
   assert(gpu_mem != nullptr);
-  cpu_addr =  static_cast<HSAuint64*>(gpu_mem->CpuAddress());
+  *cpu_addr = reinterpret_cast<HSAuint64>(gpu_mem->CpuAddress());
   return HSAKMT_STATUS_SUCCESS;
 }
 
