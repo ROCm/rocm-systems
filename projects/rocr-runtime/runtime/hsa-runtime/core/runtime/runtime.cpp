@@ -50,7 +50,6 @@
 #if defined(__linux__)
 #include <link.h>
 #include <dlfcn.h>
-#include <fcntl.h>
 #include <amdgpu_drm.h>
 #include <sys/mman.h>
 #endif
@@ -4276,11 +4275,6 @@ hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
   if (memoryHandle->imported)
     return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
 
-#ifndef _WIN32
-  *dmabuf_fd = fcntl(memoryHandle->driver_handle.dmabuf_fd, F_DUPFD_CLOEXEC, 0);
-  if (*dmabuf_fd == -1) return HSA_STATUS_ERROR;
-  return HSA_STATUS_SUCCESS;
-#else
   uint64_t offset;
 
   hsa_status_t err = memoryHandle->region->owner()->driver().ExportDMABuf(
@@ -4290,7 +4284,6 @@ hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
     return err;
   }
   return HSA_STATUS_SUCCESS;
-#endif
 }
 
 hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,

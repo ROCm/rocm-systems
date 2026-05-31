@@ -46,6 +46,7 @@
 #include <amdgpu_drm.h>
 #include <link.h>
 #include <sys/ioctl.h>
+#include <fcntl.h>
 #endif
 
 #include "hsakmt/hsakmt.h"
@@ -455,6 +456,15 @@ hsa_status_t KfdDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
 hsa_status_t KfdDriver::ExportDMABuf(const core::Agent& agent,
                                      const core::DriverMemoryHandle& handle, size_t size, int* dmabuf_fd,
                                      size_t* offset) {
+
+#if defined(__linux__)
+  if (handle.dmabuf_fd != -1) {
+    //*dmabuf_fd = fcntl(handle.dmabuf_fd, F_DUPFD_CLOEXEC, 0);
+    *dmabuf_fd = handle.dmabuf_fd;
+    *offset = 0;
+    return HSA_STATUS_SUCCESS;
+  }
+#endif
   const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
 
   HsaHandleExportDesc desc = {};
