@@ -355,6 +355,7 @@ static const unsigned char kCodeTrapHandlerV2_1010[1] = {0};\n\
 static const unsigned char kCodeTrapHandlerV2_10[1] = {0};\n\
 static const unsigned char kCodeTrapHandlerV2_11[1] = {0};\n\
 static const unsigned char kCodeTrapHandlerV2_12[1] = {0};\n\
+static const unsigned char kCodeTrapHandlerV2_1250[1] = {0};\n\
 }  // namespace AMD\n\
 }  // namespace rocr\n\
 ")
@@ -373,25 +374,25 @@ if (APPLE)
   file(MAKE_DIRECTORY ${BLIT_STUB_DIR})
   file(WRITE ${BLIT_STUB_DIR}/amd_blit_shaders_v2.h
 "// Auto-generated Darwin stub — see CMakeLists.txt APPLE branch.\n\
-// Matches symbols produced by blit_shaders/create_blit_shader_header.py:\n\
-// kCode{CopyAligned,CopyMisaligned,Fill}{9,1010,10,11,12}.\n\
+// Matches v2 symbols referenced by amd_gpu_agent.cpp (gfx7/gfx8 come from the\n\
+// checked-in amd_blit_shaders.h): kCode{CopyAligned,CopyMisaligned,Fill}{9,10,11,12,1250}.\n\
 namespace rocr {\n\
 namespace AMD {\n\
 static const unsigned char kCodeCopyAligned9[1] = {0};\n\
-static const unsigned char kCodeCopyAligned1010[1] = {0};\n\
 static const unsigned char kCodeCopyAligned10[1] = {0};\n\
 static const unsigned char kCodeCopyAligned11[1] = {0};\n\
 static const unsigned char kCodeCopyAligned12[1] = {0};\n\
+static const unsigned char kCodeCopyAligned1250[1] = {0};\n\
 static const unsigned char kCodeCopyMisaligned9[1] = {0};\n\
-static const unsigned char kCodeCopyMisaligned1010[1] = {0};\n\
 static const unsigned char kCodeCopyMisaligned10[1] = {0};\n\
 static const unsigned char kCodeCopyMisaligned11[1] = {0};\n\
 static const unsigned char kCodeCopyMisaligned12[1] = {0};\n\
+static const unsigned char kCodeCopyMisaligned1250[1] = {0};\n\
 static const unsigned char kCodeFill9[1] = {0};\n\
-static const unsigned char kCodeFill1010[1] = {0};\n\
 static const unsigned char kCodeFill10[1] = {0};\n\
 static const unsigned char kCodeFill11[1] = {0};\n\
 static const unsigned char kCodeFill12[1] = {0};\n\
+static const unsigned char kCodeFill1250[1] = {0};\n\
 }  // namespace AMD\n\
 }  // namespace rocr\n\
 ")
