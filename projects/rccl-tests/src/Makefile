@@ -101,7 +101,7 @@ GPU_TARGETS_FLAGS = $(foreach target,$(GPU_TARGETS),"--offload-arch=$(target)")
 #endif
 
 ifneq ($(NCCL_HOME), "")
-HIPCUFLAGS += -I$(NCCL_HOME)/ -I$(NCCL_HOME)/include
+HIPCUFLAGS += -I$(NCCL_HOME)/ -I$(NCCL_HOME)/include -I$(NCCL_HOME)/include/rccl
 HIPLDFLAGS += -Wl,-rpath,$(NCCL_HOME) -L$(NCCL_HOME) -L$(NCCL_HOME)/lib
 endif
 
