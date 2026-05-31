@@ -102,10 +102,10 @@ class KfdVirtioDriver final : public core::Driver {
                               uint32_t* cu_mask) const override;
   hsa_status_t AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_GWS, uint32_t* GWS) const override;
   hsa_status_t ExportMemoryHandle(const core::Agent& agent, const core::DriverMemoryHandle& handle,
-                                  size_t size, core::ShareableHandleType type, uint32_t flags,
+                                  core::ShareableHandleType type, uint32_t flags,
                                   void* export_handle) override;
   hsa_status_t ImportMemoryHandle(const core::Agent& agent, core::DriverMemoryHandle* handle,
-                                  size_t* size, core::ShareableHandleType type, void* import_handle,
+                                  core::ShareableHandleType type, void* import_handle,
                                   void* mem = nullptr) override;
   hsa_status_t DestroyImportedShareableHandle(core::DriverMemoryHandle* handle) override;
   hsa_status_t Map(core::DriverMemoryHandle handle, void* mem, size_t offset, size_t size,

@@ -1011,7 +1011,7 @@ class Runtime {
   std::map<const void*, AddressHandle> reserved_address_map_;  // Indexed by VA
 
   struct MemoryHandle {
-    MemoryHandle(const MemoryRegion* region, size_t size, uint64_t flags_unused,
+    MemoryHandle(const MemoryRegion* region, uint64_t flags_unused,
                  DriverMemoryHandle driver_handle, MemoryRegion::AllocateFlags alloc_flag);
     MemoryHandle(int dmabuf_fd);
     MemoryHandle(hsa_fabric_handle_t fabric_handle);
@@ -1029,13 +1029,11 @@ class Runtime {
     __forceinline core::Agent* agentOwner() const { return region->owner(); }
 
     const MemoryRegion* region;
-    size_t size;
     int ref_count;
     int use_count;
     DriverMemoryHandle driver_handle;  // handle returned by Driver::Allocate(NoAddress = 1)
     bool imported; /* True is this BO was imported from another process */
     bool is_fabric_handle;
-    hsa_fabric_handle_t fabric_handle;
     MemoryRegion::AllocateFlags alloc_flag;
   };
   // hsa_amd_vmem_alloc_handle_t (MemoryHandle*) to MemoryHandle mapping. Owns MemoryHandle
