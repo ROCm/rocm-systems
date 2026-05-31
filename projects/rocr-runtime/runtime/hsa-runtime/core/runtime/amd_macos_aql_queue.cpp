@@ -554,7 +554,12 @@ hsa_status_t MacAqlQueue::SubmitKernel(const hsa_kernel_dispatch_packet_t& packe
             packet.workgroup_size_z, 0, 0});
   DispatchDirect(pm4, dispatch_dim_x, dispatch_dim_y, dispatch_dim_z, dispatch_initiator);
   EventWrite(pm4, CS_PARTIAL_FLUSH, EVENT_INDEX_CS_PARTIAL_FLUSH);
-  if (EnvEnabled("ROCR_MACOS_AQL_POST_ACQUIRE")) {
+  // Post-dispatch GL2 writeback+invalidate so the kernel's results reach VRAM and
+  // are visible to the host blit. MUST default ON: without it the kernel's output
+  // stays in L2 and the host reads stale VRAM (e.g. hipBLAS SAXPY returns the
+  // unmodified y). A tree update inverted this from the original SKIP-gated
+  // default-on to an enable-gated default-off; restore default-on.
+  if (!EnvEnabled("ROCR_MACOS_AQL_SKIP_POST_ACQUIRE")) {
     AcquireMemGfx10(pm4);
   }
   status = SubmitPm4AndWait(pm4);
