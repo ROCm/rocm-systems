@@ -400,10 +400,8 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
   }
   //--------------No graph capture--------------
   else {
-    // driverVersion is reported as 71200000 for ROCm 7.12 when using hipDriverGetVersion().
-    if (ROCM_VERSION >= 71200 && driverVersion >= 70200000) {
-#if ROCM_VERSION >= 71200
-    // For ROCm 7.12+, use batch memory copy for better performance
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+    if (ncclCeBatchAsyncEnable()) {
     params->attrs[0] = {};
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
     params->attrs[0].srcAccessOrder = hipMemcpySrcAccessOrderStream;
