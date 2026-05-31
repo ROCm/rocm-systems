@@ -175,6 +175,7 @@ static ncclResult_t symMemoryMapLsaTeam(
   ncclResult_t ret = ncclSuccess;
   struct ncclDevrState* devr = &comm->devrState;
   CUmemAccessDesc accessDesc = {};
+  int importFd = -1;
   union Message {
     CUmemGenericAllocationHandle memHandle;
     CUmemFabricHandle fabricHandle;
@@ -198,15 +199,14 @@ static ncclResult_t symMemoryMapLsaTeam(
   accessDesc.location.id = comm->cudaDev;
   accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
   for (int r = 0; r < devr->lsaSize; r++) {
+    importFd = -1;
     CUmemGenericAllocationHandle impHandle;
     if (r == devr->lsaSelf) {
       impHandle = memHandle;
     } else {
       if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
-        int fd = -1;
-        NCCLCHECKGOTO(ncclProxyClientGetFdBlocking(comm, devr->lsaRankList[r], &messages[r], &fd), ret, fail);
-        CUCHECKGOTO(cuMemImportFromShareableHandle(&impHandle, reinterpret_cast<void*>((uintptr_t)fd), ncclCuMemHandleType), ret, fail);
-        SYSCHECKGOTO(close(fd), "close", ret, fail);
+        NCCLCHECKGOTO(ncclProxyClientGetFdBlocking(comm, devr->lsaRankList[r], &messages[r], &importFd), ret, fail);
+        CUCHECKGOTO(cuMemImportFromShareableHandle(&impHandle, reinterpret_cast<void*>((uintptr_t)importFd), ncclCuMemHandleType), ret, fail);
       } else {
         CUCHECKGOTO(cuMemImportFromShareableHandle(&impHandle, (void*)&messages[r].fabricHandle, ncclCuMemHandleType), ret, fail);
       }
@@ -219,6 +219,10 @@ static ncclResult_t symMemoryMapLsaTeam(
     if (r != devr->lsaSelf) {
       CUCHECKGOTO(cuMemRelease(impHandle), ret, fail);
     }
+    if (importFd >= 0) {
+      SYSCHECKGOTO(close(importFd), "close", ret, fail);
+      importFd = -1;
+    }
   }
   // Ensure everyone has imported my mem handle.
   NCCLCHECKGOTO(bootstrapIntraNodeBarrier(comm->bootstrap, devr->lsaRankList, devr->lsaSelf, devr->lsaSize, 0xbeef), ret, fail);
@@ -226,6 +230,7 @@ leave:
   free(messages);
   return ret;
 fail:
+  if (importFd >= 0) SYSCHECK(close(importFd), "close");
   goto leave;
 }
 
@@ -625,6 +630,7 @@ ncclResult_t ncclDevrWindowRegisterInGroup(
     *outWinDev = reinterpret_cast<struct ncclWindow_vidmem*>(localRegHandle);
     return ncclSuccess;
   }
+
   if (winFlags & NCCL_WIN_COLL_SYMMETRIC) {
     // Defer symmetric kernel init until at least one window with that flag exists.
     NCCLCHECKGOTO(ncclSymkInitOnce(comm), ret, fail);
@@ -633,13 +639,25 @@ ncclResult_t ncclDevrWindowRegisterInGroup(
   // Get underlying cumem handle:
   CUCHECKGOTO(cuMemGetAddressRange(&memAddr, &memSize, reinterpret_cast<CUdeviceptr>(userPtr)), ret, fail_locReg);
   memOffset = reinterpret_cast<uintptr_t>(userPtr) - reinterpret_cast<uintptr_t>(memAddr);
+  WARN("Window register address range: userPtr=%p userSize=%zu memAddr=%p memSize=%zu memOffset=%zu", userPtr, userSize, (void*)memAddr, memSize, memOffset);
   // memOffset = reinterpret_cast<CUdeviceptr>(userPtr) - memAddr;
   if (memOffset%NCCL_WIN_REQUIRED_ALIGNMENT != 0) {
     WARN("Window address must be suitably aligned.");
     ret = ncclInvalidArgument;
     goto fail;
   }
+  if (memAddr == 0 || memSize == 0) {
+    WARN("Window register got invalid address range before retain: userPtr=%p userSize=%zu memAddr=%p memSize=%zu", userPtr, userSize, (void*)memAddr, memSize);
+    ret = ncclInternalError;
+    goto fail_locReg;
+  }
+  if (memOffset + userSize > memSize) {
+    WARN("Window exceeds retained allocation: userPtr=%p userSize=%zu memAddr=%p memSize=%zu memOffset=%zu", userPtr, userSize, (void*)memAddr, memSize, memOffset);
+    ret = ncclInvalidArgument;
+    goto fail_locReg;
+  }
 
+  WARN("Window register retaining handle for memAddr=%p memSize=%zu", (void*)memAddr, memSize);
   CUCHECKGOTO(cuMemRetainAllocationHandle(&memHandle, reinterpret_cast<void*>(memAddr)), ret, fail_locReg);
 
   // Trade cumem handle for ncclDevrMemory*
@@ -969,6 +987,17 @@ ncclResult_t ncclCommWindowDeregister_impl(struct ncclComm* comm, struct ncclWin
     NCCLCHECKGOTO(ncclCommDeregister(comm, winDev), ret, fail);
     goto exit;
   }
+
+  // Window register may have fallen back to non-symmetric path on symmetric comms.
+  // In that case winDev is a local registration handle, not a shadow-pool window.
+  {
+    struct ncclWindow_vidmem* winHost = nullptr;
+    if (ncclSuccess != ncclShadowPoolToHost(&comm->devrState.shadows, winDev, &winHost)) {
+      NCCLCHECKGOTO(ncclCommDeregister(comm, winDev), ret, fail);
+      goto exit;
+    }
+  }
+
   CUDACHECKGOTO(cudaGetDevice(&saveDev), ret, fail);
   CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), ret, fail);
   CUDACHECKGOTO(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), ret, fail_dev);

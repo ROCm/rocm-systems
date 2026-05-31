@@ -34,18 +34,37 @@ ncclResult_t  ncclMemAlloc_impl(void **ptr, size_t size) {
 
   if (ncclCuMemEnable()) {
     size_t handleSize = size;
-    int requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
-    // Query device to see if FABRIC handle support is available
-    flag = 0;
-    (void) CUPFN(cuDeviceGetAttribute(&flag, CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED, currentDev));
-    if (flag) requestedHandleTypes |= CU_MEM_HANDLE_TYPE_FABRIC;
+
+    // Use the same handle type as the rest of RCCL. ncclCuMemHandleType is
+    // POSIX_FILE_DESCRIPTOR by default and gets promoted to FABRIC by mnnvl.cc
+    // when an MNNVL fabric clique is detected during ncclCommInit. Allocating
+    // with the matching single handle type (instead of a POSIX|FABRIC bitmask
+    // that HIP rejects with NOT_SUPPORTED, silently falling back to POSIX) is
+    // what makes ncclCommWindowRegister / -R 2 work: the symmetric LSA team
+    // path in dev_runtime.cc::symMemoryMapLsaTeam exports memHandle with
+    // ncclCuMemHandleType, and that export only succeeds if the underlying
+    // allocation was created with that handle type.
+    CUmemAllocationHandleType requestedHandleType = ncclCuMemHandleType;
+
+    // Sanity-check: if FABRIC is requested but the device claims no support,
+    // fall back to POSIX with a loud warning rather than silently. Symmetric
+    // registration (-R 2) won't work on this device anyway in that case.
+    if (requestedHandleType == CU_MEM_HANDLE_TYPE_FABRIC) {
+      flag = 0;
+      (void) CUPFN(cuDeviceGetAttribute(&flag, CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED, currentDev));
+      if (!flag) {
+        WARN("ncclMemAlloc: FABRIC handle requested (MNNVL) but device %d reports no FABRIC support; falling back to POSIX. ncclCommWindowRegister / -R 2 will not work.", cudaDev);
+        requestedHandleType = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+      }
+    }
+
 #if defined(HIP_VMM_UNCACHED_MEMORY)
     memprop.type = hipMemAllocationTypeUncached;
 #else
     memprop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
 #endif
     memprop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-    memprop.requestedHandleTypes = (CUmemAllocationHandleType) requestedHandleTypes;
+    memprop.requestedHandleTypes = requestedHandleType;
     memprop.location.id = currentDev;
 #if HIP_VERSION > 70000000
     // ROCM-2550: Use cuDeviceGetAttribute to check if RDMA support is available
@@ -62,26 +81,16 @@ ncclResult_t  ncclMemAlloc_impl(void **ptr, size_t size) {
     CUDACHECK(cudaGetDeviceCount(&dcnt));
     ALIGN_SIZE(handleSize, memGran);
 
-    if (requestedHandleTypes & CU_MEM_HANDLE_TYPE_FABRIC) {
-      /* First try cuMemCreate() with FABRIC handle support and then remove if it fails */
-      CUresult err = CUPFN(cuMemCreate(&handle, handleSize, &memprop, 0));
-      if (err == CUDA_ERROR_NOT_SUPPORTED) {
-        requestedHandleTypes &= ~CU_MEM_HANDLE_TYPE_FABRIC;
-        memprop.requestedHandleTypes = (CUmemAllocationHandleType) requestedHandleTypes;
-        /* Allocate the physical memory on the device */
-        CUCHECK(cuMemCreate(&handle, handleSize, &memprop, 0));
-      } else if (err != CUDA_SUCCESS) {
-        // Catch and report any error from above
-        CUCHECK(cuMemCreate(&handle, handleSize, &memprop, 0));
-      }
-    } else {
-      /* Allocate the physical memory on the device */
-      CUCHECK(cuMemCreate(&handle, handleSize, &memprop, 0));
-    }
+    INFO(NCCL_ALLOC, "ncclMemAlloc: cuMemCreate size=%zu handleType=%s",
+         handleSize,
+         requestedHandleType == CU_MEM_HANDLE_TYPE_FABRIC ? "FABRIC" : "POSIX_FD");
+    CUCHECK(cuMemCreate(&handle, handleSize, &memprop, 0));
+
     /* Reserve a virtual address range */
     CUCHECK(cuMemAddressReserve((CUdeviceptr*)ptr, handleSize, memGran, 0, 0));
     /* Map the virtual address range to the physical allocation */
     CUCHECK(cuMemMap((CUdeviceptr)*ptr, handleSize, 0, handle, 0));
+
     /* Now allow RW access to the newly mapped memory */
     for (int i = 0; i < dcnt; ++i) {
       int p2p = 0;
@@ -462,6 +471,10 @@ ncclResult_t ncclShadowPoolToHost(struct ncclShadowPool* pool, void* devObj, voi
   if (devObj == nullptr) {
     *hostObj = nullptr;
     return ncclSuccess;
+  }
+
+  if (pool->hbits == 0 || pool->table == nullptr) {
+    return ncclInvalidArgument;
   }
 
   int b = hashBucket(pool->hbits, devObj);

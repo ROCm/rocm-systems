@@ -1142,7 +1142,9 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     }
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, MAXCHANNELS);
   }
-
+  // Final safety: arch-specific caps above may shrink p2pnChannels below
+  // p2pnChannelsPerPeer; clamp to preserve the device-side invariant.
+  comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, comm->p2pnChannels);
   // Init channels that weren't used so far
   for (int c=comm->nChannels; c<std::max(comm->nChannels, comm->p2pnChannels); c++) NCCLCHECK(initChannel(comm, c));
 

@@ -15,7 +15,7 @@
 
 using namespace rccl;
 
-#if HIP_VERSION >= 71260540
+#if HIP_VERSION >= 70200000
 NCCL_PARAM(LocalRegister, "LOCAL_REGISTER", 1);
 #else
 NCCL_PARAM(LocalRegister, "LOCAL_REGISTER", 0);

@@ -294,6 +294,7 @@ ncclResult_t ncclP2pImportShareableBuffer(struct ncclComm *comm, int peer, size_
     CUdeviceptr dptr = 0;
     CUmemAllocationHandleType type = ncclCuMemHandleType;
     CUmemGenericAllocationHandle handle;
+    int importFd = -1;
     ncclCuDesc *cuDesc = &ipcDesc->cuDesc;
     CUmemAllocationProp prop = {};
     size_t granularity = 0;
@@ -312,13 +313,18 @@ ncclResult_t ncclP2pImportShareableBuffer(struct ncclComm *comm, int peer, size_
     // Import and map the remote memory descriptor to the local GPU
     if (type == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
       // UDS fd support
-      int fd = -1;
+      importFd = -1;
       // Send cuMem handle to remote for conversion to an fd
-      NCCLCHECK(ncclProxyClientGetFdBlocking(comm, peer, &cuDesc->data, &fd));
-      INFO(NCCL_P2P, "UDS converted handle 0x%lx to fd %d on remote peer %d", *(uint64_t*)&cuDesc->data, fd, peer);
+      NCCLCHECK(ncclProxyClientGetFdBlocking(comm, peer, &cuDesc->data, &importFd));
+      INFO(NCCL_P2P, "UDS converted handle 0x%lx to fd %d on remote peer %d", *(uint64_t*)&cuDesc->data, importFd, peer);
+#ifdef ENABLE_TRACE
+      TRACE(NCCL_P2P, "CUMEM import POSIX_FD: peer %d cudaDev %d size %zu granularity %zu fd %d", peer, comm->cudaDev, size, granularity, importFd);
+#endif
       // For POSIX_FD, pass the fd value (not a pointer to fd) cast as void*
-      CUCHECK(cuMemImportFromShareableHandle(&handle, (void*)(uintptr_t)fd, type));
-      SYSCHECK(close(fd), "close");
+      CUCHECK(cuMemImportFromShareableHandle(&handle, (void*)(uintptr_t)importFd, type));
+#ifdef ENABLE_TRACE
+      TRACE(NCCL_P2P, "CUMEM import POSIX_FD succeeded: peer %d cudaDev %d handle %p", peer, comm->cudaDev, (void*)(uintptr_t)handle);
+#endif
     } else {
 #ifdef ENABLE_TRACE
       // Log handle bytes to verify correct data received cross-node
@@ -338,17 +344,38 @@ ncclResult_t ncclP2pImportShareableBuffer(struct ncclComm *comm, int peer, size_
 #endif
       CUCHECK(cuMemImportFromShareableHandle(&handle, (void*)cuDesc, type));
     }
+#ifdef ENABLE_TRACE
+    TRACE(NCCL_P2P, "CUMEM reserve VA: peer %d cudaDev %d size %zu", peer, comm->cudaDev, size);
+#endif
     CUCHECK(cuMemAddressReserve(&dptr, size, /* alignment */ 0, /* addr */ 0, /* flags */ 0));
+#ifdef ENABLE_TRACE
+    TRACE(NCCL_P2P, "CUMEM reserve VA succeeded: peer %d cudaDev %d dptr %p", peer, comm->cudaDev, (void*)dptr);
+#endif
+
+#ifdef ENABLE_TRACE
+    TRACE(NCCL_P2P, "CUMEM map: peer %d cudaDev %d dptr %p size %zu handle %p", peer, comm->cudaDev, (void*)dptr, size, (void*)(uintptr_t)handle);
+#endif
     CUCHECK(cuMemMap(dptr, size, /* offset */ 0, handle, /* flags */ 0));
+#ifdef ENABLE_TRACE
+    TRACE(NCCL_P2P, "CUMEM map succeeded: peer %d cudaDev %d dptr %p size %zu", peer, comm->cudaDev, (void*)dptr, size);
+#endif
 
     TRACE(NCCL_P2P, "Imported shareable buffer size %zu handle %p dptr %p", size, (void*)(uintptr_t)handle, (void*)dptr);
 
-    // Allow access by the local GPU
+    // Allow access by the local GPU.
     CUmemAccessDesc accessDesc = {};
     accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
     accessDesc.location.id = comm->cudaDev;
     accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+#ifdef ENABLE_TRACE
+    TRACE(NCCL_P2P, "CUMEM set-access: peer %d cudaDev %d dptr %p size %zu", peer, comm->cudaDev, (void*)dptr, size);
+#endif
     CUCHECK(cuMemSetAccess(dptr, size, &accessDesc, 1));
+    // Keep POSIX fd alive through map/set-access; close after setup completes.
+    if (importFd >= 0) SYSCHECK(close(importFd), "close");
+#ifdef ENABLE_TRACE
+    TRACE(NCCL_P2P, "CUMEM set-access succeeded: peer %d cudaDev %d dptr %p size %zu", peer, comm->cudaDev, (void*)dptr, size);
+#endif
     TRACE(NCCL_P2P, "Set Access for %p size %zu on dev %d", (void*)dptr, size, accessDesc.location.id);
 
     *devMemPtr = (void *)dptr;
@@ -930,7 +957,7 @@ ncclResult_t ret = ncclSuccess;
 
         if (baseAddr == NULL) {
           CUCHECKGOTO(cuMemGetAddressRange((CUdeviceptr*)&baseAddr, &baseSize, (CUdeviceptr)userbuff), ret, fail);
-#if HIP_VERSION >= 71260540
+#if HIP_VERSION >= 70200000
           CUCHECKGOTO(cuPointerGetAttribute((void*)&legacyIpcCap, CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE, (CUdeviceptr)baseAddr), ret, fail);
 #else
           // Legacy CUDA IPC support
@@ -1154,6 +1181,7 @@ static ncclResult_t p2pProxyRegister(struct ncclProxyConnection* connection, str
   bool mapped = false;
   bool imported = false;
   CUmemGenericAllocationHandle handle;
+  int importFd = -1;
 #endif
 
   assert(sizeof(struct p2pIpcExpInfo) == reqSize);
@@ -1176,8 +1204,8 @@ static ncclResult_t p2pProxyRegister(struct ncclProxyConnection* connection, str
     } else {
       if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
         // For POSIX_FD, pass the fd value (not a pointer to fd) cast as void*
-        CUCHECKGOTO(cuMemImportFromShareableHandle(&handle, (void*)(uintptr_t)ipcExpInfo->impFd, ncclCuMemHandleType), ret, fail);
-        SYSCHECKGOTO(close(ipcExpInfo->impFd), "close", ret, fail);
+        importFd = ipcExpInfo->impFd;
+        CUCHECKGOTO(cuMemImportFromShareableHandle(&handle, (void*)(uintptr_t)importFd, ncclCuMemHandleType), ret, fail);
       } else {
         CUCHECKGOTO(cuMemImportFromShareableHandle(&handle, (void*)&ipcExpInfo->ipcDesc.cuDesc, ncclCuMemHandleType), ret, fail);
       }
@@ -1191,7 +1219,33 @@ static ncclResult_t p2pProxyRegister(struct ncclProxyConnection* connection, str
     accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
     accessDesc.location.id = proxyState->cudaDev;
     accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-    CUCHECKGOTO(cuMemSetAccess((CUdeviceptr)regAddr, ipcExpInfo->size, &accessDesc, 1), ret, fail);
+
+    // Debug aid for large-size invalid-argument failures in proxy registration.
+    int allocDev = -1;
+    int p2pAccess = 0;
+    CUmemAllocationProp allocProp = {};
+    CUresult propRes = CUPFN(cuMemGetAllocationPropertiesFromHandle(&allocProp, handle));
+    if (propRes == CUDA_SUCCESS && allocProp.location.type == CU_MEM_LOCATION_TYPE_DEVICE) {
+      allocDev = allocProp.location.id;
+      if (allocDev != proxyState->cudaDev) {
+        CUDACHECKGOTO(cudaDeviceCanAccessPeer(&p2pAccess, proxyState->cudaDev, allocDev), ret, fail);
+        if (!p2pAccess) {
+          WARN("p2pProxyRegister setAccess skipped: proxyDev=%d cannot access allocDev=%d size=%zu regAddr=%p sameProcess=%d legacy=%d handleType=%d", proxyState->cudaDev, allocDev, ipcExpInfo->size, regAddr, connection->sameProcess, ipcExpInfo->legacyIpcCap, (int)ncclCuMemHandleType);
+          ret = ncclInvalidUsage;
+          goto fail;
+        }
+      }
+    }
+
+    CUresult setAccessRes = CUPFN(cuMemSetAccess((CUdeviceptr)regAddr, ipcExpInfo->size, &accessDesc, 1));
+    if (setAccessRes != CUDA_SUCCESS) {
+      WARN("p2pProxyRegister cuMemSetAccess failed: err=%d proxyDev=%d allocDev=%d size=%zu regAddr=%p offset=%lu sameProcess=%d legacy=%d importFd=%d handleType=%d", (int)setAccessRes, proxyState->cudaDev, allocDev, ipcExpInfo->size, regAddr, (unsigned long)ipcExpInfo->offset, connection->sameProcess, ipcExpInfo->legacyIpcCap, importFd, (int)ncclCuMemHandleType);
+      CUCHECKGOTO(setAccessRes, ret, fail);
+    }
+    if (importFd >= 0) {
+      SYSCHECKGOTO(close(importFd), "close", ret, fail);
+      importFd = -1;
+    }
     regAddr = (void*)((uintptr_t)regAddr + ipcExpInfo->offset);
 #endif
   }
@@ -1202,6 +1256,7 @@ exit:
   *done = 1;
   return ret;
 fail:
+  if (importFd >= 0) SYSCHECK(close(importFd), "close");
   if (!ipcExpInfo->legacyIpcCap) {
 #if ROCM_VERSION >= 70000
     if (mapped) CUCHECK(cuMemUnmap((CUdeviceptr)regAddr, ipcExpInfo->size));

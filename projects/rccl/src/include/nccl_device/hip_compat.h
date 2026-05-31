@@ -60,7 +60,9 @@
 #elif defined(__HIP_DEVICE_COMPILE__) && __HIP_DEVICE_COMPILE__
   // Map HIP GFX versions to a comparable value
   // MI200 (gfx90a) and MI300 (gfx942) are roughly Hopper-class
-  #if defined(__gfx942__) || defined(__gfx950__)
+  #if defined(__gfx1250__)
+    #define NCCL_DEVICE_ARCH 1250  // MI300 class
+  #elif defined(__gfx942__) || defined(__gfx950__)
     #define NCCL_DEVICE_ARCH 942  // MI300 class
   #elif defined(__gfx90a__)
     #define NCCL_DEVICE_ARCH 90   // MI200 class

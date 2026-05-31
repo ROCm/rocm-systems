@@ -37,7 +37,7 @@ RCCL_PARAM(CeBatchAsyncEnable, "CE_BATCH_ASYNC_ENABLE", -2);
 static int ncclCeBatchAsyncSupported() {
   int driverVersion;
   if (ncclCudaDriverVersion(&driverVersion) != ncclSuccess) return 0;
-  return (driverVersion >= 71200000 || (driverVersion >= 70051831 && driverVersion < 70060000));
+  return (driverVersion >= 70200000 || (driverVersion >= 70051831 && driverVersion < 70060000));
 }
 #endif
 
@@ -168,12 +168,9 @@ bool ncclCeImplemented(ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_
   int driverVersion;
   if (ncclCudaDriverVersion(&driverVersion) != ncclSuccess) return false;
 
-  // CE is supported in ROCm 7.12+ and the 7.0.2.x range [7.0.2.2, 7.0.3.0).
-  // hipDriverGetVersion() encodes as MAJOR*10000000 + MINOR*100000 + PATCH*1000 + BUILD;
-  //   ROCm 7.12.0   → 71200000
-  //   ROCm 7.0.2.2  → 70051831  (lower bound of the 7.0.2.x backport range)
-  //   ROCm 7.0.3.0  → 70060000  (exclusive upper bound)
-  if (driverVersion >= 71200000 || (driverVersion >= 70051831 && driverVersion < 70060000)) {
+  // CE is supported in ROCm 7.12 and later
+  // hipDriverGetVersion() returns 71200000 for ROCm 7.12
+  if (driverVersion >= 70200000) {
     switch (coll) {
     case ncclFuncAllGather:
     case ncclFuncAlltoAll:
@@ -403,8 +400,10 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
   }
   //--------------No graph capture--------------
   else {
-#ifdef CE_BATCH_ASYNC_SUPPORTED
-    if (ncclCeBatchAsyncEnable()) {
+    // driverVersion is reported as 71200000 for ROCm 7.12 when using hipDriverGetVersion().
+    if (ROCM_VERSION >= 71200 && driverVersion >= 70200000) {
+#if ROCM_VERSION >= 71200
+    // For ROCm 7.12+, use batch memory copy for better performance
     params->attrs[0] = {};
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
     params->attrs[0].srcAccessOrder = hipMemcpySrcAccessOrderStream;
