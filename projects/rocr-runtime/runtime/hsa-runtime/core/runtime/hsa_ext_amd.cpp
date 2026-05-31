@@ -63,6 +63,7 @@
 #include "core/inc/runtime.h"
 #include "core/inc/signal.h"
 #include "core/inc/counted_queue_manager.h"
+#include "core/util/os.h"
 
 namespace rocr {
 
@@ -1620,7 +1621,7 @@ hsa_status_t hsa_amd_portable_export_dmabuf_v2(const void* ptr, size_t size,
 
 hsa_status_t hsa_amd_portable_close_dmabuf(int dmabuf) {
   TRY;
-  return core::Runtime::runtime_singleton_->DmaBufClose(dmabuf);
+  return rocr::os::DmaBufClose(dmabuf) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_RESOURCE_FREE;
   CATCH;
 }
 

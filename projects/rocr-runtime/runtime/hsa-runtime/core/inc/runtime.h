@@ -414,8 +414,6 @@ class Runtime {
   hsa_status_t DmaBufExport(const void* ptr, size_t size, int* dmabuf,
                                             uint64_t* offset, uint64_t flags);
 
-  hsa_status_t DmaBufClose(int dmabuf);
-
   hsa_status_t VMemoryAddressReserve(void** ptr, size_t size, uint64_t address, uint64_t alignment, uint64_t flags);
 
   hsa_status_t VMemoryAddressFree(void* ptr, size_t size);
