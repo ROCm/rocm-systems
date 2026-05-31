@@ -582,7 +582,14 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
 
   int source_fd = -1;
 
-  // Export by CPU address; ExportDMABuf needs a driver buffer handle instead.
+  /*
+   * On Linux, when using KFD we need to create the memory allocation using the KFD interface
+   * (hsaKmtExportDMABufHandle) so that the KFD section of AMDGPU drivers has an entry for the BO.
+   * When then import the BO into the DRM interface so that we can use the IOCTLs from the DRM
+   * section of AMDGPU drivers.
+   * On Windows, the hsaKmtExportDMABufHandle and ExportDMABuf functions do the same thing.
+   */
+
   if (HSAKMT_CALL(hsaKmtExportDMABufHandle(mem, size, &source_fd, offset)) != HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
 
