@@ -455,13 +455,12 @@ hsa_status_t KfdDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
 hsa_status_t KfdDriver::ExportDMABuf(const core::Agent& agent,
                                      const core::DriverMemoryHandle& handle, size_t size, int* dmabuf_fd,
                                      size_t* offset) {
-  #if __linux__
-  const auto &gpu_agent = static_cast<const GpuAgent &>(agent);
+  const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
 
   HsaHandleExportDesc desc = {};
   desc.device_handle = gpu_agent.libThunkDev();
   desc.type = HSA_EXTERNAL_HANDLE_DMA_BUF;
-  desc.buf_handle = (HsaMemoryObjectHandle)handle.handle; /* amdgpu_bo_handle */
+  desc.buf_handle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
   desc.size = size;
 
   HsaHandleExportFlags flags = {};
@@ -472,21 +471,6 @@ hsa_status_t KfdDriver::ExportDMABuf(const core::Agent& agent,
   }
   *dmabuf_fd = res.dmabuf_fd;
   *offset = 0;
-  #else // __windows__
-  int dmabuf_fd_res = -1;
-  size_t offset_res = 0;
-  HSAKMT_STATUS status =
-      HSAKMT_CALL(hsaKmtExportDMABufHandle((void*)handle.handle, size, &dmabuf_fd_res, &offset_res));
-  if (status != HSAKMT_STATUS_SUCCESS) {
-    if (status == HSAKMT_STATUS_INVALID_PARAMETER) {
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    }
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-  }
-
-  *dmabuf_fd = dmabuf_fd_res;
-  *offset = offset_res;
-  #endif
   return HSA_STATUS_SUCCESS;
 }
 
@@ -596,18 +580,11 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
   // Create handle by exporting and importing the memory from the owning agent.
   (void)va;
 
-  core::DriverMemoryHandle sourceHandle = {.handle = reinterpret_cast<uint64_t>(mem)};
   int source_fd = -1;
 
-#if defined(__linux__)
-  // KFD export by CPU address; ExportDMABuf needs a DRM buffer handle instead.
+  // Export by CPU address; ExportDMABuf needs a driver buffer handle instead.
   if (HSAKMT_CALL(hsaKmtExportDMABufHandle(mem, size, &source_fd, offset)) != HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
-#else
-  hsa_status_t status = ExportDMABuf(agent, sourceHandle, size, &source_fd, offset);
-  if (status != HSA_STATUS_SUCCESS)
-    return status;
-#endif
 
   core::DriverMemoryHandle targetHandle = {};
   size_t imported_size = 0;
