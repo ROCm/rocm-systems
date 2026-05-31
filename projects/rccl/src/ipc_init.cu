@@ -33,8 +33,14 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   if (comm == nullptr) {
     return ncclSuccess;
   }
+
+  // Skip the DDA IPC fast path when MNNVL is active; the cuMem/FABRIC
+  // transport handles cross-host fabric peers correctly
   if (comm->nRanks != kDdaNranks || comm->nNodes != 1 ||
-      comm->bootstrap == nullptr) {
+      comm->bootstrap == nullptr || comm->MNNVL) {
+    if (comm->MNNVL) {
+      INFO(NCCL_INIT, "ncclDdaIpcCommInit: skipping DDA IPC fast path (MNNVL=1; legacy CUDA IPC is not portable across MNNVL clique hosts)");
+    }
     return ncclSuccess;
   }
 
