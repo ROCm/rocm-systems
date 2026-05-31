@@ -816,25 +816,38 @@ hsa_status_t XdnaDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
   return HSA_STATUS_ERROR_INVALID_QUEUE;
 }
 
-hsa_status_t XdnaDriver::ExportDMABuf(const core::Agent& agent, const core::DriverMemoryHandle& handle, size_t size, int* dmabuf_fd, size_t* offset) {
-  auto bo_handle = FindBOHandle(const_cast<void*>(reinterpret_cast<const void*>(&handle)));
-  if (!bo_handle.IsValid()) {
-    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+hsa_status_t XdnaDriver::ExportMemoryHandle(const core::Agent& agent, const core::DriverMemoryHandle& handle,
+                                            size_t size, core::ShareableHandleType type, uint32_t flags,
+                                            void* export_handle) {
+  (void)agent;
+  (void)size;
+  (void)flags;
+  if (export_handle == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  switch (type) {
+  case core::ShareableHandleType::DMABUF_FD: {
+    auto bo_handle = FindBOHandle(const_cast<void*>(reinterpret_cast<const void*>(&handle)));
+    if (!bo_handle.IsValid()) {
+      return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    }
+
+    drm_prime_handle export_params = {};
+    export_params.handle = bo_handle.handle;
+    export_params.flags = DRM_RDWR;
+    export_params.fd = -1;
+    hsa_status_t err = xdna_ioctl(fd_, DRM_IOCTL_PRIME_HANDLE_TO_FD, &export_params);
+    if (err != HSA_STATUS_SUCCESS) {
+      return err;
+    }
+
+    *static_cast<int*>(export_handle) = export_params.fd;
+    return HSA_STATUS_SUCCESS;
   }
-
-  drm_prime_handle export_params = {};
-  export_params.handle = bo_handle.handle;
-  export_params.flags = DRM_RDWR;
-  export_params.fd = -1;
-  hsa_status_t err = xdna_ioctl(fd_, DRM_IOCTL_PRIME_HANDLE_TO_FD, &export_params);
-  if (err != HSA_STATUS_SUCCESS) {
-    return err;
+  case core::ShareableHandleType::FABRIC_HANDLE:
+    return HSA_STATUS_ERROR;
+  default:
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
-
-  *dmabuf_fd = export_params.fd;
-  *offset = reinterpret_cast<uintptr_t>(handle.handle) - reinterpret_cast<uintptr_t>(bo_handle.vaddr);
-
-  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t XdnaDriver::ImportDMABuf(int dmabuf_fd, const core::Agent& agent,
@@ -850,10 +863,6 @@ hsa_status_t XdnaDriver::ImportDMABuf(int dmabuf_fd, const core::Agent& agent,
   *handle = core::DriverMemoryHandle{import_params.handle};
   *size = lseek(dmabuf_fd, 0, SEEK_END);
   return HSA_STATUS_SUCCESS;
-}
-
-hsa_status_t XdnaDriver::ExportFabricHandle(core::Agent &agent, core::DriverMemoryHandle *handle, size_t size, hsa_fabric_handle_t *fabric_handle) {
-  return HSA_STATUS_ERROR;
 }
 
 hsa_status_t XdnaDriver::ImportFabricHandle(core::Agent &agent, hsa_fabric_handle_t fabric_handle, core::DriverMemoryHandle *handle, size_t *size) {

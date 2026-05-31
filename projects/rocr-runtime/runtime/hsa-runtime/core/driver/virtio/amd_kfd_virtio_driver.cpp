@@ -467,23 +467,35 @@ hsa_status_t KfdVirtioDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_G
   return HSA_STATUS_ERROR;
 }
 
-hsa_status_t KfdVirtioDriver::ExportDMABuf(const core::Agent& agent, const core::DriverMemoryHandle& handle, size_t size, int* dmabuf_fd, size_t* offset) {
-  int dmabuf_fd_res = -1;
-  size_t offset_res = 0;
-  HSAKMT_STATUS status =
-      vhsaKmtExportDMABufHandle(const_cast<void*>(reinterpret_cast<const void*>(&handle)), size,
-                                &dmabuf_fd_res, &offset_res);
-  if (status != HSAKMT_STATUS_SUCCESS) {
-    if (status == HSAKMT_STATUS_INVALID_PARAMETER) {
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+hsa_status_t KfdVirtioDriver::ExportMemoryHandle(const core::Agent& agent, const core::DriverMemoryHandle& handle,
+                                                 size_t size, core::ShareableHandleType type, uint32_t flags,
+                                                 void* export_handle) {
+  (void)agent;
+  (void)flags;
+  if (export_handle == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  switch (type) {
+  case core::ShareableHandleType::DMABUF_FD: {
+    int dmabuf_fd_res = -1;
+    size_t offset_res = 0;
+    HSAKMT_STATUS status =
+        vhsaKmtExportDMABufHandle(const_cast<void*>(reinterpret_cast<const void*>(&handle)), size,
+                                  &dmabuf_fd_res, &offset_res);
+    if (status != HSAKMT_STATUS_SUCCESS) {
+      if (status == HSAKMT_STATUS_INVALID_PARAMETER) {
+        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      }
+      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     }
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+    *static_cast<int*>(export_handle) = dmabuf_fd_res;
+    return HSA_STATUS_SUCCESS;
   }
-
-  *dmabuf_fd = dmabuf_fd_res;
-  *offset = offset_res;
-
-  return HSA_STATUS_SUCCESS;
+  case core::ShareableHandleType::FABRIC_HANDLE:
+    return HSA_STATUS_ERROR;
+  default:
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 }
 
 hsa_status_t KfdVirtioDriver::ImportDMABuf(int dmabuf_fd, const core::Agent& agent,
@@ -498,10 +510,6 @@ hsa_status_t KfdVirtioDriver::ImportDMABuf(int dmabuf_fd, const core::Agent& age
   *handle = core::DriverMemoryHandle{reinterpret_cast<uint64_t>(res.buf_handle)};
   *size = res.alloc_size;
   return HSA_STATUS_SUCCESS;
-}
-
-hsa_status_t KfdVirtioDriver::ExportFabricHandle(core::Agent &agent, core::DriverMemoryHandle *handle, size_t size, hsa_fabric_handle_t *fabric_handle) {
-  return HSA_STATUS_ERROR;
 }
 
 hsa_status_t KfdVirtioDriver::ImportFabricHandle(core::Agent &agent, hsa_fabric_handle_t fabric_handle, core::DriverMemoryHandle *handle, size_t *size) {
