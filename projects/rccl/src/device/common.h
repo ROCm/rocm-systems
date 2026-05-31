@@ -542,6 +542,10 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
   case 0:
   //ncclShmem.channelId = blockIdx.x;
     for (int i = 0; i < num; i++) {
+      // WARP_SIZE<64 path leaves `x` set to (WARP_SIZE+tid) from the
+      // previous iteration, so the first check of masks[i] for i>=1 was reading
+      // the upper 32 bits twice and never the lower 32 bits. Reset to tid here.
+      x = tid;
       if (args->channelMask.masks[i] & (1ull<<x)) {
         y = __popcll(args->channelMask.masks[i] & ((1ull<<x)-1));
         y = total + y;
