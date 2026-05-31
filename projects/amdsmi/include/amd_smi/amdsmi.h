@@ -1978,8 +1978,8 @@ typedef struct {
 typedef struct {
   bool has_deep_sleep;     //!< Deep Sleep frequency is only supported by some GPUs
   uint32_t num_supported;  //!< The number of supported frequencies
-  uint32_t current;        //!< The current frequency index in MHz
-  uint64_t frequency[AMDSMI_MAX_NUM_FREQUENCIES]; /**< List of frequencies in MHz. Only the first
+  uint32_t current;        //!< The current frequency index
+  uint64_t frequency[AMDSMI_MAX_NUM_FREQUENCIES]; /**< List of frequencies in Hz. Only the first
                                                        num_supported frequencies are valid */
 } amdsmi_frequencies_t;
 

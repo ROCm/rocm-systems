@@ -13,6 +13,13 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Added shadow detection: if `amdsmi` loads from a path other than the resolved expected path (`AMDSMI_PATH`, `ROCM_HOME`, `ROCM_PATH`, or `/opt/rocm` default), tests exit early with a clear error message and remediation steps.
   - Non-root invocations now exit with code 1 immediately with a clear message instead of failing mid-test.
 
+### Fixed
+
+- **Corrected the documented unit of `amdsmi_frequencies_t::frequency`**.
+  - The struct comment claimed frequencies were in MHz, but `amdsmi_get_clk_freq()` returns them in Hz. The comment now reads "List of frequencies in Hz".
+  - Also removed the incorrect "in MHz" note from the `current` field, which is a frequency index, not a frequency value.
+  - Updated the Python API reference to state the unit is Hz.
+
 ## amd_smi_lib for ROCm 7.13.0
 
 ### Changed
