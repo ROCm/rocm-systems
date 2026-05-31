@@ -541,8 +541,7 @@ hsa_status_t KfdVirtioDriver::Unmap(core::DriverMemoryHandle handle, void* mem, 
 
 hsa_status_t KfdVirtioDriver::CreateShareableHandle(void* va, void* mem, size_t size,
                                                     const core::Agent& agent,
-                                                    core::DriverMemoryHandle* handle, uint64_t* offset,
-                                                    int* drm_fd, uint64_t* drm_fd_offset) {
+                                                    core::DriverMemoryHandle* handle, uint64_t* offset) {
   return HSA_STATUS_ERROR;
 }
 

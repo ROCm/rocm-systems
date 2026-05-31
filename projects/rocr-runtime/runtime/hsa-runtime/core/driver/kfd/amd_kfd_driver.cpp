@@ -46,6 +46,7 @@
 #include <amdgpu_drm.h>
 #include <link.h>
 #include <sys/ioctl.h>
+#include <fcntl.h>
 #endif
 
 #include "hsakmt/hsakmt.h"
@@ -455,13 +456,21 @@ hsa_status_t KfdDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
 hsa_status_t KfdDriver::ExportDMABuf(const core::Agent& agent,
                                      const core::DriverMemoryHandle& handle, size_t size, int* dmabuf_fd,
                                      size_t* offset) {
-  #if __linux__
-  const auto &gpu_agent = static_cast<const GpuAgent &>(agent);
+
+#if defined(__linux__)
+  if (handle.dmabuf_fd != -1) {
+    //*dmabuf_fd = fcntl(handle.dmabuf_fd, F_DUPFD_CLOEXEC, 0);
+    *dmabuf_fd = handle.dmabuf_fd;
+    *offset = 0;
+    return HSA_STATUS_SUCCESS;
+  }
+#endif
+  const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
 
   HsaHandleExportDesc desc = {};
   desc.device_handle = gpu_agent.libThunkDev();
   desc.type = HSA_EXTERNAL_HANDLE_DMA_BUF;
-  desc.buf_handle = (HsaMemoryObjectHandle)handle.handle; /* amdgpu_bo_handle */
+  desc.buf_handle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
   desc.size = size;
 
   HsaHandleExportFlags flags = {};
@@ -472,21 +481,6 @@ hsa_status_t KfdDriver::ExportDMABuf(const core::Agent& agent,
   }
   *dmabuf_fd = res.dmabuf_fd;
   *offset = 0;
-  #else // __windows__
-  int dmabuf_fd_res = -1;
-  size_t offset_res = 0;
-  HSAKMT_STATUS status =
-      HSAKMT_CALL(hsaKmtExportDMABufHandle((void*)handle.handle, size, &dmabuf_fd_res, &offset_res));
-  if (status != HSAKMT_STATUS_SUCCESS) {
-    if (status == HSAKMT_STATUS_INVALID_PARAMETER) {
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    }
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-  }
-
-  *dmabuf_fd = dmabuf_fd_res;
-  *offset = offset_res;
-  #endif
   return HSA_STATUS_SUCCESS;
 }
 
@@ -592,23 +586,15 @@ hsa_status_t KfdDriver::Unmap(core::DriverMemoryHandle handle, void *mem,
 
 hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
                                               const core::Agent& agent,
-                                              core::DriverMemoryHandle* handle, uint64_t* offset,
-                                              int* handle_fd, uint64_t* mmap_offset) {
+                                              core::DriverMemoryHandle* handle, uint64_t* offset) {
   // Create handle by exporting and importing the memory from the owning agent.
   (void)va;
 
-  core::DriverMemoryHandle sourceHandle = {.handle = reinterpret_cast<uint64_t>(mem)};
   int source_fd = -1;
 
-#if defined(__linux__)
-  // KFD export by CPU address; ExportDMABuf needs a DRM buffer handle instead.
+  // Export by CPU address; ExportDMABuf needs a driver buffer handle instead.
   if (HSAKMT_CALL(hsaKmtExportDMABufHandle(mem, size, &source_fd, offset)) != HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
-#else
-  hsa_status_t status = ExportDMABuf(agent, sourceHandle, size, &source_fd, offset);
-  if (status != HSA_STATUS_SUCCESS)
-    return status;
-#endif
 
   core::DriverMemoryHandle targetHandle = {};
   size_t imported_size = 0;
@@ -623,11 +609,11 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
   int shareable_fd = source_fd;
 #if defined(__linux__)
   // Re-export from DRM; the KFD fd was transient and is already closed.
-  ret = ExportDMABuf(agent, targetHandle, size, &shareable_fd, mmap_offset);
+  ret = ExportDMABuf(agent, targetHandle, size, &shareable_fd, &handle->mmap_offset);
   if (ret != HSA_STATUS_SUCCESS)
     return ret;
   /*
-   * We converted mem into a shareable_handle. The shareable_handle will keep the reference count
+   * We converted mem into a driver handle. The driver handle will keep the reference count
    * inside the KMD so we can free the original KFD allocation.
    */
   HSAKMT_CALL(hsaKmtFreeMemory(mem, size));
@@ -635,11 +621,11 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
 
   const auto devhandle = static_cast<const GpuAgent&>(agent).libThunkDev();
   const auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(targetHandle.handle);
-  if (HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(devhandle, memhandle, mmap_offset)) != HSAKMT_STATUS_SUCCESS)
+  if (HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(devhandle, memhandle, &handle->mmap_offset)) != HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
 
   handle->handle = targetHandle.handle;
-  *handle_fd = shareable_fd;
+  handle->dmabuf_fd = shareable_fd;
   return HSA_STATUS_SUCCESS;
 }
 

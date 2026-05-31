@@ -50,7 +50,6 @@
 #if defined(__linux__)
 #include <link.h>
 #include <dlfcn.h>
-#include <fcntl.h>
 #include <amdgpu_drm.h>
 #include <sys/mman.h>
 #endif
@@ -3782,17 +3781,15 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
   hsa_status_t status = region->Allocate(size, alloc_flags, &mem, 0);
   if (status == HSA_STATUS_SUCCESS) {
     uint64_t offset;
-    uint64_t mmap_offset = 0;
-    core::DriverMemoryHandle shareable_handle = {};
+    core::DriverMemoryHandle driver_handle = {};
     auto agentOwner = region->owner();
-    int dmabuf_fd;
-    auto ret = agentOwner->driver().CreateShareableHandle(nullptr, mem, size, *agentOwner, &shareable_handle, &offset, &dmabuf_fd, &mmap_offset);
+    auto ret = agentOwner->driver().CreateShareableHandle(nullptr, mem, size, *agentOwner, &driver_handle, &offset);
     if (ret != HSA_STATUS_SUCCESS) {
       region->Free(mem, size);
       return ret;
     }
 
-    auto memoryHandle = std::make_unique<MemoryHandle>(region, size, flags_unused, shareable_handle, dmabuf_fd, mmap_offset, alloc_flags);
+    auto memoryHandle = std::make_unique<MemoryHandle>(region, size, flags_unused, driver_handle, alloc_flags);
     *memoryOnlyHandle = MemoryHandle::Convert(memoryHandle.get());
     memory_handles.emplace(*memoryOnlyHandle, std::move(memoryHandle));
   }
@@ -3934,9 +3931,9 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
 
   hsa_status_t status;
   if (memHandle->imported && memHandle->is_fabric_handle) {
-    status = targetAgent->driver().ImportFabricHandle(*targetAgent, memHandle->fabric_handle, &shareable_handle, &alloc_size);
+    status = targetAgent->driver().ImportFabricHandle(*targetAgent, memHandle->fabric_handle, &driver_handle, &alloc_size);
   } else {
-    status = targetAgent->driver().ImportDMABuf(memHandle->dmabuf_fd, *targetAgent, &shareable_handle, &alloc_size);
+    status = targetAgent->driver().ImportDMABuf(memHandle->driver_handle.dmabuf_fd, *targetAgent, &driver_handle, &alloc_size);
   }
   if (status != HSA_STATUS_SUCCESS) 
     throw AMD::hsa_exception(status, "Failed to import memory");
@@ -3953,7 +3950,7 @@ Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
     (void)result;
   }
   else {
-    hsa_status_t status = targetAgent->driver().DestroyImportedShareableHandle(&shareable_handle);
+    hsa_status_t status = targetAgent->driver().DestroyImportedShareableHandle(&driver_handle);
     assert(status == HSA_STATUS_SUCCESS);
     (void)status;
   }
@@ -3970,11 +3967,11 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
     agentOwner->driver().GetDeviceFd(agentOwner->node_id(), &mmap_fd);
 
     if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mmap_fd,
-                             mappedHandle->mem_handle->mmap_offset)) {
+                             mappedHandle->mem_handle->driver_handle.mmap_offset)) {
       return HSA_STATUS_ERROR;
     }
   } else {
-    hsa_status_t status = targetAgent->driver().Map(shareable_handle, va, mappedHandle->offset, size, perms);
+    hsa_status_t status = targetAgent->driver().Map(driver_handle, va, mappedHandle->offset, size, perms);
     if (status != HSA_STATUS_SUCCESS) return status;
   }
   permissions = perms;
@@ -3995,7 +3992,7 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::RemoveAccess() {
     }
   } else {
     return targetAgent->driver().Unmap(
-        shareable_handle, va, mappedHandle->offset, mappedHandle->size);
+        driver_handle, va, mappedHandle->offset, mappedHandle->size);
   }
   return HSA_STATUS_SUCCESS;
 }
@@ -4029,21 +4026,18 @@ Runtime::MappedHandle::MappedHandle(MemoryHandle *mem_handle, AddressHandle *add
 }
 
 Runtime::MemoryHandle::MemoryHandle(const MemoryRegion* region, size_t size, uint64_t flags_unused,
-                 DriverMemoryHandle shareable_handle, int dmabuf_fd, uint64_t mmap_offset,
-                 MemoryRegion::AllocateFlags alloc_flag)
+                 DriverMemoryHandle driver_handle, MemoryRegion::AllocateFlags alloc_flag)
           : region(region),
           size(size),
           ref_count(1),
           use_count(0),
-          shareable_handle(shareable_handle),
-          dmabuf_fd(dmabuf_fd),
-          mmap_offset(mmap_offset),
+          driver_handle(driver_handle),
           imported(false),
           is_fabric_handle(false),
           fabric_handle({}),
           alloc_flag(alloc_flag) {
 
-  assert(shareable_handle.handle != 0);
+  assert(driver_handle.handle != 0);
   assert(size >= 0);
 }
 
@@ -4052,9 +4046,7 @@ Runtime::MemoryHandle::MemoryHandle(int dmabuf_fd)
     size(0),
     ref_count(1),
     use_count(0),
-    shareable_handle({}),
-    dmabuf_fd(dmabuf_fd), 
-    mmap_offset(0),
+    driver_handle({.dmabuf_fd = dmabuf_fd}),
     imported(true),
     is_fabric_handle(false),
     fabric_handle({}),
@@ -4066,9 +4058,7 @@ Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
     size(0),
     ref_count(1),
     use_count(0),
-    shareable_handle({}),
-    dmabuf_fd(-1),
-    mmap_offset(0),
+    driver_handle({.dmabuf_fd = -1}),
     imported(true),
     is_fabric_handle(true),
     fabric_handle(fabric_handle),
@@ -4076,11 +4066,11 @@ Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
 }
 
 Runtime::MemoryHandle::~MemoryHandle() {
-  if (shareable_handle.handle != 0 && region != nullptr)
-    agentOwner()->driver().DestroyShareableHandle(&shareable_handle);
+  if (driver_handle.dmabuf_fd != -1)
+    core::Runtime::runtime_singleton_->DmaBufClose(driver_handle.dmabuf_fd);
 
-  if (dmabuf_fd != -1)
-    core::Runtime::runtime_singleton_->DmaBufClose(dmabuf_fd);
+  if (driver_handle.handle != 0 && region != nullptr)
+    agentOwner()->driver().DestroyShareableHandle(&driver_handle);
 }
 
 
@@ -4285,21 +4275,15 @@ hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
   if (memoryHandle->imported)
     return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
 
-#ifndef _WIN32
-  *dmabuf_fd = fcntl(memoryHandle->dmabuf_fd, F_DUPFD_CLOEXEC, 0);
-  if (*dmabuf_fd == -1) return HSA_STATUS_ERROR;
-  return HSA_STATUS_SUCCESS;
-#else
   uint64_t offset;
 
   hsa_status_t err = memoryHandle->region->owner()->driver().ExportDMABuf(
      *memoryHandle->region->owner(),
-      memoryHandle->shareable_handle, memoryHandle->size, dmabuf_fd, &offset);
+      memoryHandle->driver_handle, memoryHandle->size, dmabuf_fd, &offset);
   if (err != HSA_STATUS_SUCCESS) {
     return err;
   }
   return HSA_STATUS_SUCCESS;
-#endif
 }
 
 hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
@@ -4329,7 +4313,7 @@ hsa_status_t Runtime::VMemoryExportFabricHandle(hsa_fabric_handle_t* fabric_hand
   auto agentOwner = memoryHandle->region->owner();
 
   return agentOwner->driver().ExportFabricHandle(*agentOwner,
-                                                 &memoryHandle->shareable_handle,
+                                                 &memoryHandle->driver_handle,
                                                  memoryHandle->size, fabric_handle);
 }
 

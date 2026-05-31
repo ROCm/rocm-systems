@@ -899,8 +899,7 @@ hsa_status_t XdnaDriver::Unmap(core::DriverMemoryHandle handle, void *mem,
 
 hsa_status_t XdnaDriver::CreateShareableHandle(void* va, void* mem, size_t size,
                                                const core::Agent& agent,
-                                               core::DriverMemoryHandle* handle, uint64_t* offset,
-                                               int* drm_fd, uint64_t* drm_fd_offset) {
+                                               core::DriverMemoryHandle* handle, uint64_t* offset) {
   // Find BO handle; mem is the BO handle; see AllocateMemory.
   auto bo_handle = FindBOHandle(mem);
   if (!bo_handle.IsValid()) {
@@ -933,10 +932,10 @@ hsa_status_t XdnaDriver::CreateShareableHandle(void* va, void* mem, size_t size,
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
-  *handle = core::DriverMemoryHandle{bo_handle.handle};
+  handle->handle = bo_handle.handle;
+  handle->dmabuf_fd = params.fd;
+  handle->mmap_offset = 0;
   *offset = 0;
-  *drm_fd = params.fd;
-  *drm_fd_offset = 0;
 
   return HSA_STATUS_SUCCESS;
 }
