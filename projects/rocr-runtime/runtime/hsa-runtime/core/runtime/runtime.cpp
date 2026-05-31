@@ -3918,9 +3918,13 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
 
   hsa_status_t status;
   if (memHandle->imported && memHandle->is_fabric_handle) {
-    status = targetAgent->driver().ImportFabricHandle(*targetAgent, memHandle->fabric_handle, &driver_handle, &alloc_size);
+    status = targetAgent->driver().ImportMemoryHandle(
+        *targetAgent, &driver_handle, &alloc_size, ShareableHandleType::FABRIC_HANDLE,
+        &memHandle->fabric_handle);
   } else {
-    status = targetAgent->driver().ImportDMABuf(memHandle->driver_handle.dmabuf_fd, *targetAgent, &driver_handle, &alloc_size);
+    status = targetAgent->driver().ImportMemoryHandle(
+        *targetAgent, &driver_handle, &alloc_size, ShareableHandleType::DMABUF_FD,
+        &memHandle->driver_handle.dmabuf_fd);
   }
   if (status != HSA_STATUS_SUCCESS) 
     throw AMD::hsa_exception(status, "Failed to import memory");

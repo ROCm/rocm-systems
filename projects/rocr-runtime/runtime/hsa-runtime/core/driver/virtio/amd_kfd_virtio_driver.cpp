@@ -498,26 +498,36 @@ hsa_status_t KfdVirtioDriver::ExportMemoryHandle(const core::Agent& agent, const
   }
 }
 
-hsa_status_t KfdVirtioDriver::ImportDMABuf(int dmabuf_fd, const core::Agent& agent,
-                                           core::DriverMemoryHandle* handle, size_t *size, void* mem) {
-  const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
-  amdgpu_bo_import_result res;
-  auto ret = vamdgpu_bo_import(
-      gpu_agent.libDrmDev(), amdgpu_bo_handle_type_dma_buf_fd, dmabuf_fd, &res);
-  if (ret)
+hsa_status_t KfdVirtioDriver::ImportMemoryHandle(const core::Agent& agent, core::DriverMemoryHandle* handle,
+                                                 size_t* size, core::ShareableHandleType type,
+                                                 void* import_handle, void* mem) {
+  (void)mem;
+  if (handle == nullptr || size == nullptr || import_handle == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  switch (type) {
+  case core::ShareableHandleType::DMABUF_FD: {
+    const int dmabuf_fd = *static_cast<int*>(import_handle);
+    const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
+    amdgpu_bo_import_result res;
+    auto ret = vamdgpu_bo_import(
+        gpu_agent.libDrmDev(), amdgpu_bo_handle_type_dma_buf_fd, dmabuf_fd, &res);
+    if (ret)
+      return HSA_STATUS_ERROR;
+
+    *handle = core::DriverMemoryHandle{reinterpret_cast<uint64_t>(res.buf_handle)};
+    *size = res.alloc_size;
+    return HSA_STATUS_SUCCESS;
+  }
+  case core::ShareableHandleType::FABRIC_HANDLE:
     return HSA_STATUS_ERROR;
-
-  *handle = core::DriverMemoryHandle{reinterpret_cast<uint64_t>(res.buf_handle)};
-  *size = res.alloc_size;
-  return HSA_STATUS_SUCCESS;
-}
-
-hsa_status_t KfdVirtioDriver::ImportFabricHandle(core::Agent &agent, hsa_fabric_handle_t fabric_handle, core::DriverMemoryHandle *handle, size_t *size) {
-  return HSA_STATUS_ERROR;
+  default:
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 }
 
 hsa_status_t KfdVirtioDriver::DestroyImportedShareableHandle(core::DriverMemoryHandle* handle) {
-  // Calls DestroyShareableHandle, as an amdgpu_bo_handle object is created during ImportDMABuf.
+  // Calls DestroyShareableHandle, as an amdgpu_bo_handle object is created during import.
   return DestroyShareableHandle(handle);
 }
 

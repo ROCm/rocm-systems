@@ -222,24 +222,25 @@ public:
                                           size_t size, ShareableHandleType type, uint32_t flags,
                                           void* export_handle) = 0;
 
-  /// @brief Imports a memory object via dma-buf.
+  /// @brief Imports a memory object from a shareable handle.
   ///
   /// @note The handle must be destroyed with @ref DestroyImportedShareableHandle.
   ///
-  /// @param[in] dmabuf_fd dma-buf file descriptor
   /// @param[in] agent agent to import the memory for
   /// @param[out] handle handle to the imported memory
+  /// @param[out] size imported allocation size in bytes
+  /// @param[in] type shareable handle type to import
+  /// @param[in] import_handle input handle; @p int* for @p DMABUF_FD,
+  ///             @p hsa_fabric_handle_t* for @p FABRIC_HANDLE
   /// @param[in] mem address of existing buffer, used to bypass import
-  virtual hsa_status_t ImportDMABuf(int dmabuf_fd, const core::Agent& agent,
-                                    core::DriverMemoryHandle* handle, size_t *size, void* mem = nullptr) = 0;
+  virtual hsa_status_t ImportMemoryHandle(const core::Agent& agent, DriverMemoryHandle* handle,
+                                          size_t* size, ShareableHandleType type,
+                                          void* import_handle, void* mem = nullptr) = 0;
 
-  /// @brief Destroys the handle created during @ref ImportDMABuf.
+  /// @brief Destroys the handle created during @ref ImportMemoryHandle.
   ///
   /// @param[in] handle handle of the object to release
   virtual hsa_status_t DestroyImportedShareableHandle(core::DriverMemoryHandle* handle) = 0;
-
-  virtual hsa_status_t ImportFabricHandle(core::Agent& agent, hsa_fabric_handle_t fabric_handle,
-                                          core::DriverMemoryHandle* handle, size_t* size) = 0;
 
   /// @brief Maps the memory associated with the handle.
   ///
