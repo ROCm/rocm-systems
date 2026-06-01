@@ -21,9 +21,22 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Added shadow detection: if `amdsmi` loads from a path other than the resolved expected path (`AMDSMI_PATH`, `ROCM_HOME`, `ROCM_PATH`, or `/opt/rocm` default), tests exit early with a clear error message and remediation steps.
   - Non-root invocations now exit with code 1 immediately with a clear message instead of failing mid-test.
 
-### Fixed
+### Resolved Issues
 
-- **Corrected the documented unit of `amdsmi_frequencies_t::frequency`**.
+- **Fixed `amd-smi static` hanging indefinitely on gfx1153 and gfx950**.  
+  - Added a 60-second timeout to `amdsmi_init()` in the CLI so the process exits with a clear error message instead of hanging when the GPU driver is unresponsive.
+  - Added `O_NONBLOCK` to DRM device open during initialization so `open()` returns immediately if the device is wedged.
+
+- **Fixed `amd-smi ras --afid --cper-file <file>` not showing AFIDs for correctable errors**.  
+  - `aca_decode_corrected_error` was receiving the count of `uint32_t` elements where `decode_afid` expected the count of `uint64_t` elements, causing `decode_error_info` to return `NULL` for all non-standard section types.
+
+- **Fixed `amd-smi ras --cper --json` producing invalid JSON**.  
+  - Multi-GPU runs emitted a separate JSON array per GPU instead of a single unified array, and `--follow` mode printed an empty `[]` every iteration when no new entries existed. Both are now consolidated into a single JSON document.
+
+- **Exposed `amdsmi_get_afids_from_cper` in the Python package**.  
+  - The CPER AFID API was implemented but missing from `py-interface/__init__.py`, making it unavailable to Python callers using `from amdsmi import ...`.
+
+- **Corrected the documented unit of `amdsmi_frequencies_t::frequency`**.  
   - The struct comment claimed frequencies were in MHz, but `amdsmi_get_clk_freq()` returns them in Hz. The comment now reads "List of frequencies in Hz".
   - Also removed the incorrect "in MHz" note from the `current` field, which is a frequency index, not a frequency value.
   - Updated the Python API reference to state the unit is Hz.
@@ -203,19 +216,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Updated default `amd-smi` output to align values to the left for improved readability.
     Several items were misaligned in the default output, and this change ensures a consistent left-aligned format across all fields.
   - *This change is purely cosmetic and does not affect any functionality.*
-
-- **Fixed `amd-smi static` hanging indefinitely on gfx1153 and gfx950**.  
-  - Added a 60-second timeout to `amdsmi_init()` in the CLI so the process exits with a clear error message instead of hanging when the GPU driver is unresponsive.
-  - Added `O_NONBLOCK` to DRM device open during initialization so `open()` returns immediately if the device is wedged.
-
-- **Fixed `amd-smi ras --afid --cper-file <file>` not showing AFIDs for correctable errors**.  
-  - `aca_decode_corrected_error` was receiving the count of `uint32_t` elements where `decode_afid` expected the count of `uint64_t` elements, causing `decode_error_info` to return `NULL` for all non-standard section types.
-
-- **Fixed `amd-smi ras --cper --json` producing invalid JSON**.  
-  - Multi-GPU runs emitted a separate JSON array per GPU instead of a single unified array, and `--follow` mode printed an empty `[]` every iteration when no new entries existed. Both are now consolidated into a single JSON document.
-
-- **Exposed `amdsmi_get_afids_from_cper` in the Python package**.  
-  - The CPER AFID API was implemented but missing from `py-interface/__init__.py`, making it unavailable to Python callers using `from amdsmi import ...`.
 
 ## amd_smi_lib for ROCm 7.12.0
 
