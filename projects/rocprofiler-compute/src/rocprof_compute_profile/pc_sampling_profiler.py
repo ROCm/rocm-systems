@@ -4,7 +4,6 @@
 import argparse
 import os
 import shlex
-import shutil
 import time
 from pathlib import Path
 from typing import Union, cast
@@ -12,9 +11,11 @@ from typing import Union, cast
 from utils.logger import console_debug, console_error, console_log
 from utils.utils_common import (
     PC_SAMPLING_BLOCK_IDS,
+    PC_SAMPLING_OUTPUT_FILE_NAME,
     capture_subprocess_output,
     get_rocprof_cmd,
     is_only_pc_sampling,
+    pc_sampling_unit,
     perform_attach_detach,
 )
 from utils.utils_profile import ProfilerOptions, is_live_attach
@@ -72,26 +73,25 @@ class PCSamplingProfiler:
         self,
         profiler_options: ProfilerOptions,
     ) -> None:
-        """Remove a leftover ROCPROF_OUTPUT_PATH in PC-sampling-only sdk runs."""
+        """Remove leftover ``ps_file_*`` outputs from a prior PC-sampling-only
+        sdk run.
+
+        PC sampling writes ``ps_file_*`` directly into the workload directory
+        (see ``_launch_sdk``). When re-profiling into an existing directory we
+        delete those stale files so the new run does not mix in old results.
+        """
         if not (self.is_exclusive() and self._profiler == "rocprofiler-sdk"):
             return
-        if not isinstance(profiler_options, dict):
+        workload_dir = Path(self._workload_dir)
+        if not workload_dir.is_dir():
             return
-        rocprof_output_path = profiler_options.get("ROCPROF_OUTPUT_PATH")
-        if rocprof_output_path is None:
-            return
-        rocprof_output_path = Path(rocprof_output_path)
-        if rocprof_output_path.exists():
-            shutil.rmtree(rocprof_output_path, ignore_errors=True)
-            if rocprof_output_path.exists():
-                console_debug(
-                    "Failed to remove existing ROCProf output path: "
-                    f"{rocprof_output_path}"
-                )
+        for stale in workload_dir.glob(f"{PC_SAMPLING_OUTPUT_FILE_NAME}_*"):
+            try:
+                stale.unlink()
+            except OSError:
+                console_debug(f"Failed to remove stale PC sampling output: {stale}")
             else:
-                console_debug(
-                    f"Removed existing ROCProf output path: {rocprof_output_path}"
-                )
+                console_debug(f"Removed stale PC sampling output: {stale}")
 
     def _launch(
         self,
@@ -100,40 +100,23 @@ class PCSamplingProfiler:
         """Run rocprof with pc sampling. Current support v3 only."""
         # Todo:
         #   - precheck with rocprofv3 --list-avail
-        method = self._args.pc_sampling_method
-        interval = self._args.pc_sampling_interval
-        unit = "time" if method == "host_trap" else "cycles"
-
         if self._profiler == "rocprofiler-sdk":
-            self._launch_sdk(
-                cast(dict[str, Union[str, list[str]]], profiler_options),
-                method,
-                interval,
-                unit,
-            )
+            self._launch_sdk(cast(dict[str, Union[str, list[str]]], profiler_options))
         else:
-            self._launch_v3(cast(list[str], profiler_options), method, interval, unit)
+            self._launch_v3(cast(list[str], profiler_options))
 
     def _launch_sdk(
         self,
         profiler_options: dict[str, Union[str, list[str]]],
-        method: str,
-        interval: int,
-        unit: str,
     ) -> None:
+        """Launch the sdk PC sampling pass.
+
+        ``profiler_options`` is the authoritative env dict built by
+        ``rocprofiler_sdk_profiler.get_profiler_options(pc_sampling=True)``; this
+        method merges it into the environment verbatim and never re-derives PC
+        sampling keys.
+        """
         options = profiler_options.copy()
-        options.update({
-            # no counter collection for pc sampling
-            "ROCPROF_COUNTER_COLLECTION": "0",
-            "ROCPROF_KERNEL_TRACE": "1",
-            "ROCPROF_OUTPUT_FORMAT": "csv,json",
-            "ROCPROF_OUTPUT_PATH": self._workload_dir,
-            "ROCPROF_OUTPUT_FILE_NAME": "ps_file",
-            "ROCPROFILER_PC_SAMPLING_BETA_ENABLED": "1",
-            "ROCPROF_PC_SAMPLING_UNIT": unit,
-            "ROCPROF_PC_SAMPLING_INTERVAL": str(interval),
-            "ROCPROF_PC_SAMPLING_METHOD": method,
-        })
         app_cmd = options.pop("APP_CMD") if "APP_CMD" in options else None
         new_env = os.environ.copy()
         for key, value in options.items():
@@ -161,17 +144,16 @@ class PCSamplingProfiler:
     def _launch_v3(
         self,
         profiler_options: list[str],
-        method: str,
-        interval: int,
-        unit: str,
     ) -> None:
+        method = self._args.pc_sampling_method
+        interval = self._args.pc_sampling_interval
         options = [
             "--kernel-trace",
             "--pc-sampling-beta-enabled",
             "--pc-sampling-method",
             method,
             "--pc-sampling-unit",
-            unit,
+            pc_sampling_unit(method),
             "--output-format",
             "csv",
             "json",
@@ -180,7 +162,7 @@ class PCSamplingProfiler:
             "-d",
             self._workload_dir,
             "-o",
-            "ps_file",  # TODO: sync up with the name from source in 2100_.yaml
+            PC_SAMPLING_OUTPUT_FILE_NAME,
         ]
 
         if is_live_attach(profiler_options):

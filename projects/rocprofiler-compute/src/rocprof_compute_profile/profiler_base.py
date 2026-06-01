@@ -22,6 +22,7 @@ from utils.logger import (
 )
 from utils.native_tool_finder import NativeToolFinder
 from utils.utils_common import (
+    PC_SAMPLING_BLOCK_IDS,
     format_time,
     get_job_rank_and_size,
     print_status,
@@ -391,10 +392,7 @@ class RocProfCompute_Base:
         print_status(status_msg)
 
         native_tool_path = self.__get_native_tool_path(args)
-        if self.__profiler == "rocprofiler-sdk":
-            options = self.get_profiler_options(native_tool_path=native_tool_path)
-        else:
-            options = self.get_profiler_options()
+        options = self.__resolve_profiler_options(native_tool_path)
 
         # Compute total workload runs including PC sampling for warning check
         total_workload_runs = total_runs
@@ -481,18 +479,26 @@ class RocProfCompute_Base:
 
         if not pc_sampling.is_requested():
             console_warning(
-                "PC sampling data collection skipped as block 21 / "
-                "pc_sampling is not specified."
+                "PC sampling data collection skipped as block "
+                f"{' / '.join(PC_SAMPLING_BLOCK_IDS)} is not specified."
             )
             return
 
-        if self.__profiler == "rocprofiler-sdk":
-            pc_sampling_options = self.get_profiler_options(
-                native_tool_path=native_tool_path, pc_sampling=True
-            )
-        else:
-            pc_sampling_options = self.get_profiler_options()
+        pc_sampling_options = self.__resolve_profiler_options(
+            native_tool_path, pc_sampling=True
+        )
         pc_sampling.run(pc_sampling_options, total_runs)
+
+    def __resolve_profiler_options(
+        self, native_tool_path: Optional[str], pc_sampling: bool = False
+    ) -> Union[list[str], dict[str, Any]]:
+        """Build profiler options, threading the native-tool and PC sampling
+        arguments only to the sdk profiler (the v3 profiler ignores both)."""
+        if self.__profiler == "rocprofiler-sdk":
+            return self.get_profiler_options(
+                native_tool_path=native_tool_path, pc_sampling=pc_sampling
+            )
+        return self.get_profiler_options()
 
     def __get_native_tool_path(self, args: argparse.Namespace) -> str | None:
         try:
@@ -510,6 +516,9 @@ class RocProfCompute_Base:
                 "Please ensure the native tool library is installed "
                 "or source files are present."
             )
+            # console_error normally terminates; return None explicitly so the
+            # contract holds even if it is configured not to exit.
+            return None
 
     def __is_native_tool_requested(self, args: argparse.Namespace) -> bool:
         return self.__profiler == "rocprofiler-sdk" and not args.no_native_tool

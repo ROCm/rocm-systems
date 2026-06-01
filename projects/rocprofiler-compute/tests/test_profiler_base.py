@@ -406,3 +406,57 @@ def test_run_profiling_pc_sampling_increments_workload_runs_for_multirank(tmp_pa
     assert run_with(["21", "2"], is_requested=True) is True
     # Not requested -> only the single counter pass -> no multi-rank warning.
     assert run_with(["2"], is_requested=False) is False
+
+
+def test_run_profiling_sdk_routes_native_tool_into_pc_sampling(tmp_path):
+    """In rocprofiler-sdk mode, run_profiling resolves the native tool path and
+    threads it (with pc_sampling=True) into the options handed to
+    PCSamplingProfiler.run() — the native-tool PC sampling routing."""
+    args = argparse.Namespace(
+        filter_blocks=["21"],
+        output_directory=str(tmp_path),
+        roof_only=False,
+        no_native_tool=False,
+        iteration_multiplexing=None,
+        kernel=None,
+        dispatch=None,
+        remaining="-- ./app",
+    )
+    soc = SimpleNamespace(_mspec=SimpleNamespace(gpu_model="MI300"))
+    profiler = RocProfCompute_Base(args, profiler_mode="rocprofiler-sdk", soc=soc)
+    profiler._filter_blocks = ["21"]
+
+    fake_native = "/opt/rocm/lib/rocprofiler-compute/librocprofiler-compute-tool.so"
+    pc_sampling_opts = {"LD_PRELOAD": f"sdk_tool:{fake_native}", "tag": "pc"}
+    base = "rocprof_compute_profile.profiler_base"
+
+    def fake_get_options(native_tool_path=None, pc_sampling=False):
+        assert native_tool_path == fake_native
+        return pc_sampling_opts if pc_sampling else {"tag": "pmc"}
+
+    with (
+        mock.patch(f"{base}.PCSamplingProfiler") as mock_pc_cls,
+        mock.patch(f"{base}.print_status"),
+        mock.patch(f"{base}.console_log"),
+        mock.patch(f"{base}.console_debug"),
+        mock.patch(f"{base}.console_warning"),
+        mock.patch(f"{base}.get_job_rank_and_size", return_value=(None, None)),
+        mock.patch.object(
+            RocProfCompute_Base,
+            "_RocProfCompute_Base__get_native_tool_path",
+            return_value=fake_native,
+        ),
+        mock.patch.object(
+            RocProfCompute_Base, "get_profiler_options", side_effect=fake_get_options
+        ),
+    ):
+        instance = mock_pc_cls.return_value
+        instance.is_exclusive.return_value = True
+        instance.is_requested.return_value = True
+
+        profiler.run_profiling(version="1.0.0", prog="rocprof-compute")
+
+        instance.run.assert_called_once()
+        passed_opts = instance.run.call_args[0][0]
+        assert passed_opts is pc_sampling_opts
+        assert fake_native in passed_opts["LD_PRELOAD"]

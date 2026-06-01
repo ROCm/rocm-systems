@@ -29,6 +29,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Reworded the N/A metric-evaluation warning to "divide-by-zero or empty counter data" (the prior "missing counter data" message could only fire for non-missing causes).
 
+* PC sampling collection now routes through the native counter-collection tool by default on ROCm >= 7.x (previously the native tool was disabled for PC-sampling-only runs). Opt out with `--no-native-tool` to retain the prior rocprofiler-sdk-only path.
+
 ### Removed
 
 * ``--path`` and ``--subpath`` options have been removed from profile mode. Use ``--output-directory`` instead.

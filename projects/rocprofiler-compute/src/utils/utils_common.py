@@ -623,6 +623,10 @@ def parse_pmc_perf(pmc_perf_file: str) -> list[str]:
 
 PC_SAMPLING_BLOCK_IDS = ("21", "pc_sampling")
 
+# Base name rocprof writes PC sampling outputs under (e.g. ps_file_results.json).
+# TODO: sync up with the name from source in 2100_.yaml
+PC_SAMPLING_OUTPUT_FILE_NAME = "ps_file"
+
 
 def is_only_pc_sampling(filter_blocks: list[str]) -> bool:
     """Return True if all requested blocks are PC sampling (block 21 or the
@@ -630,6 +634,15 @@ def is_only_pc_sampling(filter_blocks: list[str]) -> bool:
     return bool(filter_blocks) and all(
         block in PC_SAMPLING_BLOCK_IDS for block in filter_blocks
     )
+
+
+def pc_sampling_unit(method: str) -> str:
+    """Return the PC sampling interval unit for a sampling method.
+
+    ``host_trap`` samples on a time interval; every other method
+    (e.g. ``stochastic``) samples on a cycle interval.
+    """
+    return "time" if method == "host_trap" else "cycles"
 
 
 def format_time(seconds: float) -> str:

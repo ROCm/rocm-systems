@@ -10,7 +10,11 @@ from typing import Optional, Union
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import console_debug, console_error, console_log, demarcate
-from utils.utils_common import resolve_rocm_library_path
+from utils.utils_common import (
+    PC_SAMPLING_OUTPUT_FILE_NAME,
+    pc_sampling_unit,
+    resolve_rocm_library_path,
+)
 
 
 class rocprofiler_sdk_profiler(RocProfCompute_Base):
@@ -141,14 +145,21 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             options["APP_CMD"] = app_cmd
 
         if pc_sampling:
+            # This branch owns the complete PC sampling option set; the launcher
+            # merges it verbatim and must not re-derive any of these keys.
             method = args.pc_sampling_method
             options.update({
+                # No counter collection on the PC sampling pass.
                 "ROCPROF_COUNTER_COLLECTION": "0",
+                "ROCPROF_KERNEL_TRACE": "1",
+                "ROCPROF_OUTPUT_FORMAT": "csv,json",
+                # PC sampling outputs land directly in the workload directory
+                # (ps_file_*), not under out/pmc_1 like the counter pass.
+                "ROCPROF_OUTPUT_PATH": args.output_directory,
+                "ROCPROF_OUTPUT_FILE_NAME": PC_SAMPLING_OUTPUT_FILE_NAME,
                 "ROCPROF_PC_SAMPLING_METHOD": method,
                 "ROCPROF_PC_SAMPLING_INTERVAL": str(args.pc_sampling_interval),
-                "ROCPROF_PC_SAMPLING_UNIT": (
-                    "time" if method == "host_trap" else "cycles"
-                ),
+                "ROCPROF_PC_SAMPLING_UNIT": pc_sampling_unit(method),
                 "ROCPROFILER_PC_SAMPLING_BETA_ENABLED": "1",
             })
 

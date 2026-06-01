@@ -386,72 +386,52 @@ def _make_pc_sampling_profiler(method, interval, workload_dir, profiler):
     )
 
 
+@pytest.mark.parametrize(
+    "method, expected_unit, interval",
+    [("host_trap", "time", 1000), ("stochastic", "cycles", 5000)],
+)
 @mock.patch("rocprof_compute_profile.pc_sampling_profiler.capture_subprocess_output")
 @mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_error")
 @mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_debug")
 def test_pc_sampling_profiler_sdk_forwards_env_and_ld_preload(
-    mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path
+    mock_console_debug,
+    mock_console_error,
+    mock_capture_subprocess,
+    method,
+    expected_unit,
+    interval,
 ):
-    """sdk non-live-attach launch forwards LD_PRELOAD plus the PC sampling
-    env vars (method/interval and the host_trap->time unit mapping) into the
-    subprocess env on success."""
-    method = "host_trap"
-    interval = 1000
-    workload_dir = str(tmp_path)
-    options = {"APP_CMD": "my_app --arg"}
+    """sdk launch forwards the authoritative options dict verbatim into the
+    subprocess env: LD_PRELOAD, the PC sampling env vars (method/interval and
+    the host_trap->time / stochastic->cycles unit mapping owned by
+    get_profiler_options), and the PC sampling output path/name."""
+    output_dir = Path(common.get_output_dir())
+    output_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        args = _make_sdk_args(output_dir, method, pc_sampling_interval=interval)
+        options = rocprofiler_sdk_profiler(
+            args, profiler_mode="rocprofiler-sdk", soc=None
+        ).get_profiler_options(pc_sampling=True)
 
-    expected_tool_path = str(
-        tmp_path / "rocm_sdk" / "lib" / "rocprofiler-sdk" / "librocprofiler-sdk-tool.so"
-    )
-    options["LD_PRELOAD"] = expected_tool_path
+        mock_capture_subprocess.return_value = (True, "Success output")
+        profiler = _make_pc_sampling_profiler(
+            method, interval, str(output_dir), "rocprofiler-sdk"
+        )
+        profiler._launch(options)
 
-    mock_capture_subprocess.return_value = (True, "Success output")
+        assert mock_capture_subprocess.called
+        called_env = mock_capture_subprocess.call_args.kwargs.get("new_env", {})
 
-    profiler = _make_pc_sampling_profiler(
-        method, interval, workload_dir, "rocprofiler-sdk"
-    )
-    profiler._launch(options)
+        assert args.rocprofiler_sdk_tool_path in called_env["LD_PRELOAD"]
+        assert called_env["ROCPROF_PC_SAMPLING_METHOD"] == method
+        assert called_env["ROCPROF_PC_SAMPLING_UNIT"] == expected_unit
+        assert called_env["ROCPROF_PC_SAMPLING_INTERVAL"] == str(interval)
+        assert called_env["ROCPROF_OUTPUT_PATH"] == str(output_dir)
+        assert called_env["ROCPROF_OUTPUT_FILE_NAME"] == "ps_file"
 
-    assert mock_capture_subprocess.called
-    call_args = mock_capture_subprocess.call_args
-    called_env = call_args.kwargs.get("new_env", {})
-
-    assert called_env["LD_PRELOAD"] == expected_tool_path
-    assert called_env["ROCPROF_PC_SAMPLING_METHOD"] == method
-    assert called_env["ROCPROF_PC_SAMPLING_UNIT"] == "time"
-    assert called_env["ROCPROF_PC_SAMPLING_INTERVAL"] == str(interval)
-    assert called_env["ROCPROF_OUTPUT_PATH"] == workload_dir
-    assert called_env["ROCPROF_OUTPUT_FILE_NAME"] == "ps_file"
-
-    mock_console_error.assert_not_called()
-
-
-@mock.patch("rocprof_compute_profile.pc_sampling_profiler.capture_subprocess_output")
-@mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_error")
-@mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_debug")
-def test_pc_sampling_profiler_sdk_stochastic_unit_is_cycles(
-    mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path
-):
-    """A non-host_trap (stochastic) method maps to the ``cycles`` sampling unit
-    in the forwarded sdk env."""
-    method = "stochastic"
-    interval = 5000
-    workload_dir = str(tmp_path)
-    options = {"APP_CMD": "my_app"}
-
-    mock_capture_subprocess.return_value = (True, "Success output")
-
-    profiler = _make_pc_sampling_profiler(
-        method, interval, workload_dir, "rocprofiler-sdk"
-    )
-    profiler._launch(options)
-
-    called_env = mock_capture_subprocess.call_args.kwargs.get("new_env", {})
-    assert called_env["ROCPROF_PC_SAMPLING_METHOD"] == method
-    assert called_env["ROCPROF_PC_SAMPLING_UNIT"] == "cycles"
-    assert called_env["ROCPROF_PC_SAMPLING_INTERVAL"] == str(interval)
-
-    mock_console_error.assert_not_called()
+        mock_console_error.assert_not_called()
+    finally:
+        common.clean_output_dir(True, str(output_dir))
 
 
 @mock.patch("rocprof_compute_profile.pc_sampling_profiler.capture_subprocess_output")
@@ -631,61 +611,61 @@ def test_pc_sampling_profiler_is_exclusive():
 
 
 @mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_debug")
-def test_pc_sampling_profiler_cleanup_stale_output_removes_dir(
+def test_pc_sampling_profiler_cleanup_stale_output_removes_ps_files(
     mock_console_debug, tmp_path
 ):
-    """Exclusive sdk run with a dict ROCPROF_OUTPUT_PATH removes the stale dir."""
-    stale = tmp_path / "out" / "pmc_1"
-    stale.mkdir(parents=True, exist_ok=True)
-    options = {"ROCPROF_OUTPUT_PATH": str(stale)}
+    """Exclusive sdk run removes stale ps_file_* in the workload dir (where
+    _launch_sdk actually writes PC sampling output), and leaves other files."""
+    stale_a = tmp_path / "ps_file_results.json"
+    stale_b = tmp_path / "ps_file_pc_sampling_host_trap.csv"
+    keep = tmp_path / "sysinfo.csv"
+    for f in (stale_a, stale_b, keep):
+        f.write_text("")
 
     profiler = PCSamplingProfiler(
         args=MockArgs(filter_blocks=["21"]),
         profiler="rocprofiler-sdk",
         workload_dir=str(tmp_path),
     )
-    profiler._cleanup_stale_output(options)
+    # Cleanup no longer depends on the options dict for the path.
+    profiler._cleanup_stale_output({"ROCPROF_OUTPUT_PATH": str(tmp_path)})
 
-    assert not stale.exists()
+    assert not stale_a.exists()
+    assert not stale_b.exists()
+    assert keep.exists()
 
 
 @mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_debug")
 def test_pc_sampling_profiler_cleanup_stale_output_noop_cases(
     mock_console_debug, tmp_path
 ):
-    """Cleanup is a no-op outside the exclusive-sdk-dict-with-key case."""
+    """Cleanup is a no-op outside the exclusive-sdk case, and never touches
+    ps_file_* there."""
     sdk_args = MockArgs(filter_blocks=["21"])
 
     # Non-sdk profiler: no removal even when exclusive.
-    stale = tmp_path / "non_sdk"
-    stale.mkdir(parents=True, exist_ok=True)
+    stale = tmp_path / "ps_file_results.json"
+    stale.write_text("")
     PCSamplingProfiler(
         args=sdk_args, profiler="rocprofv3", workload_dir=str(tmp_path)
-    )._cleanup_stale_output({"ROCPROF_OUTPUT_PATH": str(stale)})
+    )._cleanup_stale_output(["--kernel-trace"])
     assert stale.exists()
 
     # Non-exclusive: no removal.
-    stale = tmp_path / "mixed"
-    stale.mkdir(parents=True, exist_ok=True)
     PCSamplingProfiler(
         args=MockArgs(filter_blocks=["2", "21"]),
         profiler="rocprofiler-sdk",
         workload_dir=str(tmp_path),
-    )._cleanup_stale_output({"ROCPROF_OUTPUT_PATH": str(stale)})
+    )._cleanup_stale_output({"ROCPROF_OUTPUT_PATH": str(tmp_path)})
     assert stale.exists()
 
-    # List options (v3): no removal.
-    stale = tmp_path / "list_opts"
-    stale.mkdir(parents=True, exist_ok=True)
+    # Missing workload dir: no error, no removal.
     PCSamplingProfiler(
-        args=sdk_args, profiler="rocprofiler-sdk", workload_dir=str(tmp_path)
-    )._cleanup_stale_output(["--kernel-trace"])
-    assert stale.exists()
-
-    # Missing key: no error, no removal.
-    PCSamplingProfiler(
-        args=sdk_args, profiler="rocprofiler-sdk", workload_dir=str(tmp_path)
+        args=sdk_args,
+        profiler="rocprofiler-sdk",
+        workload_dir=str(tmp_path / "does_not_exist"),
     )._cleanup_stale_output({"APP_CMD": "app"})
+    assert stale.exists()
 
 
 @mock.patch("rocprof_compute_profile.pc_sampling_profiler.capture_subprocess_output")
@@ -841,11 +821,11 @@ def test_pc_sampling_profiler_run_cleanup_before_launch(
     mock_capture_subprocess,
     tmp_path,
 ):
-    """run() removes stale output before reaching the subprocess launch seam, and
-    emits the run header and a timing debug."""
-    stale = tmp_path / "out" / "pmc_1"
-    stale.mkdir(parents=True, exist_ok=True)
-    options = {"ROCPROF_OUTPUT_PATH": str(stale), "APP_CMD": "my_app"}
+    """run() removes stale ps_file_* output before reaching the subprocess launch
+    seam, and emits the run header and a timing debug."""
+    stale = tmp_path / "ps_file_results.json"
+    stale.write_text("")
+    options = {"ROCPROF_OUTPUT_PATH": str(tmp_path), "APP_CMD": "my_app"}
 
     profiler = _make_pc_sampling_profiler(
         "host_trap", 100, str(tmp_path), "rocprofiler-sdk"
@@ -927,6 +907,102 @@ def test_native_tool_supported_preconditions(rocm_version, attach_pid, expected)
 
 
 # ---------------------------------------------------------------------------
+# __get_native_tool_path: happy path, not-requested None, and error handling
+# ---------------------------------------------------------------------------
+def test_get_native_tool_path_returns_finder_path():
+    """When requested and supported, the resolved collector path is returned."""
+    args = _make_supported_args(["21"])
+    profiler = RocProfCompute_Base(
+        args, profiler_mode="rocprofiler-sdk", soc=_make_soc("7.0.0")
+    )
+    fake_path = Path("/opt/rocm/lib/rocprofiler-compute/librocprofiler-compute-tool.so")
+    with mock.patch(
+        "rocprof_compute_profile.profiler_base.NativeToolFinder"
+    ) as mock_finder:
+        mock_finder.return_value.get_collector_library_path.return_value = fake_path
+        result = profiler._RocProfCompute_Base__get_native_tool_path(args)
+    assert result == str(fake_path)
+
+
+def test_get_native_tool_path_none_when_not_requested():
+    """--no-native-tool disables the path -> None, finder never constructed."""
+    args = _make_supported_args(["21"])
+    args.no_native_tool = True
+    profiler = RocProfCompute_Base(
+        args, profiler_mode="rocprofiler-sdk", soc=_make_soc("7.0.0")
+    )
+    with mock.patch(
+        "rocprof_compute_profile.profiler_base.NativeToolFinder"
+    ) as mock_finder:
+        result = profiler._RocProfCompute_Base__get_native_tool_path(args)
+    assert result is None
+    mock_finder.assert_not_called()
+
+
+def test_get_native_tool_path_errors_then_returns_none(monkeypatch):
+    """If the finder raises, console_error fires and the method returns None
+    (well-defined even if console_error is configured not to exit)."""
+    console_error_calls = []
+
+    def fake_console_error(msg, exit=True):
+        console_error_calls.append(msg)
+
+    monkeypatch.setattr(
+        "rocprof_compute_profile.profiler_base.console_error", fake_console_error
+    )
+
+    args = _make_supported_args(["21"])
+    profiler = RocProfCompute_Base(
+        args, profiler_mode="rocprofiler-sdk", soc=_make_soc("7.0.0")
+    )
+    with mock.patch(
+        "rocprof_compute_profile.profiler_base.NativeToolFinder"
+    ) as mock_finder:
+        mock_finder.return_value.get_collector_library_path.side_effect = RuntimeError(
+            "boom"
+        )
+        result = profiler._RocProfCompute_Base__get_native_tool_path(args)
+
+    assert result is None
+    assert any(
+        "Failed to use native counter collection tool" in m for m in console_error_calls
+    )
+
+
+# ---------------------------------------------------------------------------
+# _launch_v3 builds the PC sampling flags with the correct unit mapping
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "method, expected_unit",
+    [("host_trap", "time"), ("stochastic", "cycles")],
+)
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.capture_subprocess_output")
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_error")
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_debug")
+def test_pc_sampling_profiler_v3_builds_flags(
+    mock_console_debug,
+    mock_console_error,
+    mock_capture_subprocess,
+    tmp_path,
+    method,
+    expected_unit,
+):
+    """v3 launch emits --pc-sampling-method/unit/interval with the right values
+    (unit derived from method) plus -o ps_file."""
+    with mock.patch("utils.utils_common._rocprof_cmd", "rocprof_cli_tool"):
+        mock_capture_subprocess.return_value = (True, "Success")
+        profiler = _make_pc_sampling_profiler(method, 4096, str(tmp_path), "rocprofv3")
+        profiler._launch(["--", "./app"])
+
+        opts = mock_capture_subprocess.call_args[0][0]
+        assert opts[opts.index("--pc-sampling-method") + 1] == method
+        assert opts[opts.index("--pc-sampling-unit") + 1] == expected_unit
+        assert opts[opts.index("--pc-sampling-interval") + 1] == "4096"
+        assert opts[opts.index("-o") + 1] == "ps_file"
+        mock_console_error.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # get_profiler_options(pc_sampling=True) populates the PC sampling env vars
 # ---------------------------------------------------------------------------
 def _make_sdk_args(
@@ -999,5 +1075,58 @@ def test_get_profiler_options_pc_sampling_false_preserves_pmc_behavior():
             assert key not in options
         # PMC path: counter collection stays on (SDK collects).
         assert options["ROCPROF_COUNTER_COLLECTION"] == "1"
+    finally:
+        common.clean_output_dir(True, str(output_dir))
+
+
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.capture_subprocess_output")
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_error")
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_debug")
+def test_pc_sampling_native_tool_reaches_subprocess_env(
+    mock_console_debug, mock_console_error, mock_capture_subprocess
+):
+    """End-to-end producer->consumer: the dict built by
+    get_profiler_options(pc_sampling=True) carries the native tool on LD_PRELOAD
+    and the PC sampling env vars all the way into the launched subprocess env."""
+    output_dir = Path(common.get_output_dir())
+    output_dir.mkdir(parents=True, exist_ok=True)
+    native_tool = "/tmp/fake_native_tool.so"
+    try:
+        args = _make_sdk_args(output_dir, "host_trap", pc_sampling_interval=4096)
+        sdk_profiler = rocprofiler_sdk_profiler(
+            args, profiler_mode="rocprofiler-sdk", soc=None
+        )
+        options = sdk_profiler.get_profiler_options(
+            native_tool_path=native_tool, pc_sampling=True
+        )
+
+        mock_capture_subprocess.return_value = (True, "ok")
+        pc_profiler = PCSamplingProfiler(
+            args=MockArgs(
+                pc_sampling_method="host_trap",
+                pc_sampling_interval=4096,
+                filter_blocks=["21"],
+            ),
+            profiler="rocprofiler-sdk",
+            workload_dir=str(output_dir),
+        )
+        pc_profiler._launch(options)
+
+        assert mock_capture_subprocess.called
+        called_env = mock_capture_subprocess.call_args.kwargs.get("new_env", {})
+        # Native tool AND the sdk tool are both preloaded so PC samples are
+        # still collected by the sdk tool.
+        assert native_tool in called_env["LD_PRELOAD"]
+        assert args.rocprofiler_sdk_tool_path in called_env["LD_PRELOAD"]
+        # PC sampling env vars survive into the subprocess.
+        assert called_env["ROCPROF_PC_SAMPLING_METHOD"] == "host_trap"
+        assert called_env["ROCPROF_PC_SAMPLING_INTERVAL"] == "4096"
+        assert called_env["ROCPROF_PC_SAMPLING_UNIT"] == "time"
+        assert called_env["ROCPROFILER_PC_SAMPLING_BETA_ENABLED"] == "1"
+        assert called_env["ROCPROF_COUNTER_COLLECTION"] == "0"
+        assert called_env["ROCPROF_OUTPUT_FILE_NAME"] == "ps_file"
+        # PC sampling output lands in the workload dir, not out/pmc_1.
+        assert called_env["ROCPROF_OUTPUT_PATH"] == str(output_dir)
+        mock_console_error.assert_not_called()
     finally:
         common.clean_output_dir(True, str(output_dir))
