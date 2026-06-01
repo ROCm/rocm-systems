@@ -316,7 +316,7 @@ __device__ void QueuePair::bnxt_post_wqe_rma_single(int32_t length,
   lock(&bnxt_sq.lock);
 
   /* Write WQE to SQ */
-  bnxt_write_rma_wqe(raddr, laddr, length, opcode, keys[0].rkey);
+  bnxt_write_rma_wqe(raddr, laddr, length, opcode, rkey);
 
   if (ring_db) {
     bnxt_ring_doorbell(bnxt_sq.tail);
@@ -425,7 +425,7 @@ __device__ uint64_t QueuePair::bnxt_post_wqe_amo_single(uintptr_t raddr,
   lock(&bnxt_sq.lock);
 
   /* Write WQE to SQ */
-  atomic_idx = bnxt_write_amo_wqe(raddr, opcode, atomic_data, atomic_cmp, fetching, keys[0].rkey);
+  atomic_idx = bnxt_write_amo_wqe(raddr, opcode, atomic_data, atomic_cmp, fetching, rkey);
 
   bnxt_ring_doorbell(bnxt_sq.tail);
 

@@ -311,7 +311,7 @@ __device__ void QueuePair::mlx5_post_wqe_rma_single(int32_t length, uintptr_t la
 
   // construct the WQE on the stack
   gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, MLX5_WQE_CTRL_CQ_UPDATE,
-                   raddr, keys[0].rkey, laddr, get_lkey(laddr), static_cast<uint32_t>(length), send_inline};
+                   raddr, rkey, laddr, get_lkey(laddr), static_cast<uint32_t>(length), send_inline};
 
   // copy to SQ
   mlx5_sq.buf[sq_idx] = wqe;
@@ -407,7 +407,7 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo_single([[maybe_unused]] int32_t
 
   // construct the WQE on the stack
   gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, MLX5_WQE_CTRL_CQ_UPDATE,
-                   raddr, keys[0].rkey,  // single path: always heap
+                   raddr, rkey,  // single path: always heap
                    static_cast<uint64_t>(atomic_data), static_cast<uint64_t>(atomic_cmp),
                    reinterpret_cast<uintptr_t>(atomic_laddr), atomic_lkey};
 
