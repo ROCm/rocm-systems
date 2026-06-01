@@ -199,14 +199,6 @@ if(BUILD_TESTS)
     ../src/misc/latency_profiler/CollTraceUtils.cc
     )
 
-  # _RecorderTests.cpp uses RcclMockFuncs.hpp which defines ncclDebugLog and getHostName as
-  # non-weak stubs. With a shared library these override the library symbols at runtime, but
-  # with a static library the linker sees duplicate definitions and errors out. Exclude from
-  # static builds.
-  if(BUILD_SHARED_LIBS)
-    list(APPEND TEST_SOURCE_FILES _RecorderTests.cpp)
-  endif()
-
   # Due to default hidden symbol visibility, append source file if build type is not Debug.
   # It requires explicit addition of the following source file(s)
   # to the unit tests to ensure it is included for the existing rccl-UnitTests execution
@@ -270,6 +262,7 @@ if(BUILD_TESTS)
       RcclWrapTests.cpp
       TransportTests.cpp
       TimeoutTests.cpp
+      _RecorderTests.cpp
       mem_manager/MemManagerTests.cpp
       graph/XmlTests.cpp
       graph/NetDevsPolicyP2pNetTests.cpp
@@ -437,7 +430,8 @@ if(BUILD_TESTS)
         endif()
     endif()
 
-    if(ROCM_VERSION VERSION_GREATER_EQUAL "60400" AND CMAKE_BUILD_TYPE MATCHES "Debug")
+    if(ROCM_VERSION VERSION_GREATER_EQUAL "60400" AND
+        (CMAKE_BUILD_TYPE MATCHES "Debug" OR NOT BUILD_SHARED_LIBS))
         set(_rccl_test_categories_fixtures_debug_yaml "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_fixtures_debug.yaml")
         if(EXISTS "${_rccl_test_categories_fixtures_debug_yaml}")
             message(STATUS "Applying test categories for rccl-UnitTestsFixturesDebug")
@@ -450,7 +444,9 @@ if(BUILD_TESTS)
         else()
             message(WARNING "Skipping test categories for rccl-UnitTestsFixturesDebug: missing ${_rccl_test_categories_fixtures_debug_yaml}")
         endif()
+    endif()
 
+    if(ROCM_VERSION VERSION_GREATER_EQUAL "60400" AND CMAKE_BUILD_TYPE MATCHES "Debug")
         set(_rccl_test_categories_altrsmi_yaml "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_altrsmi.yaml")
         if(EXISTS "${_rccl_test_categories_altrsmi_yaml}")
             message(STATUS "Applying test categories for rccl-UnitTestsAltRsmi")

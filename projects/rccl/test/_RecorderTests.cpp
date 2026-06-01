@@ -7,7 +7,6 @@
 #include <gtest/gtest.h>
 #include <rccl/rccl.h>
 
-#include "RcclMockFuncs.hpp"
 #include "comm.h"
 #include "common/ProcessIsolatedTestRunner.hpp"
 
