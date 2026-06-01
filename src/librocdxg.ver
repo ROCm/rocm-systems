@@ -103,6 +103,8 @@ hsaKmtMemoryVaUnmap;
 hsaKmtMemHandleFree;
 hsaKmtMemoryGetCpuAddr;
 hsaKmtMemoryCpuMap;
+hsaKmtImportExternalSemaphore;
+hsaKmtDestroyExternalSemaphore;
 DxgAbiCheck;
 amdgpu_device_initialize;
 amdgpu_device_deinitialize;
