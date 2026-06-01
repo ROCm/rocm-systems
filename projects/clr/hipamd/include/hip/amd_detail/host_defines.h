@@ -344,7 +344,7 @@ struct NumericLimits<unsigned long long> {
 template <>
 struct NumericLimits<float> {
     static constexpr float maximum()    { return __builtin_bit_cast(float, 0x7F7FFFFF); }
-    static constexpr float lowest() { return __builtin_bit_cast(float, 0x80800001); }
+    static constexpr float lowest() { return __builtin_bit_cast(float, 0xFF7FFFFF); }
 };
 
 template <>
