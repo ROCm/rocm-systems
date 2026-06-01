@@ -804,7 +804,12 @@ __host__ int rocshmem_team_split_2d(rocshmem_team_t parent_team, int xrange, con
 {
   *yaxis_team = ROCSHMEM_TEAM_INVALID;
   *xaxis_team = ROCSHMEM_TEAM_INVALID;
-  
+
+  if (parent_team == ROCSHMEM_TEAM_INVALID) {
+      LOG_ERROR("Parent team is invaid");
+      return ROCSHMEM_ERROR;
+    }
+
   Team *parent_team_obj = get_internal_team(parent_team);
   const int parent_size = parent_team_obj->num_pes;
 
