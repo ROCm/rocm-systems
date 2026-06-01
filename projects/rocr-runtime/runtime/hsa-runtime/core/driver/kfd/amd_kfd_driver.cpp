@@ -455,20 +455,29 @@ hsa_status_t KfdDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
 }
 
 hsa_status_t KfdDriver::ExportMemoryHandle(const core::Agent& agent, const core::DriverMemoryHandle& handle,
-                                           core::ShareType type, uint32_t flags,
-                                           void* export_handle) {
-  (void)flags;
+                                           core::ShareType type, uint32_t flags, void* export_handle,
+                                           uint64_t* export_offset) {
   if (export_handle == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   switch (type) {
   case core::ShareType::DMABUF_FD: {
     auto* dmabuf_fd = static_cast<int*>(export_handle);
+    if (flags & core::EXPORT_MEMORY_FLAGS_KFD_DMABUF) {
+      if (export_offset == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      void* mem = reinterpret_cast<void*>(handle.handle);
+      if (HSAKMT_CALL(hsaKmtExportDMABufHandle(mem, handle.size, dmabuf_fd, export_offset)) !=
+          HSAKMT_STATUS_SUCCESS) {
+        return HSA_STATUS_ERROR;
+      }
+      return HSA_STATUS_SUCCESS;
+    }
 #if defined(__linux__)
     if (handle.dmabuf_fd != -1) {
       *dmabuf_fd = handle.dmabuf_fd;
       return HSA_STATUS_SUCCESS;
     }
 #endif
+    (void)export_offset;
     const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
 
     HsaHandleExportDesc desc = {};
@@ -487,6 +496,7 @@ hsa_status_t KfdDriver::ExportMemoryHandle(const core::Agent& agent, const core:
     return HSA_STATUS_SUCCESS;
   }
   case core::ShareType::FABRIC_HANDLE: {
+    (void)export_offset;
 #if !defined(__linux__)
     assert(!"Unimplemented!");
     return HSA_STATUS_ERROR;
@@ -608,15 +618,19 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
   int source_fd = -1;
 
   /*
-   * On Linux, when using KFD we need to create the memory allocation using the KFD interface
-   * (hsaKmtExportDMABufHandle) so that the KFD section of AMDGPU drivers has an entry for the BO.
-   * When then import the BO into the DRM interface so that we can use the IOCTLs from the DRM
-   * section of AMDGPU drivers.
-   * On Windows, the hsaKmtExportDMABufHandle and ExportMemoryHandle functions do the same thing.
+   * On Linux, export via KFD first (EXPORT_MEMORY_FLAGS_KFD_DMABUF) so the KFD section of the
+   * AMDGPU driver has a BO entry, then import into DRM. Re-export from DRM for the shareable fd.
+   * On Windows, KFD export and DRM export are equivalent.
    */
 
-  if (HSAKMT_CALL(hsaKmtExportDMABufHandle(mem, size, &source_fd, offset)) != HSAKMT_STATUS_SUCCESS)
+  core::DriverMemoryHandle kfd_alloc = {};
+  kfd_alloc.handle = reinterpret_cast<uint64_t>(mem);
+  kfd_alloc.size = size;
+  if (ExportMemoryHandle(agent, kfd_alloc, core::ShareType::DMABUF_FD,
+                         core::EXPORT_MEMORY_FLAGS_KFD_DMABUF, &source_fd, offset) !=
+      HSA_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
+  }
 
   core::DriverMemoryHandle targetHandle = {};
   hsa_status_t ret = ImportMemoryHandle(agent, &targetHandle, core::ShareType::DMABUF_FD,
