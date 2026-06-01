@@ -23,6 +23,7 @@
 #include "metrics.hpp"
 #include "id_decode.hpp"
 
+#include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
@@ -285,10 +286,12 @@ locateMetricsFile(std::string_view name)
     auto metric_env_path = std::string{"not set"};
 
     // 1) Try env var
-    if(const char* env = std::getenv("ROCPROFILER_METRICS_PATH"))
+    auto env = common::get_env_optional("ROCPROFILER_METRICS_PATH");
+    if(env)
     {
-        metric_env_path = env;
-        auto env_paths = sdk::parse::tokenize<std::vector<std::string>>(env, std::string_view{":"});
+        metric_env_path = *env;
+        auto env_paths =
+            sdk::parse::tokenize<std::vector<std::string>>(*env, std::string_view{":"});
         for(const auto& path : env_paths)
         {
             fs::path candidate = fs::path{path} / std::string{name};
@@ -298,7 +301,7 @@ locateMetricsFile(std::string_view name)
                 return candidate.string();
             }
         }
-        ROCP_INFO << name << " not found at ROCPROFILER_METRICS_PATH (" << env
+        ROCP_INFO << name << " not found at ROCPROFILER_METRICS_PATH (" << *env
                   << "). Falling back to install path.";
     }
 
