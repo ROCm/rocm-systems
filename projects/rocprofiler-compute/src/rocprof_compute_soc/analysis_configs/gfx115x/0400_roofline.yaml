@@ -19,7 +19,6 @@ Panel Config:
         value: Value
         unit: Unit
         peak: Peak (Empirical)
-        pop: Pct of Peak
       metric:
         # Note: RDNA 3.5 counters cannot differentiate FP16/FP32; uses aggregate VALU counter.
         VALU FLOPs:
