@@ -2671,6 +2671,148 @@ template <typename Inst>
   return false;
 }
 
+/// VOP3P integer dot-product SIMD fast path (v_dot4_i32_i8 / v_dot4_u32_u8 /
+/// v_dot8_i32_i4 / v_dot8_u32_u4 / v_dot2_i32_i16 / v_dot2_u32_u16). Unlike
+/// the packed-16 family the destination is a single 32-bit lane (NOT packed)
+/// and src2 is a per-lane accumulator; the dot reduction happens *within*
+/// each lane, so the fast path vectorizes across lanes (each lane computes
+/// its own reduction). ElemBits selects the sub-word width (16/8/4 -> 2/4/8
+/// products per lane); Signed selects sign- vs zero-extension and, for the
+/// signed forms when inst.clamp is set, a lower clamp to 0 — the scalar
+/// std::clamp(sum, 0, INT_MAX) on an int32 sum is just max(sum, 0). The
+/// unsigned scalar bodies have NO clamp branch, so the unsigned fast path
+/// ignores the clamp bit entirely. Signed accumulation runs in the int32
+/// domain (matching the scalar body and the pk_mad_i16 precedent); unsigned
+/// in uint32. For the 16-bit forms op_sel / op_sel_hi pick the source halves,
+/// so the fast path gates on the default packing (op_sel == 0, op_sel_hi == 3)
+/// and bails otherwise; the 8/4-bit scalar bodies ignore op_sel so no gate is
+/// needed there.
+template <int ElemBits, bool Signed, typename Inst>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_vop3p_dot_int_simd(Inst &inst, Wavefront &wf) {
+  static_assert(ElemBits == 16 || ElemBits == 8 || ElemBits == 4, "dot ElemBits must be 16/8/4");
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+    return false;
+  if constexpr (ElemBits == 16) {
+    if (inst.inst_.op_sel != 0u || inst.inst_.op_sel_hi != 3u)
+      return false;
+  }
+  constexpr int N = 32 / ElemBits;
+  constexpr uint32_t kElemMask = (ElemBits == 16) ? 0xFFFFu : (ElemBits == 8) ? 0xFFu : 0xFu;
+  constexpr int kShift = 32 - ElemBits;
+  using T = uint32_t;
+  constexpr std::size_t W = util::native_width_v<T>;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  const bool clamp = inst.inst_.clamp;
+  using U = util::native<uint32_t>;
+  using I = util::native<int32_t>;
+  const I kZeroI(0);
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const U raw0 = read_simd<uint32_t>(inst.src0, wf, base);
+    const U raw1 = read_simd<uint32_t>(inst.src1, wf, base);
+    const U acc = read_simd<uint32_t>(inst.src2, wf, base);
+    if constexpr (Signed) {
+      I sum = std::bit_cast<I>(acc);
+      for (int i = 0; i < N; ++i) {
+        const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
+        const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
+        const I a = (util::stdx::static_simd_cast<I>(ea) << kShift) >> kShift;
+        const I b = (util::stdx::static_simd_cast<I>(eb) << kShift) >> kShift;
+        sum += a * b;
+      }
+      if (clamp)
+        util::stdx::where(sum < kZeroI, sum) = kZeroI;
+      write_simd<uint32_t>(inst.vdst, wf, base, std::bit_cast<U>(sum), chunk);
+    } else {
+      U sum = acc;
+      for (int i = 0; i < N; ++i) {
+        const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
+        const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
+        sum += ea * eb;
+      }
+      write_simd<uint32_t>(inst.vdst, wf, base, sum, chunk);
+    }
+  }
+  return true;
+}
+
+template <int ElemBits, bool Signed, typename Inst>
+[[nodiscard]] inline bool try_execute_vop3p_dot_int_simd(Inst &, Wavefront &) {
+  return false;
+}
+
+/// VOP3P v_dot2_f32_f16 SIMD fast path. Two f16 products plus an f32
+/// accumulator collapse into a single f32 lane: result = a0*b0 + a1*b1 + acc
+/// (plain `*` / `+`, left-to-right — matching the scalar, NOT a contracted
+/// fma). op_sel / op_sel_hi pick the f16 halves of src0/src1 (gated to the
+/// default packing op_sel == 0 && op_sel_hi == 3); neg / neg_hi flip the
+/// src0/src1 product-operand signs and neg bit 2 flips the accumulator.
+/// Optional clamp to [0, 1]. NaN-input payload divergence accepted (same
+/// carve-out as the pk_fma slices).
+template <typename Inst>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_vop3p_dot_f16_simd(Inst &inst, Wavefront &wf) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+    return false;
+  if (inst.inst_.op_sel != 0u || inst.inst_.op_sel_hi != 3u)
+    return false;
+  using T = uint32_t;
+  constexpr std::size_t W = util::native_width_v<T>;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  const bool clamp = inst.inst_.clamp;
+  using F = util::native<float>;
+  using U = util::native<uint32_t>;
+  const F kZero(0.0f);
+  const F kOne(1.0f);
+  const U kSignBit(0x80000000u);
+  const bool neg_a0 = inst.inst_.neg & 1u;
+  const bool neg_b0 = inst.inst_.neg & 2u;
+  const bool neg_acc = inst.inst_.neg & 4u;
+  const bool neg_a1 = inst.inst_.neg_hi & 1u;
+  const bool neg_b1 = inst.inst_.neg_hi & 2u;
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const U raw0 = read_simd<uint32_t>(inst.src0, wf, base);
+    const U raw1 = read_simd<uint32_t>(inst.src1, wf, base);
+    F acc = read_simd<float>(inst.src2, wf, base);
+    F a0 = util::f16_to_f32_simd(raw0 & 0xFFFFu);
+    F a1 = util::f16_to_f32_simd(raw0 >> 16);
+    F b0 = util::f16_to_f32_simd(raw1 & 0xFFFFu);
+    F b1 = util::f16_to_f32_simd(raw1 >> 16);
+    if (neg_a0)
+      a0 = std::bit_cast<F>(std::bit_cast<U>(a0) ^ kSignBit);
+    if (neg_b0)
+      b0 = std::bit_cast<F>(std::bit_cast<U>(b0) ^ kSignBit);
+    if (neg_a1)
+      a1 = std::bit_cast<F>(std::bit_cast<U>(a1) ^ kSignBit);
+    if (neg_b1)
+      b1 = std::bit_cast<F>(std::bit_cast<U>(b1) ^ kSignBit);
+    if (neg_acc)
+      acc = std::bit_cast<F>(std::bit_cast<U>(acc) ^ kSignBit);
+    F r = a0 * b0 + a1 * b1 + acc;
+    if (clamp) {
+      util::stdx::where(r < kZero, r) = kZero;
+      util::stdx::where(r > kOne, r) = kOne;
+    }
+    write_simd<float>(inst.vdst, wf, base, r, chunk);
+  }
+  return true;
+}
+
+template <typename Inst>
+[[nodiscard]] inline bool try_execute_vop3p_dot_f16_simd(Inst &, Wavefront &) {
+  return false;
+}
+
 } // namespace amdgpu
 } // namespace rocjitsu
 
@@ -2998,6 +3140,17 @@ template <typename Inst>
 /// VOP3P v_pk_mov_b32 probe. Functorless / fixed-op.
 #define ROCJITSU_TRY_SIMD_VOP3P_MOV_B32()                                                          \
   if (::rocjitsu::amdgpu::try_execute_vop3p_mov_b32_simd(inst, wf))                                \
+  return
+
+/// VOP3P integer dot-product probe. Args: (ElemBits, Signed) — e.g.
+/// (8, true) for v_dot4_i32_i8, (4, false) for v_dot8_u32_u4. Functorless.
+#define ROCJITSU_TRY_SIMD_VOP3P_DOT_INT(...)                                                       \
+  if (::rocjitsu::amdgpu::try_execute_vop3p_dot_int_simd<__VA_ARGS__>(inst, wf))                   \
+  return
+
+/// VOP3P v_dot2_f32_f16 probe. Functorless / fixed-op.
+#define ROCJITSU_TRY_SIMD_VOP3P_DOT_F16()                                                          \
+  if (::rocjitsu::amdgpu::try_execute_vop3p_dot_f16_simd(inst, wf))                                \
   return
 
 #endif // ROCJITSU_ISA_AMDGPU_SHARED_SIMD_GLUE_H_
