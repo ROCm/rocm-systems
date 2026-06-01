@@ -123,6 +123,10 @@ static ncclResult_t rcclDirectAllGather(const void* sendbuff, void* recvbuff, si
 RCCL_PARAM(HierarchicalAllGather, "HIERARCHICAL_ALLGATHER", 0);
 RCCL_PARAM(DdaEnable, "DDA_ENABLE", 1);
 
+// Defined via NCCL_PARAM in enqueue.cc; declared extern here so the DDA fast
+// path can fall back to ncclEnqueueCheck when implicit launch ordering is on.
+extern int64_t ncclParamLaunchOrderImplicit();
+
 static bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize) {
   if (comm->nNodes < 8) return false;
   if (rcclParamHierarchicalAllGather() != 1) return false;
@@ -393,7 +397,7 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
      ddaThreshold = 0;	
   }
 
-  if (rcclParamDdaEnable() && (count * ncclTypeSize(datatype) <= ddaThreshold) && (ddaThreshold > 0) && ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op) && ncclGroupDepth == 0) {
+  if (!ncclParamLaunchOrderImplicit() && rcclParamDdaEnable() && (count * ncclTypeSize(datatype) <= ddaThreshold) && (ddaThreshold > 0) && ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op) && ncclGroupDepth == 0) {
     NCCLCHECK(ncclAllReduceDdaIpc(
         sendbuff,
         recvbuff,
