@@ -307,6 +307,8 @@ _VOP3_UNARY_SKIP = {
     "v_mov_b16",
     "v_frexp_exp_i32_f32",
     "v_frexp_exp_i32_f64",
+    "v_frexp_mant_f16",
+    "v_frexp_exp_i16_f16",
 }
 
 SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
@@ -446,6 +448,30 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         "uint32_t",
         "uint32_t",
         "[](auto a) { return util::frexp_exp_f32_simd(a); }",
+    ),
+    # frexp f16: the scalar widens src to f32, runs std::frexp, then narrows the
+    # mantissa (or float(exp)) back to f16 via f32_to_f16. Compose the bit-exact
+    # f16<->f32 ports with the f32 frexp helpers; the f16<->f32 round trips and
+    # frexp are each bit-identical, so the composition matches. The VOP3 twins
+    # carry omod/clamp around that round trip (not reproduced) -> _VOP3_UNARY_SKIP.
+    "v_frexp_mant_f16_vop1": (
+        "uint32_t",
+        "uint32_t",
+        "[](auto a) {"
+        " return util::f32_to_f16_simd(util::frexp_mant_f32_simd("
+        "std::bit_cast<util::native<uint32_t>>(util::f16_to_f32_simd(a)))); }",
+    ),
+    "v_frexp_exp_i16_f16_vop1": (
+        "uint32_t",
+        "uint32_t",
+        # The scalar narrows `static_cast<uint32_t>(exp)` to f16 -- the int->float
+        # conversion is UNSIGNED, so a negative exponent (0xFFFF_FFxx) becomes a
+        # ~4.29e9 float and f32_to_f16 saturates it to +Inf (0x7C00). Mirror that
+        # with an unsigned static_simd_cast (no signed intermediate).
+        "[](auto a) {"
+        " auto e = util::frexp_exp_f32_simd("
+        "std::bit_cast<util::native<uint32_t>>(util::f16_to_f32_simd(a)));"
+        " return util::f32_to_f16_simd(util::stdx::static_simd_cast<util::native<float>>(e)); }",
     ),
     # --- f8 -> f32 (E4M3 / E5M2 8-bit float expand) ----------------------------
     # Scalar reads the low byte of src0 and expands via util::fp8_e4m3_to_f32 /

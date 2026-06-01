@@ -192,6 +192,9 @@ const Vop1Case kCases[] = {
     // cover ±0 / denormal / Inf / NaN / normal, where frexp's special cases live.
     {"v_frexp_exp_i32_f32", 51},
     {"v_frexp_mant_f32", 52},
+    // frexp f16 (f16<->f32 round trip): mantissa / exponent narrowed to f16.
+    {"v_frexp_mant_f16", 66},
+    {"v_frexp_exp_i16_f16", 67},
 };
 
 void check_case(const Vop1Case &c, uint64_t exec) {
