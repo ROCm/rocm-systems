@@ -146,6 +146,12 @@ Approximate XCC/XCD count using HSA:
 
     printf("Approx compute partitions: %d\n", gpu_agent_count);
 
+Take MI300X as an example, the out put will be:
+
+.. code-block:: cpp
+
+    Approx compute partitions: 8
+
 Interpretation:
 
 - CPX mode: one agent ≈ one XCC
