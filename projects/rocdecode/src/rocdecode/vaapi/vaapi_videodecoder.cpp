@@ -723,6 +723,21 @@ rocDecStatus VaContext::GetVaContext(int device_id, uint32_t *va_ctx_id) {
         std::string drm_node = "/dev/dri/renderD";
         int render_node_id = (gpu_uuids_to_render_nodes_map_.find(gpu_uuid) != gpu_uuids_to_render_nodes_map_.end()) ? gpu_uuids_to_render_nodes_map_[gpu_uuid] : 128;
         drm_node += std::to_string(render_node_id + offset);
+
+        if (g_rocdec_logger.GetLogLevel() >= kRocDecLogInfo) {
+            std::ostringstream oss;
+            oss << '{';
+            bool first = true;
+            for (const auto& entry : gpu_uuids_to_render_nodes_map_) {
+                if (!first) oss << ", ";
+                oss << entry.first << ": " << entry.second;
+                first = false;
+            }
+            oss << '}';
+            InfoLog(g_rocdec_logger, "gpu_uuids_to_render_nodes_map_: " + oss.str());
+            InfoLog(g_rocdec_logger, "Selected GPU UUID: " + gpu_uuid);
+        }
+
         rocdec_status = InitVAAPI(va_ctx_idx, drm_node);
         if (rocdec_status != ROCDEC_SUCCESS) {
             CriticalLog(g_rocdec_logger, "Failed to initialize the VAAPI.");
@@ -1019,9 +1034,10 @@ rocDecStatus VaContext::InitHIP(int device_id, hipDeviceProp_t& hip_dev_prop) {
 
 rocDecStatus VaContext::InitVAAPI(int va_ctx_idx, std::string drm_node) {
     FunctionEntryLog(g_rocdec_logger);
+    InfoLog(g_rocdec_logger, "Opening DRM node: " + drm_node);
     va_contexts_[va_ctx_idx].drm_fd = open(drm_node.c_str(), O_RDWR);
     if (va_contexts_[va_ctx_idx].drm_fd < 0) {
-        CriticalLog(g_rocdec_logger, "Failed to open drm node." + drm_node);
+        CriticalLog(g_rocdec_logger, "Failed to open drm node: " + drm_node);
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_NOT_INITIALIZED;
     }

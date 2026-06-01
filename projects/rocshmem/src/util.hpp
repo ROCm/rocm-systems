@@ -390,7 +390,15 @@ __device__ __forceinline__ bool is_last_active_lane() {
 #define LOAD(VAR) __atomic_load_n((VAR), __ATOMIC_SEQ_CST)
 #define STORE(DST, SRC) __atomic_store_n((DST), (SRC), __ATOMIC_SEQ_CST)
 
-enum class MemcpyKind { Put, Get };
+enum class MemcpyKind { Put, Get, PutBlocking, GetBlocking };
+
+constexpr bool is_put(MemcpyKind k) {
+  return k == MemcpyKind::Put || k == MemcpyKind::PutBlocking;
+}
+
+constexpr bool is_blocking(MemcpyKind k) {
+  return k == MemcpyKind::PutBlocking || k == MemcpyKind::GetBlocking;
+}
 
 template <MemcpyKind Kind = MemcpyKind::Put>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_lane(void* dst, void* src, size_t size) {
@@ -399,7 +407,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
 
   for (size_t i = 16; i >= 1; i >>= 1) {
     while (size >= i) {
-      if constexpr (Kind == MemcpyKind::Put) {
+      if constexpr (is_put(Kind)) {
         put_asm(src_bytes, dst_bytes, i);
       } else {
         get_asm(src_bytes, dst_bytes, i);
@@ -437,7 +445,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
       src_bytes += i * j;
       dst_bytes += i * j;
 
-      if constexpr (Kind == MemcpyKind::Put) {
+      if constexpr (is_put(Kind)) {
         put_asm(src_bytes, dst_bytes, j);
       } else {
         get_asm(src_bytes, dst_bytes, j);
@@ -474,7 +482,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
       src_bytes += i * j;
       dst_bytes += i * j;
 
-      if constexpr (Kind == MemcpyKind::Put) {
+      if constexpr (is_put(Kind)) {
         put_asm(src_bytes, dst_bytes, j);
       } else {
         get_asm(src_bytes, dst_bytes, j);
@@ -484,6 +492,18 @@ template <MemcpyKind Kind = MemcpyKind::Put>
     dst_def += cpy_size * j;
     src_def += cpy_size * j;
   }
+}
+
+/* Is ptr_b in range [ptr_a, ptr_a + len_a) */
+[[maybe_unused]]
+__host__ __device__ static bool
+is_ptr_in_range(uintptr_t ptr_a, size_t len_a, uintptr_t ptr_b) {
+
+  if ((len_a == 0) || (ptr_b < ptr_a)) {
+    return false;
+  }
+
+  return static_cast<size_t>(ptr_b - ptr_a) < len_a;
 }
 
 int rocm_init();

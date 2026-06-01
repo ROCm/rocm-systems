@@ -335,6 +335,9 @@ std::string
 get_sampling_gpus();
 
 std::string
+get_gpu_perf_counters();
+
+std::string
 get_sampling_ainics();
 
 bool
@@ -361,7 +364,10 @@ get_kill_delay();
 namespace output_filtering
 {
 bool
-is_output_enabled_for_current_mpi_rank();
+is_file_output_enabled_for_current_mpi_rank();
+
+bool
+is_log_output_enabled_for_current_mpi_rank();
 }  // namespace output_filtering
 
 std::string
@@ -374,10 +380,20 @@ void
 reset_database_path_memo();
 
 std::string
+get_output_absolute_path(std::string_view basename, std::string_view extension,
+                         std::string_view tag, std::string_view dir);
+
+std::string
 get_perfetto_output_filename_with_suffix(std::string_view suffix = "");
+
+std::string
+get_ump_absolute_path();
 
 bool&
 get_use_rocpd() ROCPROFSYS_HOT;
+
+bool&
+get_use_unified_memory_profiling() ROCPROFSYS_HOT;
 
 bool&
 get_caching_perfetto() ROCPROFSYS_HOT;

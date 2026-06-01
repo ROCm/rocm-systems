@@ -3777,6 +3777,17 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 71
+    - name: SQ_INSTS_DUAL_VALU_WAVE32
+      description: Number of dual VALU (VOPD) instructions issued in wave32 mode. {emulated}
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQ
+          event: 178
     - name: SQ_INSTS_EXP_GDS
       description: Total number of EXPORT or GDS (global wave state) instructions issued. When used 
         in combination with SQ_ACTIVE_INST_EXP_GDS (cycle count for executing instructions) the 

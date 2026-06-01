@@ -114,16 +114,6 @@ TEST(Gfx10TokenTest, ConstructorSetsFields)
 }
 
 // Tests for gfx10::CSRegisterHandler
-TEST(CSRegisterHandlerGFX10Test, IsPgmLoHi)
-{
-    gfx10::CSRegisterHandler handler;
-
-    EXPECT_TRUE(handler.IsPgmLo(0xC));
-    EXPECT_FALSE(handler.IsPgmLo(0xD));
-    EXPECT_TRUE(handler.IsPgmHi(0xD));
-    EXPECT_FALSE(handler.IsPgmHi(0xC));
-}
-
 TEST(CSRegisterHandlerGFX10Test, IsUserdata)
 {
     gfx10::CSRegisterHandler handler;

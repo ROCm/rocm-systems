@@ -912,7 +912,14 @@ bool Buffer::create(bool alloc_local) {
     auto ext_memory = interop->asExternalMemory();
     amd::GLObject* glObject = interop->asGLObject();
     if (ext_memory != nullptr) {
-      return interopMapBuffer(ext_memory->Handle()) == HSA_STATUS_SUCCESS;
+      // Win32-KMT handles need ROCR's KMT branch in libhsakmt; the default
+      // (no flag) takes the NT path and fails with STATUS_INVALID_HANDLE.
+      hsa_interop_map_flag_t map_flags = HSA_INTEROP_MAP_FLAG_NONE;
+      if (ext_memory->Type() == amd::ExternalMemory::HandleType::OpaqueWin32Kmt ||
+          ext_memory->Type() == amd::ExternalMemory::HandleType::D3D11ResourceKmt) {
+        map_flags = HSA_INTEROP_MAP_FLAG_KMT_HANDLE;
+      }
+      return interopMapBuffer(ext_memory->Handle(), map_flags) == HSA_STATUS_SUCCESS;
     } else if (glObject != nullptr) {
       return createInteropBuffer(GL_ARRAY_BUFFER, 0);
     }
