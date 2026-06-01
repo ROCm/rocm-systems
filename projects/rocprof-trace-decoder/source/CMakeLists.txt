@@ -12,10 +12,6 @@ if(NOT DEFINED VERSION_PATCH)
     set(VERSION_PATCH 7)
 endif()
 
-# C is needed for LLVMConfig.cmake's check_c_source_compiles probes
-# (FindFFI/FindTerminfo). C++20 is needed for designated initializers in
-# trace_parser.hpp (MSVC enforces /std:c++20). Both are no-ops when the
-# parent project already enabled them.
 project(
     rocprof-trace-decoder
     VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}
@@ -51,9 +47,7 @@ endif()
 include(CMakePackageConfigHelpers)
 find_package(Threads REQUIRED)
 
-if(MSVC)
-    add_compile_options($<$<CONFIG:Release>:/O2>)
-else()
+if(NOT MSVC)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=hidden")
     set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -O3")
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
@@ -269,7 +263,11 @@ target_link_libraries(
     rocprof-trace-decoder-static
     PRIVATE Threads::Threads
     PUBLIC ${TTD_DISASM_LINK_LIBS})
-set_target_properties(rocprof-trace-decoder-static PROPERTIES OUTPUT_NAME rocprof-trace-decoder
+set(_td_static_output_name rocprof-trace-decoder)
+if(WIN32)
+    set(_td_static_output_name rocprof-trace-decoder-static)
+endif()
+set_target_properties(rocprof-trace-decoder-static PROPERTIES OUTPUT_NAME ${_td_static_output_name}
                                                               ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 
 # --- Sanitized shared library (test-only, not installed) ---
@@ -299,6 +297,7 @@ endif()
 install(
     TARGETS rocprof-trace-decoder
     EXPORT rocprof-trace-decoder-targets
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT runtime
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT devel)
 
