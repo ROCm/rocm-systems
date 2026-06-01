@@ -495,6 +495,26 @@ def test_repro_issue_12345(...):
     ...</code></pre>
       <p><strong>CI policy:</strong> misc opt-in for comprehensive/full; tmp developer-only unless promoted. <code>@pytest.mark.misc</code> bridges to <code>type(misc)</code>.</p>
 
+      <h3>Design — Section 4.3: Execution modes &amp; analyze surfaces (profile / CLI / TUI)</h3>
+      <p>Two top-level <strong>phases</strong> (<code>profile</code>, <code>analyze</code>) and analyze <strong>surfaces</strong> (<code>cli</code>, <code>tui</code>, <code>db</code>, legacy <code>webui</code>). Filter by markers — do <strong>not</strong> duplicate the entire suite per mode.</p>
+      <table>
+        <thead><tr><th>Dimension</th><th>Values</th><th>When</th></tr></thead>
+        <tbody>
+          <tr><td><code>phase</code></td><td><code>profile</code>, <code>analyze</code></td><td>Tests exercising a rocprof-compute mode</td></tr>
+          <tr><td><code>surface</code></td><td><code>cli</code>, <code>tui</code>, <code>db</code>, <code>webui</code></td><td>Analyze presentation; omit for pure profile capture</td></tr>
+        </tbody>
+      </table>
+      <p><strong>Surface policy:</strong> CLI + TUI official; web-ui maintenance-only (no new tests); DB tagged <code>surface(db)</code>.</p>
+      <p><strong>TUI three layers:</strong></p>
+      <ul>
+        <li><code>tests/unit/rocprof_compute_tui/</code> — widget/util unit tests (today's <code>test_tui_components.py</code>)</li>
+        <li><code>tests/integration/analyze/tui/</code> — Textual Pilot smoke tests (<code>standard</code> tier)</li>
+        <li><code>tests/functional/analyze/tui/</code> — E2E with fixture workloads (<code>comprehensive</code>+)</li>
+      </ul>
+      <pre><code>pytest -m "phase(analyze) and surface(cli)"
+pytest -m "surface(tui) and type(unit)"
+pytest -m "not surface(webui)"</code></pre>
+
       <h3>Design — Section 5: CTest / PTest / GoogleTest</h3>
       <p><strong>Primary harness</strong></p>
       <ul>
@@ -525,6 +545,7 @@ def test_repro_issue_12345(...):
           <tr><td><strong>Unit</strong></td><td>Phase 1 (MVP)</td><td>Show mirror-<code>src/</code> layout, unit conftest, <code>type</code> marker, no GPU</td><td><code>tests/unit/.../test_&lt;module&gt;.py</code></td></tr>
           <tr><td><strong>Integration</strong></td><td>Phase 1 (MVP)</td><td>Show feature file, integration conftest, CLI/GPU fixtures</td><td><code>tests/integration/test_&lt;feature&gt;.py</code></td></tr>
           <tr><td><strong>Misc / ad-hoc</strong></td><td>Phase 1 (MVP)</td><td>Unclassified or scratch; <code>type(misc)</code>, optional <code>lifecycle(tmp)</code></td><td><code>tests/misc/</code></td></tr>
+          <tr><td><strong>TUI (unit layer)</strong></td><td>Phase 1 (MVP)</td><td>Widget/util; <code>phase(analyze)</code>, <code>surface(tui)</code></td><td><code>tests/unit/rocprof_compute_tui/</code></td></tr>
           <tr><td><strong>Functional</strong></td><td>Phase 2+</td><td>Golden workload / output validation pattern</td><td><code>tests/integration/</code> or future <code>tests/functional/</code></td></tr>
           <tr><td><strong>Performance / pressure</strong></td><td>Phase 2+</td><td>Baseline comparison or sustained-load pattern</td><td>future <code>tests/performance/</code> or marked integration</td></tr>
         </tbody>
@@ -588,6 +609,8 @@ def test_repro_issue_12345(...):
         <li>Decide whether <strong>docker/k8s</strong> functional tests belong in <code>comprehensive</code>/<code>full</code> only with env-gated CI lanes.</li>
         <li>Agree to <strong>migrate ad-hoc markers</strong> (<code>torch_trace</code>, <code>torch_ops</code>) when classification is known; <strong>misc/tmp remain permanent escape hatches</strong> (§4.2).</li>
         <li>Confirm <strong>tmp test policy</strong>: max lifetime, owner/docstring requirement, stale-tmp CI gate.</li>
+        <li>Agree on <strong>phase / surface markers</strong> for profile vs analyze and CLI vs TUI (§4.3); web-ui maintenance-only.</li>
+        <li>Confirm <strong>TUI sample tests</strong> for Phase 1: migrate <code>test_tui_components.py</code> to unit layer + one Pilot smoke test.</li>
       </ul>
 
       <div class="footer">Generated for local discussion. Source: internal brainstorming conversation summary.</div>
@@ -976,6 +999,26 @@ def test_repro_issue_12345(...):
     ...</code></pre>
       <p><strong>CI policy:</strong> misc opt-in for comprehensive/full; tmp developer-only unless promoted. <code>@pytest.mark.misc</code> bridges to <code>type(misc)</code>.</p>
 
+      <h3>Design — Section 4.3: Execution modes &amp; analyze surfaces (profile / CLI / TUI)</h3>
+      <p>Two top-level <strong>phases</strong> (<code>profile</code>, <code>analyze</code>) and analyze <strong>surfaces</strong> (<code>cli</code>, <code>tui</code>, <code>db</code>, legacy <code>webui</code>). Filter by markers — do <strong>not</strong> duplicate the entire suite per mode.</p>
+      <table>
+        <thead><tr><th>Dimension</th><th>Values</th><th>When</th></tr></thead>
+        <tbody>
+          <tr><td><code>phase</code></td><td><code>profile</code>, <code>analyze</code></td><td>Tests exercising a rocprof-compute mode</td></tr>
+          <tr><td><code>surface</code></td><td><code>cli</code>, <code>tui</code>, <code>db</code>, <code>webui</code></td><td>Analyze presentation; omit for pure profile capture</td></tr>
+        </tbody>
+      </table>
+      <p><strong>Surface policy:</strong> CLI + TUI official; web-ui maintenance-only (no new tests); DB tagged <code>surface(db)</code>.</p>
+      <p><strong>TUI three layers:</strong></p>
+      <ul>
+        <li><code>tests/unit/rocprof_compute_tui/</code> — widget/util unit tests (today's <code>test_tui_components.py</code>)</li>
+        <li><code>tests/integration/analyze/tui/</code> — Textual Pilot smoke tests (<code>standard</code> tier)</li>
+        <li><code>tests/functional/analyze/tui/</code> — E2E with fixture workloads (<code>comprehensive</code>+)</li>
+      </ul>
+      <pre><code>pytest -m "phase(analyze) and surface(cli)"
+pytest -m "surface(tui) and type(unit)"
+pytest -m "not surface(webui)"</code></pre>
+
       <h3>Design — Section 5: CTest / PTest / GoogleTest</h3>
       <p><strong>Primary harness</strong></p>
       <ul>
@@ -1006,6 +1049,7 @@ def test_repro_issue_12345(...):
           <tr><td><strong>Unit</strong></td><td>Phase 1 (MVP)</td><td>Show mirror-<code>src/</code> layout, unit conftest, <code>type</code> marker, no GPU</td><td><code>tests/unit/.../test_&lt;module&gt;.py</code></td></tr>
           <tr><td><strong>Integration</strong></td><td>Phase 1 (MVP)</td><td>Show feature file, integration conftest, CLI/GPU fixtures</td><td><code>tests/integration/test_&lt;feature&gt;.py</code></td></tr>
           <tr><td><strong>Misc / ad-hoc</strong></td><td>Phase 1 (MVP)</td><td>Unclassified or scratch; <code>type(misc)</code>, optional <code>lifecycle(tmp)</code></td><td><code>tests/misc/</code></td></tr>
+          <tr><td><strong>TUI (unit layer)</strong></td><td>Phase 1 (MVP)</td><td>Widget/util; <code>phase(analyze)</code>, <code>surface(tui)</code></td><td><code>tests/unit/rocprof_compute_tui/</code></td></tr>
           <tr><td><strong>Functional</strong></td><td>Phase 2+</td><td>Golden workload / output validation pattern</td><td><code>tests/integration/</code> or future <code>tests/functional/</code></td></tr>
           <tr><td><strong>Performance / pressure</strong></td><td>Phase 2+</td><td>Baseline comparison or sustained-load pattern</td><td>future <code>tests/performance/</code> or marked integration</td></tr>
         </tbody>
@@ -1069,6 +1113,8 @@ def test_repro_issue_12345(...):
         <li>Decide whether <strong>docker/k8s</strong> functional tests belong in <code>comprehensive</code>/<code>full</code> only with env-gated CI lanes.</li>
         <li>Agree to <strong>migrate ad-hoc markers</strong> (<code>torch_trace</code>, <code>torch_ops</code>) when classification is known; <strong>misc/tmp remain permanent escape hatches</strong> (§4.2).</li>
         <li>Confirm <strong>tmp test policy</strong>: max lifetime, owner/docstring requirement, stale-tmp CI gate.</li>
+        <li>Agree on <strong>phase / surface markers</strong> for profile vs analyze and CLI vs TUI (§4.3); web-ui maintenance-only.</li>
+        <li>Confirm <strong>TUI sample tests</strong> for Phase 1: migrate <code>test_tui_components.py</code> to unit layer + one Pilot smoke test.</li>
       </ul>
 
       <div class="footer">Generated for local discussion. Source: internal brainstorming conversation summary.</div>

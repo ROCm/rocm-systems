@@ -519,6 +519,102 @@ explicitly promoted.
   when classification is known; use `type(misc)` only while still unclassified.
 - Misc/tmp bucket is **permanent** in the framework — it does not go away after migration.
 
+### Design — Section 4.3: Execution modes & analyze surfaces (profile / CLI / TUI)
+
+rocprof-compute has **two top-level execution phases** (`profile`, `analyze`) and **multiple
+analyze presentation surfaces** (`cli`, `tui`, `db`, legacy `web_ui`). Tests should be filterable
+by phase/surface, but we should **not** duplicate the entire suite per mode.
+
+**Recommendation: marker dimensions, not parallel folder trees**
+
+| Dimension | Values | When |
+|-----------|--------|------|
+| `phase` | `profile`, `analyze` | Every test that exercises a rocprof-compute mode |
+| `surface` | `cli`, `tui`, `db`, `webui` | Analyze (and list/db output paths); omit for pure profile capture |
+
+Keep physical layout by **test level** (`unit/`, `integration/`, `functional/`) — not
+`tests/profile/` vs `tests/analyze/` as the primary split. Use markers + selective subfolders
+where it aids discovery.
+
+**Why not separate suites per mode?**
+
+- Most **analyze CLI** logic (metrics, SOC, workloads) is shared; TUI reuses the same data pipeline.
+- Separate CTest entries per mode would explode YAML/tier maintenance without adding coverage.
+- Filters let CI run `phase(analyze) and surface(cli)` for PR tiers and add TUI selectively.
+
+**Analyze surfaces (official vs legacy)**
+
+| Surface | Status | Test policy |
+|---------|--------|-------------|
+| **CLI** (`analyze` default) | Official | Primary integration/functional coverage (`test_analyze_workloads.py`, `test_analyze_commands.py`) |
+| **TUI** (`--tui`) | Official | Layered pyramid below; keep in `quick`/`standard` for unit TUI only |
+| **DB / rocpd** (`--output-format db\|csv`) | Official | Tag `surface(db)`; share fixtures with CLI where output is compared |
+| **Web GUI** (`--gui`) | Legacy / maintenance-only | Tag `surface(webui)` + `lifecycle(maintenance)`; **no new tests** unless fixing regressions; exclude from PR tiers |
+
+**TUI test organization (three layers)**
+
+Current `test_tui_components.py` is mostly **unit-level** widget/util tests (mocked Textual, no
+terminal) — this is the right direction. Expand as follows:
+
+```
+tests/unit/rocprof_compute_tui/          # layer 1: widgets, tui_utils, collapsibles (mocked)
+tests/integration/analyze/tui/           # layer 2: Textual Pilot / async app smoke tests
+tests/functional/analyze/tui/          # layer 3 (Phase 2+): fixture workload → launch TUI → key nav → assert state
+```
+
+| Layer | `type` | `surface` | What to test | CI tier |
+|-------|--------|-----------|--------------|---------|
+| 1 — Component | `unit` | `tui` | `InstantButton`, `DropdownMenu`, dataframe rounding, YAML config load | `quick` |
+| 2 — App smoke | `integration` | `tui` | `RocprofTUIApp` starts, navigates one panel, quits; use Textual `Pilot` | `standard` (headless CI) |
+| 3 — E2E | `functional` | `tui` | Pre-captured workload dir → `--tui` → golden panel snapshot or DOM assertion | `comprehensive`+ |
+
+**Example markers**
+
+```python
+@pytest.mark.phase("analyze")
+@pytest.mark.surface("cli")
+@pytest.mark.type("integration")
+def test_analyze_vcopy_MI350(binary_handler_analyze_rocprof_compute):
+    ...
+
+@pytest.mark.phase("analyze")
+@pytest.mark.surface("tui")
+@pytest.mark.type("unit")
+@pytest.mark.tui  # bridge: keep existing file-level marker during migration
+class TestInstantButton:
+    ...
+
+@pytest.mark.phase("analyze")
+@pytest.mark.surface("tui")
+@pytest.mark.type("integration")
+async def test_tui_app_loads_workload_pilot(pilot, workload_dir):
+    ...
+```
+
+**Filter examples**
+
+```bash
+pytest -m "phase(analyze) and surface(cli)"     # all CLI analyze tests
+pytest -m "surface(tui) and type(unit)"         # fast TUI unit layer (today's test_tui_components)
+pytest -m "phase(profile)"                      # capture/profile integration only
+pytest -m "not surface(webui)"                  # exclude legacy GUI from any run
+```
+
+**Shared vs surface-specific fixtures**
+
+- **`tests/conftest.py`**: workload dirs, arch detection (shared).
+- **`tests/integration/conftest.py`**: `binary_handler_profile_*`, `binary_handler_analyze_*` (CLI subprocess).
+- **`tests/integration/analyze/tui/conftest.py`**: Textual `Pilot` fixture, headless terminal env, sample `workload_dir` for TUI launch — **do not** mix Pilot setup into CLI conftest.
+
+**Migration mapping (current repo)**
+
+| Current file | Future markers |
+|--------------|----------------|
+| `test_profile_*.py` | `phase(profile)`, `type(integration)` |
+| `test_analyze_workloads.py`, `test_analyze_commands.py` | `phase(analyze)`, `surface(cli)` |
+| `test_tui_components.py` | `phase(analyze)`, `surface(tui)`, `type(unit)` — split/move to `tests/unit/rocprof_compute_tui/` |
+| (none today) | TUI Pilot integration → new `tests/integration/analyze/tui/` sample in Phase 1 |
+
 ### Design — Section 5: CTest / PTest / GoogleTest
 
 **Primary harness**
@@ -549,6 +645,7 @@ explicitly promoted.
 | **Unit** | Phase 1 (MVP) | Show mirror-`src/` layout, unit conftest, `@pytest.mark.type("unit")`, no GPU | `tests/unit/.../test_<module>.py` |
 | **Integration** | Phase 1 (MVP) | Show feature file, integration conftest, CLI/GPU fixtures, `@pytest.mark.type("integration")` | `tests/integration/test_<feature>.py` |
 | **Misc / ad-hoc** | Phase 1 (MVP) | Unclassified or scratch tests; `@pytest.mark.type("misc")`, optional `lifecycle(tmp)` | `tests/misc/` |
+| **TUI (unit layer)** | Phase 1 (MVP) | Widget/util tests; `phase(analyze)`, `surface(tui)`, mocked Textual | `tests/unit/rocprof_compute_tui/` |
 | **Functional** | Phase 2+ | Golden workload / output validation pattern | `tests/integration/` or future `tests/functional/` |
 | **Performance / pressure** | Phase 2+ | Baseline comparison or sustained-load pattern | future `tests/performance/` or marked integration |
 
@@ -617,4 +714,6 @@ Use these prompts to drive alignment in the team meeting:
 - Decide whether **docker/k8s** functional tests belong in `comprehensive`/`full` only with env-gated CI lanes.
 - Agree to **migrate ad-hoc markers** (`torch_trace`, `torch_ops`) to structured markers when classification is known; **`misc` / `tmp` remain as permanent escape hatches** (§4.2).
 - Confirm **tmp test policy**: max lifetime, owner/docstring requirement, and whether CI should fail if `lifecycle(tmp)` tests are older than N days.
+- Agree on **`phase` / `surface` markers** for profile vs analyze and CLI vs TUI (§4.3); web-ui = maintenance-only, no new tests.
+- Confirm **TUI sample tests** for Phase 1: migrate `test_tui_components.py` to unit layer + add one Textual Pilot integration smoke test.
 

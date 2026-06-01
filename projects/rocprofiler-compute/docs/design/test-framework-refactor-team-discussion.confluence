@@ -371,6 +371,22 @@ Structured taxonomy is the *default path*, not a hard requirement for every file
 
 *Permanent escape hatch* — misc/tmp does not go away after migration. {{@pytest.mark.misc}} bridges to {{type(misc)}}.
 
+h3. Design — Section 4.3: Execution modes & analyze surfaces (profile / CLI / TUI)
+
+Two top-level *phases* (profile, analyze) and analyze *surfaces* (cli, tui, db, legacy webui). Filter by markers — do *not* duplicate the entire suite per mode.
+
+|| Dimension || Values || When ||
+| phase | profile, analyze | Tests exercising a rocprof-compute mode |
+| surface | cli, tui, db, webui | Analyze presentation; omit for pure profile capture |
+
+*Surface policy:* CLI + TUI = official; webui = maintenance-only (no new tests); db = tag surface(db).
+
+*TUI three layers:* (1) {{tests/unit/rocprof_compute_tui/}} — widget/util unit tests (today's test_tui_components); (2) {{tests/integration/analyze/tui/}} — Textual Pilot smoke; (3) functional E2E comprehensive+.
+
+*Filters:* {{pytest -m "phase(analyze) and surface(cli)"}}, {{pytest -m "surface(tui) and type(unit)"}}, {{pytest -m "not surface(webui)"}}.
+
+*TUI conftest:* {{tests/integration/analyze/tui/conftest.py}} for Pilot fixture — separate from CLI subprocess handlers.
+
 h3. Design — Section 5: CTest / PTest / GoogleTest
 
 *Primary harness*
@@ -400,6 +416,7 @@ h3. Design — Section 6: Migration strategy
 | *Unit* | Phase 1 (MVP) | Show mirror-src/ layout, unit conftest, type marker, no GPU | {{tests/unit/.../test_<module>.py}} |
 | *Integration* | Phase 1 (MVP) | Show feature file, integration conftest, CLI/GPU fixtures | {{tests/integration/test_<feature>.py}} |
 | *Misc / ad-hoc* | Phase 1 (MVP) | Unclassified or scratch; type(misc), optional lifecycle(tmp) | {{tests/misc/}} |
+| *TUI (unit layer)* | Phase 1 (MVP) | Widget/util; phase(analyze), surface(tui) | {{tests/unit/rocprof_compute_tui/}} |
 | *Functional* | Phase 2+ | Golden workload / output validation pattern | {{tests/integration/}} or future {{tests/functional/}} |
 | *Performance / pressure* | Phase 2+ | Baseline comparison or sustained-load pattern | future {{tests/performance/}} or marked integration |
 
@@ -468,6 +485,8 @@ Use these prompts to drive alignment in the team meeting:
 * Decide whether *docker/k8s* functional tests belong in comprehensive/full only with env-gated CI lanes.
 * Agree to *migrate ad-hoc markers* (torch_trace, torch_ops) when classification is known; *misc/tmp remain permanent escape hatches* (§4.2).
 * Confirm *tmp test policy*: max lifetime, owner/docstring requirement, stale-tmp CI gate.
+* Agree on *phase / surface markers* for profile vs analyze and CLI vs TUI (§4.3); web-ui maintenance-only.
+* Confirm *TUI sample tests* for Phase 1: migrate test_tui_components to unit layer + one Pilot smoke test.
 
 ## rocprofiler-compute — Test Framework Refactor (Team Discussion Draft, Detailed)
 
@@ -753,6 +772,22 @@ Structured taxonomy is the *default path*, not a hard requirement for every file
 
 *Permanent escape hatch* — misc/tmp does not go away after migration. {{@pytest.mark.misc}} bridges to {{type(misc)}}.
 
+h3. Design — Section 4.3: Execution modes & analyze surfaces (profile / CLI / TUI)
+
+Two top-level *phases* (profile, analyze) and analyze *surfaces* (cli, tui, db, legacy webui). Filter by markers — do *not* duplicate the entire suite per mode.
+
+|| Dimension || Values || When ||
+| phase | profile, analyze | Tests exercising a rocprof-compute mode |
+| surface | cli, tui, db, webui | Analyze presentation; omit for pure profile capture |
+
+*Surface policy:* CLI + TUI = official; webui = maintenance-only (no new tests); db = tag surface(db).
+
+*TUI three layers:* (1) {{tests/unit/rocprof_compute_tui/}} — widget/util unit tests (today's test_tui_components); (2) {{tests/integration/analyze/tui/}} — Textual Pilot smoke; (3) functional E2E comprehensive+.
+
+*Filters:* {{pytest -m "phase(analyze) and surface(cli)"}}, {{pytest -m "surface(tui) and type(unit)"}}, {{pytest -m "not surface(webui)"}}.
+
+*TUI conftest:* {{tests/integration/analyze/tui/conftest.py}} for Pilot fixture — separate from CLI subprocess handlers.
+
 h3. Design — Section 5: CTest / PTest / GoogleTest
 
 *Primary harness*
@@ -782,6 +817,7 @@ h3. Design — Section 6: Migration strategy
 | *Unit* | Phase 1 (MVP) | Show mirror-src/ layout, unit conftest, type marker, no GPU | {{tests/unit/.../test_<module>.py}} |
 | *Integration* | Phase 1 (MVP) | Show feature file, integration conftest, CLI/GPU fixtures | {{tests/integration/test_<feature>.py}} |
 | *Misc / ad-hoc* | Phase 1 (MVP) | Unclassified or scratch; type(misc), optional lifecycle(tmp) | {{tests/misc/}} |
+| *TUI (unit layer)* | Phase 1 (MVP) | Widget/util; phase(analyze), surface(tui) | {{tests/unit/rocprof_compute_tui/}} |
 | *Functional* | Phase 2+ | Golden workload / output validation pattern | {{tests/integration/}} or future {{tests/functional/}} |
 | *Performance / pressure* | Phase 2+ | Baseline comparison or sustained-load pattern | future {{tests/performance/}} or marked integration |
 
@@ -850,4 +886,6 @@ Use these prompts to drive alignment in the team meeting:
 * Decide whether *docker/k8s* functional tests belong in comprehensive/full only with env-gated CI lanes.
 * Agree to *migrate ad-hoc markers* (torch_trace, torch_ops) when classification is known; *misc/tmp remain permanent escape hatches* (§4.2).
 * Confirm *tmp test policy*: max lifetime, owner/docstring requirement, stale-tmp CI gate.
+* Agree on *phase / surface markers* for profile vs analyze and CLI vs TUI (§4.3); web-ui maintenance-only.
+* Confirm *TUI sample tests* for Phase 1: migrate test_tui_components to unit layer + one Pilot smoke test.
 
