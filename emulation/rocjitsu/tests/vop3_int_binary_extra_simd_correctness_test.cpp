@@ -49,11 +49,15 @@ struct Case {
   bool i16;
 };
 
-const std::array<Case, 4> kCases = {{
+const std::array<Case, 6> kCases = {{
     {"v_add_i32_vop3", 668, false},
     {"v_sub_i32_vop3", 669, false},
     {"v_add_i16_vop3", 670, true},
     {"v_sub_i16_vop3", 671, true},
+    // Pack two clamped 32-bit ints into the dst's hi/lo 16-bit halves. kVals
+    // includes the ±32768 / 0xFFFF / INT extremes that exercise both clamps.
+    {"v_cvt_pk_u16_u32_vop3", 663, false},
+    {"v_cvt_pk_i16_i32_vop3", 664, false},
 }};
 
 // Mixed uint32 values; for the i16 ops, only the low 16 bits matter to the
