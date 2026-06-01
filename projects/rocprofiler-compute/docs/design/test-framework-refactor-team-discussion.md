@@ -194,6 +194,41 @@ The conversation referenced several open patterns to ground the design choices:
   - integration tests for GPU/CLI glue paths and workload fixtures,
   - functional/perf as later layers (goldens/baselines).
 
+### 6.1 TheRock reference design (target state)
+
+For the **new test framework connected to TheRock**, the team wants to **eventually align** with the
+**hipBLAS `test_categories.yaml` pattern** used across `rocm-libraries` (same tier model as rocBLAS).
+
+**Reference design (canonical example):**
+
+- [hipBLAS `test_categories.yaml`](https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipblas/clients/gtest/test_categories.yaml)
+- Related: [hipBLAS gtest `CMakeLists.txt`](https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipblas/clients/gtest/CMakeLists.txt) (wires `apply_test_category_labels`)
+- Shared spec: [rocm-libraries `shared/ctest/README.md`](https://github.com/ROCm/rocm-libraries/blob/develop/shared/ctest/README.md)
+
+**What we adopt from that reference:**
+
+| Element | hipBLAS reference | rocprofiler-compute direction |
+|--------|-----------------|-------------------------------|
+| Tier names | `quick`, `standard`, `comprehensive`, `full` | Keep (already in our YAML) |
+| Per-tier `description` | Human-readable + Jenkins/TheRock intent | Align wording and timeouts |
+| `test_patterns` / `exclude` | Glob patterns for test selection | Map to CTest test names and/or pytest markers |
+| `labels` | CTest labels for `ctest -L` | Same — primary TheRock filter mechanism |
+| `execution_settings` | `category_timeouts`, `environment`, `timeout_multiplier` | Adopt structure; tune for pytest/CI |
+| GPU exclusions | Optional `exclude_gpu` block (see shared README) | Add when arch-gating is formalized |
+
+**Important distinction (not a blocker):**
+
+- hipBLAS uses **rocm-libraries** `apply_test_category_labels()` → one GoogleTest binary + gtest filters.
+- rocprofiler-compute uses **rocm-systems** `apply_ctest_category_labels()` → labels on many existing `add_test(pytest …)` entries.
+
+The **YAML shape and TheRock contract** should converge on the hipBLAS reference; the **CMake/parser layer** may remain the rocm-systems variant until/unless we unify parsers across monorepos.
+
+**Phasing:**
+
+1. **MVP / bridge:** Keep current `tests/test_categories.yaml` + `apply_ctest_category_labels()` (required for TheRock today).
+2. **Refactor:** Reorganize tests (`unit/` / `integration/`) and add marker dimensions (`type`, `arch`).
+3. **Target:** Restructure `test_categories.yaml` to match hipBLAS reference fields and semantics; retire duplicate selection in `therock_test_runner.py` (hardcoded `QUICK_TESTS` / `TEST_TYPE`).
+
 ---
 
 ## 7) Proposed design (Sections 1–7)
@@ -273,7 +308,8 @@ Filters must work for both CI and developer “partial run” workflows (not CI-
 **Bridge period**
 
 - Keep `quick/standard/comprehensive/full` in `tests/test_categories.yaml` for now.
-- Long term: replace YAML categories with filter presets / one-line marker expressions.
+- **Target state (TheRock):** evolve this file toward the [hipBLAS reference design](https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipblas/clients/gtest/test_categories.yaml) (tiers, patterns, labels, `execution_settings`, optional GPU exclusions).
+- Developer convenience: expose tier presets as one-line `ctest -L` / `pytest -m` equivalents (not a replacement for YAML — the YAML remains the TheRock-facing contract).
 
 ### Design — Section 5: CTest / PTest / GoogleTest
 
@@ -346,4 +382,5 @@ Use these prompts to drive alignment in the team meeting:
 - Confirm the two-week **parallel soak** policy after new layout is CI-green.
 - Decide what “artifact dirs stable” means concretely (JUnit XML paths, logs, coverage output).
 - Agree whether PR `#6189` commit `07b0579` is acceptable as the starting scaffolding (cherry-pick only).
+- Confirm **hipBLAS `test_categories.yaml`** as the long-term TheRock reference design (see §6.1) and what must match in the first convergence PR vs later.
 

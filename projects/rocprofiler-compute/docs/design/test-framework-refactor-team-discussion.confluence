@@ -1,0 +1,654 @@
+## rocprofiler-compute — Test Framework Refactor (Team Discussion Draft, Detailed)
+
+{info}
+This page is a polished, detailed capture of the conversation that kicked off the
+test-framework refactor effort. It is intended to be used as a discussion artifact with the
+rocprofiler-compute team.
+
+Important guardrails (current agreement):
+* This stays at *design/proposal* level. No implementation steps have been executed yet.
+* Any refactor that touches test infrastructure must respect the profiling infra constraints in
+  .ai/rules/profiling_infra.md (determinism, fixture sizing, output schema stability, etc.).
+{info}
+
+----
+
+h2. 1) Kickoff (what we’re trying to do)
+
+We want to follow the spec-driven workflow to work on a new feature:
+
+* *Goal*: refactor the test framework for rocprofiler-compute
+* *Explicit objectives*:
+** Clearly define test definitions on each test level
+** Define test filters properly
+** Choose a refactoring strategy:
+*** (1) gradually modify the current framework, or
+*** (2) keep the current one alive and build the new one in parallel
+
+*Reference inputs used in the discussion:*
+
+* *AGSRCIT Test Framework Design (PDF)*: hierarchical test types, multi-dimensional filter engine
+* *Yang Unit Test Framework (PDF)*: unit-test-first, pytest markers + CTest launcher, CTest as a thin registry
+* *test_refactor.md (vedithal plan)*: unit/integration layout, migration phases, no test-logic changes
+* *PR #6189*: refactor implementation branch; candidate cherry-pick core commit 07b0579
+
+----
+
+h2. 2) Problem statement (why now)
+
+The team’s top motivations (from A1 answers) are:
+
+* *Test code quality / maintainability / triage cost* is too high.
+* *There is no clear boundary* between unit tests and GPU / CLI / integration tests.
+* The suite is *hard to extend* for new GPU architecture support and new features.
+
+What we want is a set of *authoritative definitions + a classification system* that allow us to:
+
+* organize tests and suites consistently
+* balance coverage vs cost
+* reduce maintenance risk and triage overhead
+* scale across new architectures/features
+
+----
+
+h2. 3) Deliverable intent & scope
+
+*Outcome direction (A2):*
+
+* Aim for a *framework-level refactor* with clear definitions and filters.
+* Keep an *incremental migration path* (avoid large, risky big-bang).
+* Start with a *design-first* deliverable (proposal/spec) before implementation.
+
+*Schedule*: no deadline. \\
+*Reviewers*: rocprofiler-compute team; TheRock may review CI integration details.
+
+*Scope boundary for the initial refactor phase (G1 “all out”):*
+
+* No rewriting assertions / changing test expectations.
+* No adding new tests or expanding coverage (coverage must be maintained).
+* No fixing flaky tests as part of this refactor (unless required to keep CI green).
+* No src/ changes for testability.
+* No custom test runner or heavy pytest plugin system in MVP.
+
+----
+
+h2. 4) Brainstorming stage Q&A (questions + your answers)
+
+This section records the *brainstorming-stage* questions used to clarify requirements, plus
+your answers. These details are kept explicitly because they drive the design trade-offs.
+
+h3. 4.1 Goals & success criteria
+
+* *A1 (primary problems to solve)*: c), d), f) — clear definition and classification to organize tests/suites, balance coverage vs cost, reduce maintenance, and improve extensibility.
+* *A2 (target deliverable)*: combine e), c), a) — aim toward a full refactor direction, preserve the current system while bringing up the new one, and start from proposal/design first.
+* *A3 (deadline)*: no deadline.
+* *A4 (reviewers)*: rocprof-compute team members; TheRock review mainly for CI definition.
+
+h3. 4.2 Test level definitions / taxonomy
+
+* *B1 (model)*: start from Option B (five-level thinking), but re-evaluate whether “component” and “integration” should be combined. Also requested open reference designs for profiling tools and Python/C++ mixed projects.
+* *B2 (definitions)*: follow B1; additionally, performance tests should include pressure/stress testing.
+* *B3 (current tests classification)*: unknown today; classification/discovery is part of the work.
+* *B4 (scope for harnesses)*: CTest + PTest are the major target; for C++ prefer GoogleTest (not Catch2).
+* *B5 (profile vs analyze / component meaning)*: prefer dropping “component” (fold into integration); “profile” and “analyze” are distinct modes; in the future support both “two-stage” and “one-stop” modes.
+
+h3. 4.3 Filters & CI tiers
+
+* *C1 (purpose of filters)*: filters are not only for CI — developers should run partial suites quickly with conditions; quick/standard/comprehensive/full should become “one line” presets (still thinking about exact mapping).
+* *C2 (MVP filter dimensions)*: type, arch.
+* *C3 (developer entrypoints)*: both ctest and direct pytest should be supported.
+* *C4 (when to run)*: every PR (at least for the agreed set).
+* *C5 (test_categories.yaml)*: keep for now; should be replaced by filters in the future.
+* *C6 (GPU-less CI requirement)*: nice-to-have (not a hard requirement).
+
+h3. 4.4 Refactoring strategy & PR shape
+
+* *D1 (migration strategy)*: choose (2) parallel bring-up, and merge (3) into (2) (reuse PR #6189 partially).
+* *D2 (parallel coexistence length)*: keep both until CI is green on the new framework; then proceed to cutover path.
+* *D3 (hard constraints)*: yes — no src/ changes, no test-logic changes, preserve CTest args.
+* *D4 (delivery shape)*: OpenSpec change first, then phased implementation PRs.
+* *D5 (relationship to PR #6189)*: cherry-pick core commit(s) only.
+
+h3. 4.5 Layout & fixtures
+
+* *E1 (layout)*: combine folder structure (tests/unit/, tests/integration/) with markers.
+* *E2 (conftest split)*: prefer per-subtree fixtures; leaned toward subtree conftest layout.
+* *E3 (integration naming)*: test_<feature>.py.
+* *E4 (borderline tests)*: fixed split rule (banner/module split), not re-deciding assertions.
+
+h3. 4.6 Source of truth & documentation placement
+
+* *F1 (authoritative source when conflicts exist)*: the new unified spec written in this brainstorm (not any single prior doc).
+* *F2 (artifact location)*: OpenSpec change directory under openspec/changes/; can link out to other docs if needed.
+* *F3 (mapping between models)*: prefer “pick one model” (avoid large reconciliation tables in the spec).
+* *F4 (TheRock constraints)*: keep artifact directories stable.
+
+h3. 4.7 Scope boundaries & quality
+
+* *G1 (non-goals)*: treat all “nice-to-have” work as out-of-scope for this phase (assertion changes, new tests, src/ changes, etc.).
+* *G2 (coverage gate)*: coverage must not regress.
+* *G3 (experimental/arch-gated tests)*: out of scope for MVP.
+
+h3. 4.8 Risks & preferences
+
+* *H1 (biggest risks)*: CI breakage, taxonomy disagreement, over-engineering filters early.
+* *H2 (bias if forced today)*:
+** Strategy: (2) parallel, partially based on #6189
+** Taxonomy: 2-level physical split
+** Filter MVP: both (markers + CI entrypoints)
+
+----
+
+h2. 5) Brainstorm conclusions (key decisions so far)
+
+h3. 5.1 Taxonomy tension and the reconciliation
+
+You initially favored the hierarchical AGSRCIT model (unit/component/integration/functional/performance),
+but later indicated a practical preference for a *two-level physical split* (H2).
+
+*Reconciliation agreed in the discussion:*
+
+* *Physical layout (MVP)*: two roots only
+** tests/unit/
+** tests/integration/
+* *Logical classification grows over time*:
+** MVP type: unit, integration
+** Later type: add functional, performance (including pressure/stress)
+* *“Component”* is likely folded into integration for now (you preferred dropping it; B5).
+
+This keeps navigation simple immediately while preserving a long-term taxonomy for classification/filtering.
+
+h3. 5.2 Strategy (gradual vs parallel)
+
+You chose:
+
+* *Strategy*: (2) *parallel* bring-up, plus selectively reuse PR #6189 (merge (3) into (2)).
+* *PR relationship*: cherry-pick core commit(s) only (07b0579), do not adopt the entire messy branch history.
+* *Cutover rule*: after new framework is *CI-green*, keep legacy flat tests running *two more weeks in parallel*
+  (soak period), then remove legacy.
+
+h3. 5.3 Filter MVP
+
+You selected:
+
+* *MVP filter dimensions*: type, arch
+* Filters are not only for CI; they must support dev partial runs as well.
+* Keep test_categories.yaml for now, but long-term it should be replaced by filters.
+
+h3. 5.4 CTest/PTest and C++ tests
+
+You indicated:
+
+* *CTest + PTest* are major targets for the overall test framework and CI execution.
+* For C++ tests, prefer *GoogleTest* (not Catch2) for potential expansion.
+
+----
+
+h2. 6) Open reference patterns (what the design is inspired by)
+
+The conversation referenced several open patterns to ground the design choices:
+
+* pytest + markers as the classification/filter backbone (both PDFs trend that way).
+* CTest as a thin registry/launcher (Yang PDF), which preserves TheRock/CI behavior.
+* Profiler-style pipeline testing (capture → analyze → validate) commonly uses:
+** unit tests for pure logic/parsers,
+** integration tests for GPU/CLI glue paths and workload fixtures,
+** functional/perf as later layers (goldens/baselines).
+
+h3. 6.1 TheRock reference design (target state)
+
+For the *new test framework connected to TheRock*, the team wants to *eventually align* with the
+*hipBLAS test_categories.yaml pattern* used across rocm-libraries (same tier model as rocBLAS).
+
+*Reference design (canonical example):*
+
+* [hipBLAS test_categories.yaml|https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipblas/clients/gtest/test_categories.yaml]
+* [hipBLAS gtest CMakeLists.txt|https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipblas/clients/gtest/CMakeLists.txt]
+* [rocm-libraries shared/ctest/README.md|https://github.com/ROCm/rocm-libraries/blob/develop/shared/ctest/README.md]
+
+*What we adopt from that reference:* tiers (quick/standard/comprehensive/full), per-tier description, test_patterns/exclude, labels for ctest -L, execution_settings (timeouts, environment), optional exclude_gpu when arch-gating is formalized.
+
+*Important distinction:* hipBLAS uses rocm-libraries apply_test_category_labels (one gtest binary + filters); rocprofiler-compute uses rocm-systems apply_ctest_category_labels (labels on many add_test(pytest …) entries). The *YAML shape and TheRock contract* should converge on the hipBLAS reference.
+
+*Phasing:* (1) MVP — keep current tests/test_categories.yaml; (2) refactor unit/integration + type/arch markers; (3) target — restructure YAML to hipBLAS reference; retire therock_test_runner.py hardcoded QUICK_TESTS / TEST_TYPE.
+
+----
+
+h2. 7) Proposed design (Sections 1–7)
+
+h3. Design — Section 1: Problem & goals
+
+*Problem*
+
+* Tests are hard to triage and organize.
+* The suite lacks an authoritative boundary between “unit” and “GPU/CLI integration”.
+* Filters are not defined as a coherent system usable by both CI and developers.
+* Extending across architectures and new profiler features is costly.
+
+*Goals*
+
+* Authoritative test definitions and classification rules.
+* Filter MVP that supports both CI and developer partial runs.
+* Physical organization that makes “where is the test for this source file/feature?” obvious by path.
+* Preserve infra constraints from .ai/rules/profiling_infra.md:
+** determinism (stable seeds/order),
+** fixture size discipline (tests/workloads/ for larger data),
+** output schema stability when formats/counters change.
+
+*Non-goals (for initial refactor phase)*
+
+* No new assertions or coverage expansion.
+* No src/ changes for testability.
+* Avoid heavy plugin systems; keep filter engine incremental.
+
+h3. Design — Section 2: Test level definitions
+
+*MVP “type” definitions*
+
+* *Unit*:
+** in-process, no GPU requirement, no rocprof-compute subprocess
+** uses mocks/tiny fixtures; runs on dev laptop without ROCm
+* *Integration*:
+** exercises real glue paths: CLI driving, GPU-required capture/analyze behavior,
+   workloads as black-box fixtures
+
+*Later (not MVP)*
+
+* *Functional*: end-user flows and output correctness (golden baselines)
+* *Performance*: overhead/throughput/regressions; includes pressure/stress tests
+
+*Borderline rule*
+
+When a file mixes types (common in the current flat layout), split by section banner/imported
+source module without changing assertions or expectations.
+
+h3. Design — Section 3: Layout & fixtures
+
+*Target layout (MVP)*
+
+* tests/unit/ mirrors src/
+* tests/integration/ has one file per feature
+
+*Fixture strategy*
+
+Prefer per-subtree fixtures (clear boundaries, scales when we later add more types):
+
+* tests/conftest.py: common/lightweight shared fixtures and option parsing
+* tests/unit/conftest.py: unit-only fixtures (mocks, tiny data builders)
+* tests/integration/conftest.py: integration-only fixtures (GPU/CLI/workloads)
+
+h3. Design — Section 4: Filter system
+
+*Key principle*
+
+Filters must work for both CI and developer “partial run” workflows (not CI-only).
+
+*MVP filter dimensions*
+
+* type
+* arch
+
+*Bridge period*
+
+* Keep quick/standard/comprehensive/full in tests/test_categories.yaml for now.
+* *Target state (TheRock):* evolve toward [hipBLAS test_categories.yaml|https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipblas/clients/gtest/test_categories.yaml].
+* Developer convenience: tier presets as one-line ctest -L / pytest -m (YAML remains TheRock-facing contract).
+
+h3. Design — Section 5: CTest / PTest / GoogleTest
+
+*Primary harness*
+
+* CTest + PTest remain the major entry point for CI.
+
+*C++ direction*
+
+* Prefer GoogleTest for C++ tests (potential future expansion).
+
+*Current repo reality (for awareness)*
+
+* Current CTest tests are registered in projects/rocprofiler-compute/CMakeLists.txt with
+  pytest marker selection and --junitxml=tests/<name>.xml.
+
+h3. Design — Section 6: Migration strategy
+
+*Preferred strategy*
+
+* *Parallel bring-up*: keep current framework alive while the new layout/framework is built in parallel.
+* Selectively incorporate PR #6189 by cherry-picking the core refactor commit 07b0579.
+
+*Hard constraints*
+
+* No src/ changes.
+* No test-logic changes (moves/splits/import fixups only).
+* Preserve existing CTest invocation behavior as much as feasible.
+* Coverage must not regress.
+
+*Cutover / soak policy*
+
+* When the new layout/framework is *CI-green*, keep the legacy flat tests running in parallel for
+  *two additional weeks* (soak period), then remove legacy.
+
+h3. Design — Section 7: Risks & mitigations
+
+* *Risk: CI breakage / TheRock integration issues*
+** Mitigation: parallel bring-up + two-week soak; keep artifact paths stable.
+* *Risk: team disagreement on taxonomy*
+** Mitigation: authoritative definitions + borderline rules; keep MVP minimal (type, arch).
+* *Risk: over-engineering filters too early*
+** Mitigation: MVP dimensions only; postpone other dimensions until after layout is stable.
+
+----
+
+h2. 8) CDash / dashboards considerations
+
+rocprofiler-compute submits to CDash via projects/rocprofiler-compute/tools/run-ci.py (it
+generates a CTest dashboard script, runs ctest_test(...), and submits results).
+
+*What to watch during the refactor*
+
+* CTest test names (appear as entries in CDash)
+* JUnit XML paths (current pattern uses --junitxml=tests/<name>.xml)
+* Labels/tier tags used for grouping
+* Artifact directories (team indicated this is important)
+
+No CTestConfig.cmake/CTestCustom.cmake files were found in-repo; any CDash-visible
+changes will be driven by how we modify CTest registration and JUnit output locations.
+
+----
+
+h2. 9) Next discussion prompts for the team
+
+Use these prompts to drive alignment in the team meeting:
+
+* Do we formally *drop “component”* and fold into integration for MVP?
+* Confirm MVP is only *two filter dimensions*: type, arch (everything else later).
+* Confirm the two-week *parallel soak* policy after new layout is CI-green.
+* Decide what “artifact dirs stable” means concretely (JUnit XML paths, logs, coverage output).
+* Agree whether PR #6189 commit 07b0579 is acceptable as the starting scaffolding (cherry-pick only).
+* Confirm hipBLAS test_categories.yaml as the long-term TheRock reference design (see §6.1).
+
+## rocprofiler-compute — Test Framework Refactor (Team Discussion Draft, Detailed)
+
+{info}
+This page is a polished, detailed capture of the conversation that kicked off the
+test-framework refactor effort. It is intended to be used as a discussion artifact with the
+rocprofiler-compute team.
+
+Important guardrails (current agreement):
+* This stays at *design/proposal* level. No implementation steps have been executed yet.
+* Any refactor that touches test infrastructure must respect the profiling infra constraints in
+  .ai/rules/profiling_infra.md (determinism, fixture sizing, output schema stability, etc.).
+{info}
+
+----
+
+h2. 1) Kickoff (what we’re trying to do)
+
+We want to follow the spec-driven workflow to work on a new feature:
+
+* *Goal*: refactor the test framework for rocprofiler-compute
+* *Explicit objectives*:
+** Clearly define test definitions on each test level
+** Define test filters properly
+** Choose a refactoring strategy:
+*** (1) gradually modify the current framework, or
+*** (2) keep the current one alive and build the new one in parallel
+
+*Reference inputs used in the discussion:*
+
+* *AGSRCIT Test Framework Design (PDF)*: hierarchical test types, multi-dimensional filter engine
+* *Yang Unit Test Framework (PDF)*: unit-test-first, pytest markers + CTest launcher, CTest as a thin registry
+* *test_refactor.md (vedithal plan)*: unit/integration layout, migration phases, no test-logic changes
+* *PR #6189*: refactor implementation branch; candidate cherry-pick core commit 07b0579
+
+----
+
+h2. 2) Problem statement (why now)
+
+The team’s top motivations (from A1 answers) are:
+
+* *Test code quality / maintainability / triage cost* is too high.
+* *There is no clear boundary* between unit tests and GPU / CLI / integration tests.
+* The suite is *hard to extend* for new GPU architecture support and new features.
+
+What we want is a set of *authoritative definitions + a classification system* that allow us to:
+
+* organize tests and suites consistently
+* balance coverage vs cost
+* reduce maintenance risk and triage overhead
+* scale across new architectures/features
+
+----
+
+h2. 3) Deliverable intent & scope
+
+*Outcome direction (A2):*
+
+* Aim for a *framework-level refactor* with clear definitions and filters.
+* Keep an *incremental migration path* (avoid large, risky big-bang).
+* Start with a *design-first* deliverable (proposal/spec) before implementation.
+
+*Schedule*: no deadline. \\
+*Reviewers*: rocprofiler-compute team; TheRock may review CI integration details.
+
+*Scope boundary for the initial refactor phase (G1 “all out”):*
+
+* No rewriting assertions / changing test expectations.
+* No adding new tests or expanding coverage (coverage must be maintained).
+* No fixing flaky tests as part of this refactor (unless required to keep CI green).
+* No src/ changes for testability.
+* No custom test runner or heavy pytest plugin system in MVP.
+
+----
+
+h2. 4) Brainstorm conclusions (key decisions so far)
+
+h3. 4.1 Taxonomy tension and the reconciliation
+
+You initially favored the hierarchical AGSRCIT model (unit/component/integration/functional/performance),
+but later indicated a practical preference for a *two-level physical split* (H2).
+
+*Reconciliation agreed in the discussion:*
+
+* *Physical layout (MVP)*: two roots only
+** tests/unit/
+** tests/integration/
+* *Logical classification grows over time*:
+** MVP type: unit, integration
+** Later type: add functional, performance (including pressure/stress)
+* *“Component”* is likely folded into integration for now (preferred dropping it; B5).
+
+This keeps navigation simple immediately while preserving a long-term taxonomy for classification/filtering.
+
+h3. 4.2 Strategy (gradual vs parallel)
+
+You chose:
+
+* *Strategy*: (2) *parallel* bring-up, plus selectively reuse PR #6189 (merge (3) into (2)).
+* *PR relationship*: cherry-pick core commit(s) only (07b0579); do not adopt the entire messy branch history.
+* *Cutover rule*: after new framework is *CI-green*, keep legacy flat tests running *two more weeks in parallel*
+  (soak period), then remove legacy.
+
+h3. 4.3 Filter MVP
+
+You selected:
+
+* *MVP filter dimensions*: type, arch
+* Filters are not only for CI; they must support dev partial runs as well.
+* Keep test_categories.yaml for now, but long-term it should be replaced by filters.
+
+h3. 4.4 CTest/PTest and C++ tests
+
+You indicated:
+
+* *CTest + PTest* are major targets for the overall test framework and CI execution.
+* For C++ tests, prefer *GoogleTest* (not Catch2) for potential expansion.
+
+----
+
+h2. 5) Open reference patterns (what the design is inspired by)
+
+The conversation referenced several open patterns to ground the design choices:
+
+* pytest + markers as the classification/filter backbone (both PDFs trend that way).
+* CTest as a thin registry/launcher (Yang PDF), which preserves TheRock/CI behavior.
+* Profiler-style pipeline testing (capture → analyze → validate) commonly uses:
+** unit tests for pure logic/parsers,
+** integration tests for GPU/CLI glue paths and workload fixtures,
+** functional/perf as later layers (goldens/baselines).
+
+----
+
+h2. 6) Proposed design (Sections 1–7)
+
+h3. Design — Section 1: Problem & goals
+
+*Problem*
+
+* Tests are hard to triage and organize.
+* The suite lacks an authoritative boundary between “unit” and “GPU/CLI integration”.
+* Filters are not defined as a coherent system usable by both CI and developers.
+* Extending across architectures and new profiler features is costly.
+
+*Goals*
+
+* Authoritative test definitions and classification rules.
+* Filter MVP that supports both CI and developer partial runs.
+* Physical organization that makes “where is the test for this source file/feature?” obvious by path.
+* Preserve infra constraints from .ai/rules/profiling_infra.md:
+** determinism (stable seeds/order),
+** fixture size discipline (tests/workloads/ for larger data),
+** output schema stability when formats/counters change.
+
+*Non-goals (for initial refactor phase)*
+
+* No new assertions or coverage expansion.
+* No src/ changes for testability.
+* Avoid heavy plugin systems; keep filter engine incremental.
+
+h3. Design — Section 2: Test level definitions
+
+*MVP “type” definitions*
+
+* *Unit*:
+** in-process, no GPU requirement, no rocprof-compute subprocess
+** uses mocks/tiny fixtures; runs on dev laptop without ROCm
+* *Integration*:
+** exercises real glue paths: CLI driving, GPU-required capture/analyze behavior,
+   workloads as black-box fixtures
+
+*Later (not MVP)*
+
+* *Functional*: end-user flows and output correctness (golden baselines)
+* *Performance*: overhead/throughput/regressions; includes pressure/stress tests
+
+*Borderline rule*
+
+When a file mixes types (common in the current flat layout), split by section banner/imported
+source module without changing assertions or expectations.
+
+h3. Design — Section 3: Layout & fixtures
+
+*Target layout (MVP)*
+
+* tests/unit/ mirrors src/
+* tests/integration/ has one file per feature
+
+*Fixture strategy*
+
+Prefer per-subtree fixtures (clear boundaries, scales when we later add more types):
+
+* tests/conftest.py: common/lightweight shared fixtures and option parsing
+* tests/unit/conftest.py: unit-only fixtures (mocks, tiny data builders)
+* tests/integration/conftest.py: integration-only fixtures (GPU/CLI/workloads)
+
+h3. Design — Section 4: Filter system
+
+*Key principle*
+
+Filters must work for both CI and developer “partial run” workflows (not CI-only).
+
+*MVP filter dimensions*
+
+* type
+* arch
+
+*Bridge period*
+
+* Keep quick/standard/comprehensive/full in tests/test_categories.yaml for now.
+* *Target state (TheRock):* evolve toward [hipBLAS test_categories.yaml|https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipblas/clients/gtest/test_categories.yaml].
+* Developer convenience: tier presets as one-line ctest -L / pytest -m (YAML remains TheRock-facing contract).
+
+h3. Design — Section 5: CTest / PTest / GoogleTest
+
+*Primary harness*
+
+* CTest + PTest remain the major entry point for CI.
+
+*C++ direction*
+
+* Prefer GoogleTest for C++ tests (potential future expansion).
+
+*Current repo reality (for awareness)*
+
+* Current CTest tests are registered in projects/rocprofiler-compute/CMakeLists.txt with
+  pytest marker selection and --junitxml=tests/<name>.xml.
+
+h3. Design — Section 6: Migration strategy
+
+*Preferred strategy*
+
+* *Parallel bring-up*: keep current framework alive while the new layout/framework is built in parallel.
+* Selectively incorporate PR #6189 by cherry-picking the core refactor commit 07b0579.
+
+*Hard constraints*
+
+* No src/ changes.
+* No test-logic changes (moves/splits/import fixups only).
+* Preserve existing CTest invocation behavior as much as feasible.
+* Coverage must not regress.
+
+*Cutover / soak policy*
+
+* When the new layout/framework is *CI-green*, keep the legacy flat tests running in parallel for
+  *two additional weeks* (soak period), then remove legacy.
+
+h3. Design — Section 7: Risks & mitigations
+
+* *Risk: CI breakage / TheRock integration issues*
+** Mitigation: parallel bring-up + two-week soak; keep artifact paths stable.
+* *Risk: team disagreement on taxonomy*
+** Mitigation: authoritative definitions + borderline rules; keep MVP minimal (type, arch).
+* *Risk: over-engineering filters too early*
+** Mitigation: MVP dimensions only; postpone other dimensions until after layout is stable.
+
+----
+
+h2. 7) CDash / dashboards considerations
+
+rocprofiler-compute submits to CDash via projects/rocprofiler-compute/tools/run-ci.py (it
+generates a CTest dashboard script, runs ctest_test(...), and submits results).
+
+*What to watch during the refactor*
+
+* CTest test names (appear as entries in CDash)
+* JUnit XML paths (current pattern uses --junitxml=tests/<name>.xml)
+* Labels/tier tags used for grouping
+* Artifact directories (team indicated this is important)
+
+No CTestConfig.cmake/CTestCustom.cmake files were found in-repo; any CDash-visible
+changes will be driven by how we modify CTest registration and JUnit output locations.
+
+----
+
+h2. 8) Next discussion prompts for the team
+
+Use these prompts to drive alignment in the team meeting:
+
+* Do we formally *drop “component”* and fold into integration for MVP?
+* Confirm MVP is only *two filter dimensions*: type, arch (everything else later).
+* Confirm the two-week *parallel soak* policy after new layout is CI-green.
+* Decide what “artifact dirs stable” means concretely (JUnit XML paths, logs, coverage output).
+* Agree whether PR #6189 commit 07b0579 is acceptable as the starting scaffolding (cherry-pick only).
+* Confirm hipBLAS test_categories.yaml as the long-term TheRock reference design (see §6.1).
+

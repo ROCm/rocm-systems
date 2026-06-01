@@ -300,6 +300,37 @@
         </ul>
       </ul>
 
+      <h3>6.1 TheRock reference design (target state)</h3>
+      <p>
+        For the <strong>new test framework connected to TheRock</strong>, the team wants to
+        <strong>eventually align</strong> with the hipBLAS <code>test_categories.yaml</code> pattern used across
+        <code>rocm-libraries</code> (same tier model as rocBLAS).
+      </p>
+      <p><strong>Reference design (canonical example):</strong></p>
+      <ul>
+        <li>
+          <a href="https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipblas/clients/gtest/test_categories.yaml">hipBLAS test_categories.yaml</a>
+        </li>
+        <li>
+          <a href="https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipblas/clients/gtest/CMakeLists.txt">hipBLAS gtest CMakeLists.txt</a>
+        </li>
+        <li>
+          <a href="https://github.com/ROCm/rocm-libraries/blob/develop/shared/ctest/README.md">rocm-libraries shared/ctest/README.md</a>
+        </li>
+      </ul>
+      <p>
+        <strong>Important distinction:</strong> hipBLAS uses rocm-libraries <code>apply_test_category_labels()</code>
+        (one gtest binary + filters); rocprofiler-compute uses rocm-systems <code>apply_ctest_category_labels()</code>
+        (labels on many <code>add_test(pytest …)</code> entries). The <strong>YAML shape and TheRock contract</strong>
+        should converge on the hipBLAS reference.
+      </p>
+      <p><strong>Phasing:</strong></p>
+      <ol>
+        <li>MVP — keep current <code>tests/test_categories.yaml</code>.</li>
+        <li>Refactor — <code>unit/</code> / <code>integration/</code> + <code>type</code> / <code>arch</code> markers.</li>
+        <li>Target — restructure YAML to hipBLAS reference; retire <code>therock_test_runner.py</code> hardcoded quick selection.</li>
+      </ol>
+
       <h2>7) Proposed design (Sections 1–7)</h2>
 
       <h3>Design — Section 1: Problem &amp; goals</h3>
@@ -375,7 +406,11 @@
       <p><strong>Bridge period</strong></p>
       <ul>
         <li>Keep <code>quick/standard/comprehensive/full</code> in <code>tests/test_categories.yaml</code> for now.</li>
-        <li>Long term: replace YAML categories with filter presets / one-line marker expressions.</li>
+        <li>
+          <strong>Target state (TheRock):</strong> evolve toward
+          <a href="https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipblas/clients/gtest/test_categories.yaml">hipBLAS test_categories.yaml</a>.
+        </li>
+        <li>Developer convenience: tier presets as one-line <code>ctest -L</code> / <code>pytest -m</code> (YAML remains TheRock-facing contract).</li>
       </ul>
 
       <h3>Design — Section 5: CTest / PTest / GoogleTest</h3>
@@ -442,6 +477,7 @@
         <li>Confirm the two-week <strong>parallel soak</strong> policy after new layout is CI-green.</li>
         <li>Decide what “artifact dirs stable” means concretely (JUnit XML paths, logs, coverage output).</li>
         <li>Agree whether PR <strong>#6189</strong> commit <code>07b0579</code> is acceptable as the starting scaffolding (cherry-pick only).</li>
+        <li>Confirm <strong>hipBLAS <code>test_categories.yaml</code></strong> as the long-term TheRock reference design (see §6.1).</li>
       </ul>
 
       <div class="footer">Generated for local discussion. Source: internal brainstorming conversation summary.</div>
@@ -750,7 +786,11 @@
       <p><strong>Bridge period</strong></p>
       <ul>
         <li>Keep <code>quick/standard/comprehensive/full</code> in <code>tests/test_categories.yaml</code> for now.</li>
-        <li>Long term: replace YAML categories with filter presets / one-line marker expressions.</li>
+        <li>
+          <strong>Target state (TheRock):</strong> evolve toward
+          <a href="https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipblas/clients/gtest/test_categories.yaml">hipBLAS test_categories.yaml</a>.
+        </li>
+        <li>Developer convenience: tier presets as one-line <code>ctest -L</code> / <code>pytest -m</code> (YAML remains TheRock-facing contract).</li>
       </ul>
 
       <h3>Design — Section 5: CTest / PTest / GoogleTest</h3>
@@ -817,6 +857,7 @@
         <li>Confirm the two-week <strong>parallel soak</strong> policy after new layout is CI-green.</li>
         <li>Decide what “artifact dirs stable” means concretely (JUnit XML paths, logs, coverage output).</li>
         <li>Agree whether PR <strong>#6189</strong> commit <code>07b0579</code> is acceptable as the starting scaffolding (cherry-pick only).</li>
+        <li>Confirm <strong>hipBLAS <code>test_categories.yaml</code></strong> as the long-term TheRock reference design (see §6.1).</li>
       </ul>
 
       <div class="footer">Generated for local discussion. Source: internal brainstorming conversation summary.</div>
