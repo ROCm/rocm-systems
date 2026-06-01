@@ -1417,6 +1417,30 @@ SIMD_VOPC_VOP3_F64: dict[str, str] = _build_simd_vopc_vop3_f64()
 # 16-bit wrap. 32-bit forms use the wrap-around add/sub on uint32 lanes;
 # signed-vs-unsigned wraps the same way.
 SIMD_VOP3_BINARY_INT_EXTRA: dict[str, tuple[str, str]] = {
+    # Pack two clamped 32-bit ints into the hi/lo 16-bit halves of the dst.
+    # v_cvt_pk_i16_i32: signed-clamp each source to [-32768, 32767]; u16_u32:
+    # unsigned-saturate each to 0xFFFF. Pure element-wise, no modifiers.
+    "v_cvt_pk_i16_i32_vop3": (
+        "uint32_t",
+        "[](auto a, auto b) {"
+        " using I = util::native<int32_t>;"
+        " using U = util::native<uint32_t>;"
+        " I lo = util::stdx::static_simd_cast<I>(a);"
+        " util::stdx::where(lo < I(-32768), lo) = I(-32768);"
+        " util::stdx::where(lo > I(32767), lo) = I(32767);"
+        " I hi = util::stdx::static_simd_cast<I>(b);"
+        " util::stdx::where(hi < I(-32768), hi) = I(-32768);"
+        " util::stdx::where(hi > I(32767), hi) = I(32767);"
+        " return ((util::stdx::static_simd_cast<U>(hi) & 0xFFFFu) << 16) |"
+        " (util::stdx::static_simd_cast<U>(lo) & 0xFFFFu); }",
+    ),
+    "v_cvt_pk_u16_u32_vop3": (
+        "uint32_t",
+        "[](auto a, auto b) {"
+        " auto lo = a; util::stdx::where(a > 0xFFFFu, lo) = 0xFFFFu;"
+        " auto hi = b; util::stdx::where(b > 0xFFFFu, hi) = 0xFFFFu;"
+        " return (hi << 16) | lo; }",
+    ),
     "v_add_i32_vop3": ("uint32_t", "[](auto a, auto b) { return a + b; }"),
     "v_sub_i32_vop3": ("uint32_t", "[](auto a, auto b) { return a - b; }"),
     "v_add_nc_i32_vop3": ("uint32_t", "[](auto a, auto b) { return a + b; }"),
