@@ -150,7 +150,8 @@ const auto strict_config_value_validations = std::array<config_value_validation,
     { env_vars::PERFETTO_BACKEND, config_value_rule::choice,
       "one of the registered choices" },
     { env_vars::TRACE, config_value_rule::boolean,
-      "a boolean value (0, non-zero integer, true, false, on, off, yes, no)" },
+      "a boolean value (0, non-zero integer, true, false, on, off, yes, no, "
+      "y, n, t, f)" },
     { env_vars::TRACE_DURATION, config_value_rule::floating_point,
       "a finite floating-point value" },
     // Only validate positive ranges for settings without sentinel values.
@@ -181,16 +182,37 @@ lower_config_value(std::string value)
 }
 
 bool
+has_config_value_reference(std::string_view raw_value)
+{
+    auto value = trim_config_value(raw_value);
+    return !value.empty() && value.front() == '$';
+}
+
+bool
+is_unsigned_integer_config_value(std::string_view value)
+{
+    return !value.empty() && value.find_first_not_of("0123456789") == std::string::npos;
+}
+
+bool
+is_recognized_boolean_text_value(std::string_view value)
+{
+    constexpr auto accepted_values =
+        std::array<std::string_view, 10>{ "on", "off", "true", "false", "yes",
+                                          "no", "y",   "n",    "t",     "f" };
+    return std::any_of(accepted_values.begin(), accepted_values.end(),
+                       [value](auto accepted_value) { return value == accepted_value; });
+}
+
+bool
 is_valid_boolean_config_value(std::string_view raw_value)
 {
     auto value = lower_config_value(trim_config_value(raw_value));
     if(value.empty()) return true;
 
-    if(value.find_first_not_of("0123456789") == std::string::npos) return true;
+    if(is_unsigned_integer_config_value(value)) return true;
 
-    return value == "on" || value == "off" || value == "true" || value == "false" ||
-           value == "yes" || value == "no" || value == "y" || value == "n" ||
-           value == "t" || value == "f";
+    return is_recognized_boolean_text_value(value);
 }
 
 bool
@@ -341,6 +363,8 @@ validate_config_file_values(const std::string& config_file, const std::string& t
         if(auto comment_pos = raw_value.find('#'); comment_pos != std::string::npos)
             raw_value =
                 trim_config_value(std::string_view{ raw_value }.substr(0, comment_pos));
+
+        if(raw_value.empty() || has_config_value_reference(raw_value)) continue;
 
         try
         {

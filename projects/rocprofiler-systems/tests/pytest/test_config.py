@@ -60,6 +60,29 @@ VALID_BOOLEAN_VALUES = [
     pytest.param("Y", id="Y"),
 ]
 
+VALID_NON_BOOLEAN_TYPED_VALUE_CASES = [
+    pytest.param(
+        {"ROCPROFSYS_MODE": "trace"},
+        r"[Ii]nvalid value.*ROCPROFSYS_MODE",
+        id="mode",
+    ),
+    pytest.param(
+        {"ROCPROFSYS_PERFETTO_BACKEND": "inprocess"},
+        r"[Ii]nvalid value.*ROCPROFSYS_PERFETTO_BACKEND",
+        id="perfetto-backend",
+    ),
+    pytest.param(
+        {"ROCPROFSYS_TRACE_DURATION": "1.25"},
+        r"[Ii]nvalid value.*ROCPROFSYS_TRACE_DURATION",
+        id="numeric-parse",
+    ),
+    pytest.param(
+        {"ROCPROFSYS_USE_SAMPLING": "ON", "ROCPROFSYS_SAMPLING_FREQ": "50"},
+        r"[Ii]nvalid value.*ROCPROFSYS_SAMPLING_FREQ",
+        id="numeric-range",
+    ),
+]
+
 
 # =============================================================================
 # Config fixtures
@@ -164,6 +187,82 @@ class TestConfig(RocprofsysTest):
         env = MINIMAL_RUNTIME_ENV.copy()
         env["ROCPROFSYS_CONFIG_FILE"] = str(config_file)
         env["ROCPROFSYS_TRACE"] = value
+
+        result = self.run_invalid_config_test(config_target, env)
+
+        self.assert_regex(
+            result,
+            pass_regex=[r"[Ii]nvalid value.*ROCPROFSYS_MODE"],
+            fail_regex=[r"[Ii]nvalid value.*ROCPROFSYS_TRACE"],
+            use_abort_fail_regex=False,
+        )
+
+    @pytest.mark.parametrize(
+        "env_overrides, fail_regex", VALID_NON_BOOLEAN_TYPED_VALUE_CASES
+    )
+    def test_valid_non_boolean_environment_values_are_not_rejected(
+        self, config_target, create_config_file, env_overrides, fail_regex
+    ):
+        """Test valid non-boolean environment values pass strict validation."""
+        config_file = create_config_file(
+            {"ROCPROFSYS_TRACE": "maybe"},
+            f"valid_env_{next(iter(env_overrides)).lower()}.cfg",
+            skip_filter=True,
+        )
+        env = MINIMAL_RUNTIME_ENV.copy()
+        env.update(env_overrides)
+        env["ROCPROFSYS_CONFIG_FILE"] = str(config_file)
+
+        result = self.run_invalid_config_test(config_target, env)
+
+        self.assert_regex(
+            result,
+            pass_regex=[r"[Ii]nvalid value.*ROCPROFSYS_TRACE"],
+            fail_regex=[fail_regex],
+            use_abort_fail_regex=False,
+        )
+
+    @pytest.mark.parametrize(
+        "config_env, fail_regex", VALID_NON_BOOLEAN_TYPED_VALUE_CASES
+    )
+    def test_valid_non_boolean_config_values_are_not_rejected(
+        self, config_target, create_config_file, config_env, fail_regex
+    ):
+        """Test valid non-boolean config-file values pass strict validation."""
+        config_values = config_env.copy()
+        config_values["ROCPROFSYS_TRACE"] = "maybe"
+        config_file = create_config_file(
+            config_values,
+            f"valid_config_{next(iter(config_env)).lower()}.cfg",
+            skip_filter=True,
+        )
+        env = MINIMAL_RUNTIME_ENV.copy()
+        env["ROCPROFSYS_CONFIG_FILE"] = str(config_file)
+
+        result = self.run_invalid_config_test(config_target, env)
+
+        self.assert_regex(
+            result,
+            pass_regex=[r"[Ii]nvalid value.*ROCPROFSYS_TRACE"],
+            fail_regex=[fail_regex],
+            use_abort_fail_regex=False,
+        )
+
+    def test_config_file_variable_boolean_value_is_not_rejected(
+        self, config_target, create_config_file
+    ):
+        """Test config variable references survive strict raw pre-validation."""
+        config_file = create_config_file(
+            {
+                "$ENABLE": "ON",
+                "ROCPROFSYS_TRACE": "$ENABLE",
+                "ROCPROFSYS_MODE": "banana",
+            },
+            "valid_bool_trace_variable.cfg",
+            skip_filter=True,
+        )
+        env = MINIMAL_RUNTIME_ENV.copy()
+        env["ROCPROFSYS_CONFIG_FILE"] = str(config_file)
 
         result = self.run_invalid_config_test(config_target, env)
 
