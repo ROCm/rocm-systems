@@ -79,8 +79,7 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
   // SOPP branches encode a signed dword offset from the next instruction. Keep
   // the range check shared so both cave entry and return branches fail closed.
   constexpr int64_t kBranchPcBiasBytes = static_cast<int64_t>(sizeof(uint32_t));
-  constexpr uint64_t kMaxSignedTarget =
-      static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
+  constexpr uint64_t kMaxSignedTarget = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
   constexpr uint64_t kMaxSignedBranchPc =
       static_cast<uint64_t>(std::numeric_limits<int64_t>::max() - kBranchPcBiasBytes);
   // The PCs are unsigned until this check passes. Compare against the casted

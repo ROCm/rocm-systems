@@ -3880,6 +3880,18 @@ inline static hipError_t hipLibraryGetKernel(hipKernel_t* pKernel, hipLibrary_t 
   return hipCUResultTohipError(cuLibraryGetKernel(pKernel, library, name));
 }
 
+inline static hipError_t hipLibraryGetGlobal(void** dptr, size_t* bytes,
+                                             hipLibrary_t library, const char* name) {
+  return hipCUDAErrorTohipError(
+      cudaLibraryGetGlobal(dptr, bytes, reinterpret_cast<cudaLibrary_t>(library), name));
+}
+
+inline static hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes,
+                                              hipLibrary_t library, const char* name) {
+  return hipCUDAErrorTohipError(
+      cudaLibraryGetManaged(dptr, bytes, reinterpret_cast<cudaLibrary_t>(library), name));
+}
+
 inline static hipError_t hipLibraryGetKernelCount(unsigned int* count, hipLibrary_t library) {
   return hipCUResultTohipError(cuLibraryGetKernelCount(count, library));
 }

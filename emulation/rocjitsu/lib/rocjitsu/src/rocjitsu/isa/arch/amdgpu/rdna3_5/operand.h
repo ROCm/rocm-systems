@@ -15,7 +15,7 @@
 namespace rocjitsu {
 namespace rdna3_5 {
 
-class Operand : public IsaOperand<Isa> {
+class Operand : public AmdgpuIsaOperand<Isa> {
 public:
   Operand(int size_bits, OperandType opr_type, int encoding_value);
   std::string name() const override;

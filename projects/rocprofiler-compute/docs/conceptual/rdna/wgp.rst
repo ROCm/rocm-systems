@@ -1,5 +1,5 @@
 .. meta::
-   :description: ROCm Compute Profiler — RDNA3.5 WGP / roofline metrics
+   :description: ROCm Compute Profiler - RDNA3.5 WGP / roofline metrics
    :keywords: ROCm Compute Profiler, RDNA, gfx1151, WGP, roofline
 
 .. _rdna-wgp:
@@ -8,18 +8,14 @@
 Workgroup processor (WGP)
 =========================
 
-On RDNA3-class GPUs (including discrete Ryzen APU 3x and RDNA3.5 / gfx1151
-integrations), shader work is organized into Workgroup Processors (WGPs). A WGP
-pairs two Compute Units (CUs) that share resources; compute kernels are typically
-tracked with wave32-oriented waves in the gfx1151 panel set. The profiler's
-WGP panel is the analogue of the Instinct compute unit chapter: occupancy,
-dispatch, instruction mix, and local caches at that granularity.
+Within each shader engine, **Workgroup Processors (WGPs)** pair two **Compute Units (CUs)** that share resources and execute dispatched waves after the SPI workgroup manager hands off work.
+On RDNA3-class GPUs (including discrete Ryzen APU 3x and RDNA3.5 / gfx1151 integrations), compute kernels are typically tracked with wave32-oriented waves; the gfx1151 **WGP** panels cover occupancy, dispatch, instruction mix, and local caches at that WGP/CU-pair granularity.
 
 The sections below list RDNA3.5 (gfx1151) metric descriptions.
 
 .. Note::
-   For VALU / VMEM / MFMA-style pipeline tables and MI-series diagrams, see
-   :doc:`../cdna/compute-unit`.
+   AMD Instinct (CDNA) GPUs use a different execution hierarchy and panel grouping.
+   For Instinct-only pipeline metrics (for example, VALU / VMEM / MFMA-style tables), see :doc:`../cdna/cdna-performance-model`-without assuming RDNA WGPs or CUs map directly to those layouts.
 
 Roofline
 ========

@@ -564,6 +564,9 @@ struct formatter<hipLaunchAttributeID> : rocprofiler::hip::details::base_formatt
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipLaunchAttribute, ClusterDimension);
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipLaunchAttribute, ClusterSchedulingPolicyPreference);
 #    endif
+#    if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 28
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipLaunchAttribute, ExtDynDataPrefetch);
+#    endif
             ROCP_SDK_HIP_FORMAT_DFLT_CASE(hipLaunchAttributeID);
         }
         return fmt::format_to(ctx.out(), "Unknown");
@@ -575,7 +578,24 @@ struct formatter<hipLaunchAttributeValue> : rocprofiler::hip::details::base_form
     template <typename Ctx>
     auto format(hipLaunchAttributeValue v, Ctx& ctx) const
     {
-#    if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 27
+#    if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 28
+        return fmt::format_to(
+            ctx.out(),
+            "{{accessPolicyWindow={}, cooperative={}, priority={}, syncPolicy={}, "
+            "memSyncDomainMap={}, memSyncDomain={}, clusterDim={{x={}, y={}, z={}}}, "
+            "clusterSchedulingPolicyPreference={}, dynDataPrefetch={}}}",
+            v.accessPolicyWindow,
+            v.cooperative,
+            v.priority,
+            v.syncPolicy,
+            v.memSyncDomainMap,
+            v.memSyncDomain,
+            v.clusterDim.x,
+            v.clusterDim.y,
+            v.clusterDim.z,
+            v.clusterSchedulingPolicyPreference,
+            static_cast<const void*>(v.dynDataPrefetch));
+#    elif HIP_RUNTIME_API_TABLE_STEP_VERSION >= 27
         return fmt::format_to(
             ctx.out(),
             "{{accessPolicyWindow={}, cooperative={}, priority={}, syncPolicy={}, "
@@ -745,19 +765,29 @@ struct formatter<hipDevResource> : rocprofiler::hip::details::base_formatter
         switch(v.type)
         {
             case hipDevResourceTypeSm:
-                return fmt::format_to(
-                    ctx.out(), "{}type={}, sm={}, nextResource={}{}",
-                    '{', v.type, v.sm, static_cast<const void*>(v.nextResource), '}');
+                return fmt::format_to(ctx.out(),
+                                      "{}type={}, sm={}, nextResource={}{}",
+                                      '{',
+                                      v.type,
+                                      v.sm,
+                                      static_cast<const void*>(v.nextResource),
+                                      '}');
             case hipDevResourceTypeWorkqueueConfig:
-                return fmt::format_to(
-                    ctx.out(), "{}type={}, wqConfig={}, nextResource={}{}",
-                    '{', v.type, v.wqConfig, static_cast<const void*>(v.nextResource), '}');
-            default:
-                break;
+                return fmt::format_to(ctx.out(),
+                                      "{}type={}, wqConfig={}, nextResource={}{}",
+                                      '{',
+                                      v.type,
+                                      v.wqConfig,
+                                      static_cast<const void*>(v.nextResource),
+                                      '}');
+            default: break;
         }
-        return fmt::format_to(
-            ctx.out(), "{}type={}, nextResource={}{}",
-            '{', v.type, static_cast<const void*>(v.nextResource), '}');
+        return fmt::format_to(ctx.out(),
+                              "{}type={}, nextResource={}{}",
+                              '{',
+                              v.type,
+                              static_cast<const void*>(v.nextResource),
+                              '}');
     }
 };
 

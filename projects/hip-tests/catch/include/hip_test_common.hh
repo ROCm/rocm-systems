@@ -252,12 +252,19 @@ static void initHipCtx(hipCtx_t* pcontext) {
   HIPCHECK(hipDeviceGet(&device, 0));
   HIPCHECK(hipCtxCreate(pcontext, 0, device));
 }
+
+// hipLibrary* / hipModuleLoad use the CUDA driver API on NVIDIA and require
+// hipInit() before the first call (hipErrorNotInitialized otherwise). Runtime
+// APIs such as hipMalloc or hipStreamCreate initialize implicitly. Tests that
+// also call hipModuleLoad or hipKernelGetFunction need CTX_CREATE() instead.
+#define HIP_TEST_DRIVER_INIT() HIP_CHECK(hipInit(0))
 #else
 #define CTX_CREATE()
 #define CTX_DESTROY()
 #define ARRAY_DESTROY(array) HIPCHECK(hipFreeArray(array));
 #define HIP_TEX_REFERENCE textureReference*
 #define HIP_ARRAY hipArray_t
+#define HIP_TEST_DRIVER_INIT()
 #endif
 
 static inline int getWarpSize() {

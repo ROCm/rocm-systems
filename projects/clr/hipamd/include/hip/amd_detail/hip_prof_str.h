@@ -500,7 +500,9 @@ enum hip_api_id_t {
   HIP_API_ID_hipExecutionCtxRecordEvent = 475,
   HIP_API_ID_hipExecutionCtxSynchronize = 476,
   HIP_API_ID_hipExecutionCtxWaitEvent = 477,
-  HIP_API_ID_LAST = 477,
+  HIP_API_ID_hipLibraryGetGlobal = 478,
+  HIP_API_ID_hipLibraryGetManaged = 479,
+  HIP_API_ID_LAST = 479,
 
   HIP_API_ID_hipChooseDevice = HIP_API_ID_CONCAT(HIP_API_ID_,hipChooseDevice),
   HIP_API_ID_hipGetDeviceProperties = HIP_API_ID_CONCAT(HIP_API_ID_,hipGetDeviceProperties),
@@ -794,8 +796,10 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipLaunchKernel: return "hipLaunchKernel";
     case HIP_API_ID_hipLaunchKernelExC: return "hipLaunchKernelExC";
     case HIP_API_ID_hipLibraryEnumerateKernels: return "hipLibraryEnumerateKernels";
+    case HIP_API_ID_hipLibraryGetGlobal: return "hipLibraryGetGlobal";
     case HIP_API_ID_hipLibraryGetKernel: return "hipLibraryGetKernel";
     case HIP_API_ID_hipLibraryGetKernelCount: return "hipLibraryGetKernelCount";
+    case HIP_API_ID_hipLibraryGetManaged: return "hipLibraryGetManaged";
     case HIP_API_ID_hipLibraryLoadData: return "hipLibraryLoadData";
     case HIP_API_ID_hipLibraryLoadFromFile: return "hipLibraryLoadFromFile";
     case HIP_API_ID_hipLibraryUnload: return "hipLibraryUnload";
@@ -1265,8 +1269,10 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipLaunchKernel", name) == 0) return HIP_API_ID_hipLaunchKernel;
   if (strcmp("hipLaunchKernelExC", name) == 0) return HIP_API_ID_hipLaunchKernelExC;
   if (strcmp("hipLibraryEnumerateKernels", name) == 0) return HIP_API_ID_hipLibraryEnumerateKernels;
+  if (strcmp("hipLibraryGetGlobal", name) == 0) return HIP_API_ID_hipLibraryGetGlobal;
   if (strcmp("hipLibraryGetKernel", name) == 0) return HIP_API_ID_hipLibraryGetKernel;
   if (strcmp("hipLibraryGetKernelCount", name) == 0) return HIP_API_ID_hipLibraryGetKernelCount;
+  if (strcmp("hipLibraryGetManaged", name) == 0) return HIP_API_ID_hipLibraryGetManaged;
   if (strcmp("hipLibraryLoadData", name) == 0) return HIP_API_ID_hipLibraryLoadData;
   if (strcmp("hipLibraryLoadFromFile", name) == 0) return HIP_API_ID_hipLibraryLoadFromFile;
   if (strcmp("hipLibraryUnload", name) == 0) return HIP_API_ID_hipLibraryUnload;
@@ -2946,6 +2952,15 @@ typedef struct hip_api_data_s {
       hipLibrary_t library;
     } hipLibraryEnumerateKernels;
     struct {
+      void** dptr;
+      void* dptr__val;
+      size_t* bytes;
+      size_t bytes__val;
+      hipLibrary_t library;
+      const char* name;
+      char name__val;
+    } hipLibraryGetGlobal;
+    struct {
       hipKernel_t* pKernel;
       hipKernel_t pKernel__val;
       hipLibrary_t library;
@@ -2957,6 +2972,15 @@ typedef struct hip_api_data_s {
       unsigned int count__val;
       hipLibrary_t library;
     } hipLibraryGetKernelCount;
+    struct {
+      void** dptr;
+      void* dptr__val;
+      size_t* bytes;
+      size_t bytes__val;
+      hipLibrary_t library;
+      const char* name;
+      char name__val;
+    } hipLibraryGetManaged;
     struct {
       hipLibrary_t* library;
       hipLibrary_t library__val;
@@ -5778,6 +5802,13 @@ typedef struct hip_api_data_s {
   cb_data.args.hipLibraryEnumerateKernels.numKernels = (unsigned int)numKernels; \
   cb_data.args.hipLibraryEnumerateKernels.library = (hipLibrary_t)library; \
 };
+// hipLibraryGetGlobal[('void**', 'dptr'), ('size_t*', 'bytes'), ('hipLibrary_t', 'library'), ('const char*', 'name')]
+#define INIT_hipLibraryGetGlobal_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipLibraryGetGlobal.dptr = (void**)dptr; \
+  cb_data.args.hipLibraryGetGlobal.bytes = (size_t*)bytes; \
+  cb_data.args.hipLibraryGetGlobal.library = (hipLibrary_t)library; \
+  cb_data.args.hipLibraryGetGlobal.name = (name) ? strdup(name) : NULL; \
+};
 // hipLibraryGetKernel[('hipKernel_t*', 'pKernel'), ('hipLibrary_t', 'library'), ('const char*', 'name')]
 #define INIT_hipLibraryGetKernel_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipLibraryGetKernel.pKernel = (hipKernel_t*)kernel; \
@@ -5788,6 +5819,13 @@ typedef struct hip_api_data_s {
 #define INIT_hipLibraryGetKernelCount_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipLibraryGetKernelCount.count = (unsigned int*)count; \
   cb_data.args.hipLibraryGetKernelCount.library = (hipLibrary_t)library; \
+};
+// hipLibraryGetManaged[('void**', 'dptr'), ('size_t*', 'bytes'), ('hipLibrary_t', 'library'), ('const char*', 'name')]
+#define INIT_hipLibraryGetManaged_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipLibraryGetManaged.dptr = (void**)dptr; \
+  cb_data.args.hipLibraryGetManaged.bytes = (size_t*)bytes; \
+  cb_data.args.hipLibraryGetManaged.library = (hipLibrary_t)library; \
+  cb_data.args.hipLibraryGetManaged.name = (name) ? strdup(name) : NULL; \
 };
 // hipLibraryLoadData[('hipLibrary_t*', 'library'), ('const void*', 'code'), ('hipJitOption*', 'jitOptions'), ('void**', 'jitOptionsValues'), ('unsigned int', 'numJitOptions'), ('hipLibraryOption*', 'libraryOptions'), ('void**', 'libraryOptionValues'), ('unsigned int', 'numLibraryOptions')]
 #define INIT_hipLibraryLoadData_CB_ARGS_DATA(cb_data) { \
@@ -8236,6 +8274,12 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
     case HIP_API_ID_hipLibraryEnumerateKernels:
       if (data->args.hipLibraryEnumerateKernels.kernels) data->args.hipLibraryEnumerateKernels.kernels__val = *(data->args.hipLibraryEnumerateKernels.kernels);
       break;
+// hipLibraryGetGlobal[('void**', 'dptr'), ('size_t*', 'bytes'), ('hipLibrary_t', 'library'), ('const char*', 'name')]
+    case HIP_API_ID_hipLibraryGetGlobal:
+      if (data->args.hipLibraryGetGlobal.dptr) data->args.hipLibraryGetGlobal.dptr__val = *(data->args.hipLibraryGetGlobal.dptr);
+      if (data->args.hipLibraryGetGlobal.bytes) data->args.hipLibraryGetGlobal.bytes__val = *(data->args.hipLibraryGetGlobal.bytes);
+      if (data->args.hipLibraryGetGlobal.name) data->args.hipLibraryGetGlobal.name__val = *(data->args.hipLibraryGetGlobal.name);
+      break;
 // hipLibraryGetKernel[('hipKernel_t*', 'pKernel'), ('hipLibrary_t', 'library'), ('const char*', 'name')]
     case HIP_API_ID_hipLibraryGetKernel:
       if (data->args.hipLibraryGetKernel.pKernel) data->args.hipLibraryGetKernel.pKernel__val = *(data->args.hipLibraryGetKernel.pKernel);
@@ -8244,6 +8288,12 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
 // hipLibraryGetKernelCount[('unsigned int*', 'count'), ('hipLibrary_t', 'library')]
     case HIP_API_ID_hipLibraryGetKernelCount:
       if (data->args.hipLibraryGetKernelCount.count) data->args.hipLibraryGetKernelCount.count__val = *(data->args.hipLibraryGetKernelCount.count);
+      break;
+// hipLibraryGetManaged[('void**', 'dptr'), ('size_t*', 'bytes'), ('hipLibrary_t', 'library'), ('const char*', 'name')]
+    case HIP_API_ID_hipLibraryGetManaged:
+      if (data->args.hipLibraryGetManaged.dptr) data->args.hipLibraryGetManaged.dptr__val = *(data->args.hipLibraryGetManaged.dptr);
+      if (data->args.hipLibraryGetManaged.bytes) data->args.hipLibraryGetManaged.bytes__val = *(data->args.hipLibraryGetManaged.bytes);
+      if (data->args.hipLibraryGetManaged.name) data->args.hipLibraryGetManaged.name__val = *(data->args.hipLibraryGetManaged.name);
       break;
 // hipLibraryLoadData[('hipLibrary_t*', 'library'), ('const void*', 'code'), ('hipJitOption*', 'jitOptions'), ('void**', 'jitOptionsValues'), ('unsigned int', 'numJitOptions'), ('hipLibraryOption*', 'libraryOptions'), ('void**', 'libraryOptionValues'), ('unsigned int', 'numLibraryOptions')]
     case HIP_API_ID_hipLibraryLoadData:
@@ -11056,6 +11106,17 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << ", library="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryEnumerateKernels.library);
       oss << ")";
     break;
+    case HIP_API_ID_hipLibraryGetGlobal:
+      oss << "hipLibraryGetGlobal(";
+      if (data->args.hipLibraryGetGlobal.dptr == NULL) oss << "dptr=NULL";
+      else { oss << "dptr="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetGlobal.dptr__val); }
+      if (data->args.hipLibraryGetGlobal.bytes == NULL) oss << ", bytes=NULL";
+      else { oss << ", bytes="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetGlobal.bytes__val); }
+      oss << ", library="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetGlobal.library);
+      if (data->args.hipLibraryGetGlobal.name == NULL) oss << ", name=NULL";
+      else { oss << ", name="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetGlobal.name__val); }
+      oss << ")";
+    break;
     case HIP_API_ID_hipLibraryGetKernel:
       oss << "hipLibraryGetKernel(";
       if (data->args.hipLibraryGetKernel.pKernel == NULL) oss << "pKernel=NULL";
@@ -11070,6 +11131,17 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       if (data->args.hipLibraryGetKernelCount.count == NULL) oss << "count=NULL";
       else { oss << "count="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetKernelCount.count__val); }
       oss << ", library="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetKernelCount.library);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipLibraryGetManaged:
+      oss << "hipLibraryGetManaged(";
+      if (data->args.hipLibraryGetManaged.dptr == NULL) oss << "dptr=NULL";
+      else { oss << "dptr="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetManaged.dptr__val); }
+      if (data->args.hipLibraryGetManaged.bytes == NULL) oss << ", bytes=NULL";
+      else { oss << ", bytes="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetManaged.bytes__val); }
+      oss << ", library="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetManaged.library);
+      if (data->args.hipLibraryGetManaged.name == NULL) oss << ", name=NULL";
+      else { oss << ", name="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetManaged.name__val); }
       oss << ")";
     break;
     case HIP_API_ID_hipLibraryLoadData:

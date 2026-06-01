@@ -22,7 +22,10 @@ from amdisa import (
 )
 from amdisa import xml_schema as xs
 from amdisa.cross_isa import CrossIsaAnalyzer
-from amdisa.encoding_translator_codegen import generate_encoding_fields, generate_encoding_translators
+from amdisa.encoding_translator_codegen import (
+    generate_encoding_fields,
+    generate_encoding_translators,
+)
 from amdisa.legalization import LegalizationGenerator
 from amdisa.legalization_codegen import emit_all as emit_legalization
 from amdisa.semantics import derive_all_semantics
@@ -83,7 +86,10 @@ def _run_multi(args) -> None:
     specs = []
     for entry in args.multi:
         if ':' not in entry:
-            print(f'error: --multi entry must be name:xml_path, got: {entry}', file=sys.stderr)
+            print(
+                f'error: --multi entry must be name:xml_path, got: {entry}',
+                file=sys.stderr,
+            )
             sys.exit(1)
         name, xml_path = entry.split(':', 1)
         profile_key = name.replace('.', '_')
@@ -97,9 +103,12 @@ def _run_multi(args) -> None:
     analyzer = CrossIsaAnalyzer()
     plan = analyzer.analyze(specs)
 
-    print(f'Cross-ISA analysis: {plan.total_universal} universal, '
-          f'{plan.total_family_shared} family-shared, '
-          f'{plan.total_exclusive} exclusive', file=sys.stderr)
+    print(
+        f'Cross-ISA analysis: {plan.total_universal} universal, '
+        f'{plan.total_family_shared} family-shared, '
+        f'{plan.total_exclusive} exclusive',
+        file=sys.stderr,
+    )
 
     config = CodegenConfig()
 
@@ -107,8 +116,9 @@ def _run_multi(args) -> None:
     if args.gen_isas:
         all_shared_bodies: dict[tuple[str, str], tuple] = {}
         for name, spec, sem in specs:
-            code_gen = CodeGenerator(spec, args.isa_output, sem, config=config,
-                                     shared_plan=plan)
+            code_gen = CodeGenerator(
+                spec, args.isa_output, sem, config=config, shared_plan=plan
+            )
             code_gen.gen_all()
             for key, data in code_gen._shared_execute_bodies.items():
                 if key not in all_shared_bodies:
@@ -117,8 +127,9 @@ def _run_multi(args) -> None:
         if all_shared_bodies:
             first_spec = specs[0][1]
             first_sem = specs[0][2]
-            writer = CodeGenerator(first_spec, args.isa_output, first_sem,
-                                   config=config, shared_plan=plan)
+            writer = CodeGenerator(
+                first_spec, args.isa_output, first_sem, config=config, shared_plan=plan
+            )
             writer._shared_execute_bodies = all_shared_bodies
             writer._write_shared_execute_templates()
 
@@ -131,10 +142,13 @@ def _run_multi(args) -> None:
         generated = emit_legalization(dbt_output, results)
         for src, dst, entries in results:
             counts = leg_gen.summary(entries)
-            print(f'  {src} -> {dst}: {len(entries)} entries '
-                  f'({counts["identity"]} identity, {counts["substitute"]} substitute, '
-                  f'{counts["lower"]} lower, {counts["expand"]} expand, '
-                  f'{counts["illegal"]} illegal)', file=sys.stderr)
+            print(
+                f'  {src} -> {dst}: {len(entries)} entries '
+                f'({counts["identity"]} identity, {counts["substitute"]} substitute, '
+                f'{counts["lower"]} lower, {counts["expand"]} expand, '
+                f'{counts["illegal"]} illegal)',
+                file=sys.stderr,
+            )
         print(f'Generated {len(generated)} files in {dbt_output}', file=sys.stderr)
 
         generate_encoding_fields(specs, dbt_output)
@@ -144,7 +158,8 @@ def _run_multi(args) -> None:
                 src_spec, _ = spec_map[src_n]
                 dst_spec, _ = spec_map[dst_n]
                 generate_encoding_translators(
-                    src_spec, dst_spec, src_n, dst_n, dbt_output)
+                    src_spec, dst_spec, src_n, dst_n, dbt_output
+                )
 
 
 def main() -> None:
@@ -153,20 +168,28 @@ def main() -> None:
         description="Parse a machine-readable AMD GPU ISA specification and generate C++ sources"
     )
     arg_parser.add_argument(
-        "isafile", nargs='?', default=None,
-        help="XML file with machine-readable AMD GPU ISA specification"
+        "isafile",
+        nargs='?',
+        default=None,
+        help="XML file with machine-readable AMD GPU ISA specification",
     )
     arg_parser.add_argument(
-        "--multi", nargs='+', metavar='NAME:XML',
+        "--multi",
+        nargs='+',
+        metavar='NAME:XML',
         help="Multi-ISA mode: parse all XMLs and generate shared execute() templates. "
-             "Each argument is name:xml_path (e.g., cdna1:/path/to/cdna1.xml)."
+        "Each argument is name:xml_path (e.g., cdna1:/path/to/cdna1.xml).",
     )
     arg_parser.add_argument(
-        "--gen-isas", action="store_true", default=True,
+        "--gen-isas",
+        action="store_true",
+        default=True,
         help="Generate ISA C++ files (decoders, encodings, execute bodies). Default.",
     )
     arg_parser.add_argument(
-        "--gen-dbt", action="store_true", default=True,
+        "--gen-dbt",
+        action="store_true",
+        default=True,
         help="Generate DBT legalization tables and encoding translators. Default.",
     )
     arg_parser.add_argument(

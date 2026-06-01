@@ -521,8 +521,10 @@ extern "C" ncclResult_t ncclIbCastGetResiliencyState(void* sendComm, struct nccl
   out->outstandingRequests = res->outstandingRequests;
   out->outstandingRecovery = res->outstandingRecovery;
   out->ndevs              = res->ndevs;
-  for (int i = 0; i < res->ndevs && i < 4; i++)
+  for (int i = 0; i < res->ndevs && i < NCCL_IB_MAX_DEVS_PER_NIC; i++) {
     out->devState[i] = (int)res->devs[i].state.load(std::memory_order_acquire);
+    out->recoveryCount[i] = res->devs[i].recoveryCount;
+  }
 
   return ncclSuccess;
 }
