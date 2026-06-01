@@ -203,15 +203,21 @@ if (NOT BUILD_TESTS_ONLY)
   #############################################################################
   # GDA Requires libnuma
   if(USE_GDA)
-    find_path(NUMA_INCLUDE_DIR NAMES numa.h)
-    find_library(NUMA_LIBRARY NAMES numa)
+    find_package(NUMA QUIET
+      PATHS /opt/rocm/lib/rocm_sysdeps /opt/rocm
+      PATH_SUFFIXES lib/cmake/NUMA)
+    if(NOT TARGET numa::numa)
+      find_library(_NUMA_LIB NAMES numa)
+      find_path(_NUMA_INC NAMES numa.h)
+      if(_NUMA_LIB AND _NUMA_INC)
+        add_library(numa::numa SHARED IMPORTED)
+        set_target_properties(numa::numa PROPERTIES
+          IMPORTED_LOCATION "${_NUMA_LIB}"
+          INTERFACE_INCLUDE_DIRECTORIES "${_NUMA_INC}")
+      endif()
+    endif()
 
-    include(FindPackageHandleStandardArgs)
-    find_package_handle_standard_args(NUMA DEFAULT_MSG NUMA_LIBRARY NUMA_INCLUDE_DIR)
-
-    # Usually you would have to add libnuma to target but we use dlopen
-
-    if (NOT NUMA_FOUND)
+    if(NOT TARGET numa::numa)
       message(STATUS "libnuma not found. Unable to build GDA")
       set(USE_GDA OFF)
       set(GDA_IONIC OFF)
@@ -356,6 +362,7 @@ if (NOT BUILD_TESTS_ONLY)
       -fgpu-rdc
       $<$<NOT:$<BOOL:${FILESYSTEM_NO_LINK_NEEDED}>>:stdc++fs>
       $<$<BOOL:${USE_SDMA}>:hsakmt::hsakmt>
+      $<$<BOOL:${USE_GDA}>:numa::numa>
   )
 
   if(${ROCM_MAJOR_VERSION} LESS 7)
@@ -404,6 +411,7 @@ if (NOT BUILD_TESTS_ONLY)
   rocm_export_targets(
     TARGETS roc::rocshmem
     NAMESPACE roc::
+    DEPENDS PACKAGE NUMA
   )
   include(ROCMPackageConfigHelpers)
   include(ROCMClients)
