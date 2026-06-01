@@ -97,9 +97,13 @@ RJ_API_EXPORT rj_status_t rj_code_decoder_decode(rj_code_decoder_t *decoder,
 /// @brief GPU target identifiers.
 typedef enum rj_code_target_id_t {
   /// @brief gfx942 target ID (CDNA3).
-  ROCJITSU_CODE_TARGET_GFX942 = 0,
+  ROCJITSU_CODE_TARGET_GFX942,
   /// @brief gfx950 target ID (CDNA4).
-  ROCJITSU_CODE_TARGET_GFX950 = 1,
+  ROCJITSU_CODE_TARGET_GFX950,
+  /// @brief gfx1200 target ID (RDNA4).
+  ROCJITSU_CODE_TARGET_GFX1200,
+  /// @brief gfx1201 target ID (RDNA4).
+  ROCJITSU_CODE_TARGET_GFX1201,
   /// @brief Sentinel value representing an invalid target.
   ROCJITSU_CODE_TARGET_INVALID
 } rj_code_target_id_t;

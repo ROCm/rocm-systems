@@ -15,6 +15,7 @@
 #include "hipfile-warnings.h"
 #include "io.h"
 #include "state.h"
+#include "stats.h"
 
 #include <cerrno>
 #include <cstdint>
@@ -78,6 +79,7 @@ try {
         case hipFileHandleTypeOpaqueFD: {
             UnregisteredFile uf{descr->handle.fd};
             *fh = Context<DriverState>::get()->registerFile(std::move(uf));
+            Context<StatsCollection>::get()->fileRegistration();
             return {hipFileSuccess, hipSuccess};
         }
         case hipFileHandleTypeOpaqueWin32:
@@ -113,6 +115,7 @@ hipFileBufRegister(const void *buffer_base, size_t length, int flags)
 try {
     hipFileInit();
     Context<DriverState>::get()->registerBuffer(buffer_base, length, flags);
+    Context<StatsCollection>::get()->bufferRegistration();
     return {hipFileSuccess, hipSuccess};
 }
 catch (const BufferAlreadyRegistered &) {
