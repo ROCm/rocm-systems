@@ -2924,7 +2924,11 @@ class GraphMemAllocNode final : public GraphNode {
           aligned_size, static_cast<hip::Stream*>(queue()),
           relaunch ? *phys_ptr_ref_ : nullptr);
       if (dptr == nullptr) {
+        LogError("Graph MemAlloc node failed to allocate device memory");
         setStatus(CL_INVALID_OPERATION);
+        // Graph commands are fire-and-forget; latch the device error (as the HSA
+        // async-error handler does) so hipGraphLaunch/sync surface it.
+        queue()->device().gpu_error_ = CL_INVALID_OPERATION;
         if (!AMD_DIRECT_DISPATCH) {
           WorkerThreadLock_.unlock();
         }
