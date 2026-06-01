@@ -225,25 +225,6 @@ Guidelines:
 - Use hierarchical reductions to reduce pressure on global memory
 
 ------------------------------------------------------------
-Cache Line Alignment
-------------------------------------------------------------
-
-Typical cache line size: 64 bytes
-
-.. code-block:: cpp
-
-    struct alignas(64) Data
-    {
-        float values[16];
-    };
-
-Benefits:
-
-- Improved memory coalescing
-- Reduced cache contention
-- Increased memory access efficiency
-
-------------------------------------------------------------
 Multi-XCC Profiling
 ------------------------------------------------------------
 
