@@ -591,6 +591,83 @@ inline native<uint64_t> frexp_exp_f64_simd(native<double> x) {
   stdx::where(E == 2047ull, out) = U(0ull);
   return out;
 }
+
+/// Sum of the four per-byte absolute differences of two uint32 lanes (the core
+/// of v_sad_u8 / v_sad_hi_u8). Each byte difference is in [0,255], so the sum is
+/// in [0,1020]; bit-identical to the scalar byte loop.
+inline native<uint32_t> sad_bytes_u32_simd(native<uint32_t> a, native<uint32_t> b) {
+  using U = native<uint32_t>;
+  U r(0u);
+  for (int i = 0; i < 4; ++i) {
+    U ai = (a >> (i * 8)) & U(0xFFu);
+    U bi = (b >> (i * 8)) & U(0xFFu);
+    U d = ai - bi;
+    stdx::where(bi > ai, d) = bi - ai; // |ai - bi|
+    r += d;
+  }
+  return r;
+}
+
+/// Masked per-byte SAD (v_msad_u8): like sad_bytes_u32_simd but a byte whose
+/// reference (src0) value is zero contributes nothing. Bit-identical to scalar.
+inline native<uint32_t> msad_bytes_u32_simd(native<uint32_t> a, native<uint32_t> b) {
+  using U = native<uint32_t>;
+  U r(0u);
+  for (int i = 0; i < 4; ++i) {
+    U ai = (a >> (i * 8)) & U(0xFFu);
+    U bi = (b >> (i * 8)) & U(0xFFu);
+    U d = ai - bi;
+    stdx::where(bi > ai, d) = bi - ai;
+    stdx::where(ai == 0u, d) = 0u; // skip masked-out (zero reference) bytes
+    r += d;
+  }
+  return r;
+}
+
+/// Per-byte unsigned lerp (v_lerp_u8): out_byte = a + ((b - a) * c + 128) / 256,
+/// computed independently per byte and repacked. The division is signed and
+/// truncates toward zero (matching the scalar `int / 256`), so a negative
+/// numerator gets the +1 floor->trunc correction. Bit-identical to the scalar.
+inline native<uint32_t> lerp_u8_simd(native<uint32_t> a, native<uint32_t> b, native<uint32_t> c) {
+  using U = native<uint32_t>;
+  using I = native<int32_t>;
+  U r(0u);
+  for (int i = 0; i < 4; ++i) {
+    const int sh = i * 8;
+    I ab = stdx::static_simd_cast<I>((a >> sh) & U(0xFFu));
+    I bb = stdx::static_simd_cast<I>((b >> sh) & U(0xFFu));
+    I cb = stdx::static_simd_cast<I>((c >> sh) & U(0xFFu));
+    I num = (bb - ab) * cb + I(128);
+    I q = num >> 8; // arithmetic shift == floor division by 256
+    stdx::where((num < 0) && ((num & I(255)) != 0), q) = q + I(1); // floor -> toward zero
+    I res = ab + q;
+    r = r | (stdx::static_simd_cast<U>(res) << sh);
+  }
+  return r;
+}
+
+/// Byte permute (v_perm_b32): build each output byte from a selector byte of
+/// src2 indexing the 8 bytes of the {src0:src1} 64-bit source (src1 = low word).
+/// Selector 0..7 picks a source byte; 0xD yields 0xFF; every other value yields
+/// 0. Bit-identical to the scalar byte loop.
+inline native<uint32_t> perm_b32_simd(native<uint32_t> a, native<uint32_t> b, native<uint32_t> c) {
+  using U = native<uint32_t>;
+  U srcbyte[8];
+  for (int k = 0; k < 4; ++k)
+    srcbyte[k] = (b >> (k * 8)) & U(0xFFu); // bytes 0..3 from the low word (src1)
+  for (int k = 0; k < 4; ++k)
+    srcbyte[k + 4] = (a >> (k * 8)) & U(0xFFu); // bytes 4..7 from the high word (src0)
+  U r(0u);
+  for (int i = 0; i < 4; ++i) {
+    U sel = (c >> (i * 8)) & U(0xFFu);
+    U byte(0u); // 0xC and all other selectors >= 8 -> 0
+    for (int k = 0; k < 8; ++k)
+      stdx::where(sel == U(static_cast<uint32_t>(k)), byte) = srcbyte[k];
+    stdx::where(sel == U(0xDu), byte) = U(0xFFu); // 0xD -> 0xFF
+    r = r | (byte << (i * 8));
+  }
+  return r;
+}
 #endif // __has_include(<experimental/simd>)
 
 #if !__has_include(<experimental/simd>)

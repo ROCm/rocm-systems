@@ -52,7 +52,7 @@ struct Case {
 // family (i16/i32/u16/u32) is included: the scalar bodies use std::max/min (and
 // the int minmax/maxmin use std::fmax/fmin on integers, order-preserving) so the
 // integer SIMD min/max is bit-identical for every input.
-const std::array<Case, 19> kCases = {{
+const std::array<Case, 26> kCases = {{
     {"v_add3_u32_vop3", 511},
     {"v_or3_b32_vop3", 514},
     {"v_lshl_add_u32_vop3", 509},
@@ -72,6 +72,14 @@ const std::array<Case, 19> kCases = {{
     {"v_med3_u16_vop3", 508},
     {"v_bfe_u32_vop3", 456},
     {"v_bfe_i32_vop3", 457},
+    // SAD / masked-SAD / lerp (byte SWAR + src2 accumulate).
+    {"v_sad_u8_vop3", 473},
+    {"v_sad_hi_u8_vop3", 474},
+    {"v_sad_u16_vop3", 475},
+    {"v_sad_u32_vop3", 476},
+    {"v_msad_u8_vop3", 484},
+    {"v_lerp_u8_vop3", 461},
+    {"v_perm_b32_vop3", 493},
 }};
 
 // 14 mixed uint32 values; shift-count cases include small (<32) and full-low

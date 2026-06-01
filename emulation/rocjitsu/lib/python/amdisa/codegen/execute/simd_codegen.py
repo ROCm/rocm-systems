@@ -866,6 +866,10 @@ SIMD_VOP2_TERNARY: dict[str, tuple[str, str, str]] = {
     "v_madak_f16_vop2": ("uint32_t", "inst.simm32.encoding_value_", _FMA_ADDK_F16),
     "v_fmamk_f16_vop2": ("uint32_t", "inst.simm32_", _FMA_MULK_F16),
     "v_madmk_f16_vop2": ("uint32_t", "inst.simm32.encoding_value_", _FMA_MULK_F16),
+    # v_fmaak_f16 (RDNA only): dst = fma(s0, s1, K), K = f16(simm32_). Same f16
+    # FMA functor as v_madak_f16, differing only in the literal field (simm32_ vs
+    # simm32.encoding_value_); the SIMD path is identical to the tested madak_f16.
+    "v_fmaak_f16_vop2": ("uint32_t", "inst.simm32_", _FMA_ADDK_F16),
 }
 
 
@@ -1714,6 +1718,39 @@ SIMD_VOP3_LDEXP_FP64: dict[str, str] = {
 
 
 SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
+    # Sum-of-absolute-differences (byte / 16-bit / 32-bit) + accumulate src2.
+    # Pure integer byte SWAR (see util::sad_bytes_u32_simd etc); no modifiers.
+    "v_sad_u8_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) { return c + util::sad_bytes_u32_simd(a, b); }",
+    ),
+    "v_sad_hi_u8_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) { return (util::sad_bytes_u32_simd(a, b) << 16) + c; }",
+    ),
+    "v_sad_u16_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) {"
+        " using U = util::native<uint32_t>;"
+        " U al = a & 0xFFFFu, ah = (a >> 16) & 0xFFFFu;"
+        " U bl = b & 0xFFFFu, bh = (b >> 16) & 0xFFFFu;"
+        " U dl = al - bl; util::stdx::where(bl > al, dl) = bl - al;"
+        " U dh = ah - bh; util::stdx::where(bh > ah, dh) = bh - ah;"
+        " return c + dl + dh; }",
+    ),
+    "v_sad_u32_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) {"
+        " auto d = a - b; util::stdx::where(b > a, d) = b - a; return c + d; }",
+    ),
+    "v_msad_u8_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) { return c + util::msad_bytes_u32_simd(a, b); }",
+    ),
+    "v_lerp_u8_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) { return util::lerp_u8_simd(a, b, c); }",
+    ),
     "v_add3_u32_vop3": (
         "uint32_t",
         "[](auto a, auto b, auto c) { return a + b + c; }",
@@ -1797,6 +1834,12 @@ SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
     "v_bfi_b32_vop3": (
         "uint32_t",
         "[](auto a, auto b, auto c) { return (a & b) | (~a & c); }",
+    ),
+    # Byte permute: each output byte selected from the 8 bytes of {src0:src1} by
+    # a selector byte of src2 (see util::perm_b32_simd). Pure byte gather.
+    "v_perm_b32_vop3": (
+        "uint32_t",
+        "[](auto a, auto b, auto c) { return util::perm_b32_simd(a, b, c); }",
     ),
     # min3/max3/med3 (integer). The scalar body uses std::max/std::min for the
     # 16/32-bit forms (and the minmax/maxmin scalar bodies use std::fmax/fmin on
