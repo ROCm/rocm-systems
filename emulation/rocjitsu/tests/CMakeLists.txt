@@ -140,10 +140,14 @@ endif()
 
 find_library(HSA_RUNTIME64 hsa-runtime64 PATHS /opt/rocm/lib ENV ROCM_PATH PATH_SUFFIXES lib)
 if(HSA_RUNTIME64)
+    get_filename_component(RJ_HSA_LIBRARY_DIR "${HSA_RUNTIME64}" DIRECTORY)
+    get_filename_component(RJ_HSA_ROCM_ROOT "${RJ_HSA_LIBRARY_DIR}" DIRECTORY)
+    set(RJ_HSA_INCLUDE_DIR "${RJ_HSA_ROCM_ROOT}/include")
+
     add_executable(hsa_init_test hsa_init_test.cpp)
-    target_include_directories(hsa_init_test PRIVATE /opt/rocm/include ${HSA_INCLUDE_DIR})
+    target_include_directories(hsa_init_test PRIVATE ${RJ_HSA_INCLUDE_DIR} ${HSA_INCLUDE_DIR})
     target_link_libraries(hsa_init_test PRIVATE ${HSA_RUNTIME64} GTest::gtest)
-    target_link_options(hsa_init_test PRIVATE -Wl,-rpath,/opt/rocm/lib)
+    target_link_options(hsa_init_test PRIVATE -Wl,-rpath,${RJ_HSA_LIBRARY_DIR})
     add_dependencies(hsa_init_test rocjitsu_bin rocjitsu_kmd_shim)
     add_test(NAME "HsaTest.InitSucceeded"
         COMMAND ${RJ_CLI} --config ${RJ_CDNA4_KMD_CONFIG} --
