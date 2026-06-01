@@ -374,8 +374,7 @@ inline native<float> flush_denorm_f32_simd(native<float> v) {
 // Canonical positive quiet-NaN (f32), broadcast across the vector. Shared by
 // the transcendental fast paths below, which blend it into out-of-domain
 // lanes (negative sqrt/rsqrt, log of a negative) to match the scalar refs.
-inline const native<float> kQNaN =
-    std::bit_cast<native<float>>(native<uint32_t>(0x7FC00000u));
+inline const native<float> kQNaN = std::bit_cast<native<float>>(native<uint32_t>(0x7FC00000u));
 
 inline native<float> rcp_f32_simd(native<float> a) {
   native<float> x = flush_denorm_f32_simd(a);
@@ -465,7 +464,8 @@ inline native<float> fp8_e4m3_to_f32_simd(native<uint32_t> v) {
   U normal = signbit | ((exp + U(120u)) << 23) | (mant << 20); // exp + 127 - 7
   U inf_nan = signbit | U(0x43800000u);                        // exp15, mant0 -> max normal
   stdx::where(mant != 0u, inf_nan) = signbit | U(0x7FC00000u); // exp15, mant!=0 -> qNaN
-  native<float> dn = stdx::static_simd_cast<native<float>>(mant) * native<float>(0.001953125f); // 2^-9
+  native<float> dn =
+      stdx::static_simd_cast<native<float>>(mant) * native<float>(0.001953125f); // 2^-9
   U dnb = std::bit_cast<U>(dn) | signbit; // exp0: ±denormal, or ±0 when mant==0
   U out = normal;
   stdx::where(exp == 0u, out) = dnb;
@@ -517,9 +517,9 @@ inline native<float> frexp_mant_f32_simd(native<uint32_t> v) {
   const U p = (std::bit_cast<U>(mf) >> 23) - U(127u);
   U dn = sign | (U(126u) << 23) | ((M << (U(23u) - p)) & U(0x7FFFFFu));
   U out = normal;
-  stdx::where(E == 0u, out) = v;                  // ±0 (M==0); overwritten if denormal
-  stdx::where((E == 0u) && (M != 0u), out) = dn;  // denormal -> renormalized
-  stdx::where(E == 255u, out) = v;                // Inf passes through unchanged
+  stdx::where(E == 0u, out) = v;                 // ±0 (M==0); overwritten if denormal
+  stdx::where((E == 0u) && (M != 0u), out) = dn; // denormal -> renormalized
+  stdx::where(E == 255u, out) = v;               // Inf passes through unchanged
   // frexp quiets signaling NaNs (sets the mantissa MSB) while preserving the
   // payload; qNaN inputs are unchanged by the idempotent OR.
   stdx::where((E == 255u) && (M != 0u), out) = v | U(0x00400000u);
@@ -541,9 +541,9 @@ inline native<uint32_t> frexp_exp_f32_simd(native<uint32_t> v) {
   const U p = (std::bit_cast<U>(mf) >> 23) - U(127u);
   U dn = p - U(148u);
   U out = normal;
-  stdx::where(E == 0u, out) = U(0u);              // ±0 (M==0); overwritten if denormal
-  stdx::where((E == 0u) && (M != 0u), out) = dn;  // denormal exponent
-  stdx::where(E == 255u, out) = U(0u);            // Inf / NaN -> 0
+  stdx::where(E == 0u, out) = U(0u);             // ±0 (M==0); overwritten if denormal
+  stdx::where((E == 0u) && (M != 0u), out) = dn; // denormal exponent
+  stdx::where(E == 255u, out) = U(0u);           // Inf / NaN -> 0
   return out;
 }
 
@@ -564,9 +564,9 @@ inline native<double> frexp_mant_f64_simd(native<double> x) {
   const U p = (std::bit_cast<U>(mf) >> 52) - U(1023ull);
   U dn = sign | (U(1022ull) << 52) | ((M << (U(52ull) - p)) & U(0xFFFFFFFFFFFFFull));
   U out = normal;
-  stdx::where(E == 0ull, out) = v;                    // ±0 (M==0); overwritten if denormal
-  stdx::where((E == 0ull) && (M != 0ull), out) = dn;  // denormal -> renormalized
-  stdx::where(E == 2047ull, out) = v;                 // Inf passes through unchanged
+  stdx::where(E == 0ull, out) = v;                   // ±0 (M==0); overwritten if denormal
+  stdx::where((E == 0ull) && (M != 0ull), out) = dn; // denormal -> renormalized
+  stdx::where(E == 2047ull, out) = v;                // Inf passes through unchanged
   stdx::where((E == 2047ull) && (M != 0ull), out) = v | U(0x0008000000000000ull); // quiet NaN
   return std::bit_cast<native<double>>(out);
 }

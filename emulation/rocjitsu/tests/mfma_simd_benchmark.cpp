@@ -80,8 +80,7 @@ struct BenchFixture {
   // (reg, lane). The exact layout doesn't matter for the benchmark — both
   // modes read the same bytes — only that values are finite and bounded so
   // the accumulated matmul stays finite.
-  template <typename Gen>
-  void seed(uint32_t off, uint32_t regs, uint32_t bit_width, Gen gen) {
+  template <typename Gen> void seed(uint32_t off, uint32_t regs, uint32_t bit_width, Gen gen) {
     for (uint32_t reg = 0; reg < regs; ++reg) {
       for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         uint32_t word = 0;
@@ -168,8 +167,7 @@ void bench(const char *label, BenchFixture &fx, const std::function<void()> &run
 
   if (is_int) {
     for (size_t i = 0; i < result_scalar.size(); ++i)
-      EXPECT_EQ(result_scalar[i], result_simd[i])
-          << label << ": int divergence at index " << i;
+      EXPECT_EQ(result_scalar[i], result_simd[i]) << label << ": int divergence at index " << i;
   } else {
     double max_rel = 0.0;
     for (size_t i = 0; i < result_scalar.size(); ++i) {
@@ -233,7 +231,8 @@ TEST(MfmaSimdBenchmark, F32_16x16x32_f16) {
   fx.seed(S1_OFF, /*regs=*/8, bits, SmallGen(2));
   auto run = [&] {
     amdgpu::exec_f32(*fx.cu, M, N, K, B, bits, fx.vbase + DST_OFF, fx.vbase + S0_OFF,
-                     fx.vbase + S1_OFF, 0, amdgpu::extract_f16, amdgpu::extract_f16, /*const_acc=*/0);
+                     fx.vbase + S1_OFF, 0, amdgpu::extract_f16, amdgpu::extract_f16,
+                     /*const_acc=*/0);
   };
   bench("v_mfma_f32_16x16x32_f16", fx, run, double(M) * N * K * B, /*is_int=*/false);
 }
@@ -263,7 +262,8 @@ TEST(MfmaSimdBenchmark, F32_32x32x16_f16) {
   fx.seed(S1_OFF, 8, bits, SmallGen(4));
   auto run = [&] {
     amdgpu::exec_f32(*fx.cu, M, N, K, B, bits, fx.vbase + DST_OFF, fx.vbase + S0_OFF,
-                     fx.vbase + S1_OFF, 0, amdgpu::extract_f16, amdgpu::extract_f16, /*const_acc=*/0);
+                     fx.vbase + S1_OFF, 0, amdgpu::extract_f16, amdgpu::extract_f16,
+                     /*const_acc=*/0);
   };
   bench("v_mfma_f32_32x32x16_f16", fx, run, double(M) * N * K * B, /*is_int=*/false);
 }
@@ -277,7 +277,8 @@ TEST(MfmaSimdBenchmark, F32_16x16x32_fp8) {
   fx.seed(S1_OFF, 8, bits, SmallGen(6));
   auto run = [&] {
     amdgpu::exec_f32(*fx.cu, M, N, K, B, bits, fx.vbase + DST_OFF, fx.vbase + S0_OFF,
-                     fx.vbase + S1_OFF, 0, amdgpu::extract_fp8, amdgpu::extract_fp8, /*const_acc=*/0);
+                     fx.vbase + S1_OFF, 0, amdgpu::extract_fp8, amdgpu::extract_fp8,
+                     /*const_acc=*/0);
   };
   bench("v_mfma_f32_16x16x32_fp8", fx, run, double(M) * N * K * B, /*is_int=*/false);
 }
@@ -326,8 +327,8 @@ TEST(MfmaSimdBenchmark, F32Scaled_16x16x128_fp8) {
   auto run = [&] {
     amdgpu::exec_f32_scaled(*fx.cu, M, N, K, B, bits, fx.vbase + DST_OFF, fx.vbase + S0_OFF,
                             fx.vbase + S1_OFF, 0, amdgpu::extract_fp8, amdgpu::extract_fp8,
-                            /*const_acc=*/0, /*cbsz=*/0, /*abid=*/0, /*blgp=*/0,
-                            fx.vbase + SCALE_A, fx.vbase + SCALE_B);
+                            /*const_acc=*/0, /*cbsz=*/0, /*abid=*/0, /*blgp=*/0, fx.vbase + SCALE_A,
+                            fx.vbase + SCALE_B);
   };
   bench("v_mfma_scale_f32_16x16x128_fp8", fx, run, double(M) * N * K * B, /*is_int=*/false);
 }

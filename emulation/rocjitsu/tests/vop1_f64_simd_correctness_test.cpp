@@ -49,18 +49,9 @@ constexpr uint32_t vop1_encode(uint32_t op, uint32_t vdst, uint32_t src0) {
 // negatives feed sqrt/rsq a NaN result (skipped on compare); rcp(±0) -> ±Inf and
 // ceil/floor/trunc/rndne of the specials are well defined and bit-exact.
 const std::array<double, 18> kEdge = {{
-    +0.0,
-    -0.0,
-    1.0,
-    -1.0,
-    2.5,
-    0.5,
-    std::numeric_limits<double>::infinity(),
-    -std::numeric_limits<double>::infinity(),
-    std::numeric_limits<double>::denorm_min(),
-    std::numeric_limits<double>::max(),
-    3.141592653589793,
-    -2.718281828459045,
+    +0.0, -0.0, 1.0, -1.0, 2.5, 0.5, std::numeric_limits<double>::infinity(),
+    -std::numeric_limits<double>::infinity(), std::numeric_limits<double>::denorm_min(),
+    std::numeric_limits<double>::max(), 3.141592653589793, -2.718281828459045,
     // sNaN / qNaN (frexp quiets the former; math ops skip NaN-result lanes).
     std::bit_cast<double>(static_cast<uint64_t>(0x7FF0000000000001ull)),
     std::bit_cast<double>(static_cast<uint64_t>(0xFFF8000000000001ull)),

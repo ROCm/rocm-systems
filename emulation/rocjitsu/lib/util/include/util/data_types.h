@@ -61,8 +61,8 @@ namespace detail {
 inline void f16_to_f32_block_arch(const uint16_t *src, float *dst, size_t n, size_t &i) {
 #if defined(__AVX512F__)
   for (; i + 16 <= n; i += 16)
-    _mm512_storeu_ps(&dst[i],
-                     _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i *>(src + i))));
+    _mm512_storeu_ps(
+        &dst[i], _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i *>(src + i))));
 #endif
   for (; i + 8 <= n; i += 8)
     _mm256_storeu_ps(&dst[i],
