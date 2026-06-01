@@ -30,7 +30,7 @@
     "rete-history-plugin": "^2.1.1",
     "rete-react-plugin": "^2.1.0",
     "rete-render-utils": "^2.0.3",
-    "styled-components": "^6.3.12"
+    "styled-components": "^6.4.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
