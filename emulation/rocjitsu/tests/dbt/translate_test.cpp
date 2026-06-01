@@ -1704,8 +1704,9 @@ bool has_cdna4_to_cdna3_semantic_rule_case(uint16_t encoding_id, uint16_t opcode
 }
 
 void expect_field_matches(uint16_t expected, uint16_t actual, std::string_view field_name) {
-  if (expected != kAnyExpectedField)
+  if (expected != kAnyExpectedField) {
     EXPECT_EQ(actual, expected) << field_name;
+  }
 }
 
 void expect_cdna3_instruction_matches(const rocjitsu::Instruction &inst,
