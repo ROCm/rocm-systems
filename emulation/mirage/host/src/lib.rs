@@ -37,10 +37,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Utc;
+use mirage_core::common::MaybeRef;
 use mirage_core::error::{MirageError, Result};
-use mirage_core::exec::{ExecDef, ExecId, ExecStatus, NodeStatus};
+use mirage_core::exec::{ExecDef, ExecId, ExecStatus, InjectionDef, NodeStatus};
 use mirage_core::paths::{ExecLayout, SessionLayout};
-use mirage_core::session::{SessionHealth, SessionId};
+use mirage_core::profile::ProfileDef;
+use mirage_core::session::{SessionDef, SessionHealth, SessionId};
 use mirage_core::state::{read_json, read_small_str, write_bytes, write_json};
 use nix::sys::stat::Mode;
 use nix::unistd::mkfifo;
@@ -218,8 +220,77 @@ fn process_signal_requests(layout: &SessionLayout) {
     }
 }
 
+/// Resolve the emulator-level injection for a session by reading its
+/// on-disk definition, resolving its profile, and computing the env
+/// vars / `LD_PRELOAD` the configured emulator backend needs.
+///
+/// Returns an empty [`InjectionDef`] for emulators that need no
+/// injection (e.g. `noop`). Errors only when a configured emulator
+/// cannot produce its required assets (e.g. rocjitsu can't build its
+/// simulation config), so a misconfigured session fails loudly instead
+/// of silently running unemulated.
+fn resolve_injection(session: &SessionId) -> Result<InjectionDef> {
+    let session_def: SessionDef = read_json(&SessionLayout::for_id(session).def())?;
+    let profile: ProfileDef = match session_def.profile {
+        MaybeRef::Owned(p) => p,
+        MaybeRef::Ref(name) => {
+            let p = mirage_core::paths::profile_path(&name);
+            if !p.exists() {
+                return Err(MirageError::ProfileNotFound(name));
+            }
+            read_json(&p)?
+        }
+    };
+    let emulator = &profile.emulator;
+
+    match emulator.emulator.as_str() {
+        "rocjitsu" => {
+            // Extract embedded assets if they aren't on disk yet, then
+            // compute the preload + simulation config for this profile.
+            if let Err(e) = mirage_rocjitsu::ensure_assets(false) {
+                tracing::warn!("rocjitsu: failed to extract assets: {e:#}");
+            }
+            let (config, schema) = match mirage_rocjitsu::kmd_config(emulator) {
+                Ok(paths) => paths,
+                Err(e) => {
+                    // Can't build the sim config (e.g. rocjitsu assets not
+                    // available on this machine). Warn and run unemulated
+                    // rather than failing the exec outright.
+                    tracing::warn!(
+                        "rocjitsu: could not build simulation config; \
+                         running without emulation env: {e:#}"
+                    );
+                    return Ok(InjectionDef::default());
+                }
+            };
+            let mut env = std::collections::BTreeMap::new();
+            env.insert("RJ_CONFIG".to_string(), config.display().to_string());
+            env.insert("RJ_SCHEMA".to_string(), schema.display().to_string());
+            let ld_preload = mirage_rocjitsu::kmd_preload().map(|p| p.display().to_string());
+            if ld_preload.is_none() {
+                tracing::warn!(
+                    "rocjitsu: no KMD preload library found; workload will not be emulated"
+                );
+            }
+            Ok(InjectionDef {
+                wrapper: None,
+                ld_preload,
+                files: Default::default(),
+                env,
+            })
+        }
+        // `noop` and any other emulator currently need no injection.
+        _ => Ok(InjectionDef::default()),
+    }
+}
+
 async fn run_exec(layout: ExecLayout) -> Result<()> {
     let def: ExecDef = read_json(&layout.def())?;
+    // Resolve the emulator-level injection (env vars, LD_PRELOAD, ...)
+    // for this exec's session. For a rocjitsu session this is what wires
+    // `LD_PRELOAD=librocjitsu_kmd.so` plus `RJ_CONFIG`/`RJ_SCHEMA` into
+    // every spawned child so the workload actually runs under emulation.
+    let injection = resolve_injection(&def.session)?;
     let mut status = ExecStatus {
         started: false,
         ended: false,
@@ -241,7 +312,7 @@ async fn run_exec(layout: ExecLayout) -> Result<()> {
         path: head_layout.root.clone(),
         source: e,
     })?;
-    let head = spawn_node(&def, 0, head_layout.clone())?;
+    let head = spawn_node(&def, 0, head_layout.clone(), &injection)?;
     status.started = true;
     status.nodes.insert(
         0,
@@ -297,6 +368,7 @@ fn spawn_node(
     def: &ExecDef,
     node: u32,
     nlayout: mirage_core::paths::NodeLayout,
+    injection: &InjectionDef,
 ) -> Result<SpawnedNode> {
     // Pick the args for this node.
     let args = if node == 0 {
@@ -379,7 +451,21 @@ fn spawn_node(
         // Make sure programs that consult $TERM behave like a real
         // terminal even if the host's own environment has none set.
         .env("TERM", std::env::var("TERM").unwrap_or_else(|_| "xterm-256color".into()))
+        // Emulator-provided env (e.g. rocjitsu's RJ_CONFIG / RJ_SCHEMA)
+        // is applied before the user's env so an explicit exec env can
+        // still override it if needed.
+        .envs(&injection.env)
         .envs(&args.env);
+    // `LD_PRELOAD` is special: the emulator's interposer must stay on the
+    // preload list, so combine it with any user-supplied value rather than
+    // letting one clobber the other.
+    if let Some(preload) = &injection.ld_preload {
+        let combined = match args.env.get("LD_PRELOAD") {
+            Some(user) if !user.is_empty() => format!("{preload}:{user}"),
+            _ => preload.clone(),
+        };
+        cmd.env("LD_PRELOAD", combined);
+    }
     if let Some(wd) = &args.workdir {
         cmd.current_dir(wd);
     }
