@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/pc_sampling/parser/pc_record_interface.hpp"
 
+#include "lib/common/logging.hpp"
 #include "lib/common/utility.hpp"
 
 #include <type_traits>
@@ -33,7 +34,7 @@ PCSamplingParserContext::alloc<rocprofiler_pc_sampling_record_host_trap_v0_t>(
     uint64_t                                        size)
 {
     std::unique_lock<std::shared_mutex> lock(mut);
-    assert(buffer != nullptr);
+    ROCP_FATAL_IF(buffer == nullptr) << "alloc() called with a null output buffer pointer";
     host_trap_data.emplace_back(
         std::make_unique<PCSamplingData<rocprofiler_pc_sampling_record_host_trap_v0_t>>(size));
     *buffer = host_trap_data.back()->samples.data();
@@ -47,7 +48,7 @@ PCSamplingParserContext::alloc<rocprofiler_pc_sampling_record_stochastic_v0_t>(
     uint64_t                                         size)
 {
     std::unique_lock<std::shared_mutex> lock(mut);
-    assert(buffer != nullptr);
+    ROCP_FATAL_IF(buffer == nullptr) << "alloc() called with a null output buffer pointer";
     stochastic_data.emplace_back(
         std::make_unique<PCSamplingData<rocprofiler_pc_sampling_record_stochastic_v0_t>>(size));
     *buffer = stochastic_data.back()->samples.data();
@@ -63,7 +64,7 @@ PCSamplingParserContext::alloc<rocprofiler_pc_sampling_record_v0_t>(
     uint64_t                              size)
 {
     std::unique_lock<std::shared_mutex> lock(mut);
-    assert(buffer != nullptr);
+    ROCP_FATAL_IF(buffer == nullptr) << "alloc() called with a null output buffer pointer";
     v0_data.emplace_back(
         std::make_unique<PCSamplingData<rocprofiler_pc_sampling_record_v0_t>>(size));
     *buffer = v0_data.back()->samples.data();
@@ -77,7 +78,7 @@ PCSamplingParserContext::alloc<rocprofiler_pc_sampling_record_v1_t>(
     uint64_t                              size)
 {
     std::unique_lock<std::shared_mutex> lock(mut);
-    assert(buffer != nullptr);
+    ROCP_FATAL_IF(buffer == nullptr) << "alloc() called with a null output buffer pointer";
     v1_data.emplace_back(
         std::make_unique<PCSamplingData<rocprofiler_pc_sampling_record_v1_t>>(size));
     *buffer = v1_data.back()->samples.data();
@@ -91,7 +92,7 @@ PCSamplingParserContext::alloc<rocprofiler_pc_sampling_record_v2_t>(
     uint64_t                              size)
 {
     std::unique_lock<std::shared_mutex> lock(mut);
-    assert(buffer != nullptr);
+    ROCP_FATAL_IF(buffer == nullptr) << "alloc() called with a null output buffer pointer";
     v2_data.emplace_back(
         std::make_unique<PCSamplingData<rocprofiler_pc_sampling_record_v2_t>>(size));
     *buffer = v2_data.back()->samples.data();
@@ -105,7 +106,7 @@ PCSamplingParserContext::alloc<rocprofiler_pc_sampling_record_v3_t>(
     uint64_t                              size)
 {
     std::unique_lock<std::shared_mutex> lock(mut);
-    assert(buffer != nullptr);
+    ROCP_FATAL_IF(buffer == nullptr) << "alloc() called with a null output buffer pointer";
     v3_data.emplace_back(
         std::make_unique<PCSamplingData<rocprofiler_pc_sampling_record_v3_t>>(size));
     *buffer = v3_data.back()->samples.data();
@@ -119,7 +120,7 @@ PCSamplingParserContext::alloc<rocprofiler_pc_sampling_record_v4_t>(
     uint64_t                              size)
 {
     std::unique_lock<std::shared_mutex> lock(mut);
-    assert(buffer != nullptr);
+    ROCP_FATAL_IF(buffer == nullptr) << "alloc() called with a null output buffer pointer";
     v4_data.emplace_back(
         std::make_unique<PCSamplingData<rocprofiler_pc_sampling_record_v4_t>>(size));
     *buffer = v4_data.back()->samples.data();

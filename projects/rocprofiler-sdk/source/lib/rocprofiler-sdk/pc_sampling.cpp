@@ -23,8 +23,6 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/pc_sampling.h>
 
-#include <optional>
-
 #include "lib/common/environment.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
@@ -36,6 +34,7 @@
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <cstring>
+#include <optional>
 #include <unordered_set>
 
 namespace
@@ -407,10 +406,14 @@ validate_record_kinds_against_flags(const rocprofiler_pc_sampling_record_kind_t*
  * REQUIRE_HOST_TRAP is never combined with a stochastic-only record kind (V2/V4) -- and does
  * not re-check that case.
  *
- * Returns the method to use and whether it is a hard requirement.
- * - V1 records -> host-trap
- * - V2 records -> stochastic
- * - V0/INVALID_SAMPLE only -> prefer stochastic, fall back to host-trap
+ * Returns the method to use and whether it is a hard requirement. The record-kind heuristic
+ * mirrors the compatibility matrix documented in pc_sampling.h:
+ * - V0 records           -> prefer stochastic, fall back to host-trap
+ * - V1 records           -> prefer host-trap, fall back to stochastic
+ * - V2 records           -> stochastic
+ * - V3 records           -> prefer host-trap, fall back to stochastic
+ * - V4 records           -> stochastic
+ * - INVALID_SAMPLE only  -> no method implied; defaults to stochastic (overridable by flags)
  * - REQUIRE flags override the record-kind heuristic
  * - PREFER flags act as soft hints (PREFER_HOST_TRAP is silently honored as stochastic when
  *   the requested record kinds are stochastic-only)

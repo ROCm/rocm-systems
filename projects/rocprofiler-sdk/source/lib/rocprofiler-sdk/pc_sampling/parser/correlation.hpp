@@ -427,7 +427,7 @@ add_upcoming_samples(const device_handle     device,
         if(is_invalid_sample<PcSamplingRecordT, Method>(pc_sample)) continue;
 
         // Correct PC address of the original sample (if needed) prior to decoding it.
-        auto pc_address = correct_pc_address<GFXIP, PcSamplingRecordT>(snap);
+        auto pc_address = correct_pc_address<GFXIP, PcSamplingRecordT, Method>(snap);
 
         // Convert PC -> (loaded code object id containing PC, offset within code object)
         if(!cache_addr_range.inrange(pc_address.value))

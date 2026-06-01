@@ -1132,8 +1132,13 @@ copySample<GFX1250, rocprofiler_pc_sampling_record_stochastic_v0_t, ROCPROFILER_
 
 /**
  * @brief The default implementation assumes no correction is needed.
+ *
+ * Method-aware (like copySample / is_invalid_sample): the mid-macro PC correction reads the
+ * stochastic-only perf_snapshot_data1 register, so it must NEVER run for host-trap samples --
+ * for a host-trap sample that register offset aliases reserved bytes in perf_sample_host_trap_v1
+ * and would corrupt a valid PC. Only the STOCHASTIC GFX950 specializations below apply it.
  */
-template <typename GFX, typename PcSamplingRecordT>
+template <typename GFX, typename PcSamplingRecordT, rocprofiler_pc_sampling_method_t Method>
 inline rocprofiler_address_t
 correct_pc_address(const perf_sample_snapshot_v1* sample)
 {
@@ -1141,42 +1146,53 @@ correct_pc_address(const perf_sample_snapshot_v1* sample)
 }
 
 /**
- * @brief GFX950 specific implementation of the PC address correction.
+ * @brief GFX950 mid-macro PC address correction, shared by all stochastic record layouts.
+ *
+ * If the mid_macro bit is 1, the reg spec says we subtract 2 dwords from the PC address.
  */
-template <>
 inline rocprofiler_address_t
-correct_pc_address<GFX950, rocprofiler_pc_sampling_record_stochastic_v0_t>(
-    const perf_sample_snapshot_v1* sample)
+correct_pc_address_gfx950_stochastic(const perf_sample_snapshot_v1* sample)
 {
-    // If mid_macro bit is 1, then reg spec says we need to subtract 2 dwords from the PC address.
     auto mid_macro = static_cast<bool>(EXTRACT_BITS(sample->perf_snapshot_data1, 31, 31));
     if(mid_macro)
-    {
         return rocprofiler_address_t{.value = sample->pc - 2 * sizeof(uint32_t)};
-    }
-    else
-    {
-        return rocprofiler_address_t{.value = sample->pc};
-    }
+    return rocprofiler_address_t{.value = sample->pc};
 }
 
-/**
- * @brief GFX950 PC address correction for V2 records (stochastic on GFX950).
- */
 template <>
 inline rocprofiler_address_t
-correct_pc_address<GFX950, rocprofiler_pc_sampling_record_v2_t>(
-    const perf_sample_snapshot_v1* sample)
+correct_pc_address<GFX950,
+                   rocprofiler_pc_sampling_record_stochastic_v0_t,
+                   ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(const perf_sample_snapshot_v1* sample)
 {
-    auto mid_macro = static_cast<bool>(EXTRACT_BITS(sample->perf_snapshot_data1, 31, 31));
-    if(mid_macro)
-    {
-        return rocprofiler_address_t{.value = sample->pc - 2 * sizeof(uint32_t)};
-    }
-    else
-    {
-        return rocprofiler_address_t{.value = sample->pc};
-    }
+    return correct_pc_address_gfx950_stochastic(sample);
+}
+
+template <>
+inline rocprofiler_address_t
+correct_pc_address<GFX950,
+                   rocprofiler_pc_sampling_record_v0_t,
+                   ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(const perf_sample_snapshot_v1* sample)
+{
+    return correct_pc_address_gfx950_stochastic(sample);
+}
+
+template <>
+inline rocprofiler_address_t
+correct_pc_address<GFX950,
+                   rocprofiler_pc_sampling_record_v1_t,
+                   ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(const perf_sample_snapshot_v1* sample)
+{
+    return correct_pc_address_gfx950_stochastic(sample);
+}
+
+template <>
+inline rocprofiler_address_t
+correct_pc_address<GFX950,
+                   rocprofiler_pc_sampling_record_v2_t,
+                   ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(const perf_sample_snapshot_v1* sample)
+{
+    return correct_pc_address_gfx950_stochastic(sample);
 }
 
 #undef EXTRACT_BITS
