@@ -262,6 +262,11 @@ h3. Design — Section 2: Test level definitions
 * *Functional*: end-user flows and output correctness (golden baselines)
 * *Performance*: overhead/throughput/regressions; includes pressure/stress tests
 
+*Ad-hoc / misc / temporary (always allowed)*
+
+* *type(misc)* — unclassified, exploratory, or edge-case tests (repo already uses {{@pytest.mark.misc}}). Excluded from default PR tiers until promoted.
+* *lifecycle(tmp)* — short-lived scratch tests; require owner/issue in docstring; promote or delete within agreed window.
+
 *Borderline rule*
 
 When a file mixes types (common in the current flat layout), split by section banner/imported
@@ -273,6 +278,7 @@ h3. Design — Section 3: Layout & fixtures
 
 * tests/unit/ mirrors src/
 * tests/integration/ has one file per feature
+* tests/misc/ ad-hoc and not-yet-classified tests (see §4.2); optional tests/misc/tmp/ for scratch
 
 *Fixture strategy*
 
@@ -281,6 +287,7 @@ Prefer per-subtree fixtures (clear boundaries, scales when we later add more typ
 * tests/conftest.py: common/lightweight shared fixtures and option parsing
 * tests/unit/conftest.py: unit-only fixtures (mocks, tiny data builders)
 * tests/integration/conftest.py: integration-only fixtures (GPU/CLI/workloads)
+* tests/misc/conftest.py: optional; inherit shared fixtures only
 
 h3. Design — Section 4: Filter system
 
@@ -290,7 +297,7 @@ Filters must work for both CI and developer “partial run” workflows (not CI-
 
 *MVP filter dimensions*
 
-* type
+* type (includes misc — see §4.2)
 * arch
 
 *Bridge period*
@@ -348,7 +355,21 @@ docker/k8s/MPI/pytorch into type.
 
 *Design rules (orthogonal dimensions):* type = test kind; domain = workload audience; runtime = launch mode; framework = AI stack. Avoid combinatorial names like {{functional_ai_mpi_pytorch}}.
 
-*Phasing:* MVP = type + arch; Phase 2 = gpu + exclude_gpu + functional type; Phase 2+ = domain, framework, runtime. Migrate ad-hoc markers (torch_trace, torch_ops) over time.
+*Phasing:* MVP = type (incl. misc) + arch; Phase 2 = gpu + exclude_gpu + functional type; Phase 2+ = domain, framework, runtime. Domain-specific ad-hoc markers (torch_trace, torch_ops) migrate when known; *misc/tmp bucket remains permanent* (§4.2).
+
+h3. Design — Section 4.2: Ad-hoc, misc, and temporary tests
+
+Structured taxonomy is the *default path*, not a hard requirement for every file.
+
+*When to use type(misc):* unclassified/exploratory tests; legacy {{@pytest.mark.misc}} during migration; not ready for PR tiers.
+
+*When to use lifecycle(tmp):* bug repro or spike; must promote or delete; never in quick/standard YAML tiers.
+
+*Layout:* {{tests/misc/}}, optional {{tests/misc/tmp/}}. Markers: {{@pytest.mark.type("misc")}}, {{@pytest.mark.lifecycle("tmp")}}.
+
+*CI policy:* misc excluded from quick/standard by default; opt-in comprehensive/full; tmp developer-only unless promoted.
+
+*Permanent escape hatch* — misc/tmp does not go away after migration. {{@pytest.mark.misc}} bridges to {{type(misc)}}.
 
 h3. Design — Section 5: CTest / PTest / GoogleTest
 
@@ -378,6 +399,7 @@ h3. Design — Section 6: Migration strategy
 || Category || When || Purpose || Example location ||
 | *Unit* | Phase 1 (MVP) | Show mirror-src/ layout, unit conftest, type marker, no GPU | {{tests/unit/.../test_<module>.py}} |
 | *Integration* | Phase 1 (MVP) | Show feature file, integration conftest, CLI/GPU fixtures | {{tests/integration/test_<feature>.py}} |
+| *Misc / ad-hoc* | Phase 1 (MVP) | Unclassified or scratch; type(misc), optional lifecycle(tmp) | {{tests/misc/}} |
 | *Functional* | Phase 2+ | Golden workload / output validation pattern | {{tests/integration/}} or future {{tests/functional/}} |
 | *Performance / pressure* | Phase 2+ | Baseline comparison or sustained-load pattern | future {{tests/performance/}} or marked integration |
 
@@ -444,7 +466,8 @@ Use these prompts to drive alignment in the team meeting:
 * Agree on *sample-first* templates: which real tests become the Unit / Integration / Functional / Performance reference cases in Phase 1.
 * Confirm *Phase 2+ filter extensions* (see §4.1): gpu dimension + exclude_gpu YAML; domain / framework / runtime for AI vs HPC functional tests.
 * Decide whether *docker/k8s* functional tests belong in comprehensive/full only with env-gated CI lanes.
-* Agree to *migrate ad-hoc markers* (torch_trace, torch_ops) to structured markers over time.
+* Agree to *migrate ad-hoc markers* (torch_trace, torch_ops) when classification is known; *misc/tmp remain permanent escape hatches* (§4.2).
+* Confirm *tmp test policy*: max lifetime, owner/docstring requirement, stale-tmp CI gate.
 
 ## rocprofiler-compute — Test Framework Refactor (Team Discussion Draft, Detailed)
 
@@ -621,6 +644,11 @@ h3. Design — Section 2: Test level definitions
 * *Functional*: end-user flows and output correctness (golden baselines)
 * *Performance*: overhead/throughput/regressions; includes pressure/stress tests
 
+*Ad-hoc / misc / temporary (always allowed)*
+
+* *type(misc)* — unclassified, exploratory, or edge-case tests (repo already uses {{@pytest.mark.misc}}). Excluded from default PR tiers until promoted.
+* *lifecycle(tmp)* — short-lived scratch tests; require owner/issue in docstring; promote or delete within agreed window.
+
 *Borderline rule*
 
 When a file mixes types (common in the current flat layout), split by section banner/imported
@@ -632,6 +660,7 @@ h3. Design — Section 3: Layout & fixtures
 
 * tests/unit/ mirrors src/
 * tests/integration/ has one file per feature
+* tests/misc/ ad-hoc and not-yet-classified tests (see §4.2); optional tests/misc/tmp/ for scratch
 
 *Fixture strategy*
 
@@ -640,6 +669,7 @@ Prefer per-subtree fixtures (clear boundaries, scales when we later add more typ
 * tests/conftest.py: common/lightweight shared fixtures and option parsing
 * tests/unit/conftest.py: unit-only fixtures (mocks, tiny data builders)
 * tests/integration/conftest.py: integration-only fixtures (GPU/CLI/workloads)
+* tests/misc/conftest.py: optional; inherit shared fixtures only
 
 h3. Design — Section 4: Filter system
 
@@ -649,7 +679,7 @@ Filters must work for both CI and developer “partial run” workflows (not CI-
 
 *MVP filter dimensions*
 
-* type
+* type (includes misc — see §4.2)
 * arch
 
 *Bridge period*
@@ -707,7 +737,21 @@ docker/k8s/MPI/pytorch into type.
 
 *Design rules (orthogonal dimensions):* type = test kind; domain = workload audience; runtime = launch mode; framework = AI stack. Avoid combinatorial names like {{functional_ai_mpi_pytorch}}.
 
-*Phasing:* MVP = type + arch; Phase 2 = gpu + exclude_gpu + functional type; Phase 2+ = domain, framework, runtime. Migrate ad-hoc markers (torch_trace, torch_ops) over time.
+*Phasing:* MVP = type (incl. misc) + arch; Phase 2 = gpu + exclude_gpu + functional type; Phase 2+ = domain, framework, runtime. Domain-specific ad-hoc markers (torch_trace, torch_ops) migrate when known; *misc/tmp bucket remains permanent* (§4.2).
+
+h3. Design — Section 4.2: Ad-hoc, misc, and temporary tests
+
+Structured taxonomy is the *default path*, not a hard requirement for every file.
+
+*When to use type(misc):* unclassified/exploratory tests; legacy {{@pytest.mark.misc}} during migration; not ready for PR tiers.
+
+*When to use lifecycle(tmp):* bug repro or spike; must promote or delete; never in quick/standard YAML tiers.
+
+*Layout:* {{tests/misc/}}, optional {{tests/misc/tmp/}}. Markers: {{@pytest.mark.type("misc")}}, {{@pytest.mark.lifecycle("tmp")}}.
+
+*CI policy:* misc excluded from quick/standard by default; opt-in comprehensive/full; tmp developer-only unless promoted.
+
+*Permanent escape hatch* — misc/tmp does not go away after migration. {{@pytest.mark.misc}} bridges to {{type(misc)}}.
 
 h3. Design — Section 5: CTest / PTest / GoogleTest
 
@@ -737,6 +781,7 @@ h3. Design — Section 6: Migration strategy
 || Category || When || Purpose || Example location ||
 | *Unit* | Phase 1 (MVP) | Show mirror-src/ layout, unit conftest, type marker, no GPU | {{tests/unit/.../test_<module>.py}} |
 | *Integration* | Phase 1 (MVP) | Show feature file, integration conftest, CLI/GPU fixtures | {{tests/integration/test_<feature>.py}} |
+| *Misc / ad-hoc* | Phase 1 (MVP) | Unclassified or scratch; type(misc), optional lifecycle(tmp) | {{tests/misc/}} |
 | *Functional* | Phase 2+ | Golden workload / output validation pattern | {{tests/integration/}} or future {{tests/functional/}} |
 | *Performance / pressure* | Phase 2+ | Baseline comparison or sustained-load pattern | future {{tests/performance/}} or marked integration |
 
@@ -803,5 +848,6 @@ Use these prompts to drive alignment in the team meeting:
 * Agree on *sample-first* templates: which real tests become the Unit / Integration / Functional / Performance reference cases in Phase 1.
 * Confirm *Phase 2+ filter extensions* (see §4.1): gpu dimension + exclude_gpu YAML; domain / framework / runtime for AI vs HPC functional tests.
 * Decide whether *docker/k8s* functional tests belong in comprehensive/full only with env-gated CI lanes.
-* Agree to *migrate ad-hoc markers* (torch_trace, torch_ops) to structured markers over time.
+* Agree to *migrate ad-hoc markers* (torch_trace, torch_ops) when classification is known; *misc/tmp remain permanent escape hatches* (§4.2).
+* Confirm *tmp test policy*: max lifetime, owner/docstring requirement, stale-tmp CI gate.
 

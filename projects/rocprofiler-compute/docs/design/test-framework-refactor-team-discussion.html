@@ -387,6 +387,11 @@
         <li><strong>Functional</strong>: end-user flows and output correctness (golden baselines)</li>
         <li><strong>Performance</strong>: overhead/throughput/regressions; includes pressure/stress tests</li>
       </ul>
+      <p><strong>Ad-hoc / misc / temporary (always allowed)</strong></p>
+      <ul>
+        <li><strong><code>type(misc)</code></strong> — unclassified, exploratory, or edge-case tests (repo already uses <code>@pytest.mark.misc</code>). Excluded from default PR tiers until promoted.</li>
+        <li><strong><code>lifecycle(tmp)</code></strong> — short-lived scratch tests; require owner/issue in docstring; promote or delete within agreed window.</li>
+      </ul>
       <p><strong>Borderline rule</strong></p>
       <p>When a file mixes types (common in the current flat layout), split by section banner/imported source module without changing assertions or expectations.</p>
 
@@ -395,6 +400,7 @@
       <ul>
         <li><code>tests/unit/</code> mirrors <code>src/</code></li>
         <li><code>tests/integration/</code> has one file per feature</li>
+        <li><code>tests/misc/</code> ad-hoc and not-yet-classified tests (see §4.2); optional <code>tests/misc/tmp/</code> for scratch</li>
       </ul>
       <p><strong>Fixture strategy</strong></p>
       <p>Prefer per-subtree fixtures (clear boundaries, scales when we later add more types):</p>
@@ -402,6 +408,7 @@
         <li><code>tests/conftest.py</code>: common/lightweight shared fixtures and option parsing</li>
         <li><code>tests/unit/conftest.py</code>: unit-only fixtures (mocks, tiny data builders)</li>
         <li><code>tests/integration/conftest.py</code>: integration-only fixtures (GPU/CLI/workloads)</li>
+        <li><code>tests/misc/conftest.py</code>: optional; inherit shared fixtures only</li>
       </ul>
 
       <h3>Design — Section 4: Filter system</h3>
@@ -409,7 +416,7 @@
       <p>Filters must work for both CI and developer “partial run” workflows (not CI-only).</p>
       <p><strong>MVP filter dimensions</strong></p>
       <ul>
-        <li><code>type</code></li>
+        <li><code>type</code> (includes <code>misc</code> — see §4.2)</li>
         <li><code>arch</code></li>
       </ul>
       <p><strong>Bridge period</strong></p>
@@ -474,7 +481,19 @@ pytest -m "functional and domain(ai) and framework(pytorch) and runtime(baremeta
 pytest -m "functional and domain(hpc) and runtime(mpi)"</code></pre>
       <p><strong>Docker / k8s:</strong> mark as <code>runtime(docker)</code> / <code>runtime(k8s)</code>; gate on environment + tier (<code>comprehensive</code> / <code>full</code> only).</p>
       <p><strong>Design rules:</strong> keep dimensions orthogonal — <code>type</code> = test kind; <code>domain</code> = workload audience; <code>runtime</code> = launch mode; <code>framework</code> = AI stack.</p>
-      <p><strong>Phasing:</strong> MVP = <code>type</code> + <code>arch</code>; Phase 2 = <code>gpu</code> + <code>exclude_gpu</code> + functional; Phase 2+ = <code>domain</code>, <code>framework</code>, <code>runtime</code>. Migrate ad-hoc markers over time.</p>
+      <p><strong>Phasing:</strong> MVP = <code>type</code> (incl. <code>misc</code>) + <code>arch</code>; Phase 2 = <code>gpu</code> + <code>exclude_gpu</code> + functional; Phase 2+ = <code>domain</code>, <code>framework</code>, <code>runtime</code>. Domain-specific ad-hoc markers migrate when known; <strong>misc/tmp bucket remains permanent</strong> (§4.2).</p>
+
+      <h3>Design — Section 4.2: Ad-hoc, misc, and temporary tests</h3>
+      <p>Structured taxonomy is the <strong>default path</strong>, not a hard requirement for every file.</p>
+      <p><strong><code>type(misc)</code></strong> — unclassified/exploratory tests; legacy <code>@pytest.mark.misc</code> during migration; excluded from quick/standard tiers by default.</p>
+      <p><strong><code>lifecycle(tmp)</code></strong> — bug repro or spike; must promote or delete; never in quick/standard YAML tiers.</p>
+      <p><strong>Layout:</strong> <code>tests/misc/</code>, optional <code>tests/misc/tmp/</code>.</p>
+      <pre><code>@pytest.mark.type("misc")
+@pytest.mark.lifecycle("tmp")
+def test_repro_issue_12345(...):
+    """TMP: delete or promote by 2026-Q3; owner: @dev."""
+    ...</code></pre>
+      <p><strong>CI policy:</strong> misc opt-in for comprehensive/full; tmp developer-only unless promoted. <code>@pytest.mark.misc</code> bridges to <code>type(misc)</code>.</p>
 
       <h3>Design — Section 5: CTest / PTest / GoogleTest</h3>
       <p><strong>Primary harness</strong></p>
@@ -505,6 +524,7 @@ pytest -m "functional and domain(hpc) and runtime(mpi)"</code></pre>
         <tbody>
           <tr><td><strong>Unit</strong></td><td>Phase 1 (MVP)</td><td>Show mirror-<code>src/</code> layout, unit conftest, <code>type</code> marker, no GPU</td><td><code>tests/unit/.../test_&lt;module&gt;.py</code></td></tr>
           <tr><td><strong>Integration</strong></td><td>Phase 1 (MVP)</td><td>Show feature file, integration conftest, CLI/GPU fixtures</td><td><code>tests/integration/test_&lt;feature&gt;.py</code></td></tr>
+          <tr><td><strong>Misc / ad-hoc</strong></td><td>Phase 1 (MVP)</td><td>Unclassified or scratch; <code>type(misc)</code>, optional <code>lifecycle(tmp)</code></td><td><code>tests/misc/</code></td></tr>
           <tr><td><strong>Functional</strong></td><td>Phase 2+</td><td>Golden workload / output validation pattern</td><td><code>tests/integration/</code> or future <code>tests/functional/</code></td></tr>
           <tr><td><strong>Performance / pressure</strong></td><td>Phase 2+</td><td>Baseline comparison or sustained-load pattern</td><td>future <code>tests/performance/</code> or marked integration</td></tr>
         </tbody>
@@ -566,7 +586,8 @@ pytest -m "functional and domain(hpc) and runtime(mpi)"</code></pre>
         <li>Agree on <strong>sample-first</strong> templates: which real tests become the Unit / Integration / Functional / Performance reference cases in Phase 1.</li>
         <li>Confirm <strong>Phase 2+ filter extensions</strong> (see §4.1): <code>gpu</code> dimension + <code>exclude_gpu</code> YAML; <code>domain</code> / <code>framework</code> / <code>runtime</code> for AI vs HPC functional tests.</li>
         <li>Decide whether <strong>docker/k8s</strong> functional tests belong in <code>comprehensive</code>/<code>full</code> only with env-gated CI lanes.</li>
-        <li>Agree to <strong>migrate ad-hoc markers</strong> (<code>torch_trace</code>, <code>torch_ops</code>) to structured markers over time.</li>
+        <li>Agree to <strong>migrate ad-hoc markers</strong> (<code>torch_trace</code>, <code>torch_ops</code>) when classification is known; <strong>misc/tmp remain permanent escape hatches</strong> (§4.2).</li>
+        <li>Confirm <strong>tmp test policy</strong>: max lifetime, owner/docstring requirement, stale-tmp CI gate.</li>
       </ul>
 
       <div class="footer">Generated for local discussion. Source: internal brainstorming conversation summary.</div>
@@ -847,6 +868,11 @@ pytest -m "functional and domain(hpc) and runtime(mpi)"</code></pre>
         <li><strong>Functional</strong>: end-user flows and output correctness (golden baselines)</li>
         <li><strong>Performance</strong>: overhead/throughput/regressions; includes pressure/stress tests</li>
       </ul>
+      <p><strong>Ad-hoc / misc / temporary (always allowed)</strong></p>
+      <ul>
+        <li><strong><code>type(misc)</code></strong> — unclassified, exploratory, or edge-case tests (repo already uses <code>@pytest.mark.misc</code>). Excluded from default PR tiers until promoted.</li>
+        <li><strong><code>lifecycle(tmp)</code></strong> — short-lived scratch tests; require owner/issue in docstring; promote or delete within agreed window.</li>
+      </ul>
       <p><strong>Borderline rule</strong></p>
       <p>When a file mixes types (common in the current flat layout), split by section banner/imported source module without changing assertions or expectations.</p>
 
@@ -855,6 +881,7 @@ pytest -m "functional and domain(hpc) and runtime(mpi)"</code></pre>
       <ul>
         <li><code>tests/unit/</code> mirrors <code>src/</code></li>
         <li><code>tests/integration/</code> has one file per feature</li>
+        <li><code>tests/misc/</code> ad-hoc and not-yet-classified tests (see §4.2); optional <code>tests/misc/tmp/</code> for scratch</li>
       </ul>
       <p><strong>Fixture strategy</strong></p>
       <p>Prefer per-subtree fixtures (clear boundaries, scales when we later add more types):</p>
@@ -862,6 +889,7 @@ pytest -m "functional and domain(hpc) and runtime(mpi)"</code></pre>
         <li><code>tests/conftest.py</code>: common/lightweight shared fixtures and option parsing</li>
         <li><code>tests/unit/conftest.py</code>: unit-only fixtures (mocks, tiny data builders)</li>
         <li><code>tests/integration/conftest.py</code>: integration-only fixtures (GPU/CLI/workloads)</li>
+        <li><code>tests/misc/conftest.py</code>: optional; inherit shared fixtures only</li>
       </ul>
 
       <h3>Design — Section 4: Filter system</h3>
@@ -869,7 +897,7 @@ pytest -m "functional and domain(hpc) and runtime(mpi)"</code></pre>
       <p>Filters must work for both CI and developer “partial run” workflows (not CI-only).</p>
       <p><strong>MVP filter dimensions</strong></p>
       <ul>
-        <li><code>type</code></li>
+        <li><code>type</code> (includes <code>misc</code> — see §4.2)</li>
         <li><code>arch</code></li>
       </ul>
       <p><strong>Bridge period</strong></p>
@@ -934,7 +962,19 @@ pytest -m "functional and domain(ai) and framework(pytorch) and runtime(baremeta
 pytest -m "functional and domain(hpc) and runtime(mpi)"</code></pre>
       <p><strong>Docker / k8s:</strong> mark as <code>runtime(docker)</code> / <code>runtime(k8s)</code>; gate on environment + tier (<code>comprehensive</code> / <code>full</code> only).</p>
       <p><strong>Design rules:</strong> keep dimensions orthogonal — <code>type</code> = test kind; <code>domain</code> = workload audience; <code>runtime</code> = launch mode; <code>framework</code> = AI stack.</p>
-      <p><strong>Phasing:</strong> MVP = <code>type</code> + <code>arch</code>; Phase 2 = <code>gpu</code> + <code>exclude_gpu</code> + functional; Phase 2+ = <code>domain</code>, <code>framework</code>, <code>runtime</code>. Migrate ad-hoc markers over time.</p>
+      <p><strong>Phasing:</strong> MVP = <code>type</code> (incl. <code>misc</code>) + <code>arch</code>; Phase 2 = <code>gpu</code> + <code>exclude_gpu</code> + functional; Phase 2+ = <code>domain</code>, <code>framework</code>, <code>runtime</code>. Domain-specific ad-hoc markers migrate when known; <strong>misc/tmp bucket remains permanent</strong> (§4.2).</p>
+
+      <h3>Design — Section 4.2: Ad-hoc, misc, and temporary tests</h3>
+      <p>Structured taxonomy is the <strong>default path</strong>, not a hard requirement for every file.</p>
+      <p><strong><code>type(misc)</code></strong> — unclassified/exploratory tests; legacy <code>@pytest.mark.misc</code> during migration; excluded from quick/standard tiers by default.</p>
+      <p><strong><code>lifecycle(tmp)</code></strong> — bug repro or spike; must promote or delete; never in quick/standard YAML tiers.</p>
+      <p><strong>Layout:</strong> <code>tests/misc/</code>, optional <code>tests/misc/tmp/</code>.</p>
+      <pre><code>@pytest.mark.type("misc")
+@pytest.mark.lifecycle("tmp")
+def test_repro_issue_12345(...):
+    """TMP: delete or promote by 2026-Q3; owner: @dev."""
+    ...</code></pre>
+      <p><strong>CI policy:</strong> misc opt-in for comprehensive/full; tmp developer-only unless promoted. <code>@pytest.mark.misc</code> bridges to <code>type(misc)</code>.</p>
 
       <h3>Design — Section 5: CTest / PTest / GoogleTest</h3>
       <p><strong>Primary harness</strong></p>
@@ -965,6 +1005,7 @@ pytest -m "functional and domain(hpc) and runtime(mpi)"</code></pre>
         <tbody>
           <tr><td><strong>Unit</strong></td><td>Phase 1 (MVP)</td><td>Show mirror-<code>src/</code> layout, unit conftest, <code>type</code> marker, no GPU</td><td><code>tests/unit/.../test_&lt;module&gt;.py</code></td></tr>
           <tr><td><strong>Integration</strong></td><td>Phase 1 (MVP)</td><td>Show feature file, integration conftest, CLI/GPU fixtures</td><td><code>tests/integration/test_&lt;feature&gt;.py</code></td></tr>
+          <tr><td><strong>Misc / ad-hoc</strong></td><td>Phase 1 (MVP)</td><td>Unclassified or scratch; <code>type(misc)</code>, optional <code>lifecycle(tmp)</code></td><td><code>tests/misc/</code></td></tr>
           <tr><td><strong>Functional</strong></td><td>Phase 2+</td><td>Golden workload / output validation pattern</td><td><code>tests/integration/</code> or future <code>tests/functional/</code></td></tr>
           <tr><td><strong>Performance / pressure</strong></td><td>Phase 2+</td><td>Baseline comparison or sustained-load pattern</td><td>future <code>tests/performance/</code> or marked integration</td></tr>
         </tbody>
@@ -1026,7 +1067,8 @@ pytest -m "functional and domain(hpc) and runtime(mpi)"</code></pre>
         <li>Agree on <strong>sample-first</strong> templates: which real tests become the Unit / Integration / Functional / Performance reference cases in Phase 1.</li>
         <li>Confirm <strong>Phase 2+ filter extensions</strong> (see §4.1): <code>gpu</code> dimension + <code>exclude_gpu</code> YAML; <code>domain</code> / <code>framework</code> / <code>runtime</code> for AI vs HPC functional tests.</li>
         <li>Decide whether <strong>docker/k8s</strong> functional tests belong in <code>comprehensive</code>/<code>full</code> only with env-gated CI lanes.</li>
-        <li>Agree to <strong>migrate ad-hoc markers</strong> (<code>torch_trace</code>, <code>torch_ops</code>) to structured markers over time.</li>
+        <li>Agree to <strong>migrate ad-hoc markers</strong> (<code>torch_trace</code>, <code>torch_ops</code>) when classification is known; <strong>misc/tmp remain permanent escape hatches</strong> (§4.2).</li>
+        <li>Confirm <strong>tmp test policy</strong>: max lifetime, owner/docstring requirement, stale-tmp CI gate.</li>
       </ul>
 
       <div class="footer">Generated for local discussion. Source: internal brainstorming conversation summary.</div>

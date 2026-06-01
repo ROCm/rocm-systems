@@ -280,6 +280,16 @@ The **YAML shape and TheRock contract** should converge on the hipBLAS reference
 - **Functional**: end-user flows and output correctness (golden baselines)
 - **Performance**: overhead/throughput/regressions; includes pressure/stress tests
 
+**Ad-hoc / misc / temporary (always allowed)**
+
+Not every test fits unit/integration/functional/performance on day one. The framework must
+**explicitly support an escape hatch** rather than forcing misclassification:
+
+- **`type(misc)`** — unclassified, exploratory, or edge-case tests (repo already uses
+  `@pytest.mark.misc` in several files). Stays runnable; excluded from default PR tiers until promoted.
+- **`lifecycle(tmp)`** — short-lived scratch tests (bug repro, WIP validation). Must carry an
+  owner/issue reference in docstring; promoted to a proper `type` or deleted within an agreed window.
+
 **Borderline rule**
 
 When a file mixes types (common in the current flat layout), split by section banner/imported
@@ -291,6 +301,7 @@ source module without changing assertions or expectations.
 
 - `tests/unit/` mirrors `src/`
 - `tests/integration/` has one file per feature
+- `tests/misc/` ad-hoc and not-yet-classified tests (see §4.2); optional `tests/misc/tmp/` for scratch
 
 **Fixture strategy**
 
@@ -299,6 +310,7 @@ Prefer per-subtree fixtures (clear boundaries, scales when we later add more typ
 - `tests/conftest.py`: common/lightweight shared fixtures and option parsing
 - `tests/unit/conftest.py`: unit-only fixtures (mocks, tiny data builders)
 - `tests/integration/conftest.py`: integration-only fixtures (GPU/CLI/workloads)
+- `tests/misc/conftest.py`: optional; inherit shared fixtures only (keep misc lightweight)
 
 ### Design — Section 4: Filter system
 
@@ -308,7 +320,7 @@ Filters must work for both CI and developer “partial run” workflows (not CI-
 
 **MVP filter dimensions**
 
-- `type`
+- `type` (includes `misc` — see §4.2)
 - `arch`
 
 **Bridge period**
@@ -439,11 +451,73 @@ Avoid combinatorial marker names like `functional_ai_mpi_pytorch`.
 
 | Phase | Filter capability |
 |-------|-------------------|
-| MVP | `type`, `arch` + YAML tiers (`quick`…`full`) |
+| MVP | `type` (incl. `misc`), `arch` + YAML tiers (`quick`…`full`) |
 | Phase 2 | `gpu` + `exclude_gpu`; enable `type=functional` |
 | Phase 2+ | `domain`, `framework`, `runtime` for AI/HPC functional splits |
 
-Ad-hoc markers (`torch_trace`, `torch_ops`) migrate to structured markers over time.
+Domain-specific ad-hoc markers (`torch_trace`, `torch_ops`) migrate to structured markers when
+classification is known. The **`misc` / `tmp` bucket remains permanent** (§4.2).
+
+### Design — Section 4.2: Ad-hoc, misc, and temporary tests
+
+The structured taxonomy (unit / integration / functional / performance / AI / HPC) is the
+**default path**, not a hard requirement for every test file. Contributors need a sanctioned
+place for tests that are not yet classified or are intentionally short-lived.
+
+**When to use `type(misc)`**
+
+- Test purpose is unclear or spans multiple levels (promote later after split).
+- One-off validation, debug harness, or experimental coverage not ready for CI tiers.
+- Legacy `@pytest.mark.misc` tests during migration (many exist in `test_utils.py`,
+  `test_profile_general.py`, `test_gpu_specs.py`, `test_analyze_commands.py`).
+
+**When to use `lifecycle(tmp)`**
+
+- Bug repro or spike that must land before proper fixture/golden exists.
+- Developer-local validation shared temporarily with the team.
+- **Not** a substitute for permanent coverage — tmp tests require promotion or deletion.
+
+**Markers and layout**
+
+```python
+@pytest.mark.type("misc")
+@pytest.mark.gpu("optional")   # set explicitly; misc does not imply gpu=none
+def test_edge_case_not_yet_bucketed(...):
+    """MISC: promote to integration after workload fixture lands (JIRA-XXXX)."""
+    ...
+
+@pytest.mark.type("misc")
+@pytest.mark.lifecycle("tmp")
+def test_repro_issue_12345(...):
+    """TMP: delete or promote by 2026-Q3; owner: @dev."""
+    ...
+```
+
+```
+tests/misc/
+  test_<topic>_scratch.py       # type(misc)
+  tmp/
+    test_repro_issue_12345.py   # type(misc) + lifecycle(tmp)
+```
+
+**CI / tier policy**
+
+| Tier | misc | tmp |
+|------|------|-----|
+| `quick` / `standard` | excluded by default | excluded |
+| `comprehensive` / `full` | opt-in via YAML pattern or `pytest -m misc` | never in YAML tiers |
+| developer | `pytest -m "misc and not lifecycle(tmp)"` | `pytest -m lifecycle(tmp)` |
+
+Register markers in `pytest.ini` / `pyproject.toml` so `-m misc` and `-m lifecycle(tmp)` work
+without typos. **Do not** add misc/tmp tests to `quick`/`standard` `test_patterns` unless
+explicitly promoted.
+
+**Relationship to other ad-hoc markers**
+
+- **`@pytest.mark.misc`** → becomes `type(misc)` (keep name during bridge period).
+- **`torch_trace`, `torch_ops`, etc.** → migrate to structured `domain` / `framework` markers
+  when classification is known; use `type(misc)` only while still unclassified.
+- Misc/tmp bucket is **permanent** in the framework — it does not go away after migration.
 
 ### Design — Section 5: CTest / PTest / GoogleTest
 
@@ -474,6 +548,7 @@ Ad-hoc markers (`torch_trace`, `torch_ops`) migrate to structured markers over t
 |----------|------|---------|------------------|
 | **Unit** | Phase 1 (MVP) | Show mirror-`src/` layout, unit conftest, `@pytest.mark.type("unit")`, no GPU | `tests/unit/.../test_<module>.py` |
 | **Integration** | Phase 1 (MVP) | Show feature file, integration conftest, CLI/GPU fixtures, `@pytest.mark.type("integration")` | `tests/integration/test_<feature>.py` |
+| **Misc / ad-hoc** | Phase 1 (MVP) | Unclassified or scratch tests; `@pytest.mark.type("misc")`, optional `lifecycle(tmp)` | `tests/misc/` |
 | **Functional** | Phase 2+ | Golden workload / output validation pattern | `tests/integration/` or future `tests/functional/` |
 | **Performance / pressure** | Phase 2+ | Baseline comparison or sustained-load pattern | future `tests/performance/` or marked integration |
 
@@ -540,5 +615,6 @@ Use these prompts to drive alignment in the team meeting:
 - Agree on **sample-first** templates: which real tests become the Unit / Integration / Functional / Performance reference cases in Phase 1.
 - Confirm **Phase 2+ filter extensions** (see §4.1): `gpu` dimension + `exclude_gpu` YAML; `domain` / `framework` / `runtime` for AI vs HPC functional tests.
 - Decide whether **docker/k8s** functional tests belong in `comprehensive`/`full` only with env-gated CI lanes.
-- Agree to **migrate ad-hoc markers** (`torch_trace`, `torch_ops`) to structured markers over time.
+- Agree to **migrate ad-hoc markers** (`torch_trace`, `torch_ops`) to structured markers when classification is known; **`misc` / `tmp` remain as permanent escape hatches** (§4.2).
+- Confirm **tmp test policy**: max lifetime, owner/docstring requirement, and whether CI should fail if `lifecycle(tmp)` tests are older than N days.
 
