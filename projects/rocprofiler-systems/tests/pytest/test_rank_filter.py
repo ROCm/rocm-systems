@@ -183,8 +183,8 @@ class TestRankFilter(RocprofsysTest):
 
     def test_invalid_filter_strings(self, rocpd_env):
         """Invalid filter specifications.
-        OUTPUT="garbage,10-0,2": 'garbage' is non-numeric and '10-0' is a reversed
-        range (both ignored); only rank 2 remains, so only rank 2 produces files.
+        OUTPUT="garbage,10-0,-1,2": 'garbage' is non-numeric, '10-0' is a reversed
+        range, '-1' is invalid (all ignored); only rank 2 remains, so only rank 2 produces files.
         LOGS="garbage": the only token is non-numeric and is ignored, so the
         filter parses to no valid ranks. An invalid specification disables log
         filtering entirely, so every rank emits a banner.
@@ -198,7 +198,7 @@ class TestRankFilter(RocprofsysTest):
             env=rocpd_env,
             sysrun_args=[
                 "--rank-filter-output",
-                "garbage,10-0,2",
+                "garbage,10-0,-1,2",
                 "--rank-filter-logs",
                 "garbage",
             ],

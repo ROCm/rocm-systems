@@ -76,9 +76,10 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
             auto _vv = tim::delimit(_v, "-");
             if(_vv.size() != 2)
             {
-                throw std::runtime_error(fmt::format(
-                    "Invalid {} range specification: {}. Required format N-M, e.g. 0-4",
-                    _label, _v));
+                LOG_WARNING("Invalid {} range specification: {}. Required format N-M, "
+                            "e.g. 0-4. Ignoring {}...",
+                            _label, _v, _v);
+                continue;
             }
 
             Tp _vn = _get_value(_vv.at(0));
