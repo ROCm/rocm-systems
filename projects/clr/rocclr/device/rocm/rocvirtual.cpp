@@ -4357,9 +4357,14 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
 
     if ((devKernel->workGroupInfo()->usedStackSize_ & 0x1) == 0x1) {
       dispatchPacket.private_segment_size =
-              std::max<uint64_t>(dev().StackSize(), dispatchPacket.private_segment_size);
-      if (dispatchPacket.private_segment_size > 16 * Ki) {
-        dispatchPacket.private_segment_size = 16 * Ki;
+          std::max<uint64_t>(dev().StackSize(), dispatchPacket.private_segment_size);
+      const size_t maxStackSize = dev().MaxStackSize();
+      // we return an explicit error when we exceed the max stack size limit
+      if (dispatchPacket.private_segment_size > maxStackSize) {
+        LogPrintfError("Scratch size (%u) exceeds max allowed (%zu) for kernel : %s",
+                       dispatchPacket.private_segment_size, maxStackSize,
+                       gpuKernel.getDemangledName().c_str());
+        return false;
       }
     }
 

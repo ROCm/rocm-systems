@@ -1230,12 +1230,15 @@ TEST(BinaryTranslator, CaveBranchOverflowLeavesCodeObjectUnchanged) {
   auto result = translator.translate(co);
 
   EXPECT_EQ(result.elf_bytes, image);
-  const bool warned =
-      std::any_of(result.warnings.begin(), result.warnings.end(), [](const std::string &warning) {
-        return warning.find("branch range") != std::string::npos &&
-               warning.find("leaving code object unchanged") != std::string::npos;
+  const bool diagnosed = std::any_of(
+      result.diagnostics.begin(), result.diagnostics.end(),
+      [](const TranslationDiagnostic &diagnostic) {
+        return diagnostic.severity == DiagnosticSeverity::Error &&
+               diagnostic.kind == DiagnosticKind::ResourceLimit &&
+               diagnostic.message.find("branch range") != std::string::npos &&
+               diagnostic.message.find("leaving code object unchanged") != std::string::npos;
       });
-  EXPECT_TRUE(warned);
+  EXPECT_TRUE(diagnosed);
 }
 
 } // namespace
@@ -1335,7 +1338,7 @@ TEST(BinaryTranslatorE2E, TranslatesMultiKernelCodeObject) {
   rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
   auto result = translator.translate(co);
   ASSERT_FALSE(result.elf_bytes.empty());
-  EXPECT_TRUE(result.warnings.empty());
+  EXPECT_TRUE(result.ok());
 
   rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(translated.is_valid());
