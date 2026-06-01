@@ -57,9 +57,11 @@ set(EXECUTABLE_NAME "rocprof-compute")
 include(ExternalProject)
 include(GNUInstallDirs)
 include(utils.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/cmake/asan_build_dependencies.cmake)
+# sanitizers.cmake resolves the canonical ENABLE_SANITIZER and applies all
+# instrumentation side effects at include time; it must run before
+# asan_build_dependencies.cmake, whose pthread guard reads ENABLE_SANITIZER.
 include(cmake/sanitizers.cmake)
-enable_sanitizer_gpu_target_munging()
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/asan_build_dependencies.cmake)
 
 set(BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides")
 set(BUILD_DEBIAN_PKGING_FLAG

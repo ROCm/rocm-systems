@@ -3,10 +3,13 @@
 
 include_guard(GLOBAL)
 
-# Resolve the sanitizer selection in place (normalize, validate, write back via
-# PARENT_SCOPE). THEROCK_SANITIZER is promoted over the passed variable
-# so TheRock-driven builds have a single source of truth.
-function(resolve_sanitizer out_var)
+# Resolve ENABLE_SANITIZER in place (normalize, validate, write back via
+# PARENT_SCOPE). ENABLE_SANITIZER is the single canonical sanitizer variable for
+# this project. THEROCK_SANITIZER and the legacy ENABLE_ADDRESS_SANITIZER are
+# folded into it here, with precedence THEROCK_SANITIZER > explicit
+# ENABLE_SANITIZER > ENABLE_ADDRESS_SANITIZER, so every downstream site reads one
+# variable.
+function(resolve_sanitizer)
     set(sanitizer_valid
         ""
         "OFF"
@@ -23,20 +26,33 @@ function(resolve_sanitizer out_var)
         )
     endif()
 
-    set(sanitizer_provenance "-D${out_var}")
+    set(sanitizer_provenance "-DENABLE_SANITIZER")
     if(DEFINED THEROCK_SANITIZER AND NOT THEROCK_SANITIZER STREQUAL "")
-        set(${out_var}
+        set(ENABLE_SANITIZER
             "${THEROCK_SANITIZER}"
             CACHE STRING
             "Sanitizer for the native tool library (driven by THEROCK_SANITIZER)"
             FORCE
         )
         set(sanitizer_provenance "THEROCK_SANITIZER")
+    elseif(
+        (ENABLE_SANITIZER STREQUAL "" OR ENABLE_SANITIZER STREQUAL "OFF")
+        AND ENABLE_ADDRESS_SANITIZER
+    )
+        # Legacy flag: promote to the canonical ASAN selection so the single guard
+        # downstream (and the full flag/munging machinery) reads ENABLE_SANITIZER.
+        set(ENABLE_SANITIZER
+            "ASAN"
+            CACHE STRING
+            "Sanitizer for the native tool library (driven by ENABLE_ADDRESS_SANITIZER)"
+            FORCE
+        )
+        set(sanitizer_provenance "ENABLE_ADDRESS_SANITIZER")
     endif()
 
     # Normalize OFF -> "" so downstream code only tests for emptiness.
-    if(${out_var} STREQUAL "OFF")
-        set(${out_var}
+    if(ENABLE_SANITIZER STREQUAL "OFF")
+        set(ENABLE_SANITIZER
             ""
             CACHE STRING
             "Sanitizer for the native tool library: OFF, ASAN, HOST_ASAN, or TSAN"
@@ -44,44 +60,38 @@ function(resolve_sanitizer out_var)
         )
     endif()
 
-    if(NOT ${out_var} IN_LIST sanitizer_valid)
+    if(NOT ENABLE_SANITIZER IN_LIST sanitizer_valid)
         message(
             FATAL_ERROR
-            "${out_var}='${${out_var}}' is not one of: OFF, ASAN, HOST_ASAN, TSAN"
+            "ENABLE_SANITIZER='${ENABLE_SANITIZER}' is not one of: OFF, ASAN, HOST_ASAN, TSAN"
         )
     endif()
 
     # Nuitka onefile is incompatible with sanitizers (it execs a stripped binary
     # from a temp dir; the sanitizer runtime cannot be located).
-    if(${out_var} AND STANDALONEBINARY)
+    if(ENABLE_SANITIZER AND STANDALONEBINARY)
         message(
             FATAL_ERROR
-            "${out_var}=${${out_var}} cannot be combined with STANDALONEBINARY=ON"
+            "ENABLE_SANITIZER=${ENABLE_SANITIZER} cannot be combined with STANDALONEBINARY=ON"
         )
     endif()
 
-    if(${out_var})
-        message(STATUS "Sanitizer: ${${out_var}} (from ${sanitizer_provenance})")
+    if(ENABLE_SANITIZER)
+        message(STATUS "Sanitizer: ${ENABLE_SANITIZER} (from ${sanitizer_provenance})")
     else()
         message(STATUS "Sanitizer: OFF")
     endif()
 
-    set(${out_var} "${${out_var}}" PARENT_SCOPE)
+    set(ENABLE_SANITIZER "${ENABLE_SANITIZER}" PARENT_SCOPE)
 endfunction()
 
-# Apply -fsanitize=... flags and link options to the current scope
-# No-op when off, or when TheRock already injected -fsanitize=
-# via CMAKE_CXX_FLAGS_INIT (avoid double-instrumentation).
+# Apply -fsanitize=... compile flags and link options to the current scope.
+# No-op when off. Compile-flag injection is skipped when TheRock already populated
+# -fsanitize= via CMAKE_CXX_FLAGS_INIT (avoid double-instrumentation); link options
+# are emitted unconditionally so they survive TheRock ever splitting its compile and
+# link injection. Sanitizer link flags are idempotent, so any duplication is benign.
 function(enable_sanitizer)
     if(NOT ENABLE_SANITIZER)
-        return()
-    endif()
-
-    if(CMAKE_CXX_FLAGS_INIT MATCHES "-fsanitize=")
-        message(
-            STATUS
-            "enable_sanitizer(): -fsanitize= already in CMAKE_CXX_FLAGS_INIT; skipping local injection"
-        )
         return()
     endif()
 
@@ -91,9 +101,16 @@ function(enable_sanitizer)
         set(_flag "thread")
     endif()
 
-    set(_extra "-fsanitize=${_flag} -fno-omit-frame-pointer -g")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${_extra}" PARENT_SCOPE)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${_extra}" PARENT_SCOPE)
+    if(CMAKE_CXX_FLAGS_INIT MATCHES "-fsanitize=")
+        message(
+            STATUS
+            "enable_sanitizer(): -fsanitize= already in CMAKE_CXX_FLAGS_INIT; skipping local compile-flag injection"
+        )
+    else()
+        set(_extra "-fsanitize=${_flag} -fno-omit-frame-pointer -g")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${_extra}" PARENT_SCOPE)
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${_extra}" PARENT_SCOPE)
+    endif()
 
     # clang defaults to static sanitizer linkage; gcc defaults to shared.
     # Force shared on clang only.
@@ -116,6 +133,9 @@ function(enable_sanitizer_gpu_target_munging)
         )
         return()
     endif()
+    # The gfx942/gfx950 arch list mirrors TheRock's regex, tracked upstream as
+    # TheRock TODO #3444 (ASAN variants may need xnack-suffix expansion). Keep it in
+    # sync with upstream rather than widening it independently.
     list(TRANSFORM GPU_TARGETS REPLACE "^(gfx942|gfx950)$" "\\1:xnack+")
     set(GPU_TARGETS "${GPU_TARGETS}" PARENT_SCOPE)
     set(AMDGPU_TARGETS "${GPU_TARGETS}" PARENT_SCOPE)
@@ -125,9 +145,6 @@ endfunction()
 # Wrap the ctest python command with THEROCK_SANITIZER_LAUNCHER plus env that
 # quiets known false positives.
 function(enable_sanitizer_python_launcher out_var)
-    if(NOT DEFINED THEROCK_SANITIZER_LAUNCHER)
-        set(THEROCK_SANITIZER_LAUNCHER)
-    endif()
     set(_launcher ${THEROCK_SANITIZER_LAUNCHER} ${${out_var}})
     if(ENABLE_SANITIZER STREQUAL "ASAN" OR ENABLE_SANITIZER STREQUAL "HOST_ASAN")
         list(
@@ -162,4 +179,16 @@ set_property(
     CACHE ENABLE_SANITIZER
     PROPERTY STRINGS OFF ASAN HOST_ASAN TSAN
 )
-resolve_sanitizer(ENABLE_SANITIZER)
+
+# Sanitizer instrumentation is a project-wide configure-time concern, so the module
+# drives all three side effects in order at include time: resolve the canonical
+# selection, rewrite GPU targets, and inject compile/link flags. Including this
+# module from the top-level CMakeLists (before add_subdirectory) is sufficient;
+# CMAKE_CXX_FLAGS propagates into src/lib via standard subdir inheritance, so that
+# subdir does not need to know sanitizers exist. The runtime JIT build of src/lib
+# never sets ENABLE_SANITIZER/THEROCK_SANITIZER and does not include this module, so
+# it stays sanitizer-free. The python launcher is wired separately by the top-level
+# CMakeLists once PYTHON_TEST_COMMAND is defined.
+resolve_sanitizer()
+enable_sanitizer_gpu_target_munging()
+enable_sanitizer()
