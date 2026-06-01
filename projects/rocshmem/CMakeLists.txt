@@ -430,6 +430,7 @@ endif (NOT BUILD_TESTS_ONLY)
 ###############################################################################
 # TEST SUBDIRECTORIES
 ###############################################################################
+enable_testing()
 add_subdirectory(tests)
 
 if (BUILD_EXAMPLES)
