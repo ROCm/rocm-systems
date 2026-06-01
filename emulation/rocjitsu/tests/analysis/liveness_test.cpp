@@ -326,6 +326,22 @@ TEST(LivenessAnalysis, FindsDeadSgprAfterLiveSgpr) {
   EXPECT_EQ(liveness.find_free_sgpr(&use, 4), 5);
 }
 
+TEST(LivenessAnalysis, MinFreeVgprForcesScratchAllocationAboveFloor) {
+  auto blocks = build_test_blocks({TestOpcode::UseSgpr4, TestOpcode::End});
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.min_free_vgpr = 4;
+
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  const Instruction &use = *blocks[0]->instructions().begin();
+  EXPECT_FALSE(liveness.is_live_before(use, {RegClass::VGPR, 0, 4}));
+  EXPECT_EQ(liveness.find_free_sgpr(&use, 0), 0);
+  EXPECT_EQ(liveness.find_free_run(&use, 1, 0), 4);
+  EXPECT_EQ(liveness.find_free_run(&use, 1, 7), 7);
+}
+
 TEST(LivenessAnalysis, ReadWriteSameRegisterIsLiveBeforeInstruction) {
   auto blocks = build_test_blocks({TestOpcode::ReadWriteSgpr4, TestOpcode::End});
   LivenessAnalysis liveness = analyze_scope(blocks);
