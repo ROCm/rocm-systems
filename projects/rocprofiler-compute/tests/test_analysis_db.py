@@ -212,8 +212,8 @@ def test_evaluate_with_none_in_formula_does_not_nullify_valid_result():
 def test_evaluate_divide_by_zero_silenced_and_logged_at_debug():
     """
     Divide-by-zero (x/0 -> inf, 0/0 -> NaN) emits a numpy RuntimeWarning
-    that is captured and logged via console_debug. The misleading
-    "missing counter data" console_warning must not fire.
+    that is captured and logged via console_debug. The "evaluated to N/A"
+    console_warning must not fire when a RuntimeWarning was caught.
     """
     pmc_df = pd.DataFrame({"Counter1": [10, 20, 30]})
     sys_info = {}
@@ -282,17 +282,20 @@ def test_calc_builtin_vars_processes_per_xcd_first():
             "rocprof_compute_analyze.analysis_db.get_build_in_vars",
             return_value=mock_builtin_vars,
         ),
+        patch(
+            "utils.utils_counter_defs.get_build_in_vars",
+            return_value=mock_builtin_vars,
+        ),
     ):
-        result = db_analysis.calc_builtin_vars(pmc_df, sys_info)
+        db_analysis.calc_builtin_vars(
+            pmc_df, sys_info, ["$PER_XCD_VAR", "$DERIVED_VAR"]
+        )
 
     # Verify PER_XCD var was computed
     assert sys_info["PER_XCD_VAR"] == 20
 
     # Verify DERIVED_VAR used the computed PER_XCD_VAR value
     assert sys_info["DERIVED_VAR"] == 25
-
-    # Verify pmc_df is returned unchanged
-    pd.testing.assert_frame_equal(result, pmc_df)
 
 
 def test_calc_builtin_vars_with_dataframe_expressions():
@@ -317,8 +320,14 @@ def test_calc_builtin_vars_with_dataframe_expressions():
             "rocprof_compute_analyze.analysis_db.get_build_in_vars",
             return_value=mock_builtin_vars,
         ),
+        patch(
+            "utils.utils_counter_defs.get_build_in_vars",
+            return_value=mock_builtin_vars,
+        ),
     ):
-        db_analysis.calc_builtin_vars(pmc_df, sys_info)
+        db_analysis.calc_builtin_vars(
+            pmc_df, sys_info, ["$TOTAL_COUNT", "$SCALED_TOTAL"]
+        )
 
     assert sys_info["TOTAL_COUNT"] == 60
     assert sys_info["SCALED_TOTAL"] == 120
@@ -383,6 +392,10 @@ def test_calc_dataframe_expressions_with_builtin_vars():
         ),
         patch(
             "rocprof_compute_analyze.analysis_db.get_build_in_vars",
+            return_value=mock_builtin_vars,
+        ),
+        patch(
+            "utils.utils_counter_defs.get_build_in_vars",
             return_value=mock_builtin_vars,
         ),
     ):

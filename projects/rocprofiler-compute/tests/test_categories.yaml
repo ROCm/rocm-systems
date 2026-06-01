@@ -4,6 +4,7 @@ test_categories:
     test_patterns:
       - test_profile_misc
       - test_metric_utils
+      - test_parser
       - test_profile_section
       - test_pc_sampling
       - test_analyze_workloads
@@ -55,6 +56,7 @@ test_categories:
       - test_profile_iteration_multiplexing_2
       - test_profile_iteration_multiplexing_stochastic
       - test_metric_utils
+      - test_parser
       - test_autogen_config
       - test_analyze_commands
       - test_analyze_workloads
@@ -102,6 +104,7 @@ test_categories:
       - test_profile_iteration_multiplexing_2
       - test_profile_iteration_multiplexing_stochastic
       - test_metric_utils
+      - test_parser
       - test_autogen_config
       - test_analyze_commands
       - test_analyze_workloads
@@ -149,6 +152,7 @@ test_categories:
       - test_profile_iteration_multiplexing_2
       - test_profile_iteration_multiplexing_stochastic
       - test_metric_utils
+      - test_parser
       - test_autogen_config
       - test_analyze_commands
       - test_analyze_workloads

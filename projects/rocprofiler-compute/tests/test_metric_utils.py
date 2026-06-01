@@ -37,7 +37,6 @@ from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
 )
-from utils.utils_common import calc_builtin_var
 
 # =============================================================================
 # Tests for utils.metrics.aggregation
@@ -164,12 +163,6 @@ class TestExpression:
         """update_denominator_string returns the empty string when input is empty."""
         assert update_denominator_string("", "per_wave") == ""
 
-    def test_calc_builtin_var_exits_for_unsupported_var(self):
-        """calc_builtin_var exits when given an unsupported variable name."""
-        sys_info = {"total_l2_chan": 32}
-        with pytest.raises(SystemExit):
-            calc_builtin_var("$unsupported_var", sys_info)
-
     def test_visit_call_raises_for_unknown_function(self):
         """CodeTransformer.visit_Call raises for unknown function names."""
         transformer = CodeTransformer()
@@ -285,6 +278,13 @@ class TestEvaluationPipeline:
         }).set_index("Metric_ID")
         dfs = {1: metric_df}
         dfs_type = {1: "metric_table"}
+        dfs_expressions = {
+            1: [
+                v
+                for v in metric_fields.values()
+                if isinstance(v, str) and v and v != "None"
+            ]
+        }
         sys_info = pd.Series({
             "ip_blocks": "standard",
             "gpu_arch": "gfx90a",
@@ -308,15 +308,16 @@ class TestEvaluationPipeline:
             "SQ_WAVES": [100, 200, 150],
             "GRBM_GUI_ACTIVE": [1000, 2000, 1500],
         })
-        return metric_df, dfs, dfs_type, sys_info, raw_pmc_df
+        return metric_df, dfs, dfs_type, dfs_expressions, sys_info, raw_pmc_df
 
     def test_eval_metric_in_debug_mode(self):
         """eval_metric with debug=True invokes debug_row_tracker and writes back."""
-        metric_df, dfs, dfs_type, sys_info, raw_pmc_df = self._build_eval_metric_inputs(
+        fixture = self._build_eval_metric_inputs(
             metric_fields={
                 "Value": "to_sum(raw_pmc_df['SQ_WAVES'])",
             }
         )
+        metric_df, dfs, dfs_type, dfs_expressions, sys_info, raw_pmc_df = fixture
         with (
             patch(
                 "utils.metrics.evaluation_pipeline.get_build_in_vars",
@@ -329,6 +330,7 @@ class TestEvaluationPipeline:
             eval_metric(
                 dfs,
                 dfs_type,
+                dfs_expressions,
                 sys_info,
                 pd.DataFrame(),
                 raw_pmc_df,
@@ -343,17 +345,19 @@ class TestEvaluationPipeline:
 
     def test_eval_metric_computes_value_from_expression(self):
         """eval_metric writes the computed Value back to the metric DataFrame."""
-        metric_df, dfs, dfs_type, sys_info, raw_pmc_df = self._build_eval_metric_inputs(
+        fixture = self._build_eval_metric_inputs(
             metric_fields={
                 "Value": "to_sum(raw_pmc_df['SQ_WAVES'])",
             }
         )
+        metric_df, dfs, dfs_type, dfs_expressions, sys_info, raw_pmc_df = fixture
         with patch(
             "utils.metrics.evaluation_pipeline.get_build_in_vars", return_value={}
         ):
             eval_metric(
                 dfs,
                 dfs_type,
+                dfs_expressions,
                 sys_info,
                 pd.DataFrame(),
                 raw_pmc_df,
@@ -363,7 +367,7 @@ class TestEvaluationPipeline:
 
     def test_eval_metric_resolves_accum_alias_column_end_to_end(self):
         """eval_metric resolves YAML formulas that reference ACCUM alias columns."""
-        metric_df, dfs, dfs_type, sys_info, _ = self._build_eval_metric_inputs(
+        fixture = self._build_eval_metric_inputs(
             metric_fields={
                 "Value": (
                     "to_sum(raw_pmc_df['SQ_INST_LEVEL_VMEM_ACCUM']) / "
@@ -371,6 +375,7 @@ class TestEvaluationPipeline:
                 ),
             }
         )
+        metric_df, dfs, dfs_type, dfs_expressions, sys_info, raw_pmc_df = fixture
         flat_raw_pmc_df = pd.DataFrame({
             "SQ_INST_LEVEL_VMEM_ACCUM": [100.0, 200.0, 300.0],
             "SQ_INSTS_VMEM": [10.0, 20.0, 30.0],
@@ -382,6 +387,7 @@ class TestEvaluationPipeline:
             eval_metric(
                 dfs,
                 dfs_type,
+                dfs_expressions,
                 sys_info,
                 pd.DataFrame(),
                 flat_raw_pmc_df,
@@ -391,9 +397,8 @@ class TestEvaluationPipeline:
 
     def test_eval_metric_normalizes_falsey_average_to_empty_string(self):
         """eval_metric replaces a falsey Average value with the empty string."""
-        metric_df, dfs, dfs_type, sys_info, raw_pmc_df = self._build_eval_metric_inputs(
-            metric_fields={"Average": None}
-        )
+        fixture = self._build_eval_metric_inputs(metric_fields={"Average": None})
+        metric_df, dfs, dfs_type, dfs_expressions, sys_info, raw_pmc_df = fixture
         assert metric_df.loc["1.1.0", "Average"] is None
 
         with patch(
@@ -402,6 +407,7 @@ class TestEvaluationPipeline:
             eval_metric(
                 dfs,
                 dfs_type,
+                dfs_expressions,
                 sys_info,
                 pd.DataFrame(),
                 raw_pmc_df,
@@ -413,7 +419,7 @@ class TestEvaluationPipeline:
         """eval_metric emits per-metric variance warning + summary on clamp."""
         # Negative DIFF over a positive REF crosses the 1% threshold and bumps
         # the noise-clamp counter when to_noise_clamp evaluates the expression.
-        _, dfs, dfs_type, sys_info, _ = self._build_eval_metric_inputs(
+        fixture = self._build_eval_metric_inputs(
             metric_fields={
                 "Value": (
                     "to_noise_clamp("
@@ -422,6 +428,7 @@ class TestEvaluationPipeline:
                 ),
             }
         )
+        metric_df, dfs, dfs_type, dfs_expressions, sys_info, raw_pmc_df = fixture
         raw_pmc_df = pd.DataFrame({
             "GRBM_GUI_ACTIVE": [1000],
             "DIFF": [-100.0],
@@ -443,6 +450,7 @@ class TestEvaluationPipeline:
             eval_metric(
                 dfs,
                 dfs_type,
+                dfs_expressions,
                 sys_info,
                 pd.DataFrame(),
                 raw_pmc_df,
@@ -713,9 +721,9 @@ class TestMetricEvaluator:
     def test_eval_expression_divide_by_zero_silenced_and_logged_at_debug(self):
         """
         Divide-by-zero (x/0 -> inf, 0/0 -> NaN) emits a numpy RuntimeWarning
-        that is captured and logged via console_debug. The misleading
-        "missing counter data" console_warning must not fire; the function
-        still returns 'N/A' for both cases.
+        that is captured and logged via console_debug. The "evaluated to N/A"
+        console_warning must not fire when a RuntimeWarning was caught; the
+        function still returns 'N/A' for both cases.
         """
         cases = [
             # x/0 -> inf, taken by the np.isinf branch
@@ -795,3 +803,65 @@ class TestMetricEvaluator:
         result = evaluator.eval_expression(eval_str)
         assert isinstance(result, float)
         assert abs(result - 2.0) < 1e-9, f"MIN([10, 2, 10]) should be 2.0, got {result}"
+
+
+# =============================================================================
+# Tests for utils.utils_counter_defs.extract_counters_and_variables
+# =============================================================================
+
+
+class TestExtractCountersAndVariables:
+    """Tests for utils.utils_counter_defs.extract_counters_and_variables."""
+
+    def test_returns_hw_counters_and_referenced_builtin_vars(self):
+        from utils.utils_counter_defs import extract_counters_and_variables
+
+        text = "$GRBM_GUI_ACTIVE_PER_XCD / SQ_WAVES"
+        hw, vars_ = extract_counters_and_variables(text, "MI200")
+        assert "GRBM_GUI_ACTIVE" in hw
+        assert "SQ_WAVES" in hw
+        assert "GRBM_GUI_ACTIVE_PER_XCD" in vars_
+
+    def test_resolves_builtin_var_dependencies_transitively(self):
+        from utils.utils_counter_defs import extract_counters_and_variables
+
+        # numActiveCUs references $GRBM_GUI_ACTIVE_PER_XCD -> GRBM_GUI_ACTIVE
+        text = "$numActiveCUs"
+        hw, vars_ = extract_counters_and_variables(text, "MI200")
+        assert "GRBM_GUI_ACTIVE" in hw
+        assert "numActiveCUs" in vars_
+        assert "GRBM_GUI_ACTIVE_PER_XCD" in vars_
+
+    def test_unreferenced_builtin_vars_are_not_returned(self):
+        from utils.utils_counter_defs import extract_counters_and_variables
+
+        # SUPPORTED_DENOM["per_cycle"] pulls in $GRBM_GUI_ACTIVE_PER_XCD
+        # unconditionally; unrelated built-in vars must not appear.
+        text = "SQ_WAVES"
+        _, vars_ = extract_counters_and_variables(text, "MI200")
+        assert "GRBM_COUNT_PER_XCD" not in vars_
+        assert "GRBM_SPI_BUSY_PER_XCD" not in vars_
+        assert "numActiveCUs" not in vars_
+
+    def test_non_builtin_vars_dropped_from_variables_set(self):
+        from utils.utils_counter_defs import extract_counters_and_variables
+
+        # $num_xcd is a sys var, not a built-in var; should not appear in vars_
+        text = "GRBM_GUI_ACTIVE / $num_xcd"
+        _, vars_ = extract_counters_and_variables(text, "MI200")
+        assert "num_xcd" not in vars_
+
+    def test_handles_ammolite_prefix(self):
+        from utils.utils_counter_defs import extract_counters_and_variables
+
+        # After build_eval_string, $var becomes ammolite__var
+        text = "(100 * ammolite__numActiveCUs) / ammolite__cu_per_gpu"
+        _, vars_ = extract_counters_and_variables(text, "MI200")
+        assert "numActiveCUs" in vars_
+
+    def test_ignores_non_builtin_ammolite(self):
+        from utils.utils_counter_defs import extract_counters_and_variables
+
+        # ammolite__cu_per_gpu is a sys var, not a built-in var
+        _, vars_ = extract_counters_and_variables("ammolite__cu_per_gpu", "MI200")
+        assert "cu_per_gpu" not in vars_

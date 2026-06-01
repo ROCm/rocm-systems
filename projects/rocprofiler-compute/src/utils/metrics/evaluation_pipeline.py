@@ -21,8 +21,8 @@ from utils.metrics.noise_clamper import (
     print_noise_clamp_summary,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.utils_common import SUPPORTED_FIELD, calc_builtin_var
-from utils.utils_counter_defs import get_build_in_vars
+from utils.utils_common import SUPPORTED_FIELD
+from utils.utils_counter_defs import extract_counters_and_variables, get_build_in_vars
 
 
 def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, float]:
@@ -88,12 +88,15 @@ def create_sys_vars(sys_info: pd.Series) -> dict[str, int | float]:
         sys_vars_collection[f"ammolite__{var_name}"] = variable_value
 
     # Special case for total_l2_chan
-    total_l2_channel_count = calc_builtin_var("$total_l2_chan", sys_info.to_dict())
-    if np.isnan(total_l2_channel_count) or total_l2_channel_count == 0:
+    raw_total_l2_chan = sys_info.to_dict().get("total_l2_chan")
+    if pd.isna(raw_total_l2_chan) or raw_total_l2_chan == 0:
         console_warning(
             "total_l2_chan is not available in sysinfo.csv, please provide the correct "
             "value using --specs-correction"
         )
+        total_l2_channel_count = 0
+    else:
+        total_l2_channel_count = int(raw_total_l2_chan)
     sys_vars_collection["ammolite__total_l2_chan"] = total_l2_channel_count
 
     return sys_vars_collection
@@ -103,12 +106,20 @@ def calc_builtin_vars(
     raw_pmc_df: pd.DataFrame,
     sys_vars: dict[str, int | float],
     gpu_arch: str,
+    expressions: list[str],
 ) -> dict[str, Optional[str | float | int]]:
-    """Calculate built-in variables."""
+    """Evaluate built-in variables referenced by expressions."""
     # TODO: fix all $normUnit in Unit column or title
-    # build and eval all derived build-in global variables
     builtin_vars_collection = {}
-    build_in_vars = get_build_in_vars(mi_gpu_specs.get_gpu_series(gpu_arch))
+    gpu_series = mi_gpu_specs.get_gpu_series(gpu_arch)
+    _, expression_builtin_vars = extract_counters_and_variables(
+        "\n".join(expressions), gpu_series
+    )
+    build_in_vars = {
+        k: v
+        for k, v in get_build_in_vars(gpu_series).items()
+        if k in expression_builtin_vars
+    }
 
     # First pass: calculate per-XCD values
     for variable_key, variable_value in build_in_vars.items():
@@ -153,6 +164,7 @@ def calc_builtin_vars(
 def eval_metric(
     dfs: dict,
     dfs_type: dict,
+    dfs_expressions: dict[int, list[str]],
     sys_info: pd.Series,
     empirical_peaks_df: pd.DataFrame,
     raw_pmc_df: pd.DataFrame,
@@ -171,7 +183,15 @@ def eval_metric(
 
     sys_vars = create_sys_vars(sys_info)
     empirical_peaks = create_empirical_peaks_dict(empirical_peaks_df)
-    builtin_vars = calc_builtin_vars(raw_pmc_df, sys_vars, sys_info["gpu_arch"])
+    expressions = [
+        expr
+        for df_id in dfs
+        if dfs_type.get(df_id) == "metric_table"
+        for expr in dfs_expressions.get(df_id, [])
+    ]
+    builtin_vars = calc_builtin_vars(
+        raw_pmc_df, sys_vars, sys_info["gpu_arch"], expressions
+    )
     sys_vars.update(builtin_vars)
 
     # Clear any previous noise clamp warnings before this analysis
