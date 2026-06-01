@@ -117,13 +117,85 @@ impl Default for LinkDef {
     }
 }
 
-/// Top-level agent (single-device hardware) definition.
+/// Declarative component-tree topology for a single agent.
+///
+/// Mirrors the flatbuffer `TopologyDef` in
+/// `rocjitsu/schemas/simulation_config.fbs`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub struct AgentDef {
+pub struct AgentTopologyDef {
     pub root: ComponentDef,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub links: Vec<LinkDef>,
+}
+
+/// KFD device identity and topology properties for sysfs generation.
+/// Mirrors `KfdDeviceInfo` in the rocjitsu flatbuffer schema.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct KfdDeviceInfo {
+    #[serde(default)] pub gpu_id: u32,
+    #[serde(default)] pub gfx_target_version: u32,
+    #[serde(default)] pub vendor_id: u32,
+    #[serde(default)] pub device_id: u32,
+    #[serde(default)] pub family_id: u32,
+    #[serde(default)] pub unique_id: u64,
+    #[serde(default)] pub marketing_name: String,
+    #[serde(default)] pub drm_render_minor: u32,
+    #[serde(default)] pub simd_count: u32,
+    #[serde(default)] pub max_waves_per_simd: u32,
+    #[serde(default)] pub num_shader_engines: u32,
+    #[serde(default)] pub num_shader_arrays_per_engine: u32,
+    #[serde(default)] pub num_cu_per_sh: u32,
+    #[serde(default)] pub simd_per_cu: u32,
+    #[serde(default)] pub wave_front_size: u32,
+    #[serde(default)] pub max_slots_scratch_cu: u32,
+    #[serde(default)] pub local_mem_size: u64,
+    #[serde(default)] pub lds_size_kb: u32,
+    #[serde(default)] pub mem_width: u32,
+    #[serde(default)] pub mem_clk_max: u32,
+    #[serde(default)] pub l1_size_kb: u32,
+    #[serde(default)] pub l1_line_size: u32,
+    #[serde(default)] pub l1_assoc: u32,
+    #[serde(default)] pub l2_size_kb: u32,
+    #[serde(default)] pub l2_line_size: u32,
+    #[serde(default)] pub l2_assoc: u32,
+    #[serde(default)] pub num_sdma_engines: u32,
+    #[serde(default)] pub num_sdma_xgmi_engines: u32,
+    #[serde(default)] pub num_cp_queues: u32,
+    #[serde(default)] pub max_engine_clk_fcompute: u32,
+}
+
+/// AMDGPU memory configuration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct GpuMemoryConfig {
+    #[serde(default)] pub size_mb: u32,
+    #[serde(default)] pub memory_side_cache_mb: u32,
+}
+
+/// AMDGPU top-level configuration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct AmdgpuConfig {
+    #[serde(default)] pub num_xcds: u32,
+    #[serde(default)] pub num_iods: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory: Option<GpuMemoryConfig>,
+    #[serde(default)] pub device: KfdDeviceInfo,
+}
+
+/// Virtual machine hardware model. Mirrors `VirtualMachineConfig`
+/// in the rocjitsu flatbuffer schema. `programs` is intentionally
+/// omitted: it's runtime workload configuration, not hardware.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct VirtualMachineConfig {
+    #[serde(default)] pub arch: String,
+    #[serde(default)] pub gpu: AmdgpuConfig,
+}
+
+/// Top-level agent (single-device hardware) definition.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct AgentDef {
+    pub vm: VirtualMachineConfig,
+    pub topology: AgentTopologyDef,
 }
 
 /// On-disk agent store backed by `<MIRAGE_CONFIG>/agent/`.

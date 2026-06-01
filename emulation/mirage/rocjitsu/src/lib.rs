@@ -128,11 +128,11 @@ pub fn ensure_assets(force: bool) -> Result<Vec<(String, bool)>> {
 /// directory (`<MIRAGE_CONFIG>/agent/`).
 ///
 /// The embedded blobs are full simulation configs (max_ticks,
-/// num_threads, vm, topology, ...) of which only the `topology`
-/// subtree maps onto mirage's [`mirage_core::agent::AgentDef`]. We
-/// parse the blob, extract its `topology`, deserialize as an
-/// `AgentDef`, and reserialize so the on-disk file contains only
-/// the fields mirage understands.
+/// num_threads, vm, topology, ...) of which mirage's
+/// [`mirage_core::agent::AgentDef`] captures the `vm` + `topology`
+/// subset. We deserialize directly from the blob (extra fields are
+/// ignored by serde) and reserialize so the on-disk file contains
+/// only the fields mirage understands.
 ///
 /// If `force` is true, existing files are overwritten. Otherwise
 /// only missing files are written. Empty embedded configs are skipped.
@@ -148,19 +148,12 @@ pub fn ensure_agents(force: bool) -> Result<Vec<(String, bool)>> {
             report.push((name.to_string(), false));
             continue;
         }
-        let raw: serde_json::Value = serde_json::from_slice(bytes).map_err(|e| {
-            mirage_core::error::MirageError::Other(format!(
-                "rocjitsu agent {name}: parse embedded JSON: {e}"
-            ))
-        })?;
-        let topology = raw.get("topology").cloned().unwrap_or(raw);
-        let agent: mirage_core::agent::AgentDef = serde_json::from_value(topology).map_err(
-            |e| {
+        let agent: mirage_core::agent::AgentDef =
+            serde_json::from_slice(bytes).map_err(|e| {
                 mirage_core::error::MirageError::Other(format!(
-                    "rocjitsu agent {name}: extract topology as AgentDef: {e}"
+                    "rocjitsu agent {name}: parse embedded JSON as AgentDef: {e}"
                 ))
-            },
-        )?;
+            })?;
         mirage_core::state::write_json(&path, &agent)?;
         report.push((name.to_string(), true));
     }
@@ -208,21 +201,31 @@ pub fn kmd_preload() -> Option<PathBuf> {
 /// should advertise as `RJ_CONFIG` / `RJ_SCHEMA` for `arch` (`"cdna3"`
 /// or `"cdna4"`).
 ///
-/// Prefers the extracted on-disk copies (kmd json under
-/// `<MIRAGE_CONFIG>/agent/` and schema under
-/// `<MIRAGE_CACHE>/emulator/rocjitsu/`). Falls back to the rocjitsu
-/// source tree for environments that haven't extracted the embedded
-/// assets.
+/// The agent JSON under `<MIRAGE_CONFIG>/agent/` only stores the
+/// `vm` + `topology` subset that mirage owns. rocjitsu's KMD shim
+/// however expects a full simulation_config (max_ticks, num_threads,
+/// exec_mode, vm, topology). We materialize that runtime wrapper
+/// into `<MIRAGE_CACHE>/emulator/rocjitsu/<arch>_sim.json` whenever
+/// the agent file is newer (or the wrapper is missing), so the
+/// user-visible agent file stays clean.
+///
+/// Falls back to the rocjitsu source tree for environments that
+/// haven't extracted the embedded assets.
 pub fn kmd_config(arch: &str) -> Option<(PathBuf, PathBuf)> {
     let (agent_name, fallback_cfg_name) = match arch {
         "cdna3" => (CDNA3_AGENT_NAME, "amdgpu_cdna3_kmd.json"),
         "cdna4" => (CDNA4_AGENT_NAME, "amdgpu_cdna4_kmd.json"),
         _ => return None,
     };
-    let extracted_cfg = mirage_core::paths::agent_path(agent_name);
-    let extracted_schema = schema_fbs_path();
-    if extracted_cfg.exists() && extracted_schema.exists() {
-        return Some((extracted_cfg, extracted_schema));
+    let agent_file = mirage_core::paths::agent_path(agent_name);
+    let schema = schema_fbs_path();
+    if agent_file.exists() && schema.exists() {
+        let sim_path = sim_config_path(arch);
+        if let Err(e) = materialize_sim_config(&agent_file, &sim_path) {
+            tracing::warn!("failed to materialize rocjitsu sim config for {arch}: {e:#}");
+        } else {
+            return Some((sim_path, schema));
+        }
     }
     let root = root();
     let cfg = root.join("configs").join(fallback_cfg_name);
@@ -232,6 +235,47 @@ pub fn kmd_config(arch: &str) -> Option<(PathBuf, PathBuf)> {
     } else {
         None
     }
+}
+
+fn sim_config_path(arch: &str) -> PathBuf {
+    asset_dir().join(format!("{arch}_sim.json"))
+}
+
+/// Rewrap the mirage `AgentDef` JSON at `agent_file` into a full
+/// rocjitsu `SimulationConfig` JSON at `out`. Re-runs only when the
+/// agent file is newer than (or `out` doesn't exist).
+fn materialize_sim_config(agent_file: &Path, out: &Path) -> Result<()> {
+    let stale = match (std::fs::metadata(agent_file), std::fs::metadata(out)) {
+        (Ok(a), Ok(b)) => match (a.modified(), b.modified()) {
+            (Ok(am), Ok(bm)) => am > bm,
+            _ => true,
+        },
+        (Ok(_), Err(_)) => true,
+        _ => true,
+    };
+    if !stale {
+        return Ok(());
+    }
+    let agent: serde_json::Value = serde_json::from_slice(&std::fs::read(agent_file).map_err(
+        |e| mirage_core::error::MirageError::Io {
+            path: agent_file.to_path_buf(),
+            source: e,
+        },
+    )?)
+    .map_err(|e| {
+        mirage_core::error::MirageError::Other(format!(
+            "rocjitsu materialize_sim_config: parse {}: {e}",
+            agent_file.display()
+        ))
+    })?;
+    let sim = serde_json::json!({
+        "max_ticks": 100000u64,
+        "num_threads": 1u32,
+        "exec_mode": "functional",
+        "vm": agent.get("vm").cloned().unwrap_or(serde_json::json!({})),
+        "topology": agent.get("topology").cloned().unwrap_or(serde_json::json!({})),
+    });
+    mirage_core::state::write_json(out, &sim)
 }
 
 /// The hipcc `--offload-arch` value that matches the `arch` preset
