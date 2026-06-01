@@ -13,12 +13,14 @@
 #include "rocclr/utils/debug.hpp"
 #include "hip_graph_capture.hpp"
 
+#include <unordered_map>
 #include <unordered_set>
 #include <thread>
 #include <stack>
 #include <mutex>
 #include <iterator>
 #include <algorithm>
+#include <vector>
 #ifdef _WIN32
 #include <process.h>
 #else
@@ -52,6 +54,11 @@ typedef struct hipArray {
 
 namespace hip{
 extern std::once_flag g_ihipInitialized;
+
+  struct ResourceMeta {
+    uint32_t familyId;
+    uint32_t startCU;
+  };
 enum MemcpyType {
   hipHostToHost,      //!< Memcpy from host to host
   hipWriteBuffer,     //!< Memcpy from host to device
@@ -68,13 +75,23 @@ struct UserObject;
 class Stream;
 
 #define IHIP_IPC_EVENT_HANDLE_SIZE 32
-#define IHIP_IPC_EVENT_RESERVED_SIZE LP64_SWITCH(28,24)
+
+enum ihipIpcEventHandleType : uint32_t {
+    kIpcEventHandleEmulated = 0,
+    kIpcEventHandleROCr     = 1,
+};
+
 typedef struct ihipIpcEventHandle_st {
-    //hsa_amd_ipc_signal_t ipc_handle;  //!< ipc signal handle on ROCr
-    //char ipc_handle[IHIP_IPC_EVENT_HANDLE_SIZE];
-    //char reserved[IHIP_IPC_EVENT_RESERVED_SIZE];
-    char shmem_name[IHIP_IPC_EVENT_HANDLE_SIZE];
+    ihipIpcEventHandleType type;
+    int32_t creator_pid;
+    union {
+        char shmem_name[IHIP_IPC_EVENT_HANDLE_SIZE];
+        char ipc_signal_handle[IHIP_IPC_EVENT_HANDLE_SIZE];
+    };
 } ihipIpcEventHandle_t;
+
+static_assert(sizeof(ihipIpcEventHandle_t) <= sizeof(hipIpcEventHandle_t),
+              "ihipIpcEventHandle_t exceeds hipIpcEventHandle_t storage");
 
 const char* ihipGetErrorName(hipError_t hip_error);
 
@@ -232,12 +249,17 @@ const char* ihipGetErrorName(hipError_t hip_error);
 
 #define STREAM_CAPTURE(name, stream, ...)                                                          \
   hip::getStreamPerThread(stream);                                                                 \
-  if (stream != nullptr && stream != hipStreamLegacy) {                                            \
-    auto captureStatus = reinterpret_cast<hip::Stream*>(stream)->GetCaptureStatus();               \
-    if (captureStatus == hipStreamCaptureStatusActive) {                                           \
-      return hip::capture##name(stream, ##__VA_ARGS__);                                            \
-    } else if (captureStatus == hipStreamCaptureStatusInvalidated) {                               \
-      return hipErrorStreamCaptureInvalidated;                                                     \
+  if (!g_allCapturingStreams.empty()) {                                                            \
+    if (!hip::isValid(stream)) {                                                                   \
+      return hipErrorInvalidValue;                                                                 \
+    }                                                                                              \
+    if (stream != nullptr && stream != hipStreamLegacy) {                                          \
+      auto captureStatus = reinterpret_cast<hip::Stream*>(stream)->GetCaptureStatus();             \
+      if (captureStatus == hipStreamCaptureStatusActive) {                                         \
+        return hip::capture##name(stream, ##__VA_ARGS__);                                          \
+      } else if (captureStatus == hipStreamCaptureStatusInvalidated) {                             \
+        return hipErrorStreamCaptureInvalidated;                                                   \
+      }                                                                                            \
     }                                                                                              \
   }
 
@@ -282,6 +304,7 @@ namespace hip {
   class Device;
   class MemoryPool;
   class Event;
+  class ExecutionCtx;
   class Stream : public amd::HostQueue {
   public:
     enum Priority : int { High = -1, Normal = 0, Low = 1 };
@@ -459,7 +482,7 @@ namespace hip {
 
   /// HIP Device class
   class Device : public amd::ReferenceCountedObject {
-  public:
+   public:
     Device(amd::Context* ctx, int devId)
         : context_(ctx),
           deviceId_(devId),
@@ -525,7 +548,8 @@ namespace hip {
     MemoryPool* GetDefaultManagedMemoryPool() const { return default_managed_mem_pool_; }
     void AddMemoryPool(MemoryPool* pool);
     void RemoveMemoryPool(MemoryPool* pool);
-    bool FreeMemory(amd::Memory* memory, Stream* stream, Event* event = nullptr);
+    bool FreeMemory(amd::Memory* memory, Stream* stream, Event* event = nullptr,
+                    bool skip_event = false);
     void ReleaseFreedMemory();
     void RemoveStreamFromPools(Stream* stream);
     void AddSafeStream(Stream* event_stream, Stream* wait_stream);
@@ -539,6 +563,15 @@ namespace hip {
     ObjectRegistry<hipGraphicsResource_t>& mappedGraphics() {
       return mappedGraphicsResources_;
     }
+
+    // --- Execution context management ---
+    
+    ExecutionCtx* getPrimaryExecCtx() const { return primaryExecCtx_; }
+    void setPrimaryExecCtx(ExecutionCtx* ctx) { primaryExecCtx_ = ctx; }
+    std::recursive_mutex& getLock() { return lock_; }
+
+    void registerResource(uint32_t resId, uint32_t familyId, uint32_t startCU);
+    const ResourceMeta* lookupResource(uint32_t resId);
 
   private:
     /// Destroy all streams on this device (called by Reset)
@@ -565,6 +598,12 @@ namespace hip {
     // ----- Graphics resource tracking -----
     ObjectRegistry<hipGraphicsResource_t> registeredGraphicsResources_;
     ObjectRegistry<hipGraphicsResource_t> mappedGraphicsResources_;
+
+    // ----- Execution context state -----
+    ExecutionCtx* primaryExecCtx_ = nullptr;      //!< Primary execution context
+    std::unordered_map<uint32_t, ResourceMeta> resourceFamilyMap_;
+    std::mutex resourceFamilyMapLock_;
+
   };
 
   /// Per-thread state aggregator for HIP runtime (one instance per thread via thread_local).
@@ -616,6 +655,16 @@ namespace hip {
   extern hipError_t ihipHostMalloc(void** ptr, size_t sizeBytes, unsigned int flags);
   extern hipError_t ihipMemGetInfo(size_t* free, size_t* total);
   extern amd::Memory* getMemoryObject(const void* ptr, size_t& offset, size_t size = 0);
+  extern std::vector<amd::Memory*> getMemoryObjectBatch(void* const* ptrs, size_t count,
+                                                         std::vector<size_t>& offsets);
+  extern void getMemoryObjectBatchPairs(void* const* srcs, void* const* dsts, size_t count,
+                                         std::vector<amd::Memory*>& src_memories,
+                                         std::vector<amd::Memory*>& dst_memories,
+                                         std::vector<size_t>& src_offsets,
+                                         std::vector<size_t>& dst_offsets);
+  extern void getMemoryObjectPairs(const void* src, const void* dst,
+                                    amd::Memory*& src_memory, amd::Memory*& dst_memory,
+                                    size_t& src_offset, size_t& dst_offset);
   extern amd::Memory* getMemoryObjectWithOffset(const void* ptr, const size_t size = 0);
   extern void getStreamPerThread(hipStream_t& stream);
   extern hipStream_t getPerThreadDefaultStream();

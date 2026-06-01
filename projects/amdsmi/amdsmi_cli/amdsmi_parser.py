@@ -120,6 +120,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         partition,
         ras,
         node,
+        fabric,
         _rocm_smi,
         default,
         sys_argv=None,
@@ -225,6 +226,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             "partition",
             "ras",
             "node",
+            "fabric",
             "default",
         ]
 
@@ -248,6 +250,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 self._add_partition_parser(self.subparsers, partition)
                 self._add_ras_parser(self.subparsers, ras)
                 self._add_node_parser(self.subparsers, node)
+                self._add_fabric_parser(self.subparsers, fabric)
             elif any(arg in sys_argv for arg in ["version"]):
                 self._add_version_parser(self.subparsers, version)
             elif any(arg in sys_argv for arg in ["list"]):
@@ -282,6 +285,8 @@ class AMDSMIParser(argparse.ArgumentParser):
                 self._add_ras_parser(self.subparsers, ras)
             elif any(arg in sys_argv for arg in ["node"]):
                 self._add_node_parser(self.subparsers, node)
+            elif any(arg in sys_argv for arg in ["fabric"]):
+                self._add_fabric_parser(self.subparsers, fabric)
             else:
                 # If no subcommand is given, add the default parser
                 self._add_default_parser(self.subparsers, default)
@@ -422,6 +427,14 @@ class AMDSMIParser(argparse.ArgumentParser):
                 if clk_type not in valid_clk_types:
                     raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
                         sys.argv[1], clk_type, output_format
+                    )
+
+                if not perf_levels_str:
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                        sys.argv[1],
+                        clk_type,
+                        output_format,
+                        hint=f"\n--clk-level requires at least one performance level index (e.g. --clk-level {clk_type} 0 1)",
                     )
 
                 perf_levels = []
@@ -1144,11 +1157,15 @@ class AMDSMIParser(argparse.ArgumentParser):
                 if isinstance(values, str):
                     if "%" in values:
                         try:
-                            amdsmi_helpers.confirm_out_of_spec_warning()
                             # Store percentage value with is_percentage flag
                             # CLI will convert based on gpu_od availability
                             percentage_value = int(values[:-1])
                             if 0 <= percentage_value <= 100:
+                                # Making behavior consistent with recent non-percentage path changes
+                                # 1. Check input validity (0-100%)
+                                # 2. If valid, prompt out-of-spec warning. If not valid, raise argparse error without prompt.
+                                # This ensures users are only prompted for valid inputs that may be out-of-spec, not for invalid inputs.
+                                amdsmi_helpers.confirm_out_of_spec_warning()
                                 # Store as tuple: (percentage_value, is_percentage=True)
                                 setattr(args, self.dest, (percentage_value, True))
                             else:
@@ -1621,7 +1638,10 @@ class AMDSMIParser(argparse.ArgumentParser):
                 "-p", "--partition", action="store_true", required=False, help=partition_help
             )
 
-            mem_carveout_help = "Display VRAM carveout memory options and current setting"
+            mem_carveout_help = (
+                "Display VRAM carveout memory options and current setting."
+                "\n\tOnly supported on some APUs."
+            )
             static_parser.add_argument(
                 "-m", "--mem-carveout", action="store_true", required=False, help=mem_carveout_help
             )
@@ -2253,6 +2273,13 @@ class AMDSMIParser(argparse.ArgumentParser):
             help=name_help,
         )
 
+        process_parser.add_argument(
+            "--sort-by-pid",
+            action="store_true",
+            default=False,
+            help="Group process output by PID instead of GPU.",
+        )
+
         # Add Universal Arguments & watch Args
         self._add_watch_arguments(process_parser)
         self._add_device_arguments(process_parser, required=False)
@@ -2408,7 +2435,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 set_perf_level_help = (
                     f"Set one of the following performance levels:\n\t{perf_level_help_choices_str}"
                 )
-                power_profile_choices_str = ", ".join(self.helpers.get_power_profiles()[0:-1])
+                power_profile_choices_str = ", ".join(self.helpers.get_power_profiles())
                 set_profile_help = f"Set power profile level (#) or choose one of available profiles:\n\t{power_profile_choices_str}"
                 set_perf_det_help = (
                     "Enable performance determinism mode and set GFXCLK softmax limit (in MHz)"
@@ -2511,6 +2538,8 @@ class AMDSMIParser(argparse.ArgumentParser):
                     "-P",
                     "--profile",
                     action="store",
+                    choices=self.helpers.get_power_profiles(),
+                    type=str.upper,
                     required=False,
                     help=set_profile_help,
                     metavar="PROFILE_LEVEL",
@@ -2624,7 +2653,11 @@ class AMDSMIParser(argparse.ArgumentParser):
             )
 
             if self.helpers.is_baremetal():
-                set_mem_carveout_help = "Set VRAM carveout size by option index.\n\tUse `amd-smi static --mem-carveout` to see available options."
+                set_mem_carveout_help = (
+                    "Set VRAM carveout size by option index."
+                    "\n\tUse `amd-smi static --mem-carveout` to see available options."
+                    "\n\tOnly supported on some APUs; a reboot is required after setting."
+                )
                 set_value_exclusive_group.add_argument(
                     "-m",
                     "--mem-carveout",
@@ -3033,20 +3066,30 @@ class AMDSMIParser(argparse.ArgumentParser):
         monitor_parser.add_argument(
             "-q", "--process", action="store_true", required=False, help=process_help
         )
-        monitor_parser.add_argument(
-            "-nic", "--brcm_nic", action="store_true", required=False, help=nic_monitor_help
-        )
-        monitor_parser.add_argument(
-            "-switch",
-            "--brcm_switch",
-            action="store_true",
-            required=False,
-            help=switch_monitor_help,
-        )
+
+        if self.helpers.is_brcm_nic_initialized():
+            monitor_parser.add_argument(
+                "-nic", "--brcm_nic", action="store_true", required=False, help=nic_monitor_help
+            )
+        if self.helpers.is_brcm_switch_initialized():
+            monitor_parser.add_argument(
+                "-switch",
+                "--brcm_switch",
+                action="store_true",
+                required=False,
+                help=switch_monitor_help,
+            )
         if not self.helpers.is_virtual_os():
             monitor_parser.add_argument(
                 "-V", "--violation", action="store_true", required=False, help=violation_help
             )
+
+        monitor_parser.add_argument(
+            "--sort-by-pid",
+            action="store_true",
+            default=False,
+            help="Group process output by PID instead of GPU. Only applies when --process is used.",
+        )
 
         # Add Universal Arguments & Watch Args
         self._add_watch_arguments(monitor_parser)
@@ -3257,6 +3300,40 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Add Universal Arguments
         self._add_command_modifiers(node_parser)
+
+    def _add_fabric_parser(self, subparsers: argparse._SubParsersAction, func):
+        if not self.helpers.is_amdgpu_initialized():
+            return
+
+        # Subparser help text
+        fabric_help = "Displays fabric (UALoE/UALink over Ethernet) information of the devices"
+        fabric_subcommand_help = f"{self.description}\n\nIf no GPU is specified, returns information for all GPUs on the system.\
+                                \nIf no fabric argument is provided, all fabric information will be displayed."
+        fabric_optionals_title = "Fabric arguments"
+
+        # Help text for arguments
+        topology_help = "Display fabric topology data (counters per category, instance, and item)"
+        info_help = "Display fabric device configuration (BDF, bandwidth, latency, vPoD/pPoD, accelerator state)"
+
+        # Create fabric subparser
+        fabric_parser = subparsers.add_parser(
+            "fabric", help=fabric_help, description=fabric_subcommand_help
+        )
+        fabric_parser._optionals.title = fabric_optionals_title
+        fabric_parser.formatter_class = lambda prog: AMDSMISubparserHelpFormatter(prog)
+        fabric_parser.set_defaults(func=func)
+
+        # Optional Args
+        fabric_parser.add_argument(
+            "-t", "--topology", action="store_true", required=False, help=topology_help
+        )
+        fabric_parser.add_argument(
+            "-i", "--info", action="store_true", required=False, help=info_help
+        )
+
+        # Add Universal Arguments
+        self._add_device_arguments(fabric_parser, required=False)
+        self._add_command_modifiers(fabric_parser)
 
     def error(self, message):
         outputformat = self.helpers.get_output_format()

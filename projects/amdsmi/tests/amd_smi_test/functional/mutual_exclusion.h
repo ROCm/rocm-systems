@@ -23,6 +23,8 @@
 #ifndef TESTS_AMD_SMI_TEST_FUNCTIONAL_MUTUAL_EXCLUSION_H_
 #define TESTS_AMD_SMI_TEST_FUNCTIONAL_MUTUAL_EXCLUSION_H_
 
+#include <string>
+
 #include "../test_base.h"
 
 class TestMutualExclusion : public TestBase {
@@ -50,6 +52,13 @@ class TestMutualExclusion : public TestBase {
  private:
   bool sleeper_process_;
   int child_;
+  std::string orig_cross_process_env_;
+  bool orig_cross_process_env_was_set_;
+  // Pipe-based init handshake (replaces sleep-based ordering):
+  //   init_pipe_:         sleeper → tester  (sleeper amdsmi_init complete)
+  //   tester_ready_pipe_: tester → sleeper  (tester amdsmi_init complete)
+  int init_pipe_[2];
+  int tester_ready_pipe_[2];
 };
 
 #endif  // TESTS_AMD_SMI_TEST_FUNCTIONAL_MUTUAL_EXCLUSION_H_

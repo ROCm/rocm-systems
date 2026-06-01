@@ -80,15 +80,12 @@ if(HIP_HIPCC_EXECUTABLE)
   add_definitions(-DHIP_HIPCC_EXECUTABLE="${HIP_HIPCC_EXECUTABLE}")
 endif()
 
-# Make Rocm lib path available for runtime dlopen (e.g., librocm_smi64.so)
-add_definitions(-DROCM_SMI_LIB_DIR="${ROCM_PATH}/lib")
-
 if(TEST_CLOCK_CYCLE)
   add_definitions(-DTEST_CLOCK_CYCLE)
 endif()
 
 if(ENABLE_YAML_TAGS)
-    add_definitions(-DENABLE_YAML_TAGS)
+  add_definitions(-DENABLE_YAML_TAGS)
 endif()
 
 if(NOT WIN32)
@@ -313,6 +310,11 @@ string(TOUPPER "${CMAKE_BUILD_TYPE}" _HIP_BUILD_TYPE_UPPER)
 separate_arguments(HIP_DEVICE_BUILD_FLAGS_NO_ARCH NATIVE_COMMAND
   "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
 list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "--offload-arch=")
+if(ENABLE_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
+  list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "-fsanitize=address")
+  list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "-fno-omit-frame-pointer")
+  list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "-shared-libasan")
+endif()
 
 # get hip-tests commit short hash
 execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
@@ -391,7 +393,6 @@ if(BUILD_UNIT_TESTS)
   endif()
 endif()
 if(BUILD_PERF_TESTS)
-  add_subdirectory(perftests ${CATCH_BUILD_DIR}/perftests)
   add_subdirectory(performance ${CATCH_BUILD_DIR}/performance)
 endif()
 if(BUILD_STRESS_TESTS)

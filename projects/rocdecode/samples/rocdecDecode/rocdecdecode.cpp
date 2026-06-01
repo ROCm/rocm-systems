@@ -32,6 +32,7 @@ THE SOFTWARE.
     #include <experimental/filesystem>
     namespace fs = std::experimental::filesystem;
 #endif
+
 #include <hip/hip_runtime.h>
 #include <rocdecode/rocdecode.h>
 #include <rocdecode/rocparser.h>
@@ -68,12 +69,11 @@ __attribute__((visibility("hidden"))) inline void report_error(
     std::exit(EXIT_FAILURE);
 }
 
-//hardcoding for this sample
+// Hard-coded defaults for initial decoder creation. They will be adjusted based on the input stream after reconfiguration.
 #define DEFAULT_WIDTH 2912
 #define DEFAULT_HEIGHT 1888
 
-// helper functions for saving output to file
-
+// helper function for GetChromaHeightFactor based on YUV format
 static inline float GetChromaHeightFactor(rocDecVideoSurfaceFormat surface_format) {
     float factor = 0.5;
     switch (surface_format) {
@@ -96,6 +96,7 @@ static inline float GetChromaHeightFactor(rocDecVideoSurfaceFormat surface_forma
     return factor;
 };
 
+// helper function for CodecTypeToRocDecVideoCodec based on codec_type
 static inline rocDecVideoCodec CodecTypeToRocDecVideoCodec(int codec_type) {
     switch (codec_type) {
         case 0:     return rocDecVideoCodec_HEVC;
@@ -107,6 +108,8 @@ static inline rocDecVideoCodec CodecTypeToRocDecVideoCodec(int codec_type) {
         default:    return rocDecVideoCodec_NumCodecs;
     }
 }
+
+// helper function for GetChromaWidthFactor based on surface_format
 static inline float GetChromaWidthFactor(rocDecVideoSurfaceFormat surface_format) {
     float factor = 0.5;
     switch (surface_format) {
@@ -263,7 +266,7 @@ void save_frame_to_file(DecoderInfo *p_dec_info, void *surf_mem[], uint32_t *pit
 }
 
 /**
- * @brief Function to save internal frame buffer to file for host buffer
+ * @brief Function to save internal frame buffer to file for host backend
  * 
  * @param p_dec_info 
  * @param frame_mem 

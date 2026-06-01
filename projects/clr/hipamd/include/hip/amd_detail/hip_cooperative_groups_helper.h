@@ -253,20 +253,20 @@ __CG_STATIC_QUALIFIER__ void barrier_wait() {
 
 namespace tiled_group {
 
-// enforce ordering for memory intructions
+// enforce ordering for memory instructions
 __CG_STATIC_QUALIFIER__ void sync() {
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
-    __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "agent");
+    __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "wavefront");
 }
 
 }  // namespace tiled_group
 
 namespace coalesced_group {
 
-// enforce ordering for memory intructions
+// enforce ordering for memory instructions
 __CG_STATIC_QUALIFIER__ void sync() {
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
-    __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "agent");
+    __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "wavefront");
 }
 
 // Masked bit count

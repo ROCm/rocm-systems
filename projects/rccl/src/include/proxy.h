@@ -19,6 +19,7 @@
 #include "p2p.h"
 #include "collectives.h"
 #include "proxy_trace/proxy_trace.h"
+#include "gin/gin_host.h"
 
 typedef enum : uint8_t {
   ncclPatternRing,
@@ -351,8 +352,11 @@ struct ncclProxyState {
   bool dmaBufSupport;
   ncclNet_t* ncclNet;
   ncclCollNet_t* ncclCollNet;
+  struct ncclGinState* ginState;
+
   uint32_t* abortFlag;
   bool directMode;
+  struct ncclMemManager* memManager;  // Shared memory manager for proxy allocations
   // Service threads
   pthread_t thread;
   pthread_t threadUDS;
@@ -392,6 +396,10 @@ struct ncclProxyState {
 
   // A handle to the proxy traces
   facebook_rccl::ProxyTrace* proxyTrace;
+
+  // [RCCL] Host mirrors of device side NCCL_LL128_LINEELEMS / NCCL_LL128_DATAELEMS
+  int ll128LineElems;
+  int ll128DataElems;
 };
 
 enum proxyConnectState {

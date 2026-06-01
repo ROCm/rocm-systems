@@ -512,6 +512,16 @@ static void setFilesLimit() {
   return ptr;
 }
 
+__host__ int rocshmem_buffer_register(void *addr, size_t length) {
+  VERIFY_BACKEND();
+  return backend->buffer_register(addr, length);
+}
+
+__host__ int rocshmem_buffer_unregister(void *addr) {
+  VERIFY_BACKEND();
+  return backend->buffer_unregister(addr);
+}
+
 [[maybe_unused]] __host__ void rocshmem_free(void *ptr) {
   VERIFY_BACKEND();
 

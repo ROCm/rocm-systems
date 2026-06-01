@@ -38,7 +38,9 @@ set(TEST_FILES
     gfx11_test.cpp
     gfx12_test.cpp
     token_stream_test.cpp
-    sqttparser_test.cpp)
+    sqttparser_test.cpp
+    mi400_test.cpp
+    funcmap_test.cpp)
 
 # Function to create a test executable with specific sanitizer options Re-list library sources for sanitizer builds
 # (must be recompiled with sanitizer flags)
@@ -46,14 +48,16 @@ file(
     GLOB
     UNIT_TEST_LIB_SOURCES
     ${SRC_DIR}/trie.cpp
-    ${SRC_DIR}/sqttparser.cpp
+    ${SRC_DIR}/rocprof_trace_decoder.cpp
+    ${SRC_DIR}/quick_scan_export.cpp
     ${SRC_DIR}/stitch/stitch.cpp
     ${SRC_DIR}/stitch/pctranslator.cpp
     ${SRC_DIR}/trace_parser.cpp
     ${SRC_DIR}/gfx9/*.cpp
     ${SRC_DIR}/gfx10/*.cpp
     ${SRC_DIR}/gfx11/*.cpp
-    ${SRC_DIR}/gfx12/*.cpp)
+    ${SRC_DIR}/gfx12/*.cpp
+    ${SRC_DIR}/mi400/*.cpp)
 
 function(add_unit_test_executable TARGET_NAME SANITIZER_TYPE)
     if(SANITIZER_TYPE STREQUAL "regular")
@@ -64,6 +68,19 @@ function(add_unit_test_executable TARGET_NAME SANITIZER_TYPE)
     endif()
 
     target_include_directories(${TARGET_NAME} PRIVATE ${SRC_DIR} ${INC_DIR})
+
+    if(NOT SANITIZER_TYPE STREQUAL "regular")
+        if(DISABLE_COMGR)
+            target_compile_definitions(${TARGET_NAME} PRIVATE ROCPROF_TRACE_DECODER_COMGR_DISABLED)
+        else()
+            if(DEFINED ROCM_INCLUDE_DIR)
+                target_include_directories(${TARGET_NAME} PRIVATE ${ROCM_INCLUDE_DIR})
+            endif()
+            if(DEFINED COMGR_LIB)
+                target_link_libraries(${TARGET_NAME} PRIVATE ${COMGR_LIB})
+            endif()
+        endif()
+    endif()
 
     target_link_libraries(${TARGET_NAME} PRIVATE GTest::gtest_main GTest::gmock_main)
 

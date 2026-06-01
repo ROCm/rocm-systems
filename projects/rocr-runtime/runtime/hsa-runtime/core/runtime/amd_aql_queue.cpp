@@ -206,7 +206,7 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
 
   queue_scratch_.use_once_limit = core::Runtime::runtime_singleton_->flag().scratch_single_limit();
   if (queue_scratch_.use_once_limit > agent_->MaxScratchDevice()) {
-    fprintf(stdout, "User specified scratch limit exceeds device limits (requested:%lu max:%lu)!\n",
+    fprintf(stdout, "User specified scratch limit exceeds device limits (requested:%zu max:%zu)!\n",
                     queue_scratch_.use_once_limit, agent_->MaxScratchDevice());
     queue_scratch_.use_once_limit = agent_->MaxScratchDevice();
   }
@@ -551,6 +551,15 @@ hsa_status_t AqlQueue::GetInfo(hsa_queue_info_attribute_t attribute, void* value
     case HSA_AMD_QUEUE_INFO_PROPERTIES:
       GetInfoProperties(reinterpret_cast<uint8_t*>(value));
       break;
+    case HSA_AMD_QUEUE_INFO_VM_FAULT_STATUS:
+      *static_cast<bool*>(value) = vm_faulted_.load(std::memory_order_acquire);
+      break;
+    case HSA_AMD_QUEUE_INFO_VM_FAULT_ADDRESS:
+      *reinterpret_cast<uint64_t*>(value) = vm_fault_address_;
+      break;
+    case HSA_AMD_QUEUE_INFO_VM_FAULT_REASON:
+      *reinterpret_cast<uint32_t*>(value) = vm_fault_reason_;
+      break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
@@ -694,6 +703,7 @@ void AqlQueue::Suspend() {
   auto err =
       agent_->driver().UpdateQueue(queue_id_, 0, priority_, ring_buf_, ring_buf_alloc_bytes_, NULL);
   assert(err == HSA_STATUS_SUCCESS && "Update queue failed.");
+  (void)err;
 }
 
 void AqlQueue::Resume() {
@@ -702,6 +712,7 @@ void AqlQueue::Resume() {
     auto err = agent_->driver().UpdateQueue(queue_id_, 100, priority_, ring_buf_,
                                             ring_buf_alloc_bytes_, NULL);
     assert(err == HSA_STATUS_SUCCESS && "Update queue failed.");
+    (void)err;
   }
 }
 
@@ -710,6 +721,7 @@ hsa_status_t AqlQueue::Inactivate() {
   if (active) {
     auto err = agent_->driver().DestroyQueue(queue_id_);
     assert(err == HSA_STATUS_SUCCESS && "Destroy queue failed.");
+    (void)err;
     atomic::Fence(std::memory_order_acquire);
   }
   return HSA_STATUS_SUCCESS;
@@ -1384,7 +1396,7 @@ bool AqlQueue::ExceptionHandler(hsa_signal_value_t error_code, void* arg) {
       // EC_QUEUE_PACKET_DISPATCH_WORK_GROUP_SIZE_INVALID
       { 21, HSA_STATUS_ERROR_INVALID_ARGUMENT },
       // EC_QUEUE_PACKET_DISPATCH_REGISTER_SIZE_INVALID
-      { 22, HSA_STATUS_ERROR_INVALID_ISA },
+      { 22, (hsa_status_t)HSA_STATUS_ERROR_INVALID_DISPATCH_PARAMETERS },
       // EC_QUEUE_PACKET_VENDOR_UNSUPPORTED
       { 23, HSA_STATUS_ERROR_INVALID_PACKET_FORMAT },
       // EC_QUEUE_PREEMPTION_ERROR
@@ -1423,11 +1435,20 @@ bool AqlQueue::ExceptionHandler(hsa_signal_value_t error_code, void* arg) {
   // Undefined or unexpected code
   assert((errorCode != HSA_STATUS_ERROR) && "Undefined or unexpected queue error code");
 
-  // Suppress VM fault reporting.  This is more useful when reported through the system error
-  // handler.
+  // VM fault callback is handled by VMFaultHandler. Mark this queue as
+  // faulted so VMFaultHandler can identify it and stamp fault details.
   if (errorCode == static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_FAULT)) {
+    queue->MarkVMFaulted();
+    core::Runtime::runtime_singleton_->SignalVMFault();
     debug_print("Queue error - HSA_STATUS_ERROR_MEMORY_FAULT\n");
     return exceptionHandlerDone();
+  }
+
+  const char* errorMsg = nullptr;
+  if (HSA::hsa_status_string(errorCode, &errorMsg) == HSA_STATUS_SUCCESS && errorMsg) {
+    fprintf(stderr, "Queue error: %s\n", errorMsg);
+  } else {
+    fprintf(stderr, "Queue error: code 0x%lx\n", (unsigned long)error_code);
   }
 
   // Fallback if KFD does not support GPU core dump. In this case, the core
@@ -1583,7 +1604,7 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
   constexpr uint32_t slot_size_dw = uint32_t(slot_size_b / sizeof(uint32_t));
   uint32_t slot_data[slot_size_dw];
   hsa_signal_t local_signal = {0};
-  hsa_status_t err;
+  hsa_status_t err = HSA_STATUS_SUCCESS;
 
   if (agent_->supported_isas()[0]->GetMajorVersion() <= 8) {
     // Construct a set of PM4 to fit inside the AQL packet slot.
@@ -1687,7 +1708,9 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
                                     HSA_WAIT_STATE_ACTIVE);
     err = hsa_signal_destroy(local_signal);
     assert(ret == 0 && err == HSA_STATUS_SUCCESS);
+    (void)ret;
   }
+  (void)err;
 }
 
 void AqlQueue::FillBufRsrcWord0() {

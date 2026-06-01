@@ -27,7 +27,7 @@ struct driver
      * @param init_flags Initialization flags (default: AMDSMI_INIT_AMD_GPUS).
      * @return AMD SMI status code indicating success or failure.
      */
-    static amdsmi_status_t init(uint64_t init_flags = AMDSMI_INIT_AMD_GPUS)
+    static amdsmi_status_t init(std::uint64_t init_flags = AMDSMI_INIT_AMD_GPUS)
     {
         return amdsmi_init(init_flags);
     }
@@ -55,7 +55,7 @@ struct driver
      * for count query).
      * @return AMD SMI status code indicating success or failure.
      */
-    static amdsmi_status_t get_socket_handles(uint32_t*             socket_count,
+    static amdsmi_status_t get_socket_handles(std::uint32_t*        socket_count,
                                               amdsmi_socket_handle* socket_handles)
     {
         return amdsmi_get_socket_handles(socket_count, socket_handles);
@@ -73,7 +73,7 @@ struct driver
      * get_processor_handles_by_type() with AMDSMI_PROCESSOR_TYPE_AMD_NIC.
      */
     static amdsmi_status_t get_processor_handles(
-        amdsmi_socket_handle socket_handle, uint32_t* processor_count,
+        amdsmi_socket_handle socket_handle, std::uint32_t* processor_count,
         amdsmi_processor_handle* processor_handles)
     {
         return amdsmi_get_processor_handles(socket_handle, processor_count,
@@ -95,7 +95,7 @@ struct driver
      */
     static amdsmi_status_t get_processor_handles_by_type(
         amdsmi_socket_handle socket_handle, processor_type_t processor_type,
-        amdsmi_processor_handle* processor_handles, uint32_t* processor_count)
+        amdsmi_processor_handle* processor_handles, std::uint32_t* processor_count)
     {
         return amdsmi_get_processor_handles_by_type(socket_handle, processor_type,
                                                     processor_handles, processor_count);
@@ -122,7 +122,8 @@ struct driver
      * @return AMD SMI status code indicating success or failure.
      */
     static amdsmi_status_t get_memory_usage(amdsmi_processor_handle processor_handle,
-                                            amdsmi_memory_type_t type, uint64_t* usage)
+                                            amdsmi_memory_type_t    type,
+                                            std::uint64_t*          usage)
     {
         return amdsmi_get_gpu_memory_usage(processor_handle, type, usage);
     }
@@ -167,7 +168,7 @@ struct driver
      */
 #if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
     static amdsmi_status_t get_gpu_process_list(amdsmi_processor_handle processor_handle,
-                                                uint32_t*               max_processes,
+                                                std::uint32_t*          max_processes,
                                                 amdsmi_proc_info_t*     list)
     {
         return amdsmi_get_gpu_process_list(processor_handle, max_processes, list);

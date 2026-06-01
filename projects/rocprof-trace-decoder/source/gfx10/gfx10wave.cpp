@@ -28,6 +28,7 @@
 #include <vector>
 #include "gfx11/gfx11wave.h"
 #include "gfx12/gfx12wave.h"
+#include "mi400/mi400wave.h"
 #include "segment.hpp"
 
 #define INST_JUMP_TYPE 5
@@ -209,7 +210,7 @@ static std::unordered_map<int, mapped_inst_t> table_map_to_common_type{
     {(int) EINST::subv_loop_end,     {WaveInstCategory::SALU, 1} }
 };
 
-mapped_inst_t wave_t::map_to_common_type(int einst, int dprate, int derate)
+mapped_inst_t map_to_common_type(int einst, int dprate, int derate)
 {
     auto it = table_map_to_common_type.find(einst);
     if (it != table_map_to_common_type.end())
@@ -222,8 +223,18 @@ mapped_inst_t wave_t::map_to_common_type(int einst, int dprate, int derate)
     return mapped_inst_t{WaveInstCategory::NONE, 0};
 }
 
-wave_t::wave_t(int target_wgp, int tg_simd, int slot, pcinfo_t addr, Token& token, bool exbarw) :
-WaveDataInternal(target_wgp, tg_simd, slot, token.time, addr, exbarw)
+wave_t::wave_t(
+    int target_wgp,
+    int tg_simd,
+    int slot,
+    pcinfo_t addr,
+    Token& token,
+    bool exbarw,
+    uint8_t me,
+    uint8_t pipe,
+    uint8_t wg
+) :
+WaveDataInternal(target_wgp, tg_simd, slot, token.time, addr, exbarw, me, pipe, wg)
 {
     this->last_state_cycle = token.time;
     this->cur_state = WaveslotState::WS_IDLE;
@@ -246,7 +257,7 @@ void wave_t::complete_wave(Token& token)
 void wave_t::apply_wave_rdy(int64_t time)
 {
     update_barrier_gfx11(time - 1);
-    update_state(WaveslotState::WS_STALL, time);
+    if (last_xnack_cycle < time && !bIsXnack) update_state(WaveslotState::WS_STALL, time);
 }
 
 void wave_t::update_state(WaveslotState new_state, int64_t time)
@@ -277,7 +288,7 @@ void wave_t::new_pc(int64_t time, int64_t pc, CodeobjTableTranslator& table)
 
     auto& back = pc_infos.at(info_idx).second;
 
-    back = table.ToPcV2(pc << 2);
+    back = ToPcV2(table, pc << 2);
     if (back.code_object_id == 0) unattrib_pcs.push_back(pc_infos.size() - 1);
 }
 
@@ -381,6 +392,12 @@ void wave_t::apply_inst(int64_t token_time, int enum_inst, mapped_inst_t mapped,
         stall = time - last_state_cycle;
         duration += stall;
         time = last_state_cycle;
+
+        if (bIsXnack)
+        {
+            bIsXnack = false;
+            last_xnack_cycle = token_time;
+        }
     }
 
     this->instructions.push_back({time, mapped.category, duration, stall});

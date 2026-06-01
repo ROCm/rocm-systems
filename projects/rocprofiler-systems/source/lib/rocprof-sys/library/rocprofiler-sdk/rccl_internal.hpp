@@ -57,7 +57,7 @@ rccl_type_size(ncclDataType_t datatype) noexcept
  * @param comm The RCCL communicator
  * @return The device ID associated with the communicator
  */
-[[nodiscard]] uint32_t
+[[nodiscard]] std::uint32_t
 rccl_get_device_id(ncclComm_t comm) noexcept;
 
 /**
@@ -77,7 +77,7 @@ struct rccl_event_info
  * It uses template-based dependency injection for PMC registration to enable
  * zero-overhead testing (no virtual function calls).
  *
- * @tparam PmcRegistrar Type that implements register_gpu_pmc(uint32_t) - duck typing
+ * @tparam PmcRegistrar Type that implements register_gpu_pmc(std::uint32_t) - duck typing
  *
  * Usage:
  *   Production: rccl_gpu_tracking_state_t<production_pmc_registrar> state(registrar);
@@ -102,7 +102,7 @@ public:
      * @param rccl_device_idx The GPU device index
      * @note Calls PMC registrar if one was provided
      */
-    inline void register_gpu(uint32_t rccl_device_idx)
+    inline void register_gpu(std::uint32_t rccl_device_idx)
     {
         bool newly_registered = false;
         {
@@ -126,7 +126,8 @@ public:
      * @param bytes Number of bytes to add
      * @return The new cumulative byte count for the device
      */
-    [[nodiscard]] inline uint64_t add_bytes(uint32_t rccl_device_idx, size_t bytes)
+    [[nodiscard]] inline std::uint64_t add_bytes(std::uint32_t rccl_device_idx,
+                                                 size_t        bytes)
     {
         std::unique_lock<std::mutex> _lk{ m_cumulative_mutex };
         auto& device_bytes = m_cumulative_bytes_per_device[rccl_device_idx];
@@ -139,7 +140,7 @@ public:
      * @param rccl_device_idx The GPU device index
      * @return True if registered
      */
-    [[nodiscard]] inline bool is_registered(uint32_t rccl_device_idx) const
+    [[nodiscard]] inline bool is_registered(std::uint32_t rccl_device_idx) const
     {
         std::unique_lock<std::mutex> _lk{ m_registered_gpus_mutex };
         return m_registered_gpus.count(rccl_device_idx) > 0;
@@ -150,7 +151,7 @@ public:
      * @param rccl_device_idx The GPU device index
      * @return Cumulative bytes (0 if not tracked)
      */
-    [[nodiscard]] inline uint64_t get_bytes(uint32_t rccl_device_idx) const
+    [[nodiscard]] inline std::uint64_t get_bytes(std::uint32_t rccl_device_idx) const
     {
         std::unique_lock<std::mutex> _lk{ m_cumulative_mutex };
         auto it = m_cumulative_bytes_per_device.find(rccl_device_idx);
@@ -173,11 +174,11 @@ public:
     }
 
 private:
-    std::shared_ptr<PmcRegistrar>          m_pmc_registrar;
-    mutable std::mutex                     m_registered_gpus_mutex{};
-    std::unordered_set<uint32_t>           m_registered_gpus{};
-    mutable std::mutex                     m_cumulative_mutex{};
-    std::unordered_map<uint32_t, uint64_t> m_cumulative_bytes_per_device{};
+    std::shared_ptr<PmcRegistrar>                    m_pmc_registrar;
+    mutable std::mutex                               m_registered_gpus_mutex{};
+    std::unordered_set<std::uint32_t>                m_registered_gpus{};
+    mutable std::mutex                               m_cumulative_mutex{};
+    std::unordered_map<std::uint32_t, std::uint64_t> m_cumulative_bytes_per_device{};
 };
 
 }  // namespace rocprofiler_sdk

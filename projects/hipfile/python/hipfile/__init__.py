@@ -1,4 +1,4 @@
-# pylint: disable=C0114
+"""Python bindings for the hipFile GPU-accelerated file I/O library."""
 
 from hipfile._hipfile import (  # pylint: disable=E0401,E0611
     # Constants

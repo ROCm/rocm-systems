@@ -37,36 +37,36 @@ union mock_enabled_metrics
 {
     struct
     {
-        uint32_t current_socket_power : 1;  // Bit 0
-        uint32_t average_socket_power : 1;  // Bit 1
-        uint32_t memory_usage         : 1;  // Bit 2
-        uint32_t hotspot_temperature  : 1;  // Bit 3
-        uint32_t edge_temperature     : 1;  // Bit 4
-        uint32_t gfx_activity         : 1;  // Bit 5
-        uint32_t umc_activity         : 1;  // Bit 6
-        uint32_t mm_activity          : 1;  // Bit 7
-        uint32_t vcn_activity         : 1;  // Bit 8  - Device-level VCN (Radeon)
-        uint32_t jpeg_activity        : 1;  // Bit 9  - Device-level JPEG (Radeon)
-        uint32_t vcn_busy             : 1;  // Bit 10 - Per-XCP VCN (MI300)
-        uint32_t jpeg_busy            : 1;  // Bit 11 - Per-XCP JPEG (MI300)
-        uint32_t xgmi                 : 1;  // Bit 12
-        uint32_t pcie                 : 1;  // Bit 13
-        uint32_t sdma_usage           : 1;  // Bit 14
+        std::uint32_t current_socket_power : 1;  // Bit 0
+        std::uint32_t average_socket_power : 1;  // Bit 1
+        std::uint32_t memory_usage         : 1;  // Bit 2
+        std::uint32_t hotspot_temperature  : 1;  // Bit 3
+        std::uint32_t edge_temperature     : 1;  // Bit 4
+        std::uint32_t gfx_activity         : 1;  // Bit 5
+        std::uint32_t umc_activity         : 1;  // Bit 6
+        std::uint32_t mm_activity          : 1;  // Bit 7
+        std::uint32_t vcn_activity         : 1;  // Bit 8  - Device-level VCN (Radeon)
+        std::uint32_t jpeg_activity        : 1;  // Bit 9  - Device-level JPEG (Radeon)
+        std::uint32_t vcn_busy             : 1;  // Bit 10 - Per-XCP VCN (MI300)
+        std::uint32_t jpeg_busy            : 1;  // Bit 11 - Per-XCP JPEG (MI300)
+        std::uint32_t xgmi                 : 1;  // Bit 12
+        std::uint32_t pcie                 : 1;  // Bit 13
+        std::uint32_t sdma_usage           : 1;  // Bit 14
     } bits;
-    uint32_t value = 0;
+    std::uint32_t value = 0;
 };
 
 struct mock_xcp_metrics
 {
-    std::array<uint16_t, MAX_NUM_JPEG> jpeg_busy;
-    std::array<uint16_t, MAX_NUM_VCN>  vcn_busy;
+    std::array<std::uint16_t, MAX_NUM_JPEG> jpeg_busy;
+    std::array<std::uint16_t, MAX_NUM_VCN>  vcn_busy;
 };
 
 struct mock_metrics
 {
     std::array<mock_xcp_metrics, MAX_NUM_XCP> xcp_stats;
-    std::array<uint16_t, MAX_NUM_VCN>         vcn_activity  = {};
-    std::array<uint16_t, MAX_NUM_JPEG>        jpeg_activity = {};
+    std::array<std::uint16_t, MAX_NUM_VCN>    vcn_activity  = {};
+    std::array<std::uint16_t, MAX_NUM_JPEG>   jpeg_activity = {};
 };
 
 // ──────────────────────────────────────────────────────────────────
@@ -122,15 +122,15 @@ generate_device_level_metrics(const std::string& base_name, bool is_enabled,
 
 // Mirrors addendum_blk lambda in perfetto_policy.hpp (lines 173-181)
 std::string
-format_perfetto_xcp_track(uint32_t device_id, const char* metric_name, size_t xcp_idx,
-                          size_t engine_idx)
+format_perfetto_xcp_track(std::uint32_t device_id, const char* metric_name,
+                          size_t xcp_idx, size_t engine_idx)
 {
     return fmt::format("GPU [{}] {} XCP_{}: [{:02}] (S)", device_id, metric_name, xcp_idx,
                        engine_idx);
 }
 
 std::string
-format_perfetto_device_track(uint32_t device_id, const char* metric_name,
+format_perfetto_device_track(std::uint32_t device_id, const char* metric_name,
                              size_t engine_idx)
 {
     return fmt::format("GPU [{}] {} [{:02}] (S)", device_id, metric_name, engine_idx);
@@ -138,12 +138,13 @@ format_perfetto_device_track(uint32_t device_id, const char* metric_name,
 
 // Mirrors unique_key computation in emit_xcp_array_metrics
 // (perfetto_processor.cpp:173-175)
-uint64_t
-compute_track_key(uint32_t device_id, std::optional<size_t> xcp_idx, size_t engine_idx)
+std::uint64_t
+compute_track_key(std::uint32_t device_id, std::optional<size_t> xcp_idx,
+                  size_t engine_idx)
 {
-    return (static_cast<uint64_t>(device_id) << 16) |
-           (static_cast<uint64_t>(xcp_idx.value_or(0)) << 8) |
-           static_cast<uint64_t>(engine_idx);
+    return (static_cast<std::uint64_t>(device_id) << 16) |
+           (static_cast<std::uint64_t>(xcp_idx.value_or(0)) << 8) |
+           static_cast<std::uint64_t>(engine_idx);
 }
 
 mock_metrics
@@ -152,11 +153,11 @@ make_sentinel_metrics()
     mock_metrics m{};
     for(auto& xcp : m.xcp_stats)
     {
-        xcp.vcn_busy.fill(std::numeric_limits<uint16_t>::max());
-        xcp.jpeg_busy.fill(std::numeric_limits<uint16_t>::max());
+        xcp.vcn_busy.fill(std::numeric_limits<std::uint16_t>::max());
+        xcp.jpeg_busy.fill(std::numeric_limits<std::uint16_t>::max());
     }
-    m.vcn_activity.fill(std::numeric_limits<uint16_t>::max());
-    m.jpeg_activity.fill(std::numeric_limits<uint16_t>::max());
+    m.vcn_activity.fill(std::numeric_limits<std::uint16_t>::max());
+    m.jpeg_activity.fill(std::numeric_limits<std::uint16_t>::max());
     return m;
 }
 
@@ -269,7 +270,7 @@ TEST_F(xcp_output_test, AllXcpPartitionsWritten)
     {
         for(size_t eng = 0; eng < MAX_NUM_VCN; ++eng)
         {
-            m.xcp_stats[xcp].vcn_busy[eng] = static_cast<uint16_t>(xcp * 10 + eng);
+            m.xcp_stats[xcp].vcn_busy[eng] = static_cast<std::uint16_t>(xcp * 10 + eng);
         }
     }
 
@@ -319,7 +320,7 @@ TEST_F(xcp_output_test, DeviceLevelVcnActivitySeparateFromXcp)
 // Track names follow "GPU [{id}] VCN Busy XCP_{xcp}: [{eng:02}] (S)"
 TEST_F(xcp_output_test, PerfettoXcpTrackNameFormat)
 {
-    uint32_t device_id = 0;
+    std::uint32_t device_id = 0;
 
     auto vcn_name = format_perfetto_xcp_track(device_id, "VCN Busy", 3, 2);
     EXPECT_EQ(vcn_name, "GPU [0] VCN Busy XCP_3: [02] (S)");
@@ -360,7 +361,7 @@ TEST_F(xcp_output_test, PerfettoTrackKeyUniqueness)
 TEST_F(xcp_output_test, SentinelValuesSkipped)
 {
     std::vector<std::pair<std::string, double>> emitted;
-    uint32_t                                    device_id = 0;
+    std::uint32_t                               device_id = 0;
 
     // All sentinel by default from make_sentinel_metrics()
     for(size_t xcp = 0; xcp < m.xcp_stats.size(); ++xcp)
@@ -368,7 +369,7 @@ TEST_F(xcp_output_test, SentinelValuesSkipped)
         for(size_t i = 0; i < m.xcp_stats[xcp].vcn_busy.size(); ++i)
         {
             auto value = m.xcp_stats[xcp].vcn_busy[i];
-            if(value == std::numeric_limits<uint16_t>::max()) continue;
+            if(value == std::numeric_limits<std::uint16_t>::max()) continue;
             emitted.emplace_back(format_perfetto_xcp_track(device_id, "VCN Busy", xcp, i),
                                  static_cast<double>(value));
         }
@@ -384,7 +385,7 @@ TEST_F(xcp_output_test, SentinelValuesSkipped)
         for(size_t i = 0; i < m.xcp_stats[xcp].vcn_busy.size(); ++i)
         {
             auto value = m.xcp_stats[xcp].vcn_busy[i];
-            if(value == std::numeric_limits<uint16_t>::max()) continue;
+            if(value == std::numeric_limits<std::uint16_t>::max()) continue;
             emitted.emplace_back(format_perfetto_xcp_track(device_id, "VCN Busy", xcp, i),
                                  static_cast<double>(value));
         }

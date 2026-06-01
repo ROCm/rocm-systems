@@ -32,9 +32,5 @@
 
 namespace gfx12
 {
-struct wave_t : public gfx11::wave_t
-{
-    // static std::unordered_map<int, const char*> INST_NAMES;
-    static mapped_inst_t map_to_common_type(int einst, int dprate, int derate);
-};
+mapped_inst_t map_to_common_type(int einst, int dprate, int derate);
 } // namespace gfx12

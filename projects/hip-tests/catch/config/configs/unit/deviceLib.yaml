@@ -299,6 +299,12 @@ deviceLib:
   Unit_half_min_max_host:
     <<: *level_2
     tags: [types]
+  Unit_bf16_atomic_add:
+    <<: *level_2
+    tags: [atomics, types]
+  Unit_fp16_atomic_add:
+    <<: *level_2
+    tags: [atomics, types]
   Unit_fp8_ocp_bool_host:
     <<: *level_2
     tags: [types]

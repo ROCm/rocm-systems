@@ -8,6 +8,7 @@
 #include "core/timemory.hpp"
 #include "library/components/category_region.hpp"
 #include "library/runtime.hpp"
+#include <cstdint>
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/macros.hpp>
@@ -51,28 +52,28 @@ ucx_gotcha::configure()
         ucx_gotcha_t::configure<3, void, void*, void*>("ucp_am_data_release");
 
         // Atomic operations
-        ucx_gotcha_t::configure<4, void*, void*, uint32_t, uint64_t, void*>(
+        ucx_gotcha_t::configure<4, void*, void*, std::uint32_t, std::uint64_t, void*>(
             "ucp_atomic_add32");
-        ucx_gotcha_t::configure<5, void*, void*, uint64_t, uint64_t, void*>(
+        ucx_gotcha_t::configure<5, void*, void*, std::uint64_t, std::uint64_t, void*>(
             "ucp_atomic_add64");
-        ucx_gotcha_t::configure<6, void*, void*, uint32_t, uint32_t, uint64_t, void*>(
-            "ucp_atomic_cswap32");
-        ucx_gotcha_t::configure<7, void*, void*, uint64_t, uint64_t, uint64_t, void*>(
-            "ucp_atomic_cswap64");
-        ucx_gotcha_t::configure<8, void*, void*, uint32_t, uint64_t, void*, void*>(
-            "ucp_atomic_fadd32");
-        ucx_gotcha_t::configure<9, void*, void*, uint64_t, uint64_t, void*, void*>(
-            "ucp_atomic_fadd64");
-        ucx_gotcha_t::configure<10, void*, void*, uint32_t, uint64_t, void*, void*>(
-            "ucp_atomic_swap32");
-        ucx_gotcha_t::configure<11, void*, void*, uint64_t, uint64_t, void*, void*>(
-            "ucp_atomic_swap64");
-        ucx_gotcha_t::configure<12, int, void*, int, uint64_t, const void*, size_t,
+        ucx_gotcha_t::configure<6, void*, void*, std::uint32_t, std::uint32_t,
+                                std::uint64_t, void*>("ucp_atomic_cswap32");
+        ucx_gotcha_t::configure<7, void*, void*, std::uint64_t, std::uint64_t,
+                                std::uint64_t, void*>("ucp_atomic_cswap64");
+        ucx_gotcha_t::configure<8, void*, void*, std::uint32_t, std::uint64_t, void*,
+                                void*>("ucp_atomic_fadd32");
+        ucx_gotcha_t::configure<9, void*, void*, std::uint64_t, std::uint64_t, void*,
+                                void*>("ucp_atomic_fadd64");
+        ucx_gotcha_t::configure<10, void*, void*, std::uint32_t, std::uint64_t, void*,
+                                void*>("ucp_atomic_swap32");
+        ucx_gotcha_t::configure<11, void*, void*, std::uint64_t, std::uint64_t, void*,
+                                void*>("ucp_atomic_swap64");
+        ucx_gotcha_t::configure<12, int, void*, int, std::uint64_t, const void*, size_t,
                                 void*>("ucp_atomic_post");
-        ucx_gotcha_t::configure<13, void*, void*, int, uint64_t, void*, size_t, void*,
-                                void*>("ucp_atomic_fetch_nb");
+        ucx_gotcha_t::configure<13, void*, void*, int, std::uint64_t, void*, size_t,
+                                void*, void*>("ucp_atomic_fetch_nb");
         ucx_gotcha_t::configure<14, void*, void*, unsigned, void*, void*, size_t,
-                                uint64_t, void*>("ucp_atomic_op_nbx");
+                                std::uint64_t, void*>("ucp_atomic_op_nbx");
 
         // Cleanup and config
         ucx_gotcha_t::configure<15, void, void*>("ucp_cleanup");
@@ -112,21 +113,21 @@ ucx_gotcha::configure()
         ucx_gotcha_t::configure<36, int, void*, void*>("ucp_mem_query");
 
         // Put/Get operations
-        ucx_gotcha_t::configure<37, int, void*, const void*, size_t, uint64_t, void*>(
-            "ucp_put");
-        ucx_gotcha_t::configure<38, int, void*, void*, size_t, uint64_t, void*>(
+        ucx_gotcha_t::configure<37, int, void*, const void*, size_t, std::uint64_t,
+                                void*>("ucp_put");
+        ucx_gotcha_t::configure<38, int, void*, void*, size_t, std::uint64_t, void*>(
             "ucp_get");
-        ucx_gotcha_t::configure<39, int, void*, const void*, size_t, uint64_t, void*>(
-            "ucp_put_nbi");
-        ucx_gotcha_t::configure<40, int, void*, void*, size_t, uint64_t, void*>(
+        ucx_gotcha_t::configure<39, int, void*, const void*, size_t, std::uint64_t,
+                                void*>("ucp_put_nbi");
+        ucx_gotcha_t::configure<40, int, void*, void*, size_t, std::uint64_t, void*>(
             "ucp_get_nbi");
-        ucx_gotcha_t::configure<41, void*, void*, const void*, size_t, uint64_t, void*,
-                                void*>("ucp_put_nb");
-        ucx_gotcha_t::configure<42, void*, void*, void*, size_t, uint64_t, void*, void*>(
-            "ucp_get_nb");
-        ucx_gotcha_t::configure<43, void*, void*, const void*, size_t, uint64_t, void*,
-                                const void*>("ucp_put_nbx");
-        ucx_gotcha_t::configure<44, void*, void*, void*, size_t, uint64_t, void*,
+        ucx_gotcha_t::configure<41, void*, void*, const void*, size_t, std::uint64_t,
+                                void*, void*>("ucp_put_nb");
+        ucx_gotcha_t::configure<42, void*, void*, void*, size_t, std::uint64_t, void*,
+                                void*>("ucp_get_nb");
+        ucx_gotcha_t::configure<43, void*, void*, const void*, size_t, std::uint64_t,
+                                void*, const void*>("ucp_put_nbx");
+        ucx_gotcha_t::configure<44, void*, void*, void*, size_t, std::uint64_t, void*,
                                 const void*>("ucp_get_nbx");
 
         // Request
@@ -167,13 +168,13 @@ ucx_gotcha::configure()
             "ucp_tag_send_nb");
         ucx_gotcha_t::configure<64, void*, void*, void*, size_t, void*, void*, void*>(
             "ucp_tag_recv_nb");
-        ucx_gotcha_t::configure<65, void*, void*, const void*, size_t, uint64_t,
+        ucx_gotcha_t::configure<65, void*, void*, const void*, size_t, std::uint64_t,
                                 const void*>("ucp_tag_send_nbx");
-        ucx_gotcha_t::configure<66, void*, void*, void*, size_t, uint64_t, uint64_t,
-                                const void*>("ucp_tag_recv_nbx");
-        ucx_gotcha_t::configure<67, void*, void*, const void*, size_t, uint64_t, void*>(
-            "ucp_tag_send_sync_nb");
-        ucx_gotcha_t::configure<68, void*, void*, const void*, size_t, uint64_t,
+        ucx_gotcha_t::configure<66, void*, void*, void*, size_t, std::uint64_t,
+                                std::uint64_t, const void*>("ucp_tag_recv_nbx");
+        ucx_gotcha_t::configure<67, void*, void*, const void*, size_t, std::uint64_t,
+                                void*>("ucp_tag_send_sync_nb");
+        ucx_gotcha_t::configure<68, void*, void*, const void*, size_t, std::uint64_t,
                                 const void*>("ucp_tag_send_sync_nbx");
 
         // Worker
@@ -203,7 +204,7 @@ ucx_gotcha::configure()
             "uct_ep_am_bcopy");
         ucx_gotcha_t::configure<85, ssize_t, void*, unsigned, const void*, unsigned,
                                 const void*, size_t, void*>("uct_ep_am_zcopy");
-        ucx_gotcha_t::configure<86, ssize_t, void*, unsigned, uint64_t, const void*,
+        ucx_gotcha_t::configure<86, ssize_t, void*, unsigned, std::uint64_t, const void*,
                                 unsigned>("uct_ep_am_short");
         ucx_gotcha_t::configure<87, unsigned, void*>("uct_iface_progress");
         ucx_gotcha_t::configure<88, int, void*, unsigned, void*, void*, unsigned>(
@@ -264,7 +265,7 @@ ucx_gotcha::resume()
 // Specific audit functions for tag operations
 void
 ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, const void* arg2,
-                  size_t arg3, uint64_t arg4, const void* arg5)
+                  size_t arg3, std::uint64_t arg4, const void* arg5)
 {
     category_region<category::ucx>::start(std::string_view{ _data.tool_id }, "ep", arg1,
                                           "buffer", arg2, "count", arg3, "tag", arg4,
@@ -276,7 +277,7 @@ ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, const v
 
 void
 ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, void* arg2,
-                  size_t arg3, uint64_t arg4, uint64_t arg5, const void* arg6)
+                  size_t arg3, std::uint64_t arg4, std::uint64_t arg5, const void* arg6)
 {
     category_region<category::ucx>::start(std::string_view{ _data.tool_id }, "worker",
                                           arg1, "buffer", arg2, "count", arg3, "tag",
@@ -289,7 +290,7 @@ ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, void* a
 // RMA operations
 void
 ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, const void* arg2,
-                  size_t arg3, uint64_t arg4, void* arg5, const void* arg6)
+                  size_t arg3, std::uint64_t arg4, void* arg5, const void* arg6)
 {
     category_region<category::ucx>::start(std::string_view{ _data.tool_id }, "ep", arg1,
                                           "buffer", arg2, "count", arg3, "remote_addr",
@@ -301,7 +302,7 @@ ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, const v
 
 void
 ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, void* arg2,
-                  size_t arg3, uint64_t arg4, void* arg5, const void* arg6)
+                  size_t arg3, std::uint64_t arg4, void* arg5, const void* arg6)
 {
     category_region<category::ucx>::start(std::string_view{ _data.tool_id }, "ep", arg1,
                                           "buffer", arg2, "count", arg3, "remote_addr",

@@ -34,17 +34,17 @@ extern "C"
     struct rocprofiler_client_id_t;
 
     using rocprofiler_configure_t =
-        rocprofiler_tool_configure_result_t* (*) (uint32_t    version,
-                                                  const char* runtime_version,
-                                                  uint32_t    priority,
+        rocprofiler_tool_configure_result_t* (*) (std::uint32_t version,
+                                                  const char*   runtime_version,
+                                                  std::uint32_t priority,
                                                   rocprofiler_client_id_t* client_id);
 
     rocprofiler_tool_configure_result_t* rocprofiler_configure(
-        uint32_t version, const char* runtime_version, uint32_t priority,
+        std::uint32_t version, const char* runtime_version, std::uint32_t priority,
         rocprofiler_client_id_t* client_id) ROCPROFSYS_PUBLIC_API;
 #if ROCPROFILER_VERSION >= 10200
     rocprofiler_tool_configure_attach_result_t* rocprofiler_configure_attach(
-        uint32_t version, const char* runtime_version, uint32_t priority,
+        std::uint32_t version, const char* runtime_version, std::uint32_t priority,
         rocprofiler_client_id_t* client_id) ROCPROFSYS_PUBLIC_API;
 #endif
 }
