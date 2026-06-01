@@ -2807,6 +2807,14 @@ is_rank_in_filter(std::string enabled_ranks_str)
 
     const auto enabled_ranks = rocprofsys::utility::parse_numeric_range<
         std::int64_t, std::unordered_set<std::int64_t>>(enabled_ranks_str, "ranks", 1L);
+    // empty enabled_ranks for non-empty && not "none" enabled_ranks_str (checked above)
+    // -> filter string parsing error
+    if(enabled_ranks.empty())
+    {
+        LOG_WARNING("MPI output filtering DISABLED: invalid filter specification '{}'",
+                    enabled_ranks_str);
+        return true;
+    }
 
     const auto is_enabled = enabled_ranks.count(current_rank.value()) != 0;
     LOG_DEBUG("Output for MPI rank {} is {}", current_rank.value(),

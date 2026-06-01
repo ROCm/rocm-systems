@@ -83,6 +83,13 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
 
             Tp _vn = _get_value(_vv.at(0));
             Tp _vN = _get_value(_vv.at(1));
+            if(_vn > _vN)
+            {
+                LOG_WARNING("Invalid {} range specification: {}. Start exceeds end; "
+                            "required format N-M with N <= M, e.g. 0-4. Ignoring {}...",
+                            _label, _v, _v);
+                continue;
+            }
             do
             {
                 emplace(_result, _vn);
