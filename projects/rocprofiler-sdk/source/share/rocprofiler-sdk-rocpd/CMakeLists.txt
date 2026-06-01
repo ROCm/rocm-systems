@@ -32,7 +32,6 @@ function(rocpd_configure_schema_files)
         set(_INSTALL_DEST "share/rocprofiler-sdk-rocpd")
     endif()
     foreach(_FILE ${_SCHEMA_FILES})
-        message(WARNING "rocpd_configure_schema_files _FILE = ${_FILE}")
         configure_file(${_FILE} ${_BINARY_DEST}/${_FILE} COPYONLY)
         install(
             FILES ${_BINARY_DEST}/${_FILE}

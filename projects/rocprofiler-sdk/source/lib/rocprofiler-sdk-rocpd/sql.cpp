@@ -179,7 +179,6 @@ load_version_file_map(const std::string&       _schema_paths,
                       version_file_map_t&      version_file_map,
                       rocpd_version_triplet_t& latest_version)
 {
-
     auto _schema_versions_file = std::optional<std::string>{};
     for(const auto& itr : rocprofiler::sdk::parse::tokenize(_schema_paths, ":"))
     {
