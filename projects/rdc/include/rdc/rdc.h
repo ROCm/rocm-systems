@@ -199,7 +199,7 @@ typedef enum {
   RDC_FI_GPU_TEMP,           //!< Current temperature for the device
   RDC_FI_GPU_JUNCTION_TEMP,  //!< Junction/hotspot temperature for the device
   RDC_FI_POWER_USAGE = 300,  //!< Power usage for the device
-  RDC_FI_GPU_ENERGY,         //!< Energy consumed since driver load (microjoules)
+  RDC_FI_GPU_ENERGY,         //!< GPU energy accumulator (microjoules)
 
   /**
    * @brief PCIe related fields
