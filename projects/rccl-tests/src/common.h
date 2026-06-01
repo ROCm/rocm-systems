@@ -11,7 +11,13 @@
 #define NCCL_TESTS_VERSION "2.17.9"
 
 #include "rccl/rccl.h"
-#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+// nccl_device.h provides the device-API public types referenced below
+// (ncclCommProperties_t, full ncclDevCommRequirements, NCCL_GIN_TYPE_NONE, ...).
+// As of NCCL 2.29 these types are referenced unconditionally by the test engine
+// signature and per-collective DevCommRequirements helpers, so the include must
+// not require -DENABLE_DEVICE_API on 2.29+.
+#if (defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)) \
+    || NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
 #include "nccl_device.h"
 #endif
 #include <stdio.h>
