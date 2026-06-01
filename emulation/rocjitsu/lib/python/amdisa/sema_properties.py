@@ -41,27 +41,48 @@ class InstructionProperty(Flag):
     IS_ENDPGM = auto()
 
 
-_CROSS_LANE_CALLS: frozenset[str] = frozenset({
-    'v_permlane16', 'v_permlanex16', 'v_readfirstlane', 'v_readlane',
-    'v_writelane', 'ds_bpermute', 'ds_swizzle',
-})
+_CROSS_LANE_CALLS: frozenset[str] = frozenset(
+    {
+        'v_permlane16',
+        'v_permlanex16',
+        'v_readfirstlane',
+        'v_readlane',
+        'v_writelane',
+        'ds_bpermute',
+        'ds_swizzle',
+    }
+)
 
-_MATRIX_CALLS: frozenset[str] = frozenset({
-    'mfma_compute',
-})
+_MATRIX_CALLS: frozenset[str] = frozenset(
+    {
+        'mfma_compute',
+    }
+)
 
-_BARRIER_CALLS: frozenset[str] = frozenset({
-    'barrier', 'CheckBarrierComplete',
-})
+_BARRIER_CALLS: frozenset[str] = frozenset(
+    {
+        'barrier',
+        'CheckBarrierComplete',
+    }
+)
 
-_WAITCNT_CALLS: frozenset[str] = frozenset({
-    'waitcnt',
-})
+_WAITCNT_CALLS: frozenset[str] = frozenset(
+    {
+        'waitcnt',
+    }
+)
 
-_ADDR_CALC_CALLS: frozenset[str] = frozenset({
-    'CalcBufferAddr', 'CalcFlatAddr', 'CalcGlobalAddr', 'CalcDsAddr',
-    'CalcScalarGlobalAddr', 'CalcScalarBufferAddr', 'CalcScratchAddr',
-})
+_ADDR_CALC_CALLS: frozenset[str] = frozenset(
+    {
+        'CalcBufferAddr',
+        'CalcFlatAddr',
+        'CalcGlobalAddr',
+        'CalcDsAddr',
+        'CalcScalarGlobalAddr',
+        'CalcScalarBufferAddr',
+        'CalcScratchAddr',
+    }
+)
 
 
 def derive_properties(block: SemaBlock) -> InstructionProperty:

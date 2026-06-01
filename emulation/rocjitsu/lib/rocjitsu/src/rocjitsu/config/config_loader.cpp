@@ -61,8 +61,7 @@ simdojo::ExecMode parse_exec_mode(const rocjitsu::fb::SimulationConfig *fb_confi
 }
 
 const rocjitsu::fb::SimulationConfig *
-parse_json(const std::string &json, const std::string &schema_path, flatbuffers::Parser &parser) {
-  std::string schema_text = read_file(schema_path);
+parse_json(const std::string &json, const std::string &schema_text, flatbuffers::Parser &parser) {
   parser.opts.skip_unexpected_fields_in_json = true;
   if (!parser.Parse(schema_text.c_str()))
     throw std::runtime_error("Failed to parse schema: " + std::string(parser.error_));
@@ -737,16 +736,16 @@ const char *arch_to_string(rj_code_arch_t arch) {
   }
 }
 
-LoadedConfig load_config(const std::string &json_path, const std::string &schema_path) {
+LoadedConfig load_config(const std::string &json_path, const std::string &schema_text) {
   std::string json_text = read_file(json_path);
   flatbuffers::Parser parser;
-  auto *fb_config = parse_json(json_text, schema_path, parser);
+  auto *fb_config = parse_json(json_text, schema_text, parser);
   return build_from_fb(fb_config);
 }
 
-LoadedConfig load_config_from_string(const std::string &json, const std::string &schema_path) {
+LoadedConfig load_config_from_string(const std::string &json, const std::string &schema_text) {
   flatbuffers::Parser parser;
-  auto *fb_config = parse_json(json, schema_path, parser);
+  auto *fb_config = parse_json(json, schema_text, parser);
   return build_from_fb(fb_config);
 }
 

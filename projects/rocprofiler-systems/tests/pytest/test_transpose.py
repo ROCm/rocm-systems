@@ -58,6 +58,16 @@ def rocprofiler_env(transpose_env: dict[str, str], gpu_info: GPUInfo) -> dict[st
 
 
 @pytest.fixture
+def gpu_perf_counter_env(
+    transpose_env: dict[str, str], gpu_info: GPUInfo
+) -> dict[str, str]:
+    """Environment with GPU perf counters configured."""
+    env = transpose_env.copy()
+    env["ROCPROFSYS_GPU_PERF_COUNTERS"] = gpu_info.gpu_perf_counters_for_test
+    return env
+
+
+@pytest.fixture
 def transpose_rules(validation_rules_dir: Path) -> list[Path]:
     """Get validation rules files for transpose tests."""
     rules_dir = validation_rules_dir / "transpose"
@@ -312,3 +322,43 @@ class TestTransposeROCProfiler(RocprofsysTest):
                 subtest_name="RocPD HW counter validation",
                 rules_files=rocprofiler_rules,
             )
+
+
+# ============================================================================
+# Test Class: GPU Performance Counter Collection (Device Counting Service)
+# ============================================================================
+
+
+@pytest.mark.mpi_optional("transpose")
+@pytest.mark.rocprofiler
+@pytest.mark.class_name("transpose-gpu-perf-counters")
+class TestTransposeGPUPerfCounters(RocprofsysTest):
+
+    @pytest.mark.rocpd("gpu_perf_counter_env")
+    def test(
+        self,
+        gpu_perf_counter_env,
+        gpu_info,
+        num_processes,
+        validation_rules_dir,
+    ):
+        result = self.run_test(
+            "sampling",
+            "transpose",
+            env=gpu_perf_counter_env,
+            check_target_arch=True,
+            timeout=120,
+            mpi_ranks=num_processes,
+        )
+        self.assert_regex(result)
+        self.assert_perfetto(
+            result,
+            subtest_name="Perfetto GPU perf counter validation",
+            counter_names=gpu_info.counter_names,
+        )
+        rules_dir = validation_rules_dir / "transpose"
+        self.assert_rocpd(
+            result,
+            subtest_name="ROCpd GPU perf counter validation",
+            rules_files=[rules_dir / "gpu-perf-counter-rules.json"],
+        )

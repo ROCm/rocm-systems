@@ -33,6 +33,8 @@ Value Description
 
 Stats Collected
 ---------------
+* Basic: Number of file handle registrations.
+* Basic: Number of buffer registrations.
 * Basic: Bytes read/written on the fastpath/fallback backends.
 * Basic: Bandwidth for reads/writes on the fastpath/fallback backends.
 * Basic: Latency for reads/writes on the fastpath/fallback backends.
@@ -47,6 +49,9 @@ Example output shape: ::
 
     AIS-STATS Version: 1
     HipFile Stats Level: 1
+    File Handle Registrations: 1
+    Buffer Registrations: 1
+
     Total Fastpath Read Size (B): 67108864
     Average Fastpath Read Bandwidth (GiB/s): 0.776272
     Average Fastpath Read Latency (us): 1258.02

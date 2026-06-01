@@ -77,70 +77,162 @@ def _register_handlers() -> None:
         gen_scalar_cmpk,
     )
     from amdisa.codegen.execute.vector_cmp import (
-        gen_vector_cmp_class, gen_vector_cmpx,
+        gen_vector_cmp_class,
+        gen_vector_cmpx,
     )
     from amdisa.codegen.execute.vector_special import (
-        gen_vector_mbcnt, gen_vector_mad_64_32, gen_vector_mad_32_16,
-        gen_vector_div_fixup, gen_vector_div_scale, gen_vector_div_fmas,
-        gen_vector_dot, gen_vector_dot2c_bf16, gen_vector_bitop3,
-        gen_vector_permlane_swap, gen_vector_permlane, gen_vector_permlane64,
+        gen_vector_mbcnt,
+        gen_vector_mad_64_32,
+        gen_vector_mad_32_16,
+        gen_vector_div_fixup,
+        gen_vector_div_scale,
+        gen_vector_div_fmas,
+        gen_vector_dot,
+        gen_vector_dot2c_bf16,
+        gen_vector_bitop3,
+        gen_vector_permlane_swap,
+        gen_vector_permlane,
+        gen_vector_permlane64,
         gen_vector_cvt_pk,
     )
     from amdisa.codegen.execute.packed import (
-        gen_pk_binop, gen_pk_ternary, gen_pk_binop_f32, gen_pk_ternary_f32,
-        gen_pk_mov_b32, gen_mad_mix_f32, gen_mad_mix_lo_hi,
-        gen_dot2, gen_dot4, gen_dot8,
+        gen_pk_binop,
+        gen_pk_ternary,
+        gen_pk_binop_f32,
+        gen_pk_ternary_f32,
+        gen_pk_mov_b32,
+        gen_mad_mix_f32,
+        gen_mad_mix_lo_hi,
+        gen_dot2,
+        gen_dot4,
+        gen_dot8,
     )
     from amdisa.codegen.execute.matrix import (
-        gen_accvgpr_read, gen_accvgpr_write, gen_mfma,
+        gen_accvgpr_read,
+        gen_accvgpr_write,
+        gen_mfma,
     )
 
     # Scalar ALU — scalar_unary, scalar_binop, scalar_cmp, scalar_bitcmp,
     # scalar_saveexec now handled by SemaAST pipeline (_SEMA_CLASSES).
-    DISPATCH['scalar_cmpk'] = lambda c: gen_scalar_cmpk(c.dst_ops, c.src_ops, c.op, c.dtype)
+    DISPATCH['scalar_cmpk'] = lambda c: gen_scalar_cmpk(
+        c.dst_ops, c.src_ops, c.op, c.dtype
+    )
 
     # Vector ALU — vector_unary, vector_binop, vector_ternary now handled
     # by SemaAST pipeline (_SEMA_CLASSES).
 
     # Vector compare — vector_cmp, vector_cmp_class, vector_add_co now
     # handled by SemaAST pipeline (_SEMA_CLASSES).
-    DISPATCH['vector_cmpx'] = lambda c: gen_vector_cmpx(c.src_ops, c.op, c.dtype, c.cmpx_writes_vcc, c.is_vop3, c.dst_ops, c.has_abs)
-    DISPATCH['vector_cmpx_class'] = lambda c: gen_vector_cmp_class(c.dst_ops, c.src_ops, c.dtype, True, c.cmpx_writes_vcc, c.is_vop3, c.has_abs)
+    DISPATCH['vector_cmpx'] = lambda c: gen_vector_cmpx(
+        c.src_ops, c.op, c.dtype, c.cmpx_writes_vcc, c.is_vop3, c.dst_ops, c.has_abs
+    )
+    DISPATCH['vector_cmpx_class'] = lambda c: gen_vector_cmp_class(
+        c.dst_ops, c.src_ops, c.dtype, True, c.cmpx_writes_vcc, c.is_vop3, c.has_abs
+    )
 
     # Vector special
     DISPATCH['vector_mbcnt'] = lambda c: gen_vector_mbcnt(c.dst_ops, c.src_ops, c.op)
-    DISPATCH['vector_mad_64_32'] = lambda c: gen_vector_mad_64_32(c.dst_ops, c.src_ops, c.dtype)
-    DISPATCH['vector_mad_32_16'] = lambda c: gen_vector_mad_32_16(c.dst_ops, c.src_ops, c.dtype)
-    DISPATCH['vector_div_fixup'] = lambda c: gen_vector_div_fixup(c.dst_ops, c.src_ops, c.dtype, c.is_vop3, c.has_abs)
-    DISPATCH['vector_div_scale'] = lambda c: gen_vector_div_scale(c.dst_ops, c.src_ops, c.dtype, c.is_vop3, c.has_abs)
-    DISPATCH['vector_div_fmas'] = lambda c: gen_vector_div_fmas(c.dst_ops, c.src_ops, c.dtype, c.is_vop3, c.has_abs)
-    DISPATCH['vector_dot'] = lambda c: gen_vector_dot(c.dst_ops, c.src_ops, c.op, c.dtype)
-    DISPATCH['vector_dot2c_bf16'] = lambda c: gen_vector_dot2c_bf16(c.dst_ops, c.src_ops)
-    DISPATCH['vector_bitop3'] = lambda c: gen_vector_bitop3(c.dst_ops, c.src_ops, c.dtype)
-    DISPATCH['vector_permlane16'] = lambda c: gen_vector_permlane(c.dst_ops, c.src_ops, c.op, cross=False)
-    DISPATCH['vector_permlanex16'] = lambda c: gen_vector_permlane(c.dst_ops, c.src_ops, c.op, cross=True)
-    DISPATCH['vector_permlane16_swap'] = lambda c: gen_vector_permlane_swap(c.dst_ops, c.src_ops, stride=16)
-    DISPATCH['vector_permlane32_swap'] = lambda c: gen_vector_permlane_swap(c.dst_ops, c.src_ops, stride=32)
-    DISPATCH['vector_permlane64'] = lambda c: gen_vector_permlane64(c.dst_ops, c.src_ops)
-    DISPATCH['vector_cvt_pk'] = lambda c: gen_vector_cvt_pk(c.dst_ops, c.src_ops, c.cls, c.op)
+    DISPATCH['vector_mad_64_32'] = lambda c: gen_vector_mad_64_32(
+        c.dst_ops, c.src_ops, c.dtype
+    )
+    DISPATCH['vector_mad_32_16'] = lambda c: gen_vector_mad_32_16(
+        c.dst_ops, c.src_ops, c.dtype
+    )
+    DISPATCH['vector_div_fixup'] = lambda c: gen_vector_div_fixup(
+        c.dst_ops, c.src_ops, c.dtype, c.is_vop3, c.has_abs
+    )
+    DISPATCH['vector_div_scale'] = lambda c: gen_vector_div_scale(
+        c.dst_ops, c.src_ops, c.dtype, c.is_vop3, c.has_abs
+    )
+    DISPATCH['vector_div_fmas'] = lambda c: gen_vector_div_fmas(
+        c.dst_ops, c.src_ops, c.dtype, c.is_vop3, c.has_abs
+    )
+    DISPATCH['vector_dot'] = lambda c: gen_vector_dot(
+        c.dst_ops, c.src_ops, c.op, c.dtype
+    )
+    DISPATCH['vector_dot2c_bf16'] = lambda c: gen_vector_dot2c_bf16(
+        c.dst_ops, c.src_ops
+    )
+    DISPATCH['vector_bitop3'] = lambda c: gen_vector_bitop3(
+        c.dst_ops, c.src_ops, c.dtype
+    )
+    DISPATCH['vector_permlane16'] = lambda c: gen_vector_permlane(
+        c.dst_ops, c.src_ops, c.op, cross=False
+    )
+    DISPATCH['vector_permlanex16'] = lambda c: gen_vector_permlane(
+        c.dst_ops, c.src_ops, c.op, cross=True
+    )
+    DISPATCH['vector_permlane16_swap'] = lambda c: gen_vector_permlane_swap(
+        c.dst_ops, c.src_ops, stride=16
+    )
+    DISPATCH['vector_permlane32_swap'] = lambda c: gen_vector_permlane_swap(
+        c.dst_ops, c.src_ops, stride=32
+    )
+    DISPATCH['vector_permlane64'] = lambda c: gen_vector_permlane64(
+        c.dst_ops, c.src_ops
+    )
+    DISPATCH['vector_cvt_pk'] = lambda c: gen_vector_cvt_pk(
+        c.dst_ops, c.src_ops, c.cls, c.op
+    )
 
     # Packed
-    DISPATCH['pk_binop'] = lambda c: gen_pk_binop(c.dst_ops, c.src_ops, c.op, c.dtype, opsel_exprs=c.opsel_exprs)
-    DISPATCH['pk_ternary'] = lambda c: gen_pk_ternary(c.dst_ops, c.src_ops, c.op, c.dtype, op_sel_hi_2_expr=c.op_sel_hi_2_expr, opsel_exprs=c.opsel_exprs)
-    DISPATCH['pk_binop_f32'] = lambda c: gen_pk_binop_f32(c.dst_ops, c.src_ops, c.op, opsel_exprs=c.opsel_exprs)
-    DISPATCH['pk_ternary_f32'] = lambda c: gen_pk_ternary_f32(c.dst_ops, c.src_ops, c.op, op_sel_hi_2_expr=c.op_sel_hi_2_expr, opsel_exprs=c.opsel_exprs)
-    DISPATCH['pk_mov_b32'] = lambda c: gen_pk_mov_b32(c.dst_ops, c.src_ops, opsel_exprs=c.opsel_exprs)
-    DISPATCH['mad_mix_f32'] = lambda c: gen_mad_mix_f32(c.dst_ops, c.src_ops, op_sel_hi_2_expr=c.op_sel_hi_2_expr, opsel_exprs=c.opsel_exprs)
-    DISPATCH['mad_mixlo_f16'] = lambda c: gen_mad_mix_lo_hi(c.dst_ops, c.src_ops, is_lo=True, op_sel_hi_2_expr=c.op_sel_hi_2_expr, opsel_exprs=c.opsel_exprs)
-    DISPATCH['mad_mixhi_f16'] = lambda c: gen_mad_mix_lo_hi(c.dst_ops, c.src_ops, is_lo=False, op_sel_hi_2_expr=c.op_sel_hi_2_expr, opsel_exprs=c.opsel_exprs)
-    DISPATCH['dot2'] = lambda c: gen_dot2(c.dst_ops, c.src_ops, c.cls, opsel_exprs=c.opsel_exprs)
+    DISPATCH['pk_binop'] = lambda c: gen_pk_binop(
+        c.dst_ops, c.src_ops, c.op, c.dtype, opsel_exprs=c.opsel_exprs
+    )
+    DISPATCH['pk_ternary'] = lambda c: gen_pk_ternary(
+        c.dst_ops,
+        c.src_ops,
+        c.op,
+        c.dtype,
+        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
+        opsel_exprs=c.opsel_exprs,
+    )
+    DISPATCH['pk_binop_f32'] = lambda c: gen_pk_binop_f32(
+        c.dst_ops, c.src_ops, c.op, opsel_exprs=c.opsel_exprs
+    )
+    DISPATCH['pk_ternary_f32'] = lambda c: gen_pk_ternary_f32(
+        c.dst_ops,
+        c.src_ops,
+        c.op,
+        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
+        opsel_exprs=c.opsel_exprs,
+    )
+    DISPATCH['pk_mov_b32'] = lambda c: gen_pk_mov_b32(
+        c.dst_ops, c.src_ops, opsel_exprs=c.opsel_exprs
+    )
+    DISPATCH['mad_mix_f32'] = lambda c: gen_mad_mix_f32(
+        c.dst_ops,
+        c.src_ops,
+        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
+        opsel_exprs=c.opsel_exprs,
+    )
+    DISPATCH['mad_mixlo_f16'] = lambda c: gen_mad_mix_lo_hi(
+        c.dst_ops,
+        c.src_ops,
+        is_lo=True,
+        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
+        opsel_exprs=c.opsel_exprs,
+    )
+    DISPATCH['mad_mixhi_f16'] = lambda c: gen_mad_mix_lo_hi(
+        c.dst_ops,
+        c.src_ops,
+        is_lo=False,
+        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
+        opsel_exprs=c.opsel_exprs,
+    )
+    DISPATCH['dot2'] = lambda c: gen_dot2(
+        c.dst_ops, c.src_ops, c.cls, opsel_exprs=c.opsel_exprs
+    )
     DISPATCH['dot4'] = lambda c: gen_dot4(c.dst_ops, c.src_ops, c.cls)
     DISPATCH['dot8'] = lambda c: gen_dot8(c.dst_ops, c.src_ops, c.cls)
 
     # Matrix
     DISPATCH['accvgpr_read'] = lambda c: gen_accvgpr_read(c.dst_ops, c.src_ops)
     DISPATCH['accvgpr_write'] = lambda c: gen_accvgpr_write(c.dst_ops, c.src_ops)
-    DISPATCH['mfma'] = lambda c: gen_mfma(c.inst, c.dst_ops, c.src_ops, arch_name=c.arch_name)
+    DISPATCH['mfma'] = lambda c: gen_mfma(
+        c.inst, c.dst_ops, c.src_ops, arch_name=c.arch_name
+    )
 
 
 _register_handlers()

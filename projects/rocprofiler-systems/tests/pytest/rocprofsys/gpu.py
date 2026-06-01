@@ -66,6 +66,16 @@ class GPUInfo:
         return ["SQ_WAVES"]
 
     @property
+    def gpu_perf_counters_for_test(self) -> str:
+        """Get appropriate GPU perf counters for testing based on architecture.
+
+        These are the same counters as rocm_events_for_test but used with
+        ROCPROFSYS_GPU_PERF_COUNTERS (device counting service) instead of
+        ROCPROFSYS_ROCM_EVENTS (kernel dispatch counters).
+        """
+        return self.rocm_events_for_test
+
+    @property
     def expected_counter_files(self) -> list[str]:
         """Get expected counter output file patterns based on architecture.
 

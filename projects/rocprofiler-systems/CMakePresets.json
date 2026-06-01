@@ -10,7 +10,6 @@
                 "CMAKE_CXX_COMPILER": "g++",
                 "CMAKE_C_COMPILER": "gcc",
                 "CMAKE_INSTALL_PREFIX": "/opt/rocprofiler-systems",
-                "ROCPROFSYS_BUILD_BOOST": "ON",
                 "ROCPROFSYS_BUILD_DYNINST": "ON",
                 "ROCPROFSYS_BUILD_ELFUTILS": "ON",
                 "ROCPROFSYS_BUILD_LIBIBERTY": "ON",
@@ -68,6 +67,21 @@
             "displayName": "Official release build",
             "inherits": "default",
             "name": "release"
+        },
+        {
+            "binaryDir": "${sourceDir}/build/coverage",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "ROCPROFSYS_BUILD_CODECOV": "ON",
+                "ROCPROFSYS_BUILD_GTEST": "ON",
+                "ROCPROFSYS_BUILD_HIDDEN_VISIBILITY": "OFF",
+                "ROCPROFSYS_BUILD_TESTING": "ON",
+                "ROCPROFSYS_STRIP_LIBRARIES": "OFF"
+            },
+            "description": "Build with GCC code coverage instrumentation",
+            "displayName": "Code coverage build",
+            "inherits": "default",
+            "name": "coverage"
         }
     ],
     "version": 3

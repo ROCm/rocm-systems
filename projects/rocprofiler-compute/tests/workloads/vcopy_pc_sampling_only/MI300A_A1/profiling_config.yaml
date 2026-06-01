@@ -22,7 +22,6 @@ name: null
 no_native_tool: false
 no_roof: false
 output_directory: vcopy
-path: vcopy
 pc_sampling_interval: 1048576
 pc_sampling_method: stochastic
 quiet: false
@@ -33,7 +32,6 @@ roof_only: false
 set_selected: null
 spatial_multiplexing: null
 specs: false
-subpath: gpu_model
 target: null
 torch_trace: false
 verbose: 1

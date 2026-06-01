@@ -75,6 +75,7 @@ constexpr std::string_view AMD_SMI_FREQ         = "ROCPROFSYS_AMD_SMI_FREQ";
 // --- Domains: ROCm ---
 constexpr std::string_view ROCM_DOMAINS        = "ROCPROFSYS_ROCM_DOMAINS";
 constexpr std::string_view ROCM_GROUP_BY_QUEUE = "ROCPROFSYS_ROCM_GROUP_BY_QUEUE";
+constexpr std::string_view GPU_PERF_COUNTERS   = "ROCPROFSYS_GPU_PERF_COUNTERS";
 
 // --- Domains: CPU ---
 constexpr std::string_view CPU_FREQ         = "ROCPROFSYS_CPU_FREQ";
@@ -105,6 +106,11 @@ constexpr std::string_view INPUT_PREFIX  = "ROCPROFSYS_INPUT_PREFIX";
 constexpr std::string_view USE_ROCPD     = "ROCPROFSYS_USE_ROCPD";
 constexpr std::string_view USE_UNIFIED_MEMORY_PROFILING =
     "ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING";
+
+// --- MPI output filtering ---
+constexpr std::string_view RANK_FILTER_ID     = "ROCPROFSYS_RANK_FILTER_ID";
+constexpr std::string_view RANK_FILTER_OUTPUT = "ROCPROFSYS_RANK_FILTER_OUTPUT";
+constexpr std::string_view RANK_FILTER_LOGS   = "ROCPROFSYS_RANK_FILTER_LOGS";
 
 // --- Process sampling ---
 constexpr std::string_view PROCESS_SAMPLING_FREQ  = "ROCPROFSYS_PROCESS_SAMPLING_FREQ";

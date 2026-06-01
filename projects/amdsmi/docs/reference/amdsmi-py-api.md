@@ -372,6 +372,16 @@ Where:
 * `<device>` is 2 hex digits long from 00-1F interval
 * `<function>` is 1 hex digit long from 0-7 interval
 
+> [!NOTE]
+> In some devices, the partition ID may be stored in the function bits
+> BDFID[2:0] instead of BDFID[31:28].
+
+> [!NOTE]
+> For MI series devices, the function bits are only used to store the 
+> partition ID, but this modified BDF is internal to the ROCm stack. 
+> To the OS, partitions share the same BDF as the unpartitioned device and
+> have function bits = 0, which can be verified through lspci.
+
 Exceptions that can be thrown by `amdsmi_get_gpu_device_bdf` function:
 
 * `AmdSmiParameterException`
@@ -2255,11 +2265,21 @@ BDFID = ((DOMAIN & 0xffffffff) << 32) | ((BUS & 0xff) << 8) |
 
 | Name     | Field   |
 ---------- | ------- |
-| Domain   | [64:32] |
+| Domain   | [63:32] |
 | Reserved | [31:16] |
 | Bus      | [15: 8] |
 | Device   | [ 7: 3] |
 | Function | [ 2: 0] |
+
+> [!NOTE]
+> In some devices, the partition ID may be stored in the function bits
+> BDFID[2:0] instead of BDFID[31:28].
+
+> [!NOTE]
+> For MI series devices, the function bits are only used to store the 
+> partition ID, but this modified BDF is internal to the ROCm stack. 
+> To the OS, partitions share the same BDF as the unpartitioned device and
+> have function bits = 0, which can be verified through lspci.
 
 Exceptions that can be thrown by `amdsmi_get_gpu_bdf_id` function:
 
@@ -4575,7 +4595,12 @@ finally:
 ### amdsmi_get_gpu_ecc_enabled
 
 Description: Retrieve the enabled ECC bit-mask. It is not supported on virtual
-machine guest
+machine guest.
+
+Note that whether a block has ECC enabled or not in the device is independent
+of whether there is kernel support for error counting for that block. Although
+a block may be enabled, there may not be kernel support for reading error
+counters for that block.
 
 See [RAS Error Count sysfs Interface (AMDGPU RAS Support - Linux Kernel
 documentation)](https://docs.kernel.org/gpu/amdgpu/ras.html#ras-error-count-sysfs-interface)

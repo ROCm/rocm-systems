@@ -30,13 +30,14 @@ ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
     if (comm->peerInfo[i].fabricInfo.state != NVML_GPU_FABRIC_STATE_COMPLETED) return ncclSuccess;
   }
 #else
-  // TODO: Verify ACTIVE/READY state correctly gates fabric handle exchangeability on AMD systems.
-  // Require ACTIVE or READY state on all ranks — mirrors NCCL's NVML_GPU_FABRIC_STATE_COMPLETED check.
-  // CONFIGURED means vpod is set up but fabric handles are not yet exchangeable cross-process.
+  // Require ACTIVE or READY state on all ranks before enabling MNNVL.
+  // AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_CONFIGURED means the vpod is provisioned but fabric handles
+  // are not yet exchangeable cross-process — equivalent to NCCL's NVML_GPU_FABRIC_STATE_COMPLETED gate.
   for (int i = 0; i < comm->nRanks; i++) {
     if ((comm->peerInfo[i].fabricInfo.state != AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE) &&
         (comm->peerInfo[i].fabricInfo.state != AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY)) {
-      WARN("MNNVL Fabric not ready for peer:%d (state=%d)", i, comm->peerInfo[i].fabricInfo.state);
+      INFO(NCCL_INIT, "MNNVL disabled: peer %d fabric state %d is not ACTIVE or READY; falling back to RDMA",
+           i, comm->peerInfo[i].fabricInfo.state);
       return ncclSuccess;
     }
   }
@@ -74,7 +75,7 @@ ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
     CUresult err;
 
     // Allocate FABRIC handle compatible memory
-    ncclResult_t ret = ncclCuMemAlloc(&ptr, &handle, CU_MEM_HANDLE_TYPE_FABRIC, CUDA_IPC_MIN);
+    ncclResult_t ret = ncclCuMemAlloc(&ptr, &handle, CU_MEM_HANDLE_TYPE_FABRIC, CUDA_IPC_MIN, comm->memManager, ncclMemOffload);
     if (ret != ncclSuccess) {
       // Return an error if this is a MNNVL capable system but FABRIC handles are not supported
       WARN("MNNVL (cliqueSize %d) is available but not working on this system. Check afmctl. Set NCCL_MNNVL_ENABLE=0 to ignore this issue.",
@@ -92,13 +93,13 @@ ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
     // it was removed, so future maintainers don't re-add it expecting it to work.
       const char *errStr;
       (void) cuGetErrorString(err, &errStr);
-      NCCLCHECK(ncclCuMemFree(ptr));
+      NCCLCHECK(ncclCuMemFree(ptr, comm->memManager));
       // Return an error if this is a MNNVL capable system but it's not working
       WARN("MNNVL rank%d (cliqueSize %d) is available but not working on this system: cuMemExportToShareableHandle/cuMemImportFromShareableHandle failed: %s. Check afmctl. Set NCCL_MNNVL_ENABLE=0 to ignore this issue.",
           comm->rank, comm->clique.size, errStr);
       return ncclSystemError;
     }
-    NCCLCHECK(ncclCuMemFree(ptr));
+    NCCLCHECK(ncclCuMemFree(ptr, comm->memManager));
 
     // Force the CUMEM handle type to be FABRIC for MNNVL
     ncclCuMemHandleType = CU_MEM_HANDLE_TYPE_FABRIC;

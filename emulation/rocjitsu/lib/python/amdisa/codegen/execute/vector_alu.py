@@ -19,7 +19,14 @@ from amdisa.codegen.execute.vop3_modifiers import (
 )
 
 
-def gen_vector_unary(dst: list[str], src: list[str], op: str | None, dtype: str | None, is_vop3: bool = False, has_abs: bool = False) -> str:
+def gen_vector_unary(
+    dst: list[str],
+    src: list[str],
+    op: str | None,
+    dtype: str | None,
+    is_vop3: bool = False,
+    has_abs: bool = False,
+) -> str:
     """Generate vector unary operation body."""
     L = []
     L.append('  uint64_t exec = wf.exec();')
@@ -171,30 +178,59 @@ def gen_vector_unary(dst: list[str], src: list[str], op: str | None, dtype: str 
             L.append(cvt_map[dtype])
         else:
             L.append(f'    // TODO: cvt {dtype}')
-            L.append(f'    {dst[0]}.write_lane(wf, lane, {src[0]}.read_lane(wf, lane));')
+            L.append(
+                f'    {dst[0]}.write_lane(wf, lane, {src[0]}.read_lane(wf, lane));'
+            )
     elif op == 'cvt_f32_bf16':
-        L.append(f'    float r = util::bf16_to_f32(static_cast<uint16_t>({src[0]}.read_lane(wf, lane) & 0xFFFF));')
+        L.append(
+            f'    float r = util::bf16_to_f32(static_cast<uint16_t>({src[0]}.read_lane(wf, lane) & 0xFFFF));'
+        )
         L.append(f'    {dst[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(r));')
     elif op == 'cvt_f32_fp8':
-        L.append(f'    float r = util::fp8_e4m3_to_f32(static_cast<uint8_t>({src[0]}.read_lane(wf, lane) & 0xFF));')
+        L.append(
+            f'    float r = util::fp8_e4m3_to_f32(static_cast<uint8_t>({src[0]}.read_lane(wf, lane) & 0xFF));'
+        )
         L.append(f'    {dst[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(r));')
     elif op == 'cvt_f32_bf8':
-        L.append(f'    float r = util::bf8_e5m2_to_f32(static_cast<uint8_t>({src[0]}.read_lane(wf, lane) & 0xFF));')
+        L.append(
+            f'    float r = util::bf8_e5m2_to_f32(static_cast<uint8_t>({src[0]}.read_lane(wf, lane) & 0xFF));'
+        )
         L.append(f'    {dst[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(r));')
     elif op == 'cvt_pk_f32_fp8':
         # Unpack two FP8 values into two F32s in dst[0] and dst[0]+1
         L.append(f'    uint32_t raw = {src[0]}.read_lane(wf, lane);')
-        L.append(f'    float lo = util::fp8_e4m3_to_f32(static_cast<uint8_t>(raw & 0xFF));')
-        L.append(f'    float hi = util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw >> 8) & 0xFF));')
+        L.append(
+            f'    float lo = util::fp8_e4m3_to_f32(static_cast<uint8_t>(raw & 0xFF));'
+        )
+        L.append(
+            f'    float hi = util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw >> 8) & 0xFF));'
+        )
         L.append(f'    {dst[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(lo));')
-        L.append(f'    wf.cu().write_vgpr(wf.vgpr_alloc().base + {dst[0]}.encoding_value_ + 1, lane, std::bit_cast<uint32_t>(hi));')
+        L.append(
+            f'    wf.cu().write_vgpr(wf.vgpr_alloc().base + {dst[0]}.encoding_value_ + 1, lane, std::bit_cast<uint32_t>(hi));'
+        )
     elif op == 'cvt_pk_f32_bf8':
         L.append(f'    uint32_t raw = {src[0]}.read_lane(wf, lane);')
-        L.append(f'    float lo = util::bf8_e5m2_to_f32(static_cast<uint8_t>(raw & 0xFF));')
-        L.append(f'    float hi = util::bf8_e5m2_to_f32(static_cast<uint8_t>((raw >> 8) & 0xFF));')
+        L.append(
+            f'    float lo = util::bf8_e5m2_to_f32(static_cast<uint8_t>(raw & 0xFF));'
+        )
+        L.append(
+            f'    float hi = util::bf8_e5m2_to_f32(static_cast<uint8_t>((raw >> 8) & 0xFF));'
+        )
         L.append(f'    {dst[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(lo));')
-        L.append(f'    wf.cu().write_vgpr(wf.vgpr_alloc().base + {dst[0]}.encoding_value_ + 1, lane, std::bit_cast<uint32_t>(hi));')
-    elif op in ('not', 'bfrev', 'ffbh_u32', 'ffbl', 'ffbh_i32', 'bcnt', 'mbcnt_lo', 'mbcnt_hi'):
+        L.append(
+            f'    wf.cu().write_vgpr(wf.vgpr_alloc().base + {dst[0]}.encoding_value_ + 1, lane, std::bit_cast<uint32_t>(hi));'
+        )
+    elif op in (
+        'not',
+        'bfrev',
+        'ffbh_u32',
+        'ffbl',
+        'ffbh_i32',
+        'bcnt',
+        'mbcnt_lo',
+        'mbcnt_hi',
+    ):
         L.append(f'    uint32_t s = {src[0]}.read_lane(wf, lane);')
         int_op_map = {
             'not': '~s',
@@ -204,47 +240,65 @@ def gen_vector_unary(dst: list[str], src: list[str], op: str | None, dtype: str 
         }
         if op == 'bfrev':
             L.append('    uint32_t result = 0;')
-            L.append('    for (int i = 0; i < 32; ++i) result |= ((s >> i) & 1) << (31 - i);')
+            L.append(
+                '    for (int i = 0; i < 32; ++i) result |= ((s >> i) & 1) << (31 - i);'
+            )
             L.append(f'    {dst[0]}.write_lane(wf, lane, result);')
         elif op == 'ffbh_i32':
             L.append('    int32_t sv = static_cast<int32_t>(s);')
             L.append('    uint32_t abs_val = sv < 0 ? ~s : s;')
-            L.append(f'    {dst[0]}.write_lane(wf, lane, abs_val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(abs_val)));')
+            L.append(
+                f'    {dst[0]}.write_lane(wf, lane, abs_val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(abs_val)));'
+            )
         elif op in int_op_map:
             L.append(f'    {dst[0]}.write_lane(wf, lane, {int_op_map[op]});')
         else:
             L.append(f'    {dst[0]}.write_lane(wf, lane, s);')
     elif op == 'frexp_exp_f32' and dtype == 'f64':
         # V_FREXP_EXP_I32_F64: extract exponent from f64, write as i32
-        L.append(f'    double s = std::bit_cast<double>({src[0]}.read_lane64(wf, lane));')
+        L.append(
+            f'    double s = std::bit_cast<double>({src[0]}.read_lane64(wf, lane));'
+        )
         if is_vop3:
             L.extend(vop3_src_mod('s', 0, has_abs))
         L.append('    int exp = 0;')
-        L.append('    if (s != 0.0 && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);')
+        L.append(
+            '    if (s != 0.0 && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'
+        )
         L.append(f'    {dst[0]}.write_lane(wf, lane, static_cast<uint32_t>(exp));')
     elif op == 'frexp_mant_f32' and dtype == 'f64':
         # V_FREXP_MANT_F64: extract mantissa from f64, write as f64
-        L.append(f'    double s = std::bit_cast<double>({src[0]}.read_lane64(wf, lane));')
+        L.append(
+            f'    double s = std::bit_cast<double>({src[0]}.read_lane64(wf, lane));'
+        )
         if is_vop3:
             L.extend(vop3_src_mod('s', 0, has_abs))
         L.append('    int exp = 0;')
         L.append('    double result = std::frexp(s, &exp);')
         if is_vop3:
             L.extend(vop3_dst_mod_f64('result'))
-        L.append(f'    {dst[0]}.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));')
+        L.append(
+            f'    {dst[0]}.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));'
+        )
     elif op == 'frexp_exp_f32':
         L.append(f'    float s = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
         if is_vop3:
             L.extend(vop3_src_mod('s', 0, has_abs))
         L.append('    int exp = 0;')
-        L.append('    if (s != 0.0f && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);')
+        L.append(
+            '    if (s != 0.0f && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'
+        )
         L.append(f'    {dst[0]}.write_lane(wf, lane, static_cast<uint32_t>(exp));')
     elif op == 'frexp_exp_f16':
-        L.append(f'    float s = util::f16_to_f32(static_cast<uint16_t>({src[0]}.read_lane(wf, lane)));')
+        L.append(
+            f'    float s = util::f16_to_f32(static_cast<uint16_t>({src[0]}.read_lane(wf, lane)));'
+        )
         if is_vop3:
             L.extend(vop3_src_mod('s', 0, has_abs))
         L.append('    int exp = 0;')
-        L.append('    if (s != 0.0f && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);')
+        L.append(
+            '    if (s != 0.0f && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'
+        )
         L.append(f'    {dst[0]}.write_lane(wf, lane, static_cast<uint32_t>(exp));')
     elif op == 'frexp_mant_f32':
         L.append(f'    float s = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
@@ -259,7 +313,9 @@ def gen_vector_unary(dst: list[str], src: list[str], op: str | None, dtype: str 
         L.append(f'    (void){src[0]};')
         L.append(f'    (void){dst[0]};')
     elif dtype == 'f64':
-        L.append(f'    double s = std::bit_cast<double>({src[0]}.read_lane64(wf, lane));')
+        L.append(
+            f'    double s = std::bit_cast<double>({src[0]}.read_lane64(wf, lane));'
+        )
         if is_vop3:
             L.extend(vop3_src_mod('s', 0, has_abs))
         math_map_f64 = {
@@ -278,11 +334,17 @@ def gen_vector_unary(dst: list[str], src: list[str], op: str | None, dtype: str 
         if is_vop3:
             L.append(f'    double result = {expr};')
             L.extend(vop3_dst_mod_f64('result'))
-            L.append(f'    {dst[0]}.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));')
+            L.append(
+                f'    {dst[0]}.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));'
+            )
         else:
-            L.append(f'    {dst[0]}.write_lane64(wf, lane, std::bit_cast<uint64_t>({expr}));')
+            L.append(
+                f'    {dst[0]}.write_lane64(wf, lane, std::bit_cast<uint64_t>({expr}));'
+            )
     elif dtype == 'f16':
-        L.append(f'    float s = util::f16_to_f32(static_cast<uint16_t>({src[0]}.read_lane(wf, lane)));')
+        L.append(
+            f'    float s = util::f16_to_f32(static_cast<uint16_t>({src[0]}.read_lane(wf, lane)));'
+        )
         if is_vop3:
             L.extend(vop3_src_mod('s', 0, has_abs))
         math_map_f16 = {
@@ -333,14 +395,26 @@ def gen_vector_unary(dst: list[str], src: list[str], op: str | None, dtype: str 
         if is_vop3:
             L.append(f'    float result = {expr};')
             L.extend(vop3_dst_mod('result'))
-            L.append(f'    {dst[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(result));')
+            L.append(
+                f'    {dst[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(result));'
+            )
         else:
-            L.append(f'    {dst[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>({expr}));')
+            L.append(
+                f'    {dst[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>({expr}));'
+            )
 
     L.append('  }')
     return '\n'.join(L)
 
-def gen_vector_binop(dst: list[str], src: list[str], op: str | None, dtype: str | None, is_vop3: bool = False, has_abs: bool = False) -> str:
+
+def gen_vector_binop(
+    dst: list[str],
+    src: list[str],
+    op: str | None,
+    dtype: str | None,
+    is_vop3: bool = False,
+    has_abs: bool = False,
+) -> str:
     """Generate vector binary operation body."""
     if dst:
         d = dst[0]
@@ -358,9 +432,13 @@ def gen_vector_binop(dst: list[str], src: list[str], op: str | None, dtype: str 
         L.append(f'    double sv0 = std::bit_cast<double>({s0}.read_lane64(wf, lane));')
         if op == 'ldexp':
             # src1 is a 32-bit integer exponent, not a double.
-            L.append(f'    int32_t sv1_i = static_cast<int32_t>({s1}.read_lane(wf, lane));')
+            L.append(
+                f'    int32_t sv1_i = static_cast<int32_t>({s1}.read_lane(wf, lane));'
+            )
         else:
-            L.append(f'    double sv1 = std::bit_cast<double>({s1}.read_lane64(wf, lane));')
+            L.append(
+                f'    double sv1 = std::bit_cast<double>({s1}.read_lane64(wf, lane));'
+            )
         if is_vop3:
             L.extend(vop3_src_mod('sv0', 0, has_abs))
             if op != 'ldexp':
@@ -381,14 +459,20 @@ def gen_vector_binop(dst: list[str], src: list[str], op: str | None, dtype: str 
         if is_vop3:
             L.append(f'    double result = {expr};')
             L.extend(vop3_dst_mod_f64('result'))
-            L.append(f'    {d}.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));')
+            L.append(
+                f'    {d}.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));'
+            )
         else:
-            L.append(f'    {d}.write_lane64(wf, lane, std::bit_cast<uint64_t>({expr}));')
+            L.append(
+                f'    {d}.write_lane64(wf, lane, std::bit_cast<uint64_t>({expr}));'
+            )
     elif dtype == 'f32':
         L.append(f'    float sv0 = std::bit_cast<float>({s0}.read_lane(wf, lane));')
         if op == 'ldexp':
             # src1 is a 32-bit integer exponent, not a float.
-            L.append(f'    int32_t sv1_i = static_cast<int32_t>({s1}.read_lane(wf, lane));')
+            L.append(
+                f'    int32_t sv1_i = static_cast<int32_t>({s1}.read_lane(wf, lane));'
+            )
         else:
             L.append(f'    float sv1 = std::bit_cast<float>({s1}.read_lane(wf, lane));')
         if is_vop3:
@@ -416,12 +500,18 @@ def gen_vector_binop(dst: list[str], src: list[str], op: str | None, dtype: str 
         else:
             L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>({expr}));')
     elif dtype == 'f16':
-        L.append(f'    float sv0 = util::f16_to_f32(static_cast<uint16_t>({s0}.read_lane(wf, lane)));')
+        L.append(
+            f'    float sv0 = util::f16_to_f32(static_cast<uint16_t>({s0}.read_lane(wf, lane)));'
+        )
         if op == 'ldexp':
             # src1 is a 16-bit integer exponent, not an f16 value.
-            L.append(f'    int32_t sv1_i = static_cast<int32_t>(static_cast<int16_t>(static_cast<uint16_t>({s1}.read_lane(wf, lane))));')
+            L.append(
+                f'    int32_t sv1_i = static_cast<int32_t>(static_cast<int16_t>(static_cast<uint16_t>({s1}.read_lane(wf, lane))));'
+            )
         else:
-            L.append(f'    float sv1 = util::f16_to_f32(static_cast<uint16_t>({s1}.read_lane(wf, lane)));')
+            L.append(
+                f'    float sv1 = util::f16_to_f32(static_cast<uint16_t>({s1}.read_lane(wf, lane)));'
+            )
         if is_vop3:
             L.extend(vop3_src_mod('sv0', 0, has_abs))
             if op != 'ldexp':
@@ -446,22 +536,34 @@ def gen_vector_binop(dst: list[str], src: list[str], op: str | None, dtype: str 
         else:
             L.append(f'    {d}.write_lane(wf, lane, util::f32_to_f16({expr}));')
     elif dtype == 'i24':
-        L.append(f'    int32_t sv0 = static_cast<int32_t>({s0}.read_lane(wf, lane) << 8) >> 8;')
-        L.append(f'    int32_t sv1 = static_cast<int32_t>({s1}.read_lane(wf, lane) << 8) >> 8;')
+        L.append(
+            f'    int32_t sv0 = static_cast<int32_t>({s0}.read_lane(wf, lane) << 8) >> 8;'
+        )
+        L.append(
+            f'    int32_t sv1 = static_cast<int32_t>({s1}.read_lane(wf, lane) << 8) >> 8;'
+        )
         if op == 'mulhi':
-            L.append(f'    {d}.write_lane(wf, lane, static_cast<uint32_t>((static_cast<int64_t>(sv0) * sv1) >> 32));')
+            L.append(
+                f'    {d}.write_lane(wf, lane, static_cast<uint32_t>((static_cast<int64_t>(sv0) * sv1) >> 32));'
+            )
         else:
             L.append(f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(sv0 * sv1));')
     elif dtype == 'u24':
         L.append(f'    uint32_t sv0 = {s0}.read_lane(wf, lane) & 0x00FFFFFFu;')
         L.append(f'    uint32_t sv1 = {s1}.read_lane(wf, lane) & 0x00FFFFFFu;')
         if op == 'mulhi':
-            L.append(f'    {d}.write_lane(wf, lane, static_cast<uint32_t>((static_cast<uint64_t>(sv0) * sv1) >> 32));')
+            L.append(
+                f'    {d}.write_lane(wf, lane, static_cast<uint32_t>((static_cast<uint64_t>(sv0) * sv1) >> 32));'
+            )
         else:
             L.append(f'    {d}.write_lane(wf, lane, sv0 * sv1);')
     elif dtype == 'i16':
-        L.append(f'    int16_t sv0 = static_cast<int16_t>({s0}.read_lane(wf, lane) & 0xFFFF);')
-        L.append(f'    int16_t sv1 = static_cast<int16_t>({s1}.read_lane(wf, lane) & 0xFFFF);')
+        L.append(
+            f'    int16_t sv0 = static_cast<int16_t>({s0}.read_lane(wf, lane) & 0xFFFF);'
+        )
+        L.append(
+            f'    int16_t sv1 = static_cast<int16_t>({s1}.read_lane(wf, lane) & 0xFFFF);'
+        )
         i_op_map = {
             'add': 'static_cast<int16_t>(sv0 + sv1)',
             'sub': 'static_cast<int16_t>(sv0 - sv1)',
@@ -471,7 +573,9 @@ def gen_vector_binop(dst: list[str], src: list[str], op: str | None, dtype: str 
             'ashr': 'static_cast<int16_t>(sv1 >> (sv0 & 15))',
         }
         expr = i_op_map.get(op, f'sv0 /* TODO: {op} */')
-        L.append(f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>({expr})));')
+        L.append(
+            f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>({expr})));'
+        )
     elif dtype == 'u16':
         L.append(f'    uint16_t sv0 = static_cast<uint16_t>({s0}.read_lane(wf, lane));')
         L.append(f'    uint16_t sv1 = static_cast<uint16_t>({s1}.read_lane(wf, lane));')
@@ -492,12 +596,20 @@ def gen_vector_binop(dst: list[str], src: list[str], op: str | None, dtype: str 
         L.append(f'    {d}.write_lane(wf, lane, static_cast<uint32_t>({expr}));')
     elif dtype in ('i64',):
         if op == 'ashr':
-            L.append(f'    int64_t val = static_cast<int64_t>({s1}.read_lane64(wf, lane));')
+            L.append(
+                f'    int64_t val = static_cast<int64_t>({s1}.read_lane64(wf, lane));'
+            )
             L.append(f'    uint32_t shift = {s0}.read_lane(wf, lane) & 63u;')
-            L.append(f'    {d}.write_lane64(wf, lane, static_cast<uint64_t>(val >> shift));')
+            L.append(
+                f'    {d}.write_lane64(wf, lane, static_cast<uint64_t>(val >> shift));'
+            )
         else:
-            L.append(f'    int64_t sv0 = static_cast<int64_t>({s0}.read_lane64(wf, lane));')
-            L.append(f'    int64_t sv1 = static_cast<int64_t>({s1}.read_lane64(wf, lane));')
+            L.append(
+                f'    int64_t sv0 = static_cast<int64_t>({s0}.read_lane64(wf, lane));'
+            )
+            L.append(
+                f'    int64_t sv1 = static_cast<int64_t>({s1}.read_lane64(wf, lane));'
+            )
             i_op_map = {
                 'add': 'static_cast<uint64_t>(sv0 + sv1)',
                 'sub': 'static_cast<uint64_t>(sv0 - sv1)',
@@ -572,7 +684,15 @@ def gen_vector_binop(dst: list[str], src: list[str], op: str | None, dtype: str 
     L.append('  }')
     return '\n'.join(L)
 
-def gen_vector_ternary(dst: list[str], src: list[str], op: str | None, dtype: str | None, is_vop3: bool = False, has_abs: bool = False) -> str:
+
+def gen_vector_ternary(
+    dst: list[str],
+    src: list[str],
+    op: str | None,
+    dtype: str | None,
+    is_vop3: bool = False,
+    has_abs: bool = False,
+) -> str:
     """Generate vector ternary (3-operand) operation body."""
     d = dst[0]
     s0, s1, s2 = src[0], src[1], src[2]
@@ -590,8 +710,12 @@ def gen_vector_ternary(dst: list[str], src: list[str], op: str | None, dtype: st
         if op == 'bfe_u':
             L.append('    uint32_t offset = b & 31;')
             L.append('    uint32_t width = c & 31;')
-            L.append('    uint32_t mask = (width == 0 || width >= 32) ? 0u : ((1u << width) - 1);')
-            L.append(f'    {d}.write_lane(wf, lane, width == 0 ? 0u : (a >> offset) & mask);')
+            L.append(
+                '    uint32_t mask = (width == 0 || width >= 32) ? 0u : ((1u << width) - 1);'
+            )
+            L.append(
+                f'    {d}.write_lane(wf, lane, width == 0 ? 0u : (a >> offset) & mask);'
+            )
         elif op == 'bfe_i':
             L.append('    uint32_t offset = b & 31;')
             L.append('    uint32_t width = c & 31;')
@@ -602,8 +726,12 @@ def gen_vector_ternary(dst: list[str], src: list[str], op: str | None, dtype: st
             # past bit 31. Arithmetic right shift of sv by offset gives
             # the correct sign-extended result without shift UB.
             L.append('    else if (offset + width >= 32) result_val = sv >> offset;')
-            L.append('    else result_val = (sv << (32 - offset - width)) >> (32 - width);')
-            L.append(f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(result_val));')
+            L.append(
+                '    else result_val = (sv << (32 - offset - width)) >> (32 - width);'
+            )
+            L.append(
+                f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(result_val));'
+            )
         else:  # perm
             L.append(f'    uint32_t result = 0;')
             L.append('    uint64_t src = (static_cast<uint64_t>(a) << 32) | b;')
@@ -652,7 +780,9 @@ def gen_vector_ternary(dst: list[str], src: list[str], op: str | None, dtype: st
         }
         # Cube map operations: inputs are (x, y, z)
         if op == 'cubeid':
-            L.append('    float ax = std::fabs(a), ay = std::fabs(b), az = std::fabs(c);')
+            L.append(
+                '    float ax = std::fabs(a), ay = std::fabs(b), az = std::fabs(c);'
+            )
             L.append('    float face;')
             L.append('    if (az >= ax && az >= ay) face = c >= 0 ? 4.0f : 5.0f;')
             L.append('    else if (ay >= ax) face = b >= 0 ? 2.0f : 3.0f;')
@@ -661,7 +791,9 @@ def gen_vector_ternary(dst: list[str], src: list[str], op: str | None, dtype: st
                 L.extend(vop3_dst_mod('face'))
             L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>(face));')
         elif op == 'cubesc':
-            L.append('    float ax = std::fabs(a), ay = std::fabs(b), az = std::fabs(c);')
+            L.append(
+                '    float ax = std::fabs(a), ay = std::fabs(b), az = std::fabs(c);'
+            )
             L.append('    float sc;')
             L.append('    if (az >= ax && az >= ay) sc = c >= 0 ? a : -a;')
             L.append('    else if (ay >= ax) sc = a;')
@@ -670,7 +802,9 @@ def gen_vector_ternary(dst: list[str], src: list[str], op: str | None, dtype: st
                 L.extend(vop3_dst_mod('sc'))
             L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>(sc));')
         elif op == 'cubetc':
-            L.append('    float ax = std::fabs(a), ay = std::fabs(b), az = std::fabs(c);')
+            L.append(
+                '    float ax = std::fabs(a), ay = std::fabs(b), az = std::fabs(c);'
+            )
             L.append('    float tc;')
             L.append('    if (az >= ax && az >= ay) tc = -b;')
             L.append('    else if (ay >= ax) tc = b >= 0 ? c : -c;')
@@ -679,7 +813,9 @@ def gen_vector_ternary(dst: list[str], src: list[str], op: str | None, dtype: st
                 L.extend(vop3_dst_mod('tc'))
             L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>(tc));')
         elif op == 'cubema':
-            L.append('    float ax = std::fabs(a), ay = std::fabs(b), az = std::fabs(c);')
+            L.append(
+                '    float ax = std::fabs(a), ay = std::fabs(b), az = std::fabs(c);'
+            )
             L.append('    float ma;')
             L.append('    if (az >= ax && az >= ay) ma = 2.0f * az;')
             L.append('    else if (ay >= ax) ma = 2.0f * ay;')
@@ -692,11 +828,17 @@ def gen_vector_ternary(dst: list[str], src: list[str], op: str | None, dtype: st
             if is_vop3:
                 L.append(f'    float result = {expr};')
                 L.extend(vop3_dst_mod('result'))
-                L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>(result));')
+                L.append(
+                    f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>(result));'
+                )
             else:
-                L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>({expr}));')
+                L.append(
+                    f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>({expr}));'
+                )
         else:
-            L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>(a)); // unhandled: {op}')
+            L.append(
+                f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>(a)); // unhandled: {op}'
+            )
     elif dtype == 'f64':
         L.append(f'    double a = std::bit_cast<double>({s0}.read_lane64(wf, lane));')
         L.append(f'    double b = std::bit_cast<double>({s1}.read_lane64(wf, lane));')
@@ -724,13 +866,23 @@ def gen_vector_ternary(dst: list[str], src: list[str], op: str | None, dtype: st
         if is_vop3:
             L.append(f'    double result = {expr};')
             L.extend(vop3_dst_mod_f64('result'))
-            L.append(f'    {d}.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));')
+            L.append(
+                f'    {d}.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));'
+            )
         else:
-            L.append(f'    {d}.write_lane64(wf, lane, std::bit_cast<uint64_t>({expr}));')
+            L.append(
+                f'    {d}.write_lane64(wf, lane, std::bit_cast<uint64_t>({expr}));'
+            )
     elif dtype == 'f16':
-        L.append(f'    float a = util::f16_to_f32(static_cast<uint16_t>({s0}.read_lane(wf, lane)));')
-        L.append(f'    float b = util::f16_to_f32(static_cast<uint16_t>({s1}.read_lane(wf, lane)));')
-        L.append(f'    float c = util::f16_to_f32(static_cast<uint16_t>({s2}.read_lane(wf, lane)));')
+        L.append(
+            f'    float a = util::f16_to_f32(static_cast<uint16_t>({s0}.read_lane(wf, lane)));'
+        )
+        L.append(
+            f'    float b = util::f16_to_f32(static_cast<uint16_t>({s1}.read_lane(wf, lane)));'
+        )
+        L.append(
+            f'    float c = util::f16_to_f32(static_cast<uint16_t>({s2}.read_lane(wf, lane)));'
+        )
         if is_vop3:
             L.extend(vop3_src_mod('a', 0, has_abs))
             L.extend(vop3_src_mod('b', 1, has_abs))
@@ -758,9 +910,15 @@ def gen_vector_ternary(dst: list[str], src: list[str], op: str | None, dtype: st
         else:
             L.append(f'    {d}.write_lane(wf, lane, util::f32_to_f16({expr}));')
     elif dtype in ('i16',):
-        L.append(f'    int16_t a = static_cast<int16_t>({s0}.read_lane(wf, lane) & 0xFFFF);')
-        L.append(f'    int16_t b = static_cast<int16_t>({s1}.read_lane(wf, lane) & 0xFFFF);')
-        L.append(f'    int16_t c = static_cast<int16_t>({s2}.read_lane(wf, lane) & 0xFFFF);')
+        L.append(
+            f'    int16_t a = static_cast<int16_t>({s0}.read_lane(wf, lane) & 0xFFFF);'
+        )
+        L.append(
+            f'    int16_t b = static_cast<int16_t>({s1}.read_lane(wf, lane) & 0xFFFF);'
+        )
+        L.append(
+            f'    int16_t c = static_cast<int16_t>({s2}.read_lane(wf, lane) & 0xFFFF);'
+        )
         i_map = {
             'min3': 'std::min(std::min(a, b), c)',
             'max3': 'std::max(std::max(a, b), c)',
@@ -768,7 +926,9 @@ def gen_vector_ternary(dst: list[str], src: list[str], op: str | None, dtype: st
             'mad': 'static_cast<int16_t>(a * b + c)',
         }
         expr = i_map.get(op, f'a /* TODO: {op} */')
-        L.append(f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>({expr})));')
+        L.append(
+            f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>({expr})));'
+        )
     elif dtype in ('u16',):
         L.append(f'    uint16_t a = static_cast<uint16_t>({s0}.read_lane(wf, lane));')
         L.append(f'    uint16_t b = static_cast<uint16_t>({s1}.read_lane(wf, lane));')
@@ -792,8 +952,12 @@ def gen_vector_ternary(dst: list[str], src: list[str], op: str | None, dtype: st
         expr = u_map.get(op, f'a /* unhandled: {op} */')
         L.append(f'    {d}.write_lane64(wf, lane, {expr});')
     elif dtype in ('i24',):
-        L.append(f'    int32_t a = static_cast<int32_t>({s0}.read_lane(wf, lane) << 8) >> 8;')
-        L.append(f'    int32_t b = static_cast<int32_t>({s1}.read_lane(wf, lane) << 8) >> 8;')
+        L.append(
+            f'    int32_t a = static_cast<int32_t>({s0}.read_lane(wf, lane) << 8) >> 8;'
+        )
+        L.append(
+            f'    int32_t b = static_cast<int32_t>({s1}.read_lane(wf, lane) << 8) >> 8;'
+        )
         L.append(f'    int32_t c = static_cast<int32_t>({s2}.read_lane(wf, lane));')
         L.append(f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(a * b + c));')
     elif dtype in ('u24',):
@@ -826,35 +990,45 @@ def gen_vector_ternary(dst: list[str], src: list[str], op: str | None, dtype: st
         if op == 'sad_u8':
             L.append('    uint32_t sum = 0;')
             L.append('    for (int i = 0; i < 4; ++i) {')
-            L.append('      uint32_t ba = (a >> (i * 8)) & 0xFF, bb = (b >> (i * 8)) & 0xFF;')
+            L.append(
+                '      uint32_t ba = (a >> (i * 8)) & 0xFF, bb = (b >> (i * 8)) & 0xFF;'
+            )
             L.append('      sum += ba > bb ? ba - bb : bb - ba;')
             L.append('    }')
             L.append(f'    {d}.write_lane(wf, lane, sum + c);')
         elif op == 'sad_hi_u8':
             L.append('    uint32_t sum = 0;')
             L.append('    for (int i = 0; i < 4; ++i) {')
-            L.append('      uint32_t ba = (a >> (i * 8)) & 0xFF, bb = (b >> (i * 8)) & 0xFF;')
+            L.append(
+                '      uint32_t ba = (a >> (i * 8)) & 0xFF, bb = (b >> (i * 8)) & 0xFF;'
+            )
             L.append('      sum += ba > bb ? ba - bb : bb - ba;')
             L.append('    }')
             L.append(f'    {d}.write_lane(wf, lane, (sum << 16) + c);')
         elif op == 'sad_u16':
             L.append('    uint32_t lo_a = a & 0xFFFF, hi_a = a >> 16;')
             L.append('    uint32_t lo_b = b & 0xFFFF, hi_b = b >> 16;')
-            L.append('    uint32_t sum = (lo_a > lo_b ? lo_a - lo_b : lo_b - lo_a) + (hi_a > hi_b ? hi_a - hi_b : hi_b - hi_a);')
+            L.append(
+                '    uint32_t sum = (lo_a > lo_b ? lo_a - lo_b : lo_b - lo_a) + (hi_a > hi_b ? hi_a - hi_b : hi_b - hi_a);'
+            )
             L.append(f'    {d}.write_lane(wf, lane, sum + c);')
         elif op == 'sad_u32':
             L.append(f'    {d}.write_lane(wf, lane, (a > b ? a - b : b - a) + c);')
         elif op == 'msad_u8':
             L.append('    uint32_t sum = 0;')
             L.append('    for (int i = 0; i < 4; ++i) {')
-            L.append('      uint32_t ba = (a >> (i * 8)) & 0xFF, bb = (b >> (i * 8)) & 0xFF;')
+            L.append(
+                '      uint32_t ba = (a >> (i * 8)) & 0xFF, bb = (b >> (i * 8)) & 0xFF;'
+            )
             L.append('      if (ba != 0) sum += ba > bb ? ba - bb : bb - ba;')
             L.append('    }')
             L.append(f'    {d}.write_lane(wf, lane, sum + c);')
         elif op == 'lerp_u8':
             L.append('    uint32_t result = 0;')
             L.append('    for (int i = 0; i < 4; ++i) {')
-            L.append('      uint32_t ba = (a >> (i * 8)) & 0xFF, bb = (b >> (i * 8)) & 0xFF;')
+            L.append(
+                '      uint32_t ba = (a >> (i * 8)) & 0xFF, bb = (b >> (i * 8)) & 0xFF;'
+            )
             L.append('      uint32_t bc = (c >> (i * 8)) & 1;')
             L.append('      result |= (((ba + bb + bc) >> 1) & 0xFF) << (i * 8);')
             L.append('    }')
@@ -885,4 +1059,3 @@ def gen_vector_ternary(dst: list[str], src: list[str], op: str | None, dtype: st
 
     L.append('  }')
     return '\n'.join(L)
-

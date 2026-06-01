@@ -1,0 +1,3 @@
+# ASan suppressions for profiler-hub.
+# Format: interceptor_via_lib:<libname>  /  interceptor_name:<func>
+# See https://github.com/google/sanitizers/wiki/AddressSanitizer

@@ -6,6 +6,7 @@
 
 #ifndef _NCCL_DEVICE_BARRIER__FUNCS_H_
 #define _NCCL_DEVICE_BARRIER__FUNCS_H_
+#include "../hip_compat.h"
 #include "barrier__types.h"
 #include "lsa_barrier__funcs.h"
 #include "gin_barrier__funcs.h"
@@ -86,7 +87,8 @@ NCCL_DEVICE_INLINE void ncclBarrierSession<Coop>::sync(Coop, cuda::memory_order 
     this->innerLsaBar.thing.sync(this->coop, this->outerGinBar.present ? nccl::utility::releaseOrderOf(ord) : ord);
   }
   if (this->outerGinBar.present) {
-    this->outerGinBar.thing.sync(this->coop, this->innerLsaBar.present ? nccl::utility::acquireOrderOf(ord) : ord, fence);
+    auto ginOrd = this->innerLsaBar.present ? nccl::utility::acquireOrderOf(ord) : ord;
+    this->outerGinBar.thing.sync(this->coop, ginOrd, fence);
   }
 }
 #endif

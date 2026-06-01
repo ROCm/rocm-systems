@@ -2907,7 +2907,8 @@ static amd::CopyMetadata buildCopyMetadataFromAttrs(hipMemcpyAttributes* attrs, 
   // Map flags
   unsigned int flags = attrs[attrIdx].flags;
   if (flags & hipMemcpyFlagExtPreferCE) {
-    metadata.preferCE_ = 1;
+    // CE means Copy Engine here, so keep these copies on SDMA instead of shader blits.
+    metadata.copyEnginePreference_ = amd::CopyMetadata::CopyEnginePreference::SDMA;
   }
   if (flags & hipMemcpyFlagExtOpSwap) {
     metadata.copyOpType_ = amd::CopyMetadata::kCopyOpSwap;

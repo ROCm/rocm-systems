@@ -395,6 +395,7 @@ resolve_schema_config(const nlohmann::json& config)
         {
             resolve_value(result, hw, "rocm_events", env_vars::ROCM_EVENTS);
             resolve_value(result, hw, "papi_events", env_vars::PAPI_EVENTS);
+            resolve_value(result, hw, "gpu_perf_counters", env_vars::GPU_PERF_COUNTERS);
         }
         if(hw.contains("papi_multiplexing"))
             resolve_enabled(result, hw["papi_multiplexing"], "enabled",
@@ -850,6 +851,11 @@ export_hardware_counters(nlohmann::json&                           config,
     {
         hw["enabled"]              = true;
         hw["papi_events"]["value"] = *v;
+    }
+    if(auto v = lookup(env_map, env_vars::GPU_PERF_COUNTERS))
+    {
+        hw["enabled"]                    = true;
+        hw["gpu_perf_counters"]["value"] = *v;
     }
     export_enabled(config, env_map, env_vars::PAPI_MULTIPLEXING, "hardware_counters",
                    "papi_multiplexing");

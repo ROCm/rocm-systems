@@ -33,6 +33,7 @@ public:
       : Section(std::move(name), std::move(data)), shdr_(shdr) {}
 
   std::size_t size() const override { return shdr_.sh_size; }
+  uint64_t flags() const override { return shdr_.sh_flags; }
   uint64_t vaddr() const override { return shdr_.sh_addr; }
   uint32_t sectionHeaderNameIdx() const override { return shdr_.sh_name; }
   uint64_t sectionOffset() const override { return shdr_.sh_offset; }
@@ -43,12 +44,20 @@ private:
 
 bool is_elf(const Elf64_Ehdr &ehdr) { return !std::memcmp(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE); }
 
+bool is_executable_section(const Elf64_Shdr &shdr) {
+  return shdr.sh_type == SHT_PROGBITS && (shdr.sh_flags & SHF_EXECINSTR) != 0;
+}
+
 rj_code_target_id_t target_from_machine_flags(uint32_t flags) {
   uint32_t mach = flags & EF_AMDGPU_MACH;
   if (mach == EF_AMDGPU_MACH_AMDGCN_GFX942)
     return ROCJITSU_CODE_TARGET_GFX942;
   if (mach == EF_AMDGPU_MACH_AMDGCN_GFX950)
     return ROCJITSU_CODE_TARGET_GFX950;
+  if (mach == EF_AMDGPU_MACH_AMDGCN_GFX1200)
+    return ROCJITSU_CODE_TARGET_GFX1200;
+  if (mach == EF_AMDGPU_MACH_AMDGCN_GFX1201)
+    return ROCJITSU_CODE_TARGET_GFX1201;
   return ROCJITSU_CODE_TARGET_INVALID;
 }
 
@@ -57,6 +66,10 @@ rj_code_target_id_t target_from_triple(const std::string &triple) {
     return ROCJITSU_CODE_TARGET_GFX942;
   if (triple == "gfx950")
     return ROCJITSU_CODE_TARGET_GFX950;
+  if (triple == "gfx1200")
+    return ROCJITSU_CODE_TARGET_GFX1200;
+  if (triple == "gfx1201")
+    return ROCJITSU_CODE_TARGET_GFX1201;
   return ROCJITSU_CODE_TARGET_INVALID;
 }
 
@@ -70,6 +83,7 @@ AmdGpuCodeObject::AmdGpuCodeObject(AmdGpuCodeObject &&other) noexcept
   header_ = std::move(other.header_);
   sections_ = std::move(other.sections_);
   text_sections_ = std::move(other.text_sections_);
+  code_sections_ = std::move(other.code_sections_);
   rodata_sections_ = std::move(other.rodata_sections_);
 }
 
@@ -167,6 +181,9 @@ AmdGpuCodeObject::AmdGpuCodeObject(const uint8_t *elf_bytes, size_t elf_size) {
       text_sections_.push_back(sections_.back().get());
     else if (sec_name == ".rodata")
       rodata_sections_.push_back(sections_.back().get());
+
+    if (is_executable_section(shdr))
+      code_sections_.push_back(sections_.back().get());
   }
 
   target_id_ = target_from_machine_flags(header_->flags());
@@ -260,6 +277,9 @@ void AmdGpuCodeObject::load_sections(std::ifstream &elf_file) {
       text_sections_.push_back(sections_.back().get());
     else if (sec_name == ".rodata")
       rodata_sections_.push_back(sections_.back().get());
+
+    if (is_executable_section(shdr))
+      code_sections_.push_back(sections_.back().get());
   }
 
   // Parse symbol table for kernel descriptor offsets.
