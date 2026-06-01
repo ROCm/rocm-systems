@@ -93,6 +93,18 @@ typedef enum
 #define NCCL_REVOKE_DEFAULT                                                                        \
     0x00 /* default revoke behavior: quiesce in-flight work, reject new ops */
 
+/* Communicator suspend flags */
+#define NCCL_SUSPEND_MEM 0x01 /* Suspend memory (release dynamic allocations) */
+
+/* Communicator memory statistic selector (for ncclCommMemStats) */
+typedef enum
+{
+    ncclStatGpuMemSuspend   = 0, /* Allocated GPU memory that can be suspended (bytes) */
+    ncclStatGpuMemSuspended = 1, /* GPU memory suspended? (0=active, 1=suspended)      */
+    ncclStatGpuMemPersist   = 2, /* Allocated GPU memory that cannot be suspended      */
+    ncclStatGpuMemTotal     = 3  /* Total allocated GPU memory tracked by NCCL (bytes) */
+} ncclCommMemStat_t;
+
 /*! @defgroup   rccl_config_type Communicator Configuration
     @details    Structure that allows for customizing Communicator behavior via
    ncclCommInitRankConfig
@@ -384,6 +396,21 @@ ncclResult_t
 ncclCommRevoke(ncclComm_t comm, int revokeFlags);
 ncclResult_t
 pncclCommRevoke(ncclComm_t comm, int revokeFlags);
+
+ncclResult_t
+ncclCommSuspend(ncclComm_t comm, int flags);
+ncclResult_t
+pncclCommSuspend(ncclComm_t comm, int flags);
+
+ncclResult_t
+ncclCommResume(ncclComm_t comm);
+ncclResult_t
+pncclCommResume(ncclComm_t comm);
+
+ncclResult_t
+ncclCommMemStats(ncclComm_t comm, ncclCommMemStat_t stat, uint64_t* value);
+ncclResult_t
+pncclCommMemStats(ncclComm_t comm, ncclCommMemStat_t stat, uint64_t* value);
 
 /*! @brief      Creates a new communicator (multi thread/process version), similar to
    ncclCommInitRankConfig.
