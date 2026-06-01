@@ -1312,15 +1312,13 @@ hsa_signal_value_t hsa_signal_wait_scacquire(hsa_signal_t hsa_signal,
   hsa_signal_value_t result = signal->WaitAcquire(condition, compare_value, timeout_hint,
                                                    wait_state_hint);
 
-  // Warn on long waits (>50% of timeout or >1 second)
+  // Warn on long waits (>1 second)
   if (should_track) {
     uint64_t elapsed = rocr::rocr_get_timestamp_us() - start_time;
-    uint64_t warn_threshold = std::min(timeout_hint / 2000, (uint64_t)1000000);  // 50% or 1s
-    if (elapsed > warn_threshold) {
+    if (elapsed > 1000000) {  // >1 second
       RocrLogWarning(ROCR_LOG_WAIT | ROCR_LOG_HANG,
-        "Signal wait slow: handle=0x%lx expect=%ld got=%ld elapsed=%llu us (%.1f%% of timeout)",
-        hsa_signal.handle, compare_value, result, (unsigned long long)elapsed,
-        (float)elapsed * 1000.0f / timeout_hint);
+        "Signal wait slow: handle=0x%lx expect=%ld got=%ld elapsed=%llu us",
+        hsa_signal.handle, compare_value, result, (unsigned long long)elapsed);
     }
   }
 

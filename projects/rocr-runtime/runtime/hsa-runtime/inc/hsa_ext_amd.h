@@ -4946,7 +4946,7 @@ typedef enum hsa_amd_log_flag_s {
   HSA_AMD_LOG_FLAG_SDMA = 1,
   /* Log INFO */
   HSA_AMD_LOG_FLAG_INFO = 2,
-  /* Extended logging flags (for use with HSA_LOG_MASK env var) */
+  /* Extended logging flags (bit positions for hsa_amd_enable_logging flags array) */
   HSA_AMD_LOG_FLAG_QUEUE = 3,
   HSA_AMD_LOG_FLAG_MEM = 4,
   HSA_AMD_LOG_FLAG_SIGNAL = 5,

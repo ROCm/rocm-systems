@@ -1632,7 +1632,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
     }
 
     for (uint32_t d = 0; d < num_entries; ++d) {
-      RocrLogDebug(ROCR_LOG_SDMA,
+      RocrLogInfo(ROCR_LOG_SDMA,
                "SDMA FanOut(%s) WaitSignalBody[%u/%u]: engine %02u, src=%p, dst=%p, "
                "size=%zu, completion_signal=0x%zx",
                op_name,
@@ -1740,7 +1740,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
   }
 
   // Prologue: dep polls, HDP flush, GCR invalidate, decrement prologue_signal.
-  RocrLogDebug(ROCR_LOG_SDMA,
+  RocrLogInfo(ROCR_LOG_SDMA,
            "SDMA FanOut(%s) Prologue: engine %02u, num_entries=%u, dep_signal=0x%zx, "
            "completion_signal=0x%zx, prologue_signal=0x%zx",
            op_name, coord_idx, num_entries,
@@ -1757,7 +1757,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
 
   for (uint32_t d = 0; d < num_entries; ++d) {
     core::Signal& body_sig = use_body_signals ? *body_raw[d] : out_signal;
-    RocrLogDebug(ROCR_LOG_SDMA,
+    RocrLogInfo(ROCR_LOG_SDMA,
              "SDMA FanOut(%s) Body[%u/%u]: engine %02u, src=%p, dst=%p, size=%zu, "
              "prologue_signal=0x%zx, body_signal=0x%zx",
              op_name,
@@ -1804,7 +1804,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
   }
 
   // Epilogue: waits for all bodies, GCR writeback, end timestamp, signal -> 0.
-  RocrLogDebug(ROCR_LOG_SDMA,
+  RocrLogInfo(ROCR_LOG_SDMA,
            "SDMA FanOut(%s) Epilogue: engine %02u, completion_signal=0x%zx, "
            "num_body_signals=%zu",
            op_name, coord_idx,
@@ -1846,7 +1846,7 @@ hsa_status_t GpuAgent::DmaCopyBroadcast(
         if (profiling_enabled())
           out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
 
-        RocrLogDebug(ROCR_LOG_SDMA,
+        RocrLogInfo(ROCR_LOG_SDMA,
                  "SDMA linearB2BCopy using engine %02u, src=%p, num_entries=%u, size=%zu, "
                  "dep_signal=0x%zx, completion_signal=0x%zx",
                  BlitHostToDev, op.src, num_entries, op.size,
@@ -1863,7 +1863,7 @@ hsa_status_t GpuAgent::DmaCopyBroadcast(
         if (profiling_enabled())
           out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
 
-        RocrLogDebug(ROCR_LOG_SDMA,
+        RocrLogInfo(ROCR_LOG_SDMA,
                  "SDMA %s using engine %02u, src=%p, num_entries=%u, size=%zu, "
                  "dep_signal=0x%zx, completion_signal=0x%zx",
                  (sdma_blit->IsGfx1250()) ? "Multicast" : "Broadcast",

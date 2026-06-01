@@ -49,7 +49,7 @@
 // ENVIRONMENT VARIABLES:
 //   HSA_LOG_LEVEL   0-6     Log verbosity (0=none, 1=error, 2=warn, 3=info,
 //                           4=debug, 5=trace, 6=verbose). Set to "help" for usage.
-//   HSA_LOG_MASK    hex     Category bitmask (default 0x7FFFFFFF = all)
+//   HSA_LOG_MASK    hex     Category bitmask (default all enabled)
 //   HSA_LOG_FILE    path    Output file (PID appended), empty = stderr
 //   HSA_LOG_SIZE    MB      Max file size before truncation (default 2048)
 //   HSA_LOG_ASYNC   0/1     Enable async ring buffer logging
@@ -108,6 +108,13 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+#ifdef _WIN32
+#include <io.h>
+#define STDERR_FILENO 2
+#else
+#include <unistd.h>
+#endif
 
 namespace rocr {
 
@@ -280,16 +287,20 @@ struct RocrLoggingState {
   bool async_enabled;             // Async logging enabled (from HSA_LOG_ASYNC)
   bool structured_output;         // JSON output mode (from HSA_LOG_FORMAT=json)
   FILE* log_file;                 // Log file handle (or stderr)
+  int log_file_fd;                // File descriptor for async-signal-safe crash flush
+  bool owns_log_file;             // True if we opened log_file and should close it
   bool initialized;               // Whether logging is initialized
   std::mutex file_mutex;          // Mutex for file operations
 
   RocrLoggingState()
       : log_level(0),
-        log_mask(0x7FFFFFFF),
+        log_mask(0xFFFFFFFFFFFFFFFFULL),
         log_max_size_mb(2048),
         async_enabled(false),
         structured_output(false),
         log_file(stderr),
+        log_file_fd(STDERR_FILENO),
+        owns_log_file(false),
         initialized(false) {}
 };
 

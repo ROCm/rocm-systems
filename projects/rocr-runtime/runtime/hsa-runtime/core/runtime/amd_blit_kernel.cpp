@@ -635,9 +635,11 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(void* dst, const void* src,
 
   if(agent_->profiling_enabled()) {
     amd_signal_t* amd_signal = reinterpret_cast<amd_signal_t*>(completion_signal_.handle);
-    RocrLogDebug(ROCR_LOG_BLIT, "BlitKernel::SubmitLinearCopyCommand Signal=0x%lx ticks=%lu/%lu elapsed=%lu",
-                 completion_signal_.handle, amd_signal->start_ts, amd_signal->end_ts,
-                 amd_signal->end_ts - amd_signal->start_ts);
+    RocrLogInfo(ROCR_LOG_BLIT, "BlitKernel::SubmitLinearCopyCommand Signal=0x%llx ticks=%llu/%llu elapsed=%llu",
+                 (unsigned long long)completion_signal_.handle,
+                 (unsigned long long)amd_signal->start_ts,
+                 (unsigned long long)amd_signal->end_ts,
+                 (unsigned long long)(amd_signal->end_ts - amd_signal->start_ts));
   }
 
   return HSA_STATUS_SUCCESS;

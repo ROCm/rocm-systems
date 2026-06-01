@@ -185,15 +185,11 @@ void RocrAsyncLogger::FlushOnCrash() noexcept {
     return;
   }
 
-  // Get file descriptor for direct write (async-signal-safe)
-  int fd = -1;
-  if (g_rocr_log_state.log_file != nullptr && g_rocr_log_state.log_file != stderr) {
-    fd = fileno(g_rocr_log_state.log_file);
-  } else {
+  // Use pre-stored file descriptor for async-signal-safe write
+  int fd = g_rocr_log_state.log_file_fd;
+  if (fd < 0) {
     fd = STDERR_FILENO;
   }
-
-  if (fd < 0) return;
 
   // Write a simple crash marker using only write() (async-signal-safe)
   static const char crash_msg[] = "\n[rocr] CRASH: Async log buffer may contain unwritten entries\n";
@@ -395,6 +391,11 @@ void rocr_log_init() {
       fprintf(stderr, "rocr: Failed to open log file '%s', falling back to stderr\n",
               filename.c_str());
       g_rocr_log_state.log_file = stderr;
+      g_rocr_log_state.log_file_fd = STDERR_FILENO;
+      g_rocr_log_state.owns_log_file = false;
+    } else {
+      g_rocr_log_state.log_file_fd = fileno(g_rocr_log_state.log_file);
+      g_rocr_log_state.owns_log_file = true;
     }
   }
 
@@ -445,11 +446,13 @@ void rocr_log_shutdown() {
     g_rocr_async_logger.Stop();
   }
 
-  // Close log file if it's not stderr
-  if (g_rocr_log_state.log_file != stderr && g_rocr_log_state.log_file != nullptr) {
+  // Close log file only if we own it (we opened it from HSA_LOG_FILE)
+  if (g_rocr_log_state.owns_log_file && g_rocr_log_state.log_file != nullptr) {
     fflush(g_rocr_log_state.log_file);
     fclose(g_rocr_log_state.log_file);
     g_rocr_log_state.log_file = stderr;
+    g_rocr_log_state.log_file_fd = STDERR_FILENO;
+    g_rocr_log_state.owns_log_file = false;
   }
 
   g_rocr_log_state.initialized = false;
