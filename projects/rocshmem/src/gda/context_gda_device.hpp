@@ -28,7 +28,6 @@
 #include "context.hpp"
 #include "team.hpp"
 #include "queue_pair.hpp"
-#include "gda_sym_buf.hpp"
 
 namespace rocshmem {
 

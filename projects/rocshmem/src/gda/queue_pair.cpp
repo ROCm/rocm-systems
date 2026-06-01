@@ -28,7 +28,6 @@
 
 #include "backend_gda.hpp"
 #include "constants.hpp"
-#include "gda_sym_buf.hpp"
 #include "util.hpp"
 
 namespace rocshmem {
@@ -102,8 +101,12 @@ QueuePair::QueuePair(struct ibv_pd* pd, int gda_provider) {
   }
   gda_provider_ = gda_provider;
 
+  /* Setup User Buffer Registration Mechanism */
   pd_ = pd;
-  // keys[] is an inline array (zero-initialized by default member initializer).
+  num_user_buffers = envvar::gda::num_user_buffers;
+
+  CHECK_HIP(hipMalloc(&user_buf_info, sizeof(struct user_buf_info_t) *  num_user_buffers));
+  CHECK_HIP(hipMemset(user_buf_info, 0, sizeof(struct user_buf_info_t) *  num_user_buffers));
 }
 
 QueuePair::~QueuePair() {
@@ -121,7 +124,10 @@ QueuePair::~QueuePair() {
   fetching_atomic_freelist->~FreeListT();
   allocator.deallocate((void*)fetching_atomic_freelist);
 
-  // keys[] is an inline array; no hipFree needed.
+  if (user_buf_info) {
+    CHECK_HIP(hipFree(user_buf_info));
+    user_buf_info = nullptr;
+  }
 }
 
 __device__ uint64_t QueuePair::get_same_qp_lane_mask() {
@@ -185,7 +191,7 @@ __device__ uint64_t QueuePair::post_wqe_amo([[maybe_unused]] int32_t size, uintp
     uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
     bool fetching, ActiveWFInfo &wf_info) {
   return post_wqe_amo(size, raddr, opcode, atomic_data, atomic_cmp, fetching,
-                      wf_info, keys[0].rkey);
+                      wf_info, rkey);
 }
 
 __device__ uint64_t QueuePair::post_wqe_amo([[maybe_unused]] int32_t size, uintptr_t raddr,
@@ -288,7 +294,7 @@ __device__ void QueuePair::put_nbi(void *dest, const void *source,
     size_t nelems, int pe, ActiveWFInfo &wf_info) {
   uintptr_t src = reinterpret_cast<uintptr_t>(source);
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
-  post_wqe_rma(pe, nelems, src, dst, gda_op_rdma_write, keys[0].rkey, wf_info);
+  post_wqe_rma(pe, nelems, src, dst, gda_op_rdma_write, rkey, wf_info);
 }
 
 __device__ void QueuePair::put_nbi(void *dest, const void *source,
@@ -316,7 +322,7 @@ __device__ void QueuePair::get_nbi(void *dest, const void *source,
     size_t nelems, int pe, ActiveWFInfo &wf_info) {
   uintptr_t src = reinterpret_cast<uintptr_t>(source);
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
-  post_wqe_rma(pe, nelems, dst, src, gda_op_rdma_read, keys[0].rkey, wf_info);
+  post_wqe_rma(pe, nelems, dst, src, gda_op_rdma_read, rkey, wf_info);
 }
 
 __device__ int64_t QueuePair::atomic_cas(void *dest, int64_t atomic_data,
@@ -380,12 +386,19 @@ __device__ void QueuePair::atomic_nofetch_single(void *dest, int64_t value) {
   post_wqe_amo_single(dst, gda_op_atomic_fa, value, 0, false);
 }
 
+// Returns the slot index (buf_idx) on success, ROCSHMEM_ERROR on failure.
 int QueuePair::buffer_register(uintptr_t addr, size_t length) {
   struct ibv_mr *mr = nullptr;
-  int access = IBV_ACCESS_LOCAL_WRITE
-             | IBV_ACCESS_REMOTE_WRITE
-             | IBV_ACCESS_REMOTE_READ
-             | IBV_ACCESS_REMOTE_ATOMIC;
+  int access = 0;
+
+  if (user_buffer_mrs.size() >= num_user_buffers) {
+    return ROCSHMEM_ERROR;
+  }
+
+  access = IBV_ACCESS_LOCAL_WRITE
+         | IBV_ACCESS_REMOTE_WRITE
+         | IBV_ACCESS_REMOTE_READ
+         | IBV_ACCESS_REMOTE_ATOMIC;
 
   if (envvar::gda::pcie_relaxed_ordering) {
     access |= IBV_ACCESS_RELAXED_ORDERING;
@@ -395,28 +408,59 @@ int QueuePair::buffer_register(uintptr_t addr, size_t length) {
   CHECK_NNULL(mr, "ibv_reg_mr (buffer_register)");
 
   user_buffer_mrs[addr] = mr;
-  return ROCSHMEM_SUCCESS;
+
+  for (size_t i=0; i<num_user_buffers; i++) {
+    if (user_buf_info[i].addr == 0) {
+      user_buf_info[i].addr   = addr;
+      user_buf_info[i].length = length;
+
+      if (gda_provider_ == GDAProvider::MLX5) {
+        user_buf_info[i].lkey = htobe32(mr->lkey);
+      } else {
+        user_buf_info[i].lkey = mr->lkey;
+      }
+
+      return static_cast<int>(i);
+    }
+  }
+
+  return ROCSHMEM_ERROR;
 }
 
 int QueuePair::buffer_unregister(uintptr_t addr) {
-  int err = ibv.dereg_mr(user_buffer_mrs[addr]);
+  int err;
+
+  for (size_t i=0; i<num_user_buffers; i++) {
+    if (is_ptr_in_range(user_buf_info[i].addr, user_buf_info[i].length, addr)) {
+      CHECK_HIP(hipMemset(&user_buf_info[i], 0, sizeof(struct user_buf_info_t)));
+      break;
+    }
+  }
+
+  err = ibv.dereg_mr(user_buffer_mrs[addr]);
   CHECK_ZERO(err, "ibv_dereg_mr (buffer_unregister)");
+
   user_buffer_mrs.erase(addr);
+
   return ROCSHMEM_SUCCESS;
 }
 
 __device__ uint32_t QueuePair::get_lkey(uintptr_t addr) {
-  // Heap fast path: buf_idx=0 always covers the heap.
+  /* Check if in heap */
   if (is_ptr_in_range(base_heap, base_heap_size, addr)) {
-    return keys[0].lkey;
+    return lkey;
   }
-  // Sym-registered buffers: scan gda_sym_buf_meta (constant memory, already hot).
-  for (int b = 1; b < gda_sym_buf_count; b++) {
-    if (is_ptr_in_range(gda_sym_buf_meta[b].local_base,
-                        gda_sym_buf_meta[b].length, addr)) {
-      return keys[b].lkey;
+
+  /* Get the correct lkey for the user buffer */
+  for (size_t i=0; i<num_user_buffers; i++) {
+    uintptr_t uaddr = user_buf_info[i].addr;
+    size_t uaddr_len = user_buf_info[i].length;
+
+    if (is_ptr_in_range(uaddr, uaddr_len, addr)) {
+      return user_buf_info[i].lkey;
     }
   }
+
   LOGD_ERROR_ABORT("Valid lkey buffer not found");
   return 0;
 }

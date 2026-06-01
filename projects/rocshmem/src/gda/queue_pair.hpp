@@ -41,7 +41,6 @@
 
 #include "ibv_wrapper.hpp"
 
-#include "gda/gda_sym_buf.hpp"
 #include "gda/ionic/provider_gda_ionic.hpp"
 #include "gda/mlx5/provider_gda_mlx5.hpp"
 #include "gda/bnxt/provider_gda_bnxt.hpp"
@@ -141,15 +140,17 @@ class ActiveWFInfo {
   }
 };
 
+struct user_buf_info_t {
+  uintptr_t addr{0};
+  size_t    length{0};
+  uint32_t  lkey{0};
+  uint32_t  rkey{0};
+  uintptr_t remote_base{0};  // remote VA on this QP's target PE (set by sym_buffer_register)
+};
+
 class QueuePair {
  public:
   friend GDABackend;
-
-  // Paired rkey+lkey for each sym-registered buffer (buf_idx=0 is the heap).
-  // Inline array: one cache line covers all entries; rkey and lkey for the same
-  // buffer land adjacent so a single load services both sides of the RDMA WQE.
-  struct sym_keys_t { uint32_t rkey; uint32_t lkey; };
-  sym_keys_t keys[GDA_MAX_SYM_BUFS] = {};
 
   /**
    * @brief Constructor.
@@ -267,6 +268,29 @@ class QueuePair {
 
   uintptr_t base_heap = 0;
   size_t base_heap_size = 0;
+
+  // Resolve dest address to (raddr, rkey) for an RDMA WQE.
+  // Heap fast path first (no scan); then scans user_buf_info[] for sym-registered buffers.
+  // On unregistered addr: returns false (application bug).
+  __device__ inline bool gda_resolve_rdma(
+      uintptr_t dst, int pe,
+      char * const *base_heap_all,
+      uintptr_t *raddr_out, uint32_t *rkey_out) {
+    if (dst >= base_heap && dst < base_heap + base_heap_size) {
+      *raddr_out = reinterpret_cast<uintptr_t>(base_heap_all[pe]) + (dst - base_heap);
+      *rkey_out  = rkey;
+      return true;
+    }
+    for (size_t b = 0; b < num_user_buffers; b++) {
+      if (user_buf_info[b].addr != 0 && dst >= user_buf_info[b].addr &&
+          dst < user_buf_info[b].addr + user_buf_info[b].length) {
+        *raddr_out = user_buf_info[b].remote_base + (dst - user_buf_info[b].addr);
+        *rkey_out  = user_buf_info[b].rkey;
+        return true;
+      }
+    }
+    return false;
+  }
 
  private:
   /**
@@ -471,6 +495,8 @@ class QueuePair {
 
   char dev_name[24];
   uint32_t qp_num{0};
+  uint32_t rkey{0};
+  uint32_t lkey{0};
 
   uint64_t* nonfetching_atomic{nullptr};
   uint32_t nonfetching_atomic_lkey{0};
@@ -495,6 +521,9 @@ class QueuePair {
 
   struct ibv_pd* pd_;
   std::map<uintptr_t, struct ibv_mr*> user_buffer_mrs;
+
+  struct user_buf_info_t *user_buf_info{nullptr};
+  size_t num_user_buffers{0};
 
   int buffer_register(uintptr_t addr, size_t length);
   int buffer_unregister(uintptr_t addr);

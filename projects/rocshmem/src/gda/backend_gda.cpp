@@ -30,7 +30,6 @@
 #include <algorithm>
 
 #include "backend_gda.hpp"
-#include "gda_sym_buf.hpp"
 #include <endian.h>
 #include "debug_gda.hpp"
 #include "ibv_wrapper.hpp"
@@ -134,7 +133,6 @@ void GDABackend::init() {
 
   setup_ibv();
   setup_heap_mr();
-  gda_sym_buf_init(num_pes);
   setup_gpu_qps();
   setup_heap_sym_tables();
 
@@ -162,7 +160,6 @@ GDABackend::~GDABackend() {
   cleanup_ipc();
 
   cleanup_gpu_qps();
-  gda_sym_buf_fini();
   cleanup_heap_mr();
   cleanup_ibv();
 
@@ -573,76 +570,65 @@ void GDABackend::ctx_destroy(Context *ctx) {
 }
 
 int GDABackend::buffer_register(void *addr, size_t length) {
-  // Cap check: keys[] and gda_sym_buf_meta[] are fixed at GDA_MAX_SYM_BUFS.
-  // Both buffer_register (lkey-only) and sym_buffer_register consume a slot.
-  if (sym_buf_count_ >= GDA_MAX_SYM_BUFS) {
-    LOG_WARN("GDABackend::buffer_register: sym buffer table full (max %d)", GDA_MAX_SYM_BUFS);
+  int err = ROCSHMEM_SUCCESS;
+  bool qp_registration_failed = false;
+
+  /* Register in ptr cache */
+  err = Backend::buffer_register(addr, length);
+
+  if (ROCSHMEM_SUCCESS != err) {
     return ROCSHMEM_ERROR;
   }
 
-  /* Register in ptr cache */
-  if (Backend::buffer_register(addr, length) != ROCSHMEM_SUCCESS) return ROCSHMEM_ERROR;
-
-  /* Register with QPs: ibv_reg_mr gives us the per-QP lkey. */
+  /* Register with QPs */
+  int buf_idx = ROCSHMEM_ERROR;
   for (size_t i = 0; i < num_qps; i++) {
-    if (host_qps[i].buffer_register((uintptr_t)addr, length) != ROCSHMEM_SUCCESS) {
-      Backend::buffer_unregister(addr);
+    int slot = host_qps[i].buffer_register((uintptr_t)addr, length);
+    if (ROCSHMEM_ERROR == slot) {
+      qp_registration_failed = true;
+    }
+    assert(buf_idx == ROCSHMEM_ERROR || buf_idx == slot);
+    if (i == 0) buf_idx = slot;
+  }
+
+  if (qp_registration_failed) {
+    Backend::buffer_unregister(addr);
+    return ROCSHMEM_ERROR;
+  }
+  user_buf_count_++;
+  return buf_idx;
+}
+
+int GDABackend::buffer_unregister(void *addr) {
+  int err = ROCSHMEM_SUCCESS;
+
+  /* Deregister in ptr cache */
+  err = Backend::buffer_unregister(addr);
+
+  if (ROCSHMEM_SUCCESS != err) {
+    return ROCSHMEM_ERROR;
+  }
+
+  /* Deregister with QPs */
+  for (size_t i = 0; i < num_qps; i++) {
+    err = host_qps[i].buffer_unregister((uintptr_t)addr);
+    if (ROCSHMEM_SUCCESS != err) {
       return ROCSHMEM_ERROR;
     }
   }
 
-  /* Add gda_sym_buf_meta entry so get_lkey() can find this buffer by address range.
-   * Remote VAs are zero: this registration is lkey-only, never used as an RDMA target. */
-  std::vector<uintptr_t> zero_vas(num_pes, 0);
-  gda_sym_buf_meta_t meta{reinterpret_cast<uintptr_t>(addr), length};
-  int buf_idx = gda_sym_buf_add_entry(&meta, zero_vas.data(), num_pes);
-  if (buf_idx < 0) {
-    for (size_t i = 0; i < num_qps; i++) host_qps[i].buffer_unregister((uintptr_t)addr);
-    Backend::buffer_unregister(addr);
-    return ROCSHMEM_ERROR;
-  }
-
-  /* Populate keys[buf_idx].lkey per QP; rkey is zero (not needed for lkey-only path). */
-  for (size_t i = 0; i < num_qps; i++) {
-    uint32_t lkey = host_qps[i].user_buffer_mrs.at((uintptr_t)addr)->lkey;
-    if (gda_provider == GDAProvider::MLX5) lkey = htobe32(lkey);
-    QueuePair::sym_keys_t kv{0, lkey};
-    host_qps[i].keys[buf_idx] = kv;
-    size_t slot_offset = offsetof(QueuePair, keys) + buf_idx * sizeof(QueuePair::sym_keys_t);
-    CHECK_HIP(hipMemcpy(reinterpret_cast<char*>(&gpu_qps[i]) + slot_offset, &kv,
-                        sizeof(QueuePair::sym_keys_t), hipMemcpyHostToDevice));
-  }
-
-  sym_buf_count_++;
-  return ROCSHMEM_SUCCESS;
+  user_buf_count_--;
+  return err;
 }
 
-int GDABackend::buffer_unregister(void *addr) {
-  uintptr_t key = reinterpret_cast<uintptr_t>(addr);
-
-  /* Deregister in ptr cache */
-  if (Backend::buffer_unregister(addr) != ROCSHMEM_SUCCESS) return ROCSHMEM_ERROR;
-
-  /* Deregister with QPs (ibv_dereg_mr) */
-  for (size_t i = 0; i < num_qps; i++) {
-    if (host_qps[i].buffer_unregister(key) != ROCSHMEM_SUCCESS) return ROCSHMEM_ERROR;
-  }
-
-  /* Remove from gda_sym_buf_meta table and sync to device. */
-  gda_sym_buf_remove_entry(key);
-  sym_buf_count_--;
-
-  return ROCSHMEM_SUCCESS;
-}
-
-// Private helper: given pre-registered MRs (one per NIC), allgather rkeys and VAs,
-// populate per-QP keys[buf_idx].{rkey,lkey} and gda_sym_buf_table.
-// Called by both sym_buffer_register (with freshly registered MRs) and
-// setup_heap_sym_tables (reusing nic_devices_[n].heap_mr).
+// Private helper: allgather rkeys and VAs for a user buffer, fill user_buf_info[buf_idx].rkey
+// and .remote_base per QP.
+// mrs: pre-registered MRs (one per NIC, from buffer_register).
 // Returns buf_idx on success, -1 on error.
-int GDABackend::sym_fill_rkey_va_tables(void *addr, size_t length,
+int GDABackend::sym_fill_rkey_va_tables(void *addr, [[maybe_unused]] size_t length,
                                         const std::vector<ibv_mr*> &mrs,
-                                        int my_pe, int n_pes, bool set_lkey) {
+                                        int my_pe, int n_pes, bool /*set_lkey*/,
+                                        int buf_idx) {
   // Allgather rkeys (num_nics_ per PE).
   const size_t rkeys_per_pe = sizeof(uint32_t) * num_nics_;
   const size_t rkeys_size = rkeys_per_pe * n_pes;
@@ -650,7 +636,7 @@ int GDABackend::sym_fill_rkey_va_tables(void *addr, size_t length,
   if (!rkey_buf) return -1;
   memset(rkey_buf, 0, rkeys_size);
   for (int n = 0; n < num_nics_; n++) {
-    rkey_buf[my_pe * num_nics_ + n] = mrs[n]->rkey;
+    if (mrs[n]) rkey_buf[my_pe * num_nics_ + n] = mrs[n]->rkey;
   }
   if (backend_comm != MPI_COMM_NULL)
     mpilib_ftable_.Allgather(MPI_IN_PLACE, rkeys_per_pe, MPI_CHAR,
@@ -669,34 +655,16 @@ int GDABackend::sym_fill_rkey_va_tables(void *addr, size_t length,
   else
     backend_bootstr->allGather(va_buf, sizeof(uintptr_t));
 
-  // Fill gda_sym_buf device table (metadata + remote VAs).
-  gda_sym_buf_meta_t meta;
-  meta.local_base = reinterpret_cast<uintptr_t>(addr);
-  meta.length = length;
-  int buf_idx = gda_sym_buf_add_entry(&meta, va_buf, n_pes);
-  free(va_buf);
-
-  if (buf_idx < 0) { free(rkey_buf); return -1; }
-
-  // Fill per-QP keys[buf_idx].{rkey,lkey}.
-  // Each QP is attached to one NIC; both come from that NIC's MR.
-  // Sync each slot into gpu_qps[i] via targeted hipMemcpy (avoids re-copying the full QP struct).
+  // Fill user_buf_info[buf_idx].rkey and .remote_base per QP (hipMalloc'd — visible to device).
   for (size_t i = 0; i < num_qps; i++) {
     int nic_idx = nic_idx_for_qp(static_cast<int>(i));
     int pe = static_cast<int>(i) % num_pes;
-
-    QueuePair::sym_keys_t kv;
-    kv.rkey = rkey_buf[pe * num_nics_ + nic_idx];
-    kv.lkey = set_lkey ? mrs[nic_idx]->lkey : 0;
-    if (gda_provider == GDAProvider::MLX5) {
-      kv.rkey = htobe32(kv.rkey);
-      if (set_lkey) kv.lkey = htobe32(kv.lkey);
-    }
-    host_qps[i].keys[buf_idx] = kv;
-    size_t slot_offset = offsetof(QueuePair, keys) + buf_idx * sizeof(QueuePair::sym_keys_t);
-    CHECK_HIP(hipMemcpy(reinterpret_cast<char*>(&gpu_qps[i]) + slot_offset, &kv,
-                        sizeof(QueuePair::sym_keys_t), hipMemcpyHostToDevice));
+    uint32_t rkey = rkey_buf[pe * num_nics_ + nic_idx];
+    if (gda_provider == GDAProvider::MLX5) rkey = htobe32(rkey);
+    host_qps[i].user_buf_info[buf_idx].rkey = rkey;
+    host_qps[i].user_buf_info[buf_idx].remote_base = va_buf[pe];
   }
+  free(va_buf);
 
   free(rkey_buf);
   return buf_idx;
@@ -705,27 +673,31 @@ int GDABackend::sym_fill_rkey_va_tables(void *addr, size_t length,
 int GDABackend::sym_buffer_register(void *addr, size_t length,
                                     int my_pe, int n_pes,
                                     [[maybe_unused]] ptrdiff_t stride) {
-  int access = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ;
-  if (envvar::gda::pcie_relaxed_ordering) access |= IBV_ACCESS_RELAXED_ORDERING;
+  // Step 1: register for lkey (ibv_reg_mr per NIC, fills user_buf_info[slot].{addr,length,lkey}).
+  int buf_idx = buffer_register(addr, length);
+  if (buf_idx < 0) return ROCSHMEM_ERROR;
 
-  // One ibv_reg_mr per NIC: lkey and rkey stored paired in keys[buf_idx].
+  // Step 2: collect MRs registered by buffer_register (one per NIC, all QPs share same NIC set).
+  // All QPs on the same NIC have the same MR for this addr, so use host_qps[0..num_nics_-1].
+  // The QPs are laid out as: QP i serves NIC nic_idx_for_qp(i) and PE (i % num_pes).
+  // There is one QP per (NIC, PE) pair. To get the MR for NIC n, use any QP attached to that NIC.
   std::vector<ibv_mr*> mrs(num_nics_, nullptr);
-  for (int n = 0; n < num_nics_; n++) {
-    mrs[n] = ibv.reg_mr(nic_devices_[n].pd_orig, addr, length, access);
-    if (!mrs[n]) {
-      for (int j = 0; j < n; j++) ibv.dereg_mr(mrs[j]);
-      return ROCSHMEM_ERROR;
+  for (size_t i = 0; i < num_qps; i++) {
+    int nic_idx = nic_idx_for_qp(static_cast<int>(i));
+    if (!mrs[nic_idx]) {
+      auto it = host_qps[i].user_buffer_mrs.find((uintptr_t)addr);
+      if (it != host_qps[i].user_buffer_mrs.end()) mrs[nic_idx] = it->second;
     }
   }
 
-  int buf_idx = sym_fill_rkey_va_tables(addr, length, mrs, my_pe, n_pes, /*set_lkey=*/true);
-  if (buf_idx < 0) {
-    for (int n = 0; n < num_nics_; n++) ibv.dereg_mr(mrs[n]);
+  // Step 3: allgather rkeys+VAs, fill user_buf_info[buf_idx].{rkey, remote_base} per QP.
+  int rc = sym_fill_rkey_va_tables(addr, length, mrs, my_pe, n_pes, /*set_lkey=*/false, buf_idx);
+  if (rc < 0) {
+    buffer_unregister(addr);
     return ROCSHMEM_ERROR;
   }
 
   sym_buf_mrs_[reinterpret_cast<uintptr_t>(addr)] = std::move(mrs);
-  sym_buf_count_++;
   return ROCSHMEM_SUCCESS;
 }
 
@@ -733,14 +705,9 @@ int GDABackend::sym_buffer_unregister(void *addr) {
   uintptr_t key = reinterpret_cast<uintptr_t>(addr);
   auto it = sym_buf_mrs_.find(key);
   if (it == sym_buf_mrs_.end()) return ROCSHMEM_ERROR;
-
-  for (auto *mr : it->second) {
-    if (mr) ibv.dereg_mr(mr);
-  }
   sym_buf_mrs_.erase(it);
-  sym_buf_count_--;
 
-  gda_sym_buf_remove_entry(key);
+  buffer_unregister(addr);
   return ROCSHMEM_SUCCESS;
 }
 
@@ -1312,20 +1279,41 @@ void GDABackend::setup_heap_mr() {
   }
 }
 
-// Allgather heap rkeys and VAs, populate keys[0].{rkey,lkey} and gda_sym_buf_table[0].
-// Must run after setup_gpu_qps (QPs must exist for keys[] writes).
-// Reuses nic_devices_[n].heap_mr registered by setup_heap_mr.
+// Allgather heap rkeys and populate QP.rkey/lkey.
+// Must run after setup_gpu_qps. Reuses nic_devices_[n].heap_mr.
+// Note: heap remote VA is computed as base_heap[pe] + offset at call time.
 void GDABackend::setup_heap_sym_tables() {
-  auto *base_heap = heap.get_local_heap_base();
   std::vector<ibv_mr*> heap_mrs(num_nics_);
   for (int n = 0; n < num_nics_; n++) heap_mrs[n] = nic_devices_[n].heap_mr;
 
-  int buf_idx = sym_fill_rkey_va_tables(base_heap, heap.get_size(), heap_mrs,
-                                        my_pe, num_pes, /*set_lkey=*/true);
-  if (buf_idx < 0) {
-    LOG_ERROR_EXIT("Failed to fill heap sym buffer tables");
+  // Allgather rkeys (num_nics_ per PE).
+  const size_t rkeys_per_pe = sizeof(uint32_t) * num_nics_;
+  const size_t rkeys_size = rkeys_per_pe * num_pes;
+  uint32_t *rkey_buf = reinterpret_cast<uint32_t*>(malloc(rkeys_size));
+  CHECK_NNULL(rkey_buf, "malloc (heap rkey_buf)");
+  memset(rkey_buf, 0, rkeys_size);
+  for (int n = 0; n < num_nics_; n++) rkey_buf[my_pe * num_nics_ + n] = heap_mrs[n]->rkey;
+  if (backend_comm != MPI_COMM_NULL)
+    mpilib_ftable_.Allgather(MPI_IN_PLACE, rkeys_per_pe, MPI_CHAR,
+                             rkey_buf, rkeys_per_pe, MPI_CHAR, backend_comm);
+  else
+    backend_bootstr->allGather(rkey_buf, rkeys_per_pe);
+
+  // Fill gpu_qp->rkey and gpu_qp->lkey for each QP.
+  for (size_t i = 0; i < num_qps; i++) {
+    int nic_idx = nic_idx_for_qp(static_cast<int>(i));
+    int pe = static_cast<int>(i) % num_pes;
+    uint32_t rkey = rkey_buf[pe * num_nics_ + nic_idx];
+    uint32_t lkey = heap_mrs[nic_idx]->lkey;
+    if (gda_provider == GDAProvider::MLX5) { rkey = htobe32(rkey); lkey = htobe32(lkey); }
+    host_qps[i].rkey = rkey;
+    host_qps[i].lkey = lkey;
+    CHECK_HIP(hipMemcpy(reinterpret_cast<char*>(&gpu_qps[i]) + offsetof(QueuePair, rkey),
+                        &host_qps[i].rkey, sizeof(uint32_t), hipMemcpyHostToDevice));
+    CHECK_HIP(hipMemcpy(reinterpret_cast<char*>(&gpu_qps[i]) + offsetof(QueuePair, lkey),
+                        &host_qps[i].lkey, sizeof(uint32_t), hipMemcpyHostToDevice));
   }
-  sym_buf_count_++;
+  free(rkey_buf);
 }
 
 // Deregister heap MR. Called at teardown after sym_buffer_unregister(heap) has cleared tables.
