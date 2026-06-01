@@ -23,7 +23,7 @@ class Bench_gfx11(benchmark_base.Bench_base):
         self.WAVEFRONT_SIZE = 32
         self.MATRIX_OPS_TYPE = "WMMA"
 
-        self.unsupported_data_types = {}
+        self.unsupported_data_types = []
 
         self.matrix_kernel_selector = {}
         self.matrix_ops = {}
