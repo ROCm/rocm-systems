@@ -136,6 +136,15 @@ endif()
 include(GNUInstallDirs) # install directories
 include(MacroUtilities) # various functions and macros
 
+if(NOT DEFINED LLVM_HOST_TRIPLE)
+    execute_process(
+        COMMAND ${CMAKE_CXX_COMPILER} --print-target-triple
+        OUTPUT_VARIABLE LLVM_HOST_TRIPLE
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+endif()
+
 if(CI_BUILD)
     rocprofiler_systems_add_option(ROCPROFSYS_BUILD_CI "Enable internal asserts, etc." ON
         ADVANCED NO_FEATURE

@@ -146,6 +146,10 @@ else
     if [ -n "$(basename ${ROCPROFSYS_COMPILER} | egrep 'amdclang|amdllvm')" ]; then
         # this ensures the libomptarget-amdgpu-gfx*.bc files are found
         LLVM_LIB_DIR=$(cd $(dirname $(realpath ${ROCPROFSYS_COMPILER}))/../lib && pwd)
+        LLVM_HOST_TRIPLE=$(${ROCPROFSYS_COMPILER} --print-target-triple 2>/dev/null || true)
+        if [ -n "${LLVM_HOST_TRIPLE}" ] && [ -d "${LLVM_LIB_DIR}/${LLVM_HOST_TRIPLE}" ]; then
+            LLVM_LIB_DIR="${LLVM_LIB_DIR}/${LLVM_HOST_TRIPLE}:${LLVM_LIB_DIR}"
+        fi
         debug-message export LIBRARY_PATH=${LLVM_LIB_DIR}:${LIBRARY_PATH}
         export LIBRARY_PATH=${LLVM_LIB_DIR}:${LIBRARY_PATH}
     fi

@@ -67,15 +67,30 @@ get_filename_component(ROCM_ROOT_DIR "${_omp_bin_dir}" DIRECTORY)
 message(STATUS "Using OpenMP target compiler: ${OMP_TARGET_COMPILER}")
 message(STATUS "ROCm root inferred from compiler: ${ROCM_ROOT_DIR}")
 
+if(NOT DEFINED LLVM_HOST_TRIPLE)
+    execute_process(
+        COMMAND ${OMP_TARGET_COMPILER} --print-target-triple
+        OUTPUT_VARIABLE LLVM_HOST_TRIPLE
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+endif()
+
 # Candidate lib directories for libomptarget across ROCm layouts
 set(_LLVM_LIB_HINTS
+    "${ROCmVersion_DIR}/llvm/lib/${LLVM_HOST_TRIPLE}"
     "${ROCmVersion_DIR}/llvm/lib"
     "${ROCmVersion_DIR}/lib"
     "${ROCM_ROOT_DIR}/lib"
+    "${ROCM_ROOT_DIR}/llvm/lib/${LLVM_HOST_TRIPLE}"
     "${ROCM_ROOT_DIR}/llvm/lib"
+    "$ENV{ROCM_PATH}/llvm/lib/${LLVM_HOST_TRIPLE}"
     "$ENV{ROCM_PATH}/llvm/lib"
+    "$ENV{ROCM_PATH}/lib/llvm/lib/${LLVM_HOST_TRIPLE}"
     "$ENV{ROCM_PATH}/lib/llvm/lib"
+    "/opt/rocm/llvm/lib/${LLVM_HOST_TRIPLE}"
     "/opt/rocm/llvm/lib"
+    "/opt/rocm/lib/llvm/lib/${LLVM_HOST_TRIPLE}"
     "/opt/rocm/lib/llvm/lib"
 )
 
@@ -91,7 +106,11 @@ get_filename_component(_rocm_llvm_lib "${LIBOMPTARGET_SO}" DIRECTORY)
 set(_rocm_clang_lib "${ROCM_ROOT_DIR}/lib")
 set(_COMMON_RPATH "${_rocm_llvm_lib};${_rocm_clang_lib};$ORIGIN;$ORIGIN/lib")
 if(ROCmVersion_DIR)
-    list(APPEND _COMMON_RPATH "${ROCmVersion_DIR}/llvm/lib")
+    list(
+        APPEND _COMMON_RPATH
+        "${ROCmVersion_DIR}/llvm/lib"
+        "${ROCmVersion_DIR}/llvm/lib/${LLVM_HOST_TRIPLE}"
+    )
 endif()
 list(REMOVE_DUPLICATES _COMMON_RPATH)
 

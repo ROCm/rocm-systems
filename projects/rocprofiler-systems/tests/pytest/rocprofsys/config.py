@@ -82,12 +82,19 @@ class RocprofsysConfig:
         Returns:
             List of existing LLVM lib paths found, empty list if none found.
         """
+        import os
+        import platform
+
+        host_triple = os.environ.get(
+            "LLVM_HOST_TRIPLE", f"{platform.machine()}-unknown-linux-gnu"
+        )
         found_paths = []
         if self.rocm_path:
-            # Match discover_llvm_libdir_for_ompt() logic
             candidates = [
                 self.rocm_path / "llvm" / "lib",
+                self.rocm_path / "llvm" / "lib" / host_triple,
                 self.rocm_path / "lib" / "llvm" / "lib",
+                self.rocm_path / "lib" / "llvm" / "lib" / host_triple,
             ]
             for candidate in candidates:
                 if candidate.exists():
