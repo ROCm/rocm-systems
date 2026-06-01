@@ -165,6 +165,10 @@ def validate_json_data(data: dict[str, Any]) -> bool:
         return False
 
     summary = data["summary"]
+    if not isinstance(summary, dict):
+        print("Error: 'summary' must be an object")
+        return False
+
     required_summary_fields = [
         "xnack_enabled",
         "total_page_faults",
@@ -185,6 +189,10 @@ def validate_json_data(data: dict[str, Any]) -> bool:
         print("Warning: No devices in output (may be expected if no migrations occurred)")
 
     for i, device in enumerate(devices):
+        if not isinstance(device, dict):
+            print(f"Error: Device {i} must be an object")
+            return False
+
         required_device_fields = ["device_id", "device_name", "migrations"]
         missing = [field for field in required_device_fields if field not in device]
 
@@ -193,12 +201,20 @@ def validate_json_data(data: dict[str, Any]) -> bool:
             return False
 
         migrations = device["migrations"]
+        if not isinstance(migrations, dict):
+            print(f"Error: Device {i} 'migrations' must be an object")
+            return False
+
         for direction in REQUIRED_MIGRATION_DIRECTIONS:
             if direction not in migrations:
                 print(f"Error: Device {i} missing migration direction: {direction}")
                 return False
 
             stats = migrations[direction]
+            if not isinstance(stats, dict):
+                print(f"Error: Device {i}, {direction} stats must be an object")
+                return False
+
             missing_stats = [
                 field for field in REQUIRED_MIGRATION_STATS if field not in stats
             ]
@@ -208,6 +224,10 @@ def validate_json_data(data: dict[str, Any]) -> bool:
                 return False
 
     triggers = summary["migration_triggers"]
+    if not isinstance(triggers, dict):
+        print("Error: 'migration_triggers' must be an object")
+        return False
+
     required_trigger_fields = [
         "gpu_page_fault",
         "cpu_page_fault",
