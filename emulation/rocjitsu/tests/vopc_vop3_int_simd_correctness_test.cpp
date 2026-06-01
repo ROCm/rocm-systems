@@ -2,21 +2,24 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vopc_vop3_int_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs forced-scalar body) for the
-/// VOP3 form of the integer VOPC relational compares on CDNA4. The VOP3 form
-/// reads src0/src1 (not src0/vsrc1) and writes the per-lane compare result
-/// into an arbitrary SGPR-pair dst via inst.vdst.read/write_scalar64 instead
-/// of the fixed VCC. We point the SGPR-pair at VCC (106) so the same harness
-/// checks the result via wf.vcc(). Integer/bitwise compares apply no source
-/// modifiers, so the only differences vs the VOPC path are the src1/vsrc1
-/// swap and the SGPR-pair dst — neither affects bit-for-bit identity. Inactive
-/// SGPR-pair bits must be preserved.
+/// @brief Bit-identity check (SIMD fast path vs scalar body) for the VOP3 form
+/// of the integer VOPC relational compares on CDNA4. The VOP3 form reads
+/// src0/src1 (not src0/vsrc1) and writes the per-lane compare result into an
+/// arbitrary SGPR-pair dst via inst.vdst.read/write_scalar64 instead of the
+/// fixed VCC. We point the SGPR-pair at VCC (106) so the same harness reads the
+/// result via wf.vcc(). The process runs one fixed execute mode (RJ_FORCE_SCALAR,
+/// immutable); the 64-bit result is recorded (as two words) and the
+/// scalar-vs-SIMD equivalence is asserted by diffing the two runs (see simd_ab.h
+/// / the simd_ab_diff CTest entry). In-process inactive SGPR-pair bits must be
+/// preserved.
 ///
 /// Coverage: every (rel, suffix) pair routed through try_execute_vopc_vop3_*_int_simd
 /// — 8 rels × {i16,u16,i32,u32,i64,u64} = 48 ops, full + partial EXEC. Each lane
 /// gets a distinct (a, b) pair; a rotation sweep pairs each value with every other
 /// over the test loop so eq/lt/gt/le/ge/ne all fire on real boundary cases (incl.
 /// signed-negative vs unsigned wrap).
+
+#include "simd_ab.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -33,6 +36,7 @@
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace {
@@ -200,12 +204,9 @@ struct Fixture {
     wf->set_vcc(vcc_in);
   }
 
-  uint64_t run(Instruction *inst, bool force_scalar, Width w, uint32_t rot, uint64_t exec,
-               uint64_t vcc_in) {
-    amdgpu::simd_force_scalar() = force_scalar;
+  uint64_t run(Instruction *inst, Width w, uint32_t rot, uint64_t exec, uint64_t vcc_in) {
     seed_inputs(w, rot, exec, vcc_in);
     cu->execute_instruction(inst, *wf);
-    amdgpu::simd_force_scalar() = false;
     return wf->vcc();
   }
 };
@@ -223,13 +224,16 @@ void check_case(const Case &c, uint64_t exec) {
   const std::size_t kRotMax = (c.width == Width::B64) ? kVals64.size() : kVals32.size();
   for (uint32_t rot = 0; rot < kRotMax; ++rot) {
     for (uint64_t vcc_in : kVcc) {
-      uint64_t scalar = fx.run(inst, /*force_scalar=*/true, c.width, rot, exec, vcc_in);
-      uint64_t simd = fx.run(inst, /*force_scalar=*/false, c.width, rot, exec, vcc_in);
-      EXPECT_EQ(scalar, simd) << c.name << " rot=" << rot << " vcc_in=0x" << std::hex << vcc_in
-                              << ": dst divergence scalar=0x" << scalar << " simd=0x" << simd;
+      uint64_t vcc = fx.run(inst, c.width, rot, exec, vcc_in);
+
+      const std::string sub =
+          std::string(c.name) + ":r" + std::to_string(rot) + ":vcc" + std::to_string(vcc_in);
+      const uint32_t vcc_words[2] = {static_cast<uint32_t>(vcc), static_cast<uint32_t>(vcc >> 32)};
+      simd_ab::record(sub, exec, vcc_words, 2);
+
       const uint64_t inactive = ~exec;
-      EXPECT_EQ(simd & inactive, vcc_in & inactive)
-          << c.name << " rot=" << rot << ": SIMD altered inactive-lane dst bit";
+      EXPECT_EQ(vcc & inactive, vcc_in & inactive)
+          << c.name << " rot=" << rot << ": altered inactive-lane dst bit";
     }
   }
   delete inst;

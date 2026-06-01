@@ -2,16 +2,23 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vop3_fmac_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs forced-scalar body) for the
+/// @brief Bit-identity check (SIMD fast path vs scalar body) for the
 /// dst-accumulate FMA / MAC VOP3 forms on CDNA4 (v_fmac_f32, v_mac_f16,
 /// v_fmac_f64). Per-isa codegen classes for these ops only initialize
 /// src0+src1+vdst — the third FMA operand IS vdst. The new accumulate-form
 /// glue (try_execute_fmac_vop3_fp*_simd) reads inst.vdst as the third operand
-/// and applies abs/neg only to src0/src1, matching the scalar body. NaN-input
-/// lanes skipped (accepted FMA carve-out).
+/// and applies abs/neg only to src0/src1, matching the scalar body. The process
+/// runs one fixed execute mode (RJ_FORCE_SCALAR, immutable); the accumulator
+/// result is recorded and the scalar-vs-SIMD equivalence is asserted by diffing
+/// the two runs (see simd_ab.h / the simd_ab_diff CTest entry). NaN-result lanes
+/// carry an accepted payload divergence and are overwritten with a fixed
+/// sentinel before recording — NaN-ness is deterministic from the inputs, so
+/// both runs mask the same lanes.
 ///
 /// These ops are NOT benched: looping the same instruction creates a loop-
 /// carried RAW dep on the accumulator that serializes both modes to ~1x.
+
+#include "simd_ab.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -28,6 +35,7 @@
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <memory>
+#include <string>
 
 namespace {
 
@@ -37,6 +45,9 @@ constexpr uint32_t WF_SIZE = 64;
 constexpr uint32_t SGPRS_PER_WF = 106;
 constexpr uint32_t VGPRS_PER_WF = 256;
 constexpr uint32_t kAccVgpr = 4; // accumulator (vdst)
+// Fixed marker written over accepted-divergence (NaN-result) lanes before
+// recording, so the cross-run diff ignores them identically in both runs.
+constexpr uint32_t SKIP_SENTINEL = 0xA11D1FFFu;
 
 constexpr void vop3_encode(uint32_t op, uint32_t vdst, uint32_t src0, uint32_t src1, uint32_t abs,
                            uint32_t neg, uint32_t omod, uint32_t clamp, uint32_t words[2]) {
@@ -169,12 +180,9 @@ struct Fixture {
     wf->set_exec(exec);
   }
 
-  std::array<uint64_t, WF_SIZE> run(Instruction *inst, Kind k, bool force_scalar, uint32_t rot,
-                                    uint64_t exec) {
-    amdgpu::simd_force_scalar() = force_scalar;
+  std::array<uint64_t, WF_SIZE> run(Instruction *inst, Kind k, uint32_t rot, uint64_t exec) {
     seed_inputs(k, rot, exec);
     cu->execute_instruction(inst, *wf);
-    amdgpu::simd_force_scalar() = false;
     std::array<uint64_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
@@ -201,27 +209,34 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
   ASSERT_NE(inst, nullptr) << c.name << " decode failed";
   const std::size_t rot_max = (c.kind == Kind::F64) ? kF64.size() : kF32.size();
   for (uint32_t rot = 0; rot < rot_max; ++rot) {
-    auto scalar = fx.run(inst, c.kind, /*force_scalar=*/true, rot, exec);
-    auto simd = fx.run(inst, c.kind, /*force_scalar=*/false, rot, exec);
+    auto out = fx.run(inst, c.kind, rot, exec);
+
+    // Record the accumulator result as (lo, hi) word pairs. NaN-result lanes
+    // carry an accepted payload divergence; NaN-ness is deterministic from the
+    // inputs, so both runs mask the same lanes with a fixed sentinel.
+    uint32_t words_out[2 * WF_SIZE];
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-      if (!((exec >> lane) & 1ULL))
-        continue;
-      bool nan_either = false;
+      const bool active = (exec >> lane) & 1ULL;
+      uint64_t v = out[lane];
+      bool nan = false;
       if (c.kind == Kind::F32)
-        nan_either = is_f32_nan(static_cast<uint32_t>(scalar[lane])) ||
-                     is_f32_nan(static_cast<uint32_t>(simd[lane]));
+        nan = is_f32_nan(static_cast<uint32_t>(v));
       else if (c.kind == Kind::F16)
-        nan_either = is_f16_nan(static_cast<uint32_t>(scalar[lane])) ||
-                     is_f16_nan(static_cast<uint32_t>(simd[lane]));
+        nan = is_f16_nan(static_cast<uint32_t>(v));
       else
-        nan_either = is_f64_nan(scalar[lane]) || is_f64_nan(simd[lane]);
-      if (nan_either)
-        continue;
-      EXPECT_EQ(scalar[lane], simd[lane])
-          << c.name << " abs=" << abs << " neg=" << neg << " omod=" << omod << " clamp=" << clamp
-          << " rot=" << rot << " lane=" << lane << ": divergence scalar=0x" << std::hex
-          << scalar[lane] << " simd=0x" << simd[lane];
+        nan = is_f64_nan(v);
+      if (active && nan) {
+        words_out[2 * lane] = SKIP_SENTINEL;
+        words_out[2 * lane + 1] = SKIP_SENTINEL;
+      } else {
+        words_out[2 * lane] = static_cast<uint32_t>(v);
+        words_out[2 * lane + 1] = static_cast<uint32_t>(v >> 32);
+      }
     }
+    const std::string sub = std::string(c.name) + ":a" + std::to_string(abs) + "n" +
+                            std::to_string(neg) + "o" + std::to_string(omod) + "c" +
+                            std::to_string(clamp) + "r" + std::to_string(rot);
+    simd_ab::record(sub, exec, words_out, 2 * WF_SIZE);
   }
   delete inst;
 }

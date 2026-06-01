@@ -2,14 +2,18 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vop3_binary_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs forced-scalar body) for the
+/// @brief Bit-identity check (SIMD fast path vs scalar body) for the
 /// VOP3-encoded twins of the SIMD VOP2 binary ops on CDNA4. The VOP3 form reads
 /// src0/src1 and carries per-source abs/neg and per-instruction omod/clamp
 /// modifiers. f32 ops apply the modifiers in-vector (so the fast path fires even
 /// when modifiers are set — every abs/neg/omod/clamp combination is swept);
-/// integer/bitwise ops apply none. Each op runs both modes in-process via
-/// amdgpu::simd_force_scalar() and the full per-lane VGPR result must agree, with
-/// inactive lanes preserved, under full and partial EXEC.
+/// integer/bitwise ops apply none. The process runs one fixed execute mode
+/// (RJ_FORCE_SCALAR, immutable); each (case, modifier combo) result is recorded
+/// and the scalar-vs-SIMD equivalence is asserted by diffing the two runs (see
+/// simd_ab.h / the simd_ab_diff CTest entry). In-process inactive lanes must
+/// stay preserved under full and partial EXEC.
+
+#include "simd_ab.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -26,6 +30,7 @@
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <memory>
+#include <string>
 
 namespace {
 
@@ -177,11 +182,9 @@ struct Fixture {
     wf->set_exec(exec);
   }
 
-  std::array<uint32_t, WF_SIZE> run(Instruction *inst, bool force_scalar, Kind k, uint64_t exec) {
-    amdgpu::simd_force_scalar() = force_scalar;
+  std::array<uint32_t, WF_SIZE> run(Instruction *inst, Kind k, uint64_t exec) {
     seed_inputs(k, exec);
     cu->execute_instruction(inst, *wf);
-    amdgpu::simd_force_scalar() = false;
     uint32_t vb = wf->vgpr_alloc().base;
     std::array<uint32_t, WF_SIZE> out{};
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
@@ -200,20 +203,21 @@ void check(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32_t cl
               words);
   Instruction *inst = fx.decoder->decode(words);
   ASSERT_NE(inst, nullptr) << c.name << " decode failed";
-  auto scalar = fx.run(inst, /*force_scalar=*/true, c.kind, exec);
-  auto simd = fx.run(inst, /*force_scalar=*/false, c.kind, exec);
+  auto out = fx.run(inst, c.kind, exec);
+
+  // Fold the modifier combo into the sublabel so each (case, mods) line is unique.
+  const std::string sub = std::string(c.name) + ":a" + std::to_string(abs) + "n" +
+                          std::to_string(neg) + "o" + std::to_string(omod) + "c" +
+                          std::to_string(clamp);
+  simd_ab::record(sub, exec, out.data(), WF_SIZE);
+
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     const bool active = (exec >> lane) & 1ULL;
     if (!active) {
-      EXPECT_EQ(simd[lane], DST_SENTINEL)
+      EXPECT_EQ(out[lane], DST_SENTINEL)
           << c.name << " abs=" << abs << " neg=" << neg << " omod=" << omod << " clamp=" << clamp
-          << ": SIMD clobbered inactive lane " << lane;
-      continue;
+          << ": clobbered inactive lane " << lane;
     }
-    EXPECT_EQ(scalar[lane], simd[lane])
-        << c.name << " abs=" << abs << " neg=" << neg << " omod=" << omod << " clamp=" << clamp
-        << std::hex << ": lane " << std::dec << lane << " scalar=0x" << std::hex << scalar[lane]
-        << " simd=0x" << simd[lane];
   }
   delete inst;
 }

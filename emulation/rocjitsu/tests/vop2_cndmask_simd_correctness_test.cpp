@@ -2,13 +2,16 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vop2_cndmask_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs forced-scalar body) for
-/// v_cndmask_b32 (CDNA4 VOP2 opcode 0): dst[lane] = (VCC bit) ? vsrc1 : src0.
-/// VCC is an input side-channel that drives the per-lane select. The test seeds
-/// distinct src0/vsrc1 values, sweeps several VCC patterns (which lanes pick
-/// vsrc1), runs both modes in-process via amdgpu::simd_force_scalar(), and
-/// asserts every lane agrees with the scalar generated body under full and
-/// partial EXEC. Inactive EXEC lanes must keep the dst sentinel.
+/// @brief Bit-identity check (SIMD fast path vs scalar body) for v_cndmask_b32
+/// (CDNA4 VOP2 opcode 0): dst[lane] = (VCC bit) ? vsrc1 : src0. VCC is an input
+/// side-channel that drives the per-lane select. The test seeds distinct
+/// src0/vsrc1 values and sweeps several VCC patterns (which lanes pick vsrc1).
+/// The process runs one fixed execute mode (RJ_FORCE_SCALAR, immutable); each
+/// (vcc) result is recorded and the scalar-vs-SIMD equivalence is asserted by
+/// diffing the two runs (see simd_ab.h / the simd_ab_diff CTest entry).
+/// In-process inactive EXEC lanes must keep the dst sentinel.
+
+#include "simd_ab.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -25,6 +28,7 @@
 #include <cstdint>
 #include <memory>
 #include <random>
+#include <string>
 
 namespace {
 
@@ -78,12 +82,9 @@ struct Fixture {
     return out;
   }
 
-  std::array<uint32_t, WF_SIZE> run(Instruction *inst, bool fs, uint64_t seed, uint64_t exec,
-                                    uint64_t vcc) {
-    amdgpu::simd_force_scalar() = fs;
+  std::array<uint32_t, WF_SIZE> run(Instruction *inst, uint64_t seed, uint64_t exec, uint64_t vcc) {
     seed_inputs(seed, exec, vcc);
     cu->execute_instruction(inst, *wf);
-    amdgpu::simd_force_scalar() = false;
     return snapshot_dst();
   }
 };
@@ -104,16 +105,16 @@ void check_case(uint64_t exec) {
 
   constexpr uint64_t SEED = 0xCD'1234'5678'9AB0ULL;
   for (uint64_t vcc : kVccPatterns) {
-    auto scalar = fx.run(inst, /*fs=*/true, SEED, exec, vcc);
-    auto simd = fx.run(inst, /*fs=*/false, SEED, exec, vcc);
+    auto out = fx.run(inst, SEED, exec, vcc);
+
+    // vcc is folded into the sublabel so each (vcc) record line is unique.
+    simd_ab::record("v_cndmask_b32:vcc" + std::to_string(vcc), exec, out.data(), WF_SIZE);
+
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       const bool active = (exec >> lane) & 1ULL;
-      EXPECT_EQ(scalar[lane], simd[lane])
-          << "vcc=0x" << std::hex << vcc << ": divergence at lane " << std::dec << lane << std::hex
-          << " scalar=0x" << scalar[lane] << " simd=0x" << simd[lane];
       if (!active) {
-        EXPECT_EQ(simd[lane], DST_SENTINEL)
-            << "vcc=0x" << std::hex << vcc << ": SIMD clobbered inactive lane " << std::dec << lane;
+        EXPECT_EQ(out[lane], DST_SENTINEL)
+            << "vcc=0x" << std::hex << vcc << ": clobbered inactive lane " << std::dec << lane;
       }
     }
   }

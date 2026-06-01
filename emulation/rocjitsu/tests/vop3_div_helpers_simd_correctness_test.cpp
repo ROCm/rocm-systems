@@ -2,8 +2,14 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vop3_div_helpers_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs forced-scalar body) for four
-/// VOP3 division helpers on CDNA4:
+/// @brief Bit-identity check (SIMD fast path vs scalar body) for four VOP3
+/// division helpers on CDNA4. The process runs one fixed execute mode
+/// (RJ_FORCE_SCALAR, immutable); each result is recorded and the scalar-vs-SIMD
+/// equivalence is asserted by diffing the two runs (see simd_ab.h / the
+/// simd_ab_diff CTest entry). NaN-result lanes carry an accepted payload
+/// divergence and are overwritten with a fixed sentinel before recording —
+/// NaN-ness is deterministic from the inputs, so both runs mask the same lanes.
+/// In-process inactive lanes must keep the sentinel. The helpers covered:
 ///   - v_div_fixup_f32 / v_div_fixup_f64: NaN/Inf/zero `else if` cascade
 ///     ((p, b, c) -> selected float per AMD spec), routed through the
 ///     existing fp ternary VOP3 glue with a `div_fixup_*_simd` functor that
@@ -15,6 +21,8 @@
 /// NaN-input lanes are skipped per-lane in the comparison (the gcc-13 packed
 /// FMA quiets a different NaN operand vs scalar std::fma — accepted
 /// divergence shared with the rest of the ternary fp suite).
+
+#include "simd_ab.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -31,6 +39,7 @@
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <memory>
+#include <string>
 
 namespace {
 
@@ -41,6 +50,9 @@ constexpr uint32_t SGPRS_PER_WF = 106;
 constexpr uint32_t VGPRS_PER_WF = 256;
 constexpr uint32_t DST_SENTINEL_32 = 0xCDCDCDCDu;
 constexpr uint64_t DST_SENTINEL_64 = 0xCDCDCDCDCDCDCDCDULL;
+// Fixed marker written over accepted-divergence (NaN-result) lanes before
+// recording, so the cross-run diff ignores them identically in both runs.
+constexpr uint32_t SKIP_SENTINEL = 0xA11D1FFFu;
 constexpr uint32_t kDstVgpr32 = 6;
 constexpr uint32_t kDstVgpr64 = 8;
 
@@ -141,13 +153,11 @@ struct Fixture {
     wf->set_exec(exec);
   }
 
-  std::array<uint32_t, WF_SIZE> run32(Instruction *inst, bool force_scalar, uint32_t rot0,
-                                      uint32_t rot1, uint32_t rot2, uint64_t exec, uint64_t vcc) {
-    amdgpu::simd_force_scalar() = force_scalar;
+  std::array<uint32_t, WF_SIZE> run32(Instruction *inst, uint32_t rot0, uint32_t rot1,
+                                      uint32_t rot2, uint64_t exec, uint64_t vcc) {
     seed_vgprs_f32(rot0, rot1, rot2, exec);
     wf->set_vcc(vcc);
     cu->execute_instruction(inst, *wf);
-    amdgpu::simd_force_scalar() = false;
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
@@ -155,13 +165,11 @@ struct Fixture {
     return out;
   }
 
-  std::array<uint64_t, WF_SIZE> run64(Instruction *inst, bool force_scalar, uint32_t rot0,
-                                      uint32_t rot1, uint32_t rot2, uint64_t exec, uint64_t vcc) {
-    amdgpu::simd_force_scalar() = force_scalar;
+  std::array<uint64_t, WF_SIZE> run64(Instruction *inst, uint32_t rot0, uint32_t rot1,
+                                      uint32_t rot2, uint64_t exec, uint64_t vcc) {
     seed_vgprs_f64(rot0, rot1, rot2, exec);
     wf->set_vcc(vcc);
     cu->execute_instruction(inst, *wf);
-    amdgpu::simd_force_scalar() = false;
     std::array<uint64_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
@@ -195,20 +203,23 @@ void check_div_fixup_f32(uint64_t exec) {
     // Sweep rotations so every (b,c) class pairing hits the cascade.
     for (uint32_t r1 = 0; r1 < kF32.size(); ++r1)
       for (uint32_t r2 = 0; r2 < kF32.size(); r2 += 3) {
-        auto sc = fx.run32(inst, true, 0, r1, r2, exec, /*vcc=*/0);
-        auto sd = fx.run32(inst, false, 0, r1, r2, exec, /*vcc=*/0);
+        auto out = fx.run32(inst, 0, r1, r2, exec, /*vcc=*/0);
+
+        uint32_t words_out[WF_SIZE];
+        for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+          const bool active = (exec >> lane) & 1ULL;
+          words_out[lane] = (active && is_f32_nan(out[lane])) ? SKIP_SENTINEL : out[lane];
+        }
+        const std::string sub =
+            std::string(o.name) + ":r1_" + std::to_string(r1) + ":r2_" + std::to_string(r2);
+        simd_ab::record(sub, exec, words_out, WF_SIZE);
+
         for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
           const bool active = (exec >> lane) & 1ULL;
           if (!active) {
-            EXPECT_EQ(sd[lane], DST_SENTINEL_32) << o.name << " r1=" << r1 << " r2=" << r2
-                                                 << ": SIMD clobbered inactive lane " << lane;
-            continue;
+            EXPECT_EQ(out[lane], DST_SENTINEL_32)
+                << o.name << " r1=" << r1 << " r2=" << r2 << ": clobbered inactive lane " << lane;
           }
-          if (is_f32_nan(sc[lane]) || is_f32_nan(sd[lane]))
-            continue; // NaN payload may differ
-          EXPECT_EQ(sc[lane], sd[lane])
-              << o.name << " r1=" << r1 << " r2=" << r2 << " lane=" << lane << ": sc=0x" << std::hex
-              << sc[lane] << " sd=0x" << sd[lane];
         }
       }
     delete inst;
@@ -228,20 +239,30 @@ void check_div_fixup_f64(uint64_t exec) {
   ASSERT_NE(inst, nullptr) << "v_div_fixup_f64_vop3 decode failed";
   for (uint32_t r1 = 0; r1 < kF64.size(); ++r1)
     for (uint32_t r2 = 0; r2 < kF64.size(); r2 += 3) {
-      auto sc = fx.run64(inst, true, 0, r1, r2, exec, /*vcc=*/0);
-      auto sd = fx.run64(inst, false, 0, r1, r2, exec, /*vcc=*/0);
+      auto out = fx.run64(inst, 0, r1, r2, exec, /*vcc=*/0);
+
+      uint32_t words_out[2 * WF_SIZE];
+      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+        const bool active = (exec >> lane) & 1ULL;
+        uint64_t v = out[lane];
+        if (active && is_f64_nan(v)) {
+          words_out[2 * lane] = SKIP_SENTINEL;
+          words_out[2 * lane + 1] = SKIP_SENTINEL;
+        } else {
+          words_out[2 * lane] = static_cast<uint32_t>(v);
+          words_out[2 * lane + 1] = static_cast<uint32_t>(v >> 32);
+        }
+      }
+      const std::string sub =
+          "v_div_fixup_f64:r1_" + std::to_string(r1) + ":r2_" + std::to_string(r2);
+      simd_ab::record(sub, exec, words_out, 2 * WF_SIZE);
+
       for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         const bool active = (exec >> lane) & 1ULL;
         if (!active) {
-          EXPECT_EQ(sd[lane], DST_SENTINEL_64) << "v_div_fixup_f64 r1=" << r1 << " r2=" << r2
-                                               << ": SIMD clobbered inactive lane " << lane;
-          continue;
+          EXPECT_EQ(out[lane], DST_SENTINEL_64) << "v_div_fixup_f64 r1=" << r1 << " r2=" << r2
+                                                << ": clobbered inactive lane " << lane;
         }
-        if (is_f64_nan(sc[lane]) || is_f64_nan(sd[lane]))
-          continue;
-        EXPECT_EQ(sc[lane], sd[lane])
-            << "v_div_fixup_f64 r1=" << r1 << " r2=" << r2 << " lane=" << lane << ": sc=0x"
-            << std::hex << sc[lane] << " sd=0x" << sd[lane];
       }
     }
   delete inst;
@@ -259,21 +280,24 @@ void check_div_fmas_f32(uint64_t exec) {
   for (uint64_t vcc : {uint64_t{0}, uint64_t{~0ULL}, uint64_t{0xAAAAAAAAAAAAAAAAULL},
                        uint64_t{0x5555555555555555ULL}}) {
     for (uint32_t r1 = 0; r1 < kF32.size(); r1 += 3) {
-      auto sc = fx.run32(inst, true, 0, r1, 2 * r1, exec, vcc);
-      auto sd = fx.run32(inst, false, 0, r1, 2 * r1, exec, vcc);
+      auto out = fx.run32(inst, 0, r1, 2 * r1, exec, vcc);
+
+      uint32_t words_out[WF_SIZE];
+      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+        const bool active = (exec >> lane) & 1ULL;
+        words_out[lane] = (active && is_f32_nan(out[lane])) ? SKIP_SENTINEL : out[lane];
+      }
+      const std::string sub =
+          "v_div_fmas_f32:vcc" + std::to_string(vcc) + ":r1_" + std::to_string(r1);
+      simd_ab::record(sub, exec, words_out, WF_SIZE);
+
       for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         const bool active = (exec >> lane) & 1ULL;
         if (!active) {
-          EXPECT_EQ(sd[lane], DST_SENTINEL_32)
+          EXPECT_EQ(out[lane], DST_SENTINEL_32)
               << "v_div_fmas_f32 vcc=0x" << std::hex << vcc << " r1=" << std::dec << r1
-              << ": SIMD clobbered inactive lane " << lane;
-          continue;
+              << ": clobbered inactive lane " << lane;
         }
-        if (is_f32_nan(sc[lane]) || is_f32_nan(sd[lane]))
-          continue;
-        EXPECT_EQ(sc[lane], sd[lane])
-            << "v_div_fmas_f32 vcc=0x" << std::hex << vcc << " r1=" << std::dec << r1
-            << " lane=" << lane << ": sc=0x" << std::hex << sc[lane] << " sd=0x" << sd[lane];
       }
     }
   }
@@ -292,21 +316,31 @@ void check_div_fmas_f64(uint64_t exec) {
   for (uint64_t vcc : {uint64_t{0}, uint64_t{~0ULL}, uint64_t{0xAAAAAAAAAAAAAAAAULL},
                        uint64_t{0x5555555555555555ULL}}) {
     for (uint32_t r1 = 0; r1 < kF64.size(); r1 += 3) {
-      auto sc = fx.run64(inst, true, 0, r1, 2 * r1, exec, vcc);
-      auto sd = fx.run64(inst, false, 0, r1, 2 * r1, exec, vcc);
+      auto out = fx.run64(inst, 0, r1, 2 * r1, exec, vcc);
+
+      uint32_t words_out[2 * WF_SIZE];
+      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+        const bool active = (exec >> lane) & 1ULL;
+        uint64_t v = out[lane];
+        if (active && is_f64_nan(v)) {
+          words_out[2 * lane] = SKIP_SENTINEL;
+          words_out[2 * lane + 1] = SKIP_SENTINEL;
+        } else {
+          words_out[2 * lane] = static_cast<uint32_t>(v);
+          words_out[2 * lane + 1] = static_cast<uint32_t>(v >> 32);
+        }
+      }
+      const std::string sub =
+          "v_div_fmas_f64:vcc" + std::to_string(vcc) + ":r1_" + std::to_string(r1);
+      simd_ab::record(sub, exec, words_out, 2 * WF_SIZE);
+
       for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         const bool active = (exec >> lane) & 1ULL;
         if (!active) {
-          EXPECT_EQ(sd[lane], DST_SENTINEL_64)
+          EXPECT_EQ(out[lane], DST_SENTINEL_64)
               << "v_div_fmas_f64 vcc=0x" << std::hex << vcc << " r1=" << std::dec << r1
-              << ": SIMD clobbered inactive lane " << lane;
-          continue;
+              << ": clobbered inactive lane " << lane;
         }
-        if (is_f64_nan(sc[lane]) || is_f64_nan(sd[lane]))
-          continue;
-        EXPECT_EQ(sc[lane], sd[lane])
-            << "v_div_fmas_f64 vcc=0x" << std::hex << vcc << " r1=" << std::dec << r1
-            << " lane=" << lane << ": sc=0x" << std::hex << sc[lane] << " sd=0x" << sd[lane];
       }
     }
   }

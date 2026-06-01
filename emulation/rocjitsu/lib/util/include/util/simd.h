@@ -29,13 +29,19 @@ inline constexpr bool has_stdx_simd =
     false;
 #endif
 
-/// Per-thread switch that callers check before taking the SIMD fast
-/// path. Used by tests/benchmarks to A/B SIMD vs scalar in one process.
-/// Initial value seeded once per thread from `RJ_FORCE_SCALAR` env var
-/// (treats unset/empty/"0" as false, any other value as true), so e2e
-/// runs can force the scalar codepath without recompiling.
-inline bool &force_scalar() {
-  static thread_local bool flag = [] {
+/// Process-wide, immutable switch that callers check before taking the
+/// SIMD fast path. Read ONCE from the `RJ_FORCE_SCALAR` env var on first
+/// call (unset/empty/"0" => false, any other value => true) and fixed for
+/// the process lifetime. Returned by value: there is no setter and no
+/// mutable reference, so production code cannot flip it at runtime and the
+/// public API leaks no mutable global state.
+///
+/// A/B testing selects the mode by setting `RJ_FORCE_SCALAR` before launch
+/// (the SIMD correctness suite is run twice and the per-case result dumps
+/// diffed; see tests/simd_ab.h), and e2e runs force the scalar codepath the
+/// same way without recompiling.
+inline bool force_scalar() {
+  static const bool flag = [] {
     const char *e = std::getenv("RJ_FORCE_SCALAR");
     return e && e[0] && !(e[0] == '0' && e[1] == '\0');
   }();

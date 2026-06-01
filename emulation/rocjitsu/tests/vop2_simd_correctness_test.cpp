@@ -2,11 +2,14 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vop2_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs forced-scalar body) for the
-/// Tier-1 VOP2 binary instructions wired into SIMD_VOP2_BINARY. Each op runs
-/// both modes in-process via the `amdgpu::simd_force_scalar()` thread-local
-/// and asserts all 64 lanes agree, under both a full and a partial EXEC mask.
-/// The scalar generated body is the reference; the SIMD path must not diverge.
+/// @brief Bit-identity check (SIMD fast path vs scalar body) for the Tier-1
+/// VOP2 binary instructions wired into SIMD_VOP2_BINARY. The process runs in a
+/// single execute mode (RJ_FORCE_SCALAR, immutable); each op records its 64
+/// lane results and the scalar-vs-SIMD equivalence is asserted by diffing the
+/// two runs (see simd_ab.h / the simd_ab_diff CTest entry). In-process the test
+/// still checks inactive-lane preservation under full and partial EXEC masks.
+
+#include "simd_ab.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -92,12 +95,13 @@ struct Fixture {
     return out;
   }
 
-  std::array<uint32_t, WF_SIZE> run(Instruction *inst, bool force_scalar, uint64_t seed,
-                                    bool is_float, uint64_t exec) {
-    amdgpu::simd_force_scalar() = force_scalar;
+  // Runs the instruction in the process's fixed execute mode (SIMD or scalar,
+  // selected once by RJ_FORCE_SCALAR). The scalar-vs-SIMD comparison happens
+  // across two process runs via the recorded dump; see simd_ab.h.
+  std::array<uint32_t, WF_SIZE> run(Instruction *inst, uint64_t seed, bool is_float,
+                                    uint64_t exec) {
     seed_inputs(seed, is_float, exec);
     cu->execute_instruction(inst, *wf);
-    amdgpu::simd_force_scalar() = false;
     return snapshot_dst();
   }
 };
@@ -167,15 +171,19 @@ void check_case(const Vop2Case &c, uint64_t exec) {
   ASSERT_NE(inst, nullptr) << c.label << ": decode failed";
 
   constexpr uint64_t SEED = 0xC0FFEE'1234'5678ULL;
-  auto scalar = fx.run(inst, /*force_scalar=*/true, SEED, c.is_float, exec);
-  auto simd = fx.run(inst, /*force_scalar=*/false, SEED, c.is_float, exec);
+  auto out = fx.run(inst, SEED, c.is_float, exec);
 
+  // Record per-lane results for the cross-run scalar-vs-SIMD diff (the two
+  // RJ_FORCE_SCALAR runs must emit identical dumps).
+  simd_ab::record(c.label, exec, out.data(), WF_SIZE);
+
+  // In-process invariant that holds in either mode: inactive lanes must keep
+  // the destination sentinel (no out-of-bounds writes / masked-store leaks).
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     const bool active = (exec >> lane) & 1ULL;
-    EXPECT_EQ(scalar[lane], simd[lane]) << c.label << ": divergence at lane " << lane << std::hex
-                                        << " scalar=0x" << scalar[lane] << " simd=0x" << simd[lane];
     if (!active) {
-      EXPECT_EQ(simd[lane], DST_SENTINEL) << c.label << ": SIMD clobbered inactive lane " << lane;
+      EXPECT_EQ(out[lane], DST_SENTINEL) << c.label << ": clobbered inactive lane " << lane
+                                         << std::hex << " value=0x" << out[lane];
     }
   }
   delete inst;

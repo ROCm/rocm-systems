@@ -2,10 +2,14 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vop_alias_rdna_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs forced-scalar body) for the
-/// RDNA-only VOP1 / VOP2 / VOP3 aliases routed into existing SIMD glue tables
-/// in the 2026-05-29 sweep slice. RDNA3 fixture (wave32, encoding markers
-/// VOP3=0x35).
+/// @brief Bit-identity check (SIMD fast path vs scalar body) for the RDNA-only
+/// VOP1 / VOP2 / VOP3 aliases routed into existing SIMD glue tables in the
+/// 2026-05-29 sweep slice. RDNA3 fixture (wave32, encoding markers VOP3=0x35).
+/// The process runs one fixed execute mode (RJ_FORCE_SCALAR, immutable); the
+/// destination VGPR (and VCC for the carry forms) is recorded and the
+/// scalar-vs-SIMD equivalence is asserted by diffing the two runs (see simd_ab.h
+/// / the simd_ab_diff CTest entry). In-process inactive lanes must keep the
+/// sentinel.
 ///
 /// Ops covered:
 ///   VOP2 (6, RDNA-only naming):
@@ -21,6 +25,8 @@
 ///     SIMD_VOP1_UNARY twin fallback since the scalar body of each ignores
 ///     modifiers — verified inline in the regen for this slice) + 2 ints
 ///     missing from CDNA4 (v_minmax / v_maxmin u32/i32 are RDNA3+ only).
+
+#include "simd_ab.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -38,6 +44,7 @@
 #include <gtest/gtest.h>
 #include <memory>
 #include <random>
+#include <string>
 
 namespace {
 
@@ -127,11 +134,9 @@ struct Fixture {
     uint64_t vcc = 0;
   };
 
-  Result run(Instruction *inst, bool force_scalar, uint32_t rot, uint64_t exec, uint64_t vcc_in) {
-    amdgpu::simd_force_scalar() = force_scalar;
+  Result run(Instruction *inst, uint32_t rot, uint64_t exec, uint64_t vcc_in) {
     seed_inputs(rot, exec, vcc_in);
     cu->execute_instruction(inst, *wf);
-    amdgpu::simd_force_scalar() = false;
     Result res;
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
@@ -215,24 +220,25 @@ void check_case(const VopCase &c, uint64_t exec) {
   for (size_t v = 0; v < vcc_n; ++v) {
     uint64_t vcc_in = vcc_set[v];
     for (uint32_t rot = 0; rot < kVals.size(); ++rot) {
-      auto scalar = fx.run(inst, /*force_scalar=*/true, rot, exec, vcc_in);
-      auto simd = fx.run(inst, /*force_scalar=*/false, rot, exec, vcc_in);
+      auto out = fx.run(inst, rot, exec, vcc_in);
+
+      // Record the dst words; for carry forms also the full 64-bit VCC (lo, hi).
+      // (name, vcc_in, rot) keep the line unique.
+      const std::string base =
+          std::string(c.name) + ":vcc" + std::to_string(vcc_in) + ":r" + std::to_string(rot);
+      simd_ab::record(base, exec, out.dst.data(), WF_SIZE);
+      if (has_vcc_in) {
+        const uint32_t vcc_words[2] = {static_cast<uint32_t>(out.vcc),
+                                       static_cast<uint32_t>(out.vcc >> 32)};
+        simd_ab::record(base + ":vcc", exec, vcc_words, 2);
+      }
+
       for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         const bool active = (exec >> lane) & 1ULL;
         if (!active) {
-          EXPECT_EQ(simd.dst[lane], DST_SENTINEL)
-              << c.name << " rot=" << rot << ": SIMD clobbered inactive lane " << lane;
-          continue;
+          EXPECT_EQ(out.dst[lane], DST_SENTINEL)
+              << c.name << " rot=" << rot << ": clobbered inactive lane " << lane;
         }
-        EXPECT_EQ(scalar.dst[lane], simd.dst[lane])
-            << c.name << " vcc_in=0x" << std::hex << vcc_in << " rot=" << std::dec << rot
-            << " lane=" << lane << ": divergence scalar=0x" << std::hex << scalar.dst[lane]
-            << " simd=0x" << simd.dst[lane];
-      }
-      if (has_vcc_in) {
-        EXPECT_EQ(scalar.vcc, simd.vcc)
-            << c.name << " vcc_in=0x" << std::hex << vcc_in << " rot=" << std::dec << rot
-            << ": VCC divergence scalar=0x" << std::hex << scalar.vcc << " simd=0x" << simd.vcc;
       }
     }
   }

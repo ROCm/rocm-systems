@@ -2,8 +2,12 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vop3_b16_rdna_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs forced-scalar body) for five
-/// 16-bit-lane VOP3 ops that are RDNA3+ only (no CDNA4 decode path):
+/// @brief Bit-identity check (SIMD fast path vs scalar body) for five
+/// 16-bit-lane VOP3 ops that are RDNA3+ only (no CDNA4 decode path). The process
+/// runs one fixed execute mode (RJ_FORCE_SCALAR, immutable); each result is
+/// recorded and the scalar-vs-SIMD equivalence is asserted by diffing the two
+/// runs (see simd_ab.h / the simd_ab_diff CTest entry). In-process inactive
+/// lanes must keep the sentinel.
 ///   - v_and_b16, v_or_b16, v_xor_b16: low-16 bitwise binary, routed
 ///     through the int VOP3 binary glue with a `& 0xFFFFu` mask.
 ///   - v_not_b16: low-16 bitwise unary, routed through the VOP1 unary glue
@@ -14,6 +18,8 @@
 /// All five share the scalar-body pattern `uint32_t(uint16_t(... low16 ...))`
 /// — the high 16 bits of the destination VGPR are zeroed. The CU and decoder
 /// are built for RDNA3; encoding marker is 0x35<<26.
+
+#include "simd_ab.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -30,6 +36,7 @@
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <memory>
+#include <string>
 
 namespace {
 
@@ -127,12 +134,9 @@ struct Fixture {
     wf->set_exec(exec);
   }
 
-  std::array<uint32_t, WF_SIZE> run(Instruction *inst, bool force_scalar, uint32_t rot,
-                                    uint64_t exec) {
-    amdgpu::simd_force_scalar() = force_scalar;
+  std::array<uint32_t, WF_SIZE> run(Instruction *inst, uint32_t rot, uint64_t exec) {
     seed_vgprs(rot, exec);
     cu->execute_instruction(inst, *wf);
-    amdgpu::simd_force_scalar() = false;
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
@@ -161,17 +165,16 @@ void check_binary(const BinCase &c, uint64_t exec) {
   Instruction *inst = fx.decoder->decode(words);
   ASSERT_NE(inst, nullptr) << c.name << " decode failed";
   for (uint32_t rot = 0; rot < kSrcB.size(); ++rot) {
-    auto sc = fx.run(inst, true, rot, exec);
-    auto sd = fx.run(inst, false, rot, exec);
+    auto out = fx.run(inst, rot, exec);
+
+    simd_ab::record(std::string(c.name) + ":r" + std::to_string(rot), exec, out.data(), WF_SIZE);
+
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       const bool active = (exec >> lane) & 1ULL;
       if (!active) {
-        EXPECT_EQ(sd[lane], DST_SENTINEL)
-            << c.name << " rot=" << rot << ": SIMD clobbered inactive lane " << lane;
-        continue;
+        EXPECT_EQ(out[lane], DST_SENTINEL)
+            << c.name << " rot=" << rot << ": clobbered inactive lane " << lane;
       }
-      EXPECT_EQ(sc[lane], sd[lane]) << c.name << " rot=" << rot << " lane=" << lane << ": sc=0x"
-                                    << std::hex << sc[lane] << " sd=0x" << sd[lane];
     }
   }
   delete inst;
@@ -185,16 +188,15 @@ void check_not_b16(uint64_t exec) {
   rdna3_vop3_encode(/*op=*/489, /*vdst=*/kDstVgpr, /*src0=*/256, /*src1=*/0, /*src2=*/0, words);
   Instruction *inst = fx.decoder->decode(words);
   ASSERT_NE(inst, nullptr) << "v_not_b16_vop3 decode failed";
-  auto sc = fx.run(inst, true, 0, exec);
-  auto sd = fx.run(inst, false, 0, exec);
+  auto out = fx.run(inst, 0, exec);
+
+  simd_ab::record("v_not_b16_vop3", exec, out.data(), WF_SIZE);
+
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     const bool active = (exec >> lane) & 1ULL;
     if (!active) {
-      EXPECT_EQ(sd[lane], DST_SENTINEL) << "v_not_b16_vop3 SIMD clobbered inactive lane " << lane;
-      continue;
+      EXPECT_EQ(out[lane], DST_SENTINEL) << "v_not_b16_vop3 clobbered inactive lane " << lane;
     }
-    EXPECT_EQ(sc[lane], sd[lane]) << "v_not_b16_vop3 lane=" << lane << ": sc=0x" << std::hex
-                                  << sc[lane] << " sd=0x" << sd[lane];
   }
   delete inst;
 }
@@ -211,18 +213,18 @@ void check_cndmask_b16(uint64_t exec, uint64_t sel) {
   Instruction *inst = fx.decoder->decode(words);
   ASSERT_NE(inst, nullptr) << "v_cndmask_b16_vop3 decode failed";
   for (uint32_t rot = 0; rot < kSrcB.size(); ++rot) {
-    auto sc = fx.run(inst, true, rot, exec);
-    auto sd = fx.run(inst, false, rot, exec);
+    auto out = fx.run(inst, rot, exec);
+
+    const std::string sub =
+        "v_cndmask_b16_vop3:sel" + std::to_string(sel) + ":r" + std::to_string(rot);
+    simd_ab::record(sub, exec, out.data(), WF_SIZE);
+
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       const bool active = (exec >> lane) & 1ULL;
       if (!active) {
-        EXPECT_EQ(sd[lane], DST_SENTINEL) << "v_cndmask_b16_vop3 sel=0x" << std::hex << sel
-                                          << ": SIMD clobbered inactive lane " << lane;
-        continue;
+        EXPECT_EQ(out[lane], DST_SENTINEL) << "v_cndmask_b16_vop3 sel=0x" << std::hex << sel
+                                           << ": clobbered inactive lane " << lane;
       }
-      EXPECT_EQ(sc[lane], sd[lane])
-          << "v_cndmask_b16_vop3 sel=0x" << std::hex << sel << " rot=" << std::dec << rot
-          << " lane=" << lane << ": sc=0x" << std::hex << sc[lane] << " sd=0x" << sd[lane];
     }
   }
   delete inst;
@@ -288,18 +290,17 @@ void check_mov_b16(uint64_t exec, uint32_t omod, uint32_t clamp) {
                         omod, words);
   Instruction *inst = fx.decoder->decode(words);
   ASSERT_NE(inst, nullptr) << "v_mov_b16_vop3 decode failed";
-  auto sc = fx.run(inst, true, 0, exec);
-  auto sd = fx.run(inst, false, 0, exec);
+  auto out = fx.run(inst, 0, exec);
+
+  const std::string sub = "v_mov_b16:o" + std::to_string(omod) + "c" + std::to_string(clamp);
+  simd_ab::record(sub, exec, out.data(), WF_SIZE);
+
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     const bool active = (exec >> lane) & 1ULL;
     if (!active) {
-      EXPECT_EQ(sd[lane], DST_SENTINEL) << "v_mov_b16 omod=" << omod << " clamp=" << clamp
-                                        << " SIMD clobbered inactive lane " << lane;
-      continue;
+      EXPECT_EQ(out[lane], DST_SENTINEL)
+          << "v_mov_b16 omod=" << omod << " clamp=" << clamp << " clobbered inactive lane " << lane;
     }
-    EXPECT_EQ(sc[lane], sd[lane]) << "v_mov_b16 omod=" << omod << " clamp=" << clamp
-                                  << " lane=" << lane << ": sc=0x" << std::hex << sc[lane]
-                                  << " sd=0x" << sd[lane];
   }
   delete inst;
 }

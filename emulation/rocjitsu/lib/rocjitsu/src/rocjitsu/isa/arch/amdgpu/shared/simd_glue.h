@@ -28,9 +28,11 @@ namespace amdgpu {
 /// in <stdfloat>; rocjitsu is on C++20 so a local alias.
 using float32_t = float;
 
-/// Per-thread runtime override that disables the SIMD fast path in
-/// kernels that have one. Forwards to util::force_scalar().
-inline bool &simd_force_scalar() { return util::force_scalar(); }
+/// Process-wide, immutable override that disables the SIMD fast path in
+/// kernels that have one. Forwards to util::force_scalar() (read once from
+/// RJ_FORCE_SCALAR); returned by value, so there is no mutable global to
+/// flip at runtime.
+inline bool simd_force_scalar() { return util::force_scalar(); }
 
 /// In-vector VOP3 source modifier (f32), bit-exact with the scalar lambda the
 /// generated bodies emit per source: `abs` first (`std::fabs`), then `neg`

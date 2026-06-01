@@ -2,13 +2,12 @@
 // SPDX-License-Identifier: MIT
 
 /// @file v_add_simd_benchmark.cpp
-/// @brief A/B microbenchmark: SIMD vs forced-scalar execution of v_add_f32
-/// and v_add_u32 (CDNA4, VOP2 form). Both modes run in the same process; the
-/// `amdgpu::simd_force_scalar()` thread-local flag flips between them.
-///
-/// Reports ns/instruction and speedup, and asserts SIMD-vs-scalar results
-/// are bit-identical for u32 and within 0 ULP for fp32 add (IEEE-754
-/// binary32 single-rounded; matches the host SIMD adder).
+/// @brief Microbenchmark of v_add_f32 / v_add_u32 (CDNA4, VOP2 form). The
+/// execute mode is fixed per process by `RJ_FORCE_SCALAR` (force_scalar() is
+/// immutable), so each run times one mode and reports ns/instruction. Compare
+/// SIMD vs scalar throughput by running twice: `RJ_FORCE_SCALAR=1` (scalar)
+/// then unset (SIMD). Scalar-vs-SIMD bit-equivalence is verified separately by
+/// the simd_ab_diff CTest job, not here.
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -126,9 +125,7 @@ struct ModeStats {
   uint64_t total_ns = 0;
 };
 
-ModeStats time_mode(BenchFixture &fx, Instruction *inst, bool force_scalar, uint64_t seed,
-                    bool sanitize_finite) {
-  amdgpu::simd_force_scalar() = force_scalar;
+ModeStats time_mode(BenchFixture &fx, Instruction *inst, uint64_t seed, bool sanitize_finite) {
   fx.seed_inputs(seed, sanitize_finite);
   // Warmup.
   for (int i = 0; i < 100; ++i)
@@ -138,7 +135,6 @@ ModeStats time_mode(BenchFixture &fx, Instruction *inst, bool force_scalar, uint
   for (int i = 0; i < ITERATIONS; ++i)
     fx.cu->execute_instruction(inst, *fx.wf);
   auto t1 = Clock::now();
-  amdgpu::simd_force_scalar() = false;
   ModeStats s;
   s.total_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
   s.ns_per_inst = static_cast<double>(s.total_ns) / ITERATIONS;
@@ -158,39 +154,20 @@ void run_words(const char *label, uint32_t w0, uint32_t w1, bool sanitize_finite
 
   constexpr uint64_t SEED = 0xC0FFEE'1234'5678ULL;
 
-  // Correctness pre-check: snapshot both modes' results lane-by-lane.
-  amdgpu::simd_force_scalar() = true;
-  fx.seed_inputs(SEED, sanitize_finite);
-  fx.cu->execute_instruction(inst, *fx.wf);
-  auto result_scalar = fx.snapshot_v2();
+  // force_scalar() is immutable per process, so this benchmark times whichever
+  // execute mode the process is in. Scalar-vs-SIMD bit-equivalence is checked
+  // separately by the simd_ab_diff CTest job. To compare throughput, run the
+  // benchmark twice: `RJ_FORCE_SCALAR=1 ...` (scalar) and unset (SIMD).
+  const char *mode = amdgpu::simd_force_scalar() ? "scalar" : "simd";
+  ModeStats s = time_mode(fx, inst, SEED, sanitize_finite);
 
-  amdgpu::simd_force_scalar() = false;
-  fx.seed_inputs(SEED, sanitize_finite);
-  fx.cu->execute_instruction(inst, *fx.wf);
-  auto result_simd = fx.snapshot_v2();
-  amdgpu::simd_force_scalar() = false;
-
-  for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-    EXPECT_EQ(result_scalar[lane], result_simd[lane])
-        << label << ": divergence at lane " << lane << " scalar=0x" << std::hex
-        << result_scalar[lane] << " simd=0x" << result_simd[lane];
-  }
-
-  ModeStats sc = time_mode(fx, inst, /*force_scalar=*/true, SEED, sanitize_finite);
-  ModeStats sd = time_mode(fx, inst, /*force_scalar=*/false, SEED, sanitize_finite);
-
-  double speedup = (sd.ns_per_inst > 0) ? (sc.ns_per_inst / sd.ns_per_inst) : 0.0;
-  std::printf("\n  === %s (CDNA4, wave64) ===\n"
+  std::printf("\n  === %s (CDNA4, wave64) [%s] ===\n"
               "  iterations: %d  enc: 0x%08x 0x%08x\n"
-              "  scalar : %7.1f ns/inst  (%6.2f MIPS)  wall %.1f ms\n"
-              "  simd   : %7.1f ns/inst  (%6.2f MIPS)  wall %.1f ms\n"
-              "  speedup: %5.2fx\n",
-              label, ITERATIONS, w0, w1, sc.ns_per_inst, sc.mips,
-              static_cast<double>(sc.total_ns) / 1e6, sd.ns_per_inst, sd.mips,
-              static_cast<double>(sd.total_ns) / 1e6, speedup);
+              "  %-6s : %7.1f ns/inst  (%6.2f MIPS)  wall %.1f ms\n",
+              label, mode, ITERATIONS, w0, w1, mode, s.ns_per_inst, s.mips,
+              static_cast<double>(s.total_ns) / 1e6);
 
-  EXPECT_GT(sc.mips, 0.01) << label << ": scalar baseline too slow";
-  EXPECT_GT(sd.mips, 0.01) << label << ": simd path too slow";
+  EXPECT_GT(s.mips, 0.01) << label << ": " << mode << " path too slow";
 
   delete inst;
 }

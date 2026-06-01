@@ -2,16 +2,20 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vopc_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs forced-scalar body) for the VOPC
+/// @brief Bit-identity check (SIMD fast path vs scalar body) for the VOPC
 /// compares wired into SIMD_VOPC / SIMD_VOPC64: the f32/f16/f64 relations
 /// (eq/ge/gt/le/lg/lt/neq/nge/ngt/nle/nlg/nlt/o/u/f/tru) and the
 /// i32/u32/i16/u16/i64/u64 relations (eq/ge/gt/le/lt/ne/f/t). Each writes one bit
-/// per active EXEC lane into VCC, preserving inactive bits. The test runs both
-/// modes in-process via amdgpu::simd_force_scalar() and asserts the full 64-bit
-/// VCC agrees under full and partial EXEC, with inactive-lane bits preserved.
-/// The 64-bit relations exercise the split lo/hi VGPR-pair read path. Inputs seed
-/// NaN/±Inf/±0/denorm (floats) and signed/extreme boundaries (ints); float
-/// compares are bit-exact in both modes (no NaN-skip carve-out needed).
+/// per active EXEC lane into VCC, preserving inactive bits. The process runs one
+/// fixed execute mode (RJ_FORCE_SCALAR, immutable); the full 64-bit VCC is
+/// recorded (as two words) per (opcode, vcc_in) and the scalar-vs-SIMD
+/// equivalence is asserted by diffing the two runs (see simd_ab.h / the
+/// simd_ab_diff CTest entry). In-process inactive-lane VCC bits must stay
+/// preserved under full and partial EXEC. The 64-bit relations exercise the
+/// split lo/hi VGPR-pair read path. Inputs seed NaN/±Inf/±0/denorm (floats) and
+/// signed/extreme boundaries (ints); float compares are bit-exact in both modes.
+
+#include "simd_ab.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -119,11 +123,9 @@ struct Fixture {
     wf->set_vcc(vcc_in);
   }
 
-  uint64_t run(Instruction *inst, bool force_scalar, Kind k, uint64_t exec, uint64_t vcc_in) {
-    amdgpu::simd_force_scalar() = force_scalar;
+  uint64_t run(Instruction *inst, Kind k, uint64_t exec, uint64_t vcc_in) {
     seed_inputs(k, exec, vcc_in);
     cu->execute_instruction(inst, *wf);
-    amdgpu::simd_force_scalar() = false;
     return wf->vcc();
   }
 };
@@ -167,13 +169,17 @@ void check_all(uint64_t exec) {
     Instruction *inst = fx.decoder->decode(words);
     ASSERT_NE(inst, nullptr) << "VOPC opcode " << c.opcode << " decode failed";
     for (uint64_t vcc_in : kVcc) {
-      uint64_t scalar = fx.run(inst, /*force_scalar=*/true, c.kind, exec, vcc_in);
-      uint64_t simd = fx.run(inst, /*force_scalar=*/false, c.kind, exec, vcc_in);
-      EXPECT_EQ(scalar, simd) << "VOPC opcode " << c.opcode << " vcc_in=0x" << std::hex << vcc_in
-                              << ": VCC divergence scalar=0x" << scalar << " simd=0x" << simd;
+      uint64_t vcc = fx.run(inst, c.kind, exec, vcc_in);
+
+      // Record the full 64-bit VCC as two words; (opcode, vcc_in) keep the line
+      // unique. The cross-run diff covers the compare result.
+      const std::string sub = "op" + std::to_string(c.opcode) + ":vcc_in" + std::to_string(vcc_in);
+      const uint32_t vcc_words[2] = {static_cast<uint32_t>(vcc), static_cast<uint32_t>(vcc >> 32)};
+      simd_ab::record(sub, exec, vcc_words, 2);
+
       const uint64_t inactive = ~exec;
-      EXPECT_EQ(simd & inactive, vcc_in & inactive)
-          << "VOPC opcode " << c.opcode << ": SIMD altered an inactive-lane VCC bit";
+      EXPECT_EQ(vcc & inactive, vcc_in & inactive)
+          << "VOPC opcode " << c.opcode << ": altered an inactive-lane VCC bit";
     }
     delete inst;
   }

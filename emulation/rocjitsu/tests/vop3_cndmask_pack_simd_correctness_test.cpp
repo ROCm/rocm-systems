@@ -2,15 +2,20 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vop3_cndmask_pack_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs forced-scalar body) for two
-/// VOP3 ops that don't fit the binary/unary tables and reach SIMD through
-/// dedicated paths:
+/// @brief Bit-identity check (SIMD fast path vs scalar body) for two VOP3 ops
+/// that don't fit the binary/unary tables and reach SIMD through dedicated
+/// paths. The process runs one fixed execute mode (RJ_FORCE_SCALAR, immutable);
+/// each result is recorded and the scalar-vs-SIMD equivalence is asserted by
+/// diffing the two runs (see simd_ab.h / the simd_ab_diff CTest entry).
+/// In-process inactive lanes must keep the sentinel.
 ///   - v_cndmask_b32_vop3: per-lane select from a 64-bit selector read out of
 ///     the SGPR-pair `src2` (instead of fixed VCC); routes through the new
 ///     try_execute_cndmask_vop3_simd glue.
 ///   - v_pack_b32_f16_vop3: pack low-16 of src0 and low-16 of src1 into a
 ///     b32 dst — pure integer bit-pack, routed through the existing VOP3 int
 ///     binary path.
+
+#include "simd_ab.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -27,6 +32,7 @@
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <memory>
+#include <string>
 
 namespace {
 
@@ -140,12 +146,9 @@ struct Fixture {
     cu->write_sgpr(sb + 1, static_cast<uint32_t>(sel >> 32));
   }
 
-  std::array<uint32_t, WF_SIZE> run(Instruction *inst, bool force_scalar, uint32_t rot,
-                                    uint64_t exec) {
-    amdgpu::simd_force_scalar() = force_scalar;
+  std::array<uint32_t, WF_SIZE> run(Instruction *inst, uint32_t rot, uint64_t exec) {
     seed_vgprs(rot, exec);
     cu->execute_instruction(inst, *wf);
-    amdgpu::simd_force_scalar() = false;
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
@@ -166,20 +169,19 @@ void check_cndmask_one(uint64_t exec, uint64_t sel) {
   Instruction *inst = fx.decoder->decode(words);
   ASSERT_NE(inst, nullptr) << "v_cndmask_b32_vop3 decode failed";
   for (uint32_t rot = 0; rot < kSrcA.size(); ++rot) {
-    auto scalar = fx.run(inst, /*force_scalar=*/true, rot, exec);
-    auto simd = fx.run(inst, /*force_scalar=*/false, rot, exec);
+    auto out = fx.run(inst, rot, exec);
+
+    const std::string sub =
+        "v_cndmask_b32_vop3:sel" + std::to_string(sel) + ":r" + std::to_string(rot);
+    simd_ab::record(sub, exec, out.data(), WF_SIZE);
+
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       const bool active = (exec >> lane) & 1ULL;
       if (!active) {
-        EXPECT_EQ(simd[lane], DST_SENTINEL)
+        EXPECT_EQ(out[lane], DST_SENTINEL)
             << "v_cndmask_b32_vop3 sel=0x" << std::hex << sel << " rot=" << std::dec << rot
-            << ": SIMD clobbered inactive lane " << lane;
-        continue;
+            << ": clobbered inactive lane " << lane;
       }
-      EXPECT_EQ(scalar[lane], simd[lane])
-          << "v_cndmask_b32_vop3 sel=0x" << std::hex << sel << " rot=" << std::dec << rot
-          << " lane=" << lane << ": divergence scalar=0x" << std::hex << scalar[lane] << " simd=0x"
-          << simd[lane];
     }
   }
   delete inst;
@@ -194,18 +196,16 @@ void check_pack_one(uint64_t exec) {
   Instruction *inst = fx.decoder->decode(words);
   ASSERT_NE(inst, nullptr) << "v_pack_b32_f16_vop3 decode failed";
   for (uint32_t rot = 0; rot < kSrcA.size(); ++rot) {
-    auto scalar = fx.run(inst, /*force_scalar=*/true, rot, exec);
-    auto simd = fx.run(inst, /*force_scalar=*/false, rot, exec);
+    auto out = fx.run(inst, rot, exec);
+
+    simd_ab::record("v_pack_b32_f16_vop3:r" + std::to_string(rot), exec, out.data(), WF_SIZE);
+
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       const bool active = (exec >> lane) & 1ULL;
       if (!active) {
-        EXPECT_EQ(simd[lane], DST_SENTINEL)
-            << "v_pack_b32_f16_vop3 rot=" << rot << ": SIMD clobbered inactive lane " << lane;
-        continue;
+        EXPECT_EQ(out[lane], DST_SENTINEL)
+            << "v_pack_b32_f16_vop3 rot=" << rot << ": clobbered inactive lane " << lane;
       }
-      EXPECT_EQ(scalar[lane], simd[lane])
-          << "v_pack_b32_f16_vop3 rot=" << rot << " lane=" << lane << ": divergence scalar=0x"
-          << std::hex << scalar[lane] << " simd=0x" << simd[lane];
     }
   }
   delete inst;

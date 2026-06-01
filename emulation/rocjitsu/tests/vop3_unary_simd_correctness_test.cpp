@@ -2,13 +2,17 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vop3_unary_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs forced-scalar body) for the
+/// @brief Bit-identity check (SIMD fast path vs scalar body) for the
 /// VOP3-encoded twins of the SIMD VOP1 unary ops on CDNA4. The f32 forms carry
 /// per-source abs/neg and result omod/clamp modifiers, applied in-vector — every
 /// abs/neg/omod/clamp combination is swept.
-/// The integer/cvt forms apply no modifiers and reuse the VOP1 unary path. Each
-/// op runs both modes in-process via amdgpu::simd_force_scalar(); the per-lane
-/// VGPR result must agree with inactive lanes preserved, under full/partial EXEC.
+/// The integer/cvt forms apply no modifiers and reuse the VOP1 unary path. The
+/// process runs one fixed execute mode (RJ_FORCE_SCALAR, immutable); each
+/// (case, modifier combo) result is recorded and the scalar-vs-SIMD equivalence
+/// is asserted by diffing the two runs (see simd_ab.h / the simd_ab_diff CTest
+/// entry). In-process inactive lanes must stay preserved under full/partial EXEC.
+
+#include "simd_ab.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -25,6 +29,7 @@
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <memory>
+#include <string>
 
 namespace {
 
@@ -144,11 +149,9 @@ struct Fixture {
     wf->set_exec(exec);
   }
 
-  std::array<uint32_t, WF_SIZE> run(Instruction *inst, bool force_scalar, Kind k, uint64_t exec) {
-    amdgpu::simd_force_scalar() = force_scalar;
+  std::array<uint32_t, WF_SIZE> run(Instruction *inst, Kind k, uint64_t exec) {
     seed_inputs(k, exec);
     cu->execute_instruction(inst, *wf);
-    amdgpu::simd_force_scalar() = false;
     uint32_t vb = wf->vgpr_alloc().base;
     std::array<uint32_t, WF_SIZE> out{};
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
@@ -166,20 +169,21 @@ void check(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32_t cl
   vop3_encode(c.opcode, /*vdst=*/kDstVgpr, /*src0=*/256, abs, neg, omod, clamp, words);
   Instruction *inst = fx.decoder->decode(words);
   ASSERT_NE(inst, nullptr) << c.name << " decode failed";
-  auto scalar = fx.run(inst, /*force_scalar=*/true, c.kind, exec);
-  auto simd = fx.run(inst, /*force_scalar=*/false, c.kind, exec);
+  auto out = fx.run(inst, c.kind, exec);
+
+  // Fold the modifier combo into the sublabel so each (case, mods) line is unique.
+  const std::string sub = std::string(c.name) + ":a" + std::to_string(abs) + "n" +
+                          std::to_string(neg) + "o" + std::to_string(omod) + "c" +
+                          std::to_string(clamp);
+  simd_ab::record(sub, exec, out.data(), WF_SIZE);
+
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     const bool active = (exec >> lane) & 1ULL;
     if (!active) {
-      EXPECT_EQ(simd[lane], DST_SENTINEL)
+      EXPECT_EQ(out[lane], DST_SENTINEL)
           << c.name << " abs=" << abs << " neg=" << neg << " omod=" << omod << " clamp=" << clamp
-          << ": SIMD clobbered inactive lane " << lane;
-      continue;
+          << ": clobbered inactive lane " << lane;
     }
-    EXPECT_EQ(scalar[lane], simd[lane])
-        << c.name << " abs=" << abs << " neg=" << neg << " omod=" << omod << " clamp=" << clamp
-        << ": lane " << std::dec << lane << std::hex << " scalar=0x" << scalar[lane] << " simd=0x"
-        << simd[lane];
   }
   delete inst;
 }
@@ -225,12 +229,13 @@ TEST(Vop3UnarySimdCorrectness, Plain_FullAndPartialExec) {
   }
 }
 
-// Absolute scalar-behavior regression for the v_mov_b32 VOP3 codegen fix: with no
+// Absolute behavior regression for the v_mov_b32 VOP3 codegen fix: with no
 // modifiers it must MOVE the bits (not truncate float->int). Before the fix the
 // generated body returned the f32 value to a uint32 write_lane without a
-// bit_cast, so 0.5 (0x3F000000) wrote 0; neg must flip the sign bit. Runs
-// forced-scalar so it pins the generated body independent of the SIMD path.
-TEST(Vop3UnarySimdCorrectness, MovB32_Scalar_PreservesBits) {
+// bit_cast, so 0.5 (0x3F000000) wrote 0; neg must flip the sign bit. The
+// expected bit patterns are mode-independent, so this pins the result in
+// whichever execute mode (RJ_FORCE_SCALAR) the process runs.
+TEST(Vop3UnarySimdCorrectness, MovB32_PreservesBits) {
   Fixture fx;
   ASSERT_NE(fx.cu, nullptr);
   ASSERT_NE(fx.wf, nullptr);
@@ -249,13 +254,11 @@ TEST(Vop3UnarySimdCorrectness, MovB32_Scalar_PreservesBits) {
                 s.clamp, words);
     Instruction *inst = fx.decoder->decode(words);
     ASSERT_NE(inst, nullptr);
-    amdgpu::simd_force_scalar() = true;
     uint32_t vb = fx.wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
       fx.cu->write_vgpr(vb + 0, lane, s.in);
     fx.wf->set_exec(~0ULL);
     fx.cu->execute_instruction(inst, *fx.wf);
-    amdgpu::simd_force_scalar() = false;
     EXPECT_EQ(fx.cu->read_vgpr(vb + kDstVgpr, 0), s.expect)
         << "v_mov_b32 abs=" << s.abs << " neg=" << s.neg << " in=0x" << std::hex << s.in;
     delete inst;

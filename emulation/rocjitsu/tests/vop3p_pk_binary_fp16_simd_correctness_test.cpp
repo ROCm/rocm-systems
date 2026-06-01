@@ -2,17 +2,23 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vop3p_pk_binary_fp16_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs forced-scalar body) for the
-/// VOP3P packed-16 floating-point binary family on CDNA4:
+/// @brief Bit-identity check (SIMD fast path vs scalar body) for the VOP3P
+/// packed-16 floating-point binary family on CDNA4:
 ///   v_pk_add_f16 / v_pk_mul_f16 / v_pk_max_f16 / v_pk_min_f16.
 ///
 /// Each 32-bit lane holds two f16 values. The SIMD path widens each half to
 /// f32, applies per-half sign-flip from neg/neg_hi, runs the functor in
 /// f32, narrows back to f16 and packs. Default packing (op_sel = 0,
-/// op_sel_hi = 3) only — non-default modes bail to scalar. The test sweeps
-/// 4 neg combinations × 4 neg_hi combinations × 14 rotations under full
-/// + partial EXEC, with NaN-input lanes skipped (toolchain-dependent NaN
-/// payload divergence, same carve-out as the existing pk_fma_mix slice).
+/// op_sel_hi = 3) only — non-default modes bail to scalar. The process runs one
+/// fixed execute mode (RJ_FORCE_SCALAR, immutable); each result is recorded and
+/// the scalar-vs-SIMD equivalence is asserted by diffing the two runs (see
+/// simd_ab.h / the simd_ab_diff CTest entry). NaN-input lanes carry a
+/// toolchain-dependent NaN-payload divergence and are overwritten with a fixed
+/// sentinel before recording — the skip condition is computed from the inputs,
+/// identical in both runs, so both mask the same lanes. In-process inactive
+/// lanes must keep the sentinel.
+
+#include "simd_ab.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -29,6 +35,7 @@
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <memory>
+#include <string>
 
 namespace {
 
@@ -39,6 +46,9 @@ constexpr uint32_t SGPRS_PER_WF = 106;
 constexpr uint32_t VGPRS_PER_WF = 256;
 constexpr uint32_t kDstVgpr = 6;
 constexpr uint32_t DST_SENTINEL = 0xCDCDCDCDu;
+// Fixed marker written over accepted-divergence (NaN-input) lanes before
+// recording, so the cross-run diff ignores them identically in both runs.
+constexpr uint32_t SKIP_SENTINEL = 0xA11D1FFFu;
 
 // CDNA4 VOP3P encoding. neg goes into word1 bits 29:31; neg_hi goes into
 // word0 bits 8:10; op_sel/op_sel_hi packed for default lo/hi pick.
@@ -132,12 +142,9 @@ struct Fixture {
     wf->set_exec(exec);
   }
 
-  std::array<uint32_t, WF_SIZE> run(Instruction *inst, bool force_scalar, uint32_t rot,
-                                    uint64_t exec) {
-    amdgpu::simd_force_scalar() = force_scalar;
+  std::array<uint32_t, WF_SIZE> run(Instruction *inst, uint32_t rot, uint64_t exec) {
     seed_inputs(rot, exec);
     cu->execute_instruction(inst, *wf);
-    amdgpu::simd_force_scalar() = false;
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
@@ -159,35 +166,40 @@ void check_case(const Case &c, uint64_t exec, uint32_t neg, uint32_t neg_hi) {
   Instruction *inst = fx.decoder->decode(words);
   ASSERT_NE(inst, nullptr) << c.name << " decode failed";
   for (uint32_t rot = 0; rot < kF16Bits.size(); ++rot) {
-    auto scalar = fx.run(inst, /*force_scalar=*/true, rot, exec);
-    auto simd = fx.run(inst, /*force_scalar=*/false, rot, exec);
+    auto out = fx.run(inst, rot, exec);
+
+    // Mask NaN-input lanes (accepted f16 NaN-payload divergence) before recording.
+    // The skip condition is computed from the inputs (identical in both runs), so
+    // both the scalar and SIMD runs mask the same lanes.
+    uint32_t words_out[WF_SIZE];
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+      const bool active = (exec >> lane) & 1ULL;
+      bool skip = false;
+      if (active) {
+        uint16_t a_lo = kF16Bits[lane % kF16Bits.size()];
+        uint16_t a_hi = kF16Bits[(lane + 3) % kF16Bits.size()];
+        uint16_t b_lo = kF16Bits[(lane + rot) % kF16Bits.size()];
+        uint16_t b_hi = kF16Bits[(lane + rot + 5) % kF16Bits.size()];
+        skip = is_f16_nan(a_lo) || is_f16_nan(a_hi) || is_f16_nan(b_lo) || is_f16_nan(b_hi);
+        if (!skip && c.ternary) {
+          uint16_t c_lo = kF16Bits[(lane + 2 * rot + 1) % kF16Bits.size()];
+          uint16_t c_hi = kF16Bits[(lane + 2 * rot + 7) % kF16Bits.size()];
+          skip = is_f16_nan(c_lo) || is_f16_nan(c_hi);
+        }
+      }
+      words_out[lane] = (active && skip) ? SKIP_SENTINEL : out[lane];
+    }
+    const std::string sub = std::string(c.name) + ":n" + std::to_string(neg) + "h" +
+                            std::to_string(neg_hi) + "r" + std::to_string(rot);
+    simd_ab::record(sub, exec, words_out, WF_SIZE);
+
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       const bool active = (exec >> lane) & 1ULL;
       if (!active) {
-        EXPECT_EQ(simd[lane], DST_SENTINEL)
+        EXPECT_EQ(out[lane], DST_SENTINEL)
             << c.name << " neg=" << neg << " neg_hi=" << neg_hi << " rot=" << rot
-            << ": SIMD clobbered inactive lane " << lane;
-        continue;
+            << ": clobbered inactive lane " << lane;
       }
-      // Skip lanes whose inputs include f16 NaN — NaN payload divergence
-      // between stdx::fmin/fmax / std::fma and the scalar IEEE bodies is
-      // toolchain-dependent (same carve-out as the existing fma_mix slice).
-      uint16_t a_lo = kF16Bits[lane % kF16Bits.size()];
-      uint16_t a_hi = kF16Bits[(lane + 3) % kF16Bits.size()];
-      uint16_t b_lo = kF16Bits[(lane + rot) % kF16Bits.size()];
-      uint16_t b_hi = kF16Bits[(lane + rot + 5) % kF16Bits.size()];
-      if (is_f16_nan(a_lo) || is_f16_nan(a_hi) || is_f16_nan(b_lo) || is_f16_nan(b_hi))
-        continue;
-      if (c.ternary) {
-        uint16_t c_lo = kF16Bits[(lane + 2 * rot + 1) % kF16Bits.size()];
-        uint16_t c_hi = kF16Bits[(lane + 2 * rot + 7) % kF16Bits.size()];
-        if (is_f16_nan(c_lo) || is_f16_nan(c_hi))
-          continue;
-      }
-      EXPECT_EQ(scalar[lane], simd[lane])
-          << c.name << " neg=0x" << std::hex << neg << " neg_hi=0x" << neg_hi << " rot=" << std::dec
-          << rot << " lane=" << lane << ": divergence scalar=0x" << std::hex << scalar[lane]
-          << " simd=0x" << simd[lane];
     }
   }
   delete inst;

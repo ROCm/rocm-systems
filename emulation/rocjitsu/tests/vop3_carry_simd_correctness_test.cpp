@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vop3_carry_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs forced-scalar body) for the
+/// @brief Bit-identity check (SIMD fast path vs scalar body) for the
 /// VOP3 sdst-enc carry-bearing ops:
 ///   no-carry-in (CDNA4): v_add_co_u32, v_sub_co_u32, v_subrev_co_u32
 ///   src2-carry-in (CDNA4): v_addc_co_u32, v_subb_co_u32, v_subbrev_co_u32
@@ -11,11 +11,15 @@
 /// All six cin-form scalar bodies pull per-lane carry-in from
 /// `inst.src2.read_scalar64(wf)` (SGPR-pair) and write co into
 /// `inst.sdst.write_scalar64`, with inactive lanes preserved from the
-/// incoming VCC. The test runs both modes in-process via
-/// simd_force_scalar() and asserts that the destination VGPR AND the
-/// full 64-bit SGPR-pair carry result agree, sweeping {full, partial}
-/// EXEC × {VCC seeds} × {cin patterns}. Inputs deliberately seed the
-/// 32-bit carry/borrow boundary on the low lanes.
+/// incoming VCC. The process runs one fixed execute mode (RJ_FORCE_SCALAR,
+/// immutable); the destination VGPR AND the full 64-bit SGPR-pair carry result
+/// are recorded and the scalar-vs-SIMD equivalence on BOTH is asserted by
+/// diffing the two runs (see simd_ab.h / the simd_ab_diff CTest entry), sweeping
+/// {full, partial} EXEC × {VCC seeds} × {cin patterns}. In-process inactive dst
+/// lanes must keep the sentinel. Inputs deliberately seed the 32-bit
+/// carry/borrow boundary on the low lanes.
+
+#include "simd_ab.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -33,6 +37,7 @@
 #include <gtest/gtest.h>
 #include <memory>
 #include <random>
+#include <string>
 
 namespace {
 
@@ -141,12 +146,10 @@ template <int WaveSize> struct WaveFixture {
     uint64_t sdst = 0;
   };
 
-  Result run(Instruction *inst, bool force_scalar, uint64_t seed, uint64_t exec, uint64_t vcc_in,
-             uint64_t sdst_in, uint32_t sdst_sgpr, uint64_t cin_word, uint32_t cin_sgpr_pair) {
-    amdgpu::simd_force_scalar() = force_scalar;
+  Result run(Instruction *inst, uint64_t seed, uint64_t exec, uint64_t vcc_in, uint64_t sdst_in,
+             uint32_t sdst_sgpr, uint64_t cin_word, uint32_t cin_sgpr_pair) {
     seed_inputs(seed, exec, vcc_in, sdst_in, sdst_sgpr, cin_word, cin_sgpr_pair);
     cu->execute_instruction(inst, *wf);
-    amdgpu::simd_force_scalar() = false;
     Result res;
     uint32_t vbase = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WaveSize; ++lane)
@@ -210,24 +213,24 @@ void check_case(WaveFixture<WaveSize> &fx, const CarryCase &c, uint32_t encoding
     const size_t cin_n = c.has_cin ? std::size(kCinPatterns) : 1u;
     for (size_t i = 0; i < cin_n; ++i) {
       uint64_t cin_word = c.has_cin ? cin_set[i] : 0ULL;
-      auto scalar = fx.run(inst, /*force_scalar=*/true, SEED, exec, vcc_in, SDST_SEED, sb, cin_word,
-                           cin_pair);
-      auto simd = fx.run(inst, /*force_scalar=*/false, SEED, exec, vcc_in, SDST_SEED, sb, cin_word,
-                         cin_pair);
+      auto out = fx.run(inst, SEED, exec, vcc_in, SDST_SEED, sb, cin_word, cin_pair);
+
+      // Record the dst words and the full 64-bit sdst (lo, hi) so the cross-run
+      // diff covers BOTH outputs. (label, vcc_in, cin) keep the line unique.
+      const std::string base = std::string(c.label) + ":vcc" + std::to_string(vcc_in) + ":cin" +
+                               std::to_string(cin_word);
+      simd_ab::record(base, exec, out.dst.data(), WaveSize);
+      const uint32_t sdst_words[2] = {static_cast<uint32_t>(out.sdst),
+                                      static_cast<uint32_t>(out.sdst >> 32)};
+      simd_ab::record(base + ":sdst", exec, sdst_words, 2);
+
       for (uint32_t lane = 0; lane < WaveSize; ++lane) {
         const bool active = (exec >> lane) & 1ULL;
-        EXPECT_EQ(scalar.dst[lane], simd.dst[lane])
-            << c.label << " vcc_in=0x" << std::hex << vcc_in << " cin=0x" << cin_word
-            << ": dst divergence at lane " << std::dec << lane << std::hex << " scalar=0x"
-            << scalar.dst[lane] << " simd=0x" << simd.dst[lane];
         if (!active) {
-          EXPECT_EQ(simd.dst[lane], DST_SENTINEL)
-              << c.label << ": SIMD clobbered inactive dst lane " << lane;
+          EXPECT_EQ(out.dst[lane], DST_SENTINEL)
+              << c.label << ": clobbered inactive dst lane " << lane;
         }
       }
-      EXPECT_EQ(scalar.sdst, simd.sdst)
-          << c.label << " vcc_in=0x" << std::hex << vcc_in << " cin=0x" << cin_word
-          << ": sdst divergence scalar=0x" << scalar.sdst << " simd=0x" << simd.sdst;
     }
   }
   delete inst;

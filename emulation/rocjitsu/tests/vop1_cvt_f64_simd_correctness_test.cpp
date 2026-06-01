@@ -2,21 +2,26 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vop1_cvt_f64_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs forced-scalar body) for the six
+/// @brief Bit-identity check (SIMD fast path vs scalar body) for the six
 /// mixed-width f64<->32-bit VOP1 conversions on CDNA4: the f64-source forms
 /// (v_cvt_f32_f64, v_cvt_i32_f64, v_cvt_u32_f64) and the f64-dst forms
 /// (v_cvt_f64_f32, v_cvt_f64_i32, v_cvt_f64_u32). These bridge an 8-wide
 /// (native_width64) f64 chunk and the same number of 32-bit lanes, so they use
 /// dedicated cvt glue (read_simd64 / narrow32) rather than the equal-width unary
-/// path. Each op runs in both modes in-process via amdgpu::simd_force_scalar()
-/// and the destination VGPR(s) must agree on active lanes, with inactive lanes
-/// preserved, under full and partial EXEC.
+/// path. The process runs one fixed execute mode (RJ_FORCE_SCALAR, immutable);
+/// the destination word pair is recorded and the scalar-vs-SIMD equivalence is
+/// asserted by diffing the two runs (see simd_ab.h / the simd_ab_diff CTest
+/// entry). In-process inactive lanes must stay preserved under full/partial EXEC.
 ///
 /// The float-result conversions (v_cvt_f32_f64, v_cvt_f64_f32) are correctly
 /// rounded (vcvtpd2ps / vcvtps2pd), bit-exact for finite/Inf inputs; a NaN
 /// *result* may carry a different payload between packed and scalar (accepted),
-/// so those lanes are skipped. The int conversions are exact (NaN->0 and the
-/// saturating clamp are deterministic), compared with no carve-out.
+/// so those lanes are overwritten with a fixed sentinel before recording —
+/// NaN-ness of the result is deterministic from the inputs, so both runs mask
+/// the same lanes. The int conversions are exact (NaN->0 and the saturating
+/// clamp are deterministic), recorded with no carve-out.
+
+#include "simd_ab.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -43,6 +48,9 @@ using namespace rocjitsu;
 constexpr uint32_t WF_SIZE = 64;
 constexpr uint32_t SGPRS_PER_WF = 106;
 constexpr uint32_t VGPRS_PER_WF = 256;
+// Fixed marker written over accepted-divergence (NaN-result) lanes before
+// recording, so the cross-run diff ignores them identically in both runs.
+constexpr uint32_t SKIP_SENTINEL = 0xA11D1FFFu;
 
 // CDNA4 VOP1: enc[31:25] = 0b0111111, vdst[24:17], op[16:9], src0[8:0].
 constexpr uint32_t vop1_encode(uint32_t op, uint32_t vdst, uint32_t src0) {
@@ -167,12 +175,9 @@ struct Fixture {
     wf->set_exec(exec);
   }
 
-  std::array<uint64_t, WF_SIZE> run(Instruction *inst, const CvtCase &c, bool force_scalar,
-                                    uint64_t exec) {
-    amdgpu::simd_force_scalar() = force_scalar;
+  std::array<uint64_t, WF_SIZE> run(Instruction *inst, const CvtCase &c, uint64_t exec) {
     seed_inputs(c, exec);
     cu->execute_instruction(inst, *wf);
-    amdgpu::simd_force_scalar() = false;
     std::array<uint64_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
@@ -190,34 +195,38 @@ void check_case(const CvtCase &c, uint64_t exec) {
   Instruction *inst = fx.decoder->decode(words);
   ASSERT_NE(inst, nullptr) << c.name << " decode failed";
 
-  auto scalar = fx.run(inst, c, /*force_scalar=*/true, exec);
-  auto simd = fx.run(inst, c, /*force_scalar=*/false, exec);
+  auto out = fx.run(inst, c, exec);
+
+  // Record the dst word pair (lo, hi). For float-result conversions a NaN-result
+  // lane carries a possibly-different NaN payload (accepted divergence); the
+  // NaN-ness is deterministic from the inputs, so both runs mask the same lanes
+  // with a fixed sentinel. For the 32-bit-dst forms the high half is the
+  // (deterministic) sentinel and is recorded as-is, so the high-half no-write
+  // invariant is also covered by the cross-run diff.
+  uint32_t words_out[2 * WF_SIZE];
+  for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+    const bool active = (exec >> lane) & 1ULL;
+    uint64_t v = out[lane];
+    uint32_t lo = static_cast<uint32_t>(v);
+    uint32_t hi = static_cast<uint32_t>(v >> 32);
+    if (active && c.skip_nan) {
+      if (c.dst64) {
+        if (is_f64_nan(v)) {
+          lo = SKIP_SENTINEL;
+          hi = SKIP_SENTINEL;
+        }
+      } else if (is_f32_nan(lo)) {
+        lo = SKIP_SENTINEL;
+      }
+    }
+    words_out[2 * lane] = lo;
+    words_out[2 * lane + 1] = hi;
+  }
+  simd_ab::record(c.name, exec, words_out, 2 * WF_SIZE);
 
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     if (!(exec & (1ULL << lane))) {
-      EXPECT_EQ(simd[lane], dst_sentinel(lane))
-          << c.name << " clobbered inactive lane " << lane << " (simd)";
-      EXPECT_EQ(scalar[lane], dst_sentinel(lane))
-          << c.name << " clobbered inactive lane " << lane << " (scalar)";
-      continue;
-    }
-    if (c.dst64) {
-      // Full 64-bit f64 result.
-      if (c.skip_nan && (is_f64_nan(scalar[lane]) || is_f64_nan(simd[lane])))
-        continue;
-      EXPECT_EQ(scalar[lane], simd[lane])
-          << c.name << " dst divergence at lane " << lane << std::hex << " scalar=0x"
-          << scalar[lane] << " simd=0x" << simd[lane];
-    } else {
-      // 32-bit result lives in the low half; the high half must keep the sentinel.
-      uint32_t sc = static_cast<uint32_t>(scalar[lane]);
-      uint32_t sd = static_cast<uint32_t>(simd[lane]);
-      EXPECT_EQ(simd[lane] >> 32, dst_sentinel(lane) >> 32)
-          << c.name << " wrote into the high VGPR at lane " << lane;
-      if (c.skip_nan && (is_f32_nan(sc) || is_f32_nan(sd)))
-        continue;
-      EXPECT_EQ(sc, sd) << c.name << " dst divergence at lane " << lane << std::hex << " scalar=0x"
-                        << sc << " simd=0x" << sd;
+      EXPECT_EQ(out[lane], dst_sentinel(lane)) << c.name << " clobbered inactive lane " << lane;
     }
   }
   delete inst;

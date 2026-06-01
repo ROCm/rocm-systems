@@ -2,8 +2,15 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vop3p_dot_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs forced-scalar body) for the
-/// VOP3P dot-product family on CDNA4:
+/// @brief Bit-identity check (SIMD fast path vs scalar body) for the VOP3P
+/// dot-product family on CDNA4. The process runs one fixed execute mode
+/// (RJ_FORCE_SCALAR, immutable); each result is recorded and the scalar-vs-SIMD
+/// equivalence is asserted by diffing the two runs (see simd_ab.h / the
+/// simd_ab_diff CTest entry). The f16 form's NaN-input lanes carry a
+/// toolchain-dependent NaN-payload divergence and are overwritten with a fixed
+/// sentinel before recording (the skip condition is computed from the inputs, so
+/// both runs mask the same lanes). In-process inactive lanes must keep the
+/// sentinel. Ops covered:
 ///   integer: v_dot4_i32_i8 / v_dot4_u32_u8 / v_dot8_i32_i4 / v_dot8_u32_u4 /
 ///            v_dot2_i32_i16 / v_dot2_u32_u16
 ///   float:   v_dot2_f32_f16
@@ -17,6 +24,8 @@
 /// combination × clamp with NaN-input lanes skipped (toolchain-dependent NaN
 /// payload divergence, same carve-out as the pk_fma slices). Default packing
 /// (op_sel = 0, op_sel_hi = 3) only — non-default modes bail to scalar.
+
+#include "simd_ab.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -34,6 +43,7 @@
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <memory>
+#include <string>
 
 namespace {
 
@@ -44,6 +54,9 @@ constexpr uint32_t SGPRS_PER_WF = 106;
 constexpr uint32_t VGPRS_PER_WF = 256;
 constexpr uint32_t kDstVgpr = 6;
 constexpr uint32_t DST_SENTINEL = 0xCDCDCDCDu;
+// Fixed marker written over accepted-divergence (NaN-input) lanes before
+// recording, so the cross-run diff ignores them identically in both runs.
+constexpr uint32_t SKIP_SENTINEL = 0xA11D1FFFu;
 
 // CDNA4 VOP3P dot encoding (all dot ops are 3-source). Default packing:
 // op_sel = 0, op_sel_hi = 3, op_sel_hi_2 = 1. clamp -> word0 bit 15; neg ->
@@ -126,11 +139,9 @@ void check_int_case(const IntCase &c, uint64_t exec, uint32_t clamp) {
     }
     wf->set_exec(exec);
   };
-  auto run = [&](bool force_scalar, uint32_t rot) {
-    amdgpu::simd_force_scalar() = force_scalar;
+  auto run = [&](uint32_t rot) {
     seed(rot);
     cu->execute_instruction(inst, *wf);
-    amdgpu::simd_force_scalar() = false;
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
@@ -139,18 +150,18 @@ void check_int_case(const IntCase &c, uint64_t exec, uint32_t clamp) {
   };
 
   for (uint32_t rot = 0; rot < kVals.size(); ++rot) {
-    auto scalar = run(/*force_scalar=*/true, rot);
-    auto simd = run(/*force_scalar=*/false, rot);
+    auto out = run(rot);
+
+    const std::string sub =
+        std::string(c.name) + ":c" + std::to_string(clamp) + ":r" + std::to_string(rot);
+    simd_ab::record(sub, exec, out.data(), WF_SIZE);
+
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       const bool active = (exec >> lane) & 1ULL;
       if (!active) {
-        EXPECT_EQ(simd[lane], DST_SENTINEL) << c.name << " clamp=" << clamp << " rot=" << rot
-                                            << ": clobbered inactive lane " << lane;
-        continue;
+        EXPECT_EQ(out[lane], DST_SENTINEL) << c.name << " clamp=" << clamp << " rot=" << rot
+                                           << ": clobbered inactive lane " << lane;
       }
-      EXPECT_EQ(scalar[lane], simd[lane])
-          << c.name << " clamp=" << clamp << " rot=" << rot << " lane=" << lane
-          << ": divergence scalar=0x" << std::hex << scalar[lane] << " simd=0x" << simd[lane];
     }
   }
   delete inst;
@@ -240,11 +251,9 @@ void check_f16_case(uint64_t exec, uint32_t neg, uint32_t neg_hi, uint32_t clamp
     }
     wf->set_exec(exec);
   };
-  auto run = [&](bool force_scalar, uint32_t rot) {
-    amdgpu::simd_force_scalar() = force_scalar;
+  auto run = [&](uint32_t rot) {
     seed(rot);
     cu->execute_instruction(inst, *wf);
-    amdgpu::simd_force_scalar() = false;
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
@@ -253,23 +262,32 @@ void check_f16_case(uint64_t exec, uint32_t neg, uint32_t neg_hi, uint32_t clamp
   };
 
   for (uint32_t rot = 0; rot < kF16Bits.size(); ++rot) {
-    auto scalar = run(/*force_scalar=*/true, rot);
-    auto simd = run(/*force_scalar=*/false, rot);
+    auto out = run(rot);
+
+    // Mask NaN-input lanes (accepted f16 NaN-payload divergence). The skip
+    // condition is computed from the inputs, identical in both runs.
+    uint32_t words_out[WF_SIZE];
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+      const bool active = (exec >> lane) & 1ULL;
+      bool skip = false;
+      if (active) {
+        auto h = half_bits(lane, rot);
+        skip = is_f16_nan(h[0]) || is_f16_nan(h[1]) || is_f16_nan(h[2]) || is_f16_nan(h[3]);
+      }
+      words_out[lane] = (active && skip) ? SKIP_SENTINEL : out[lane];
+    }
+    const std::string sub = "v_dot2_f32_f16:n" + std::to_string(neg) + "h" +
+                            std::to_string(neg_hi) + "c" + std::to_string(clamp) + "r" +
+                            std::to_string(rot);
+    simd_ab::record(sub, exec, words_out, WF_SIZE);
+
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       const bool active = (exec >> lane) & 1ULL;
       if (!active) {
-        EXPECT_EQ(simd[lane], DST_SENTINEL)
+        EXPECT_EQ(out[lane], DST_SENTINEL)
             << "v_dot2_f32_f16 neg=" << neg << " neg_hi=" << neg_hi << " clamp=" << clamp
             << " rot=" << rot << ": clobbered inactive lane " << lane;
-        continue;
       }
-      auto h = half_bits(lane, rot);
-      if (is_f16_nan(h[0]) || is_f16_nan(h[1]) || is_f16_nan(h[2]) || is_f16_nan(h[3]))
-        continue;
-      EXPECT_EQ(scalar[lane], simd[lane])
-          << "v_dot2_f32_f16 neg=0x" << std::hex << neg << " neg_hi=0x" << neg_hi << std::dec
-          << " clamp=" << clamp << " rot=" << rot << " lane=" << lane << ": divergence scalar=0x"
-          << std::hex << scalar[lane] << " simd=0x" << simd[lane];
     }
   }
   delete inst;

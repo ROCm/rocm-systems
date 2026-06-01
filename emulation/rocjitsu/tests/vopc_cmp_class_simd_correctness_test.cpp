@@ -2,19 +2,23 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vopc_cmp_class_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs forced-scalar body) for the
+/// @brief Bit-identity check (SIMD fast path vs scalar body) for the
 /// v_cmp_class VOPC ops on CDNA4. v_cmp_class tests src0's IEEE-754 float class
 /// against a 10-bit class mask in vsrc1 and writes one VCC bit per active lane;
 /// it is not a relational compare, so it uses a class-decode functor over the
-/// existing VOPC glue. Each op runs both modes in-process via
-/// amdgpu::simd_force_scalar() and the full 64-bit VCC must agree, with inactive
-/// lanes preserved, under full and partial EXEC.
+/// existing VOPC glue. The process runs one fixed execute mode (RJ_FORCE_SCALAR,
+/// immutable); the full 64-bit VCC is recorded (as two words) and the
+/// scalar-vs-SIMD equivalence is asserted by diffing the two runs (see simd_ab.h
+/// / the simd_ab_diff CTest entry). In-process inactive-lane VCC bits must stay
+/// preserved under full and partial EXEC.
 ///
 /// f16 and f32 read src0 as 32-bit raw bits; f64 reads src0 as a 64-bit VGPR pair
 /// while vsrc1 stays a 32-bit mask (the mixed-width class glue). The
 /// classification is pure bit decode (matching the scalar isnan/isnormal/signbit
 /// outcomes for every input incl. NaN payload), so the compare is bit-exact with
 /// no carve-out.
+
+#include "simd_ab.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -30,6 +34,7 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace {
@@ -189,12 +194,9 @@ struct Fixture {
     wf->set_vcc(vcc_in);
   }
 
-  uint64_t run(Instruction *inst, bool force_scalar, Kind k, uint32_t rot, uint64_t exec,
-               uint64_t vcc_in) {
-    amdgpu::simd_force_scalar() = force_scalar;
+  uint64_t run(Instruction *inst, Kind k, uint32_t rot, uint64_t exec, uint64_t vcc_in) {
     seed_inputs(k, rot, exec, vcc_in);
     cu->execute_instruction(inst, *wf);
-    amdgpu::simd_force_scalar() = false;
     return wf->vcc();
   }
 };
@@ -212,13 +214,17 @@ void check_all(uint64_t exec) {
     ASSERT_NE(inst, nullptr) << c.name << " decode failed";
     for (uint32_t rot = 0; rot < kMasks.size(); ++rot) {
       for (uint64_t vcc_in : kVcc) {
-        uint64_t scalar = fx.run(inst, /*force_scalar=*/true, c.kind, rot, exec, vcc_in);
-        uint64_t simd = fx.run(inst, /*force_scalar=*/false, c.kind, rot, exec, vcc_in);
-        EXPECT_EQ(scalar, simd) << c.name << " rot=" << rot << " vcc_in=0x" << std::hex << vcc_in
-                                << ": VCC divergence scalar=0x" << scalar << " simd=0x" << simd;
+        uint64_t vcc = fx.run(inst, c.kind, rot, exec, vcc_in);
+
+        const std::string sub =
+            std::string(c.name) + ":r" + std::to_string(rot) + ":vcc" + std::to_string(vcc_in);
+        const uint32_t vcc_words[2] = {static_cast<uint32_t>(vcc),
+                                       static_cast<uint32_t>(vcc >> 32)};
+        simd_ab::record(sub, exec, vcc_words, 2);
+
         const uint64_t inactive = ~exec;
-        EXPECT_EQ(simd & inactive, vcc_in & inactive)
-            << c.name << " rot=" << rot << ": SIMD altered an inactive-lane VCC bit";
+        EXPECT_EQ(vcc & inactive, vcc_in & inactive)
+            << c.name << " rot=" << rot << ": altered an inactive-lane VCC bit";
       }
     }
     delete inst;
@@ -254,14 +260,18 @@ void check_all_vop3(uint64_t exec) {
         ASSERT_NE(inst, nullptr) << c.name << " decode failed";
         for (uint32_t rot = 0; rot < kMasks.size(); ++rot) {
           for (uint64_t vcc_in : kVcc) {
-            uint64_t scalar = fx.run(inst, /*force_scalar=*/true, c.kind, rot, exec, vcc_in);
-            uint64_t simd = fx.run(inst, /*force_scalar=*/false, c.kind, rot, exec, vcc_in);
-            EXPECT_EQ(scalar, simd) << c.name << " abs=" << abs << " neg=" << neg << " rot=" << rot
-                                    << " vcc_in=0x" << std::hex << vcc_in
-                                    << ": VCC divergence scalar=0x" << scalar << " simd=0x" << simd;
+            uint64_t vcc = fx.run(inst, c.kind, rot, exec, vcc_in);
+
+            const std::string sub = std::string(c.name) + ":a" + std::to_string(abs) + "n" +
+                                    std::to_string(neg) + ":r" + std::to_string(rot) + ":vcc" +
+                                    std::to_string(vcc_in);
+            const uint32_t vcc_words[2] = {static_cast<uint32_t>(vcc),
+                                           static_cast<uint32_t>(vcc >> 32)};
+            simd_ab::record(sub, exec, vcc_words, 2);
+
             const uint64_t inactive = ~exec;
-            EXPECT_EQ(simd & inactive, vcc_in & inactive)
-                << c.name << " abs=" << abs << " neg=" << neg << ": SIMD altered inactive VCC bit";
+            EXPECT_EQ(vcc & inactive, vcc_in & inactive)
+                << c.name << " abs=" << abs << " neg=" << neg << ": altered inactive VCC bit";
           }
         }
         delete inst;

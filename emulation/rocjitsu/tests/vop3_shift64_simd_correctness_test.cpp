@@ -2,12 +2,18 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vop3_shift64_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs forced-scalar body) for the
-/// 64-bit-lane VOP3 shifts on CDNA4: the reverse shifts v_lshlrev_b64 /
-/// v_lshrrev_b64 / v_ashrrev_i64 (shift the 64-bit src1 by the 32-bit src0,
-/// masked to [0,63]) and v_lshl_add_u64 ((src0 << (src1 & 63)) + src2). These
-/// use the new mixed-width 64-bit shift glue (32-bit count + 64-bit value);
-/// shifts produce no NaN so every active lane is compared bit-for-bit.
+/// @brief Bit-identity check (SIMD fast path vs scalar body) for the 64-bit-lane
+/// VOP3 shifts on CDNA4: the reverse shifts v_lshlrev_b64 / v_lshrrev_b64 /
+/// v_ashrrev_i64 (shift the 64-bit src1 by the 32-bit src0, masked to [0,63])
+/// and v_lshl_add_u64 ((src0 << (src1 & 63)) + src2). These use the new
+/// mixed-width 64-bit shift glue (32-bit count + 64-bit value); shifts produce
+/// no NaN so every value is recorded exactly. The process runs one fixed execute
+/// mode (RJ_FORCE_SCALAR, immutable); the f64 dst (lo,hi per lane) is recorded
+/// and the scalar-vs-SIMD equivalence is asserted by diffing the two runs (see
+/// simd_ab.h / the simd_ab_diff CTest entry). In-process inactive lanes must
+/// keep the sentinel.
+
+#include "simd_ab.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -24,6 +30,7 @@
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <memory>
+#include <string>
 
 namespace {
 
@@ -103,8 +110,7 @@ void check_revshift(const char *name, uint32_t op, uint64_t exec) {
   Instruction *inst = fx.decoder->decode(words);
   ASSERT_NE(inst, nullptr) << name << " decode failed";
   uint32_t vb = fx.wf->vgpr_alloc().base;
-  auto run = [&](bool force_scalar, uint32_t srot, uint32_t vrot) {
-    amdgpu::simd_force_scalar() = force_scalar;
+  auto run = [&](uint32_t srot, uint32_t vrot) {
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       fx.cu->write_vgpr(vb + 0, lane, kShifts[(lane + srot) % kShifts.size()]);
       fx.write64(vb + 2, lane, kVals64[(lane + vrot) % kVals64.size()]);
@@ -112,7 +118,6 @@ void check_revshift(const char *name, uint32_t op, uint64_t exec) {
     }
     fx.wf->set_exec(exec);
     fx.cu->execute_instruction(inst, *fx.wf);
-    amdgpu::simd_force_scalar() = false;
     std::array<uint64_t, WF_SIZE> out{};
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
       out[lane] = fx.read64(vb + kDstVgpr, lane);
@@ -120,17 +125,22 @@ void check_revshift(const char *name, uint32_t op, uint64_t exec) {
   };
   for (uint32_t srot = 0; srot < kShifts.size(); ++srot)
     for (uint32_t vrot = 0; vrot < kVals64.size(); vrot += 3) {
-      auto sc = run(true, srot, vrot);
-      auto sd = run(false, srot, vrot);
+      auto out = run(srot, vrot);
+
+      uint32_t words_out[2 * WF_SIZE];
+      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+        words_out[2 * lane] = static_cast<uint32_t>(out[lane]);
+        words_out[2 * lane + 1] = static_cast<uint32_t>(out[lane] >> 32);
+      }
+      const std::string sub =
+          std::string(name) + ":s" + std::to_string(srot) + ":v" + std::to_string(vrot);
+      simd_ab::record(sub, exec, words_out, 2 * WF_SIZE);
+
       for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         const bool active = (exec >> lane) & 1ULL;
         if (!active) {
-          EXPECT_EQ(sd[lane], dst_sentinel(lane)) << name << ": clobbered inactive lane " << lane;
-          continue;
+          EXPECT_EQ(out[lane], dst_sentinel(lane)) << name << ": clobbered inactive lane " << lane;
         }
-        EXPECT_EQ(sc[lane], sd[lane])
-            << name << " srot=" << srot << " vrot=" << vrot << " lane=" << lane << ": scalar=0x"
-            << std::hex << sc[lane] << " simd=0x" << sd[lane];
       }
     }
   delete inst;
@@ -147,8 +157,7 @@ void check_lshl_add(uint64_t exec) {
   Instruction *inst = fx.decoder->decode(words);
   ASSERT_NE(inst, nullptr) << "v_lshl_add_u64 decode failed";
   uint32_t vb = fx.wf->vgpr_alloc().base;
-  auto run = [&](bool force_scalar, uint32_t srot, uint32_t crot) {
-    amdgpu::simd_force_scalar() = force_scalar;
+  auto run = [&](uint32_t srot, uint32_t crot) {
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       fx.write64(vb + 0, lane, kVals64[lane % kVals64.size()]);
       fx.cu->write_vgpr(vb + 2, lane, kShifts[(lane + srot) % kShifts.size()]);
@@ -157,7 +166,6 @@ void check_lshl_add(uint64_t exec) {
     }
     fx.wf->set_exec(exec);
     fx.cu->execute_instruction(inst, *fx.wf);
-    amdgpu::simd_force_scalar() = false;
     std::array<uint64_t, WF_SIZE> out{};
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
       out[lane] = fx.read64(vb + kDstVgpr, lane);
@@ -165,18 +173,23 @@ void check_lshl_add(uint64_t exec) {
   };
   for (uint32_t srot = 0; srot < kShifts.size(); ++srot)
     for (uint32_t crot = 0; crot < kVals64.size(); crot += 3) {
-      auto sc = run(true, srot, crot);
-      auto sd = run(false, srot, crot);
+      auto out = run(srot, crot);
+
+      uint32_t words_out[2 * WF_SIZE];
+      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+        words_out[2 * lane] = static_cast<uint32_t>(out[lane]);
+        words_out[2 * lane + 1] = static_cast<uint32_t>(out[lane] >> 32);
+      }
+      const std::string sub =
+          "v_lshl_add_u64:s" + std::to_string(srot) + ":c" + std::to_string(crot);
+      simd_ab::record(sub, exec, words_out, 2 * WF_SIZE);
+
       for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         const bool active = (exec >> lane) & 1ULL;
         if (!active) {
-          EXPECT_EQ(sd[lane], dst_sentinel(lane))
+          EXPECT_EQ(out[lane], dst_sentinel(lane))
               << "v_lshl_add_u64: clobbered inactive lane " << lane;
-          continue;
         }
-        EXPECT_EQ(sc[lane], sd[lane])
-            << "v_lshl_add_u64 srot=" << srot << " crot=" << crot << " lane=" << lane
-            << ": scalar=0x" << std::hex << sc[lane] << " simd=0x" << sd[lane];
       }
     }
   delete inst;
@@ -193,8 +206,7 @@ void check_mad64(const char *name, uint32_t op, uint64_t exec) {
   Instruction *inst = fx.decoder->decode(words);
   ASSERT_NE(inst, nullptr) << name << " decode failed";
   uint32_t vb = fx.wf->vgpr_alloc().base;
-  auto run = [&](bool force_scalar, uint32_t arot, uint32_t crot) {
-    amdgpu::simd_force_scalar() = force_scalar;
+  auto run = [&](uint32_t arot, uint32_t crot) {
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       fx.cu->write_vgpr(vb + 0, lane, kShifts[lane % kShifts.size()]);
       fx.cu->write_vgpr(vb + 2, lane, kShifts[(lane + arot) % kShifts.size()]);
@@ -203,7 +215,6 @@ void check_mad64(const char *name, uint32_t op, uint64_t exec) {
     }
     fx.wf->set_exec(exec);
     fx.cu->execute_instruction(inst, *fx.wf);
-    amdgpu::simd_force_scalar() = false;
     std::array<uint64_t, WF_SIZE> out{};
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
       out[lane] = fx.read64(vb + kDstVgpr, lane);
@@ -211,17 +222,22 @@ void check_mad64(const char *name, uint32_t op, uint64_t exec) {
   };
   for (uint32_t arot = 0; arot < kShifts.size(); ++arot)
     for (uint32_t crot = 0; crot < kVals64.size(); crot += 3) {
-      auto sc = run(true, arot, crot);
-      auto sd = run(false, arot, crot);
+      auto out = run(arot, crot);
+
+      uint32_t words_out[2 * WF_SIZE];
+      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+        words_out[2 * lane] = static_cast<uint32_t>(out[lane]);
+        words_out[2 * lane + 1] = static_cast<uint32_t>(out[lane] >> 32);
+      }
+      const std::string sub =
+          std::string(name) + ":a" + std::to_string(arot) + ":c" + std::to_string(crot);
+      simd_ab::record(sub, exec, words_out, 2 * WF_SIZE);
+
       for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         const bool active = (exec >> lane) & 1ULL;
         if (!active) {
-          EXPECT_EQ(sd[lane], dst_sentinel(lane)) << name << ": clobbered inactive lane " << lane;
-          continue;
+          EXPECT_EQ(out[lane], dst_sentinel(lane)) << name << ": clobbered inactive lane " << lane;
         }
-        EXPECT_EQ(sc[lane], sd[lane])
-            << name << " arot=" << arot << " crot=" << crot << " lane=" << lane << ": scalar=0x"
-            << std::hex << sc[lane] << " simd=0x" << sd[lane];
       }
     }
   delete inst;

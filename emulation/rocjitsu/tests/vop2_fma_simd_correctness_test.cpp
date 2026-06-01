@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vop2_fma_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs forced-scalar body) for the
-/// ternary VOP2 fused multiply-add family wired into SIMD_VOP2_TERNARY. Covers
-/// the three operand shapes available on CDNA4:
+/// @brief Bit-identity check (SIMD fast path vs scalar body) for the ternary
+/// VOP2 fused multiply-add family wired into SIMD_VOP2_TERNARY. Covers the
+/// three operand shapes available on CDNA4:
 ///   dst-accumulate : v_fmac_f32 (59), v_mac_f16 (35)   -> fma(s0, s1, dst)
 ///   literal addend : v_fmaak_f32 (24), v_madak_f16 (37) -> fma(s0, s1, K)
 ///   literal mult   : v_fmamk_f32 (23), v_madmk_f16 (36) -> fma(s0, K, s1)
@@ -14,10 +14,14 @@
 /// random bit patterns plus explicit fp edge lanes (0, ±0, ±Inf, denormal,
 /// large). fma is bit-exact for all finite/Inf inputs (incl. Inf*0->NaN); a NaN
 /// *input* may propagate a different NaN payload through the packed vs scalar
-/// FMA, an accepted difference, so lanes with a NaN input are skipped in the
-/// comparison. Both modes run in-process via amdgpu::simd_force_scalar(); the
-/// SIMD result must match the scalar generated body on every non-NaN-input
-/// lane, under full and partial EXEC.
+/// FMA, an accepted difference, so lanes with a NaN input are overwritten with a
+/// fixed sentinel before recording (the skip condition is computed from the
+/// inputs, identical in both runs, so both runs mask the same lanes). The
+/// process runs one fixed execute mode (RJ_FORCE_SCALAR, immutable); the
+/// scalar-vs-SIMD equivalence is asserted by diffing the two runs (see
+/// simd_ab.h / the simd_ab_diff CTest entry).
+
+#include "simd_ab.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -43,6 +47,9 @@ using namespace rocjitsu;
 constexpr uint32_t WF_SIZE = 64;
 constexpr uint32_t SGPRS_PER_WF = 106;
 constexpr uint32_t VGPRS_PER_WF = 256;
+// Fixed marker written over accepted-divergence (NaN-input) lanes before
+// recording, so the cross-run diff ignores them identically in both runs.
+constexpr uint32_t SKIP_SENTINEL = 0xA11D1FFFu;
 
 // CDNA4 VOP2: opcode[30:25], vdst[24:17], vsrc1[16:9], src0[8:0]. Bit 31 = 0.
 constexpr uint32_t vop2_encode(uint32_t opcode, uint32_t vdst, uint32_t vsrc1, uint32_t src0) {
@@ -171,28 +178,29 @@ void check_case(const FmaCase &c, uint64_t exec) {
 
   constexpr uint64_t SEED = 0xF1A'1234'5678'9ABCULL;
 
-  amdgpu::simd_force_scalar() = true;
-  fx.seed_inputs(SEED, c.is_f16, exec);
-  fx.cu->execute_instruction(inst, *fx.wf);
-  auto scalar = fx.snapshot_dst();
-
-  amdgpu::simd_force_scalar() = false;
   std::array<bool, WF_SIZE> nan_lane{};
   auto seeded = fx.seed_inputs(SEED, c.is_f16, exec, &nan_lane);
   fx.cu->execute_instruction(inst, *fx.wf);
-  auto simd = fx.snapshot_dst();
+  auto out = fx.snapshot_dst();
 
+  // Mask accepted-divergence lanes (NaN input -> NaN-payload divergence) with a
+  // fixed sentinel before recording. The skip condition is computed from the
+  // inputs (identical in both runs), so both the scalar and SIMD runs mask the
+  // same lanes and the cross-run diff stays bit-exact on the comparable lanes.
+  for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+    const bool active = (exec >> lane) & 1ULL;
+    if (active && nan_lane[lane])
+      out[lane] = SKIP_SENTINEL;
+  }
+  simd_ab::record(c.label, exec, out.data(), WF_SIZE);
+
+  // Inactive-lane preservation holds regardless of NaN-payload status: each
+  // inactive lane must keep its seeded v2 value (deterministic, identical runs).
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     const bool active = (exec >> lane) & 1ULL;
     if (!active) {
-      // Inactive-lane preservation holds regardless of NaN-payload status.
-      EXPECT_EQ(simd[lane], seeded[lane]) << c.label << ": SIMD clobbered inactive lane " << lane;
-      continue;
+      EXPECT_EQ(out[lane], seeded[lane]) << c.label << ": clobbered inactive lane " << lane;
     }
-    if (nan_lane[lane])
-      continue; // active NaN-input lanes have an accepted NaN-payload divergence
-    EXPECT_EQ(scalar[lane], simd[lane]) << c.label << ": divergence at lane " << lane << std::hex
-                                        << " scalar=0x" << scalar[lane] << " simd=0x" << simd[lane];
   }
   delete inst;
 }

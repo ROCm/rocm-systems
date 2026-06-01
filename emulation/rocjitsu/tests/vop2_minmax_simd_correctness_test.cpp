@@ -2,14 +2,22 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vop2_minmax_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs forced-scalar body) for the
-/// float min/max VOP2 ops: v_max_f32 (11), v_min_f32 (10), v_max_f16 (45),
+/// @brief Bit-identity check (SIMD fast path vs scalar body) for the float
+/// min/max VOP2 ops: v_max_f32 (11), v_min_f32 (10), v_max_f16 (45),
 /// v_min_f16 (46). These use std::fmax/std::fmin in the scalar body; the SIMD
 /// path uses util::stdx::fmax/fmin, which is bit-exact for finite/Inf and the
-/// signed-zero tie cases. NaN-input lanes can differ in NaN payload (accepted),
-/// so they are skipped in the comparison. The inputs deliberately pair up ±0
-/// and NaN in both operand orders on the low lanes — the corner cases the
+/// signed-zero tie cases. NaN-input lanes (and signed-zero ties) can differ in
+/// payload/sign between the scalar and SIMD bodies — an accepted divergence — so
+/// those lanes are overwritten with a fixed sentinel before recording (the skip
+/// condition is computed from the inputs, identical in both runs, so both runs
+/// mask the same lanes and the cross-run diff stays meaningful on the rest).
+/// The process runs one fixed execute mode (RJ_FORCE_SCALAR, immutable); the
+/// scalar-vs-SIMD equivalence is asserted by diffing the two runs (see
+/// simd_ab.h / the simd_ab_diff CTest entry). The inputs deliberately pair up
+/// ±0 and NaN in both operand orders on the low lanes — the corner cases the
 /// earlier (reverted) f16 min/max shipped without and silently diverged on.
+
+#include "simd_ab.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -26,6 +34,7 @@
 #include <cstdint>
 #include <memory>
 #include <random>
+#include <string>
 
 namespace {
 
@@ -35,6 +44,9 @@ constexpr uint32_t WF_SIZE = 64;
 constexpr uint32_t SGPRS_PER_WF = 106;
 constexpr uint32_t VGPRS_PER_WF = 256;
 constexpr uint32_t DST_SENTINEL = 0xCAFEF00Du;
+// Fixed marker written over accepted-divergence (skipped) lanes before
+// recording, so the cross-run diff ignores them identically in both runs.
+constexpr uint32_t SKIP_SENTINEL = 0xA11D1FFFu;
 
 constexpr uint32_t vop2_encode(uint32_t opcode, uint32_t vdst, uint32_t vsrc1, uint32_t src0) {
   return ((opcode & 0x3F) << 25) | ((vdst & 0xFF) << 17) | ((vsrc1 & 0xFF) << 9) | (src0 & 0x1FF);
@@ -170,27 +182,27 @@ void check_case(const MinMaxCase &c, uint64_t exec) {
 
   constexpr uint64_t SEED = 0x3E12'7777'1234ULL;
 
-  amdgpu::simd_force_scalar() = true;
-  fx.seed_inputs(SEED, c.is_f16, exec);
-  fx.cu->execute_instruction(inst, *fx.wf);
-  auto scalar = fx.snapshot_dst();
-
-  amdgpu::simd_force_scalar() = false;
   auto nan_lane = fx.seed_inputs(SEED, c.is_f16, exec);
   fx.cu->execute_instruction(inst, *fx.wf);
-  auto simd = fx.snapshot_dst();
+  auto out = fx.snapshot_dst();
 
+  // Mask accepted-divergence lanes (NaN-payload / signed-zero tie) with a fixed
+  // sentinel before recording. The skip condition is computed from the inputs
+  // (identical in both runs), so both the scalar and SIMD runs mask the same
+  // lanes and the cross-run diff stays bit-exact on the comparable lanes.
+  for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+    const bool active = (exec >> lane) & 1ULL;
+    if (active && nan_lane[lane])
+      out[lane] = SKIP_SENTINEL;
+  }
+  simd_ab::record(c.label, exec, out.data(), WF_SIZE);
+
+  // Inactive-lane preservation holds regardless of NaN/signed-zero status.
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     const bool active = (exec >> lane) & 1ULL;
     if (!active) {
-      // Inactive-lane preservation holds regardless of NaN/signed-zero status.
-      EXPECT_EQ(simd[lane], DST_SENTINEL) << c.label << ": SIMD clobbered inactive lane " << lane;
-      continue;
+      EXPECT_EQ(out[lane], DST_SENTINEL) << c.label << ": clobbered inactive lane " << lane;
     }
-    if (nan_lane[lane])
-      continue; // active lane accepted divergence: NaN payload or signed-zero tie
-    EXPECT_EQ(scalar[lane], simd[lane]) << c.label << ": divergence at lane " << lane << std::hex
-                                        << " scalar=0x" << scalar[lane] << " simd=0x" << simd[lane];
   }
   delete inst;
 }

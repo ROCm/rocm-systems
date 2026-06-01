@@ -51,6 +51,7 @@ add_executable(
     instruction_execution_harness_test.cpp
     decode_execute_benchmark.cpp
     util_simd_test.cpp
+    simd_ab.cpp
     v_add_simd_benchmark.cpp
     vop1_cvt_f64_scalar_correctness_test.cpp
     vopc_cmp_class_scalar_correctness_test.cpp
@@ -134,6 +135,17 @@ add_test(
     NAME "RjDbtTranslate.Smoke"
     COMMAND rj_dbt_translate_smoke_test $<TARGET_FILE:rj_dbt_translate>
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+)
+
+# --- Scalar-vs-SIMD A/B equivalence (2-process diff) ---
+# force_scalar() is immutable per process, so the SIMD-vs-scalar bit-identity
+# check runs the *SimdCorrectness* suites twice (RJ_FORCE_SCALAR=1 vs 0),
+# dumping per-case results, and diffs them. Any divergence fails the test.
+add_test(
+    NAME simd_ab_diff
+    COMMAND
+        ${CMAKE_CURRENT_SOURCE_DIR}/simd_ab_diff.sh
+        $<TARGET_FILE:rocjitsu_tests>
 )
 
 # --- Scaling test (standalone executable) ---

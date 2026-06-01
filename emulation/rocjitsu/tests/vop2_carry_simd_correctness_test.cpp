@@ -2,18 +2,21 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vop2_carry_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs forced-scalar body) for the
+/// @brief Bit-identity check (SIMD fast path vs scalar body) for the
 /// carry-bearing VOP2 instructions wired into SIMD_VOP2_CARRY:
 ///   v_add_co_u32, v_sub_co_u32, v_subrev_co_u32,
 ///   v_addc_co_u32, v_subb_co_u32, v_subbrev_co_u32.
 /// Unlike the plain binary VOP2 path these write per-lane carry/borrow into
-/// VCC, and the addc/subb/subbrev forms read VCC as a carry-in. The test runs
-/// both modes in-process via amdgpu::simd_force_scalar() and asserts that the
-/// destination VGPR AND the full 64-bit VCC agree, under full and partial EXEC
-/// masks and across several carry-in VCC patterns. Inputs deliberately seed the
+/// VCC, and the addc/subb/subbrev forms read VCC as a carry-in. The process
+/// runs in a single execute mode (RJ_FORCE_SCALAR, immutable); each op records
+/// its 64-lane destination AND the full 64-bit VCC (as two uint32 words), and
+/// the scalar-vs-SIMD equivalence on BOTH is asserted by diffing the two runs
+/// (see simd_ab.h / the simd_ab_diff CTest entry). Inputs deliberately seed the
 /// 32-bit carry/borrow boundary (0xFFFFFFFF+1, a<b, a==b+cin, ...) on the low
-/// lanes — random-only inputs hide these corners. The scalar generated body is
-/// the reference; the SIMD path must not diverge on either result or VCC.
+/// lanes — random-only inputs hide these corners. In-process the test still
+/// checks inactive-lane dst/VCC preservation under full and partial EXEC masks.
+
+#include "simd_ab.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -111,11 +114,9 @@ struct Fixture {
     uint64_t vcc = 0;
   };
 
-  Result run(Instruction *inst, bool force_scalar, uint64_t seed, uint64_t exec, uint64_t vcc_in) {
-    amdgpu::simd_force_scalar() = force_scalar;
+  Result run(Instruction *inst, uint64_t seed, uint64_t exec, uint64_t vcc_in) {
     seed_inputs(seed, exec, vcc_in);
     cu->execute_instruction(inst, *wf);
-    amdgpu::simd_force_scalar() = false;
     Result res;
     uint32_t vbase = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
@@ -153,28 +154,28 @@ void check_case(const CarryCase &c, uint64_t exec) {
 
   constexpr uint64_t SEED = 0xC0FFEE'1234'5678ULL;
   for (uint64_t vcc_in : kVccPatterns) {
-    auto scalar = fx.run(inst, /*force_scalar=*/true, SEED, exec, vcc_in);
-    auto simd = fx.run(inst, /*force_scalar=*/false, SEED, exec, vcc_in);
+    auto out = fx.run(inst, SEED, exec, vcc_in);
+
+    // Record the destination words and the full 64-bit VCC (low, high) so the
+    // cross-run diff covers BOTH outputs. vcc_in is folded into the sublabel so
+    // each (case, vcc_in) line is unique.
+    const std::string base = std::string(c.label) + ":vcc_in" + std::to_string(vcc_in);
+    simd_ab::record(base, exec, out.dst.data(), WF_SIZE);
+    const uint32_t vcc_words[2] = {static_cast<uint32_t>(out.vcc),
+                                   static_cast<uint32_t>(out.vcc >> 32)};
+    simd_ab::record(base + ":vcc", exec, vcc_words, 2);
 
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       const bool active = (exec >> lane) & 1ULL;
-      EXPECT_EQ(scalar.dst[lane], simd.dst[lane])
-          << c.label << " vcc_in=0x" << std::hex << vcc_in << ": dst divergence at lane "
-          << std::dec << lane << std::hex << " scalar=0x" << scalar.dst[lane] << " simd=0x"
-          << simd.dst[lane];
       if (!active) {
-        EXPECT_EQ(simd.dst[lane], DST_SENTINEL)
-            << c.label << ": SIMD clobbered inactive dst lane " << lane;
+        EXPECT_EQ(out.dst[lane], DST_SENTINEL)
+            << c.label << ": clobbered inactive dst lane " << lane;
       }
     }
-    EXPECT_EQ(scalar.vcc, simd.vcc)
-        << c.label << " vcc_in=0x" << std::hex << vcc_in << ": VCC divergence scalar=0x"
-        << scalar.vcc << " simd=0x" << simd.vcc;
-    // Inactive EXEC lanes must keep their incoming VCC bit in both modes.
+    // Inactive EXEC lanes must keep their incoming VCC bit.
     const uint64_t inactive = ~exec;
-    EXPECT_EQ(simd.vcc & inactive, vcc_in & inactive)
-        << c.label << " vcc_in=0x" << std::hex << vcc_in
-        << ": SIMD altered an inactive-lane VCC bit";
+    EXPECT_EQ(out.vcc & inactive, vcc_in & inactive)
+        << c.label << " vcc_in=0x" << std::hex << vcc_in << ": altered an inactive-lane VCC bit";
   }
   delete inst;
 }

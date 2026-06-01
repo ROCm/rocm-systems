@@ -2,14 +2,18 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vop3_int_binary_extra_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs forced-scalar body) for the
-/// VOP3-only plain integer add/sub forms that have no VOP2 twin on CDNA4
-/// (v_add_i32, v_sub_i32, v_add_i16, v_sub_i16). All apply no modifiers and
-/// reuse try_execute_binary_vop3_simd<uint32_t> via the SIMD_VOP3_BINARY_INT_EXTRA
+/// @brief Bit-identity check (SIMD fast path vs scalar body) for the VOP3-only
+/// plain integer add/sub forms that have no VOP2 twin on CDNA4 (v_add_i32,
+/// v_sub_i32, v_add_i16, v_sub_i16). All apply no modifiers and reuse
+/// try_execute_binary_vop3_simd<uint32_t> via the SIMD_VOP3_BINARY_INT_EXTRA
 /// table — the i16 forms mask the low 16 bits in the functor to match the scalar
-/// `uint32(uint16(int16(...)))` zero-extension. The remaining nc_* / subrev_nc_*
-/// variants are RDNA-only (their probes ship for cross-ISA correctness) and are
-/// not exercised here.
+/// `uint32(uint16(int16(...)))` zero-extension. The process runs one fixed
+/// execute mode (RJ_FORCE_SCALAR, immutable); each (case, rot) result is
+/// recorded and the scalar-vs-SIMD equivalence is asserted by diffing the two
+/// runs (see simd_ab.h / the simd_ab_diff CTest entry). In-process inactive
+/// lanes must keep the sentinel.
+
+#include "simd_ab.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -26,6 +30,7 @@
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <memory>
+#include <string>
 
 namespace {
 
@@ -109,12 +114,9 @@ struct Fixture {
     wf->set_exec(exec);
   }
 
-  std::array<uint32_t, WF_SIZE> run(Instruction *inst, bool force_scalar, uint32_t rot,
-                                    uint64_t exec) {
-    amdgpu::simd_force_scalar() = force_scalar;
+  std::array<uint32_t, WF_SIZE> run(Instruction *inst, uint32_t rot, uint64_t exec) {
     seed_inputs(rot, exec);
     cu->execute_instruction(inst, *wf);
-    amdgpu::simd_force_scalar() = false;
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
@@ -132,18 +134,16 @@ void check_case(const Case &c, uint64_t exec) {
   Instruction *inst = fx.decoder->decode(words);
   ASSERT_NE(inst, nullptr) << c.name << " decode failed";
   for (uint32_t rot = 0; rot < kVals.size(); ++rot) {
-    auto scalar = fx.run(inst, /*force_scalar=*/true, rot, exec);
-    auto simd = fx.run(inst, /*force_scalar=*/false, rot, exec);
+    auto out = fx.run(inst, rot, exec);
+
+    simd_ab::record(std::string(c.name) + ":r" + std::to_string(rot), exec, out.data(), WF_SIZE);
+
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       const bool active = (exec >> lane) & 1ULL;
       if (!active) {
-        EXPECT_EQ(simd[lane], DST_SENTINEL)
-            << c.name << " rot=" << rot << ": SIMD clobbered inactive lane " << lane;
-        continue;
+        EXPECT_EQ(out[lane], DST_SENTINEL)
+            << c.name << " rot=" << rot << ": clobbered inactive lane " << lane;
       }
-      EXPECT_EQ(scalar[lane], simd[lane])
-          << c.name << " rot=" << rot << " lane=" << lane << ": divergence scalar=0x" << std::hex
-          << scalar[lane] << " simd=0x" << simd[lane];
     }
   }
   delete inst;

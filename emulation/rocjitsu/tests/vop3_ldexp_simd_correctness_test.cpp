@@ -2,11 +2,16 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vop3_ldexp_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs forced-scalar body) for the
+/// @brief Bit-identity check (SIMD fast path vs scalar body) for the
 /// mixed-width VOP3 ldexp ops on CDNA4: v_ldexp_f32 (f32 src0 + int32 src1
 /// exp) and v_ldexp_f64 (f64 src0 + int32 src1 exp). stdx::ldexp is bit-exact
 /// to std::ldexp for every input incl. NaN (proven in the VOP2 v_ldexp_f16
-/// path), so no carve-out needed.
+/// path), so no carve-out needed. The process runs one fixed execute mode
+/// (RJ_FORCE_SCALAR, immutable); each (case, mods, rot) result is recorded and
+/// the scalar-vs-SIMD equivalence is asserted by diffing the two runs (see
+/// simd_ab.h / the simd_ab_diff CTest entry).
+
+#include "simd_ab.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -23,6 +28,7 @@
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <memory>
+#include <string>
 
 namespace {
 
@@ -122,12 +128,9 @@ struct Fixture {
     wf->set_exec(exec);
   }
 
-  std::array<uint64_t, WF_SIZE> run(Instruction *inst, bool f64, bool force_scalar, uint32_t rot,
-                                    uint64_t exec) {
-    amdgpu::simd_force_scalar() = force_scalar;
+  std::array<uint64_t, WF_SIZE> run(Instruction *inst, bool f64, uint32_t rot, uint64_t exec) {
     seed_inputs(f64, rot, exec);
     cu->execute_instruction(inst, *wf);
-    amdgpu::simd_force_scalar() = false;
     std::array<uint64_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
@@ -153,16 +156,19 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
   Instruction *inst = fx.decoder->decode(words);
   ASSERT_NE(inst, nullptr) << c.name << " decode failed";
   for (uint32_t rot = 0; rot < kExp.size(); ++rot) {
-    auto scalar = fx.run(inst, c.f64, /*force_scalar=*/true, rot, exec);
-    auto simd = fx.run(inst, c.f64, /*force_scalar=*/false, rot, exec);
+    auto out = fx.run(inst, c.f64, rot, exec);
+
+    // Record the dst result as (lo, hi) word pairs (hi is 0 for the 32-bit form,
+    // deterministic). No NaN carve-out: ldexp is bit-exact in both modes.
+    uint32_t words_out[2 * WF_SIZE];
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-      if (!((exec >> lane) & 1ULL))
-        continue;
-      EXPECT_EQ(scalar[lane], simd[lane])
-          << c.name << " abs=" << abs << " neg=" << neg << " omod=" << omod << " clamp=" << clamp
-          << " rot=" << rot << " lane=" << lane << ": divergence scalar=0x" << std::hex
-          << scalar[lane] << " simd=0x" << simd[lane];
+      words_out[2 * lane] = static_cast<uint32_t>(out[lane]);
+      words_out[2 * lane + 1] = static_cast<uint32_t>(out[lane] >> 32);
     }
+    const std::string sub = std::string(c.name) + ":a" + std::to_string(abs) + "n" +
+                            std::to_string(neg) + "o" + std::to_string(omod) + "c" +
+                            std::to_string(clamp) + "r" + std::to_string(rot);
+    simd_ab::record(sub, exec, words_out, 2 * WF_SIZE);
   }
   delete inst;
 }

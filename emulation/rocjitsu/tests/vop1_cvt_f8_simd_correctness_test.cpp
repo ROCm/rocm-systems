@@ -2,14 +2,17 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vop1_cvt_f8_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs forced-scalar body) for the f8 ->
-/// f32 expand ops on CDNA4: v_cvt_f32_fp8 (E4M3) and v_cvt_f32_bf8 (E5M2), in
-/// both their VOP1 and VOP3 encodings. The 8-bit source has only 256 distinct
+/// @brief Bit-identity check (SIMD fast path vs scalar body) for the f8 -> f32
+/// expand ops on CDNA4: v_cvt_f32_fp8 (E4M3) and v_cvt_f32_bf8 (E5M2), in both
+/// their VOP1 and VOP3 encodings. The 8-bit source has only 256 distinct
 /// values, so every byte 0..255 is swept exhaustively (4 wavefront fills of 64
-/// lanes) under both a full and a partial EXEC mask. Each op runs both modes via
-/// the amdgpu::simd_force_scalar() thread-local; all active lanes must agree
-/// bit-for-bit (covering ±0, denormals, max-normal/Inf, NaN) and inactive lanes
-/// must keep the DST sentinel.
+/// lanes) under both a full and a partial EXEC mask. The process runs one fixed
+/// execute mode (RJ_FORCE_SCALAR, immutable); each (encoding, block) result is
+/// recorded and the scalar-vs-SIMD equivalence is asserted by diffing the two
+/// runs (see simd_ab.h / the simd_ab_diff CTest entry). In-process inactive
+/// lanes must keep the DST sentinel.
+
+#include "simd_ab.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -26,6 +29,7 @@
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <memory>
+#include <string>
 
 namespace {
 
@@ -92,12 +96,9 @@ struct Fixture {
     wf->set_exec(exec);
   }
 
-  std::array<uint32_t, WF_SIZE> run(Instruction *inst, bool force_scalar, uint32_t block,
-                                    uint64_t exec) {
-    amdgpu::simd_force_scalar() = force_scalar;
+  std::array<uint32_t, WF_SIZE> run(Instruction *inst, uint32_t block, uint64_t exec) {
     seed_inputs(block, exec);
     cu->execute_instruction(inst, *wf);
-    amdgpu::simd_force_scalar() = false;
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vbase = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
@@ -106,24 +107,24 @@ struct Fixture {
   }
 };
 
-// Decode `words` and exhaustively A/B all 256 byte values against the scalar.
-void check_words(const char *label, const uint32_t words[4], uint64_t exec) {
+// Decode `words` and exhaustively sweep all 256 byte values; record per block
+// for the cross-run scalar-vs-SIMD diff. `label` must be unique per encoding.
+void check_words(const std::string &label, const uint32_t words[4], uint64_t exec) {
   Fixture fx;
   ASSERT_NE(fx.cu, nullptr);
   ASSERT_NE(fx.wf, nullptr);
   Instruction *inst = fx.decoder->decode(words);
   ASSERT_NE(inst, nullptr) << label << " decode failed";
   for (uint32_t block = 0; block < 4; ++block) { // 4 * 64 = all 256 byte values
-    auto scalar = fx.run(inst, /*force_scalar=*/true, block, exec);
-    auto simd = fx.run(inst, /*force_scalar=*/false, block, exec);
+    auto out = fx.run(inst, block, exec);
+
+    // block is folded into the sublabel so each (encoding, block) line is unique.
+    simd_ab::record(label + ":block" + std::to_string(block), exec, out.data(), WF_SIZE);
+
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       const bool active = (exec >> lane) & 1ULL;
-      uint32_t byte = (block * WF_SIZE + lane) & 0xFFu;
-      EXPECT_EQ(scalar[lane], simd[lane])
-          << label << ": divergence on byte 0x" << std::hex << byte << " lane " << std::dec << lane
-          << std::hex << " scalar=0x" << scalar[lane] << " simd=0x" << simd[lane];
       if (!active) {
-        EXPECT_EQ(simd[lane], DST_SENTINEL) << label << ": SIMD clobbered inactive lane " << lane;
+        EXPECT_EQ(out[lane], DST_SENTINEL) << label << ": clobbered inactive lane " << lane;
       }
     }
   }
@@ -132,10 +133,10 @@ void check_words(const char *label, const uint32_t words[4], uint64_t exec) {
 
 void check_both_encodings(const Case &c, uint64_t exec) {
   uint32_t v1[4] = {vop1_encode(c.vop1_op, /*vdst=*/kDstVgpr, /*src0=*/256), 0u, 0u, 0u};
-  check_words(c.name, v1, exec);
+  check_words(std::string(c.name) + ":vop1", v1, exec);
   uint32_t v3[4] = {0u, 0u, 0u, 0u};
   vop3_encode(c.vop3_op, /*vdst=*/kDstVgpr, /*src0=*/256, v3);
-  check_words(c.name, v3, exec);
+  check_words(std::string(c.name) + ":vop3", v3, exec);
 }
 
 TEST(Vop1CvtF8SimdCorrectness, AllBytes_FullExec) {

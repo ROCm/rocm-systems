@@ -222,17 +222,23 @@ TEST(UtilSimd, NarrowBridgeCast_DoubleToFromB32) {
     EXPECT_EQ(dd[i], static_cast<double>(iv[i])) << "i32->f64 lane " << i;
 }
 
-TEST(UtilSimd, ForceScalar_ThreadLocal) {
-  util::force_scalar() = true;
-  ASSERT_TRUE(util::force_scalar());
+TEST(UtilSimd, ForceScalar_ImmutableProcessWide) {
+  // force_scalar() is read once from RJ_FORCE_SCALAR and fixed for the process
+  // lifetime: no setter, no mutable reference. It must be stable across calls
+  // and identical on every thread. A/B testing selects the mode by launching
+  // the process with the env var set (see tests/simd_ab.h), not by mutating it.
+  const bool v = util::force_scalar();
+  EXPECT_EQ(util::force_scalar(), v) << "force_scalar() must be stable within a process";
 
-  std::atomic<bool> other_thread_saw_true{true};
-  std::thread t([&]() { other_thread_saw_true.store(util::force_scalar()); });
+  std::atomic<bool> other{!v};
+  std::thread t([&]() { other.store(util::force_scalar()); });
   t.join();
+  EXPECT_EQ(other.load(), v) << "force_scalar() must be process-wide (identical on all threads)";
 
-  EXPECT_FALSE(other_thread_saw_true.load()) << "force_scalar() must be thread-local";
-  EXPECT_TRUE(util::force_scalar()) << "this thread's flag must survive the other thread";
-  util::force_scalar() = false;
+  // Value reflects the env parse: unset/empty/"0" => false, else true.
+  const char *e = std::getenv("RJ_FORCE_SCALAR");
+  const bool expected = e && e[0] && !(e[0] == '0' && e[1] == '\0');
+  EXPECT_EQ(v, expected);
 }
 
 // Toolchain guard for the SIMD fast path of v_exp_f32 (stdx::exp2) and

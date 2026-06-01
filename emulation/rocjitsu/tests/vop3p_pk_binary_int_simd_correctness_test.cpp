@@ -2,9 +2,12 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vop3p_pk_binary_int_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs forced-scalar body) for the
-/// VOP3P packed-16 integer binary family wired into SIMD_VOP3P_PK_BINARY_INT
-/// on CDNA4:
+/// @brief Bit-identity check (SIMD fast path vs scalar body) for the VOP3P
+/// packed-16 integer binary family wired into SIMD_VOP3P_PK_BINARY_INT on CDNA4.
+/// The process runs one fixed execute mode (RJ_FORCE_SCALAR, immutable); each
+/// (case, rot) result is recorded and the scalar-vs-SIMD equivalence is asserted
+/// by diffing the two runs (see simd_ab.h / the simd_ab_diff CTest entry).
+/// In-process inactive lanes must keep the sentinel. Ops covered:
 ///   v_pk_add_u16 / v_pk_add_i16 / v_pk_sub_u16 / v_pk_sub_i16
 ///   v_pk_mul_lo_u16
 ///   v_pk_lshlrev_b16 / v_pk_lshrrev_b16 / v_pk_ashrrev_i16
@@ -16,6 +19,8 @@
 /// under full + partial EXEC; inputs cover overflow, sign-boundary,
 /// shift-saturation, and identical-pair cases on both halves
 /// independently.
+
+#include "simd_ab.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -32,6 +37,7 @@
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <memory>
+#include <string>
 
 namespace {
 
@@ -130,12 +136,9 @@ struct Fixture {
     wf->set_exec(exec);
   }
 
-  std::array<uint32_t, WF_SIZE> run(Instruction *inst, bool force_scalar, uint32_t rot,
-                                    uint64_t exec) {
-    amdgpu::simd_force_scalar() = force_scalar;
+  std::array<uint32_t, WF_SIZE> run(Instruction *inst, uint32_t rot, uint64_t exec) {
     seed_inputs(rot, exec);
     cu->execute_instruction(inst, *wf);
-    amdgpu::simd_force_scalar() = false;
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
@@ -157,18 +160,16 @@ void check_case(const Case &c, uint64_t exec) {
   Instruction *inst = fx.decoder->decode(words);
   ASSERT_NE(inst, nullptr) << c.name << " decode failed";
   for (uint32_t rot = 0; rot < kVals.size(); ++rot) {
-    auto scalar = fx.run(inst, /*force_scalar=*/true, rot, exec);
-    auto simd = fx.run(inst, /*force_scalar=*/false, rot, exec);
+    auto out = fx.run(inst, rot, exec);
+
+    simd_ab::record(std::string(c.name) + ":r" + std::to_string(rot), exec, out.data(), WF_SIZE);
+
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       const bool active = (exec >> lane) & 1ULL;
       if (!active) {
-        EXPECT_EQ(simd[lane], DST_SENTINEL)
-            << c.name << " rot=" << rot << ": SIMD clobbered inactive lane " << lane;
-        continue;
+        EXPECT_EQ(out[lane], DST_SENTINEL)
+            << c.name << " rot=" << rot << ": clobbered inactive lane " << lane;
       }
-      EXPECT_EQ(scalar[lane], simd[lane])
-          << c.name << " rot=" << rot << " lane=" << lane << ": divergence scalar=0x" << std::hex
-          << scalar[lane] << " simd=0x" << simd[lane];
     }
   }
   delete inst;

@@ -2,16 +2,20 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vop1_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs forced-scalar body) for the
-/// Tier-2 unary VOP1 instructions wired into SIMD_VOP1_UNARY. Each op runs
-/// both modes in-process via the `amdgpu::simd_force_scalar()` thread-local
-/// and asserts all 64 lanes agree, under both a full and a partial EXEC mask.
+/// @brief Bit-identity check (SIMD fast path vs scalar body) for the Tier-2
+/// unary VOP1 instructions wired into SIMD_VOP1_UNARY. The process runs in a
+/// single execute mode (RJ_FORCE_SCALAR, immutable); each op records its 64
+/// lane results and the scalar-vs-SIMD equivalence is asserted by diffing the
+/// two runs (see simd_ab.h / the simd_ab_diff CTest entry). In-process the test
+/// still checks inactive-lane preservation under full and partial EXEC masks.
 ///
 /// All wired ops (move/bitwise, exact int<->float casts, and correctly-rounded
 /// IEEE floor/ceil/trunc/rndne/fract/rcp/rsq/sqrt) are bit-identical to their
 /// scalar bodies for every input — including NaN/Inf/denormal — so inputs are
 /// raw random with explicit edge lanes injected (0, ±0, ±Inf, NaN, denormal,
 /// INT32 extremes) rather than sanitized to finite normals.
+
+#include "simd_ab.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -28,6 +32,7 @@
 #include <cstdint>
 #include <memory>
 #include <random>
+#include <string>
 
 namespace {
 
@@ -124,12 +129,9 @@ struct Fixture {
     return out;
   }
 
-  std::array<uint32_t, WF_SIZE> run(Instruction *inst, bool force_scalar, uint64_t seed,
-                                    uint64_t exec) {
-    amdgpu::simd_force_scalar() = force_scalar;
+  std::array<uint32_t, WF_SIZE> run(Instruction *inst, uint64_t seed, uint64_t exec) {
     seed_inputs(seed, exec);
     cu->execute_instruction(inst, *wf);
-    amdgpu::simd_force_scalar() = false;
     return snapshot_dst();
   }
 };
@@ -209,15 +211,19 @@ void check_case(const Vop1Case &c, uint64_t exec) {
   // Sweep several seeds so the random (non-edge) lanes cover more of the
   // input space — in particular the [2^31, 2^32) cvt range and clamp regions.
   for (uint64_t seed = 0; seed < 16; ++seed) {
-    auto scalar = fx.run(inst, /*force_scalar=*/true, seed, exec);
-    auto simd = fx.run(inst, /*force_scalar=*/false, seed, exec);
+    auto out = fx.run(inst, seed, exec);
+
+    // Record per-lane results for the cross-run scalar-vs-SIMD diff (seed is
+    // folded into the sublabel so each (case, seed) line is unique).
+    simd_ab::record(std::string(c.label) + ":seed" + std::to_string(seed), exec, out.data(),
+                    WF_SIZE);
+
+    // Inactive lanes must keep the destination sentinel in either mode.
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       const bool active = (exec >> lane) & 1ULL;
-      EXPECT_EQ(scalar[lane], simd[lane])
-          << c.label << ": divergence at seed " << seed << " lane " << lane << std::hex
-          << " scalar=0x" << scalar[lane] << " simd=0x" << simd[lane];
       if (!active) {
-        EXPECT_EQ(simd[lane], DST_SENTINEL) << c.label << ": SIMD clobbered inactive lane " << lane;
+        EXPECT_EQ(out[lane], DST_SENTINEL)
+            << c.label << ": clobbered inactive lane " << lane << " at seed " << seed;
       }
     }
   }
