@@ -102,17 +102,15 @@ Panel Config:
       Arithmetic Intensity relative to the L2 cache. This metric shows compute
       density relative to L2 cache traffic. Higher values indicate better data
       reuse upstream of L2, while lower values suggest heavy traffic into L2.
-      This value is used as the x-coordinate for the L2 roofline.
     AI L1: >-
       Arithmetic Intensity relative to the L1 cache (TCP). Higher values indicate
       more compute operations per byte of data loaded, suggesting compute-bound
       behavior. Lower values suggest memory-bound behavior limited by L1 bandwidth.
-      This value is used as the x-coordinate for the L1 roofline.
     AI LDS: >-
-      The Arithmetic Intensity (AI) relative to the Local Data Share (LDS).
-      It is the ratio of total floating-point operations (FLOPs) to total bytes
-      transferred to/from LDS. This value is used as the x-coordinate for the LDS
-      roofline.
+      Arithmetic Intensity relative to the Local Data Share (LDS). Higher values
+      indicate more compute per byte of LDS traffic, suggesting effective reuse
+      of shared data within a workgroup. Lower values suggest memory-bound
+      behavior limited by LDS bandwidth or bank-conflict pressure.
     Performance (GFLOPs): >-
       Achieved compute throughput measured in billions of floating-point operations
       per second. This value, combined with arithmetic intensity, determines the

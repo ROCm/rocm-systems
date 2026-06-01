@@ -20,17 +20,39 @@ from utils.logger import (
     demarcate,
 )
 from utils.roofline_calc import (
-    AI_CACHE_LEVELS,
-    CACHE_LEVEL_COLORS,
+    CACHE_HIERARCHY,
+    CACHE_LEVELS,
     MATRIX_DATATYPES,
     PEAK_OPS_DATATYPES,
     SUPPORTED_DATATYPES,
     construct_roof,
-    get_color,
 )
 from utils.specs import MachineSpecs
 
 SYMBOLS = [0, 1, 2, 3, 4, 5, 13, 17, 18, 20]
+
+# Per cache-level / compute-roof trace colors. Keyed by category, with one
+# entry per rendering backend so both the HTML (Plotly hex) and CLI (plotext
+# token) plots draw from a single source of truth.
+_TRACE_COLORS: dict[str, dict[str, str]] = {
+    "l1": {"html": "#0072B2", "cli": "red+"},
+    "l2": {"html": "#009E73", "cli": "green+"},
+    "hbm": {"html": "#D55E00", "cli": "blue+"},
+    "lds": {"html": "#E69F00", "cli": "orange+"},
+    "valu": {"html": "#CC79A7", "cli": "white"},
+    "matrix_ops": {"html": "#56B4E9", "cli": "magenta+"},
+}
+
+
+def get_color(category: str, backend: str = "html") -> str:
+    key = category.removeprefix("ai_").lower()
+
+    if key not in _TRACE_COLORS:
+        raise RuntimeError(f"Invalid category passed to get_color(): {category}")
+    if backend not in _TRACE_COLORS[key]:
+        raise RuntimeError(f"Invalid backend passed to get_color(): {backend}")
+
+    return _TRACE_COLORS[key][backend]
 
 
 def wrap_text(text: str, width: int = 100) -> str:
@@ -348,7 +370,7 @@ class Roofline:
 
                 plot_points_data = []
 
-                for cache_level in AI_CACHE_LEVELS:
+                for cache_level in CACHE_LEVELS:
                     if cache_level in self.__ai_data:
                         x_vals = self.__ai_data[cache_level][0]
                         y_vals = self.__ai_data[cache_level][1]
@@ -463,7 +485,7 @@ class Roofline:
             symbols_list = [SYMBOLS[i % len(SYMBOLS)] for i in range(len(kernel_names))]
             show_in_legend = not self.__run_parameters["is_standalone"]
 
-            for cache_level in AI_CACHE_LEVELS:
+            for cache_level in CACHE_LEVELS:
                 if (
                     cache_level not in self.__ai_data
                     or not self.__ai_data[cache_level][0]
@@ -492,7 +514,7 @@ class Roofline:
         #######################
         mem_level_config = self.__run_parameters.get("mem_level", "ALL")
         cache_hierarchy = (
-            ["HBM", "L2", "L1", "LDS"]
+            CACHE_HIERARCHY
             if mem_level_config == "ALL" or mem_level_config == ["ALL"]
             else (
                 mem_level_config
@@ -597,7 +619,7 @@ class Roofline:
                     y=valu_data[1],
                     name=legend_name,
                     mode="lines",
-                    line=dict(color=CACHE_LEVEL_COLORS["valu"]),
+                    line=dict(color=get_color("valu")),
                     hovertemplate=f"<b>{legend_name}</b><extra></extra>",
                 ),
                 **subplot_kwargs,
@@ -613,7 +635,7 @@ class Roofline:
                     y=matrix_data[1],
                     name=legend_name,
                     mode="lines",
-                    line=dict(color=CACHE_LEVEL_COLORS["matrix_ops"]),
+                    line=dict(color=get_color("matrix_ops")),
                     hovertemplate=f"<b>{legend_name}</b><extra></extra>",
                 ),
                 **subplot_kwargs,
@@ -1044,15 +1066,6 @@ class Roofline:
         raw_mem = self.__run_parameters["mem_level"]
         mem_level = list(raw_mem) if isinstance(raw_mem, list) else raw_mem
 
-        color_scheme = {
-            "HBM": "blue+",
-            "L2": "green+",
-            "L1": "red+",
-            "LDS": "orange+",
-            "VALU": "white",
-            "Matrix": "magenta+",
-        }
-
         kernel_markers = {
             0: "star",
             1: "cross",
@@ -1069,9 +1082,7 @@ class Roofline:
 
         # Plot bandwidth lines
         cache_hierarchy = (
-            ["HBM", "L2", "L1", "LDS"]
-            if mem_level == "ALL" or mem_level == ["ALL"]
-            else mem_level
+            CACHE_HIERARCHY if mem_level == "ALL" or mem_level == ["ALL"] else mem_level
         )
 
         for cache_level in cache_hierarchy:
@@ -1083,7 +1094,7 @@ class Roofline:
                 self.__ceiling_data[cache_key][1],
                 label=f"{cache_level}-{dtype}",
                 marker="braille",
-                color=color_scheme[cache_level],
+                color=get_color(cache_level, backend="cli"),
             )
             plt.text(
                 f"{round(self.__ceiling_data[cache_key][2])} GB/s",
@@ -1112,7 +1123,7 @@ class Roofline:
                 ],
                 label=f"Peak VALU-{dtype}",
                 marker="braille",
-                color=color_scheme["VALU"],
+                color=get_color("valu", backend="cli"),
             )
             plt.text(
                 f"{round(self.__ceiling_data['valu'][2])} G{ops_flops}/s",
@@ -1145,7 +1156,7 @@ class Roofline:
                 ],
                 label=f"Peak MFMA-{dtype}",
                 marker="braille",
-                color=color_scheme["Matrix"],
+                color=get_color("matrix_ops", backend="cli"),
             )
             plt.text(
                 f"{round(self.__ceiling_data['matrix_ops'][2])} G{ops_flops}/s",
@@ -1176,6 +1187,10 @@ class Roofline:
             for i in range(len(self.__ai_data.get("kernelNames", []))):
                 # Zero intensity level means no data reported for this cache level
                 if i >= len(self.__ai_data[key][0]) or i >= len(self.__ai_data[key][1]):
+                    console_debug(
+                        "roofline",
+                        f"AI_{kernel_names[i]}: array too short, skipped",
+                    )
                     continue
 
                 if self.__ai_data[key][0][i] > 0 and self.__ai_data[key][1][i] > 0:
@@ -1183,20 +1198,15 @@ class Roofline:
                         [self.__ai_data[key][0][i]],
                         [self.__ai_data[key][1][i]],
                         label=f"AI_{cache_level}_{kernel_names[i][:40]}",
-                        color=color_scheme[cache_level],
+                        color=get_color(cache_level, backend="cli"),
                         marker=kernel_markers[i % len(kernel_markers)],
                     )
-                val1 = (
-                    self.__ai_data[key][0][i]
-                    if i < len(self.__ai_data[key][0])
-                    else "N/A"
+
+                console_debug(
+                    "roofline",
+                    f"AI_{kernel_names[i]}: {self.__ai_data[key][0][i]}, "
+                    f"{self.__ai_data[key][1][i]}",
                 )
-                val2 = (
-                    self.__ai_data[key][1][i]
-                    if i < len(self.__ai_data[key][1])
-                    else "N/A"
-                )
-                console_debug("roofline", f"AI_{kernel_names[i]}: {val1}, {val2}")
         plt.xlabel(f"Arithmetic Intensity ({ops_flops}s/Byte)")
         plt.ylabel("Performance (GFLOP/sec)")
         wdir = self.__run_parameters.get("workload_dir", "")

@@ -82,16 +82,7 @@ SUPPORTED_DATATYPES: dict[str, list[str]] = {
 PEAK_OPS_DATATYPES = ["FP16", "FP32", "FP64", "I8", "I32", "I64"]
 MATRIX_DATATYPES = ["FP4", "FP6", "FP8", "FP16", "BF16", "FP32", "FP64", "I8"]
 CACHE_HIERARCHY = ["HBM", "L2", "L1", "LDS"]
-AI_CACHE_LEVELS = ["ai_l1", "ai_l2", "ai_hbm", "ai_lds"]
-
-CACHE_LEVEL_COLORS: dict[str, str] = {
-    "l1": "#0072B2",
-    "l2": "#009E73",
-    "hbm": "#D55E00",
-    "lds": "#E69F00",
-    "valu": "#CC79A7",
-    "matrix_ops": "#56B4E9",
-}
+CACHE_LEVELS = ["ai_l1", "ai_l2", "ai_hbm", "ai_lds"]
 
 TOP_N = 10
 
@@ -180,15 +171,6 @@ def get_font() -> dict[str, Union[int, str]]:
     }
 
 
-def get_color(category: str) -> str:
-    key = category.removeprefix("ai_")
-
-    if key not in CACHE_LEVEL_COLORS:
-        raise RuntimeError(f"Invalid category passed to get_color(): {category}")
-
-    return CACHE_LEVEL_COLORS[key]
-
-
 def sanitize_ai_value(value: float) -> float:
     excluded_values = ("", "N/A", np.inf, -np.inf, None)
     return value if value and value not in excluded_values else 0
@@ -208,7 +190,7 @@ def calc_ceilings(
 
     if ai_data:
         max_ai = 0
-        for cache_level in AI_CACHE_LEVELS:
+        for cache_level in CACHE_LEVELS:
             if cache_level in ai_data and ai_data[cache_level][0]:
                 cache_max = max(ai_data[cache_level][0])
                 max_ai = max(max_ai, cache_max)
