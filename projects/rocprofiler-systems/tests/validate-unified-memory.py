@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import mmap
 import os
 import re
 import sys
@@ -38,7 +39,7 @@ REQUIRED_MIGRATION_STATS = [
 ]
 
 
-def print_help():
+def print_help() -> None:
     """Print the help message"""
     print(f"""
     Unified Memory Output Validation Tool
@@ -135,8 +136,11 @@ def validate_text_output(filepath: Path) -> bool:
 def load_json_output(filepath: Path) -> Optional[dict[str, Any]]:
     """Load a unified-memory JSON output file."""
     try:
-        with open(filepath) as f:
+        with open(filepath, encoding="utf-8") as f:
             data = json.load(f)
+    except (OSError, UnicodeDecodeError) as e:
+        print(f"Error: Could not read JSON file: {e}")
+        return None
     except json.JSONDecodeError as e:
         print(f"Error: Invalid JSON format: {e}")
         return None
@@ -318,22 +322,32 @@ def validate_perfetto_fault_only_trace(output_dir: Path, data: dict[str, Any]) -
         print("Warning: no Perfetto trace found; skipping Perfetto track validation")
         return True
 
+    if perfetto_trace.stat().st_size == 0:
+        print("Error: Perfetto trace is empty")
+        return False
+
     print(f"Validating Perfetto fault-only tracks: {perfetto_trace}")
-    content = perfetto_trace.read_bytes()
 
     # Lightweight track-name smoke check. This avoids requiring trace_processor
     # in every validation environment while still catching accidental track
-    # creation in the common case.
-    if PERFETTO_FAULT_TRACK_NAME not in content:
-        print("Error: fault-only Perfetto trace is missing unified-memory fault track")
-        return False
+    # creation in the common case. mmap keeps large traces off the Python heap;
+    # use find() because mmap's `in` operator matches single bytes, not byte
+    # sequences.
+    with open(perfetto_trace, "rb") as f, mmap.mmap(
+        f.fileno(), 0, access=mmap.ACCESS_READ
+    ) as content:
+        if content.find(PERFETTO_FAULT_TRACK_NAME) == -1:
+            print(
+                "Error: fault-only Perfetto trace is missing unified-memory fault track"
+            )
+            return False
 
-    if PERFETTO_MIGRATION_THROUGHPUT_TRACK_NAME in content:
-        print(
-            "Error: fault-only Perfetto trace contains unified-memory migration "
-            "throughput track"
-        )
-        return False
+        if content.find(PERFETTO_MIGRATION_THROUGHPUT_TRACK_NAME) != -1:
+            print(
+                "Error: fault-only Perfetto trace contains unified-memory migration "
+                "throughput track"
+            )
+            return False
 
     print("Perfetto fault-only track validation passed")
     return True
@@ -436,7 +450,8 @@ if __name__ == "__main__":
     json_data = load_json_output(json_file)
     json_valid = json_data is not None and validate_json_data(json_data)
     perfetto_valid = True
-    if json_data is not None and json_valid:
+    if json_valid:
+        assert json_data is not None
         perfetto_valid = validate_perfetto_fault_only_trace(json_file.parent, json_data)
 
     print()
