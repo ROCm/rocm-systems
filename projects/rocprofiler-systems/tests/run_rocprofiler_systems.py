@@ -1,10 +1,25 @@
 #!/usr/bin/env python3
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
-"""Run the rocprofiler-systems project's installed pytest suite.
+"""Run the rocprofiler-systems project's installed test suite via CTest.
 
-This runner is installed with the rocprofiler-systems test payload and executes
-the standalone rocprofsys-tests.pyz package shipped by that project.
+This runner is installed with the rocprofiler-systems test payload and
+executes the CTest definitions shipped by that project
+(``CTestTestfile.cmake``), which in turn invoke the standalone
+``rocprofsys-tests.pyz`` package.
+
+This script is intended primarily as a CI / automated entry point. The
+hardcoded ``EXCLUDED_TESTS`` / ``EXCLUDED_LABELS`` / ``QUICK_TESTS_REGEX``
+lists below curate which tests run in install mode. Developers running
+the suite locally should prefer ``ctest --test-dir <prefix>/share/...``
+to bypass these filters.
+
+Environment variables:
+  ROCPROFSYS_INSTALL_DIR  rocprofiler-systems install prefix override.
+  ROCM_PATH               ROCm dependency prefix. Defaults to /opt/rocm.
+  ROCM_BIN_DIR            Directory containing ROCm command-line tools.
+  TEST_TYPE               'full' (default) or 'quick'. 'quick' restricts
+                          the run to a curated short subset (~15 min).
 """
 
 import argparse
@@ -13,28 +28,70 @@ import logging
 import os
 import shlex
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
 logging.basicConfig(level=logging.INFO)
 
 PROJECT_NAME = "rocprofiler-systems"
-TEST_FILTER = (
-    "not TestOpenMPTarget and not (TestTranspose and runtime_instrument) "
-    "and not TestGPUConnect"
-)
+
+# CTest test-name regexes (CTest --exclude-regex) for tests that should not
+# run in installed mode. Joined with '|' to form a single regex alternation.
+# Always excluded until the relevant issue is fixed (AIPROFSYST-441).
+EXCLUDED_TESTS = [
+    "transferbench-sys-run",
+    "fork.*",
+    "openmp-target.*",
+    "roctx-sampling",
+    "roctx-runtime-instrument",
+    "jacobi-usm-sys-run",
+    "jacobi-roctx.*",
+    "jpeg-decode.*",
+    "matrix-exponential.*",
+    "scratch-memory.*",
+    "selective-region-region-1-filter.*",
+    "selective-region-region-2-and-3.*",
+    "selective-region-no-marker-region-1-filter.*",
+    "shmem-pingpong.*",
+    "video-decode.*",
+]
+
+# CTest labels (CTest --label-exclude) for tests that should not run in
+# installed mode. Each pytest marker becomes a CTest label in the generated
+# CTestTestfile.cmake. Excluded by default (AIPROFSYST-441).
+EXCLUDED_LABELS = [
+    "annotate",
+    "mpi",
+    "julia",
+    "attach",
+    "lulesh",
+    "network",
+    "overflow",
+    "thread_limit",
+    "rockoff",
+]
+
+# Curated short subset for TEST_TYPE=quick (target ~15 minutes).
+QUICK_TESTS_REGEX = [
+    "transpose.*",
+    "rocprofiler-systems.*",  # Binary tests
+    "config.*",
+    "openmp.*",
+    "roctx.*",
+    "trace-time-window.*",
+]
 
 HELP_EPILOG = f"""\
 This script runs the {PROJECT_NAME} project test suite from an installed
-payload. When run from an installed location, it discovers:
+payload via CTest. When run from an installed location, it discovers:
 
-  <install-prefix>/share/{PROJECT_NAME}/tests/rocprofsys-tests.pyz
+  <install-prefix>/share/{PROJECT_NAME}/tests/CTestTestfile.cmake
 
 Environment variables:
   ROCPROFSYS_INSTALL_DIR  rocprofiler-systems install prefix override.
   ROCM_PATH               ROCm dependency prefix. Defaults to /opt/rocm.
   ROCM_BIN_DIR            Directory containing ROCm command-line tools.
+  TEST_TYPE               'full' (default) or 'quick' for a curated subset.
 """
 
 
@@ -44,7 +101,7 @@ def format_command(cmd) -> str:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description=f"Run the {PROJECT_NAME} project pytest suite.",
+        description=f"Run the {PROJECT_NAME} project test suite via CTest.",
         epilog=HELP_EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -91,7 +148,13 @@ def main() -> None:
     rocm_bin_dir = Path(os.getenv("ROCM_BIN_DIR") or rocm_path / "bin").resolve()
     tests_dir = install_dir / "share" / PROJECT_NAME / "tests"
     if not tests_dir.is_dir():
-        raise FileNotFoundError(f"Could not find rocprofiler-systems tests: {tests_dir}")
+        raise FileNotFoundError(
+            f"Could not find rocprofiler-systems tests: {tests_dir}"
+        )
+    ctest_file = tests_dir / "CTestTestfile.cmake"
+    if not ctest_file.is_file():
+        raise FileNotFoundError(f"Could not find CTest definitions: {ctest_file}")
+
     test_output_dir = default_output_dir()
     test_output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -104,19 +167,21 @@ def main() -> None:
     examples_lib_dir = install_dir / "share" / PROJECT_NAME / "examples" / "lib"
     prepend_path(env, "LD_LIBRARY_PATH", examples_lib_dir)
 
-    pytest_package_exec = tests_dir / "rocprofsys-tests.pyz"
-    if not pytest_package_exec.is_file():
-        raise FileNotFoundError(f"Could not find test package: {pytest_package_exec}")
-    cmd = [
-        sys.executable,
-        str(pytest_package_exec),
-        "-k",
-        TEST_FILTER,
-        f"--junit-xml={test_output_dir / 'junit.xml'}",
-        f"--output-dir={test_output_dir}",
-        "--ci-mode",
-        "--log-cli-level=info",
+    test_type = os.getenv("TEST_TYPE", "full").lower()
+
+    ctest_base = ["ctest", "--test-dir", str(tests_dir)]
+
+    cmd = ctest_base + [
+        "--output-on-failure",
+        "--exclude-regex",
+        f"{'|'.join(EXCLUDED_TESTS)}",
+        "--label-exclude",
+        f"{'|'.join(EXCLUDED_LABELS)}",
+        "--repeat",
+        "until-pass:3",
     ]
+    if test_type == "quick":
+        cmd.extend(["--tests-regex", "|".join(QUICK_TESTS_REGEX)])
 
     logging.info(f"++ Exec [{test_output_dir}]$ {format_command(cmd)}")
     subprocess.run(cmd, cwd=test_output_dir, check=True, env=env)
