@@ -232,7 +232,7 @@ class AmdsmiSession {
 // partition config; sub-partition handles return NOT_SUPPORTED. Calling set on
 // a sub-partition handle is a no-op (NOT_SUPPORTED), so filter them out first.
 // Each entry is {amd-smi GPU index, handle}.
-using PrimaryGpuList = std::vector<std::pair<size_t, amdsmi_processor_handle>>;
+using PrimaryGpuList = std::vector<std::pair<uint32_t, amdsmi_processor_handle>>;
 
 [[nodiscard]] static PrimaryGpuList get_primary_gpu_handles(
     const std::vector<amdsmi_processor_handle>& all_handles) {
@@ -241,7 +241,7 @@ using PrimaryGpuList = std::vector<std::pair<size_t, amdsmi_processor_handle>>;
     amdsmi_accelerator_partition_profile_config_t cfg{};
     if (amdsmi_get_gpu_accelerator_partition_profile_config(all_handles[i], &cfg) ==
         AMDSMI_STATUS_SUCCESS)
-      primary.emplace_back(i, all_handles[i]);
+      primary.emplace_back(static_cast<uint32_t>(i), all_handles[i]);
   }
   return primary;
 }

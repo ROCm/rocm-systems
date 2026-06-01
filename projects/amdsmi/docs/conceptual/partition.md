@@ -190,8 +190,22 @@ On an MI300X (8 XCDs), this translates to:
 | QPX | 4 | 2 |
 | CPX | 8 | 1 |
 
-TPX is unavailable on MI300X because 8 XCDs cannot be split evenly into three
-equal partitions.
+```{note}
+**Why partition support differs between MI300X and MI300A:** A partition mode is only
+valid on an ASIC when the XCC count divides evenly by the number of partitions the mode
+creates. The two ASICs have different XCD counts, so each supports a different subset of
+modes:
+
+| Mode | Partitions | MI300X (8 XCDs) | MI300A (6 XCDs) |
+| :--- | :---: | :---: | :---: |
+| SPX  | 1 | ✅ (8 XCCs) | ✅ (6 XCCs) |
+| DPX  | 2 | ✅ (4 XCCs each) | ✅ (3 XCCs each) |
+| TPX  | 3 | ❌ (8 ÷ 3) | ✅ (2 XCCs each) |
+| QPX  | 4 | ✅ (2 XCCs each) | ❌ (6 ÷ 4) |
+| CPX  | XCC count | ✅ (8 partitions) | ✅ (6 partitions) |
+
+CPX is always available because each XCC simply becomes its own partition. As we mention in later sections, mode availablilty is controlled by firmware, so availability may vary by system and driver version. Always verify available modes on your specific device by running `sudo amd-smi partition --accelerator` (or the equivalent API query).
+```
 
 Each box below represents one logical GPU (XCP). The same 8 XCCs are present in every mode
 — only how they are grouped changes:
@@ -274,8 +288,10 @@ following table reflects MI300X support:
 | **QPX** | ✅ | -- | ✅ |
 | **CPX** | ✅ | -- | ✅ |
 
+```{note}
 NPS8 is defined in the API but is not a supported configuration on MI300X and is
 omitted from this matrix.
+```
 
 ```{note}
 NPS4 requires QPX or CPX mode, and NPS2 requires DPX mode, because the number of memory

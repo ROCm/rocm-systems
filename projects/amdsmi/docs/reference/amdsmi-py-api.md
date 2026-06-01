@@ -6098,31 +6098,31 @@ Output: Dictionary with fields:
 
 Field | Description
 ---|---
-`num_profiles` | Total number of supported accelerator partition profiles
-`num_resource_profiles` | Number of resource profile entries
-`resource_profiles` | Flattened list of all resource allocation dicts across profiles (see `resources` below)
-`default_profile_index` | Index of the default profile
-`profiles` | List of profile dicts (see below)
+`num_profiles` | Number of accelerator partition profiles in each `profiles` entry
+`num_resource_profiles` | Number of resource entries per profile (matches the length of each `profiles[i]["resources"]` list)
+`resource_profiles` | Resource entries from the last profile in `profiles` (alias of `profiles[-1]["resources"]`). For per-profile data, read `profiles[i]["resources"]` directly.
+`default_profile_index` | Index in `profiles` of the device's default profile
+`profiles` | Per-profile entries (see below)
 
 Each entry in `profiles`:
 
 Field | Description
 ---|---
-`profile_type` | Partition mode string (e.g. `"SPX"`, `"CPX"`)
-`num_partitions` | Number of logical partitions for this profile
+`profile_type` | Accelerator partition mode string (e.g. `"SPX"`, `"DPX"`, `"QPX"`, `"CPX"`, …)
+`num_partitions` | Number of logical GPUs (XCPs) this profile creates
 `profile_index` | Index to pass to `amdsmi_set_gpu_accelerator_partition_profile()`
-`memory_caps` | List of compatible NPS modes (e.g. `["NPS1", "NPS4"]`)
-`num_resources` | Number of resource entries
-`resources` | List of resource allocation dicts
+`memory_caps` | NPS memory partition modes compatible with this profile (e.g. `["NPS1", "NPS4"]`)
+`num_resources` | Number of entries in this profile's `resources` list
+`resources` | One entry per resource type used by this profile (XCC, DECODER, DMA, JPEG, ...)
 
-Each entry in `resources`:
+Each entry in `resources` (and in the top-level `resource_profiles`):
 
 Field | Description
 ---|---
-`profile_index` | Profile index this resource entry belongs to
-`resource_type` | Resource type string (e.g. `"XCC"`, `"DMA"`)
-`partition_resource` | Number of this resource per partition
-`num_partitions_share_resource` | Number of partitions sharing this resource
+`profile_index` | `profile_index` of the owning profile in `profiles`
+`resource_type` | Resource type string (e.g.`"XCC"`, `"DECODER"`, `"DMA"`, `"JPEG"`, ...)
+`partition_resource` | Number of this resource type assigned to each partition
+`num_partitions_share_resource` | Number of partitions that share a single instance of this resource (`1` = dedicated, `>1` = shared)
 
 Exceptions that can be thrown by `amdsmi_get_gpu_accelerator_partition_profile_config` function:
 
