@@ -350,6 +350,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "rocm",
         "kfd",
         "unified_memory",
+        "validation_usm",
         "selective_regions",
         "minimal",
         "rank_filter",
@@ -1034,7 +1035,7 @@ def _emit_test_item_block(
     props: list[str] = []
     if labels:
         props.append(f'    LABELS "{";".join(sorted(labels))}"')
-    props.append(f"    TIMEOUT ${{_TEST_TIMEOUT}}")
+    props.append("    TIMEOUT ${_TEST_TIMEOUT}")
     props.append(f"    SKIP_RETURN_CODE {SKIP_RETURN_CODE}")
     props.append('    FIXTURES_REQUIRED "rocprofsys-global-tmp-files"')
     if run_serial:

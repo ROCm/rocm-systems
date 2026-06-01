@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-pytestmark = [pytest.mark.unit_tests, pytest.mark.ci_enable]
+pytestmark = [pytest.mark.validation_usm]
 
 
 @pytest.fixture(scope="module")
