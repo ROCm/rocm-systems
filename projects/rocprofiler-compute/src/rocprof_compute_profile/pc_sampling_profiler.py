@@ -80,9 +80,15 @@ class PCSamplingProfiler:
         rocprof_output_path = Path(rocprof_output_path)
         if rocprof_output_path.exists():
             shutil.rmtree(rocprof_output_path, ignore_errors=True)
-            console_debug(
-                f"Removed existing ROCProf output path: {rocprof_output_path}"
-            )
+            if rocprof_output_path.exists():
+                console_debug(
+                    "Failed to remove existing ROCProf output path: "
+                    f"{rocprof_output_path}"
+                )
+            else:
+                console_debug(
+                    f"Removed existing ROCProf output path: {rocprof_output_path}"
+                )
 
     def _launch(
         self,

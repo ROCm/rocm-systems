@@ -358,9 +358,7 @@ def test_run_profiling_skips_pc_sampling_when_not_requested(tmp_path):
         mock.patch(f"{base}.console_debug"),
         mock.patch(f"{base}.console_warning") as mock_warning,
         mock.patch(f"{base}.get_job_rank_and_size", return_value=(None, None)),
-        mock.patch.object(
-            RocProfCompute_Base, "profile", return_value=0.0
-        ),
+        mock.patch.object(RocProfCompute_Base, "profile", return_value=0.0),
     ):
         instance = mock_pc_cls.return_value
         instance.is_exclusive.return_value = False
