@@ -48,7 +48,7 @@ constexpr uint32_t vop1_encode(uint32_t op, uint32_t vdst, uint32_t src0) {
 // f64 inputs covering ±0, ±1, ±Inf, denormal, max, and ordinary normals. The
 // negatives feed sqrt/rsq a NaN result (skipped on compare); rcp(±0) -> ±Inf and
 // ceil/floor/trunc/rndne of the specials are well defined and bit-exact.
-const std::array<double, 12> kEdge = {{
+const std::array<double, 18> kEdge = {{
     +0.0,
     -0.0,
     1.0,
@@ -61,6 +61,14 @@ const std::array<double, 12> kEdge = {{
     std::numeric_limits<double>::max(),
     3.141592653589793,
     -2.718281828459045,
+    // sNaN / qNaN (frexp quiets the former; math ops skip NaN-result lanes).
+    std::bit_cast<double>(static_cast<uint64_t>(0x7FF0000000000001ull)),
+    std::bit_cast<double>(static_cast<uint64_t>(0xFFF8000000000001ull)),
+    // f64 denormals with the highest mantissa bit at varied positions, to
+    // exercise frexp's denormal renormalization across the shift range.
+    std::bit_cast<double>(static_cast<uint64_t>(0x000FFFFFFFFFFFFFull)), // p = 51
+    std::bit_cast<double>(static_cast<uint64_t>(0x8000000100000000ull)), // p = 32, negative
+    std::bit_cast<double>(static_cast<uint64_t>(0x0000000000010000ull)), // p = 16
 }};
 
 bool is_f64_nan(uint64_t bits) { return std::isnan(std::bit_cast<double>(bits)); }
@@ -71,7 +79,7 @@ struct F64UnaryCase {
   bool is_float; // false for v_mov_b64 (exact bit copy, no NaN carve-out)
 };
 
-const std::array<F64UnaryCase, 9> kCases = {{
+const std::array<F64UnaryCase, 10> kCases = {{
     {"v_ceil_f64", 24, true},
     {"v_floor_f64", 26, true},
     {"v_trunc_f64", 23, true},
@@ -81,6 +89,9 @@ const std::array<F64UnaryCase, 9> kCases = {{
     {"v_rsq_f64", 38, true},
     {"v_sqrt_f64", 40, true},
     {"v_mov_b64", 56, false},
+    // frexp mantissa: deterministic bit-exact (incl. sNaN quieting), so exact
+    // compare with no NaN-result skip (is_float=false).
+    {"v_frexp_mant_f64", 49, false},
 }};
 
 // Per-lane vdst sentinel so an inactive-lane clobber is detectable.

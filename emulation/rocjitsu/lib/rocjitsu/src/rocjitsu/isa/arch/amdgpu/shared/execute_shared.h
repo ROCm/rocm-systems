@@ -11550,6 +11550,9 @@ inline void execute_v_frexp_exp_i32_f32_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_frexp_exp_i32_f64_vop1([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(int32_t, [](auto s) {
+    return util::stdx::static_simd_cast<util::narrow32<int32_t>>(util::frexp_exp_f64_simd(s));
+  });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -11719,6 +11722,7 @@ inline void execute_v_frexp_mant_f32_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_frexp_mant_f64_vop1([[maybe_unused]] Inst &inst,
                                           [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP1_UNARY_F64(double, [](auto a) { return util::frexp_mant_f64_simd(a); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -11734,6 +11738,7 @@ inline void execute_v_frexp_mant_f64_vop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_frexp_mant_f64_vop3([[maybe_unused]] Inst &inst,
                                           [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP64([](auto a) { return util::frexp_mant_f64_simd(a); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
