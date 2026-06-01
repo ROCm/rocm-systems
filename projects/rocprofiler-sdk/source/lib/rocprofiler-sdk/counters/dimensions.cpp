@@ -54,6 +54,17 @@ getBlockDimensions(rocprofiler_agent_id_t agent_id, const Metric& metric)
                                              ROCPROFILER_DIMENSION_INSTANCE}};
     }
 
+    // Synthesized topology metrics (see counters/evaluate_ast.cpp) and any
+    // metric lacking block/expression/constant have no AQL-queryable shape.
+    // Return a single-instance dimension to avoid CHECK_EQ in the AQL path.
+    if(metric.id() >= 0xFFFF0000ULL ||
+       (metric.block().empty() && metric.expression().empty() && metric.constant().empty()))
+    {
+        return std::vector<MetricDimension>{{dimension_map().at(ROCPROFILER_DIMENSION_INSTANCE),
+                                             1,
+                                             ROCPROFILER_DIMENSION_INSTANCE}};
+    }
+
     std::unordered_map<rocprofiler_profile_counter_instance_types, uint64_t> count;
 
     std::vector<MetricDimension> ret;
