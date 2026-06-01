@@ -282,6 +282,7 @@ _VOP3_UNARY_FP_F32 = {
     "v_sqrt_f32",
     "v_exp_f32",
     "v_log_f32",
+    "v_frexp_mant_f32",
 }
 
 # VOP1 base mnemonics whose VOP3 twin stays scalar: the f16 rounding/transcendental
@@ -304,6 +305,7 @@ _VOP3_UNARY_SKIP = {
     "v_exp_f16",
     "v_log_f16",
     "v_mov_b16",
+    "v_frexp_exp_i32_f32",
 }
 
 SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
@@ -426,6 +428,23 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         " x = ((x & 0x0F0F0F0Fu) << 4) | ((x >> 4) & 0x0F0F0F0Fu);"
         " x = ((x & 0x00FF00FFu) << 8) | ((x >> 8) & 0x00FF00FFu);"
         " return (x << 16) | (x >> 16); }",
+    ),
+    # --- frexp (f32 split into mantissa / exponent) ----------------------------
+    # frexp_mant returns the significand m with |m| in [0.5,1) (±0/Inf/NaN pass
+    # through); read as float so the VOP3 twin reuses the f32 unary FP glue for
+    # abs/neg/omod/clamp (added to _VOP3_UNARY_FP_F32 below). frexp_exp returns
+    # the raw int32 exponent bits; its VOP3 twin applies float omod/clamp to
+    # float(exp) and bit-casts (a different output encoding than the VOP1 int),
+    # so the VOP3 form stays scalar (_VOP3_UNARY_SKIP).
+    "v_frexp_mant_f32_vop1": (
+        "float32_t",
+        "float32_t",
+        "[](auto a) { return util::frexp_mant_f32_simd(std::bit_cast<util::native<uint32_t>>(a)); }",
+    ),
+    "v_frexp_exp_i32_f32_vop1": (
+        "uint32_t",
+        "uint32_t",
+        "[](auto a) { return util::frexp_exp_f32_simd(a); }",
     ),
     # --- f8 -> f32 (E4M3 / E5M2 8-bit float expand) ----------------------------
     # Scalar reads the low byte of src0 and expands via util::fp8_e4m3_to_f32 /

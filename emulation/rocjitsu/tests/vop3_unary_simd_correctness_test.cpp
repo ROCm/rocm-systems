@@ -93,7 +93,7 @@ struct Case {
   Kind kind;
 };
 
-const std::array<Case, 14> kCases = {{
+const std::array<Case, 15> kCases = {{
     {"v_mov_b32", 321, Kind::FP},
     {"v_floor_f32", 351, Kind::FP},
     {"v_ceil_f32", 349, Kind::FP},
@@ -110,6 +110,9 @@ const std::array<Case, 14> kCases = {{
     {"v_ffbl_b32", 366, Kind::PLAIN},
     {"v_ffbh_i32", 367, Kind::PLAIN},
     {"v_bcnt_u32_b32", 651, Kind::PLAIN},
+    // frexp mantissa VOP3: routed through the f32 unary FP glue (abs/neg on the
+    // source, omod/clamp on the mantissa); every modifier combination is swept.
+    {"v_frexp_mant_f32", 372, Kind::FP},
 }};
 
 struct Fixture {
