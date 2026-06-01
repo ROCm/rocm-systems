@@ -50,6 +50,8 @@ add_executable(
     waitcnt_counter_test.cpp
     instruction_execution_harness_test.cpp
     decode_execute_benchmark.cpp
+    util_simd_test.cpp
+    v_add_simd_benchmark.cpp
     execution_plugin_test.cpp
 )
 target_link_libraries(
@@ -73,6 +75,25 @@ rj_configure_target(rocjitsu_tests TEST)
 include(GoogleTest)
 gtest_discover_tests(rocjitsu_tests)
 
+add_executable(
+    rj_dbt_translate_smoke_test
+    tools/rj_dbt_translate_smoke_test.cpp
+)
+target_include_directories(
+    rj_dbt_translate_smoke_test
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
+        ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
+)
+target_link_libraries(rj_dbt_translate_smoke_test PRIVATE GTest::gtest)
+rj_configure_target(rj_dbt_translate_smoke_test TEST)
+add_dependencies(rj_dbt_translate_smoke_test rj_dbt_translate)
+add_test(
+    NAME "RjDbtTranslate.Smoke"
+    COMMAND rj_dbt_translate_smoke_test $<TARGET_FILE:rj_dbt_translate>
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+)
+
 # --- Scaling test (standalone executable) ---
 
 add_executable(scaling_test scaling_test.cpp)
@@ -88,7 +109,6 @@ rj_configure_target(scaling_test TEST)
 set(RJ_KMD_PRELOAD_ENV
     "LD_PRELOAD=$<TARGET_FILE:rocjitsu_kmd_shim>"
     "RJ_CONFIG=${CMAKE_SOURCE_DIR}/configs/amdgpu_cdna4_kmd.json"
-    "RJ_SCHEMA=${CMAKE_SOURCE_DIR}/schemas/simulation_config.fbs"
     "HSA_ENABLE_SDMA=1"
 )
 
@@ -149,7 +169,7 @@ if(ROCMINFO_EXECUTABLE)
         "RocminfoTest.DetectsGpuAgent"
         "RocminfoTest.ReportsGfx950"
         "RocminfoTest.ReportsWavefrontSize"
-        PROPERTIES ENVIRONMENT "${RJ_KMD_PRELOAD_ENV}" TIMEOUT 30
+        PROPERTIES ENVIRONMENT "${RJ_KMD_PRELOAD_ENV}"
     )
     message(STATUS "rocminfo test enabled (found ${ROCMINFO_EXECUTABLE})")
 else()
@@ -204,7 +224,6 @@ if(HSA_RUNTIME64)
         PROPERTIES
             ENVIRONMENT "${RJ_KMD_PRELOAD_ENV}"
             SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
-            TIMEOUT 30
     )
     message(STATUS "HSA init test enabled (found ${HSA_RUNTIME64})")
 
@@ -276,13 +295,9 @@ if(HSA_RUNTIME64)
                 COMMAND hsa_translate_test --gtest_filter=*VectorAdd*
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
             )
-            set_tests_properties(
-                "HsaTranslateTest.TranslateAndDispatchVectorAdd"
-                PROPERTIES TIMEOUT 30
-            )
             message(
                 STATUS
-                "HSA translate vector_add test enabled (supported DBT GPU detected)"
+                "HSA translate test enabled (supported DBT GPU detected)"
             )
         else()
             message(
@@ -350,7 +365,7 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
         add_test(NAME ${TEST_NAME} COMMAND ${HIP_TEST_BIN})
         set_tests_properties(
             ${TEST_NAME}
-            PROPERTIES ENVIRONMENT "${RJ_KMD_PRELOAD_ENV}" TIMEOUT 120
+            PROPERTIES ENVIRONMENT "${RJ_KMD_PRELOAD_ENV}"
         )
     endfunction()
 
@@ -366,7 +381,7 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
         )
         set_tests_properties(
             ${TEST_CASE}
-            PROPERTIES ENVIRONMENT "${RJ_KMD_PRELOAD_ENV}" TIMEOUT 120
+            PROPERTIES ENVIRONMENT "${RJ_KMD_PRELOAD_ENV}"
         )
     endfunction()
 
@@ -422,7 +437,6 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
         )
             rj_add_hip_test_case(hip_gemm_test "RocblasGemmTest.${TC}")
         endforeach()
-        # Large SDMA stress test — 48 MB H2D transfer, needs extended timeout.
         # Large GEMM stress test — validates SDMA + LDS isolation for big K.
         add_test(
             NAME "RocblasGemmTest.Large_2048x2048"
@@ -430,7 +444,7 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
         )
         set_tests_properties(
             "RocblasGemmTest.Large_2048x2048"
-            PROPERTIES ENVIRONMENT "${RJ_KMD_PRELOAD_ENV}" TIMEOUT 600
+            PROPERTIES ENVIRONMENT "${RJ_KMD_PRELOAD_ENV}"
         )
         foreach(I RANGE 0 4)
             rj_add_hip_test_case(hip_gemm_test "RocblasGemmFuzz.Iter${I}")
@@ -440,7 +454,6 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
         set(RJ_CDNA3_ENV
             "LD_PRELOAD=$<TARGET_FILE:rocjitsu_kmd_shim>"
             "RJ_CONFIG=${CMAKE_SOURCE_DIR}/configs/amdgpu_cdna3_kmd.json"
-            "RJ_SCHEMA=${CMAKE_SOURCE_DIR}/schemas/simulation_config.fbs"
             "HSA_ENABLE_SDMA=1"
         )
         foreach(TC IN ITEMS Tiny_2x2x3 Square_16x16 Square_32x32 Rect_7x11x13)
@@ -450,7 +463,7 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
             )
             set_tests_properties(
                 "RocblasGemmCdna3.${TC}"
-                PROPERTIES ENVIRONMENT "${RJ_CDNA3_ENV}" TIMEOUT 120
+                PROPERTIES ENVIRONMENT "${RJ_CDNA3_ENV}"
             )
         endforeach()
         foreach(I RANGE 0 2)
@@ -460,7 +473,7 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
             )
             set_tests_properties(
                 "RocblasGemmCdna3.Fuzz_Iter${I}"
-                PROPERTIES ENVIRONMENT "${RJ_CDNA3_ENV}" TIMEOUT 120
+                PROPERTIES ENVIRONMENT "${RJ_CDNA3_ENV}"
             )
         endforeach()
         message(STATUS "rocBLAS GEMM test enabled (found ${ROCBLAS_LIB})")

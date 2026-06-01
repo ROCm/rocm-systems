@@ -1551,6 +1551,10 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
               }
               Barriers().GetLastSignal()->flags_.isPacketDispatch_ = true;
             }
+          } else if (has_prepatched_signal &&
+                     pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH &&
+                     amd::activity_prof::IsEnabled(OP_ID_DISPATCH)) {
+            slot->reserved2 = timestamp_->command().profilingInfo().correlation_id_;
           }
         }
         if (kernelNames != nullptr && i < kernelNames->size() &&
@@ -4353,9 +4357,14 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
 
     if ((devKernel->workGroupInfo()->usedStackSize_ & 0x1) == 0x1) {
       dispatchPacket.private_segment_size =
-              std::max<uint64_t>(dev().StackSize(), dispatchPacket.private_segment_size);
-      if (dispatchPacket.private_segment_size > 16 * Ki) {
-        dispatchPacket.private_segment_size = 16 * Ki;
+          std::max<uint64_t>(dev().StackSize(), dispatchPacket.private_segment_size);
+      const size_t maxStackSize = dev().MaxStackSize();
+      // we return an explicit error when we exceed the max stack size limit
+      if (dispatchPacket.private_segment_size > maxStackSize) {
+        LogPrintfError("Scratch size (%u) exceeds max allowed (%zu) for kernel : %s",
+                       dispatchPacket.private_segment_size, maxStackSize,
+                       gpuKernel.getDemangledName().c_str());
+        return false;
       }
     }
 
@@ -4604,6 +4613,21 @@ void VirtualGPU::submitAccumulate(amd::AccumulateCommand& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
   std::scoped_lock lock(execution());
   profilingBegin(vcmd);
+
+  // Register pre-patched HW event signals with the Timestamp for profiling.
+  // These signals were configured by ApplyHwEventPatches (isPacketDispatch_,
+  // done_ flags set there) but bypass ActiveSignal, so they must be added
+  // here so checkGpuTime → ExtractSignalTiming → addTimestamps picks them up.
+  if (timestamp_ != nullptr) {
+    for (const auto& [_, events] : vcmd.getHwEvents()) {
+      for (void* hw_event : events) {
+        auto* ps = reinterpret_cast<ProfilingSignal*>(hw_event);
+        if (ps != nullptr) {
+          timestamp_->AddProfilingSignal(ps);
+        }
+      }
+    }
+  }
 
   const Settings& settings = dev().settings();
   if (settings.barrier_value_packet_) {

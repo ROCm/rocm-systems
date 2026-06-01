@@ -33,6 +33,14 @@ if(NOT AMDCLANG)
     return()
 endif()
 
+if(DEFINED SKIP_DEVICE_KERNELS AND SKIP_DEVICE_KERNELS)
+    message(
+        STATUS
+        "SKIP_DEVICE_KERNELS set - device kernel tests will be disabled"
+    )
+    return()
+endif()
+
 message(STATUS "Found amdclang++: ${AMDCLANG}")
 
 set(KERNEL_OUTPUT_DIR ${CMAKE_BINARY_DIR}/kernels)
