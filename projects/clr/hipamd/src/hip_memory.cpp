@@ -734,7 +734,7 @@ hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKin
   amd::Memory* srcDeviceMemory = nullptr;
   amd::Memory* dstDeviceMemory = nullptr;
   getMemoryObjectPairs(src, dst, srcDeviceMemory, dstDeviceMemory, sOffset, dOffset);
-  
+
   // Handle kind vs memobject miss matches
   if (kind == hipMemcpyDeviceToHost && srcDeviceMemory == nullptr) {
     return hipErrorInvalidValue;
@@ -3044,23 +3044,53 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
     batchCmd->release();
   }
 
-  // Handle write buffer (host to device) copies.
-  // This path handles kSrcAccessOrderDuringApiCall and kSrcAccessOrderAny for host sources
-  // that lack a memory object (e.g. malloc'd or stack pointers). The writeBuffer path
-  // handles kSrcAccessOrderDuringApiCall
-  for (size_t idx : writeBufferIndices) {
-    status = ihipMemcpy(dsts[idx], srcs[idx], sizes[idx], hipMemcpyDefault, stream, isAsync, true);
-    if (status != hipSuccess) {
-      return status;
+  if (!writeBufferIndices.empty()) {
+    std::vector<amd::BatchWriteMemoryOp> write_ops;
+    write_ops.reserve(writeBufferIndices.size());
+    for (size_t idx : writeBufferIndices) {
+      amd::CopyMetadata metadata =
+          buildCopyMetadataFromAttrs(attrs, attrsIdxs, numAttrs, idx, isAsync);
+      write_ops.emplace_back(srcs[idx], dstMemories[idx], dstOffsets[idx], sizes[idx], metadata);
     }
+    writeBufferIndices.clear();
+
+    amd::Command::EventWaitList wait_list;
+    amd::BatchWriteMemoryCommand* batch_cmd = new amd::BatchWriteMemoryCommand(
+        stream, ROCCLR_COMMAND_BATCH_WRITE_BUFFER, wait_list, std::move(write_ops));
+
+    if (batch_cmd == nullptr) {
+      return hipErrorOutOfMemory;
+    }
+
+    batch_cmd->enqueue();
+    if (!isAsync) {
+      batch_cmd->queue()->finishCommand(batch_cmd);
+    }
+    batch_cmd->release();
   }
 
-  // Handle read buffer (device to host) copies
-  for (size_t idx : readBufferIndices) {
-    status = ihipMemcpy(dsts[idx], srcs[idx], sizes[idx], hipMemcpyDefault, stream, isAsync, true);
-    if (status != hipSuccess) {
-      return status;
+  if (!readBufferIndices.empty()) {
+    std::vector<amd::BatchReadMemoryOp> read_ops;
+    read_ops.reserve(readBufferIndices.size());
+    for (size_t idx : readBufferIndices) {
+      amd::CopyMetadata metadata =
+          buildCopyMetadataFromAttrs(attrs, attrsIdxs, numAttrs, idx, isAsync);
+      read_ops.emplace_back(srcMemories[idx], dsts[idx], srcOffsets[idx], sizes[idx], metadata);
     }
+
+    amd::Command::EventWaitList wait_list;
+    amd::BatchReadMemoryCommand* batch_cmd = new amd::BatchReadMemoryCommand(
+        stream, ROCCLR_COMMAND_BATCH_READ_BUFFER, wait_list, std::move(read_ops));
+
+    if (batch_cmd == nullptr) {
+      return hipErrorOutOfMemory;
+    }
+
+    batch_cmd->enqueue();
+    if (!isAsync) {
+      batch_cmd->queue()->finishCommand(batch_cmd);
+    }
+    batch_cmd->release();
   }
 
   return hipSuccess;

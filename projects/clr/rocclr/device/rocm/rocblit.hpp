@@ -133,6 +133,16 @@ class DmaBlitManager : public device::HostBlitManager {
       const std::vector<amd::BatchCopyOp>& copyOps  //!< Batch of copy operations
   ) const;
 
+  //! Copies pageable host-to-device operations in a batch
+  bool WriteBufferBatch(
+      const std::vector<amd::BatchWriteMemoryOp>& write_ops  //!< Batch of write operations
+  ) const override;
+
+  //! Copies device-to-pageable-host operations in a batch
+  bool ReadBufferBatch(
+      const std::vector<amd::BatchReadMemoryOp>& read_ops  //!< Batch of read operations
+  ) const override;
+
   //! Copies an image object to a buffer object
   virtual bool copyImageToBuffer(
       device::Memory& srcMemory,                            //!< Source memory object
@@ -254,6 +264,10 @@ class DmaBlitManager : public device::HostBlitManager {
       const std::vector<hsa_amd_memory_copy_op_t>& copyOps,
       const std::vector<hsa_signal_t>* externalWaitEvents = nullptr,
       std::vector<ProfilingSignal*>* outBatchSignals = nullptr) const;
+
+  //! Submits a pinned batch copy and releases pinned host memory after completion.
+  bool SubmitPinnedCopyBatch(std::vector<amd::BatchCopyOp>& copy_ops,
+                             std::vector<amd::Memory*>& pinned_memories) const;
 
   // Get Pinned Host Memory or Staging Buffer
   void getBuffer(const_address hostMem,  //!< Host Mem Address

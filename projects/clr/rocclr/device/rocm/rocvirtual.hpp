@@ -457,6 +457,8 @@ class VirtualGPU : public device::VirtualDevice {
   void submitCopyMemory(amd::CopyMemoryCommand& cmd);
   void submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd);
   void submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd);
+  void SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd);
+  void SubmitBatchReadMemory(amd::BatchReadMemoryCommand& cmd);
   void submitMapMemory(amd::MapMemoryCommand& cmd);
   void submitUnmapMemory(amd::UnmapMemoryCommand& cmd);
   void submitKernel(amd::NDRangeKernelCommand& cmd);

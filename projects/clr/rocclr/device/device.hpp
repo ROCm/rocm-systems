@@ -51,6 +51,8 @@ class FillMemoryCommand;
 class CopyMemoryCommand;
 class CopyMemoryP2PCommand;
 class BatchCopyMemoryCommand;
+class BatchWriteMemoryCommand;
+class BatchReadMemoryCommand;
 class MapMemoryCommand;
 class UnmapMemoryCommand;
 class MigrateMemObjectsCommand;
@@ -1303,6 +1305,8 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void submitCopyMemory(amd::CopyMemoryCommand& cmd) = 0;
   virtual void submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) = 0;
   virtual void submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) = 0;
+  virtual void SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd) = 0;
+  virtual void SubmitBatchReadMemory(amd::BatchReadMemoryCommand& cmd) = 0;
   virtual void submitMapMemory(amd::MapMemoryCommand& cmd) = 0;
   virtual void submitUnmapMemory(amd::UnmapMemoryCommand& cmd) = 0;
   virtual void submitKernel(amd::NDRangeKernelCommand& command) = 0;

@@ -361,6 +361,105 @@ bool DmaBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& copyOp
   return true;
 }
 
+bool DmaBlitManager::SubmitPinnedCopyBatch(std::vector<amd::BatchCopyOp>& copy_ops,
+                                           std::vector<amd::Memory*>& pinned_memories) const {
+  auto release_pinned_memories = [&pinned_memories]() {
+    for (amd::Memory* pinned_memory : pinned_memories) {
+      pinned_memory->release();
+    }
+    pinned_memories.clear();
+  };
+
+  device::Memory::SyncFlags sync_flags;
+  sync_flags.skipEntire_ = false;
+
+  for (const amd::BatchCopyOp& op : copy_ops) {
+    Memory* src_dev_mem = dev().getRocMemory(op.srcMemory);
+    Memory* dst_dev_mem = dev().getRocMemory(op.dstMemory);
+
+    if (src_dev_mem == nullptr || dst_dev_mem == nullptr) {
+      LogError("DmaBlitManager::SubmitPinnedCopyBatch: Invalid memory objects!");
+      release_pinned_memories();
+      return false;
+    }
+
+    if (!dst_dev_mem->isHostMemDirectAccess()) {
+      dst_dev_mem->syncCacheFromHost(gpu(), sync_flags);
+    }
+
+    if (!src_dev_mem->isHostMemDirectAccess()) {
+      src_dev_mem->syncCacheFromHost(gpu());
+    }
+  }
+
+  if (!copyBufferBatch(copy_ops)) {
+    release_pinned_memories();
+    return false;
+  }
+
+  // @note: HIP requires to unpin all memory after operation, due to an
+  // optimization with direct HSA signal check HIP avoids the command completion
+  // wait
+  gpu().releaseGpuMemoryFence();
+  release_pinned_memories();
+  return true;
+}
+
+bool DmaBlitManager::WriteBufferBatch(const std::vector<amd::BatchWriteMemoryOp>& write_ops) const {
+  std::vector<amd::Memory*> pinned_memories;
+
+  for (const amd::BatchWriteMemoryOp& op : write_ops) {
+    if (op.metadata_.srcAccessOrder_ == amd::CopyMetadata::kSrcAccessOrderStream) {
+      gpu().releaseGpuMemoryFence();
+      break;
+    }
+  }
+
+  std::vector<amd::BatchCopyOp> copy_ops;
+  copy_ops.reserve(write_ops.size());
+  for (const amd::BatchWriteMemoryOp& op : write_ops) {
+    size_t pinned_offset = 0;
+    amd::Memory* pinned_source = pinHostMemory(op.src_host_, op.size_, pinned_offset);
+    if (pinned_source == nullptr) {
+      LogError("DmaBlitManager::WriteBufferBatch: Failed to pin pageable source!");
+      for (amd::Memory* pinned_memory : pinned_memories) {
+        pinned_memory->release();
+      }
+      return false;
+    }
+    pinned_memories.push_back(pinned_source);
+    copy_ops.emplace_back(pinned_source, op.dst_memory_, pinned_offset, op.dst_offset_, op.size_,
+                          op.metadata_);
+  }
+
+  return SubmitPinnedCopyBatch(copy_ops, pinned_memories);
+}
+
+bool DmaBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp>& read_ops) const {
+  std::vector<amd::Memory*> pinned_memories;
+
+  std::vector<amd::BatchCopyOp> copy_ops;
+  copy_ops.reserve(read_ops.size());
+  for (const amd::BatchReadMemoryOp& op : read_ops) {
+    size_t pinned_offset = 0;
+    amd::Memory* pinned_destination = pinHostMemory(op.dst_host_, op.size_, pinned_offset);
+    if (pinned_destination == nullptr) {
+      LogError(
+          "DmaBlitManager::ReadBufferBatch: Failed to pin pageable "
+          "destination!");
+      for (amd::Memory* pinned_memory : pinned_memories) {
+        pinned_memory->release();
+      }
+      return false;
+    }
+    pinned_memories.push_back(pinned_destination);
+    copy_ops.emplace_back(op.src_memory_, pinned_destination, op.src_offset_, pinned_offset,
+                          op.size_, op.metadata_);
+  }
+
+  return SubmitPinnedCopyBatch(copy_ops, pinned_memories);
+}
+
 // ================================================================================================
 bool DmaBlitManager::copyImageToBuffer(device::Memory& srcMemory, device::Memory& dstMemory,
                                        const amd::Coord3D& srcOrigin, const amd::Coord3D& dstOrigin,

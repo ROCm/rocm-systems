@@ -3152,6 +3152,54 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
 }
 
 // ================================================================================================
+void VirtualGPU::SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd) {
+  // Make sure VirtualGPU has an exclusive access to the resources
+  std::scoped_lock lock(execution());
+
+  profilingBegin(cmd, true);
+
+  if (cmd.Count() == 0) {
+    profilingEnd();
+    return;
+  }
+
+  if (!blitMgr().WriteBufferBatch(cmd.WriteOps())) {
+    LogError("SubmitBatchWriteMemory: Batch write failed!");
+    cmd.setStatus(CL_OUT_OF_RESOURCES);
+    profilingEnd();
+    return;
+  }
+
+  for (const amd::BatchWriteMemoryOp& op : cmd.WriteOps()) {
+    op.dst_memory_->signalWrite(&dev());
+  }
+
+  profilingEnd();
+}
+
+// ================================================================================================
+void VirtualGPU::SubmitBatchReadMemory(amd::BatchReadMemoryCommand& cmd) {
+  // Make sure VirtualGPU has an exclusive access to the resources
+  std::scoped_lock lock(execution());
+
+  profilingBegin(cmd, true);
+
+  if (cmd.Count() == 0) {
+    profilingEnd();
+    return;
+  }
+
+  if (!blitMgr().ReadBufferBatch(cmd.ReadOps())) {
+    LogError("SubmitBatchReadMemory: Batch read failed!");
+    cmd.setStatus(CL_OUT_OF_RESOURCES);
+    profilingEnd();
+    return;
+  }
+
+  profilingEnd();
+}
+
+// ================================================================================================
 void VirtualGPU::submitSvmMapMemory(amd::SvmMapMemoryCommand& cmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
   std::scoped_lock lock(execution());

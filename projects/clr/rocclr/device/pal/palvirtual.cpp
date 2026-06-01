@@ -2122,6 +2122,77 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
   profilingEnd(cmd);
 }
 
+void VirtualGPU::SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd) {
+  // Make sure VirtualGPU has an exclusive access to the resources
+  std::scoped_lock lock(execution());
+
+  profilingBegin(cmd);
+
+  const std::vector<amd::BatchWriteMemoryOp>& write_ops = cmd.WriteOps();
+  if (write_ops.empty()) {
+    profilingEnd(cmd);
+    return;
+  }
+
+  device::Memory::SyncFlags sync_flags;
+  sync_flags.skipEntire_ = false;
+
+  for (const amd::BatchWriteMemoryOp& op : write_ops) {
+    Memory* dst_dev_mem = dev().getGpuMemory(op.dst_memory_);
+    if (dst_dev_mem == nullptr) {
+      LogError("SubmitBatchWriteMemory: Invalid memory object!");
+      cmd.setStatus(CL_INVALID_MEM_OBJECT);
+      profilingEnd(cmd);
+      return;
+    }
+
+    dst_dev_mem->syncCacheFromHost(*this, sync_flags);
+  }
+
+  if (!blitMgr().WriteBufferBatch(write_ops)) {
+    LogError("SubmitBatchWriteMemory failed!");
+    cmd.setStatus(CL_OUT_OF_RESOURCES);
+  } else {
+    for (const amd::BatchWriteMemoryOp& op : write_ops) {
+      op.dst_memory_->signalWrite(&dev());
+    }
+  }
+
+  profilingEnd(cmd);
+}
+
+void VirtualGPU::SubmitBatchReadMemory(amd::BatchReadMemoryCommand& cmd) {
+  // Make sure VirtualGPU has an exclusive access to the resources
+  std::scoped_lock lock(execution());
+
+  profilingBegin(cmd);
+
+  const std::vector<amd::BatchReadMemoryOp>& read_ops = cmd.ReadOps();
+  if (read_ops.empty()) {
+    profilingEnd(cmd);
+    return;
+  }
+
+  for (const amd::BatchReadMemoryOp& op : read_ops) {
+    Memory* src_dev_mem = dev().getGpuMemory(op.src_memory_);
+    if (src_dev_mem == nullptr) {
+      LogError("SubmitBatchReadMemory: Invalid memory object!");
+      cmd.setStatus(CL_INVALID_MEM_OBJECT);
+      profilingEnd(cmd);
+      return;
+    }
+
+    src_dev_mem->syncCacheFromHost(*this);
+  }
+
+  if (!blitMgr().ReadBufferBatch(read_ops)) {
+    LogError("SubmitBatchReadMemory failed!");
+    cmd.setStatus(CL_OUT_OF_RESOURCES);
+  }
+
+  profilingEnd(cmd);
+}
+
 void VirtualGPU::submitSvmMapMemory(amd::SvmMapMemoryCommand& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
   std::scoped_lock lock(execution());
