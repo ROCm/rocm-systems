@@ -59,7 +59,7 @@ FLD_DESC_ENT(RDC_FI_MEMORY_TEMP,         "Memory temperature in millidegrees Cel
 FLD_DESC_ENT(RDC_FI_GPU_TEMP,            "GPU temperature in millidegrees Celsius",     "GPU_TEMP",         true)
 FLD_DESC_ENT(RDC_FI_GPU_JUNCTION_TEMP,   "Junction/hotspot temperature in millideg C",  "JUNCTION_TEMP",    true)
 FLD_DESC_ENT(RDC_FI_POWER_USAGE,         "Power usage in microwatts",                   "POWER_USAGE",      true)
-FLD_DESC_ENT(RDC_FI_GPU_ENERGY,          "Total energy consumed in microjoules",        "GPU_ENERGY",      true)
+FLD_DESC_ENT(RDC_FI_GPU_ENERGY,          "Energy consumed since driver load in microjoules",        "GPU_ENERGY",      true)
 FLD_DESC_ENT(RDC_FI_PCIE_TX,             "PCIe Tx utilization in bytes/second",         "PCIE_TX",          true)
 FLD_DESC_ENT(RDC_FI_PCIE_RX,             "PCIe Rx utilization in bytes/second",         "PCIE_RX",          true)
 FLD_DESC_ENT(RDC_FI_PCIE_BANDWIDTH,      "PCIe bandwidth in GB/sec",                    "PCIE_BANDWIDTH",   true)

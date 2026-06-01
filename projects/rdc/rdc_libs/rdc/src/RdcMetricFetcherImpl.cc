@@ -878,7 +878,9 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
                                               &counter_resolution, &timestamp);
       value->type = INTEGER;
       if (value->status == AMDSMI_STATUS_SUCCESS) {
-        value->value.l_int = static_cast<int64_t>(energy_accumulator);
+        // counter_resolution is in micro Joules per counter tick
+        value->value.l_int =
+            static_cast<int64_t>(static_cast<double>(energy_accumulator) * counter_resolution);
       }
       break;
     }
