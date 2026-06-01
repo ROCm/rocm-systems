@@ -999,7 +999,8 @@ def test_run_prof_success_v3(tmp_path, monkeypatch):
         "End_Timestamp,Counter_Name,Counter_Value\n"
         "GPU,0,0,0,0,0,0,0,0,0,0,test_kernel,0,0,0,0,0,0,0,1,SQ_WAVES,100"
     )
-    with open(workload_dir + "/out/pmc_1/results_0.csv", "w") as f:
+    converted_file = workload_dir + "/out/pmc_1/results_0_converted.csv"
+    with open(converted_file, "w") as f:
         f.write(csv_content)
 
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
@@ -1010,7 +1011,8 @@ def test_run_prof_success_v3(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     monkeypatch.setattr(
-        "glob.glob", lambda pattern: [workload_dir + "/out/pmc_1/results_0.csv"]
+        "utils.utils_profile.process_rocprofv3_output",
+        lambda *a, **k: [converted_file],
     )
 
     utils_profile.run_prof(str(fname), ["--arg"], workload_dir, logging.INFO, "csv")

@@ -20,6 +20,12 @@ import yaml
 from scipy.stats import zscore
 
 from utils.rocpd_data import get_rocpd_pass_db_paths, read_counter_collection_rows
+from utils.utils_analysis import (
+    ROCPD_COUNTER_NAME_COLUMN,
+    ROCPD_COUNTER_VALUE_COLUMN,
+    ROCPD_METADATA_COLUMNS,
+    ROCPD_PIVOT_GROUP_COLUMNS,
+)
 from utils.utils_common import canonical_config_arch
 
 # Runtime config options
@@ -380,12 +386,33 @@ def validate(test_name, workload_dir, file_dict, args=[]):
         baseline_compare_metric(test_name, workload_dir, args)
 
 
+def normalize_counter_dataframe_for_comparison(df):
+    """Return long-form counter rows for both legacy CSV and rocpd-wide outputs."""
+    if {ROCPD_COUNTER_NAME_COLUMN, ROCPD_COUNTER_VALUE_COLUMN}.issubset(df.columns):
+        return df
+
+    id_columns = [
+        column
+        for column in dict.fromkeys(ROCPD_PIVOT_GROUP_COLUMNS + ROCPD_METADATA_COLUMNS)
+        if column in df.columns
+    ]
+    counter_columns = [column for column in df.columns if column not in id_columns]
+    return df.melt(
+        id_vars=id_columns,
+        value_vars=counter_columns,
+        var_name=ROCPD_COUNTER_NAME_COLUMN,
+        value_name=ROCPD_COUNTER_VALUE_COLUMN,
+    ).dropna(subset=[ROCPD_COUNTER_VALUE_COLUMN])
+
+
 def are_stochastic_counters_similar(test_dfs, baseline_df):
     """
     Compares multiple test dataframes against a baseline dataframe to check
     if the stochastic counter values are similar. Returns True if all test dataframes
     have similar counter values to the baseline, otherwise returns False.
     """
+    baseline_df = normalize_counter_dataframe_for_comparison(baseline_df)
+    test_dfs = [normalize_counter_dataframe_for_comparison(df) for df in test_dfs]
     group_labels = [
         "Kernel_Name",
         "Grid_Size",
@@ -463,6 +490,8 @@ def are_deterministic_counters_equal(test_dfs, baseline_df):
     if the deterministic counter values are equal. Returns True if all test dataframes
     have equal counter values to the baseline, otherwise returns False.
     """
+    baseline_df = normalize_counter_dataframe_for_comparison(baseline_df)
+    test_dfs = [normalize_counter_dataframe_for_comparison(df) for df in test_dfs]
     group_labels = [
         "Kernel_Name",
         "Grid_Size",
@@ -661,8 +690,9 @@ def test_path_rocpd(
 
     code = binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
     assert code == 0
-    assert (Path(workload_dir) / "pmc_perf.csv").exists()
-    assert common.check_file_pattern("Counter_Name", f"{workload_dir}/pmc_perf.csv")
+    pmc_perf = pd.read_csv(Path(workload_dir) / "pmc_perf.csv", nrows=0)
+    assert "Kernel_Name" in pmc_perf.columns
+    assert "Counter_Name" not in pmc_perf.columns
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -1091,8 +1121,9 @@ def test_roof_rocpd(
 
     code = binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
     assert code == 0
-    assert (Path(workload_dir) / "pmc_perf.csv").exists()
-    assert common.check_file_pattern("Counter_Name", f"{workload_dir}/pmc_perf.csv")
+    pmc_perf = pd.read_csv(Path(workload_dir) / "pmc_perf.csv", nrows=0)
+    assert "Kernel_Name" in pmc_perf.columns
+    assert "Counter_Name" not in pmc_perf.columns
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 

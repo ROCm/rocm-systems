@@ -31,14 +31,7 @@ def load_sys_info(f: str) -> pd.DataFrame:
     """
     Load sys running info from csv file to a df.
     """
-    from utils.utils_common import canonical_config_arch
-
-    df = pd.read_csv(f)
-    if "gpu_arch" in df.columns and not df.empty:
-        df["gpu_arch"] = df["gpu_arch"].map(
-            lambda x: canonical_config_arch(str(x)) if pd.notna(x) else x
-        )
-    return df
+    return pd.read_csv(f)
 
 
 def load_panel_configs(
