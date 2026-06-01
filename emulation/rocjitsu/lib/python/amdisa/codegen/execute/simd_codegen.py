@@ -306,6 +306,7 @@ _VOP3_UNARY_SKIP = {
     "v_log_f16",
     "v_mov_b16",
     "v_frexp_exp_i32_f32",
+    "v_frexp_exp_i32_f64",
 }
 
 SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
@@ -884,6 +885,12 @@ SIMD_VOP1_UNARY_F64: dict[str, tuple[str, str]] = {
     ),
     "v_sqrt_f64_vop1": ("double", "[](auto a) { return util::stdx::sqrt(a); }"),
     "v_mov_b64_vop1": ("uint64_t", "[](auto a) { return a; }"),
+    # frexp mantissa: significand in [0.5,1) via bitfield rebias + denormal
+    # renorm (see util::frexp_mant_f64_simd). VOP3 twin in SIMD_VOP3_UNARY_FP64.
+    "v_frexp_mant_f64_vop1": (
+        "double",
+        "[](auto a) { return util::frexp_mant_f64_simd(a); }",
+    ),
 }
 
 
@@ -924,6 +931,16 @@ SIMD_CVT_F64_TO_B32: dict[str, tuple[str, str]] = {
         " util::stdx::where(util::stdx::isnan(s) || s < 0.0, r) = 0.0;"
         " util::stdx::where(s >= 4294967296.0, r) = 4294967295.0;"
         " return util::stdx::static_simd_cast<util::narrow32<uint32_t>>(r); }",
+    ),
+    # frexp exponent (f64 -> int32). util::frexp_exp_f64_simd returns the int32 in
+    # the low 32 bits of each 64-bit lane; the narrowing cast keeps them. The VOP3
+    # twin applies float omod/clamp to float(exp) + bit-casts (a different output
+    # encoding), so it stays scalar (_VOP3_UNARY_SKIP gates the cvt auto-route).
+    "v_frexp_exp_i32_f64_vop1": (
+        "int32_t",
+        "[](auto s) {"
+        " return util::stdx::static_simd_cast<util::narrow32<int32_t>>("
+        "util::frexp_exp_f64_simd(s)); }",
     ),
 }
 
@@ -1507,6 +1524,9 @@ SIMD_VOP3_UNARY_FP64: dict[str, str] = {
     # matches std::floor bit-exact (NaN-floor(NaN) = NaN; NaN result skipped
     # by the test like any other NaN-result lane).
     "v_fract_f64_vop3": "[](auto a) { return a - util::stdx::floor(a); }",
+    # frexp mantissa: same functor as the VOP1 form; the f64 unary FP glue applies
+    # abs/neg on the source and omod/clamp on the mantissa, matching the scalar.
+    "v_frexp_mant_f64_vop3": "[](auto a) { return util::frexp_mant_f64_simd(a); }",
     # v_rcp_f64 / v_rsq_f64: scalar uses transcendental::*_f64 with explicit
     # NaN passthrough, ±0 -> copysign(Inf, x), ±Inf -> copysign(0, x); negative
     # rsq inputs -> qNaN. Plain 1.0 / x and 1.0 / sqrt match the IEEE result
@@ -2197,6 +2217,11 @@ def simd_probe_line(template_name: str) -> str | None:
         # present in the plain VOP1 functors.)
         speccvtoutv3 = SIMD_CVT_F64_TO_B32.get(base + "_vop1")
         if speccvtoutv3 is not None:
+            # Unlike the plain cvt ops, v_frexp_exp_i32_f64's VOP3 body keeps the
+            # modifiers (float omod/clamp on float(exp) + bit_cast) — a different
+            # output encoding than the VOP1 int. Keep that twin scalar.
+            if base in _VOP3_UNARY_SKIP:
+                return None
             out_t, cpp_op = speccvtoutv3
             return f"  ROCJITSU_TRY_SIMD_CVT_F64_TO_B32({out_t}, {cpp_op});"
         speccvtinv3 = SIMD_CVT_B32_TO_F64.get(base + "_vop1")

@@ -60,7 +60,7 @@ struct Case {
   Kind kind;
 };
 
-const std::array<Case, 13> kCases = {{
+const std::array<Case, 14> kCases = {{
     {"v_add_f64_vop3", 640, Kind::Bin},
     {"v_mul_f64_vop3", 641, Kind::Bin},
     {"v_max_f64_vop3", 643, Kind::BinMinMax},
@@ -74,6 +74,7 @@ const std::array<Case, 13> kCases = {{
     {"v_rcp_f64_vop3", 357, Kind::Una},
     {"v_rsq_f64_vop3", 358, Kind::Una},
     {"v_mov_b64_vop3", 376, Kind::Una},
+    {"v_frexp_mant_f64_vop3", 369, Kind::Una},
 }};
 
 // f64 inputs covering every IEEE class + clamp boundary + values that exercise

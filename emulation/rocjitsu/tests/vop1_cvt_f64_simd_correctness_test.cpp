@@ -52,7 +52,12 @@ constexpr uint32_t vop1_encode(uint32_t op, uint32_t vdst, uint32_t src0) {
 // f64-source inputs: ±0, ±1, fractional, the clamp boundaries (2^31, 2^32) and
 // values straddling them, ±huge, NaN, ±Inf, denorm, pi, -e. Exercises every
 // branch of the int clamp/NaN logic and the correctly-rounded narrowing cast.
-const std::array<double, 20> kF64In = {{
+const std::array<double, 23> kF64In = {{
+    // f64 denormals with the highest mantissa bit at varied positions, to
+    // exercise v_frexp_exp_i32_f64's denormal renormalization across the range.
+    std::bit_cast<double>(static_cast<uint64_t>(0x000FFFFFFFFFFFFFull)), // p = 51
+    std::bit_cast<double>(static_cast<uint64_t>(0x0000000100000000ull)), // p = 32
+    std::bit_cast<double>(static_cast<uint64_t>(0x0000000000010000ull)), // p = 16
     +0.0,
     -0.0,
     1.0,
@@ -105,13 +110,16 @@ struct CvtCase {
   bool skip_nan; // result is a float whose NaN payload may diverge (accepted)
 };
 
-const std::array<CvtCase, 6> kCases = {{
+const std::array<CvtCase, 7> kCases = {{
     {"v_cvt_f32_f64", 15, true, false, true},
     {"v_cvt_i32_f64", 3, true, false, false},
     {"v_cvt_u32_f64", 21, true, false, false},
     {"v_cvt_f64_f32", 16, false, true, true},
     {"v_cvt_f64_i32", 4, false, true, false},
     {"v_cvt_f64_u32", 22, false, true, false},
+    // frexp exponent: f64 -> int32 (low half), high half keeps sentinel; the
+    // int result is deterministic (0 for ±0/Inf/NaN), so no NaN skip.
+    {"v_frexp_exp_i32_f64", 48, true, false, false},
 }};
 
 uint64_t dst_sentinel(uint32_t lane) {
