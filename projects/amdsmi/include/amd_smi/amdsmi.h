@@ -1414,6 +1414,44 @@ typedef struct {
 } amdsmi_proc_info_t;
 
 /**
+ * @brief Per-GPU process entry within a PID-grouped result.
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef struct {
+  uint32_t gpu_index;  //!< GPU index
+  uint64_t mem;        //!< Total memory in bytes
+  struct {
+    uint64_t gfx;  //!< GFX engine usage in nanoseconds
+    uint64_t enc;  //!< ENC engine usage in nanoseconds
+    uint32_t reserved[12];
+  } engine_usage;
+  struct {
+    uint64_t gtt_mem;   //!< GTT memory in bytes
+    uint64_t cpu_mem;   //!< CPU memory in bytes
+    uint64_t vram_mem;  //!< VRAM memory in bytes
+    uint32_t reserved[10];
+  } memory_usage;
+  uint32_t cu_occupancy;  //!< Number of CUs utilized
+  uint32_t evicted_time;  //!< Queue eviction time in milliseconds
+  uint64_t sdma_usage;    //!< SDMA usage in microseconds
+  uint32_t reserved[8];
+} amdsmi_proc_gpu_entry_t;
+
+/**
+ * @brief Process info aggregated across all GPUs, keyed by PID.
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef struct {
+  amdsmi_process_handle_t pid;
+  char name[AMDSMI_MAX_STRING_LENGTH];
+  char container_name[AMDSMI_MAX_STRING_LENGTH];
+  uint32_t num_gpus;                                 //!< Number of GPU entries populated
+  amdsmi_proc_gpu_entry_t gpus[AMDSMI_MAX_DEVICES];  //!< Per-GPU data, num_gpus entries valid
+} amdsmi_proc_info_by_pid_t;
+
+/**
  * @brief IO Link P2P Capability
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
@@ -5462,26 +5500,26 @@ typedef enum {
 } amdsmi_fabric_telemetry_category_t;
 
 /**
- * @brief Fabric telemetry category bitmask constructor
+ * @brief Fabric telemetry category bitmask values
  *
  */
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_UALOE (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE)
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_SWITCH (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_SWITCH)
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_CRYPTO (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO)
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_PFC (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_PFC)
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_NETPORT \
-  (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT)
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_UALOE \
-  (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE)
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_NETPORT \
-  (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT)
-
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_ALL_KNOWN                                         \
-  (AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_UALOE | AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_SWITCH | \
-   AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_CRYPTO | AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_PFC |   \
-   AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_NETPORT |                                              \
-   AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_UALOE |                                        \
-   AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_NETPORT)  //!< All known categories
+typedef enum {
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_UALOE = (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE),
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_SWITCH = (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_SWITCH),
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_CRYPTO = (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO),
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_PFC = (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_PFC),
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_NETPORT = (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT),
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_UALOE =
+      (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE),
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_NETPORT =
+      (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT),
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_ALL_KNOWN =
+      (AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_UALOE | AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_SWITCH |
+       AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_CRYPTO | AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_PFC |
+       AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_NETPORT |
+       AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_UALOE |
+       AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_NETPORT)  //!< All known categories
+} amdsmi_fabric_telemetry_category_mask_t;
 
 /**
  * @brief Fabric telemetry item structure
@@ -5621,8 +5659,16 @@ const char* amdsmi_fabric_telem_id_to_string(uint64_t telem_id);
 amdsmi_status_t amdsmi_free_fabric_telemetry(amdsmi_processor_handle processor_handle,
                                              amdsmi_fabric_telemetry_t* telemetry);
 
-#define AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE 32
-#define AMDSMI_FABRIC_MAX_LOCAL_GPUS 8
+/**
+ * @brief Fabric size constants
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef enum {
+  AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE =
+      32,  //!< Active accelerators bitmap size (32 x 32-bit words = 1024 bits)
+  AMDSMI_FABRIC_MAX_LOCAL_GPUS = 8  //!< Maximum local GPUs in fabric
+} amdsmi_fabric_size_constants_t;
 
 /**
  * @brief Fabric type
@@ -5812,11 +5858,12 @@ amdsmi_status_t amdsmi_get_gpu_ecc_count(amdsmi_processor_handle processor_handl
  *  enabled_mask, this function will write bits to memory pointed to by
  *  @p enabled_blocks. Upon a successful call, @p enabled_blocks can then be
  *  AND'd with elements of the ::amdsmi_gpu_block_t ennumeration to determine if
- *  the corresponding block has ECC enabled. Note that whether a block has ECC
- *  enabled or not in the device is independent of whether there is kernel
- *  support for error counting for that block. Although a block may be enabled,
- *  but there may not be kernel support for reading error counters for that
- *  block.
+ *  the corresponding block has ECC enabled.
+ *
+ *  @note Whether a block has ECC enabled or not in the device is independent
+ *  of whether there is kernel support for error counting for that block.
+ *  Although a block may be enabled, but there may not be kernel support for
+ *  reading error counters for that block.
  *
  *  @param[in] processor_handle a processor handle
  *
@@ -7566,6 +7613,34 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
  */
 amdsmi_status_t amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_handle,
                                             uint32_t* max_processes, amdsmi_proc_info_t* list);
+
+/**
+ *  @brief Get the list of processes running on one or more GPUs, grouped by PID.
+ *
+ *  @details Aggregates per-GPU process lists across all provided processor handles
+ *  and returns one entry per unique PID. Each entry contains the per-GPU breakdown
+ *  for every GPU that PID is active on. Results are sorted ascending by PID.
+ *
+ *  @ingroup tagProcessInfo
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @param[in]  processor_handles  Array of processor handles to query
+ *  @param[in]  num_processors     Number of handles in processor_handles
+ *  @param[out] procs              Caller-allocated buffer of amdsmi_proc_info_by_pid_t.
+ *                                 Pass NULL to query the required size via max_processes.
+ *  @param[in,out] max_processes   On input: capacity of procs. On output: number of
+ *                                 unique PIDs written (or required if procs is NULL).
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
+ *                            | ::AMDSMI_STATUS_OUT_OF_RESOURCES if max_processes was too small,
+ *                            | ::AMDSMI_STATUS_INVAL if processor_handles is NULL or num_processors
+ * is 0
+ */
+amdsmi_status_t amdsmi_get_gpu_process_list_by_pid(amdsmi_processor_handle* processor_handles,
+                                                   uint32_t num_processors,
+                                                   amdsmi_proc_info_by_pid_t* procs,
+                                                   uint32_t* max_processes);
 
 /** @} End tagProcessInfo */
 
