@@ -184,6 +184,11 @@ class MacOsDriver final : public core::Driver, private lite::DirectQueuePlatform
   hsa_status_t AllocateVram(size_t size, size_t align, void** cpu_addr,
                             uint64_t* gpu_addr);
   hsa_status_t HostToGpuAddress(const void* ptr, uint64_t* gpu_addr) const;
+  // macOS-egpu: true only if `ptr` lies inside a REGISTERED VRAM allocation
+  // (vs HostToGpuAddress which accepts any address in the whole BAR window). Used
+  // to translate only genuine device pointers in a kernarg blob and avoid
+  // mis-translating by-value scalar fields that coincidentally fall in the window.
+  bool IsRegisteredVramPointer(const void* ptr) const;
   void RegisterVramShadow(const void* cpu_addr, size_t size, const void* src);
   hsa_status_t VramShadowAddress(const void* cpu_addr, size_t size,
                                  const void** shadow_addr) const;

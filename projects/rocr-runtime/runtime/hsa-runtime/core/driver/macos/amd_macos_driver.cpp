@@ -475,6 +475,18 @@ hsa_status_t MacOsDriver::HostToGpuAddress(const void* ptr, uint64_t* gpu_addr) 
   return HSA_STATUS_SUCCESS;
 }
 
+bool MacOsDriver::IsRegisteredVramPointer(const void* ptr) const {
+  if (ptr == nullptr) return false;
+  std::lock_guard<std::mutex> g(gpu_lock_);
+  const auto p = reinterpret_cast<uintptr_t>(ptr);
+  for (const auto& kv : vram_allocations_) {
+    const auto base = reinterpret_cast<uintptr_t>(kv.first);
+    const auto& alloc = kv.second;
+    if (p >= base && p < base + alloc.size) return true;
+  }
+  return false;
+}
+
 void MacOsDriver::RegisterVramShadow(const void* cpu_addr, size_t size, const void* src) {
   if (cpu_addr == nullptr || src == nullptr || size == 0) return;
 

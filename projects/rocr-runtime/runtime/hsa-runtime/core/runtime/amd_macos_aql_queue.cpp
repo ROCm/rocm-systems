@@ -462,19 +462,31 @@ hsa_status_t MacAqlQueue::SubmitKernel(const hsa_kernel_dispatch_packet_t& packe
 
     std::vector<uint8_t> kernargs(kernarg_stage_size);
     std::memcpy(kernargs.data(), packet.kernarg_address, kernargs.size());
+    // macOS-egpu: translate only kernarg qwords that are interiors of a REGISTERED
+    // VRAM allocation, and (by default) never stage host-looking scalars. The old
+    // value-heuristic translated/staged ANY qword that fell in the BAR window or
+    // "looked like" a host pointer, which corrupts large by-value struct kernargs
+    // (e.g. ATen reduce_kernel's ~976B ReduceOp of IntDivider magic/stride scalars)
+    // and hangs the GPU (HSA 0x1000). ROCR_MACOS_AQL_KERNARG_LEGACY=1 restores the
+    // old behavior for A/B comparison.
+    const bool kernarg_legacy = EnvEnabled("ROCR_MACOS_AQL_KERNARG_LEGACY");
     for (size_t off = 0; off + sizeof(uint64_t) <= kernargs.size(); off += sizeof(uint64_t)) {
       uint64_t value = 0;
       std::memcpy(&value, kernargs.data() + off, sizeof(value));
+      const void* value_ptr = reinterpret_cast<const void*>(static_cast<uintptr_t>(value));
       uint64_t translated = 0;
-      if (driver_.HostToGpuAddress(reinterpret_cast<const void*>(static_cast<uintptr_t>(value)),
-                                   &translated) == HSA_STATUS_SUCCESS) {
+      const bool translate_eligible =
+          kernarg_legacy || driver_.IsRegisteredVramPointer(value_ptr);
+      if (translate_eligible &&
+          driver_.HostToGpuAddress(value_ptr, &translated) == HSA_STATUS_SUCCESS) {
         if (TraceAql() && translated != value) {
           kernarg_translations.emplace_back(value, translated);
         }
         std::memcpy(kernargs.data() + off, &translated, sizeof(translated));
         continue;
       }
-      // Fallback: a raw host pointer not registered as VRAM. Stage it to VRAM
+      if (!kernarg_legacy) continue;
+      // Legacy fallback: a raw host pointer not registered as VRAM. Stage it to VRAM
       // scratch so the kernel can read it, and record a writable range for the
       // optional post-dispatch copy-back.
       size_t readable_size = 0;
