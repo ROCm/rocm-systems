@@ -64,18 +64,12 @@ endif()
 # on the same path. json-tool reads ROCPROFILER_TOOL_OUTPUT_FILE verbatim (no built-in
 # placeholder expansion), so use a `bash -c` shim to expand $OMPI_COMM_WORLD_RANK at the
 # per-rank level. Validation only inspects rank 0's trace; both ranks exercise the same
-# set of APIs. rocSHMEM/Open MPI can hang in static teardown on some builds *after* the
-# demo has run and the rocprofiler trace files are written (observed on Ubuntu). Bound the
-# launcher with `timeout` so it exits before ctest's own timeout, and treat the test as
-# passed once the json-tool reports it finished writing the trace
-# (PASS_REGULAR_EXPRESSION). A run that never produces a trace prints no such marker and
-# still fails.
+# set of APIs.
 rocprofiler_add_integration_execute_test(
     rocshmem-tracing
     COMMAND
-        ${CMAKE_COMMAND} -E env ${MPI_ENV_VARS} ${MPI_LAUNCH_TIMEOUT} ${MPIRUN_EXECUTABLE}
-        -np 2 bash -c
-        "ROCPROFILER_TOOL_OUTPUT_FILE='${CMAKE_CURRENT_BINARY_DIR}/rocshmem-tracing-test.rank-'\${OMPI_COMM_WORLD_RANK}.json exec '$<IF:$<TARGET_EXISTS:rocshmem-demo>,$<TARGET_FILE:rocshmem-demo>,rocshmem-demo>'"
+        ${CMAKE_COMMAND} -E env ${MPI_ENV_VARS} ${MPIRUN_EXECUTABLE} -np 2 bash -c
+        "ROCPROFILER_TOOL_OUTPUT_FILE='${CMAKE_CURRENT_BINARY_DIR}/rocshmem-tracing-test.rank-'\${OMPI_COMM_WORLD_RANK}.json exec timeout -k 5 30 '$<IF:$<TARGET_EXISTS:rocshmem-demo>,$<TARGET_FILE:rocshmem-demo>,rocshmem-demo>'"
     DEPENDS rocshmem-demo
     TIMEOUT 45
     LABELS "integration-tests"
