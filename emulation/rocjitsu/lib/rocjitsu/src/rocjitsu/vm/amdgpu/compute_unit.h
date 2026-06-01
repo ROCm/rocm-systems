@@ -375,9 +375,7 @@ public:
   const uint32_t *vgpr_words(uint32_t base) const {
     return reinterpret_cast<const uint32_t *>(vgpr_data(base));
   }
-  uint32_t *vgpr_words(uint32_t base) {
-    return reinterpret_cast<uint32_t *>(vgpr_data(base));
-  }
+  uint32_t *vgpr_words(uint32_t base) { return reinterpret_cast<uint32_t *>(vgpr_data(base)); }
 
   /// @brief Return the SGPR register file (for serialization).
   /// @returns Const reference to the SGPR register file.

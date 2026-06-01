@@ -144,9 +144,8 @@ void check_int_case(const IntCase &c, uint64_t exec, uint32_t clamp) {
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       const bool active = (exec >> lane) & 1ULL;
       if (!active) {
-        EXPECT_EQ(simd[lane], DST_SENTINEL)
-            << c.name << " clamp=" << clamp << " rot=" << rot << ": clobbered inactive lane "
-            << lane;
+        EXPECT_EQ(simd[lane], DST_SENTINEL) << c.name << " clamp=" << clamp << " rot=" << rot
+                                            << ": clobbered inactive lane " << lane;
         continue;
       }
       EXPECT_EQ(scalar[lane], simd[lane])
@@ -215,8 +214,8 @@ void check_f16_case(uint64_t exec, uint32_t neg, uint32_t neg_hi, uint32_t clamp
   ASSERT_NE(wf, nullptr);
 
   uint32_t words[2] = {0u, 0u};
-  vop3p_encode_dot(/*op=*/35, kDstVgpr, /*src0=*/256, /*src1=*/257, /*src2=*/258, neg, neg_hi, clamp,
-                   words);
+  vop3p_encode_dot(/*op=*/35, kDstVgpr, /*src0=*/256, /*src1=*/257, /*src2=*/258, neg, neg_hi,
+                   clamp, words);
   Instruction *inst = decoder->decode(words);
   ASSERT_NE(inst, nullptr) << "v_dot2_f32_f16 decode failed";
 

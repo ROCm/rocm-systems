@@ -359,12 +359,11 @@ void exec_f32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K, u
       // (no per-call heap allocation). MAX_* bound every real MFMA shape;
       // anything larger falls back to the scalar path.
       constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
-      constexpr size_t MAX_AB = 2048;     // max M*K over all MFMA shapes
+      constexpr size_t MAX_AB = 2048;      // max M*K over all MFMA shapes
       constexpr size_t MAX_BSTRIDE = 4096; // max K*stride
       constexpr size_t MAX_C = 1024;       // max M*stride
       const uint32_t stride = ((N + W - 1) / W) * W;
-      if (static_cast<size_t>(M) * K > MAX_AB ||
-          static_cast<size_t>(K) * stride > MAX_BSTRIDE ||
+      if (static_cast<size_t>(M) * K > MAX_AB || static_cast<size_t>(K) * stride > MAX_BSTRIDE ||
           static_cast<size_t>(M) * stride > MAX_C) {
         run_scalar();
       } else {
@@ -555,8 +554,7 @@ void exec_f32_scaled(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
       constexpr size_t MAX_BSTRIDE = 4096;
       constexpr size_t MAX_C = 1024;
       const uint32_t stride = ((N + W - 1) / W) * W;
-      if (static_cast<size_t>(M) * K > MAX_AB ||
-          static_cast<size_t>(K) * stride > MAX_BSTRIDE ||
+      if (static_cast<size_t>(M) * K > MAX_AB || static_cast<size_t>(K) * stride > MAX_BSTRIDE ||
           static_cast<size_t>(M) * N > MAX_C) {
         run_scalar();
       } else {
@@ -581,10 +579,9 @@ void exec_f32_scaled(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
           for (uint32_t row = 0; row < M; ++row)
             for (uint32_t col = 0; col < N; ++col) {
               auto out = output_loc_32(M, N, row, col, b);
-              Cacc[row * N + col] =
-                  (const_acc != ACC_FROM_VGPR)
-                      ? std::bit_cast<float>(const_acc)
-                      : std::bit_cast<float>(c_words[out.reg * wf + out.lane]);
+              Cacc[row * N + col] = (const_acc != ACC_FROM_VGPR)
+                                        ? std::bit_cast<float>(const_acc)
+                                        : std::bit_cast<float>(c_words[out.reg * wf + out.lane]);
             }
           for (uint32_t row = 0; row < M; ++row) {
             for (uint32_t blk = 0; blk < num_blocks; ++blk) {
@@ -684,8 +681,7 @@ inline void exec_i32_i8(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uin
       constexpr size_t MAX_BSTRIDE = 4096;
       constexpr size_t MAX_C = 1024;
       const uint32_t stride = ((N + W - 1) / W) * W;
-      if (static_cast<size_t>(M) * K > MAX_AB ||
-          static_cast<size_t>(K) * stride > MAX_BSTRIDE ||
+      if (static_cast<size_t>(M) * K > MAX_AB || static_cast<size_t>(K) * stride > MAX_BSTRIDE ||
           static_cast<size_t>(M) * stride > MAX_C) {
         run_scalar();
       } else {
@@ -815,8 +811,7 @@ inline void exec_f64(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
       constexpr size_t MAX_BSTRIDE = 2048;
       constexpr size_t MAX_C = 1024;
       const uint32_t stride = ((N + W - 1) / W) * W;
-      if (static_cast<size_t>(M) * K > MAX_AB ||
-          static_cast<size_t>(K) * stride > MAX_BSTRIDE ||
+      if (static_cast<size_t>(M) * K > MAX_AB || static_cast<size_t>(K) * stride > MAX_BSTRIDE ||
           static_cast<size_t>(M) * stride > MAX_C) {
         run_scalar();
       } else {
@@ -902,8 +897,8 @@ inline void exec_f64(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
 ///   - cbsz/blgp lane permutation is non-default
 ///   - RJ_FORCE_SCALAR is set
 inline void exec_f32_mfma_16x16x32_f16(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
-                                       uint32_t s1, uint32_t s2, uint32_t const_acc,
-                                       uint32_t cbsz, uint32_t abid, uint32_t blgp) {
+                                       uint32_t s1, uint32_t s2, uint32_t const_acc, uint32_t cbsz,
+                                       uint32_t abid, uint32_t blgp) {
   constexpr uint32_t M = 16, N = 16, K = 32, B = 1, in_bits = 16;
   if constexpr (!util::has_stdx_simd) {
     exec_f32(cu, M, N, K, B, in_bits, dst, s0, s1, s2, amdgpu::extract_f16, amdgpu::extract_f16,

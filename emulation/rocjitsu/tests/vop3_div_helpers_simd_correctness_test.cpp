@@ -207,8 +207,8 @@ void check_div_fixup_f32(uint64_t exec) {
           if (is_f32_nan(sc[lane]) || is_f32_nan(sd[lane]))
             continue; // NaN payload may differ
           EXPECT_EQ(sc[lane], sd[lane])
-              << o.name << " r1=" << r1 << " r2=" << r2 << " lane=" << lane << ": sc=0x"
-              << std::hex << sc[lane] << " sd=0x" << sd[lane];
+              << o.name << " r1=" << r1 << " r2=" << r2 << " lane=" << lane << ": sc=0x" << std::hex
+              << sc[lane] << " sd=0x" << sd[lane];
         }
       }
     delete inst;

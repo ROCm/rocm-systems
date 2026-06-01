@@ -48,9 +48,18 @@ constexpr void vop3_encode(uint32_t op, uint32_t vdst, uint32_t src0, uint32_t s
 
 // 64-bit values: sign bit set/clear, all-ones, alternating, powers of two.
 const std::array<uint64_t, 12> kVals64 = {{
-    0x0000000000000000ull, 0x0000000000000001ull, 0xFFFFFFFFFFFFFFFFull, 0x8000000000000000ull,
-    0x7FFFFFFFFFFFFFFFull, 0x123456789ABCDEF0ull, 0xDEADBEEFCAFEBABEull, 0xA5A5A5A5A5A5A5A5ull,
-    0x0000000100000000ull, 0xFFFFFFFF00000000ull, 0x00000000FFFFFFFFull, 0x5A5A5A5A5A5A5A5Aull,
+    0x0000000000000000ull,
+    0x0000000000000001ull,
+    0xFFFFFFFFFFFFFFFFull,
+    0x8000000000000000ull,
+    0x7FFFFFFFFFFFFFFFull,
+    0x123456789ABCDEF0ull,
+    0xDEADBEEFCAFEBABEull,
+    0xA5A5A5A5A5A5A5A5ull,
+    0x0000000100000000ull,
+    0xFFFFFFFF00000000ull,
+    0x00000000FFFFFFFFull,
+    0x5A5A5A5A5A5A5A5Aull,
 }};
 // Shift counts: include <64, ==0, and >=64 (exercises the &63 mask vs scalar).
 const std::array<uint32_t, 10> kShifts = {{0u, 1u, 7u, 31u, 32u, 33u, 63u, 64u, 100u, 0xFFFFFFFFu}};
@@ -119,9 +128,9 @@ void check_revshift(const char *name, uint32_t op, uint64_t exec) {
           EXPECT_EQ(sd[lane], dst_sentinel(lane)) << name << ": clobbered inactive lane " << lane;
           continue;
         }
-        EXPECT_EQ(sc[lane], sd[lane]) << name << " srot=" << srot << " vrot=" << vrot
-                                      << " lane=" << lane << ": scalar=0x" << std::hex << sc[lane]
-                                      << " simd=0x" << sd[lane];
+        EXPECT_EQ(sc[lane], sd[lane])
+            << name << " srot=" << srot << " vrot=" << vrot << " lane=" << lane << ": scalar=0x"
+            << std::hex << sc[lane] << " simd=0x" << sd[lane];
       }
     }
   delete inst;
@@ -161,13 +170,13 @@ void check_lshl_add(uint64_t exec) {
       for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         const bool active = (exec >> lane) & 1ULL;
         if (!active) {
-          EXPECT_EQ(sd[lane], dst_sentinel(lane)) << "v_lshl_add_u64: clobbered inactive lane "
-                                                  << lane;
+          EXPECT_EQ(sd[lane], dst_sentinel(lane))
+              << "v_lshl_add_u64: clobbered inactive lane " << lane;
           continue;
         }
-        EXPECT_EQ(sc[lane], sd[lane]) << "v_lshl_add_u64 srot=" << srot << " crot=" << crot
-                                      << " lane=" << lane << ": scalar=0x" << std::hex << sc[lane]
-                                      << " simd=0x" << sd[lane];
+        EXPECT_EQ(sc[lane], sd[lane])
+            << "v_lshl_add_u64 srot=" << srot << " crot=" << crot << " lane=" << lane
+            << ": scalar=0x" << std::hex << sc[lane] << " simd=0x" << sd[lane];
       }
     }
   delete inst;
@@ -210,9 +219,9 @@ void check_mad64(const char *name, uint32_t op, uint64_t exec) {
           EXPECT_EQ(sd[lane], dst_sentinel(lane)) << name << ": clobbered inactive lane " << lane;
           continue;
         }
-        EXPECT_EQ(sc[lane], sd[lane]) << name << " arot=" << arot << " crot=" << crot
-                                      << " lane=" << lane << ": scalar=0x" << std::hex << sc[lane]
-                                      << " simd=0x" << sd[lane];
+        EXPECT_EQ(sc[lane], sd[lane])
+            << name << " arot=" << arot << " crot=" << crot << " lane=" << lane << ": scalar=0x"
+            << std::hex << sc[lane] << " simd=0x" << sd[lane];
       }
     }
   delete inst;

@@ -898,8 +898,8 @@ template <typename Inst, typename CmpOp>
   const uint32_t *pm = SimdAccess::lane_ptr(inst.vsrc1, wf, 0);
   const auto s_bcast =
       lo0 ? util::native<uint64_t>{} : util::broadcast64<uint64_t>(inst.src0.read_scalar64(wf));
-  const auto mask_bcast =
-      pm ? util::narrow32<uint32_t>{} : util::broadcast_narrow<uint32_t>(inst.vsrc1.read_scalar(wf));
+  const auto mask_bcast = pm ? util::narrow32<uint32_t>{}
+                             : util::broadcast_narrow<uint32_t>(inst.vsrc1.read_scalar(wf));
   for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
@@ -1393,10 +1393,10 @@ template <typename Inst, typename BinOp>
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const auto a =
-        apply_vop3_src_mod_f64<0>(lo0 ? util::load64<T>(lo0 + base, hi0 + base) : a_bcast, abs, neg);
-    const auto b =
-        apply_vop3_src_mod_f64<1>(lo1 ? util::load64<T>(lo1 + base, hi1 + base) : b_bcast, abs, neg);
+    const auto a = apply_vop3_src_mod_f64<0>(
+        lo0 ? util::load64<T>(lo0 + base, hi0 + base) : a_bcast, abs, neg);
+    const auto b = apply_vop3_src_mod_f64<1>(
+        lo1 ? util::load64<T>(lo1 + base, hi1 + base) : b_bcast, abs, neg);
     const auto r = apply_vop3_dst_mod_f64(bin_op(a, b), omod, clamp);
     write_simd64_at<T>(dlo, dhi, inst.vdst, wf, base, r, chunk);
   }
@@ -1434,8 +1434,8 @@ template <typename Inst, typename UnOp>
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const auto a =
-        apply_vop3_src_mod_f64<0>(lo0 ? util::load64<T>(lo0 + base, hi0 + base) : a_bcast, abs, neg);
+    const auto a = apply_vop3_src_mod_f64<0>(
+        lo0 ? util::load64<T>(lo0 + base, hi0 + base) : a_bcast, abs, neg);
     const auto r = apply_vop3_dst_mod_f64(un_op(a), omod, clamp);
     write_simd64_at<T>(dlo, dhi, inst.vdst, wf, base, r, chunk);
   }
@@ -1659,12 +1659,12 @@ template <typename Inst, typename FmaOp>
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const auto a =
-        apply_vop3_src_mod_f64<0>(lo0 ? util::load64<T>(lo0 + base, hi0 + base) : a_bcast, abs, neg);
-    const auto b =
-        apply_vop3_src_mod_f64<1>(lo1 ? util::load64<T>(lo1 + base, hi1 + base) : b_bcast, abs, neg);
-    const auto c =
-        apply_vop3_src_mod_f64<2>(lo2 ? util::load64<T>(lo2 + base, hi2 + base) : c_bcast, abs, neg);
+    const auto a = apply_vop3_src_mod_f64<0>(
+        lo0 ? util::load64<T>(lo0 + base, hi0 + base) : a_bcast, abs, neg);
+    const auto b = apply_vop3_src_mod_f64<1>(
+        lo1 ? util::load64<T>(lo1 + base, hi1 + base) : b_bcast, abs, neg);
+    const auto c = apply_vop3_src_mod_f64<2>(
+        lo2 ? util::load64<T>(lo2 + base, hi2 + base) : c_bcast, abs, neg);
     const auto r = apply_vop3_dst_mod_f64(tern_op(a, b, c), omod, clamp);
     write_simd64_at<T>(dlo, dhi, inst.vdst, wf, base, r, chunk);
   }
@@ -1798,10 +1798,10 @@ template <typename Inst, typename FmaOp>
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const auto a =
-        apply_vop3_src_mod_f64<0>(lo0 ? util::load64<T>(lo0 + base, hi0 + base) : a_bcast, abs, neg);
-    const auto b =
-        apply_vop3_src_mod_f64<1>(lo1 ? util::load64<T>(lo1 + base, hi1 + base) : b_bcast, abs, neg);
+    const auto a = apply_vop3_src_mod_f64<0>(
+        lo0 ? util::load64<T>(lo0 + base, hi0 + base) : a_bcast, abs, neg);
+    const auto b = apply_vop3_src_mod_f64<1>(
+        lo1 ? util::load64<T>(lo1 + base, hi1 + base) : b_bcast, abs, neg);
     const auto c = dlo ? util::load64<T>(dlo + base, dhi + base) : c_bcast; // accumulator, no mod
     const auto r = apply_vop3_dst_mod_f64(tern_op(a, b, c), omod, clamp);
     write_simd64_at<T>(dlo, dhi, inst.vdst, wf, base, r, chunk);
@@ -1886,8 +1886,8 @@ template <typename Inst, typename Op>
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const auto a =
-        apply_vop3_src_mod_f64<0>(lo0 ? util::load64<T>(lo0 + base, hi0 + base) : a_bcast, abs, neg);
+    const auto a = apply_vop3_src_mod_f64<0>(
+        lo0 ? util::load64<T>(lo0 + base, hi0 + base) : a_bcast, abs, neg);
     const auto e = pe ? util::load_narrow<int32_t>(pe + base) : e_bcast;
     const auto r = apply_vop3_dst_mod_f64(op(a, e), omod, clamp);
     write_simd64_at<T>(dlo, dhi, inst.vdst, wf, base, r, chunk);
@@ -2090,12 +2090,12 @@ template <typename Inst>
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const auto a =
-        apply_vop3_src_mod_f64<0>(lo0 ? util::load64<T>(lo0 + base, hi0 + base) : a_bcast, abs, neg);
-    const auto b =
-        apply_vop3_src_mod_f64<1>(lo1 ? util::load64<T>(lo1 + base, hi1 + base) : b_bcast, abs, neg);
-    const auto c =
-        apply_vop3_src_mod_f64<2>(lo2 ? util::load64<T>(lo2 + base, hi2 + base) : c_bcast, abs, neg);
+    const auto a = apply_vop3_src_mod_f64<0>(
+        lo0 ? util::load64<T>(lo0 + base, hi0 + base) : a_bcast, abs, neg);
+    const auto b = apply_vop3_src_mod_f64<1>(
+        lo1 ? util::load64<T>(lo1 + base, hi1 + base) : b_bcast, abs, neg);
+    const auto c = apply_vop3_src_mod_f64<2>(
+        lo2 ? util::load64<T>(lo2 + base, hi2 + base) : c_bcast, abs, neg);
     auto r = util::stdx::fma(a, b, c);
     const auto scaled = util::stdx::ldexp(r, shift_64);
     // VCC mask built directly in the f64 abi via a generator; avoids a
@@ -2218,10 +2218,10 @@ template <typename Inst, typename MadOp>
   const uint32_t *p1 = SimdAccess::lane_ptr(inst.src1, wf, 0);
   auto [lo2, hi2] = SimdAccess::lane_ptr64(inst.src2, wf, 0);
   auto [dlo, dhi] = SimdAccess::dst_ptr64(inst.vdst, wf, 0);
-  const auto a_bcast = p0 ? util::narrow32<uint32_t>{}
-                          : util::broadcast_narrow<uint32_t>(inst.src0.read_scalar(wf));
-  const auto b_bcast = p1 ? util::narrow32<uint32_t>{}
-                          : util::broadcast_narrow<uint32_t>(inst.src1.read_scalar(wf));
+  const auto a_bcast =
+      p0 ? util::narrow32<uint32_t>{} : util::broadcast_narrow<uint32_t>(inst.src0.read_scalar(wf));
+  const auto b_bcast =
+      p1 ? util::narrow32<uint32_t>{} : util::broadcast_narrow<uint32_t>(inst.src1.read_scalar(wf));
   const auto c_bcast =
       lo2 ? util::native<uint64_t>{} : util::broadcast64<uint64_t>(inst.src2.read_scalar64(wf));
   for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
@@ -3066,31 +3066,31 @@ template <typename Inst>
 /// v_ashrrev_i64). src0 = 32-bit shift, src1 = 64-bit value; the functor takes
 /// `(native<uint64_t> value, native<uint64_t> shift)`. Variadic.
 #define ROCJITSU_TRY_SIMD_SHIFT64_VOP3(...)                                                        \
-  if (::rocjitsu::amdgpu::try_execute_shift64_vop3_simd(inst, wf, __VA_ARGS__))                     \
+  if (::rocjitsu::amdgpu::try_execute_shift64_vop3_simd(inst, wf, __VA_ARGS__))                    \
   return
 
 /// VOP3 v_lshl_add_u64 counterpart. Fixed op ((src0 << (src1 & 63)) + src2).
 #define ROCJITSU_TRY_SIMD_LSHL_ADD_U64()                                                           \
-  if (::rocjitsu::amdgpu::try_execute_lshl_add_u64_simd(inst, wf))                                  \
+  if (::rocjitsu::amdgpu::try_execute_lshl_add_u64_simd(inst, wf))                                 \
   return
 
 /// VOP3 wide 32x32->64 multiply-add counterpart (v_mad_u64_u32 / v_mad_i64_i32).
 /// The functor takes `(narrow32<uint32_t> s0, narrow32<uint32_t> s1,
 /// native<uint64_t> c)`; variadic so its commas pass through.
 #define ROCJITSU_TRY_SIMD_MAD_WIDE64_VOP3(...)                                                     \
-  if (::rocjitsu::amdgpu::try_execute_mad_wide64_vop3_simd(inst, wf, __VA_ARGS__))                  \
+  if (::rocjitsu::amdgpu::try_execute_mad_wide64_vop3_simd(inst, wf, __VA_ARGS__))                 \
   return
 
 /// VOP3 carry-OUT counterpart (no carry-in; carry-out to SGPR sdst). Lane type
 /// fixed to uint32_t; variadic in the SimdCarry functor.
 #define ROCJITSU_TRY_SIMD_VOP3_CO(...)                                                             \
-  if (::rocjitsu::amdgpu::try_execute_binary_vop3_co_simd(inst, wf, __VA_ARGS__))                   \
+  if (::rocjitsu::amdgpu::try_execute_binary_vop3_co_simd(inst, wf, __VA_ARGS__))                  \
   return
 
 /// VOP3 carry-IN counterpart (carry-in from SGPR src2, carry-out to SGPR sdst).
 /// Lane type fixed to uint32_t; variadic in the SimdCarry functor.
 #define ROCJITSU_TRY_SIMD_VOP3_CIN(...)                                                            \
-  if (::rocjitsu::amdgpu::try_execute_binary_vop3_cin_simd(inst, wf, __VA_ARGS__))                  \
+  if (::rocjitsu::amdgpu::try_execute_binary_vop3_cin_simd(inst, wf, __VA_ARGS__))                 \
   return
 
 /// VOP3P fma_mix / mad_mix probes. The destination shape is the only thing
