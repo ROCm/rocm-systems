@@ -314,6 +314,7 @@ __device__ inline T __reduce_op_sync(MaskT mask, T val, BinaryOp op, WfReduce wf
                                         1 :
                                         (sizeof(T) + sizeof(unsigned int) - 1) / sizeof(unsigned int);
   static constexpr auto kMaskNumBits = sizeof(MaskT) * 8;
+  static constexpr auto alignment = alignof(T) <= 4? 4 : alignof(T);
   static_assert(__hip_internal::is_integral<MaskT>::value && sizeof(MaskT) == 8,
                 "The mask must be a 64-bit integer. "
                 "Implicitly promoting a smaller integer is almost always an error.");
@@ -330,9 +331,13 @@ __device__ inline T __reduce_op_sync(MaskT mask, T val, BinaryOp op, WfReduce wf
   int lastLane = kMaskNumBits - leadingZeroes - 1;
   int maskNumBits;
   int numIterations;
+
   // unsigned int[N] is used in some cases, e.g. when T is wider than 32-bit
-  typename __hip_internal::conditional<isPrimitiveType && (sizeof(T) == 4 || sizeof(T) == 2), permuteType,
-                                       permuteType[kNumOfPermutes]>::type result, permuteResult;
+  using ResultType = typename __hip_internal::conditional<
+                       isPrimitiveType && (sizeof(T) == 4 || sizeof(T) == 2),
+                       permuteType, permuteType[kNumOfPermutes]>::type;
+  alignas(alignment) ResultType result;
+  alignas(alignment) ResultType permuteResult;
   auto backwardPermute = [](int index, permuteType arg) {
     if constexpr (__hip_internal::is_floating_point<T>::value &&
                   sizeof(T) <= 4) {

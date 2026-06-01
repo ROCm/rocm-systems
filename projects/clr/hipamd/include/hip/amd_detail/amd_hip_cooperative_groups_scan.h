@@ -169,8 +169,12 @@ namespace impl {
 #endif
 
     // unsigned int[N] is used in some cases, e.g. when T is wider than 32-bit
-    typename __hip_internal::conditional<isPrimitiveType && (sizeof(Val) == 4 || sizeof(Val) == 2), permuteType,
-                                        permuteType[kNumOfPermutes]>::type result, permuteResult;
+    using ResultType = typename __hip_internal::conditional<
+                         isPrimitiveType && (sizeof(Val) == 4 || sizeof(Val) == 2), permuteType,
+                         permuteType[kNumOfPermutes]>::type;
+    static constexpr int alignment = alignof(Val) <= 4? 4 : alignof(Val);
+    alignas(alignment) ResultType result;
+    alignas(alignment) ResultType permuteResult;
 
     if constexpr (isPrimitiveType && (sizeof(Val) == 2 || sizeof(Val) == 4)) {
       result = val;
