@@ -226,7 +226,7 @@ protected:
 TEST_F(AddTorchLibraryPathTest, SkipsNonPythonExecutables)
 {
     std::vector<std::string> envp = { "LD_LIBRARY_PATH=/usr/lib" };
-    add_torch_library_path(envp, "/usr/bin/bash", false, updated_envs);
+    add_torch_library_path(envp, "/usr/bin/bash", updated_envs);
     ASSERT_EQ(envp.size(), 1);
     EXPECT_EQ(envp[0], "LD_LIBRARY_PATH=/usr/lib");
 }
@@ -234,7 +234,7 @@ TEST_F(AddTorchLibraryPathTest, SkipsNonPythonExecutables)
 TEST_F(AddTorchLibraryPathTest, HandlesEmptyExecutable)
 {
     std::vector<std::string> envp = { "LD_LIBRARY_PATH=/usr/lib" };
-    add_torch_library_path(envp, std::string_view{}, false, updated_envs);
+    add_torch_library_path(envp, std::string_view{}, updated_envs);
     ASSERT_EQ(envp.size(), 1);
     EXPECT_EQ(envp[0], "LD_LIBRARY_PATH=/usr/lib");
 }
@@ -244,7 +244,7 @@ TEST_F(AddTorchLibraryPathTest, PythonExecutableWithoutTorchLeavesEnvUnchanged)
     // "/nonexistent/python3" is recognised as a Python interpreter but
     // discover_torch_libpath returns "" → early return, env unchanged.
     std::vector<std::string> envp = { "LD_LIBRARY_PATH=/usr/lib" };
-    add_torch_library_path(envp, "/nonexistent/python3", false, updated_envs);
+    add_torch_library_path(envp, "/nonexistent/python3", updated_envs);
     ASSERT_EQ(envp.size(), 1);
     EXPECT_EQ(envp[0], "LD_LIBRARY_PATH=/usr/lib");
 }
@@ -259,17 +259,17 @@ TEST(DiscoverTorchLibpathTest, EmptyBinaryReturnsEmpty)
 TEST(DiscoverTorchLibpathTest, UnsafeCharInPathReturnsEmpty)
 {
     // ';' hits default: return false in is_safe_executable_path
-    EXPECT_EQ(discover_torch_libpath("/usr/bin/python;injected", true), "");
+    EXPECT_EQ(discover_torch_libpath("/usr/bin/python;injected"), "");
 }
 
 TEST(DiscoverTorchLibpathTest, SpaceInPathReturnsEmpty)
 {
-    EXPECT_EQ(discover_torch_libpath("/path with space/python3", true), "");
+    EXPECT_EQ(discover_torch_libpath("/path with space/python3"), "");
 }
 
 TEST(DiscoverTorchLibpathTest, DollarSignInPathReturnsEmpty)
 {
-    EXPECT_EQ(discover_torch_libpath("$HOME/python3", true), "");
+    EXPECT_EQ(discover_torch_libpath("$HOME/python3"), "");
 }
 
 TEST(DiscoverTorchLibpathTest, SafePathWithAllowedCharsAndNoTorchReturnsEmpty)
@@ -277,7 +277,7 @@ TEST(DiscoverTorchLibpathTest, SafePathWithAllowedCharsAndNoTorchReturnsEmpty)
     // Path uses all allowed non-alnum chars (/ _ - + .) to exercise every
     // switch case in is_safe_executable_path. Shell exits non-zero (not found)
     // → popen succeeds, status != 0 → returns empty string.
-    EXPECT_EQ(discover_torch_libpath("/nonexistent_dir/python-3.11+safe.bin", true), "");
+    EXPECT_EQ(discover_torch_libpath("/nonexistent_dir/python-3.11+safe.bin"), "");
 }
 
 // ── posix_env + forwarding free functions (L77, L79, L269–L279) ──────────────
@@ -582,14 +582,14 @@ TEST_F(FakeEnvConfigTest, OperatorRespectsOverrideZero)
     EXPECT_EQ(fake_environment::get_env("FOO", std::string{}), "original");
 }
 
-TEST_F(FakeEnvConfigTest, VerbosePathExecutes)
+TEST_F(FakeEnvConfigTest, OperatorReturnsZeroOnSuccess)
 {
     env_config<fake_env> cfg;
     cfg.m_env_name  = "FOO";
-    cfg.m_env_value = "verbose_value";
+    cfg.m_env_value = "some_value";
     cfg.m_override  = 1;
-    EXPECT_EQ(cfg(true), 0);
-    EXPECT_EQ(fake_environment::get_env("FOO", std::string{}), "verbose_value");
+    EXPECT_EQ(cfg(), 0);
+    EXPECT_EQ(fake_environment::get_env("FOO", std::string{}), "some_value");
 }
 
 TEST_F(FakeEnvConfigTest, EmptyNameIsNoop)

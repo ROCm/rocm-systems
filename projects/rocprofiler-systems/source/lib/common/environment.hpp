@@ -5,8 +5,8 @@
 
 #include "common/defines.h"
 #include "common/join.hpp"
+#include "logger/debug.hpp"
 
-#include <timemory/log/color.hpp>
 #include <timemory/utility/filepath.hpp>
 
 #include <algorithm>
@@ -28,47 +28,6 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
-
-#if !defined(ROCPROFSYS_ENVIRON_LOG_NAME)
-#    if defined(ROCPROFSYS_COMMON_LIBRARY_NAME)
-#        define ROCPROFSYS_ENVIRON_LOG_NAME "[" ROCPROFSYS_COMMON_LIBRARY_NAME "]"
-#    else
-#        define ROCPROFSYS_ENVIRON_LOG_NAME
-#    endif
-#endif
-
-#if !defined(ROCPROFSYS_ENVIRON_LOG_START)
-#    if defined(ROCPROFSYS_COMMON_LIBRARY_LOG_START)
-#        define ROCPROFSYS_ENVIRON_LOG_START ROCPROFSYS_COMMON_LIBRARY_LOG_START
-#    elif defined(TIMEMORY_LOG_COLORS_AVAILABLE)
-#        define ROCPROFSYS_ENVIRON_LOG_START                                             \
-            fprintf(stderr, "%s", ::tim::log::color::info());
-#    else
-#        define ROCPROFSYS_ENVIRON_LOG_START
-#    endif
-#endif
-
-#if !defined(ROCPROFSYS_ENVIRON_LOG_END)
-#    if defined(ROCPROFSYS_COMMON_LIBRARY_LOG_END)
-#        define ROCPROFSYS_ENVIRON_LOG_END ROCPROFSYS_COMMON_LIBRARY_LOG_END
-#    elif defined(TIMEMORY_LOG_COLORS_AVAILABLE)
-#        define ROCPROFSYS_ENVIRON_LOG_END                                               \
-            fprintf(stderr, "%s", ::tim::log::color::end());
-#    else
-#        define ROCPROFSYS_ENVIRON_LOG_END
-#    endif
-#endif
-
-#define ROCPROFSYS_ENVIRON_LOG(CONDITION, ...)                                           \
-    if(CONDITION)                                                                        \
-    {                                                                                    \
-        fflush(stderr);                                                                  \
-        ROCPROFSYS_ENVIRON_LOG_START                                                     \
-        fprintf(stderr, "[rocprof-sys]" ROCPROFSYS_ENVIRON_LOG_NAME "[%i] ", getpid());  \
-        fprintf(stderr, __VA_ARGS__);                                                    \
-        ROCPROFSYS_ENVIRON_LOG_END                                                       \
-        fflush(stderr);                                                                  \
-    }
 
 namespace rocprofsys
 {
@@ -148,12 +107,9 @@ private:
             return static_cast<Tp>(std::stod(raw));
         } catch(const std::exception& exc)
         {
-            (void) fprintf(
-                stderr,
-                "[rocprof-sys][get_env] Exception thrown converting "
-                "getenv(\"%s\") = %s to float: %s\n",
-                env_id.data(),  // NOLINT(bugprone-suspicious-stringview-data-usage)
-                raw, exc.what());
+            LOG_ERROR("[get_env] Exception thrown converting getenv(\"{}\") = {} to "
+                      "float: {}",
+                      env_id, raw, exc.what());
         }
         return fallback;
     }
@@ -175,12 +131,9 @@ private:
             }
         } catch(const std::exception& exc)
         {
-            (void) fprintf(
-                stderr,
-                "[rocprof-sys][get_env] Exception thrown converting "
-                "getenv(\"%s\") = %s to integer: %s\n",
-                env_id.data(),  // NOLINT(bugprone-suspicious-stringview-data-usage)
-                raw, exc.what());
+            LOG_ERROR("[get_env] Exception thrown converting getenv(\"{}\") = {} to "
+                      "integer: {}",
+                      env_id, raw, exc.what());
         }
         return fallback;
     }
@@ -246,11 +199,9 @@ public:
         auto value = get_env(env_id, value_default);
         if(choices.find(value) == choices.end())
         {
-            fprintf(
-                stderr,
-                "[rocprof-sys][get_env] Environment variable \"%s\" has invalid value "
-                "\"%s\". Reverting to default.\n",
-                env_id.data(), get_env<std::string>(env_id).c_str());
+            LOG_WARNING("[get_env] Environment variable \"{}\" has invalid value \"{}\". "
+                        "Reverting to default.",
+                        env_id, get_env<std::string>(env_id));
             return value_default;
         }
         return value;
@@ -265,11 +216,10 @@ struct ROCPROFSYS_INTERNAL_API env_config
     std::string m_env_value = {};
     int         m_override  = 0;
 
-    auto operator()(bool _verbose = false) const
+    auto operator()() const
     {
         if(m_env_name.empty()) return -1;
-        ROCPROFSYS_ENVIRON_LOG(_verbose, "setenv(\"%s\", \"%s\", %i)\n",
-                               m_env_name.c_str(), m_env_value.c_str(), m_override);
+        LOG_DEBUG("setenv(\"{}\", \"{}\", {})", m_env_name, m_env_value, m_override);
         return EnvType::setenv(m_env_name.c_str(), m_env_value.c_str(), m_override);
     }
 };
@@ -328,7 +278,7 @@ remove_env(std::vector<std::string>& env_list, std::string_view env_variable,
 }
 
 inline std::string
-discover_llvm_libdir_for_ompt(bool verbose = false)
+discover_llvm_libdir_for_ompt()
 {
     auto strip = [](std::string value_to_strip) {
         if(!value_to_strip.empty() && value_to_strip.back() == '/')
@@ -374,12 +324,11 @@ discover_llvm_libdir_for_ompt(bool verbose = false)
     auto result = std::find_if(candidates.begin(), candidates.end(), has_libomptarget);
     if(result != candidates.end())
     {
-        ROCPROFSYS_ENVIRON_LOG(verbose, "Using LLVM libdir: %s\n", result->c_str());
+        LOG_DEBUG("Using LLVM libdir: {}", *result);
         return *result;
     }
 
-    ROCPROFSYS_ENVIRON_LOG(verbose,
-                           "libomptarget.so not found in candidate LLVM libdirs\n");
+    LOG_DEBUG("libomptarget.so not found in candidate LLVM libdirs");
     return {};
 }
 
@@ -409,7 +358,7 @@ is_python_interpreter(std::string_view executable)
 }
 
 inline std::string
-discover_torch_libpath(const std::string& python_binary, bool verbose = false)
+discover_torch_libpath(const std::string& python_binary)
 {
     if(python_binary.empty()) return {};
 
@@ -434,9 +383,8 @@ discover_torch_libpath(const std::string& python_binary, bool verbose = false)
 
     if(!is_safe_executable_path(python_binary))
     {
-        ROCPROFSYS_ENVIRON_LOG(
-            verbose, "Unsafe characters detected in Python interpreter path: %s\n",
-            python_binary.c_str());
+        LOG_WARNING("Unsafe characters detected in Python interpreter path: {}",
+                    python_binary);
         return {};
     }
 
@@ -446,7 +394,7 @@ discover_torch_libpath(const std::string& python_binary, bool verbose = false)
     FILE* pipe = popen(cmd.c_str(), "r");
     if(!pipe)
     {
-        ROCPROFSYS_ENVIRON_LOG(verbose, "Failed to execute command: %s\n", cmd.c_str());
+        LOG_WARNING("Failed to execute command: {}", cmd);
         return {};
     }
 
@@ -463,8 +411,7 @@ discover_torch_libpath(const std::string& python_binary, bool verbose = false)
 
     if(status != 0 || result.empty())
     {
-        ROCPROFSYS_ENVIRON_LOG(verbose, "torch not found for Python interpreter: %s\n",
-                               python_binary.c_str());
+        LOG_DEBUG("torch not found for Python interpreter: {}", python_binary);
         return {};
     }
 
@@ -480,13 +427,11 @@ discover_torch_libpath(const std::string& python_binary, bool verbose = false)
 
     if(!::tim::filepath::direxists(torch_libdir))
     {
-        ROCPROFSYS_ENVIRON_LOG(verbose, "torch lib directory does not exist: %s\n",
-                               torch_libdir.c_str());
+        LOG_WARNING("torch lib directory does not exist: {}", torch_libdir);
         return {};
     }
 
-    ROCPROFSYS_ENVIRON_LOG(verbose, "Discovered torch library path: %s\n",
-                           torch_libdir.c_str());
+    LOG_DEBUG("Discovered torch library path: {}", torch_libdir);
     return torch_libdir;
 }
 
@@ -567,12 +512,12 @@ update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _
 template <typename UpdatedEnvsT>
 inline void
 add_torch_library_path(std::vector<std::string>& envp, std::string_view executable,
-                       bool verbose, UpdatedEnvsT& updated_envs)
+                       UpdatedEnvsT& updated_envs)
 {
     if(executable.empty()) return;
     if(!is_python_interpreter(executable)) return;
 
-    auto torch_libpath = discover_torch_libpath(std::string{ executable }, verbose);
+    auto torch_libpath = discover_torch_libpath(std::string{ executable });
     if(torch_libpath.empty()) return;
 
     std::unordered_set<std::string> seen{ torch_libpath };
