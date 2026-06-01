@@ -92,47 +92,6 @@ def create_minimal_rocpd_counter_db(db_path):
     conn.close()
 
 
-
-def create_minimal_rocpd_counter_db(db_path):
-    """Create a small rocpd counters_collection table for utility tests."""
-    conn = sqlite3.connect(db_path)
-    conn.execute(
-        """CREATE TABLE counters_collection (
-            agent_id INTEGER, guid TEXT, stack_id INTEGER, dispatch_id INTEGER,
-            pid INTEGER, grid_size INTEGER, workgroup_size INTEGER,
-            lds_block_size INTEGER, scratch_size INTEGER, vgpr_count INTEGER,
-            accum_vgpr_count INTEGER, sgpr_count INTEGER, kernel_name TEXT,
-            start INTEGER, end INTEGER, kernel_id INTEGER,
-            counter_name TEXT, value REAL
-        )"""
-    )
-    conn.execute(
-        "INSERT INTO counters_collection VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (
-            0,
-            "guid",
-            1,
-            0,
-            100,
-            64,
-            256,
-            0,
-            0,
-            32,
-            0,
-            16,
-            "kernel",
-            10,
-            20,
-            0,
-            "SQ_WAVES",
-            1,
-        ),
-    )
-    conn.commit()
-    conn.close()
-
-
 ##################################################
 ##          Generated tests                     ##
 ##################################################
