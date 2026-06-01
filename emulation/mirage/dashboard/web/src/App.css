@@ -345,6 +345,25 @@
   background: rgba(239, 68, 68, 0.1);
 }
 
+.btn-secondary-sm {
+  font-family: var(--sans);
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+  margin-right: 6px;
+  transition: background 0.15s;
+}
+
+.btn-secondary-sm:hover {
+  background: var(--surface-2, rgba(255, 255, 255, 0.05));
+}
+
 /* ── States ──────────────────────────────────────────────────────────── */
 
 .loading {

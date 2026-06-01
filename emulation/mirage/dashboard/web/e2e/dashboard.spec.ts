@@ -134,6 +134,14 @@ test.describe.serial("mirage dashboard e2e", () => {
     await expect(page.getByTestId("agent-detail-MI350X")).toBeVisible();
   });
 
+  test("user story 6b: edit button opens agent editor", async ({ page }) => {
+    await page.goto("/agents");
+    await page.getByTestId("edit-agent-MI350X").click();
+    await expect(page).toHaveURL(/\/agents\/edit\/MI350X$/);
+    await expect(page.getByTestId("agent-editor-name")).toHaveText("MI350X");
+    await expect(page.getByTestId("agent-editor-save")).toBeVisible();
+  });
+
   test("user story 7: create a topology on the Topologies page", async ({ page }) => {
     await page.goto("/topologies");
     await page.getByTestId("open-topology-create").click();

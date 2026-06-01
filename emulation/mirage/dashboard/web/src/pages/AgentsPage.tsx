@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import * as api from "../api/client";
 import type { AgentDef } from "../api/types";
 import { Modal } from "../components/ui/Modal";
 import { useToast } from "../components/ui/Toast";
 
 export function AgentsPage() {
+  const navigate = useNavigate();
   const toast = useToast();
   const [names, setNames] = useState<string[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -117,6 +119,14 @@ export function AgentsPage() {
           >
             Import JSON…
           </button>
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={() => navigate("/agents/new")}
+            data-testid="open-agent-editor-new"
+          >
+            + New agent
+          </button>
         </div>
       </div>
       {error && <div className="error" role="alert">{error}</div>}
@@ -148,6 +158,13 @@ export function AgentsPage() {
                   </button>
                 </td>
                 <td className="row-actions">
+                  <Link
+                    to={`/agents/edit/${encodeURIComponent(n)}`}
+                    className="btn-secondary-sm"
+                    data-testid={`edit-agent-${n}`}
+                  >
+                    Edit
+                  </Link>
                   <button
                     type="button"
                     className="btn-danger-sm"
