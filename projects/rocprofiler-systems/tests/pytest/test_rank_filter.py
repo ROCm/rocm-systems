@@ -181,6 +181,40 @@ class TestRankFilter(RocprofsysTest):
             ranks_without_output=[2],
         )
 
+    def test_invalid_filter_strings(self, rocpd_env):
+        """Invalid filter specifications.
+        OUTPUT="garbage,10-0,2": 'garbage' is non-numeric and '10-0' is a reversed
+        range (both ignored); only rank 2 remains, so only rank 2 produces files.
+        LOGS="garbage": the only token is non-numeric and is ignored, so the
+        filter parses to no valid ranks. An invalid specification disables log
+        filtering entirely, so every rank emits a banner.
+        Rank 0: banner, no file output
+        Rank 1: banner, no file output
+        Rank 2: banner AND file output
+        """
+        result = self.run_test(
+            "sys_run",
+            TARGET,
+            env=rocpd_env,
+            sysrun_args=[
+                "--rank-filter-output",
+                "garbage,10-0,2",
+                "--rank-filter-logs",
+                "garbage",
+            ],
+            launcher="mpi",
+            num_procs=NUM_PROCS,
+        )
+        self.assert_regex(result)
+        assert (
+            banner_count(result.test_output) == 3
+        ), f"Expected 3 banners, got {banner_count(result.test_output)}"
+        assert_per_rank_outputs(
+            self.test_output_dir,
+            ranks_with_output=[2],
+            ranks_without_output=[0, 1],
+        )
+
     def test_custom_id_excludes_all(self, rocpd_env):
         """Custom rank-ID forces every rank to identify as 10; filter is 0-2.
         Since 10 is not in [0,2] for either filter, every rank is silenced
