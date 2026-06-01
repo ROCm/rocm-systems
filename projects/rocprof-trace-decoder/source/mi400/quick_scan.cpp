@@ -285,7 +285,7 @@ ScanFn select_scanner()
 
 } // namespace
 
-size_t scan_mi400(const uint8_t* buf, size_t size, TokenGenerator::QuickToken* out, size_t out_cap)
+size_t scan_mi400(const uint8_t* buf, size_t size, TokenGenerator::QuickToken* __restrict__ out, size_t out_cap)
 {
     static const ScanFn fn = select_scanner();
     // Precondition: caller has verified availability via the export-level
@@ -294,15 +294,6 @@ size_t scan_mi400(const uint8_t* buf, size_t size, TokenGenerator::QuickToken* o
     return fn(buf, size, out, out_cap);
 }
 
-} // namespace mi400::quick_scan
-
-#else // MI400_RARE_SCAN_HAS_X86
-
-// MSVC / non-x86: no SIMD implementation compiled. Export-level probe
-// returns NOT_IMPLEMENTED and prevents this stub from ever being called.
-namespace mi400::quick_scan
-{
-size_t scan_mi400(const uint8_t*, size_t, TokenGenerator::QuickToken*, size_t) { return 0; }
 } // namespace mi400::quick_scan
 
 #endif // MI400_RARE_SCAN_HAS_X86

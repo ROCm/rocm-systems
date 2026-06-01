@@ -32,6 +32,14 @@
 
 //#define GET_TIMING
 
+#ifndef ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
+#    if (defined(__GNUC__) || defined(__clang__)) && (defined(__x86_64__) || defined(__i386__))
+#        define ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD 1
+#    else
+#        define ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD 0
+#    endif
+#endif
+
 namespace quick_scan
 {
 // Captured rare-token entry. `contents` is the full 64-bit window starting
@@ -77,8 +85,10 @@ struct QuickToken
 //
 // Writes up to `out_cap` entries into `out` in stream order and returns
 // the number written. Single-threaded, no exceptions.
-size_t scan_gfx9(const uint8_t* buf, size_t size, QuickToken* out, size_t out_cap);
-size_t scan_gfx12(const uint8_t* buf, size_t size, QuickToken* out, size_t out_cap);
+#if ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
+size_t scan_gfx9(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap);
+size_t scan_gfx12(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap);
+#endif
 
 // Returns true iff the running CPU supports AVX-512 (vbmi+bw+f) and the
 // TU was built for x86 with a compiler that has the SIMD paths. False on

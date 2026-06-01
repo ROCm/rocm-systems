@@ -512,7 +512,8 @@ ScanFn select_scanner()
 
 namespace quick_scan
 {
-size_t scan_gfx9(const uint8_t* buf, size_t size, QuickToken* out, size_t out_cap)
+#if GFX9_QUICK_SCAN_HAS_X86
+size_t scan_gfx9(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap)
 {
     thread_local const gfx9::quick_scan::ScanFn fn = gfx9::quick_scan::select_scanner();
     // Precondition: caller has verified availability via the export-level
@@ -520,4 +521,5 @@ size_t scan_gfx9(const uint8_t* buf, size_t size, QuickToken* out, size_t out_ca
     if (!fn) return 0;
     return fn(buf, size, out, out_cap);
 }
+#endif
 } // namespace quick_scan

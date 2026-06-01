@@ -48,7 +48,7 @@ namespace quick_scan
 {
 bool avx512_available()
 {
-#if (defined(__GNUC__) || defined(__clang__)) && (defined(__x86_64__) || defined(__i386__))
+#if ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
     static const bool ok = []
     {
         __builtin_cpu_init();
@@ -260,15 +260,20 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
     data_size -= header_skip;
     buf += header_skip;
 
+    size_t ntokens = 0;
+#if ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
     auto scanner = (gfxip == 9) ? &quick_scan::scan_gfx9 : &scan_none;
     if (gfxip == 12) scanner = &quick_scan::scan_gfx12;
 
-    size_t ntokens = scanner(buf, data_size, raw.data(), raw.size());
+    ntokens = scanner(buf, data_size, raw.data(), raw.size());
     while (ntokens == raw.size())
     {
         raw.resize(raw.size() * 2);
         ntokens = scanner(buf, data_size, raw.data(), raw.size());
     }
+#else
+    return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
+#endif
 
     TIMING(t2);
 
@@ -383,12 +388,17 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
 
     if (!quick_scan::avx512_available()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
 
-    size_t ntokens = quick_scan::scan_gfx9(buf, offset_begin, raw.data(), raw.size());
+    size_t ntokens = 0;
+#if ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
+    ntokens = quick_scan::scan_gfx9(buf, offset_begin, raw.data(), raw.size());
     while (ntokens == raw.size())
     {
         raw.resize(raw.size() * 2);
         ntokens = quick_scan::scan_gfx9(buf, offset_begin, raw.data(), raw.size());
     }
+#else
+    return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
+#endif
 
     process_events_gfx9</*EmitEvents=*/false>(temp, raw, static_cast<int>(ntokens), 0, nullptr, nullptr);
 

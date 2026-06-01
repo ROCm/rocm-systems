@@ -49,6 +49,8 @@ namespace mi400::quick_scan
 // Single-threaded, no exceptions. The buffer is read up to position
 // `size`; the windowed inner loop loads 8 bytes at a time, so a tail
 // fallback handles the last <16 bytes safely.
-size_t scan_mi400(const uint8_t* buf, size_t size, TokenGenerator::QuickToken* out, size_t out_cap);
+#if (defined(__GNUC__) || defined(__clang__)) && (defined(__x86_64__) || defined(__i386__))
+size_t scan_mi400(const uint8_t* buf, size_t size, TokenGenerator::QuickToken* __restrict__ out, size_t out_cap);
+#endif
 
 } // namespace mi400::quick_scan
