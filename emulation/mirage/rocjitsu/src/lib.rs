@@ -127,6 +127,13 @@ pub fn ensure_assets(force: bool) -> Result<Vec<(String, bool)>> {
 /// Write the bundled rocjitsu kmd configs into the mirage agent
 /// directory (`<MIRAGE_CONFIG>/agent/`).
 ///
+/// The embedded blobs are full simulation configs (max_ticks,
+/// num_threads, vm, topology, ...) of which only the `topology`
+/// subtree maps onto mirage's [`mirage_core::agent::AgentDef`]. We
+/// parse the blob, extract its `topology`, deserialize as an
+/// `AgentDef`, and reserialize so the on-disk file contains only
+/// the fields mirage understands.
+///
 /// If `force` is true, existing files are overwritten. Otherwise
 /// only missing files are written. Empty embedded configs are skipped.
 pub fn ensure_agents(force: bool) -> Result<Vec<(String, bool)>> {
@@ -141,7 +148,20 @@ pub fn ensure_agents(force: bool) -> Result<Vec<(String, bool)>> {
             report.push((name.to_string(), false));
             continue;
         }
-        mirage_core::state::write_bytes(&path, bytes)?;
+        let raw: serde_json::Value = serde_json::from_slice(bytes).map_err(|e| {
+            mirage_core::error::MirageError::Other(format!(
+                "rocjitsu agent {name}: parse embedded JSON: {e}"
+            ))
+        })?;
+        let topology = raw.get("topology").cloned().unwrap_or(raw);
+        let agent: mirage_core::agent::AgentDef = serde_json::from_value(topology).map_err(
+            |e| {
+                mirage_core::error::MirageError::Other(format!(
+                    "rocjitsu agent {name}: extract topology as AgentDef: {e}"
+                ))
+            },
+        )?;
+        mirage_core::state::write_json(&path, &agent)?;
         report.push((name.to_string(), true));
     }
     Ok(report)

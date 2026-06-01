@@ -205,7 +205,8 @@ mod tests {
         crate::paths::set_test_root(tmp.path());
 
         let first = store::ensure_builtins(false).unwrap();
-        assert!(!first.is_empty(), "expected at least one builtin agent");
+        // Core ships no builtin agents; backends contribute them.
+        // We just check the call is idempotent and well-formed.
         assert!(
             first.iter().all(|(_, w)| *w),
             "first run should write every builtin"

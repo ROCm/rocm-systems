@@ -152,7 +152,7 @@ fn create_profile(d: &Daemon, name: &str) {
             "plugins": {},
             "exec_mode": "Functional",
             "options": {},
-            "topology": {"racks": 1, "nodes_per_rack": 1, "gpus_per_node": 1, "agent": "noop"}
+            "topology": {"racks": 1, "nodes_per_rack": 1, "gpus_per_node": 1, "agent": "cdna4"}
         }
     });
     let (s, b) = d.put_json(&format!("/api/profiles/{name}"), &prof);
@@ -347,7 +347,7 @@ async fn create_profile_async(client: &reqwest::Client, d: &Daemon, name: &str) 
             "plugins": {},
             "exec_mode": "Functional",
             "options": {},
-            "topology": {"racks": 1, "nodes_per_rack": 1, "gpus_per_node": 1, "agent": "noop"}
+            "topology": {"racks": 1, "nodes_per_rack": 1, "gpus_per_node": 1, "agent": "cdna4"}
         }
     });
     let r = client

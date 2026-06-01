@@ -12,7 +12,7 @@
 //!   ([`crate::topology::TopologyDef`]) that arrange agents into
 //!   racks/nodes/GPUs.
 
-use crate::agent::{AgentDef, ComponentDef};
+use crate::agent::AgentDef;
 use crate::common::{MaybeRef, SimpleMap};
 use crate::emulator::{EmulatorDef, EmulatorDescription, ExecMode};
 use crate::topology::TopologyDef;
@@ -65,29 +65,28 @@ pub fn make_def(spec: &EmulatorSpec, topology: TopologyDef) -> EmulatorDef {
 }
 
 /// Default topology referenced by a fresh profile: a single GPU
-/// driven by the `noop` agent.
+/// driven by the `cdna4` agent.
 pub fn default_topology() -> TopologyDef {
     TopologyDef {
         racks: 1,
         nodes_per_rack: 1,
         gpus_per_node: 1,
-        agent: MaybeRef::Ref("noop".to_string()),
+        agent: MaybeRef::Ref("cdna4".to_string()),
     }
 }
 
 /// Curated set of named agents (hardware descriptions) that mirage
-/// preloads into `<MIRAGE_CONFIG>/agent/<name>.json`. Backends like
-/// rocjitsu contribute additional agents at runtime via their own
-/// `ensure_agents` helpers.
+/// preloads into `<MIRAGE_CONFIG>/agent/<name>.json`. Core ships no
+/// builtin agents; backends like rocjitsu contribute them at
+/// runtime via their own `ensure_agents` helpers.
 pub fn builtin_agents() -> Vec<(&'static str, fn() -> AgentDef)> {
-    vec![("noop", noop_agent)]
+    vec![]
 }
 
 /// Curated set of named topologies (system layouts) that mirage
 /// preloads into `<MIRAGE_CONFIG>/topology/<name>.json`.
 pub fn builtin_topologies() -> Vec<(&'static str, fn() -> TopologyDef)> {
     vec![
-        ("noop", || topology(1, 1, 1, "noop")),
         ("cdna4-1x1", || topology(1, 1, 1, "cdna4")),
         ("cdna4-1x8", || topology(1, 1, 8, "cdna4")),
         ("cdna4-2x8", || topology(1, 2, 8, "cdna4")),
@@ -117,17 +116,6 @@ pub const NOOP: EmulatorSpec = EmulatorSpec {
 
 fn noop_installed() -> bool {
     true
-}
-
-fn noop_agent() -> AgentDef {
-    AgentDef {
-        root: ComponentDef {
-            name: "noop".to_string(),
-            r#type: "noop".to_string(),
-            ..Default::default()
-        },
-        links: vec![],
-    }
 }
 
 fn noop_describe() -> EmulatorDescription {
@@ -212,7 +200,7 @@ mod tests {
 
     #[test]
     fn builtin_agents_and_topologies_nonempty() {
-        assert!(builtin_agents().iter().any(|(n, _)| *n == "noop"));
-        assert!(builtin_topologies().iter().any(|(n, _)| *n == "noop"));
+        // Core ships no builtin agents; rocjitsu contributes them.
+        assert!(builtin_topologies().iter().any(|(n, _)| *n == "cdna4-1x1"));
     }
 }

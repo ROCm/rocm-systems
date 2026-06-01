@@ -555,7 +555,7 @@ mod tests {
                 plugins: Default::default(),
                 exec_mode: Default::default(),
                 options: Default::default(),
-                topology: MaybeRef::Owned(Default::default()),
+                topology: MaybeRef::Owned(crate::registry::default_topology()),
             },
         }
     }

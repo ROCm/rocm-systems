@@ -96,9 +96,9 @@ pub enum ProfileCmd {
         /// noop).
         #[arg(long)]
         emulator: Option<String>,
-        /// Agent name from `<MIRAGE_CONFIG>/agent/` (e.g. `cdna4`,
-        /// `noop`). Defaults to `noop`.
-        #[arg(long, default_value = "noop")]
+        /// Agent name from `<MIRAGE_CONFIG>/agent/` (e.g. `cdna3`,
+        /// `cdna4`). Defaults to `cdna4`.
+        #[arg(long, default_value = "cdna4")]
         agent: String,
         /// Number of racks.
         #[arg(long, default_value_t = 1)]
@@ -894,11 +894,11 @@ fn profile_wizard(
         .interact_text()?;
     let known_agents = mirage_core::agent::store::list().unwrap_or_default();
     let agent: String = if known_agents.is_empty() {
-        "noop".to_string()
+        "cdna4".to_string()
     } else {
         let default_idx = known_agents
             .iter()
-            .position(|n| n == "noop")
+            .position(|n| n == "cdna4")
             .unwrap_or(0);
         let pick = Select::with_theme(&theme)
             .with_prompt("Agent")
