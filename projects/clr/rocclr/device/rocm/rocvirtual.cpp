@@ -4635,6 +4635,32 @@ void VirtualGPU::submitAccumulate(amd::AccumulateCommand& vcmd) {
 }
 
 // ================================================================================================
+void VirtualGPU::submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) {
+  // Unwrap the hsa_amd_external_semaphore_t that importExtSemaphore
+  // heap-allocated and stashed as the CLR-visible handle.
+  auto* holder = static_cast<hsa_amd_external_semaphore_t*>(
+      const_cast<void*>(cmd.sem_ptr()));
+  if (holder == nullptr || gpu_queue_ == nullptr) {
+    cmd.setStatus(CL_INVALID_OPERATION);
+    return;
+  }
+
+  if (cmd.semaphoreCmd() == amd::ExternalSemaphoreCmd::COMMAND_SIGNAL_EXTSEMAPHORE) {
+    // GPU-side signal. The host-queue worker runs sequentially, so
+    // prior AQL packets are already enqueued; the KMD appends the
+    // signal command behind them.
+    hsa_status_t s = hsa_amd_queue_signal_external_semaphore(
+        gpu_queue_, *holder, cmd.fence());
+    if (s != HSA_STATUS_SUCCESS) {
+      LogError("Failed to signal external semaphore");
+      cmd.setStatus(CL_INVALID_OPERATION);
+    }
+  }
+  // WAIT branch is a no-op until hsa_amd_queue_wait_external_semaphore
+  // is wired; vkWaitForFences masks it in the meantime.
+}
+
+// ================================================================================================
 void VirtualGPU::submitAcquireExtObjects(amd::AcquireExtObjectsCommand& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
   std::scoped_lock lock(execution());
