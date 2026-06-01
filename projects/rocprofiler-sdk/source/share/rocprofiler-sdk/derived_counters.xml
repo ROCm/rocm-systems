@@ -573,6 +573,9 @@
 <gfx1102 base="gfx11">
 </gfx1102>
 
+<gfx1150 base="gfx11">
+</gfx1150>
+
 <gfx11 base="gfx11"></gfx11>
 #Mi300
 <gfx941 base="gfx940"></gfx941>
