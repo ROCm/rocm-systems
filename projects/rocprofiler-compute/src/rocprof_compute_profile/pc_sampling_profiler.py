@@ -11,12 +11,15 @@ from typing import Union, cast
 
 from utils.logger import console_debug, console_error, console_log
 from utils.utils_common import (
+    PC_SAMPLING_BLOCK_IDS,
     capture_subprocess_output,
     get_rocprof_cmd,
     is_only_pc_sampling,
     perform_attach_detach,
 )
 from utils.utils_profile import is_live_attach
+
+ProfilerOptions = Union[list[str], dict[str, Union[str, list[str]]]]
 
 
 class PCSamplingProfiler:
@@ -39,23 +42,20 @@ class PCSamplingProfiler:
         self._workload_dir = str(workload_dir)
 
     def is_requested(self) -> bool:
-        return any(
-            block in ["21", "pc_sampling"] for block in self._args.filter_blocks
-        )
+        return any(block in PC_SAMPLING_BLOCK_IDS for block in self._args.filter_blocks)
 
     def is_exclusive(self) -> bool:
         return is_only_pc_sampling(self._args.filter_blocks)
 
     def run(
         self,
-        profiler_options: Union[list[str], dict[str, Union[str, list[str]]]],
+        profiler_options: ProfilerOptions,
+        prior_run_count: int,
     ) -> None:
         """Execute the PC sampling pass and log timing."""
-        total_runs = len(
-            list(Path(self._workload_dir).glob("perfmon/pmc_perf_*.yaml"))
-        )
         console_log(
-            f"[Run {total_runs + 1}/{total_runs + 1}][PC sampling profile run]"
+            f"[Run {prior_run_count + 1}/{prior_run_count + 1}]"
+            "[PC sampling profile run]"
         )
 
         self._cleanup_stale_output(profiler_options)
@@ -72,7 +72,7 @@ class PCSamplingProfiler:
 
     def _cleanup_stale_output(
         self,
-        profiler_options: Union[list[str], dict[str, Union[str, list[str]]]],
+        profiler_options: ProfilerOptions,
     ) -> None:
         """Remove a leftover ROCPROF_OUTPUT_PATH in PC-sampling-only sdk runs."""
         if not (self.is_exclusive() and self._profiler == "rocprofiler-sdk"):
@@ -91,28 +91,33 @@ class PCSamplingProfiler:
 
     def _launch(
         self,
-        profiler_options: Union[list[str], dict[str, Union[str, list[str]]]],
+        profiler_options: ProfilerOptions,
     ) -> None:
         """Run rocprof with pc sampling. Current support v3 only."""
         # Todo:
-        #   - precheck with rocprofv3 –-list-avail
+        #   - precheck with rocprofv3 --list-avail
         method = self._args.pc_sampling_method
         interval = self._args.pc_sampling_interval
         unit = "time" if method == "host_trap" else "cycles"
 
         if self._profiler == "rocprofiler-sdk":
-            self._launch_sdk(profiler_options, method, interval, unit)
+            self._launch_sdk(
+                cast(dict[str, Union[str, list[str]]], profiler_options),
+                method,
+                interval,
+                unit,
+            )
         else:
-            self._launch_v3(profiler_options, method, interval, unit)
+            self._launch_v3(cast(list[str], profiler_options), method, interval, unit)
 
     def _launch_sdk(
         self,
-        profiler_options: Union[list[str], dict[str, Union[str, list[str]]]],
+        profiler_options: dict[str, Union[str, list[str]]],
         method: str,
         interval: int,
         unit: str,
     ) -> None:
-        options = cast(dict[str, Union[str, list[str]]], profiler_options).copy()
+        options = profiler_options.copy()
         options.update({
             # no counter collection for pc sampling
             "ROCPROF_COUNTER_COLLECTION": "0",
@@ -140,6 +145,7 @@ class PCSamplingProfiler:
                 "APP_CMD, the workload's executable must be provided "
                 "when not in live attach mode"
             )
+            return
 
         console_debug(f"pc sampling rocprof sdk user provided command: {app_cmd}")
         success, _ = capture_subprocess_output(
@@ -150,12 +156,12 @@ class PCSamplingProfiler:
 
     def _launch_v3(
         self,
-        profiler_options: Union[list[str], dict[str, Union[str, list[str]]]],
+        profiler_options: list[str],
         method: str,
         interval: int,
         unit: str,
     ) -> None:
-        profiler_options_list = cast(list[str], profiler_options)
+        profiler_options_list = profiler_options
 
         options = [
             "--kernel-trace",
@@ -202,11 +208,10 @@ class PCSamplingProfiler:
                     "when not in live attach mode"
                 )
 
-        console_debug(
-            f"rocprof command: {shlex.join([get_rocprof_cmd()] + options)}"
-        )
+        rocprof_cmd = get_rocprof_cmd()
+        console_debug(f"rocprof command: {shlex.join([rocprof_cmd] + options)}")
         success, _ = capture_subprocess_output(
-            [get_rocprof_cmd()] + options,
+            [rocprof_cmd] + options,
             new_env=os.environ.copy(),
             profileMode=True,
         )

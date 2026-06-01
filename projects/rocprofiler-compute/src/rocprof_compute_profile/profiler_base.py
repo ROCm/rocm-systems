@@ -482,12 +482,13 @@ class RocProfCompute_Base:
 
         if not pc_sampling.is_requested():
             console_warning(
-                "PC sampling data collection skipped as block 21 is not specified."
+                "PC sampling data collection skipped as block 21 / "
+                "pc_sampling is not specified."
             )
             return
 
         # No native tool for pc sampling
-        pc_sampling.run(self.get_profiler_options())
+        pc_sampling.run(self.get_profiler_options(), total_runs)
 
     def __get_native_tool_path(self, args: argparse.Namespace) -> str | None:
         try:

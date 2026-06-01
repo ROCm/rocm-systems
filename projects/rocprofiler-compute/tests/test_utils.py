@@ -4119,9 +4119,7 @@ def _make_pc_sampling_profiler(method, interval, workload_dir, profiler):
     )
 
 
-@mock.patch(
-    "rocprof_compute_profile.pc_sampling_profiler.capture_subprocess_output"
-)
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.capture_subprocess_output")
 @mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_error")
 @mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_debug")
 def test_pc_sampling_profiler_sdk_path_nonexistent_librocprofiler_sdk_tool(
@@ -4167,9 +4165,7 @@ def test_pc_sampling_profiler_sdk_path_nonexistent_librocprofiler_sdk_tool(
     mock_console_error.assert_not_called()
 
 
-@mock.patch(
-    "rocprof_compute_profile.pc_sampling_profiler.capture_subprocess_output"
-)
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.capture_subprocess_output")
 @mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_debug")
 def test_pc_sampling_profiler_subprocess_fails(
     mock_console_debug, mock_capture_subprocess, tmp_path, monkeypatch
@@ -4235,9 +4231,7 @@ def test_pc_sampling_profiler_subprocess_fails(
     assert console_error_calls == ["PC sampling failed."]
 
 
-@mock.patch(
-    "rocprof_compute_profile.pc_sampling_profiler.capture_subprocess_output"
-)
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.capture_subprocess_output")
 @mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_error")
 @mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_debug")
 def test_pc_sampling_profiler_empty_appcmd(
@@ -4290,9 +4284,7 @@ def test_pc_sampling_profiler_empty_appcmd(
     mock_console_error.assert_not_called()
 
 
-@mock.patch(
-    "rocprof_compute_profile.pc_sampling_profiler.capture_subprocess_output"
-)
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.capture_subprocess_output")
 @mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_error")
 @mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_debug")
 def test_pc_sampling_profiler_multiarg_appcmd(
@@ -4413,9 +4405,7 @@ def test_pc_sampling_profiler_cleanup_stale_output_noop_cases(
     )._cleanup_stale_output({"APP_CMD": "app"})
 
 
-@mock.patch(
-    "rocprof_compute_profile.pc_sampling_profiler.capture_subprocess_output"
-)
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.capture_subprocess_output")
 @mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_error")
 @mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_debug")
 def test_pc_sampling_profiler_v3_live_attach(
@@ -4441,9 +4431,7 @@ def test_pc_sampling_profiler_v3_live_attach(
         mock_console_error.assert_not_called()
 
 
-@mock.patch(
-    "rocprof_compute_profile.pc_sampling_profiler.capture_subprocess_output"
-)
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.capture_subprocess_output")
 @mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_debug")
 def test_pc_sampling_profiler_v3_live_attach_missing_pid_value(
     mock_console_debug, mock_capture_subprocess, tmp_path, monkeypatch
@@ -4475,9 +4463,7 @@ def test_pc_sampling_profiler_v3_live_attach_missing_pid_value(
     mock_capture_subprocess.assert_not_called()
 
 
-@mock.patch(
-    "rocprof_compute_profile.pc_sampling_profiler.capture_subprocess_output"
-)
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.capture_subprocess_output")
 @mock.patch("rocprof_compute_profile.pc_sampling_profiler.perform_attach_detach")
 @mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_error")
 @mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_debug")
@@ -4504,31 +4490,102 @@ def test_pc_sampling_profiler_sdk_live_attach(
     mock_console_error.assert_not_called()
 
 
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.capture_subprocess_output")
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_debug")
+def test_pc_sampling_profiler_sdk_missing_app_cmd(
+    mock_console_debug, mock_capture_subprocess, tmp_path, monkeypatch
+):
+    """sdk non-live-attach without APP_CMD errors before launching."""
+    console_error_calls = []
+
+    def mock_console_error(msg, exit=True):
+        console_error_calls.append(msg)
+        if exit:
+            raise RuntimeError("console_error called")
+
+    monkeypatch.setattr(
+        "rocprof_compute_profile.pc_sampling_profiler.console_error",
+        mock_console_error,
+    )
+
+    profiler = _make_pc_sampling_profiler(
+        "host_trap", 100, str(tmp_path), "rocprofiler-sdk"
+    )
+    with pytest.raises(RuntimeError, match="console_error called"):
+        profiler._launch({"LD_PRELOAD": "x"})
+
+    assert console_error_calls == [
+        "APP_CMD, the workload's executable must be provided "
+        "when not in live attach mode"
+    ]
+    mock_capture_subprocess.assert_not_called()
+
+
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.capture_subprocess_output")
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_debug")
+def test_pc_sampling_profiler_v3_missing_separator(
+    mock_console_debug, mock_capture_subprocess, tmp_path, monkeypatch
+):
+    """v3 non-live-attach without a '--' separator errors before launching."""
+    console_error_calls = []
+
+    def mock_console_error(msg, exit=True):
+        console_error_calls.append(msg)
+        if exit:
+            raise RuntimeError("console_error called")
+
+    monkeypatch.setattr(
+        "rocprof_compute_profile.pc_sampling_profiler.console_error",
+        mock_console_error,
+    )
+
+    with mock.patch("utils.utils_common._rocprof_cmd", "rocprof_cli_tool"):
+        profiler = _make_pc_sampling_profiler(
+            "host_trap", 100, str(tmp_path), "rocprofv3"
+        )
+        with pytest.raises(RuntimeError, match="console_error called"):
+            profiler._launch(["--something"])
+
+    assert console_error_calls == [
+        "APP_CMD, the workload's executable must be provided "
+        "when not in live attach mode"
+    ]
+    mock_capture_subprocess.assert_not_called()
+
+
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.capture_subprocess_output")
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_error")
 @mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_log")
 @mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_debug")
 def test_pc_sampling_profiler_run_cleanup_before_launch(
-    mock_console_debug, mock_console_log, tmp_path
+    mock_console_debug,
+    mock_console_log,
+    mock_console_error,
+    mock_capture_subprocess,
+    tmp_path,
 ):
-    """run() removes stale output before launching and invokes _launch."""
+    """run() removes stale output before reaching the subprocess launch seam."""
     stale = tmp_path / "out" / "pmc_1"
     stale.mkdir(parents=True, exist_ok=True)
-    options = {"ROCPROF_OUTPUT_PATH": str(stale)}
+    options = {"ROCPROF_OUTPUT_PATH": str(stale), "APP_CMD": "my_app"}
 
     profiler = _make_pc_sampling_profiler(
         "host_trap", 100, str(tmp_path), "rocprofiler-sdk"
     )
 
-    launch_calls = []
+    stale_existed_at_launch = []
 
-    def fake_launch(profiler_options):
-        # Records whether cleanup already ran when _launch is invoked.
-        launch_calls.append(stale.exists())
+    def record(*args, **kwargs):
+        # Cleanup must already have run by the time we launch the subprocess.
+        stale_existed_at_launch.append(stale.exists())
+        return (True, "")
 
-    profiler._launch = fake_launch
-    profiler.run(options)
+    mock_capture_subprocess.side_effect = record
+    profiler.run(options, prior_run_count=0)
 
-    assert launch_calls == [False]
+    assert stale_existed_at_launch == [False]
     assert not stale.exists()
+    mock_console_error.assert_not_called()
 
 
 def test_set_parser():
