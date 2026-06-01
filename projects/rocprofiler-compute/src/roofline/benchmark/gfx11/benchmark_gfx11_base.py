@@ -23,21 +23,7 @@ class Bench_gfx11(benchmark_base.Bench_base):
         self.WAVEFRONT_SIZE = 32
         self.MATRIX_OPS_TYPE = "WMMA"
 
-        self.unsupported_data_types = [
-            "HBM",
-            "I8",
-            "I32",
-            "I64",
-            "WMMA-F4",
-            "WMMA-F6",
-            "WMMA-F6F4",
-            "WMMA-F8",
-            "WMMA-F16",
-            "WMMA-BF16",
-            "WMMA-F32",
-            "WMMA-F64",
-            "WMMA-I8",
-        ]
+        self.unsupported_data_types = {}
 
         self.matrix_kernel_selector = {}
         self.matrix_ops = {}
