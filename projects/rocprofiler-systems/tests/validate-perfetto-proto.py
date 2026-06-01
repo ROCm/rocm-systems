@@ -227,9 +227,7 @@ if __name__ == "__main__":
 
     if labels:
         if aggregate_by_name:
-            count_mode = (
-                "presence-only" if not args.counts else "exact counts per label"
-            )
+            count_mode = "presence-only" if not args.counts else "exact counts per label"
             print(
                 "Perfetto slice validation mode: aggregate-by-name "
                 f"(sum counts across depths, ignore unmatched slices, {count_mode})"
