@@ -14,6 +14,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::Context as _;
 use clap::{Args, Subcommand};
 use mirage_core::common::MaybeRef;
 use mirage_core::ctl::{CreateSessionRequest, MirageCtl, StdStream, StreamPacket};
@@ -694,11 +695,51 @@ async fn session_start<C: MirageCtl>(
     Ok(ExitCode::from(0))
 }
 
-fn find_host_bin_for_session_spawn() -> std::path::PathBuf {
-    match std::env::var_os("MIRAGE_BIN") {
-        Some(b) => std::path::PathBuf::from(b),
-        None => std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("mirage")),
+/// Look up an executable named `name` on `PATH`, returning the first hit.
+fn which_on_path(name: &str) -> Option<std::path::PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path) {
+        let candidate = dir.join(name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
     }
+    None
+}
+
+/// Resolve the `mirage` binary used to spawn a per-session host process.
+///
+/// Resolution order, skipping any candidate that no longer exists on disk
+/// (e.g. `current_exe()` going stale after the binary was rebuilt or
+/// reinstalled while a long-running daemon kept executing):
+///   1. `MIRAGE_BIN` (tests / explicit override)
+///   2. the current executable, if its path still points at a real file
+///   3. a `mirage` binary discovered on `PATH`
+fn find_host_bin_for_session_spawn() -> anyhow::Result<std::path::PathBuf> {
+    if let Some(b) = std::env::var_os("MIRAGE_BIN") {
+        let p = std::path::PathBuf::from(b);
+        if p.is_file() {
+            return Ok(p);
+        }
+        anyhow::bail!(
+            "MIRAGE_BIN points at `{}`, which does not exist",
+            p.display()
+        );
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if exe.is_file() {
+            return Ok(exe);
+        }
+    }
+    if let Some(p) = which_on_path("mirage") {
+        return Ok(p);
+    }
+    anyhow::bail!(
+        "could not locate the `mirage` binary to launch a session host. \
+         The running daemon's own executable path is stale (it was likely \
+         rebuilt or reinstalled while running). Restart the daemon, or set \
+         MIRAGE_BIN to the path of the `mirage` binary."
+    )
 }
 
 /// Spawn the per-session `mirage host` process for `id` and detach it.
@@ -709,7 +750,7 @@ pub fn spawn_host_for(id: &SessionId) -> anyhow::Result<()> {
     // The unified `mirage` binary is its own host: we re-exec
     // ourselves with the `host` subcommand. Tests may override which
     // binary is used via `MIRAGE_BIN`.
-    let bin = find_host_bin_for_session_spawn();
+    let bin = find_host_bin_for_session_spawn()?;
     let layout = mirage_core::paths::SessionLayout::for_id(id);
     // ensure host.log file exists for stderr redirect
     let log = std::fs::OpenOptions::new()
@@ -731,7 +772,12 @@ pub fn spawn_host_for(id: &SessionId) -> anyhow::Result<()> {
             Ok(())
         });
     }
-    cmd.spawn()?;
+    cmd.spawn().with_context(|| {
+        format!(
+            "failed to launch session host via `{}`",
+            cmd.get_program().to_string_lossy()
+        )
+    })?;
     Ok(())
 }
 
