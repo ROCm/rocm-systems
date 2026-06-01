@@ -9,7 +9,6 @@ path = "src/lib.rs"
 
 [dependencies]
 mirage_core = { workspace = true }
-rocjitsu_sys = { path = "../rocjitsu_sys" }
 chrono = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

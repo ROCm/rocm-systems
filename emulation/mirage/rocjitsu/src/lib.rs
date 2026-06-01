@@ -31,7 +31,6 @@ use mirage_core::exec::InjectionDef;
 use mirage_core::plugin::PluginsDef;
 use mirage_core::profile::ProfileDef;
 use mirage_core::session::SessionHealth;
-use rocjitsu_sys::Vm;
 
 /// Errors that can occur when constructing a [`RocjitsuEmulator`].
 #[derive(Debug, thiserror::Error)]
@@ -42,9 +41,6 @@ pub enum RocjitsuError {
     /// `arch` option referenced an unsupported architecture.
     #[error("unknown rocjitsu arch: {0} (known: cdna3, cdna4)")]
     UnknownArch(String),
-    /// The underlying FFI call failed.
-    #[error("rocjitsu FFI error: {0}")]
-    Ffi(#[from] rocjitsu_sys::Error),
 }
 
 /// A rocjitsu-backed emulator instance.
@@ -53,7 +49,6 @@ pub enum RocjitsuError {
 /// [`Emulator::shutdown`]) to release rocjitsu resources.
 pub struct RocjitsuEmulator {
     def: EmulatorDef,
-    vm: Vm,
 }
 
 impl RocjitsuEmulator {
@@ -61,19 +56,12 @@ impl RocjitsuEmulator {
     /// [`Emulator::new`] trait method delegates to this and unwraps.
     pub fn try_new(profile: ProfileDef) -> Result<Self, RocjitsuError> {
         let def = profile.emulator.clone();
-        let config = resolve_config(&def.options)?;
-        let vm = Vm::create_with_default_schema(&config)?;
-        Ok(Self { def, vm })
+        Ok(Self { def })
     }
 
     /// Returns the absolute path of the loaded rocjitsu JSON config.
     pub fn config_path(opts: &SimpleMap) -> Result<PathBuf, RocjitsuError> {
         resolve_config(opts)
-    }
-
-    /// Direct access to the underlying VM (for advanced callers).
-    pub fn vm_mut(&mut self) -> &mut Vm {
-        &mut self.vm
     }
 }
 
