@@ -38,12 +38,23 @@
 #include <unistd.h>
 
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <memory>
 #include <random>
 #include <string>
 #include <vector>
+
+// libhsakmt-windows (librocdxg) headers. These are only available when the shim
+// is built/linked, which today is the native-Windows path (gdi32 + matching
+// KMD). On the WSL2 / Linux build ROCPROFILER_HAVE_LIBHSAKMT_WINDOWS is left
+// undefined, so the shim call below compiles out and enumerate() keeps using
+// the hardcoded per-arch fallback.
+#if defined(ROCPROFILER_HAVE_LIBHSAKMT_WINDOWS)
+#    include <hsakmt/hsakmt.h>
+#    include <hsakmt/hsakmttypes.h>
+#endif
 
 namespace rocprofiler
 {
@@ -335,6 +346,147 @@ struct DxcoreHandle
                close_adapter != nullptr;
     }
 };
+
+// === libhsakmt-windows topology bridge ===
+//
+// Holds KFD-equivalent topology fields that DXCore does not surface. Populated
+// by fetch_libhsakmt_topology() from HsaNodeProperties on systems where the
+// libhsakmt-windows shim (librocdxg) is available; otherwise the caller falls
+// back to a hardcoded per-arch table (see enumerate() below).
+struct WslTopology
+{
+    uint32_t cu_count                = 0;
+    uint32_t num_shader_banks        = 0;  // HsaNodeProperties.NumShaderBanks
+    uint32_t array_count             = 0;  // HsaNodeProperties.NumArrays
+    uint32_t simd_arrays_per_engine  = 0;
+    uint32_t cu_per_simd_array       = 0;
+    uint32_t simd_per_cu             = 0;
+    uint32_t simd_count              = 0;  // HsaNodeProperties.NumFComputeCores
+    uint32_t wave_front_size         = 0;
+    uint32_t max_waves_per_simd      = 0;
+    uint32_t max_engine_clk_fcompute = 0;  // HsaNodeProperties.MaxEngineClockMhzFCompute
+    uint32_t max_engine_clk_ccompute = 0;  // HsaNodeProperties.MaxEngineClockMhzCCompute
+    uint32_t engine_id_major         = 0;  // HsaNodeProperties.EngineId.ui32.Major
+    uint32_t engine_id_minor         = 0;
+    uint32_t engine_id_stepping      = 0;
+};
+
+// Populate the topology fields that DXCore does not expose by invoking the
+// libhsakmt-windows shim. DXCore (D3DKMTQueryAdapterInfo) surfaces vendor/device
+// id, BDF and local memory size, but not the KFD-equivalent compute topology
+// (NumArrays / NumShaderBanks / NumFComputeCores / EngineId / engine clocks).
+// The shim exposes the same private KFD escape ABI that Linux uses — populated
+// under the hood via D3DKMTEscape — so a single hsaKmtGetNodeProperties() call
+// returns the full HsaNodeProperties struct, with no HSA runtime dependency.
+//
+// `luid` is the DXCore adapter's Windows LUID (DxcAdapterInfo.AdapterLuid); the
+// matching KFD node is found by comparing it against HsaNodeProperties.LuidLow/
+// HighPart. `adapter` is reserved for future escape calls keyed by the handle.
+//
+// Returns true and fills `out` on success; false if the shim is not linked in
+// this build, the opt-in env var ROCPROFILER_USE_LIBROCDXG is not set, no KFD
+// node matches the adapter LUID, or any hsaKmt* call fails.
+//
+// The shim only links on native Windows (gdi32 + the matching KMD). On the
+// WSL2 / Linux build ROCPROFILER_HAVE_LIBHSAKMT_WINDOWS is undefined and this
+// unconditionally returns false, so enumerate() keeps using the hardcoded
+// per-arch fallback and today's behavior is unchanged.
+[[maybe_unused]] bool
+fetch_libhsakmt_topology([[maybe_unused]] D3DKMT_HANDLE  adapter,
+                         [[maybe_unused]] const DxcLuid& luid,
+                         [[maybe_unused]] WslTopology&   out)
+{
+    // Opt-in only.
+    const char* enable = std::getenv("ROCPROFILER_USE_LIBROCDXG");
+    if(!enable || std::string{enable} != "1") return false;
+
+#if !defined(ROCPROFILER_HAVE_LIBHSAKMT_WINDOWS)
+    // Shim not available in this build (e.g. WSL2 / Linux). No-op.
+    return false;
+#else
+    if(auto _st = hsaKmtOpenKFD(); _st != HSAKMT_STATUS_SUCCESS)
+    {
+        ROCP_INFO << fmt::format(
+            "[libhsakmt-windows] hsaKmtOpenKFD failed status={}; falling back to hardcoded "
+            "topology",
+            static_cast<int>(_st));
+        return false;
+    }
+
+    // RAII close so every early return releases the KFD handle / snapshot.
+    struct KfdGuard
+    {
+        ~KfdGuard() { hsaKmtCloseKFD(); }
+    } kfd_guard;
+
+    HsaSystemProperties sys{};
+    if(auto _st = hsaKmtAcquireSystemProperties(&sys); _st != HSAKMT_STATUS_SUCCESS)
+    {
+        ROCP_INFO << fmt::format(
+            "[libhsakmt-windows] hsaKmtAcquireSystemProperties failed status={}; falling back to "
+            "hardcoded topology",
+            static_cast<int>(_st));
+        return false;
+    }
+
+    struct SysGuard
+    {
+        ~SysGuard() { hsaKmtReleaseSystemProperties(); }
+    } sys_guard;
+
+    for(HSAuint32 i = 0; i < sys.NumNodes; ++i)
+    {
+        HsaNodeProperties n{};
+        if(hsaKmtGetNodeProperties(i, &n) != HSAKMT_STATUS_SUCCESS) continue;
+
+        // CPU-only nodes carry no FCompute cores; skip them.
+        if(n.NumFComputeCores == 0) continue;
+
+        // Match the KFD node to the DXCore adapter by Windows LUID. KFD reports
+        // the same LUID that D3DKMTQueryAdapterInfo returns for the adapter.
+        if(n.LuidLowPart != luid.LowPart ||
+           n.LuidHighPart != static_cast<HSAuint32>(luid.HighPart))
+            continue;
+
+        const uint32_t simd_per_cu = (n.NumSIMDPerCU != 0) ? n.NumSIMDPerCU : 1;
+
+        out.simd_count             = n.NumFComputeCores;               // total SIMDs
+        out.cu_count               = n.NumFComputeCores / simd_per_cu; // SIMDs / SIMD-per-CU
+        out.simd_per_cu            = n.NumSIMDPerCU;
+        out.cu_per_simd_array      = n.NumCUPerArray;
+        out.num_shader_banks       = n.NumShaderBanks;                 // shader engines
+        // KFD reports NumArrays as SIMD-arrays *per engine*. On single-SE parts
+        // (gfx1150) array_count and simd_arrays_per_engine coincide; on multi-SE
+        // parts confirm whether the synth-agent table expects a total
+        // (NumShaderBanks * NumArrays) here before relying on it.
+        out.array_count            = n.NumArrays;
+        out.simd_arrays_per_engine = n.NumArrays;
+        out.wave_front_size        = n.WaveFrontSize;
+        out.max_waves_per_simd     = n.MaxWavesPerSIMD;
+        out.max_engine_clk_fcompute = n.MaxEngineClockMhzFCompute;
+        out.max_engine_clk_ccompute = n.MaxEngineClockMhzCCompute;
+        out.engine_id_major        = n.EngineId.ui32.Major;
+        out.engine_id_minor        = n.EngineId.ui32.Minor;
+        out.engine_id_stepping     = n.EngineId.ui32.Stepping;
+
+        ROCP_INFO << fmt::format(
+            "[libhsakmt-windows] KFD node {} matched adapter LUID; topology: "
+            "gfx{}.{}.{} cu_count={} simd_count={} num_shader_banks={} array_count={} "
+            "cu_per_simd_array={} simd_per_cu={} wave_front_size={} max_waves_per_simd={} "
+            "max_engine_clk_fcompute={}",
+            i, out.engine_id_major, out.engine_id_minor, out.engine_id_stepping, out.cu_count,
+            out.simd_count, out.num_shader_banks, out.array_count, out.cu_per_simd_array,
+            out.simd_per_cu, out.wave_front_size, out.max_waves_per_simd,
+            out.max_engine_clk_fcompute);
+
+        return true;
+    }
+
+    ROCP_INFO << "fetch_libhsakmt_topology: no KFD node matched the DXCore "
+                 "adapter LUID; falling back to hardcoded topology";
+    return false;
+#endif
+}
 }  // namespace
 
 bool
@@ -491,13 +643,81 @@ enumerate()
         // here. Multi-XCC datacenter parts are not supported on this path.
         info.num_xcc = 1;
 
+        // DXCore does not expose KFD topology (NumArrays, NumShaderBanks,
+        // NumFComputeCores, MaxEngineClockMhz*, etc.). Without these
+        // aql_profile::Gfx11Factory::Init() SIGFPEs on integer divide-by-zero.
+        //
+        // First try to populate them via the libhsakmt-windows shim
+        // (hsaKmtOpenKFD + hsaKmtAcquireSystemProperties +
+        // hsaKmtGetNodeProperties; see fetch_libhsakmt_topology() above for
+        // the planned wiring). When the shim is unavailable, fall back to a
+        // hardcoded gfx1150 (RDNA 3.5) topology — gated by the same
+        // FORCE_GFX env knob.
+        WslTopology topo{};
+        if(fetch_libhsakmt_topology(a.hAdapter, a.AdapterLuid, topo))
+        {
+            info.cu_count                = topo.cu_count;
+            info.num_shader_banks        = topo.num_shader_banks;
+            info.array_count             = topo.array_count;
+            info.simd_arrays_per_engine  = topo.simd_arrays_per_engine;
+            info.cu_per_simd_array       = topo.cu_per_simd_array;
+            info.simd_per_cu             = topo.simd_per_cu;
+            info.simd_count              = topo.simd_count;
+            info.wave_front_size         = topo.wave_front_size;
+            info.max_waves_per_simd      = topo.max_waves_per_simd;
+            info.max_engine_clk_fcompute = topo.max_engine_clk_fcompute;
+            info.max_engine_clk_ccompute = topo.max_engine_clk_ccompute;
+            // NOTE: gfx_target_version is still derived from ROCPROFILER_FORCE_GFX
+            // below, since that env-var override is the canonical source of
+            // truth for which per-arch counter YAML rocprofiler-sdk loads. The
+            // EngineId from HsaNodeProperties is captured into `topo` for
+            // future use (e.g. cross-checking the env override).
+        }
+        else
+        {
+            // Hardcoded fallback: gfx1150 (RDNA 3.5) topology.
+            info.cu_count               = 16;  // 8 WGPs * 2 CUs
+            info.num_shader_banks       = 1;   // 1 SE
+            info.simd_arrays_per_engine = 2;   // 2 SAs per SE
+            info.array_count            = 2;   // 1 SE * 2 SA
+            info.cu_per_simd_array      = 8;   // 16 CUs / 2 SAs
+            info.simd_per_cu            = 2;   // RDNA: 2 SIMDs per CU
+            info.simd_count             = 32;  // 16 CUs * 2 SIMDs
+            info.wave_front_size        = 32;  // RDNA wave32
+            info.max_waves_per_simd     = 16;
+        }
+
         auto adapter_name = wchar_to_utf8(reg.AdapterString, kMaxStr);
         if(adapter_name.empty()) adapter_name = "unknown";
 
         info.product_name = common::get_string_entry(adapter_name)->c_str();
         info.vendor_name  = common::get_string_entry("AMD")->c_str();
-        info.name         = info.product_name;
-        info.model_name   = common::get_string_entry("")->c_str();
+        // Counter YAML (config.yaml) is keyed by gfx target (e.g. "gfx1150"),
+        // not the marketing product name. WSL DXCore does not expose KFD topology so
+        // we can't reliably derive gfx from the PCI device ID; honor an override env
+        // var and default to gfx1150 (RDNA 3.5).
+        const char* forced_gfx = std::getenv("ROCPROFILER_FORCE_GFX");
+        const char* gfx_name   = (forced_gfx && *forced_gfx) ? forced_gfx : "gfx1150";
+        info.name              = common::get_string_entry(gfx_name)->c_str();
+        info.model_name        = common::get_string_entry("")->c_str();
+
+        // gfx_target_version = major*10000 + minor*100 + step.
+        // gfx1150 -> 110500. Parse trailing digits from gfx_name suffix.
+        {
+            uint32_t    maj = 11, min = 5, stp = 0;
+            const char* p = gfx_name;
+            if(p[0] == 'g' && p[1] == 'f' && p[2] == 'x') p += 3;
+            size_t n = std::strlen(p);
+            if(n >= 3)
+            {
+                stp = static_cast<uint32_t>(p[n - 1] - '0');
+                min = static_cast<uint32_t>(p[n - 2] - '0');
+                maj = 0;
+                for(size_t k = 0; k + 2 < n; ++k)
+                    maj = maj * 10 + static_cast<uint32_t>(p[k] - '0');
+            }
+            info.gfx_target_version = maj * 10000 + min * 100 + stp;
+        }
 
         info.mem_banks_count = 0;
         info.caches_count    = 0;
