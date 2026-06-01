@@ -3,12 +3,9 @@
 
 include_guard(GLOBAL)
 
-# Resolve ENABLE_SANITIZER in place (normalize, validate, write back via
-# PARENT_SCOPE). ENABLE_SANITIZER is the single canonical sanitizer variable for
-# this project. THEROCK_SANITIZER and the legacy ENABLE_ADDRESS_SANITIZER are
-# folded into it here, with precedence THEROCK_SANITIZER > explicit
-# ENABLE_SANITIZER > ENABLE_ADDRESS_SANITIZER, so every downstream site reads one
-# variable.
+# Fold THEROCK_SANITIZER and legacy ENABLE_ADDRESS_SANITIZER into the canonical
+# ENABLE_SANITIZER, precedence THEROCK_SANITIZER > ENABLE_SANITIZER >
+# ENABLE_ADDRESS_SANITIZER, so every downstream site reads one variable.
 function(resolve_sanitizer)
     set(sanitizer_valid
         ""
@@ -18,7 +15,6 @@ function(resolve_sanitizer)
         "TSAN"
     )
 
-    # Validated before promotion.
     if(DEFINED THEROCK_SANITIZER AND NOT THEROCK_SANITIZER IN_LIST sanitizer_valid)
         message(
             FATAL_ERROR
@@ -39,8 +35,7 @@ function(resolve_sanitizer)
         (ENABLE_SANITIZER STREQUAL "" OR ENABLE_SANITIZER STREQUAL "OFF")
         AND ENABLE_ADDRESS_SANITIZER
     )
-        # Legacy flag: promote to the canonical ASAN selection so the single guard
-        # downstream (and the full flag/munging machinery) reads ENABLE_SANITIZER.
+        # Legacy flag: promote to ASAN so downstream only reads ENABLE_SANITIZER.
         set(ENABLE_SANITIZER
             "ASAN"
             CACHE STRING
@@ -86,10 +81,9 @@ function(resolve_sanitizer)
 endfunction()
 
 # Apply -fsanitize=... compile flags and link options to the current scope.
-# No-op when off. Compile-flag injection is skipped when TheRock already populated
-# -fsanitize= via CMAKE_CXX_FLAGS_INIT (avoid double-instrumentation); link options
-# are emitted unconditionally so they survive TheRock ever splitting its compile and
-# link injection. Sanitizer link flags are idempotent, so any duplication is benign.
+# Compile-flag injection is skipped when TheRock already populated -fsanitize= via
+# CMAKE_CXX_FLAGS_INIT (avoid double-instrumentation); link options are emitted
+# unconditionally and are idempotent, so duplication is benign.
 function(enable_sanitizer)
     if(NOT ENABLE_SANITIZER)
         return()
@@ -180,15 +174,11 @@ set_property(
     PROPERTY STRINGS OFF ASAN HOST_ASAN TSAN
 )
 
-# Sanitizer instrumentation is a project-wide configure-time concern, so the module
-# drives all three side effects in order at include time: resolve the canonical
-# selection, rewrite GPU targets, and inject compile/link flags. Including this
-# module from the top-level CMakeLists (before add_subdirectory) is sufficient;
-# CMAKE_CXX_FLAGS propagates into src/lib via standard subdir inheritance, so that
-# subdir does not need to know sanitizers exist. The runtime JIT build of src/lib
-# never sets ENABLE_SANITIZER/THEROCK_SANITIZER and does not include this module, so
-# it stays sanitizer-free. The python launcher is wired separately by the top-level
-# CMakeLists once PYTHON_TEST_COMMAND is defined.
+# Drive all three side effects at include time: resolve the selection, rewrite GPU
+# targets, inject compile/link flags. CMAKE_CXX_FLAGS propagates into src/lib via
+# subdir inheritance, so subdirs need no sanitizer awareness. The runtime JIT build
+# of src/lib does not include this module, so it stays sanitizer-free. The python
+# launcher is wired separately once PYTHON_TEST_COMMAND is defined.
 resolve_sanitizer()
 enable_sanitizer_gpu_target_munging()
 enable_sanitizer()

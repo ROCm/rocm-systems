@@ -57,9 +57,8 @@ set(EXECUTABLE_NAME "rocprof-compute")
 include(ExternalProject)
 include(GNUInstallDirs)
 include(utils.cmake)
-# sanitizers.cmake resolves the canonical ENABLE_SANITIZER and applies all
-# instrumentation side effects at include time; it must run before
-# asan_build_dependencies.cmake, whose pthread guard reads ENABLE_SANITIZER.
+# Must run before asan_build_dependencies.cmake, whose pthread guard reads the
+# ENABLE_SANITIZER that this module resolves.
 include(cmake/sanitizers.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/asan_build_dependencies.cmake)
 
