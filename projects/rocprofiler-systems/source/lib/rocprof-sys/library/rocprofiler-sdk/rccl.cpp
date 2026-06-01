@@ -3,6 +3,7 @@
 
 #include "library/rocprofiler-sdk/rccl.hpp"
 #include "library/rocprofiler-sdk/rccl_internal.hpp"
+#include <cstdint>
 
 #include "core/categories.hpp"
 #include "core/config.hpp"
@@ -63,7 +64,7 @@ rccl_metadata_initialize_categories()
  */
 struct production_pmc_registrar
 {
-    void register_gpu_pmc(uint32_t rccl_device_idx)
+    void register_gpu_pmc(std::uint32_t rccl_device_idx)
     {
         constexpr size_t EVENT_CODE  = 0;
         constexpr size_t INSTANCE_ID = 0;
@@ -103,7 +104,7 @@ rccl_get_gpu_tracking_state();
 
 [[nodiscard]] rccl_event_info
 rccl_get_event_info_impl(
-    uint32_t                                            operation,
+    std::uint32_t                                       operation,
     const rocprofiler_callback_tracing_rccl_api_data_t& payload) noexcept
 {
     rccl_event_info info{};
@@ -172,7 +173,8 @@ rccl_metadata_initialize_track()
 
 template <typename Tp, typename... Args>
 void
-write_perfetto_counter_track(uint64_t _val, uint64_t _begin_ts, uint64_t _end_ts)
+write_perfetto_counter_track(std::uint64_t _val, std::uint64_t _begin_ts,
+                             std::uint64_t _end_ts)
 {
     using counter_track = rocprofsys::perfetto_counter_track<Tp>;
 
@@ -195,13 +197,14 @@ write_perfetto_counter_track(uint64_t _val, uint64_t _begin_ts, uint64_t _end_ts
 
 template <typename Track>
 void
-cache_rccl_comm_data_events(uint32_t rccl_device_idx, size_t bytes, uint64_t timestamp_ns)
+cache_rccl_comm_data_events(std::uint32_t rccl_device_idx, size_t bytes,
+                            std::uint64_t timestamp_ns)
 {
     auto&  tracking_state = rccl_get_gpu_tracking_state();
     size_t transfer_bytes = bytes;
 
     tracking_state.register_gpu(rccl_device_idx);
-    uint64_t cumulative = tracking_state.add_bytes(rccl_device_idx, bytes);
+    std::uint64_t cumulative = tracking_state.add_bytes(rccl_device_idx, bytes);
 
     const auto event_metadata = fmt::format(R"({{"transfer_bytes":{}}})", transfer_bytes);
 
@@ -216,8 +219,9 @@ cache_rccl_comm_data_events(uint32_t rccl_device_idx, size_t bytes, uint64_t tim
     trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
         static_cast<size_t>(category_enum_id<category::comm_data>::value), Track::label,
         timestamp_ns, event_metadata.c_str(), stack_id, parent_stack_id, correlation_id,
-        call_stack, line_info, rccl_device_idx, static_cast<uint8_t>(agent_type::GPU),
-        pmc_label.c_str(), static_cast<double>(cumulative), std::nullopt });
+        call_stack, line_info, rccl_device_idx,
+        static_cast<std::uint8_t>(agent_type::GPU), pmc_label.c_str(),
+        static_cast<double>(cumulative), std::nullopt });
 }
 
 rccl_gpu_tracking_state&
@@ -242,10 +246,10 @@ rccl_type_size_or_abort(ncclDataType_t datatype) noexcept
 
 }  // anonymous namespace
 
-[[nodiscard]] uint32_t
+[[nodiscard]] std::uint32_t
 rccl_get_device_id(ncclComm_t comm) noexcept
 {
-    constexpr uint32_t DEFAULT_DEVICE_ID = 0;
+    constexpr std::uint32_t DEFAULT_DEVICE_ID = 0;
 
     if(comm == nullptr) return DEFAULT_DEVICE_ID;
 
@@ -276,7 +280,7 @@ rccl_get_device_id(ncclComm_t comm) noexcept
                   static_cast<int>(result));
         return DEFAULT_DEVICE_ID;
     }
-    return static_cast<uint32_t>(device_id);
+    return static_cast<std::uint32_t>(device_id);
 }
 
 /**
@@ -307,15 +311,15 @@ rccl_comm_data_initialize()
  * @param end_ts Timestamp when the API call ended (nanoseconds)
  */
 void
-tool_tracing_callback_rccl(uint32_t                                      operation,
+tool_tracing_callback_rccl(std::uint32_t                                 operation,
                            rocprofiler_callback_tracing_rccl_api_data_t* payload,
-                           uint64_t begin_ts, uint64_t end_ts)
+                           std::uint64_t begin_ts, std::uint64_t end_ts)
 {
     rccl_event_info info = rccl_get_event_info_impl(operation, *payload);
 
     if(info.size > 0 && info.comm != nullptr)
     {
-        uint32_t device_id = rccl_get_device_id(info.comm);
+        std::uint32_t device_id = rccl_get_device_id(info.comm);
 
         if(info.is_send)
         {

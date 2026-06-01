@@ -109,7 +109,7 @@ HIP_TEST_CASE(Unit_malloc_CoherentTst) {
       REQUIRE(ret);
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
+    HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
   }
 }
 #endif
@@ -142,7 +142,7 @@ HIP_TEST_CASE(Unit_malloc_CoherentTstWthAdvise) {
       free(Ptr);
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
+    HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
   }
 }
 #endif
@@ -176,7 +176,7 @@ HIP_TEST_CASE(Unit_mmap_CoherentTst) {
       REQUIRE(ret);
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
+    HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
   }
 }
 #endif
@@ -220,7 +220,7 @@ HIP_TEST_CASE(Unit_mmap_CoherentTstWthAdvise) {
       HIP_CHECK(hipStreamDestroy(strm));
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
+    HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
   }
 }
 #endif

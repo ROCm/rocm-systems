@@ -3,10 +3,8 @@
 > [!CAUTION] 
 > This release is an *early-access* software technology preview. Running production workloads is *not* recommended.
 
-[![MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/ROCm/hipFile/develop/LICENSE.md)
-[![CI](https://github.com/ROCm/hipFile/actions/workflows/root-ci.yml/badge.svg)](https://github.com/ROCm/hipFile/actions/workflows/root-ci.yml)
+[![MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.md)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/11458/badge)](https://www.bestpractices.dev/projects/11458)
-[![CodeQL](https://github.com/ROCm/hipFile/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/ROCm/hipFile/actions/workflows/github-code-scanning/codeql)
 [![Coverity](https://scan.coverity.com/projects/hipFile/badge.svg)](https://scan.coverity.com/projects/hipFile)
 [![clang-format](https://github.com/ROCm/rocm-systems/actions/workflows/hipfile-clang-format.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/hipfile-clang-format.yml)
 [![cmakelint](https://github.com/ROCm/rocm-systems/actions/workflows/hipfile-cmakelint.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/hipfile-cmakelint.yml)

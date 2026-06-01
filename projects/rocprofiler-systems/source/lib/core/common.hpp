@@ -102,6 +102,6 @@ using ::tim::type_mutex;   // NOLINT
 
 struct construct_on_thread
 {
-    int64_t index = threading::get_id();
+    std::int64_t index = threading::get_id();
 };
 }  // namespace rocprofsys

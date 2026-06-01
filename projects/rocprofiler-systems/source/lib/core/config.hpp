@@ -7,6 +7,7 @@
 #include "common/defines.h"
 #include "state.hpp"
 #include "timemory.hpp"
+#include <cstdint>
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/macros/language.hpp>
@@ -54,7 +55,7 @@ int
 get_sampling_cputime_signal();
 
 std::set<int>
-get_sampling_signals(int64_t _tid = 0);
+get_sampling_signals(std::int64_t _tid = 0);
 
 void
 finalize();
@@ -150,9 +151,6 @@ bool&
 is_binary_rewrite();
 
 bool
-get_is_continuous_integration() ROCPROFSYS_HOT;
-
-bool
 get_debug_env() ROCPROFSYS_HOT;
 
 bool
@@ -225,6 +223,9 @@ bool
 get_use_ompt();
 
 bool
+get_group_by_queue();
+
+bool
 get_use_code_coverage();
 
 bool
@@ -239,7 +240,7 @@ get_perfetto_shmem_size_hint();
 size_t
 get_perfetto_buffer_size();
 
-uint32_t
+std::uint32_t
 get_perfetto_flush_period();
 
 bool
@@ -257,7 +258,7 @@ get_disabled_categories();
 bool
 get_perfetto_annotations() ROCPROFSYS_HOT;
 
-uint64_t
+std::uint64_t
 get_thread_pool_size();
 
 std::string&
@@ -306,13 +307,13 @@ get_sampling_cpus();
 std::string
 get_cpu_metrics();
 
-std::set<int64_t>
+std::set<std::int64_t>
 get_sampling_cputime_tids();
 
-std::set<int64_t>
+std::set<std::int64_t>
 get_sampling_realtime_tids();
 
-std::set<int64_t>
+std::set<std::int64_t>
 get_sampling_overflow_tids();
 
 bool
@@ -332,6 +333,9 @@ get_process_sampling_duration();
 
 std::string
 get_sampling_gpus();
+
+std::string
+get_gpu_perf_counters();
 
 std::string
 get_sampling_ainics();
@@ -360,7 +364,10 @@ get_kill_delay();
 namespace output_filtering
 {
 bool
-is_output_enabled_for_current_mpi_rank();
+is_file_output_enabled_for_current_mpi_rank();
+
+bool
+is_log_output_enabled_for_current_mpi_rank();
 }  // namespace output_filtering
 
 std::string
@@ -369,11 +376,24 @@ get_tmpdir();
 std::string
 get_database_absolute_path(std::string_view database_name, std::string_view tag);
 
+void
+reset_database_path_memo();
+
+std::string
+get_output_absolute_path(std::string_view basename, std::string_view extension,
+                         std::string_view tag, std::string_view dir);
+
 std::string
 get_perfetto_output_filename_with_suffix(std::string_view suffix = "");
 
+std::string
+get_ump_absolute_path();
+
 bool&
 get_use_rocpd() ROCPROFSYS_HOT;
+
+bool&
+get_use_unified_memory_profiling() ROCPROFSYS_HOT;
 
 bool&
 get_caching_perfetto() ROCPROFSYS_HOT;
@@ -419,7 +439,7 @@ get_causal_mode();
 bool
 get_causal_end_to_end();
 
-std::vector<int64_t>
+std::vector<std::int64_t>
 get_causal_fixed_speedup();
 
 std::string

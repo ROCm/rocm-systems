@@ -3,13 +3,13 @@
 
 #pragma once
 #include "core/trace_cache/cache_type_traits.hpp"
+#include <cstdint>
 
 #include <algorithm>
 #include <cassert>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
-#include <stdint.h>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -37,7 +37,7 @@ constexpr auto PERCENTAGE = "%";
 
 template <typename TypeIdentifierEnum>
 constexpr size_t header_size = sizeof(TypeIdentifierEnum) + sizeof(size_t);
-using buffer_array_t         = std::array<uint8_t, buffer_size>;
+using buffer_array_t         = std::array<std::uint8_t, buffer_size>;
 
 const auto tmp_directory = std::string{ "/tmp/" };
 
@@ -77,7 +77,7 @@ get_size(Type&& val)
     {
         static_assert(!type_traits::is_optional_v<typename DecayedType::value_type>,
                       "Nested std::optional is not supported");
-        return sizeof(uint8_t) + (val.has_value() ? get_size(val.value()) : 0);
+        return sizeof(std::uint8_t) + (val.has_value() ? get_size(val.value()) : 0);
     }
     else
     {
@@ -94,7 +94,7 @@ get_size(Type&& val, Types&&... vals)
 
 template <typename Type>
 __attribute__((always_inline)) inline void
-store_value(const Type& value, uint8_t* buffer, size_t& position)
+store_value(const Type& value, std::uint8_t* buffer, size_t& position)
 {
     using DecayedType = std::decay_t<Type>;
     static_assert(type_traits::is_supported_type_v<DecayedType>,
@@ -133,7 +133,7 @@ store_value(const Type& value, uint8_t* buffer, size_t& position)
 
 template <typename... Types>
 __attribute__((always_inline)) inline void
-store_value(uint8_t* buffer, const Types&... values)
+store_value(std::uint8_t* buffer, const Types&... values)
 {
     size_t position = 0;
     (store_value(values, buffer, position), ...);
@@ -141,7 +141,7 @@ store_value(uint8_t* buffer, const Types&... values)
 
 template <typename Type>
 __attribute__((always_inline)) inline static void
-parse_value(uint8_t*& data_pos, Type& arg)
+parse_value(std::uint8_t*& data_pos, Type& arg)
 {
     using DecayedType = std::decay_t<Type>;
     static_assert(type_traits::is_supported_type_v<DecayedType>,
@@ -198,7 +198,7 @@ parse_value(uint8_t*& data_pos, Type& arg)
 
 template <typename Type, typename... Types>
 __attribute__((always_inline)) inline static void
-parse_value(uint8_t*& data_pos, Type& arg, Types&... args)
+parse_value(std::uint8_t*& data_pos, Type& arg, Types&... args)
 {
     parse_value(data_pos, arg);
     parse_value(data_pos, args...);

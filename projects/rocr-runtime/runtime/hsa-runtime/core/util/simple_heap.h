@@ -189,8 +189,9 @@ template <typename Allocator> class SimpleHeap {
     // Disallow multiple suballocation from large blocks.
     // Prevents a small allocation from retaining a large block.
     if (bytes > default_block_size()) {
-      bool err = discardBlock(reinterpret_cast<void*>(base));
-      assert(err && "Large block discard failed.");
+      if (!discardBlock(reinterpret_cast<void*>(base))) {
+        assert(false && "Large block discard failed.");
+      }
     }
 
     return reinterpret_cast<void*>(base);

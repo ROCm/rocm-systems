@@ -30,10 +30,10 @@ struct track_description
 // Helper function to create enabled_metrics value from bit positions
 // See enabled_metrics definition in pmc/collectors/gpu/types.hpp for bit position
 // documentation
-inline constexpr uint32_t
-make_metric_value(std::initializer_list<uint8_t> bit_positions)
+inline constexpr std::uint32_t
+make_metric_value(std::initializer_list<std::uint8_t> bit_positions)
 {
-    uint32_t value = 0;
+    std::uint32_t value = 0;
     for(auto bit : bit_positions)
     {
         value |= (1u << bit);
@@ -54,8 +54,10 @@ const auto JPEG_BUSY_VALUE     = make_metric_value({ 11 });    // jpeg_busy (MI3
 const auto XGMI_VALUE          = make_metric_value({ 12 });    // xgmi
 const auto PCIE_VALUE          = make_metric_value({ 13 });    // pcie
 const auto SDMA_USAGE_VALUE    = make_metric_value({ 14 });    // sdma_usage
+const auto GFX_CLOCK_VALUE     = make_metric_value({ 15 });    // gfx_clock
+const auto MEM_CLOCK_VALUE     = make_metric_value({ 16 });    // mem_clock
 
-inline std::unordered_map<uint32_t, track_description>
+inline std::unordered_map<std::uint32_t, track_description>
 make_default_tracks()
 {
     return {
@@ -72,6 +74,8 @@ make_default_tracks()
         { XGMI_VALUE, { "XGMI", "", {} } },
         { PCIE_VALUE, { "PCIe", "", {} } },
         { SDMA_USAGE_VALUE, { "SDMA Usage", "%", {} } },
+        { GFX_CLOCK_VALUE, { "GFX Clock", "MHz", {} } },
+        { MEM_CLOCK_VALUE, { "Memory Clock", "MHz", {} } },
     };
 }
 
@@ -93,7 +97,7 @@ struct pcie_track_set
 
 struct perfetto_amd_smi_sample
 {
-    uint64_t                      timestamp;
+    std::uint64_t                 timestamp;
     pmc::collectors::gpu::metrics metrics;
 };
 
@@ -101,7 +105,7 @@ struct perfetto_device_data
 {
     std::unique_ptr<std::vector<perfetto_amd_smi_sample>> samples;
     enabled_metrics                                       supported_metrics;
-    std::unordered_map<uint32_t, track_description>       tracks;
+    std::unordered_map<std::uint32_t, track_description>  tracks;
     xgmi_track_set                                        xgmi_tracks;
     pcie_track_set                                        pcie_tracks;
 };
@@ -291,7 +295,7 @@ struct perfetto_policy
      * @param timestamp Sample timestamp in nanoseconds
      */
     static void store_sample(size_t device_index, const metrics& metric_values,
-                             uint64_t timestamp)
+                             std::uint64_t timestamp)
     {
         detail::get_perfetto_data()[device_index].samples->emplace_back(
             detail::perfetto_amd_smi_sample{ timestamp, metric_values });
@@ -334,8 +338,8 @@ private:
         }
 
         pmc::collectors::gpu::enabled_metrics effective_metrics;
-        effective_metrics.value =
-            static_cast<uint32_t>(enabled_metrics_cfg.value & supported_metrics.value);
+        effective_metrics.value = static_cast<std::uint32_t>(enabled_metrics_cfg.value &
+                                                             supported_metrics.value);
 
         if(effective_metrics.value == 0)
         {
@@ -369,9 +373,9 @@ private:
 
 private:
     static void process_basic_metrics(
-        size_t device_index, uint64_t ts, const metrics& metric_values,
-        const enabled_metrics&                                   effective_metrics,
-        std::unordered_map<uint32_t, detail::track_description>& tracks)
+        size_t device_index, std::uint64_t ts, const metrics& metric_values,
+        const enabled_metrics&                                        effective_metrics,
+        std::unordered_map<std::uint32_t, detail::track_description>& tracks)
     {
         auto gfx_it = tracks.find(detail::GFX_BUSY_VALUE);
         if(effective_metrics.bits.gfx_activity && gfx_it != tracks.end() &&
@@ -451,13 +455,33 @@ private:
                 counter_track::at(device_index, sdma_it->second.track_indexes[0]), ts,
                 static_cast<double>(metric_values.sdma_usage));
         }
+
+        auto gfx_clock_it = tracks.find(detail::GFX_CLOCK_VALUE);
+        if(effective_metrics.bits.gfx_clock && gfx_clock_it != tracks.end() &&
+           !gfx_clock_it->second.track_indexes.empty())
+        {
+            TRACE_COUNTER(
+                "device_gfx_clock",
+                counter_track::at(device_index, gfx_clock_it->second.track_indexes[0]),
+                ts, static_cast<double>(metric_values.gfx_clock_mhz));
+        }
+
+        auto mem_clock_it = tracks.find(detail::MEM_CLOCK_VALUE);
+        if(effective_metrics.bits.mem_clock && mem_clock_it != tracks.end() &&
+           !mem_clock_it->second.track_indexes.empty())
+        {
+            TRACE_COUNTER(
+                "device_mem_clock",
+                counter_track::at(device_index, mem_clock_it->second.track_indexes[0]),
+                ts, static_cast<double>(metric_values.mem_clock_mhz));
+        }
     }
 
     static void process_xcp_activity(
-        size_t device_index, uint64_t ts,
-        const pmc::collectors::gpu::metrics&                     metric_values,
-        const pmc::collectors::gpu::enabled_metrics&             effective_metrics,
-        std::unordered_map<uint32_t, detail::track_description>& tracks)
+        size_t device_index, std::uint64_t ts,
+        const pmc::collectors::gpu::metrics&                          metric_values,
+        const pmc::collectors::gpu::enabled_metrics&                  effective_metrics,
+        std::unordered_map<std::uint32_t, detail::track_description>& tracks)
     {
         // Per-XCP VCN busy metrics (MI300)
         auto vcn_busy_it = tracks.find(detail::VCN_BUSY_VALUE);
@@ -469,7 +493,7 @@ private:
             {
                 for(const auto& vcn_val : xcp_stats.vcn_busy)
                 {
-                    if(vcn_val != std::numeric_limits<uint16_t>::max() &&
+                    if(vcn_val != std::numeric_limits<std::uint16_t>::max() &&
                        engine_id < vcn_busy_it->second.track_indexes.size())
                     {
                         TRACE_COUNTER("device_vcn_activity",
@@ -490,7 +514,7 @@ private:
             size_t engine_id = 0;
             for(const auto& vcn_val : metric_values.vcn_activity)
             {
-                if(vcn_val != std::numeric_limits<uint16_t>::max() &&
+                if(vcn_val != std::numeric_limits<std::uint16_t>::max() &&
                    engine_id < vcn_it->second.track_indexes.size())
                 {
                     TRACE_COUNTER(
@@ -512,7 +536,7 @@ private:
             {
                 for(const auto& jpeg_val : xcp_stats.jpeg_busy)
                 {
-                    if(jpeg_val != std::numeric_limits<uint16_t>::max() &&
+                    if(jpeg_val != std::numeric_limits<std::uint16_t>::max() &&
                        engine_id < jpeg_busy_it->second.track_indexes.size())
                     {
                         TRACE_COUNTER(
@@ -534,7 +558,7 @@ private:
             size_t engine_id = 0;
             for(const auto& jpeg_val : metric_values.jpeg_activity)
             {
-                if(jpeg_val != std::numeric_limits<uint16_t>::max() &&
+                if(jpeg_val != std::numeric_limits<std::uint16_t>::max() &&
                    engine_id < jpeg_it->second.track_indexes.size())
                 {
                     TRACE_COUNTER(
@@ -547,7 +571,7 @@ private:
         }
     }
 
-    static void process_xgmi_metrics(size_t device_index, uint64_t ts,
+    static void process_xgmi_metrics(size_t device_index, std::uint64_t ts,
                                      const metrics&                metric_values,
                                      const enabled_metrics&        effective_metrics,
                                      const detail::xgmi_track_set& xgmi_tracks)
@@ -596,7 +620,7 @@ private:
         }
     }
 
-    static void process_pcie_metrics(size_t device_index, uint64_t ts,
+    static void process_pcie_metrics(size_t device_index, std::uint64_t ts,
                                      const metrics&                metric_values,
                                      const enabled_metrics&        effective_metrics,
                                      const detail::pcie_track_set& pcie_tracks)

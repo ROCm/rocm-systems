@@ -49,6 +49,12 @@ Follow [Keep a Changelog](https://keepachangelog.com/) format:
 - For breaking changes: include migration guidance
 - Use past tense for fixes ("Fixed"), present tense for additions ("New")
 - Reference the JIRA/issue if available: `[SWDEV-XXXXXX]`
+- **Bolded headline bullets must end with two trailing spaces** (Markdown hard line break) so Sphinx renders the headline and its sub-bullets on separate lines. Example:
+  ```markdown
+  - **Fixed `amd-smi static` hang on gfx1153**.··
+    - Added 60-second timeout to `amdsmi_init()`.
+  ```
+  (`··` = two literal trailing spaces.) Without them, Sphinx collapses the headline into the first sub-bullet. Verify with `grep -nP '^- \*\*.*\*\*[^ ]*$' CHANGELOG.md` — any match is missing the trailing whitespace.
 
 ## Review Checklist
 
@@ -59,6 +65,7 @@ When reviewing a PR, check:
 - [ ] Entry describes the **impact**, not the implementation
 - [ ] Breaking changes have migration notes
 - [ ] Entry is under `## [Unreleased]` (not a version number)
+- [ ] Bolded headline bullets end with two trailing spaces (Sphinx hard break)
 
 ## Severity
 

@@ -45,6 +45,7 @@
 #ifndef HSA_RUNTIME_CORE_INC_AMD_GPU_AGENT_H_
 #define HSA_RUNTIME_CORE_INC_AMD_GPU_AGENT_H_
 
+#include <atomic>
 #include <vector>
 #include <list>
 #include <map>
@@ -60,6 +61,7 @@
 #include "core/inc/signal.h"
 #include "core/util/lazy_ptr.h"
 #include "core/util/locks.h"
+#include "core/util/os.h"
 #include "core/util/small_heap.h"
 #include "pcs/pcs_runtime.h"
 #include "core/inc/counted_queue_manager.h"
@@ -314,6 +316,24 @@ class GpuAgent : public GpuAgentInt {
   // @brief Override from core::Agent.
   hsa_status_t DmaPreferredEngine(core::Agent& dst_agent, core::Agent& src_agent,
                                   uint32_t* recommended_ids_mask) override;
+
+  // @brief Pick an SDMA engine from a preferred-engine mask using round-robin.
+  // Returns a blit object index (1-indexed, suitable for GetBlitObject), or 0
+  // if mask is empty. When advance=true (default) the counter is incremented so
+  // successive body assignments spread across engines. Pass advance=false to
+  // peek at the current position without consuming a slot — used when selecting
+  // a coordinator engine so it rotates independently of body assignments.
+  inline uint32_t PickSdmaEngine(uint32_t engine_mask, bool advance = true) {
+    if (!engine_mask) return 0;
+    int count = rocr::os::Popcount(engine_mask);
+    if (count == 1) return rocr::os::Ffs(engine_mask);
+    uint32_t rr = advance ? sdma_rr_index_.fetch_add(1, std::memory_order_relaxed)
+                          : sdma_rr_index_.load(std::memory_order_relaxed);
+    uint32_t m = engine_mask;
+    for (uint32_t i = 0, pick = rr % count; i < pick; ++i)
+      m &= m - 1;
+    return rocr::os::Ffs(m);
+  }
 
   // @brief Override from core::Agent.
   hsa_status_t DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
@@ -931,8 +951,8 @@ class GpuAgent : public GpuAgentInt {
   bool uses_rec_sdma_eng_id_mask_;
   bool rec_sdma_eng_override_;
 
-  // Round-robin index for spreading SDMA work across engines.
-  uint32_t sdma_rr_index_ = 0;
+  // Round-robin index for spreading SDMA work across engines (gfx1250+).
+  std::atomic<uint32_t> sdma_rr_index_{0};
 
   // structure for host trap sampling
   pcs_data_t pcs_hosttrap_data_;

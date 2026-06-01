@@ -252,6 +252,16 @@ class BaseRunner(ABC):
             except (subprocess.TimeoutExpired, OSError):
                 pass
 
+        if self.launcher is type(self).Launcher.SHMEM and command:
+            # PRRTE-based oshrun (Open MPI >= 5.0) strips the first literal
+            # `--` from the program argv, breaking `rocprof-sys-run -- <binary>`.
+            # A second `--` survives, so insert a decoy right after the program
+            # name to absorb the strip. Older ORTE-based oshrun (4.x) preserves
+            # `--` and would forward the decoy verbatim, so gate on version.
+            oshrun_version = self.config.capabilities.oshrun_version
+            if oshrun_version is not None and oshrun_version[0] >= 5:
+                command = [command[0], "--"] + command[1:]
+
         return cmd + command
 
     def run(self) -> TestResult:

@@ -5,6 +5,7 @@
 #include "core/config.hpp"
 #include "library/pmc/sampler.hpp"
 #include "library/runtime.hpp"
+#include <cstdint>
 
 #include "logger/debug.hpp"
 
@@ -76,7 +77,8 @@ sampler::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
 
     auto _now = std::chrono::steady_clock::now();
     auto _end =
-        _now + std::chrono::nanoseconds{ static_cast<uint64_t>(_duration * units::sec) };
+        _now +
+        std::chrono::nanoseconds{ static_cast<std::uint64_t>(_duration * units::sec) };
     while(_state && _state->load() < State::Finalized && get_state() < State::Finalized)
     {
         std::this_thread::sleep_until(_now);
@@ -121,33 +123,30 @@ sampler::setup()
     // shutdown if already running
     shutdown();
 
-    if(get_use_amd_smi())
-    {
-        LOG_DEBUG("Setting up PMC sampling.");
-        auto& _pmc         = instances.emplace_back(std::make_unique<instance>());
-        _pmc->setup        = []() { pmc::setup(); };
-        _pmc->shutdown     = []() { pmc::shutdown(); };
-        _pmc->post_process = []() { pmc::post_process(); };
-        _pmc->config       = []() { pmc::config(); };
-        _pmc->sample       = []() { pmc::sample(); };
-        _pmc->pause        = []() { pmc::pause(); };
-    }
+    LOG_DEBUG("Setting up PMC sampling.");
+    auto& _pmc         = instances.emplace_back(std::make_unique<instance>());
+    _pmc->setup        = []() { pmc::setup(); };
+    _pmc->shutdown     = []() { pmc::shutdown(); };
+    _pmc->post_process = []() { pmc::post_process(); };
+    _pmc->config       = []() { pmc::config(); };
+    _pmc->sample       = []() { pmc::sample(); };
+    _pmc->pause        = []() { pmc::pause(); };
 
     for(auto& itr : instances)
         itr->setup();
 
     polling_finished = std::make_unique<promise_t>();
 
-    auto     _freq      = get_process_sampling_freq();
-    uint64_t _msec_freq = (1.0 / _freq) * 1.0e3;
-
-    polling_finished = std::make_unique<promise_t>();
+    const auto _freq = get_process_sampling_freq();
+    const auto _interval =
+        nsec_t{ static_cast<std::uint64_t>((1.0 / _freq) * units::sec) };
 
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
     set_state(State::PreInit);
-    get_thread() = std::make_unique<std::thread>(&poll<msec_t>, &get_sampler_state(),
-                                                 msec_t{ _msec_freq }, nullptr);
+    using poll_fn = void (*)(std::atomic<State>*, nsec_t, promise_t*);
+    get_thread()  = std::make_unique<std::thread>(
+        static_cast<poll_fn>(&poll), &get_sampler_state(), _interval, nullptr);
 
     set_state(State::Active);
 }
@@ -167,7 +166,7 @@ sampler::shutdown()
     {
         size_t           _nitr     = 0;
         constexpr size_t _nitr_max = 100;
-        uint64_t         _freq     = (1.0 / get_process_sampling_freq()) * 1.0e3;
+        std::uint64_t    _freq     = (1.0 / get_process_sampling_freq()) * 1.0e3;
 
         // wait until the sampler is no longer sampling
         std::this_thread::sleep_for(msec_t{ _freq });
@@ -177,7 +176,7 @@ sampler::shutdown()
         }
 
         // during CI, throw an error if polling_finished is not valid
-        if(!polling_finished && get_is_continuous_integration())
+        if(!polling_finished)
         {
             throw std::runtime_error("polling_finished is not valid");
         }

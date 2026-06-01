@@ -2,12 +2,36 @@
 
 Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs.amd.com/projects/HIP/en/latest/index.html)
 
+## HIP 7.14 for ROCm 7.14
+
+### Added
+* New HIP APIs
+    - Execution Context Management
+    Support for the following APIs for parity with corresponding CUDA runtime APIs.
+      * `hipDeviceGetDevResource` returns the device resource of a given type for a device
+      * `hipDevSmResourceSplitByCount` splits SM resources into groups with at least a minimum SM count
+      * `hipDevSmResourceSplit` splits SM resources into groups with configurable per-group parameters
+      * `hipDevResourceGenerateDesc` generates a resource descriptor from one or more device resources
+      * `hipGreenCtxCreate` creates a green (execution) context from a resource descriptor
+      * `hipExecutionCtxDestroy` destroys a green (execution) context
+      * `hipDeviceGetExecutionCtx` returns the default execution context for a device
+      * `hipExecutionCtxStreamCreate` creates a stream on a green (execution) context with specified flags and priority
+      * `hipExecutionCtxGetDevResource` returns the device resource of a given type for an execution context
+      * `hipExecutionCtxGetDevice` returns the device associated with an execution context
+      * `hipExecutionCtxGetId` returns a unique identifier for an execution context
+      * `hipStreamGetDevResource` returns the device resource of a given type for a stream
+      * `hipExecutionCtxRecordEvent` records an event on an execution context
+      * `hipExecutionCtxSynchronize` blocks until all work on an execution context has completed
+      * `hipExecutionCtxWaitEvent` makes an execution context wait on an event
+
 ## HIP 7.13 for ROCm 7.13
 
 ### Added
 
 * New HIP APIs
     - `cooperative_groups::reduce()` allows calling reduce operators on `thread_block_tile` and `coalesced_threads`. The implementation is based on the `__reduce_*_sync` operations, so the macro `HIP_ENABLE_EXTRA_WARP_SYNC_TYPES` may be needed to unlock some optimizations.
+    - `hipLibraryGetGlobal` returns the device pointer and size of a `__device__` global defined in a `hipLibrary_t`. Mirrors CUDA's `cudaLibraryGetGlobal` / `cuLibraryGetGlobal`.
+    - `hipLibraryGetManaged` returns the host-accessible managed pointer and size of a `__managed__` variable defined in a `hipLibrary_t`. Mirrors CUDA's `cudaLibraryGetManaged` / `cuLibraryGetManaged`.
 * New device attribute `hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported`, indicating support for GPU Direct RDMA when using HIP VMM. This attribute corresponds to CUDA’s `CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED`.
 
 ### Resolved issues
@@ -28,7 +52,6 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 ## HIP 7.12 for ROCm 7.12
 
 ### Added
-
 * New HIP APIs
     - Library Management
     Support for the following APIs for parity with the corresponding CUDA APIs.
