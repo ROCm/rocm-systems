@@ -364,19 +364,6 @@ public:
   /// @returns Mutable pointer to the raw VGPR data.
   virtual uint8_t *vgpr_data(uint32_t base) = 0;
 
-  /// @brief Word-typed view of the VGPR file for batched lane access.
-  /// @details The VGPR file is reg-major and contiguous (each register is a
-  /// @c VectorReg<WF_SIZE,uint32_t> == @c std::array of @c WF_SIZE words, no
-  /// padding), so register @p base + @c r, lane @c l is at index
-  /// <tt>r * wf_size() + l</tt>. Lets hot paths (MFMA gather/scatter) read and
-  /// write many lanes after a single virtual @c vgpr_data call instead of one
-  /// virtual @c read_vgpr/write_vgpr per element. Same backing storage the VALU
-  /// SIMD path reaches through @c SimdAccess::lane_ptr.
-  const uint32_t *vgpr_words(uint32_t base) const {
-    return reinterpret_cast<const uint32_t *>(vgpr_data(base));
-  }
-  uint32_t *vgpr_words(uint32_t base) { return reinterpret_cast<uint32_t *>(vgpr_data(base)); }
-
   /// @brief Return the SGPR register file (for serialization).
   /// @returns Const reference to the SGPR register file.
   const simdojo::RegisterFile<uint32_t> &sgpr_file() const { return sgpr_file_; }
