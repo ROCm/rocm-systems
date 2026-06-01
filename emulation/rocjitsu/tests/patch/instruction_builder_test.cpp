@@ -87,6 +87,15 @@ TEST(ComputeSoppBranchSimm16, NonDwordAlignedBranchPcFails) {
   EXPECT_FALSE(compute_sopp_branch_simm16(0x1002, 0x1100).has_value());
 }
 
+// C++20 specifies truncated-toward-zero integer division/modulo, so
+// `(-258) % 4 == -2 != 0`. This pins that semantic: a negative delta that
+// is not a multiple of 4 must be rejected (not silently rounded).
+TEST(ComputeSoppBranchSimm16, NegativeUnalignedDeltaFails) {
+  // branch_pc = 0x1100, target = 0x1002 →
+  //   delta = 0x1002 - 0x1100 - 4 = -0x102 = -258 bytes (not /4).
+  EXPECT_FALSE(compute_sopp_branch_simm16(0x1100, 0x1002).has_value());
+}
+
 TEST(ComputeSoppBranchSimm16, BranchPcNearInt64MaxFails) {
   constexpr uint64_t kHugePc = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
   EXPECT_FALSE(compute_sopp_branch_simm16(kHugePc, kHugePc).has_value());

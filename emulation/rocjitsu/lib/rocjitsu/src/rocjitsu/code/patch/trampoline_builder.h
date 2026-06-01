@@ -5,10 +5,13 @@
 /// @brief Lowers a TrampolinePlan into patched-anchor bytes and trampoline
 ///        words for the DBI relocation-only path.
 ///
-/// This is the byte emitter; it owns SOPP branch math and the inline-nop smoke
-/// guardrail. It does not touch the ELF or own layout assignment — see
-/// instrumentor.h for the orchestrator and code_object_patcher.h for the ELF
-/// mutation layer.
+/// This is the byte emitter; it owns SOPP branch math and basic plan
+/// well-formedness checks (original_size 4 or 8, original_words count
+/// matches, branch ranges fit). It does not touch the ELF, does not own
+/// layout assignment, and does not enforce milestone-scoped restrictions
+/// (e.g. "only emit s_nop placeholder bodies" — that lives in the
+/// orchestrator as `validate_inline_nop_smoke_plan` in instrumentor.h).
+/// See code_object_patcher.h for the ELF mutation layer.
 
 #pragma once
 
@@ -59,10 +62,13 @@ public:
   ///
   /// Returns std::nullopt and writes a human-readable explanation to
   /// @p error_out (if non-null) on:
-  ///   - Inline-nop smoke guardrail violation (before/after/emit_original)
   ///   - original_size other than 4 or 8
   ///   - original_words size mismatch with original_size
   ///   - Forward or return branch outside s_branch simm16 range
+  ///
+  /// The builder does not enforce milestone-scoped restrictions on body
+  /// shape; the orchestrator decides what kind of plan to emit and calls
+  /// validate_inline_nop_smoke_plan (in instrumentor.h) when appropriate.
   [[nodiscard]] static std::optional<TrampolineBytes>
   build(const TrampolinePlan &plan, std::string *error_out = nullptr);
 };
