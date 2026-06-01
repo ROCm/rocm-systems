@@ -20,18 +20,10 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import argparse
-import functools
-import json
 import logging
-import math
-import multiprocessing
-import os
-import signal
 import sys
-import threading
-import time
-import copy
 
+<<<<<<< users/josnarlo/Change_CLI_return_and_error_codes
 from _version import __version__
 
 from amdsmi_cli_exceptions import (
@@ -44,77 +36,62 @@ from amdsmi_cli_exceptions import (
     AmdSmiParameterNotSupportedException,
     AmdSmiRequiredCommandException,
 )
+=======
+>>>>>>> develop
 from amdsmi_helpers import AMDSMIHelpers
 from amdsmi_logger import AMDSMILogger
 from amdsmi import amdsmi_exception, amdsmi_interface
-from amdsmi.amdsmi_interface import AMDSMI_MAX_UTIL, AMDSMI_MAX_PPT_LIMIT, AMDSMI_MAX_RAIL_INDEX
-from pathlib import Path
+
+from subcommands import (
+    BadPagesCommands,
+    DefaultCommands,
+    EventCommands,
+    FabricCommands,
+    FirmwareCommands,
+    ListDevicesCommands,
+    MetricCommands,
+    MonitorCommands,
+    NodeCommands,
+    PartitionCommands,
+    ProcessCommands,
+    RasCommands,
+    ResetCommands,
+    SetValueCommands,
+    StaticCommands,
+    TopologyCommands,
+    VersionCommands,
+    XgmiCommands,
+)
 
 
-def _fabric_ppod_id_to_uuid_string(ppod_id):
-    """Format 16-byte pPoD id as 8-4-4-4-12 hex (canonical UUID-style), one line.
-
-    If the value is missing or not 16 bytes, returns the all-9s sentinel used when
-    no pPoD id is available from the library.
-    """
-    sentinel = "99999999-9999-9999-9999-999999999999"
-    if not isinstance(ppod_id, (list, tuple)) or len(ppod_id) != 16:
-        return sentinel
-    try:
-        octets = bytes(int(x) & 0xFF for x in ppod_id)
-    except (TypeError, ValueError):
-        return sentinel
-    h = octets.hex()
-    return f"{h[0:8]}-{h[8:12]}-{h[12:16]}-{h[16:20]}-{h[20:32]}"
-
-
-# Unset slots in local_accelerators[] and vpod_active_accelerators[] use UINT32_MAX
-# (see amd_smi_gpu_device.cc).
-_FABRIC_LOCAL_ACCEL_UNSET = (1 << 32) - 1
-
-
-def _fabric_local_accelerators_to_line(local_accelerators):
-    """Format accelerator id list (local or vPoD-active) as one comma-separated line; skip unset."""
-    if not isinstance(local_accelerators, (list, tuple)):
-        return "N/A"
-    try:
-        vals = [int(x) for x in local_accelerators]
-    except (TypeError, ValueError):
-        return "N/A"
-    active = [str(v) for v in vals if v != _FABRIC_LOCAL_ACCEL_UNSET]
-    return ", ".join(active) if active else "N/A"
-
-
-_FABRIC_VPOD_ACTIVE_SLOTS = 32
-_FABRIC_VPOD_ACTIVE_ROW_LEN = 8
-
-
-def _fabric_local_active_accelerators_rows(vpod_active_accelerators):
-    """32 vPoD-active slots as 4×8 grid; each row is comma-separated ('-' if unset). Returns None if invalid."""
-    unset = _FABRIC_LOCAL_ACCEL_UNSET
-    if not isinstance(vpod_active_accelerators, (list, tuple)):
-        return None
-    try:
-        vals = [int(x) for x in vpod_active_accelerators]
-    except (TypeError, ValueError):
-        return None
-    if len(vals) != _FABRIC_VPOD_ACTIVE_SLOTS:
-        if len(vals) > _FABRIC_VPOD_ACTIVE_SLOTS:
-            vals = vals[:_FABRIC_VPOD_ACTIVE_SLOTS]
-        else:
-            vals = vals + [unset] * (_FABRIC_VPOD_ACTIVE_SLOTS - len(vals))
-    rows = []
-    for r in range(_FABRIC_VPOD_ACTIVE_SLOTS // _FABRIC_VPOD_ACTIVE_ROW_LEN):
-        start = r * _FABRIC_VPOD_ACTIVE_ROW_LEN
-        chunk = vals[start : start + _FABRIC_VPOD_ACTIVE_ROW_LEN]
-        rows.append(", ".join(str(v) if v != unset else "-" for v in chunk))
-    return rows
-
-
-class AMDSMICommands:
-    """This class contains all the commands corresponding to AMDSMIParser
+class AMDSMICommands(
+    BadPagesCommands,
+    DefaultCommands,
+    EventCommands,
+    FabricCommands,
+    FirmwareCommands,
+    ListDevicesCommands,
+    MetricCommands,
+    MonitorCommands,
+    NodeCommands,
+    PartitionCommands,
+    ProcessCommands,
+    RasCommands,
+    ResetCommands,
+    SetValueCommands,
+    StaticCommands,
+    TopologyCommands,
+    VersionCommands,
+    XgmiCommands,
+):
+    """This class contains all the commands corresponding to AMDSMIParser.
     Each command function will interact with AMDSMILogger to handle
     displaying the output to the specified format and destination.
+
+    Subcommand implementations are organized in the subcommands/ package.
+    Each subcommand module defines a base class (e.g., ListDevicesCommands) that
+    provides the methods for that CLI subcommand. This class inherits from
+    all of them and adds __init__, profile, and rocm_smi.
     """
 
     def __init__(self, format="human_readable", destination="stdout", helpers=None) -> None:
@@ -224,20 +201,6 @@ class AMDSMICommands:
                 )
                 exit_flag = True
 
-        self.convert_clock_type = {
-            "sys": amdsmi_interface.AmdSmiClkType.SYS,
-            "mem": amdsmi_interface.AmdSmiClkType.MEM,
-            "df": amdsmi_interface.AmdSmiClkType.DF,
-            "fclk": amdsmi_interface.AmdSmiClkType.DF,
-            "soc": amdsmi_interface.AmdSmiClkType.SOC,
-            "dcef": amdsmi_interface.AmdSmiClkType.DCEF,
-            # vclk and dclk currently do not support levels so average clk is given for frequency levels
-            "vclk0": amdsmi_interface.AmdSmiClkType.VCLK0,
-            "vclk1": amdsmi_interface.AmdSmiClkType.VCLK1,
-            "dclk0": amdsmi_interface.AmdSmiClkType.DCLK0,
-            "dclk1": amdsmi_interface.AmdSmiClkType.DCLK1,
-        }
-
         if exit_flag:
             version_args = argparse.Namespace()
             version_args.gpu_version = False
@@ -246,6 +209,7 @@ class AMDSMICommands:
             self.version(version_args)
             raise PermissionError("Command requires elevation")
 
+<<<<<<< users/josnarlo/Change_CLI_return_and_error_codes
     def version(self, args, gpu_version=None, cpu_version=None, nic_version=None):
         """Print Version String
 
@@ -13308,6 +13272,11 @@ class AMDSMICommands:
             return
 
         self.logger.print_output(multiple_device_enabled=False)
+=======
+    def profile(self, args):
+        """Not applicable to linux baremetal"""
+        print("Not applicable to linux baremetal")
+>>>>>>> develop
 
     def rocm_smi(self, args):
         """

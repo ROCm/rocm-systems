@@ -972,6 +972,9 @@ graph:
   Unit_hipStreamEndCapture_Positive_Thread:
     <<: *level_2
     tags: [capture]
+  Unit_hipStreamEndCapture_Negative_InvalidatedStateReset:
+    <<: *level_2
+    tags: [capture]
   Unit_hipStreamEndCapture_Negative:
     <<: *level_2
     tags: [capture]

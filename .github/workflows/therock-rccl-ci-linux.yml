@@ -7,6 +7,9 @@ on:
         type: string
       artifact_group:
         type: string
+      package_version:
+        type: string
+        required: true
       cmake_options:
         type: string
 
@@ -38,7 +41,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 42cdfac66fed8bcabe230611e6517d577a1127f9 # 2026-05-27 commit
+          ref: 685f8c3b89006309b34a7c16de17e841400f0d76 # 2025-05-29 commit
 
       - name: Install python deps
         run: |
@@ -73,7 +76,7 @@ jobs:
       - name: Configure Projects
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
-          package_version: ADHOCBUILD
+          package_version: ${{ inputs.package_version }}
           extra_cmake_options: "-DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
           BUILD_DIR: build
         run: |
