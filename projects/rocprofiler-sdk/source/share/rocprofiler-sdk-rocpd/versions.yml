@@ -35,3 +35,9 @@ rocprofiler-sdk-rocpd:
 # Version 3.0.2
 # - Added graph_exec_id and graph_node_id columns to rocpd_kernel_dispatch and rocpd_memory_copy
 # - Added rocpd_graph_launch table for HIP graph launch summary records
+
+# Version 3.0.3
+# - rocpd_pmc_event: added sample_id (FK to rocpd_sample), xcc, shader_engine, instance columns
+# - rocpd_info_pmc: added spm_support column
+# - Added spm_counters data view
+# - Modified counters_collection view to exclude SPM records (WHERE sample_id IS NULL)

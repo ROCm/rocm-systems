@@ -69,6 +69,11 @@ rocprofv3 --spm-beta-enabled --spm SQ_WAVES --spm-sample-interval-unit sclk_cycl
 The preceding command enables SPM for SQ_WAVES and sample interval with unit as sclk cycle counts. Replace ``<application_path>`` with the path to the application you want to profile.
 This generates a JSON results file prefixed with the process ID.
 
+rocprofv3 --spm-beta-enabled --spm SQ_WAVES --spm-sample-interval-unit sclk_cycles --spm-sample-interval 1200  -- <application_path>
+
+The preceding command enables SPM for SQ_WAVES and sample interval with unit as sclk cycle counts. Replace ``<application_path>`` with the path to the application you want to profile.
+This generates a rocpd results file prefixed with the process ID.
+
 Input parameters
 ===================
 
@@ -81,4 +86,5 @@ Here are the input parameters used to configure SPM
 
 .. code-block:: bash
 
-  rocprofv3 --spm-beta-enabled --spm SQ_WAVES -spm-sample-interval-unit sclk_cycles --spm-sample-interval 1200  --output-format json -- <application_path>
+  rocprofv3 --spm-beta-enabled --spm SQ_WAVES --spm-sample-interval-unit sclk_cycles --spm-sample-interval 1200  --output-format json -- <application_path>
+  rocprofv3 --spm-beta-enabled --spm SQ_WAVES --spm-sample-interval-unit sclk_cycles --spm-sample-interval 1200 -- <application_path>
