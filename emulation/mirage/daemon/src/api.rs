@@ -128,15 +128,17 @@ struct PathsResponse {
     config: String,
     runtime: String,
     state: String,
+    cache: String,
     profiles: String,
     sessions: String,
 }
 
 async fn get_paths() -> Json<PathsResponse> {
     Json(PathsResponse {
-        config: mirage_core::paths::xdg_config_home().display().to_string(),
-        runtime: mirage_core::paths::xdg_runtime_dir().display().to_string(),
-        state: mirage_core::paths::xdg_state_home().display().to_string(),
+        config: mirage_core::paths::mirage_config_dir().display().to_string(),
+        runtime: mirage_core::paths::mirage_runtime_dir().display().to_string(),
+        state: mirage_core::paths::mirage_state_dir().display().to_string(),
+        cache: mirage_core::paths::mirage_cache_dir().display().to_string(),
         profiles: mirage_core::paths::profile_root().display().to_string(),
         sessions: mirage_core::paths::session_root().display().to_string(),
     })

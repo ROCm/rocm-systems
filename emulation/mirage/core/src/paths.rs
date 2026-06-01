@@ -16,6 +16,19 @@
 //! | Cache                 | `$XDG_CACHE_HOME`       | `mirage/`                     |
 //! | Persistent state      | `$XDG_STATE_HOME`       | `mirage/`                     |
 //!
+//! Two environment variables provide direct overrides for the
+//! per-app directories, bypassing the XDG base lookup:
+//!
+//! * `$MIRAGE_CONFIG` — overrides the mirage config dir (would otherwise
+//!   be `$XDG_CONFIG_HOME/mirage`).
+//! * `$MIRAGE_STATE` — overrides the mirage state dir (would otherwise
+//!   be `$XDG_STATE_HOME/mirage`).
+//! * `$MIRAGE_CACHE` — overrides the mirage cache dir (would otherwise
+//!   be `$XDG_CACHE_HOME/mirage`).
+//! * `$MIRAGE_RUNTIME` — overrides the mirage runtime dir (would
+//!   otherwise be `$XDG_RUNTIME_DIR/mirage`); session files live under
+//!   `<mirage_runtime_dir>/session/<id>/...`.
+//!
 //! Per-session structure:
 //!
 //! ```text
@@ -81,15 +94,77 @@ pub fn xdg_state_home() -> PathBuf {
     home_dir().join(".local").join("state")
 }
 
+/// Returns `$XDG_CACHE_HOME` (or `$HOME/.cache` if unset).
+pub fn xdg_cache_home() -> PathBuf {
+    if let Ok(p) = std::env::var("XDG_CACHE_HOME") {
+        if !p.is_empty() {
+            return PathBuf::from(p);
+        }
+    }
+    home_dir().join(".cache")
+}
+
 fn home_dir() -> PathBuf {
     std::env::var("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("/"))
 }
 
-/// Root directory for mirage profiles: `$XDG_CONFIG_HOME/mirage/profile`.
+/// Returns the mirage config directory.
+///
+/// Honors `$MIRAGE_CONFIG` as a direct override; otherwise returns
+/// `$XDG_CONFIG_HOME/mirage`.
+pub fn mirage_config_dir() -> PathBuf {
+    if let Ok(p) = std::env::var("MIRAGE_CONFIG") {
+        if !p.is_empty() {
+            return PathBuf::from(p);
+        }
+    }
+    xdg_config_home().join(APP_NAMESPACE)
+}
+
+/// Returns the mirage persistent state directory.
+///
+/// Honors `$MIRAGE_STATE` as a direct override; otherwise returns
+/// `$XDG_STATE_HOME/mirage`.
+pub fn mirage_state_dir() -> PathBuf {
+    if let Ok(p) = std::env::var("MIRAGE_STATE") {
+        if !p.is_empty() {
+            return PathBuf::from(p);
+        }
+    }
+    xdg_state_home().join(APP_NAMESPACE)
+}
+
+/// Returns the mirage cache directory.
+///
+/// Honors `$MIRAGE_CACHE` as a direct override; otherwise returns
+/// `$XDG_CACHE_HOME/mirage`.
+pub fn mirage_cache_dir() -> PathBuf {
+    if let Ok(p) = std::env::var("MIRAGE_CACHE") {
+        if !p.is_empty() {
+            return PathBuf::from(p);
+        }
+    }
+    xdg_cache_home().join(APP_NAMESPACE)
+}
+
+/// Returns the mirage runtime directory.
+///
+/// Honors `$MIRAGE_RUNTIME` as a direct override; otherwise returns
+/// `$XDG_RUNTIME_DIR/mirage`.
+pub fn mirage_runtime_dir() -> PathBuf {
+    if let Ok(p) = std::env::var("MIRAGE_RUNTIME") {
+        if !p.is_empty() {
+            return PathBuf::from(p);
+        }
+    }
+    xdg_runtime_dir().join(APP_NAMESPACE)
+}
+
+/// Root directory for mirage profiles: `<mirage_config_dir>/profile`.
 pub fn profile_root() -> PathBuf {
-    xdg_config_home().join(APP_NAMESPACE).join("profile")
+    mirage_config_dir().join("profile")
 }
 
 /// Path to a specific profile file: `<profile_root>/<name>.json`.
@@ -97,9 +172,9 @@ pub fn profile_path(name: &str) -> PathBuf {
     profile_root().join(format!("{name}.json"))
 }
 
-/// Root directory for all sessions: `$XDG_RUNTIME_DIR/mirage/session`.
+/// Root directory for all sessions: `<mirage_runtime_dir>/session`.
 pub fn session_root() -> PathBuf {
-    xdg_runtime_dir().join(APP_NAMESPACE).join("session")
+    mirage_runtime_dir().join("session")
 }
 
 /// Per-session directory.
@@ -223,6 +298,13 @@ pub fn set_test_root(path: &Path) {
         std::env::set_var("XDG_CONFIG_HOME", p.join("config"));
         std::env::set_var("XDG_RUNTIME_DIR", p.join("runtime"));
         std::env::set_var("XDG_STATE_HOME", p.join("state"));
+        std::env::set_var("XDG_CACHE_HOME", p.join("cache"));
+        // The MIRAGE_* overrides would bypass the XDG redirection above,
+        // so unset them to keep tests hermetic.
+        std::env::remove_var("MIRAGE_CONFIG");
+        std::env::remove_var("MIRAGE_STATE");
+        std::env::remove_var("MIRAGE_CACHE");
+        std::env::remove_var("MIRAGE_RUNTIME");
     }
 }
 
@@ -250,5 +332,67 @@ mod tests {
             profile_path("foo"),
             tmp.path().join("config/mirage/profile/foo.json")
         );
+    }
+
+    #[test]
+    fn mirage_config_env_override() {
+        let _g = test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        set_test_root(tmp.path());
+        let custom = tmp.path().join("custom-cfg");
+        unsafe {
+            std::env::set_var("MIRAGE_CONFIG", &custom);
+        }
+        assert_eq!(mirage_config_dir(), custom);
+        assert_eq!(profile_path("foo"), custom.join("profile/foo.json"));
+        unsafe {
+            std::env::remove_var("MIRAGE_CONFIG");
+        }
+    }
+
+    #[test]
+    fn mirage_state_env_override() {
+        let _g = test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        set_test_root(tmp.path());
+        let custom = tmp.path().join("custom-state");
+        unsafe {
+            std::env::set_var("MIRAGE_STATE", &custom);
+        }
+        assert_eq!(mirage_state_dir(), custom);
+        unsafe {
+            std::env::remove_var("MIRAGE_STATE");
+        }
+    }
+
+    #[test]
+    fn mirage_cache_env_override() {
+        let _g = test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        set_test_root(tmp.path());
+        let custom = tmp.path().join("custom-cache");
+        unsafe {
+            std::env::set_var("MIRAGE_CACHE", &custom);
+        }
+        assert_eq!(mirage_cache_dir(), custom);
+        unsafe {
+            std::env::remove_var("MIRAGE_CACHE");
+        }
+    }
+
+    #[test]
+    fn mirage_runtime_env_override() {
+        let _g = test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        set_test_root(tmp.path());
+        let custom = tmp.path().join("custom-runtime");
+        unsafe {
+            std::env::set_var("MIRAGE_RUNTIME", &custom);
+        }
+        assert_eq!(mirage_runtime_dir(), custom);
+        assert_eq!(session_root(), custom.join("session"));
+        unsafe {
+            std::env::remove_var("MIRAGE_RUNTIME");
+        }
     }
 }

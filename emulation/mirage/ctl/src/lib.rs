@@ -954,9 +954,10 @@ fn confirm(prompt: &str) -> anyhow::Result<bool> {
 
 fn print_paths(json: bool) {
     let info = serde_json::json!({
-        "config": mirage_core::paths::xdg_config_home(),
-        "runtime": mirage_core::paths::xdg_runtime_dir(),
-        "state": mirage_core::paths::xdg_state_home(),
+        "config": mirage_core::paths::mirage_config_dir(),
+        "runtime": mirage_core::paths::mirage_runtime_dir(),
+        "state": mirage_core::paths::mirage_state_dir(),
+        "cache": mirage_core::paths::mirage_cache_dir(),
         "profiles": mirage_core::paths::profile_root(),
         "sessions": mirage_core::paths::session_root(),
     });
@@ -965,15 +966,19 @@ fn print_paths(json: bool) {
     } else {
         println!(
             "config:   {}",
-            mirage_core::paths::xdg_config_home().display()
+            mirage_core::paths::mirage_config_dir().display()
         );
         println!(
             "runtime:  {}",
-            mirage_core::paths::xdg_runtime_dir().display()
+            mirage_core::paths::mirage_runtime_dir().display()
         );
         println!(
             "state:    {}",
-            mirage_core::paths::xdg_state_home().display()
+            mirage_core::paths::mirage_state_dir().display()
+        );
+        println!(
+            "cache:    {}",
+            mirage_core::paths::mirage_cache_dir().display()
         );
         println!("profiles: {}", mirage_core::paths::profile_root().display());
         println!("sessions: {}", mirage_core::paths::session_root().display());
