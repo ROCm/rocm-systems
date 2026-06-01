@@ -40,10 +40,17 @@ typedef ncclNvlDomainInfo_v5_t ncclNvlDomainInfo_t;
 
 #define NCCL_ALGO_PROTO_IGNORE -1.0
 
-#define NCCL_NUM_UNROLLS 3 // 1/2/4
+#ifdef RCCL_BUILD_UNROLL
+#define NCCL_NUM_UNROLLS 1
+#else
+#define NCCL_NUM_UNROLLS 6 // 1/2/4/8/16/32
+#endif
 #define NCCL_UNROLL_1 0
 #define NCCL_UNROLL_2 1
 #define NCCL_UNROLL_4 2
+#define NCCL_UNROLL_8 3
+#define NCCL_UNROLL_16 4
+#define NCCL_UNROLL_32 5
 
 #define NCCL_NUM_FLOATS 6 // half/float/double/rccl_bfloat16/rccl_float8/rccl_bfloat8
 

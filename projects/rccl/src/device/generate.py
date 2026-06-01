@@ -14,7 +14,7 @@ all_protos    = ["LL","LL128","SIMPLE"]
 all_algos     = ["TREE","RING", "", "", "", "", "PAT"]
 all_accs      = ["0", "1"]
 all_pipelines = ["0", "1"]
-all_unrolls   = ["1", "2", "4"]
+all_unrolls   = ["1", "2", "4", "8", "16", "32"]
 
 all_params = [all_colls, all_algos, all_protos, all_redops, all_tys, all_accs, all_pipelines, all_unrolls]
 
@@ -81,7 +81,14 @@ is_colltrace       = 1 if sys.argv[3] == "ON" else 0
 is_local_arch_only = 1 if sys.argv[5] == "ON" else 0
 is_rocshmem        = 1 if sys.argv[6] == "ON" else 0
 
-func_pattern = sys.argv[7:8]
+# RCCL_BUILD_UNROLL: optional single-unroll build (empty = build all)
+build_unroll_arg = sys.argv[7] if len(sys.argv) > 7 and sys.argv[7] != "" else ""
+if build_unroll_arg:
+    assert build_unroll_arg in all_unrolls, \
+        f"RCCL_BUILD_UNROLL={build_unroll_arg} not in all_unrolls={all_unrolls}"
+    all_unrolls = [build_unroll_arg]
+
+func_pattern = sys.argv[8:9]
 
 if func_pattern and func_pattern[0]:
   func_pattern = func_pattern[0]
@@ -198,46 +205,47 @@ class Fn:
 def calc_unroll_and_pipeline_for_local_arch():
 
   if not is_local_arch_only:
-    return (all_unrolls, all_pipelines)
-
-  rocminfo_path = os.environ.get('ROCM_PATH') + "/bin/rocminfo"
-
-  res = subprocess.run([rocminfo_path], stdout=subprocess.PIPE, universal_newlines=True)
-  rocminfo_output = res.stdout
-
-  # Parse rocminfo binary output
-  gfx_targets = {}
-  curr_name = None
-  for line in rocminfo_output.splitlines():
-    line = line.strip()
-
-    if line.startswith("Name:"):
-      name = line.split(':')[-1].strip()
-      if "gfx" in name:
-        curr_name = name
-    if line.startswith("Compute Unit:") and curr_name:
-      cu_count = int(line.split(':')[-1].strip())
-      gfx_targets[(curr_name, cu_count)] = None
-      curr_name = None
-
-  # We want to remove duplicates but cannot use a dictionary since same gfx name can have different cu counts
-  # Use (gfx_name, cu_count) as key for dictionary and convert it to list here
-  gfx_targets = list(gfx_targets.keys())
-  
-  # Homogeneous system is required to build for only 1 variant of unroll factor (except for gfx950)
-  if len(gfx_targets) == 1:
-    gfx_name, cu_count = gfx_targets[0]
-    if "gfx950" == gfx_name:
-      return (["1", "2"], ["0"])  # Disable pipelining for gfx950
-    elif "gfx908" == gfx_name or ("gfx942" == gfx_name and cu_count > 80):
-      return (["2"], all_pipelines)
-    else:
-      return (["4"], all_pipelines)
+    unroll,pipeline = all_unrolls, all_pipelines
   else:
-    return (all_unrolls, all_pipelines)
+    rocminfo_path = os.environ.get('ROCM_PATH') + "/bin/rocminfo"
 
-# if building for local arch only, we only need to build for 1 variant of unroll for most gfx targets,
-# except for gfx950. For gfx950, we also disable pipelining.
+    res = subprocess.run([rocminfo_path], stdout=subprocess.PIPE, universal_newlines=True)
+    rocminfo_output = res.stdout
+
+    # Parse rocminfo binary output
+    gfx_targets = {}
+    curr_name = None
+    for line in rocminfo_output.splitlines():
+      line = line.strip()
+
+      if line.startswith("Name:"):
+        name = line.split(':')[-1].strip()
+        if "gfx" in name:
+          curr_name = name
+      if line.startswith("Compute Unit:") and curr_name:
+        cu_count = int(line.split(':')[-1].strip())
+        gfx_targets[(curr_name, cu_count)] = None
+        curr_name = None
+
+    # We want to remove duplicates but cannot use a dictionary since same gfx name can have different cu counts
+    # Use (gfx_name, cu_count) as key for dictionary and convert it to list here
+    gfx_targets = list(gfx_targets.keys())
+    
+    # Homogeneous system is required to build for only 1 variant of unroll factor (except for gfx950)
+    if len(gfx_targets) == 1:
+      gfx_name, cu_count = gfx_targets[0]
+      if "gfx950" == gfx_name:
+        unroll,pipeline = ["1", "2"], ["0"]  # Disable pipelining for gfx950
+      elif "gfx908" == gfx_name or ("gfx942" == gfx_name and cu_count > 80):
+        unroll,pipeline = ["2"], all_pipelines
+      else:
+        unroll,pipeline = ["4"], all_pipelines
+    else:
+      unroll,pipeline = all_unrolls, all_pipelines
+  if build_unroll_arg:
+    unroll = [build_unroll_arg]
+  return (unroll, pipeline)
+
 local_unroll, local_pipeline = calc_unroll_and_pipeline_for_local_arch()
 
 # rocSHMEM/GDA-based collectives: only generated when ENABLE_ROCSHMEM build is requested

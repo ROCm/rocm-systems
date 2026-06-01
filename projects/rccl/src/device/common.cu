@@ -19,25 +19,67 @@ struct RunWorkNop {
   __device__ void run() {}
 };
 
+#if !defined(RCCL_BUILD_UNROLL) || RCCL_BUILD_UNROLL == 1
 __launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernel_Generic_1(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
   ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/false, /*Unroll*/1>(&argsStorage.args);
 }
+#endif
+#if !defined(RCCL_BUILD_UNROLL) || RCCL_BUILD_UNROLL == 2
 __launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernel_Generic_2(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
   ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/false, /*Unroll*/2>(&argsStorage.args);
 }
+#endif
+#if !defined(RCCL_BUILD_UNROLL) || RCCL_BUILD_UNROLL == 4
 __launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernel_Generic_4(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
   ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/false, /*Unroll*/4>(&argsStorage.args);
 }
+#endif
+#if !defined(RCCL_BUILD_UNROLL) || RCCL_BUILD_UNROLL == 8
+__launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernel_Generic_8(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
+  ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/false, /*Unroll*/8>(&argsStorage.args);
+}
+#endif
+#if !defined(RCCL_BUILD_UNROLL) || RCCL_BUILD_UNROLL == 16
+__launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernel_Generic_16(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
+  ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/false, /*Unroll*/16>(&argsStorage.args);
+}
+#endif
+#if !defined(RCCL_BUILD_UNROLL) || RCCL_BUILD_UNROLL == 32
+__launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernel_Generic_32(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
+  ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/false, /*Unroll*/32>(&argsStorage.args);
+}
+#endif
 #ifdef ENABLE_COLLTRACE
+#if !defined(RCCL_BUILD_UNROLL) || RCCL_BUILD_UNROLL == 1
 __launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernelDebug_Generic_1(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
   ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/true, /*Unroll*/1>(&argsStorage.args);
 }
+#endif
+#if !defined(RCCL_BUILD_UNROLL) || RCCL_BUILD_UNROLL == 2
 __launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernelDebug_Generic_2(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
   ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/true, /*Unroll*/2>(&argsStorage.args);
 }
+#endif
+#if !defined(RCCL_BUILD_UNROLL) || RCCL_BUILD_UNROLL == 4
 __launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernelDebug_Generic_4(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
   ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/true, /*Unroll*/4>(&argsStorage.args);
 }
+#endif
+#if !defined(RCCL_BUILD_UNROLL) || RCCL_BUILD_UNROLL == 8
+__launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernelDebug_Generic_8(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
+  ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/true, /*Unroll*/8>(&argsStorage.args);
+}
+#endif
+#if !defined(RCCL_BUILD_UNROLL) || RCCL_BUILD_UNROLL == 16
+__launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernelDebug_Generic_16(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
+  ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/true, /*Unroll*/16>(&argsStorage.args);
+}
+#endif
+#if !defined(RCCL_BUILD_UNROLL) || RCCL_BUILD_UNROLL == 32
+__launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernelDebug_Generic_32(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
+  ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/true, /*Unroll*/32>(&argsStorage.args);
+}
+#endif
 #endif
 
 #if defined(USE_INDIRECT_FUNCTION_CALL) || defined(RCCL_DEVICE_LINKER)

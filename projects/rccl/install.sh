@@ -44,6 +44,7 @@ quiet_warnings=false
 build_rocshmem_support=false
 rocshmem_mono_hash="0e2998b11f99e8302c72f1ac2ce9f2b8c1816587"
 custom_cmake_options=""
+build_unroll=""
 
 # #################################################
 # helper functions
@@ -61,7 +62,8 @@ function display_help()
     echo "       --device-linker         Build with assembly-extract device linker (default)"
     echo "       --disable-colltrace     Build without collective trace"
     echo "       --disable-roctx         Build without ROCTX logging"
-    echo "       --disable-warp-speed    Disable WARP_SPEED kernel optimizations"
+    echo "       --disable-warp-speed    Disable WARP_SPEED kernel optimizations
+       --unroll                Build with a single fixed unroll factor (valid values: 1 2 4 8 16 32)"
     echo "       --dump-asm              Disassemble code and dump assembly with inline code"
     echo "    -c|--enable-code-coverage  Enable code coverage"
     echo "       --enable_backtrace      Build with custom backtrace support"
@@ -119,7 +121,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,roctx-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-warp-speed,unroll:,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,roctx-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -144,6 +146,7 @@ while true; do
          --disable-colltrace)        collective_trace=false;                                                                           shift ;;
          --disable-roctx)            roctx_enabled=false;                                                                              shift ;;
          --disable-warp-speed)       warp_speed_enabled=false;                                                                         shift ;;
+         --unroll)                   build_unroll=${2};                                                                                 shift 2 ;;
          --dump-asm)                 dump_asm=true;                                                                                    shift ;;
     -c | --enable-code-coverage)     enable_code_coverage=true;                                                                        shift ;;
          --enable_backtrace)         build_bfd=true;                                                                                   shift ;;
@@ -418,6 +421,11 @@ fi
 # Enable WARP_SPEED only on MI350/MI300 platforms
 if [[ "${warp_speed_enabled}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DENABLE_WARP_SPEED=ON"
+fi
+
+# Build-time fixed unroll factor
+if [[ -n "${build_unroll}" ]]; then
+    cmake_common_options="${cmake_common_options} -DRCCL_BUILD_UNROLL=${build_unroll}"
 fi
 
 # Suppress Warnings
