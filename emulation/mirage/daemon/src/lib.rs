@@ -31,40 +31,65 @@
 //! | DELETE | `/api/sessions/:id/execs/:exec`                      | `{ok}`                                       |
 //! | WS     | `/api/sessions/:id/execs/:exec/attach`               | server pushes `StreamPacket` JSON frames     |
 //!
-//! Run with `mirage daemon --addr 127.0.0.1:5174`.
+//! Run with `mirage webui --addr 127.0.0.1:5174`.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::Router;
-use clap::Args;
+use clap::{Args, Subcommand};
 
 mod api;
 mod server;
+mod service;
 mod spa;
 mod state;
 
 pub use server::{build_router, serve};
+pub use service::InstallArgs;
 pub use state::AppState;
 
-/// Command-line flags for `mirage daemon`.
+/// Command-line flags for `mirage webui`.
 #[derive(Args, Debug, Clone)]
-pub struct DaemonArgs {
-    /// Address to bind the HTTP server on.
-    #[arg(long, default_value = "127.0.0.1:5174", env = "MIRAGE_DAEMON_ADDR")]
+pub struct WebuiArgs {
+    /// Address to bind the HTTP server on (and to bake into the
+    /// systemd unit when installing).
+    #[arg(long, default_value = "127.0.0.1:5174", env = "MIRAGE_WEBUI_ADDR")]
     pub addr: SocketAddr,
+
+    #[command(subcommand)]
+    pub command: Option<WebuiCmd>,
 }
 
-impl Default for DaemonArgs {
+impl Default for WebuiArgs {
     fn default() -> Self {
         Self {
             addr: "127.0.0.1:5174".parse().unwrap(),
+            command: None,
         }
     }
 }
 
-/// Entry point for `mirage daemon`.
-pub fn run(args: DaemonArgs) -> anyhow::Result<()> {
+/// Subcommands of `mirage webui`.
+#[derive(Subcommand, Debug, Clone)]
+pub enum WebuiCmd {
+    /// Run the web UI server in the foreground (this is the default
+    /// when no subcommand is given).
+    Serve,
+    /// Install the web UI as a systemd service.
+    Install(InstallArgs),
+}
+
+/// Entry point for `mirage webui`.
+pub fn run(args: WebuiArgs) -> anyhow::Result<()> {
+    match &args.command {
+        Some(WebuiCmd::Install(install)) => service::install(args.addr, install),
+        _ => serve_blocking(args.addr),
+    }
+}
+
+/// Run the HTTP server until shutdown.
+fn serve_blocking(addr: SocketAddr) -> anyhow::Result<()> {
     // Best-effort: write any missing builtin agents/topologies and
     // extract the rocjitsu runtime assets on startup so the
     // dashboard/CLI always see them.
@@ -72,7 +97,7 @@ pub fn run(args: DaemonArgs) -> anyhow::Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
         let state = Arc::new(AppState::new());
-        serve(args.addr, build_router(state)).await
+        serve(addr, build_router(state)).await
     })
 }
 

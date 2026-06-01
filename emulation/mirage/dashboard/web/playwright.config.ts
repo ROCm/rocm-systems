@@ -22,7 +22,7 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: `bash -c 'set -e; rm -rf ${E2E_ROOT}; mkdir -p ${E2E_ROOT}/cfg ${E2E_ROOT}/rt ${E2E_ROOT}/state; cd ${REPO_ROOT} && cargo build --quiet && exec ${MIRAGE_BIN} daemon --addr 127.0.0.1:${DAEMON_PORT}'`,
+      command: `bash -c 'set -e; rm -rf ${E2E_ROOT}; mkdir -p ${E2E_ROOT}/cfg ${E2E_ROOT}/rt ${E2E_ROOT}/state; cd ${REPO_ROOT} && cargo build --quiet && exec ${MIRAGE_BIN} webui --addr 127.0.0.1:${DAEMON_PORT}'`,
       port: DAEMON_PORT,
       reuseExistingServer: !process.env.CI,
       timeout: 240_000,

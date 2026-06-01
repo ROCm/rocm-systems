@@ -45,7 +45,7 @@ impl Daemon {
         let port = free_port();
         let addr = format!("127.0.0.1:{port}");
         let child = Command::new(&mirage_bin)
-            .args(["daemon", "--addr", &addr])
+            .args(["webui", "--addr", &addr])
             .env("XDG_CONFIG_HOME", &config)
             .env("XDG_RUNTIME_DIR", &runtime)
             .env("XDG_STATE_HOME", &state)

@@ -8,7 +8,8 @@
 //!   (`profile`, `session`, `exec`, `run`, `attach`, `logs`, `paths`,
 //!   `schema`). These are flattened in from [`mirage_ctl::CtlCmd`].
 //! * `mirage host --session <id>` — runs the per-session host.
-//! * `mirage daemon` — runs the (currently stub) background daemon.
+//! * `mirage webui` — runs the web UI server (formerly `mirage
+//!   daemon`, still accepted as an alias).
 
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -17,7 +18,7 @@ use clap::{Args, Parser, Subcommand};
 use mirage_core::ctl::FileCtl;
 use mirage_core::session::SessionId;
 use mirage_ctl::CtlCmd;
-use mirage_daemon::DaemonArgs;
+use mirage_daemon::WebuiArgs;
 use mirage_host::{HostConfig, run as host_run};
 use tokio::sync::Notify;
 
@@ -51,8 +52,10 @@ enum TopCmd {
     /// session start` and `mirage run`; rarely invoked directly).
     Host(HostArgs),
 
-    /// Run the (optional) background daemon.
-    Daemon(DaemonArgs),
+    /// Run the web UI server (formerly `daemon`). Use `mirage webui
+    /// install` to register it as a systemd service.
+    #[command(alias = "daemon")]
+    Webui(WebuiArgs),
 
     /// All control-plane subcommands (profile, session, exec, run,
     /// attach, logs, paths, schema) are flattened in here.
@@ -97,7 +100,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<ExitCode> {
             })?;
             Ok(ExitCode::from(0))
         }
-        TopCmd::Daemon(args) => {
+        TopCmd::Webui(args) => {
             mirage_daemon::run(args)?;
             Ok(ExitCode::from(0))
         }
