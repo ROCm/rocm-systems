@@ -37,8 +37,10 @@ struct ginRocshmemCtx {
 
 struct ginRocshmemMemHandle {
   ncclGinRocshmemMemHandle *devHandle;
-  void *addr;
+  void *addr;            // primaryAddr (key for refcount map)
+  void *registeredAddr;  // address passed to rocshmem register
   size_t size;
+  bool isSym;            // true if registered via sym_buffer_register
 };
 
 ncclResult_t ncclGinRocshmemCreateContext(struct ncclComm *comm, void *collComm, int devId,
@@ -143,38 +145,46 @@ ncclResult_t ncclGinRocshmemRegister(ncclGin_t *ginComm, void *ginCtx, void *add
   NCCLCHECK(ncclCalloc(&mh, 1));
 
   auto &refcount = bufferRegRefcount[addr];
-  // lsaSelfAddr: the LSA flat VA for self rank for this memory region.
-  // All cross-PE memory access goes through the LSA flat space (cuMemSetAccess
-  // is only called for the LSA flat mappings, not for primaryAddr).
-  // We must register and address-reference the buffer at its LSA flat VA so
-  // that ipc_resolve_remote can translate to other ranks' LSA flat VAs.
+
+  // lsaSelfAddr: the LSA flat VA for this rank, valid only when comm is available.
+  // LSA flat space is the only P2P-accessible address range for VMM/ncclMemAlloc buffers.
+  // For non-VMM (hipMalloc'd) buffers, lsaSelfAddr stays nullptr — use addr directly.
   void* lsaSelfAddr = nullptr;
-  NCCLCHECK(ncclDevrGetLsaSelfAddr(ctx->comm, addr, &lsaSelfAddr));
-  if (lsaSelfAddr == nullptr) {
-    WARN("GIN rocshmem: could not resolve LSA flat addr for %p", addr);
-    free(mh);
-    return ncclSystemError;
+  if (ctx != NULL && ctx->comm != NULL) {
+    ncclDevrGetLsaSelfAddr(ctx->comm, addr, &lsaSelfAddr);
   }
+  void *regAddr = lsaSelfAddr ? lsaSelfAddr : addr;
 
   if (refcount == 0) {
-    struct ncclDevrState* devr = &ctx->comm->devrState;
-
-    // Always use stride-based VMM registration: each PE's LSA flat VA differs
-    // by exactly bigSize, so remote_bases[pe] = lsaSelfAddr + (pe-lsaSelf)*bigSize.
-    int rc = rocshmem::rocshmem_buffer_register_vmm(lsaSelfAddr, size, devr->lsaSelf,
-                 devr->lsaSize, (ptrdiff_t)devr->bigSize);
-    if (rc != 0) {
-      WARN("GIN rocshmem: buffer register failed for %p (lsaSelf=%p) size %zu",
-           addr, lsaSelfAddr, size);
-      bufferRegRefcount.erase(addr);
-      free(mh);
-      return ncclSystemError;
+    if (ctx != NULL && ctx->comm != NULL) {
+      // With comm: sym_buffer_register for rkey + remote VA allgather (needed for GDA).
+      struct ncclDevrState* devr = &ctx->comm->devrState;
+      int rc = rocshmem::rocshmem_sym_buffer_register(regAddr, size,
+                   devr->lsaSelf, devr->lsaSize, (ptrdiff_t)devr->bigSize);
+      if (rc != 0) {
+        WARN("GIN rocshmem: sym_buffer_register failed for %p (reg=%p) size %zu",
+             addr, regAddr, size);
+        bufferRegRefcount.erase(addr);
+        free(mh);
+        return ncclSystemError;
+      }
+      INFO(NCCL_INIT, "GIN rocshmem: registered addr=%p reg=%p +%zu", addr, regAddr, size);
+    } else {
+      // No comm (plugin path): local-only registration (IPC handles, no rkey allgather).
+      int rc = rocshmem::rocshmem_buffer_register(addr, size);
+      if (rc != 0) {
+        WARN("GIN rocshmem: rocshmem_buffer_register failed for %p size %zu", addr, size);
+        bufferRegRefcount.erase(addr);
+        free(mh);
+        return ncclSystemError;
+      }
+      INFO(NCCL_INIT, "GIN rocshmem: registered local addr=%p +%zu", addr, size);
     }
-
-    INFO(NCCL_INIT, "GIN rocshmem: registered addr=%p lsaSelf=%p +%zu", addr, lsaSelfAddr, size);
   }
   refcount++;
   mh->addr = addr;
+  mh->registeredAddr = regAddr;
+  mh->isSym = (ctx != NULL && ctx->comm != NULL);
   mh->size = size;
 
   if (hipMalloc(&mh->devHandle, sizeof(ncclGinRocshmemMemHandle)) != hipSuccess) {
@@ -182,11 +192,10 @@ ncclResult_t ncclGinRocshmemRegister(ncclGin_t *ginComm, void *ginCtx, void *add
     return ncclSystemError;
   }
 
-  // Store the LSA flat VA for self rank. The device-side code will use this as
-  // the local_base to compute offsets, and ipc_resolve_remote will translate to
-  // the remote rank's LSA flat VA (which is P2P accessible).
+  // Store the address the device will use as base for offset computations.
+  // LSA flat VA for VMM buffers (P2P accessible); plain addr for plugin path.
   ncclGinRocshmemMemHandle hostMh;
-  hostMh.baseAddr = (uintptr_t)lsaSelfAddr;
+  hostMh.baseAddr = (uintptr_t)regAddr;
 
   if (hipMemcpy(mh->devHandle, &hostMh, sizeof(ncclGinRocshmemMemHandle),
                 hipMemcpyHostToDevice) != hipSuccess) {
@@ -208,8 +217,12 @@ ncclResult_t ncclGinRocshmemDeregister(ncclGin_t *ginComm, void *ginCtx, void *m
     auto &refcount = bufferRegRefcount[mh->addr];
     refcount--;
     if (refcount <= 0) {
-      // Registered via rocshmem_buffer_register_vmm (constant-memory table),
-      // no corresponding rocshmem_buffer_unregister needed.
+      if (mh->registeredAddr) {
+        if (mh->isSym)
+          rocshmem::rocshmem_sym_buffer_unregister(mh->registeredAddr);
+        else
+          rocshmem::rocshmem_buffer_unregister(mh->registeredAddr);
+      }
       bufferRegRefcount.erase(mh->addr);
     }
   }
