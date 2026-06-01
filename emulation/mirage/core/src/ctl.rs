@@ -139,7 +139,9 @@ pub trait MirageCtl: Send + Sync {
     /// numbering (e.g. `SIGINT == 2`).
     fn exec_signal(&self, exec: &ExecRef, sig: i32) -> Result<()>;
 
-    /// Remove an exec's directory. Fails if the exec is still running.
+    /// Remove an exec's directory. If the exec is still running its
+    /// node processes (and their descendants) are forcefully terminated
+    /// first, so a remove never leaves orphaned children behind.
     fn exec_remove(&self, exec: &ExecRef) -> Result<()>;
 
     // ---- Daemon ---------------------------------------------------------
@@ -399,6 +401,17 @@ impl MirageCtl for FileCtl {
                 }
             }
         }
+
+        // Reap any exec node processes (and their descendants) that may
+        // still be alive. The graceful host SIGTERM above normally tears
+        // these down, but if we had to SIGKILL the host it never got the
+        // chance to clean up its children — so kill every node's
+        // process-group directly to guarantee nothing is left running.
+        let leftover = all_session_node_pids(&layout);
+        for &pid in &leftover {
+            kill_process_group(pid, nix::sys::signal::Signal::SIGKILL);
+        }
+
         std::fs::remove_dir_all(&layout.root).map_err(|e| MirageError::Io {
             path: layout.root.clone(),
             source: e,
@@ -519,19 +532,42 @@ impl MirageCtl for FileCtl {
     }
 
     fn exec_remove(&self, exec: &ExecRef) -> Result<()> {
+        let layout = crate::paths::SessionLayout::for_id(&exec.session).exec(&exec.exec);
         let status = self.exec_status(exec)?;
         if status.started && !status.ended {
-            return Err(MirageError::other(format!(
-                "exec {} is still running",
-                exec.exec
-            )));
+            // Forcefully terminate the running node processes (and their
+            // descendants) so a remove never leaves orphaned children
+            // behind. Each node runs in its own session/process-group
+            // (the host calls `setsid()`), so killing the group reaps the
+            // whole tree. SIGTERM first for a chance to clean up, then
+            // SIGKILL anything still alive.
+            let pids = exec_node_pids(&layout, &status);
+            for &pid in &pids {
+                kill_process_group(pid, nix::sys::signal::Signal::SIGTERM);
+            }
+            for _ in 0..25 {
+                if pids.iter().all(|&p| !process_alive(p)) {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            for &pid in &pids {
+                if process_alive(pid) {
+                    kill_process_group(pid, nix::sys::signal::Signal::SIGKILL);
+                }
+            }
         }
-        let layout = crate::paths::SessionLayout::for_id(&exec.session).exec(&exec.exec);
-        std::fs::remove_dir_all(&layout.root).map_err(|e| MirageError::Io {
-            path: layout.root.clone(),
-            source: e,
-        })?;
-        Ok(())
+        match std::fs::remove_dir_all(&layout.root) {
+            Ok(()) => Ok(()),
+            // The host may have already cleaned up the directory (e.g. a
+            // `keep=false` exec whose child we just killed); treat an
+            // already-gone directory as success.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(MirageError::Io {
+                path: layout.root.clone(),
+                source: e,
+            }),
+        }
     }
 
     fn daemon_shutdown(&self) -> Result<()> {
@@ -545,6 +581,68 @@ impl MirageCtl for FileCtl {
 
 fn process_alive(pid: i32) -> bool {
     nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_ok()
+}
+
+/// Send `sig` to the process group led by `pid`. The host launches each
+/// node with `setsid()`, so the node pid is its own process-group leader
+/// and signalling the negative pid reaches the whole descendant tree
+/// (the program plus anything it spawned). Falls back to signalling the
+/// single pid if the group send fails (e.g. the process already exited).
+fn kill_process_group(pid: i32, sig: nix::sys::signal::Signal) {
+    if pid <= 0 {
+        return;
+    }
+    if nix::sys::signal::kill(nix::unistd::Pid::from_raw(-pid), sig).is_err() {
+        let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), sig);
+    }
+}
+
+/// Collect the node process ids for a single exec. Prefers the pids
+/// recorded in `status.json`, falling back to the per-node `pid` files
+/// on disk in case the status is stale or incomplete.
+fn exec_node_pids(layout: &crate::paths::ExecLayout, status: &ExecStatus) -> Vec<i32> {
+    let mut pids: Vec<i32> = status
+        .nodes
+        .values()
+        .filter_map(|n| n.pid)
+        .map(|p| p as i32)
+        .collect();
+    if pids.is_empty()
+        && let Ok(nodes) = std::fs::read_dir(layout.node_root())
+    {
+        for n in nodes.flatten() {
+            if let Ok(Some(s)) = crate::state::read_small_str(&n.path().join("pid"))
+                && let Ok(pid) = s.parse::<i32>()
+            {
+                pids.push(pid);
+            }
+        }
+    }
+    pids
+}
+
+/// Collect every node pid across every exec of a session by walking the
+/// on-disk `exec/*/node/*/pid` files. Used as a last-resort reap when
+/// tearing a session down.
+fn all_session_node_pids(layout: &crate::paths::SessionLayout) -> Vec<i32> {
+    let mut pids = Vec::new();
+    let Ok(execs) = std::fs::read_dir(layout.exec_root()) else {
+        return pids;
+    };
+    for e in execs.flatten() {
+        let exec_layout = crate::paths::ExecLayout::for_root(e.path());
+        let Ok(nodes) = std::fs::read_dir(exec_layout.node_root()) else {
+            continue;
+        };
+        for n in nodes.flatten() {
+            if let Ok(Some(s)) = crate::state::read_small_str(&n.path().join("pid"))
+                && let Ok(pid) = s.parse::<i32>()
+            {
+                pids.push(pid);
+            }
+        }
+    }
+    pids
 }
 
 /// Best-effort container removal. Runs `<provider> rm -f <id>` and
