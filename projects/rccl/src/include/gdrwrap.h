@@ -180,7 +180,9 @@ static gdr_t ncclGdrInit() {
 }
 
 template <typename T>
-static ncclResult_t ncclGdrCudaCalloc(T** ptr, T** devPtr, size_t nelem, void** gdrHandle) {
+static ncclResult_t ncclGdrCudaCalloc(T** ptr, T** devPtr, size_t nelem, void** gdrHandle,
+                                      struct ncclMemManager* manager,
+                                      ncclMemType_t memType = ncclMemPersist) {
   // gdr_info_t info; // unused variable - compiler warning
   size_t mapSize;
   // gdr_mh_t mh;     // unused variable - compiler warning
@@ -193,9 +195,9 @@ static ncclResult_t ncclGdrCudaCalloc(T** ptr, T** devPtr, size_t nelem, void** 
   ALIGN_SIZE(mapSize, GPU_PAGE_SIZE);
   // GDRCOPY Pinned buffer has to be GPU_PAGE_SIZE aligned too
 #if defined(HIP_UNCACHED_MEMORY)
-  NCCLCHECK(ncclCudaCalloc(&devMem, mapSize+GPU_PAGE_SIZE-1, hipDeviceMallocUncached));
+  NCCLCHECK(ncclCudaCalloc(&devMem, mapSize+GPU_PAGE_SIZE-1, manager, memType, hipDeviceMallocUncached));
 #else
-  NCCLCHECK(ncclCudaCalloc(&devMem, mapSize+GPU_PAGE_SIZE-1, hipDeviceMallocFinegrained));
+  NCCLCHECK(ncclCudaCalloc(&devMem, mapSize+GPU_PAGE_SIZE-1, manager, memType, hipDeviceMallocFinegrained));
 #endif
   gdr_mem_desc_t* md;
   NCCLCHECK(ncclCalloc(&md, 1));
@@ -222,9 +224,9 @@ static ncclResult_t ncclGdrCudaCopy(void *gdrHandle, T* dst, T* src, size_t nele
   return ncclSuccess;
 }
 
-static ncclResult_t ncclGdrCudaFree(void* gdrHandle) {
+static ncclResult_t ncclGdrCudaFree(void* gdrHandle, struct ncclMemManager* manager) {
   gdr_mem_desc_t *md = (gdr_mem_desc_t*)gdrHandle;
-  CUDACHECK(cudaFree(md->gdrDevMem));
+  NCCLCHECK(ncclCudaFree(md->gdrDevMem, manager));
   free(md);
 
   return ncclSuccess;
@@ -261,7 +263,9 @@ error:
 }
 
 template <typename T>
-static ncclResult_t ncclGdrCudaCalloc(T** ptr, T** devPtr, size_t nelem, void** gdrHandle) {
+static ncclResult_t ncclGdrCudaCalloc(T** ptr, T** devPtr, size_t nelem, void** gdrHandle,
+                                      struct ncclMemManager* manager,
+                                      ncclMemType_t memType = ncclMemPersist) {
   gdr_info_t info;
   size_t mapSize;
   gdr_mh_t mh;
@@ -273,7 +277,7 @@ static ncclResult_t ncclGdrCudaCalloc(T** ptr, T** devPtr, size_t nelem, void** 
   // GDRCOPY Pinned buffer has to be a minimum of a GPU_PAGE_SIZE
   ALIGN_SIZE(mapSize, GPU_PAGE_SIZE);
   // GDRCOPY Pinned buffer has to be GPU_PAGE_SIZE aligned too
-  NCCLCHECK(ncclCudaCalloc(&devMem, mapSize+GPU_PAGE_SIZE-1));
+  NCCLCHECK(ncclCudaCalloc(&devMem, mapSize+GPU_PAGE_SIZE-1, manager, memType));
   uint64_t alignedAddr = (((uint64_t) devMem) + GPU_PAGE_OFFSET) & GPU_PAGE_MASK;
   size_t align = alignedAddr - (uint64_t)devMem;
 
@@ -313,11 +317,11 @@ static ncclResult_t ncclGdrCudaCopy(void *gdrHandle, T* dst, T* src, size_t nele
   return ncclSuccess;
 }
 
-static ncclResult_t ncclGdrCudaFree(void* gdrHandle) {
+static ncclResult_t ncclGdrCudaFree(void* gdrHandle, struct ncclMemManager* manager) {
   gdr_mem_desc_t *md = (gdr_mem_desc_t*)gdrHandle;
   NCCLCHECK(wrap_gdr_unmap(ncclGdrCopy, md->gdrMh, md->gdrMap, md->gdrMapSize));
   NCCLCHECK(wrap_gdr_unpin_buffer(ncclGdrCopy, md->gdrMh));
-  NCCLCHECK(ncclCudaFree(md->gdrDevMem));
+  NCCLCHECK(ncclCudaFree(md->gdrDevMem, manager));
   free(md);
 
   return ncclSuccess;

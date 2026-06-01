@@ -231,6 +231,13 @@ inline bool isQuickLevel() {
     abort();                                                                                       \
   }
 
+// Causes the test to stop and be skipped at runtime.
+#define HIP_SKIP_TEST(reason)                                                                      \
+  {                                                                                                \
+    std::cout << "HIP_SKIP_THIS_TEST" << std::endl;                                                \
+    SKIP(reason);                                                                                  \
+  }
+
 #if HT_NVIDIA
 #define CTX_CREATE()                                                                               \
   hipCtx_t context;                                                                                \
@@ -245,12 +252,19 @@ static void initHipCtx(hipCtx_t* pcontext) {
   HIPCHECK(hipDeviceGet(&device, 0));
   HIPCHECK(hipCtxCreate(pcontext, 0, device));
 }
+
+// hipLibrary* / hipModuleLoad use the CUDA driver API on NVIDIA and require
+// hipInit() before the first call (hipErrorNotInitialized otherwise). Runtime
+// APIs such as hipMalloc or hipStreamCreate initialize implicitly. Tests that
+// also call hipModuleLoad or hipKernelGetFunction need CTX_CREATE() instead.
+#define HIP_TEST_DRIVER_INIT() HIP_CHECK(hipInit(0))
 #else
 #define CTX_CREATE()
 #define CTX_DESTROY()
 #define ARRAY_DESTROY(array) HIPCHECK(hipFreeArray(array));
 #define HIP_TEX_REFERENCE textureReference*
 #define HIP_ARRAY hipArray_t
+#define HIP_TEST_DRIVER_INIT()
 #endif
 
 static inline int getWarpSize() {
@@ -490,7 +504,7 @@ inline bool isKernelArgPrefetchSupported() {
 }
 
 /**
- * Canonical skip reasons for HipTest::HIP_SKIP_TEST (stable strings for logs / ctest filters).
+ * Canonical skip reasons for HIP_SKIP_TEST (stable strings for logs / ctest filters).
  * Use these instead of duplicating slightly different wording for the same condition.
  */
 namespace SkipReason {
@@ -554,15 +568,6 @@ inline constexpr char const kNotEnoughFreeHostMemory[] =
     "not enough free host memory";
 inline constexpr char const kRequiresLinux[] = "this test requires Linux.";
 }  // namespace SkipReason
-
-/**
- * Causes the test to stop and be skipped at runtime.
- * reason: Message describing the reason the test has been skipped.
- */
-static inline void HIP_SKIP_TEST(char const* const reason) noexcept {
-  // ctest is setup to parse for "HIP_SKIP_THIS_TEST", at which point it will skip the test.
-  std::cout << "Skipping test. Reason: " << reason << '\n' << "HIP_SKIP_THIS_TEST" << std::endl;
-}
 
 /**
  * @brief Helper template that returns the expected arguments of a kernel.
@@ -723,8 +728,7 @@ class BlockingContext {
 // is supported on the current device.
 #define CHECK_IMAGE_SUPPORT                                                                        \
   if (!HipTest::isImageSupported()) {                                                              \
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);                         \
-    return;                                                                                        \
+    HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);                                  \
   }
 
 // Call at the start of tests that require managed memory support to indicate
@@ -733,8 +737,7 @@ class BlockingContext {
   int current_device_ = 0;                                                     \
   HIP_CHECK(hipGetDevice(&current_device_));                                   \
   if (!HipTest::isManagedMemorySupportedOnDevice(current_device_)) {           \
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);    \
-    return;                                                                    \
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);             \
   }
 
 // Per-device variant of CHECK_MANAGED_MEMORY_SUPPORT: skip the current test
@@ -747,8 +750,7 @@ class BlockingContext {
 
 #define CHECK_PCIE_ATOMIC_SUPPORT                                                                 \
   if (!HipTest::isPcieAtomicSupported()) {                                                        \
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);                         \
-    return;                                                                                        \
+    HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);                                   \
   }
 
 #define CHECK_P2P_SUPPORT                                                                          \
@@ -756,15 +758,13 @@ class BlockingContext {
   if (!HipTest::isP2PSupported(d1,d2)) {                                                           \
     std::string msg = "P2P access check failed between dev1:" + std::to_string(d1) + ",dev2:" +    \
                                                                 std::to_string(d2);                \
-    HipTest::HIP_SKIP_TEST(msg.c_str());                                                           \
-    return;                                                                                        \
+    HIP_SKIP_TEST(msg.c_str());                                                                    \
   }                                                                                                \
 // Use this before running tests that rely on warp match functions to check device support and
 // skip the current test if they are not available.
 #define CHECK_WARP_MATCH_FUNCTIONS_SUPPORT                                                         \
   if (!HipTest::areWarpMatchFunctionsSupported()) {                                                \
-    HipTest::HIP_SKIP_TEST("warp match functions are not supported on this device.");      \
-    return;                                                                                        \
+    HIP_SKIP_TEST("warp match functions are not supported on this device.");                       \
   }
 
 // Call GENERATE_CAPTURE macro at the start of the test, before using BEGIN/END_CAPTURE.

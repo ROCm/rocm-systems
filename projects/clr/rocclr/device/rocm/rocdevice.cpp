@@ -34,8 +34,14 @@
 #endif
 #endif
 
+#if defined(__linux__)
+#include <climits>
+#include <unistd.h>
+#endif
+
 #include <algorithm>
 #include <chrono>
+#include <cinttypes>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -69,6 +75,8 @@ namespace amd::roc {
 bool roc::Device::isHsaInitialized_ = false;
 std::vector<hsa_agent_t> roc::Device::gpu_agents_;
 std::vector<AgentInfo> roc::Device::cpu_agents_;
+
+std::atomic<bool> Device::skipHsaShutdown_{false};
 
 address Device::mg_sync_ = nullptr;
 
@@ -216,17 +224,25 @@ Device::~Device() {
   delete xferQueue_;
   xferQueue_ = nullptr;
 
-  for (auto& it : queuePool_) {
-    for (auto qIter = it.begin(); qIter != it.end();) {
-      hsa_queue_t* queue = qIter->first;
-      auto& qInfo = qIter->second;
-      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Deleting hardware queue %p with refCount 0",
-              queue->base_address);
-      qIter = it.erase(qIter);
-      Hsa::queue_destroy(queue);
+#if defined(_WIN32)
+  if (hasSchedulerQueue_.load(std::memory_order_acquire) > 0) {
+    skipHsaShutdown_.store(true, std::memory_order_release);
+    queuePool_.clear();
+  } else
+#endif  // _WIN32
+  {
+    for (auto& it : queuePool_) {
+      for (auto qIter = it.begin(); qIter != it.end();) {
+        hsa_queue_t* queue = qIter->first;
+        auto& qInfo = qIter->second;
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Deleting hardware queue %p with refCount 0",
+                queue->base_address);
+        qIter = it.erase(qIter);
+        Hsa::queue_destroy(queue);
+      }
     }
+    queuePool_.clear();
   }
-  queuePool_.clear();
 
   delete blitProgram_;
 
@@ -334,7 +350,7 @@ hsa_status_t Device::iterateAgentCallback(hsa_agent_t agent, void* data) {
   return stat;
 }
 
-hsa_ven_amd_loader_1_00_pfn_t Device::amd_loader_ext_table = {nullptr};
+hsa_ven_amd_loader_1_03_pfn_t Device::amd_loader_ext_table = {nullptr};
 
 hsa_status_t Device::loaderQueryHostAddress(const void* device, const void** host) {
   return amd_loader_ext_table.hsa_ven_amd_loader_query_host_address
@@ -344,6 +360,9 @@ hsa_status_t Device::loaderQueryHostAddress(const void* device, const void** hos
 
 // ================================================================================================
 bool Device::init() {
+#if defined(_WIN32)
+  skipHsaShutdown_.store(false, std::memory_order_release);
+#endif
   if (!Hsa::LoadLib()) {
     LogPrintfWarning("Failed to load rocr library!");
     return false;
@@ -526,6 +545,11 @@ extern const char* SchedulerSourceCode;
 
 void Device::tearDown() {
   NullDevice::tearDown();
+#if defined(_WIN32)
+  if (skipHsaShutdown_.load(std::memory_order_acquire)) {
+    return;
+  }
+#endif  // _WIN32
   Hsa::shut_down();
 }
 
@@ -1069,9 +1093,23 @@ bool Device::populateOCLDeviceConstants() {
     return false;
   }
 
-  if ((isa().versionMajor() == 12 && isa().versionMinor() == 5 && isa().versionStepping() == 0)
-       && (info_.globalMemCacheLineSize_ < 256)) {
+  if (info_.globalMemCacheLineSize_ < 256 &&
+      (isa().versionMajor() >= 13 ||
+       (isa().versionMajor() == 12 && isa().versionMinor() >= 5))) {
     info_.globalMemCacheLineSize_ = 256;
+  }
+
+  {
+    uint32_t maxPrefetchRegions = 0;
+    if (HSA_STATUS_SUCCESS ==
+        Hsa::agent_get_info(
+            bkendDevice_,
+            (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS,
+            &maxPrefetchRegions)) {
+      info_.maxDynDataPrefetchRegions_ = maxPrefetchRegions;
+    } else {
+      info_.maxDynDataPrefetchRegions_ = 0;
+    }
   }
 
   assert(cachesize[0] > 0);
@@ -3532,12 +3570,24 @@ device::Signal* Device::createSignal() const { return new roc::Signal(); }
 device::Signal* Device::createIpcSignal() const { return new roc::IpcSignal(); }
 
 // ================================================================================================
+static std::string GetLocalHostName() {
+#if defined(__linux__)
+  char buf[HOST_NAME_MAX + 1];
+  buf[HOST_NAME_MAX] = '\0';
+  if (gethostname(buf, sizeof(buf)) == 0) return buf;
+#endif
+  return "";
+}
+
+// ================================================================================================
 hsa_status_t Device::BackendErrorCallBackHandler(const hsa_amd_event_t* event, void* data) {
   cl_int gpu_error = CL_SUCCESS;
   switch (event->event_type) {
     case HSA_AMD_GPU_MEMORY_FAULT_EVENT: {
       gpu_error = CL_INVALID_MEM_OBJECT;
       LogError("Memory Fault Error");
+      std::string hostnameStr = GetLocalHostName();
+      std::string host_tag = hostnameStr.empty() ? "" : "host: " + hostnameStr + ", ";
       for (auto* amd_dev : amd::Device::devices()) {
         if (amd_dev->type() != CL_DEVICE_TYPE_GPU) continue;
         Device* roc_dev = reinterpret_cast<Device*>(amd_dev);
@@ -3549,7 +3599,13 @@ hsa_status_t Device::BackendErrorCallBackHandler(const hsa_amd_event_t* event, v
                                      HSA_AMD_QUEUE_INFO_VM_FAULT_STATUS,
                                      &faulted) == HSA_STATUS_SUCCESS &&
               faulted) {
-            vgpu->AnalyzeAqlQueue();
+            std::string kernelName = vgpu->AnalyzeAqlQueue();
+            const char* kname = kernelName.c_str();
+            ClPrint(amd::LOG_NONE, amd::LOG_ALWAYS,
+                    "Memory Fault Error [%sGPU index: %u, "
+                    "faulting addr: 0x%" PRIx64 ", kernel: %s]",
+                    host_tag.c_str(), roc_dev->index(),
+                    event->memory_fault.virtual_address, kname);
           }
         }
       }
@@ -3694,6 +3750,16 @@ void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
     } else if (patch.dep_slot == HwEventPatch::kCompletionSignal) {
       auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
       pkt->completion_signal = sig;
+
+      // Prepare this signal for profiling: mark it as active and classify
+      // the packet type so checkGpuTime → addTimestamps only fires for
+      // kernel dispatches (not synthetic barriers).
+      ps->flags_.done_ = false;
+      uint16_t hdr;
+      memcpy(&hdr, raw, sizeof(hdr));
+      uint8_t pktType = hdr & ((1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1);
+      ps->flags_.isPacketDispatch_ =
+          (pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH);
     } else {
       // dep_slot >= 0: patch a barrier's dependency signal slot (cross-segment wait)
       auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
@@ -4007,15 +4073,19 @@ cl_int ConvertHSAErrorIntoCLError(hsa_status_t hsa_status) {
 void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
   if (status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK) {
     Device* dev = reinterpret_cast<Device*>(data);
+    std::string hostnameStr = GetLocalHostName();
+    std::string host_tag = hostnameStr.empty() ? "" : "host: " + hostnameStr + ", ";
+    std::string kernelName;
     for (auto it : dev->vgpus()) {
       roc::VirtualGPU* vgpu = reinterpret_cast<roc::VirtualGPU*>(it);
       if (vgpu->gpu_queue() == queue) {
-        vgpu->AnalyzeAqlQueue();
+        kernelName = vgpu->AnalyzeAqlQueue();
       }
     }
     // Abort on device exceptions.
     const char* errorMsg = 0;
     Hsa::status_string(status, &errorMsg);
+    const char* kname = kernelName.c_str();
     if (status == HSA_STATUS_ERROR_OUT_OF_RESOURCES) {
       size_t global_available_mem = 0;
       if (HSA_STATUS_SUCCESS !=
@@ -4025,12 +4095,15 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
         LogError("HSA_AMD_AGENT_INFO_MEMORY_AVAIL query failed.");
       }
       ClPrint(amd::LOG_NONE, amd::LOG_ALWAYS,
-              "Callback: Queue %p Aborting with error : %s Code: 0x%x Available Free mem : %zu MB",
-              queue->base_address, errorMsg, status, global_available_mem / Mi);
+              "Callback: Queue %p Aborting with error : %s Code: 0x%x Available Free mem : %zu MB"
+              " [%sGPU index: %u, kernel: %s]",
+              queue->base_address, errorMsg, status, global_available_mem / Mi,
+              host_tag.c_str(), dev->index(), kname);
     } else {
       ClPrint(amd::LOG_NONE, amd::LOG_ALWAYS,
-              "Callback: Queue %p aborting with error : %s code: 0x%x", queue->base_address,
-              errorMsg, status);
+              "Callback: Queue %p aborting with error : %s code: 0x%x"
+              " [%sGPU index: %u, kernel: %s]",
+              queue->base_address, errorMsg, status, host_tag.c_str(), dev->index(), kname);
     }
 
     // Core dumps generally provide limited value for OOM or register overflow,
@@ -4060,4 +4133,92 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
 device::UriLocator* Device::createUriLocator() const { return new roc::UriLocator(); }
 #endif
 #endif
+
+// ================================================================================================
+namespace {
+
+inline bool MapHandleType(amd::ExternalSemaphoreHandleType t,
+                          hsa_amd_external_semaphore_handle_type_t* out) {
+  switch (t) {
+    case amd::ExternalSemaphoreHandleType::OpaqueFd:
+      *out = HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD;
+      return true;
+    case amd::ExternalSemaphoreHandleType::OpaqueWin32:
+      *out = HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32;
+      return true;
+    case amd::ExternalSemaphoreHandleType::OpaqueWin32Kmt:
+      *out = HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_KMT;
+      return true;
+    default:
+      // Reject amd:: enum values with no HSA counterpart
+      // (D3D11/D3D12Fence, NvSciSync, KeyedMutex*, TimelineSemaphore*).
+      // Types we do map (e.g. OpaqueFd, OpaqueWin32Kmt) may still fail
+      // at libhsakmt import time on platforms without KMD support;
+      // capability ground-truth lives in the lower layer.
+      return false;
+  }
+}
+
+}  // namespace
+
+// ================================================================================================
+bool Device::importExtSemaphore(void** extSemaphore, const amd::Os::FileDesc& handle,
+                                amd::ExternalSemaphoreHandleType sem_handle_type) {
+  if (extSemaphore == nullptr) return false;
+
+  hsa_amd_external_semaphore_handle_descriptor_t desc = {};
+  if (!MapHandleType(sem_handle_type, &desc.type)) return false;
+
+  // Populate the descriptor union by the *mapped* HSA type, not by
+  // build platform: amd::Os::FileDesc is void* on Windows and int on
+  // POSIX, but the HSA layer reads the union member dictated by
+  // desc.type. Reading a member that wasn't written is undefined
+  // behaviour, so reject combinations where the platform's FileDesc
+  // shape doesn't match the requested handle type.
+  switch (desc.type) {
+    case HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32:
+    case HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_KMT:
+#if defined(_WIN32)
+      desc.handle.win32_handle = handle;
+      break;
+#else
+      // Win32 NT handles aren't routable through a non-Windows KMD.
+      return false;
+#endif
+    case HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD:
+#if defined(_WIN32)
+      // POSIX FDs aren't routable through WDDM.
+      return false;
+#else
+      desc.handle.fd = handle;
+      break;
+#endif
+    default:
+      return false;
+  }
+
+  // Heap-allocated holder so the caller gets an opaque pointer for
+  // DestroyExtSemaphore. Storing the hsa_amd_external_semaphore_t
+  // preserves the syncobj identity that submitExternalSemaphoreCmd
+  // will consume once the queue signal/wait submission path lands.
+  auto* holder = new hsa_amd_external_semaphore_t{};
+
+  hsa_status_t s = hsa_amd_external_semaphore_handle_open(bkendDevice_, &desc, holder);
+  if (s != HSA_STATUS_SUCCESS) {
+    delete holder;
+    return false;
+  }
+
+  *extSemaphore = holder;
+  return true;
+}
+
+// ================================================================================================
+void Device::DestroyExtSemaphore(void* extSemaphore) {
+  if (extSemaphore == nullptr) return;
+  auto* holder = static_cast<hsa_amd_external_semaphore_t*>(extSemaphore);
+  hsa_amd_external_semaphore_handle_close(*holder);
+  delete holder;
+}
+
 }  // namespace amd::roc

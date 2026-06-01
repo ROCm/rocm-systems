@@ -98,8 +98,7 @@ static void testMemCoherency(eSyncToTest test, eMemoryToTest mem, uint32_t flags
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
   // If the GPU is not large bar then exit the test
   if (prop.isLargeBar != 1) {
-    HipTest::HIP_SKIP_TEST("large BAR (resizable BAR) is not supported on this device.");
-    return;
+    HIP_SKIP_TEST("large BAR (resizable BAR) is not supported on this device.");
   }
   constexpr auto blocksPerCU = 6;
   unsigned grid_size = HipTest::setNumBlocks(blocksPerCU, block_size, buffer_size);

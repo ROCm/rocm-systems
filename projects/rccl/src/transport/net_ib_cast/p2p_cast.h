@@ -32,8 +32,8 @@ static inline ncclResult_t IbCastRecvCommGetQpForCts(struct ncclIbRecvComm* recv
 }
 
 static inline ncclResult_t IbCastRequestRetrieveAsIndex(ncclIbRequest* reqs, uint32_t reqIndex, ncclIbRequest** req) {
-  if (reqIndex < 0 || reqIndex >= NET_IB_MAX_REQUESTS) {
-    WARN("NET/IB: %s: Invalid request index %d. Not in the range [%d, %d). Cannot retrieve request.", __func__, reqIndex, 0, NET_IB_MAX_REQUESTS);
+  if (reqIndex >= NET_IB_MAX_REQUESTS) {
+    WARN("NET/IB: %s: Invalid request index %u. Not in the range [%u, %u). Cannot retrieve request.", __func__, reqIndex, 0u, NET_IB_MAX_REQUESTS);
     return ncclInternalError;
   }
   *req = &reqs[reqIndex];

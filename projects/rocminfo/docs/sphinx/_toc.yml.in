@@ -4,8 +4,10 @@ root: index
 subtrees:
 - caption: Install
   entries:
+  - file: install/install.rst
+    title: Install rocminfo
   - file: install/build.rst
-    title: Build rocminfo
+    title: Build from source
 
 - caption: How to
   entries:

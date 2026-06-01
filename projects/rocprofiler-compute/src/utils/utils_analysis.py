@@ -60,10 +60,16 @@ def format_bw_human_readable(
 
 @dataclass
 class KernelStats:
-    """Aggregated kernel launch stats for one kernel name."""
+    """Aggregated kernel launch stats for one kernel name.
+
+    min_duration_ns and max_duration_ns are None until a dispatch with a
+    non-zero duration is observed.
+    """
 
     launches: int = 0
     total_duration_ns: float = 0.0
+    min_duration_ns: Optional[float] = None
+    max_duration_ns: Optional[float] = None
     kernel_id: Optional[int] = None
 
 
@@ -71,9 +77,15 @@ class KernelStats:
 class CallTreeNode:
     """A node in the operator call tree.
 
-    Children are ordered operator sub-calls; kernels maps each kernel name to
-    a ``KernelStats`` record. ``kernel_launches``
-    and ``total_duration_ms`` are inclusive (rolled up from all descendants).
+    Local to this frame:
+      - invocation_ids: distinct Context_Id prefixes at this frame's depth.
+      - call_count: derived as len(invocation_ids); see the property below.
+
+    Inclusive over this node plus all descendants:
+      - kernel_launches: kernel dispatches in the subtree.
+      - total_duration_ms: cumulative GPU time in the subtree.
+      - min_dispatch_ns / max_dispatch_ns / mean_dispatch_ns: per-kernel-dispatch
+        duration stats. None when no non-zero-duration dispatch is in the subtree.
     """
 
     name: str
@@ -81,6 +93,24 @@ class CallTreeNode:
     kernels: dict[str, KernelStats] = field(default_factory=dict)
     kernel_launches: int = 0
     total_duration_ms: float = 0.0
+    invocation_ids: set[str] = field(default_factory=set)
+    min_dispatch_ns: Optional[float] = None
+    max_dispatch_ns: Optional[float] = None
+    mean_dispatch_ns: Optional[float] = None
+
+    @property
+    def call_count(self) -> int:
+        return len(self.invocation_ids)
+
+
+@dataclass
+class NodeRollup:
+    """Inclusive subtree aggregate returned by rollup_node_stats."""
+
+    launches: int
+    total_duration_ns: float
+    min_dispatch_ns: Optional[float]
+    max_dispatch_ns: Optional[float]
 
 
 def simplify_kernel_name(full_kernel_name: str) -> str:
@@ -123,19 +153,49 @@ def parse_top_level_location(context_id: object) -> str:
     return location if ":" in location else "unknown:0"
 
 
-def rollup_node_stats(node: CallTreeNode) -> tuple[int, float]:
-    """Bottom-up rollup: set kernel_launches and total_duration_ms inclusive."""
-    launches = sum(stats.launches for stats in node.kernels.values())
-    duration_ns = sum(stats.total_duration_ns for stats in node.kernels.values())
+def rollup_node_stats(node: CallTreeNode) -> NodeRollup:
+    """Bottom-up rollup over this node and all descendants.
+
+    Sets inclusive fields on node: kernel_launches, total_duration_ms,
+    min_dispatch_ns, max_dispatch_ns, mean_dispatch_ns.
+
+    Subtrees with no non-zero-duration dispatch leave min/max/mean as None so
+    callers can render N/A rather than a misleading 0.
+    """
+    launches = 0
+    total_duration_ns = 0.0
+    mins: list[float] = []
+    maxes: list[float] = []
+
+    for stats in node.kernels.values():
+        launches += stats.launches
+        total_duration_ns += stats.total_duration_ns
+        if stats.min_duration_ns is not None:
+            mins.append(stats.min_duration_ns)
+        if stats.max_duration_ns is not None:
+            maxes.append(stats.max_duration_ns)
 
     for child in node.children.values():
-        child_launches, child_duration_ns = rollup_node_stats(child)
-        launches += child_launches
-        duration_ns += child_duration_ns
+        child_rollup = rollup_node_stats(child)
+        launches += child_rollup.launches
+        total_duration_ns += child_rollup.total_duration_ns
+        if child_rollup.min_dispatch_ns is not None:
+            mins.append(child_rollup.min_dispatch_ns)
+        if child_rollup.max_dispatch_ns is not None:
+            maxes.append(child_rollup.max_dispatch_ns)
 
     node.kernel_launches = launches
-    node.total_duration_ms = duration_ns * NS_TO_MS
-    return launches, duration_ns
+    node.total_duration_ms = total_duration_ns * NS_TO_MS
+    node.min_dispatch_ns = min(mins, default=None)
+    node.max_dispatch_ns = max(maxes, default=None)
+    node.mean_dispatch_ns = total_duration_ns / launches if launches > 0 else None
+
+    return NodeRollup(
+        launches=launches,
+        total_duration_ns=total_duration_ns,
+        min_dispatch_ns=node.min_dispatch_ns,
+        max_dispatch_ns=node.max_dispatch_ns,
+    )
 
 
 def build_call_trees(
@@ -190,11 +250,20 @@ def build_call_trees(
             call_trees[location] = CallTreeNode(name=location)
         location_root = call_trees[location]
 
+        op_segments = op_path.split("/")
+        ctx_segments = (
+            str(context_id).split("/")
+            if has_context_id and context_id is not None and pd.notna(context_id)
+            else []
+        )
+
         current_node = location_root
-        for path_segment in op_path.split("/"):
+        for i, path_segment in enumerate(op_segments):
             if path_segment not in current_node.children:
                 current_node.children[path_segment] = CallTreeNode(name=path_segment)
             current_node = current_node.children[path_segment]
+            if i < len(ctx_segments):
+                current_node.invocation_ids.add("/".join(ctx_segments[: i + 1]))
 
         if kernel_name not in current_node.kernels:
             kernel_id = None
@@ -202,8 +271,14 @@ def build_call_trees(
             if pd.notna(kernel_id_value):
                 kernel_id = int(kernel_id_value)
             current_node.kernels[kernel_name] = KernelStats(kernel_id=kernel_id)
-        current_node.kernels[kernel_name].launches += 1
-        current_node.kernels[kernel_name].total_duration_ns += duration_ns
+        kstats = current_node.kernels[kernel_name]
+        kstats.launches += 1
+        kstats.total_duration_ns += duration_ns
+        if duration_ns > 0:
+            if kstats.min_duration_ns is None or duration_ns < kstats.min_duration_ns:
+                kstats.min_duration_ns = duration_ns
+            if kstats.max_duration_ns is None or duration_ns > kstats.max_duration_ns:
+                kstats.max_duration_ns = duration_ns
 
     for location_root in call_trees.values():
         rollup_node_stats(location_root)
@@ -236,6 +311,122 @@ def build_call_trees_with_kernel_ids(
         consolidated_with_ids["Kernel_Name"].str.strip().map(kernel_name_to_id)
     )
     return build_call_trees(consolidated_with_ids)
+
+
+def build_operator_summary(
+    call_trees: dict[str, CallTreeNode],
+) -> pd.DataFrame:
+    """Build a one-row-per-operator summary table from the call trees.
+
+    Each row describes one operator (e.g. aten::matmul) that ran at least
+    one GPU kernel. All time values are in milliseconds.
+
+    Columns:
+
+    - Operator: full path of the operator (e.g. "aten::matmul/aten::mm").
+
+    - Location: Python file:line where the outermost caller lives.
+
+    - Calls: how many times this operator was invoked. NaN when the trace
+      did not include Context_Id information to count invocations.
+
+    - Dispatches: how many GPU kernels ran while this operator was on the
+      call stack (kernels launched by operators it called also count).
+
+    - Dispatches_Per_Call: Dispatches divided by Calls. NaN when Calls is
+      unknown.
+
+    - Total_GPU: total GPU time spent while this operator was on the call
+      stack.
+
+    - Pct_Total_GPU: how much of the workload's total GPU time fell while
+      this operator was on the call stack. The same kernel time gets
+      counted for an operator and for any operator that called it, so the
+      column can add up to more than 100%. NaN when no GPU time was
+      recorded at all.
+
+    - Mean_Per_Call: average GPU time per call to this operator.
+
+    - Mean_Per_Dispatch, Min_Dispatch, Max_Dispatch: per-kernel timings
+      across kernels launched while this operator was on the call stack.
+
+    Operators that ran no GPU kernels and the synthetic location-root nodes
+    are skipped. Empty input returns an empty DataFrame with the full
+    column list.
+
+    Sorted by Total_GPU descending, then Operator and Location ascending.
+    """
+    columns = [
+        "Operator",
+        "Location",
+        "Calls",
+        "Dispatches",
+        "Dispatches_Per_Call",
+        "Total_GPU",
+        "Pct_Total_GPU",
+        "Mean_Per_Call",
+        "Mean_Per_Dispatch",
+        "Min_Dispatch",
+        "Max_Dispatch",
+    ]
+    rows: list[dict[str, Any]] = []
+
+    def walk(node: CallTreeNode, location: str, path_parts: list[str]) -> None:
+        for child_name, child in node.children.items():
+            full_path = path_parts + [child_name]
+            if child.kernel_launches > 0:
+                has_calls = len(child.invocation_ids) > 0
+                calls = len(child.invocation_ids) if has_calls else float("nan")
+                dispatches = child.kernel_launches
+                total_gpu_ms = child.total_duration_ms
+                rows.append({
+                    "Operator": "/".join(full_path),
+                    "Location": location,
+                    "Calls": calls,
+                    "Dispatches": dispatches,
+                    "Dispatches_Per_Call": (
+                        dispatches / calls if has_calls else float("nan")
+                    ),
+                    "Total_GPU": total_gpu_ms,
+                    "Pct_Total_GPU": float("nan"),  # filled in if grand total > 0
+                    "Mean_Per_Call": (
+                        total_gpu_ms / calls if has_calls else float("nan")
+                    ),
+                    "Mean_Per_Dispatch": (
+                        child.mean_dispatch_ns * NS_TO_MS
+                        if child.mean_dispatch_ns is not None
+                        else float("nan")
+                    ),
+                    "Min_Dispatch": (
+                        child.min_dispatch_ns * NS_TO_MS
+                        if child.min_dispatch_ns is not None
+                        else float("nan")
+                    ),
+                    "Max_Dispatch": (
+                        child.max_dispatch_ns * NS_TO_MS
+                        if child.max_dispatch_ns is not None
+                        else float("nan")
+                    ),
+                })
+            walk(child, location, full_path)
+
+    for location, root in call_trees.items():
+        walk(root, location, [])
+
+    if not rows:
+        return pd.DataFrame(columns=columns)
+
+    grand_total_ms = sum(root.total_duration_ms for root in call_trees.values())
+    if grand_total_ms > 0:
+        for r in rows:
+            r["Pct_Total_GPU"] = 100.0 * r["Total_GPU"] / grand_total_ms
+
+    df = pd.DataFrame(rows, columns=columns)
+    return df.sort_values(
+        by=["Total_GPU", "Operator", "Location"],
+        ascending=[False, True, True],
+        ignore_index=True,
+    )
 
 
 @demarcate
@@ -382,9 +573,7 @@ def is_workload_empty(path: str) -> None:
     if pmc_perf_path.is_file():
         files_to_check = [pmc_perf_path]
     else:
-        pmc_files = list(workload_dir.glob("pmc_perf_*.csv"))
-        results_files = list(workload_dir.glob("results_*.csv"))
-        files_to_check = pmc_files if pmc_files else results_files
+        files_to_check = list(workload_dir.glob("results_*.csv"))
 
     if not files_to_check:
         console_error("analysis", "No profiling data found.")
@@ -401,42 +590,20 @@ def is_workload_empty(path: str) -> None:
             break
 
 
-def reverse_multi_index_df_pmc(
-    final_df: pd.DataFrame,
-) -> tuple[list[pd.DataFrame], list[Any]]:
-    """
-    Util function to decompose multi-index dataframe.
-    """
-    # Check if the columns have more than one level
-    if not isinstance(final_df.columns, pd.MultiIndex) or final_df.columns.nlevels < 2:
-        raise ValueError("Input DataFrame does not have a multi-index column.")
-
-    # Extract the first level of the MultiIndex columns (the file names)
-    coll_levels = final_df.columns.get_level_values(0).unique().tolist()
-
-    # Initialize the list of DataFrames
-    dfs: list[pd.DataFrame] = []
-
-    # Loop through each 'coll_level' and rebuild the DataFrames
-    for level in coll_levels:
-        # Select columns that belong to the current 'coll_level'
-        columns_for_level = final_df.xs(level, axis=1, level=0)
-        # Append the DataFrame for this level
-        if isinstance(columns_for_level, pd.Series):
-            columns_for_level = columns_for_level.to_frame()
-        dfs.append(columns_for_level)
-
-    # Return the list of DataFrames and the column levels
-    return dfs, coll_levels
-
-
 def impute_counters_iteration_multiplex(
-    df_multi_index: pd.DataFrame,
+    df: pd.DataFrame,
     policy: str,
+    workload_dir: Path,
 ) -> pd.DataFrame:
     """
     Perform data imputation for missing counter values due to iteration multiplexing.
     """
+    # Counter buckets configured for the workload. A kernel needs at least
+    # this many dispatches to cover every bucket.
+    num_perfmon_files = len(list(workload_dir.glob("perfmon/*.txt"))) + len(
+        list(workload_dir.glob("perfmon/pmc_perf_*.yaml"))
+    )
+
     non_counter_column_index = [
         "Dispatch_ID",
         "GPU_ID",
@@ -452,85 +619,112 @@ def impute_counters_iteration_multiplex(
         "End_Timestamp",
         "Kernel_ID",
     ]
-    result_dfs: list[pd.DataFrame] = []
-    dfs, coll_levels = reverse_multi_index_df_pmc(df_multi_index)
 
-    for df in dfs:
-        # Group by unique kernel configurations
-        unique_occurences = (
-            df.groupby("Kernel_Name")
-            if policy == "kernel"
-            else df.groupby(
-                [
-                    "Kernel_Name",
-                    "Grid_Size",
-                    "Workgroup_Size",
-                    "LDS_Per_Workgroup",
-                ],
-                as_index=False,
-            )
+    # Group by unique kernel configurations
+    unique_occurences = (
+        df.groupby("Kernel_Name")
+        if policy == "kernel"
+        else df.groupby(
+            [
+                "Kernel_Name",
+                "Grid_Size",
+                "Workgroup_Size",
+                "LDS_Per_Workgroup",
+            ],
+            as_index=False,
         )
+    )
 
-        counter_columns = [
-            col for col in df.columns if col not in non_counter_column_index
-        ]
-        # Collect imputed groups as dataframes
-        group_dfs = []
+    counter_columns = [col for col in df.columns if col not in non_counter_column_index]
+    # Collect imputed groups as dataframes
+    group_dfs: list[pd.DataFrame] = []
 
-        # Log imputation task summary before processing
-        console_debug(
-            f"Performing data imputation on {len(df)} dispatches "
-            f"across {unique_occurences.ngroups} unique kernel configurations"
-        )
+    # Log imputation task summary before processing
+    console_debug(
+        f"Performing data imputation on {len(df)} dispatches "
+        f"across {unique_occurences.ngroups} unique kernel configurations"
+    )
 
-        for _, group in unique_occurences:
-            # Identify counter buckets
-            counter_groups: set[frozenset[str]] = set()
-            for _, row in group.iterrows():
-                # Set of counter column names with non empty values
-                cols_frozenset = frozenset(row[counter_columns].dropna().index)
-                # If no counters found for this dispatch, continue
-                if not cols_frozenset:
-                    continue
-                # Since counter buckets are repeated in round robin fashion,
-                # we can stop once we see a repeated bucket
-                if cols_frozenset in counter_groups:
-                    break
-                counter_groups.add(cols_frozenset)
+    incomplete_kernel_names: set[str] = set()
 
-            # If no counters found for this group, continue
-            if not counter_groups:
-                continue
-
-            # Iterate over subgroups of dispatches containing
-            # all counters and impute missing values
-            # Create subgroup_id column for groupby: 0,0,0,...,1,1,1,...,2,2,2,...
-            # Use numpy for vectorized operation
+    for _, group in unique_occurences:
+        # Skip imputation entirely for undersampled kernels: nullify
+        # counters so metric evaluation excludes them. Non-counter columns
+        # are preserved for Top Stats (Block 1) timing.
+        if len(group) < num_perfmon_files:
             group_copy = group.copy()
-            group_copy["__subgroup_id"] = np.arange(len(group_copy)) // len(
-                counter_groups
-            )
-            # groupby().bfill() automatically excludes the grouping column from result
-            group_copy[counter_columns] = (
-                group_copy[[*counter_columns, "__subgroup_id"]]
-                .groupby("__subgroup_id", group_keys=False)
-                .bfill()  # Propagate first valid value backward to start of subgroup
-                .ffill()  # Propagate forward to end of subgroup
-            )
+            group_copy[counter_columns] = np.nan
+            incomplete_kernel_names.add(group_copy["Kernel_Name"].iloc[0])
             group_dfs.append(group_copy)
+            continue
 
-        # Create a new dataframe by concatenating all groups
-        result_dfs.append(
-            pd.concat(group_dfs, ignore_index=True)
-            if group_dfs
-            else pd.DataFrame(df.columns)
+        # Identify counter buckets
+        counter_groups: set[frozenset[str]] = set()
+        for _, row in group.iterrows():
+            # Set of counter column names with non empty values
+            cols_frozenset = frozenset(row[counter_columns].dropna().index)
+            # If no counters found for this dispatch, continue
+            if not cols_frozenset:
+                continue
+            # Since counter buckets are repeated in round robin fashion,
+            # we can stop once we see a repeated bucket
+            if cols_frozenset in counter_groups:
+                break
+            counter_groups.add(cols_frozenset)
+
+        # If no counters found for this group, continue
+        if not counter_groups:
+            continue
+
+        # Iterate over subgroups of dispatches containing
+        # all counters and impute missing values
+        # Create subgroup_id column for groupby: 0,0,0,...,1,1,1,...,2,2,2,...
+        # Use numpy for vectorized operation
+        group_copy = group.copy()
+        group_copy["__subgroup_id"] = np.arange(len(group_copy)) // len(counter_groups)
+        # groupby().bfill() automatically excludes the grouping column from result
+        group_copy[counter_columns] = (
+            group_copy[[*counter_columns, "__subgroup_id"]]
+            .groupby("__subgroup_id", group_keys=False)
+            .bfill()  # Propagate first valid value backward to start of subgroup
+            .ffill()  # Propagate forward to end of subgroup
         )
+        group_copy = group_copy.drop(columns=["__subgroup_id"])
+        group_dfs.append(group_copy)
 
-    final_df = pd.concat(result_dfs, keys=coll_levels, axis=1, copy=False)
-    return final_df
+    if incomplete_kernel_names:
+        _warn_kernels_with_incomplete_coverage(incomplete_kernel_names)
+
+    if not group_dfs:
+        return pd.DataFrame(columns=df.columns)
+    return pd.concat(group_dfs, ignore_index=True)
 
 
-def merge_counters_spatial_multiplex(df_multi_index: pd.DataFrame) -> pd.DataFrame:
+def _warn_kernels_with_incomplete_coverage(incomplete_kernel_names: set[str]) -> None:
+    """
+    Emit a warning listing kernels excluded from metrics due to missing counter data.
+    """
+    kernel_list = "\n\n".join(
+        f"  Kernel {i}: {name}"
+        for i, name in enumerate(sorted(incomplete_kernel_names), start=1)
+    )
+    console_warning(
+        "imputation",
+        (
+            f"Some kernels have missing counter data after imputation and "
+            f"have been excluded from metrics calculations:\n\n"
+            f"{kernel_list}\n\n"
+            f"Execution times for these kernels are still shown in Top Stats.\n"
+            f"To get more complete kernel coverage for metrics calculations, "
+            f"you may consider:\n"
+            f"  - disabling iteration multiplexing to use application replay\n"
+            f"  - increasing the number of iterations for these kernels in "
+            f"the workload"
+        ),
+    )
+
+
+def merge_counters_spatial_multiplex(df: pd.DataFrame) -> pd.DataFrame:
     """
     For spatial multiplexing, this merges counter values for the same kernel that
     runs on different devices. For time stamp, start time stamp will use median
@@ -566,70 +760,57 @@ def merge_counters_spatial_multiplex(df_multi_index: pd.DataFrame) -> pd.DataFra
         "Queue_ID",
     ]
 
-    result_dfs: list[pd.DataFrame] = []
+    kernel_name_column_name = "Kernel_Name"
+    if "Kernel_Name" not in df and "Name" in df:
+        kernel_name_column_name = "Name"
 
-    # TODO: will need to optimize to avoid this conversion to single index format
-    # and do merge directly on multi-index dataframe
-    dfs, coll_levels = reverse_multi_index_df_pmc(df_multi_index)
+    # Find the values in Kernel_Name that occur more than once
+    kernel_single_occurances = df[kernel_name_column_name].value_counts().index
 
-    for df in dfs:
-        kernel_name_column_name = "Kernel_Name"
-        if "Kernel_Name" not in df and "Name" in df:
-            kernel_name_column_name = "Name"
+    # Define a list to store the merged rows
+    result_data: list[dict[str, Any]] = []
 
-        # Find the values in Kernel_Name that occur more than once
-        kernel_single_occurances = df[kernel_name_column_name].value_counts().index
+    for kernel_name in kernel_single_occurances:
+        # Get all rows for the current kernel_name
+        group = df[df[kernel_name_column_name] == kernel_name]
 
-        # Define a list to store the merged rows
-        result_data: list[dict[str, Any]] = []
+        # Create a dictionary to store the merged row for the current group
+        merged_row: dict[str, Any] = {}
 
-        for kernel_name in kernel_single_occurances:
-            # Get all rows for the current kernel_name
-            group = df[df[kernel_name_column_name] == kernel_name]
+        # Process non-counter columns
+        for col in [
+            col for col in non_counter_column_index if col not in expired_column_index
+        ]:
+            if col == "Start_Timestamp":
+                # For Start_Timestamp, take the median
+                merged_row[col] = group["Start_Timestamp"].median()
+            elif col == "End_Timestamp":
+                # For End_Timestamp, calculate the median delta time
+                delta_time = group[col] - group["Start_Timestamp"]
+                merged_row[col] = group["Start_Timestamp"] + delta_time.median()
+            else:
+                # For other non-counter columns, take the first occurrence (0th row)
+                merged_row[col] = group.iloc[0][col]
 
-            # Create a dictionary to store the merged row for the current group
-            merged_row: dict[str, Any] = {}
+        # Process counter columns (assumed to be all columns not in
+        # non_counter_column_index)
+        counter_columns = [
+            col for col in group.columns if col not in non_counter_column_index
+        ]
+        for counter_col in counter_columns:
+            # for counter columns, take the first non-none (or non-nan) value
+            current_valid_counter_group = group[group[counter_col].notna()]
+            first_valid_value = (
+                current_valid_counter_group.iloc[0][counter_col]
+                if len(current_valid_counter_group) > 0
+                else None
+            )
+            merged_row[counter_col] = first_valid_value
 
-            # Process non-counter columns
-            for col in [
-                col
-                for col in non_counter_column_index
-                if col not in expired_column_index
-            ]:
-                if col == "Start_Timestamp":
-                    # For Start_Timestamp, take the median
-                    merged_row[col] = group["Start_Timestamp"].median()
-                elif col == "End_Timestamp":
-                    # For End_Timestamp, calculate the median delta time
-                    delta_time = group[col] - group["Start_Timestamp"]
-                    merged_row[col] = group["Start_Timestamp"] + delta_time.median()
-                else:
-                    # For other non-counter columns, take the first occurrence (0th row)
-                    merged_row[col] = group.iloc[0][col]
+        # Append the merged row to the result list
+        result_data.append(merged_row)
 
-            # Process counter columns (assumed to be all columns not in
-            # non_counter_column_index)
-            counter_columns = [
-                col for col in group.columns if col not in non_counter_column_index
-            ]
-            for counter_col in counter_columns:
-                # for counter columns, take the first non-none (or non-nan) value
-                current_valid_counter_group = group[group[counter_col].notna()]
-                first_valid_value = (
-                    current_valid_counter_group.iloc[0][counter_col]
-                    if len(current_valid_counter_group) > 0
-                    else None
-                )
-                merged_row[counter_col] = first_valid_value
-
-            # Append the merged row to the result list
-            result_data.append(merged_row)
-
-        # Create a new DataFrame from the merged rows
-        result_dfs.append(pd.DataFrame(result_data))
-
-    final_df = pd.concat(result_dfs, keys=coll_levels, axis=1, copy=False)
-    return final_df
+    return pd.DataFrame(result_data)
 
 
 def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:

@@ -30,6 +30,43 @@ extern int64_t ncclParamIbCastPkey();
 // no more than two batches of "alive" messsages should be pending in the CQ at
 // any time.
 #define NCCL_IB_RESILIENCY_PORT_RECOVERY_CQ_SIZE (NCCL_IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_BATCH_SIZE_MAX*2)
+#define NCCL_IB_RESILIENCY_PORT_RECOVERY_ACK_MSG_ID (0x1234)
+
+#define NCCL_IB_RECOVERY_QKEY 0x1234ABCD
+
+// Max QPN entries for recovery exchange. Both send and recv buffers are
+// sized to NCCL_IB_MAX_QPS entries, accommodating the worst case where
+// all QPs belong to the failed device.
+#define NCCL_IB_MAX_RECOVERY_QPN_ENTRIES NCCL_IB_MAX_QPS
+
+static ncclResult_t IbCastPortRecoveryQpInitUd(struct ncclIbQp* qp, int pkeyIndex, int portNum) {
+  struct ibv_qp_attr attr;
+  memset(&attr, 0, sizeof(attr));
+  attr.qp_state = IBV_QPS_INIT;
+  attr.pkey_index = pkeyIndex;
+  attr.port_num = portNum;
+  attr.qkey = NCCL_IB_RECOVERY_QKEY;
+  NCCLCHECK(wrap_ibv_modify_qp(qp->qp, &attr,
+      IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_QKEY));
+  return ncclSuccess;
+}
+
+static ncclResult_t IbCastPortRecoveryQpRtrUd(struct ncclIbQp* qp) {
+  struct ibv_qp_attr attr;
+  memset(&attr, 0, sizeof(attr));
+  attr.qp_state = IBV_QPS_RTR;
+  NCCLCHECK(wrap_ibv_modify_qp(qp->qp, &attr, IBV_QP_STATE));
+  return ncclSuccess;
+}
+
+static ncclResult_t IbCastPortRecoveryQpRtsUd(struct ncclIbQp* qp) {
+  struct ibv_qp_attr attr;
+  memset(&attr, 0, sizeof(attr));
+  attr.qp_state = IBV_QPS_RTS;
+  attr.sq_psn = 0;
+  NCCLCHECK(wrap_ibv_modify_qp(qp->qp, &attr, IBV_QP_STATE | IBV_QP_SQ_PSN));
+  return ncclSuccess;
+}
 
 // Asynchronous thread to handle port recovery operations
 std::thread IbCastPortRecoveryAsyncThread;
@@ -142,9 +179,16 @@ struct ncclIbPortRecoveryContext {
       bool aliveMsgCompleted;
     } send;
     struct {
-      int nInOrderMsgsReceived;
+      uint32_t windowBase;
+      uint32_t receivedBits;
     } recv;
   };
+
+  // AINIC destroy+recreate: local and remote QPN exchange buffers.
+  struct RecoveryQpnEntry localQpns[NCCL_IB_MAX_QPS];
+  int nLocalQpns;
+  struct RecoveryQpnEntry remoteQpns[NCCL_IB_MAX_QPS];
+  int nRemoteQpns;
 };
 
 // Shared inbox for new recovery contexts - protected by IbCastPortRecoveryMutex.
@@ -168,16 +212,18 @@ static inline ncclResult_t IbCastPortRecoveryQpsToError(ncclIbPortRecoveryContex
 // Predefined work ID for receive work request for port recovery messages
 #define NCCL_IB_PORT_RECOVERY_WR_ID (0xAAAA)
 
-static struct ibv_recv_wr IbCastResiliencyPortRecoveryRecvWr = {
-    .wr_id = NCCL_IB_PORT_RECOVERY_WR_ID,
-    .next = NULL,
-    .sg_list = NULL,
-    .num_sge = 0
-};
-
-inline static ncclResult_t IbCastPortRecoveryPostRecvWorkRequest(struct ibv_qp* qp) {
+inline static ncclResult_t IbCastPortRecoveryPostRecvWorkRequest(struct ibv_qp* qp, struct ncclIbResiliencyDev* resDev) {
+  struct ibv_sge sge;
+  sge.addr = (uintptr_t)resDev->portRecoveryGrhBuf;
+  sge.length = sizeof(resDev->portRecoveryGrhBuf);
+  sge.lkey = resDev->portRecoveryGrhMr->lkey;
+  struct ibv_recv_wr wr;
+  memset(&wr, 0, sizeof(wr));
+  wr.wr_id = NCCL_IB_PORT_RECOVERY_WR_ID;
+  wr.sg_list = &sge;
+  wr.num_sge = 1;
   struct ibv_recv_wr* bad_wr;
-  return wrap_ibv_post_recv(qp, &IbCastResiliencyPortRecoveryRecvWr, &bad_wr);
+  return wrap_ibv_post_recv(qp, &wr, &bad_wr);
 }
 
 // Helper function to drain CQEs on the provided CQ and fill a Receive WQE for
@@ -199,7 +245,7 @@ static ncclResult_t IbCastPortRecoveryDrainCqAndPostReceiveWRs(struct ncclIbPort
     }
     INFO(NCCL_NET, "NET/IB: %s: Drained %d CQEs from recovery CQ %p for device %d (comm=%p)", __func__, wrDone, cq, recoveryContext->devIndex, recoveryContext->resCtx->baseComm);
     for (int i = 0; i < wrDone; i++) {
-      ret = IbCastPortRecoveryPostRecvWorkRequest(qp);
+      ret = IbCastPortRecoveryPostRecvWorkRequest(qp, &recoveryContext->resCtx->devs[recoveryContext->devIndex]);
       if (ret != ncclSuccess) {
         INFO(NCCL_NET, "NET/IB: %s: Failed to post recv WR on recovery QP %p for device %d (comm=%p)", __func__, qp, recoveryContext->devIndex, recoveryContext->resCtx->baseComm);
         *success = false;
@@ -235,6 +281,8 @@ static inline ncclResult_t IbCastPortRecoveryContextInit(struct ncclIbResiliency
   recoveryCtx->ackReceived = false;
   recoveryCtx->ackPosted = false;
   recoveryCtx->ackCompleted = false;
+  recoveryCtx->nLocalQpns = 0;
+  recoveryCtx->nRemoteQpns = 0;
 
   for (int i = 0; i < resCtx->ndevs; i++) {
     if (i != failedDevIndex) continue;
@@ -255,18 +303,19 @@ static inline ncclResult_t IbCastPortRecoveryContextInit(struct ncclIbResiliency
     recoveryCtx->send.aliveMsgCompleted = false;
     // Required for the ACK from the receiver
     INFO(NCCL_NET, "NET/IB: %s: Sender posting initial (%d) recv WRs for port recovery for device %d (comm=%p)", __func__, 1, recoveryCtx->devIndex, recoveryCtx->resCtx->baseComm);
-    res = IbCastPortRecoveryPostRecvWorkRequest(recoveryCtx->resCtx->portRecoveryQps[recoveryCtx->devIndex].qp);
+    res = IbCastPortRecoveryPostRecvWorkRequest(recoveryCtx->resCtx->portRecoveryQps[recoveryCtx->devIndex].qp, &recoveryCtx->resCtx->devs[recoveryCtx->devIndex]);
     if (res != ncclSuccess) {
       INFO(NCCL_NET, "NET/IB: %s: Sender failed to post recv WR on recovery QP for device %d (comm=%p)", __func__, recoveryCtx->devIndex, recoveryCtx->resCtx->baseComm);
       free(recoveryCtx);
       return res;
     }
   } else {
-    recoveryCtx->recv.nInOrderMsgsReceived = 0;
+    recoveryCtx->recv.windowBase = 0;
+    recoveryCtx->recv.receivedBits = 0;
     // Required for the alive messages and final ACK from the sender
     INFO(NCCL_NET, "NET/IB: %s: Receiver posting initial (%d) recv WRs for port recovery for device %d (comm=%p)", __func__, NCCL_IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_BATCH_SIZE_MAX, recoveryCtx->devIndex, recoveryCtx->resCtx->baseComm);
     for (int i = 0; i < NCCL_IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_BATCH_SIZE_MAX; i++) {
-      res = IbCastPortRecoveryPostRecvWorkRequest(recoveryCtx->resCtx->portRecoveryQps[recoveryCtx->devIndex].qp);
+      res = IbCastPortRecoveryPostRecvWorkRequest(recoveryCtx->resCtx->portRecoveryQps[recoveryCtx->devIndex].qp, &recoveryCtx->resCtx->devs[recoveryCtx->devIndex]);
       if (res != ncclSuccess) {
         INFO(NCCL_NET, "NET/IB: %s: Receiver failed to post recv WR on recovery QP for device %d (comm=%p)", __func__, recoveryCtx->devIndex, recoveryCtx->resCtx->baseComm);
         free(recoveryCtx);
@@ -290,17 +339,29 @@ ncclResult_t IbCastPortRecoveryDevInit(struct ncclIbResiliency* resCtx, int devI
   assert(resCtx->recoveryEnabled);
   struct ncclIbResiliencyDev* resDev = &resCtx->devs[devIndex];
   void* cqContext = (void*)&resCtx->baseComm->stats;
-  INFO(NCCL_NET, "NET/IB: %s: Created port recovery CQ is enabled for resiliency context (%s comm=%p) on device %d", __func__, resCtx->baseComm->isSend ? "send" : "recv", resCtx->baseComm, devIndex);
   NCCLCHECK(wrap_ibv_create_cq(&resDev->portRecoveryCq, ibDev->context, NCCL_IB_RESILIENCY_PORT_RECOVERY_CQ_SIZE, cqContext, NULL, 0));
+  memset(resDev->portRecoveryGrhBuf, 0, sizeof(resDev->portRecoveryGrhBuf));
+  NCCLCHECK(wrap_ibv_reg_mr(&resDev->portRecoveryGrhMr, ibDev->pd, resDev->portRecoveryGrhBuf, sizeof(resDev->portRecoveryGrhBuf), IBV_ACCESS_LOCAL_WRITE));
+  // Register QPN send buffer against this device's PD so ACK sends use a matching lkey.
+  NCCLCHECK(wrap_ibv_reg_mr(&resDev->portRecoveryQpnMr, ibDev->pd, resCtx->portRecoveryQpnBuf, sizeof(resCtx->portRecoveryQpnBuf), IBV_ACCESS_LOCAL_WRITE));
+  INFO(NCCL_NET, "NET/IB: %s: Created port recovery CQ and GRH MR for resiliency context (%s comm=%p) on device %d", __func__, resCtx->baseComm->isSend ? "send" : "recv", resCtx->baseComm, devIndex);
   return ncclSuccess;
 }
 
 ncclResult_t IbCastPortRecoveryDevDestroy(struct ncclIbResiliency* resCtx, int devIndex) {
   struct ncclIbResiliencyDev* resDev = &resCtx->devs[devIndex];
+  if (resDev->portRecoveryGrhMr) {
+    wrap_ibv_dereg_mr(resDev->portRecoveryGrhMr);
+    resDev->portRecoveryGrhMr = nullptr;
+  }
   if (resDev->portRecoveryCq) {
     NCCLCHECK(wrap_ibv_destroy_cq(resDev->portRecoveryCq));
   }
-  INFO(NCCL_NET, "NET/IB: %s: Destroyed port recovery CQ (cq=%p) on device %d for resiliency context (comm=%p)", __func__, resDev->portRecoveryCq, devIndex, resCtx->baseComm);
+  if (resDev->portRecoveryQpnMr) {
+    wrap_ibv_dereg_mr(resDev->portRecoveryQpnMr);
+    resDev->portRecoveryQpnMr = nullptr;
+  }
+  INFO(NCCL_NET, "NET/IB: %s: Destroyed port recovery CQ and GRH MR on device %d for resiliency context (comm=%p)", __func__, devIndex, resCtx->baseComm);
   return ncclSuccess;
 }
 
@@ -311,7 +372,7 @@ ncclResult_t IbCastPortRecoverySenderQpsCreate(struct ncclIbResiliency* resCtx, 
   void* qpContext = (void*)&sendComm->base.stats;
   struct ncclIbQpCreateAttr qpCreateAttrs;
   memset(&qpCreateAttrs, 0, sizeof(qpCreateAttrs));
-  qpCreateAttrs.type = IBV_QPT_UC;
+  qpCreateAttrs.type = IBV_QPT_UD;
   qpCreateAttrs.maxRecvWorkRequest = 1;
   qpCreateAttrs.maxSendWorkRequest = NCCL_IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_BATCH_SIZE_MAX;
   for (int localQpIndex = 0; localQpIndex < nQps; localQpIndex++) {
@@ -323,19 +384,11 @@ ncclResult_t IbCastPortRecoverySenderQpsCreate(struct ncclIbResiliency* resCtx, 
     qpCreateAttrs.pd = sendCommDev->base.pd;
     qpCreateAttrs.qpContext = qpContext;
     NCCLCHECK(IbCastQpCreate(localQp, &qpCreateAttrs));
-    // Populate the info that will be delivered to the remote receiver peer
     ncclIbQpInfo* localQpInfo = &localPortRecoveryQpsInfo[localQpIndex];
     localQpInfo->qpn = localQp->qp->qp_num;
     localQpInfo->devIndex = localDevIndex;
 
-    // Transition the QP to INIT state
-    struct ncclIbQpInitAttr* initAttr = &localQp->initAttr;
-    initAttr->state = IBV_QPS_INIT;
-    initAttr->pkeyIndex = ncclParamIbCastPkey();
-    initAttr->portNum = ibDev->portNum;
-    // Recovery QPs on the sender side do not require any remote permissions.
-    initAttr->qpAccessFlags = IBV_ACCESS_LOCAL_WRITE;
-    NCCLCHECK(IbCastQpInit(localQp));
+    NCCLCHECK(IbCastPortRecoveryQpInitUd(localQp, ncclParamIbCastPkey(), ibDev->portNum));
   }
   return ncclSuccess;
 }
@@ -347,32 +400,39 @@ ncclResult_t IbCastPortRecoverySenderQpsToRts(struct ncclIbResiliency* resCtx, s
   ncclIbQp* localQp = NULL;
   ncclIbQpInfo* remQpInfo = NULL;
   for (int localQpIndex = 0; localQpIndex < nQps; localQpIndex++) {
-    int localDevIndex = localQpIndex % sendComm->base.vProps.ndevs;;
+    int localDevIndex = localQpIndex % sendComm->base.vProps.ndevs;
     ncclIbSendCommDev* sendCommDev = &sendComm->devs[localDevIndex];
     ncclIbDev* ibDev = &IbCastDevs[sendCommDev->base.ibDevN];
     localQp = &resCtx->portRecoveryQps[localQpIndex];
     remQpInfo = &(remInfo->resiliencyInfo.portRecoveryQpsInfo[localQpIndex]);
     localQp->remDevIdx = remQpInfo->devIndex;
-    // It might be that the remote side has a different number of devices, so
-    // finding the correct remote device information is done by checking the
-    // remote QP info.
     ncclIbDevInfo* remDevInfo = &remInfo->devs[remQpInfo->devIndex];
 
-    struct ncclIbQpRtrAttr* rtrAttr = &localQp->rtrAttr;
-    rtrAttr->mtu = std::min(remDevInfo->mtu, ibDev->portAttr.active_mtu);
-    rtrAttr->linkLayer = remDevInfo->link_layer;
-    rtrAttr->tc = (remDevInfo->link_layer == IBV_LINK_LAYER_ETHERNET) ? remInfo->tc : -1;
-    rtrAttr->sl = remInfo->sl;
-    rtrAttr->remoteQpNum = remQpInfo->qpn;
-    rtrAttr->remoteLid = remDevInfo->lid;
-    rtrAttr->remoteGid = remDevInfo->gid;
-    rtrAttr->localIbPort = remDevInfo->ib_port;
-    rtrAttr->localGid = sendCommDev->base.gidInfo.localGid;
-    rtrAttr->localGidIndex = sendCommDev->base.gidInfo.localGidIndex;
-    NCCLCHECK(IbCastQpRtr(localQp));
+    NCCLCHECK(IbCastPortRecoveryQpRtrUd(localQp));
+    NCCLCHECK(IbCastPortRecoveryQpRtsUd(localQp));
 
-    NCCLCHECK(IbCastQpRts(localQp));
-    INFO(NCCL_NET, "NET/IB: %s: To RTS done on recovery QP (index=%d, qp_num=%u, dest_qp_num=%u, deviceIndex=%d, comm=%p)", __func__, localQpIndex, localQp->qp->qp_num, rtrAttr->remoteQpNum, localDevIndex, resCtx->baseComm);
+    // Create Address Handle for UD sends to remote recovery QP
+    struct ibv_ah_attr ahAttr;
+    memset(&ahAttr, 0, sizeof(ahAttr));
+    ahAttr.port_num = ibDev->portNum;
+    ahAttr.sl = remInfo->sl;
+    if (remDevInfo->link_layer == IBV_LINK_LAYER_ETHERNET) {
+      ahAttr.is_global = 1;
+      ahAttr.grh.dgid = remDevInfo->gid;
+      ahAttr.grh.sgid_index = sendCommDev->base.gidInfo.localGidIndex;
+      ahAttr.grh.hop_limit = 255;
+      ahAttr.grh.traffic_class = remInfo->tc;
+    } else {
+      ahAttr.dlid = remDevInfo->lid;
+    }
+    resCtx->portRecoveryAh[localDevIndex] = sendCommDev->base.pd->context->ops.create_ah(sendCommDev->base.pd, &ahAttr);
+    if (!resCtx->portRecoveryAh[localDevIndex]) {
+      WARN("NET/IB: %s: Failed to create AH for recovery QP on device %d (comm=%p)", __func__, localDevIndex, resCtx->baseComm);
+      return ncclSystemError;
+    }
+    resCtx->portRecoveryRemoteQpn[localDevIndex] = remQpInfo->qpn;
+
+    INFO(NCCL_NET, "NET/IB: %s: To RTS done on recovery UD QP (index=%d, qp_num=%u, remote_qpn=%u, deviceIndex=%d, comm=%p)", __func__, localQpIndex, localQp->qp->qp_num, remQpInfo->qpn, localDevIndex, resCtx->baseComm);
   }
   return ncclSuccess;
 }
@@ -382,7 +442,7 @@ ncclResult_t IbCastPortRecoveryReceiverQpsCreateToRts(struct ncclIbResiliency* r
   void* qpContext = (void*)&recvComm->base.stats;
   struct ncclIbQpCreateAttr qpCreateAttrs;
   memset(&qpCreateAttrs, 0, sizeof(qpCreateAttrs));
-  qpCreateAttrs.type = IBV_QPT_UC;
+  qpCreateAttrs.type = IBV_QPT_UD;
   qpCreateAttrs.maxRecvWorkRequest = NCCL_IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_BATCH_SIZE_MAX;
   qpCreateAttrs.maxSendWorkRequest = 1;
   for (int localQpIndex = 0; localQpIndex < nQps; localQpIndex++) {
@@ -397,46 +457,50 @@ ncclResult_t IbCastPortRecoveryReceiverQpsCreateToRts(struct ncclIbResiliency* r
     localPortRecoveryQpsInfo[localQpIndex].qpn = localQp->qp->qp_num;
     localPortRecoveryQpsInfo[localQpIndex].devIndex = localDevIndex;
 
-    // Transition the QP to INIT state
-    struct ncclIbQpInitAttr* initAttr = &localQp->initAttr;
-    initAttr->state = IBV_QPS_INIT;
-    initAttr->pkeyIndex = ncclParamIbCastPkey();
-    initAttr->portNum = ibDev->portNum;
-    // Recovery QPs on the receiver side do not require any remote permissions.
-    // Sender is expected to only use RDMA Send with Immediate operations
-    // to send alive messages to the receiver.
-    initAttr->qpAccessFlags = IBV_ACCESS_LOCAL_WRITE;
-    NCCLCHECK(IbCastQpInit(localQp));
+    NCCLCHECK(IbCastPortRecoveryQpInitUd(localQp, ncclParamIbCastPkey(), ibDev->portNum));
 
     ncclIbQpInfo* remQpInfo = &remInfo->resiliencyInfo.portRecoveryQpsInfo[localQpIndex];
     ncclIbDevInfo* remDevInfo = &remInfo->devs[remQpInfo->devIndex];
 
-    struct ncclIbQpRtrAttr* rtrAttr = &localQp->rtrAttr;
-    rtrAttr->mtu = std::min(remDevInfo->mtu, ibDev->portAttr.active_mtu);
-    rtrAttr->linkLayer = remDevInfo->link_layer;
-    rtrAttr->tc = (remDevInfo->link_layer == IBV_LINK_LAYER_ETHERNET) ? remInfo->tc : -1;
-    rtrAttr->sl = remInfo->sl;
-    rtrAttr->remoteQpNum = remQpInfo->qpn;
-    rtrAttr->remoteLid = remDevInfo->lid;
-    rtrAttr->remoteGid = remDevInfo->gid;
-    rtrAttr->localIbPort = remDevInfo->ib_port;
-    rtrAttr->localGid = recvCommDev->base.gidInfo.localGid;
-    rtrAttr->localGidIndex = recvCommDev->base.gidInfo.localGidIndex;
-    NCCLCHECK(IbCastQpRtr(localQp));
+    NCCLCHECK(IbCastPortRecoveryQpRtrUd(localQp));
+    NCCLCHECK(IbCastPortRecoveryQpRtsUd(localQp));
 
-    NCCLCHECK(IbCastQpRts(localQp));
-    INFO(NCCL_NET, "NET/IB: %s: To RTS done on recovery QP (index=%d, qp_num=%u, dest_qp_num=%u, deviceIndex=%d, comm=%p)", __func__, localQpIndex, localQp->qp->qp_num, rtrAttr->remoteQpNum, localDevIndex, resCtx->baseComm);
+    // Create Address Handle for UD sends (ACK messages) to remote recovery QP
+    struct ibv_ah_attr ahAttr;
+    memset(&ahAttr, 0, sizeof(ahAttr));
+    ahAttr.port_num = ibDev->portNum;
+    ahAttr.sl = remInfo->sl;
+    if (remDevInfo->link_layer == IBV_LINK_LAYER_ETHERNET) {
+      ahAttr.is_global = 1;
+      ahAttr.grh.dgid = remDevInfo->gid;
+      ahAttr.grh.sgid_index = recvCommDev->base.gidInfo.localGidIndex;
+      ahAttr.grh.hop_limit = 255;
+      ahAttr.grh.traffic_class = remInfo->tc;
+    } else {
+      ahAttr.dlid = remDevInfo->lid;
+    }
+    resCtx->portRecoveryAh[localDevIndex] = recvCommDev->base.pd->context->ops.create_ah(recvCommDev->base.pd, &ahAttr);
+    if (!resCtx->portRecoveryAh[localDevIndex]) {
+      WARN("NET/IB: %s: Failed to create AH for recovery QP on device %d (comm=%p)", __func__, localDevIndex, resCtx->baseComm);
+      return ncclSystemError;
+    }
+    resCtx->portRecoveryRemoteQpn[localDevIndex] = remQpInfo->qpn;
+    INFO(NCCL_NET, "NET/IB: %s: To RTS done on recovery UD QP (index=%d, qp_num=%u, remote_qpn=%u, deviceIndex=%d, comm=%p)", __func__, localQpIndex, localQp->qp->qp_num, remQpInfo->qpn, localDevIndex, resCtx->baseComm);
   }
   return ncclSuccess;
 }
 
 ncclResult_t IbCastPortRecoveryQpsDestroy(struct ncclIbResiliency* resCtx, int nQps) {
   for (int qpIndex = 0; qpIndex < nQps; qpIndex++) {
+    if (resCtx->portRecoveryAh[qpIndex]) {
+      resCtx->portRecoveryAh[qpIndex]->context->ops.destroy_ah(resCtx->portRecoveryAh[qpIndex]);
+      resCtx->portRecoveryAh[qpIndex] = nullptr;
+    }
     struct ncclIbQp* recoveryQp = &resCtx->portRecoveryQps[qpIndex];
     if (!recoveryQp->qp) {
       continue;
     }
-    INFO(NCCL_NET, "NET/IB: %s: Destroying port recovery QP (index=%d, qp=%p, qp_num=%u) for resiliency context (comm=%p)", __func__, qpIndex, recoveryQp->qp, recoveryQp->qp->qp_num, resCtx->baseComm);
+    INFO(NCCL_NET, "NET/IB: %s: Destroying port recovery UD QP (index=%d, qp_num=%u) for resiliency context (comm=%p)", __func__, qpIndex, recoveryQp->qp->qp_num, resCtx->baseComm);
     NCCLCHECK(wrap_ibv_destroy_qp(recoveryQp->qp));
   }
   return ncclSuccess;
@@ -541,7 +605,228 @@ static inline ncclResult_t IbCastPortRecoveryQpsRestore(ncclIbPortRecoveryContex
   return ncclSuccess;
 }
 
-#define NCCL_IB_RESILIENCY_PORT_RECOVERY_ACK_MSG_ID (0x1234)
+// AINIC workaround: Destroy old QPs and create new ones (Phase A).
+// ibv_modify_qp(RESET) does not work on AINIC, so we must destroy and
+// recreate the QP to get a fresh one. This produces a new QPN which must
+// be exchanged with the remote side before RTR/RTS (Phase B).
+static inline ncclResult_t IbCastPortRecoveryQpsDestroyAndCreate(ncclIbPortRecoveryContext* recoveryContext) {
+  uint nqps = recoveryContext->resCtx->baseComm->nqps;
+  recoveryContext->nLocalQpns = 0;
+
+  for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
+    ncclIbQp* localQp = &recoveryContext->resCtx->baseComm->qps[qpIndex];
+    if (localQp->devIndex != recoveryContext->devIndex) {
+      continue;
+    }
+
+    uint32_t oldQpn = localQp->qp->qp_num;
+    INFO(NCCL_NET, "NET/IB: %s: Destroying QP %d on device %d (comm=%p, old_qp_num=%u)",
+         __func__, qpIndex, recoveryContext->devIndex,
+         recoveryContext->resCtx->baseComm, oldQpn);
+
+    NCCLCHECK(wrap_ibv_destroy_qp(localQp->qp));
+    localQp->qp = NULL;
+
+    struct ncclIbQpCreateAttr createAttr;
+    IbCastBuildDataQpCreateAttr(recoveryContext->resCtx->baseComm, recoveryContext->devIndex, &createAttr);
+    createAttr.channelId = localQp->channelId;
+    createAttr.isDataQp = localQp->isDataQp;
+    // isCtsEnabled and ctsQpSlot are left at 0 (from memset in IbCastBuildDataQpCreateAttr).
+    // CTS offload is disabled when resiliency features are enabled (init.cc).
+    NCCLCHECK(IbCastQpCreate(localQp, &createAttr));
+
+    INFO(NCCL_NET, "NET/IB: %s: Recreated QP %d on device %d (comm=%p, old_qp_num=%u, new_qp_num=%u)",
+         __func__, qpIndex, recoveryContext->devIndex,
+         recoveryContext->resCtx->baseComm, oldQpn, localQp->qp->qp_num);
+
+    // Transition to INIT
+    NCCLCHECK(IbCastQpInit(localQp));
+
+    // Record the new QPN for exchange with remote
+    int idx = recoveryContext->nLocalQpns;
+    recoveryContext->localQpns[idx].qpIndex = qpIndex;
+    recoveryContext->localQpns[idx].newQpn = localQp->qp->qp_num;
+    recoveryContext->nLocalQpns++;
+  }
+
+  // Also destroy+recreate flush QP on receiver side (it connects to itself)
+  if (!recoveryContext->resCtx->baseComm->isSend) {
+    ncclIbRecvComm* recvComm = (ncclIbRecvComm*)recoveryContext->resCtx->baseComm;
+    if (recvComm->flushEnabled) {
+      for (int i = 0; i < recvComm->base.vProps.ndevs; i++) {
+        if (i != recoveryContext->devIndex) continue;
+        struct ncclIbRecvCommDev* rCommDev = &recvComm->devs[i];
+        ncclIbQp* flushQp = &rCommDev->gpuFlush.qp;
+        INFO(NCCL_NET, "NET/IB: %s: Destroying Flush QP on device %d (comm=%p, old_qp_num=%u)",
+             __func__, i, recoveryContext->resCtx->baseComm, flushQp->qp->qp_num);
+        NCCLCHECK(wrap_ibv_destroy_qp(flushQp->qp));
+        flushQp->qp = NULL;
+        struct ncclIbQpCreateAttr flushCreateAttr;
+        IbCastBuildDataQpCreateAttr(recoveryContext->resCtx->baseComm, recoveryContext->devIndex, &flushCreateAttr);
+        flushCreateAttr.maxRecvWorkRequest = 0;
+        flushCreateAttr.maxSendWorkRequest = NET_IB_MAX_REQUESTS;
+        flushCreateAttr.channelId = flushQp->channelId;
+        flushCreateAttr.isDataQp = flushQp->isDataQp;
+        NCCLCHECK(IbCastQpCreate(flushQp, &flushCreateAttr));
+        INFO(NCCL_NET, "NET/IB: %s: Recreated Flush QP on device %d (comm=%p, new_qp_num=%u)",
+             __func__, i, recoveryContext->resCtx->baseComm, flushQp->qp->qp_num);
+        NCCLCHECK(IbCastQpInit(flushQp));
+      }
+    }
+  }
+
+  INFO(NCCL_NET, "NET/IB: %s: Phase A complete: %d QPs destroyed+recreated on device %d (comm=%p)",
+       __func__, recoveryContext->nLocalQpns, recoveryContext->devIndex,
+       recoveryContext->resCtx->baseComm);
+  return ncclSuccess;
+}
+
+// AINIC workaround: Transition recreated QPs to RTR+RTS (Phase B).
+// Uses remote QPNs received via ACK payload to set remoteQpNum before RTR.
+static inline ncclResult_t IbCastPortRecoveryQpsToRts(ncclIbPortRecoveryContext* recoveryContext) {
+  uint nqps = recoveryContext->resCtx->baseComm->nqps;
+
+  for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
+    ncclIbQp* localQp = &recoveryContext->resCtx->baseComm->qps[qpIndex];
+    if (localQp->devIndex != recoveryContext->devIndex) {
+      continue;
+    }
+
+    // Find the matching remote QPN for this QP
+    uint32_t remoteQpn = 0;
+    bool found = false;
+    for (int r = 0; r < recoveryContext->nRemoteQpns; r++) {
+      if (recoveryContext->remoteQpns[r].qpIndex == qpIndex) {
+        remoteQpn = recoveryContext->remoteQpns[r].newQpn;
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      WARN("NET/IB: %s: No remote QPN found for QP index %d on device %d (comm=%p)",
+           __func__, qpIndex, recoveryContext->devIndex,
+           recoveryContext->resCtx->baseComm);
+      return ncclInternalError;
+    }
+
+    // Update the remote QPN and transition to RTR+RTS
+    localQp->rtrAttr.remoteQpNum = remoteQpn;
+    INFO(NCCL_NET, "NET/IB: %s: QP %d RTR with remoteQpn=%u (comm=%p, qp_num=%u)",
+         __func__, qpIndex, remoteQpn, recoveryContext->resCtx->baseComm,
+         localQp->qp->qp_num);
+
+    if (localQp->eceSupported) {
+      NCCLCHECK(wrap_ibv_set_ece(localQp->qp, &localQp->ece, &localQp->eceSupported));
+    }
+    NCCLCHECK(IbCastQpRtr(localQp));
+    NCCLCHECK(IbCastQpRts(localQp));
+
+    INFO(NCCL_NET, "NET/IB: %s: Restored QP %d on device %d (comm=%p, qp_num=%u)",
+         __func__, qpIndex, recoveryContext->devIndex,
+         recoveryContext->resCtx->baseComm, localQp->qp->qp_num);
+
+    // Pre-post receive work requests on receiver QPs
+    if (!recoveryContext->resCtx->baseComm->isSend) {
+      struct ncclIbRecvComm* recvComm = (struct ncclIbRecvComm*)recoveryContext->resCtx->baseComm;
+      NCCLCHECK(IbCastPostReceiveWorkRequestsOnQp(recvComm, localQp));
+    }
+  }
+
+  // Restore Flush QP on receiver (self-loopback — remote QPN is own new QPN)
+  if (!recoveryContext->resCtx->baseComm->isSend) {
+    ncclIbRecvComm* recvComm = (ncclIbRecvComm*)recoveryContext->resCtx->baseComm;
+    if (recvComm->flushEnabled) {
+      for (int i = 0; i < recvComm->base.vProps.ndevs; i++) {
+        if (i != recoveryContext->devIndex) continue;
+        struct ncclIbRecvCommDev* rCommDev = &recvComm->devs[i];
+        ncclIbQp* flushQp = &rCommDev->gpuFlush.qp;
+        // Self-loopback: remote QPN = own new QPN
+        flushQp->rtrAttr.remoteQpNum = flushQp->qp->qp_num;
+        NCCLCHECK(IbCastQpRtr(flushQp));
+        NCCLCHECK(IbCastQpRts(flushQp));
+        INFO(NCCL_NET, "NET/IB: %s: Restored Flush QP on device %d (comm=%p, qp_num=%u)",
+             __func__, i, recoveryContext->resCtx->baseComm, flushQp->qp->qp_num);
+      }
+    }
+  }
+
+  return ncclSuccess;
+}
+
+// Post an ACK message with QPN payload for AINIC destroy+recreate recovery.
+static inline ncclResult_t IbCastPortRecoveryPostAckWithQpns(ncclIbPortRecoveryContext* recoveryContext, bool* success) {
+  int devIdx = recoveryContext->devIndex;
+  struct ncclIbResiliency* resCtx = recoveryContext->resCtx;
+
+  // Populate the QPN send buffer with local QPN entries.
+  // Payload must fit in both the send buffer and the remote recv buffer (after GRH).
+  if (recoveryContext->nLocalQpns > NCCL_IB_MAX_RECOVERY_QPN_ENTRIES) {
+    WARN("NET/IB: %s: Too many QPN entries (%d) for recovery ACK payload (max %d)",
+         __func__, recoveryContext->nLocalQpns, NCCL_IB_MAX_RECOVERY_QPN_ENTRIES);
+    return ncclInternalError;
+  }
+  int payloadSize = recoveryContext->nLocalQpns * sizeof(struct RecoveryQpnEntry);
+  memcpy(resCtx->portRecoveryQpnBuf, recoveryContext->localQpns, payloadSize);
+
+  struct ibv_sge qpnSge;
+  qpnSge.addr = (uintptr_t)resCtx->portRecoveryQpnBuf;
+  qpnSge.length = payloadSize;
+  qpnSge.lkey = resCtx->devs[devIdx].portRecoveryQpnMr->lkey;
+
+  struct ibv_send_wr wr;
+  memset(&wr, 0, sizeof(wr));
+  wr.wr_id = recoveryContext->aliveMsgNextId;
+  wr.opcode = IBV_WR_SEND_WITH_IMM;
+  wr.imm_data = NCCL_IB_RESILIENCY_PORT_RECOVERY_ACK_MSG_ID;
+  wr.send_flags = IBV_SEND_SIGNALED;
+  wr.sg_list = &qpnSge;
+  wr.num_sge = 1;
+  wr.wr.ud.ah = resCtx->portRecoveryAh[devIdx];
+  wr.wr.ud.remote_qpn = resCtx->portRecoveryRemoteQpn[devIdx];
+  wr.wr.ud.remote_qkey = NCCL_IB_RECOVERY_QKEY;
+
+  INFO(NCCL_NET, "NET/IB: %s: %s posting ACK with %d QPN entries for device %d (comm=%p)",
+       __func__, resCtx->baseComm->isSend ? "Sender" : "Receiver",
+       recoveryContext->nLocalQpns, devIdx, resCtx->baseComm);
+
+  struct ibv_send_wr* bad_wr = NULL;
+  struct ncclIbQp* recoveryQp = &resCtx->portRecoveryQps[devIdx];
+  if (wrap_ibv_post_send(recoveryQp->qp, &wr, &bad_wr) != ncclSuccess) {
+    INFO(NCCL_NET, "NET/IB: %s: Failed to post ACK with QPNs on device %d (comm=%p, qp_num=%u)",
+         __func__, devIdx, resCtx->baseComm, recoveryQp->qp->qp_num);
+    *success = false;
+    return ncclSuccess;
+  }
+  recoveryContext->ackPosted = true;
+  *success = true;
+  return ncclSuccess;
+}
+
+// Extract QPNs from a received ACK message buffer (after GRH offset in UD recv).
+static inline void IbCastPortRecoveryExtractQpns(ncclIbPortRecoveryContext* recoveryContext, struct ibv_wc* wc) {
+  struct ncclIbResiliencyDev* resDev = &recoveryContext->resCtx->devs[recoveryContext->devIndex];
+  // UD receives prepend GRH; QPN payload starts at offset NCCL_IB_UD_GRH_SIZE
+  int totalLen = wc->byte_len;
+  int payloadLen = totalLen - NCCL_IB_UD_GRH_SIZE;
+  if (payloadLen <= 0) {
+    // No QPN payload (shouldn't happen on AINIC path, but be safe)
+    recoveryContext->nRemoteQpns = 0;
+    return;
+  }
+  int nEntries = payloadLen / sizeof(struct RecoveryQpnEntry);
+  if (nEntries > NCCL_IB_MAX_QPS) nEntries = NCCL_IB_MAX_QPS;
+
+  uint8_t* payload = resDev->portRecoveryGrhBuf + NCCL_IB_UD_GRH_SIZE;
+  memcpy(recoveryContext->remoteQpns, payload, nEntries * sizeof(struct RecoveryQpnEntry));
+  recoveryContext->nRemoteQpns = nEntries;
+
+  for (int i = 0; i < nEntries; i++) {
+    INFO(NCCL_NET, "NET/IB: %s: Extracted remote QPN: qpIndex=%u newQpn=%u (comm=%p)",
+         __func__, recoveryContext->remoteQpns[i].qpIndex,
+         recoveryContext->remoteQpns[i].newQpn,
+         recoveryContext->resCtx->baseComm);
+  }
+}
 
 static inline ncclResult_t IbCastPortRecoveryHandleCompletionReceiver(struct ncclIbPortRecoveryContext* recoveryContext, struct ibv_wc completion, bool* success) {
   ncclResult_t res = ncclSuccess;
@@ -551,7 +836,7 @@ static inline ncclResult_t IbCastPortRecoveryHandleCompletionReceiver(struct ncc
       // Receiver waits for it's own local ACK completion
       if (completion.opcode == IBV_WC_RECV) {
         INFO(NCCL_NET, "NET/IB: %s: Receiver expected local completion of ACK message for device %d (comm=%p) but got completion with opcode: %s", __func__, recoveryContext->devIndex, recoveryContext->resCtx->baseComm, ibvWcOpcodeStr(completion.opcode));
-        res = IbCastPortRecoveryPostRecvWorkRequest(recoveryContext->resCtx->portRecoveryQps[recoveryContext->devIndex].qp);
+        res = IbCastPortRecoveryPostRecvWorkRequest(recoveryContext->resCtx->portRecoveryQps[recoveryContext->devIndex].qp, &recoveryContext->resCtx->devs[recoveryContext->devIndex]);
         if (res != ncclSuccess) {
           INFO(NCCL_NET, "NET/IB: %s: Receiver failed to post recv WR on data QP for device %d (comm=%p)", __func__, recoveryContext->devIndex, recoveryContext->resCtx->baseComm);
           *success = false;
@@ -568,19 +853,22 @@ static inline ncclResult_t IbCastPortRecoveryHandleCompletionReceiver(struct ncc
       INFO(NCCL_NET, "NET/IB: %s: Receiver's ACK message completed locally for device %d (comm=%p)", __func__, recoveryContext->devIndex, recoveryContext->resCtx->baseComm);
     } else {
       assert(completion.opcode == IBV_WC_RECV);
-      if (completion.imm_data == recoveryContext->aliveMsgNextId) {
-        // In-order alive message
-        recoveryContext->recv.nInOrderMsgsReceived++;
-        recoveryContext->aliveMsgNextId++;
-        INFO(NCCL_NET, "NET/IB: %s: Receiver received in-order alive message %u for device %d (nInOrderMsgsReceived=%d, comm=%p)", __func__, completion.imm_data, recoveryContext->devIndex, recoveryContext->recv.nInOrderMsgsReceived, recoveryContext->resCtx->baseComm);
+      uint32_t id = completion.imm_data;
+      int seqSize = ncclParamIbCastResiliencyPortRecoveryAliveMsgSequenceSize();
+      uint32_t windowEnd = recoveryContext->recv.windowBase + seqSize;
+      if (id >= recoveryContext->recv.windowBase && id < windowEnd) {
+        recoveryContext->recv.receivedBits |= (1u << (id - recoveryContext->recv.windowBase));
+        INFO(NCCL_NET, "NET/IB: %s: Receiver got alive message %u in window [%u,%u) for device %d (bits=0x%x, comm=%p)", __func__, id, recoveryContext->recv.windowBase, windowEnd, recoveryContext->devIndex, recoveryContext->recv.receivedBits, recoveryContext->resCtx->baseComm);
+      } else if (id >= windowEnd) {
+        uint32_t newBase = id - (id % seqSize);
+        recoveryContext->recv.windowBase = newBase;
+        recoveryContext->recv.receivedBits = (1u << (id - newBase));
+        INFO(NCCL_NET, "NET/IB: %s: Receiver shifted window to [%u,%u) on alive message %u for device %d (comm=%p)", __func__, newBase, newBase + seqSize, id, recoveryContext->devIndex, recoveryContext->resCtx->baseComm);
       } else {
-        // Out-of-order alive message
-        INFO(NCCL_NET, "NET/IB: %s: Receiver received out-of-order alive message %u (expected %u) for device %d (comm=%p)", __func__, completion.imm_data, recoveryContext->aliveMsgNextId, recoveryContext->devIndex, recoveryContext->resCtx->baseComm);
-        recoveryContext->aliveMsgNextId = completion.imm_data + 1;
-        recoveryContext->recv.nInOrderMsgsReceived = 0;
+        INFO(NCCL_NET, "NET/IB: %s: Receiver ignoring stale alive message %u (window base=%u) for device %d (comm=%p)", __func__, id, recoveryContext->recv.windowBase, recoveryContext->devIndex, recoveryContext->resCtx->baseComm);
       }
       recoveryContext->timeLastMsg = clockNano();
-      res = IbCastPortRecoveryPostRecvWorkRequest(recoveryContext->resCtx->portRecoveryQps[recoveryContext->devIndex].qp);
+      res = IbCastPortRecoveryPostRecvWorkRequest(recoveryContext->resCtx->portRecoveryQps[recoveryContext->devIndex].qp, &recoveryContext->resCtx->devs[recoveryContext->devIndex]);
       if (res != ncclSuccess) {
           INFO(NCCL_NET, "NET/IB: %s: Receiver failed to post recv WR on recovery QP for device %d (comm=%p)", __func__, recoveryContext->devIndex, recoveryContext->resCtx->baseComm);
         *success = false;
@@ -592,6 +880,10 @@ static inline ncclResult_t IbCastPortRecoveryHandleCompletionReceiver(struct ncc
     assert(completion.opcode == IBV_WC_RECV);
     assert(completion.imm_data == NCCL_IB_RESILIENCY_PORT_RECOVERY_ACK_MSG_ID);
     INFO(NCCL_NET, "NET/IB: %s: Receiver received final ACK message for device %d (comm=%p)", __func__, recoveryContext->devIndex, recoveryContext->resCtx->baseComm);
+    // On AINIC, extract sender's new QPNs from the final ACK payload
+    if (IbCastAinicRoce) {
+      IbCastPortRecoveryExtractQpns(recoveryContext, &completion);
+    }
     recoveryContext->ackReceived = true;
   }
   *success = true;
@@ -617,6 +909,10 @@ static inline ncclResult_t IbCastPortRecoveryHandleCompletionSender(struct ncclI
       assert(completion.opcode == IBV_WC_RECV);
       assert(completion.imm_data == NCCL_IB_RESILIENCY_PORT_RECOVERY_ACK_MSG_ID);
       INFO(NCCL_NET, "NET/IB: %s: Sender received an ACK message from the receiver for device %d (comm=%p)", __func__, recoveryContext->devIndex, recoveryContext->resCtx->baseComm);
+      // On AINIC, extract receiver's new QPNs from the ACK payload
+      if (IbCastAinicRoce) {
+        IbCastPortRecoveryExtractQpns(recoveryContext, &completion);
+      }
       recoveryContext->ackReceived = true;
       *success = true;
       return ncclSuccess;
@@ -681,6 +977,7 @@ static inline ncclResult_t IbCastPortRecoveryPostAliveMessages(struct ncclIbPort
     WARN("NET/IB: %s: Requested alive message batch size %d exceeds maximum supported %d", __func__, nMsgsToPost, NCCL_IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_BATCH_SIZE_MAX);
     return ncclInternalError;
   }
+  int devIdx = recoveryContext->devIndex;
   for (int i = 0; i < nMsgsToPost; i++) {
     memset(&wr[i], 0, sizeof(wr[i]));
     wr[i].opcode = IBV_WR_SEND_WITH_IMM;
@@ -689,6 +986,9 @@ static inline ncclResult_t IbCastPortRecoveryPostAliveMessages(struct ncclIbPort
     wr[i].sg_list = NULL;
     wr[i].num_sge = 0;
     wr[i].wr_id = recoveryContext->aliveMsgNextId;
+    wr[i].wr.ud.ah = recoveryContext->resCtx->portRecoveryAh[devIdx];
+    wr[i].wr.ud.remote_qpn = recoveryContext->resCtx->portRecoveryRemoteQpn[devIdx];
+    wr[i].wr.ud.remote_qkey = NCCL_IB_RECOVERY_QKEY;
     if (i < nMsgsToPost - 1) {
       wr[i].next = &wr[i + 1];
     } else {
@@ -700,7 +1000,7 @@ static inline ncclResult_t IbCastPortRecoveryPostAliveMessages(struct ncclIbPort
 
   // Post the send operation on the recovery QP.
   struct ncclIbQp* recoveryQp = &recoveryContext->resCtx->portRecoveryQps[recoveryContext->devIndex];
-  if (ibv_post_send(recoveryQp->qp, &wr[0], &bad_wr)) {
+  if (wrap_ibv_post_send(recoveryQp->qp, &wr[0], &bad_wr) != ncclSuccess) {
     INFO(NCCL_NET, "NET/IB: %s: Sender failed to post alive messages batch on device %d (comm=%p, qp_num=%u)", __func__, recoveryContext->devIndex, recoveryContext->resCtx->baseComm, recoveryQp->qp->qp_num);
     *success = false;
     return ncclSuccess;
@@ -716,18 +1016,22 @@ static inline ncclResult_t IbCastPortRecoveryPostAck(ncclIbPortRecoveryContext* 
   struct ibv_send_wr *bad_wr = NULL;
   struct ibv_send_wr wr;
   memset(&wr, 0, sizeof(wr));
+  int devIdx = recoveryContext->devIndex;
   wr.wr_id = recoveryContext->aliveMsgNextId;
   wr.opcode = IBV_WR_SEND_WITH_IMM;
   wr.imm_data = NCCL_IB_RESILIENCY_PORT_RECOVERY_ACK_MSG_ID;
   wr.send_flags = IBV_SEND_SIGNALED;
   wr.sg_list = NULL;
   wr.num_sge = 0;
+  wr.wr.ud.ah = recoveryContext->resCtx->portRecoveryAh[devIdx];
+  wr.wr.ud.remote_qpn = recoveryContext->resCtx->portRecoveryRemoteQpn[devIdx];
+  wr.wr.ud.remote_qkey = NCCL_IB_RECOVERY_QKEY;
 
   INFO(NCCL_NET, "NET/IB: %s: %s posting ACK message for device %d (comm=%p)", __func__, recoveryContext->resCtx->baseComm->isSend ? "Sender" : "Receiver", recoveryContext->devIndex, recoveryContext->resCtx->baseComm);
 
   // Post the send operation on the recovery QP.
   struct ncclIbQp* recoveryQp = &recoveryContext->resCtx->portRecoveryQps[recoveryContext->devIndex];
-  if (ibv_post_send(recoveryQp->qp, &wr, &bad_wr)) {
+  if (wrap_ibv_post_send(recoveryQp->qp, &wr, &bad_wr) != ncclSuccess) {
     INFO(NCCL_NET, "NET/IB: %s: Failed to post ack message on device %d (comm=%p, qp_num=%u)", __func__, recoveryContext->devIndex, recoveryContext->resCtx->baseComm, recoveryQp->qp->qp_num);
     *success = false;
     return ncclSuccess;
@@ -786,7 +1090,8 @@ static inline ncclResult_t IbCastPortRecoveryProgressAliveMessagesReceiver(ncclI
       *outResult = ncclIbPortRecoveryStateProgressResultFailed;
       return ncclSuccess;
     }
-    if (recoveryContext->recv.nInOrderMsgsReceived > ncclParamIbCastResiliencyPortRecoveryAliveMsgSequenceSize()) {
+    uint32_t allSet = (1u << ncclParamIbCastResiliencyPortRecoveryAliveMsgSequenceSize()) - 1;
+    if (recoveryContext->recv.receivedBits == allSet) {
       // Received enough in-order alive messages. Draining the CQ from any
       // remaining alive messages and proceeding to restore QPs and post ACK.
       // Draining is important to ensure that if the receiver goes back to the
@@ -798,13 +1103,20 @@ static inline ncclResult_t IbCastPortRecoveryProgressAliveMessagesReceiver(ncclI
         return ncclSuccess;
       }
       INFO(NCCL_NET, "NET/IB: %s: Receiver received enough in-order alive messages for device %d (comm=%p). Restoring QPs and posting ACK message.", __func__, recoveryContext->devIndex, recoveryContext->resCtx->baseComm);
-      NCCLCHECK(IbCastPortRecoveryQpsRestore(recoveryContext, &success));
-      if (!success) {
-        INFO(NCCL_NET, "NET/IB: %s: Receiver failed to restore QPs on device %d (comm=%p)", __func__, recoveryContext->devIndex, recoveryContext->resCtx->baseComm);
-        *outResult = ncclIbPortRecoveryStateProgressResultFailed;
-        return ncclSuccess;
+      if (IbCastAinicRoce) {
+        // AINIC workaround: destroy+recreate QPs (Phase A), send ACK with QPNs
+        NCCLCHECK(IbCastPortRecoveryQpsDestroyAndCreate(recoveryContext));
+        NCCLCHECK(IbCastPortRecoveryPostAckWithQpns(recoveryContext, &success));
+      } else {
+        // bnxt_re: standard RESET path, send zero-byte ACK
+        NCCLCHECK(IbCastPortRecoveryQpsRestore(recoveryContext, &success));
+        if (!success) {
+          INFO(NCCL_NET, "NET/IB: %s: Receiver failed to restore QPs on device %d (comm=%p)", __func__, recoveryContext->devIndex, recoveryContext->resCtx->baseComm);
+          *outResult = ncclIbPortRecoveryStateProgressResultFailed;
+          return ncclSuccess;
+        }
+        NCCLCHECK(IbCastPortRecoveryPostAck(recoveryContext, &success));
       }
-      NCCLCHECK(IbCastPortRecoveryPostAck(recoveryContext, &success));
       if (!success) {
         INFO(NCCL_NET, "NET/IB: %s: Failed to post ACK message for device %d (comm=%p)", __func__, recoveryContext->devIndex, recoveryContext->resCtx->baseComm);
         *outResult = ncclIbPortRecoveryStateProgressResultFailed;
@@ -846,14 +1158,20 @@ static inline ncclResult_t IbCastPortRecoveryProgressAliveMessagesReceiver(ncclI
           *outResult = ncclIbPortRecoveryStateProgressResultFailed;
           return ncclSuccess;
         }
-        // Go back to alive messages state
+        // Go back to alive messages state. On AINIC, the QPs created in Phase A
+        // (currently in INIT state) will be destroyed+recreated again when the
+        // receiver re-enters Phase A on the next attempt. The sender also retries
+        // from alive messages state, so both sides restart the full handshake
+        // with fresh QPNs — no stale QPN mismatch.
         recoveryContext->ackPosted = false;
         recoveryContext->ackCompleted = false;
+        recoveryContext->nLocalQpns = 0;
+        recoveryContext->nRemoteQpns = 0;
         recoveryContext->timeLastMsg = now;
         *outResult = ncclIbPortRecoveryStateProgressResultGoToPrevState;
         INFO(NCCL_NET, "NET/IB: %s: Receiver posting (%d) recv WRs on device %d (comm=%p)", __func__, NCCL_IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_BATCH_SIZE_MAX, recoveryContext->devIndex, recoveryContext->resCtx->baseComm);
         for (int i = 0; i < NCCL_IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_BATCH_SIZE_MAX; i++) {
-          res = IbCastPortRecoveryPostRecvWorkRequest(recoveryContext->resCtx->portRecoveryQps[recoveryContext->devIndex].qp);
+          res = IbCastPortRecoveryPostRecvWorkRequest(recoveryContext->resCtx->portRecoveryQps[recoveryContext->devIndex].qp, &recoveryContext->resCtx->devs[recoveryContext->devIndex]);
           if (res != ncclSuccess) {
             INFO(NCCL_NET, "NET/IB: %s: Receiver failed to post recv WR on recovery QP for device %d (comm=%p)", __func__, recoveryContext->devIndex, recoveryContext->resCtx->baseComm);
             *outResult = ncclIbPortRecoveryStateProgressResultFailed;
@@ -926,13 +1244,22 @@ static inline ncclResult_t IbCastPortRecoveryProgressAckSender(ncclIbPortRecover
   }
 
   if (recoveryContext->ackPosted == false) {
-    NCCLCHECK(IbCastPortRecoveryQpsRestore(recoveryContext, &success));
-    if (!success) {
-      INFO(NCCL_NET, "NET/IB: %s: Sender failed to restore QPs on device %d (comm=%p)", __func__, recoveryContext->devIndex, recoveryContext->resCtx->baseComm);
-      *outResult = ncclIbPortRecoveryStateProgressResultFailed;
-      return ncclSuccess;
+    if (IbCastAinicRoce) {
+      // AINIC workaround: Phase A (destroy+create) + Phase B (RTR+RTS with
+      // receiver's QPNs), then send final ACK with our new QPNs
+      NCCLCHECK(IbCastPortRecoveryQpsDestroyAndCreate(recoveryContext));
+      NCCLCHECK(IbCastPortRecoveryQpsToRts(recoveryContext));
+      NCCLCHECK(IbCastPortRecoveryPostAckWithQpns(recoveryContext, &success));
+    } else {
+      // bnxt_re: standard RESET path, send zero-byte final ACK
+      NCCLCHECK(IbCastPortRecoveryQpsRestore(recoveryContext, &success));
+      if (!success) {
+        INFO(NCCL_NET, "NET/IB: %s: Sender failed to restore QPs on device %d (comm=%p)", __func__, recoveryContext->devIndex, recoveryContext->resCtx->baseComm);
+        *outResult = ncclIbPortRecoveryStateProgressResultFailed;
+        return ncclSuccess;
+      }
+      NCCLCHECK(IbCastPortRecoveryPostAck(recoveryContext, &success));
     }
-    NCCLCHECK(IbCastPortRecoveryPostAck(recoveryContext, &success));
     if (!success) {
       INFO(NCCL_NET, "NET/IB: %s: Failed to post ack for device %d (comm=%p)", __func__, recoveryContext->devIndex, recoveryContext->resCtx->baseComm);
       *outResult = ncclIbPortRecoveryStateProgressResultFailed;
@@ -976,10 +1303,13 @@ static inline ncclResult_t IbCastPortRecoveryProgressAckReceiver(ncclIbPortRecov
         return ncclSuccess;
       }
       *outResult = ncclIbPortRecoveryStateProgressResultGoToPrevState;
-      // Reset internal state
+      // Reset internal state. On AINIC, QPs from Phase A will be destroyed+
+      // recreated again on the next attempt with fresh QPNs.
       recoveryContext->ackPosted = false;
       recoveryContext->ackCompleted = false;
-      recoveryContext->recv.nInOrderMsgsReceived = 0;
+      recoveryContext->recv.receivedBits = 0;
+      recoveryContext->nLocalQpns = 0;
+      recoveryContext->nRemoteQpns = 0;
       NCCLCHECK(IbCastPortRecoveryDrainCqAndPostReceiveWRs(recoveryContext, &success));
       if (!success) {
         INFO(NCCL_NET, "NET/IB: %s: Failed to drain CQ and post recv WRs for device %d (comm=%p)", __func__, recoveryContext->devIndex, recoveryContext->resCtx->baseComm);
@@ -990,6 +1320,11 @@ static inline ncclResult_t IbCastPortRecoveryProgressAckReceiver(ncclIbPortRecov
       *outResult = ncclIbPortRecoveryStateProgressResultInProgress;
     }
   } else {
+    // Final ACK received. On AINIC, complete Phase B (RTR+RTS with sender's QPNs).
+    // On bnxt_re, QPs were already restored before the ACK was posted.
+    if (IbCastAinicRoce && recoveryContext->nRemoteQpns > 0) {
+      NCCLCHECK(IbCastPortRecoveryQpsToRts(recoveryContext));
+    }
     *outResult = ncclIbPortRecoveryStateProgressResultGoToNextState;
   }
   return ncclSuccess;

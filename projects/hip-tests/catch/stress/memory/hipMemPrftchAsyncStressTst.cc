@@ -116,6 +116,6 @@ HIP_TEST_CASE(Stress_hipMemPrefetchAsyncOneToAll) {
     // Releasing the resources in case all the scenarios passed
     HIP_CHECK(hipFree(Hmm1));
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }

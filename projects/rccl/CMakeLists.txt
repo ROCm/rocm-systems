@@ -76,6 +76,7 @@ option(ENABLE_CODE_COVERAGE                    "Enable code coverage"           
 option(ENABLE_NPKIT                            "Enable NPKit"                                  OFF)
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
 option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     ON)
+option(EMIT_LLVM_IR                            "Emit LLVM IR/bitcode for nccl_device APIs"     OFF)
 option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             OFF)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
@@ -175,6 +176,20 @@ else()
 endif()
 
 set(GPU_TARGETS "${SUPPORTED_GPUS}")
+
+# Fail fast if we ended up with no GPU targets at all
+if(NOT GPU_TARGETS OR "${GPU_TARGETS}" STREQUAL "NOTFOUND")
+  message(FATAL_ERROR
+    "GPU_TARGETS is empty (resolved to '${GPU_TARGETS}').\n"
+    "This usually means ./install.sh -l was used on a host with no visible "
+    "AMD GPU (no /dev/kfd, no /dev/dri), so local-arch detection found "
+    "nothing to target.\n"
+    "\n"
+    "If you wish to build here anyway, re-run with an explicit GPU "
+    "architecture, e.g.:\n"
+    "    ./install.sh --amdgpu_targets gfx1201\n")
+endif()
+
 message(STATUS "Compiling for ${GPU_TARGETS}")
 
 ## NOTE: Reload rocm-cmake in order to update GPU_TARGETS
@@ -312,6 +327,9 @@ check_cxx_source_compiles("
   }
 " HIP_FABRIC_HANDLE_TYPE)
 
+### Check for hipMemcpyBatchAsync support (Copy Engine batch API)
+check_symbol_exists("hipMemcpyBatchAsync" "hip/hip_runtime_api.h" HIP_MEMCPY_BATCH_ASYNC)
+
 unset(CMAKE_REQUIRED_LIBRARIES)
 
 ### Check for indirect function call support
@@ -335,6 +353,17 @@ else()
   message(STATUS "RCCL LL128 protocol disabled - requires HIP version >= 6.1.33591")
 endif()
 
+## Check for Copy Engine (CE) batch API support
+## hipMemcpyBatchAsync symbol presence is the sole gate: if the SDK exposes the
+## symbol, CE is supported regardless of the exact version string.
+if(HIP_MEMCPY_BATCH_ASYNC)
+  set(CE_ENABLED ON)
+  message(STATUS "Copy Engine (CE) batch API enabled")
+else()
+  set(CE_ENABLED OFF)
+  message(STATUS "Copy Engine (CE) batch API disabled - hipMemcpyBatchAsync not found in hip/hip_runtime_api.h")
+endif()
+
 ## Check for hsa-runtime64
 find_package(hsa-runtime64 REQUIRED)
 get_target_property(HSA_INCLUDE_PATH hsa-runtime64::hsa-runtime64 INTERFACE_INCLUDE_DIRECTORIES)
@@ -354,6 +383,27 @@ if(ROCM_VERSION VERSION_GREATER_EQUAL "71100")
     endif()
     message(STATUS "Found amd_smi at ${SMI_INCLUDE_DIR}")
     set(SMI_LIBRARIES amd_smi)
+
+    ### Check whether the installed amdsmi headers expose the UALoE fabric struct
+    ### (amdsmi_fabric_info_t). The probe compiles against the struct only — no
+    ### link-time dependency on amdsmi_get_gpu_fabric_info — because amdsmi is
+    ### loaded lazily at runtime via dlopen. If the struct is absent, the compat
+    ### types in amdsmi_wrap.h must be compiled in.
+    set(CMAKE_REQUIRED_INCLUDES "${SMI_INCLUDE_DIR}")
+    check_cxx_source_compiles("
+      #include <amd_smi/amdsmi.h>
+      int main() {
+        amdsmi_fabric_info_t info{};
+        (void)info;
+        return 0;
+      }
+    " AMDSMI_FABRIC_API)
+    unset(CMAKE_REQUIRED_INCLUDES)
+    if(AMDSMI_FABRIC_API)
+      message(STATUS "amdsmi UALoE fabric API found - enabling AMDSMI_FABRIC_DIRECT")
+    else()
+      message(STATUS "amdsmi UALoE fabric API not found - using compat types")
+    endif()
   endif()
 endif()
 
@@ -550,6 +600,21 @@ configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/nccl.h)      # Used b
 # Source directory contains library creation
 add_subdirectory(src)
 
+# LLVM IR / bitcode for nccl_device APIs (HIP / AMDGPU)
+#==================================================================================================
+# When EMIT_LLVM_IR=ON, build a standalone LLVM bitcode artifact (librccl_device.bc)
+# plus a C wrapper header (nccl_device_wrapper.h) from src/include/nccl_device/.
+# The bitcode is generated from the hipify-staged headers that librccl.so itself
+# is compiled from, so the IR is guaranteed to match the host library.
+if(EMIT_LLVM_IR)
+  add_subdirectory(bindings/ir)
+  # bindings/ir/ reads headers out of ${PROJECT_BINARY_DIR}/hipify, which is
+  # populated by the copy_nccl_device_headers target defined in src/CMakeLists.txt.
+  add_dependencies(llvm_ir copy_nccl_device_headers)
+  # Convenience aggregate target: builds librccl.so together with the bitcode.
+  add_custom_target(rccl_with_ir ALL DEPENDS rccl llvm_ir)
+endif()
+
 # Install settings
 #==================================================================================================
 ## Specify install targets
@@ -558,6 +623,20 @@ rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/rccl/rccl.h src/include/p
              DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)
 rocm_install(FILES       src/include/api_trace.h
              DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl/amd_detail)
+## Optional: install LLVM bitcode artifacts when EMIT_LLVM_IR is enabled.
+## librccl_device.bc, nccl_device_wrapper.h, hipified nccl_device headers,
+## and nccl.h (same as rccl.h; nccl_device #includes <nccl.h>) are produced
+## before install because rccl_with_ir is part of ALL.
+if(EMIT_LLVM_IR)
+  rocm_install(FILES       ${PROJECT_BINARY_DIR}/lib/librccl_device.bc
+               DESTINATION ${CMAKE_INSTALL_LIBDIR}/rccl)
+  rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/nccl_device_wrapper.h
+                           ${PROJECT_BINARY_DIR}/include/nccl_device.h
+                           ${PROJECT_BINARY_DIR}/include/nccl.h
+               DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)
+  rocm_install(DIRECTORY   ${PROJECT_BINARY_DIR}/include/nccl_device
+               DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)
+endif()
 ## Install tuner config directory for CSV-based tuner
 file(COPY tuner DESTINATION ${PROJECT_BINARY_DIR})
 rocm_install(DIRECTORY ${PROJECT_BINARY_DIR}/tuner DESTINATION ${CMAKE_INSTALL_DATADIR}/rccl)

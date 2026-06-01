@@ -6,9 +6,11 @@
 
 #include "rocjitsu/isa/arch/amdgpu/cdna2/sopk.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
+#include "util/log.h"
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -286,8 +288,7 @@ SGetregB32Sopk::SGetregB32Sopk(const MachineInst *inst)
 }
 
 void SGetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_getreg_b32_sopk(*this, wf);
 }
 
 SSetregB32Sopk::SSetregB32Sopk(const MachineInst *inst)
@@ -302,8 +303,7 @@ SSetregB32Sopk::SSetregB32Sopk(const MachineInst *inst)
 }
 
 void SSetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_setreg_b32_sopk(*this, wf);
 }
 
 SSetregImm32B32Sopk::SSetregImm32B32Sopk(const MachineInst *inst)
@@ -316,8 +316,7 @@ SSetregImm32B32Sopk::SSetregImm32B32Sopk(const MachineInst *inst)
 }
 
 void SSetregImm32B32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_setreg_imm32_b32_sopk(*this, wf);
 }
 
 SCallB64Sopk::SCallB64Sopk(const MachineInst *inst)

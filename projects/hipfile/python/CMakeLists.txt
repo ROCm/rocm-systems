@@ -8,11 +8,27 @@ find_program(CYTHON_EXECUTABLE cython REQUIRED)
 
 # ---- hipFile library & headers --------------------------------------------
 
+# ROCm install hints: prefer $ROCM_PATH from env; fall back to a glob of
+# /opt/rocm/core-* (7.11+ layout) plus legacy /opt/rocm.
+if(DEFINED ENV{ROCM_PATH})
+    set(_ROCM_ROOTS "$ENV{ROCM_PATH}")
+else()
+    file(GLOB _ROCM_ROOTS "/opt/rocm/core-*")
+    list(APPEND _ROCM_ROOTS "/opt/rocm")
+endif()
+
+set(_ROCM_INCLUDE_HINTS)
+set(_ROCM_LIB_HINTS)
+foreach(_r IN LISTS _ROCM_ROOTS)
+    list(APPEND _ROCM_INCLUDE_HINTS "${_r}/include")
+    list(APPEND _ROCM_LIB_HINTS "${_r}/lib")
+endforeach()
+
 # hipfile.h location (prefer sibling include/ from source, fall back to installed)
 find_path(HIPFILE_INCLUDE_DIR hipfile.h
     HINTS
         "${CMAKE_CURRENT_SOURCE_DIR}/../include"
-        "/opt/rocm/include"
+        ${_ROCM_INCLUDE_HINTS}
     PATH "Path to directory containing hipfile.h"
 )
 if(NOT HIPFILE_INCLUDE_DIR)
@@ -25,7 +41,7 @@ endif()
 find_library(HIPFILE_LIBRARY hipfile
     HINTS
         "${CMAKE_CURRENT_SOURCE_DIR}/../build/src/amd_detail"
-        "/opt/rocm/lib"
+        ${_ROCM_LIB_HINTS}
 )
 if(NOT HIPFILE_LIBRARY)
     message(FATAL_ERROR
@@ -36,8 +52,7 @@ endif()
 # HIP runtime headers (needed because hipfile.h includes hip/hip_runtime_api.h)
 find_path(HIP_INCLUDE_DIR hip/hip_runtime_api.h
     HINTS
-        "/opt/rocm/include"
-        "/opt/rocm/hip/include"
+        ${_ROCM_INCLUDE_HINTS}
 )
 if(NOT HIP_INCLUDE_DIR)
     message(FATAL_ERROR

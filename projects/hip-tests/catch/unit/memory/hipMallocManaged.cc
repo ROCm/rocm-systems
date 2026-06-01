@@ -70,8 +70,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_Basic) {
 HIP_TEST_CASE(Unit_hipMallocManaged_Advanced) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   const size_t N = isQuickLevel() ? (512 * 1024 / sizeof(float)) : numElements;

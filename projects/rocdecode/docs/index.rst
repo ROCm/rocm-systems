@@ -17,9 +17,8 @@ rocDecode is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. 
 
   .. grid-item-card:: Install
 
-    * :doc:`rocDecode prerequisites <./install/rocDecode-prerequisites>`
-    * :doc:`Cloning the rocDecode project <./install/rocDecode-clone-project>`
-    * :doc:`Building and installing rocDecode from source code <./install/rocDecode-build-and-install>`
+    * :doc:`Install rocDecode <./install/rocDecode-install>`
+    * :doc:`Build from source <./install/rocDecode-build-and-install>`
 
 .. grid:: 2
   :gutter: 3

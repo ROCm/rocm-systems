@@ -19,6 +19,8 @@
     #define _HIP_BFLOAT16_H_
     #include <hip/hip_bf16.h>
     typedef __hip_bfloat16 hip_bfloat16;
+  #elif ROCM_VERSION >= 70000
+    #include <hip/hip_bf16.h>
   #else
     #error "RCCL is not using the correct hip_bf16.h file. Please make sure that the correct header is included!"
   #endif
@@ -82,7 +84,7 @@ extern const char* funcNames[];
   #define NCCL_CUDA_ARCH_FAMILY_SPECIFIC 0
 #endif
 
-#include "net_device.h"
+#include "nccl_device/net_device.h"
 
 enum ncclDevRedOp_t {
   ncclDevSum, ncclDevProd, ncclDevMinMax,
@@ -245,6 +247,7 @@ struct ncclProxyConnector {
   int sameProcess;
   struct ncclProxyConnection* connection;
   ncclResult_t (*proxyProgress)(struct ncclProxyState* proxyState, struct ncclProxyArgs*); // Copied from transport if necessary
+  ncclResult_t (*proxyGinProgress)(struct ncclProxyState* proxyState);
 };
 
 struct ncclConnector {
@@ -804,7 +807,8 @@ __device__ constexpr int ncclShmemDynamicSize(int cudaArch = NCCL_CUDA_ARCH) {
 
 // Host-side table of kernel function pointers.
 extern int const ncclDevKernelCount;
-extern void* const ncclDevKernelList[/*ncclDevKernelCount*/];
+extern void* ncclDevKernelList[/*ncclDevKernelCount*/];
+extern int ncclDevKernelRequirements[/*ncclDevKernelCount*/];
 
 // Table of most specialized kernel function to run given func index.
 extern int const ncclDevFuncRowToId[];

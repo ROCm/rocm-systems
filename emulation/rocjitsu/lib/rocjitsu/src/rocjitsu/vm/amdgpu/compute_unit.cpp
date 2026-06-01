@@ -3,6 +3,8 @@
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 
+#include "rocjitsu/vm/amdgpu/command_processor.h"
+
 #include "rocjitsu/isa/arch/amdgpu/cdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
@@ -175,15 +177,6 @@ void ComputeUnitCore::retire_halted_wfs_no_lds_reset() {
 void ComputeUnitCore::retire_halted_wfs() {
   for (auto &w : wfs_) {
     if (w->is_halted() && w->sgpr_alloc().count > 0) {
-      util::Logger::vm([&](auto &os) {
-        static thread_local uint64_t retire_count = 0;
-        static thread_local uint32_t max_wg = 0;
-        if (w->wg_id() > max_wg)
-          max_wg = w->wg_id();
-        if (++retire_count <= 5 || (retire_count % 40) == 0)
-          os << std::format("CU {}: retire #{} wg={} insts={} max_wg_seen={}", this->name(),
-                            retire_count, w->wg_id(), w->trace_inst_count_, max_wg);
-      });
       sgpr_file_.free(w->sgpr_alloc().base);
       free_vgprs(w->vgpr_alloc().base);
       w->trace_inst_count_ = 0;
@@ -192,6 +185,16 @@ void ComputeUnitCore::retire_halted_wfs() {
   }
   if (!has_active_wfs()) {
     reset_lds_alloc();
+  }
+}
+
+void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id) {
+  auto key = wg_key(dispatch_id, wg_id);
+  auto it = active_wgs_.find(key);
+  if (it != active_wgs_.end() && --it->second == 0) {
+    active_wgs_.erase(it);
+    if (cp_)
+      cp_->notify_wg_complete(dispatch_id, wg_id);
   }
 }
 
@@ -286,6 +289,37 @@ void ComputeUnitCore::issue_local_mem(const std::array<uint64_t, 64> &addrs, uin
 bool ComputeUnitCore::step() {
   tick_pipelines();
 
+  {
+    static thread_local uint64_t step_count = 0;
+    if ((++step_count % 2000000) == 0) {
+      util::Logger::vm([&](auto &os) {
+        for (auto &w : wfs_) {
+          if (w->sgpr_alloc().count == 0)
+            continue;
+          const char *st = "?";
+          switch (w->state()) {
+          case WfState::HALTED:
+            st = "H";
+            break;
+          case WfState::RUNNING:
+            st = "R";
+            break;
+          case WfState::WAITCNT:
+            st = "W";
+            break;
+          case WfState::BARRIER:
+            st = "B";
+            break;
+          case WfState::ENDING:
+            st = "E";
+            break;
+          }
+          os << std::format("wf{}[d={} wg={} {}] ", w->wf_id(), w->dispatch_id(), w->wg_id(), st);
+        }
+      });
+    }
+  }
+
   if (!has_active_wfs()) {
     // Final pipeline drain: complete deferred load writebacks for wavefronts
     // that halted on the previous step (after tick_pipelines ran but before
@@ -343,6 +377,13 @@ bool ComputeUnitCore::step() {
           if (w2->wg_id() == wg && w2->state() == WfState::BARRIER)
             w2->set_state(WfState::RUNNING);
       }
+    }
+    // Drain WAITCNT and ENDING wavefronts that are ready to proceed.
+    for (auto &w : wfs_) {
+      if (w->state() == WfState::WAITCNT && w->wait_satisfied())
+        w->set_state(WfState::RUNNING);
+      else if (w->state() == WfState::ENDING && w->wait_counters().empty())
+        w->halt();
     }
     retire_halted_wfs();
     return has_active_wfs();
@@ -404,56 +445,24 @@ bool ComputeUnitCore::step() {
   assert(inst_size_signed > 0 && "instruction size must be positive");
   auto inst_size = static_cast<uint64_t>(inst_size_signed);
 
-  util::Logger::vm([&](auto &os) {
-    if (active->pc == 0x4d0024938cULL || active->pc == 0x4d00249304ULL ||
-        active->pc == 0x4d00249324ULL || active->pc == 0x4d00249358ULL)
-      os << std::format("FILL_INST pc={:#x} mnem={} exec={:#x} wf={}", active->pc, inst->mnemonic(),
-                        active->exec(), active->wf_id());
-  });
-
-  // Per-instruction trace: snapshot registers and flags for wf0 (and wf2 first 100).
   if constexpr (util::Logger::group_enabled(util::Logger::GROUP_VM)) {
-    if (((active->wf_id() == 0 && active->trace_inst_count_ <= 2000) ||
-         (active->wf_id() == 2 && active->trace_inst_count_ <= 100)) &&
-        active->num_vgprs_ >= 32) {
+    if (active->num_vgprs_ > 0) {
       util::Logger::vm([&](auto &os) {
-        uint32_t sb = active->sgpr_alloc().base;
         uint32_t vb = active->vgpr_alloc().base;
-        os << std::format("{} wg[{}] wf[{}] EXECUTE #{} pc={:#x} {} w={:08x},{:08x}",
-                          this->full_path(), active->wg_id(), active->wf_id(),
-                          active->trace_inst_count_, active->pc, inst->mnemonic(), words[0],
-                          words[1]);
-        os << std::format(" s[0:7]={:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}"
-                          " s[8:15]={:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}",
-                          read_sgpr(sb), read_sgpr(sb + 1), read_sgpr(sb + 2), read_sgpr(sb + 3),
-                          read_sgpr(sb + 4), read_sgpr(sb + 5), read_sgpr(sb + 6),
-                          read_sgpr(sb + 7), read_sgpr(sb + 8), read_sgpr(sb + 9),
-                          read_sgpr(sb + 10), read_sgpr(sb + 11), read_sgpr(sb + 12),
-                          read_sgpr(sb + 13), read_sgpr(sb + 14), read_sgpr(sb + 15));
-        os << std::format(
-            " s[16:31]={:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}"
-            ",{:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}"
-            " v[0:7]L0={:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}"
-            " v[8:15]L0={:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}"
-            " scc={} vcc={:x} exec={:x}",
-            read_sgpr(sb + 16), read_sgpr(sb + 17), read_sgpr(sb + 18), read_sgpr(sb + 19),
-            read_sgpr(sb + 20), read_sgpr(sb + 21), read_sgpr(sb + 22), read_sgpr(sb + 23),
-            read_sgpr(sb + 24), read_sgpr(sb + 25), read_sgpr(sb + 26), read_sgpr(sb + 27),
-            read_sgpr(sb + 28), read_sgpr(sb + 29), read_sgpr(sb + 30), read_sgpr(sb + 31),
-            read_vgpr(vb, 0), read_vgpr(vb + 1, 0), read_vgpr(vb + 2, 0), read_vgpr(vb + 3, 0),
-            read_vgpr(vb + 4, 0), read_vgpr(vb + 5, 0), read_vgpr(vb + 6, 0), read_vgpr(vb + 7, 0),
-            read_vgpr(vb + 8, 0), read_vgpr(vb + 9, 0), read_vgpr(vb + 10, 0),
-            read_vgpr(vb + 11, 0), read_vgpr(vb + 12, 0), read_vgpr(vb + 13, 0),
-            read_vgpr(vb + 14, 0), read_vgpr(vb + 15, 0), active->read_scc(), active->vcc(),
-            active->exec());
-        if (active->num_sgprs_ >= 80)
-          os << std::format(
-              " s[64:79]={:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}"
-              ",{:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}",
-              read_sgpr(sb + 64), read_sgpr(sb + 65), read_sgpr(sb + 66), read_sgpr(sb + 67),
-              read_sgpr(sb + 68), read_sgpr(sb + 69), read_sgpr(sb + 70), read_sgpr(sb + 71),
-              read_sgpr(sb + 72), read_sgpr(sb + 73), read_sgpr(sb + 74), read_sgpr(sb + 75),
-              read_sgpr(sb + 76), read_sgpr(sb + 77), read_sgpr(sb + 78), read_sgpr(sb + 79));
+        os << std::format("{} wg[{}] wf[{}] EXECUTE #{} pc={:#x} {} sz={}", this->full_path(),
+                          active->wg_id(), active->wf_id(), active->trace_inst_count_, active->pc,
+                          inst->mnemonic(), inst_size);
+        os << " enc=";
+        for (uint64_t w = 0; w < inst_size / 4; ++w)
+          os << std::format("{}{:08x}", w ? "," : "", words[w]);
+        os << std::format(" scc={} vcc={:x} exec={:x}", active->read_scc(), active->vcc(),
+                          active->exec());
+        uint32_t nvr = std::min(active->num_vgprs_, 16u);
+        for (uint32_t ln = 0; ln < active->wf_size_; ++ln) {
+          os << std::format("\n[rj log VM]  PRE L{}: v[0:{}]=", ln, nvr - 1);
+          for (uint32_t r = 0; r < nvr; ++r)
+            os << std::format("{}{:x}", r ? "," : "", read_vgpr(vb + r, ln));
+        }
       });
     }
   }
@@ -463,35 +472,17 @@ bool ComputeUnitCore::step() {
   execute_instruction(inst, *active);
 
   if constexpr (util::Logger::group_enabled(util::Logger::GROUP_VM)) {
-    if (active->wf_id() == 0 && active->trace_inst_count_ <= 2000 && active->num_vgprs_ >= 32) {
+    if (active->num_vgprs_ > 0) {
       util::Logger::vm([&](auto &os) {
-        uint32_t sb = active->sgpr_alloc().base;
         uint32_t vb = active->vgpr_alloc().base;
-        os << std::format("RESULT  #{}"
-                          " s[0:7]={:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}"
-                          " s[8:15]={:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}",
-                          active->trace_inst_count_, read_sgpr(sb), read_sgpr(sb + 1),
-                          read_sgpr(sb + 2), read_sgpr(sb + 3), read_sgpr(sb + 4),
-                          read_sgpr(sb + 5), read_sgpr(sb + 6), read_sgpr(sb + 7),
-                          read_sgpr(sb + 8), read_sgpr(sb + 9), read_sgpr(sb + 10),
-                          read_sgpr(sb + 11), read_sgpr(sb + 12), read_sgpr(sb + 13),
-                          read_sgpr(sb + 14), read_sgpr(sb + 15));
-        os << std::format(
-            " s[16:31]={:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}"
-            ",{:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}"
-            " v[0:7]L0={:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}"
-            " v[8:15]L0={:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}"
-            " scc={} vcc={:x} exec={:x}",
-            read_sgpr(sb + 16), read_sgpr(sb + 17), read_sgpr(sb + 18), read_sgpr(sb + 19),
-            read_sgpr(sb + 20), read_sgpr(sb + 21), read_sgpr(sb + 22), read_sgpr(sb + 23),
-            read_sgpr(sb + 24), read_sgpr(sb + 25), read_sgpr(sb + 26), read_sgpr(sb + 27),
-            read_sgpr(sb + 28), read_sgpr(sb + 29), read_sgpr(sb + 30), read_sgpr(sb + 31),
-            read_vgpr(vb, 0), read_vgpr(vb + 1, 0), read_vgpr(vb + 2, 0), read_vgpr(vb + 3, 0),
-            read_vgpr(vb + 4, 0), read_vgpr(vb + 5, 0), read_vgpr(vb + 6, 0), read_vgpr(vb + 7, 0),
-            read_vgpr(vb + 8, 0), read_vgpr(vb + 9, 0), read_vgpr(vb + 10, 0),
-            read_vgpr(vb + 11, 0), read_vgpr(vb + 12, 0), read_vgpr(vb + 13, 0),
-            read_vgpr(vb + 14, 0), read_vgpr(vb + 15, 0), active->read_scc(), active->vcc(),
-            active->exec());
+        os << std::format("RESULT #{} scc={} vcc={:x} exec={:x}", active->trace_inst_count_,
+                          active->read_scc(), active->vcc(), active->exec());
+        uint32_t nvr = std::min(active->num_vgprs_, 16u);
+        for (uint32_t ln = 0; ln < active->wf_size_; ++ln) {
+          os << std::format("\n[rj log VM]  POST L{}: v[0:{}]=", ln, nvr - 1);
+          for (uint32_t r = 0; r < nvr; ++r)
+            os << std::format("{}{:x}", r ? "," : "", read_vgpr(vb + r, ln));
+        }
       });
     }
   }

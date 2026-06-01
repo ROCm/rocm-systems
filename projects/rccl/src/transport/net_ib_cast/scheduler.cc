@@ -425,7 +425,7 @@ ncclResult_t IbCastQpSchedFreeRemap(struct ncclIbRemapWrId* r) {
 // Test introspection API — exposes internal WRR scheduler state from a
 // sendComm handle.  Only intended for unit tests; not part of the public net
 // plugin ABI.
-// Struct definition and function prototypes live in src/include/net_ib_cast_inspect.h.
+// Struct definition and function prototypes live in src/transport/net_ib_cast/net_ib_cast_inspect.h.
 // =============================================================================
 
 // ncclIbCastGetSchedState — copy WRR scheduler state out of a sendComm.
@@ -506,3 +506,35 @@ extern "C" ncclResult_t ncclIbCastSetSchedParms(void* sendComm,
     base->schedParms.splitDataMin = splitDataMin;
     return ncclSuccess;
 }
+
+#ifdef ENABLE_FAULT_INJECTION
+#include "p2p_resiliency_cast.h"
+
+extern "C" ncclResult_t ncclIbCastGetResiliencyState(void* sendComm, struct ncclIbCastResiliencyState* out) {
+  if (!sendComm || !out) return ncclInvalidArgument;
+  struct ncclIbSendComm* comm = (struct ncclIbSendComm*) sendComm;
+  struct ncclIbResiliency* res = comm->base.resiliency;
+  if (!res) return ncclInvalidArgument;
+
+  out->recoveryEnabled    = res->recoveryEnabled;
+  out->inProgress         = res->inProgress;
+  out->outstandingRequests = res->outstandingRequests;
+  out->outstandingRecovery = res->outstandingRecovery;
+  out->ndevs              = res->ndevs;
+  for (int i = 0; i < res->ndevs && i < NCCL_IB_MAX_DEVS_PER_NIC; i++) {
+    out->devState[i] = (int)res->devs[i].state.load(std::memory_order_acquire);
+    out->recoveryCount[i] = res->devs[i].recoveryCount;
+  }
+
+  return ncclSuccess;
+}
+
+extern "C" ncclResult_t ncclIbCastGetRepostCount(void* sendComm, int* out) {
+  if (!sendComm || !out) return ncclInvalidArgument;
+  struct ncclIbSendComm* comm = (struct ncclIbSendComm*) sendComm;
+  struct ncclIbResiliency* res = comm->base.resiliency;
+  if (!res) return ncclInvalidArgument;
+  *out = res->repostCount;
+  return ncclSuccess;
+}
+#endif /* ENABLE_FAULT_INJECTION */
