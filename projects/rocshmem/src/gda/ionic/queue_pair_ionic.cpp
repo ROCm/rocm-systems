@@ -373,7 +373,7 @@ __device__ void QueuePair::ionic_post_wqe_rma_single(int32_t size,
 
   wqe->common.rdma.remote_va_high = byteswap<uint32_t>(raddr >> 32);
   wqe->common.rdma.remote_va_low = byteswap<uint32_t>(raddr);
-  wqe->common.rdma.remote_rkey = byteswap<uint32_t>(keys[0].rkey);
+  wqe->common.rdma.remote_rkey = byteswap<uint32_t>(rkey);
   wqe->common.length = byteswap<uint32_t>(size);
 
   if (size) {
@@ -502,7 +502,7 @@ __device__ uint64_t QueuePair::ionic_post_wqe_amo_single([[maybe_unused]] int32_
 
   wqe->atomic_v2.remote_va_high = byteswap<uint32_t>(raddr >> 32);
   wqe->atomic_v2.remote_va_low = byteswap<uint32_t>(raddr);
-  wqe->atomic_v2.remote_rkey = byteswap<uint32_t>(keys[0].rkey);
+  wqe->atomic_v2.remote_rkey = byteswap<uint32_t>(rkey);
   wqe->atomic_v2.swap_add_high = byteswap<uint32_t>(atomic_data >> 32);
   wqe->atomic_v2.swap_add_low = byteswap<uint32_t>(atomic_data);
   wqe->atomic_v2.compare_high = byteswap<uint32_t>(atomic_cmp >> 32);

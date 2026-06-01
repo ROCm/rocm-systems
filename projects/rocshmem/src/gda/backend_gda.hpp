@@ -91,10 +91,11 @@ class GDABackend : public Backend {
   enum GDAProvider gda_provider = GDAProvider::UNSET;
 
   // Per-sym-buffer MRs: sym_buf_mrs_[local_base] = per-NIC MR list (indexed by nic index).
-  // One ibv_mr* per NIC, kept for ibv_dereg_mr on unregister.
+  // One ibv_mr* per NIC, kept for cleanup on sym_buffer_unregister.
   std::map<uintptr_t, std::vector<ibv_mr*>> sym_buf_mrs_;
-  // Next buf_idx to assign (monotonically tracked, matches gda_sym_buf_count).
-  int sym_buf_count_ {0};
+  // Count of registered user buffers (plain buffer_register + sym_buffer_register combined).
+  // Used for capacity check against envvar::gda::num_user_buffers.
+  int user_buf_count_ {0};
 
   std::vector<NicDevice> nic_devices_;
   int num_nics_{0};
@@ -240,6 +241,7 @@ class GDABackend : public Backend {
    * @brief Register a user buffer.
    */
   int buffer_register(void *addr, size_t length) override;
+
 
   /**
    * @brief Unregister a user buffer.
@@ -416,14 +418,14 @@ class GDABackend : public Backend {
 
   // Register heap ibv_mr per NIC (before setup_gpu_qps).
   void setup_heap_mr();
-  // Allgather heap rkeys/VAs and fill keys[0].{rkey,lkey}+sym_buf_table (after setup_gpu_qps).
+  // Allgather heap rkeys and fill QP.rkey/lkey (after setup_gpu_qps).
   void setup_heap_sym_tables();
   // Deregister heap ibv_mr (after sym tables cleared at teardown).
   void cleanup_heap_mr();
-  // Common allgather+fill path for both heap and user sym buffers.
+  // Allgather rkeys+VAs for a user buffer, fill user_buf_info[buf_idx].{rkey, remote_base}.
   int sym_fill_rkey_va_tables(void *addr, size_t length,
                               const std::vector<ibv_mr*> &mrs, int my_pe, int n_pes,
-                              bool set_lkey = true);
+                              bool set_lkey, int buf_idx);
 
   void initialize_gpu_qp(QueuePair* qp, int conn_num);
   void bnxt_initialize_gpu_qp(QueuePair* qp, int conn_num);
