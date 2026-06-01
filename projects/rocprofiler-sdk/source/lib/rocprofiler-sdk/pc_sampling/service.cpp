@@ -273,12 +273,10 @@ configure_pc_sampling_service_v2(context::context*                            ct
         session->parser       = std::make_unique<PCSamplingParserContext>();
         session->cid_manager  = std::make_unique<PCSCIDManager>(session->parser.get());
 
-        // v2 API: store the requested record kinds. The parser is stateless w.r.t. V2 config;
-        // the requested record kind and deliver-invalid policy are passed per parse() call by the
-        // caller (see hsa_adapter.cpp). Capture deliver_invalid once here, where the requested set
-        // is in scope.
+        // v2 API: store the requested record kinds. The parser is stateless w.r.t. V2 config; the
+        // requested set is forwarded verbatim to parser->parse() per call (see hsa_adapter.cpp),
+        // which derives the record kind to parse and the deliver/drop policy from it.
         session->requested_record_kinds.assign(record_kinds, record_kinds + num_record_kinds);
-        session->deliver_invalid = session->wants_invalid_samples();
 
         // Register session in global map
         sessions[agent->id] = session;

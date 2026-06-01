@@ -662,6 +662,12 @@ rocprofiler_pc_sampling_configure_service_v2(
     auto const* buff = rocprofiler::buffer::get_buffer(buffer_id);
     if(!buff) return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
 
+    // Note on INVALID-only requests ({ INVALID_SAMPLE } with no valid version kind): they carry no
+    // method preference of their own, so method selection falls entirely to the flags / stochastic
+    // default + fallback below, exactly like any flagless request. There is intentionally no
+    // special-casing here -- the carrier-kind decision (parse as V0, deliver only invalids) happens
+    // downstream in PCSamplingParserContext::parse() from the requested-record-kinds set.
+
     // Try with inferred method first
     auto status = rocprofiler::pc_sampling::configure_pc_sampling_service_v2(
         ctx, agent, method, unit, interval, buffer_id, record_kinds, num_record_kinds);
@@ -789,6 +795,11 @@ rocprofiler_pc_sampling_query_agent_configurations_v2(
     std::vector<rocprofiler_pc_sampling_configuration_t> v1_configs;
     auto status = rocprofiler::pc_sampling::ioctl::ioctl_query_pcs_configs(agent, v1_configs);
     if(status != ROCPROFILER_STATUS_SUCCESS) return status;
+
+    // Note on INVALID-only requests ({ INVALID_SAMPLE } with no valid version kind): they are
+    // filtered like a method-agnostic (V0-style) request -- preference flags are respected and,
+    // absent flags, all configs are returned. There is intentionally no special-casing here; the
+    // INVALID-only carrier-kind decision is a parse-time concern, not a configuration-query one.
 
     // A stochastic-only record kind (V2, V4) can only be produced by the stochastic method;
     // host-trap configs are not a valid substitute. Treat the method filter as hard in that

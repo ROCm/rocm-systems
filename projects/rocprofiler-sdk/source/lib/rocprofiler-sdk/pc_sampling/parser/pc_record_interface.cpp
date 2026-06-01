@@ -237,13 +237,13 @@ PCSamplingParserContext::_get_parse_func_for_record_kind_and_method(
 }
 
 pcsample_status_t
-PCSamplingParserContext::parse(const upcoming_samples_t&             upcoming,
-                               const generic_sample_t*               data_,
-                               uint32_t                              gfx_target_version,
-                               std::condition_variable&              midway_signal,
-                               bool                                  bRocrBufferFlip,
-                               rocprofiler_pc_sampling_record_kind_t requested_record_kind,
-                               bool                                  deliver_invalid)
+PCSamplingParserContext::parse(
+    const upcoming_samples_t&                                 upcoming,
+    const generic_sample_t*                                   data_,
+    uint32_t                                                  gfx_target_version,
+    std::condition_variable&                                  midway_signal,
+    bool                                                      bRocrBufferFlip,
+    const std::vector<rocprofiler_pc_sampling_record_kind_t>& requested_record_kinds)
 {
     auto gfxip_major = (gfx_target_version / 10000) % 100;
     auto gfxip_minor = (gfx_target_version / 100) % 100;
@@ -251,8 +251,40 @@ PCSamplingParserContext::parse(const upcoming_samples_t&             upcoming,
                            ? ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP
                            : ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC;
 
-    // v2 API when a specific record kind is requested; otherwise legacy (v1) method-based dispatch.
-    const bool is_v2 = requested_record_kind != ROCPROFILER_PC_SAMPLING_RECORD_NONE;
+    // v2 API when record kinds are requested; otherwise legacy (v1) method-based dispatch.
+    const bool is_v2 = !requested_record_kinds.empty();
+
+    // Derive, from the requested set, the record kind to parse and the deliver/drop policy.
+    // The set is small and fixed-size, so the scan is cheap and allocation-free.
+    auto valid_kind    = ROCPROFILER_PC_SAMPLING_RECORD_NONE;
+    bool wants_invalid = false;
+    for(auto k : requested_record_kinds)
+    {
+        if(k == ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE)
+            wants_invalid = true;
+        else
+            valid_kind = k;  // the single V0..V4 entry (validated upstream)
+    }
+
+    // INVALID-only: the client requested invalid samples but no valid version kind.
+    const bool invalid_only =
+        is_v2 && wants_invalid && valid_kind == ROCPROFILER_PC_SAMPLING_RECORD_NONE;
+
+    // Carrier: INVALID-only sessions parse with the cheapest v2 record (V0); the valid carriers are
+    // dropped at emplace time and never reach the client. Hardcoded for now -- revisit only if
+    // profiling shows a cheaper carrier on some GFX. Note: INVALID-only is a debugging feature, so
+    // the cost of translating valid V0 carriers only to drop them is acceptable; we deliberately do
+    // not add a hot-loop early-skip.
+    const auto requested_record_kind =
+        invalid_only ? ROCPROFILER_PC_SAMPLING_RECORD_V0_SAMPLE : valid_kind;
+
+    const bool deliver_invalid = wants_invalid;
+    // Drop the valid carrier records only in the INVALID-only case. Note: under HOST_TRAP,
+    // is_invalid_sample is a compile-time false, so an INVALID-only host-trap session currently
+    // produces an empty stream. This is intentional and may change: if host-trap ever needs to flag
+    // samples invalid (e.g. to surface a hardware/driver bug), the same path will deliver them with
+    // no structural change here.
+    const bool deliver_valid = !invalid_only;
 
     // Template instantiation is faster!
     parse_funct_ptr_t parseSample_func = nullptr;
@@ -307,7 +339,7 @@ PCSamplingParserContext::parse(const upcoming_samples_t&             upcoming,
         return PCSAMPLE_STATUS_INVALID_METHOD;
     }
 
-    auto status = (this->*parseSample_func)(upcoming, data_, deliver_invalid);
+    auto status = (this->*parseSample_func)(upcoming, data_, deliver_invalid, deliver_valid);
     midway_signal.notify_all();
 
     if(!bRocrBufferFlip || status != PCSAMPLE_STATUS_SUCCESS) return status;
@@ -408,23 +440,28 @@ record_kind_for<rocprofiler_pc_sampling_record_v4_t>()
 
 /**
  * @brief Emit parsed records into the SDK buffer, applying the deliver/drop policy for invalid
- * samples.
+ * and valid samples.
  *
  * Method-aware via is_invalid_sample<RecordT, Method>: for HOST_TRAP V0/V1/V3 the invalid branch
  * is compiled out (the trait is a compile-time false), so this is a plain copy loop. For
  * stochastic records, invalid samples are dropped unless @p deliver_invalid is set, in which case
  * a ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE record is emitted instead.
  *
- * @p deliver_invalid is a runtime argument (not a template axis): it is a single branch that is
- * constant per session and perfectly predicted, so templatizing it would only double the
- * instantiation count for no measurable gain.
+ * @p deliver_valid drops valid records when false. This is used by INVALID-only sessions, which
+ * parse with a cheap carrier record (V0) purely to reach the invalid-sample path: the valid
+ * carriers are translated and then discarded here, so the client receives only invalid records.
+ *
+ * @p deliver_invalid and @p deliver_valid are runtime arguments (not template axes): each is a
+ * single branch that is constant per session and perfectly predicted, so templatizing them would
+ * only multiply the instantiation count for no measurable gain.
  */
 template <typename PcSamplingRecordT, rocprofiler_pc_sampling_method_t Method>
 inline void
 emplace_records_in_buffer(rocprofiler::buffer::instance* buff,
                           const PcSamplingRecordT*       samples,
                           size_t                         num_samples,
-                          bool                           deliver_invalid)
+                          bool                           deliver_invalid,
+                          bool                           deliver_valid)
 {
     for(size_t i = 0; i < num_samples; i++)
     {
@@ -439,6 +476,7 @@ emplace_records_in_buffer(rocprofiler::buffer::instance* buff,
         }
         else
         {
+            if(!deliver_valid) continue;
             buff->emplace(ROCPROFILER_BUFFER_CATEGORY_PC_SAMPLING,
                           record_kind_for<PcSamplingRecordT>(),
                           samples[i]);
@@ -451,7 +489,8 @@ void
 PCSamplingParserContext::generate_upcoming_pc_record(uint64_t                 agent_id_handle,
                                                      const PcSamplingRecordT* samples,
                                                      size_t                   num_samples,
-                                                     bool                     deliver_invalid)
+                                                     bool                     deliver_invalid,
+                                                     bool                     deliver_valid)
 {
     auto buff_id = _agent_buffers.at(rocprofiler_agent_id_t{agent_id_handle});
     rocprofiler::buffer::instance* buff = rocprofiler::buffer::get_buffer(buff_id);
@@ -460,5 +499,5 @@ PCSamplingParserContext::generate_upcoming_pc_record(uint64_t                 ag
         throw std::runtime_error(fmt::format("Buffer with id: {} does not exists", buff_id.handle));
 
     emplace_records_in_buffer<PcSamplingRecordT, Method>(
-        buff, samples, num_samples, deliver_invalid);
+        buff, samples, num_samples, deliver_invalid, deliver_valid);
 }

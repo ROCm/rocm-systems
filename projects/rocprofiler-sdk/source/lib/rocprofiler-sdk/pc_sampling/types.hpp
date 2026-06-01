@@ -72,36 +72,12 @@ struct PCSAgentSession
 
     // v2 API: which record kinds the client requested.
     // Empty means this session was created via the old (v1) API.
+    // Forwarded verbatim to parser->parse() per call, which derives the record kind to parse and
+    // the deliver/drop policy for valid and invalid samples from this set.
     std::vector<rocprofiler_pc_sampling_record_kind_t> requested_record_kinds = {};
-
-    // v2 API: whether the client opted in to receiving invalid samples (i.e. requested the
-    // INVALID_SAMPLE record kind). Computed once at configure time from requested_record_kinds and
-    // forwarded to parser->parse() per call. False for v1 sessions.
-    bool deliver_invalid = false;
 
     // Returns true if this session was created via the v2 API
     bool is_v2_api() const { return !requested_record_kinds.empty(); }
-
-    // Returns the valid version record kind (V0-V4) if configured via v2 API,
-    // or ROCPROFILER_PC_SAMPLING_RECORD_NONE if not applicable.
-    rocprofiler_pc_sampling_record_kind_t get_valid_record_kind() const
-    {
-        for(auto kind : requested_record_kinds)
-        {
-            if(kind != ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE) return kind;
-        }
-        return ROCPROFILER_PC_SAMPLING_RECORD_NONE;
-    }
-
-    // Returns true if the client wants to receive invalid samples
-    bool wants_invalid_samples() const
-    {
-        for(auto kind : requested_record_kinds)
-        {
-            if(kind == ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE) return true;
-        }
-        return false;
-    }
 };
 
 // TODO static assertions

@@ -41,6 +41,7 @@
 #include <shared_mutex>
 #include <thread>
 #include <unordered_set>
+#include <vector>
 
 template <typename PcSamplingRecordT>
 struct PCSamplingData
@@ -87,13 +88,16 @@ public:
      * @param[in] gfxip_major GFXIP of these samples (GFX9==9/GFX11==11).
      * @param[in] midway_signal notifies_all when the samples have been processed.
      * @param[in] bFlushCorrelationIds Set to true if this is the last batch from a ROCr buffer.
-     * @param[in] requested_record_kind v2 API: the record kind to emit. The sampling method is
-     * derived from upcoming.which_sample_type, so (record_kind, method) together select the parse
-     * specialization. ROCPROFILER_PC_SAMPLING_RECORD_NONE selects the legacy (v1) method-based
-     * dispatch. Supplied per call by the caller (PCSAgentSession); not stored on the context.
-     * @param[in] deliver_invalid v2 API: when true, invalid samples are emitted to the buffer as
-     * ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE; when false they are dropped. Also supplied
-     * per call by the caller.
+     * @param[in] requested_record_kinds v2 API: the record kinds the client requested. The
+     * sampling method is derived from upcoming.which_sample_type, and from this set parse() derives
+     * the record kind to parse and the deliver/drop policy for valid and invalid samples:
+     *  - empty set -> legacy (v1) method-based dispatch;
+     *  - one valid version kind (V0..V4), optionally with INVALID_SAMPLE -> parse that kind;
+     *    invalid samples are delivered iff INVALID_SAMPLE is present;
+     *  - INVALID_SAMPLE alone -> parse with a cheap carrier record (V0), deliver only the invalid
+     *    records and drop the valid carriers.
+     * Supplied per call by the caller (PCSAgentSession); not stored on the context. This is the
+     * natural extension point for richer future requests (e.g. partially-valid samples).
      * @returns PCSAMPLE_STATUS_SUCCESS on success.
      * @returns PCSAMPLE_STATUS_PARSER_ERROR (non-fatal) if one or more samples has invalid
      * correlation ID(s).
@@ -101,14 +105,12 @@ public:
      * @returns PCSAMPLE_STATUS_CALLBACK_ERROR (fatal) if memory allocation fails.
      */
     pcsample_status_t parse(
-        const upcoming_samples_t&             upcoming,
-        const generic_sample_t*               data,
-        uint32_t                              gfx_target_version,
-        std::condition_variable&              midway_signal,
-        bool                                  bFlushCorrelationIds,
-        rocprofiler_pc_sampling_record_kind_t requested_record_kind =
-            ROCPROFILER_PC_SAMPLING_RECORD_NONE,
-        bool deliver_invalid = false);
+        const upcoming_samples_t&                                 upcoming,
+        const generic_sample_t*                                   data,
+        uint32_t                                                  gfx_target_version,
+        std::condition_variable&                                  midway_signal,
+        bool                                                      bFlushCorrelationIds,
+        const std::vector<rocprofiler_pc_sampling_record_kind_t>& requested_record_kinds = {});
 
     /**
      * @brief Signals a dispatch completion.
@@ -158,7 +160,8 @@ protected:
               rocprofiler_pc_sampling_method_t Method>
     pcsample_status_t _parse(const upcoming_samples_t& upcoming,
                              const generic_sample_t*   data_,
-                             bool                      deliver_invalid)
+                             bool                      deliver_invalid,
+                             bool                      deliver_valid)
     {
         // std::shared_lock<std::shared_mutex> lock(mut);
 
@@ -180,7 +183,7 @@ protected:
             data_ += memsize;
             pkt_counter -= memsize;
             generate_upcoming_pc_record<PcSamplingRecordT, Method>(
-                dev.handle, samples, memsize, deliver_invalid);
+                dev.handle, samples, memsize, deliver_invalid, deliver_valid);
         }
 
         return status;
@@ -197,7 +200,8 @@ protected:
     void generate_upcoming_pc_record(uint64_t                 agent_id_handle,
                                      const PcSamplingRecordT* samples,
                                      size_t                   num_samples,
-                                     bool                     deliver_invalid);
+                                     bool                     deliver_invalid,
+                                     bool                     deliver_valid);
 
     //! Maps doorbells and dispatch_index to correlation_id
     std::unique_ptr<Parser::CorrelationMap> corr_map;
@@ -224,7 +228,7 @@ protected:
 
 private:
     using parse_funct_ptr_t = pcsample_status_t (PCSamplingParserContext::*)(
-        const upcoming_samples_t&, const generic_sample_t*, bool);
+        const upcoming_samples_t&, const generic_sample_t*, bool, bool);
 
     template <typename GFXIP>
     parse_funct_ptr_t _get_parse_func_for_method(rocprofiler_pc_sampling_method_t pcs_method);

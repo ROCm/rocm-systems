@@ -186,8 +186,7 @@ data_ready_callback(void*                                client_callback_data,
                                          agent_session->agent->gfx_target_version,
                                          cv,
                                          false,
-                                         agent_session->get_valid_record_kind(),
-                                         agent_session->deliver_invalid);
+                                         agent_session->requested_record_kinds);
 
         if(pcs_parser_status != PCSAMPLE_STATUS_SUCCESS)
         {
