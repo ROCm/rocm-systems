@@ -28,6 +28,74 @@ function execLabel(e: ExecListItem): string {
   return `exit ${e.status.exit_code ?? "?"}`;
 }
 
+/**
+ * Split a command line into argv the way a POSIX shell would, honoring
+ * single quotes, double quotes, and backslash escapes. Throws on an
+ * unterminated quote so the caller can surface a clear error instead of
+ * silently passing a malformed argv to the host (which would then fail
+ * with confusing shell parse errors like `Syntax error: Unterminated
+ * quoted string`).
+ */
+export function splitCommand(input: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let inSingle = false;
+  let inDouble = false;
+  let hasToken = false;
+  for (let i = 0; i < input.length; i++) {
+    const c = input[i];
+    if (inSingle) {
+      if (c === "'") {
+        inSingle = false;
+      } else {
+        cur += c;
+      }
+      continue;
+    }
+    if (inDouble) {
+      if (c === "\\" && i + 1 < input.length) {
+        const next = input[i + 1];
+        if (next === '"' || next === "\\" || next === "$" || next === "`") {
+          cur += next;
+          i++;
+        } else {
+          cur += c;
+        }
+      } else if (c === '"') {
+        inDouble = false;
+      } else {
+        cur += c;
+      }
+      continue;
+    }
+    if (c === "'") {
+      inSingle = true;
+      hasToken = true;
+    } else if (c === '"') {
+      inDouble = true;
+      hasToken = true;
+    } else if (c === "\\" && i + 1 < input.length) {
+      cur += input[i + 1];
+      hasToken = true;
+      i++;
+    } else if (c === " " || c === "\t" || c === "\n") {
+      if (hasToken) {
+        out.push(cur);
+        cur = "";
+        hasToken = false;
+      }
+    } else {
+      cur += c;
+      hasToken = true;
+    }
+  }
+  if (inSingle || inDouble) {
+    throw new Error(`unterminated ${inSingle ? "single" : "double"} quote`);
+  }
+  if (hasToken) out.push(cur);
+  return out;
+}
+
 function shortAge(iso?: string): string {
   if (!iso) return "—";
   const t = Date.parse(iso);
@@ -81,7 +149,15 @@ export function SessionDetailPage() {
     e.preventDefault();
     if (!id) return;
     setError("");
-    const parts = command.trim().split(/\s+/);
+    let parts: string[];
+    try {
+      parts = splitCommand(command);
+    } catch (err) {
+      const msg = `invalid command: ${err instanceof Error ? err.message : String(err)}`;
+      setError(msg);
+      toast.error(msg);
+      return;
+    }
     if (!parts.length || !parts[0]) {
       const msg = "command is required";
       setError(msg);
