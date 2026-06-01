@@ -696,18 +696,6 @@ def load_panel_configs(
     return OrderedDict(sorted(configs.items()))
 
 
-def calc_builtin_var(var: Union[int, str], sys_info: dict[str, Any]) -> int:  # type: ignore[return]
-    """
-    Calculate build-in variable based on sys_info.
-    """
-    if isinstance(var, int):
-        return var
-    elif isinstance(var, str) and var.startswith("$total_l2_chan"):
-        return int(sys_info["total_l2_chan"])
-    else:
-        console_error(f'Built-in var "{var}" is not supported')
-
-
 def expand_placeholder_ranges(
     panel_configs: OrderedDict[int, dict[str, Any]],
     sys_info: Optional[dict[str, Any]],
@@ -724,30 +712,35 @@ def expand_placeholder_ranges(
     for _panel_id, panel in panel_configs.items():
         for data_source in panel["data source"]:
             for type_key, data_config in data_source.items():
-                if (
-                    type_key == "metric_table"
-                    and "metric" in data_config
-                    and "placeholder_range" in data_config["metric"]
-                ):
-                    new_metrics: dict[str, Any] = {}
-                    if sys_info is not None:
-                        # NB: support single placeholder for now!!
-                        p_range = data_config["metric"].pop("placeholder_range")
-                        metric, metric_expr = data_config["metric"].popitem()
-                        for p, r in p_range.items():
-                            # NB: We have to resolve placeholder range first if it
-                            #   is a build-in var. It will be too late to do it in
-                            #   eval_metric(). This is the only reason we need
-                            #   sys_info at this stage.
-                            var = calc_builtin_var(r, sys_info)
-                            for i in range(var):
-                                new_key = metric.replace(p, str(i))
-                                new_val = {
-                                    k: v.replace(p, str(i))
-                                    for k, v in metric_expr.items()
-                                }
-                                new_metrics[new_key] = new_val
-                    data_config["metric"] = new_metrics
+                if type_key != "metric_table":
+                    continue
+                if "metric" not in data_config:
+                    continue
+                if "placeholder_range" not in data_config["metric"]:
+                    continue
+                if sys_info is None:
+                    data_config["metric"] = {}
+                    continue
+
+                # Resolved here (not in eval_metric) because the range may
+                # itself be a built-in var. Single placeholder only.
+                p_range = data_config["metric"].pop("placeholder_range")
+                metric, metric_expr = data_config["metric"].popitem()
+                new_metrics: dict[str, Any] = {}
+                for p, r in p_range.items():
+                    if isinstance(r, int):
+                        var = r
+                    elif isinstance(r, str) and r.startswith("$total_l2_chan"):
+                        var = int(sys_info["total_l2_chan"])
+                    else:
+                        console_error(f'Built-in var "{r}" is not supported')
+                    for i in range(var):
+                        new_key = metric.replace(p, str(i))
+                        new_val = {
+                            k: v.replace(p, str(i)) for k, v in metric_expr.items()
+                        }
+                        new_metrics[new_key] = new_val
+                data_config["metric"] = new_metrics
 
     return panel_configs
 
@@ -882,6 +875,33 @@ def format_scientific_notation_if_needed(
         formatted = normal_str
 
     return formatted
+
+
+def convert_filter_blocks_to_panel_ids(
+    filter_blocks: list[str], arch: Optional[str] = None
+) -> set[int]:
+    """Inverse of convert_metric_id_to_panel_info: map metric ids like
+    "2" or "11.1" to the set of file_id integers (e.g. {200, 1100}).
+    Tokens that are not metric ids are looked up as panel aliases (e.g.
+    "lds", "roofline") for the given arch.
+    """
+    alias_map: dict[str, str] = (
+        get_arch_alias_to_panel_id(arch)
+        if arch and any(not METRIC_ID_RE.match(str(bid)) for bid in filter_blocks)
+        else {}
+    )
+    resolved: set[int] = set()
+    for bid in filter_blocks:
+        token = str(bid)
+        if not METRIC_ID_RE.match(token):
+            if token not in alias_map:
+                console_error(
+                    f"Invalid --block value {token}. "
+                    "Run rocprof-compute --list-blocks to see valid values."
+                )
+            token = alias_map[token]
+        resolved.add(int(convert_metric_id_to_panel_info(token)[0]))
+    return resolved
 
 
 def convert_metric_id_to_panel_info(

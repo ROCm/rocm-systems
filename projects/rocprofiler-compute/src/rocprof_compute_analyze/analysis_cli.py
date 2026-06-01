@@ -146,11 +146,13 @@ class cli_analysis(OmniAnalyze_Base):
                 self.apply_torch_operator_filter(args, workload, path_info[0])
 
             # create the loaded table
+            gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
             parser.load_table_data(
                 workload=workload,
                 dir_path=path_info[0],
                 is_gui=False,
                 args=args,
+                dfs_expressions=self._arch_configs[gpu_arch].dfs_expressions,
             )
 
     @demarcate
@@ -234,9 +236,12 @@ class cli_analysis(OmniAnalyze_Base):
                             ai_data=ai_data,
                         )
 
-                        ops_fig, flops_fig, ops_dt, flops_dt = (
-                            roof_obj.construct_plotly_figures(ai_data=ai_data)
-                        )
+                        (
+                            ops_fig,
+                            flops_fig,
+                            ops_dt,
+                            flops_dt,
+                        ) = roof_obj.construct_plotly_figures(ai_data=ai_data)
                         roof_obj.save_html_files(ops_fig, flops_fig, ops_dt, flops_dt)
                     else:
                         console_warning(

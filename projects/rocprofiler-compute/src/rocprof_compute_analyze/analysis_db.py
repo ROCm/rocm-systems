@@ -56,7 +56,7 @@ from utils.roofline_calc import (
     SUPPORTED_DATATYPES,
 )
 from utils.utils_common import get_uuid, get_version
-from utils.utils_counter_defs import get_build_in_vars
+from utils.utils_counter_defs import extract_counters_and_variables, get_build_in_vars
 
 
 class db_analysis(OmniAnalyze_Base):
@@ -86,9 +86,10 @@ class db_analysis(OmniAnalyze_Base):
             self._kernel_values_data_per_workload,
             self._workload_values_data_per_workload,
         ) = self.calc_expressions()
-        self._roofline_data_per_kernel, self._roofline_data_per_workload = (
-            self.calc_roofline_data()
-        )
+        (
+            self._roofline_data_per_kernel,
+            self._roofline_data_per_workload,
+        ) = self.calc_roofline_data()
 
     @demarcate
     def run_analysis(self) -> None:
@@ -556,8 +557,8 @@ class db_analysis(OmniAnalyze_Base):
                     )
                 elif not caught:
                     console_warning(
-                        f"Could not evaluate expression for {name}: {value} - "
-                        "likely due to missing counter data."
+                        f"Expression for {name}: {value} evaluated to N/A "
+                        "(divide-by-zero or empty counter data)."
                     )
                 return None
 
@@ -572,10 +573,22 @@ class db_analysis(OmniAnalyze_Base):
             return None
 
     @staticmethod
-    def calc_builtin_vars(pmc_df: pd.DataFrame, sys_info: dict) -> pd.DataFrame:
-        """Calculate arch-specific built-in variables (numActiveCUs, etc.)"""
+    def calc_builtin_vars(
+        pmc_df: pd.DataFrame,
+        sys_info: dict,
+        expressions: list[str],
+    ) -> None:
+        """Evaluate arch-specific built-in variables referenced by expressions
+        (numActiveCUs, etc.). Mutates ``sys_info`` in place."""
         gpu_series = mi_gpu_specs.get_gpu_series(sys_info["gpu_arch"])
-        build_in_vars = get_build_in_vars(gpu_series)
+        _, expression_builtin_vars = extract_counters_and_variables(
+            "\n".join(expressions), gpu_series
+        )
+        build_in_vars = {
+            k: v
+            for k, v in get_build_in_vars(gpu_series).items()
+            if k in expression_builtin_vars
+        }
         # Calculate PER_XCD variables first
         for key, value in build_in_vars.items():
             if "PER_XCD" in key:
@@ -588,7 +601,6 @@ class db_analysis(OmniAnalyze_Base):
                 sys_info[key] = db_analysis.evaluate(
                     key, value, pmc_df, sys_info, parse=True
                 )
-        return pmc_df
 
     @staticmethod
     def calc_dataframe_expressions(
@@ -597,9 +609,15 @@ class db_analysis(OmniAnalyze_Base):
         expression_df: pd.DataFrame,
         emit_variance_warnings: bool = False,
     ) -> pd.Series:
-        # Calculate built-in variables
-        db_analysis.calc_builtin_vars(pmc_df, sys_info)
-        # Evaluate expressions while printing warnings
+        db_analysis.calc_builtin_vars(
+            pmc_df,
+            sys_info,
+            [
+                v
+                for v in expression_df["value"].tolist()
+                if isinstance(v, str) and v and v != "None"
+            ],
+        )
         return expression_df.apply(
             lambda row: db_analysis.evaluate(
                 f"{row['metric_id']} - {row['value_name']}",
@@ -877,9 +895,9 @@ class db_analysis(OmniAnalyze_Base):
             pmc_df = self._pmc_df_per_workload[workload_path].copy()
             sys_info = self._runs[workload_path].sys_info.iloc[0].to_dict()
             gfx_arch = sys_info["gpu_arch"]
-            roofline_data_df = self._arch_configs[gfx_arch].dfs[402]
+            roofline_data_df = self._arch_configs[gfx_arch].dfs.get(402)
 
-            if roofline_data_df.empty:
+            if roofline_data_df is None or roofline_data_df.empty:
                 console_warning(
                     f"Roofline data is filtered out or not found for {workload_path}."
                 )

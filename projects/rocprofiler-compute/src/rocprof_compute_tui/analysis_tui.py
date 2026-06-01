@@ -119,9 +119,11 @@ class tui_analysis(OmniAnalyze_Base):
             kernel_dfs = copy.deepcopy(workload.dfs)
 
             # Evaluate metrics aggregated across all dispatches of this kernel
+            gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
             eval_metric(
                 kernel_dfs,
                 workload.dfs_type,
+                self._arch_configs[gpu_arch].dfs_expressions,
                 workload.sys_info.iloc[0],
                 workload.roofline_peaks,
                 kernel_raw_pmc,
@@ -142,6 +144,7 @@ class tui_analysis(OmniAnalyze_Base):
             self.args.list_stats,
             self.args.filter_metrics,
             sys_info.iloc[0],
+            getattr(self, "_profiling_config", {}),
         )
         self.load_options(normalization_filter)
 
