@@ -70,7 +70,7 @@ void AllReduceGetBw(size_t count, int typesize, double sec, double* algBw, doubl
   *busBw = baseBw * factor;
 }
 
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
  // set devComm reqs for allreduce device kernels
 testResult_t AllReduceGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs, ncclCommProperties_t* commProperties) {
   if (!reqs || !commProperties) return testInternalError;

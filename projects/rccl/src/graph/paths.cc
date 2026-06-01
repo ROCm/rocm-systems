@@ -661,17 +661,16 @@ NCCL_PARAM(PxnDisable, "PXN_DISABLE", 1);
 // remote proxies without risking deadlocks
 int ncclPxnDisable(struct ncclComm* comm) {
 #if defined(NCCL_OS_LINUX)
-  static int pxnDisable = -1;
-  if (pxnDisable == -1) {
-    if (comm && comm->ncclNetVer == 4) {
-      INFO(NCCL_INIT, "PXN Disabled as plugin is v4");
-      pxnDisable = 1;
-    } else {
-      rcclSetPxn(comm, pxnDisable);
-      pxnDisable = (pxnDisable > RCCL_VALUE_INVALID)? pxnDisable : ncclParamPxnDisable();
-    }
+  if (comm->pxnDisable > RCCL_VALUE_INVALID) return comm->pxnDisable;
+  if (comm->ncclNetVer == 4) {
+    INFO(NCCL_INIT, "PXN Disabled as plugin is v4");
+    comm->pxnDisable = 1;
+  } else {
+    int v = -1;
+    rcclSetPxn(comm, v);
+    comm->pxnDisable = (v > RCCL_VALUE_INVALID) ? v : ncclParamPxnDisable();
   }
-  return pxnDisable;
+  return comm->pxnDisable;
 #else
   return 1;
 #endif
@@ -1156,7 +1155,7 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
   if (comm->nNodes > 1 && comm->config.nChannelsPerNetPeer == NCCL_CONFIG_UNDEF_INT) {
     // In the case of >1 NVLD (and the user didn't set nChannelsPerNetPeer), the network is the bottleneck.
     // Reduce the number of channels per host to avoid going above p2pnChannels to fit all the peers within a single round.
-    while (comm->p2pnChannelsPerPeer * divUp(comm->nRanks, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) > comm->p2pnChannels && comm->p2pnChannelsPerPeer > 1) comm->p2pnChannelsPerPeer /= 2;
+    while (comm->p2pnChannelsPerPeer * divUp(comm->nRanks, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) >= comm->p2pnChannels && comm->p2pnChannelsPerPeer > 1) comm->p2pnChannelsPerPeer /= 2;
   } else {
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, comm->p2pnChannels);
   }

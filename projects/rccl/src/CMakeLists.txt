@@ -316,6 +316,7 @@ set(SRC_FILES
   misc/proxy_trace/proxy_trace.cc
   nccl_device/core.cc
   nccl_device/gin_barrier.cc
+  nccl_device/gin_scratch.cc
   nccl_device/ll_a2a.cc
   nccl_device/lsa_barrier.cc
   os/linux.cc
@@ -363,6 +364,7 @@ set(SRC_FILES
   register/register.cc
   register/sendrecv_reg.cc
   scheduler/symmetric_sched.cc
+  scheduler/allgatherv_sched.cc
   transport/coll_net.cc
   transport/generic.cc
   transport/net.cc
@@ -867,6 +869,10 @@ if(DEMANGLE_DIR)
 endif()
 if(LL128_ENABLED)
   target_compile_definitions(rccl PRIVATE ENABLE_LL128)
+endif()
+if(CE_ENABLED)
+  target_compile_definitions(rccl PRIVATE CE_BATCH_ASYNC_SUPPORTED)
+  message(STATUS "CE_BATCH_ASYNC_SUPPORTED compile definition enabled")
 endif()
 
 ## Set RCCL compile options

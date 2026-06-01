@@ -24,7 +24,7 @@
 #define BUSID_SIZE (sizeof("0000:00:00.0"))
 #define BUSID_REDUCED_SIZE (sizeof("0000:00"))
 
-const char* topoNodeTypeStr[] = { "GPU", "PCI", "NVS", "CPU", "NIC", "NET" };
+const char* topoNodeTypeStr[] = { "GPU", "PCI", "NVS", "CPU", "NIC", "NET", "GIN" };
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 const char* topoLinkTypeStr[] = { "LOC", "XGMI", "",    "C2C", "PCI",    "",    "",    "",    "", "SYS", "NET" };
 const char* topoPathTypeStr[] = { "LOC", "XGMI", "NVB", "C2C", "PIX", "PXB", "P2C", "PXN", "PHB", "SYS", "NET", "DIS" };
@@ -398,6 +398,29 @@ ncclResult_t ncclTopoAddNet(struct ncclXmlNode* xmlNet, struct ncclTopoSystem* s
   return ncclSuccess;
 }
 
+// Create a GIN topology node for a gin-capable NIC. NCCL 2.29 decouples GIN
+// from the NET plugin: GIN devices live in system->nodes[GIN] (parallel to
+// system->nodes[NET]) and are looked up by ncclTopoGetLocalGinDev for
+// device-API kernels (-D 3 / -D 4 in rccl-tests).
+ncclResult_t ncclTopoAddGin(struct ncclXmlNode* xmlNet, struct ncclTopoSystem* system, struct ncclTopoNode* nic, int systemId) {
+  int dev;
+  NCCLCHECK(xmlGetAttrInt(xmlNet, "dev", &dev));
+
+  int64_t netId = NCCL_TOPO_ID(systemId, dev);
+  struct ncclTopoNode* net;
+  NCCLCHECK(ncclTopoCreateNode(system, &net, GIN, netId));
+  net->net.dev = dev;
+
+  int mbps;
+  NCCLCHECKNOWARN(xmlGetAttrIntDefault(xmlNet, "speed", &mbps, 0), NCCL_GRAPH);
+  if (mbps <= 0) mbps = 10000; // Some NICs define speed = -1
+  net->net.bw = mbps / 8000.0;
+
+  NCCLCHECK(ncclTopoConnectNodes(nic, net, LINK_NET, net->net.bw));
+  NCCLCHECK(ncclTopoConnectNodes(net, nic, LINK_NET, net->net.bw));
+  return ncclSuccess;
+}
+
 ncclResult_t ncclTopoAddNic(struct ncclXmlNode* xmlNic, struct ncclTopoSystem* system, struct ncclTopoNode* nic, int systemId, int64_t busId) {
   for (int s=0; s<xmlNic->nSubs; s++) {
     struct ncclXmlNode* xmlNet = xmlNic->subs[s];
@@ -406,7 +429,13 @@ ncclResult_t ncclTopoAddNic(struct ncclXmlNode* xmlNic, struct ncclTopoSystem* s
     NCCLCHECK(xmlGetAttrIndex(xmlNet, "dev", &index));
     // This means that the "dev" attribute wasn't set on this net xml node. That means it should not be added to the system topology graph
     if (index == -1) continue;
-    NCCLCHECK(ncclTopoAddNet(xmlNet, system, nic, systemId, busId));
+
+    // Backward compatibility: net without "net" attr is a net dev, net without a "gin" attr is not a gin dev
+    int net = 0, gin = 0;
+    NCCLCHECK(xmlGetAttrIntDefault(xmlNet, "net", &net, 1));
+    NCCLCHECK(xmlGetAttrIntDefault(xmlNet, "gin", &gin, 0));
+    if (net) NCCLCHECK(ncclTopoAddNet(xmlNet, system, nic, systemId, busId));
+    if (gin) NCCLCHECK(ncclTopoAddGin(xmlNet, system, nic, systemId));
   }
   return ncclSuccess;
 }

@@ -758,7 +758,7 @@ static ncclResult_t scheduleCollTasksToPlan(
   int nChannels[2*2] = {0, 0, 0, 0}; // [collnet][nvls]
   int const nMaxChannels[2*2] = {comm->nChannels, comm->nvlsChannels, // [collnet][nvls]
                                  comm->nChannels, std::min(comm->nChannels, comm->nvlsChannels)};
-  constexpr size_t MinTrafficPerChannel = 32 << 10; // 32K traffic as minimal
+  constexpr size_t MinTrafficPerChannel = 16 << 10;
   do {
     size_t workBytes = 0;
     struct ncclTaskColl* task = ncclIntruQueueHead(&planner->collTaskQueue);
@@ -797,7 +797,7 @@ static ncclResult_t scheduleCollTasksToPlan(
 
     int kind = 2*task->isCollnet + task->isNvls;
     if (kind != kindPrev) {
-      trafficPerChannel = divUp(trafficBytes[kind] / nChannels[kind], 16) * 16;
+      trafficPerChannel = std::max<size_t>(MinTrafficPerChannel, divUp(trafficBytes[kind] / nChannels[kind], 16) * 16);
       kindPrev = kind;
       channelId = 0;
       currentTraffic = 0;
@@ -2603,6 +2603,38 @@ rccl_static ncclResult_t getAlgoInfo(
   return ncclSuccess;
 }
 
+// External entry point matching the declaration in include/enqueue.h.
+// Forwards to RCCL's getAlgoInfo so out-of-TU callers (e.g. the scheduler
+// sources synced from upstream NCCL) can link.
+ncclResult_t ncclGetAlgoInfo(
+    struct ncclComm* comm, struct ncclTaskColl* task,
+    int collNetSupport, int nvlsSupport, int numPipeOps, ncclSimInfo_t* simInfo
+  ) {
+  return getAlgoInfo(comm, task, collNetSupport, nvlsSupport, numPipeOps, simInfo);
+}
+
+// Out-of-TU shims for the upstream symbols ncclAddWorkBatchToPlan and the
+// ncclDevKernelForFunc[] / ncclDevKernelForFuncIsSpecialized[] kernel lookup.
+// RCCL's equivalents (static addWorkBatchToPlan, file-local ncclKerns table)
+// aren't reachable from sources synced verbatim from upstream NCCL.
+
+void ncclAddWorkBatchToPlan(
+    struct ncclComm* comm, struct ncclKernelPlan* plan, int channelId,
+    enum ncclDevWorkType workType, int devFuncId, uint32_t workOffset,
+    int /*p2pEpoch*/, int p2pRound, bool /*newBatch*/
+  ) {
+  // RCCL's static addWorkBatchToPlan determines new-batch internally from
+  // chan->workBatchQueue.tail and has no notion of p2pEpoch. Forwarding the
+  // remaining args matches the call patterns at enqueue.cc:835, :985, :1329.
+  addWorkBatchToPlan(comm, plan, channelId, workType, devFuncId, workOffset,
+                     p2pRound, /*batchP2P=*/false);
+}
+
+void ncclPlanSetDefaultKernel(struct ncclComm* comm, struct ncclKernelPlan* plan) {
+  plan->kernelFn = ncclKerns[ncclGetKernelIndex(comm)].kernelFn;
+  plan->kernelSpecialized = ncclKerns[ncclGetKernelIndex(comm)].specialized;
+}
+
 NCCL_PARAM(NvlsTreeMaxChunkSize, "NVLSTREE_MAX_CHUNKSIZE", -2);
 
 static ncclResult_t calcCollChunking(
@@ -3493,22 +3525,13 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
             NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI, (void*)((char*)info->recvbuff+r*info->count*ncclTypeSize(info->datatype)), info->count, info->datatype, r, allowUB));
           }
         } else if (info->coll == ncclFuncAllGather && info->useDirect) {
-          // Direct AllGather: post per-peer Send/Recv P2P tasks the same way
-          // ncclFuncAlltoAll does above. Differences vs A2A:
-          //   - sendbuff is NOT offset per peer (every peer receives this
-          //     rank's full contribution).
-          //   - recvbuff is offset by r * count * sizeof(T) (each peer's
-          //     contribution lands in its slot of the gather buffer).
-          // Identical to A2A in all other respects: iteration order is
-          // 0..nRanks-1 on every rank (no (rank+r)%nRanks rotation), and
-          // the self peer (r == rank) is always posted (no in-place skip).
-          // Posting self via p2pTaskAppend is correct because the device
-          // kernel handles isCopy = (sendRank == self) as a local memcpy
-          // (see device/sendrecv.h's RunWorkBatch<ncclFuncSendRecv,...>).
+          NCCLCHECK(ncclRegFind(comm, info->sendbuff, info->count * ncclTypeSize(info->datatype), &sendReg));
+          NCCLCHECK(ncclRegFind(comm, info->recvbuff, comm->nRanks * info->count * ncclTypeSize(info->datatype), &recvReg));
+          allowUB = captured || (sendReg != NULL && recvReg != NULL);
           size_t rankOffset = info->count * ncclTypeSize(info->datatype);
           for (int r=0; r<comm->nRanks; r++) {
-            NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI, (void*)info->sendbuff, info->count, info->datatype, r));
-            NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI, (void*)((char*)info->recvbuff + r*rankOffset), info->count, info->datatype, r));
+            NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI, (void*)info->sendbuff, info->count, info->datatype, r, allowUB));
+            NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI, (void*)((char*)info->recvbuff + r*rankOffset), info->count, info->datatype, r, allowUB));
           }
         } else if (info->coll == ncclFuncGather){
           size_t offset = 0;

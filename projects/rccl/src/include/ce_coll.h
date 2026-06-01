@@ -17,10 +17,6 @@
 #define NCCL_CE_SYNC_OPS_PER_RANK_UC 3
 #define RCCL_CE_NUM_COPY_STREAMS 8
 
-// hipMemcpyBatchAsync is available in ROCm 7.12+ and was backported to 7.0.2.x.
-// ROCM_VERSION encodes as (MAJOR*10000 + MINOR*100 + PATCH), so 7.0.2 → 70002.
-#define CE_BATCH_API_SUPPORTED (ROCM_VERSION >= 71200 || ROCM_VERSION == 70002)
-
 struct ncclCeColl {
   uint8_t* baseUCSymReadyPtr;
   uint8_t* baseUCSymComplPtr;
@@ -64,7 +60,7 @@ struct ncclCeBatchOpsParams {
   size_t* sizes;
   size_t numOps;
   bool intraBatchSync;
-#if CE_BATCH_API_SUPPORTED
+#ifdef CE_BATCH_ASYNC_SUPPORTED
   hipMemcpyAttributes* attrs;
   size_t* attrIdxs;
   size_t numAttrs;
@@ -72,6 +68,8 @@ struct ncclCeBatchOpsParams {
 };
 
 bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty, ncclSymRegType_t winRegType);
+
+bool ncclCeImplemented(ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty);
 
 ncclResult_t ncclCeInit(struct ncclComm* comm);
 

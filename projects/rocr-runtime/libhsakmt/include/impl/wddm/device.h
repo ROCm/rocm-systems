@@ -88,8 +88,16 @@ enum class SegmentKind {
 struct SegmentInfo {
   uint32_t segment_id;
   SegmentKind kind;
+  // Raw segment flags — kind collapses aperture+system_memory into kAperture,
+  // so preserve the source bits to identify non-local-heap segments later.
+  bool is_aperture;
+  bool is_system_memory;
 
-  SegmentInfo() : segment_id(0), kind(SegmentKind::kUnknown) {}
+  SegmentInfo()
+      : segment_id(0),
+        kind(SegmentKind::kUnknown),
+        is_aperture(false),
+        is_system_memory(false) {}
 };
 
 class WDDMDevice {

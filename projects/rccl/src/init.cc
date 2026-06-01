@@ -794,6 +794,8 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   
   comm->rank = rank;
   comm->nRanks = ndev;
+  comm->pxnDisable = RCCL_VALUE_UNSET;
+  comm->p2pNetChunkSize = RCCL_VALUE_UNSET;
 
   comm->hierarchicalIntraComm = nullptr;
   comm->hierarchicalInterComm = nullptr;
@@ -2585,7 +2587,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   comm->initState = ncclSuccess;
 
   // Initialize hierarchical sub-communicators and temp buffer
-  if (!job->parent && comm->nNodes >= 8 && rcclParamHierarchicalAllGather() == 1) {
+  if (!job->parent && !comm->isGrow && comm->nNodes >= 8 && rcclParamHierarchicalAllGather() == 1) {
     if (comm->minLocalRanks != comm->maxLocalRanks) {
       INFO(NCCL_INIT, "Hierarchical AllGather: non-uniform GPU count per node, skipping hierarchical allgather");
     } else {
@@ -3031,7 +3033,7 @@ static ncclResult_t parseCommConfig(ncclComm_t comm, ncclConfig_t *config) {
   NCCL_CONFIG_DEFAULT(internalConfigPtr, nChannelsPerNetPeer, NCCL_CONFIG_UNDEF_INT,
                       NCCL_CONFIG_UNDEF_INT, "nChannelsPerNetPeer", "%d");
   NCCL_CONFIG_DEFAULT(internalConfigPtr, nvlinkCentricSched, NCCL_CONFIG_UNDEF_INT, 0, "nvlinkCentricSched", "%d");
-  NCCL_CONFIG_DEFAULT(internalConfigPtr, graphUsageMode, NCCL_CONFIG_UNDEF_INT, 2, "graphUsageMode", "%d");
+  NCCL_CONFIG_DEFAULT(internalConfigPtr, graphUsageMode, NCCL_CONFIG_UNDEF_INT, 0, "graphUsageMode", "%d");
   NCCL_CONFIG_DEFAULT(internalConfigPtr, numRmaCtx, NCCL_CONFIG_UNDEF_INT, 1, "numRmaCtx", "%d");
 
   /* assign config to communicator */
