@@ -610,7 +610,6 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_H2D_Pageable_Stream_SourceAccess) {
   hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagDefault};
 
   FillDeviceBuffers(MakeBatchPtrs(producer), copy_size, kStreamProducedValue);
-  FillHostBuffers(src, copy_size, kInitialValue);
 
   for (size_t i = 0; i < copy_count; ++i) {
     HIP_CHECK(hipMemcpyAsync(src_ptrs[i], producer[i].ptr(), copy_size, hipMemcpyDeviceToHost,
