@@ -340,11 +340,13 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpyBatchAsync) {
   void *srcs[kBatchCount] = {reinterpret_cast<void *>(hostA.data()),
                              reinterpret_cast<void *>(hostB.data())};
   size_t sizes[kBatchCount] = {kN * sizeof(int), kN * sizeof(int)};
+  hipMemcpyAttributes attrs[1] = {};
+  attrs[0].srcAccessOrder = hipMemcpySrcAccessOrderStream;
   size_t attrsIdxs[1] = {0};
   size_t failIdx = 0;
 
-  HIP_CHECK(hipMemcpyBatchAsync(dsts, srcs, sizes, kBatchCount, nullptr,
-                                attrsIdxs, 0, &failIdx, stream));
+  HIP_CHECK(hipMemcpyBatchAsync(dsts, srcs, sizes, kBatchCount, attrs,
+                                attrsIdxs, 1, &failIdx, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
   HIP_CHECK(hipStreamDestroy(stream));
 
