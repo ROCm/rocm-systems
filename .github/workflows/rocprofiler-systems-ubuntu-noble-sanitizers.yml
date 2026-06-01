@@ -61,9 +61,10 @@ jobs:
       DEBIAN_FRONTEND: noninteractive
       OMPI_ALLOW_RUN_AS_ROOT: 1
       OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
-      # Disable OpenMPI's binary patcher — it conflicts with ASAN's
+      # Disable OpenMPI's binary patcher - it conflicts with ASAN's
       # mprotect interceptor, causing SIGSEGV in all MPI/UCX tests.
       OMPI_MCA_patcher: ""
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
 
     steps:
       - name: Install git
@@ -97,6 +98,22 @@ jobs:
               nlohmann-json3-dev python3-pip software-properties-common texinfo unzip wget \
               vim zip zlib1g-dev libucx-dev ucx-utils libomp-dev libopenmpi-dev &&
             apt-get autoclean
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-ubuntu-noble-sanitizers-${{ github.job }}-${{ matrix.compiler }}-${{ matrix.sanitizer-type }}-${{ github.sha }}
+          restore-keys: |
+            ccache-ubuntu-noble-sanitizers-${{ github.job }}-${{ matrix.compiler }}-${{ matrix.sanitizer-type }}-
+
+      - name: Configure ccache
+        run: |
+          mkdir -p "${CCACHE_DIR}"
+          ccache --max-size=1G
+          ccache --set-config=sloppiness=time_macros,include_file_mtime,include_file_ctime,pch_defines
+          ccache -z
+          ccache -p | head -20
 
       - name: Configure git safe directory
         run: git config --global --add safe.directory '*'
@@ -163,6 +180,8 @@ jobs:
         working-directory: projects/rocprofiler-systems/
         env:
           GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
         run: |
           git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
           git config --global --add safe.directory ${PWD}
@@ -203,6 +222,14 @@ jobs:
             -DCMAKE_PREFIX_PATH=/opt/rocm \
             -- \
             -R "${TEST_REGEX}"
+
+      - name: ccache stats
+        if: always()
+        run: |
+          echo "=== ccache stats ==="
+          ccache -s -v || true
+          echo "=== ccache dir size ==="
+          du -sh "${CCACHE_DIR}" || true
 
       - name: Print Sanitizer Logs
         if: always()
