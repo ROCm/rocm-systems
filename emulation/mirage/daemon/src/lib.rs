@@ -65,6 +65,14 @@ impl Default for DaemonArgs {
 
 /// Entry point for `mirage daemon`.
 pub fn run(args: DaemonArgs) -> anyhow::Result<()> {
+    // Best-effort: write any missing builtin agents/topologies on
+    // startup so the dashboard/CLI always see them.
+    if let Err(e) = mirage_core::agent::store::ensure_builtins(false) {
+        tracing::warn!("failed to preload builtin agents: {e:#}");
+    }
+    if let Err(e) = mirage_core::topology::store::ensure_builtins(false) {
+        tracing::warn!("failed to preload builtin topologies: {e:#}");
+    }
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
         let state = Arc::new(AppState::new());

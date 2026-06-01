@@ -51,6 +51,14 @@ pub enum CtlCmd {
     #[command(subcommand)]
     Profile(ProfileCmd),
 
+    /// Manage topologies (rack/node/GPU system layouts).
+    #[command(subcommand)]
+    Topology(TopologyCmd),
+
+    /// Manage agents (hardware GPU definitions).
+    #[command(subcommand)]
+    Agent(AgentCmd),
+
     /// Manage sessions.
     #[command(subcommand)]
     Session(SessionCmd),
@@ -127,6 +135,58 @@ pub enum ProfileCmd {
     Delete {
         name: String,
         /// Don't prompt for confirmation.
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+}
+
+// ----- topology --------------------------------------------------------------
+
+#[derive(Subcommand, Debug)]
+pub enum TopologyCmd {
+    /// List available topologies.
+    List,
+    /// Show a topology as JSON.
+    Show { name: String },
+    /// Create or overwrite a topology.
+    Create {
+        name: String,
+        /// Agent name referenced by this topology.
+        #[arg(long, default_value = "MI350X")]
+        agent: String,
+        /// Number of racks.
+        #[arg(long, default_value_t = 1)]
+        racks: u32,
+        /// Nodes per rack.
+        #[arg(long, default_value_t = 1)]
+        nodes_per_rack: u32,
+        /// GPUs per node.
+        #[arg(long, default_value_t = 1)]
+        gpus_per_node: u32,
+    },
+    /// Import a topology from a JSON file (use `-` for stdin).
+    Import { name: String, file: String },
+    /// Delete a topology.
+    Delete {
+        name: String,
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+}
+
+// ----- agent -----------------------------------------------------------------
+
+#[derive(Subcommand, Debug)]
+pub enum AgentCmd {
+    /// List available agents.
+    List,
+    /// Show an agent as JSON.
+    Show { name: String },
+    /// Import an agent from a JSON file (use `-` for stdin).
+    Import { name: String, file: String },
+    /// Delete an agent.
+    Delete {
+        name: String,
         #[arg(short = 'f', long)]
         force: bool,
     },
@@ -326,6 +386,8 @@ pub async fn dispatch<C: MirageCtl + 'static>(
     let ctl = Arc::new(ctl);
     match cmd {
         CtlCmd::Profile(c) => profile_cmd(&*ctl, c, json),
+        CtlCmd::Topology(c) => topology_cmd(&*ctl, c, json),
+        CtlCmd::Agent(c) => agent_cmd(&*ctl, c, json),
         CtlCmd::Session(c) => session_cmd(&*ctl, c, json).await,
         CtlCmd::Exec(c) => exec_cmd(ctl.clone(), c, json).await,
         CtlCmd::State(c) => state_cmd(ctl.clone(), c, json).await,
@@ -439,6 +501,106 @@ fn profile_cmd(ctl: &dyn MirageCtl, cmd: ProfileCmd, json: bool) -> anyhow::Resu
         }
     }
     Ok(ExitCode::from(0))
+}
+
+// ----- topology dispatch -----------------------------------------------------
+
+fn topology_cmd(ctl: &dyn MirageCtl, cmd: TopologyCmd, json: bool) -> anyhow::Result<ExitCode> {
+    match cmd {
+        TopologyCmd::List => {
+            let names = ctl.topology_list()?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&names)?);
+            } else {
+                for n in names {
+                    println!("{n}");
+                }
+            }
+        }
+        TopologyCmd::Show { name } => {
+            let t = ctl.topology_get(&name)?;
+            println!("{}", serde_json::to_string_pretty(&t)?);
+        }
+        TopologyCmd::Create {
+            name,
+            agent,
+            racks,
+            nodes_per_rack,
+            gpus_per_node,
+        } => {
+            let t = mirage_core::topology::TopologyDef {
+                racks,
+                nodes_per_rack,
+                gpus_per_node,
+                agent: MaybeRef::Ref(agent),
+            };
+            ctl.topology_put(&name, &t)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&t)?);
+            } else {
+                println!("created topology {name}");
+            }
+        }
+        TopologyCmd::Import { name, file } => {
+            let bytes = read_input(&file)?;
+            let t: mirage_core::topology::TopologyDef = serde_json::from_slice(&bytes)?;
+            ctl.topology_put(&name, &t)?;
+            println!("imported topology {name}");
+        }
+        TopologyCmd::Delete { name, force } => {
+            if !force && !confirm(&format!("delete topology {name}?"))? {
+                return Ok(ExitCode::from(0));
+            }
+            ctl.topology_delete(&name)?;
+            println!("deleted topology {name}");
+        }
+    }
+    Ok(ExitCode::from(0))
+}
+
+// ----- agent dispatch --------------------------------------------------------
+
+fn agent_cmd(ctl: &dyn MirageCtl, cmd: AgentCmd, json: bool) -> anyhow::Result<ExitCode> {
+    match cmd {
+        AgentCmd::List => {
+            let names = ctl.agent_list()?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&names)?);
+            } else {
+                for n in names {
+                    println!("{n}");
+                }
+            }
+        }
+        AgentCmd::Show { name } => {
+            let a = ctl.agent_get(&name)?;
+            println!("{}", serde_json::to_string_pretty(&a)?);
+        }
+        AgentCmd::Import { name, file } => {
+            let bytes = read_input(&file)?;
+            let a: mirage_core::agent::AgentDef = serde_json::from_slice(&bytes)?;
+            ctl.agent_put(&name, &a)?;
+            println!("imported agent {name}");
+        }
+        AgentCmd::Delete { name, force } => {
+            if !force && !confirm(&format!("delete agent {name}?"))? {
+                return Ok(ExitCode::from(0));
+            }
+            ctl.agent_delete(&name)?;
+            println!("deleted agent {name}");
+        }
+    }
+    Ok(ExitCode::from(0))
+}
+
+fn read_input(file: &str) -> anyhow::Result<Vec<u8>> {
+    if file == "-" {
+        let mut buf = Vec::new();
+        std::io::Read::read_to_end(&mut std::io::stdin().lock(), &mut buf)?;
+        Ok(buf)
+    } else {
+        Ok(std::fs::read(file)?)
+    }
 }
 
 // ----- session dispatch ------------------------------------------------------

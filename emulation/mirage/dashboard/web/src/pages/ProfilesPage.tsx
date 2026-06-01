@@ -9,8 +9,13 @@ import { useToast } from "../components/ui/Toast";
 const DEFAULT_NEW_PROFILE = {
   name: "",
   emulator: "noop",
-  nodes: 1,
+  topology_mode: "new" as "new" | "existing",
+  topology_pick: "",
+  topology_save_as: "",
+  racks: 1,
+  nodes_per_rack: 1,
   gpus_per_node: 1,
+  agent: "MI350X",
   exec_mode: "Functional" as "Functional" | "Clocked",
   plugins: [] as string[],
   description: "",
@@ -20,6 +25,8 @@ export function ProfilesPage() {
   const toast = useToast();
   const [names, setNames] = useState<string[]>([]);
   const [emulators, setEmulators] = useState<EmulatorEntry[]>([]);
+  const [topologies, setTopologies] = useState<string[]>([]);
+  const [agents, setAgents] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [wizardOpen, setWizardOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -28,15 +35,24 @@ export function ProfilesPage() {
 
   async function refresh() {
     try {
-      const [n, em] = await Promise.all([
+      const [n, em, tops, ags] = await Promise.all([
         api.listProfiles(),
         api.listEmulators(),
+        api.listTopologies().catch(() => [] as string[]),
+        api.listAgents().catch(() => [] as string[]),
       ]);
       setNames(n);
       setEmulators(em);
+      setTopologies(tops);
+      setAgents(ags);
       if (em.length && !em.some((e) => e.name === form.emulator)) {
         const def = em.find((e) => e.is_default) ?? em[0];
         setForm((f) => ({ ...f, emulator: def.name }));
+      }
+      if (tops.length) {
+        setForm((f) =>
+          f.topology_pick ? f : { ...f, topology_pick: tops[0] },
+        );
       }
     } catch (e) {
       setError(String(e));
@@ -62,17 +78,40 @@ export function ProfilesPage() {
     try {
       const pluginsRecord: Record<string, Record<string, unknown>> = {};
       for (const p of form.plugins) pluginsRecord[p] = {};
+
+      let topology: import("../api/types").EmulatorDef["topology"];
+      if (form.topology_mode === "existing") {
+        if (!form.topology_pick) {
+          setError("Pick a topology");
+          setBusy(false);
+          return;
+        }
+        topology = form.topology_pick;
+      } else {
+        const inline = {
+          racks: form.racks,
+          nodes_per_rack: form.nodes_per_rack,
+          gpus_per_node: form.gpus_per_node,
+          agent: form.agent,
+        };
+        const saveAs = form.topology_save_as.trim();
+        if (saveAs) {
+          await api.putTopology(saveAs, inline);
+          topology = saveAs;
+        } else {
+          topology = inline;
+        }
+      }
+
       await api.putProfile({
         name,
         description: form.description || undefined,
         emulator: {
           emulator: form.emulator,
           plugins: pluginsRecord,
-          nodes: form.nodes,
-          gpus_per_node: form.gpus_per_node,
           exec_mode: form.exec_mode,
           options: {},
-          topology: { root: { name: "", type: "" } },
+          topology,
         },
       });
       toast.success(`Profile "${name}" created`);
@@ -285,34 +324,127 @@ export function ProfilesPage() {
             </div>
           </div>
 
-          <label className="form-field">
-            <span>Nodes</span>
-            <input
-              type="number"
-              min={1}
-              value={form.nodes}
-              data-testid="wizard-nodes"
-              onChange={(e) =>
-                setForm({ ...form, nodes: Math.max(1, +e.target.value || 1) })
-              }
-            />
-          </label>
+          <div className="form-field span-2">
+            <span>Topology source</span>
+            <div className="segmented" role="radiogroup" aria-label="Topology source">
+              {(
+                [
+                  ["existing", "Existing"],
+                  ["new", "New (inline)"],
+                ] as const
+              ).map(([v, label]) => (
+                <button
+                  type="button"
+                  key={v}
+                  role="radio"
+                  aria-checked={form.topology_mode === v}
+                  className={`segmented-option${form.topology_mode === v ? " is-on" : ""}`}
+                  data-testid={`wizard-topology-mode-${v}`}
+                  onClick={() => setForm({ ...form, topology_mode: v })}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
 
-          <label className="form-field">
-            <span>GPUs per node</span>
-            <input
-              type="number"
-              min={1}
-              value={form.gpus_per_node}
-              data-testid="wizard-gpus"
-              onChange={(e) =>
-                setForm({
-                  ...form,
-                  gpus_per_node: Math.max(1, +e.target.value || 1),
-                })
-              }
-            />
-          </label>
+          {form.topology_mode === "existing" ? (
+            <div className="form-field span-2">
+              <span>Topology</span>
+              <Dropdown
+                testId="wizard-topology-pick"
+                ariaLabel="Topology"
+                value={form.topology_pick}
+                onChange={(v) => setForm({ ...form, topology_pick: v })}
+                options={topologies.map((t) => ({ value: t, label: t }))}
+              />
+              {topologies.length === 0 && (
+                <span className="form-help">
+                  No topologies yet. Switch to "New (inline)" or create one
+                  on the Topologies page.
+                </span>
+              )}
+            </div>
+          ) : (
+            <>
+              <label className="form-field">
+                <span>Racks</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={form.racks}
+                  data-testid="wizard-racks"
+                  onChange={(e) =>
+                    setForm({ ...form, racks: Math.max(1, +e.target.value || 1) })
+                  }
+                />
+              </label>
+
+              <label className="form-field">
+                <span>Nodes per rack</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={form.nodes_per_rack}
+                  data-testid="wizard-nodes"
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      nodes_per_rack: Math.max(1, +e.target.value || 1),
+                    })
+                  }
+                />
+              </label>
+
+              <label className="form-field">
+                <span>GPUs per node</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={form.gpus_per_node}
+                  data-testid="wizard-gpus"
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      gpus_per_node: Math.max(1, +e.target.value || 1),
+                    })
+                  }
+                />
+              </label>
+
+              <div className="form-field">
+                <span>Agent</span>
+                <Dropdown
+                  testId="wizard-agent"
+                  ariaLabel="Agent"
+                  value={form.agent}
+                  onChange={(v) => setForm({ ...form, agent: v })}
+                  options={
+                    agents.length
+                      ? agents.map((a) => ({ value: a, label: a }))
+                      : [{ value: form.agent, label: form.agent }]
+                  }
+                />
+              </div>
+
+              <label className="form-field span-2">
+                <span>Save topology as (optional)</span>
+                <input
+                  value={form.topology_save_as}
+                  data-testid="wizard-topology-save-name"
+                  placeholder="leave blank to keep inline"
+                  onChange={(e) =>
+                    setForm({ ...form, topology_save_as: e.target.value })
+                  }
+                />
+                <span className="form-help">
+                  If set, the topology is also saved to{" "}
+                  <code>&lt;MIRAGE_CONFIG&gt;/topology/</code> and the profile
+                  references it by name.
+                </span>
+              </label>
+            </>
+          )}
 
           <div className="form-field span-2">
             <span>Plugins</span>

@@ -22,8 +22,10 @@ export function Layout() {
             Overview
           </NavLink>
           <NavLink to="/profiles">Profiles</NavLink>
+          <NavLink to="/topologies">Topologies</NavLink>
+          <NavLink to="/agents">Agents</NavLink>
           <NavLink to="/sessions">Sessions</NavLink>
-          <NavLink to="/topology">Topology</NavLink>
+          <NavLink to="/topology">Topology editor</NavLink>
         </nav>
         <div className="sidebar-footer">
           {sys && (

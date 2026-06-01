@@ -1,6 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 
 const PROFILE = `e2e-profile-${Date.now()}`;
+const TOPOLOGY = `e2e-topo-${Date.now()}`;
+const PROFILE_WITH_TOPO = `e2e-profile-topo-${Date.now()}`;
 
 async function dismissAllToasts(page: Page) {
   await page.locator(".toast").evaluateAll((els) => {
@@ -122,5 +124,62 @@ test.describe.serial("mirage dashboard e2e", () => {
     await expect(confirm).toBeVisible();
     await page.getByTestId("confirm-delete-profile-confirm").click();
     await expect(page.getByTestId(`profile-row-${PROFILE}`)).toHaveCount(0);
+  });
+
+  test("user story 6: agents list shows builtins", async ({ page }) => {
+    await page.goto("/agents");
+    // Builtins (MI300X, MI350X) are seeded on daemon start.
+    await expect(page.getByTestId("agent-row-MI350X")).toBeVisible();
+    await page.getByTestId("agent-show-MI350X").click();
+    await expect(page.getByTestId("agent-detail-MI350X")).toBeVisible();
+  });
+
+  test("user story 7: create a topology on the Topologies page", async ({ page }) => {
+    await page.goto("/topologies");
+    await page.getByTestId("open-topology-create").click();
+    const modal = page.getByTestId("topology-create-modal");
+    await expect(modal).toBeVisible();
+    await page.getByTestId("topology-create-name").fill(TOPOLOGY);
+    await page.getByTestId("topology-create-racks").fill("1");
+    await page.getByTestId("topology-create-nodes").fill("1");
+    await page.getByTestId("topology-create-gpus").fill("2");
+    await page.getByTestId("topology-create-submit").click();
+    await expect(modal).toHaveCount(0);
+    await expect(page.getByTestId(`topology-row-${TOPOLOGY}`)).toBeVisible();
+    await dismissAllToasts(page);
+  });
+
+  test("user story 8: pick an existing topology in the profile wizard", async ({ page }) => {
+    await page.goto("/profiles");
+    await page.getByTestId("open-profile-wizard").click();
+    const wizard = page.getByTestId("profile-wizard");
+    await expect(wizard).toBeVisible();
+    await page.getByTestId("wizard-name").fill(PROFILE_WITH_TOPO);
+    await page.getByTestId("wizard-emulator").click();
+    await page.getByTestId("wizard-emulator-option-noop").click();
+    await page.getByTestId("wizard-topology-mode-existing").click();
+    await page.getByTestId("wizard-topology-pick").click();
+    await page.getByTestId(`wizard-topology-pick-option-${TOPOLOGY}`).click();
+    await page.getByTestId("wizard-submit").click();
+    await expect(wizard).toHaveCount(0);
+    await expect(page.getByTestId(`profile-row-${PROFILE_WITH_TOPO}`)).toBeVisible();
+    await dismissAllToasts(page);
+  });
+
+  test("user story 9: delete the test profile and topology", async ({ page }) => {
+    await page.goto("/profiles");
+    await page.getByTestId(`delete-profile-${PROFILE_WITH_TOPO}`).click();
+    await page.getByTestId("confirm-delete-profile-confirm").click();
+    await expect(
+      page.getByTestId(`profile-row-${PROFILE_WITH_TOPO}`),
+    ).toHaveCount(0);
+
+    await page.goto("/topologies");
+    await page.getByTestId(`delete-topology-${TOPOLOGY}`).click();
+    const confirm = page.getByTestId("confirm-delete-topology");
+    await expect(confirm).toBeVisible();
+    await page.getByTestId("confirm-delete-topology-confirm").click();
+    await expect(page.getByTestId(`topology-row-${TOPOLOGY}`)).toHaveCount(0);
+    await dismissAllToasts(page);
   });
 });

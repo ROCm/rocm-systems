@@ -14,10 +14,12 @@ use serde::{Deserialize, Serialize};
 use tokio_stream::Stream;
 
 use crate::{
+    agent::AgentDef,
     error::{MirageError, Result},
     exec::{ExecDef, ExecId, ExecRef, ExecStatus},
     profile::ProfileDef,
     session::{SessionDef, SessionHealth, SessionId, SessionState},
+    topology::TopologyDef,
 };
 
 pub type StreamPacketStream = Pin<Box<dyn Stream<Item = StreamPacket> + Send>>;
@@ -75,6 +77,24 @@ pub trait MirageCtl: Send + Sync {
     /// Write a profile. Overwrites any existing profile with the same name.
     fn profile_put(&self, profile: &ProfileDef) -> Result<()>;
     fn profile_delete(&self, name: &str) -> Result<()>;
+
+    // ---- Topologies -----------------------------------------------------
+
+    /// List the names of all topologies on disk.
+    fn topology_list(&self) -> Result<Vec<String>>;
+    fn topology_get(&self, name: &str) -> Result<TopologyDef>;
+    /// Write a topology under `name`. Overwrites any existing one.
+    fn topology_put(&self, name: &str, topology: &TopologyDef) -> Result<()>;
+    fn topology_delete(&self, name: &str) -> Result<()>;
+
+    // ---- Agents ---------------------------------------------------------
+
+    /// List the names of all agents on disk.
+    fn agent_list(&self) -> Result<Vec<String>>;
+    fn agent_get(&self, name: &str) -> Result<AgentDef>;
+    /// Write an agent under `name`. Overwrites any existing one.
+    fn agent_put(&self, name: &str, agent: &AgentDef) -> Result<()>;
+    fn agent_delete(&self, name: &str) -> Result<()>;
 
     // ---- Sessions -------------------------------------------------------
 
@@ -192,6 +212,50 @@ impl MirageCtl for FileCtl {
         let p = crate::paths::profile_path(name);
         if !p.exists() {
             return Err(MirageError::ProfileNotFound(name.to_string()));
+        }
+        std::fs::remove_file(&p).map_err(|e| MirageError::Io { path: p, source: e })
+    }
+
+    // ---- Topologies -----------------------------------------------------
+
+    fn topology_list(&self) -> Result<Vec<String>> {
+        crate::topology::store::list()
+    }
+
+    fn topology_get(&self, name: &str) -> Result<TopologyDef> {
+        crate::topology::store::get(name)
+    }
+
+    fn topology_put(&self, name: &str, topology: &TopologyDef) -> Result<()> {
+        crate::topology::store::put(name, topology).map(|_| ())
+    }
+
+    fn topology_delete(&self, name: &str) -> Result<()> {
+        let p = crate::paths::topology_path(name);
+        if !p.exists() {
+            return Err(MirageError::Other(format!("topology not found: {name}")));
+        }
+        std::fs::remove_file(&p).map_err(|e| MirageError::Io { path: p, source: e })
+    }
+
+    // ---- Agents ---------------------------------------------------------
+
+    fn agent_list(&self) -> Result<Vec<String>> {
+        crate::agent::store::list()
+    }
+
+    fn agent_get(&self, name: &str) -> Result<AgentDef> {
+        crate::agent::store::get(name)
+    }
+
+    fn agent_put(&self, name: &str, agent: &AgentDef) -> Result<()> {
+        crate::agent::store::put(name, agent).map(|_| ())
+    }
+
+    fn agent_delete(&self, name: &str) -> Result<()> {
+        let p = crate::paths::agent_path(name);
+        if !p.exists() {
+            return Err(MirageError::Other(format!("agent not found: {name}")));
         }
         std::fs::remove_file(&p).map_err(|e| MirageError::Io { path: p, source: e })
     }

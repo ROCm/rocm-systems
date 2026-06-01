@@ -19,11 +19,13 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post, put};
 use chrono::Utc;
 use futures::{SinkExt, StreamExt};
+use mirage_core::agent::AgentDef;
 use mirage_core::common::MaybeRef;
 use mirage_core::ctl::{CreateSessionRequest, MirageCtl, StreamPacket};
 use mirage_core::exec::{ExecArgs, ExecDef, ExecId, ExecRef, ExecStatus};
 use mirage_core::profile::ProfileDef;
 use mirage_core::session::{SessionDef, SessionId, SessionState};
+use mirage_core::topology::TopologyDef;
 use serde::{Deserialize, Serialize};
 
 use crate::state::AppState;
@@ -38,6 +40,14 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/profiles/{name}", get(get_profile))
         .route("/profiles/{name}", put(put_profile))
         .route("/profiles/{name}", delete(delete_profile))
+        .route("/topologies", get(list_topologies))
+        .route("/topologies/{name}", get(get_topology))
+        .route("/topologies/{name}", put(put_topology))
+        .route("/topologies/{name}", delete(delete_topology))
+        .route("/agents", get(list_agents))
+        .route("/agents/{name}", get(get_agent))
+        .route("/agents/{name}", put(put_agent))
+        .route("/agents/{name}", delete(delete_agent))
         .route("/sessions", get(list_sessions).post(create_session))
         .route(
             "/sessions/{id}",
@@ -266,6 +276,66 @@ async fn delete_profile(
     Path(name): Path<String>,
 ) -> Result<Json<Ok>, ApiError> {
     s.ctl.profile_delete(&name)?;
+    Ok(ok())
+}
+
+// ---- topologies ------------------------------------------------------------
+
+async fn list_topologies(State(s): State<Arc<AppState>>) -> Result<Json<Vec<String>>, ApiError> {
+    Ok(Json(s.ctl.topology_list()?))
+}
+
+async fn get_topology(
+    State(s): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> Result<Json<TopologyDef>, ApiError> {
+    Ok(Json(s.ctl.topology_get(&name)?))
+}
+
+async fn put_topology(
+    State(s): State<Arc<AppState>>,
+    Path(name): Path<String>,
+    Json(topology): Json<TopologyDef>,
+) -> Result<Json<Ok>, ApiError> {
+    s.ctl.topology_put(&name, &topology)?;
+    Ok(ok())
+}
+
+async fn delete_topology(
+    State(s): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> Result<Json<Ok>, ApiError> {
+    s.ctl.topology_delete(&name)?;
+    Ok(ok())
+}
+
+// ---- agents ----------------------------------------------------------------
+
+async fn list_agents(State(s): State<Arc<AppState>>) -> Result<Json<Vec<String>>, ApiError> {
+    Ok(Json(s.ctl.agent_list()?))
+}
+
+async fn get_agent(
+    State(s): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> Result<Json<AgentDef>, ApiError> {
+    Ok(Json(s.ctl.agent_get(&name)?))
+}
+
+async fn put_agent(
+    State(s): State<Arc<AppState>>,
+    Path(name): Path<String>,
+    Json(agent): Json<AgentDef>,
+) -> Result<Json<Ok>, ApiError> {
+    s.ctl.agent_put(&name, &agent)?;
+    Ok(ok())
+}
+
+async fn delete_agent(
+    State(s): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> Result<Json<Ok>, ApiError> {
+    s.ctl.agent_delete(&name)?;
     Ok(ok())
 }
 

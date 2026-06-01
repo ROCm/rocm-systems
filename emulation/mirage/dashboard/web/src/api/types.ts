@@ -14,10 +14,27 @@ export interface ProfileDef {
 export interface EmulatorDef {
   emulator: string;
   plugins: Record<string, Record<string, unknown>>;
-  nodes: number;
-  gpus_per_node: number;
   exec_mode: "Functional" | "Clocked";
   options: Record<string, unknown>;
+  /// Either a topology preset name (string) or an inline
+  /// [`TopologyDef`].
+  topology: string | TopologyDef;
+}
+
+export interface TopologyDef {
+  racks: number;
+  nodes_per_rack: number;
+  gpus_per_node: number;
+  /// Either an agent preset name (string) or an inline
+  /// `AgentDef` (typed loosely here).
+  agent: string | AgentDef;
+}
+
+/// Loose mirror of `mirage_core::agent::AgentDef`. Only used by the
+/// dashboard for display + round-trip; we don't validate inner
+/// fields.
+export interface AgentDef {
+  vm: Record<string, unknown>;
   topology: Record<string, unknown>;
 }
 

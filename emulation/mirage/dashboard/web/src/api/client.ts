@@ -5,6 +5,7 @@
 /// `mirage_core::ctl::MirageCtl`.
 
 import type {
+  AgentDef,
   EmulatorEntry,
   ExecListItem,
   ExecStatus,
@@ -14,6 +15,7 @@ import type {
   SessionDef,
   SessionState,
   SystemInfo,
+  TopologyDef,
 } from "./types";
 
 const API = "/api";
@@ -66,6 +68,28 @@ export const putProfile = (profile: ProfileDef) =>
   );
 export const deleteProfile = (name: string) =>
   del<{ ok: boolean }>(`/profiles/${encodeURIComponent(name)}`);
+
+// ── Topologies ──────────────────────────────────────────
+
+export const listTopologies = () => get<string[]>("/topologies");
+export const getTopology = (name: string) =>
+  get<TopologyDef>(`/topologies/${encodeURIComponent(name)}`);
+export const putTopology = (name: string, topology: TopologyDef) =>
+  put<{ ok: boolean }>(
+    `/topologies/${encodeURIComponent(name)}`,
+    topology,
+  );
+export const deleteTopology = (name: string) =>
+  del<{ ok: boolean }>(`/topologies/${encodeURIComponent(name)}`);
+
+// ── Agents ──────────────────────────────────────────────
+export const listAgents = () => get<string[]>("/agents");
+export const getAgent = (name: string) =>
+  get<AgentDef>(`/agents/${encodeURIComponent(name)}`);
+export const putAgent = (name: string, agent: AgentDef) =>
+  put<{ ok: boolean }>(`/agents/${encodeURIComponent(name)}`, agent);
+export const deleteAgent = (name: string) =>
+  del<{ ok: boolean }>(`/agents/${encodeURIComponent(name)}`);
 
 // ── Sessions ───────────────────────────────────────────────────────────────
 
