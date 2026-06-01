@@ -213,6 +213,9 @@ add_dependencies(rocjitsu_shared flatbuffers_schemas)
 # Developer and test workflow tools.
 add_subdirectory(tools)
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_subdirectory(tools/rocjitsu)
+endif()
 # Tests and scaling tools.
 if(BUILD_TESTING)
     add_subdirectory(tests)
@@ -239,6 +242,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     install(
         TARGETS rocjitsu_kmd_shim
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    )
+    install(
+        TARGETS rocjitsu_bin
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
 endif()
 

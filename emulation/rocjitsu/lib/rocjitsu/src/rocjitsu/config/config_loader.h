@@ -82,17 +82,24 @@ struct KfdDeviceConfig {
   uint32_t num_sdma_xgmi_engines = 0;
   uint32_t num_cp_queues = 128;
   uint32_t max_engine_clk_fcompute = 2100;
+  uint32_t location_id = 0x0300;
+  uint64_t hive_id = 0;
+  uint32_t domain = 0;
   bool present = false; ///< True if device section existed in config.
 };
 
 struct LoadedConfig {
   simdojo::SimulationEngine::Config engine_config;
   TopologyBuildResult build_result;
+  std::vector<TopologyBuildResult>
+      extra_gpu_builds; ///< Additional GPU SoC trees (for num_gpus > 1).
   simdojo::ExecMode exec_mode = simdojo::ExecMode::FUNCTIONAL;
-  KfdDeviceConfig device; ///< KFD device identity from vm.gpu.device.
+  KfdDeviceConfig device;               ///< KFD device identity from vm.gpu.device.
+  uint32_t num_gpus = 1;                ///< Number of simulated GPU instances.
+  std::vector<KfdDeviceConfig> devices; ///< Per-GPU configs (populated when num_gpus > 1).
 
-  /// @brief Return the SoC (root component, typed).
-  SoC *soc() { return dynamic_cast<SoC *>(build_result.root.get()); }
+  /// @brief Return the SoC from the topology root.
+  SoC *soc();
 
   /// @brief Return GPU memory.
   amdgpu::GpuMemory *memory() { return build_result.memory; }

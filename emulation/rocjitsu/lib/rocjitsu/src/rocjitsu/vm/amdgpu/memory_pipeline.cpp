@@ -131,12 +131,12 @@ void vector_complete(VectorMemState &d, ComputeUnitCore &cu) {
 
 } // namespace
 
-void ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront & /*wf*/) {
+void ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<ScalarMemState>();
   if (d.is_load) {
-    l1_->load(d.addr, d.num_dwords, d.response_data);
+    l1_->load(d.addr, d.num_dwords, d.response_data, wf.process_id());
   } else {
-    l1_->store(d.addr, d.num_dwords, d.store_data);
+    l1_->store(d.addr, d.num_dwords, d.store_data, wf.process_id());
   }
 }
 
@@ -221,7 +221,7 @@ template <typename F> F apply_fp_atomic(AtomicOp op, F old_val, F src_val) {
 /// Reads old value from L2, applies the atomic operation, writes new value
 /// back. Invalidates the L1 line to prevent stale reads. Old values are
 /// stored in response_data for GLC return.
-void execute_atomic_rmw(VectorMemState &d, L2Cache *l2, L1VectorCache *l1) {
+void execute_atomic_rmw(VectorMemState &d, L2Cache *l2, L1VectorCache *l1, uint32_t vmid) {
   const uint32_t esz = d.elem_size;
   d.response_data.resize(d.wf_size * esz);
 
@@ -278,7 +278,7 @@ void execute_atomic_rmw(VectorMemState &d, L2Cache *l2, L1VectorCache *l1) {
         std::memcpy(line_data + offset, &new_val, 8);
         std::memcpy(&d.response_data[lane * 8], &old_val, 8);
       }
-    });
+    }, vmid);
 
     // Invalidate stale L1 line.
     l1->invalidate(ea);
@@ -350,14 +350,14 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   }
 
   if (d.atomic_op != AtomicOp::NONE) {
-    execute_atomic_rmw(d, l2_, l1_);
+    execute_atomic_rmw(d, l2_, l1_, wf.process_id());
     return;
   }
 
   if (d.is_load) {
     d.response_data.resize(d.wf_size * d.num_elems * d.elem_size);
     l1_->load(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems, d.response_data.data(),
-              d.mtype, d.non_temporal);
+              d.mtype, d.non_temporal, wf.process_id());
   } else {
     // Trace: dump per-lane addresses, hex data, and float values for stores.
     util::Logger::vm([&](auto &os) {
@@ -384,7 +384,7 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
       }
     });
     l1_->store(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems, d.store_data.data(),
-               d.mtype, d.non_temporal);
+               d.mtype, d.non_temporal, wf.process_id());
   }
 }
 

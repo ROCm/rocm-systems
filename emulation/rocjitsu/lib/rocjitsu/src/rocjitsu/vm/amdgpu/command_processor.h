@@ -24,6 +24,8 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/spi.h"
 
 #include "simdojo/sim/component.h"
 
@@ -49,12 +51,14 @@ namespace amdgpu {
 
 /// @brief Description of an AQL hardware queue registered with the CP.
 struct HwQueue {
+  uint32_t process_id = 0;
   uint32_t queue_id = 0;
   uint64_t ring_base_va = 0;
   uint32_t ring_size = 0;
   uint64_t read_ptr_va = 0;
   uint64_t write_ptr_va = 0;
   uint32_t doorbell_offset = 0;
+  void *doorbell_base = nullptr;
   uint64_t doorbell_va = 0;
   uint64_t last_doorbell = 0;
   bool host_accessible = false;
@@ -78,20 +82,33 @@ public:
   ~CommandProcessor() override { stop_doorbell_monitor(); }
 
   void set_memory(GpuMemory *mem) { memory_ = mem; }
+  void add_l2_cache(L2Cache *l2) { l2_caches_.push_back(l2); }
   void set_vgpr_granularity(uint32_t g) { vgpr_granularity_ = g; }
   void set_packed_tid(bool v) { packed_tid_ = v; }
-  void set_doorbell_base(void *base);
+  /// @brief Update doorbell_base for all queues belonging to a process.
+  /// @details Called when the doorbell page is mmap'd after queue creation.
+  void set_doorbell_base(uint32_t process_id, void *base);
 
-  using InterruptCallback = std::function<void(uint32_t event_id)>;
+  using InterruptCallback = std::function<void(uint32_t process_id, uint32_t event_id)>;
   void set_interrupt_callback(InterruptCallback cb) { interrupt_cb_ = std::move(cb); }
 
+  using ScratchBackingResolver = std::function<uint64_t(uint32_t process_id)>;
+  void set_scratch_backing_resolver(ScratchBackingResolver cb) { scratch_resolver_ = std::move(cb); }
+
+  using ScratchBackingAllocator = std::function<bool(uint32_t process_id, uint64_t gpu_va, size_t size)>;
+  void set_scratch_backing_allocator(ScratchBackingAllocator cb) {
+    scratch_allocator_ = std::move(cb);
+  }
+
   void register_queue(HwQueue queue);
-  void unregister_queue(uint32_t queue_id);
-  void update_queue(uint32_t queue_id, uint64_t ring_base_va, uint32_t ring_size);
+  void unregister_queue(uint32_t queue_id, uint32_t process_id);
+  void update_queue(uint32_t queue_id, uint32_t process_id, uint64_t ring_base_va, uint32_t ring_size);
 
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
     plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group();
   }
+
+  void add_spi(ShaderProcessorInput *spi) { spis_.push_back(spi); }
 
   void add_compute_unit(ComputeUnitCore *cu) {
     auto port_id = static_cast<simdojo::PortID>(dispatch_ports_.size());
@@ -141,11 +158,14 @@ private:
                           uint64_t pkt_addr, HwQueueState &qs);
 
   rocr::llvm::amdhsa::kernel_descriptor_t read_kernel_descriptor(uint64_t kernel_object,
+                                                                 uint32_t vmid,
                                                                  bool host_accessible = false);
-  void signal_aql_completion(uint64_t pkt_addr);
-
   /// @brief Dispatch workgroups from entry to CUs. Returns number dispatched.
   uint32_t dispatch_workgroups(DispatchEntry &entry);
+
+  /// @brief Asynchronous Compute Engine (ACE): dispatch workgroups from all
+  /// active queues to SPIs and run CUs to completion.
+  bool ace_dispatch_all();
 
   /// @brief Process all queues: dispatch undispatched entries, handle non-kernel entries.
   void process_queues();
@@ -176,7 +196,8 @@ private:
   }
 
   GpuMemory *memory_ = nullptr;
-  std::atomic<void *> doorbell_base_{nullptr};
+  std::vector<ShaderProcessorInput *> spis_;
+  std::vector<L2Cache *> l2_caches_;
   std::vector<HwQueue> hw_queues_;
   std::vector<HwQueueState> new_queue_states_;
   std::vector<ComputeUnitCore *> cus_;
@@ -192,15 +213,28 @@ private:
   size_t total_dispatched_ = 0;
 
   simdojo::Event doorbell_event_{this, simdojo::EventType::TIMER_CALLBACK};
-  std::mutex hw_queue_mutex_;
+  std::recursive_mutex hw_queue_mutex_;
 
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
 
-  uint64_t read_gpu_u64(uint64_t va) const;
+  /// @brief Read a uint64 from GPU virtual address space via GpuMemory translation.
+  uint64_t read_gpu_u64(uint64_t va, uint32_t vmid) const;
+
+  /// @brief Read a uint32 from GPU virtual address space via GpuMemory translation.
+  uint32_t read_gpu_u32(uint64_t va, uint32_t vmid) const;
+
+  /// @brief Read a block of bytes from GPU virtual address space into a buffer.
+  void read_gpu_block(uint64_t va, void *dst, size_t size, uint32_t vmid) const;
+
+  /// @brief Write a block of bytes to GPU virtual address space from a buffer.
+  void write_gpu_block(uint64_t va, const void *src, size_t size, uint32_t vmid);
+
   void stop_doorbell_monitor();
   bool scan_doorbells();
 
   InterruptCallback interrupt_cb_;
+  ScratchBackingResolver scratch_resolver_;
+  ScratchBackingAllocator scratch_allocator_;
   std::unique_ptr<CompletionTracker> completion_;
 
   void doorbell_poll_loop(std::stop_token stop);

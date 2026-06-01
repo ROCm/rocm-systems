@@ -68,16 +68,18 @@ public:
   ///          age predicate, respecting wait_for_all (AND vs OR semantics).
   ///          Creates a thread-local CV and registers it with each waited event.
   /// @returns 0 on success, -EBADF if the driver is closing.
-  int wait_events(void *arg);
+  int wait_events(void *arg, uint32_t process_id = 0);
 
   /// @brief Adopt a pre-allocated event page from the FMM allocator (dGPU path).
   /// @details Idempotent, subsequent calls after the first are no-ops.
   void adopt_page(void *ptr, size_t size);
 
-  /// @brief Signal a specific event from the CP's interrupt callback.
-  /// @details Sets event_age to 1 and notifies registered waiters. Only
-  ///          affects signal events (event_type == 0).
+  /// @brief Signal event(s) from the CP's interrupt callback.
+  /// @details When event_id is non-zero, signals that specific event. When
+  ///          event_id is zero, broadcasts to all type-0 events — matching
+  ///          real KFD's kfd_signal_event_interrupt(pasid, 0, 0) broadcast.
   void signal_interrupt(uint32_t event_id);
+
 
   /// @brief Wake all event waiters for driver shutdown.
   /// @details Sets the closing flag and notifies every registered waiter
@@ -104,8 +106,9 @@ private:
   struct GpuEvent {
     uint32_t event_id = 0;   ///< KFD event ID (1-based, matches slot index).
     uint32_t event_type = 0; ///< HSA event type (0 = signal, others = system).
-    bool auto_reset = false; ///< If true, event_age resets to 0 after acknowledgement.
-    uint64_t event_age = 0;  ///< Monotonic age (0 = unsignaled, 1 = signaled).
+    bool auto_reset = false; ///< If true, signaled clears after wakeup.
+    bool signaled = false;   ///< True when the event has been signaled.
+    uint64_t event_age = 1;  ///< Monotonic age counter (starts at 1, matching real KFD).
     std::vector<std::condition_variable *> waiters; ///< Per-event waiter list (kernel wait_queue).
   };
 
