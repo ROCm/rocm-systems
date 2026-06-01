@@ -66,6 +66,7 @@ typedef enum {
   HIP_COPY_KIND_BUFFER_TO_IMAGE_EXT = 10, /**< Device buffer → device image (format conversion) */
   HIP_COPY_KIND_IMAGE_TO_BUFFER_EXT = 11, /**< Device image → device buffer (format conversion) */
   HIP_COPY_KIND_FILL_EXT            = 12, /**< Device buffer fill (pattern written by compute engine) */
+  HIP_COPY_KIND_BATCH_EXT           = 13, /**< Batched buffer copy (may mix D2D, P2P, H2D, D2H) */
 } HipCopyKindExt;
 
 /**
@@ -80,7 +81,8 @@ static inline int hipCopyKindIsSDMAExt(HipCopyKindExt kind) {
          kind == HIP_COPY_KIND_H2D_IMAGE_EXT ||
          kind == HIP_COPY_KIND_D2H_EXT       ||
          kind == HIP_COPY_KIND_D2H_RECT_EXT  ||
-         kind == HIP_COPY_KIND_D2H_IMAGE_EXT;
+         kind == HIP_COPY_KIND_D2H_IMAGE_EXT ||
+         kind == HIP_COPY_KIND_BATCH_EXT;
 }
 
 /**
@@ -288,14 +290,13 @@ hipError_t hipProfilerGetRecordsExt(const hipApiRecordExt* const** chunks,
 /**
  * @brief Callback type for streaming delivery of completed activity records.
  *
- * @param records     Pointer to the slab — an array of count records aligned to a
- *                    kChunkSize boundary.  Valid only for the duration of the callback;
- *                    do not store this pointer.  The profiler frees the records immediately
- *                    after the callback returns.
+ * @param records     Pointer to the slab — an array of count records.  Valid only for
+ *                    the duration of the callback; do not store this pointer.  The profiler
+ *                    frees the records immediately after the callback returns.
  * @param count       Number of valid records in the slab (always kChunkSize except for the
  *                    last partial slab delivered at exit).
- * @param chunk_id    chunk_id of records[0].  Records within the slab are contiguous, so
- *                    the last record has chunk_id == chunk_id + count - 1.
+ * @param chunk_id    Monotonically increasing slab index (0, 1, 2, …).  Slabs are always
+ *                    delivered in order.  records[i].chunk_id == chunk_id * kChunkSize + i.
  * @param user_data   Opaque pointer supplied to hipProfilerRegisterChunkCallbackExt.
  */
 typedef void (*hipProfilerChunkCallback)(

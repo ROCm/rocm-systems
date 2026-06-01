@@ -48,7 +48,7 @@ __device__ void GDAContext::p(T *dest, T value, int pe) {
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
     long L_offset{reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank]};
-    ipcImpl_.ipcCopy(ipcImpl_.ipc_bases[local_pe] + L_offset, reinterpret_cast<void *>(&value), sizeof(T));
+    ipcImpl_.ipcCopy<MemcpyKind::Put>(ipcImpl_.ipc_bases[local_pe] + L_offset, reinterpret_cast<void *>(&value), sizeof(T), local_pe);
     return;
   }
   putmem_nbi(dest, &value, sizeof(T), pe);
@@ -71,7 +71,7 @@ __device__ T GDAContext::g(const T *source, int pe) {
   if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
     const char *src_typed{reinterpret_cast<const char *>(source)};
     long L_offset{const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank]};
-    ipcImpl_.ipcCopy(&ret, ipcImpl_.ipc_bases[local_pe] + L_offset, sizeof(T));
+    ipcImpl_.ipcCopy<MemcpyKind::Get>(&ret, ipcImpl_.ipc_bases[local_pe] + L_offset, sizeof(T), local_pe);
     return ret;
   }
   LOGD_ERROR_ABORT("gda::g not implemented");
@@ -699,7 +699,7 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team, T *dest,
     if (nelems != 0) {
       T* dst = (T*)((char*) dest + dest_displs[j] * sizeof(T));
       T* src = (T*)((char*) &tmp_buf[j * tmp_buf_off]);
-      memcpy_wg(dst, src, nelems);
+      memcpy_wg<MemcpyKind::Put>(dst, src, nelems);
     }
   }
 
@@ -1077,6 +1077,254 @@ __device__ __forceinline__ uint32_t GDAContext::get_qp_index(int pe,
   return qp_index;
 }
 
+/******************************************************************************
+ **************** TILE API STUB IMPLEMENTATIONS (NOT IMPLEMENTED) *************
+ *****************************************************************************/
+
+// RMA PUT operations - Type-erased interface
+__device__ inline int GDAContext::tile_put([[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                    [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                    [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                    [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                    [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int GDAContext::tile_put_wave([[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                         [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                         [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                         [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                         [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int GDAContext::tile_put_wg([[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                       [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                       [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                       [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                       [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+// RMA GET operations - Type-erased interface
+__device__ inline int GDAContext::tile_get([[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                    [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                    [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                    [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                    [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int GDAContext::tile_get_wave([[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                         [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                         [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                         [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                         [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int GDAContext::tile_get_wg([[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                       [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                       [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                       [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                       [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+// Allgather operations - Type-erased interface
+__device__ inline int GDAContext::tile_allgather([[maybe_unused]] rocshmem_team_t team,
+                                          [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                          [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                          [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                          [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                          [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int GDAContext::tile_allgather_wave([[maybe_unused]] rocshmem_team_t team,
+                                               [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                               [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                               [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                               [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                               [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int GDAContext::tile_allgather_wg([[maybe_unused]] rocshmem_team_t team,
+                                             [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                             [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                             [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                             [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                             [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+// Broadcast operations - Type-erased interface
+__device__ inline int GDAContext::tile_broadcast([[maybe_unused]] rocshmem_team_t team,
+                                          [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                          [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                          [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                          [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                          [[maybe_unused]] int pe_root, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int GDAContext::tile_broadcast_wave([[maybe_unused]] rocshmem_team_t team,
+                                               [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                               [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                               [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                               [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                               [[maybe_unused]] int pe_root, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int GDAContext::tile_broadcast_wg([[maybe_unused]] rocshmem_team_t team,
+                                             [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                             [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                             [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                             [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                             [[maybe_unused]] int pe_root, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+// SUM Reduction operations - Type-erased interface
+__device__ inline int GDAContext::tile_sum_reduce([[maybe_unused]] rocshmem_team_t team,
+                                           [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                           [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                           [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                           [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                           [[maybe_unused]] int root, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int GDAContext::tile_sum_reduce_wave([[maybe_unused]] rocshmem_team_t team,
+                                                [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                                [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                                [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                                [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                                [[maybe_unused]] int root, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int GDAContext::tile_sum_reduce_wg([[maybe_unused]] rocshmem_team_t team,
+                                              [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                              [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                              [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                              [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                              [[maybe_unused]] int root, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+// MAX Reduction operations - Type-erased interface
+__device__ inline int GDAContext::tile_max_reduce([[maybe_unused]] rocshmem_team_t team,
+                                                   [[maybe_unused]] void* dst_data,
+                                                   [[maybe_unused]] const void* src_data,
+                                                   [[maybe_unused]] const size_t* dst_strides,
+                                                   [[maybe_unused]] const size_t* src_strides,
+                                                   [[maybe_unused]] const size_t* start_coord,
+                                                   [[maybe_unused]] const size_t* boundary,
+                                                   [[maybe_unused]] int ndim,
+                                                   [[maybe_unused]] size_t element_size,
+                                                   [[maybe_unused]] int root,
+                                                   [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int GDAContext::tile_max_reduce_wave([[maybe_unused]] rocshmem_team_t team,
+                                                        [[maybe_unused]] void* dst_data,
+                                                        [[maybe_unused]] const void* src_data,
+                                                        [[maybe_unused]] const size_t* dst_strides,
+                                                        [[maybe_unused]] const size_t* src_strides,
+                                                        [[maybe_unused]] const size_t* start_coord,
+                                                        [[maybe_unused]] const size_t* boundary,
+                                                        [[maybe_unused]] int ndim,
+                                                        [[maybe_unused]] size_t element_size,
+                                                        [[maybe_unused]] int root,
+                                                        [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int GDAContext::tile_max_reduce_wg([[maybe_unused]] rocshmem_team_t team,
+                                                      [[maybe_unused]] void* dst_data,
+                                                      [[maybe_unused]] const void* src_data,
+                                                      [[maybe_unused]] const size_t* dst_strides,
+                                                      [[maybe_unused]] const size_t* src_strides,
+                                                      [[maybe_unused]] const size_t* start_coord,
+                                                      [[maybe_unused]] const size_t* boundary,
+                                                      [[maybe_unused]] int ndim,
+                                                      [[maybe_unused]] size_t element_size,
+                                                      [[maybe_unused]] int root,
+                                                      [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+// MIN Reduction operations - Type-erased interface
+__device__ inline int GDAContext::tile_min_reduce([[maybe_unused]] rocshmem_team_t team,
+                                                   [[maybe_unused]] void* dst_data,
+                                                   [[maybe_unused]] const void* src_data,
+                                                   [[maybe_unused]] const size_t* dst_strides,
+                                                   [[maybe_unused]] const size_t* src_strides,
+                                                   [[maybe_unused]] const size_t* start_coord,
+                                                   [[maybe_unused]] const size_t* boundary,
+                                                   [[maybe_unused]] int ndim,
+                                                   [[maybe_unused]] size_t element_size,
+                                                   [[maybe_unused]] int root,
+                                                   [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int GDAContext::tile_min_reduce_wave([[maybe_unused]] rocshmem_team_t team,
+                                                        [[maybe_unused]] void* dst_data,
+                                                        [[maybe_unused]] const void* src_data,
+                                                        [[maybe_unused]] const size_t* dst_strides,
+                                                        [[maybe_unused]] const size_t* src_strides,
+                                                        [[maybe_unused]] const size_t* start_coord,
+                                                        [[maybe_unused]] const size_t* boundary,
+                                                        [[maybe_unused]] int ndim,
+                                                        [[maybe_unused]] size_t element_size,
+                                                        [[maybe_unused]] int root,
+                                                        [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int GDAContext::tile_min_reduce_wg([[maybe_unused]] rocshmem_team_t team,
+                                                      [[maybe_unused]] void* dst_data,
+                                                      [[maybe_unused]] const void* src_data,
+                                                      [[maybe_unused]] const size_t* dst_strides,
+                                                      [[maybe_unused]] const size_t* src_strides,
+                                                      [[maybe_unused]] const size_t* start_coord,
+                                                      [[maybe_unused]] const size_t* boundary,
+                                                      [[maybe_unused]] int ndim,
+                                                      [[maybe_unused]] size_t element_size,
+                                                      [[maybe_unused]] int root,
+                                                      [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+// Rooted SUM Reduction operations
+// Rooted MAX Reduction operations
+// Rooted MIN Reduction operations
 }  // namespace rocshmem
 
 #endif  // LIBRARY_SRC_GDA_CONTEXT_TMPL_DEVICE_HPP_

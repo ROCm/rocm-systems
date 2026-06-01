@@ -11,7 +11,9 @@ subtrees:
   - caption: Install
     entries:
     - file: install/install.rst
-      title: ROCm Systems Profiler installation guide
+      title: Install ROCm Systems Profiler
+    - file: install/build.rst
+      title: Build from source
 
   - caption: How to
     entries:

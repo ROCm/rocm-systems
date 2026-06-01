@@ -90,6 +90,7 @@ endif()
 # the device-side create_ctx/destroy_ctx dispatchers)
 set(BITCODE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rocshmem_gpu.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rocshmem_tile_gpu.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ipc_policy.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/team.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/sync/abql_block_mutex.cpp

@@ -9,6 +9,7 @@
 #include <optional>
 
 #include "hip_internal.hpp"
+#include "platform/command.hpp"
 #include "platform/ndrange.hpp"
 #include "platform/program.hpp"
 #include "hip_event.hpp"
@@ -22,7 +23,8 @@ hipError_t ihipModuleLoadData(hipModule_t* module, const void* mmap_ptr, size_t 
 extern hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDim,
                                    void** args, size_t sharedMemBytes, hipStream_t stream,
                                    hipEvent_t startEvent, hipEvent_t stopEvent, int flags,
-                                   dim3 clusterDim = {1, 1, 1});
+                                   dim3 clusterDim = {1, 1, 1},
+                                   const amd::DynDataPrefetchConfig* dynDataPrefetchConfig = nullptr);
 
 const std::string& FunctionName(const hipFunction_t f) {
   return hip::asKernel(f)->name();
@@ -469,7 +471,8 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
                                   hipEvent_t startEvent, hipEvent_t stopEvent, uint32_t flags = 0,
                                   uint32_t params = 0, uint32_t gridId = 0, uint32_t numGrids = 0,
                                   uint64_t prevGridSum = 0, uint64_t allGridSum = 0,
-                                  uint32_t firstDevice = 0) {
+                                  uint32_t firstDevice = 0,
+                                  const amd::DynDataPrefetchConfig* dynDataPrefetchConfig = nullptr) {
   int deviceId = hip::Stream::DeviceId(hStream);
 
   // Ensure the stream's device matches the current device,
@@ -521,6 +524,11 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
     return status;
   }
 
+  if (dynDataPrefetchConfig != nullptr && dynDataPrefetchConfig->isEnabled()) {
+    amd::NDRangeKernelCommand* kernelCmd = static_cast<amd::NDRangeKernelCommand*>(command);
+    kernelCmd->setDynDataPrefetchConfig(*dynDataPrefetchConfig);
+  }
+
   if (startEvent != nullptr) {
     hip::Event* eStart = reinterpret_cast<hip::Event*>(startEvent);
     status = eStart->addMarker(hip_stream, nullptr);
@@ -570,14 +578,8 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f, uint32_t gridDimX, uint32_t gr
   STREAM_CAPTURE(hipModuleLaunchKernel, hStream, f, gridDimX, gridDimY, gridDimZ, blockDimX,
                  blockDimY, blockDimZ, sharedMemBytes, kernelParams, extra);
 
-  constexpr auto int32_max = static_cast<uint64_t>(std::numeric_limits<int32_t>::max());
-  constexpr auto uint16_max = static_cast<uint64_t>(std::numeric_limits<uint16_t>::max()) + 1;
-  if (gridDimX > int32_max || gridDimY > uint16_max || gridDimZ > uint16_max) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
-
   amd::HIPLaunchParams launch_params(gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ,
-                                     sharedMemBytes);
+                                     sharedMemBytes, *device, 0, 0, 0, 1, 1, 1);
   if (!launch_params.IsValidConfig() ||
        launch_params.local_.product() > device->info().maxWorkGroupSize_) {
     HIP_RETURN(hipErrorInvalidValue);
@@ -623,7 +625,8 @@ hipError_t hipExtModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
                  kernelParams, extra, startEvent, stopEvent, flags);
 
   amd::LaunchParams launch_params(globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ, localWorkSizeX,
-                                  localWorkSizeY, localWorkSizeZ, sharedMemBytes);
+                                  localWorkSizeY, localWorkSizeZ, sharedMemBytes, *device, 1, 1, 1, 1,
+                                  1, 1, false);
 
   if (!launch_params.IsValidConfig() ||
        launch_params.local_.product() > device->info().maxWorkGroupSize_) {
@@ -658,8 +661,11 @@ hipError_t hipHccModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
                blockDimX, blockDimY, blockDimZ, sharedMemBytes, hStream, kernelParams, extra,
                startEvent, stopEvent);
 
+  int deviceId = hip::Stream::DeviceId(hStream);
+  const amd::Device* device = g_devices[deviceId]->devices()[0];
   amd::LaunchParams launch_params(globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ, blockDimX,
-                                  blockDimY, blockDimZ, sharedMemBytes);
+                                  blockDimY, blockDimZ, sharedMemBytes, *device, 1, 1, 1, 1, 1, 1,
+                                  false);
 
   HIP_RETURN(ihipModuleLaunchKernel(f, launch_params, hStream, kernelParams, extra, startEvent,
                                     stopEvent));
@@ -684,7 +690,7 @@ hipError_t hipModuleLaunchCooperativeKernel(hipFunction_t f, unsigned int gridDi
                  blockDimX, blockDimY, blockDimZ, sharedMemBytes, kernelParams);
 
   amd::HIPLaunchParams launch_params(gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ,
-                                     sharedMemBytes);
+                                     sharedMemBytes, *device, 0, 0, 0, 1, 1, 1);
 
   if (!launch_params.IsValidConfig() ||
       launch_params.local_.product() > device->info().maxWorkGroupSize_) {
@@ -795,9 +801,10 @@ hipError_t ihipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams*
       }
     }
 
+    const amd::Device& device = hip_stream->vdev()->device();
     amd::HIPLaunchParams launch_params(launch.gridDimX, launch.gridDimY, launch.gridDimZ,
                                        launch.blockDimX, launch.blockDimY, launch.blockDimZ,
-                                       launch.sharedMemBytes);
+                                       launch.sharedMemBytes, device, 0, 0, 0, 1, 1, 1);
 
     if (!launch_params.IsValidConfig()) {
       return hipErrorInvalidConfiguration;
@@ -845,31 +852,30 @@ hipError_t hipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams* 
        amd::NDRangeKernelCommand::CooperativeMultiDeviceGroups)));
 }
 
-hipError_t hipGetFuncBySymbol(hipFunction_t* functionPtr, const void* symbolPtr) {
-  HIP_INIT_API(hipGetFuncBySymbol, functionPtr, symbolPtr);
-
+hipError_t ihipGetFuncBySymbol(hipFunction_t* functionPtr, const void* symbolPtr) {
   hipError_t hip_error =
       PlatformState::Instance().StatCO().GetFunc(functionPtr, symbolPtr, ihipGetDevice());
-
   if ((hip_error != hipSuccess) || (functionPtr == nullptr)) {
-    HIP_RETURN(hipErrorInvalidDeviceFunction);
+    return hipErrorInvalidDeviceFunction;
   }
-  HIP_RETURN(hipSuccess);
+  return hipSuccess;
+}
+
+hipError_t hipGetFuncBySymbol(hipFunction_t* functionPtr, const void* symbolPtr) {
+  HIP_INIT_API(hipGetFuncBySymbol, functionPtr, symbolPtr);
+  HIP_RETURN(ihipGetFuncBySymbol(functionPtr, symbolPtr));
 }
 
 hipError_t hipLaunchKernel_common(const void* hostFunction, dim3 gridDim, dim3 blockDim,
                                   void** args, size_t sharedMemBytes, hipStream_t stream,
-                                  dim3 clusterDim = {1, 1, 1}) {
-  // TODO: @cjatin refactor the isValid check in hot path
-  // We do this check in `ihipLaunchKernel` as well, but the macro STREAM_CAPTURE dereferences the stream first.
-  // So this shows up in the ASAN run.
-  // I will raise a follow up PR to fix this.
+                                  dim3 clusterDim = {1, 1, 1},
+                                  const amd::DynDataPrefetchConfig* dynDataPrefetchConfig = nullptr) {
   if (!hip::isValid(stream)) {
     return hipErrorInvalidValue;
   }
   STREAM_CAPTURE(hipLaunchKernel, stream, hostFunction, gridDim, blockDim, args, sharedMemBytes);
   return ihipLaunchKernel(hostFunction, gridDim, blockDim, args, sharedMemBytes, stream, nullptr,
-                          nullptr, 0, clusterDim);
+                          nullptr, 0, clusterDim, dynDataPrefetchConfig);
 }
 
 hipError_t hipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDim, void** args,
@@ -926,7 +932,7 @@ hipError_t hipLaunchCooperativeKernel_common(const void* f, dim3 gridDim, dim3 b
   const amd::Device* device = g_devices[deviceId]->devices()[0];
 
   amd::HIPLaunchParams launch_params(gridDim.x, gridDim.y, gridDim.z, blockDim.x, blockDim.y,
-                                     blockDim.z, sharedMemBytes);
+                                     blockDim.z, sharedMemBytes, *device, 0, 0, 0, 1, 1, 1);
 
   if (!launch_params.IsValidConfig() ||
       launch_params.local_.product() > device->info().maxWorkGroupSize_) {
@@ -1245,6 +1251,57 @@ hipError_t hipLinkDestroy(hipLinkState_t hip_link_state) {
   HIP_RETURN(hipSuccess);
 }
 
+static hipError_t validateDynDataPrefetchConfig(const hipExtDynDataPrefetchConfig& config,
+                                                 uint32_t maxRegions,
+                                                 size_t cacheLineSize) {
+  constexpr size_t kPrefetchUnit = 256;
+  constexpr size_t kMaxBurstSizeUnits = 1u << 11;
+  constexpr size_t kMaxNumBursts = 1u << 16;
+  constexpr size_t kMaxStrideUnits = (1u << 24) - 1u;
+
+  if (maxRegions == 0) return hipErrorNotSupported;
+  if (config.numRegions == 0 || config.numRegions > maxRegions) return hipErrorInvalidValue;
+  if (config.temporal != hipExtDynDataPrefetchTemporalRegular &&
+      config.temporal != hipExtDynDataPrefetchTemporalHigh) {
+    return hipErrorInvalidValue;
+  }
+  for (unsigned int i = 0; i < config.numRegions; ++i) {
+    const hipExtDynDataPrefetchRegion& r = config.regions[i];
+    if (r.address == nullptr ||
+        reinterpret_cast<uintptr_t>(r.address) % cacheLineSize != 0 ||
+        r.width == 0 || r.width % cacheLineSize != 0 || r.width % kPrefetchUnit != 0 ||
+        r.stride == 0 || r.stride % cacheLineSize != 0 || r.stride % kPrefetchUnit != 0 ||
+        r.stride < r.width ||
+        r.height == 0) {
+      return hipErrorInvalidValue;
+    }
+    if ((r.width / kPrefetchUnit) > kMaxBurstSizeUnits ||
+        r.height > kMaxNumBursts ||
+        (r.stride / kPrefetchUnit) > kMaxStrideUnits) {
+      return hipErrorInvalidValue;
+    }
+  }
+  return hipSuccess;
+}
+
+static hipError_t convertDynDataPrefetchConfig(const hipExtDynDataPrefetchConfig& hipCfg,
+                                               amd::DynDataPrefetchConfig& clrCfg,
+                                               const device::Info& devInfo) {
+  hipError_t status = validateDynDataPrefetchConfig(
+      hipCfg, devInfo.maxDynDataPrefetchRegions_,
+      static_cast<size_t>(devInfo.globalMemCacheLineSize_));
+  if (status != hipSuccess) return status;
+  clrCfg.numRegions = hipCfg.numRegions;
+  clrCfg.hints = (hipCfg.temporal == hipExtDynDataPrefetchTemporalHigh) ? 2u : 0u;
+  for (uint32_t i = 0; i < hipCfg.numRegions; ++i) {
+    clrCfg.regions[i].baseAddress = hipCfg.regions[i].address;
+    clrCfg.regions[i].burstSize   = hipCfg.regions[i].width;
+    clrCfg.regions[i].numBursts   = static_cast<uint32_t>(hipCfg.regions[i].height);
+    clrCfg.regions[i].stride      = static_cast<uint32_t>(hipCfg.regions[i].stride);
+  }
+  return hipSuccess;
+}
+
 hipError_t hipLaunchKernelExC(const hipLaunchConfig_t* config, const void* fPtr, void** args) {
   HIP_INIT_API(hipLaunchKernelExC, config, fPtr, args);
   if (fPtr == nullptr) {
@@ -1260,7 +1317,9 @@ hipError_t hipLaunchKernelExC(const hipLaunchConfig_t* config, const void* fPtr,
                                                config->dynamicSmemBytes, config->stream));
   }
 
-  dim3 clusterDims = {0, 0, 0};
+  const auto& devInfo = hip::getCurrentDevice()->devices()[0]->info();
+  dim3 clusterDims = {1, 1, 1};
+  amd::DynDataPrefetchConfig dynDataPrefetchConfig;
   for (size_t attr_idx = 0; attr_idx < config->numAttrs; ++attr_idx) {
     hipLaunchAttribute& attr = config->attrs[attr_idx];
     switch (attr.id) {
@@ -1271,24 +1330,35 @@ hipError_t hipLaunchKernelExC(const hipLaunchConfig_t* config, const void* fPtr,
                                                 config->dynamicSmemBytes, config->stream));
         }
         break;
-      case hipLaunchAttributeClusterDimension :
+      case hipLaunchAttributeClusterDimension:
         clusterDims.x = attr.val.clusterDim.x;
         clusterDims.y = attr.val.clusterDim.y;
         clusterDims.z = attr.val.clusterDim.z;
+        if (clusterDims.x == 0 || clusterDims.y == 0 || clusterDims.z == 0) {
+          HIP_RETURN(hipErrorInvalidConfiguration);
+        }
         break;
+      case hipLaunchAttributeExtDynDataPrefetch: {
+        if (attr.val.dynDataPrefetch == nullptr) {
+          HIP_RETURN(hipErrorInvalidValue);
+        }
+        hipError_t status = convertDynDataPrefetchConfig(*attr.val.dynDataPrefetch,
+                                                         dynDataPrefetchConfig,
+                                                         devInfo);
+        if (status != hipSuccess) {
+          HIP_RETURN(status);
+        }
+        break;
+      }
       default:
         LogPrintfError("Attribute %u not supported", attr.id);
-        break;
+        HIP_RETURN(hipErrorInvalidValue);
     }
-  }
-  // All dimensions have to be atleast 1.
-  if (clusterDims.x == 0 || clusterDims.y == 0 || clusterDims.z == 0) {
-    HIP_RETURN (hipErrorInvalidConfiguration);
   }
 
   HIP_RETURN_DURATION(hipLaunchKernel_common(fPtr, config->gridDim, config->blockDim, args,
-    config->dynamicSmemBytes, config->stream,
-    clusterDims));
+    config->dynamicSmemBytes, config->stream, clusterDims,
+    dynDataPrefetchConfig.isEnabled() ? &dynDataPrefetchConfig : nullptr));
 }
 
 hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f,
@@ -1302,35 +1372,74 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
     HIP_RETURN(hipErrorInvalidValue);
   }
 
+  hipStream_t hStream = config->hStream;
+  if (!hip::isValid(hStream)) {
+    HIP_RETURN(hipErrorContextIsDestroyed);
+  }
+  int drvDeviceId = hip::Stream::DeviceId(hStream);
+  const amd::Device* drvDevice = g_devices[drvDeviceId]->devices()[0];
   amd::HIPLaunchParams launch_params(config->gridDimX, config->gridDimY, config->gridDimZ,
                                      config->blockDimX, config->blockDimY, config->blockDimZ,
-                                     config->sharedMemBytes);
+                                     config->sharedMemBytes, *drvDevice, 0, 0, 0, 1, 1, 1);
 
   if (!launch_params.IsValidConfig()) {
     HIP_RETURN(hipErrorInvalidConfiguration);
   }
 
   if (config->numAttrs == 0) {
-    HIP_RETURN(ihipModuleLaunchKernel(f, launch_params, config->hStream, kernelParams, nullptr,
+    HIP_RETURN(ihipModuleLaunchKernel(f, launch_params, hStream, kernelParams, nullptr,
                                       nullptr, nullptr, 0));
   }
 
+  const auto& devInfo = drvDevice->info();
+  dim3 clusterDim = {1, 1, 1};
+  amd::DynDataPrefetchConfig dynDataPrefetchConfig;
   for (size_t attr_idx = 0; attr_idx < config->numAttrs; ++attr_idx) {
     hipLaunchAttribute& attr = config->attrs[attr_idx];
     switch (attr.id) {
       case hipLaunchAttributeCooperative: {
         if (attr.value.cooperative != 0) {
-          HIP_RETURN(ihipModuleLaunchKernel(f, launch_params, config->hStream, kernelParams,
+          HIP_RETURN(ihipModuleLaunchKernel(f, launch_params, hStream, kernelParams,
                                             nullptr, nullptr, nullptr, 0,
                                             amd::NDRangeKernelCommand::CooperativeGroups));
         }
         break;
       }
+      case hipLaunchAttributeClusterDimension: {
+        clusterDim.x = attr.value.clusterDim.x;
+        clusterDim.y = attr.value.clusterDim.y;
+        clusterDim.z = attr.value.clusterDim.z;
+        break;
+      }
+      case hipLaunchAttributeExtDynDataPrefetch: {
+        if (attr.value.dynDataPrefetch == nullptr) {
+          HIP_RETURN(hipErrorInvalidValue);
+        }
+        hipError_t status = convertDynDataPrefetchConfig(*attr.value.dynDataPrefetch,
+                                                         dynDataPrefetchConfig,
+                                                         devInfo);
+        if (status != hipSuccess) {
+          HIP_RETURN(status);
+        }
+        break;
+      }
       default:
         LogPrintfError("Attribute %u not supported", attr.id);
-        break;
+        HIP_RETURN(hipErrorInvalidValue);
     }
   }
-  HIP_RETURN(hipErrorInvalidConfiguration)
+
+  if (clusterDim.x == 0 || clusterDim.y == 0 || clusterDim.z == 0) {
+    HIP_RETURN(hipErrorInvalidConfiguration);
+  }
+
+  amd::HIPLaunchParams launch_params_cluster(config->gridDimX, config->gridDimY, config->gridDimZ,
+                                          config->blockDimX, config->blockDimY, config->blockDimZ,
+                                          config->sharedMemBytes, *drvDevice, 0, 0, 0, clusterDim.x,
+                                          clusterDim.y, clusterDim.z);
+
+  HIP_RETURN(ihipModuleLaunchKernel(f, launch_params_cluster, hStream, kernelParams, extra, nullptr,
+                                    nullptr, 0, 0, 0, 0, 0, 0, 0,
+                                    dynDataPrefetchConfig.isEnabled() ? &dynDataPrefetchConfig : nullptr));
 }
 }  // namespace hip

@@ -1,0 +1,76 @@
+digraph backend_abstraction {
+    rankdir=TB;
+    fontname="Helvetica";
+    node [fontname="Helvetica", fontsize=10, style=filled, shape=box];
+    edge [fontname="Helvetica", fontsize=9];
+
+    label="Backend Abstraction Layer";
+    labelloc=t;
+    fontsize=14;
+    compound=true;
+
+    subgraph cluster_consumers {
+        label="Consumers (schema-agnostic operations)";
+        style=filled;
+        color="#d5e8d5";
+        fillcolor="#f0fff0";
+
+        writers [label="Schema Writers\n(region, kernel_dispatch, ...)", fillcolor="#c0e0c0"];
+        readers [label="Schema Readers\n(reader_impl)", fillcolor="#c0e0c0"];
+    }
+
+    subgraph cluster_statements {
+        label="Statement Layer (schema-specific SQL)";
+        style=filled;
+        color="#e5ddf0";
+        fillcolor="#f5f0ff";
+
+        insert_stmts [label="insert_statements<Backend>\n(schema v3)", fillcolor="#ddd0f0"];
+        read_stmts [label="read_statements\n(schema v3)", fillcolor="#ddd0f0"];
+        insert_stmts_v4 [label="insert_statements<Backend>\n(schema v4 — future)", fillcolor="#e8e0f0", style="filled,dashed"];
+        read_stmts_v4 [label="read_statements\n(schema v4 — future)", fillcolor="#e8e0f0", style="filled,dashed"];
+    }
+
+    subgraph cluster_builders {
+        label="Query Builders (shared utilities)";
+        style=filled;
+        color="#f5f5e0";
+        fillcolor="#fffff0";
+
+        insert_builder [label="table_insert_query\n(fluent INSERT builder)", fillcolor="#f0f0c0"];
+        select_builder [label="table_select_query\n(fluent SELECT builder)", fillcolor="#f0f0c0"];
+    }
+
+    subgraph cluster_backend {
+        label="Backend Layer (database engine)";
+        style=filled;
+        color="#f5e0e0";
+        fillcolor="#fff5f5";
+
+        sqlite [label="sqlite_backend\n\nprepared_insert_statement<Values...>\nresult_set<T>\ntransaction_guard\nstatement_handle\n\ncreate_write_statement_executor()\ncreate_read_statement_executor()\nbegin_transaction()\nflush()", fillcolor="#f0d0d0"];
+    }
+
+    subgraph cluster_db {
+        label="";
+        style=invis;
+
+        database [label="SQLite Database\n(in-memory or on-disk)", shape=cylinder, fillcolor="#e0e0e0"];
+    }
+
+    writers -> insert_stmts [label="  calls statements  "];
+    readers -> read_stmts [label="  calls statements  "];
+
+    insert_stmts -> insert_builder [label="  builds SQL  ", style=dashed, color=gray50];
+    read_stmts -> select_builder [label="  builds SQL  ", style=dashed, color=gray50];
+    insert_stmts_v4 -> insert_builder [style=dashed, color=gray50];
+    read_stmts_v4 -> select_builder [style=dashed, color=gray50];
+
+    insert_stmts -> sqlite [label="  create_write_statement_executor  ", color="#a06020", fontcolor="#a06020"];
+    read_stmts -> sqlite [label="  create_read_statement_executor  ", color="#a06020", fontcolor="#a06020"];
+    insert_stmts_v4 -> sqlite [style=dashed, color=gray50];
+    read_stmts_v4 -> sqlite [style=dashed, color=gray50];
+
+    writers -> sqlite [label="  begin_transaction()  ", color="#2060a0", fontcolor="#2060a0"];
+
+    sqlite -> database [label="  SQLite C API  "];
+}

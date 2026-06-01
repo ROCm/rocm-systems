@@ -42,26 +42,14 @@
 
 #include "core/inc/amd_aie_aql_queue.h"
 
-#ifdef __linux__
-#include <fcntl.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#endif
-
-#ifdef _WIN32
-#include <Windows.h>
-#endif
-
 #include <atomic>
 #include <cassert>
-#include <cstring>
 
 #include "inc/hsa_ext_amd_aie.h"
 #include "core/inc/amd_xdna_driver.h"
 #include "core/inc/queue.h"
 #include "core/inc/runtime.h"
 #include "core/inc/signal.h"
-#include "core/util/utils.h"
 
 namespace rocr {
 namespace AMD {
@@ -74,20 +62,19 @@ AieAqlQueue::AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_
     : Queue(shared_queue, flags, agent),
       LocalSignal(0, false),
       DoorbellSignal(signal()),
-      agent_(*agent),
-      active_(false) {
-  if (agent_.device_type() != core::Agent::DeviceType::kAmdAieDevice) {
+      queue_size_bytes_(req_size_pkts * sizeof(hsa_amd_aie_kernel_dispatch_packet_t)) {
+  if (agent->device_type() != core::Agent::DeviceType::kAmdAieDevice) {
     throw hsa_exception(HSA_STATUS_ERROR_INVALID_AGENT,
                         "Attempting to create an AIE queue on a non-AIE agent.");
   }
-  queue_size_bytes_ = req_size_pkts * sizeof(hsa_amd_aie_kernel_dispatch_packet_t);
-  ring_buf_ = agent_.system_allocator()(queue_size_bytes_, 4096,
-                                        core::MemoryRegion::AllocateNoFlags);
 
+  ring_buf_ =
+      agent->system_allocator()(queue_size_bytes_, 4096, core::MemoryRegion::AllocateNoFlags);
   if (!ring_buf_) {
     throw hsa_exception(HSA_STATUS_ERROR_INVALID_QUEUE_CREATION,
                         "Could not allocate a ring buffer for an AIE queue.");
   }
+  MAKE_NAMED_SCOPE_GUARD(ring_buf_guard, [&] { agent->system_deallocator()(ring_buf_); });
 
   // Populate hsa_queue_t fields.
   amd_queue_.hsa_queue.type = HSA_QUEUE_TYPE_SINGLE;
@@ -104,22 +91,25 @@ AieAqlQueue::AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_
   signal_.hardware_doorbell_ptr = nullptr;
   signal_.kind = AMD_SIGNAL_KIND_DOORBELL;
   signal_.queue_ptr = &amd_queue_;
+
+  auto& driver = static_cast<XdnaDriver&>(agent->driver());
+  hsa_status_t err = driver.CreateKernelModeQueue(req_size_pkts, &kmq_metadata_);
+  if (err != HSA_STATUS_SUCCESS) {
+    throw hsa_exception(err, "Failed to create KMQ metadata for the AIE queue.");
+  }
+
   active_ = true;
 
-  HsaQueueResource queue_resource = {};
-  hsa_status_t status =
-      agent_.driver().CreateQueue(node_id, HSA_QUEUE_COMPUTE_AQL, 0, rocr::HSA::HSA_AMD_QUEUE_PRIORITY_NORMAL, 0,
-                                  nullptr, queue_size_bytes_, 0, nullptr, queue_resource);
-  if (status != HSA_STATUS_SUCCESS) {
-    throw hsa_exception(status, "Failed to create a hardware context for an AIE queue.");
-  }
-  queue_id_ = queue_resource.QueueId;
+  ring_buf_guard.Dismiss();
 }
 
 AieAqlQueue::~AieAqlQueue() {
-  AieAqlQueue::Inactivate();
+  auto err = AieAqlQueue::Inactivate();
+  assert(err == HSA_STATUS_SUCCESS && "Destroy queue failed.");
+  (void)err;
   if (ring_buf_) {
-    agent_.system_deallocator()(ring_buf_);
+    auto& agent = static_cast<AieAgent&>(*GetAgent());
+    agent.system_deallocator()(ring_buf_);
   }
   if (shared_queue_) {
     core::Runtime::runtime_singleton_->system_deallocator()(shared_queue_);
@@ -128,12 +118,15 @@ AieAqlQueue::~AieAqlQueue() {
 
 hsa_status_t AieAqlQueue::Inactivate() {
   bool active = active_.exchange(false, std::memory_order_relaxed);
-  if (active) {
-    auto err = agent_.driver().DestroyQueue(queue_id_);
-    assert(err == HSA_STATUS_SUCCESS && "Destroy queue failed.");
-    atomic::Fence(std::memory_order_acquire);
+  if (!active) {
+    return HSA_STATUS_SUCCESS;
   }
-  return HSA_STATUS_SUCCESS;
+
+  auto& driver = static_cast<XdnaDriver&>(GetAgent()->driver());
+  hsa_status_t err = driver.DestroyKernelModeQueue(kmq_metadata_);
+  kmq_metadata_ = nullptr;
+  atomic::Fence(std::memory_order_acquire);
+  return err;
 }
 
 hsa_status_t AieAqlQueue::SetPriority(HSA::hsa_amd_queue_priority_internal_t priority) {
@@ -216,7 +209,8 @@ void AieAqlQueue::SubmitPackets() {
     return;
   }
 
-  auto& driver = static_cast<XdnaDriver&>(agent_.driver());
+  auto& agent = static_cast<AieAgent&>(*GetAgent());
+  auto& driver = static_cast<XdnaDriver&>(agent.driver());
 
   const uint64_t first_pkt_idx = LoadReadIndexRelaxed();
   const uint64_t last_pkt_idx = LoadWriteIndexAcquire();
@@ -227,10 +221,10 @@ void AieAqlQueue::SubmitPackets() {
   }
 
   const auto num_pkts = last_pkt_idx - first_pkt_idx;
-  hsa_status_t status = driver.SubmitCmdChain(amd_queue_.hsa_queue, queue_id_, first_pkt_idx,
-                                              num_pkts, agent_.properties().NumNeuralCores);
-  if (status != HSA_STATUS_SUCCESS) {
-    throw hsa_exception(status, "Could not submit packets");
+  hsa_status_t err = driver.SubmitCmdChain(amd_queue_.hsa_queue, kmq_metadata_, first_pkt_idx,
+                                           num_pkts, agent.properties().NumNeuralCores);
+  if (err != HSA_STATUS_SUCCESS) {
+    throw hsa_exception(err, "Could not submit packets");
   }
 
   atomic::Store(&amd_queue_.read_dispatch_id, last_pkt_idx, std::memory_order_release);
@@ -244,7 +238,7 @@ void AieAqlQueue::StoreRelease(hsa_signal_value_t value) {
 hsa_status_t AieAqlQueue::GetInfo(hsa_queue_info_attribute_t attribute, void* value) {
   switch (attribute) {
     case HSA_AMD_QUEUE_INFO_AGENT:
-      *static_cast<hsa_agent_t*>(value) = agent_.public_handle();
+      *static_cast<hsa_agent_t*>(value) = GetAgent()->public_handle();
       break;
     case HSA_AMD_QUEUE_INFO_DOORBELL_ID:
       // Hardware doorbell supports AQL semantics.

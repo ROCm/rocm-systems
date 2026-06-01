@@ -104,10 +104,10 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncAdviseFlgTst) {
       HIP_CHECK(hipFree(Hmm));
       REQUIRE(IfTestPassed);
     } else {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+      HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 }
 
@@ -195,10 +195,10 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncAccsdByTst) {
       HIP_CHECK(hipStreamDestroy(strm));
       REQUIRE(IfTestPassed);
     } else {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+      HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 }
 
@@ -294,7 +294,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncNegativeTst) {
     REQUIRE(IfTestPassed);
 
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }
 

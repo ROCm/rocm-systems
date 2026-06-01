@@ -8,7 +8,6 @@ on:
     paths:
       - '.github/workflows/rocprofiler-systems-formatting.yml'
       - 'projects/rocprofiler-systems/**'
-      - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
       - '!**/.markdownlint-ci2.yaml'
@@ -31,14 +30,8 @@ jobs:
         with:
           sparse-checkout: projects/rocprofiler-systems
 
-      - name: Fetch config
-        shell: sh
-        working-directory: projects/rocprofiler-systems/
-        run: |
-          test -f .markdownlint.yaml && echo "Using local config file" || curl --silent --show-error --fail --location https://raw.github.com/ROCm/rocm-docs-core/develop/.markdownlint.yaml -O
-
       - name: Use markdownlint-cli2
-        uses: DavidAnson/markdownlint-cli2-action@v10.0.1
+        uses: DavidAnson/markdownlint-cli2-action@6b51ade7a9e4a75a7ad929842dd298a3804ebe8b # v23.1.0
         with:
           globs: "projects/rocprofiler-systems/**/*.md"
 
@@ -62,7 +55,7 @@ jobs:
           sed -i "s|docs/\*\*/\*.md|projects/rocprofiler-systems/docs/**/*.md|g" .spellcheck.yaml
 
       - name: Run spellcheck
-        uses: rojopolis/spellcheck-github-actions@0.46.0
+        uses: rojopolis/spellcheck-github-actions@e3cd8e9aec4587ec73bc0e60745aafd45c37aa2e # 0.60.0
 
       - name: On fail
         if: failure()
@@ -81,7 +74,7 @@ jobs:
         sparse-checkout: projects/rocprofiler-systems
 
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ matrix.python-version }}
 

@@ -50,7 +50,7 @@ cmake --build build
 **Arguments:**
 
 | Position | Description | Default |
-|----------|-------------|---------|
+| ---------- | ------------- | --------- |
 | 1 | Number of CPU threads (each gets a HIP stream) | 2 |
 | 2 | Number of kernel iterations | 500 |
 | 3 | Synchronize every N iterations | 10 |
@@ -64,7 +64,7 @@ rocprof-sys-run -- ./transpose 4 200 10
 ### Recommended Configuration
 
 | Variable | Value | Purpose |
-|----------|-------|---------|
+| ---------- | ------- | --------- |
 | `ROCPROFSYS_ROCM_DOMAINS` | `hip_runtime_api,kernel_dispatch,memory_copy` | Trace HIP API calls, kernel launches, and memory transfers |
 | `ROCPROFSYS_ROCM_EVENTS` | `SQ_WAVES,GRBM_COUNT` | Sample GPU hardware counters |
 | `ROCPROFSYS_TRACE` | `true` | Generate Perfetto trace |

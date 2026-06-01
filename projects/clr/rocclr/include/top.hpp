@@ -150,18 +150,6 @@ class MemoryPoolObject {
   void operator delete(void*, void* address) {}
 };
 
-/*! \brief For objects allocated on the C-heap.
- */
-class HeapObject {
- public:
-  void* operator new(size_t size);
-  void operator delete(void* obj);
-  void* operator new(size_t size, size_t extSize) {
-    return HeapObject::operator new(size + extSize);
-  };
-  void operator delete(void* obj, size_t extSize) { HeapObject::operator delete(obj); }
-};
-
 /*! \brief For all reference counted objects.
  */
 class ReferenceCountedObject {

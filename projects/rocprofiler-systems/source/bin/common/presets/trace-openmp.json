@@ -14,7 +14,7 @@
                     "enabled": true
                 },
                 "hsa_api": {
-                    "enabled": true
+                    "enabled": false
                 },
                 "kernel_dispatch": {
                     "enabled": true
@@ -32,9 +32,9 @@
     "metadata": {
         "category": "hpc",
         "cli_flag": "--trace-openmp",
-        "description": "OpenMP offload workloads: tracing with HSA domains and OMPT enabled",
+        "description": "OpenMP workloads: tracing kernel dispatch, memory copy, and OMPT enabled",
         "name": "trace-openmp",
-        "use_case": "OpenMP offload applications using target directives on AMD GPUs"
+        "use_case": "OpenMP applications using target directives on AMD GPUs"
     },
     "profiling": {
         "enabled": false

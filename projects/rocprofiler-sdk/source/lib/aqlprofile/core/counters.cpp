@@ -25,7 +25,7 @@
 
 #include "lib/aqlprofile/core/counter_dimensions.hpp"
 
-#include "lib/aqlprofile/core/logger.h"
+#include "lib/aqlprofile/core/logger.hpp"
 #include "lib/aqlprofile/core/pm4_factory.h"
 #include "lib/aqlprofile/pm4/cmd_builder.h"
 #include "lib/aqlprofile/pm4/pmc_builder.h"
@@ -34,8 +34,6 @@
 
 #include "lib/aqlprofile/core/commandbuffermgr.hpp"
 #include "lib/aqlprofile/core/memorymanager.hpp"
-
-#include "lib/common/logging.hpp"
 
 #include <array>
 #include <cstddef>
@@ -46,13 +44,14 @@
 #include <vector>
 
 #define ERR_CHECK(cond, err, msg)                                                                  \
+    do                                                                                             \
     {                                                                                              \
         if(cond)                                                                                   \
         {                                                                                          \
-            ERR_LOGGING << msg;                                                                    \
+            ERR_LOGGING("{}", msg);                                                                \
             return err;                                                                            \
         }                                                                                          \
-    }
+    } while(0)
 
 #define HSA_TRY_WRAP                                                                               \
     try                                                                                            \
@@ -148,7 +147,8 @@ _internal_aqlprofile_pmc_iterate_data(aqlprofile_handle_t            handle,
 
     aql_profile::Pm4Factory* pm4_factory =
         aql_profile::Pm4Factory::Create(memorymgr->AgentHandle());
-    const uint32_t xcc_num = pm4_factory->GetXccNumber();
+    const uint32_t xcc_num     = pm4_factory->GetXccNumber();
+    const uint32_t xcc_per_aid = pm4_factory->GetXccPerAid();
 
     uint64_t* samples             = reinterpret_cast<uint64_t*>(memorymgr->GetOutputBuf());
     uint64_t* buffer_end_location = samples + memorymgr->GetOutputBufSize() / sizeof(uint64_t);
@@ -188,6 +188,8 @@ _internal_aqlprofile_pmc_iterate_data(aqlprofile_handle_t            handle,
 
             if((pm4_factory->GetBlockInfo(event.block_name)->attr & CounterBlockUmcAttr) != 0u)
                 continue;
+            if((pm4_factory->GetBlockInfo(event.block_name)->attr & CounterBlockGrbmaAttr) != 0u)
+                continue;
 
             // non-MI300A-AID counter event.
             uint32_t block_samples_count       = pm4_factory->GetNumEvents(event.block_name);
@@ -212,6 +214,50 @@ _internal_aqlprofile_pmc_iterate_data(aqlprofile_handle_t            handle,
                 if(!event.bInternal)
                 {
                     hsa_status_t status = callback(event, xcc_sample_id, *samples, userdata);
+                    if(status == HSA_STATUS_INFO_BREAK)
+                        return HSA_STATUS_SUCCESS;
+                    else if(status != HSA_STATUS_SUCCESS)
+                        return status;
+                }
+
+                samples++;
+            }
+        }
+
+    // AIGC blocks
+    for(uint32_t xcc_index = 0, aid_index = 0; xcc_index < xcc_num;
+        xcc_index += xcc_per_aid, aid_index++)
+        for(auto& event : events)
+        {
+            // Skip non-AIGC blocks
+            if(!(pm4_factory->GetBlockInfo(event.block_name)->attr & CounterBlockGrbmaAttr))
+                continue;
+
+            if(samples >= buffer_end_location) return HSA_STATUS_ERROR;
+
+            // AIGC counter event.
+            uint32_t block_samples_count       = pm4_factory->GetNumEvents(event.block_name);
+            const EventAttribDimension& attrib = EventAttribDimension::get(agent, event.block_name);
+            if(!attrib.get_num()) return HSA_STATUS_ERROR;
+            size_t aid_sample_count = attrib.get_num_instances() * block_samples_count;
+            for(uint32_t blk = 0; blk < block_samples_count; ++blk)
+            {
+#if DEBUG_TRACE == 2
+                printf("DATA: xcc(%u) blk(%u) bloc id(%u) index(%u) counter id(%u) res(%lu)\n",
+                       xcc_index,
+                       blk,
+                       event.block_name,
+                       event.block_index,
+                       event.event_id,
+                       *samples);
+#endif
+                size_t aid_sample_id =
+                    aid_sample_count * aid_index +
+                    static_cast<size_t>(event.block_index) * block_samples_count + blk;
+
+                if(!event.bInternal)
+                {
+                    hsa_status_t status = callback(event, aid_sample_id, *samples, userdata);
                     if(status == HSA_STATUS_INFO_BREAK)
                         return HSA_STATUS_SUCCESS;
                     else if(status != HSA_STATUS_SUCCESS)
@@ -322,11 +368,11 @@ aqlprofile_pmc_create_packets(aqlprofile_handle_t*                 handle,
             handle, packets, profile, alloc_cb, dealloc_cb, memcpy_cb, userdata);
     } catch(hsa_status_t err)
     {
-        ERR_LOGGING << err;
+        ERR_LOGGING("hsa_status_t error: {}", static_cast<int>(err));
         return err;
     } catch(std::exception& e)
     {
-        ERR_LOGGING << e.what();
+        ERR_LOGGING("{}", e.what());
         return HSA_STATUS_ERROR;
     } catch(...)
     {
@@ -359,11 +405,11 @@ aqlprofile_pmc_iterate_data(aqlprofile_handle_t            handle,
         return aql_profile_v2::_internal_aqlprofile_pmc_iterate_data(handle, callback, userdata);
     } catch(hsa_status_t err)
     {
-        ERR_LOGGING << err;
+        ERR_LOGGING("hsa_status_t: {}", static_cast<int>(err));
         return err;
     } catch(std::exception& e)
     {
-        ERR_LOGGING << e.what();
+        ERR_LOGGING("{}", e.what());
         return HSA_STATUS_ERROR;
     } catch(...)
     {
@@ -386,7 +432,7 @@ aqlprofile_iterate_event_ids(aqlprofile_eventname_callback_t callback, void* use
         }
     } catch(hsa_status_t err)
     {
-        ERR_LOGGING << err;
+        ERR_LOGGING("hsa_status_t: {}", static_cast<int>(err));
         return err;
     } catch(...)
     {
@@ -419,7 +465,7 @@ aqlprofile_iterate_event_coord(aqlprofile_agent_handle_t        agent,
         }
     } catch(hsa_status_t err)
     {
-        ERR_LOGGING << err;
+        ERR_LOGGING("hsa_status_t: {}", static_cast<int>(err));
         return err;
     } catch(...)
     {
@@ -472,7 +518,7 @@ aqlprofile_register_agent_info(aqlprofile_agent_handle_t* agent_id,
         }
     } catch(hsa_status_t err)
     {
-        ERR_LOGGING << err;
+        ERR_LOGGING("hsa_status_t: {}", static_cast<int>(err));
         return err;
     } catch(...)
     {
@@ -497,7 +543,7 @@ aqlprofile_validate_pmc_event(aqlprofile_agent_handle_t     agent,
         if(pm4_factory->GetBlockInfo(event) != nullptr) *result = true;
     } catch(hsa_status_t err)
     {
-        ERR_LOGGING << err;
+        ERR_LOGGING("hsa_status_t: {}", static_cast<int>(err));
         return err;
     } catch(...)
     {
@@ -547,7 +593,7 @@ aqlprofile_get_pmc_info(const aqlprofile_pmc_profile_t* profile,
 
     } catch(hsa_status_t err)
     {
-        ERR_LOGGING << err;
+        ERR_LOGGING("hsa_status_t: {}", static_cast<int>(err));
         return err;
     } catch(...)
     {

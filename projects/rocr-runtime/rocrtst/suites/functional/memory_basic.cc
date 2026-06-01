@@ -281,6 +281,13 @@ void MemoryTest::MaxSingleAllocationTest(hsa_agent_t ag,
 
   // Neg. test for system RAM: Try to allocate an impossibly large amount (2x total system RAM)
   // to ensure the runtime fails gracefully without causing system hangs.
+#ifdef ROCRTST_ASAN
+  // Under ASAN, hsa_amd_memory_pool_allocate is intercepted and ASAN aborts
+  // on oversized allocations instead of letting the runtime return an error.
+  if (is_system_ram && !rocrtst::pool_size_limit && verbosity() > 0) {
+    std::cout << "  Skipping impossible-size negative alloc under ASAN (abort risk)" << std::endl;
+  }
+#else
   if (is_system_ram && !rocrtst::pool_size_limit) {
     uint64_t impossible_size = 2 * info.totalram;
     err = TestAllocate(pool, impossible_size);
@@ -291,6 +298,7 @@ void MemoryTest::MaxSingleAllocationTest(hsa_agent_t ag,
                 << impossible_size / (1024*1024) << " MB) fails gracefully" << std::endl;
     }
   }
+#endif
 
   // Reduce upper_bound by 30% or 10% for system-RAM, depending on pool size limit. Otherwise
   // Linux OOM-Killer app can be triggered if system has allocated all available physical

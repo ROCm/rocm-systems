@@ -50,6 +50,8 @@ constexpr size_t MAX_NUM_XGMI_LINKS = 8;
  *   - xgmi = 12
  *   - pcie = 13
  *   - sdma_usage = 14
+ *   - gfx_clock = 15
+ *   - mem_clock = 16
  */
 union enabled_metrics
 {
@@ -70,6 +72,8 @@ union enabled_metrics
         std::uint32_t xgmi                 : 1;
         std::uint32_t pcie                 : 1;
         std::uint32_t sdma_usage           : 1;
+        std::uint32_t gfx_clock            : 1;  // current_gfxclk (MHz)
+        std::uint32_t mem_clock            : 1;  // current_uclk (MHz)
     } bits;
     std::uint32_t value = 0;
 };
@@ -136,6 +140,9 @@ struct metrics
     } pcie;
 
     std::uint32_t sdma_usage = 0;  // SDMA utilization percentage (0-100)
+
+    std::uint32_t gfx_clock_mhz = 0;  // current_gfxclk (MHz)
+    std::uint32_t mem_clock_mhz = 0;  // current_uclk (MHz)
 };
 
 template <typename T>

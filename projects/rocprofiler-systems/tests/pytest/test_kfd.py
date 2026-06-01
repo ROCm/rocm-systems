@@ -11,7 +11,6 @@ and the ROCpd database.
 
 from __future__ import annotations
 import pytest
-from pathlib import Path
 from conftest import RocprofsysTest
 
 pytestmark = [
@@ -20,7 +19,6 @@ pytestmark = [
     pytest.mark.hip,
     pytest.mark.kfd,
 ]
-
 
 # =============================================================================
 # Fixtures
@@ -36,6 +34,7 @@ def kfd_environment() -> dict[str, str]:
         "ROCPROFSYS_TIME_OUTPUT": "OFF",
         "ROCPROFSYS_COUT_OUTPUT": "ON",
         "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,kernel_dispatch,kfd_events",
+        "ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING": "ON",
         "ROCPROFSYS_USE_AMD_SMI": "OFF",
         "HSA_XNACK": "1",
     }

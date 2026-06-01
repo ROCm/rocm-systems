@@ -1,4 +1,5 @@
-# pylint: disable=C0114,C0115,C0116
+"""GPU-accelerated file I/O through hipFile."""
+
 from __future__ import annotations
 
 import os
@@ -22,7 +23,20 @@ if TYPE_CHECKING:
 
 
 class FileHandle:
-    DEFAULT_MODE = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH
+    """Manage a file descriptor registered with the hipFile driver.
+
+    Wraps ``os.open``/``os.close`` together with hipFile handle
+    registration so that GPU-accelerated reads and writes can be
+    performed through a single object.
+
+    Supports the context-manager protocol for automatic
+    ``open``/``close``::
+
+        with FileHandle(path, os.O_RDONLY | os.O_DIRECT) as fh:
+            fh.read(buf, size, 0, 0)
+    """
+
+    DEFAULT_MODE = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH  # 0o644
 
     def __init__(
         self,
@@ -31,6 +45,24 @@ class FileHandle:
         mode: int = DEFAULT_MODE,
         handle_type: FileHandleType = FileHandleType.OPAQUE_FD,
     ) -> None:
+        """Initialize a ``FileHandle``.
+
+        The file is **not** opened until ``open`` is called (or the
+        context manager is entered).
+
+        Parameters
+        ----------
+        path : str or os.PathLike[str]
+            Filesystem path to open.
+        flags : int
+            Flags passed to ``os.open`` (e.g. ``os.O_RDONLY | os.O_DIRECT``).
+        mode : int, optional
+            Permission bits used when creating a file.  Defaults to
+            ``0o644``.
+        handle_type : FileHandleType, optional
+            Type of handle to register.  Defaults to
+            ``FileHandleType.OPAQUE_FD``.
+        """
         self._fd: int | None = None
         self._flags = flags
         self._handle: int | None = None
@@ -41,6 +73,7 @@ class FileHandle:
         self.handle_type = handle_type
 
     def __del__(self) -> None:
+        """Close on garbage collection if still open."""
         try:
             self.close()
         except Exception:  # pylint: disable=W0718  # Suppress exceptions in a dtor
@@ -50,6 +83,7 @@ class FileHandle:
             )
 
     def __enter__(self) -> FileHandle:
+        """Open the file and return *self*."""
         self.open()
         return self
 
@@ -59,22 +93,37 @@ class FileHandle:
         exc_value: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
+        """Close the file."""
         self.close()
 
     @property
     def flags(self) -> int:
+        """Flags passed to ``os.open``."""
         return self._flags
 
     @property
     def handle(self) -> int | None:
+        """Opaque hipFile handle, or ``None`` if not open."""
         return self._handle
 
     @property
     def handle_type(self) -> FileHandleType | None:
+        """Handle type used for registration."""
         return self._handle_type
 
     @handle_type.setter
     def handle_type(self, _handle_type: FileHandleType) -> None:
+        """Set the handle type.
+
+        Raises
+        ------
+        RuntimeError
+            If the file handle is already open.
+        ValueError
+            If *_handle_type* is not a ``FileHandleType`` member.
+        NotImplementedError
+            If *_handle_type* is ``OPAQUE_WIN32``.
+        """
         if self._handle is not None:
             raise RuntimeError("Cannot modify handle_type while FileHandle is open")
         if _handle_type not in FileHandleType:
@@ -87,13 +136,24 @@ class FileHandle:
 
     @property
     def mode(self) -> int:
+        """File creation permission bits."""
         return self._mode
 
     @property
     def path(self) -> str | os.PathLike[str]:
+        """Filesystem path."""
         return self._path
 
     def open(self) -> None:
+        """Open the file and register it with the hipFile driver.
+
+        Raises
+        ------
+        RuntimeError
+            If the file handle is already open.
+        HipFileException
+            If hipFile handle registration fails.
+        """
         if self._handle is not None:
             raise RuntimeError("The FileHandle is already open.")
         self._fd = os.open(self._path, self._flags, self._mode)
@@ -105,6 +165,10 @@ class FileHandle:
         self._handle = handle
 
     def close(self) -> None:
+        """Deregister the hipFile handle and close the file descriptor.
+
+        Safe to call multiple times; subsequent calls are no-ops.
+        """
         if self._handle is not None:
             hipFileHandleDeregister(self._handle)
             self._handle = None
@@ -115,6 +179,33 @@ class FileHandle:
     def read(
         self, buffer: Buffer, size: int, file_offset: int, buffer_offset: int
     ) -> int:
+        """Read from the file into a GPU buffer.
+
+        Parameters
+        ----------
+        buffer : Buffer
+            GPU buffer to read into.
+        size : int
+            Number of bytes to read.
+        file_offset : int
+            Byte offset within the file to start reading from.
+        buffer_offset : int
+            Byte offset within the GPU buffer to read into.
+
+        Returns
+        -------
+        int
+            Number of bytes actually read.
+
+        Raises
+        ------
+        RuntimeError
+            If the file handle is not open.
+        OSError
+            On a system-level I/O error (wraps ``errno``).
+        HipFileException
+            On a hipFile or HIP driver error.
+        """
         if self._handle is None:
             raise RuntimeError("The FileHandle is not open.")
         bytes_read, extra_err = hipFileRead(
@@ -133,6 +224,33 @@ class FileHandle:
     def write(
         self, buffer: Buffer, size: int, file_offset: int, buffer_offset: int
     ) -> int:
+        """Write from a GPU buffer into the file.
+
+        Parameters
+        ----------
+        buffer : Buffer
+            GPU buffer to write from.
+        size : int
+            Number of bytes to write.
+        file_offset : int
+            Byte offset within the file to start writing to.
+        buffer_offset : int
+            Byte offset within the GPU buffer to write from.
+
+        Returns
+        -------
+        int
+            Number of bytes actually written.
+
+        Raises
+        ------
+        RuntimeError
+            If the file handle is not open.
+        OSError
+            On a system-level I/O error (wraps ``errno``).
+        HipFileException
+            On a hipFile or HIP driver error.
+        """
         if self._handle is None:
             raise RuntimeError("The FileHandle is not open.")
         bytes_written, extra_err = hipFileWrite(

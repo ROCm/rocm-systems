@@ -214,12 +214,13 @@ static void ChunkDeliveryThread() {
       std::unique_lock<std::mutex> lk(g_chunk_mtx);
       g_chunk_cv.wait(lk, [&] {
         if (g_chunk_thread_stop.load(std::memory_order_relaxed)) return true;
-        uint32_t max_id = g_max_gpu_chunk_id.load(std::memory_order_acquire);
-        // Wake when the next slab's last record (chunk_id) is at least
-        // kDeliveryMargin behind the highest GPU-callback chunk_id.
-        // slab_last is the chunk_id of the last record in slab next_slab.
-        uint32_t slab_last = (next_slab + 1) * static_cast<uint32_t>(kChunkSize) - 1;
-        return max_id > slab_last + kDeliveryMargin;
+        uint32_t max_id  = g_max_gpu_chunk_id.load(std::memory_order_acquire);
+        // Wake when the GPU callback watermark is kDeliveryMargin full slabs
+        // ahead of next_slab.  Slab-granular margin (not record-granular) gives
+        // ~kChunkSize * kDeliveryMargin records of safety, making it safe even
+        // when GPU callbacks arrive significantly out of order.
+        uint32_t max_slab = max_id / static_cast<uint32_t>(kChunkSize);
+        return max_slab > next_slab + kDeliveryMargin;
       });
     }
 
@@ -236,17 +237,21 @@ static void ChunkDeliveryThread() {
     auto deliver_slab = [&](uint32_t slab_idx, uint32_t count) {
       if (slab_idx >= g_records.size() || !g_records[slab_idx]) return;
       hipApiRecordExt* ptr = g_records[slab_idx];
-      uint32_t slab_first  = slab_idx * static_cast<uint32_t>(kChunkSize);
       for (auto& c : clients)
-        c.cb(ptr, count, slab_first, c.user_data);
+        c.cb(ptr, count, slab_idx, c.user_data);
       for (uint32_t i = 0; i < count; ++i)
         FreeRecordResources(&ptr[i]);
       g_records[slab_idx] = nullptr;
     };
 
-    // Deliver all complete slabs that are kDeliveryMargin behind the GPU callback watermark.
-    if (total >= static_cast<uint32_t>(kChunkSize)) {
-      uint32_t watermark_slab = total / static_cast<uint32_t>(kChunkSize) - 1;
+    // Deliver all complete slabs that are kDeliveryMargin full slabs behind the
+    // GPU callback watermark.  max_slab is the slab of the highest GPU callback;
+    // we only deliver slabs strictly before max_slab - kDeliveryMargin.
+    uint32_t max_id   = g_max_gpu_chunk_id.load(std::memory_order_acquire);
+    uint32_t max_slab = max_id / static_cast<uint32_t>(kChunkSize);
+    if (total >= static_cast<uint32_t>(kChunkSize) &&
+        max_slab > next_slab + kDeliveryMargin) {
+      uint32_t watermark_slab = max_slab - kDeliveryMargin - 1;
       while (next_slab <= watermark_slab) {
         deliver_slab(next_slab, static_cast<uint32_t>(kChunkSize));
         ++next_slab;
@@ -280,6 +285,7 @@ static HipCopyKindExt ToCopyKindExt(uint32_t cl_kind) {
     case CL_COMMAND_COPY_BUFFER_TO_IMAGE:   return HIP_COPY_KIND_BUFFER_TO_IMAGE_EXT;
     case CL_COMMAND_COPY_IMAGE_TO_BUFFER:   return HIP_COPY_KIND_IMAGE_TO_BUFFER_EXT;
     case CL_COMMAND_FILL_BUFFER:            return HIP_COPY_KIND_FILL_EXT;
+    case ROCCLR_COMMAND_BATCH_COPY_BUFFER:  return HIP_COPY_KIND_BATCH_EXT;
     default:                                return HIP_COPY_KIND_UNKNOWN_EXT;
   }
 }
@@ -328,6 +334,10 @@ int HipActivityCallbackExt(activity_domain_t domain, uint32_t op_id, void* data)
 
   size_t idx = slot / kChunkSize;
   if (idx >= g_records.size()) return 0;
+
+  // g_records[idx] may be nullptr if the chunk was already delivered and freed
+  // by the streaming delivery thread — ignore late GPU callbacks for freed slabs.
+  if (!g_records[idx]) return 0;
 
   hipApiRecordExt* rec = &g_records[idx][slot % kChunkSize];
 
@@ -510,6 +520,7 @@ static const char* CopyKindName(uint32_t kind) {
     case HIP_COPY_KIND_BUFFER_TO_IMAGE_EXT: return "BufferToImage";
     case HIP_COPY_KIND_IMAGE_TO_BUFFER_EXT: return "ImageToBuffer";
     case HIP_COPY_KIND_FILL_EXT:            return "Fill";
+    case HIP_COPY_KIND_BATCH_EXT:           return "Batch_Copy";
     default:                                return "Unknown";
   }
 }
@@ -692,7 +703,7 @@ void WriteJsonTraceImpl(const char* filepath) {
       // emit_host_arrow: draw ph:s/ph:t dep arrow from CPU event to this GPU op.
       //   For graph launches only the first op gets the host arrow; subsequent nodes
       //   are connected via node→node graph arrows instead.
-      struct GpuOpInfo { uint64_t tid; double ts; bool has_ts; };
+      struct GpuOpInfo { uint64_t tid; double ts; double dur; bool has_ts; };
       auto emit_gpu_op = [&](const hipGpuActivityExt& gop, hipStream_t stream,
                              bool emit_host_arrow = true) -> GpuOpInfo {
         uint32_t op_idx  = gop.op < 3 ? gop.op : 3;
@@ -725,7 +736,7 @@ void WriteJsonTraceImpl(const char* filepath) {
         if (has_ts && emit_host_arrow)
           trace << ",\n{\"ph\":\"s\",\"id\":" << fid
                 << ",\"pid\":1024,\"tid\":" << rec.thread_id
-                << ",\"ts\":" << s_time << ",\"name\":\"dep\"}";
+                << ",\"ts\":" << (s_time + dur_us) << ",\"name\":\"dep\"}";
         // GPU X event.
         trace << ",\n{\"name\":\"" << gpu_name
               << "\",\"ph\":\"X\",\"pid\":" << gop.device_id
@@ -837,7 +848,7 @@ void WriteJsonTraceImpl(const char* filepath) {
         }
 
         device_gpu_tids[static_cast<int>(gop.device_id)].insert(gpu_tid);
-        return GpuOpInfo{gpu_tid, gpu_ts, has_ts};
+        return GpuOpInfo{gpu_tid, gpu_ts, gpu_dur, has_ts};
       };
 
       // Op-1 lives directly in rec.gpu; ops 2..N are in the spill linked list.
@@ -854,7 +865,7 @@ void WriteJsonTraceImpl(const char* filepath) {
             trace << ",\n{\"ph\":\"s\",\"id\":" << gfid
                   << ",\"pid\":" << rec.gpu.device_id
                   << ",\"tid\":" << prev.tid
-                  << ",\"ts\":" << prev.ts << ",\"name\":\"graph\",\"cat\":\"graph\"}";
+                  << ",\"ts\":" << (prev.ts + prev.dur) << ",\"name\":\"graph\",\"cat\":\"graph\"}";
             trace << ",\n{\"ph\":\"f\",\"bp\":\"e\",\"id\":" << gfid
                   << ",\"pid\":" << rec.gpu.device_id
                   << ",\"tid\":" << cur.tid
@@ -1603,14 +1614,14 @@ static void PfChunkCallback(const hipApiRecordExt* records, uint32_t count, uint
       cpu_anns.push_back({iid_stream, buf});
     }
 
-    // CPU→GPU outflow
-    std::vector<uint64_t> cpu_out;
     auto cfit = chunk_cpu_gpu_fid.find(rec.chunk_id);
-    if (cfit != chunk_cpu_gpu_fid.end()) cpu_out.push_back(cfit->second);
 
     uint64_t name_iid = g_pf_evt_iid.count(rec.api_name) ? g_pf_evt_iid[rec.api_name] : 0;
     EmitSliceSorted(sorted_pkts, cpu_uuid, ts_ns, dur_ns, rec.api_name,
-                    name_iid, cat_hip, cpu_anns, cpu_out, {});
+                    name_iid, cat_hip, cpu_anns, {}, {});
+    // CPU→GPU flow arrow sourced at CPU event END time (dispatch point)
+    if (cfit != chunk_cpu_gpu_fid.end())
+      EmitFlowEventSorted(sorted_pkts, cpu_uuid, ts_ns + dur_ns, cfit->second, true);
 
     if (rec.gpu.gpu_op_count == 0) continue;
 
@@ -2098,7 +2109,7 @@ void WriteProtoTraceImpl(const char* filepath) {
     for (auto& kv : g_kernel_names) intern_evt(kv.second);
   }
   // GPU copy: all possible CopyKindName values
-  for (int k = 0; k <= 12; ++k) intern_evt(CopyKindName(static_cast<uint32_t>(k)));
+  for (int k = 0; k <= 13; ++k) intern_evt(CopyKindName(static_cast<uint32_t>(k)));
   intern_evt("Barrier");
   // Memory alloc names: "0xADDR (SIZE unit)"
   for (auto& kv : alloc_map) {
@@ -2160,9 +2171,7 @@ void WriteProtoTraceImpl(const char* filepath) {
       uint64_t ts_ns    = rec.start_ns;
       uint64_t dur_ns   = (rec.end_ns > rec.start_ns) ? (rec.end_ns - rec.start_ns) : 1;
 
-      std::vector<uint64_t> cpu_out;
       auto cfit = cpu_gpu_flow.find(slot);
-      if (cfit != cpu_gpu_flow.end()) cpu_out.push_back(cfit->second);
 
       std::vector<std::pair<uint64_t,std::string>> cpu_anns;
       {
@@ -2186,7 +2195,10 @@ void WriteProtoTraceImpl(const char* filepath) {
         }
       }
       EmitSliceSorted(sorted_pkts, cpu_uuid, ts_ns, dur_ns, rec.api_name,
-                      intern_evt(rec.api_name), kCatHip, cpu_anns, cpu_out, {});
+                      intern_evt(rec.api_name), kCatHip, cpu_anns, {}, {});
+      // CPU→GPU flow arrow sourced at CPU event END time (dispatch point)
+      if (cfit != cpu_gpu_flow.end())
+        EmitFlowEventSorted(sorted_pkts, cpu_uuid, ts_ns + dur_ns, cfit->second, true);
 
       // GPU op slices
       auto ctoit = cpu_gpu_target_ord.find(slot);
@@ -2282,16 +2294,16 @@ void WriteProtoTraceImpl(const char* filepath) {
         auto gnif = graph_node_in_flows.find(slot * 1000 + op_ord);
         if (gnif != graph_node_in_flows.end()) in_flows_vec.push_back(gnif->second);
 
-        // Graph node→node: this op sends to next node
-        std::vector<uint64_t> out_flows_vec;
+        // Graph node→node: this op sends to next node (arrow from op END)
         auto gnof = graph_node_out_flows.find(slot * 1000 + op_ord);
-        if (gnof != graph_node_out_flows.end()) out_flows_vec.push_back(gnof->second);
 
         ++op_ord;
 
         uint64_t gpu_name_iid = intern_evt(gpu_name);
         EmitSliceSorted(sorted_pkts, gpu_uuid, g_ts, g_dur, gpu_name,
-                        gpu_name_iid, kCatGpu, gpu_anns, out_flows_vec, in_flows_vec);
+                        gpu_name_iid, kCatGpu, gpu_anns, {}, in_flows_vec);
+        if (gnof != graph_node_out_flows.end())
+          EmitFlowEventSorted(sorted_pkts, gpu_uuid, g_ts + g_dur, gnof->second, true);
       };
 
       if (rec.gpu.gpu_op_count > 0) {
@@ -2512,9 +2524,9 @@ void HipCaptureGraphNodeArgsExt(HipGraphNodeInfoExt* info, hipFunction_t func, v
       --len;
     }
     std::string mangled(raw.data(), len);
-    // ar->kernel_name from the HSA callback is the mangled name — use the same
-    // key (mangled) so fill_dispatch_info's strcmp(ni.gpu.kernel_name, ar->kernel_name)
-    // finds a match.  Demangling happens lazily at write time (PreDemangleKernelNames).
+    // ar->kernel_name from the HSA callback is the same mangled name as kernel->name().
+    // Use the mangled name as key so fill_dispatch_info's strcmp finds a match.
+    // Demangling happens lazily at write time in PreDemangleKernelNames.
     std::lock_guard<std::mutex> lk(g_kernel_names_mtx);
     auto [it, ok] = g_kernel_names.emplace(mangled, mangled);
     (void)ok;
