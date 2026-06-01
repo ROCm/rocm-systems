@@ -63,8 +63,7 @@ void EventState::signal_interrupt(uint32_t event_id) {
         if (!(++ev.event_age))
           ev.event_age = 2;
         write_event_slot(page, page_size, id, ev.event_age);
-        util::Logger::cp("SIGNAL_BROADCAST: event_id=", id,
-                         " age=", ev.event_age,
+        util::Logger::cp("SIGNAL_BROADCAST: event_id=", id, " age=", ev.event_age,
                          " waiters=", ev.waiters.size());
         for (auto *cv : ev.waiters)
           cv->notify_one();
@@ -78,10 +77,8 @@ void EventState::signal_interrupt(uint32_t event_id) {
     if (!(++it->second.event_age))
       it->second.event_age = 2;
     write_event_slot(page, page_size, event_id, it->second.event_age);
-    util::Logger::cp("SIGNAL_INTERRUPT: event_id=", event_id,
-                     " age=", it->second.event_age,
-                     " waiters=", it->second.waiters.size(),
-                     " page=", page ? "valid" : "null");
+    util::Logger::cp("SIGNAL_INTERRUPT: event_id=", event_id, " age=", it->second.event_age,
+                     " waiters=", it->second.waiters.size(), " page=", page ? "valid" : "null");
     for (auto *cv : it->second.waiters)
       cv->notify_one();
   } else {
@@ -139,8 +136,8 @@ int EventState::create_event(void *arg, uint32_t gpu_id) {
   args->event_page_offset = KFD_MMAP_TYPE_EVENTS | kfd_mmap_gpu_id(gpu_id);
 
   util::Logger::cp([&](auto &os) {
-    os << std::format("CREATE_EVENT: event_id={} type={} auto_reset={} gpu_id={}",
-                      ev.event_id, ev.event_type, ev.auto_reset, gpu_id);
+    os << std::format("CREATE_EVENT: event_id={} type={} auto_reset={} gpu_id={}", ev.event_id,
+                      ev.event_type, ev.auto_reset, gpu_id);
   });
 
   return 0;
@@ -178,8 +175,7 @@ int EventState::set_event(void *arg) {
   if (!(++it->second.event_age))
     it->second.event_age = 2;
   write_event_slot(page, page_size, args->event_id, it->second.event_age);
-  util::Logger::cp("SET_EVENT: event_id=", args->event_id,
-                   " age=", it->second.event_age,
+  util::Logger::cp("SET_EVENT: event_id=", args->event_id, " age=", it->second.event_age,
                    " waiters=", it->second.waiters.size());
   for (auto *cv : it->second.waiters)
     cv->notify_one();
@@ -206,9 +202,8 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
   auto *ev_data = reinterpret_cast<kfd_event_data *>(args->events_ptr);
   const bool wait_all = args->wait_for_all != 0;
   util::Logger::cp([&](auto &os) {
-    os << "WAIT_EVENTS: pid=" << process_id
-       << " num=" << args->num_events << " timeout=" << args->timeout
-       << " wait_all=" << wait_all;
+    os << "WAIT_EVENTS: pid=" << process_id << " num=" << args->num_events
+       << " timeout=" << args->timeout << " wait_all=" << wait_all;
     for (uint32_t i = 0; i < args->num_events && i < 4; ++i)
       os << " ev[" << i << "]=" << ev_data[i].event_id
          << "(age=" << ev_data[i].signal_event_data.last_event_age << ")";
@@ -309,8 +304,8 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
       auto it = events_.find(ev_data[i].event_id);
       uint64_t age = (it != events_.end()) ? it->second.event_age : 999;
       util::Logger::cp([&](auto &os) {
-        os << std::format("WAIT_COMPLETE: pid={} ev={} age={} poll_count={} is_poll={}",
-                          process_id, ev_data[i].event_id, age, wait_log_counter, is_poll);
+        os << std::format("WAIT_COMPLETE: pid={} ev={} age={} poll_count={} is_poll={}", process_id,
+                          ev_data[i].event_id, age, wait_log_counter, is_poll);
       });
     }
     wait_log_counter = 0;
@@ -345,9 +340,9 @@ int SimulatedDriver::create_event_ioctl(KfdProcess &proc, void *arg) {
     if (it == proc.allocations_.end() || !it->second.host_ptr)
       it = proc.allocations_.find(raw);
     if (it != proc.allocations_.end() && it->second.host_ptr) {
-      util::Logger::vm("CREATE_EVENT: adopted event page handle=", it->first,
-                       " ptr=0x", std::hex, reinterpret_cast<uintptr_t>(it->second.host_ptr),
-                       " size=", std::dec, it->second.size);
+      util::Logger::vm("CREATE_EVENT: adopted event page handle=", it->first, " ptr=0x", std::hex,
+                       reinterpret_cast<uintptr_t>(it->second.host_ptr), " size=", std::dec,
+                       it->second.size);
       proc.event_state_.adopt_page(it->second.host_ptr, it->second.size);
     } else {
       util::Logger::vm("CREATE_EVENT: event_page_offset=0x", std::hex, raw,

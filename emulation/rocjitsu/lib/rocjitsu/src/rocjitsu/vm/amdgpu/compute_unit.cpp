@@ -331,11 +331,9 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   if (words[0] == 0 && words[1] == 0 && active->trace_inst_count_ < 2) {
     bool mapped = memory_->translate_debug(active->pc, vmid) != nullptr;
     auto pt_info = memory_->debug_page_table_info(vmid, active->pc >> 12);
-    util::Logger::cp("CU ", this->name(), " wf", active->wf_id(),
-                     " FETCH-ZERO pc=0x", std::hex, active->pc, std::dec,
-                     " vmid=", vmid, " mapped=", mapped,
-                     " mem=0x", std::hex, reinterpret_cast<uintptr_t>(memory_), std::dec,
-                     " ", pt_info);
+    util::Logger::cp("CU ", this->name(), " wf", active->wf_id(), " FETCH-ZERO pc=0x", std::hex,
+                     active->pc, std::dec, " vmid=", vmid, " mapped=", mapped, " mem=0x", std::hex,
+                     reinterpret_cast<uintptr_t>(memory_), std::dec, " ", pt_info);
   }
 
   active->trace_inst_count_++;
@@ -438,7 +436,9 @@ bool ComputeUnitCore::step() {
           auto st = wf->state();
           if (st == WfState::RUNNING || st == WfState::WAITCNT || st == WfState::BARRIER)
             os << std::format(" wf{}:pc={:#x}:{}", wf->wf_id(), wf->pc,
-                              st == WfState::RUNNING ? "R" : st == WfState::WAITCNT ? "W" : "B");
+                              st == WfState::RUNNING   ? "R"
+                              : st == WfState::WAITCNT ? "W"
+                                                       : "B");
         }
       });
     }

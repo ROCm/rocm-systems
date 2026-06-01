@@ -21,8 +21,8 @@
 #include <sstream>
 #include <string_view>
 #include <sys/mman.h>
-#include <sys/resource.h>
 #include <sys/random.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <thread>
@@ -73,14 +73,14 @@ std::shared_ptr<KfdProcess> SimulatedDriver::find_process(uint32_t process_id) c
 
 void SimulatedDriver::map_to_gpu(KfdProcess &proc, uint64_t gpu_va, void *host_ptr, size_t size,
                                  amdgpu::Mtype mtype) {
-  util::Logger::cp("MAP pid=", proc.process_id(), " va=0x", std::hex, gpu_va,
-                   " size=0x", size, std::dec, " mtype=", static_cast<int>(mtype));
+  util::Logger::cp("MAP pid=", proc.process_id(), " va=0x", std::hex, gpu_va, " size=0x", size,
+                   std::dec, " mtype=", static_cast<int>(mtype));
   proc.map_pages(gpu_va, host_ptr, size, mtype);
 }
 
 void SimulatedDriver::unmap_from_gpu(KfdProcess &proc, uint64_t gpu_va, size_t size) {
-  util::Logger::cp("UNMAP pid=", proc.process_id(), " va=0x", std::hex, gpu_va,
-                   " size=0x", size, std::dec);
+  util::Logger::cp("UNMAP pid=", proc.process_id(), " va=0x", std::hex, gpu_va, " size=0x", size,
+                   std::dec);
   proc.unmap_pages(gpu_va, size);
 }
 
@@ -297,10 +297,12 @@ int SimulatedDriver::open() {
         std::lock_guard<std::mutex> ilk(interrupt_mutex_);
         auto it = event_dispatch_.find(process_id);
         if (it != event_dispatch_.end()) {
-          util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id, " found=true");
+          util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id,
+                           " found=true");
           it->second->signal_interrupt(event_id);
         } else {
-          util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id, " found=false");
+          util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id,
+                           " found=false");
         }
       });
       cp->set_scratch_backing_resolver([this](uint32_t process_id) -> uint64_t {
@@ -366,10 +368,12 @@ uint32_t SimulatedDriver::open_process() {
         std::lock_guard<std::mutex> ilk(interrupt_mutex_);
         auto it = event_dispatch_.find(process_id);
         if (it != event_dispatch_.end()) {
-          util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id, " found=true");
+          util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id,
+                           " found=true");
           it->second->signal_interrupt(event_id);
         } else {
-          util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id, " found=false");
+          util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id,
+                           " found=false");
         }
       });
       cp->set_scratch_backing_resolver([this](uint32_t process_id) -> uint64_t {
@@ -514,29 +518,52 @@ int SimulatedDriver::ioctl(uint32_t process_id, unsigned long request, void *arg
 
 static const char *ioctl_name(unsigned long req) {
   switch (req) {
-  case AMDKFD_IOC_GET_VERSION: return "GET_VERSION";
-  case AMDKFD_IOC_GET_CLOCK_COUNTERS: return "GET_CLOCK_COUNTERS";
-  case AMDKFD_IOC_GET_PROCESS_APERTURES_NEW: return "GET_APERTURES";
-  case AMDKFD_IOC_ACQUIRE_VM: return "ACQUIRE_VM";
-  case AMDKFD_IOC_ALLOC_MEMORY_OF_GPU: return "ALLOC_MEMORY";
-  case AMDKFD_IOC_FREE_MEMORY_OF_GPU: return "FREE_MEMORY";
-  case AMDKFD_IOC_MAP_MEMORY_TO_GPU: return "MAP_MEMORY";
-  case AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU: return "UNMAP_MEMORY";
-  case AMDKFD_IOC_CREATE_QUEUE: return "CREATE_QUEUE";
-  case AMDKFD_IOC_UPDATE_QUEUE: return "UPDATE_QUEUE";
-  case AMDKFD_IOC_DESTROY_QUEUE: return "DESTROY_QUEUE";
-  case AMDKFD_IOC_CREATE_EVENT: return "CREATE_EVENT";
-  case AMDKFD_IOC_DESTROY_EVENT: return "DESTROY_EVENT";
-  case AMDKFD_IOC_SET_EVENT: return "SET_EVENT";
-  case AMDKFD_IOC_RESET_EVENT: return "RESET_EVENT";
-  case AMDKFD_IOC_WAIT_EVENTS: return "WAIT_EVENTS";
-  case AMDKFD_IOC_RUNTIME_ENABLE: return "RUNTIME_ENABLE";
-  case AMDKFD_IOC_SET_SCRATCH_BACKING_VA: return "SET_SCRATCH_VA";
-  case AMDKFD_IOC_SET_TRAP_HANDLER: return "SET_TRAP_HANDLER";
-  case AMDKFD_IOC_SET_XNACK_MODE: return "SET_XNACK";
-  case AMDKFD_IOC_SET_MEMORY_POLICY: return "SET_MEM_POLICY";
-  case AMDKFD_IOC_AVAILABLE_MEMORY: return "AVAIL_MEMORY";
-  default: return "UNKNOWN";
+  case AMDKFD_IOC_GET_VERSION:
+    return "GET_VERSION";
+  case AMDKFD_IOC_GET_CLOCK_COUNTERS:
+    return "GET_CLOCK_COUNTERS";
+  case AMDKFD_IOC_GET_PROCESS_APERTURES_NEW:
+    return "GET_APERTURES";
+  case AMDKFD_IOC_ACQUIRE_VM:
+    return "ACQUIRE_VM";
+  case AMDKFD_IOC_ALLOC_MEMORY_OF_GPU:
+    return "ALLOC_MEMORY";
+  case AMDKFD_IOC_FREE_MEMORY_OF_GPU:
+    return "FREE_MEMORY";
+  case AMDKFD_IOC_MAP_MEMORY_TO_GPU:
+    return "MAP_MEMORY";
+  case AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU:
+    return "UNMAP_MEMORY";
+  case AMDKFD_IOC_CREATE_QUEUE:
+    return "CREATE_QUEUE";
+  case AMDKFD_IOC_UPDATE_QUEUE:
+    return "UPDATE_QUEUE";
+  case AMDKFD_IOC_DESTROY_QUEUE:
+    return "DESTROY_QUEUE";
+  case AMDKFD_IOC_CREATE_EVENT:
+    return "CREATE_EVENT";
+  case AMDKFD_IOC_DESTROY_EVENT:
+    return "DESTROY_EVENT";
+  case AMDKFD_IOC_SET_EVENT:
+    return "SET_EVENT";
+  case AMDKFD_IOC_RESET_EVENT:
+    return "RESET_EVENT";
+  case AMDKFD_IOC_WAIT_EVENTS:
+    return "WAIT_EVENTS";
+  case AMDKFD_IOC_RUNTIME_ENABLE:
+    return "RUNTIME_ENABLE";
+  case AMDKFD_IOC_SET_SCRATCH_BACKING_VA:
+    return "SET_SCRATCH_VA";
+  case AMDKFD_IOC_SET_TRAP_HANDLER:
+    return "SET_TRAP_HANDLER";
+  case AMDKFD_IOC_SET_XNACK_MODE:
+    return "SET_XNACK";
+  case AMDKFD_IOC_SET_MEMORY_POLICY:
+    return "SET_MEM_POLICY";
+  case AMDKFD_IOC_AVAILABLE_MEMORY:
+    return "AVAIL_MEMORY";
+  default:
+    return "UNKNOWN";
   }
 }
 
@@ -666,11 +693,10 @@ void *SimulatedDriver::dispatch_mmap(KfdProcess &proc, void *addr, size_t length
       }
     }
 
-
     if (doorbell_fd >= 0) {
       off_t cur_size = 0;
       {
-        struct stat st{};
+        struct stat st {};
         if (fstat(doorbell_fd, &st) == 0)
           cur_size = st.st_size;
       }
@@ -685,8 +711,8 @@ void *SimulatedDriver::dispatch_mmap(KfdProcess &proc, void *addr, size_t length
       // shmem large folio allocation can fail during a bulk memset on a
       // freshly-mapped region. Writing through a separate PROT_WRITE
       // mapping forces page allocation before the final shared mapping.
-      auto *init_ptr =
-          static_cast<uint8_t *>(safe_mmap(nullptr, length, PROT_WRITE, MAP_SHARED, doorbell_fd, 0));
+      auto *init_ptr = static_cast<uint8_t *>(
+          safe_mmap(nullptr, length, PROT_WRITE, MAP_SHARED, doorbell_fd, 0));
       if (init_ptr != MAP_FAILED) {
         std::memset(init_ptr, 0xFF, length);
         syscall(SYS_munmap, init_ptr, length);
@@ -716,9 +742,8 @@ void *SimulatedDriver::dispatch_mmap(KfdProcess &proc, void *addr, size_t length
       gs.doorbell_gpu_va = reinterpret_cast<uint64_t>(ptr);
       map_to_gpu(proc, gs.doorbell_gpu_va, ptr, length, amdgpu::Mtype::UC);
       if (gpu && gpu->soc)
-        gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
-          cp->set_doorbell_base(proc.process_id(), ptr);
-        });
+        gpu->soc->for_each_cp(
+            [&](amdgpu::CommandProcessor *cp) { cp->set_doorbell_base(proc.process_id(), ptr); });
     }
     return ptr;
   }
@@ -989,8 +1014,8 @@ int SimulatedDriver::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
         fcntl(alloc.memfd, F_ADD_SEALS, F_SEAL_SHRINK);
 
         if (daemon_mode_ && !(args->flags & KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL)) {
-          auto *mapped = safe_mmap(nullptr, alloc.size, PROT_READ | PROT_WRITE, MAP_SHARED,
-                                   alloc.memfd, 0);
+          auto *mapped =
+              safe_mmap(nullptr, alloc.size, PROT_READ | PROT_WRITE, MAP_SHARED, alloc.memfd, 0);
           if (mapped != MAP_FAILED) {
             alloc.host_ptr = mapped;
             map_to_gpu(proc, va, alloc.host_ptr, alloc.size, alloc_mtype);
@@ -1011,9 +1036,10 @@ int SimulatedDriver::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
   }
 
   util::Logger::vm([&](auto &os) {
-    os << std::format("ALLOC pid={} handle={} gpu_va={:#x} size={} flags={:#x} memfd={} host_ptr={}",
-                      proc.process_id(), alloc.handle, va, args->size, args->flags, alloc.memfd,
-                      reinterpret_cast<uintptr_t>(alloc.host_ptr));
+    os << std::format(
+        "ALLOC pid={} handle={} gpu_va={:#x} size={} flags={:#x} memfd={} host_ptr={}",
+        proc.process_id(), alloc.handle, va, args->size, args->flags, alloc.memfd,
+        reinterpret_cast<uintptr_t>(alloc.host_ptr));
   });
 
   return 0;
@@ -1216,7 +1242,8 @@ int SimulatedDriver::update_queue_ioctl(KfdProcess &proc, void *arg) {
   for (auto &g : gpus_)
     if (g.soc)
       g.soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
-        cp->update_queue(args->queue_id, proc.process_id(), args->ring_base_address, args->ring_size);
+        cp->update_queue(args->queue_id, proc.process_id(), args->ring_base_address,
+                         args->ring_size);
       });
   return 0;
 }
@@ -1439,8 +1466,8 @@ int SimulatedDriver::ipc_export_handle_ioctl(KfdProcess &proc, void *arg) {
   }
 
   std::memcpy(args->share_handle, key.words, sizeof(key.words));
-  util::Logger::vm("ipc_export: handle=", args->handle, " size=", alloc_size, " gpu_id=",
-                   alloc_gpu_id);
+  util::Logger::vm("ipc_export: handle=", args->handle, " size=", alloc_size,
+                   " gpu_id=", alloc_gpu_id);
   return 0;
 }
 
@@ -1693,8 +1720,9 @@ int SimulatedDriver::dispatch_get_mmap_memfd(KfdProcess &proc, off_t offset) con
         return alloc.memfd;
       }
     }
-    util::Logger::cp("MEMFD_LOOKUP: pid=", proc.process_id(), " DOORBELL NO MATCH gpu_id=",
-                     db_gpu_id, " allocations=", proc.allocations_.size());
+    util::Logger::cp("MEMFD_LOOKUP: pid=", proc.process_id(),
+                     " DOORBELL NO MATCH gpu_id=", db_gpu_id,
+                     " allocations=", proc.allocations_.size());
     return -1;
   }
 

@@ -70,7 +70,9 @@ public:
   uint32_t read32(uint64_t addr, uint32_t vmid = 0) const { return memory_->read32(addr, vmid); }
 
   /// @brief Write a 32-bit dword (little-endian).
-  void write32(uint64_t addr, uint32_t val, uint32_t vmid = 0) { memory_->write32(addr, val, vmid); }
+  void write32(uint64_t addr, uint32_t val, uint32_t vmid = 0) {
+    memory_->write32(addr, val, vmid);
+  }
 
   /// @brief Direct access to the underlying GpuMemory.
   GpuMemory *memory() const { return memory_; }

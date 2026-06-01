@@ -236,49 +236,52 @@ void execute_atomic_rmw(VectorMemState &d, L2Cache *l2, L1VectorCache *l1, uint3
                   d.atomic_op == AtomicOp::FMAX);
 
     // Perform the atomic RMW under L2's atomic lock.
-    l2->atomic_rmw(ea, esz, [&](uint8_t *line_data, uint32_t offset) {
-      if (esz == 4) {
-        uint32_t old_val;
-        std::memcpy(&old_val, line_data + offset, 4);
+    l2->atomic_rmw(
+        ea, esz,
+        [&](uint8_t *line_data, uint32_t offset) {
+          if (esz == 4) {
+            uint32_t old_val;
+            std::memcpy(&old_val, line_data + offset, 4);
 
-        uint32_t new_val;
-        if (is_fp) {
-          float old_f = std::bit_cast<float>(old_val);
-          float src_f;
-          std::memcpy(&src_f, &d.store_data[lane * src_stride], 4);
-          new_val = std::bit_cast<uint32_t>(apply_fp_atomic(d.atomic_op, old_f, src_f));
-        } else {
-          uint32_t src_val = 0, cmp_val = 0;
-          std::memcpy(&src_val, &d.store_data[lane * src_stride], 4);
-          if (is_cmpswap)
-            std::memcpy(&cmp_val, &d.store_data[lane * src_stride + 4], 4);
-          new_val = apply_int_atomic(d.atomic_op, old_val, src_val, cmp_val);
-        }
+            uint32_t new_val;
+            if (is_fp) {
+              float old_f = std::bit_cast<float>(old_val);
+              float src_f;
+              std::memcpy(&src_f, &d.store_data[lane * src_stride], 4);
+              new_val = std::bit_cast<uint32_t>(apply_fp_atomic(d.atomic_op, old_f, src_f));
+            } else {
+              uint32_t src_val = 0, cmp_val = 0;
+              std::memcpy(&src_val, &d.store_data[lane * src_stride], 4);
+              if (is_cmpswap)
+                std::memcpy(&cmp_val, &d.store_data[lane * src_stride + 4], 4);
+              new_val = apply_int_atomic(d.atomic_op, old_val, src_val, cmp_val);
+            }
 
-        std::memcpy(line_data + offset, &new_val, 4);
-        std::memcpy(&d.response_data[lane * 4], &old_val, 4);
-      } else if (esz == 8) {
-        uint64_t old_val;
-        std::memcpy(&old_val, line_data + offset, 8);
+            std::memcpy(line_data + offset, &new_val, 4);
+            std::memcpy(&d.response_data[lane * 4], &old_val, 4);
+          } else if (esz == 8) {
+            uint64_t old_val;
+            std::memcpy(&old_val, line_data + offset, 8);
 
-        uint64_t new_val;
-        if (is_fp) {
-          double old_f = std::bit_cast<double>(old_val);
-          double src_f;
-          std::memcpy(&src_f, &d.store_data[lane * src_stride], 8);
-          new_val = std::bit_cast<uint64_t>(apply_fp_atomic(d.atomic_op, old_f, src_f));
-        } else {
-          uint64_t src_val = 0, cmp_val = 0;
-          std::memcpy(&src_val, &d.store_data[lane * src_stride], 8);
-          if (is_cmpswap)
-            std::memcpy(&cmp_val, &d.store_data[lane * src_stride + 8], 8);
-          new_val = apply_int_atomic(d.atomic_op, old_val, src_val, cmp_val);
-        }
+            uint64_t new_val;
+            if (is_fp) {
+              double old_f = std::bit_cast<double>(old_val);
+              double src_f;
+              std::memcpy(&src_f, &d.store_data[lane * src_stride], 8);
+              new_val = std::bit_cast<uint64_t>(apply_fp_atomic(d.atomic_op, old_f, src_f));
+            } else {
+              uint64_t src_val = 0, cmp_val = 0;
+              std::memcpy(&src_val, &d.store_data[lane * src_stride], 8);
+              if (is_cmpswap)
+                std::memcpy(&cmp_val, &d.store_data[lane * src_stride + 8], 8);
+              new_val = apply_int_atomic(d.atomic_op, old_val, src_val, cmp_val);
+            }
 
-        std::memcpy(line_data + offset, &new_val, 8);
-        std::memcpy(&d.response_data[lane * 8], &old_val, 8);
-      }
-    }, vmid);
+            std::memcpy(line_data + offset, &new_val, 8);
+            std::memcpy(&d.response_data[lane * 8], &old_val, 8);
+          }
+        },
+        vmid);
 
     // Invalidate stale L1 line.
     l1->invalidate(ea);

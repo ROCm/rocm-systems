@@ -93,16 +93,20 @@ public:
   void set_interrupt_callback(InterruptCallback cb) { interrupt_cb_ = std::move(cb); }
 
   using ScratchBackingResolver = std::function<uint64_t(uint32_t process_id)>;
-  void set_scratch_backing_resolver(ScratchBackingResolver cb) { scratch_resolver_ = std::move(cb); }
+  void set_scratch_backing_resolver(ScratchBackingResolver cb) {
+    scratch_resolver_ = std::move(cb);
+  }
 
-  using ScratchBackingAllocator = std::function<bool(uint32_t process_id, uint64_t gpu_va, size_t size)>;
+  using ScratchBackingAllocator =
+      std::function<bool(uint32_t process_id, uint64_t gpu_va, size_t size)>;
   void set_scratch_backing_allocator(ScratchBackingAllocator cb) {
     scratch_allocator_ = std::move(cb);
   }
 
   void register_queue(HwQueue queue);
   void unregister_queue(uint32_t queue_id, uint32_t process_id);
-  void update_queue(uint32_t queue_id, uint32_t process_id, uint64_t ring_base_va, uint32_t ring_size);
+  void update_queue(uint32_t queue_id, uint32_t process_id, uint64_t ring_base_va,
+                    uint32_t ring_size);
 
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
     plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group();
@@ -157,9 +161,8 @@ private:
   void process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt, const HwQueue &queue,
                           uint64_t pkt_addr, HwQueueState &qs);
 
-  rocr::llvm::amdhsa::kernel_descriptor_t read_kernel_descriptor(uint64_t kernel_object,
-                                                                 uint32_t vmid,
-                                                                 bool host_accessible = false);
+  rocr::llvm::amdhsa::kernel_descriptor_t
+  read_kernel_descriptor(uint64_t kernel_object, uint32_t vmid, bool host_accessible = false);
   /// @brief Dispatch workgroups from entry to CUs. Returns number dispatched.
   uint32_t dispatch_workgroups(DispatchEntry &entry);
 

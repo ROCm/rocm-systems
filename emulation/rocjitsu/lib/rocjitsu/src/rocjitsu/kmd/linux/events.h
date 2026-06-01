@@ -80,7 +80,6 @@ public:
   ///          real KFD's kfd_signal_event_interrupt(pasid, 0, 0) broadcast.
   void signal_interrupt(uint32_t event_id);
 
-
   /// @brief Wake all event waiters for driver shutdown.
   /// @details Sets the closing flag and notifies every registered waiter
   ///          across all events.

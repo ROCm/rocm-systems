@@ -115,8 +115,7 @@ public:
   ///
   /// @details Used for broadcast operations (setting callbacks, flushing, etc.)
   /// that must reach every CP on the device.
-  template <typename Fn>
-  void for_each_cp(Fn &&fn) {
+  template <typename Fn> void for_each_cp(Fn &&fn) {
     for (auto *xcd_ptr : xcds_)
       if (auto *cp = xcd_ptr->command_processor())
         fn(cp);

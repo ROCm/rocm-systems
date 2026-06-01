@@ -54,17 +54,16 @@ public:
 
   /// @brief Register a process's page table in the VMID table.
   void register_process(uint32_t pid, KfdProcess::PageTable *pt, std::shared_mutex *mu) {
-    util::Logger::cp("VMID_REG pid=", pid, " mem=0x", std::hex,
-                     reinterpret_cast<uintptr_t>(this), std::dec,
-                     " pt_size=", pt->size());
+    util::Logger::cp("VMID_REG pid=", pid, " mem=0x", std::hex, reinterpret_cast<uintptr_t>(this),
+                     std::dec, " pt_size=", pt->size());
     std::unique_lock lk(vmid_mutex_);
     vmid_table_[pid] = {pt, mu};
   }
 
   /// @brief Unregister a process from the VMID table.
   void unregister_process(uint32_t pid) {
-    util::Logger::cp("VMID_UNREG pid=", pid, " mem=0x", std::hex,
-                     reinterpret_cast<uintptr_t>(this), std::dec);
+    util::Logger::cp("VMID_UNREG pid=", pid, " mem=0x", std::hex, reinterpret_cast<uintptr_t>(this),
+                     std::dec);
     std::unique_lock lk(vmid_mutex_);
     vmid_table_.erase(pid);
   }
@@ -76,7 +75,9 @@ public:
   void set_passthrough(bool v) { passthrough_ = v; }
 
   /// @brief Resolve a GPU VA to a host pointer via the given VMID's page table.
-  uint8_t *resolve_host_ptr(uint64_t addr, uint32_t vmid = 0) const { return translate(addr, vmid); }
+  uint8_t *resolve_host_ptr(uint64_t addr, uint32_t vmid = 0) const {
+    return translate(addr, vmid);
+  }
 
   /// @brief Look up PTE MTYPE for a GPU VA in the given VMID's page table.
   Mtype pte_mtype(uint64_t addr, uint32_t vmid = 0) const {
@@ -113,8 +114,10 @@ public:
     std::string result = "page_missing pt_size=" + std::to_string(entry.page_table->size());
     uint64_t lo = UINT64_MAX, hi = 0;
     for (auto &[k, v] : *entry.page_table) {
-      if (k < lo) lo = k;
-      if (k > hi) hi = k;
+      if (k < lo)
+        lo = k;
+      if (k > hi)
+        hi = k;
     }
     result += " range=[0x" + std::format("{:x}", lo) + ",0x" + std::format("{:x}", hi) + "]";
     return result;

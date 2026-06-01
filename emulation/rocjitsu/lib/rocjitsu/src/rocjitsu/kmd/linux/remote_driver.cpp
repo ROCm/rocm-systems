@@ -144,7 +144,7 @@ int RemoteDriver::open() {
   // Create a high-numbered synthetic KFD fd to avoid collisions with ROCR's
   // internal fd lifecycle. Use the top of the current rlimit range (same
   // approach as SimulatedDriver::init_reserved_fd_range).
-  struct rlimit rl{};
+  struct rlimit rl {};
   getrlimit(RLIMIT_NOFILE, &rl);
   int fd_min = static_cast<int>(rl.rlim_cur) - 64;
   if (fd_min < 256)
@@ -465,8 +465,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
     auto *import_args = static_cast<kfd_ioctl_ipc_import_handle_args *>(arg);
     if (num_fds > 0 && received_fds[0] >= 0) {
       uint64_t size = 0;
-      struct stat st {
-      };
+      struct stat st {};
       if (fstat(received_fds[0], &st) == 0)
         size = static_cast<uint64_t>(st.st_size);
       register_allocation(import_args->handle, import_args->va_addr, size, received_fds[0]);
@@ -521,8 +520,8 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
         size_t num_pages = (length + page_size - 1) / page_size;
         std::vector<uint8_t> page_resident(num_pages);
         auto mc_rc = syscall(SYS_mincore, addr, length, page_resident.data());
-        auto *temp =
-            static_cast<uint8_t *>(safe_mmap(nullptr, length, PROT_WRITE, MAP_SHARED, mapping_memfd, 0));
+        auto *temp = static_cast<uint8_t *>(
+            safe_mmap(nullptr, length, PROT_WRITE, MAP_SHARED, mapping_memfd, 0));
         if (temp != MAP_FAILED) {
           if (mc_rc == 0) {
             auto *src = static_cast<uint8_t *>(addr);

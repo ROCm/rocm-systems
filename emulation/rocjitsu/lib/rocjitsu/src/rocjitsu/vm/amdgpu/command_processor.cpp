@@ -162,11 +162,11 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
                              std::max<uint16_t>(1, pkt.workgroup_size_y) *
                              std::max<uint16_t>(1, pkt.workgroup_size_z);
     uint32_t waves_per_wg = (wg_total_size + cu->wf_size() - 1) / cu->wf_size();
-    uint64_t global_wave_idx =
-        static_cast<uint64_t>(global_wg_id) * waves_per_wg + wf_index_in_wg;
+    uint64_t global_wave_idx = static_cast<uint64_t>(global_wg_id) * waves_per_wg + wf_index_in_wg;
     uint64_t wave_scratch = scratch_pool + global_wave_idx * per_wave_size;
 
-    if (memory_ && memory_->resolve_host_ptr(wave_scratch, pkt.process_id) == nullptr && scratch_allocator_) {
+    if (memory_ && memory_->resolve_host_ptr(wave_scratch, pkt.process_id) == nullptr &&
+        scratch_allocator_) {
       uint64_t total_scratch = per_wave_size * pkt.total_wgs * waves_per_wg;
       scratch_allocator_(pkt.process_id, scratch_pool, static_cast<size_t>(total_scratch));
     }
@@ -174,18 +174,17 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
     wf->set_scratch_base(wave_scratch);
     wf->set_scratch_lane_size(pkt.private_segment_fixed_size);
     util::Logger::cp([&](auto &os) {
-      os << std::format("SCRATCH wf{} pool={:#x} wave_scratch={:#x} per_wave={} priv_size={} "
-                        "backing_addr={:#x} mapped={}",
-                        wf->wf_id(), scratch_pool, wave_scratch, per_wave_size,
-                        pkt.private_segment_fixed_size, pkt.scratch_backing_addr,
-                        memory_ ? (memory_->resolve_host_ptr(wave_scratch, pkt.process_id) != nullptr) : false);
+      os << std::format(
+          "SCRATCH wf{} pool={:#x} wave_scratch={:#x} per_wave={} priv_size={} "
+          "backing_addr={:#x} mapped={}",
+          wf->wf_id(), scratch_pool, wave_scratch, per_wave_size, pkt.private_segment_fixed_size,
+          pkt.scratch_backing_addr,
+          memory_ ? (memory_->resolve_host_ptr(wave_scratch, pkt.process_id) != nullptr) : false);
     });
 
     if (flat_scratch_init_sgpr >= 0) {
-      cu->write_sgpr(sbase + flat_scratch_init_sgpr,
-                     static_cast<uint32_t>(wave_scratch));
-      cu->write_sgpr(sbase + flat_scratch_init_sgpr + 1,
-                     static_cast<uint32_t>(wave_scratch >> 32));
+      cu->write_sgpr(sbase + flat_scratch_init_sgpr, static_cast<uint32_t>(wave_scratch));
+      cu->write_sgpr(sbase + flat_scratch_init_sgpr + 1, static_cast<uint32_t>(wave_scratch >> 32));
     }
 
     cu->write_sgpr(sbase + 102, static_cast<uint32_t>(wave_scratch));
@@ -225,9 +224,7 @@ void CommandProcessor::register_queue(HwQueue queue) {
   // is safe because ROCR always creates queues from a single thread (the HSA
   // queue-creation path is not re-entrant), so there is no concurrent caller.
   if (start_poll && !doorbell_thread_.joinable()) {
-    util::Logger::cp([&](auto &os) {
-      os << std::format("{}: STARTING doorbell thread", name());
-    });
+    util::Logger::cp([&](auto &os) { os << std::format("{}: STARTING doorbell thread", name()); });
     doorbell_thread_ = std::jthread([this](std::stop_token stop) { doorbell_poll_loop(stop); });
   }
 }
@@ -326,8 +323,7 @@ bool CommandProcessor::scan_doorbells() {
       util::Logger::cp([&](auto &os) {
         os << std::format("{}: DOORBELL_CHANGE pid={} qid={} sdma={} old={:#x} new={:#x} "
                           "db_base={} db_off={}",
-                          name(), q.process_id, q.queue_id, q.is_sdma,
-                          q.last_doorbell, val,
+                          name(), q.process_id, q.queue_id, q.is_sdma, q.last_doorbell, val,
                           reinterpret_cast<uintptr_t>(q.doorbell_base), q.doorbell_offset);
       });
       q.last_doorbell = val;
@@ -369,8 +365,9 @@ void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
       for (auto &q : hw_queues_) {
         uint64_t val = 0;
         if (q.host_accessible && q.doorbell_base) {
-          val = std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(
-                                              static_cast<char *>(q.doorbell_base) + q.doorbell_offset))
+          val = std::atomic_ref<uint64_t>(
+                    *reinterpret_cast<uint64_t *>(static_cast<char *>(q.doorbell_base) +
+                                                  q.doorbell_offset))
                     .load(std::memory_order_acquire);
         }
         util::Logger::cp([&](auto &os) {
@@ -478,9 +475,8 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
 // ---------------------------------------------------------------------------
 
 void CommandProcessor::notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id) {
-  util::Logger::cp([&](auto &os) {
-    os << std::format("WG_COMPLETE d={} wg={}", dispatch_id, wg_id);
-  });
+  util::Logger::cp(
+      [&](auto &os) { os << std::format("WG_COMPLETE d={} wg={}", dispatch_id, wg_id); });
   std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
   if (completion_)
     completion_->notify_wg_complete(dispatch_id, wg_id, new_queue_states_);
@@ -588,7 +584,8 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
                                           HwQueueState &qs) {
   bool host_accessible = queue.host_accessible;
   using namespace rocr::llvm::amdhsa;
-  kernel_descriptor_t kd = read_kernel_descriptor(pkt.kernel_object, queue.process_id, host_accessible);
+  kernel_descriptor_t kd =
+      read_kernel_descriptor(pkt.kernel_object, queue.process_id, host_accessible);
   uint32_t vgpr_gran =
       AMDHSA_BITS_GET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
   uint32_t sgpr_gran =
@@ -626,8 +623,7 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   dp.kernarg_addr = reinterpret_cast<uint64_t>(pkt.kernarg_address);
   dp.num_user_sgprs = user_sgprs;
   dp.kernel_code_properties = kd.kernel_code_properties;
-  dp.private_segment_fixed_size =
-      std::max(kd.private_segment_fixed_size, pkt.private_segment_size);
+  dp.private_segment_fixed_size = std::max(kd.private_segment_fixed_size, pkt.private_segment_size);
   dp.group_segment_fixed_size = std::max(kd.group_segment_fixed_size, pkt.group_segment_size);
 
   // For KFD dispatches, provide pointers the kernel may need via user SGPRs.
@@ -701,16 +697,15 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
                       dp.completion_signal);
   });
   util::Logger::cp([&](auto &os) {
-    os << std::format("DISPATCH #{} d={} \"{}\" wgs={} wfs/wg={} sig={:#x} pid={} ko={:#x} pc={:#x}",
-                      total_dispatched_, dp.dispatch_id, kernel_sym.empty() ? "?" : kernel_sym,
-                      total_wgs, wfs_per_wg, dp.completion_signal, dp.process_id,
-                      pkt.kernel_object, entry_pc);
+    os << std::format(
+        "DISPATCH #{} d={} \"{}\" wgs={} wfs/wg={} sig={:#x} pid={} ko={:#x} pc={:#x}",
+        total_dispatched_, dp.dispatch_id, kernel_sym.empty() ? "?" : kernel_sym, total_wgs,
+        wfs_per_wg, dp.completion_signal, dp.process_id, pkt.kernel_object, entry_pc);
     if (memory_) {
       auto *ko_ptr = memory_->translate_debug(pkt.kernel_object, queue.process_id);
       auto *pc_ptr = memory_->translate_debug(entry_pc, queue.process_id);
-      os << std::format(" ko_mapped={} pc_mapped={} mem={:#x}",
-                        ko_ptr != nullptr, pc_ptr != nullptr,
-                        reinterpret_cast<uintptr_t>(memory_));
+      os << std::format(" ko_mapped={} pc_mapped={} mem={:#x}", ko_ptr != nullptr,
+                        pc_ptr != nullptr, reinterpret_cast<uintptr_t>(memory_));
       if (pc_ptr) {
         uint32_t first_word;
         std::memcpy(&first_word, pc_ptr + (entry_pc & 0xFFF), 4);
@@ -751,8 +746,8 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
         write_idx = db_val;
     }
     util::Logger::cp([&](auto &os) {
-      os << std::format("{}: SDMA_FETCH pid={} qid={} read={} write={} delta={}",
-                        name(), queue.process_id, queue.queue_id, read_idx, write_idx,
+      os << std::format("{}: SDMA_FETCH pid={} qid={} read={} write={} delta={}", name(),
+                        queue.process_id, queue.queue_id, read_idx, write_idx,
                         write_idx - read_idx);
     });
     if (read_idx >= write_idx)
@@ -899,9 +894,8 @@ void CommandProcessor::fetch_packets() {
 }
 
 void CommandProcessor::handle_doorbell(simdojo::Tick) {
-  util::Logger::cp([&](auto &os) {
-    os << std::format("{}: DOORBELL queues={}", name(), hw_queues_.size());
-  });
+  util::Logger::cp(
+      [&](auto &os) { os << std::format("{}: DOORBELL queues={}", name(), hw_queues_.size()); });
 
   std::unique_lock<std::recursive_mutex> lock(hw_queue_mutex_);
 
@@ -1051,8 +1045,8 @@ void CommandProcessor::handle_doorbell(simdojo::Tick) {
       do_teardown = true;
   }
   util::Logger::cp([&](auto &os) {
-    os << std::format("{}: TEARDOWN_CHECK all_done={} kfd={} primary={} teardown={}",
-                      name(), all_done, kfd, is_primary_, do_teardown);
+    os << std::format("{}: TEARDOWN_CHECK all_done={} kfd={} primary={} teardown={}", name(),
+                      all_done, kfd, is_primary_, do_teardown);
   });
 
   lock.unlock();
@@ -1125,7 +1119,9 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
   // Helper: resolve a GPU VA from an SDMA packet to a host pointer.
   // In daemon mode, the VA belongs to the client process; we go through the
   // VMID page table. In local mode, the VA IS the host address.
-  auto resolve = [&](uint64_t va) -> void * { return resolve_sdma_ptr(memory_, va, queue.process_id); };
+  auto resolve = [&](uint64_t va) -> void * {
+    return resolve_sdma_ptr(memory_, va, queue.process_id);
+  };
 
   while (rpos < wpos) {
     uint32_t header = dw(0);
@@ -1308,11 +1304,12 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
       break;
     }
     case sdma::OP_GCR: {
-      uint64_t base_va = (static_cast<uint64_t>(dw(1)) | (static_cast<uint64_t>(dw(2)) << 32)) &
-                         ~0xFULL;
-      uint64_t size_field = (static_cast<uint64_t>(dw(3)) | (static_cast<uint64_t>(dw(4)) << 32)) &
-                            ~0xFULL;
-      uint32_t range = size_field > 0 ? static_cast<uint32_t>(std::min(size_field, uint64_t(UINT32_MAX))) : 0;
+      uint64_t base_va =
+          (static_cast<uint64_t>(dw(1)) | (static_cast<uint64_t>(dw(2)) << 32)) & ~0xFULL;
+      uint64_t size_field =
+          (static_cast<uint64_t>(dw(3)) | (static_cast<uint64_t>(dw(4)) << 32)) & ~0xFULL;
+      uint32_t range =
+          size_field > 0 ? static_cast<uint32_t>(std::min(size_field, uint64_t(UINT32_MAX))) : 0;
       for (auto *l2 : l2_caches_) {
         if (range > 0)
           l2->invalidate_range(base_va, range);

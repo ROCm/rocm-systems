@@ -86,8 +86,7 @@ public:
   /// @param dst Destination buffer.
   /// @param size Number of bytes to read.
   /// @param mtype Memory type for caching policy.
-  void read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype = Mtype::RW,
-            uint32_t vmid = 0);
+  void read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype = Mtype::RW, uint32_t vmid = 0);
 
   /// @brief Write data to L2 (and possibly through to HBM).
   ///

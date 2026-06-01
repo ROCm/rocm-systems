@@ -806,7 +806,9 @@ void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset)
       auto *raw = InterposerContext::real.mmap(
           addr, length, prot, (flags & ~MAP_ANONYMOUS) | MAP_SHARED, memfd_out, memfd_offset);
       if (raw != MAP_FAILED) {
+#ifdef MADV_POPULATE_WRITE
         InterposerContext::real.madvise(raw, length, MADV_POPULATE_WRITE);
+#endif
         return raw;
       }
     }

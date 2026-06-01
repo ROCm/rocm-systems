@@ -68,11 +68,11 @@ public:
 
   /// @brief Configuration for a compute unit.
   struct Config {
-    rj_code_arch_t arch;             ///< ISA architecture (determines wave size, decoder).
-    uint32_t num_wf_slots;           ///< Number of hardware wavefront slots (contexts).
-    uint32_t sgprs_per_wf;           ///< Scalar GPRs per wavefront (allocation granularity).
-    uint32_t vgprs_per_wf;           ///< Vector GPRs per wavefront (allocation granularity).
-    uint32_t lds_size_kb;            ///< Local Data Share size in kilobytes.
+    rj_code_arch_t arch;   ///< ISA architecture (determines wave size, decoder).
+    uint32_t num_wf_slots; ///< Number of hardware wavefront slots (contexts).
+    uint32_t sgprs_per_wf; ///< Scalar GPRs per wavefront (allocation granularity).
+    uint32_t vgprs_per_wf; ///< Vector GPRs per wavefront (allocation granularity).
+    uint32_t lds_size_kb;  ///< Local Data Share size in kilobytes.
   };
 
   ~ComputeUnitCore() override = default;

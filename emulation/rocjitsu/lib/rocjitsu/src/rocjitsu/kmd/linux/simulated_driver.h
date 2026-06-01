@@ -49,7 +49,7 @@ struct IpcHandleKeyHash {
     size_t hash_value = std::hash<uint32_t>{}(key.words[0]);
     for (int idx = 1; idx < 4; idx++)
       hash_value ^= std::hash<uint32_t>{}(key.words[idx]) + 0x9e3779b9 + (hash_value << 6) +
-                     (hash_value >> 2);
+                    (hash_value >> 2);
     return hash_value;
   }
 };
@@ -152,7 +152,7 @@ private:
   }
 
   void map_to_gpu(KfdProcess &proc, uint64_t gpu_va, void *host_ptr, size_t size,
-                   amdgpu::Mtype mtype = amdgpu::Mtype::RW);
+                  amdgpu::Mtype mtype = amdgpu::Mtype::RW);
   void unmap_from_gpu(KfdProcess &proc, uint64_t gpu_va, size_t size);
 
   int dispatch_ioctl(KfdProcess &proc, unsigned long request, void *arg);
