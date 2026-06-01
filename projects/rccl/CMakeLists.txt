@@ -76,6 +76,7 @@ option(ENABLE_CODE_COVERAGE                    "Enable code coverage"           
 option(ENABLE_NPKIT                            "Enable NPKit"                                  OFF)
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
 option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     ON)
+option(EMIT_LLVM_IR                            "Emit LLVM IR/bitcode for nccl_device APIs"     OFF)
 option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             OFF)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
@@ -599,6 +600,21 @@ configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/nccl.h)      # Used b
 # Source directory contains library creation
 add_subdirectory(src)
 
+# LLVM IR / bitcode for nccl_device APIs (HIP / AMDGPU)
+#==================================================================================================
+# When EMIT_LLVM_IR=ON, build a standalone LLVM bitcode artifact (librccl_device.bc)
+# plus a C wrapper header (nccl_device_wrapper.h) from src/include/nccl_device/.
+# The bitcode is generated from the hipify-staged headers that librccl.so itself
+# is compiled from, so the IR is guaranteed to match the host library.
+if(EMIT_LLVM_IR)
+  add_subdirectory(bindings/ir)
+  # bindings/ir/ reads headers out of ${PROJECT_BINARY_DIR}/hipify, which is
+  # populated by the copy_nccl_device_headers target defined in src/CMakeLists.txt.
+  add_dependencies(llvm_ir copy_nccl_device_headers)
+  # Convenience aggregate target: builds librccl.so together with the bitcode.
+  add_custom_target(rccl_with_ir ALL DEPENDS rccl llvm_ir)
+endif()
+
 # Install settings
 #==================================================================================================
 ## Specify install targets
@@ -607,6 +623,20 @@ rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/rccl/rccl.h src/include/p
              DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)
 rocm_install(FILES       src/include/api_trace.h
              DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl/amd_detail)
+## Optional: install LLVM bitcode artifacts when EMIT_LLVM_IR is enabled.
+## librccl_device.bc, nccl_device_wrapper.h, hipified nccl_device headers,
+## and nccl.h (same as rccl.h; nccl_device #includes <nccl.h>) are produced
+## before install because rccl_with_ir is part of ALL.
+if(EMIT_LLVM_IR)
+  rocm_install(FILES       ${PROJECT_BINARY_DIR}/lib/librccl_device.bc
+               DESTINATION ${CMAKE_INSTALL_LIBDIR}/rccl)
+  rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/nccl_device_wrapper.h
+                           ${PROJECT_BINARY_DIR}/include/nccl_device.h
+                           ${PROJECT_BINARY_DIR}/include/nccl.h
+               DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)
+  rocm_install(DIRECTORY   ${PROJECT_BINARY_DIR}/include/nccl_device
+               DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)
+endif()
 ## Install tuner config directory for CSV-based tuner
 file(COPY tuner DESTINATION ${PROJECT_BINARY_DIR})
 rocm_install(DIRECTORY ${PROJECT_BINARY_DIR}/tuner DESTINATION ${CMAKE_INSTALL_DATADIR}/rccl)

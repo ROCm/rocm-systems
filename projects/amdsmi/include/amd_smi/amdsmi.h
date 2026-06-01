@@ -243,7 +243,7 @@ typedef enum {
 #define AMDSMI_LIB_VERSION_MAJOR 26
 
 //! Minor version should be updated for each API change, but without changing headers
-#define AMDSMI_LIB_VERSION_MINOR 4
+#define AMDSMI_LIB_VERSION_MINOR 5
 
 //! Release version should be set to 0 as default and can be updated by the PMs for each CSP point
 //! release
