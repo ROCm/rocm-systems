@@ -48,6 +48,7 @@
 #include <chrono>
 #include <string>
 #include <vector>
+#include "inc/hsa.h"
 #include "utils.h"
 
 namespace rocr {
@@ -360,8 +361,8 @@ bool UncommitMemory(void* addr, size_t size);
 bool UnmapMemory(void* addr, size_t size);
 bool MapMemory(void* addr, size_t size, MemProt prot, int fd, uint64_t cpu_addr);
 
-/// Close a dmabuf file descriptor. Returns false on failure (Linux only).
-bool DmaBufClose(int dmabuf);
+/// Close a dmabuf file descriptor.
+hsa_status_t DmaBufClose(int dmabuf);
 
 bool ProtectMemory(void* va, size_t size, MemProt perms);
 

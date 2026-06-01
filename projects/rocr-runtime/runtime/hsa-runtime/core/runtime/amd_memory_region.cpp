@@ -157,8 +157,7 @@ hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags,
 
   size = AlignUp(size, GetPageSize());
 
-  return owner()->driver().AllocateMemory(*this, alloc_flags, mem, size,
-                                          /*mmap_offset,*/ agent_node_id);
+  return owner()->driver().AllocateMemory(*this, alloc_flags, mem, size, agent_node_id);
 }
 
 hsa_status_t MemoryRegion::Free(void* address, size_t size) const {

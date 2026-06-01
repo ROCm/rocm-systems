@@ -455,13 +455,13 @@ hsa_status_t KfdDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
 }
 
 hsa_status_t KfdDriver::ExportMemoryHandle(const core::Agent& agent, const core::DriverMemoryHandle& handle,
-                                           core::ShareableHandleType type, uint32_t flags,
+                                           core::ShareType type, uint32_t flags,
                                            void* export_handle) {
   (void)flags;
   if (export_handle == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   switch (type) {
-  case core::ShareableHandleType::DMABUF_FD: {
+  case core::ShareType::DMABUF_FD: {
     auto* dmabuf_fd = static_cast<int*>(export_handle);
 #if defined(__linux__)
     if (handle.dmabuf_fd != -1) {
@@ -486,7 +486,7 @@ hsa_status_t KfdDriver::ExportMemoryHandle(const core::Agent& agent, const core:
     *dmabuf_fd = res.dmabuf_fd;
     return HSA_STATUS_SUCCESS;
   }
-  case core::ShareableHandleType::FABRIC_HANDLE: {
+  case core::ShareType::FABRIC_HANDLE: {
 #if !defined(__linux__)
     assert(!"Unimplemented!");
     return HSA_STATUS_ERROR;
@@ -517,13 +517,13 @@ hsa_status_t KfdDriver::ExportMemoryHandle(const core::Agent& agent, const core:
 }
 
 hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::DriverMemoryHandle* handle,
-                                           core::ShareableHandleType type, void* import_handle,
+                                           core::ShareType type, void* import_handle,
                                            void* mem) {
   if (handle == nullptr || import_handle == nullptr)
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   switch (type) {
-  case core::ShareableHandleType::DMABUF_FD: {
+  case core::ShareType::DMABUF_FD: {
     const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
     const int dmabuf_fd = *static_cast<int*>(import_handle);
 
@@ -543,7 +543,7 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
     handle->size = res.alloc_size;
     return HSA_STATUS_SUCCESS;
   }
-  case core::ShareableHandleType::FABRIC_HANDLE: {
+  case core::ShareType::FABRIC_HANDLE: {
 #if !defined(__linux__)
     assert(!"Unimplemented!");
     return HSA_STATUS_ERROR;
@@ -572,12 +572,12 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
   }
 }
 
-hsa_status_t KfdDriver::DestroyImportedShareableHandle(core::DriverMemoryHandle* handle) {
-  // Calls DestroyShareableHandle, as an amdgpu_bo_handle object is created during import.
-  return DestroyShareableHandle(handle);
+hsa_status_t KfdDriver::DestroyImportedMemoryHandle(core::DriverMemoryHandle* handle) {
+  // Calls DestroyMemoryHandle, as an amdgpu_bo_handle object is created during import.
+  return DestroyMemoryHandle(handle);
 }
 
-hsa_status_t KfdDriver::Map(core::DriverMemoryHandle handle, void* mem, size_t offset, size_t size,
+hsa_status_t KfdDriver::Map(const core::DriverMemoryHandle& handle, void* mem, size_t offset, size_t size,
                             hsa_access_permission_t perms) {
   HsaMemoryObjectHandle memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
   HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaMap(memhandle, static_cast<HSAuint64>(offset),
@@ -588,7 +588,7 @@ hsa_status_t KfdDriver::Map(core::DriverMemoryHandle handle, void* mem, size_t o
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdDriver::Unmap(core::DriverMemoryHandle handle, void *mem,
+hsa_status_t KfdDriver::Unmap(const core::DriverMemoryHandle& handle, void *mem,
                               size_t offset, size_t size) {
   HsaMemoryObjectHandle memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
   HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaUnmap(memhandle, static_cast<HSAuint64>(offset),
@@ -619,7 +619,7 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
     return HSA_STATUS_ERROR;
 
   core::DriverMemoryHandle targetHandle = {};
-  hsa_status_t ret = ImportMemoryHandle(agent, &targetHandle, core::ShareableHandleType::DMABUF_FD,
+  hsa_status_t ret = ImportMemoryHandle(agent, &targetHandle, core::ShareType::DMABUF_FD,
                                         &source_fd, mem);
 #if defined(__linux__)
   rocr::os::DmaBufClose(source_fd);
@@ -631,7 +631,7 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
   int shareable_fd = source_fd;
 #if defined(__linux__)
   // Re-export from DRM; the KFD fd was transient and is already closed.
-  ret = ExportMemoryHandle(agent, targetHandle, core::ShareableHandleType::DMABUF_FD, 0,
+  ret = ExportMemoryHandle(agent, targetHandle, core::ShareType::DMABUF_FD, 0,
                            &shareable_fd);
   if (ret != HSA_STATUS_SUCCESS)
     return ret;
@@ -653,12 +653,18 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdDriver::DestroyShareableHandle(core::DriverMemoryHandle* handle) {
-  auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle->handle);
+hsa_status_t KfdDriver::DestroyMemoryHandle(core::DriverMemoryHandle* handle) {
+  if (handle->dmabuf_fd >= 0) {
+    hsa_status_t status = rocr::os::DmaBufClose(handle->dmabuf_fd);
+    if (status != HSA_STATUS_SUCCESS) return status;
+  }
 
-  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemHandleFree(memhandle));
-  if (status != HSAKMT_STATUS_SUCCESS) {
-    return HSA_STATUS_ERROR;
+  auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle->handle);
+  if (memhandle != nullptr) {
+    HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemHandleFree(memhandle));
+    if (status != HSAKMT_STATUS_SUCCESS) {
+      return HSA_STATUS_ERROR;
+    }
   }
   *handle = {};
   return HSA_STATUS_SUCCESS;
