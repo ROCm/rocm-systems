@@ -37,44 +37,47 @@ __global__ void WorkGroupPrimitiveTest(int loop, int skip,
                                       long long int *start_time,
                                       long long int *end_time, char *source,
                                       char *dest, size_t size, TestType type,
-                                      ShmemContextType ctx_type) {
+                                      ShmemContextType ctx_type, int batch) {
   __shared__ rocshmem_ctx_t ctx;
   int wg_id = get_flat_grid_id();
   rocshmem_wg_ctx_create(ctx_type, &ctx);
 
   // Calculate start index for each work group
-  size_t offset = size * (loop+skip) * wg_id;
-  source += offset;
-  dest += offset;
+  source += size * batch * wg_id;
+  dest += size * batch * wg_id;
+
+  int start_slot = (batch - (skip % batch)) % batch;
 
   for (int i = 0; i < loop + skip; i++) {
-    if (i == skip) {
-      // Ensures all RMA calls from the skip loops are completed
+    size_t offset = ((start_slot + i) % batch) * size;
+
+    // Quiet at batch boundaries to allow safe buffer reuse
+    if (offset == 0) {
       if (is_thread_zero_in_block()) {
         rocshmem_ctx_quiet(ctx);
       }
       __syncthreads();
-      start_time[wg_id] = wall_clock64();
+      if (i == skip) {
+        start_time[wg_id] = wall_clock64();
+      }
     }
 
     switch (type) {
       case WGGetTestType:
-        rocshmem_ctx_getmem_wg(ctx, dest, source, size, 1);
+        rocshmem_ctx_getmem_wg(ctx, dest + offset, source + offset, size, 1);
         break;
       case WGGetNBITestType:
-        rocshmem_ctx_getmem_nbi_wg(ctx, dest, source, size, 1);
+        rocshmem_ctx_getmem_nbi_wg(ctx, dest + offset, source + offset, size, 1);
         break;
       case WGPutTestType:
-        rocshmem_ctx_putmem_wg(ctx, dest, source, size, 1);
+        rocshmem_ctx_putmem_wg(ctx, dest + offset, source + offset, size, 1);
         break;
       case WGPutNBITestType:
-        rocshmem_ctx_putmem_nbi_wg(ctx, dest, source, size, 1);
+        rocshmem_ctx_putmem_nbi_wg(ctx, dest + offset, source + offset, size, 1);
         break;
       default:
         break;
     }
-    source += size;
-    dest += size;
   }
 
   __syncthreads();
@@ -91,7 +94,7 @@ __global__ void WorkGroupPrimitiveTest(int loop, int skip,
  *****************************************************************************/
 WorkGroupPrimitiveTester::WorkGroupPrimitiveTester(TesterArguments args)
     : Tester(args) {
-  size_t buff_size = max_msg_size * args.num_wgs * (args.loop + args.skip);
+  size_t buff_size = max_msg_size * batch_size * args.num_wgs;
   char *local = (char *) alloc_test_buffer(buff_size, args.local_buf_type);
   char *remote = (char *) alloc_test_buffer(buff_size);
 
@@ -137,7 +140,7 @@ WorkGroupPrimitiveTester::~WorkGroupPrimitiveTester() {
 }
 
 void WorkGroupPrimitiveTester::resetBuffers(size_t size) {
-  size_t buff_size = size * args.num_wgs;
+  size_t buff_size = size * batch_size * args.num_wgs;
   memset(dest, '1', buff_size);
 }
 
@@ -147,7 +150,8 @@ void WorkGroupPrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize,
 
   hipLaunchKernelGGL(WorkGroupPrimitiveTest, gridSize, blockSize, shared_bytes,
                      stream, loop, args.skip, start_time, end_time,
-                     source, dest, size, _type, _shmem_context);
+                     source, dest, size, _type, _shmem_context,
+                     batch_size);
 
   num_msgs = (loop + args.skip) * gridSize.x;
   num_timed_msgs = loop * gridSize.x;
@@ -159,21 +163,26 @@ void WorkGroupPrimitiveTester::verifyResults(size_t size) {
                      : 1;
 
   if (args.myid == check_id) {
-    size_t buff_size = size * args.num_wgs;
-    size_t verify_wg_size = std::min((size_t) 1024, buff_size);
-    size_t verify_num_wgs = buff_size / verify_wg_size;
+    size_t stride = size * batch_size;
+    size_t num_buffers = args.num_wgs;
+    size_t total = size * num_buffers;
+    size_t verify_wg_size = std::min((size_t) 1024, total);
+    size_t verify_num_wgs = (total + verify_wg_size - 1) / verify_wg_size;
 
     hipLaunchKernelGGL(verify_results_kernel_char, verify_num_wgs, verify_wg_size, 0, stream,
-                       source, dest, buff_size, verification_error);
+                       source, dest, size, stride, num_buffers, verification_error);
     CHECK_HIP(hipStreamSynchronize(stream));
 
     if (*verification_error) {
-      for (size_t i = 0; i < buff_size; i++) {
-        if (dest[i] != source[i]) {
-          std::cerr << "Data validation error at idx " << i << std::endl;
-          std::cerr << " Got " << dest[i] << ", Expected "
-                    << source[i] << std::endl;
-          exit(-1);
+      for (size_t b = 0; b < num_buffers; b++) {
+        for (size_t i = 0; i < size; i++) {
+          if (dest[b * stride + i] != source[b * stride + i]) {
+            std::cerr << "Data validation error at buffer " << b
+                      << " idx " << i << std::endl;
+            std::cerr << " Got " << dest[b * stride + i] << ", Expected "
+                      << source[b * stride + i] << std::endl;
+            exit(-1);
+          }
         }
       }
       *verification_error = false;

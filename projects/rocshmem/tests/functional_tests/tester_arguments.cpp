@@ -122,6 +122,9 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
     } else if (arg == "-nskip") {
       i++;
       skip = atoi(argv[i]);
+    } else if (arg == "-b" || arg == "-batch") {
+      i++;
+      batch = atoi(argv[i]);
     } else if (arg == "-noverif") {
       verif = false;
     } else if (arg == "-localbuftype") {
@@ -257,6 +260,7 @@ void TesterArguments::show_usage(std::string executable_name) {
   std::cout << "\t-nloop Set loop count\n";
   std::cout << "\t-nlarge Set loop_large count\n";
   std::cout << "\t-nskip Set skip/warmup count\n";
+  std::cout << "\t-b|-batch Set buffer rotation batch size (default: loop count)\n";
   std::cout << "\t-noverif disable buffer verification\n";
 }
 

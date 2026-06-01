@@ -35,7 +35,8 @@ __global__ void DefaultCTXPrimitiveTest(int loop, int skip,
                               long long int *start_time,
                               long long int *end_time, char *source,
                               char *dest, size_t size, TestType type,
-                              [[maybe_unused]] ShmemContextType ctx_type, int wf_size) {
+                              [[maybe_unused]] ShmemContextType ctx_type,
+                              int wf_size, int batch) {
   int wg_id = get_flat_grid_id();
   int t_id  = get_flat_block_id();
   int wf_id = t_id / wf_size;
@@ -52,45 +53,50 @@ __global__ void DefaultCTXPrimitiveTest(int loop, int skip,
   /**
    * Calculate start index for each thread within the grid
    */
-  size_t offset = size * get_flat_id();
-  source += offset;
-  dest += offset;
+  source += size * batch * get_flat_id();
+  dest += size * batch * get_flat_id();
+
+  int start_slot = (batch - (skip % batch)) % batch;
 
   for (int i = 0; i < loop + skip; i++) {
-    if (i == skip) {
+    size_t offset = ((start_slot + i) % batch) * size;
+
+    // Quiet at batch boundaries to allow safe buffer reuse
+    if (offset == 0) {
       __syncthreads();
-      // Ensures all RMA calls from the skip loops are completed
       if(is_thread_zero_in_block()) {
         rocshmem_quiet();
       }
       __syncthreads();
-      // Capture the start time of each wavefront to identify the earliest one
-      wf_start_time[wf_id] = wall_clock64();
+      if (i == skip) {
+        // Capture the start time of each wavefront to identify the earliest one
+        wf_start_time[wf_id] = wall_clock64();
+      }
     }
 
     switch (type) {
       case DefaultCTXGetTestType:
-        rocshmem_getmem(dest, source, size, 1);
+        rocshmem_getmem(dest + offset, source + offset, size, 1);
         break;
       case DefaultCTXGetNBITestType:
-        rocshmem_getmem_nbi(dest, source, size, 1);
+        rocshmem_getmem_nbi(dest + offset, source + offset, size, 1);
         break;
       case DefaultCTXPutTestType:
-        rocshmem_putmem(dest, source, size, 1);
+        rocshmem_putmem(dest + offset, source + offset, size, 1);
         break;
       case DefaultCTXPutNBITestType:
-        rocshmem_putmem_nbi(dest, source, size, 1);
+        rocshmem_putmem_nbi(dest + offset, source + offset, size, 1);
         break;
       case DefaultCTXPTestType:
         for (size_t s = 0; s < size; s++) {
-          char val = source[s];
-          rocshmem_char_p(&dest[s], val, 1);
+          char val = source[offset + s];
+          rocshmem_char_p(&dest[offset + s], val, 1);
         }
         break;
       case DefaultCTXGTestType:
         for (size_t s = 0; s < size; s++) {
-          char ret = rocshmem_char_g(&source[s], 1);
-          dest[s] = ret;
+          char ret = rocshmem_char_g(&source[offset + s], 1);
+          dest[offset + s] = ret;
         }
         break;
       default:
@@ -128,7 +134,7 @@ __global__ void DefaultCTXPrimitiveTest(int loop, int skip,
  *****************************************************************************/
 DefaultCTXPrimitiveTester::DefaultCTXPrimitiveTester(TesterArguments args)
  : Tester(args) {
-  size_t buff_size = max_msg_size * args.wg_size * args.num_wgs;
+  size_t buff_size = max_msg_size * batch_size * args.wg_size * args.num_wgs;
   char *local = (char *) alloc_test_buffer(buff_size, args.local_buf_type);
   char *remote = (char *) alloc_test_buffer(buff_size);
 
@@ -178,7 +184,7 @@ DefaultCTXPrimitiveTester::~DefaultCTXPrimitiveTester() {
 }
 
 void DefaultCTXPrimitiveTester::resetBuffers(size_t size) {
-  size_t buff_size = size * args.wg_size * args.num_wgs;
+  size_t buff_size = size * batch_size * args.wg_size * args.num_wgs;
   memset(dest, '1', buff_size);
 }
 
@@ -189,7 +195,7 @@ void DefaultCTXPrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize,
   hipLaunchKernelGGL(DefaultCTXPrimitiveTest, gridSize, blockSize,
                      shared_bytes, stream, loop, args.skip, start_time,
                      end_time, source, dest, size, _type, _shmem_context,
-                     wf_size);
+                     wf_size, batch_size);
 
   num_msgs = (loop + args.skip) * gridSize.x * blockSize.x;
   num_timed_msgs = loop * gridSize.x * blockSize.x;
@@ -203,13 +209,19 @@ void DefaultCTXPrimitiveTester::verifyResults(size_t size) {
           : 1;
 
   if (args.myid == check_id) {
-    size_t buff_size = size * args.wg_size * args.num_wgs;
-    for (size_t i = 0; i < buff_size; i++) {
-      if (dest[i] != source[i]) {
-        std::cerr << "Data validation error at idx " << i << std::endl;
-        std::cerr << " Got " << dest[i] << ", Expected "
-                  << source[i] << std::endl;
-        exit(-1);
+    size_t stride = size * batch_size;
+    size_t num_buffers = args.wg_size * args.num_wgs;
+    for (size_t b = 0; b < num_buffers; b++) {
+      char *s = source + b * stride;
+      char *d = dest + b * stride;
+      for (size_t i = 0; i < size; i++) {
+        if (d[i] != s[i]) {
+          std::cerr << "Data validation error at buffer " << b
+                    << " idx " << i << std::endl;
+          std::cerr << " Got " << d[i] << ", Expected "
+                    << s[i] << std::endl;
+          exit(-1);
+        }
       }
     }
   }

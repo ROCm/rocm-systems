@@ -105,6 +105,8 @@ Tester::Tester(TesterArguments args) : args(args) {
   CHECK_HIP(hipHostMalloc((void**)&verification_error, sizeof(bool)));
   *verification_error = false;
 
+  batch_size = (args.batch > 0) ? args.batch : args.loop;
+
   max_msg_size = args.max_msg_size;
   if (args.max_volume_size) {
     switch (_type) {

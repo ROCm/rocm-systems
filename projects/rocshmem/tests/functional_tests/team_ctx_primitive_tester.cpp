@@ -37,7 +37,7 @@ __global__ void TeamCtxPrimitiveTest(int loop, int skip, long long int *start_ti
                                      long long int *end_time, char *source,
                                      char *dest, size_t size, TestType type,
                                      ShmemContextType ctx_type, int wf_size,
-                                     rocshmem_team_t team) {
+                                     rocshmem_team_t team, int batch) {
   __shared__ rocshmem_ctx_t ctx;
   int wg_id = get_flat_grid_id();
   int t_id  = get_flat_block_id();
@@ -57,33 +57,39 @@ __global__ void TeamCtxPrimitiveTest(int loop, int skip, long long int *start_ti
   /**
    * Calculate start index for each thread within the grid
    */
-  size_t offset = size * get_flat_id();
-  source += offset;
-  dest += offset;
+  source += size * batch * get_flat_id();
+  dest += size * batch * get_flat_id();
+
+  int start_slot = (batch - (skip % batch)) % batch;
 
   for (int i = 0; i < loop + skip; i++) {
-    if (i == skip) {
+    size_t offset = ((start_slot + i) % batch) * size;
+
+    // Quiet at batch boundaries to allow safe buffer reuse
+    if (offset == 0) {
       __syncthreads();
-      // Ensures all RMA calls from the skip loops are completed
       if(is_thread_zero_in_block()) {
         rocshmem_ctx_quiet(ctx);
       }
       __syncthreads();
-      // Capture the start time of each wavefront to identify the earliest one
-      wf_start_time[wf_id] = wall_clock64();
+      if (i == skip) {
+        // Capture the start time of each wavefront to identify the earliest one
+        wf_start_time[wf_id] = wall_clock64();
+      }
     }
+
     switch (type) {
       case TeamCtxGetTestType:
-        rocshmem_ctx_getmem(ctx, dest, source, size, 1);
+        rocshmem_ctx_getmem(ctx, dest + offset, source + offset, size, 1);
         break;
       case TeamCtxGetNBITestType:
-        rocshmem_ctx_getmem_nbi(ctx, dest, source, size, 1);
+        rocshmem_ctx_getmem_nbi(ctx, dest + offset, source + offset, size, 1);
         break;
       case TeamCtxPutTestType:
-        rocshmem_ctx_putmem(ctx, dest, source, size, 1);
+        rocshmem_ctx_putmem(ctx, dest + offset, source + offset, size, 1);
         break;
       case TeamCtxPutNBITestType:
-        rocshmem_ctx_putmem_nbi(ctx, dest, source, size, 1);
+        rocshmem_ctx_putmem_nbi(ctx, dest + offset, source + offset, size, 1);
         break;
       default:
         break;
@@ -122,7 +128,7 @@ __global__ void TeamCtxPrimitiveTest(int loop, int skip, long long int *start_ti
  *****************************************************************************/
 TeamCtxPrimitiveTester::TeamCtxPrimitiveTester(TesterArguments args)
     : Tester(args) {
-  size_t buff_size = max_msg_size * args.wg_size * args.num_wgs;
+  size_t buff_size = max_msg_size * batch_size * args.wg_size * args.num_wgs;
   char *local = (char *) alloc_test_buffer(buff_size, args.local_buf_type);
   char *remote = (char *) alloc_test_buffer(buff_size);
 
@@ -169,7 +175,7 @@ TeamCtxPrimitiveTester::~TeamCtxPrimitiveTester() {
 }
 
 void TeamCtxPrimitiveTester::resetBuffers(size_t size) {
-  size_t buff_size = size * args.wg_size * args.num_wgs;
+  size_t buff_size = size * batch_size * args.wg_size * args.num_wgs;
   memset(dest, '1', buff_size);
 }
 
@@ -188,7 +194,7 @@ void TeamCtxPrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize,
   hipLaunchKernelGGL(TeamCtxPrimitiveTest, gridSize, blockSize, shared_bytes,
                      stream, loop, args.skip, start_time, end_time, source,
                      dest, size, _type, _shmem_context, wf_size,
-                     team_primitive_world_dup);
+                     team_primitive_world_dup, batch_size);
 
   num_msgs = (loop + args.skip) * gridSize.x * blockSize.x;
   num_timed_msgs = loop * gridSize.x * blockSize.x;
@@ -203,13 +209,19 @@ void TeamCtxPrimitiveTester::verifyResults(size_t size) {
       (_type == TeamCtxGetTestType || _type == TeamCtxGetNBITestType) ? 0 : 1;
 
   if (args.myid == check_id) {
-    size_t buff_size = size * args.wg_size * args.num_wgs;
-    for (uint64_t i = 0; i < buff_size; i++) {
-      if (dest[i] != source[i]) {
-        std::cerr << "Data validation error at idx " << i << std::endl;
-        std::cerr << " Got " << dest[i] << ", Expected "
-                  << source[i] << std::endl;
-        exit(-1);
+    size_t stride = size * batch_size;
+    size_t num_buffers = args.wg_size * args.num_wgs;
+    for (size_t b = 0; b < num_buffers; b++) {
+      char *s = source + b * stride;
+      char *d = dest + b * stride;
+      for (size_t i = 0; i < size; i++) {
+        if (d[i] != s[i]) {
+          std::cerr << "Data validation error at buffer " << b
+                    << " idx " << i << std::endl;
+          std::cerr << " Got " << d[i] << ", Expected "
+                    << s[i] << std::endl;
+          exit(-1);
+        }
       }
     }
   }

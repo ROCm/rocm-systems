@@ -201,6 +201,7 @@ class Tester {
   size_t num_msgs = 0;
   size_t num_timed_msgs = 0;
   int num_loops = 0;
+  int batch_size = 0;
   int size_factor = 1;
   int bw_factor = 1;
   int rtt_factor = 1;

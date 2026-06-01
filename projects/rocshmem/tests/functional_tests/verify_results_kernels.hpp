@@ -27,16 +27,22 @@
 
 namespace rocshmem {
 
-[[maybe_unused]] static __global__ void verify_results_kernel_char(char *source, char *dest, size_t buf_size,
+[[maybe_unused]] static __global__ void verify_results_kernel_char(char *source, char *dest,
+                                                  size_t size, size_t stride,
+                                                  size_t num_buffers,
                                                   bool *verification_error) {
 
   size_t idx = get_flat_id();
+  size_t total = size * num_buffers;
 
-  if (idx >= buf_size) {
+  if (idx >= total) {
     return;
   }
 
-  if (dest[idx] != source[idx]) {
+  size_t b = idx / size;
+  size_t i = idx % size;
+
+  if (dest[b * stride + i] != source[b * stride + i]) {
     *verification_error = true;
   }
 }
