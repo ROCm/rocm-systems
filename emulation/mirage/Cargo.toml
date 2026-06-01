@@ -12,6 +12,7 @@ mirage_core = { workspace = true }
 mirage_ctl = { workspace = true }
 mirage_host = { workspace = true }
 mirage_daemon = { workspace = true }
+mirage_rocjitsu = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
 tokio = { workspace = true }
@@ -28,7 +29,6 @@ futures-util = "0.3"
 tokio = { workspace = true }
 tungstenite = "0.24"
 libc = { workspace = true }
-mirage_rocjitsu = { path = "rocjitsu" }
 
 [workspace]
 members = ["core", "ctl", "daemon", "dashboard", "host", "rocjitsu"]
@@ -55,3 +55,4 @@ mirage_core = { path = "core" }
 mirage_ctl = { path = "ctl" }
 mirage_host = { path = "host" }
 mirage_daemon = { path = "daemon" }
+mirage_rocjitsu = { path = "rocjitsu" }

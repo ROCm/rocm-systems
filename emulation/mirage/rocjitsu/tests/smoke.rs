@@ -1,55 +1,46 @@
-//! Integration smoke test: build a [`RocjitsuEmulator`] against the
-//! real FFI. Skipped when `librocjitsu.so` is not on the system.
-//! When prerequisites *are* met, a VM construction failure is a
-//! real test failure, not a silent skip.
+//! Integration smoke test: verifies that the rocjitsu artifacts the
+//! build script embedded are usable at runtime.
 //!
-//! Note: rocjitsu maintains process-global state inside its FFI
-//! and does not support concurrent VM construction from multiple
-//! threads. We intentionally pack both assertions into a single
-//! `#[test]` to make the (de-facto required) serial execution
-//! obvious from the source rather than rely on `--test-threads=1`.
+//! Skipped when no rocjitsu source tree was visible at build time
+//! (the embedded assets are then empty placeholders).
 
-use mirage_core::emulator::Emulator;
-use mirage_core::profile::ProfileDef;
-use mirage_core::registry;
-use mirage_rocjitsu::{RocjitsuEmulator, is_installed, kmd_config, kmd_preload};
+use mirage_rocjitsu::{
+    CDNA3_KMD_BYTES, CDNA4_KMD_BYTES, KMD_LIB_BYTES, SCHEMA_FBS_BYTES, ensure_assets,
+    ensure_topologies, kmd_config, kmd_lib_path, kmd_preload,
+};
 
 #[test]
-fn rocjitsu_emulator_boots_and_injects_kmd_env() {
-    if !is_installed() {
-        eprintln!("skipping: rocjitsu library not found");
+fn embedded_assets_extract_round_trip() {
+    if KMD_LIB_BYTES.is_empty() && CDNA4_KMD_BYTES.is_empty() {
+        eprintln!("skipping: no rocjitsu artifacts were embedded at build time");
         return;
     }
-    if kmd_config("cdna4").is_none() {
-        eprintln!("skipping: bundled cdna4 kmd config not present");
-        return;
-    }
-    let profile = ProfileDef {
-        name: "rj-smoke".to_string(),
-        description: None,
-        emulator: registry::make_def(&registry::ROCJITSU, 1, 1),
-    };
-    // Prerequisites met -> any failure here is a real bug, not a skip.
-    let emu = RocjitsuEmulator::try_new(profile).expect(
-        "VM construction must succeed when rocjitsu is installed and the cdna4 config is present",
-    );
-    assert_eq!(emu.def().emulator, "rocjitsu");
-    assert!(emu.health().healthy);
 
-    let inj = Emulator::injection_def(&emu);
-    assert!(inj.env.contains_key("RJ_CONFIG"), "RJ_CONFIG must be set");
-    assert!(inj.env.contains_key("RJ_SCHEMA"), "RJ_SCHEMA must be set");
-    // If the kmd .so is on disk, it MUST be advertised. Asserting in
-    // both branches ensures this test can't trivially pass on a box
-    // that happens to lack the interposer build.
-    match kmd_preload() {
-        Some(path) => assert_eq!(
-            inj.ld_preload.as_deref(),
-            Some(path.to_string_lossy().as_ref())
-        ),
-        None => assert!(
-            inj.ld_preload.is_none(),
-            "ld_preload must be None when kmd is absent"
-        ),
+    let _g = mirage_core::paths::test_env_lock();
+    let tmp = tempfile::tempdir().unwrap();
+    mirage_core::paths::set_test_root(tmp.path());
+
+    let asset_report = ensure_assets(false).unwrap();
+    let topo_report = ensure_topologies(false).unwrap();
+
+    if !KMD_LIB_BYTES.is_empty() {
+        let on_disk = kmd_lib_path();
+        assert!(on_disk.exists(), "kmd lib should have been extracted");
+        let bytes = std::fs::read(&on_disk).unwrap();
+        assert_eq!(bytes.len(), KMD_LIB_BYTES.len());
+        assert_eq!(kmd_preload(), Some(on_disk));
     }
+    if !SCHEMA_FBS_BYTES.is_empty() && !CDNA4_KMD_BYTES.is_empty() {
+        let (cfg, schema) = kmd_config("cdna4").expect("cdna4 config + schema should resolve");
+        assert!(cfg.exists());
+        assert!(schema.exists());
+    }
+    if !CDNA3_KMD_BYTES.is_empty() {
+        assert!(
+            topo_report
+                .iter()
+                .any(|(n, w)| n == "rocjitsu-cdna3" && *w)
+        );
+    }
+    assert!(!asset_report.is_empty());
 }

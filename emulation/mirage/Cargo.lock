@@ -1088,6 +1088,7 @@ dependencies = [
  "futures",
  "libc",
  "mirage_core",
+ "mirage_rocjitsu",
  "nix",
  "serde",
  "serde_json",
@@ -1152,6 +1153,7 @@ dependencies = [
  "mirage_core",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "tracing",
 ]

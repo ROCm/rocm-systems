@@ -314,6 +314,12 @@ pub async fn dispatch<C: MirageCtl + 'static>(
     if let Err(e) = mirage_core::topology::store::ensure_builtins(false) {
         tracing::warn!("failed to preload builtin topologies: {e:#}");
     }
+    if let Err(e) = mirage_rocjitsu::ensure_topologies(false) {
+        tracing::warn!("failed to preload rocjitsu topologies: {e:#}");
+    }
+    if let Err(e) = mirage_rocjitsu::ensure_assets(false) {
+        tracing::warn!("failed to extract rocjitsu assets: {e:#}");
+    }
     let ctl = Arc::new(ctl);
     match cmd {
         CtlCmd::Profile(c) => profile_cmd(&*ctl, c, json),
@@ -978,6 +984,14 @@ async fn session_wizard<C: MirageCtl>(ctl: &C, json: bool) -> anyhow::Result<Exi
 
 // ----- state dispatch --------------------------------------------------------
 
+fn rocjitsu_asset_path(name: &str) -> std::path::PathBuf {
+    match name {
+        n if n == mirage_rocjitsu::KMD_LIB_NAME => mirage_rocjitsu::kmd_lib_path(),
+        n if n == mirage_rocjitsu::LIB_NAME => mirage_rocjitsu::lib_path(),
+        _ => mirage_rocjitsu::schema_fbs_path(),
+    }
+}
+
 async fn state_cmd<C: MirageCtl + 'static>(
     ctl: Arc<C>,
     cmd: StateCmd,
@@ -985,7 +999,9 @@ async fn state_cmd<C: MirageCtl + 'static>(
 ) -> anyhow::Result<ExitCode> {
     match cmd {
         StateCmd::Builtins => {
-            let written = mirage_core::topology::store::ensure_builtins(true)?;
+            let mut written = mirage_core::topology::store::ensure_builtins(true)?;
+            written.extend(mirage_rocjitsu::ensure_topologies(true)?);
+            let assets = mirage_rocjitsu::ensure_assets(true)?;
             if json {
                 let entries: Vec<_> = written
                     .iter()
@@ -996,11 +1012,24 @@ async fn state_cmd<C: MirageCtl + 'static>(
                             "written": w,
                         })
                     })
+                    .chain(assets.iter().map(|(n, w)| {
+                        let p = rocjitsu_asset_path(n);
+                        serde_json::json!({
+                            "name": n,
+                            "path": p,
+                            "written": w,
+                        })
+                    }))
                     .collect();
                 println!("{}", serde_json::to_string_pretty(&entries)?);
             } else {
                 for (name, w) in &written {
                     let p = mirage_core::paths::topology_path(name);
+                    let tag = if *w { "wrote" } else { "kept" };
+                    println!("{tag} {} -> {}", name, p.display());
+                }
+                for (name, w) in &assets {
+                    let p = rocjitsu_asset_path(name);
                     let tag = if *w { "wrote" } else { "kept" };
                     println!("{tag} {} -> {}", name, p.display());
                 }
