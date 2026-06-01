@@ -21,6 +21,7 @@ NCCL_PARAM(NvtxDisable, "NVTX_DISABLE", 0);
 
 // Must be called before the first call to any reduction operation.
 void initNvtxRegisteredEnums() {
+#ifndef NVTX_NO_IMPL
   // Register schemas and strings
   if (ncclParamNvtxDisable()) {
     return;
@@ -38,4 +39,5 @@ void initNvtxRegisteredEnums() {
   };
 
   nvtxPayloadEnumRegister(nvtx3::domain::get<nccl_domain>(), &eAttr);
+#endif
 }

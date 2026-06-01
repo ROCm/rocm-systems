@@ -20,6 +20,10 @@
 
 typedef ncclNet_t* getNcclNet_t(void* netPluginLib);
 typedef ncclCollNet_t* getNcclCollNet_t(void* netPluginLib);
+// [RCCL] Local typedef so the v11 GIN getter can still be wired up here. The
+// upstream NCCL 2.29.7 patch moved this whole table into plugin/gin.cc, but
+// AMD still constructs the GIN/RMA fields of netPluginLib_t inline below.
+typedef ncclGin_t* getNcclGin_t(void* ginPluginLib);
 
 extern getNcclNet_t getNcclNet_v6;
 extern getNcclNet_t getNcclNet_v7;
@@ -33,6 +37,11 @@ extern getNcclCollNet_t getNcclCollNet_v8;
 extern getNcclCollNet_t getNcclCollNet_v9;
 extern getNcclCollNet_t getNcclCollNet_v10;
 extern getNcclCollNet_t getNcclCollNet_v11;
+extern int64_t rcclParamAinicRoce();
+// [RCCL] NCCL 2.29.7 moved getNcclGin[] / getNcclGin_v* externs into
+// plugin/gin.cc -- declare it here as extern so this TU can still reference
+// getNcclGin[i] from setupPlugin() without redefining the array.
+extern getNcclGin_t* getNcclGin[];
 NCCL_PARAM(NetPluginRefCount, "NET_PLUGIN_REF_COUNT", 0);
 #define NCCL_NET_VERSION_COUNT 6
 int ncclNetVersion[NCCL_NET_VERSION_COUNT] = {11, 10, 9, 8, 7, 6};
@@ -63,10 +72,18 @@ typedef struct netPluginLib {
   int netVirtDevs;                              // ncclNet - number of virtual devices
   int collNetPhysDevs;                          // ncclCollNet -  number of physical devices
   int collNetVirtDevs;                          // ncclCollNet -  number of virtual devices
+  // [RCCL] AMD wires GIN/RMA into the same plugin lib record so the IB
+  // plugin can advertise both transports. Upstream NCCL 2.29.7 split this
+  // out into plugin/gin.cc; AMD has not yet adopted that split.
+  ncclGin_t* ncclGin;
+  ncclGin_t* ncclRma;
+  ncclNetPluginState_t ncclGinPluginState;
+  ncclNetPluginState_t ncclRmaPluginState;
 } netPluginLib_t;
 
-static int pluginCount = 0;
-static netPluginLib_t netPluginLibs[NCCL_NET_MAX_PLUGINS] = { 0 };
+int pluginCount = 0;
+bool netPluginLibsInitialized = false;
+netPluginLib_t netPluginLibs[NCCL_NET_MAX_PLUGINS] = {};
 static std::mutex netPluginMutex;
 static std::once_flag initPluginLibsOnceFlag;
 
@@ -185,6 +202,42 @@ static ncclResult_t ncclNetPluginInit(struct ncclComm* comm, netPluginLib_t* plu
     }
   }
 
+  if (pluginLib->ncclGinPluginState == ncclNetPluginStateInitReady && pluginLib->ncclGin) {
+    if ((ncclParamGinType() == -1) && (pluginLib->ncclGin == (ncclGin_t *)-1)) {
+#if !defined(__HIP_PLATFORM_AMD__)
+      void* throwAwayContext = nullptr;
+      if (ncclGinIbGdaki.init(&throwAwayContext, comm->commHash, ncclDebugLog) == ncclSuccess) {
+        if (ncclGinIbGdaki.devices(&ndev) == ncclSuccess && ndev > 0) {
+          pluginLib->ncclGin = &ncclGinIbGdaki;
+        } else {
+          pluginLib->ncclGin = &ncclGinIbProxy;
+        }
+        ncclGinIbGdaki.finalize(throwAwayContext);
+      }
+      else {
+        pluginLib->ncclGin = &ncclGinIbProxy;
+      }
+#else
+      pluginLib->ncclGin = &ncclGinIbProxy;
+#endif
+    }
+    if (pluginLib->ncclGin->init(&comm->ginContext, comm->commHash, ncclDebugLog) != ncclSuccess) pluginLib->ncclGinPluginState = ncclNetPluginStateDisabled;
+    else if (pluginLib->ncclGin->devices(&ndev) != ncclSuccess || ndev <= 0) pluginLib->ncclGinPluginState = ncclNetPluginStateDisabled;
+    else {
+      pluginLib->ncclGinPluginState = ncclNetPluginStateEnabled;
+    }
+  }
+
+  // Initialize RMA plugin
+  if (pluginLib->ncclRmaPluginState == ncclNetPluginStateInitReady && pluginLib->ncclRma) {
+    if (pluginLib->ncclRma->init(&comm->netContext, comm->commHash, ncclDebugLog) != ncclSuccess)
+      pluginLib->ncclRmaPluginState = ncclNetPluginStateDisabled;
+    else if (pluginLib->ncclRma->devices(&ndev) != ncclSuccess || ndev <= 0)
+      pluginLib->ncclRmaPluginState = ncclNetPluginStateDisabled;
+    else {
+      pluginLib->ncclRmaPluginState = ncclNetPluginStateEnabled;
+    }
+  }
 exit:
   return ncclSuccess;
 fail:
@@ -235,7 +288,7 @@ static ncclResult_t ncclNetPluginDisableOtherExternal(int pluginIndex) {
 
 static void initPluginLibsOnceFunc() {
   char* netPluginName = nullptr;
-  const char* defaultNetPlugin = "libnccl-net.so";
+  const char* defaultNetPlugin = "librccl-net.so";
   const char* envNetPlugin = nullptr;
   char* envNetPluginList = nullptr;
   char* savePtr = nullptr;
@@ -277,9 +330,33 @@ static void initPluginLibsOnceFunc() {
   }
 
   // Add 2 internal ib and socket plugins
-  netPluginLibs[pluginCounter].ncclNet = &ncclNetIb;
-  netPluginLibs[pluginCounter].ncclNetPluginState = ncclNetPluginStateInitReady;
-  ++pluginCounter;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  {
+    const char* envNet = ncclGetEnv("NCCL_NET");
+    if (envNet && strcasecmp(envNet, "IB-CAST") == 0 && !(envNetPlugin)) {
+      netPluginLibs[pluginCounter].ncclNet = &netIbCast;
+      netPluginLibs[pluginCounter++].ncclNetPluginState = ncclNetPluginStateInitReady;
+    } else if ((rcclUseAinic() == 1) && !(envNetPlugin)) {
+      netPluginLibs[pluginCounter].ncclNet = &rocmNetIb;
+      netPluginLibs[pluginCounter++].ncclNetPluginState = ncclNetPluginStateInitReady;
+    } else {
+#endif
+      netPluginLibs[pluginCounter].ncclNet = &ncclNetIb;
+      netPluginLibs[pluginCounter].ncclGin = NULL;
+      if (ncclParamGinType() == -1)
+        netPluginLibs[pluginCounter].ncclGin = (ncclGin_t *)-1;
+      else if (ncclParamGinType() == NCCL_GIN_TYPE_PROXY)
+        netPluginLibs[pluginCounter].ncclGin = &ncclGinIbProxy;
+#if !defined(__HIP_PLATFORM_AMD__)
+      else if (ncclParamGinType() == NCCL_GIN_TYPE_GDAKI)
+        netPluginLibs[pluginCounter].ncclGin = &ncclGinIbGdaki;
+#endif
+      netPluginLibs[pluginCounter].ncclNetPluginState = ncclNetPluginStateInitReady;
+      ++pluginCounter;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+    }
+  }
+#endif
   netPluginLibs[pluginCounter].ncclNet = &ncclNetSocket;
   netPluginLibs[pluginCounter++].ncclNetPluginState = ncclNetPluginStateInitReady;
   pluginCount = pluginCounter;
@@ -421,6 +498,10 @@ ncclResult_t ncclGpuGdrSupport(struct ncclComm* comm, int* gdrSupport) {
       ncclNetProperties_t props;
       NCCLCHECK(comm->ncclNet->getProperties(dev, &props));
       if ((props.ptrSupport & NCCL_PTR_CUDA) == 0) continue;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+      gdrSupportMatrix[comm->cudaDev] = 1;
+      break;
+#endif
 
     // Allocate memory on the GPU and try to register it on the NIC.
     void *lComm = NULL, *sComm = NULL, *rComm = NULL;

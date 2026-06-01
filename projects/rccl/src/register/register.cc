@@ -12,8 +12,15 @@
 #include "register.h"
 #include "transport.h"
 #include "group.h"
+#include "api_trace.h"
 
+using namespace rccl;
+
+#if HIP_VERSION >= 71260540
 NCCL_PARAM(LocalRegister, "LOCAL_REGISTER", 1);
+#else
+NCCL_PARAM(LocalRegister, "LOCAL_REGISTER", 0);
+#endif
 
 ncclResult_t ncclRegLocalIsValid(struct ncclReg *reg, bool *isValid) {
   if (reg && isValid) {
@@ -115,15 +122,20 @@ ncclResult_t ncclRegCleanup(struct ncclComm* comm) {
 }
 
 NCCL_API(ncclResult_t, ncclCommRegister, const ncclComm_t comm, void* buff, size_t size, void** handle);
-ncclResult_t ncclCommRegister(const ncclComm_t comm, void* buff, size_t size, void** handle) {
-  if (!ncclParamLocalRegister() || ncclP2pUsesMemcpy()) {
+
+ncclResult_t ncclCommRegister_impl(const ncclComm_t comm, void* buff, size_t size, void** handle) {
+  ncclResult_t ret = ncclSuccess;
+
+  if (!ncclParamLocalRegister())
     *handle = NULL;
-    INFO(NCCL_REG, "Skipping registration for buffer %p size %zi (LocalRegister=%ld, P2pUsesMemcpy=%d)",
-         buff, size, ncclParamLocalRegister(), ncclP2pUsesMemcpy());
-  } else {
-    NCCLCHECK(ncclRegister(comm, buff, size, false, handle));
+  else {
+    INFO(NCCL_INIT, "RCCL: ncclCommRegister");
+    NCCLCHECKGOTO(ncclRegister(comm, buff, size, false, handle), ret, end);
   }
-  return ncclSuccess;
+end:
+  // !recording at sink
+  NCCLCHECK(Recorder::instance().record(rrCommRegister, comm, *handle, buff, size));
+  return ret;
 }
 
 ncclResult_t ncclCommGraphRegister(const ncclComm_t comm, void* buff, size_t size, void** handle) {
@@ -163,7 +175,9 @@ exit:
 }
 
 NCCL_API(ncclResult_t, ncclCommDeregister, const ncclComm_t comm, void* handle);
-ncclResult_t ncclCommDeregister(const ncclComm_t comm, void *handle) {
+ncclResult_t ncclCommDeregister_impl(const ncclComm_t comm, void *handle) {
+  NCCLCHECK(Recorder::instance().record(rrCommDeregister, comm, handle));
+
   NCCLCHECK(commDeregister(comm, false, (struct ncclReg*)handle));
   return ncclSuccess;
 }

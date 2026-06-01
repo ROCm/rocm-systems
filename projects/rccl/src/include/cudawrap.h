@@ -143,6 +143,10 @@ inline ncclResult_t ncclCudaStreamIsLegacyNull(cudaStream_t stream, bool* isLega
   return ncclSuccess;
 }
 
+// [RCCL] Guard against redefinition when both cudawrap.h and rocmwrap.h are
+// pulled into the same translation unit (e.g. via alloc.h on HIP builds).
+#ifndef NCCL_CUDA_DRIVER_VERSION_DEFINED
+#define NCCL_CUDA_DRIVER_VERSION_DEFINED
 inline ncclResult_t ncclCudaDriverVersion(int* driver) {
   int version = COMPILER_ATOMIC_LOAD(&ncclCudaDriverVersionCache, std::memory_order_relaxed);
   if (version == -1) {
@@ -152,6 +156,7 @@ inline ncclResult_t ncclCudaDriverVersion(int* driver) {
   *driver = version;
   return ncclSuccess;
 }
+#endif
 
 ncclResult_t ncclCuStreamBatchMemOp(cudaStream_t stream, unsigned int numOps, CUstreamBatchMemOpParams* batchParams);
 

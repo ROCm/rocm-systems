@@ -21,7 +21,9 @@
 #endif
 
 #ifndef NCCL_GIN_GDAKI_ENABLE
-#if CUDA_VERSION >= 12020 && __CUDA_ARCH__ >= 700
+#if defined(__HIP_PLATFORM_AMD__)
+#define NCCL_GIN_GDAKI_ENABLE 0
+#elif CUDA_VERSION >= 12020 && __CUDA_ARCH__ >= 700
 #define NCCL_GIN_GDAKI_ENABLE 1
 #else
 #define NCCL_GIN_GDAKI_ENABLE 0

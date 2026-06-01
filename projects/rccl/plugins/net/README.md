@@ -53,7 +53,7 @@ ease the implementation.
 ## Headers management
 
 To help users build plugins effortlessly, plugins should copy the `ncclNet_vX` definitions
-they support to their internal includes. An example is shown in `plugins/net/example/` where we keep
+they support to their internal includes. An example is shown in `ext-net/example/` where we keep
 all headers in the `nccl/` directory and provide thin layers to implement old versions on top
 of newer ones.
 

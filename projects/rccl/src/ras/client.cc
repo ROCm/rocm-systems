@@ -107,7 +107,7 @@ static void parseArgs(int argc, char** argv) {
         printUsage(argv[0]);
         exit(0);
       case 'r':
-        fprintf(stderr, "NCCL RAS client version " STR(NCCL_MAJOR) "." STR(NCCL_MINOR) "."
+        fprintf(stderr, "RCCL RAS client version " STR(NCCL_MAJOR) "." STR(NCCL_MINOR) "."
                 STR(NCCL_PATCH) NCCL_SUFFIX "\n");
         exit(0);
       default:

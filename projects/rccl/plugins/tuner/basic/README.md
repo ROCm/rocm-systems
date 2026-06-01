@@ -36,7 +36,7 @@ ncclResult_t pluginGetCollInfo(void* context, ncclFunc_t collType, size_t nBytes
 - **Purpose**: Modify cost tables for collective operations
 - **Current Implementation**:
   - Sets RING+SIMPLE algorithm to cost 0.0 (highest preference)
-  - Sets channel count to 1
+  - Sets channel count to 0
 - **Parameters**:
   - `context`: Plugin context from init
   - `collType`: Type of collective operation

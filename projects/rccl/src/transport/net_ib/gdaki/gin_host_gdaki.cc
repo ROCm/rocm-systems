@@ -346,6 +346,44 @@ static inline T gdaki_round_up(T x, T y) {
   return ((x + y - 1) / y) * y;
 }
 
+static ncclResult_t gdakiFindDevice(char *ibDevName, struct ibv_device **outIbDev) {
+  ncclResult_t status = ncclSuccess;
+  int numOfDevice;
+  struct ibv_device **devList = nullptr;
+  struct ibv_device *ibDev = nullptr;
+
+  assert(ibDevName != nullptr);
+
+  NCCLCHECK(wrap_ibv_get_device_list(&devList, &numOfDevice));
+
+  if (numOfDevice <= 0) {
+    WARN("No network devices that support GDAKI found");
+    status = ncclSystemError;
+    goto fail;
+  }
+
+  for (int i = 0; i < numOfDevice; ++i) {
+    struct ibv_device *ibDev_ = devList[i];
+    if (!strcmp(wrap_ibv_get_device_name(ibDev_), ibDevName)) {
+      ibDev = ibDev_;
+      break;
+    }
+  }
+  if (!ibDev) {
+    WARN("IB device %s not found", ibDevName);
+    status = ncclInvalidArgument;
+    goto fail;
+  }
+
+  *outIbDev = ibDev;
+
+exit:
+  return status;
+fail:
+  NCCLCHECK(wrap_ibv_free_device_list(devList));
+  goto exit;
+}
+
 static void gdakiFillExchInfo(struct gdaki_exch_info *exch_info, struct gdaki_context *gdaki_ctx,
                               struct doca_gpu_verbs_qp_hl *gqp) {
   exch_info->lid = gdaki_ctx->port_attr.lid;
@@ -551,7 +589,11 @@ ncclResult_t ncclGinGdakiCreateContext(void *collComm, int nSignals, int nCounte
 
   DOCACHECKGOTO(doca_gpu_create(pciBusId, &gdaki_ctx->gdev), docaStatus, status, out);
 
-  gdaki_ctx->ib_ctx = (struct ibv_context *)cComm->ibvCtx;
+  // Find the IB/RoCE device by name
+  NCCLCHECKGOTO(gdakiFindDevice(props.name, &gdaki_ctx->ib_dev), status, out);
+
+  // Open the IB context
+  NCCLCHECKGOTO(wrap_ibv_open_device(&gdaki_ctx->ib_ctx, gdaki_ctx->ib_dev), status, out);
 
   // Allocate the protection domain
   NCCLCHECKGOTO(wrap_ibv_alloc_pd(&gdaki_ctx->ib_pd, gdaki_ctx->ib_ctx), status, out);
@@ -563,7 +605,7 @@ ncclResult_t ncclGinGdakiCreateContext(void *collComm, int nSignals, int nCounte
   NCCLCHECKGOTO(counters_table->exchange_info(cComm), status, out);
   NCCLCHECKGOTO(signals_table->exchange_info(cComm), status, out);
 
-  gdaki_ctx->port_num = 1; // assume 1 for mlx5 devices
+  gdaki_ctx->port_num = props.port;
   NCCLCHECKGOTO(wrap_ibv_query_port(gdaki_ctx->ib_ctx, gdaki_ctx->port_num, &gdaki_ctx->port_attr),
                 status, out);
 
@@ -830,6 +872,7 @@ out:
 
     if (gdaki_ctx) {
       if (gdaki_ctx->ib_pd) NCCLCHECK(wrap_ibv_dealloc_pd(gdaki_ctx->ib_pd));
+      if (gdaki_ctx->ib_ctx) NCCLCHECK(wrap_ibv_close_device(gdaki_ctx->ib_ctx));
 
       memset(gdaki_ctx, 0, sizeof(*gdaki_ctx));
       free(gdaki_ctx);
@@ -921,6 +964,7 @@ ncclResult_t ncclGinGdakiDestroyContext(void *ginCtx) {
     DOCACHECK(doca_gpu_destroy(gdaki_ctx->gdev));
   }
   if (gdaki_ctx->ib_pd) NCCLCHECK(wrap_ibv_dealloc_pd(gdaki_ctx->ib_pd));
+  if (gdaki_ctx->ib_ctx) NCCLCHECK(wrap_ibv_close_device(gdaki_ctx->ib_ctx));
 
   if (gdaki_ctx->devHandle) free(gdaki_ctx->devHandle);
 

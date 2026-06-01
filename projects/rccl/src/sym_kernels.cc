@@ -1,14 +1,14 @@
 /*************************************************************************
- * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: Apache-2.0
+ * Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+ * Modification Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  *
- * See LICENSE.txt for more license information
- *************************************************************************/
+ * See LICENSE.txt for license information
+ ************************************************************************/
 
 #include "sym_kernels.h"
 #include "comm.h"
 #include "device.h"
-#include "nccl_device/core.h"
+#include "nccl_device/core_tmp.h"
 #include "transport.h"
 #include <cmath>
 #include <cfloat>
@@ -126,6 +126,7 @@ static uint32_t kernelMask_user() {
 
 NCCL_PARAM(SymCTAs, "SYM_CTAS", 0)
 NCCL_PARAM(SymGinKernelsEnable, "SYM_GIN_KERNELS_ENABLE", 1)
+NCCL_PARAM(SymLL, "SYM_LL", 1)
 
 static double softmin(double x, double ceiling, double softness) {
   // looks like a smooth version of: min(x, ceiling)
@@ -167,6 +168,11 @@ static const float nvlinkBws[NCCL_NVLINK_BW_IDX_NUM] = {
   720.0f, // Blackwell
 };
 
+// [RCCL] NCCL 2.29.7 rewrote queryModel_gin from scratch. The new version
+// removes ncclSymkKernelId_AllGather_GinHier_MCRing (replaced by RailRing+
+// LsaSTMC and RailA2A_Lsa{LD,LDMC} variants) and introduces a small helper
+// surface area: getLsaBw / getGinLat / getGinBw / busmul / smbw / smlat
+// helpers, plus calcSatBlocks/getRequirements_gin used by the scheduler.
 static double getLsaBw(struct ncclComm* comm) {
   int compCapIndex = comm->minCompCap >= 100 ? NCCL_NVLINK_BW_IDX_BLACKWELL : NCCL_NVLINK_BW_IDX_HOPPER;
   return (/*byte/sec*/1.e9)*nvlinkBws[compCapIndex];
@@ -180,31 +186,23 @@ static double getGinBw(struct ncclComm* comm) {
   return (/*byte/sec*/1.e9)*comm->minNetBw;
 }
 
-// Bus multipliers count number of times data is sent through that widget.
 static void getBusMul_ReduceScatter_RailA2A(
     struct ncclComm* comm, bool ldmc,
-    // Bus multipliers per bottleneck
     double* out_smMul, double* out_lsaMul, double* out_ginMul
   ) {
   int lsaRanks = ncclTeamLsa(comm).nRanks;
   int railRanks = ncclTeamRail(comm).nRanks;
-  // LSA
   *out_lsaMul = std::max(
     /*inbound*/(ldmc ? lsaRanks : lsaRanks-1)*railRanks,
     /*outbound*/(lsaRanks-1)*railRanks
   );
-  // GIN
-  *out_ginMul = railRanks-1; // inbound == outbound
-  // SM. Inbound (reads) only because it dominates outbound (writes).
+  *out_ginMul = railRanks-1;
   *out_smMul =
     /*stage 0*/(lsaRanks == 1 ? 0 : (ldmc ? 1 : lsaRanks)*(railRanks-1)) +
     /*stage 1*/(ldmc ? 1 : lsaRanks) + (railRanks-1);
 }
 
 static double getSmBw_ReduceScatter_RailA2A(struct ncclComm* comm, bool ldmc) {
-  // Empirically calculated as effbw/nctas where effbw is reported by TUNING
-  // debug logging (from getRequirements_gin()) and nctas is the number of ctas
-  // that appear to saturate bandwidth.
   if (100 <= comm->minCompCap) {
     return ldmc ? 2.25e9 : 5.0e9;
   } else {
@@ -213,21 +211,15 @@ static double getSmBw_ReduceScatter_RailA2A(struct ncclComm* comm, bool ldmc) {
 }
 
 static double getSmLat_ReduceScatter_RailA2A(struct ncclComm* comm, bool ldmc) {
-  // Processing delay. Larger value means bigger network buffers.
   return 10.e-6;
 }
 
-// Calculate saturation block count:
 static int calcSatBlocks_ReduceScatter_RailA2A(struct ncclComm* comm, bool ldmc) {
   double lsaBw = getLsaBw(comm);
   double ginBw = getGinBw(comm);
   double smBw = getSmBw_ReduceScatter_RailA2A(comm, ldmc);
   double smMul, lsaMul, ginMul;
   getBusMul_ReduceScatter_RailA2A(comm, ldmc, &smMul, &lsaMul, &ginMul);
-  // Effective Bandwidth: EffBw = Bw/Mul
-  // Let smsEffBw = smEffBw*nBlocks
-  // Set smsEffBw = min(lsaEffBw, ginEffBw)
-  // Solve for nBlocks:
   double minLsaGinEffBw = std::min(lsaBw/lsaMul, ginBw/ginMul);
   return std::ceil(std::min(double(1<<30), minLsaGinEffBw/(smBw/smMul)));
 }
@@ -242,7 +234,6 @@ static void getRequirements_gin(struct ncclComm* comm, int* out_nBlocks, size_t*
     double smLat = getSmLat_ReduceScatter_RailA2A(comm, ldmc);
     double smMul, lsaMul, ginMul;
     getBusMul_ReduceScatter_RailA2A(comm, ldmc, &smMul, &lsaMul, &ginMul);
-    // GIN could be throttled by LSA work
     double ginBwRenorm = std::min(lsaBw/lsaMul, ginBw/ginMul)*ginMul;
     size_t bufSize = ginBwRenorm*(ginLat + smLat);
     int nBlocks = calcSatBlocks_ReduceScatter_RailA2A(comm, ldmc);
@@ -257,15 +248,18 @@ static void getRequirements_gin(struct ncclComm* comm, int* out_nBlocks, size_t*
 
 static void queryModel_gin(struct ncclComm* comm, ncclSymkKernelId k, size_t nBytes, float* timeUs, int* nBlocks) {
   struct ncclSymkState* symk = &comm->symkState;
-  //ncclTeam world = ncclTeamWorld(comm);
-  //ncclTeam lsa = ncclTeamLsa(comm);
   ncclTeam rail = ncclTeamRail(comm);
   double lsaBw = getLsaBw(comm);
   double ginLat = getGinLat(comm);
   double ginBw = getGinBw(comm);
   int nMaxBlocks = std::min<int>(comm->config.maxCTAs, ncclSymkMaxBlocks);
   if (k == ncclSymkKernelId_AllGather_RailRing_LsaSTMC) {
+#if CUDART_VERSION >= 12010
     nMaxBlocks = std::min<int>(nMaxBlocks, divUp((comm->cudaArch < 1000 ? 16 : 32), comm->nvlsResources->nHeads));
+#else
+    // [RCCL] NVLS multicast unavailable on ROCm; fall back to a fixed cap.
+    nMaxBlocks = std::min<int>(nMaxBlocks, comm->cudaArch < 1000 ? 16 : 32);
+#endif
   }
   int nMinBlocks = comm->config.minCTAs;
   int nUserCTAs = std::min<int>(ncclSymkMaxBlocks, ncclParamSymCTAs());
@@ -295,15 +289,12 @@ static void queryModel_gin(struct ncclComm* comm, ncclSymkKernelId k, size_t nBy
       double smMul, lsaMul, ginMul;
       getBusMul_ReduceScatter_RailA2A(comm, ldmc, &smMul, &lsaMul, &ginMul);
       *nBlocks = divUp(nBytes, chunkSize);
-      // max against nMinBlocks last since we may have nMaxBlocks < nMinBlocks
       *nBlocks = std::max(nMinBlocks, std::min(nMaxBlocks, *nBlocks));
       double effBw = (*nBlocks)*(smBw/smMul);
       effBw = std::min(effBw, lsaBw/lsaMul);
       effBw = std::min(effBw, ginBw/ginMul);
       double time = nBytes/effBw;
-      // Delayed by LSA processing of first chunk.
       time += std::min<size_t>(nBytes, chunkSize*(*nBlocks))*(lsaMul/lsaBw + ginMul/ginBw);
-      // Delay by GIN latency of first chunk.
       time += ginLat;
       *timeUs = (/*usec/sec=*/1.e6)*time;
     } break;
@@ -540,6 +531,8 @@ static uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int/*ncclDe
   if (!hasSTMC) kmask &= ~kernelMask_STMC;
   if (!hasLDMC) kmask &= ~kernelMask_LDMC;
 
+  if (ncclParamSymLL() == 0) kmask &= ~kernelMask_LL;
+
   size_t nBytes = nElts*ncclTypeSize(ty);
   size_t nBusBytes = (coll == ncclFuncAllReduce ? 1 : comm->nRanks)*nBytes;
   // LL kernels use 32-bit ints to track element counts and indices.
@@ -608,7 +601,11 @@ ncclResult_t ncclSymkPickKernel(
   *kernelId = bestKernel;
   *estTimeUs = kmask==0 || kernelMask_user() == (1<<ncclSymkKernelId_Count)-1 ? bestTime : 0.0f;
   *nBlocks = bestBlocks;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  *nWarps = 256/comm->WarpSize;
+#else
   *nWarps = 16;
+#endif
   return ncclSuccess;
 }
 
@@ -658,3 +655,22 @@ ncclResult_t ncclGetSymRegType(struct ncclDevrWindow* sendWin, struct ncclDevrWi
   }
   return ncclSuccess;
 }
+
+#ifndef GENERATE_SYM_KERNELS
+// [RCCL] When symmetric kernels aren't generated by generate.py we still
+// need the symbols referenced by symmetric_sched.cc and the new
+// queryModel_gin path so the link succeeds. These stubs make every
+// kernel path return "no kernel available" -- the scheduler then falls
+// back to the regular non-symmetric kernels.
+void* ncclSymkGetKernelPtr(ncclSymkKernelId kernelId, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty) {
+  return nullptr;
+}
+
+extern int const ncclSymkKernelCount = 0;
+void* ncclSymkKernelList[ncclSymkKernelId_Count] = {nullptr};
+int ncclSymkKernelMaxDynamicSmem[ncclSymkKernelId_Count] = {0};
+
+int ncclSymkGetKernelIndex(ncclSymkKernelId /*id*/, int /*red*/, ncclDataType_t /*ty*/) {
+  return 0;
+}
+#endif

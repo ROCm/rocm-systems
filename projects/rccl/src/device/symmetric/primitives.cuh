@@ -1,9 +1,5 @@
-/*************************************************************************
- * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: Apache-2.0
- *
- * See LICENSE.txt for more license information
- *************************************************************************/
+// Modification Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT 
 
 #ifndef NCCL_DEVICE_SYMMETRIC_PRIMITIVES_H_
 #define NCCL_DEVICE_SYMMETRIC_PRIMITIVES_H_
@@ -11,9 +7,9 @@
 #include "sym_kernels.h"
 #include "bitops.h"
 #include "collectives.h"
-#include "../op128.h"
-#include "../reduce_kernel.h"
-#include "gin_scratch.h"
+#include "op128.h"
+#include "reduce_kernel.h"
+#include "common.h"
 
 #if __CUDA_ARCH__ >= 700
 // __grid_constant__ appears to break cuda-gdb

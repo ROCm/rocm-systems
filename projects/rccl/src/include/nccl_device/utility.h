@@ -1,55 +1,27 @@
 /*************************************************************************
- * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: Apache-2.0
+ * Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+ * Modifications Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
  *
- * See LICENSE.txt for more license information
- *************************************************************************/
+ * See LICENSE.txt for license information
+ ************************************************************************/
 
 #ifndef _NCCL_DEVICE_UTILITY_H_
 #define _NCCL_DEVICE_UTILITY_H_
 
+#include "hip_compat.h"
+
 // compiler specific check for __CUDACC__
+// We define NCCL_CHECK_CUDACC as a textual alias of __CUDACC__ (not a
+// "snapshot" 0/1 value) so each `#if NCCL_CHECK_CUDACC` re-evaluates
+// __CUDACC__ at the point of use. This matters for the AMD path because
+// some host-API headers (e.g. nccl_device/lsa_barrier.h) do
+// `#undef __CUDACC__` followed by `#define __CUDACC__ 0` (which hipify
+// rewrites to __HIPCC__) to hide device-side declarations from host TUs.
+// With a snapshot value, NCCL_CHECK_CUDACC and __CUDACC__ would diverge
+// after that point and we'd compile references to types that were never
+// declared in this TU.
 #ifndef NCCL_CHECK_CUDACC
-    #if defined(__clang__)
-        #ifdef __CUDACC__
-            #define NCCL_CHECK_CUDACC 1
-        #else
-            #define NCCL_CHECK_CUDACC 0
-        #endif
-    #else
-        #if __CUDACC__
-            #define NCCL_CHECK_CUDACC 1
-        #else
-            #define NCCL_CHECK_CUDACC 0
-        #endif
-    #endif
-#endif
-
-#if NCCL_CHECK_CUDACC
-  #if defined(NCCL_HOSTLIB_ONLY) || defined(__clang_llvm_bitcode_lib__)
-    #define NCCL_DEVICE_INLINE __device__ __attribute__((always_inline))
-    #define NCCL_HOST_DEVICE_INLINE __host__ __device__ __attribute__((always_inline))
-  #else
-    #define NCCL_DEVICE_INLINE __device__ __forceinline__
-    #define NCCL_HOST_DEVICE_INLINE __host__ __device__ __forceinline__
-  #endif
-#else
-  #ifndef __host__
-    #define __host__
-  #endif
-  #define NCCL_DEVICE_INLINE
-  #define NCCL_HOST_DEVICE_INLINE inline __attribute__((always_inline))
-#endif
-
-// Macro for conditional constexpr support
-#if defined(__cpp_if_constexpr) && __cpp_if_constexpr >= 201606
-  #ifndef NCCL_IF_CONSTEXPR
-    #define NCCL_IF_CONSTEXPR constexpr
-  #endif
-#else
-  #ifndef NCCL_IF_CONSTEXPR
-    #define NCCL_IF_CONSTEXPR
-  #endif
+    #define NCCL_CHECK_CUDACC __CUDACC__
 #endif
 
 #if __cplusplus
@@ -68,7 +40,11 @@
 #include <stdbool.h>
 
 #if NCCL_CHECK_CUDACC
+#if __HIP_PLATFORM_AMD__
+#include <atomic>
+#else
 #include <cuda/atomic>
+#endif
 #endif
 
 #if __cplusplus
@@ -100,7 +76,7 @@ static NCCL_DEVICE_INLINE bool testAbort(uint32_t* abortFlag, uint32_t& steps) {
 #endif
 
 template<typename T>
-T&& declval() noexcept {
+NCCL_HOST_DEVICE_INLINE T&& declval() noexcept {
   static_assert(sizeof(T)!=sizeof(T), "You can't evaluate declval.");
 }
 
@@ -200,15 +176,15 @@ NCCL_HOST_DEVICE_INLINE constexpr uint64_t idivRcp64(uint64_t x) {
 }
 
 NCCL_HOST_DEVICE_INLINE uint32_t mul32hi(uint32_t a, uint32_t b) {
-#if __CUDA_ARCH__
-  return __umulhi(a, b);
+#if NCCL_DEVICE_ARCH
+  return nccl_umulhi(a, b);
 #else
   return uint64_t(a)*b >> 32;
 #endif
 }
 NCCL_HOST_DEVICE_INLINE uint64_t mul64hi(uint64_t a, uint64_t b) {
-#if __CUDA_ARCH__
-  return __umul64hi(a, b);
+#if NCCL_DEVICE_ARCH
+  return nccl_umul64hi(a, b);
 #else
   return (uint64_t)(((unsigned __int128)a)*b >> 64);
 #endif
@@ -272,7 +248,7 @@ NCCL_HOST_DEVICE_INLINE uint32_t imodFast64(uint64_t x, uint64_t y, uint64_t yrc
   return r;
 }
 
-#if NCCL_CHECK_CUDACC
+#if NCCL_DEVICE_COMPILE
 // Precomputed integer reciprocoals for denominator values 1..64 inclusive.
 // Pass these to idivFast64() for fast division on the GPU.
 NCCL_DEVICE_INLINE uint64_t idivRcp64_upto64(int x) {
@@ -299,22 +275,89 @@ NCCL_DEVICE_INLINE uint64_t idivRcp64_upto64(int x) {
 }
 #endif
 
-#if NCCL_CHECK_CUDACC
+#if NCCL_DEVICE_COMPILE
 NCCL_DEVICE_INLINE uint32_t idivRcp32_upto64(int x) {
   return idivRcp64_upto64(x)>>32;
 }
 #endif
 
 #if NCCL_CHECK_CUDACC
-NCCL_DEVICE_INLINE cuda::memory_order acquireOrderOf(cuda::memory_order ord) {
+#if __HIP_PLATFORM_AMD__
+NCCL_HOST_DEVICE_INLINE constexpr std::memory_order acquireOrderOf(std::memory_order ord) {
+  return ord == std::memory_order_release ? std::memory_order_relaxed :
+         ord == std::memory_order_acq_rel ? std::memory_order_acquire :
+         ord;
+}
+
+NCCL_HOST_DEVICE_INLINE constexpr std::memory_order releaseOrderOf(std::memory_order ord) {
+  return ord == std::memory_order_acquire ? std::memory_order_relaxed :
+         ord == std::memory_order_acq_rel ? std::memory_order_release :
+         ord;
+}
+NCCL_HOST_DEVICE_INLINE constexpr int toAtomicBuiltinOrder(std::memory_order ord) {
+  switch (ord) {
+    case std::memory_order_relaxed: return __ATOMIC_RELAXED;
+    case std::memory_order_acquire: return __ATOMIC_ACQUIRE;
+    case std::memory_order_release: return __ATOMIC_RELEASE;
+    case std::memory_order_acq_rel: return __ATOMIC_ACQ_REL;
+    case std::memory_order_seq_cst: return __ATOMIC_SEQ_CST;
+    default: return __ATOMIC_SEQ_CST;
+  }
+}
+
+NCCL_HOST_DEVICE_INLINE constexpr cuda::memory_order acquireOrderOf(cuda::memory_order ord) {
   return ord == cuda::memory_order_release ? cuda::memory_order_relaxed :
          ord == cuda::memory_order_acq_rel ? cuda::memory_order_acquire :
          ord;
 }
-NCCL_DEVICE_INLINE cuda::memory_order releaseOrderOf(cuda::memory_order ord) {
+NCCL_HOST_DEVICE_INLINE constexpr cuda::memory_order releaseOrderOf(cuda::memory_order ord) {
   return ord == cuda::memory_order_acquire ? cuda::memory_order_relaxed :
          ord == cuda::memory_order_acq_rel ? cuda::memory_order_release :
          ord;
+}
+
+NCCL_HOST_DEVICE_INLINE constexpr cuda::memory_order toCudaOrder(std::memory_order ord) {
+  switch (ord) {
+    case std::memory_order_relaxed: return cuda::memory_order_relaxed;
+    case std::memory_order_acquire: return cuda::memory_order_acquire;
+    case std::memory_order_release: return cuda::memory_order_release;
+    case std::memory_order_acq_rel: return cuda::memory_order_acq_rel;
+    case std::memory_order_seq_cst: return cuda::memory_order_seq_cst;
+    default: return cuda::memory_order_seq_cst;
+  }
+}
+#else
+NCCL_HOST_DEVICE_INLINE constexpr cuda::memory_order acquireOrderOf(cuda::memory_order ord) {
+  return ord == cuda::memory_order_release ? cuda::memory_order_relaxed :
+         ord == cuda::memory_order_acq_rel ? cuda::memory_order_acquire :
+         ord;
+}
+NCCL_HOST_DEVICE_INLINE constexpr cuda::memory_order releaseOrderOf(cuda::memory_order ord) {
+  return ord == cuda::memory_order_acquire ? cuda::memory_order_relaxed :
+         ord == cuda::memory_order_acq_rel ? cuda::memory_order_release :
+         ord;
+}
+#endif
+#endif
+
+#if NCCL_CHECK_CUDACC
+NCCL_DEVICE_INLINE void fenceAcquireGpu() {
+  static __device__ int dummy;
+  int tmp;
+#if __HIP_PLATFORM_AMD__
+  tmp = __atomic_load_n(&dummy, __ATOMIC_ACQUIRE);
+  __threadfence();
+#else
+  asm volatile("ld.acquire.gpu.s32 %0,[%1];" : "=r"(tmp) : "l"(&dummy) : "memory");
+#endif
+  dummy = tmp;
+}
+NCCL_DEVICE_INLINE void fenceReleaseGpu() {
+#if __HIP_PLATFORM_AMD__
+  __threadfence();
+#else
+  cuda::atomic_thread_fence(cuda::memory_order_release, cuda::thread_scope_device);
+#endif
 }
 #endif
 
@@ -356,42 +399,38 @@ NCCL_DEVICE_INLINE void atomicStore(T* ptr, T val, cuda::memory_order ord, cuda:
 }
 #endif
 
-#if NCCL_CHECK_CUDACC
+#if NCCL_DEVICE_COMPILE
 NCCL_DEVICE_INLINE int lane() {
-  int ret;
-  asm("mov.u32 %0, %%laneid;" : "=r"(ret));
-  return ret;
+  return nccl_lane_id();
 }
 NCCL_DEVICE_INLINE unsigned int lanemask_lt() {
-  unsigned int ret;
-  asm("mov.u32 %0, %%lanemask_lt;" : "=r"(ret));
-  return ret;
+  return nccl_lanemask_lt();
 }
 #endif
 
-#if NCCL_CHECK_CUDACC
+#if NCCL_DEVICE_COMPILE
 // Load anything, but cache like its constant memory.
 template<typename T>
 NCCL_DEVICE_INLINE T loadConst(T const *p) {
   if (alignof(T) == 1) {
     union { uint8_t part[sizeof(T)]; T ret; };
-    for (int i=0; i < (int)sizeof(T); i++) part[i] = __ldg((uint8_t const*)p + i);
+    for (int i=0; i < (int)sizeof(T); i++) part[i] = nccl_ldg((uint8_t const*)p + i);
     return ret;
   } else if (alignof(T) == 2) {
     union { uint16_t part[sizeof(T)/2]; T ret; };
-    for (int i=0; i < (int)sizeof(T)/2; i++) part[i] = __ldg((uint16_t const*)p + i);
+    for (int i=0; i < (int)sizeof(T)/2; i++) part[i] = nccl_ldg((uint16_t const*)p + i);
     return ret;
   } else if (alignof(T) == 4) {
     union { uint32_t part[sizeof(T)/4]; T ret; };
-    for (int i=0; i < (int)sizeof(T)/4; i++) part[i] = __ldg((uint32_t const*)p + i);
+    for (int i=0; i < (int)sizeof(T)/4; i++) part[i] = nccl_ldg((uint32_t const*)p + i);
     return ret;
   } else if (alignof(T) == 8) {
     union { uint64_t part[sizeof(T)/8]; T ret; };
-    for (int i=0; i < (int)sizeof(T)/8; i++) part[i] = __ldg((uint64_t const*)p + i);
+    for (int i=0; i < (int)sizeof(T)/8; i++) part[i] = nccl_ldg((uint64_t const*)p + i);
     return ret;
   } else { // alignof(T) >= 16
     union { ulonglong2 part[sizeof(T)/16]; T ret; };
-    for (int i=0; i < (int)sizeof(T)/16; i++) part[i] = __ldg((ulonglong2 const*)p + i);
+    for (int i=0; i < (int)sizeof(T)/16; i++) part[i] = nccl_ldg((ulonglong2 const*)p + i);
     return ret;
   }
 }

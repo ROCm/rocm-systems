@@ -14,21 +14,22 @@
 #include "checks.h"
 #include "compiler.h"
 #include <stdint.h>
+#include <string.h>
 #include <time.h>
+#include <sched.h>
 #include <algorithm>
 #include <new>
 #include <type_traits>
 #include <mutex>
 #include <condition_variable>
+#include <thread>
 #include <random>
-#include <chrono>
 
 int ncclCudaCompCap();
 
 // PCI Bus ID <-> int64 conversion functions
 ncclResult_t int64ToBusId(int64_t id, char* busId);
 ncclResult_t busIdToInt64(const char* busId, int64_t* id);
-ncclResult_t pciPathToInt64(char* path, int64_t* id);
 
 ncclResult_t getBusId(int cudaDev, int64_t *busId);
 
@@ -567,54 +568,34 @@ T* ncclIntruQueueMpscAbandon(ncclIntruQueueMpsc<T,next>* me) {
 
 ncclResult_t ncclBitsToString(uint32_t bits, uint32_t mask, const char* (*toStr)(int), char *buf, size_t bufLen, const char *wildcard);
 
+/**
+ * @brief function to get page size of the system
+ */
+size_t get_sc_page_size(void);
+
+/**
+ * @brief function to get system's page size aligned memory address and buffersize 
+ *
+ * Given a pointer `ptr` to a buffer of size `bufsize`, this function computes:
+ *   1. A new pointer `aligned_ptr` which points to the start of the page-aligned memory region that includes `ptr`.
+ *   2. A new size `aligned_size` that is the minimum number of bytes (aligned to page size) needed to cover the original buffer from `aligned_ptr`.
+ *
+ * This is useful, for example, when performing operations such as memory mapping or advising memory usage (e.g., with `mmap`, `madvise`, `mlock`, etc.), which often require page-aligned memory ranges.
+ * This function doesn't dereferece the input pointer
+ *
+ * @param[in]  ptr           Pointer to the start of the original memory buffer.
+ * @param[in]  bufsize       Size (in bytes) of the original buffer starting at `ptr`.
+ * @param[out] aligned_ptr   Pointer to a variable that will be set to the aligned base address.
+ * @param[out] aligned_size  Pointer to a variable that will be set to the aligned size.
+ */
+void get_aligned_ptr_and_size(const void *ptr, const size_t bufsize, void **aligned_ptr, size_t *aligned_size);
+
 ////////////////////////////////////////////////////////////////////////////////
 // Hash function for pointer types (shared by address map implementations)
 uint64_t ncclHashPointer(int hbits, void* key);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Intrusive address map implementation (avoids per-entry allocations)
-
-/*
- * ncclIntruAddressMap Usage Contract
- * ===================================
- *
- * OVERVIEW:
- *   - Intrusive map that stores next-pointers directly in user objects
- *   - Avoids separate malloc per entry (only allocates bucket table)
- *   - Uses C++ templates for type safety with type-erased implementation
- *
- * CONSTRUCTION:
- *   - POD type with automatic zero-initialization for static/global instances
- *   - Example (global): static ncclIntruAddressMap<Obj, void*, &Obj::key, &Obj::next> globalMap;
- *   - Example (local): ncclIntruAddressMap<Obj, void*, &Obj::key, &Obj::next> localMap = {};
- *   - Zero-initialization works: ncclIntruAddressMap<...> map = {};
- *
- * DESTRUCTION:
- *   - NO explicit destructor function is provided
- *   - The map automatically cleans up internal memory when the last entry is removed
- *   - When count reaches 0, the internal table is freed and the map returns to
- *     zero-initialized state, making destruction trivial (no-op)
- *
- * USER RESPONSIBILITY:
- *   - Caller MUST remove all inserted objects before abandoning the map
- *   - Failure to remove all objects will leak memory (the internal bucket table)
- *   - Objects must outlive their presence in the map
- *   - Key and next-pointer fields are modified by the map
- *   - Delete/free objects separately after removing from map
- *
- * THREAD SAFETY:
- *   - This data structure is NOT thread-safe
- *   - Caller must provide external synchronization
- *
- * USAGE VALIDATION:
- *   Compile-time checks (via static_assert):
- *   - Key type size must be <= sizeof(uintptr_t)
- *
- *   Runtime checks (returns ncclInvalidUsage with WARN):
- *   - Map pointer must not be NULL
- *   - Object pointer must not be NULL (for Insert/Find operations)
- *   - Key size must be valid (0 < keySize <= sizeof(uintptr_t))
- */
 
 // Untyped internal structure
 struct ncclIntruAddressMap_untyped {
@@ -626,7 +607,6 @@ struct ncclIntruAddressMap_untyped {
 // Typed wrapper (uses composition for C compatibility)
 template<typename Obj, typename Key, Key Obj::*keyField, Obj* Obj::*nextField>
 struct ncclIntruAddressMap {
-  // Compile-time checks for valid usage
   static_assert(sizeof(Key) <= sizeof(uintptr_t),
     "ncclIntruAddressMap: Key type size must be <= sizeof(uintptr_t). "
     "Keys larger than a pointer cannot be safely converted to uintptr_t.");
@@ -634,9 +614,6 @@ struct ncclIntruAddressMap {
   ncclIntruAddressMap_untyped base;
 };
 
-// Destructor (optional - only needed if entries remain in map)
-// Note: Map auto-cleans when last entry is removed, so this is only needed
-// if abandoning a non-empty map to avoid leaking the bucket table.
 template<typename Obj, typename Key, Key Obj::*keyField, Obj* Obj::*nextField>
 static inline void ncclIntruAddressMapDestruct(struct ncclIntruAddressMap<Obj, Key, keyField, nextField>* map) {
   if (map->base.table != nullptr) {
@@ -647,7 +624,6 @@ static inline void ncclIntruAddressMapDestruct(struct ncclIntruAddressMap<Obj, K
   map->base.count = 0;
 }
 
-// Internal untyped function prototypes
 ncclResult_t ncclIntruAddressMapInsert_untyped(
   struct ncclIntruAddressMap_untyped* map,
   int keySize, int keyFieldOffset, int nextFieldOffset,
@@ -663,14 +639,11 @@ ncclResult_t ncclIntruAddressMapRemove_untyped(
   int keySize, int keyFieldOffset, int nextFieldOffset,
   uintptr_t key);
 
-// Typed template implementations (type-erasing wrappers)
 template<typename Obj, typename Key, Key Obj::*keyField, Obj* Obj::*nextField>
 static inline ncclResult_t ncclIntruAddressMapInsert(
     struct ncclIntruAddressMap<Obj, Key, keyField, nextField>* map,
     Key key, Obj* object) {
   Obj dummy;
-  // Using offsetof macro would be better except it won't work with non-C types,
-  // like those that involve inheritance.
   int keyFieldOffset = (char*)&(dummy.*keyField) - (char*)&dummy;
   int nextFieldOffset = (char*)&(dummy.*nextField) - (char*)&dummy;
   return ncclIntruAddressMapInsert_untyped(

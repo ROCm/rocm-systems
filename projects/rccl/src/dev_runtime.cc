@@ -7,7 +7,7 @@
 
 #include "dev_runtime.h"
 #include "comm.h"
-#include "nccl_device/core.h"
+#include "nccl_device/core_tmp.h"
 #include "rma/rma.h"
 #include "device.h"
 #include "sym_kernels.h"
@@ -98,12 +98,15 @@ ncclResult_t ncclDevrInitOnce(struct ncclComm* comm) {
   for (int i=0; i < devr->lsaSize; i++) {
     devr->lsaRankList[i] = comm->rank + (i - devr->lsaSelf);
   }
-  devr->nLsaTeams = comm->nRanks / devr->lsaSize;
 
   CUmemAllocationProp memProp = {};
+#if defined(HIP_VMM_UNCACHED_MEMORY)
+  memProp.type = hipMemAllocationTypeUncached;
+#else
   memProp.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+#endif
   memProp.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-  memProp.requestedHandleTypes = ncclCuMemHandleType;
+  memProp.requestedHandleType = ncclCuMemHandleType;
   memProp.location.id = comm->cudaDev;
   CUCHECKGOTO(cuMemGetAllocationGranularity(&devr->granularity, &memProp, CU_MEM_ALLOC_GRANULARITY_RECOMMENDED), ret, fail_lsaRankList);
 
@@ -127,6 +130,7 @@ fail_lsaRankList:
 }
 
 static void symTeamDestroyAll(struct ncclComm* comm); // Further down
+static void symMemoryDropRef(struct ncclComm* comm, struct ncclDevrMemory* mem); // Further down
 
 ncclResult_t ncclDevrFinalize(struct ncclComm* comm) {
   struct ncclDevrState* devr = &comm->devrState;
@@ -162,14 +166,32 @@ ncclResult_t ncclDevrFinalize(struct ncclComm* comm) {
         ncclShadowPoolFree(&devr->shadows, tableDev, stream);
         tableDev = next;
       }
-      cudaStreamSynchronize(stream);
-      cudaStreamDestroy(stream);
+      CUDACHECKIGNORE(cudaStreamSynchronize(stream));
+      CUDACHECKIGNORE(cudaStreamDestroy(stream));
     }
   }
+  // Drain memories whose owning windows were never explicitly destroyed
+  // (e.g. resource windows created by ncclDevCommCreate when the caller
+  // skips the matching ncclDevCommDestroy). Without this, every per-rank
+  // cuMemMap slice inside lsaFlatBase is still live when cuMemAddressFree
+  // is called below, and HIP returns hipErrorInvalidValue (AICOMRCCL-835).
+  if (devr->memHead != nullptr) {
+    int leftover = 0;
+    for (struct ncclDevrMemory* m = devr->memHead; m != nullptr; m = m->next) leftover++;
+    INFO(NCCL_INIT, "ncclDevrFinalize: draining %d leftover device-API memory record(s)", leftover);
+  }
+  while (devr->memHead != nullptr) {
+    struct ncclDevrMemory* m = devr->memHead;
+    m->refCount = 1; // force drop on the next call
+    symMemoryDropRef(comm, m);
+  }
   if (devr->lsaFlatBase != nullptr) {
+    // The drain above unmapped every per-rank slice via symMemoryDropRef,
+    // so this is now expected to succeed. Surface failures instead of
+    // masking with CUCHECKIGNORE — a regression in the drain path should
+    // not be silently swallowed (AICOMRCCL-835).
     CUdeviceptr flatAddr = reinterpret_cast<CUdeviceptr>(devr->lsaFlatBase);
-    CUCHECKIGNORE(cuMemUnmap(flatAddr, devr->lsaSize*devr->bigSize));
-    CUCHECKIGNORE(cuMemAddressFree(flatAddr, devr->lsaSize*devr->bigSize));
+    CUCHECK(cuMemAddressFree(flatAddr, devr->lsaSize*devr->bigSize));
   }
   ncclShadowPoolDestruct(&devr->shadows);
   ncclSpaceDestruct(&devr->bigSpace);
@@ -222,7 +244,9 @@ static ncclResult_t symMemoryMapLsaTeam(
         CUCHECKGOTO(cuMemImportFromShareableHandle(&impHandle, (void*)&messages[r].fabricHandle, ncclCuMemHandleType), ret, fail);
       }
     }
-    CUdeviceptr addr = reinterpret_cast<uintptr_t>((char*)devr->lsaFlatBase + r*devr->bigSize + bigOffset);
+    uintptr_t base = reinterpret_cast<uintptr_t>(devr->lsaFlatBase);
+    CUdeviceptr addr = reinterpret_cast<CUdeviceptr>(base + r * devr->bigSize + bigOffset);
+    // CUdeviceptr addr = reinterpret_cast<uintptr_t>((char*)devr->lsaFlatBase + r*devr->bigSize + bigOffset);
     CUCHECKGOTO(cuMemMap(addr, size, 0, impHandle, 0), ret, fail);
     CUCHECKGOTO(cuMemSetAccess(addr, size, &accessDesc, 1), ret, fail);
     if (r != devr->lsaSelf) {
@@ -488,7 +512,9 @@ static void symMemoryDropRef(
       symUnbindTeamMemory(comm, t, mem);
     }
     for (int r = 0; r < devr->lsaSize; r++) {
-      CUdeviceptr addr = reinterpret_cast<uintptr_t>((char*)devr->lsaFlatBase + r*devr->bigSize + mem->bigOffset);
+      uintptr_t base = reinterpret_cast<uintptr_t>(devr->lsaFlatBase);
+      CUdeviceptr addr = reinterpret_cast<CUdeviceptr>(base + r * devr->bigSize + mem->bigOffset);
+      // CUdeviceptr addr = reinterpret_cast<uintptr_t>((char*)devr->lsaFlatBase + r*devr->bigSize + mem->bigOffset);
       CUCHECKIGNORE(cuMemUnmap(addr, mem->size));
     }
     ncclSpaceFree(&devr->bigSpace, mem->bigOffset, mem->size);
@@ -648,29 +674,28 @@ ncclResult_t ncclDevrWindowRegisterInGroup(
   cudaStream_t stream = nullptr;
   void* localRegHandle = nullptr;
   struct ncclDevrWindow* winHost = nullptr;
-  int numSegments = 0;
 
   NCCLCHECKGOTO(ncclCommRegister(comm, userPtr, userSize, &localRegHandle), ret, fail);
 
+  if (!comm->symmetricSupport) {
+    // We just return the local registration handle directly in this case, as there's no reason to allocate the
+    // ncclWindow_vidmem structure on the device, etc.
+    *outWinDev = reinterpret_cast<struct ncclWindow_vidmem*>(localRegHandle);
+    return ncclSuccess;
+  }
   if (winFlags & NCCL_WIN_COLL_SYMMETRIC) {
     // Defer symmetric kernel init until at least one window with that flag exists.
-    NCCLCHECKGOTO(ncclSymkInitOnce(comm), ret, fail_locReg);
+    NCCLCHECKGOTO(ncclSymkInitOnce(comm), ret, fail);
   }
 
-  // Get underlying cumem base address and number of mapped physical segments that userPtr spans
-  NCCLCHECKGOTO(ncclCuMemGetAddressRange(reinterpret_cast<CUdeviceptr>(userPtr), userSize, &memAddr, &memSize, &numSegments), ret, fail_locReg);
-
-  if (numSegments > 1) {
-    WARN("Window registration of addresses that span multiple physical segments is currently not supported.");
-    ret = ncclInvalidArgument;
-    goto fail_locReg;
-  }
-
-  memOffset = reinterpret_cast<CUdeviceptr>(userPtr) - memAddr;
+  // Get underlying cumem handle:
+  CUCHECKGOTO(cuMemGetAddressRange(&memAddr, &memSize, reinterpret_cast<CUdeviceptr>(userPtr)), ret, fail_locReg);
+  memOffset = reinterpret_cast<uintptr_t>(userPtr) - reinterpret_cast<uintptr_t>(memAddr);
+  // memOffset = reinterpret_cast<CUdeviceptr>(userPtr) - memAddr;
   if (memOffset%NCCL_WIN_REQUIRED_ALIGNMENT != 0) {
     WARN("Window address must be suitably aligned.");
     ret = ncclInvalidArgument;
-    goto fail_locReg;
+    goto fail;
   }
 
   CUCHECKGOTO(cuMemRetainAllocationHandle(&memHandle, reinterpret_cast<void*>(memAddr)), ret, fail_locReg);
@@ -679,7 +704,7 @@ ncclResult_t ncclDevrWindowRegisterInGroup(
   NCCLCHECKGOTO(symMemoryObtain(comm, memHandle, (void*)memAddr, memSize, winFlags, &mem), ret, fail_locReg_memHandle);
   memHandle = 0x0; // symMemoryObtain took our reference
 
-  CUDACHECKGOTO(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), ret, fail_locReg_memHandle_mem);
+  CUDACHECKGOTO(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), ret, fail);
 
   NCCLCHECKGOTO(symWindowCreate(
       comm, mem, memOffset, userPtr, userSize, winFlags, localRegHandle, outWinDev, &winHost, stream
@@ -693,28 +718,24 @@ ncclResult_t ncclDevrWindowRegisterInGroup(
 
   {
     std::lock_guard<std::mutex> lock(ncclWindowMapMutex);
-    // Set intrusive map fields directly on winHost
     winHost->comm = comm;
-    winHost->next = nullptr;  // Initialize next pointer
-    // Since windows are unique and belong to a single communicator,
-    // it is not necessary to check if the insert would overwrite existing entries
+    winHost->next = nullptr;
     NCCLCHECKGOTO(ncclIntruAddressMapInsert(&ncclWindowMap, *outWinDev, winHost), ret, fail_locReg_memHandle_mem_stream_win);
     INFO(NCCL_ALLOC, "Inserted window %p into address map, ret=%d", *outWinDev, ret);
   }
 
-  cudaStreamDestroy(stream);
+  CUDACHECKIGNORE(cudaStreamDestroy(stream));
   return ret;
 
 fail_locReg_memHandle_mem_stream_win:
   symWindowDestroy(comm, *outWinDev, stream);
   *outWinDev = nullptr;
-  cudaStreamSynchronize(stream);
+  CUDACHECKIGNORE(cudaStreamSynchronize(stream));
 fail_locReg_memHandle_mem_stream:
-  cudaStreamDestroy(stream);
-fail_locReg_memHandle_mem:
+  CUDACHECKIGNORE(cudaStreamDestroy(stream));
   symMemoryDropRef(comm, mem);
 fail_locReg_memHandle:
-  if (memHandle != 0x0ULL) { CUCHECKIGNORE(cuMemRelease(memHandle)); }
+  if (memHandle != 0x0) { CUCHECKIGNORE(cuMemRelease(memHandle)); }
 fail_locReg:
   ncclCommDeregister(comm, localRegHandle);
 fail:
@@ -983,9 +1004,13 @@ ncclResult_t ncclDevrCommCreateInternal(
     outDevComm->resourceWindow_inlined = {};
   } else {
     CUmemAllocationProp memProp = {};
+#if defined(HIP_VMM_UNCACHED_MEMORY)
+    memProp.type = hipMemAllocationTypeUncached;
+#else
     memProp.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+#endif
     memProp.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-    memProp.requestedHandleTypes = ncclCuMemHandleType;
+    memProp.requestedHandleType = ncclCuMemHandleType;
     // We have to assume that if GIN is possible it might be requested in the future,
     // even on single node.
     memProp.allocFlags.gpuDirectRDMACapable = comm->sharedRes->ginState.ncclGin != nullptr ? 1 : 0;
@@ -1063,20 +1088,11 @@ fail:
 
 ////////////////////////////////////////////////////////////////////////////////
 
-NCCL_API(ncclResult_t, ncclCommWindowRegister, ncclComm_t comm, void* buff, size_t size, ncclWindow_t* win, int winFlags);
-ncclResult_t ncclCommWindowRegister(ncclComm_t comm, void* buff, size_t size, ncclWindow_t* win, int winFlags) {
-  NCCLCHECK(CommCheck(comm, __func__, "comm"));
-  NCCLCHECK(PtrCheck(win, __func__, "win"));
-  *win = nullptr;
-  if (buff == nullptr || size <= 0) {
-    WARN("%s: invalid pointer %p / size %zu", __func__, buff, size);
-    return ncclInvalidArgument;
-  }
-
-  if (!comm->symmetricSupport) {
-    return ncclSuccess;
-  }
-
+NCCL_API(ncclResult_t, ncclCommWindowRegister, ncclComm_t comm, void* ptr, size_t size, ncclWindow_t* win, int winFlags);
+ncclResult_t ncclCommWindowRegister_impl(
+    struct ncclComm* comm, void* userPtr, size_t userSize,
+    struct ncclWindow_vidmem** outWinDev, int winFlags
+  ) {
   ncclResult_t ret = ncclSuccess;
   int saveDev;
   struct ncclDevrRegTask* task;
@@ -1090,40 +1106,43 @@ ncclResult_t ncclCommWindowRegister(ncclComm_t comm, void* buff, size_t size, nc
   NCCLCHECKGOTO(ncclDevrInitOnce(comm), ret, fail);
 
   NCCLCHECKGOTO(ncclCalloc(&task, 1), ret, fail);
-  task->userPtr = buff;
-  task->userSize = size;
+  task->userPtr = userPtr;
+  task->userSize = userSize;
   task->winFlags = winFlags;
-  task->outWinDev = win;
+  task->outWinDev = outWinDev;
   ncclIntruQueueEnqueue(&comm->devrState.regTaskQueue, task);
   ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
 
 exit:
   ncclGroupErrCheck(ret);
   NCCLCHECK(ncclGroupEndInternal());
-  cudaSetDevice(saveDev);
+  CUDACHECKIGNORE(cudaSetDevice(saveDev));
   return ret;
 fail:
   goto exit;
 }
 
 NCCL_API(ncclResult_t, ncclCommWindowDeregister, ncclComm_t comm, ncclWindow_t win);
-ncclResult_t ncclCommWindowDeregister(struct ncclComm* comm, struct ncclWindow_vidmem* winDev) {
-  NCCLCHECK(CommCheck(comm, __func__, "comm"));
+ncclResult_t ncclCommWindowDeregister_impl(struct ncclComm* comm, struct ncclWindow_vidmem* winDev) {
   ncclResult_t ret = ncclSuccess;
   int saveDev;
   cudaStream_t stream;
 
   if (winDev == nullptr) goto exit;
 
+  if (!comm->symmetricSupport) {
+    NCCLCHECKGOTO(ncclCommDeregister(comm, winDev), ret, fail);
+    goto exit;
+  }
   CUDACHECKGOTO(cudaGetDevice(&saveDev), ret, fail);
   CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), ret, fail);
   CUDACHECKGOTO(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), ret, fail_dev);
   NCCLCHECKGOTO(symWindowDestroy(comm, winDev, stream), ret, fail_dev_stream);
 fail_dev_stream:
-  cudaStreamSynchronize(stream);
-  cudaStreamDestroy(stream);
+  CUDACHECKIGNORE(cudaStreamSynchronize(stream));
+  CUDACHECKIGNORE(cudaStreamDestroy(stream));
 fail_dev:
-  cudaSetDevice(saveDev);
+  CUDACHECKIGNORE(cudaSetDevice(saveDev));
 fail:
 exit:
   return ret;
@@ -1337,7 +1356,7 @@ static ncclResult_t ncclDevCommCreateCommon(
 exit:
   ncclGroupErrCheck(ret);
   NCCLCHECK(ncclGroupEndInternal());
-  cudaSetDevice(saveDev);
+  CUDACHECKIGNORE(cudaSetDevice(saveDev));
   return ret;
 fail:
   free(task);
@@ -1411,7 +1430,12 @@ ncclResult_t ncclDevCommDestroy(
   NCCLCHECK(PtrCheck(devComm, __func__, "devComm"));
   struct ncclDevrState* devr = &comm->devrState;
   if (devr->ginEnabled) {
-    NCCLCHECK(ncclGinResetSignalsAndCounters(comm, devComm));
+    // [RCCL] TODO(NCCL 2.29.7 sync): port ncclGinResetSignalsAndCounters
+    // (a CUDA kernel + host launcher) into RCCL device code. For now leave
+    // the device-side state untouched -- it gets fully torn down right
+    // below via ncclGinFreeSignalsCounters anyway, so dropping the reset
+    // affects only debug visibility, not correctness.
+    // NCCLCHECK(ncclGinResetSignalsAndCounters(comm, devComm));
 
     ncclGinFreeSignalsCounters(comm,
       devComm->ginSignalBase, devComm->ginSignalCount,

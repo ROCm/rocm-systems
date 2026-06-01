@@ -1,9 +1,9 @@
 /*************************************************************************
- * SPDX-FileCopyrightText: Copyright (c) 2022-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: Apache-2.0
+ * Copyright (c) 2022-2025, NVIDIA CORPORATION. All rights reserved.
+ * Modifications Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
  *
- * See LICENSE.txt for more license information
- *************************************************************************/
+ * See LICENSE.txt for license information
+ ************************************************************************/
 
 #include "register.h"
 #include "transport.h"
@@ -106,8 +106,8 @@ ncclResult_t ncclRegisterCollNvlsBuffers(
       info->recvMhandle = recvHandle;
     }
   }
+  #endif
 exit:
-#endif
   return result;
 }
 
@@ -123,7 +123,7 @@ ncclResult_t ncclRegisterCollBuffers(
   info->regBufType = NCCL_REGULAR_BUFFER;
   *regNeedConnect = true;
   if (!(ncclParamLocalRegister() || (comm->planner.persistent && ncclParamGraphRegister()))) goto exit;
-#if CUDART_VERSION >= 11030
+#if CUDART_VERSION >= 11030 || defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   if (info->algorithm == NCCL_ALGO_NVLS || info->algorithm == NCCL_ALGO_NVLS_TREE) {
     /* this part of nvls reg code is temporarily not used and obsolete. */
     if (!comm->nvlsRegSupport || info->opDev.op == ncclDevPreMulSum) goto exit;
@@ -182,6 +182,8 @@ ncclResult_t ncclRegisterCollBuffers(
   } else if (info->protocol == NCCL_PROTO_SIMPLE) {
     // IPC buffer registration
     if (info->func == ncclFuncReduceScatter && info->algorithm != NCCL_ALGO_COLLNET_DIRECT) goto exit;
+    // Skip IPC buffer registration for AllReduceWithBias
+    if (info->func == ncclFuncAllReduce && info->acc != nullptr) goto exit;
     if (info->algorithm == NCCL_ALGO_RING && ((info->func == ncclFuncAllReduce && info->sendbuff == info->recvbuff) || info->func == ncclFuncReduce)) goto exit;
     if (info->algorithm == NCCL_ALGO_TREE && info->sendbuff == info->recvbuff) goto exit;
     if (info->algorithm == NCCL_ALGO_COLLNET_CHAIN && info->sendbuff == info->recvbuff && comm->maxLocalRanks > 1) goto exit;
@@ -466,7 +468,7 @@ ncclResult_t ncclRegisterCollBuffers(
       info->nMaxChannels = 16;
     }
   }
-exit:
 #endif
+exit:
   return result;
 }

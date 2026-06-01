@@ -1,10 +1,11 @@
 # Copyright (c) 2024-2025, NVIDIA CORPORATION & AFFILIATES. ALL RIGHTS RESERVED.
+# Modifications Copyright (c) 2025-2026, Advanced Micro Devices, Inc. All rights reserved.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# This code was automatically generated with version 2.28.0. Do not modify it directly.
+# This code was automatically generated with version 2.30.0. Do not modify it directly.
 
-from libc.stdint cimport intptr_t
+from libc.stdint cimport intptr_t, uintptr_t
 
 import threading
 
@@ -68,8 +69,11 @@ cdef void* __ncclCommInitAll = NULL
 cdef void* __ncclCommFinalize = NULL
 cdef void* __ncclCommDestroy = NULL
 cdef void* __ncclCommAbort = NULL
+cdef void* __ncclCommRevoke = NULL
 cdef void* __ncclCommSplit = NULL
 cdef void* __ncclCommShrink = NULL
+cdef void* __ncclCommGetUniqueId = NULL
+cdef void* __ncclCommGrow = NULL
 cdef void* __ncclCommInitRankScalable = NULL
 cdef void* __ncclGetErrorString = NULL
 cdef void* __ncclGetLastError = NULL
@@ -79,8 +83,12 @@ cdef void* __ncclCommCuDevice = NULL
 cdef void* __ncclCommUserRank = NULL
 cdef void* __ncclCommRegister = NULL
 cdef void* __ncclCommDeregister = NULL
+cdef void* __ncclCommSuspend = NULL
+cdef void* __ncclCommResume = NULL
+cdef void* __ncclCommMemStats = NULL
 cdef void* __ncclCommWindowRegister = NULL
 cdef void* __ncclCommWindowDeregister = NULL
+cdef void* __ncclWinGetUserPtr = NULL
 cdef void* __ncclRedOpCreatePreMulSum = NULL
 cdef void* __ncclRedOpDestroy = NULL
 cdef void* __ncclReduce = NULL
@@ -94,21 +102,61 @@ cdef void* __ncclGather = NULL
 cdef void* __ncclScatter = NULL
 cdef void* __ncclSend = NULL
 cdef void* __ncclRecv = NULL
+cdef void* __ncclPutSignal = NULL
 cdef void* __ncclSignal = NULL
 cdef void* __ncclWaitSignal = NULL
 cdef void* __ncclGroupStart = NULL
 cdef void* __ncclGroupEnd = NULL
 cdef void* __ncclGroupSimulateEnd = NULL
+cdef void* __ncclCommQueryProperties = NULL
+cdef void* __ncclDevCommCreate = NULL
+cdef void* __ncclDevCommDestroy = NULL
+cdef void* __ncclGetLsaMultimemDevicePointer = NULL
+cdef void* __ncclGetLsaDevicePointer = NULL
+cdef void* __ncclGetPeerDevicePointer = NULL
 
 
-cdef void* load_library() except* nogil:
-    cdef void* handle
-    handle = dlopen("libnccl.so.2", RTLD_NOW | RTLD_GLOBAL)
-    if handle == NULL:
-        with gil:
-            err_msg = dlerror()
-            raise RuntimeError(f'Failed to dlopen libnccl ({err_msg.decode()})')
-    return handle
+cdef void* load_library() except* with gil:
+    # Patched for RCCL: replace upstream cuda.pathfinder lookup with a
+    # ROCm-native search.
+    #   1. NCCL_LIBRARY env var, if set, is used verbatim (path or SONAME).
+    #   2. Otherwise: ctypes.util.find_library('rccl') (ldconfig cache),
+    #      then $ROCM_PATH/lib/librccl.so and $HIP_PATH/lib/librccl.so,
+    #      then bare 'librccl.so' (resolved via LD_LIBRARY_PATH at dlopen).
+    import os
+    import ctypes.util
+
+    cdef void* handle = NULL
+    cdef bytes lib_bytes
+    cdef const char* err_ptr
+
+    explicit = os.environ.get("NCCL_LIBRARY")
+    if explicit:
+        candidates = [explicit]
+    else:
+        candidates = []
+        resolved = ctypes.util.find_library("rccl")
+        if resolved is not None:
+            candidates.append(resolved)
+        for env_var in ("ROCM_PATH", "HIP_PATH"):
+            root = os.environ.get(env_var)
+            if root:
+                candidates.append(os.path.join(root, "lib", "librccl.so"))
+        candidates.append("librccl.so")
+
+    for cand in candidates:
+        lib_bytes = cand.encode("utf-8")
+        handle = dlopen(lib_bytes, RTLD_NOW | RTLD_GLOBAL)
+        if handle != NULL:
+            return handle
+
+    err_ptr = dlerror()
+    err_str = err_ptr.decode() if err_ptr != NULL else "no diagnostic"
+    raise NotSupportedError(
+        f"Could not load RCCL library. Tried: {candidates}. "
+        f"Last dlerror: {err_str}. Set NCCL_LIBRARY or ensure "
+        "ROCM_PATH/HIP_PATH points to the ROCm install."
+    )
 
 
 cdef int _check_or_init_nccl() except -1 nogil:
@@ -194,6 +242,13 @@ cdef int _check_or_init_nccl() except -1 nogil:
                 handle = load_library()
             __ncclCommAbort = dlsym(handle, 'ncclCommAbort')
 
+        global __ncclCommRevoke
+        __ncclCommRevoke = dlsym(RTLD_DEFAULT, 'ncclCommRevoke')
+        if __ncclCommRevoke == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclCommRevoke = dlsym(handle, 'ncclCommRevoke')
+
         global __ncclCommSplit
         __ncclCommSplit = dlsym(RTLD_DEFAULT, 'ncclCommSplit')
         if __ncclCommSplit == NULL:
@@ -207,6 +262,20 @@ cdef int _check_or_init_nccl() except -1 nogil:
             if handle == NULL:
                 handle = load_library()
             __ncclCommShrink = dlsym(handle, 'ncclCommShrink')
+
+        global __ncclCommGetUniqueId
+        __ncclCommGetUniqueId = dlsym(RTLD_DEFAULT, 'ncclCommGetUniqueId')
+        if __ncclCommGetUniqueId == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclCommGetUniqueId = dlsym(handle, 'ncclCommGetUniqueId')
+
+        global __ncclCommGrow
+        __ncclCommGrow = dlsym(RTLD_DEFAULT, 'ncclCommGrow')
+        if __ncclCommGrow == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclCommGrow = dlsym(handle, 'ncclCommGrow')
 
         global __ncclCommInitRankScalable
         __ncclCommInitRankScalable = dlsym(RTLD_DEFAULT, 'ncclCommInitRankScalable')
@@ -271,6 +340,27 @@ cdef int _check_or_init_nccl() except -1 nogil:
                 handle = load_library()
             __ncclCommDeregister = dlsym(handle, 'ncclCommDeregister')
 
+        global __ncclCommSuspend
+        __ncclCommSuspend = dlsym(RTLD_DEFAULT, 'ncclCommSuspend')
+        if __ncclCommSuspend == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclCommSuspend = dlsym(handle, 'ncclCommSuspend')
+
+        global __ncclCommResume
+        __ncclCommResume = dlsym(RTLD_DEFAULT, 'ncclCommResume')
+        if __ncclCommResume == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclCommResume = dlsym(handle, 'ncclCommResume')
+
+        global __ncclCommMemStats
+        __ncclCommMemStats = dlsym(RTLD_DEFAULT, 'ncclCommMemStats')
+        if __ncclCommMemStats == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclCommMemStats = dlsym(handle, 'ncclCommMemStats')
+
         global __ncclCommWindowRegister
         __ncclCommWindowRegister = dlsym(RTLD_DEFAULT, 'ncclCommWindowRegister')
         if __ncclCommWindowRegister == NULL:
@@ -284,6 +374,13 @@ cdef int _check_or_init_nccl() except -1 nogil:
             if handle == NULL:
                 handle = load_library()
             __ncclCommWindowDeregister = dlsym(handle, 'ncclCommWindowDeregister')
+
+        global __ncclWinGetUserPtr
+        __ncclWinGetUserPtr = dlsym(RTLD_DEFAULT, 'ncclWinGetUserPtr')
+        if __ncclWinGetUserPtr == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclWinGetUserPtr = dlsym(handle, 'ncclWinGetUserPtr')
 
         global __ncclRedOpCreatePreMulSum
         __ncclRedOpCreatePreMulSum = dlsym(RTLD_DEFAULT, 'ncclRedOpCreatePreMulSum')
@@ -376,6 +473,13 @@ cdef int _check_or_init_nccl() except -1 nogil:
                 handle = load_library()
             __ncclRecv = dlsym(handle, 'ncclRecv')
 
+        global __ncclPutSignal
+        __ncclPutSignal = dlsym(RTLD_DEFAULT, 'ncclPutSignal')
+        if __ncclPutSignal == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclPutSignal = dlsym(handle, 'ncclPutSignal')
+
         global __ncclSignal
         __ncclSignal = dlsym(RTLD_DEFAULT, 'ncclSignal')
         if __ncclSignal == NULL:
@@ -410,6 +514,48 @@ cdef int _check_or_init_nccl() except -1 nogil:
             if handle == NULL:
                 handle = load_library()
             __ncclGroupSimulateEnd = dlsym(handle, 'ncclGroupSimulateEnd')
+
+        global __ncclCommQueryProperties
+        __ncclCommQueryProperties = dlsym(RTLD_DEFAULT, 'ncclCommQueryProperties')
+        if __ncclCommQueryProperties == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclCommQueryProperties = dlsym(handle, 'ncclCommQueryProperties')
+
+        global __ncclDevCommCreate
+        __ncclDevCommCreate = dlsym(RTLD_DEFAULT, 'ncclDevCommCreate')
+        if __ncclDevCommCreate == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclDevCommCreate = dlsym(handle, 'ncclDevCommCreate')
+
+        global __ncclDevCommDestroy
+        __ncclDevCommDestroy = dlsym(RTLD_DEFAULT, 'ncclDevCommDestroy')
+        if __ncclDevCommDestroy == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclDevCommDestroy = dlsym(handle, 'ncclDevCommDestroy')
+
+        global __ncclGetLsaMultimemDevicePointer
+        __ncclGetLsaMultimemDevicePointer = dlsym(RTLD_DEFAULT, 'ncclGetLsaMultimemDevicePointer')
+        if __ncclGetLsaMultimemDevicePointer == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclGetLsaMultimemDevicePointer = dlsym(handle, 'ncclGetLsaMultimemDevicePointer')
+
+        global __ncclGetLsaDevicePointer
+        __ncclGetLsaDevicePointer = dlsym(RTLD_DEFAULT, 'ncclGetLsaDevicePointer')
+        if __ncclGetLsaDevicePointer == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclGetLsaDevicePointer = dlsym(handle, 'ncclGetLsaDevicePointer')
+
+        global __ncclGetPeerDevicePointer
+        __ncclGetPeerDevicePointer = dlsym(RTLD_DEFAULT, 'ncclGetPeerDevicePointer')
+        if __ncclGetPeerDevicePointer == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclGetPeerDevicePointer = dlsym(handle, 'ncclGetPeerDevicePointer')
         __py_nccl_init = True
         return 0
 
@@ -455,11 +601,20 @@ cpdef dict _inspect_function_pointers():
     global __ncclCommAbort
     data["__ncclCommAbort"] = <intptr_t>__ncclCommAbort
 
+    global __ncclCommRevoke
+    data["__ncclCommRevoke"] = <intptr_t>__ncclCommRevoke
+
     global __ncclCommSplit
     data["__ncclCommSplit"] = <intptr_t>__ncclCommSplit
 
     global __ncclCommShrink
     data["__ncclCommShrink"] = <intptr_t>__ncclCommShrink
+
+    global __ncclCommGetUniqueId
+    data["__ncclCommGetUniqueId"] = <intptr_t>__ncclCommGetUniqueId
+
+    global __ncclCommGrow
+    data["__ncclCommGrow"] = <intptr_t>__ncclCommGrow
 
     global __ncclCommInitRankScalable
     data["__ncclCommInitRankScalable"] = <intptr_t>__ncclCommInitRankScalable
@@ -488,11 +643,23 @@ cpdef dict _inspect_function_pointers():
     global __ncclCommDeregister
     data["__ncclCommDeregister"] = <intptr_t>__ncclCommDeregister
 
+    global __ncclCommSuspend
+    data["__ncclCommSuspend"] = <intptr_t>__ncclCommSuspend
+
+    global __ncclCommResume
+    data["__ncclCommResume"] = <intptr_t>__ncclCommResume
+
+    global __ncclCommMemStats
+    data["__ncclCommMemStats"] = <intptr_t>__ncclCommMemStats
+
     global __ncclCommWindowRegister
     data["__ncclCommWindowRegister"] = <intptr_t>__ncclCommWindowRegister
 
     global __ncclCommWindowDeregister
     data["__ncclCommWindowDeregister"] = <intptr_t>__ncclCommWindowDeregister
+
+    global __ncclWinGetUserPtr
+    data["__ncclWinGetUserPtr"] = <intptr_t>__ncclWinGetUserPtr
 
     global __ncclRedOpCreatePreMulSum
     data["__ncclRedOpCreatePreMulSum"] = <intptr_t>__ncclRedOpCreatePreMulSum
@@ -533,6 +700,9 @@ cpdef dict _inspect_function_pointers():
     global __ncclRecv
     data["__ncclRecv"] = <intptr_t>__ncclRecv
 
+    global __ncclPutSignal
+    data["__ncclPutSignal"] = <intptr_t>__ncclPutSignal
+
     global __ncclSignal
     data["__ncclSignal"] = <intptr_t>__ncclSignal
 
@@ -547,6 +717,24 @@ cpdef dict _inspect_function_pointers():
 
     global __ncclGroupSimulateEnd
     data["__ncclGroupSimulateEnd"] = <intptr_t>__ncclGroupSimulateEnd
+
+    global __ncclCommQueryProperties
+    data["__ncclCommQueryProperties"] = <intptr_t>__ncclCommQueryProperties
+
+    global __ncclDevCommCreate
+    data["__ncclDevCommCreate"] = <intptr_t>__ncclDevCommCreate
+
+    global __ncclDevCommDestroy
+    data["__ncclDevCommDestroy"] = <intptr_t>__ncclDevCommDestroy
+
+    global __ncclGetLsaMultimemDevicePointer
+    data["__ncclGetLsaMultimemDevicePointer"] = <intptr_t>__ncclGetLsaMultimemDevicePointer
+
+    global __ncclGetLsaDevicePointer
+    data["__ncclGetLsaDevicePointer"] = <intptr_t>__ncclGetLsaDevicePointer
+
+    global __ncclGetPeerDevicePointer
+    data["__ncclGetPeerDevicePointer"] = <intptr_t>__ncclGetPeerDevicePointer
 
     func_ptrs = data
     return data
@@ -663,6 +851,16 @@ cdef ncclResult_t _ncclCommAbort(ncclComm_t comm) except?_NCCLRESULT_T_INTERNAL_
         comm)
 
 
+cdef ncclResult_t _ncclCommRevoke(ncclComm_t comm, int revokeFlags) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclCommRevoke
+    _check_or_init_nccl()
+    if __ncclCommRevoke == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclCommRevoke is not found")
+    return (<ncclResult_t (*)(ncclComm_t, int) noexcept nogil>__ncclCommRevoke)(
+        comm, revokeFlags)
+
+
 cdef ncclResult_t _ncclCommSplit(ncclComm_t comm, int color, int key, ncclComm_t* newcomm, ncclConfig_t* config) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
     global __ncclCommSplit
     _check_or_init_nccl()
@@ -681,6 +879,26 @@ cdef ncclResult_t _ncclCommShrink(ncclComm_t comm, int* excludeRanksList, int ex
             raise FunctionNotFoundError("function ncclCommShrink is not found")
     return (<ncclResult_t (*)(ncclComm_t, int*, int, ncclComm_t*, ncclConfig_t*, int) noexcept nogil>__ncclCommShrink)(
         comm, excludeRanksList, excludeRanksCount, newcomm, config, shrinkFlags)
+
+
+cdef ncclResult_t _ncclCommGetUniqueId(ncclComm_t comm, ncclUniqueId* uniqueId) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclCommGetUniqueId
+    _check_or_init_nccl()
+    if __ncclCommGetUniqueId == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclCommGetUniqueId is not found")
+    return (<ncclResult_t (*)(ncclComm_t, ncclUniqueId*) noexcept nogil>__ncclCommGetUniqueId)(
+        comm, uniqueId)
+
+
+cdef ncclResult_t _ncclCommGrow(ncclComm_t comm, int nRanks, const ncclUniqueId* uniqueId, int rank, ncclComm_t* newcomm, ncclConfig_t* config) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclCommGrow
+    _check_or_init_nccl()
+    if __ncclCommGrow == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclCommGrow is not found")
+    return (<ncclResult_t (*)(ncclComm_t, int, const ncclUniqueId*, int, ncclComm_t*, ncclConfig_t*) noexcept nogil>__ncclCommGrow)(
+        comm, nRanks, uniqueId, rank, newcomm, config)
 
 
 cdef ncclResult_t _ncclCommInitRankScalable(ncclComm_t* newcomm, int nranks, int myrank, int nId, ncclUniqueId* commIds, ncclConfig_t* config) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
@@ -773,6 +991,36 @@ cdef ncclResult_t _ncclCommDeregister(const ncclComm_t comm, void* handle) excep
         comm, handle)
 
 
+cdef ncclResult_t _ncclCommSuspend(ncclComm_t comm, int flags) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclCommSuspend
+    _check_or_init_nccl()
+    if __ncclCommSuspend == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclCommSuspend is not found")
+    return (<ncclResult_t (*)(ncclComm_t, int) noexcept nogil>__ncclCommSuspend)(
+        comm, flags)
+
+
+cdef ncclResult_t _ncclCommResume(ncclComm_t comm) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclCommResume
+    _check_or_init_nccl()
+    if __ncclCommResume == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclCommResume is not found")
+    return (<ncclResult_t (*)(ncclComm_t) noexcept nogil>__ncclCommResume)(
+        comm)
+
+
+cdef ncclResult_t _ncclCommMemStats(ncclComm_t comm, ncclCommMemStat_t stat, uint64_t* value) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclCommMemStats
+    _check_or_init_nccl()
+    if __ncclCommMemStats == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclCommMemStats is not found")
+    return (<ncclResult_t (*)(ncclComm_t, ncclCommMemStat_t, uint64_t*) noexcept nogil>__ncclCommMemStats)(
+        comm, stat, value)
+
+
 cdef ncclResult_t _ncclCommWindowRegister(ncclComm_t comm, void* buff, size_t size, ncclWindow_t* win, int winFlags) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
     global __ncclCommWindowRegister
     _check_or_init_nccl()
@@ -791,6 +1039,16 @@ cdef ncclResult_t _ncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win) e
             raise FunctionNotFoundError("function ncclCommWindowDeregister is not found")
     return (<ncclResult_t (*)(ncclComm_t, ncclWindow_t) noexcept nogil>__ncclCommWindowDeregister)(
         comm, win)
+
+
+cdef ncclResult_t _ncclWinGetUserPtr(ncclComm_t comm, ncclWindow_t win, void** outUserPtr) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclWinGetUserPtr
+    _check_or_init_nccl()
+    if __ncclWinGetUserPtr == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclWinGetUserPtr is not found")
+    return (<ncclResult_t (*)(ncclComm_t, ncclWindow_t, void**) noexcept nogil>__ncclWinGetUserPtr)(
+        comm, win, outUserPtr)
 
 
 cdef ncclResult_t _ncclRedOpCreatePreMulSum(ncclRedOp_t* op, void* scalar, ncclDataType_t datatype, ncclScalarResidence_t residence, ncclComm_t comm) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
@@ -923,6 +1181,16 @@ cdef ncclResult_t _ncclRecv(void* recvbuff, size_t count, ncclDataType_t datatyp
         recvbuff, count, datatype, peer, comm, stream)
 
 
+cdef ncclResult_t _ncclPutSignal(const void* localbuff, size_t count, ncclDataType_t datatype, int peer, ncclWindow_t peerWin, size_t peerWinOffset, int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, cudaStream_t stream) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclPutSignal
+    _check_or_init_nccl()
+    if __ncclPutSignal == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclPutSignal is not found")
+    return (<ncclResult_t (*)(const void*, size_t, ncclDataType_t, int, ncclWindow_t, size_t, int, int, unsigned int, ncclComm_t, cudaStream_t) noexcept nogil>__ncclPutSignal)(
+        localbuff, count, datatype, peer, peerWin, peerWinOffset, sigIdx, ctx, flags, comm, stream)
+
+
 cdef ncclResult_t _ncclSignal(int peer, int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, cudaStream_t stream) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
     global __ncclSignal
     _check_or_init_nccl()
@@ -971,3 +1239,63 @@ cdef ncclResult_t _ncclGroupSimulateEnd(ncclSimInfo_t* simInfo) except?_NCCLRESU
             raise FunctionNotFoundError("function ncclGroupSimulateEnd is not found")
     return (<ncclResult_t (*)(ncclSimInfo_t*) noexcept nogil>__ncclGroupSimulateEnd)(
         simInfo)
+
+
+cdef ncclResult_t _ncclCommQueryProperties(ncclComm_t comm, ncclCommProperties_t* props) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclCommQueryProperties
+    _check_or_init_nccl()
+    if __ncclCommQueryProperties == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclCommQueryProperties is not found")
+    return (<ncclResult_t (*)(ncclComm_t, ncclCommProperties_t*) noexcept nogil>__ncclCommQueryProperties)(
+        comm, props)
+
+
+cdef ncclResult_t _ncclDevCommCreate(ncclComm_t comm, const ncclDevCommRequirements_t* reqs, ncclDevComm_t* outDevComm) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclDevCommCreate
+    _check_or_init_nccl()
+    if __ncclDevCommCreate == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclDevCommCreate is not found")
+    return (<ncclResult_t (*)(ncclComm_t, const ncclDevCommRequirements_t*, ncclDevComm_t*) noexcept nogil>__ncclDevCommCreate)(
+        comm, reqs, outDevComm)
+
+
+cdef ncclResult_t _ncclDevCommDestroy(ncclComm_t comm, const ncclDevComm_t* devComm) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclDevCommDestroy
+    _check_or_init_nccl()
+    if __ncclDevCommDestroy == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclDevCommDestroy is not found")
+    return (<ncclResult_t (*)(ncclComm_t, const ncclDevComm_t*) noexcept nogil>__ncclDevCommDestroy)(
+        comm, devComm)
+
+
+cdef ncclResult_t _ncclGetLsaMultimemDevicePointer(ncclWindow_t window, size_t offset, void** outPtr) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclGetLsaMultimemDevicePointer
+    _check_or_init_nccl()
+    if __ncclGetLsaMultimemDevicePointer == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclGetLsaMultimemDevicePointer is not found")
+    return (<ncclResult_t (*)(ncclWindow_t, size_t, void**) noexcept nogil>__ncclGetLsaMultimemDevicePointer)(
+        window, offset, outPtr)
+
+
+cdef ncclResult_t _ncclGetLsaDevicePointer(ncclWindow_t window, size_t offset, int lsaRank, void** outPtr) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclGetLsaDevicePointer
+    _check_or_init_nccl()
+    if __ncclGetLsaDevicePointer == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclGetLsaDevicePointer is not found")
+    return (<ncclResult_t (*)(ncclWindow_t, size_t, int, void**) noexcept nogil>__ncclGetLsaDevicePointer)(
+        window, offset, lsaRank, outPtr)
+
+
+cdef ncclResult_t _ncclGetPeerDevicePointer(ncclWindow_t window, size_t offset, int peer, void** outPtr) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    global __ncclGetPeerDevicePointer
+    _check_or_init_nccl()
+    if __ncclGetPeerDevicePointer == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclGetPeerDevicePointer is not found")
+    return (<ncclResult_t (*)(ncclWindow_t, size_t, int, void**) noexcept nogil>__ncclGetPeerDevicePointer)(
+        window, offset, peer, outPtr)

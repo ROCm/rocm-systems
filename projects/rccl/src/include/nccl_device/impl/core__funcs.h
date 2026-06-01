@@ -190,7 +190,7 @@ NCCL_HOST_DEVICE_INLINE size_t ncclGetResourceBufferOffset(ncclDevResourceHandle
   return ((size_t)h)*128;
 }
 
-#if NCCL_CHECK_CUDACC
+#if __CUDACC__
 NCCL_DEVICE_INLINE void* ncclGetResourceBufferLocalPointer(ncclDevComm const& comm, ncclDevResourceHandle h) {
   void* lsaFlatBase = comm.resourceWindow_inlined.lsaFlatBase;
   uint32_t stride4G = comm.resourceWindow_inlined.stride4G;
@@ -199,7 +199,7 @@ NCCL_DEVICE_INLINE void* ncclGetResourceBufferLocalPointer(ncclDevComm const& co
 }
 #endif
 
-#if NCCL_CHECK_CUDACC
+#if __CUDACC__
 NCCL_DEVICE_INLINE void* ncclGetResourceBufferLsaPointer(ncclDevComm const& comm, ncclDevResourceHandle h, int peer) {
   int r = peer;
   void* lsaFlatBase = comm.resourceWindow_inlined.lsaFlatBase;
@@ -209,7 +209,7 @@ NCCL_DEVICE_INLINE void* ncclGetResourceBufferLsaPointer(ncclDevComm const& comm
 }
 #endif
 
-#if NCCL_CHECK_CUDACC
+#if __CUDACC__
 NCCL_DEVICE_INLINE void* ncclGetResourceBufferPeerPointer(ncclDevComm const& comm, ncclDevResourceHandle h, ncclTeam team, int peer) {
   int r = comm.lsaRank + (peer - team.rank)*team.stride;
   void* lsaFlatBase = comm.resourceWindow_inlined.lsaFlatBase;
@@ -219,7 +219,7 @@ NCCL_DEVICE_INLINE void* ncclGetResourceBufferPeerPointer(ncclDevComm const& com
 }
 #endif
 
-#if NCCL_CHECK_CUDACC
+#if __CUDACC__
 NCCL_DEVICE_INLINE void* ncclGetResourceBufferMultimemPointer(ncclDevComm const& comm, ncclDevResourceHandle h, ncclMultimemHandle mm) {
   void* ptr = mm.mcBasePtr;
   ptr = reinterpret_cast<char(*)[4096]>(ptr) + comm.resourceWindow_inlined.mcOffset4K;
@@ -228,13 +228,13 @@ NCCL_DEVICE_INLINE void* ncclGetResourceBufferMultimemPointer(ncclDevComm const&
 }
 #endif
 
-#if NCCL_CHECK_CUDACC
+#if __CUDACC__
 NCCL_DEVICE_INLINE void* ncclGetResourceBufferLsaMultimemPointer(ncclDevComm const& comm, ncclDevResourceHandle h) {
   return ncclGetResourceBufferMultimemPointer(comm, h, comm.lsaMultimem);
 }
 #endif
 
-#if NCCL_CHECK_CUDACC
+#if __CUDACC__
 NCCL_DEVICE_INLINE ncclSymPtr<char> ncclGetResourceBuffer(ncclDevComm const& comm, ncclDevResourceHandle h) {
   return ncclSymPtr<char>(comm.resourceWindow, size_t(h)*128);
 }

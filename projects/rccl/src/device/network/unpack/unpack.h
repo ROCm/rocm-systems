@@ -23,8 +23,8 @@ inline __device__ void load64gpu(const uint64_t* ptr, uint64_t &v) {
       asm volatile("ld.relaxed.gpu.u64 {%0}, [%1];"
       : "=l"(v) : "l"(ptr) : "memory");
   #else
-      asm volatile("ld.volatile.global.u64 {%0}, [%1];"
-      : "=l"(v) : "l"(ptr) : "memory");
+      // asm volatile("ld.volatile.global.u64 {%0}, [%1];"
+      // : "=l"(v) : "l"(ptr) : "memory");
   #endif
 }
 

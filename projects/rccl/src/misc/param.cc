@@ -64,11 +64,11 @@ static void initEnvFunc() {
   } else {
     const char* userDir = userHomeDir();
     if (userDir) {
-      snprintf(confFilePath, sizeof(confFilePath), "%s/.nccl.conf", userDir);
+      snprintf(confFilePath, sizeof(confFilePath), "%s/.rccl.conf", userDir);
       setEnvFile(confFilePath);
     }
   }
-  snprintf(confFilePath, sizeof(confFilePath), "/etc/nccl.conf");
+  snprintf(confFilePath, sizeof(confFilePath), "/etc/rccl.conf");
   setEnvFile(confFilePath);
 }
 

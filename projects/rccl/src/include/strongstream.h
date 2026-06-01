@@ -28,7 +28,7 @@ void ncclCudaContextDrop(struct ncclCudaContext* cxt);
  * easily.
  */
 struct ncclCudaGraph {
-#if CUDART_VERSION >= 11030
+#if ROCM_VERSION >= 60100
   cudaStream_t origin;
   cudaGraph_t graph;
   unsigned long long graphId;
@@ -38,7 +38,7 @@ struct ncclCudaGraph {
 
 inline struct ncclCudaGraph ncclCudaGraphNone(int graphUsageMode) {
   struct ncclCudaGraph tmp;
-  #if CUDART_VERSION >= 11030
+  #if ROCM_VERSION >= 60100
     tmp.origin = nullptr;
     tmp.graph = nullptr;
     tmp.graphId = ULLONG_MAX;
@@ -48,7 +48,7 @@ inline struct ncclCudaGraph ncclCudaGraphNone(int graphUsageMode) {
 }
 
 inline bool ncclCudaGraphValid(struct ncclCudaGraph graph) {
-  #if CUDART_VERSION >= 11030
+  #if ROCM_VERSION >= 60100
     return graph.graphId != ULLONG_MAX;
   #else
     return false;
@@ -56,7 +56,7 @@ inline bool ncclCudaGraphValid(struct ncclCudaGraph graph) {
 }
 
 inline bool ncclCudaGraphSame(struct ncclCudaGraph a, struct ncclCudaGraph b) {
-  #if CUDART_VERSION >= 11030
+  #if ROCM_VERSION >= 60100
     return a.graphId == b.graphId;
   #else
     return true;
@@ -120,7 +120,7 @@ struct ncclStrongStream {
   // The stream to use for non-captured work.
   cudaStream_t liveStream;
   void* liveAcquiredBy;
-#if CUDART_VERSION >= 11030
+#if ROCM_VERSION >= 60100
   // This stream ever appeared in a graph capture.
   bool everCaptured;
   std::mutex mutex;
@@ -133,7 +133,7 @@ struct ncclStrongStream {
 
 struct ncclCudaContext {
   struct ncclCudaContext* next;
-  CUcontext hcontext;
+  int hcontext;
   int refCount;
   struct ncclStrongStream launchOrder;
 };

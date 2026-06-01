@@ -1,9 +1,8 @@
 /*************************************************************************
- * SPDX-FileCopyrightText: Copyright (c) 2023-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: Apache-2.0
+ * Copyright (c) 2023-2023, NVIDIA CORPORATION. All rights reserved.
  *
- * See LICENSE.txt for more license information
- *************************************************************************/
+ * See LICENSE.txt for license information
+ ************************************************************************/
 
 #ifndef NET_DEVICE_H_
 #define NET_DEVICE_H_

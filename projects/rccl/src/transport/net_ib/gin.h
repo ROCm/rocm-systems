@@ -24,7 +24,6 @@ struct ncclGinIbCollComm {
   void**        fullSendComm;
   int           dev;
   void*         ginCtx;
-  void*         ibvCtx;
   ncclResult_t (*getProperties)(int dev, void *props);
   ncclResult_t (*allGather)(struct ncclGinIbCollComm *cComm, void *srcBuf, void *recvBuf, size_t len);
   ncclResult_t (*allToAll)(struct ncclGinIbCollComm *cComm, void *srcBuf, void *recvBuf, size_t len);

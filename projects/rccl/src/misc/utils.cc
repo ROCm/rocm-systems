@@ -11,6 +11,7 @@
 
 #include "nvmlwrap.h"
 
+#include <unistd.h>
 #include <stdlib.h>
 #include <mutex>
 
@@ -337,6 +338,25 @@ ncclResult_t ncclBitsToString(uint32_t bits, uint32_t mask, const char* (*toStr)
   return ncclSuccess;
 }
 
+size_t get_sc_page_size() {
+  static size_t cached_page_size = 0;
+  size_t ps = __atomic_load_n(&cached_page_size,__ATOMIC_RELAXED);
+  if (ps == 0) {
+      ps = (size_t)sysconf(_SC_PAGESIZE);
+      __atomic_store_n(&cached_page_size, ps,__ATOMIC_RELAXED);
+  }
+  return ps;
+}
+
+void get_aligned_ptr_and_size(const void *ptr, const size_t bufsize, void **aligned_ptr, size_t *aligned_size) {
+  if (!aligned_ptr || !aligned_size) return;
+  const size_t page_size = get_sc_page_size();
+  uintptr_t aligned_ptr_local = (uintptr_t)ptr & ~(page_size - 1);
+  size_t local_offset = (size_t)((uintptr_t)ptr - aligned_ptr_local);
+  *aligned_size = (bufsize + local_offset + page_size - 1) & ~(page_size - 1);
+  *aligned_ptr = (void *)aligned_ptr_local;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Hash function for pointer types (shared by address map implementations)
 // Uses shadowpool's algorithm
@@ -350,8 +370,6 @@ uint64_t ncclHashPointer(int hbits, void* key) {
 ////////////////////////////////////////////////////////////////////////////////
 // Intrusive address map implementation (untyped core functions)
 
-// Helper: Read key from object at given offset
-// Key must be convertible to uintptr_t, so we read keySize bytes and zero-extend
 static inline uintptr_t readKey(void* object, int keySize, int keyFieldOffset) {
   void* keyPtr = (char*)object + keyFieldOffset;
   uintptr_t result = 0;
@@ -359,8 +377,6 @@ static inline uintptr_t readKey(void* object, int keySize, int keyFieldOffset) {
   return result;
 }
 
-// Helper: Read next pointer from object at given offset
-// Uses memcpy to avoid strict aliasing violations when actual type is T*, not void*
 static inline void* readNextPtr(void* object, int nextFieldOffset) {
   void* nextPtr = (char*)object + nextFieldOffset;
   void* result = nullptr;
@@ -368,8 +384,6 @@ static inline void* readNextPtr(void* object, int nextFieldOffset) {
   return result;
 }
 
-// Helper: Write next pointer to object at given offset
-// Uses memcpy to avoid strict aliasing violations when actual type is T*, not void*
 static inline void writeNextPtr(void* object, int nextFieldOffset, void* value) {
   void* nextPtr = (char*)object + nextFieldOffset;
   memcpy(nextPtr, &value, sizeof(void*));
@@ -379,7 +393,6 @@ ncclResult_t ncclIntruAddressMapInsert_untyped(
     struct ncclIntruAddressMap_untyped* map,
     int keySize, int keyFieldOffset, int nextFieldOffset,
     uintptr_t key, void* object) {
-  // Runtime validation
   if (map == nullptr) {
     WARN("Intrusive address map pointer is NULL");
     return ncclInvalidUsage;
@@ -393,12 +406,11 @@ ncclResult_t ncclIntruAddressMapInsert_untyped(
     return ncclInvalidUsage;
   }
 
-  // Lazy initialization - create table on first insert
   if (map->hbits == 0) {
     map->hbits = 4;
     map->table = (void**)calloc(1<<map->hbits, sizeof(void*));
     if (map->table == nullptr) {
-      map->hbits = 0; // Reset on failure
+      map->hbits = 0;
       WARN("Intrusive address map initialization failed: calloc(%d entries) returned null", 1<<map->hbits);
       return ncclSystemError;
     }
@@ -406,26 +418,22 @@ ncclResult_t ncclIntruAddressMapInsert_untyped(
 
   int hbits = map->hbits;
 
-  // Check for address map size increase before inserting. Maintain 2:1 object:bucket ratio.
   if (map->count+1 > 2<<hbits) {
     int oldHbits = hbits;
     int oldSize = 1<<oldHbits;
     int newHbits = hbits + 1;
     int newSize = 1<<newHbits;
 
-    // Allocate a new table (don't use realloc to avoid data corruption during rehashing)
     void** newTable = (void**)malloc(newSize * sizeof(void*));
     if (newTable == nullptr) {
       WARN("Intrusive address map resize failed: malloc(%d entries) returned null", newSize);
       return ncclSystemError;
     }
 
-    // Initialize all new buckets to nullptr
     for (int i = 0; i < newSize; i++) {
       newTable[i] = nullptr;
     }
 
-    // Rehash all existing entries from old table to new table
     for (int i = 0; i < oldSize; i++) {
       void* obj = map->table[i];
 
@@ -439,17 +447,14 @@ ncclResult_t ncclIntruAddressMapInsert_untyped(
       }
     }
 
-    // Free old table and update to new table
     free(map->table);
     map->table = newTable;
     map->hbits = newHbits;
   }
 
-  // Insert object into appropriate bucket
   uint64_t b = ncclHashPointer(map->hbits, (void*)key);
   void* currentNext = readNextPtr(object, nextFieldOffset);
 
-  // Check if next pointer is already non-NULL (object might already be in a list)
   if (currentNext != nullptr) {
     INFO(NCCL_INIT, "Intrusive map: inserting object %p with non-NULL next pointer %p (key=0x%lx). "
          "Object may already be in another list or this is intentional reuse.",
@@ -467,7 +472,6 @@ ncclResult_t ncclIntruAddressMapFind_untyped(
     struct ncclIntruAddressMap_untyped* map,
     int keySize, int keyFieldOffset, int nextFieldOffset,
     uintptr_t key, void** object) {
-  // Runtime validation
   if (map == nullptr) {
     WARN("Intrusive address map pointer is NULL");
     return ncclInvalidUsage;
@@ -483,7 +487,6 @@ ncclResult_t ncclIntruAddressMapFind_untyped(
 
   *object = nullptr;
 
-  // Empty map is not an error - just means key not found
   if (map->hbits == 0) {
     return ncclSuccess;
   }
@@ -500,7 +503,6 @@ ncclResult_t ncclIntruAddressMapFind_untyped(
     obj = readNextPtr(obj, nextFieldOffset);
   }
 
-  // Key not found is not an error - *object is already nullptr
   return ncclSuccess;
 }
 
@@ -508,7 +510,6 @@ ncclResult_t ncclIntruAddressMapRemove_untyped(
     struct ncclIntruAddressMap_untyped* map,
     int keySize, int keyFieldOffset, int nextFieldOffset,
     uintptr_t key) {
-  // Runtime validation
   if (map == nullptr) {
     WARN("Intrusive address map pointer is NULL");
     return ncclInvalidUsage;
@@ -518,7 +519,6 @@ ncclResult_t ncclIntruAddressMapRemove_untyped(
     return ncclInvalidUsage;
   }
 
-  // Removing from empty map is not an error - it's idempotent
   if (map->hbits == 0) {
     return ncclSuccess;
   }
@@ -532,23 +532,18 @@ ncclResult_t ncclIntruAddressMapRemove_untyped(
     if (objKey == key) {
       void* next = readNextPtr(obj, nextFieldOffset);
 
-      // Update the previous pointer to skip the current object
       if (prev == nullptr) {
-        // Removing from head of bucket
         map->table[b] = next;
       } else {
-        // Removing from middle/end of list
         writeNextPtr(prev, nextFieldOffset, next);
       }
-
+      writeNextPtr(obj, nextFieldOffset, nullptr);
       map->count -= 1;
 
-      // If this was the last entry, clean up the table (same pattern as non-intrusive map)
       if (map->count == 0) {
         free(map->table);
-        map->hbits = 0;
-        map->count = 0;
         map->table = nullptr;
+        map->hbits = 0;
       }
 
       return ncclSuccess;
@@ -557,6 +552,5 @@ ncclResult_t ncclIntruAddressMapRemove_untyped(
     obj = readNextPtr(obj, nextFieldOffset);
   }
 
-  // Key not found is not an error - remove is idempotent
   return ncclSuccess;
 }

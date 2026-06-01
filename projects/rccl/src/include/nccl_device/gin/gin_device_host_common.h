@@ -10,9 +10,12 @@
 
 #include <cuda.h>
 #include "../net_device.h"
-#include "../core.h"  // for ncclGin{Signal|Counter}_t
+#include "../core_tmp.h"  // for ncclGin{Signal|Counter}_t
 
-#define NCCL_GIN_MAX_CONNECTIONS 4
+#define NCCL_GIN_MAX_CONTEXTS 4
+// [RCCL] NCCL 2.29.7 renamed NCCL_GIN_MAX_CONTEXTS to NCCL_GIN_MAX_CONNECTIONS.
+// Keep both names so AMD-side code that still uses the old name continues to compile.
+#define NCCL_GIN_MAX_CONNECTIONS NCCL_GIN_MAX_CONTEXTS
 
 typedef struct ncclGinGpuCtx *ncclGinGpuCtx_t;
 typedef void *ncclGinWindow_t;

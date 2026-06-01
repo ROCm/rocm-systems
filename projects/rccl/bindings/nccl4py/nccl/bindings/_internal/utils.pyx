@@ -1,4 +1,5 @@
 # Copyright (c) 2024-2025, NVIDIA CORPORATION & AFFILIATES. ALL RIGHTS RESERVED.
+# Modifications Copyright (c) 2025-2026, Advanced Micro Devices, Inc. All rights reserved.
 #
 # SPDX-License-Identifier: Apache-2.0
 
@@ -124,6 +125,11 @@ cdef int get_nested_resource_ptr(nested_resource[ResT] &in_out_ptr, object obj, 
     return 0
 
 
-class FunctionNotFoundError(RuntimeError): pass
+# Patched for RCCL: base FunctionNotFoundError on NotImplementedError so
+# callers handling missing NCCL >= 2.29 host APIs on RCCL can catch
+# `NotImplementedError` directly. Existing callers catching
+# FunctionNotFoundError or RuntimeError are unaffected (NotImplementedError
+# is a RuntimeError subclass).
+class FunctionNotFoundError(NotImplementedError): pass
 
 class NotSupportedError(RuntimeError): pass

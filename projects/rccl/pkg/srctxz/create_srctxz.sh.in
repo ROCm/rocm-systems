@@ -55,7 +55,7 @@ tar --exclude fortran \
     --exclude ".git*" \
     --exclude share \
     --exclude ompi \
-    --exclude ext-net \
+    --exclude plugins/net \
     --exclude pkg/srctxz \
     --exclude docker \
     $EXCLUDE_TEST \

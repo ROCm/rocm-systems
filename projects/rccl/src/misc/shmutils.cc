@@ -38,6 +38,11 @@ static void shmHandleInit(int fd, char* shmPath, size_t shmSize, size_t realShmS
   if (create) {
     int slen = strlen(shmPath);
     handle->shmPath = (char*)malloc(slen + 1);
+    if (handle->shmPath == nullptr) {
+      WARN("Failed to allocate memory for shared memory path");
+      // handle->shmPath remains nullptr, caller should check
+      return;
+    }
     memcpy(handle->shmPath, shmPath, slen + 1);
     if (hptr) memset(hptr, 0, shmSize);
   } else {
@@ -117,7 +122,11 @@ ncclResult_t ncclShmOpen(char* shmPath, size_t shmPathSize, size_t shmSize, void
   if (devShmPtr) {
     cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
     CUDACHECKGOTO(cudaThreadExchangeStreamCaptureMode(&mode), ret, fail);
+#if defined(HIP_HOST_UNCACHED_MEMORY)
+    CUDACHECKGOTO(cudaHostRegister((void*)hptr, realShmSize, cudaHostRegisterPortable | cudaHostRegisterMapped | hipExtHostRegisterUncached), ret, fail);
+#else
     CUDACHECKGOTO(cudaHostRegister((void*)hptr, realShmSize, cudaHostRegisterPortable | cudaHostRegisterMapped), ret, fail);
+#endif
     CUDACHECKGOTO(cudaHostGetDevicePointer(&dptr, (void*)hptr, 0), ret, fail);
     CUDACHECKGOTO(cudaThreadExchangeStreamCaptureMode(&mode), ret, fail);
   }

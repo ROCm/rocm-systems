@@ -240,7 +240,8 @@ ncclResult_t ncclRmaWaitSignalCe(struct ncclComm* comm, struct ncclKernelPlan* p
     }
 
     // Execute all wait operations in a single batch
-    NCCLCHECKGOTO(ncclCuStreamBatchMemOp(stream, opIdx, batchParams), ret, fail);
+    // [RCCL] direct HIP call; ncclCuStreamBatchMemOp wrapper is excluded from the RCCL build.
+    CUCHECKGOTO(hipStreamBatchMemOp(stream, opIdx, batchParams, 0), ret, fail);
   }
 
   // Free the task

@@ -349,7 +349,7 @@ static __host__ __device__ Int pow2Down(Int x) {
 }
 
 template<typename UInt, int nSubBits>
-static __host__ UInt reverseSubBits(UInt x) {
+static __host__ __device__ UInt reverseSubBits(UInt x) {
   if (nSubBits >= 16 && 8*sizeof(UInt) == nSubBits) {
     switch (8*sizeof(UInt)) {
     case 16: x = COMPILER_BSWAP16(x); break;

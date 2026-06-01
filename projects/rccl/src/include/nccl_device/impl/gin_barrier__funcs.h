@@ -8,6 +8,7 @@
 #ifndef _NCCL_DEVICE_GIN_BARRIER__FUNCS_H_
 #define _NCCL_DEVICE_GIN_BARRIER__FUNCS_H_
 #include "gin_barrier__types.h"
+#include "comm__types.h"
 
 #if NCCL_CHECK_CUDACC
 template<typename Coop>
@@ -17,18 +18,14 @@ NCCL_DEVICE_INLINE ncclGinBarrierSession<Coop>::ncclGinBarrierSession(
   ncclGinBarrierSession_internal<Coop>{coop, net, team, handle, (int)barrierIndex} {
   this->signal = handle.signal0 + barrierIndex * team.nRanks;
 }
-#endif
 
-#if NCCL_CHECK_CUDACC
 template<typename Coop>
 NCCL_DEVICE_INLINE ncclGinBarrierSession<Coop>::ncclGinBarrierSession(
     Coop coop, ncclGin net, ncclTeamTagRail, uint32_t barrierIndex
   ):
   ncclGinBarrierSession(coop, net, ncclTeamRail(net.comm), net.comm.railGinBarrier, barrierIndex) {
 }
-#endif
 
-#if NCCL_CHECK_CUDACC
 template<typename Coop>
 NCCL_DEVICE_INLINE ncclGinBarrierSession<Coop>::~ncclGinBarrierSession() {
 }

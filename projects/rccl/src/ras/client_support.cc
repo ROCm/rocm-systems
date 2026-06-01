@@ -572,29 +572,25 @@ static ncclResult_t rasClientRunInit(struct rasClient* client) {
   int firstIdx, nPeers;
   struct rasValCount valCounts[NCCL_MAX_LOCAL_RANKS];
   int nValCounts;
+  static int hipRuntime = -1, amdgpuDriver = -1;
 
   TRACE(NCCL_RAS, "RAS: rasClientRunInit: starting");
 
   rasOutReset();
-
-  // Get CUDA version info once for all output formats.
-  if (cudaRuntimeVersion == -1)
-    cudaRuntimeGetVersion(&cudaRuntimeVersion);
-  if (cudaDriverVersion == -1)
-    cudaDriverGetVersion(&cudaDriverVersion);
-
-  // For structured formats (JSON), skip the initial text output.
-  // It will be included in the structured output later.
-  if (client->outputFormat == RAS_OUTPUT_TEXT) {
-    rasOutAppend("NCCL version " STR(NCCL_MAJOR) "." STR(NCCL_MINOR) "." STR(NCCL_PATCH) NCCL_SUFFIX
-                 " compiled with CUDA " STR(CUDA_MAJOR) "." STR(CUDA_MINOR) "\n");
-    rasOutAppend("CUDA runtime version %d, driver version %d\n\n", cudaRuntimeVersion, cudaDriverVersion);
-    msgLen = rasOutLength();
-    NCCLCHECKGOTO(rasClientAllocMsg(&msg, msgLen), ret, fail);
-    rasOutExtract(msg);
-    rasClientEnqueueMsg(client, msg, msgLen);
-    msg = nullptr;
-  }
+  rasOutAppend("RCCL version " STR(NCCL_MAJOR) "." STR(NCCL_MINOR) "." STR(NCCL_PATCH) NCCL_SUFFIX
+               " compiled with ROCm " STR(ROCM_BUILD_INFO) "\n");
+  if (hipRuntime == -1)
+    CUDACHECKIGNORE(hipRuntimeGetVersion(&hipRuntime));
+  if (amdgpuDriver == -1)
+    CUDACHECKIGNORE(hipDriverGetVersion(&amdgpuDriver));
+    //Find a better way to query amdgpu driver version, as hipDriverGetVersion() reports the same as hipRuntimeGetVersion()
+    //Else, cudaRuntimeGetVersion() and cudaDriverGetVersion() are anyways hipified, so no need of this mod
+  rasOutAppend("HIP runtime version %d, amdgpu driver version %d\n\n", hipRuntime, amdgpuDriver);
+  msgLen = rasOutLength();
+  NCCLCHECKGOTO(rasClientAllocMsg(&msg, msgLen), ret, fail);
+  rasOutExtract(msg);
+  rasClientEnqueueMsg(client, msg, msgLen);
+  msg = nullptr;
 
   totalGpus = totalNodes = 0;
   firstNGpusNode = 0; // #GPUs on the first peer of a node.

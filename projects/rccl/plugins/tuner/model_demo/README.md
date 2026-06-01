@@ -79,17 +79,17 @@ Terminates the plugin and cleans up any resources allocated by the tuner.
 
 # Build instructions and usage
 
-- The way to use the external plugin is to implement the desired algorithm/protocol selection technique using the API described above. `ext-tuner/model_demo/plugin.c` is an example based on MI300 tuning table by default as a reference for customers in `plugin.c`.
+- The way to use the external plugin is to implement the desired algorithm/protocol selection technique using the API described above. `plugins/tuner/model_demo/plugin.c` is an example based on MI300 tuning table by default as a reference for customers in `plugin.c`.
 - Build the `libnccl-tuner.so` file following [the Makefile example](model_demo/Makefile). 
 
 ## Building and using example libnccl-tuner.so
 ```bash
-cd $RCCL_HOME/ext-tuner/model_demo/ 
+cd $RCCL_HOME/plugins/tuner/model_demo/ 
 make
 ```
 Next is to let RCCL know that you want to use the custom-made libnccl-tuner.so by setting the following environment variable to the directory of the libnccl-tuner.so file:
 
 ```bash
-export NCCL_TUNER_PLUGIN=$RCCL_HOME/ext-tuner/model_demo/libnccl-tuner.so
+export NCCL_TUNER_PLUGIN=$RCCL_HOME/plugins/tuner/model_demo/libnccl-tuner.so
 ```
 

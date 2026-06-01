@@ -1,13 +1,9 @@
-/*************************************************************************
- * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: Apache-2.0
- *
- * See LICENSE.txt for more license information
- *************************************************************************/
+// Modification Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT 
 
 #include "sym_kernels.h"
-#include "kernel.cuh"
-#include "primitives.cuh"
+#include "symmetric/kernel.h"
+#include "symmetric/primitives.h"
 
 template<int BytePerPack, int UnrollPacks, int UnrollPeers>
 static __device__ void bcastDeep(
@@ -34,7 +30,7 @@ static __device__ void bcastDeep(
     }
   }
 
-  if (waitNeeded) bar.wait(ncclCoopCta(), cuda::memory_order_relaxed);
+  if (waitNeeded) bar.wait(ncclCoopCta(), NCCL_MEM_ORDER_RELAXED);
 
   if (0 < nIters) {
     while (true) {
@@ -157,7 +153,8 @@ static __device__ void bcast(
     }
   }
 
-  if (waitNeeded) bar.wait(ncclCoopCta(), cuda::memory_order_relaxed);
+  if (waitNeeded)
+    bar.wait(ncclCoopCta(), NCCL_MEM_ORDER_RELAXED);
 
   constexpr int UnrollPeers = 8;
   size_t nSufElts = (nBytes-cursor)/sizeof(T);
@@ -171,7 +168,7 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_ST(ncclSymkDevWorkArgs con
   };
   int const& rank = handler.comm.rank;
 
-  bar.arrive(ncclCoopCta(), cuda::memory_order_relaxed);
+  bar.arrive(ncclCoopCta(), NCCL_MEM_ORDER_RELAXED);
 
   bool waitNeeded = true;
   handler.forEachWork<char>(
@@ -189,7 +186,7 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_ST(ncclSymkDevWorkArgs con
       }
     );
 
-  bar.sync(ncclCoopCta(), cuda::memory_order_release);
+  bar.sync(ncclCoopCta(), NCCL_MEM_ORDER_RELEASE);
 }
 
 __device__ __forceinline__ void ncclSymkRun_AllGather_STMC(ncclSymkDevWorkArgs const* args) {
@@ -199,7 +196,7 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_STMC(ncclSymkDevWorkArgs c
   );
   int const& rank = handler.comm.rank;
 
-  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
+  bar.sync(ncclCoopCta(), NCCL_MEM_ORDER_RELAXED);
 
   handler.forEachWork<char>(
       [&]__device__(int block, int nBlocks, size_t nElts, size_t nAllElts,
@@ -214,7 +211,7 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_STMC(ncclSymkDevWorkArgs c
       }
     );
 
-  bar.sync(ncclCoopCta(), cuda::memory_order_release);
+  bar.sync(ncclCoopCta(), NCCL_MEM_ORDER_RELEASE);
 }
 
 template<typename EltType>
@@ -243,7 +240,7 @@ static __device__ void allgather_LL_body(
     int pack = t%nIterPacks;
     #if 1
       // NOTE: Unrolling speedup on eos nranks=8 size=64K: 5.7us vs 6.7us
-      constexpr int Unroll = 4;
+      constexpr int Unroll = 1;
       #pragma unroll 1
       for (int i = t; i < (nRanks*nIterPacks & -(Unroll*tn)); i += Unroll*tn) {
         Pack got[Unroll];

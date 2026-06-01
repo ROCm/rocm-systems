@@ -1,9 +1,9 @@
 /*************************************************************************
- * SPDX-FileCopyrightText: Copyright (c) 2022-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: Apache-2.0
+ * Copyright (c) 2022-2025, NVIDIA CORPORATION. All rights reserved.
+ * Modifications Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
  *
- * See LICENSE.txt for more license information
- *************************************************************************/
+ * See LICENSE.txt for license information
+ ************************************************************************/
 
 #include "register.h"
 #include "transport.h"

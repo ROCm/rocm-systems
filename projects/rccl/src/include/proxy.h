@@ -1,9 +1,10 @@
 /*************************************************************************
- * SPDX-FileCopyrightText: Copyright (c) 2016-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: Apache-2.0
+ * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
+ * Modifications Copyright (c) 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright (c) Microsoft Corporation. Licensed under the MIT License.
  *
- * See LICENSE.txt for more license information
- *************************************************************************/
+ * See LICENSE.txt for license information
+ ************************************************************************/
 
 #ifndef NCCL_PROXY_H_
 #define NCCL_PROXY_H_
@@ -16,6 +17,7 @@
 #include "shmutils.h"
 #include "p2p.h"
 #include "collectives.h"
+#include "proxy_trace/proxy_trace.h"
 #include "gin/gin_host.h"
 
 #include <mutex>
@@ -41,6 +43,7 @@ typedef enum : uint8_t {
 } ncclPattern_t;
 
 enum ncclProxyOpState { ncclProxyOpNone, ncclProxyOpReady, ncclProxyOpProgress };
+enum { proxyRecv=0, proxySend=1 };
 
 struct ncclProxyArgs;
 typedef ncclResult_t (*proxyProgressFunc_t)(struct ncclProxyState*, struct ncclProxyArgs*);
@@ -64,7 +67,8 @@ struct ncclProxyOp {
   struct ncclProxyConnection* connection;
   ssize_t nbytes;
   uint64_t opCount;
-  int root;
+  int root:30;
+  uint32_t connIndex:2;
   int next;
   int nsteps;
   size_t chunkSize;
@@ -90,6 +94,8 @@ struct ncclProxyOp {
   uint8_t* recvbuff;
   int isOneRPN;
   RingAlgorithm *ringAlgo;
+  int nextRank;
+  int prevRank;
   union ncclProxyOpSpecifics specifics;
   int nChannels;
   int nPeers;
@@ -115,6 +121,12 @@ struct ncclProxyOp {
   uint64_t workCounter;
 
   struct ncclProxyOp *enqNext;
+
+  // Used to track total real bytes of this op
+  uint32_t totalBytes;
+  // Used to fetch/update the proxyOp in ProxyTrace map
+  facebook_rccl::ProxyTraceRecordKey traceKey;
+  facebook_rccl::ProxyTraceExtraInfo traceInfo;
 };
 
 struct ncclProxySubArgs;
@@ -167,6 +179,15 @@ struct ncclProxySubArgs {
 
   void* recvRequestsCache[NCCL_STEPS];
   int recvRequestsSubCount;
+
+#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_NET_SEND_ENTRY) && defined(ENABLE_NPKIT_EVENT_NET_SEND_EXIT)
+  int npKitSizesFifo[NCCL_STEPS];
+  uint64_t timestamp[NCCL_STEPS];
+#endif
+
+  // Used to fetch/update the proxyOp in ProxyTrace map
+  facebook_rccl::ProxyTraceRecordKey traceKey;
+  facebook_rccl::ProxyTraceExtraInfo traceInfo;
 };
 
 struct ncclProxyArgs {
@@ -197,6 +218,7 @@ struct ncclProxyArgs {
   int nPeers;
 
   int idle;
+  uint64_t hdp_flushed;
 
   // Element linking
   struct ncclProxyArgs* next;
@@ -204,6 +226,11 @@ struct ncclProxyArgs {
   struct ncclProxyArgs** proxyAppendPtr;
 
   union ncclProxyOpSpecifics specifics;
+
+  int prevRank;
+  int nextRank;
+  int send;
+  int retry_total;
 };
 #define NCCL_MAX_NETDEVS 128
 
@@ -233,11 +260,12 @@ struct ncclProxyOps {
 
 struct ncclProxySharedP2p {
   int refcount;
-  int size;
+  int64_t size;
   char* cudaBuff;
   char* hostBuff;
   // CUDA IPC
   ncclIpcDesc ipcDesc;
+  int dmaBufFd;  // DMA-BUF fd for cuMem allocations
   struct ncclProxyArgs* proxyAppend[MAXCHANNELS]; // Separate send and recv
 };
 
@@ -365,8 +393,21 @@ struct ncclProxyState {
   // Profiler plugin
   void* profilerContext;
 
+#ifdef ENABLE_ROCSHMEM
+  // When ROCshmem GDA is active, the proxy must busy-poll instead of sleeping
+  // to avoid OS scheduling delays at GDA-to-RCCL transitions.
+  bool rocshmemEnabled;
+#endif
+
   // Queue of expected responses from the proxy
   struct ncclExpectedProxyResponse* expectedResponses;
+
+  // A handle to the proxy traces
+  facebook_rccl::ProxyTrace* proxyTrace;
+
+  // [RCCL] Host mirrors of device side NCCL_LL128_LINEELEMS / NCCL_LL128_DATAELEMS
+  int ll128LineElems;
+  int ll128DataElems;
 };
 
 enum proxyConnectState {
@@ -446,4 +487,5 @@ ncclResult_t ncclProxyClientBatchQueryFdBlocking(struct ncclComm* comm, struct n
 ncclResult_t ncclProxyStop(struct ncclComm* comm);
 ncclResult_t ncclProxyShmUnlink(struct ncclComm* comm);
 ncclResult_t ncclProxyDestroy(struct ncclComm* comm);
+
 #endif

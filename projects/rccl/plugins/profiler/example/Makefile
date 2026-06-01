@@ -1,25 +1,29 @@
 #
-# SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
 #
-# See LICENSE.txt for more license information
+# See LICENSE.txt for license information
 #
 .DEFAULT_GOAL: build
-include ../../../makefiles/common.mk
+ROCM_PATH ?= $(wildcard /opt/rocm)
+CXX = $(ROCM_PATH)/lib/llvm/bin/amdclang++
 BUILDDIR ?= .
-NCCLDIR  := $(BUILDDIR)
+HIPIFY_DIR := hipify-profiler
 
 SRC_FILES := $(wildcard *.cc)
-DST_DIR   := $(BUILDDIR)
-OBJ_FILES := $(SRC_FILES:%.cc=${DST_DIR}/%.o)
-DEP_FILES := $(OBJ_FILES:%.o=%.dep)
+HIPIFY_SRC := $(addprefix $(HIPIFY_DIR)/,$(SRC_FILES))
 
-build: ${DST_DIR}/libnccl-profiler-example.so
+build: ${BUILDDIR}/librccl-profiler-example.so
 
-${DST_DIR}/libnccl-profiler-example.so: ${SRC_FILES}
+${BUILDDIR}/librccl-profiler-example.so: $(HIPIFY_SRC)
 	@printf "Compiling  %-35s > %s\n" $< $@
-	@mkdir -p ${DST_DIR}
-	$(CXX) -Inccl -I${CUDA_INC} -fPIC -shared -o $@ $^
+	@mkdir -p ${BUILDDIR}
+	$(CXX) -D__HIP_PLATFORM_AMD__ -I$(HIPIFY_DIR) -I$(HIPIFY_DIR)/nccl -I$(ROCM_PATH)/include -fPIC -shared -o $@ $^
+
+$(HIPIFY_DIR)/%.cc: %.cc
+	@mkdir -p $(HIPIFY_DIR)/nccl
+	@cp *.cc *.h $(HIPIFY_DIR)/
+	@cp nccl/*.h $(HIPIFY_DIR)/nccl/
+	@hipify-perl -inplace -quiet-warnings $(HIPIFY_DIR)/*.cc $(HIPIFY_DIR)/*.h
 
 clean:
-	rm -f ${DST_DIR}/libnccl-profiler-example.so
+	rm -rf ${BUILDDIR}/librccl-profiler-example.so $(HIPIFY_DIR)

@@ -13,6 +13,8 @@
 #include <unistd.h>
 #include <ifaddrs.h>
 #include <net/if.h>
+#include <unistd.h>
+#include <sys/syscall.h>
 #include "param.h"
 #include <time.h>
 #include <atomic>
@@ -23,9 +25,12 @@ NCCL_PARAM(PollTimeOut, "SOCKET_POLL_TIMEOUT_MSEC", 0);
 NCCL_PARAM(SocketMaxRecvBuff, "SOCKET_RCVBUF", -1);
 NCCL_PARAM(SocketMaxSendBuff, "SOCKET_SNDBUF", -1);
 
+RCCL_PARAM(SocketReuseAddr, "SOCKET_REUSEADDR", 0);
+RCCL_PARAM(SocketLinger, "SOCKET_LINGER", -1);
+
 static ncclResult_t socketProgress(int op, struct ncclSocket* sock, void* ptr, int size, int* offset, int* pclosed = NULL) {
   int closed;
-  NCCLCHECK(ncclOsSocketProgressOpt(op, sock, ptr, size, offset, 0, &closed));
+  NCCLCHECK(ncclOsSocketProgressOpt(op, sock, ptr, size, offset, 0 /*block*/, &closed));
   if (closed) {
     if (pclosed) {
       *pclosed = closed;
@@ -320,6 +325,7 @@ static ncclResult_t socketFinalizeAccept(struct ncclSocket* sock) {
     }
     if (magic != sock->magic) {
       ncclOsSocketResetAccept(sock);
+      sock->state = ncclSocketStateBadMagic;
       return ncclSuccess;
     }
   }
@@ -377,6 +383,12 @@ static ncclResult_t socketFinalizeConnect(struct ncclSocket* sock) {
 }
 
 static ncclResult_t socketProgressState(struct ncclSocket* sock) {
+  // BadMagic is set by socketFinalizeAccept on magic mismatch. The reset in
+  // ncclSocketAccept's do-while only fires while that loop runs; this covers
+  // the path where a caller re-enters via ncclSocketReady with state=BadMagic.
+  if (sock->state == ncclSocketStateBadMagic) {
+    sock->state = ncclSocketStateAccepting;
+  }
   if (sock->state == ncclSocketStateAccepting) {
     NCCLCHECK(ncclOsSocketTryAccept(sock));
   }
@@ -416,7 +428,6 @@ ncclResult_t ncclSocketConnect(struct ncclSocket* sock) {
 #ifdef ENABLE_TRACE
   char line[SOCKET_NAME_MAXLEN+1];
 #endif
-
   if (sock == NULL) {
     WARN("ncclSocketConnect: pass NULL socket");
     return ncclInvalidArgument;
@@ -459,7 +470,7 @@ ncclResult_t ncclSocketConnect(struct ncclSocket* sock) {
   }
 }
 
-ncclResult_t ncclSocketAccept(struct ncclSocket* sock, struct ncclSocket* listenSock) {
+ncclResult_t ncclSocketAccept(struct ncclSocket* sock, struct ncclSocket* listenSock, bool retryOnBadMagic) {
   ncclResult_t ret = ncclSuccess;
 
   if (listenSock == NULL || sock == NULL) {
@@ -485,6 +496,9 @@ ncclResult_t ncclSocketAccept(struct ncclSocket* sock, struct ncclSocket* listen
 
   do {
     NCCLCHECKGOTO(socketProgressState(sock), ret, exit);
+    if (sock->state == ncclSocketStateBadMagic && retryOnBadMagic) {
+      sock->state = ncclSocketStateAccepting;
+    }
   } while (sock->asyncFlag == 0 &&
       (sock->abortFlag == NULL || COMPILER_ATOMIC_LOAD(sock->abortFlag, std::memory_order_acquire) == 0) &&
       (sock->state == ncclSocketStateAccepting ||
@@ -496,6 +510,7 @@ ncclResult_t ncclSocketAccept(struct ncclSocket* sock, struct ncclSocket* listen
     case ncclSocketStateAccepting:
     case ncclSocketStateAccepted:
     case ncclSocketStateReady:
+    case ncclSocketStateBadMagic:
       ret = ncclSuccess;
       break;
     case ncclSocketStateError:
@@ -541,8 +556,19 @@ ncclResult_t ncclSocketInit(struct ncclSocket* sock, const union ncclSocketAddre
       goto exit;
     }
     sock->salen = (family == AF_INET) ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6);
-    // in case of error, we close the descriptor before returning as it's unclear if the caller has to use ncclSocketClose for cleanup
+    // in case of error, we close the fd before returning as it's unclear if the caller has to use ncclSocketClose for cleanup
     NCCLCHECKGOTO(ncclOsSocketResetFd(sock), ret, fail);
+
+    // [RCCL] Runtime socket options
+    if (rcclParamSocketReuseAddr()) {
+      int opt = 1;
+      SYSCHECKGOTO(setsockopt(sock->socketDescriptor, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)), "setsockopt", ret, fail);
+    }
+    int lingerParam = (int)rcclParamSocketLinger();
+    if (lingerParam > -1) {
+      linger linger_opt = { 1, lingerParam };
+      SYSCHECKGOTO(setsockopt(sock->socketDescriptor, SOL_SOCKET, SO_LINGER, &linger_opt, sizeof(linger_opt)), "setsockopt", ret, fail);
+    }
   } else {
     memset(&sock->addr, 0, sizeof(union ncclSocketAddress));
   }
@@ -617,30 +643,46 @@ ncclResult_t ncclSocketSendRecv(struct ncclSocket* sendSock, void* sendPtr, int 
   return ncclSuccess;
 }
 
-
 ncclResult_t ncclSocketMultiOp(struct ncclSocketOp* ops, int numOps) {
   if (ops == NULL || numOps <= 0) {
     WARN("ncclSocketMultiOp: invalid arguments ops=%p numOps=%d", ops, numOps);
     return ncclInvalidArgument;
   }
 
+  int completedOps = 0;
   for (int i = 0; i < numOps; i++) {
     if (ops[i].sock == NULL) {
       WARN("ncclSocketMultiOp: invalid socket at index %d", i);
       return ncclInvalidArgument;
     }
-    ops[i].offset = 0;
-  }
-  int completedOps=0, i=0;
-  while(completedOps < numOps){
-    if (ops[i].offset < ops[i].size){
-      NCCLCHECK(socketProgress(ops[i].op, ops[i].sock, ops[i].ptr, ops[i].size, &ops[i].offset));
-      if(ops[i].offset >= ops[i].size) completedOps++;
+    if (ops[i].op != NCCL_SOCKET_SEND && ops[i].op != NCCL_SOCKET_RECV) {
+      WARN("ncclSocketMultiOp: invalid op %d at index %d", ops[i].op, i);
+      return ncclInvalidArgument;
     }
-    i=(i+1)%numOps;
+    if (ops[i].size < 0) {
+      WARN("ncclSocketMultiOp: invalid size %d at index %d", ops[i].size, i);
+      return ncclInvalidArgument;
+    }
+    if (ops[i].size > 0 && ops[i].ptr == NULL) {
+      WARN("ncclSocketMultiOp: NULL ptr with size %d at index %d", ops[i].size, i);
+      return ncclInvalidArgument;
+    }
+    ops[i].offset = 0;
+    if (ops[i].size == 0) completedOps++;
+  }
+
+  int i = 0;
+  while (completedOps < numOps) {
+    if (ops[i].offset < ops[i].size) {
+      NCCLCHECK(socketProgress(ops[i].op, ops[i].sock, ops[i].ptr, ops[i].size, &ops[i].offset));
+      if (ops[i].offset >= ops[i].size) completedOps++;
+    }
+    i = (i + 1) % numOps;
   }
   return ncclSuccess;
 }
+
+
 // Receive or detect connection closed
 ncclResult_t ncclSocketTryRecv(struct ncclSocket* sock, void* ptr, int size, int* closed, bool blocking) {
   int offset = 0;

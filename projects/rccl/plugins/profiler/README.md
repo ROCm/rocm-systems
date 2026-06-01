@@ -9,7 +9,7 @@ interface. Any NCCL user can write profiler plugins to extract performance data 
 use it for debugging and analysis.
 
 Similarly to other plugins (e.g., network plugin), the profiler plugins come as a shared library
-called `libnccl-profiler.so`. That shared library contains one or more implementations of the
+called `lirccl-profiler.so`. That shared library contains one or more implementations of the
 NCCL PROFILER API, in the form of versioned structs, filled with pointers to all required
 functions.
 
@@ -17,15 +17,15 @@ functions.
 
 ## Plugin name and supporting multiple profiler plugins
 
-When NCCL is initialized, it will look for a `libnccl-profiler.so` library and dynamically load
+When NCCL is initialized, it will look for a `librccl-profiler.so` library and dynamically load
 it, then look for symbols inside the library.
 
 The `NCCL_PROFILER_PLUGIN` environment variable allows multiple plugins to coexist. If set, NCCL
-will look for a library with a name of `libnccl-profiler-${NCCL_PROFILER_PLUGIN}.so`. It is therefore
-advised to name the library following that pattern, with a symlink pointing `libnccl-profiler.so`
-to `libnccl-profiler-${NCCL_PROFILER_PLUGIN}.so`. That way, if there are multiple plugins in the
+will look for a library with a name of `librccl-profiler-${NCCL_PROFILER_PLUGIN}.so`. It is therefore
+advised to name the library following that pattern, with a symlink pointing `librccl-profiler.so`
+to `librccl-profiler-${NCCL_PROFILER_PLUGIN}.so`. That way, if there are multiple plugins in the
 path, setting `NCCL_PROFILER_PLUGIN` will allow users to select the right plugin. Alternatively,
-the user can also set `NCCL_PROFILER_PLUGIN` to the pathname of the `libnccl-profiler.so` library.
+the user can also set `NCCL_PROFILER_PLUGIN` to the pathname of the `librccl-profiler.so` library.
 
 ## Struct versioning
 
@@ -42,7 +42,7 @@ would still work.
 ## Headers management
 
 To help users build plugins effortlessly, plugins should copy the `ncclProfiler_vX` definitions
-they support to their internal includes. An example is shown in `plugins/profiler/example` where we
+they support to their internal includes. An example is shown in `ext-profiler/example` where we
 keep all headers in the `nccl/` directory and provide thin layers to implement old version on top
 of newer ones.
 
@@ -423,7 +423,7 @@ typedef union {
 } ncclProfilerEventStateArgs_v5_t;
 ```
 
-The example profiler in `plugins/profiler/example` contains details on how to capture and use the events above.
+The example profiler in `ext-profiler/example` contains details on how to capture and use the events above.
 
 ### Event hierarchy
 

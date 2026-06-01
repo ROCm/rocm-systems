@@ -43,7 +43,6 @@
 #include <mutex>
 
 #include "doca_verbs_net_wrapper.h"
-#include "doca_gpunetio_log.hpp"
 #include "host/doca_error.h"
 
 /* *********** Function Pointer Types *********** */
@@ -118,12 +117,12 @@ static void *ibverbs_handle = NULL;
  */
 static void doca_verbs_wrapper_init_once(int *ret) {
     /* Try to open the IB Verbs library */
-    ibverbs_handle = dlopen("libibverbs.so.1", RTLD_NOW);
+    ibverbs_handle = dlopen("libibverbs.so.1", RTLD_LAZY);
     if (!ibverbs_handle) {
-        ibverbs_handle = dlopen("libibverbs.so", RTLD_NOW);
+        ibverbs_handle = dlopen("libibverbs.so", RTLD_LAZY);
     }
     if (!ibverbs_handle) {
-        DOCA_LOG(LOG_ERR, "Failed to load libibverbs: %s\n", dlerror());
+        fprintf(stderr, "Failed to load libibverbs: %s\n", dlerror());
         *ret = -1;
         return;
     }
@@ -174,7 +173,7 @@ static void doca_verbs_wrapper_init_once(int *ret) {
 }
 
 static int init_ibverbs_library(void) {
-    static int ret = 0;
+    int ret = 0;
     static std::once_flag once;
     std::call_once(once, doca_verbs_wrapper_init_once, &ret);
     return ret;

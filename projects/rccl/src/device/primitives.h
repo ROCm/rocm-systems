@@ -1,19 +1,52 @@
 /*************************************************************************
- * SPDX-FileCopyrightText: Copyright (c) 2016-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: Apache-2.0
+ * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
+ * Modifications Copyright (c) 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
  *
- * See LICENSE.txt for more license information
- *************************************************************************/
+ * See LICENSE.txt for license information
+ ************************************************************************/
 
 #ifndef NCCL_PRIMITIVES_H_
 #define NCCL_PRIMITIVES_H_
 
 #include <type_traits>
 #include "reduce_kernel.h" // for reduction funcs
+#include "rccl_metadata.h"
+#include "rccl_ptr.h"
 #include "common_kernel.h"
 #include "common.h"
 
 #define NCCL_SPINS_BEFORE_CHECK_ABORT 10000
+#define barrier_generic(__THREAD_FENCE, NWORKERS, BARRIER_NEXT, BARRIERS_PTR) do { \
+  if (nthreads == threadsPerBlock) { \
+    __THREAD_FENCE; __builtin_amdgcn_s_barrier(); \
+  } else { \
+    /**const int w = threadIdx.x/WARP_SIZE //unused variable - compiler warning**/;\
+    const int wid = threadIdx.x%WARP_SIZE; \
+    if (wid == 0) { \
+      (BARRIER_NEXT) += (NWORKERS) / WARP_SIZE; \
+      __THREAD_FENCE; \
+      __hip_atomic_fetch_add((BARRIERS_PTR), 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_WORKGROUP); \
+      int spins = 0; \
+      int rate_limit = 50; \
+      while (__hip_atomic_load((BARRIERS_PTR), __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP) < (BARRIER_NEXT)) { \
+        spins++; \
+        if (spins == NCCL_SPINS_BEFORE_CHECK_ABORT) { \
+          if (__atomic_load_n(ncclShmem.comm.abortFlag, __ATOMIC_SEQ_CST)) { \
+            ncclShmem.aborted = 1; \
+            break; \
+          } \
+          spins = 0; \
+        } \
+        if (spins == 0 && rate_limit > 0) { \
+          rate_limit--; \
+          traceData(__LINE__, threadIdx.x, __hip_atomic_load((BARRIERS_PTR), __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP), (BARRIER_NEXT)); \
+        } \
+        __builtin_amdgcn_s_sleep(1); \
+      } \
+      __asm__ __volatile__("s_wakeup"); \
+    } \
+  } \
+} while (0)
 
 /* Protocol classes: ProtoSimple, ProtoLL, ProtoLL128
  * We use these as template args to the Primtiives class instead of integral
@@ -22,7 +55,7 @@
  * to how that protocol operates with a consistent interface so that our
  * algorithm code can operate protocol parametrically.
  */
-template<int SlicePerChunk_1, int StepPerSlice_1, int Unroll_1 = COLL_UNROLL, int MultimemSrcs_1 = 0, int MultimemDsts_1 = 0>
+template<int SlicePerChunk_1, int StepPerSlice_1, int useAcc, int Unroll_1, int MultimemSrcs_1 = 0, int MultimemDsts_1 = 0>
 struct ProtoSimple {
   static constexpr int Id = NCCL_PROTO_SIMPLE;
   static constexpr int SlicePerChunk = SlicePerChunk_1;
@@ -40,7 +73,7 @@ struct ProtoSimple {
     return sizeof(uint64_t); // Bogus value? Nobody queries this metric for simple.
   }
   // Group width is how many consecutive group values a subchannel occupies.
-  static constexpr int MaxGroupWidth = 2;
+  static constexpr int MaxGroupWidth = 1;
 };
 
 struct ProtoLL {
@@ -104,7 +137,7 @@ struct FanSymmetric {
 };
 
 // The primitives class. Specialized per protocol in the other headers.
-template<typename T, typename RedOp, typename Fan, int Direct, typename Proto, int P2p, bool isNetOffload = false>
+template<typename T, typename RedOp, typename Fan, int Direct, typename Proto, int P2p, bool isNetOffload = false, int Metadata = RCCL_METADATA_EMPTY, int Pipeline = 0, int useAcc = 0>
 class Primitives;
 
 // Used by LL & LL128 to implement direct members in the naive way.
@@ -144,9 +177,9 @@ __device__ inline int checkAbort(int &abortCache, const int abortValue, int &spi
   if (abortCache & abortValue) return 1;
   if (++spins < NCCL_SPINS_BEFORE_CHECK_ABORT) return 0;
   spins = 0;
-  int abort = *ncclShmem.comm.abortFlag;
+  int abort = __atomic_load_n((ncclShmem.comm.abortFlag), __ATOMIC_SEQ_CST);
   if (abort) {
-    ncclShmem.aborted = abort;
+    __atomic_store_n(&ncclShmem.aborted, abort, __ATOMIC_SEQ_CST);
     abortCache |= abortValue;
   }
   return abort;

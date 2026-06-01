@@ -23,7 +23,7 @@ One can build similar exporters to integrate with various observability systems 
 
 ```bash
 git clone https://github.com/NVIDIA/nccl.git
-cd nccl/plugins/profiler/inspector/exporter/example
+cd nccl/ext-profiler/inspector/exporter/example
 ```
 
 Install the required dependencies using the provided `requirements.txt` file:
@@ -36,7 +36,7 @@ pip install -r requirements.txt
 
 The script processes NCCL Inspector log files from a specified directory.
 
-**Note:** To generate NCCL Inspector log files, you need to run your NCCL application with the inspector plugin enabled. The log files will be output to a directory specified by the `NCCL_INSPECTOR_DUMP_DIR` environment variable. For detailed setup instructions and environment variable configuration, see the [Inspector README](../../README.md).
+**Note:** To generate NCCL Inspector log files, you need to run your NCCL application with the inspector plugin enabled. The log files will be output to a directory specified by the `NCCL_INSPECTOR_DUMP_DIR` environment variable. For detailed setup instructions and environment variable configuration, see the [Inspector README](../../../README.md).
 
 ### Basic Usage
 

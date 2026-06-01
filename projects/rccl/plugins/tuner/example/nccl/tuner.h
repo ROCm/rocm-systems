@@ -75,8 +75,8 @@ typedef struct {
   double perChMaxRingLL128Bws [NCCL_NUM_COMPCAPS][NCCL_NUM_TUNING_SCALES];
   double perChMaxTreeLL128Bws [NCCL_NUM_COMPCAPS][NCCL_NUM_TUNING_SCALES];
   double perChMaxTreeBws [NCCL_NUM_COMPCAPS][NCCL_NUM_TUNING_SCALES];
-
-
+  double perChMaxNVLSTreeBws [NCCL_NUM_COMPCAPS][NCCL_NUM_TUNING_SCALES];
+  double bwRatio [2][NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
 } ncclTunerConstants_v5_t;
 
 // API to be implemented by external tuner

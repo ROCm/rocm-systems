@@ -1,14 +1,14 @@
 /*************************************************************************
- * SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: Apache-2.0
+ * Copyright (c) 2015-2022, NVIDIA CORPORATION. All rights reserved.
+ * Modifications Copyright (c) 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
  *
- * See LICENSE.txt for more license information
- *************************************************************************/
+ * See LICENSE.txt for license information
+ ************************************************************************/
 
 #ifndef NCCL_COMM_H_
 #define NCCL_COMM_H_
 
-//#include "transport.h"
+// #include "transport.h"
 #include "p2p.h"
 #include "collectives.h"
 #include "nccl_tuner.h"
@@ -17,6 +17,8 @@
 #include "nccl_net.h"
 #include "register.h"
 #include "graph.h"
+#include "nvmlwrap.h"
+#include "amdsmi_wrap.h"
 #include "profiler.h"
 #include "allocator.h"
 #include "dev_runtime.h"
@@ -25,7 +27,19 @@
 #include "rma/rma.h"
 #include "argcheck.h"
 #include "mem_manager.h"
+#include "latency_profiler/CollTrace.h"
+#include "rccl_common.h"
+#include "recorder.h"
+#include "ipc_init_detail.h"
+#include "mem_manager.h"
 
+#ifdef ENABLE_ROCSHMEM
+#include <rocshmem/rocshmem.hpp>
+#endif
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+#define HIPRT_CB
+#else
 #if CUDART_VERSION < 9000
 struct cudaLaunchParams {
   void *func;
@@ -36,8 +50,9 @@ struct cudaLaunchParams {
   cudaStream_t stream;
 };
 #endif
+#endif
 
-#define CACHE_LINE_SIZE 128
+#define CACHE_LINE_SIZE 64
 #define MEM_ALIGN 4096
 #define CUDA_IPC_MIN 2097152UL
 
@@ -140,6 +155,11 @@ struct ncclSharedResources {
   struct ncclGinState ginState;
 };
 
+ /**
+  * NOTE: This struct contains pointer members. Shallow copies are only intended during early initialization,
+  * before these pointers are populated or before ownership/lifetime of the pointed-to resources matters.
+  * Do not treat an initialized ncclChannel as generally safe to shallow copy.
+  */
 struct ncclChannel {
   struct ncclChannelPeer** peers;
   struct ncclDevChannelPeer** devPeers;
@@ -151,7 +171,7 @@ struct ncclChannel {
 
   struct ncclTree collnetChain;
   struct ncclDirect collnetDirect;
-
+  struct ncclTree binTree;
   struct ncclNvls nvls;
 
   int id; // index of this channel
@@ -188,6 +208,7 @@ struct ncclTaskColl {
   ncclFunc_t func;
   void const* sendbuff;
   void* recvbuff;
+  void const* acc;
   size_t count;
   int root;
   ncclDataType_t datatype;
@@ -196,12 +217,21 @@ struct ncclTaskColl {
   int chunkSteps, sliceSteps;
   // Computed later:
   size_t trafficBytes;
+#ifdef ENABLE_WARP_SPEED
+  int32_t nMaxChannels:16;
+  bool useWarpSpeed;
+#else
   int32_t nMaxChannels:8;
+#endif
+#ifdef ENABLE_ROCSHMEM
+  size_t* sizes;
+#endif
   int32_t nWarps:8;
-  int32_t algorithm:8, protocol:8;
+  int32_t algorithm:8, protocol:8, pipeline:8;
   uint32_t isCollnet:1, isNvls:1, isSymLast:1;
   uint32_t devFuncId:29;
   int regBufType;
+  uint64_t opCount;
   // number of elements in planner->ipcMemQueue associated with this collective
   int nCleanupQueueElts;
 
@@ -258,6 +288,7 @@ struct ncclTaskP2p {
   ncclDataType_t datatype;
   int root;
   size_t bytes;
+  uint64_t opCount;
   bool allowUB;
 
   // Profiler plugin
@@ -322,7 +353,7 @@ struct ncclKernelPlan {
     struct ncclRmaArgs* rmaArgs;
   };
   size_t kernelArgsSize;
-  uint64_t channelMask; // bitset of which channels are present
+  struct channelMasks channelMask;
   bool hasProxyOps; // does any channel have a non-empty proxyOpQueue
   int threadPerBlock;
 
@@ -446,6 +477,8 @@ struct ncclKernelPlanner {
   bool persistent;
   // The list of user streams aggregated over all tasks present.
   struct ncclCudaStreamList* streams;
+  // Keep track of the number of user streams
+  int numStreams;
   // The most recent user stream. Ignored if streams==nullptr
   cudaStream_t streamRecent;
   // The graph capturing all user streams or invalid if none. Thus we restrict the
@@ -478,6 +511,7 @@ struct ncclKernelPlanner {
         int nBcasts; // Number of bcast works in this batch
         int p2pEpoch;
         int p2pRounds[NCCL_MAX_DEV_WORK_P2P_PER_BATCH]; // which rounds are present in this batch.
+        bool batchP2P; // whether this batch is eligible for batching multiple p2p operations.
       } wipBatch; // work-in-progress batch which will be next tail of workBatchQueue
       int nWorkBatchesP2p; // number of p2p batches for this channel.
       int nWorkBatchesBcast; // number of bcast batches for this channel.
@@ -498,6 +532,29 @@ struct ncclKernelPlanner {
 
 #define NCCL_MAGIC 0x0280028002800280 // Nickel atomic number is 28.
 
+struct ncclPeerInfo {
+  int rank;
+  int cudaDev;
+  int nvmlDev;
+  int gdrSupport;
+  bool hasFineGrain;
+  uint64_t hostHash;
+  uint64_t pidHash;
+  dev_t shmDev;
+  int64_t busId;
+  struct ncclComm* comm;
+  int cudaCompCap;
+  size_t totalGlobalMem;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  amdsmiFabricDeviceInfo fabricInfo;
+#else
+  // MNNVL support
+  nvmlGpuFabricInfoV_t fabricInfo;
+#endif
+  int cuMemSupport;
+  int version;
+};
+
 typedef enum ncclGroupTaskType {
   ncclGroupTaskTypeCollective = 0,
   ncclGroupTaskTypeSymRegister = 1,
@@ -505,6 +562,7 @@ typedef enum ncclGroupTaskType {
 } ncclGroupTaskType_t;
 
 struct ncclCommSymTeams;
+class ncclIpcMemHandler;
 
 // NCCL_CHECK_MODE=DEBUG_LOCAL/DEBUG_GLOBAL
 // ncclCheckModeDebugLocal : check the input args/pointers locally, it replaces ncclParamCheckPointers()
@@ -545,9 +603,17 @@ struct ncclComm {
   void* collNetContext;
   void* bootstrap;
   bool isGrow; // true if this comm is created via ncclCommGrow
+
+  // DDA IPC all-reduce: per-rank device scratch + IPC handles (see ncclDdaIpcCommInit)
+  ncclIpcMemHandler* ddaIpcMemHandler;
+  void* ddaIpcScratch;
+  size_t ddaIpcScratchBytes;
+  void* ddaIpcPeerPtrsDev;
+  nccl_dda_ipc_detail::DdaIpcBarrierState* ddaIpcBarrierState; /* see ncclDdaIpcCommInit */
+
   // Bitmasks for ncclTransportP2pSetup
-  uint64_t* connectSend;
-  uint64_t* connectRecv;
+  struct channelMasks* connectSend;
+  struct channelMasks* connectRecv;
   struct ncclTopoGraph graphs[NCCL_NUM_ALGORITHMS];
   int maxTreePattern;
   bool initAlgoChannels[NCCL_NUM_ALGORITHMS];
@@ -566,6 +632,7 @@ struct ncclComm {
   int minCompCap, maxCompCap; // min/max compute capability in the communicator
   int64_t busId;   // my PCI bus ID in int format
   ncclAffinity cpuAffinity; // CPU affinity of the GPU
+  int WarpSize;
   int cudaArch; // matches __CUDA_ARCH__ of device
 
   int cpuArch;   // architecture - As defined in src/include/graph.h, e.g. x86/arm/ppc/mixed
@@ -573,6 +640,8 @@ struct ncclComm {
 
   int node;
   int nNodes;
+  int rcclUseOneSlice; // RCCL: true if this comm is using one slice per primitive
+  int gfx9CheapFenceOff; // RCCL: true if gfx9 cheap fence is disabled
   int localRank;
   int localRanks;
   int maxLocalRanks;
@@ -582,6 +651,18 @@ struct ncclComm {
   int* localRankToRank;
   // localRanks and localRanktoRank for all nodes
   struct ncclNodeRanks* nodeRanks;
+
+  // Hierarchical AG sub-communicators
+  struct ncclComm* hierarchicalIntraComm;
+  struct ncclComm* hierarchicalInterComm;
+  bool hierarchicalCommsInitialized;
+
+  // Hierarchical AG temporary buffers
+  void* hierarchicalAGTempBuffer;
+
+  // Force PAT algorithm for this communicator
+  bool forcePatEnable;
+
   // MNNVL: Multi-Node NVLink
   int MNNVL; // true when MNNVL is available
   struct cliqueInfo clique; // Our MNNVL clique information
@@ -608,7 +689,7 @@ struct ncclComm {
   // Channels (per peer) for p2p
   int p2pnChannels;
   int p2pnChannelsPerPeer;
-  int p2pSchedGroupSize;
+  int p2pChannelShiftSize;
 
   // Should this comm allocate LL buffers for network P2P connections?
   bool allocP2pNetLLBuffers;
@@ -624,9 +705,11 @@ struct ncclComm {
   float latencies[NCCL_NUM_FUNCTIONS][NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
   float bandwidths[NCCL_NUM_FUNCTIONS][NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
   int maxThreads[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
+  uint64_t minMaxLLRange[RCCL_TUNABLE_COLLS][NCCL_NUM_PROTOCOLS - 1][RCCL_PROTOCOL_ENTRY_SIZE];
+  uint64_t minMaxChannelThresholds[RCCL_TUNABLE_COLLS][RCCL_CHANNELS_TUNABLE_ENTRIES][3]; //for each collective, set for 5 channel-counts: 32,40,48,56,64, the two values for min/max size-threshold
 
   /* This attribute can indicate the states of communicators and return code of
-   * asynchronous NCCL operations. */
+  * asynchronous NCCL operations. */
   ncclResult_t asyncResult;
 
   // Flag to ask NCCL kernels to abort
@@ -637,6 +720,11 @@ struct ncclComm {
   uint32_t* childAbortFlagDev;
   uint32_t destroyFlag;
   uint32_t revokedFlag;
+
+  // Flags for enable P2P NET
+  uint32_t p2pNet;
+  uint32_t useIntraNet;
+  bool hasFineGrain;
 
   // Device side of the communicator (for cudaFree's)
   struct ncclKernelComm* devComm; // actually = &ncclKernelCommAndChannels::comm
@@ -716,6 +804,28 @@ struct ncclComm {
   int reclaimSteps;
   struct ncclIntruQueueMpsc<struct ncclCommCallback, &ncclCommCallback::next> callbackQueue;
 
+  hipEvent_t doneEvent;
+  hipStream_t lastStream;
+  // False until the first kernel launch on this comm. Distinguishes "no prior launch"
+  // from "prior launch on the default stream (lastStream==nullptr)" so ncclLaunchPrepare
+  // can correctly detect a stream change in either case.
+  bool lastStreamValid;
+  latency_profiler::CollTrace* ctrace;
+
+#ifdef ENABLE_COLLTRACE
+  struct ncclCollTrace* collTrace;
+  union ncclCollTraceTail *collTraceTail;
+  pthread_t collTraceThread;
+  volatile bool collTraceExit;
+  bool collTraceEnabled;
+#endif
+#ifdef ENABLE_WARP_SPEED
+  int warpSpeedChannelMultiplier;
+#endif
+#ifdef ENABLE_FAULT_INJECTION
+  uint64_t faults;
+#endif
+
   ncclConfig_t config;
   // initState is to more conveniently reclaim resources when errors happen.
   ncclResult_t initState;
@@ -723,6 +833,7 @@ struct ncclComm {
   bool finalizeCalled;
   // shared structures for finalization
   int finalizeRankCnt;
+
   // group job to support multi-thread FT
   struct ncclGroupJob *groupJob;
 
@@ -768,6 +879,41 @@ struct ncclComm {
   struct ncclSymkState symkState; // The symmetric kernels state (built on previous)
 
   struct ncclMemManager* memManager;  // Memory manager
+
+  // unroll factor for comm [RCCL]
+  int unroll;
+  // custom collective [RCCL]
+  bool enableCustColl;
+  int pxnDisable;  // per-comm PXN-disable cache: RCCL_VALUE_UNSET uninit, RCCL_VALUE_INVALID = arch/env override, otherwise 0/1
+  int p2pNetChunkSize;  // per-comm P2P NET chunk size cache: RCCL_VALUE_UNSET uninit
+  // gfx name from hipDeviceProp_t [RCCL] , Memory resource owned by comm allocated in ncclCommInitRankFunc
+  char* archName;
+  // multiProcessorCount from hipDeviceProp_t [RCCL]
+  int cuCount;
+  // [RCCL] Host mirrors of device side NCCL_LL128_LINEELEMS / NCCL_LL128_DATAELEMS
+  int ll128LineElems;
+  int ll128DataElems;
+
+#ifdef ENABLE_ROCSHMEM
+  // circular ring buffer in rocshmem symmetric heap
+  void* sourceRshmem;
+  void* destRshmem;
+
+  rocshmem::rocshmem_team_t team_reduce_world_dup;
+  int enableRocshmem;
+  int rocshmemThreshold;
+  int numSymBuf;
+  int symId;
+  size_t bufThreshold;
+#endif
+
+  // Direct Reduce Scatter [RCCL]
+  bool enableDirectReduceScatter;
+  // Temporary Buffer [RCCL]
+  void* tempBuff;
+
+  struct ncclIntruQueue<struct ncclMemManagerTask, &ncclMemManagerTask::next> suspendTaskQueue;
+  struct ncclIntruQueue<struct ncclMemManagerTask, &ncclMemManagerTask::next> resumeTaskQueue;
 
   uint64_t endMagic;
 };

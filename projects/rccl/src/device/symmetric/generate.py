@@ -1,10 +1,7 @@
+# Modification Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT 
+
 #!/usr/bin/env python3
-
-# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-#
-# See LICENSE.txt for more license information
-
 import os
 import sys
 import shutil
@@ -86,19 +83,19 @@ ty_to_ncclDataType = {
 ty_to_cxxtype = {
   "f32": "float",
   "f16": "half",
-  "bf16": "__nv_bfloat16",
-  "f8e4m3": "__nv_fp8_e4m3",
-  "f8e5m2": "__nv_fp8_e5m2"
+  "bf16": "hip_bfloat16",
+  "f8e4m3": "rccl_float8",
+  "f8e5m2": "rccl_bfloat8"
 }
 
 def enumerate_kernels():
-  for algo in ["LL","LLMC","ST","STMC","RailRing_LsaSTMC"]:
+  for algo in ["LL","ST"]:
     yield Rec(coll="AllGather", algo=algo)
   for red in all_reds:
     for ty in all_tys:
-      for algo in ["AGxLL_R","AGxLLMC_R","RSxLD_AGxST","RSxLDMC_AGxSTMC"]:
+      for algo in ["AGxLL_R","RSxLD_AGxST"]:
         yield Rec(coll="AllReduce", algo=algo, red=red, ty=ty)
-      for algo in ["LL","LD","LDMC","RailA2A_LsaLD","RailA2A_LsaLDMC"]:
+      for algo in ["LL","LD"]:
         yield Rec(coll="ReduceScatter", algo=algo, red=red, ty=ty)
 
 def required_cuda(k):
@@ -121,18 +118,17 @@ def required_cuda(k):
 
 ################################################################################
 
-def kernel_fbase(k):
-  return coll_to_lower[k.coll] + ("_gin" if k.algo in gin_algos else "")
+def kernel_fdep(k):
+  return coll_to_lower[k.coll] + '.cpp'
 
 def kernel_fname(k):
-  parts = [coll_to_lower[k.coll]]
-  if k.algo in gin_algos: parts += ['gin']
   if k.coll in reductions:
     if k.algo in ldmc_algos and k.ty.startswith('f8'):
-      parts += [k.red, k.ty, k.algo]
+      return paste('_', coll_to_lower[k.coll], k.red, k.ty, k.algo) + '.cpp'
     else:
-      parts += [k.red, k.ty]
-  return paste('_', *parts) + '.cu'
+      return paste('_', coll_to_lower[k.coll], k.red, k.ty) + '.cpp'
+  else:
+    return coll_to_lower[k.coll] + '.cpp'
 
 def kernel_gencode(k):
   if k.coll in reductions and k.algo in ldmc_algos and k.ty.startswith('f8'):
@@ -158,59 +154,27 @@ def kernel_conds(k):
   return cudart_cond, arch_cond
 
 def instantiate(k):
-  cudart_cond, arch_cond = kernel_conds(k)
-  if (cudart_cond, arch_cond) == (None, None):
-    form_red_ty = (
-      "__global__ void {cname}(ncclSymkDevWorkArgs4K NCCL_GRID_CONSTANT const args4K) {{\n"
-      "  ncclSymkRun_{id}<{red}, {ty}>(&args4K.args);\n"
-      "}}"
-    )
-    form = (
-      "__global__ void {cname}(ncclSymkDevWorkArgs4K NCCL_GRID_CONSTANT const args4K) {{\n"
-      "  ncclSymkRun_{id}(&args4K.args);\n"
-      "}}"
-    )
-  else:
-    form_red_ty = (
-      "#if {cudart_cond}\n"
-      "  __global__ void {cname}(ncclSymkDevWorkArgs4K NCCL_GRID_CONSTANT const args4K) {{\n"
-      "    #if {arch_cond}\n"
-      "      ncclSymkRun_{id}<{red}, {ty}>(&args4K.args);\n"
-      "    #endif\n"
-      "  }}\n"
-      "#endif"
-    )
-    form = (
-      "#if {cudart_cond}\n"
-      "  __global__ void {cname}(ncclSymkDevWorkArgs4K NCCL_GRID_CONSTANT const args4K) {{\n"
-      "    #if {arch_cond}\n"
-      "      ncclSymkRun_{id}(&args4K.args);\n"
-      "    #endif\n"
-      "  }}\n"
-      "#endif"
-    )
+  form_red_ty = (
+    "__global__ void {cname}(ncclSymkDevWorkArgs4K NCCL_GRID_CONSTANT const args4K) {{\n"
+    "  ncclSymkRun_{id}<{red}, {ty}>(&args4K.args);\n"
+    "}}"
+  )
+  form = (
+    "__global__ void {cname}(ncclSymkDevWorkArgs4K NCCL_GRID_CONSTANT const args4K) {{\n"
+    "  ncclSymkRun_{id}(&args4K.args);\n"
+    "}}"
+  )
 
   id = k.coll+'_'+k.algo
   cname = kernel_cname(k)
   if k.coll in reductions:
-    inst = form_red_ty.format(cname=cname, id=id, red=red_to_Func[k.red], ty=ty_to_cxxtype[k.ty], cudart_cond=cudart_cond, arch_cond=arch_cond)
+    inst = form_red_ty.format(cname=cname, id=id, red=red_to_Func[k.red], ty=ty_to_cxxtype[k.ty])
   else:
-    inst = form.format(cname=cname, id=id, cudart_cond=cudart_cond, arch_cond=arch_cond)
+    inst = form.format(cname=cname, id=id)
   return inst
 
 def prototype(k):
-  cudart_cond, arch_cond = kernel_conds(k)
-  if cudart_cond is None:
-    form = "__global__ void {cname}(ncclSymkDevWorkArgs4K const);"
-  else:
-    form = (
-      "#if {cudart_cond}\n"
-      "  __global__ void {cname}(ncclSymkDevWorkArgs4K const);\n"
-      "#else\n"
-      "  constexpr void* {cname} = nullptr;\n"
-      "#endif"
-    )
-  return form.format(cname=kernel_cname(k), cudart_cond=cudart_cond)
+  return "__global__ void {cname}(ncclSymkDevWorkArgs4K const);".format(cname=kernel_cname(k))
 
 ################################################################################
 
@@ -224,27 +188,29 @@ def partition(vals, keyfn):
   return ans
 
 
-kernels_by_file = partition(enumerate_kernels(), lambda k: (kernel_fname(k), kernel_fbase(k)))
+kernels_by_file = partition(enumerate_kernels(), lambda k: (kernel_fname(k), k.coll))
 
-# Add dependency only files (e.g. allreduce.cu)
-for fbase in set(kernel_fbase(k) for k in enumerate_kernels()):
-  fname = fbase + '.cu'
-  if (fname, fbase) not in kernels_by_file:
-    kernels_by_file[fname, fbase] = []
+# Add dependency only files (e.g. allreduce.cpp)
+for coll in set(k.coll for k in enumerate_kernels()):
+  fname = coll_to_lower[coll]+'.cpp'
+  if (fname, coll) not in kernels_by_file:
+    kernels_by_file[fname, coll] = []
 
 files_to_print = ""
 # Generate each kernel instantiation file
-for (fname, fbase), ks in kernels_by_file.items():
+for (fname, coll), ks in kernels_by_file.items():
   files_to_print += fname + ";"
   with open(os.path.join(gensrc, fname), "w") as f:
+    print("-- Generating %s" % os.path.join(gensrc, fname))
     emitln(f, '#include "sym_kernels.h"')
-    emitln(f, '#include "symmetric/kernel.cuh"')
-    emitln(f, '#include "symmetric/{fbase}.cuh"'.format(fbase=fbase))
+    emitln(f, '#include "symmetric/kernel.h"')
+    emitln(f, '#include "symmetric/{coll}.h"'.format(coll=coll_to_lower[coll]))
     for k in ks:
       emitln(f, instantiate(k))
 
 # Generate <gensrc>/sym_kernels_host.cc
 with open(os.path.join(gensrc, "sym_kernels_host.cc"), "w") as f:
+  print("-- Generating %s" % os.path.join(gensrc, "symmetric_kernels.cc"))
   emitln(f, '#include "sym_kernels.h"')
   emitln(f, '#include "device.h"')
   emitln(f, '')
@@ -298,26 +264,3 @@ with open(os.path.join(gensrc, "sym_kernels_host.cc"), "w") as f:
   emitln(f, '}')
   indents -= 1
   emitln(f, '}')
-
-# Output file list for CMake (excludes rules.mk since it's not generated for CMake)
-files_to_print += "sym_kernels_host.cc;"
-if os.environ.get("NCCL_USE_CMAKE", "0") == "1":
-  print(files_to_print)
-
-# Generate <gensrc>/rules.mk (only needed for Makefile builds, not CMake)
-if os.environ.get("NCCL_USE_CMAKE", "0") != "1":
-  with open(os.path.join(gensrc, "rules.mk"), "w") as f:
-    inst_names = sorted(set(kernel_fname(k) for k in enumerate_kernels()))
-    names = inst_names + ["sym_kernels_host.cc"]
-    f.write("LIB_OBJS_SYM_GEN = $(patsubst %,$(OBJDIR)/genobj/symmetric/%.o,{names})\n"
-            .format(names=" ".join(names)))
-    f.write("\n")
-
-    inst_names = sorted(set((kernel_fname(k), kernel_fbase(k), kernel_gencode(k)) for k in enumerate_kernels()))
-    for fname, fbase, gencode in inst_names:
-      f.write(
-        "$(OBJDIR)/genobj/symmetric/{fname}.o: $(OBJDIR)/gensrc/symmetric $(OBJDIR)/genobj/symmetric/{fbase}.cu.d\n"
-        "\t" "$(call COMPILE_SYM,$@,$(OBJDIR)/gensrc/symmetric/{fname},{gencode})\n"
-        "\n"
-        .format(fname=fname, fbase=fbase, gencode=gencode)
-      )

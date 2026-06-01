@@ -2,12 +2,12 @@
 name = "nccl4py"
 dynamic = ["version"]
 requires-python = ">=3.10"
-description = "NCCL4Py: Python bindings for NCCL"
+description = "nccl4py: Pythonic bindings for RCCL on ROCm (AMD fork of NVIDIA nccl4py)"
 readme = {file = "DESCRIPTION.rst", content-type = "text/x-rst"}
 license = "Apache-2.0"
 license-files = ["LICENSE.txt"]
 authors = [
-    { name = "NVIDIA Corporation" }
+    { name = "Advanced Micro Devices, Inc." }
 ]
 classifiers = [
     "Intended Audience :: Developers",
@@ -26,26 +26,14 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
     "Programming Language :: Python :: Implementation :: CPython",
-    "Environment :: GPU :: NVIDIA CUDA",
-    "Environment :: GPU :: NVIDIA CUDA :: 12",
-    "Environment :: GPU :: NVIDIA CUDA :: 13",
 ]
 
 dependencies = [
     "packaging",
     "numpy",
-    "cuda.core>=0.5.0,<1.0",
-    "cuda-pathfinder~=1.1",
-]
-
-[project.optional-dependencies]
-cu12 = [
-    "nvidia-nccl-cu12",
-    "cuda-bindings~=12.0",
-]
-cu13 = [
-    "nvidia-nccl-cu13",
-    "cuda-bindings~=13.0",
+    # cuda.core / cuda-bindings / nvidia-* are replaced by the local
+    # nccl._hip_compat.cuda_core_shim package backed by hip-python.
+    "hip-python",
 ]
 
 [dependency-groups]
@@ -53,20 +41,21 @@ test = [
     "pytest",
     "pytest-cov",
     "pytest-mpi",
+    "pytest-run-parallel",
     "mpi4py",
     "ml-dtypes",
 ]
 
 [project.urls]
-homepage = "https://developer.nvidia.com/nccl"
-documentation = "https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/index.html"
-repository = "https://github.com/NVIDIA/nccl"
-issues = "https://github.com/NVIDIA/nccl/issues"
+homepage = "https://github.com/ROCm/rccl"
+documentation = "https://rocm.docs.amd.com/projects/rccl/en/latest/"
+repository = "https://github.com/ROCm/rocm-systems"
+issues = "https://github.com/ROCm/rocm-systems/issues"
 
 [build-system]
 requires = [
     "setuptools>=77.0.3",
-    "Cython>=0.29.24"
+    "Cython>=3.1"
 ]
 build-backend = "setuptools.build_meta"
 
@@ -74,6 +63,19 @@ build-backend = "setuptools.build_meta"
 include-package-data = false
 
 [tool.setuptools.packages.find]
+# Only the `nccl` package is shipped on disk. The HIP-backed
+# `cuda.core` surface is registered in `sys.modules` lazily on
+# `import nccl` (see `nccl/__init__.py` -> `_register_as_cuda_core`)
+# so we do NOT install a top-level `cuda` package here. A regular
+# (non PEP 420) `cuda/__init__.py` would shadow co-installed
+# distributions that legitimately contribute to the `cuda.*`
+# namespace (`cuda-bindings` pulled by PyTorch / RAPIDS / Triton /
+# nsight tooling, etc.); whichever package wins the `__init__.py`
+# race in `site-packages` silently hides the loser's `cuda.core`.
+# `from cuda.core import ...` therefore resolves only after
+# `import nccl` has run; users who reach `cuda.core` first get
+# whatever package owns the namespace on disk, which is the
+# correct behavior.
 include = ["nccl*"]
 
 [tool.setuptools.package-data]
@@ -95,9 +97,15 @@ typeCheckingMode = "basic"
 minversion = "6.0"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+# The collectives + interop suites need >=2 MPI ranks, so they live
+# under the `mpi` marker and are launched via
+# `mpirun -np N pytest -m mpi tests/`. Declared here for `--strict-markers`.
+markers = [
+    "mpi: requires mpirun and >=2 ranks (uses pytest-mpi)",
+]
 
 [tool.cibuildwheel]
-build = "cp310-* cp311-* cp312-* cp313-* cp314-*"
+build = "cp310-* cp311-* cp312-* cp313-* cp314-* cp314t-*"
 skip = "*-musllinux_*"
 build-verbosity = 1
 
@@ -106,10 +114,3 @@ archs = ["native"]  # Fast local builds; override in CI for multi-arch
 manylinux-x86_64-image = "manylinux_2_28"
 manylinux-aarch64-image = "manylinux_2_28"
 
-[tool.uv]
-conflicts = [
-    [
-        { extra = "cu12" },
-        { extra = "cu13" },
-    ]
-]

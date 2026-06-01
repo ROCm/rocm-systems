@@ -18,6 +18,8 @@
 #include <mutex>
 #include "os.h"
 
+#include <dlfcn.h>
+
 extern ncclProfiler_t* getNcclProfiler_v1(void* lib);
 extern ncclProfiler_t* getNcclProfiler_v2(void* lib);
 extern ncclProfiler_t* getNcclProfiler_v3(void* lib);

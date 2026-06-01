@@ -26,6 +26,39 @@ extern int64_t ncclParamIbDataDirect();
 extern int64_t ncclParamGinEnable();
 extern int64_t ncclParamGinType();
 
+// [RCCL] Local copies of the GDR/host CPU-accessible memory helpers.
+// Originally lived in gin_host_proxy.cc; the NCCL 2.29.7 patch removed them
+// upstream but AMD's rma_proxy still needs them. They mirror the gin_host_proxy
+// templates and likewise ignore the manager argument for now.
+namespace {
+
+template <typename T>
+ncclResult_t allocMemCPUAccessible(T **ptr, T **devPtr, size_t nelem, int /*host_flags*/,
+                                   void **gdrHandle, struct ncclMemManager* manager,
+                                   bool forceHost = false) {
+  if (ncclGdrCopy && !forceHost) {
+    NCCLCHECK(ncclGdrCudaCalloc(ptr, devPtr, nelem, gdrHandle, manager));
+  } else {
+    NCCLCHECK(ncclCuMemHostAlloc((void **)ptr, NULL, nelem * sizeof(T)));
+    memset((void *)*ptr, 0, nelem * sizeof(T));
+    *devPtr = *ptr;
+    if (gdrHandle) *gdrHandle = NULL;
+  }
+  return ncclSuccess;
+}
+
+template <typename T>
+ncclResult_t freeMemCPUAccessible(T *ptr, void *gdrHandle, struct ncclMemManager* manager) {
+  if (gdrHandle != NULL) {
+    NCCLCHECK(ncclGdrCudaFree(gdrHandle, manager));
+  } else {
+    NCCLCHECK(ncclCuMemHostFree(ptr));
+  }
+  return ncclSuccess;
+}
+
+} // namespace
+
 NCCL_PARAM(RmaProxyDumpSignal, "RMA_PROXY_DUMP_SIGNAL", -1);
 NCCL_PARAM(RmaProxyQueueSize, "RMA_PROXY_QUEUE_SIZE", -1);
 
@@ -658,8 +691,10 @@ ncclResult_t ncclRmaPutProxy(struct ncclComm* comm, struct ncclKernelPlan* plan,
     // If queue is full, flush pending batch ops to allow progress thread to free slots
     while ((pi - ci) >= rmaProxyCtx->queueSize) {
       if (batchIdx > 0) {
-        NCCLCHECKGOTO(ncclCuStreamBatchMemOp(stream, batchIdx, batchParams), ret, fail);
-        NCCLCHECKGOTO(ncclCuStreamBatchMemOp(stream, batchIdx, batchParams+nRmaTasksProxy), ret, fail);
+        // [RCCL] HIP exposes hipStreamBatchMemOp directly; ncclCuStreamBatchMemOp
+        // wrapper (in cudawrap.cc) is excluded from the RCCL build.
+        CUCHECKGOTO(hipStreamBatchMemOp(stream, batchIdx, batchParams, 0), ret, fail);
+        CUCHECKGOTO(hipStreamBatchMemOp(stream, batchIdx, batchParams+nRmaTasksProxy, 0), ret, fail);
         batchIdx = 0;
       }
       // Yield to allow progress thread to run and process pending entries
@@ -701,7 +736,10 @@ ncclResult_t ncclRmaPutProxy(struct ncclComm* comm, struct ncclKernelPlan* plan,
     batchParams[batchIdx].writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_64;
     batchParams[batchIdx].writeValue.address = (CUdeviceptr)&rmaProxyCtx->readySeqsDev[task->peer];
     batchParams[batchIdx].writeValue.value = desc->seq;
-    batchParams[batchIdx].writeValue.flags = CU_STREAM_WRITE_VALUE_DEFAULT;
+    // [RCCL] CU_STREAM_WRITE_VALUE_DEFAULT is a CUDA-specific constant with no HIP equivalent.
+    // This field must be initialized to satisfy the CUDA-compatible struct definition,
+    // but the HIP runtime does not use this flag and treats it as 0.
+    batchParams[batchIdx].writeValue.flags = 0;
 
     // Prepare the doneSeq wait operation
     batchParams[batchIdx+nRmaTasksProxy].waitValue.operation = CU_STREAM_MEM_OP_WAIT_VALUE_64;
@@ -726,10 +764,11 @@ ncclResult_t ncclRmaPutProxy(struct ncclComm* comm, struct ncclKernelPlan* plan,
 
   // Execute ready operations (readySeq writes) first, then done operations (doneSeq waits)
   if (batchIdx == nRmaTasksProxy) {
-    NCCLCHECKGOTO(ncclCuStreamBatchMemOp(stream, 2*batchIdx, batchParams), ret, fail);
+    // [RCCL] direct HIP call (see comment above).
+    CUCHECKGOTO(hipStreamBatchMemOp(stream, 2*batchIdx, batchParams, 0), ret, fail);
   } else {
-    NCCLCHECKGOTO(ncclCuStreamBatchMemOp(stream, batchIdx, batchParams), ret, fail);
-    NCCLCHECKGOTO(ncclCuStreamBatchMemOp(stream, batchIdx, batchParams+nRmaTasksProxy), ret, fail);
+    CUCHECKGOTO(hipStreamBatchMemOp(stream, batchIdx, batchParams, 0), ret, fail);
+    CUCHECKGOTO(hipStreamBatchMemOp(stream, batchIdx, batchParams+nRmaTasksProxy, 0), ret, fail);
   }
 
 exit:
@@ -788,7 +827,8 @@ ncclResult_t ncclRmaWaitSignalProxy(struct ncclComm* comm, struct ncclKernelPlan
     }
 
     // Execute all wait operations in a single batch
-    NCCLCHECKGOTO(ncclCuStreamBatchMemOp(stream, opIdx, batchParams), ret, fail);
+    // [RCCL] direct HIP call; ncclCuStreamBatchMemOp wrapper is excluded from the RCCL build.
+    CUCHECKGOTO(hipStreamBatchMemOp(stream, opIdx, batchParams, 0), ret, fail);
   }
 
   // Free the task

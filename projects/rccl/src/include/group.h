@@ -1,9 +1,9 @@
 /*************************************************************************
- * SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: Apache-2.0
+ * Copyright (c) 2015-2017, NVIDIA CORPORATION. All rights reserved.
+ * Modifications Copyright (c) Microsoft Corporation. Licensed under the MIT License.
  *
- * See LICENSE.txt for more license information
- *************************************************************************/
+ * See LICENSE.txt for license information
+ ************************************************************************/
 
 #ifndef NCCL_GROUP_H_
 #define NCCL_GROUP_H_
@@ -86,11 +86,6 @@ extern thread_local ncclResult_t ncclGroupError;
 extern thread_local struct ncclComm* ncclGroupCommHead[ncclGroupTaskTypeNum];
 extern thread_local struct ncclComm* ncclGroupCommPreconnectHead;
 extern thread_local int ncclGroupBlocking;
-
-inline ncclResult_t ncclGroupStartInternal() {
-  ncclGroupDepth++;
-  return ncclSuccess;
-}
 
 inline bool ncclGroupEnabled() {
   return ncclGroupDepth != 0;

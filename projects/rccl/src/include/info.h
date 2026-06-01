@@ -1,9 +1,9 @@
 /*************************************************************************
- * SPDX-FileCopyrightText: Copyright (c) 2019-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: Apache-2.0
+ * Copyright (c) 2019-2022, NVIDIA CORPORATION. All rights reserved.
+ * Modifications Copyright (c) 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
  *
- * See LICENSE.txt for more license information
- *************************************************************************/
+ * See LICENSE.txt for license information
+ ************************************************************************/
 
 #ifndef NCCL_INFO_H_
 #define NCCL_INFO_H_
@@ -29,13 +29,18 @@ struct ncclInfo {
   // Algorithm details
   int chunkSteps;
   int sliceSteps;
+  const void* acc;
+#ifdef ENABLE_ROCSHMEM
+  // Optional per-operation metadata for rocSHMEM collectives.
+  size_t* sizes;
+#endif
+  bool useDirect;
   // One-sided ops
   size_t peerWinOffset;
   ncclWindow_t peerWin;
   int sigIdx;
   int ctx;
   unsigned int flags;
-  // WaitSignal descriptors
   int nDesc;
   ncclWaitSignalDesc_t* signalDescs;
 };

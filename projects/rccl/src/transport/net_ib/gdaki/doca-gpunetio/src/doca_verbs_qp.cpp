@@ -879,12 +879,8 @@ doca_error_t doca_verbs_qp::init2rtr(struct doca_verbs_qp_attr &verbs_qp_attr,
 
     if (attr_mask & DOCA_VERBS_QP_ATTR_MIN_RNR_TIMER)
         DEVX_SET(qpc, qpc, min_rnr_nak, verbs_qp_attr.min_rnr_timer);
-    if ((verbs_qp_attr.ah_attr->addr_type == DOCA_VERBS_ADDR_TYPE_IB_GRH) ||
-        (verbs_qp_attr.ah_attr->addr_type == DOCA_VERBS_ADDR_TYPE_IB_NO_GRH)) { /* IB */
+    if (verbs_qp_attr.ah_attr->addr_type == DOCA_VERBS_ADDR_TYPE_IB_GRH)
         DEVX_SET(qpc, qpc, primary_address_path.tclass, verbs_qp_attr.ah_attr->traffic_class);
-        DEVX_SET(qpc, qpc, primary_address_path.rlid, verbs_qp_attr.ah_attr->dlid);
-        DEVX_SET(qpc, qpc, primary_address_path.sl, verbs_qp_attr.ah_attr->sl);
-    }
     DEVX_SET(qpc, qpc, primary_address_path.stat_rate, verbs_qp_attr.ah_attr->static_rate);
 
     if (verbs_qp_attr.ah_attr->addr_type != DOCA_VERBS_ADDR_TYPE_IB_NO_GRH) {
@@ -893,6 +889,9 @@ doca_error_t doca_verbs_qp::init2rtr(struct doca_verbs_qp_attr &verbs_qp_attr,
         DEVX_SET(qpc, qpc, primary_address_path.hop_limit, verbs_qp_attr.ah_attr->hop_limit);
         DEVX_SET(qpc, qpc, primary_address_path.src_addr_index, verbs_qp_attr.ah_attr->sgid_index);
     }
+
+    DEVX_SET(qpc, qpc, primary_address_path.rlid, verbs_qp_attr.ah_attr->dlid);
+    DEVX_SET(qpc, qpc, primary_address_path.sl, verbs_qp_attr.ah_attr->sl);
 
     if ((verbs_qp_attr.ah_attr->addr_type == DOCA_VERBS_ADDR_TYPE_IPv4) ||
         (verbs_qp_attr.ah_attr->addr_type == DOCA_VERBS_ADDR_TYPE_IPv6)) { /* ROCE */

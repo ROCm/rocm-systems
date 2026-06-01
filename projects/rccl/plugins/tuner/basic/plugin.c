@@ -1,9 +1,8 @@
 /*************************************************************************
- * SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: Apache-2.0
+ * Copyright (c) 2015-2019, NVIDIA CORPORATION. All rights reserved.
  *
- * See LICENSE.txt for more license information
- *************************************************************************/
+ * See LICENSE.txt for license information
+ ************************************************************************/
 
 #include "tuner.h"
 
@@ -19,7 +18,7 @@ __hidden ncclResult_t pluginGetCollInfo(void* context, ncclFunc_t collType, size
   if (table[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] != NCCL_ALGO_PROTO_IGNORE) {
     table[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 0.0;
   }
-  *nChannels = 1;
+  *nChannels = 0;
   return ncclSuccess;
 }
 

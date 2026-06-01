@@ -1,9 +1,8 @@
 /*************************************************************************
- * SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: Apache-2.0
+ * Copyright (c) 2015-2019, NVIDIA CORPORATION. All rights reserved.
  *
- * See LICENSE.txt for more license information
- *************************************************************************/
+ * See LICENSE.txt for license information
+ ************************************************************************/
 
 #include "tuner.h"
 #include <stdio.h>
@@ -300,14 +299,13 @@ __hidden ncclResult_t pluginInit(void** context, uint64_t commId, size_t nRanks,
     // Note: Example numbers are for reference only.
     //       Actual numbers may vary depending on the hardware and network topology.
     //       These numbers are not guaranteed to be optimal for all cases.
-    // Limit the tree bandwidth to 15GB/s
-    constants->perChMaxTreeBws[NCCL_BLACKWELL_COMPCAP_IDX][NCCL_TUNING_SCALE_4NODES] = 15.0;
 
-    // Limit the ring bandwidth to 20GB/s
-    constants->perChMaxRingLL128Bws[NCCL_BLACKWELL_COMPCAP_IDX][NCCL_TUNING_SCALE_4NODES] = 20.0;
-
-    // Set NVLSTree base network latency to 24us
-    constants->hwLatencies[NCCL_HW_NET][NCCL_ALGO_NVLS][NCCL_PROTO_SIMPLE] = 24.0;
+    // Limit the Ring/Simple bandwidth ratio to 70% for <=2 nodes
+    constants->bwRatio[0][NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 0.70;
+    // Limit the Tree/Simple bandwidth ratio to 65% for >2 nodes
+    constants->bwRatio[1][NCCL_ALGO_TREE][NCCL_PROTO_SIMPLE] = 0.65;
+    // Set Ring/Simple base network latency to 280
+    constants->hwLatencies[NCCL_HW_NET][NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 280.0;
   }
 
   TunerContext* ctx = (TunerContext*)malloc(sizeof(TunerContext));
@@ -356,14 +354,17 @@ __hidden ncclResult_t pluginGetCollInfo(void* context, ncclFunc_t collType, size
   TunerContext* ctx = (TunerContext*)context;
   if (!ctx) return ncclInternalError;
 
-  // Default channels
-  *nChannels = 1;
+  // Set default channels to 0 to ensure RCCL uses its default channel selection logic in case no match is found or wildcard is used in config.
+  *nChannels = 0;
 
   if (ctx->logFunction) {
     ctx->logFunction(NCCL_LOG_TRACE, NCCL_TUNING, __FILE__, __LINE__,
                      "TUNER/ExamplePlugin: pluginGetCollInfo called - collType=%s, nBytes=%zu, numPipeOps=%d, regBuff=%d, numConfigs=%d",
                      collTypeToString(collType), nBytes, numPipeOps, regBuff, ctx->numConfigs);
   }
+
+  // Cast the collCostTable pointer to a 2D array to fix the segmentation fault
+  float (*table)[NCCL_NUM_PROTOCOLS] = (float (*)[NCCL_NUM_PROTOCOLS])collCostTable;
 
   // Look for matching configuration
   for (int i = 0; i < ctx->numConfigs; i++) {
@@ -393,14 +394,14 @@ __hidden ncclResult_t pluginGetCollInfo(void* context, ncclFunc_t collType, size
 
       // Check bounds
       if (config->algorithm < numAlgo && config->protocol < numProto) {
-        if (collCostTable[config->algorithm][config->protocol] != NCCL_ALGO_PROTO_IGNORE) {
+        if (table[config->algorithm][config->protocol] != NCCL_ALGO_PROTO_IGNORE) {
           if (ctx->logFunction) {
             ctx->logFunction(NCCL_LOG_TRACE, NCCL_TUNING, __FILE__, __LINE__,
                              "TUNER/ExamplePlugin: Setting cost table[%s][%s] (%p) = 0.0 (was %.1f)",
                              algorithmToString(config->algorithm), protocolToString(config->protocol),
-                             &collCostTable[config->algorithm][config->protocol], collCostTable[config->algorithm][config->protocol]);
+                             &table[config->algorithm][config->protocol], table[config->algorithm][config->protocol]);
           }
-          collCostTable[config->algorithm][config->protocol] = 0.0; // Set low cost to prefer this configuration
+          table[config->algorithm][config->protocol] = 0.0; // Set low cost to prefer this configuration
 
           // Only override channels if not set to -1 (keep default)
           if (config->nChannels != -1) {

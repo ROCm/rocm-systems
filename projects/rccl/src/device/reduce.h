@@ -1,9 +1,9 @@
 /*************************************************************************
- * SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: Apache-2.0
+ * Copyright (c) 2015-2022, NVIDIA CORPORATION. All rights reserved.
+ * Modifications Copyright (c) 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
  *
- * See LICENSE.txt for more license information
- *************************************************************************/
+ * See LICENSE.txt for license information
+ ************************************************************************/
 
 #include "device.h"
 #include "collectives.h"
@@ -11,8 +11,17 @@
 
 namespace {
   template<typename T, typename RedOp, typename Proto>
-  __device__ __forceinline__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
+#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
+  __device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
+#else
+  __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
+#endif
+#ifdef ENABLE_WARP_SPEED
+    int warp = threadIdx.x / WARP_SIZE;
+    ncclRing *ring = &ncclShmem.warpChannel[warp].ring;
+#else
     ncclRing *ring = &ncclShmem.channel.ring;
+#endif
     const int nranks = ncclShmem.comm.nRanks;
     const int rank = ncclShmem.comm.rank;
     const int prevRank = ring->userRanks[nranks-1];
@@ -20,15 +29,19 @@ namespace {
     size_t chunkCount;
     size_t channelCount;
     size_t gridOffset;
+#ifdef ENABLE_WARP_SPEED
+    ncclCollCbdPart(work, ncclShmem.warpChannelId[warp], Proto::Id, sizeof(T), (size_t*)nullptr, &gridOffset, &channelCount, &chunkCount);
+#else
     ncclCollCbdPart(work, ncclShmem.channelId, Proto::Id, sizeof(T), (size_t*)nullptr, &gridOffset, &channelCount, &chunkCount);
+#endif
     size_t offset;
     int nelem;
 
     // Coverity reports that the callee treats &ring->next as an array.  However, due to the use of
     // FanSymmetric<1>, only the first element is ever accessed, so it's fine.
     // coverity[callee_ptr_arith:FALSE]
-    Primitives<T, RedOp, FanSymmetric<1>, 0, Proto, 0>
-      prims(tid, nthreads, &ring->prev, &ring->next, work->sendbuff, work->recvbuff, work->redOpArg);
+    Primitives<T, RedOp, FanSymmetric<1>, 0, Proto, 0, false, 0, Pipeline>
+      prims(tid, nthreads, &ring->prev, &ring->next, work->sendbuff, work->recvbuff, work->redOpArg, 0, work->connIndex, work->connIndex);
 
     if (prevRank == root) {
       for (size_t elemOffset = 0; elemOffset < channelCount; elemOffset += chunkCount) {

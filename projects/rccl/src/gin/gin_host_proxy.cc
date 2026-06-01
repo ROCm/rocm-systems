@@ -72,12 +72,59 @@ struct ginProxyCtx {
   int nCountersPerContext;
   int nSignalsPerContext;
 };
+
+// Depending on GDR, allocate memory on the CPU or GPU.
+// host_flags is not used for now, but it is here for future use.
+template <typename T>
+static ncclResult_t allocMemCPUAccessible(T **ptr, T **devPtr, size_t nelem, int host_flags,
+                                          void **gdrHandle, bool forceHost = false) {
+  if (ncclGdrCopy && !forceHost) {
+    NCCLCHECK(ncclGdrCudaCalloc(ptr, devPtr, nelem, gdrHandle, NULL));
+  } else {
+    NCCLCHECK(ncclCuMemHostAlloc((void **)ptr, NULL, nelem * sizeof(T)));
+    memset((void *)*ptr, 0, nelem * sizeof(T));
+    *devPtr = *ptr;
+    if (gdrHandle) *gdrHandle = NULL;  // Mark as host allocated by nulling GDR handle
+  }
+  return ncclSuccess;
+}
+
+// [RCCL] Manager-aware overload added by the NCCL 2.29.7 sync; the manager
+// argument is currently ignored (memory tracking lives in mem_manager.cc and
+// isn't wired through this path yet).
+template <typename T>
+static ncclResult_t allocMemCPUAccessible(T **ptr, T **devPtr, size_t nelem, int host_flags,
+                                          void **gdrHandle, struct ncclMemManager* /*manager*/,
+                                          bool forceHost = false) {
+  return allocMemCPUAccessible(ptr, devPtr, nelem, host_flags, gdrHandle, forceHost);
+}
+
+// Depending on GDR, free memory on the CPU or GPU.
+template <typename T>
+static ncclResult_t freeMemCPUAccessible(T *ptr, void *gdrHandle) {
+  if (gdrHandle != NULL) {  // If a GDR handle exists, it was GDR memory
+    NCCLCHECK(ncclGdrCudaFree(gdrHandle, NULL));
+  } else {  // Otherwise, it was host memory (or GDR was off)
+    NCCLCHECK(ncclCuMemHostFree(ptr));
+  }
+  return ncclSuccess;
+}
+
+// [RCCL] Manager-aware overload added by the NCCL 2.29.7 sync; the manager
+// argument is currently ignored.
+template <typename T>
+static ncclResult_t freeMemCPUAccessible(T *ptr, void *gdrHandle, struct ncclMemManager* /*manager*/) {
+  return freeMemCPUAccessible(ptr, gdrHandle);
+}
+
 static ncclResult_t getDmaBufFd(void *addr, size_t length, int *fd,
                                 bool forceNonDataDirect = false) {
   if (ncclParamDmaBufEnable() == 0) return ncclInvalidUsage;
 
-#if CUDA_VERSION >= 11070
-  static size_t hostPageSize = ncclOsGetPageSize();
+  // GIN's symmetric windows are cuMem/VMM allocations registered with the NIC via ibv_reg_dmabuf_mr.
+  // the cuMem/hipMemGetHandleForAddressRange that exports the DMA-BUF FD requires this HIP version.
+#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
+  static size_t hostPageSize = sysconf(_SC_PAGESIZE);
   size_t alignedSize = length;
   ALIGN_SIZE(alignedSize, hostPageSize);
 
@@ -89,8 +136,16 @@ static ncclResult_t getDmaBufFd(void *addr, size_t length, int *fd,
     if (status == CUDA_SUCCESS) return ncclSuccess;
   }
 #endif
+
+#if defined(__HIP_PLATFORM_AMD__)
+  // Direct call: hipified to hipMemGetHandleForAddressRange on HIP at build time.
+  // Same pattern as transport/net.cc and transport/coll_net.cc.
+  CUresult status = cuMemGetHandleForAddressRange((void *)fd, (CUdeviceptr)addr, alignedSize,
+                                                  CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0);
+#else
   CUresult status = pfn_cuMemGetHandleForAddressRange((void *)fd, (CUdeviceptr)addr, alignedSize,
                                                       CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0);
+#endif
   if (status == CUDA_SUCCESS) return ncclSuccess;
 #endif
 
@@ -141,7 +196,12 @@ static int proxyGinPollGfd(struct ginProxyCtx *ctx, ginProxyHostGpuCtx *hostGpuC
   ncclGinProxyGfd_t *q = hostGpuCtx->queues + targetRank * hostGpuCtx->queueSize;
   uint32_t idx = hostGpuCtx->sis[targetRank] & (hostGpuCtx->queueSize - 1);
   ncclGinProxyQword_t qword;
+#if defined(__HIP_PLATFORM_AMD__)
+  uint64_t *headerPtr = (uint64_t *)__builtin_assume_aligned(&q[idx].qword[ncclGinProxyGfdHeader].raw, alignof(uint64_t));
+  qword.raw = __atomic_load_n(headerPtr, __ATOMIC_RELAXED);
+#else
   COMPILER_ATOMIC_LOAD_DEST(&q[idx].qword[ncclGinProxyGfdHeader].raw, &qword.raw, std::memory_order_relaxed);
+#endif
   if (qword.flag.v == 0) {
     return 0;
   }
@@ -150,17 +210,35 @@ static int proxyGinPollGfd(struct ginProxyCtx *ctx, ginProxyHostGpuCtx *hostGpuC
   gfd->qword[ncclGinProxyGfdHeader] = q[idx].qword[ncclGinProxyGfdHeader];
   // Wait for and copy the other qwords.
   for (int k = 1; k < ncclGinProxyGfdQwords; k++) {
+#if defined(__HIP_PLATFORM_AMD__)
+    uint64_t *qwordPtr = (uint64_t *)__builtin_assume_aligned(&q[idx].qword[k].raw, alignof(uint64_t));
+    do {
+      qword.raw = __atomic_load_n(qwordPtr, __ATOMIC_RELAXED);
+    } while (qword.flag.v == 0);
+#else
     do {
       COMPILER_ATOMIC_LOAD_DEST(&q[idx].qword[k].raw, &qword.raw, std::memory_order_relaxed);
     } while (qword.flag.v == 0);
+#endif
     gfd->qword[k] = qword;
   }
   // Now we have the full GFD in the local struct.
 
-  // Reset the GFD in the queue. This ensures that the proxy doesn't try to process the GFD again.
+  // Reset the GFD in the queue. This lets the producer know that the GFD is consumed.
+  // On HIP, NT-stores avoid an RFO stall behind in-flight PCIe writes from the GPU
+  // (can cost 80-200us under multi-GPU contention).
+#if defined(__HIP_PLATFORM_AMD__)
+  for (int k = 0; k < ncclGinProxyGfdQwords; k++) {
+    __builtin_nontemporal_store((uint64_t)0, &q[idx].qword[k].raw);
+  }
+  // Drain WC buffers so the NT-zero stores are visible before the credit (ci) advance,
+  // otherwise the GPU producer could overwrite the slot before the zeros land.
+  wc_store_fence();
+#else
   for (int k = 0; k < ncclGinProxyGfdQwords; k++) {
     COMPILER_ATOMIC_STORE(&q[idx].qword[k].raw, 0, std::memory_order_relaxed);
   }
+#endif
 
   // set the counter_id into the state
   uint32_t stateIdx = targetRank * hostGpuCtx->queueSize + idx;
@@ -188,6 +266,11 @@ static int proxyGinPollGfd(struct ginProxyCtx *ctx, ginProxyHostGpuCtx *hostGpuC
 }
 
 static int mapGfdOpToSignalOp(ncclGinProxyGfd_t *gfd) {
+  // Mask down to the signal-op bits only. WithInline and WithCounter are
+  // orthogonal modifiers and must be excluded -- otherwise an inline put
+  // with SignalInc (op = Put|WithInline|WithSignalInc = 0x0b) masks to
+  // 0x0a and falls through to default, silently demoting iputSignal to a
+  // plain iput so the remote signal cell never gets bumped.
   uint8_t op = gfd->qword[ncclGinProxyGfdHeader].header.op;
   uint8_t signalOp = op & (ncclGinProxyOpWithSignalInc | ncclGinProxyOpWithSignalAdd);
   switch (signalOp) {
@@ -229,8 +312,13 @@ static ncclResult_t proxyGinProcessGfd(ncclGin_t *ginComm, void *collComm, struc
   uint64_t srcOff;
   void *srcHandle;
   if (gfd->qword[ncclGinProxyGfdHeader].header.op & ncclGinProxyOpWithInline) {
-    uint64_t *inlineVal = &hostGpuCtx->inlines[state - hostGpuCtx->states];
-    srcOff = (uint64_t)&inlineVal[0] - (uint64_t)hostGpuCtx->inlines;
+    // `gfd` is a stack-local copy filled by proxyGinPollGfd, not a pointer
+    // into hostGpuCtx->queues, so we cannot do `gfd - hostGpuCtx->queues` to
+    // recover its slot index. Recover it from `state` instead, which is a
+    // real heap pointer (`*state = &hostGpuCtx->states[stateIdx]`).
+    size_t slotIdx = state - hostGpuCtx->states;
+    uint64_t *inlineVal = &hostGpuCtx->inlines[slotIdx];
+    srcOff = slotIdx * sizeof(uint64_t);
     // reconstruct the inline value from the two qwords
     *inlineVal = gfd->qword[ncclGinProxyGfdInlineLow].inlineLow.inlineValLow;
     if (size > 4)

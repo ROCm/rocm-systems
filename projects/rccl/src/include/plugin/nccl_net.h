@@ -12,6 +12,7 @@
 #include "nccl_common.h"
 #include "nccl_device/net_device.h"
 #include <stdint.h>
+#include <dlfcn.h>
 
 #define NCCL_NET_HANDLE_MAXSIZE 128
 //Maximum value NCCL can accept for maxP2pBytes and maxCollBytes net properties
@@ -57,5 +58,11 @@ typedef ncclNetCommConfig_v11_t ncclNetCommConfig_t;
 
 #define NCCL_NET_PLUGIN_SYMBOL ncclNetPlugin_v11
 #define NCCL_COLLNET_PLUGIN_SYMBOL ncclCollNetPlugin_v11
+
+// context passed from RCCL lib to n/w plugin
+typedef struct {
+  // channel id
+  uint32_t chId;
+} ncclNet_ctxt_t;
 
 #endif // end include guard

@@ -10,6 +10,9 @@
 #include "gdrwrap.h"
 #include "transport.h"
 
+// When RCCL_PXN_OPT_QP_USAGE is set to 1, ncclP2pChannelBaseForRound uses batch stride of comm->maxLocalRanks instead of 1 when p2p-batching is not enabled
+RCCL_PARAM(PxnOptQpUsage, "PXN_OPT_QP_USAGE", 0);
+
 ncclResult_t initChannel(struct ncclComm* comm, int channelId) {
   struct ncclChannel* channel = &comm->channels[channelId];
   if (channel->id != -1) return ncclSuccess;
@@ -40,10 +43,10 @@ ncclResult_t initChannel(struct ncclComm* comm, int channelId) {
 
   if (channel->devPeers == NULL) {
     if (sharedRes->devPeers[channelId] == NULL) {
-      NCCLCHECK(ncclCudaCallocAsync(sharedRes->devPeers + channelId, sharedRes->tpNRanks, deviceStream, comm->memManager));
+      NCCLCHECK(ncclCudaCallocAsync(sharedRes->devPeers + channelId, sharedRes->tpNRanks, deviceStream, comm->memManager, ncclMemOffload));
     }
     /* channel->devPeers is not shared, so just free it when calling commFree() */
-    NCCLCHECK(ncclCudaCallocAsync(&channel->devPeers, nPeers, deviceStream, comm->memManager));
+    NCCLCHECK(ncclCudaCallocAsync(&channel->devPeers, nPeers, deviceStream, comm->memManager, ncclMemOffload));
     ncclCommPushCudaFree(comm, channel->devPeers);
     NCCLCHECK(ncclCalloc(&channel->devPeersHostPtr, nPeers));
     for (int r = 0; r < nRanks; r++) {
@@ -55,7 +58,7 @@ ncclResult_t initChannel(struct ncclComm* comm, int channelId) {
 
   channel->ring.userRanks = ncclMemoryStackAlloc<int>(&comm->memPermanent, nRanks);
   channel->ring.rankToIndex = ncclMemoryStackAlloc<int>(&comm->memPermanent, nRanks);
-  NCCLCHECK(ncclCudaCallocAsync(&channel->devRingUserRanks, nRanks, deviceStream, comm->memManager));
+  NCCLCHECK(ncclCudaCallocAsync(&channel->devRingUserRanks, nRanks, deviceStream, comm->memManager, ncclMemOffload));
   ncclCommPushCudaFree(comm, channel->devRingUserRanks);
 
   /* guarantee addr has been copied into channel->devPeers */

@@ -7,7 +7,7 @@
 
 #ifndef _NCCL_DEVICE_CORE__TYPES_H_
 #define _NCCL_DEVICE_CORE__TYPES_H_
-#include "../core.h"
+#include "../core_tmp.h"
 #include "nccl_device/gin/gin_device_host_common.h"
 
 // nccl.h has: typedef ncclWindow_vidmem* ncclWindow_t;

@@ -18,11 +18,11 @@ To build the example plugin shipped as part of NCCL, just type `make`.
 ## Using the profiler plugin
 
 1. Add the directory of this profiler plugin to your `LD_LIBRARY_PATH` or set the `NCCL_PROFILER_PLUGIN`,
-   as documented in `plugins/profiler/README.md`.
+   as documented in `ext-profiler/README.md`.
 
 2. Set `NCCL_PROFILE_EVENT_MASK` bitmask to specify the NCCL events you want to instrument. By
    default, all collectives and send/recv operations will be traced. For more details about the event
-   representation used by the profiler refer to `plugins/profiler/README.md`.
+   representation used by the profiler refer to `ext-profiler/README.md`.
 
    As an example, setting:
 
@@ -148,7 +148,7 @@ The `AllReduce` entry presents information about the `ncclAllReduce` operation. 
 - nChannels   : Number of channels used to process the ncclAllReduce
 
 If the proxy events are not active (e.g., the `ncclAllReduce` is intranode) the end timestamp will match the time
-consumed by the CPU to launch the collective. For more details refer to `plugins/profiler/README.md`, section `Profiling
+consumed by the CPU to launch the collective. For more details refer to `ext-profiler/README.md`, section `Profiling
 of collective and p2p operations`.
 
 The Proxy send trace gives a summary of the proxy progress thread activity for the channel. If more details are

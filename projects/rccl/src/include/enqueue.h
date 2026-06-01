@@ -18,6 +18,8 @@
 #define NCCL_SIMPLE_ALIGNMENT (WARP_SIZE * 8LL * 16LL)
 #define NCCL_BYTES_ALIGNMENT 16
 
+void* rcclGetKernelIndex(int unroll, bool useCollTrace, struct ncclTaskColl* task = NULL);
+
 ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* maxStackSize);
 ncclResult_t ncclEnqueueCheck(struct ncclInfo* info);
 ncclResult_t ncclLaunchPrepare(struct ncclComm* comm);
@@ -34,7 +36,7 @@ static inline size_t ncclFuncSendCount(ncclFunc_t func, int nRanks, size_t count
 static inline size_t ncclFuncRecvCount(ncclFunc_t func, int nRanks, size_t count) {
   return func == ncclFuncAllGather ? nRanks*count : count;
 }
-static inline size_t ncclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count) {
+rccl_static inline size_t ncclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count) {
   return func == ncclFuncAllGather || func == ncclFuncReduceScatter ? nRanks*count : count;
 }
 
@@ -46,6 +48,12 @@ ncclResult_t ncclGetAlgoInfo(
 bool ncclTestBudget(struct ncclKernelPlanBudget* budget, int nWorkBatches, ssize_t nWorkBytes);
 
 void ncclAddWorkBatchToPlan(struct ncclComm* comm, struct ncclKernelPlan* plan, int channelId, enum ncclDevWorkType workType, int devFuncId, uint32_t workOffset, int p2pEpoch =-1, int p2pRound = -1, bool newBatch = false);
+
+// RCCL-only shim: sets plan->kernelFn / kernelSpecialized using the file-local
+// ncclKerns table in enqueue.cc, for upstream-style schedulers (e.g.
+// scheduler/allgatherv_sched.cc) that would otherwise reference the absent
+// ncclDevKernelForFunc[] / ncclDevKernelForFuncIsSpecialized[] arrays.
+void ncclPlanSetDefaultKernel(struct ncclComm* comm, struct ncclKernelPlan* plan);
 
 ncclResult_t ncclAddProxyOpIfNeeded(struct ncclComm* comm, struct ncclKernelPlan* plan, struct ncclProxyOp* op);
 

@@ -1,74 +1,47 @@
 /*************************************************************************
- * SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: Apache-2.0
+ * Copyright (c) 2015-2021, NVIDIA CORPORATION. All rights reserved.
  *
- * See LICENSE.txt for more license information
- *************************************************************************/
+ * See LICENSE.txt for license information
+ ************************************************************************/
 
 #include "device.h"
 #include "collectives.h"
 #include "common.h"
-#include "nccl_device.h"
-#include "comm.h"
 
+#ifndef RCCL_DEVICE_LINKER
 __shared__ ncclShmemData ncclShmem;
 #if __CUDA_ARCH__ < 700
   __shared__ ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)/sizeof(ulong2)];
+#endif
 #endif
 
 struct RunWorkNop {
   __device__ void run() {}
 };
 
-__global__ void ncclDevKernel_Generic(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K) {
-  ncclKernelMain<-1, RunWorkNop>(&args4K.args);
+__launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernel_Generic_1(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
+  ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/false, /*Unroll*/1>(&argsStorage.args);
 }
-
-__global__ void ncclDevKernelGinResetSignalsAndCounters(ncclDevComm devComm) {
-  int tid = blockIdx.x * blockDim.x + threadIdx.x;
-  int totalThreads = gridDim.x * blockDim.x;
-
-  int signalCount = devComm.ginSignalCount;
-  int counterCount = devComm.ginCounterCount;
-
-  // Reset signals and counters for all contexts
-  for (int contextIdx = 0; contextIdx < devComm.ginContextCount; contextIdx++) {
-    ncclGin gin(devComm, contextIdx);
-
-    for (int i = tid; i < signalCount; i += totalThreads) {
-      gin.resetSignal(i);
-    }
-
-    for (int i = tid; i < counterCount; i += totalThreads) {
-      gin.resetCounter(i);
-    }
-  }
+__launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernel_Generic_2(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
+  ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/false, /*Unroll*/2>(&argsStorage.args);
 }
-
-ncclResult_t ncclGinResetSignalsAndCounters(struct ncclComm* comm, ncclDevComm_t const* devComm) {
-  int deviceWork = std::max(devComm->ginSignalCount, devComm->ginCounterCount);
-
-  if (deviceWork == 0) {
-    return ncclSuccess;
-  }
-
-  // Ensure we run on the comm's device (important when called from async reclaim thread)
-  CUDACHECK(cudaSetDevice(comm->cudaDev));
-
-  dim3 grid(1);
-  dim3 block(ncclSymkMaxThreads);
-
-  // NOTE: Use a dedicated stream so we only wait for the reset kernel, not other device work.
-  cudaStream_t stream = nullptr;
-  CUDACHECK(cudaStreamCreate(&stream));
-
-  void* args[] = { (void*)devComm };
-  CUDACHECK(cudaLaunchKernel((void*)ncclDevKernelGinResetSignalsAndCounters, grid, block, args, 0,
-                             stream));
-  CUDACHECK(cudaStreamSynchronize(stream));
-  CUDACHECK(cudaStreamDestroy(stream));
-
-  return ncclSuccess;
+__launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernel_Generic_4(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
+  ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/false, /*Unroll*/4>(&argsStorage.args);
 }
+#ifdef ENABLE_COLLTRACE
+__launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernelDebug_Generic_1(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
+  ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/true, /*Unroll*/1>(&argsStorage.args);
+}
+__launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernelDebug_Generic_2(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
+  ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/true, /*Unroll*/2>(&argsStorage.args);
+}
+__launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernelDebug_Generic_4(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
+  ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/true, /*Unroll*/4>(&argsStorage.args);
+}
+#endif
 
-__device__ void ncclDevFunc_Nop() {}
+#if defined(USE_INDIRECT_FUNCTION_CALL) || defined(RCCL_DEVICE_LINKER)
+__device__ void ncclDevFunc_Nop();
+#else
+__device__ __attribute__((noinline)) void ncclDevFunc_Nop();
+#endif
