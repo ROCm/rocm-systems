@@ -23,6 +23,28 @@ if("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx(10|11|12)[0-9][0-9]$"
     set(IS_DISABLED ON)
 endif()
 
+# Hardware-counter enumeration and pmc-check do NOT depend on PC sampling
+# support; on RDNA targets that inherit gfx11 in basic_counters.xml (e.g.
+# gfx1150 on WSL2), SQ_WAVES / GRBM_COUNT / GL2C_HIT enumerate cleanly via
+# rocprofv3-avail. Only disable when the counters literally cannot be queried
+# (gfx906, memcheck).
+set(IS_HW_COUNTERS_DISABLED OFF)
+if("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx906$"
+   OR ROCPROFILER_MEMCHECK)
+    set(IS_HW_COUNTERS_DISABLED ON)
+endif()
+
+# PC sampling is not available on navi2/3/4 (gfx10/11/12), gfx906, under
+# memcheck, or when arch info is missing (e.g. WSL synth-agent path).
+set(IS_PC_SAMPLING_DISABLED OFF)
+if("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx(10|11|12)[0-9][0-9]$"
+   OR "${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx906$"
+   OR "${pc-sampling-gpu-0-gfx-info}" STREQUAL ""
+   OR "${pc-sampling-gpu-0-gfx-info}" STREQUAL "pc-sampling-gpu-0-gfx-info-NOTFOUND"
+   OR ROCPROFILER_MEMCHECK)
+    set(IS_PC_SAMPLING_DISABLED ON)
+endif()
+
 rocprofiler_add_integration_execute_test(
     rocprofv3-avail-test-hw-counters
     COMMAND ${Python3_EXECUTABLE} $<TARGET_FILE:rocprofiler-sdk::rocprofv3-avail> info
@@ -33,7 +55,7 @@ rocprofiler_add_integration_execute_test(
     PRELOAD "${PRELOAD_ENV}"
     PASS_REGULAR_EXPRESSION
         "GPU:[0-9]*\\n*;Name:\\t[a-zA-Z_]*\\n;Counter_Name:\\t[a-zA-Z_]*\\n;Description:\\t(.*)\\n*;Expression:\\t(.)*\\n*;Block:\\t[a-zA-Z]*\\n*;Dimensions:\\t([A-Z_]*)\\t([[0-9]*:[0-9]*\\])*\\n*"
-    DISABLED "${IS_DISABLED}")
+    DISABLED "${IS_HW_COUNTERS_DISABLED}")
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-avail-test-pc-sample-config
@@ -46,27 +68,27 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "ROCPROFILER_PC_SAMPLING_BETA_ENABLED=on"
     PASS_REGULAR_EXPRESSION
         "GPU[:0-9 ]+\\n*;Name[:a-zA-Z_ ]+\\n;configs[: ]+;Method:(.*)\\n*;Unit:(.*)\\n*;Min_Interval:[0-9]*\\n*;Max_Interval:[0-9]*\\n*;Flags:(.*)\\n*"
-    DISABLED "${IS_DISABLED}")
+    DISABLED "${IS_PC_SAMPLING_DISABLED}")
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-avail-test-check-hw-counters
     COMMAND ${Python3_EXECUTABLE} $<TARGET_FILE:rocprofiler-sdk::rocprofv3-avail> -d 0
-            pmc-check SQ_WAVES GRBM_COUNT TCC_HIT
+            pmc-check SQ_WAVES GRBM_COUNT GL2C_HIT
     DEPENDS rocprofiler-sdk::rocprofv3-avail
     TIMEOUT 45
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
-    DISABLED "${IS_DISABLED}")
+    DISABLED "${IS_HW_COUNTERS_DISABLED}")
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-avail-test-check-hw-counters_2
     COMMAND ${Python3_EXECUTABLE} $<TARGET_FILE:rocprofiler-sdk::rocprofv3-avail>
-            pmc-check SQ_WAVES GRBM_COUNT TCC_HIT:device=0
+            pmc-check SQ_WAVES GRBM_COUNT GL2C_HIT:device=0
     DEPENDS rocprofiler-sdk::rocprofv3-avail
     TIMEOUT 45
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
-    DISABLED "${IS_DISABLED}")
+    DISABLED "${IS_HW_COUNTERS_DISABLED}")
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-avail-test
