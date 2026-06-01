@@ -38,6 +38,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
     rocpd support and for paths such as PC sampling that still use CSV/JSON
     outputs.
 
+* Reworded the N/A metric-evaluation warning to "divide-by-zero or empty counter data" (the prior "missing counter data" message could only fire for non-missing causes).
+
 ### Removed
 
 * ``--path`` and ``--subpath`` options have been removed from profile mode. Use ``--output-directory`` instead.
@@ -50,6 +52,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Optimized
 
 * Flattened the analyze-mode PMC dataframe to a single-index frame.
+
+* Eliminated "missing counter" warnings during analyze when profile-mode `-b` was used. Analyze now skips metrics outside the selected blocks.
 
 ### Resolved issues
 

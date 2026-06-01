@@ -564,7 +564,7 @@ def test_filter_block_5(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.filter_block
-def test_filter_block_6(binary_handler_analyze_rocprof_compute):
+def test_filter_block_6(binary_handler_analyze_rocprof_compute, capsys):
     for dir in indirs:
         workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
@@ -574,7 +574,10 @@ def test_filter_block_6(binary_handler_analyze_rocprof_compute):
             "--block",
             "100",
         ])
-        assert code == 0
+        captured = capsys.readouterr()
+        error_output = captured.err + captured.out
+        assert code != 0
+        assert "Invalid --block value 100" in error_output
 
         common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -713,7 +716,15 @@ def test_dispatch_5(binary_handler_analyze_rocprof_compute):
 @pytest.mark.misc
 def test_gpu_ids(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        if dir == "tests/workloads/vcopy/MI350":
+        if (
+            dir == "tests/workloads/vcopy/MI100"
+            or dir == "tests/workloads/vcopy/MI200"
+            or dir == "tests/workloads/vcopy/MI350"
+            or dir == "tests/workloads/vcopy/RDNA35_HALO"
+        ):
+            # MI100/MI200 workloads (rocpd format) have GPU IDs re-ranked to
+            # 0-based consecutive integers by process_rocpd_csv(). MI350 and
+            # RDNA35_HALO also use GPU ID 0.
             gpu_id = "0"
         else:
             gpu_id = "2"
@@ -1208,7 +1219,7 @@ def test_missing_file_handling(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.misc
-def test_filter_combinations_coverage(binary_handler_analyze_rocprof_compute):
+def test_filter_combinations_coverage(binary_handler_analyze_rocprof_compute, capsys):
     """Test basic filters that should work"""
     for dir in ["tests/workloads/vcopy/MI100", "tests/workloads/vcopy/MI200"]:
         if os.path.exists(dir):
@@ -1228,7 +1239,10 @@ def test_filter_combinations_coverage(binary_handler_analyze_rocprof_compute):
                 "--block",
                 "SQ",
             ])
-            assert code == 0
+            captured = capsys.readouterr()
+            error_output = captured.err + captured.out
+            assert code != 0
+            assert "Invalid --block value SQ" in error_output
 
             common.clean_output_dir(config["cleanup"], workload_dir)
             break

@@ -386,10 +386,11 @@ def calc_ai_analyze(
                 kernel_dfs[table_id] = arch_config.dfs[table_id].copy()
                 kernel_dfs_type[table_id] = arch_config.dfs_type[table_id]
 
-        # eval metrics for single kernel only
+        # eval_metric keys off kernel_dfs; extra dfs_expressions entries are ignored.
         eval_metric(
             kernel_dfs,
             kernel_dfs_type,
+            arch_config.dfs_expressions,
             workload.sys_info.iloc[0],
             workload.roofline_peaks,
             kernel_pmc_df,

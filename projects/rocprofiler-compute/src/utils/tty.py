@@ -24,11 +24,7 @@ from utils.utils_analysis import (
     get_bw_scale_and_unit,
     simplify_kernel_name,
 )
-from utils.utils_common import (
-    METRIC_ID_RE,
-    convert_metric_id_to_panel_info,
-    get_arch_alias_to_panel_id,
-)
+from utils.utils_common import convert_filter_blocks_to_panel_ids
 
 
 def _tty_view_is_table(args: argparse.Namespace) -> bool:
@@ -867,37 +863,16 @@ def show_all(
     Show all panels with their data in plain text mode.
     """
     comparable_columns = parser.build_comparable_columns(args.time_unit)
-    raw_filter_panel_ids = profiling_config.get("filter_blocks", [])
 
-    # Get gpu_arch from the first run's sys_info
     first_run = next(iter(runs.values()))
     gpu_arch = (
         first_run.sys_info.iloc[0]["gpu_arch"]
         if hasattr(first_run, "sys_info") and not first_run.sys_info.empty
         else None
     )
-
-    if isinstance(raw_filter_panel_ids, dict):
-        # For backward compatibility
-        raw_filter_panel_ids = [
-            name
-            for name, table_type in raw_filter_panel_ids.items()
-            if table_type == "metric_id"
-        ]
-
-    panel_alias = get_arch_alias_to_panel_id(gpu_arch) if gpu_arch else {}
-    filter_panel_ids: set[int] = set()
-    for bid in raw_filter_panel_ids:
-        bid_s = str(bid)
-
-        if not METRIC_ID_RE.match(bid_s):
-            if bid_s not in panel_alias:
-                raise KeyError(f"Unknown panel alias: {bid_s!r}")
-            bid_s = str(panel_alias[bid_s])
-
-        file_id, _, _ = convert_metric_id_to_panel_info(bid_s)
-        if file_id is not None:
-            filter_panel_ids.add(int(file_id))
+    filter_panel_ids = convert_filter_blocks_to_panel_ids(
+        profiling_config.get("filter_blocks", []), gpu_arch
+    )
 
     if args.include_cols:
         hidden_cols = list(set(config.HIDDEN_COLUMNS_CLI) - set(args.include_cols))
@@ -939,6 +914,13 @@ def show_all(
 
         for data_source in panel["data source"]:
             for table_type, table_config in data_source.items():
+                # Skip tables that were filtered out at build_dfs time
+                # (e.g. analyze-mode -b dropped this block). In baseline mode
+                # require the table in every run so per-run dfs[id] lookups
+                # downstream stay safe.
+                if not all(table_config["id"] in run.dfs for run in runs.values()):
+                    continue
+
                 # Emit warnings for roofline tables (401, 402)
                 # if roofline data is invalid
                 if table_config["id"] in [401, 402] and not has_valid_roofline:
@@ -1093,6 +1075,8 @@ def show_kernel_stats(
         for data_source in panel["data source"]:
             for table_type, table_config in data_source.items():
                 for run, data in runs.items():
+                    if table_config["id"] not in data.dfs:
+                        continue
                     single_df = data.dfs[table_config["id"]]
                     # NB:
                     #   For pmc_kernel_top.csv, have to sort here if not
