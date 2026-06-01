@@ -157,6 +157,25 @@ TEST(TrampolineBuilder, ForwardBranchOverflowFails) {
       << "Diagnostic must identify the forward branch, got: " << err;
 }
 
+// original_size and original_words.size()*4 must agree. The builder rejects
+// inconsistent plans rather than silently using one or the other.
+TEST(TrampolineBuilder, RejectsOriginalWordsSizeMismatch) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  TrampolinePlan plan;
+  plan.arch = kArch;
+  plan.anchor_offset = 0x100;
+  plan.original_size = 8; // expects 2 words ...
+  plan.trampoline_offset = 0x200;
+  plan.return_target = 0x108;
+  plan.original_words = {0xDEADBEEFu}; // ... but only one provided.
+  plan.before_items = {InlineAsmItem{{build_s_nop(0, kArch)}}};
+  plan.emit_original = true;
+
+  std::string err;
+  EXPECT_FALSE(TrampolineBuilder::build(plan, &err).has_value());
+  EXPECT_FALSE(err.empty()) << "Builder must explain the mismatch";
+}
+
 TEST(TrampolineBuilder, ReturnBranchOverflowFails) {
   // With forward_simm16 = INT16_MAX = 32767 (just in range) and
   // original_size = 4, the return branch needs simm16 = -32770 (one past
@@ -280,75 +299,12 @@ TEST(TrampolineBuilder, ReturnSimm16AtNegativeLimitSucceeds) {
             build_s_branch(std::numeric_limits<int16_t>::min(), kArch));
 }
 
-//==============================================================================
-// Inline-nop smoke guardrail
-//
-// The first DBI milestone (inline-nop smoke) only emits the no-clobber
-// `s_nop 0` placeholder body so we never produce instrumentation bytes that
-// need clobber handling or liveness. This is scaffolding — delete this block
-// when arbitrary inline-asm becomes legal.
-//==============================================================================
-
-TEST(TrampolineBuilderInlineNopSmokeGuardrail, RejectsNonCanonicalBody) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
-
-  auto valid_plan = [&] {
-    TrampolinePlan p;
-    p.arch = kArch;
-    p.anchor_offset = 0x100;
-    p.original_size = 4;
-    p.trampoline_offset = 0x200;
-    p.return_target = 0x104;
-    p.original_words = {0xDEADBEEFu};
-    p.before_items = {InlineAsmItem{{build_s_nop(0, kArch)}}};
-    p.emit_original = true;
-    return p;
-  };
-
-  // Sanity: the unmutated plan is accepted, so each sub-case below is
-  // exercising exactly one guardrail dimension.
-  ASSERT_TRUE(TrampolineBuilder::build(valid_plan()).has_value());
-
-  // Extra before-item.
-  {
-    auto plan = valid_plan();
-    plan.before_items.push_back(InlineAsmItem{{build_s_nop(0, kArch)}});
-    std::string err;
-    EXPECT_FALSE(TrampolineBuilder::build(plan, &err).has_value())
-        << "extra before-item must be rejected";
-    EXPECT_FALSE(err.empty());
-  }
-
-  // Before-item that isn't s_nop 0.
-  {
-    auto plan = valid_plan();
-    plan.before_items = {InlineAsmItem{{build_s_branch(0, kArch)}}};
-    std::string err;
-    EXPECT_FALSE(TrampolineBuilder::build(plan, &err).has_value())
-        << "non-placeholder before-item must be rejected";
-    EXPECT_FALSE(err.empty());
-  }
-
-  // Any after-item at all.
-  {
-    auto plan = valid_plan();
-    plan.after_items.push_back(InlineAsmItem{{build_s_nop(0, kArch)}});
-    std::string err;
-    EXPECT_FALSE(TrampolineBuilder::build(plan, &err).has_value())
-        << "non-empty after_items must be rejected";
-    EXPECT_FALSE(err.empty());
-  }
-
-  // emit_original = false.
-  {
-    auto plan = valid_plan();
-    plan.emit_original = false;
-    std::string err;
-    EXPECT_FALSE(TrampolineBuilder::build(plan, &err).has_value())
-        << "emit_original = false must be rejected";
-    EXPECT_FALSE(err.empty());
-  }
-}
+// NOTE: the inline-nop smoke guardrail used to live in TrampolineBuilder and
+// was tested here. It has been moved to the orchestrator boundary as
+// validate_inline_nop_smoke_plan() in instrumentor.h, and the test moved with
+// it (see InlineNopSmokeGuardrail.* in instrumentor_test.cpp). The builder is
+// now generic and accepts any well-formed plan; milestone-scoped restrictions
+// are the orchestrator's responsibility.
 
 } // namespace
 } // namespace rocjitsu

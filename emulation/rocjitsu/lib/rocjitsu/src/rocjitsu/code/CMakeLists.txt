@@ -20,6 +20,7 @@ rj_add_object_library(rocjitsu_code
     dbt/semantic_translator.cpp
     dbt/waitcnt_translator.cpp
     patch/code_object_patcher.cpp
+    patch/instrumentor.cpp
     patch/spill_manager.cpp
     patch/trampoline_builder.cpp
 )

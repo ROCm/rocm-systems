@@ -49,6 +49,7 @@ add_executable(
     patch/spill_manager_test.cpp
     patch/instruction_builder_test.cpp
     patch/trampoline_builder_test.cpp
+    patch/instrumentor_test.cpp
     dbt/translate_test.cpp
     mtype_flags_test.cpp
     kfd_ioctl_test.cpp

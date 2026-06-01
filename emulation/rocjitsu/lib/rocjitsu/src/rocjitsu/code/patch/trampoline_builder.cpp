@@ -16,31 +16,6 @@ void report(std::string *out, const char *msg) {
     *out = msg;
 }
 
-// DBI currently only supports inlined nops as the instrumentation body. Any
-// other inline-asm shape needs clobber declarations and liveness handling,
-// which arrive in a later milestone — this guardrail keeps the first DBI
-// build from silently emitting bytes whose register footprint hasn't been
-// accounted for.
-[[nodiscard]] bool check_inline_nop_smoke_guardrail(const TrampolinePlan &plan,
-                                                    std::string *err) {
-  if (!plan.emit_original) {
-    report(err, "trampoline plan: emit_original must be true for the inline-nop smoke build");
-    return false;
-  }
-  if (!plan.after_items.empty()) {
-    report(err, "trampoline plan: after_items must be empty for the inline-nop smoke build");
-    return false;
-  }
-  if (plan.before_items.size() != 1 || plan.before_items[0].words.size() != 1 ||
-      plan.before_items[0].words[0] != build_s_nop(0, plan.arch)) {
-    report(err,
-           "trampoline plan: before_items must be exactly { { s_nop 0 } } "
-           "for the inline-nop smoke build");
-    return false;
-  }
-  return true;
-}
-
 [[nodiscard]] bool check_size_and_words(const TrampolinePlan &plan, std::string *err) {
   if (plan.original_size != 4 && plan.original_size != 8) {
     report(err, "trampoline plan: original_size must be 4 or 8");
@@ -54,6 +29,10 @@ void report(std::string *out, const char *msg) {
   return true;
 }
 
+// Appends @p w to @p dst in host byte order. AMDGPU code objects are little-
+// endian and rocjitsu only supports little-endian hosts (matches DBT's
+// memcpy convention in binary_translator.cpp); if either invariant ever
+// changes, this helper needs an explicit byte-swap.
 void append_word(std::vector<uint8_t> &dst, uint32_t w) {
   uint8_t buf[sizeof(w)];
   std::memcpy(buf, &w, sizeof(w));
@@ -64,8 +43,6 @@ void append_word(std::vector<uint8_t> &dst, uint32_t w) {
 
 std::optional<TrampolineBytes> TrampolineBuilder::build(const TrampolinePlan &plan,
                                                         std::string *error_out) {
-  if (!check_inline_nop_smoke_guardrail(plan, error_out))
-    return std::nullopt;
   if (!check_size_and_words(plan, error_out))
     return std::nullopt;
 
@@ -76,11 +53,11 @@ std::optional<TrampolineBytes> TrampolineBuilder::build(const TrampolinePlan &pl
     return std::nullopt;
   }
 
-  // Lay out trampoline body so we can compute the return branch offset. For
-  // the inline-nop smoke build the body is exactly [s_nop 0, original*]; the
-  // generic loops below also handle the eventual multi-item inline-asm shape.
+  // Lay out trampoline body so we can compute the return branch offset. The
+  // generic loops below handle any multi-item inline-asm shape; no reserve
+  // hint because the per-item word counts aren't known up front and
+  // vector::insert handles growth.
   std::vector<uint32_t> body;
-  body.reserve(1 + plan.original_words.size() + 1);
   for (const InlineAsmItem &item : plan.before_items)
     body.insert(body.end(), item.words.begin(), item.words.end());
   if (plan.emit_original)
