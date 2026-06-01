@@ -567,6 +567,19 @@ start_duration_thread()
                 }
                 else if(_finalized)
                 {
+                    if(_premature)
+                    {
+                        LOG_INFO("Sampling duration of {:.6f} seconds was "
+                                 "interrupted by finalization. Shutting down "
+                                 "sampling...",
+                                 config::get_sampling_duration());
+                    }
+                    else
+                    {
+                        LOG_INFO("Sampling duration of {:.6f} seconds has "
+                                 "elapsed. Shutting down sampling...",
+                                 config::get_sampling_duration());
+                    }
                     break;
                 }
                 else
@@ -1926,15 +1939,19 @@ struct sampling_initialization
 void
 postfork_parent_reinit()
 {
-    if(config::get_use_process_sampling() && config::get_use_amd_smi())
+    if(config::get_use_process_sampling())
+    {
         pmc::postfork_parent_reinit();
+    }
 }
 
 void
 postfork_child_cleanup()
 {
-    if(config::get_use_process_sampling() && config::get_use_amd_smi())
+    if(config::get_use_process_sampling())
+    {
         pmc::postfork_child_cleanup();
+    }
 }
 
 void

@@ -459,3 +459,37 @@ def validate_causal_json(
         args.extend(additional_args)
 
     return _run_validation_script("validate-causal-json.py", args, tests_dir, timeout)
+
+
+def validate_unified_memory_outputs(
+    output_dir: Path,
+    tests_dir: Path,
+    timeout: int = 60,
+) -> ValidationResult:
+    """Validate unified-memory text and JSON outputs in a test output tree."""
+    txt_matches = sorted(output_dir.rglob("unified_memory*.txt"))
+    json_matches = sorted(output_dir.rglob("unified_memory*.json"))
+
+    if not txt_matches:
+        return ValidationResult(False, f"No unified_memory*.txt found under {output_dir}")
+    if not json_matches:
+        return ValidationResult(
+            False, f"No unified_memory*.json found under {output_dir}"
+        )
+
+    txt_file = txt_matches[0]
+    json_file = json_matches[0]
+
+    if txt_file.parent != json_file.parent:
+        return ValidationResult(
+            False,
+            "Unified-memory outputs landed in different directories: "
+            f"{txt_file.parent} vs {json_file.parent}",
+        )
+
+    return _run_validation_script(
+        "validate-unified-memory.py",
+        ["--output-dir", str(txt_file.parent)],
+        tests_dir,
+        timeout,
+    )

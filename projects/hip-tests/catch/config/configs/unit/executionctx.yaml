@@ -1,0 +1,38 @@
+---
+executionctx:
+  Unit_hipGreenCtxCreateDestroy_Sanity:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamCreate_Sanity:
+    <<: *level_2
+  Unit_hipGreenCtx_kernelLaunch_Basic:
+    <<: *level_2
+  Unit_hipGreenCtxCreate_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamCreate_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDestroy_Negative:
+    <<: *level_2
+    disabled: [amd_linux, amd_windows]
+  Unit_hipExecutionCtxRecordWaitEvent_Sanity:
+    <<: *level_2
+  Unit_hipExecutionCtxRecordEventFunctional:
+    <<: *level_2
+  Unit_hipExecutionCtxRecordWait_Blocking:
+    <<: *level_2
+  Unit_hipExecutionCtxResourceSplit_Sanity:
+    <<: *level_2
+  Unit_hipExecutionCtxResourceSplit_By_Count_Sanity:
+    <<: *level_2
+  Unit_hipExecutionCtxResourceSplit_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxResourceSplit_Functional:
+    <<: *level_2
+  Unit_hipExecutionCtxResourceSplit_By_Count_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxResourceSplit_By_Count_Functional:
+    <<: *level_2
+  Unit_hipExecutionCtxResourceSplit_Backfill_Functional:
+    <<: *level_2
+  Unit_hipExecutionCtxResourceSplit_Disjoint_Sets:
+    <<: *level_2
+    disabled: [nvidia_linux]

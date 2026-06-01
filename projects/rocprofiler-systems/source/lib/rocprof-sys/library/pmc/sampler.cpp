@@ -8,6 +8,11 @@
 #include "library/pmc/collectors/gpu/perfetto_policy.hpp"
 #include "library/pmc/device_providers/amd_smi/provider.hpp"
 #include <cstdint>
+#include <rocprofiler-sdk/version.h>
+#if ROCPROFILER_VERSION >= 600
+#    include "library/pmc/collectors/gpu_perf_counter/collector.hpp"
+#    include "library/pmc/device_providers/rocprofiler_sdk/provider.hpp"
+#endif
 
 #if defined(ROCPROFSYS_BUILD_AINIC)
 #    include "library/pmc/collectors/nic/cache_policy.hpp"
@@ -20,13 +25,19 @@
 #include "library/pmc/collectors/cpu/perfetto_policy.hpp"
 #include "library/pmc/device_providers/procfs/provider.hpp"
 
+#include "core/agent.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/state.hpp"
 #include "library/pmc/device_providers/amd_smi/drivers/driver.hpp"
+#if ROCPROFILER_VERSION >= 600
+#    include "library/pmc/device_providers/rocprofiler_sdk/drivers/driver.hpp"
+#endif
 #include "library/runtime.hpp"
 
 #include "library/pmc/sampler.hpp"
+
+#include "logger/debug.hpp"
 
 #include <amd_smi/amdsmi.h>
 #include <timemory/backends/threading.hpp>
@@ -36,10 +47,13 @@
 #include <timemory/utility/delimit.hpp>
 #include <timemory/utility/locking.hpp>
 
+#include <atomic>
 #include <cassert>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <new>
+#include <stdexcept>
 #include <sys/resource.h>
 #include <vector>
 
@@ -90,6 +104,14 @@ using provider_factory_t =
     device_providers::amd_smi::provider_factory<drivers::amd_smi::driver_factory>;
 using provider_t      = provider_factory_t::provider_t;
 using gpu_collector_t = collectors::gpu::collector<provider_t, gpu_production_config>;
+
+#if ROCPROFILER_VERSION >= 600
+using gpu_perf_counter_provider_t =
+    device_providers::rocprofiler_sdk::provider<drivers::rocprofiler_sdk::driver_factory>;
+using gpu_perf_counter_collector_t =
+    collectors::gpu_perf_counter::collector<gpu_perf_counter_provider_t>;
+#endif
+
 #if defined(ROCPROFSYS_BUILD_AINIC)
 using nic_collector_t = collectors::nic::collector<provider_t, nic_production_config>;
 #endif
@@ -102,6 +124,10 @@ using cpu_collector_t = collectors::cpu::collector<cpu_provider_t, cpu_productio
 std::shared_ptr<provider_t> g_device_provider;
 
 std::unique_ptr<gpu_collector_t> g_gpu_collector;
+#if ROCPROFILER_VERSION >= 600
+std::shared_ptr<gpu_perf_counter_provider_t>  g_gpu_perf_counter_provider;
+std::unique_ptr<gpu_perf_counter_collector_t> g_gpu_perf_counter_collector;
+#endif
 #if defined(ROCPROFSYS_BUILD_AINIC)
 std::unique_ptr<nic_collector_t> g_nic_collector;
 #endif
@@ -162,6 +188,9 @@ sample()
     {
         slice.sample(timestamp);
     }
+#if ROCPROFILER_VERSION >= 600
+    if(g_gpu_perf_counter_collector) g_gpu_perf_counter_collector->sample(timestamp);
+#endif
 }
 
 void
@@ -178,29 +207,33 @@ setup()
 
     try
     {
-        // Create and inject device provider (shared between GPU and NIC collectors)
-        g_device_provider = provider_factory_t::create();
-
-        g_gpu_collector = std::make_unique<gpu_collector_t>(g_device_provider);
-#if defined(ROCPROFSYS_BUILD_AINIC)
-        g_nic_collector = std::make_unique<nic_collector_t>(g_device_provider);
-#endif
+        g_collector_slices.clear();
 
         g_cpu_provider  = cpu_provider_factory_t::create();
         g_cpu_collector = std::make_unique<cpu_collector_t>(g_cpu_provider);
 
-        g_collector_slices.clear();
-        g_collector_slices.emplace_back(*g_gpu_collector);
-#if defined(ROCPROFSYS_BUILD_AINIC)
-        g_collector_slices.emplace_back(*g_nic_collector);
-#endif
         g_collector_slices.emplace_back(*g_cpu_collector);
+
+        if(config::get_use_amd_smi())
+        {
+            // Create and inject device provider (shared between GPU and NIC collectors)
+            g_device_provider = provider_factory_t::create();
+
+            g_gpu_collector = std::make_unique<gpu_collector_t>(g_device_provider);
+#if defined(ROCPROFSYS_BUILD_AINIC)
+            g_nic_collector = std::make_unique<nic_collector_t>(g_device_provider);
+#endif
+
+            g_collector_slices.emplace_back(*g_gpu_collector);
+#if defined(ROCPROFSYS_BUILD_AINIC)
+            g_collector_slices.emplace_back(*g_nic_collector);
+#endif
+        }
 
         for(auto& slice : g_collector_slices)
         {
             slice.setup();
         }
-
         is_initialized() = true;
     } catch(const std::runtime_error& _e)
     {
@@ -232,6 +265,11 @@ shutdown()
     }
 
     is_initialized() = false;
+#if ROCPROFILER_VERSION >= 600
+    if(g_gpu_perf_counter_collector) g_gpu_perf_counter_collector->shutdown();
+    g_gpu_perf_counter_collector.reset();
+    g_gpu_perf_counter_provider.reset();
+#endif
 }
 
 void
@@ -243,6 +281,11 @@ post_process()
         slice.post_process();
     }
     g_collector_slices.clear();
+#if ROCPROFILER_VERSION >= 600
+    if(g_gpu_perf_counter_collector) g_gpu_perf_counter_collector->post_process();
+    g_gpu_perf_counter_collector.reset();
+    g_gpu_perf_counter_provider.reset();
+#endif
     g_device_provider.reset();
     g_cpu_provider.reset();
 }
@@ -264,6 +307,9 @@ pause()
     {
         slice.pause(timestamp);
     }
+#if ROCPROFILER_VERSION >= 600
+    if(g_gpu_perf_counter_collector) g_gpu_perf_counter_collector->pause(timestamp);
+#endif
 }
 
 void
@@ -276,6 +322,13 @@ postfork_child_cleanup()
         slice.shutdown();
     }
     g_collector_slices.clear();
+#if ROCPROFILER_VERSION >= 600
+    // Do not call shutdown() or stop() — rocprofiler SDK / HSA mutexes may be
+    // inherited locked from the parent. The parent owns SDK context shutdown.
+    // gpu_perf_counter is not in g_collector_slices so the loop above is safe.
+    g_gpu_perf_counter_collector.reset();
+    g_gpu_perf_counter_provider.reset();
+#endif
     g_gpu_collector.reset();
 #if defined(ROCPROFSYS_BUILD_AINIC)
     g_nic_collector.reset();
@@ -295,6 +348,10 @@ postfork_parent_reinit()
     g_reinit_pending.store(true);
 }
 
+// Intentionally a second-phase setup called after rocprofiler initializes (outside of
+// setup()), because the rocprofiler context and agent list are not available at
+// setup() time. shutdown() symmetrically stops and resets the provider/collector
+// globals created here.
 void
 prefork_lock_sampler()
 {
@@ -326,4 +383,43 @@ postfork_child_reset_sampler_lock()
     ::new(static_cast<void*>(&_m)) mutex_type{};
 }
 
+#if ROCPROFILER_VERSION >= 600
+void
+register_gpu_perf_counter_source(const std::vector<std::shared_ptr<agent>>& agent_list)
+{
+    auto_lock_t _lk{ type_mutex<category::amd_smi>() };
+
+    try
+    {
+        auto settings =
+            collectors::settings_policy::get_gpu_perf_counter_enabled_metrics();
+
+        auto counters = std::move(settings.explicit_counters);
+        // counters without :device= are broadcast to every GPU agent
+        for(const auto& name : settings.broadcast_names)
+        {
+            for(const auto& gpu_agent : agent_list)
+            {
+                counters.push_back({ name, gpu_agent->device_type_index });
+            }
+        }
+
+        const auto enabled_metrics =
+            collectors::gpu_perf_counter::enabled_metrics{ std::move(counters) };
+
+        g_gpu_perf_counter_provider =
+            std::make_shared<gpu_perf_counter_provider_t>(agent_list, enabled_metrics);
+        g_gpu_perf_counter_collector =
+            std::make_unique<gpu_perf_counter_collector_t>(g_gpu_perf_counter_provider);
+
+        g_gpu_perf_counter_collector->setup();
+        g_gpu_perf_counter_collector->config();
+
+        LOG_DEBUG("Registered GPU Perf Counter PMC source");
+    } catch(const std::runtime_error& runtime_exception)
+    {
+        LOG_ERROR("Failed to register SDK PMC source: {}", runtime_exception.what());
+    }
+}
+#endif
 }  // namespace rocprofsys::pmc

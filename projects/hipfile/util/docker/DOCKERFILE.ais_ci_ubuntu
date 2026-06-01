@@ -20,26 +20,60 @@ RUN apt update && \
         curl \
         gpg
 
+# Cache MAJOR/MINOR and a 'use new repo' flag for use by later RUN steps.
+# Threshold: ROCm 7.11+ ships from repo.amd.com to /opt/rocm/core-<MAJOR>.<MINOR>;
+# earlier releases ship from repo.radeon.com to /opt/rocm (legacy symlink).
+RUN ROCM_MAJOR=$(echo "${ROCM_VERSION}" | cut -d. -f1); \
+    ROCM_MINOR=$(echo "${ROCM_VERSION}" | cut -d. -f2); \
+    if [ "${ROCM_MAJOR}" -gt 7 ] || { [ "${ROCM_MAJOR}" -eq 7 ] && [ "${ROCM_MINOR}" -ge 11 ]; }; then \
+        ROCM_USE_NEW_REPO=1; \
+        ROCM_INSTALL_PATH="/opt/rocm/core-${ROCM_MAJOR}.${ROCM_MINOR}"; \
+    else \
+        ROCM_USE_NEW_REPO=0; \
+        ROCM_INSTALL_PATH="/opt/rocm"; \
+    fi; \
+    printf 'ROCM_MAJOR=%s\nROCM_MINOR=%s\nROCM_USE_NEW_REPO=%s\nROCM_INSTALL_PATH=%s\n' \
+        "${ROCM_MAJOR}" "${ROCM_MINOR}" "${ROCM_USE_NEW_REPO}" "${ROCM_INSTALL_PATH}" \
+        > /etc/rocm-build.env
+
 # Retrieve ROCm GPG key
-RUN curl https://repo.radeon.com/rocm/rocm.gpg.key | \
-    gpg --dearmor >> /etc/apt/keyrings/rocm.gpg
+RUN . /etc/rocm-build.env && \
+    if [ "${ROCM_USE_NEW_REPO}" = "1" ]; then \
+        curl https://repo.amd.com/rocm/packages/gpg/rocm.gpg | \
+            gpg --dearmor >> /etc/apt/keyrings/amdrocm.gpg; \
+    else \
+        curl https://repo.radeon.com/rocm/rocm.gpg.key | \
+            gpg --dearmor >> /etc/apt/keyrings/rocm.gpg; \
+    fi
 
 # Manually setup ROCm Package Repos
-# ROCM_PKG_REPO_VERSION normalizes the ROCm version used in the package repo URL.
+# ROCM_PKG_REPO_VERSION normalizes the legacy ROCm version used in the package repo URL.
 # If the PATCH component is 0, the PATCH of the version is dropped. Otherwise no
 # modification is made.
-RUN ROCM_PKG_REPO_VERSION="$(echo ${ROCM_PKG_REPO_OVERRIDE:-$ROCM_VERSION} | sed -E 's|([^.]+\.[^.]+)\.0$|\1|')"; \
-    cat <<EOF > /etc/apt/sources.list.d/rocm.list
-deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/${ROCM_PKG_REPO_VERSION} ${UBUNTU_CODENAME} main
-EOF
+RUN . /etc/rocm-build.env && \
+    if [ "${ROCM_USE_NEW_REPO}" = "1" ]; then \
+        echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/amdrocm.gpg] https://repo.amd.com/rocm/packages/ubuntu${UBUNTU_MAJOR_VERSION}${UBUNTU_MINOR_VERSION} stable main" \
+            > /etc/apt/sources.list.d/amdrocm.list; \
+    else \
+        ROCM_PKG_REPO_VERSION="$(echo ${ROCM_PKG_REPO_OVERRIDE:-$ROCM_VERSION} | sed -E 's|([^.]+\.[^.]+)\.0$|\1|')"; \
+        echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/${ROCM_PKG_REPO_VERSION} ${UBUNTU_CODENAME} main" \
+            > /etc/apt/sources.list.d/rocm.list; \
+    fi
 
-RUN cat <<EOF > /etc/apt/preferences.d/rocm-pin-600
+# Apt pinning is required for the legacy repo only; 7.11+ does not need it.
+# Outer EOT is a Dockerfile-level heredoc delimiter, kept distinct from the inner shell EOF.
+RUN <<"EOT"
+. /etc/rocm-build.env
+if [ "${ROCM_USE_NEW_REPO}" = "0" ]; then
+    cat <<EOF > /etc/apt/preferences.d/rocm-pin-600
 Package: *
 Pin: release o=repo.radeon.com
 Pin-Priority: 600
 EOF
+fi
+EOT
 
-# Development Dependencies
+# Common development dependencies
 RUN apt update && \
     apt install -y \
         clang \
@@ -47,23 +81,46 @@ RUN apt update && \
         doxygen \
         gdb \
         git \
-        hip-dev \
         libboost-program-options-dev \
         libmount-dev \
         llvm-dev \
         python3.12-dev \
-        python3.12-venv \
-        rocm-llvm-dev
+        python3.12-venv
+
+# ROCm dev packages
+RUN . /etc/rocm-build.env && \
+    if [ "${ROCM_USE_NEW_REPO}" = "1" ]; then \
+        apt install -y \
+            amdrocm-runtime-dev${ROCM_MAJOR}.${ROCM_MINOR}; \
+    else \
+        apt install -y \
+            hip-dev \
+            rocm-llvm-dev; \
+    fi
 
 # Configure system linker for ROCm
-RUN cat <<EOF > /etc/ld.so.conf.d/rocm.conf
-/opt/rocm/lib
-/opt/rocm/lib64
-EOF
-RUN ldconfig
+RUN . /etc/rocm-build.env && \
+    { echo "${ROCM_INSTALL_PATH}/lib"; \
+      echo "${ROCM_INSTALL_PATH}/lib64"; } \
+        > /etc/ld.so.conf.d/rocm.conf && \
+    ldconfig
 
-# Add ROCm bin directory to the path
-ENV PATH=/opt/rocm/bin:${PATH}
+# Write a /etc/profile.d script exporting ROCM_PATH and PATH for the install layout.
+RUN . /etc/rocm-build.env && \
+    printf 'export ROCM_PATH=%s\nexport PATH=%s/bin:$PATH\n' \
+        "${ROCM_INSTALL_PATH}" "${ROCM_INSTALL_PATH}" \
+        > /etc/profile.d/rocm.sh && \
+    chmod +x /etc/profile.d/rocm.sh
+
+# /etc/profile already iterates /etc/profile.d/*.sh for login shells. The
+# iterator script below applies the same behavior to interactive non-login
+# bash (via /etc/bash.bashrc) and non-interactive bash (via BASH_ENV).
+RUN printf '%s\n' \
+        'for _f in /etc/profile.d/*.sh; do [ -r "$_f" ] && . "$_f"; done' \
+        'unset _f' \
+        > /etc/bash_env.sh && \
+    echo '. /etc/bash_env.sh' >> /etc/bash.bashrc
+ENV BASH_ENV="/etc/bash_env.sh"
 
 # Environment Build Arg for ROCm
 ENV ROCM_VERSION="${ROCM_VERSION}"

@@ -78,19 +78,8 @@
 // a global instance of std::mutex to protect data passed during threads
 std::mutex myMutex;
 
-// To enable multiple init and shutdown calls, the reference count is used
-// to track the number of times the library has been initialized.
-static int init_ref_count = 0;
-
 #define SIZE 10
 char proc_id[SIZE] = "\0";
-
-#define AMDSMI_CHECK_INIT()          \
-  do {                               \
-    if (init_ref_count == 0) {       \
-      return AMDSMI_STATUS_NOT_INIT; \
-    }                                \
-  } while (0)
 
 static const std::map<amdsmi_accelerator_partition_type_t, std::string> partition_types_map = {
     {AMDSMI_ACCELERATOR_PARTITION_SPX, "SPX"}, {AMDSMI_ACCELERATOR_PARTITION_DPX, "DPX"},
@@ -117,31 +106,6 @@ static const std::map<amdsmi_memory_partition_type_t, rsmi_memory_partition_type
                           {AMDSMI_MEMORY_PARTITION_NPS4, RSMI_MEMORY_PARTITION_NPS4},
                           {AMDSMI_MEMORY_PARTITION_NPS8, RSMI_MEMORY_PARTITION_NPS8}};
 
-static amdsmi_status_t get_gpu_device_from_handle(amdsmi_processor_handle processor_handle,
-                                                  amd::smi::AMDSmiGPUDevice** gpudevice) {
-  AMDSMI_CHECK_INIT();
-  std::ostringstream ss;
-
-  if (processor_handle == nullptr || gpudevice == nullptr) {
-    ss << __PRETTY_FUNCTION__ << " | processor_handle is NULL; returning: AMDSMI_STATUS_INVAL";
-    LOG_ERROR(ss);
-    return AMDSMI_STATUS_INVAL;
-  }
-
-  amd::smi::AMDSmiProcessor* device = nullptr;
-  amdsmi_status_t r =
-      amd::smi::AMDSmiSystem::getInstance().handle_to_processor(processor_handle, &device);
-  if (r != AMDSMI_STATUS_SUCCESS) return r;
-
-  if (device->get_processor_type() == AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
-    *gpudevice = static_cast<amd::smi::AMDSmiGPUDevice*>(device);
-    return AMDSMI_STATUS_SUCCESS;
-  }
-
-  ss << __PRETTY_FUNCTION__ << " | returning AMDSMI_STATUS_NOT_SUPPORTED";
-  LOG_ERROR(ss);
-  return AMDSMI_STATUS_NOT_SUPPORTED;
-}
 template <typename F, typename... Args>
 amdsmi_status_t rsmi_wrapper(F&& f, amdsmi_processor_handle processor_handle,
                              uint32_t increment_gpu_id, Args&&... args) {
@@ -329,31 +293,22 @@ amdsmi_status_t rsmi_switch_wrapper(F&& f, amdsmi_processor_handle processor_han
 #endif  // BRCM_NIC
 
 amdsmi_status_t amdsmi_init(uint64_t flags) {
-  if (init_ref_count > 0) {
-    init_ref_count++;
+  if (amd::smi::amdsmi_library_initialized()) {
+    amd::smi::amdsmi_library_init_ref_acquire();
     return AMDSMI_STATUS_SUCCESS;
   }
-
   amdsmi_status_t status = amd::smi::AMDSmiSystem::getInstance().init(flags);
   if (status == AMDSMI_STATUS_SUCCESS) {
-    init_ref_count++;
+    amd::smi::amdsmi_library_init_ref_acquire();
   }
   return status;
 }
 
 amdsmi_status_t amdsmi_shut_down() {
-  if (init_ref_count == 0) {
+  if (!amd::smi::amdsmi_library_init_ref_release()) {
     return AMDSMI_STATUS_SUCCESS;
   }
-  // Decrement the reference count
-  init_ref_count--;
-  // If the reference count is still greater than 0, return success
-  if (init_ref_count > 0) {
-    return AMDSMI_STATUS_SUCCESS;
-  }
-  amdsmi_status_t status = amd::smi::AMDSmiSystem::getInstance().cleanup();
-
-  return status;
+  return amd::smi::AMDSmiSystem::getInstance().cleanup();
 }
 
 amdsmi_status_t amdsmi_status_code_to_string(amdsmi_status_t status, const char** status_string) {
@@ -3764,11 +3719,7 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(
   }
 
   std::ostringstream ss_2;
-  const uint32_t kMaxPartitions = 8;
-  uint32_t copy_partition_ids[kMaxPartitions] = {0};  // initialize all to 0s
-  std::copy(partition_id, partition_id + kMaxPartitions, copy_partition_ids);
-  std::copy(std::begin(copy_partition_ids), std::end(copy_partition_ids),
-            amd::smi::make_ostream_joiner(&ss_2, ", "));
+  ss_2 << partition_id[0];
 
   auto it_profile_type = partition_types_map.find(profile->profile_type);
   std::string partition_type_str = "N/A";
@@ -5273,6 +5224,81 @@ amdsmi_status_t amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_ha
   return (max_processes_original_size >= static_cast<uint32_t>(compute_process_list.size()))
              ? AMDSMI_STATUS_SUCCESS
              : AMDSMI_STATUS_OUT_OF_RESOURCES;
+}
+
+amdsmi_status_t amdsmi_get_gpu_process_list_by_pid(amdsmi_processor_handle* processor_handles,
+                                                   uint32_t num_processors,
+                                                   amdsmi_proc_info_by_pid_t* procs,
+                                                   uint32_t* max_processes) {
+  AMDSMI_CHECK_INIT();
+
+  if (!processor_handles || num_processors == 0 || !max_processes) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  // Collect processes from all GPUs, grouped by PID
+  std::map<uint32_t, amdsmi_proc_info_by_pid_t> pid_map;
+
+  for (uint32_t i = 0; i < num_processors; i++) {
+    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+    amdsmi_status_t r = get_gpu_device_from_handle(processor_handles[i], &gpu_device);
+    if (r != AMDSMI_STATUS_SUCCESS) continue;
+
+    uint32_t gpu_index = gpu_device->get_gpu_id();
+    auto compute_process_list = gpu_device->amdgpu_get_compute_process_list();
+
+    for (auto& [pid, proc_info] : compute_process_list) {
+      auto& entry = pid_map[proc_info.pid];
+
+      // This is the first time seeing this PID so populate top-level fields
+      if (entry.num_gpus == 0) {
+        entry.pid = proc_info.pid;
+        std::strncpy(entry.name, proc_info.name, AMDSMI_MAX_STRING_LENGTH - 1);
+        entry.name[AMDSMI_MAX_STRING_LENGTH - 1] = '\0';
+        std::strncpy(entry.container_name, proc_info.container_name, AMDSMI_MAX_STRING_LENGTH - 1);
+        entry.container_name[AMDSMI_MAX_STRING_LENGTH - 1] = '\0';
+      }
+
+      if (entry.num_gpus >= AMDSMI_MAX_DEVICES) continue;
+
+      auto& gpu_entry = entry.gpus[entry.num_gpus];
+      gpu_entry.gpu_index = gpu_index;
+      gpu_entry.mem = proc_info.mem;
+      gpu_entry.engine_usage.gfx = proc_info.engine_usage.gfx;
+      gpu_entry.engine_usage.enc = proc_info.engine_usage.enc;
+      gpu_entry.memory_usage.gtt_mem = proc_info.memory_usage.gtt_mem;
+      gpu_entry.memory_usage.cpu_mem = proc_info.memory_usage.cpu_mem;
+      gpu_entry.memory_usage.vram_mem = proc_info.memory_usage.vram_mem;
+      gpu_entry.cu_occupancy = proc_info.cu_occupancy;
+      gpu_entry.evicted_time = proc_info.evicted_time;
+      gpu_entry.sdma_usage = proc_info.sdma_usage;
+      entry.num_gpus++;
+    }
+  }
+
+  uint32_t num_pids = static_cast<uint32_t>(pid_map.size());
+
+  // Size query: procs is NULL, return required count
+  if (!procs) {
+    *max_processes = num_pids;
+    return AMDSMI_STATUS_SUCCESS;
+  }
+
+  const uint32_t capacity = *max_processes;
+  *max_processes = num_pids;
+
+  if (capacity == 0) {
+    return AMDSMI_STATUS_SUCCESS;
+  }
+
+  // Copy results sorted by PID (std::map is already sorted)
+  uint32_t idx = 0;
+  for (auto& [pid, entry] : pid_map) {
+    if (idx >= capacity) break;
+    procs[idx++] = entry;
+  }
+
+  return (capacity >= num_pids) ? AMDSMI_STATUS_SUCCESS : AMDSMI_STATUS_OUT_OF_RESOURCES;
 }
 
 amdsmi_status_t amdsmi_get_power_info(amdsmi_processor_handle processor_handle,

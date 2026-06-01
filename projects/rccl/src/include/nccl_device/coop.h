@@ -38,6 +38,56 @@ NCCL_DEVICE_INLINE int ncclCoopPopc(ncclCoopMask_t x) { return (int)__popc(x); }
 #endif
 
 #if __CUDACC__
+struct ncclCoopAny {
+  struct Storage { alignas(alignof(void*)) char space[16]; };
+  struct VTable {
+    int  (*thread_rank)(void const*);
+    int  (*size)(void const*);
+    void (*sync)(void*);
+  };
+
+  template <typename Impl>
+  __device__ static int thread_rank(void const* o) {
+    return static_cast<Impl const*>(o)->thread_rank();
+  }
+  template <typename Impl>
+  __device__ static int size(void const* o) {
+    return static_cast<Impl const*>(o)->size();
+  }
+  template <typename Impl>
+  __device__ static void sync(void* o) {
+    static_cast<Impl*>(o)->sync();
+  }
+
+  template <typename Impl>
+  __device__ static VTable const* get_vtable() {
+    static_assert(sizeof(Impl)  <= sizeof(Storage),  "Incompatible coop type size");
+    static_assert(alignof(Impl) <= alignof(Storage), "Incompatible coop type alignment");
+    static constexpr VTable v = { &thread_rank<Impl>, &size<Impl>, &sync<Impl> };
+    return &v;
+  }
+
+  Storage       storage;
+  VTable const* vtable;
+
+  ncclCoopAny() = default;
+  ncclCoopAny(ncclCoopAny const&) = default;
+  ncclCoopAny(ncclCoopAny&&)      = default;
+
+  template <typename Impl>
+  __device__ ncclCoopAny(Impl impl) {
+    ::new (&this->storage) Impl(impl);
+    this->vtable = get_vtable<Impl>();
+  }
+
+  __device__ int  thread_rank() const { return vtable->thread_rank(&storage); }
+  __device__ int  size()        const { return vtable->size(&storage); }
+  __device__ int  num_threads() const { return vtable->size(&storage); }
+  __device__ void sync()              { vtable->sync(&storage); }
+};
+#endif
+
+#if __CUDACC__
 template<int nThreadsPow2>
 struct ncclCoopTile { // An aligned pow2 set of threads within the warp.
   static_assert(nccl::utility::isPow2(nThreadsPow2) && nThreadsPow2 <= WARP_SIZE, "Condition required");
@@ -53,7 +103,7 @@ struct ncclCoopTile { // An aligned pow2 set of threads within the warp.
   }
   NCCL_DEVICE_INLINE void sync() {
 #if ROCM_VERSION >= 70000
-    __syncwarp(laneMask());
+    if (nThreadsPow2 > 1) __syncwarp(laneMask());
 #else
     __syncthreads();
 #endif
@@ -69,7 +119,7 @@ typedef ncclCoopTile<WARP_SIZE> ncclCoopWarp;
 #if __CUDACC__
 struct ncclCoopLanes { // Some lanes of this warp.
   ncclCoopMask_t lmask;
-  
+
   NCCL_DEVICE_INLINE constexpr ncclCoopLanes(ncclCoopMask_t lmask = ncclCoopFullMask): lmask(lmask) {}
 
   NCCL_DEVICE_INLINE int thread_rank() const {
@@ -101,7 +151,7 @@ struct ncclCoopWarpSpan {
   NCCL_DEVICE_INLINE constexpr ncclCoopWarpSpan(int warp0, int nWarps, int id):
     warp0(warp0), nWarps(nWarps), id(id) {
   }
-  
+
   NCCL_DEVICE_INLINE int thread_rank() const {
     return threadIdx.x - WARP_SIZE*warp0;
   }
@@ -161,6 +211,14 @@ NCCL_DEVICE_INLINE constexpr bool ncclCoopIsThread(ncclCoopCta) { return false; 
 #endif
 
 #if __CUDACC__
+template<int nThreads>
+NCCL_DEVICE_INLINE constexpr bool ncclCoopWithinWarp(ncclCoopTile<nThreads>) { return true; }
+NCCL_DEVICE_INLINE constexpr bool ncclCoopWithinWarp(ncclCoopLanes) { return true; }
+NCCL_DEVICE_INLINE constexpr bool ncclCoopWithinWarp(ncclCoopWarpSpan) { return false; }
+NCCL_DEVICE_INLINE constexpr bool ncclCoopWithinWarp(ncclCoopCta) { return false; }
+#endif
+
+#if __CUDACC__
 // Pick threads of our warp that are safe to use collectively.
 NCCL_DEVICE_INLINE ncclCoopLanes ncclCoopCoalesced() {
 #if ROCM_VERSION >= 70000
@@ -184,6 +242,57 @@ NCCL_DEVICE_INLINE ncclCoopLanes ncclCoopCoalesced(ncclCoopLanes coop) {
 template<int nThreads>
 NCCL_DEVICE_INLINE ncclCoopTile<nThreads> ncclCoopCoalesced(ncclCoopTile<nThreads> coop) {
   return coop;
+}
+#endif
+
+#if __CUDACC__
+template<int nThreads, typename T>
+NCCL_DEVICE_INLINE T ncclCoopBcast(ncclCoopTile<nThreads>, T value, int root, bool entrySync=true) {
+  constexpr int n = (sizeof(T)+4-1)/4;
+  union { uint32_t u[n]; T v; };
+  v = value;
+  #pragma unroll
+  for (int i=0; i < n; i++) u[i] = __shfl_sync(-1u, u[i], root, nThreads);
+  return v;
+}
+template<typename T>
+NCCL_DEVICE_INLINE T ncclCoopBcast(ncclCoopLanes coop, T value, int root, bool entrySync=true) {
+  uint32_t m = coop.lmask;
+  uint32_t r = root == 0 ? __ffs(m)-1 : __fns(m, 0, 1+root);
+  constexpr int n = (sizeof(T)+4-1)/4;
+  union { uint32_t u[n]; T v; };
+  v = value;
+  #pragma unroll
+  for (int i=0; i < n; i++) u[i] = __shfl_sync(m, u[i], r);
+  return v;
+}
+
+NCCL_DEVICE_INLINE ulong2* ncclCoopBcast_WarpSpan_stash() {
+  __shared__ ulong2 stash[15];
+  return stash;
+}
+
+template<typename T>
+NCCL_DEVICE_INLINE T ncclCoopBcast(ncclCoopWarpSpan coop, T value, int root, bool entrySync=true) {
+  static_assert(sizeof(T) <= sizeof(ncclCoopBcast_WarpSpan_stash()[0]), "Required");
+  if (entrySync) coop.sync();
+  if (coop.thread_rank() == root) *(T*)&ncclCoopBcast_WarpSpan_stash()[coop.id] = value;
+  coop.sync();
+  return *(T*)&ncclCoopBcast_WarpSpan_stash()[coop.id];
+}
+
+NCCL_DEVICE_INLINE ulong2* ncclCoopBcast_Cta_stash() {
+  __shared__ ulong2 stash;
+  return &stash;
+}
+
+template<typename T>
+NCCL_DEVICE_INLINE T ncclCoopBcast(ncclCoopCta coop, T value, int root, bool entrySync=true) {
+  static_assert(sizeof(T) <= sizeof(*ncclCoopBcast_Cta_stash()), "Required");
+  if (entrySync) coop.sync();
+  if (coop.thread_rank() == root) *(T*)ncclCoopBcast_Cta_stash() = value;
+  coop.sync();
+  return *(T*)ncclCoopBcast_Cta_stash();
 }
 #endif
 

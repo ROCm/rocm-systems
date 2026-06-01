@@ -13,6 +13,7 @@
 #include "rocclr/utils/debug.hpp"
 #include "hip_graph_capture.hpp"
 
+#include <unordered_map>
 #include <unordered_set>
 #include <thread>
 #include <stack>
@@ -53,6 +54,11 @@ typedef struct hipArray {
 
 namespace hip{
 extern std::once_flag g_ihipInitialized;
+
+  struct ResourceMeta {
+    uint32_t familyId;
+    uint32_t startCU;
+  };
 enum MemcpyType {
   hipHostToHost,      //!< Memcpy from host to host
   hipWriteBuffer,     //!< Memcpy from host to device
@@ -298,6 +304,7 @@ namespace hip {
   class Device;
   class MemoryPool;
   class Event;
+  class ExecutionCtx;
   class Stream : public amd::HostQueue {
   public:
     enum Priority : int { High = -1, Normal = 0, Low = 1 };
@@ -475,7 +482,7 @@ namespace hip {
 
   /// HIP Device class
   class Device : public amd::ReferenceCountedObject {
-  public:
+   public:
     Device(amd::Context* ctx, int devId)
         : context_(ctx),
           deviceId_(devId),
@@ -557,6 +564,15 @@ namespace hip {
       return mappedGraphicsResources_;
     }
 
+    // --- Execution context management ---
+    
+    ExecutionCtx* getPrimaryExecCtx() const { return primaryExecCtx_; }
+    void setPrimaryExecCtx(ExecutionCtx* ctx) { primaryExecCtx_ = ctx; }
+    std::recursive_mutex& getLock() { return lock_; }
+
+    void registerResource(uint32_t resId, uint32_t familyId, uint32_t startCU);
+    const ResourceMeta* lookupResource(uint32_t resId);
+
   private:
     /// Destroy all streams on this device (called by Reset)
     void destroyAllStreams();
@@ -582,6 +598,12 @@ namespace hip {
     // ----- Graphics resource tracking -----
     ObjectRegistry<hipGraphicsResource_t> registeredGraphicsResources_;
     ObjectRegistry<hipGraphicsResource_t> mappedGraphicsResources_;
+
+    // ----- Execution context state -----
+    ExecutionCtx* primaryExecCtx_ = nullptr;      //!< Primary execution context
+    std::unordered_map<uint32_t, ResourceMeta> resourceFamilyMap_;
+    std::mutex resourceFamilyMapLock_;
+
   };
 
   /// Per-thread state aggregator for HIP runtime (one instance per thread via thread_local).

@@ -1,7 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import importlib.util
 import os
+import random
 import shutil
 import subprocess
 import sys
@@ -10,11 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
-ROOT = os.path.dirname(os.path.dirname(__file__))
-SRC = os.path.join(ROOT, "src")
-if SRC not in sys.path:
-    sys.path.insert(0, SRC)
+from common import ROOT
 
 # Determine script path
 rocprof_compute_script_path = Path(ROOT) / "src/rocprof-compute"
@@ -179,6 +177,37 @@ def pytest_addoption(parser):
         ),
         help="Path to the rocprofiler-sdk tool",
     )
+
+    parser.addoption(
+        "--coverage-seed",
+        type=int,
+        default=random.randrange(2**32),
+        help=(
+            "RNG seed for test_torch_trace_coverage operator sampling "
+            "(default: a fresh random 32-bit seed per pytest invocation)"
+        ),
+    )
+    parser.addoption(
+        "--coverage-n",
+        type=int,
+        default=100,
+        help=(
+            "ATen operator sample budget for test_torch_trace_coverage. "
+            "Structural entries are always included; this budget caps "
+            "only the random ATen sample (default: 100)."
+        ),
+    )
+
+
+@pytest.fixture
+def require_torch_gpu():
+    """Skip the test when PyTorch or a CUDA-capable GPU is unavailable."""
+    if importlib.util.find_spec("torch") is None:
+        pytest.skip("PyTorch is not installed")
+    import torch
+
+    if not torch.cuda.is_available():
+        pytest.skip("torch.cuda.is_available() is False")
 
 
 @pytest.fixture(autouse=True)

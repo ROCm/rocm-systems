@@ -7,8 +7,10 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
+#include "rocjitsu/code/dbt/generated/encoding_cdna4_to_cdna3.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_rdna3.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_rdna4.h"
+#include "rocjitsu/code/dbt/generated/legalization_cdna4_to_cdna3.h"
 #include "rocjitsu/code/dbt/generated/legalization_cdna4_to_rdna3.h"
 #include "rocjitsu/code/dbt/generated/legalization_cdna4_to_rdna4.h"
 #include "rocjitsu/code/dbt/generated/legalization_types.h"
@@ -21,8 +23,8 @@
 
 #include <algorithm>
 #include <cassert>
-#include <climits>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <span>
 #include <unordered_set>
@@ -37,6 +39,8 @@ constexpr uint32_t kConservativeLoweringMinimumVgprs = 128;
 EncodingTranslateFn select_encoding_translator(rj_code_arch_t guest, rj_code_arch_t host) {
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4)
     return cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4;
+  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_CDNA3)
+    return cdna4_to_cdna3::translate_encoding_cdna4_to_cdna3;
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA3)
     return cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3;
   return nullptr;
@@ -46,6 +50,11 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4) {
     return [](uint16_t enc_id, uint16_t opcode) -> const InstructionLegalization * {
       return lookup(kLegalization_cdna4_to_rdna4, enc_id, opcode);
+    };
+  }
+  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_CDNA3) {
+    return [](uint16_t enc_id, uint16_t opcode) -> const InstructionLegalization * {
+      return lookup(kLegalization_cdna4_to_cdna3, enc_id, opcode);
     };
   }
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA3) {
@@ -63,6 +72,33 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
       return block.get();
   }
   return nullptr;
+}
+
+[[nodiscard]] bool compute_sopp_branch_offset(uint64_t branch_pc, uint64_t target,
+                                              int16_t &offset_dwords) {
+  // SOPP branches encode a signed dword offset from the next instruction. Keep
+  // the range check shared so both cave entry and return branches fail closed.
+  constexpr int64_t kBranchPcBiasBytes = static_cast<int64_t>(sizeof(uint32_t));
+  constexpr uint64_t kMaxSignedTarget = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
+  constexpr uint64_t kMaxSignedBranchPc =
+      static_cast<uint64_t>(std::numeric_limits<int64_t>::max() - kBranchPcBiasBytes);
+  // The PCs are unsigned until this check passes. Compare against the casted
+  // signed int64_t limits so the later signed conversion, and branch_pc + 4,
+  // cannot overflow.
+  if (branch_pc > kMaxSignedBranchPc || target > kMaxSignedTarget)
+    return false;
+
+  const int64_t delta_bytes = static_cast<int64_t>(target) - (static_cast<int64_t>(branch_pc) + 4);
+  if (delta_bytes % static_cast<int64_t>(sizeof(uint32_t)) != 0)
+    return false;
+
+  const int64_t delta_dwords = delta_bytes / static_cast<int64_t>(sizeof(uint32_t));
+  if (delta_dwords < std::numeric_limits<int16_t>::min() ||
+      delta_dwords > std::numeric_limits<int16_t>::max())
+    return false;
+
+  offset_dwords = static_cast<int16_t>(delta_dwords);
+  return true;
 }
 
 [[nodiscard]] std::vector<uint64_t> kernel_entry_offsets(std::span<const KdTranslation> kernels) {
@@ -225,24 +261,11 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
 
   std::vector<uint8_t> translated_text(text.begin(), text.end());
 
-  // Find the end of actual code (after s_endpgm) to place the cave body
-  // in the NOP padding. Scan backwards from the end of .text for the first
-  // non-NOP instruction to determine where NOP padding starts.
-  uint64_t code_end = text.size();
-  {
-    const auto *data = reinterpret_cast<const uint32_t *>(text.data());
-    const size_t words = text.size() / 4;
-    // Scan backwards to find the last non-NOP word.
-    // s_nop encodes as 0xBF800000 on both CDNA4 and RDNA4.
-    for (size_t i = words; i > 0; --i) {
-      if (data[i - 1] != 0xBF800000) {
-        code_end = i * 4;
-        break;
-      }
-    }
-  }
-  // Align cave start to 4 bytes (already is, since instructions are 4-byte aligned).
-  patcher.set_cave_start(code_end);
+  // Code caves live in a separate executable section that is placed immediately
+  // after the original .text bytes. Treating that section as a .text-relative
+  // continuation keeps existing instruction addresses stable while avoiding any
+  // dependency on compiler-emitted NOP padding after s_endpgm.
+  patcher.set_cave_start(text.size());
 
   std::unordered_set<const BasicBlock *> translated_blocks;
   bool warned_shared_blocks = false;
@@ -290,7 +313,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           auto expansion = semantic_translator_->try_lower_expand(inst, offset, liveness);
           if (!expansion.empty()) {
             SemanticReplacement repl{offset, offset + inst_size, std::move(expansion)};
-            apply_semantic(repl, translated_text, patcher);
+            if (!apply_semantic(repl, translated_text, patcher))
+              return leave_unchanged();
             offset += inst_size;
             continue;
           }
@@ -306,7 +330,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           continue;
         }
 
-        handle_encoding(inst, offset, translated_text, dst_opcode, patcher, text);
+        if (!handle_encoding(inst, offset, translated_text, dst_opcode, patcher, text))
+          return leave_unchanged();
         offset += inst_size;
       }
     }
@@ -323,28 +348,12 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     }
   }
 
-  // Write cave body into the NOP padding at the end of .text.
-  // cave_start was set to the end of actual code (after s_endpgm).
-  // The cave body overwrites the NOP padding between code_end and text.size().
-  // TODO: When caves exceed available NOP padding, allocate a new .text section
-  // instead of asserting. For now, typical kernels have 256+ bytes of NOP padding
-  // which is sufficient for the current expansion rules.
-  const auto &cave = patcher.cave_body();
-  if (!cave.empty()) {
-    const uint64_t cave_start = patcher.cave_start();
-    const uint64_t text_size = static_cast<uint64_t>(text.size());
-    const uint64_t cave_size = static_cast<uint64_t>(cave.size());
-    const uint64_t available = cave_start <= text_size ? text_size - cave_start : 0;
-    if (cave_size > available) {
-      result.warnings.push_back("cave body (" + std::to_string(cave.size()) +
-                                " bytes) exceeds .text NOP padding (" + std::to_string(available) +
-                                " bytes available); leaving code object unchanged");
-      return leave_unchanged();
-    }
-    std::memcpy(translated_text.data() + cave_start, cave.data(), cave.size());
-  }
-
   patcher.overwrite_text(translated_text);
+  if (!patcher.append_cave_section()) {
+    result.warnings.push_back(
+        "code cave section could not be materialized safely; leaving code object unchanged");
+    return leave_unchanged();
+  }
 
   if (target_mach_)
     patcher.update_elf_flags(target_mach_);
@@ -354,7 +363,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   return result;
 }
 
-void BinaryTranslator::apply_semantic(const SemanticReplacement &repl, std::vector<uint8_t> &text,
+bool BinaryTranslator::apply_semantic(const SemanticReplacement &repl, std::vector<uint8_t> &text,
                                       CodeObjectPatcher &patcher) {
   assert(repl.matched() && "apply_semantic called with unmatched replacement");
   assert(repl.start_offset < repl.end_offset && "invalid replacement range");
@@ -367,7 +376,7 @@ void BinaryTranslator::apply_semantic(const SemanticReplacement &repl, std::vect
     std::memcpy(text.data() + repl.start_offset, repl.target_words.data(), target_size);
     if (target_size < source_size)
       std::memset(text.data() + repl.start_offset + target_size, 0, source_size - target_size);
-    return;
+    return true;
   }
 
   const uint64_t cave_byte_offset = patcher.cave_start() + patcher.cave_body_size();
@@ -375,11 +384,15 @@ void BinaryTranslator::apply_semantic(const SemanticReplacement &repl, std::vect
   const uint64_t branch_pc = repl.start_offset;
 
   // s_branch simm16 targets (PC + 4 + simm16*4).
-  const auto fwd_dwords = static_cast<int64_t>(cave_byte_offset - (branch_pc + 4)) / 4;
-  assert(fwd_dwords >= INT16_MIN && fwd_dwords <= INT16_MAX &&
-         "branch offset exceeds simm16 range");
+  int16_t fwd_dwords = 0;
+  if (!compute_sopp_branch_offset(branch_pc, cave_byte_offset, fwd_dwords)) {
+    if (warnings_)
+      warnings_->push_back("code cave branch range exceeds s_branch simm16; leaving code object "
+                           "unchanged");
+    return false;
+  }
 
-  const uint32_t stub = build_s_branch(static_cast<int16_t>(fwd_dwords), host_arch_);
+  const uint32_t stub = build_s_branch(fwd_dwords, host_arch_);
   std::memcpy(text.data() + repl.start_offset, &stub, 4);
   for (uint64_t off = repl.start_offset + 4; off < repl.end_offset; off += 4) {
     const uint32_t nop = build_s_nop(0, host_arch_);
@@ -387,17 +400,21 @@ void BinaryTranslator::apply_semantic(const SemanticReplacement &repl, std::vect
   }
 
   auto cave_words = repl.target_words;
-  const auto ret_dwords = (static_cast<int64_t>(stub_next) -
-                           static_cast<int64_t>(cave_byte_offset + cave_words.size() * 4 + 4)) /
-                          4;
-  assert(ret_dwords >= INT16_MIN && ret_dwords <= INT16_MAX &&
-         "return branch offset exceeds simm16 range");
-  cave_words.push_back(build_s_branch(static_cast<int16_t>(ret_dwords), host_arch_));
+  int16_t ret_dwords = 0;
+  const uint64_t return_branch_pc = cave_byte_offset + cave_words.size() * sizeof(uint32_t);
+  if (!compute_sopp_branch_offset(return_branch_pc, stub_next, ret_dwords)) {
+    if (warnings_)
+      warnings_->push_back("code cave return branch range exceeds s_branch simm16; leaving code "
+                           "object unchanged");
+    return false;
+  }
+  cave_words.push_back(build_s_branch(ret_dwords, host_arch_));
 
   patcher.append_cave_body(cave_words);
+  return true;
 }
 
-void BinaryTranslator::handle_encoding(const Instruction &inst, uint64_t offset,
+bool BinaryTranslator::handle_encoding(const Instruction &inst, uint64_t offset,
                                        std::vector<uint8_t> &text, uint16_t dst_opcode,
                                        CodeObjectPatcher &patcher,
                                        std::span<const uint8_t> orig_text) {
@@ -405,7 +422,7 @@ void BinaryTranslator::handle_encoding(const Instruction &inst, uint64_t offset,
   assert(raw && "handle_encoding called without raw encoding");
   if (!encoding_translate_) {
     std::memcpy(text.data() + offset, raw, inst.size());
-    return;
+    return true;
   }
 
   const uint32_t w0 = raw[0];
@@ -416,7 +433,7 @@ void BinaryTranslator::handle_encoding(const Instruction &inst, uint64_t offset,
 
   if (tr.word_count == 0) {
     std::memcpy(text.data() + offset, raw, inst.size());
-    return;
+    return true;
   }
 
   // Append trailing literal constant when the source instruction is larger
@@ -439,8 +456,10 @@ void BinaryTranslator::handle_encoding(const Instruction &inst, uint64_t offset,
     std::memcpy(text.data() + offset, tr.words, target_size);
   } else {
     SemanticReplacement repl{offset, offset + inst.size(), {tr.words, tr.words + tr.word_count}};
-    apply_semantic(repl, text, patcher);
+    if (!apply_semantic(repl, text, patcher))
+      return false;
   }
+  return true;
 }
 
 } // namespace rocjitsu

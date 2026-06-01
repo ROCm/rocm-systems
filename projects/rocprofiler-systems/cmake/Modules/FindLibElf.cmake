@@ -1,119 +1,89 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-# ========================================================================================
-# FindLibElf.cmake
-#
-# Find libelf include dirs and libraries
-#
-# ----------------------------------------
-#
-# Use this module by invoking find_package with the form::
-#
-# find_package(LibElf [version] [EXACT]      # Minimum or EXACT version e.g. 0.173
-# [REQUIRED]             # Fail with error if libelf is not found )
-#
-# This module reads hints about search locations from variables::
-#
-# LibElf_ROOT_DIR         - Base directory the of libelf installation LibElf_INCLUDEDIR -
-# Hint directory that contains the libelf headers files LibElf_LIBRARYDIR       - Hint
-# directory that contains the libelf library files
-#
-# and saves search results persistently in CMake cache entries::
-#
-# LibElf_FOUND                    - True if headers and requested libraries were found
-# LibElf_INCLUDE_DIRS     - libelf include directories LibElf_LIBRARY_DIRS - Link
-# directories for libelf libraries LibElf_LIBRARIES                - libelf library files
-#
-# Based on the version by Bernhard Walle <bernhard.walle@gmx.de> Copyright (c) 2008
-#
-# ========================================================================================
+#[=======================================================================[.rst:
+FindLibElf
+----------
 
-# Non-standard subdirectories to search
-set(_path_suffixes libelf libelfls elfutils)
+Find libelf, the elfutils library for ELF file inspection.
 
-find_path(
-    LibElf_INCLUDE_DIR
-    NAMES libelf.h
-    HINTS ${LibElf_ROOT_DIR}/include ${LibElf_ROOT_DIR} ${LibElf_INCLUDEDIR}
-    PATHS ${DYNINST_SYSTEM_INCLUDE_PATHS}
-    PATH_SUFFIXES ${_path_suffixes}
-    DOC "libelf include directories"
-)
+This module mirrors :module:`FindLibDW`: a thin shim that funnels discovery
+through pkg-config, which covers both system installs and the TheRock
+vendored sysdep.
 
-find_library(
-    LibElf_LIBRARIES
-    NAMES libelf.so.1 libelf.so
-    HINTS ${LibElf_ROOT_DIR}/lib ${LibElf_ROOT_DIR} ${LibElf_LIBRARYDIR}
-    PATHS ${DYNINST_SYSTEM_LIBRARY_PATHS}
-    PATH_SUFFIXES ${_path_suffixes}
-)
+Discovery order:
 
-# Find the library with the highest version
-set(_max_ver 0.0)
-set(_max_ver_lib)
-foreach(l ${LibElf_LIBRARIES})
-    get_filename_component(_elf_realpath ${l} REALPATH)
-    string(REGEX MATCH "libelf\\-(.+)\\.so\\.*$" res ${_elf_realpath})
+1. If ``LibElf::LibElf`` already exists (e.g. pre-created by
+   ``DyninstElfUtils.cmake`` for the from-source build), short-circuit.
+2. ``pkg_check_modules(libelf)`` — canonical path for both system
+   installs (``/usr``) and the TheRock vendored sysdep (which ships
+   ``libelf.pc`` in ``lib/rocm_sysdeps/lib/pkgconfig/``).
 
-    # The library version number is stored in CMAKE_MATCH_1
-    set(_cur_ver ${CMAKE_MATCH_1})
-    if(NOT "x${_cur_ver}" STREQUAL "x" AND "${_cur_ver}" VERSION_GREATER "${_max_ver}")
-        set(_max_ver "${_cur_ver}")
-        set(_max_ver_lib "${l}")
-    else()
-        if("${_max_ver}" VERSION_EQUAL "0.0" AND "x${_max_ver_lib}" STREQUAL "x")
-            set(_max_ver_lib "${l}")
+Imported targets
+^^^^^^^^^^^^^^^^
+
+``LibElf::LibElf``
+  The libelf library, if found.
+
+Result variables
+^^^^^^^^^^^^^^^^
+
+``LibElf_FOUND``, ``LibElf_INCLUDE_DIRS``, ``LibElf_LIBRARIES``, ``LibElf_VERSION``
+#]=======================================================================]
+
+# 1. Short-circuit: already populated upstream.
+if(TARGET LibElf::LibElf AND LibElf_LIBRARIES AND LibElf_INCLUDE_DIRS)
+    set(LibElf_FOUND TRUE)
+    return()
+endif()
+
+# 2. pkg-config: the canonical path for both system installs (/usr) and
+#    the TheRock vendored sysdep (lib/rocm_sysdeps/lib/pkgconfig/libelf.pc).
+if(NOT LibElf_FOUND AND NOT LibElf_NO_SYSTEM_PATHS)
+    find_package(PkgConfig QUIET)
+    if(PKG_CONFIG_FOUND)
+        set(_version "")
+        if(NOT "x${LibElf_FIND_VERSION}" STREQUAL "x")
+            set(_version ">=${LibElf_FIND_VERSION}")
+        endif()
+        set(_quiet "")
+        if(LibElf_FIND_QUIETLY)
+            set(_quiet "QUIET")
+        endif()
+        pkg_check_modules(PC_LIBELF ${_quiet} "libelf${_version}")
+        unset(_version)
+        unset(_quiet)
+    endif()
+
+    if(PC_LIBELF_FOUND)
+        if("x${PC_LIBELF_INCLUDE_DIRS}" STREQUAL "x")
+            pkg_get_variable(PC_LIBELF_INCLUDE_DIRS libelf includedir)
+        endif()
+        set(LibElf_INCLUDE_DIRS "${PC_LIBELF_INCLUDE_DIRS}")
+        set(LibElf_LIBRARIES "${PC_LIBELF_LINK_LIBRARIES}")
+        set(LibElf_VERSION "${PC_LIBELF_VERSION}")
+
+        if(NOT TARGET LibElf::LibElf)
+            add_library(LibElf::LibElf UNKNOWN IMPORTED)
+            set_target_properties(
+                LibElf::LibElf
+                PROPERTIES
+                    IMPORTED_LINK_INTERFACE_LANGUAGES "C"
+                    IMPORTED_LOCATION "${LibElf_LIBRARIES}"
+                    INTERFACE_INCLUDE_DIRECTORIES "${LibElf_INCLUDE_DIRS}"
+            )
         endif()
     endif()
-endforeach()
-
-set(_version_file_path "")
-if(EXISTS "${LibElf_INCLUDE_DIR}/version.h")
-    set(_version_file_path "${LibElf_INCLUDE_DIR}/version.h")
-elseif(EXISTS "${LibElf_INCLUDE_DIR}/elfutils/version.h")
-    set(_version_file_path "${LibElf_INCLUDE_DIR}/elfutils/version.h")
 endif()
-
-if("${_max_ver}" VERSION_EQUAL "0.0" AND NOT "x${_version_file_path}" STREQUAL "x")
-    file(
-        STRINGS "${_version_file_path}"
-        _version_line
-        REGEX "^#define _ELFUTILS_VERSION[ \t]+[0-9]+"
-    )
-    string(REGEX MATCH "[0-9]+" _version "${_version_line}")
-    if(NOT "x${_version}" STREQUAL "x")
-        set(_max_ver "0.${_version}")
-    endif()
-endif()
-unset(_version_line)
-unset(_version)
-unset(_version_file_path)
-
-# Set the exported variables to the best match
-set(LibElf_LIBRARIES ${_max_ver_lib})
-set(LibElf_VERSION ${_max_ver})
 
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(
     LibElf
     FOUND_VAR LibElf_FOUND
-    REQUIRED_VARS LibElf_LIBRARIES LibElf_INCLUDE_DIR
+    REQUIRED_VARS LibElf_LIBRARIES LibElf_INCLUDE_DIRS
     VERSION_VAR LibElf_VERSION
 )
 
-# Export cache variables
 if(LibElf_FOUND)
-    set(LibElf_INCLUDE_DIRS ${LibElf_INCLUDE_DIR})
-    set(LibElf_LIBRARIES ${LibElf_LIBRARIES})
-
-    # Because we only report the library with the largest version, we are guaranteed there
-    # is only one file in LibElf_LIBRARIES
-    get_filename_component(_elf_dir ${LibElf_LIBRARIES} DIRECTORY)
-    set(LibElf_LIBRARY_DIRS ${_elf_dir} "${_elf_dir}/elfutils")
-
-    add_library(LibElf::LibElf INTERFACE IMPORTED)
-    target_include_directories(LibElf::LibElf INTERFACE ${LibElf_INCLUDE_DIR})
-    target_link_directories(LibElf::LibElf INTERFACE ${LibElf_LIBRARY_DIRS})
-    target_link_libraries(LibElf::LibElf INTERFACE ${LibElf_LIBRARIES})
+    mark_as_advanced(LibElf_INCLUDE_DIRS LibElf_LIBRARIES LibElf_VERSION)
 endif()
