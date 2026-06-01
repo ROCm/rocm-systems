@@ -40,17 +40,6 @@ pub struct TopologyDef {
     pub agent: MaybeRef<AgentDef>,
 }
 
-impl Default for TopologyDef {
-    fn default() -> Self {
-        Self {
-            racks: 1,
-            nodes_per_rack: 1,
-            gpus_per_node: 1,
-            agent: MaybeRef::Ref("noop".to_string()),
-        }
-    }
-}
-
 impl TopologyDef {
     /// Total number of nodes (`racks * nodes_per_rack`).
     pub fn total_nodes(&self) -> u32 {
