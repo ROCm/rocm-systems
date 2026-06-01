@@ -31,6 +31,7 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <type_traits>
 #include <unordered_map>
 #include <vector>
 
@@ -220,7 +221,7 @@ private:
 using address_range_t = rocprofiler::sdk::codeobj::segment::address_range_t;
 
 // =====================================================================================
-// Traits for determining sample validity across old and new record types.
+// is_invalid_sample<RecordT, Method> -- traits for determining sample validity.
 //
 // The parser pre-allocates a homogeneously-typed array of PcSamplingRecordT via the
 // callback in add_upcoming_samples(). The hardware delivers N raw samples, some of
@@ -231,66 +232,102 @@ using address_range_t = rocprofiler::sdk::codeobj::segment::address_range_t;
 // sentinel field check. Downstream code (when emplacing into the SDK buffer, which
 // supports heterogeneous records) replaces them with proper record_invalid_t entries.
 //
-// Old records (host_trap_v0, stochastic_v0) have a `size` member and use `size == 0`
-// as the invalid sentinel.
+// Whether a parsed record is invalid depends on BOTH the record kind and the method:
+// - Legacy records (host_trap_v0_t, stochastic_v0_t) carry a `size` member; the generic
+//   primary below uses size == 0 as the sentinel (method-independent).
+// - V0/V1/V3 under HOST_TRAP never yield invalid samples (host-trap always delivers valid
+//   data), so they return false.
+// - V0/V1/V2/V3/V4 under STOCHASTIC use timestamp == 0 as the invalid sentinel: copySample
+//   zero-inits invalid stochastic samples, and the GPU timestamp counter is never 0 during
+//   real kernel execution, so a zero timestamp reliably identifies a zero-init'd record.
 //
-// New stochastic records (V2, V4) don't have a `size` member; we use `timestamp == 0`
-// as the sentinel. The GPU timestamp counter is never zero during actual kernel
-// execution, so a zero timestamp reliably identifies the zero-init'd invalid record.
-//
-// New host-trap records (V0, V1, V3) never produce invalid samples -- the host-trap
-// mechanism always delivers valid data.
+// C++ forbids partial specialization of function templates, so each instantiated
+// (RecordT, Method) pair is provided as an explicit full specialization. The combinations
+// match those dispatched by PCSamplingParserContext (see _get_parse_func_* in
+// pc_record_interface.cpp): V2/V4 are stochastic-only; V0/V1/V3 exist for both methods.
 // =====================================================================================
 
-template <typename PcSamplingRecordT>
+template <typename PcSamplingRecordT, rocprofiler_pc_sampling_method_t Method>
 inline bool
 is_invalid_sample(const PcSamplingRecordT& sample)
 {
     return sample.size == 0;
 }
 
+// --- V0 ---
 template <>
 inline bool
-is_invalid_sample<rocprofiler_pc_sampling_record_v0_t>(
+is_invalid_sample<rocprofiler_pc_sampling_record_v0_t,
+                  ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>(
     const rocprofiler_pc_sampling_record_v0_t& /*sample*/)
 {
-    // V0 is for host-trap: copySample never produces invalid V0 records
     return false;
 }
 
 template <>
 inline bool
-is_invalid_sample<rocprofiler_pc_sampling_record_v1_t>(
-    const rocprofiler_pc_sampling_record_v1_t& /*sample*/)
+is_invalid_sample<rocprofiler_pc_sampling_record_v0_t,
+                  ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(
+    const rocprofiler_pc_sampling_record_v0_t& sample)
 {
-    // V1 is for host-trap: copySample never produces invalid V1 records
-    return false;
-}
-
-template <>
-inline bool
-is_invalid_sample<rocprofiler_pc_sampling_record_v2_t>(
-    const rocprofiler_pc_sampling_record_v2_t& sample)
-{
-    // V2 invalid samples are zero-init'd by copySample; timestamp is never 0 for valid samples
     return sample.timestamp == 0;
 }
 
+// --- V1 ---
 template <>
 inline bool
-is_invalid_sample<rocprofiler_pc_sampling_record_v3_t>(
-    const rocprofiler_pc_sampling_record_v3_t& /*sample*/)
+is_invalid_sample<rocprofiler_pc_sampling_record_v1_t,
+                  ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>(
+    const rocprofiler_pc_sampling_record_v1_t& /*sample*/)
 {
-    // V3 is for host-trap: copySample never produces invalid V3 records
     return false;
 }
 
 template <>
 inline bool
-is_invalid_sample<rocprofiler_pc_sampling_record_v4_t>(
+is_invalid_sample<rocprofiler_pc_sampling_record_v1_t,
+                  ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(
+    const rocprofiler_pc_sampling_record_v1_t& sample)
+{
+    return sample.timestamp == 0;
+}
+
+// --- V2 (stochastic-only) ---
+template <>
+inline bool
+is_invalid_sample<rocprofiler_pc_sampling_record_v2_t,
+                  ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(
+    const rocprofiler_pc_sampling_record_v2_t& sample)
+{
+    return sample.timestamp == 0;
+}
+
+// --- V3 ---
+template <>
+inline bool
+is_invalid_sample<rocprofiler_pc_sampling_record_v3_t,
+                  ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>(
+    const rocprofiler_pc_sampling_record_v3_t& /*sample*/)
+{
+    return false;
+}
+
+template <>
+inline bool
+is_invalid_sample<rocprofiler_pc_sampling_record_v3_t,
+                  ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(
+    const rocprofiler_pc_sampling_record_v3_t& sample)
+{
+    return sample.timestamp == 0;
+}
+
+// --- V4 (stochastic-only) ---
+template <>
+inline bool
+is_invalid_sample<rocprofiler_pc_sampling_record_v4_t,
+                  ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(
     const rocprofiler_pc_sampling_record_v4_t& sample)
 {
-    // V4 invalid samples are zero-init'd by copySample; timestamp is never 0 for valid samples
     return sample.timestamp == 0;
 }
 
@@ -345,7 +382,26 @@ mark_sample_invalid<rocprofiler_pc_sampling_record_v4_t>(
     std::memset(&sample, 0, sizeof(sample));
 }
 
-template <typename GFXIP, typename PcSamplingRecordT>
+// Default sampling method for a record type. This default exists ONLY to preserve the original
+// v1 test design: the sole Method-less caller of add_upcoming_samples() is _parse_buffer() below,
+// which is used exclusively by the parser unit tests (benchmark_test, correlation_id_test,
+// multigpu) and instantiates the legacy host_trap_v0_t / stochastic_v0_t record types without
+// threading a method through. The production v2 path (PCSamplingParserContext::_parse) always
+// passes Method explicitly, so this default never affects it. host_trap_v0_t is the only
+// host-trap record type; every other record type defaults to stochastic.
+template <typename PcSamplingRecordT>
+constexpr rocprofiler_pc_sampling_method_t
+default_method_for()
+{
+    if constexpr(std::is_same_v<PcSamplingRecordT, rocprofiler_pc_sampling_record_host_trap_v0_t>)
+        return ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP;
+    else
+        return ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC;
+}
+
+template <typename GFXIP,
+          typename PcSamplingRecordT,
+          rocprofiler_pc_sampling_method_t Method = default_method_for<PcSamplingRecordT>()>
 inline pcsample_status_t
 add_upcoming_samples(const device_handle     device,
                      const generic_sample_t* buffer,
@@ -366,9 +422,9 @@ add_upcoming_samples(const device_handle     device,
         const auto* snap = reinterpret_cast<const perf_sample_snapshot_v1*>(buffer + p);
 
         auto& pc_sample = samples[p];
-        pc_sample       = copySample<GFXIP, PcSamplingRecordT>(static_cast<const void*>(snap));
+        pc_sample = copySample<GFXIP, PcSamplingRecordT, Method>(static_cast<const void*>(snap));
         // skip invalid samples
-        if(is_invalid_sample(pc_sample)) continue;
+        if(is_invalid_sample<PcSamplingRecordT, Method>(pc_sample)) continue;
 
         // Correct PC address of the original sample (if needed) prior to decoding it.
         auto pc_address = correct_pc_address<GFXIP, PcSamplingRecordT>(snap);

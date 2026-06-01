@@ -74,6 +74,11 @@ struct PCSAgentSession
     // Empty means this session was created via the old (v1) API.
     std::vector<rocprofiler_pc_sampling_record_kind_t> requested_record_kinds = {};
 
+    // v2 API: whether the client opted in to receiving invalid samples (i.e. requested the
+    // INVALID_SAMPLE record kind). Computed once at configure time from requested_record_kinds and
+    // forwarded to parser->parse() per call. False for v1 sessions.
+    bool deliver_invalid = false;
+
     // Returns true if this session was created via the v2 API
     bool is_v2_api() const { return !requested_record_kinds.empty(); }
 

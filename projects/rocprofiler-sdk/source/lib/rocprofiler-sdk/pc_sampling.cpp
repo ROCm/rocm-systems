@@ -161,8 +161,6 @@ ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(
     ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_DUAL_ISSUE_VALU);
 ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(
     ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_LOCK_CONTENTION);
-ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_RESERVED0);
-ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_RESERVED1);
 
 template <size_t Idx, size_t... Tail>
 const char*
@@ -185,6 +183,22 @@ is_valid_version_record_kind(rocprofiler_pc_sampling_record_kind_t kind)
            kind == ROCPROFILER_PC_SAMPLING_RECORD_V1_SAMPLE ||
            kind == ROCPROFILER_PC_SAMPLING_RECORD_V2_SAMPLE ||
            kind == ROCPROFILER_PC_SAMPLING_RECORD_V3_SAMPLE ||
+           kind == ROCPROFILER_PC_SAMPLING_RECORD_V4_SAMPLE;
+}
+
+/**
+ * @brief Helper to check if a record kind can only be produced by the stochastic method.
+ *
+ * V2 and V4 carry stochastic-only fields that host-trap cannot populate, so host-trap
+ * cannot produce them. V0/V1/V3 can be produced by either method.
+ *
+ * TODO: if a host-trap-only record kind is ever introduced, add a symmetric
+ * is_host_trap_only_record_kind() here and tighten the validator/inference accordingly.
+ */
+bool
+is_stochastic_only_record_kind(rocprofiler_pc_sampling_record_kind_t kind)
+{
+    return kind == ROCPROFILER_PC_SAMPLING_RECORD_V2_SAMPLE ||
            kind == ROCPROFILER_PC_SAMPLING_RECORD_V4_SAMPLE;
 }
 
@@ -355,14 +369,51 @@ validate_api_flags(rocprofiler_pc_sampling_api_flags_t flags)
 }
 
 /**
+ * @brief Cross-cutting validation of record kinds against method flags.
+ *
+ * Rejects REQUIRE_HOST_TRAP combined with a stochastic-only record kind (V2, V4):
+ * host-trap cannot produce those records, so the request is internally inconsistent.
+ * The reverse (REQUIRE_STOCHASTIC + host-trap-layout kinds V1/V3) is NOT rejected, since
+ * stochastic can produce records in the V1/V3 layout with stochastic-only fields unset.
+ *
+ * Pure function with no side effects. Assumes flags and record_kinds have already passed
+ * validate_api_flags() and validate_record_kinds() respectively.
+ */
+rocprofiler_status_t
+validate_record_kinds_against_flags(const rocprofiler_pc_sampling_record_kind_t* record_kinds,
+                                    size_t                                       num_record_kinds,
+                                    rocprofiler_pc_sampling_api_flags_t          flags)
+{
+    auto f = static_cast<uint32_t>(flags);
+
+    if(f & ROCPROFILER_PC_SAMPLING_API_FLAG_REQUIRE_HOST_TRAP)
+    {
+        for(size_t i = 0; i < num_record_kinds; i++)
+        {
+            if(is_stochastic_only_record_kind(record_kinds[i]))
+                return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+        }
+    }
+
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+/**
  * @brief Infer the preferred PC sampling method from record_kinds and flags.
+ *
+ * Precondition: the caller must have already run validate_api_flags(),
+ * validate_record_kinds(), and validate_record_kinds_against_flags() on these inputs. This
+ * function therefore assumes the inputs are internally consistent -- in particular, that
+ * REQUIRE_HOST_TRAP is never combined with a stochastic-only record kind (V2/V4) -- and does
+ * not re-check that case.
  *
  * Returns the method to use and whether it is a hard requirement.
  * - V1 records -> host-trap
  * - V2 records -> stochastic
  * - V0/INVALID_SAMPLE only -> prefer stochastic, fall back to host-trap
  * - REQUIRE flags override the record-kind heuristic
- * - PREFER flags act as soft hints
+ * - PREFER flags act as soft hints (PREFER_HOST_TRAP is silently honored as stochastic when
+ *   the requested record kinds are stochastic-only)
  *
  * @param[in] record_kinds  - array of record kinds
  * @param[in] num_record_kinds - size of array
@@ -418,7 +469,14 @@ infer_method_from_record_kinds_and_flags(
     }
     else if(f & ROCPROFILER_PC_SAMPLING_API_FLAG_PREFER_HOST_TRAP)
     {
-        *out_method = ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP;
+        // Soft preference for host-trap. When the requested record kinds are stochastic-only
+        // (V2, V4), host-trap cannot produce them, so the hint is silently ignored and
+        // stochastic is used. This mirrors PREFER_STOCHASTIC being satisfied by stochastic-only
+        // record kinds. The hard-requirement counterpart (REQUIRE_HOST_TRAP + V2/V4) is
+        // rejected upstream by validate_record_kinds_against_flags().
+        *out_method = (method_from_records == ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC)
+                          ? ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC
+                          : ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP;
     }
     else if(f & ROCPROFILER_PC_SAMPLING_API_FLAG_PREFER_STOCHASTIC)
     {
@@ -569,6 +627,11 @@ rocprofiler_pc_sampling_configure_service_v2(
     auto validate_status = validate_record_kinds(record_kinds, num_record_kinds);
     if(validate_status != ROCPROFILER_STATUS_SUCCESS) return validate_status;
 
+    // Cross-cutting validation (flags x records): reject REQUIRE_HOST_TRAP + V2/V4
+    auto cross_status =
+        validate_record_kinds_against_flags(record_kinds, num_record_kinds, flags);
+    if(cross_status != ROCPROFILER_STATUS_SUCCESS) return cross_status;
+
     // Infer the sampling method from record_kinds + flags
     auto method      = ROCPROFILER_PC_SAMPLING_METHOD_NONE;
     auto is_required = false;
@@ -603,8 +666,23 @@ rocprofiler_pc_sampling_configure_service_v2(
     auto status = rocprofiler::pc_sampling::configure_pc_sampling_service_v2(
         ctx, agent, method, unit, interval, buffer_id, record_kinds, num_record_kinds);
 
+    // A stochastic-only record kind (V2, V4) can only be parsed under the stochastic method.
+    // Host-trap cannot produce those records, so there is no valid fallback: retrying with
+    // host-trap would configure a session whose samples the parser cannot decode. In that case
+    // we let the genuine failure from the stochastic attempt (e.g. NOT_AVAILABLE when the device
+    // lacks stochastic) propagate instead of falling back.
+    bool stochastic_only = false;
+    for(size_t i = 0; i < num_record_kinds; i++)
+    {
+        if(is_stochastic_only_record_kind(record_kinds[i]))
+        {
+            stochastic_only = true;
+            break;
+        }
+    }
+
     // If the preferred method failed and it's not a hard requirement, try the fallback
-    if(status != ROCPROFILER_STATUS_SUCCESS && !is_required)
+    if(status != ROCPROFILER_STATUS_SUCCESS && !is_required && !stochastic_only)
     {
         auto fallback = (method == ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC)
                             ? ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP
@@ -682,6 +760,11 @@ rocprofiler_pc_sampling_query_agent_configurations_v2(
     auto validate_status = validate_record_kinds(record_kinds, num_record_kinds);
     if(validate_status != ROCPROFILER_STATUS_SUCCESS) return validate_status;
 
+    // Cross-cutting validation (flags x records): reject REQUIRE_HOST_TRAP + V2/V4
+    auto cross_status =
+        validate_record_kinds_against_flags(record_kinds, num_record_kinds, flags);
+    if(cross_status != ROCPROFILER_STATUS_SUCCESS) return cross_status;
+
     // Infer preferred method
     auto method      = ROCPROFILER_PC_SAMPLING_METHOD_NONE;
     auto is_required = false;
@@ -707,8 +790,23 @@ rocprofiler_pc_sampling_query_agent_configurations_v2(
     auto status = rocprofiler::pc_sampling::ioctl::ioctl_query_pcs_configs(agent, v1_configs);
     if(status != ROCPROFILER_STATUS_SUCCESS) return status;
 
+    // A stochastic-only record kind (V2, V4) can only be produced by the stochastic method;
+    // host-trap configs are not a valid substitute. Treat the method filter as hard in that
+    // case, so when no stochastic config exists the caller receives an empty list (a valid but
+    // unsatisfiable request) rather than misleading host-trap configs.
+    bool stochastic_only = false;
+    for(size_t i = 0; i < num_record_kinds; i++)
+    {
+        if(is_stochastic_only_record_kind(record_kinds[i]))
+        {
+            stochastic_only = true;
+            break;
+        }
+    }
+
     // PREFER vs REQUIRE semantics (mirrors rocprofiler_pc_sampling_configure_v2):
-    //   - REQUIRE: only return configs that match the inferred method (drop the rest).
+    //   - REQUIRE (or stochastic-only records): only return configs that match the inferred
+    //              method (drop the rest); an empty list means the request is unsatisfiable.
     //   - PREFER:  if at least one config matches the inferred method, return only those
     //              (preferred-method configs only); if none match, fall back to returning
     //              all configs so the caller can still pick the available method.
@@ -716,7 +814,7 @@ rocprofiler_pc_sampling_query_agent_configurations_v2(
     bool filter_by_method = false;
     if(method != ROCPROFILER_PC_SAMPLING_METHOD_NONE)
     {
-        if(is_required)
+        if(is_required || stochastic_only)
         {
             filter_by_method = true;
         }

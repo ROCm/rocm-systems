@@ -52,6 +52,16 @@ struct PCSamplingData
     std::vector<PcSamplingRecordT> samples;
 };
 
+/**
+ * @brief Parser context for translating raw hardware PC samples into SDK records.
+ *
+ * This context is stateless with respect to per-session v2 configuration. The v2-specific
+ * inputs needed for a given parse() invocation (the requested record kind and the
+ * deliver-invalid flag) are supplied as parse() arguments by the caller (e.g. PCSAgentSession
+ * in hsa_adapter.cpp), not stored on the context. The sampling method is likewise derived per
+ * call from upcoming.which_sample_type. Keeping the context free of session state preserves the
+ * pre-refactor design intent and lets a single context be reused across devices/sessions.
+ */
 class PCSamplingParserContext
 {
 public:
@@ -77,17 +87,28 @@ public:
      * @param[in] gfxip_major GFXIP of these samples (GFX9==9/GFX11==11).
      * @param[in] midway_signal notifies_all when the samples have been processed.
      * @param[in] bFlushCorrelationIds Set to true if this is the last batch from a ROCr buffer.
+     * @param[in] requested_record_kind v2 API: the record kind to emit. The sampling method is
+     * derived from upcoming.which_sample_type, so (record_kind, method) together select the parse
+     * specialization. ROCPROFILER_PC_SAMPLING_RECORD_NONE selects the legacy (v1) method-based
+     * dispatch. Supplied per call by the caller (PCSAgentSession); not stored on the context.
+     * @param[in] deliver_invalid v2 API: when true, invalid samples are emitted to the buffer as
+     * ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE; when false they are dropped. Also supplied
+     * per call by the caller.
      * @returns PCSAMPLE_STATUS_SUCCESS on success.
      * @returns PCSAMPLE_STATUS_PARSER_ERROR (non-fatal) if one or more samples has invalid
      * correlation ID(s).
      * @returns PCSAMPLE_STATUS_INVALID_GFXIP (fatal) on GFXIP != 9,11,12.
      * @returns PCSAMPLE_STATUS_CALLBACK_ERROR (fatal) if memory allocation fails.
      */
-    pcsample_status_t parse(const upcoming_samples_t& upcoming,
-                            const generic_sample_t*   data,
-                            uint32_t                  gfx_target_version,
-                            std::condition_variable&  midway_signal,
-                            bool                      bFlushCorrelationIds);
+    pcsample_status_t parse(
+        const upcoming_samples_t&             upcoming,
+        const generic_sample_t*               data,
+        uint32_t                              gfx_target_version,
+        std::condition_variable&              midway_signal,
+        bool                                  bFlushCorrelationIds,
+        rocprofiler_pc_sampling_record_kind_t requested_record_kind =
+            ROCPROFILER_PC_SAMPLING_RECORD_NONE,
+        bool deliver_invalid = false);
 
     /**
      * @brief Signals a dispatch completion.
@@ -132,15 +153,18 @@ protected:
      * @brief Parses the given input data and generates pc sampling records.
      * Calls generate_upcoming_pc_record().
      */
-    template <typename GFX, typename PcSamplingRecordT>
-    pcsample_status_t _parse(const upcoming_samples_t& upcoming, const generic_sample_t* data_)
+    template <typename GFX,
+              typename PcSamplingRecordT,
+              rocprofiler_pc_sampling_method_t Method>
+    pcsample_status_t _parse(const upcoming_samples_t& upcoming,
+                             const generic_sample_t*   data_,
+                             bool                      deliver_invalid)
     {
         // std::shared_lock<std::shared_mutex> lock(mut);
 
         pcsample_status_t status      = PCSAMPLE_STATUS_SUCCESS;
         uint64_t          pkt_counter = upcoming.num_samples;
         auto              dev         = upcoming.device;
-        bool              bIsHostTrap = upcoming.which_sample_type == AMD_HOST_TRAP_V1;
 
         while(pkt_counter > 0)
         {
@@ -150,14 +174,13 @@ protected:
             if(memsize == 0 || memsize > pkt_counter) return PCSAMPLE_STATUS_CALLBACK_ERROR;
 
             auto* map = corr_map.get();
-            if(bIsHostTrap)
-                status |= add_upcoming_samples<GFX>(dev, data_, memsize, map, samples);
-            else
-                status |= add_upcoming_samples<GFX>(dev, data_, memsize, map, samples);
+            status |= add_upcoming_samples<GFX, PcSamplingRecordT, Method>(
+                dev, data_, memsize, map, samples);
 
             data_ += memsize;
             pkt_counter -= memsize;
-            generate_upcoming_pc_record(dev.handle, samples, memsize);
+            generate_upcoming_pc_record<PcSamplingRecordT, Method>(
+                dev.handle, samples, memsize, deliver_invalid);
         }
 
         return status;
@@ -170,16 +193,11 @@ protected:
     pcsample_status_t flushForgetList();
     static void       generate_id_completion_record(const dispatch_pkt_id_t& pkt) { (void) pkt; };
 
-    template <typename PcSamplingRecordT>
+    template <typename PcSamplingRecordT, rocprofiler_pc_sampling_method_t Method>
     void generate_upcoming_pc_record(uint64_t                 agent_id_handle,
                                      const PcSamplingRecordT* samples,
-                                     size_t                   num_samples);
-
-    template <typename PcSamplingRecordT>
-    void generate_upcoming_pc_record(uint64_t                              agent_id_handle,
-                                     const PcSamplingRecordT*              samples,
-                                     size_t                                num_samples,
-                                     rocprofiler_pc_sampling_record_kind_t record_kind);
+                                     size_t                   num_samples,
+                                     bool                     deliver_invalid);
 
     //! Maps doorbells and dispatch_index to correlation_id
     std::unique_ptr<Parser::CorrelationMap> corr_map;
@@ -205,30 +223,16 @@ protected:
     mutable std::shared_mutex mut;
 
 private:
-    using parse_funct_ptr_t = pcsample_status_t (
-        PCSamplingParserContext::*)(const upcoming_samples_t&, const generic_sample_t*);
+    using parse_funct_ptr_t = pcsample_status_t (PCSamplingParserContext::*)(
+        const upcoming_samples_t&, const generic_sample_t*, bool);
 
     template <typename GFXIP>
     parse_funct_ptr_t _get_parse_func_for_method(rocprofiler_pc_sampling_method_t pcs_method);
 
     template <typename GFXIP>
-    parse_funct_ptr_t _get_parse_func_for_record_kind(
-        rocprofiler_pc_sampling_record_kind_t record_kind);
+    parse_funct_ptr_t _get_parse_func_for_record_kind_and_method(
+        rocprofiler_pc_sampling_record_kind_t record_kind,
+        rocprofiler_pc_sampling_method_t      pcs_method);
 
     std::unordered_map<rocprofiler_agent_id_t, rocprofiler_buffer_id_t> _agent_buffers;
-
-    // v2 API: the record kind to use for parse dispatch.
-    // ROCPROFILER_PC_SAMPLING_RECORD_NONE means v1 API (use method-based dispatch).
-    rocprofiler_pc_sampling_record_kind_t _requested_record_kind =
-        ROCPROFILER_PC_SAMPLING_RECORD_NONE;
-
-public:
-    /// Set the v2 record kind for this parser context.
-    /// Must be called before any parse() calls for v2 sessions.
-    void set_requested_record_kind(rocprofiler_pc_sampling_record_kind_t kind)
-    {
-        _requested_record_kind = kind;
-    }
-
-    bool is_v2() const { return _requested_record_kind != ROCPROFILER_PC_SAMPLING_RECORD_NONE; }
 };

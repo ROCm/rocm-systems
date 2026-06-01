@@ -552,9 +552,15 @@ rocprofiler_get_pc_sampling_instruction_not_issued_reason_name(
  * configurations matching the preferred method if any exist; if none exist, all available
  * configurations are returned so the caller can still pick the available method.
  *
+ * PREFER_HOST_TRAP is additionally a soft hint with respect to the requested record kinds:
+ * when all requested record kinds are stochastic-only (V2, V4), host-trap cannot produce
+ * them, so PREFER_HOST_TRAP is silently ignored and stochastic is used. This mirrors
+ * PREFER_STOCHASTIC, which is satisfied by stochastic-only record kinds.
+ *
  * REQUIRE flags are hard constraints. The runtime fails the configure call (and
  * filters all configurations from the query) if the required method is not available on
- * the agent.
+ * the agent. In particular, REQUIRE_HOST_TRAP combined with a stochastic-only record kind
+ * (V2, V4) is rejected with ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT.
  *
  * If no flags are set (NONE), the runtime uses internal heuristics driven by the requested
  * record kinds:
@@ -586,7 +592,8 @@ typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_api_flags_t
     /// @brief No flag set. Runtime infers the method purely from the requested record kinds.
     /// @var ROCPROFILER_PC_SAMPLING_API_FLAG_PREFER_HOST_TRAP
     /// @brief Soft preference for the host-trap method; falls back to stochastic when
-    /// host-trap is unavailable on the agent.
+    /// host-trap is unavailable on the agent, or when all requested record kinds are
+    /// stochastic-only (V2, V4) and therefore cannot be produced by host-trap.
     /// @var ROCPROFILER_PC_SAMPLING_API_FLAG_PREFER_STOCHASTIC
     /// @brief Soft preference for the stochastic method; falls back to host-trap when
     /// stochastic is unavailable on the agent.
@@ -806,6 +813,9 @@ typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_api_flags_t
  * - conflicting same-strength flags (PREFER_HOST_TRAP | PREFER_STOCHASTIC, or
  *   REQUIRE_HOST_TRAP | REQUIRE_STOCHASTIC). Mixing PREFER_* with REQUIRE_* is
  *   allowed; REQUIRE_* wins and PREFER_* is ignored.
+ * - REQUIRE_HOST_TRAP set together with a stochastic-only record kind (V2 or V4).
+ *   Host-trap cannot produce V2/V4 records, so the request is internally
+ *   inconsistent (see Example 6).
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
@@ -913,6 +923,9 @@ typedef rocprofiler_status_t (*rocprofiler_available_pc_sampling_configurations_
  *   ::ROCPROFILER_PC_SAMPLING_API_FLAG_PREFER_STOCHASTIC — soft preference. If at least
  *   one configuration of the preferred method exists, the callback receives only those.
  *   Otherwise the callback receives all configurations so the caller can still fall back.
+ *   When all requested @p record_kinds are stochastic-only (V2, V4), host-trap cannot
+ *   produce them, so PREFER_HOST_TRAP is silently ignored and stochastic configurations
+ *   are returned (mirroring PREFER_STOCHASTIC, which is satisfied by stochastic-only kinds).
  * - ::ROCPROFILER_PC_SAMPLING_API_FLAG_REQUIRE_HOST_TRAP /
  *   ::ROCPROFILER_PC_SAMPLING_API_FLAG_REQUIRE_STOCHASTIC — hard requirement. The
  *   callback receives only configurations of the required method; if none exist the
@@ -1022,7 +1035,9 @@ typedef rocprofiler_status_t (*rocprofiler_available_pc_sampling_configurations_
  * @retval ::ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL the amdgpu driver installed on the system
  * does not support the PC sampling feature.
  * @retval ::ROCPROFILER_STATUS_ERROR a general error caused by the amdgpu driver
- * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT invalid record_kinds, flags, or null callback
+ * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT invalid record_kinds, flags, or null
+ * callback. In particular, REQUIRE_HOST_TRAP set together with a stochastic-only record kind
+ * (V2 or V4) is rejected, since host-trap cannot produce V2/V4 records (see Example 4).
  * @retval ::ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED PC sampling v2 is not explicitly enabled
  * (set ``ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1`` to opt-in while the API is experimental)
  */

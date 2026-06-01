@@ -231,7 +231,7 @@ copySampleHeader(const SType& sample)
     return ret;
 }
 
-template <typename GFX, typename PcSamplingRecordT>
+template <typename GFX, typename PcSamplingRecordT, rocprofiler_pc_sampling_method_t Method>
 inline PcSamplingRecordT
 copySample(const void* sample);
 
@@ -240,7 +240,7 @@ copySample(const void* sample);
  */
 template <>
 inline rocprofiler_pc_sampling_record_host_trap_v0_t
-copySample<GFX9, rocprofiler_pc_sampling_record_host_trap_v0_t>(const void* sample)
+copySample<GFX9, rocprofiler_pc_sampling_record_host_trap_v0_t, ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>(const void* sample)
 {
     const auto& sample_ = *static_cast<const perf_sample_host_trap_v1*>(sample);
     auto        ret     = copySampleHeader<rocprofiler_pc_sampling_record_host_trap_v0_t>(sample_);
@@ -252,7 +252,7 @@ copySample<GFX9, rocprofiler_pc_sampling_record_host_trap_v0_t>(const void* samp
 
 template <>
 inline rocprofiler_pc_sampling_record_stochastic_v0_t
-copySample<GFX9, rocprofiler_pc_sampling_record_stochastic_v0_t>(const void* sample)
+copySample<GFX9, rocprofiler_pc_sampling_record_stochastic_v0_t, ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(const void* sample)
 {
     const auto& sample_ = *static_cast<const perf_sample_snapshot_v1*>(sample);
 
@@ -319,16 +319,16 @@ copySample<GFX9, rocprofiler_pc_sampling_record_stochastic_v0_t>(const void* sam
 
 template <>
 inline rocprofiler_pc_sampling_record_host_trap_v0_t
-copySample<GFX950, rocprofiler_pc_sampling_record_host_trap_v0_t>(const void* sample)
+copySample<GFX950, rocprofiler_pc_sampling_record_host_trap_v0_t, ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>(const void* sample)
 {
-    return copySample<GFX9, rocprofiler_pc_sampling_record_host_trap_v0_t>(sample);
+    return copySample<GFX9, rocprofiler_pc_sampling_record_host_trap_v0_t, ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>(sample);
 }
 
 template <>
 inline rocprofiler_pc_sampling_record_stochastic_v0_t
-copySample<GFX950, rocprofiler_pc_sampling_record_stochastic_v0_t>(const void* sample)
+copySample<GFX950, rocprofiler_pc_sampling_record_stochastic_v0_t, ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(const void* sample)
 {
-    return copySample<GFX9, rocprofiler_pc_sampling_record_stochastic_v0_t>(sample);
+    return copySample<GFX9, rocprofiler_pc_sampling_record_stochastic_v0_t, ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(sample);
 }
 
 /**
@@ -336,7 +336,7 @@ copySample<GFX950, rocprofiler_pc_sampling_record_stochastic_v0_t>(const void* s
  */
 template <>
 inline rocprofiler_pc_sampling_record_host_trap_v0_t
-copySample<GFX11, rocprofiler_pc_sampling_record_host_trap_v0_t>(const void* sample)
+copySample<GFX11, rocprofiler_pc_sampling_record_host_trap_v0_t, ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>(const void* sample)
 {
     const auto& sample_ = *static_cast<const perf_sample_host_trap_v1*>(sample);
     auto        ret     = copySampleHeader<rocprofiler_pc_sampling_record_host_trap_v0_t>(sample_);
@@ -347,7 +347,7 @@ copySample<GFX11, rocprofiler_pc_sampling_record_host_trap_v0_t>(const void* sam
 // TODO: implement stochastic for GFX11
 template <>
 inline rocprofiler_pc_sampling_record_stochastic_v0_t
-copySample<GFX11, rocprofiler_pc_sampling_record_stochastic_v0_t>(const void* sample)
+copySample<GFX11, rocprofiler_pc_sampling_record_stochastic_v0_t, ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(const void* sample)
 {
     const auto& sample_ = *static_cast<const perf_sample_snapshot_v1*>(sample);
     auto        ret     = copySampleHeader<rocprofiler_pc_sampling_record_stochastic_v0_t>(sample_);
@@ -362,7 +362,7 @@ copySample<GFX11, rocprofiler_pc_sampling_record_stochastic_v0_t>(const void* sa
  */
 template <>
 inline rocprofiler_pc_sampling_record_host_trap_v0_t
-copySample<GFX12, rocprofiler_pc_sampling_record_host_trap_v0_t>(const void* sample)
+copySample<GFX12, rocprofiler_pc_sampling_record_host_trap_v0_t, ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>(const void* sample)
 {
     const auto& sample_ = *static_cast<const perf_sample_host_trap_v1*>(sample);
     auto        ret     = copySampleHeader<rocprofiler_pc_sampling_record_host_trap_v0_t>(sample_);
@@ -372,7 +372,7 @@ copySample<GFX12, rocprofiler_pc_sampling_record_host_trap_v0_t>(const void* sam
 
 template <>
 inline rocprofiler_pc_sampling_record_stochastic_v0_t
-copySample<GFX12, rocprofiler_pc_sampling_record_stochastic_v0_t>(const void* sample)
+copySample<GFX12, rocprofiler_pc_sampling_record_stochastic_v0_t, ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(const void* sample)
 {
     const auto& sample_ = *static_cast<const perf_sample_snapshot_v1*>(sample);
 
@@ -555,7 +555,7 @@ pack_snapshot_ext_data_gfx1250(uint16_t arb_state, bool lock_contention)
 
 template <>
 inline rocprofiler_pc_sampling_record_v0_t
-copySample<GFX9, rocprofiler_pc_sampling_record_v0_t>(const void* sample)
+copySample<GFX9, rocprofiler_pc_sampling_record_v0_t, ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>(const void* sample)
 {
     const auto& s = *static_cast<const perf_sample_host_trap_v1*>(sample);
     return copySampleCommon<rocprofiler_pc_sampling_record_v0_t>(s);
@@ -563,14 +563,14 @@ copySample<GFX9, rocprofiler_pc_sampling_record_v0_t>(const void* sample)
 
 template <>
 inline rocprofiler_pc_sampling_record_v0_t
-copySample<GFX950, rocprofiler_pc_sampling_record_v0_t>(const void* sample)
+copySample<GFX950, rocprofiler_pc_sampling_record_v0_t, ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>(const void* sample)
 {
-    return copySample<GFX9, rocprofiler_pc_sampling_record_v0_t>(sample);
+    return copySample<GFX9, rocprofiler_pc_sampling_record_v0_t, ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>(sample);
 }
 
 template <>
 inline rocprofiler_pc_sampling_record_v0_t
-copySample<GFX11, rocprofiler_pc_sampling_record_v0_t>(const void* sample)
+copySample<GFX11, rocprofiler_pc_sampling_record_v0_t, ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>(const void* sample)
 {
     const auto& s = *static_cast<const perf_sample_host_trap_v1*>(sample);
     return copySampleCommon<rocprofiler_pc_sampling_record_v0_t>(s);
@@ -578,7 +578,7 @@ copySample<GFX11, rocprofiler_pc_sampling_record_v0_t>(const void* sample)
 
 template <>
 inline rocprofiler_pc_sampling_record_v0_t
-copySample<GFX12, rocprofiler_pc_sampling_record_v0_t>(const void* sample)
+copySample<GFX12, rocprofiler_pc_sampling_record_v0_t, ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>(const void* sample)
 {
     const auto& s = *static_cast<const perf_sample_host_trap_v1*>(sample);
     return copySampleCommon<rocprofiler_pc_sampling_record_v0_t>(s);
@@ -588,7 +588,7 @@ copySample<GFX12, rocprofiler_pc_sampling_record_v0_t>(const void* sample)
 
 template <>
 inline rocprofiler_pc_sampling_record_v1_t
-copySample<GFX9, rocprofiler_pc_sampling_record_v1_t>(const void* sample)
+copySample<GFX9, rocprofiler_pc_sampling_record_v1_t, ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>(const void* sample)
 {
     const auto& s     = *static_cast<const perf_sample_host_trap_v1*>(sample);
     auto        ret   = copySampleCommon<rocprofiler_pc_sampling_record_v1_t>(s);
@@ -603,14 +603,14 @@ copySample<GFX9, rocprofiler_pc_sampling_record_v1_t>(const void* sample)
 
 template <>
 inline rocprofiler_pc_sampling_record_v1_t
-copySample<GFX950, rocprofiler_pc_sampling_record_v1_t>(const void* sample)
+copySample<GFX950, rocprofiler_pc_sampling_record_v1_t, ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>(const void* sample)
 {
-    return copySample<GFX9, rocprofiler_pc_sampling_record_v1_t>(sample);
+    return copySample<GFX9, rocprofiler_pc_sampling_record_v1_t, ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>(sample);
 }
 
 template <>
 inline rocprofiler_pc_sampling_record_v1_t
-copySample<GFX11, rocprofiler_pc_sampling_record_v1_t>(const void* sample)
+copySample<GFX11, rocprofiler_pc_sampling_record_v1_t, ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>(const void* sample)
 {
     const auto& s            = *static_cast<const perf_sample_host_trap_v1*>(sample);
     auto        ret          = copySampleCommon<rocprofiler_pc_sampling_record_v1_t>(s);
@@ -624,7 +624,7 @@ copySample<GFX11, rocprofiler_pc_sampling_record_v1_t>(const void* sample)
 
 template <>
 inline rocprofiler_pc_sampling_record_v1_t
-copySample<GFX12, rocprofiler_pc_sampling_record_v1_t>(const void* sample)
+copySample<GFX12, rocprofiler_pc_sampling_record_v1_t, ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>(const void* sample)
 {
     const auto& s     = *static_cast<const perf_sample_host_trap_v1*>(sample);
     auto        ret   = copySampleCommon<rocprofiler_pc_sampling_record_v1_t>(s);
@@ -640,7 +640,7 @@ copySample<GFX12, rocprofiler_pc_sampling_record_v1_t>(const void* sample)
 
 template <>
 inline rocprofiler_pc_sampling_record_v2_t
-copySample<GFX9, rocprofiler_pc_sampling_record_v2_t>(const void* sample)
+copySample<GFX9, rocprofiler_pc_sampling_record_v2_t, ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(const void* sample)
 {
     const auto& s = *static_cast<const perf_sample_snapshot_v1*>(sample);
 
@@ -681,14 +681,14 @@ copySample<GFX9, rocprofiler_pc_sampling_record_v2_t>(const void* sample)
 
 template <>
 inline rocprofiler_pc_sampling_record_v2_t
-copySample<GFX950, rocprofiler_pc_sampling_record_v2_t>(const void* sample)
+copySample<GFX950, rocprofiler_pc_sampling_record_v2_t, ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(const void* sample)
 {
-    return copySample<GFX9, rocprofiler_pc_sampling_record_v2_t>(sample);
+    return copySample<GFX9, rocprofiler_pc_sampling_record_v2_t, ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(sample);
 }
 
 template <>
 inline rocprofiler_pc_sampling_record_v2_t
-copySample<GFX11, rocprofiler_pc_sampling_record_v2_t>(const void* sample)
+copySample<GFX11, rocprofiler_pc_sampling_record_v2_t, ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(const void* sample)
 {
     const auto& s            = *static_cast<const perf_sample_snapshot_v1*>(sample);
     auto        ret          = copySampleCommon<rocprofiler_pc_sampling_record_v2_t>(s);
@@ -702,7 +702,7 @@ copySample<GFX11, rocprofiler_pc_sampling_record_v2_t>(const void* sample)
 
 template <>
 inline rocprofiler_pc_sampling_record_v2_t
-copySample<GFX12, rocprofiler_pc_sampling_record_v2_t>(const void* sample)
+copySample<GFX12, rocprofiler_pc_sampling_record_v2_t, ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(const void* sample)
 {
     const auto& s = *static_cast<const perf_sample_snapshot_v1*>(sample);
 
@@ -742,14 +742,14 @@ copySample<GFX12, rocprofiler_pc_sampling_record_v2_t>(const void* sample)
 
 template <>
 inline rocprofiler_pc_sampling_record_v0_t
-copySample<GFX1250, rocprofiler_pc_sampling_record_v0_t>(const void* sample)
+copySample<GFX1250, rocprofiler_pc_sampling_record_v0_t, ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>(const void* sample)
 {
-    return copySample<GFX12, rocprofiler_pc_sampling_record_v0_t>(sample);
+    return copySample<GFX12, rocprofiler_pc_sampling_record_v0_t, ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>(sample);
 }
 
 template <>
 inline rocprofiler_pc_sampling_record_v1_t
-copySample<GFX1250, rocprofiler_pc_sampling_record_v1_t>(const void* sample)
+copySample<GFX1250, rocprofiler_pc_sampling_record_v1_t, ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>(const void* sample)
 {
     const auto& s     = *static_cast<const perf_sample_host_trap_v1*>(sample);
     auto        ret   = copySampleCommon<rocprofiler_pc_sampling_record_v1_t>(s);
@@ -766,7 +766,7 @@ copySample<GFX1250, rocprofiler_pc_sampling_record_v1_t>(const void* sample)
 
 template <>
 inline rocprofiler_pc_sampling_record_v2_t
-copySample<GFX1250, rocprofiler_pc_sampling_record_v2_t>(const void* sample)
+copySample<GFX1250, rocprofiler_pc_sampling_record_v2_t, ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(const void* sample)
 {
     const auto& s = *static_cast<const perf_sample_snapshot_v1*>(sample);
 
@@ -824,7 +824,7 @@ copySample<GFX1250, rocprofiler_pc_sampling_record_v2_t>(const void* sample)
 
 template <>
 inline rocprofiler_pc_sampling_record_v3_t
-copySample<GFX1250, rocprofiler_pc_sampling_record_v3_t>(const void* sample)
+copySample<GFX1250, rocprofiler_pc_sampling_record_v3_t, ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>(const void* sample)
 {
     const auto& s     = *static_cast<const perf_sample_host_trap_v1*>(sample);
     auto        ret   = copySampleCommon<rocprofiler_pc_sampling_record_v3_t>(s);
@@ -845,7 +845,7 @@ copySample<GFX1250, rocprofiler_pc_sampling_record_v3_t>(const void* sample)
 
 template <>
 inline rocprofiler_pc_sampling_record_v4_t
-copySample<GFX1250, rocprofiler_pc_sampling_record_v4_t>(const void* sample)
+copySample<GFX1250, rocprofiler_pc_sampling_record_v4_t, ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(const void* sample)
 {
     const auto& s = *static_cast<const perf_sample_snapshot_v1*>(sample);
 
@@ -916,6 +916,94 @@ copySample<GFX1250, rocprofiler_pc_sampling_record_v4_t>(const void* sample)
 }
 
 // =====================================================================================
+// STOCHASTIC specializations for the host-trap-layout record kinds (V0, V1, V3)
+//
+// V0/V1/V3 carry no stochastic-only fields, so under the stochastic method they decode
+// exactly like their host-trap counterparts -- the common leading fields (pc, exec_mask,
+// workgroup, chiplet_and_wave_id, hw_id, timestamp) sit at byte-identical offsets in
+// perf_sample_host_trap_v1 and perf_sample_snapshot_v1. The only extra work is honoring the
+// hardware validity bit: stochastic hardware can emit invalid samples, so we zero-init the
+// record (making is_invalid_sample<RecordT, STOCHASTIC>() detect it via timestamp == 0) and
+// otherwise delegate to the host-trap specialization. The per-GFX validity bit mirrors the
+// corresponding V2 specialization above.
+// =====================================================================================
+
+/**
+ * @brief Per-GFX hardware validity test for a stochastic snapshot sample. Mirrors the
+ * valid-bit logic used by the V2 copySample specializations.
+ */
+template <typename GFX>
+inline bool
+is_stochastic_snapshot_valid(const perf_sample_snapshot_v1& s);
+
+template <>
+inline bool
+is_stochastic_snapshot_valid<GFX9>(const perf_sample_snapshot_v1& s)
+{
+    return static_cast<bool>(EXTRACT_BITS(s.perf_snapshot_data, 0, 0) &
+                             ~EXTRACT_BITS(s.perf_snapshot_data, 26, 26));
+}
+
+template <>
+inline bool
+is_stochastic_snapshot_valid<GFX950>(const perf_sample_snapshot_v1& s)
+{
+    return is_stochastic_snapshot_valid<GFX9>(s);
+}
+
+template <>
+inline bool
+is_stochastic_snapshot_valid<GFX11>(const perf_sample_snapshot_v1& /*s*/)
+{
+    // GFX11 stochastic decoding is not yet implemented (see V2 GFX11 specialization, which
+    // performs no validity check); treat every sample as valid for now.
+    return true;
+}
+
+template <>
+inline bool
+is_stochastic_snapshot_valid<GFX12>(const perf_sample_snapshot_v1& s)
+{
+    return static_cast<bool>(EXTRACT_BITS(s.perf_snapshot_data, 0, 0));
+}
+
+template <>
+inline bool
+is_stochastic_snapshot_valid<GFX1250>(const perf_sample_snapshot_v1& s)
+{
+    return static_cast<bool>(EXTRACT_BITS(s.perf_snapshot_data, 0, 0));
+}
+
+#define STOCHASTIC_PASSTHROUGH_COPYSAMPLE(GFXIP, RECORD_T)                                          \
+    template <>                                                                                     \
+    inline RECORD_T copySample<GFXIP, RECORD_T, ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(         \
+        const void* sample)                                                                         \
+    {                                                                                               \
+        const auto& s = *static_cast<const perf_sample_snapshot_v1*>(sample);                       \
+        if(!is_stochastic_snapshot_valid<GFXIP>(s)) return RECORD_T{};                              \
+        return copySample<GFXIP, RECORD_T, ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>(sample);       \
+    }
+
+// V0 stochastic (all architectures)
+STOCHASTIC_PASSTHROUGH_COPYSAMPLE(GFX9, rocprofiler_pc_sampling_record_v0_t)
+STOCHASTIC_PASSTHROUGH_COPYSAMPLE(GFX950, rocprofiler_pc_sampling_record_v0_t)
+STOCHASTIC_PASSTHROUGH_COPYSAMPLE(GFX11, rocprofiler_pc_sampling_record_v0_t)
+STOCHASTIC_PASSTHROUGH_COPYSAMPLE(GFX12, rocprofiler_pc_sampling_record_v0_t)
+STOCHASTIC_PASSTHROUGH_COPYSAMPLE(GFX1250, rocprofiler_pc_sampling_record_v0_t)
+
+// V1 stochastic (all architectures)
+STOCHASTIC_PASSTHROUGH_COPYSAMPLE(GFX9, rocprofiler_pc_sampling_record_v1_t)
+STOCHASTIC_PASSTHROUGH_COPYSAMPLE(GFX950, rocprofiler_pc_sampling_record_v1_t)
+STOCHASTIC_PASSTHROUGH_COPYSAMPLE(GFX11, rocprofiler_pc_sampling_record_v1_t)
+STOCHASTIC_PASSTHROUGH_COPYSAMPLE(GFX12, rocprofiler_pc_sampling_record_v1_t)
+STOCHASTIC_PASSTHROUGH_COPYSAMPLE(GFX1250, rocprofiler_pc_sampling_record_v1_t)
+
+// V3 stochastic (GFX1250 only)
+STOCHASTIC_PASSTHROUGH_COPYSAMPLE(GFX1250, rocprofiler_pc_sampling_record_v3_t)
+
+#undef STOCHASTIC_PASSTHROUGH_COPYSAMPLE
+
+// =====================================================================================
 // correct_pc_address
 // =====================================================================================
 
@@ -924,10 +1012,10 @@ copySample<GFX1250, rocprofiler_pc_sampling_record_v4_t>(const void* sample)
  */
 template <>
 inline rocprofiler_pc_sampling_record_host_trap_v0_t
-copySample<GFX1250, rocprofiler_pc_sampling_record_host_trap_v0_t>(const void* sample)
+copySample<GFX1250, rocprofiler_pc_sampling_record_host_trap_v0_t, ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>(const void* sample)
 {
     // Host-trap samples are same for GFX12 and GFX1250
-    auto ret = copySample<GFX12, rocprofiler_pc_sampling_record_host_trap_v0_t>(sample);
+    auto ret = copySample<GFX12, rocprofiler_pc_sampling_record_host_trap_v0_t, ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>(sample);
     // Only difference are chiplets that exist on GFX1250
     copyChipletId<GFX1250>(ret, *static_cast<const perf_sample_snapshot_v1*>(sample));
     return ret;
@@ -938,7 +1026,7 @@ copySample<GFX1250, rocprofiler_pc_sampling_record_host_trap_v0_t>(const void* s
  */
 template <>
 inline rocprofiler_pc_sampling_record_stochastic_v0_t
-copySample<GFX1250, rocprofiler_pc_sampling_record_stochastic_v0_t>(const void* sample)
+copySample<GFX1250, rocprofiler_pc_sampling_record_stochastic_v0_t, ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(const void* sample)
 {
     // Differences compared to the GFX12:
     // - SAMPLING_LOCK_ERR introduced in the GFX1250 and means:

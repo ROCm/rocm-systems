@@ -185,7 +185,9 @@ data_ready_callback(void*                                client_callback_data,
                                          reinterpret_cast<const generic_sample_t*>(buff.get()),
                                          agent_session->agent->gfx_target_version,
                                          cv,
-                                         false);
+                                         false,
+                                         agent_session->get_valid_record_kind(),
+                                         agent_session->deliver_invalid);
 
         if(pcs_parser_status != PCSAMPLE_STATUS_SUCCESS)
         {
