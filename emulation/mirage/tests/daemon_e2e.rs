@@ -150,11 +150,9 @@ fn create_profile(d: &Daemon, name: &str) {
         "emulator": {
             "emulator": "noop",
             "plugins": {},
-            "nodes": 1,
-            "gpus_per_node": 1,
             "exec_mode": "Functional",
             "options": {},
-            "topology": {"root": {"name": "", "type": ""}}
+            "topology": {"racks": 1, "nodes_per_rack": 1, "gpus_per_node": 1, "agent": "noop"}
         }
     });
     let (s, b) = d.put_json(&format!("/api/profiles/{name}"), &prof);
@@ -347,11 +345,9 @@ async fn create_profile_async(client: &reqwest::Client, d: &Daemon, name: &str) 
         "emulator": {
             "emulator": "noop",
             "plugins": {},
-            "nodes": 1,
-            "gpus_per_node": 1,
             "exec_mode": "Functional",
             "options": {},
-            "topology": {"root": {"name": "", "type": ""}}
+            "topology": {"racks": 1, "nodes_per_rack": 1, "gpus_per_node": 1, "agent": "noop"}
         }
     });
     let r = client

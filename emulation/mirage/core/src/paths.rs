@@ -182,6 +182,16 @@ pub fn topology_path(name: &str) -> PathBuf {
     topology_root().join(format!("{name}.json"))
 }
 
+/// Root directory for mirage agents: `<mirage_config_dir>/agent`.
+pub fn agent_root() -> PathBuf {
+    mirage_config_dir().join("agent")
+}
+
+/// Path to a specific agent file: `<agent_root>/<name>.json`.
+pub fn agent_path(name: &str) -> PathBuf {
+    agent_root().join(format!("{name}.json"))
+}
+
 /// Root directory for all sessions: `<mirage_runtime_dir>/session`.
 pub fn session_root() -> PathBuf {
     mirage_runtime_dir().join("session")

@@ -13,6 +13,7 @@
 //!
 //! See the crate-level docs of [`paths`] for the on-disk layout.
 
+pub mod agent;
 pub mod attach;
 pub mod common;
 pub mod config;

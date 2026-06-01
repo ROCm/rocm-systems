@@ -19,7 +19,7 @@
 //! * [`ensure_assets`] extracts the kmd library + schema into
 //!   `<MIRAGE_STATE>/rocjitsu/` so they can be referenced via
 //!   filesystem paths (e.g. as `LD_PRELOAD`).
-//! * [`ensure_topologies`] writes the cdna3/cdna4 simulation configs
+//! * [`ensure_agents`] writes the cdna3/cdna4 simulation configs
 //!   into `<MIRAGE_CONFIG>/topology/` so they appear alongside the
 //!   generic mirage builtin topologies.
 
@@ -61,11 +61,11 @@ pub const LIB_NAME: &str = "librocjitsu.so";
 /// Name used for the extracted schema on disk.
 pub const SCHEMA_FBS_NAME: &str = "simulation_config.fbs";
 
-/// Name (without `.json` suffix) of the cdna3 builtin topology.
-pub const CDNA3_TOPOLOGY_NAME: &str = "rocjitsu-cdna3";
+/// Name (without `.json` suffix) of the cdna3 builtin agent.
+pub const CDNA3_AGENT_NAME: &str = "cdna3";
 
-/// Name (without `.json` suffix) of the cdna4 builtin topology.
-pub const CDNA4_TOPOLOGY_NAME: &str = "rocjitsu-cdna4";
+/// Name (without `.json` suffix) of the cdna4 builtin agent.
+pub const CDNA4_AGENT_NAME: &str = "cdna4";
 
 /// Directory where extracted runtime assets are stored
 /// (`<MIRAGE_CACHE>/emulator/rocjitsu/`).
@@ -124,19 +124,19 @@ pub fn ensure_assets(force: bool) -> Result<Vec<(String, bool)>> {
     Ok(report)
 }
 
-/// Write the bundled rocjitsu kmd configs into the mirage topology
-/// directory (`<MIRAGE_CONFIG>/topology/`).
+/// Write the bundled rocjitsu kmd configs into the mirage agent
+/// directory (`<MIRAGE_CONFIG>/agent/`).
 ///
 /// If `force` is true, existing files are overwritten. Otherwise
 /// only missing files are written. Empty embedded configs are skipped.
-pub fn ensure_topologies(force: bool) -> Result<Vec<(String, bool)>> {
+pub fn ensure_agents(force: bool) -> Result<Vec<(String, bool)>> {
     let mut report = Vec::new();
-    for (name, bytes) in builtin_topologies() {
+    for (name, bytes) in builtin_agents() {
         if bytes.is_empty() {
             report.push((name.to_string(), false));
             continue;
         }
-        let path = mirage_core::paths::topology_path(name);
+        let path = mirage_core::paths::agent_path(name);
         if path.exists() && !force {
             report.push((name.to_string(), false));
             continue;
@@ -147,11 +147,11 @@ pub fn ensure_topologies(force: bool) -> Result<Vec<(String, bool)>> {
     Ok(report)
 }
 
-/// The `(name, bytes)` pairs that [`ensure_topologies`] writes.
-pub fn builtin_topologies() -> &'static [(&'static str, &'static [u8])] {
+/// The `(name, bytes)` pairs that [`ensure_agents`] writes.
+pub fn builtin_agents() -> &'static [(&'static str, &'static [u8])] {
     static ENTRIES: [(&str, &[u8]); 2] = [
-        (CDNA3_TOPOLOGY_NAME, CDNA3_KMD_BYTES),
-        (CDNA4_TOPOLOGY_NAME, CDNA4_KMD_BYTES),
+        (CDNA3_AGENT_NAME, CDNA3_KMD_BYTES),
+        (CDNA4_AGENT_NAME, CDNA4_KMD_BYTES),
     ];
     &ENTRIES
 }
@@ -189,16 +189,17 @@ pub fn kmd_preload() -> Option<PathBuf> {
 /// or `"cdna4"`).
 ///
 /// Prefers the extracted on-disk copies (kmd json under
-/// `<MIRAGE_CONFIG>/topology/` and schema under
-/// `<MIRAGE_STATE>/rocjitsu/`). Falls back to the rocjitsu source
-/// tree for environments that haven't extracted the embedded assets.
+/// `<MIRAGE_CONFIG>/agent/` and schema under
+/// `<MIRAGE_CACHE>/emulator/rocjitsu/`). Falls back to the rocjitsu
+/// source tree for environments that haven't extracted the embedded
+/// assets.
 pub fn kmd_config(arch: &str) -> Option<(PathBuf, PathBuf)> {
-    let (topology_name, fallback_cfg_name) = match arch {
-        "cdna3" => (CDNA3_TOPOLOGY_NAME, "amdgpu_cdna3_kmd.json"),
-        "cdna4" => (CDNA4_TOPOLOGY_NAME, "amdgpu_cdna4_kmd.json"),
+    let (agent_name, fallback_cfg_name) = match arch {
+        "cdna3" => (CDNA3_AGENT_NAME, "amdgpu_cdna3_kmd.json"),
+        "cdna4" => (CDNA4_AGENT_NAME, "amdgpu_cdna4_kmd.json"),
         _ => return None,
     };
-    let extracted_cfg = mirage_core::paths::topology_path(topology_name);
+    let extracted_cfg = mirage_core::paths::agent_path(agent_name);
     let extracted_schema = schema_fbs_path();
     if extracted_cfg.exists() && extracted_schema.exists() {
         return Some((extracted_cfg, extracted_schema));
@@ -277,9 +278,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn topology_names_are_stable() {
-        let names: Vec<&str> = builtin_topologies().iter().map(|(n, _)| *n).collect();
-        assert_eq!(names, vec!["rocjitsu-cdna3", "rocjitsu-cdna4"]);
+    fn agent_names_are_stable() {
+        let names: Vec<&str> = builtin_agents().iter().map(|(n, _)| *n).collect();
+        assert_eq!(names, vec!["cdna3", "cdna4"]);
     }
 
     #[test]
@@ -314,15 +315,15 @@ mod tests {
     }
 
     #[test]
-    fn ensure_topologies_writes_then_skips() {
+    fn ensure_agents_writes_then_skips() {
         let _g = mirage_core::paths::test_env_lock();
         let tmp = tempfile::tempdir().unwrap();
         mirage_core::paths::set_test_root(tmp.path());
-        let first = ensure_topologies(false).unwrap();
+        let first = ensure_agents(false).unwrap();
         for (name, written) in &first {
             let bytes_empty = match name.as_str() {
-                CDNA3_TOPOLOGY_NAME => CDNA3_KMD_BYTES.is_empty(),
-                CDNA4_TOPOLOGY_NAME => CDNA4_KMD_BYTES.is_empty(),
+                CDNA3_AGENT_NAME => CDNA3_KMD_BYTES.is_empty(),
+                CDNA4_AGENT_NAME => CDNA4_KMD_BYTES.is_empty(),
                 _ => unreachable!(),
             };
             if bytes_empty {
@@ -331,9 +332,9 @@ mod tests {
                 assert!(written);
             }
         }
-        let second = ensure_topologies(false).unwrap();
+        let second = ensure_agents(false).unwrap();
         for (_, w) in &second {
-            assert!(!w, "second run should not overwrite existing topologies");
+            assert!(!w, "second run should not overwrite existing agents");
         }
     }
 }

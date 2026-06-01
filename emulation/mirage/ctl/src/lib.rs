@@ -96,9 +96,16 @@ pub enum ProfileCmd {
         /// noop).
         #[arg(long)]
         emulator: Option<String>,
-        /// Number of nodes.
+        /// Agent name from `<MIRAGE_CONFIG>/agent/` (e.g. `cdna4`,
+        /// `noop`). Defaults to `noop`.
+        #[arg(long, default_value = "noop")]
+        agent: String,
+        /// Number of racks.
         #[arg(long, default_value_t = 1)]
-        nodes: u32,
+        racks: u32,
+        /// Nodes per rack.
+        #[arg(long, default_value_t = 1)]
+        nodes_per_rack: u32,
         /// GPUs per node.
         #[arg(long, default_value_t = 1)]
         gpus_per_node: u32,
@@ -303,15 +310,18 @@ pub async fn dispatch<C: MirageCtl + 'static>(
     ctl: C,
     json: bool,
 ) -> anyhow::Result<ExitCode> {
-    // Best-effort: write any missing builtin topologies on startup
-    // so they're always available under <MIRAGE_CONFIG>/topology/.
+    // Best-effort: write any missing builtin agents/topologies on
+    // startup so they're always available under <MIRAGE_CONFIG>/.
     // Errors here are non-fatal; the user can recover via
     // `mirage state builtins`.
+    if let Err(e) = mirage_core::agent::store::ensure_builtins(false) {
+        tracing::warn!("failed to preload builtin agents: {e:#}");
+    }
     if let Err(e) = mirage_core::topology::store::ensure_builtins(false) {
         tracing::warn!("failed to preload builtin topologies: {e:#}");
     }
-    if let Err(e) = mirage_rocjitsu::ensure_topologies(false) {
-        tracing::warn!("failed to preload rocjitsu topologies: {e:#}");
+    if let Err(e) = mirage_rocjitsu::ensure_agents(false) {
+        tracing::warn!("failed to preload rocjitsu agents: {e:#}");
     }
     if let Err(e) = mirage_rocjitsu::ensure_assets(false) {
         tracing::warn!("failed to extract rocjitsu assets: {e:#}");
@@ -369,7 +379,9 @@ fn profile_cmd(ctl: &dyn MirageCtl, cmd: ProfileCmd, json: bool) -> anyhow::Resu
         ProfileCmd::Create {
             name,
             emulator,
-            nodes,
+            agent,
+            racks,
+            nodes_per_rack,
             gpus_per_node,
             description,
         } => {
@@ -388,10 +400,16 @@ fn profile_cmd(ctl: &dyn MirageCtl, cmd: ProfileCmd, json: bool) -> anyhow::Resu
                 },
                 None => registry::default_emulator(),
             };
+            let topo = mirage_core::topology::TopologyDef {
+                racks,
+                nodes_per_rack,
+                gpus_per_node,
+                agent: MaybeRef::Ref(agent),
+            };
             let p = ProfileDef {
                 name: name.clone(),
                 description,
-                emulator: registry::make_def(spec, nodes, gpus_per_node),
+                emulator: registry::make_def(spec, topo),
             };
             ctl.profile_put(&p)?;
             if json {
@@ -863,13 +881,32 @@ fn profile_wizard(
     let spec = &specs[pick];
 
     let nodes: u32 = Input::with_theme(&theme)
-        .with_prompt("Number of nodes")
+        .with_prompt("Nodes per rack")
+        .default(1)
+        .interact_text()?;
+    let racks: u32 = Input::with_theme(&theme)
+        .with_prompt("Number of racks")
         .default(1)
         .interact_text()?;
     let gpus_per_node: u32 = Input::with_theme(&theme)
         .with_prompt("GPUs per node")
         .default(1)
         .interact_text()?;
+    let known_agents = mirage_core::agent::store::list().unwrap_or_default();
+    let agent: String = if known_agents.is_empty() {
+        "noop".to_string()
+    } else {
+        let default_idx = known_agents
+            .iter()
+            .position(|n| n == "noop")
+            .unwrap_or(0);
+        let pick = Select::with_theme(&theme)
+            .with_prompt("Agent")
+            .items(&known_agents)
+            .default(default_idx)
+            .interact()?;
+        known_agents[pick].clone()
+    };
     let description: String = Input::with_theme(&theme)
         .with_prompt("Description (optional)")
         .allow_empty(true)
@@ -877,7 +914,7 @@ fn profile_wizard(
 
     let proceed = Confirm::with_theme(&theme)
         .with_prompt(format!(
-            "Create profile {name} using {} ({nodes} node(s) x {gpus_per_node} GPU(s))?",
+            "Create profile {name} using {} ({racks} rack(s) x {nodes} node(s) x {gpus_per_node} GPU(s), agent={agent})?",
             spec.name
         ))
         .default(true)
@@ -887,6 +924,12 @@ fn profile_wizard(
         return Ok(ExitCode::from(1));
     }
 
+    let topo = mirage_core::topology::TopologyDef {
+        racks,
+        nodes_per_rack: nodes,
+        gpus_per_node,
+        agent: MaybeRef::Ref(agent),
+    };
     let p = ProfileDef {
         name: name.clone(),
         description: if description.is_empty() {
@@ -894,7 +937,7 @@ fn profile_wizard(
         } else {
             Some(description)
         },
-        emulator: registry::make_def(spec, nodes, gpus_per_node),
+        emulator: registry::make_def(spec, topo),
     };
     ctl.profile_put(&p)?;
     if json {
@@ -991,22 +1034,33 @@ async fn state_cmd<C: MirageCtl + 'static>(
 ) -> anyhow::Result<ExitCode> {
     match cmd {
         StateCmd::Builtins => {
-            let mut written = mirage_core::topology::store::ensure_builtins(true)?;
-            written.extend(mirage_rocjitsu::ensure_topologies(true)?);
+            let mut agents = mirage_core::agent::store::ensure_builtins(true)?;
+            agents.extend(mirage_rocjitsu::ensure_agents(true)?);
+            let topologies = mirage_core::topology::store::ensure_builtins(true)?;
             let assets = mirage_rocjitsu::ensure_assets(true)?;
             if json {
-                let entries: Vec<_> = written
+                let entries: Vec<_> = agents
                     .iter()
                     .map(|(n, w)| {
                         serde_json::json!({
+                            "kind": "agent",
+                            "name": n,
+                            "path": mirage_core::paths::agent_path(n),
+                            "written": w,
+                        })
+                    })
+                    .chain(topologies.iter().map(|(n, w)| {
+                        serde_json::json!({
+                            "kind": "topology",
                             "name": n,
                             "path": mirage_core::paths::topology_path(n),
                             "written": w,
                         })
-                    })
+                    }))
                     .chain(assets.iter().map(|(n, w)| {
                         let p = rocjitsu_asset_path(n);
                         serde_json::json!({
+                            "kind": "asset",
                             "name": n,
                             "path": p,
                             "written": w,
@@ -1015,15 +1069,20 @@ async fn state_cmd<C: MirageCtl + 'static>(
                     .collect();
                 println!("{}", serde_json::to_string_pretty(&entries)?);
             } else {
-                for (name, w) in &written {
+                for (name, w) in &agents {
+                    let p = mirage_core::paths::agent_path(name);
+                    let tag = if *w { "wrote" } else { "kept" };
+                    println!("{tag} agent     {} -> {}", name, p.display());
+                }
+                for (name, w) in &topologies {
                     let p = mirage_core::paths::topology_path(name);
                     let tag = if *w { "wrote" } else { "kept" };
-                    println!("{tag} {} -> {}", name, p.display());
+                    println!("{tag} topology  {} -> {}", name, p.display());
                 }
                 for (name, w) in &assets {
                     let p = rocjitsu_asset_path(name);
                     let tag = if *w { "wrote" } else { "kept" };
-                    println!("{tag} {} -> {}", name, p.display());
+                    println!("{tag} asset     {} -> {}", name, p.display());
                 }
             }
         }

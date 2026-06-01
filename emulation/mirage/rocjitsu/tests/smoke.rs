@@ -5,8 +5,8 @@
 //! (the embedded assets are then empty placeholders).
 
 use mirage_rocjitsu::{
-    CDNA3_KMD_BYTES, CDNA4_KMD_BYTES, KMD_LIB_BYTES, SCHEMA_FBS_BYTES, ensure_assets,
-    ensure_topologies, kmd_config, kmd_lib_path, kmd_preload,
+    CDNA3_KMD_BYTES, CDNA4_KMD_BYTES, KMD_LIB_BYTES, SCHEMA_FBS_BYTES, ensure_agents,
+    ensure_assets, kmd_config, kmd_lib_path, kmd_preload,
 };
 
 #[test]
@@ -21,7 +21,7 @@ fn embedded_assets_extract_round_trip() {
     mirage_core::paths::set_test_root(tmp.path());
 
     let asset_report = ensure_assets(false).unwrap();
-    let topo_report = ensure_topologies(false).unwrap();
+    let agent_report = ensure_agents(false).unwrap();
 
     if !KMD_LIB_BYTES.is_empty() {
         let on_disk = kmd_lib_path();
@@ -36,11 +36,7 @@ fn embedded_assets_extract_round_trip() {
         assert!(schema.exists());
     }
     if !CDNA3_KMD_BYTES.is_empty() {
-        assert!(
-            topo_report
-                .iter()
-                .any(|(n, w)| n == "rocjitsu-cdna3" && *w)
-        );
+        assert!(agent_report.iter().any(|(n, w)| n == "cdna3" && *w));
     }
     assert!(!asset_report.is_empty());
 }

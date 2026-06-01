@@ -10,10 +10,6 @@ use crate::{
     topology::TopologyDef,
 };
 
-fn one() -> u32 {
-    1
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ExecMode {
     #[default]
@@ -29,22 +25,12 @@ pub struct EmulatorDef {
     /// plugins to use with the emulator, e.g. "rocjitsu" plugin for AMD GPU simulation
     pub plugins: PluginsDef,
 
-    /// how many nodes
-    /// default to 1 if not specified
-    #[serde(default = "one")]
-    pub nodes: u32,
-
-    /// how many gpus per node
-    /// default to 1 if not specified
-    #[serde(default = "one")]
-    pub gpus_per_node: u32,
-
     pub exec_mode: ExecMode,
 
     /// extra options to configure the emulator, e.g. {"gpu_model": "cdna3"}
     pub options: SimpleMap,
 
-    /// the topology of the emulated system
+    /// system topology (rack/node/GPU layout + per-GPU agent).
     pub topology: MaybeRef<TopologyDef>,
 }
 

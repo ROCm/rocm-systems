@@ -553,8 +553,6 @@ mod tests {
             emulator: crate::emulator::EmulatorDef {
                 emulator: "noop".to_string(),
                 plugins: Default::default(),
-                nodes: 1,
-                gpus_per_node: 1,
                 exec_mode: Default::default(),
                 options: Default::default(),
                 topology: MaybeRef::Owned(Default::default()),

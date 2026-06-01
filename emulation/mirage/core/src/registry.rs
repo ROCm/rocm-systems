@@ -1,29 +1,23 @@
-//! Emulator registry.
+//! Emulator + agent + topology registry.
 //!
-//! A small in-process table of available emulator backends. Each
-//! entry can:
+//! Three append-only lists drive the rest of mirage:
 //!
-//! * describe itself ([`EmulatorSpec::description`]),
-//! * declare whether it is installed on this machine
-//!   ([`EmulatorSpec::installed`]) — used by the CLI wizards and the
-//!   `default_emulator()` selector,
-//! * produce a default topology to use when the user creates a
-//!   profile without supplying one
-//!   ([`EmulatorSpec::default_topology`]).
-//!
-//! New backends register themselves by adding a new
-//! [`EmulatorSpec`] to [`builtins()`]. The list is the
-//! authoritative source for both the CLI (`--emulator <name>`) and
-//! the wizards (which only offer registered names).
+//! * [`builtins`] \u2014 registered emulator backends. Each
+//!   [`EmulatorSpec`] knows how to describe itself and report
+//!   whether its runtime is installed.
+//! * [`builtin_agents`] \u2014 named hardware agent definitions
+//!   ([`crate::agent::AgentDef`]). Agents are emulator-agnostic
+//!   hardware descriptions for one device.
+//! * [`builtin_topologies`] \u2014 named system layouts
+//!   ([`crate::topology::TopologyDef`]) that arrange agents into
+//!   racks/nodes/GPUs.
 
+use crate::agent::{AgentDef, ComponentDef};
 use crate::common::{MaybeRef, SimpleMap};
 use crate::emulator::{EmulatorDef, EmulatorDescription, ExecMode};
-use crate::topology::{ComponentDef, TopologyDef};
+use crate::topology::TopologyDef;
 
 /// A registered emulator backend.
-///
-/// Methods are function pointers so the registry stays a plain `&'static`
-/// slice; no trait objects, no globals to initialise.
 #[derive(Debug, Clone, Copy)]
 pub struct EmulatorSpec {
     /// Canonical name used on disk and on the CLI.
@@ -34,15 +28,11 @@ pub struct EmulatorSpec {
     /// current machine. Cheap (no network, no spawn): used by the
     /// wizard's default picker.
     pub installed: fn() -> bool,
-    /// Returns this emulator's default topology. Used when the user
-    /// asks for a profile but doesn't supply a `--topology` (or via
-    /// the wizard's "use default" answer).
-    pub default_topology: fn(nodes: u32, gpus_per_node: u32) -> TopologyDef,
     /// Returns a long-form description (name + version + blurb).
     pub describe: fn() -> EmulatorDescription,
 }
 
-/// Built-in registry. Append-only by intent.
+/// Built-in emulator registry. Append-only by intent.
 pub fn builtins() -> &'static [EmulatorSpec] {
     &[NOOP, ROCJITSU]
 }
@@ -62,34 +52,56 @@ pub fn default_emulator() -> &'static EmulatorSpec {
         .unwrap_or(&NOOP)
 }
 
-/// Build an [`EmulatorDef`] for the given registry entry.
-pub fn make_def(spec: &EmulatorSpec, nodes: u32, gpus_per_node: u32) -> EmulatorDef {
+/// Build an [`EmulatorDef`] for the given registry entry, using the
+/// supplied system topology.
+pub fn make_def(spec: &EmulatorSpec, topology: TopologyDef) -> EmulatorDef {
     EmulatorDef {
         emulator: spec.name.to_string(),
         plugins: Default::default(),
-        nodes,
-        gpus_per_node,
         exec_mode: ExecMode::default(),
         options: SimpleMap::default(),
-        topology: MaybeRef::Owned((spec.default_topology)(nodes, gpus_per_node)),
+        topology: MaybeRef::Owned(topology),
     }
 }
 
-/// Curated set of named topologies that mirage preloads into
-/// `<MIRAGE_CONFIG>/topology/<name>.json` on first run.
-///
-/// Each entry is a `(name, builder)` pair. The builder is called
-/// lazily by [`crate::topology::store::ensure_builtins`]; this keeps
-/// the list a plain function (no globals to initialise) and lets the
-/// values be regenerated cheaply if `mirage state builtins` is used
-/// to force-overwrite existing files.
+/// Default topology referenced by a fresh profile: a single GPU
+/// driven by the `noop` agent.
+pub fn default_topology() -> TopologyDef {
+    TopologyDef {
+        racks: 1,
+        nodes_per_rack: 1,
+        gpus_per_node: 1,
+        agent: MaybeRef::Ref("noop".to_string()),
+    }
+}
+
+/// Curated set of named agents (hardware descriptions) that mirage
+/// preloads into `<MIRAGE_CONFIG>/agent/<name>.json`. Backends like
+/// rocjitsu contribute additional agents at runtime via their own
+/// `ensure_agents` helpers.
+pub fn builtin_agents() -> Vec<(&'static str, fn() -> AgentDef)> {
+    vec![("noop", noop_agent)]
+}
+
+/// Curated set of named topologies (system layouts) that mirage
+/// preloads into `<MIRAGE_CONFIG>/topology/<name>.json`.
 pub fn builtin_topologies() -> Vec<(&'static str, fn() -> TopologyDef)> {
     vec![
-        ("noop", || (NOOP.default_topology)(1, 1)),
-        ("rocjitsu-1x1", || (ROCJITSU.default_topology)(1, 1)),
-        ("rocjitsu-1x8", || (ROCJITSU.default_topology)(1, 8)),
-        ("rocjitsu-2x8", || (ROCJITSU.default_topology)(2, 8)),
+        ("noop", || topology(1, 1, 1, "noop")),
+        ("cdna4-1x1", || topology(1, 1, 1, "cdna4")),
+        ("cdna4-1x8", || topology(1, 1, 8, "cdna4")),
+        ("cdna4-2x8", || topology(1, 2, 8, "cdna4")),
+        ("cdna3-1x8", || topology(1, 1, 8, "cdna3")),
     ]
+}
+
+fn topology(racks: u32, nodes_per_rack: u32, gpus_per_node: u32, agent: &str) -> TopologyDef {
+    TopologyDef {
+        racks,
+        nodes_per_rack,
+        gpus_per_node,
+        agent: MaybeRef::Ref(agent.to_string()),
+    }
 }
 
 // =============================================================================
@@ -100,7 +112,6 @@ pub const NOOP: EmulatorSpec = EmulatorSpec {
     name: "noop",
     description: "no-op emulator: runs commands directly with no GPU emulation",
     installed: noop_installed,
-    default_topology: noop_topology,
     describe: noop_describe,
 };
 
@@ -108,8 +119,8 @@ fn noop_installed() -> bool {
     true
 }
 
-fn noop_topology(_nodes: u32, _gpus_per_node: u32) -> TopologyDef {
-    TopologyDef {
+fn noop_agent() -> AgentDef {
+    AgentDef {
         root: ComponentDef {
             name: "noop".to_string(),
             r#type: "noop".to_string(),
@@ -135,7 +146,6 @@ pub const ROCJITSU: EmulatorSpec = EmulatorSpec {
     name: "rocjitsu",
     description: "ROCm just-in-time GPU emulator (cycle-accurate or functional)",
     installed: rocjitsu_installed,
-    default_topology: rocjitsu_topology,
     describe: rocjitsu_describe,
 };
 
@@ -143,8 +153,7 @@ pub const ROCJITSU: EmulatorSpec = EmulatorSpec {
 /// can be found in the mirage emulator cache (extracted by
 /// `mirage_rocjitsu::ensure_assets`), via the loader's standard
 /// search path, or if the user has set `ROCJITSU_LIB_DIR` /
-/// `ROCJITSU_ROOT`. We intentionally do not link to it from here —
-/// installation is a runtime question.
+/// `ROCJITSU_ROOT`.
 fn rocjitsu_installed() -> bool {
     let cached = crate::paths::mirage_cache_dir()
         .join("emulator")
@@ -165,39 +174,6 @@ fn rocjitsu_installed() -> bool {
         "/opt/rocm/lib/librocjitsu.so",
     ];
     candidates.iter().any(|p| std::path::Path::new(p).exists())
-}
-
-/// Default CDNA-style topology for a `nodes`x`gpus_per_node` system:
-/// one `node` per node, one `gpu` per GPU under each node. This is
-/// just enough for orchestration code; the real topology comes from
-/// rocjitsu's own JSON when the emulator boots.
-fn rocjitsu_topology(nodes: u32, gpus_per_node: u32) -> TopologyDef {
-    let mut node_children = Vec::with_capacity(nodes as usize);
-    for n in 0..nodes {
-        let mut gpus = Vec::with_capacity(gpus_per_node as usize);
-        for g in 0..gpus_per_node {
-            gpus.push(ComponentDef {
-                name: format!("gpu{g}"),
-                r#type: "gpu".to_string(),
-                ..Default::default()
-            });
-        }
-        node_children.push(ComponentDef {
-            name: format!("node{n}"),
-            r#type: "node".to_string(),
-            children: gpus,
-            ..Default::default()
-        });
-    }
-    TopologyDef {
-        root: ComponentDef {
-            name: "cluster".to_string(),
-            r#type: "cluster".to_string(),
-            children: node_children,
-            ..Default::default()
-        },
-        links: vec![],
-    }
 }
 
 fn rocjitsu_describe() -> EmulatorDescription {
@@ -227,8 +203,6 @@ mod tests {
 
     #[test]
     fn default_matches_installation_state() {
-        // Assert in *both* branches so this test isn't a no-op on
-        // any particular host.
         if (ROCJITSU.installed)() {
             assert_eq!(default_emulator().name, "rocjitsu");
         } else {
@@ -237,11 +211,8 @@ mod tests {
     }
 
     #[test]
-    fn default_topologies_match_node_count() {
-        let t = rocjitsu_topology(2, 4);
-        assert_eq!(t.root.children.len(), 2);
-        for n in &t.root.children {
-            assert_eq!(n.children.len(), 4);
-        }
+    fn builtin_agents_and_topologies_nonempty() {
+        assert!(builtin_agents().iter().any(|(n, _)| *n == "noop"));
+        assert!(builtin_topologies().iter().any(|(n, _)| *n == "noop"));
     }
 }

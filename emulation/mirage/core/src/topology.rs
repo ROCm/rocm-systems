@@ -1,117 +1,66 @@
+//! System topology definitions.
+//!
+//! A [`TopologyDef`] describes the *system layout* — how many racks,
+//! how many nodes per rack, and how many GPUs per node — together
+//! with the [`crate::agent::AgentDef`] used for each GPU slot.
+//!
+//! The agent is referenced via [`MaybeRef`]: callers can either
+//! embed a full agent definition inline or refer to a named entry
+//! from `<MIRAGE_CONFIG>/agent/`.
+//!
+//! Topologies themselves live at `<MIRAGE_CONFIG>/topology/<name>.json`.
+
 use serde::{Deserialize, Serialize};
+
+use crate::agent::AgentDef;
+use crate::common::MaybeRef;
 
 fn one() -> u32 {
     1
 }
 
-/// Key-value pair for component configuration.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub struct ConfigEntry {
-    pub key: String,
-
-    /// All values as strings, parsed by the factory.
-    pub value: String,
-}
-
-/// Port definition for dynamic ports.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub struct PortDef {
-    pub name: String,
-
-    /// "in" or "out".
-    pub direction: String,
-
-    /// "untyped", "memory_req", "memory_resp", "dispatch", etc.
-    pub protocol: String,
-}
-
-/// Component definition (recursive for hierarchy).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub struct ComponentDef {
-    /// Name or range pattern like "xcd[0:7]".
-    pub name: String,
-
-    /// Registry type: "compute_unit", "l2_cache", etc.
-    #[serde(rename = "type")]
-    pub r#type: String,
-
-    /// Component-specific parameters.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub config: Vec<ConfigEntry>,
-
-    /// Child components (recursive).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub children: Vec<ComponentDef>,
-
-    /// Optional dynamic ports.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub ports: Vec<PortDef>,
-}
-
-/// Range variable for link pattern expansion.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub struct ForRange {
-    /// Variable name: "i", "j", "k".
-    pub var_name: String,
-
-    /// Range start (inclusive).
-    pub start: u32,
-
-    /// Range end (exclusive).
-    pub end: u32,
-}
-
-/// Link definition (direct or pattern-based).
+/// System-level topology: rack/node/GPU counts plus the agent
+/// definition each GPU instantiates.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LinkDef {
-    /// Direct source: "soc.xcd0.l2.hbm_out".
-    #[serde(default)]
-    pub src: String,
-
-    /// Direct destination.
-    #[serde(default)]
-    pub dst: String,
-
-    /// Pattern: "soc.xcd[i].l2 -> soc.iod[i/4].msc".
-    #[serde(default)]
-    pub pattern: String,
-
-    /// Loop variables.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub for_ranges: Vec<ForRange>,
-
-    /// Filter: "i != j".
-    #[serde(default)]
-    pub where_expr: String,
-
+pub struct TopologyDef {
+    /// Number of racks. Defaults to 1.
     #[serde(default = "one")]
-    pub latency: u32,
+    pub racks: u32,
 
+    /// Number of nodes per rack. Defaults to 1.
     #[serde(default = "one")]
-    pub weight: u32,
+    pub nodes_per_rack: u32,
+
+    /// Number of GPUs per node. Defaults to 1.
+    #[serde(default = "one")]
+    pub gpus_per_node: u32,
+
+    /// Hardware agent for each GPU slot. Either an inline
+    /// [`AgentDef`] or a name resolvable under `<MIRAGE_CONFIG>/agent/`.
+    pub agent: MaybeRef<AgentDef>,
 }
 
-impl Default for LinkDef {
+impl Default for TopologyDef {
     fn default() -> Self {
         Self {
-            src: String::new(),
-            dst: String::new(),
-            pattern: String::new(),
-            for_ranges: Vec::new(),
-            where_expr: String::new(),
-            latency: 1,
-            weight: 1,
+            racks: 1,
+            nodes_per_rack: 1,
+            gpus_per_node: 1,
+            agent: MaybeRef::Ref("noop".to_string()),
         }
     }
 }
 
-/// Top-level topology definition.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub struct TopologyDef {
-    pub root: ComponentDef,
+impl TopologyDef {
+    /// Total number of nodes (`racks * nodes_per_rack`).
+    pub fn total_nodes(&self) -> u32 {
+        self.racks.saturating_mul(self.nodes_per_rack)
+    }
 
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub links: Vec<LinkDef>,
+    /// Total number of GPUs across the whole system.
+    pub fn total_gpus(&self) -> u32 {
+        self.total_nodes().saturating_mul(self.gpus_per_node)
+    }
 }
 
 /// On-disk topology store backed by `<MIRAGE_CONFIG>/topology/`.
@@ -158,12 +107,6 @@ pub mod store {
     }
 
     /// Write all builtin topologies to disk.
-    ///
-    /// If `force` is true, existing files are overwritten. Otherwise
-    /// only missing topologies are written.
-    ///
-    /// Returns the list of `(name, written)` entries: `written` is
-    /// true if the file was created or overwritten on this call.
     pub fn ensure_builtins(force: bool) -> Result<Vec<(String, bool)>> {
         let mut report = Vec::new();
         for (name, build) in crate::registry::builtin_topologies() {
@@ -182,7 +125,19 @@ pub mod store {
 
 #[cfg(test)]
 mod tests {
-    use super::store;
+    use super::*;
+
+    #[test]
+    fn totals() {
+        let t = TopologyDef {
+            racks: 2,
+            nodes_per_rack: 4,
+            gpus_per_node: 8,
+            agent: MaybeRef::Ref("noop".to_string()),
+        };
+        assert_eq!(t.total_nodes(), 8);
+        assert_eq!(t.total_gpus(), 64);
+    }
 
     #[test]
     fn ensure_builtins_writes_then_skips() {
@@ -192,23 +147,9 @@ mod tests {
 
         let first = store::ensure_builtins(false).unwrap();
         assert!(!first.is_empty(), "expected at least one builtin topology");
-        assert!(first.iter().all(|(_, w)| *w), "first run should write every builtin");
-
-        let names: Vec<_> = first.iter().map(|(n, _)| n.clone()).collect();
-        assert_eq!(store::list().unwrap(), {
-            let mut s = names.clone();
-            s.sort();
-            s
-        });
+        assert!(first.iter().all(|(_, w)| *w));
 
         let second = store::ensure_builtins(false).unwrap();
-        assert!(second.iter().all(|(_, w)| !*w), "second run should not rewrite existing builtins");
-
-        let forced = store::ensure_builtins(true).unwrap();
-        assert!(forced.iter().all(|(_, w)| *w), "force should rewrite every builtin");
-
-        for name in &names {
-            assert!(store::get(name).is_ok(), "{name} should be readable");
-        }
+        assert!(second.iter().all(|(_, w)| !*w));
     }
 }

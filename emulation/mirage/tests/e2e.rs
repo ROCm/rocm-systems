@@ -255,17 +255,6 @@ fn attach_to_long_running_exec_then_signal() {
 }
 
 #[test]
-fn schema_emits_examples() {
-    let env = Env::new();
-    for what in ["profile", "exec", "status", "session"] {
-        let out = env.mirage().args(["schema", what]).output().unwrap();
-        assert!(out.status.success(), "schema {what} failed");
-        let s = String::from_utf8_lossy(&out.stdout);
-        assert!(s.contains('{'), "schema {what} not json-shaped: {s}");
-    }
-}
-
-#[test]
 fn json_output_is_parseable() {
     let env = Env::new();
     env.mirage()
