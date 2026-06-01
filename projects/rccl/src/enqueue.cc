@@ -2188,8 +2188,15 @@ static ncclResult_t updateCollCostTable(
         if (!inRange) continue;
       }
     }
+    // Cache NCCL_PROTO env once: when the user explicitly asks for LL128
+    // (e.g. NCCL_PROTO=LL128 cross-node), bypass the XGMI-only gate below.
+    static int userProtoInput = -2;
+    if (userProtoInput == -2) {
+      const char* protoEnv = ncclGetEnv("NCCL_PROTO");
+      userProtoInput = !protoEnv ? 0 : 1;
+    }
     for (int p=0; p<NCCL_NUM_PROTOCOLS; p++) {
-      if (p == NCCL_PROTO_LL128 && !(comm->topo->type & RCCL_TOPO_XGMI_ALL)) {
+      if (p == NCCL_PROTO_LL128 && !(comm->topo->type & RCCL_TOPO_XGMI_ALL) && !userProtoInput) {
         table[a][p] = NCCL_ALGO_PROTO_IGNORE;
         continue;
       }

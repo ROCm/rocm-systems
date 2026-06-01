@@ -802,9 +802,9 @@ bool rcclIsArchSupportedForFunc(struct ncclTaskColl* info, const char* archName)
   if (info->protocol == NCCL_PROTO_LL128) {
 #if defined(ENABLE_LL128)
     if (info->acc)
-      supported = (IsArchMatch(archName, "gfx942") || IsArchMatch(archName, "gfx950"));
+      supported = (IsArchMatch(archName, "gfx942") || IsArchMatch(archName, "gfx950") || IsArchMatch(archName, "gfx1250"));
     else
-      supported = (IsArchMatch(archName, "gfx942") || IsArchMatch(archName, "gfx950") || IsArchMatch(archName, "gfx90a"));
+      supported = (IsArchMatch(archName, "gfx942") || IsArchMatch(archName, "gfx950") || IsArchMatch(archName, "gfx90a") || IsArchMatch(archName, "gfx1250"));
 #else
     supported = false;
 #endif
