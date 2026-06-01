@@ -1201,6 +1201,28 @@ SIMD_VOP3P_MOV_B32: set[str] = {
     "v_pk_mov_b32_vop3p",
 }
 
+# VOP3P integer dot products. dst is a single 32-bit lane (not packed) and
+# src2 is the accumulator; the dot reduction happens within each lane so the
+# fast path vectorizes across lanes. Parameterised by (ElemBits, Signed):
+# the 8/4-bit forms ignore op_sel in the scalar body, the 16-bit forms gate
+# on default packing inside the glue. Signed forms lower-clamp to 0 when
+# inst.clamp is set; the unsigned scalar bodies have no clamp branch.
+SIMD_VOP3P_DOT_INT: dict[str, str] = {
+    "v_dot4_i32_i8_vop3p": "8, true",
+    "v_dot4_u32_u8_vop3p": "8, false",
+    "v_dot8_i32_i4_vop3p": "4, true",
+    "v_dot8_u32_u4_vop3p": "4, false",
+    "v_dot2_i32_i16_vop3p": "16, true",
+    "v_dot2_u32_u16_vop3p": "16, false",
+}
+
+# v_dot2_f32_f16 — two f16 products + an f32 accumulator into one f32 lane.
+# op_sel half-select (gated default), neg/neg_hi sign flips, optional clamp
+# to [0,1]. Functorless / fixed-op.
+SIMD_VOP3P_DOT_F16: set[str] = {
+    "v_dot2_f32_f16_vop3p",
+}
+
 
 # --- VOPC compare -> VCC ---------------------------------------------------
 #
@@ -2425,6 +2447,12 @@ def simd_probe_line(template_name: str) -> str | None:
         return f"  ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_FP16({specpkf16t});"
     if template_name in SIMD_VOP3P_MOV_B32:
         return "  ROCJITSU_TRY_SIMD_VOP3P_MOV_B32();"
+    # VOP3P integer dot products (dot4 i8/u8, dot8 i4/u4, dot2 i16/u16).
+    specdot = SIMD_VOP3P_DOT_INT.get(template_name)
+    if specdot is not None:
+        return f"  ROCJITSU_TRY_SIMD_VOP3P_DOT_INT({specdot});"
+    if template_name in SIMD_VOP3P_DOT_F16:
+        return "  ROCJITSU_TRY_SIMD_VOP3P_DOT_F16();"
     # VOP3P fma_mix / mad_mix (six ops, three destination shapes). Same body
     # for all; the routing picks the matching glue specialization.
     if template_name in SIMD_VOP3P_FMA_MIX_F32:
