@@ -62,6 +62,7 @@ add_executable(
     vop2_cndmask_simd_correctness_test.cpp
     vop2_minmax_simd_correctness_test.cpp
     vop1_simd_correctness_test.cpp
+    vop1_cvt_f8_simd_correctness_test.cpp
     vop1_f64_simd_correctness_test.cpp
     vop1_cvt_f64_simd_correctness_test.cpp
     vopc_simd_correctness_test.cpp

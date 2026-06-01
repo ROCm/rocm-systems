@@ -427,6 +427,21 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         " x = ((x & 0x00FF00FFu) << 8) | ((x >> 8) & 0x00FF00FFu);"
         " return (x << 16) | (x >> 16); }",
     ),
+    # --- f8 -> f32 (E4M3 / E5M2 8-bit float expand) ----------------------------
+    # Scalar reads the low byte of src0 and expands via util::fp8_e4m3_to_f32 /
+    # bf8_e5m2_to_f32 (no op_sel / byte-select in the body), so the unary functor
+    # mirrors them bit-for-bit through the vector ports (denormal, ±0, max-normal /
+    # Inf, NaN all handled). The VOP3 twins are modifier-free -> auto-route here.
+    "v_cvt_f32_fp8_vop1": (
+        "uint32_t",
+        "float32_t",
+        "[](auto a) { return util::fp8_e4m3_to_f32_simd(a); }",
+    ),
+    "v_cvt_f32_bf8_vop1": (
+        "uint32_t",
+        "float32_t",
+        "[](auto a) { return util::bf8_e5m2_to_f32_simd(a); }",
+    ),
     # --- ubyte -> f32 (extract byte N, exact int->float) -----------------------
     # dst = float(byte_N(src0)); byte value is 0..255 so the int->float cast is
     # exact and bit-identical to the scalar static_cast<float>.

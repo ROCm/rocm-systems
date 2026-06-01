@@ -8144,6 +8144,8 @@ inline void execute_v_cvt_f16_u16_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_f32_bf8_vop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, float32_t,
+                               [](auto a) { return util::bf8_e5m2_to_f32_simd(a); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -8157,6 +8159,8 @@ inline void execute_v_cvt_f32_bf8_vop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_f32_bf8_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, float32_t,
+                               [](auto a) { return util::bf8_e5m2_to_f32_simd(a); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -8230,6 +8234,8 @@ inline void execute_v_cvt_f32_f64_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_f32_fp8_vop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, float32_t,
+                               [](auto a) { return util::fp8_e4m3_to_f32_simd(a); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -8243,6 +8249,8 @@ inline void execute_v_cvt_f32_fp8_vop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_f32_fp8_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, float32_t,
+                               [](auto a) { return util::fp8_e4m3_to_f32_simd(a); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))

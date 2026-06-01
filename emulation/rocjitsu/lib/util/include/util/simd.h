@@ -449,6 +449,53 @@ inline native<uint32_t> ctz_u32_simd(native<uint32_t> x) {
   U lowbit = x & (~x + U(1u));
   return popcount_u32_simd(lowbit - U(1u));
 }
+
+/// Vector port of `util::fp8_e4m3_to_f32` over the low byte of each lane (E4M3:
+/// 1 sign / 4 exp / 3 mantissa, bias 7, no Inf). Bit-identical to the scalar:
+/// the denormal path `mant * 2^-9` is exact for mant in [0,7] and folds the ±0
+/// case (mant==0 -> +0 | signbit); exp==15 yields the max normal (mant==0) or a
+/// canonical qNaN (mant!=0). Used by the v_cvt_f32_fp8 SIMD fast path.
+inline native<float> fp8_e4m3_to_f32_simd(native<uint32_t> v) {
+  using U = native<uint32_t>;
+  U b = v & U(0xFFu);
+  U sign = (b >> 7) & U(1u);
+  U exp = (b >> 3) & U(0xFu);
+  U mant = b & U(0x7u);
+  U signbit = sign << 31;
+  U normal = signbit | ((exp + U(120u)) << 23) | (mant << 20); // exp + 127 - 7
+  U inf_nan = signbit | U(0x43800000u);                        // exp15, mant0 -> max normal
+  stdx::where(mant != 0u, inf_nan) = signbit | U(0x7FC00000u); // exp15, mant!=0 -> qNaN
+  native<float> dn = stdx::static_simd_cast<native<float>>(mant) * native<float>(0.001953125f); // 2^-9
+  U dnb = std::bit_cast<U>(dn) | signbit; // exp0: ±denormal, or ±0 when mant==0
+  U out = normal;
+  stdx::where(exp == 0u, out) = dnb;
+  stdx::where(exp == 15u, out) = inf_nan;
+  return std::bit_cast<native<float>>(out);
+}
+
+/// Vector port of `util::bf8_e5m2_to_f32` over the low byte of each lane (E5M2:
+/// 1 sign / 5 exp / 2 mantissa, bias 15, has Inf). Bit-identical to the scalar:
+/// the denormal path `mant * 2^-16` is exact for mant in [0,3] and folds the ±0
+/// case; exp==31 yields ±Inf (mant==0) or a canonical qNaN (mant!=0). Used by
+/// the v_cvt_f32_bf8 SIMD fast path.
+inline native<float> bf8_e5m2_to_f32_simd(native<uint32_t> v) {
+  using U = native<uint32_t>;
+  U b = v & U(0xFFu);
+  U sign = (b >> 7) & U(1u);
+  U exp = (b >> 2) & U(0x1Fu);
+  U mant = b & U(0x3u);
+  U signbit = sign << 31;
+  U normal = signbit | ((exp + U(112u)) << 23) | (mant << 21); // exp + 127 - 15
+  U inf_nan = signbit | U(0x7F800000u);                        // exp31, mant0 -> ±Inf
+  stdx::where(mant != 0u, inf_nan) = signbit | U(0x7FC00000u); // exp31, mant!=0 -> qNaN
+  native<float> dn =
+      stdx::static_simd_cast<native<float>>(mant) * native<float>(1.52587890625e-05f); // 2^-16
+  U dnb = std::bit_cast<U>(dn) | signbit; // exp0: ±denormal, or ±0 when mant==0
+  U out = normal;
+  stdx::where(exp == 0u, out) = dnb;
+  stdx::where(exp == 31u, out) = inf_nan;
+  return std::bit_cast<native<float>>(out);
+}
 #endif // __has_include(<experimental/simd>)
 
 #if !__has_include(<experimental/simd>)
