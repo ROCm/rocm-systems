@@ -32,6 +32,9 @@ env:
   ROCM_PATH: "/opt/rocm"
   ENABLE_ROCR_BUILD: "true"
   ENABLE_HIP_CLR_BUILD: "true"
+  ENABLE_ROCPROFILER_REGISTER_BUILD: "false"
+  ENABLE_AQLPROFILE_BUILD: "false"
+  INSTALL_NIGHTLY_ROCM: "true"
 
 jobs:
   build-docs:
@@ -43,7 +46,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           sparse-checkout: projects/rocprofiler-sdk
           submodules: true
@@ -88,16 +91,6 @@ jobs:
       CORE_EXT_RUNNER: mi325
       GPU_RUNNER: mi325
     steps:
-      - name: Install Latest Nightly ROCm
-        shell: bash
-        working-directory: /tmp
-        run: |
-          mv "${{ env.ROCM_PATH }}-gfx94X.tar.gz" .
-          rm -rf ${{ env.ROCM_PATH }}*
-          mkdir -p "${{ env.ROCM_PATH }}"
-          tar -xf rocm-gfx94X.tar.gz -C "${{ env.ROCM_PATH }}"
-          echo "ROCm installed to: ${{ env.ROCM_PATH }}"
-
       - name: Install os essentials
         timeout-minutes: 10
         shell: bash
@@ -110,9 +103,10 @@ jobs:
           echo "PATH=/usr/bin:$PATH" >> "$GITHUB_ENV"
 
       - name: Clone ROCProfiler SDK & HIP/CLR & ROCR-Runtime
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           sparse-checkout: |
+            .github/actions/rocprofiler-sdk-util
             projects/rocprofiler-sdk
             projects/rocr-runtime
             projects/clr
@@ -153,51 +147,19 @@ jobs:
           apt-get install -y cmake gcc g++ libdw-dev libsqlite3-dev rpm
           python3 -m pip install -r requirements.txt
 
-      - name: Setup environment variables
-        shell: bash
-        run: |
-          echo "LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
-          echo "PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH" >> "$GITHUB_ENV"
-
-      - name: Build and Install ROCR-Runtime
-        if: ${{ env.ENABLE_ROCR_BUILD == 'true' }}
-        shell: bash
-        working-directory: projects/rocr-runtime
-        run: |
-          echo "Install ROCR-Runtime..."
-          cmake -B build \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm' \
-            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }} \
-            .
-          cmake --build build --target all --parallel 16
-          cmake --build build --target install
-          echo "✅ ROCR-Runtime Installation complete!"
-
-      - name: Build and Install HIP
-        if: ${{ env.ENABLE_HIP_CLR_BUILD == 'true' }}
-        shell: bash
-        working-directory: projects
-        run: |
-          export HIP_DIR=$PWD/hip
-          export CLR_DIR=$PWD/clr
-          echo "Install HIP..."
-          cd $CLR_DIR
-          cmake \
-            -DHIP_COMMON_DIR=$HIP_DIR \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DHIP_PLATFORM=amd \
-            -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm' \
-            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }} \
-            -DHIP_LLVM_ROOT=${{ env.ROCM_PATH }}/llvm \
-            -DHIP_CATCH_TEST=0 \
-            -DCLR_BUILD_HIP=ON \
-            -DCLR_BUILD_OCL=ON \
-            -S $CLR_DIR \
-            -B build
-          cmake --build build --target all --parallel 16
-          cmake --build build --target install
-          echo "✅ HIP Installation complete!"
+      - name: Build ROCProfiler SDK Dependencies
+        uses: ./.github/actions/rocprofiler-sdk-util
+        with:
+          rocm-path: ${{ env.ROCM_PATH }}
+          gpu-target: 'gfx94X'
+          compiler-launcher: /usr/bin/ccache
+          enable-rocr-build: ${{ env.ENABLE_ROCR_BUILD }}
+          enable-hip-clr-build: ${{ env.ENABLE_HIP_CLR_BUILD }}
+          enable-rocprofiler-register-build: ${{ env.ENABLE_ROCPROFILER_REGISTER_BUILD }}
+          enable-aqlprofile-build: ${{ env.ENABLE_AQLPROFILE_BUILD }}
+          install-nightly-rocm: ${{ env.INSTALL_NIGHTLY_ROCM }}
+          ccache-key: ccache-docs-ubuntu-22.04-gfx94X
+          ccache-variant: ccache
 
       - name: Configure, Build, Install, and Package
         timeout-minutes: 60

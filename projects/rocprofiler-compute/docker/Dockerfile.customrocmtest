@@ -40,7 +40,8 @@ RUN python -m pip install --upgrade pip
 # Install any rocprofiler-compute dependencies specified in requirements.txt
 COPY projects/rocprofiler-compute/requirements.txt /app/projects/rocprofiler-compute/requirements.txt
 COPY projects/rocprofiler-compute/requirements-test.txt /app/projects/rocprofiler-compute/requirements-test.txt
-RUN python -m pip install -r /app/projects/rocprofiler-compute/requirements.txt -r /app/projects/rocprofiler-compute/requirements-test.txt
+COPY projects/rocprofiler-compute/requirements-development.txt /app/projects/rocprofiler-compute/requirements-development.txt
+RUN python -m pip install -r /app/projects/rocprofiler-compute/requirements.txt -r /app/projects/rocprofiler-compute/requirements-test.txt -r /app/projects/rocprofiler-compute/requirements-development.txt
 
 # Set the working directory
 WORKDIR /app/projects/rocprofiler-compute

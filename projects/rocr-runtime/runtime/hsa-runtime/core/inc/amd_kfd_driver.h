@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -71,7 +71,7 @@ class KfdDriver final : public core::Driver {
 public:
   KfdDriver(std::string devnode_name);
 
-  /// @brief Determine of the KFD is present on the system and attemp to open it if found.
+  /// @brief Determine if the KFD is present on the system and attempt to open it if found.
   ///
   /// @param[out] Driver object for the KFD.
   /// @return HSA_STATUS_SUCCESS if driver found and opened.
@@ -98,7 +98,7 @@ public:
   hsa_status_t FreeMemory(void *mem, size_t size) override;
   hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
                            HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id, void* queue_addr,
-                           uint64_t queue_size_bytes, HsaEvent* event,
+                           uint64_t queue_size_bytes, uint64_t queue_metadata_size_bytes, HsaEvent* event,
                            HsaQueueResource& queue_resource) const override;
   hsa_status_t UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_pct, HSA::hsa_amd_queue_priority_internal_t priority,
                            void* queue_addr, uint64_t queue_size, HsaEvent* event) const override;
@@ -141,6 +141,11 @@ public:
   hsa_status_t MakeMemoryUnresident(const void* mem) const override;
 
   hsa_status_t OpenSMI(uint32_t node_id, int* fd) const override;
+
+  hsa_status_t ImportExternalSemaphore(uint32_t node_id, void* nt_handle,
+                                       hsa_amd_external_semaphore_handle_type_t type,
+                                       hsa_amd_external_semaphore_t* out_sem) const override;
+  hsa_status_t DestroyExternalSemaphore(hsa_amd_external_semaphore_t sem) const override;
 
   hsa_status_t IsModelEnabled(bool* enable) const override;
 

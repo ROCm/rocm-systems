@@ -1,0 +1,30 @@
+# TraceLens-derived metric catalog (optional — when TraceLens data present).
+# Ref: llm-reference-guide.md lines 2292-2320.
+
+interval_timeline:
+  description: "Interval-arithmetic timeline metrics"
+  metrics:
+    - name: true_compute_pct
+      description: "Non-overlapping compute time / total"
+    - name: exposed_memcpy_pct
+      description: "Memcpy time not hidden by overlapping compute"
+    - name: idle_pct
+      description: "True idle (no kernel, no memcpy)"
+
+kernel_categories:
+  description: "Per-category breakdown"
+  categories:
+    - compute_heavy
+    - memory_bound
+    - short_kernel
+
+short_kernels:
+  description: "Kernels with wasted launch overhead"
+  metrics:
+    - name: wasted_pct_of_kernel_time
+      description: "Launch overhead / kernel duration"
+      warn_threshold: 0.05
+
+thresholds:
+  idle_high: 0.20    # > 20% idle triggers HIGH priority
+  wasted_high: 0.05  # > 5% wasted triggers fusion recommendation

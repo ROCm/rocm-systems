@@ -54,6 +54,16 @@ class TeamCtxInfraTester : public Tester {
   rocshmem::rocshmem_team_t _parentTeam = rocshmem::ROCSHMEM_TEAM_WORLD;
   int _expected_pe;
   int _expected_n_pes;
+
+ private:
+  /**
+   * Number of user-creatable teams. Should equal ROCSHMEM_MAX_NUM_TEAMS
+   * (default 40). Overridden at runtime if the env variable is set.
+   */
+  int num_teams = 40;
+  rocshmem::rocshmem_team_t *team_world_dup = nullptr;
+  rocshmem::rocshmem_team_t subset_parent_team = rocshmem::ROCSHMEM_TEAM_INVALID;
+  bool _skip_shared = false;
 };
 
 #endif

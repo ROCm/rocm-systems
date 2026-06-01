@@ -45,6 +45,8 @@ enum MemoryInstType
     TYPE_FLAT_LOAD,
     TYPE_FLAT_STOR,
     TYPE_BVH,
+    TYPE_TENSOR,
+    TYPE_ASYNC,
     TYPE_WAITCNT
 };
 
@@ -65,6 +67,8 @@ union MemoryInst
         int stcnt : 1;
         int sampl : 1;
         int idle  : 1;
+        int tensr : 1;
+        int async : 1;
     };
     int raw = 0;
 };
@@ -82,14 +86,14 @@ classify(const std::string& inst)
     {
         if(inst.find("s_wait_alu") != npos) return MemoryInstType::TYPE_NOT_MEM;
 
+        MemoryInst type = MemoryInstType::TYPE_WAITCNT;
+
         if(inst.find("s_wait_idle") != npos)
         {
-            MemoryInst type = MemoryInstType::TYPE_WAITCNT;
-            type.idle       = true;
+            type.idle = true;
             return type;
         }
 
-        MemoryInst type = MemoryInstType::TYPE_WAITCNT;
         if(inst.find("dscnt") != npos) type.dscnt = true;
         if(inst.find("bvhcnt") != npos) type.bvhcn = true;
         if(inst.find("expcnt") != npos) type.expcn = true;
@@ -97,6 +101,8 @@ classify(const std::string& inst)
         if(inst.find("loadcnt") != npos) type.ldcnt = true;
         if(inst.find("storecnt") != npos) type.stcnt = true;
         if(inst.find("samplecnt") != npos) type.sampl = true;
+        if(inst.find("asynccnt") != npos) type.async = true;
+        if(inst.find("tensorcnt") != npos) type.tensr = true;
 
         return type;
     }
@@ -130,6 +136,17 @@ classify(const std::string& inst)
         else
             return MemoryInstType::TYPE_LDS;
     }
+    else if(inst.find("tensor_") <= 1)
+    {
+        return MemoryInstType::TYPE_TENSOR;
+    }
+    else if(inst.find("_async_") != npos)
+    {
+        if(inst.find("global_load_async_") == 0 || inst.find("global_store_async_") == 0)
+        {
+            return MemoryInstType::TYPE_ASYNC;
+        }
+    }
 
     bool bStore = inst.find("store") != npos || inst.find("global_wb") == 0;
 
@@ -155,6 +172,8 @@ WaitcntList::gfx12_construct(const wave_t& wave, isa_map_t& isa_map)
     MemoryCounter kmcnt("kmcnt");
     MemoryCounter expcnt("expcnt");
     MemoryCounter bvhcnt("bvhcnt");
+    MemoryCounter async("asynccnt");
+    MemoryCounter tensor("tensorcnt");
 
     std::vector<int> flat_load{};
     std::vector<int> flat_stor{};
@@ -231,6 +250,14 @@ WaitcntList::gfx12_construct(const wave_t& wave, isa_map_t& isa_map)
         {
             bvhcnt.list.push_back(line_number);
         }
+        else if(type.inst == MemoryInstType::TYPE_TENSOR)
+        {
+            tensor.list.push_back(line_number);
+        }
+        else if(type.inst == MemoryInstType::TYPE_ASYNC)
+        {
+            async.list.push_back(line_number);
+        }
         else if(type.inst == MemoryInstType::TYPE_WAITCNT)
         {
             if(type.bvhcn)
@@ -263,6 +290,16 @@ WaitcntList::gfx12_construct(const wave_t& wave, isa_map_t& isa_map)
                 if(auto joined = loadcnt.handle_mem_op(inst_str, flat_load))
                     mem_unroll.emplace_back(LineWaitcnt{line_number, std::move(*joined)});
             }
+            if(type.tensr)
+            {
+                if(auto joined = tensor.handle_mem_op(inst_str, empty_list))
+                    mem_unroll.emplace_back(LineWaitcnt{line_number, std::move(*joined)});
+            }
+            if(type.async)
+            {
+                if(auto joined = async.handle_mem_op(inst_str, empty_list))
+                    mem_unroll.emplace_back(LineWaitcnt{line_number, std::move(*joined)});
+            }
             if(type.dscnt)
             {
                 if(auto joined = dscnt.handle_mem_op(inst_str, flat_load))
@@ -287,6 +324,8 @@ WaitcntList::gfx12_construct(const wave_t& wave, isa_map_t& isa_map)
                 kmcnt.clearTo(all);
                 expcnt.clearTo(all);
                 bvhcnt.clearTo(all);
+                tensor.clearTo(all);
+                async.clearTo(all);
 
                 mem_unroll.emplace_back(LineWaitcnt{line_number, std::move(all)});
             }

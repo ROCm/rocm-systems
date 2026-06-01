@@ -6,8 +6,16 @@
 
 # Device bitcode for JIT linking: librocshmem_device_{arch}.bc
 
-find_program(LLVM_CLANG clang++ PATHS ${ROCM_PATH}/llvm/bin NO_DEFAULT_PATH QUIET)
-find_program(LLVM_LINK llvm-link PATHS ${ROCM_PATH}/llvm/bin NO_DEFAULT_PATH QUIET)
+find_program(LLVM_CLANG clang++
+             PATHS
+               ${ROCM_PATH}/llvm/bin
+               ${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin
+             NO_DEFAULT_PATH QUIET)
+find_program(LLVM_LINK llvm-link
+             PATHS
+               ${ROCM_PATH}/llvm/bin
+               ${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin
+               NO_DEFAULT_PATH QUIET)
 
 if(NOT LLVM_CLANG OR NOT LLVM_LINK)
   message(WARNING "ROCm LLVM tools (clang++, llvm-link) not found under "
@@ -28,7 +36,12 @@ endfunction()
 
 # Resolve the default arch list: GPU_TARGETS if set, otherwise auto-detect local GPUs.
 if(GPU_TARGETS)
-  strip_arch_features("${GPU_TARGETS}" _BITCODE_DEFAULT_ARCHS)
+  # Convert comma-separated string to CMake list (semicolon-separated)
+  # This handles both -DGPU_TARGETS=gfx942,gfx950 and -DGPU_TARGETS="gfx942;gfx950"
+  string(REPLACE "," ";" _GPU_TARGETS_LIST "${GPU_TARGETS}")
+  # Ensure it's treated as a list even if already semicolon-separated
+  set(_GPU_TARGETS_LIST ${_GPU_TARGETS_LIST})
+  strip_arch_features("${_GPU_TARGETS_LIST}" _BITCODE_DEFAULT_ARCHS)
 elseif(COMMAND rocm_local_targets)
   rocm_local_targets(_LOCAL_GPUS)
   if(_LOCAL_GPUS)
@@ -45,6 +58,8 @@ set(BITCODE_GPU_ARCHS "${_BITCODE_DEFAULT_ARCHS}" CACHE STRING "GPU architecture
 # -fvisibility=default ensures extern "C" device API symbols remain
 # externally visible after llvm-link and llc.
 set(BITCODE_COMPILE_FLAGS_BASE
+    -Wall
+    -Wextra
     -x hip
     --cuda-device-only
     -std=c++17
@@ -75,6 +90,7 @@ endif()
 # the device-side create_ctx/destroy_ctx dispatchers)
 set(BITCODE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rocshmem_gpu.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rocshmem_tile_gpu.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ipc_policy.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/team.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/sync/abql_block_mutex.cpp

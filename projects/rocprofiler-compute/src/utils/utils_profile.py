@@ -3,7 +3,6 @@
 
 import glob
 import importlib
-import logging
 import os
 import pkgutil
 import re
@@ -32,6 +31,33 @@ from utils.utils_common import (
     perform_attach_detach,
 )
 from vendored import yaml
+
+_PROFILER_INTERNAL_RE = re.compile(
+    r"^\[rocprofiler"  # rocprofiler-sdk and rocprofiler-compute tool messages
+    r"|^[WI]\d{8}\s"  # glog-style timestamps (W/I followed by YYYYMMDD)
+)
+
+
+def _is_live_attach(
+    profiler_options: Union[list[str], dict[str, Union[str, list[str]]]],
+) -> bool:
+    """Return True if the profiler options indicate a live-attach (pid) mode."""
+    return (isinstance(profiler_options, list) and "--pid" in profiler_options) or (
+        isinstance(profiler_options, dict)
+        and profiler_options.get("ROCPROF_ATTACH_PID") is not None
+    )
+
+
+def _classify_output_line(line: str) -> None:
+    """Log a subprocess output line at the appropriate level.
+
+    Profiler-internal messages go to DEBUG (visible with -v).
+    Everything else goes to ERROR (always visible on failure).
+    """
+    if _PROFILER_INTERNAL_RE.match(line):
+        console_debug(line)
+    else:
+        console_error(line, exit=False)
 
 
 def run_prof(
@@ -66,13 +92,6 @@ def run_prof(
     else:
         console_debug(f"pmc file: {fpath.name}")
 
-    is_mode_live_attach = (
-        isinstance(profiler_options, list) and "--pid" in profiler_options
-    ) or (
-        isinstance(profiler_options, dict)
-        and profiler_options.get("ROCPROF_ATTACH_PID") is not None
-    )
-
     # standard rocprof options
     if get_rocprof_cmd() == "rocprofiler-sdk":
         options = cast(dict[str, Union[str, list[str]]], profiler_options).copy()
@@ -102,6 +121,7 @@ def run_prof(
         / "rocprof_compute_soc"
         / "profile_configs"
         / "sdk_config.yaml",
+        encoding="utf-8",
     ) as filename:
         sdk_config = yaml.safe_load(filename)
     # Extra counter definitions
@@ -111,7 +131,7 @@ def run_prof(
             "counter_def_" + fname_path.name[len("pmc_perf_") :]
         )
         if counter_def_fname.exists():
-            with open(Path(counter_def_fname)) as file:
+            with open(Path(counter_def_fname), encoding="utf-8") as file:
                 sdk_config["rocprofiler-sdk"]["counters"].extend(
                     yaml.safe_load(file)["rocprofiler-sdk"]["counters"]
                 )
@@ -135,7 +155,7 @@ def run_prof(
             new_env[key] = value
         console_debug(f"rocprof sdk env vars: {new_env}")
 
-        if is_mode_live_attach:
+        if _is_live_attach(profiler_options):
             perform_attach_detach(new_env, options)
         else:
             if app_cmd is None:
@@ -175,10 +195,11 @@ def run_prof(
     if new_env.get("ROCPROFILER_METRICS_PATH"):
         shutil.rmtree(new_env["ROCPROFILER_METRICS_PATH"], ignore_errors=True)
 
-    if (not is_mode_live_attach) and (not success):
-        if loglevel > logging.INFO:
-            for line in output.splitlines():
-                console_error(line, exit=False)
+    if (not _is_live_attach(profiler_options)) and (not success):
+        for line in output.splitlines():
+            stripped = line.strip()
+            if stripped:
+                _classify_output_line(stripped)
         console_error("Profiling execution failed.")
 
     results_files: list[str] = []
@@ -191,10 +212,19 @@ def run_prof(
         ):
             for db_name in glob.glob(workload_dir + "/out/pmc_1/*/*.db"):
                 pid = Path(db_name).stem.split("_")[0]
-                # Read CSV as list of dicts instead of pandas DataFrame
-                counter_rows, _ = csv_ops.read_csv_as_dicts(
-                    f"{workload_dir}/out/pmc_1/{pid}_native_counter_collection.csv"
+                counter_csv = (
+                    Path(workload_dir)
+                    / "out"
+                    / "pmc_1"
+                    / f"{pid}_native_counter_collection.csv"
                 )
+                if not counter_csv.is_file():
+                    console_debug(
+                        f"No native counter CSV for pid {pid}; "
+                        f"skipping rocpd update for {db_name}."
+                    )
+                    continue
+                counter_rows, _ = csv_ops.read_csv_as_dicts(str(counter_csv))
                 rocpd_data.update_rocpd_pmc_events(
                     counter_rows,
                     db_name,
@@ -206,45 +236,67 @@ def run_prof(
             workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv",
             workload_dir + f"/out/pmc_1/{fbase}_marker_api_trace.csv",
         )
-        # Read CSV as list of dicts
-        combined_rows, _ = csv_ops.read_csv_as_dicts(
-            workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv"
-        )
-        # Reset Dispatch_ID based on PID, Kernel_Name, Grid_Size,
-        # Workgroup_Size, LDS_Per_Workgroup, Start_Timestamp, End_Timestamp
-        csv_ops.assign_group_ids(
-            combined_rows,
-            [
-                "PID",
-                "Kernel_Name",
-                "Grid_Size",
-                "Workgroup_Size",
-                "LDS_Per_Workgroup",
-                "Start_Timestamp",
-                "End_Timestamp",
-            ],
-            "Dispatch_ID",
-        )
-        # Reset Kernel_ID based on Kernel_Name, Grid_Size,
-        # Workgroup_Size, LDS_Per_Workgroup
-        csv_ops.assign_group_ids(
-            combined_rows,
-            ["Kernel_Name", "Grid_Size", "Workgroup_Size", "LDS_Per_Workgroup"],
-            "Kernel_ID",
-        )
-        # Drop PID since its not required
-        csv_ops.drop_column_from_rows(combined_rows, "PID")
-        # Write back to CSV
-        csv_ops.write_csv_from_dicts(
-            workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv", combined_rows
-        )
-        csv_ops.write_csv_from_dicts(
-            workload_dir + f"/results_{fbase}.csv", combined_rows
-        )
+        # Subprocess succeeded but may have dispatched zero GPU kernels,
+        # in which case the CSV is missing or has no data rows.
+        try:
+            combined_rows, _ = csv_ops.read_csv_as_dicts(
+                workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv"
+            )
+        except (FileNotFoundError, ValueError):
+            combined_rows = []
+        if not combined_rows:
+            console_warning(
+                "No GPU kernel data collected. "
+                "The workload may not have dispatched any GPU kernels."
+            )
+            shutil.rmtree(f"{workload_dir}/out", ignore_errors=True)
+            return
+        else:
+            # Reset Dispatch_ID based on PID, Kernel_Name, Grid_Size,
+            # Workgroup_Size, LDS_Per_Workgroup, Start_Timestamp, End_Timestamp
+            csv_ops.assign_group_ids(
+                combined_rows,
+                [
+                    "PID",
+                    "Kernel_Name",
+                    "Grid_Size",
+                    "Workgroup_Size",
+                    "LDS_Per_Workgroup",
+                    "Start_Timestamp",
+                    "End_Timestamp",
+                ],
+                "Dispatch_ID",
+            )
+            # Reset Kernel_ID based on Kernel_Name, Grid_Size,
+            # Workgroup_Size, LDS_Per_Workgroup
+            csv_ops.assign_group_ids(
+                combined_rows,
+                ["Kernel_Name", "Grid_Size", "Workgroup_Size", "LDS_Per_Workgroup"],
+                "Kernel_ID",
+            )
+            # Drop PID since its not required
+            csv_ops.drop_column_from_rows(combined_rows, "PID")
+            # Write back to CSV
+            csv_ops.write_csv_from_dicts(
+                workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv",
+                combined_rows,
+            )
+            csv_ops.write_csv_from_dicts(
+                workload_dir + f"/results_{fbase}.csv", combined_rows
+            )
+            console_warning(
+                "Intermediate results_*.csv generation from rocpd databases is "
+                "deprecated and will be replaced with automatic .db file "
+                "retention in a future release."
+            )
         if torch_trace_enabled:
             # move counter collection and marker trace to workload dir
             save_torch_trace_inputs(workload_dir, fbase, format_rocprof_output)
         if retain_rocpd_output:
+            console_warning(
+                "--retain-rocpd-output is deprecated and will be removed in "
+                "a future release. .db files will be retained automatically."
+            )
             for db_path in glob.glob(workload_dir + "/out/pmc_1/*/*.db"):
                 pid = Path(db_path).stem.split("_")[0]
                 shutil.copyfile(
@@ -313,7 +365,7 @@ def run_prof(
             # copy and remove out directory if needed
             shutil.copyfile(
                 f"{workload_dir}/out/pmc_1/results_{fbase}.csv",
-                f"{workload_dir}/{fbase}.csv",
+                f"{workload_dir}/results_{fbase}.csv",
             )
             # Remove temp directory
             shutil.rmtree(f"{workload_dir}/out")
@@ -341,7 +393,7 @@ def run_prof(
             "SCR": "Scratch_Per_Workitem",
             "ACCUM_VGPR": "Accum_VGPR",
         }
-        csv_path = Path(workload_dir) / f"{fbase}.csv"
+        csv_path = Path(workload_dir) / f"results_{fbase}.csv"
         rows, _ = csv_ops.read_csv_as_dicts(str(csv_path))
         csv_ops.rename_columns(rows, output_headers)
         csv_ops.write_csv_from_dicts(str(csv_path), rows)
@@ -382,11 +434,25 @@ def pc_sampling_prof(
         for key, value in options.items():
             new_env[key] = value
         console_debug(f"pc sampling rocprof sdk env vars: {new_env}")
-        console_debug(f"pc sampling rocprof sdk user provided command: {app_cmd}")
-        success, output = capture_subprocess_output(
-            app_cmd, new_env=new_env, profileMode=True
-        )
+
+        if _is_live_attach(profiler_options):
+            perform_attach_detach(new_env, options)
+        else:
+            if app_cmd is None:
+                console_error(
+                    "APP_CMD, the workload's executable must be provided "
+                    "when not in live attach mode"
+                )
+
+            console_debug(f"pc sampling rocprof sdk user provided command: {app_cmd}")
+            success, output = capture_subprocess_output(
+                app_cmd, new_env=new_env, profileMode=True
+            )
+            if not success:
+                console_error("PC sampling failed.")
     else:
+        profiler_options_list = cast(list[str], profiler_options)
+
         options = [
             "--kernel-trace",
             "--pc-sampling-beta-enabled",
@@ -403,18 +469,42 @@ def pc_sampling_prof(
             workload_dir,
             "-o",
             "ps_file",  # TODO: sync up with the name from source in 2100_.yaml
-            "--",
-            cast(str, profiler_options[-1]),  # app command
         ]
+
+        if _is_live_attach(profiler_options):
+            try:
+                pid_idx = profiler_options_list.index("--pid")
+                options += ["--pid", profiler_options_list[pid_idx + 1]]
+                if "--attach-duration-msec" in profiler_options_list:
+                    dur_idx = profiler_options_list.index("--attach-duration-msec")
+                    options += [
+                        "--attach-duration-msec",
+                        profiler_options_list[dur_idx + 1],
+                    ]
+            except (ValueError, IndexError):
+                console_error(
+                    "--pid or --attach-duration-msec option not found in "
+                    "profiler arguments for live attach mode"
+                )
+        else:
+            try:
+                app_cmd_with_separator = profiler_options_list[
+                    profiler_options_list.index("--") :
+                ]
+                options += app_cmd_with_separator
+            except ValueError:
+                console_error(
+                    "APP_CMD, the workload's executable must be provided "
+                    "when not in live attach mode"
+                )
 
         console_debug(f"rocprof command: {shlex.join([get_rocprof_cmd()] + options)}")
         # profile the app
         success, output = capture_subprocess_output(
             [get_rocprof_cmd()] + options, new_env=os.environ.copy(), profileMode=True
         )
-
-    if not success:
-        console_error("PC sampling failed.")
+        if not success:
+            console_error("PC sampling failed.")
 
 
 @demarcate

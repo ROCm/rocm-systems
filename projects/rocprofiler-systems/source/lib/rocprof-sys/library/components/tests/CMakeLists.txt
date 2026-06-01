@@ -2,20 +2,21 @@
 # SPDX-License-Identifier: MIT
 
 # Component Tests
-add_library(lib-components-tests OBJECT test_shmem_gotcha.cpp)
+add_library(
+    lib-components-tests
+    OBJECT
+    test_shmem_gotcha.cpp
+    test_pthread_mutex_gotcha.cpp
+)
 
 target_link_libraries(
     lib-components-tests
     PUBLIC
         rocprofiler-systems-headers # defines.hpp
+        rocprofiler-systems-logger
         rocprofiler-systems-googletest-library
         rocprofiler-systems-timemory
-        rocprofiler-systems-libva # needed for include path to va/va.h
-        rocprofiler-systems-object-library
-        rocprofiler-systems-perfetto
         rocprofiler-systems-core-library
-        rocprofiler-systems-logger # spdlog for headers pulled in via category_region -> trace_cache
-        rocprofiler-systems-rocm # needed for rocprofiler-sdk headers
 )
 
 target_include_directories(

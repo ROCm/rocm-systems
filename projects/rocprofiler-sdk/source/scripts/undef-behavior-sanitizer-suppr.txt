@@ -42,9 +42,6 @@ function:__kmp_resume_template
 vptr:__kmp_suspend_initialize_thread
 function:__kmp_suspend_initialize_thread
 
-# Suppress issues in google logging
-vptr:google::LogMessageTime::CalcGmtOffset
-function:google::LogMessageTime::CalcGmtOffset
 vptr:tzset_internal
 function:tzset_internal
 

@@ -19,7 +19,9 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+import contextlib
 import inspect
+import io
 import json
 import os
 import pathlib
@@ -27,16 +29,106 @@ import sys
 
 import unittest
 
-amdsmi_path = os.environ.get("AMDSMI_PATH", "/opt/rocm/share/amd_smi")
+
+def _print_path_remediation(script, file):
+    """Print the shared 'fix with one of:' remediation block.
+
+    Used by both print_amdsmi_path_help() (-h context) and print_shadow_error()
+    (import-error context) to avoid duplicating the step list.
+    """
+    print(
+        "\t 1. Run the tests from the installed amd-smi-lib-tests package location (RECOMMENDED):\n"
+        f"\t\t `sudo $ROCM_PATH/share/amd_smi/tests/python_unittest/{script} -v`\n"
+        f"\t\t e.g. `sudo /opt/rocm/share/amd_smi/tests/python_unittest/{script} -v`\n\n"
+        "\t 2. Set AMDSMI_PATH to point at the correct build:\n"
+        "\t\t `export AMDSMI_PATH=$ROCM_PATH/share/amd_smi`\n\n"
+        "\t 3. Reinstall the correct amd-smi-lib package (removes the stale Python package too):\n"
+        "\t\t `sudo apt remove amd-smi-lib && sudo apt install amd-smi-lib`\n"
+        "\t\t or, if amd-smi was installed directly via pip:\n"
+        "\t\t `sudo pip uninstall amdsmi`",
+        file=file,
+    )
+
+
+def print_amdsmi_path_help(file=sys.stdout):
+    """Print env-var documentation, path remediation guidance, and usage examples for -h output."""
+    _script = os.path.basename(sys.argv[0]) or "<script>"
+    print("\nAdditional options:", file=file)
+    print("  -l, --list           List all available tests and exit", file=file)
+    print(file=file)
+    print("Environment variables:", file=file)
+    print("  AMDSMI_PATH   Path to amd_smi share dir (overrides ROCM_HOME/ROCM_PATH)", file=file)
+    print("  ROCM_HOME     ROCm install root, used when AMDSMI_PATH is unset", file=file)
+    print("  ROCM_PATH     Fallback ROCm install root (default: /opt/rocm)", file=file)
+    print(file=file)
+    print("If amd-smi loads from the wrong path, fix with one of:", file=file)
+    _print_path_remediation(_script, file)
+    _full = "sudo " + (sys.argv[0] or _script)
+    _base = sys.argv[0] or _script
+    _cmds = [
+        (_base + " -l", "list all available tests"),
+        (_full + " -v", "run all tests, verbose with print statements (RECOMMENDED)"),
+        (_full + ' -k "test_name" -v', "run only tests matching substring"),
+        (_full + " -q", "run all tests, quiet with no print statements"),
+    ]
+    _w = max(len(cmd) for cmd, _ in _cmds) + 2
+    print(file=file)
+    print("Examples:", file=file)
+    for cmd, desc in _cmds:
+        print(f"  {cmd:<{_w}} - {desc}", file=file)
+
+
+def print_shadow_error(script, loaded_from, expected_path, file=sys.stderr):
+    """Print an actionable error when amdsmi was loaded from the wrong path.
+
+    Prints an ERROR header identifying the unexpected source, the shadowing
+    diagnosis, the shared remediation steps, and a pointer to -h for more details.
+    """
+    print(
+        f"ERROR: amdsmi loaded from '{loaded_from}' instead of expected path '{expected_path}'.",
+        file=file,
+    )
+    print("A system-installed amdsmi package is shadowing the test target.", file=file)
+    print("Fix with one of:", file=file)
+    _print_path_remediation(script, file)
+    print(f"\nRefer to `{script} -h` for more details.", file=file)
+
+
+amdsmi_path = os.environ.get("AMDSMI_PATH") or os.path.join(
+    os.environ.get("ROCM_HOME") or os.environ.get("ROCM_PATH") or "/opt/rocm", "share/amd_smi"
+)
 if not os.path.exists(amdsmi_path):
     raise FileNotFoundError(
-        f'AMDSMI_PATH "{amdsmi_path}" does not exist. Please set the correct path in your environment.'
+        f'amdsmi path "{amdsmi_path}" does not exist. '
+        "Set ROCM_HOME, ROCM_PATH, or AMDSMI_PATH to the correct install location."
     )
-sys.path.append(amdsmi_path)
+sys.path.insert(0, amdsmi_path)
 try:
     import amdsmi
 except ImportError as e:
     raise ImportError(f'Could not import the "amdsmi" module from "{amdsmi_path}"') from e
+
+# Verify the imported amdsmi package came from amdsmi_path, not a system-installed
+# package in dist-packages. A stale system install wins over sys.path.append() because
+# dist-packages is already on sys.path at interpreter startup; insert(0,...) above
+# prevents this, but error explicitly in case amdsmi was already cached in sys.modules.
+#
+# Example of how to trigger this error output (for test purposes):
+# sudo AMDSMI_PATH=/tmp /opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py -v
+_amdsmi_file = getattr(amdsmi, "__file__", None) or ""
+if not os.path.realpath(_amdsmi_file).startswith(os.path.realpath(amdsmi_path) + os.sep):
+    _script = os.path.basename(sys.argv[0]) or "unit_tests.py"
+    print_shadow_error(_script, _amdsmi_file, amdsmi_path)
+    # For direct test-script invocations use sys.exit so no Python traceback
+    # clutters the remediation output.  For anything else (pytest, IDE runners,
+    # ad-hoc imports) raise so the caller gets a clear error with location.
+    _known_scripts = ("unit_tests.py", "integration_test.py", "cli_unit_test.py")
+    _main_file = getattr(sys.modules.get("__main__"), "__file__", "") or ""
+    if os.path.basename(_main_file) in _known_scripts:
+        sys.exit(1)
+    raise RuntimeError(
+        f"amdsmi loaded from wrong path: '{_amdsmi_file}' (expected under '{amdsmi_path}')"
+    )
 
 #################################################
 # Module level functions, not part of the class #
@@ -47,10 +139,10 @@ VERBOSITY_NORMAL = 1  # default (dot-per-test)
 VERBOSITY_VERBOSE = 2  # -v / --verbose (per-test result lines)
 
 
-def print_test_ids(suite):
+def _print_test_ids(suite):
     for test in suite:
         if isinstance(test, unittest.TestSuite):
-            print_test_ids(test)
+            _print_test_ids(test)
         else:
             test = str(test).split()[0]
             print(f"\t{test}", file=sys.stderr)
@@ -58,20 +150,51 @@ def print_test_ids(suite):
 
 
 def print_tests(module_name):
+    """Print all test IDs in the given module to stderr and return.
+
+    Loads every test discovered by unittest.TestLoader from the named module
+    (pass __name__ from the script's __main__ block) and prints each ID,
+    one per line, indented by a tab.  Output goes to stderr so it can be
+    captured independently of normal stdout test output.
+    """
     loader = unittest.TestLoader()
     suite = loader.loadTestsFromModule(sys.modules[module_name])
-    print("=" * 70, file=sys.stderr)
     print("Available tests:", file=sys.stderr)
-    print_test_ids(suite)
+    _print_test_ids(suite)
     return
 
 
 def print_legend():
-    # Provide Legend for test results, otherwise it is not clear what the output means
+    """Print the dot-character legend for unittest output to stderr.
+
+    Call this before running tests in non-verbose mode so users know what
+    the single-character result indicators (., s, F, E) mean.
+    """
     print("=" * 70, file=sys.stderr)
     print("Legend: . = pass, s = skipped, F = fail, E = error", file=sys.stderr)
     print("=" * 70, file=sys.stderr)
     return
+
+
+def print_unittest_help():
+    """Print unittest's -h output with its built-in Examples epilog stripped.
+
+    unittest (via argparse) appends its own Examples block; we capture stdout,
+    remove everything from the last 'Examples:' onward, and reprint — leaving
+    our print_amdsmi_path_help() as the sole Examples section at the bottom.
+    """
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            unittest.main(argv=[sys.argv[0] or "unit_tests.py", "--help"])
+    except SystemExit:
+        pass
+    output = buf.getvalue()
+    examples_idx = output.rfind("\nExamples:")
+    if examples_idx != -1:
+        output = output[:examples_idx]
+    sys.stdout.write(output)
+    sys.stdout.flush()
 
 
 def make_runner_verbosity(verbose):
@@ -136,6 +259,28 @@ def expand_glob_k_arg(caller_globals):
                 sys.argv.insert(idx + i * 2, flag)
                 sys.argv.insert(idx + i * 2 + 1, name)
         break
+
+
+def has_gpu_od_interface(bdf):
+    """Check if a GPU has the gpu_od sysfs interface.
+
+    This is a wrapper around AMDSMIHelpers.detect_gpu_od() for test convenience.
+
+    Args:
+        bdf: PCI Bus/Device/Function string (e.g. '0000:26:00.0')
+
+    Returns:
+        bool: True if gpu_od directory exists for this GPU
+    """
+    # Add amdsmi_cli to path for import
+    cli_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "amdsmi_cli")
+    if cli_path not in sys.path:
+        sys.path.insert(0, cli_path)
+
+    from amdsmi_helpers import AMDSMIHelpers
+
+    has_gpu_od, _ = AMDSMIHelpers.detect_gpu_od(bdf)
+    return has_gpu_od
 
 
 class Common:
@@ -424,6 +569,20 @@ class Common:
                 error_code_name = self.error_map[error_code]
         return (error_code, error_code_name)
 
+    def get_dict_key_from_value(self, _value, _dict):
+        if _value not in _dict.values():
+            return None
+        for key, value in _dict.items():
+            if value == _value:
+                return key
+        return None
+
+    def get_error_code_from_name(self, error_code_name):
+        error_code = self.get_dict_key_from_value(error_code_name, self.error_map)
+        if error_code == None:
+            error_code = -1
+        return error_code
+
     def check_ret(self, msg, exc, expected_code_name=None, printIt=True):
         # Returns True if the test FAILED (i.e. the result did not match expected).
         # Callers use the pattern: `if self.check_ret(...): raise_exception = e`
@@ -444,36 +603,45 @@ class Common:
 
         # Check for when there are multiple passing conditions
         if isinstance(expected_code_name, list):
-            for ec in expected_code_name:
-                if not self.check_ret(msg, exc, ec, False):  # check without printing
+            for ec_name in expected_code_name:
+                if not self.check_ret(msg, exc, ec_name, False):  # check without printing
                     # This expected code matched - print once and return success
                     if self.verbose > VERBOSITY_QUIET and printIt:
                         if msg:
                             print(f"{msg}\n", end="")
-                        print(f"\tTest PASSED with expected result {ec}", flush=True)
+                        ec_code = self.get_error_code_from_name(ec_name)
+                        print(f"\tTEST SUCCESS, AMDSMI API Returned {ec_code:>2s}, {ec_name}")
                     return False
 
             # No expected result matched - print failure (respects same guards as single-condition path)
             if self.verbose > VERBOSITY_QUIET and printIt:
                 if msg:
                     print(f"{msg}\n", end="")
-                print(
-                    f"\tTest FAILED with expected results {expected_code_name} but received {error_code_name}",
-                    flush=True,
+                status_msg = (
+                    f"\tTEST FAILURE, AMDSMI API Returned {error_code:>2s}, {error_code_name}\n"
                 )
+                for ec_name in expected_code_name:
+                    ec_code = self.get_error_code_from_name(ec_name)
+                    status_msg += (
+                        f"\t              AMDSMI API Expected {ec_code:>2s}, {expected_code_name}"
+                    )
             return True
 
         # Check for single passing condition
         status_msg = ""
         status_ret = False
         if any(error_code in value for value in self.not_supported_error_codes):
-            status_msg = f"\tAMDSMI API Returned {error_code_name}"
+            status_msg = f"\tAMDSMI API Returned {error_code:>2s}, {error_code_name}"
         elif error_code_name == expected_code_name:
-            status_msg = f"\tTest PASSED with expected result {expected_code_name}"
+            status_msg = f"\tTEST SUCCESS, AMDSMI API Returned expected {error_code:>2s}, {expected_code_name}"
         elif error_code_name != self.PASS and expected_code_name == self.ANY_FAIL:
-            status_msg = f"\tTest PASSED with expected result {expected_code_name} and received {error_code_name}"
+            status_msg = f"\tTEST SUCCESS, AMDSMI API Returned expected fail {error_code:>2s}, {expected_code_name}"
         else:
-            status_msg = f"\tTest FAILED with expected result {expected_code_name} but received {error_code_name}"
+            expected_error_code = self.get_error_code_from_name(expected_code_name)
+            status_msg = (
+                f"\tTEST FAILURE, AMDSMI API Returned {error_code:>2s}, {error_code_name}\n"
+            )
+            status_msg += f"\t              AMDSMI API Expected {expected_error_code:>2s}, {expected_code_name}"
             status_ret = True
         if self.verbose > VERBOSITY_QUIET and printIt:
             if msg:

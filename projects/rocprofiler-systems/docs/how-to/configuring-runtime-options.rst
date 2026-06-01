@@ -298,13 +298,11 @@ Use the following command to view the available domains:
 
    * ``hip_api`` which will enable both ``hip_runtime_api`` and ``hip_compiler_api``.
    * ``hsa_api`` which will enable all hsa domains, ``hsa_core_api``, ``hsa_amd_ext_api``, ``hsa_image_exit_api``, and ``hsa_finalize_ext_api``.
-   * ``marker_api`` or ``roctx`` can be used to enable the roctx marker API tracing.
-   * ``scratch_memory`` can be used to enable scratch memory tracing.
-   * ``memory_allocation`` can be used to enable memory allocation tracing.
-   * ``memory_copy`` can be used to enable memory copy tracing.
-   * ``kernel_dispatch`` can be used to enable kernel dispatch tracing.
-   * ``rocdecode_api`` can be used to enable rocdecode API tracing.
-   * ``rocjpeg_api`` can be used to enable rocjpeg API tracing.
+   * ``kfd_events`` which will enable all Kernel Fusion Driver (KFD) domains,
+     ``kfd_page_fault``, ``kfd_page_migrate``, ``kfd_queue``,
+     ``kfd_event_queue``, ``kfd_event_unmap_from_gpu``, and
+     ``kfd_event_dropped_events``. Requires ``HSA_XNACK=1``, an XNACK-capable
+     GPU, and ROCProfiler-SDK version 1.2.2 or above.
 
 For example, the following is a valid configuration:
 
@@ -312,10 +310,57 @@ For example, the following is a valid configuration:
 
    ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,rocdecode_api,rocjpeg_api
 
-ROCPROFSYS_TRACE_REGION
+
+For KFD event tracing, first check whether your GPU supports XNACK by running
+``rocminfo | grep xnack``. If the output contains ``xnack-``, XNACK is available
+but disabled by default. Enable it by setting the environment variable
+``HSA_XNACK=1``; running ``rocminfo`` again should then show ``xnack+``.
+
+.. code-block:: shell
+
+   export HSA_XNACK=1
+
+Then add ``kfd_events`` to ``ROCPROFSYS_ROCM_DOMAINS`` in your configuration file
+or on the command line. For example:
+
+.. code-block:: shell
+
+   ROCPROFSYS_ROCM_DOMAINS=kfd_events
+
+ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The ``ROCPROFSYS_TRACE_REGION`` setting limits tracing to activity that occurs inside
+Enables generation of unified-memory profiling reports from KFD page-fault and
+page-migration events. Two files are written alongside the usual Perfetto and
+ROCpd outputs:
+
+* ``unified_memory.txt`` -- human-readable per-GPU summary with fault counts,
+  trigger breakdown (``gpu_page_fault``, ``cpu_page_fault``, ``prefetch``), and
+  host-to-device / device-to-host effective migration throughput.
+* ``unified_memory.json`` -- machine-readable equivalent with the same fields
+  plus an ``xnack_enabled`` flag and an always-present
+  ``device_to_device`` direction bucket for schema stability.
+
+The migration-throughput value is computed as migrated bytes divided by KFD
+page-migration event duration. It is an end-to-end migration-service metric and
+should not be interpreted as PCIe, XGMI, SDMA, HBM, or raw memory-subsystem
+bandwidth.
+
+Requires an XNACK-capable AMD GPU with ``HSA_XNACK=1`` and
+ROCProfiler-SDK 1.2.2 or above. The KFD tracing domains
+(``kfd_page_fault``, ``kfd_page_migrate``) are enabled automatically when this
+setting is on -- you do not need to add ``kfd_events`` to
+``ROCPROFSYS_ROCM_DOMAINS`` separately.
+
+.. code-block:: shell
+
+   export HSA_XNACK=1
+   export ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON
+
+ROCPROFSYS_SELECTED_REGIONS
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The ``ROCPROFSYS_SELECTED_REGIONS`` setting limits tracing to activity that occurs inside
 specific roctx regions. When set, only GPU kernel dispatches, HIP API calls, and other
 traced events that occur while a matching roctx region is active are recorded.
 Regions are matched against the message passed to ``roctxRangeStartA()`` /
@@ -325,7 +370,7 @@ The value is a comma-separated list of region names:
 
 .. code-block:: shell
 
-   ROCPROFSYS_TRACE_REGION=Region1,Region2
+   ROCPROFSYS_SELECTED_REGIONS=Region1,Region2
 
 When this variable is empty (the default), all activity is traced regardless of roctx regions.
 
@@ -335,7 +380,7 @@ Filtering on ``Region2`` captures only activity inside the inner ``Region2`` sco
 
 .. note::
 
-   ``ROCPROFSYS_TRACE_REGION`` uses process-wide ``roctxRangeStartA`` / ``roctxRangeStop``
+   ``ROCPROFSYS_SELECTED_REGIONS`` uses process-wide ``roctxRangeStartA`` / ``roctxRangeStop``
    markers, not thread-local ``roctxRangePush`` / ``roctxRangePop``.
 
    When combined with ``roctxProfilerPause`` / ``roctxProfilerResume``, a pause issued
@@ -347,7 +392,7 @@ Example: trace only activity inside a region named ``Compute``:
 
    rocprof-sys-run \
        -e ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,kernel_dispatch \
-       -e ROCPROFSYS_TRACE_REGION=Compute \
+       -e ROCPROFSYS_SELECTED_REGIONS=Compute \
        -- ./my_app
 
 rocprof-sys-avail examples
@@ -521,7 +566,7 @@ Viewing the setting descriptions
    | ROCPROFSYS_TIMING_SCIENTIFIC             | Set the numerical reporting format f... |
    | ROCPROFSYS_TIMING_UNITS                  | Set the units for components with u...  |
    | ROCPROFSYS_TIMING_WIDTH                  | Set the output width for components ... |
-   | ROCPROFSYS_TRACE_REGION                  | Comma-separated list of roctx region... |
+   | ROCPROFSYS_SELECTED_REGIONS              | Comma-separated list of roctx region... |
    | ROCPROFSYS_TRACE_THREAD_LOCKS            | Enable tracking calls to pthread_mut... |
    | ROCPROFSYS_TREE_OUTPUT                   | Write hierarchical json output files    |
    | ROCPROFSYS_USE_CODE_COVERAGE             | Enable support for code coverage        |

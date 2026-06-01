@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "constraint.hpp"
 #include "config.hpp"
@@ -114,7 +95,7 @@ find_clock_identifier(const Tp& _v)
 }
 
 void
-sleep(uint64_t _n)
+sleep(std::uint64_t _n)
 {
     std::this_thread::sleep_for(std::chrono::nanoseconds{ _n });
 }
@@ -127,7 +108,7 @@ get_timespec(clockid_t clock_id) noexcept
     return _ts;
 }
 
-template <typename Tp = uint64_t, typename Precision = std::nano>
+template <typename Tp = std::uint64_t, typename Precision = std::nano>
 Tp
 get_clock_now(clockid_t clock_id) noexcept
 {
@@ -148,12 +129,12 @@ get_clock_now(clockid_t clock_id) noexcept
 stages::stages()
 : init{ [](const spec&) { return get_state() < State::Finalized; } }
 , wait{ [](const spec& _spec) {
-    sleep(std::min<uint64_t>(100 * units::msec, _spec.delay * units::sec));
+    sleep(std::min<std::uint64_t>(100 * units::msec, _spec.delay * units::sec));
     return get_state() < State::Finalized;
 } }
 , start{ [](const spec&) { return get_state() < State::Finalized; } }
 , collect{ [](const spec& _spec) {
-    sleep(std::min<uint64_t>(100 * units::msec, _spec.duration * units::sec));
+    sleep(std::min<std::uint64_t>(100 * units::msec, _spec.duration * units::sec));
     return get_state() < State::Finalized;
 } }
 , stop{ [](const spec&) { return get_state() < State::Finalized; } }
@@ -213,7 +194,8 @@ clock_identifier::as_string() const
 //
 //--------------------------------------------------------------------------------------//
 
-spec::spec(clock_identifier _id, double _delay, double _dur, uint64_t _n, uint64_t _rep)
+spec::spec(clock_identifier _id, double _delay, double _dur, std::uint64_t _n,
+           std::uint64_t _rep)
 : delay{ _delay }
 , duration{ _dur }
 , count{ _n }
@@ -221,7 +203,8 @@ spec::spec(clock_identifier _id, double _delay, double _dur, uint64_t _n, uint64
 , clock_id{ std::move(_id) }
 {}
 
-spec::spec(int _clock_id, double _delay, double _dur, uint64_t _n, uint64_t _rep)
+spec::spec(int _clock_id, double _delay, double _dur, std::uint64_t _n,
+           std::uint64_t _rep)
 : delay{ _delay }
 , duration{ _dur }
 , count{ _n }
@@ -229,8 +212,8 @@ spec::spec(int _clock_id, double _delay, double _dur, uint64_t _n, uint64_t _rep
 , clock_id{ find_clock_identifier(_clock_id) }
 {}
 
-spec::spec(const std::string& _clock_id, double _delay, double _dur, uint64_t _n,
-           uint64_t _rep)
+spec::spec(const std::string& _clock_id, double _delay, double _dur, std::uint64_t _n,
+           std::uint64_t _rep)
 : delay{ _delay }
 , duration{ _dur }
 , count{ _n }
@@ -247,7 +230,7 @@ spec::spec(const std::string& _line)
     auto _delim = tim::delimit(_line, ":");
     if(!_delim.empty()) delay = utility::convert<double>(_delim.at(0));
     if(_delim.size() > 1) duration = utility::convert<double>(_delim.at(1));
-    if(_delim.size() > 2) repeat = utility::convert<uint64_t>(_delim.at(2));
+    if(_delim.size() > 2) repeat = utility::convert<std::uint64_t>(_delim.at(2));
     if(_delim.size() > 3) clock_id = find_clock_identifier(_delim.at(3));
 }
 
@@ -255,12 +238,12 @@ void
 spec::operator()(const stages& _stages) const
 {
     auto _n = repeat;
-    if(_n < 1) _n = std::numeric_limits<uint64_t>::max();
+    if(_n < 1) _n = std::numeric_limits<std::uint64_t>::max();
 
     while(get_state() < State::Active)
         sleep(1 * units::usec);
 
-    for(uint64_t i = 0; i < _n; ++i)
+    for(std::uint64_t i = 0; i < _n; ++i)
     {
         auto _spec = spec{ clock_id, delay, duration, i, repeat };
         auto _wait = [_spec](const auto& _func, auto _dur) {
@@ -343,12 +326,12 @@ get_trace_stages()
 
     _v.init = [](const spec&) { return get_state() < State::Finalized; };
     _v.wait = [](const spec& _spec) {
-        sleep(std::min<uint64_t>(100 * units::msec, _spec.delay * units::sec));
+        sleep(std::min<std::uint64_t>(100 * units::msec, _spec.delay * units::sec));
         return get_state() < State::Finalized;
     };
     _v.start   = [](const spec&) { return get_state() < State::Finalized; };
     _v.collect = [](const spec& _spec) {
-        sleep(std::min<uint64_t>(100 * units::msec, _spec.duration * units::sec));
+        sleep(std::min<std::uint64_t>(100 * units::msec, _spec.duration * units::sec));
         return get_state() < State::Finalized;
     };
     _v.stop = [](const spec&) { return get_state() < State::Finalized; };

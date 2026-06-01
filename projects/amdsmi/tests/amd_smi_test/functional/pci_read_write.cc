@@ -180,9 +180,15 @@ void TestPciReadWrite::Run(void) {
                        VERB(STANDARD));
     ret = amdsmi_set_gpu_pci_bandwidth(processor_handles_[dv_ind], freq_bitmask);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
-    if (ret != amdsmi_status_t::AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(ret)
+    if (ret == amdsmi_status_t::AMDSMI_STATUS_NOT_SUPPORTED ||
+        ret == amdsmi_status_t::AMDSMI_STATUS_NO_PERM) {
+      // NOT_SUPPORTED: pp_dpm_pcie absent. NO_PERM: sysfs read-only (EROFS).
+      auto status_string("");
+      amdsmi_status_code_to_string(ret, &status_string);
+      std::cout << "\t\t** amdsmi_set_gpu_pci_bandwidth(): " << status_string << "\n";
+      continue;
     }
+    CHK_ERR_ASRT(ret)
 
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_bandwidth", "gpu=" + std::to_string(dv_ind),
                        VERB(STANDARD));
@@ -198,7 +204,8 @@ void TestPciReadWrite::Run(void) {
                        VERB(STANDARD));
     ret = amdsmi_set_gpu_pci_bandwidth(processor_handles_[dv_ind], 0xFFFFFFFF);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
-    if (ret != amdsmi_status_t::AMDSMI_STATUS_NOT_SUPPORTED) {
+    if (ret != amdsmi_status_t::AMDSMI_STATUS_NOT_SUPPORTED &&
+        ret != amdsmi_status_t::AMDSMI_STATUS_NO_PERM) {
       CHK_ERR_ASRT(ret)
     }
 

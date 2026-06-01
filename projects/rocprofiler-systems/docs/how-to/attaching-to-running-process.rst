@@ -29,12 +29,6 @@ Before starting with process attachment, you should ensure:
 
 * The process is running with the appropriate permissions for attachment (see ``ptrace`` requirements).
 
-.. admonition:: Current limitation: Process reattach unavailable
-
-   Once you detach from a process, you cannot reattach to the same process.
-   A second attach to the same PID will result in an error. Support for
-   reattaching to a previously detached process is planned for a future release.
-
 When to use rocprof-sys-attach
 ========================================
 
@@ -194,6 +188,34 @@ Here is a complete workflow for attaching to a running GPU application:
    $ firefox https://ui.perfetto.dev
    # Drag and drop the .proto file to visualize
 
+Re-attaching to a process
+========================================
+
+After detaching from a process, you can re-attach to the same PID to start a
+new profiling session. Each re-attach produces a separate output with its own
+timestamp directory.
+
+.. code-block:: shell-session
+
+   # First profiling session
+   $ rocprof-sys-attach -p 98765 -o ./results -F perfetto
+   [rocprof-sys-attach] Attached to process 98765. Press ENTER to detach.
+   # Press ENTER to detach
+   [rocprof-sys-attach] Detached from process 98765
+
+   # Second profiling session (same PID)
+   $ rocprof-sys-attach -p 98765 -o ./results -F perfetto
+   [rocprof-sys-attach] Attached to process 98765. Press ENTER to detach.
+   # Press ENTER to detach
+   [rocprof-sys-attach] Detached from process 98765
+
+.. note::
+
+   Configuration settings (environment variables, output format, etc.) are
+   captured during the first attach and persist across re-attach sessions.
+   Changing environment variables between sessions has no effect. To profile
+   with different settings, restart the application.
+
 Troubleshooting
 ========================================
 
@@ -236,14 +258,6 @@ If the process cannot be found:
 1. Verify the PID is correct: ``ps -p <pid>``.
 2. Ensure the process is still running.
 3. Check if the process is in a different namespace (containers).
-
-Reattach fails
-----------------------------------------
-
-If you detach from a process and attempt to reattach to the same
-PID, the attach will fail. This is a current limitation; reattach support is
-planned for a future release. As a workaround, to profile the same application again, restart
-the application and attach to the new process.
 
 See also
 ========================================

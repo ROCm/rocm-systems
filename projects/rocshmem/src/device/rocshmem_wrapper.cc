@@ -47,7 +47,137 @@
 #define ROCSHMEM_DEVICE_API \
   __device__ __attribute__((visibility("default")))
 
+// Forward declarations for tile API namespace functions (implemented in rocshmem_tile_gpu.cpp)
+namespace rocshmem {
+  // RMA PUT
+  __device__ int rocshmem_ctx_tile_put_internal(
+      rocshmem_ctx_t ctx, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int pe, uint64_t flags);
+  __device__ int rocshmem_ctx_tile_put_wave_internal(
+      rocshmem_ctx_t ctx, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int pe, uint64_t flags);
+  __device__ int rocshmem_ctx_tile_put_wg_internal(
+      rocshmem_ctx_t ctx, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int pe, uint64_t flags);
+
+  // RMA GET
+  __device__ int rocshmem_ctx_tile_get_internal(
+      rocshmem_ctx_t ctx, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int pe, uint64_t flags);
+  __device__ int rocshmem_ctx_tile_get_wave_internal(
+      rocshmem_ctx_t ctx, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int pe, uint64_t flags);
+  __device__ int rocshmem_ctx_tile_get_wg_internal(
+      rocshmem_ctx_t ctx, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int pe, uint64_t flags);
+
+  // Collective - Allgather
+  __device__ int rocshmem_tile_allgather_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, uint64_t flags);
+  __device__ int rocshmem_tile_allgather_wave_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, uint64_t flags);
+  __device__ int rocshmem_tile_allgather_wg_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, uint64_t flags);
+
+  // Collective - Broadcast
+  __device__ int rocshmem_tile_broadcast_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int pe_root, uint64_t flags);
+  __device__ int rocshmem_tile_broadcast_wave_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int pe_root, uint64_t flags);
+  __device__ int rocshmem_tile_broadcast_wg_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int pe_root, uint64_t flags);
+
+  // Reduction - SUM
+  __device__ int rocshmem_tile_sum_reduce_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int root, uint64_t flags);
+  __device__ int rocshmem_tile_sum_reduce_wave_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int root, uint64_t flags);
+  __device__ int rocshmem_tile_sum_reduce_wg_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int root, uint64_t flags);
+
+  // Reduction - MAX
+  __device__ int rocshmem_tile_max_reduce_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int root, uint64_t flags);
+  __device__ int rocshmem_tile_max_reduce_wave_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int root, uint64_t flags);
+  __device__ int rocshmem_tile_max_reduce_wg_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int root, uint64_t flags);
+
+  // Reduction - MIN
+  __device__ int rocshmem_tile_min_reduce_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int root, uint64_t flags);
+  __device__ int rocshmem_tile_min_reduce_wave_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int root, uint64_t flags);
+  __device__ int rocshmem_tile_min_reduce_wg_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int root, uint64_t flags);
+
+  // Collective wait
+  __device__ int rocshmem_tile_collective_wait_internal(
+      rocshmem_team_t team, uint64_t flags);
+}
+
 extern "C" {
+
+// Bring types into scope for extern "C" functions
+using rocshmem::rocshmem_ctx_t;
+using rocshmem::rocshmem_team_t;
 
 ROCSHMEM_DEVICE_API int rocshmem_my_pe() {
   return rocshmem::rocshmem_my_pe();
@@ -512,5 +642,258 @@ WRAP_WAIT(unsigned int, uint)
 WRAP_WAIT(unsigned long, ulong)
 WRAP_WAIT(unsigned long long, ulonglong)
 WRAP_WAIT(uint64_t, uint64)
+// Only support reduce on team = 0 (ROCSHMEM_TEAM_WORLD)
+#define WRAP_REDUCE_OP(T, TNAME, OP)                                           \
+  ROCSHMEM_DEVICE_API int rocshmem_##TNAME##_##OP##_reduce_wg(                 \
+      int team, T *dest, const T *source, int nreduce) {                       \
+    if (team != 0) return rocshmem::ROCSHMEM_ERROR;                            \
+    return rocshmem::rocshmem_ctx_##TNAME##_##OP##_reduce_wg(                  \
+        rocshmem::ROCSHMEM_CTX_DEFAULT,                                        \
+        rocshmem::device::ROCSHMEM_TEAM_WORLD, dest, source, nreduce);         \
+  }
+
+#define WRAP_REDUCE_ARITH(T, TNAME)                                            \
+  WRAP_REDUCE_OP(T, TNAME, sum)                                                \
+  WRAP_REDUCE_OP(T, TNAME, min)                                                \
+  WRAP_REDUCE_OP(T, TNAME, max)                                                \
+  WRAP_REDUCE_OP(T, TNAME, prod)
+
+WRAP_REDUCE_ARITH(short, short)
+WRAP_REDUCE_ARITH(int, int)
+WRAP_REDUCE_ARITH(long, long)
+WRAP_REDUCE_ARITH(long long, longlong)
+WRAP_REDUCE_ARITH(float, float)
+WRAP_REDUCE_ARITH(double, double)
+
+/******************************************************************************
+ *********************** TILE API OPERATIONS ***********************************
+ *****************************************************************************/
+
+// Tile API: Type-erased bitcode interface for tensor operations
+// The namespace implementations (_internal suffix) are in src/rocshmem_tile_gpu.cpp
+// These extern "C" wrappers provide clean names for JIT consumers (PyTorch/Triton)
+
+// RMA PUT operations
+ROCSHMEM_DEVICE_API int rocshmem_ctx_tile_put(
+    rocshmem_ctx_t ctx, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int pe, uint64_t flags) {
+  return rocshmem::rocshmem_ctx_tile_put_internal(
+      ctx, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, pe, flags);
+}
+
+ROCSHMEM_DEVICE_API int rocshmem_ctx_tile_put_wave(
+    rocshmem_ctx_t ctx, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int pe, uint64_t flags) {
+  return rocshmem::rocshmem_ctx_tile_put_wave_internal(
+      ctx, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, pe, flags);
+}
+
+ROCSHMEM_DEVICE_API int rocshmem_ctx_tile_put_wg(
+    rocshmem_ctx_t ctx, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int pe, uint64_t flags) {
+  return rocshmem::rocshmem_ctx_tile_put_wg_internal(
+      ctx, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, pe, flags);
+}
+
+// RMA GET operations
+ROCSHMEM_DEVICE_API int rocshmem_ctx_tile_get(
+    rocshmem_ctx_t ctx, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int pe, uint64_t flags) {
+  return rocshmem::rocshmem_ctx_tile_get_internal(
+      ctx, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, pe, flags);
+}
+
+ROCSHMEM_DEVICE_API int rocshmem_ctx_tile_get_wave(
+    rocshmem_ctx_t ctx, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int pe, uint64_t flags) {
+  return rocshmem::rocshmem_ctx_tile_get_wave_internal(
+      ctx, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, pe, flags);
+}
+
+ROCSHMEM_DEVICE_API int rocshmem_ctx_tile_get_wg(
+    rocshmem_ctx_t ctx, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int pe, uint64_t flags) {
+  return rocshmem::rocshmem_ctx_tile_get_wg_internal(
+      ctx, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, pe, flags);
+}
+
+// Collective - Allgather
+ROCSHMEM_DEVICE_API int rocshmem_tile_allgather(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, uint64_t flags) {
+  return rocshmem::rocshmem_tile_allgather_internal(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, flags);
+}
+
+ROCSHMEM_DEVICE_API int rocshmem_tile_allgather_wave(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, uint64_t flags) {
+  return rocshmem::rocshmem_tile_allgather_wave_internal(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, flags);
+}
+
+ROCSHMEM_DEVICE_API int rocshmem_tile_allgather_wg(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, uint64_t flags) {
+  return rocshmem::rocshmem_tile_allgather_wg_internal(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, flags);
+}
+
+// Collective - Broadcast
+ROCSHMEM_DEVICE_API int rocshmem_tile_broadcast(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int pe_root, uint64_t flags) {
+  return rocshmem::rocshmem_tile_broadcast_internal(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, pe_root, flags);
+}
+
+ROCSHMEM_DEVICE_API int rocshmem_tile_broadcast_wave(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int pe_root, uint64_t flags) {
+  return rocshmem::rocshmem_tile_broadcast_wave_internal(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, pe_root, flags);
+}
+
+ROCSHMEM_DEVICE_API int rocshmem_tile_broadcast_wg(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int pe_root, uint64_t flags) {
+  return rocshmem::rocshmem_tile_broadcast_wg_internal(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, pe_root, flags);
+}
+
+// Collective - SUM Reduce
+ROCSHMEM_DEVICE_API int rocshmem_tile_sum_reduce(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int root, uint64_t flags) {
+  return rocshmem::rocshmem_tile_sum_reduce_internal(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
+}
+
+ROCSHMEM_DEVICE_API int rocshmem_tile_sum_reduce_wave(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int root, uint64_t flags) {
+  return rocshmem::rocshmem_tile_sum_reduce_wave_internal(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
+}
+
+ROCSHMEM_DEVICE_API int rocshmem_tile_sum_reduce_wg(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int root, uint64_t flags) {
+  return rocshmem::rocshmem_tile_sum_reduce_wg_internal(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
+}
+
+// Collective - MAX Reduce
+ROCSHMEM_DEVICE_API int rocshmem_tile_max_reduce(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int root, uint64_t flags) {
+  return rocshmem::rocshmem_tile_max_reduce_internal(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
+}
+
+ROCSHMEM_DEVICE_API int rocshmem_tile_max_reduce_wave(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int root, uint64_t flags) {
+  return rocshmem::rocshmem_tile_max_reduce_wave_internal(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
+}
+
+ROCSHMEM_DEVICE_API int rocshmem_tile_max_reduce_wg(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int root, uint64_t flags) {
+  return rocshmem::rocshmem_tile_max_reduce_wg_internal(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
+}
+
+// Collective - MIN Reduce
+ROCSHMEM_DEVICE_API int rocshmem_tile_min_reduce(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int root, uint64_t flags) {
+  return rocshmem::rocshmem_tile_min_reduce_internal(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
+}
+
+ROCSHMEM_DEVICE_API int rocshmem_tile_min_reduce_wave(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int root, uint64_t flags) {
+  return rocshmem::rocshmem_tile_min_reduce_wave_internal(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
+}
+
+ROCSHMEM_DEVICE_API int rocshmem_tile_min_reduce_wg(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int root, uint64_t flags) {
+  return rocshmem::rocshmem_tile_min_reduce_wg_internal(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
+}
+
+// Collective Wait
+ROCSHMEM_DEVICE_API int rocshmem_tile_collective_wait(
+    rocshmem_team_t team, uint64_t flags) {
+  return rocshmem::rocshmem_tile_collective_wait_internal(team, flags);
+}
 
 }

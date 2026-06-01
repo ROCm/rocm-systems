@@ -1,291 +1,183 @@
 // Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
-#include <cstdlib>
-#include <cstring>
-#include <initializer_list>
+#include "common/preset_registry.hpp"
+
+#include <functional>
 #include <iostream>
+#include <map>
+#include <sstream>
 #include <string>
-#include <sys/stat.h>
-#include <unistd.h>
+#include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace rocprofsys
 {
 namespace common_utils
 {
-inline std::string
-get_output_directory(const char* env_var = "ROCPROFSYS_OUTPUT_PATH")
+/**
+ * Result of translating command-line arguments for the argument parser.
+ * Owns any translated strings so their lifetime covers the parse_args call.
+ */
+struct translated_args
 {
-    const char* output_path = std::getenv(env_var);
-    if(output_path && strlen(output_path) > 0) return std::string(output_path);
+    std::vector<char*>       argv_ptrs;  // non-owning pointers for parser
+    std::vector<std::string> command;    // args after "--"
+    std::vector<std::string> owned;      // RAII ownership of translated strings
+};
 
-    return "rocprof-sys-output";
-}
+/**
+ * Translate legacy preset flags (e.g., --balanced -> --preset=balanced)
+ * and deprecated flag aliases (e.g., --cputime -> --sample-cputime)
+ * and split argv into parser args and command args (separated by "--").
+ *
+ * Also maps old flag names to new canonical names.
+ * Flags with '=' values (e.g. --freq=100) are handled by splitting on '=' before lookup.
+ */
+[[nodiscard]] translated_args
+translate_arguments(
+    int argc, char** argv, preset_registry& registry,
+    const std::unordered_map<std::string, std::string>& deprecated_flags = {});
 
-inline bool
-check_directory_writable(const std::string& dir)
+/**
+ * Export configuration to JSON file or stdout.
+ */
+void
+export_config(const std::vector<std::string>&        current_env,
+              const std::unordered_set<std::string>& initial_envs,
+              const std::string& preset_name, std::string_view tool_name,
+              const std::string& output_file = "");
+
+/**
+ * Run the shared post-parse validation sequence.
+ * Called by both run and sample after argument parsing.
+ */
+void
+run_post_parse_validation(std::string_view tool_name, struct domain_flag_state& state,
+                          int verbose_level);
+
+using help_group_names = std::vector<std::string>;
+using help_topic_map   = std::map<std::string, help_group_names>;
+
+struct domain_help_entry
 {
-    struct stat st;
-    if(stat(dir.c_str(), &st) == 0)
-    {
-        return (access(dir.c_str(), W_OK) == 0);
-    }
+    std::string              description;
+    std::vector<std::string> flag_patterns;
+};
 
-    std::string parent = dir;
-    size_t      pos    = parent.find_last_of('/');
-    if(pos != std::string::npos)
-    {
-        parent = parent.substr(0, pos);
-        if(parent.empty()) parent = ".";
-    }
-    else
-    {
-        parent = ".";
-    }
+using domain_help_map = std::map<std::string, domain_help_entry>;
 
-    return (access(parent.c_str(), W_OK) == 0);
-}
+const help_topic_map&
+get_help_topic_map();
 
-inline std::string
-get_preset_description(std::string_view preset_mode)
+const domain_help_map&
+get_domain_help_map();
+
+void
+print_compact_help(std::string_view tool_name, std::ostream& out = std::cout);
+
+[[nodiscard]] bool
+print_help_for_topic(const std::string& captured_help, std::string_view topic,
+                     std::string_view tool_name, std::ostream& out = std::cout);
+
+[[nodiscard]] bool
+print_help_for_domain(const std::string& captured_help, std::string_view domain,
+                      std::string_view tool_name, std::ostream& out = std::cout);
+
+/**
+ * Build a NUL-terminated `char*` array suitable for execvpe() / argv-style APIs.
+ *
+ * Returned pointers are non-owning and reference the internal buffers of `src`
+ * via `std::string::data()`. The caller MUST keep `src` alive for the whole
+ * lifetime of the returned vector and MUST NOT mutate `src` (any push_back /
+ * resize that reallocates invalidates every pointer). Non-const reference is
+ * required because `data()` only returns a writable pointer on a non-const
+ * string.
+ */
+[[nodiscard]] std::vector<char*>
+to_c_argv(std::vector<std::string>& src);
+
+void
+print_command(const std::vector<std::string>& argv, std::string_view prefix = {});
+
+namespace detail
 {
-    static const std::unordered_map<std::string_view, std::string> descriptions = {
-        { "--balanced",
-          "Balanced profiling with moderate overhead and comprehensive data\n"
-          "  ├─ Tracing:         ON (Perfetto timeline)\n"
-          "  ├─ Profiling:       ON (call-stack based)\n"
-          "  ├─ CPU Sampling:    ON @ 50 Hz\n"
-          "  └─ Process Metrics: ON (CPU freq, memory)" },
-        { "--profile-only", "Profiling-only mode without tracing (flat profile)\n"
-                            "  ├─ Tracing:         OFF\n"
-                            "  ├─ Profiling:       ON (flat profile)\n"
-                            "  ├─ CPU Sampling:    ON @ 100 Hz\n"
-                            "  └─ Process Metrics: OFF" },
-        { "--detailed", "Comprehensive profiling with full system metrics\n"
-                        "  ├─ Tracing:         ON (Perfetto timeline)\n"
-                        "  ├─ Profiling:       ON (call-stack based)\n"
-                        "  ├─ CPU Sampling:    ON @ 100 Hz (all CPUs)\n"
-                        "  └─ Process Metrics: ON (CPU freq, memory)" },
-        { "--trace-hpc", "Optimized for HPC/MPI/OpenMP applications\n"
-                         "  ├─ Tracing:         ON (Perfetto timeline)\n"
-                         "  ├─ Profiling:       ON (call-stack based)\n"
-                         "  ├─ CPU Sampling:    OFF (reduced overhead)\n"
-                         "  ├─ Process Metrics: ON\n"
-                         "  ├─ OpenMP (OMPT):   ON\n"
-                         "  ├─ MPI (MPIP):      ON\n"
-                         "  ├─ Kokkos:          ON\n"
-                         "  ├─ RCCL:            ON\n"
-                         "  ├─ PAPI Events:     PAPI_TOT_INS, PAPI_TOT_CYC, PAPI_L3_TCM\n"
-                         "  ├─ ROCm Domains:    HIP API, kernels, memory, scratch\n"
-                         "  └─ GPU Metrics:     busy, temp, power, mem_usage" },
-        { "--workload-trace",
-          "Optimized for general compute workloads (AI/ML, HPC, etc.)\n"
-          "  ├─ Tracing:         ON (Perfetto timeline)\n"
-          "  ├─ Profiling:       ON (call-stack based)\n"
-          "  ├─ CPU Sampling:    OFF (reduced overhead)\n"
-          "  ├─ Process Metrics: ON\n"
-          "  ├─ ROCtracer:       ON\n"
-          "  ├─ HIP API Trace:   ON\n"
-          "  ├─ HIP Activity:    ON (kernel timing)\n"
-          "  ├─ RCCL:            ON (collective comms)\n"
-          "  ├─ rocPD:           ON (SQLite Database Output Format)\n"
-          "  ├─ MPI (MPIP):      ON\n"
-          "  ├─ ROCm Domains:    HIP API, kernels, memory, scratch\n"
-          "  ├─ GPU Metrics:     busy, temp, power, mem_usage\n"
-          "  └─ Buffer Size:     2 GB (for long traces)" },
-        { "--sys-trace", "Comprehensive system API tracing\n"
-                         "  ├─ Tracing:         ON (Perfetto timeline)\n"
-                         "  ├─ Profiling:       ON (call-stack based)\n"
-                         "  ├─ ROCm APIs:       HIP API, HSA API\n"
-                         "  ├─ Marker API:      ROCTx\n"
-                         "  ├─ RCCL:            ON (collective communications)\n"
-                         "  ├─ Decode/JPEG:     rocDecode, rocJPEG\n"
-                         "  ├─ Memory Ops:      copies, scratch, allocations\n"
-                         "  └─ Kernel Dispatch: ON" },
-        { "--runtime-trace", "Runtime API tracing (excludes compiler and low-level HSA)\n"
-                             "  ├─ Tracing:         ON (Perfetto timeline)\n"
-                             "  ├─ Profiling:       ON (call-stack based)\n"
-                             "  ├─ HIP Runtime:     ON (excludes compiler API)\n"
-                             "  ├─ Marker API:      ROCTx\n"
-                             "  ├─ RCCL:            ON (collective communications)\n"
-                             "  ├─ Decode/JPEG:     rocDecode, rocJPEG\n"
-                             "  ├─ Memory Ops:      copies, scratch, allocations\n"
-                             "  └─ Kernel Dispatch: ON" },
-        { "--trace-gpu",
-          "GPU workload analysis with host functions, MPI, and device activity\n"
-          "  ├─ Tracing:         ON (Perfetto timeline)\n"
-          "  ├─ Profiling:       OFF (reduced overhead)\n"
-          "  ├─ ROCm:            ON\n"
-          "  ├─ AMD SMI:         ON (GPU metrics)\n"
-          "  ├─ CPU Sampling:    Disabled (none)\n"
-          "  └─ ROCm Domains:    HIP runtime, ROCTx, kernels, memory, scratch" },
-        { "--trace-openmp",
-          "OpenMP offload workloads with HSA domains\n"
-          "  ├─ Tracing:         ON (Perfetto timeline)\n"
-          "  ├─ Profiling:       OFF (reduced overhead)\n"
-          "  ├─ ROCm:            ON\n"
-          "  ├─ OMPT:            ON (OpenMP tools interface)\n"
-          "  └─ ROCm Domains:    HIP runtime, ROCTx, kernels, memory, HSA API" },
-        { "--profile-mpi", "MPI communication latency profiling\n"
-                           "  ├─ Tracing:         OFF\n"
-                           "  ├─ Profiling:       ON (flat profile)\n"
-                           "  ├─ AMD SMI:         OFF\n"
-                           "  ├─ ROCm:            OFF\n"
-                           "  └─ Focus:           Wall-clock files per rank" },
-        { "--trace-hw-counters", "Hardware counter collection during execution\n"
-                                 "  ├─ Profiling:       ON\n"
-                                 "  ├─ CPU Sampling:    Disabled (none)\n"
-                                 "  ├─ ROCm Events:     VALUUtilization, Occupancy\n"
-                                 "  └─ Focus:           GPU performance counters" }
-    };
+void
+print_environment_impl(const std::vector<std::string>&              env,
+                       const std::function<bool(std::string_view)>& is_updated,
+                       bool include_general_vars, std::string_view prefix);
+}  // namespace detail
 
-    auto it = descriptions.find(preset_mode);
-    if(it != descriptions.end())
-    {
-        return it->second;
-    }
-    return "";
-}
-
-inline void
-print_pre_execution_info(std::string_view tool_name, std::string_view preset_mode = "")
+template <typename UpdatedEnvsT>
+void
+print_environment(const std::vector<std::string>& env, const UpdatedEnvsT& updated_envs,
+                  bool include_general_vars = false, std::string_view prefix = {})
 {
-    auto output_dir = get_output_directory();
-
-    if(!preset_mode.empty() && !tool_name.empty())
-    {
-        constexpr size_t           box_width       = 60;
-        constexpr size_t           box_inner_width = box_width - 2;
-        constexpr std::string_view box_line =
-            "════════════════════════════════════════════════════════════";
-        constexpr std::string_view prefix       = "ROCm Systems Profiler - ";
-        const size_t               content_size = prefix.size() + tool_name.size();
-        const size_t               padding =
-            content_size < box_inner_width ? box_inner_width - content_size : 0;
-
-        std::cout << "\n"
-                  << "╔" << box_line << "╗\n"
-                  << "║ " << prefix << tool_name << std::string(padding, ' ') << " ║\n"
-                  << "╚" << box_line << "╝\n"
-                  << "\n";
-
-        std::cout << "Preset:        " << preset_mode << "\n";
-
-        auto description = get_preset_description(preset_mode);
-        if(!description.empty())
-        {
-            std::cout << "\n" << description << "\n";
-        }
-    }
-
-    std::cout << "\nOutput:        " << output_dir << "\n";
-
-    if(!check_directory_writable(output_dir))
-    {
-        std::cerr << "\nWARNING: Output directory may not be writable!\n";
-        std::cerr << "   Try: rocprof-sys-" << tool_name
-                  << " -o /tmp/profile -- <command>\n\n";
-    }
-
-    std::cout << "\nResults will be available in:\n"
-              << "  • Text profile:  " << output_dir << "/wall_clock.txt\n"
-              << "  • Trace (visual): " << output_dir << "/perfetto-trace.proto\n"
-              << "  • JSON data:      " << output_dir << "/wall_clock.json\n"
-              << "\nTo visualize trace:\n"
-              << "  Open " << output_dir
-              << "/perfetto-trace.proto in https://ui.perfetto.dev\n"
-              << "\n";
+    detail::print_environment_impl(
+        env,
+        [&](std::string_view key) {
+            // Both std::string and std::string_view sets accept string_view in count().
+            return updated_envs.count(typename UpdatedEnvsT::key_type{ key }) > 0;
+        },
+        include_general_vars, prefix);
 }
 
 template <typename ParserT>
-std::vector<std::string>
-collect_active_presets(ParserT& parser, std::initializer_list<const char*> preset_names)
+std::string
+capture_help_text(ParserT& parser)
 {
-    std::vector<std::string> active_presets;
-    for(const auto* name : preset_names)
+    std::ostringstream oss;
+    auto*              old_stream = parser.set_ostream(&oss);
+    parser.print_help();
+    parser.set_ostream(old_stream);
+    return oss.str();
+}
+
+/**
+ * Shared help dispatch: handles --help (compact), --help=<topic>, --help=all.
+ * Returns the exit code the caller should use to terminate the program.
+ */
+template <typename ParserT>
+[[nodiscard]] int
+dispatch_help(ParserT& parser, std::string_view tool_name, int exit_code)
+{
+    std::string topic;
+    if(parser.exists("help")) topic = parser.template get<std::string>("help");
+
+    if(topic.empty())
     {
-        if(parser.exists(name) && parser.template get<bool>(name))
+        print_compact_help(tool_name);
+    }
+    else if(topic == "all")
+    {
+        parser.print_help();
+    }
+    else
+    {
+        auto captured = capture_help_text(parser);
+
+        if(!print_help_for_domain(captured, topic, tool_name) &&
+           !print_help_for_topic(captured, topic, tool_name))
         {
-            active_presets.emplace_back(std::string("--") + name);
+            std::cerr << "[rocprof-sys] Unknown help topic '" << topic << "'.\n\n"
+                      << "Available topics (use --help=<topic>):\n";
+
+            std::cerr << "\n  Group topics:\n";
+            for(const auto& [name, groups] : get_help_topic_map())
+                std::cerr << "    " << name << "\n";
+
+            std::cerr << "\n  Domain topics:\n";
+            for(const auto& [name, info] : get_domain_help_map())
+                std::cerr << "    " << name << "  - " << info.description << "\n";
+
+            std::cerr << "\n  --help=all  Show all options\n";
         }
     }
-    return active_presets;
-}
-
-inline bool
-validate_preset_modes(const std::vector<std::string>& active_presets)
-{
-    if(active_presets.size() > 1)
-    {
-        std::cerr << "\nERROR: Multiple preset modes specified: ";
-        for(const auto& active_preset : active_presets)
-        {
-            std::cerr << active_preset;
-            if(active_preset != active_presets.back()) std::cerr << ", ";
-        }
-        std::cerr << "\n\n";
-
-        std::cerr << "Only ONE preset mode can be used at a time.\n\n";
-        std::cerr
-            << "Available presets:\n"
-            << "  General Purpose:\n"
-            << "    --balanced           Balanced profiling with moderate overhead\n"
-            << "    --profile-only       Profiling without tracing, minimal overhead\n"
-            << "    --detailed           Full trace + hardware counters\n"
-            << "  Workload-Specific:\n"
-            << "    --trace-hpc          MPI/OpenMP/HPC applications\n"
-            << "    --workload-trace     General compute workloads (AI/ML, HPC, etc.)\n"
-            << "    --trace-gpu          GPU workload analysis\n"
-            << "    --trace-openmp       OpenMP offload workloads\n"
-            << "    --profile-mpi        MPI communication latency profiling\n"
-            << "    --trace-hw-counters  Hardware counter collection\n"
-            << "  API Tracing:\n"
-            << "    --sys-trace          Comprehensive system API tracing\n"
-            << "    --runtime-trace      Runtime API tracing (no compiler/HSA)\n\n";
-
-        std::cerr
-            << "Choose one preset or use manual options for custom configuration.\n";
-        std::cerr << "See --help for all options.\n\n";
-
-        return false;
-    }
-    return true;
-}
-
-inline bool
-check_rocm_available()
-{
-    return (access("/opt/rocm/bin/hipconfig", X_OK) == 0);
-}
-
-inline void
-warn_if_rocm_unavailable()
-{
-    if(!check_rocm_available())
-    {
-        std::cerr << "\nWARNING: GPU tracing requested but ROCm is not available\n\n";
-        std::cerr << "GPU features will be disabled.\n\n";
-    }
-}
-
-inline void
-warn_if_gpu_preset_without_rocm(const std::vector<std::string>& active_presets)
-{
-    for(const auto& preset : active_presets)
-    {
-        if(preset == "--workload-trace" || preset == "--trace-hpc" ||
-           preset == "--sys-trace" || preset == "--runtime-trace" ||
-           preset == "--trace-gpu" || preset == "--trace-openmp" ||
-           preset == "--trace-hw-counters")
-        {
-            warn_if_rocm_unavailable();
-            return;
-        }
-    }
+    return exit_code;
 }
 
 }  // namespace common_utils

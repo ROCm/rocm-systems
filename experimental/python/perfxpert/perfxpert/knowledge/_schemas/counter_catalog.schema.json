@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["name", "block", "description"],
+    "properties": {
+      "name": {"type": "string"},
+      "block": {"type": "string", "enum": ["GRBM", "SQ", "TCP", "TCC", "TA", "TD"]},
+      "unit": {"type": "string"},
+      "description": {"type": "string"},
+      "derived": {"type": "boolean"},
+      "aliases": {"type": "array", "items": {"type": "string"}}
+    },
+    "additionalProperties": false
+  }
+}

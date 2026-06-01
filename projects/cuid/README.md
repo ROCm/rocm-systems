@@ -132,6 +132,44 @@ pip install -r docs/sphinx/requirements.txt
 sphinx-build docs docs/_build/html
 ```
 
+### Supported Operating Systems
+
+#### Minimum Requirements
+
+| Component | Minimum Version | Notes |
+|-----------|-----------------|-------|
+| **OpenSSL** | 1.1.0 | Uses `HMAC_CTX_new()`/`HMAC_CTX_free()` (1.1.x) or `EVP_MAC` API (3.0+) |
+| **CMake** | 3.14 | Build system requirement |
+| **GCC** | 5.0 | C++14 standard required |
+| **Kernel** | 2.6+ | Standard sysfs interfaces |
+| **Architecture** | x86_64 required for CPUID-based CPU fields | Limited fallback via `/proc/cpuinfo` on other architectures |
+
+#### Linux Distribution Compatibility
+
+| Distribution | Version | Kernel | GLibc | Status |
+|--------------|---------|--------|-------|--------|
+| **Ubuntu** | 24.04.4 | 6.8 (GA), 6.17(HWE) | 2.39 | ✅ Supported |
+| | 22.04.5 | 5.15(GA), 6.8(HWE) | 2.35 | ✅ Supported |
+| **RHEL** | 10.1 | 6.12.0-124 | 2.39 | ✅ Supported |
+| | 10.0 | 6.12.0-55 | 2.39 | ✅ Supported |
+| | 9.7 | 5.14.0-611 | 2.34 | ✅ Supported |
+| | 9.6 | 5.14.0-570 | 2.34 | ✅ Supported |
+| | 9.4 | 5.14.0-427 | 2.34 | ✅ Supported |
+| | 8.10 | 4.18.0-553 | 2.28 | ✅ Supported |
+| **SLES** | 15 SP7 | 6.4.0-150700.51 | 2.38 | ✅ Supported |
+| **Debian** | 13 | 6.12 | 2.36 | ✅ Supported |
+| | 12 | 6.1.0 | 2.36 | ✅ Supported |
+| **Rocky Linux** | 9 | 5.14.0-570 | 2.34 | ✅ Supported |
+| **Oracle Linux** | 10 | 6.12.0 (UEK) | 2.39 | ✅ Supported |
+| | 9 | 5.15.0 (UEK) | 2.34 | ✅ Supported |
+| | 8 | 5.15.0 (UEK) | 2.28 | ✅ Supported |
+
+#### Notes
+
+- **LibreSSL** and **BoringSSL** are supported via the HMAC_CTX backend
+- Root/administrator privileges are required for full functionality (ACPI tables, SMBIOS UUID, PCI config space access)
+- systemd is only needed for `udevd` reloads and optional service management; the daemon can also be started using other mechanisms such as an `@reboot` cron job
+
 ## License
 
 Copyright (c) Advanced Micro Devices, Inc. All rights reserved.

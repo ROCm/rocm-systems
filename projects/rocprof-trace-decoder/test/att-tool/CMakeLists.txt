@@ -30,6 +30,7 @@ file(GLOB ATT_DECODER_V3_FILES
   ${DECODER_SRC}/gfx10/*.cpp
   ${DECODER_SRC}/gfx11/*.cpp
   ${DECODER_SRC}/gfx12/*.cpp
+  ${DECODER_SRC}/mi400/*.cpp
   ${DECODER_SRC}/stitch/stitch.cpp
   ${DECODER_SRC}/stitch/pctranslator.cpp
 )

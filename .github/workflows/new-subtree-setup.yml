@@ -1,4 +1,4 @@
-name: Setup additonal subtrees for super-repo
+name: Setup additional subtrees for super-repo
 
 on:
   workflow_dispatch:

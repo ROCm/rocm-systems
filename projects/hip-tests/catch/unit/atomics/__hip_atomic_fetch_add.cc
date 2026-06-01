@@ -17,6 +17,56 @@
  *    - @ref Unit_AtomicBuiltins_Negative_Parameters_RTC
  */
 
+// Helper function to run __hip_atomic_fetch_add tests with WAVEFRONT scope
+template <typename TestType>
+static void runHipAtomicFetchAddWavefrontTest() {
+  int warp_size = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  const auto cache_line_size = 128u;
+
+  for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Same address " << current) {
+      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kBuiltinAdd,
+                                   __HIP_MEMORY_SCOPE_WAVEFRONT>(1, sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Adjacent addresses " << current) {
+      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kBuiltinAdd,
+                                   __HIP_MEMORY_SCOPE_WAVEFRONT>(warp_size, sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Scattered addresses " << current) {
+      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kBuiltinAdd,
+                                   __HIP_MEMORY_SCOPE_WAVEFRONT>(warp_size, cache_line_size);
+    }
+  }
+}
+
+// Helper function to run __hip_atomic_fetch_add tests with WORKGROUP scope
+template <typename TestType>
+static void runHipAtomicFetchAddWorkgroupTest() {
+  int warp_size = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  const auto cache_line_size = 128u;
+
+  for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Same address " << current) {
+      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kBuiltinAdd,
+                                   __HIP_MEMORY_SCOPE_WORKGROUP>(1, sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Adjacent addresses " << current) {
+      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kBuiltinAdd,
+                                   __HIP_MEMORY_SCOPE_WORKGROUP>(warp_size, sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Scattered addresses " << current) {
+      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kBuiltinAdd,
+                                   __HIP_MEMORY_SCOPE_WORKGROUP>(warp_size, cache_line_size);
+    }
+  }
+}
+
 /**
  * Test Description
  * ------------------------
@@ -42,28 +92,13 @@
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit___hip_atomic_fetch_add_Positive_Wavefront, int, unsigned int,
-                   unsigned long, unsigned long long, float, double) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kBuiltinAdd,
-                                   __HIP_MEMORY_SCOPE_WAVEFRONT>(1, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kBuiltinAdd,
-                                   __HIP_MEMORY_SCOPE_WAVEFRONT>(warp_size, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kBuiltinAdd,
-                                   __HIP_MEMORY_SCOPE_WAVEFRONT>(warp_size, cache_line_size);
-    }
-  }
+HIP_TEST_CASE(Unit___hip_atomic_fetch_add_Positive_Wavefront) {
+  SECTION("int") { runHipAtomicFetchAddWavefrontTest<int>(); }
+  SECTION("unsigned int") { runHipAtomicFetchAddWavefrontTest<unsigned int>(); }
+  SECTION("unsigned long") { runHipAtomicFetchAddWavefrontTest<unsigned long>(); }
+  SECTION("unsigned long long") { runHipAtomicFetchAddWavefrontTest<unsigned long long>(); }
+  SECTION("float") { runHipAtomicFetchAddWavefrontTest<float>(); }
+  SECTION("double") { runHipAtomicFetchAddWavefrontTest<double>(); }
 }
 
 /**
@@ -91,28 +126,13 @@ HIP_TEMPLATE_TEST_CASE(Unit___hip_atomic_fetch_add_Positive_Wavefront, int, unsi
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit___hip_atomic_fetch_add_Positive_Workgroup, int, unsigned int,
-                   unsigned long, unsigned long long, float, double) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kBuiltinAdd,
-                                   __HIP_MEMORY_SCOPE_WORKGROUP>(1, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kBuiltinAdd,
-                                   __HIP_MEMORY_SCOPE_WORKGROUP>(warp_size, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kBuiltinAdd,
-                                   __HIP_MEMORY_SCOPE_WORKGROUP>(warp_size, cache_line_size);
-    }
-  }
+HIP_TEST_CASE(Unit___hip_atomic_fetch_add_Positive_Workgroup) {
+  SECTION("int") { runHipAtomicFetchAddWorkgroupTest<int>(); }
+  SECTION("unsigned int") { runHipAtomicFetchAddWorkgroupTest<unsigned int>(); }
+  SECTION("unsigned long") { runHipAtomicFetchAddWorkgroupTest<unsigned long>(); }
+  SECTION("unsigned long long") { runHipAtomicFetchAddWorkgroupTest<unsigned long long>(); }
+  SECTION("float") { runHipAtomicFetchAddWorkgroupTest<float>(); }
+  SECTION("double") { runHipAtomicFetchAddWorkgroupTest<double>(); }
 }
 
 /**

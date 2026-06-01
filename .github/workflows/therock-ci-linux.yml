@@ -7,9 +7,12 @@ on:
         type: string
       projects_to_test:
         type: string
+      package_version:
+        type: string
+        required: true
       test_runs_on:
         type: string
-        default: "linux-gfx942-1gpu-ossci-rocm"
+        default: "linux-gfx942-1gpu-core42-ossci-rocm"
 
 
 permissions:
@@ -22,7 +25,7 @@ jobs:
     permissions:
       id-token: write
     container:
-      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:583d473f263a289222c48d4b493e2956b2354a45796f09dee6f2c8ecd4504ab6
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:48492540591673fdc8d51beb89bde41e7ba13cbb528f643c0a481ba42c4058f2 # 2026-04-16
       options: -v /runner/config:/home/awsconfig/
     strategy:
       fail-fast: true
@@ -41,7 +44,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 3272cd77d15e7972b26f68a477a3d61fe4a93591 # 2026-03-26 commit
+          ref: 685f8c3b89006309b34a7c16de17e841400f0d76 # 2025-05-29 commit
 
       - name: Install python deps
         run: |
@@ -56,7 +59,7 @@ jobs:
       - name: Setup ccache
         run: |
           ./TheRock/build_tools/setup_ccache.py \
-            --config-preset "github-oss-presubmit" \
+            --config-preset "github-oss-dev" \
             --dir "$(dirname $CCACHE_CONFIGPATH)" \
             --local-path "$CACHE_DIR/ccache"
 
@@ -77,14 +80,14 @@ jobs:
       - name: Configure Projects
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
-          package_version: ADHOCBUILD
+          package_version: ${{ inputs.package_version }}
           extra_cmake_options: "-DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=../ -DTHEROCK_ENABLE_RCCL=OFF ${{ inputs.cmake_options }}"
           BUILD_DIR: build
         run: |
           python TheRock/build_tools/github_actions/build_configure.py
 
-      - name: Build therock-archives and therock-dist
-        run: cmake --build TheRock/build --target therock-archives therock-dist -- -k 0
+      - name: Build therock-artifacts and therock-dist
+        run: cmake --build TheRock/build --target therock-artifacts therock-dist -- -k 0
 
       - name: Report
         if: ${{ !cancelled() }}
@@ -92,9 +95,6 @@ jobs:
           echo "Full SDK du:"
           echo "------------"
           du -h -d 1 TheRock/build/dist/rocm
-          echo "Artifact Archives:"
-          echo "------------------"
-          ls -lh TheRock/build/artifacts/*.tar.xz
           echo "Artifacts:"
           echo "----------"
           du -h -d 1 TheRock/build/artifacts
@@ -108,6 +108,13 @@ jobs:
         with:
           aws-region: us-east-2
           role-to-assume: arn:aws:iam::692859939525:role/therock-ci-external
+
+      - name: Push artifacts
+        run: |
+          python3 TheRock/build_tools/artifact_manager.py push \
+            --run-id ${{ github.run_id }} \
+            --build-dir TheRock/build \
+            --stage all
 
       - name: Post Build Upload
         if: always()

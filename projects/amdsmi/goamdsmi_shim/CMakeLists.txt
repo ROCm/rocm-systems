@@ -97,11 +97,6 @@ target_link_libraries(${GOAMDSMI_SHIM_TARGET} -L${AMDSMI_DIR}/lib64)
 set_property(TARGET ${GOAMDSMI_SHIM_TARGET} PROPERTY SOVERSION "${VERSION_MAJOR}")
 set_property(TARGET ${GOAMDSMI_SHIM_TARGET} PROPERTY VERSION "${SO_VERSION_STRING}")
 
-## If the library is a release, strip the target library
-if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
-    add_custom_command(TARGET ${GOAMDSMI_SHIM_TARGET} POST_BUILD COMMAND ${CMAKE_STRIP} lib${GOAMDSMI_SHIM_TARGET}.so)
-endif()
-
 set(go_amd_smi_install_headers smiwrapper/goamdsmi.h smiwrapper/amdsmi_go_shim.h)
 
 ## Add the install directives for the runtime library.

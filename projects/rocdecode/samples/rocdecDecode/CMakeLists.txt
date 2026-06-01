@@ -75,7 +75,8 @@ find_package(rocdecode QUIET)
 if(HIP_FOUND AND rocdecode_FOUND)
     # HIP
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::host)
-
+    # rocdecode-host depends on FFmpeg runtime libraries, so
+    # find_package for rocdecode-host is enabled when FFmpeg is available
     if(FFMPEG_FOUND AND NOT USING_THE_ROCK)
       find_package(rocdecode-host 1.0.0 QUIET)
       # FFMPEG
@@ -108,18 +109,17 @@ if(HIP_FOUND AND rocdecode_FOUND)
     endif()
     target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
 else()
-    message("-- ERROR!: ${PROJECT_NAME} excluded! please install all the dependencies and try again!")
+    message("-- ERROR!: ${PROJECT_NAME} excluded! unmet dependencies")
     if (NOT HIP_FOUND)
-        message(FATAL_ERROR "-- ERROR!: HIP Not Found! - please install ROCm and HIP!")
+        message(FATAL_ERROR "-- ERROR!: HIP Not Found!")
     endif()
     if (NOT FFMPEG_FOUND)
-        message(FATAL_ERROR "-- ERROR!: FFMPEG Not Found! - please install FFMPEG!")
+        message(FATAL_ERROR "-- ERROR!: FFMPEG Not Found!")
     endif()
     if (NOT rocdecode_FOUND)
-        message(FATAL_ERROR "-- ERROR!: rocdecode Not Found! - please install rocdecode!")
+        message(FATAL_ERROR "-- ERROR!: rocdecode Not Found!")
     endif()
     if (NOT rocdecode-host_FOUND)
-        message(FATAL_ERROR "-- ERROR!: rocdecode-host Not Found! - please install rocdecode-host!")
+        message(FATAL_ERROR "-- ERROR!: rocdecode-host Not Found!")
     endif()
 endif()
-  

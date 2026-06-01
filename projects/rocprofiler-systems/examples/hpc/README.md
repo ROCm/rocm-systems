@@ -58,7 +58,7 @@ Julia language vector addition example demonstrating GPU profiling of Julia work
 
 ## Prerequisites
 
-- CMake 3.21+
+- CMake 3.25+
 - HIP runtime and `hipcc` compiler (for HIP examples)
 - rocBLAS (for matrix exponential)
 - Fortran compiler with OpenMP target support (for Fortran examples)
@@ -95,7 +95,7 @@ rocprof-sys-run -- ./matrix-exponential-streams-sync-hip
 ### Recommended Configuration
 
 | Variable | Value | Purpose |
-|----------|-------|---------|
+| ---------- | ------- | --------- |
 | `ROCPROFSYS_ROCM_DOMAINS` | `hip_runtime_api,kernel_dispatch,memory_copy` | Trace HIP API and GPU operations |
 | `ROCPROFSYS_TRACE` | `true` | Generate Perfetto trace for stream overlap analysis |
 | `ROCPROFSYS_PROFILE` | `true` | Generate call-stack profile |

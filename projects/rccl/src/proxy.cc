@@ -521,10 +521,12 @@ static ncclResult_t ncclLocalOpAppend(struct ncclComm* comm, struct ncclProxyCon
     op = pool->ops+opIndex;
     proxyOps->freeOp = op->next;
   } else {
-    int freeOp;
-    while ((freeOp = pool->freeOps[tpLocalRank]) == -1) sched_yield();
-    int freeOpNew;
-    while ((freeOpNew = __sync_val_compare_and_swap(pool->freeOps+tpLocalRank, freeOp, -1)) != freeOp) freeOp = freeOpNew;
+    // Read the freeOps value and wait for a value different than -1. Once not -1, read the value with acquire and reset -1
+    int freeOp = -1;
+    while (freeOp == -1) {
+      freeOp = __atomic_exchange_n(&pool->freeOps[tpLocalRank], -1, __ATOMIC_ACQUIRE);
+      if (freeOp == -1) sched_yield();
+    }
     opIndex = freeOp;
     op = pool->ops+opIndex;
     proxyOps->freeOp = op->next;
@@ -606,11 +608,6 @@ static ncclResult_t SaveProxy(struct ncclComm* comm, struct ncclChannel* channel
     op->peer = peer;
     NCCLCHECK(ncclLocalOpAppend(comm, &connector->proxyConn, op));
   }
-  return ncclSuccess;
-}
-
-ncclResult_t mscclSaveProxy(struct ncclComm* comm, struct ncclChannel* channel, int type, int peer, struct ncclProxyOp* op, int connIndex) {
-  NCCLCHECK(SaveProxy(comm, channel, type, peer, op, connIndex, nullptr));
   return ncclSuccess;
 }
 
@@ -892,26 +889,17 @@ process_nextops:
 
   for (int i = 0; i < proxyState->tpLocalnRanks; i++) {
     if (freeOp[i] == -1) continue;
-    int newFree = freeOp[i];
-    int oldFree = pool->freeOps[i];
-    // Coverity gets confused by the complex code structure here.  The previous "for" loop ensures that freeOpEnd[i]
-    // is initialized so long as freeOp[i] is initialized (is not -1).  In the current loop we filter out uninitialized
-    // freeOp[i], hence ensuring that freeOpEnd[i] is also initialized.
-    // coverity[uninit_use:FALSE]
-    pool->ops[freeOpEnd[i]].next = oldFree;
-    if (oldFree == -1) {
-      // Nothing for the main thread to consume, we can set it.
-      pool->freeOps[i] = newFree;
-    } else {
-      // The main thread may recycle free ops at any time, replace the freeOps value atomically and check it worked.
-      int swap = __sync_val_compare_and_swap(pool->freeOps+i, oldFree, newFree);
-      if (swap != oldFree) {
-        if (swap != -1) return ncclInternalError;
-        // Ops were recycled while we were trying to swap, just set the value directly now.
-        pool->ops[freeOpEnd[i]].next = -1;
-        pool->freeOps[i] = newFree;
-      }
-    }
+    int oldFree = -1, swap = -1, newFree = freeOp[i];
+    // prepend the ops freeOp[i]-freeOpEnd[i] in front of the pool->freeOps[i] op
+    oldFree = __atomic_load_n(&pool->freeOps[i], __ATOMIC_ACQUIRE);
+    do {
+      // Coverity gets confused by the complex code structure here.  The previous "for" loop ensures that freeOpEnd[i]
+      // is initialized so long as freeOp[i] is initialized (is not -1).  In the current loop we filter out uninitialized
+      // freeOp[i], hence ensuring that freeOpEnd[i] is also initialized.
+      // coverity[uninit_use:FALSE]
+      pool->ops[freeOpEnd[i]].next = swap = oldFree;
+      __atomic_compare_exchange_n(&pool->freeOps[i], &oldFree, newFree, true, /*success=*/__ATOMIC_RELEASE, /*failure=*/__ATOMIC_ACQUIRE);
+    } while (swap != oldFree);
   }
   ncclProfilerRecordProxyCtrlEventState(eHandle, *added, ncclProfilerProxyCtrlAppendEnd);
   ncclProfilerStopProxyCtrlEvent(eHandle);
@@ -1516,7 +1504,7 @@ static ncclResult_t proxyConnInit(struct ncclProxyLocalPeer* peer, struct ncclPr
 }
 
 static ncclResult_t proxyQueryFd(struct ncclProxyState* proxyState, int rank, void *opId, int rmtFd) {
-#if ROCM_VERSION >= 71200
+#if ROCM_VERSION >= 70000
   struct ncclIpcSocket ipcSock = { 0 };
   uint64_t hash = (uint64_t) opId;
   ncclResult_t ret = ncclSuccess;
@@ -1539,7 +1527,7 @@ static ncclResult_t proxyGetFd(struct ncclProxyState* proxyState, int rank, void
    uint64_t handle
 #endif
 ) {
-#if ROCM_VERSION >= 71200
+#if ROCM_VERSION >= 70000
   // cuMem API support
   ncclResult_t ret = ncclSuccess;
   struct ncclIpcSocket ipcSock = { 0 };
@@ -1716,6 +1704,10 @@ void* ncclProxyService(void* _args) {
   int npeers = 0;
   int stop = PROXY_RUNNING;
   int asyncOpCount = 0;
+  {
+    char line[SOCKET_NAME_MAXLEN+1];
+    INFO(NCCL_INIT, "proxy listening socket at %s", ncclSocketToString(&proxyState->listenSock->addr, line));
+  }
   while (stop == PROXY_RUNNING || npeers > 0) {
     /* Even if local comm aborts, we cannot let proxy thread exit if we still have peer
      * connections. Need to wait until all other related comms call abort and safely exit
@@ -1744,15 +1736,19 @@ void* ncclProxyService(void* _args) {
         WARN("[Service thread] Initialize peers[%d].sock fails", s);
         return NULL;
       }
-      if (ncclSocketAccept(&peers[s].sock, proxyState->listenSock) != ncclSuccess) {
+      if (ncclSocketAccept(&peers[s].sock, proxyState->listenSock, /*retryOnBadMagic*/false) != ncclSuccess) {
         WARN("[Service thread] Accept failed %s", strerror(errno));
       } else {
         if (ncclSocketGetFd(&peers[s].sock, &pollfds[s].fd) != ncclSuccess) {
           WARN("[Service thread] Get peers[%d].sock fd fails", s);
           return NULL;
         }
-        npeers++;
-        peers[s].tpLocalRank = -1;
+        if (pollfds[s].fd == -1) {
+          (void)ncclSocketClose(&peers[s].sock);
+        } else {
+          npeers++;
+          peers[s].tpLocalRank = -1;
+        }
       }
     }
     for (int s=0; s<maxnpeers; s++) {
@@ -1960,6 +1956,7 @@ ncclResult_t ncclProxyCreate(struct ncclComm* comm) {
   struct ncclProxyState* proxyState = comm->proxyState;
   if (proxyState->refCount == 1) {
     /* we have to make sure all following fields in comm have been initialized. */
+    proxyState->memManager = comm->memManager;  // Set shared memory manager for proxy allocations
     proxyState->tpRank = comm->rank;
     proxyState->tpnRanks = comm->nRanks;
     proxyState->tpLocalnRanks = comm->localRanks;
@@ -1972,11 +1969,15 @@ ncclResult_t ncclProxyCreate(struct ncclComm* comm) {
     proxyState->dmaBufSupport = comm->dmaBufSupport;
     proxyState->ncclNet = comm->ncclNet;
     proxyState->ncclCollNet = comm->ncclCollNet;
+    proxyState->ginState = &comm->sharedRes->ginState;
     proxyState->netContext = comm->netContext;
     proxyState->collNetContext = comm->collNetContext;
     proxyState->profilerContext = comm->profilerContext;
     proxyState->directMode = comm->directMode;
     memcpy(proxyState->buffSizes, comm->buffSizes, sizeof(comm->buffSizes));
+    // [RCCL] Host side mirrors of device side NCCL_LL128_LINEELEMS & NCCL_LL128_DATAELEMS 
+    proxyState->ll128LineElems = comm->ll128LineElems;
+    proxyState->ll128DataElems = comm->ll128DataElems;
 
     PTHREADCHECK(pthread_create(&comm->proxyState->thread, NULL, ncclProxyService, comm->proxyState), "pthread_create");
     ncclSetThreadName(comm->proxyState->thread, "NCCL Service %2d", comm->cudaDev);

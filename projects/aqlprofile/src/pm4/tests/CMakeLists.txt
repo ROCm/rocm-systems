@@ -23,6 +23,7 @@ target_link_libraries(
             ${CMAKE_DL_LIBS})
 gtest_discover_tests(
     command-builder-test
+    DISCOVERY_MODE PRE_TEST
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     PROPERTIES TIMEOUT 45 LABELS "unittests")
 
@@ -45,6 +46,7 @@ target_link_libraries(
             ${CMAKE_DL_LIBS})
 gtest_discover_tests(
     pmc-builder-test
+    DISCOVERY_MODE PRE_TEST
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     PROPERTIES TIMEOUT 45 LABELS "unittests")
 
@@ -67,6 +69,7 @@ target_link_libraries(
             ${CMAKE_DL_LIBS})
 gtest_discover_tests(
     gfx9-command-builder-test
+    DISCOVERY_MODE PRE_TEST
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     PROPERTIES TIMEOUT 45 LABELS "unittests")
 
@@ -91,6 +94,7 @@ target_link_libraries(
             ${CMAKE_DL_LIBS})
 gtest_discover_tests(
     spm-builder-test
+    DISCOVERY_MODE PRE_TEST
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     PROPERTIES TIMEOUT 45 LABELS "unittests")
 
@@ -113,6 +117,7 @@ target_link_libraries(
             ${CMAKE_DL_LIBS})
 gtest_discover_tests(
     trace-config-test
+    DISCOVERY_MODE PRE_TEST
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     PROPERTIES TIMEOUT 45 LABELS "unittests")
 
@@ -135,5 +140,6 @@ target_link_libraries(
             ${CMAKE_DL_LIBS})
 gtest_discover_tests(
     sqtt-builder-test
+    DISCOVERY_MODE PRE_TEST
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     PROPERTIES TIMEOUT 45 LABELS "unittests")

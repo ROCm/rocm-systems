@@ -376,7 +376,7 @@ static bool assemblyFile_Verification(std::string assemfilename, std::string ins
     }
   } else {
     result = true;
-    SUCCEED("Assembly file does not exist");
+    HIP_SKIP_TEST("expected assembly file not found.");
   }
   return result;
 }

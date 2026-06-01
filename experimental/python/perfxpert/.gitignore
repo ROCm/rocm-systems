@@ -1,0 +1,43 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+*.whl
+dist/
+build/
+.eggs/
+*.so
+.pytest_cache/
+/wheelhouse/
+# editable install metadata
+perfxpert.egg-info/
+
+# opencode submodule build artifacts
+opencode/node_modules/
+opencode/dist/
+opencode/.next/
+opencode/.turbo/
+opencode/target/
+opencode/*.log
+
+# Bundled opencode binary — built locally (or on first run) by
+# scripts/build-bundled-opencode.sh. NOT committed; wheel build picks it
+# up via pyproject `package_data` at sdist/wheel time.
+perfxpert/_bundled/opencode
+perfxpert/_bundled/opencode.*
+
+# BUT: do NOT ignore .patches/*.patch files
+!.patches/*.patch
+
+# Non-deterministic test artifacts (cycle-2 N3):
+# These directories hold pytest-generated outputs embedding PID-suffixed
+# /tmp/pytest-of-* paths. They are test side-effects, not source of
+# truth, and must not be committed (they create spurious `git status`
+# noise every time the suite runs).
+tests/test_integration/_airgap_snapshots/
+tests/test_regression_gate/_runner_outputs/
+# Per-run red-team gate outputs (e.g. `sol_gate_unmocked_*.json`).
+# The hand-authored baseline fixtures under _attack_outcomes/ stay tracked
+# (they are the regression source of truth); only the dynamically
+# generated probe outputs are ignored via the pattern below.
+tests/test_red_team/_attack_outcomes/sol_gate_unmocked_*.json

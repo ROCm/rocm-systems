@@ -13,6 +13,7 @@
 #include "rocclr/os/os.hpp"
 
 #include <hip/amd_detail/hip_api_trace.hpp>
+#include "profiler/hip_clr_profiler.hpp"
 namespace hip {
 const HipToolsDispatchTable* GetHipToolsDispatchTable();
 }  // namespace hip
@@ -61,21 +62,11 @@ void init(bool* status) {
     amd::RuntimeTearDown::RegisterObject(device);
   }
 
-  // Report devices to HIP tools layer if available
+  // Register tool dispatch table to profiler v3.
+  // If app is attached by profiler, __hipTriggerReportDevices_fn() will be called
+  // by profiler.
   const auto* tools_dispatch_table = hip::GetHipToolsDispatchTable();
-  if (tools_dispatch_table->__hipReportDevices_fn) {
-    std::vector<hipUUID> uuids;
-    uuids.reserve(device_count);
-
-    for (const auto* dev : g_devices) {
-      const auto& info = dev->devices()[0]->info();
-      static_assert(sizeof(info.uuid_) == sizeof(hipUUID::bytes), "UUID size mismatch");
-      uuids.emplace_back();
-      std::copy(std::begin(info.uuid_), std::end(info.uuid_), std::begin(uuids.back().bytes));
-    }
-
-    tools_dispatch_table->__hipReportDevices_fn(device_count, uuids.data());
-  }
+  tools_dispatch_table->__hipTriggerReportDevices_fn();
 
   // Create and initialize host context
   host_context = new amd::Context(devices, amd::Context::Info());
@@ -91,6 +82,10 @@ void init(bool* status) {
 
   // Complete platform initialization
   PlatformState::Instance().Init();
+
+  // Initialize built-in CLR profiler (no-op unless GPU_CLR_PROFILE=1)
+  HipProfilerInitExt();
+
   *status = true;
 }
 
@@ -119,7 +114,7 @@ hip::Stream* getStream(hipStream_t stream, bool wait) {
 
 // ================================================================================================
 hip::Stream* getNullStream(amd::Context& ctx, bool wait) {
-  for (auto& it : g_devices) {
+  for (const auto& it : g_devices) {
     if (it->asContext() == &ctx) {
       return it->NullStream(wait);
     }
@@ -388,6 +383,23 @@ hipError_t hipDevicePrimaryCtxSetFlags(hipDevice_t dev, unsigned int flags) {
     HIP_RETURN(hipErrorInvalidDevice);
   } else {
     HIP_RETURN(hipErrorContextAlreadyInUse);
+  }
+}
+
+void __hipTriggerReportDevices() {
+  const auto* tools_dispatch_table = hip::GetHipToolsDispatchTable();
+  if (tools_dispatch_table->__hipReportDevices_fn) {
+    // If app is started or attached by profiler, __hipReportDevices_fn must be valid
+    std::vector<hipUUID> uuids;
+    uuids.reserve(g_devices.size());
+
+    for (const auto* dev : g_devices) {
+      const auto& info = dev->devices()[0]->info();
+      static_assert(sizeof(info.cuid_) == sizeof(hipUUID::bytes), "UUID size mismatch");
+      uuids.emplace_back();
+      std::copy(std::begin(info.cuid_), std::end(info.cuid_), std::begin(uuids.back().bytes));
+    }
+    tools_dispatch_table->__hipReportDevices_fn(g_devices.size(), uuids.data());
   }
 }
 }  // namespace hip

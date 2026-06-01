@@ -133,6 +133,10 @@ class ROHostContext : public Context {
 
   __host__ void barrier_all_on_stream(hipStream_t stream);
 
+  __host__ void quiet_on_stream(hipStream_t stream);
+
+  __host__ void sync_all_on_stream(hipStream_t stream);
+
   __host__ void alltoallmem_on_stream(rocshmem_team_t team, void *dest,
                                       const void *source, size_t size,
                                       hipStream_t stream);

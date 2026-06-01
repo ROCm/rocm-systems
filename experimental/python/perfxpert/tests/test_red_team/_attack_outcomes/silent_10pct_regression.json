@@ -1,0 +1,8 @@
+{
+  "attack_id": "silent_10pct_regression",
+  "status": "defeated",
+  "details": {
+    "hot_kernel_delta_pct": 14.000000000000002,
+    "verdict_status": "regressed"
+  }
+}

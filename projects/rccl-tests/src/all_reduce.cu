@@ -27,9 +27,8 @@
 #include <algorithm>
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
 #include "nccl_device.h"
-#include "vector_types.h"
+#include "rccl_vector_types.h"
 #include "multimem_ops.h"
-constexpr int WARP_SIZE = 32;
 #endif
 
 void AllReduceGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, size_t eltSize, int nranks) {
@@ -140,7 +139,6 @@ template <typename T>
 __global__ void allReduceLsaKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
   ncclLsaBarrierSession<ncclCoopCta> bar { ncclCoopCta(), devComm, ncclTeamLsa(devComm), devComm.lsaBarrier, blockIdx.x };
   bar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
-
   const int rank = devComm.rank, nRanks = devComm.nRanks;
 
   const int globalTid = threadIdx.x + blockDim.x * (rank + blockIdx.x * nRanks);

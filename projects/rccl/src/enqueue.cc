@@ -68,7 +68,7 @@ static ncclKernelMatch const ncclKerns[3] = {
 static int rcclProtoGrainSize(int proto, ncclComm *comm){
   switch (proto) {
     case NCCL_PROTO_LL: return 16;
-    case NCCL_PROTO_LL128: return comm->WarpSize*(NCCL_LL128_SHMEM_ELEMS_PER_THREAD/NCCL_LL128_LINEELEMS)*NCCL_LL128_DATAELEMS*sizeof(uint64_t);
+    case NCCL_PROTO_LL128: return comm->WarpSize*NCCL_LL128_SHMEM_ELEMS_PER_THREAD*comm->ll128DataElems*sizeof(uint64_t)/comm->ll128LineElems;
     case NCCL_PROTO_SIMPLE: return 512;
     default: return -1;
   }
@@ -120,7 +120,10 @@ ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* ma
       if (fn == nullptr) continue;
 
       cudaError_t errcode = cudaFuncGetAttributes(&attr, fn);
-      if (errcode != cudaSuccess) continue; // Silently ignore failures
+      if (errcode != cudaSuccess) {
+		  cudaGetLastError(); // Drain error code
+		  continue; // Silently ignore failures
+	  }
       if (maxStackSize) {
         if (attr.localSizeBytes > *maxStackSize) *maxStackSize = attr.localSizeBytes;
       }
@@ -157,7 +160,7 @@ static inline int ncclFuncTrafficPerByte(ncclFunc_t func, int nRanks) {
   case ncclFuncAllReduce: return 2;
   case ncclFuncAllGather: return nRanks;
   case ncclFuncReduceScatter: return nRanks;
-  case ncclFuncAlltoAllvGda: return nRanks;			      
+  case ncclFuncAlltoAllvGda: return nRanks;
   default: return 1;
   }
 }
@@ -207,6 +210,9 @@ static void addWorkBatchToPlan(
       newBatch |= (comm->nNodes > 2 && batchP2P)? (chan->wipBatch.nP2ps == NCCL_MAX_DEV_WORK_P2P_PER_BATCH) : (chan->wipBatch.nP2ps == 1);
       for (int i=0; i < chan->wipBatch.nP2ps; i++) {
         newBatch |= p2pRound == chan->wipBatch.p2pRounds[i];
+        // Make sure we only aggregate p2p operations within the same p2p round epoch (one epoch is NCCL_MAX_DEV_WORK_P2P_PER_BATCH ops).
+        // This enforces uniform batching accross ranks in the communicator and prevents hangs.
+        newBatch |= (p2pRound / NCCL_MAX_DEV_WORK_P2P_PER_BATCH) != (chan->wipBatch.p2pRounds[i] / NCCL_MAX_DEV_WORK_P2P_PER_BATCH);
       }
     }
   }
@@ -244,8 +250,8 @@ static void addWorkBatchToPlan(
   batch->offsetBitset |= 1ull<<(offset/workSize);
   chan->wipBatch.workBytes += workSize;
   if (workType == ncclDevWorkTypeP2p) {
-    //if batching is enabled (RCCL_P2P_BATCH_ENABLE=1), 
-    //but this op is not eligible for batching with other ops (i.e. alltoallv where sendBytes != recvBytes), 
+    //if batching is enabled (RCCL_P2P_BATCH_ENABLE=1),
+    //but this op is not eligible for batching with other ops (i.e. alltoallv where sendBytes != recvBytes),
     // mark eligibility/ineligibility so that future ops that may be eligible, are not batched with ineligible ones
     if(chan->wipBatch.nP2ps == 0)
       chan->wipBatch.batchP2P = batchP2P;
@@ -271,6 +277,7 @@ static void finishPlan(struct ncclComm* comm, struct ncclKernelPlan* plan) {
   }
   plan->kernelArgsSize = sizeof(struct ncclDevKernelArgs) + batchBytes;
   plan->kernelArgsSize += (plan->workStorageType == ncclDevWorkStorageTypeArgs) ? workBytes : 0;
+  plan->kernelArgsSize = max(plan->kernelArgsSize, sizeof(ncclDevKernelArgsDefaultStorage));
   plan->kernelArgsSize = alignUp(plan->kernelArgsSize, 16);
   plan->kernelArgs = (struct ncclDevKernelArgs*)ncclMemoryStackAlloc(&comm->memScoped, plan->kernelArgsSize, /*align=*/16);
   plan->kernelArgs->comm = comm->devComm;
@@ -455,7 +462,7 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
       devWork.currentRank = comm->rank;
       devWork.count = task->count;
     }
-    
+
     devWork.isOneRPN = comm->isOneRPN;
     devWork.netRegUsed = devWork.regUsed = 0;
     devWork.profilerEnabled = ncclProfilerPluginLoaded() && (task->eActivationMask & ncclProfileKernelCh);
@@ -756,6 +763,9 @@ static ncclResult_t scheduleCollTasksToPlan(
       NCCLCHECK(calcCollChunking(comm, task, nChannels, nBytes, &chunkSize, &directFlags, &proxyOp));
       devWork->channelLo = 0;
       devWork->channelHi = nChannels-1;
+      // RCCL: CollNet path never set task->nChannels; profiler received 0.
+      // Clamp to UINT8_MAX: ENABLE_WARP_SPEED pushes MAXCHANNELS to 512 which wraps uint8.
+      task->nChannels = (nChannels <= UINT8_MAX) ? (uint8_t)nChannels : UINT8_MAX;
       devWork->collnet.count = task->count;
       devWork->collnet.chunkCount = chunkSize/ncclTypeSize(task->datatype);
       devWork->direct = directFlags;
@@ -1016,7 +1026,7 @@ NCCL_PARAM(ChunkSize, "CHUNK_SIZE", 0);
 // Currently, p2p-batching thresholds are only used for gfx950 for 16 nodes and above
 // previously, p2p-batching was causing regression on all node-counts for larger message sizes (64KB "per-rank")
 // we want to enable by default only for gfx950, so we use rcclEffectiveP2pBatchEnable helper to branch based on arch
-RCCL_PARAM(P2pBatchEnable, "P2P_BATCH_ENABLE", -1);
+RCCL_PARAM(P2pBatchEnable, "P2P_BATCH_ENABLE", 0);
 RCCL_PARAM(P2pBatchThreshold, "P2P_BATCH_THRESHOLD", 1 << 16);  // 64k per-rank message size
 
 
@@ -1806,9 +1816,16 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
       }
       // userStream[0] waits on deviceStream
       NCCLCHECKGOTO(ncclStreamWaitStream(launchStream, deviceStream, comm->sharedRes->scratchEvent), result, failure);
-    } else if (planner->streams->stream != comm->lastStream && comm->lastStream != nullptr && !persistent) {
-      // Stream changed from last call, create dependency against last NCCL kernel launch
-      CUDACHECKGOTO(hipStreamWaitEvent(planner->streams->stream, comm->doneEvent, 0), result, failure);
+    } else if (comm->lastStreamValid && comm->lastStream != launchStream) {
+      // Stream changed from last call. The new launchStream has no implicit edge to the
+      // previous kernel's completion; install a direct event-based dependency on doneEvent.
+      // Record lazily here on lastStream — HIP's per-stream FIFO guarantees the record
+      // sequences after the prior cuLaunchKernel — then wait on it from launchStream.
+      // Recording only on detected stream change (instead of after every ncclLaunchKernel)
+      // avoids a per-launch HIP runtime cost. Bypasses deviceStream, which the fast path
+      // leaves stale by skipping Finish-side advance.
+      CUDACHECKGOTO(hipEventRecord(comm->doneEvent, comm->lastStream), result, failure);
+      CUDACHECKGOTO(hipStreamWaitEvent(launchStream, comm->doneEvent, 0), result, failure);
     }
 
     bool capturing = ncclCudaGraphValid(planner->capturingGraph);
@@ -1889,28 +1906,33 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
 
   NCCLCHECK(ncclProfilerStartKernelLaunchEvent(plan, launchStream));
 
-  void* extra[] = {plan->kernelArgs, &plan->kernelArgsSize};
+  void* extra[] = {
+    CU_LAUNCH_PARAM_BUFFER_POINTER, plan->kernelArgs,
+    CU_LAUNCH_PARAM_BUFFER_SIZE, &plan->kernelArgsSize,
+    CU_LAUNCH_PARAM_END
+  };
 
   auto event = latency_profiler::collTraceAquireEventBaseline(plan, launchStream);
-  if (planner->numStreams == 1 && !plan->persistent) {
-    latency_profiler::collTraceRecordStartEvent(comm, launchStream, event.get());
-    comm->lastStream = planner->streams->stream;
-    CUDACHECKGOTO(hipExtLaunchKernel(plan->kernelFn, grid, block, extra, 0, launchStream, NULL, comm->doneEvent, 0), ret, do_return);
 
-    latency_profiler::collTraceRecordEndEvent(comm, plan, launchStream, std::move(event));
-    return ncclSuccess;
-  }
-
-  // CUfunction fn;
-  // CUDACHECK(cudaGetFuncBySymbol(&fn, sym));
-
-#if !defined(__HIP_PLATFORM_AMD__) || !defined(__HIPCC__)
   int driverVersion;
   NCCLCHECKGOTO(ncclCudaDriverVersion(&driverVersion), ret, do_return);
 
   CUfunction fn;
   CUDACHECKGOTO(cudaGetFuncBySymbol(&fn, sym), ret, do_return);
 
+  if (planner->numStreams == 1 && !plan->persistent) {
+    latency_profiler::collTraceRecordStartEvent(comm, launchStream, event.get());
+    CUCHECKGOTO(cuLaunchKernel(fn, grid.x, grid.y, grid.z, block.x, block.y, block.z, smem, launchStream, nullptr, extra), ret, do_return);
+    // doneEvent is recorded lazily by ncclLaunchPrepare on a detected stream change; no
+    // per-launch hipEventRecord is needed here. lastStream/lastStreamValid bookkeeping is
+    // still required so the next call's ncclLaunchPrepare can detect that change.
+    comm->lastStream = launchStream;
+    comm->lastStreamValid = true;
+    latency_profiler::collTraceRecordEndEvent(comm, plan, launchStream, std::move(event));
+    return ncclSuccess;
+  }
+
+#if !defined(__HIP_PLATFORM_AMD__) || !defined(__HIPCC__)
   if (CUDART_VERSION >= 11080 && driverVersion >= 11080) {
   #if CUDART_VERSION >= 11080
     int compCap = comm->compCap;
@@ -1989,10 +2011,13 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   }
 #endif
   // Standard kernel launch
-  //cuLaunchKernel(sym, grid.x, grid.y, grid.z, block.x, block.y, block.z, smem, launchStream, nullptr, extra);
   latency_profiler::collTraceRecordStartEvent(comm, launchStream, event.get());
-  CUDACHECKGOTO(cudaLaunchKernel(sym, grid, block, extra, smem, launchStream), ret, do_return);
+  CUCHECKGOTO(cuLaunchKernel(fn, grid.x, grid.y, grid.z, block.x, block.y, block.z, smem, launchStream, nullptr, extra), ret, do_return);
   latency_profiler::collTraceRecordEndEvent(comm, plan, launchStream, std::move(event));
+  // Mirror fast-path bookkeeping so the next ncclLaunchPrepare can detect stream-change.
+  // doneEvent is recorded lazily by ncclLaunchPrepare in the stream-change branch.
+  comm->lastStream = launchStream;
+  comm->lastStreamValid = true;
 
 do_return:
   NCCLCHECK(ncclProfilerStopKernelLaunchEvent(plan));
@@ -2421,6 +2446,11 @@ rccl_static ncclResult_t getAlgoInfo(
       info->algorithm = NCCL_ALGO_TREE;
       info->protocol = NCCL_PROTO_LL;
     }
+
+    if(!userAlgoInput && (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1200") || IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1201")) && comm->nNodes == 1 && (info->func == ncclFuncAllReduce)) {
+       info->algorithm = NCCL_ALGO_RING; // for Navi RING algo always performs better than Tree based on data.
+    }
+
     // NCCL_CTA_POLICY_EFFICIENCY requires user (non-symmetric) buffer registration (currently unsupported with MNNVL)
     if (comm->config.CTAPolicy == NCCL_CTA_POLICY_EFFICIENCY && !userAlgoInput && ncclGetEnv("NCCL_PROTO") == NULL && !comm->MNNVL) {
       // make algorithm selection based on buffer registration
@@ -2509,7 +2539,7 @@ static ncclResult_t calcCollChunking(
   int sliceSteps = (info->protocol == NCCL_PROTO_SIMPLE && info->algorithm == NCCL_ALGO_RING) ? info->sliceSteps : 1;
   int chunkSize = stepSize*chunkSteps;
   if (info->protocol == NCCL_PROTO_LL) chunkSize /= 2;
-  if (info->protocol == NCCL_PROTO_LL128) chunkSize = (chunkSize / NCCL_LL128_LINEELEMS) * NCCL_LL128_DATAELEMS;
+  if (info->protocol == NCCL_PROTO_LL128) chunkSize = (chunkSize / comm->ll128LineElems) * comm->ll128DataElems;
 
   if (info->algorithm == NCCL_ALGO_TREE && info->protocol == NCCL_PROTO_SIMPLE) {
     if (pattern == ncclPatternTreeUpDown) {
@@ -2983,6 +3013,10 @@ static ncclResult_t collTaskAppend(
   NCCLCHECK(ncclProfilerStartCollApiEvent(info, isGraphCaptured));
 
   struct ncclTaskColl* t = ncclMemoryPoolAlloc<struct ncclTaskColl>(&comm->memPool_ncclTaskColl, &comm->memPermanent);
+  // RCCL: ncclMemoryPoolAlloc does not zero-initialize; default to 0 so
+  // scheduleCollTasksToPlan overwrites with the correct value and the inspector plugin
+  // never sees garbage in eDescr->coll.nChannels.
+  t->nChannels = 0;
   t->func = info->coll;
   t->sendbuff = info->sendbuff;
   t->recvbuff = info->recvbuff;
@@ -3116,6 +3150,24 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
             NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI, (void*)((char*)info->sendbuff+r*info->count*ncclTypeSize(info->datatype)), info->count, info->datatype, r));
             NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI, (void*)((char*)info->recvbuff+r*info->count*ncclTypeSize(info->datatype)), info->count, info->datatype, r));
           }
+        } else if (info->coll == ncclFuncAllGather && info->useDirect) {
+          // Direct AllGather: post per-peer Send/Recv P2P tasks the same way
+          // ncclFuncAlltoAll does above. Differences vs A2A:
+          //   - sendbuff is NOT offset per peer (every peer receives this
+          //     rank's full contribution).
+          //   - recvbuff is offset by r * count * sizeof(T) (each peer's
+          //     contribution lands in its slot of the gather buffer).
+          // Identical to A2A in all other respects: iteration order is
+          // 0..nRanks-1 on every rank (no (rank+r)%nRanks rotation), and
+          // the self peer (r == rank) is always posted (no in-place skip).
+          // Posting self via p2pTaskAppend is correct because the device
+          // kernel handles isCopy = (sendRank == self) as a local memcpy
+          // (see device/sendrecv.h's RunWorkBatch<ncclFuncSendRecv,...>).
+          size_t rankOffset = info->count * ncclTypeSize(info->datatype);
+          for (int r=0; r<comm->nRanks; r++) {
+            NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI, (void*)info->sendbuff, info->count, info->datatype, r));
+            NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI, (void*)((char*)info->recvbuff + r*rankOffset), info->count, info->datatype, r));
+          }
         } else if (info->coll == ncclFuncGather){
           size_t offset = 0;
           NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI, (void*)info->sendbuff, info->count, info->datatype, info->root));
@@ -3147,18 +3199,30 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
 }
 
 ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
+  // Early-out on invalid or revoked communicator
+  ncclResult_t ret = CommCheck(info->comm, info->opName, "comm");
+  if (ret != ncclSuccess) return ncclGroupErrCheck(ret);
+  if (info->comm->revokedFlag) {
+    WARN("%s: communicator was revoked", info->opName);
+    return ncclGroupErrCheck(ncclInvalidUsage);
+  }
   // Profiler - If a group API event has already started, update the profilerGroupDepth so that the depth
   // updates correctly for implicit ncclGroupStartInternal and ncclGroupEndInternal calls
   if (ncclProfilerApiState.profilerGroupDepth > 0) {
     ncclProfilerApiState.profilerGroupDepth++;
   }
   NCCLCHECK(ncclGroupStartInternal());
-  ncclResult_t ret = ncclSuccess;
+  ret = ncclSuccess;
   int devOld = -1;
-
-  NCCLCHECKGOTO(CommCheck(info->comm, info->opName, "comm"), ret, fail);
   // Check whether communicator is ready to communicate
   NCCLCHECKGOTO(ncclCommEnsureReady(info->comm), ret, fail);
+
+  if (__atomic_load_n(&info->comm->revokedFlag, __ATOMIC_ACQUIRE)) {
+    WARN("%s: communicator %p has been revoked; no new collectives may be enqueued",
+         info->opName, info->comm);
+    ret = ncclInvalidUsage;
+    goto fail;
+  }
 
   if (info->comm->checkPointers) {
     CUDACHECKGOTO(cudaGetDevice(&devOld), ret, fail);

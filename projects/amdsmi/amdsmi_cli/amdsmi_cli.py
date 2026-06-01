@@ -31,16 +31,12 @@ except ImportError as e:
     logging.debug(f"Unhandled import error: {e}")
     logging.debug("argcomplete module not found. Autocomplete will not work.")
 
-# from typing import TYPE_CHECKING
-# # only used for type checking
-# # pyright trips up and cannot find amdsmi scripts without it
-# if TYPE_CHECKING:
-#     from amdsmi_commands import AMDSMICommands
-#     from amdsmi_parser import AMDSMIParser
-#     from amdsmi_logger import AMDSMILogger
-#     import amdsmi_cli_exceptions
-#     from amdsmi import amdsmi_interface
-#     from amdsmi import amdsmi_exception
+from typing import TYPE_CHECKING
+
+# only used for type checking
+# pyright trips up and cannot find amdsmi scripts without it
+if TYPE_CHECKING:
+    from amdsmi import amdsmi_exception
 
 # Set the environment variable for GPU metrics cache duration
 gpu_metrics_cache_ms = os.environ.setdefault("AMDSMI_GPU_METRICS_CACHE_MS", "100")
@@ -154,7 +150,7 @@ if __name__ == "__main__":
     amd_smi_commands = AMDSMICommands(helpers=amd_smi_helpers)
     amd_smi_parser = AMDSMIParser(
         amd_smi_commands.version,
-        amd_smi_commands.list,
+        amd_smi_commands.list_devices,
         amd_smi_commands.static,
         amd_smi_commands.firmware,
         amd_smi_commands.bad_pages,
@@ -170,6 +166,7 @@ if __name__ == "__main__":
         amd_smi_commands.partition,
         amd_smi_commands.ras,
         amd_smi_commands.node,
+        amd_smi_commands.fabric,
         amd_smi_commands.rocm_smi,
         amd_smi_commands.default,
         sys_argv=sys.argv,
@@ -263,6 +260,15 @@ if __name__ == "__main__":
         exc = amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
             amd_smi_commands.logger.format, e.get_error_code()
         )
+        _print_error(
+            f"{type(exc).__module__}.{type(exc).__name__}: {str(exc)}",
+            amd_smi_commands.logger.destination,
+        )
+        sys.exit(abs(exc.value))
+    except PermissionError as e:
+        command = sys.argv[1] if len(sys.argv) > 1 else ""
+        outputformat = amd_smi_commands.logger.format
+        exc = amdsmi_cli_exceptions.AmdSmiPermissionDeniedException(command, outputformat)
         _print_error(
             f"{type(exc).__module__}.{type(exc).__name__}: {str(exc)}",
             amd_smi_commands.logger.destination,

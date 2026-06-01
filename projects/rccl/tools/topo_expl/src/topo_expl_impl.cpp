@@ -697,12 +697,12 @@ ncclResult_t ncclTransportCollNetFree(struct ncclComm* comm) {
       if (ncclAtomicRefCountDecrement(&peer->refCount) == 0) {
         for (int b=0; b<NCCL_MAX_CONNS; b++) {
           struct ncclConnector* send = peer->send + b;
-          if (send->transportResources && send->transportComm) NCCLCHECK(send->transportComm->free(send));
+          if (send->transportResources && send->transportComm) NCCLCHECK(send->transportComm->free(comm, send));
           send->transportResources = NULL; // avoid double free
         }
         for (int b=0; b<NCCL_MAX_CONNS; b++) {
           struct ncclConnector* recv = peer->recv + b;
-          if (recv->transportResources && recv->transportComm) NCCLCHECK(recv->transportComm->free(recv));
+          if (recv->transportResources && recv->transportComm) NCCLCHECK(recv->transportComm->free(comm, recv));
           recv->transportResources = NULL; // avoid double free
         }
       }
@@ -798,8 +798,6 @@ ncclResult_t initTransportsRank_1(struct ncclComm* comm, struct allGatherInfo *a
   comm->topo->pivotA2ANumBiRings = 0;
   // LL128
   comm->topo->ll128Enabled = false;
-  // Topology hint for MSCCL internal scheduler about whether to enable MSCCL
-  comm->topo->mscclEnabled = false;
   // Topology hint if tree has been defined by model or User
   comm->topo->treeDefined = false;
   // Compute paths between GPUs and NICs
@@ -955,7 +953,6 @@ ncclResult_t initTransportsRank_1(struct ncclComm* comm, struct allGatherInfo *a
   allGather3Data[rank].pivotA2AEnabled = comm->topo->pivotA2AEnabled && rcclParamPivotAlltoallEnable();
   comm->topo->ll128Enabled =  comm->topo->ll128Enabled || rcclParamLL128ForceEnable();
   allGather3Data[rank].ll128Enabled = comm->topo->ll128Enabled;
-  allGather3Data[rank].mscclEnabled = comm->topo->mscclEnabled;
 
   for (int a=0; a<NCCL_NUM_ALGORITHMS; a++) {
     allGather3Data[rank].graphInfo[a].pattern = graphs[a]->pattern;
@@ -969,6 +966,7 @@ ncclResult_t initTransportsRank_1(struct ncclComm* comm, struct allGatherInfo *a
 
   comm->nChannels = std::min(treeGraph.nChannels, ringGraph.nChannels);
   TRACE(NCCL_INIT,"treeGraph.nChannels: %d , ringGraph.nChannels: %d", treeGraph.nChannels, ringGraph.nChannels);
+  allGather3Data[rank].romeTopoModelIdx = comm->topo->romeTopoModelIdx;
   NCCLCHECKGOTO(ncclTopoPreset(comm, graphs, &allGather3Data[rank].topoRanks), ret, fail);
 fail:
   return ret;
@@ -1057,7 +1055,6 @@ ncclResult_t initTransportsRank_3(struct ncclComm* comm, struct allGatherInfo *a
     // Make sure we align all ranks so that the tuning is consistent across ranks
     comm->topo->pivotA2AEnabled = comm->topo->pivotA2AEnabled && allGather3Data[i].pivotA2AEnabled;
     comm->topo->ll128Enabled = comm->topo->ll128Enabled && allGather3Data[i].ll128Enabled;
-    comm->topo->mscclEnabled = comm->topo->mscclEnabled && allGather3Data[i].mscclEnabled;
     for (int a=0; a<NCCL_NUM_ALGORITHMS; a++) {
       graphs[a]->nChannels = std::min(allGather3Data[i].graphInfo[a].nChannels, graphs[a]->nChannels);
       graphs[a]->sameChannels = std::min(allGather3Data[i].graphInfo[a].sameChannels, graphs[a]->sameChannels);

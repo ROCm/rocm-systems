@@ -1,18 +1,21 @@
 // Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
-#include "core/components/fwd.hpp"
+#include "common/defines.h"
+#include "core/agent.hpp"
 #include "core/state.hpp"
 
+#include <atomic>
 #include <cstdint>
+#include <memory>
+#include <vector>
 
-namespace rocprofsys
-{
-namespace pmc
-{
+#include <rocprofiler-sdk/version.h>
 
+namespace rocprofsys::pmc
+{
 std::atomic<State>&
 get_state();
 
@@ -42,46 +45,18 @@ postfork_child_cleanup();
 void
 postfork_parent_reinit();
 
-}  // namespace pmc
-}  // namespace rocprofsys
+void
+prefork_lock_sampler();
 
-#if !defined(ROCPROFSYS_EXTERN_COMPONENTS) ||                                            \
-    (defined(ROCPROFSYS_EXTERN_COMPONENTS) && ROCPROFSYS_EXTERN_COMPONENTS > 0)
+void
+postfork_parent_unlock_sampler();
 
-#    include <timemory/components/base.hpp>
-#    include <timemory/components/data_tracker/components.hpp>
-#    include <timemory/operations.hpp>
+void
+postfork_child_reset_sampler_lock();
 
-ROCPROFSYS_DECLARE_EXTERN_COMPONENT(
-    TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_gpu_busy_gfx>),
-    true, double)
-
-ROCPROFSYS_DECLARE_EXTERN_COMPONENT(
-    TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_gpu_busy_umc>),
-    true, double)
-
-ROCPROFSYS_DECLARE_EXTERN_COMPONENT(
-    TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_gpu_busy_mm>),
-    true, double)
-
-ROCPROFSYS_DECLARE_EXTERN_COMPONENT(
-    TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_gpu_temp>), true,
-    double)
-
-ROCPROFSYS_DECLARE_EXTERN_COMPONENT(
-    TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_gpu_power>), true,
-    double)
-
-ROCPROFSYS_DECLARE_EXTERN_COMPONENT(
-    TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_gpu_memory>), true,
-    double)
-
-ROCPROFSYS_DECLARE_EXTERN_COMPONENT(
-    TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_gpu_vcn>), true,
-    double)
-
-ROCPROFSYS_DECLARE_EXTERN_COMPONENT(
-    TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_gpu_jpeg>), true,
-    double)
-
+#if ROCPROFILER_VERSION >= 600
+void
+register_gpu_perf_counter_source(const std::vector<std::shared_ptr<agent>>& agent_list);
 #endif
+
+}  // namespace rocprofsys::pmc

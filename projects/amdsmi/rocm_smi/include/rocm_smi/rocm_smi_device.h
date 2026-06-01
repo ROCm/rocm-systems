@@ -216,6 +216,9 @@ class Device {
   const std::shared_ptr<PowerMon>& power_monitor() { return power_monitor_; }
   void set_power_monitor(std::shared_ptr<PowerMon> pm) { power_monitor_ = pm; }
 
+  // GPU Overdrive (gpu_od) sysfs path helper methods
+  std::string get_gpu_od_fan_min_pwm_path(void) const;
+
   int readDevInfo(DevInfoTypes type, uint64_t* val);
   int readDevInfoLine(DevInfoTypes type, std::string* line);
   int readDevInfo(DevInfoTypes type, std::string* val);

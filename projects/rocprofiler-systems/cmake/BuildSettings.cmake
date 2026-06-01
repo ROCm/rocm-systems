@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # include guard
 include_guard(DIRECTORY)
 
@@ -12,53 +15,76 @@ include(Compilers)
 include(FindPackageHandleStandardArgs)
 include(MacroUtilities)
 
+# Auto-wire ccache when present so warm rebuilds hit cache.
+# Skip if user has already set a compiler launcher (don't clobber distcc, sccache, etc.).
+if(ROCPROFSYS_USE_CCACHE)
+    find_program(ROCPROFSYS_CCACHE_PROGRAM ccache)
+    if(ROCPROFSYS_CCACHE_PROGRAM)
+        message(STATUS "Using ccache: ${ROCPROFSYS_CCACHE_PROGRAM}")
+        if(NOT DEFINED CMAKE_C_COMPILER_LAUNCHER)
+            set(CMAKE_C_COMPILER_LAUNCHER
+                "${ROCPROFSYS_CCACHE_PROGRAM}"
+                CACHE STRING
+                "C compiler launcher"
+            )
+        endif()
+        if(NOT DEFINED CMAKE_CXX_COMPILER_LAUNCHER)
+            set(CMAKE_CXX_COMPILER_LAUNCHER
+                "${ROCPROFSYS_CCACHE_PROGRAM}"
+                CACHE STRING
+                "C++ compiler launcher"
+            )
+        endif()
+    endif()
+endif()
+
 rocprofiler_systems_add_option(
     ROCPROFSYS_BUILD_DEVELOPER "Extra build flags for development like -Werror"
     ${ROCPROFSYS_BUILD_CI}
 )
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_RELEASE
-                               "Build with minimal debug line info" OFF
+    "Build with minimal debug line info" OFF
 )
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_EXTRA_OPTIMIZATIONS
-                               "Extra optimization flags" OFF
+    "Extra optimization flags" OFF
 )
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_LTO "Build with link-time optimization"
-                               OFF
+    OFF
 )
 rocprofiler_systems_add_option(ROCPROFSYS_USE_COMPILE_TIMING
-                               "Build with timing metrics for compilation" OFF
+    "Build with timing metrics for compilation" OFF
 )
 rocprofiler_systems_add_option(ROCPROFSYS_USE_SANITIZER
-                               "Build with -fsanitze=\${ROCPROFSYS_SANITIZER_TYPE}" OFF
+    "Build with -fsanitze=\${ROCPROFSYS_SANITIZER_TYPE}" OFF
 )
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_STATIC_LIBGCC
-                               "Build with -static-libgcc if possible" OFF
+    "Build with -static-libgcc if possible" OFF
 )
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_STATIC_LIBSTDCXX
-                               "Build with -static-libstdc++ if possible" OFF
+    "Build with -static-libstdc++ if possible" OFF
 )
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_STACK_PROTECTOR
-                               "Build with -fstack-protector" ON
+    "Build with -fstack-protector" ON
 )
 rocprofiler_systems_add_cache_option(
     ROCPROFSYS_BUILD_LINKER
     "If set to a non-empty value, pass -fuse-ld=\${ROCPROFSYS_BUILD_LINKER}" STRING "bfd"
 )
 rocprofiler_systems_add_cache_option(ROCPROFSYS_BUILD_NUMBER "Internal CI use" STRING "0"
-                                     ADVANCED NO_FEATURE
+    ADVANCED NO_FEATURE
 )
 
 rocprofiler_systems_add_interface_library(rocprofiler-systems-static-libgcc
-                                          "Link to static version of libgcc"
+    "Link to static version of libgcc"
 )
 rocprofiler_systems_add_interface_library(rocprofiler-systems-static-libstdcxx
-                                          "Link to static version of libstdc++"
+    "Link to static version of libstdc++"
 )
 rocprofiler_systems_add_interface_library(rocprofiler-systems-static-libgcc-optional
-                                          "Link to static version of libgcc"
+    "Link to static version of libgcc"
 )
 rocprofiler_systems_add_interface_library(rocprofiler-systems-static-libstdcxx-optional
-                                          "Link to static version of libstdc++"
+    "Link to static version of libstdc++"
 )
 
 target_compile_definitions(
@@ -76,7 +102,7 @@ endif()
 
 if(ROCPROFSYS_BUILD_CI)
     rocprofiler_systems_target_compile_definitions(${LIBNAME}-compile-options
-                                                   INTERFACE ROCPROFSYS_CI
+        INTERFACE ROCPROFSYS_CI
     )
 endif()
 
@@ -132,7 +158,7 @@ rocprofiler_systems_add_interface_library(
 )
 
 add_target_flag_if_avail(rocprofiler-systems-compile-debuginfo "-g3"
-                         "-fno-omit-frame-pointer" "-fno-optimize-sibling-calls"
+    "-fno-omit-frame-pointer" "-fno-optimize-sibling-calls"
 )
 
 if(CMAKE_CUDA_COMPILER_IS_NVIDIA)
@@ -142,14 +168,14 @@ endif()
 target_compile_options(
     rocprofiler-systems-compile-debuginfo
     INTERFACE
-        $<$<COMPILE_LANGUAGE:C>:$<$<C_COMPILER_ID:GNU>:-rdynamic>>
-        $<$<COMPILE_LANGUAGE:CXX>:$<$<CXX_COMPILER_ID:GNU>:-rdynamic>>
+        $<$<COMPILE_LANGUAGE:C>:$<$<C_COMPILER_ID:GNU,Clang>:-rdynamic>>
+        $<$<COMPILE_LANGUAGE:CXX>:$<$<CXX_COMPILER_ID:GNU,Clang>:-rdynamic>>
 )
 
 if(NOT APPLE)
     target_link_options(
         rocprofiler-systems-compile-debuginfo
-        INTERFACE $<$<CXX_COMPILER_ID:GNU>:-rdynamic>
+        INTERFACE $<$<CXX_COMPILER_ID:GNU,Clang>:-rdynamic>
     )
 endif()
 
@@ -157,7 +183,7 @@ if(CMAKE_CUDA_COMPILER_IS_NVIDIA)
     target_compile_options(
         rocprofiler-systems-compile-debuginfo
         INTERFACE
-            $<$<COMPILE_LANGUAGE:CUDA>:$<$<CXX_COMPILER_ID:GNU>:-Xcompiler=-rdynamic>>
+            $<$<COMPILE_LANGUAGE:CUDA>:$<$<CXX_COMPILER_ID:GNU,Clang>:-Xcompiler=-rdynamic>>
     )
 endif()
 
@@ -173,7 +199,7 @@ endif()
 # non-debug optimizations
 #
 rocprofiler_systems_add_interface_library(rocprofiler-systems-compile-extra
-                                          "Extra optimization flags"
+    "Extra optimization flags"
 )
 if(NOT ROCPROFSYS_BUILD_CODECOV AND ROCPROFSYS_BUILD_EXTRA_OPTIMIZATIONS)
     add_target_flag_if_avail(
@@ -205,7 +231,7 @@ endif()
 add_cxx_flag_if_avail("-faligned-new")
 
 rocprofiler_systems_add_interface_library(rocprofiler-systems-lto
-                                          "Adds link-time-optimization flags"
+    "Adds link-time-optimization flags"
 )
 
 if(NOT ROCPROFSYS_BUILD_CODECOV)
@@ -260,10 +286,10 @@ endif()
 # fstack-protector
 #
 rocprofiler_systems_add_interface_library(rocprofiler-systems-stack-protector
-                                          "Adds stack-protector compiler flags"
+    "Adds stack-protector compiler flags"
 )
 add_target_flag_if_avail(rocprofiler-systems-stack-protector "-fstack-protector-strong"
-                         "-Wstack-protector"
+    "-Wstack-protector"
 )
 
 if(ROCPROFSYS_BUILD_STACK_PROTECTOR)
@@ -310,15 +336,15 @@ endif()
 # visibility build flags
 #
 rocprofiler_systems_add_interface_library(rocprofiler-systems-default-visibility
-                                          "Adds -fvisibility=default compiler flag"
+    "Adds -fvisibility=default compiler flag"
 )
 rocprofiler_systems_add_interface_library(rocprofiler-systems-hidden-visibility
-                                          "Adds -fvisibility=hidden compiler flag"
+    "Adds -fvisibility=hidden compiler flag"
 )
 
 add_target_flag_if_avail(rocprofiler-systems-default-visibility "-fvisibility=default")
 add_target_flag_if_avail(rocprofiler-systems-hidden-visibility "-fvisibility=hidden"
-                         "-fvisibility-inlines-hidden"
+    "-fvisibility-inlines-hidden"
 )
 
 # ----------------------------------------------------------------------------------------#
@@ -350,7 +376,7 @@ set_property(
     PROPERTY STRINGS "${ROCPROFSYS_SANITIZER_TYPES}"
 )
 rocprofiler_systems_add_interface_library(rocprofiler-systems-sanitizer-compile-options
-                                          "Adds compiler flags for sanitizers"
+    "Adds compiler flags for sanitizers"
 )
 rocprofiler_systems_add_interface_library(
     rocprofiler-systems-sanitizer
@@ -384,6 +410,33 @@ endforeach()
 unset(_FLAG)
 unset(COMMON_SANITIZER_FLAGS)
 
+# UBSan's vptr check inserts implicit RTTI lookups for all polymorphic types.
+# External libraries (e.g. Dyninst) are not built with UBSan, so their typeinfo
+# symbols are not available, causing linker errors. Disable vptr for UBSan.
+target_compile_options(
+    rocprofiler-systems-undefined-sanitizer
+    INTERFACE "-fno-sanitize=vptr"
+)
+set_property(
+    TARGET rocprofiler-systems-undefined-sanitizer
+    APPEND
+    PROPERTY INTERFACE_LINK_OPTIONS "-fno-sanitize=vptr"
+)
+
+# Source-level ignorelist for UBSan checks that do not support runtime
+# suppression (e.g. nonnull-attribute in third-party timemory headers).
+set(_ROCPROFSYS_UBSAN_IGNORELIST
+    "${PROJECT_SOURCE_DIR}/scripts/rocprof-sys-ubsan-ignorelist.txt"
+)
+# -fsanitize-ignorelist= is Clang-only; GCC has no source-level UBSan ignorelist.
+if(EXISTS "${_ROCPROFSYS_UBSAN_IGNORELIST}" AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(
+        rocprofiler-systems-undefined-sanitizer
+        INTERFACE "-fsanitize-ignorelist=${_ROCPROFSYS_UBSAN_IGNORELIST}"
+    )
+endif()
+unset(_ROCPROFSYS_UBSAN_IGNORELIST)
+
 if(ROCPROFSYS_USE_SANITIZER)
     foreach(_TYPE ${ROCPROFSYS_SANITIZER_TYPE})
         if(TARGET rocprofiler-systems-${_TYPE}-sanitizer)
@@ -402,14 +455,24 @@ else()
     set(ROCPROFSYS_USE_SANITIZER OFF)
 endif()
 
+# sanitizer instrumentation inflates stack frames and triggers false positives
+# in GCC's -Wmaybe-uninitialized and -Wstack-usage diagnostics
+if(ROCPROFSYS_USE_SANITIZER AND ROCPROFSYS_BUILD_DEVELOPER)
+    add_target_flag_if_avail(rocprofiler-systems-compile-options
+                             "-Wno-error=maybe-uninitialized"
+                             "-Wno-error=stack-usage="
+                             "-Wno-error=array-bounds"
+    )
+endif()
+
 # ----------------------------------------------------------------------------------------#
 # static lib flags
 #
 target_compile_options(
     rocprofiler-systems-static-libgcc
     INTERFACE
-        $<$<COMPILE_LANGUAGE:C>:$<$<C_COMPILER_ID:GNU>:-static-libgcc>>
-        $<$<COMPILE_LANGUAGE:CXX>:$<$<CXX_COMPILER_ID:GNU>:-static-libgcc>>
+        $<$<COMPILE_LANGUAGE:C>:$<$<C_COMPILER_ID:GNU,Clang>:-static-libgcc>>
+        $<$<COMPILE_LANGUAGE:CXX>:$<$<CXX_COMPILER_ID:GNU,Clang>:-static-libgcc>>
 )
 target_link_options(
     rocprofiler-systems-static-libgcc
@@ -420,7 +483,7 @@ target_link_options(
 
 target_compile_options(
     rocprofiler-systems-static-libstdcxx
-    INTERFACE $<$<COMPILE_LANGUAGE:CXX>:$<$<CXX_COMPILER_ID:GNU>:-static-libstdc++>>
+    INTERFACE $<$<COMPILE_LANGUAGE:CXX>:$<$<CXX_COMPILER_ID:GNU,Clang>:-static-libstdc++>>
 )
 target_link_options(
     rocprofiler-systems-static-libstdcxx

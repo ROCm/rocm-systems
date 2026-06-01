@@ -42,6 +42,14 @@ python3 -m pip install -r requirements.txt
 
 **Note**: When working from source, vendored dependencies (like PyYAML) are included as git submodules. If you see import errors about missing vendored modules, run `git submodule update --init --recursive -- src/vendored/`.
 
+### Development dependencies
+
+To install development tools (linter, pre-commit hooks, YAML utilities), run:
+
+```bash
+python3 -m pip install -r requirements-development.txt
+```
+
 ## Testing
 
 Populate the <usename> variable in `docker/docker-compose.customrocmtest.yml`.

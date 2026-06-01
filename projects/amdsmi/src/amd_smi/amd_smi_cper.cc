@@ -20,11 +20,10 @@
  * THE SOFTWARE.
  */
 
-#include <fcntl.h>
 #include <sys/stat.h>
-#include <unistd.h>
 
 #include <cstring>
+#include <fstream>
 #include <memory>
 #include <sstream>
 
@@ -101,14 +100,15 @@ static auto amdsmi_read_cper_file(const std::string& filepath) -> CperFileCtx {
 
   ctx.file_size = file_stats.st_size;
   ctx.buffer = std::make_unique<char[]>(ctx.file_size);
-  int file = open(filepath.c_str(), O_RDONLY);
-  if (file == -1) {
-    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[CPER] failed to open file: " << filepath
-       << ", errno:()" << errno << "): " << strerror(errno);
+
+  std::ifstream file(filepath, std::ios::binary);
+  if (!file) {
+    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[CPER] failed to open file: " << filepath;
     LOG_ERROR(ss);
     return ctx;
   }
-  long bytes_read = read(file, ctx.buffer.get(), ctx.file_size);
+  file.read(ctx.buffer.get(), ctx.file_size);
+  long bytes_read = file.gcount();
   if (bytes_read <= 0) {
     ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__
        << "[CPER] failed to read complete file, read only  " << bytes_read << " of "
@@ -116,7 +116,6 @@ static auto amdsmi_read_cper_file(const std::string& filepath) -> CperFileCtx {
     LOG_ERROR(ss);
     return ctx;
   }
-  close(file);
 
   ctx.status = AMDSMI_STATUS_SUCCESS;
   ctx.file_size = bytes_read;
@@ -288,8 +287,8 @@ exit:
   if (!body) return -1;
 
   return aca_decode_corrected_error(
-      body->err_ctx.reg_dump, sizeof(body->err_ctx.reg_dump) / sizeof(body->err_ctx.reg_dump[0]),
-      section->flags_mask, section->revision_major, body->err_ctx.reg_ctx_type);
+      body->err_ctx.reg_dump, body->err_ctx.reg_arr_size / sizeof(uint64_t), section->flags_mask,
+      section->revision_major, body->err_ctx.reg_ctx_type);
 }
 
 static int cper_dump_cr_fatal(const struct cper_sec_crashdump* crashdump,

@@ -12,9 +12,6 @@
 #include "transport.h"
 #include "group.h"
 #include "api_trace.h"
-#ifdef ENABLE_MSCCLPP
-#include "mscclpp/mscclpp_nccl.h"
-#endif
 
 using namespace rccl;
 
@@ -106,7 +103,7 @@ static ncclResult_t regCleanup(struct ncclComm* comm, struct ncclReg* reg) {
         free(reg->ipcInfos[i]);
       }
     if (reg->regIpcAddrs.hostPeerRmtAddrs) free(reg->regIpcAddrs.hostPeerRmtAddrs);
-    if (reg->regIpcAddrs.devPeerRmtAddrs) NCCLCHECK(ncclCudaFree(reg->regIpcAddrs.devPeerRmtAddrs));
+    if (reg->regIpcAddrs.devPeerRmtAddrs) NCCLCHECK(ncclCudaFree(reg->regIpcAddrs.devPeerRmtAddrs, comm->memManager));
   }
   return ncclSuccess;
 }
@@ -124,27 +121,13 @@ ncclResult_t ncclRegCleanup(struct ncclComm* comm) {
 }
 
 NCCL_API(ncclResult_t, ncclCommRegister, const ncclComm_t comm, void* buff, size_t size, void** handle);
+
 ncclResult_t ncclCommRegister_impl(const ncclComm_t comm, void* buff, size_t size, void** handle) {
   ncclResult_t ret = ncclSuccess;
 
   if (!ncclParamLocalRegister())
     *handle = NULL;
   else {
-    #ifdef ENABLE_MSCCLPP
-    if (comm->mscclppCompatible) {
-      if (comm->mscclCompatible && size > 0){
-        bool isManagedBuffer = false; 
-        CUDACHECK(hipPointerGetAttribute(&isManagedBuffer, HIP_POINTER_ATTRIBUTE_IS_MANAGED, const_cast<void*>(buff)));
-        if(!isManagedBuffer){
-          INFO(NCCL_INIT, "MSCCL++: ncclCommRegister");
-          NCCLCHECKGOTO(mscclpp_ncclCommRegister(comm->mscclpp_comm, buff, size, handle), ret, end);
-        }
-        else{
-          WARN("MSCCL++: Cannot register user-buffers on managed memory. RCCL user-buffer registration will occur.");
-        }
-      }
-    }
-    #endif
     INFO(NCCL_INIT, "RCCL: ncclCommRegister");
     NCCLCHECKGOTO(ncclRegister(comm, buff, size, false, handle), ret, end);
   }
@@ -155,7 +138,13 @@ end:
 }
 
 ncclResult_t ncclCommGraphRegister(const ncclComm_t comm, void* buff, size_t size, void** handle) {
-  NCCLCHECK(ncclRegister(comm, buff, size, true, handle));
+  if (ncclP2pUsesMemcpy()) {
+    *handle = NULL;
+    INFO(NCCL_REG, "Skipping graph registration for buffer %p size %zi (P2pUsesMemcpy=%d)",
+         buff, size, ncclP2pUsesMemcpy());
+  } else {
+    NCCLCHECK(ncclRegister(comm, buff, size, true, handle));
+  }
   return ncclSuccess;
 }
 
@@ -187,16 +176,6 @@ exit:
 NCCL_API(ncclResult_t, ncclCommDeregister, const ncclComm_t comm, void* handle);
 ncclResult_t ncclCommDeregister_impl(const ncclComm_t comm, void *handle) {
   NCCLCHECK(Recorder::instance().record(rrCommDeregister, comm, handle));
-
-  #ifdef ENABLE_MSCCLPP
-  if (comm->mscclppCompatible) {
-    const size_t size = mscclpp_BufferSize(comm->mscclpp_comm, handle);
-    if (comm->mscclCompatible && size > 0) {
-        NCCLCHECK(mscclpp_ncclCommDeregister(comm->mscclpp_comm, handle));
-      return ncclSuccess;
-    }
-  }
-  #endif
 
   NCCLCHECK(commDeregister(comm, false, (struct ncclReg*)handle));
   return ncclSuccess;

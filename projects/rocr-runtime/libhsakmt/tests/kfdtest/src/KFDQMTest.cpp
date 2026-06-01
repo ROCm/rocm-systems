@@ -465,9 +465,9 @@ void KFDQMTest::SdmaConcurrentCopies(int gpuNode) {
         }
 
         for (unsigned j = 0; j < NPACKETS; j++)
-            queue.PlacePacket(
+            ASSERT_NO_FATAL_FAILURE(queue.PlacePacket(
                 SDMACopyDataPacket(queue.GetFamilyId(), dstBuf.As<char *>()+COPY_SIZE*j,
-                                   srcBuf.As<char *>()+COPY_SIZE*j, COPY_SIZE));
+                                   srcBuf.As<char *>()+COPY_SIZE*j, COPY_SIZE)));
         queue.SubmitPacket();
 
         /* Waste a variable amount of time. Submission timing
@@ -481,12 +481,12 @@ void KFDQMTest::SdmaConcurrentCopies(int gpuNode) {
          * run concurrently for a bit without getting too far ahead
          */
         if ((i & 0x7) == 0)
-            queue.Wait4PacketConsumption();
+            ASSERT_NO_FATAL_FAILURE(queue.Wait4PacketConsumption());
     }
     log << "Done." << std::endl;
 
-    queue.PlaceAndSubmitPacket(SDMAWriteDataPacket(queue.GetFamilyId(), srcBuf.As<unsigned *>(), 0x02020202));
-    queue.Wait4PacketConsumption();
+    ASSERT_NO_FATAL_FAILURE(queue.PlaceAndSubmitPacket(SDMAWriteDataPacket(queue.GetFamilyId(), srcBuf.As<unsigned *>(), 0x02020202)));
+    ASSERT_NO_FATAL_FAILURE(queue.Wait4PacketConsumption());
     EXPECT_TRUE_GPU(WaitOnValue(srcBuf.As<unsigned int*>(), 0x02020202), gpuNode);
 
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
@@ -739,8 +739,14 @@ void KFDQMTest::OverSubscribeCpQueues(int gpuNode) {
     for (unsigned int qidx = 0; qidx < MAX_CP_QUEUES; ++qidx)
         queues[qidx].SubmitPacket();
 
-    // Delaying for 5 seconds in order to get all the results
-    Delay(5000);
+    // Delaying in order to get all the results
+    if(g_IsEmuMode) {
+        LOG() << "Emulation mode detected, delaying for 1 min to allow all packets to be processed." << std::endl;
+        Delay(60000);
+    } else {
+        LOG() << "Delaying for 5 seconds to allow all packets to be processed." << std::endl;
+        Delay(5000);
+    }
 
     for (unsigned int qidx = 0; qidx < MAX_CP_QUEUES; ++qidx)
         EXPECT_TRUE_GPU(queues[qidx].AllPacketsSubmitted(), gpuNode)<< "QueueId=" << qidx;;
@@ -1328,7 +1334,7 @@ void KFDQMTest::extendedCuMasking(int gpuNode) {
             }
 
             // Check if what we detected is consistent with info from KFD
-            EXPECT_TRUE_GPU((activeCU + inactiveCount) == maxCU, gpuNode);
+            EXPECT_TRUE_GPU(g_IsEmuMode || (activeCU + inactiveCount) == maxCU, gpuNode);
 
             maskConfig.pInactiveMask = inactiveMask;
 

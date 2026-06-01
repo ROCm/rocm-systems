@@ -192,10 +192,15 @@ hsa_status_t Memory::interopMapBuffer(hsa_handle_t fdn, hsa_interop_map_flag_t f
   hsa_agent_t agent = dev().getBackendDevice();
   size_t size;
   size_t metadata_size = 0;
-  void* metadata;
+  void* metadata = nullptr;
   auto fd = fdn;
   hsa_status_t status = Hsa::interop_map_buffer(1, &agent, fd, flags, &size, &interop_deviceMemory_,
-                                                &metadata_size, (const void**)&metadata);
+#if IS_WINDOWS
+                                                nullptr, nullptr  // Cannot get metadata and metadata_size in Windows
+#else
+                                                &metadata_size, (const void**)&metadata
+#endif
+  );
   ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "Map Interop memory %p, size 0x%zx", interop_deviceMemory_,
           size);
   deviceMemory_ = static_cast<char*>(interop_deviceMemory_);  // + out.buf_offset;
@@ -241,13 +246,20 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
   amdImageDesc_->deviceID = (AmdVendor << DeviceIdVendorShift) | id;
 
 #if IS_WINDOWS
-  hsa_handle_t handle;
+  hsa_handle_t handle, resHandle;
   int offset;
 
-  if (!GlInterop::Export(owner(), targetType, miplevel, &handle, &offset)) return false;
+  if (!GlInterop::Export(owner(), targetType, miplevel, &handle, &resHandle, &offset, amdImageDesc_->data,
+                         MaxMetadataSizeDwords * sizeof(uint32_t))) {
+    return false;
+  }
+
   if (interopMapBuffer(handle, HSA_INTEROP_MAP_FLAG_KMT_HANDLE) != HSA_STATUS_SUCCESS) return false;
 
   deviceMemory_ = static_cast<char*>(interop_deviceMemory_) + offset;
+  if(!GlInterop::Detach(owner(), resHandle)) {
+    LogPrintfError("GlInterop::Detach(handle %p) failed", resHandle);
+  }
   return true;
 #else
   mesa_glinterop_export_in in = {0};
@@ -783,8 +795,9 @@ bool Buffer::create(bool alloc_local) {
         return false;
       }
     } else {
-      // If this is physical memory request, then get an handle and store it in user data
-      owner()->getUserData().hsa_handle = dev().deviceVmemAlloc(owner()->getSize(), 0);
+      owner()->getUserData().hsa_handle = dev().deviceVmemAlloc(owner()->getSize(),
+                                          memFlags & ROCCLR_MEM_HSA_UNCACHED
+                                          ? HSA_AMD_MEMORY_POOL_UNCACHED_FLAG : 0);
     }
 
     if (owner()->getUserData().hsa_handle == 0) {
@@ -899,7 +912,14 @@ bool Buffer::create(bool alloc_local) {
     auto ext_memory = interop->asExternalMemory();
     amd::GLObject* glObject = interop->asGLObject();
     if (ext_memory != nullptr) {
-      return interopMapBuffer(ext_memory->Handle()) == HSA_STATUS_SUCCESS;
+      // Win32-KMT handles need ROCR's KMT branch in libhsakmt; the default
+      // (no flag) takes the NT path and fails with STATUS_INVALID_HANDLE.
+      hsa_interop_map_flag_t map_flags = HSA_INTEROP_MAP_FLAG_NONE;
+      if (ext_memory->Type() == amd::ExternalMemory::HandleType::OpaqueWin32Kmt ||
+          ext_memory->Type() == amd::ExternalMemory::HandleType::D3D11ResourceKmt) {
+        map_flags = HSA_INTEROP_MAP_FLAG_KMT_HANDLE;
+      }
+      return interopMapBuffer(ext_memory->Handle(), map_flags) == HSA_STATUS_SUCCESS;
     } else if (glObject != nullptr) {
       return createInteropBuffer(GL_ARRAY_BUFFER, 0);
     }

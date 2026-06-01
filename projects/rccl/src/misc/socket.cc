@@ -526,6 +526,7 @@ static ncclResult_t socketFinalizeAccept(struct ncclSocket* sock) {
     }
     if (magic != sock->magic) {
       socketResetAccept(sock);
+      sock->state = ncclSocketStateBadMagic;
       return ncclSuccess;
     }
   }
@@ -666,6 +667,12 @@ static ncclResult_t socketFinalizeConnect(struct ncclSocket* sock) {
 }
 
 static ncclResult_t socketProgressState(struct ncclSocket* sock) {
+  // BadMagic is set by socketFinalizeAccept on magic mismatch. The reset in
+  // ncclSocketAccept's do-while only fires while that loop runs; this covers
+  // the path where a caller re-enters via ncclSocketReady with state=BadMagic.
+  if (sock->state == ncclSocketStateBadMagic) {
+    sock->state = ncclSocketStateAccepting;
+  }
   if (sock->state == ncclSocketStateAccepting) {
     NCCLCHECK(socketTryAccept(sock));
   }
@@ -747,7 +754,7 @@ ncclResult_t ncclSocketConnect(struct ncclSocket* sock) {
   }
 }
 
-ncclResult_t ncclSocketAccept(struct ncclSocket* sock, struct ncclSocket* listenSock) {
+ncclResult_t ncclSocketAccept(struct ncclSocket* sock, struct ncclSocket* listenSock, bool retryOnBadMagic) {
   ncclResult_t ret = ncclSuccess;
 
   if (listenSock == NULL || sock == NULL) {
@@ -773,6 +780,9 @@ ncclResult_t ncclSocketAccept(struct ncclSocket* sock, struct ncclSocket* listen
 
   do {
     NCCLCHECKGOTO(socketProgressState(sock), ret, exit);
+    if (sock->state == ncclSocketStateBadMagic && retryOnBadMagic) {
+      sock->state = ncclSocketStateAccepting;
+    }
   } while (sock->asyncFlag == 0 &&
       (sock->abortFlag == NULL || __atomic_load_n(sock->abortFlag, __ATOMIC_ACQUIRE) == 0) &&
       (sock->state == ncclSocketStateAccepting ||
@@ -784,6 +794,7 @@ ncclResult_t ncclSocketAccept(struct ncclSocket* sock, struct ncclSocket* listen
     case ncclSocketStateAccepting:
     case ncclSocketStateAccepted:
     case ncclSocketStateReady:
+    case ncclSocketStateBadMagic:
       ret = ncclSuccess;
       break;
     case ncclSocketStateError:
@@ -912,6 +923,45 @@ ncclResult_t ncclSocketSendRecv(struct ncclSocket* sendSock, void* sendPtr, int 
   while (sendOffset < sendSize || recvOffset < recvSize) {
     if (sendOffset < sendSize) NCCLCHECK(socketProgress(NCCL_SOCKET_SEND, sendSock, sendPtr, sendSize, &sendOffset));
     if (recvOffset < recvSize) NCCLCHECK(socketProgress(NCCL_SOCKET_RECV, recvSock, recvPtr, recvSize, &recvOffset));
+  }
+  return ncclSuccess;
+}
+
+ncclResult_t ncclSocketMultiOp(struct ncclSocketOp* ops, int numOps) {
+  if (ops == NULL || numOps <= 0) {
+    WARN("ncclSocketMultiOp: invalid arguments ops=%p numOps=%d", ops, numOps);
+    return ncclInvalidArgument;
+  }
+
+  int completedOps = 0;
+  for (int i = 0; i < numOps; i++) {
+    if (ops[i].sock == NULL) {
+      WARN("ncclSocketMultiOp: invalid socket at index %d", i);
+      return ncclInvalidArgument;
+    }
+    if (ops[i].op != NCCL_SOCKET_SEND && ops[i].op != NCCL_SOCKET_RECV) {
+      WARN("ncclSocketMultiOp: invalid op %d at index %d", ops[i].op, i);
+      return ncclInvalidArgument;
+    }
+    if (ops[i].size < 0) {
+      WARN("ncclSocketMultiOp: invalid size %d at index %d", ops[i].size, i);
+      return ncclInvalidArgument;
+    }
+    if (ops[i].size > 0 && ops[i].ptr == NULL) {
+      WARN("ncclSocketMultiOp: NULL ptr with size %d at index %d", ops[i].size, i);
+      return ncclInvalidArgument;
+    }
+    ops[i].offset = 0;
+    if (ops[i].size == 0) completedOps++;
+  }
+
+  int i = 0;
+  while (completedOps < numOps) {
+    if (ops[i].offset < ops[i].size) {
+      NCCLCHECK(socketProgress(ops[i].op, ops[i].sock, ops[i].ptr, ops[i].size, &ops[i].offset));
+      if (ops[i].offset >= ops[i].size) completedOps++;
+    }
+    i = (i + 1) % numOps;
   }
   return ncclSuccess;
 }

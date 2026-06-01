@@ -1373,6 +1373,30 @@ hsa_status_t HSA_API hsa_amd_counted_queue_release(hsa_queue_t* queue) {
   return amdExtTable->hsa_amd_counted_queue_release_fn(queue);
 }
 
+hsa_status_t HSA_API hsa_amd_svm_discard_batch_async(void** ptrs, size_t* sizes, uint32_t count, uint32_t num_dep_signals,
+                          const hsa_signal_t* dep_signals, hsa_signal_t completion_signal) {
+  return amdExtTable->hsa_amd_svm_discard_batch_async_fn(ptrs, sizes, count, num_dep_signals, dep_signals,
+                                                   completion_signal);
+}
+
+hsa_status_t HSA_API hsa_amd_signal_get_event_id(hsa_signal_t signal, uint32_t *event_id) {
+  return amdExtTable->hsa_amd_signal_get_event_id_fn(signal, event_id);
+}
+
+// Mirrors Amd Extension Apis
+hsa_status_t HSA_API hsa_amd_external_semaphore_handle_open(
+    hsa_agent_t agent,
+    const hsa_amd_external_semaphore_handle_descriptor_t *desc,
+    hsa_amd_external_semaphore_t *out_sem) {
+  return amdExtTable->hsa_amd_external_semaphore_handle_open_fn(agent, desc, out_sem);
+}
+
+// Mirrors Amd Extension Apis
+hsa_status_t HSA_API hsa_amd_external_semaphore_handle_close(
+    hsa_amd_external_semaphore_t sem) {
+  return amdExtTable->hsa_amd_external_semaphore_handle_close_fn(sem);
+}
+
 // Tools only table interfaces.
 namespace rocr {
 

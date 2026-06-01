@@ -483,7 +483,26 @@ enum hip_api_id_t {
   HIP_API_ID_hipKernelSetAttribute = 458,
   HIP_API_ID_hipKernelGetFunction = 459,
   HIP_API_ID_hipMemPrefetchBatchAsync = 460,
-  HIP_API_ID_LAST = 460,
+  HIP_API_ID_hipOccupancyMaxActiveClusters = 461,
+  HIP_API_ID_hipOccupancyMaxPotentialClusterSize = 462,
+  HIP_API_ID_hipGreenCtxCreate = 463,
+  HIP_API_ID_hipExecutionCtxDestroy = 464,
+  HIP_API_ID_hipExecutionCtxStreamCreate = 465,
+  HIP_API_ID_hipDeviceGetDevResource = 466,
+  HIP_API_ID_hipDevSmResourceSplitByCount = 467,
+  HIP_API_ID_hipDevSmResourceSplit = 468,
+  HIP_API_ID_hipDevResourceGenerateDesc = 469,
+  HIP_API_ID_hipDeviceGetExecutionCtx = 470,
+  HIP_API_ID_hipExecutionCtxGetDevResource = 471,
+  HIP_API_ID_hipExecutionCtxGetDevice = 472,
+  HIP_API_ID_hipExecutionCtxGetId = 473,
+  HIP_API_ID_hipStreamGetDevResource = 474,
+  HIP_API_ID_hipExecutionCtxRecordEvent = 475,
+  HIP_API_ID_hipExecutionCtxSynchronize = 476,
+  HIP_API_ID_hipExecutionCtxWaitEvent = 477,
+  HIP_API_ID_hipLibraryGetGlobal = 478,
+  HIP_API_ID_hipLibraryGetManaged = 479,
+  HIP_API_ID_LAST = 479,
 
   HIP_API_ID_hipChooseDevice = HIP_API_ID_CONCAT(HIP_API_ID_,hipChooseDevice),
   HIP_API_ID_hipGetDeviceProperties = HIP_API_ID_CONCAT(HIP_API_ID_,hipGetDeviceProperties),
@@ -552,6 +571,9 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipDestroyExternalMemory: return "hipDestroyExternalMemory";
     case HIP_API_ID_hipDestroyExternalSemaphore: return "hipDestroyExternalSemaphore";
     case HIP_API_ID_hipDestroySurfaceObject: return "hipDestroySurfaceObject";
+    case HIP_API_ID_hipDevResourceGenerateDesc: return "hipDevResourceGenerateDesc";
+    case HIP_API_ID_hipDevSmResourceSplit: return "hipDevSmResourceSplit";
+    case HIP_API_ID_hipDevSmResourceSplitByCount: return "hipDevSmResourceSplitByCount";
     case HIP_API_ID_hipDeviceCanAccessPeer: return "hipDeviceCanAccessPeer";
     case HIP_API_ID_hipDeviceComputeCapability: return "hipDeviceComputeCapability";
     case HIP_API_ID_hipDeviceDisablePeerAccess: return "hipDeviceDisablePeerAccess";
@@ -561,6 +583,8 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipDeviceGetByPCIBusId: return "hipDeviceGetByPCIBusId";
     case HIP_API_ID_hipDeviceGetCacheConfig: return "hipDeviceGetCacheConfig";
     case HIP_API_ID_hipDeviceGetDefaultMemPool: return "hipDeviceGetDefaultMemPool";
+    case HIP_API_ID_hipDeviceGetDevResource: return "hipDeviceGetDevResource";
+    case HIP_API_ID_hipDeviceGetExecutionCtx: return "hipDeviceGetExecutionCtx";
     case HIP_API_ID_hipDeviceGetGraphMemAttribute: return "hipDeviceGetGraphMemAttribute";
     case HIP_API_ID_hipDeviceGetLimit: return "hipDeviceGetLimit";
     case HIP_API_ID_hipDeviceGetMemPool: return "hipDeviceGetMemPool";
@@ -605,6 +629,14 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipEventRecord: return "hipEventRecord";
     case HIP_API_ID_hipEventRecordWithFlags: return "hipEventRecordWithFlags";
     case HIP_API_ID_hipEventSynchronize: return "hipEventSynchronize";
+    case HIP_API_ID_hipExecutionCtxDestroy: return "hipExecutionCtxDestroy";
+    case HIP_API_ID_hipExecutionCtxGetDevResource: return "hipExecutionCtxGetDevResource";
+    case HIP_API_ID_hipExecutionCtxGetDevice: return "hipExecutionCtxGetDevice";
+    case HIP_API_ID_hipExecutionCtxGetId: return "hipExecutionCtxGetId";
+    case HIP_API_ID_hipExecutionCtxRecordEvent: return "hipExecutionCtxRecordEvent";
+    case HIP_API_ID_hipExecutionCtxStreamCreate: return "hipExecutionCtxStreamCreate";
+    case HIP_API_ID_hipExecutionCtxSynchronize: return "hipExecutionCtxSynchronize";
+    case HIP_API_ID_hipExecutionCtxWaitEvent: return "hipExecutionCtxWaitEvent";
     case HIP_API_ID_hipExtDisableLogging: return "hipExtDisableLogging";
     case HIP_API_ID_hipExtEnableLogging: return "hipExtEnableLogging";
     case HIP_API_ID_hipExtGetLastError: return "hipExtGetLastError";
@@ -734,6 +766,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipGraphicsSubResourceGetMappedArray: return "hipGraphicsSubResourceGetMappedArray";
     case HIP_API_ID_hipGraphicsUnmapResources: return "hipGraphicsUnmapResources";
     case HIP_API_ID_hipGraphicsUnregisterResource: return "hipGraphicsUnregisterResource";
+    case HIP_API_ID_hipGreenCtxCreate: return "hipGreenCtxCreate";
     case HIP_API_ID_hipHccModuleLaunchKernel: return "hipHccModuleLaunchKernel";
     case HIP_API_ID_hipHostAlloc: return "hipHostAlloc";
     case HIP_API_ID_hipHostFree: return "hipHostFree";
@@ -763,8 +796,10 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipLaunchKernel: return "hipLaunchKernel";
     case HIP_API_ID_hipLaunchKernelExC: return "hipLaunchKernelExC";
     case HIP_API_ID_hipLibraryEnumerateKernels: return "hipLibraryEnumerateKernels";
+    case HIP_API_ID_hipLibraryGetGlobal: return "hipLibraryGetGlobal";
     case HIP_API_ID_hipLibraryGetKernel: return "hipLibraryGetKernel";
     case HIP_API_ID_hipLibraryGetKernelCount: return "hipLibraryGetKernelCount";
+    case HIP_API_ID_hipLibraryGetManaged: return "hipLibraryGetManaged";
     case HIP_API_ID_hipLibraryLoadData: return "hipLibraryLoadData";
     case HIP_API_ID_hipLibraryLoadFromFile: return "hipLibraryLoadFromFile";
     case HIP_API_ID_hipLibraryUnload: return "hipLibraryUnload";
@@ -903,7 +938,9 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipOccupancyAvailableDynamicSMemPerBlock: return "hipOccupancyAvailableDynamicSMemPerBlock";
     case HIP_API_ID_hipOccupancyMaxActiveBlocksPerMultiprocessor: return "hipOccupancyMaxActiveBlocksPerMultiprocessor";
     case HIP_API_ID_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags: return "hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags";
+    case HIP_API_ID_hipOccupancyMaxActiveClusters: return "hipOccupancyMaxActiveClusters";
     case HIP_API_ID_hipOccupancyMaxPotentialBlockSize: return "hipOccupancyMaxPotentialBlockSize";
+    case HIP_API_ID_hipOccupancyMaxPotentialClusterSize: return "hipOccupancyMaxPotentialClusterSize";
     case HIP_API_ID_hipPeekAtLastError: return "hipPeekAtLastError";
     case HIP_API_ID_hipPointerGetAttribute: return "hipPointerGetAttribute";
     case HIP_API_ID_hipPointerGetAttributes: return "hipPointerGetAttributes";
@@ -930,6 +967,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipStreamGetAttribute: return "hipStreamGetAttribute";
     case HIP_API_ID_hipStreamGetCaptureInfo: return "hipStreamGetCaptureInfo";
     case HIP_API_ID_hipStreamGetCaptureInfo_v2: return "hipStreamGetCaptureInfo_v2";
+    case HIP_API_ID_hipStreamGetDevResource: return "hipStreamGetDevResource";
     case HIP_API_ID_hipStreamGetDevice: return "hipStreamGetDevice";
     case HIP_API_ID_hipStreamGetFlags: return "hipStreamGetFlags";
     case HIP_API_ID_hipStreamGetId: return "hipStreamGetId";
@@ -1006,6 +1044,9 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipDestroyExternalMemory", name) == 0) return HIP_API_ID_hipDestroyExternalMemory;
   if (strcmp("hipDestroyExternalSemaphore", name) == 0) return HIP_API_ID_hipDestroyExternalSemaphore;
   if (strcmp("hipDestroySurfaceObject", name) == 0) return HIP_API_ID_hipDestroySurfaceObject;
+  if (strcmp("hipDevResourceGenerateDesc", name) == 0) return HIP_API_ID_hipDevResourceGenerateDesc;
+  if (strcmp("hipDevSmResourceSplit", name) == 0) return HIP_API_ID_hipDevSmResourceSplit;
+  if (strcmp("hipDevSmResourceSplitByCount", name) == 0) return HIP_API_ID_hipDevSmResourceSplitByCount;
   if (strcmp("hipDeviceCanAccessPeer", name) == 0) return HIP_API_ID_hipDeviceCanAccessPeer;
   if (strcmp("hipDeviceComputeCapability", name) == 0) return HIP_API_ID_hipDeviceComputeCapability;
   if (strcmp("hipDeviceDisablePeerAccess", name) == 0) return HIP_API_ID_hipDeviceDisablePeerAccess;
@@ -1015,6 +1056,8 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipDeviceGetByPCIBusId", name) == 0) return HIP_API_ID_hipDeviceGetByPCIBusId;
   if (strcmp("hipDeviceGetCacheConfig", name) == 0) return HIP_API_ID_hipDeviceGetCacheConfig;
   if (strcmp("hipDeviceGetDefaultMemPool", name) == 0) return HIP_API_ID_hipDeviceGetDefaultMemPool;
+  if (strcmp("hipDeviceGetDevResource", name) == 0) return HIP_API_ID_hipDeviceGetDevResource;
+  if (strcmp("hipDeviceGetExecutionCtx", name) == 0) return HIP_API_ID_hipDeviceGetExecutionCtx;
   if (strcmp("hipDeviceGetGraphMemAttribute", name) == 0) return HIP_API_ID_hipDeviceGetGraphMemAttribute;
   if (strcmp("hipDeviceGetLimit", name) == 0) return HIP_API_ID_hipDeviceGetLimit;
   if (strcmp("hipDeviceGetMemPool", name) == 0) return HIP_API_ID_hipDeviceGetMemPool;
@@ -1059,6 +1102,14 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipEventRecord", name) == 0) return HIP_API_ID_hipEventRecord;
   if (strcmp("hipEventRecordWithFlags", name) == 0) return HIP_API_ID_hipEventRecordWithFlags;
   if (strcmp("hipEventSynchronize", name) == 0) return HIP_API_ID_hipEventSynchronize;
+  if (strcmp("hipExecutionCtxDestroy", name) == 0) return HIP_API_ID_hipExecutionCtxDestroy;
+  if (strcmp("hipExecutionCtxGetDevResource", name) == 0) return HIP_API_ID_hipExecutionCtxGetDevResource;
+  if (strcmp("hipExecutionCtxGetDevice", name) == 0) return HIP_API_ID_hipExecutionCtxGetDevice;
+  if (strcmp("hipExecutionCtxGetId", name) == 0) return HIP_API_ID_hipExecutionCtxGetId;
+  if (strcmp("hipExecutionCtxRecordEvent", name) == 0) return HIP_API_ID_hipExecutionCtxRecordEvent;
+  if (strcmp("hipExecutionCtxStreamCreate", name) == 0) return HIP_API_ID_hipExecutionCtxStreamCreate;
+  if (strcmp("hipExecutionCtxSynchronize", name) == 0) return HIP_API_ID_hipExecutionCtxSynchronize;
+  if (strcmp("hipExecutionCtxWaitEvent", name) == 0) return HIP_API_ID_hipExecutionCtxWaitEvent;
   if (strcmp("hipExtDisableLogging", name) == 0) return HIP_API_ID_hipExtDisableLogging;
   if (strcmp("hipExtEnableLogging", name) == 0) return HIP_API_ID_hipExtEnableLogging;
   if (strcmp("hipExtGetLastError", name) == 0) return HIP_API_ID_hipExtGetLastError;
@@ -1188,6 +1239,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipGraphicsSubResourceGetMappedArray", name) == 0) return HIP_API_ID_hipGraphicsSubResourceGetMappedArray;
   if (strcmp("hipGraphicsUnmapResources", name) == 0) return HIP_API_ID_hipGraphicsUnmapResources;
   if (strcmp("hipGraphicsUnregisterResource", name) == 0) return HIP_API_ID_hipGraphicsUnregisterResource;
+  if (strcmp("hipGreenCtxCreate", name) == 0) return HIP_API_ID_hipGreenCtxCreate;
   if (strcmp("hipHccModuleLaunchKernel", name) == 0) return HIP_API_ID_hipHccModuleLaunchKernel;
   if (strcmp("hipHostAlloc", name) == 0) return HIP_API_ID_hipHostAlloc;
   if (strcmp("hipHostFree", name) == 0) return HIP_API_ID_hipHostFree;
@@ -1217,8 +1269,10 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipLaunchKernel", name) == 0) return HIP_API_ID_hipLaunchKernel;
   if (strcmp("hipLaunchKernelExC", name) == 0) return HIP_API_ID_hipLaunchKernelExC;
   if (strcmp("hipLibraryEnumerateKernels", name) == 0) return HIP_API_ID_hipLibraryEnumerateKernels;
+  if (strcmp("hipLibraryGetGlobal", name) == 0) return HIP_API_ID_hipLibraryGetGlobal;
   if (strcmp("hipLibraryGetKernel", name) == 0) return HIP_API_ID_hipLibraryGetKernel;
   if (strcmp("hipLibraryGetKernelCount", name) == 0) return HIP_API_ID_hipLibraryGetKernelCount;
+  if (strcmp("hipLibraryGetManaged", name) == 0) return HIP_API_ID_hipLibraryGetManaged;
   if (strcmp("hipLibraryLoadData", name) == 0) return HIP_API_ID_hipLibraryLoadData;
   if (strcmp("hipLibraryLoadFromFile", name) == 0) return HIP_API_ID_hipLibraryLoadFromFile;
   if (strcmp("hipLibraryUnload", name) == 0) return HIP_API_ID_hipLibraryUnload;
@@ -1357,7 +1411,9 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipOccupancyAvailableDynamicSMemPerBlock", name) == 0) return HIP_API_ID_hipOccupancyAvailableDynamicSMemPerBlock;
   if (strcmp("hipOccupancyMaxActiveBlocksPerMultiprocessor", name) == 0) return HIP_API_ID_hipOccupancyMaxActiveBlocksPerMultiprocessor;
   if (strcmp("hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags", name) == 0) return HIP_API_ID_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags;
+  if (strcmp("hipOccupancyMaxActiveClusters", name) == 0) return HIP_API_ID_hipOccupancyMaxActiveClusters;
   if (strcmp("hipOccupancyMaxPotentialBlockSize", name) == 0) return HIP_API_ID_hipOccupancyMaxPotentialBlockSize;
+  if (strcmp("hipOccupancyMaxPotentialClusterSize", name) == 0) return HIP_API_ID_hipOccupancyMaxPotentialClusterSize;
   if (strcmp("hipPeekAtLastError", name) == 0) return HIP_API_ID_hipPeekAtLastError;
   if (strcmp("hipPointerGetAttribute", name) == 0) return HIP_API_ID_hipPointerGetAttribute;
   if (strcmp("hipPointerGetAttributes", name) == 0) return HIP_API_ID_hipPointerGetAttributes;
@@ -1384,6 +1440,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipStreamGetAttribute", name) == 0) return HIP_API_ID_hipStreamGetAttribute;
   if (strcmp("hipStreamGetCaptureInfo", name) == 0) return HIP_API_ID_hipStreamGetCaptureInfo;
   if (strcmp("hipStreamGetCaptureInfo_v2", name) == 0) return HIP_API_ID_hipStreamGetCaptureInfo_v2;
+  if (strcmp("hipStreamGetDevResource", name) == 0) return HIP_API_ID_hipStreamGetDevResource;
   if (strcmp("hipStreamGetDevice", name) == 0) return HIP_API_ID_hipStreamGetDevice;
   if (strcmp("hipStreamGetFlags", name) == 0) return HIP_API_ID_hipStreamGetFlags;
   if (strcmp("hipStreamGetId", name) == 0) return HIP_API_ID_hipStreamGetId;
@@ -1571,6 +1628,37 @@ typedef struct hip_api_data_s {
       hipSurfaceObject_t surfaceObject;
     } hipDestroySurfaceObject;
     struct {
+      hipDevResourceDesc_t* phDesc;
+      hipDevResourceDesc_t phDesc__val;
+      hipDevResource* resources;
+      hipDevResource resources__val;
+      unsigned int nbResources;
+    } hipDevResourceGenerateDesc;
+    struct {
+      hipDevResource* result;
+      hipDevResource result__val;
+      unsigned int nbGroups;
+      const hipDevResource* input;
+      hipDevResource input__val;
+      hipDevResource* remainder;
+      hipDevResource remainder__val;
+      unsigned int flags;
+      hipDevSmResourceGroupParams* groupParams;
+      hipDevSmResourceGroupParams groupParams__val;
+    } hipDevSmResourceSplit;
+    struct {
+      hipDevResource* result;
+      hipDevResource result__val;
+      unsigned int* nbGroups;
+      unsigned int nbGroups__val;
+      const hipDevResource* input;
+      hipDevResource input__val;
+      hipDevResource* remainder;
+      hipDevResource remainder__val;
+      unsigned int flags;
+      unsigned int minCount;
+    } hipDevSmResourceSplitByCount;
+    struct {
       int* canAccessPeer;
       int canAccessPeer__val;
       int deviceId;
@@ -1616,6 +1704,17 @@ typedef struct hip_api_data_s {
       hipMemPool_t mem_pool__val;
       int device;
     } hipDeviceGetDefaultMemPool;
+    struct {
+      hipDevice_t device;
+      hipDevResource* resource;
+      hipDevResource resource__val;
+      hipDevResourceType type;
+    } hipDeviceGetDevResource;
+    struct {
+      hipExecutionCtx_t* ctx;
+      hipExecutionCtx_t ctx__val;
+      int device;
+    } hipDeviceGetExecutionCtx;
     struct {
       int device;
       hipGraphMemAttributeType attr;
@@ -1836,6 +1935,43 @@ typedef struct hip_api_data_s {
     struct {
       hipEvent_t event;
     } hipEventSynchronize;
+    struct {
+      hipExecutionCtx_t ctx;
+    } hipExecutionCtxDestroy;
+    struct {
+      hipExecutionCtx_t ctx;
+      hipDevResource* resource;
+      hipDevResource resource__val;
+      hipDevResourceType type;
+    } hipExecutionCtxGetDevResource;
+    struct {
+      int* device;
+      int device__val;
+      hipExecutionCtx_t ctx;
+    } hipExecutionCtxGetDevice;
+    struct {
+      hipExecutionCtx_t ctx;
+      unsigned long long* ctxId;
+      unsigned long long ctxId__val;
+    } hipExecutionCtxGetId;
+    struct {
+      hipExecutionCtx_t ctx;
+      hipEvent_t event;
+    } hipExecutionCtxRecordEvent;
+    struct {
+      hipStream_t* stream;
+      hipStream_t stream__val;
+      hipExecutionCtx_t greenctx;
+      unsigned int flags;
+      int priority;
+    } hipExecutionCtxStreamCreate;
+    struct {
+      hipExecutionCtx_t ctx;
+    } hipExecutionCtxSynchronize;
+    struct {
+      hipExecutionCtx_t ctx;
+      hipEvent_t event;
+    } hipExecutionCtxWaitEvent;
     struct {
       int device1;
       int device2;
@@ -2638,6 +2774,13 @@ typedef struct hip_api_data_s {
       hipGraphicsResource_t resource;
     } hipGraphicsUnregisterResource;
     struct {
+      hipExecutionCtx_t* ctx;
+      hipExecutionCtx_t ctx__val;
+      hipDevResourceDesc_t desc;
+      int device;
+      unsigned int flags;
+    } hipGreenCtxCreate;
+    struct {
       hipFunction_t f;
       unsigned int globalWorkSizeX;
       unsigned int globalWorkSizeY;
@@ -2809,6 +2952,15 @@ typedef struct hip_api_data_s {
       hipLibrary_t library;
     } hipLibraryEnumerateKernels;
     struct {
+      void** dptr;
+      void* dptr__val;
+      size_t* bytes;
+      size_t bytes__val;
+      hipLibrary_t library;
+      const char* name;
+      char name__val;
+    } hipLibraryGetGlobal;
+    struct {
       hipKernel_t* pKernel;
       hipKernel_t pKernel__val;
       hipLibrary_t library;
@@ -2820,6 +2972,15 @@ typedef struct hip_api_data_s {
       unsigned int count__val;
       hipLibrary_t library;
     } hipLibraryGetKernelCount;
+    struct {
+      void** dptr;
+      void* dptr__val;
+      size_t* bytes;
+      size_t bytes__val;
+      hipLibrary_t library;
+      const char* name;
+      char name__val;
+    } hipLibraryGetManaged;
     struct {
       hipLibrary_t* library;
       hipLibrary_t library__val;
@@ -3787,6 +3948,13 @@ typedef struct hip_api_data_s {
       unsigned int flags;
     } hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags;
     struct {
+      int* numClusters;
+      int numClusters__val;
+      const void* f;
+      const hipLaunchConfig_t* config;
+      hipLaunchConfig_t config__val;
+    } hipOccupancyMaxActiveClusters;
+    struct {
       int* gridSize;
       int gridSize__val;
       int* blockSize;
@@ -3795,6 +3963,13 @@ typedef struct hip_api_data_s {
       size_t dynSharedMemPerBlk;
       int blockSizeLimit;
     } hipOccupancyMaxPotentialBlockSize;
+    struct {
+      int* clusterSize;
+      int clusterSize__val;
+      const void* f;
+      const hipLaunchConfig_t* config;
+      hipLaunchConfig_t config__val;
+    } hipOccupancyMaxPotentialClusterSize;
     struct {
       void* data;
       hipPointer_attribute attribute;
@@ -3924,6 +4099,12 @@ typedef struct hip_api_data_s {
       size_t* numDependencies_out;
       size_t numDependencies_out__val;
     } hipStreamGetCaptureInfo_v2;
+    struct {
+      hipStream_t hStream;
+      hipDevResource* resource;
+      hipDevResource resource__val;
+      hipDevResourceType type;
+    } hipStreamGetDevResource;
     struct {
       hipStream_t stream;
       hipDevice_t* device;
@@ -4298,6 +4479,30 @@ typedef struct hip_api_data_s {
 #define INIT_hipDestroySurfaceObject_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipDestroySurfaceObject.surfaceObject = (hipSurfaceObject_t)surfaceObject; \
 };
+// hipDevResourceGenerateDesc[('hipDevResourceDesc_t*', 'phDesc'), ('hipDevResource*', 'resources'), ('unsigned int', 'nbResources')]
+#define INIT_hipDevResourceGenerateDesc_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipDevResourceGenerateDesc.phDesc = (hipDevResourceDesc_t*)phDesc; \
+  cb_data.args.hipDevResourceGenerateDesc.resources = (hipDevResource*)resources; \
+  cb_data.args.hipDevResourceGenerateDesc.nbResources = (unsigned int)nbResources; \
+};
+// hipDevSmResourceSplit[('hipDevResource*', 'result'), ('unsigned int', 'nbGroups'), ('const hipDevResource*', 'input'), ('hipDevResource*', 'remainder'), ('unsigned int', 'flags'), ('hipDevSmResourceGroupParams*', 'groupParams')]
+#define INIT_hipDevSmResourceSplit_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipDevSmResourceSplit.result = (hipDevResource*)result; \
+  cb_data.args.hipDevSmResourceSplit.nbGroups = (unsigned int)nbGroups; \
+  cb_data.args.hipDevSmResourceSplit.input = (const hipDevResource*)input; \
+  cb_data.args.hipDevSmResourceSplit.remainder = (hipDevResource*)remainder; \
+  cb_data.args.hipDevSmResourceSplit.flags = (unsigned int)flags; \
+  cb_data.args.hipDevSmResourceSplit.groupParams = (hipDevSmResourceGroupParams*)groupParams; \
+};
+// hipDevSmResourceSplitByCount[('hipDevResource*', 'result'), ('unsigned int*', 'nbGroups'), ('const hipDevResource*', 'input'), ('hipDevResource*', 'remainder'), ('unsigned int', 'flags'), ('unsigned int', 'minCount')]
+#define INIT_hipDevSmResourceSplitByCount_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipDevSmResourceSplitByCount.result = (hipDevResource*)result; \
+  cb_data.args.hipDevSmResourceSplitByCount.nbGroups = (unsigned int*)nbGroups; \
+  cb_data.args.hipDevSmResourceSplitByCount.input = (const hipDevResource*)input; \
+  cb_data.args.hipDevSmResourceSplitByCount.remainder = (hipDevResource*)remainder; \
+  cb_data.args.hipDevSmResourceSplitByCount.flags = (unsigned int)flags; \
+  cb_data.args.hipDevSmResourceSplitByCount.minCount = (unsigned int)minCount; \
+};
 // hipDeviceCanAccessPeer[('int*', 'canAccessPeer'), ('int', 'deviceId'), ('int', 'peerDeviceId')]
 #define INIT_hipDeviceCanAccessPeer_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipDeviceCanAccessPeer.canAccessPeer = (int*)canAccess; \
@@ -4343,6 +4548,17 @@ typedef struct hip_api_data_s {
 #define INIT_hipDeviceGetDefaultMemPool_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipDeviceGetDefaultMemPool.mem_pool = (hipMemPool_t*)mem_pool; \
   cb_data.args.hipDeviceGetDefaultMemPool.device = (int)device; \
+};
+// hipDeviceGetDevResource[('hipDevice_t', 'device'), ('hipDevResource*', 'resource'), ('hipDevResourceType', 'type')]
+#define INIT_hipDeviceGetDevResource_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipDeviceGetDevResource.device = (hipDevice_t)device; \
+  cb_data.args.hipDeviceGetDevResource.resource = (hipDevResource*)resource; \
+  cb_data.args.hipDeviceGetDevResource.type = (hipDevResourceType)type; \
+};
+// hipDeviceGetExecutionCtx[('hipExecutionCtx_t*', 'ctx'), ('int', 'device')]
+#define INIT_hipDeviceGetExecutionCtx_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipDeviceGetExecutionCtx.ctx = (hipExecutionCtx_t*)ctx; \
+  cb_data.args.hipDeviceGetExecutionCtx.device = (int)device; \
 };
 // hipDeviceGetGraphMemAttribute[('int', 'device'), ('hipGraphMemAttributeType', 'attr'), ('void*', 'value')]
 #define INIT_hipDeviceGetGraphMemAttribute_CB_ARGS_DATA(cb_data) { \
@@ -4574,6 +4790,47 @@ typedef struct hip_api_data_s {
 // hipEventSynchronize[('hipEvent_t', 'event')]
 #define INIT_hipEventSynchronize_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipEventSynchronize.event = (hipEvent_t)event; \
+};
+// hipExecutionCtxDestroy[('hipExecutionCtx_t', 'ctx')]
+#define INIT_hipExecutionCtxDestroy_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipExecutionCtxDestroy.ctx = (hipExecutionCtx_t)ctx; \
+};
+// hipExecutionCtxGetDevResource[('hipExecutionCtx_t', 'ctx'), ('hipDevResource*', 'resource'), ('hipDevResourceType', 'type')]
+#define INIT_hipExecutionCtxGetDevResource_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipExecutionCtxGetDevResource.ctx = (hipExecutionCtx_t)ctx; \
+  cb_data.args.hipExecutionCtxGetDevResource.resource = (hipDevResource*)resource; \
+  cb_data.args.hipExecutionCtxGetDevResource.type = (hipDevResourceType)type; \
+};
+// hipExecutionCtxGetDevice[('int*', 'device'), ('hipExecutionCtx_t', 'ctx')]
+#define INIT_hipExecutionCtxGetDevice_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipExecutionCtxGetDevice.device = (int*)device; \
+  cb_data.args.hipExecutionCtxGetDevice.ctx = (hipExecutionCtx_t)ctx; \
+};
+// hipExecutionCtxGetId[('hipExecutionCtx_t', 'ctx'), ('unsigned long long*', 'ctxId')]
+#define INIT_hipExecutionCtxGetId_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipExecutionCtxGetId.ctx = (hipExecutionCtx_t)ctx; \
+  cb_data.args.hipExecutionCtxGetId.ctxId = (unsigned long long*)ctxId; \
+};
+// hipExecutionCtxRecordEvent[('hipExecutionCtx_t', 'ctx'), ('hipEvent_t', 'event')]
+#define INIT_hipExecutionCtxRecordEvent_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipExecutionCtxRecordEvent.ctx = (hipExecutionCtx_t)ctx; \
+  cb_data.args.hipExecutionCtxRecordEvent.event = (hipEvent_t)event; \
+};
+// hipExecutionCtxStreamCreate[('hipStream_t*', 'stream'), ('hipExecutionCtx_t', 'greenctx'), ('unsigned int', 'flags'), ('int', 'priority')]
+#define INIT_hipExecutionCtxStreamCreate_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipExecutionCtxStreamCreate.stream = (hipStream_t*)stream; \
+  cb_data.args.hipExecutionCtxStreamCreate.greenctx = (hipExecutionCtx_t)greenctx; \
+  cb_data.args.hipExecutionCtxStreamCreate.flags = (unsigned int)flags; \
+  cb_data.args.hipExecutionCtxStreamCreate.priority = (int)priority; \
+};
+// hipExecutionCtxSynchronize[('hipExecutionCtx_t', 'ctx')]
+#define INIT_hipExecutionCtxSynchronize_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipExecutionCtxSynchronize.ctx = (hipExecutionCtx_t)ctx; \
+};
+// hipExecutionCtxWaitEvent[('hipExecutionCtx_t', 'ctx'), ('hipEvent_t', 'event')]
+#define INIT_hipExecutionCtxWaitEvent_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipExecutionCtxWaitEvent.ctx = (hipExecutionCtx_t)ctx; \
+  cb_data.args.hipExecutionCtxWaitEvent.event = (hipEvent_t)event; \
 };
 // hipExtDisableLogging[]
 #define INIT_hipExtDisableLogging_CB_ARGS_DATA(cb_data) { \
@@ -5364,6 +5621,13 @@ typedef struct hip_api_data_s {
 #define INIT_hipGraphicsUnregisterResource_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipGraphicsUnregisterResource.resource = (hipGraphicsResource_t)resource; \
 };
+// hipGreenCtxCreate[('hipExecutionCtx_t*', 'ctx'), ('hipDevResourceDesc_t', 'desc'), ('int', 'device'), ('unsigned int', 'flags')]
+#define INIT_hipGreenCtxCreate_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipGreenCtxCreate.ctx = (hipExecutionCtx_t*)phCtx; \
+  cb_data.args.hipGreenCtxCreate.desc = (hipDevResourceDesc_t)desc; \
+  cb_data.args.hipGreenCtxCreate.device = (int)device; \
+  cb_data.args.hipGreenCtxCreate.flags = (unsigned int)flags; \
+};
 // hipHccModuleLaunchKernel[('hipFunction_t', 'f'), ('unsigned int', 'globalWorkSizeX'), ('unsigned int', 'globalWorkSizeY'), ('unsigned int', 'globalWorkSizeZ'), ('unsigned int', 'blockDimX'), ('unsigned int', 'blockDimY'), ('unsigned int', 'blockDimZ'), ('size_t', 'sharedMemBytes'), ('hipStream_t', 'hStream'), ('void**', 'kernelParams'), ('void**', 'extra'), ('hipEvent_t', 'startEvent'), ('hipEvent_t', 'stopEvent')]
 #define INIT_hipHccModuleLaunchKernel_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipHccModuleLaunchKernel.f = (hipFunction_t)f; \
@@ -5538,6 +5802,13 @@ typedef struct hip_api_data_s {
   cb_data.args.hipLibraryEnumerateKernels.numKernels = (unsigned int)numKernels; \
   cb_data.args.hipLibraryEnumerateKernels.library = (hipLibrary_t)library; \
 };
+// hipLibraryGetGlobal[('void**', 'dptr'), ('size_t*', 'bytes'), ('hipLibrary_t', 'library'), ('const char*', 'name')]
+#define INIT_hipLibraryGetGlobal_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipLibraryGetGlobal.dptr = (void**)dptr; \
+  cb_data.args.hipLibraryGetGlobal.bytes = (size_t*)bytes; \
+  cb_data.args.hipLibraryGetGlobal.library = (hipLibrary_t)library; \
+  cb_data.args.hipLibraryGetGlobal.name = (name) ? strdup(name) : NULL; \
+};
 // hipLibraryGetKernel[('hipKernel_t*', 'pKernel'), ('hipLibrary_t', 'library'), ('const char*', 'name')]
 #define INIT_hipLibraryGetKernel_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipLibraryGetKernel.pKernel = (hipKernel_t*)kernel; \
@@ -5548,6 +5819,13 @@ typedef struct hip_api_data_s {
 #define INIT_hipLibraryGetKernelCount_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipLibraryGetKernelCount.count = (unsigned int*)count; \
   cb_data.args.hipLibraryGetKernelCount.library = (hipLibrary_t)library; \
+};
+// hipLibraryGetManaged[('void**', 'dptr'), ('size_t*', 'bytes'), ('hipLibrary_t', 'library'), ('const char*', 'name')]
+#define INIT_hipLibraryGetManaged_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipLibraryGetManaged.dptr = (void**)dptr; \
+  cb_data.args.hipLibraryGetManaged.bytes = (size_t*)bytes; \
+  cb_data.args.hipLibraryGetManaged.library = (hipLibrary_t)library; \
+  cb_data.args.hipLibraryGetManaged.name = (name) ? strdup(name) : NULL; \
 };
 // hipLibraryLoadData[('hipLibrary_t*', 'library'), ('const void*', 'code'), ('hipJitOption*', 'jitOptions'), ('void**', 'jitOptionsValues'), ('unsigned int', 'numJitOptions'), ('hipLibraryOption*', 'libraryOptions'), ('void**', 'libraryOptionValues'), ('unsigned int', 'numLibraryOptions')]
 #define INIT_hipLibraryLoadData_CB_ARGS_DATA(cb_data) { \
@@ -6532,6 +6810,12 @@ typedef struct hip_api_data_s {
   cb_data.args.hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags.dynamicSMemSize = (size_t)dynamicSMemSize; \
   cb_data.args.hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags.flags = (unsigned int)flags; \
 };
+// hipOccupancyMaxActiveClusters[('int*', 'numClusters'), ('const void*', 'f'), ('const hipLaunchConfig_t*', 'config')]
+#define INIT_hipOccupancyMaxActiveClusters_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipOccupancyMaxActiveClusters.numClusters = (int*)numClusters; \
+  cb_data.args.hipOccupancyMaxActiveClusters.f = (const void*)f; \
+  cb_data.args.hipOccupancyMaxActiveClusters.config = (const hipLaunchConfig_t*)config; \
+};
 // hipOccupancyMaxPotentialBlockSize[('int*', 'gridSize'), ('int*', 'blockSize'), ('const void*', 'f'), ('size_t', 'dynSharedMemPerBlk'), ('int', 'blockSizeLimit')]
 #define INIT_hipOccupancyMaxPotentialBlockSize_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipOccupancyMaxPotentialBlockSize.gridSize = (int*)gridSize; \
@@ -6539,6 +6823,12 @@ typedef struct hip_api_data_s {
   cb_data.args.hipOccupancyMaxPotentialBlockSize.f = (const void*)f; \
   cb_data.args.hipOccupancyMaxPotentialBlockSize.dynSharedMemPerBlk = (size_t)dynSharedMemPerBlk; \
   cb_data.args.hipOccupancyMaxPotentialBlockSize.blockSizeLimit = (int)blockSizeLimit; \
+};
+// hipOccupancyMaxPotentialClusterSize[('int*', 'clusterSize'), ('const void*', 'f'), ('const hipLaunchConfig_t*', 'config')]
+#define INIT_hipOccupancyMaxPotentialClusterSize_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipOccupancyMaxPotentialClusterSize.clusterSize = (int*)clusterSize; \
+  cb_data.args.hipOccupancyMaxPotentialClusterSize.f = (const void*)f; \
+  cb_data.args.hipOccupancyMaxPotentialClusterSize.config = (const hipLaunchConfig_t*)config; \
 };
 // hipPeekAtLastError[]
 #define INIT_hipPeekAtLastError_CB_ARGS_DATA(cb_data) { \
@@ -6677,6 +6967,12 @@ typedef struct hip_api_data_s {
   cb_data.args.hipStreamGetCaptureInfo_v2.graph_out = (hipGraph_t*)graph_out; \
   cb_data.args.hipStreamGetCaptureInfo_v2.dependencies_out = (const hipGraphNode_t**)dependencies_out; \
   cb_data.args.hipStreamGetCaptureInfo_v2.numDependencies_out = (size_t*)numDependencies_out; \
+};
+// hipStreamGetDevResource[('hipStream_t', 'hStream'), ('hipDevResource*', 'resource'), ('hipDevResourceType', 'type')]
+#define INIT_hipStreamGetDevResource_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipStreamGetDevResource.hStream = (hipStream_t)hStream; \
+  cb_data.args.hipStreamGetDevResource.resource = (hipDevResource*)resource; \
+  cb_data.args.hipStreamGetDevResource.type = (hipDevResourceType)type; \
 };
 // hipStreamGetDevice[('hipStream_t', 'stream'), ('hipDevice_t*', 'device')]
 #define INIT_hipStreamGetDevice_CB_ARGS_DATA(cb_data) { \
@@ -7071,6 +7367,25 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
 // hipDestroySurfaceObject[('hipSurfaceObject_t', 'surfaceObject')]
     case HIP_API_ID_hipDestroySurfaceObject:
       break;
+// hipDevResourceGenerateDesc[('hipDevResourceDesc_t*', 'phDesc'), ('hipDevResource*', 'resources'), ('unsigned int', 'nbResources')]
+    case HIP_API_ID_hipDevResourceGenerateDesc:
+      if (data->args.hipDevResourceGenerateDesc.phDesc) data->args.hipDevResourceGenerateDesc.phDesc__val = *(data->args.hipDevResourceGenerateDesc.phDesc);
+      if (data->args.hipDevResourceGenerateDesc.resources) data->args.hipDevResourceGenerateDesc.resources__val = *(data->args.hipDevResourceGenerateDesc.resources);
+      break;
+// hipDevSmResourceSplit[('hipDevResource*', 'result'), ('unsigned int', 'nbGroups'), ('const hipDevResource*', 'input'), ('hipDevResource*', 'remainder'), ('unsigned int', 'flags'), ('hipDevSmResourceGroupParams*', 'groupParams')]
+    case HIP_API_ID_hipDevSmResourceSplit:
+      if (data->args.hipDevSmResourceSplit.result) data->args.hipDevSmResourceSplit.result__val = *(data->args.hipDevSmResourceSplit.result);
+      if (data->args.hipDevSmResourceSplit.input) data->args.hipDevSmResourceSplit.input__val = *(data->args.hipDevSmResourceSplit.input);
+      if (data->args.hipDevSmResourceSplit.remainder) data->args.hipDevSmResourceSplit.remainder__val = *(data->args.hipDevSmResourceSplit.remainder);
+      if (data->args.hipDevSmResourceSplit.groupParams) data->args.hipDevSmResourceSplit.groupParams__val = *(data->args.hipDevSmResourceSplit.groupParams);
+      break;
+// hipDevSmResourceSplitByCount[('hipDevResource*', 'result'), ('unsigned int*', 'nbGroups'), ('const hipDevResource*', 'input'), ('hipDevResource*', 'remainder'), ('unsigned int', 'flags'), ('unsigned int', 'minCount')]
+    case HIP_API_ID_hipDevSmResourceSplitByCount:
+      if (data->args.hipDevSmResourceSplitByCount.result) data->args.hipDevSmResourceSplitByCount.result__val = *(data->args.hipDevSmResourceSplitByCount.result);
+      if (data->args.hipDevSmResourceSplitByCount.nbGroups) data->args.hipDevSmResourceSplitByCount.nbGroups__val = *(data->args.hipDevSmResourceSplitByCount.nbGroups);
+      if (data->args.hipDevSmResourceSplitByCount.input) data->args.hipDevSmResourceSplitByCount.input__val = *(data->args.hipDevSmResourceSplitByCount.input);
+      if (data->args.hipDevSmResourceSplitByCount.remainder) data->args.hipDevSmResourceSplitByCount.remainder__val = *(data->args.hipDevSmResourceSplitByCount.remainder);
+      break;
 // hipDeviceCanAccessPeer[('int*', 'canAccessPeer'), ('int', 'deviceId'), ('int', 'peerDeviceId')]
     case HIP_API_ID_hipDeviceCanAccessPeer:
       if (data->args.hipDeviceCanAccessPeer.canAccessPeer) data->args.hipDeviceCanAccessPeer.canAccessPeer__val = *(data->args.hipDeviceCanAccessPeer.canAccessPeer);
@@ -7106,6 +7421,14 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
 // hipDeviceGetDefaultMemPool[('hipMemPool_t*', 'mem_pool'), ('int', 'device')]
     case HIP_API_ID_hipDeviceGetDefaultMemPool:
       if (data->args.hipDeviceGetDefaultMemPool.mem_pool) data->args.hipDeviceGetDefaultMemPool.mem_pool__val = *(data->args.hipDeviceGetDefaultMemPool.mem_pool);
+      break;
+// hipDeviceGetDevResource[('hipDevice_t', 'device'), ('hipDevResource*', 'resource'), ('hipDevResourceType', 'type')]
+    case HIP_API_ID_hipDeviceGetDevResource:
+      if (data->args.hipDeviceGetDevResource.resource) data->args.hipDeviceGetDevResource.resource__val = *(data->args.hipDeviceGetDevResource.resource);
+      break;
+// hipDeviceGetExecutionCtx[('hipExecutionCtx_t*', 'ctx'), ('int', 'device')]
+    case HIP_API_ID_hipDeviceGetExecutionCtx:
+      if (data->args.hipDeviceGetExecutionCtx.ctx) data->args.hipDeviceGetExecutionCtx.ctx__val = *(data->args.hipDeviceGetExecutionCtx.ctx);
       break;
 // hipDeviceGetGraphMemAttribute[('int', 'device'), ('hipGraphMemAttributeType', 'attr'), ('void*', 'value')]
     case HIP_API_ID_hipDeviceGetGraphMemAttribute:
@@ -7275,6 +7598,34 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
       break;
 // hipEventSynchronize[('hipEvent_t', 'event')]
     case HIP_API_ID_hipEventSynchronize:
+      break;
+// hipExecutionCtxDestroy[('hipExecutionCtx_t', 'ctx')]
+    case HIP_API_ID_hipExecutionCtxDestroy:
+      break;
+// hipExecutionCtxGetDevResource[('hipExecutionCtx_t', 'ctx'), ('hipDevResource*', 'resource'), ('hipDevResourceType', 'type')]
+    case HIP_API_ID_hipExecutionCtxGetDevResource:
+      if (data->args.hipExecutionCtxGetDevResource.resource) data->args.hipExecutionCtxGetDevResource.resource__val = *(data->args.hipExecutionCtxGetDevResource.resource);
+      break;
+// hipExecutionCtxGetDevice[('int*', 'device'), ('hipExecutionCtx_t', 'ctx')]
+    case HIP_API_ID_hipExecutionCtxGetDevice:
+      if (data->args.hipExecutionCtxGetDevice.device) data->args.hipExecutionCtxGetDevice.device__val = *(data->args.hipExecutionCtxGetDevice.device);
+      break;
+// hipExecutionCtxGetId[('hipExecutionCtx_t', 'ctx'), ('unsigned long long*', 'ctxId')]
+    case HIP_API_ID_hipExecutionCtxGetId:
+      if (data->args.hipExecutionCtxGetId.ctxId) data->args.hipExecutionCtxGetId.ctxId__val = *(data->args.hipExecutionCtxGetId.ctxId);
+      break;
+// hipExecutionCtxRecordEvent[('hipExecutionCtx_t', 'ctx'), ('hipEvent_t', 'event')]
+    case HIP_API_ID_hipExecutionCtxRecordEvent:
+      break;
+// hipExecutionCtxStreamCreate[('hipStream_t*', 'stream'), ('hipExecutionCtx_t', 'greenctx'), ('unsigned int', 'flags'), ('int', 'priority')]
+    case HIP_API_ID_hipExecutionCtxStreamCreate:
+      if (data->args.hipExecutionCtxStreamCreate.stream) data->args.hipExecutionCtxStreamCreate.stream__val = *(data->args.hipExecutionCtxStreamCreate.stream);
+      break;
+// hipExecutionCtxSynchronize[('hipExecutionCtx_t', 'ctx')]
+    case HIP_API_ID_hipExecutionCtxSynchronize:
+      break;
+// hipExecutionCtxWaitEvent[('hipExecutionCtx_t', 'ctx'), ('hipEvent_t', 'event')]
+    case HIP_API_ID_hipExecutionCtxWaitEvent:
       break;
 // hipExtDisableLogging[]
     case HIP_API_ID_hipExtDisableLogging:
@@ -7806,6 +8157,10 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
 // hipGraphicsUnregisterResource[('hipGraphicsResource_t', 'resource')]
     case HIP_API_ID_hipGraphicsUnregisterResource:
       break;
+// hipGreenCtxCreate[('hipExecutionCtx_t*', 'ctx'), ('hipDevResourceDesc_t', 'desc'), ('int', 'device'), ('unsigned int', 'flags')]
+    case HIP_API_ID_hipGreenCtxCreate:
+      if (data->args.hipGreenCtxCreate.ctx) data->args.hipGreenCtxCreate.ctx__val = *(data->args.hipGreenCtxCreate.ctx);
+      break;
 // hipHccModuleLaunchKernel[('hipFunction_t', 'f'), ('unsigned int', 'globalWorkSizeX'), ('unsigned int', 'globalWorkSizeY'), ('unsigned int', 'globalWorkSizeZ'), ('unsigned int', 'blockDimX'), ('unsigned int', 'blockDimY'), ('unsigned int', 'blockDimZ'), ('size_t', 'sharedMemBytes'), ('hipStream_t', 'hStream'), ('void**', 'kernelParams'), ('void**', 'extra'), ('hipEvent_t', 'startEvent'), ('hipEvent_t', 'stopEvent')]
     case HIP_API_ID_hipHccModuleLaunchKernel:
       if (data->args.hipHccModuleLaunchKernel.kernelParams) data->args.hipHccModuleLaunchKernel.kernelParams__val = *(data->args.hipHccModuleLaunchKernel.kernelParams);
@@ -7919,6 +8274,12 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
     case HIP_API_ID_hipLibraryEnumerateKernels:
       if (data->args.hipLibraryEnumerateKernels.kernels) data->args.hipLibraryEnumerateKernels.kernels__val = *(data->args.hipLibraryEnumerateKernels.kernels);
       break;
+// hipLibraryGetGlobal[('void**', 'dptr'), ('size_t*', 'bytes'), ('hipLibrary_t', 'library'), ('const char*', 'name')]
+    case HIP_API_ID_hipLibraryGetGlobal:
+      if (data->args.hipLibraryGetGlobal.dptr) data->args.hipLibraryGetGlobal.dptr__val = *(data->args.hipLibraryGetGlobal.dptr);
+      if (data->args.hipLibraryGetGlobal.bytes) data->args.hipLibraryGetGlobal.bytes__val = *(data->args.hipLibraryGetGlobal.bytes);
+      if (data->args.hipLibraryGetGlobal.name) data->args.hipLibraryGetGlobal.name__val = *(data->args.hipLibraryGetGlobal.name);
+      break;
 // hipLibraryGetKernel[('hipKernel_t*', 'pKernel'), ('hipLibrary_t', 'library'), ('const char*', 'name')]
     case HIP_API_ID_hipLibraryGetKernel:
       if (data->args.hipLibraryGetKernel.pKernel) data->args.hipLibraryGetKernel.pKernel__val = *(data->args.hipLibraryGetKernel.pKernel);
@@ -7927,6 +8288,12 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
 // hipLibraryGetKernelCount[('unsigned int*', 'count'), ('hipLibrary_t', 'library')]
     case HIP_API_ID_hipLibraryGetKernelCount:
       if (data->args.hipLibraryGetKernelCount.count) data->args.hipLibraryGetKernelCount.count__val = *(data->args.hipLibraryGetKernelCount.count);
+      break;
+// hipLibraryGetManaged[('void**', 'dptr'), ('size_t*', 'bytes'), ('hipLibrary_t', 'library'), ('const char*', 'name')]
+    case HIP_API_ID_hipLibraryGetManaged:
+      if (data->args.hipLibraryGetManaged.dptr) data->args.hipLibraryGetManaged.dptr__val = *(data->args.hipLibraryGetManaged.dptr);
+      if (data->args.hipLibraryGetManaged.bytes) data->args.hipLibraryGetManaged.bytes__val = *(data->args.hipLibraryGetManaged.bytes);
+      if (data->args.hipLibraryGetManaged.name) data->args.hipLibraryGetManaged.name__val = *(data->args.hipLibraryGetManaged.name);
       break;
 // hipLibraryLoadData[('hipLibrary_t*', 'library'), ('const void*', 'code'), ('hipJitOption*', 'jitOptions'), ('void**', 'jitOptionsValues'), ('unsigned int', 'numJitOptions'), ('hipLibraryOption*', 'libraryOptions'), ('void**', 'libraryOptionValues'), ('unsigned int', 'numLibraryOptions')]
     case HIP_API_ID_hipLibraryLoadData:
@@ -8463,10 +8830,20 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
     case HIP_API_ID_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags:
       if (data->args.hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags.numBlocks) data->args.hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags.numBlocks__val = *(data->args.hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags.numBlocks);
       break;
+// hipOccupancyMaxActiveClusters[('int*', 'numClusters'), ('const void*', 'f'), ('const hipLaunchConfig_t*', 'config')]
+    case HIP_API_ID_hipOccupancyMaxActiveClusters:
+      if (data->args.hipOccupancyMaxActiveClusters.numClusters) data->args.hipOccupancyMaxActiveClusters.numClusters__val = *(data->args.hipOccupancyMaxActiveClusters.numClusters);
+      if (data->args.hipOccupancyMaxActiveClusters.config) data->args.hipOccupancyMaxActiveClusters.config__val = *(data->args.hipOccupancyMaxActiveClusters.config);
+      break;
 // hipOccupancyMaxPotentialBlockSize[('int*', 'gridSize'), ('int*', 'blockSize'), ('const void*', 'f'), ('size_t', 'dynSharedMemPerBlk'), ('int', 'blockSizeLimit')]
     case HIP_API_ID_hipOccupancyMaxPotentialBlockSize:
       if (data->args.hipOccupancyMaxPotentialBlockSize.gridSize) data->args.hipOccupancyMaxPotentialBlockSize.gridSize__val = *(data->args.hipOccupancyMaxPotentialBlockSize.gridSize);
       if (data->args.hipOccupancyMaxPotentialBlockSize.blockSize) data->args.hipOccupancyMaxPotentialBlockSize.blockSize__val = *(data->args.hipOccupancyMaxPotentialBlockSize.blockSize);
+      break;
+// hipOccupancyMaxPotentialClusterSize[('int*', 'clusterSize'), ('const void*', 'f'), ('const hipLaunchConfig_t*', 'config')]
+    case HIP_API_ID_hipOccupancyMaxPotentialClusterSize:
+      if (data->args.hipOccupancyMaxPotentialClusterSize.clusterSize) data->args.hipOccupancyMaxPotentialClusterSize.clusterSize__val = *(data->args.hipOccupancyMaxPotentialClusterSize.clusterSize);
+      if (data->args.hipOccupancyMaxPotentialClusterSize.config) data->args.hipOccupancyMaxPotentialClusterSize.config__val = *(data->args.hipOccupancyMaxPotentialClusterSize.config);
       break;
 // hipPeekAtLastError[]
     case HIP_API_ID_hipPeekAtLastError:
@@ -8565,6 +8942,10 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
       if (data->args.hipStreamGetCaptureInfo_v2.graph_out) data->args.hipStreamGetCaptureInfo_v2.graph_out__val = *(data->args.hipStreamGetCaptureInfo_v2.graph_out);
       if (data->args.hipStreamGetCaptureInfo_v2.dependencies_out) data->args.hipStreamGetCaptureInfo_v2.dependencies_out__val = *(data->args.hipStreamGetCaptureInfo_v2.dependencies_out);
       if (data->args.hipStreamGetCaptureInfo_v2.numDependencies_out) data->args.hipStreamGetCaptureInfo_v2.numDependencies_out__val = *(data->args.hipStreamGetCaptureInfo_v2.numDependencies_out);
+      break;
+// hipStreamGetDevResource[('hipStream_t', 'hStream'), ('hipDevResource*', 'resource'), ('hipDevResourceType', 'type')]
+    case HIP_API_ID_hipStreamGetDevResource:
+      if (data->args.hipStreamGetDevResource.resource) data->args.hipStreamGetDevResource.resource__val = *(data->args.hipStreamGetDevResource.resource);
       break;
 // hipStreamGetDevice[('hipStream_t', 'stream'), ('hipDevice_t*', 'device')]
     case HIP_API_ID_hipStreamGetDevice:
@@ -8939,6 +9320,43 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << "surfaceObject="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDestroySurfaceObject.surfaceObject);
       oss << ")";
     break;
+    case HIP_API_ID_hipDevResourceGenerateDesc:
+      oss << "hipDevResourceGenerateDesc(";
+      if (data->args.hipDevResourceGenerateDesc.phDesc == NULL) oss << "phDesc=NULL";
+      else { oss << "phDesc="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDevResourceGenerateDesc.phDesc__val); }
+      if (data->args.hipDevResourceGenerateDesc.resources == NULL) oss << ", resources=NULL";
+      else { oss << ", resources="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDevResourceGenerateDesc.resources__val); }
+      oss << ", nbResources="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDevResourceGenerateDesc.nbResources);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipDevSmResourceSplit:
+      oss << "hipDevSmResourceSplit(";
+      if (data->args.hipDevSmResourceSplit.result == NULL) oss << "result=NULL";
+      else { oss << "result="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDevSmResourceSplit.result__val); }
+      oss << ", nbGroups="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDevSmResourceSplit.nbGroups);
+      if (data->args.hipDevSmResourceSplit.input == NULL) oss << ", input=NULL";
+      else { oss << ", input="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDevSmResourceSplit.input__val); }
+      if (data->args.hipDevSmResourceSplit.remainder == NULL) oss << ", remainder=NULL";
+      else { oss << ", remainder="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDevSmResourceSplit.remainder__val); }
+      oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDevSmResourceSplit.flags);
+      if (data->args.hipDevSmResourceSplit.groupParams == NULL) oss << ", groupParams=NULL";
+      else { oss << ", groupParams="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDevSmResourceSplit.groupParams__val); }
+      oss << ")";
+    break;
+    case HIP_API_ID_hipDevSmResourceSplitByCount:
+      oss << "hipDevSmResourceSplitByCount(";
+      if (data->args.hipDevSmResourceSplitByCount.result == NULL) oss << "result=NULL";
+      else { oss << "result="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDevSmResourceSplitByCount.result__val); }
+      if (data->args.hipDevSmResourceSplitByCount.nbGroups == NULL) oss << ", nbGroups=NULL";
+      else { oss << ", nbGroups="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDevSmResourceSplitByCount.nbGroups__val); }
+      if (data->args.hipDevSmResourceSplitByCount.input == NULL) oss << ", input=NULL";
+      else { oss << ", input="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDevSmResourceSplitByCount.input__val); }
+      if (data->args.hipDevSmResourceSplitByCount.remainder == NULL) oss << ", remainder=NULL";
+      else { oss << ", remainder="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDevSmResourceSplitByCount.remainder__val); }
+      oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDevSmResourceSplitByCount.flags);
+      oss << ", minCount="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDevSmResourceSplitByCount.minCount);
+      oss << ")";
+    break;
     case HIP_API_ID_hipDeviceCanAccessPeer:
       oss << "hipDeviceCanAccessPeer(";
       if (data->args.hipDeviceCanAccessPeer.canAccessPeer == NULL) oss << "canAccessPeer=NULL";
@@ -9001,6 +9419,21 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       if (data->args.hipDeviceGetDefaultMemPool.mem_pool == NULL) oss << "mem_pool=NULL";
       else { oss << "mem_pool="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetDefaultMemPool.mem_pool__val); }
       oss << ", device="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetDefaultMemPool.device);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipDeviceGetDevResource:
+      oss << "hipDeviceGetDevResource(";
+      oss << "device="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetDevResource.device);
+      if (data->args.hipDeviceGetDevResource.resource == NULL) oss << ", resource=NULL";
+      else { oss << ", resource="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetDevResource.resource__val); }
+      oss << ", type="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetDevResource.type);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipDeviceGetExecutionCtx:
+      oss << "hipDeviceGetExecutionCtx(";
+      if (data->args.hipDeviceGetExecutionCtx.ctx == NULL) oss << "ctx=NULL";
+      else { oss << "ctx="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetExecutionCtx.ctx__val); }
+      oss << ", device="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetExecutionCtx.device);
       oss << ")";
     break;
     case HIP_API_ID_hipDeviceGetGraphMemAttribute:
@@ -9313,6 +9746,59 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
     case HIP_API_ID_hipEventSynchronize:
       oss << "hipEventSynchronize(";
       oss << "event="; roctracer::hip_support::detail::operator<<(oss, data->args.hipEventSynchronize.event);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipExecutionCtxDestroy:
+      oss << "hipExecutionCtxDestroy(";
+      oss << "ctx="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExecutionCtxDestroy.ctx);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipExecutionCtxGetDevResource:
+      oss << "hipExecutionCtxGetDevResource(";
+      oss << "ctx="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExecutionCtxGetDevResource.ctx);
+      if (data->args.hipExecutionCtxGetDevResource.resource == NULL) oss << ", resource=NULL";
+      else { oss << ", resource="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExecutionCtxGetDevResource.resource__val); }
+      oss << ", type="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExecutionCtxGetDevResource.type);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipExecutionCtxGetDevice:
+      oss << "hipExecutionCtxGetDevice(";
+      if (data->args.hipExecutionCtxGetDevice.device == NULL) oss << "device=NULL";
+      else { oss << "device="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExecutionCtxGetDevice.device__val); }
+      oss << ", ctx="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExecutionCtxGetDevice.ctx);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipExecutionCtxGetId:
+      oss << "hipExecutionCtxGetId(";
+      oss << "ctx="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExecutionCtxGetId.ctx);
+      if (data->args.hipExecutionCtxGetId.ctxId == NULL) oss << ", ctxId=NULL";
+      else { oss << ", ctxId="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExecutionCtxGetId.ctxId__val); }
+      oss << ")";
+    break;
+    case HIP_API_ID_hipExecutionCtxRecordEvent:
+      oss << "hipExecutionCtxRecordEvent(";
+      oss << "ctx="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExecutionCtxRecordEvent.ctx);
+      oss << ", event="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExecutionCtxRecordEvent.event);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipExecutionCtxStreamCreate:
+      oss << "hipExecutionCtxStreamCreate(";
+      if (data->args.hipExecutionCtxStreamCreate.stream == NULL) oss << "stream=NULL";
+      else { oss << "stream="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExecutionCtxStreamCreate.stream__val); }
+      oss << ", greenctx="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExecutionCtxStreamCreate.greenctx);
+      oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExecutionCtxStreamCreate.flags);
+      oss << ", priority="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExecutionCtxStreamCreate.priority);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipExecutionCtxSynchronize:
+      oss << "hipExecutionCtxSynchronize(";
+      oss << "ctx="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExecutionCtxSynchronize.ctx);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipExecutionCtxWaitEvent:
+      oss << "hipExecutionCtxWaitEvent(";
+      oss << "ctx="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExecutionCtxWaitEvent.ctx);
+      oss << ", event="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExecutionCtxWaitEvent.event);
       oss << ")";
     break;
     case HIP_API_ID_hipExtDisableLogging:
@@ -10382,6 +10868,15 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << "resource="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphicsUnregisterResource.resource);
       oss << ")";
     break;
+    case HIP_API_ID_hipGreenCtxCreate:
+      oss << "hipGreenCtxCreate(";
+      if (data->args.hipGreenCtxCreate.ctx == NULL) oss << "ctx=NULL";
+      else { oss << "ctx="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGreenCtxCreate.ctx__val); }
+      oss << ", desc="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGreenCtxCreate.desc);
+      oss << ", device="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGreenCtxCreate.device);
+      oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGreenCtxCreate.flags);
+      oss << ")";
+    break;
     case HIP_API_ID_hipHccModuleLaunchKernel:
       oss << "hipHccModuleLaunchKernel(";
       oss << "f="; roctracer::hip_support::detail::operator<<(oss, data->args.hipHccModuleLaunchKernel.f);
@@ -10611,6 +11106,17 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << ", library="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryEnumerateKernels.library);
       oss << ")";
     break;
+    case HIP_API_ID_hipLibraryGetGlobal:
+      oss << "hipLibraryGetGlobal(";
+      if (data->args.hipLibraryGetGlobal.dptr == NULL) oss << "dptr=NULL";
+      else { oss << "dptr="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetGlobal.dptr__val); }
+      if (data->args.hipLibraryGetGlobal.bytes == NULL) oss << ", bytes=NULL";
+      else { oss << ", bytes="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetGlobal.bytes__val); }
+      oss << ", library="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetGlobal.library);
+      if (data->args.hipLibraryGetGlobal.name == NULL) oss << ", name=NULL";
+      else { oss << ", name="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetGlobal.name__val); }
+      oss << ")";
+    break;
     case HIP_API_ID_hipLibraryGetKernel:
       oss << "hipLibraryGetKernel(";
       if (data->args.hipLibraryGetKernel.pKernel == NULL) oss << "pKernel=NULL";
@@ -10625,6 +11131,17 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       if (data->args.hipLibraryGetKernelCount.count == NULL) oss << "count=NULL";
       else { oss << "count="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetKernelCount.count__val); }
       oss << ", library="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetKernelCount.library);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipLibraryGetManaged:
+      oss << "hipLibraryGetManaged(";
+      if (data->args.hipLibraryGetManaged.dptr == NULL) oss << "dptr=NULL";
+      else { oss << "dptr="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetManaged.dptr__val); }
+      if (data->args.hipLibraryGetManaged.bytes == NULL) oss << ", bytes=NULL";
+      else { oss << ", bytes="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetManaged.bytes__val); }
+      oss << ", library="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetManaged.library);
+      if (data->args.hipLibraryGetManaged.name == NULL) oss << ", name=NULL";
+      else { oss << ", name="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetManaged.name__val); }
       oss << ")";
     break;
     case HIP_API_ID_hipLibraryLoadData:
@@ -11869,6 +12386,15 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags.flags);
       oss << ")";
     break;
+    case HIP_API_ID_hipOccupancyMaxActiveClusters:
+      oss << "hipOccupancyMaxActiveClusters(";
+      if (data->args.hipOccupancyMaxActiveClusters.numClusters == NULL) oss << "numClusters=NULL";
+      else { oss << "numClusters="; roctracer::hip_support::detail::operator<<(oss, data->args.hipOccupancyMaxActiveClusters.numClusters__val); }
+      oss << ", f="; roctracer::hip_support::detail::operator<<(oss, data->args.hipOccupancyMaxActiveClusters.f);
+      if (data->args.hipOccupancyMaxActiveClusters.config == NULL) oss << ", config=NULL";
+      else { oss << ", config="; roctracer::hip_support::detail::operator<<(oss, data->args.hipOccupancyMaxActiveClusters.config__val); }
+      oss << ")";
+    break;
     case HIP_API_ID_hipOccupancyMaxPotentialBlockSize:
       oss << "hipOccupancyMaxPotentialBlockSize(";
       if (data->args.hipOccupancyMaxPotentialBlockSize.gridSize == NULL) oss << "gridSize=NULL";
@@ -11878,6 +12404,15 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << ", f="; roctracer::hip_support::detail::operator<<(oss, data->args.hipOccupancyMaxPotentialBlockSize.f);
       oss << ", dynSharedMemPerBlk="; roctracer::hip_support::detail::operator<<(oss, data->args.hipOccupancyMaxPotentialBlockSize.dynSharedMemPerBlk);
       oss << ", blockSizeLimit="; roctracer::hip_support::detail::operator<<(oss, data->args.hipOccupancyMaxPotentialBlockSize.blockSizeLimit);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipOccupancyMaxPotentialClusterSize:
+      oss << "hipOccupancyMaxPotentialClusterSize(";
+      if (data->args.hipOccupancyMaxPotentialClusterSize.clusterSize == NULL) oss << "clusterSize=NULL";
+      else { oss << "clusterSize="; roctracer::hip_support::detail::operator<<(oss, data->args.hipOccupancyMaxPotentialClusterSize.clusterSize__val); }
+      oss << ", f="; roctracer::hip_support::detail::operator<<(oss, data->args.hipOccupancyMaxPotentialClusterSize.f);
+      if (data->args.hipOccupancyMaxPotentialClusterSize.config == NULL) oss << ", config=NULL";
+      else { oss << ", config="; roctracer::hip_support::detail::operator<<(oss, data->args.hipOccupancyMaxPotentialClusterSize.config__val); }
       oss << ")";
     break;
     case HIP_API_ID_hipPeekAtLastError:
@@ -12065,6 +12600,14 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       else { oss << ", dependencies_out="; roctracer::hip_support::detail::operator<<(oss, (void*)data->args.hipStreamGetCaptureInfo_v2.dependencies_out__val); }
       if (data->args.hipStreamGetCaptureInfo_v2.numDependencies_out == NULL) oss << ", numDependencies_out=NULL";
       else { oss << ", numDependencies_out="; roctracer::hip_support::detail::operator<<(oss, data->args.hipStreamGetCaptureInfo_v2.numDependencies_out__val); }
+      oss << ")";
+    break;
+    case HIP_API_ID_hipStreamGetDevResource:
+      oss << "hipStreamGetDevResource(";
+      oss << "hStream="; roctracer::hip_support::detail::operator<<(oss, data->args.hipStreamGetDevResource.hStream);
+      if (data->args.hipStreamGetDevResource.resource == NULL) oss << ", resource=NULL";
+      else { oss << ", resource="; roctracer::hip_support::detail::operator<<(oss, data->args.hipStreamGetDevResource.resource__val); }
+      oss << ", type="; roctracer::hip_support::detail::operator<<(oss, data->args.hipStreamGetDevResource.type);
       oss << ")";
     break;
     case HIP_API_ID_hipStreamGetDevice:

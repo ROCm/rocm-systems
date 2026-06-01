@@ -201,7 +201,7 @@ space, regardless of other optimizations that may be possible.
 Also note that the ``filter`` parameter passed in as a kernel argument (see
 :dev-sample:`example <vmem.hip>` and
 :ref:`design note <flat-experiment-design>`) is set to zero on the host, such
-that we always write to the :doc:`local </conceptual/local-data-share>` (LDS)
+that we always write to the :doc:`local </conceptual/cdna/local-data-share>` (LDS)
 memory allocation ``lds``.
 
 Examining this kernel in the VMEM Instruction Mix table yields:

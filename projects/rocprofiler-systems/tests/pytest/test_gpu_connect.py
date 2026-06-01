@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 """
 Tests for GPU connectivity
@@ -10,7 +10,11 @@ import pytest
 from pathlib import Path
 from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.gpu, pytest.mark.xgmi, pytest.mark.ci_enable]
+pytestmark = [
+    pytest.mark.gpu,
+    pytest.mark.xgmi,
+    pytest.mark.rocm,
+]
 
 # =============================================================================
 # GPU connectivity fixtures
@@ -24,7 +28,7 @@ def gpu_connect_env() -> dict[str, str]:
         "ROCPROFSYS_TRACE": "ON",
         "ROCPROFSYS_TRACE_LEGACY": "ON",
         "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api",
-        "ROCPROFSYS_AMD_SMI_METRICS": "busy,temp,power,xgmi,pcie",
+        "ROCPROFSYS_AMD_SMI_METRICS": "busy,temp,power,xgmi,pcie,gfx_clock,mem_clock",
         "ROCPROFSYS_SAMPLING_CPUS": "none",
         "ROCPROFSYS_USE_SAMPLING": "OFF",
         "ROCPROFSYS_PROCESS_SAMPLING_FREQ": "50",
@@ -49,19 +53,19 @@ def gpu_connect_rules(validation_rules_dir: Path) -> list[Path]:
 
 @pytest.mark.multi_gpu(2)
 @pytest.mark.run_if_gpu_category("not apu or instinct")
-class TestGPUConnect(RocprofsysTest):
+class TestTransferBench(RocprofsysTest):
     """Tests for GPU connectivity tests."""
 
+    @pytest.mark.timeout(120)
     @pytest.mark.parametrize(
         "mode", [pytest.param("sys_run", marks=pytest.mark.rocpd("gpu_connect_env"))]
     )
-    def test_transferbench(self, mode, gpu_connect_env, gpu_connect_rules):
+    def test(self, mode, gpu_connect_env, gpu_connect_rules):
         result = self.run_test(
             mode,
             "transferBench",
             env=gpu_connect_env,
             check_target_arch=True,
-            timeout=120,
         )
         if "Error: No valid transfers created" in result.test_output:
             pytest.skip("No valid transfers created")

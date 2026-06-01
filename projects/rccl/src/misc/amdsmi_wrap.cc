@@ -16,13 +16,9 @@ static int is_wsl2 = -1;
 #define AMDSMICHECK(cmd) do {                \
   amdsmi_status_t ret = cmd;                 \
   if( ret != AMDSMI_STATUS_SUCCESS ) {       \
-    if (pfn_amdsmi_status_code_to_string) {  \
-      const char *err;                       \
-      pfn_amdsmi_status_code_to_string(ret, &err); \
-      ERROR("AMD SMI failure: %s at line: %d in file: %s", err, __LINE__, __FILE__); \
-    } else {                                 \
-      ERROR("AMD SMI failure: status %d at line: %d in file: %s", (int)ret, __LINE__, __FILE__); \
-    }                                        \
+    const char *err;                         \
+    pfn_amdsmi_status_code_to_string(ret, &err);         \
+    ERROR("AMD SMI failure: %s at line: %d in file: %s", err, __LINE__, __FILE__);    \
     return ncclInternalError;                \
   }                                          \
 } while(false)
@@ -40,45 +36,15 @@ static int is_wsl2 = -1;
     return ncclInternalError; /* missing symbol is not a warned error */ \
   amdsmi_status_t ret = pfn_##name(__VA_ARGS__); \
   if( ret != AMDSMI_STATUS_SUCCESS ) {       \
-    if (pfn_amdsmi_status_code_to_string) {  \
-      const char *err;                       \
-      pfn_amdsmi_status_code_to_string(ret, &err); \
-      ERROR("AMD SMI failure: %s at line: %d in file: %s", err, __LINE__, __FILE__); \
-    } else {                                 \
-      ERROR("AMD SMI failure: status %d at line: %d in file: %s", (int)ret, __LINE__, __FILE__); \
-    }                                        \
+    const char *err;                         \
+    pfn_amdsmi_status_code_to_string(ret, &err); \
+    ERROR("AMD SMI failure: %s at line: %d in file: %s", err, __LINE__, __FILE__);    \
     return ncclInternalError;                \
   }                                          \
 } while(0)
 
-#define AMDSMITRYSET(name, result, ...) do { \
-  if (!AMDSMI_DIRECT && pfn_##name == nullptr) { \
-    result = ncclInternalError; \
-    return ncclInternalError; /* missing symbol is not a warned error */ \
-  } \
-  amdsmi_status_t ret = pfn_##name(__VA_ARGS__); \
-  if( ret != AMDSMI_STATUS_SUCCESS ) {       \
-    if (pfn_amdsmi_status_code_to_string) {  \
-      const char *err;                       \
-      pfn_amdsmi_status_code_to_string(ret, &err); \
-      ERROR("AMD SMI failure: %s at line: %d in file: %s", err, __LINE__, __FILE__); \
-    } else {                                 \
-      ERROR("AMD SMI failure: status %d at line: %d in file: %s", (int)ret, __LINE__, __FILE__); \
-    }                                        \
-    result = ncclInternalError; \
-    return ncclInternalError;                \
-  }                                          \
-} while(0)
+RCCL_PARAM(UseAmdSmiLib, "USE_AMD_SMI_LIB", 0); // Opt-in environment variable for enabling using amd_smi_lib instead of internal code
 
-// Disabled by default due to a critical concurrency issue in amdsmi library init
-// (communicated to the amdsmi team). Once a known ROCm version ships with the fix,
-// re-enable the version-gated default here (e.g. #if ROCM_VERSION >= <fixed_version>)
-// and update this comment with the resolved ROCm version.
-// Users can opt-in in the meantime by setting RCCL_USE_AMD_SMI_LIB=1.
-#define AMDSMI_DEFAULT_ENABLED 0
-
-// Enable use of amd_smi_lib instead of internal ARSMI code by default; set RCCL_USE_AMD_SMI_LIB=1 to enable amd_smi_lib and use the AMD SMI path
-RCCL_PARAM(UseAmdSmiLib, "USE_AMD_SMI_LIB", AMDSMI_DEFAULT_ENABLED);
 #include <dlfcn.h>
 #define RCCL_AMDSMI_FN(name, rettype, arglist) rettype(*pfn_##name)arglist = nullptr;
 
@@ -128,7 +94,6 @@ namespace {
   ncclResult_t fabricInitResult = ncclSuccess;
   ncclResult_t amdSmiInitResult = ncclSuccess;
   std::atomic<bool> amdSmiInitCalled{false};  // Track if amd_smi_init has been called
-  std::mutex amdsmiInitLock;
 }
 
 /*************************************************************************
@@ -174,7 +139,10 @@ static bool amd_smi_FabricFunctionsLoaded() {
  * Existing AMD SMI Wrapper Functions
  ************************************************************************/
 
-static ncclResult_t amd_smi_init_impl() {
+ncclResult_t amd_smi_init() {
+  // Ensure we only initialize once
+  if (amdSmiInitCalled.exchange(true)) return amdSmiInitResult;
+
   if (__atomic_load_n(&is_wsl2, __ATOMIC_ACQUIRE) == -1)
     __atomic_store_n(&is_wsl2, (access("/dev/dxg", F_OK) == -1) ? 0 : 1, __ATOMIC_RELEASE);
   if (__atomic_load_n(&is_wsl2, __ATOMIC_ACQUIRE)) {
@@ -187,6 +155,7 @@ static ncclResult_t amd_smi_init_impl() {
       static void *libhandle = dlopen("libamd_smi.so", RTLD_NOW);
       if (libhandle == nullptr) {
         WARN("Failed to open libamd_smi.so");
+        amdSmiInitResult = ncclInternalError;
         return ncclInternalError;
       }
 
@@ -214,7 +183,7 @@ static ncclResult_t amd_smi_init_impl() {
         {(void**)&pfn_amdsmi_free_fabric_telemetry, "amdsmi_free_fabric_telemetry"},
         {(void**)&pfn_amdsmi_get_fw_info, "amdsmi_get_fw_info"},
       };
-      for (Symbol sym: symbols) {
+      for(Symbol sym: symbols) {
         *sym.ppfn = dlsym(libhandle, sym.name);
       }
     }
@@ -235,20 +204,6 @@ static ncclResult_t amd_smi_init_impl() {
     INFO(NCCL_INIT, "initialized internal alternative rsmi functionality");
   }
   return ncclSuccess;
-}
-
-ncclResult_t amd_smi_init() {
-  // Ensure we only initialize once and avoid grabbing the mutex for every call
-  if (!amdSmiInitCalled.load(std::memory_order_acquire)) {
-    std::lock_guard<std::mutex> lock(amdsmiInitLock);
-    if (!amdSmiInitCalled.load(std::memory_order_relaxed)) {
-      // Always cache the result and mark init as done regardless of outcome
-      // (WSL2 skip, dlopen failure, AMDSMI/ARSMI errors all included)
-      amdSmiInitResult = amd_smi_init_impl();
-      amdSmiInitCalled.store(true, std::memory_order_release);
-    }
-  }
-  return amdSmiInitResult;
 }
 
 ncclResult_t amd_smi_shutdown() {
@@ -348,18 +303,12 @@ ncclResult_t amd_smi_getDevicePciBusIdString(uint32_t deviceIndex, char* busId, 
         ERROR("amdsmi_lib: device index %u not found", deviceIndex);
         return ncclInternalError;
       }
-      // borrowing NCCL's format from utils.cc:int64ToBusId
-      // !! To be reconciled after discussion with amdsmi team !!
-      snprintf(busId, len, "%04lx:%02lx:%02lx.%01lx", (id) >> 32, (id & 0xff00) >> 8, (id & 0xf8) >> 3, (id & 0x7));
-      // snprintf(busId, len, "%04lx:%02lx:%02lx.%01lx", (id) >> 20, (id & 0xff000) >> 12, (id & 0xff0) >> 4, (id & 0xf));
     } else {
-    // rocm-smi format
       ARSMICHECK(ARSMI_dev_pci_id_get(deviceIndex, &id));
-      // ARSMI uses the same BDF packing as rocm_smi.
-      // Keep this formatting identical to rocm_smi_wrap to avoid
-      // generating inconsistent PCI IDs in topology XML.
-      snprintf(busId, len, "%04lx:%02lx:%02lx.%01lx", (id) >> 32, (id & 0xff00) >> 8, (id & 0xf8) >> 3, (id & 0x7));
     }
+    // borrowing NCCL's format from utils.cc:int64ToBusId
+    // !! To be reconciled after discussion with amdsmi team !!
+    snprintf(busId, len, "%04lx:%02lx:%02lx.%01lx", (id) >> 32, (id & 0xff00) >> 8, (id & 0xf8) >> 3, (id & 0x7));
   }
   return ncclSuccess;
 }
@@ -509,7 +458,14 @@ ncclResult_t amd_smi_getLinkInfo(int srcIndex, int dstIndex, amdsmi_link_type_t*
       ARSMI_linkInfo tinfo;
       ARSMICHECK(ARSMI_topo_get_link_info(srcIndex, dstIndex, &tinfo));
 
-      *type  = (amdsmi_link_type_t) tinfo.type;
+      // ARSMI_IO_LINK_TYPE and amdsmi_link_type_t are NOT value-compatible:
+      //   ARSMI: UNDEFINED=0, PCIEXPRESS=1, XGMI=2
+      //   amdsmi: INTERNAL=0, XGMI=1, PCIE=2, NOT_APPLICABLE=3, UNKNOWN=4
+      switch (tinfo.type) {
+        case ARSMI_IOLINK_TYPE_PCIEXPRESS: *type = AMDSMI_LINK_TYPE_PCIE; break;
+        case ARSMI_IOLINK_TYPE_XGMI:       *type = AMDSMI_LINK_TYPE_XGMI; break;
+        default:                           *type = AMDSMI_LINK_TYPE_UNKNOWN; break;
+      }
       if (*type == AMDSMI_LINK_TYPE_XGMI && (tinfo.weight == 15 ||
         tinfo.weight == 41 || tinfo.weight == 13)) {
         *hops = 1;
@@ -547,22 +503,7 @@ ncclResult_t amd_smi_getFirmwareVersion(uint32_t deviceIndex, uint64_t* fwVersio
     }
     *fwVersion = info.fw_info_list[0].fw_version;
   } else {
-    // Read MEC firmware version from sysfs; path may not exist on card0, so search all cards until found
-    constexpr uint32_t maxCards = 128;
-    *fwVersion = 0;
-    for (uint32_t card = 0; card < maxCards; card++) {
-      char path[256];
-      snprintf(path, sizeof(path), "/sys/class/drm/card%u/device/fw_version/mec_fw_version", card);
-      FILE* fp = fopen(path, "r");
-      if (fp != nullptr) {
-        char line[64];
-        if (fgets(line, sizeof(line), fp) != nullptr) {
-          *fwVersion = strtoull(line, nullptr, 16);
-        }
-        fclose(fp);
-        break;
-      }
-    }
+    ARSMICHECK(ARSMI_get_fw_version(deviceIndex, fwVersion));
   }
   return ncclSuccess;
 }
@@ -573,6 +514,7 @@ ncclResult_t amd_smi_getFirmwareVersion(uint32_t deviceIndex, uint64_t* fwVersio
  * These functions provide access to AMD's UALoE fabric for scale-up
  * networking, similar to how nvmlwrap.cc provides MNNVL support for NVIDIA.
  ************************************************************************/
+
 
 ncclResult_t amd_smi_ensureFabricInitialized() {
   // Optimization to avoid repeatedly grabbing the lock when we only want to
@@ -591,93 +533,97 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
   if (fabricInitialized) return fabricInitResult;
   fabricInitialized = true;
 
-  // Fabric requires amd_smi_lib
-  if (!rcclParamUseAmdSmiLib()) {
-    INFO(NCCL_INIT, "UALoE fabric detection skipped: RCCL_USE_AMD_SMI_LIB not set");
-    fabricInitResult = ncclSuccess;
-    return fabricInitResult;
-  }
-
-  // WSL2 doesn't support fabric
+  // WSL2 has no GPU fabric support on either path
   if (__atomic_load_n(&is_wsl2, __ATOMIC_ACQUIRE)) {
     INFO(NCCL_INIT, "UALoE fabric detection skipped: WSL2 environment");
     fabricInitResult = ncclSuccess;
     return fabricInitResult;
   }
 
-  // Get device count
+  bool useSysfs = !rcclParamUseAmdSmiLib();
+
+  // Get and validate device count (common to both paths)
   uint32_t numDevs = 0;
-  ncclResult_t res = amd_smi_getNumDevice(&numDevs);
-  if (res != ncclSuccess) {
-    fabricInitResult = res;
+  if (amd_smi_getNumDevice(&numDevs) != ncclSuccess || numDevs == 0) {
+    fabricInitResult = ncclSuccess;
     return fabricInitResult;
   }
-
-  if (numDevs > amdsmiFabricMaxDevices) {
-    WARN("AMD SMI fabric: device count %u exceeds max %d, truncating",
-         numDevs, amdsmiFabricMaxDevices);
+  if (numDevs > (uint32_t)amdsmiFabricMaxDevices) {
+    WARN("%s fabric: device count %u exceeds max %d, truncating",
+         useSysfs ? "ARSMI" : "AMD SMI", numDevs, amdsmiFabricMaxDevices);
     numDevs = amdsmiFabricMaxDevices;
   }
-
   amdsmiFabricDeviceCount = numDevs;
 
-  // Initialize fabric info for each device
   for (uint32_t d = 0; d < numDevs; d++) {
     struct amdsmiFabricDeviceInfo* devInfo = &amdsmiFabricDevices[d];
     memset(devInfo, 0, sizeof(*devInfo));
 
-    amdsmi_processor_handle procHandle;
-    if (getProcessorHandle(d, &procHandle) != ncclSuccess || !amd_smi_FabricFunctionsLoaded()) {
-      WARN("AMD SMI fabric: unable to get processor handle or fabric functions not loaded for device %u, skipping fabric detection", d);
-      devInfo->fabricSupported = false;
-      continue;
+    if (useSysfs) {
+      ARSMI_fabricInfo arsmiInfo;
+      if (ARSMI_get_fabric_info(d, &arsmiInfo) != 0) {
+        devInfo->fabricSupported = false;
+        continue;
+      }
+      devInfo->fabricSupported = (bool)arsmiInfo.supported;
+      devInfo->fabricType      = (amdsmi_fabric_type_t)arsmiInfo.fabric_type;
+      devInfo->state           = (amdsmi_fabric_accelerator_vpod_state_t)arsmiInfo.accel_state;
+      devInfo->acceleratorId   = arsmiInfo.accel_id;
+      devInfo->bandwidth       = arsmiInfo.bandwidth;
+      devInfo->latency         = arsmiInfo.latency;
+      memcpy(devInfo->clusterUuid, arsmiInfo.ppod_id, sizeof(devInfo->clusterUuid));
+      devInfo->ppodSize        = arsmiInfo.ppod_size;
+      devInfo->cliqueId        = arsmiInfo.vpod_id;
+      devInfo->vpodSize        = arsmiInfo.vpod_size;
+    } else {
+      amdsmi_processor_handle procHandle;
+      if (getProcessorHandle(d, &procHandle) != ncclSuccess || !amd_smi_FabricFunctionsLoaded()) {
+        WARN("AMD SMI fabric: unable to get processor handle or fabric functions not loaded for device %u, skipping fabric detection", d);
+        devInfo->fabricSupported = false;
+        continue;
+      }
+      amdsmi_fabric_info_t fabricInfo;
+      memset(&fabricInfo, 0, sizeof(fabricInfo));
+      amdsmi_status_t status = pfn_amdsmi_get_gpu_fabric_info(procHandle, &fabricInfo);
+      if (status != AMDSMI_STATUS_SUCCESS) {
+        devInfo->fabricSupported = false;
+        continue;
+      }
+      if (fabricInfo.fabric_info.version != AMDSMI_FABRIC_INFO_CURRENT_VERSION) {
+        WARN("AMD SMI fabric: unexpected fabric info version %u for device %u, expected %u",
+             fabricInfo.fabric_info.version, d, AMDSMI_FABRIC_INFO_CURRENT_VERSION);
+        devInfo->fabricSupported = false;
+        continue;
+      }
+      const amdsmi_fabric_info_v1_t* v1 = &fabricInfo.fabric_info.fabric_version.v1;
+      devInfo->fabricSupported = ((v1->fabric_type == AMDSMI_FABRIC_TYPE_UALOE ||
+                                   v1->fabric_type == AMDSMI_FABRIC_TYPE_UALLINK) &&
+                                  (v1->accel_state == AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE ||
+                                   v1->accel_state == AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY));
+      devInfo->fabricType    = v1->fabric_type;
+      devInfo->state         = v1->accel_state;
+      devInfo->acceleratorId = v1->accelerator_id;
+      devInfo->bandwidth     = v1->bandwidth;
+      devInfo->latency       = v1->latency;
+      memcpy(devInfo->clusterUuid, v1->ppod_id, sizeof(v1->ppod_id));
+      devInfo->ppodSize      = v1->ppod_size;
+      devInfo->cliqueId      = v1->vpod_id;
+      devInfo->vpodSize      = v1->vpod_size;
     }
-
-    // Query fabric info from AMD SMI
-    amdsmi_fabric_info_t fabricInfo;
-    memset(&fabricInfo, 0, sizeof(fabricInfo));
-
-
-    amdsmi_status_t status = pfn_amdsmi_get_gpu_fabric_info(procHandle, &fabricInfo);
-    if (status != AMDSMI_STATUS_SUCCESS) {
-      devInfo->fabricSupported = false;
-      continue;
-    }
-    // Check fabric info version
-    if (fabricInfo.info.version != AMDSMI_FABRIC_INFO_CURRENT_VERSION) {
-      WARN("AMD SMI fabric: unexpected fabric info version %u for device %u, expected %u",
-         fabricInfo.info.version, d, AMDSMI_FABRIC_INFO_CURRENT_VERSION);
-      devInfo->fabricSupported = false;
-      continue;
-    }
-
-    // Populate cached info from v1 structure
-    const amdsmi_fabric_info_v1_t* v1 = &fabricInfo.info.v1;
-    devInfo->fabricSupported = (v1->fabric_type == AMDSMI_FABRIC_TYPE_UALOE &&
-                               (v1->accel_state == AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE ||
-                                v1->accel_state == AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY));
-    devInfo->fabricType = v1->fabric_type;
-    devInfo->state = v1->accel_state;
-    devInfo->acceleratorId = v1->accelerator_id;
-    devInfo->bandwidth = v1->bandwidth;
-    devInfo->latency = v1->latency;
-    memcpy(devInfo->clusterUuid, v1->ppod_id, sizeof(v1->ppod_id));
-    devInfo->ppodSize = v1->ppod_size;
-    devInfo->cliqueId = v1->vpod_id;
-    devInfo->vpodSize = v1->vpod_size;
 
     if (devInfo->fabricSupported) {
       uint64_t uuidHigh, uuidLow;
       memcpy(&uuidHigh, devInfo->clusterUuid, sizeof(uint64_t));
-      memcpy(&uuidLow, devInfo->clusterUuid + sizeof(uint64_t), sizeof(uint64_t));
-      INFO(NCCL_INIT, "GPU %d: UALoE fabric detected - accelId=%u bw=%uMb/s lat=%uns vpod=%u/%u uuid=%lx.%lx ppod_size=%u",
-         d, devInfo->acceleratorId, devInfo->bandwidth, devInfo->latency,
-         devInfo->cliqueId, devInfo->vpodSize, uuidHigh, uuidLow, devInfo->ppodSize);
+      memcpy(&uuidLow,  devInfo->clusterUuid + sizeof(uint64_t), sizeof(uint64_t));
+      const char* typeStr = (devInfo->fabricType == AMDSMI_FABRIC_TYPE_UALLINK) ? "UALLink" : "UALoE";
+      INFO(NCCL_INIT, "GPU %d: %s fabric detected%s - accelId=%u bw=%uMb/s lat=%uns vpod=%u/%u uuid=%lx.%lx ppod_size=%u",
+           d, typeStr, useSysfs ? " (sysfs)" : "",
+           devInfo->acceleratorId, devInfo->bandwidth, devInfo->latency,
+           devInfo->cliqueId, devInfo->vpodSize, uuidHigh, uuidLow, devInfo->ppodSize);
     }
-
   }
 
-  fabricInitResult = amd_smi_FabricFunctionsLoaded()? ncclSuccess : ncclInternalError;
+  fabricInitResult = ncclSuccess;
   return fabricInitResult;
 }
 
@@ -766,7 +712,7 @@ ncclResult_t amd_smi_freeFabricTelemetry(uint32_t deviceIndex,
 
 const char* amd_smi_fabricTelemIdToString(uint64_t telemId) {
   if (pfn_amdsmi_fabric_telem_id_to_string == nullptr) {
-    return "UNKNOWN";
+    return ARSMI_fabric_telem_id_to_string(telemId);
   }
   return pfn_amdsmi_fabric_telem_id_to_string(telemId);
 }

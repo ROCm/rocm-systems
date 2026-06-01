@@ -374,6 +374,26 @@ hsaKmtCreateQueueExt(
     );
 
 /**
+  Creates a GPU queue with user-mode access rights
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtCreateQueueV2(
+    HSAuint32           NodeId,                           //IN
+    HSA_QUEUE_TYPE      Type,                             //IN
+    HSAuint32           QueuePercentage,                  //IN
+    HSA_QUEUE_PRIORITY  Priority,                         //IN
+    HSAuint32           SdmaEngineId,                     //IN
+    void*               QueueAddress,                     //IN
+    HSAuint64           QueueSizeInBytes,                 //IN
+    HSAuint64           MetaDataPrefetchSizeInBytes,      //IN
+    HsaEvent*           Event,                            //IN
+    HsaQueueResource*   QueueResource                     //OUT
+    );
+
+
+/**
   Updates a queue
 */
 
@@ -551,6 +571,33 @@ hsaKmtRegisterGraphicsHandleToNodesExt(
     HSAuint64       NumberOfNodes,                 //IN
     HSAuint32*      NodeArray,                     //IN
     HSA_REGISTER_MEM_FLAGS RegisterFlags           //IN
+    );
+
+/**
+  Imports an external semaphore (e.g. from Vulkan) into ROCr's KMD
+  context, returning an opaque handle. The HSA-layer queue signal/wait
+  API that consumes the resulting handle has not landed yet; for now
+  the handle round-trips through hsaKmtDestroyExternalSemaphore only.
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtImportExternalSemaphore(
+    HSAuint32                          NodeId,    //IN
+    void                              *NtHandle,  //IN, Win32 NT handle
+    HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE Type,      //IN
+    HSA_EXTERNAL_SEMAPHORE_HANDLE     *OutHandle  //OUT
+    );
+
+/**
+  Releases an external semaphore previously imported via
+  hsaKmtImportExternalSemaphore.
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtDestroyExternalSemaphore(
+    HSA_EXTERNAL_SEMAPHORE_HANDLE Handle   //IN
     );
 
 /**

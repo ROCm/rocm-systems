@@ -21,6 +21,8 @@ THE SOFTWARE.
 */
 #include "rdc_lib/impl/RdcRocpLib.h"
 
+#include <dlfcn.h>
+
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -45,7 +47,12 @@ RdcRocpLib::RdcRocpLib()
   // must happen before library is loaded
   rdc_unset_hsa_tools_lib();
 
-  rdc_status_t status = lib_loader_.load("librdc_rocp.so");
+  // Load with RTLD_GLOBAL so that rocprofiler_configure (defined in librdc_rocp.so)
+  // is visible globally. This is required for rocprofiler-sdk tool registration:
+  // when hsa_init() is called later, rocprofiler searches for the rocprofiler_configure
+  // symbol in the global namespace. Without RTLD_GLOBAL, the symbol is only visible
+  // within the library and rocprofiler cannot discover the tool.
+  rdc_status_t status = lib_loader_.load("librdc_rocp.so", RTLD_LAZY | RTLD_GLOBAL);
   if (status != RDC_ST_OK) {
     RDC_LOG(RDC_ERROR, "Rocp related function will not work.");
     return;

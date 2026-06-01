@@ -38,7 +38,11 @@ env:
   PATH: "/usr/bin:$PATH"
   EXCLUDED_PATHS: "external /tmp/build/external"
   GLOBAL_CMAKE_OPTIONS: "-DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON"
+  ENABLE_ROCR_BUILD: "false"
   ENABLE_HIP_CLR_BUILD: "false"
+  ENABLE_ROCPROFILER_REGISTER_BUILD: "false"
+  ENABLE_AQLPROFILE_BUILD: "false"
+  INSTALL_NIGHTLY_ROCM: "false"
 
 jobs:
   analyze:
@@ -96,9 +100,10 @@ jobs:
         sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
         git config --global --add safe.directory '*'
 
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         sparse-checkout: |
+          .github/actions/rocprofiler-sdk-util
           projects/rocprofiler-sdk
           projects/clr
           projects/hip
@@ -114,33 +119,21 @@ jobs:
         build-mode: ${{ matrix.build-mode }}
         queries: security-extended
 
-    - name: Build and Install HIP
+    - name: Build ROCProfiler SDK Dependencies
       if: ${{ env.ENABLE_HIP_CLR_BUILD == 'true' }}
-      shell: bash
-      working-directory: projects
-      run: |
-        export HIP_DIR=$PWD/hip
-        export CLR_DIR=$PWD/clr
-        export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
-        export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
-        echo "Install HIP..."
-        cd $CLR_DIR
-        pip install CppHeaderParser
-        cmake \
-          -DHIP_COMMON_DIR=$HIP_DIR \
-          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-          -DHIP_PLATFORM=amd \
-          -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm' \
-          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }} \
-          -DHIP_LLVM_ROOT=${{ env.ROCM_PATH }}/lib/llvm \
-          -DHIP_CATCH_TEST=0 \
-          -DCLR_BUILD_HIP=ON \
-          -DCLR_BUILD_OCL=ON \
-          -S $CLR_DIR \
-          -B build
-        cmake --build build --target all --parallel 8
-        cmake --build build --target install
-        echo "✅ HIP Installation complete!"
+      uses: ./.github/actions/rocprofiler-sdk-util
+      with:
+        rocm-path: ${{ env.ROCM_PATH }}
+        gpu-target: 'gfx94X'
+        compiler-launcher: /usr/bin/ccache
+        enable-rocr-build: ${{ env.ENABLE_ROCR_BUILD }}
+        enable-hip-clr-build: ${{ env.ENABLE_HIP_CLR_BUILD }}
+        enable-rocprofiler-register-build: ${{ env.ENABLE_ROCPROFILER_REGISTER_BUILD }}
+        enable-aqlprofile-build: ${{ env.ENABLE_AQLPROFILE_BUILD }}
+        install-nightly-rocm: ${{ env.INSTALL_NIGHTLY_ROCM }}
+        build-jobs: '8'
+        ccache-key: ccache-codeql-ubuntu-22.04-gfx94X
+        ccache-variant: ccache
 
     - name: Configure and Build
       timeout-minutes: 30

@@ -1,0 +1,17 @@
+diff --git a/packages/opencode/src/session/retry.ts b/packages/opencode/src/session/retry.ts
+index 12fd4d345..c49fe913b 100644
+--- a/packages/opencode/src/session/retry.ts
++++ b/packages/opencode/src/session/retry.ts
+@@ -52,6 +52,12 @@ export function delay(attempt: number, error?: MessageV2.APIError) {
+ }
+ 
+ export function retryable(error: Err) {
++  // perfxpert: allow users to short-circuit client-side retry loops entirely.
++  // When PERFXPERT_DISABLE_RATE_LIMIT_RETRY=1 is set, surface rate-limit and
++  // other retry-eligible errors to the caller immediately instead of sleeping.
++  const disableRetry = process.env["PERFXPERT_DISABLE_RATE_LIMIT_RETRY"]
++  if (disableRetry === "1" || disableRetry === "true") return undefined
++
+   // context overflow errors should not be retried
+   if (MessageV2.ContextOverflowError.isInstance(error)) return undefined
+   if (MessageV2.APIError.isInstance(error)) {

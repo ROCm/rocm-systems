@@ -1,0 +1,77 @@
+# fusion_patterns — common HIP kernel-fusion recipes the Compute
+# Specialist quotes when `kernel_fusion.find_fusion_candidates` returns
+# adjacent short-kernel pairs. Each entry is a declarative recipe;
+# deterministic ranking uses `expected_impact / effort_factor`.
+#
+# Phase-10 Feature A.
+
+version: 1
+
+patterns:
+  - id: elementwise_fuse_elementwise
+    name: "Elementwise + Elementwise -> Single Kernel"
+    description: >
+      Two consecutive pointwise kernels (add, mul, relu, gelu, ...) over the
+      same tensor layout — fuse into a single pass to eliminate one launch
+      overhead and one HBM round-trip of the intermediate tensor.
+    trigger:
+      adjacent_short_kernels: true
+      same_tensor_signature: true
+      ops: [add, sub, mul, div, relu, gelu, tanh, sigmoid]
+    expected_impact: 0.25    # typical 15-35% time-saved on elementwise-bound regions
+    units: time_saved_fraction
+    # source: https://rocm.docs.amd.com/en/latest/how_to/kernel_fusion.html
+    effort_factor: 1.0
+    risk: low
+    verify_counters: [SQ_INSTS_VALU, TCP_TCC_READ_REQ_sum]
+
+  - id: elementwise_epilogue_fuse
+    name: "Elementwise + Reduce -> Epilogue Fuse"
+    description: >
+      An elementwise op immediately before a reduction (sum, mean, max, min)
+      can be folded into the reduction's epilogue, saving the intermediate
+      write-back and a launch.
+    trigger:
+      adjacent_short_kernels: true
+      last_op_is_reduce: true
+    expected_impact: 0.30
+    units: time_saved_fraction
+    effort_factor: 1.2
+    risk: low
+    verify_counters: [SQ_INSTS_VALU, TCC_WRITE_sum]
+
+  - id: normalization_residual_fuse
+    name: "Normalization + Residual -> Single Pass"
+    description: >
+      LayerNorm / RMSNorm followed by an add-residual can share the same
+      load of the input tensor and write once, eliminating one HBM read.
+    trigger:
+      adjacent_short_kernels: true
+      ops: [layer_norm, rms_norm, batch_norm]
+      followed_by: [add, residual]
+    expected_impact: 0.35
+    units: time_saved_fraction
+    effort_factor: 1.5
+    risk: medium
+    verify_counters: [TCC_HIT_sum, TCC_MISS_sum, TCC_EA_RDREQ_sum]
+
+  - id: gemm_bias_activation_epilogue
+    name: "GEMM + Bias-Add + Activation -> Single Kernel"
+    description: >
+      Fuse bias-add and activation into the GEMM epilogue via MFMA-epilogue
+      hooks (rocBLAS / hipBLASLt extAPI) — eliminates two full HBM passes
+      and is the single highest-leverage fusion on transformer inference.
+    trigger:
+      adjacent_short_kernels: true
+      ops_sequence: [gemm, bias_add, activation]
+    expected_impact: 0.45
+    units: time_saved_fraction
+    # source: https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/design/extension-api.html
+    effort_factor: 2.0
+    risk: medium
+    verify_counters: [SQ_INSTS_VALU_MFMA, TCC_EA_RDREQ_sum]
+
+notes: |
+  Fusion ≠ correctness: every candidate must be verified with a bitwise
+  check (Gate 3) before acceptance. The Compute Specialist proposes
+  patches in pseudocode form only and hands off to the Correctness agent.

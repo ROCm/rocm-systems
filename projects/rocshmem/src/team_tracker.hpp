@@ -47,6 +47,17 @@ class Team;
 class TeamTracker {
  public:
   /**
+   * @brief Number of pool slots reserved for predefined teams.
+   * When IPC is enabled: TEAM_WORLD + TEAM_SHARED.
+   * Otherwise: TEAM_WORLD only (TEAM_SHARED is TEAM_INVALID).
+   */
+#if defined(USE_IPC)
+  static constexpr size_t NUM_RESERVED_TEAMS = 2;
+#else
+  static constexpr size_t NUM_RESERVED_TEAMS = 1;
+#endif
+
+  /**
    * @brief Primary constructor
    */
   TeamTracker();
@@ -87,7 +98,7 @@ class TeamTracker {
    *
    * @return number of teams currently being tracked
    */
-  int get_num_user_teams() { return teams_.size(); }
+  size_t get_num_user_teams() { return teams_.size(); }
 
   /**
    * @brief Get maximum number of teams supported by tracker
@@ -112,6 +123,22 @@ class TeamTracker {
    */
   __host__ void set_team_world(Team* team_world) { team_world_ = team_world; }
 
+  /**
+   * @brief Get team shared pointer
+   *
+   * @return team shared pointer
+   */
+  __host__ Team* get_team_shared() { return team_shared_; }
+
+  /**
+   * @brief Set team shared pointer
+   *
+   * @param[in] team_shared pointer
+   *
+   * @return void
+   */
+  __host__ void set_team_shared(Team* team_shared) { team_shared_ = team_shared; }
+
  private:
   /**
    * @brief List of teams created by the user.
@@ -119,18 +146,21 @@ class TeamTracker {
   std::vector<rocshmem_team_t> teams_{};
 
   /**
-   * @brief The maximum number of teams the user can create.
-   *
-   * This constraint is required since the library needs to
-   * pre-allocate resources (e.g. LDS, working arrays, etc.)
-   * for teams.
+   * @brief Total pool capacity: user-requested teams plus the
+   * predefined teams.  This is the size used to pre-allocate
+   * resources (e.g. LDS, working arrays, bitmask, etc.).
    */
-  size_t max_num_teams_{envvar::max_num_teams};
+  size_t max_num_teams_{envvar::max_num_teams + NUM_RESERVED_TEAMS};
 
   /**
    * @brief Pointer to implementation of ROCSHMEM_TEAM_WORLD
    */
   Team* team_world_{nullptr};
+
+  /**
+   * @brief Pointer to implementation of ROCSHMEM_TEAM_SHARED
+   */
+  Team* team_shared_{nullptr};
 };
 
 }  // namespace rocshmem

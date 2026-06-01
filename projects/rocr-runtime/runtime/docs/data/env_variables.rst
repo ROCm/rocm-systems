@@ -77,7 +77,7 @@
 
     * - | ``HSA_ENABLE_MWAITX``
         | When mwaitx is enabled, on AMD CPUs, runtime will hint to the CPU to go into lower power-states when doing busy loops by using the mwaitx instruction.
-      - ``0``
+      - ``1``
       - | 0: Disable
         | 1: Enable
 

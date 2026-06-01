@@ -39,17 +39,19 @@ endif()
 ###############################################################################
 # CONFIGURATION OPTIONS
 ###############################################################################
-option(DEBUG "Enable debug trace" OFF)
+
 option(PROFILE "Enable statistics and timing support" OFF)
 option(USE_RO "Enable RO conduit" ON)
 option(USE_IPC "Enable IPC support (using HIP)" OFF)
 option(USE_GDA "Enable GDA conduit" OFF)
+option(USE_SDMA "Enable SDMA transport (MI300X+)" OFF)
 option(USE_THREADS "Enable workgroup threads to share network queues" OFF)
 option(USE_WF_COAL "Enable wavefront message coalescing" OFF)
 option(USE_HEAP_DEVICE_FINEGRAIN "Heap uses GPU memory in finegrain mode" ON)
 option(USE_HEAP_DEVICE_UNCACHED "Heap uses GPU memory in uncached mode" OFF)
 option(USE_HEAP_DEVICE_COARSEGRAIN "Heap uses GPU memory in coarsegrain mode" OFF)
 option(USE_HEAP_DEVICE_VMM_POSIX "Heap uses GPU memory with VMM and POSIX FD IPC (requires ROCm 7.0+)" OFF)
+option(USE_HEAP_DEVICE_VMM_FABRIC "Heap uses GPU memory with VMM and Fabric handles (requires ROCm 7.next)" OFF)
 option(USE_FUNC_CALL "Force compiler to use function calls on library API" OFF)
 option(USE_SHARED_CTX "Request support for shared ctx between WG" OFF)
 option(USE_SINGLE_NODE "Enable single node support only." OFF)
@@ -59,11 +61,15 @@ option(USE_HDP_FLUSH_HOST_SIDE "Use a polling thread to flush the HDP cache on t
 option(BUILD_FUNCTIONAL_TESTS "Build the functional tests (Requires MPI)" OFF)
 option(BUILD_EXAMPLES "Build the examples" OFF)
 option(BUILD_UNIT_TESTS "Build the unit tests (Requires MPI)" OFF)
-option(BUILD_TESTS_ONLY "Build only tests. Used to link agains rocSHMEM in a ROCm Release" OFF)
+option(BUILD_PYTHON_TESTS "Install rocshmem4py test assets (RO execution requires MPI launcher, Python, pip)" OFF)
+option(BUILD_TESTS_ONLY "Build only tests. Used to link against rocSHMEM in a ROCm Release" OFF)
 option(BUILD_TOOLS "Build binary tools (e.g., rocshmem_info)" ON)
 
 option(BUILD_LOCAL_GPU_TARGET_ONLY "Build only for GPUs detected on this machine" OFF)
 option(BUILD_CODE_COVERAGE "Build with code coverage flags (gcc only)" OFF)
+option(BUILD_DEBUG_TRACE_HOST "Compile in host-side trace logging (LOG_API/TRACE)" OFF)
+option(BUILD_DEBUG_TRACE_DEVICE "Compile in device-side trace logging (LOGD_API/TRACE)" OFF)
+option(BUILD_DEBUG_DEVICE "Compile in device-side logging (LOGD_WARN/INFO and GDA error checking)" OFF)
 
 option(GDA_IONIC "Build for AMD Pensando IONIC RDMA provider" OFF)
 option(GDA_BNXT "Build for Broadcom RDMA provider" OFF)
@@ -78,12 +84,7 @@ set_property(CACHE USE_EXTERNAL_MPI PROPERTY STRINGS AUTO ON OFF)
 include(${CMAKE_SOURCE_DIR}/cmake/setup_project.cmake)
 
 ## Setup VERSION
-file(READ include/rocshmem/rocshmem.hpp header_text)
-if("${header_text}" MATCHES "constexpr char VERSION\\[\\] *= \"([0-9]+)\\.([0-9]+)\\.([0-9]+)\";")
-  set(VERSION_STRING ${CMAKE_MATCH_1}.${CMAKE_MATCH_2}.${CMAKE_MATCH_3})
-else()
-  message(FATAL_ERROR "Failed to parse Version")
-endif()
+set(VERSION_STRING 3.4.0)
 message(STATUS "rocSHMEM Version: " "${VERSION_STRING}")
 
 project(rocshmem VERSION ${VERSION_STRING} LANGUAGES CXX)
@@ -105,19 +106,61 @@ if(USE_HEAP_DEVICE_VMM_POSIX)
 endif()
 
 #############################################################################
+# DETECT POD CAPABILITY
+#############################################################################
+# Try to find AMD SMI library
+find_library(AMDSMI_LIBRARY
+  NAMES amd_smi
+  PATHS /opt/rocm/lib /opt/rocm/lib64
+  NO_DEFAULT_PATH
+)
+
+if(AMDSMI_LIBRARY)
+  # Check if the library has the amdsmi_get_gpu_fabric_info function
+  include(CheckLibraryExists)
+  check_library_exists(${AMDSMI_LIBRARY} amdsmi_get_gpu_fabric_info "" HAVE_AMDSMI_GPU_FABRIC_INFO)
+
+  if(HAVE_AMDSMI_GPU_FABRIC_INFO)
+    message(STATUS "AMD SMI library found with fabric info support - enabling pod-based IPC capability detection")
+  else()
+    message(STATUS "AMD SMI library found but lacks amdsmi_get_gpu_fabric_info - disabling pod-based IPC capability detection")
+  endif()
+else()
+  message(STATUS "AMD SMI library not found - disabling pod-based IPC capability detection")
+endif()
+
+#############################################################################
+# VALIDATE VMM FABRIC ALLOCATOR OPTION
+#############################################################################
+if(USE_HEAP_DEVICE_VMM_FABRIC)
+  if(${ROCM_MAJOR_VERSION} LESS 7)
+    message(FATAL_ERROR "USE_HEAP_DEVICE_VMM_FABRIC requires ROCm 7.next or newer. Current ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}")
+  endif()
+
+  # VMM Fabric allocator requires fabric info support for pod-based IPC
+  if(NOT HAVE_AMDSMI_GPU_FABRIC_INFO)
+    message(FATAL_ERROR "USE_HEAP_DEVICE_VMM_FABRIC requires AMD SMI library with amdsmi_get_gpu_fabric_info support. "
+                        "Either update to a newer AMD SMI version or disable USE_HEAP_DEVICE_VMM_FABRIC.")
+  endif()
+
+  # Note: Fabric handle support will be available in a future ROCm 7.x release
+  message(STATUS "USE_HEAP_DEVICE_VMM_FABRIC enabled. Requires fabric handle support (ROCm 7.next)")
+endif()
+
+#############################################################################
 # SET GPU ARCHITECTURES
 #############################################################################
 include(cmake/rocm_local_targets.cmake)
 
 set(DEFAULT_GPUS
-    gfx90a:xnack-;
-    gfx90a:xnack+;
+    gfx90a;
     gfx1100;
     gfx1201;
     gfx942)
 
 if(${ROCM_MAJOR_VERSION} GREATER 6)
   list(APPEND DEFAULT_GPUS gfx950)
+  list(APPEND DEFAULT_GPUS gfx1250)
 endif()
 
 if($ENV{BUILD_LOCAL_GPU_TARGET_ONLY})
@@ -154,11 +197,29 @@ message(STATUS "Compiling for ${GPU_TARGETS}")
 if (NOT BUILD_TESTS_ONLY)
   add_library(${PROJECT_NAME})
   add_library(roc::${PROJECT_NAME} ALIAS ${PROJECT_NAME})
-  add_subdirectory(src)
 
   #############################################################################
   # PACKAGE DEPENDENCIES
   #############################################################################
+  # GDA Requires libnuma
+  if(USE_GDA)
+    find_path(NUMA_INCLUDE_DIR NAMES numa.h)
+    find_library(NUMA_LIBRARY NAMES numa)
+
+    include(FindPackageHandleStandardArgs)
+    find_package_handle_standard_args(NUMA DEFAULT_MSG NUMA_LIBRARY NUMA_INCLUDE_DIR)
+
+    # Usually you would have to add libnuma to target but we use dlopen
+
+    if (NOT NUMA_FOUND)
+      message(STATUS "libnuma not found. Unable to build GDA")
+      set(USE_GDA OFF)
+      set(GDA_IONIC OFF)
+      set(GDA_BNXT OFF)
+      set(GDA_MLX5 OFF)
+    endif()
+  endif()
+
   if (NOT USE_EXTERNAL_MPI STREQUAL "OFF")
     find_package(MPI)
   else()
@@ -181,6 +242,10 @@ if (NOT BUILD_TESTS_ONLY)
 
   find_package(hip REQUIRED PATHS /opt/rocm)
   find_package(hsa-runtime64 REQUIRED)
+
+  if (USE_SDMA)
+    find_package(hsakmt REQUIRED PATHS /opt/rocm)
+  endif()
 
   set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
   set(THREADS_PREFER_PTHREAD_FLAG TRUE)
@@ -206,7 +271,55 @@ if (NOT BUILD_TESTS_ONLY)
     set(HAVE_DEVICE_MALLOC_UNCACHED OFF)
   endif()
 
+  execute_process(
+    COMMAND git -C "${PROJECT_SOURCE_DIR}" rev-parse HEAD
+    OUTPUT_VARIABLE ROCSHMEM_GIT_HASH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+  if(NOT ROCSHMEM_GIT_HASH)
+    set(ROCSHMEM_GIT_HASH "unknown")
+  endif()
+
+  string(REPLACE ";" " " ROCSHMEM_OFFLOAD_TARGETS "${GPU_TARGETS}")
+
+  set(_backends "")
+  if(USE_GDA)
+    set(_gda_nics "")
+    foreach(_nic IN ITEMS IONIC BNXT MLX5)
+      if(GDA_${_nic})
+        list(APPEND _gda_nics "${_nic}")
+      endif()
+    endforeach()
+    list(JOIN _gda_nics "/" _gda_providers)
+    list(APPEND _backends "GDA(${_gda_providers})")
+  endif()
+  if(USE_RO)
+    list(APPEND _backends "RO")
+  endif()
+  if(USE_IPC)
+    list(APPEND _backends "IPC")
+  endif()
+
+  if(_backends)
+    list(JOIN _backends "+" ROCSHMEM_BACKEND)
+  else()
+    set(ROCSHMEM_BACKEND "NONE")
+  endif()
+  set(ROCSHMEM_VENDOR_STRING "rocSHMEM_v${VERSION_STRING}_${ROCSHMEM_BACKEND}")
+
   configure_file(cmake/rocshmem_config.h.in include/rocshmem/rocshmem_config.h)
+
+  # Embed rocshmem_config.h as a C++17 raw string literal so build_info.cpp
+  # (and the rocshmem_info tool) can display it without reading the file at runtime.
+  file(READ "${CMAKE_BINARY_DIR}/include/rocshmem/rocshmem_config.h" _config_content)
+  file(WRITE "${CMAKE_BINARY_DIR}/include/rocshmem/rocshmem_config_embedded.hpp"
+    "// Auto-generated from rocshmem_config.h — do not edit.\n"
+    "#pragma once\n"
+    "static const char rocshmem_config_h_content[] = R\"ROCSHMEM_CFG_END(\n"
+    "${_config_content}"
+    ")ROCSHMEM_CFG_END\";\n"
+  )
 
   #############################################################################
   # LINKING AND INCLUDE DIRECTORIES
@@ -215,6 +328,10 @@ if (NOT BUILD_TESTS_ONLY)
     ${PROJECT_NAME}
     PUBLIC
       -fgpu-rdc
+    PRIVATE
+      -Wall
+      -Wextra
+      -ffile-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/=
   )
 
   target_include_directories(
@@ -238,6 +355,7 @@ if (NOT BUILD_TESTS_ONLY)
       hsa-runtime64::hsa-runtime64
       -fgpu-rdc
       $<$<NOT:$<BOOL:${FILESYSTEM_NO_LINK_NEEDED}>>:stdc++fs>
+      $<$<BOOL:${USE_SDMA}>:hsakmt::hsakmt>
   )
 
   if(${ROCM_MAJOR_VERSION} LESS 7)
@@ -269,8 +387,9 @@ if (NOT BUILD_TESTS_ONLY)
   )
 
   if (BUILD_TOOLS)
+    add_subdirectory(tools)
     rocm_install(
-      PROGRAMS "${CMAKE_BINARY_DIR}/src/tools/rocshmem_info"
+      PROGRAMS "${CMAKE_BINARY_DIR}/tools/rocshmem_info"
       DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
   endif()
@@ -296,6 +415,13 @@ if (NOT BUILD_TESTS_ONLY)
     DESCRIPTION "ROCm OpenSHMEM (rocSHMEM)"
     MAINTAINER "rocSHMEM Maintainer <rocshmem-maintainer@amd.com>"
   )
+endif (NOT BUILD_TESTS_ONLY)
+
+###############################################################################
+# TEST SUBDIRECTORIES
+###############################################################################
+if (NOT BUILD_TESTS_ONLY)
+  add_subdirectory(src)
 endif (NOT BUILD_TESTS_ONLY)
 
 ###############################################################################

@@ -15,7 +15,7 @@ This test runner provides a maintainable, extensible alternative to shell-based 
 - **Custom Library Support**: Use pre-built RCCL libraries from custom locations via environment variables
 - **Configurable Build System**: Customize CMake options, environment variables, and parallel jobs via config
 - **MPI Support**: Full support for multi-rank and multi-node tests
-- **Flexible Test Filtering**: Run all tests, specific test suites, or individual tests
+- **Flexible Test Filtering**: Both `--test-name` and `--suite-name` accept gtest-style glob patterns (`P2P*` = prefix, `*SHM*` = contains, `*:-NET*` = exclude; colon = OR; case-sensitive); filter by individual test name or by suite name
 - **Build Integration**: Automated RCCL building with CMake
 - **Code Coverage**: Integrated LLVM coverage report generation (HTML and text)
 - **Clean Output**: Automatic filtering of MPI verbose messages (enable with --verbose)
@@ -32,8 +32,20 @@ python test_runner.py --config my_tests.json
 # Run with verbose output
 python test_runner.py --config my_tests.json --verbose
 
-# Run specific test by name
+# Run a specific test by exact name (searches all enabled suites for a match)
 python test_runner.py --config my_tests.json --test-name SHM_ComprehensiveWorkflow
+
+# Run all tests whose name starts with 'P2P' (glob prefix match)
+python test_runner.py --config my_tests.json --test-name "P2P_*"
+
+# Run multiple tests (colon-separated globs)
+python test_runner.py --config my_tests.json --test-name "P2P_*:SHM_Basic"
+
+# Run all suites whose name starts with 'P2P' (glob prefix match)
+python test_runner.py --config my_tests.json --suite-name "P2P*"
+
+# Run two specific suites by exact name (colon-separated)
+python test_runner.py --config my_tests.json --suite-name "P2P Tests - 2-Rank:P2P Tests - 4-Rank"
 ```
 
 ### Generate Coverage Report
@@ -74,11 +86,12 @@ python test_runner.py --config test_config_sample.json --rerun-failed --verbose
 python test_runner.py --config test_config_sample.json --rerun-failed --stop-on-rerun-failure
 ```
 
-### Skip MPI Installation Check
+### Skip MPI Tests
 
 ```bash
-# Skip MPI validation if MPI is not installed or not needed for your tests
-python test_runner.py --config test_config_sample.json --skip-mpi-check
+# Skip MPI entirely: removes --enable-mpi-tests from build flags,
+# skips MPI installation check, and skips tests with num_ranks > 1
+python test_runner.py --config mi300x_mellanox_ib.json --skip-mpi-check
 
 # Useful for single-rank unit tests that don't require MPI
 python test_runner.py --config unit_tests_only.json --skip-mpi-check
@@ -95,6 +108,7 @@ The test runner supports the following environment variables to customize behavi
 | `RCCL_LIB_PATH` | Path to pre-built RCCL library directory (contains `librccl.so` and `test/` subdirectory). When set, the build step is automatically skipped. | `/path/to/rccl/build` |
 | `RCCL_BUILD_DIR` | Alternative name for `RCCL_LIB_PATH`. Either variable can be used. | `/path/to/rccl/build` |
 | `RCCL_TEST_MPI_HOSTFILE` | Path to MPI hostfile for multi-node tests. | `~/.mpi_hostfile` |
+| `RCCL_MPI_LOG_ALL_RANKS` | Set to `1` to capture stdout/stderr from every MPI rank into `rccl_test_rank_<N>.log` in the working directory (rank 0 is tee'd to console + file; ranks 1-N go to file only). Useful for debugging failures on non-zero ranks. | `RCCL_MPI_LOG_ALL_RANKS=1` |
 
 ### Configuration Path Variables
 
@@ -434,13 +448,14 @@ Required:
 Optional:
   -v, --verbose             Enable verbose output (shows build paths, commands, etc.)
   -o, --output DIR          Output directory for logs and reports
-  --test-name NAME          Run only specific test by name
+  --test-name GLOB[:GLOB…]  Run only tests matching any glob pattern; ':' = OR, '*' = wildcard, '-' prefix = exclude, case-sensitive (e.g. 'P2P_*' = all P2P tests; '*:-SHM*' = all except SHM)
+  --suite-name GLOB[:GLOB…] Run only suites matching any glob pattern; ':' = OR, '*' = wildcard, '-' prefix = exclude, case-sensitive (e.g. 'P2P*' = all P2P suites; '*:-NET*' = all except NET)
   --no-build                Skip build step and use existing build
   --skip-tests              Skip test execution (useful with --coverage-report)
   --coverage-report         Generate code coverage report (HTML + text)
   --build-dir PATH          Custom build directory path (default: <workdir>/build/debug or build/release)
   --rerun-failed            Rerun failed tests with additional environment variables
-  --skip-mpi-check          Skip MPI installation check during environment validation
+  --skip-mpi-check          Skip MPI: removes --enable-mpi-tests from build, skips MPI check, skips tests with num_ranks > 1
   --stop-on-rerun-failure   Stop testing immediately if a rerun also fails (requires --rerun-failed)
   --overwrite               Overwrite previous workspace directories
   --report-suffix SUFFIX    Suffix for report directory (default: blank)
@@ -489,10 +504,35 @@ When `--coverage-report` is specified, the runner generates:
 python test_runner.py --config test_config_sample.json --verbose
 ```
 
-### Run Specific Test
+### Run Specific Tests or Suites
+
+Both `--test-name` and `--suite-name` accept gtest-style glob patterns:
+
+| Syntax | Meaning | Example |
+|--------|---------|---------|
+| `Name` | Exact match | `--test-name P2P_AllTests` |
+| `Name*` | Prefix match | `--test-name "P2P_*"` |
+| `*Name*` | Contains match | `--test-name "*AllReduce*"` |
+| `A:B` | A or B (OR) | `--test-name "P2P_*:SHM_Basic"` |
+| `-Name` | Exclude | `--test-name "*:-SHM*"` |
+
+Matching is against the `"name"` field (tests) or suite name (suites), and is case-sensitive.
 
 ```bash
+# Single test by exact name
 python test_runner.py --config test_config_sample.json --test-name P2P_AllTests
+
+# All tests whose name starts with 'P2P_'
+python test_runner.py --config test_config_sample.json --test-name "P2P_*"
+
+# All tests except SHM tests
+python test_runner.py --config test_config_sample.json --test-name "*:-SHM*"
+
+# All suites whose name starts with 'P2P' (glob prefix match)
+python test_runner.py --config test_config_sample.json --suite-name "P2P*"
+
+# Two specific suites matched by exact name (colon-separated)
+python test_runner.py --config test_config_sample.json --suite-name "P2P Tests - 2-Rank:P2P Tests - 4-Rank"
 ```
 
 ### Skip Build (Use Existing)
@@ -1089,7 +1129,7 @@ python test_runner.py --config test_config_sample.json --skip-tests --verbose
 1. Add test definition to appropriate configuration in JSON file
 2. Specify `is_gtest`, `description`, and required fields
 3. Test with dry run first: `--skip-tests --verbose`
-4. Run actual test: `--test-name YourTest --verbose`
+4. Run actual test: `--test-name YourTest --verbose` (exact name) or `--test-name "YourTest*" --verbose` (glob) or `--suite-name "My Suite" --verbose`
 
 ### Test Type Handling
 
@@ -1169,8 +1209,9 @@ These override the paths specified in the JSON configuration file:
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `RCCL_TEST_MPI_HOSTFILE` | Path to MPI hostfile for multi-node tests | `export RCCL_TEST_MPI_HOSTFILE=~/.mpi_hostfile` |
+| `RCCL_MPI_LOG_ALL_RANKS` | Set to `1` to redirect each MPI rank's stdout/stderr to `rccl_test_rank_<N>.log` (rank 0 is also tee'd to the console). Useful when debugging failures on non-zero ranks or when tests read per-rank log files for assertions. | `export RCCL_MPI_LOG_ALL_RANKS=1` |
 
-**Note**: Falls back to `~/.mpi_hostfile` if not set. For SLURM environments, hostfile is auto-generated from `SLURM_NODELIST`.
+**Note**: `RCCL_TEST_MPI_HOSTFILE` falls back to `~/.mpi_hostfile` if not set. For SLURM environments, hostfile is auto-generated from `SLURM_NODELIST`.
 
 ### Test-Specific Variables
 

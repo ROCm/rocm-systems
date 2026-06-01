@@ -8,8 +8,6 @@
 #define _NCCL_DEVICE_LL_A2A_H_
 #include "impl/core__types.h"
 
-#define __CUDACC__ 0
-
 struct ncclLLA2AHandle;
 
 NCCL_EXTERN_C __host__ int ncclLLA2ACalcSlots(int maxElts, int maxEltSize);
@@ -27,7 +25,7 @@ struct ncclLLA2ASession: ncclLLA2ASession_internal<Coop> {
   NCCL_DEVICE_INLINE ~ncclLLA2ASession();
 
   ncclLLA2ASession(ncclLLA2ASession const&) = delete; // Sessions are not copyable
-  
+
   template<typename T>
   NCCL_DEVICE_INLINE void send(int peer, int slot, T data);
 
@@ -43,7 +41,7 @@ struct ncclLLA2ASession: ncclLLA2ASession_internal<Coop> {
   template<int Unroll, typename Elt, typename EltToAcc, typename Reduce>
   NCCL_DEVICE_INLINE auto recvReduce(int eltStart, int eltCount, int eltStride, EltToAcc eltToAcc, Reduce red)
     -> decltype(eltToAcc(nccl::utility::declval<Elt>())) ;
-  
+
   // End an alltoall region. For every peer in team you must have done both of the
   // following each of which can be accomplished using any thread in coop:
   //  1. Targeted that peer with at least one send().

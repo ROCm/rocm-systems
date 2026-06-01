@@ -123,20 +123,23 @@ __global__ void TeamCtxPrimitiveTest(int loop, int skip, long long int *start_ti
 TeamCtxPrimitiveTester::TeamCtxPrimitiveTester(TesterArguments args)
     : Tester(args) {
   size_t buff_size = max_msg_size * args.wg_size * args.num_wgs;
-  source = (char *)rocshmem_malloc(buff_size);
-  dest = (char *)rocshmem_malloc(buff_size);
+  char *local = (char *) alloc_test_buffer(buff_size, args.local_buf_type);
+  char *remote = (char *) alloc_test_buffer(buff_size);
 
-  if (source == nullptr || dest == nullptr) {
-    std::cerr << "Error allocating memory from symmetric heap" << std::endl;
-    std::cerr << "source: " << source << ", dest: " << dest << std::endl;
-    if (source) {
-      rocshmem_free(source);
-    }
-    if (dest) {
-      rocshmem_free(dest);
-    }
-    rocshmem_global_exit(1);
+  switch (_type) {
+    case TeamCtxPutTestType:
+    case TeamCtxPutNBITestType:
+      source = local;
+      dest = remote;
+      break;
+    case TeamCtxGetTestType:
+    case TeamCtxGetNBITestType:
+    default:
+      dest = local;
+      source = remote;
+      break;
   }
+
 
   for(size_t i = 0; i < buff_size; i++) {
     source[i] = static_cast<char>('a' + i % 26);
@@ -144,8 +147,25 @@ TeamCtxPrimitiveTester::TeamCtxPrimitiveTester(TesterArguments args)
 }
 
 TeamCtxPrimitiveTester::~TeamCtxPrimitiveTester() {
-  rocshmem_free(source);
-  rocshmem_free(dest);
+  char *local = nullptr;
+  char *remote = nullptr;
+
+  switch (_type) {
+    case TeamCtxPutTestType:
+    case TeamCtxPutNBITestType:
+      local = source;
+      remote = dest;
+      break;
+    case TeamCtxGetTestType:
+    case TeamCtxGetNBITestType:
+    default:
+      local = dest;
+      remote = source;
+      break;
+  }
+
+  free_test_buffer(local, args.local_buf_type);
+  free_test_buffer(remote);
 }
 
 void TeamCtxPrimitiveTester::resetBuffers(size_t size) {

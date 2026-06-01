@@ -51,6 +51,8 @@
 #include <tuple>
 #include <utility>
 #include <thread>
+#include <mutex>
+#include <condition_variable>
 #include <shared_mutex>
 #include <random>
 #include <cinttypes>
@@ -136,6 +138,7 @@ class Runtime {
     bool supports_exception_debugging;
     bool supports_event_age;
     bool supports_core_dump;
+    bool supports_metadata_prefetch;
   };
 
   /// @brief Open connection to kernel driver and increment reference count.
@@ -383,6 +386,10 @@ class Runtime {
   hsa_status_t SvmPrefetch(void* ptr, size_t size, hsa_agent_t agent, uint32_t num_dep_signals,
                            const hsa_signal_t* dep_signals, hsa_signal_t completion_signal);
 
+  hsa_status_t SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count,
+                                        uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
+                                        hsa_signal_t completion_signal);
+
   hsa_status_t DmaBufExport(const void* ptr, size_t size, int* dmabuf,
                                             uint64_t* offset, uint64_t flags);
 
@@ -424,6 +431,8 @@ class Runtime {
 
   hsa_status_t EnableLogging(uint8_t* flags, void* file);
 
+  hsa_status_t GetSignalEventId(hsa_signal_t signal, uint32_t *event_id);
+
   const std::vector<Agent*>& cpu_agents() { return cpu_agents_; }
 
   const std::vector<Agent*>& gpu_agents() { return gpu_agents_; }
@@ -452,7 +461,7 @@ class Runtime {
 
   amd::hsa::code::AmdHsaCodeManager* code_manager() { return &code_manager_; }
 
-  // Helper to iterate over allocation_map_ and add code object allocations 
+  // Helper to iterate over allocation_map_ and add code object allocations
   // to lightweight coredump filter
   void IterateCodeObjectAllocations(std::function<void(uint64_t start, size_t size)> cb) {
     std::lock_guard<std::shared_mutex> lock(memory_lock_);
@@ -503,6 +512,12 @@ class Runtime {
     if (thunkLoader()->IsDXG()) {
       kfd_version.supports_event_age = false;
     }
+
+    kfd_version.supports_metadata_prefetch = false;
+    if (version.KernelInterfaceMajorVersion > 1 ||
+        (version.KernelInterfaceMajorVersion == 1 &&
+        version.KernelInterfaceMinorVersion >= 19))
+      kfd_version.supports_metadata_prefetch = true;
   }
 
   void KfdVersion(bool exception_debugging, bool core_dump) {
@@ -727,7 +742,7 @@ class Runtime {
 
   struct PrefetchRange {
     PrefetchRange() {}
-    PrefetchRange(size_t Bytes, PrefetchOp* Op) : bytes(Bytes), op(Op) {}
+    PrefetchRange(size_t Bytes, PrefetchOp* Op) : bytes(Bytes), op(Op), prev{}, next{} {}
     size_t bytes;
     PrefetchOp* op;
     prefetch_map_t::iterator prev;
@@ -912,6 +927,33 @@ class Runtime {
 
   // Kfd version
   KfdVersion_t kfd_version;
+
+  // Synchronization between the per-queue ExceptionHandler thread and the
+  // global VMFaultHandler thread.  ExceptionHandler marks the faulting queue
+  // first (AqlQueue::MarkVMFaulted), then signals this condvar so that
+  // VMFaultHandler can stamp the fault address/reason onto the correct queue
+  // before the system-event callback fires.
+  std::mutex              vm_fault_mutex_;
+  std::condition_variable vm_fault_cv_;
+  bool                    vm_fault_signaled_{false};
+
+ public:
+  /// @brief Signal that a per-queue ExceptionHandler has marked a queue as
+  /// VM-faulted.  Wakes VMFaultHandler so it can proceed to stamp details.
+  void SignalVMFault() {
+    std::lock_guard<std::mutex> lock(vm_fault_mutex_);
+    vm_fault_signaled_ = true;
+    vm_fault_cv_.notify_all();
+  }
+
+  /// @brief Block until a VM fault is signaled or the timeout expires.
+  /// @param timeout_ms Maximum time to wait in milliseconds.
+  /// @return true if a fault was signaled, false on timeout.
+  bool WaitForVMFault(int timeout_ms) {
+    std::unique_lock<std::mutex> lock(vm_fault_mutex_);
+    return vm_fault_cv_.wait_for(lock, std::chrono::milliseconds(timeout_ms),
+                                 [this] { return vm_fault_signaled_; });
+  }
 
   std::unique_ptr<AMD::SvmProfileControl> svm_profile_;
 

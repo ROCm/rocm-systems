@@ -1,10 +1,10 @@
 # Video decode picture files sample
 
-The video decode picture files sample illustrates decoding an elementary video stream which is stored in multiple files with each file containing bitstream data of a coded picutre. This sample can be configured with a device ID and optionally able to dump the output to a file. This sample uses the high-level RocVideoDecoder class which connects both the video parser and Rocdecoder. This process repeats in a loop until all frames have been decoded.
+The video decode picture files sample illustrates decoding an elementary video stream which is stored in multiple files with each file containing bitstream data of a coded picture. This sample can be configured with a device ID and optionally able to dump the output to a file. This sample uses the high-level RocVideoDecoder class which connects both the video parser and Rocdecoder. This process repeats in a loop until all frames have been decoded.
 
 ## Prerequisites:
 
-* Install [rocDecode](../../README.md#build-and-install-instructions)
+* Install [rocDecode](https://rocm.docs.amd.com/projects/rocDecode/en/latest/install/rocDecode-build-and-install.html)
 
 ## Build
 

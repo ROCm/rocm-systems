@@ -6,10 +6,19 @@
 Metric description manager.
 Syncs metric descriptions between config YAMLs and documentation files.
 
-Usage:
-    python metric_description_manager.py --sync-arch <arch_name> <configs_dir>
-    python metric_description_manager.py --sync-all <configs_dir>
-    python metric_description_manager.py --validate <arch_name> <configs_dir>
+Run from the project root so default options resolve:
+  --per-arch-output (tools/per_arch_metric_definitions)
+  --docs-output-dir (docs/data/metrics)
+
+Usage (paths relative to project root):
+    SCRIPT=tools/config_management/metric_description_manager.py
+    CONFIGS=src/rocprof_compute_soc/analysis_configs
+
+    python $SCRIPT --sync-arch <arch_name> $CONFIGS
+    python $SCRIPT --sync-all $CONFIGS
+    python $SCRIPT --validate <arch_name> $CONFIGS
+    python $SCRIPT --generate-docs
+    python $SCRIPT --generate-docs --docs-arch gfx1151
 """
 
 from __future__ import annotations
@@ -21,12 +30,18 @@ from pathlib import Path
 from typing import Union
 
 import yaml
+from ruamel.yaml.scalarstring import SingleQuotedScalarString
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from config_management import utils_ruamel as cm_utils  # noqa: E402
+
+
+def is_rdna35_arch(arch_name: str) -> bool:
+    """True for RDNA 3.5 IP names: gfx115x (gfx1150 to gfx115f)."""
+    return bool(re.fullmatch(r"gfx115[0-9a-f]", arch_name, re.IGNORECASE))
 
 
 def normalize_unit_for_docs(unit: str) -> str:
@@ -50,45 +65,138 @@ def normalize_unit_for_docs(unit: str) -> str:
     return unit
 
 
-# Section to panel ID mapping for organizing descriptions
-SECTION_PANEL_MAP: dict[str, int] = {
-    "Wavefront launch stats": 701,
-    "Wavefront runtime stats": 702,
-    "Overall instruction mix": 1001,
-    "VALU arithmetic instruction mix": 1002,
-    "Matrix instruction mix": 1004,
-    "Compute Speed-of-Light": 1101,
-    "Pipeline statistics": 1102,
-    "Arithmetic operations": 1103,
-    "LDS Speed-of-Light": 1201,
-    "LDS Statistics": 1202,
-    "vL1D Speed-of-Light": 1601,
-    "Busy / stall metrics": 1501,
-    "Instruction counts": 1502,
-    "Spill / stack metrics": 1503,
-    "L1 Unified Translation Cache (UTCL1)": 1605,
-    "vL1D cache stall metrics": 1602,
-    "vL1D cache access metrics": 1603,
-    "Vector L1 data-return path or Texture Data (TD)": 1504,
-    "L2 Speed-of-Light": 1701,
-    "L2 cache accesses": 1703,
-    "L2-Fabric interface metrics": 1702,
-    "L2 - Fabric interface detailed metrics": 1706,
-    "L2 - Fabric Interface stalls": 1705,
-    "Scalar L1D Speed-of-Light": 1401,
-    "Scalar L1D cache accesses": 1402,
-    "Scalar L1D Cache - L2 Interface": 1403,
-    "L1I Speed-of-Light": 1301,
-    "L1I cache accesses": 1302,
-    "L1I <-> L2 interface": 1303,
-    "Workgroup manager utilizations": 601,
-    "Workgroup Manager - Resource Allocation": 602,
-    "Command processor fetcher (CPF)": 501,
-    "Command processor packet processor (CPC)": 502,
-    "System Speed-of-Light": 201,
+def format_yaml_scalar(value: str):
+    """Serialize descriptions like gfx942: inline scalars without block markers."""
+    if isinstance(value, str) and "\n" in value:
+        return re.sub(r"\s*\n\s*", " ", value).strip()
+    return value
+
+
+def normalize_docs_section_name(arch_name: str, section_name: str) -> str:
+    """Apply docs-only section name cleanup for selected architectures."""
+    if not is_rdna35_arch(arch_name):
+        return section_name
+
+    replacements = {
+        "Memory chart - TCP Cache (GL0 Vector Cache)": "Memory chart - TCP Cache",
+        "Memory chart - GL1 Cache (L1)": "Memory chart - GL1 Cache",
+        "Memory chart - GL2 Cache (L2)": "Memory chart - GL2 Cache",
+    }
+    return replacements.get(section_name, section_name)
+
+
+def normalize_docs_metric_name(arch_name: str, metric_name: str) -> str:
+    """Apply docs-only metric name cleanup for selected architectures."""
+    if not is_rdna35_arch(arch_name):
+        return metric_name
+
+    replacements = {
+        "GL0 Cache BW (TCP Cache)": "GL0 Cache BW",
+    }
+    return replacements.get(metric_name, metric_name)
+
+
+# All CDNA architectures share the same panel ID mapping.
+CDNA_PANEL_ID_TO_SECTION: dict[int, str] = {
+    201: "System Speed-of-Light",
+    501: "Command processor fetcher (CPF)",
+    502: "Command processor packet processor (CPC)",
+    601: "Workgroup manager utilizations",
+    602: "Workgroup Manager - Resource Allocation",
+    701: "Wavefront launch stats",
+    702: "Wavefront runtime stats",
+    1001: "Overall instruction mix",
+    1002: "VALU arithmetic instruction mix",
+    1004: "Matrix instruction mix",
+    1101: "Compute Speed-of-Light",
+    1102: "Pipeline statistics",
+    1103: "Arithmetic operations",
+    1201: "LDS Speed-of-Light",
+    1202: "LDS Statistics",
+    1301: "L1I Speed-of-Light",
+    1302: "L1I cache accesses",
+    1303: "L1I <-> L2 interface",
+    1401: "Scalar L1D Speed-of-Light",
+    1402: "Scalar L1D cache accesses",
+    1403: "Scalar L1D Cache - L2 Interface",
+    1501: "Busy / stall metrics",
+    1502: "Instruction counts",
+    1503: "Spill / stack metrics",
+    1504: "Vector L1 data-return path or Texture Data (TD)",
+    1601: "vL1D Speed-of-Light",
+    1602: "vL1D cache stall metrics",
+    1603: "vL1D cache access metrics",
+    1605: "L1 Unified Translation Cache (UTCL1)",
+    1701: "L2 Speed-of-Light",
+    1702: "L2-Fabric interface metrics",
+    1703: "L2 cache accesses",
+    1705: "L2 - Fabric Interface stalls",
+    1706: "L2 - Fabric interface detailed metrics",
 }
 
-PANEL_ID_TO_SECTION: dict[int, str] = {v: k for k, v in SECTION_PANEL_MAP.items()}
+# RDNA 3.5 (gfx115x) metric_table ids -> section names
+RDNA35_PANEL_ID_TO_SECTION_BY_ARCH: dict[int, str] = {
+    1: "Top Kernels",
+    2: "Dispatch List",
+    101: "System Info",
+    201: "System Speed-of-Light",
+    301: "Memory chart - Instruction Cache",
+    302: "Memory chart - Scalar Data Cache",
+    303: "Memory chart - TCP Cache (GL0 Vector Cache)",
+    304: "Memory chart - LDS (Local Data Share)",
+    305: "Memory chart - TCP-GL1 Interface",
+    306: "Memory chart - GL1 Cache (L1)",
+    307: "Memory chart - GL1-GL2 Interface",
+    308: "Memory chart - GL2 Cache (L2)",
+    309: "Memory chart - GCEA to System Memory",
+    401: "Roofline Performance Rates",
+    402: "Roofline Plot Points",
+    501: "CPC Utilization",
+    502: "CPC Interface Utilization",
+    503: "MEC Stall Cycles",
+    504: "CPC Memory Requests",
+    505: "MEC Instruction Cache",
+    601: "SPI Utilization",
+    602: "Wave Dispatch Statistics",
+    701: "WGP Utilization",
+    702: "Wavefront Launch Stats",
+    703: "Wave Dispatch",
+    704: "Wave Life",
+    705: "Wave Instruction Mix",
+    706: "VMEM Instruction Mix",
+    707: "LDS Instruction Mix",
+    709: "Wait State Analysis",
+    710: "WGP Instruction Cache",
+    711: "WGP Scalar Data Cache",
+    901: "GL0 Utilization",
+    902: "GL0 Request Statistics",
+    903: "GL0 Cache Performance",
+    904: "GL0-GL1 Interface",
+    905: "GL0 Stalls",
+    1101: "GL1 Cache Utilization",
+    1102: "GL1 Cache Request Statistics",
+    1103: "GL1 Cache Performance",
+    1104: "GL1-GL2 Interface",
+    1105: "GL1 Cache Stalls",
+    1301: "GL2 Cache Performance",
+    1302: "GL2 Cache Request Statistics",
+    1303: "GL2 Cache Bandwidth",
+    1401: "DRAM Read Interface",
+    1402: "DRAM Write Interface",
+    1404: "System Arbiter (SARB)",
+    1405: "Return Interface",
+    1701: "GPU Utilization",
+    1702: "Shader Engine Utilization",
+}
+
+
+def panel_id_to_section(arch_name: str, table_id: int | None) -> str | None:
+    """Resolve documentation section name for a metric_table id (arch-specific)."""
+    if table_id is None:
+        return None
+    if is_rdna35_arch(arch_name):
+        return RDNA35_PANEL_ID_TO_SECTION_BY_ARCH.get(table_id)
+    return CDNA_PANEL_ID_TO_SECTION.get(table_id)
 
 
 def validate_rst_syntax(text: str) -> tuple[bool, str]:
@@ -132,6 +240,7 @@ def extract_descriptions_from_arch(
     Returns dict organized by section name.
     """
     arch_path = Path(arch_dir)
+    arch_name = arch_path.name
     descriptions_by_section: dict[str, dict[str, dict]] = {}
 
     for yaml_file in sorted(arch_path.glob("*.yaml")):
@@ -149,7 +258,7 @@ def extract_descriptions_from_arch(
             for key, value in ds.items():
                 if isinstance(value, dict) and "metric" in value:
                     table_id = value.get("id")
-                    section_name = PANEL_ID_TO_SECTION.get(table_id)
+                    section_name = panel_id_to_section(arch_name, table_id)
                     if not section_name:
                         continue
                     for metric_name, metric_data in value["metric"].items():
@@ -218,8 +327,8 @@ def update_per_arch_metrics_file(
         per_arch_descriptions[section] = {}
         for metric_name, desc_data in metrics.items():
             entry = {
-                "plain": desc_data.get("plain", ""),
-                "rst": desc_data.get("rst", ""),
+                "plain": format_yaml_scalar(desc_data.get("plain", "")),
+                "rst": format_yaml_scalar(desc_data.get("rst", "")),
             }
             if "unit" in desc_data:
                 entry["unit"] = desc_data["unit"]
@@ -297,10 +406,21 @@ def preserve_manual_rst_edits(new_descriptions: dict, existing_per_arch: dict) -
     return new_descriptions
 
 
+def resolved_docs_target_archs(per_arch_dir: Union[str, Path]) -> list[str]:
+    """Doc emit list: every per-arch YAML on disk except known-excluded archs."""
+    excluded = {"gfx940", "gfx941"}
+    suffix = "_metrics_description.yaml"
+    return sorted(
+        arch
+        for path in Path(per_arch_dir).glob(f"*{suffix}")
+        if (arch := path.name.removesuffix(suffix)) not in excluded
+    )
+
+
 def generate_docs_from_per_arch(
     per_arch_dir: Union[str, Path],
     docs_output_dir: Union[str, Path],
-    target_archs: list[str] = None,
+    target_archs: list[str] | None = None,
 ) -> bool:
     """
     Generate per-arch documentation YAMLs from per-arch metric definitions.
@@ -313,8 +433,7 @@ def generate_docs_from_per_arch(
     - Write docs YAML (only 'rst' and 'unit' fields)
     """
     if target_archs is None:
-        # Default: skip gfx940, gfx941 (redundant)
-        target_archs = ["gfx908", "gfx90a", "gfx942", "gfx950"]
+        target_archs = resolved_docs_target_archs(per_arch_dir)
 
     docs_output_dir = Path(docs_output_dir)
     docs_output_dir.mkdir(parents=True, exist_ok=True)
@@ -334,15 +453,19 @@ def generate_docs_from_per_arch(
         # Transform: Keep only RST and unit fields for documentation
         docs_data = {}
         for section, metrics in per_arch_data.items():
-            docs_data[section] = {}
+            docs_section = normalize_docs_section_name(arch, section)
+            docs_data[docs_section] = {}
             for metric_name, metric_info in metrics.items():
+                docs_metric_name = normalize_docs_metric_name(arch, metric_name)
                 # Extract only RST and unit (drop 'plain' text)
                 entry = {}
                 if "rst" in metric_info:
-                    entry["rst"] = metric_info["rst"]
+                    entry["rst"] = SingleQuotedScalarString(
+                        format_yaml_scalar(metric_info["rst"])
+                    )
                 if "unit" in metric_info:
                     entry["unit"] = metric_info["unit"]
-                docs_data[section][metric_name] = entry
+                docs_data[docs_section][docs_metric_name] = entry
 
         cm_utils.save_yaml(docs_data, dst_file)
         print(f"Generated: {dst_file}")
@@ -434,7 +557,7 @@ def main() -> int:
     parser.add_argument(
         "--sync-arch",
         metavar="ARCH",
-        help="Sync descriptions for specific architecture",
+        help="Sync descriptions for a single architecture",
     )
     parser.add_argument(
         "--sync-all",
@@ -444,7 +567,7 @@ def main() -> int:
     parser.add_argument(
         "--validate",
         metavar="ARCH",
-        help="Validate descriptions for specific architecture",
+        help="Validate descriptions for a single architecture",
     )
     parser.add_argument(
         "--generate-docs",
@@ -452,26 +575,51 @@ def main() -> int:
         help="Generate per-arch docs YAMLs from per-arch definitions",
     )
     parser.add_argument(
-        "configs_dir", nargs="?", help="Path to analysis_configs directory"
+        "--docs-arch",
+        action="append",
+        metavar="ARCH",
+        dest="docs_archs",
+        help=(
+            "Restrict --generate-docs to one or more architectures "
+            "(repeatable). Defaults to every per-arch description file."
+        ),
+    )
+    parser.add_argument(
+        "configs_dir", nargs="?", help="Path to the analysis_configs directory"
     )
     parser.add_argument(
         "--per-arch-output",
         default="tools/per_arch_metric_definitions",
-        help="Output directory for per-arch files",
+        help="Output directory for the per-arch description YAMLs",
     )
     parser.add_argument(
         "--docs-output-dir",
         default="docs/data/metrics",
-        help="Output directory for per-arch docs files",
+        help="Output directory for the generated docs YAMLs",
     )
 
     args = parser.parse_args()
 
+    if args.docs_archs and not args.generate_docs:
+        print("Error: --docs-arch requires --generate-docs")
+        return 1
+
     if args.generate_docs:
+        available_archs = set(resolved_docs_target_archs(args.per_arch_output))
+        if args.docs_archs:
+            unknown = sorted(set(args.docs_archs) - available_archs)
+            if unknown:
+                print(
+                    "Error: --docs-arch values are not in the docs target set "
+                    f"(available: {', '.join(sorted(available_archs))}): "
+                    f"{', '.join(unknown)}"
+                )
+                return 1
+            target_archs = args.docs_archs
+        else:
+            target_archs = None
         ok = generate_docs_from_per_arch(
-            args.per_arch_output,
-            args.docs_output_dir,
-            target_archs=["gfx908", "gfx90a", "gfx942", "gfx950"],
+            args.per_arch_output, args.docs_output_dir, target_archs
         )
         return 0 if ok else 1
 

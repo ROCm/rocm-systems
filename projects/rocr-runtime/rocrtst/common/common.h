@@ -112,6 +112,34 @@ struct agent_pools_t{
 
 extern size_t pool_size_limit;
 
+/// Platform types for test filtering
+enum class PlatformType {
+  REAL_HARDWARE,
+  EMULATOR,
+  FFM_SIMULATOR,
+  UNKNOWN
+};
+
+/// Platform detection utilities
+class PlatformDetector {
+public:
+  /// Detect the current platform type
+  /// \returns PlatformType indicating the detected platform
+  static PlatformType detectPlatform();
+
+  /// Check if FFM simulator environment is active
+  /// \returns true if HSA_MODEL_TOPOLOGY environment variable is set
+  static bool isFFMEnvironment();
+
+  /// Get string name for platform type
+  /// \param platform The platform type
+  /// \returns String representation of the platform type
+  static const char* platformName(PlatformType platform);
+};
+
+/// Check if emulator mode is enabled
+/// This function is used for test size adjustments on slow emulators
+/// \returns true if emulator mode is detected
 bool isEmuModeEnabled();
 
 /// Fill in the pool_info_t structure for the provided pool.

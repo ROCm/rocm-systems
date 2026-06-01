@@ -222,7 +222,7 @@ void Reporter::writeFile() {
     _out << "numCycle,";
     _out << "collective,";
 #ifdef MPI_SUPPORT
-    _out << "ranks,rankspernode,gpusperrank,";
+    _out << "nodes,ranks,ranksPerNode,gpusPerRank,";
 #else
     _out << "gpus,";
 #endif
@@ -1127,6 +1127,52 @@ static void getGPUMemoryInfo(int64_t* ptotalGpuMem, int64_t* pfreeGpuMem) {
 // The full implementation lives in collector.cu / collector.h
 // ============================================================
 
+static bool DiscoverRdmaNics(NetworkCounterContext& ctx) {
+  std::vector<std::string> ib_hca = NetCounterParseIbHcaList();
+  if (!ib_hca.empty()) {
+    for (const auto& ib : ib_hca) {
+      ctx.ib_names.push_back(ib);
+      ctx.nic_names.push_back(NetCounterFindNicForIbDevice(ib));
+    }
+    return true;
+  }
+  std::vector<std::string> all_nics;
+  NetCounterGetNetworkInterfaces(all_nics);
+  for (const auto& nic : all_nics) {
+    std::string ib = NetCounterFindIbDeviceForNic(nic);
+    if (ib.empty()) continue;
+    ctx.nic_names.push_back(nic);
+    ctx.ib_names.push_back(ib);
+  }
+  if (ctx.nic_names.empty()) {
+    fprintf(stderr,
+            "# Warning: no RDMA-capable NICs found, disabling net counter collection\n");
+    return false;
+  }
+  return true;
+}
+
+static NicType DetectNicTypeFromIbDevices(const std::vector<std::string>& ib_names,
+                                          bool& mixed) {
+  NicType nic_type = NIC_UNKNOWN;
+  mixed = false;
+  for (size_t i = 0; i < ib_names.size(); i++) {
+    NicType t = NetCounterDetectNicType(ib_names[i]);
+    if (t == NIC_UNKNOWN) continue;
+    if (nic_type == NIC_UNKNOWN) {
+      nic_type = t;
+    } else if (t != nic_type) {
+      mixed = true;
+      break;
+    }
+  }
+  if (mixed) {
+    fprintf(stderr,
+            "# Warning: mixed NIC types detected during counter table selection\n");
+  }
+  return nic_type;
+}
+
 NetworkCounterContext NetCounterCollectBefore(struct threadArgs* args) {
   NetworkCounterContext ctx;
   ctx.enabled = NetCounterIsEnabled();
@@ -1139,27 +1185,18 @@ NetworkCounterContext NetCounterCollectBefore(struct threadArgs* args) {
     return ctx;
   }
 
-  ctx.selected_counters = NetCounterParseCounterList();
   ctx.nGpus = args->nGpus;
   ctx.nranks = args->nProcs * args->nThreads * args->nGpus;
   ctx.base_rank = args->proc * args->nThreads * args->nGpus;
 
-  // Primary: NCCL_IB_HCA → resolve ethernet NICs.
-  // Fallback: discover ethernet NICs → resolve IB device names.
-  std::vector<std::string> ib_hca = NetCounterParseIbHcaList();
-  if (!ib_hca.empty()) {
-    for (const auto& ib : ib_hca) {
-      ctx.ib_names.push_back(ib);
-      ctx.nic_names.push_back(NetCounterFindNicForIbDevice(ib));
-    }
-  } else {
-    NetCounterGetNetworkInterfaces(ctx.nic_names);
-    if (ctx.nic_names.empty()) { ctx.nic_names.push_back("eth0"); }
-    ctx.ib_names.resize(ctx.nic_names.size());
-    for (size_t i = 0; i < ctx.nic_names.size(); i++) {
-      ctx.ib_names[i] = NetCounterFindIbDeviceForNic(ctx.nic_names[i]);
-    }
+  if (!DiscoverRdmaNics(ctx)) {
+    ctx.enabled = false;
+    return ctx;
   }
+
+  bool mixed_detect = false;
+  NicType nic_type = DetectNicTypeFromIbDevices(ctx.ib_names, mixed_detect);
+  ctx.selected_counters = NetCounterGetCounterList(nic_type);
 
   size_t ndevs = ctx.nic_names.size();
   ctx.snapshots_before.resize(ndevs);
@@ -1172,7 +1209,8 @@ NetworkCounterContext NetCounterCollectBefore(struct threadArgs* args) {
   char hostname[256] = {0};
   gethostname(hostname, sizeof(hostname));
   printf("# Network counter collection enabled (RCCL_TESTS_NET_COUNTER_ENABLE=1)\n");
-  if (!ib_hca.empty()) {
+  const char* ib_hca_env = getenv("NCCL_IB_HCA");
+  if (ib_hca_env && strlen(ib_hca_env) > 0) {
     printf("# Device list from NCCL_IB_HCA\n");
   }
   printf("# Node %s: lead rank %d collecting %zu device(s):",
@@ -1185,6 +1223,7 @@ NetworkCounterContext NetCounterCollectBefore(struct threadArgs* args) {
     }
   }
   printf("\n");
+  printf("# NIC type: %s\n", mixed_detect ? "MIXED" : NicTypeStr(nic_type));
   printf("# Counters (%zu):", ctx.selected_counters.size());
   for (const auto& d : ctx.selected_counters) { printf(" %s", d.name.c_str()); }
   printf("\n");
@@ -1408,7 +1447,10 @@ testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, s
   else {
     // ROCM-2696:HIP_VERSION check added because ncclMemAlloc relies on hipMemRetainAllocationHandle, which had a bug
     // in older HIP versions that could cause use-after-free or segfaults due to premature allocation release.
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0) && HIP_VERSION >= 71260540
+    // The ROCm 7.0.2.x backport (HIP_VERSION in [70051831, 70060000)) carries the same hipMemRetainAllocationHandle
+    // fix, so extend the guard to cover that range as well.
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0) && \
+    (HIP_VERSION >= 71260540 || (HIP_VERSION >= 70051831 && HIP_VERSION < 70060000))
     NCCLCHECK(ncclMemAlloc(sendbuff, nbytes));
     NCCLCHECK(ncclMemAlloc(recvbuff, nbytes));
     if (bias) NCCLCHECK(ncclMemAlloc(bias, nbytes));
@@ -1924,6 +1966,13 @@ testResult_t run() {
   for (int i=0; i<nGpus*nThreads; i++) {
     gpus[i] = ((gpu0 != -1 ? gpu0 : localRank*nThreads*nGpus) + i)%numDevices;
     CUDACHECK(cudaSetDevice(gpus[i]));
+    if (parallel_init) {
+      if (test_bias) {
+        TESTCHECK(AllocateBuffs(sendbuffs.data()+i, sendBytes, recvbuffs.data()+i, recvBytes, expected.data()+i, (size_t)maxBytes, bias.data()+i));
+      } else {
+        TESTCHECK(AllocateBuffs(sendbuffs.data()+i, sendBytes, recvbuffs.data()+i, recvBytes, expected.data()+i, (size_t)maxBytes, NULL));
+      }
+    }
     if (streamnull) {
       streams[i] = NULL;
     }
@@ -2217,6 +2266,7 @@ testResult_t run() {
   finalizeFooter();
 
 #ifdef MPI_SUPPORT
+  MPI_Barrier(mpi_comm);   // Synchronize all ranks
   MPI_Comm_free(&mpi_comm);
   MPI_Finalize();
 #endif

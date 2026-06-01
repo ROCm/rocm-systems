@@ -47,7 +47,7 @@ if(ROCPROFILER_BUILD_TESTS)
             REPO_URL https://github.com/google/googletest.git
             REPO_BRANCH "main")
 
-        set(BUILD_GMOCK OFF)
+        set(BUILD_GMOCK ON)
         set(INSTALL_GTEST OFF)
         add_subdirectory(googletest EXCLUDE_FROM_ALL)
 
@@ -58,7 +58,8 @@ if(ROCPROFILER_BUILD_TESTS)
         target_link_libraries(rocprofiler-sdk-gtest INTERFACE GTest::gtest)
         target_include_directories(
             rocprofiler-sdk-gtest SYSTEM
-            INTERFACE ${CMAKE_CURRENT_LIST_DIR}/googletest/googletest/include)
+            INTERFACE ${CMAKE_CURRENT_LIST_DIR}/googletest/googletest/include
+                      ${CMAKE_CURRENT_LIST_DIR}/googlemock/googlemock/include)
 
         mark_as_advanced(INSTALL_GTEST)
         mark_as_advanced(BUILD_GMOCK)
@@ -69,29 +70,34 @@ if(ROCPROFILER_BUILD_TESTS)
     endif()
 endif()
 
-if(ROCPROFILER_BUILD_GLOG)
+if(ROCPROFILER_BUILD_ABSEIL)
     # checkout submodule if not already checked out or clone repo if no .gitmodules file
     rocprofiler_checkout_git_submodule(
         RECURSIVE
-        RELATIVE_PATH external/glog
+        RELATIVE_PATH external/abseil-cpp
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-        REPO_URL https://github.com/google/glog.git
-        REPO_BRANCH "master")
+        REPO_URL https://github.com/abseil/abseil-cpp.git
+        REPO_BRANCH "lts_2026_01_07")
 
-    # May want to use GFLAGS in the future
-    set(WITH_GFLAGS OFF)
-    set(WITH_GTEST OFF)
-    set(WITH_UNWIND "none")
-    add_subdirectory(glog EXCLUDE_FROM_ALL)
+    set(ABSL_PROPAGATE_CXX_STD ON)
+    set(ABSL_BUILD_TESTING OFF)
+    set(ABSL_USE_GOOGLETEST_HEAD OFF)
+    add_subdirectory(abseil-cpp EXCLUDE_FROM_ALL)
 
-    target_link_libraries(rocprofiler-sdk-glog INTERFACE $<BUILD_INTERFACE:glog::glog>)
-    target_include_directories(
-        rocprofiler-sdk-glog SYSTEM
-        INTERFACE $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/external/glog>
-                  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/glog/src>)
+    target_link_libraries(
+        rocprofiler-sdk-abseil
+        INTERFACE $<BUILD_INTERFACE:absl::log>
+                  $<BUILD_INTERFACE:absl::log_initialize>
+                  $<BUILD_INTERFACE:absl::check>
+                  $<BUILD_INTERFACE:absl::log_globals>
+                  $<BUILD_INTERFACE:absl::vlog_is_on>
+                  $<BUILD_INTERFACE:absl::failure_signal_handler>)
 else()
-    find_package(glog REQUIRED)
-    target_link_libraries(rocprofiler-sdk-glog INTERFACE glog::glog)
+    find_package(absl REQUIRED)
+    target_link_libraries(
+        rocprofiler-sdk-abseil
+        INTERFACE absl::log absl::log_initialize absl::check absl::log_globals
+                  absl::vlog_is_on absl::failure_signal_handler)
 endif()
 
 if(ROCPROFILER_BUILD_FMT)
@@ -104,6 +110,7 @@ if(ROCPROFILER_BUILD_FMT)
         REPO_BRANCH "master")
 
     set(FMT_TEST OFF)
+    set(FMT_DEBUG_POSTFIX "")
     add_subdirectory(fmt EXCLUDE_FROM_ALL)
 
     target_link_libraries(rocprofiler-sdk-fmt INTERFACE $<BUILD_INTERFACE:fmt::fmt>)

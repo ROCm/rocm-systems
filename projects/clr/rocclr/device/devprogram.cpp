@@ -295,12 +295,10 @@ bool Program::compileToLLVMBitcode(const amd_comgr_data_set_t compileInputs,
   //  Create the output data set
   amd_comgr_action_info_t action{};
   amd_comgr_data_set_t output{};
-  amd_comgr_data_set_t dataSetPCH{};
   amd_comgr_data_set_t input = compileInputs;
 
   bool hasAction = false;
   bool hasOutput = false;
-  bool hasDataSetPCH = false;
 
   amd_comgr_status_t status = createAction(langver, options, &action, &hasAction);
 
@@ -308,18 +306,12 @@ bool Program::compileToLLVMBitcode(const amd_comgr_data_set_t compileInputs,
     status = amd::Comgr::create_data_set(&output);
   }
 
-  //  Adding Precompiled Headers
   if (status == AMD_COMGR_STATUS_SUCCESS) {
     hasOutput = true;
-    status = amd::Comgr::create_data_set(&dataSetPCH);
   }
 
   // Preprocess the source
-  // FIXME: This must happen before the precompiled headers are added, as they
-  // do not embed the source text of the header, and so reference paths in the
-  // filesystem which do not exist at runtime.
   if (status == AMD_COMGR_STATUS_SUCCESS) {
-    hasDataSetPCH = true;
 
     if (amdOptions->isDumpFlagSet(amd::option::DUMP_I)) {
       amd_comgr_data_set_t dataSetPreprocessor;
@@ -346,18 +338,7 @@ bool Program::compileToLLVMBitcode(const amd_comgr_data_set_t compileInputs,
     }
   }
 
-  if (!isHIP()) {
-    if (status == AMD_COMGR_STATUS_SUCCESS) {
-      status = amd::Comgr::do_action(AMD_COMGR_ACTION_ADD_PRECOMPILED_HEADERS, action, input,
-                                     dataSetPCH);
-      extractBuildLog(dataSetPCH);
-    }
-
-    // Set input for the next stage
-    input = dataSetPCH;
-  }
-
-  //  Compiling the source codes with precompiled headers or directly compileInputs
+  //  Compiling the source codes
   if (status == AMD_COMGR_STATUS_SUCCESS) {
     if (link_dev_libs) {
       status = amd::Comgr::do_action(AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC, action,
@@ -379,10 +360,6 @@ bool Program::compileToLLVMBitcode(const amd_comgr_data_set_t compileInputs,
 
   if (hasAction) {
     amd::Comgr::destroy_action_info(action);
-  }
-
-  if (hasDataSetPCH) {
-    amd::Comgr::destroy_data_set(dataSetPCH);
   }
 
   if (hasOutput) {
@@ -1309,6 +1286,8 @@ int32_t Program::build(const std::string& sourceCode, const char* origOptions,
   std::vector<const char*> headerIncludeNames;
   const std::vector<std::string>& tmpHeaderNames = owner()->headerNames();
   const std::vector<std::string>& tmpHeaders = owner()->headers();
+  headers.reserve(tmpHeaders.size());
+  headerIncludeNames.reserve(tmpHeaderNames.size());
   for (size_t i = 0; i < tmpHeaders.size(); ++i) {
     headers.push_back(&tmpHeaders[i]);
     headerIncludeNames.push_back(tmpHeaderNames[i].c_str());
@@ -2072,6 +2051,7 @@ bool Program::getSymbolsFromCodeObj(std::vector<std::string>* var_names,
 
 const bool Program::getLoweredNames(std::vector<std::string>* mangledNames) const {
   /* Iterate thru kernel names first */
+  mangledNames->reserve(mangledNames->size() + kernelMetadataMap_.size());
   for (auto const& kernelMeta : kernelMetadataMap_) {
     mangledNames->emplace_back(kernelMeta.first);
   }

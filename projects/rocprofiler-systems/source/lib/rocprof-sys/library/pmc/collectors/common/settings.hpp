@@ -1,19 +1,28 @@
 // Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "core/config.hpp"
+#include "library/pmc/collectors/cpu/types.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
+#include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 #include "library/pmc/collectors/nic/types.hpp"
+#include "library/pmc/common/types.hpp"
 #include "logger/debug.hpp"
+#include <cstdint>
 
 #include <algorithm>
+#include <cstdint>
 #include <regex>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace rocprofsys::pmc::collectors
 {
@@ -34,38 +43,45 @@ using ::rocprofsys::pmc::nic_device_filter;
 using ::rocprofsys::pmc::collectors::nic::enabled_metrics;
 }  // namespace nic
 
-namespace
+// Import CPU types into collectors namespace
+namespace cpu
 {
-// Bitfield values for enabling/disabling all metrics at once
-// 0x7FFF sets GPU metric bits 0-14 to 1 (all 15 GPU metrics enabled)
-// 0x0000 sets all bits to 0 (all disabled)
-constexpr uint32_t ENABLE_ALL_METRICS  = 0x7FFF;
-constexpr uint32_t DISABLE_ALL_METRICS = 0x0000;
-}  // namespace
+using ::rocprofsys::pmc::device_filter;
+using ::rocprofsys::pmc::device_selection_mode;
+using ::rocprofsys::pmc::collectors::cpu::enabled_metrics;
+}  // namespace cpu
+
+// GPU metric bitfield helpers: ENABLE_ALL_METRICS sets bits 0..NUM_GPU_METRIC_BITS-1
+inline constexpr std::uint32_t NUM_GPU_METRIC_BITS = 17;
+inline constexpr std::uint32_t ENABLE_ALL_METRICS  = (1U << NUM_GPU_METRIC_BITS) - 1U;
+inline constexpr std::uint32_t DISABLE_ALL_METRICS = 0x0000;
 
 struct settings_policy
 {
-    static gpu::device_filter get_device_filter() noexcept
+    /**
+     * @brief Build a device filter from a setting string.
+     *
+     * Parses numeric range (e.g., "0-3", "0,2,4") or special values
+     * "all"/"on" (enable all), "none"/"off" (disable), empty (enable all).
+     * Used by both GPU and CPU traits.
+     */
+    static device_filter get_device_filter(const std::string& filter_str)
     {
-        auto filter = rocprofsys::get_sampling_gpus();
-        if(filter == "all" || filter == "on" || filter.empty())
+        if(filter_str == "all" || filter_str == "on" || filter_str.empty())
         {
-            gpu::device_filter result;
-            result.mode = gpu::device_selection_mode::ALL;
+            device_filter result;
+            result.mode = device_selection_mode::ALL;
             return result;
         }
-
-        if(filter == "none" || filter == "off")
+        if(filter_str == "none" || filter_str == "off")
         {
-            gpu::device_filter result;
-            result.mode = gpu::device_selection_mode::NONE;
+            device_filter result;
+            result.mode = device_selection_mode::NONE;
             return result;
         }
-
-        auto               enabled_devices = parse_numeric_range(filter);
-        gpu::device_filter result;
-        result.mode    = gpu::device_selection_mode::SPECIFIC;
-        result.indices = enabled_devices;
+        device_filter result;
+        result.mode    = device_selection_mode::SPECIFIC;
+        result.indices = parse_numeric_range(filter_str);
         return result;
     }
 
@@ -99,7 +115,7 @@ struct settings_policy
             return result;
         }
 
-        auto filter_str = filter.value();
+        const auto& filter_str = filter.value();
         if(filter_str == "all" || filter_str == "on")
         {
             nic::nic_device_filter result;
@@ -124,7 +140,7 @@ struct settings_policy
     /**
      * @brief Get NIC enabled metrics.
      *
-     * For NIC, all 6 RDMA metrics are enabled when NIC sampling is active.
+     * For NIC, all RDMA metrics are enabled when NIC sampling is active.
      */
     static nic::enabled_metrics get_nic_enabled_metrics() noexcept
     {
@@ -133,7 +149,148 @@ struct settings_policy
         return result;
     }
 
+    /**
+     * @brief Get CPU enabled metrics based on ROCPROFSYS_CPU_METRICS setting.
+     *
+     * Parses token list (e.g., "frequency,load,memory") or "all"/"none".
+     * Cached on first call.
+     */
+    static cpu::enabled_metrics get_cpu_enabled_metrics()
+    {
+        static auto _result = []() {
+            auto       setting = get_setting_value<std::string>("ROCPROFSYS_CPU_METRICS");
+            const auto value_str = setting.has_value() ? setting.value() : "all";
+            return parse_cpu_enabled_metrics(value_str);
+        }();
+        return _result;
+    }
+
+    static gpu_perf_counter::gpu_perf_counter_settings
+    get_gpu_perf_counter_enabled_metrics() noexcept
+    {
+        auto value_str = rocprofsys::get_gpu_perf_counters();
+        if(value_str.empty())
+        {
+            return gpu_perf_counter::gpu_perf_counter_settings{};
+        }
+
+        std::string trimmed;
+        trimmed.reserve(value_str.size());
+        for(auto chr : value_str)
+        {
+            if(chr != '\t' && chr != ' ') trimmed.push_back(chr);
+        }
+
+        gpu_perf_counter::gpu_perf_counter_settings result;
+
+        constexpr auto device_qualifier = std::string_view{ ":device=" };
+
+        std::stringstream stream(trimmed);
+        std::string       token;
+        while(std::getline(stream, token, ','))
+        {
+            std::stringstream sub_stream(token);
+            std::string       subtoken;
+            while(std::getline(sub_stream, subtoken, ';'))
+            {
+                if(subtoken.empty()) continue;
+                auto pos = subtoken.find(device_qualifier);
+                if(pos == std::string::npos)
+                {
+                    result.broadcast_names.push_back(subtoken);
+                }
+                else
+                {
+                    auto name       = subtoken.substr(0, pos);
+                    auto device_str = subtoken.substr(pos + device_qualifier.size());
+                    if(name.empty()) continue;
+                    if(device_str.empty() ||
+                       !std::all_of(device_str.begin(), device_str.end(), ::isdigit))
+                    {
+                        LOG_ERROR("Invalid :device= value in "
+                                  "ROCPROFSYS_GPU_PERF_COUNTERS: '{}'",
+                                  subtoken);
+                        continue;
+                    }
+                    try
+                    {
+                        result.explicit_counters.push_back(
+                            { name, std::stoull(device_str) });
+                    } catch(const std::exception&)
+                    {
+                        LOG_ERROR("Invalid :device= value in "
+                                  "ROCPROFSYS_GPU_PERF_COUNTERS: '{}'",
+                                  subtoken);
+                    }
+                }
+            }
+        }
+
+        return result;
+    }
+
 private:
+    static cpu::enabled_metrics parse_cpu_enabled_metrics(const std::string& input)
+    {
+        std::string trimmed;
+        trimmed.reserve(input.size());
+        std::for_each(input.begin(), input.end(), [&trimmed](char ch) {
+            if(ch != '\t' && ch != ' ')
+                trimmed.push_back(static_cast<char>(std::tolower(ch)));
+        });
+
+        if(trimmed.empty() || trimmed == "all")
+        {
+            cpu::enabled_metrics result;
+            result.value = cpu::ALL_CPU_METRICS;
+            return result;
+        }
+        if(trimmed == "none")
+        {
+            cpu::enabled_metrics result;
+            result.value = DISABLE_ALL_METRICS;
+            return result;
+        }
+
+        auto make_bits =
+            [](std::initializer_list<std::uint8_t> positions) -> std::uint32_t {
+            std::uint32_t v = 0;
+            for(auto b : positions)
+                v |= (1u << b);
+            return v;
+        };
+
+        const std::unordered_map<std::string, std::uint32_t> mapper{
+            { "frequency", make_bits({ 0 }) },    { "load", make_bits({ 1 }) },
+            { "memory", make_bits({ 2, 3, 4 }) }, { "page_rss", make_bits({ 2 }) },
+            { "virt_mem", make_bits({ 3 }) },     { "peak_rss", make_bits({ 4 }) },
+            { "ctx_switches", make_bits({ 5 }) }, { "page_faults", make_bits({ 6 }) },
+            { "cpu_time", make_bits({ 7, 8 }) },  { "user_time", make_bits({ 7 }) },
+            { "kernel_time", make_bits({ 8 }) },
+        };
+
+        cpu::enabled_metrics metrics;
+        metrics.value = DISABLE_ALL_METRICS;
+
+        std::regex           tokenizer{ R"(\w+)" };
+        std::sregex_iterator it(trimmed.begin(), trimmed.end(), tokenizer);
+        std::sregex_iterator end;
+
+        for(; it != end; ++it)
+        {
+            const auto found = mapper.find(it->str());
+            if(found != mapper.end()) metrics.value |= found->second;
+        }
+
+        if(metrics.value == DISABLE_ALL_METRICS)
+        {
+            LOG_INFO("Invalid CPU metrics settings '{}'. Enabling all metrics.", input);
+            metrics.value = cpu::ALL_CPU_METRICS;
+        }
+
+        return metrics;
+    }
+
     static gpu::enabled_metrics parse_enabled_metrics(const std::string& input)
     {
         std::string settings_trimmed;
@@ -160,8 +317,8 @@ private:
         }
 
         std::regex validator{
-            R"(^(?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity|xgmi|pcie|sdma_usage)"
-            R"()(?:[,;](?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity|xgmi|pcie|sdma_usage))*$)"
+            R"(^(?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity|xgmi|pcie|sdma_usage|gfx_clock|mem_clock)"
+            R"()(?:[,;](?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity|xgmi|pcie|sdma_usage|gfx_clock|mem_clock))*$)"
         };
 
         if(!std::regex_match(settings_trimmed, validator))
@@ -172,8 +329,8 @@ private:
             return result;
         }
 
-        auto make_metric = [](std::initializer_list<uint8_t> bit_positions) {
-            uint32_t value = 0;
+        auto make_metric = [](std::initializer_list<std::uint8_t> bit_positions) {
+            std::uint32_t value = 0;
             for(auto bit : bit_positions)
             {
                 value |= (1u << bit);
@@ -184,16 +341,18 @@ private:
         };
 
         // See enabled_metrics definition in common.hpp for bit position documentation
-        const std::unordered_map<std::string, uint16_t> mapper{
-            { "temp", make_metric({ 3, 4 }) },        // hotspot, edge
-            { "power", make_metric({ 0, 1 }) },       // current, average
-            { "busy", make_metric({ 5, 6, 7 }) },     // gfx, umc, mm
-            { "mem_usage", make_metric({ 2 }) },      // memory_usage
-            { "vcn_activity", make_metric({ 8 }) },   // vcn_activity
-            { "jpeg_activity", make_metric({ 9 }) },  // jpeg_activity
-            { "xgmi", make_metric({ 12 }) },          // xgmi
-            { "pcie", make_metric({ 13 }) },          // pcie
-            { "sdma_usage", make_metric({ 14 }) },    // sdma_usage
+        const std::unordered_map<std::string, std::uint32_t> mapper{
+            { "power", make_metric({ 0, 1 }) },           // current, average
+            { "mem_usage", make_metric({ 2 }) },          // memory_usage
+            { "temp", make_metric({ 3, 4 }) },            // hotspot, edge
+            { "busy", make_metric({ 5, 6, 7 }) },         // gfx, umc, mm
+            { "vcn_activity", make_metric({ 8, 10 }) },   // vcn_activity
+            { "jpeg_activity", make_metric({ 9, 11 }) },  // jpeg_activity
+            { "xgmi", make_metric({ 12 }) },              // xgmi
+            { "pcie", make_metric({ 13 }) },              // pcie
+            { "sdma_usage", make_metric({ 14 }) },        // sdma_usage
+            { "gfx_clock", make_metric({ 15 }) },         // gfx_clock
+            { "mem_clock", make_metric({ 16 }) },         // mem_clock
         };
 
         gpu::enabled_metrics metrics;
@@ -223,7 +382,7 @@ private:
 
         if(!std::regex_match(input_range, validator))
         {
-            LOG_ERROR("Failed to parse gpu input list: {}", input_range);
+            LOG_ERROR("Failed to parse device index list: {}", input_range);
             return result;
         }
 

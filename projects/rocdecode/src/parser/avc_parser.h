@@ -186,7 +186,7 @@ protected:
     /*! \brief Function to parse slice header
      * \param p_stream The pointer to the input bit stream
      * \param [in] stream_size_in_byte The byte size of the stream
-     * \param [out] p_slice_header The pointer to the slice header strucutre
+     * \param [out] p_slice_header The pointer to the slice header structure
      * \return <tt>ParserResult</tt>
      */
     ParserResult ParseSliceHeader(uint8_t *p_stream, size_t stream_size_in_byte, AvcSliceHeader *p_slice_header);
@@ -230,8 +230,8 @@ protected:
      */
    ParserResult DecodeFrameNumGaps();
 
-    /*! \brief Function to set up the reference picutre lists for each slice. 8.2.4.
-     * \param [in] p_slice_info Poiner to slice info struct
+    /*! \brief Function to set up the reference picture lists for each slice. 8.2.4.
+     * \param [in] p_slice_info Pointer to slice info struct
      * \return <tt>ParserResult</tt>
      */
     ParserResult SetupReflist(AvcSliceInfo *p_slice_info);
@@ -292,7 +292,6 @@ protected:
      */
     ParserResult FlushDpb();
 
-#if DBGINFO
     /*! \brief Function to log out parsed SPS content for debug.
     */
     void PrintSps(AvcSeqParameterSet *p_sps);
@@ -312,5 +311,4 @@ protected:
     /*! \brief Function to log out buffer info in VAAPI decode params
      */
     void PrintVappiBufInfo();
-#endif // DBGINFO
 };

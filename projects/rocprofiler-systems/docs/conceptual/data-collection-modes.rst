@@ -214,7 +214,7 @@ Sampling types:
 
 1. **CPU-Time sampling** (default)
 
-* Enabled using ``ROCPROFSYS_SAMPLING_CPUTIME=ON`` or ``--cputime`` (rocprof-sys-sample), ``--sample-cputime`` (rocprof-sys-run). The sampling can be controlled using:
+* Enabled using ``ROCPROFSYS_SAMPLING_CPUTIME=ON`` or ``--sample-cputime`` (both rocprof-sys-run and rocprof-sys-sample). The sampling can be controlled using:
 
   * ``ROCPROFSYS_SAMPLING_CPUTIME_FREQ``
   * ``ROCPROFSYS_SAMPLING_CPUTIME_DELAY``
@@ -222,7 +222,7 @@ Sampling types:
 
 2. **Real-Time sampling**
 
-* Enabled using ``ROCPROFSYS_SAMPLING_REALTIME=ON`` or ``--realtime`` (rocprof-sys-sample), ``--sample-realtime`` (rocprof-sys-run). The sampling can be controlled using:
+* Enabled using ``ROCPROFSYS_SAMPLING_REALTIME=ON`` or ``--sample-realtime`` (both rocprof-sys-run and rocprof-sys-sample). The sampling can be controlled using:
 
   * ``ROCPROFSYS_SAMPLING_REALTIME_FREQ``
   * ``ROCPROFSYS_SAMPLING_REALTIME_DELAY``

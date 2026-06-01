@@ -32,6 +32,9 @@ namespace rocshmem {
 
 struct constmem_t {
   uint64_t alltoall_wg_algo;
+  int ipc_first_pe;
+  int ipc_stride;    // 0 = pattern invalid (use fallback linear scan)
+  int ipc_shm_size;
 } __attribute__ ((aligned (16)));
 
 extern __constant__ constmem_t constmem;

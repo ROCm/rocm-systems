@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -26,7 +7,6 @@
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
-#include "core/defines.hpp"
 #include "core/demangler.hpp"
 #include "core/perfetto.hpp"
 #include "core/state.hpp"
@@ -37,6 +17,7 @@
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
 #include "library/tracing/annotation.hpp"
+#include <cstdint>
 
 #include <timemory/components/io/components.hpp>
 #include <timemory/components/network/types.hpp>
@@ -55,6 +36,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <ratio>
 #include <string>
 #include <type_traits>
@@ -86,6 +68,9 @@ extern ROCPROFSYS_HIDDEN_API bool debug_mark;
 
 std::unordered_map<hash_value_t, std::string>&
 get_perfetto_track_uuids();
+
+std::mutex&
+get_perfetto_track_uuids_mutex();
 
 void
 copy_timemory_hash_ids();
@@ -127,19 +112,19 @@ pop_perfetto(CategoryT, const char*, Args&&...);
 
 template <typename CategoryT, typename... Args>
 inline void
-push_perfetto_ts(CategoryT, const char*, uint64_t _ts, Args&&...);
+push_perfetto_ts(CategoryT, const char*, std::uint64_t _ts, Args&&...);
 
 template <typename CategoryT, typename... Args>
 inline void
-pop_perfetto_ts(CategoryT, const char*, uint64_t, Args&&...);
+pop_perfetto_ts(CategoryT, const char*, std::uint64_t, Args&&...);
 
 template <typename CategoryT, typename... Args>
 inline void
-push_perfetto_track(CategoryT, const char*, ::perfetto::Track, uint64_t, Args&&...);
+push_perfetto_track(CategoryT, const char*, ::perfetto::Track, std::uint64_t, Args&&...);
 
 template <typename CategoryT, typename... Args>
 inline void
-pop_perfetto_track(CategoryT, const char*, ::perfetto::Track, uint64_t, Args&&...);
+pop_perfetto_track(CategoryT, const char*, ::perfetto::Track, std::uint64_t, Args&&...);
 
 template <typename CategoryT, typename... Args>
 inline void
@@ -147,11 +132,11 @@ mark_perfetto(CategoryT, const char*, Args&&...);
 
 template <typename CategoryT, typename... Args>
 inline void
-mark_perfetto_ts(CategoryT, const char*, uint64_t, Args&&...);
+mark_perfetto_ts(CategoryT, const char*, std::uint64_t, Args&&...);
 
 template <typename CategoryT, typename... Args>
 inline void
-mark_perfetto_track(CategoryT, const char*, ::perfetto::Track, uint64_t, Args&&...);
+mark_perfetto_track(CategoryT, const char*, ::perfetto::Track, std::uint64_t, Args&&...);
 
 //
 //  definitions
@@ -171,8 +156,11 @@ template <typename CategoryT, typename TrackT = ::perfetto::Track, typename Func
 auto
 get_perfetto_track(CategoryT, FuncT&& _desc_generator, Args&&... _args)
 {
-    auto  _uuid = get_perfetto_category_uuid<CategoryT>(std::forward<Args>(_args)...);
-    auto& _track_uuids = get_perfetto_track_uuids();
+    auto _uuid = get_perfetto_category_uuid<CategoryT>(std::forward<Args>(_args)...);
+
+    std::lock_guard<std::mutex> _lk{ get_perfetto_track_uuids_mutex() };
+    auto&                       _track_uuids = get_perfetto_track_uuids();
+
     if(_track_uuids.find(_uuid) == _track_uuids.end())
     {
         const auto _track = TrackT(_uuid, ::perfetto::ProcessTrack::Current());
@@ -193,7 +181,7 @@ get_perfetto_track(CategoryT, FuncT&& _desc_generator, Args&&... _args)
     // overhead of generating string during releases
 #if defined(ROCPROFSYS_CI) && ROCPROFSYS_CI > 0
     auto _name = std::forward<FuncT>(_desc_generator)(std::forward<Args>(_args)...);
-    if(get_is_continuous_integration() && _track_uuids.at(_uuid) != _name)
+    if(_track_uuids.at(_uuid) != _name)
     {
         throw std::runtime_error(
             fmt::format("Error! Multiple invocations of UUID {} produced different "
@@ -205,7 +193,7 @@ get_perfetto_track(CategoryT, FuncT&& _desc_generator, Args&&... _args)
     return TrackT(_uuid, ::perfetto::ProcessTrack::Current());
 }
 
-template <typename Tp = uint64_t>
+template <typename Tp = std::uint64_t>
 ROCPROFSYS_INLINE auto
 now()
 {
@@ -213,7 +201,7 @@ now()
 }
 
 inline auto&
-get_instrumentation_bundles(int64_t _tid = threading::get_id())
+get_instrumentation_bundles(std::int64_t _tid = threading::get_id())
 {
     return instrumentation_bundles::instance(construct_on_thread{ _tid });
 }
@@ -234,8 +222,8 @@ pop_count()
 
 struct category_stack
 {
-    int32_t profile = 0;  // use signed so compiler doesn't have to
-    int32_t tracing = 0;  // account for underflow/overflow
+    std::int32_t profile = 0;  // use signed so compiler doesn't have to
+    std::int32_t tracing = 0;  // account for underflow/overflow
 };
 
 template <typename CategoryT>
@@ -402,7 +390,7 @@ push_perfetto(CategoryT, const char* name, Args&&... args)
                  std::is_invocable<Args..., ::perfetto::EventContext>::value)
     {
         ++get_tracing_stack<CategoryT>();
-        uint64_t _ts = now();
+        std::uint64_t _ts = now();
         if(config::get_perfetto_annotations())
         {
             TRACE_EVENT_BEGIN(trait::name<CategoryT>::value, get_perfetto_string(name),
@@ -421,18 +409,18 @@ push_perfetto(CategoryT, const char* name, Args&&... args)
         using arg1_type  = concepts::tuple_element_t<1, tuple_type>;
 
         if constexpr(std::is_same<arg0_type, ::perfetto::Track>::value &&
-                     std::is_same<arg1_type, uint64_t>::value)
+                     std::is_same<arg1_type, std::uint64_t>::value)
         {
             push_perfetto_track(CategoryT{}, name, std::forward<Args>(args)...);
         }
-        else if constexpr(std::is_same<arg0_type, uint64_t>::value)
+        else if constexpr(std::is_same<arg0_type, std::uint64_t>::value)
         {
             push_perfetto_ts(CategoryT{}, name, std::forward<Args>(args)...);
         }
         else
         {
             ++get_tracing_stack<CategoryT>();
-            uint64_t _ts = now();
+            std::uint64_t _ts = now();
             TRACE_EVENT_BEGIN(
                 trait::name<CategoryT>::value, get_perfetto_string(name), _ts,
                 std::forward<Args>(args)..., [&](::perfetto::EventContext ctx) {
@@ -487,7 +475,7 @@ pop_perfetto(CategoryT, const char* name, Args&&... args)
     {
         // decrement tracing stack
         --get_tracing_stack<CategoryT>();
-        uint64_t _ts = now();
+        std::uint64_t _ts = now();
         if(config::get_perfetto_annotations())
         {
             TRACE_EVENT_END(trait::name<CategoryT>::value, _ts, "end_ns", _ts,
@@ -507,11 +495,11 @@ pop_perfetto(CategoryT, const char* name, Args&&... args)
         using arg1_type  = concepts::tuple_element_t<1, tuple_type>;
 
         if constexpr(std::is_same<arg0_type, ::perfetto::Track>::value &&
-                     std::is_same<arg1_type, uint64_t>::value)
+                     std::is_same<arg1_type, std::uint64_t>::value)
         {
             pop_perfetto_track(CategoryT{}, name, std::forward<Args>(args)...);
         }
-        else if constexpr(std::is_same<arg0_type, uint64_t>::value)
+        else if constexpr(std::is_same<arg0_type, std::uint64_t>::value)
         {
             pop_perfetto_ts(CategoryT{}, name, std::forward<Args>(args)...);
         }
@@ -519,7 +507,7 @@ pop_perfetto(CategoryT, const char* name, Args&&... args)
         {
             // decrement tracing stack
             --get_tracing_stack<CategoryT>();
-            uint64_t _ts = now();
+            std::uint64_t _ts = now();
             TRACE_EVENT_END(
                 trait::name<CategoryT>::value, _ts, std::forward<Args>(args)...,
                 perfetto_annotate_timemory_data(
@@ -537,7 +525,7 @@ pop_perfetto(CategoryT, const char* name, Args&&... args)
 
 template <typename CategoryT, typename... Args>
 inline void
-push_perfetto_ts(CategoryT, const char* name, uint64_t _ts, Args&&... args)
+push_perfetto_ts(CategoryT, const char* name, std::uint64_t _ts, Args&&... args)
 {
     // skip if category is disabled
     if(category_push_disabled<CategoryT>()) return;
@@ -549,7 +537,7 @@ push_perfetto_ts(CategoryT, const char* name, uint64_t _ts, Args&&... args)
 
 template <typename CategoryT, typename... Args>
 inline void
-pop_perfetto_ts(CategoryT, const char* name, uint64_t _ts, Args&&... args)
+pop_perfetto_ts(CategoryT, const char* name, std::uint64_t _ts, Args&&... args)
 {
     // skip if category is disabled and not pushed on this thread
     if(tracing_pop_disabled<CategoryT>()) return;
@@ -564,8 +552,8 @@ pop_perfetto_ts(CategoryT, const char* name, uint64_t _ts, Args&&... args)
 
 template <typename CategoryT, typename... Args>
 inline void
-push_perfetto_track(CategoryT, const char* name, ::perfetto::Track _track, uint64_t _ts,
-                    Args&&... args)
+push_perfetto_track(CategoryT, const char* name, ::perfetto::Track _track,
+                    std::uint64_t _ts, Args&&... args)
 {
     // skip if category is disabled
     if(category_push_disabled<CategoryT>()) return;
@@ -577,8 +565,8 @@ push_perfetto_track(CategoryT, const char* name, ::perfetto::Track _track, uint6
 
 template <typename CategoryT, typename... Args>
 inline void
-pop_perfetto_track(CategoryT, const char* name, ::perfetto::Track _track, uint64_t _ts,
-                   Args&&... args)
+pop_perfetto_track(CategoryT, const char* name, ::perfetto::Track _track,
+                   std::uint64_t _ts, Args&&... args)
 {
     // skip if category is disabled and not pushed on this thread
     if(tracing_pop_disabled<CategoryT>()) return;
@@ -601,7 +589,7 @@ mark_perfetto(CategoryT, const char* name, Args&&... args)
     if constexpr(sizeof...(Args) == 1 &&
                  std::is_invocable<Args..., ::perfetto::EventContext>::value)
     {
-        uint64_t _ts = now();
+        std::uint64_t _ts = now();
         if(config::get_perfetto_annotations())
         {
             TRACE_EVENT_INSTANT(trait::name<CategoryT>::value, get_perfetto_string(name),
@@ -620,17 +608,17 @@ mark_perfetto(CategoryT, const char* name, Args&&... args)
         using arg1_type  = concepts::tuple_element_t<1, tuple_type>;
 
         if constexpr(std::is_same<arg0_type, ::perfetto::Track>::value &&
-                     std::is_same<arg1_type, uint64_t>::value)
+                     std::is_same<arg1_type, std::uint64_t>::value)
         {
             mark_perfetto_track(CategoryT{}, name, std::forward<Args>(args)...);
         }
-        else if constexpr(std::is_same<arg0_type, uint64_t>::value)
+        else if constexpr(std::is_same<arg0_type, std::uint64_t>::value)
         {
             mark_perfetto_ts(CategoryT{}, name, std::forward<Args>(args)...);
         }
         else
         {
-            uint64_t _ts = now();
+            std::uint64_t _ts = now();
             TRACE_EVENT_INSTANT(trait::name<CategoryT>::value, get_perfetto_string(name),
                                 _ts, std::forward<Args>(args)...,
                                 [&](::perfetto::EventContext ctx) {
@@ -645,7 +633,7 @@ mark_perfetto(CategoryT, const char* name, Args&&... args)
 
 template <typename CategoryT, typename... Args>
 inline void
-mark_perfetto_ts(CategoryT, const char* name, uint64_t _ts, Args&&... args)
+mark_perfetto_ts(CategoryT, const char* name, std::uint64_t _ts, Args&&... args)
 {
     // skip if category is disabled
     if(category_mark_disabled<CategoryT>()) return;
@@ -656,8 +644,8 @@ mark_perfetto_ts(CategoryT, const char* name, uint64_t _ts, Args&&... args)
 
 template <typename CategoryT, typename... Args>
 inline void
-mark_perfetto_track(CategoryT, const char* name, ::perfetto::Track _track, uint64_t _ts,
-                    Args&&... args)
+mark_perfetto_track(CategoryT, const char* name, ::perfetto::Track _track,
+                    std::uint64_t _ts, Args&&... args)
 {
     // skip if category is disabled
     if(category_mark_disabled<CategoryT>()) return;
@@ -667,8 +655,8 @@ mark_perfetto_track(CategoryT, const char* name, ::perfetto::Track _track, uint6
 }
 
 template <typename FuncT>
-int64_t
-get_clock_skew(FuncT&& _timestamp_func, int64_t _n = 1)
+std::int64_t
+get_clock_skew(FuncT&& _timestamp_func, std::int64_t _n = 1)
 {
     namespace cpu = tim::cpu;
     // synchronize timestamps
@@ -686,16 +674,17 @@ get_clock_skew(FuncT&& _timestamp_func, int64_t _n = 1)
     };
 
     auto _compute = [&_cpu_now, &_gpu_now]() {
-        volatile uint64_t _cpu_ts = 0;
-        volatile uint64_t _gpu_ts = 0;
+        volatile std::uint64_t _cpu_ts = 0;
+        volatile std::uint64_t _gpu_ts = 0;
         _cpu_ts += _cpu_now();
         _gpu_ts += _gpu_now();
         _cpu_ts += _cpu_now();
-        return static_cast<int64_t>(_cpu_ts / 2) - static_cast<int64_t>(_gpu_ts);
+        return static_cast<std::int64_t>(_cpu_ts / 2) -
+               static_cast<std::int64_t>(_gpu_ts);
     };
 
-    int64_t _diff = 0;
-    for(int64_t i = 0; i < _n; ++i)
+    std::int64_t _diff = 0;
+    for(std::int64_t i = 0; i < _n; ++i)
     {
         _diff += _compute();
     }

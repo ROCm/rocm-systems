@@ -23,6 +23,7 @@
 #define _GNU_SOURCE 1
 
 #include "lib/rocprofiler-sdk/registration.hpp"
+#include "lib/aqlprofile/aqlprofile.hpp"
 #include "lib/common/dl.hpp"
 #include "lib/common/elf_utils.hpp"
 #include "lib/common/environment.hpp"
@@ -784,7 +785,7 @@ invoke_client_detaches()
 
             hsa::async_copy_sync();
             hsa::queue_controller_sync();
-            pc_sampling::service_sync();
+            pc_sampling::service_sync(itr->internal_client_id);
 
             auto _fini_status = get_fini_status();
             if(_fini_status == 0) set_fini_status(-1);
@@ -826,7 +827,7 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
 
                 hsa::async_copy_sync();
                 hsa::queue_controller_sync();
-                pc_sampling::service_sync();
+                pc_sampling::service_sync(itr->internal_client_id);
 
                 auto _fini_status = get_fini_status();
                 if(_fini_status == 0) set_fini_status(-1);
@@ -1211,6 +1212,8 @@ rocprofiler_set_api_table(const char* name,
         if(runtime_pc_sampling_table)
             rocprofiler::hsa::copy_table(hsa_api_table->pc_sampling_ext_, lib_instance);
 #endif
+
+        rocprofiler::aqlprofile::hsa_rsrc_factory_init(hsa_api_table);
 
         // need to construct agent mappings before initializing the queue controller
         rocprofiler::agent::construct_agent_cache(hsa_api_table);

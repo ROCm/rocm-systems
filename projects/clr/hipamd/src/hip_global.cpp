@@ -128,7 +128,7 @@ hipError_t Function::GetStatFuncAttr(hipFuncAttributes* func_attr, int deviceId)
   func_attr->maxDynamicSharedSizeBytes = wginfo->maxDynamicSharedSizeBytes_;
   func_attr->maxThreadsPerBlock = static_cast<int>(wginfo->size_);
   func_attr->numRegs = static_cast<int>(wginfo->usedVGPRs_);
-  func_attr->preferredShmemCarveout = 0;
+  func_attr->preferredShmemCarveout = wginfo->groupMemCarveout_;
   func_attr->ptxVersion = binaryVersion;
   return hipSuccess;
 }

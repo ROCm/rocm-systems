@@ -30,6 +30,7 @@
 #include "lib/rocprofiler-sdk/counters/device_counting.hpp"
 #include "lib/rocprofiler-sdk/external_correlation.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/types.hpp"
+#include "lib/rocprofiler-sdk/spm/core.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
@@ -87,6 +88,18 @@ struct dispatch_counter_collection_service
     common::Synchronized<bool> enabled{false};
 };
 
+struct spm_dispatch_counter_collection_service
+{
+    // Contains a SPM collection instance associated with this context.
+    // Contains callback information along with other data needed to collect/process
+    // SPM counters.
+    std::vector<std::shared_ptr<spm::spm_counter_callback_info>> callbacks{};
+    // A flag to state wether or not the counter set is currently enabled. This is primarily
+    // to protect against multithreaded calls to enable a context (and enabling already enabled
+    // counters).
+    common::Synchronized<bool> enabled{false};
+};
+
 struct device_counting_service
 {
     std::unordered_set<uint64_t>                            conf_agents;
@@ -109,9 +122,13 @@ struct pc_sampling_service
     // Contains a map with pairs (rocprofiler_agent_id_t, PCSAgentSession*).
     // The PCSAgentSession encapsulates the information about the configured PC sampling session
     // used on the agent with `rocprofiler_agent_id_t`.
+    // Uses shared_ptr for shared ownership with global sessions map.
     std::unordered_map<rocprofiler_agent_id_t,
-                       std::unique_ptr<rocprofiler::pc_sampling::PCSAgentSession>>
+                       std::shared_ptr<rocprofiler::pc_sampling::PCSAgentSession>>
         agent_sessions;
+
+    // Atomic flag for CAS-based start/stop operations
+    std::atomic<bool> enabled{false};
 };
 
 struct context
@@ -124,12 +141,13 @@ struct context
     std::unique_ptr<callback_tracing_service> callback_tracer    = {};
     std::unique_ptr<buffer_tracing_service>   buffered_tracer    = {};
     // Only one of counter collection/agent counter collection can exists in the ctx.
-    std::unique_ptr<dispatch_counter_collection_service> counter_collection        = {};
-    std::unique_ptr<device_counting_service>             device_counter_collection = {};
-    std::unique_ptr<pc_sampling_service>                 pc_sampler                = {};
+    std::unique_ptr<dispatch_counter_collection_service> dispatch_counter_collection = {};
+    std::unique_ptr<device_counting_service>             device_counter_collection   = {};
+    std::unique_ptr<pc_sampling_service>                 pc_sampler                  = {};
+    std::unique_ptr<thread_trace::DispatchThreadTracer>  dispatch_thread_trace       = {};
+    std::unique_ptr<thread_trace::DeviceThreadTracer>    device_thread_trace         = {};
 
-    std::unique_ptr<thread_trace::DispatchThreadTracer> dispatch_thread_trace = {};
-    std::unique_ptr<thread_trace::DeviceThreadTracer>   device_thread_trace   = {};
+    std::unique_ptr<spm_dispatch_counter_collection_service> dispatch_spm = {};
 
     template <typename KindT>
     bool is_tracing(KindT _kind) const;

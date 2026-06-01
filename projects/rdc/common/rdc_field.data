@@ -69,6 +69,9 @@ FLD_DESC_ENT(RDC_FI_GPU_MEMORY_ACTIVITY, "Memory busy percentage",              
 FLD_DESC_ENT(RDC_FI_GPU_MEMORY_MAX_BANDWIDTH,       "Memory max bandwidth",             "GPU_MEM_MAX_BANDWIDTH",   true)
 FLD_DESC_ENT(RDC_FI_GPU_MEMORY_CUR_BANDWIDTH,       "Memory current bandwidth",         "GPU_MEM_CUR_BANDWIDTH",   true)
 FLD_DESC_ENT(RDC_FI_GPU_BUSY_PERCENT,    "GPU busy percentage",                         "GPU_BUSY_PERCENT", true)
+FLD_DESC_ENT(RDC_FI_GFX_ACTIVITY_ACC,    "GFX activity accumulated counter",            "GFX_ACTIVITY_ACC",  true)
+FLD_DESC_ENT(RDC_FI_MEM_ACTIVITY_ACC,    "Memory activity accumulated counter",         "MEM_ACTIVITY_ACC",  true)
+FLD_DESC_ENT(RDC_FI_ACCUMULATION_COUNTER, "Accumulation cycle counter",                 "ACCUMULATION_COUNTER", true)
 FLD_DESC_ENT(RDC_FI_GPU_PAGE_RETRIED,    "Retried page of the GPU instance",            "GPU_PAGE_RETRIED", true)
 
 // ECC totals

@@ -27,6 +27,10 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
 
     extern void __amd_streamOpsWrite(__global uint*, __global ulong*, ulong);
 
+    extern void __amd_streamOpsIncrement(__global uint*, __global ulong*, ulong);
+
+    extern void __amd_streamOpsDecrement(__global uint*, __global ulong*, ulong);
+
     extern void __amd_streamOpsWait(__global uint*, __global ulong*, ulong, ulong, ulong);
 
     extern void __amd_batchMemOp(__global void*, uint count);
@@ -130,6 +134,54 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
       }
     }
 
+    typedef struct CopyBufferBatchDescriptor {
+      ulong source_address;
+      ulong destination_address;
+      ulong aligned_element_count;
+      uint aligned_element_size;
+      uint trailing_byte_count;
+    } CopyBufferBatchDescriptor;
+
+    __kernel void __amd_rocclr_copyBufferBatch(
+        __global const CopyBufferBatchDescriptor *descriptors,
+        uint workgroup_size,
+        uint copy_stride) {
+      uint work_item_id = __builtin_amdgcn_workitem_id_x();
+      uint group_ordinal = __builtin_amdgcn_workgroup_id_x();
+      uint descriptor_index = __builtin_amdgcn_workgroup_id_y();
+
+      CopyBufferBatchDescriptor descriptor = descriptors[descriptor_index];
+      __global uchar *source = (__global uchar *)descriptor.source_address;
+      __global uchar *destination =
+          (__global uchar *)descriptor.destination_address;
+      ulong copy_index = ((ulong)group_ordinal * workgroup_size) + work_item_id;
+
+      if (descriptor.aligned_element_size == sizeof(ulong2)) {
+        __global ulong2 *source_data = (__global ulong2 *)(source);
+        __global ulong2 *destination_data = (__global ulong2 *)(destination);
+        while (copy_index < descriptor.aligned_element_count) {
+          destination_data[copy_index] = source_data[copy_index];
+          copy_index += copy_stride;
+        }
+      } else {
+        __global uint *source_data = (__global uint *)(source);
+        __global uint *destination_data = (__global uint *)(destination);
+        while (copy_index < descriptor.aligned_element_count) {
+          destination_data[copy_index] = source_data[copy_index];
+          copy_index += copy_stride;
+        }
+      }
+      if ((descriptor.trailing_byte_count != 0) && (group_ordinal == 0) &&
+          (work_item_id == 0)) {
+        ulong tail_start =
+            descriptor.aligned_element_count * descriptor.aligned_element_size;
+        ulong tail_end = tail_start + descriptor.trailing_byte_count;
+        for (ulong i = tail_start; i < tail_end; ++i) {
+          destination[i] = source[i];
+        }
+      }
+    }
+
     __kernel void __amd_rocclr_copyBufferAligned(__global uint* src, __global uint* dst,
                                                  ulong srcOrigin, ulong dstOrigin, ulong size,
                                                  uint alignment) {
@@ -156,6 +208,16 @@ const char* HipExtraSourceCode = BLIT_KERNELS(
       __amd_streamOpsWrite(ptrInt, ptrUlong, value);
     }
 
+    __kernel void __amd_rocclr_streamOpsIncrement(__global uint* ptrInt, __global ulong* ptrUlong,
+                                                  ulong value) {
+      __amd_streamOpsIncrement(ptrInt, ptrUlong, value);
+    }
+
+    __kernel void __amd_rocclr_streamOpsDecrement(__global uint* ptrInt, __global ulong* ptrUlong,
+                                                  ulong value) {
+      __amd_streamOpsDecrement(ptrInt, ptrUlong, value);
+    }
+
     __kernel void __amd_rocclr_streamOpsWait(__global uint* ptrInt, __global ulong* ptrUlong,
                                              ulong value, ulong flags, ulong mask) {
       __amd_streamOpsWait(ptrInt, ptrUlong, value, flags, mask);
@@ -172,6 +234,16 @@ const char* HipExtraSourceCodeNoGWS = BLIT_KERNELS(
     __kernel void __amd_rocclr_streamOpsWrite(__global uint* ptrInt, __global ulong* ptrUlong,
                                               ulong value) {
       __amd_streamOpsWrite(ptrInt, ptrUlong, value);
+    }
+
+    __kernel void __amd_rocclr_streamOpsIncrement(__global uint* ptrInt, __global ulong* ptrUlong,
+                                                  ulong value) {
+      __amd_streamOpsIncrement(ptrInt, ptrUlong, value);
+    }
+
+    __kernel void __amd_rocclr_streamOpsDecrement(__global uint* ptrInt, __global ulong* ptrUlong,
+                                                  ulong value) {
+      __amd_streamOpsDecrement(ptrInt, ptrUlong, value);
     }
 
     __kernel void __amd_rocclr_streamOpsWait(__global uint* ptrInt, __global ulong* ptrUlong,
