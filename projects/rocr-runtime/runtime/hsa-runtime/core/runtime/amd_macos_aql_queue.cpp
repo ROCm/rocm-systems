@@ -20,6 +20,8 @@
 #include <thread>
 #include <utility>
 #include <unistd.h>
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
 
 #include "core/inc/exceptions.h"
 #include "core/util/utils.h"
@@ -145,6 +147,73 @@ void CopyToBar(void* dst, const void* src, size_t size) {
     *reinterpret_cast<volatile uint32_t*>(d8 + i) = word;
   }
   for (; i < size; ++i) d8[i] = s8[i];
+}
+
+void CopyFromBar(void* dst, const void* src, size_t size) {
+  auto* d8 = static_cast<uint8_t*>(dst);
+  const auto* s8 = static_cast<const volatile uint8_t*>(src);
+  size_t i = 0;
+  for (; i + sizeof(uint32_t) <= size; i += sizeof(uint32_t)) {
+    uint32_t word = *reinterpret_cast<const volatile uint32_t*>(s8 + i);
+    std::memcpy(d8 + i, &word, sizeof(word));
+  }
+  for (; i < size; ++i) d8[i] = s8[i];
+}
+
+// Host-pointer kernarg staging: a kernarg value that is a raw host pointer (not
+// a registered VRAM address HostToGpuAddress can translate) is copied into VRAM
+// scratch so the GPU can read it; writable ranges are recorded for an optional
+// post-dispatch copy-back (ROCR_MACOS_AQL_ENABLE_HOST_COPYBACK).
+constexpr size_t kHostPointerStageBytes = 4096;
+
+struct HostPointerStage {
+  uint64_t host = 0;
+  void* staged_cpu = nullptr;
+  uint64_t staged_gpu = 0;
+  size_t size = 0;
+  size_t copy_back_size = 0;
+};
+
+bool LooksLikeDarwinUserPointer(uint64_t value) {
+  // Filter GPU virtual addresses and small/aligned scalar values before asking
+  // Mach about the process VM map.
+  if ((value & 0xffffffffull) == 0) return false;
+  return value >= 0x100000000ull && value < 0x0000800000000000ull &&
+         (value & (alignof(uint64_t) - 1)) == 0;
+}
+
+bool HostPointerRangeWithProtection(const void* ptr, vm_prot_t required_prot,
+                                    size_t* available_size) {
+  if (ptr == nullptr || available_size == nullptr) return false;
+  *available_size = 0;
+  mach_vm_address_t query = reinterpret_cast<mach_vm_address_t>(ptr);
+  mach_vm_address_t region = query;
+  mach_vm_size_t region_size = 0;
+  vm_region_basic_info_data_64_t info{};
+  mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+  mach_port_t object_name = MACH_PORT_NULL;
+  kern_return_t kr = mach_vm_region(mach_task_self(), &region, &region_size,
+                                    VM_REGION_BASIC_INFO_64,
+                                    reinterpret_cast<vm_region_info_t>(&info), &count,
+                                    &object_name);
+  if (object_name != MACH_PORT_NULL) {
+    mach_port_deallocate(mach_task_self(), object_name);
+  }
+  if (kr != KERN_SUCCESS) return false;
+  if (query < region || query >= region + region_size) return false;
+  if ((info.protection & required_prot) != required_prot) return false;
+  *available_size = static_cast<size_t>(std::min<mach_vm_size_t>(
+      region + region_size - query, kHostPointerStageBytes));
+  return *available_size != 0;
+}
+
+bool ReadableHostPointerRange(const void* ptr, size_t* readable_size) {
+  return HostPointerRangeWithProtection(ptr, VM_PROT_READ, readable_size);
+}
+
+bool WritableHostPointerRange(const void* ptr, size_t* writable_size) {
+  return HostPointerRangeWithProtection(ptr, VM_PROT_READ | VM_PROT_WRITE,
+                                        writable_size);
 }
 
 bool SignalSatisfied(hsa_signal_t signal) {
@@ -373,6 +442,7 @@ hsa_status_t MacAqlQueue::SubmitKernel(const hsa_kernel_dispatch_packet_t& packe
 
   uint64_t kernarg_gpu = 0;
   std::vector<std::pair<uint64_t, uint64_t>> kernarg_translations;
+  std::vector<HostPointerStage> host_pointer_stages;
   size_t kernarg_stage_size = kd->kernarg_size;
   // rocBLAS/Tensile UserArgs kernels request the kernarg-pointer SGPR
   // (kPropKernargPtr) but report kernarg_size==0; without a staged buffer they
@@ -402,6 +472,29 @@ hsa_status_t MacAqlQueue::SubmitKernel(const hsa_kernel_dispatch_packet_t& packe
           kernarg_translations.emplace_back(value, translated);
         }
         std::memcpy(kernargs.data() + off, &translated, sizeof(translated));
+        continue;
+      }
+      // Fallback: a raw host pointer not registered as VRAM. Stage it to VRAM
+      // scratch so the kernel can read it, and record a writable range for the
+      // optional post-dispatch copy-back.
+      size_t readable_size = 0;
+      if (LooksLikeDarwinUserPointer(value) &&
+          ReadableHostPointerRange(reinterpret_cast<const void*>(static_cast<uintptr_t>(value)),
+                                   &readable_size)) {
+        void* staged_cpu = nullptr;
+        uint64_t staged_gpu = 0;
+        status = AllocateDispatchScratch(readable_size, 16, &staged_cpu, &staged_gpu);
+        if (status != HSA_STATUS_SUCCESS) return status;
+        CopyToBar(staged_cpu, reinterpret_cast<const void*>(static_cast<uintptr_t>(value)),
+                  readable_size);
+        size_t writable_size = 0;
+        const bool writable = WritableHostPointerRange(
+            reinterpret_cast<void*>(static_cast<uintptr_t>(value)), &writable_size);
+        host_pointer_stages.push_back(
+            {value, staged_cpu, staged_gpu, readable_size,
+             writable ? std::min(readable_size, writable_size) : 0});
+        if (TraceAql()) kernarg_translations.emplace_back(value, staged_gpu);
+        std::memcpy(kernargs.data() + off, &staged_gpu, sizeof(staged_gpu));
       }
     }
     CopyToBar(kernarg_cpu, kernargs.data(), kernargs.size());
@@ -575,6 +668,18 @@ hsa_status_t MacAqlQueue::SubmitKernel(const hsa_kernel_dispatch_packet_t& packe
     AcquireMemGfx10(pm4);
   }
   status = SubmitPm4AndWait(pm4);
+  // Copy back writable raw-host-pointer kernargs from their VRAM shadows. Opt-in
+  // (ROCR_MACOS_AQL_ENABLE_HOST_COPYBACK) because a too-broad writable range can
+  // clobber host memory adjacent to a small kernarg object; copy_back_size is
+  // clamped to the Mach-reported writable region.
+  if (status == HSA_STATUS_SUCCESS && EnvEnabled("ROCR_MACOS_AQL_ENABLE_HOST_COPYBACK") &&
+      !EnvEnabled("ROCR_MACOS_AQL_SKIP_HOST_COPYBACK")) {
+    for (const HostPointerStage& stage : host_pointer_stages) {
+      if (stage.copy_back_size == 0) continue;
+      CopyFromBar(reinterpret_cast<void*>(static_cast<uintptr_t>(stage.host)),
+                  stage.staged_cpu, stage.copy_back_size);
+    }
+  }
   if (status == HSA_STATUS_SUCCESS) CompleteSignal(packet.completion_signal, 0);
   return status;
 }
