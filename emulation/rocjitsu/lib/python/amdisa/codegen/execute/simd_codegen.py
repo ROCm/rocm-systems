@@ -351,6 +351,68 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         " util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(r)), out) = 0;"
         " return out; }",
     ),
+    # --- bit-scan (SWAR, no stdx primitive) -----------------------------------
+    # All return uint32_t and special-case the zero input to 0xFFFFFFFF, matching
+    # the scalar bodies (std::countl_zero / countr_zero / popcount). The VOP3
+    # twins share these (modifier-free integer bodies, auto-routed below). f16<->
+    # f32 round-trip not involved -> not in _VOP3_UNARY_SKIP.
+    #
+    # ffbh_u32 / clz_i32_u32: count leading zeros; 0 -> 0xFFFFFFFF.
+    "v_ffbh_u32_vop1": (
+        "uint32_t",
+        "uint32_t",
+        "[](auto a) {"
+        " auto c = util::clz_u32_simd(a);"
+        " util::stdx::where(a == 0u, c) = 0xFFFFFFFFu;"
+        " return c; }",
+    ),
+    "v_clz_i32_u32_vop1": (
+        "uint32_t",
+        "uint32_t",
+        "[](auto a) {"
+        " auto c = util::clz_u32_simd(a);"
+        " util::stdx::where(a == 0u, c) = 0xFFFFFFFFu;"
+        " return c; }",
+    ),
+    # ffbl_b32 / ctz_i32_b32: count trailing zeros; 0 -> 0xFFFFFFFF.
+    "v_ffbl_b32_vop1": (
+        "uint32_t",
+        "uint32_t",
+        "[](auto a) {"
+        " auto c = util::ctz_u32_simd(a);"
+        " util::stdx::where(a == 0u, c) = 0xFFFFFFFFu;"
+        " return c; }",
+    ),
+    "v_ctz_i32_b32_vop1": (
+        "uint32_t",
+        "uint32_t",
+        "[](auto a) {"
+        " auto c = util::ctz_u32_simd(a);"
+        " util::stdx::where(a == 0u, c) = 0xFFFFFFFFu;"
+        " return c; }",
+    ),
+    # ffbh_i32 / cls_i32: count leading sign bits = clz of (s < 0 ? ~s : s);
+    # 0 (== all-zero or all-one source) -> 0xFFFFFFFF.
+    "v_ffbh_i32_vop1": (
+        "uint32_t",
+        "uint32_t",
+        "[](auto a) {"
+        " util::native<uint32_t> u = a;"
+        " util::stdx::where((a & 0x80000000u) != 0u, u) = ~a;"
+        " auto c = util::clz_u32_simd(u);"
+        " util::stdx::where(u == 0u, c) = 0xFFFFFFFFu;"
+        " return c; }",
+    ),
+    "v_cls_i32_vop1": (
+        "uint32_t",
+        "uint32_t",
+        "[](auto a) {"
+        " util::native<uint32_t> u = a;"
+        " util::stdx::where((a & 0x80000000u) != 0u, u) = ~a;"
+        " auto c = util::clz_u32_simd(u);"
+        " util::stdx::where(u == 0u, c) = 0xFFFFFFFFu;"
+        " return c; }",
+    ),
     # v_bfrev_b32: reverse the 32 bits of src0. The scalar body loops bit-by-bit;
     # this is the branchless swap-by-strides equivalent (1/2/4/8/16-bit groups),
     # bit-identical for every input. Pure uint32 bitwise ops.
@@ -1357,6 +1419,14 @@ SIMD_VOP3_UNARY_INT_EXTRA: dict[str, tuple[str, str, str]] = {
         "uint32_t",
         "uint32_t",
         "[](auto a) { return (~a) & 0xFFFFu; }",
+    ),
+    # v_bcnt_u32_b32: VOP3-only (no VOP1 twin). The scalar body is a plain
+    # std::popcount(src0) -> vdst (src1 is read but unused by this codebase's
+    # body), so the unary src0->vdst glue is bit-exact.
+    "v_bcnt_u32_b32_vop3": (
+        "uint32_t",
+        "uint32_t",
+        "[](auto a) { return util::popcount_u32_simd(a); }",
     ),
 }
 

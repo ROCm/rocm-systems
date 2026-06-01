@@ -93,7 +93,7 @@ struct Case {
   Kind kind;
 };
 
-const std::array<Case, 10> kCases = {{
+const std::array<Case, 14> kCases = {{
     {"v_mov_b32", 321, Kind::FP},
     {"v_floor_f32", 351, Kind::FP},
     {"v_ceil_f32", 349, Kind::FP},
@@ -104,6 +104,12 @@ const std::array<Case, 10> kCases = {{
     {"v_cvt_i32_f32", 328, Kind::PLAIN},
     {"v_not_b32", 363, Kind::PLAIN},
     {"v_bfrev_b32", 364, Kind::PLAIN},
+    // Bit-scan VOP3 twins (auto-routed through the VOP1 unary glue; modifier-free
+    // integer bodies) + the VOP3-only v_bcnt_u32_b32 (UNARY_INT_EXTRA popcount).
+    {"v_ffbh_u32", 365, Kind::PLAIN},
+    {"v_ffbl_b32", 366, Kind::PLAIN},
+    {"v_ffbh_i32", 367, Kind::PLAIN},
+    {"v_bcnt_u32_b32", 651, Kind::PLAIN},
 }};
 
 struct Fixture {

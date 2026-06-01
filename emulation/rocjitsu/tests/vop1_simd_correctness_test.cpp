@@ -176,6 +176,11 @@ const Vop1Case kCases[] = {
     {"v_cvt_f16_u16", 57},
     {"v_cvt_i16_f16", 60},
     {"v_cvt_u16_f16", 59},
+    // Bit-scan (SWAR popcount/clz/ctz functors). 0-input lanes (kEdgeBits[0])
+    // exercise the 0xFFFFFFFF sentinel; INT32_MIN / -1 / 1 cover sign cases.
+    {"v_ffbh_u32", 45},
+    {"v_ffbl_b32", 46},
+    {"v_ffbh_i32", 47},
 };
 
 void check_case(const Vop1Case &c, uint64_t exec) {
