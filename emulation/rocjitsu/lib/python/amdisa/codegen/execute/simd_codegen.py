@@ -329,7 +329,11 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         " auto x = util::stdx::static_simd_cast<util::native<int32_t>>(a & 0xFFFFu);"
         " return util::stdx::static_simd_cast<util::native<uint32_t>>((x << 16) >> 16); }",
     ),
-    "v_cvt_u32_u16_vop1": ("uint32_t", "uint32_t", "[](auto a) { return a & 0xFFFFu; }"),
+    "v_cvt_u32_u16_vop1": (
+        "uint32_t",
+        "uint32_t",
+        "[](auto a) { return a & 0xFFFFu; }",
+    ),
     # RDNA f32->i32 round-toward-floor / round-to-nearest-even conversions
     # (cdna4 spells these v_cvt_flr_i32_f32 / v_cvt_rpi_i32_f32). floor via
     # stdx::floor; nearest via ceil(s - 0.5) (round-half-to-even on the .5 path).
