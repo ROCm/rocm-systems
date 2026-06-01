@@ -135,7 +135,11 @@ def _run_multi(args) -> None:
 
     # DBT legalization tables and encoding translators.
     if args.gen_dbt:
-        dbt_output = args.dbt_output or args.isa_output or '.'
+        dbt_output = args.dbt_output
+        if not dbt_output:
+            print('error: --dbt-output is required when generating DBT tables with --multi',
+                  file=sys.stderr)
+            sys.exit(1)
 
         leg_gen = LegalizationGenerator(specs)
         results = leg_gen.generate_all()

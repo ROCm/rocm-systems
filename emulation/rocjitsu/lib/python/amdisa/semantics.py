@@ -1378,13 +1378,11 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'dcache_wb')
     if upper == 'S_GL1_INV':
         return InstructionSemantics(name, 'gl1_inv')
+    if upper in ('S_MEMTIME', 'S_MEMREALTIME'):
+        return InstructionSemantics(name, 'smem_time')
     # Remaining scalar cache / special instructions.
-    if 'DCACHE' in upper or upper in (
-        'S_MEMTIME',
-        'S_MEMREALTIME',
-        'S_ATC_PROBE',
-        'S_ATC_PROBE_BUFFER',
-    ):
+    if 'DCACHE' in upper or upper in ('S_ATC_PROBE',
+                                       'S_ATC_PROBE_BUFFER'):
         return InstructionSemantics(name, 'nop')
 
     # S_ATOMIC_* are scalar atomics — not currently simulated.
@@ -1396,16 +1394,11 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
         if upper.endswith(suffix):
             cls = 'smem_store' if is_store else 'smem_load'
             return InstructionSemantics(name, cls, num_elems=ndw)
-    # BUFFER_WBL2, BUFFER_INV, etc. — cache control for SMEM buffer paths.
-    if upper in (
-        'BUFFER_WBL2',
-        'BUFFER_INV',
-        'BUFFER_GL0_INV',
-        'BUFFER_GL1_INV',
-        'S_BUFFER_GL0_INV',
-        'S_BUFFER_GL1_INV',
-    ):
-        return InstructionSemantics(name, 'dcache_inv')
+    if upper == 'BUFFER_WBL2':
+        return InstructionSemantics(name, 'gl2_wb')
+    if upper in ('BUFFER_INV', 'BUFFER_GL0_INV', 'BUFFER_GL1_INV',
+                 'S_BUFFER_GL0_INV', 'S_BUFFER_GL1_INV'):
+        return InstructionSemantics(name, 'gl1_inv')
     return InstructionSemantics(name, 'nop')
 
 
@@ -1515,6 +1508,7 @@ def _derive_flat(name: str) -> InstructionSemantics | None:
                     suffix = suffix[:-3]
                 # Try exact match first (handles ADD_F32, PK_ADD_F16, etc.).
                 info = _FLAT_ATOMIC_OPS.get(suffix)
+                is_64bit = False
                 if not info:
                     # Strip type suffix (_B32, _U32, _I32, _F32, _B64, etc.).
                     for tsuf in (
@@ -1531,10 +1525,11 @@ def _derive_flat(name: str) -> InstructionSemantics | None:
                             info = _FLAT_ATOMIC_OPS.get(
                                 suffix[: len(suffix) - len(tsuf)]
                             )
+                            is_64bit = '64' in tsuf
                             break
                 if info:
                     op, data_dw = info
-                    elem_size = 8 if is_x2 else 4
+                    elem_size = 8 if (is_x2 or is_64bit or data_dw >= 2) else 4
                     data_dw_actual = data_dw * (2 if is_x2 else 1)
                     return InstructionSemantics(
                         name,
@@ -1589,17 +1584,12 @@ _BUFFER_FORMAT_MAP: dict[str, tuple[int, int]] = {
 def _derive_mubuf(name: str) -> InstructionSemantics | None:
     """Derive semantics for a MUBUF (Untyped Buffer memory) instruction."""
     upper = name.upper()
-    # Buffer cache control instructions.
-    if upper in (
-        'BUFFER_WBINVL1',
-        'BUFFER_WBINVL1_SC',
-        'BUFFER_WBINVL1_VOL',
-        'BUFFER_GL0_INV',
-        'BUFFER_GL1_INV',
-        'BUFFER_WBL2',
-        'BUFFER_INV',
-    ):
-        return InstructionSemantics(name, 'dcache_inv')
+    if upper == 'BUFFER_WBL2':
+        return InstructionSemantics(name, 'gl2_wb')
+    if upper in ('BUFFER_WBINVL1', 'BUFFER_WBINVL1_SC', 'BUFFER_WBINVL1_VOL',
+                 'BUFFER_GL0_INV', 'BUFFER_GL1_INV',
+                 'BUFFER_INV'):
+        return InstructionSemantics(name, 'gl1_inv')
     if '_ATOMIC_' in upper:
         for prefix in ('BUFFER_ATOMIC_',):
             if upper.startswith(prefix):
@@ -1608,6 +1598,7 @@ def _derive_mubuf(name: str) -> InstructionSemantics | None:
                 if is_x2:
                     suffix = suffix[:-3]
                 info = _FLAT_ATOMIC_OPS.get(suffix)
+                is_64bit = False
                 if not info:
                     for tsuf in (
                         '_B32',
@@ -1623,10 +1614,11 @@ def _derive_mubuf(name: str) -> InstructionSemantics | None:
                             info = _FLAT_ATOMIC_OPS.get(
                                 suffix[: len(suffix) - len(tsuf)]
                             )
+                            is_64bit = '64' in tsuf
                             break
                 if info:
                     op, data_dw = info
-                    elem_size = 8 if is_x2 else 4
+                    elem_size = 8 if (is_x2 or is_64bit or data_dw >= 2) else 4
                     data_dw_actual = data_dw * (2 if is_x2 else 1)
                     return InstructionSemantics(
                         name,

@@ -1136,10 +1136,23 @@ class CodeGenerator:
             return '  wf.cu().l1_scalar().invalidate_all();'
 
         if cls == 'dcache_wb':
-            return '  wf.cu().l1_scalar().writeback_all();'
+            return '  wf.cu().l1_scalar().writeback_all(wf.process_id());'
 
         if cls == 'gl1_inv':
-            return '  wf.cu().l1_vector().invalidate_all();'
+            return ('  wf.cu().l1_vector().invalidate_all();\n'
+                    '  if (auto *l2 = wf.cu().l2())\n'
+                    '    l2->flush_all(wf.process_id());')
+
+        if cls == 'gl2_wb':
+            return ('  if (auto *l2 = wf.cu().l2())\n'
+                    '    l2->flush_all(wf.process_id());')
+
+        if cls == 'smem_time':
+            return ('  static thread_local uint64_t counter = 0;\n'
+                    '  counter += 100;\n'
+                    '  uint32_t dst = wf.sgpr_alloc().base + inst_.sdata;\n'
+                    '  wf.cu().write_sgpr(dst, static_cast<uint32_t>(counter));\n'
+                    '  wf.cu().write_sgpr(dst + 1, static_cast<uint32_t>(counter >> 32));')
 
         if cls == 'flat_atomic':
             return self._gen_flat_atomic(dst_ops, src_ops, sem)
@@ -1768,9 +1781,15 @@ class CodeGenerator:
         L.append(f'  d->store_data.resize(wf.wf_size() * {stride});')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
+        is_cmpswap = sem.operation == 'cmpswap'
+        half = data_dwords // 2
         for i in range(data_dwords):
+            if is_cmpswap and i >= half:
+                reg = f'inst_.data1 + {i - half}'
+            else:
+                reg = f'inst_.data0 + {i}'
             L.append(
-                f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + {acc} + inst_.data0 + {i}, lane);'
+                f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + {acc} + {reg}, lane);'
             )
             L.append(
                 f'    std::memcpy(&d->store_data[lane * {stride} + {i * 4}], &val{i}, 4);'
@@ -3835,6 +3854,14 @@ class CodeGenerator:
             '    return 0xC0800000u; // -4.0f\n'
             '  if (ev == 248)\n'
             '    return 0x3E22F983u; // 1/(2*pi)\n'
+            '  if (ev == 235)\n'
+            '    return static_cast<uint32_t>(wf.shared_aperture_base() >> 32); // SRC_SHARED_BASE\n'
+            '  if (ev == 236)\n'
+            '    return static_cast<uint32_t>(wf.shared_aperture_limit() >> 32); // SRC_SHARED_LIMIT\n'
+            '  if (ev == 237)\n'
+            '    return static_cast<uint32_t>(wf.private_aperture_base() >> 32); // SRC_PRIVATE_BASE\n'
+            '  if (ev == 238)\n'
+            '    return static_cast<uint32_t>(wf.private_aperture_limit() >> 32); // SRC_PRIVATE_LIMIT\n'
             '  if (ev == 249)\n'
             '    return 0u; // SRC_POPS_EXITING_WAVE_ID (not used in compute)\n'
             '  if (ev == 250)\n'
@@ -3889,6 +3916,14 @@ class CodeGenerator:
             '    return 0xC010000000000000ULL; // -4.0\n'
             '  if (ev == 248)\n'
             '    return 0x3FC45F306DC9C883ULL; // 1/(2*pi)\n'
+            '  if (ev == 235)\n'
+            '    return wf.shared_aperture_base(); // SRC_SHARED_BASE\n'
+            '  if (ev == 236)\n'
+            '    return wf.shared_aperture_limit(); // SRC_SHARED_LIMIT\n'
+            '  if (ev == 237)\n'
+            '    return wf.private_aperture_base(); // SRC_PRIVATE_BASE\n'
+            '  if (ev == 238)\n'
+            '    return wf.private_aperture_limit(); // SRC_PRIVATE_LIMIT\n'
             '  throw std::logic_error("Unsupported encoding value for scalar64 read: " + std::to_string(ev));\n'
             '}\n'
             '\n'

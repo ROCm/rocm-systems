@@ -1128,6 +1128,14 @@ uint32_t resolve_src_scalar(const amdgpu::Wavefront &wf, int ev) {
     return 0xC0800000u; // -4.0f
   if (ev == 248)
     return 0x3E22F983u; // 1/(2*pi)
+  if (ev == 235)
+    return static_cast<uint32_t>(wf.shared_aperture_base() >> 32); // SRC_SHARED_BASE
+  if (ev == 236)
+    return static_cast<uint32_t>(wf.shared_aperture_limit() >> 32); // SRC_SHARED_LIMIT
+  if (ev == 237)
+    return static_cast<uint32_t>(wf.private_aperture_base() >> 32); // SRC_PRIVATE_BASE
+  if (ev == 238)
+    return static_cast<uint32_t>(wf.private_aperture_limit() >> 32); // SRC_PRIVATE_LIMIT
   if (ev == 249)
     return 0u; // SRC_POPS_EXITING_WAVE_ID (not used in compute)
   if (ev == 250)
@@ -1182,6 +1190,14 @@ uint64_t resolve_src_scalar64(const amdgpu::Wavefront &wf, int ev) {
     return 0xC010000000000000ULL; // -4.0
   if (ev == 248)
     return 0x3FC45F306DC9C883ULL; // 1/(2*pi)
+  if (ev == 235)
+    return wf.shared_aperture_base(); // SRC_SHARED_BASE
+  if (ev == 236)
+    return wf.shared_aperture_limit(); // SRC_SHARED_LIMIT
+  if (ev == 237)
+    return wf.private_aperture_base(); // SRC_PRIVATE_BASE
+  if (ev == 238)
+    return wf.private_aperture_limit(); // SRC_PRIVATE_LIMIT
   throw std::logic_error("Unsupported encoding value for scalar64 read: " + std::to_string(ev));
 }
 
