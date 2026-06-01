@@ -76,6 +76,13 @@ constexpr uint32_t kEdgeBits[] = {
     0x00003C00u, // f16 1.0
     0x0000C000u, // f16 -2.0
     0x00008000u, // f16 -0.0
+    // f32 denormals with the highest mantissa bit at varied positions, to
+    // exercise frexp's denormal renormalization across the full shift range.
+    0x00400000u, // p = 22 (largest denormal exponent)
+    0x80200001u, // p = 21, negative
+    0x00080040u, // p = 19
+    0x00000200u, // p = 9
+    0x0000007Fu, // p = 6
 };
 
 struct Fixture {
@@ -181,6 +188,10 @@ const Vop1Case kCases[] = {
     {"v_ffbh_u32", 45},
     {"v_ffbl_b32", 46},
     {"v_ffbh_i32", 47},
+    // frexp f32 split: exponent (raw int32) and mantissa (float). Edge lanes
+    // cover ±0 / denormal / Inf / NaN / normal, where frexp's special cases live.
+    {"v_frexp_exp_i32_f32", 51},
+    {"v_frexp_mant_f32", 52},
 };
 
 void check_case(const Vop1Case &c, uint64_t exec) {

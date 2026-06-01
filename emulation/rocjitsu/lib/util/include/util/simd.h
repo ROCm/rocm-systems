@@ -496,6 +496,56 @@ inline native<float> bf8_e5m2_to_f32_simd(native<uint32_t> v) {
   stdx::where(exp == 31u, out) = inf_nan;
   return std::bit_cast<native<float>>(out);
 }
+
+/// Vector port of the f32 `std::frexp` mantissa over raw float bits. Returns the
+/// significand m with |m| in [0.5, 1) such that input = m * 2^e (e via
+/// frexp_exp_f32_simd). Normal lanes force the exponent field to 126 and keep
+/// the mantissa; ±0 / Inf / NaN pass through unchanged (matching glibc frexp,
+/// which the scalar body calls unguarded); denormals are renormalized via the
+/// highest-set-bit index p = floor(log2(M)) (M < 2^24, so the int->float cast is
+/// exact and p reads out of the f32 exponent field). Bit-identical to the scalar
+/// v_frexp_mant_f32 body.
+inline native<float> frexp_mant_f32_simd(native<uint32_t> v) {
+  using U = native<uint32_t>;
+  U sign = v & U(0x80000000u);
+  U E = (v >> 23) & U(0xFFu);
+  U M = v & U(0x7FFFFFu);
+  U normal = sign | (U(126u) << 23) | M; // exponent forced to 2^-1
+  // Denormal: p = index of highest set bit of M; mantissa <<= (23 - p), drop the
+  // implicit leading 1, exponent field stays 126.
+  const native<float> mf = stdx::static_simd_cast<native<float>>(M);
+  const U p = (std::bit_cast<U>(mf) >> 23) - U(127u);
+  U dn = sign | (U(126u) << 23) | ((M << (U(23u) - p)) & U(0x7FFFFFu));
+  U out = normal;
+  stdx::where(E == 0u, out) = v;                  // ±0 (M==0); overwritten if denormal
+  stdx::where((E == 0u) && (M != 0u), out) = dn;  // denormal -> renormalized
+  stdx::where(E == 255u, out) = v;                // Inf passes through unchanged
+  // frexp quiets signaling NaNs (sets the mantissa MSB) while preserving the
+  // payload; qNaN inputs are unchanged by the idempotent OR.
+  stdx::where((E == 255u) && (M != 0u), out) = v | U(0x00400000u);
+  return std::bit_cast<native<float>>(out);
+}
+
+/// Vector port of the f32 `std::frexp` exponent over raw float bits, returned as
+/// the raw bits of the int32 result. Normal lanes give E - 126; denormals give
+/// p - 148 (p = floor(log2(M))); ±0 / Inf / NaN give 0 (the scalar body only
+/// calls frexp on finite non-zero inputs, leaving exp = 0 otherwise). Negative
+/// results carry the correct two's-complement bits. Bit-identical to the scalar
+/// v_frexp_exp_i32_f32 body.
+inline native<uint32_t> frexp_exp_f32_simd(native<uint32_t> v) {
+  using U = native<uint32_t>;
+  U E = (v >> 23) & U(0xFFu);
+  U M = v & U(0x7FFFFFu);
+  U normal = E - U(126u);
+  const native<float> mf = stdx::static_simd_cast<native<float>>(M);
+  const U p = (std::bit_cast<U>(mf) >> 23) - U(127u);
+  U dn = p - U(148u);
+  U out = normal;
+  stdx::where(E == 0u, out) = U(0u);              // ±0 (M==0); overwritten if denormal
+  stdx::where((E == 0u) && (M != 0u), out) = dn;  // denormal exponent
+  stdx::where(E == 255u, out) = U(0u);            // Inf / NaN -> 0
+  return out;
+}
 #endif // __has_include(<experimental/simd>)
 
 #if !__has_include(<experimental/simd>)
