@@ -413,6 +413,42 @@ inline native<float> exp_f32_simd(native<float> a) {
   stdx::where(stdx::isnan(a), r) = a;
   return r;
 }
+
+/// Branchless SWAR population count over a uint32 vector. Each lane holds
+/// std::popcount(lane) in [0, 32], bit-identical to the scalar std::popcount.
+/// Used by the bit-scan VOP1/VOP3 SIMD fast paths (bcnt / ffbh / ffbl / cls).
+inline native<uint32_t> popcount_u32_simd(native<uint32_t> x) {
+  using U = native<uint32_t>;
+  x = x - ((x >> 1) & U(0x55555555u));
+  x = (x & U(0x33333333u)) + ((x >> 2) & U(0x33333333u));
+  x = (x + (x >> 4)) & U(0x0F0F0F0Fu);
+  x = x + (x >> 8);
+  x = x + (x >> 16);
+  return x & U(0x3Fu);
+}
+
+/// Count leading zeros over a uint32 vector. RAW count: a zero input yields 32
+/// (callers blend the AMD `0xFFFFFFFF`-on-zero sentinel themselves). Computed
+/// as 32 - popcount(MSB-smear), so a lane with its MSB at bit b yields 31 - b.
+inline native<uint32_t> clz_u32_simd(native<uint32_t> x) {
+  using U = native<uint32_t>;
+  U s = x;
+  s = s | (s >> 1);
+  s = s | (s >> 2);
+  s = s | (s >> 4);
+  s = s | (s >> 8);
+  s = s | (s >> 16);
+  return U(32u) - popcount_u32_simd(s);
+}
+
+/// Count trailing zeros over a uint32 vector. RAW count: a zero input yields 32
+/// (callers blend the AMD `0xFFFFFFFF`-on-zero sentinel themselves). Computed as
+/// popcount((x & -x) - 1): isolate the lowest set bit, then count the bits below.
+inline native<uint32_t> ctz_u32_simd(native<uint32_t> x) {
+  using U = native<uint32_t>;
+  U lowbit = x & (~x + U(1u));
+  return popcount_u32_simd(lowbit - U(1u));
+}
 #endif // __has_include(<experimental/simd>)
 
 #if !__has_include(<experimental/simd>)
