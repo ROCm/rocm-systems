@@ -103,7 +103,7 @@ h3. 4.3 Filters & CI tiers
 
 h3. 4.4 Refactoring strategy & PR shape
 
-* *D1 (migration strategy)*: choose (2) parallel bring-up, and merge (3) into (2) (reuse PR #6189 partially).
+* *D1 (migration strategy)*: choose (2) parallel bring-up, and merge (3) into (2) (reuse PR #6189 partially). Also add *sample-first adoption*: for each category (Unit / Integration / Functional / Performance), land one sample test template (or a few real sample cases) in the new layout before bulk migration.
 * *D2 (parallel coexistence length)*: keep both until CI is green on the new framework; then proceed to cutover path.
 * *D3 (hard constraints)*: yes — no src/ changes, no test-logic changes, preserve CTest args.
 * *D4 (delivery shape)*: OpenSpec change first, then phased implementation PRs.
@@ -158,11 +158,16 @@ but later indicated a practical preference for a *two-level physical split* (H2)
 
 This keeps navigation simple immediately while preserving a long-term taxonomy for classification/filtering.
 
-h3. 5.2 Strategy (gradual vs parallel)
+h3. 5.2 Strategy (gradual vs parallel + sample-first)
 
 You chose:
 
 * *Strategy*: (2) *parallel* bring-up, plus selectively reuse PR #6189 (merge (3) into (2)).
+* *Sample-first adoption*: before moving the full suite, add *one sample test template per category* (or a few real sample cases) in the new subsystem so contributors can copy the pattern:
+** *Unit* — e.g. {{tests/unit/.../test_<module>.py}} (no GPU, mocks only)
+** *Integration* — e.g. {{tests/integration/test_<feature>.py}} (CLI/GPU/workload fixture)
+** *Functional* — golden-output / end-user flow sample (later tier)
+** *Performance / pressure* — overhead or stress sample (later tier)
 * *PR relationship*: cherry-pick core commit(s) only (07b0579), do not adopt the entire messy branch history.
 * *Cutover rule*: after new framework is *CI-green*, keep legacy flat tests running *two more weeks in parallel*
   (soak period), then remove legacy.
@@ -210,7 +215,7 @@ For the *new test framework connected to TheRock*, the team wants to *eventually
 
 *Important distinction:* hipBLAS uses rocm-libraries apply_test_category_labels (one gtest binary + filters); rocprofiler-compute uses rocm-systems apply_ctest_category_labels (labels on many add_test(pytest …) entries). The *YAML shape and TheRock contract* should converge on the hipBLAS reference.
 
-*Phasing:* (1) MVP — keep current tests/test_categories.yaml; (2) refactor unit/integration + type/arch markers; (3) target — restructure YAML to hipBLAS reference; retire therock_test_runner.py hardcoded QUICK_TESTS / TEST_TYPE.
+*Phasing:* (1) MVP — keep current tests/test_categories.yaml; (2) *sample-first scaffolding* — reference samples per category (Unit + Integration first; Functional + Performance when enabled); (3) refactor unit/integration + type/arch markers, migrate using samples as templates; (4) target — restructure YAML to hipBLAS reference; retire therock_test_runner.py hardcoded QUICK_TESTS / TEST_TYPE.
 
 ----
 
@@ -314,7 +319,26 @@ h3. Design — Section 6: Migration strategy
 *Preferred strategy*
 
 * *Parallel bring-up*: keep current framework alive while the new layout/framework is built in parallel.
+* *Sample-first adoption*: for each test category, land *sample template(s)* in the new subsystem before bulk moves — lowers adoption friction and documents conventions in code.
 * Selectively incorporate PR #6189 by cherry-picking the core refactor commit 07b0579.
+
+*Sample templates (by category)*
+
+|| Category || When || Purpose || Example location ||
+| *Unit* | Phase 1 (MVP) | Show mirror-src/ layout, unit conftest, type marker, no GPU | {{tests/unit/.../test_<module>.py}} |
+| *Integration* | Phase 1 (MVP) | Show feature file, integration conftest, CLI/GPU fixtures | {{tests/integration/test_<feature>.py}} |
+| *Functional* | Phase 2+ | Golden workload / output validation pattern | {{tests/integration/}} or future {{tests/functional/}} |
+| *Performance / pressure* | Phase 2+ | Baseline comparison or sustained-load pattern | future {{tests/performance/}} or marked integration |
+
+Each sample should be *real and runnable* (not empty stubs): registered in CTest, labeled in test_categories.yaml, and selectable via {{ctest -L}} / {{pytest -m}}. Contributors copy the nearest sample when adding or migrating tests.
+
+*Recommended migration order*
+
+# Scaffolding + *Unit* and *Integration* samples (parallel with legacy flat tests).
+# Cherry-pick / align layout from PR #6189 where applicable.
+# Migrate existing tests in waves, using samples as the checklist (imports, markers, conftest, CTest name, YAML entry).
+# Add *Functional* and *Performance* samples when those type markers are enabled.
+# CI-green on new layout → *two-week parallel soak* → remove legacy flat tests.
 
 *Hard constraints*
 
@@ -366,6 +390,7 @@ Use these prompts to drive alignment in the team meeting:
 * Decide what “artifact dirs stable” means concretely (JUnit XML paths, logs, coverage output).
 * Agree whether PR #6189 commit 07b0579 is acceptable as the starting scaffolding (cherry-pick only).
 * Confirm hipBLAS test_categories.yaml as the long-term TheRock reference design (see §6.1).
+* Agree on *sample-first* templates: which real tests become the Unit / Integration / Functional / Performance reference cases in Phase 1.
 
 ## rocprofiler-compute — Test Framework Refactor (Team Discussion Draft, Detailed)
 
@@ -599,7 +624,26 @@ h3. Design — Section 6: Migration strategy
 *Preferred strategy*
 
 * *Parallel bring-up*: keep current framework alive while the new layout/framework is built in parallel.
+* *Sample-first adoption*: for each test category, land *sample template(s)* in the new subsystem before bulk moves — lowers adoption friction and documents conventions in code.
 * Selectively incorporate PR #6189 by cherry-picking the core refactor commit 07b0579.
+
+*Sample templates (by category)*
+
+|| Category || When || Purpose || Example location ||
+| *Unit* | Phase 1 (MVP) | Show mirror-src/ layout, unit conftest, type marker, no GPU | {{tests/unit/.../test_<module>.py}} |
+| *Integration* | Phase 1 (MVP) | Show feature file, integration conftest, CLI/GPU fixtures | {{tests/integration/test_<feature>.py}} |
+| *Functional* | Phase 2+ | Golden workload / output validation pattern | {{tests/integration/}} or future {{tests/functional/}} |
+| *Performance / pressure* | Phase 2+ | Baseline comparison or sustained-load pattern | future {{tests/performance/}} or marked integration |
+
+Each sample should be *real and runnable* (not empty stubs): registered in CTest, labeled in test_categories.yaml, and selectable via {{ctest -L}} / {{pytest -m}}. Contributors copy the nearest sample when adding or migrating tests.
+
+*Recommended migration order*
+
+# Scaffolding + *Unit* and *Integration* samples (parallel with legacy flat tests).
+# Cherry-pick / align layout from PR #6189 where applicable.
+# Migrate existing tests in waves, using samples as the checklist (imports, markers, conftest, CTest name, YAML entry).
+# Add *Functional* and *Performance* samples when those type markers are enabled.
+# CI-green on new layout → *two-week parallel soak* → remove legacy flat tests.
 
 *Hard constraints*
 
@@ -651,4 +695,5 @@ Use these prompts to drive alignment in the team meeting:
 * Decide what “artifact dirs stable” means concretely (JUnit XML paths, logs, coverage output).
 * Agree whether PR #6189 commit 07b0579 is acceptable as the starting scaffolding (cherry-pick only).
 * Confirm hipBLAS test_categories.yaml as the long-term TheRock reference design (see §6.1).
+* Agree on *sample-first* templates: which real tests become the Unit / Integration / Functional / Performance reference cases in Phase 1.
 
