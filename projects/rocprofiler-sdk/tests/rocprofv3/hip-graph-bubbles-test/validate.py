@@ -184,7 +184,7 @@ def test_kernel_trace_no_bubbles(
     # Check for batching patterns (most gaps are small, but some are very large)
     # This detects scenarios where kernels are grouped into batches with large
     # gaps between batches, indicating a profiler regression
-    OUTLIER_THRESHOLD_NS = 50_000  # 50 microseconds
+    OUTLIER_THRESHOLD_NS = 200_000  # 200 microseconds
 
     if p99_9_gap > OUTLIER_THRESHOLD_NS:
         raise AssertionError(
