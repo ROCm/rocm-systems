@@ -43,9 +43,11 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpy) {
   CHECK_MANAGED_MEMORY_SUPPORT
 
   std::vector<int> host(kN);
-  for (int i = 0; i < kN; ++i) host[i] = i;
+  for (int i = 0; i < kN; ++i) {
+    host[i] = i;
+  }
   HIP_CHECK(hipMemcpy(g_managed_a, host.data(), kN * sizeof(int),
-                      hipMemcpyDefault));
+                      hipMemcpyHostToDevice));
 
   AddConst<<<dim3(kNumBlocks), dim3(kBlockSize)>>>(g_managed_a, kN,
                                                    kKernelAddValue);
@@ -207,20 +209,15 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpyWithStream) {
 HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemset) {
   CHECK_MANAGED_MEMORY_SUPPORT
 
-  constexpr int kAddend = 7;
-  HIP_CHECK(hipMemset(g_managed_a, 0, kN * sizeof(int)));
+  constexpr unsigned char kFillByte = 0x42;
+  constexpr int kExpected = 0x42424242;
+
+  HIP_CHECK(hipMemset(g_managed_a, kFillByte, kN * sizeof(int)));
   HIP_CHECK(hipDeviceSynchronize());
 
-  AddConst<<<dim3(kNumBlocks), dim3(kBlockSize)>>>(g_managed_a, kN, kAddend);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
-
-  std::vector<int> out(kN);
-  HIP_CHECK(hipMemcpy(out.data(), g_managed_a, kN * sizeof(int),
-                      hipMemcpyDeviceToHost));
   for (int i = 0; i < kN; ++i) {
     INFO("Index " << i);
-    REQUIRE(out[i] == kAddend);
+    REQUIRE(g_managed_a[i] == kExpected);
   }
 }
 
@@ -318,7 +315,8 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemset3D) {
   }
 }
 
-#if HT_AMD
+// cudaMemcpyBatchAsync was introduced in CUDA 12.8.
+#if HT_AMD || (HT_NVIDIA && CUDA_VERSION >= 12080)
 HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpyBatchAsync) {
   CHECK_MANAGED_MEMORY_SUPPORT
 
@@ -336,11 +334,11 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpyBatchAsync) {
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  void* dsts[kBatchCount];
-  dsts[0] = reinterpret_cast<void*>(g_managed_a);
-  dsts[1] = reinterpret_cast<void*>(g_managed_b);
-  void* srcs[kBatchCount] = {reinterpret_cast<void*>(hostA.data()),
-                             reinterpret_cast<void*>(hostB.data())};
+  void *dsts[kBatchCount];
+  dsts[0] = reinterpret_cast<void *>(g_managed_a);
+  dsts[1] = reinterpret_cast<void *>(g_managed_b);
+  void *srcs[kBatchCount] = {reinterpret_cast<void *>(hostA.data()),
+                             reinterpret_cast<void *>(hostB.data())};
   size_t sizes[kBatchCount] = {kN * sizeof(int), kN * sizeof(int)};
   size_t attrsIdxs[1] = {0};
   size_t failIdx = 0;
@@ -357,7 +355,7 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpyBatchAsync) {
     REQUIRE(g_managed_b[i] == i + kSeedB);
   }
 }
-#endif  // HT_AMD
+#endif // HT_AMD || (HT_NVIDIA && CUDA_VERSION >= 12080)
 
 HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpyPeer) {
   int numDevices = 0;

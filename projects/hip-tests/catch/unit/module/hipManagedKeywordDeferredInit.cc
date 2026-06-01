@@ -19,10 +19,7 @@ HIP_TEST_CASE(Unit_hipModuleLaunchKernel_ManagedVar_Memcpy) {
 
   for (int i = 0; i < numDevices; ++i) {
     HIP_CHECK(hipSetDevice(i));
-    hipDevice_t device;
-    hipCtx_t context;
-    HIP_CHECK(hipDeviceGet(&device, i));
-    HIP_CHECK(hipCtxCreate(&context, 0, device));
+    CTX_CREATE();
 
     hipModule_t module;
     HIP_CHECK(hipModuleLoad(&module, kCodeFile));
@@ -46,6 +43,6 @@ HIP_TEST_CASE(Unit_hipModuleLaunchKernel_ManagedVar_Memcpy) {
     REQUIRE(result == kSeed + 1);
 
     HIP_CHECK(hipModuleUnload(module));
-    HIP_CHECK(hipCtxDestroy(context));
+    CTX_DESTROY();
   }
 }
