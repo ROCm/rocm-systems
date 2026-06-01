@@ -20,10 +20,11 @@
  * THE SOFTWARE.
  */
 
+#include <fcntl.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include <cstring>
-#include <fstream>
 #include <memory>
 #include <sstream>
 
@@ -101,21 +102,29 @@ static auto amdsmi_read_cper_file(const std::string& filepath) -> CperFileCtx {
   ctx.file_size = file_stats.st_size;
   ctx.buffer = std::make_unique<char[]>(ctx.file_size);
 
-  std::ifstream file(filepath, std::ios::binary);
-  if (!file) {
-    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[CPER] failed to open file: " << filepath;
+  // Use POSIX open/read/close rather than std::ifstream. debugfs CPER nodes
+  // (e.g. /sys/kernel/debug/dri/<N>/amdgpu_ring_cper) report st_size == 0
+  // because their content is generated on read. An ifstream over such a node
+  // allocates an internal filebuf whose destructor can crash (invalid free)
+  // when the library is LD_PRELOAD-ed alongside the host libstdc++. The POSIX
+  // path performs no STL allocation across the library boundary (ROCM-25398).
+  int fd = open(filepath.c_str(), O_RDONLY);
+  if (fd == -1) {
+    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[CPER] failed to open file: " << filepath
+       << ", errno:(" << errno << "): " << strerror(errno);
     LOG_ERROR(ss);
     return ctx;
   }
-  file.read(ctx.buffer.get(), ctx.file_size);
-  long bytes_read = file.gcount();
+  long bytes_read = read(fd, ctx.buffer.get(), ctx.file_size);
   if (bytes_read <= 0) {
     ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__
        << "[CPER] failed to read complete file, read only  " << bytes_read << " of "
        << ctx.file_size << " bytes";
     LOG_ERROR(ss);
+    close(fd);
     return ctx;
   }
+  close(fd);
 
   ctx.status = AMDSMI_STATUS_SUCCESS;
   ctx.file_size = bytes_read;
