@@ -222,6 +222,64 @@ class AotritonHandler(DatabaseHandler):
         return None
 
 
+class HipKernelProviderAsmHandler(DatabaseHandler):
+    """Handler for hip-kernel-provider ASM kernel code objects.
+
+    The hipDNN ASM SDPA engine ships .co code objects in
+    per-architecture directories under the hipDNN engine plugin tree:
+        lib/hipdnn_plugins/engines/hip_kernel_provider/asm_kernels/gfx942/fmha_v3_fwd/MI300/fwd_hd128_bf16_rtne.co
+        lib/hipdnn_plugins/engines/hip_kernel_provider/asm_kernels/gfx950/fmha_v3_fwd/fwd_hd128_bf16.co
+    (bin/ instead of lib/ on Windows.)
+
+    Architecture is the directory component immediately following
+    asm_kernels/. Both forward (fmha_v3_fwd) and backward (fmha_v3_bwd)
+    kernels live under the same per-arch tree, so this single handler
+    covers both passes.
+
+    These are single-arch HSA code objects (not fat binaries), so without
+    a handler they would default into the generic artifact. Detecting them
+    here routes each arch's kernels into the matching per-arch artifact.
+
+    The asm_kernels/<arch>/ directories use exact target names (gfx942,
+    gfx950) which are already valid bundle keys, so they pass through
+    unchanged.
+    """
+
+    # Directory marker whose immediately-following component is the arch.
+    _MARKER_DIR = "asm_kernels"
+    # The marker's parent component, required to avoid false positives on
+    # any unrelated "asm_kernels" directory elsewhere in the tree.
+    _MARKER_PARENT = "hip_kernel_provider"
+
+    def name(self) -> str:
+        return "hip-kernel-provider-asm"
+
+    def detect(self, path: Path, prefix_root: Path) -> Optional[str]:
+        """
+        Detect hip-kernel-provider ASM kernel code objects.
+
+        Pattern: */hip_kernel_provider/asm_kernels/<arch>/...
+
+        Returns:
+            Architecture bundle key (e.g., 'gfx942', 'gfx950') or None.
+        """
+        path_str = self._relative_path(path, prefix_root)
+        path_parts = Path(path_str).parts
+
+        for i, part in enumerate(path_parts[:-1]):
+            if part != self._MARKER_DIR or i + 1 >= len(path_parts):
+                continue
+            # Require the expected parent directory to scope the match.
+            if i == 0 or path_parts[i - 1] != self._MARKER_PARENT:
+                continue
+            arch_dir = path_parts[i + 1]
+            if _GFX_ARCH_PATTERN.fullmatch(arch_dir):
+                return arch_dir
+            break
+
+        return None
+
+
 class MIOpenHandler(DatabaseHandler):
     """Handler for MIOpen performance database and model files.
 
@@ -285,6 +343,7 @@ AVAILABLE_HANDLERS = {
     "hipblaslt": HipBLASLtHandler,
     "hipsparselt": HipSparseLtHandler,
     "aotriton": AotritonHandler,
+    "hip-kernel-provider-asm": HipKernelProviderAsmHandler,
     "miopen": MIOpenHandler,
 }
 
@@ -297,6 +356,7 @@ WHEEL_TYPE_PRESETS = {
         "hipblaslt",
         "hipsparselt",
         "aotriton",
+        "hip-kernel-provider-asm",
         "miopen",
     ],
 }

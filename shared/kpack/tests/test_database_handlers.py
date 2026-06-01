@@ -9,6 +9,7 @@ from rocm_kpack.database_handlers import (
     HipBLASLtHandler,
     HipSparseLtHandler,
     AotritonHandler,
+    HipKernelProviderAsmHandler,
     MIOpenHandler,
     WHEEL_TYPE_PRESETS,
     get_database_handlers,
@@ -521,6 +522,117 @@ class TestAotritonHandler:
         assert result is None
 
 
+class TestHipKernelProviderAsmHandler:
+    """Tests for HipKernelProviderAsmHandler (AITER ASM kernels) detection logic."""
+
+    # Relative install root for the ASM kernels (Linux layout).
+    _ROOT = "lib/hipdnn_plugins/engines/hip_kernel_provider/asm_kernels"
+
+    @pytest.fixture
+    def handler(self):
+        return HipKernelProviderAsmHandler()
+
+    @pytest.fixture
+    def prefix_root(self, tmp_path):
+        """Create a temporary prefix root directory."""
+        root = tmp_path / "prefix"
+        root.mkdir()
+        return root
+
+    def test_name(self, handler):
+        """Test handler name."""
+        assert handler.name() == "hip-kernel-provider-asm"
+
+    def test_detect_fwd_co_with_sku(self, handler, prefix_root):
+        """Forward .co under a per-SKU subdirectory resolves to its arch."""
+        file_path = (
+            prefix_root
+            / f"{self._ROOT}/gfx942/fmha_v3_fwd/MI300/fwd_hd128_bf16_rtne.co"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        assert handler.detect(file_path, prefix_root) == "gfx942"
+
+    def test_detect_bwd_co_with_sku(self, handler, prefix_root):
+        """Backward .co (covers ALMIOPEN-1930) resolves to its arch too."""
+        file_path = (
+            prefix_root / f"{self._ROOT}/gfx942/fmha_v3_bwd/MI300/bwd_hd128_odo_bf16.co"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        assert handler.detect(file_path, prefix_root) == "gfx942"
+
+    def test_detect_co_without_sku(self, handler, prefix_root):
+        """Kernels installed directly under the kernel-family dir resolve."""
+        file_path = prefix_root / f"{self._ROOT}/gfx950/fmha_v3_fwd/fwd_hd128_bf16.co"
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        assert handler.detect(file_path, prefix_root) == "gfx950"
+
+    def test_detect_various_architectures(self, handler, prefix_root):
+        """All supported ASM SDPA architectures are detected."""
+        for arch in ("gfx942", "gfx950"):
+            file_path = prefix_root / f"{self._ROOT}/{arch}/fmha_v3_fwd/kernel.co"
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.touch()
+
+            assert handler.detect(file_path, prefix_root) == arch, f"Failed {arch}"
+
+    def test_detect_windows_bin_layout(self, handler, prefix_root):
+        """Windows installs under bin/ rather than lib/ — still detected."""
+        file_path = (
+            prefix_root
+            / "bin/hipdnn_plugins/engines/hip_kernel_provider/asm_kernels"
+            / "gfx942/fmha_v3_fwd/kernel.co"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        assert handler.detect(file_path, prefix_root) == "gfx942"
+
+    def test_reject_no_arch_subdir(self, handler, prefix_root):
+        """A file directly under asm_kernels/ (no arch dir) is not matched."""
+        file_path = prefix_root / f"{self._ROOT}/README.txt"
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        assert handler.detect(file_path, prefix_root) is None
+
+    def test_reject_non_arch_subdir(self, handler, prefix_root):
+        """A non-gfx directory under asm_kernels/ is not matched."""
+        file_path = prefix_root / f"{self._ROOT}/common/kernel.co"
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        assert handler.detect(file_path, prefix_root) is None
+
+    def test_reject_wrong_parent_directory(self, handler, prefix_root):
+        """An asm_kernels/ dir not under hip_kernel_provider/ is not matched."""
+        file_path = prefix_root / "lib/other/asm_kernels/gfx942/kernel.co"
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        assert handler.detect(file_path, prefix_root) is None
+
+    def test_reject_unrelated_file(self, handler, prefix_root):
+        """An unrelated host file elsewhere in the tree is not matched."""
+        file_path = prefix_root / "lib/libhip_kernel_provider.so"
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        assert handler.detect(file_path, prefix_root) is None
+
+    def test_reject_file_outside_prefix(self, handler, prefix_root):
+        """Files outside prefix root are a caller bug — must raise."""
+        file_path = Path("/tmp/asm_kernels/gfx942/kernel.co")
+
+        with pytest.raises(ValueError, match="is not under prefix_root"):
+            handler.detect(file_path, prefix_root)
+
+
 class TestMIOpenHandler:
     """Tests for MIOpenHandler detection logic."""
 
@@ -763,8 +875,9 @@ class TestDatabaseHandlerRegistry:
         assert "hipblaslt" in handlers
         assert "hipsparselt" in handlers
         assert "aotriton" in handlers
+        assert "hip-kernel-provider-asm" in handlers
         assert "miopen" in handlers
-        assert len(handlers) == 5
+        assert len(handlers) == 6
 
     def test_get_database_handlers_single(self):
         """Test getting a single handler by name."""
@@ -782,20 +895,28 @@ class TestDatabaseHandlerRegistry:
     def test_get_database_handlers_all(self):
         """Test getting all handlers."""
         handlers = get_database_handlers(
-            ["rocblas", "hipblaslt", "hipsparselt", "aotriton", "miopen"]
+            [
+                "rocblas",
+                "hipblaslt",
+                "hipsparselt",
+                "aotriton",
+                "hip-kernel-provider-asm",
+                "miopen",
+            ]
         )
-        assert len(handlers) == 5
+        assert len(handlers) == 6
         assert isinstance(handlers[0], RocBLASHandler)
         assert isinstance(handlers[1], HipBLASLtHandler)
         assert isinstance(handlers[2], HipSparseLtHandler)
         assert isinstance(handlers[3], AotritonHandler)
-        assert isinstance(handlers[4], MIOpenHandler)
+        assert isinstance(handlers[4], HipKernelProviderAsmHandler)
+        assert isinstance(handlers[5], MIOpenHandler)
 
     def test_wheel_type_preset(self):
         """Test that wheel type presets resolve to valid handlers."""
         names = WHEEL_TYPE_PRESETS["torch-fat"]
         handlers = get_database_handlers(names)
-        assert len(handlers) == 5
+        assert len(handlers) == 6
 
     def test_get_database_handlers_unknown(self):
         """Test that unknown handler name raises ValueError."""
