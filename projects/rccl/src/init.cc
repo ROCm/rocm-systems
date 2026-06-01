@@ -146,6 +146,17 @@ RCCL_PARAM( InitChannels, "INIT_CHANNELS", -1) ;
 // RCCL_LAZY_KERNEL_INIT unset (default).
 RCCL_PARAM_NCCL_ALIAS(LazyKernelInit, "LAZY_KERNEL_INIT", 0);
 
+// Fine-grained lazy init (orthogonal to RCCL_LAZY_KERNEL_INIT; only consulted
+// when lazy init is enabled). When set, the first collective launch loads only
+// the single generic kernel it actually dispatches through
+// (ncclKerns[ncclGetKernelIndex(comm)], selected by comm->unroll) instead of
+// every kernel in the table, cutting the first-launch HSA code-object load.
+// Default ON so enabling RCCL_LAZY_KERNEL_INIT also gets the cheaper first
+// launch; set to 0 to restore the load-all-kernels behaviour. Symmetric-memory
+// kernels (GENERATE_SYM_KERNELS) have no per-fn gate and always load via the
+// device-wide path on first use.
+RCCL_PARAM_NCCL_ALIAS(LazyKernelInitFineGrained, "LAZY_KERNEL_INIT_FINEGRAINED", 1);
+
 // GDRCOPY support: Off by default
 NCCL_PARAM(GdrCopyEnable, "GDRCOPY_ENABLE", 0);
 

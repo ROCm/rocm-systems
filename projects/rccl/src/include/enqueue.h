@@ -20,6 +20,12 @@
 void* rcclGetKernelIndex(int unroll, bool useCollTrace, struct ncclTaskColl* task = NULL);
 
 ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* maxStackSize);
+// Fine-grained counterpart of ncclInitKernelsForDevice: prepares a single
+// kernel function (HSA code-object load + shared-mem/carveout attributes) and
+// reports its stack size via *outStack. Used by the fine-grained lazy path so
+// the first collective only loads the one ncclKerns[] entry it dispatches
+// through instead of every kernel in the table.
+ncclResult_t ncclInitKernelForFn(void* fn, int cudaArch, int maxSharedMem, size_t* outStack);
 // Applies cudaLimitStackSize on the current device using maxLocalSizeBytes
 // returned by ncclInitKernelsForDevice. Shared between the eager init path
 // in ncclCommInitRankFunc and the lazy init path in ncclLaunchKernel. No

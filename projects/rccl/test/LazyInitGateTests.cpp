@@ -30,10 +30,13 @@
  *     became the owner never observe a precondition-driven error.
  ************************************************************************/
 
+#include <array>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -115,6 +118,46 @@ static ncclResult_t testGateRun(
     // w == LAZY_UNINIT: owner aborted, retry the CAS ourselves.
   }
 }
+
+// ---------------------------------------------------------------------------
+// Fine-grained lazy init mirrors (src/enqueue.cc fine-grained path).
+//
+// The fine-grained path keeps the SAME per-slot gate contract pinned by
+// testGateRun above, but (a) uses a separate gate per generic-kernel index
+// instead of one per device, and (b) raises cudaLimitStackSize incrementally
+// as each kernel's stack size is discovered. The two helpers below mirror the
+// only NEW logic those add on top of the gate: fn->index lookup and the
+// serialized running-max stack update.
+// ---------------------------------------------------------------------------
+
+// Mirror of src/enqueue.cc::lazyKernelGenericIndex: linear search of fn in the
+// generic ncclKerns[] table; -1 when fn is not a generic kernel (in production
+// a symmetric-memory kernel, which falls back to the device-wide gate).
+static int testGenericIndex(void* const* kerns, int count, void* fn) {
+  for (int k = 0; k < count; k++) {
+    if (kerns[k] == fn) return k;
+  }
+  return -1;
+}
+
+// Mirror of the incremental stack-limit update in lazyKernelInitFnOnce: under a
+// lock, raise the running max and only then "apply" the limit. lastApplied
+// records the value handed to cudaDeviceSetLimit so tests can assert the limit
+// is monotonic and is never lowered by a racing smaller value.
+struct StackLimitMirror {
+  std::mutex mu;
+  size_t maxStack = 0;
+  size_t lastApplied = 0;
+  std::atomic<int> applyCalls{0};
+  void offer(size_t stack) {
+    std::lock_guard<std::mutex> lk(mu);
+    if (stack > maxStack) {
+      maxStack = stack;
+      lastApplied = stack;
+      applyCalls.fetch_add(1, std::memory_order_relaxed);
+    }
+  }
+};
 
 } // namespace
 
@@ -327,6 +370,88 @@ TEST(LazyInitGateTests, MultiThread_OwnerAborts_WaiterRetriesAndSucceeds) {
 
   EXPECT_EQ(initCalls.load(), 1) << "init must fire exactly once across owner+retrier";
   EXPECT_EQ(gate.load(), LazyInitState::LAZY_DONE);
+}
+
+// fn->index lookup: known generic kernels map to their slot, everything else
+// (symmetric kernels, null) maps to -1 so the caller falls back to the
+// device-wide gate.
+TEST(LazyInitFineGrainedTests, GenericIndex_MapsKnownFns_RejectsUnknown) {
+  int a, b, c, other;
+  void* kerns[3] = {&a, &b, &c};
+  EXPECT_EQ(testGenericIndex(kerns, 3, &a), 0);
+  EXPECT_EQ(testGenericIndex(kerns, 3, &b), 1);
+  EXPECT_EQ(testGenericIndex(kerns, 3, &c), 2);
+  EXPECT_EQ(testGenericIndex(kerns, 3, &other), -1) << "unknown (e.g. symmetric) fn must map to -1";
+  EXPECT_EQ(testGenericIndex(kerns, 3, nullptr), -1);
+}
+
+// Per-fn gates are independent: initializing the kernel one comm uses must not
+// flip the gates for the kernels it never launches, and the inited slot still
+// has the steady-state no-reinit fast path.
+TEST(LazyInitFineGrainedTests, PerFnGates_AreIndependent_EachInitsOnce) {
+  constexpr int K = 3;
+  std::array<std::atomic<LazyInitState>, K> gate;
+  std::array<std::atomic<int>, K> err;
+  for (int k = 0; k < K; ++k) {
+    gate[k].store(LazyInitState::LAZY_UNINIT);
+    err[k].store((int)ncclSuccess);
+  }
+  int calls[K] = {0, 0, 0};
+
+  // Only the kernel at index 1 is launched first.
+  EXPECT_EQ(testGateRun(gate[1], err[1], [&]{ ++calls[1]; return ncclSuccess; }), ncclSuccess);
+  EXPECT_EQ(gate[1].load(), LazyInitState::LAZY_DONE);
+  EXPECT_EQ(gate[0].load(), LazyInitState::LAZY_UNINIT) << "untouched kernel must stay UNINIT";
+  EXPECT_EQ(gate[2].load(), LazyInitState::LAZY_UNINIT) << "untouched kernel must stay UNINIT";
+  EXPECT_EQ(calls[0], 0);
+  EXPECT_EQ(calls[2], 0);
+
+  // Re-launch of the same kernel takes the fast path, no second init.
+  EXPECT_EQ(testGateRun(gate[1], err[1], [&]{ ++calls[1]; return ncclSuccess; }), ncclSuccess);
+  EXPECT_EQ(calls[1], 1) << "already-inited kernel must not reinit";
+
+  // A different kernel inits independently exactly once.
+  EXPECT_EQ(testGateRun(gate[0], err[0], [&]{ ++calls[0]; return ncclSuccess; }), ncclSuccess);
+  EXPECT_EQ(calls[0], 1);
+  EXPECT_EQ(gate[0].load(), LazyInitState::LAZY_DONE);
+}
+
+// Incremental stack-limit update raises the device limit monotonically and
+// never re-applies for a smaller value.
+TEST(LazyInitFineGrainedTests, StackLimit_RaisesMonotonically_NeverLowers) {
+  StackLimitMirror m;
+  m.offer(512);
+  EXPECT_EQ(m.maxStack, 512u);
+  EXPECT_EQ(m.lastApplied, 512u);
+  m.offer(256); // smaller: must not lower or re-apply
+  EXPECT_EQ(m.maxStack, 512u);
+  EXPECT_EQ(m.lastApplied, 512u);
+  m.offer(1024);
+  EXPECT_EQ(m.maxStack, 1024u);
+  EXPECT_EQ(m.lastApplied, 1024u);
+  EXPECT_EQ(m.applyCalls.load(), 2) << "limit applied only when it actually grows (512, 1024)";
+}
+
+// Concurrent stack offers in arbitrary order must converge to the true max as
+// the last-applied limit -- the property that keeps a racing smaller value
+// from being the final cudaLimitStackSize.
+TEST(LazyInitFineGrainedTests, StackLimit_ConcurrentOffers_FinalIsTrueMax) {
+  StackLimitMirror m;
+  const std::vector<size_t> vals = {128, 2048, 512, 1024, 256, 2048, 64};
+  std::atomic<int> start{0};
+  std::vector<std::thread> ts;
+  ts.reserve(vals.size());
+  for (size_t v : vals) {
+    ts.emplace_back([&, v]{
+      while (start.load(std::memory_order_acquire) == 0) sched_yield();
+      m.offer(v);
+    });
+  }
+  start.store(1, std::memory_order_release);
+  for (auto& t : ts) t.join();
+
+  EXPECT_EQ(m.maxStack, 2048u);
+  EXPECT_EQ(m.lastApplied, 2048u) << "final applied limit must equal the true max regardless of order";
 }
 
 } // namespace RcclUnitTesting

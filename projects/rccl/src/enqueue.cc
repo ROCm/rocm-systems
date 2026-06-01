@@ -32,6 +32,7 @@
 #include <cinttypes> // PRIx64
 #include <cassert>
 #include <atomic> // std::atomic — lazy kernel init gate
+#include <mutex> // std::mutex — fine-grained lazy init stack-limit update
 #include <sched.h> // sched_yield — lazy kernel init wait path
 #include "alloc.h" // MAX_ALLOC_TRACK_NGPU — sizing for per-device gate
 #include "latency_profiler/CollTraceFunc.h"
@@ -95,6 +96,7 @@ constexpr int rcclShmemDynamicSize(int cudaArch = NCCL_CUDA_ARCH, int WarpSize =
 
 NCCL_PARAM(L1SharedMemoryCarveout, "L1_SHARED_MEMORY_CARVEOUT", 0);
 RCCL_PARAM_DECLARE(LazyKernelInit);
+RCCL_PARAM_DECLARE(LazyKernelInitFineGrained);
 
 // Per-process per-device gate for lazy kernel init.
 // LAZY_FAILED is required so that if ncclInitKernelsForDevice fails on the
@@ -120,6 +122,26 @@ static std::atomic<LazyInitState> g_rcclLazyKernelInitState[MAX_ALLOC_TRACK_NGPU
 // on the gate store makes the value visible to any waiter that acquire-loads
 // LAZY_FAILED, so a plain relaxed load on the err table is sufficient.
 static std::atomic<int> g_rcclLazyKernelInitErr[MAX_ALLOC_TRACK_NGPU] = {};
+
+// Fine-grained lazy init: per-(device, generic-kernel-index) gate so the first
+// collective only loads the single ncclKerns[] entry it actually dispatches
+// through (selected by ncclGetKernelIndex / comm->unroll) instead of every
+// kernel in the table. kLazyGenericKernelCount is the generic kernel table size
+// (3, or 6 with ENABLE_COLLTRACE). Symmetric kernels (GENERATE_SYM_KERNELS)
+// have no per-fn slot and fall back to the device-wide gate above. Same CAS /
+// stream-capture / error-slot contract as g_rcclLazyKernelInitState, just keyed
+// per kernel index.
+static constexpr int kLazyGenericKernelCount = sizeof(ncclKerns)/sizeof(ncclKerns[0]);
+static std::atomic<LazyInitState> g_rcclLazyKernelFnState[MAX_ALLOC_TRACK_NGPU][kLazyGenericKernelCount] = {};
+static std::atomic<int> g_rcclLazyKernelFnErr[MAX_ALLOC_TRACK_NGPU][kLazyGenericKernelCount] = {};
+// Running max kernel stack size applied to cudaLimitStackSize per device as the
+// fine-grained path discovers each kernel's localSizeBytes incrementally. The
+// eager path computes this max across all kernels in one shot; here it grows as
+// kernels are loaded on demand. Guarded by g_rcclLazyStackMutex, taken only
+// when a kernel raises the max (at most kLazyGenericKernelCount times/device),
+// so cudaDeviceSetLimit is never lowered by a racing smaller value.
+static size_t g_rcclLazyMaxStack[MAX_ALLOC_TRACK_NGPU] = {};
+static std::mutex g_rcclLazyStackMutex;
 
 // Spin window for the lazy-init waiter before yielding the core. Mirrors the
 // short tight-spin pattern used in comm.h wait loops: a few µs covers the
@@ -189,6 +211,51 @@ ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* ma
 #ifdef GENERATE_SYM_KERNELS
   }
 #endif
+  return result;
+}
+
+// Fine-grained single-kernel init. Behaviour for one fn mirrors a single
+// iteration of the ncclInitKernelsForDevice loop above; that loop is left
+// intact so the eager init path is byte-for-byte unchanged. *outStack reports
+// this kernel's localSizeBytes so the caller can fold it into a running max for
+// cudaLimitStackSize.
+ncclResult_t ncclInitKernelForFn(void* fn, int cudaArch, int maxSharedMem, size_t* outStack) {
+  ncclResult_t result = ncclSuccess;
+  if (outStack) *outStack = 0;
+  if (fn == nullptr) return ncclSuccess;
+
+  int carveout = ncclParamL1SharedMemoryCarveout();
+  int WarpSize = -1;
+  int cudaDev = -1;
+  CUDACHECK(cudaGetDevice(&cudaDev));
+  CUDACHECK(hipDeviceGetAttribute(&WarpSize, hipDeviceAttributeWarpSize, cudaDev));
+  int ncclMaxSharedMem = rcclShmemDynamicSize(cudaArch, WarpSize);
+
+  cudaFuncAttributes attr = {0};
+  cudaError_t errcode = cudaFuncGetAttributes(&attr, fn);
+  if (errcode != cudaSuccess) {
+    cudaGetLastError(); // Drain error code
+    return ncclSuccess;  // Silently ignore failures (matches ncclInitKernelsForDevice)
+  }
+  if (outStack) *outStack = attr.localSizeBytes;
+  if (carveout) {
+    CUDACHECKGOTO(cudaFuncSetAttribute(fn,
+      cudaFuncAttributePreferredSharedMemoryCarveout, carveout),
+      result, ignore1);
+  ignore1:;
+  }
+  if (ncclMaxSharedMem != 0) {
+    int sharedMemSize = ncclMaxSharedMem;
+    if (sharedMemSize > (maxSharedMem-attr.sharedSizeBytes)) {
+      WARN("cudaArch %d ncclMaxSharedMem %d exceeds device/fn maxSharedMem %zu",
+           cudaArch, sharedMemSize, maxSharedMem-attr.sharedSizeBytes);
+      return ncclSystemError;
+    }
+    CUDACHECKGOTO(cudaFuncSetAttribute(fn,
+      cudaFuncAttributeMaxDynamicSharedMemorySize, sharedMemSize),
+      result, done);
+  }
+done:
   return result;
 }
 
@@ -1928,7 +1995,12 @@ ncclResult_t ncclLaunchKernelBefore_NoUncapturedCuda(struct ncclComm* comm, stru
 NCCL_PARAM(MemSyncDomain, "MEM_SYNC_DOMAIN", cudaLaunchMemSyncDomainRemote);
 #endif
 
-// Once-per-(process,device) lazy kernel init driven by ncclLaunchKernel.
+// Shared CAS-gate machinery for lazy kernel init, parameterized over the gate
+// slot, error slot and the actual init work (doInit). Both the device-wide
+// "load all kernels" path (lazyKernelInitOnce) and the fine-grained
+// "load one kernel" path (lazyKernelInitFnOnce) run through this so the
+// concurrency contract lives in exactly one place.
+//
 // Caller must ensure rcclParamLazyKernelInit() is set; cudaDev range is
 // validated eagerly in ncclCommInitRankFunc so this fast-path only does the
 // CAS-gate dance.
@@ -1937,18 +2009,20 @@ NCCL_PARAM(MemSyncDomain, "MEM_SYNC_DOMAIN", cudaLaunchMemSyncDomainRemote);
 // UNINIT->INITIALIZING CAS. If the owner is then found to be inside a
 // capture, it releases ownership back to LAZY_UNINIT (release) and returns
 // ncclInvalidUsage; any concurrent waiter sees that release as "owner
-// abandoned" and restarts from the top of the function to retry the CAS
-// itself. Tying the precondition to CAS ownership (rather than to a stale
-// pre-CAS load of s) closes the race where a thread observed LAZY_UNINIT
-// but did not actually become the owner.
+// abandoned" and restarts from the top of the loop to retry the CAS itself.
+// Tying the precondition to CAS ownership (rather than to a stale pre-CAS load
+// of s) closes the race where a thread observed LAZY_UNINIT but did not
+// actually become the owner.
 //
 // On real init failure the gate is poisoned to LAZY_FAILED and the failing
-// ncclResult_t is published in g_rcclLazyKernelInitErr so every waiter
-// returns the same first-cause code instead of a generic ncclSystemError.
-static ncclResult_t lazyKernelInitOnce(struct ncclComm* comm, cudaStream_t launchStream) {
-  auto& gate = g_rcclLazyKernelInitState[comm->cudaDev];
-  auto& errSlot = g_rcclLazyKernelInitErr[comm->cudaDev];
-
+// ncclResult_t is published in errSlot so every waiter returns the same
+// first-cause code instead of a generic ncclSystemError.
+template <typename InitFn>
+static ncclResult_t lazyGateRun(std::atomic<LazyInitState>& gate,
+                                std::atomic<int>& errSlot,
+                                cudaStream_t launchStream,
+                                int cudaDev, int rank, const char* mode,
+                                InitFn&& doInit) {
   for (;;) {
     LazyInitState s = gate.load(std::memory_order_acquire);
     if (__builtin_expect(s == LazyInitState::LAZY_DONE, 1)) return ncclSuccess;
@@ -1973,27 +2047,23 @@ static ncclResult_t lazyKernelInitOnce(struct ncclComm* comm, cudaStream_t launc
                "graph-capturable. Perform a warmup ncclAllReduce outside "
                "cudaStreamBeginCapture/cudaStreamEndCapture, or unset "
                "RCCL_LAZY_KERNEL_INIT for capture workloads.",
-               comm->cudaDev, (int)captureStatus);
+               cudaDev, (int)captureStatus);
           return ncclInvalidUsage;
         }
 
         uint64_t t0 = clockNano();
-        size_t maxLocalSizeBytes = 0;
-        ncclResult_t r = ncclInitKernelsForDevice(comm->cudaArch, comm->maxSharedMem, &maxLocalSizeBytes);
-        if (r == ncclSuccess) {
-          r = applyKernelStackLimits(comm->archName, maxLocalSizeBytes);
-        }
+        ncclResult_t r = doInit();
         if (r != ncclSuccess) {
           errSlot.store((int)r, std::memory_order_relaxed);
           gate.store(LazyInitState::LAZY_FAILED, std::memory_order_release);
-          WARN("LazyKernelInit: init failed on dev %d: %d", comm->cudaDev, (int)r);
+          WARN("LazyKernelInit: init failed on dev %d (mode %s): %d", cudaDev, mode, (int)r);
           return r;
         }
         gate.store(LazyInitState::LAZY_DONE, std::memory_order_release);
         INFO(NCCL_INIT | NCCL_BOOTSTRAP | NCCL_PROFILE,
-             "LazyKernelInit fired rank %d dev %d kernels_us %llu",
-             comm->rank, comm->cudaDev,
-             (unsigned long long)((clockNano() - t0) / 1000));
+             "LazyKernelInit fired rank %d dev %d kernels_us %llu mode %s",
+             rank, cudaDev,
+             (unsigned long long)((clockNano() - t0) / 1000), mode);
         return ncclSuccess;
       }
       // CAS lost: somebody else owns the gate now, fall through to wait.
@@ -2014,7 +2084,7 @@ static ncclResult_t lazyKernelInitOnce(struct ncclComm* comm, cudaStream_t launc
         WARN("LazyKernelInit: rank %d dev %d still waiting for owner after %llus; "
              "owner thread may be stuck in ncclInitKernelsForDevice "
              "(HSA code-object load) or crashed before publishing the gate",
-             comm->rank, comm->cudaDev,
+             rank, cudaDev,
              (unsigned long long)(elapsed / 1000000000ULL));
         warned = true;
       }
@@ -2023,6 +2093,55 @@ static ncclResult_t lazyKernelInitOnce(struct ncclComm* comm, cudaStream_t launc
     if (w == LazyInitState::LAZY_FAILED) return (ncclResult_t)errSlot.load(std::memory_order_relaxed);
     // w == LAZY_UNINIT: owner aborted; retry the CAS ourselves.
   }
+}
+
+// Device-wide lazy init: loads every kernel in the table on the first launch.
+// Used when fine-grained mode is disabled, and as the fallback for symmetric
+// kernels (which have no per-fn gate slot).
+static ncclResult_t lazyKernelInitOnce(struct ncclComm* comm, cudaStream_t launchStream) {
+  return lazyGateRun(g_rcclLazyKernelInitState[comm->cudaDev],
+                     g_rcclLazyKernelInitErr[comm->cudaDev],
+                     launchStream, comm->cudaDev, comm->rank, "all",
+                     [&]() -> ncclResult_t {
+    size_t maxLocalSizeBytes = 0;
+    ncclResult_t r = ncclInitKernelsForDevice(comm->cudaArch, comm->maxSharedMem, &maxLocalSizeBytes);
+    if (r == ncclSuccess) r = applyKernelStackLimits(comm->archName, maxLocalSizeBytes);
+    return r;
+  });
+}
+
+// Returns the index of fn within the generic ncclKerns[] table, or -1 if fn is
+// not a generic kernel (e.g. a symmetric-memory kernel under GENERATE_SYM_KERNELS).
+static int lazyKernelGenericIndex(void* fn) {
+  for (int k = 0; k < kLazyGenericKernelCount; k++) {
+    if (ncclKerns[k].kernelFn == fn) return k;
+  }
+  return -1;
+}
+
+// Fine-grained lazy init: prepares only the single kernel fn that the imminent
+// launch dispatches through, gated per (device, kernel index). The device stack
+// limit is raised incrementally as kernels are discovered (serialized so a
+// racing smaller value can never lower it). Symmetric/unknown kernels have no
+// per-fn slot and fall back to the device-wide load-all gate.
+static ncclResult_t lazyKernelInitFnOnce(struct ncclComm* comm, void* fn, cudaStream_t launchStream) {
+  int idx = lazyKernelGenericIndex(fn);
+  if (idx < 0) return lazyKernelInitOnce(comm, launchStream);
+
+  return lazyGateRun(g_rcclLazyKernelFnState[comm->cudaDev][idx],
+                     g_rcclLazyKernelFnErr[comm->cudaDev][idx],
+                     launchStream, comm->cudaDev, comm->rank, "fine",
+                     [&]() -> ncclResult_t {
+    size_t stack = 0;
+    ncclResult_t r = ncclInitKernelForFn(fn, comm->cudaArch, comm->maxSharedMem, &stack);
+    if (r != ncclSuccess) return r;
+    std::lock_guard<std::mutex> lk(g_rcclLazyStackMutex);
+    if (stack > g_rcclLazyMaxStack[comm->cudaDev]) {
+      g_rcclLazyMaxStack[comm->cudaDev] = stack;
+      r = applyKernelStackLimits(comm->archName, stack);
+    }
+    return r;
+  });
 }
 
 ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan) {
@@ -2035,7 +2154,13 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   // in ncclCommInitRankFunc when lazy mode is enabled, so we don't repeat
   // the check on every launch.
   if (rcclParamLazyKernelInit()) {
-    NCCLCHECK(lazyKernelInitOnce(comm, planner->streams->stream));
+    // Fine-grained (default on with lazy): load only the kernel this plan
+    // launches. RCCL_LAZY_KERNEL_INIT_FINEGRAINED=0 restores load-all.
+    if (rcclParamLazyKernelInitFineGrained()) {
+      NCCLCHECK(lazyKernelInitFnOnce(comm, plan->kernelFn, planner->streams->stream));
+    } else {
+      NCCLCHECK(lazyKernelInitOnce(comm, planner->streams->stream));
+    }
   }
   int nChannels = 0;
   for (int i = 0; i < MAXCHANNELS/64; i++)
