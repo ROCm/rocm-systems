@@ -27,16 +27,6 @@ profiles: /home/me/.config/mirage/profile
 sessions: /run/user/1000/mirage/session
 ```
 
-## `mirage schema <what>`
-
-Print an example JSON document for one of `profile`, `session`, `exec`,
-or `status`. Useful for hand-authoring inputs or for piping into `jq`.
-
-```sh
-$ mirage schema profile | tee /tmp/p.json
-$ mirage profile import /tmp/p.json
-```
-
 ## `mirage profile`
 
 Profiles are reusable emulator presets stored in
@@ -51,8 +41,7 @@ mirage profile import <file>            # use '-' for stdin
 mirage profile delete <name> [-f]
 ```
 
-`profile import` accepts any valid `ProfileDef` JSON document; see
-`mirage schema profile`.
+`profile import` accepts any valid `ProfileDef` JSON document.
 
 ## `mirage session`
 

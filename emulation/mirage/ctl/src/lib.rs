@@ -74,10 +74,6 @@ pub enum CtlCmd {
 
     /// Print where mirage stores its state on this machine.
     Paths,
-
-    /// Print the JSON schema of a definition (`profile`, `session`,
-    /// `exec`, `status`).
-    Schema { what: String },
 }
 
 // ----- profile ---------------------------------------------------------------
@@ -331,10 +327,6 @@ pub async fn dispatch<C: MirageCtl + 'static>(
         CtlCmd::Logs(a) => logs_cmd(ctl.clone(), a).await,
         CtlCmd::Paths => {
             print_paths(json);
-            Ok(ExitCode::from(0))
-        }
-        CtlCmd::Schema { what } => {
-            print_schema(&what);
             Ok(ExitCode::from(0))
         }
     }
@@ -1127,47 +1119,4 @@ fn print_paths(json: bool) {
         println!("profiles: {}", mirage_core::paths::profile_root().display());
         println!("sessions: {}", mirage_core::paths::session_root().display());
     }
-}
-
-fn print_schema(what: &str) {
-    // We don't pull in a JSON-schema crate; instead, emit an example.
-    let example = match what {
-        "profile" => serde_json::to_string_pretty(&ProfileDef {
-            name: "example".to_string(),
-            description: Some(format!(
-                "a single-node {} profile",
-                registry::default_emulator().name
-            )),
-            emulator: registry::make_def(registry::default_emulator(), 1, 1),
-        })
-        .unwrap(),
-        "exec" => serde_json::to_string_pretty(&ExecDef {
-            timestamp: chrono::Utc::now(),
-            session: SessionId::new("example").unwrap(),
-            exec: ExecArgs {
-                command: "/bin/sh".to_string(),
-                args: vec!["-c".into(), "echo hi".into()],
-                env: Default::default(),
-                workdir: None,
-            },
-            worker_exec: None,
-            keep: false,
-        })
-        .unwrap(),
-        "status" => {
-            serde_json::to_string_pretty(&mirage_core::exec::ExecStatus::default()).unwrap()
-        }
-        "session" => serde_json::to_string_pretty(&serde_json::json!({
-            "id": "example",
-            "profile": "example",
-            "workdir": "/tmp",
-            "created_at": chrono::Utc::now(),
-        }))
-        .unwrap(),
-        _ => {
-            eprintln!("unknown schema: {what}. try: profile, session, exec, status");
-            return;
-        }
-    };
-    println!("{example}");
 }

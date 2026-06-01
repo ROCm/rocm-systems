@@ -46,7 +46,7 @@ Example (`cdna3.json`):
 }
 ```
 
-Use `mirage schema profile` to print a fresh template.
+Use `mirage profile show <name>` to print an existing profile.
 
 ## Sessions
 
