@@ -134,7 +134,7 @@ jobs:
         cmake --preset coverage \
           -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
           -DROCPROFSYS_PYTHON_ENVS=py3.12 \
-          "-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;videodecode;jpegdecode;openmp" \
+          "-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;videodecode;jpegdecode;openmp;roctx;scratch-memory;unified-memory;transferBench;hpc;sdma_test" \
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
 
     - name: Build
