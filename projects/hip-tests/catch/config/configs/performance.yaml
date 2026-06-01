@@ -37,8 +37,12 @@ performance:
   Performance_hipMemcpyHtoA:
     <<: *level_2
     tags: [image]
-  Performance_hipMemcpyBatchAsync_D2D_OptimizedPath_Aligned: *level_2
-  Performance_hipMemcpyBatchAsync_D2D_OptimizedPath_4ByteOffset: *level_2
+  Performance_hipMemcpyBatchAsync_D2D: *level_2
+  Performance_hipMemcpyBatchAsync_P2P: *level_2
+  Performance_hipMemcpyBatchAsync_H2D_Pageable: *level_2
+  Performance_hipMemcpyBatchAsync_H2D_Pinned: *level_2
+  Performance_hipMemcpyBatchAsync_D2H_Pageable: *level_2
+  Performance_hipMemcpyBatchAsync_D2H_Pinned: *level_2
   Performance_hipMemcpyDtoD_PeerAccessEnabled: *level_2
   Performance_hipMemcpyDtoD_PeerAccessDisabled: *level_2
   Performance_hipMemcpyDtoDAsync_PeerAccessEnabled: *level_2
