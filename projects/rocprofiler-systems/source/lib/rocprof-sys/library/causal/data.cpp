@@ -59,17 +59,17 @@ using random_engine_t    = std::mt19937_64;
 using progress_bundles_t = component_bundle_cache<component::progress_point>;
 
 auto speedup_seeds     = std::vector<size_t>{};
-auto speedup_divisions = get_env<uint16_t>("ROCPROFSYS_CAUSAL_SPEEDUP_DIVISIONS", 5);
+auto speedup_divisions = get_env<std::uint16_t>("ROCPROFSYS_CAUSAL_SPEEDUP_DIVISIONS", 5);
 auto speedup_dist      = []() {
-    size_t                _n = std::max<size_t>(1, 100 / speedup_divisions);
-    std::vector<uint16_t> _v(_n, uint16_t{ 0 });
+    size_t                     _n = std::max<size_t>(1, 100 / speedup_divisions);
+    std::vector<std::uint16_t> _v(_n, std::uint16_t{ 0 });
     std::generate(_v.begin(), _v.end(),
                        [_value = 0]() mutable { return (_value += speedup_divisions); });
     // approximately 25% of bins should be zero speedup
     size_t _nzero = std::ceil(_v.size() / 4.0);
     _v.resize(_v.size() + _nzero, 0);
     std::sort(_v.begin(), _v.end());
-    if(get_is_continuous_integration() && _v.back() > 100)
+    if(_v.back() > 100)
     {
         throw std::runtime_error(
             fmt::format("Error! last value is too large: {}", _v.back()));
@@ -82,7 +82,7 @@ auto perform_experiment_impl_completed = std::unique_ptr<std::promise<void>>{};
 auto num_progress_points               = std::atomic<size_t>{ 0 };
 
 auto&
-get_progress_bundles(int64_t _tid = utility::get_thread_index())
+get_progress_bundles(std::int64_t _tid = utility::get_thread_index())
 {
     return progress_bundles_t::instance(construct_on_thread{ _tid });
 }
@@ -93,7 +93,7 @@ get_engine()
 {
     static auto _seed = []() -> hash_value_t {
         auto _seed_v =
-            config::get_setting_value<uint64_t>("ROCPROFSYS_CAUSAL_RANDOM_SEED")
+            config::get_setting_value<std::uint64_t>("ROCPROFSYS_CAUSAL_RANDOM_SEED")
                 .value_or(0);
         if(_seed_v == 0) _seed_v = std::random_device{}();
         return _seed_v;
@@ -489,7 +489,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
     if(_delay_sec > 0.0)
     {
         LOG_DEBUG("[causal] delaying experimentation for {} seconds...", _delay_sec);
-        uint64_t _delay_nsec = _delay_sec * units::sec;
+        std::uint64_t _delay_nsec = _delay_sec * units::sec;
         std::this_thread::yield();
         std::this_thread::sleep_for(std::chrono::nanoseconds{ _delay_nsec });
     }
@@ -737,7 +737,7 @@ set_current_selection(unwind_addr_t _stack)
 }
 
 size_t
-set_current_selection(container::c_array<uint64_t> _stack)
+set_current_selection(container::c_array<std::uint64_t> _stack)
 {
     for(auto itr : _stack)
     {
@@ -803,9 +803,7 @@ sample_selection(size_t _nitr, size_t _wait_ns)
             // unlikely this will be empty but just in case
             if(linfo.empty()) continue;
 
-            // debugging for continuous integration
-            if(ROCPROFSYS_UNLIKELY(config::get_is_continuous_integration() ||
-                                   config::get_debug()))
+            if(ROCPROFSYS_UNLIKELY(config::get_debug()))
             {
                 auto _location =
                     (_dl_info.location)
@@ -1015,7 +1013,7 @@ mark_progress_point(std::string_view _name, bool _force)
     }
 }
 
-uint16_t
+std::uint16_t
 sample_virtual_speedup()
 {
     if(speedup_dist.empty())
@@ -1049,7 +1047,7 @@ start_experimenting()
                           "Invalid virtual speedup: {}",
                           itr);
             }
-            speedup_dist.emplace_back(static_cast<uint16_t>(itr));
+            speedup_dist.emplace_back(static_cast<std::uint16_t>(itr));
         }
     }
 

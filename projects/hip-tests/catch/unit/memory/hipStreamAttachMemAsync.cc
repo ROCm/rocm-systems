@@ -12,8 +12,7 @@
 
 HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_Basic) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   StreamGuard stream(Streams::created);
@@ -26,13 +25,11 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_Basic) {
 
 HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_Pageable) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   if (!DeviceAttributesSupport(0, hipDeviceAttributePageableMemoryAccess)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
   }
 
   StreamGuard stream(Streams::created);
@@ -47,8 +44,7 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_Pageable) {
 // device.
 HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachGlobal) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   const auto device_count = HipTest::getDeviceCount();
@@ -92,13 +88,11 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachGlobal) {
 // attribute cudaDevAttrConcurrentManagedAccess.
 HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachHost) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   if (DeviceAttributesSupport(0, hipDeviceAttributeConcurrentManagedAccess)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedNoConcurrentAccess);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedNoConcurrentAccess);
   }
 
   StreamGuard stream(Streams::created);
@@ -123,13 +117,11 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachHost) {
 // guarantee that it will only access the memory on the device from stream.
 HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachSingle) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   if (DeviceAttributesSupport(0, hipDeviceAttributeConcurrentManagedAccess)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedNoConcurrentAccess);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedNoConcurrentAccess);
   }
 
   StreamGuard stream1(Streams::created);
@@ -160,8 +152,7 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachSingle) {
 
 HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Negative_Parameters) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   StreamGuard stream(Streams::created);

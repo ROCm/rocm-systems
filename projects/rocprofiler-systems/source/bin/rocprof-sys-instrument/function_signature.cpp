@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "function_signature.hpp"
+#include <cstdint>
 
 #include "core/demangler.hpp"
 
@@ -73,7 +74,7 @@ function_signature::get(bool _all, bool _save) const
             ss << " [" << _rc1 << "]";
         else if(!m_info_end && !_rc1.empty())
             ss << " [" << _rc1 << "]";
-        else if(m_loop_num < std::numeric_limits<uint32_t>::max())
+        else if(m_loop_num < std::numeric_limits<std::uint32_t>::max())
             ss << " [loop#" << m_loop_num << "]";
         else
             errprintf(3, "line info for %s is empty! [{%s}] [{%s}]\n", m_name.c_str(),

@@ -697,12 +697,12 @@ ncclResult_t ncclTransportCollNetFree(struct ncclComm* comm) {
       if (ncclAtomicRefCountDecrement(&peer->refCount) == 0) {
         for (int b=0; b<NCCL_MAX_CONNS; b++) {
           struct ncclConnector* send = peer->send + b;
-          if (send->transportResources && send->transportComm) NCCLCHECK(send->transportComm->free(send));
+          if (send->transportResources && send->transportComm) NCCLCHECK(send->transportComm->free(comm, send));
           send->transportResources = NULL; // avoid double free
         }
         for (int b=0; b<NCCL_MAX_CONNS; b++) {
           struct ncclConnector* recv = peer->recv + b;
-          if (recv->transportResources && recv->transportComm) NCCLCHECK(recv->transportComm->free(recv));
+          if (recv->transportResources && recv->transportComm) NCCLCHECK(recv->transportComm->free(comm, recv));
           recv->transportResources = NULL; // avoid double free
         }
       }
@@ -966,6 +966,7 @@ ncclResult_t initTransportsRank_1(struct ncclComm* comm, struct allGatherInfo *a
 
   comm->nChannels = std::min(treeGraph.nChannels, ringGraph.nChannels);
   TRACE(NCCL_INIT,"treeGraph.nChannels: %d , ringGraph.nChannels: %d", treeGraph.nChannels, ringGraph.nChannels);
+  allGather3Data[rank].romeTopoModelIdx = comm->topo->romeTopoModelIdx;
   NCCLCHECKGOTO(ncclTopoPreset(comm, graphs, &allGather3Data[rank].topoRanks), ret, fail);
 fail:
   return ret;

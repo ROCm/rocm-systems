@@ -1,0 +1,22 @@
+jobs:
+- pmc:
+  - SQ_INST_CYCLES_LDS_sum
+  - SQ_WAIT_INST_LDS_sum
+  - SQ_ITEMS_sum
+  - SQ_INSTS_SALU_sum
+  - SQ_INSTS_SMEM_sum
+  - SQ_INSTS_VALU_TRANS_sum
+  - SQ_INSTS_TEX_sum
+  - SQ_INSTS_FLAT_sum
+  - CPC_MEC_INSTR_CACHE_HIT_sum
+  - CPC_MEC_INSTR_CACHE_MISS_sum
+  - GCEA_WDRAM_REQ_PER_CLIGRP_sum
+  - GCEA_RDRAM_SIZE_REQ_sum
+  - GL1C_BUSY
+  - GL1C_CYCLE
+  - GL1C_REQ_READ_sum
+  - GL1C_REQ_WRITE_sum
+  - GL2C_WRITE_sum
+  - GL2C_ATOMIC_sum
+  - GL2C_EA_RDREQ_DRAM_sum
+  - GL2C_EA_WRREQ_DRAM_sum

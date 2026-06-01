@@ -15,6 +15,8 @@
 __managed__ float m_A[N];  // Accessible by ALL CPU and GPU functions !!!
 __managed__ float m_B[N];
 __managed__ int m_X = 0;
+__managed__ int m_pa_before = 0;
+__managed__ int m_pa_after = 0;
 
 static __global__ void managed_add(size_t size) {
   size_t i = blockDim.x * blockIdx.x + threadIdx.x;
@@ -25,6 +27,8 @@ static __global__ void managed_add(size_t size) {
 
 static __global__ void managed_inc() { atomicAdd(&m_X, 1.0f); }
 
+static __global__ void managed_touch(int* p) { (void)*p; }
+
 HIP_TEST_CASE(Unit_hipManagedKeyword_SingleGpu) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -32,8 +36,7 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_SingleGpu) {
     int managed_memory = 0;
     HIP_CHECK(hipDeviceGetAttribute(&managed_memory, hipDeviceAttributeManagedMemory, i));
     if (!managed_memory) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-      return;
+      HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     }
   }
 
@@ -63,8 +66,7 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_MultiGpu) {
     int managed_memory = 0;
     HIP_CHECK(hipDeviceGetAttribute(&managed_memory, hipDeviceAttributeManagedMemory, i));
     if (!managed_memory) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-      return;
+      HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     }
   }
 
@@ -76,4 +78,32 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_MultiGpu) {
 
   INFO("Inc counter should match the device count: " << m_X << " Device count: " << numDevices);
   REQUIRE(m_X == numDevices);
+}
+
+HIP_TEST_CASE(Unit_hipManagedKeyword_hipPointerGetAttributes_BeforeKernel) {
+  CHECK_MANAGED_MEMORY_SUPPORT
+
+  hipPointerAttribute_t attrs{};
+  HIP_CHECK(hipPointerGetAttributes(&attrs, &m_pa_before));
+  REQUIRE(attrs.type == hipMemoryTypeManaged);
+  REQUIRE(attrs.isManaged == true);
+  REQUIRE(attrs.hostPointer != nullptr);
+  REQUIRE(attrs.devicePointer != nullptr);
+  REQUIRE(attrs.hostPointer == attrs.devicePointer);
+}
+
+HIP_TEST_CASE(Unit_hipManagedKeyword_hipPointerGetAttributes_AfterKernel) {
+  CHECK_MANAGED_MEMORY_SUPPORT
+
+  managed_touch<<<1, 1>>>(&m_pa_after);
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize());
+
+  hipPointerAttribute_t attrs{};
+  HIP_CHECK(hipPointerGetAttributes(&attrs, &m_pa_after));
+  REQUIRE(attrs.type == hipMemoryTypeManaged);
+  REQUIRE(attrs.isManaged == true);
+  REQUIRE(attrs.hostPointer != nullptr);
+  REQUIRE(attrs.devicePointer != nullptr);
+  REQUIRE(attrs.hostPointer == attrs.devicePointer);
 }

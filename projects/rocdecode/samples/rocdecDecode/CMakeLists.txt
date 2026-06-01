@@ -75,7 +75,8 @@ find_package(rocdecode QUIET)
 if(HIP_FOUND AND rocdecode_FOUND)
     # HIP
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::host)
-
+    # rocdecode-host depends on FFmpeg runtime libraries, so
+    # find_package for rocdecode-host is enabled when FFmpeg is available
     if(FFMPEG_FOUND AND NOT USING_THE_ROCK)
       find_package(rocdecode-host 1.0.0 QUIET)
       # FFMPEG

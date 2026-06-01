@@ -24,7 +24,7 @@
 
 #include <rocprofiler-sdk/agent.h>
 
-#include "lib/rocprofiler-sdk/aql/aql_profile_v2.h"
+#include "lib/aqlprofile/aqlprofile.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 
 #include <hsa/hsa_api_trace.h>

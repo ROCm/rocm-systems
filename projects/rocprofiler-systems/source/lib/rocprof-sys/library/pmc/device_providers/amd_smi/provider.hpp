@@ -58,7 +58,7 @@ private:
      */
     [[nodiscard]] std::vector<amdsmi_socket_handle> get_socket_handles()
     {
-        uint32_t count = 0;
+        std::uint32_t count = 0;
         check_amd_smi_status(m_driver_api->get_socket_handles(&count, nullptr),
                              "Failed to get socket count!");
 
@@ -84,7 +84,7 @@ private:
     [[nodiscard]] std::vector<amdsmi_processor_handle> get_gpu_handles_for_socket(
         amdsmi_socket_handle socket_handle)
     {
-        uint32_t count = 0;
+        std::uint32_t count = 0;
         auto status = m_driver_api->get_processor_handles(socket_handle, &count, nullptr);
 
         if(status != AMDSMI_STATUS_SUCCESS || count == 0)
@@ -117,8 +117,8 @@ private:
     [[nodiscard]] std::vector<amdsmi_processor_handle> get_nic_handles_for_socket(
         amdsmi_socket_handle socket_handle)
     {
-        uint32_t count  = 0;
-        auto     status = m_driver_api->get_processor_handles_by_type(
+        std::uint32_t count  = 0;
+        auto          status = m_driver_api->get_processor_handles_by_type(
             socket_handle, AMDSMI_PROCESSOR_TYPE_AMD_NIC, nullptr, &count);
 
         if(status != AMDSMI_STATUS_SUCCESS || count == 0)
@@ -142,10 +142,13 @@ private:
     /**
      * @brief Enumerate GPU devices across all sockets.
      *
+     * Creates a GpuDriver per handle, then wraps it in a Device.
+     *
      * @tparam Device The device type to create.
+     * @tparam GpuDriver The GPU driver type (owns the handle).
      * @return Vector of shared pointers to GPU device objects.
      */
-    template <typename Device>
+    template <typename Device, typename GpuDriver>
     [[nodiscard]] std::vector<std::shared_ptr<Device>> enumerate_gpu_devices()
     {
         std::vector<std::shared_ptr<Device>> devices;
@@ -158,8 +161,8 @@ private:
             auto handles = get_gpu_handles_for_socket(socket_handle);
             for(auto& handle : handles)
             {
-                devices.push_back(std::make_shared<Device>(
-                    m_driver_api, handle, AMDSMI_PROCESSOR_TYPE_AMD_GPU, index));
+                auto driver = std::make_shared<GpuDriver>(handle);
+                devices.push_back(std::make_shared<Device>(std::move(driver), index));
                 index++;
             }
         }
@@ -289,22 +292,16 @@ public:
     }
 
     /**
-     * @brief Get all devices of a specific type.
+     * @brief Get all GPU devices.
      *
-     * Enumerates all devices of the specified type across all sockets.
-     *
-     * @tparam Device The device type to create.
-     * @param type The device type to enumerate (GPU or NIC).
-     * @return Vector of shared pointers to device objects.
+     * @tparam Device The GPU device type.
+     * @tparam GpuDriver The GPU driver type (owns the processor handle).
+     * @return Vector of shared pointers to GPU device objects.
      */
-    template <typename Device>
-    [[nodiscard]] std::vector<std::shared_ptr<Device>> get_devices(device_type type)
+    template <typename Device, typename GpuDriver>
+    [[nodiscard]] std::vector<std::shared_ptr<Device>> get_gpu_devices()
     {
-        if(type == device_type::GPU)
-        {
-            return enumerate_gpu_devices<Device>();
-        }
-        return {};  // Unsupported device type
+        return enumerate_gpu_devices<Device, GpuDriver>();
     }
 
 #if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1

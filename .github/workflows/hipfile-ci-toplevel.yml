@@ -1,4 +1,4 @@
-name: hipfile-toplevel
+name: hipFile
 run-name: Kicks off several hipFile CI workflows for various platforms
 
 # In particular, this root workflow's only purpose is to allow
@@ -26,16 +26,20 @@ permissions:
 
 jobs:
 
-  hipfile-CI:
+  Linux:
     strategy:
       fail-fast: false
       matrix:
         supported_platforms:
           - rocky
+          - rocky8
           - suse
           - ubuntu
         rocm_versions:
           - 7.2.2
+        include:
+          - supported_platforms: ubuntu
+            rocm_versions: 7.13.0
     uses: ./.github/workflows/hipfile-ci.yml
     with:
       platform: ${{ matrix.supported_platforms }}

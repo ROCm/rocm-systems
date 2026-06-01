@@ -46,6 +46,7 @@ set(TEST_SRC
   hipGraphEventWaitNodeSetEvent.cc
   hipGraphMemsetNodeGetParams.cc
   hipGraphMemsetNodeSetParams.cc
+  hipGraphMemsetNodeFlatAlloc.cc
   hipGraphExecMemcpyNodeSetParamsFromSymbol_old.cc
   hipGraphExecMemcpyNodeSetParamsFromSymbol.cc
   hipGraphEventRecordNodeGetEvent.cc
@@ -64,7 +65,8 @@ set(TEST_SRC
   hipGraphAddBatchMemOpNode.cc
   hipGraphBatchMemOpNodeSetParams.cc
   hipDrvGraphExecMemcpyNodeSetParams.cc
-  hipDrvGraphAddMemFreeNode.cc)
+  hipDrvGraphAddMemFreeNode.cc
+  hipGraphAddNodeConcurrent.cc)
 
 if(HIP_PLATFORM MATCHES "amd")
   set(AMD_SRC
@@ -131,12 +133,12 @@ set(TEST_SRC
   hipGraphKernelNodeCopyAttributes.cc
   hipGraphCycle.cc
   hipGraphPerf.cc
-  hipGraphProfilingTimestamps.cc
   hipGraphKernelNodeGetAttribute.cc
   hipGraphKernelNodeSetAttribute.cc
   hipGraphMemAllocNodeGetParams.cc
   hipGraphAddMemAllocNode.cc
   hipGraphAddMemFreeNode.cc
+  hipGraphAllocNodeMemReuse.cc
   hipDrvGraphMemcpyNodeGetParams.cc
   hipDrvGraphMemcpyNodeSetParams.cc
   hipDeviceSetGraphMemAttribute.cc
@@ -171,7 +173,7 @@ if(HIP_PLATFORM MATCHES "amd")
   set_property(GLOBAL APPEND PROPERTY
                G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/hipMatMul.code)
   if(UNIX)
-    set(TEST_SRC hipSimpleGraphWithKernel.cc)
+    set(TEST_KERNEL_ARG_PREFETCH_SRC hipSimpleGraphWithKernel.cc)
     hip_add_exe_to_target(NAME GraphsKernelArgPrefetchTest
                           TEST_SRC ${TEST_KERNEL_ARG_PREFETCH_SRC}
                           TEST_TARGET_NAME build_tests)

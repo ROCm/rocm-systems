@@ -29,3 +29,24 @@ ENDIF()
 IF (BUILD_UNIT_TESTS)
     add_subdirectory(unit_tests)
 ENDIF()
+
+IF (BUILD_PYTHON_TESTS)
+    # Canonical source of truth is projects/rocshmem/python/tests.
+    # This test CMake path only installs those assets into the test package.
+    configure_file(../scripts/python_tests/driver.sh rocshmem_python_driver.sh COPYONLY)
+    rocm_install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/rocshmem_python_driver.sh
+                 COMPONENT tests DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem)
+
+    rocm_install(FILES
+        ${CMAKE_SOURCE_DIR}/python/tests/test_smoke.py
+        ${CMAKE_SOURCE_DIR}/python/tests/test_basic.py
+        ${CMAKE_SOURCE_DIR}/python/tests/test_collective.py
+        ${CMAKE_SOURCE_DIR}/python/tests/conftest.py
+        COMPONENT tests
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem/python_tests)
+
+    rocm_install(PROGRAMS
+        ${CMAKE_SOURCE_DIR}/python/launch_test.sh
+        COMPONENT tests
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem)
+ENDIF()

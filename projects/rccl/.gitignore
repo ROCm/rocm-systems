@@ -2,7 +2,7 @@
 # Modifications Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 *.gcov
 /coverage/
-build/
+build*/
 install*/
 ext/
 src/transport/net_ib_rocm.cc

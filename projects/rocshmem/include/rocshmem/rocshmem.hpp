@@ -35,6 +35,7 @@
 #include "rocshmem_COLL.hpp"
 #include "rocshmem_P2P_SYNC.hpp"
 #include "rocshmem_RMA_X.hpp"
+#include "rocshmem_TILE.hpp"
 #if defined(HAVE_EXTERNAL_MPI)
 #include <mpi.h>
 #endif
@@ -229,6 +230,21 @@ __host__ void *rocshmem_malloc(size_t size);
  * @param[in] ptr Pointer to previously allocated memory on the symmetric heap.
  */
 __host__ void rocshmem_free(void *ptr);
+
+/**
+ * @brief Registers a non-symmetric buffer
+ *
+ * @param[in] addr Pointer to previously allocated user memory
+ * @param[in] length Length of addr
+ */
+__host__ int rocshmem_buffer_register(void *addr, size_t length);
+
+/**
+ * @brief Deregisters previously registered user memory
+ *
+ * @param[in] addr Pointer to previously registered memory
+ */
+__host__ int rocshmem_buffer_unregister(void *addr);
 
 /**
  * @brief Query for the number of PEs.

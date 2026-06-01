@@ -97,6 +97,12 @@ populateSocketAddr(sockaddr_un &addr, pid_t pid) noexcept
 }
 
 namespace hipFile {
+
+// This flag is not defined on kernels before 5.1
+#ifndef F_SEAL_FUTURE_WRITE
+#define F_SEAL_FUTURE_WRITE 0x0010
+#endif
+
 StatsContainer::StatsContainer()
     : m_fd{FileDescriptor::make_managed(Context<Sys>::get()->memfd_create("AISSTATS", MFD_ALLOW_SEALING))},
       m_stats{nullptr}
@@ -107,6 +113,12 @@ StatsContainer::StatsContainer()
         Context<Sys>::get()->mmap(nullptr, sizeof(Stats), PROT_READ | PROT_WRITE, MAP_SHARED, m_fd.get(), 0);
     try {
         Context<Sys>::get()->fcntl(m_fd.get(), F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_FUTURE_WRITE);
+    }
+    catch (const std::system_error &e) {
+        Context<Sys>::get()->munmap(shm, sizeof(Stats));
+        if (e.code().value() == EINVAL)
+            return;
+        throw;
     }
     catch (...) {
         Context<Sys>::get()->munmap(shm, sizeof(Stats));
@@ -128,7 +140,8 @@ StatsContainer::~StatsContainer()
 StatsServer::StatsServer()
     : m_efd{FileDescriptor::make_managed(Context<Sys>::get()->eventfd(0, 0))}, m_stats{}
 {
-    m_thread = std::thread(&StatsServer::threadFn, this);
+    if (m_stats.getStats())
+        m_thread = std::thread(&StatsServer::threadFn, this);
 }
 
 StatsServer::~StatsServer()
@@ -352,14 +365,17 @@ StatsClient::generateReportV1(std::ostream &stream, const StatsV1 *stats)
     static constexpr StatsBackend backends[]{StatsBackend::Fastpath, StatsBackend::Fallback};
     for (const auto &backend : backends) {
         for (const auto &ioType : ioTypes) {
-            uint64_t totalBytes{}, totalCount{}, totalTimeUs{};
+            uint64_t totalBytes{}, totalCount{}, totalTimeUs{}, totalErrors{};
             for (size_t i{}; i < StatsV1::MaxGpus; ++i) {
                 if (const auto *perGpuStats{stats->getPerGpuStats(i, backend)}) {
-                    if (const auto [sizeHist, countHist, timeHist] = perGpuStats->getHistograms(ioType);
-                        sizeHist != nullptr && countHist != nullptr && timeHist != nullptr) {
+                    if (const auto [sizeHist, countHist, timeHist, errorCountHist] =
+                            perGpuStats->getHistograms(ioType);
+                        sizeHist != nullptr && countHist != nullptr && timeHist != nullptr &&
+                        errorCountHist != nullptr) {
                         totalBytes += sizeHist->accumulate();
                         totalCount += countHist->accumulate();
                         totalTimeUs += timeHist->accumulate();
+                        totalErrors += errorCountHist->accumulate();
                     }
                 }
             }
@@ -368,7 +384,9 @@ StatsClient::generateReportV1(std::ostream &stream, const StatsV1 *stats)
             stream << "Average " << reportUtil::toString(backend) << ' ' << reportUtil::toString(ioType)
                    << " Bandwidth (GiB/s): " << reportUtil::bandwidthGiBs(totalBytes, totalTimeUs) << '\n';
             stream << "Average " << reportUtil::toString(backend) << ' ' << reportUtil::toString(ioType)
-                   << " Latency (us): " << reportUtil::latencyUs(totalTimeUs, totalCount) << "\n\n";
+                   << " Latency (us): " << reportUtil::latencyUs(totalTimeUs, totalCount) << '\n';
+            stream << "Total " << reportUtil::toString(backend) << ' ' << reportUtil::toString(ioType)
+                   << " Errors: " << totalErrors << "\n\n";
         }
     }
     for (size_t gpuId{}; gpuId < StatsV1::MaxGpus; ++gpuId) {
@@ -377,7 +395,10 @@ StatsClient::generateReportV1(std::ostream &stream, const StatsV1 *stats)
         }
         stream << "GPU " << gpuId << ":\n";
         auto ioSize = [](std::ostream &str, PerGpuStatsV1::ConstHistograms histograms, size_t bucket) {
-            const auto [sizeHist, countHist, timeHist] = histograms;
+            const auto [sizeHist, countHist, timeHist, errorCountHist] = histograms;
+            (void)countHist;
+            (void)timeHist;
+            (void)errorCountHist;
             uint64_t size{};
             if (sizeHist != nullptr) {
                 size = sizeHist->buckets[bucket].load();
@@ -385,7 +406,9 @@ StatsClient::generateReportV1(std::ostream &stream, const StatsV1 *stats)
             str << size;
         };
         auto bandwidth = [](std::ostream &str, PerGpuStatsV1::ConstHistograms histograms, size_t bucket) {
-            const auto [sizeHist, countHist, timeHist] = histograms;
+            const auto [sizeHist, countHist, timeHist, errorCountHist] = histograms;
+            (void)countHist;
+            (void)errorCountHist;
             uint64_t size{}, timeUs{};
             if (sizeHist != nullptr) {
                 size = sizeHist->buckets[bucket].load();
@@ -396,7 +419,9 @@ StatsClient::generateReportV1(std::ostream &stream, const StatsV1 *stats)
             str << reportUtil::bandwidthGiBs(size, timeUs);
         };
         auto latency = [](std::ostream &str, PerGpuStatsV1::ConstHistograms histograms, size_t bucket) {
-            const auto [sizeHist, countHist, timeHist] = histograms;
+            const auto [sizeHist, countHist, timeHist, errorCountHist] = histograms;
+            (void)sizeHist;
+            (void)errorCountHist;
             uint64_t timeUs{}, count{};
             if (timeHist != nullptr) {
                 timeUs = timeHist->buckets[bucket].load();
@@ -406,9 +431,21 @@ StatsClient::generateReportV1(std::ostream &stream, const StatsV1 *stats)
             }
             str << reportUtil::latencyUs(timeUs, count);
         };
+        auto errorCount = [](std::ostream &str, PerGpuStatsV1::ConstHistograms histograms, size_t bucket) {
+            const auto [sizeHist, countHist, timeHist, errorCountHist] = histograms;
+            (void)sizeHist;
+            (void)countHist;
+            (void)timeHist;
+            uint64_t errors{};
+            if (errorCountHist != nullptr) {
+                errors = errorCountHist->buckets[bucket].load();
+            }
+            str << errors;
+        };
         generateReportHistogramV1(stream, stats, gpuId, "Size", "Size (B)", ioSize);
         generateReportHistogramV1(stream, stats, gpuId, "Bandwidth", "Bandwidth (GiB/s)", bandwidth);
         generateReportHistogramV1(stream, stats, gpuId, "Latency", "Latency (us)", latency);
+        generateReportHistogramV1(stream, stats, gpuId, "Errors", "Error Count", errorCount);
     }
 }
 
@@ -439,7 +476,8 @@ StatsCollection::addIo(IoType ioType, StatsBackend backend, uint64_t bytes, uint
     if (perGpuStats == nullptr) {
         return;
     }
-    auto [sizeHist, countHist, timeHist] = perGpuStats->getHistograms(ioType);
+    auto [sizeHist, countHist, timeHist, errorCountHist] = perGpuStats->getHistograms(ioType);
+    (void)errorCountHist;
     if (sizeHist == nullptr || countHist == nullptr || timeHist == nullptr) {
         return;
     }
@@ -447,6 +485,36 @@ StatsCollection::addIo(IoType ioType, StatsBackend backend, uint64_t bytes, uint
     sizeHist->buckets[bucket].fetch_add(bytes, std::memory_order_relaxed);
     countHist->buckets[bucket].fetch_add(1, std::memory_order_relaxed);
     timeHist->buckets[bucket].fetch_add(timeUs, std::memory_order_relaxed);
+    perGpuStats->inUse.store(1, std::memory_order_relaxed);
+}
+
+void
+StatsCollection::error(IoType ioType, StatsBackend backend, uint64_t bytes) const noexcept
+{
+    Stats *stats{Context<IStatsServer>::get()->getStats()};
+    if (stats == nullptr || stats->getLevel() < StatsLevel::Basic) {
+        return;
+    }
+    size_t device{};
+    try {
+        device = static_cast<size_t>(Context<Hip>::get()->hipGetDevice());
+    }
+    catch (...) {
+        return;
+    }
+    auto *perGpuStats{stats->getPerGpuStats(device, backend)};
+    if (perGpuStats == nullptr) {
+        return;
+    }
+    auto [sizeHist, countHist, timeHist, errorCountHist] = perGpuStats->getHistograms(ioType);
+    (void)sizeHist;
+    (void)countHist;
+    (void)timeHist;
+    if (errorCountHist == nullptr) {
+        return;
+    }
+    size_t bucket = StatsHistogram::toHistogramBucket(bytes);
+    errorCountHist->buckets[bucket].fetch_add(1, std::memory_order_relaxed);
     perGpuStats->inUse.store(1, std::memory_order_relaxed);
 }
 }

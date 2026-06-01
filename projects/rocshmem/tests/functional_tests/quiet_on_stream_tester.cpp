@@ -65,8 +65,8 @@ QuietOnStreamTester::QuietOnStreamTester(TesterArguments args)
   }
 
   // Allocate test buffers - one int per stream
-  source_buf = static_cast<int*>(rocshmem_malloc(num_streams * sizeof(int)));
-  dest_buf = static_cast<int*>(rocshmem_malloc(num_streams * sizeof(int)));
+  source_buf = static_cast<int*>(alloc_test_buffer(num_streams * sizeof(int), args.local_buf_type));
+  dest_buf = static_cast<int*>(alloc_test_buffer(num_streams * sizeof(int)));
 }
 
 QuietOnStreamTester::~QuietOnStreamTester() {
@@ -76,8 +76,8 @@ QuietOnStreamTester::~QuietOnStreamTester() {
     }
   }
 
-  rocshmem_free(dest_buf);
-  rocshmem_free(source_buf);
+  free_test_buffer(dest_buf);
+  free_test_buffer(source_buf, args.local_buf_type);
 }
 
 void QuietOnStreamTester::preLaunchKernel() {

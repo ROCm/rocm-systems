@@ -93,7 +93,7 @@ perfxpert = [
     "agents/fence/*.md",
     "agents/templates/*",
     "../NOTICE",
-    "../opencode/LICENSE",
+    "_bundled/opencode_LICENSE",
 ]
 
 [tool.pytest.ini_options]

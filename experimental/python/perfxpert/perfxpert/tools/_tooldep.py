@@ -133,16 +133,41 @@ def _shared_lib_search_paths(name: str) -> List[str]:
     return [p for p in paths if p]
 
 
-def check_tool_available(name: str) -> Tuple[bool, str]:
-    """Return (is_available, detail_message) for the named dependency."""
+def _resolve_binary(name: str, executable: Optional[str] = None) -> Tuple[Optional[str], str]:
+    """Return executable path for a binary dependency, or an error detail."""
+    probe = executable or name
+    has_path_separator = os.path.sep in probe or (
+        os.path.altsep is not None and os.path.altsep in probe
+    )
+    if has_path_separator:
+        path = Path(probe).expanduser()
+        if not path.is_file():
+            return None, f"{probe} is not a file"
+        if not os.access(path, os.X_OK):
+            return None, f"{probe} is not executable"
+        return str(path), f"{name} at {path}"
+
+    path = shutil.which(probe)
+    if not path:
+        return None, f"{probe} not found on PATH"
+    return path, f"{name} at {path}"
+
+
+def check_tool_available(name: str, *, executable: Optional[str] = None) -> Tuple[bool, str]:
+    """Return (is_available, detail_message) for the named dependency.
+
+    For registered binary dependencies, `executable` may name the configured
+    binary path to probe while `name` remains the registry key used for install
+    hints and dependency ownership.
+    """
     dep = _TOOL_REGISTRY.get(name)
     if dep is None:
         return False, f"unknown tool {name!r} (not in _TOOL_REGISTRY)"
 
     if dep.kind == "binary":
-        path = shutil.which(name)
+        path, detail = _resolve_binary(name, executable)
         if not path:
-            return False, f"{name} not found on PATH. Install: {dep.install_hint}"
+            return False, f"{detail}. Install: {dep.install_hint}"
         if dep.smoke_test is not None:
             cmd = [path] + list(dep.smoke_test)
             try:
@@ -161,7 +186,7 @@ def check_tool_available(name: str) -> Tuple[bool, str]:
                 return False, f"binary at {path} but smoke-test failed: {e}"
             except subprocess.TimeoutExpired:
                 return False, f"binary at {path} but smoke-test timed out after 2 s"
-        return True, f"{name} at {path}"
+        return True, detail
 
     if dep.kind == "pylib":
         spec = importlib.util.find_spec(name)
@@ -214,7 +239,12 @@ def offer_install(name: str) -> bool:
     return ok
 
 
-def require_tool(name: str, *, allow_install: bool = False) -> str:
+def require_tool(
+    name: str,
+    *,
+    allow_install: bool = False,
+    executable: Optional[str] = None,
+) -> str:
     """Assert that `name` is available; raise ExternalToolMissing otherwise.
 
     If `allow_install=True` AND `PERFXPERT_ALLOW_INSTALL=1` AND the registry
@@ -223,7 +253,7 @@ def require_tool(name: str, *, allow_install: bool = False) -> str:
 
     Returns the detail string from check_tool_available on success.
     """
-    ok, detail = check_tool_available(name)
+    ok, detail = check_tool_available(name, executable=executable)
     if ok:
         return detail
 
@@ -232,7 +262,7 @@ def require_tool(name: str, *, allow_install: bool = False) -> str:
     if allow_install and user_opted_in and dep and dep.install_cmd:
         installed = offer_install(name)
         if installed:
-            ok, detail = check_tool_available(name)
+            ok, detail = check_tool_available(name, executable=executable)
             if ok:
                 return detail
 

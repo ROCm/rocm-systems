@@ -147,6 +147,12 @@ rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32
             return rocdec_status;
         }
 
+        if (va_drm_prime_surface_desc.num_layers == 0 || va_drm_prime_surface_desc.num_layers > 3) {
+            ErrorLog(g_rocdec_logger, "VA-API returned an unsupported value for num_layers. num_layers = " + ROCDEC_TOSTR(va_drm_prime_surface_desc.num_layers));
+            FunctionExitLog(g_rocdec_logger);
+            return ROCDEC_RUNTIME_ERROR;
+        }
+
         external_mem_handle_desc.type = hipExternalMemoryHandleTypeOpaqueFd;
         external_mem_handle_desc.handle.fd = va_drm_prime_surface_desc.objects[0].fd;
         external_mem_handle_desc.size = va_drm_prime_surface_desc.objects[0].size;
@@ -159,13 +165,10 @@ rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32
         hip_interop_[pic_idx].width = va_drm_prime_surface_desc.width;
         hip_interop_[pic_idx].height = va_drm_prime_surface_desc.height;
 
-        hip_interop_[pic_idx].offset[0] = va_drm_prime_surface_desc.layers[0].offset[0];
-        hip_interop_[pic_idx].offset[1] = va_drm_prime_surface_desc.layers[1].offset[0];
-        hip_interop_[pic_idx].offset[2] = va_drm_prime_surface_desc.layers[2].offset[0];
-
-        hip_interop_[pic_idx].pitch[0] = va_drm_prime_surface_desc.layers[0].pitch[0];
-        hip_interop_[pic_idx].pitch[1] = va_drm_prime_surface_desc.layers[1].pitch[0];
-        hip_interop_[pic_idx].pitch[2] = va_drm_prime_surface_desc.layers[2].pitch[0];
+        for (int i = 0; i < va_drm_prime_surface_desc.num_layers; i++) {
+            hip_interop_[pic_idx].offset[i] = va_drm_prime_surface_desc.layers[i].offset[0];
+            hip_interop_[pic_idx].pitch[i] = va_drm_prime_surface_desc.layers[i].pitch[0];
+        }
 
         hip_interop_[pic_idx].num_layers = va_drm_prime_surface_desc.num_layers;
 

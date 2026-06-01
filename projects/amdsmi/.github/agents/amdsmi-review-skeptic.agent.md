@@ -2,7 +2,7 @@
 name: amdsmi-review-skeptic
 description: "Skeptic review subagent. Questions necessity, challenges scope, finds simpler alternatives, resists premature abstraction. Also runs as rebuttal reviewer in thorough mode. Use when: skeptic review, scope check, simplification, rebuttal."
 tools: read/readFile, search/textSearch, search/fileSearch, search/listDirectory, search/usages
-model: "Claude Sonnet 4.6"
+model: "Claude Opus 4.6"
 user-invocable: false
 ---
 

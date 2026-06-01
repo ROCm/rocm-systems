@@ -17,12 +17,26 @@ CLI
     perfxpert analyze -i trace.db --format json
 """
 
-from importlib.metadata import PackageNotFoundError, version
+import re
+from importlib.metadata import PackageNotFoundError, version as _metadata_version
+from pathlib import Path
+
+
+def _source_tree_version() -> str:
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    try:
+        text = pyproject.read_text(encoding="utf-8")
+    except OSError:
+        return "0+unknown"
+    match = re.search(r"(?m)^version\s*=\s*\"([^\"]+)\"", text)
+    return match.group(1) if match else "0+unknown"
+
 
 try:
-    __version__ = version("perfxpert")
+    __version__ = _metadata_version("perfxpert")
 except PackageNotFoundError:
-    __version__ = "0.0.0"
+    __version__ = _source_tree_version()
+
 __author__ = "Advanced Micro Devices, Inc."
 
 from .connection import PerfxpertConnection, execute_statement, merge_sqlite_dbs

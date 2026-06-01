@@ -181,17 +181,20 @@ private:
       } else if ((flags & ConnFifoEnabled) && connFifo[step%NCCL_STEPS].mode == NCCL_MODE_OFFSET) {
         ptrs[index] = connEltsFifo + loadInt(&connFifo[step%NCCL_STEPS].offset)/sizeof(T);
       } else if (isSendNotRecv && DirectSend) {
-        if (flags & DirectWrite) {
+        // directBuff is only assigned by setDataPtrs when (Direct && ipcReg);
+        // when Direct=1 but no buffer was registered, it stays NULL and using
+        // it as a base would compute an invalid GPU address.
+        if ((flags & DirectWrite) && directBuff != nullptr) {
           ptrs[index] = directBuff + dstIx + offset;
-        } else if (flags & DirectRead) {  // empty send
+        } else if ((flags & DirectRead) && directBuff != nullptr) {  // empty send
           ptrs[index] = nullptr;
         } else {
           ptrs[index] = connEltsFifo + (step%NCCL_STEPS)*connStepSize;
         }
       } else if (!isSendNotRecv && DirectRecv) {
-        if (flags & DirectRead) {
+        if ((flags & DirectRead) && directBuff != nullptr) {
           ptrs[index] = directBuff + srcIx + offset;
-        } else if (flags & DirectWrite) {
+        } else if ((flags & DirectWrite) && directBuff != nullptr) {
           ptrs[index] = directBuff + dstIx + offset;  // send to next from my output buffer
         } else {
           ptrs[index] = connEltsFifo + (step%NCCL_STEPS)*connStepSize;

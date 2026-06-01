@@ -57,6 +57,9 @@ class TestBase : public rocrtst::BaseRocR {
 
   virtual ~TestBase(void);
 
+  // Check if test was skipped due to platform filtering
+  bool isTestSkipped() const { return test_skipped_; }
+
   enum VerboseLevel {VERBOSE_MIN = 0, VERBOSE_STANDARD, VERBOSE_PROGRESS};
 
   // @Brief: Before run the core measure codes, do something to set up
@@ -88,6 +91,13 @@ class TestBase : public rocrtst::BaseRocR {
   bool Skip() const { return skip_; }
 
   void markAsSkip() { skip_ = true; }
+
+ protected:
+  // Check platform filtering and set test_skipped_ if test should be skipped
+  // Returns false if test should be skipped, true if it should run
+  bool checkPlatformFiltering();
+
+  bool test_skipped_ = false;
 
  private:
   std::string description_;

@@ -26,7 +26,10 @@ This testcase verifies following scenarios
 #endif
 
 
-static constexpr auto NUM_ELM{4 * 1024 * 1024};
+static auto NUM_ELM() {
+  static const auto val = isQuickLevel() ? 128 * 1024 : 4 * 1024 * 1024;
+  return val;
+}
 static unsigned blocksPerCU{6};  // to hide latency
 static unsigned threadsPerBlock{256};
 
@@ -336,17 +339,17 @@ template <typename T> void memcpytest2_offsets(size_t maxElem, bool devOffsets, 
 // Create multiple threads to stress multi-thread locking behavior in the
 // allocation/deallocation/tracking logic:
 template <typename T> void multiThread_1(bool serialize, bool usePinnedHost) {
-  DeviceMemory<T> memD(NUM_ELM);
-  HostMemory<T> mem1(NUM_ELM, usePinnedHost);
-  HostMemory<T> mem2(NUM_ELM, usePinnedHost);
+  DeviceMemory<T> memD(NUM_ELM());
+  HostMemory<T> mem1(NUM_ELM(), usePinnedHost);
+  HostMemory<T> mem2(NUM_ELM(), usePinnedHost);
 
-  std::thread t1(memcpytest2<T>, &memD, &mem1, NUM_ELM, 0, 0, 0);
+  std::thread t1(memcpytest2<T>, &memD, &mem1, NUM_ELM(), 0, 0, 0);
   if (serialize) {
     t1.join();
   }
 
 
-  std::thread t2(memcpytest2<T>, &memD, &mem2, NUM_ELM, 0, 0, 0);
+  std::thread t2(memcpytest2<T>, &memD, &mem2, NUM_ELM(), 0, 0, 0);
   if (serialize) {
     t2.join();
   }
@@ -360,25 +363,25 @@ Launches kernel and performs the sum of device variables
 copies the result to host variable and validates the result.
 */
 HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy_KernelLaunch, int, float, double) {
-  size_t Nbytes = NUM_ELM * sizeof(TestType);
+  size_t Nbytes = NUM_ELM() * sizeof(TestType);
 
   TestType *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr};
   TestType *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr};
 
-  HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, NUM_ELM, false);
+  HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, NUM_ELM(), false);
 
   HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
 
   constexpr int threads = 1024;
-  int blocks = NUM_ELM / threads;
+  int blocks = NUM_ELM() / threads;
   hipLaunchKernelGGL(HipTest::vectorADD, blocks, 1024, 0, 0, static_cast<const TestType*>(A_d),
-                     static_cast<const TestType*>(B_d), C_d, NUM_ELM);
+                     static_cast<const TestType*>(B_d), C_d, NUM_ELM());
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
 
   HIP_CHECK(hipDeviceSynchronize());
-  HipTest::checkVectorADD(A_h, B_h, C_h, NUM_ELM);
+  HipTest::checkVectorADD(A_h, B_h, C_h, NUM_ELM());
 
   HipTest::freeArrays<TestType>(A_d, B_d, C_d, A_h, B_h, C_h, false);
 }
@@ -397,29 +400,29 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy_H2H_H2D_D2H_H2PinMem, int, float, double) 
   TestType *A_Ph{nullptr}, *B_Ph{nullptr};
   HIP_CHECK(hipSetDevice(0));
   HipTest::initArrays<TestType>(&A_d, &B_d, nullptr, &A_h, &B_h, nullptr,
-                                NUM_ELM * sizeof(TestType));
+                                NUM_ELM() * sizeof(TestType));
   HipTest::initArrays<TestType>(nullptr, nullptr, nullptr, &A_Ph, &B_Ph, nullptr,
-                                NUM_ELM * sizeof(TestType), true);
+                                NUM_ELM() * sizeof(TestType), true);
 
   SECTION("H2H, H2PinMem and PinMem2H") {
-    HIP_CHECK(hipMemcpy(B_h, A_h, NUM_ELM * sizeof(TestType), hipMemcpyDefault));
-    HIP_CHECK(hipMemcpy(A_Ph, B_h, NUM_ELM * sizeof(TestType), hipMemcpyDefault));
-    HIP_CHECK(hipMemcpy(B_Ph, A_Ph, NUM_ELM * sizeof(TestType), hipMemcpyDefault));
-    HipTest::checkTest(A_h, B_Ph, NUM_ELM);
+    HIP_CHECK(hipMemcpy(B_h, A_h, NUM_ELM() * sizeof(TestType), hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(A_Ph, B_h, NUM_ELM() * sizeof(TestType), hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(B_Ph, A_Ph, NUM_ELM() * sizeof(TestType), hipMemcpyDefault));
+    HipTest::checkTest(A_h, B_Ph, NUM_ELM());
   }
 
   SECTION("H2D-D2D-D2H-SameGPU") {
-    HIP_CHECK(hipMemcpy(A_d, A_h, NUM_ELM * sizeof(TestType), hipMemcpyDefault));
-    HIP_CHECK(hipMemcpy(B_d, A_d, NUM_ELM * sizeof(TestType), hipMemcpyDefault));
-    HIP_CHECK(hipMemcpy(B_h, B_d, NUM_ELM * sizeof(TestType), hipMemcpyDefault));
-    HipTest::checkTest(A_h, B_h, NUM_ELM);
+    HIP_CHECK(hipMemcpy(A_d, A_h, NUM_ELM() * sizeof(TestType), hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(B_d, A_d, NUM_ELM() * sizeof(TestType), hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(B_h, B_d, NUM_ELM() * sizeof(TestType), hipMemcpyDefault));
+    HipTest::checkTest(A_h, B_h, NUM_ELM());
   }
 
   SECTION("pH2D-D2D-D2pH-SameGPU") {
-    HIP_CHECK(hipMemcpy(A_d, A_Ph, NUM_ELM * sizeof(TestType), hipMemcpyDefault));
-    HIP_CHECK(hipMemcpy(B_d, A_d, NUM_ELM * sizeof(TestType), hipMemcpyDefault));
-    HIP_CHECK(hipMemcpy(B_Ph, B_d, NUM_ELM * sizeof(TestType), hipMemcpyDefault));
-    HipTest::checkTest(A_Ph, B_Ph, NUM_ELM);
+    HIP_CHECK(hipMemcpy(A_d, A_Ph, NUM_ELM() * sizeof(TestType), hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(B_d, A_d, NUM_ELM() * sizeof(TestType), hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(B_Ph, B_d, NUM_ELM() * sizeof(TestType), hipMemcpyDefault));
+    HipTest::checkTest(A_Ph, B_Ph, NUM_ELM());
   }
   SECTION("H2D-D2D-D2H-DeviceContextChange") {
     int deviceCount = 0;
@@ -431,10 +434,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy_H2H_H2D_D2H_H2PinMem, int, float, double) 
       HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1));
       if (canAccessPeer) {
         HIP_CHECK(hipSetDevice(1));
-        HIP_CHECK(hipMemcpy(A_d, A_h, NUM_ELM * sizeof(TestType), hipMemcpyDefault));
-        HIP_CHECK(hipMemcpy(B_d, A_d, NUM_ELM * sizeof(TestType), hipMemcpyDefault));
-        HIP_CHECK(hipMemcpy(B_h, B_d, NUM_ELM * sizeof(TestType), hipMemcpyDefault));
-        HipTest::checkTest(A_h, B_h, NUM_ELM);
+        HIP_CHECK(hipMemcpy(A_d, A_h, NUM_ELM() * sizeof(TestType), hipMemcpyDefault));
+        HIP_CHECK(hipMemcpy(B_d, A_d, NUM_ELM() * sizeof(TestType), hipMemcpyDefault));
+        HIP_CHECK(hipMemcpy(B_h, B_d, NUM_ELM() * sizeof(TestType), hipMemcpyDefault));
+        HipTest::checkTest(A_h, B_h, NUM_ELM());
       } else {
         WARN("Skipping section: " << HipTest::SkipReason::kPeerAccessUnavailable);
       }
@@ -453,11 +456,11 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy_H2H_H2D_D2H_H2PinMem, int, float, double) 
         HIP_CHECK(hipSetDevice(1));
         TestType* C_d{nullptr};
         HipTest::initArrays<TestType>(nullptr, nullptr, &C_d, nullptr, nullptr, nullptr,
-                                      NUM_ELM * sizeof(TestType));
-        HIP_CHECK(hipMemcpy(A_d, A_h, NUM_ELM * sizeof(TestType), hipMemcpyDefault));
-        HIP_CHECK(hipMemcpy(C_d, A_d, NUM_ELM * sizeof(TestType), hipMemcpyDefault));
-        HIP_CHECK(hipMemcpy(B_h, C_d, NUM_ELM * sizeof(TestType), hipMemcpyDefault));
-        HipTest::checkTest(A_h, B_h, NUM_ELM);
+                                      NUM_ELM() * sizeof(TestType));
+        HIP_CHECK(hipMemcpy(A_d, A_h, NUM_ELM() * sizeof(TestType), hipMemcpyDefault));
+        HIP_CHECK(hipMemcpy(C_d, A_d, NUM_ELM() * sizeof(TestType), hipMemcpyDefault));
+        HIP_CHECK(hipMemcpy(B_h, C_d, NUM_ELM() * sizeof(TestType), hipMemcpyDefault));
+        HipTest::checkTest(A_h, B_h, NUM_ELM());
         HIP_CHECK(hipFree(C_d));
       } else {
         WARN("Skipping section: " << HipTest::SkipReason::kPeerAccessUnavailable);
@@ -492,21 +495,20 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy_PinnedRegMemWithKernelLaunch,
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   {
     // 1 refers to pinned Memory
     // 2 refers to register Memory
     int MallocPinType = GENERATE(0, 1);
-    size_t Nbytes = NUM_ELM * sizeof(TestType);
-    unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, NUM_ELM);
+    size_t Nbytes = NUM_ELM() * sizeof(TestType);
+    unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, NUM_ELM());
 
     TestType *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr};
     TestType *X_d{nullptr}, *Y_d{nullptr}, *Z_d{nullptr};
     TestType *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr};
     if (MallocPinType) {
-      HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, NUM_ELM, true);
+      HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, NUM_ELM(), true);
     } else {
       A_h = reinterpret_cast<TestType*>(malloc(Nbytes));
       HIP_CHECK(hipHostRegister(A_h, Nbytes, hipHostRegisterDefault));
@@ -514,18 +516,18 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy_PinnedRegMemWithKernelLaunch,
       HIP_CHECK(hipHostRegister(B_h, Nbytes, hipHostRegisterDefault));
       C_h = reinterpret_cast<TestType*>(malloc(Nbytes));
       HIP_CHECK(hipHostRegister(C_h, Nbytes, hipHostRegisterDefault));
-      HipTest::initArrays<TestType>(&A_d, &B_d, &C_d, nullptr, nullptr, nullptr, NUM_ELM, false);
-      HipTest::setDefaultData<TestType>(NUM_ELM, A_h, B_h, C_h);
+      HipTest::initArrays<TestType>(&A_d, &B_d, &C_d, nullptr, nullptr, nullptr, NUM_ELM(), false);
+      HipTest::setDefaultData<TestType>(NUM_ELM(), A_h, B_h, C_h);
     }
     HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
 
     hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, 0,
                        static_cast<const TestType*>(A_d), static_cast<const TestType*>(B_d), C_d,
-                       NUM_ELM);
+                       NUM_ELM());
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
-    HipTest::checkVectorADD(A_h, B_h, C_h, NUM_ELM);
+    HipTest::checkVectorADD(A_h, B_h, C_h, NUM_ELM());
 
     unsigned int seed = time(0);
     HIP_CHECK(hipSetDevice(HipTest::RAND_R(&seed) % (numDevices - 1) + 1));
@@ -533,9 +535,9 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy_PinnedRegMemWithKernelLaunch,
     int device;
     HIP_CHECK(hipGetDevice(&device));
     std::cout << "hipMemcpy is set to happen between device 0 and device " << device << std::endl;
-    HipTest::initArrays<TestType>(&X_d, &Y_d, &Z_d, nullptr, nullptr, nullptr, NUM_ELM, false);
+    HipTest::initArrays<TestType>(&X_d, &Y_d, &Z_d, nullptr, nullptr, nullptr, NUM_ELM(), false);
 
-    for (int j = 0; j < NUM_ELM; j++) {
+    for (int j = 0; j < NUM_ELM(); j++) {
       A_h[j] = 0;
       B_h[j] = 0;
       C_h[j] = 0;
@@ -548,11 +550,11 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy_PinnedRegMemWithKernelLaunch,
 
     hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, 0,
                        static_cast<const TestType*>(X_d), static_cast<const TestType*>(Y_d), Z_d,
-                       NUM_ELM);
+                       NUM_ELM());
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipMemcpy(C_h, Z_d, Nbytes, hipMemcpyDeviceToHost));
 
-    HipTest::checkVectorADD(A_h, B_h, C_h, NUM_ELM);
+    HipTest::checkVectorADD(A_h, B_h, C_h, NUM_ELM());
 
     if (MallocPinType) {
       HipTest::freeArrays<TestType>(A_d, B_d, C_d, A_h, B_h, C_h, true);

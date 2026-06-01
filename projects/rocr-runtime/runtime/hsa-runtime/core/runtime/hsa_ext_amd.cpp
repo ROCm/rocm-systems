@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -437,13 +437,16 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
         // Multi-linear: arrays of src/dst/size, one signal for all entries.
         if (op.src_list == nullptr || op.dst_list == nullptr ||
             op.dst_agent_list == nullptr || op.size_list == nullptr ||
-            op.num_entries > 1024 || op.reserved0 != 0)
+            op.num_entries > 65536 || op.reserved0 != 0)
           return HSA_STATUS_ERROR_INVALID_ARGUMENT;
         for (uint32_t d = 0; d < op.num_entries; ++d) {
           IS_BAD_PTR(op.src_list[d]);
           IS_BAD_PTR(op.dst_list[d]);
           core::Agent* da = core::Agent::Convert(op.dst_agent_list[d]);
           IS_VALID(da);
+          if (src_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice &&
+              da->device_type() != core::Agent::DeviceType::kAmdGpuDevice)
+            return HSA_STATUS_ERROR_INVALID_AGENT;
           if (op.size_list[d] == 0)
             return HSA_STATUS_ERROR_INVALID_ARGUMENT;
         }
@@ -467,7 +470,7 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
       break;
     case HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST:
       if (op.dst_list == nullptr || op.dst_agent_list == nullptr ||
-          op.num_entries == 0 || op.num_entries > 1024 || op.unused_size != 0)
+          op.num_entries == 0 || op.num_entries > 65536 || op.unused_size != 0)
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       for (uint32_t d = 0; d < op.num_entries; ++d) {
         IS_BAD_PTR(op.dst_list[d]);
@@ -479,7 +482,7 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
       if (op.num_entries > 0) {
         if (op.src_list == nullptr || op.dst_list == nullptr ||
             op.dst_agent_list == nullptr || op.size_list == nullptr ||
-            op.num_entries > 1024 || op.reserved0 != 0)
+            op.num_entries > 65536 || op.reserved0 != 0)
           return HSA_STATUS_ERROR_INVALID_ARGUMENT;
         for (uint32_t d = 0; d < op.num_entries; ++d) {
           IS_BAD_PTR(op.src_list[d]);
@@ -514,11 +517,18 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
 
     if (has_work) {
       core::Agent* copy_agent = nullptr;
-      if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST ||
-          (is_multi && op.type != HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP)) {
+      if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST) {
         if (src_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice)
           return HSA_STATUS_ERROR_INVALID_AGENT;
         copy_agent = src_agent;
+      } else if (is_multi && op.type != HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP) {
+        if (src_agent->device_type() == core::Agent::DeviceType::kAmdGpuDevice) {
+          // D2D or D2H: use src GPU as the copy engine.
+          copy_agent = src_agent;
+        } else {
+          // H2D: every destination was validated as a GPU; route through the first one.
+          copy_agent = core::Agent::Convert(op.dst_agent_list[0]);
+        }
       } else if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP && is_multi) {
         // Swap: pick the GPU agent, same as DmaCopy does.
         // Multi-entry swap has no single dst_agent, use dst_agent_list[0].
@@ -1914,6 +1924,49 @@ hsa_status_t HSA_API hsa_amd_svm_discard_batch_async(void** ptrs, size_t* sizes,
 hsa_status_t hsa_amd_enable_logging(uint8_t* flags, void *file) {
   TRY;
   return core::Runtime::runtime_singleton_->EnableLogging(flags, file);
+  CATCH;
+}
+
+hsa_status_t hsa_amd_external_semaphore_handle_open(
+    hsa_agent_t agent,
+    const hsa_amd_external_semaphore_handle_descriptor_t *desc,
+    hsa_amd_external_semaphore_t *out_sem) {
+  TRY;
+  IS_OPEN();
+  if (desc == nullptr || out_sem == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  const core::Agent *core_agent = core::Agent::Convert(agent);
+  if (core_agent == NULL || !core_agent->IsValid() ||
+      core_agent->device_type() != core::Agent::kAmdGpuDevice)
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+
+  // The descriptor union has separate active members per handle type
+  // (win32_handle for OPAQUE_WIN32 / OPAQUE_WIN32_KMT, fd for OPAQUE_FD).
+  // Only the Win32 NT-handle path is wired through the driver today, so
+  // reject other types up front: reading an inactive union member is
+  // undefined behaviour in C++.
+  if (desc->type != HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32 &&
+      desc->type != HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_KMT) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  return core_agent->driver().ImportExternalSemaphore(
+      core_agent->node_id(), desc->handle.win32_handle, desc->type, out_sem);
+  CATCH;
+}
+
+hsa_status_t hsa_amd_external_semaphore_handle_close(
+    hsa_amd_external_semaphore_t sem) {
+  TRY;
+  IS_OPEN();
+
+  // No agent on the close API; iterate drivers. The base Destroy
+  // returns INVALID_AGENT ("not my handle"); first owner wins.
+  for (auto& driver : core::Runtime::runtime_singleton_->AgentDrivers()) {
+    hsa_status_t s = driver->DestroyExternalSemaphore(sem);
+    if (s != HSA_STATUS_ERROR_INVALID_AGENT) return s;
+  }
+  return HSA_STATUS_ERROR_INVALID_AGENT;
   CATCH;
 }
 

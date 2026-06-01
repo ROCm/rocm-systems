@@ -271,14 +271,18 @@ ncclResult_t ncclGetUserP2pLevel(int* level) {
   return ncclSuccess;
 }
 
+// Tests two ranks for CUDA P2P connectivity.
+// *cudaP2p returns 1 if CUDA P2P between the ranks is supported.
+// *p2p returns 1 only if the distance between the ranks is no greater than NCCL_P2P_LEVEL.  The connection may go through an intermediate rank.
 ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* system, int rank1, int rank2,
-                              int* p2p, int *read, int* intermediateRank) {
+                              int* p2p, int *read, int* intermediateRank, int* cudaP2p) {
   int mnnvl = 0;
   struct ncclPeerInfo* info1 = NULL;
   struct ncclPeerInfo* info2 = NULL;
   *p2p = 0;
   if (read) *read = 0;
   if (intermediateRank) *intermediateRank = -1;
+  if (cudaP2p) *cudaP2p = 0;
 
   // Rule out different nodes / isolated containers
   if (comm) {
@@ -287,8 +291,10 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
     if (info1->hostHash != info2->hostHash) {
       if (comm->MNNVL) {
         NCCLCHECK(ncclTopoCheckMNNVL(comm->topo, info1, info2, &mnnvl));
+        TRACE(NCCL_GRAPH, "ncclTopoCheckP2p rank%d->rank%d: cross-node, MNNVL=%d mnnvl=%d", rank1, rank2, comm->MNNVL, mnnvl);
         if (!mnnvl) return ncclSuccess;
       } else {
+        TRACE(NCCL_GRAPH, "ncclTopoCheckP2p rank%d->rank%d: cross-node, comm->MNNVL=0, returning p2p=0", rank1, rank2);
         return ncclSuccess;
       }
     } else if (info1->shmDev != info2->shmDev) {
@@ -302,6 +308,13 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
   struct ncclTopoNode* gpu1 = system->nodes[GPU].nodes+g1;
   if (ncclTopoRankToIndex(system, rank2, &g2, /*showWarn=*/false) == ncclInternalError) {
     // GPU not found, we can't use p2p.
+    // For MNNVL cross-node pairs, rank2 may live on a remote node and never be added to the local
+    // system topology — this is expected. Warn only if MNNVL is enabled so operators can diagnose
+    // cases where a clique peer is unexpectedly absent.
+    if (comm && comm->MNNVL)
+      WARN("ncclTopoCheckP2p rank%d->rank%d: rank%d not in local topology (MNNVL active), returning p2p=0", rank1, rank2, rank2);
+    else
+      TRACE(NCCL_GRAPH, "ncclTopoCheckP2p rank%d->rank%d: rank2 not in topology, returning p2p=0", rank1, rank2);
     return ncclSuccess;
   }
   #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
@@ -337,14 +350,13 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
   }
 
   // Compute the PCI distance and compare with the p2pLevel.
-  if (path->type <= p2pLevel) *p2p = 1;
+  // For MNNVL clique peers (IFoE cross-node), no topology edge exists between the merged GPUs,
+  // so path->type is PATH_DIS. Treat them as PATH_NVL — fabric memory handles provide direct access.
+  if (mnnvl || path->type <= p2pLevel) *p2p = 1;
 
 #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
   if (*p2p == 1) {
-    // NCCL_IGNORE_DISABLED_P2P=2 is used by unit tests that don't want to
-    // validate against NVML at all since they are pretending to be on other hw.
-    if (g1 != g2 && (comm == NULL || (info1->hostHash == comm->peerInfo[comm->rank].hostHash &&
-                                      info1->hostHash == info2->hostHash)) && ncclParamIgnoreDisabledP2p() != 2) {
+    if (checkNvml) {
       int indexes[3] = {-1,-1,-1};
       int verticeN = 0;
       NCCLCHECK(ncclNvmlEnsureInitialized());
@@ -380,6 +392,26 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
     // Enable P2P Read for Ampere/NVLink only
     if (read && (gpu1->gpu.cudaCompCap == gpu2->gpu.cudaCompCap) && (gpu1->gpu.cudaCompCap == 80)) *read = 1;
   }
+
+#if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
+  if (cudaP2p) {
+    if (checkNvml) {
+      int n1, n2;
+      n1 = system->nodes[GPU].nodes[g1].gpu.dev;
+      n2 = system->nodes[GPU].nodes[g2].gpu.dev;
+      *cudaP2p = (ncclNvmlDevicePairs[n1][n2].p2pStatusRead == NVML_P2P_STATUS_OK &&
+                  ncclNvmlDevicePairs[n1][n2].p2pStatusWrite == NVML_P2P_STATUS_OK);
+    } else {
+      // We assume P2P connectivity in case the ranks are connected using MNNVL or are on the same host.
+      *cudaP2p = (mnnvl || comm == NULL || info1->hostHash == info2->hostHash);
+    }
+  }
+#else
+  if (cudaP2p) {
+    // On AMD/HIP, assume P2P connectivity based on MNNVL or same host
+    *cudaP2p = (mnnvl || comm == NULL || info1->hostHash == info2->hostHash);
+  }
+#endif
 
   return ncclSuccess;
 }
@@ -571,13 +603,21 @@ ncclResult_t ncclTopoCheckNet(struct ncclTopoSystem* system, int rank1, int rank
   struct ncclTopoNode* gpu2 = system->nodes[GPU].nodes+g2;
   float speed = gpu1->paths[GPU][g2].bw;
 
-  // Now check the speed each GPU can access the network through PXB or better
+  // Now check the speed each GPU can access the network through PXB or better.
+  // For MNNVL cross-node pairs, the remote GPU has no local NICs so paths[NET] is NULL
+  // and its netSpeed stays 0. Since both GPUs must beat the GPU-GPU speed for NET to win,
+  // a zero netSpeed on either side means MNNVL P2P is preferred over RDMA for that pair.
+  // NET remains a valid fallback when both GPUs have local NICs and sufficient bandwidth.
   float netSpeed1 = 0, netSpeed2 = 0;
   for (int n=0; n<system->nodes[NET].count; n++) {
-    struct ncclTopoLinkList* path = gpu1->paths[NET]+n;
-    if (path->type <= PATH_PXB && path->bw > netSpeed1) netSpeed1 = path->bw;
-    path = gpu2->paths[NET]+n;
-    if (path->type <= PATH_PXB && path->bw > netSpeed2) netSpeed2 = path->bw;
+    if (gpu1->paths[NET] != NULL) {
+      struct ncclTopoLinkList* path = gpu1->paths[NET]+n;
+      if (path->type <= PATH_PXB && path->bw > netSpeed1) netSpeed1 = path->bw;
+    }
+    if (gpu2->paths[NET] != NULL) {
+      struct ncclTopoLinkList* path = gpu2->paths[NET]+n;
+      if (path->type <= PATH_PXB && path->bw > netSpeed2) netSpeed2 = path->bw;
+    }
   }
 
   if (netSpeed1 > speed && netSpeed2 > speed) return ncclSuccess;
@@ -591,6 +631,8 @@ ncclResult_t ncclTopoGetIntermediateRank(struct ncclTopoSystem* system, int rank
   NCCLCHECK(ncclTopoIdToIndex(system, NET, netId, &n));
   NCCLCHECK(ncclTopoRankToIndex(system, rank, &g, /*showWarn=*/true));
   struct ncclTopoNode* gpu = system->nodes[GPU].nodes+g;
+  // Remote GPUs (MNNVL) have no NET paths allocated; they have no local NICs so no intermediate rank
+  if (gpu->paths[NET] == NULL) { *intermediateRank = -1; return ncclSuccess; }
   struct ncclTopoLinkList* path = gpu->paths[NET]+n;
   if (path->type == PATH_PXN) {
     struct ncclTopoNode* node;
@@ -632,7 +674,7 @@ ncclResult_t ncclTopoGetPxnRanks(struct ncclComm* comm, int** intermediateRanks,
   struct ncclTopoSystem* system = comm->topo;
   *nranks = 0;
   *intermediateRanks = NULL;
-  if (system->nodes[NET].count == 0) return ncclSuccess;
+  if (system->inter == 0) return ncclSuccess;
 
   int nr = 0;
   int* ranks = NULL;
@@ -715,7 +757,7 @@ ncclResult_t ncclTopoComputePaths(struct ncclTopoSystem* system, struct ncclComm
     for (int p=0; p<system->nodes[GPU].count; p++) {
       int p2p;
       NCCLCHECK(ncclTopoCheckP2p(comm, system, system->nodes[GPU].nodes[p].gpu.rank,
-                                 system->nodes[GPU].nodes[g].gpu.rank, &p2p, NULL, NULL));
+                                 system->nodes[GPU].nodes[g].gpu.rank, &p2p, NULL, NULL, NULL));
       if (p2p == 0) {
         // Divert all traffic through the CPU
         int cpu;
@@ -751,8 +793,12 @@ ncclResult_t ncclTopoComputePaths(struct ncclTopoSystem* system, struct ncclComm
       NCCLCHECK(ncclGetLocalCpu(system, g, &c));
       if (c == -1) continue;
       if (mergePathType(gpuNode->paths[CPU][c].type, netNode->paths[CPU][c].type) == PATH_P2C) {
-        gpuNode->paths[NET][n].type = std::min(PATH_P2C, gpuNode->paths[NET][n].type);
-        netNode->paths[GPU][g].type = std::min(PATH_P2C, netNode->paths[GPU][g].type);
+        // Skip MNNVL remote GPUs: paths[NET]==NULL means no physical NIC path on this node.
+        // Local GPUs always have paths[NET] allocated by ncclTopoSetPaths BFS.
+        if (gpuNode->paths[NET] != NULL) {
+          gpuNode->paths[NET][n].type = std::min(PATH_P2C, gpuNode->paths[NET][n].type);
+          netNode->paths[GPU][g].type = std::min(PATH_P2C, netNode->paths[GPU][g].type);
+        }
       }
     }
   }
@@ -792,7 +838,9 @@ ncclResult_t ncclTopoComputePaths(struct ncclTopoSystem* system, struct ncclComm
           struct ncclTopoNode* peerNode = system->nodes[GPU].nodes+localGpuIndex;
           // Only use PXN for NIC n if remote GPU p ...
           int pxnType = ncclParamPxnC2c() ? PATH_P2C : PATH_PXB;
-          if (/* (1) is connected to the NIC with PxN type*/
+          if (/* null paths[NET] means PATH_DIS — NIC unreachable, skip PXN */
+              peerNode->paths[NET] != NULL && gpu->paths[NET] != NULL &&
+              /* (1) is connected to the NIC with PxN type*/
               peerNode->paths[NET][n].type <= pxnType &&
               /* and (2) is connected to us through NVLink */
               peerNode->paths[GPU][g].type <= PATH_NVL &&
@@ -806,7 +854,7 @@ ncclResult_t ncclTopoComputePaths(struct ncclTopoSystem* system, struct ncclComm
             NCCLCHECK(addInterStep(system, GPU, localGpuIndex, GPU, g, NET, n));
         }
       }
-      if (gpu->paths[NET][n].type < PATH_PHB) {
+      if (gpu->paths[NET] != NULL && gpu->paths[NET][n].type < PATH_PHB) {
         // Update path when we dont want to / can't use GPU Direct RDMA.
         enum ncclTopoGdrMode gdr;
         NCCLCHECK(ncclTopoCheckGdr(system, system->nodes[GPU].nodes[g].gpu.rank, netNode->id, 0, &gdr));
@@ -842,16 +890,44 @@ ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* 
   bool allXgmi = true;
   NCCLCHECK(ncclCalloc(&domains, system->nodes[GPU].count));
   NCCLCHECKGOTO(ncclCalloc(&ids, system->nodes[GPU].count), ret, fail);
-  for (int g=0; g<system->nodes[GPU].count; g++) {
-    struct ncclTopoNode* gpu = system->nodes[GPU].nodes+g;
-    domains[g] = g;
-    ids[g] = gpu->id;
-    for (int p=0; p<g; p++) {
-      if (gpu->paths[GPU][p].type < PATH_NET) {
-        domains[g] = std::min(domains[g], domains[p]);
-      }
+
+  // TODO: Remove sameCliqueP2p once cross-node MNNVL pairs get PATH_NVL via the topology fix
+  // (ncclTopoAddMNNVLXmlLinks). At that point paths[GPU][p].type < PATH_NET is naturally true
+  // for clique peers and this block becomes redundant.
+  {
+    if (comm->MNNVL && comm->peerInfo != NULL) {
+      INFO(NCCL_GRAPH, "ncclTopoTrimSystem: MNNVL enabled, checking clique membership for %d ranks (cliqueSize %d)", comm->nRanks, comm->clique.size);
     }
-    if (gpu->gpu.rank == comm->rank) myDomain = domains[g];
+
+    for (int g=0; g<system->nodes[GPU].count; g++) {
+      struct ncclTopoNode* gpu = system->nodes[GPU].nodes+g;
+      domains[g] = g;
+      ids[g] = gpu->id;
+      for (int p=0; p<g; p++) {
+        bool sameCliqueP2p = false;
+        // MNNVL clique peers have no topology path (PATH_DIS) but are reachable via IFoE fabric.
+        // Treat them as same domain so they are not trimmed from the topology.
+        if (comm->MNNVL && comm->peerInfo != NULL) {
+          struct ncclTopoNode* peerGpu = system->nodes[GPU].nodes+p;
+          // Use rank as direct index into peerInfo — avoids busId key collisions across nodes
+          // where two hosts can have GPUs at the same PCI bus address.
+          int rank1 = gpu->gpu.rank, rank2 = peerGpu->gpu.rank;
+          if (rank1 >= 0 && rank1 < comm->nRanks && rank2 >= 0 && rank2 < comm->nRanks) {
+            int mnnvl = 0;
+            NCCLCHECKGOTO(ncclTopoCheckMNNVL(system, &comm->peerInfo[rank1], &comm->peerInfo[rank2], &mnnvl), ret, fail);
+            if (mnnvl) {
+              sameCliqueP2p = true;
+              TRACE(NCCL_GRAPH, "ncclTopoTrimSystem: GPU %lx and GPU %lx are MNNVL clique peers, merging into domain %d",
+                    NCCL_TOPO_ID_LOCAL_ID(gpu->id), NCCL_TOPO_ID_LOCAL_ID(peerGpu->id), std::min(domains[g], domains[p]));
+            }
+          }
+        }
+        if (sameCliqueP2p || gpu->paths[GPU][p].type < PATH_NET) {
+          domains[g] = std::min(domains[g], domains[p]);
+        }
+      }
+      if (gpu->gpu.rank == comm->rank) myDomain = domains[g];
+    }
   }
 
   for (int i=0; i<ngpus; i++) {
@@ -906,6 +982,8 @@ ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* 
   if (allXgmi) system->type |= RCCL_TOPO_XGMI_ALL;
   for (int g = 0; g < system->nodes[GPU].count; g++) {
     int64_t netId;
+    // Skip remote GPUs (MNNVL): paths[NET] is null, they have no local NICs on this node
+    if (system->nodes[GPU].nodes[g].paths[NET] == NULL) continue;
     NCCLCHECKGOTO(ncclTopoGetLocalNet(system, system->nodes[GPU].nodes[g].gpu.rank, 0, &netId, nullptr), ret, fail);
     NCCLCHECKGOTO(ncclTopoCheckGdr(system, system->nodes[GPU].nodes[g].gpu.rank, netId, 1, &useGdr), ret, fail);
     if (!useGdr) break;
@@ -926,6 +1004,7 @@ ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* 
     for (int n=system->nodes[NET].count-1; n>=0; n--)
       NCCLCHECKGOTO(ncclTopoRemoveNode(system, NET, n), ret, fail);
   }
+  system->inter = system->nodes[GPU].count == comm->nRanks ? 0 : 1;
 exit:
   free(domains);
   if (ids) free(ids);
@@ -953,11 +1032,31 @@ static ncclResult_t ncclTopoGetNchannels(struct ncclComm* comm, int g /*local gp
     path = system->nodes[GPU].nodes[peer].paths[GPU]+g;
     if (path->type == PATH_NVL) {
       float nvlBw = ncclTopoXGMISpeed(system->nodes[GPU].nodes[g].gpu.gcn);
-      *nChannels = ((IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx942") || IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) ? 4 : 2)*std::max(1, (int)(path->bw / nvlBw));
+      *nChannels = ((IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx942") ||
+                     IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx950") ||
+                     IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx1250")) ? 4 : 2) * std::max(1, (int)(path->bw / nvlBw));
     } else {
       *nChannels = 2;
     }
   } else {
+    // Remote rank — check for MNNVL fabric peer before falling back to NIC channel math.
+    // MNNVL cross-node peers are not in the local topology so RankToIndex fails, but their
+    // effective bandwidth matches intra-node XGMI; use the same formula as PATH_NVL.
+    if (comm && comm->MNNVL) {
+      bool isMnnvlPeer = false;
+      for (int ci = 0; ci < comm->clique.size; ci++) {
+        if (comm->clique.ranks[ci] == peerRank) { isMnnvlPeer = true; break; }
+      }
+      if (isMnnvlPeer) {
+        float nvlBw = ncclTopoXGMISpeed(system->nodes[GPU].nodes[g].gpu.gcn);
+        *nChannels = ((IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx942") ||
+                       IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx950") ||
+                       IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx1250")) ? 4 : 2);
+        // MNNVL fabric runs at one XGMI link width per direction; no bw multiplier here.
+        (void)nvlBw;
+        return ncclSuccess;
+      }
+    }
     // Remote rank, use network
     int nNetChannels = comm->config.nChannelsPerNetPeer;
     if (nNetChannels == NCCL_CONFIG_UNDEF_INT) {
@@ -980,6 +1079,9 @@ static ncclResult_t ncclTopoGetNchannels(struct ncclComm* comm, int g /*local gp
 
 NCCL_PARAM(MinP2pNChannels, "MIN_P2P_NCHANNELS", 1);
 NCCL_PARAM(MaxP2pNChannels, "MAX_P2P_NCHANNELS", MAXCHANNELS);
+// When enabled, caps p2pnChannels to 16 on gfx950 (MI350) for large-scale jobs
+// (nNodes >= 16) to reduce P2P CU usage. Disabled by default.
+NCCL_PARAM(P2pCuReduceScaleEnable, "P2P_CU_REDUCE_SCALE_ENABLE", 0);
 extern int64_t ncclParamWorkArgsBytes();
 
 ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
@@ -1016,13 +1118,18 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     // Round to next pow2 nChannelsPerPeer and nChannels
     comm->p2pnChannelsPerPeer = pow2Up(minChannels);
     // Doubling P2P channels per peer on single node
-    if (comm->topo->nodes[GPU].count == comm->topo->nRanks && (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") || IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950"))) comm->p2pnChannelsPerPeer *= 2;
+    if (comm->topo->nodes[GPU].count == comm->topo->nRanks &&
+        (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") ||
+         IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") ||
+         IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250"))) comm->p2pnChannelsPerPeer *= 2;
     comm->p2pnChannels = std::min(pow2Up(comm->p2pnChannels), 4*CHANNEL_LIMIT);
     // p2pnChannelsPerPeer cannot be greater than MAXCHANNELS
     // Capping the comm->p2pnChannels to 32 for send/recv based collectives on multi-node MI350 (2 and 4 nodes)
     if (((comm->nNodes == 2 && comm->topo->nRanks == 16) || (comm->nNodes == 4 && comm->topo->nRanks == 32)) && (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950"))) comm->p2pnChannels = std::min(comm->p2pnChannels, 32);
     // Capping the comm->p2pnChannels to 16 for send/recv based collectives with half-subscription (4 GPUs per node) multi-node MI350 (2 and 4 nodes)
     if (((comm->nNodes == 2 && comm->topo->nRanks == 8) || (comm->nNodes == 4 && comm->topo->nRanks == 16)) && (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950"))) comm->p2pnChannels = std::min(comm->p2pnChannels, 16);
+    // Opt-in P2P CU reduction on gfx950 (MI350) at scale: cap p2pnChannels to 16 when nNodes >= 16
+    if (ncclParamP2pCuReduceScaleEnable() && comm->nNodes >= 16 && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) comm->p2pnChannels = std::min(comm->p2pnChannels, 16);
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, MAXCHANNELS);
   }
 

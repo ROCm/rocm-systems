@@ -1,5 +1,6 @@
 """E2E: `perfxpert-code --version` produces AMD-branded output."""
 
+from importlib.metadata import version
 import subprocess
 
 
@@ -36,3 +37,4 @@ def test_version_has_version_number():
     )
     # something like "AMD ROCm PerfXpert 0.2.0 (opencode wrapper)"
     assert re.search(r"\d+\.\d+\.\d+", result.stdout)
+    assert version("perfxpert") in result.stdout

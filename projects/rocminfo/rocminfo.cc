@@ -195,6 +195,7 @@ static const uint32_t kIndentSize = 2;
 
 static bool wsl_env = false;
 static bool dtif_env = false;
+static bool model_env = false;
 
 enum rocmi_int_format {
   ROCMI_INT_FORMAT_DEC = 1,
@@ -239,6 +240,15 @@ static void DetectWSLEnvironment() {
     fclose(file);
     wsl_env = true;
   }
+}
+
+static void DetectModelEnvironment() {
+  char *var = getenv("HSA_MODEL_TOPOLOGY");
+  if (var == NULL)
+    return;
+
+  printf("Model: environment detected with topology path: %s\n", var);
+  model_env = true;
 }
 
 static void DetectDTIFEnvironment() {
@@ -1316,8 +1326,9 @@ int main() {
 
   DetectWSLEnvironment();
   DetectDTIFEnvironment();
+  DetectModelEnvironment();
 
-  if (!(wsl_env || dtif_env) && CheckInitialState()) {
+  if (!(wsl_env || dtif_env || model_env) && CheckInitialState()) {
     return 1;
   }
   err = hsa_init();
