@@ -23,16 +23,6 @@ rocprofiler-sdk:
             - gfx90a
           expression: 
             400*reduce(SQ_WAIT_INST_LDS,sum)/reduce(SQ_WAVES,sum)/reduce(GRBM_GUI_ACTIVE,max)
-    - name: ActiveWGPs
-      description: 'Active WGPs - average number of active WGPs per SQG cycle.'
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-            - gfx1153
-          expression: reduce(accumulate(SQG_LEVEL_WGP_ACTIVE,HIGH_RES),sum)/reduce(SQG_CYCLES,sum)
     - name: AggSysCycles
       description: 'Unit: cycles'
       properties: []
@@ -3399,18 +3389,6 @@ rocprofiler-sdk:
             - gfx1153
           block: SQG
           event: 24
-    - name: SQG_LEVEL_WGP_ACTIVE
-      description: Number of active WGPs observed by SQG. Best used with accumulate() functions as 
-        part of a derived counter (per shader engine). SQG_PERF_SEL_LEVEL_WGP_ACTIVE.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-            - gfx1153
-          block: SQG
-          event: 45
     - name: SQG_MSG
       description: Number of S_SENDMSG instructions issued by waves observed by SQG (per shader 
         engine). SQG_PERF_SEL_MSG.
