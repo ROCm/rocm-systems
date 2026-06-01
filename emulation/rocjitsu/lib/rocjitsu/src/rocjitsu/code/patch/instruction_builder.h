@@ -20,6 +20,8 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
+#include <optional>
 
 #include "rocjitsu/code/rj_code.h"
 
@@ -57,6 +59,38 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
 /// @brief Scalar source operand encoding for a non-negative inline integer.
 [[nodiscard]] inline constexpr uint16_t scalar_positive_inline_u32(uint16_t value) {
   return static_cast<uint16_t>(kScalarPositiveInlineBase + value);
+}
+
+/// @brief Compute the SOPP simm16 dword field for a branch from @p branch_pc
+///        to @p target under SOPP semantics: target = branch_pc + 4 + simm16*4.
+///
+/// Returns std::nullopt if the delta is not dword-aligned, if it does not fit
+/// in a signed 16-bit dword field, or if @p branch_pc / @p target are large
+/// enough that the signed int64 intermediate would overflow.
+///
+/// Shared by DBT cave-entry/return branches and the DBI relocation trampoline
+/// so both paths fail closed on the same range.
+[[nodiscard]] inline constexpr std::optional<int16_t>
+compute_sopp_branch_simm16(uint64_t branch_pc, uint64_t target) {
+  constexpr int64_t kBranchPcBiasBytes = static_cast<int64_t>(sizeof(uint32_t));
+  constexpr uint64_t kMaxSignedTarget =
+      static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
+  constexpr uint64_t kMaxSignedBranchPc =
+      static_cast<uint64_t>(std::numeric_limits<int64_t>::max() - kBranchPcBiasBytes);
+  if (branch_pc > kMaxSignedBranchPc || target > kMaxSignedTarget)
+    return std::nullopt;
+
+  const int64_t delta_bytes =
+      static_cast<int64_t>(target) - (static_cast<int64_t>(branch_pc) + kBranchPcBiasBytes);
+  if (delta_bytes % static_cast<int64_t>(sizeof(uint32_t)) != 0)
+    return std::nullopt;
+
+  const int64_t delta_dwords = delta_bytes / static_cast<int64_t>(sizeof(uint32_t));
+  if (delta_dwords < std::numeric_limits<int16_t>::min() ||
+      delta_dwords > std::numeric_limits<int16_t>::max())
+    return std::nullopt;
+
+  return static_cast<int16_t>(delta_dwords);
 }
 
 /// @brief Get the s_branch opcode for a target ISA.
