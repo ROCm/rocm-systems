@@ -1032,7 +1032,7 @@ class Runtime {
     int ref_count;
     int use_count;
     DriverMemoryHandle driver_handle;  // handle returned by Driver::Allocate(NoAddress = 1)
-    bool imported; /* True is this BO was imported from another process */
+    bool imported; // True if this BO was imported from another process
     bool is_fabric_handle;
     MemoryRegion::AllocateFlags alloc_flag;
   };

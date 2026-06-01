@@ -817,14 +817,14 @@ hsa_status_t XdnaDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
 }
 
 hsa_status_t XdnaDriver::ExportMemoryHandle(const core::Agent& agent, const core::DriverMemoryHandle& handle,
-                                            core::ShareableHandleType type, uint32_t flags,
+                                            core::ShareType type, uint32_t flags,
                                             void* export_handle) {
   (void)agent;
   (void)flags;
   if (export_handle == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   switch (type) {
-  case core::ShareableHandleType::DMABUF_FD: {
+  case core::ShareType::DMABUF_FD: {
     auto bo_handle = FindBOHandle(const_cast<void*>(reinterpret_cast<const void*>(&handle)));
     if (!bo_handle.IsValid()) {
       return HSA_STATUS_ERROR_INVALID_ALLOCATION;
@@ -842,7 +842,7 @@ hsa_status_t XdnaDriver::ExportMemoryHandle(const core::Agent& agent, const core
     *static_cast<int*>(export_handle) = export_params.fd;
     return HSA_STATUS_SUCCESS;
   }
-  case core::ShareableHandleType::FABRIC_HANDLE:
+  case core::ShareType::FABRIC_HANDLE:
     return HSA_STATUS_ERROR;
   default:
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -850,7 +850,7 @@ hsa_status_t XdnaDriver::ExportMemoryHandle(const core::Agent& agent, const core
 }
 
 hsa_status_t XdnaDriver::ImportMemoryHandle(const core::Agent& agent, core::DriverMemoryHandle* handle,
-                                            core::ShareableHandleType type, void* import_handle,
+                                            core::ShareType type, void* import_handle,
                                             void* mem) {
   (void)agent;
   (void)mem;
@@ -858,7 +858,7 @@ hsa_status_t XdnaDriver::ImportMemoryHandle(const core::Agent& agent, core::Driv
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   switch (type) {
-  case core::ShareableHandleType::DMABUF_FD: {
+  case core::ShareType::DMABUF_FD: {
     const int dmabuf_fd = *static_cast<int*>(import_handle);
 
     drm_prime_handle import_params = {};
@@ -873,19 +873,19 @@ hsa_status_t XdnaDriver::ImportMemoryHandle(const core::Agent& agent, core::Driv
     handle->size = lseek(dmabuf_fd, 0, SEEK_END);
     return HSA_STATUS_SUCCESS;
   }
-  case core::ShareableHandleType::FABRIC_HANDLE:
+  case core::ShareType::FABRIC_HANDLE:
     return HSA_STATUS_ERROR;
   default:
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 }
 
-hsa_status_t XdnaDriver::DestroyImportedShareableHandle(core::DriverMemoryHandle* handle) {
+hsa_status_t XdnaDriver::DestroyImportedMemoryHandle(core::DriverMemoryHandle* handle) {
   // Nothing to do for XDNA since we have a single, non-ref counted handle.
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t XdnaDriver::Map(core::DriverMemoryHandle handle, void *mem,
+hsa_status_t XdnaDriver::Map(const core::DriverMemoryHandle& handle, void *mem,
                              size_t offset, size_t size,
                              hsa_access_permission_t perms) {
   // Get fd associated with the handle.
@@ -908,7 +908,7 @@ hsa_status_t XdnaDriver::Map(core::DriverMemoryHandle handle, void *mem,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t XdnaDriver::Unmap(core::DriverMemoryHandle handle, void *mem,
+hsa_status_t XdnaDriver::Unmap(const core::DriverMemoryHandle& handle, void *mem,
                                size_t offset, size_t size) {
   if (munmap(mem, size) != 0) {
     return HSA_STATUS_ERROR;
@@ -961,7 +961,7 @@ hsa_status_t XdnaDriver::CreateShareableHandle(void* va, void* mem, size_t size,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t XdnaDriver::DestroyShareableHandle(core::DriverMemoryHandle* handle) {
+hsa_status_t XdnaDriver::DestroyMemoryHandle(core::DriverMemoryHandle* handle) {
   drm_gem_close close_params = {};
   close_params.handle = handle->handle;
   hsa_status_t err = xdna_ioctl(fd_, DRM_IOCTL_GEM_CLOSE, &close_params);

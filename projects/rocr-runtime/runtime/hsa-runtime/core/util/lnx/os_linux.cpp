@@ -880,9 +880,9 @@ bool MapMemory(void* va, size_t size, MemProt perms, int fd, uint64_t cpu_addr) 
   return true;
 }
 
-bool DmaBufClose(int dmabuf) {
-  if (dmabuf < 0) return true;
-  return ::close(dmabuf) == 0;
+hsa_status_t DmaBufClose(int dmabuf) {
+  if (dmabuf < 0) return HSA_STATUS_SUCCESS;
+  return ::close(dmabuf) == 0 ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_RESOURCE_FREE;
 }
 
 void* ReserveMemory(void* start, size_t size, size_t alignment, MemProt prot) {

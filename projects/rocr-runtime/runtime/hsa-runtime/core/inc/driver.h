@@ -78,13 +78,18 @@ struct DriverMemoryHandle {
 
   bool IsValid() const { return handle != 0; }
 
-  bool operator()(const DriverMemoryHandle& a, const DriverMemoryHandle& b) const {
-    return a.handle > b.handle;
-  }
+  bool operator<(const DriverMemoryHandle& b) const { return handle < b.handle; }
+  bool operator==(const DriverMemoryHandle& b) const { return handle == b.handle; }
 };
 
-enum ShareableHandleType {
+/// @brief Format of a shareable memory handle for export and import.
+///
+/// Selects how @ref ExportMemoryHandle and @ref ImportMemoryHandle encode the
+/// external reference to a driver memory allocation.
+enum ShareType {
+  /// @brief POSIX file descriptor for a DMA-BUF object (local or same-machine sharing).
   DMABUF_FD,
+  /// @brief Globally unique fabric handle for multi-node / cross-domain sharing.
   FABRIC_HANDLE,
 };
 
@@ -211,37 +216,37 @@ public:
   virtual hsa_status_t AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
                                      uint32_t* first_gws) const = 0;
 
-  /// @brief Exports a memory object as a shareable handle.
+  /// @brief Exports a memory object.
   ///
   /// @param[in] agent agent that owns the memory
   /// @param[in] handle driver memory handle to export
-  /// @param[in] type shareable handle type to export
+  /// @param[in] type @ref ShareType to export
   /// @param[in] flags reserved for future use
   /// @param[out] export_handle output handle; @p int* for @p DMABUF_FD,
   ///             @p hsa_fabric_handle_t* for @p FABRIC_HANDLE
   virtual hsa_status_t ExportMemoryHandle(const core::Agent& agent, const DriverMemoryHandle& handle,
-                                          ShareableHandleType type, uint32_t flags,
+                                          ShareType type, uint32_t flags,
                                           void* export_handle) = 0;
 
   /// @brief Imports a memory object from a shareable handle.
   ///
-  /// @note The handle must be destroyed with @ref DestroyImportedShareableHandle.
+  /// @note The handle must be destroyed with @ref DestroyImportedMemoryHandle.
   ///
   /// @param[in] agent agent to import the memory for
   /// @param[out] handle handle to the imported memory; @p handle->size is set to the
   ///             imported allocation size in bytes
-  /// @param[in] type shareable handle type to import
+  /// @param[in] type @ref ShareType to import
   /// @param[in] import_handle input handle; @p int* for @p DMABUF_FD,
   ///             @p hsa_fabric_handle_t* for @p FABRIC_HANDLE
   /// @param[in] mem address of existing buffer, used to bypass import
   virtual hsa_status_t ImportMemoryHandle(const core::Agent& agent, DriverMemoryHandle* handle,
-                                          ShareableHandleType type, void* import_handle,
+                                          ShareType type, void* import_handle,
                                           void* mem = nullptr) = 0;
 
   /// @brief Destroys the handle created during @ref ImportMemoryHandle.
   ///
   /// @param[in] handle handle of the object to release
-  virtual hsa_status_t DestroyImportedShareableHandle(core::DriverMemoryHandle* handle) = 0;
+  virtual hsa_status_t DestroyImportedMemoryHandle(core::DriverMemoryHandle* handle) = 0;
 
   /// @brief Maps the memory associated with the handle.
   ///
@@ -250,7 +255,7 @@ public:
   /// @param[in] offset memory offset in bytes
   /// @param[in] size memory size in bytes
   /// @param[out] perms new permissions
-  virtual hsa_status_t Map(core::DriverMemoryHandle handle, void *mem,
+  virtual hsa_status_t Map(const core::DriverMemoryHandle& handle, void *mem,
                            size_t offset, size_t size,
                            hsa_access_permission_t perms) = 0;
 
@@ -260,13 +265,13 @@ public:
   /// @param[in] mem virtual address associated with the handle
   /// @param[in] offset memory offset in bytes
   /// @param[in] size memory size in bytes
-  virtual hsa_status_t Unmap(core::DriverMemoryHandle handle, void *mem,
+  virtual hsa_status_t Unmap(const core::DriverMemoryHandle& handle, void *mem,
                              size_t offset, size_t size) = 0;
 
   /// @brief Maps the virtual address to the physical address and creates a handle to share this
   /// mapping.
   ///
-  /// @note The handle must be destroyed with @ref DestroyShareableHandle.
+  /// @note The handle must be destroyed with @ref DestroyMemoryHandle.
   ///
   /// @param[in] va virtual address
   /// @param[in] mem physical memory handle
@@ -282,7 +287,7 @@ public:
   /// @brief Destroys the handle created during @ref CreateShareableHandle.
   ///
   /// @param[in] handle handle of the object to destroy
-  virtual hsa_status_t DestroyShareableHandle(core::DriverMemoryHandle* handle) = 0;
+  virtual hsa_status_t DestroyMemoryHandle(core::DriverMemoryHandle* handle) = 0;
 
   /// @brief Acquire a streaming performance monitor on an agent.
   /// @param[in] preferred_node_id Node ID of the preferred agent.

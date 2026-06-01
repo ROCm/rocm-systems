@@ -468,14 +468,14 @@ hsa_status_t KfdVirtioDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_G
 }
 
 hsa_status_t KfdVirtioDriver::ExportMemoryHandle(const core::Agent& agent, const core::DriverMemoryHandle& handle,
-                                                 core::ShareableHandleType type, uint32_t flags,
+                                                 core::ShareType type, uint32_t flags,
                                                  void* export_handle) {
   (void)agent;
   (void)flags;
   if (export_handle == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   switch (type) {
-  case core::ShareableHandleType::DMABUF_FD: {
+  case core::ShareType::DMABUF_FD: {
     int dmabuf_fd_res = -1;
     size_t offset_res = 0;
     HSAKMT_STATUS status =
@@ -491,7 +491,7 @@ hsa_status_t KfdVirtioDriver::ExportMemoryHandle(const core::Agent& agent, const
     *static_cast<int*>(export_handle) = dmabuf_fd_res;
     return HSA_STATUS_SUCCESS;
   }
-  case core::ShareableHandleType::FABRIC_HANDLE:
+  case core::ShareType::FABRIC_HANDLE:
     return HSA_STATUS_ERROR;
   default:
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -499,14 +499,14 @@ hsa_status_t KfdVirtioDriver::ExportMemoryHandle(const core::Agent& agent, const
 }
 
 hsa_status_t KfdVirtioDriver::ImportMemoryHandle(const core::Agent& agent, core::DriverMemoryHandle* handle,
-                                                 core::ShareableHandleType type, void* import_handle,
+                                                 core::ShareType type, void* import_handle,
                                                  void* mem) {
   (void)mem;
   if (handle == nullptr || import_handle == nullptr)
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   switch (type) {
-  case core::ShareableHandleType::DMABUF_FD: {
+  case core::ShareType::DMABUF_FD: {
     const int dmabuf_fd = *static_cast<int*>(import_handle);
     const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
     amdgpu_bo_import_result res;
@@ -519,19 +519,19 @@ hsa_status_t KfdVirtioDriver::ImportMemoryHandle(const core::Agent& agent, core:
     handle->size = res.alloc_size;
     return HSA_STATUS_SUCCESS;
   }
-  case core::ShareableHandleType::FABRIC_HANDLE:
+  case core::ShareType::FABRIC_HANDLE:
     return HSA_STATUS_ERROR;
   default:
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 }
 
-hsa_status_t KfdVirtioDriver::DestroyImportedShareableHandle(core::DriverMemoryHandle* handle) {
-  // Calls DestroyShareableHandle, as an amdgpu_bo_handle object is created during import.
-  return DestroyShareableHandle(handle);
+hsa_status_t KfdVirtioDriver::DestroyImportedMemoryHandle(core::DriverMemoryHandle* handle) {
+  // Calls DestroyMemoryHandle, as an amdgpu_bo_handle object is created during import.
+  return DestroyMemoryHandle(handle);
 }
 
-hsa_status_t KfdVirtioDriver::Map(core::DriverMemoryHandle handle, void* mem, size_t offset,
+hsa_status_t KfdVirtioDriver::Map(const core::DriverMemoryHandle& handle, void* mem, size_t offset,
                                   size_t size, hsa_access_permission_t perms) {
   const auto ldrm_bo = reinterpret_cast<amdgpu_bo_handle>(handle.handle);
   if (!ldrm_bo)
@@ -544,7 +544,7 @@ hsa_status_t KfdVirtioDriver::Map(core::DriverMemoryHandle handle, void* mem, si
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::Unmap(core::DriverMemoryHandle handle, void* mem, size_t offset,
+hsa_status_t KfdVirtioDriver::Unmap(const core::DriverMemoryHandle& handle, void* mem, size_t offset,
                                     size_t size) {
   const auto ldrm_bo = reinterpret_cast<amdgpu_bo_handle>(handle.handle);
   if (!ldrm_bo)
@@ -563,7 +563,7 @@ hsa_status_t KfdVirtioDriver::CreateShareableHandle(void* va, void* mem, size_t 
   return HSA_STATUS_ERROR;
 }
 
-hsa_status_t KfdVirtioDriver::DestroyShareableHandle(core::DriverMemoryHandle* handle) {
+hsa_status_t KfdVirtioDriver::DestroyMemoryHandle(core::DriverMemoryHandle* handle) {
   const auto ldrm_bo = reinterpret_cast<amdgpu_bo_handle>(handle.handle);
   if (!ldrm_bo)
     return HSA_STATUS_ERROR;

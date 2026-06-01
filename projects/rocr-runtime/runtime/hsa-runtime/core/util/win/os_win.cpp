@@ -481,9 +481,9 @@ bool MapMemory(void* addr, size_t size, MemProt perms, int fd [[maybe_unused]],
   return VirtualProtect(addr, size, memProtToOsProt(perms), &OldProtect) != 0;
 }
 
-bool DmaBufClose(int dmabuf) {
+hsa_status_t DmaBufClose(int dmabuf) {
   (void)dmabuf;
-  return true;
+  return HSA_STATUS_SUCCESS;
 }
 
 bool ProtectMemory(void* va, size_t size, MemProt perms) {
