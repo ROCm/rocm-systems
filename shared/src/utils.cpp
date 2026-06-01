@@ -29,6 +29,7 @@ static const struct GfxipTable kGfxipTable[] = {
   { 0x1586, 11, 5, 1 },
   { 0x1114, 11, 5, 2 },
   { 0x1900, 11, 0, 3 },
+  { 0x1902, 11, 5, 3 },
 };
 
 const int kGfxipTableSize = sizeof(kGfxipTable) / sizeof(kGfxipTable[0]);
