@@ -317,6 +317,134 @@ Filters must work for both CI and developer “partial run” workflows (not CI-
 - **Target state (TheRock):** evolve this file toward the [hipBLAS reference design](https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipblas/clients/gtest/test_categories.yaml) (tiers, patterns, labels, `execution_settings`, optional GPU exclusions).
 - Developer convenience: expose tier presets as one-line `ctest -L` / `pytest -m` equivalents (not a replacement for YAML — the YAML remains the TheRock-facing contract).
 
+### Design — Section 4.1: Extended filter dimensions (Phase 2+)
+
+MVP filters (`type`, `arch`) do **not** yet express GPU requirement or AI vs HPC profiling targets.
+Those needs are partially covered today by test level, skip fixtures, and ad-hoc markers
+(`torch_trace`, `torch_ops`, mpirun checks). Phase 2+ adds explicit orthogonal dimensions.
+
+**GPU requirement (`gpu`)**
+
+| Value | Meaning | Typical `type` |
+|-------|---------|----------------|
+| `none` | Runs without ROCm / GPU (laptop, GPU-less CI) | `unit` |
+| `required` | Skip if no GPU / ROCm device | `integration`, `functional` |
+| `optional` | Runs either way; exercises GPU path when present | either |
+
+Today `type=unit` implies `gpu=none` implicitly; making `gpu` explicit allows CI tiers to
+exclude GPU tests without relying on folder layout alone.
+
+**Developer runs:**
+
+```bash
+pytest -m "gpu(none)"                              # all GPU-less tests
+pytest -m "integration and gpu(required)"          # GPU integration only
+pytest -m "gpu(none) or gpu(optional)"              # safe for GPU-less nodes
+```
+
+**CI / TheRock YAML (hipBLAS-style):**
+
+```yaml
+quick:
+  exclude_gpu: true   # selects tests where gpu != required (or type == unit)
+```
+
+**Functional workload taxonomy (AI vs HPC)**
+
+Functional tests (Phase 2+) are end-user flows: capture → analyze → validate golden output.
+AI and HPC differ in **workload/runtime stack**, not in rocprof-compute internal unit boundaries.
+Use **markers for cross-cutting tags** and **folders for discoverability** — do not encode
+docker/k8s/MPI/pytorch into `type`.
+
+| Dimension | Values | Purpose |
+|-----------|--------|---------|
+| `type` | `functional` | Test level (already in taxonomy) |
+| `domain` | `ai`, `hpc`, `generic` | Profiling target audience |
+| `framework` | `pytorch`, `jax`, `vllm`, `none` | AI stack (optional; omit for HPC) |
+| `runtime` | `baremetal`, `mpi`, `docker`, `k8s` | How the application is launched |
+| `gpu` | `none`, `required`, `optional` | Hardware requirement |
+| `arch` | `gfx942`, `gfx950`, `rdna35`, … | Already in MVP |
+
+**Suggested functional layout**
+
+```
+tests/functional/
+  ai/
+    test_torch_trace_e2e.py      # domain=ai, framework=pytorch, runtime=baremetal
+    test_jax_profile_e2e.py      # domain=ai, framework=jax
+  hpc/
+    test_mpi_vcopy_e2e.py        # domain=hpc, runtime=mpi
+    test_roofline_hpc_golden.py  # domain=hpc, runtime=baremetal
+  generic/
+    test_profile_analyze_golden.py  # domain=generic — no AI/HPC-specific stack
+```
+
+**Mapping from current repo patterns**
+
+| Existing test / pattern | Future classification |
+|-------------------------|----------------------|
+| `test_torch_trace_*`, `@pytest.mark.torch_trace` | `functional` + `domain(ai)` + `framework(pytorch)` |
+| `test_profile_multi_rank`, `num_ranks > 1` + mpirun | `functional` + `domain(hpc)` + `runtime(mpi)` |
+| `test_roofline_calc_ai_analyze` | `functional` + `domain(ai)` |
+| Parser/DB/utils tests | stays `type(unit)`, `gpu(none)` |
+
+**Example markers**
+
+```python
+@pytest.mark.type("functional")
+@pytest.mark.domain("ai")
+@pytest.mark.framework("pytorch")
+@pytest.mark.runtime("baremetal")
+@pytest.mark.gpu("required")
+@pytest.mark.arch("gfx942")
+def test_torch_trace_profile_analyze_golden(require_torch_gpu, ...):
+    ...
+```
+
+```python
+@pytest.mark.type("functional")
+@pytest.mark.domain("hpc")
+@pytest.mark.runtime("mpi")
+@pytest.mark.gpu("required")
+def test_mpi_multi_rank_profile_golden(...):
+    ...
+```
+
+**Filter examples (dev + CI)**
+
+```bash
+pytest -m "functional and domain(ai)"
+pytest -m "functional and domain(ai) and framework(pytorch) and runtime(baremetal)"
+pytest -m "functional and domain(hpc) and runtime(mpi)"
+```
+
+**Docker / k8s:** mark as `runtime(docker)` / `runtime(k8s)` and gate on environment +
+tier (`comprehensive` / `full` only — not PR quick/standard):
+
+```python
+@pytest.mark.runtime("docker")
+@pytest.mark.skipif(not os.getenv("ROCPROF_COMPUTE_TEST_DOCKER"), reason="needs docker CI node")
+```
+
+**Design rules (keep dimensions orthogonal)**
+
+- `type` = *what kind of test* (unit vs functional)
+- `domain` = *who the workload represents* (AI vs HPC)
+- `runtime` = *how it is executed* (MPI, docker, k8s)
+- `framework` = *AI stack* (pytorch, jax, vllm)
+
+Avoid combinatorial marker names like `functional_ai_mpi_pytorch`.
+
+**Phasing**
+
+| Phase | Filter capability |
+|-------|-------------------|
+| MVP | `type`, `arch` + YAML tiers (`quick`…`full`) |
+| Phase 2 | `gpu` + `exclude_gpu`; enable `type=functional` |
+| Phase 2+ | `domain`, `framework`, `runtime` for AI/HPC functional splits |
+
+Ad-hoc markers (`torch_trace`, `torch_ops`) migrate to structured markers over time.
+
 ### Design — Section 5: CTest / PTest / GoogleTest
 
 **Primary harness**
@@ -410,4 +538,7 @@ Use these prompts to drive alignment in the team meeting:
 - Agree whether PR `#6189` commit `07b0579` is acceptable as the starting scaffolding (cherry-pick only).
 - Confirm **hipBLAS `test_categories.yaml`** as the long-term TheRock reference design (see §6.1) and what must match in the first convergence PR vs later.
 - Agree on **sample-first** templates: which real tests become the Unit / Integration / Functional / Performance reference cases in Phase 1.
+- Confirm **Phase 2+ filter extensions** (see §4.1): `gpu` dimension + `exclude_gpu` YAML; `domain` / `framework` / `runtime` for AI vs HPC functional tests.
+- Decide whether **docker/k8s** functional tests belong in `comprehensive`/`full` only with env-gated CI lanes.
+- Agree to **migrate ad-hoc markers** (`torch_trace`, `torch_ops`) to structured markers over time.
 

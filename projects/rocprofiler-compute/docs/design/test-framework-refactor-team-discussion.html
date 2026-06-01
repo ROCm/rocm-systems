@@ -422,6 +422,60 @@
         <li>Developer convenience: tier presets as one-line <code>ctest -L</code> / <code>pytest -m</code> (YAML remains TheRock-facing contract).</li>
       </ul>
 
+      <h3>Design — Section 4.1: Extended filter dimensions (Phase 2+)</h3>
+      <p>
+        MVP filters (<code>type</code>, <code>arch</code>) do <strong>not</strong> yet express GPU requirement or AI vs HPC profiling targets.
+        Those needs are partially covered today by test level, skip fixtures, and ad-hoc markers
+        (<code>torch_trace</code>, <code>torch_ops</code>, mpirun checks). Phase 2+ adds explicit orthogonal dimensions.
+      </p>
+      <p><strong>GPU requirement (<code>gpu</code>)</strong></p>
+      <table>
+        <thead><tr><th>Value</th><th>Meaning</th><th>Typical <code>type</code></th></tr></thead>
+        <tbody>
+          <tr><td><code>none</code></td><td>Runs without ROCm / GPU (laptop, GPU-less CI)</td><td><code>unit</code></td></tr>
+          <tr><td><code>required</code></td><td>Skip if no GPU / ROCm device</td><td><code>integration</code>, <code>functional</code></td></tr>
+          <tr><td><code>optional</code></td><td>Runs either way; exercises GPU path when present</td><td>either</td></tr>
+        </tbody>
+      </table>
+      <p><strong>Developer runs:</strong></p>
+      <pre><code>pytest -m "gpu(none)"
+pytest -m "integration and gpu(required)"
+pytest -m "gpu(none) or gpu(optional)"</code></pre>
+      <p><strong>CI / TheRock YAML (hipBLAS-style):</strong> <code>exclude_gpu: true</code> on quick tier.</p>
+      <p><strong>Functional workload taxonomy (AI vs HPC)</strong></p>
+      <p>Functional tests (Phase 2+) are end-user flows: capture → analyze → validate golden output.
+        Use <strong>markers for cross-cutting tags</strong> and <strong>folders for discoverability</strong> — do not encode docker/k8s/MPI/pytorch into <code>type</code>.</p>
+      <table>
+        <thead><tr><th>Dimension</th><th>Values</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td><code>type</code></td><td><code>functional</code></td><td>Test level</td></tr>
+          <tr><td><code>domain</code></td><td><code>ai</code>, <code>hpc</code>, <code>generic</code></td><td>Profiling target audience</td></tr>
+          <tr><td><code>framework</code></td><td><code>pytorch</code>, <code>jax</code>, <code>vllm</code>, <code>none</code></td><td>AI stack (optional; omit for HPC)</td></tr>
+          <tr><td><code>runtime</code></td><td><code>baremetal</code>, <code>mpi</code>, <code>docker</code>, <code>k8s</code></td><td>How the application is launched</td></tr>
+          <tr><td><code>gpu</code></td><td><code>none</code>, <code>required</code>, <code>optional</code></td><td>Hardware requirement</td></tr>
+          <tr><td><code>arch</code></td><td><code>gfx942</code>, <code>gfx950</code>, <code>rdna35</code>, …</td><td>Already in MVP</td></tr>
+        </tbody>
+      </table>
+      <p><strong>Suggested functional layout:</strong></p>
+      <pre><code>tests/functional/
+  ai/       # domain=ai, framework=pytorch|jax, runtime=baremetal
+  hpc/      # domain=hpc, runtime=mpi|baremetal
+  generic/  # domain=generic</code></pre>
+      <p><strong>Mapping from current repo patterns:</strong></p>
+      <ul>
+        <li><code>test_torch_trace_*</code>, <code>@pytest.mark.torch_trace</code> → <code>functional</code> + <code>domain(ai)</code> + <code>framework(pytorch)</code></li>
+        <li><code>test_profile_multi_rank</code>, mpirun → <code>functional</code> + <code>domain(hpc)</code> + <code>runtime(mpi)</code></li>
+        <li><code>test_roofline_calc_ai_analyze</code> → <code>functional</code> + <code>domain(ai)</code></li>
+        <li>Parser/DB/utils tests → stays <code>type(unit)</code>, <code>gpu(none)</code></li>
+      </ul>
+      <p><strong>Filter examples:</strong></p>
+      <pre><code>pytest -m "functional and domain(ai)"
+pytest -m "functional and domain(ai) and framework(pytorch) and runtime(baremetal)"
+pytest -m "functional and domain(hpc) and runtime(mpi)"</code></pre>
+      <p><strong>Docker / k8s:</strong> mark as <code>runtime(docker)</code> / <code>runtime(k8s)</code>; gate on environment + tier (<code>comprehensive</code> / <code>full</code> only).</p>
+      <p><strong>Design rules:</strong> keep dimensions orthogonal — <code>type</code> = test kind; <code>domain</code> = workload audience; <code>runtime</code> = launch mode; <code>framework</code> = AI stack.</p>
+      <p><strong>Phasing:</strong> MVP = <code>type</code> + <code>arch</code>; Phase 2 = <code>gpu</code> + <code>exclude_gpu</code> + functional; Phase 2+ = <code>domain</code>, <code>framework</code>, <code>runtime</code>. Migrate ad-hoc markers over time.</p>
+
       <h3>Design — Section 5: CTest / PTest / GoogleTest</h3>
       <p><strong>Primary harness</strong></p>
       <ul>
@@ -510,6 +564,9 @@
         <li>Agree whether PR <strong>#6189</strong> commit <code>07b0579</code> is acceptable as the starting scaffolding (cherry-pick only).</li>
         <li>Confirm <strong>hipBLAS <code>test_categories.yaml</code></strong> as the long-term TheRock reference design (see §6.1).</li>
         <li>Agree on <strong>sample-first</strong> templates: which real tests become the Unit / Integration / Functional / Performance reference cases in Phase 1.</li>
+        <li>Confirm <strong>Phase 2+ filter extensions</strong> (see §4.1): <code>gpu</code> dimension + <code>exclude_gpu</code> YAML; <code>domain</code> / <code>framework</code> / <code>runtime</code> for AI vs HPC functional tests.</li>
+        <li>Decide whether <strong>docker/k8s</strong> functional tests belong in <code>comprehensive</code>/<code>full</code> only with env-gated CI lanes.</li>
+        <li>Agree to <strong>migrate ad-hoc markers</strong> (<code>torch_trace</code>, <code>torch_ops</code>) to structured markers over time.</li>
       </ul>
 
       <div class="footer">Generated for local discussion. Source: internal brainstorming conversation summary.</div>
@@ -825,6 +882,60 @@
         <li>Developer convenience: tier presets as one-line <code>ctest -L</code> / <code>pytest -m</code> (YAML remains TheRock-facing contract).</li>
       </ul>
 
+      <h3>Design — Section 4.1: Extended filter dimensions (Phase 2+)</h3>
+      <p>
+        MVP filters (<code>type</code>, <code>arch</code>) do <strong>not</strong> yet express GPU requirement or AI vs HPC profiling targets.
+        Those needs are partially covered today by test level, skip fixtures, and ad-hoc markers
+        (<code>torch_trace</code>, <code>torch_ops</code>, mpirun checks). Phase 2+ adds explicit orthogonal dimensions.
+      </p>
+      <p><strong>GPU requirement (<code>gpu</code>)</strong></p>
+      <table>
+        <thead><tr><th>Value</th><th>Meaning</th><th>Typical <code>type</code></th></tr></thead>
+        <tbody>
+          <tr><td><code>none</code></td><td>Runs without ROCm / GPU (laptop, GPU-less CI)</td><td><code>unit</code></td></tr>
+          <tr><td><code>required</code></td><td>Skip if no GPU / ROCm device</td><td><code>integration</code>, <code>functional</code></td></tr>
+          <tr><td><code>optional</code></td><td>Runs either way; exercises GPU path when present</td><td>either</td></tr>
+        </tbody>
+      </table>
+      <p><strong>Developer runs:</strong></p>
+      <pre><code>pytest -m "gpu(none)"
+pytest -m "integration and gpu(required)"
+pytest -m "gpu(none) or gpu(optional)"</code></pre>
+      <p><strong>CI / TheRock YAML (hipBLAS-style):</strong> <code>exclude_gpu: true</code> on quick tier.</p>
+      <p><strong>Functional workload taxonomy (AI vs HPC)</strong></p>
+      <p>Functional tests (Phase 2+) are end-user flows: capture → analyze → validate golden output.
+        Use <strong>markers for cross-cutting tags</strong> and <strong>folders for discoverability</strong> — do not encode docker/k8s/MPI/pytorch into <code>type</code>.</p>
+      <table>
+        <thead><tr><th>Dimension</th><th>Values</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td><code>type</code></td><td><code>functional</code></td><td>Test level</td></tr>
+          <tr><td><code>domain</code></td><td><code>ai</code>, <code>hpc</code>, <code>generic</code></td><td>Profiling target audience</td></tr>
+          <tr><td><code>framework</code></td><td><code>pytorch</code>, <code>jax</code>, <code>vllm</code>, <code>none</code></td><td>AI stack (optional; omit for HPC)</td></tr>
+          <tr><td><code>runtime</code></td><td><code>baremetal</code>, <code>mpi</code>, <code>docker</code>, <code>k8s</code></td><td>How the application is launched</td></tr>
+          <tr><td><code>gpu</code></td><td><code>none</code>, <code>required</code>, <code>optional</code></td><td>Hardware requirement</td></tr>
+          <tr><td><code>arch</code></td><td><code>gfx942</code>, <code>gfx950</code>, <code>rdna35</code>, …</td><td>Already in MVP</td></tr>
+        </tbody>
+      </table>
+      <p><strong>Suggested functional layout:</strong></p>
+      <pre><code>tests/functional/
+  ai/       # domain=ai, framework=pytorch|jax, runtime=baremetal
+  hpc/      # domain=hpc, runtime=mpi|baremetal
+  generic/  # domain=generic</code></pre>
+      <p><strong>Mapping from current repo patterns:</strong></p>
+      <ul>
+        <li><code>test_torch_trace_*</code>, <code>@pytest.mark.torch_trace</code> → <code>functional</code> + <code>domain(ai)</code> + <code>framework(pytorch)</code></li>
+        <li><code>test_profile_multi_rank</code>, mpirun → <code>functional</code> + <code>domain(hpc)</code> + <code>runtime(mpi)</code></li>
+        <li><code>test_roofline_calc_ai_analyze</code> → <code>functional</code> + <code>domain(ai)</code></li>
+        <li>Parser/DB/utils tests → stays <code>type(unit)</code>, <code>gpu(none)</code></li>
+      </ul>
+      <p><strong>Filter examples:</strong></p>
+      <pre><code>pytest -m "functional and domain(ai)"
+pytest -m "functional and domain(ai) and framework(pytorch) and runtime(baremetal)"
+pytest -m "functional and domain(hpc) and runtime(mpi)"</code></pre>
+      <p><strong>Docker / k8s:</strong> mark as <code>runtime(docker)</code> / <code>runtime(k8s)</code>; gate on environment + tier (<code>comprehensive</code> / <code>full</code> only).</p>
+      <p><strong>Design rules:</strong> keep dimensions orthogonal — <code>type</code> = test kind; <code>domain</code> = workload audience; <code>runtime</code> = launch mode; <code>framework</code> = AI stack.</p>
+      <p><strong>Phasing:</strong> MVP = <code>type</code> + <code>arch</code>; Phase 2 = <code>gpu</code> + <code>exclude_gpu</code> + functional; Phase 2+ = <code>domain</code>, <code>framework</code>, <code>runtime</code>. Migrate ad-hoc markers over time.</p>
+
       <h3>Design — Section 5: CTest / PTest / GoogleTest</h3>
       <p><strong>Primary harness</strong></p>
       <ul>
@@ -913,6 +1024,9 @@
         <li>Agree whether PR <strong>#6189</strong> commit <code>07b0579</code> is acceptable as the starting scaffolding (cherry-pick only).</li>
         <li>Confirm <strong>hipBLAS <code>test_categories.yaml</code></strong> as the long-term TheRock reference design (see §6.1).</li>
         <li>Agree on <strong>sample-first</strong> templates: which real tests become the Unit / Integration / Functional / Performance reference cases in Phase 1.</li>
+        <li>Confirm <strong>Phase 2+ filter extensions</strong> (see §4.1): <code>gpu</code> dimension + <code>exclude_gpu</code> YAML; <code>domain</code> / <code>framework</code> / <code>runtime</code> for AI vs HPC functional tests.</li>
+        <li>Decide whether <strong>docker/k8s</strong> functional tests belong in <code>comprehensive</code>/<code>full</code> only with env-gated CI lanes.</li>
+        <li>Agree to <strong>migrate ad-hoc markers</strong> (<code>torch_trace</code>, <code>torch_ops</code>) to structured markers over time.</li>
       </ul>
 
       <div class="footer">Generated for local discussion. Source: internal brainstorming conversation summary.</div>
@@ -1109,6 +1223,7 @@
       <p><strong>Key principle</strong>: filters must serve CI and developer partial runs.</p>
       <p><strong>MVP dimensions</strong>: <code>type</code>, <code>arch</code>.</p>
       <p><strong>Bridge</strong>: keep current tiers (<code>quick/standard/comprehensive/full</code>) from <code>tests/test_categories.yaml</code> initially.</p>
+      <p><strong>Phase 2+ (§4.1)</strong>: add <code>gpu</code> (+ <code>exclude_gpu</code> YAML), then <code>domain</code> / <code>framework</code> / <code>runtime</code> for AI vs HPC functional tests.</p>
 
       <h3>Design — Section 5: CTest / PTest / GoogleTest</h3>
       <ul>
