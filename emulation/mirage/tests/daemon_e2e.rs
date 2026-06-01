@@ -313,8 +313,11 @@ async fn exec_attach_streams_output_via_websocket() {
     }
     let _ = ws.send(Message::Close(None)).await;
 
-    assert!(stdout.contains("hello-from-exec"), "got stdout: {stdout:?}");
-    assert!(stderr.contains("err"), "got stderr: {stderr:?}");
+    // The exec runs under a PTY, so stdout and stderr are merged onto the
+    // terminal (the stdout stream), exactly as in a real terminal.
+    let combined = format!("{stdout}{stderr}");
+    assert!(combined.contains("hello-from-exec"), "got output: {combined:?}");
+    assert!(combined.contains("err"), "got output: {combined:?}");
     assert_eq!(exit_code, Some(7));
 
     // Status now reflects ended.

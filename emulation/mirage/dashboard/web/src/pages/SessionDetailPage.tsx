@@ -424,10 +424,17 @@ function AttachView(props: { sessionId: string; execId: string }) {
     // Forward every keystroke typed in the terminal to the program's
     // stdin. xterm emits already-encoded byte sequences (e.g. "\r" for
     // Enter, "\x7f" for Backspace), so we pass them through verbatim.
+    // Each keystroke is a separate HTTP POST; to preserve input order we
+    // chain the sends so the next one starts only after the previous has
+    // been accepted by the daemon (otherwise fast typing can race and
+    // arrive scrambled).
+    let stdinChain: Promise<unknown> = Promise.resolve();
     const dataSub = term.onData((data) => {
-      api.stdinExec(props.sessionId, props.execId, data).catch(() => {
-        /* exec may have exited; ignore stdin write failures */
-      });
+      stdinChain = stdinChain
+        .then(() => api.stdinExec(props.sessionId, props.execId, data))
+        .catch(() => {
+          /* exec may have exited; ignore stdin write failures */
+        });
     });
     const ro = new ResizeObserver(() => {
       try {

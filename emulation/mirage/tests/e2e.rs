@@ -116,8 +116,11 @@ fn run_command_streams_stdout_stderr_and_exit_code() {
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stdout.contains("hello"), "stdout was: {stdout:?}");
-    assert!(stderr.contains("oops"), "stderr was: {stderr:?}");
+    // The exec runs under a PTY, so stdout and stderr are merged onto the
+    // terminal (the stdout stream), exactly as in a real terminal.
+    let combined = format!("{stdout}{stderr}");
+    assert!(combined.contains("hello"), "output was: {combined:?}");
+    assert!(combined.contains("oops"), "output was: {combined:?}");
     assert_eq!(out.status.code(), Some(7));
 }
 

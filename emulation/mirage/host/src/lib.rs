@@ -13,8 +13,14 @@
 //! 2. Polls `exec/` for new exec definitions (i.e. directories that
 //!    have a `def.json` but no `status.json` yet).
 //! 3. For each new exec, creates per-node directories with a stdin
-//!    FIFO, then spawns one child process per node wired to those
-//!    files. Writes per-node `pid` and, on exit, `exit_code`.
+//!    FIFO, then spawns one child process per node attached to a
+//!    pseudo-terminal (PTY). The child's stdin/stdout/stderr are wired
+//!    to the PTY slave so interactive programs (a shell, a REPL) get a
+//!    real terminal: line editing, prompts, and input echo all work.
+//!    The host bridges the PTY: it pumps the stdin FIFO into the PTY
+//!    master and the PTY master's output into the node's `stdout` file
+//!    (which attached clients tail). Writes per-node `pid` and, on
+//!    exit, `exit_code`.
 //! 4. Aggregates per-node exits into `status.json` (`ended=true` +
 //!    overall `exit_code`).
 //! 5. On `SIGTERM`/`SIGINT`, marks the session unhealthy, signals all
@@ -279,16 +285,12 @@ async fn run_exec(layout: ExecLayout) -> Result<()> {
 struct SpawnedNode {
     child: tokio::process::Child,
     pid: u32,
-    #[allow(dead_code)]
-    stdin_path: PathBuf,
-    /// A write end of the stdin FIFO held open by the host for the entire
-    /// lifetime of the child. Without this, the child's `read()` on stdin
-    /// would return EOF the moment no writer is present, so interactive
-    /// programs (`cat`, a REPL, a shell) would exit immediately instead of
-    /// waiting for input forwarded via the `stdin` endpoint. Dropped only
-    /// after the child has exited (see [`wait_node`]).
-    #[allow(dead_code)]
-    stdin_keepalive: std::os::fd::OwnedFd,
+    /// Background task that bridges the node's PTY: stdin FIFO -> PTY
+    /// master, and PTY master -> the node's `stdout` file. It owns the
+    /// master fd and a keepalive writer on the FIFO; it finishes on its
+    /// own when the child closes the slave (EOF on the master), and is
+    /// aborted by [`wait_node`] as a backstop once the child has exited.
+    bridge: tokio::task::JoinHandle<()>,
 }
 
 fn spawn_node(
@@ -305,13 +307,16 @@ fn spawn_node(
         return Err(MirageError::other("no worker exec for non-head node"));
     };
 
-    // Create FIFO for stdin.
+    // Create FIFO for stdin. The control plane (`session_stdin`) writes
+    // user keystrokes here; the bridge task forwards them into the PTY.
     let stdin_path = nlayout.stdin();
     if !stdin_path.exists() {
         mkfifo(&stdin_path, Mode::S_IRUSR | Mode::S_IWUSR)
             .map_err(|e| MirageError::other(format!("mkfifo {stdin_path:?}: {e}")))?;
     }
-    // Open stdout/stderr files.
+    // Create the stdout file (the bridge appends merged PTY output here)
+    // and an empty stderr file (the PTY merges stderr into stdout, but
+    // attach clients still tail the stderr path, so it must exist).
     let stdout_file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -320,7 +325,7 @@ fn spawn_node(
             path: nlayout.stdout(),
             source: e,
         })?;
-    let stderr_file = std::fs::OpenOptions::new()
+    std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(nlayout.stderr())
@@ -329,44 +334,40 @@ fn spawn_node(
             source: e,
         })?;
 
-    // Open the FIFO for reading on the child side. We use a writer fd
-    // briefly to ensure read end doesn't return EOF immediately.
-    // tokio's Command will dup this fd for the child.
-    use std::os::fd::OwnedFd;
-    let read_fd: OwnedFd = std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NONBLOCK)
-        .open(&stdin_path)
-        .map_err(|e| MirageError::Io {
-            path: stdin_path.clone(),
-            source: e,
-        })?
-        .into();
-    // Clear the O_NONBLOCK we used to avoid blocking on open()-for-read.
-    unsafe {
-        let raw = std::os::fd::AsRawFd::as_raw_fd(&read_fd);
-        let flags = libc::fcntl(raw, libc::F_GETFL);
-        libc::fcntl(raw, libc::F_SETFL, flags & !libc::O_NONBLOCK);
-    }
+    // Allocate a pseudo-terminal. The child runs on the slave side so it
+    // sees a real TTY (echo, line discipline, job control); the host
+    // keeps the master side to pump bytes in and out.
+    use std::os::fd::{AsRawFd, OwnedFd};
+    let winsize = nix::pty::Winsize {
+        ws_row: 24,
+        ws_col: 80,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    let pty = nix::pty::openpty(Some(&winsize), None)
+        .map_err(|e| MirageError::other(format!("openpty: {e}")))?;
+    let master: OwnedFd = pty.master;
+    let slave: OwnedFd = pty.slave;
 
-    // Hold a write end of the FIFO open for as long as the child lives.
-    // A reader (read_fd) is already open, so this open() will not block.
-    // This keeps the child's stdin from hitting EOF before any input is
-    // forwarded, which is what makes interactive programs stay alive.
-    let stdin_keepalive: OwnedFd = std::fs::OpenOptions::new()
-        .write(true)
-        .open(&stdin_path)
-        .map_err(|e| MirageError::Io {
-            path: stdin_path.clone(),
-            source: e,
-        })?
-        .into();
+    // Wire all three child standard streams to the slave end.
+    let slave_in = slave.try_clone().map_err(|e| MirageError::Io {
+        path: stdin_path.clone(),
+        source: e,
+    })?;
+    let slave_out = slave.try_clone().map_err(|e| MirageError::Io {
+        path: nlayout.stdout(),
+        source: e,
+    })?;
+    let slave_err = slave.try_clone().map_err(|e| MirageError::Io {
+        path: nlayout.stderr(),
+        source: e,
+    })?;
 
     let mut cmd = tokio::process::Command::new(&args.command);
     cmd.args(&args.args)
-        .stdin(Stdio::from(read_fd))
-        .stdout(Stdio::from(stdout_file))
-        .stderr(Stdio::from(stderr_file))
+        .stdin(Stdio::from(slave_in))
+        .stdout(Stdio::from(slave_out))
+        .stderr(Stdio::from(slave_err))
         .env_clear()
         // inherit a minimal environment by default
         .envs(std::env::vars().filter(|(k, _)| {
@@ -375,32 +376,178 @@ fn spawn_node(
                 "PATH" | "HOME" | "USER" | "LANG" | "LC_ALL" | "TERM" | "TMPDIR"
             )
         }))
+        // Make sure programs that consult $TERM behave like a real
+        // terminal even if the host's own environment has none set.
+        .env("TERM", std::env::var("TERM").unwrap_or_else(|_| "xterm-256color".into()))
         .envs(&args.env);
     if let Some(wd) = &args.workdir {
         cmd.current_dir(wd);
+    }
+
+    // After fork, in the child: start a new session and make the PTY our
+    // controlling terminal. By the time these closures run, the standard
+    // streams (fd 0/1/2) already point at the slave, so the ioctl on fd 0
+    // claims the right TTY.
+    unsafe {
+        cmd.pre_exec(|| {
+            nix::unistd::setsid().map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
+            if libc::ioctl(0, libc::TIOCSCTTY as libc::c_ulong, 0) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
     }
 
     let child = cmd.spawn().map_err(|e| MirageError::Io {
         path: PathBuf::from(&args.command),
         source: e,
     })?;
+    // The host no longer needs the slave: drop every host-side copy so the
+    // master observes EOF once the child exits and closes its own copies.
+    drop(slave);
     let pid = child.id().unwrap_or(0);
     write_bytes(&nlayout.pid(), pid.to_string().as_bytes())?;
-    Ok(SpawnedNode {
-        child,
-        pid,
-        stdin_path,
-        stdin_keepalive,
-    })
+
+    // Open the stdin FIFO read end (non-blocking so open() doesn't block
+    // waiting for a writer) plus a keepalive writer so the read end never
+    // hits EOF when no client is currently sending input.
+    let fifo_read: OwnedFd = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(&stdin_path)
+        .map_err(|e| MirageError::Io {
+            path: stdin_path.clone(),
+            source: e,
+        })?
+        .into();
+    let fifo_keepalive: OwnedFd = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&stdin_path)
+        .map_err(|e| MirageError::Io {
+            path: stdin_path.clone(),
+            source: e,
+        })?
+        .into();
+
+    // Make the master and FIFO read end non-blocking for AsyncFd.
+    for fd in [master.as_raw_fd(), fifo_read.as_raw_fd()] {
+        unsafe {
+            let flags = libc::fcntl(fd, libc::F_GETFL);
+            libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+        }
+    }
+
+    let bridge = tokio::spawn(async move {
+        // Keep the keepalive writer alive for the whole bridge lifetime.
+        let _keepalive = fifo_keepalive;
+        if let Err(err) = pump_pty(master, fifo_read, stdout_file).await {
+            tracing::debug!("pty bridge ended: {err}");
+        }
+    });
+
+    Ok(SpawnedNode { child, pid, bridge })
+}
+
+/// Read a fd into `buf`, mapping a negative return into the last OS error.
+fn raw_read(fd: std::os::fd::RawFd, buf: &mut [u8]) -> std::io::Result<usize> {
+    let n = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+    if n < 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(n as usize)
+    }
+}
+
+/// Write `buf` to a fd, mapping a negative return into the last OS error.
+fn raw_write(fd: std::os::fd::RawFd, buf: &[u8]) -> std::io::Result<usize> {
+    let n = unsafe { libc::write(fd, buf.as_ptr() as *const libc::c_void, buf.len()) };
+    if n < 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(n as usize)
+    }
+}
+
+/// Bridge a node's PTY for its whole lifetime:
+///   * PTY master -> the node's `stdout` file (so attach clients see
+///     program output *and* the terminal's echo of typed input);
+///   * stdin FIFO -> PTY master (so forwarded keystrokes reach the
+///     program through the terminal line discipline).
+///
+/// Returns when the master reports EOF, i.e. the child has exited and
+/// closed the slave.
+async fn pump_pty(
+    master: std::os::fd::OwnedFd,
+    fifo_read: std::os::fd::OwnedFd,
+    mut stdout_file: std::fs::File,
+) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::fd::AsRawFd;
+    use tokio::io::unix::AsyncFd;
+
+    let master = AsyncFd::new(master)?;
+    let fifo = AsyncFd::new(fifo_read)?;
+    let mut obuf = [0u8; 8192];
+    let mut ibuf = [0u8; 8192];
+
+    loop {
+        tokio::select! {
+            // PTY output -> stdout file.
+            guard = master.readable() => {
+                let mut guard = guard?;
+                match guard.try_io(|inner| raw_read(inner.get_ref().as_raw_fd(), &mut obuf)) {
+                    Ok(Ok(0)) => break, // child exited; slave closed
+                    Ok(Ok(n)) => {
+                        stdout_file.write_all(&obuf[..n])?;
+                        stdout_file.flush()?;
+                    }
+                    // EIO on the master means the slave is gone (child exited).
+                    Ok(Err(e)) => {
+                        if e.raw_os_error() == Some(libc::EIO) {
+                            break;
+                        }
+                        return Err(e);
+                    }
+                    Err(_would_block) => {}
+                }
+            }
+            // stdin FIFO -> PTY master.
+            guard = fifo.readable() => {
+                let mut guard = guard?;
+                match guard.try_io(|inner| raw_read(inner.get_ref().as_raw_fd(), &mut ibuf)) {
+                    Ok(Ok(0)) => {} // no writers momentarily; keepalive keeps us open
+                    Ok(Ok(n)) => write_all_to_master(&master, &ibuf[..n]).await?,
+                    Ok(Err(e)) => return Err(e),
+                    Err(_would_block) => {}
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Write every byte of `data` to the PTY master, honoring non-blocking
+/// back-pressure via the `AsyncFd` writable readiness.
+async fn write_all_to_master(
+    master: &tokio::io::unix::AsyncFd<std::os::fd::OwnedFd>,
+    mut data: &[u8],
+) -> std::io::Result<()> {
+    use std::os::fd::AsRawFd;
+    while !data.is_empty() {
+        let mut guard = master.writable().await?;
+        match guard.try_io(|inner| raw_write(inner.get_ref().as_raw_fd(), data)) {
+            Ok(Ok(0)) => break,
+            Ok(Ok(n)) => data = &data[n..],
+            Ok(Err(e)) => return Err(e),
+            Err(_would_block) => continue,
+        }
+    }
+    Ok(())
 }
 
 async fn wait_node(node: SpawnedNode) -> i32 {
-    // Keep the stdin write end open until the child has fully exited, then
-    // drop it. Dropping earlier would deliver a premature EOF.
     let SpawnedNode {
-        mut child,
-        stdin_keepalive,
-        ..
+        mut child, bridge, ..
     } = node;
     let code = match child.wait().await {
         Ok(s) => {
@@ -414,7 +561,9 @@ async fn wait_node(node: SpawnedNode) -> i32 {
         }
         Err(_) => -1,
     };
-    drop(stdin_keepalive);
+    // The bridge normally finishes on its own when the master hits EOF;
+    // give it a brief moment to flush trailing output, then abort.
+    let _ = tokio::time::timeout(Duration::from_millis(200), &mut { bridge }).await;
     code
 }
 
