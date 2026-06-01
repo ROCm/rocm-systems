@@ -118,8 +118,6 @@ void runAggregation(hiprtcProgram& prog, AggregationType aggType) {
 
   INFO("Type: " << typeToString<T>());
   for (auto tileSize : tileSizes) {
-    UNSCOPED_INFO("Tile size: " << tileSize);
-
     for (unsigned int laneId = 0; laneId < wavefrontSize; laneId++) {
       unsigned long long mask = ~0ull >> (64 - tileSize);
 
@@ -131,8 +129,6 @@ void runAggregation(hiprtcProgram& prog, AggregationType aggType) {
         if constexpr (!std::is_same<T, half>::value) {
           inputStr = std::string(" input: ") + std::to_string(input.host_ptr()[laneId]);
         }
-
-        UNSCOPED_INFO("laneId: " << laneId << " mask: " << mask << inputStr);
       }
     }
 
@@ -153,10 +149,10 @@ void runAggregation(hiprtcProgram& prog, AggregationType aggType) {
             REQUIRE(result == expectedByLane[laneId]);
           } else {
             compareFloatingPoint<Op<T>>(result,
-                                     expectedByLane[laneId],
-                                     mask,
-                                     input.host_ptr(),
-                                     laneId);
+                                        expectedByLane[laneId],
+                                        mask,
+                                        input.host_ptr(),
+                                        laneId);
           }
         }
       }
