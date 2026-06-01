@@ -38,13 +38,14 @@ See:
 cargo build --workspace
 ```
 
-Produces three binaries under `target/debug/`:
+Produces the unified `mirage` binary under `target/debug/`. The build
+also compiles the embedded web dashboard, which needs **Node.js 20.19+**
+and **npm** on your `PATH`.
 
-| Binary         | Crate           | Purpose                              |
-| -------------- | --------------- | ------------------------------------ |
-| `mirage`       | `mirage`        | The end-user CLI.                    |
-| `mirage-host`  | `mirage_host`   | Per-session host process.            |
-| `mirage-daemon`| `mirage_daemon` | (optional) supervisor; reserved.     |
+See [`docs/building.md`](docs/building.md) for the full guide:
+prerequisites (Rust, Node, optional rocjitsu/CMake), building the
+dashboard SPA, building rocjitsu, environment variables, and
+troubleshooting.
 
 ## Testing
 

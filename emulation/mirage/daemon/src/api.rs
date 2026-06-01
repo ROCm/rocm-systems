@@ -267,6 +267,13 @@ async fn put_profile(
 ) -> Result<Json<Ok>, ApiError> {
     // Path is authoritative.
     profile.name = name;
+    // Validate against the target emulator so the dashboard surfaces
+    // *why* a profile is rejected instead of failing later at session
+    // start.
+    mirage_ctl::validate_profile(&profile).map_err(|message| ApiError {
+        status: StatusCode::BAD_REQUEST,
+        message,
+    })?;
     s.ctl.profile_put(&profile)?;
     Ok(ok())
 }

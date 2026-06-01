@@ -312,7 +312,35 @@ async fn run_exec(layout: ExecLayout) -> Result<()> {
         path: head_layout.root.clone(),
         source: e,
     })?;
-    let head = spawn_node(&def, 0, head_layout.clone(), &injection)?;
+    let head = match spawn_node(&def, 0, head_layout.clone(), &injection) {
+        Ok(head) => head,
+        Err(e) => {
+            // Spawning the node failed (e.g. the command doesn't exist).
+            // Rather than leaving the exec stuck in a perpetual "started
+            // but never ended" state, surface the reason on the node's
+            // stderr (which attach clients tail) and finish the exec with
+            // the conventional 127 "command not found" exit code.
+            let msg = format!("mirage: {e}\n");
+            let _ = std::fs::write(head_layout.stderr(), msg.as_bytes());
+            let _ = write_bytes(&head_layout.exit_code(), b"127");
+            status.started = true;
+            status.ended = true;
+            status.ended_at = Some(Utc::now());
+            status.exit_code = Some(127);
+            status.nodes.insert(
+                0,
+                NodeStatus {
+                    pid: None,
+                    exit_code: Some(127),
+                },
+            );
+            write_json(&layout.status(), &status)?;
+            if !def.keep {
+                let _ = std::fs::remove_dir_all(&layout.root);
+            }
+            return Ok(());
+        }
+    };
     status.started = true;
     status.nodes.insert(
         0,
@@ -484,9 +512,20 @@ fn spawn_node(
         });
     }
 
-    let child = cmd.spawn().map_err(|e| MirageError::Io {
-        path: PathBuf::from(&args.command),
-        source: e,
+    let child = cmd.spawn().map_err(|e| match e.kind() {
+        // Translate the common spawn failures into a clear, actionable
+        // message instead of a raw OS error. argv[0] not existing is by
+        // far the most common ("mirage run -- typo").
+        std::io::ErrorKind::NotFound => {
+            MirageError::other(format!("command not found: {}", args.command))
+        }
+        std::io::ErrorKind::PermissionDenied => {
+            MirageError::other(format!("permission denied: {}", args.command))
+        }
+        _ => MirageError::Io {
+            path: PathBuf::from(&args.command),
+            source: e,
+        },
     })?;
     // The host no longer needs the slave: drop every host-side copy so the
     // master observes EOF once the child exits and closes its own copies.

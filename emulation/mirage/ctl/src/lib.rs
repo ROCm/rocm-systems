@@ -40,6 +40,63 @@ pub fn init_logging(verbose: u8) {
         .try_init();
 }
 
+/// Best-effort: materialise all builtin state on disk — agents,
+/// topologies, and the rocjitsu runtime assets — writing only what's
+/// missing. Errors are logged, never fatal; the user can always force
+/// a full rewrite with `mirage state builtins`.
+///
+/// Shared by the CLI ([`dispatch`]) and the daemon so both surfaces
+/// auto-unpack the builtins the first time they run, instead of
+/// requiring the user to invoke `mirage state builtins` by hand.
+pub fn ensure_builtins_present() {
+    if let Err(e) = mirage_core::agent::store::ensure_builtins(false) {
+        tracing::warn!("failed to preload builtin agents: {e:#}");
+    }
+    if let Err(e) = mirage_core::topology::store::ensure_builtins(false) {
+        tracing::warn!("failed to preload builtin topologies: {e:#}");
+    }
+    if let Err(e) = mirage_rocjitsu::ensure_assets(false) {
+        tracing::warn!("failed to extract rocjitsu assets: {e:#}");
+    }
+}
+
+/// Validate a profile against its target emulator before it is
+/// persisted. Returns a human-readable reason when the emulator can't
+/// accept the profile (an unknown emulator, an unresolvable
+/// agent/topology reference, or a missing runtime asset) so the
+/// failure is reported at creation time rather than only when a
+/// session is later started.
+///
+/// Shared by the CLI profile commands and the daemon's profile
+/// endpoint so both validate identically.
+pub fn validate_profile(def: &ProfileDef) -> std::result::Result<(), String> {
+    let emulator = def.emulator.emulator.as_str();
+    if registry::find(emulator).is_none() {
+        let known = registry::builtins()
+            .iter()
+            .map(|e| e.name)
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(format!("unknown emulator `{emulator}` (known: {known})"));
+    }
+    match emulator {
+        "rocjitsu" => {
+            // Make sure the runtime assets (the flatbuffer schema in
+            // particular) are present so this mirrors exactly what
+            // session start will do.
+            let _ = mirage_rocjitsu::ensure_assets(false);
+            // Building the kmd config resolves the topology + agent
+            // references and checks the schema is available; any error
+            // here is precisely what would otherwise surface at run
+            // time, so we report it now with the profile in hand.
+            mirage_rocjitsu::kmd_config(&def.emulator)
+                .map(|_| ())
+                .map_err(|e| format!("rocjitsu cannot use this profile: {e}"))
+        }
+        _ => Ok(()),
+    }
+}
+
 // =============================================================================
 // Top-level ctl subcommand enum
 // =============================================================================
@@ -371,19 +428,11 @@ pub async fn dispatch<C: MirageCtl + 'static>(
     ctl: C,
     json: bool,
 ) -> anyhow::Result<ExitCode> {
-    // Best-effort: write any missing builtin agents/topologies on
-    // startup so they're always available under <MIRAGE_CONFIG>/.
-    // Errors here are non-fatal; the user can recover via
-    // `mirage state builtins`.
-    if let Err(e) = mirage_core::agent::store::ensure_builtins(false) {
-        tracing::warn!("failed to preload builtin agents: {e:#}");
-    }
-    if let Err(e) = mirage_core::topology::store::ensure_builtins(false) {
-        tracing::warn!("failed to preload builtin topologies: {e:#}");
-    }
-    if let Err(e) = mirage_rocjitsu::ensure_assets(false) {
-        tracing::warn!("failed to extract rocjitsu assets: {e:#}");
-    }
+    // Best-effort: write any missing builtin agents/topologies and
+    // extract the rocjitsu runtime assets on startup so they're always
+    // available under <MIRAGE_CONFIG>/ and <MIRAGE_CACHE>/. Errors here
+    // are non-fatal; the user can recover via `mirage state builtins`.
+    ensure_builtins_present();
     let ctl = Arc::new(ctl);
     match cmd {
         CtlCmd::Profile(c) => profile_cmd(&*ctl, c, json),
@@ -471,6 +520,9 @@ fn profile_cmd(ctl: &dyn MirageCtl, cmd: ProfileCmd, json: bool) -> anyhow::Resu
                 description,
                 emulator: registry::make_def(spec, topo),
             };
+            if let Err(e) = validate_profile(&p) {
+                anyhow::bail!("cannot create profile {name}: {e}");
+            }
             ctl.profile_put(&p)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&p)?);
@@ -1144,6 +1196,9 @@ fn profile_wizard(
         },
         emulator: registry::make_def(spec, topo),
     };
+    if let Err(e) = validate_profile(&p) {
+        anyhow::bail!("cannot create profile {name}: {e}");
+    }
     ctl.profile_put(&p)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&p)?);

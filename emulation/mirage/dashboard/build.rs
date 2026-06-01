@@ -22,6 +22,7 @@ fn main() {
     let spa_out_dir = out_dir.join(SPA_OUT_DIR);
 
     emit_rerun_directives(&web_dir);
+    check_node_version();
     install_web_dependencies_if_needed(&web_dir);
     build_spa(&web_dir, &spa_out_dir);
 
@@ -39,6 +40,7 @@ fn main() {
 
 fn emit_rerun_directives(web_dir: &Path) {
     println!("cargo:rerun-if-env-changed=NPM");
+    println!("cargo:rerun-if-env-changed=NODE");
     println!("cargo:rerun-if-env-changed=MIRAGE_DASHBOARD_SKIP_NPM_CI");
 
     for path in [
@@ -79,6 +81,63 @@ fn emit_rerun_for_tree(path: &Path) {
             println!("cargo:rerun-if-changed={}", entry_path.display());
         }
     }
+}
+
+/// Minimum Node.js major.minor required to build the SPA. Vite 8 and
+/// the React 19 toolchain require Node 20.19+ (or 22.12+); building on
+/// an older runtime fails with cryptic errors, so we check up front
+/// and emit an actionable message instead.
+const MIN_NODE_MAJOR: u32 = 20;
+const MIN_NODE_MINOR: u32 = 19;
+
+fn check_node_version() {
+    // Allow CI/sandboxes that pre-build the SPA to skip the toolchain
+    // entirely (same escape hatch used for `npm ci`).
+    if env::var_os("MIRAGE_DASHBOARD_SKIP_NPM_CI").is_some() {
+        return;
+    }
+
+    let node = env::var_os("NODE").unwrap_or_else(|| OsString::from("node"));
+    let output = match Command::new(&node).arg("--version").output() {
+        Ok(output) => output,
+        Err(err) => panic!(
+            "could not run `{} --version` to verify the Node.js toolchain: {err}.\n\
+             Building the mirage dashboard requires Node.js {MIN_NODE_MAJOR}.{MIN_NODE_MINOR}+ \
+             and npm on PATH. Install Node.js (see emulation/mirage/docs/building.md), or set \
+             MIRAGE_DASHBOARD_SKIP_NPM_CI=1 if the SPA is prebuilt.",
+            node.to_string_lossy(),
+        ),
+    };
+
+    if !output.status.success() {
+        panic!(
+            "`node --version` failed with status {}; is Node.js installed and on PATH?",
+            output.status
+        );
+    }
+
+    let raw = String::from_utf8_lossy(&output.stdout);
+    let version = raw.trim().trim_start_matches('v');
+    let (major, minor) = parse_node_version(version).unwrap_or_else(|| {
+        panic!("could not parse Node.js version from `node --version` output: {raw:?}")
+    });
+
+    if (major, minor) < (MIN_NODE_MAJOR, MIN_NODE_MINOR) {
+        panic!(
+            "Node.js {major}.{minor} is too old to build the mirage dashboard; \
+             {MIN_NODE_MAJOR}.{MIN_NODE_MINOR}+ is required (Vite 8 / React 19 toolchain).\n\
+             Upgrade Node.js (see emulation/mirage/docs/building.md), or set \
+             MIRAGE_DASHBOARD_SKIP_NPM_CI=1 if the SPA is prebuilt."
+        );
+    }
+}
+
+/// Parse a `major.minor[.patch]` version string into `(major, minor)`.
+fn parse_node_version(version: &str) -> Option<(u32, u32)> {
+    let mut parts = version.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    Some((major, minor))
 }
 
 fn install_web_dependencies_if_needed(web_dir: &Path) {
