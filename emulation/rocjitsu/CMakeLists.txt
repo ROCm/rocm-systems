@@ -8,6 +8,10 @@ include(rj_default_compiler)
 
 project(rocm_jit_suite)
 
+# Generate compile_commands.json for clangd, clang-tidy, and other tooling that
+# needs the exact compiler invocations from the configured build tree.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # Default install prefix to /opt/rocm, matching other ROCm projects.
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     if(DEFINED ENV{ROCM_PATH})
@@ -204,6 +208,9 @@ target_link_libraries(
 )
 target_include_directories(rocjitsu_shared PRIVATE ${GENERATED_DIR})
 add_dependencies(rocjitsu_shared flatbuffers_schemas)
+
+# Developer and test workflow tools.
+add_subdirectory(tools)
 
 # Tests and scaling tools.
 if(BUILD_TESTING)
