@@ -21,4 +21,5 @@ rj_add_object_library(rocjitsu_code
     dbt/waitcnt_translator.cpp
     patch/code_object_patcher.cpp
     patch/spill_manager.cpp
+    patch/trampoline_builder.cpp
 )

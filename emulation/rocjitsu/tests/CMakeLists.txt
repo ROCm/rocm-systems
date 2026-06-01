@@ -48,6 +48,7 @@ add_executable(
     analysis/liveness_test.cpp
     patch/spill_manager_test.cpp
     patch/instruction_builder_test.cpp
+    patch/trampoline_builder_test.cpp
     dbt/translate_test.cpp
     mtype_flags_test.cpp
     kfd_ioctl_test.cpp
