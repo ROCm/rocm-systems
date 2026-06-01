@@ -281,6 +281,14 @@ struct SpawnedNode {
     pid: u32,
     #[allow(dead_code)]
     stdin_path: PathBuf,
+    /// A write end of the stdin FIFO held open by the host for the entire
+    /// lifetime of the child. Without this, the child's `read()` on stdin
+    /// would return EOF the moment no writer is present, so interactive
+    /// programs (`cat`, a REPL, a shell) would exit immediately instead of
+    /// waiting for input forwarded via the `stdin` endpoint. Dropped only
+    /// after the child has exited (see [`wait_node`]).
+    #[allow(dead_code)]
+    stdin_keepalive: std::os::fd::OwnedFd,
 }
 
 fn spawn_node(
@@ -341,6 +349,19 @@ fn spawn_node(
         libc::fcntl(raw, libc::F_SETFL, flags & !libc::O_NONBLOCK);
     }
 
+    // Hold a write end of the FIFO open for as long as the child lives.
+    // A reader (read_fd) is already open, so this open() will not block.
+    // This keeps the child's stdin from hitting EOF before any input is
+    // forwarded, which is what makes interactive programs stay alive.
+    let stdin_keepalive: OwnedFd = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&stdin_path)
+        .map_err(|e| MirageError::Io {
+            path: stdin_path.clone(),
+            source: e,
+        })?
+        .into();
+
     let mut cmd = tokio::process::Command::new(&args.command);
     cmd.args(&args.args)
         .stdin(Stdio::from(read_fd))
@@ -369,12 +390,19 @@ fn spawn_node(
         child,
         pid,
         stdin_path,
+        stdin_keepalive,
     })
 }
 
 async fn wait_node(node: SpawnedNode) -> i32 {
-    let SpawnedNode { mut child, .. } = node;
-    match child.wait().await {
+    // Keep the stdin write end open until the child has fully exited, then
+    // drop it. Dropping earlier would deliver a premature EOF.
+    let SpawnedNode {
+        mut child,
+        stdin_keepalive,
+        ..
+    } = node;
+    let code = match child.wait().await {
         Ok(s) => {
             if let Some(c) = s.code() {
                 c
@@ -385,7 +413,9 @@ async fn wait_node(node: SpawnedNode) -> i32 {
             }
         }
         Err(_) => -1,
-    }
+    };
+    drop(stdin_keepalive);
+    code
 }
 
 // silence unused-import in case OS-specific items get conditionally compiled.

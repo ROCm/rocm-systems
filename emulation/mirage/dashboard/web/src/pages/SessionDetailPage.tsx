@@ -194,6 +194,21 @@ export function SessionDetailPage() {
     }
   }
 
+  // SIGTERM, the conventional "please stop" signal. The host forwards it
+  // to every node process belonging to the exec.
+  async function onKill(execId: string) {
+    if (!id) return;
+    try {
+      await api.signalExec(id, execId, 15);
+      toast.info(`Sent SIGTERM to ${execId}`);
+      await refresh();
+    } catch (e) {
+      const msg = String(e);
+      setError(msg);
+      toast.error(msg);
+    }
+  }
+
   if (!id) return <div className="page">missing id</div>;
 
   const healthy = session?.health.healthy ?? false;
@@ -263,6 +278,16 @@ export function SessionDetailPage() {
                         </div>
                       </div>
                     </button>
+                    {e.status.started && !e.status.ended && (
+                      <button
+                        type="button"
+                        className="btn-danger-sm"
+                        onClick={() => onKill(e.id)}
+                        data-testid={`kill-${e.id}`}
+                      >
+                        Kill
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="btn-danger-sm"
@@ -396,6 +421,14 @@ function AttachView(props: { sessionId: string; execId: string }) {
     }
     termRef.current = term;
     fitRef.current = fit;
+    // Forward every keystroke typed in the terminal to the program's
+    // stdin. xterm emits already-encoded byte sequences (e.g. "\r" for
+    // Enter, "\x7f" for Backspace), so we pass them through verbatim.
+    const dataSub = term.onData((data) => {
+      api.stdinExec(props.sessionId, props.execId, data).catch(() => {
+        /* exec may have exited; ignore stdin write failures */
+      });
+    });
     const ro = new ResizeObserver(() => {
       try {
         fit.fit();
@@ -405,12 +438,13 @@ function AttachView(props: { sessionId: string; execId: string }) {
     });
     ro.observe(containerRef.current);
     return () => {
+      dataSub.dispose();
       ro.disconnect();
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
     };
-  }, []);
+  }, [props.sessionId, props.execId]);
 
   useEffect(() => {
     setOutput("");

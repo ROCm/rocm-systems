@@ -134,6 +134,12 @@ export const signalExec = (
     { signal },
   );
 
+export const stdinExec = (sessionId: string, execId: string, data: string) =>
+  post<{ ok: boolean }>(
+    `/sessions/${encodeURIComponent(sessionId)}/execs/${encodeURIComponent(execId)}/stdin`,
+    { data },
+  );
+
 export function attachUrl(sessionId: string, execId: string): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${proto}//${window.location.host}${API}/sessions/${encodeURIComponent(sessionId)}/execs/${encodeURIComponent(execId)}/attach`;

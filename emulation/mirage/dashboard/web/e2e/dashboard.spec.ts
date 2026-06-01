@@ -117,6 +117,74 @@ test.describe.serial("mirage dashboard e2e", () => {
     await dismissAllToasts(page);
   });
 
+  test("user story 4b: terminal stdin is forwarded and a running exec can be killed", async ({ page }) => {
+    await page.goto("/sessions");
+
+    await page.getByTestId("open-start-session").click();
+    const startModal = page.getByTestId("start-session-modal");
+    await expect(startModal).toBeVisible();
+    await page.getByTestId("start-modal-profile").click();
+    await page.getByTestId(`start-modal-profile-option-${PROFILE}`).click();
+    await page.getByTestId("start-modal-timeout").fill("10");
+    await page.getByTestId("start-session-confirm").click();
+    await expect(startModal).toHaveCount(0);
+
+    const sessionCard = page.locator('[data-testid^="session-row-"]').first();
+    await expect(sessionCard).toBeVisible({ timeout: 30_000 });
+    const sessionId = (await sessionCard.getAttribute("data-testid"))!.replace(
+      "session-row-",
+      "",
+    );
+    await expect
+      .poll(
+        async () =>
+          (await page
+            .getByTestId(`session-healthy-${sessionId}`)
+            .textContent()) ?? "",
+        { timeout: 30_000 },
+      )
+      .toContain("healthy");
+
+    await page.getByTestId(`session-open-${sessionId}`).click();
+    await expect(page).toHaveURL(new RegExp(`/sessions/${sessionId}$`));
+
+    // `cat` echoes whatever it reads on stdin back to stdout, so it is a
+    // perfect probe for the "is terminal input forwarded?" question and it
+    // stays running until killed.
+    await page.getByTestId("exec-command").fill("/bin/cat");
+    await page.getByTestId("submit-exec").click();
+
+    // The new exec row should appear with a Kill button (it is running).
+    const killButton = page.locator('[data-testid^="kill-"]').first();
+    await expect(killButton).toBeVisible({ timeout: 30_000 });
+
+    // Type into the xterm terminal and expect `cat` to echo it back. The
+    // real <textarea> xterm uses for input is positioned off-screen, so we
+    // focus the visible terminal frame and type via the keyboard.
+    await page.locator(".xterm-frame").click();
+    await page.locator(".xterm-helper-textarea").focus();
+    await page.keyboard.type("ping-pong");
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("attach-output")).toContainText("ping-pong", {
+      timeout: 30_000,
+    });
+
+    // Kill the running exec; `cat` should terminate and report an exit.
+    await killButton.click();
+    await expect(page.getByTestId("attach-exit")).toBeVisible({
+      timeout: 30_000,
+    });
+
+    await page.goto("/sessions");
+    await page.getByTestId(`stop-session-${sessionId}`).click();
+    await expect(page.getByTestId("confirm-stop-session")).toBeVisible();
+    await page.getByTestId("confirm-stop-session-confirm").click();
+    await expect(page.getByTestId(`session-row-${sessionId}`)).toHaveCount(0, {
+      timeout: 15_000,
+    });
+    await dismissAllToasts(page);
+  });
+
   test("user story 5: delete the profile via confirmation modal", async ({ page }) => {
     await page.goto("/profiles");
     await page.getByTestId(`delete-profile-${PROFILE}`).click();
