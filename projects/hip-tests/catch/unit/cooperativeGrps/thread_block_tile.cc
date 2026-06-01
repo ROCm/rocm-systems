@@ -1363,10 +1363,12 @@ void testScanForTileSize(AggregationType aggType)
   std::array<void*, 2> devicePtrs = { d_result.ptr(), d_aggType.ptr() };
   void* args[devicePtrs.size()];
 
-  if constexpr (std::is_same<T, half>::value && std::is_same<Op, cooperative_groups::less<T>>::value) {
-    id = static_cast<half>(65504);
-  } else {
-    id = std::numeric_limits<T>::max();
+  if constexpr (std::is_same<Op, cooperative_groups::less<T>>::value) {
+    if constexpr (std::is_same<T, half>::value) {
+      id = static_cast<half>(65504);
+    } else {
+      id = std::numeric_limits<T>::max();
+    }
   }
 
   accum = id;
