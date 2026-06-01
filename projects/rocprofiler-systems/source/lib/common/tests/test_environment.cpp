@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "common/environment.hpp"
+#include <cstdint>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -522,6 +523,55 @@ TEST_F(FakeEnvGetEnvTest, SizeTReturnsValueWhenSet)
 {
     fake_env::setenv("FOO", "42", 1);
     EXPECT_EQ(fake_environment::get_env("FOO", std::size_t{ 0 }), std::size_t{ 42 });
+}
+
+TEST_F(FakeEnvGetEnvTest, UnsignedNegativeInputReturnsDefault)
+{
+    // "-1" must not wrap to UINT64_MAX for an unsigned target; fall back instead.
+    fake_env::setenv("FOO", "-1", 1);
+    EXPECT_EQ(fake_environment::get_env("FOO", std::uint64_t{ 7 }), std::uint64_t{ 7 });
+}
+
+TEST_F(FakeEnvGetEnvTest, UnsignedOutOfRangeInputReturnsDefault)
+{
+    // 70000 does not fit in std::uint16_t -> fall back to the default.
+    fake_env::setenv("FOO", "70000", 1);
+    EXPECT_EQ(fake_environment::get_env("FOO", std::uint16_t{ 5 }), std::uint16_t{ 5 });
+}
+
+TEST_F(FakeEnvGetEnvTest, UnsignedLargeValuePastInt64MaxParses)
+{
+    // Value > INT64_MAX previously threw out_of_range via stoll; it must now
+    // parse correctly for an unsigned 64-bit target.
+    constexpr auto big = std::uint64_t{ 18446744073709551610ULL };  // UINT64_MAX - 5
+    fake_env::setenv("FOO", "18446744073709551610", 1);
+    EXPECT_EQ(fake_environment::get_env("FOO", std::uint64_t{ 0 }), big);
+}
+
+TEST_F(FakeEnvGetEnvTest, SignedNegativeInputParses)
+{
+    // Signed targets must still accept negative values (e.g. ROCPROFSYS_VERBOSE).
+    fake_env::setenv("FOO", "-3", 1);
+    EXPECT_EQ(fake_environment::get_env("FOO", 0), -3);
+}
+
+TEST_F(FakeEnvGetEnvTest, SignedOutOfRangeInputReturnsDefault)
+{
+    // 70000 does not fit in std::int16_t -> fall back to the default.
+    fake_env::setenv("FOO", "70000", 1);
+    EXPECT_EQ(fake_environment::get_env("FOO", std::int16_t{ 9 }), std::int16_t{ 9 });
+}
+
+TEST_F(FakeEnvGetEnvTest, IntegralTrailingGarbageReturnsDefault)
+{
+    fake_env::setenv("FOO", "42abc", 1);
+    EXPECT_EQ(fake_environment::get_env("FOO", 1), 1);
+}
+
+TEST_F(FakeEnvGetEnvTest, IntegralSurroundingWhitespaceParses)
+{
+    fake_env::setenv("FOO", "  42  ", 1);
+    EXPECT_EQ(fake_environment::get_env("FOO", 0), 42);
 }
 
 // ── to_env_string ─────────────────────────────────────────────────────────────

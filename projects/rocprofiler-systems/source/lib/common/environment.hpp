@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <charconv>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -119,22 +120,29 @@ private:
     {
         const char* raw = fetch_raw_env(env_id);
         if(!raw) return fallback;
-        try
+
+        // Trim surrounding whitespace so values such as " 42 " still parse.
+        constexpr std::string_view whitespace = " \t\n\r\f\v";
+        std::string_view           token{ raw };
+        const auto                 first = token.find_first_not_of(whitespace);
+        if(first == std::string_view::npos)
         {
-            if constexpr(std::is_same_v<Tp, int>)
-            {
-                return std::stoi(raw);
-            }
-            else
-            {
-                return static_cast<Tp>(std::stoll(raw));
-            }
-        } catch(const std::exception& exc)
-        {
-            LOG_ERROR("[get_env] Exception thrown converting getenv(\"{}\") = {} to "
-                      "integer: {}",
-                      env_id, raw, exc.what());
+            LOG_ERROR("[get_env] Cannot convert empty getenv(\"{}\") to integer", env_id);
+            return fallback;
         }
+        token = token.substr(first, token.find_last_not_of(whitespace) - first + 1);
+
+        // std::from_chars parses against the exact target type: it rejects a
+        // leading '-' for unsigned Tp and reports result_out_of_range, so
+        // negative or overflowing input falls back to the default instead of
+        // silently wrapping or truncating. Signed Tp still accepts '-'.
+        Tp          value{};
+        const auto* end      = token.data() + token.size();
+        const auto [ptr, ec] = std::from_chars(token.data(), end, value);
+        if(ec == std::errc{} && ptr == end) return value;
+
+        LOG_ERROR("[get_env] Failed to convert getenv(\"{}\") = \"{}\" to integer",
+                  env_id, raw);
         return fallback;
     }
 
