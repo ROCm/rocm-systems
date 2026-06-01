@@ -200,14 +200,9 @@ bool ncclAllReduceDdaIpcEligible(
   if (need > comm->ddaIpcScratchBytes) {
     return false;
   }
-  if ((count *  ncclTypeSize(datatype)) % 16) {
-    // 16 byte alignment as we do 16-byte loads in DDA kernel
-    return false;
-  }
   if ((count *  ncclTypeSize(datatype)) > kDdaFlatTreeThresholdBytes) {
-    if (count % comm->nRanks || ((count / comm->nRanks * ncclTypeSize(datatype)) % 16)) {
-      // In two-shot algo, each rank is reduces count/nRanks_ elements so we
-      // need to make sure that is 16-byte aligned
+    if (count % comm->nRanks) {
+      // Two-shot algorithm requires count to be divisible by nRanks
       return false;
     }	
   }

@@ -109,13 +109,14 @@ static inline __device__ void reduceScatter(
     const size_t idxStart,
     const size_t idxEnd,
     const size_t idxStride,
-    int pattern) {
+    int pattern,
+    const size_t countPerRank) {
   static_assert(is_supported_type_v<T>, "dda: unsupported element type");
   for (size_t idx = idxStart; idx < idxEnd; idx += idxStride) {
     // pattern = 2 performs reduce (one-shot)
     // pattern = 1 performs reduce-scatter (two-shot)	  
-    size_t srcIdx = (pattern == 2) ? idx : (idx + selfRank * idxEnd);
-    size_t destIdx = (pattern == 1) ? (idx + selfRank * idxEnd) : idx;
+    size_t srcIdx = (pattern == 2) ? idx : (idx + selfRank * countPerRank);
+    size_t destIdx = (pattern == 1) ? (idx + selfRank * countPerRank) : idx;
 
     uint4 sum{0, 0, 0, 0};
     if constexpr (hasAcc) {
@@ -147,13 +148,14 @@ static inline __device__ void allGather(
     const size_t idxStart,
     const size_t idxEnd,
     const size_t idxStride,
-    bool enable_offset) {
+    bool enable_offset,
+    const size_t countPerRank) {
   static_assert(is_supported_type_v<T>, "dda: unsupported element type");
   for (size_t idx = idxStart; idx < idxEnd; idx += idxStride) {
 #pragma unroll NRANKS
     for (int r = 0; r < NRANKS; ++r) {
       int srcRank = (selfRank + r) % NRANKS;
-      int destIdx = idx + srcRank * idxEnd;
+      int destIdx = idx + srcRank * countPerRank;
       int srcIdx;
       if (enable_offset) {
         srcIdx = destIdx;
