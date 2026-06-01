@@ -271,17 +271,21 @@ def validate_perfetto_trace(
     print_output: bool = False,
     check_counter_pairing: bool = False,
     timeout: int = 120,
-    match_by_label: bool = False,
 ) -> ValidationResult:
     """Validate a Perfetto trace file using validate-perfetto-proto.py.
+
+    Slice validation mode is inferred by validate-perfetto-proto.py: pass ``depths``
+    (-d) for positional row-by-row checks; omit ``depths`` for aggregate-by-name
+    (sum counts across depths). Omit ``counts`` (-c) in aggregate mode for
+    presence-only checks.
 
     Args:
         trace_path: Path to perfetto-trace.proto file
         tests_dir: Path to directory containing validation scripts
         categories: List of categories to filter by (-m flag)
         labels: Expected labels (-l flag)
-        counts: -c (per label); with ``match_by_label``, omit for presence-only
-        depths: -d (positional mode only); ignored when ``match_by_label`` is True
+        counts: Expected counts (-c flag)
+        depths: Expected depths (-d flag); omit for aggregate-by-name validation
         label_substrings: Expected label substrings (-s flag)
         counter_names: Counter names to validate (--counter-names flag)
         key_names: Debug key names to check (--key-names flag)
@@ -290,7 +294,6 @@ def validate_perfetto_trace(
         print_output: Whether to print trace data (-p flag)
         check_counter_pairing: Verify counter tracks have paired start/end entries
         timeout: Validation timeout in seconds
-        match_by_label: ``--match-by-label`` (match by name, sum across depth, non-positional)
 
     Returns:
         ValidationResult with validation status
@@ -316,8 +319,7 @@ def validate_perfetto_trace(
     if counts:
         args.extend(["-c"] + [str(c) for c in counts])
 
-    # Positional validation requires (-d); label matching aggregates across depths.
-    if depths and not match_by_label:
+    if depths:
         args.extend(["-d"] + [str(d) for d in depths])
 
     if counter_names:
@@ -337,9 +339,6 @@ def validate_perfetto_trace(
 
     if print_output:
         args.append("-p")
-
-    if match_by_label:
-        args.append("--match-by-label")
 
     return _run_validation_script("validate-perfetto-proto.py", args, tests_dir, timeout)
 

@@ -240,7 +240,6 @@ class TestOpenMPTarget(RocprofsysTest):
                     "Z4vmulIdEvPT_S1_S1_i_l51.kd",
                 ],
                 counts=[4, 4, 4],
-                match_by_label=True,
             )
 
 

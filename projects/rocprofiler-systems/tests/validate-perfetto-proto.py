@@ -103,7 +103,7 @@ def validate_perfetto_by_label(
     useSubstringForLabels=False,
 ):
     """
-    Validate slice rows by matching each expected label to trace names (see ``--match-by-label``).
+    Validate slice rows by matching each expected label to trace names (aggregate mode).
 
     For each expected label, find matching slice rows in ``data`` by label (exact or
     substring). Matching slice counts are summed **across all depths** so stack depth is
@@ -162,7 +162,12 @@ if __name__ == "__main__":
         "-c", "--counts", nargs="+", type=int, help="Expected counts", default=[]
     )
     parser.add_argument(
-        "-d", "--depths", nargs="+", type=int, help="Expected depths", default=[]
+        "-d",
+        "--depths",
+        nargs="+",
+        type=int,
+        help="Expected depths (positional mode). Omit for aggregate-by-name mode.",
+        default=[],
     )
     parser.add_argument(
         "-s",
@@ -208,11 +213,6 @@ if __name__ == "__main__":
         action="store_true",
         help="Verify each counter track has paired start/end entries (even count, last value is 0)",
     )
-    parser.add_argument(
-        "--match-by-label",
-        action="store_true",
-        help="Match slices by kernel name and sum counts across depths (non-positional)",
-    )
 
     args = parser.parse_args()
 
@@ -223,19 +223,31 @@ if __name__ == "__main__":
         )
 
     labels = args.labels if args.labels else args.label_substrings
+    aggregate_by_name = not args.depths
 
-    if args.match_by_label:
-        if not labels:
-            raise RuntimeError("Expected labels (-l or -s) are required")
-        if args.counts and len(args.counts) != len(labels):
-            raise RuntimeError(
-                "With --match-by-label, provide no -c (presence-only) or "
-                "one count per label"
+    if labels:
+        if aggregate_by_name:
+            count_mode = (
+                "presence-only" if not args.counts else "exact counts per label"
             )
-    elif len(labels) != len(args.counts) or len(labels) != len(args.depths):
-        raise RuntimeError(
-            "The same number of labels, counts, and depths must be specified"
-        )
+            print(
+                "Perfetto slice validation mode: aggregate-by-name "
+                f"(sum counts across depths, ignore unmatched slices, {count_mode})"
+            )
+            if args.counts and len(args.counts) != len(labels):
+                raise RuntimeError(
+                    "With -d omitted, provide no -c (presence-only) or one count per label"
+                )
+        else:
+            print(
+                "Perfetto slice validation mode: positional "
+                "(match label, count, and depth per trace row, in order)"
+            )
+            if len(labels) != len(args.counts) or len(labels) != len(args.depths):
+                raise RuntimeError(
+                    "The same number of labels, counts, and depths must be specified "
+                    "when -d is provided"
+                )
 
     if args.key_names or args.key_counts:
         if len(args.key_names) != len(args.key_counts):
@@ -284,21 +296,22 @@ if __name__ == "__main__":
     ret = 0
     try:
         use_substrings = bool(args.label_substrings)
-        if args.match_by_label:
-            validate_perfetto_by_label(
-                perfetto_data,
-                labels,
-                args.counts,
-                useSubstringForLabels=use_substrings,
-            )
-        else:
-            validate_perfetto(
-                perfetto_data,
-                labels,
-                args.counts,
-                args.depths,
-                useSubstringForLabels=use_substrings,
-            )
+        if labels:
+            if aggregate_by_name:
+                validate_perfetto_by_label(
+                    perfetto_data,
+                    labels,
+                    args.counts,
+                    useSubstringForLabels=use_substrings,
+                )
+            else:
+                validate_perfetto(
+                    perfetto_data,
+                    labels,
+                    args.counts,
+                    args.depths,
+                    useSubstringForLabels=use_substrings,
+                )
 
     except RuntimeError as e:
         print(f"Fail: {e}")
