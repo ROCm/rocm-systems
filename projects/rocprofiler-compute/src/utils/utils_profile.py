@@ -159,7 +159,7 @@ def run_prof(
         else:
             if app_cmd is None:
                 console_error(
-                    "APP_CMD, the workload's execuatble must be provided "
+                    "APP_CMD, the workload's executable must be provided "
                     "when not in live attach mode"
                 )
 

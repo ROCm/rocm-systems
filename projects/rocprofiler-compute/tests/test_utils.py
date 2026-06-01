@@ -4413,6 +4413,124 @@ def test_pc_sampling_profiler_cleanup_stale_output_noop_cases(
     )._cleanup_stale_output({"APP_CMD": "app"})
 
 
+@mock.patch(
+    "rocprof_compute_profile.pc_sampling_profiler.capture_subprocess_output"
+)
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_error")
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_debug")
+def test_pc_sampling_profiler_v3_live_attach(
+    mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path
+):
+    """v3 live-attach appends --pid and --attach-duration-msec, no APP_CMD '--'."""
+    with mock.patch("utils.utils_common._rocprof_cmd", "rocprof_cli_tool"):
+        options = ["--pid", "1234", "--attach-duration-msec", "500"]
+        mock_capture_subprocess.return_value = (True, "Success")
+
+        profiler = _make_pc_sampling_profiler(
+            "host_trap", 100, str(tmp_path), "rocprofv3"
+        )
+        profiler._launch(options)
+
+        assert mock_capture_subprocess.called
+        options_list = mock_capture_subprocess.call_args[0][0]
+        pid_idx = options_list.index("--pid")
+        assert options_list[pid_idx + 1] == "1234"
+        dur_idx = options_list.index("--attach-duration-msec")
+        assert options_list[dur_idx + 1] == "500"
+        assert "--" not in options_list
+        mock_console_error.assert_not_called()
+
+
+@mock.patch(
+    "rocprof_compute_profile.pc_sampling_profiler.capture_subprocess_output"
+)
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_debug")
+def test_pc_sampling_profiler_v3_live_attach_missing_pid_value(
+    mock_console_debug, mock_capture_subprocess, tmp_path, monkeypatch
+):
+    """v3 live-attach with --pid but no trailing value triggers console_error."""
+    console_error_calls = []
+
+    def mock_console_error(msg, exit=True):
+        console_error_calls.append(msg)
+        if exit:
+            raise RuntimeError("console_error called")
+
+    monkeypatch.setattr(
+        "rocprof_compute_profile.pc_sampling_profiler.console_error",
+        mock_console_error,
+    )
+
+    with mock.patch("utils.utils_common._rocprof_cmd", "rocprof_cli_tool"):
+        profiler = _make_pc_sampling_profiler(
+            "host_trap", 100, str(tmp_path), "rocprofv3"
+        )
+        with pytest.raises(RuntimeError, match="console_error called"):
+            profiler._launch(["--pid"])
+
+    assert console_error_calls == [
+        "--pid or --attach-duration-msec option not found in "
+        "profiler arguments for live attach mode"
+    ]
+    mock_capture_subprocess.assert_not_called()
+
+
+@mock.patch(
+    "rocprof_compute_profile.pc_sampling_profiler.capture_subprocess_output"
+)
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.perform_attach_detach")
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_error")
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_debug")
+def test_pc_sampling_profiler_sdk_live_attach(
+    mock_console_debug,
+    mock_console_error,
+    mock_perform_attach_detach,
+    mock_capture_subprocess,
+    tmp_path,
+):
+    """sdk live-attach calls perform_attach_detach and returns before launching."""
+    options = {
+        "ROCPROF_ATTACH_PID": "1234",
+        "ROCPROF_ATTACH_LIBRARY": "lib.so",
+    }
+
+    profiler = _make_pc_sampling_profiler(
+        "host_trap", 100, str(tmp_path), "rocprofiler-sdk"
+    )
+    profiler._launch(options)
+
+    mock_perform_attach_detach.assert_called_once()
+    mock_capture_subprocess.assert_not_called()
+    mock_console_error.assert_not_called()
+
+
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_log")
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_debug")
+def test_pc_sampling_profiler_run_cleanup_before_launch(
+    mock_console_debug, mock_console_log, tmp_path
+):
+    """run() removes stale output before launching and invokes _launch."""
+    stale = tmp_path / "out" / "pmc_1"
+    stale.mkdir(parents=True, exist_ok=True)
+    options = {"ROCPROF_OUTPUT_PATH": str(stale)}
+
+    profiler = _make_pc_sampling_profiler(
+        "host_trap", 100, str(tmp_path), "rocprofiler-sdk"
+    )
+
+    launch_calls = []
+
+    def fake_launch(profiler_options):
+        # Records whether cleanup already ran when _launch is invoked.
+        launch_calls.append(stale.exists())
+
+    profiler._launch = fake_launch
+    profiler.run(options)
+
+    assert launch_calls == [False]
+    assert not stale.exists()
+
+
 def test_set_parser():
     result = utils_common.parse_sets_yaml("gfx90a")
     assert "compute_thruput_util" in result
