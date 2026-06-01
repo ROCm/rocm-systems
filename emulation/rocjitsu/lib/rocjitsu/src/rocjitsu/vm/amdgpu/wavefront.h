@@ -352,6 +352,7 @@ public:
     vcc_ = 0;
     m0_ = 0;
     scratch_base_ = 0;
+    scratch_lane_size_ = 0;
     shared_aperture_base_ = 0;
     shared_aperture_limit_ = 0;
     private_aperture_base_ = 0;
@@ -390,9 +391,9 @@ protected:
   RegAllocation vgpr_alloc_; ///< Slice in CU's VGPR file.
 
 private:
-  uint64_t exec_ = ~0ULL;     ///< EXEC mask -- one bit per lane (1 = active).
-  uint64_t vcc_ = 0;          ///< Vector condition code (per-lane comparison result).
-  uint32_t m0_ = 0;           ///< M0 special register (misc addressing).
+  uint64_t exec_ = ~0ULL;          ///< EXEC mask -- one bit per lane (1 = active).
+  uint64_t vcc_ = 0;               ///< Vector condition code (per-lane comparison result).
+  uint32_t m0_ = 0;                ///< M0 special register (misc addressing).
   uint64_t scratch_base_ = 0;      ///< Per-wavefront scratch (private segment) base address.
   uint32_t scratch_lane_size_ = 0; ///< Per-lane scratch size (private_segment_fixed_size).
   uint64_t shared_aperture_base_ = 0;

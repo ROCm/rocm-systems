@@ -9,6 +9,8 @@
 
 #include <bit>
 #include <cassert>
+#include <cstring>
+#include <format>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -43,9 +45,9 @@ void L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, Mtype
     if ((total & (total - 1)) == 0 && total >= 1024) {
       os << std::format("L1V_READ_MTYPE_STATS total={} UC={} CC={} RW={} WB={} NT={} "
                         "last: addr={:#x} inst={} eff={} vmid={}",
-                        total, mtype_counts[0], mtype_counts[1], mtype_counts[2],
-                        mtype_counts[3], mtype_counts[4],
-                        addr, static_cast<int>(inst_mtype), static_cast<int>(mtype), vmid);
+                        total, mtype_counts[0], mtype_counts[1], mtype_counts[2], mtype_counts[3],
+                        mtype_counts[4], addr, static_cast<int>(inst_mtype),
+                        static_cast<int>(mtype), vmid);
     }
   });
 
@@ -140,9 +142,7 @@ void L1VectorCache::store(const uint64_t *addrs, uint64_t lane_mask, uint32_t el
   }
 }
 
-void L1VectorCache::flush_all() {
-  cache_.invalidate_all();
-}
+void L1VectorCache::flush_all() { cache_.invalidate_all(); }
 
 } // namespace amdgpu
 } // namespace rocjitsu

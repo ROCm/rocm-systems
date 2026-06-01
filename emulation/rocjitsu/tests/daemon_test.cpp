@@ -33,7 +33,7 @@ struct ProcessResult {
 };
 
 bool socket_exists(const std::string &path) {
-  struct stat st {};
+  struct stat st{};
   return stat(path.c_str(), &st) == 0 && S_ISSOCK(st.st_mode);
 }
 
@@ -69,7 +69,7 @@ protected:
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
-    FAIL() << "daemon socket not created after 10s";
+    FAIL() << "daemon socket not created after 30s";
   }
 
   void TearDown() override {

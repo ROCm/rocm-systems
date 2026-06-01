@@ -6,6 +6,7 @@
 #include "util/log.h"
 
 #include <atomic>
+#include <cstring>
 #include <format>
 
 namespace rocjitsu {
@@ -87,7 +88,8 @@ void CompletionTracker::fire_signal(const DispatchEntry &entry) {
   constexpr uint32_t EVENT_ID_OFF = 24;
 
   if (memory_) {
-    auto *sig_page = memory_->resolve_host_ptr(entry.completion_signal + SIG_VAL_OFF, entry.process_id);
+    auto *sig_page =
+        memory_->resolve_host_ptr(entry.completion_signal + SIG_VAL_OFF, entry.process_id);
 
     util::Logger::cp([&](auto &os) {
       auto *page0 = memory_->resolve_host_ptr(entry.completion_signal, entry.process_id);
@@ -107,8 +109,8 @@ void CompletionTracker::fire_signal(const DispatchEntry &entry) {
       os << std::format("SIGNAL_DUMP d={} sig={:#x} pid={} host_page={} kind={:#x} val={} "
                         "mailbox={:#x} event_id={}",
                         entry.dispatch_id, entry.completion_signal, entry.process_id,
-                        page0 != nullptr, kind_raw, static_cast<int64_t>(val_raw),
-                        mbx_raw, eid_raw);
+                        page0 != nullptr, kind_raw, static_cast<int64_t>(val_raw), mbx_raw,
+                        eid_raw);
     });
 
     int64_t old = 0;
@@ -116,12 +118,13 @@ void CompletionTracker::fire_signal(const DispatchEntry &entry) {
     if (sig_page) {
       auto *sig_ptr = reinterpret_cast<uint64_t *>(
           sig_page + ((entry.completion_signal + SIG_VAL_OFF) & 0xFFF));
-      old = static_cast<int64_t>(
-          std::atomic_ref<uint64_t>(*sig_ptr).load(std::memory_order_relaxed));
+      old =
+          static_cast<int64_t>(std::atomic_ref<uint64_t>(*sig_ptr).load(std::memory_order_relaxed));
       new_val = static_cast<uint64_t>(old - 1);
       std::atomic_ref<uint64_t>(*sig_ptr).store(new_val, std::memory_order_release);
     } else {
-      old = static_cast<int64_t>(memory_->read64(entry.completion_signal + SIG_VAL_OFF, entry.process_id));
+      old = static_cast<int64_t>(
+          memory_->read64(entry.completion_signal + SIG_VAL_OFF, entry.process_id));
       new_val = static_cast<uint64_t>(old - 1);
       memory_->write64(entry.completion_signal + SIG_VAL_OFF, new_val, entry.process_id);
     }
@@ -132,16 +135,15 @@ void CompletionTracker::fire_signal(const DispatchEntry &entry) {
     util::Logger::cp([&](auto &os) {
       os << std::format("FIRE_SIGNAL_RESULT d={} old_val={} new_val={} mailbox={:#x} event_id={} "
                         "has_interrupt_cb={}",
-                        entry.dispatch_id, old, static_cast<int64_t>(new_val),
-                        mailbox_ptr, event_id, interrupt_cb_ != nullptr);
+                        entry.dispatch_id, old, static_cast<int64_t>(new_val), mailbox_ptr,
+                        event_id, interrupt_cb_ != nullptr);
     });
 
     if (mailbox_ptr != 0) {
       auto *mb_page = memory_->resolve_host_ptr(mailbox_ptr, entry.process_id);
       if (mb_page) {
         auto *mb_ptr = reinterpret_cast<uint64_t *>(mb_page + (mailbox_ptr & 0xFFF));
-        std::atomic_ref<uint64_t>(*mb_ptr).store(uint64_t(event_id),
-                                                 std::memory_order_release);
+        std::atomic_ref<uint64_t>(*mb_ptr).store(uint64_t(event_id), std::memory_order_release);
       } else {
         memory_->write64(mailbox_ptr, uint64_t(event_id), entry.process_id);
       }

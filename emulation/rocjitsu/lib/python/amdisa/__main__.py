@@ -31,22 +31,22 @@ from amdisa.legalization_codegen import emit_all as emit_legalization
 from amdisa.semantics import derive_all_semantics
 
 _ENCODING_TRANSLATOR_PAIRS = [
-    ('cdna4', 'cdna3'),
-    ('cdna4', 'rdna4'),
-    ('cdna4', 'rdna3'),
+    ("cdna4", "cdna3"),
+    ("cdna4", "rdna4"),
+    ("cdna4", "rdna3"),
 ]
 
 _PROFILES = {
-    'cdna': CdnaProfile,
-    'cdna1': Cdna1Profile,
-    'cdna2': Cdna2Profile,
-    'cdna3': CdnaProfile,
-    'cdna4': CdnaProfile,
-    'rdna1': Rdna1Profile,
-    'rdna2': Rdna2Profile,
-    'rdna3': Rdna3Profile,
-    'rdna3.5': Rdna3_5Profile,
-    'rdna4': Rdna4Profile,
+    "cdna": CdnaProfile,
+    "cdna1": Cdna1Profile,
+    "cdna2": Cdna2Profile,
+    "cdna3": CdnaProfile,
+    "cdna4": CdnaProfile,
+    "rdna1": Rdna1Profile,
+    "rdna2": Rdna2Profile,
+    "rdna3": Rdna3Profile,
+    "rdna3.5": Rdna3_5Profile,
+    "rdna4": Rdna4Profile,
 }
 
 
@@ -63,36 +63,36 @@ def _detect_profile(isa_xml: str) -> str:
     parts = arch_name_raw.split()
     family = parts[1].lower()
     version = parts[2]
-    key = f'{family}{version}'
+    key = f"{family}{version}"
     if key in _PROFILES:
         return key
     key_underscore = f'{family}{version.replace(".", "_")}'
     if key_underscore in _PROFILES:
         return key_underscore
-    if family == 'cdna':
-        return 'cdna'
-    if family == 'rdna':
-        major = int(version.split('.')[0])
+    if family == "cdna":
+        return "cdna"
+    if family == "rdna":
+        major = int(version.split(".")[0])
         if major >= 4:
-            return 'rdna4'
+            return "rdna4"
         if major >= 3:
-            return 'rdna3'
-        return 'rdna1'
-    return 'cdna'
+            return "rdna3"
+        return "rdna1"
+    return "cdna"
 
 
 def _run_multi(args) -> None:
     """Multi-ISA mode: parse all XMLs, run CrossIsaAnalyzer, generate shared + per-ISA."""
     specs = []
     for entry in args.multi:
-        if ':' not in entry:
+        if ":" not in entry:
             print(
-                f'error: --multi entry must be name:xml_path, got: {entry}',
+                f"error: --multi entry must be name:xml_path, got: {entry}",
                 file=sys.stderr,
             )
             sys.exit(1)
-        name, xml_path = entry.split(':', 1)
-        profile_key = name.replace('.', '_')
+        name, xml_path = entry.split(":", 1)
+        profile_key = name.replace(".", "_")
         if profile_key not in _PROFILES:
             profile_key = _detect_profile(xml_path)
         profile = _PROFILES[profile_key]()
@@ -104,9 +104,9 @@ def _run_multi(args) -> None:
     plan = analyzer.analyze(specs)
 
     print(
-        f'Cross-ISA analysis: {plan.total_universal} universal, '
-        f'{plan.total_family_shared} family-shared, '
-        f'{plan.total_exclusive} exclusive',
+        f"Cross-ISA analysis: {plan.total_universal} universal, "
+        f"{plan.total_family_shared} family-shared, "
+        f"{plan.total_exclusive} exclusive",
         file=sys.stderr,
     )
 
@@ -137,8 +137,10 @@ def _run_multi(args) -> None:
     if args.gen_dbt:
         dbt_output = args.dbt_output
         if not dbt_output:
-            print('error: --dbt-output is required when generating DBT tables with --multi',
-                  file=sys.stderr)
+            print(
+                "error: --dbt-output is required when generating DBT tables with --multi",
+                file=sys.stderr,
+            )
             sys.exit(1)
 
         leg_gen = LegalizationGenerator(specs)
@@ -147,13 +149,13 @@ def _run_multi(args) -> None:
         for src, dst, entries in results:
             counts = leg_gen.summary(entries)
             print(
-                f'  {src} -> {dst}: {len(entries)} entries '
+                f"  {src} -> {dst}: {len(entries)} entries "
                 f'({counts["identity"]} identity, {counts["substitute"]} substitute, '
                 f'{counts["lower"]} lower, {counts["expand"]} expand, '
                 f'{counts["illegal"]} illegal)',
                 file=sys.stderr,
             )
-        print(f'Generated {len(generated)} files in {dbt_output}', file=sys.stderr)
+        print(f"Generated {len(generated)} files in {dbt_output}", file=sys.stderr)
 
         generate_encoding_fields(specs, dbt_output)
         spec_map = {name: (spec, sem) for name, spec, sem in specs}
@@ -173,14 +175,14 @@ def main() -> None:
     )
     arg_parser.add_argument(
         "isafile",
-        nargs='?',
+        nargs="?",
         default=None,
         help="XML file with machine-readable AMD GPU ISA specification",
     )
     arg_parser.add_argument(
         "--multi",
-        nargs='+',
-        metavar='NAME:XML',
+        nargs="+",
+        metavar="NAME:XML",
         help="Multi-ISA mode: parse all XMLs and generate shared execute() templates. "
         "Each argument is name:xml_path (e.g., cdna1:/path/to/cdna1.xml).",
     )
@@ -212,7 +214,7 @@ def main() -> None:
         return
 
     if not args.isafile:
-        print('error: isafile required in single-ISA mode', file=sys.stderr)
+        print("error: isafile required in single-ISA mode", file=sys.stderr)
         sys.exit(1)
 
     profile_key = _detect_profile(args.isafile)
@@ -225,5 +227,5 @@ def main() -> None:
         code_gen.gen_all()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

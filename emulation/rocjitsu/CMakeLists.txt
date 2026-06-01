@@ -243,10 +243,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         TARGETS rocjitsu_kmd_shim
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     )
-    install(
-        TARGETS rocjitsu_bin
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-    )
+    install(TARGETS rocjitsu_bin RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 
 # Config files and schemas: share/rocjitsu/
