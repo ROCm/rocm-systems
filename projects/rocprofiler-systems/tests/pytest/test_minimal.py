@@ -10,7 +10,7 @@ import pytest
 from pathlib import Path
 from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.minimal, pytest.mark.ci_enable]
+pytestmark = [pytest.mark.minimal]
 
 # =============================================================================
 # Fixtures
