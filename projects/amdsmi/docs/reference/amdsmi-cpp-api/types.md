@@ -7,6 +7,15 @@ myst:
 
 # AMD SMI C/C++ types
 
+Data types used across the AMD SMI API, including enums for statuses, library
+initialization flags, device states, and device capabilities. This reference
+includes:
+
+- [Enums](#enumerations)
+- [Structs](#structs)
+- [Unions](#unions)
+- [Typedefs](#typedefs)
+
 ## Enumerations
 
 ```{amdsmi-doxygen}

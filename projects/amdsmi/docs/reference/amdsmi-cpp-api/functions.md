@@ -6,7 +6,9 @@ myst:
 
 # AMD SMI C/C++ functions
 
-The AMD SMI library's API can be organized into the following categories based on functionality.
+AMD SMI library functions grouped by category. Each function returns an
+{c:type}`amdsmi_status_t` status code. Some functions are not supported on
+all platforms.
 
 <!-- These categories/groups are marked by "@defgroup" in amdsmi.h -->
 
