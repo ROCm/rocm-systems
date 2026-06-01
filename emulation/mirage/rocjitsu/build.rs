@@ -35,8 +35,6 @@ fn main() {
     println!("cargo:rerun-if-env-changed=ROCJITSU_KMD_LIB");
     println!("cargo:rerun-if-env-changed=ROCJITSU_LIB");
     println!("cargo:rerun-if-env-changed=ROCJITSU_SCHEMA_FBS");
-    println!("cargo:rerun-if-env-changed=ROCJITSU_CDNA3_KMD");
-    println!("cargo:rerun-if-env-changed=ROCJITSU_CDNA4_KMD");
     println!("cargo:rerun-if-env-changed=MIRAGE_ROCJITSU_BUILD");
 
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR is set by cargo"));
@@ -85,24 +83,6 @@ fn main() {
             "ROCJITSU_SCHEMA_FBS",
             root.as_deref(),
             "schemas/simulation_config.fbs",
-        ),
-    );
-    stage_asset(
-        "ROCJITSU_CDNA3_KMD_PATH",
-        &out_dir.join("amdgpu_cdna3_kmd.json"),
-        find_in_root(
-            "ROCJITSU_CDNA3_KMD",
-            root.as_deref(),
-            "configs/amdgpu_cdna3_kmd.json",
-        ),
-    );
-    stage_asset(
-        "ROCJITSU_CDNA4_KMD_PATH",
-        &out_dir.join("amdgpu_cdna4_kmd.json"),
-        find_in_root(
-            "ROCJITSU_CDNA4_KMD",
-            root.as_deref(),
-            "configs/amdgpu_cdna4_kmd.json",
         ),
     );
 }

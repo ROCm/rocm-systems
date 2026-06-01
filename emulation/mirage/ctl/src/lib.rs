@@ -96,9 +96,9 @@ pub enum ProfileCmd {
         /// noop).
         #[arg(long)]
         emulator: Option<String>,
-        /// Agent name from `<MIRAGE_CONFIG>/agent/` (e.g. `cdna3`,
-        /// `cdna4`). Defaults to `cdna4`.
-        #[arg(long, default_value = "cdna4")]
+        /// Agent name from `<MIRAGE_CONFIG>/agent/` (e.g. `MI300X`,
+        /// `MI350X`). Defaults to `MI350X`.
+        #[arg(long, default_value = "MI350X")]
         agent: String,
         /// Number of racks.
         #[arg(long, default_value_t = 1)]
@@ -319,9 +319,6 @@ pub async fn dispatch<C: MirageCtl + 'static>(
     }
     if let Err(e) = mirage_core::topology::store::ensure_builtins(false) {
         tracing::warn!("failed to preload builtin topologies: {e:#}");
-    }
-    if let Err(e) = mirage_rocjitsu::ensure_agents(false) {
-        tracing::warn!("failed to preload rocjitsu agents: {e:#}");
     }
     if let Err(e) = mirage_rocjitsu::ensure_assets(false) {
         tracing::warn!("failed to extract rocjitsu assets: {e:#}");
@@ -894,11 +891,11 @@ fn profile_wizard(
         .interact_text()?;
     let known_agents = mirage_core::agent::store::list().unwrap_or_default();
     let agent: String = if known_agents.is_empty() {
-        "cdna4".to_string()
+        "MI350X".to_string()
     } else {
         let default_idx = known_agents
             .iter()
-            .position(|n| n == "cdna4")
+            .position(|n| n == "MI350X")
             .unwrap_or(0);
         let pick = Select::with_theme(&theme)
             .with_prompt("Agent")
@@ -1034,8 +1031,7 @@ async fn state_cmd<C: MirageCtl + 'static>(
 ) -> anyhow::Result<ExitCode> {
     match cmd {
         StateCmd::Builtins => {
-            let mut agents = mirage_core::agent::store::ensure_builtins(true)?;
-            agents.extend(mirage_rocjitsu::ensure_agents(true)?);
+            let agents = mirage_core::agent::store::ensure_builtins(true)?;
             let topologies = mirage_core::topology::store::ensure_builtins(true)?;
             let assets = mirage_rocjitsu::ensure_assets(true)?;
             if json {

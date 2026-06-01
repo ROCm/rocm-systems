@@ -30,7 +30,24 @@ use tempfile::TempDir;
 /// when the full rocjitsu KMD-interposer pipeline is present.
 fn rocjitsu_env() -> Option<(PathBuf, PathBuf, PathBuf)> {
     let kmd = mirage_rocjitsu::kmd_preload()?;
-    let (cfg, schema) = mirage_rocjitsu::kmd_config("cdna4")?;
+    // Build a minimal EmulatorDef referencing a builtin agent so
+    // rocjitsu can synthesise the sim config.
+    let _ = mirage_core::agent::store::ensure_builtins(false).ok()?;
+    let agents = mirage_core::agent::store::list().ok()?;
+    let agent_name = agents.into_iter().next()?;
+    let def = mirage_core::emulator::EmulatorDef {
+        emulator: "rocjitsu".to_string(),
+        plugins: Default::default(),
+        exec_mode: mirage_core::emulator::ExecMode::Functional,
+        options: Default::default(),
+        topology: mirage_core::common::MaybeRef::Owned(mirage_core::topology::TopologyDef {
+            racks: 1,
+            nodes_per_rack: 1,
+            gpus_per_node: 1,
+            agent: mirage_core::common::MaybeRef::Ref(agent_name),
+        }),
+    };
+    let (cfg, schema) = mirage_rocjitsu::kmd_config(&def).ok()?;
     Some((kmd, cfg, schema))
 }
 
@@ -96,15 +113,13 @@ fn fixtures_dir() -> PathBuf {
 }
 
 /// Compile `tiny_hip.hip` with `hipcc` into `out_dir/tiny_hip`,
-/// targeting the offload arch that matches our cdna4 KMD config.
+/// targeting the offload arch that matches our MI350X KMD config.
 /// Returns the binary path on success.
 fn compile_tiny_hip(out_dir: &Path) -> PathBuf {
     let src = fixtures_dir().join("tiny_hip.hip");
     let bin = out_dir.join("tiny_hip");
-    let arch = mirage_rocjitsu::hipcc_offload_arch("cdna4")
-        .expect("cdna4 must map to a hipcc offload arch");
     let status = Command::new("hipcc")
-        .arg(format!("--offload-arch={arch}"))
+        .arg("--offload-arch=gfx950")
         .arg("-std=c++20")
         .arg(&src)
         .arg("-o")

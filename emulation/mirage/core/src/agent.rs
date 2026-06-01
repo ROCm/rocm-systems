@@ -249,17 +249,23 @@ pub mod store {
     /// Write all builtin agents to disk.
     ///
     /// If `force` is true, existing files are overwritten. Otherwise
-    /// only missing agents are written.
+    /// only missing agents are written. Embedded JSON is parsed as
+    /// an [`AgentDef`] and reserialized so the on-disk file contains
+    /// only fields mirage understands.
     pub fn ensure_builtins(force: bool) -> Result<Vec<(String, bool)>> {
         let mut report = Vec::new();
-        for (name, build) in crate::registry::builtin_agents() {
+        for (name, json) in crate::registry::builtin_agents() {
             let p = crate::paths::agent_path(name);
-            let exists = p.exists();
-            if exists && !force {
+            if p.exists() && !force {
                 report.push((name.to_string(), false));
                 continue;
             }
-            crate::state::write_json(&p, &build())?;
+            let agent: AgentDef = serde_json::from_str(json).map_err(|e| {
+                MirageError::Other(format!(
+                    "builtin agent {name}: parse embedded JSON as AgentDef: {e}"
+                ))
+            })?;
+            crate::state::write_json(&p, &agent)?;
             report.push((name.to_string(), true));
         }
         Ok(report)

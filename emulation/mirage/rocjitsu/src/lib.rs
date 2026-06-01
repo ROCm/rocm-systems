@@ -7,8 +7,6 @@
 //!   interposer that routes real HIP/HSA syscalls into the simulator.
 //! * [`SCHEMA_FBS_BYTES`] — `simulation_config.fbs`, the flatbuffer
 //!   schema the kmd config is validated against.
-//! * [`CDNA3_KMD_BYTES`], [`CDNA4_KMD_BYTES`] — bundled simulation
-//!   configs, exposed as default rocjitsu topologies.
 //!
 //! See `build.rs` for how these assets are located/built at compile
 //! time and the embedding fallback when the rocjitsu source tree is
@@ -17,15 +15,21 @@
 //! Runtime entry points:
 //!
 //! * [`ensure_assets`] extracts the kmd library + schema into
-//!   `<MIRAGE_STATE>/rocjitsu/` so they can be referenced via
-//!   filesystem paths (e.g. as `LD_PRELOAD`).
-//! * [`ensure_agents`] writes the cdna3/cdna4 simulation configs
-//!   into `<MIRAGE_CONFIG>/topology/` so they appear alongside the
-//!   generic mirage builtin topologies.
+//!   `<MIRAGE_CACHE>/emulator/rocjitsu/`.
+//! * [`kmd_config`] synthesises a runtime `SimulationConfig` JSON
+//!   from an [`mirage_core::emulator::EmulatorDef`] by resolving its
+//!   topology + agent references and wrapping them with rocjitsu's
+//!   required runtime fields.
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
-use mirage_core::error::Result;
+use mirage_core::agent::AgentDef;
+use mirage_core::common::MaybeRef;
+use mirage_core::emulator::{EmulatorDef, ExecMode};
+use mirage_core::error::{MirageError, Result};
+use mirage_core::topology::TopologyDef;
 
 /// `librocjitsu_kmd.so` bytes. Empty when the build script could not
 /// locate or build the artifact.
@@ -38,14 +42,6 @@ pub static LIB_BYTES: &[u8] = include_bytes!(env!("ROCJITSU_LIB_BYTES_PATH"));
 /// `simulation_config.fbs` schema bytes. Empty when not available at
 /// build time.
 pub static SCHEMA_FBS_BYTES: &[u8] = include_bytes!(env!("ROCJITSU_SCHEMA_FBS_PATH"));
-
-/// Bundled `amdgpu_cdna3_kmd.json` config. Empty when not available
-/// at build time.
-pub static CDNA3_KMD_BYTES: &[u8] = include_bytes!(env!("ROCJITSU_CDNA3_KMD_PATH"));
-
-/// Bundled `amdgpu_cdna4_kmd.json` config. Empty when not available
-/// at build time.
-pub static CDNA4_KMD_BYTES: &[u8] = include_bytes!(env!("ROCJITSU_CDNA4_KMD_PATH"));
 
 /// Subdirectory under `<MIRAGE_CACHE>/emulator/` where the extracted
 /// runtime assets (`librocjitsu_kmd.so`, `librocjitsu.so`,
@@ -60,12 +56,6 @@ pub const LIB_NAME: &str = "librocjitsu.so";
 
 /// Name used for the extracted schema on disk.
 pub const SCHEMA_FBS_NAME: &str = "simulation_config.fbs";
-
-/// Name (without `.json` suffix) of the cdna3 builtin agent.
-pub const CDNA3_AGENT_NAME: &str = "cdna3";
-
-/// Name (without `.json` suffix) of the cdna4 builtin agent.
-pub const CDNA4_AGENT_NAME: &str = "cdna4";
 
 /// Directory where extracted runtime assets are stored
 /// (`<MIRAGE_CACHE>/emulator/rocjitsu/`).
@@ -124,58 +114,14 @@ pub fn ensure_assets(force: bool) -> Result<Vec<(String, bool)>> {
     Ok(report)
 }
 
-/// Write the bundled rocjitsu kmd configs into the mirage agent
-/// directory (`<MIRAGE_CONFIG>/agent/`).
-///
-/// The embedded blobs are full simulation configs (max_ticks,
-/// num_threads, vm, topology, ...) of which mirage's
-/// [`mirage_core::agent::AgentDef`] captures the `vm` + `topology`
-/// subset. We deserialize directly from the blob (extra fields are
-/// ignored by serde) and reserialize so the on-disk file contains
-/// only the fields mirage understands.
-///
-/// If `force` is true, existing files are overwritten. Otherwise
-/// only missing files are written. Empty embedded configs are skipped.
-pub fn ensure_agents(force: bool) -> Result<Vec<(String, bool)>> {
-    let mut report = Vec::new();
-    for (name, bytes) in builtin_agents() {
-        if bytes.is_empty() {
-            report.push((name.to_string(), false));
-            continue;
-        }
-        let path = mirage_core::paths::agent_path(name);
-        if path.exists() && !force {
-            report.push((name.to_string(), false));
-            continue;
-        }
-        let agent: mirage_core::agent::AgentDef =
-            serde_json::from_slice(bytes).map_err(|e| {
-                mirage_core::error::MirageError::Other(format!(
-                    "rocjitsu agent {name}: parse embedded JSON as AgentDef: {e}"
-                ))
-            })?;
-        mirage_core::state::write_json(&path, &agent)?;
-        report.push((name.to_string(), true));
-    }
-    Ok(report)
-}
-
-/// The `(name, bytes)` pairs that [`ensure_agents`] writes.
-pub fn builtin_agents() -> &'static [(&'static str, &'static [u8])] {
-    static ENTRIES: [(&str, &[u8]); 2] = [
-        (CDNA3_AGENT_NAME, CDNA3_KMD_BYTES),
-        (CDNA4_AGENT_NAME, CDNA4_KMD_BYTES),
-    ];
-    &ENTRIES
-}
-
 /// Returns the path mirage should pass as `LD_PRELOAD` to an
 /// rocjitsu-emulated workload.
 ///
-/// Prefers the extracted on-disk copy under `<MIRAGE_STATE>/rocjitsu/`
-/// (after [`ensure_assets`] has run); falls back to probing the
-/// rocjitsu source/build/install layout for backwards compatibility
-/// with workspaces that don't use the embedded copy.
+/// Prefers the extracted on-disk copy under
+/// `<MIRAGE_CACHE>/emulator/rocjitsu/` (after [`ensure_assets`] has
+/// run); falls back to probing the rocjitsu source/build/install
+/// layout for backwards compatibility with workspaces that don't
+/// use the embedded copy.
 pub fn kmd_preload() -> Option<PathBuf> {
     let extracted = kmd_lib_path();
     if extracted.exists() {
@@ -197,95 +143,64 @@ pub fn kmd_preload() -> Option<PathBuf> {
     candidates.into_iter().find(|p| p.exists())
 }
 
-/// Returns the `(config, schema)` pair the LD_PRELOAD'd workload
-/// should advertise as `RJ_CONFIG` / `RJ_SCHEMA` for `arch` (`"cdna3"`
-/// or `"cdna4"`).
+/// Synthesise a rocjitsu `SimulationConfig` JSON file from the given
+/// [`EmulatorDef`] and return `(config_path, schema_path)` ready to
+/// be passed to the LD_PRELOAD'd workload as `RJ_CONFIG` /
+/// `RJ_SCHEMA`.
 ///
 /// The agent JSON under `<MIRAGE_CONFIG>/agent/` only stores the
 /// `vm` + `topology` subset that mirage owns. rocjitsu's KMD shim
-/// however expects a full simulation_config (max_ticks, num_threads,
-/// exec_mode, vm, topology). We materialize that runtime wrapper
-/// into `<MIRAGE_CACHE>/emulator/rocjitsu/<arch>_sim.json` whenever
-/// the agent file is newer (or the wrapper is missing), so the
-/// user-visible agent file stays clean.
+/// expects a full `SimulationConfig` (max_ticks, num_threads,
+/// exec_mode, vm, topology). This function:
 ///
-/// Falls back to the rocjitsu source tree for environments that
-/// haven't extracted the embedded assets.
-pub fn kmd_config(arch: &str) -> Option<(PathBuf, PathBuf)> {
-    let (agent_name, fallback_cfg_name) = match arch {
-        "cdna3" => (CDNA3_AGENT_NAME, "amdgpu_cdna3_kmd.json"),
-        "cdna4" => (CDNA4_AGENT_NAME, "amdgpu_cdna4_kmd.json"),
-        _ => return None,
+/// 1. Resolves `def.topology` (and its inner `agent`), following
+///    [`MaybeRef`] references against the on-disk
+///    `<MIRAGE_CONFIG>/{topology,agent}/` stores.
+/// 2. Wraps the agent's `vm` + `topology` with rocjitsu runtime
+///    fields (`exec_mode` is taken from `def.exec_mode`; the other
+///    fields use sane defaults).
+/// 3. Writes the result to
+///    `<MIRAGE_CACHE>/emulator/rocjitsu/sim_<hash>.json`, keyed on
+///    the JSON content so identical configs share a file and stale
+///    files are never overwritten in-place.
+pub fn kmd_config(def: &EmulatorDef) -> Result<(PathBuf, PathBuf)> {
+    let topology: TopologyDef = match &def.topology {
+        MaybeRef::Owned(t) => t.clone(),
+        MaybeRef::Ref(name) => mirage_core::topology::store::get(name)?,
     };
-    let agent_file = mirage_core::paths::agent_path(agent_name);
-    let schema = schema_fbs_path();
-    if agent_file.exists() && schema.exists() {
-        let sim_path = sim_config_path(arch);
-        if let Err(e) = materialize_sim_config(&agent_file, &sim_path) {
-            tracing::warn!("failed to materialize rocjitsu sim config for {arch}: {e:#}");
-        } else {
-            return Some((sim_path, schema));
-        }
-    }
-    let root = root();
-    let cfg = root.join("configs").join(fallback_cfg_name);
-    let schema = root.join("schemas").join(SCHEMA_FBS_NAME);
-    if cfg.exists() && schema.exists() {
-        Some((cfg, schema))
-    } else {
-        None
-    }
-}
-
-fn sim_config_path(arch: &str) -> PathBuf {
-    asset_dir().join(format!("{arch}_sim.json"))
-}
-
-/// Rewrap the mirage `AgentDef` JSON at `agent_file` into a full
-/// rocjitsu `SimulationConfig` JSON at `out`. Re-runs only when the
-/// agent file is newer than (or `out` doesn't exist).
-fn materialize_sim_config(agent_file: &Path, out: &Path) -> Result<()> {
-    let stale = match (std::fs::metadata(agent_file), std::fs::metadata(out)) {
-        (Ok(a), Ok(b)) => match (a.modified(), b.modified()) {
-            (Ok(am), Ok(bm)) => am > bm,
-            _ => true,
-        },
-        (Ok(_), Err(_)) => true,
-        _ => true,
+    let agent: AgentDef = match &topology.agent {
+        MaybeRef::Owned(a) => a.clone(),
+        MaybeRef::Ref(name) => mirage_core::agent::store::get(name)?,
     };
-    if !stale {
-        return Ok(());
-    }
-    let agent: serde_json::Value = serde_json::from_slice(&std::fs::read(agent_file).map_err(
-        |e| mirage_core::error::MirageError::Io {
-            path: agent_file.to_path_buf(),
-            source: e,
-        },
-    )?)
-    .map_err(|e| {
-        mirage_core::error::MirageError::Other(format!(
-            "rocjitsu materialize_sim_config: parse {}: {e}",
-            agent_file.display()
-        ))
-    })?;
+    let exec_mode = match def.exec_mode {
+        ExecMode::Functional => "functional",
+        ExecMode::Clocked => "clocked",
+    };
     let sim = serde_json::json!({
         "max_ticks": 100000u64,
         "num_threads": 1u32,
-        "exec_mode": "functional",
-        "vm": agent.get("vm").cloned().unwrap_or(serde_json::json!({})),
-        "topology": agent.get("topology").cloned().unwrap_or(serde_json::json!({})),
+        "exec_mode": exec_mode,
+        "vm": agent.vm,
+        "topology": agent.topology,
     });
-    mirage_core::state::write_json(out, &sim)
-}
-
-/// The hipcc `--offload-arch` value that matches the `arch` preset
-/// used by [`kmd_config`].
-pub fn hipcc_offload_arch(arch: &str) -> Option<&'static str> {
-    match arch {
-        "cdna3" => Some("gfx942"),
-        "cdna4" => Some("gfx950"),
-        _ => None,
+    let bytes = serde_json::to_vec_pretty(&sim).map_err(|e| {
+        MirageError::Other(format!("rocjitsu kmd_config: serialize sim config: {e}"))
+    })?;
+    let mut hasher = DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    let key = format!("{:016x}", hasher.finish());
+    let cfg = asset_dir().join(format!("sim_{key}.json"));
+    if !cfg.exists() {
+        mirage_core::state::write_bytes(&cfg, &bytes)?;
     }
+    let schema = schema_fbs_path();
+    if !schema.exists() {
+        return Err(MirageError::Other(format!(
+            "rocjitsu schema not extracted: {} missing (run `mirage state builtins`)",
+            schema.display()
+        )));
+    }
+    Ok((cfg, schema))
 }
 
 /// Best-effort discovery of the rocjitsu source/install root. Used
@@ -342,19 +257,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn agent_names_are_stable() {
-        let names: Vec<&str> = builtin_agents().iter().map(|(n, _)| *n).collect();
-        assert_eq!(names, vec!["cdna3", "cdna4"]);
-    }
-
-    #[test]
-    fn hipcc_offload_arch_known() {
-        assert_eq!(hipcc_offload_arch("cdna3"), Some("gfx942"));
-        assert_eq!(hipcc_offload_arch("cdna4"), Some("gfx950"));
-        assert_eq!(hipcc_offload_arch("rdna99"), None);
-    }
-
-    #[test]
     fn ensure_assets_writes_or_skips() {
         let _g = mirage_core::paths::test_env_lock();
         let tmp = tempfile::tempdir().unwrap();
@@ -375,30 +277,6 @@ mod tests {
                 assert!(written, "{name} should have been written on first run");
                 assert!(path.exists());
             }
-        }
-    }
-
-    #[test]
-    fn ensure_agents_writes_then_skips() {
-        let _g = mirage_core::paths::test_env_lock();
-        let tmp = tempfile::tempdir().unwrap();
-        mirage_core::paths::set_test_root(tmp.path());
-        let first = ensure_agents(false).unwrap();
-        for (name, written) in &first {
-            let bytes_empty = match name.as_str() {
-                CDNA3_AGENT_NAME => CDNA3_KMD_BYTES.is_empty(),
-                CDNA4_AGENT_NAME => CDNA4_KMD_BYTES.is_empty(),
-                _ => unreachable!(),
-            };
-            if bytes_empty {
-                assert!(!written);
-            } else {
-                assert!(written);
-            }
-        }
-        let second = ensure_agents(false).unwrap();
-        for (_, w) in &second {
-            assert!(!w, "second run should not overwrite existing agents");
         }
     }
 }
