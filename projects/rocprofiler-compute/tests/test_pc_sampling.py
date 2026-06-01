@@ -385,30 +385,20 @@ def _make_pc_sampling_profiler(method, interval, workload_dir, profiler):
 @mock.patch("rocprof_compute_profile.pc_sampling_profiler.capture_subprocess_output")
 @mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_error")
 @mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_debug")
-def test_pc_sampling_profiler_sdk_path_nonexistent_librocprofiler_sdk_tool(
+def test_pc_sampling_profiler_sdk_forwards_env_and_ld_preload(
     mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path
 ):
-    """
-    Edge Case: rocprofiler_sdk_tool_path is valid, but librocprofiler-sdk-tool.so
-    is NOT found next to it (or in rocprofiler-sdk subdir).
-    This test primarily checks if the paths are constructed. The actual check for
-    file existence before `capture_subprocess_output` is not in the provided snippet,
-    but we test the path construction.
-    """
+    """sdk non-live-attach launch forwards LD_PRELOAD plus the PC sampling
+    env vars (method/interval and the host_trap->time unit mapping) into the
+    subprocess env on success."""
     method = "host_trap"
     interval = 1000
     workload_dir = str(tmp_path)
     options = {"APP_CMD": "my_app --arg"}
 
-    sdk_lib_dir = tmp_path / "rocm_sdk" / "lib"
-    sdk_lib_dir.mkdir(parents=True, exist_ok=True)
-    rocprofiler_sdk_tool_path = str(sdk_lib_dir / "librocprofiler_sdk.so")
-    Path(rocprofiler_sdk_tool_path).touch()
-
     expected_tool_path = str(
-        sdk_lib_dir / "rocprofiler-sdk" / "librocprofiler-sdk-tool.so"
+        tmp_path / "rocm_sdk" / "lib" / "rocprofiler-sdk" / "librocprofiler-sdk-tool.so"
     )
-
     options["LD_PRELOAD"] = expected_tool_path
 
     mock_capture_subprocess.return_value = (True, "Success output")
@@ -422,8 +412,40 @@ def test_pc_sampling_profiler_sdk_path_nonexistent_librocprofiler_sdk_tool(
     call_args = mock_capture_subprocess.call_args
     called_env = call_args.kwargs.get("new_env", {})
 
-    assert "LD_PRELOAD" in called_env
     assert called_env["LD_PRELOAD"] == expected_tool_path
+    assert called_env["ROCPROF_PC_SAMPLING_METHOD"] == method
+    assert called_env["ROCPROF_PC_SAMPLING_UNIT"] == "time"
+    assert called_env["ROCPROF_PC_SAMPLING_INTERVAL"] == str(interval)
+    assert called_env["ROCPROF_OUTPUT_PATH"] == workload_dir
+    assert called_env["ROCPROF_OUTPUT_FILE_NAME"] == "ps_file"
+
+    mock_console_error.assert_not_called()
+
+
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.capture_subprocess_output")
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_error")
+@mock.patch("rocprof_compute_profile.pc_sampling_profiler.console_debug")
+def test_pc_sampling_profiler_sdk_stochastic_unit_is_cycles(
+    mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path
+):
+    """A non-host_trap (stochastic) method maps to the ``cycles`` sampling unit
+    in the forwarded sdk env."""
+    method = "stochastic"
+    interval = 5000
+    workload_dir = str(tmp_path)
+    options = {"APP_CMD": "my_app"}
+
+    mock_capture_subprocess.return_value = (True, "Success output")
+
+    profiler = _make_pc_sampling_profiler(
+        method, interval, workload_dir, "rocprofiler-sdk"
+    )
+    profiler._launch(options)
+
+    called_env = mock_capture_subprocess.call_args.kwargs.get("new_env", {})
+    assert called_env["ROCPROF_PC_SAMPLING_METHOD"] == method
+    assert called_env["ROCPROF_PC_SAMPLING_UNIT"] == "cycles"
+    assert called_env["ROCPROF_PC_SAMPLING_INTERVAL"] == str(interval)
 
     mock_console_error.assert_not_called()
 
@@ -839,7 +861,7 @@ def test_pc_sampling_profiler_run_cleanup_before_launch(
     assert not stale.exists()
     mock_console_error.assert_not_called()
 
-    mock_console_log.assert_any_call("[Run 1][PC sampling profile run]")
+    mock_console_log.assert_any_call("[Run 1/1][PC sampling profile run]")
     assert any(
         call.args and call.args[0] == "profiling"
         for call in mock_console_debug.call_args_list

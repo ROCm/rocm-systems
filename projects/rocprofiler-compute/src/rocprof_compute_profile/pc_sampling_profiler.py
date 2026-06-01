@@ -51,7 +51,10 @@ class PCSamplingProfiler:
         prior_run_count: int,
     ) -> None:
         """Execute the PC sampling pass and log timing."""
-        console_log(f"[Run {prior_run_count + 1}][PC sampling profile run]")
+        console_log(
+            f"[Run {prior_run_count + 1}/{prior_run_count + 1}]"
+            "[PC sampling profile run]"
+        )
 
         self._cleanup_stale_output(profiler_options)
 
