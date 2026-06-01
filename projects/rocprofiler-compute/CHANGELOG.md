@@ -10,6 +10,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added backward compatibility for live attach mode to work with older ROCm 7.x.x releases.
 
+* Added native PC sampling collection to ``librocprofiler-compute-tool``, which gathers host-trap and stochastic PC samples directly through the rocprofiler-sdk PC sampling service and writes a ``ps_file_results.json`` compatible with the existing PC sampling analysis.
+
 ### Changed
 
 * Moved `--gui` and `--tui` analyze options to experimental status. These features now require the `--experimental` flag to be enabled (e.g., `rocprof-compute analyze --experimental --gui`).

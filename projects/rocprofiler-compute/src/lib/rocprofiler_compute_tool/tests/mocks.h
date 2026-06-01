@@ -91,6 +91,8 @@ public:
                                             rocprofiler_callback_tracing_cb_t      callback,
                                             void* callback_args) override;
     void start_context(rocprofiler_context_id_t context_id) override;
+    void stop_context(rocprofiler_context_id_t context_id) override;
+    void flush_buffer(rocprofiler_buffer_id_t buffer_id) override;
     void iterate_agent_supported_counters(rocprofiler_agent_id_t              agent_id,
                                           rocprofiler_available_counters_cb_t cb,
                                           void*                               user_data) override;
@@ -106,6 +108,27 @@ public:
 
     void at_intercept_table_registration_hsa(rocprofiler_intercept_library_cb_t callback,
                                              void*                              user_data) override;
+
+    void query_available_agents(rocprofiler_query_available_agents_cb_t cb,
+                                size_t                                  agent_size,
+                                void*                                   user_data) override;
+    void query_pc_sampling_agent_configurations(rocprofiler_agent_id_t agent_id,
+                                                rocprofiler_available_pc_sampling_configurations_cb_t cb,
+                                                void* user_data) override;
+    void                 create_buffer(rocprofiler_context_id_t        context_id,
+                                       size_t                          size,
+                                       size_t                          watermark,
+                                       rocprofiler_buffer_policy_t     policy,
+                                       rocprofiler_buffer_tracing_cb_t callback,
+                                       void*                           callback_data,
+                                       rocprofiler_buffer_id_t*        buffer_id) override;
+    rocprofiler_status_t configure_pc_sampling_service(rocprofiler_context_id_t         context_id,
+                                                       rocprofiler_agent_id_t           agent_id,
+                                                       rocprofiler_pc_sampling_method_t method,
+                                                       rocprofiler_pc_sampling_unit_t   unit,
+                                                       uint64_t                         interval,
+                                                       rocprofiler_buffer_id_t          buffer_id,
+                                                       int flags) override;
 
     struct hsa_intercept_registration_info
     {

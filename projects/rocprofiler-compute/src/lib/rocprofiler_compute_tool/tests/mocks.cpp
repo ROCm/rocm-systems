@@ -152,6 +152,45 @@ void MockSdkWrapper::start_context(rocprofiler_context_id_t context_id)
     m_started_contexts.push_back(context_id.handle);
 }
 
+void MockSdkWrapper::stop_context(rocprofiler_context_id_t /*context_id*/) {}
+
+void MockSdkWrapper::flush_buffer(rocprofiler_buffer_id_t /*buffer_id*/) {}
+
+void MockSdkWrapper::query_available_agents(rocprofiler_query_available_agents_cb_t /*cb*/,
+                                            size_t /*agent_size*/,
+                                            void* /*user_data*/)
+{
+}
+
+void MockSdkWrapper::query_pc_sampling_agent_configurations(
+    rocprofiler_agent_id_t /*agent_id*/,
+    rocprofiler_available_pc_sampling_configurations_cb_t /*cb*/,
+    void* /*user_data*/)
+{
+}
+
+void MockSdkWrapper::create_buffer(rocprofiler_context_id_t /*context_id*/,
+                                   size_t /*size*/,
+                                   size_t /*watermark*/,
+                                   rocprofiler_buffer_policy_t /*policy*/,
+                                   rocprofiler_buffer_tracing_cb_t /*callback*/,
+                                   void* /*callback_data*/,
+                                   rocprofiler_buffer_id_t* /*buffer_id*/)
+{
+}
+
+rocprofiler_status_t MockSdkWrapper::configure_pc_sampling_service(
+    rocprofiler_context_id_t /*context_id*/,
+    rocprofiler_agent_id_t /*agent_id*/,
+    rocprofiler_pc_sampling_method_t /*method*/,
+    rocprofiler_pc_sampling_unit_t /*unit*/,
+    uint64_t /*interval*/,
+    rocprofiler_buffer_id_t /*buffer_id*/,
+    int /*flags*/)
+{
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
 void MockSdkWrapper::iterate_agent_supported_counters(rocprofiler_agent_id_t              agent_id,
                                                       rocprofiler_available_counters_cb_t cb,
                                                       void*                               user_data)

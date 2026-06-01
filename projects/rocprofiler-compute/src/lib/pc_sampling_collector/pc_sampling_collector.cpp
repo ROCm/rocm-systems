@@ -15,6 +15,12 @@ pc_sampling_collector_t::ptr pc_sampling_collector_t::create()
         std::make_shared<code_object_translator_impl_t>());
 }
 
+pc_sampling_collector_t::ptr pc_sampling_collector_t::create(
+    const std::shared_ptr<code_object_translator_t>& translator)
+{
+    return std::make_shared<pc_sampling_collector_impl_t>(translator);
+}
+
 pc_sampling_collector_impl_t::pc_sampling_collector_impl_t(
     const std::shared_ptr<code_object_translator_t>& translator)
     : m_translator(translator)
@@ -24,18 +30,7 @@ pc_sampling_collector_impl_t::pc_sampling_collector_impl_t(
 void pc_sampling_collector_impl_t::on_code_object_load(
     const rocprofiler_callback_tracing_code_object_load_data_t& info)
 {
-    if (info.storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE)
-    {
-        m_translator->add_code_object(info.uri, info.code_object_id, info.load_base, info.load_size);
-    }
-    else if (info.storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY)
-    {
-        m_translator->add_code_object(info.memory_base,
-                                      info.memory_size,
-                                      info.code_object_id,
-                                      info.load_base,
-                                      info.load_size);
-    }
+    load_code_object(*m_translator, info);
 }
 
 void pc_sampling_collector_impl_t::write(code_object_writer_t& writer)

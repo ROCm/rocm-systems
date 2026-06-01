@@ -70,3 +70,25 @@ instruction_t code_object_translator_impl_t::get_instruction(size_t object_id, u
               << virtual_address << std::endl;
     return {};
 }
+
+uint64_t code_object_translator_impl_t::get_load_base(size_t object_id) const
+{
+    return m_obj_id_to_load_addr.at(object_id);
+}
+
+void rocprofiler_compute_tool::load_code_object(code_object_translator_t& translator,
+                                                const rocprofiler_callback_tracing_code_object_load_data_t& info)
+{
+    if (info.storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE)
+    {
+        translator.add_code_object(info.uri, info.code_object_id, info.load_base, info.load_size);
+    }
+    else if (info.storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY)
+    {
+        translator.add_code_object(info.memory_base,
+                                   info.memory_size,
+                                   info.code_object_id,
+                                   info.load_base,
+                                   info.load_size);
+    }
+}

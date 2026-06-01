@@ -42,6 +42,20 @@ instruction_t mock_code_object_translator_t::get_instruction(size_t, uint64_t) c
     return m_instruction;
 }
 
+uint64_t mock_code_object_translator_t::get_load_base(size_t object_id) const
+{
+    if (const auto item = m_load_base_per_obj.find(object_id); item != m_load_base_per_obj.end())
+    {
+        return item->second;
+    }
+    return 0;
+}
+
+void mock_code_object_translator_t::set_load_base(size_t object_id, uint64_t load_base)
+{
+    m_load_base_per_obj[object_id] = load_base;
+}
+
 void mock_code_object_translator_t::add_symbols(size_t object_id,
                                                 const std::vector<rocprofiler_compute_tool::symbol_t>& symbols)
 {
@@ -120,4 +134,59 @@ const std::vector<instruction_t>& mock_code_object_writer_t::get_instruction_des
 uint32_t mock_code_object_writer_t::get_end_symbol_count() const
 {
     return m_end_symbol_count;
+}
+
+void mock_ps_file_writer_t::add_stochastic_sample(int inst_index, const pc_sampling_record_t& rec)
+{
+    m_stochastic_samples.emplace_back(inst_index, rec);
+}
+
+void mock_ps_file_writer_t::add_host_trap_sample(int inst_index, const pc_sampling_record_t& rec)
+{
+    m_host_trap_samples.emplace_back(inst_index, rec);
+}
+
+void mock_ps_file_writer_t::set_instruction_strings(const std::vector<std::string>& instructions,
+                                                    const std::vector<std::string>& comments)
+{
+    m_instructions = instructions;
+    m_comments     = comments;
+}
+
+void mock_ps_file_writer_t::add_kernel_symbol(uint64_t           code_object_id,
+                                              const std::string& formatted_kernel_name)
+{
+    m_kernel_symbols.emplace_back(code_object_id, formatted_kernel_name);
+}
+
+std::string mock_ps_file_writer_t::get_result()
+{
+    return {};
+}
+
+void mock_ps_file_writer_t::flush(const std::filesystem::path& output_file_path) {}
+
+const std::vector<std::pair<int, pc_sampling_record_t>>& mock_ps_file_writer_t::get_stochastic_samples() const
+{
+    return m_stochastic_samples;
+}
+
+const std::vector<std::pair<int, pc_sampling_record_t>>& mock_ps_file_writer_t::get_host_trap_samples() const
+{
+    return m_host_trap_samples;
+}
+
+const std::vector<std::string>& mock_ps_file_writer_t::get_instruction_strings() const
+{
+    return m_instructions;
+}
+
+const std::vector<std::string>& mock_ps_file_writer_t::get_comment_strings() const
+{
+    return m_comments;
+}
+
+const std::vector<std::pair<uint64_t, std::string>>& mock_ps_file_writer_t::get_kernel_symbols() const
+{
+    return m_kernel_symbols;
 }

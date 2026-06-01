@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -83,6 +84,18 @@ void record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
     g_sdk_callbacks->record_callback(dispatch_data, record_data, record_count, callback_data_args);
 }
 
+void pc_sampling_buffer_callback(rocprofiler_context_id_t /*context_id*/,
+                                 rocprofiler_buffer_id_t /*buffer_id*/,
+                                 rocprofiler_record_header_t** headers,
+                                 size_t                        num_headers,
+                                 void*                         user_data,
+                                 uint64_t /*drop_count*/)
+{
+    assert(user_data);
+    auto* tool_data = static_cast<std::unique_ptr<tool_data_t>*>(user_data)->get();
+    tool_data->pc_sampling.on_sample_records(headers, num_headers);
+}
+
 void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                            rocprofiler_user_data_t* /*user_data*/,
                            void* callback_data)
@@ -121,12 +134,27 @@ void on_hsa_runtime_loaded(rocprofiler_intercept_table_t /*type*/,
     if (g_hsa_intercept_done.exchange(true, std::memory_order_acq_rel))
         return;
 
-    g_sdk_wrapper->configure_callback_dispatch_counting_service(get_client_ctx(),
-                                                                dispatch_callback,
-                                                                user_data,
-                                                                record_callback,
-                                                                user_data);
-    g_sdk_wrapper->start_context(get_client_ctx());
+    assert(user_data);
+    auto* tool_data = static_cast<std::unique_ptr<tool_data_t>*>(user_data)->get();
+
+    // Only set up counter dispatch-counting when counters were actually
+    // requested. PC sampling and counter collection must not share a context;
+    // gating here also avoids starting an unused counter service.
+    if (!tool_data->requested_counters.empty())
+    {
+        g_sdk_wrapper->configure_callback_dispatch_counting_service(get_client_ctx(),
+                                                                    dispatch_callback,
+                                                                    user_data,
+                                                                    record_callback,
+                                                                    user_data);
+        g_sdk_wrapper->start_context(get_client_ctx());
+    }
+
+    if (tool_data->pc_sampling.enabled())
+    {
+        tool_data->pc_sampling.configure(*g_sdk_wrapper, &pc_sampling_buffer_callback, user_data);
+        tool_data->pc_sampling.start(*g_sdk_wrapper);
+    }
 }
 
 int tool_init(rocprofiler_client_finalize_t, void* user_data)
@@ -140,6 +168,17 @@ int tool_init(rocprofiler_client_finalize_t, void* user_data)
                                                       0,
                                                       tool_tracing_callback,
                                                       user_data);
+
+    // PC sampling must live in its own context, separate from counter
+    // collection (the SDK forbids both services sharing a context).
+    assert(user_data);
+    auto* tool_data = static_cast<std::unique_ptr<tool_data_t>*>(user_data)->get();
+    if (tool_data->pc_sampling.enabled())
+    {
+        rocprofiler_context_id_t pc_ctx{};
+        g_sdk_wrapper->create_context(&pc_ctx);
+        tool_data->pc_sampling.set_pc_context(pc_ctx);
+    }
     return 0;
 }
 
@@ -166,7 +205,10 @@ void generate_output(tool_data_t* tool_data)
     }
 
     if (tool_data->pc_sampling.enabled())
+    {
         tool_data->pc_sampling.finalize();
+        tool_data->pc_sampling.finalize_samples();
+    }
 }
 
 void tool_fini(void* user_data)
@@ -177,6 +219,13 @@ void tool_fini(void* user_data)
     rocprofiler_stop_context(get_client_ctx());
 
     auto* tool_data_ptr = static_cast<std::unique_ptr<tool_data_t>*>(user_data);
+
+    // Flush PC sampling before serializing: the SDK does not auto-deliver
+    // buffered samples on teardown, so without this the JSON would drop any
+    // records still sitting below the buffer watermark.
+    if (tool_data_ptr->get()->pc_sampling.enabled())
+        tool_data_ptr->get()->pc_sampling.stop_and_flush(*g_sdk_wrapper);
+
     generate_output(tool_data_ptr->get());
 
     delete tool_data_ptr;
@@ -207,6 +256,12 @@ std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
             std::string{g_input_parameters->get_pc_sampling_method()});
         tool_data->pc_sampling =
             pc_sampling_feature_t{pc_mode, generate_output_filename(output_path, "_code_obj_info.json")};
+
+        // The SDK consumer reads exactly <workload>/ps_file_results.json, so this
+        // path carries NO pid prefix. The native tool is never co-loaded with the
+        // SDK tool in PC-sampling mode, so there is no risk of clobbering.
+        tool_data->pc_sampling.set_ps_output_path(std::filesystem::path{output_path} /
+                                                  "ps_file_results.json");
     }
 
     // ROCPROF_COUNTERS env. var. is a string like "pmc: counter1 counter2 ..."

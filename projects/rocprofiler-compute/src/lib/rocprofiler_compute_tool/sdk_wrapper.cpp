@@ -64,6 +64,16 @@ void SdkWrapperImpl::start_context(rocprofiler_context_id_t context_id)
     ROCPROFILER_CALL(rocprofiler_start_context(context_id), "start context");
 }
 
+void SdkWrapperImpl::stop_context(rocprofiler_context_id_t context_id)
+{
+    ROCPROFILER_CALL(rocprofiler_stop_context(context_id), "stop context");
+}
+
+void SdkWrapperImpl::flush_buffer(rocprofiler_buffer_id_t buffer_id)
+{
+    ROCPROFILER_CALL(rocprofiler_flush_buffer(buffer_id), "flush buffer");
+}
+
 void SdkWrapperImpl::iterate_agent_supported_counters(rocprofiler_agent_id_t              agent_id,
                                                       rocprofiler_available_counters_cb_t cb,
                                                       void*                               user_data)
@@ -99,4 +109,46 @@ void SdkWrapperImpl::at_intercept_table_registration_hsa(rocprofiler_intercept_l
 {
     ROCPROFILER_CALL(rocprofiler_at_intercept_table_registration(callback, ROCPROFILER_HSA_TABLE, user_data),
                      "register HSA intercept table callback");
+}
+
+void SdkWrapperImpl::query_available_agents(rocprofiler_query_available_agents_cb_t cb,
+                                            size_t                                  agent_size,
+                                            void*                                   user_data)
+{
+    // SDK requires a version enum as the first arg; supply it here so the wrapper stays mockable.
+    ROCPROFILER_CALL(rocprofiler_query_available_agents(ROCPROFILER_AGENT_INFO_VERSION_0, cb, agent_size, user_data),
+                     "query available agents");
+}
+
+void SdkWrapperImpl::query_pc_sampling_agent_configurations(rocprofiler_agent_id_t agent_id,
+                                                            rocprofiler_available_pc_sampling_configurations_cb_t cb,
+                                                            void* user_data)
+{
+    ROCPROFILER_CALL(rocprofiler_query_pc_sampling_agent_configurations(agent_id, cb, user_data),
+                     "query pc sampling agent configurations");
+}
+
+void SdkWrapperImpl::create_buffer(rocprofiler_context_id_t        context_id,
+                                   size_t                          size,
+                                   size_t                          watermark,
+                                   rocprofiler_buffer_policy_t     policy,
+                                   rocprofiler_buffer_tracing_cb_t callback,
+                                   void*                           callback_data,
+                                   rocprofiler_buffer_id_t*        buffer_id)
+{
+    ROCPROFILER_CALL(
+        rocprofiler_create_buffer(context_id, size, watermark, policy, callback, callback_data, buffer_id),
+        "create buffer");
+}
+
+rocprofiler_status_t SdkWrapperImpl::configure_pc_sampling_service(rocprofiler_context_id_t context_id,
+                                                                   rocprofiler_agent_id_t agent_id,
+                                                                   rocprofiler_pc_sampling_method_t method,
+                                                                   rocprofiler_pc_sampling_unit_t unit,
+                                                                   uint64_t interval,
+                                                                   rocprofiler_buffer_id_t buffer_id,
+                                                                   int flags)
+{
+    // No assert: PC sampling may legitimately be unavailable; the caller inspects the status.
+    return rocprofiler_configure_pc_sampling_service(context_id, agent_id, method, unit, interval, buffer_id, flags);
 }
