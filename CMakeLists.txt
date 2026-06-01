@@ -263,7 +263,16 @@ configure_file ( librocdxg.pc.in librocdxg.pc @ONLY )
 
 install ( FILES ${CMAKE_CURRENT_BINARY_DIR}/librocdxg.pc DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig COMPONENT dev )
 
-install(CODE "execute_process(COMMAND ldconfig)" COMPONENT binary)
+set ( ENABLE_LDCONFIG ON CACHE BOOL "Set library links and caches using ldconfig.")
+if(ENABLE_LDCONFIG)
+  # Match DEBIAN/postinst.in: system ld.so.conf.d, not $PREFIX/etc.
+  set ( ROCDXG_LD_SO_CONF_DIR "/${CMAKE_INSTALL_SYSCONFDIR}/ld.so.conf.d" )
+  install(CODE "
+    file(WRITE \"\$ENV{DESTDIR}${ROCDXG_LD_SO_CONF_DIR}/x86_64-libhsakmt.conf\"
+         \"${CMAKE_INSTALL_FULL_LIBDIR}\n\")
+    execute_process(COMMAND ldconfig)
+  " COMPONENT binary)
+endif()
 
 ###########################
 # Packaging directives
@@ -278,7 +287,6 @@ set(CPACK_PACKAGE_VERSION_PATCH ${VERSION_PATCH})
 set(CPACK_PACKAGE_CONTACT "AMD GFX mailing list <amd-gfx@lists.freedesktop.org>")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
 set(CPACK_COMPONENT_DESCRIPTION "ROCDXG development package.\n This package includes the user-mode API interfaces\nused to interact with the ROCm driver.\n This package contains the libraries and cmake files for the ROCDXG package.")
-set ( ENABLE_LDCONFIG ON CACHE BOOL "Set library links and caches using ldconfig.")
 
 # Install License file
 install ( FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT binary )
