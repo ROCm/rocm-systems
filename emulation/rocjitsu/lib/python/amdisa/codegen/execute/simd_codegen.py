@@ -1023,6 +1023,184 @@ SIMD_VOP3_DIV_FMAS_FP64: set[str] = {
     "v_div_fmas_f64_vop3",
 }
 
+# VOP3P fma_mix / mad_mix family. The six ops share one body (`a*b + c` plus
+# optional clamp to [0,1]); only the destination shape differs:
+#  - F32     -> v_fma_mix_f32_vop3p (RDNA3+), v_mad_mix_f32_vop3p (CDNA1-4)
+#  - F16_LO  -> v_fma_mixlo_f16_vop3p, v_mad_mixlo_f16_vop3p
+#  - F16_HI  -> v_fma_mixhi_f16_vop3p, v_mad_mixhi_f16_vop3p
+# Per-source op_sel_hi gates the f16<->f32 widening shape; op_sel picks the f16
+# half. neg flips the sign bit. No abs, no omod. Functorless / fixed-op.
+SIMD_VOP3P_FMA_MIX_F32: set[str] = {
+    "v_fma_mix_f32_vop3p",
+    "v_mad_mix_f32_vop3p",
+}
+SIMD_VOP3P_FMA_MIX_F16_LO: set[str] = {
+    "v_fma_mixlo_f16_vop3p",
+    "v_mad_mixlo_f16_vop3p",
+}
+SIMD_VOP3P_FMA_MIX_F16_HI: set[str] = {
+    "v_fma_mixhi_f16_vop3p",
+    "v_mad_mixhi_f16_vop3p",
+}
+
+# VOP3P packed-16 integer binary family. Each 32-bit lane holds {low16,
+# high16}. The glue gates op_sel == 0 && op_sel_hi == 3 (default packing)
+# and bails to scalar otherwise; the functor receives the two u32 simd
+# vectors as packed pairs and returns the same shape with the per-half op
+# applied. Scalar bodies for these ops do NOT apply neg/neg_hi/clamp on
+# integer operands, so the SIMD path also passes through. mul_lo / shift
+# functors mask each half to 16 bits before packing to drop any product
+# overflow / shift-into-bit-16 leakage between halves.
+SIMD_VOP3P_PK_BINARY_INT: dict[str, str] = {
+    "v_pk_add_u16_vop3p": (
+        "[](auto a, auto b) {"
+        " auto lo = (a + b) & 0xFFFFu;"
+        " auto hi = ((a >> 16) + (b >> 16)) & 0xFFFFu;"
+        " return lo | (hi << 16); }"
+    ),
+    # add_i16 is bit-identical to add_u16 (mod-2^16 wrap matches).
+    "v_pk_add_i16_vop3p": (
+        "[](auto a, auto b) {"
+        " auto lo = (a + b) & 0xFFFFu;"
+        " auto hi = ((a >> 16) + (b >> 16)) & 0xFFFFu;"
+        " return lo | (hi << 16); }"
+    ),
+    "v_pk_sub_u16_vop3p": (
+        "[](auto a, auto b) {"
+        " auto lo = (a - b) & 0xFFFFu;"
+        " auto hi = ((a >> 16) - (b >> 16)) & 0xFFFFu;"
+        " return lo | (hi << 16); }"
+    ),
+    "v_pk_sub_i16_vop3p": (
+        "[](auto a, auto b) {"
+        " auto lo = (a - b) & 0xFFFFu;"
+        " auto hi = ((a >> 16) - (b >> 16)) & 0xFFFFu;"
+        " return lo | (hi << 16); }"
+    ),
+    "v_pk_mul_lo_u16_vop3p": (
+        "[](auto a, auto b) {"
+        " auto lo = ((a & 0xFFFFu) * (b & 0xFFFFu)) & 0xFFFFu;"
+        " auto hi = ((a >> 16) * (b >> 16)) & 0xFFFFu;"
+        " return lo | (hi << 16); }"
+    ),
+    # Reverse-shift forms: src1 holds the value, src0 holds the count.
+    # Shift count masked to low 4 bits per scalar (`& 15u`).
+    "v_pk_lshlrev_b16_vop3p": (
+        "[](auto a, auto b) {"
+        " auto lo = ((b & 0xFFFFu) << (a & 15u)) & 0xFFFFu;"
+        " auto hi = (((b >> 16) & 0xFFFFu) << ((a >> 16) & 15u)) & 0xFFFFu;"
+        " return lo | (hi << 16); }"
+    ),
+    "v_pk_lshrrev_b16_vop3p": (
+        "[](auto a, auto b) {"
+        " auto lo = ((b & 0xFFFFu) >> (a & 15u)) & 0xFFFFu;"
+        " auto hi = ((b >> 16) >> ((a >> 16) & 15u)) & 0xFFFFu;"
+        " return lo | (hi << 16); }"
+    ),
+    # Arithmetic right shift on i16: sign-extend each half to int32 via
+    # (x << 16) >> 16, shift, mask back to 16.
+    "v_pk_ashrrev_i16_vop3p": (
+        "[](auto a, auto b) {"
+        " using I = util::native<int32_t>;"
+        " auto bv_lo = (util::stdx::static_simd_cast<I>(b & 0xFFFFu) << 16) >> 16;"
+        " auto bv_hi = (util::stdx::static_simd_cast<I>(b >> 16) << 16) >> 16;"
+        " auto sh_lo = util::stdx::static_simd_cast<I>(a & 15u);"
+        " auto sh_hi = util::stdx::static_simd_cast<I>((a >> 16) & 15u);"
+        " auto rlo = util::stdx::static_simd_cast<util::native<uint32_t>>(bv_lo >> sh_lo) & 0xFFFFu;"
+        " auto rhi = util::stdx::static_simd_cast<util::native<uint32_t>>(bv_hi >> sh_hi) & 0xFFFFu;"
+        " return rlo | (rhi << 16); }"
+    ),
+    "v_pk_min_u16_vop3p": (
+        "[](auto a, auto b) {"
+        " auto lo = util::stdx::min(a & 0xFFFFu, b & 0xFFFFu);"
+        " auto hi = util::stdx::min(a >> 16, b >> 16);"
+        " return (lo & 0xFFFFu) | ((hi & 0xFFFFu) << 16); }"
+    ),
+    "v_pk_max_u16_vop3p": (
+        "[](auto a, auto b) {"
+        " auto lo = util::stdx::max(a & 0xFFFFu, b & 0xFFFFu);"
+        " auto hi = util::stdx::max(a >> 16, b >> 16);"
+        " return (lo & 0xFFFFu) | ((hi & 0xFFFFu) << 16); }"
+    ),
+    "v_pk_min_i16_vop3p": (
+        "[](auto a, auto b) {"
+        " using I = util::native<int32_t>;"
+        " auto a_lo = (util::stdx::static_simd_cast<I>(a & 0xFFFFu) << 16) >> 16;"
+        " auto a_hi = (util::stdx::static_simd_cast<I>(a >> 16) << 16) >> 16;"
+        " auto b_lo = (util::stdx::static_simd_cast<I>(b & 0xFFFFu) << 16) >> 16;"
+        " auto b_hi = (util::stdx::static_simd_cast<I>(b >> 16) << 16) >> 16;"
+        " auto rlo = util::stdx::static_simd_cast<util::native<uint32_t>>(util::stdx::min(a_lo, b_lo)) & 0xFFFFu;"
+        " auto rhi = util::stdx::static_simd_cast<util::native<uint32_t>>(util::stdx::min(a_hi, b_hi)) & 0xFFFFu;"
+        " return rlo | (rhi << 16); }"
+    ),
+    "v_pk_max_i16_vop3p": (
+        "[](auto a, auto b) {"
+        " using I = util::native<int32_t>;"
+        " auto a_lo = (util::stdx::static_simd_cast<I>(a & 0xFFFFu) << 16) >> 16;"
+        " auto a_hi = (util::stdx::static_simd_cast<I>(a >> 16) << 16) >> 16;"
+        " auto b_lo = (util::stdx::static_simd_cast<I>(b & 0xFFFFu) << 16) >> 16;"
+        " auto b_hi = (util::stdx::static_simd_cast<I>(b >> 16) << 16) >> 16;"
+        " auto rlo = util::stdx::static_simd_cast<util::native<uint32_t>>(util::stdx::max(a_lo, b_lo)) & 0xFFFFu;"
+        " auto rhi = util::stdx::static_simd_cast<util::native<uint32_t>>(util::stdx::max(a_hi, b_hi)) & 0xFFFFu;"
+        " return rlo | (rhi << 16); }"
+    ),
+}
+
+# VOP3P packed-16 integer ternary (pk_mad_i16 / pk_mad_u16). Same default
+# packing gate as the binary table (op_sel/op_sel_hi/op_sel_hi_2). Scalar
+# truncates to 16 bits via uint16_t cast, so the SIMD path masks each half
+# to 16 bits before pack.
+SIMD_VOP3P_PK_TERNARY_INT: dict[str, str] = {
+    "v_pk_mad_i16_vop3p": (
+        "[](auto a, auto b, auto c) {"
+        " using I = util::native<int32_t>;"
+        " auto a_lo = (util::stdx::static_simd_cast<I>(a & 0xFFFFu) << 16) >> 16;"
+        " auto a_hi = (util::stdx::static_simd_cast<I>(a >> 16) << 16) >> 16;"
+        " auto b_lo = (util::stdx::static_simd_cast<I>(b & 0xFFFFu) << 16) >> 16;"
+        " auto b_hi = (util::stdx::static_simd_cast<I>(b >> 16) << 16) >> 16;"
+        " auto c_lo = (util::stdx::static_simd_cast<I>(c & 0xFFFFu) << 16) >> 16;"
+        " auto c_hi = (util::stdx::static_simd_cast<I>(c >> 16) << 16) >> 16;"
+        " auto rlo = util::stdx::static_simd_cast<util::native<uint32_t>>(a_lo * b_lo + c_lo) & 0xFFFFu;"
+        " auto rhi = util::stdx::static_simd_cast<util::native<uint32_t>>(a_hi * b_hi + c_hi) & 0xFFFFu;"
+        " return rlo | (rhi << 16); }"
+    ),
+    "v_pk_mad_u16_vop3p": (
+        "[](auto a, auto b, auto c) {"
+        " auto a_lo = a & 0xFFFFu;"
+        " auto a_hi = a >> 16;"
+        " auto b_lo = b & 0xFFFFu;"
+        " auto b_hi = b >> 16;"
+        " auto c_lo = c & 0xFFFFu;"
+        " auto c_hi = c >> 16;"
+        " auto rlo = (a_lo * b_lo + c_lo) & 0xFFFFu;"
+        " auto rhi = (a_hi * b_hi + c_hi) & 0xFFFFu;"
+        " return rlo | (rhi << 16); }"
+    ),
+}
+
+# VOP3P packed-16 f16 binary family. Each 32-bit lane holds 2 f16 values.
+# Glue widens halves to f32, applies neg/neg_hi (sign-bit toggle), runs the
+# per-half functor in f32, narrows back to f16, packs. No clamp on any
+# pk_*_f16 scalar body (verified line 15109, 15519). NaN-input lanes can
+# diverge in payload (same as the existing f16 ternary slice).
+SIMD_VOP3P_PK_BINARY_FP16: dict[str, str] = {
+    "v_pk_add_f16_vop3p": "[](auto a, auto b) { return a + b; }",
+    "v_pk_mul_f16_vop3p": "[](auto a, auto b) { return a * b; }",
+    "v_pk_max_f16_vop3p": "[](auto a, auto b) { return util::stdx::fmax(a, b); }",
+    "v_pk_min_f16_vop3p": "[](auto a, auto b) { return util::stdx::fmin(a, b); }",
+}
+
+# pk_fma_f16 — 3-source FMA per half. NaN-input payload divergence accepted.
+SIMD_VOP3P_PK_TERNARY_FP16: dict[str, str] = {
+    "v_pk_fma_f16_vop3p": "[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }",
+}
+
+# v_pk_mov_b32 — default-packing-only fast path. Each src is a 64-bit pair
+# (consecutive VGPRs), result is (src0_lo, src1_hi). Functorless / fixed-op.
+SIMD_VOP3P_MOV_B32: set[str] = {
+    "v_pk_mov_b32_vop3p",
+}
+
 
 # --- VOPC compare -> VCC ---------------------------------------------------
 #
@@ -2230,6 +2408,31 @@ def simd_probe_line(template_name: str) -> str | None:
         return "  ROCJITSU_TRY_SIMD_DIV_FMAS_VOP3_FP32();"
     if template_name in SIMD_VOP3_DIV_FMAS_FP64:
         return "  ROCJITSU_TRY_SIMD_DIV_FMAS_VOP3_FP64();"
+    # VOP3P packed-16 integer binary family (pk_add/sub/mul_lo/min/max for
+    # i16/u16 + pk_lshlrev/lshrrev/ashrrev for b16/i16). Gated on default
+    # op_sel = 0 / op_sel_hi = 3 inside the glue.
+    specpk = SIMD_VOP3P_PK_BINARY_INT.get(template_name)
+    if specpk is not None:
+        return f"  ROCJITSU_TRY_SIMD_VOP3P_PK_BINARY_INT({specpk});"
+    specpkt = SIMD_VOP3P_PK_TERNARY_INT.get(template_name)
+    if specpkt is not None:
+        return f"  ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_INT({specpkt});"
+    specpkf16 = SIMD_VOP3P_PK_BINARY_FP16.get(template_name)
+    if specpkf16 is not None:
+        return f"  ROCJITSU_TRY_SIMD_VOP3P_PK_BINARY_FP16({specpkf16});"
+    specpkf16t = SIMD_VOP3P_PK_TERNARY_FP16.get(template_name)
+    if specpkf16t is not None:
+        return f"  ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_FP16({specpkf16t});"
+    if template_name in SIMD_VOP3P_MOV_B32:
+        return "  ROCJITSU_TRY_SIMD_VOP3P_MOV_B32();"
+    # VOP3P fma_mix / mad_mix (six ops, three destination shapes). Same body
+    # for all; the routing picks the matching glue specialization.
+    if template_name in SIMD_VOP3P_FMA_MIX_F32:
+        return "  ROCJITSU_TRY_SIMD_VOP3P_FMA_MIX_F32();"
+    if template_name in SIMD_VOP3P_FMA_MIX_F16_LO:
+        return "  ROCJITSU_TRY_SIMD_VOP3P_FMA_MIX_F16_LO();"
+    if template_name in SIMD_VOP3P_FMA_MIX_F16_HI:
+        return "  ROCJITSU_TRY_SIMD_VOP3P_FMA_MIX_F16_HI();"
     # VOP3 dst-accumulate FMA/MAC (vdst is the third operand). Per-isa class
     # has no src2; the accumulate glue reads vdst instead.
     specfmacf32 = SIMD_VOP3_FMAC_FP32.get(template_name)
