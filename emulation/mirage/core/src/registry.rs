@@ -139,11 +139,20 @@ pub const ROCJITSU: EmulatorSpec = EmulatorSpec {
     describe: rocjitsu_describe,
 };
 
-/// rocjitsu is "installed" if the dynamic library `librocjitsu.so` can
-/// be found via the loader's standard search path *or* if the user
-/// has set `ROCJITSU_LIB_DIR` / `ROCJITSU_ROOT`. We intentionally do
-/// not link to it from here — installation is a runtime question.
+/// rocjitsu is "installed" if the dynamic library `librocjitsu.so`
+/// can be found in the mirage emulator cache (extracted by
+/// `mirage_rocjitsu::ensure_assets`), via the loader's standard
+/// search path, or if the user has set `ROCJITSU_LIB_DIR` /
+/// `ROCJITSU_ROOT`. We intentionally do not link to it from here —
+/// installation is a runtime question.
 fn rocjitsu_installed() -> bool {
+    let cached = crate::paths::mirage_cache_dir()
+        .join("emulator")
+        .join("rocjitsu")
+        .join("librocjitsu.so");
+    if cached.exists() {
+        return true;
+    }
     if std::env::var_os("ROCJITSU_LIB_DIR").is_some()
         || std::env::var_os("ROCJITSU_ROOT").is_some()
     {
