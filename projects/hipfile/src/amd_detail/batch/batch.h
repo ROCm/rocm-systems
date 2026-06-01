@@ -54,9 +54,9 @@ class IBatchContext {
 public:
     static constexpr unsigned MAX_SIZE = 128;
 
-    virtual ~IBatchContext()                                                                 = default;
-    virtual unsigned get_capacity() const noexcept                                           = 0;
-    virtual void     submit_operations(const hipFileIOParams_t *params, unsigned num_params) = 0;
+    virtual ~IBatchContext()                                                                = default;
+    virtual unsigned getCapacity() const noexcept                                           = 0;
+    virtual void     submitOperations(const hipFileIOParams_t *params, unsigned num_params) = 0;
 };
 
 class BatchContext : public IBatchContext {
@@ -66,7 +66,7 @@ public:
     ///
     /// @return The max number of concurrent operations that can be processed by this BatchContext.
     /// @note This may not exceed the value returned by `MAX_SIZE`.
-    unsigned get_capacity() const noexcept override;
+    unsigned getCapacity() const noexcept override;
 
     ///
     /// @brief Submit one or more operations to this Context.
@@ -76,7 +76,7 @@ public:
     /// @note This is an All or None operation. If one submitted operation is not valid, no operations
     ///       will be submitted.
     ///
-    void submit_operations(const hipFileIOParams_t *params, const unsigned num_params) override;
+    void submitOperations(const hipFileIOParams_t *params, const unsigned num_params) override;
 
 private:
     const unsigned capacity;

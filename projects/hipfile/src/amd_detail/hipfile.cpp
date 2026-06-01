@@ -391,7 +391,7 @@ try {
     (void)flags; // Unused at this time.
 
     std::shared_ptr<IBatchContext> batch_context = Context<DriverState>::get()->getBatchContext(batch_idp);
-    batch_context->submit_operations(iocbp, nr);
+    batch_context->submitOperations(iocbp, nr);
 
     return {hipFileSuccess, hipSuccess};
 }

@@ -94,13 +94,13 @@ BatchContext::BatchContext(unsigned _capacity) : capacity{_capacity}
 }
 
 unsigned
-BatchContext::get_capacity() const noexcept
+BatchContext::getCapacity() const noexcept
 {
     return capacity;
 }
 
 void
-BatchContext::submit_operations(const hipFileIOParams_t *params, unsigned num_params)
+BatchContext::submitOperations(const hipFileIOParams_t *params, unsigned num_params)
 {
     std::unique_lock<std::shared_mutex> _ulock{context_mutex};
 

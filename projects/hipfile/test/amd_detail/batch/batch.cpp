@@ -266,18 +266,18 @@ struct HipFileBatchContext : public HipFileUnopened {
 
 TEST_F(HipFileBatchContext, SubmitSingleGoodOp)
 {
-    _context->submit_operations(&io_params, 1);
+    _context->submitOperations(&io_params, 1);
 }
 
 TEST_F(HipFileBatchContext, SubmitZeroOperations)
 {
-    _context->submit_operations(nullptr, 0);
+    _context->submitOperations(nullptr, 0);
 }
 
 TEST_F(HipFileBatchContext, SubmitOverCapacity)
 {
     // We should fail before we ever try touching the nullptr.
-    ASSERT_THROW(_context->submit_operations(nullptr, _context_capacity + 1), std::invalid_argument);
+    ASSERT_THROW(_context->submitOperations(nullptr, _context_capacity + 1), std::invalid_argument);
 }
 
 TEST_F(HipFileBatchContext, SubmitOverCapacityOverMultipleSubmissions)
@@ -286,22 +286,22 @@ TEST_F(HipFileBatchContext, SubmitOverCapacityOverMultipleSubmissions)
     // In the future we might care that we are submitting the same operation.
     for (unsigned i = 0; i < _context_capacity; i++) {
         printf("i: %u\n", i);
-        _context->submit_operations(&io_params, 1);
+        _context->submitOperations(&io_params, 1);
     }
 
-    ASSERT_THROW(_context->submit_operations(nullptr, 1), std::invalid_argument);
+    ASSERT_THROW(_context->submitOperations(nullptr, 1), std::invalid_argument);
 }
 
 TEST_F(HipFileBatchContext, SubmitSingleBadBuffer)
 {
     EXPECT_CALL(*mock_driver_state, getFileAndBuffer).WillOnce(Throw(BufferNotRegistered()));
-    ASSERT_THROW(_context->submit_operations(&io_params, 1), BufferNotRegistered);
+    ASSERT_THROW(_context->submitOperations(&io_params, 1), BufferNotRegistered);
 }
 
 TEST_F(HipFileBatchContext, SubmitSingleBadFileHandle)
 {
     EXPECT_CALL(*mock_driver_state, getFileAndBuffer).WillOnce(Throw(FileNotRegistered()));
-    ASSERT_THROW(_context->submit_operations(&io_params, 1), FileNotRegistered);
+    ASSERT_THROW(_context->submitOperations(&io_params, 1), FileNotRegistered);
 }
 
 // BatchOperation is not mocked.
@@ -309,42 +309,42 @@ TEST_F(HipFileBatchContext, SubmitSingleBadParamBufferOffsetNegative)
 {
     hipFileIOParams_t bad_io_params     = io_params;
     bad_io_params.u.batch.devPtr_offset = -1;
-    ASSERT_THROW(_context->submit_operations(&bad_io_params, 1), std::invalid_argument);
+    ASSERT_THROW(_context->submitOperations(&bad_io_params, 1), std::invalid_argument);
 }
 
 TEST_F(HipFileBatchContext, SubmitSingleBadParamBufferOffsetTooLarge)
 {
     hipFileIOParams_t bad_io_params     = io_params;
     bad_io_params.u.batch.devPtr_offset = default_mock_buffer_length;
-    ASSERT_THROW(_context->submit_operations(&bad_io_params, 1), std::invalid_argument);
+    ASSERT_THROW(_context->submitOperations(&bad_io_params, 1), std::invalid_argument);
 }
 
 TEST_F(HipFileBatchContext, SubmitSingleBadParamIOSizeTooLarge)
 {
     hipFileIOParams_t bad_io_params = io_params;
     bad_io_params.u.batch.size      = static_cast<size_t>(default_mock_buffer_length + 1);
-    ASSERT_THROW(_context->submit_operations(&bad_io_params, 1), std::invalid_argument);
+    ASSERT_THROW(_context->submitOperations(&bad_io_params, 1), std::invalid_argument);
 }
 
 TEST_F(HipFileBatchContext, SubmitSingleBadParamFileOffsetNegative)
 {
     hipFileIOParams_t bad_io_params   = io_params;
     bad_io_params.u.batch.file_offset = -1;
-    ASSERT_THROW(_context->submit_operations(&bad_io_params, 1), std::invalid_argument);
+    ASSERT_THROW(_context->submitOperations(&bad_io_params, 1), std::invalid_argument);
 }
 
 TEST_F(HipFileBatchContext, SubmitSingleBadParamOpcodeInvalid)
 {
     hipFileIOParams_t bad_io_params = io_params;
     bad_io_params.opcode            = invalidEnum<hipFileOpcode_t>(-1);
-    ASSERT_THROW(_context->submit_operations(&bad_io_params, 1), std::invalid_argument);
+    ASSERT_THROW(_context->submitOperations(&bad_io_params, 1), std::invalid_argument);
 }
 
 TEST_F(HipFileBatchContext, SubmitSingleBadParamModeInvalid)
 {
     hipFileIOParams_t bad_io_params = io_params;
     bad_io_params.mode              = invalidEnum<hipFileBatchMode_t>(-1);
-    ASSERT_THROW(_context->submit_operations(&bad_io_params, 1), std::invalid_argument);
+    ASSERT_THROW(_context->submitOperations(&bad_io_params, 1), std::invalid_argument);
 }
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON
