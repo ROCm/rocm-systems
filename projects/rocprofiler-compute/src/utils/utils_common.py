@@ -625,7 +625,8 @@ PC_SAMPLING_BLOCK_IDS = ("21", "pc_sampling")
 
 
 def is_only_pc_sampling(filter_blocks: list[str]) -> bool:
-    """Return True if all requested blocks are PC sampling (block 21)."""
+    """Return True if all requested blocks are PC sampling (block 21 or the
+    ``pc_sampling`` alias)."""
     return bool(filter_blocks) and all(
         block in PC_SAMPLING_BLOCK_IDS for block in filter_blocks
     )

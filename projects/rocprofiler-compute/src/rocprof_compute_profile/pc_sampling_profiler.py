@@ -17,9 +17,7 @@ from utils.utils_common import (
     is_only_pc_sampling,
     perform_attach_detach,
 )
-from utils.utils_profile import is_live_attach
-
-ProfilerOptions = Union[list[str], dict[str, Union[str, list[str]]]]
+from utils.utils_profile import ProfilerOptions, is_live_attach
 
 
 class PCSamplingProfiler:
@@ -53,10 +51,7 @@ class PCSamplingProfiler:
         prior_run_count: int,
     ) -> None:
         """Execute the PC sampling pass and log timing."""
-        console_log(
-            f"[Run {prior_run_count + 1}/{prior_run_count + 1}]"
-            "[PC sampling profile run]"
-        )
+        console_log(f"[Run {prior_run_count + 1}][PC sampling profile run]")
 
         self._cleanup_stale_output(profiler_options)
 
@@ -161,8 +156,6 @@ class PCSamplingProfiler:
         interval: int,
         unit: str,
     ) -> None:
-        profiler_options_list = profiler_options
-
         options = [
             "--kernel-trace",
             "--pc-sampling-beta-enabled",
@@ -183,13 +176,13 @@ class PCSamplingProfiler:
 
         if is_live_attach(profiler_options):
             try:
-                pid_idx = profiler_options_list.index("--pid")
-                options += ["--pid", profiler_options_list[pid_idx + 1]]
-                if "--attach-duration-msec" in profiler_options_list:
-                    dur_idx = profiler_options_list.index("--attach-duration-msec")
+                pid_idx = profiler_options.index("--pid")
+                options += ["--pid", profiler_options[pid_idx + 1]]
+                if "--attach-duration-msec" in profiler_options:
+                    dur_idx = profiler_options.index("--attach-duration-msec")
                     options += [
                         "--attach-duration-msec",
-                        profiler_options_list[dur_idx + 1],
+                        profiler_options[dur_idx + 1],
                     ]
             except (ValueError, IndexError):
                 console_error(
@@ -198,8 +191,8 @@ class PCSamplingProfiler:
                 )
         else:
             try:
-                app_cmd_with_separator = profiler_options_list[
-                    profiler_options_list.index("--") :
+                app_cmd_with_separator = profiler_options[
+                    profiler_options.index("--") :
                 ]
                 options += app_cmd_with_separator
             except ValueError:

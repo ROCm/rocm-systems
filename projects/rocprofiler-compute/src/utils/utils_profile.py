@@ -36,9 +36,11 @@ _PROFILER_INTERNAL_RE = re.compile(
     r"|^[WI]\d{8}\s"  # glog-style timestamps (W/I followed by YYYYMMDD)
 )
 
+ProfilerOptions = Union[list[str], dict[str, Union[str, list[str]]]]
+
 
 def is_live_attach(
-    profiler_options: Union[list[str], dict[str, Union[str, list[str]]]],
+    profiler_options: ProfilerOptions,
 ) -> bool:
     """Return True if the profiler options indicate a live-attach (pid) mode."""
     return (isinstance(profiler_options, list) and "--pid" in profiler_options) or (
@@ -61,7 +63,7 @@ def _classify_output_line(line: str) -> None:
 
 def run_prof(
     fnames: Union[list[str], str],
-    profiler_options: Union[list[str], dict[str, Union[str, list[str]]]],
+    profiler_options: ProfilerOptions,
     workload_dir: str,
     loglevel: int,
     format_rocprof_output: str,
