@@ -35,7 +35,7 @@ function(resolve_sanitizer)
         (ENABLE_SANITIZER STREQUAL "" OR ENABLE_SANITIZER STREQUAL "OFF")
         AND ENABLE_ADDRESS_SANITIZER
     )
-        # Legacy flag: promote to ASAN so downstream only reads ENABLE_SANITIZER.
+        # Promote ENABLE_ADDRESS_SANITIZER to ASAN so downstream only reads ENABLE_SANITIZER.
         set(ENABLE_SANITIZER
             "ASAN"
             CACHE STRING
