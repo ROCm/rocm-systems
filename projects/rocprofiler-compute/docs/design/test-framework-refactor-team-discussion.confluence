@@ -299,6 +299,7 @@ Filters must work for both CI and developer “partial run” workflows (not CI-
 
 * type (includes misc — see §4.2)
 * arch
+* *os reserved* — Linux today; Windows planned (see §4.1)
 
 *Bridge period*
 
@@ -339,6 +340,9 @@ docker/k8s/MPI/pytorch into type.
 | runtime | baremetal, mpi, docker, k8s | How the application is launched |
 | gpu | none, required, optional | Hardware requirement |
 | arch | gfx942, gfx950, rdna35, … | Already in MVP |
+| os | linux, windows | Host OS (reserved) |
+
+*Platform / OS (os) — Linux now, Windows later:* Reserve {{os}} marker; MVP = Linux-only CI (default {{os(linux)}}); Phase 3+ = {{os(windows)}} + Win CI lane. Markers not OS folder trees; register {{os}} in pytest config now.
 
 *Suggested functional layout:* {{tests/functional/ai/}}, {{tests/functional/hpc/}}, {{tests/functional/generic/}}
 
@@ -355,7 +359,7 @@ docker/k8s/MPI/pytorch into type.
 
 *Design rules (orthogonal dimensions):* type = test kind; domain = workload audience; runtime = launch mode; framework = AI stack. Avoid combinatorial names like {{functional_ai_mpi_pytorch}}.
 
-*Phasing:* MVP = type (incl. misc) + arch; Phase 2 = gpu + exclude_gpu + functional type; Phase 2+ = domain, framework, runtime. Domain-specific ad-hoc markers (torch_trace, torch_ops) migrate when known; *misc/tmp bucket remains permanent* (§4.2).
+*Phasing:* MVP = type (incl. misc) + arch; Phase 2 = gpu + exclude_gpu + functional type; Phase 2+ = domain, framework, runtime; Phase 3+ = os(windows). Domain-specific ad-hoc markers (torch_trace, torch_ops) migrate when known; *misc/tmp bucket remains permanent* (§4.2).
 
 h3. Design — Section 4.2: Ad-hoc, misc, and temporary tests
 
@@ -487,6 +491,7 @@ Use these prompts to drive alignment in the team meeting:
 * Confirm *tmp test policy*: max lifetime, owner/docstring requirement, stale-tmp CI gate.
 * Agree on *phase / surface markers* for profile vs analyze and CLI vs TUI (§4.3); web-ui maintenance-only.
 * Confirm *TUI sample tests* for Phase 1: migrate test_tui_components to unit layer + one Pilot smoke test.
+* Confirm *os marker reserved* for Linux (MVP) and Windows (later) — filter plumbing must not assume Linux-only (§4.1).
 
 ## rocprofiler-compute — Test Framework Refactor (Team Discussion Draft, Detailed)
 
@@ -700,6 +705,7 @@ Filters must work for both CI and developer “partial run” workflows (not CI-
 
 * type (includes misc — see §4.2)
 * arch
+* *os reserved* — Linux today; Windows planned (see §4.1)
 
 *Bridge period*
 
@@ -740,6 +746,9 @@ docker/k8s/MPI/pytorch into type.
 | runtime | baremetal, mpi, docker, k8s | How the application is launched |
 | gpu | none, required, optional | Hardware requirement |
 | arch | gfx942, gfx950, rdna35, … | Already in MVP |
+| os | linux, windows | Host OS (reserved) |
+
+*Platform / OS (os) — Linux now, Windows later:* Reserve {{os}} marker; MVP = Linux-only CI (default {{os(linux)}}); Phase 3+ = {{os(windows)}} + Win CI lane. Markers not OS folder trees; register {{os}} in pytest config now.
 
 *Suggested functional layout:* {{tests/functional/ai/}}, {{tests/functional/hpc/}}, {{tests/functional/generic/}}
 
@@ -756,7 +765,7 @@ docker/k8s/MPI/pytorch into type.
 
 *Design rules (orthogonal dimensions):* type = test kind; domain = workload audience; runtime = launch mode; framework = AI stack. Avoid combinatorial names like {{functional_ai_mpi_pytorch}}.
 
-*Phasing:* MVP = type (incl. misc) + arch; Phase 2 = gpu + exclude_gpu + functional type; Phase 2+ = domain, framework, runtime. Domain-specific ad-hoc markers (torch_trace, torch_ops) migrate when known; *misc/tmp bucket remains permanent* (§4.2).
+*Phasing:* MVP = type (incl. misc) + arch; Phase 2 = gpu + exclude_gpu + functional type; Phase 2+ = domain, framework, runtime; Phase 3+ = os(windows). Domain-specific ad-hoc markers (torch_trace, torch_ops) migrate when known; *misc/tmp bucket remains permanent* (§4.2).
 
 h3. Design — Section 4.2: Ad-hoc, misc, and temporary tests
 
@@ -888,4 +897,5 @@ Use these prompts to drive alignment in the team meeting:
 * Confirm *tmp test policy*: max lifetime, owner/docstring requirement, stale-tmp CI gate.
 * Agree on *phase / surface markers* for profile vs analyze and CLI vs TUI (§4.3); web-ui maintenance-only.
 * Confirm *TUI sample tests* for Phase 1: migrate test_tui_components to unit layer + one Pilot smoke test.
+* Confirm *os marker reserved* for Linux (MVP) and Windows (later) — filter plumbing must not assume Linux-only (§4.1).
 

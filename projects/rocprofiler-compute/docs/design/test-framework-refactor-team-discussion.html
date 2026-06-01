@@ -418,6 +418,7 @@
       <ul>
         <li><code>type</code> (includes <code>misc</code> — see §4.2)</li>
         <li><code>arch</code></li>
+        <li><strong><code>os</code> reserved</strong> — Linux today; Windows planned (see §4.1)</li>
       </ul>
       <p><strong>Bridge period</strong></p>
       <ul>
@@ -461,8 +462,10 @@ pytest -m "gpu(none) or gpu(optional)"</code></pre>
           <tr><td><code>runtime</code></td><td><code>baremetal</code>, <code>mpi</code>, <code>docker</code>, <code>k8s</code></td><td>How the application is launched</td></tr>
           <tr><td><code>gpu</code></td><td><code>none</code>, <code>required</code>, <code>optional</code></td><td>Hardware requirement</td></tr>
           <tr><td><code>arch</code></td><td><code>gfx942</code>, <code>gfx950</code>, <code>rdna35</code>, …</td><td>Already in MVP</td></tr>
+          <tr><td><code>os</code></td><td><code>linux</code>, <code>windows</code></td><td>Host OS (reserved)</td></tr>
         </tbody>
       </table>
+      <p><strong>Platform / OS (<code>os</code>) — Linux now, Windows later:</strong> Reserve <code>os</code> marker; MVP = Linux-only CI (default <code>os(linux)</code>); Phase 3+ = <code>os(windows)</code> tests + Windows CI lane. Use markers, not separate OS folder trees; register <code>os</code> in pytest config now.</p>
       <p><strong>Suggested functional layout:</strong></p>
       <pre><code>tests/functional/
   ai/       # domain=ai, framework=pytorch|jax, runtime=baremetal
@@ -481,7 +484,7 @@ pytest -m "functional and domain(ai) and framework(pytorch) and runtime(baremeta
 pytest -m "functional and domain(hpc) and runtime(mpi)"</code></pre>
       <p><strong>Docker / k8s:</strong> mark as <code>runtime(docker)</code> / <code>runtime(k8s)</code>; gate on environment + tier (<code>comprehensive</code> / <code>full</code> only).</p>
       <p><strong>Design rules:</strong> keep dimensions orthogonal — <code>type</code> = test kind; <code>domain</code> = workload audience; <code>runtime</code> = launch mode; <code>framework</code> = AI stack.</p>
-      <p><strong>Phasing:</strong> MVP = <code>type</code> (incl. <code>misc</code>) + <code>arch</code>; Phase 2 = <code>gpu</code> + <code>exclude_gpu</code> + functional; Phase 2+ = <code>domain</code>, <code>framework</code>, <code>runtime</code>. Domain-specific ad-hoc markers migrate when known; <strong>misc/tmp bucket remains permanent</strong> (§4.2).</p>
+      <p><strong>Phasing:</strong> MVP = <code>type</code> (incl. <code>misc</code>) + <code>arch</code>; Phase 2 = <code>gpu</code> + <code>exclude_gpu</code> + functional; Phase 2+ = <code>domain</code>, <code>framework</code>, <code>runtime</code>; Phase 3+ = <code>os(windows)</code>. Domain-specific ad-hoc markers migrate when known; <strong>misc/tmp bucket remains permanent</strong> (§4.2).</p>
 
       <h3>Design — Section 4.2: Ad-hoc, misc, and temporary tests</h3>
       <p>Structured taxonomy is the <strong>default path</strong>, not a hard requirement for every file.</p>
@@ -611,6 +614,7 @@ pytest -m "not surface(webui)"</code></pre>
         <li>Confirm <strong>tmp test policy</strong>: max lifetime, owner/docstring requirement, stale-tmp CI gate.</li>
         <li>Agree on <strong>phase / surface markers</strong> for profile vs analyze and CLI vs TUI (§4.3); web-ui maintenance-only.</li>
         <li>Confirm <strong>TUI sample tests</strong> for Phase 1: migrate <code>test_tui_components.py</code> to unit layer + one Pilot smoke test.</li>
+        <li>Confirm <strong><code>os</code> marker reserved</strong> for Linux (MVP) and Windows (later); filter plumbing must not assume Linux-only (§4.1).</li>
       </ul>
 
       <div class="footer">Generated for local discussion. Source: internal brainstorming conversation summary.</div>
@@ -922,6 +926,7 @@ pytest -m "not surface(webui)"</code></pre>
       <ul>
         <li><code>type</code> (includes <code>misc</code> — see §4.2)</li>
         <li><code>arch</code></li>
+        <li><strong><code>os</code> reserved</strong> — Linux today; Windows planned (see §4.1)</li>
       </ul>
       <p><strong>Bridge period</strong></p>
       <ul>
@@ -965,8 +970,10 @@ pytest -m "gpu(none) or gpu(optional)"</code></pre>
           <tr><td><code>runtime</code></td><td><code>baremetal</code>, <code>mpi</code>, <code>docker</code>, <code>k8s</code></td><td>How the application is launched</td></tr>
           <tr><td><code>gpu</code></td><td><code>none</code>, <code>required</code>, <code>optional</code></td><td>Hardware requirement</td></tr>
           <tr><td><code>arch</code></td><td><code>gfx942</code>, <code>gfx950</code>, <code>rdna35</code>, …</td><td>Already in MVP</td></tr>
+          <tr><td><code>os</code></td><td><code>linux</code>, <code>windows</code></td><td>Host OS (reserved)</td></tr>
         </tbody>
       </table>
+      <p><strong>Platform / OS (<code>os</code>) — Linux now, Windows later:</strong> Reserve <code>os</code> marker; MVP = Linux-only CI (default <code>os(linux)</code>); Phase 3+ = <code>os(windows)</code> tests + Windows CI lane. Use markers, not separate OS folder trees; register <code>os</code> in pytest config now.</p>
       <p><strong>Suggested functional layout:</strong></p>
       <pre><code>tests/functional/
   ai/       # domain=ai, framework=pytorch|jax, runtime=baremetal
@@ -985,7 +992,7 @@ pytest -m "functional and domain(ai) and framework(pytorch) and runtime(baremeta
 pytest -m "functional and domain(hpc) and runtime(mpi)"</code></pre>
       <p><strong>Docker / k8s:</strong> mark as <code>runtime(docker)</code> / <code>runtime(k8s)</code>; gate on environment + tier (<code>comprehensive</code> / <code>full</code> only).</p>
       <p><strong>Design rules:</strong> keep dimensions orthogonal — <code>type</code> = test kind; <code>domain</code> = workload audience; <code>runtime</code> = launch mode; <code>framework</code> = AI stack.</p>
-      <p><strong>Phasing:</strong> MVP = <code>type</code> (incl. <code>misc</code>) + <code>arch</code>; Phase 2 = <code>gpu</code> + <code>exclude_gpu</code> + functional; Phase 2+ = <code>domain</code>, <code>framework</code>, <code>runtime</code>. Domain-specific ad-hoc markers migrate when known; <strong>misc/tmp bucket remains permanent</strong> (§4.2).</p>
+      <p><strong>Phasing:</strong> MVP = <code>type</code> (incl. <code>misc</code>) + <code>arch</code>; Phase 2 = <code>gpu</code> + <code>exclude_gpu</code> + functional; Phase 2+ = <code>domain</code>, <code>framework</code>, <code>runtime</code>; Phase 3+ = <code>os(windows)</code>. Domain-specific ad-hoc markers migrate when known; <strong>misc/tmp bucket remains permanent</strong> (§4.2).</p>
 
       <h3>Design — Section 4.2: Ad-hoc, misc, and temporary tests</h3>
       <p>Structured taxonomy is the <strong>default path</strong>, not a hard requirement for every file.</p>
@@ -1115,6 +1122,7 @@ pytest -m "not surface(webui)"</code></pre>
         <li>Confirm <strong>tmp test policy</strong>: max lifetime, owner/docstring requirement, stale-tmp CI gate.</li>
         <li>Agree on <strong>phase / surface markers</strong> for profile vs analyze and CLI vs TUI (§4.3); web-ui maintenance-only.</li>
         <li>Confirm <strong>TUI sample tests</strong> for Phase 1: migrate <code>test_tui_components.py</code> to unit layer + one Pilot smoke test.</li>
+        <li>Confirm <strong><code>os</code> marker reserved</strong> for Linux (MVP) and Windows (later); filter plumbing must not assume Linux-only (§4.1).</li>
       </ul>
 
       <div class="footer">Generated for local discussion. Source: internal brainstorming conversation summary.</div>

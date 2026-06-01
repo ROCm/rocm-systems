@@ -322,6 +322,7 @@ Filters must work for both CI and developer “partial run” workflows (not CI-
 
 - `type` (includes `misc` — see §4.2)
 - `arch`
+- **`os` reserved** — Linux today; Windows support planned (see §4.1); do not hard-code Linux-only assumptions in filter plumbing
 
 **Bridge period**
 
@@ -376,6 +377,39 @@ docker/k8s/MPI/pytorch into `type`.
 | `runtime` | `baremetal`, `mpi`, `docker`, `k8s` | How the application is launched |
 | `gpu` | `none`, `required`, `optional` | Hardware requirement |
 | `arch` | `gfx942`, `gfx950`, `rdna35`, … | Already in MVP |
+| `os` | `linux`, `windows` | Host OS (reserved — see below) |
+
+**Platform / OS (`os`) — Linux now, Windows later**
+
+The framework must **reserve** multi-OS filtering even though **MVP CI and dev targets Linux only**.
+Windows support is expected later; avoid baking in Linux-only filter APIs that cannot extend.
+
+| Value | When | Test policy |
+|-------|------|-------------|
+| `linux` | MVP (default) | All current tests; implicit if marker omitted during bridge period |
+| `windows` | Phase 3+ | Tag when added; skip on Linux CI via `pytest -m "not os(windows)"` or auto-skip in conftest |
+
+**Design rules**
+
+- Use **`os` marker**, not separate `tests/linux/` vs `tests/windows/` trees (same pattern as `phase` / `surface`).
+- Register `os` in pytest marker config up front so `-m "os(linux)"` works when Windows lands.
+- **Shared code paths first**: unit tests for parsers/utils should stay OS-agnostic; OS-specific tests cover path separators, process launch, ROCm install layout on Windows, TUI/terminal differences.
+- **CI lanes**: Linux tiers stay in `test_categories.yaml`; Windows gets its own tier/label or external pipeline when ready — do not block Linux MVP on Windows infra.
+- **Conftest hook (reserved)**: `tests/conftest.py` may auto-apply `skipif(sys.platform != "win32")` for `os(windows)` tests and vice versa — implement when first Windows test lands.
+
+**Example (future)**
+
+```python
+@pytest.mark.os("windows")
+@pytest.mark.gpu("required")
+def test_profile_vcopy_windows(...):
+    ...
+```
+
+```bash
+pytest -m "os(linux)"                    # default local/CI run today
+pytest -m "os(windows)"                  # Windows dev machine or Win CI lane
+```
 
 **Suggested functional layout**
 
@@ -454,6 +488,7 @@ Avoid combinatorial marker names like `functional_ai_mpi_pytorch`.
 | MVP | `type` (incl. `misc`), `arch` + YAML tiers (`quick`…`full`) |
 | Phase 2 | `gpu` + `exclude_gpu`; enable `type=functional` |
 | Phase 2+ | `domain`, `framework`, `runtime` for AI/HPC functional splits |
+| Phase 3+ | `os(windows)` tests + Windows CI lane; `os` marker enforced (default `linux`) |
 
 Domain-specific ad-hoc markers (`torch_trace`, `torch_ops`) migrate to structured markers when
 classification is known. The **`misc` / `tmp` bucket remains permanent** (§4.2).
@@ -716,4 +751,5 @@ Use these prompts to drive alignment in the team meeting:
 - Confirm **tmp test policy**: max lifetime, owner/docstring requirement, and whether CI should fail if `lifecycle(tmp)` tests are older than N days.
 - Agree on **`phase` / `surface` markers** for profile vs analyze and CLI vs TUI (§4.3); web-ui = maintenance-only, no new tests.
 - Confirm **TUI sample tests** for Phase 1: migrate `test_tui_components.py` to unit layer + add one Textual Pilot integration smoke test.
+- Confirm **`os` marker reserved** for Linux (MVP) and Windows (later); filter plumbing must not assume Linux-only long term (§4.1).
 
