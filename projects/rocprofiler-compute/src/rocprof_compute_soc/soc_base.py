@@ -41,7 +41,7 @@ from utils.utils_common import (
 )
 from utils.utils_counter_defs import (
     counter_to_block,
-    extract_counters,
+    extract_counters_and_variables,
 )
 from vendored import yaml
 
@@ -400,7 +400,7 @@ class OmniSoC_Base:
             metric_name,
             metric_yaml,
         ) in self._iter_arch_analysis_yaml_metrics():
-            hw = extract_counters(metric_yaml, self._mspec.gpu_series)
+            hw, _ = extract_counters_and_variables(metric_yaml, self._mspec.gpu_series)
             hw = self._expand_tcc_template_counters(hw)
             counters = frozenset(hw & remaining)
             if not counters:
@@ -497,7 +497,9 @@ class OmniSoC_Base:
                 block_id, config_filename_dict, config_root_dir, texts
             )
 
-        counters = extract_counters("\n".join(texts), self._mspec.gpu_series)
+        counters, _ = extract_counters_and_variables(
+            "\n".join(texts), self._mspec.gpu_series
+        )
         counters = self._expand_tcc_template_counters(counters)
 
         return counters, filter_blocks
