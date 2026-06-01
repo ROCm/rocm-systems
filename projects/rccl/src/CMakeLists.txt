@@ -94,6 +94,7 @@ set(SRC_FILES
   include/bitops.h
   include/bootstrap.h
   include/ce_coll.h
+  include/ce_fault_inject.h
   include/channel.h
   include/checks.h
   include/collectives.h
@@ -817,6 +818,10 @@ if(DEMANGLE_DIR)
 endif()
 if(LL128_ENABLED)
   target_compile_definitions(rccl PRIVATE ENABLE_LL128)
+endif()
+if(CE_ENABLED)
+  target_compile_definitions(rccl PRIVATE CE_BATCH_ASYNC_SUPPORTED)
+  message(STATUS "CE_BATCH_ASYNC_SUPPORTED compile definition enabled")
 endif()
 
 ## Set RCCL compile options
