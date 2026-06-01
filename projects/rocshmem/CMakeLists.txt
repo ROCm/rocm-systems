@@ -201,15 +201,21 @@ if (NOT BUILD_TESTS_ONLY)
   #############################################################################
   # PACKAGE DEPENDENCIES
   #############################################################################
-  # GDA Requires libnuma
-  if(USE_GDA)
+  # GDA links libnuma directly; hsakmt (USE_SDMA) also depends on numa::numa
+  if(USE_GDA OR USE_SDMA)
     find_package(NUMA QUIET
       PATHS /opt/rocm/lib/rocm_sysdeps /opt/rocm
       PATH_SUFFIXES lib/cmake/NUMA)
     if(NOT TARGET numa::numa)
-      find_library(_NUMA_LIB NAMES numa)
-      find_path(_NUMA_INC NAMES numa.h)
-      if(_NUMA_LIB AND _NUMA_INC)
+      find_package(PkgConfig QUIET)
+      if(PKG_CONFIG_FOUND)
+        pkg_check_modules(_NUMA_PC QUIET numa)
+      endif()
+      find_library(_NUMA_LIB NAMES numa HINTS ${_NUMA_PC_LIBDIR})
+      find_path(_NUMA_INC NAMES numa.h HINTS ${_NUMA_PC_INCLUDEDIR})
+      include(FindPackageHandleStandardArgs)
+      find_package_handle_standard_args(NUMA DEFAULT_MSG _NUMA_LIB _NUMA_INC)
+      if(NUMA_FOUND AND NOT TARGET numa::numa)
         add_library(numa::numa SHARED IMPORTED)
         set_target_properties(numa::numa PROPERTIES
           IMPORTED_LOCATION "${_NUMA_LIB}"
@@ -217,7 +223,7 @@ if (NOT BUILD_TESTS_ONLY)
       endif()
     endif()
 
-    if(NOT TARGET numa::numa)
+    if(USE_GDA AND NOT TARGET numa::numa)
       message(STATUS "libnuma not found. Unable to build GDA")
       set(USE_GDA OFF)
       set(GDA_IONIC OFF)
