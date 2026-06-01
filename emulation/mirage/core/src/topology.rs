@@ -113,3 +113,102 @@ pub struct TopologyDef {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub links: Vec<LinkDef>,
 }
+
+/// On-disk topology store backed by `<MIRAGE_CONFIG>/topology/`.
+pub mod store {
+    use super::TopologyDef;
+    use crate::error::{MirageError, Result};
+    use std::path::PathBuf;
+
+    /// List the names of all topology files on disk.
+    pub fn list() -> Result<Vec<String>> {
+        let root = crate::paths::topology_root();
+        if !root.exists() {
+            return Ok(Vec::new());
+        }
+        let mut out = Vec::new();
+        for entry in std::fs::read_dir(&root).map_err(|e| MirageError::Io {
+            path: root.clone(),
+            source: e,
+        })? {
+            let entry = entry.map_err(|e| MirageError::Io {
+                path: root.clone(),
+                source: e,
+            })?;
+            let name = entry.file_name().to_string_lossy().to_string();
+            if let Some(stem) = name.strip_suffix(".json") {
+                out.push(stem.to_string());
+            }
+        }
+        out.sort();
+        Ok(out)
+    }
+
+    /// Read a topology by name.
+    pub fn get(name: &str) -> Result<TopologyDef> {
+        let p = crate::paths::topology_path(name);
+        crate::state::read_json(&p)
+    }
+
+    /// Write a topology to disk.
+    pub fn put(name: &str, topology: &TopologyDef) -> Result<PathBuf> {
+        let p = crate::paths::topology_path(name);
+        crate::state::write_json(&p, topology)?;
+        Ok(p)
+    }
+
+    /// Write all builtin topologies to disk.
+    ///
+    /// If `force` is true, existing files are overwritten. Otherwise
+    /// only missing topologies are written.
+    ///
+    /// Returns the list of `(name, written)` entries: `written` is
+    /// true if the file was created or overwritten on this call.
+    pub fn ensure_builtins(force: bool) -> Result<Vec<(String, bool)>> {
+        let mut report = Vec::new();
+        for (name, build) in crate::registry::builtin_topologies() {
+            let p = crate::paths::topology_path(name);
+            let exists = p.exists();
+            if exists && !force {
+                report.push((name.to_string(), false));
+                continue;
+            }
+            crate::state::write_json(&p, &build())?;
+            report.push((name.to_string(), true));
+        }
+        Ok(report)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::store;
+
+    #[test]
+    fn ensure_builtins_writes_then_skips() {
+        let _g = crate::paths::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        crate::paths::set_test_root(tmp.path());
+
+        let first = store::ensure_builtins(false).unwrap();
+        assert!(!first.is_empty(), "expected at least one builtin topology");
+        assert!(first.iter().all(|(_, w)| *w), "first run should write every builtin");
+
+        let names: Vec<_> = first.iter().map(|(n, _)| n.clone()).collect();
+        assert_eq!(store::list().unwrap(), {
+            let mut s = names.clone();
+            s.sort();
+            s
+        });
+
+        let second = store::ensure_builtins(false).unwrap();
+        assert!(second.iter().all(|(_, w)| !*w), "second run should not rewrite existing builtins");
+
+        let forced = store::ensure_builtins(true).unwrap();
+        assert!(forced.iter().all(|(_, w)| *w), "force should rewrite every builtin");
+
+        for name in &names {
+            assert!(store::get(name).is_ok(), "{name} should be readable");
+        }
+    }
+}

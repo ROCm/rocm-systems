@@ -59,6 +59,10 @@ pub enum CtlCmd {
     #[command(subcommand)]
     Exec(ExecCmd),
 
+    /// Manage mirage's on-disk state (builtin topologies, purge).
+    #[command(subcommand)]
+    State(StateCmd),
+
     /// Convenience: create session, run a command, attach, clean up.
     Run(RunArgs),
 
@@ -217,6 +221,33 @@ pub struct ExecStartArgs {
     argv: Vec<String>,
 }
 
+// ----- state -----------------------------------------------------------------
+
+#[derive(Subcommand, Debug)]
+pub enum StateCmd {
+    /// (Re)write the builtin topologies to `<MIRAGE_CONFIG>/topology/`.
+    ///
+    /// On every run mirage writes any missing builtin topologies on
+    /// startup; this command additionally **overwrites** existing
+    /// ones, useful after upgrading mirage.
+    Builtins,
+    /// Completely stop and purge all mirage processes and state.
+    ///
+    /// Stops every running session and then removes the mirage
+    /// runtime, state, and cache directories. The config directory
+    /// (profiles, topologies) is left alone unless `--all` is passed.
+    Purge {
+        /// Don't prompt for confirmation.
+        #[arg(short = 'f', long)]
+        force: bool,
+        /// Also remove the mirage config directory (profiles +
+        /// topologies). Builtin topologies will be re-written the
+        /// next time mirage runs.
+        #[arg(long)]
+        all: bool,
+    },
+}
+
 // ----- run -------------------------------------------------------------------
 
 #[derive(Args, Debug)]
@@ -276,11 +307,19 @@ pub async fn dispatch<C: MirageCtl + 'static>(
     ctl: C,
     json: bool,
 ) -> anyhow::Result<ExitCode> {
+    // Best-effort: write any missing builtin topologies on startup
+    // so they're always available under <MIRAGE_CONFIG>/topology/.
+    // Errors here are non-fatal; the user can recover via
+    // `mirage state builtins`.
+    if let Err(e) = mirage_core::topology::store::ensure_builtins(false) {
+        tracing::warn!("failed to preload builtin topologies: {e:#}");
+    }
     let ctl = Arc::new(ctl);
     match cmd {
         CtlCmd::Profile(c) => profile_cmd(&*ctl, c, json),
         CtlCmd::Session(c) => session_cmd(&*ctl, c, json).await,
         CtlCmd::Exec(c) => exec_cmd(ctl.clone(), c, json).await,
+        CtlCmd::State(c) => state_cmd(ctl.clone(), c, json).await,
         CtlCmd::Run(a) => run_cmd(ctl.clone(), a).await,
         CtlCmd::Attach(a) => attach_cmd(ctl.clone(), a).await,
         CtlCmd::Logs(a) => logs_cmd(ctl.clone(), a).await,
@@ -935,6 +974,82 @@ async fn session_wizard<C: MirageCtl>(ctl: &C, json: bool) -> anyhow::Result<Exi
         json,
     )
     .await
+}
+
+// ----- state dispatch --------------------------------------------------------
+
+async fn state_cmd<C: MirageCtl + 'static>(
+    ctl: Arc<C>,
+    cmd: StateCmd,
+    json: bool,
+) -> anyhow::Result<ExitCode> {
+    match cmd {
+        StateCmd::Builtins => {
+            let written = mirage_core::topology::store::ensure_builtins(true)?;
+            if json {
+                let entries: Vec<_> = written
+                    .iter()
+                    .map(|(n, w)| {
+                        serde_json::json!({
+                            "name": n,
+                            "path": mirage_core::paths::topology_path(n),
+                            "written": w,
+                        })
+                    })
+                    .collect();
+                println!("{}", serde_json::to_string_pretty(&entries)?);
+            } else {
+                for (name, w) in &written {
+                    let p = mirage_core::paths::topology_path(name);
+                    let tag = if *w { "wrote" } else { "kept" };
+                    println!("{tag} {} -> {}", name, p.display());
+                }
+            }
+        }
+        StateCmd::Purge { force, all } => {
+            let prompt = if all {
+                "purge ALL mirage state, including profiles and topologies?"
+            } else {
+                "purge all mirage runtime/state/cache and stop all sessions?"
+            };
+            if !force && !confirm(prompt)? {
+                return Ok(ExitCode::from(0));
+            }
+            purge(&*ctl, all)?;
+            println!("purged");
+        }
+    }
+    Ok(ExitCode::from(0))
+}
+
+/// Stop every session and remove mirage's on-disk state.
+fn purge<C: MirageCtl + ?Sized>(ctl: &C, all: bool) -> anyhow::Result<()> {
+    // Best effort: stop every known session (this also wipes their
+    // per-session directory under `mirage_runtime_dir`).
+    if let Ok(ids) = ctl.session_list() {
+        for id in ids {
+            if let Err(e) = ctl.session_destroy(&id) {
+                tracing::warn!("failed to stop session {id}: {e:#}");
+            }
+        }
+    }
+
+    let mut targets = vec![
+        mirage_core::paths::mirage_runtime_dir(),
+        mirage_core::paths::mirage_state_dir(),
+        mirage_core::paths::mirage_cache_dir(),
+    ];
+    if all {
+        targets.push(mirage_core::paths::mirage_config_dir());
+    }
+    for t in targets {
+        if t.exists()
+            && let Err(e) = std::fs::remove_dir_all(&t)
+        {
+            tracing::warn!("failed to remove {}: {e:#}", t.display());
+        }
+    }
+    Ok(())
 }
 
 // ----- misc helpers ----------------------------------------------------------

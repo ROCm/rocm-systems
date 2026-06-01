@@ -75,6 +75,23 @@ pub fn make_def(spec: &EmulatorSpec, nodes: u32, gpus_per_node: u32) -> Emulator
     }
 }
 
+/// Curated set of named topologies that mirage preloads into
+/// `<MIRAGE_CONFIG>/topology/<name>.json` on first run.
+///
+/// Each entry is a `(name, builder)` pair. The builder is called
+/// lazily by [`crate::topology::store::ensure_builtins`]; this keeps
+/// the list a plain function (no globals to initialise) and lets the
+/// values be regenerated cheaply if `mirage state builtins` is used
+/// to force-overwrite existing files.
+pub fn builtin_topologies() -> Vec<(&'static str, fn() -> TopologyDef)> {
+    vec![
+        ("noop", || (NOOP.default_topology)(1, 1)),
+        ("rocjitsu-1x1", || (ROCJITSU.default_topology)(1, 1)),
+        ("rocjitsu-1x8", || (ROCJITSU.default_topology)(1, 8)),
+        ("rocjitsu-2x8", || (ROCJITSU.default_topology)(2, 8)),
+    ]
+}
+
 // =============================================================================
 // noop
 // =============================================================================

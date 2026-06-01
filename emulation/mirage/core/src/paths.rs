@@ -172,6 +172,16 @@ pub fn profile_path(name: &str) -> PathBuf {
     profile_root().join(format!("{name}.json"))
 }
 
+/// Root directory for mirage topologies: `<mirage_config_dir>/topology`.
+pub fn topology_root() -> PathBuf {
+    mirage_config_dir().join("topology")
+}
+
+/// Path to a specific topology file: `<topology_root>/<name>.json`.
+pub fn topology_path(name: &str) -> PathBuf {
+    topology_root().join(format!("{name}.json"))
+}
+
 /// Root directory for all sessions: `<mirage_runtime_dir>/session`.
 pub fn session_root() -> PathBuf {
     mirage_runtime_dir().join("session")

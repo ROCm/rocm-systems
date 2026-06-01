@@ -58,8 +58,18 @@ list the installed emulators
 ### mirage emulator status
 get the status of an emulator
 
-## mirage purge
-completelly stop and purge all mirage process and state
+## mirage state
+
+### mirage state builtins
+(re)write the builtin topologies to `$MIRAGE_CONFIG/topology/`,
+overwriting any existing files. Mirage writes any *missing*
+builtins automatically on every run; use this command after
+upgrading mirage to refresh the bundled set.
+
+### mirage state purge
+completely stop and purge all mirage processes and state.
+Removes the runtime, state, and cache directories; pass `--all`
+to also delete the config directory (profiles + topologies).
 
 ## mirage session
 
