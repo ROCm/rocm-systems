@@ -30,6 +30,9 @@ ncclResult_t ncclLaunchFinish(struct ncclComm* comm);
 ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool* needConnect, ncclSimInfo_t* simInfo);
 ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm);
 
+// Defined via NCCL_PARAM in enqueue.cc.
+int64_t ncclParamLaunchOrderImplicit();
+
 static inline size_t ncclFuncSendCount(ncclFunc_t func, int nRanks, size_t count) {
   return func == ncclFuncReduceScatter ? nRanks*count : count;
 }
