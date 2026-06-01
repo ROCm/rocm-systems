@@ -52,7 +52,9 @@ bool DmaBlitManager::readBuffer(device::Memory& srcMemory, void* dstHost,
     const_address addrSrc = gpuMem(srcMemory).getDeviceMemory() + origin[0];
     address addrDst = reinterpret_cast<address>(dstHost);
     constexpr bool kHostToDev = false;
-    constexpr bool kEnablePin = true;
+    // ROC_FORCE_STAGED_D2H forces the staging-buffer path: no user-pointer
+    // pin and no svm_range install on the host destination.
+    const bool kEnablePin = !ROC_FORCE_STAGED_D2H;
     if (!hsaCopyStagedOrPinned(addrSrc, addrDst, copySize, kHostToDev, copyMetadata, kEnablePin)) {
       LogError("DmaBlitManager:: readBuffer copy failure!");
       return false;
@@ -136,7 +138,10 @@ bool DmaBlitManager::writeBuffer(const void* srcHost, device::Memory& dstMemory,
     address dstAddr = gpuMem(dstMemory).getDeviceMemory() + origin[0];
     const_address srcAddr = reinterpret_cast<const_address>(srcHost);
     constexpr bool kHostToDev = true;
-    constexpr bool enablePin = true;
+    // ROC_FORCE_STAGED_D2H is direction-symmetric: applying it to H2D as
+    // well ensures host source pointers also avoid persistent svm_range
+    // install.
+    const bool enablePin = !ROC_FORCE_STAGED_D2H;
     if (!hsaCopyStagedOrPinned(srcAddr, dstAddr, copySize, kHostToDev, copyMetadata, enablePin)) {
       LogError("DmaBlitManager:: writeBuffer copy failure!");
       return false;
