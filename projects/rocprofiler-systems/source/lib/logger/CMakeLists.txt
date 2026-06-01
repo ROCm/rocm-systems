@@ -20,8 +20,6 @@ target_sources(
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/logger.hpp ${CMAKE_CURRENT_SOURCE_DIR}/debug.hpp
 )
 
-set_target_properties(rocprofiler-systems-logger PROPERTIES POSITION_INDEPENDENT_CODE ON)
-
 get_filename_component(LOGGER_SOURCE_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}" DIRECTORY)
 
 target_include_directories(
