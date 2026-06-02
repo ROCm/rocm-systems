@@ -420,16 +420,16 @@ __host__ int rocshmem_team_my_pe(rocshmem_team_t team);
  *        y-coordinate, and each yteam will contain all the PEs with
  *        the same x-coordinate.
  *
- * @param parent_team   The team to be split.
- * @param xrange        Number of PEs per row (x-axis stride). 
- * @param xaxis_config  Pointer to a team configuration struct for the x-axis.
- * @param xaxis_mask    Bitmask of representing the set of configuration parameters 
- *                      to use from @p xconfig. A zero mask indicates all fields use defaults.
- * @param xaxis_team    Output handle for the calling PE's x-axis team.
- * @param yaxis_config  Pointer to a team configuration struct for the y-axis.
- * @param yaxis_mask    Bitmask of representing the set of configuration parameters 
- *                      to use from @p yconfig. A zero mask indicates all fields use defaults.
- * @param yaxis_team    Output handle for the calling PE's y-axis team.
+ * @param[in] parent_team    The team to be split.
+ * @param[in] xrange         Number of PEs per row (x-axis stride). 
+ * @param[in] xaxis_config   Pointer to a team configuration struct for the x-axis.
+ * @param[in] xaxis_mask     Bitmask of representing the set of configuration parameters 
+ *                           to use from @p xconfig. A zero mask indicates all fields use defaults.
+ * @param[out] xaxis_team    Output handle for the calling PE's x-axis team.
+ * @param[in] yaxis_config   Pointer to a team configuration struct for the y-axis.
+ * @param[in] yaxis_mask     Bitmask of representing the set of configuration parameters 
+ *                           to use from @p yconfig. A zero mask indicates all fields use defaults.
+ * @param[out] yaxis_team    Output handle for the calling PE's y-axis team.
  *
  * @return Zero on sucess; non-zero on failure.
  */
