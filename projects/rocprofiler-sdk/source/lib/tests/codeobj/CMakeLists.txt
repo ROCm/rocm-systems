@@ -22,12 +22,14 @@ configure_file(hipcc_output.s hipcc_output.s COPYONLY)
 
 # Compile a HIP kernel with debug info to test DWARF inline annotation. Two-step: compile
 # to offload bundle, then unbundle to get the GPU ELF.
-find_program(
-    CODEOBJ_AMDCLANGPP REQUIRED
-    NAMES amdclang++
-    HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-    PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-    PATH_SUFFIXES bin llvm/bin NO_CACHE)
+if(NOT ROCPROFILER_SDK_TEST_AMDCLANGPP)
+    find_program(
+        ROCPROFILER_SDK_TEST_AMDCLANGPP REQUIRED
+        NAMES amdclang++
+        HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
+        PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
+        PATH_SUFFIXES bin llvm/bin NO_CACHE)
+endif()
 
 find_program(
     CODEOBJ_OFFLOAD_BUNDLER REQUIRED
@@ -46,9 +48,9 @@ set(_SYNCKERNEL_BIN "${CMAKE_CURRENT_BINARY_DIR}/syncthreads_kernel.bin")
 add_custom_command(
     OUTPUT "${_SYNCKERNEL_BIN}"
     COMMAND
-        ${CODEOBJ_AMDCLANGPP} -x hip -ggdb --offload-arch=${_SYNCKERNEL_ARCH}
-        --offload-device-only -c -fno-gpu-rdc --no-offload-new-driver -o
-        "${_SYNCKERNEL_BUNDLE}" "${_SYNCKERNEL_SRC}"
+        ${ROCPROFILER_SDK_TEST_AMDCLANGPP} ${ROCPROFILER_SDK_TEST_AMDCLANGPP_FLAGS} -x hip
+        -ggdb --offload-arch=${_SYNCKERNEL_ARCH} --offload-device-only -c -fno-gpu-rdc
+        --no-offload-new-driver -o "${_SYNCKERNEL_BUNDLE}" "${_SYNCKERNEL_SRC}"
     COMMAND
         ${CODEOBJ_OFFLOAD_BUNDLER} --type=o --input=${_SYNCKERNEL_BUNDLE}
         --output=${_SYNCKERNEL_BIN} --unbundle
