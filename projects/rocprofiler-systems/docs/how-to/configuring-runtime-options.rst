@@ -386,6 +386,15 @@ Filtering on ``Region2`` captures only activity inside the inner ``Region2`` sco
    When combined with ``roctxProfilerPause`` / ``roctxProfilerResume``, a pause issued
    outside an active target region is ignored — each region entry resets the pause state.
 
+.. note::
+
+   Counter tracks may show a small latency between the region boundary and the
+   closing zero-valued sentinel sample.  This is expected behavior — the sentinel
+   is written by a callback that executes after ``roctxRangeStop()`` returns, so a
+   gap of a few tens of microseconds is normal and does not indicate any problem
+   with the trace.  Increasing the process-sampling frequency
+   (``ROCPROFSYS_PROCESS_SAMPLING_FREQ``) will reduce this gap.
+
 Example: trace only activity inside a region named ``Compute``:
 
 .. code-block:: shell

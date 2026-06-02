@@ -1445,6 +1445,14 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
       !coordinator->SwapSupported() && !coordinator->IsGfx1250())
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
+  const bool is_indirect =
+      (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC) ||
+      (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST) ||
+      (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST);
+
+  if (is_indirect && !coordinator->IndirectCopySupported())
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
   struct EngineSlot { BlitSdmaBase* blit; uint32_t idx; };
   std::vector<EngineSlot> engines(num_entries, {coordinator, coord_idx});
 
@@ -1505,7 +1513,8 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
   }
 
   const char* op_name =
-      (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP) ? "Swap" : "Copy";
+      (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP) ? "Swap" :
+      is_indirect ? "Indirect" : "Copy";
 
   // GFX1250+ fast path: use wait/signal packets so bodies directly wait on
   // dep_signals and signal out_signal. No prologue or epilogue needed when
@@ -1562,6 +1571,19 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
             size_list[d], size_list[d],
             *body_deps_ptr, out_signal);
         break;
+      case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC:
+      case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST:
+      case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST: {
+        const bool ind_src = (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC) ||
+                             (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST);
+        const bool ind_dst = (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST) ||
+                             (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST);
+        stat = engines[d].blit->SubmitLinearCopyBodyIndirectWaitSignal(
+            dst_list[d], src_list[d], size_list[d],
+            ind_src, ind_dst,
+            *body_deps_ptr, out_signal);
+        break;
+      }
       default:
         stat = engines[d].blit->SubmitLinearCopyBodyWaitSignal(
             dst_list[d], src_list[d], size_list[d],
@@ -1590,11 +1612,19 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
 
   // Legacy Path: prologue -> body -> epilogue path.
 
+  bool use_body_signals = !coordinator->PlatformAtomicSupport();
+
+  // On gfx1250 with shared out_signal, use WaitSignal body to fuse
+  // poll+copy+signal into a single packet per body.
+  const bool waitsignal_body =
+      coordinator->IsGfx1250() && !use_body_signals;
+
+  // Indirect bodies only implement fused packets
+  if (is_indirect && !waitsignal_body) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
   // Allocate prologue synchronization signal
   core::unique_signal_ptr prologue_signal(new core::DefaultSignal(1));
   if (!prologue_signal->IsValid()) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-
-  bool use_body_signals = !coordinator->PlatformAtomicSupport();
 
   // Without platform atomic support, bodies cannot atomically decrement a
   // shared signal. Allocate per-body signals so each body writes to its own
@@ -1647,9 +1677,6 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
   if (stat != HSA_STATUS_SUCCESS) return stat;
 
   // Fan out: one body per entry on its resolved engine.
-  // On gfx1250 with shared out_signal, use WaitSignal body to fuse
-  // poll+copy+signal into a single packet per body.
-  const bool waitsignal_body = (coordinator->IsGfx1250()) && !use_body_signals;
   const std::vector<core::Signal*> body_deps = waitsignal_body
       ? std::vector<core::Signal*>{prologue_raw} : std::vector<core::Signal*>{};
 
@@ -1674,6 +1701,20 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
                 dst_list[d], const_cast<void*>(src_list[d]), size_list[d],
                 *prologue_raw, body_sig);
       break;
+    case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC:
+    case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST:
+    case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST: {
+      const bool ind_src =
+          (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC) ||
+          (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST);
+      const bool ind_dst =
+          (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST) ||
+          (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST);
+      stat = engines[d].blit->SubmitLinearCopyBodyIndirectWaitSignal(
+          dst_list[d], src_list[d], size_list[d], ind_src, ind_dst,
+          body_deps, out_signal);
+      break;
+    }
     default: // Default is Linear Copy
       stat = waitsignal_body
           ? engines[d].blit->SubmitLinearCopyBodyWaitSignal(
@@ -1842,8 +1883,49 @@ hsa_status_t GpuAgent::DmaCopySwap(
   core::Signal* out_signal_obj = core::Signal::Convert(op.completion_signal);
   core::Signal& out_signal = *out_signal_obj;
 
+  if (op.num_entries == 0) {
+    // Asymmetric swap is not yet supported here.
+    if (op.src_size != op.dst_size)
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+    const void* src_arr[1] = { op.src };
+    void* dst_arr[1] = { op.dst };
+    hsa_agent_t dst_agent_arr[1] = { op.dst_agent };
+    size_t size_arr[1] = { op.src_size };
+    return DmaCopyFanOutOp(HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP, out_signal,
+                           dep_signals, 1,
+                           src_arr, dst_arr, dst_agent_arr, size_arr);
+  }
+
   return DmaCopyFanOutOp(HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP, out_signal,
                          dep_signals, op.num_entries,
+                         const_cast<const void* const*>(op.src_list),
+                         op.dst_list, op.dst_agent_list, op.size_list);
+}
+
+hsa_status_t GpuAgent::DmaCopyIndirect(
+    const hsa_amd_memory_copy_op_t& op,
+    std::vector<core::Signal*>& dep_signals) {
+
+  core::Signal* out_signal_obj = core::Signal::Convert(op.completion_signal);
+  core::Signal& out_signal = *out_signal_obj;
+
+  // Each entry becomes a separate indirect packet routed to an SDMA engine by
+  // DmaCopyFanOutOp; the packet's per-entry indirect mode is taken from op.type
+  // (all entries in one HSA op share the same INDIRECT_{SRC,DST,SRCDST} kind).
+  const auto op_type = static_cast<hsa_amd_memory_copy_op_type_t>(op.type);
+
+  if (op.num_entries == 0) {
+    // Single indirect transfer using the scalar fields.
+    const void* src_arr[1] = { op.src };
+    void* dst_arr[1] = { op.dst };
+    hsa_agent_t dst_agent_arr[1] = { op.dst_agent };
+    size_t size_arr[1] = { op.size };
+    return DmaCopyFanOutOp(op_type, out_signal, dep_signals, 1,
+                           src_arr, dst_arr, dst_agent_arr, size_arr);
+  }
+
+  return DmaCopyFanOutOp(op_type, out_signal, dep_signals, op.num_entries,
                          const_cast<const void* const*>(op.src_list),
                          op.dst_list, op.dst_agent_list, op.size_list);
 }
@@ -1886,14 +1968,13 @@ hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
       status = DmaCopyBroadcast(op, dep_signals);
       break;
     case HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP:
-      if (op.num_entries == 0)
-        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       status = DmaCopySwap(op, dep_signals);
       break;
     case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC:
     case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST:
     case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST:
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      status = DmaCopyIndirect(op, dep_signals);
+      break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
