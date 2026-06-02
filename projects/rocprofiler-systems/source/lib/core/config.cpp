@@ -2780,6 +2780,35 @@ get_mpi_rank_from_env()
 
     return std::nullopt;
 }
+
+std::optional<std::uint64_t>
+get_mpi_world_size_from_env()
+{
+    const std::vector<std::string> size_env_var_options = {
+        // world-size env vars: most runtime-specific to most generic
+        "OMPI_COMM_WORLD_SIZE", "MV2_COMM_WORLD_SIZE", "PMI_SIZE", "SLURM_NTASKS"
+    };
+
+    for(const auto& env_var : size_env_var_options)
+    {
+        const std::string size_str = get_env(env_var, std::string{}, false);
+
+        if(size_str.empty()) continue;
+        try
+        {
+            const auto size = std::stoul(size_str);
+            LOG_DEBUG("MPI output filtering: using world size = {} from {}", size,
+                      env_var);
+            return size;
+        } catch(const std::exception& e)
+        {
+            LOG_WARNING("MPI output filtering: failed to get world size from {}='{}': {}",
+                        env_var, size_str, e.what());
+        }
+    }
+
+    return std::nullopt;
+}
 #endif
 }  // namespace
 
@@ -2805,10 +2834,32 @@ is_rank_in_filter(std::string enabled_ranks_str)
         return true;
     }
 
-    const auto enabled_ranks = rocprofsys::utility::parse_numeric_range<
+    auto enabled_ranks = rocprofsys::utility::parse_numeric_range<
         std::int64_t, std::unordered_set<std::int64_t>>(enabled_ranks_str, "ranks", 1L);
+
+    // Drop ranks that cannot exist in this job. World size is read from launcher
+    // env vars; when it is unknown, no validation is performed (user's
+    // responsibility). NOTE: assumes the detected rank and world size share the
+    // same (global) numbering space.
+    const auto world_size = get_mpi_world_size_from_env();
+    if(world_size)
+    {
+        for(auto it = enabled_ranks.begin(); it != enabled_ranks.end();)
+        {
+            if(*it < 0 || static_cast<std::uint64_t>(*it) >= world_size.value())
+            {
+                LOG_WARNING("MPI output filtering: rank {} is out of range [0, {}); "
+                            "ignoring",
+                            *it, world_size.value());
+                it = enabled_ranks.erase(it);
+            }
+            else
+                ++it;
+        }
+    }
+
     // empty enabled_ranks for non-empty && not "none" enabled_ranks_str (checked above)
-    // -> filter string parsing error
+    // -> filter string parsing error or all ranks out of range
     if(enabled_ranks.empty())
     {
         LOG_WARNING("MPI output filtering DISABLED: invalid filter specification '{}'",
