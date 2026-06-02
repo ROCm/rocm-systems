@@ -12,6 +12,7 @@ set(UNIT_TEST_SOURCES
     database_test.cpp
     entity_utility_test.cpp
     json_serializer_test.cpp
+    mock_sqlite3_test.cpp
 )
 
 add_executable(profiler-hub_unit_tests ${UNIT_TEST_SOURCES})
