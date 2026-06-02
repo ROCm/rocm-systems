@@ -39,7 +39,7 @@ HIP_TEST_CASE(Unit_hipMemcpyPeerAsync_Positive_Default) {
   }
 
   const auto allocation_size =
-      isQuickLevel() ? kPageSize : GENERATE(kPageSize / 2, kPageSize, kPageSize * 2);
+      isQuickLevel() ? GENERATE(kPageSize / 2, kPageSize * 2) : GENERATE(kPageSize / 2, kPageSize, kPageSize * 2);
 
   int can_access_peer = 0;
 

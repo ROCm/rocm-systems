@@ -39,7 +39,7 @@ HIP_TEST_CASE(Unit_hipMemcpyPeer_Positive_Default) {
   }
 
   const auto allocation_size =
-      isQuickLevel() ? kPageSize : GENERATE(kPageSize / 2, kPageSize, kPageSize * 2);
+      isQuickLevel() ? GENERATE(kPageSize / 2, kPageSize * 2) : GENERATE(kPageSize / 2, kPageSize, kPageSize * 2);
 
   int can_access_peer = 0;
   const auto src_device = isQuickLevel() ? 0 : GENERATE(range(0, HipTest::getDeviceCount()));

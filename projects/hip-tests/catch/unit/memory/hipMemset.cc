@@ -39,7 +39,7 @@ static bool testhipMemset(T* A_h, T* A_d, T memsetval, enum MemsetType type, siz
   A_h = reinterpret_cast<T*>(malloc(Nbytes));
   REQUIRE(A_h != nullptr);
 
-  for (int offset = isQuickLevel() ? 0 : MAX_OFFSET; offset >= 0; offset--) {
+  for (int offset = MAX_OFFSET; offset >= 0; offset--) {
     if (type == hipMemsetTypeDefault) {
       HIP_CHECK(hipMemset(A_d + offset, memsetval, numElements - offset));
 
@@ -81,7 +81,7 @@ template <typename T> static bool testhipMemsetAsync(T* A_h, T* A_d, T memsetval
   A_h = reinterpret_cast<T*>(malloc(Nbytes));
   REQUIRE(A_h != nullptr);
 
-  for (int offset = isQuickLevel() ? 0 : MAX_OFFSET; offset >= 0; offset--) {
+  for (int offset = MAX_OFFSET; offset >= 0; offset--) {
     if (type == hipMemsetTypeDefault) {
       HIP_CHECK(hipMemsetAsync(A_d + offset, memsetval, numElements - offset, stream));
 
