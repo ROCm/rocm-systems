@@ -703,6 +703,15 @@ if(TARGET test-rocprofiler-compute-tool)
     add_test(NAME test-rocprofiler-compute-tool COMMAND ${_tool_test_cmd})
 endif()
 
+if(TARGET test-pc-sampling-collector)
+    if(TEST_FROM_INSTALL)
+        set(_pcs_test_cmd tests/test-pc-sampling-collector)
+    else()
+        set(_pcs_test_cmd $<TARGET_FILE:test-pc-sampling-collector>)
+    endif()
+    add_test(NAME test-pc-sampling-collector COMMAND ${_pcs_test_cmd})
+endif()
+
 # -----------------------------------
 # Generate coverage tests
 # -----------------------------------
