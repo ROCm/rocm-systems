@@ -37,10 +37,10 @@
 namespace rocjitsu {
 
 class AmdGpuCodeObject;
-class CodeObjectPatcher;
 class SemanticTranslator;
 class Instruction;
 struct InstructionLegalization;
+struct KernelTextLayout;
 
 /// @brief Encoding translation function type.
 ///
@@ -72,12 +72,11 @@ using LegalizationLookupFn = const InstructionLegalization *(*)(uint16_t encodin
 
 /// @brief One source instruction trace event emitted by BinaryTranslator.
 ///
-/// @details Offsets are .text-relative. When emitted_in_cave is true,
-/// target_offset points into the logical .text continuation that later becomes
-/// `.rj_translations`; subtracting the original .text size gives the offset in
-/// that cave section. source_words and target_words are only valid for the
-/// duration of the callback; callers that need to retain them must copy the
-/// spans.
+/// @details Offsets are .text-relative in the relocated output. When
+/// emitted_in_cave is true, target_offset points into the current kernel's
+/// private local cave inside the rewritten .text. source_words and target_words
+/// are only valid for the duration of the callback; callers that need to retain
+/// them must copy the spans.
 struct TranslationTraceEvent {
   uint64_t source_offset = 0;
   uint32_t source_size = 0;
@@ -130,10 +129,13 @@ struct TranslatedCodeObject {
 ///   3. Translating remaining instructions via legalization + encoding translate.
 ///   4. Re-emitting a valid ELF for host_arch via CodeObjectPatcher.
 ///
-/// Because every in-place replacement preserves the original instruction's size
-/// (same-size for Identity/Substitute/Lower; branch stub for code caves),
-/// no instruction in .text ever shifts. Branch offsets remain valid — no global
-/// branch fixup pass is required.
+/// DBT relocates each kernel into a fresh .text layout instead of appending a
+/// global `.rj_translations` cave. Each descriptor entry gets a private emitted
+/// body plus a local cave immediately after that body. Since explicit branches
+/// may move by a different delta than their targets, direct PC-relative branch
+/// immediates are patched through the kernel-local source-to-target block
+/// placement map. Fallthrough is preserved by emitting reachable blocks in
+/// original .text order.
 class BinaryTranslator {
 public:
   /// @brief Construct a translator for the given (guest, host) ISA pair.
@@ -159,15 +161,19 @@ private:
   /// @details If the replacement fits within the source byte range, writes
   /// in-place and pads any leftover source words. If it expands, writes a
   /// branch stub in-place and appends the replacement body + return branch to
-  /// the .rj_translations code cave via the patcher.
+  /// the current kernel's local cave.
   ///
-  /// @param repl    The semantic replacement to apply.
-  /// @param text    The translated text buffer (same size as original .text).
-  /// @param patcher The code object patcher for cave body accumulation.
+  /// @param repl                 The semantic replacement to apply.
+  /// @param text                 The relocated .text buffer under construction.
+  /// @param layout               Current kernel layout for local cave accounting.
+  /// @param orig_text            Original guest .text used to classify fallthrough padding.
+  /// @param source_return_offset Original .text offset reached after the replaced instruction.
   /// @returns true if the replacement was applied safely; false if an expanding
   ///          replacement could not be branched to/from the code cave.
   [[nodiscard]] bool apply_semantic(const struct SemanticReplacement &repl,
-                                    std::vector<uint8_t> &text, CodeObjectPatcher &patcher);
+                                    std::vector<uint8_t> &text, KernelTextLayout &layout,
+                                    std::span<const uint8_t> orig_text,
+                                    uint64_t source_return_offset);
 
   /// @brief Translate a single instruction via the encoding translation pipeline.
   ///
@@ -176,17 +182,19 @@ private:
   /// Falls back to copying the original encoding if translation produces no output.
   ///
   /// @param inst       The decoded guest instruction.
-  /// @param offset     Byte offset of the instruction within .text.
+  /// @param offset     Source byte offset of the instruction within original .text.
+  /// @param target_offset Relocated byte offset of the instruction in output .text.
   /// @param text       The translated text buffer.
   /// @param dst_opcode Target opcode from the legalization table.
-  /// @param patcher    The code object patcher for expanded instruction bodies.
+  /// @param layout     Current kernel layout for local cave accounting.
   /// @param orig_text   The original .text bytes used to preserve trailing literals.
   /// @returns true if the instruction was translated or copied safely; false if
   ///          the translated encoding expanded and could not be branched through
   ///          the code cave.
   [[nodiscard]] bool handle_encoding(const Instruction &inst, uint64_t offset,
-                                     std::vector<uint8_t> &text, uint16_t dst_opcode,
-                                     CodeObjectPatcher &patcher, std::span<const uint8_t> orig_text,
+                                     uint64_t target_offset, std::vector<uint8_t> &text,
+                                     uint16_t dst_opcode, KernelTextLayout &layout,
+                                     std::span<const uint8_t> orig_text,
                                      const InstructionLegalization *leg);
 
   rj_code_arch_t guest_arch_;                               ///< Source ISA.

@@ -372,7 +372,7 @@ count_semantic_lowerings(const std::vector<InstructionTranslationReport> &transl
 [[nodiscard]] std::string target_location(const InstructionTranslationReport &translation,
                                           size_t text_size) {
   if (translation.emitted_in_cave && translation.target_offset >= text_size)
-    return ".rj_translations+" + hex_offset(translation.target_offset - text_size);
+    return ".text(local-cave)+" + hex_offset(translation.target_offset);
   return ".text+" + hex_offset(translation.target_offset);
 }
 
