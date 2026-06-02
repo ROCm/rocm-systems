@@ -44,6 +44,10 @@ ROCPD_METADATA_COLUMNS = [
     "End_Timestamp",
 ]
 
+# Canonical column-name preference order for Pct of Peak lookups
+VALUE_COL_PREFERENCE: tuple[str, ...] = ("Avg", "Value")
+PEAK_COL_PREFERENCE: tuple[str, ...] = ("Peak", "Peak (Empirical)")
+
 
 def get_bw_scale_and_unit(value: float) -> tuple[float, str]:
     """Return the divisor and suffix for a bandwidth value in Bytes/s."""
