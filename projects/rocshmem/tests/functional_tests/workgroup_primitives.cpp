@@ -112,9 +112,7 @@ WorkGroupPrimitiveTester::WorkGroupPrimitiveTester(TesterArguments args)
       break;
   }
 
-  for(size_t i = 0; i < buff_size; i++) {
-    source[i] = static_cast<char>('a' + i % 26);
-  }
+  CHECK_HIP(hipMemset(source, 'a', buff_size));
 }
 
 WorkGroupPrimitiveTester::~WorkGroupPrimitiveTester() {
@@ -141,7 +139,7 @@ WorkGroupPrimitiveTester::~WorkGroupPrimitiveTester() {
 
 void WorkGroupPrimitiveTester::resetBuffers(size_t size) {
   size_t buff_size = size * batch_size * args.num_wgs;
-  memset(dest, '1', buff_size);
+  CHECK_HIP(hipMemset(dest, '1', buff_size));
 }
 
 void WorkGroupPrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize,
@@ -163,25 +161,28 @@ void WorkGroupPrimitiveTester::verifyResults(size_t size) {
                      : 1;
 
   if (args.myid == check_id) {
-    size_t stride = size * batch_size;
+    size_t buf_bytes = size * batch_size;
     size_t num_buffers = args.num_wgs;
-    size_t total = size * num_buffers;
+    size_t total = buf_bytes * num_buffers;
     size_t verify_wg_size = std::min((size_t) 1024, total);
     size_t verify_num_wgs = (total + verify_wg_size - 1) / verify_wg_size;
 
     hipLaunchKernelGGL(verify_results_kernel_char, verify_num_wgs, verify_wg_size, 0, stream,
-                       source, dest, size, stride, num_buffers, verification_error);
+                       dest, size, num_buffers, batch_size, verification_error);
     CHECK_HIP(hipStreamSynchronize(stream));
 
     if (*verification_error) {
       for (size_t b = 0; b < num_buffers; b++) {
-        for (size_t i = 0; i < size; i++) {
-          if (dest[b * stride + i] != source[b * stride + i]) {
-            std::cerr << "Data validation error at buffer " << b
-                      << " idx " << i << std::endl;
-            std::cerr << " Got " << dest[b * stride + i] << ", Expected "
-                      << source[b * stride + i] << std::endl;
-            exit(-1);
+        for (int slot = 0; slot < batch_size; slot++) {
+          for (size_t i = 0; i < size; i++) {
+            if (dest[b * buf_bytes + slot * size + i] != 'a') {
+              std::cerr << "Data validation error at buffer " << b
+                        << " slot " << slot << " idx " << i << std::endl;
+              std::cerr << " Got " << (int)(unsigned char)dest[b * buf_bytes + slot * size + i]
+                        << ", Expected " << (int)(unsigned char)'a'
+                        << std::endl;
+              exit(-1);
+            }
           }
         }
       }

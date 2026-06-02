@@ -154,9 +154,7 @@ DefaultCTXPrimitiveTester::DefaultCTXPrimitiveTester(TesterArguments args)
       break;
   }
 
-  for(size_t i = 0; i < buff_size; i++) {
-    source[i] = static_cast<char>('a' + i % 26);
-  }
+  CHECK_HIP(hipMemset(source, 'a', buff_size));
 }
 
 DefaultCTXPrimitiveTester::~DefaultCTXPrimitiveTester() {
@@ -185,7 +183,7 @@ DefaultCTXPrimitiveTester::~DefaultCTXPrimitiveTester() {
 
 void DefaultCTXPrimitiveTester::resetBuffers(size_t size) {
   size_t buff_size = size * batch_size * args.wg_size * args.num_wgs;
-  memset(dest, '1', buff_size);
+  CHECK_HIP(hipMemset(dest, '1', buff_size));
 }
 
 void DefaultCTXPrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize,
@@ -209,18 +207,20 @@ void DefaultCTXPrimitiveTester::verifyResults(size_t size) {
           : 1;
 
   if (args.myid == check_id) {
-    size_t stride = size * batch_size;
+    size_t buf_bytes = size * batch_size;
     size_t num_buffers = args.wg_size * args.num_wgs;
+
     for (size_t b = 0; b < num_buffers; b++) {
-      char *s = source + b * stride;
-      char *d = dest + b * stride;
-      for (size_t i = 0; i < size; i++) {
-        if (d[i] != s[i]) {
-          std::cerr << "Data validation error at buffer " << b
-                    << " idx " << i << std::endl;
-          std::cerr << " Got " << d[i] << ", Expected "
-                    << s[i] << std::endl;
-          exit(-1);
+      for (int slot = 0; slot < batch_size; slot++) {
+        for (size_t i = 0; i < size; i++) {
+          if (dest[b * buf_bytes + slot * size + i] != 'a') {
+            std::cerr << "Data validation error at buffer " << b
+                      << " slot " << slot << " idx " << i << std::endl;
+            std::cerr << " Got " << (int)(unsigned char)dest[b * buf_bytes + slot * size + i]
+                      << ", Expected " << (int)(unsigned char)'a'
+                      << std::endl;
+            exit(-1);
+          }
         }
       }
     }
