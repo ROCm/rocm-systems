@@ -88,11 +88,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtQueueSignalExternalSemaphore(
   // HSA_QUEUEID is a (WDDMQueue *); reverse-cast matches dxg/queues.cpp.
   auto *queue = reinterpret_cast<WDDMQueue *>(QueueId);
 
-  // The syncobj was opened against the semaphore's node (node_id), but the
-  // GPU command is issued on the queue's adapter (queue->context). On a
-  // multi-adapter system those can differ, mixing a syncobj from one adapter
-  // with a context from another, which fails unpredictably. Require the queue
-  // to live on the same node the semaphore was imported on.
+  // The syncobj belongs to the semaphore's node; issuing on a queue from a
+  // different adapter mixes mismatched handles. Require the nodes to match.
   if (queue->device == nullptr ||
       queue->device->NodeId() != static_cast<int>(node_id))
     return HSAKMT_STATUS_INVALID_NODE_UNIT;
@@ -121,9 +118,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtQueueWaitExternalSemaphore(
 
   auto *queue = reinterpret_cast<WDDMQueue *>(QueueId);
 
-  // Same cross-adapter guard as the signal path: the syncobj belongs to the
-  // semaphore's node (node_id) and the wait is issued on the queue's adapter,
-  // so the queue must live on that same node.
+  // Same cross-adapter guard as the signal path.
   if (queue->device == nullptr ||
       queue->device->NodeId() != static_cast<int>(node_id))
     return HSAKMT_STATUS_INVALID_NODE_UNIT;
