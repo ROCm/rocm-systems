@@ -20,25 +20,25 @@ RUN apt update && \
         curl \
         gpg
 
-# Cache MAJOR/MINOR and a 'use new repo' flag for use by later RUN steps.
+# Cache MAJOR/MINOR and the ROCm build type for use by later RUN steps.
 # Threshold: ROCm 7.11+ ships from repo.amd.com to /opt/rocm/core-<MAJOR>.<MINOR>;
 # earlier releases ship from repo.radeon.com to /opt/rocm (legacy symlink).
 RUN ROCM_MAJOR=$(echo "${ROCM_VERSION}" | cut -d. -f1); \
     ROCM_MINOR=$(echo "${ROCM_VERSION}" | cut -d. -f2); \
     if [ "${ROCM_MAJOR}" -gt 7 ] || { [ "${ROCM_MAJOR}" -eq 7 ] && [ "${ROCM_MINOR}" -ge 11 ]; }; then \
-        ROCM_USE_NEW_REPO=1; \
+        ROCM_BUILD_TYPE=new; \
         ROCM_INSTALL_PATH="/opt/rocm/core-${ROCM_MAJOR}.${ROCM_MINOR}"; \
     else \
-        ROCM_USE_NEW_REPO=0; \
+        ROCM_BUILD_TYPE=legacy; \
         ROCM_INSTALL_PATH="/opt/rocm"; \
     fi; \
-    printf 'ROCM_MAJOR=%s\nROCM_MINOR=%s\nROCM_USE_NEW_REPO=%s\nROCM_INSTALL_PATH=%s\n' \
-        "${ROCM_MAJOR}" "${ROCM_MINOR}" "${ROCM_USE_NEW_REPO}" "${ROCM_INSTALL_PATH}" \
+    printf 'ROCM_MAJOR=%s\nROCM_MINOR=%s\nROCM_BUILD_TYPE=%s\nROCM_INSTALL_PATH=%s\n' \
+        "${ROCM_MAJOR}" "${ROCM_MINOR}" "${ROCM_BUILD_TYPE}" "${ROCM_INSTALL_PATH}" \
         > /etc/rocm-build.env
 
 # Retrieve ROCm GPG key
 RUN . /etc/rocm-build.env && \
-    if [ "${ROCM_USE_NEW_REPO}" = "1" ]; then \
+    if [ "${ROCM_BUILD_TYPE}" = "new" ]; then \
         curl https://repo.amd.com/rocm/packages/gpg/rocm.gpg | \
             gpg --dearmor >> /etc/apt/keyrings/amdrocm.gpg; \
     else \
@@ -51,7 +51,7 @@ RUN . /etc/rocm-build.env && \
 # If the PATCH component is 0, the PATCH of the version is dropped. Otherwise no
 # modification is made.
 RUN . /etc/rocm-build.env && \
-    if [ "${ROCM_USE_NEW_REPO}" = "1" ]; then \
+    if [ "${ROCM_BUILD_TYPE}" = "new" ]; then \
         echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/amdrocm.gpg] https://repo.amd.com/rocm/packages/ubuntu${UBUNTU_MAJOR_VERSION}${UBUNTU_MINOR_VERSION} stable main" \
             > /etc/apt/sources.list.d/amdrocm.list; \
     else \
@@ -64,7 +64,7 @@ RUN . /etc/rocm-build.env && \
 # Outer EOT is a Dockerfile-level heredoc delimiter, kept distinct from the inner shell EOF.
 RUN <<"EOT"
 . /etc/rocm-build.env
-if [ "${ROCM_USE_NEW_REPO}" = "0" ]; then
+if [ "${ROCM_BUILD_TYPE}" = "legacy" ]; then
     cat <<EOF > /etc/apt/preferences.d/rocm-pin-600
 Package: *
 Pin: release o=repo.radeon.com
@@ -88,7 +88,7 @@ RUN apt update && \
 
 # ROCm dev packages
 RUN . /etc/rocm-build.env && \
-    if [ "${ROCM_USE_NEW_REPO}" = "1" ]; then \
+    if [ "${ROCM_BUILD_TYPE}" = "new" ]; then \
         apt install -y \
             amdrocm-runtime-dev${ROCM_MAJOR}.${ROCM_MINOR}; \
     else \
