@@ -6,6 +6,7 @@
 
 #include "aql_queue.h"
 
+#include "embedded_schema.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/risc_v/hart.h"
@@ -28,8 +29,6 @@ RJ_DIAGNOSTIC_POP
 namespace {
 
 using namespace rocjitsu;
-
-const std::string SCHEMA_PATH = std::string(SCHEMA_DIR) + "/simulation_config.fbs";
 
 // SOPP encoding: bits[31:23]=0x17F, bits[22:16]=op, bits[15:0]=simm16.
 constexpr uint32_t sopp(uint32_t op, uint16_t simm16 = 0) {
@@ -94,7 +93,7 @@ struct PluginFixture {
         {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10}
       ]}}
     )";
-    auto loaded = config::load_config_from_string(json, SCHEMA_PATH);
+    auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
     soc = loaded.soc();
     mem = loaded.memory();
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);

@@ -13,13 +13,9 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 // ncclSymk[Foo]: Kernels built on the device API
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-#define NCCL_MEM_ORDER_RELAXED std::memory_order_relaxed
-#define NCCL_MEM_ORDER_RELEASE std::memory_order_release
-#else
+// cuda::memory_order is provided on HIP by hip_compat.h, pulled in transitively via nccl_device.h above.
 #define NCCL_MEM_ORDER_RELAXED cuda::memory_order_relaxed
 #define NCCL_MEM_ORDER_RELEASE cuda::memory_order_release
-#endif
 
 #define NCCL_SYM_KERNEL_CELL_SIZE 1024 // no less than 16 bytes minimal cell size
 

@@ -566,6 +566,19 @@ rocpd_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sample)
     insert_event_and_sample(enabled.bits.tx_rdma_cnp_pkts,
                             trait::name<category::amd_smi_nic_tx_cnp_pkts>::value,
                             "ainic_tx_rdma_cnp_pkts", m.tx_rdma_cnp_pkts);
+    insert_event_and_sample(enabled.bits.tx_rdma_ack_timeout,
+                            trait::name<category::amd_smi_nic_tx_rdma_ack_timeout>::value,
+                            "ainic_tx_rdma_ack_timeout", m.tx_rdma_ack_timeout);
+    insert_event_and_sample(enabled.bits.resp_tx_pkt_seq_err,
+                            trait::name<category::amd_smi_nic_resp_tx_pkt_seq_err>::value,
+                            "ainic_resp_tx_pkt_seq_err", m.resp_tx_pkt_seq_err);
+    insert_event_and_sample(enabled.bits.req_rx_pkt_seq_err,
+                            trait::name<category::amd_smi_nic_req_rx_pkt_seq_err>::value,
+                            "ainic_req_rx_pkt_seq_err", m.req_rx_pkt_seq_err);
+    insert_event_and_sample(
+        enabled.bits.req_rx_impl_nak_seq_err,
+        trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::value,
+        "ainic_req_rx_impl_nak_seq_err", m.req_rx_impl_nak_seq_err);
 }
 
 void
