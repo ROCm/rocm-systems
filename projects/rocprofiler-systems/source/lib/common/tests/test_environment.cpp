@@ -334,6 +334,21 @@ TEST_F(FakeEnvGetEnvTest, StringReturnsValueWhenSet)
     EXPECT_EQ(fake_environment::get_env("FOO", std::string{ "default" }), "bar");
 }
 
+TEST_F(FakeEnvGetEnvTest, StringViewEnvIdResolvesViaShim)
+{
+    // A non-null-terminated string_view name must still resolve correctly.
+    fake_env::setenv("FOO", "bar", 1);
+    const std::string_view name = std::string_view{ "FOOBAR" }.substr(0, 3);
+    EXPECT_EQ(fake_environment::get_env(name, std::string{ "default" }), "bar");
+}
+
+TEST_F(FakeEnvGetEnvTest, StdStringEnvIdResolvesViaShim)
+{
+    fake_env::setenv("FOO", "7", 1);
+    const std::string name{ "FOO" };
+    EXPECT_EQ(fake_environment::get_env(name, 42), 7);
+}
+
 TEST_F(FakeEnvGetEnvTest, IntReturnsDefaultWhenUnset)
 {
     EXPECT_EQ(fake_environment::get_env("FOO", 42), 42);
@@ -421,6 +436,14 @@ TEST_F(FakeEnvSetEnvTest, OverrideOneOverwrites)
     EXPECT_EQ(fake_environment::get_env("FOO", std::string{}), "new");
 }
 
+TEST_F(FakeEnvSetEnvTest, StringViewEnvVarResolvesViaShim)
+{
+    // A non-null-terminated string_view name must be materialised before setenv.
+    const std::string_view name = std::string_view{ "FOOBAR" }.substr(0, 3);
+    fake_environment::set_env(name, std::string{ "baz" }, 1);
+    EXPECT_EQ(fake_environment::get_env("FOO", std::string{}), "baz");
+}
+
 class FakeEnvGetEnvChoiceTest : public ::testing::Test
 {
 protected:
@@ -471,6 +494,14 @@ TEST_F(FakeEnvGetEnvTest, BoolNumericGreaterThanOneIsTrue)
     EXPECT_TRUE(fake_environment::get_env("FOO", false));
 }
 
+TEST_F(FakeEnvGetEnvTest, BoolNumericOverflowIsTrueAndDoesNotThrow)
+{
+    // An all-digit value past UINT64_MAX must not throw (std::stoi would) and
+    // is still truthy.
+    fake_env::setenv("FOO", "99999999999999999999999", 1);
+    EXPECT_NO_THROW({ EXPECT_TRUE(fake_environment::get_env("FOO", false)); });
+}
+
 TEST_F(FakeEnvGetEnvTest, BoolUpperCaseFalseVariants)
 {
     for(const char* v : { "FALSE", "NO", "OFF", "F", "N" })
@@ -498,6 +529,18 @@ TEST_F(FakeEnvGetEnvTest, FloatTypeReturnsValue)
 {
     fake_env::setenv("FOO", "1.5", 1);
     EXPECT_NEAR(fake_environment::get_env("FOO", 0.0f), 1.5f, 1e-6f);
+}
+
+TEST_F(FakeEnvGetEnvTest, FloatSurroundingWhitespaceParses)
+{
+    fake_env::setenv("FOO", "  2.5  ", 1);
+    EXPECT_NEAR(fake_environment::get_env("FOO", 0.0), 2.5, 1e-9);
+}
+
+TEST_F(FakeEnvGetEnvTest, FloatTrailingGarbageReturnsDefault)
+{
+    fake_env::setenv("FOO", "1.5abc", 1);
+    EXPECT_NEAR(fake_environment::get_env("FOO", 9.9), 9.9, 1e-9);
 }
 
 // ── Integral branch gaps ──────────────────────────────────────────────────────
