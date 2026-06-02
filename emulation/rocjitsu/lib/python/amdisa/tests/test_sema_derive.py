@@ -19,8 +19,10 @@ from amdisa.sema_fingerprint import fingerprint
 
 class _FakeSem:
     """Minimal InstructionSemantics stand-in for testing."""
-    def __init__(self, name, semantic_class, operation=None,
-                 data_type=None, sets_scc=None):
+
+    def __init__(
+        self, name, semantic_class, operation=None, data_type=None, sets_scc=None
+    ):
         self.name = name
         self.semantic_class = semantic_class
         self.operation = operation
@@ -133,13 +135,28 @@ class TestDeriveScalarBinop:
     def test_absdiff(self):
         sem = _FakeSem('S_ABSDIFF_I32', 'scalar_binop', 'absdiff', 'i32', 'nonzero')
         block = derive_sema_block(sem)
-        call_names = [n.call_name for n in block.body.walk()
-                      if n.kind == SemaNodeKind.CALL]
+        call_names = [
+            n.call_name for n in block.body.walk() if n.kind == SemaNodeKind.CALL
+        ]
         assert 'ABSDIFF' in call_names
 
     def test_lowers_without_error(self):
-        for op in ['add', 'sub', 'and', 'or', 'xor', 'shl', 'shr',
-                    'nand', 'nor', 'xnor', 'andn2', 'orn2', 'min', 'max']:
+        for op in [
+            'add',
+            'sub',
+            'and',
+            'or',
+            'xor',
+            'shl',
+            'shr',
+            'nand',
+            'nor',
+            'xnor',
+            'andn2',
+            'orn2',
+            'min',
+            'max',
+        ]:
             sem = _FakeSem(f'S_{op.upper()}_B32', 'scalar_binop', op, 'b32')
             block = derive_sema_block(sem)
             assert block is not None
@@ -192,8 +209,9 @@ class TestDeriveScalarBfe:
         sem = _FakeSem('S_BFE_U32', 'scalar_bfe', data_type='u32')
         block = derive_sema_block(sem)
         assert block is not None
-        call_names = [n.call_name for n in block.body.walk()
-                      if n.kind == SemaNodeKind.CALL]
+        call_names = [
+            n.call_name for n in block.body.walk() if n.kind == SemaNodeKind.CALL
+        ]
         assert 'util::bfe' in call_names
         cpp = lower_sema_block(block)
         assert 'write_scc' in cpp
@@ -225,6 +243,7 @@ class TestDeriveScalarSaveexec:
 # =========================================================================
 # Vector ALU + cmp
 # =========================================================================
+
 
 class TestDeriveVectorMov:
     def test_produces_vector_pragma(self):
@@ -262,8 +281,20 @@ class TestDeriveVectorUnary:
         assert SemaNodeKind.FLOOR in all_kinds
 
     def test_lowers_all(self):
-        for op in ['not', 'sqrt', 'sin', 'cos', 'floor', 'trunc', 'fract',
-                    'rcp', 'rsq', 'log', 'bcnt', 'ffbl']:
+        for op in [
+            'not',
+            'sqrt',
+            'sin',
+            'cos',
+            'floor',
+            'trunc',
+            'fract',
+            'rcp',
+            'rsq',
+            'log',
+            'bcnt',
+            'ffbl',
+        ]:
             sem = _FakeSem(f'V_{op.upper()}_F32', 'vector_unary', op, 'f32')
             block = derive_sema_block(sem)
             assert block is not None
@@ -295,20 +326,36 @@ class TestDeriveVectorBinop:
         for op in ['min', 'max']:
             sem = _FakeSem(f'V_{op.upper()}_F32', 'vector_binop', op, 'f32')
             block = derive_sema_block(sem)
-            call_names = [n.call_name for n in block.body.walk()
-                          if n.kind == SemaNodeKind.CALL]
+            call_names = [
+                n.call_name for n in block.body.walk() if n.kind == SemaNodeKind.CALL
+            ]
             assert f'std::f{op}' in call_names
         for op in ['min', 'max']:
             sem = _FakeSem(f'V_{op.upper()}_I32', 'vector_binop', op, 'i32')
             block = derive_sema_block(sem)
-            call_names = [n.call_name for n in block.body.walk()
-                          if n.kind == SemaNodeKind.CALL]
+            call_names = [
+                n.call_name for n in block.body.walk() if n.kind == SemaNodeKind.CALL
+            ]
             assert f'std::{op}' in call_names
 
     def test_lowers_all(self):
-        for op in ['add', 'sub', 'subrev', 'mul', 'and', 'or', 'xor',
-                    'shl', 'shr', 'lshlrev', 'lshrrev', 'ashrrev',
-                    'min', 'max', 'ldexp']:
+        for op in [
+            'add',
+            'sub',
+            'subrev',
+            'mul',
+            'and',
+            'or',
+            'xor',
+            'shl',
+            'shr',
+            'lshlrev',
+            'lshrrev',
+            'ashrrev',
+            'min',
+            'max',
+            'ldexp',
+        ]:
             sem = _FakeSem(f'V_{op.upper()}_F32', 'vector_binop', op, 'f32')
             block = derive_sema_block(sem)
             assert block is not None
@@ -344,8 +391,11 @@ class TestDeriveVectorCmp:
         block = derive_sema_block(sem)
         assert block is not None
         assert block.pragma == ExecModel.VECTOR
-        ids = {n.id_name for n in block.body.walk()
-               if n.kind == SemaNodeKind.ID and n.id_name}
+        ids = {
+            n.id_name
+            for n in block.body.walk()
+            if n.kind == SemaNodeKind.ID and n.id_name
+        }
         assert 'VCC' in ids
 
     def test_all_ops(self):
@@ -360,8 +410,11 @@ class TestDeriveVectorCmpx:
         sem = _FakeSem('V_CMPX_EQ_F32', 'vector_cmpx', 'eq', 'f32')
         block = derive_sema_block(sem)
         assert block is not None
-        ids = {n.id_name for n in block.body.walk()
-               if n.kind == SemaNodeKind.ID and n.id_name}
+        ids = {
+            n.id_name
+            for n in block.body.walk()
+            if n.kind == SemaNodeKind.ID and n.id_name
+        }
         assert 'EXEC' in ids
 
 
@@ -370,8 +423,9 @@ class TestDeriveVectorCmpClass:
         sem = _FakeSem('V_CMP_CLASS_F32', 'vector_cmp_class', data_type='f32')
         block = derive_sema_block(sem)
         assert block is not None
-        call_names = [n.call_name for n in block.body.walk()
-                      if n.kind == SemaNodeKind.CALL]
+        call_names = [
+            n.call_name for n in block.body.walk() if n.kind == SemaNodeKind.CALL
+        ]
         assert 'fp_class_test' in call_names
 
 
@@ -380,16 +434,18 @@ class TestDeriveVectorAddCo:
         sem = _FakeSem('V_ADD_CO_U32', 'vector_add_co', 'add', 'u32')
         block = derive_sema_block(sem)
         assert block is not None
-        call_names = {n.call_name for n in block.body.walk()
-                      if n.kind == SemaNodeKind.CALL}
+        call_names = {
+            n.call_name for n in block.body.walk() if n.kind == SemaNodeKind.CALL
+        }
         assert 'add_co' in call_names
 
     def test_sub_co(self):
         sem = _FakeSem('V_SUB_CO_U32', 'vector_add_co', 'sub', 'u32')
         block = derive_sema_block(sem)
         assert block is not None
-        call_names = {n.call_name for n in block.body.walk()
-                      if n.kind == SemaNodeKind.CALL}
+        call_names = {
+            n.call_name for n in block.body.walk() if n.kind == SemaNodeKind.CALL
+        }
         assert 'sub_co' in call_names
 
 
@@ -400,8 +456,11 @@ class TestDeriveVectorCndmask:
         assert block is not None
         all_kinds = {n.kind for n in block.body.walk()}
         assert SemaNodeKind.TERNARY in all_kinds
-        ids = {n.id_name for n in block.body.walk()
-               if n.kind == SemaNodeKind.ID and n.id_name}
+        ids = {
+            n.id_name
+            for n in block.body.walk()
+            if n.kind == SemaNodeKind.ID and n.id_name
+        }
         assert 'VCC' in ids
 
 
@@ -452,6 +511,7 @@ class TestDeriveVectorFmaVariants:
 # Memory
 # =========================================================================
 
+
 class TestDeriveSmemLoad:
     def test_produces_scalar(self):
         sem = _FakeSem('S_LOAD_B32', 'smem_load')
@@ -468,8 +528,9 @@ class TestDeriveSmemLoad:
         sem.num_elems = 1
         sem.sign_extend = False
         block = derive_sema_block(sem)
-        call_names = [n.call_name for n in block.body.walk()
-                      if n.kind == SemaNodeKind.CALL]
+        call_names = [
+            n.call_name for n in block.body.walk() if n.kind == SemaNodeKind.CALL
+        ]
         assert 'CalcScalarGlobalAddr' in call_names
 
     def test_lowers_to_scalar_mem(self):
@@ -502,8 +563,9 @@ class TestDeriveBufferLoad:
         block = derive_sema_block(sem)
         assert block is not None
         assert block.pragma == ExecModel.VECTOR
-        call_names = [n.call_name for n in block.body.walk()
-                      if n.kind == SemaNodeKind.CALL]
+        call_names = [
+            n.call_name for n in block.body.walk() if n.kind == SemaNodeKind.CALL
+        ]
         assert 'CalcBufferAddr' in call_names
 
 
@@ -515,8 +577,9 @@ class TestDeriveFlatLoad:
         sem.sign_extend = False
         block = derive_sema_block(sem)
         assert block is not None
-        call_names = [n.call_name for n in block.body.walk()
-                      if n.kind == SemaNodeKind.CALL]
+        call_names = [
+            n.call_name for n in block.body.walk() if n.kind == SemaNodeKind.CALL
+        ]
         assert 'CalcFlatAddr' in call_names
 
 
@@ -528,8 +591,9 @@ class TestDeriveDsRead:
         sem.sign_extend = False
         block = derive_sema_block(sem)
         assert block is not None
-        call_names = [n.call_name for n in block.body.walk()
-                      if n.kind == SemaNodeKind.CALL]
+        call_names = [
+            n.call_name for n in block.body.walk() if n.kind == SemaNodeKind.CALL
+        ]
         assert 'CalcDsAddr' in call_names
 
     def test_lowers_to_lds(self):
@@ -562,8 +626,9 @@ class TestDeriveDsAtomic:
         sem.sign_extend = False
         block = derive_sema_block(sem)
         assert block is not None
-        call_names = [n.call_name for n in block.body.walk()
-                      if n.kind == SemaNodeKind.CALL]
+        call_names = [
+            n.call_name for n in block.body.walk() if n.kind == SemaNodeKind.CALL
+        ]
         assert 'atomic_add' in call_names
         assert 'CalcDsAddr' in call_names
 
@@ -576,8 +641,9 @@ class TestDeriveDsPermute:
         sem.sign_extend = False
         block = derive_sema_block(sem)
         assert block is not None
-        call_names = [n.call_name for n in block.body.walk()
-                      if n.kind == SemaNodeKind.CALL]
+        call_names = [
+            n.call_name for n in block.body.walk() if n.kind == SemaNodeKind.CALL
+        ]
         assert 'ds_bpermute' in call_names
 
 
@@ -620,7 +686,9 @@ class TestDeriveMemoryLowerAll:
             sem.sign_extend = False
             block = derive_sema_block(sem)
             assert block is not None, f'{cls} returned None'
-            assert block.pragma == expected_pragma, f'{cls}: expected {expected_pragma}, got {block.pragma}'
+            assert (
+                block.pragma == expected_pragma
+            ), f'{cls}: expected {expected_pragma}, got {block.pragma}'
             cpp = lower_sema_block(block)
             assert len(cpp) > 0, f'{cls} produced empty C++'
 
@@ -628,6 +696,7 @@ class TestDeriveMemoryLowerAll:
 # =========================================================================
 # Packed, matrix, special, remaining
 # =========================================================================
+
 
 class TestDerivePacked:
     def test_pk_ternary(self):
@@ -653,8 +722,9 @@ class TestDeriveDot:
         sem = _FakeSem('V_DOT2_F32_F16', 'vector_dot', 'dot2_f32_f16', 'f32')
         block = derive_sema_block(sem)
         assert block is not None
-        call_names = [n.call_name for n in block.body.walk()
-                      if n.kind == SemaNodeKind.CALL]
+        call_names = [
+            n.call_name for n in block.body.walk() if n.kind == SemaNodeKind.CALL
+        ]
         assert 'dot2_f32_f16' in call_names
 
     def test_dot_variants(self):
@@ -669,8 +739,9 @@ class TestDeriveMfma:
         sem = _FakeSem('V_MFMA_F32_16X16X16_F16', 'mfma', data_type='f32')
         block = derive_sema_block(sem)
         assert block is not None
-        call_names = [n.call_name for n in block.body.walk()
-                      if n.kind == SemaNodeKind.CALL]
+        call_names = [
+            n.call_name for n in block.body.walk() if n.kind == SemaNodeKind.CALL
+        ]
         assert 'mfma_compute' in call_names
 
 
@@ -679,8 +750,9 @@ class TestDerivePermlane:
         sem = _FakeSem('V_PERMLANE16_B32', 'vector_permlane16')
         block = derive_sema_block(sem)
         assert block is not None
-        call_names = [n.call_name for n in block.body.walk()
-                      if n.kind == SemaNodeKind.CALL]
+        call_names = [
+            n.call_name for n in block.body.walk() if n.kind == SemaNodeKind.CALL
+        ]
         assert 'v_permlane16' in call_names
 
     def test_permlanex16(self):
@@ -779,6 +851,7 @@ class TestDeriveCvtPk:
 class TestDeriveAllClassesLower:
     def test_all_registered_classes_lower(self):
         from amdisa.sema_derive import _DERIVE_REGISTRY
+
         errors = []
         for cls_name in sorted(_DERIVE_REGISTRY.keys()):
             sem = _FakeSem(f'TEST_{cls_name.upper()}', cls_name, 'add', 'f32')

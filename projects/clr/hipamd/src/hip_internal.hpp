@@ -13,6 +13,7 @@
 #include "rocclr/utils/debug.hpp"
 #include "hip_graph_capture.hpp"
 
+#include <unordered_map>
 #include <unordered_set>
 #include <thread>
 #include <stack>
@@ -53,6 +54,11 @@ typedef struct hipArray {
 
 namespace hip{
 extern std::once_flag g_ihipInitialized;
+
+  struct ResourceMeta {
+    uint32_t familyId;
+    uint32_t startCU;
+  };
 enum MemcpyType {
   hipHostToHost,      //!< Memcpy from host to host
   hipWriteBuffer,     //!< Memcpy from host to device
@@ -90,6 +96,12 @@ static_assert(sizeof(ihipIpcEventHandle_t) <= sizeof(hipIpcEventHandle_t),
 const char* ihipGetErrorName(hipError_t hip_error);
 
 } // namespace hip
+
+#if defined(__GNUC__) || defined(__clang__)
+extern "C" __attribute__((visibility("default"))) void __hipOnError(const void *err_info);
+#else
+extern "C" void __hipOnError(const void *err_info);
+#endif
 
 // Helper: set up TLS device pointer on first use.
 #define HIP_INIT_TLS_DEVICE()                                                                      \
@@ -166,6 +178,22 @@ const char* ihipGetErrorName(hipError_t hip_error);
   } else if (hip::tls.last_command_error_ != hipSuccess &&                                         \
              hip::tls.last_command_error_ != hipErrorNotReady) {                                   \
     hip::tls.last_error_ = hip::tls.last_command_error_;                                           \
+  }                                                                                                \
+  if (hip::tls.last_command_error_ != hipSuccess &&                                                \
+      hip::tls.last_command_error_ != hipErrorNotReady) {                                          \
+    /* The debugger may place a breakpoint at __hipOnError to catch failed API calls */            \
+    struct {                                                                                       \
+      uint32_t version;                                                                            \
+      uint32_t code;                                                                               \
+      const char *name;                                                                            \
+      const char *desc;                                                                            \
+    } err_info = {                                                                                 \
+      1,                                                                                           \
+      hip::tls.last_command_error_,                                                                \
+      hipGetErrorName(hip::tls.last_command_error_),                                               \
+      hipGetErrorString(hip::tls.last_command_error_)                                              \
+    };                                                                                             \
+    __hipOnError((void *) &err_info);                                                              \
   }
 
 #define HIP_RETURN_DURATION(ret, ...)                                                              \
@@ -298,6 +326,7 @@ namespace hip {
   class Device;
   class MemoryPool;
   class Event;
+  class ExecutionCtx;
   class Stream : public amd::HostQueue {
   public:
     enum Priority : int { High = -1, Normal = 0, Low = 1 };
@@ -475,7 +504,7 @@ namespace hip {
 
   /// HIP Device class
   class Device : public amd::ReferenceCountedObject {
-  public:
+   public:
     Device(amd::Context* ctx, int devId)
         : context_(ctx),
           deviceId_(devId),
@@ -557,6 +586,15 @@ namespace hip {
       return mappedGraphicsResources_;
     }
 
+    // --- Execution context management ---
+    
+    ExecutionCtx* getPrimaryExecCtx() const { return primaryExecCtx_; }
+    void setPrimaryExecCtx(ExecutionCtx* ctx) { primaryExecCtx_ = ctx; }
+    std::recursive_mutex& getLock() { return lock_; }
+
+    void registerResource(uint32_t resId, uint32_t familyId, uint32_t startCU);
+    const ResourceMeta* lookupResource(uint32_t resId);
+
   private:
     /// Destroy all streams on this device (called by Reset)
     void destroyAllStreams();
@@ -582,6 +620,12 @@ namespace hip {
     // ----- Graphics resource tracking -----
     ObjectRegistry<hipGraphicsResource_t> registeredGraphicsResources_;
     ObjectRegistry<hipGraphicsResource_t> mappedGraphicsResources_;
+
+    // ----- Execution context state -----
+    ExecutionCtx* primaryExecCtx_ = nullptr;      //!< Primary execution context
+    std::unordered_map<uint32_t, ResourceMeta> resourceFamilyMap_;
+    std::mutex resourceFamilyMapLock_;
+
   };
 
   /// Per-thread state aggregator for HIP runtime (one instance per thread via thread_local).

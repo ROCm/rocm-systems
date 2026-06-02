@@ -207,6 +207,7 @@ hipStreamGetFlags
 hipStreamQuery
 hipStreamSynchronize
 hipStreamWaitEvent
+__hipOnError
 __hipPopCallConfiguration
 __hipPushCallConfiguration
 __hipRegisterFatBinary
@@ -519,6 +520,8 @@ hipLibraryLoadFromFile
 hipLibraryUnload
 hipLibraryGetKernel
 hipLibraryGetKernelCount
+hipLibraryGetGlobal
+hipLibraryGetManaged
 hipStreamCopyAttributes
 hipLibraryEnumerateKernels
 hipKernelGetLibrary
@@ -537,4 +540,19 @@ hipKernelSetAttribute
 hipKernelGetFunction
 hipOccupancyMaxPotentialClusterSize
 hipOccupancyMaxActiveClusters
+hipGreenCtxCreate
+hipExecutionCtxDestroy
+hipExecutionCtxStreamCreate
+hipDeviceGetDevResource
+hipDevSmResourceSplitByCount
+hipDevSmResourceSplit
+hipDevResourceGenerateDesc
+hipDeviceGetExecutionCtx
+hipExecutionCtxGetDevResource
+hipExecutionCtxGetDevice
+hipExecutionCtxGetId
+hipStreamGetDevResource
+hipExecutionCtxRecordEvent
+hipExecutionCtxSynchronize
+hipExecutionCtxWaitEvent
 @HSA_EXPORTS@

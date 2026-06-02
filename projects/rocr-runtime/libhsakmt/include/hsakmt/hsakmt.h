@@ -574,6 +574,33 @@ hsaKmtRegisterGraphicsHandleToNodesExt(
     );
 
 /**
+  Imports an external semaphore (e.g. from Vulkan) into ROCr's KMD
+  context, returning an opaque handle. The HSA-layer queue signal/wait
+  API that consumes the resulting handle has not landed yet; for now
+  the handle round-trips through hsaKmtDestroyExternalSemaphore only.
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtImportExternalSemaphore(
+    HSAuint32                          NodeId,    //IN
+    void                              *NtHandle,  //IN, Win32 NT handle
+    HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE Type,      //IN
+    HSA_EXTERNAL_SEMAPHORE_HANDLE     *OutHandle  //OUT
+    );
+
+/**
+  Releases an external semaphore previously imported via
+  hsaKmtImportExternalSemaphore.
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtDestroyExternalSemaphore(
+    HSA_EXTERNAL_SEMAPHORE_HANDLE Handle   //IN
+    );
+
+/**
  * Export a dmabuf handle and offset for a given memory address
  *
  * Validates that @MemoryAddress belongs to a valid allocation and that the

@@ -7,7 +7,6 @@
 
 #include <atomic>
 #include <cstring>
-#include <format>
 
 namespace rocjitsu {
 namespace amdgpu {

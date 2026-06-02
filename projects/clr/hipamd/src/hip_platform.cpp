@@ -1130,22 +1130,7 @@ hipError_t PlatformState::GetDynGlobalVar(const char* hostVar, hipModule_t hmod,
     LogPrintfError("Cannot find the module: 0x%x", hmod);
     return hipErrorNotFound;
   }
-  if (dev_ptr) {
-    *dev_ptr = nullptr;
-  }
-  IHIP_RETURN_ONFAIL(it->second->getManagedVarPointer(hostVar, dev_ptr, size_ptr));
-  // if dev_ptr is nullptr, hostvar is not in managed variable list
-  if ((dev_ptr && !*dev_ptr) || (size_ptr && *size_ptr == 0)) {
-    amd::Memory* mem = nullptr;
-    IHIP_RETURN_ONFAIL(it->second->GetDeviceVar(&mem, hostVar));
-    if (dev_ptr) {
-      *dev_ptr = memDevPtr(mem);
-    }
-    if (size_ptr) {
-      *size_ptr = mem->getSize();
-    }
-  }
-  return hipSuccess;
+  return it->second->GetGlobal(hostVar, reinterpret_cast<void**>(dev_ptr), size_ptr);
 }
 
 // ================================================================================================
@@ -1226,41 +1211,6 @@ void PlatformState::ConfigureCall(dim3 gridDim, dim3 blockDim, size_t sharedMem,
 void PlatformState::PopExec(ihipExec_t& exec) {
   exec = std::move(hip::tls.exec_stack_.top());
   hip::tls.exec_stack_.pop();
-}
-
-// ================================================================================================
-std::shared_ptr<UniqueFD> PlatformState::GetUniqueFileHandle(const std::string& file_path) {
-  std::scoped_lock lock(ufd_lock_);
-
-  auto it = ufd_map_.find(file_path);
-  if (it != ufd_map_.end()) {
-    return it->second;
-  }
-
-  // Get the file desc and file size from amd::Os API
-  amd::Os::FileDesc fdesc;
-  size_t fsize = 0;
-  if (!amd::Os::GetFileHandle(file_path.c_str(), &fdesc, &fsize)) {
-    return nullptr;
-  }
-  
-  auto ufd = std::make_shared<UniqueFD>(file_path, fdesc, fsize);
-  ufd_map_.emplace(file_path, ufd);
-  return ufd;
-}
-
-// ================================================================================================
-bool PlatformState::CloseUniqueFileHandle(const std::shared_ptr<UniqueFD>& ufd) {
-  std::scoped_lock lock(ufd_lock_);
-
-  // if use_count is 2, then there is 1 entry in the map and the current entry is the last close.
-  if (ufd.use_count() == 2) {
-    ufd_map_.erase(ufd->fpath_);
-    if (!amd::Os::CloseFileHandle(ufd->fdesc_)) {
-      return false;
-    }
-  }
-  return true;
 }
 
 // ================================================================================================

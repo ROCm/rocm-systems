@@ -881,6 +881,16 @@ configure_settings(bool _init)
     }
 
     ROCPROFSYS_CONFIG_SETTING(
+        std::string, "ROCPROFSYS_GPU_PERF_COUNTERS",
+        "GPU hardware counters to collect via device counting service (PMC polled "
+        "sampling). Comma-separated list of counter names (e.g. "
+        "SQ_WAVES,SQ_BUSY_CYCLES). "
+        "Independent from ROCPROFSYS_ROCM_EVENTS which controls kernel dispatch "
+        "counters. "
+        "If empty, no PMC sampling is performed.",
+        "", "rocm", "hardware_counters", "pmc", "process_sampling");
+
+    ROCPROFSYS_CONFIG_SETTING(
         std::string, "ROCPROFSYS_RANK_FILTER_ID",
         "Name of environment variable to read rank from for MPI output filtering",
         std::string{}, "data", "io", "advanced");
@@ -890,6 +900,13 @@ configure_settings(bool _init)
         "Ranks for which file output is generated. Values should be separated by commas "
         "and can be explicit or ranges, e.g. 0,1,5-8. An empty value enables output "
         "for all ranks",
+        std::string{}, "data", "io", "advanced");
+
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, "ROCPROFSYS_RANK_FILTER_LOGS",
+        "Ranks for which console output is generated. Values should be separated by "
+        "commas and can be explicit or ranges, e.g. 0,1,5-8. An empty value enables "
+        "output for all ranks",
         std::string{}, "data", "io", "advanced");
 
     // set the defaults
@@ -986,6 +1003,16 @@ configure_settings(bool _init)
     _add_advanced_category("ROCPROFSYS_WIDTH");
     _add_advanced_category("ROCPROFSYS_COLLAPSE_THREADS");
     _add_advanced_category("ROCPROFSYS_COLLAPSE_PROCESSES");
+
+    // Setting is registered above with "ROCPROFSYS_CONFIG_SETTING"; safe to read them
+    // here.
+    if(!output_filtering::is_log_output_enabled_for_current_mpi_rank())
+    {
+        logger_t::instance().set_level(spdlog::level::err);
+        setenv("ROCPROFSYS_LOG_LEVEL", "error", 1);
+        setenv("ROCPROFSYS_DL_VERBOSE", "-1", 1);
+        setenv("ROCPROFSYS_VERBOSE", "-1", 1);
+    }
 
 #if defined(TIMEMORY_USE_PAPI)
     int _paranoid = 2;
@@ -1114,6 +1141,14 @@ configure_settings(bool _init)
        _combine_perfetto_traces->second->get_config_updated())
     {
         _combine_perfetto_traces->second->set(_config->get<bool>("collapse_processes"));
+    }
+
+    auto _merge_perfetto_files = _config->find("ROCPROFSYS_MERGE_PERFETTO_FILES");
+    if(!_merge_perfetto_files->second->get_environ_updated() &&
+       !_merge_perfetto_files->second->get_config_updated())
+    {
+        _merge_perfetto_files->second->set(
+            static_cast<tim::tsettings<bool>&>(*_combine_perfetto_traces->second).get());
     }
 
     handle_deprecated_setting("ROCPROFSYS_AMD_SMI_DEVICES", "ROCPROFSYS_SAMPLING_GPUS");
@@ -1490,7 +1525,7 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
     {
         auto _v = itr.second->get_env_name();
         if(_hidden_exact.count(_v) > 0 ||
-           std ::regex_match(_v, std::regex{ _hidden_exact_re }) ||
+           std::regex_match(_v, std::regex{ _hidden_exact_re }) ||
            std::regex_match(_v, std::regex{ _hidden_begin_re }))
         {
             itr.second->set_enabled(false);
@@ -1555,6 +1590,8 @@ handle_deprecated_setting(const std::string& _old, const std::string& _new,
 void
 print_banner(std::ostream& _os)
 {
+    if(!output_filtering::is_log_output_enabled_for_current_mpi_rank()) return;
+
     static const char* _banner = R"banner(
 
      ____   ___   ____ __  __   ______   ______ _____ _____ __  __ ____    ____  ____   ___  _____ ___ _     _____ ____
@@ -2383,11 +2420,16 @@ get_sampling_allocator_size()
 double
 get_process_sampling_freq()
 {
-    static auto _v = get_config()->find("ROCPROFSYS_PROCESS_SAMPLING_FREQ");
-    auto        _val =
-        std::min<double>(static_cast<tim::tsettings<double>&>(*_v->second).get(), 1000.0);
-    if(_val < 1.0e-9) return std::min<double>(get_sampling_freq(), 100.0);
-    return _val;
+    static auto _v   = get_config()->find("ROCPROFSYS_PROCESS_SAMPLING_FREQ");
+    const auto  _val = static_cast<tim::tsettings<double>&>(*_v->second).get();
+
+    constexpr auto effective_zero = 1.0e-9;
+    if(_val < effective_zero)
+    {
+        return std::min<double>(get_sampling_freq(), 100.0);
+    }
+
+    return std::min<double>(_val, 1000.0);
 }
 
 double
@@ -2401,6 +2443,13 @@ std::string
 get_sampling_gpus()
 {
     static auto _v = get_config()->find("ROCPROFSYS_SAMPLING_GPUS");
+    return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+}
+
+std::string
+get_gpu_perf_counters()
+{
+    static auto _v = get_config()->find("ROCPROFSYS_GPU_PERF_COUNTERS");
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 }
 
@@ -2686,6 +2735,13 @@ get_rank_filter_output()
     return static_cast<tim::tsettings<std::string>&>(*_v).get();
 }
 
+std::string
+get_rank_filter_logs()
+{
+    static auto _v = get_config()->at("ROCPROFSYS_RANK_FILTER_LOGS");
+    return static_cast<tim::tsettings<std::string>&>(*_v).get();
+}
+
 #if(defined(ROCPROFSYS_USE_MPI_HEADERS) && ROCPROFSYS_USE_MPI_HEADERS > 0) ||            \
     (defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0)
 #    define ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED 1
@@ -2728,14 +2784,15 @@ get_mpi_rank_from_env()
 
 namespace output_filtering
 {
-bool
-is_output_enabled_for_current_mpi_rank()
-{
 #if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
-    auto enabled_ranks_str = get_rank_filter_output();
+namespace
+{
+bool
+is_rank_in_filter(std::string enabled_ranks_str)
+{
     rocprofsys::utility::trim_str(enabled_ranks_str);
     for(auto& ch : enabled_ranks_str)
-        ch = std::tolower(ch);
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
 
     if(enabled_ranks_str.empty() || enabled_ranks_str == "all") return true;
     if(enabled_ranks_str == "none") return false;
@@ -2754,6 +2811,27 @@ is_output_enabled_for_current_mpi_rank()
     LOG_DEBUG("Output for MPI rank {} is {}", current_rank.value(),
               is_enabled ? "enabled" : "disabled");
     return is_enabled;
+}
+}  // namespace
+#endif
+
+bool
+is_file_output_enabled_for_current_mpi_rank()
+{
+#if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
+    static auto _v = is_rank_in_filter(get_rank_filter_output());
+    return _v;
+#else
+    return true;
+#endif
+}
+
+bool
+is_log_output_enabled_for_current_mpi_rank()
+{
+#if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
+    static auto _v = is_rank_in_filter(get_rank_filter_logs());
+    return _v;
 #else
     return true;
 #endif

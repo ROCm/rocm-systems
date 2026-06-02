@@ -203,6 +203,7 @@ static ncclResult_t ncclNetPluginInit(struct ncclComm* comm, netPluginLib_t* plu
 
   if (pluginLib->ncclGinPluginState == ncclNetPluginStateInitReady && pluginLib->ncclGin) {
     if ((ncclParamGinType() == -1) && (pluginLib->ncclGin == (ncclGin_t *)-1)) {
+#if !defined(__HIP_PLATFORM_AMD__)
       void* throwAwayContext = nullptr;
       if (ncclGinIbGdaki.init(&throwAwayContext, comm->commHash, ncclDebugLog) == ncclSuccess) {
         if (ncclGinIbGdaki.devices(&ndev) == ncclSuccess && ndev > 0) {
@@ -213,6 +214,9 @@ static ncclResult_t ncclNetPluginInit(struct ncclComm* comm, netPluginLib_t* plu
       else {
         pluginLib->ncclGin = &ncclGinIbProxy;
       }
+#else
+      pluginLib->ncclGin = &ncclGinIbProxy;
+#endif
     }
     if (pluginLib->ncclGin->init(&comm->ginContext, comm->commHash, ncclDebugLog) != ncclSuccess) pluginLib->ncclGinPluginState = ncclNetPluginStateDisabled;
     else if (pluginLib->ncclGin->devices(&ndev) != ncclSuccess || ndev <= 0) pluginLib->ncclGinPluginState = ncclNetPluginStateDisabled;
@@ -334,7 +338,18 @@ static void initPluginLibsOnceFunc() {
     } else {
 #endif
       netPluginLibs[pluginCounter].ncclNet = &ncclNetIb;
-      netPluginLibs[pluginCounter++].ncclNetPluginState = ncclNetPluginStateInitReady;
+      netPluginLibs[pluginCounter].ncclGin = NULL;
+      if (ncclParamGinType() == -1)
+        netPluginLibs[pluginCounter].ncclGin = (ncclGin_t *)-1;
+      else if (ncclParamGinType() == NCCL_NET_DEVICE_GIN_PROXY)
+        netPluginLibs[pluginCounter].ncclGin = &ncclGinIbProxy;
+#if !defined(__HIP_PLATFORM_AMD__)
+      else if (ncclParamGinType() == NCCL_NET_DEVICE_GIN_GDAKI)
+        netPluginLibs[pluginCounter].ncclGin = &ncclGinIbGdaki;
+#endif
+      netPluginLibs[pluginCounter].ncclNetPluginState = ncclNetPluginStateInitReady;
+      netPluginLibs[pluginCounter].ncclGinPluginState = netPluginLibs[pluginCounter].ncclGin ? ncclNetPluginStateInitReady : ncclNetPluginStateLoadFailed;
+      ++pluginCounter;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
     }
   }
@@ -513,7 +528,7 @@ ncclResult_t ncclGpuGdrSupport(struct ncclComm* comm, int* gdrSupport) {
       connected = (rComm != NULL) && (sComm != NULL);
     }
 
-    NCCLCHECKGOTONOWARN(ncclCudaMalloc(&gpuPtr, GPU_BUF_SIZE), ret, cleanup2, NCCL_NET);
+    NCCLCHECKGOTONOWARN(ncclCudaMalloc(&gpuPtr, GPU_BUF_SIZE, comm->memManager), ret, cleanup2, NCCL_NET);
     NOWARN(ret = comm->ncclNet->regMr(sComm, gpuPtr, GPU_BUF_SIZE, NCCL_PTR_CUDA, &mHandle), NCCL_NET);
     if (ret == ncclSuccess) {
       NCCLCHECKNOWARN(comm->ncclNet->deregMr(sComm, mHandle), NCCL_NET);
@@ -521,7 +536,7 @@ ncclResult_t ncclGpuGdrSupport(struct ncclComm* comm, int* gdrSupport) {
       NCCLCHECKNOWARN(comm->ncclNet->deregMr(rComm, mHandle), NCCL_NET);
       gdrSupportMatrix[comm->cudaDev] = 1;
     }
-    NCCLCHECK(ncclCudaFree(gpuPtr));
+    NCCLCHECK(ncclCudaFree(gpuPtr, comm->memManager));
 cleanup2:
     if (rComm != NULL)
       NCCLCHECK(comm->ncclNet->closeRecv(rComm));

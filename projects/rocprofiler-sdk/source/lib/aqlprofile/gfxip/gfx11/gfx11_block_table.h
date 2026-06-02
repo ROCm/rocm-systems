@@ -167,6 +167,54 @@ static const CounterRegInfo SpiCounterRegAddr[] = {{REG_32B_ADDR(GC, 0, regSPI_P
                                                     REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER5_HI),
                                                     REG_32B_NULL}};
 /*
+ * SQG
+ *
+ * SQG has 8 perfcounters; each has its own SELECT/LO/HI registers and they all
+ * share a single global control register (regSQG_PERFCOUNTER_CTRL) that gates
+ * which graphics pipeline stages contribute to counting.
+ */
+static const CounterRegInfo SqgCounterRegAddr[] = {{REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER0_SELECT),
+                                                    REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER_CTRL),
+                                                    REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER0_LO),
+                                                    REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER0_HI),
+                                                    REG_32B_NULL},
+                                                   {REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER1_SELECT),
+                                                    REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER_CTRL),
+                                                    REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER1_LO),
+                                                    REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER1_HI),
+                                                    REG_32B_NULL},
+                                                   {REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER2_SELECT),
+                                                    REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER_CTRL),
+                                                    REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER2_LO),
+                                                    REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER2_HI),
+                                                    REG_32B_NULL},
+                                                   {REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER3_SELECT),
+                                                    REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER_CTRL),
+                                                    REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER3_LO),
+                                                    REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER3_HI),
+                                                    REG_32B_NULL},
+                                                   {REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER4_SELECT),
+                                                    REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER_CTRL),
+                                                    REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER4_LO),
+                                                    REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER4_HI),
+                                                    REG_32B_NULL},
+                                                   {REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER5_SELECT),
+                                                    REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER_CTRL),
+                                                    REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER5_LO),
+                                                    REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER5_HI),
+                                                    REG_32B_NULL},
+                                                   {REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER6_SELECT),
+                                                    REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER_CTRL),
+                                                    REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER6_LO),
+                                                    REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER6_HI),
+                                                    REG_32B_NULL},
+                                                   {REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER7_SELECT),
+                                                    REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER_CTRL),
+                                                    REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER7_LO),
+                                                    REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER7_HI),
+                                                    REG_32B_NULL}};
+
+/*
  * SQ        CORRECT
  */
 static const CounterRegInfo SqCounterRegAddr[] = {{REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER0_SELECT),
@@ -497,6 +545,16 @@ static const GpuBlockInfo SqCounterBlockInfo = {
     gfx11_cntx_prim::sq_select_value,
     CounterBlockSeAttr | CounterBlockSqAttr | CounterBlockSaAttr | CounterBlockWgpAttr,
     BLOCK_DELAY_NONE};
+// Counter block SQG (one instance per Shader Engine, SE-level SQ globals)
+static const GpuBlockInfo SqgCounterBlockInfo = {"SQG",
+                                                 SqgCounterBlockId,
+                                                 1,
+                                                 SqgCounterBlockMaxEvent,
+                                                 SqgCounterBlockNumCounters,
+                                                 SqgCounterRegAddr,
+                                                 gfx11_cntx_prim::sqg_select_value,
+                                                 CounterBlockSeAttr | CounterBlockSqAttr,
+                                                 BLOCK_DELAY_NONE};
 // Counter block SX
 static const GpuBlockInfo SxCounterBlockInfo = {
     "SX",
