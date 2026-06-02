@@ -40,3 +40,4 @@ set_target_properties(rocprofiler-sdk-aqlprofile PROPERTIES POSITION_INDEPENDENT
 add_subdirectory(core)
 add_subdirectory(util)
 add_subdirectory(pm4)
+add_subdirectory(tests)
