@@ -55,7 +55,7 @@ SRC=""                       # existing checkout; empty => clone DEFAULT_REPO
 REPO="${DEFAULT_REPO}"
 BRANCH="${DEFAULT_BRANCH}"
 OUT="$(resolve_target_dir)/lib"
-BUILD_DIR="build-hotswap"
+BUILD_DIR="$(resolve_target_dir)/build-hotswap"
 JOBS="$(nproc 2>/dev/null || echo 4)"
 BUILD_TYPE="Release"
 CLEAN=0
