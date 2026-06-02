@@ -20,6 +20,8 @@ typedef enum {
   NCCL_NET_DEVICE_GIN_PROXY=2,
   NCCL_NET_DEVICE_GIN_GDAKI=3,
   NCCL_NET_DEVICE_GIN_ROCSHMEM=4,
+  // Intra-node MI300 xGMI SDMA only; select via NCCL_GIN_TYPE=5.
+  NCCL_NET_DEVICE_GIN_ANVIL=5,
 } ncclNetDeviceType;
 
 typedef struct {
