@@ -370,7 +370,7 @@ if (NOT BUILD_TESTS_ONLY)
 
   if(${ROCM_MAJOR_VERSION} LESS 7)
     # ROCm 6.x requires us to explicitly enable warp sync builtins
-    target_compile_definitions(${PROJECT_NAME} PRIVATE HIP_ENABLE_WARP_SYNC_BUILTINS=1)
+    target_compile_definitions(${PROJECT_NAME} PUBLIC $<BUILD_INTERFACE:HIP_ENABLE_WARP_SYNC_BUILTINS=1>)
   endif()
 
   #############################################################################
