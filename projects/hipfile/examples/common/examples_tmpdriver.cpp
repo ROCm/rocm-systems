@@ -72,10 +72,10 @@ mkdir_p(const std::string &path)
     while (pos != std::string::npos) {
         pos             = path.find('/', pos + 1);
         std::string sub = path.substr(0, pos);
-        if (sub.empty()) continue;
+        if (sub.empty())
+            continue;
         if (mkdir(sub.c_str(), 0755) != 0 && errno != EEXIST) {
-            std::fprintf(stderr, "tmpdriver: mkdir(%s) failed: %s\n", sub.c_str(),
-                         std::strerror(errno));
+            std::fprintf(stderr, "tmpdriver: mkdir(%s) failed: %s\n", sub.c_str(), std::strerror(errno));
             std::exit(2);
         }
     }
