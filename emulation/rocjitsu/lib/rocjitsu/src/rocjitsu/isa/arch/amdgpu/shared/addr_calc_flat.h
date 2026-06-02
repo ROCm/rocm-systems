@@ -51,11 +51,10 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
   if (inst.seg == 1) {
     // SCRATCH: architected flat scratch (GFX940/CDNA4).
     // addr = FLAT_SCRATCH + lane * scratch_lane_size + VGPR[lane] + saddr + offset.
-    // Hardware automatically adds the per-lane swizzle (lane * private_segment_fixed_size)
-    // so each thread accesses its own private scratch region.
-    uint32_t fs_base = wf.sgpr_alloc().base;
-    uint64_t scratch_base =
-        (static_cast<uint64_t>(cu.read_sgpr(fs_base + 103)) << 32) | cu.read_sgpr(fs_base + 102);
+    // On real hardware FLAT_SCRATCH is a dedicated register, not part of the
+    // SGPR file. We store it in the wavefront's scratch_base_ member and also
+    // mirror it to the flat_scratch_init user SGPRs for legacy compatibility.
+    uint64_t scratch_base = wf.scratch_base();
     uint32_t saddr_val = 0;
     if (inst.saddr != 0x7F) {
       uint32_t sb = wf.sgpr_alloc().base + inst.saddr;

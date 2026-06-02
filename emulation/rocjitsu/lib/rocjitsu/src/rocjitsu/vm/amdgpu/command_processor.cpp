@@ -186,9 +186,6 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
       cu->write_sgpr(sbase + flat_scratch_init_sgpr, static_cast<uint32_t>(wave_scratch));
       cu->write_sgpr(sbase + flat_scratch_init_sgpr + 1, static_cast<uint32_t>(wave_scratch >> 32));
     }
-
-    cu->write_sgpr(sbase + 102, static_cast<uint32_t>(wave_scratch));
-    cu->write_sgpr(sbase + 103, static_cast<uint32_t>(wave_scratch >> 32));
   }
 }
 
