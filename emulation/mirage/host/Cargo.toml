@@ -1,0 +1,18 @@
+[package]
+name = "mirage_host"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+mirage_core = { workspace = true }
+mirage_rocjitsu = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+tokio = { workspace = true }
+nix = { workspace = true }
+libc = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

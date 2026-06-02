@@ -54,7 +54,7 @@ protected:
         MPITestBase::SetUp();
 
         if(!isCeDispatchConfigured())
-            GTEST_SKIP() << "CE requires ROCm >= 7.12 or 7.0.2.x, "
+            GTEST_SKIP() << "CE not configured: need CE_BATCH_ASYNC_SUPPORTED build + "
                             "NCCL_CTA_POLICY=2, NCCL_LOCAL_REGISTER=0, NCCL_CUMEM_ENABLE=1";
 
         // Set debug env vars before ncclCommInitRank so the communicator picks them up.
@@ -455,7 +455,10 @@ TEST(CeInternalNeg, CeImplementedReturnsFalseForUnsupported)
 TEST(CeInternalNeg, CeImplementedReturnsTrueOnSupportedDriver)
 {
     if(!isCeDriverSupported())
-        GTEST_SKIP() << "CE not supported on this driver (need >= 7.12 or 7.0.2.x)";
+        GTEST_SKIP() << "CE not available (binary not compiled with CE_BATCH_ASYNC_SUPPORTED)";
+    if(!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE not supported on this runtime driver "
+                        "(need ROCm >= 7.12 or 7.0.2.x backport [70051831, 70060000))";
 
     EXPECT_TRUE(ncclCeImplemented(ncclFuncAllGather, ncclDevSum, ncclFloat32));
     EXPECT_TRUE(ncclCeImplemented(ncclFuncAlltoAll,  ncclDevSum, ncclFloat32));

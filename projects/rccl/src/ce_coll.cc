@@ -7,6 +7,7 @@
 #include "comm.h"
 #include "register_inline.h"
 #include <algorithm>
+#include <atomic>
 #include <cuda.h>
 #include "rocmwrap.h"
 #include "ce_coll.h"
@@ -25,6 +26,39 @@ static ncclResult_t ceFaultCheck(struct ncclComm* comm, uint32_t bit, const char
 #endif
 
 RCCL_PARAM(CeMultiStreams, "CE_MULTI_STREAMS", 0);
+RCCL_PARAM(CeBatchAsyncEnable, "CE_BATCH_ASYNC_ENABLE", -2);
+
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+// Runtime detection: does the running driver actually implement hipMemcpyBatchAsync?
+//   ROCm 7.12+   → >= 71200000
+//   ROCm 7.0.2.x → [70051831, 70060000)  (backport range; no device-attribute
+//                  probe exists for the batch API, so the version range is the
+//                  only runtime guard and must include the backport runtime)
+static int ncclCeBatchAsyncSupported() {
+  int driverVersion;
+  if (ncclCudaDriverVersion(&driverVersion) != ncclSuccess) return 0;
+  return (driverVersion >= 71200000 || (driverVersion >= 70051831 && driverVersion < 70060000));
+}
+#endif
+
+static int ncclCeBatchAsyncEnable() {
+  // Called once per CE collective; warn at most once to avoid flooding the log.
+  static std::atomic<bool> warnedUnsupported{false};
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+  int param = rcclParamCeBatchAsyncEnable();
+  int supported = ncclCeBatchAsyncSupported();
+  if (param > 0 && !supported) {
+    if (!warnedUnsupported.exchange(true))
+      WARN("RCCL_CE_BATCH_ASYNC_ENABLE=1 is set but hipMemcpyBatchAsync is not supported at runtime; disabling CE batch path");
+    return 0;
+  }
+  return param >= 0 ? param : (param == -2 && supported);
+#else
+  if (rcclParamCeBatchAsyncEnable() > 0 && !warnedUnsupported.exchange(true))
+    WARN("RCCL_CE_BATCH_ASYNC_ENABLE=1 is set but CE batch API not available; disabling");
+  return 0;
+#endif
+}
 // Static constant for graph synchronization
 static const uint32_t GRAPH_SYNC_VALUE = 1;
 
@@ -307,7 +341,7 @@ ncclResult_t ncclCeInitBatchOpsParams(struct ncclCeBatchOpsParams* params, int n
   params->sizes = nullptr;
   params->numOps = 0;
   params->intraBatchSync = false;
-#if CE_BATCH_API_SUPPORTED
+#ifdef CE_BATCH_ASYNC_SUPPORTED
   params->attrs = nullptr;
   params->attrIdxs = nullptr;
   params->numAttrs = 0;
@@ -316,7 +350,7 @@ ncclResult_t ncclCeInitBatchOpsParams(struct ncclCeBatchOpsParams* params, int n
   NCCLCHECKGOTO(ncclCalloc(&params->srcs, nRanks), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&params->dsts, nRanks), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&params->sizes, nRanks), ret, fail);
-#if CE_BATCH_API_SUPPORTED
+#ifdef CE_BATCH_ASYNC_SUPPORTED
   NCCLCHECKGOTO(ncclCalloc(&params->attrs, nRanks), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&params->attrIdxs, nRanks), ret, fail);
 #endif
@@ -330,7 +364,7 @@ void ncclCeFreeBatchOpsParams(struct ncclCeBatchOpsParams* params) {
   if (params->srcs) free(params->srcs);
   if (params->dsts) free(params->dsts);
   if (params->sizes) free(params->sizes);
-#if CE_BATCH_API_SUPPORTED
+#ifdef CE_BATCH_ASYNC_SUPPORTED
   if (params->attrs) free(params->attrs);
   if (params->attrIdxs) free(params->attrIdxs);
 #endif
@@ -351,9 +385,6 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
   // Check if we are in a CUDA graph capture
   bool capturing = ncclCudaGraphValid(comm->planner.capturingGraph);
 
-  int driverVersion;
-  NCCLCHECKGOTO(ncclCudaDriverVersion(&driverVersion), ret, fail);
-
   //--------------Graph capture--------------
   // cudaMemcpyBatchAsync is not supported during CUDA graph capture
   if (capturing) {
@@ -372,11 +403,8 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
   }
   //--------------No graph capture--------------
   else {
-    // driverVersion is reported as ~71200000 for ROCm 7.12 and values in
-    // [70051831, 70060000) for ROCm 7.0.2.x backport builds.
-    if (CE_BATCH_API_SUPPORTED &&
-        (driverVersion >= 71200000 || (driverVersion >= 70051831 && driverVersion < 70060000))) {
-#if CE_BATCH_API_SUPPORTED
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+    if (ncclCeBatchAsyncEnable()) {
     params->attrs[0] = {};
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
     params->attrs[0].srcAccessOrder = hipMemcpySrcAccessOrderStream;
@@ -417,8 +445,9 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
         (void**)params->dsts, (void**)params->srcs, params->sizes, params->numOps,
         params->attrs, params->attrIdxs, params->numAttrs, nullptr, stream), ret, fail);
     }
-#endif
-    } else if (comm->ceColl.nCopyStreams > 0 && (int)params->numOps > 1 && !params->intraBatchSync) {
+    } else  // CE batch async disabled — fall through to non-batch paths below
+#endif // CE_BATCH_ASYNC_SUPPORTED
+    if (comm->ceColl.nCopyStreams > 0 && (int)params->numOps > 1 && !params->intraBatchSync) {
       int nStreams = comm->ceColl.nCopyStreams;
       int activeStreams = ((int)params->numOps < nStreams) ? (int)params->numOps : nStreams;
       INFO(NCCL_COLL, "CE: rank %d -> No-Batch Multi-Stream path (%d streams), numOps=%zu", comm->rank, activeStreams, params->numOps);

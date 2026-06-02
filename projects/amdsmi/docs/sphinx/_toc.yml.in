@@ -53,6 +53,8 @@ subtrees:
 
 - caption: Conceptual
   entries:
+  - file: conceptual/partition.md
+    title: GPU partitioning
   - file: conceptual/gpu-violations.md
   - file: conceptual/perf-determinism.md
     title: Performance determinism
