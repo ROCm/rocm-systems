@@ -422,11 +422,10 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
             std::vector<const char*> hints;
             if(!hints_opt.is_none())
             {
-                auto       seq = hints_opt.cast<py::sequence>();
-                const auto n   = seq.size();
+                const auto n = hints_opt.size();
                 for(size_t i = 0; i < n; ++i)
                 {
-                    storage.push_back(py::cast<std::string>(seq[i]));
+                    storage.push_back(py::cast<std::string>(hints_opt[i]));
                     hints.push_back(storage.back().c_str());
                 }
             }
