@@ -442,11 +442,19 @@ hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device)
       break;
     case hipDeviceAttributeHostNumaId:
       *pi = static_cast<int>(g_devices[device]->devices()[0]->getPreferredNumaNode());
+      break;
     case hipDeviceAttributeDmaBufSupported:
       *pi = static_cast<int>(g_devices[device]->devices()[0]->info().dmabufSupported_);
       break;
+    case hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported:
+      *pi = static_cast<int>(
+          g_devices[device]->devices()[0]->info().gpuDirectRdmaWithHipVmmSupported_);
+      break;
     case hipDeviceAttributeExpertSchedMode:
       *pi = static_cast<int>(g_devices[device]->devices()[0]->info().hasExpertSchedMode_);
+      break;
+    case hipDeviceAttributeMaxDynDataPrefetchRegions:
+      *pi = static_cast<int>(g_devices[device]->devices()[0]->info().maxDynDataPrefetchRegions_);
       break;
     default:
       HIP_RETURN(hipErrorInvalidValue);
@@ -595,6 +603,7 @@ hipError_t hipDeviceSetCacheConfig(hipFuncCache_t cacheConfig) {
 
   // No way to set cache config yet.
 
+  hip::getCurrentDevice()->devices()[0]->UpdateGroupMemCarveout(cacheConfig);
   HIP_RETURN(hipSuccess);
 }
 

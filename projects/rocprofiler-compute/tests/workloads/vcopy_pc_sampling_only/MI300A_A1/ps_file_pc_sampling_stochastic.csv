@@ -1,0 +1,2 @@
+"Sample_Timestamp","Exec_Mask","Dispatch_Id","Instruction","Instruction_Comment","Correlation_Id","Wave_Issued_Instruction","Instruction_Type","Stall_Reason","Wave_Count"
+1987779595259424,18446744073709551615,3,"s_waitcnt vmcnt(0)","",3,0,"ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_NO_INST","ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_WAITCNT",12

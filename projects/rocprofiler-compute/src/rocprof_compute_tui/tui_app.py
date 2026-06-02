@@ -1,26 +1,6 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
 """
 ROCm Compute Profiler TUI - Main Application with Analysis Methods
 ----------------------------------------------------------------
@@ -40,7 +20,7 @@ import config
 from rocprof_compute_tui.config import APP_TITLE
 from rocprof_compute_tui.views.main_view import MainView
 from utils.specs import generate_machine_specs
-from utils.utils import get_version
+from utils.utils_common import get_version
 
 
 class RocprofTUIApp(App):
@@ -104,13 +84,13 @@ class RocprofTUIApp(App):
     def _load_recent_dirs(self) -> list[str]:
         recent_file = Path.home() / ".textual_browser_recent.json"
         if recent_file.exists():
-            with open(recent_file) as f:
+            with open(recent_file, encoding="utf-8") as f:
                 return json.load(f)
         return []
 
     def _save_recent_dirs(self) -> None:
         recent_file = Path.home() / ".textual_browser_recent.json"
-        with open(recent_file, "w") as f:
+        with open(recent_file, "w", encoding="utf-8") as f:
             json.dump(self.recent_dirs, f, indent=2)
 
     def add_recent_dir(self, directory: str) -> None:

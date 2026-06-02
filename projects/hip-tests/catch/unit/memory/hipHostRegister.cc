@@ -28,16 +28,6 @@ static constexpr auto LEN{1024};
 static constexpr auto LARGE_CHUNK_LEN{128 * LEN};
 static constexpr auto SMALL_CHUNK_LEN{8 * LEN};
 
-#if HT_AMD
-#define TEST_SKIP(arch, msg)                                                                       \
-  if (std::string::npos == arch.find("xnack+")) {                                                  \
-    HipTest::HIP_SKIP_TEST(msg);                                                                   \
-    return;                                                                                        \
-  }
-#else
-#define TEST_SKIP(arch, msg)
-#endif
-
 template <typename T> __global__ void SetVal(T* in, T val) {
   int i = threadIdx.x + blockIdx.x * blockDim.x;
   in[i] = val;
@@ -61,8 +51,8 @@ void doMemCopy(size_t numElements, int offset, T* A, T* Bh, T* Bd, bool internal
 
   // Reset
   for (size_t i = 0; i < numElements; i++) {
-    A[i] = static_cast<float>(i);
-    Bh[i] = 0.0f;
+    A[i] = static_cast<T>(i);
+    Bh[i] = static_cast<T>(0);
   }
 
   HIP_CHECK(hipMemset(Bd, memsetval, sizeBytes));
@@ -84,7 +74,7 @@ void doMemCopy(size_t numElements, int offset, T* A, T* Bh, T* Bd, bool internal
  *    - This testcase verifies the hipHostRegister API by
  * 1. Allocating the memory using malloc
  * 2. hipHostRegister that variable
- * 3. Getting the corresponding device pointer of the registered varible
+ * 3. Getting the corresponding device pointer of the registered variable
  * 4. Launching kernel and access the device pointer variable
  * 5. performing hipMemset on the device pointer variable
  * Test source
@@ -562,9 +552,7 @@ HIP_TEST_CASE(Unit_hipHostRegister_MemAdvise_SetGet) {
   hipDeviceProp_t prop;
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
   if (prop.concurrentManagedAccess == 0) {
-    const char* msg = "Concurrent access not supported. Skipping test";
-    HipTest::HIP_SKIP_TEST(msg);
-    return;
+    HIP_SKIP_TEST("concurrent managed access is not supported for this test.");
   }
   int numDevices = HipTest::getDeviceCount();
   size_t sizeBytes{LEN * sizeof(uint8_t)};
@@ -642,14 +630,15 @@ HIP_TEST_CASE(Unit_hipHostRegister_Memcpy) {
   Bh = reinterpret_cast<int*>(malloc(sizeBytes));
   HIP_CHECK(hipMalloc(&Bd, sizeBytes));
 
-  REQUIRE(LEN > OFFSET);
+  const size_t offset = isQuickLevel() ? 32 : OFFSET;
+  REQUIRE(LEN > offset);
   if (mem_type) {
-    for (size_t i = 0; i < OFFSET; i++) {
+    for (size_t i = 0; i < offset; i++) {
       doMemCopy<int>(LEN, i, A, Bh, Bd, true /*internalRegister*/);
     }
   } else {
     HIP_CHECK(hipHostRegister(A, sizeBytes, 0));
-    for (size_t i = 0; i < OFFSET; i++) {
+    for (size_t i = 0; i < offset; i++) {
       doMemCopy<int>(LEN, i, A, Bh, Bd, false /*internalRegister*/);
     }
     HIP_CHECK(hipHostUnregister(A));
@@ -681,14 +670,12 @@ HIP_TEST_CASE(Unit_hipHostRegister_Flags) {
     bool valid;
   };
 
-  /* EXSWCPHIPT-29 - 0x08 is hipHostRegisterReadOnly which currently doesn't
-  have a definition in the headers */
   /* hipHostRegisterIoMemory is a valid flag but requires access to I/O mapped
   memory to be tested */
   FlagType flags = GENERATE(
       FlagType{hipHostRegisterDefault, true}, FlagType{hipHostRegisterPortable, true},
-      FlagType{0x08, true}, FlagType{hipHostRegisterPortable | hipHostRegisterMapped, true},
-      FlagType{hipHostRegisterPortable | hipHostRegisterMapped | 0x08, true},
+      FlagType{hipHostRegisterReadOnly, true}, FlagType{hipHostRegisterPortable | hipHostRegisterMapped, true},
+      FlagType{hipHostRegisterPortable | hipHostRegisterMapped | hipHostRegisterReadOnly, true},
 #if (HT_AMD == 1) && (HT_LINUX == 1)
       FlagType{hipHostRegisterIoMemory, true},
       FlagType{hipExtHostRegisterUncached, true},
@@ -698,6 +685,7 @@ HIP_TEST_CASE(Unit_hipHostRegister_Flags) {
 
 #if (HT_AMD == 1) && (HT_LINUX == 1)
   if (IsNavi4X() && (flags.value & hipExtHostRegisterUncached)) {
+    free(hostPtr);
     return;
   }
 #endif

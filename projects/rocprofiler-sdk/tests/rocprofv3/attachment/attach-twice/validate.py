@@ -43,7 +43,7 @@ def test_attachment_kernel_trace(kernel_input_data):
 
     kernel_threads = set()
     kernel_streams = set()
-    NUM_KERNEL_THREADS = 32
+    NUM_KERNEL_THREADS = 8
     expected_stream_ids = set([i for i in range(1, 9)])
 
     # Verify basic kernel properties
@@ -71,9 +71,10 @@ def test_attachment_kernel_trace(kernel_input_data):
             kernel_threads.add(thread_id)
             kernel_streams.add(stream_id)
 
-    # Exactly 8 streams and 32 threads
-    len(kernel_threads) == NUM_KERNEL_THREADS
-    kernel_streams == expected_stream_ids
+    # Exactly 8 streams and 8 threads
+    assert len(kernel_threads) == NUM_KERNEL_THREADS
+    # Readd when JSON conversion is redone
+    # assert kernel_streams == expected_stream_ids
 
 
 def test_attachment_memory_copy_trace(memory_copy_input_data):

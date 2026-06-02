@@ -65,7 +65,7 @@ class AmdSmiLibraryException(AmdSmiException):
             amdsmi_wrapper.AMDSMI_STATUS_TIMEOUT: "AMDSMI_STATUS_TIMEOUT - Timeout in API call",
             amdsmi_wrapper.AMDSMI_STATUS_RETRY: "AMDSMI_STATUS_RETRY - Retry operation",
             amdsmi_wrapper.AMDSMI_STATUS_NO_PERM: "AMDSMI_STATUS_NO_PERM - Permission Denied",
-            amdsmi_wrapper.AMDSMI_STATUS_INTERRUPT: "AMDSMI_STATUS_INTERRUPT - Interrupt ocurred during execution",
+            amdsmi_wrapper.AMDSMI_STATUS_INTERRUPT: "AMDSMI_STATUS_INTERRUPT - Interrupt occurred during execution",
             amdsmi_wrapper.AMDSMI_STATUS_IO: "AMDSMI_STATUS_IO - I/O Error",
             amdsmi_wrapper.AMDSMI_STATUS_ADDRESS_FAULT: "AMDSMI_STATUS_ADDRESS_FAULT - Bad address",
             amdsmi_wrapper.AMDSMI_STATUS_FILE_ERROR: "AMDSMI_STATUS_FILE_ERROR - Error opening file",

@@ -189,13 +189,13 @@ int main(int argc, char **argv) {
         }
 
         if (num_devices < 1) {
-            ROCDEC_ERR("ERROR: didn't find any GPU!");
+            std::cerr << "ERROR: didn't find any GPU!" << std::endl;
             return -1;
         }
 
         hip_status = hipGetDeviceProperties(&hip_dev_prop, device_id);
         if (hip_status != hipSuccess) {
-            ROCDEC_ERR("ERROR: hipGetDeviceProperties for device (" +TOSTR(device_id) + " ) failed! (" + hipGetErrorName(hip_status) + ")" );
+            std::cerr << "ERROR: hipGetDeviceProperties for device (" +ROCVIDEODEC_TOSTR(device_id) + " ) failed! (" + hipGetErrorName(hip_status) + ")"  << std::endl;
             return -1;
         }
 

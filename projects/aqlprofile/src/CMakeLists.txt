@@ -20,6 +20,7 @@ set ( LIB_SRC
   ${LIB_DIR}/core/gfx11_factory.cpp
   ${LIB_DIR}/core/gfx115x_factory.cpp
   ${LIB_DIR}/core/gfx12_factory.cpp
+  ${LIB_DIR}/core/gfx1250_factory.cpp
   ${LIB_DIR}/core/vega20_reg_init.cpp
   ${LIB_DIR}/core/parse_ip_discovery.cpp
   ${LIB_DIR}/core/navi_reg_init.cpp
@@ -30,14 +31,29 @@ set ( LIB_SRC
 add_library ( ${TARGET_LIB} SHARED ${LIB_SRC} )
 add_library (aqlprofile::aqlprofile-lib ALIAS ${TARGET_LIB})
 target_include_directories ( ${TARGET_LIB}
-  PRIVATE ${LIB_DIR}
-          ${API_PATH}
+  PUBLIC  ${LIB_DIR}
+  PRIVATE ${API_PATH}
           ${LIB_DIR}/core/include
 )
+if ( WIN32 )
+  # Link the module-definition file so the linker exports all public symbols
+  target_sources ( ${TARGET_LIB} PRIVATE ${LIB_DIR}/hsa-amd-aqlprofile64.def )
+  # Locate the pre-built HIP import library (re-exports all HSA runtime symbols)
+  find_library ( AMDHIP64_LIB
+    NAMES amdhip64
+    HINTS "${AMDHIP64_LIB_DIR}"
+  )
+  if ( NOT AMDHIP64_LIB OR AMDHIP64_LIB STREQUAL "AMDHIP64_LIB-NOTFOUND" )
+    message ( FATAL_ERROR "Failed to find amdhip64 import library for Windows build. Install HIP or set AMDHIP64_LIB_DIR to the directory containing amdhip64.lib." )
+  endif ()
+  message ( STATUS "---AMDHIP64_LIB: ${AMDHIP64_LIB}" )
+endif ()
+
 target_link_libraries( ${TARGET_LIB}
   PRIVATE
-    pthread
-    hsa-runtime64::hsa-runtime64
+    $<$<NOT:$<BOOL:${WIN32}>>:pthread>
+    $<$<NOT:$<BOOL:${WIN32}>>:hsa-runtime64::hsa-runtime64>
+    $<$<BOOL:${WIN32}>:${AMDHIP64_LIB}>
   PUBLIC
     aqlprofile::headers
 )

@@ -57,14 +57,14 @@ __device__ bool thread_passing(int num_bins, uint32_t *bin_threads,
 __global__ void RandomAccessTest(int loop, int skip, long long int *start_time,
                                  long long int *end_time, int *s_buf,
                                  int *r_buf, size_t size, OpType type,
-                                 int coal_coef, int num_bins, int num_waves,
+                                 int coal_coef, int num_bins, [[maybe_unused]] int num_waves,
                                  uint32_t *threads_bins, uint32_t *off_bins,
                                  uint32_t *PE_bins, ShmemContextType ctx_type) {
   __shared__ rocshmem_ctx_t ctx;
   int wg_id = get_flat_grid_id();
   rocshmem_wg_ctx_create(ctx_type, &ctx);
 
-  int pe = rocshmem_ctx_my_pe(ctx);
+  [[maybe_unused]] int pe = rocshmem_ctx_my_pe(ctx);
   size_t offset;
   int PE;
 
@@ -143,8 +143,8 @@ RandomAccessTester::RandomAccessTester(TesterArguments args) : Tester(args) {
     abort();
   }
 
-  s_buf = (int *)rocshmem_malloc(max_size * wg_size * space);
-  r_buf = (int *)rocshmem_malloc(max_size * wg_size * space);
+  s_buf = (int *) alloc_test_buffer(max_size * wg_size * space, args.local_buf_type);
+  r_buf = (int *) alloc_test_buffer(max_size * wg_size * space);
   h_buf = (int *)malloc(max_size * wg_size * space);
   h_dev_buf = (int *)malloc(max_size * wg_size * space);
   CHECK_HIP(hipMalloc((void **)&_threads_bins, sizeof(uint32_t) * _num_waves * _num_bins));
@@ -156,8 +156,8 @@ RandomAccessTester::RandomAccessTester(TesterArguments args) : Tester(args) {
 }
 
 RandomAccessTester::~RandomAccessTester() {
-  rocshmem_free(s_buf);
-  rocshmem_free(r_buf);
+  free_test_buffer(s_buf, args.local_buf_type);
+  free_test_buffer(r_buf);
   free(h_buf);
   free(h_dev_buf);
   CHECK_HIP(hipFree(_threads_bins));
@@ -165,7 +165,7 @@ RandomAccessTester::~RandomAccessTester() {
   CHECK_HIP(hipFree(_PE_bins));
 }
 
-void RandomAccessTester::resetBuffers(size_t size) {
+void RandomAccessTester::resetBuffers([[maybe_unused]] size_t size) {
   for (size_t i = 0; i < max_msg_size / sizeof(int) * args.wg_size * space;
        i++) {
     s_buf[i] = 1;

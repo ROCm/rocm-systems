@@ -19,6 +19,7 @@
 #endif
 
 static constexpr size_t ONE_MB = 1024 * 1024;
+static constexpr size_t DEV_MEM_ALIGNMENT = 256;
 
 HIP_TEST_CASE(Unit_hipMalloc_Positive_Basic) {
   constexpr size_t page_size = 4096;
@@ -27,7 +28,7 @@ HIP_TEST_CASE(Unit_hipMalloc_Positive_Basic) {
       GENERATE_COPY(10, page_size / 2, page_size, page_size * 3 / 2, page_size * 2);
   HIP_CHECK(hipMalloc(&ptr, alloc_size));
   CHECK(ptr != nullptr);
-  CHECK(reinterpret_cast<intptr_t>(ptr) % 256 == 0);
+  CHECK(reinterpret_cast<intptr_t>(ptr) % DEV_MEM_ALIGNMENT == 0);
   HIP_CHECK(hipFree(ptr));
 }
 
@@ -41,18 +42,21 @@ HIP_TEST_CASE(Unit_hipMalloc_Positive_Alignment) {
   void *ptr1 = nullptr, *ptr2 = nullptr;
   HIP_CHECK(hipMalloc(&ptr1, 1));
   HIP_CHECK(hipMalloc(&ptr2, 10));
-  CHECK(reinterpret_cast<intptr_t>(ptr1) % 256 == 0);
-  CHECK(reinterpret_cast<intptr_t>(ptr2) % 256 == 0);
+  CHECK(reinterpret_cast<intptr_t>(ptr1) % DEV_MEM_ALIGNMENT == 0);
+  CHECK(reinterpret_cast<intptr_t>(ptr2) % DEV_MEM_ALIGNMENT == 0);
   HIP_CHECK(hipFree(ptr1));
   HIP_CHECK(hipFree(ptr2));
 }
 
-HIP_TEST_CASE(Unit_hipMalloc_Negative_Parameters) {
-  SECTION("ptr == nullptr") { HIP_CHECK_ERROR(hipMalloc(nullptr, 4096), hipErrorInvalidValue); }
+TEST_CASE("Unit_hipMalloc_Negative_Parameters") {
+  SECTION("ptr == nullptr") {
+    HIP_CHECK_ERROR(hipMalloc(nullptr, 4096), hipErrorInvalidValue);
+  }
   SECTION("size == max size_t") {
     void* ptr;
     HIP_CHECK_ERROR(hipMalloc(&ptr, std::numeric_limits<size_t>::max()), hipErrorOutOfMemory);
   }
+  (void)hipGetLastError();
 }
 
 // Commenting this due to defect SWDEV-501675, used in below commented tests
@@ -95,7 +99,9 @@ static inline size_t getAvailableRAM() {
  * In addKernel function, all elements of the array a increased by 1
  */
 static __global__ void addKernel(char* a, size_t size) {
-  for (int i = 0; i < size; i++) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  size_t stride = blockDim.x * gridDim.x;
+  for (size_t i = idx; i < size; i += stride) {
     a[i] += 1;
   }
 }
@@ -113,17 +119,15 @@ static void performOperations(char* devMem, size_t size) {
 
   HIP_CHECK(hipMemset(devMem, value, sizeToCheck));
   addKernel<<<1, 1>>>(devMem, sizeToCheck);
+  HIP_CHECK(hipGetLastError());
+  std::vector<char> arrToCheck(sizeToCheck, 0);
 
-  char* arrToCheck = new char[sizeToCheck];
-  memset(arrToCheck, '0', sizeToCheck);
+  HIP_CHECK(hipMemcpy(arrToCheck.data(), devMem, sizeToCheck, hipMemcpyDeviceToHost));
 
-  HIP_CHECK(hipMemcpy(arrToCheck, devMem, sizeToCheck, hipMemcpyDeviceToHost));
-
-  for (int i = 0; i < sizeToCheck; i++) {
+  for (size_t i = 0; i < sizeToCheck; i++) {
     INFO("At index : " << i << " Got value : " << arrToCheck[i] << " Expected value : B ");
     REQUIRE(arrToCheck[i] == 'B');
   }
-  delete[] arrToCheck;
 }
 
 /**
@@ -148,13 +152,62 @@ HIP_TEST_CASE(Unit_hipMalloc_Allocate90PercentOfDeviceMemory) {
    * Avoided allocating total available VRAM just for stability
    * and to keep some buffer memory.
    */
-  size_t size = freeVRAM * 0.9;
+  size_t size = (freeVRAM * 9) / 10;
   INFO("Size going to allocate : " << size);
 
   HIP_CHECK(hipMalloc(&devMem, size));
   REQUIRE(devMem != nullptr);
 
   performOperations(devMem, size);
+  HIP_CHECK(hipFree(devMem));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - APU-only. Allocates a single device buffer expected to exceed the
+ *   dedicated-VRAM carveout, then exercises it with memory operations
+ *   (memset, copy back, verify head and tail). Validates that hipMalloc
+ *   honours the spill path for large allocations on unified memory and
+ *   that the resulting buffer remains accessible for those operations.
+ * Test source
+ * ------------------------
+ * - unit/memory/hipMalloc.cc
+ */
+HIP_TEST_CASE(Unit_hipMalloc_Positive_APU_LargeAllocSpill) {
+  hipDeviceProp_t prop{};
+  HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+  if (!prop.integrated) {
+    HIP_SKIP_TEST("dGPU --- APU spill regression test does not apply");
+    return;
+  }
+  // Assumes the dedicated-VRAM carveout is smaller than 5 GiB.
+  constexpr size_t size = static_cast<size_t>(5) << 30;
+  constexpr size_t headroom = static_cast<size_t>(1) << 30;
+  if (prop.totalGlobalMem < size + headroom) {
+    HIP_SKIP_TEST("APU totalGlobalMem too small for this allocation plus headroom");
+    return;
+  }
+
+  char* devMem = nullptr;
+  HIP_CHECK(hipMalloc(&devMem, size));
+  REQUIRE(devMem != nullptr);
+
+  constexpr int fill = 0xCD;
+  HIP_CHECK(hipMemset(devMem, fill, size));
+
+  // Sample-verify head and tail; full read-back is bandwidth-bound at GiB
+  // scale but touching both ends catches page-table or aperture mismatches.
+  constexpr size_t sample = static_cast<size_t>(64) * 1024;
+  std::vector<char> head(sample), tail(sample);
+  HIP_CHECK(hipMemcpy(head.data(), devMem, sample, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(tail.data(), devMem + (size - sample), sample,
+                      hipMemcpyDeviceToHost));
+  for (size_t i = 0; i < sample; ++i) {
+    REQUIRE(head[i] == static_cast<char>(fill));
+    REQUIRE(tail[i] == static_cast<char>(fill));
+  }
+
   HIP_CHECK(hipFree(devMem));
 }
 

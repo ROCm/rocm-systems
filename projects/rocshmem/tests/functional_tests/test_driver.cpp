@@ -71,7 +71,7 @@ static void pmix_bcast(void *buf, size_t nbytes, char *key, int root)
     pmix_info_t *info;
     bool flag;
 
-    if (pmix_myproc.rank == root) {
+    if (static_cast<int>(pmix_myproc.rank) == root) {
       value.type = PMIX_BYTE_OBJECT;
       value.data.bo.bytes = (char *) (buf);
       value.data.bo.size = nbytes;
@@ -112,7 +112,7 @@ static void pmix_bcast(void *buf, size_t nbytes, char *key, int root)
       abort();
     }
 
-    if (pmix_myproc.rank != root) {
+    if (static_cast<int>(pmix_myproc.rank) != root) {
       if (NULL == val->data.bo.bytes) {
         std::cerr <<  "Rank " << pmix_myproc.rank << " PMIx_Get %d returned NULL pointer\n";
         PMIX_VALUE_RELEASE(val);

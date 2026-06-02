@@ -243,12 +243,23 @@ def export_to_json(results, filename):
 
 
 class ROCMHealthCheck:
-    def __init__(self, logger=None, rocm_path=None):
+    def __init__(
+        self,
+        logger=None,
+        rocm_path=None,
+        skip_multinode_readiness=False,
+        skip_atomic_operations=False,
+        kernel_params_warnings_only=False,
+    ):
         if logger is None:
             self.logger = logging.getLogger("RDHC")
             self.logger.setLevel(logging.INFO)
         else:
             self.logger = logger
+
+        self.skip_multinode_readiness = skip_multinode_readiness
+        self.skip_atomic_operations = skip_atomic_operations
+        self.kernel_params_warnings_only = kernel_params_warnings_only
 
         # ROCm path: from constructor, or env, or default (used everywhere instead of os.environ.get)
         self.rocm_path = (
@@ -971,6 +982,21 @@ class ROCMHealthCheck:
                 "is_error": False,
             },
         ]
+
+        # Optional: treat all kernel_param_checks with is_error True as warnings (CLI)
+        if self.kernel_params_warnings_only:
+            adjusted = []
+            for c in kernel_param_checks:
+                nc = dict(c)
+                if nc.get("is_error"):
+                    nc["is_error"] = False
+                    if not nc.get("warning_message") and nc.get("error_message"):
+                        nc["warning_message"] = nc["error_message"]
+                adjusted.append(nc)
+            kernel_param_checks = adjusted
+            self.logger.info(
+                "----Kernel parameter checks: failures count as warnings (--kernel-params-warnings-only)."
+            )
 
         # Process each kernel parameter check
         for check in kernel_param_checks:
@@ -1986,13 +2012,31 @@ class ROCMHealthCheck:
 
         # Test 9: Multinode cluster readiness
         self._print_test_start("Multinode cluster readiness")
-        status, reason = self.test_check_multinode_cluster_readiness()
-        results["Multinode_Readiness"] = {"status": status, "reason": reason}
+        if self.skip_multinode_readiness:
+            self.logger.info(
+                "Skipping multinode cluster readiness (--skip-multinode-readiness)."
+            )
+            results["Multinode_Readiness"] = {
+                "status": TestStatus.NOT_TESTED.value,
+                "reason": "Skipped (--skip-multinode-readiness).",
+            }
+        else:
+            status, reason = self.test_check_multinode_cluster_readiness()
+            results["Multinode_Readiness"] = {"status": status, "reason": reason}
 
         # Test 10: Atomic Operations
         self._print_test_start("Is Atomic Operations Enabled")
-        status, reason = self.test_check_atomic_operations()
-        results["atomic_operations"] = {"status": status, "reason": reason}
+        if self.skip_atomic_operations:
+            self.logger.info(
+                "Skipping atomic operations check (--skip-atomic-operations)."
+            )
+            results["atomic_operations"] = {
+                "status": TestStatus.NOT_TESTED.value,
+                "reason": "Skipped (--skip-atomic-operations).",
+            }
+        else:
+            status, reason = self.test_check_atomic_operations()
+            results["atomic_operations"] = {"status": status, "reason": reason}
 
         return results
 
@@ -2227,6 +2271,13 @@ def main():
         + "# Use a custom ROCm install prefix\n"
         + "sudo -E ./rdhc.py --rocm-install-prefix /usr/local/rocm\n"
         + "\n"
+        + "# Skip optional checks (e.g. single-node, containers without full PCI/RDMA)\n"
+        + "sudo -E ./rdhc.py --skip-optional-cluster-checks\n"
+        + "# (or: --skip-multinode-readiness --skip-atomic-operations)\n"
+        + "\n"
+        + "# Kernel cmdline/sysctl checks: failures as warnings only (no FAIL on mismatch)\n"
+        + "sudo -E ./rdhc.py --kernel-params-warnings-only\n"
+        + "\n"
         + "NOTE for Ubuntu 24.04 (Python 3.12) users:\n"
         + "Due to enhanced security policies, you must use a virtual environment:\n"
         + "  # Create and activate virtual environment (one-time setup)\n"
@@ -2274,7 +2325,31 @@ def main():
         help="ROCm installation prefix. If set, overrides ROCM_PATH; otherwise ROCM_PATH or /opt/rocm is used.",
         default=None,
     )
+    parser.add_argument(
+        "--skip-multinode-readiness",
+        action="store_true",
+        help="Skip multinode/RDMA readiness (use on nodes without InfiniBand or RDMA stack).",
+    )
+    parser.add_argument(
+        "--skip-atomic-operations",
+        action="store_true",
+        help="Skip PCIe atomic operations check (use in containers or when lspci cannot read capabilities).",
+    )
+    parser.add_argument(
+        "--skip-optional-cluster-checks",
+        action="store_true",
+        help="Skip multinode readiness and atomic operations (same as both --skip-* flags above).",
+    )
+    parser.add_argument(
+        "--kernel-params-warnings-only",
+        action="store_true",
+        help="For kernel parameter checks (numa, iommu, pci realloc, etc.), treat failures as warnings (is_error=false) instead of counting errors.",
+    )
     args = parser.parse_args()
+
+    if args.skip_optional_cluster_checks:
+        args.skip_multinode_readiness = True
+        args.skip_atomic_operations = True
 
     # Setup logger
     logger = setup_logger(args.verbose, args.silent)
@@ -2307,7 +2382,13 @@ def main():
         rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
 
     # Create the health check instance
-    health_check = ROCMHealthCheck(logger, rocm_path=rocm_path)
+    health_check = ROCMHealthCheck(
+        logger,
+        rocm_path=rocm_path,
+        skip_multinode_readiness=args.skip_multinode_readiness,
+        skip_atomic_operations=args.skip_atomic_operations,
+        kernel_params_warnings_only=args.kernel_params_warnings_only,
+    )
 
     # Run tests with the temp_dir
     health_check.run_tests(run_all=args.all, temp_dir=temp_dir)

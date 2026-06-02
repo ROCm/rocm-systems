@@ -351,6 +351,11 @@ class Device : public NullDevice {
   static hsa_status_t iterateCpuMemoryPoolCallback(hsa_amd_memory_pool_t region, void* data);
   static hsa_status_t loaderQueryHostAddress(const void* device, const void** host);
 
+  //! Returns the AMD HSA loader extension function table.
+  static const hsa_ven_amd_loader_1_03_pfn_t& loaderExtensionTable() {
+    return amd_loader_ext_table;
+  }
+
   static bool loadHsaModules();
 
   hsa_agent_t getBackendDevice() const { return bkendDevice_; }
@@ -404,6 +409,7 @@ class Device : public NullDevice {
   }
 
   virtual device::Signal* createSignal() const override;
+  virtual device::Signal* createIpcSignal() const override;
 
   //! Acquire external graphics API object in the host thread
   //! Needed for OpenGL objects on CPU device
@@ -429,7 +435,7 @@ class Device : public NullDevice {
   virtual bool globalFreeMemory(size_t* freeMemory) const override;
   virtual void* hostAlloc(size_t size, size_t alignment,
                           MemorySegment mem_seg = MemorySegment::kNoAtomics,
-                          const void* agentInfo = nullptr) const override;  // nullptr uses default CPU agent
+                          const void* agentInfo = nullptr, bool allowAllAgentsAccess = true) const override;  // nullptr uses default CPU agent
   virtual void hostFree(void* ptr, size_t size = 0) const override;
 
   virtual bool amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
@@ -444,7 +450,7 @@ class Device : public NullDevice {
   uint64_t deviceVmemAlloc(size_t size, uint64_t flags) const;
 
   void* deviceLocalAlloc(size_t size,
-                        const AllocationFlags& flags = AllocationFlags{}) const override;
+                        const AllocationFlags& flags = AllocationFlags{}, bool allowAllAgentsAccess = true) const override;
   void* reserveMemory(size_t size, size_t alignment) const;
   void releaseMemory(void* ptr, size_t size) const;
   void memFree(void* ptr, size_t size) const;
@@ -482,8 +488,17 @@ class Device : public NullDevice {
   virtual void getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* end) const override;
   virtual void ReleaseGlobalSignal(void* signal) const override;
   virtual void RetainGlobalSignal(void* signal) const override;
+  virtual bool CreateHwEvents(int count, std::vector<void*>& hw_events) const override;
+  virtual void DestroyHwEvent(void* hw_event) const override;
+  virtual uint8_t* CreateBarrierPacket() const override;
+  virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
+                                   const std::vector<void*>& hw_events) const override;
   virtual bool CreateUserEvent(amd::UserEvent* event) const override;
   virtual void SetUserEvent(amd::UserEvent* event) const override;
+
+  virtual bool importExtSemaphore(void** extSemaphore, const amd::Os::FileDesc& handle,
+                                  amd::ExternalSemaphoreHandleType sem_handle_type) override;
+  virtual void DestroyExtSemaphore(void* extSemaphore) override;
 
   //! Allocate host memory in terms of numa policy set by user
   void* hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg) const;
@@ -538,19 +553,23 @@ class Device : public NullDevice {
   hsa_queue_t* acquireQueue(
       uint32_t queue_size_hint, bool coop_queue = false, const std::vector<uint32_t>& cuMask = {},
       amd::CommandQueue::Priority priority = amd::CommandQueue::Priority::Normal,
-      bool managed = false, bool dedicated_queue = false);
+      bool managed = false, bool dedicated_queue = false,
+      hsa_queue_t* preferred = nullptr,
+      const std::unordered_set<uint64_t>* excluded_ids = nullptr,
+      void** metadata_ring_buffer = nullptr);
 
   //! Release HSA queue
   void releaseQueue(hsa_queue_t*, const std::vector<uint32_t>& cuMask = {}, bool coop_queue = false,
                     bool managed = false);
 
-  hsa_queue_t* AcquireActiveQueue(amd::CommandQueue::Priority priority);
+  hsa_queue_t* AcquireActiveQueue(amd::CommandQueue::Priority priority,
+                                   hsa_queue_t* preferred = nullptr,
+                                   const std::unordered_set<uint64_t>* excluded_ids = nullptr,
+                                   void** metadata_ring_buffer = nullptr);
   bool ReleaseActiveQueue(hsa_queue_t* queue, amd::CommandQueue::Priority priority);
 
-  //! For the given HSA queue, return an existing hostcall buffer or create a
-  //! new one. queuePool_ keeps a mapping from HSA queue to hostcall buffer.
-  void* getOrCreateHostcallBuffer(hsa_queue_t* queue, bool coop_queue = false,
-                                  const std::vector<uint32_t>& cuMask = {});
+  //! Return the pre-computed metadata packet version header bits
+  uint32_t MetadataVersionHeader() const { return metadata_version_header_; }
 
   //! Return multi GPU grid launch sync buffer
   address MGSync() const { return mg_sync_; }
@@ -613,6 +632,9 @@ class Device : public NullDevice {
   //! Returns true if PM4 emulation is enabled
   bool IsPm4Emulation() const { return pm4_emulation_; }
 
+  //! Waits until all VirtualGPU QueuedAsyncHandlers are zero (30s timeout).
+  void WaitForHsaAsyncHandlersIdle();
+
  private:
   bool create();
 
@@ -626,7 +648,7 @@ class Device : public NullDevice {
                            int numa_id = kDefaultNumaNode) const;
   static constexpr hsa_signal_value_t InitSignalValue = 1;
 
-  static hsa_ven_amd_loader_1_00_pfn_t amd_loader_ext_table;
+  static hsa_ven_amd_loader_1_03_pfn_t amd_loader_ext_table;
 
   std::recursive_mutex* mapCacheOps_;    //!< Lock to serialise cache for the map resources
   std::vector<amd::Memory*>* mapCache_;  //!< Map cache info structure
@@ -663,13 +685,17 @@ class Device : public NullDevice {
                                    //!< mode
   static address mg_sync_;         //!< MGPU grid launch sync memory (SVM location)
 
+  //! Pre-computed metadata packet version header bits
+  uint32_t metadata_version_header_ = 0;
+  bool metadata_version_queried_ = false;
+
   struct QueueInfo {
-    int refCount;           //! Reference counter. Shows how many time the queue was shared
-    void* hostcallBuffer_;  //! Host call buffer for the HSA queue
+    int refCount;             //! Reference counter. Shows how many time the queue was shared
     bool hasDedicatedQueue_;  //! True if this queue is a dedicated queue (e.g., null stream)
+    void* metadataRingBuffer_; //! Metadata prefetch ring buffer base
 
     // Constructor
-    QueueInfo() : refCount(0), hostcallBuffer_(nullptr), hasDedicatedQueue_(false) {}
+    QueueInfo() : refCount(0), hasDedicatedQueue_(false), metadataRingBuffer_(nullptr) {}
 
     //! Get the current hardware queue depth (wptr - rptr)
     static uint64_t GetHwQueueDepth(hsa_queue_t* queue) {
@@ -712,15 +738,15 @@ class Device : public NullDevice {
   std::atomic<uint32_t> num_queues_[QueuePriority::Total] = {};  //!< Per-priority queue counters
 
   //! Use dynamic queues mode to get a queue from pool
-  hsa_queue_t* getQueueFromPool(const uint qIndex, bool force_reuse = false);
+  hsa_queue_t* getQueueFromPool(const uint qIndex, bool force_reuse = false,
+                                hsa_queue_t* preferred = nullptr,
+                                const std::unordered_set<uint64_t>* excluded_ids = nullptr,
+                                void** metadata_ring_buffer = nullptr);
 
-  void* coopHostcallBuffer_;
   //! returns value for corresponding LinkAttrbutes in a vector given Memory pool.
   virtual bool findLinkInfo(const hsa_amd_memory_pool_t& pool,
                             std::vector<LinkAttrType>* link_attr);
 
-  //! Pool of HSA queues with custom CU masks
-  std::vector<std::map<hsa_queue_t*, QueueInfo, QueueCompare>> queueWithCUMaskPool_;
   hsa_amd_memory_pool_t getHostMemoryPool(MemorySegment mem_seg,
                                           const AgentInfo* agentInfo = nullptr) const;
   //! Read and Write mask for device<->host
@@ -757,6 +783,12 @@ class Device : public NullDevice {
   friend void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data);
 
  public:
+
+  //! Count of schedulerQueue_ instances per device
+  //! Windows AQL device-enqueue path.
+  std::atomic<uint32_t> hasSchedulerQueue_{0};
+  static std::atomic<bool> skipHsaShutdown_;
+
   std::atomic<uint> numOfVgpus_;  //!< Virtual gpu unique index
 
   //! Returns the valid SDMA engine bitmask for the given operation type.

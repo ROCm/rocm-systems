@@ -157,7 +157,7 @@ pydata-sphinx-theme==0.15.4
     #   sphinx-book-theme
 pygithub==2.3.0
     # via rocm-docs-core
-pygments==2.18.0
+pygments==2.20.0
     # via
     #   accessible-pygments
     #   ipython
@@ -188,7 +188,7 @@ requests==2.31.0
     # via
     #   pygithub
     #   sphinx
-rocm-docs-core==1.31.2
+rocm-docs-core==1.33.1
     # via -r requirements.in
 rpds-py==0.30.0
     # via

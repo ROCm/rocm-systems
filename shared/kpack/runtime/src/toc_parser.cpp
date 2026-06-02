@@ -31,7 +31,7 @@ kpack_error_t parse_toc(FILE* file, uint64_t toc_offset, uint64_t file_size,
   }
 
   // Seek to TOC
-  if (fseek(file, toc_offset, SEEK_SET) != 0) {
+  if (kpack_fseek(file, static_cast<int64_t>(toc_offset), SEEK_SET) != 0) {
     return KPACK_ERROR_IO_ERROR;
   }
 

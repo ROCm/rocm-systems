@@ -14,7 +14,7 @@ ENV HIP_RUNTIME=rocclr
 ENV HIP_COMPILER=amdclang++
 ENV LLVM_PATH=/opt/rocm/llvm
 ENV CMAKE_PREFIX_PATH=/opt/rocm
-ENV PATH=/opt/rh/gcc-toolset-11/root/usr/bin:/opt/rocm/bin:/opt/rocm/llvm/bin:/usr/local/bin:~/.local/bin:${PATH}
+ENV PATH=/opt/rh/gcc-toolset-11/root/usr/bin:/usr/lib64/openmpi/bin:/opt/rocm/bin:/opt/rocm/llvm/bin:/usr/local/bin:~/.local/bin:${PATH}
 ENV LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/llvm/lib:${LD_LIBRARY_PATH}
 
 # Debian/Ubuntu
@@ -58,7 +58,7 @@ RUN set -euo pipefail; \
             echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/amdgpu/latest/rhel/9.6/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/amdgpu.repo; \
         fi; \
         dnf clean all; \
-        dnf install -y rocm-openmp rocm-openmp-sdk rocm-llvm-devel hipify-clang libsqlite3x-devel elfutils-devel; \
+        dnf install -y rocm-openmp rocm-openmp-sdk rocm-llvm-devel hipify-clang libsqlite3x-devel openmpi-devel elfutils-devel; \
         python3 -m pip install -U awscli pipx; \
         python3 -m venv rocprofiler-sdk; \
         source rocprofiler-sdk/bin/activate; \

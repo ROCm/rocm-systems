@@ -1,27 +1,5 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 import argparse
 import copy
@@ -38,8 +16,8 @@ from rocprof_compute_tui.utils.tui_utils import (
     process_panels_to_dataframes,
 )
 from utils import file_io, parser, schema
-from utils.kernel_name_shortener import kernel_name_shortener
-from utils.logger import console_error, demarcate
+from utils.logger import console_error, console_log, demarcate
+from utils.metrics.evaluation_pipeline import eval_metric
 
 
 class tui_analysis(OmniAnalyze_Base):
@@ -55,13 +33,48 @@ class tui_analysis(OmniAnalyze_Base):
         self._profiling_config = file_io.load_profiling_config(self.path)
         self._runs = self.initalize_runs()
 
-        # Join pmc_perf_*.csv or results_*.csv files if needed (Phase 2)
-        self.join_workload_csvs(Path(self.path))
-
         if self.args.random_port:
             console_error("--gui flag is required to enable --random-port")
 
         workload = self._runs[self.path]
+
+        # Initialize per-kernel dataframes
+        self.raw_dfs: dict[str, Any] = {}
+
+        if self.pc_sampling_only():
+            console_log(
+                "analysis",
+                "Only PC sampling and kernel tracing data"
+                " available, metrics calculation will be"
+                " skipped",
+            )
+            workload.raw_pmc = file_io.process_pc_sampling_kernel_trace(self.path)
+            workload.raw_pmc = workload.raw_pmc.rename(
+                columns={"Dispatch_Id": "Dispatch_ID"}
+            )
+
+            kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
+                df_in=workload.raw_pmc,
+                raw_data_dir=self.path,
+                filter_gpu_ids=workload.filter_gpu_ids,
+                filter_dispatch_ids=workload.filter_dispatch_ids,
+                filter_nodes=workload.filter_nodes,
+                time_unit=self.args.time_unit,
+                kernel_verbose=self.args.kernel_verbose,
+            )
+            workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
+            workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
+
+            parser.load_non_mertrics_table(
+                workload=workload,
+                dir_path=self.path,
+                args=self.args,
+            )
+            parser.nullify_unevaluated_metric_values(workload)
+            return
+
+        # Join results_*.csv source files into pmc_perf.csv if needed (Phase 2)
+        self.join_workload_csvs(Path(self.path))
 
         workload.raw_pmc = file_io.create_df_pmc(
             self.path,
@@ -75,7 +88,7 @@ class tui_analysis(OmniAnalyze_Base):
         if self.args.spatial_multiplexing:
             workload.raw_pmc = self.spatial_multiplex_merge_counters(workload.raw_pmc)
 
-        file_io.create_df_kernel_top_stats(
+        kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
             df_in=workload.raw_pmc,
             raw_data_dir=self.path,
             filter_gpu_ids=workload.filter_gpu_ids,
@@ -84,17 +97,17 @@ class tui_analysis(OmniAnalyze_Base):
             time_unit=self.args.time_unit,
             kernel_verbose=self.args.kernel_verbose,
         )
-        kernel_name_shortener(workload.raw_pmc, self.args.kernel_verbose)
+        workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
+        workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
 
         parser.load_non_mertrics_table(
-            workload=workload, dir_path=self.path, args=self.args
+            workload=workload,
+            dir_path=self.path,
+            args=self.args,
         )
 
-        # 2. Generate per-kernel dataframes (aggregated across all dispatches)
-        self.raw_dfs = {}
-
         # Group raw PMC data by kernel name
-        kernel_groups = workload.raw_pmc.pmc_perf.groupby("Kernel_Name")
+        kernel_groups = workload.raw_pmc.groupby("Kernel_Name")
 
         for kernel_name, group in kernel_groups:
             # Get all dispatch indices for this kernel
@@ -106,14 +119,13 @@ class tui_analysis(OmniAnalyze_Base):
             kernel_dfs = copy.deepcopy(workload.dfs)
 
             # Evaluate metrics aggregated across all dispatches of this kernel
-            parser.eval_metric(
+            eval_metric(
                 kernel_dfs,
                 workload.dfs_type,
                 workload.sys_info.iloc[0],
                 workload.roofline_peaks,
                 kernel_raw_pmc,
                 self.args.debug,
-                self._profiling_config,
             )
 
             self.raw_dfs[str(kernel_name)] = kernel_dfs

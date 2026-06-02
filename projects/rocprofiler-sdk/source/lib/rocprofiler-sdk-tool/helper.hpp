@@ -49,7 +49,7 @@
 #include <hsa/hsa_ven_amd_aqlprofile.h>
 #include <hsa/hsa_ven_amd_loader.h>
 
-#include <glog/logging.h>
+#include "lib/common/logging.hpp"
 
 #include <cxxabi.h>
 #include <semaphore.h>

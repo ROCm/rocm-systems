@@ -1,27 +1,5 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 import argparse
 import os
@@ -31,8 +9,8 @@ from typing import Optional, Union
 
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils.logger import console_error, console_log, demarcate
-from utils.utils import resolve_rocm_library_path
+from utils.logger import console_debug, console_error, console_log, demarcate
+from utils.utils_common import resolve_rocm_library_path
 
 
 class rocprofiler_sdk_profiler(RocProfCompute_Base):
@@ -73,7 +51,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             "LD_PRELOAD": ld_preload_value,
             "ROCPROF_KERNEL_TRACE": "1",
             "ROCPROF_OUTPUT_FORMAT": args.format_rocprof_output,
-            "ROCPROF_OUTPUT_PATH": f"{args.path}/out/pmc_1",
+            "ROCPROF_OUTPUT_PATH": f"{args.output_directory}/out/pmc_1",
         })
 
         if getattr(args, "torch_trace", False):
@@ -98,12 +76,30 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             })
             options.pop("LD_PRELOAD", None)
 
+            # Try new live attach library first, fall back to old library
             rocprofiler_attach_library_path = resolve_rocm_library_path(
                 str(
                     Path(args.rocprofiler_sdk_tool_path).parent.parent
                     / "librocprofiler-sdk-rocattach.so"
                 )
             )
+            if not Path(rocprofiler_attach_library_path).exists():
+                console_debug(
+                    f"Latest live attach library not found at "
+                    f"{rocprofiler_attach_library_path}, "
+                    "searching for legacy live attach library"
+                )
+                rocprofiler_attach_library_path = resolve_rocm_library_path(
+                    str(
+                        Path(args.rocprofiler_sdk_tool_path).parent
+                        / "librocprofv3-attach.so"
+                    )
+                )
+            if not Path(rocprofiler_attach_library_path).exists():
+                console_error(
+                    "No live attach library found at "
+                    f"{rocprofiler_attach_library_path}."
+                )
             options.update({
                 "ROCPROF_ATTACH_LIBRARY": rocprofiler_attach_library_path,
                 "ROCPROF_ATTACH_PID": args.attach_pid,

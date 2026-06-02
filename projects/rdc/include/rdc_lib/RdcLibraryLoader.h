@@ -36,7 +36,7 @@ class RdcLibraryLoader {
   RdcLibraryLoader();
 
   // throws RdcException if lib not found
-  rdc_status_t load(const char* filename);
+  rdc_status_t load(const char* filename, int dlopen_flags = RTLD_LAZY);
 
   template <typename T>
   rdc_status_t load_symbol(T* func_handler, const char* func_name);

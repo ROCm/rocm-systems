@@ -30,6 +30,8 @@
 #include "gfx10wave.h"
 #include "gfx11/gfx11wave.h"
 #include "gfx12/gfx12wave.h"
+#include "mi400/mi400token.h"
+#include "mi400/mi400wave.h"
 #include "segment.hpp"
 #include "stitch/stitch.hpp"
 
@@ -81,6 +83,13 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
             case RdnaType::MISC_GFX10:
             {
                 bool bCtxSave = false;
+                if (tt_version >= 5)
+                {
+                    mi400::misc_type misc{.raw = token.contents};
+                    DEBUGPRINT(misc);
+                    bCtxSave = misc.save_context;
+                }
+                else
                 {
                     gfx10::misc_type misc{.raw = token.contents};
                     DEBUGPRINT(misc);
@@ -106,6 +115,15 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
 
                 if (tt_version >= 4) double_buffer = (token.contents >> 43) & 1;
 
+                if (tt_version >= 5)
+                {
+                    mi400::header_type header{.raw = token.contents};
+                    DEBUGPRINT(header);
+                    target_sa_wgp = get_sa_wgp(header.DSA, header.DWGP);
+                    target_simd = header.DSIMD;
+                    derate = header.trans2;
+                }
+                else
                 {
                     header_type header{.raw = token.contents};
                     DEBUGPRINT(header);
@@ -161,7 +179,15 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                         {
                             if (slot.empty() || slot.back().bIsComplete)
                                 slot.push_back(wave_t(
-                                    target_sa_wgp, start.simd, start.wid, pcinfo_t{0, 0}, token, exclude_barrier_wait
+                                    target_sa_wgp,
+                                    start.simd,
+                                    start.wid,
+                                    pcinfo_t{0, 0},
+                                    token,
+                                    exclude_barrier_wait,
+                                    (uint8_t) start.me,
+                                    (uint8_t) start.pipe,
+                                    (uint8_t) start.wgid
                                 ));
 
                             auto& wave = slot.back();
@@ -183,7 +209,18 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                         auto it = running_waves.find(start.getGPULocation());
                         if (it != running_waves.end())
                         {
-                            occupancy.push_back({it->second, token.time, start.SACU(), start.simd, start.wid, 0});
+                            occupancy.push_back(
+                                {it->second,
+                                 token.time,
+                                 start.SACU(),
+                                 start.simd,
+                                 start.wid,
+                                 0,
+                                 (uint64_t) start.me,
+                                 (uint64_t) start.pipe,
+                                 start.isExt,
+                                 (uint64_t) start.wgid}
+                            );
                             saved_waves[start.getGPULocation()] = it->second;
                         }
                     }
@@ -195,7 +232,18 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
 
                         saved_waves.erase(start.getGPULocation());
                         running_waves[start.getGPULocation()] = addr;
-                        occupancy.push_back({addr, token.time, start.SACU(), start.simd, start.wid, 1});
+                        occupancy.push_back(
+                            {addr,
+                             token.time,
+                             start.SACU(),
+                             start.simd,
+                             start.wid,
+                             1,
+                             (uint64_t) start.me,
+                             (uint64_t) start.pipe,
+                             start.isExt,
+                             (uint64_t) start.wgid}
+                        );
                     }
 
                     break;
@@ -203,7 +251,18 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
 
                 running_waves[start.getGPULocation()] = wave_addr;
 
-                occupancy.push_back({wave_addr, token.time, start.SACU(), start.simd, start.wid, 1});
+                occupancy.push_back(
+                    {wave_addr,
+                     token.time,
+                     start.SACU(),
+                     start.simd,
+                     start.wid,
+                     1,
+                     (uint64_t) start.me,
+                     (uint64_t) start.pipe,
+                     start.isExt,
+                     (uint64_t) start.wgid}
+                );
                 if (double_buffer && occupancy.size() >= MAX_ACCUM_RECORDS) send_occupancy();
 
                 if (bIsTarget)
@@ -215,16 +274,26 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                         stitch.stitch(wave);
                         SIMD[start.wid].pop_back();
                     }
-                    SIMD[start.wid].push_back(
-                        wave_t(target_sa_wgp, start.simd, start.wid, wave_addr, token, exclude_barrier_wait)
-                    );
+                    SIMD[start.wid].push_back(wave_t(
+                        target_sa_wgp,
+                        start.simd,
+                        start.wid,
+                        wave_addr,
+                        token,
+                        exclude_barrier_wait,
+                        (uint8_t) start.me,
+                        (uint8_t) start.pipe,
+                        (uint8_t) start.wgid
+                    ));
                 }
                 break;
             }
             case RdnaType::WAVE_END:
             {
                 wend_type_common end;
-                if (tt_version == 4)
+                if (tt_version >= 5)
+                    end = mi400::wend_type{.raw = token.contents}.get();
+                else if (tt_version == 4)
                     end = gfx12::wend_type{.raw = token.contents}.get();
                 else
                     end = gfx10::wend_type{.raw = token.contents}.get();
@@ -242,9 +311,9 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                     running_waves.erase(end.getGPULocation());
                 }
                 else
-                    occupancy.insert(occupancy.begin(), {startpc, 0, end.SACU(), end.simd, end.wid, 1});
+                    occupancy.insert(occupancy.begin(), {startpc, 0, end.SACU(), end.simd, end.wid, 1, 0, 0, 0, 0});
 
-                occupancy.push_back({startpc, token.time, end.SACU(), end.simd, end.wid, 0});
+                occupancy.push_back({startpc, token.time, end.SACU(), end.simd, end.wid, 0, 0, 0, 0, 0});
                 break;
             }
             case RdnaType::INST:
@@ -252,18 +321,32 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                 inst_type_common inst;
                 auto mapped = mapped_inst_t{WaveInstCategory::NONE, 0};
 
-                if (tt_version == 4)
+                if (tt_version >= 5)
+                {
+                    inst = mi400::inst_type{.raw = token.contents}.get();
+                    try
+                    {
+                        mapped = mi400::map_to_common_type(inst.inst, derate);
+                    }
+                    catch (std::exception&)
+                    {
+                        auto& simd = SIMD[inst.wid];
+                        if (simd.size()) mi400::handle_xnack_rewind(simd.back());
+                        break;
+                    }
+                }
+                else if (tt_version == 4)
                 {
                     inst = gfx12::inst_type{.raw = token.contents}.get();
-                    mapped = gfx12::wave_t::map_to_common_type(inst.inst, dprate, derate);
+                    mapped = gfx12::map_to_common_type(inst.inst, dprate, derate);
                 }
                 else
                 {
                     inst = gfx10::inst_type{.raw = token.contents}.get();
                     if (tt_version == 3)
-                        mapped = gfx11::wave_t::map_to_common_type(inst.inst, dprate, derate);
+                        mapped = gfx11::map_to_common_type(inst.inst, dprate, derate);
                     else
-                        mapped = wave_t::map_to_common_type(inst.inst, dprate, derate);
+                        mapped = gfx10::map_to_common_type(inst.inst, dprate, derate);
                 }
                 DEBUGPRINT(inst);
 
@@ -282,7 +365,23 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                 {
                     auto& simd = SIMD[inst.wid];
                     empty_wave_check(simd.size());
-                    simd.back().apply_inst(token.time, inst.inst, mapped, tt_version);
+                    auto& wave = simd.back();
+
+                    if (mapped.category == WaveInstCategory::LD_SCALE)
+                    {
+                        wave.next_ld_scale = true;
+                        break;
+                    }
+
+                    int64_t inst_time = token.time;
+                    if (wave.next_ld_scale)
+                    {
+                        wave.next_ld_scale = false;
+                        inst_time -= 1;
+                        mapped.cycles++;
+                    }
+
+                    wave.apply_inst(inst_time, inst.inst, mapped, tt_version);
                 }
                 break;
             }
@@ -298,6 +397,13 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
             case RdnaType::IMM_ONE:
             {
                 int wid;
+                if (tt_version >= 5)
+                {
+                    mi400::immed_one_type immed_one{.raw = token.contents};
+                    DEBUGPRINT(immed_one);
+                    wid = immed_one.wid;
+                }
+                else
                 {
                     immed_one_type immed_one{.raw = token.contents};
                     DEBUGPRINT(immed_one);
@@ -320,7 +426,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                 gfx10::new_pc_type pc{.raw = token.contents};
                 DEBUGPRINT(pc);
                 if (pc.wave < SIMD.size() && SIMD[pc.wave].size())
-                    SIMD[pc.wave].back().new_pc((uint64_t) token.time, pc.pc, csregister.table);
+                    SIMD[pc.wave].back().new_pc((uint64_t) token.time, pc.pc, csregister.table.write());
                 break;
             }
             case RdnaType::NEW_PC_GFX12:
@@ -328,7 +434,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                 gfx12::new_pc_type pc{.raw = token.contents};
                 DEBUGPRINT(pc);
                 if (pc.wave < SIMD.size() && SIMD[pc.wave].size())
-                    SIMD[pc.wave].back().new_pc((uint64_t) token.time, pc.pc, csregister.table);
+                    SIMD[pc.wave].back().new_pc((uint64_t) token.time, pc.pc, csregister.table.write());
                 break;
             }
             case RdnaType::REG:

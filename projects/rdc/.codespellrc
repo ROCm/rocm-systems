@@ -1,0 +1,7 @@
+[codespell]
+# AMD/ROCm domain-specific terms that are not typos
+ignore-words-list = hsa,valu,inout,cant,indx,traid,ue,wite,esponse
+# Skip generated files, build artifacts, and protobuf generated code
+# Note that pre-commit hook for codespell ignores these. You have to modify the regex in .pre-commit-config.yaml.
+skip = build,.git
+quiet-level = 2

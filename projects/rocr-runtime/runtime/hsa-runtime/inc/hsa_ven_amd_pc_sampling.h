@@ -66,8 +66,9 @@ typedef struct {
   uint32_t workgroup_id_y;
   uint32_t workgroup_id_z;
   uint32_t wave_in_wg : 6;
-  uint32_t chiplet    : 3;   // Currently not used
-  uint32_t reserved   : 23;
+  uint32_t reserved_wg: 2;
+  uint32_t chiplet    : 3;
+  uint32_t reserved   : 21;
   uint32_t hw_id;
   uint32_t reserved0;
   uint64_t reserved1;
@@ -85,8 +86,9 @@ typedef struct {
   uint32_t workgroup_id_y;
   uint32_t workgroup_id_z;
   uint32_t wave_in_wg : 6;
-  uint32_t chiplet    : 3;   // Currently not used
-  uint32_t reserved   : 23;
+  uint32_t reserved_wg: 2;
+  uint32_t chiplet    : 3;
+  uint32_t reserved   : 21;
   uint32_t hw_id;
   uint32_t perf_snapshot_data;
   uint32_t perf_snapshot_data1;

@@ -57,7 +57,7 @@ class QueueDescProxy {
   QueueDescProxy() = default;
 
   QueueDescProxy(size_t max_queues)
-    : max_queues_{max_queues}, proxy_{max_queues} {
+    : proxy_{max_queues}, max_queues_{max_queues} {
 
     auto *queue_descs{proxy_.get()};
     for (size_t i{0}; i < max_queues_; i++) {

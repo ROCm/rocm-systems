@@ -37,8 +37,7 @@ behaviour
   hipDeviceAttribute_t attr = hipDeviceAttributeVirtualMemoryManagementSupported;                \
   HIP_CHECK(hipDeviceGetAttribute(&value, attr, device));                                        \
   if (value == 0) {                                                                              \
-    printf("Machine does not support VMM. Skipping this test..");                                \
-    return;                                                                                      \
+    HIP_SKIP_TEST(HipTest::SkipReason::kVmmUnsupported);                                         \
   }                                                                                              \
 }
 
@@ -161,10 +160,11 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_PeerGPU) {
                                        reinterpret_cast<hipDeviceptr_t>(A_d)));
       REQUIRE(data == 0);
     } else {
-      SUCCEED("Machine does not seem to have P2P");
+      HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     }
   } else {
-    SUCCEED("skipped the testcase as no of devices is less than 2");
+    HIP_CHECK(hipFree(A_d));
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   HIP_CHECK(hipFree(A_d));
 }
@@ -323,7 +323,6 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_Negative) {
 /* Allocate memory using different Allocation APIs and check whether
    IPC CAPABLE attribute returns correctly */
 HIP_TEST_CASE(Unit_hipPointerGetAttribute_ipc_capable) {
-
   HIP_CHECK(hipSetDevice(0));
   size_t Nbytes = N * sizeof(int);
   unsigned int datatype;
@@ -340,7 +339,6 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_ipc_capable) {
   size_t pitch_A;
   size_t width{NUM_W * sizeof(char)};
   SECTION("Malloc Pitch Allocation") {
-    CHECK_IMAGE_SUPPORT
     char* A_d;
     HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, NUM_H));
     HIP_CHECK(hipPointerGetAttribute(&datatype, HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE,
@@ -349,33 +347,6 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_ipc_capable) {
     REQUIRE(datatype == 1);
     HIP_CHECK(hipFree(A_d));
   }
-#if HT_AMD
-  SECTION("Malloc Array Allocation") {
-    CHECK_IMAGE_SUPPORT
-    hipArray_t B_d;
-    hipChannelFormatDesc desc = hipCreateChannelDesc<char>();
-    HIP_CHECK(hipMallocArray(&B_d, &desc, NUM_W, NUM_H, hipArrayDefault));
-    HIP_CHECK_ERROR(hipPointerGetAttribute(&datatype, HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE,
-                                           reinterpret_cast<hipDeviceptr_t>(B_d)),
-                                           hipErrorInvalidValue);
-    HIP_CHECK(hipFreeArray(B_d));
-  }
-
-  SECTION("Malloc 3D Array Allocation") {
-    CHECK_IMAGE_SUPPORT
-    int width = 10, height = 10, depth = 10;
-    hipArray_t arr;
-
-    hipChannelFormatDesc channelDesc =
-        hipCreateChannelDesc(sizeof(float) * 8, 0, 0, 0, hipChannelFormatKindFloat);
-    HIP_CHECK(hipMalloc3DArray(&arr, &channelDesc, make_hipExtent(width, height, depth),
-                               hipArrayDefault));
-    HIP_CHECK_ERROR(hipPointerGetAttribute(&datatype, HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE,
-                                           reinterpret_cast<hipDeviceptr_t>(arr)),
-                                           hipErrorInvalidValue);
-    HIP_CHECK(hipFreeArray(arr));
-  }
-#endif
 
   SECTION("VMM Memory Allocation") {
     size_t granularity = 0;
@@ -417,3 +388,37 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_ipc_capable) {
  }
 
 }
+
+#if HT_AMD
+/* HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE on hipArray allocations (2D/3D). */
+HIP_TEST_CASE(Unit_hipPointerGetAttribute_ipc_capable_Array) {
+  CHECK_IMAGE_SUPPORT
+
+  HIP_CHECK(hipSetDevice(0));
+  unsigned int datatype;
+
+  SECTION("Malloc Array Allocation") {
+    hipArray_t B_d;
+    hipChannelFormatDesc desc = hipCreateChannelDesc<char>();
+    HIP_CHECK(hipMallocArray(&B_d, &desc, NUM_W, NUM_H, hipArrayDefault));
+    HIP_CHECK_ERROR(hipPointerGetAttribute(&datatype, HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE,
+                                           reinterpret_cast<hipDeviceptr_t>(B_d)),
+                    hipErrorInvalidValue);
+    HIP_CHECK(hipFreeArray(B_d));
+  }
+
+  SECTION("Malloc 3D Array Allocation") {
+    int width = 10, height = 10, depth = 10;
+    hipArray_t arr;
+
+    hipChannelFormatDesc channelDesc =
+        hipCreateChannelDesc(sizeof(float) * 8, 0, 0, 0, hipChannelFormatKindFloat);
+    HIP_CHECK(hipMalloc3DArray(&arr, &channelDesc, make_hipExtent(width, height, depth),
+                               hipArrayDefault));
+    HIP_CHECK_ERROR(hipPointerGetAttribute(&datatype, HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE,
+                                           reinterpret_cast<hipDeviceptr_t>(arr)),
+                    hipErrorInvalidValue);
+    HIP_CHECK(hipFreeArray(arr));
+  }
+}
+#endif

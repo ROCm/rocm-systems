@@ -176,7 +176,11 @@ class HostQueue : public CommandQueue {
       }
     }
 
-    void Release() const { virtualDevice_->release(); }
+    void Release() const {
+      if (virtualDevice_ != nullptr) {
+        virtualDevice_->release();
+      }
+    }
 
     //! Get virtual device for the current thread
     device::VirtualDevice* vdev() const { return virtualDevice_; }
@@ -281,11 +285,7 @@ class HostQueue : public CommandQueue {
   }
 
   //! Flushes submitted commands if the batch size significantly grew
-  void FlushSubmissionBatch(Command* command) {
-    if (size_ > DEBUG_CLR_MAX_BATCH_SIZE) {
-      command->notifyCmdQueue();
-    }
-  }
+  void FlushSubmissionBatch();
   //! Reset the command batch list
   void ResetSubmissionBatch() {
     head_ = nullptr;

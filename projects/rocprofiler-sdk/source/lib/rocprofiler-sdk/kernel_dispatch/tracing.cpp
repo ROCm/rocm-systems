@@ -41,19 +41,13 @@ namespace rocprofiler
 {
 namespace kernel_dispatch
 {
-namespace
-{
-using queue_info_session_t     = hsa::queue_info_session;
-using kernel_dispatch_record_t = rocprofiler_buffer_tracing_kernel_dispatch_record_t;
-}  // namespace
-
 profiling_time
-get_dispatch_time(const hsa::queue_info_session& session)
+get_dispatch_time(const queue_info_session_t& session, packet_data_t& packet_data)
 {
-    const auto& callback_record = session.callback_record;
+    const auto& callback_record = packet_data.callback_record;
     const auto* _rocp_agent     = agent::get_agent(callback_record.dispatch_info.agent_id);
     auto        _hsa_agent      = agent::get_hsa_agent(_rocp_agent);
-    auto        _signal         = session.kernel_pkt.kernel_dispatch.completion_signal;
+    auto        _signal         = packet_data.kernel_packet.kernel_dispatch.completion_signal;
     auto        _kern_id        = callback_record.dispatch_info.kernel_id;
 
     return (_hsa_agent) ? get_dispatch_time(*_hsa_agent, _signal, _kern_id, session.enqueue_ts)
@@ -61,18 +55,22 @@ get_dispatch_time(const hsa::queue_info_session& session)
 }
 
 void
-dispatch_complete(queue_info_session_t& session, profiling_time dispatch_time)
+dispatch_complete(queue_info_session_t& session,
+                  packet_data_t&        packet_data,
+                  profiling_time        dispatch_time)
 {
+    using kernel_dispatch_record_t = rocprofiler_buffer_tracing_kernel_dispatch_record_t;
+
     // get the contexts that were active when the signal was created
-    auto& tracing_data_v = session.tracing_data;
+    auto& tracing_data_v = packet_data.tracing_data;
     if(tracing_data_v.callback_contexts.empty() && tracing_data_v.buffered_contexts.empty()) return;
 
     // we need to decrement this reference count at the end of the functions
     auto* _corr_id = session.correlation_id;
 
     // only do the following work if there are contexts that require this info
-    auto&       callback_record   = session.callback_record;
-    const auto& _extern_corr_ids  = session.tracing_data.external_correlation_ids;
+    auto&       callback_record   = packet_data.callback_record;
+    const auto& _extern_corr_ids  = packet_data.tracing_data.external_correlation_ids;
     auto        _tid              = session.tid;
     auto        _internal_corr_id = (_corr_id) ? _corr_id->internal : 0;
     auto        _ancestor_corr_id = (_corr_id) ? _corr_id->ancestor : 0;

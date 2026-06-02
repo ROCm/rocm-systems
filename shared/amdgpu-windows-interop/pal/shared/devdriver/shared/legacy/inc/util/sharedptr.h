@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) 2021-2026 Advanced Micro Devices, Inc. All Rights Reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -223,14 +223,14 @@ namespace DevDriver
             return Get();
         }
 
-        // Templated comparison operator. Allows comparing shared pointer objects so long as U is convertable to T.
+        // Templated comparison operator. Allows comparing shared pointer objects so long as U is convertible to T.
         template <typename U, typename = typename Platform::EnableIf<Platform::IsConvertible<U*, T*>::Value>::Type>
         bool operator== (const SharedPointer< U >&right) const
         {
             return m_pObject == right.m_pObject;
         }
 
-        // Templated comparison operator. Allows comparing shared pointer objects so long as U is convertable to T.
+        // Templated comparison operator. Allows comparing shared pointer objects so long as U is convertible to T.
         template <typename U, typename = typename Platform::EnableIf<Platform::IsConvertible<U*, T*>::Value>::Type>
         bool operator!= (const SharedPointer< U >&right) const
         {

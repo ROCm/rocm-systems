@@ -5,7 +5,6 @@
  */
 
 #include <hip_test_common.hh>
-#include "hipMallocManagedCommon.hh"
 #include <atomic>
 
 
@@ -283,11 +282,7 @@ static void AllocateHmmMemory(int flag, int device) {
 }
 
 HIP_TEST_CASE(Unit_hipMallocManaged_MultiThread) {
-  auto managed = HmmAttrPrint();
-  if (managed != 1) {
-    HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
-    return;
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   IfTestPassed = true;
   int NumDevs = 0, ATTACH_GLOBAL = 0, ATTACH_HOST = 1;
@@ -337,21 +332,16 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiThread) {
 // The following test checks what happens when same Hmm memory is used to
 // launch multiple threads over multiple gpus
 HIP_TEST_CASE(Unit_hipMallocManaged_MGpuMThread) {
-  auto managed = HmmAttrPrint();
-  if (managed != 1) {
-    HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
-    return;
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   IfTestPassed = true;
   int Ngpus = 0;
   HIP_CHECK(hipGetDeviceCount(&Ngpus));
   if (Ngpus < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping test because more than one device was not found.");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
-  int InitVal = 123, *Hmm1 = NULL, NumElms = 4096 * 4;
+  int InitVal = 123, *Hmm1 = NULL, NumElms = isQuickLevel() ? 4096 : 4096 * 4;
   HIP_CHECK(hipMallocManaged(&Hmm1, (NumElms * sizeof(int))));
   for (int i = 0; i < NumElms; ++i) {
     Hmm1[i] = InitVal;
@@ -380,15 +370,11 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MGpuMThread) {
 // The following test checks what happens when multiple kernels are launched
 // with same Hmm memory
 HIP_TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnHmm) {
-  auto managed = HmmAttrPrint();
-  if (managed != 1) {
-    HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
-    return;
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   IfTestPassed = true;
 
-  int InitVal = 123, *Hmm = NULL, NumElms = 1024 * 4, TotThrds = 2;
+  int InitVal = 123, *Hmm = NULL, NumElms = isQuickLevel() ? 4096 : 1024 * 4, TotThrds = 2;
   int HmmMem2 = 0, *HstPtr = nullptr;  //  to indicate the thread that
   //  hipMalloc() memory has to be used
   HstPtr = reinterpret_cast<int*>(new int[NumElms]);
@@ -415,14 +401,10 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnHmm) {
 // The following test checks what happens when multiple kernels are launched
 // with same hipMalloc() memory
 HIP_TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnMalloc) {
-  auto managed = HmmAttrPrint();
-  if (managed != 1) {
-    HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
-    return;
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   IfTestPassed = true;
-  int InitVal = 123, *Dptr = NULL, NumElms = 4096 * 8, TotThrds = 2;
+  int InitVal = 123, *Dptr = NULL, NumElms = isQuickLevel() ? 4096 : 4096 * 8, TotThrds = 2;
   int* HstPtr = reinterpret_cast<int*>(new int[NumElms]);
   HIP_CHECK(hipMalloc(&Dptr, (NumElms * sizeof(int))));
   for (int i = 0; i < NumElms; ++i) {
@@ -446,15 +428,11 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnMalloc) {
 //  The following section tests the scenario wherein multiple threads use their
 //  own stream to launch kernel on common Hmm memory
 HIP_TEST_CASE(Unit_hipMallocManaged_MultiThrdMultiStrm) {
-  auto managed = HmmAttrPrint();
-  if (managed != 1) {
-    HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
-    return;
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   IfTestPassed = true;
 
-  int NumElms = 4096 * 4;
+  int NumElms = isQuickLevel() ? 4096 : 4096 * 4;
   int *Hmm1 = NULL, TotlThrds = 4, InitVal = 123;
   int HmmMem = 1;  //  to indicate the thread that Hmm memory need to be
   //  used inside it
@@ -480,14 +458,10 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiThrdMultiStrm) {
 //  The following section tests the scenario wherein two threads each use
 //  different kernel but common HMM memory
 HIP_TEST_CASE(Unit_hipMallocManaged_TwoKrnlsComnHmmMem) {
-  auto managed = HmmAttrPrint();
-  if (managed != 1) {
-    HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
-    return;
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   IfTestPassed = true;
-  int InitVal = 123, *Dptr = NULL, NumElms = 4096 * 4, TotThrds = 2;
+  int InitVal = 123, *Dptr = NULL, NumElms = isQuickLevel() ? 4096 : 4096 * 4, TotThrds = 2;
   int* HstPtr = reinterpret_cast<int*>(new int[NumElms]);
   HIP_CHECK(hipMalloc(&Dptr, (NumElms * sizeof(int))));
   for (int i = 0; i < NumElms; ++i) {

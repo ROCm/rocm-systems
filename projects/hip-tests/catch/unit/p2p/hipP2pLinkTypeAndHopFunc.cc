@@ -15,6 +15,7 @@
 #include <dlfcn.h>
 #endif
 #include <vector>
+#include <string>
 #define MAX_SIZE 30
 #define VISIBLE_DEVICE 0
 
@@ -190,12 +191,22 @@ bool validateLinkType(uint32_t linktype_Hip, RSMI_IO_LINK_TYPE linktype_RocmSmi)
 bool testhipLinkTypeHopcountDevice(int numDevices) {
   bool TestPassed = true;
   // Opening and initializing rocm-smi library
-  void* lib_rocm_smi_hdl;
+  void* lib_rocm_smi_hdl = nullptr;
   rsmi_status_t (*fntopo_get_link_type)(uint32_t, uint32_t, uint64_t*, RSMI_IO_LINK_TYPE*);
   rsmi_status_t (*fntopo_init)(uint64_t);
   rsmi_status_t (*fntopo_shut_down)();
 
-  lib_rocm_smi_hdl = dlopen("/opt/rocm/lib/librocm_smi64.so", RTLD_LAZY);
+  lib_rocm_smi_hdl = dlopen("librocm_smi64.so", RTLD_LAZY);
+  if (lib_rocm_smi_hdl == nullptr) {
+    // Try to find in the user defined rocm path
+    if (const char *rocm_path = std::getenv("ROCM_PATH")) {
+      std::string rocm_smi_path =
+          std::string(rocm_path) + "/lib/librocm_smi64.so";
+      lib_rocm_smi_hdl = dlopen(rocm_smi_path.c_str(), RTLD_LAZY);
+    } else {
+      lib_rocm_smi_hdl = dlopen("/opt/rocm/lib/librocm_smi64.so", RTLD_LAZY);
+    }
+  }
   REQUIRE(lib_rocm_smi_hdl);
 
   void* fnsym = dlsym(lib_rocm_smi_hdl, "rsmi_topo_get_link_type");
@@ -289,8 +300,7 @@ HIP_TEST_CASE(Unit_hipP2pLinkTypeAndHopFunc) {
   bool TestPassed = true;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   SECTION("Test running for testhipInvalidDevice") {
     TestPassed = testhipInvalidDevice(numDevices);
@@ -299,7 +309,7 @@ HIP_TEST_CASE(Unit_hipP2pLinkTypeAndHopFunc) {
 #ifdef __linux__
   getDeviceCount(&numDevices);
   if (numDevices < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
+    WARN("Skipping Linux-only P2P sections: " << HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
   SECTION("Test running for testMaskedDevice") {
@@ -327,7 +337,7 @@ HIP_TEST_CASE(Unit_hipP2pLinkTypeAndHopFunc) {
     REQUIRE(TestPassed == true);
   }
 #else
-  printf("This test is skipped due to non linux environment.\n");
+  WARN("Skipping Linux-only P2P link scenarios: " << HipTest::SkipReason::kRequiresLinux);
 #endif
 }
 

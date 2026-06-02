@@ -445,8 +445,9 @@ trap_entry:
   // [0x14]  uint32_t workgroup_id_y;
   // [0x18]  uint32_t workgroup_id_z;
   // [0x1c]  uint32_t wave_in_wg : 6;
-  //         uint32_t chiplet    : 3;    // Currently not used
-  //         uint32_t reserved   : 23;
+  //         uint32_t reserved_wg: 2;
+  //         uint32_t chiplet    : 3;    // XCC_ID on gfx94x, zero on older gfx9
+  //         uint32_t reserved   : 21;
   // [0x20]  uint32_t hw_id;
   // [0x24]  uint32_t reserved0;
   // [0x28]  uint64_t reserved1;

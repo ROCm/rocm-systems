@@ -12,21 +12,20 @@ A specific attach is not repeatable, and it can only collect the set of counters
 
 Detachment can be achieved in two ways:
 
-a) By setting the ``--attach-duration-msec`` parameter to a specific duration (in milliseconds). In this case, the detachment occurs automatically after the specified time has elapsed since the ``rocprof`` subprocess started.
+a) By setting the ``--attach-duration-msec`` parameter to a specific duration (in milliseconds). In this case, the detachment occurs automatically after the specified time has elapsed since the profiling session started.
 b) By pressing the Enter key after a successful attach within the same profiling terminal session. Upon a successful attach, a confirmation message is displayed in the terminal log of the workload process.
 
----------------------
 Profiling options
----------------------
+=================
 For using profiling options for PC sampling the configuration needed are:
 
 * ``--attach-pid``: Should be the process ID of the process of workload's application.
-* ``--attach-duration-msec``: (Optional) This is for setting up the synchronized detach, and is optional. Its unit is in milliseconds. When setting up, the detach will happen after this time has elapsed since the ``rocprof`` subprocess started. For example, setting it to 60000 yields 1 minute.
+* ``--attach-duration-msec``: (Optional) This is for setting up the synchronized detach, and is optional. Its unit is in milliseconds. When setting up, the detach will happen after this time has elapsed since the profiling session started. For example, setting it to 60000 yields 1 minute.
 
 **Sample command:**
 
 .. code-block:: shell
-   
+
    $ rocprof-compute profile -n try_live_attach_detach -b 3.1.1 4.1.1 5.1.1 --no-roof -VVV --attach-pid <process id of workload>
 
    $ rocprof-compute profile -n try_live_attach_detach --set launch_stats --no-roof -VVV --attach-pid <process id of workload>
@@ -35,9 +34,8 @@ For using profiling options for PC sampling the configuration needed are:
 
    $ rocprof-compute profile -n try_live_attach_detach --set launch_stats --no-roof -VVV --attach-pid <process id of workload> --attach-duration-msec <time before detach>
 
------------------------
 Analysis options
------------------------
+================
 
 The analyze options for Dynamic process attachment are completely compatible with other non-Dynamic process attachment options.
 

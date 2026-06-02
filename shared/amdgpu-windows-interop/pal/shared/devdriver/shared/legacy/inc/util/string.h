@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) 2021-2026 Advanced Micro Devices, Inc. All Rights Reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -31,7 +31,7 @@
 namespace DevDriver
 {
 // A String class that stores the string inline with a compile-time maximum size.
-// This class facilitiates passing bounded sized C Strings around without dynamic allocation. It has POD semantics
+// This class facilitates passing bounded sized C Strings around without dynamic allocation. It has POD semantics
 // when copied or passed by value into functions, and can be stored in a vector.
 template<size_t FixedSize>
 class FixedString
@@ -83,7 +83,7 @@ public:
 
     // Computes the length of the string.
     // Note! This is an O(N) operation!
-    size_t Size() const { return strlen(m_data); }
+    size_t Size() const { return Platform::Strlen_s(m_data, FixedSize); }
 };
 
 // Sanity check for class size.

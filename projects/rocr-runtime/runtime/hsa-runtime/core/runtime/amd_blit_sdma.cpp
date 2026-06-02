@@ -78,36 +78,51 @@ const size_t BlitSdmaBase::kMaxSingleCopySize = SDMA_PKT_COPY_LINEAR::kMaxSize_;
 const size_t BlitSdmaBase::kMaxSingleFillSize = SDMA_PKT_CONSTANT_FILL::kMaxSize_;
 
 // Initialize size of various sDMA commands use by this module
-template <bool useGCR>
-const uint32_t BlitSdma<useGCR>::linear_copy_command_size_ = sizeof(SDMA_PKT_COPY_LINEAR);
+template <bool useGCR, bool scopeFields>
+const uint32_t BlitSdma<useGCR, scopeFields>::linear_copy_command_size_ = sizeof(SDMA_PKT_COPY_LINEAR);
 
-template <bool useGCR>
-const uint32_t BlitSdma<useGCR>::broadcast_copy_command_size_ = sizeof(SDMA_PKT_COPY_LINEAR_BROADCAST);
+template <bool useGCR, bool scopeFields>
+const uint32_t BlitSdma<useGCR, scopeFields>::broadcast_copy_command_size_ = sizeof(SDMA_PKT_COPY_LINEAR_BROADCAST);
 
-template <bool useGCR>
-const uint32_t BlitSdma<useGCR>::fill_command_size_ = sizeof(SDMA_PKT_CONSTANT_FILL);
+template <bool useGCR, bool scopeFields>
+const uint32_t BlitSdma<useGCR, scopeFields>::swap_copy_command_size_ = sizeof(SDMA_PKT_COPY_LINEAR_SWAP);
 
-template <bool useGCR>
-const uint32_t BlitSdma<useGCR>::fence_command_size_ = sizeof(SDMA_PKT_FENCE);
+template <bool useGCR, bool scopeFields>
+const uint32_t BlitSdma<useGCR, scopeFields>::fill_command_size_ = sizeof(SDMA_PKT_CONSTANT_FILL);
 
-template <bool useGCR>
-const uint32_t BlitSdma<useGCR>::poll_command_size_ = sizeof(SDMA_PKT_POLL_REGMEM);
+template <bool useGCR, bool scopeFields>
+const uint32_t BlitSdma<useGCR, scopeFields>::fence_command_size_ = sizeof(SDMA_PKT_FENCE);
 
-template <bool useGCR>
-const uint32_t BlitSdma<useGCR>::flush_command_size_ = sizeof(SDMA_PKT_POLL_REGMEM);
+template <bool useGCR, bool scopeFields>
+const uint32_t BlitSdma<useGCR, scopeFields>::poll_command_size_ = sizeof(SDMA_PKT_POLL_REGMEM);
 
-template <bool useGCR>
-const uint32_t BlitSdma<useGCR>::atomic_command_size_ = sizeof(SDMA_PKT_ATOMIC);
+template <bool useGCR, bool scopeFields>
+const uint32_t BlitSdma<useGCR, scopeFields>::flush_command_size_ = sizeof(SDMA_PKT_POLL_REGMEM);
 
-template <bool useGCR>
-const uint32_t BlitSdma<useGCR>::timestamp_command_size_ = sizeof(SDMA_PKT_TIMESTAMP);
+template <bool useGCR, bool scopeFields>
+const uint32_t BlitSdma<useGCR, scopeFields>::atomic_command_size_ = sizeof(SDMA_PKT_ATOMIC);
 
-template <bool useGCR> const uint32_t BlitSdma<useGCR>::trap_command_size_ = sizeof(SDMA_PKT_TRAP);
+template <bool useGCR, bool scopeFields>
+const uint32_t BlitSdma<useGCR, scopeFields>::timestamp_command_size_ = sizeof(SDMA_PKT_TIMESTAMP);
 
-template <bool useGCR> const uint32_t BlitSdma<useGCR>::gcr_command_size_ = sizeof(SDMA_PKT_GCR);
+template <bool useGCR, bool scopeFields> const uint32_t BlitSdma<useGCR, scopeFields>::trap_command_size_ = sizeof(SDMA_PKT_TRAP);
 
-template <bool useGCR>
-BlitSdma<useGCR>::BlitSdma()
+template <bool useGCR, bool scopeFields>
+const uint32_t BlitSdma<useGCR, scopeFields>::fence_64b_command_size_ = sizeof(SDMA_PKT_FENCE_64B_GFX1250);
+
+template <bool useGCR, bool scopeFields>
+const uint32_t BlitSdma<useGCR, scopeFields>::poll_64b_command_size_ = sizeof(SDMA_PKT_POLL_MEM_64B_GFX1250);
+
+template <bool useGCR,bool scopeFields>
+uint32_t BlitSdma<useGCR, scopeFields>::gcr_command_size() {
+  if (is_gfx1250_) {
+    return sizeof(SDMA_PKT_GCR_GFX1250);
+  }
+  return sizeof(SDMA_PKT_GCR);
+}
+
+template <bool useGCR, bool scopeFields>
+BlitSdma<useGCR, scopeFields>::BlitSdma()
     : agent_(NULL),
       queue_start_addr_(NULL),
       bytes_queued_(0),
@@ -128,14 +143,16 @@ BlitSdma<useGCR>::BlitSdma()
       queue_rptr_(nullptr),
       queue_doorbell_(nullptr),
       broadcast_supported_(false),
-      multicast_supported_(false) {
+      is_gfx1250_(false),
+      swap_supported_(false),
+      indirect_copy_supported_(false) {
   std::memset(&queue_resource_, 0, sizeof(queue_resource_));
 }
 
-template <bool useGCR> BlitSdma<useGCR>::~BlitSdma() {}
+template <bool useGCR, bool scopeFields> BlitSdma<useGCR, scopeFields>::~BlitSdma() {}
 
-template <bool useGCR>
-hsa_status_t BlitSdma<useGCR>::Initialize(const core::Agent& agent, bool use_xgmi,
+template <bool useGCR, bool scopeFields>
+hsa_status_t BlitSdma<useGCR, scopeFields>::Initialize(const core::Agent& agent, bool use_xgmi,
                                           size_t linear_copy_size_override, int rec_eng) {
   if (queue_start_addr_ != NULL) {
     // Already initialized.
@@ -183,15 +200,18 @@ hsa_status_t BlitSdma<useGCR>::Initialize(const core::Agent& agent, bool use_xgm
     hdp_flush_support_ = link.info.link_type != HSA_AMD_LINK_INFO_TYPE_XGMI;
   }
 
+  is_gfx1250_ = (major == 12 && minor == 5);
+
+  // The linear wait/signal-indirect copy packet is available on gfx1250.
+  indirect_copy_supported_ = is_gfx1250_;
+
   // Broadcast linear copy supported on MI200+ and all SDMA 5.x/6.x+.
   if (major >= 10) {
     broadcast_supported_ = true;
   } else if (major == 9) {
     broadcast_supported_ = (minor >= 4) || (minor == 0 && stepping >= 10);
+    swap_supported_ = (minor >= 4);
   }
-
-  // Multicast not yet supported on any current hardware.
-  multicast_supported_ = false;
 
   // Allocate queue buffer.
   queue_start_addr_ =
@@ -213,7 +233,7 @@ hsa_status_t BlitSdma<useGCR>::Initialize(const core::Agent& agent, bool use_xgm
   const HSA_QUEUE_TYPE kQueueType_ = rec_eng >= 0 ? HSA_QUEUE_SDMA_BY_ENG_ID :
                                      (use_xgmi ? HSA_QUEUE_SDMA_XGMI : HSA_QUEUE_SDMA);
   if (agent_->driver().CreateQueue(agent_->node_id(), kQueueType_, 100, HSA::HSA_AMD_QUEUE_PRIORITY_MAXIMUM,
-                                   rec_eng, queue_start_addr_, kQueueSize, nullptr,
+                                   rec_eng, queue_start_addr_, kQueueSize, 0, nullptr,
                                    queue_resource_) != HSA_STATUS_SUCCESS) {
     LogPrint(HSA_AMD_LOG_FLAG_INFO, "Failed to create queue, size=%d, type=%d,"
        " priority=%d, engine_id=%d", kQueueSize, kQueueType_, HSA_QUEUE_PRIORITY_MAXIMUM, rec_eng);
@@ -255,13 +275,14 @@ hsa_status_t BlitSdma<useGCR>::Initialize(const core::Agent& agent, bool use_xgm
   return HSA_STATUS_SUCCESS;
 }
 
-template <bool useGCR> hsa_status_t BlitSdma<useGCR>::Destroy() {
+template <bool useGCR, bool scopeFields> hsa_status_t BlitSdma<useGCR, scopeFields>::Destroy() {
   // Release all allocated resources and reset them to zero.
 
   if (queue_resource_.QueueId != 0) {
     // Release queue resources from the kernel
     auto err = agent_->driver().DestroyQueue(queue_resource_.QueueId);
     assert(err == HSA_STATUS_SUCCESS);
+    (void)err;
     memset(&queue_resource_, 0, sizeof(queue_resource_));
   }
 
@@ -336,8 +357,8 @@ static bool DepSignalCompleteHandler(hsa_signal_value_t signal_value, void *arg 
   return false;
 }
 
-template <bool useGCR>
-hsa_status_t BlitSdma<useGCR>::SubmitBlockingCommand(const void* cmd, size_t cmd_size,
+template <bool useGCR, bool scopeFields>
+hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBlockingCommand(const void* cmd, size_t cmd_size,
                                                      uint64_t size) {
   std::unique_lock<std::mutex> lock(lock_);
 
@@ -368,8 +389,8 @@ hsa_status_t BlitSdma<useGCR>::SubmitBlockingCommand(const void* cmd, size_t cmd
   return ret;
 }
 
-template <bool useGCR>
-hsa_status_t BlitSdma<useGCR>::SubmitCommand(const void* cmd, size_t cmd_size, uint64_t size,
+template <bool useGCR, bool scopeFields>
+hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitCommand(const void* cmd, size_t cmd_size, uint64_t size,
                                              const std::vector<core::Signal*>& dep_signals,
                                              core::Signal& out_signal,
                                              std::vector<core::Signal*>& gang_signals) {
@@ -469,7 +490,7 @@ hsa_status_t BlitSdma<useGCR>::SubmitCommand(const void* cmd, size_t cmd_size, u
   }
 
   // Add space for cache flush.
-  if (useGCR) flush_cmd_size += gcr_command_size_ * 2;
+  if (useGCR) flush_cmd_size += gcr_command_size() * 2;
 
   const uint32_t total_command_size = total_poll_command_size + cmd_size + sync_command_size +
       total_timestamp_command_size + interrupt_command_size + flush_cmd_size + total_gang_command_size;
@@ -533,9 +554,9 @@ hsa_status_t BlitSdma<useGCR>::SubmitCommand(const void* cmd, size_t cmd_size, u
   // Issue cache invalidate
   if (useGCR) {
     BuildGCRCommand(command_addr, true);
-    command_addr += gcr_command_size_;
+    command_addr += gcr_command_size();
     bytes_written_[wrapped_index] = prior_bytes;
-    wrapped_index += gcr_command_size_;
+    wrapped_index += gcr_command_size();
   }
 
   // Do the command after all polls are satisfied.
@@ -547,9 +568,9 @@ hsa_status_t BlitSdma<useGCR>::SubmitCommand(const void* cmd, size_t cmd_size, u
   // Issue cache writeback
   if (useGCR) {
     BuildGCRCommand(command_addr, false);
-    command_addr += gcr_command_size_;
+    command_addr += gcr_command_size();
     bytes_written_[wrapped_index] = post_bytes;
-    wrapped_index += gcr_command_size_;
+    wrapped_index += gcr_command_size();
   }
 
   if (profiling_enabled && (gang_leader_ || gang_signals.empty())) {
@@ -638,8 +659,8 @@ hsa_status_t BlitSdma<useGCR>::SubmitCommand(const void* cmd, size_t cmd_size, u
   return HSA_STATUS_SUCCESS;
 }
 
-template <bool useGCR>
-hsa_status_t BlitSdma<useGCR>::SubmitPrologue(
+template <bool useGCR, bool scopeFields>
+hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitPrologue(
     const std::vector<core::Signal*>& dep_signals,
     core::Signal& out_signal,
     core::Signal& prologue_signal) {
@@ -650,13 +671,19 @@ hsa_status_t BlitSdma<useGCR>::SubmitPrologue(
   for (size_t i = 0; i < dep_signals.size(); ++i) {
     dep_signals_value[i] = dep_signals[i]->LoadRelaxed();
     if (dep_signals_value[i]) {
-      num_poll_command++;
-      if (dep_signals_value[i] >> 32)
+      if (is_gfx1250_) {
+        // 64b poll handles full 64-bit value in a single command.
         num_poll_command++;
+      } else {
+        num_poll_command++;
+        if (dep_signals_value[i] >> 32)
+          num_poll_command++;
+      }
     }
   }
 
-  const uint32_t total_poll_command_size = num_poll_command * poll_command_size_;
+  const uint32_t per_poll_size = (is_gfx1250_) ? poll_64b_command_size_ : poll_command_size_;
+  const uint32_t total_poll_command_size = num_poll_command * per_poll_size;
   const bool profiling_enabled = agent_->profiling_enabled();
 
   uint64_t* start_ts_addr = nullptr;
@@ -673,11 +700,12 @@ hsa_status_t BlitSdma<useGCR>::SubmitPrologue(
     if (hdp_flush_support_)
       flush_cmd_size = flush_command_size_;
   }
-  if (useGCR) flush_cmd_size += gcr_command_size_;
+  if (useGCR) flush_cmd_size += gcr_command_size();
 
-  // Prologue signal decrement to notify body engines.
+  // Prologue signal release: prefer atomic dec, else 64b fence on gfx1250, else 32b fence.
   const size_t prologue_signal_cmd_size = platform_atomic_support_
-      ? atomic_command_size_ : fence_command_size_;
+      ? atomic_command_size_
+      : ((is_gfx1250_) ? fence_64b_command_size_ : fence_command_size_);
 
   const uint32_t total_command_size = total_poll_command_size +
       total_timestamp_command_size + flush_cmd_size + prologue_signal_cmd_size;
@@ -701,19 +729,26 @@ hsa_status_t BlitSdma<useGCR>::SubmitPrologue(
   // Dependency signal polls.
   for (size_t i = 0; i < dep_signals.size(); ++i) {
     if (dep_signals_value[i]) {
-      uint32_t* signal_addr =
-          reinterpret_cast<uint32_t*>(dep_signals[i]->ValueLocation());
+      if (is_gfx1250_) {
+        BuildPoll64bCommand(command_addr, dep_signals[i]->ValueLocation(), 0);
+        command_addr += poll_64b_command_size_;
+        bytes_written_[wrapped_index] = prior_bytes;
+        wrapped_index += poll_64b_command_size_;
+      } else {
+        uint32_t* signal_addr =
+            reinterpret_cast<uint32_t*>(dep_signals[i]->ValueLocation());
 
-      if (dep_signals_value[i] >> 32) {
-        BuildPollCommand(command_addr, &signal_addr[1], 0);
+        if (dep_signals_value[i] >> 32) {
+          BuildPollCommand(command_addr, &signal_addr[1], 0);
+          command_addr += poll_command_size_;
+          bytes_written_[wrapped_index] = prior_bytes;
+          wrapped_index += poll_command_size_;
+        }
+        BuildPollCommand(command_addr, &signal_addr[0], 0);
         command_addr += poll_command_size_;
         bytes_written_[wrapped_index] = prior_bytes;
         wrapped_index += poll_command_size_;
       }
-      BuildPollCommand(command_addr, &signal_addr[0], 0);
-      command_addr += poll_command_size_;
-      bytes_written_[wrapped_index] = prior_bytes;
-      wrapped_index += poll_command_size_;
     }
   }
 
@@ -738,9 +773,9 @@ hsa_status_t BlitSdma<useGCR>::SubmitPrologue(
   // GCR cache invalidate.
   if (useGCR) {
     BuildGCRCommand(command_addr, true);
-    command_addr += gcr_command_size_;
+    command_addr += gcr_command_size();
     bytes_written_[wrapped_index] = prior_bytes;
-    wrapped_index += gcr_command_size_;
+    wrapped_index += gcr_command_size();
   }
 
   // Decrement prologue_signal to notify body engines that setup is complete.
@@ -749,6 +784,11 @@ hsa_status_t BlitSdma<useGCR>::SubmitPrologue(
     command_addr += atomic_command_size_;
     bytes_written_[wrapped_index] = prior_bytes;
     wrapped_index += atomic_command_size_;
+  } else if (is_gfx1250_) {
+    BuildFence64bCommand(command_addr, prologue_signal.ValueLocation(), 0);
+    command_addr += fence_64b_command_size_;
+    bytes_written_[wrapped_index] = prior_bytes;
+    wrapped_index += fence_64b_command_size_;
   } else {
     uint32_t* sig_loc = reinterpret_cast<uint32_t*>(prologue_signal.ValueLocation());
     BuildFenceCommand(command_addr, sig_loc, 0);
@@ -767,8 +807,8 @@ hsa_status_t BlitSdma<useGCR>::SubmitPrologue(
   return HSA_STATUS_SUCCESS;
 }
 
-template <bool useGCR>
-hsa_status_t BlitSdma<useGCR>::SubmitBody(
+template <bool useGCR, bool scopeFields>
+hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBody(
     const void* cmd, size_t cmd_size, uint64_t size,
     core::Signal& prologue_signal,
     core::Signal& body_signal) {
@@ -838,8 +878,8 @@ hsa_status_t BlitSdma<useGCR>::SubmitBody(
   return HSA_STATUS_SUCCESS;
 }
 
-template <bool useGCR>
-hsa_status_t BlitSdma<useGCR>::SubmitEpilogue(
+template <bool useGCR, bool scopeFields>
+hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitEpilogue(
     core::Signal& out_signal,
     hsa_signal_value_t body_complete_value,
     const std::vector<core::Signal*>& body_signals) {
@@ -856,21 +896,28 @@ hsa_status_t BlitSdma<useGCR>::SubmitEpilogue(
     total_timestamp_command_size = timestamp_command_size_;
   }
 
+  const uint32_t per_poll_size = (is_gfx1250_) ? poll_64b_command_size_ : poll_command_size_;
   const uint32_t body_poll_size = use_body_signals
-      ? static_cast<uint32_t>(body_signals.size()) * poll_command_size_
-      : poll_command_size_;
+      ? static_cast<uint32_t>(body_signals.size()) * per_poll_size
+      : per_poll_size;
 
   uint32_t gcr_cmd_size = 0;
-  if (useGCR) gcr_cmd_size = gcr_command_size_;
+  if (useGCR) gcr_cmd_size = gcr_command_size();
 
   const uint64_t completion_signal_value = use_body_signals
       ? 0
       : static_cast<uint64_t>(body_complete_value - 1);
-  const size_t sync_command_size = (platform_atomic_support_)
-      ? atomic_command_size_
-      : (completion_signal_value > UINT32_MAX)
-            ? 2 * fence_command_size_
-            : fence_command_size_;
+
+  size_t sync_command_size;
+  if (platform_atomic_support_) {
+    sync_command_size = atomic_command_size_;
+  } else if (is_gfx1250_) {
+    sync_command_size = fence_64b_command_size_;
+  } else {
+    sync_command_size = (completion_signal_value > UINT32_MAX)
+        ? 2 * fence_command_size_
+        : fence_command_size_;
+  }
 
   const size_t interrupt_command_size =
       (out_signal.signal_.event_mailbox_ptr != 0)
@@ -898,28 +945,43 @@ hsa_status_t BlitSdma<useGCR>::SubmitEpilogue(
 
   if (use_body_signals) {
     for (size_t i = 0; i < body_signals.size(); ++i) {
-      uint32_t* body_addr =
-          reinterpret_cast<uint32_t*>(body_signals[i]->ValueLocation());
-      BuildPollCommand(command_addr, &body_addr[0], 0);
+      if (is_gfx1250_) {
+        BuildPoll64bCommand(command_addr, body_signals[i]->ValueLocation(), 0);
+        command_addr += poll_64b_command_size_;
+        bytes_written_[wrapped_index] = prior_bytes;
+        wrapped_index += poll_64b_command_size_;
+      } else {
+        uint32_t* body_addr =
+            reinterpret_cast<uint32_t*>(body_signals[i]->ValueLocation());
+        BuildPollCommand(command_addr, &body_addr[0], 0);
+        command_addr += poll_command_size_;
+        bytes_written_[wrapped_index] = prior_bytes;
+        wrapped_index += poll_command_size_;
+      }
+    }
+  } else {
+    if (is_gfx1250_) {
+      BuildPoll64bCommand(command_addr, out_signal.ValueLocation(),
+                          static_cast<uint64_t>(body_complete_value));
+      command_addr += poll_64b_command_size_;
+      bytes_written_[wrapped_index] = prior_bytes;
+      wrapped_index += poll_64b_command_size_;
+    } else {
+      uint32_t* out_addr = reinterpret_cast<uint32_t*>(out_signal.ValueLocation());
+      BuildPollCommand(command_addr, &out_addr[0],
+                       static_cast<uint32_t>(body_complete_value));
       command_addr += poll_command_size_;
       bytes_written_[wrapped_index] = prior_bytes;
       wrapped_index += poll_command_size_;
     }
-  } else {
-    uint32_t* out_addr = reinterpret_cast<uint32_t*>(out_signal.ValueLocation());
-    BuildPollCommand(command_addr, &out_addr[0],
-                     static_cast<uint32_t>(body_complete_value));
-    command_addr += poll_command_size_;
-    bytes_written_[wrapped_index] = prior_bytes;
-    wrapped_index += poll_command_size_;
   }
 
   // GCR cache writeback.
   if (useGCR) {
     BuildGCRCommand(command_addr, false);
-    command_addr += gcr_command_size_;
+    command_addr += gcr_command_size();
     bytes_written_[wrapped_index] = prior_bytes;
-    wrapped_index += gcr_command_size_;
+    wrapped_index += gcr_command_size();
   }
 
   // End profiling timestamp.
@@ -938,6 +1000,12 @@ hsa_status_t BlitSdma<useGCR>::SubmitEpilogue(
     command_addr += atomic_command_size_;
     bytes_written_[wrapped_index] = prior_bytes;
     wrapped_index += atomic_command_size_;
+  } else if (is_gfx1250_) {
+    BuildFence64bCommand(command_addr, out_signal.ValueLocation(),
+                         completion_signal_value);
+    command_addr += fence_64b_command_size_;
+    bytes_written_[wrapped_index] = prior_bytes;
+    wrapped_index += fence_64b_command_size_;
   } else {
     uint32_t* signal_value_location =
         reinterpret_cast<uint32_t*>(out_signal.ValueLocation());
@@ -981,8 +1049,123 @@ hsa_status_t BlitSdma<useGCR>::SubmitEpilogue(
   return HSA_STATUS_SUCCESS;
 }
 
-template <bool useGCR>
-hsa_status_t BlitSdma<useGCR>::SubmitLinearCopyBody(
+template <bool useGCR, bool scopeFields>
+hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitNotifyPrologue(
+    core::Signal* prologue_signal) {
+  if (!useGCR) return HSA_STATUS_SUCCESS;
+
+  // When prologue_signal is provided (fan-out case), emit an atomic decrement
+  // after GCR invalidate so bodies on other engines can wait on it.
+  uint32_t total_command_size = gcr_command_size();
+  if (prologue_signal) total_command_size += atomic_command_size_;
+
+  const uint32_t pad_size = total_command_size < min_submission_size_
+      ? min_submission_size_ - total_command_size
+      : is_dxg_ ? AlignUp(total_command_size, 64) - total_command_size : 0;
+
+  uint64_t curr_index;
+  char* command_addr;
+  uint64_t prior_bytes;
+  {
+    std::lock_guard<std::mutex> lock(reservation_lock_);
+    command_addr = AcquireWriteAddress(total_command_size + pad_size, curr_index);
+    if (command_addr == nullptr)
+      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    prior_bytes = bytes_queued_;
+  }
+  uint32_t wrapped_index = WrapIntoRing(curr_index);
+
+  BuildGCRCommand(command_addr, true);
+  command_addr += gcr_command_size();
+  bytes_written_[wrapped_index] = prior_bytes;
+  wrapped_index += gcr_command_size();
+
+  if (prologue_signal) {
+    BuildAtomicDecrementCommand(command_addr, prologue_signal->ValueLocation());
+    command_addr += atomic_command_size_;
+    bytes_written_[wrapped_index] = prior_bytes;
+    wrapped_index += atomic_command_size_;
+  }
+
+  if (pad_size) {
+    memset(command_addr, 0, pad_size);
+    uint32_t* dword_command_addr = reinterpret_cast<uint32_t*>(command_addr);
+    dword_command_addr[0] = (pad_size / 4 - 1) << 16;
+  }
+
+  ReleaseWriteAddress(curr_index, total_command_size + pad_size);
+  return HSA_STATUS_SUCCESS;
+}
+
+template <bool useGCR, bool scopeFields>
+hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitNotifyEpilogue(
+    core::Signal& out_signal) {
+
+  const bool has_mailbox = (out_signal.signal_.event_mailbox_ptr != 0);
+  if (!useGCR && !has_mailbox)
+    return HSA_STATUS_SUCCESS;
+
+  uint32_t total_command_size = poll_64b_command_size_;
+  if (useGCR) total_command_size += gcr_command_size();
+  if (has_mailbox) total_command_size += fence_command_size_ + trap_command_size_;
+
+  const uint32_t pad_size = total_command_size < min_submission_size_
+      ? min_submission_size_ - total_command_size
+      : is_dxg_ ? AlignUp(total_command_size, 64) - total_command_size : 0;
+
+  uint64_t curr_index;
+  char* command_addr;
+  uint64_t prior_bytes;
+  {
+    std::lock_guard<std::mutex> lock(reservation_lock_);
+    command_addr = AcquireWriteAddress(total_command_size + pad_size, curr_index);
+    if (command_addr == nullptr)
+      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    prior_bytes = bytes_queued_;
+  }
+  uint32_t wrapped_index = WrapIntoRing(curr_index);
+
+  // Wait for all bodies to complete.
+  BuildPoll64bCommand(command_addr, out_signal.ValueLocation(), 0);
+  command_addr += poll_64b_command_size_;
+  bytes_written_[wrapped_index] = prior_bytes;
+  wrapped_index += poll_64b_command_size_;
+
+  // GCR writeback after all copies are done.
+  if (useGCR) {
+    BuildGCRCommand(command_addr, false);
+    command_addr += gcr_command_size();
+    bytes_written_[wrapped_index] = prior_bytes;
+    wrapped_index += gcr_command_size();
+  }
+
+  // Notify KFD via mailbox doorbell + trap interrupt.
+  if (has_mailbox) {
+    BuildFenceCommand(command_addr,
+                      reinterpret_cast<uint32_t*>(out_signal.signal_.event_mailbox_ptr),
+                      static_cast<uint32_t>(out_signal.signal_.event_id));
+    command_addr += fence_command_size_;
+    bytes_written_[wrapped_index] = prior_bytes;
+    wrapped_index += fence_command_size_;
+
+    BuildTrapCommand(command_addr, out_signal.signal_.event_id);
+    command_addr += trap_command_size_;
+    bytes_written_[wrapped_index] = prior_bytes;
+    wrapped_index += trap_command_size_;
+  }
+
+  if (pad_size) {
+    memset(command_addr, 0, pad_size);
+    uint32_t* dword_command_addr = reinterpret_cast<uint32_t*>(command_addr);
+    dword_command_addr[0] = (pad_size / 4 - 1) << 16;
+  }
+
+  ReleaseWriteAddress(curr_index, total_command_size + pad_size);
+  return HSA_STATUS_SUCCESS;
+}
+
+template <bool useGCR, bool scopeFields>
+hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyBody(
     void* dst, const void* src, size_t size,
     core::Signal& prologue_signal,
     core::Signal& body_signal) {
@@ -999,8 +1182,267 @@ hsa_status_t BlitSdma<useGCR>::SubmitLinearCopyBody(
                     prologue_signal, body_signal);
 }
 
-template <bool useGCR>
-hsa_status_t BlitSdma<useGCR>::SubmitLinearCopyCommand(void* dst, const void* src, size_t size) {
+template <bool useGCR, bool scopeFields>
+hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearSwapBody(
+    void* addr_a, void* addr_b, size_t size,
+    core::Signal& prologue_signal,
+    core::Signal& body_signal) {
+
+  if (!swap_supported_)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  // Addresses must be aligned for SWAP operation. Make this check here to
+  // avoid SDMA blit creation at top level.
+  constexpr size_t kAlign = SDMA_PKT_COPY_LINEAR_SWAP::kAlignment_;
+  if ((reinterpret_cast<uintptr_t>(addr_a) & (kAlign - 1)) != 0 ||
+      (reinterpret_cast<uintptr_t>(addr_b) & (kAlign - 1)) != 0)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  const size_t max_copy_size = SDMA_PKT_COPY_LINEAR_SWAP::kMaxSize_;
+  const uint32_t num_copy_command =
+      static_cast<uint32_t>((size + max_copy_size - 1) / max_copy_size);
+
+  std::vector<SDMA_PKT_COPY_LINEAR_SWAP> buff(num_copy_command);
+  BuildSwapCopyCommand(reinterpret_cast<char*>(&buff[0]), num_copy_command, addr_a, addr_b, size);
+
+  return SubmitBody(&buff[0], buff.size() * sizeof(SDMA_PKT_COPY_LINEAR_SWAP), size,
+                    prologue_signal, body_signal);
+}
+
+template <bool useGCR, bool scopeFields>
+hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyBodyWaitSignal(
+    void* dst, const void* src, size_t size,
+    const std::vector<core::Signal*>& dep_signals,
+    core::Signal& out_signal) {
+
+  const size_t max_copy_size = max_single_linear_copy_size_ ? max_single_linear_copy_size_
+                                                            : kMaxSingleCopySize;
+  const uint32_t num_copy_command =
+      static_cast<uint32_t>((size + max_copy_size - 1) / max_copy_size);
+
+  // Each packet: 1 header + up to 7 wait + 6 copy + up to 5 signal = 19 DWs max.
+  // First packet gets wait, last gets signal.
+  const uint32_t first_pkt_dws = 1 + 7 + 6 + (num_copy_command == 1 ? 5 : 0);
+  const uint32_t last_pkt_dws = (num_copy_command > 1) ? (1 + 6 + 5) : 0;
+  const uint32_t mid_pkt_dws = 1 + 6;  // no wait, no signal
+  const uint32_t total_copy_dws = first_pkt_dws + last_pkt_dws +
+      (num_copy_command > 2 ? (num_copy_command - 2) * mid_pkt_dws : 0);
+
+  // Extra 64b poll commands for dep_signals[1..N-1].
+  const uint32_t extra_polls = (dep_signals.size() > 1)
+      ? static_cast<uint32_t>(dep_signals.size() - 1) : 0;
+  const uint32_t extra_poll_bytes = extra_polls * poll_64b_command_size_;
+
+  const uint32_t copy_bytes = total_copy_dws * sizeof(uint32_t);
+  const uint32_t total_command_size = extra_poll_bytes + copy_bytes;
+
+  const uint32_t pad_size = total_command_size < min_submission_size_
+      ? min_submission_size_ - total_command_size
+      : is_dxg_ ? AlignUp(total_command_size, 64) - total_command_size : 0;
+
+  uint64_t curr_index;
+  char* command_addr;
+  uint64_t prior_bytes, post_bytes;
+  {
+    std::lock_guard<std::mutex> lock(reservation_lock_);
+    command_addr = AcquireWriteAddress(total_command_size + pad_size, curr_index);
+    if (command_addr == nullptr)
+      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    prior_bytes = bytes_queued_;
+    bytes_queued_ += size;
+    post_bytes = bytes_queued_;
+  }
+  uint32_t wrapped_index = WrapIntoRing(curr_index);
+
+  for (uint32_t i = 1; i < dep_signals.size(); ++i) {
+    BuildPoll64bCommand(command_addr, dep_signals[i]->ValueLocation(), 0);
+    command_addr += poll_64b_command_size_;
+    bytes_written_[wrapped_index] = prior_bytes;
+    wrapped_index += poll_64b_command_size_;
+  }
+
+  const core::Signal* wait_sig = dep_signals.empty() ? nullptr : dep_signals[0];
+  BuildWaitSignalCopyCommand(command_addr, num_copy_command,
+                             dst, src, size,
+                             wait_sig, &out_signal);
+  bytes_written_.fill(wrapped_index, wrapped_index + copy_bytes, prior_bytes);
+  // Last packet's signal marks the post-copy bytes.
+  bytes_written_[wrapped_index + copy_bytes - sizeof(uint32_t)] = post_bytes;
+  command_addr += copy_bytes;
+  wrapped_index += copy_bytes;
+
+  if (pad_size) {
+    memset(command_addr, 0, pad_size);
+    uint32_t* dword_command_addr = reinterpret_cast<uint32_t*>(command_addr);
+    dword_command_addr[0] = (pad_size / 4 - 1) << 16;
+  }
+
+  ReleaseWriteAddress(curr_index, total_command_size + pad_size);
+  return HSA_STATUS_SUCCESS;
+}
+
+template <bool useGCR, bool scopeFields>
+hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyBodyIndirectWaitSignal(
+    void* dst, const void* src, size_t size,
+    bool indirect_src, bool indirect_dst,
+    const std::vector<core::Signal*>& dep_signals,
+    core::Signal& out_signal) {
+
+  if (!indirect_copy_supported_)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (!indirect_src && !indirect_dst)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  const size_t max_copy_size = max_single_linear_copy_size_ ? max_single_linear_copy_size_
+                                                            : kMaxSingleCopySize;
+
+  // This function emits one indirect SDMA packet against the caller-supplied
+  // pointer slot(s), so it cannot chunk a single large copy: the indirect
+  // packet format (SDMA_PKT_COPY_LINEAR_WAITSIGNAL_INDIRECT_GFX1250) has no
+  // field for an offset into the resolved buffer — every packet against the
+  // same slot would copy starting from *slot.  Callers that need to chunk
+  // should supply multiple pre-offset slots.
+  if (size > max_copy_size)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  // Single packet: header (DW0) + wait block (DW1..DW7) + copy (DW8..DW13) +
+  // signal block (DW14..DW18) = 19 DWs total.
+  const uint32_t total_copy_dws = 1 + 7 + 6 + 5;
+
+  // Extra 64b poll commands are emitted for dep_signals[1..N-1]; dep_signals[0]
+  // is folded into the packet's hardware WAIT field.
+  const uint32_t extra_polls = (dep_signals.size() > 1)
+      ? static_cast<uint32_t>(dep_signals.size() - 1) : 0;
+  const uint32_t extra_poll_bytes = extra_polls * poll_64b_command_size_;
+
+  const uint32_t copy_bytes = total_copy_dws * sizeof(uint32_t);
+  const uint32_t total_command_size = extra_poll_bytes + copy_bytes;
+
+  const uint32_t pad_size = total_command_size < min_submission_size_
+      ? min_submission_size_ - total_command_size
+      : is_dxg_ ? AlignUp(total_command_size, 64) - total_command_size : 0;
+
+  uint64_t curr_index;
+  char* command_addr;
+  uint64_t prior_bytes, post_bytes;
+  {
+    std::lock_guard<std::mutex> lock(reservation_lock_);
+    command_addr = AcquireWriteAddress(total_command_size + pad_size, curr_index);
+    if (command_addr == nullptr)
+      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    prior_bytes = bytes_queued_;
+    bytes_queued_ += size;
+    post_bytes = bytes_queued_;
+  }
+  uint32_t wrapped_index = WrapIntoRing(curr_index);
+
+  for (uint32_t i = 1; i < dep_signals.size(); ++i) {
+    BuildPoll64bCommand(command_addr, dep_signals[i]->ValueLocation(), 0);
+    command_addr += poll_64b_command_size_;
+    bytes_written_[wrapped_index] = prior_bytes;
+    wrapped_index += poll_64b_command_size_;
+  }
+
+  const core::Signal* wait_sig = dep_signals.empty() ? nullptr : dep_signals[0];
+  BuildWaitSignalIndirectCopyCommand(command_addr,
+                                     dst, src, size,
+                                     indirect_src, indirect_dst,
+                                     wait_sig, &out_signal);
+  bytes_written_.fill(wrapped_index, wrapped_index + copy_bytes, prior_bytes);
+  bytes_written_[wrapped_index + copy_bytes - sizeof(uint32_t)] = post_bytes;
+  command_addr += copy_bytes;
+  wrapped_index += copy_bytes;
+
+  if (pad_size) {
+    memset(command_addr, 0, pad_size);
+    uint32_t* dword_command_addr = reinterpret_cast<uint32_t*>(command_addr);
+    dword_command_addr[0] = (pad_size / 4 - 1) << 16;
+  }
+
+  ReleaseWriteAddress(curr_index, total_command_size + pad_size);
+  return HSA_STATUS_SUCCESS;
+}
+
+template <bool useGCR, bool scopeFields>
+hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearSwapBodyWaitSignal(
+    void* addr_a, void* addr_b, size_t size_a, size_t size_b,
+    const std::vector<core::Signal*>& dep_signals,
+    core::Signal& out_signal) {
+
+  if (!swap_supported_ && !is_gfx1250_)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  constexpr size_t kAlign = SDMA_PKT_COPY_LINEAR_SWAP_WAITSIGNAL_GFX1250::kAlignment_;
+  if ((reinterpret_cast<uintptr_t>(addr_a) & (kAlign - 1)) != 0 ||
+      (reinterpret_cast<uintptr_t>(addr_b) & (kAlign - 1)) != 0)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  // For asymmetric swap, chunk count is driven by the larger side.
+  const size_t size_max = std::max(size_a, size_b);
+  const size_t max_copy_size = SDMA_PKT_COPY_LINEAR_SWAP_WAITSIGNAL_GFX1250::kMaxSize_;
+  const uint32_t num_copy_command =
+      static_cast<uint32_t>((size_max + max_copy_size - 1) / max_copy_size);
+
+  const uint32_t copy_body_dws = 6;
+  const uint32_t first_pkt_dws = 1 + 7 + copy_body_dws + (num_copy_command == 1 ? 5 : 0);
+  const uint32_t last_pkt_dws = (num_copy_command > 1) ? (1 + copy_body_dws + 5) : 0;
+  const uint32_t mid_pkt_dws = 1 + copy_body_dws;
+  const uint32_t total_copy_dws = first_pkt_dws + last_pkt_dws +
+      (num_copy_command > 2 ? (num_copy_command - 2) * mid_pkt_dws : 0);
+
+  const uint32_t extra_polls = (dep_signals.size() > 1)
+      ? static_cast<uint32_t>(dep_signals.size() - 1) : 0;
+  const uint32_t extra_poll_bytes = extra_polls * poll_64b_command_size_;
+
+  const uint32_t copy_bytes = total_copy_dws * sizeof(uint32_t);
+  const uint32_t total_command_size = extra_poll_bytes + copy_bytes;
+
+  const uint32_t pad_size = total_command_size < min_submission_size_
+      ? min_submission_size_ - total_command_size
+      : is_dxg_ ? AlignUp(total_command_size, 64) - total_command_size : 0;
+
+  uint64_t curr_index;
+  char* command_addr;
+  uint64_t prior_bytes, post_bytes;
+  {
+    std::lock_guard<std::mutex> lock(reservation_lock_);
+    command_addr = AcquireWriteAddress(total_command_size + pad_size, curr_index);
+    if (command_addr == nullptr)
+      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    prior_bytes = bytes_queued_;
+    bytes_queued_ += size_max;
+    post_bytes = bytes_queued_;
+  }
+  uint32_t wrapped_index = WrapIntoRing(curr_index);
+
+  for (uint32_t i = 1; i < dep_signals.size(); ++i) {
+    BuildPoll64bCommand(command_addr, dep_signals[i]->ValueLocation(), 0);
+    command_addr += poll_64b_command_size_;
+    bytes_written_[wrapped_index] = prior_bytes;
+    wrapped_index += poll_64b_command_size_;
+  }
+
+  const core::Signal* wait_sig = dep_signals.empty() ? nullptr : dep_signals[0];
+  BuildWaitSignalSwapCommand(command_addr, num_copy_command,
+                             addr_a, addr_b, size_a, size_b,
+                             wait_sig, &out_signal);
+  bytes_written_.fill(wrapped_index, wrapped_index + copy_bytes, prior_bytes);
+  bytes_written_[wrapped_index + copy_bytes - sizeof(uint32_t)] = post_bytes;
+  command_addr += copy_bytes;
+  wrapped_index += copy_bytes;
+
+  if (pad_size) {
+    memset(command_addr, 0, pad_size);
+    uint32_t* dword_command_addr = reinterpret_cast<uint32_t*>(command_addr);
+    dword_command_addr[0] = (pad_size / 4 - 1) << 16;
+  }
+
+  ReleaseWriteAddress(curr_index, total_command_size + pad_size);
+  return HSA_STATUS_SUCCESS;
+}
+
+template <bool useGCR, bool scopeFields>
+hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyCommand(void* dst, const void* src, size_t size) {
   // Break the copy into multiple copy operation incase the copy size exceeds
   // the SDMA linear copy limit.
   const size_t max_copy_size = max_single_linear_copy_size_ ? max_single_linear_copy_size_ :
@@ -1017,8 +1459,8 @@ hsa_status_t BlitSdma<useGCR>::SubmitLinearCopyCommand(void* dst, const void* sr
   return SubmitBlockingCommand(buff, num_copy_command * sizeof(SDMA_PKT_COPY_LINEAR), size);
 }
 
-template <bool useGCR>
-hsa_status_t BlitSdma<useGCR>::SubmitLinearCopyCommand(void* dst, const void* src, size_t size,
+template <bool useGCR, bool scopeFields>
+hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyCommand(void* dst, const void* src, size_t size,
                                                        std::vector<core::Signal*>& dep_signals,
                                                        core::Signal& out_signal,
                                                        std::vector<core::Signal*>& gang_signals) {
@@ -1039,8 +1481,8 @@ hsa_status_t BlitSdma<useGCR>::SubmitLinearCopyCommand(void* dst, const void* sr
                        out_signal, gang_signals);
 }
 
-template <bool useGCR>
-hsa_status_t BlitSdma<useGCR>::SubmitLinearCopyBroadcastCommand(
+template <bool useGCR, bool scopeFields>
+hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyBroadcastCommand(
     const std::vector<void*>& dsts, const void* src, size_t size,
     std::vector<core::Signal*>& dep_signals,
     core::Signal& out_signal) {
@@ -1053,14 +1495,39 @@ hsa_status_t BlitSdma<useGCR>::SubmitLinearCopyBroadcastCommand(
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
+  const size_t max_copy_size = max_single_linear_copy_size_ ? max_single_linear_copy_size_ :
+                                                              kMaxSingleCopySize;
+  const uint32_t num_chunks = static_cast<uint32_t>((size + max_copy_size - 1) / max_copy_size);
+  const uint64_t total_bytes_moved = static_cast<uint64_t>(size) * dsts.size();
+  std::vector<core::Signal*> no_gang;
+
+  if (is_gfx1250_) {
+    // Multicast handles each destination independently, so the broadcast
+    // pair-alignment check (kDstAlignMask_) does not apply here.
+    const uint32_t num_dsts = static_cast<uint32_t>(dsts.size());
+    // 5 fixed DWs (header, count, parameter, src_addr lo/hi) + 2 DWs per destination (lo/hi).
+    const size_t pkt_dwords = 5 + 2 * static_cast<size_t>(num_dsts);
+    const size_t pkt_bytes = pkt_dwords * sizeof(uint32_t);
+    const size_t total_cmd_size = num_chunks * pkt_bytes;
+
+    std::vector<char> cmd_buf(total_cmd_size, 0);
+    BuildMulticastCopyCommand(cmd_buf.data(), num_chunks, dsts, src, size);
+
+    return SubmitCommand(cmd_buf.data(), total_cmd_size, total_bytes_moved,
+                         dep_signals, out_signal, no_gang);
+  }
+
+  constexpr size_t kMask = SDMA_PKT_COPY_LINEAR_BROADCAST::kDstAlignMask_;
+  for (size_t i = 0; i + 1 < dsts.size(); i += 2) {
+    if ((reinterpret_cast<uintptr_t>(dsts[i]) & kMask) !=
+        (reinterpret_cast<uintptr_t>(dsts[i + 1]) & kMask))
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
   // Each broadcast packet copies from one src to two dsts.
   // An odd trailing destination falls back to a regular linear copy.
   const uint32_t num_pairs = static_cast<uint32_t>(dsts.size() / 2);
   const bool has_remainder = (dsts.size() % 2) != 0;
-
-  const size_t max_copy_size = max_single_linear_copy_size_ ? max_single_linear_copy_size_ :
-                                                              kMaxSingleCopySize;
-  const uint32_t num_chunks = static_cast<uint32_t>((size + max_copy_size - 1) / max_copy_size);
 
   // Total command buffer: broadcast packets for each pair, plus linear packets
   // for the remainder destination, all multiplied by the number of size chunks.
@@ -1086,16 +1553,47 @@ hsa_status_t BlitSdma<useGCR>::SubmitLinearCopyBroadcastCommand(
                      src, size);
   }
 
-  // Total data moved across bus = size * number of destinations.
-  const uint64_t total_bytes_moved = static_cast<uint64_t>(size) * dsts.size();
+  return SubmitCommand(cmd_buf.data(), total_cmd_size, total_bytes_moved,
+                       dep_signals, out_signal, no_gang);
+}
+
+template <bool useGCR, bool scopeFields>
+hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyB2BCommand(
+    const std::vector<void*>& dsts, const std::vector<const void*>& srcs,
+    const std::vector<size_t>& sizes, std::vector<core::Signal*>& dep_signals,
+    core::Signal& out_signal) {
+
+  const size_t num_entries = srcs.size();
+  if (num_entries == 0 || dsts.size() != num_entries || sizes.size() != num_entries) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  const size_t max_copy_size = max_single_linear_copy_size_ ? max_single_linear_copy_size_
+                                                             : kMaxSingleCopySize;
+
+  std::vector<uint32_t> chunks(num_entries);
+  size_t total_cmd_size = 0;
+  uint64_t total_bytes_moved = 0;
+  for (size_t i = 0; i < num_entries; i++) {
+    chunks[i] = static_cast<uint32_t>((sizes[i] + max_copy_size - 1) / max_copy_size);
+    total_cmd_size += static_cast<size_t>(chunks[i]) * linear_copy_command_size_;
+    total_bytes_moved += sizes[i];
+  }
+
+  std::vector<char> cmd_buf(total_cmd_size);
+  char* cmd_ptr = cmd_buf.data();
+  for (size_t i = 0; i < num_entries; i++) {
+    BuildCopyCommand(cmd_ptr, chunks[i], dsts[i], srcs[i], sizes[i]);
+    cmd_ptr += static_cast<size_t>(chunks[i]) * linear_copy_command_size_;
+  }
 
   std::vector<core::Signal*> no_gang;
   return SubmitCommand(cmd_buf.data(), total_cmd_size, total_bytes_moved,
                        dep_signals, out_signal, no_gang);
 }
 
-template <bool useGCR>
-hsa_status_t BlitSdma<useGCR>::SubmitCopyRectCommand(
+template <bool useGCR, bool scopeFields>
+hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitCopyRectCommand(
     const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset, const hsa_pitched_ptr_t* src,
     const hsa_dim3_t* src_offset, const hsa_dim3_t* range, std::vector<core::Signal*>& dep_signals,
     core::Signal& out_signal) {
@@ -1169,8 +1667,8 @@ hsa_status_t BlitSdma<useGCR>::SubmitCopyRectCommand(
                        out_signal, gang_signals);
 }
 
-template <bool useGCR>
-hsa_status_t BlitSdma<useGCR>::SubmitLinearFillCommand(void* ptr, uint32_t value, size_t count) {
+template <bool useGCR, bool scopeFields>
+hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearFillCommand(void* ptr, uint32_t value, size_t count) {
   const size_t size = count * sizeof(uint32_t);
 
   const uint32_t num_fill_command = (size + kMaxSingleFillSize - 1) / kMaxSingleFillSize;
@@ -1185,12 +1683,12 @@ hsa_status_t BlitSdma<useGCR>::SubmitLinearFillCommand(void* ptr, uint32_t value
   return SubmitBlockingCommand(buff, num_fill_command * sizeof(SDMA_PKT_CONSTANT_FILL), size);
 }
 
-template <bool useGCR> hsa_status_t BlitSdma<useGCR>::EnableProfiling(bool enable) {
+template <bool useGCR, bool scopeFields> hsa_status_t BlitSdma<useGCR, scopeFields>::EnableProfiling(bool enable) {
   return HSA_STATUS_SUCCESS;
 }
 
-template <bool useGCR>
-char* BlitSdma<useGCR>::AcquireWriteAddress(uint32_t cmd_size, uint64_t& curr_index) {
+template <bool useGCR, bool scopeFields>
+char* BlitSdma<useGCR, scopeFields>::AcquireWriteAddress(uint32_t cmd_size, uint64_t& curr_index) {
   // Ring is full when all but one byte is written.
   if (cmd_size >= kQueueSize) {
     return nullptr;
@@ -1233,12 +1731,13 @@ char* BlitSdma<useGCR>::AcquireWriteAddress(uint32_t cmd_size, uint64_t& curr_in
   return nullptr;
 }
 
-template <bool useGCR>
-void BlitSdma<useGCR>::UpdateWriteAndDoorbellRegister(uint64_t curr_index, uint64_t new_index) {
+template <bool useGCR, bool scopeFields>
+void BlitSdma<useGCR, scopeFields>::UpdateWriteAndDoorbellRegister(uint64_t curr_index, uint64_t new_index) {
   while (true) {
     // Make sure that the address before ::curr_index is already released.
     // Otherwise the CP may read invalid packets.
-    if (atomic::Load(&cached_commit_index_, std::memory_order_acquire) == curr_index) {
+    uint64_t commit_index = atomic::Load(&cached_commit_index_, std::memory_order_acquire);
+    if (commit_index == curr_index) {
       if (sdma_wait_idle_) {
         // TODO: remove when sdma wpointer issue is resolved.
         // Wait until the SDMA engine finish processing all packets before
@@ -1270,6 +1769,7 @@ void BlitSdma<useGCR>::UpdateWriteAndDoorbellRegister(uint64_t curr_index, uint6
     // burning CPU cycles.
     if (core::g_use_mwaitx) {
       timer::DoMwaitx(static_cast<int64_t*>(static_cast<void*>(&cached_commit_index_)),
+                      static_cast<int64_t>(commit_index),
                       10000, true);
     } else {
       os::YieldThread();
@@ -1277,8 +1777,8 @@ void BlitSdma<useGCR>::UpdateWriteAndDoorbellRegister(uint64_t curr_index, uint6
   }
 }
 
-template <bool useGCR>
-void BlitSdma<useGCR>::ReleaseWriteAddress(uint64_t curr_index, uint32_t cmd_size) {
+template <bool useGCR, bool scopeFields>
+void BlitSdma<useGCR, scopeFields>::ReleaseWriteAddress(uint64_t curr_index, uint32_t cmd_size) {
   if (cmd_size > kQueueSize) {
     assert(false && "cmd_addr is outside the queue buffer range");
     return;
@@ -1287,8 +1787,8 @@ void BlitSdma<useGCR>::ReleaseWriteAddress(uint64_t curr_index, uint32_t cmd_siz
   UpdateWriteAndDoorbellRegister(curr_index, curr_index + cmd_size);
 }
 
-template <bool useGCR>
-void BlitSdma<useGCR>::PadRingToEnd(uint64_t curr_index) {
+template <bool useGCR, bool scopeFields>
+void BlitSdma<useGCR, scopeFields>::PadRingToEnd(uint64_t curr_index) {
   // Reserve region from here to the end of the ring.
   uint64_t new_index = curr_index + (kQueueSize - WrapIntoRing(curr_index));
 
@@ -1312,11 +1812,11 @@ void BlitSdma<useGCR>::PadRingToEnd(uint64_t curr_index) {
   }
 }
 
-template <bool useGCR> uint32_t BlitSdma<useGCR>::WrapIntoRing(uint64_t index) {
+template <bool useGCR, bool scopeFields> uint32_t BlitSdma<useGCR, scopeFields>::WrapIntoRing(uint64_t index) {
   return index & (kQueueSize - 1);
 }
 
-template <bool useGCR> bool BlitSdma<useGCR>::CanWriteUpto(uint64_t upto_index) {
+template <bool useGCR, bool scopeFields> bool BlitSdma<useGCR, scopeFields>::CanWriteUpto(uint64_t upto_index) {
   // Get/calculate the monotonic read index.
   uint64_t hw_read_index = *queue_rptr_;
 
@@ -1325,30 +1825,52 @@ template <bool useGCR> bool BlitSdma<useGCR>::CanWriteUpto(uint64_t upto_index) 
   return (upto_index - hw_read_index) < kQueueSize;
 }
 
-template <bool useGCR>
-void BlitSdma<useGCR>::BuildFenceCommand(char* fence_command_addr, uint32_t* fence,
+template <bool useGCR, bool scopeFields>
+void BlitSdma<useGCR, scopeFields>::BuildFenceCommand(char* fence_command_addr, uint32_t* fence,
                                          uint32_t fence_value) {
   assert(fence_command_addr != NULL);
-  SDMA_PKT_FENCE* packet_addr =
+
+  // GFX12 or later use a different packet format that is incompatible (fields changed in size and location).
+  if (agent_->supported_isas()[0]->GetMajorVersion() >= 12) {
+    SDMA_PKT_FENCE_GFX12* packet_addr =
+      reinterpret_cast<SDMA_PKT_FENCE_GFX12*>(fence_command_addr);
+
+    memset(packet_addr, 0, sizeof(SDMA_PKT_FENCE_GFX12));
+
+    packet_addr->HEADER_UNION.op = SDMA_OP_FENCE;
+    packet_addr->HEADER_UNION.mtype = 3;
+
+    /* We only use fence on signals and they are in system memory */
+    packet_addr->HEADER_UNION.sys = 1;
+
+    if (scopeFields)
+      packet_addr->HEADER_UNION.scope = SDMA_MEMORY_SCOPE_SYS;
+
+    packet_addr->ADDR_LO_UNION.addr_31_0 = ptrlow32(fence);
+    packet_addr->ADDR_HI_UNION.addr_63_32 = ptrhigh32(fence);
+
+    packet_addr->DATA_UNION.data = fence_value;
+  } else {
+    SDMA_PKT_FENCE* packet_addr =
       reinterpret_cast<SDMA_PKT_FENCE*>(fence_command_addr);
 
-  memset(packet_addr, 0, sizeof(SDMA_PKT_FENCE));
+    memset(packet_addr, 0, sizeof(SDMA_PKT_FENCE));
 
-  packet_addr->HEADER_UNION.op = SDMA_OP_FENCE;
+    packet_addr->HEADER_UNION.op = SDMA_OP_FENCE;
 
-  if (agent_->supported_isas()[0]->GetMajorVersion() >= 10) {
-    packet_addr->HEADER_UNION.mtype = 3;
+    if (agent_->supported_isas()[0]->GetMajorVersion() >= 10) {
+      packet_addr->HEADER_UNION.mtype = 3;
+    }
+
+    packet_addr->ADDR_LO_UNION.addr_31_0 = ptrlow32(fence);
+    packet_addr->ADDR_HI_UNION.addr_63_32 = ptrhigh32(fence);
+
+    packet_addr->DATA_UNION.data = fence_value;\
   }
-
-  packet_addr->ADDR_LO_UNION.addr_31_0 = ptrlow32(fence);
-
-  packet_addr->ADDR_HI_UNION.addr_63_32 = ptrhigh32(fence);
-
-  packet_addr->DATA_UNION.data = fence_value;
 }
 
-template <bool useGCR>
-void BlitSdma<useGCR>::BuildCopyCommand(char* cmd_addr, uint32_t num_copy_command, void* dst,
+template <bool useGCR, bool scopeFields>
+void BlitSdma<useGCR, scopeFields>::BuildCopyCommand(char* cmd_addr, uint32_t num_copy_command, void* dst,
                                         const void* src, size_t size) {
   size_t cur_size = 0;
   const size_t max_copy_size = max_single_linear_copy_size_ ? max_single_linear_copy_size_ :
@@ -1368,10 +1890,17 @@ void BlitSdma<useGCR>::BuildCopyCommand(char* cmd_addr, uint32_t num_copy_comman
     packet_addr->HEADER_UNION.op = SDMA_OP_COPY;
     packet_addr->HEADER_UNION.sub_op = SDMA_SUBOP_COPY_LINEAR;
 
+    if (scopeFields) packet_addr->HEADER_UNION.npd = 1;
+
     if (max_copy_size == max_single_linear_copy_size_)
       packet_addr->COUNT_UNION.count_ext.count = copy_size - 1; /* count is 1-based */
     else
       packet_addr->COUNT_UNION.count.count = copy_size - 1; /* count is 1-based */
+
+    if (scopeFields) {
+      packet_addr->PARAMETER_UNION.dst_scope = SDMA_MEMORY_SCOPE_SYS;
+      packet_addr->PARAMETER_UNION.src_scope = SDMA_MEMORY_SCOPE_SYS;
+    }
 
     packet_addr->SRC_ADDR_LO_UNION.src_addr_31_0 = ptrlow32(cur_src);
     packet_addr->SRC_ADDR_HI_UNION.src_addr_63_32 = ptrhigh32(cur_src);
@@ -1386,10 +1915,13 @@ void BlitSdma<useGCR>::BuildCopyCommand(char* cmd_addr, uint32_t num_copy_comman
   assert(cur_size == size);
 }
 
-template <bool useGCR>
-void BlitSdma<useGCR>::BuildBroadcastCopyCommand(char* cmd_addr, uint32_t num_copy_command,
+template <bool useGCR, bool scopeFields>
+void BlitSdma<useGCR, scopeFields>::BuildBroadcastCopyCommand(char* cmd_addr, uint32_t num_copy_command,
                                                   void* dst1, void* dst2,
                                                   const void* src, size_t size) {
+  [[maybe_unused]] constexpr size_t kMask = SDMA_PKT_COPY_LINEAR_BROADCAST::kDstAlignMask_;
+  assert((reinterpret_cast<uintptr_t>(dst1) & kMask) ==
+         (reinterpret_cast<uintptr_t>(dst2) & kMask));
   size_t cur_size = 0;
   const size_t max_copy_size = max_single_linear_copy_size_ ? max_single_linear_copy_size_ :
                                                               kMaxSingleCopySize;
@@ -1431,14 +1963,99 @@ void BlitSdma<useGCR>::BuildBroadcastCopyCommand(char* cmd_addr, uint32_t num_co
   assert(cur_size == size);
 }
 
+template <bool useGCR, bool scopeFields>
+void BlitSdma<useGCR, scopeFields>::BuildMulticastCopyCommand(
+    char* cmd_addr, uint32_t num_copy_command,
+    const std::vector<void*>& dsts, const void* src, size_t size) {
+
+  const uint32_t num_dsts = static_cast<uint32_t>(dsts.size());
+  const size_t pkt_bytes = (5 + 2 * static_cast<size_t>(num_dsts)) * sizeof(uint32_t);
+  const size_t max_copy_size = max_single_linear_copy_size_ ? max_single_linear_copy_size_ :
+                                                              kMaxSingleCopySize;
+  size_t cur_size = 0;
+  for (uint32_t i = 0; i < num_copy_command; ++i) {
+    const uint32_t copy_size =
+        static_cast<uint32_t>(std::min(size - cur_size, max_copy_size));
+
+    memset(cmd_addr, 0, pkt_bytes);
+
+    SDMA_PKT_COPY_LINEAR_MULTICAST_GFX1250* pkt =
+        reinterpret_cast<SDMA_PKT_COPY_LINEAR_MULTICAST_GFX1250*>(cmd_addr);
+
+    pkt->HEADER_UNION.op = SDMA_OP_COPY;
+    pkt->HEADER_UNION.sub_op = SDMA_SUBOP_COPY_MULTICAST;
+
+    pkt->COUNT_UNION.count = copy_size - 1;
+
+    pkt->PARAMETER_UNION.num_of_destination = num_dsts - 1;
+    pkt->PARAMETER_UNION.dst_scope = SDMA_MEMORY_SCOPE_SYS;
+    pkt->PARAMETER_UNION.src_scope = SDMA_MEMORY_SCOPE_SYS;
+
+    const void* cur_src = static_cast<const char*>(src) + cur_size;
+    pkt->SRC_ADDR_LO_UNION.src_addr_31_0 = ptrlow32(cur_src);
+    pkt->SRC_ADDR_HI_UNION.src_addr_63_32 = ptrhigh32(cur_src);
+
+    uint32_t* dst_dw = reinterpret_cast<uint32_t*>(cmd_addr) + 5;
+    for (uint32_t d = 0; d < num_dsts; ++d) {
+      const void* cur_dst = static_cast<const char*>(dsts[d]) + cur_size;
+      dst_dw[d * 2]     = ptrlow32(cur_dst);
+      dst_dw[d * 2 + 1] = ptrhigh32(cur_dst);
+    }
+
+    cmd_addr += pkt_bytes;
+    cur_size += copy_size;
+  }
+
+  assert(cur_size == size);
+}
+
+template <bool useGCR, bool scopeFields>
+void BlitSdma<useGCR, scopeFields>::BuildSwapCopyCommand(char* cmd_addr, uint32_t num_copy_command,
+                                            void* addr_a, void* addr_b, size_t size) {
+  [[maybe_unused]] constexpr size_t kAlign = SDMA_PKT_COPY_LINEAR_SWAP::kAlignment_;
+  assert((reinterpret_cast<uintptr_t>(addr_a) & (kAlign - 1)) == 0);
+  assert((reinterpret_cast<uintptr_t>(addr_b) & (kAlign - 1)) == 0);
+
+  size_t cur_size = 0;
+  const size_t max_copy_size = SDMA_PKT_COPY_LINEAR_SWAP::kMaxSize_;
+  for (uint32_t i = 0; i < num_copy_command; ++i) {
+    const uint32_t copy_size =
+        static_cast<uint32_t>(std::min((size - cur_size), max_copy_size));
+
+    void* cur_addr_a = static_cast<char*>(addr_a) + cur_size;
+    void* cur_addr_b = static_cast<char*>(addr_b) + cur_size;
+
+    SDMA_PKT_COPY_LINEAR_SWAP* packet_addr =
+        reinterpret_cast<SDMA_PKT_COPY_LINEAR_SWAP*>(cmd_addr);
+
+    memset(packet_addr, 0, sizeof(SDMA_PKT_COPY_LINEAR_SWAP));
+
+    packet_addr->HEADER_UNION.op = SDMA_OP_COPY;
+    packet_addr->HEADER_UNION.sub_op = SDMA_SUBOP_COPY_SWAP;
+
+    packet_addr->COUNT_UNION.count = copy_size - 1;
+
+    packet_addr->ADDR_A_LO_UNION.DW_3_DATA = ptrlow32(cur_addr_a);
+    packet_addr->ADDR_A_HI_UNION.addr_a_63_32 = ptrhigh32(cur_addr_a);
+
+    packet_addr->ADDR_B_LO_UNION.DW_5_DATA = ptrlow32(cur_addr_b);
+    packet_addr->ADDR_B_HI_UNION.addr_b_63_32 = ptrhigh32(cur_addr_b);
+
+    cmd_addr += swap_copy_command_size_;
+    cur_size += copy_size;
+  }
+
+  assert(cur_size == size);
+}
+
 /*
 Copies are done in terms of elements (1, 2, 4, 8, or 16 bytes) and have alignment restrictions.
 Elements are coded by the log2 of the element size in bytes (ie. element 0=1 byte, 4=16 byte).
 This routine breaks a large rect into tiles that can be handled by hardware.  Pitches and offsets
 must be representable in terms of elements in all tiles of the copy.
 */
-template <bool useGCR>
-void BlitSdma<useGCR>::BuildCopyRectCommand(const std::function<void*(size_t)>& append,
+template <bool useGCR, bool scopeFields>
+void BlitSdma<useGCR, scopeFields>::BuildCopyRectCommand(const std::function<void*(size_t)>& append,
                                             const hsa_pitched_ptr_t* dst,
                                             const hsa_dim3_t* dst_offset,
                                             const hsa_pitched_ptr_t* src,
@@ -1542,6 +2159,7 @@ void BlitSdma<useGCR>::BuildCopyRectCommand(const std::function<void*(size_t)>& 
           *pkt = {};
           pkt->HEADER_UNION.op = SDMA_OP_COPY;
           pkt->HEADER_UNION.sub_op = SDMA_SUBOP_COPY_LINEAR_RECT;
+          if (scopeFields) pkt->HEADER_UNION.npd = 1;
           pkt->HEADER_UNION.element = element;
           pkt->SRC_ADDR_LO_UNION.src_addr_31_0 = sbase;
           pkt->SRC_ADDR_HI_UNION.src_addr_63_32 = sbase >> 32;
@@ -1557,7 +2175,11 @@ void BlitSdma<useGCR>::BuildCopyRectCommand(const std::function<void*(size_t)>& 
             (range->z == 1) ? 0 : (dst->slice >> element) - 1;
           pkt->RECT_PARAMETER_1_UNION.rect_x = xcount - 1;
           pkt->RECT_PARAMETER_1_UNION.rect_y = Min(range->y - y, max_y) - 1;
-          pkt->RECT_PARAMETER_2_UNION.rect_z = Min(range->z - z, max_z) - 1;
+          pkt->RECT_PARAMETER_2_UNION.gfx12.rect_z = Min(range->z - z, max_z) - 1;
+          if (scopeFields) {
+            pkt->RECT_PARAMETER_2_UNION.gfx1250.dst_scope = SDMA_MEMORY_SCOPE_SYS;
+            pkt->RECT_PARAMETER_2_UNION.gfx1250.src_scope = SDMA_MEMORY_SCOPE_SYS;
+          }
         } else {  // Pre-GFX12, common packet used
           SDMA_PKT_COPY_LINEAR_RECT* pkt =
             (SDMA_PKT_COPY_LINEAR_RECT*)append(sizeof(SDMA_PKT_COPY_LINEAR_RECT));
@@ -1580,15 +2202,15 @@ void BlitSdma<useGCR>::BuildCopyRectCommand(const std::function<void*(size_t)>& 
           pkt->RECT_PARAMETER_1_UNION.rect_x = xcount - 1;
           pkt->RECT_PARAMETER_1_UNION.rect_y = Min(range->y - y, max_y) - 1;
           pkt->RECT_PARAMETER_2_UNION.rect_z = Min(range->z - z, max_z) - 1;
-	}
+	      }
       }
     }
   }
 }
 
-template <bool useGCR>
-void BlitSdma<useGCR>::BuildFillCommand(char* cmd_addr, uint32_t num_fill_command, void* ptr,
-                                        uint32_t value, size_t count) {
+template <bool useGCR, bool scopeFields>
+void BlitSdma<useGCR, scopeFields>::BuildFillCommand(char* cmd_addr, uint32_t num_fill_command,
+                                                     void* ptr, uint32_t value, size_t count) {
   char* cur_ptr = reinterpret_cast<char*>(ptr);
   const uint32_t maxDwordCount = kMaxSingleFillSize / sizeof(uint32_t);
   SDMA_PKT_CONSTANT_FILL* packet_addr = reinterpret_cast<SDMA_PKT_CONSTANT_FILL*>(cmd_addr);
@@ -1600,6 +2222,10 @@ void BlitSdma<useGCR>::BuildFillCommand(char* cmd_addr, uint32_t num_fill_comman
     memset(packet_addr, 0, sizeof(SDMA_PKT_CONSTANT_FILL));
 
     packet_addr->HEADER_UNION.op = SDMA_OP_CONST_FILL;
+    if (scopeFields) {
+      packet_addr->HEADER_UNION.scope = SDMA_MEMORY_SCOPE_SYS;
+      packet_addr->HEADER_UNION.npd = 1;
+    }
     packet_addr->HEADER_UNION.fillsize = 2;  // DW fill
 
     packet_addr->DST_ADDR_LO_UNION.dst_addr_31_0 = ptrlow32(cur_ptr);
@@ -1617,8 +2243,8 @@ void BlitSdma<useGCR>::BuildFillCommand(char* cmd_addr, uint32_t num_fill_comman
   assert(count == 0 && "SDMA fill command count error.");
 }
 
-template <bool useGCR>
-void BlitSdma<useGCR>::BuildPollCommand(char* cmd_addr, void* addr, uint32_t reference) {
+template <bool useGCR, bool scopeFields>
+void BlitSdma<useGCR, scopeFields>::BuildPollCommand(char* cmd_addr, void* addr, uint32_t reference) {
   SDMA_PKT_POLL_REGMEM* packet_addr =
       reinterpret_cast<SDMA_PKT_POLL_REGMEM*>(cmd_addr);
 
@@ -1636,16 +2262,254 @@ void BlitSdma<useGCR>::BuildPollCommand(char* cmd_addr, void* addr, uint32_t ref
 
   packet_addr->DW5_UNION.interval = 0x04;
   packet_addr->DW5_UNION.retry_count = 0xfff;  // Retry forever.
+  if (scopeFields) packet_addr->DW5_UNION.scope = SDMA_MEMORY_SCOPE_SYS;
 }
 
-template <bool useGCR>
-void BlitSdma<useGCR>::BuildAtomicDecrementCommand(char* cmd_addr, void* addr) {
+template <bool useGCR, bool scopeFields>
+void BlitSdma<useGCR, scopeFields>::BuildPoll64bCommand(char* cmd_addr, void* addr, uint64_t reference) {
+  SDMA_PKT_POLL_MEM_64B_GFX1250* pkt =
+      reinterpret_cast<SDMA_PKT_POLL_MEM_64B_GFX1250*>(cmd_addr);
+
+  memset(pkt, 0, sizeof(SDMA_PKT_POLL_MEM_64B_GFX1250));
+
+  pkt->HEADER_UNION.op = SDMA_OP_POLL_REGMEM;
+  pkt->HEADER_UNION.sub_op = SDMA_SUBOP_POLL_MEM_64B;
+  pkt->HEADER_UNION.func = 0x3;  // Equal
+
+  pkt->ADDR_LO_UNION.addr_31_3 = ptrlow32(addr) >> 3;
+  pkt->ADDR_HI_UNION.addr_63_32 = ptrhigh32(addr);
+
+  pkt->REFERENCE_LO_UNION.reference_31_0 = static_cast<uint32_t>(reference);
+  pkt->REFERENCE_HI_UNION.reference_63_32 = static_cast<uint32_t>(reference >> 32);
+
+  pkt->MASK_LO_UNION.mask_31_0 = 0xffffffff;
+  pkt->MASK_HI_UNION.mask_63_32 = 0xffffffff;
+
+  pkt->DW7_UNION.retry_count = 0;  // Infinite retry
+}
+
+template <bool useGCR, bool scopeFields>
+void BlitSdma<useGCR, scopeFields>::BuildFence64bCommand(char* cmd_addr, void* fence_addr,
+                                                         uint64_t fence_value) {
+  SDMA_PKT_FENCE_64B_GFX1250* pkt =
+      reinterpret_cast<SDMA_PKT_FENCE_64B_GFX1250*>(cmd_addr);
+
+  memset(pkt, 0, sizeof(SDMA_PKT_FENCE_64B_GFX1250));
+
+  pkt->HEADER_UNION.op = SDMA_OP_FENCE;
+  pkt->HEADER_UNION.sub_op = SDMA_SUBOP_FENCE_64B;
+  pkt->HEADER_UNION.mtype = 3;
+
+  pkt->ADDR_LO_UNION.addr_31_3 = ptrlow32(fence_addr) >> 3;
+  pkt->ADDR_HI_UNION.addr_63_32 = ptrhigh32(fence_addr);
+
+  pkt->DATA_LO_UNION.data_31_0 = static_cast<uint32_t>(fence_value);
+  pkt->DATA_HI_UNION.data_63_32 = static_cast<uint32_t>(fence_value >> 32);
+}
+
+template <bool useGCR, bool scopeFields>
+void BlitSdma<useGCR, scopeFields>::BuildWaitSignalCopyCommand(
+    char* cmd_addr, uint32_t num_copy_command,
+    void* dst, const void* src, size_t size,
+    const core::Signal* wait_signal,
+    core::Signal* signal_signal) {
+
+  size_t cur_size = 0;
+  const size_t max_copy_size = max_single_linear_copy_size_ ? max_single_linear_copy_size_
+                                                            : kMaxSingleCopySize;
+
+  for (uint32_t i = 0; i < num_copy_command; ++i) {
+    const uint32_t copy_size =
+        static_cast<uint32_t>(std::min(size - cur_size, max_copy_size));
+
+    const bool is_first = (i == 0);
+    const bool is_last = (i == num_copy_command - 1);
+    const bool do_wait = is_first && (wait_signal != nullptr);
+    const bool do_signal = is_last && (signal_signal != nullptr);
+
+    SDMA_PKT_COPY_LINEAR_WAITSIGNAL_GFX1250* pkt =
+        reinterpret_cast<SDMA_PKT_COPY_LINEAR_WAITSIGNAL_GFX1250*>(cmd_addr);
+    memset(pkt, 0, sizeof(SDMA_PKT_COPY_LINEAR_WAITSIGNAL_GFX1250));
+
+    pkt->HEADER_UNION.op = SDMA_OP_COPY;
+    pkt->HEADER_UNION.sub_op = SDMA_SUBOP_COPY_LINEAR;
+    pkt->HEADER_UNION.wait = do_wait ? 1 : 0;
+    pkt->HEADER_UNION.signal = do_signal ? 1 : 0;
+
+    if (do_wait) {
+      pkt->WAIT_FUNCTION_UNION.wait_function = 0x3;  // Equal
+      void* wait_addr = const_cast<core::Signal*>(wait_signal)->ValueLocation();
+      pkt->WAIT_ADDR_LO_UNION.wait_addr_31_3 = ptrlow32(wait_addr) >> 3;
+      pkt->WAIT_ADDR_HI_UNION.wait_addr_63_32 = ptrhigh32(wait_addr);
+      pkt->WAIT_REFERENCE_LO_UNION.wait_reference_31_0 = 0;
+      pkt->WAIT_REFERENCE_HI_UNION.wait_reference_63_32 = 0;
+      pkt->WAIT_MASK_LO_UNION.wait_mask_31_0 = 0xffffffff;
+      pkt->WAIT_MASK_HI_UNION.wait_mask_63_32 = 0xffffffff;
+    }
+
+    pkt->COPY_COUNT_UNION.copy_count = copy_size - 1;
+    pkt->COPY_PARAMETER_UNION.dst_scope = SDMA_MEMORY_SCOPE_SYS;
+    pkt->COPY_PARAMETER_UNION.src_scope = SDMA_MEMORY_SCOPE_SYS;
+
+    const char* cur_src = reinterpret_cast<const char*>(src) + cur_size;
+    char* cur_dst = reinterpret_cast<char*>(dst) + cur_size;
+    pkt->SRC_ADDR_LO_UNION.src_addr_31_0 = ptrlow32(cur_src);
+    pkt->SRC_ADDR_HI_UNION.src_addr_63_32 = ptrhigh32(cur_src);
+    pkt->DST_ADDR_LO_UNION.dst_addr_31_0 = ptrlow32(cur_dst);
+    pkt->DST_ADDR_HI_UNION.dst_addr_63_32 = ptrhigh32(cur_dst);
+
+    if (do_signal) {
+      pkt->SIGNAL_OPERATION_UNION.signal_operation = 0x70;  // 64b sub
+      pkt->SIGNAL_OPERATION_UNION.signal_scope = SDMA_MEMORY_SCOPE_SYS;
+      void* sig_addr = signal_signal->ValueLocation();
+      pkt->SIGNAL_ADDR_LO_UNION.signal_addr_31_3 = ptrlow32(sig_addr) >> 3;
+      pkt->SIGNAL_ADDR_HI_UNION.signal_addr_63_32 = ptrhigh32(sig_addr);
+      pkt->SIGNAL_DATA_LO_UNION.signal_data_31_0 = 1;
+      pkt->SIGNAL_DATA_HI_UNION.signal_data_63_32 = 0;
+    }
+
+    // Advance by the actual DW count used for this packet variant.
+    // Base copy is DW8-DW13 (6 DWs for count+param+src+dst), header is DW0.
+    // Total: 1 (header) + wait_dws + 6 (copy) + signal_dws
+    uint32_t pkt_dwords = 1 + 6;
+    if (do_wait) pkt_dwords += 7;   // DW1-DW7
+    if (do_signal) pkt_dwords += 5; // DW14-DW18
+    cmd_addr += pkt_dwords * sizeof(uint32_t);
+    cur_size += copy_size;
+  }
+}
+
+template <bool useGCR, bool scopeFields>
+void BlitSdma<useGCR, scopeFields>::BuildWaitSignalIndirectCopyCommand(
+    char* cmd_addr,
+    void* dst, const void* src, size_t size,
+    bool indirect_src, bool indirect_dst,
+    const core::Signal* wait_signal,
+    core::Signal* signal_signal) {
+
+  const bool do_wait = (wait_signal != nullptr);
+  const bool do_signal = (signal_signal != nullptr);
+
+  SDMA_PKT_COPY_LINEAR_WAITSIGNAL_INDIRECT_GFX1250* pkt =
+      reinterpret_cast<SDMA_PKT_COPY_LINEAR_WAITSIGNAL_INDIRECT_GFX1250*>(cmd_addr);
+  memset(pkt, 0, sizeof(SDMA_PKT_COPY_LINEAR_WAITSIGNAL_INDIRECT_GFX1250));
+
+  pkt->HEADER_UNION.op = SDMA_OP_COPY;
+  pkt->HEADER_UNION.sub_op = SDMA_SUBOP_COPY_INDIRECT;
+  pkt->HEADER_UNION.indirect_src = indirect_src ? 1 : 0;
+  pkt->HEADER_UNION.indirect_dst = indirect_dst ? 1 : 0;
+  pkt->HEADER_UNION.wait = do_wait ? 1 : 0;
+  pkt->HEADER_UNION.signal = do_signal ? 1 : 0;
+
+  if (do_wait) {
+    pkt->WAIT_FUNCTION_UNION.wait_function = 0x3;  // Equal
+    void* wait_addr = const_cast<core::Signal*>(wait_signal)->ValueLocation();
+    pkt->WAIT_ADDR_LO_UNION.wait_addr_31_3 = ptrlow32(wait_addr) >> 3;
+    pkt->WAIT_ADDR_HI_UNION.wait_addr_63_32 = ptrhigh32(wait_addr);
+    pkt->WAIT_REFERENCE_LO_UNION.wait_reference_31_0 = 0;
+    pkt->WAIT_REFERENCE_HI_UNION.wait_reference_63_32 = 0;
+    pkt->WAIT_MASK_LO_UNION.wait_mask_31_0 = 0xffffffff;
+    pkt->WAIT_MASK_HI_UNION.wait_mask_63_32 = 0xffffffff;
+  }
+
+  pkt->COPY_COUNT_UNION.copy_count = static_cast<uint32_t>(size) - 1;
+  pkt->COPY_PARAMETER_UNION.copy_dst_scope = SDMA_MEMORY_SCOPE_SYS;
+  pkt->COPY_PARAMETER_UNION.copy_src_scope = SDMA_MEMORY_SCOPE_SYS;
+  pkt->COPY_PARAMETER_UNION.indirect_addr_scope = SDMA_MEMORY_SCOPE_SYS;
+
+  pkt->SRC_ADDR_LO_UNION.copy_src_addr_31_0 = ptrlow32(src);
+  pkt->SRC_ADDR_HI_UNION.copy_src_addr_63_32 = ptrhigh32(src);
+  pkt->DST_ADDR_LO_UNION.copy_dst_addr_31_0 = ptrlow32(dst);
+  pkt->DST_ADDR_HI_UNION.copy_dst_addr_63_32 = ptrhigh32(dst);
+
+  if (do_signal) {
+    pkt->SIGNAL_OPERATION_UNION.signal_operation = 0x70;  // 64b sub
+    pkt->SIGNAL_OPERATION_UNION.signal_scope = SDMA_MEMORY_SCOPE_SYS;
+    void* sig_addr = signal_signal->ValueLocation();
+    pkt->SIGNAL_ADDR_LO_UNION.signal_addr_31_3 = ptrlow32(sig_addr) >> 3;
+    pkt->SIGNAL_ADDR_HI_UNION.signal_addr_63_32 = ptrhigh32(sig_addr);
+    pkt->SIGNAL_DATA_LO_UNION.signal_data_31_0 = 1;
+    pkt->SIGNAL_DATA_HI_UNION.signal_data_63_32 = 0;
+  }
+}
+
+template <bool useGCR, bool scopeFields>
+void BlitSdma<useGCR, scopeFields>::BuildWaitSignalSwapCommand(
+    char* cmd_addr, uint32_t num_copy_command,
+    void* addr_a, void* addr_b, size_t size_a, size_t size_b,
+    const core::Signal* wait_signal,
+    core::Signal* signal_signal) {
+
+  size_t cur_a = 0, cur_b = 0;
+  const size_t max_copy_size = SDMA_PKT_COPY_LINEAR_SWAP_WAITSIGNAL_GFX1250::kMaxSize_;
+
+  for (uint32_t i = 0; i < num_copy_command; ++i) {
+    const bool is_first = (i == 0);
+    const bool is_last = (i == num_copy_command - 1);
+    const bool do_wait = is_first && (wait_signal != nullptr);
+    const bool do_signal = is_last && (signal_signal != nullptr);
+
+    const uint32_t chunk_a = static_cast<uint32_t>(std::min(size_a - cur_a, max_copy_size));
+    const uint32_t chunk_b = static_cast<uint32_t>(std::min(size_b - cur_b, max_copy_size));
+
+    const char* p_a = reinterpret_cast<const char*>(addr_a) + cur_a;
+    const char* p_b = reinterpret_cast<const char*>(addr_b) + cur_b;
+
+    // gfx1250 packet — single COUNT, addr_b stored as full 32-bit pointer.
+    SDMA_PKT_COPY_LINEAR_SWAP_WAITSIGNAL_GFX1250* pkt =
+        reinterpret_cast<SDMA_PKT_COPY_LINEAR_SWAP_WAITSIGNAL_GFX1250*>(cmd_addr);
+    memset(pkt, 0, sizeof(SDMA_PKT_COPY_LINEAR_SWAP_WAITSIGNAL_GFX1250));
+
+    pkt->HEADER_UNION.op     = SDMA_OP_COPY;
+    pkt->HEADER_UNION.sub_op = SDMA_SUBOP_COPY_SWAP;
+    pkt->HEADER_UNION.wait   = do_wait   ? 1 : 0;
+    pkt->HEADER_UNION.signal = do_signal ? 1 : 0;
+
+    if (do_wait) {
+      pkt->WAIT_FUNCTION_UNION.wait_function  = 0x3;  // Equal
+      void* wa = const_cast<core::Signal*>(wait_signal)->ValueLocation();
+      pkt->WAIT_ADDR_LO_UNION.wait_addr_31_3  = ptrlow32(wa) >> 3;
+      pkt->WAIT_ADDR_HI_UNION.wait_addr_63_32 = ptrhigh32(wa);
+      pkt->WAIT_MASK_LO_UNION.wait_mask_31_0  = 0xffffffff;
+      pkt->WAIT_MASK_HI_UNION.wait_mask_63_32 = 0xffffffff;
+    }
+
+    pkt->COUNT_UNION.count                    = chunk_a - 1;
+    pkt->COPY_PARAMETER_UNION.scope_a         = SDMA_MEMORY_SCOPE_SYS;
+    pkt->COPY_PARAMETER_UNION.scope_b         = SDMA_MEMORY_SCOPE_SYS;
+    pkt->ADDR_A_LO_UNION.addr_a_31_0          = ptrlow32(p_a);
+    pkt->ADDR_A_HI_UNION.addr_a_63_32         = ptrhigh32(p_a);
+    pkt->ADDR_B_LO_UNION.addr_b_31_0          = ptrlow32(p_b);
+    pkt->ADDR_B_HI_UNION.addr_b_63_32         = ptrhigh32(p_b);
+
+    if (do_signal) {
+      pkt->SIGNAL_OPERATION_UNION.signal_operation = 0x70;  // 64b sub
+      pkt->SIGNAL_OPERATION_UNION.signal_scope     = SDMA_MEMORY_SCOPE_SYS;
+      void* sa = signal_signal->ValueLocation();
+      pkt->SIGNAL_ADDR_LO_UNION.signal_addr_31_3   = ptrlow32(sa) >> 3;
+      pkt->SIGNAL_ADDR_HI_UNION.signal_addr_63_32  = ptrhigh32(sa);
+      pkt->SIGNAL_DATA_LO_UNION.signal_data_31_0   = 1;
+    }
+
+    uint32_t pkt_dwords = 1 + 6;  // header + copy (6 DWs for gfx1250)
+    if (do_wait)   pkt_dwords += 7;
+    if (do_signal) pkt_dwords += 5;
+    cmd_addr += pkt_dwords * sizeof(uint32_t);
+
+    cur_a += chunk_a;
+    cur_b += chunk_b;
+  }
+}
+
+template <bool useGCR, bool scopeFields>
+void BlitSdma<useGCR, scopeFields>::BuildAtomicDecrementCommand(char* cmd_addr, void* addr) {
   SDMA_PKT_ATOMIC* packet_addr = reinterpret_cast<SDMA_PKT_ATOMIC*>(cmd_addr);
 
   memset(packet_addr, 0, sizeof(SDMA_PKT_ATOMIC));
 
   packet_addr->HEADER_UNION.op = SDMA_OP_ATOMIC;
   packet_addr->HEADER_UNION.operation = SDMA_ATOMIC_ADD64;
+  if (scopeFields) packet_addr->HEADER_UNION.scope = SDMA_MEMORY_SCOPE_SYS;
 
   packet_addr->ADDR_LO_UNION.addr_31_0 = ptrlow32(addr);
   packet_addr->ADDR_HI_UNION.addr_63_32 = ptrhigh32(addr);
@@ -1654,8 +2518,8 @@ void BlitSdma<useGCR>::BuildAtomicDecrementCommand(char* cmd_addr, void* addr) {
   packet_addr->SRC_DATA_HI_UNION.src_data_63_32 = 0xffffffff;
 }
 
-template <bool useGCR>
-void BlitSdma<useGCR>::BuildGetGlobalTimestampCommand(char* cmd_addr, void* write_address) {
+template <bool useGCR, bool scopeFields>
+void BlitSdma<useGCR, scopeFields>::BuildGetGlobalTimestampCommand(char* cmd_addr, void* write_address) {
   SDMA_PKT_TIMESTAMP* packet_addr =
       reinterpret_cast<SDMA_PKT_TIMESTAMP*>(cmd_addr);
 
@@ -1664,11 +2528,13 @@ void BlitSdma<useGCR>::BuildGetGlobalTimestampCommand(char* cmd_addr, void* writ
   packet_addr->HEADER_UNION.op = SDMA_OP_TIMESTAMP;
   packet_addr->HEADER_UNION.sub_op = SDMA_SUBOP_TIMESTAMP_GET_GLOBAL;
 
+  if (scopeFields) packet_addr->HEADER_UNION.scope = SDMA_MEMORY_SCOPE_SYS;
+
   packet_addr->ADDR_LO_UNION.addr_31_0 = ptrlow32(write_address);
   packet_addr->ADDR_HI_UNION.addr_63_32 = ptrhigh32(write_address);
 }
 
-template <bool useGCR> void BlitSdma<useGCR>::BuildTrapCommand(char* cmd_addr, uint32_t event_id) {
+template <bool useGCR, bool scopeFields> void BlitSdma<useGCR, scopeFields>::BuildTrapCommand(char* cmd_addr, uint32_t event_id) {
   SDMA_PKT_TRAP* packet_addr =
       reinterpret_cast<SDMA_PKT_TRAP*>(cmd_addr);
 
@@ -1678,32 +2544,49 @@ template <bool useGCR> void BlitSdma<useGCR>::BuildTrapCommand(char* cmd_addr, u
   packet_addr->INT_CONTEXT_UNION.int_ctx = event_id;
 }
 
-template <bool useGCR> void BlitSdma<useGCR>::BuildHdpFlushCommand(char* cmd_addr) {
+template <bool useGCR, bool scopeFields> void BlitSdma<useGCR, scopeFields>::BuildHdpFlushCommand(char* cmd_addr) {
   assert(cmd_addr != NULL);
   SDMA_PKT_POLL_REGMEM* addr = reinterpret_cast<SDMA_PKT_POLL_REGMEM*>(cmd_addr);
   memcpy(addr, &hdp_flush_cmd, flush_command_size_);
 }
 
-template <bool useGCR> void BlitSdma<useGCR>::BuildGCRCommand(char* cmd_addr, bool invalidate) {
+template <bool useGCR, bool scopeFields> void BlitSdma<useGCR, scopeFields>::BuildGCRCommand(char* cmd_addr, bool invalidate) {
   assert(cmd_addr != NULL);
   assert(useGCR && "Unsupported SDMA command - GCR.");
-  SDMA_PKT_GCR* addr = reinterpret_cast<SDMA_PKT_GCR*>(cmd_addr);
-  memset(addr, 0, sizeof(SDMA_PKT_GCR));
-  addr->HEADER_UNION.op = SDMA_OP_GCR;
-  addr->HEADER_UNION.sub_op = SDMA_SUBOP_USER_GCR;
-  addr->WORD2_UNION.GCR_CONTROL_GL2_WB = 1;
-  addr->WORD2_UNION.GCR_CONTROL_GLK_WB = 1;
-  if (invalidate) {
-    addr->WORD2_UNION.GCR_CONTROL_GL2_INV = 1;
-    addr->WORD2_UNION.GCR_CONTROL_GL1_INV = 1;
-    addr->WORD2_UNION.GCR_CONTROL_GLV_INV = 1;
-    addr->WORD2_UNION.GCR_CONTROL_GLK_INV = 1;
+
+  if (is_gfx1250_) {
+    SDMA_PKT_GCR_GFX1250* addr = reinterpret_cast<SDMA_PKT_GCR_GFX1250*>(cmd_addr);
+    memset(addr, 0, sizeof(SDMA_PKT_GCR_TAG_GFX1250));
+    addr->HEADER_UNION.op = SDMA_OP_GCR;
+    addr->HEADER_UNION.sub_op = SDMA_SUBOP_USER_GCR;
+    if (invalidate) {
+      addr->WORD3_UNION.GCR_CONTROL_GL2_SCOPE = 1; // system-scope
+      addr->WORD3_UNION.GCR_CONTROL_GL2_INV = 1;
+    } else {
+      addr->WORD3_UNION.GCR_CONTROL_GL2_SCOPE = 1; // system-scope
+      addr->WORD3_UNION.GCR_CONTROL_GL2_WB = 1;
+    }
+    // Discarding all lines for now.
+    addr->WORD3_UNION.GCR_CONTROL_GL2_RANGE = 0;
+  } else {
+    SDMA_PKT_GCR* addr = reinterpret_cast<SDMA_PKT_GCR*>(cmd_addr);
+    memset(addr, 0, sizeof(SDMA_PKT_GCR));
+    addr->HEADER_UNION.op = SDMA_OP_GCR;
+    addr->HEADER_UNION.sub_op = SDMA_SUBOP_USER_GCR;
+    addr->WORD2_UNION.GCR_CONTROL_GL2_WB = 1;
+    addr->WORD2_UNION.GCR_CONTROL_GLK_WB = 1;
+    if (invalidate) {
+      addr->WORD2_UNION.GCR_CONTROL_GL2_INV = 1;
+      addr->WORD2_UNION.GCR_CONTROL_GL1_INV = 1;
+      addr->WORD2_UNION.GCR_CONTROL_GLV_INV = 1;
+      addr->WORD2_UNION.GCR_CONTROL_GLK_INV = 1;
+    }
+    // Discarding all lines for now.
+    addr->WORD2_UNION.GCR_CONTROL_GL2_RANGE = 0;
   }
-  // Discarding all lines for now.
-  addr->WORD2_UNION.GCR_CONTROL_GL2_RANGE = 0;
 }
 
-template <bool useGCR> uint64_t BlitSdma<useGCR>::PendingBytes() {
+template <bool useGCR, bool scopeFields> uint64_t BlitSdma<useGCR, scopeFields>::PendingBytes() {
   uint64_t commit = atomic::Load(&cached_commit_index_, std::memory_order_acquire);
   uint64_t hw_read_index = *queue_rptr_;
 
@@ -1711,8 +2594,9 @@ template <bool useGCR> uint64_t BlitSdma<useGCR>::PendingBytes() {
   return bytes_queued_ - bytes_written_[WrapIntoRing(hw_read_index)];
 }
 
-template class BlitSdma<false>;
-template class BlitSdma<true>;
+template class BlitSdma<false, false>;  // BlitSdmaV4
+template class BlitSdma<true, false>;   // BlitSdmaV5
+template class BlitSdma<true, true>;    // BlitSdmaV6
 
 }  // namespace amd
 }  // namespace rocr

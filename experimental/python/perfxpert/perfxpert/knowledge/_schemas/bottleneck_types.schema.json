@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["name", "signatures", "priority_hint", "description"],
+    "properties": {
+      "name": {
+        "type": "string",
+        "enum": ["compute", "memory_transfer", "latency", "mixed", "api_overhead"]
+      },
+      "signatures": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["metric", "op", "threshold"],
+          "properties": {
+            "metric": {"type": "string"},
+            "op": {"type": "string", "enum": [">", ">=", "<", "<=", "==", "!="]},
+            "threshold": {"type": "number"},
+            "unit": {"type": "string"}
+          }
+        }
+      },
+      "priority_hint": {"type": "string", "enum": ["high", "medium", "low"]},
+      "description": {"type": "string"}
+    }
+  }
+}

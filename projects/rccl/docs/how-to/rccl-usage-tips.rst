@@ -9,7 +9,7 @@
 RCCL usage tips
 *****************************************
 
-This topic describes some of the more common RCCL extensions, such as NPKit and MSCCL, and provides tips on how to
+This topic describes some of the more common RCCL extensions, such as NPKit, and provides tips on how to
 configure and customize the application.
 
 NPKit
@@ -33,41 +33,8 @@ To manually run RCCL with NPKit enabled, set the environment variable ``NPKIT_DU
 to the NPKit event dump directory. NPKit only supports one GPU per process.
 To manually analyze the NPKit dump results, use `npkit_trace_generator.py <https://github.com/microsoft/NPKit/blob/main/rccl_samples/npkit_trace_generator.py>`_.
 
-MSCCL/MSCCL++
-=============
-
-RCCL integrates `MSCCL <https://github.com/microsoft/msccl>`_ and `MSCCL++ <https://github.com/microsoft/mscclpp>`_ to
-leverage these highly efficient GPU-GPU communication primitives for collective operations.
-Microsoft Corporation collaborated with AMD for this project.
-
-MSCCL uses XMLs for different collective algorithms on different architectures. 
-RCCL collectives can leverage these algorithms after the user provides the corresponding XML.
-The XML files contain sequences of send-recv and reduction operations for the kernel to run.
-
-MSCCL is enabled by default on the AMD Instinct™ MI300X accelerator. On other platforms, users might have to enable it
-using the setting ``RCCL_MSCCL_FORCE_ENABLE=1``. By default, MSCCL is only used if every rank belongs
-to a unique process. To disable this restriction for multi-threaded or single-threaded configurations,
-use the setting ``RCCL_MSCCL_ENABLE_SINGLE_PROCESS=1``.
-
-RCCL allreduce and allgather collectives can leverage the efficient MSCCL++ communication kernels
-for certain message sizes. MSCCL++ support is available whenever MSCCL support is available.
-To run a RCCL workload with MSCCL++ support, set the following RCCL environment variable:
-
-.. code-block:: shell
-
-   RCCL_MSCCLPP_ENABLE=1
-
-To set the message size threshold for using MSCCL++, use the environment variable ``RCCL_MSCCLPP_THRESHOLD``,
-which has a default value of 1MB. After ``RCCL_MSCCLPP_THRESHOLD`` has been set,
-RCCL invokes MSCCL++ kernels for all message sizes less than or equal to the specified threshold.
-
-The following restrictions apply when using MSCCL++. If these restrictions are not met,
-operations fall back to using MSCCL or RCCL.
-
-*  The message size must be a non-zero multiple of 32 bytes
-*  It does not support ``hipMallocManaged`` buffers
-*  Allreduce only supports the ``float16``, ``int32``, ``uint32``, ``float32``, and ``bfloat16`` data types
-*  Allreduce only supports the sum operation
+MSCCL and MSCCL++ integration has been removed from RCCL. The legacy API symbols ``mscclLoadAlgo``,
+``mscclRunAlgo``, and ``mscclUnloadAlgo`` remain as no-ops for link compatibility.
 
 Enabling peer-to-peer transport
 ===============================
@@ -202,9 +169,6 @@ the same OAM) on the MI300X.
 .. code-block:: shell
 
    export HIP_FORCE_DEV_KERNARG=1
-   export RCCL_MSCCLPP_THRESHOLD=1073741824
-
-   export MSCCLPP_READ_ALLRED=1 
    export ROCR_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 
    mpirun -np 8 --bind-to numa rccl-tests/build/all_reduce_perf -b 32 -e 1G -f 2 -g 1 -G 2 -w 20 -n 50
@@ -252,16 +216,14 @@ benchmark:
    export ROCR_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
    python -u -m torch.distributed.run --nproc_per_node=8 --rdzv_endpoint localhost:6000  --rdzv_backend c10d all_reduce_bench.py
 
-For better performance, the ``HIP_FORCE_DEV_KERNARG``, ``RCCL_MSCCLPP_THRESHOLD``,
-and ``TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK`` environment variables are
+For better performance, the ``HIP_FORCE_DEV_KERNARG`` and
+``TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK`` environment variables are
 set during the benchmark in the following manner:
 
 .. code-block:: shell
 
    export TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK=1
    export HIP_FORCE_DEV_KERNARG=1
-   export RCCL_MSCCLPP_THRESHOLD=$((2*1024*1024*1024))
-   export MSCCLPP_READ_ALLRED=1
    export ROCR_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
    python -u -m torch.distributed.run --nproc_per_node=8 --rdzv_endpoint localhost:6000  --rdzv_backend c10d all_reduce_bench.py
 

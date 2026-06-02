@@ -8,10 +8,10 @@ import re
 
 from rocm_docs import ROCmDocs
 
-with open('../include/rocshmem/rocshmem.hpp', encoding='utf-8') as f:
-    match = re.search(r'constexpr char VERSION\[\] = "([0-9.]+)[^0-9.]+', f.read())
+with open('../CMakeLists.txt', encoding='utf-8') as f:
+    match = re.search(r'set\(VERSION_STRING\s+([0-9.]+)\)', f.read())
     if not match:
-        raise ValueError("VERSION not found!")
+        raise ValueError("VERSION_STRING not found in CMakeLists.txt")
     version_number = match[1]
 left_nav_title = f"rocSHMEM {version_number} documentation"
 

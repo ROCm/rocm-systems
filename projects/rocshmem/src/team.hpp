@@ -45,6 +45,11 @@ class TeamInfo {
   __host__ __device__ TeamInfo() = default;
 
   /**
+   * @brief Copy constructor
+   */
+  __host__ __device__ TeamInfo(const TeamInfo&) = default;
+
+  /**
    * @brief Primary constructor
    */
   __host__ __device__ TeamInfo(Team* parent_team, int pe_start, int stride,
@@ -66,11 +71,6 @@ class TeamInfo {
   int stride{-1};
 
   /**
-   * @brief The log2 stride used to calculate team members.
-   */
-  double log_stride{-1};
-
-  /**
    * @brief The size of this team.
    */
   int size{-1};
@@ -88,9 +88,19 @@ class Team {
    * @param _my_pe the index of this PE in the team
    * @param _mpi_comm MPI Communicator representing the team
    */
-  Team(Backend* handle, TeamInfo* team_info_wrt_parent,
-       TeamInfo* team_info_wrt_world, int num_pes, int my_pe,
+  Team(Backend* handle, const TeamInfo& team_info_wrt_parent,
+       const TeamInfo& team_info_wrt_world, int num_pes, int my_pe,
        MPI_Comm mpi_comm);
+
+  /**
+   * @brief Non-copyable and non-movable because Team
+   * owns a hipMalloc'd TeamInfo block and an MPI
+   * communicator that require unique ownership.
+   */
+  Team(const Team&) = delete;
+  Team& operator=(const Team&) = delete;
+  Team(Team&&) = delete;
+  Team& operator=(Team&&) = delete;
 
   /**
    * @brief Destructor.
@@ -156,6 +166,15 @@ class Team {
    * @note This is required to do some reinterpret_casts.
    */
   BackendType type{BackendType::RO_BACKEND};
+
+ private:
+  /**
+   * @brief Owns the device memory block for both TeamInfo objects.
+   *
+   * Layout: [tinfo_wrt_parent | tinfo_wrt_world] (contiguous).
+   * tinfo_wrt_parent and tinfo_wrt_world point into this block.
+   */
+  TeamInfo* team_info_block_{nullptr};
 };
 
 __host__ __device__ Team* get_internal_team(rocshmem_team_t team);

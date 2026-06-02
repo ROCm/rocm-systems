@@ -89,6 +89,12 @@ namespace timer {
 inline timer::fast_clock::duration GetFastTimeout(uint64_t timeout) {
   uint64_t hsa_freq = 0;
   HSA::hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &hsa_freq);
+  if (hsa_freq == 0) {
+    if (timeout == UINT64_MAX) {
+      return timer::fast_clock::duration::max();
+    }
+    return timer::duration_from_seconds<timer::fast_clock::duration>(0);
+  }
   return timer::duration_from_seconds<timer::fast_clock::duration>(
       double(timeout) / double(hsa_freq));
 }
@@ -105,10 +111,14 @@ inline void CheckAbortTimeout(const timer::fast_clock::time_point& start_time,
   }
 }
 
-inline void DoMwaitx(int64_t* addr, uint32_t timeout, bool timer_enable = false) {
+inline void DoMwaitx(int64_t* addr, int64_t val_on_last_check, uint32_t timeout, bool timer_enable) {
 #if defined(__i386__) || defined(__x86_64__)
   _mm_monitorx(addr, 0, 0);
-  _mm_mwaitx(0, timeout, timer_enable ? MWAITX_ECX_TIMER_ENABLE : 0);
+  if (atomic::Load(addr, std::memory_order_relaxed) != val_on_last_check) {
+    return;
+  }
+  // args are extensions (ecx), hints (eax), clock (ebx)
+  _mm_mwaitx(timer_enable ? MWAITX_ECX_TIMER_ENABLE : 0, 0, timeout);
 #endif
 }
 } // namespace timer

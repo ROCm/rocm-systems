@@ -276,6 +276,11 @@ struct AmdExtTable {
   decltype(hsa_amd_counted_queue_acquire)* hsa_amd_counted_queue_acquire_fn;
   decltype(hsa_amd_counted_queue_release)* hsa_amd_counted_queue_release_fn;
   decltype(hsa_amd_memory_async_batch_copy)* hsa_amd_memory_async_batch_copy_fn;
+  decltype(hsa_amd_agent_preload) *hsa_amd_agent_preload_fn;
+  decltype(hsa_amd_svm_discard_batch_async)* hsa_amd_svm_discard_batch_async_fn;
+  decltype(hsa_amd_signal_get_event_id)* hsa_amd_signal_get_event_id_fn;
+  decltype(hsa_amd_external_semaphore_handle_open)*  hsa_amd_external_semaphore_handle_open_fn;
+  decltype(hsa_amd_external_semaphore_handle_close)* hsa_amd_external_semaphore_handle_close_fn;
 };
 
 // Table to export HSA Core Runtime Apis

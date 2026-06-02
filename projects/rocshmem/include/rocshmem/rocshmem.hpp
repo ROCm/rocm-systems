@@ -35,6 +35,7 @@
 #include "rocshmem_COLL.hpp"
 #include "rocshmem_P2P_SYNC.hpp"
 #include "rocshmem_RMA_X.hpp"
+#include "rocshmem_TILE.hpp"
 #if defined(HAVE_EXTERNAL_MPI)
 #include <mpi.h>
 #endif
@@ -55,7 +56,11 @@
 
 namespace rocshmem {
 
-constexpr char VERSION[] = "3.3.0";
+#define ROCSHMEM_MAJOR_VERSION 1
+#define ROCSHMEM_MINOR_VERSION 4
+#define ROCSHMEM_MAX_NAME_LEN  64
+
+constexpr char VERSION[] = ROCSHMEM_VERSION;
 
 /******************************************************************************
  **************************** HOST INTERFACE **********************************
@@ -72,7 +77,7 @@ constexpr char VERSION[] = "3.3.0";
 
 /**
  * @brief Initialize the rocSHMEM runtime and underlying transport layer.
- *        This is equivalent to the previous function, using implicitely
+ *        This is equivalent to the previous function, using implicitly
  *        MPI_COMM_WORLD for initialization
  */
 __host__ void rocshmem_init(void);
@@ -168,7 +173,7 @@ __host__ int rocshmem_init_attr(unsigned int flags, rocshmem_init_attr_t *attr);
 __host__ int rocshmem_get_uniqueid(rocshmem_uniqueid_t *uid);
 
 /**
- * @brief Initalizes the rocshmem_init_attr_t struct
+ * @brief Initializes the rocshmem_init_attr_t struct
  *
  * @param[in] rank     rank of the calling process
  * @param[in] nranks   number of pes
@@ -227,6 +232,21 @@ __host__ void *rocshmem_malloc(size_t size);
 __host__ void rocshmem_free(void *ptr);
 
 /**
+ * @brief Registers a non-symmetric buffer
+ *
+ * @param[in] addr Pointer to previously allocated user memory
+ * @param[in] length Length of addr
+ */
+__host__ int rocshmem_buffer_register(void *addr, size_t length);
+
+/**
+ * @brief Deregisters previously registered user memory
+ *
+ * @param[in] addr Pointer to previously registered memory
+ */
+__host__ int rocshmem_buffer_unregister(void *addr);
+
+/**
  * @brief Query for the number of PEs.
  *
  * @return Number of PEs.
@@ -239,6 +259,38 @@ __host__ int rocshmem_n_pes();
  * @return PE ID of the caller.
  */
 __host__ int rocshmem_my_pe();
+
+/**
+ * @brief Query the OpenSHMEM specification version this library implements.
+ *
+ * @param[out] major  ROCSHMEM_MAJOR_VERSION.
+ * @param[out] minor  ROCSHMEM_MINOR_VERSION.
+ */
+__host__ void rocshmem_info_get_version(int *major, int *minor);
+
+/**
+ * @brief Returns the vendor-defined string identifying this library.
+ *
+ * Copies ROCSHMEM_VENDOR_STRING into @p name. The caller must provide
+ * a buffer of at least ROCSHMEM_MAX_NAME_LEN bytes.
+ *
+ * @param[out] name  Buffer to receive the vendor string.
+ */
+__host__ void rocshmem_info_get_name(char *name);
+
+/**
+ * @brief Returns the vendor-specific library version of rocSHMEM.
+ *
+ * Writes ROCSHMEM_VENDOR_MAJOR_VERSION into @p major,
+ * ROCSHMEM_VENDOR_MINOR_VERSION into @p minor, and
+ * ROCSHMEM_VENDOR_PATCH_VERSION into @p patch.
+ *
+ * @param[out] major  Vendor major version.
+ * @param[out] minor  Vendor minor version.
+ * @param[out] patch  Vendor patch version.
+ */
+__host__ void rocshmem_vendor_get_version_info(int *major, int *minor,
+                                               int *patch);
 
 /**
  * @brief Creates an OpenSHMEM context.
@@ -327,10 +379,11 @@ __host__ int rocshmem_team_split_strided(rocshmem_team_t parent_team,
  * is undefined. This call will destroy only the shareable contexts
  * created from the referenced team.
  *
- * @param[in] team The team to destroy. The behavior is undefined if
- *                 the input team is ROCSHMEM_TEAM_WORLD or any other
- *                 invalid team. If the input is ROCSHMEM_TEAM_INVALID,
- *                 this function will not perform any operation.
+ * @param[in] team The team to destroy.
+ *                 ROCSHMEM_TEAM_INVALID, ROCSHMEM_TEAM_WORLD, and
+ *                 ROCSHMEM_TEAM_SHARED are silently ignored (no-op).
+ *                 Passing a handle that was already destroyed or
+ *                 never created results in undefined behavior.
  *
  * @return None.
  */
@@ -360,6 +413,15 @@ __host__ void rocshmem_ctx_quiet(rocshmem_ctx_t ctx);
 __host__ void rocshmem_quiet();
 
 /**
+ * @brief enqueues a quiet operation on given stream.
+ *
+ * @param[in] stream  HIP stream on which to enqueue the operation.
+ *
+ * @return void
+ */
+__host__ void rocshmem_quiet_on_stream(hipStream_t stream);
+
+/**
  * @brief perform a collective barrier between all PEs in the system.
  * The caller is blocked until the barrier is resolved.
  *
@@ -373,6 +435,15 @@ __host__ void rocshmem_barrier_all();
  * @return void
  */
 __host__ void rocshmem_barrier_all_on_stream(hipStream_t stream);
+
+/**
+ * @brief enqueues a sync_all operation on given stream.
+ *
+ * @param[in] stream  HIP stream on which to enqueue the operation.
+ *
+ * @return void
+ */
+__host__ void rocshmem_sync_all_on_stream(hipStream_t stream);
 
 /**
  * @brief enqueues an alltoall collective operation on given stream.

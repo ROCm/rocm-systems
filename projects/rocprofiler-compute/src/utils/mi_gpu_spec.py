@@ -1,27 +1,5 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 from pathlib import Path
 from typing import Any, Optional
@@ -42,6 +20,7 @@ class MIGPUSpecs:
     _num_xcds_dict: dict[str, dict[str, int]] = {}  # key: gpu_model
     _chip_id_dict: dict[int, str] = {}  # key: chip_id (int)
     _perfmon_config: dict[str, Any] = {}  # key: gpu_arch
+    _gpu_design: dict[str, dict[str, int]] = {}  # key: gpu_model
 
     # key: gpu_arch, used for gpu archs containing only one gpu model and
     # thus one compute partition
@@ -81,7 +60,7 @@ class MIGPUSpecs:
         """
 
         console_debug("mi_gpu_spec", "[load_yaml]")
-        with open(file_path) as file:
+        with open(file_path, encoding="utf-8") as file:
             data = yaml.safe_load(file)
             return data or {}
 
@@ -100,6 +79,10 @@ class MIGPUSpecs:
                     |-- partition_mode
                         | -- compute partition mode
                         | -- memory partition mode
+                    |-- design
+                        | -- physical_aid (CDNA)
+                        | -- logical_partitions_per_die (CDNA)
+                        | -- memory_die (RDNA/navi3)
         """
 
         current_dir = Path(__file__).parent
@@ -145,6 +128,8 @@ class MIGPUSpecs:
                         cls._chip_id_dict[models["chip_ids"]["virtual"]] = (
                             curr_gpu_model
                         )
+
+                    cls._gpu_design[curr_gpu_model] = models.get("design", {})
 
         # detect gpu arch to compute partition relationships
         cls._populate_gpu_arch_to_compute_partition_dict()
@@ -297,7 +282,7 @@ class MIGPUSpecs:
         4. Default settings (last resort)
         """
         # Constants for legacy GPUs that don't support compute partitions
-        LEGACY_ARCHS = {"gfx908", "gfx90a"}
+        LEGACY_ARCHS = {"gfx908", "gfx90a", "gfx1150", "gfx1151"}
         LEGACY_MODELS = {"mi50", "mi60", "mi100", "mi210", "mi250", "mi250x"}
 
         # Normalize inputs to lowercase for consistent comparison
@@ -362,6 +347,23 @@ class MIGPUSpecs:
 
         # 4. Last resort: use default settings
         return cls.set_default_gpu_settings(gpu_arch, gpu_model, compute_partition)
+
+    @classmethod
+    def get_num_dies(cls, gpu_arch: str, gpu_model: str) -> int:
+        """
+        CDNA: Some gpu models' architecture has larger physical AIDs but through
+        software divides the physical AIDs into distinct logical AID partitions.
+
+        RDNA: Check for the MCD count. *supported products at this time are APUs,
+        which do not have MCD concept like dGPUs- force to "1" to signal unified memory.
+        """
+        if cls.get_gpu_series(gpu_arch).lower() == "navi3":
+            return cls._gpu_design[gpu_model.lower()].get("memory_die", 1)
+        else:
+            design = cls._gpu_design.get(gpu_model.lower(), {})
+            return design.get("physical_aid", 1) * design.get(
+                "logical_partitions_per_die", 1
+            )
 
     @classmethod
     def get_chip_id_dict(cls) -> dict[int, str]:

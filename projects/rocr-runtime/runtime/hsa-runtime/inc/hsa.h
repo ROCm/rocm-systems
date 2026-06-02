@@ -336,9 +336,15 @@ typedef enum {
 } hsa_access_permission_t;
 
 /**
- * @brief POSIX file descriptor.
+ * @brief OS file handle. A POSIX file descriptor on Unix-like systems, a Win32
+ * HANDLE (as returned by CreateFile) on Windows. Declared as void* on Windows
+ * to avoid pulling windows.h into the public header.
  */
+#if defined(_WIN32) || defined(_WIN64)
+typedef void* hsa_file_t;
+#else
 typedef int hsa_file_t;
+#endif
 
 /** @} **/
 
@@ -2289,12 +2295,12 @@ typedef enum {
   /**
    * Queue supports kernel dispatch packets.
    */
-  HSA_QUEUE_FEATURE_KERNEL_DISPATCH = 1,
+  HSA_QUEUE_FEATURE_KERNEL_DISPATCH = (1 << 0),
 
   /**
    * Queue supports agent dispatch packets.
    */
-  HSA_QUEUE_FEATURE_AGENT_DISPATCH = 2
+  HSA_QUEUE_FEATURE_AGENT_DISPATCH = (1 << 1)
 } hsa_queue_feature_t;
 
 /**

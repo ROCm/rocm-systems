@@ -1,0 +1,131 @@
+diff --git a/packages/opencode/src/cli/cmd/run.ts b/packages/opencode/src/cli/cmd/run.ts
+index 0874beee1..2f5371d63 100644
+--- a/packages/opencode/src/cli/cmd/run.ts
++++ b/packages/opencode/src/cli/cmd/run.ts
+@@ -212,7 +212,7 @@ function normalizePath(input?: string) {
+ 
+ export const RunCommand = cmd({
+   command: "run [message..]",
+-  describe: "run opencode with a message",
++  describe: "run AMD ROCm PerfXpert with a message (non-interactive)",
+   builder: (yargs: Argv) => {
+     return yargs
+       .positional("message", {
+@@ -270,7 +270,7 @@ export const RunCommand = cmd({
+       })
+       .option("attach", {
+         type: "string",
+-        describe: "attach to a running opencode server (e.g., http://localhost:4096)",
++        describe: "attach to a running PerfXpert server (e.g., http://localhost:4096)",
+       })
+       .option("password", {
+         alias: ["p"],
+diff --git a/packages/opencode/src/cli/cmd/serve.ts b/packages/opencode/src/cli/cmd/serve.ts
+index d5eee75dd..63501e42e 100644
+--- a/packages/opencode/src/cli/cmd/serve.ts
++++ b/packages/opencode/src/cli/cmd/serve.ts
+@@ -6,14 +6,14 @@ import { Flag } from "../../flag/flag"
+ export const ServeCommand = cmd({
+   command: "serve",
+   builder: (yargs) => withNetworkOptions(yargs),
+-  describe: "starts a headless opencode server",
++  describe: "start a headless AMD ROCm PerfXpert server",
+   handler: async (args) => {
+     if (!Flag.OPENCODE_SERVER_PASSWORD) {
+-      console.log("Warning: OPENCODE_SERVER_PASSWORD is not set; server is unsecured.")
++      console.log("Warning: OPENCODE_SERVER_PASSWORD is not set; PerfXpert server is unsecured.")
+     }
+     const opts = await resolveNetworkOptions(args)
+     const server = await Server.listen(opts)
+-    console.log(`opencode server listening on http://${server.hostname}:${server.port}`)
++    console.log(`AMD ROCm PerfXpert server listening on http://${server.hostname}:${server.port}`)
+ 
+     await new Promise(() => {})
+     await server.stop()
+diff --git a/packages/opencode/src/cli/cmd/tui/attach.ts b/packages/opencode/src/cli/cmd/tui/attach.ts
+index 9a93f3f57..7402f8695 100644
+--- a/packages/opencode/src/cli/cmd/tui/attach.ts
++++ b/packages/opencode/src/cli/cmd/tui/attach.ts
+@@ -6,7 +6,7 @@ import { TuiConfig } from "@/cli/cmd/tui/config/tui"
+ 
+ export const AttachCommand = cmd({
+   command: "attach <url>",
+-  describe: "attach to a running opencode server",
++  describe: "attach to a running PerfXpert server",
+   builder: (yargs) =>
+     yargs
+       .positional("url", {
+diff --git a/packages/opencode/src/cli/cmd/tui/thread.ts b/packages/opencode/src/cli/cmd/tui/thread.ts
+index e3e9eb811..549e874b5 100644
+--- a/packages/opencode/src/cli/cmd/tui/thread.ts
++++ b/packages/opencode/src/cli/cmd/tui/thread.ts
+@@ -67,12 +67,12 @@ async function input(value?: string) {
+ 
+ export const TuiThreadCommand = cmd({
+   command: "$0 [project]",
+-  describe: "start opencode tui",
++  describe: "start the AMD ROCm PerfXpert interactive TUI",
+   builder: (yargs) =>
+     withNetworkOptions(yargs)
+       .positional("project", {
+         type: "string",
+-        describe: "path to start opencode in",
++        describe: "path to start PerfXpert in",
+       })
+       .option("model", {
+         type: "string",
+diff --git a/packages/opencode/src/cli/cmd/tui/ui/dialog-help.tsx b/packages/opencode/src/cli/cmd/tui/ui/dialog-help.tsx
+index 4e4527930..fd2448a5a 100644
+--- a/packages/opencode/src/cli/cmd/tui/ui/dialog-help.tsx
++++ b/packages/opencode/src/cli/cmd/tui/ui/dialog-help.tsx
+@@ -19,7 +19,7 @@ export function DialogHelp() {
+     <box paddingLeft={2} paddingRight={2} gap={1}>
+       <box flexDirection="row" justifyContent="space-between">
+         <text attributes={TextAttributes.BOLD} fg={theme.text}>
+-          Help
++          AMD ROCm PerfXpert — Help
+         </text>
+         <text fg={theme.textMuted} onMouseUp={() => dialog.clear()}>
+           esc/enter
+@@ -27,7 +27,15 @@ export function DialogHelp() {
+       </box>
+       <box paddingBottom={1}>
+         <text fg={theme.textMuted}>
+-          Press {keybind.print("command_list")} to see all available actions and commands in any context.
++          Press {keybind.print("command_list")} to see all PerfXpert actions and commands in any context.
++        </text>
++      </box>
++      <box paddingBottom={1}>
++        <text fg={theme.textMuted}>
++          PerfXpert (AMD ROCm) — GPU performance optimization assistant.
++        </text>
++        <text fg={theme.textMuted}>
++          Built on opencode (MIT) by Sam Stephenson · https://github.com/sst/opencode
+         </text>
+       </box>
+       <box flexDirection="row" justifyContent="flex-end" paddingBottom={1}>
+diff --git a/packages/opencode/src/cli/cmd/web.ts b/packages/opencode/src/cli/cmd/web.ts
+index 9dd8796d6..7ad157e25 100644
+--- a/packages/opencode/src/cli/cmd/web.ts
++++ b/packages/opencode/src/cli/cmd/web.ts
+@@ -31,16 +31,18 @@ function getNetworkIPs() {
+ export const WebCommand = cmd({
+   command: "web",
+   builder: (yargs) => withNetworkOptions(yargs),
+-  describe: "start opencode server and open web interface",
++  describe: "start AMD ROCm PerfXpert server and open the web interface",
+   handler: async (args) => {
+     if (!Flag.OPENCODE_SERVER_PASSWORD) {
+-      UI.println(UI.Style.TEXT_WARNING_BOLD + "!  OPENCODE_SERVER_PASSWORD is not set; server is unsecured.")
++      UI.println(UI.Style.TEXT_WARNING_BOLD + "!  OPENCODE_SERVER_PASSWORD is not set; PerfXpert server is unsecured.")
+     }
+     const opts = await resolveNetworkOptions(args)
+     const server = await Server.listen(opts)
+     UI.empty()
+     UI.println(UI.logo("  "))
+     UI.empty()
++    UI.println(UI.Style.TEXT_NORMAL_BOLD + "  AMD ROCm PerfXpert" + UI.Style.TEXT_NORMAL + " · built on opencode (MIT)")
++    UI.empty()
+ 
+     if (opts.hostname === "0.0.0.0") {
+       // Show localhost for local access

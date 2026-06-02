@@ -39,9 +39,6 @@ rtc:
   Unit_RTC_LinkDestroy_Negative:
     <<: *level_2
     tags: [link]
-  Unit_hiprtc_fp8_simple:
-    <<: *level_2
-    tags: [compile]
   Unit_RTC_LinkDestroy_Default:
     <<: *level_2
     # SWDEV-450909: Test failed in stress testing
@@ -64,8 +61,6 @@ rtc:
     tags: [integration]
   Unit_Rtc_ReduceRandom:
     <<: *level_2
-    # Rock_Linux_Failures_on_gfx94X
-    disabled: [amd_linux]
     tags: [compile]
   Unit_hiprtc_stdheaders:
     <<: *level_2
@@ -220,5 +215,3 @@ rtc:
     tags: [compile]
   Unit_Rtc_CoopReduce:
     <<: *level_2
-    # Rock_Window_Failures_on_gfx1151
-    disabled: [amd_windows]

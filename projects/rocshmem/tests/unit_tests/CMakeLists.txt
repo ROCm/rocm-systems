@@ -60,6 +60,7 @@ target_sources(
     wavefront_size_gtest.cpp
     atomic_wf_queue_gtest.cpp
     envvar_gtest.cpp
+    backend_bc_buffer_register_gtest.cpp
 )
 
 if (USE_IPC)
@@ -71,6 +72,7 @@ if (USE_IPC)
       ipc_impl_tiled_fine_gtest.cpp
   )
 endif()
+
 
 if (USE_GDA)
   target_sources(

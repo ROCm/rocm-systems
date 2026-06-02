@@ -167,6 +167,14 @@ in the following table.
         | Forces merging of network devices.
       - | String specifying forced merge configuration
 
+    * - | ``RCCL_IB_SPLIT_DATA_THRESHOLD``
+        | Minimum message size (in bytes) before the payload is split across
+        | multiple NICs/QPs.
+        | Smaller messages use one QP for data to reduce latency.
+        | This variable can be leveraged when NIC Fusion (``NCCL_NET_MERGE_LEVEL``) and/or data splitting on QPs (``NCCL_IB_SPLIT_DATA_ON_QPS``) is enabled.
+      - | Integer value in bytes (default: ``128``)
+        | ``N``: Split only when message size >= N bytes
+
     * - | ``NCCL_RINGS``
         | Defines custom ring topology.
       - | Ring topology specification string
@@ -205,3 +213,26 @@ intended for debugging and development purposes.
         | Enables multi-process mode in test applications.
       - | Any non-empty value enables multi-process mode
         | Used with test executables for distributed testing
+
+Multi-communicator ordering
+===========================
+
+When an application uses multiple RCCL communicators on the same device,
+collective operations may execute in an unpredictable order unless the
+application adds explicit synchronization between streams.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40,60
+
+    * - **Environment variable**
+      - **Values**
+
+    * - | ``NCCL_LAUNCH_ORDER_IMPLICIT``
+        | Serializes RCCL operations across different communicators on the
+        | same device according to their host-side launch sequence. This
+        | provides deterministic execution order for multi-communicator
+        | workloads such as chained collectives where one operation's
+        | output feeds into the next.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled. Operations execute in host launch order.

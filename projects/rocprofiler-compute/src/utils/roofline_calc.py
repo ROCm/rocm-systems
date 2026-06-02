@@ -1,27 +1,5 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 import csv
 from dataclasses import dataclass
@@ -33,8 +11,7 @@ import pandas as pd
 
 from utils import schema
 from utils.logger import console_debug, console_error, console_warning
-from utils.parser import eval_metric
-from utils.specs import MachineSpecs
+from utils.metrics.evaluation_pipeline import eval_metric
 
 ################################################
 # Global vars
@@ -99,11 +76,11 @@ SUPPORTED_DATATYPES: dict[str, list[str]] = {
         "I8",
         "I32",
         "I64",
-    ],  # Unsupported:
+    ],
 }
 
 PEAK_OPS_DATATYPES = ["FP16", "FP32", "FP64", "I8", "I32", "I64"]
-MFMA_DATATYPES = ["FP4", "FP6", "FP8", "FP16", "BF16", "FP32", "FP64", "I8"]
+MATRIX_DATATYPES = ["FP4", "FP6", "FP8", "FP16", "BF16", "FP32", "FP64", "I8"]
 CACHE_HIERARCHY = ["HBM", "L2", "L1", "LDS"]
 
 TOP_N = 10
@@ -159,7 +136,7 @@ class GraphPoints:
     l1: list[Union[list[float], float, None]]
     lds: list[Union[list[float], float, None]]
     valu: list[Union[list[float], float, None]]
-    mfma: list[Union[list[float], float, None]]
+    matrix_ops: list[Union[list[float], float, None]]
 
     @classmethod
     def empty(cls) -> "GraphPoints":
@@ -170,7 +147,7 @@ class GraphPoints:
             l1=[None, None, None],
             lds=[None, None, None],
             valu=[None, None, None],
-            mfma=[None, None, None],
+            matrix_ops=[None, None, None],
         )
 
 
@@ -230,7 +207,7 @@ def calc_ceilings(
         "l1": [],
         "lds": [],
         "valu": [],
-        "mfma": [],
+        "matrix_ops": [],
     }
 
     mem_level = roofline_parameters["mem_level"]
@@ -239,7 +216,7 @@ def calc_ceilings(
     )
 
     x1 = y1 = x2 = y2 = -1
-    x1_mfma = y1_mfma = x2_mfma = y2_mfma = -1
+    x1_matrix = y1_matrix = x2_matrix = y2_matrix = -1
 
     ops_flops = "Ops" if dtype.startswith("I") else "Flops"
 
@@ -277,22 +254,22 @@ def calc_ceilings(
             x2 = peak_ops / peak_bw
             y2 = peak_ops  # noqa
 
-            # Plot MFMA lines (NOTE: Assuming MI200 soc)
-            x1_mfma = peak_ops / peak_bw
-            y1_mfma = peak_ops
+            # Plot Matrix Ops lines (NOTE: Assuming MI200 soc)
+            x1_matrix = peak_ops / peak_bw
+            y1_matrix = peak_ops
 
-        peak_mfma = 0.0
-        if dtype in MFMA_DATATYPES:
+        peak_matrix = 0.0
+        if dtype in MATRIX_DATATYPES:
             target_precision = dtype if dtype.startswith("I") else f"F{dtype[2:]}"
 
             try:
-                peak_mfma = float(
+                peak_matrix = float(
                     benchmark_data[f"MFMA{target_precision}{ops_flops}"][
                         roofline_parameters["device_id"]
                     ]
                 )
-                x2_mfma = peak_mfma / peak_bw
-                y2_mfma = peak_mfma
+                x2_matrix = peak_matrix / peak_bw
+                y2_matrix = peak_matrix
             except KeyError:
                 console_warning(
                     f"Missing benchmark data for "
@@ -302,12 +279,12 @@ def calc_ceilings(
                 )
 
         # Check which peak is higher for formatting bandwidth lines
-        if y2_mfma > y1_mfma:  # peak_mfma
-            peak_x = x2_mfma
-            peak_y = y2_mfma
+        if y2_matrix > y1_matrix:  # peak_matrix
+            peak_x = x2_matrix
+            peak_y = y2_matrix
         else:  # peakVALU
-            peak_x = x1_mfma
-            peak_y = y1_mfma
+            peak_x = x1_matrix
+            peak_y = y1_matrix
 
         cache_key = cache_level.lower()
         graph_points[cache_key].extend([[x1, peak_x], [y1, peak_y], peak_bw])
@@ -325,14 +302,16 @@ def calc_ceilings(
             peak_ops,
         ])
 
-    # Plot MFMA roof
-    if dtype in MFMA_DATATYPES:  # assert that mfma has been assigned
-        x0_mfma = min(x2_mfma, dynamic_xmax) if x2_mfma < dynamic_xmax else dynamic_xmax
+    # Plot Matrix Ops roof
+    if dtype in MATRIX_DATATYPES:  # assert that "matrix_ops" has been assigned
+        x0_matrix = (
+            min(x2_matrix, dynamic_xmax) if x2_matrix < dynamic_xmax else dynamic_xmax
+        )
 
-        graph_points["mfma"].extend([
-            [x0_mfma, dynamic_xmax],
-            [peak_mfma, peak_mfma],
-            peak_mfma,
+        graph_points["matrix_ops"].extend([
+            [x0_matrix, dynamic_xmax],
+            [peak_matrix, peak_matrix],
+            peak_matrix,
         ])
 
     return graph_points
@@ -345,9 +324,6 @@ def calc_ceilings(
 def calc_ai_analyze(
     workload: schema.Workload,
     pmc_df: pd.DataFrame,
-    mspec: MachineSpecs,
-    sort_type: str,
-    config: dict[str, Any],
     arch_config: schema.ArchConfig,
 ) -> dict[str, Union[list[list[float]], list[str]]]:
     """
@@ -396,13 +372,11 @@ def calc_ai_analyze(
         console_debug("roofline", f"Processing kernel {kernel_id}: {kernel_name[:50]}")
 
         # filter PMC data for specific kernel
-        kernel_pmc_df = pmc_df[pmc_df["pmc_perf"]["Kernel_Name"] == kernel_name]
+        kernel_pmc_df = pmc_df[pmc_df["Kernel_Name"] == kernel_name]
 
         if kernel_pmc_df.empty:
             console_debug("roofline", f"No PMC data for kernel {kernel_id}")
             continue
-
-        kernel_only_data = {"pmc_perf": kernel_pmc_df["pmc_perf"]}
 
         kernel_dfs: dict[int, pd.DataFrame] = {}
         kernel_dfs_type: dict[int, str] = {}
@@ -418,9 +392,8 @@ def calc_ai_analyze(
             kernel_dfs_type,
             workload.sys_info.iloc[0],
             workload.roofline_peaks,
-            kernel_only_data,
+            kernel_pmc_df,
             debug=False,
-            config=config,
         )
 
         ai_hbm = ai_l2 = ai_l1 = performance = 0
@@ -459,11 +432,16 @@ def calc_ai_analyze(
                 plot_points.ai_l1[0].append(ai_l1)
                 plot_points.ai_l1[1].append(performance)
 
-            plot_points.kernelNames.append(f"K{kernel_id}")
-            console_debug("roofline", f"Added kernel {kernel_id} to plot points")
+            plot_points.kernelNames.append(kernel_name)
+            console_debug(
+                "roofline",
+                f"Added kernel {kernel_id}: {kernel_name[:50]} to plot points",
+            )
         else:
             console_debug(
-                "roofline", f"Skipping kernel {kernel_id} - no performance data"
+                "roofline",
+                f"Skipping kernel {kernel_id}: {kernel_name[:50]}"
+                f" - no performance data",
             )
 
         # store metrics for display
@@ -475,70 +453,6 @@ def calc_ai_analyze(
 
     console_debug("roofline", f"Generated {len(plot_points.kernelNames)} plot points")
     return plot_points.__dict__
-
-
-def validate_roofline_csv(workload_dir: Union[str, Path, list]) -> tuple[bool, str]:
-    """
-    Validate roofline.csv exists and has consistent structure.
-
-    Returns:
-        tuple: (is_valid, error_message)
-               is_valid=True if CSV is valid, False otherwise
-               error_message contains description if invalid
-    """
-    if isinstance(workload_dir, list):
-        base_dir = (
-            workload_dir[0][0]
-            if isinstance(workload_dir[0], (list, tuple))
-            else workload_dir[0]
-        )
-    else:
-        base_dir = workload_dir
-
-    benchmark_results = Path(base_dir) / "roofline.csv"
-
-    # Check if file exists
-    if not benchmark_results.exists():
-        return False, f"Benchmark results file not found: {benchmark_results}"
-
-    # Validate CSV structure
-    try:
-        with open(benchmark_results) as csvfile:
-            csv_reader = csv.reader(csvfile, delimiter=",")
-            row_count = 0
-            num_headers = 0
-
-            for row in csv_reader:
-                if row_count == 0:
-                    num_headers = len(row) - 1
-                    if num_headers <= 0:
-                        return (
-                            False,
-                            "Empty or invalid header row in benchmark_results",
-                        )
-                else:
-                    if len(row) - 1 != num_headers:
-                        return (
-                            False,
-                            f"Inconsistent row length in benchmark_results at "
-                            f"row {row_count + 1}. "
-                            f"Expected {num_headers + 1} columns, "
-                            f"found {len(row)}. "
-                            "Roofline data appears corrupted or incomplete.",
-                        )
-                row_count += 1
-
-            if row_count < 2:
-                return (
-                    False,
-                    f"Insufficient data in benchmark_results. "
-                    f"Found {row_count} rows (need at least 2)."
-                    f" Roofline data appears corrupted or incomplete.",
-                )
-    except Exception as e:
-        return False, f"Failed to read benchmark_results: {e}"
-
-    return True, ""
 
 
 def construct_roof(
@@ -563,7 +477,7 @@ def construct_roof(
     headers: list[str] = []
 
     try:
-        with open(benchmark_results) as csvfile:
+        with open(benchmark_results, newline="", encoding="utf-8") as csvfile:
             csv_reader = csv.reader(csvfile, delimiter=",")
             row_count = 0
 
@@ -601,7 +515,7 @@ def construct_roof(
     for cache_level in cache_hierarchy:
         expected_columns.append(f"{cache_level}Bw")
 
-    if dtype in MFMA_DATATYPES:
+    if dtype in MATRIX_DATATYPES:
         target_precision = dtype if dtype.startswith("I") else f"F{dtype[2:]}"
         expected_columns.append(f"MFMA{target_precision}{ops_flops}")
 

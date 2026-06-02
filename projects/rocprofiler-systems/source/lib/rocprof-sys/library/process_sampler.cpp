@@ -1,33 +1,15 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "library/process_sampler.hpp"
 #include "core/config.hpp"
-#include "library/amd_smi.hpp"
-#include "library/cpu_freq.hpp"
+#include "library/pmc/sampler.hpp"
 #include "library/runtime.hpp"
+#include <cstdint>
 
 #include "logger/debug.hpp"
 
+#include <atomic>
 #include <memory>
 #include <vector>
 
@@ -40,6 +22,7 @@ namespace
 using promise_t                                         = std::promise<void>;
 std::unique_ptr<promise_t>             polling_finished = {};
 std::vector<std::unique_ptr<instance>> instances        = {};
+std::atomic<bool>                      sampler_paused{ false };
 
 bool&
 is_initialized()
@@ -94,13 +77,15 @@ sampler::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
 
     auto _now = std::chrono::steady_clock::now();
     auto _end =
-        _now + std::chrono::nanoseconds{ static_cast<uint64_t>(_duration * units::sec) };
+        _now +
+        std::chrono::nanoseconds{ static_cast<std::uint64_t>(_duration * units::sec) };
     while(_state && _state->load() < State::Finalized && get_state() < State::Finalized)
     {
         std::this_thread::sleep_until(_now);
         if(_state->load() != State::Active) continue;
         if(get_state() >= State::Finalized) break;
         if(get_state() != State::Active) continue;
+        if(sampler_paused.load(std::memory_order_relaxed)) continue;
         get_sampler_is_sampling().store(true);
         for(auto& itr : instances)
             itr->sample();
@@ -138,41 +123,30 @@ sampler::setup()
     // shutdown if already running
     shutdown();
 
-    if(get_use_amd_smi())
-    {
-        auto& _amd_smi         = instances.emplace_back(std::make_unique<instance>());
-        _amd_smi->setup        = []() { amd_smi::setup(); };
-        _amd_smi->shutdown     = []() { amd_smi::shutdown(); };
-        _amd_smi->post_process = []() { amd_smi::post_process(); };
-        _amd_smi->config       = []() { amd_smi::config(); };
-        _amd_smi->sample       = []() { amd_smi::sample(); };
-    }
-
-    if(get_cpu_freq_enabled())
-    {
-        auto& _cpu_freq         = instances.emplace_back(std::make_unique<instance>());
-        _cpu_freq->setup        = []() { cpu_freq::setup(); };
-        _cpu_freq->shutdown     = []() { cpu_freq::shutdown(); };
-        _cpu_freq->post_process = []() { cpu_freq::post_process(); };
-        _cpu_freq->config       = []() { cpu_freq::config(); };
-        _cpu_freq->sample       = []() { cpu_freq::sample(); };
-    }
+    LOG_DEBUG("Setting up PMC sampling.");
+    auto& _pmc         = instances.emplace_back(std::make_unique<instance>());
+    _pmc->setup        = []() { pmc::setup(); };
+    _pmc->shutdown     = []() { pmc::shutdown(); };
+    _pmc->post_process = []() { pmc::post_process(); };
+    _pmc->config       = []() { pmc::config(); };
+    _pmc->sample       = []() { pmc::sample(); };
+    _pmc->pause        = []() { pmc::pause(); };
 
     for(auto& itr : instances)
         itr->setup();
 
     polling_finished = std::make_unique<promise_t>();
 
-    auto     _freq      = get_process_sampling_freq();
-    uint64_t _msec_freq = (1.0 / _freq) * 1.0e3;
-
-    polling_finished = std::make_unique<promise_t>();
+    const auto _freq = get_process_sampling_freq();
+    const auto _interval =
+        nsec_t{ static_cast<std::uint64_t>((1.0 / _freq) * units::sec) };
 
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
     set_state(State::PreInit);
-    get_thread() = std::make_unique<std::thread>(&poll<msec_t>, &get_sampler_state(),
-                                                 msec_t{ _msec_freq }, nullptr);
+    using poll_fn = void (*)(std::atomic<State>*, nsec_t, promise_t*);
+    get_thread()  = std::make_unique<std::thread>(
+        static_cast<poll_fn>(&poll), &get_sampler_state(), _interval, nullptr);
 
     set_state(State::Active);
 }
@@ -192,7 +166,7 @@ sampler::shutdown()
     {
         size_t           _nitr     = 0;
         constexpr size_t _nitr_max = 100;
-        uint64_t         _freq     = (1.0 / get_process_sampling_freq()) * 1.0e3;
+        std::uint64_t    _freq     = (1.0 / get_process_sampling_freq()) * 1.0e3;
 
         // wait until the sampler is no longer sampling
         std::this_thread::sleep_for(msec_t{ _freq });
@@ -202,7 +176,7 @@ sampler::shutdown()
         }
 
         // during CI, throw an error if polling_finished is not valid
-        if(!polling_finished && get_is_continuous_integration())
+        if(!polling_finished)
         {
             throw std::runtime_error("polling_finished is not valid");
         }
@@ -225,6 +199,23 @@ sampler::shutdown()
     }
 
     is_initialized() = false;
+}
+
+void
+sampler::pause()
+{
+    sampler_paused.store(true, std::memory_order_relaxed);
+
+    for(auto& itr : instances)
+    {
+        itr->pause();
+    }
+}
+
+void
+sampler::resume()
+{
+    sampler_paused.store(false, std::memory_order_relaxed);
 }
 
 void

@@ -233,7 +233,7 @@ __device__ ATTR_NO_INLINE void rocshmem_ulonglong_alltoallv_wg(rocshmem_team_t t
 /**
  * @name SHMEM_BROADCAST
  * @brief Perform a broadcast between PEs in the active set. The caller
- * is blocked until the broadcase completes.
+ * is blocked until the broadcast completes.
  *
  * This function must be called as a work-group collective.
  *
@@ -740,6 +740,14 @@ __host__ int rocshmem_ctx_double_prod_reduce(
  * @return void
  */
 __global__ ATTR_NO_INLINE void rocshmem_barrier_all_kernel();
+
+/**
+ * @brief kernel for performing a sync_all operation.
+ * Caller enqueues the kernel on given stream
+ *
+ * @return void
+ */
+__global__ ATTR_NO_INLINE void rocshmem_sync_all_kernel();
 
 /**
  * @brief kernel for performing an alltoall collective operation.

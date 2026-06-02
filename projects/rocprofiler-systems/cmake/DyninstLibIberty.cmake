@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # ======================================================================================
 # LibIberty.cmake
 #
@@ -7,7 +10,7 @@
 #
 # Directly exports the following CMake variables
 #
-# LibIberty_ROOT_DIR       - Computed base directory the of LibIberty installation
+# LibIberty_ROOT_DIR       - Computed base directory of the LibIberty installation
 # LibIberty_LIBRARY_DIRS   - Link directories for LibIberty libraries LibIberty_LIBRARIES
 # - LibIberty library files LibIberty_INCLUDE - LibIberty include files
 #
@@ -27,8 +30,8 @@ endif()
 
 # -------------- PATHS --------------------------------------------------------
 
-# Base directory the of LibIberty installation
-set(LibIberty_ROOT_DIR "/usr" CACHE PATH "Base directory the of LibIberty installation")
+# Base directory of the LibIberty installation
+set(LibIberty_ROOT_DIR "/usr" CACHE PATH "Base directory of the LibIberty installation")
 
 # Hint directory that contains the LibIberty library files
 set(LibIberty_LIBRARYDIR
@@ -79,20 +82,28 @@ else()
     file(MAKE_DIRECTORY "${_li_root}/lib")
     file(MAKE_DIRECTORY "${_li_root}/include")
 
+    # Build only libiberty (not top-level "all"): full binutils needs bison, etc.
+    # bfd doc rules can invoke makeinfo; use a no-op so Texinfo is not required.
+    find_program(_ROCPROFSYS_LIBIBERTY_MAKEINFO_NOOP NAMES true)
+    if(NOT _ROCPROFSYS_LIBIBERTY_MAKEINFO_NOOP)
+        set(_ROCPROFSYS_LIBIBERTY_MAKEINFO_NOOP /usr/bin/true)
+    endif()
+
     include(ExternalProject)
     ExternalProject_Add(
         ${_li_project_name}
         PREFIX ${_li_root}
         URL
             ${DYNINST_BINUTILS_DOWNLOAD_URL}
-            http://ftpmirror.gnu.org/gnu/binutils/binutils-2.45.tar.gz
-            http://mirrors.kernel.org/sourceware/binutils/releases/binutils-2.45.tar.gz
+            https://ftpmirror.gnu.org/gnu/binutils/binutils-2.46.0.tar.gz
+            https://mirrors.kernel.org/sourceware/binutils/releases/binutils-2.46.0.tar.gz
         BUILD_IN_SOURCE 1
         CONFIGURE_COMMAND
-            ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER} CFLAGS=-fPIC\ -O3
-            CXX=${CMAKE_CXX_COMPILER} CXXFLAGS=-fPIC\ -O3 <SOURCE_DIR>/configure
+            ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER} CFLAGS=-fPIC\ -O3\ -Wno-error
+            CXX=${CMAKE_CXX_COMPILER} CXXFLAGS=-fPIC\ -O3\ -Wno-error
+            MAKEINFO=${_ROCPROFSYS_LIBIBERTY_MAKEINFO_NOOP} <SOURCE_DIR>/configure
             --prefix=${_li_root}
-        BUILD_COMMAND make
+        BUILD_COMMAND make MAKEINFO=${_ROCPROFSYS_LIBIBERTY_MAKEINFO_NOOP} all-libiberty
         INSTALL_COMMAND ""
     )
 
@@ -132,7 +143,7 @@ target_link_libraries(rocprofiler-systems-libiberty INTERFACE ${_li_libs})
 set(LibIberty_ROOT_DIR
     ${_li_root}
     CACHE PATH
-    "Base directory the of LibIberty installation"
+    "Base directory of the LibIberty installation"
     FORCE
 )
 set(LibIberty_INCLUDE_DIRS
@@ -150,3 +161,22 @@ set(IBERTY_LIBRARIES ${LibIberty_LIBRARIES})
 rocprofiler_systems_message(STATUS "LibIberty include dirs: ${LibIberty_INCLUDE_DIRS}")
 rocprofiler_systems_message(STATUS "LibIberty library dirs: ${LibIberty_LIBRARY_DIRS}")
 rocprofiler_systems_message(STATUS "LibIberty libraries: ${LibIberty_LIBRARIES}")
+
+# --------------------------------------------------------------------------------------#
+# Create Dyninst::LibIberty target if building from source
+# --------------------------------------------------------------------------------------#
+# When LibIberty is built from source, Dyninst's find_package(LibIberty) would fail
+# because the bundled LibIberty isn't installed in standard locations. Creating this
+# target causes Dyninst to skip find_package(LibIberty) and use the bundled dependency.
+if(ROCPROFSYS_BUILD_LIBIBERTY AND NOT TARGET Dyninst::LibIberty)
+    add_library(Dyninst::LibIberty INTERFACE IMPORTED)
+    target_link_libraries(Dyninst::LibIberty INTERFACE ${LibIberty_LIBRARIES})
+    target_include_directories(
+        Dyninst::LibIberty
+        SYSTEM
+        INTERFACE ${LibIberty_INCLUDE_DIRS}
+    )
+    if(LibIberty_LIBRARY_DIRS)
+        target_link_directories(Dyninst::LibIberty INTERFACE ${LibIberty_LIBRARY_DIRS})
+    endif()
+endif()

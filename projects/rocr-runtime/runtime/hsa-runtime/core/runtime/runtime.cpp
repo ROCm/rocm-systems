@@ -40,6 +40,9 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
+#include <cassert>
+#include <chrono>
+#include <thread>
 #include <cstring>
 #include <regex>
 #include <string>
@@ -48,14 +51,11 @@
 #include <dlfcn.h>
 #include <amdgpu_drm.h>
 #include <sys/mman.h>
-#include <sys/socket.h>
-#include <sys/un.h>
-#else
-#define debug_warning(__VA_ARGS__)
 #endif
 
 #include "core/inc/runtime.h"
 #include "core/inc/hsa_table_interface.h"
+#include "core/util/timer.h"
 
 #if defined(HSA_ROCPROFILER_REGISTER) && HSA_ROCPROFILER_REGISTER > 0
 #include <rocprofiler-register/rocprofiler-register.h>
@@ -65,6 +65,7 @@
 #include "core/inc/amd_core_dump.hpp"
 #include "core/inc/amd_cpu_agent.h"
 #include "core/inc/amd_gpu_agent.h"
+#include "core/inc/amd_aql_queue.h"
 #include "core/inc/amd_memory_region.h"
 #include "core/inc/amd_topology.h"
 #include "core/inc/exceptions.h"
@@ -826,6 +827,13 @@ hsa_status_t Runtime::GetSystemInfo(hsa_system_info_t attribute, void* value) {
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t Runtime::GetSignalEventId(hsa_signal_t signal, uint32_t *event_id) {
+  core::Signal* coreSignal = core::Signal::Convert(signal);
+  *event_id = coreSignal->EopEvent() ? coreSignal->EopEvent()->EventId : 0;
+
+  return HSA_STATUS_SUCCESS;
+}
+
 hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal,
                                             hsa_signal_condition_t cond,
                                             hsa_signal_value_t value,
@@ -1258,75 +1266,6 @@ hsa_status_t Runtime::SetPtrInfoData(const void* ptr, void* userptr) {
   return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 }
 
-// Send the dmabuf_fd to from process via Unix socket
-static int SendDmaBufFd(int socket, int dmabuf_fd) {
-#if defined(__linux__)
-  char iov_buf[1];
-  struct msghdr msg = {0};
-  char buf[CMSG_SPACE(sizeof(dmabuf_fd))];
-
-  memset(buf, 0, sizeof(buf));
-  memset(iov_buf, 0, sizeof(iov_buf));
-  iov_buf[0] = 'y';
-
-  struct iovec io = {.iov_base = iov_buf, .iov_len = 1};
-
-  msg.msg_iov = &io;
-  msg.msg_iovlen = 1;
-  msg.msg_control = buf;
-  msg.msg_controllen = sizeof(buf);
-
-  struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
-  cmsg->cmsg_level = SOL_SOCKET;
-  cmsg->cmsg_type = SCM_RIGHTS;
-  cmsg->cmsg_len = CMSG_LEN(sizeof(dmabuf_fd));
-
-  memcpy(CMSG_DATA(cmsg), &dmabuf_fd, sizeof(dmabuf_fd));
-
-  msg.msg_controllen = CMSG_SPACE(sizeof(dmabuf_fd));
-
-  ssize_t sent = sendmsg(socket, &msg, 0);
-
-  return (sent < 0) ? -1 : 0;
-#else
-  assert(!"Unimplemented!");
-  return 0;
-#endif
-}
-
-// Receive the dmabuf_fd to from process via Unix socket
-static int ReceiveDmaBufFd(int socket) {
-#if defined(__linux__)
-  struct msghdr msg = {0};
-
-  // The struct iovec is needed, even if it points to minimal data
-  char m_buffer[1];
-  struct iovec io = {.iov_base = m_buffer, .iov_len = sizeof(m_buffer)};
-  msg.msg_iov = &io;
-  msg.msg_iovlen = 1;
-
-  char c_buffer[256];
-  msg.msg_control = c_buffer;
-  msg.msg_controllen = sizeof(c_buffer);
-
-  ssize_t rcv = recvmsg(socket, &msg, MSG_WAITALL);
-  if (rcv < 0) return -1;
-
-  while (!rcv)
-    rcv = recvmsg(socket, &msg, MSG_WAITALL);
-
-  struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
-
-  int fd;
-  memcpy(&fd, CMSG_DATA(cmsg), sizeof(fd));
-
-  return fd;
-#else
-  assert(!"Unimplemented!");
-  return 0;
-#endif
-}
-
 #define IPC_SOCK_SERVER_DMABUF_FD_HANDLE_LENGTH 64
 #define IPC_SOCK_SERVER_NAME_LENGTH 32
 #define IPC_SOCK_SERVER_CONN_CLOSE_HANDLE UINT64_MAX
@@ -1335,50 +1274,46 @@ void Runtime::AsyncIPCSockServerConnLoop(void*) {
    auto& ipc_sock_server_conns_ = runtime_singleton_->ipc_sock_server_conns_;
    auto& ipc_sock_server_lock_ = runtime_singleton_->ipc_sock_server_lock_;
 
-   int connection_fd;
    char buf[IPC_SOCK_SERVER_DMABUF_FD_HANDLE_LENGTH];
-   // Wait until the client has connected
    while (1) {
-     connection_fd = accept(ipc_sock_server_fd_, NULL, NULL);
-     if (connection_fd == -1) continue;
-     MAKE_SCOPE_GUARD([&]() { close(connection_fd); });
-     if (read(connection_fd, buf, sizeof(buf)) == -1)
-       continue;
+    os::IPCSocket conn = os::AcceptIPCConnection(ipc_sock_server_fd_);
+    if (conn == os::INVALID_SOCKET_VALUE) continue;
+    MAKE_SCOPE_GUARD([&]() { os::CloseIPCSocket(conn); });
+    if (os::IPCSocketRead(conn, buf, sizeof(buf)) == -1)
+      continue;
 
-     // Request to kill the server.
-     uint64_t conn_handle = strtoull(buf, NULL, 10);
-     if (conn_handle == IPC_SOCK_SERVER_CONN_CLOSE_HANDLE)
-       break;
+    uint64_t conn_handle = strtoull(buf, NULL, 10);
+    if (conn_handle == IPC_SOCK_SERVER_CONN_CLOSE_HANDLE)
+      break;
 
-     int dmabuf_fd = -1;
-     uint64_t fragOffset;
-     void *ptr = NULL;
-     size_t len = 0;
+    {
+      int dmabuf_fd = -1;
+      uint64_t fragOffset;
+      void *ptr = NULL;
+      size_t len = 0;
+      MAKE_SCOPE_GUARD([&]() { runtime_singleton_->DmaBufClose(dmabuf_fd); })
+      std::lock_guard<std::mutex> lock(ipc_sock_server_lock_);
+      for (auto& conns : ipc_sock_server_conns_) {
+        if (conn_handle == conns.first) {
+          ptr = reinterpret_cast<void *>(conn_handle);
+          len = conns.second;
+          break;
+        }
+      }
 
-     // Search for registered export pointer
-     std::lock_guard<std::mutex> lock(ipc_sock_server_lock_);
-     for (auto& conns : ipc_sock_server_conns_) {
-       if (conn_handle == conns.first) {
-         ptr = reinterpret_cast<void *>(conn_handle);
-         len = conns.second;
-         break;
-       }
-     }
+      if (!ptr) continue;
 
-     if (!ptr) continue;
-
-     // Export DMA Buf FD and wait for client import
-     int err = HSAKMT_CALL(hsaKmtExportDMABufHandle(ptr, len, &dmabuf_fd, &fragOffset));
-     if (err != HSAKMT_STATUS_SUCCESS) continue;
-     SendDmaBufFd(connection_fd, dmabuf_fd);
-     err = read(connection_fd, buf, sizeof(buf));
-     close(dmabuf_fd);
-     if (err == -1) break; // Client failed to confirm import so end server
+      int err = HSAKMT_CALL(hsaKmtExportDMABufHandle(ptr, len, &dmabuf_fd, &fragOffset));
+      if (err != HSAKMT_STATUS_SUCCESS) continue;
+      err = os::IPCSendHandle(conn, dmabuf_fd);
+      if (err == -1) break;
+      err = os::IPCSocketRead(conn, buf, sizeof(buf));
+      if (err == -1) break;
+    }
    }
 
-   // Clean up
    ipc_sock_server_conns_.clear();
-   close(ipc_sock_server_fd_);
+   os::CloseIPCSocket(ipc_sock_server_fd_);
 }
 
 hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* handle) {
@@ -1433,7 +1368,7 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   uint32_t dmaBufFdHandleHi = (reinterpret_cast<uint64_t>(ptr) >> 32);
   handle->handle[0] = dmaBufFdHandleLo;
   handle->handle[1] = dmaBufFdHandleHi;
-  handle->handle[2] = getpid(); // socket server name handle
+  handle->handle[2] = os::GetProcessId(); // socket server name handle
 
   Agent *agent = Agent::Convert(info.agentOwner);
   handle->handle[3] = agent->device_type() == Agent::kAmdCpuDevice;
@@ -1454,93 +1389,60 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   if (err != HSA_STATUS_SUCCESS) return err;
 
   if (agent->device_type() == Agent::kAmdGpuDevice) {
-#if defined(__linux__)
-    if (!thunkLoader()->IsDXG()) {
-      AMD::GpuAgent* agent_ = reinterpret_cast<AMD::GpuAgent*>(agent);
+    AMD::GpuAgent* agent_ = reinterpret_cast<AMD::GpuAgent*>(agent);
 
-      srand(static_cast<uint32_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count()));
-      handle->handle[7] = rand();
+    auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    std::mt19937 gen(seed);
+    std::uniform_int_distribution<uint32_t> distr(1, 1<<15);
+    handle->handle[7] = distr(gen);
 
-      HsaExternalHandleDesc desc;
-      desc.device_handle = agent_->libThunkDev();
-      desc.fd = static_cast<HSAint32>(dmabuf_fd);
-      desc.type = HSA_EXTERNAL_HANDLE_DMA_BUF;
-      desc.metadata = handle->handle[7];
-      HsaHandleImportFlags hflags;
-      hflags.ui32.IPCHandle = 1;
-      hflags.ui32.SysMem = handle->handle[3];
-      hflags.ui32.UpdateMetadata = 1;
-      HsaHandleImportResult res;
-      HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtHandleImport(&desc, &res, &hflags));
-      if (status == HSAKMT_STATUS_ERROR) {
-        close(dmabuf_fd);
-        return HSA_STATUS_ERROR;
-      }
-      allocation_map_[ptr].thunk_bo = res.buf_handle;
-   }
-#else
-    assert(!"Unimplemented!");
-#endif
+    HsaExternalHandleDesc desc;
+    desc.device_handle = agent_->libThunkDev();
+    desc.fd = static_cast<HSAint64>(dmabuf_fd);
+    desc.type = HSA_EXTERNAL_HANDLE_DMA_BUF;
+    desc.metadata = handle->handle[7];
+    desc.mem = ptr;
+    HsaHandleImportFlags hflags;
+    hflags.ui32.IPCHandle = 1;
+    hflags.ui32.SysMem = handle->handle[3];
+    hflags.ui32.UpdateMetadata = 1;
+    HsaHandleImportResult res = {};
+    HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtHandleImport(&desc, &res, &hflags));
+    if (status != HSAKMT_STATUS_SUCCESS) {
+      runtime_singleton_->DmaBufClose(dmabuf_fd);
+      return HSA_STATUS_ERROR;
+    }
+    // Reuse token already stored on the BO
+    if (res.metadata != 0) handle->handle[7] = res.metadata;
+    allocation_map_[ptr].thunk_bo = res.buf_handle;
   }
 
-  close(dmabuf_fd);
+  runtime_singleton_->DmaBufClose(dmabuf_fd);
 
   std::lock_guard<std::mutex> lock(ipc_sock_server_lock_);
-#if defined(__linux__)
-  if (!ipc_sock_server_conns_.size()) { // create new runtime socket server
-    // Ensure any previous IPC server thread handle is released before starting a new one.
+  if (!ipc_sock_server_conns_.size()) {
     if (ipc_sock_server_thread_) {
       os::WaitForThread(ipc_sock_server_thread_);
       os::CloseThread(ipc_sock_server_thread_);
       ipc_sock_server_thread_ = nullptr;
     }
 
-    struct sockaddr_un address;
-    ipc_sock_server_fd_ = socket(AF_UNIX, SOCK_STREAM, 0);
-    assert(ipc_sock_server_fd_ > -1 && "DMA buffer could not be exported for IPC!");
-    if (ipc_sock_server_fd_ == -1) return HSA_STATUS_ERROR;
-
-    // Use the PID as unique socket server name.
     char socketName[IPC_SOCK_SERVER_NAME_LENGTH];
     snprintf(socketName, IPC_SOCK_SERVER_NAME_LENGTH, "xhsa%i", handle->handle[2]);
 
-    // Initialize os socket server with client acceptance limit.
-    // Socket servers sill serialize connections and drop connections over the listen limit.
-    // The client can try and reconnect and it's unlikely that INT_MAX concurrent
-    // connections will occur.
-    memset(&address, 0, sizeof(struct sockaddr_un));
-    address.sun_family = AF_UNIX;
-    strncpy(address.sun_path, socketName, IPC_SOCK_SERVER_NAME_LENGTH);
-    address.sun_path[0] = 0; // first NULL char creates unlisted abstract socket
-    int err = bind(ipc_sock_server_fd_, (struct sockaddr *)&address, sizeof(struct sockaddr_un));
-    assert(!err && "Connection to export DMA buffer not made!");
-    if (err) {
-      close(ipc_sock_server_fd_);
-      ipc_sock_server_fd_ = -1;
-      return HSA_STATUS_ERROR;
-    }
-    err = listen(ipc_sock_server_fd_, 1);
-    assert(!err && "Connection to export DMA buffer not made!");
-    if (err) {
-      close(ipc_sock_server_fd_);
-      ipc_sock_server_fd_ = -1;
-      return HSA_STATUS_ERROR;
-    }
+    ipc_sock_server_fd_ = os::CreateIPCServer(socketName, 1);
+    assert(ipc_sock_server_fd_ != os::INVALID_SOCKET_VALUE && "DMA buffer could not"
+      "be exported for IPC!");
+    if (ipc_sock_server_fd_ == os::INVALID_SOCKET_VALUE) return HSA_STATUS_ERROR;
 
-    // Spin server client acceptance into a socket server thread.
-    // Socket server needs to last for the lifetime of the runtime instance
-    // as the attach life cycle is unknown.
     ipc_sock_server_thread_ = os::CreateThread(AsyncIPCSockServerConnLoop, NULL);
     if (!ipc_sock_server_thread_) {
       ipc_sock_server_conns_.clear();
-      close(ipc_sock_server_fd_);
-      ipc_sock_server_fd_ = -1;
+      os::CloseIPCSocket(ipc_sock_server_fd_);
+      ipc_sock_server_fd_ = os::INVALID_SOCKET_VALUE;
       return HSA_STATUS_ERROR;
     }
   }
-#else
-  assert(!"Unimplemented! Do we really need this?");
-#endif
   ipc_sock_server_conns_[reinterpret_cast<uint64_t>(ptr)] = len;
 
   // TODO: fragment block discard for better memory performance causes memory violations
@@ -1553,56 +1455,35 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
                              unsigned int numNodes, HSAuint32 *nodes,
                              void **importAddress, HSAuint64 *importSize, bool isDmabufSysmem,
                              uint32_t shared_handle) {
-    int dmabuf_fd = -1, socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    assert(socket_fd > -1 && "DMA buffer could not be imported for IPC!");
-    if (socket_fd == -1) return -1;
+    char socketName[IPC_SOCK_SERVER_NAME_LENGTH];
+    snprintf(socketName, IPC_SOCK_SERVER_NAME_LENGTH, "xhsa%i", conn_handle);
+    std::chrono::milliseconds timeout(10000);
+    std::chrono::milliseconds retryInterval(1);
+    os::IPCSocket socket_fd = os::ConnectToIPCServer(
+        socketName, timeout, retryInterval);
+    assert(socket_fd != os::INVALID_SOCKET_VALUE && "Connection to export DMA buffer not made!");
+    if (socket_fd == os::INVALID_SOCKET_VALUE) return -1;
 
-    // Set 10 second timeout for ReceiveDmaBufFd
-    struct timeval tv;
-    tv.tv_sec = 10;
-    tv.tv_usec = 0;
-    int status = setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
-    assert(status == 0 && "DMA buffer FD could not be received for IPC!");
-    if (status) return -1;
+    std::chrono::seconds rcvtimeout(10);
+    os::SetIPCSocketRecvTimeout(socket_fd, rcvtimeout);
+
+    MAKE_SCOPE_GUARD([&]() { os::CloseIPCSocket(socket_fd); });
 
     char buf[IPC_SOCK_SERVER_DMABUF_FD_HANDLE_LENGTH];
     memset(buf, 0, sizeof(buf));
-    int timeoutLimitMs = 10000, timeoutMs = 0, timeoutIntervalMs = 1;
-#if defined(__linux__)
-    struct sockaddr_un address;
-    memset(&address, 0, sizeof(struct sockaddr_un));
-    address.sun_family = AF_UNIX;
-    snprintf(address.sun_path, IPC_SOCK_SERVER_NAME_LENGTH, "xhsa%i", conn_handle);
-    address.sun_path[0] = 0; // first NULL char creates unlisted abstract socket
 
-    while (timeoutMs < timeoutLimitMs) {
-      if (connect(socket_fd, (struct sockaddr *) &address, sizeof(struct sockaddr_un))) {
-        timeoutMs  += timeoutIntervalMs;
-        std::this_thread::sleep_for(std::chrono::milliseconds(timeoutIntervalMs));
-      } else {
-        break;
-      }
-    }
-#else
-    assert(!"Unimplmented!");
-#endif
-    MAKE_SCOPE_GUARD([&]() { close(socket_fd); });
-
-    if (timeoutMs >= timeoutLimitMs) return -1;
-
-    // Ping server to export and send DMABUF FD on handle
-    snprintf(buf, sizeof(buf), "%li", dmabuf_fd_handle);
-    if (write(socket_fd, buf, sizeof(buf)) == -1) return -1;
+    snprintf(buf, sizeof(buf), "%" PRIu64, dmabuf_fd_handle);
+    if (os::IPCSocketWrite(socket_fd, buf, sizeof(buf)) == -1) return -1;
 
     if (dmabuf_fd_handle == IPC_SOCK_SERVER_CONN_CLOSE_HANDLE) return 0;
 
-    dmabuf_fd = ReceiveDmaBufFd(socket_fd);
+    intptr_t dmabuf_fd = os::IPCRecvHandle(socket_fd);
     if (dmabuf_fd == -1) return -1;
 
     HsaGraphicsResourceInfo info;
-    HSA_REGISTER_MEM_FLAGS regFlags;
+    HSA_REGISTER_MEM_FLAGS regFlags{0};
     regFlags.ui32.requiresVAddr = !isDmabufSysmem;
-    int err = HSAKMT_CALL(hsaKmtRegisterGraphicsHandleToNodesExt(dmabuf_fd, &info, numNodes, nodes, regFlags));
+    int err = HSAKMT_CALL(hsaKmtRegisterGraphicsHandleToNodesExt(static_cast<HSAuint64>(dmabuf_fd), &info, numNodes, nodes, regFlags));
     if (err == HSAKMT_STATUS_SUCCESS) {
       *importAddress = info.MemoryAddress;
       *importSize = info.SizeInBytes;
@@ -1614,34 +1495,40 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
 
       HsaExternalHandleDesc desc;
       desc.device_handle = agent->libThunkDev();
-      desc.fd = static_cast<HSAint32>(dmabuf_fd);
+      desc.fd = static_cast<HSAint64>(dmabuf_fd);
       desc.type = HSA_EXTERNAL_HANDLE_DMA_BUF;
       desc.metadata = static_cast<HSAuint32>(shared_handle);
+      desc.mem = *importAddress;
       HsaHandleImportFlags hflags;
       hflags.ui32.IPCHandle = 1;
       hflags.ui32.SysMem = isDmabufSysmem;
       hflags.ui32.UpdateMetadata = 0;
-      HsaHandleImportResult res;
+      HsaHandleImportResult res = {};
       HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtHandleImport(&desc, &res, &hflags));
       if (status != HSAKMT_STATUS_SUCCESS) {
         fprintf(stderr, "IPC Client Import: Invalid IPC handle! expected %u, got %u\n",
                 shared_handle, res.metadata);
-        close(dmabuf_fd);
+        runtime_singleton_->DmaBufClose(static_cast<int>(dmabuf_fd));
         return -1;
       }
 
-      // Store the buffer object handle in allocation map for later use
+      // Store the buffer object handle in allocation map for later use.
+      // If a stale entry exists at this VA (from a previous import that was
+      // never detached), free the old BO first to avoid leaking it.
       if (status == HSAKMT_STATUS_SUCCESS) {
         std::lock_guard<std::shared_mutex> lock(memory_lock_);
-        allocation_map_[*importAddress] =
-            AllocationRegion(nullptr, *importSize, *importSize, core::MemoryRegion::AllocateNoFlags);
-        allocation_map_[*importAddress].thunk_bo = res.buf_handle;
+        auto [it, inserted] = allocation_map_.try_emplace(
+        *importAddress, nullptr, *importSize, *importSize, core::MemoryRegion::AllocateNoFlags);
+        if (!inserted && it->second.thunk_bo) {
+          HSAKMT_CALL(hsaKmtMemHandleFree(it->second.thunk_bo));
+        }
+        it->second.thunk_bo = res.buf_handle;
       }
-      close(dmabuf_fd);
+      runtime_singleton_->DmaBufClose(static_cast<int>(dmabuf_fd));
     }
 
     // Ping socket server to close exporter
-    if (write(socket_fd, buf, sizeof(buf)) == -1) return -1;
+    if (os::IPCSocketWrite(socket_fd, buf, sizeof(buf)) == -1) return -1;
     return err;
 }
 
@@ -1663,8 +1550,8 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
       len = Min(len, importSize - fragOffset);
     }
     std::lock_guard<std::shared_mutex> lock(memory_lock_);
-    allocation_map_[importAddress] =
-        AllocationRegion(nullptr, len, len, core::MemoryRegion::AllocateNoFlags);
+    allocation_map_.try_emplace(
+        importAddress, nullptr, len, len, core::MemoryRegion::AllocateNoFlags);
     allocation_map_[importAddress].thunk_bo = thunk_bo;
   };
 
@@ -1722,7 +1609,6 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
     dmaBufFDHandle = (dmaBufFDHandleHi << 32) | dmaBufFDHandleLo;
   }
 
-#if defined(__linux__)
   if (num_agents == 0) {
     bool isDmabufSysMem = ipc_dmabuf_supported_ && importHandle.handle[3];
 
@@ -1739,6 +1625,7 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
 
     // Create a shared cpu access pointer for user
     void *cpuPtr;
+    void* intermediateAddr = importAddress;
     HsaMemoryObjectHandle bo = allocation_map_[importAddress].thunk_bo;
     HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryCpuMap(bo, &cpuPtr));
     if (status != HSAKMT_STATUS_SUCCESS) {
@@ -1751,12 +1638,17 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
     }
     importAddress = cpuPtr;
     fixFragment(bo);
+
+    // Remove the stale intermediate entry created by IPCClientImport.
+    // The canonical entry now lives at cpuPtr (set by fixFragment above).
+    if (intermediateAddr != importAddress) {
+      std::lock_guard<std::shared_mutex> lock(memory_lock_);
+      allocation_map_.erase(intermediateAddr);
+    }
+
     *mapped_ptr = importAddress;
     return HSA_STATUS_SUCCESS;
   }
-#else
-  assert(!"Unimplemented!");
-#endif
 
   HSAuint32* nodes = nullptr;
   if (num_agents > tinyArraySize)
@@ -1785,7 +1677,6 @@ hsa_status_t Runtime::IPCDetach(void* ptr) {
     const auto& it = allocation_map_.find(ptr);
     if (it != allocation_map_.end()) {
       if (it->second.region != nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-#if defined(__linux__)
       if (it->second.thunk_bo) {
         HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaUnmap(it->second.thunk_bo, 0,
                                                                static_cast<HSAuint64>(it->second.size),
@@ -1799,9 +1690,6 @@ hsa_status_t Runtime::IPCDetach(void* ptr) {
         }
         ldrmImportCleaned = true;
       }
-#else
-      assert(!"Unimplemented!");
-#endif
       allocation_map_.erase(it);
       lock.unlock();  // Can't hold memory lock when using pointer info.
 
@@ -1840,9 +1728,6 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
     assert(async_events_.handler_[index] != nullptr);
     bool keep = async_events_.handler_[index](value, async_events_.arg_[index]);
     if (!keep) {
-      if (!wait_any) {
-        hsa_signals[index]->WaitingDec();
-      }
       hsa_signal_handle(async_events_.signal_[index])->Release();
       async_events_.CopyIndex(index, async_events_.Size() - 1);
       async_events_.PopBack();
@@ -1895,15 +1780,15 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
           Signal::WaitAnyExceptions(uint32_t(async_events_.Size()), &async_events_.signal_[0],
                                     &async_events_.cond_[0], &async_events_.value_[0], &value[0]);
     } else {
-     if (core::Runtime::runtime_singleton_->flag().wait_any()) {
-       index = Signal::WaitMultiple(uint32_t(async_events_.Size()), &async_events_.signal_[0],
+      if (core::Runtime::runtime_singleton_->flag().wait_any()) {
+        index = Signal::WaitMultiple(uint32_t(async_events_.Size()), &async_events_.signal_[0],
                                     &async_events_.cond_[0], &async_events_.value_[0], uint64_t(-1),
                                     HSA_WAIT_STATE_BLOCKED, value, false);
-     } else {
-      // Skip wake-up signal logic
-      index = 1;
-      wait_any = false;
-     }
+      } else {
+        // Skip wake-up signal logic
+        index = 1;
+        wait_any = false;
+      }
     }
 
     // Reset the control signal
@@ -1920,14 +1805,6 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       bool polling = false;
       bool init_age = true;
 
-      // Mark all signals with a waiting tag
-      // @note: Waiting tag must be marked before the signal state check on CPU to
-      // avoid a possible race condition between KFD sleep and rocr's awake call
-      if (!wait_any) {
-        for (size_t e = 0; e < async_events_.Size(); e++) {
-          hsa_signals[e]->WaitingInc();
-        }
-      }
       while (!finish) {
         // If exception or WaitAny(), then finish with just one iterration
         if (wait_any) {
@@ -1969,16 +1846,59 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
         }
         // If nothing was complete and an interrupt wait was requested, then call KFD
         if (interrupt_wait) {
-          WaitForInterrupt();
+          // Active poll before the expensive kernel wait, matching WaitMultiple's
+          // 200us polling window. During this window, new async handlers can wake
+          // the thread via atomic stores on the wake signal without needing the
+          // expensive(~1.5us) hsaKmtSetEvent ioctl call.
+          timer::fast_clock::time_point start_time = timer::fast_clock::now();
+          const timer::fast_clock::duration kMaxElapsed = std::chrono::microseconds(200);
+
+          while (true) {
+            for (size_t pi = 0; pi < async_events_.Size(); pi++) {
+              auto pval = atomic::Load(&hsa_signals[pi]->signal_.value,
+                                       std::memory_order_relaxed);
+              if (CheckSignalCondition(pval, async_events_.cond_[pi],
+                                       async_events_.value_[pi])) {
+                finish = true;
+                break;
+              }
+            }
+            if (finish) break;
+
+            if (timer::fast_clock::now() - start_time < kMaxElapsed) {
+              continue;
+            }
+
+            // Polling window expired — mark signals as waiting before kernel sleep.
+            // WaitingInc must be set before re-checking signal values to avoid
+            // a race where a producer's StoreRelease skips hsaKmtSetEvent.
+            for (size_t e = 0; e < async_events_.Size(); e++) {
+              hsa_signals[e]->WaitingInc();
+            }
+
+            // Re-check all signals after WaitingInc to close the race window
+            for (size_t ri = 0; ri < async_events_.Size(); ri++) {
+              auto rval = atomic::Load(&hsa_signals[ri]->signal_.value,
+                                       std::memory_order_relaxed);
+              if (CheckSignalCondition(rval, async_events_.cond_[ri],
+                                       async_events_.value_[ri])) {
+                finish = true;
+                break;
+              }
+            }
+
+            if (!finish) {
+              WaitForInterrupt();
+            }
+
+            for (size_t e = 0; e < async_events_.Size(); e++) {
+              // Remove waiting tag from events
+              hsa_signals[e]->WaitingDec();
+            }
+            break;
+          }
           init_age = false;
         }
-      }
-    }
-
-    if (!wait_any) {
-      // Remove the waiting tags from events
-      for (size_t e = 0; e < async_events_.Size(); e++) {
-        hsa_signals[e]->WaitingDec();
       }
     }
 
@@ -2021,7 +1941,7 @@ void Runtime::AsyncEventsPool::clear() {
     size_t capacity = 0;
     for (auto& block : block_list_) capacity += block.second;
     if (capacity != free_list_.size())
-      debug_print("Warning: Resource leak detected by AsyncEventsPool, %ld items leaked.\n",
+      debug_print("Warning: Resource leak detected by AsyncEventsPool, %zd items leaked.\n",
                   capacity - free_list_.size());
   }
 
@@ -2074,6 +1994,7 @@ void Runtime::AsyncEventsPool::free(AsyncEventItem* ptr) {
       }
     }
     assert(valid && "Object does not belong to pool.");
+    (void)valid;
   }
   free_list_.push_back(ptr);
 }
@@ -2232,6 +2153,45 @@ bool Runtime::VMFaultHandler(hsa_signal_value_t val, void* arg) {
   HsaMemoryAccessFault& fault =
       vm_fault_event->EventData.EventData.MemoryAccessFault;
 
+  // The per-queue ExceptionHandler runs on a separate thread and marks the
+  // faulting queue.  Wait for it so we can stamp address/reason onto the
+  // correct queue before the system-event callback fires.
+  if (runtime_singleton_->KfdVersion().supports_exception_debugging) {
+    runtime_singleton_->WaitForVMFault(50);
+  }
+
+  // Build the fault-reason mask once.
+  auto buildReasonMask = [](const HsaAccessAttributeFailure& f) -> uint32_t {
+    uint32_t mask = 0;
+    if (f.NotPresent == 1) mask |= HSA_AMD_MEMORY_FAULT_PAGE_NOT_PRESENT;
+    if (f.ReadOnly == 1)   mask |= HSA_AMD_MEMORY_FAULT_READ_ONLY;
+    if (f.NoExecute == 1)  mask |= HSA_AMD_MEMORY_FAULT_NX;
+    if (f.GpuAccess == 1)  mask |= HSA_AMD_MEMORY_FAULT_HOST_ONLY;
+    if (f.Imprecise == 1)  mask |= HSA_AMD_MEMORY_FAULT_IMPRECISE;
+    if (f.ECC == 1 && f.ErrorType == 0) mask |= HSA_AMD_MEMORY_FAULT_DRAMECC;
+    if (f.ErrorType == 1)  mask |= HSA_AMD_MEMORY_FAULT_SRAMECC;
+    if (f.ErrorType == 2)  mask |= HSA_AMD_MEMORY_FAULT_DRAMECC;
+    if (f.ErrorType == 3)  mask |= HSA_AMD_MEMORY_FAULT_HANG;
+    return mask;
+  };
+  uint32_t reason_mask = buildReasonMask(fault.Failure);
+
+  // Stamp fault address and reason onto any queues that ExceptionHandler
+  // marked as faulted on this agent.
+  auto node_it = runtime_singleton_->agents_by_node_.find(fault.NodeId);
+  if (node_it != runtime_singleton_->agents_by_node_.end()) {
+    Agent* agent = node_it->second.front();
+    if (agent->device_type() == Agent::DeviceType::kAmdGpuDevice) {
+      AMD::GpuAgent* gpu_agent = static_cast<AMD::GpuAgent*>(agent);
+      for (auto* q : gpu_agent->GetAqlQueues()) {
+        auto* aql_q = static_cast<AMD::AqlQueue*>(q);
+        if (aql_q->IsVMFaulted()) {
+          aql_q->SetVMFaultDetails(fault.VirtualAddress, reason_mask);
+        }
+      }
+    }
+  }
+
   hsa_status_t custom_handler_status = HSA_STATUS_ERROR;
   auto system_event_handlers = runtime_singleton_->GetSystemEventHandlers();
   Agent* faulty_agent = nullptr;
@@ -2248,34 +2208,7 @@ bool Runtime::VMFaultHandler(hsa_signal_value_t val, void* arg) {
     fault_info.agent = Agent::Convert(faulty_agent);
 
     fault_info.virtual_address = fault.VirtualAddress;
-    fault_info.fault_reason_mask = 0;
-    if (fault.Failure.NotPresent == 1) {
-      fault_info.fault_reason_mask |= HSA_AMD_MEMORY_FAULT_PAGE_NOT_PRESENT;
-    }
-    if (fault.Failure.ReadOnly == 1) {
-      fault_info.fault_reason_mask |= HSA_AMD_MEMORY_FAULT_READ_ONLY;
-    }
-    if (fault.Failure.NoExecute == 1) {
-      fault_info.fault_reason_mask |= HSA_AMD_MEMORY_FAULT_NX;
-    }
-    if (fault.Failure.GpuAccess == 1) {
-      fault_info.fault_reason_mask |= HSA_AMD_MEMORY_FAULT_HOST_ONLY;
-    }
-    if (fault.Failure.Imprecise == 1) {
-      fault_info.fault_reason_mask |= HSA_AMD_MEMORY_FAULT_IMPRECISE;
-    }
-    if (fault.Failure.ECC == 1 && fault.Failure.ErrorType == 0) {
-      fault_info.fault_reason_mask |= HSA_AMD_MEMORY_FAULT_DRAMECC;
-    }
-    if (fault.Failure.ErrorType == 1) {
-      fault_info.fault_reason_mask |= HSA_AMD_MEMORY_FAULT_SRAMECC;
-    }
-    if (fault.Failure.ErrorType == 2) {
-      fault_info.fault_reason_mask |= HSA_AMD_MEMORY_FAULT_DRAMECC;
-    }
-    if (fault.Failure.ErrorType == 3) {
-      fault_info.fault_reason_mask |= HSA_AMD_MEMORY_FAULT_HANG;
-    }
+    fault_info.fault_reason_mask = reason_mask;
 
     for (auto& callback : system_event_handlers) {
       hsa_status_t err = callback.first(&memory_fault_event, callback.second);
@@ -2361,7 +2294,7 @@ void Runtime::PrintMemoryMapNear(void* ptr) {
       else if (region->IsLDS())
         kind = "LDS";
     }
-    fprintf(stderr, "%p, 0x%lx, %s\n", it->first, it->second.size, kind.c_str());
+    fprintf(stderr, "%p, 0x%zx, %s\n", it->first, it->second.size, kind.c_str());
     it++;
   }
   fprintf(stderr, "\n");
@@ -2378,14 +2311,14 @@ void Runtime::PrintMemoryMapNear(void* ptr) {
     hsa_status_t err = runtime_singleton_->PtrInfo(const_cast<void*>(it->first), &info, malloc,
                                                    &count, &canAccess, &block);
     if (err == HSA_STATUS_SUCCESS) {
-      fprintf(stderr, "PtrInfo:\n\tAddress: %p-%p/%p-%p\n\tSize: 0x%lx\n\tType: %u\n\tOwner: %p\n",
+      fprintf(stderr, "PtrInfo:\n\tAddress: %p-%p/%p-%p\n\tSize: 0x%zx\n\tType: %u\n\tOwner: %p\n",
               info.agentBaseAddress, (char*)info.agentBaseAddress + info.sizeInBytes,
               info.hostBaseAddress, (char*)info.hostBaseAddress + info.sizeInBytes, info.sizeInBytes,
               info.type, reinterpret_cast<void*>(info.agentOwner.handle));
       fprintf(stderr, "\tCanAccess: %u\n", count);
       for (int t = 0; t < count; t++)
         fprintf(stderr, "\t\t%p\n", reinterpret_cast<void*>(canAccess[t].handle));
-      fprintf(stderr, "\tIn block: %p, 0x%lx\n", block.base, block.length);
+      fprintf(stderr, "\tIn block: %p, 0x%zx\n", block.base, block.length);
       free(canAccess);
     }
     it++;
@@ -2405,7 +2338,7 @@ Runtime::AsyncEventsInfo::~AsyncEventsInfo() {
 }
 
 Runtime::AsyncEventsControl::AsyncEventsControl(AsyncEventsInfo *asyncInfo)
-  : info_(asyncInfo), exit(false) {
+  : exit(false), info_(asyncInfo) {
 
   auto err = HSA::hsa_signal_create(0, 0, NULL, &wake);
   if (err != HSA_STATUS_SUCCESS)
@@ -2434,11 +2367,11 @@ Runtime::Runtime()
       ref_count_(0),
       thunkLoader_(nullptr),
       kfd_version{},
-      ipc_sock_server_fd_(0),
+      ipc_sock_server_fd_(os::INVALID_SOCKET_VALUE),
       ipc_sock_server_thread_(nullptr) {
   virtual_mem_api_supported_ = false;
-  aqlprofile_lib_ = nullptr;
   ipc_dmabuf_supported_ = false;
+  aqlprofile_lib_ = nullptr;
   xnack_enabled_ = false;
   g_use_interrupt_wait = true;
   g_use_mwaitx = true;
@@ -2498,11 +2431,11 @@ hsa_status_t Runtime::Load() {
 
   loader_.reset(amd::hsa::loader::Loader::Create(&loader_context_));
 
-  // Load extensions
-  LoadExtensions();
-
   // Probe aqlprofile availability once and cache the result
   aqlprofile_lib_ = os::LoadLib(kAqlProfileLib);
+
+  // Load extensions
+  LoadExtensions();
 
   // Initialize per GPU scratch, blits, and trap handler
   for (core::Agent* agent : gpu_agents_) {
@@ -2532,7 +2465,7 @@ hsa_status_t Runtime::Load() {
 void Runtime::Unload() {
   // Close IPC socket server
   if (ipc_sock_server_conns_.size())
-    IPCClientImport(getpid(), IPC_SOCK_SERVER_CONN_CLOSE_HANDLE,
+    IPCClientImport(os::GetProcessId(), IPC_SOCK_SERVER_CONN_CLOSE_HANDLE,
                     0, nullptr, nullptr, nullptr, false, 0);
 
   if (ipc_sock_server_thread_) {
@@ -3444,6 +3377,7 @@ hsa_status_t Runtime::SvmPrefetch(void* ptr, size_t size, hsa_agent_t agent,
     attrib.value = op->node_id;
     HSAKMT_STATUS error = HSAKMT_CALL(hsaKmtSVMSetAttr(op->base, op->size, 1, &attrib));
     assert(error == HSAKMT_STATUS_SUCCESS && "KFD Prefetch failed.");
+    (void)error;
 
     removePrefetchRanges(op);
 
@@ -3514,6 +3448,7 @@ Agent* Runtime::GetSVMPrefetchAgent(void* ptr, size_t size) {
     HSAKMT_STATUS error =
         HSAKMT_CALL(hsaKmtSVMGetAttr(reinterpret_cast<void*>(range.first), range.second, 1, &attrib));
     assert(error == HSAKMT_STATUS_SUCCESS && "KFD prefetch query failed.");
+    (void)error;
 
     if (attrib.value == -1) return nullptr;
     if (prefetch_node == -2) prefetch_node = attrib.value;
@@ -3523,6 +3458,163 @@ Agent* Runtime::GetSVMPrefetchAgent(void* ptr, size_t size) {
   assert(prefetch_node != -2 && "prefetch_node was not updated.");
   assert(prefetch_node != -1 && "Should have already returned.");
   return agents_by_node_[prefetch_node][0];
+}
+
+hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count,
+                                      uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
+                                      hsa_signal_t completion_signal) {
+
+#if !defined (__linux__)
+  return HSA_STATUS_ERROR;
+#else
+  const size_t kPageSize = os::PageSize();
+
+  // Get a CPU agent for migration target
+  if (cpu_agents().empty()) return HSA_STATUS_ERROR;
+
+  // Validate the pointers
+  for (int i = 0; i < count; i++) {
+    hsa_amd_pointer_info_t ptr_info = {};
+    ptr_info.size = sizeof(ptr_info);
+    hsa_status_t status = PtrInfo(ptrs[i], &ptr_info, nullptr, nullptr, nullptr);
+    if (status != HSA_STATUS_SUCCESS) {
+      debug_warning(false && "Retrieving SVM pointer information failed");
+      return status;
+    }
+
+    // Only SVM allocations that were reserved using hsa_amd_vmem_address_reserve are valid for discard
+    if (ptr_info.type != HSA_EXT_POINTER_TYPE_RESERVED_ADDR || ptr_info.registered) {
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+  }
+
+  // Discard operation context
+  struct DiscardOp {
+    std::vector<uint32_t> target_cpus;
+    std::vector<std::pair<void*, size_t>> regions;
+    std::atomic<uint32_t> remaining_deps;
+    hsa_signal_t completion;
+  };
+
+  DiscardOp* op = new DiscardOp();
+  MAKE_NAMED_SCOPE_GUARD(OpGuard, [&]() { delete op; });
+
+  // Prepare memory regions with page alignment and store target cpu agent for each region
+  op->regions.reserve(count);
+  op->target_cpus.reserve(count);
+  op->completion = completion_signal;
+
+  for (uint32_t i = 0; i < count; i++) {
+    uint8_t* base = AlignDown((uint8_t*)ptrs[i], kPageSize);
+    uint8_t* end = AlignUp((uint8_t*)ptrs[i] + sizes[i], kPageSize);
+    size_t len = end - base;
+
+    op->regions.emplace_back(std::make_pair(reinterpret_cast<void*>(base), len));
+
+    // Query the nearest cpu agent for the region
+    HSA_SVM_ATTRIBUTE attr;
+    attr.type = HSA_SVM_ATTR_PREFERRED_LOC;
+    attr.value = 0;
+
+    AMD::CpuAgent* cpu = nullptr;
+    HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtSVMGetAttr(base, len, 1, &attr));
+
+    if (status == HSAKMT_STATUS_SUCCESS &&
+        (attr.value != 0xFFFFFFFF && attr.value != INVALID_NODEID)) {
+      core::Agent* agent = agents_by_node_[attr.value][0];
+
+      if (agent->device_type() == core::Agent::kAmdCpuDevice) {
+        // Already on a CPU agent; skip prefetch for this region
+        op->target_cpus.push_back(UINT32_MAX);
+        continue;
+      } else if (agent->device_type() == core::Agent::kAmdGpuDevice) {
+        AMD::GpuAgent* gpu = static_cast<AMD::GpuAgent*>(agent);
+        cpu = static_cast<AMD::CpuAgent*>(gpu->GetNearestCpuAgent());
+      }
+    }
+
+    if (!cpu) {
+      // Fallback to use first available CPU agent when nearest fails
+      cpu = static_cast<AMD::CpuAgent*>(cpu_agents_[0]);
+    }
+    op->target_cpus.push_back(cpu->node_id());
+  }
+
+  // Dependancy signals already at 0 need not be monitored.
+  std::vector<hsa_signal_t> pending_deps;
+  pending_deps.reserve(num_dep_signals);
+  for (int i = 0; i < num_dep_signals; i++) {
+    if (Signal::Convert(dep_signals[i])->LoadRelaxed() != 0) {
+      pending_deps.push_back(dep_signals[i]);
+    }
+  }
+
+  /* Function to discard all memory regions once dependencies are cleared.
+  For every region, prefetch to target cpu (if not already on cpu), then discard pages */
+  static auto discard_all = [](DiscardOp* op) {
+    for (size_t i = 0; i < op->regions.size(); i++) {
+      void* base = op->regions[i].first;
+      size_t size = op->regions[i].second;
+      uint32_t target_cpu = op->target_cpus[i];
+
+      if (target_cpu != UINT32_MAX) {
+        HSA_SVM_ATTRIBUTE attr;
+        attr.type = HSA_SVM_ATTR_PREFETCH_LOC;
+        attr.value = target_cpu;
+
+        HSAKMT_STATUS err = HSAKMT_CALL(hsaKmtSVMSetAttr(base, size, 1, &attr));
+        if (err != HSAKMT_STATUS_SUCCESS) {
+          debug_warning(false && "hsaKmtSVMSetAttr prefetch failed in SvmBatchDiscard");
+        }
+      }
+
+      int res = madvise(base, size, MADV_FREE);
+      if (res != 0) {
+        debug_warning(false && "madvise MADV_FREE failed in SvmBatchDiscard");
+      }
+    }
+
+    // Signal completion and cleanup after all regions have been discarded
+    if (op->completion.handle != 0) {
+      Signal::Convert(op->completion)->SubRelaxed(1);
+    }
+    delete op;
+  };
+
+  /* Each pending dep signal calls this handler when it reaches 0.
+  The last one to decrement remaining_deps to 0 will triggers the discard. */
+  static hsa_amd_signal_handler signal_handler = [](hsa_signal_value_t value, void* arg) {
+    DiscardOp* op = reinterpret_cast<DiscardOp*>(arg);
+
+    if (op->remaining_deps.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+      discard_all(op);
+    }
+    return false;
+  };
+
+  // Dispatch discard call directly if there are no pending deps
+  if (pending_deps.empty()) {
+    op->remaining_deps.store(1, std::memory_order_release);
+    auto no_dependencies = [](void* arg) { signal_handler(0, arg); };
+    hsa_status_t err = AMD::hsa_amd_async_function(no_dependencies, op);
+    if (err != HSA_STATUS_SUCCESS) {
+      throw AMD::hsa_exception(err, "Failed to schedule async discard operation");
+    }
+  } else {
+    // Set signal handlers for all pending dependencies
+    op->remaining_deps.store(static_cast<uint32_t>(pending_deps.size()),
+                             std::memory_order_release);
+    for (size_t i = 0; i < pending_deps.size(); i++) {
+      /* SetAsyncSignalHandler currently always returns HSA_STATUS_SUCCESS. If it is modified to
+      return errors in the future, we need to handle the possibility of use-after-free and double deletion
+      of op if this call fails midway and leaves some handlers set but not others. */
+      SetAsyncSignalHandler(pending_deps[i], HSA_SIGNAL_CONDITION_EQ, 0, signal_handler, op);
+    }
+  }
+
+  OpGuard.Dismiss();
+  return HSA_STATUS_SUCCESS;
+#endif
 }
 
 hsa_status_t Runtime::DmaBufExport(const void* ptr, size_t size, int* dmabuf, uint64_t* offset,
@@ -3575,11 +3667,14 @@ hsa_status_t Runtime::DmaBufExport(const void* ptr, size_t size, int* dmabuf, ui
 
 hsa_status_t Runtime::DmaBufClose(int dmabuf) {
 #ifdef __linux__
-  int err = close(dmabuf);
+  int err = 0;
+  if (dmabuf >= 0) {
+    err = close(dmabuf);
+  }
   if (err == 0) return HSA_STATUS_SUCCESS;
   return HSA_STATUS_ERROR_RESOURCE_FREE;
 #else
-  return HSA_STATUS_ERROR_NOT_INITIALIZED;
+  return HSA_STATUS_SUCCESS;
 #endif
 }
 
@@ -3593,8 +3688,7 @@ hsa_status_t Runtime::VMemoryAddressReserve(void** va, size_t size, uint64_t add
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
 
   if (flags & HSA_AMD_VMEM_ADDRESS_NO_REGISTER) {
-    size_t requested = size + alignment - rocr::os::PageSize();
-    auto mem = rocr::os::ReserveMemory(addr, requested, alignment, rocr::os::MEM_PROT_RW);
+    auto mem = rocr::os::ReserveMemory(addr, size, alignment, rocr::os::MEM_PROT_RW);
     if (mem == nullptr)
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
@@ -3854,16 +3948,28 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
   status =
       targetAgent->driver().ImportDMABuf(dmabuf_fd, *targetAgent, &shareable_handle, reuse_handle);
   assert(status == HSA_STATUS_SUCCESS);
-  core::Runtime::runtime_singleton_->DmaBufClose(dmabuf_fd);
   if (status != HSA_STATUS_SUCCESS)
     return;
-}
+  status = core::Runtime::runtime_singleton_->DmaBufClose(dmabuf_fd);
+  if (status != HSA_STATUS_SUCCESS)
+    return;
+  }
 
 Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
-  if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) return;
-
-  hsa_status_t status = targetAgent->driver().DestroyImportedShareableHandle(&shareable_handle);
-  assert(status == HSA_STATUS_SUCCESS);
+  if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
+#if defined(__linux__)
+    if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) assert(!"Unimplemented");
+#endif
+    /* Remap the CPU mapping back to anonymous, freeing the DRM FD while retaining VA reservation */
+    bool result = rocr::os::UncommitMemory(va, size);
+    assert(result && "Failed to remap VA to anonymous");
+    (void)result;
+  }
+  else {
+    hsa_status_t status = targetAgent->driver().DestroyImportedShareableHandle(&shareable_handle);
+    assert(status == HSA_STATUS_SUCCESS);
+    (void)status;
+  }
 }
 
 hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permission_t perms) {

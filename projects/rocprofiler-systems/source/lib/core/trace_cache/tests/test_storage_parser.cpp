@@ -1,27 +1,9 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "core/trace_cache/storage_parser.hpp"
 #include "mocked_types.hpp"
+#include <cstdint>
 
 #include <atomic>
 #include <cstddef>
@@ -208,7 +190,7 @@ protected:
 
             ofs.write(reinterpret_cast<const char*>(&header), sizeof(header));
 
-            std::vector<uint8_t> buffer;
+            std::vector<std::uint8_t> buffer;
             buffer.reserve(header.sample_size);
             buffer.assign(header.sample_size, 0xFF);
 
@@ -353,7 +335,7 @@ TEST_F(storage_parser_test, load_file_with_zero_sized_samples)
 
         ofs.write(reinterpret_cast<const char*>(&valid_header), sizeof(valid_header));
 
-        std::vector<uint8_t> buffer(valid_header.sample_size);
+        std::vector<std::uint8_t> buffer(valid_header.sample_size);
         rocprofsys::trace_cache::serialize(buffer.data(), valid_sample);
         ofs.write(reinterpret_cast<const char*>(buffer.data()), valid_header.sample_size);
 
@@ -386,7 +368,7 @@ TEST_F(storage_parser_test, load_nonexisting_file)
 
 TEST_F(storage_parser_test, load_large_sample_data)
 {
-    std::vector<uint8_t> large_payload(10000);
+    std::vector<std::uint8_t> large_payload(10000);
     std::iota(large_payload.begin(), large_payload.end(), 0);
 
     std::vector<test_sample_3> samples_3 = { test_sample_3(large_payload) };
@@ -448,7 +430,7 @@ TEST_F(storage_parser_test, write_less_than_expected)
 
     ofs.write(reinterpret_cast<const char*>(&header), sizeof(header));
 
-    std::vector<uint8_t> partial_data(50, 0xAA);
+    std::vector<std::uint8_t> partial_data(50, 0xAA);
     ofs.write(reinterpret_cast<const char*>(partial_data.data()), partial_data.size());
 
     ofs.close();
@@ -483,7 +465,7 @@ TEST_F(storage_parser_test, read_fragmented_space)
         sample_header header;
         header.sample_size = 100;
         header.type        = test_type_identifier_t::fragmented_space;
-        std::vector<uint8_t> fragmented_space;
+        std::vector<std::uint8_t> fragmented_space;
         fragmented_space.reserve(header.sample_size);
         fragmented_space.assign(header.sample_size, 0);
 
@@ -518,7 +500,7 @@ TEST_F(storage_parser_test, read_fragmented_space)
 TEST_F(storage_parser_test, load_sample_type_5_optional)
 {
     std::vector<test_sample_5> samples_5 = {
-        test_sample_5(std::optional<uint32_t>{ 123 }), test_sample_5(std::nullopt)
+        test_sample_5(std::optional<std::uint32_t>{ 123 }), test_sample_5(std::nullopt)
     };
 
     {

@@ -60,15 +60,8 @@ TeamBroadcastmemOnStreamTester::TeamBroadcastmemOnStreamTester(TesterArguments a
   int total_bytes = num_bytes_wg * num_teams;
   buf_size = total_bytes;
 
-  source_buf = static_cast<char *>(rocshmem_malloc(buf_size));
-  dest_buf = static_cast<char *>(rocshmem_malloc(buf_size));
-
-  if (source_buf == nullptr || dest_buf == nullptr) {
-    std::cerr << "Error allocating memory from symmetric heap" << std::endl;
-    std::cerr << "source: " << source_buf << ", dest: " << dest_buf
-              << std::endl;
-    rocshmem_global_exit(1);
-  }
+  source_buf = static_cast<char *>(alloc_test_buffer(buf_size, args.local_buf_type));
+  dest_buf = static_cast<char *>(alloc_test_buffer(buf_size));
 
   team_world_dup.resize(num_teams);
 
@@ -88,8 +81,8 @@ TeamBroadcastmemOnStreamTester::~TeamBroadcastmemOnStreamTester() {
     CHECK_HIP(hipEventDestroy(start_events_timed[i]));
     CHECK_HIP(hipStreamDestroy(streams[i]));
   }
-  rocshmem_free(source_buf);
-  rocshmem_free(dest_buf);
+  free_test_buffer(source_buf, args.local_buf_type);
+  free_test_buffer(dest_buf);
 }
 
 void TeamBroadcastmemOnStreamTester::preLaunchKernel() {
@@ -113,7 +106,7 @@ void TeamBroadcastmemOnStreamTester::postLaunchKernel() {
   }
 
   // Get elapsed time for each work group from HIP events
-  for (int wg_id = 0; wg_id < num_teams && wg_id < num_timers; wg_id++) {
+  for (uint32_t wg_id = 0; wg_id < static_cast<uint32_t>(num_teams) && wg_id < static_cast<uint32_t>(num_timers); wg_id++) {
     float elapsed_time_ms = 0.0f;
     CHECK_HIP(hipEventElapsedTime(&elapsed_time_ms, start_events_timed[wg_id],
                                   stop_events_timed[wg_id]));
@@ -128,7 +121,7 @@ void TeamBroadcastmemOnStreamTester::postLaunchKernel() {
   }
 
   // Fill remaining timers with zero if num_timers > num_teams
-  for (int i = num_teams; i < num_timers; i++) {
+  for (uint32_t i = num_teams; i < static_cast<uint32_t>(num_timers); i++) {
     start_time[i] = 0;
     end_time[i] = 0;
   }
@@ -168,8 +161,8 @@ void TeamBroadcastmemOnStreamTester::resetBuffers(size_t size) {
   }
 }
 
-void TeamBroadcastmemOnStreamTester::launchKernel(dim3 gridSize,
-                                                  dim3 blockSize,
+void TeamBroadcastmemOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize,
+                                                  [[maybe_unused]] dim3 blockSize,
                                                   int loop,
                                                   size_t size) {
   // Execute warmup iterations (skip)

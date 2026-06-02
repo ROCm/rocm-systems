@@ -236,7 +236,7 @@ amdsmi_free_name_value_pairs = _libraries['libamd_smi.so'].amdsmi_free_name_valu
 amdsmi_free_name_value_pairs.restype = None
 amdsmi_free_name_value_pairs.argtypes = [ctypes.POINTER(None)]"""
     else:
-        print("Unknown operating system. It is only supporing Linux and Windows.")
+        print("Unknown operating system. It is only supporting Linux and Windows.")
         return
 
     arguments.append("--clang-args=-I" + clang_include_dir + clang_extra_args)
@@ -255,7 +255,7 @@ amdsmi_free_name_value_pairs.argtypes = [ctypes.POINTER(None)]"""
             output_file_contents = fin.read()
         output_file_array = output_file_contents.split("\n")
 
-        # Find all unamed occurences in the output_file
+        # Find all unnamed occurrences in the output_file
         struct_name_dict = {}
         for index, line in enumerate(output_file_array):
             if "amdsmi.h:" in line:

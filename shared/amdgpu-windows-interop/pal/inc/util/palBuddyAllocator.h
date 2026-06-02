@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2015-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -110,7 +110,7 @@ public:
     /// Returns the size of the largest allocation that can be suballocated with this buddy allocator.
     gpusize MaximumAllocationSize() const;
 
-    /// Claims (doesn't allocate) some memory, used to quickly determine if a pool of memory has availible memory.
+    /// Claims (doesn't allocate) some memory, used to quickly determine if a pool of memory has available memory.
     /// Doesn't affect internal state unless Result::Success is returned
     ///
     /// @param [in]  size           The size of the requested suballocation.
@@ -119,7 +119,7 @@ public:
     /// @returns Success if there is enough memory in this buddyAllocator to allocate the requested size of memory,
     ///          @ref ErrorOutOfGpuMemory if there is not enough memory
     ///
-    /// @warning Unless this is called to test availible memory before every call to Allocate, then the results will not
+    /// @warning Unless this is called to test available memory before every call to Allocate, then the results will not
     ///          be valid.
     Result ClaimGpuMemory(
         gpusize size,

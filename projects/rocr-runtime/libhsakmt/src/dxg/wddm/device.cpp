@@ -68,7 +68,12 @@ WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_i
   memset(&device_info_, 0, sizeof(device_info_));
 
   NTSTATUS ret = ParseDeviceInfo();
+  pr_rocr_info("kmd_version:%" PRIu32 "\n", device_info_.kmd_version);
   device_info_.hwsInfo.hwsMask.aql_queue &= !dxg_runtime->use_pm4_;
+  pr_rocr_info("hwsInfo: aql_queue=%d computeHwsEnabled=%d use_pm4_override=%d\n",
+           device_info_.hwsInfo.hwsMask.aql_queue,
+           device_info_.hwsInfo.hwsMask.computeHwsEnabled,
+           dxg_runtime->use_pm4_);
 
   if (ret == STATUS_OBJECT_NAME_NOT_FOUND || ret == STATUS_REVISION_MISMATCH) {
     // Skip adapter
@@ -147,10 +152,16 @@ bool WDDMDevice::QuerySegmentInfo()
 
     SegmentInfo info;
     info.segment_id = i;
-    info.segment_type = seg.SegmentProperties.SegmentType;
-    info.system_memory = seg.SegmentProperties.SystemMemory;
-    info.aperture = seg.Aperture;
-    info.commit_limit = seg.CommitLimit;
+    info.is_aperture = seg.Aperture;
+    info.is_system_memory = seg.SegmentProperties.SystemMemory;
+
+    if (seg.Aperture) {
+      info.kind = SegmentKind::kAperture;
+    } else {
+      info.kind = seg.SegmentProperties.SystemMemory
+                      ? SegmentKind::kSystemMemory
+                      : SegmentKind::kLocalMemory;
+    }
 
     segment_infos_.push_back(info);
   }
@@ -158,23 +169,22 @@ bool WDDMDevice::QuerySegmentInfo()
   return true;
 }
 
-bool WDDMDevice::GetSegmentId(D3DKMT_QUERYSTATISTICS_SEGMENT_TYPE segment_type,
-                              uint32_t &segment_id)
+bool WDDMDevice::FindSegmentId(SegmentKind segment_kind, uint32_t* segment_id)
 {
   for (const auto& seg_info : segment_infos_) {
-    if (seg_info.segment_type == segment_type) {
-      segment_id = seg_info.segment_id;
+    if (seg_info.kind == segment_kind) {
+      *segment_id = seg_info.segment_id;
       return true;
     }
   }
-  pr_err("Failed to get segment id for type %u\n", segment_type);
+
   return false;
 }
 
-/*Local heap(dedicated GPU memory) includes visiable heap and invisiable heap.
- *Non local heap refers to shared GPU memory and it is sytem memory.
+/*Local heap(dedicated GPU memory) includes visible heap and invisible heap.
+ *Non local heap refers to shared GPU memory and it is system memory.
  */
-uint64_t WDDMDevice::VramAvail(void) {
+hsa_status_t WDDMDevice::VramAvail(uint64_t* available_bytes) {
   D3DKMT_QUERYSTATISTICS stats;
   NTSTATUS ret;
   uint64_t usedVis = 0;
@@ -182,14 +192,16 @@ uint64_t WDDMDevice::VramAvail(void) {
   uint64_t usedNonLocal = 0;
   uint32_t segmentId = 0;
 
+  *available_bytes = 0;
+
   // wait fence complete
   uint64_t value = page_fence_value_.load();
-  if(!CpuWait(&page_syncobj_, &value, 1, false))
+  if (!CpuWait(&page_syncobj_, &value, 1, false))
     return HSA_STATUS_ERROR;
 
   if (IsDgpu()) {
     // local cpu-visible memory
-    if(!GetSegmentId(D3DKMT_QUERYSTATISTICS_SEGMENT_TYPE_MEMORY, segmentId))
+    if (!FindSegmentId(SegmentKind::kLocalMemory, &segmentId))
       return HSA_STATUS_ERROR;
 
     memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
@@ -202,33 +214,73 @@ uint64_t WDDMDevice::VramAvail(void) {
 
     // local invisible memory
     if (device_info_.local_invisible_heap_size) {
-      segmentId++;
+      uint32_t invisibleSegmentId = 0;
+      bool foundInvisible = false;
+      // Use the next local-memory segment after visible FB as invisible FB.
+      for (const auto& seg_info : segment_infos_) {
+        if (seg_info.kind == SegmentKind::kLocalMemory &&
+            seg_info.segment_id > segmentId) {
+          invisibleSegmentId = seg_info.segment_id;
+          foundInvisible = true;
+          break;
+        }
+      }
+
+      if (!foundInvisible) {
+        return HSA_STATUS_ERROR;
+      }
       memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
       stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
       stats.AdapterLuid = adapter_luid_;
-      stats.QuerySegment.SegmentId = 1;
+      stats.QuerySegment.SegmentId = invisibleSegmentId;
 
       ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
       if (ret == 0)
         usedInv = stats.QueryResult.SegmentInformation.BytesResident;
     }
 
-    return LocalHeapSize() - usedVis - usedInv;
+    *available_bytes = LocalHeapSize() - usedVis - usedInv;
   } else {
-    // APU - NonLocal memory
-    if(!GetSegmentId(D3DKMT_QUERYSTATISTICS_SEGMENT_TYPE_SYSMEM, segmentId))
+    // APU: the shared-system-memory budget is exposed as aperture segments
+    // with the SystemMemory bit set (collapsed to kAperture above), so
+    // FindSegmentId(kSystemMemory) always missed. Sum BytesResident across
+    // every aperture+system_memory segment for the residency footprint.
+    const uint64_t budget = NonLocalHeapSize();
+    if (budget == 0) {
+      // No budget from WKMI — bail rather than underflow VramAvail.
       return HSA_STATUS_ERROR;
+    }
 
-    memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
-    stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
-    stats.AdapterLuid = adapter_luid_;
-    stats.QuerySegment.SegmentId = segmentId;
-    ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
-    if (ret == 0)
-      usedNonLocal = stats.QueryResult.SegmentInformation.BytesResident;
+    bool found_any = false;
+    bool queried_any = false;
+    for (const auto& seg_info : segment_infos_) {
+      if (!seg_info.is_aperture || !seg_info.is_system_memory) {
+        continue;
+      }
+      found_any = true;
 
-    return NonLocalHeapSize() - usedNonLocal;
+      memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
+      stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
+      stats.AdapterLuid = adapter_luid_;
+      stats.QuerySegment.SegmentId = seg_info.segment_id;
+      ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
+      if (ret != 0) {
+        continue;
+      }
+      queried_any = true;
+      usedNonLocal += stats.QueryResult.SegmentInformation.BytesResident;
+    }
+
+    if (!found_any || !queried_any) {
+      return HSA_STATUS_ERROR;
+    }
+
+    // Virtual apertures can double-count residency — saturate at zero
+    // instead of underflowing.
+    *available_bytes = (usedNonLocal >= budget) ? 0 : (budget - usedNonLocal);
   }
+
+  return HSA_STATUS_SUCCESS;
 }
 
 bool WDDMDevice::CreateDevice(void) {
@@ -501,13 +553,34 @@ bool WDDMDevice::CreateSyncobj(D3DKMT_HANDLE *handle, uint64_t **addr) {
   return false;
 }
 
-void WDDMDevice::DestroySyncobj(D3DKMT_HANDLE handle) {
+bool WDDMDevice::DestroySyncobj(D3DKMT_HANDLE handle) {
   D3DKMT_DESTROYSYNCHRONIZATIONOBJECT args = {0};
   args.hSyncObject = handle;
 
   NTSTATUS ret = DXCORE_CALL(D3DKMTDestroySynchronizationObject(&args));
-  if (ret != STATUS_SUCCESS)
+  if (ret != STATUS_SUCCESS) {
     pr_err("fail %x\n", ret);
+    return false;
+  }
+  return true;
+}
+
+bool WDDMDevice::OpenSyncobjFromNtHandle(void *nt_handle,
+                                         D3DKMT_HANDLE *out_handle) {
+  if (nt_handle == nullptr || out_handle == nullptr) return false;
+
+  D3DKMT_OPENSYNCOBJECTFROMNTHANDLE2 args = {0};
+  args.hNtHandle = nt_handle;
+  args.hDevice = device_;
+
+  NTSTATUS ret = DXCORE_CALL(D3DKMTOpenSyncObjectFromNtHandle2(&args));
+  if (ret != STATUS_SUCCESS) {
+    pr_err("D3DKMTOpenSyncObjectFromNtHandle2 failed: 0x%x\n", ret);
+    return false;
+  }
+
+  *out_handle = args.hSyncObject;
+  return true;
 }
 
 void WDDMDevice::InitCmdbufInfo(void) {
@@ -736,9 +809,18 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
   memset(priv_data, 0, priv_size);
   bool FwManagedGfxState = SupportStateShadowingByCpFw();
   uint32_t* doorbell_loc = nullptr;
-  auto queue_memory = static_cast<ComputeQueue*>(queue)->GetAmdQueueMemory();
-  auto resource = queue_memory->KmtHandle();
-  Wkmi::FillinHwQueuePrivData(priv_data, FwManagedGfxState, queue->prio, IsAqlSupported(),
+  // amd_queue_memory_ / KmtHandle and AQL parameters only apply when the queue
+  // is an AQL ComputeQueue. SDMAQueue (and SwsCompute non-AQL queues) must not
+  // be down-cast to ComputeQueue here -- doing so reads garbage and crashes.
+  ComputeQueue* compute_queue = dynamic_cast<ComputeQueue*>(queue);
+  D3DKMT_HANDLE resource = 0;
+  bool is_aql = false;
+  if (compute_queue != nullptr && IsAqlSupported()) {
+    auto queue_memory = compute_queue->GetAmdQueueMemory();
+    resource = queue_memory->KmtHandle();
+    is_aql = true;
+  }
+  Wkmi::FillinHwQueuePrivData(priv_data, FwManagedGfxState, queue->prio, is_aql,
       queue->cmdbuf_addr, queue->cmdbuf_size, reinterpret_cast<uintptr_t>(queue->ring_wptr),
       reinterpret_cast<uintptr_t>(queue->ring_rptr), resource, &doorbell_loc);
 

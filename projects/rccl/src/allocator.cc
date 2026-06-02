@@ -14,7 +14,7 @@ ncclResult_t  ncclMemAlloc_impl(void **ptr, size_t size) {
   NCCL_NVTX3_FUNC_RANGE;
   ncclResult_t ret = ncclSuccess;
 
-#if ROCM_VERSION >= 71200
+#if ROCM_VERSION >= 70000
   size_t memGran = 0;
   CUdevice currentDev;
   CUmemAllocationProp memprop = {};
@@ -39,14 +39,25 @@ ncclResult_t  ncclMemAlloc_impl(void **ptr, size_t size) {
     flag = 0;
     (void) CUPFN(cuDeviceGetAttribute(&flag, CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED, currentDev));
     if (flag) requestedHandleTypes |= CU_MEM_HANDLE_TYPE_FABRIC;
+#if defined(HIP_VMM_UNCACHED_MEMORY)
+    memprop.type = hipMemAllocationTypeUncached;
+#else
     memprop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+#endif
     memprop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
     memprop.requestedHandleTypes = (CUmemAllocationHandleType) requestedHandleTypes;
     memprop.location.id = currentDev;
-    // Query device to see if RDMA support is available
-    flag = 0;
+#if HIP_VERSION > 70000000
+    // ROCM-2550: Use cuDeviceGetAttribute to check if RDMA support is available
+    // TODO: Remove once ROCM-2550 is fixed
+    // Always enable gpuDirectRDMACapable: the non-RDMA VMM code path in
+    // HIP crashes (SIGSEGV in hipMemMap) after many allocations.
+    memprop.allocFlags.gpuDirectRDMACapable = 1;
+    // // Query device to see if RDMA support is available
+    // flag = 0;
     // CUCHECK(cuDeviceGetAttribute(&flag, CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED, currentDev));
-    if (flag) memprop.allocFlags.gpuDirectRDMACapable = 1;
+    // if (flag) memprop.allocFlags.gpuDirectRDMACapable = 1;
+#endif
     CUCHECK(cuMemGetAllocationGranularity(&memGran, &memprop, CU_MEM_ALLOC_GRANULARITY_RECOMMENDED));
     CUDACHECK(cudaGetDeviceCount(&dcnt));
     ALIGN_SIZE(handleSize, memGran);
@@ -105,7 +116,7 @@ ncclResult_t  ncclMemFree_impl(void *ptr) {
   int saveDevice;
 
   CUDACHECK(cudaGetDevice(&saveDevice));
-#if ROCM_VERSION >= 71200
+#if ROCM_VERSION >= 70000
   CUdevice ptrDev = 0;
 
   if (ptr == NULL) goto fallback;
@@ -115,7 +126,7 @@ ncclResult_t  ncclMemFree_impl(void *ptr) {
   CUCHECKGOTO(cuPointerGetAttribute((void*)&ptrDev, CU_POINTER_ATTRIBUTE_DEVICE_ORDINAL, (CUdeviceptr)ptr), ret, fail);
   CUDACHECKGOTO(cudaSetDevice((int)ptrDev), ret, fail);
   if (ncclCuMemEnable()) {
-    NCCLCHECKGOTO(ncclCuMemFree(ptr), ret, fail);
+    NCCLCHECKGOTO(ncclCuMemFree(ptr, nullptr), ret, fail); // User facing API, memManager does not need to track user memory. Same as ncclMemAlloc
     goto exit;
   }
 

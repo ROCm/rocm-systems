@@ -615,7 +615,7 @@ struct drm_amdgpu_gem_va {
 #define AMDGPU_HW_IP_UVD_ENC 5
 #define AMDGPU_HW_IP_VCN_DEC 6
 /*
- * From VCN4, AMDGPU_HW_IP_VCN_ENC is re-used to support
+ * From VCN4, AMDGPU_HW_IP_VCN_ENC is reused to support
  * both encoding and decoding jobs.
  */
 #define AMDGPU_HW_IP_VCN_ENC 7

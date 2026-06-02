@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -116,6 +116,17 @@ class ThunkLoader {
                                       HSAuint32 SdmaEngineId, \
                                       void* QueueAddress, \
                                       HSAuint64 QueueSizeInBytes, \
+                                      HSAuint64 MetaDataPrefetchSizeInBytes, \
+                                      HsaEvent* Event, \
+                                      HsaQueueResource* QueueResource);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtCreateQueueV2))(HSAuint32 NodeId, \
+                                      HSA_QUEUE_TYPE Type, \
+                                      HSAuint32 QueuePercentage, \
+                                      HSA_QUEUE_PRIORITY Priority, \
+                                      HSAuint32 SdmaEngineId, \
+                                      void* QueueAddress, \
+                                      HSAuint64 QueueSizeInBytes, \
+                                      HSAuint64 MetaDataPrefetchSizeInBytes, \
                                       HsaEvent* Event, \
                                       HsaQueueResource* QueueResource);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtUpdateQueue))( HSA_QUEUEID QueueId, \
@@ -342,6 +353,11 @@ class ThunkLoader {
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtHandleImport))(const HsaExternalHandleDesc* ImportDesc, \
                                       HsaHandleImportResult* ImportResult, \
                                       HsaHandleImportFlags* flags);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtImportExternalSemaphore))(HSAuint32 NodeId, \
+                                      void* NtHandle, \
+                                      HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE Type, \
+                                      HSA_EXTERNAL_SEMAPHORE_HANDLE* OutHandle);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtDestroyExternalSemaphore))(HSA_EXTERNAL_SEMAPHORE_HANDLE Handle);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemoryVaMap))(HsaMemoryObjectHandle Handle, \
                                       HSAuint64 offset, \
                                       HSAuint64 size, \
@@ -433,6 +449,7 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtWaitOnMultipleEvents)* HSAKMT_PFN(hsaKmtWaitOnMultipleEvents);
     HSAKMT_DEF(hsaKmtCreateQueue)* HSAKMT_PFN(hsaKmtCreateQueue);
     HSAKMT_DEF(hsaKmtCreateQueueExt)* HSAKMT_PFN(hsaKmtCreateQueueExt);
+    HSAKMT_DEF(hsaKmtCreateQueueV2)* HSAKMT_PFN(hsaKmtCreateQueueV2);
     HSAKMT_DEF(hsaKmtUpdateQueue)* HSAKMT_PFN(hsaKmtUpdateQueue);
     HSAKMT_DEF(hsaKmtDestroyQueue)* HSAKMT_PFN(hsaKmtDestroyQueue);
     HSAKMT_DEF(hsaKmtSetQueueCUMask)* HSAKMT_PFN(hsaKmtSetQueueCUMask);
@@ -512,6 +529,8 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtGetMemoryHandle)* HSAKMT_PFN(hsaKmtGetMemoryHandle);
 #endif
     HSAKMT_DEF(hsaKmtHandleImport)* HSAKMT_PFN(hsaKmtHandleImport);
+    HSAKMT_DEF(hsaKmtImportExternalSemaphore)* HSAKMT_PFN(hsaKmtImportExternalSemaphore);
+    HSAKMT_DEF(hsaKmtDestroyExternalSemaphore)* HSAKMT_PFN(hsaKmtDestroyExternalSemaphore);
     HSAKMT_DEF(hsaKmtMemoryVaMap)* HSAKMT_PFN(hsaKmtMemoryVaMap);
     HSAKMT_DEF(hsaKmtMemoryVaUnmap)* HSAKMT_PFN(hsaKmtMemoryVaUnmap);
     HSAKMT_DEF(hsaKmtMemHandleFree)* HSAKMT_PFN(hsaKmtMemHandleFree);

@@ -12,7 +12,6 @@
 #include <utils.hh>
 
 HIP_TEST_CASE(Unit_hipMemcpy2D_Positive_Basic) {
-  CHECK_IMAGE_SUPPORT
   constexpr bool async = false;
 
   SECTION("Device to Host") { Memcpy2DDeviceToHostShell<async>(hipMemcpy2D); }
@@ -50,13 +49,11 @@ HIP_TEST_CASE(Unit_hipMemcpy2D_Positive_Synchronization_Behavior) {
 }
 
 HIP_TEST_CASE(Unit_hipMemcpy2D_Positive_Parameters) {
-  CHECK_IMAGE_SUPPORT
   constexpr bool async = false;
   Memcpy2DZeroWidthHeight<async>(hipMemcpy2D);
 }
 
 HIP_TEST_CASE(Unit_hipMemcpy2D_Negative_Parameters) {
-  CHECK_IMAGE_SUPPORT
   constexpr size_t cols = 128;
   constexpr size_t rows = 128;
 
@@ -137,7 +134,6 @@ HIP_TEST_CASE(Unit_hipMemcpy2D_Negative_Parameters) {
 }
 
 HIP_TEST_CASE(Unit_hipMemcpy2D_Capture) {
-  CHECK_IMAGE_SUPPORT
 
   constexpr size_t width = 16;
   constexpr size_t height = 16;

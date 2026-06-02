@@ -10,7 +10,7 @@ This example stress-tests GPU scratch memory allocation by launching kernels wit
 
 ## Prerequisites
 
-- CMake 3.21+
+- CMake 3.25+
 - HIP runtime and `hipcc` compiler
 - HSA runtime library
 
@@ -47,7 +47,7 @@ rocprof-sys-run -- ./scratch-memory
 ### Recommended Configuration
 
 | Variable | Value | Purpose |
-|----------|-------|---------|
+| ---------- | ------- | --------- |
 | `ROCPROFSYS_ROCM_DOMAINS` | `hip_api,hsa_api,kernel_dispatch,scratch_memory` | Trace HIP/HSA API and scratch memory events |
 | `ROCPROFSYS_ROCM_EVENTS` | `SQ_WAVES` | Sample GPU wave occupancy |
 | `ROCPROFSYS_TRACE` | `true` | Generate Perfetto trace |

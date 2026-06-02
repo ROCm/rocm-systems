@@ -30,6 +30,7 @@
 #include <hip/hip_runtime_api.h>
 #include <hip/hip_runtime.h>
 
+#ifndef CHECK_HIP
 #define CHECK_HIP(condition) {                                            \
     hipError_t error = condition;                                         \
     if(error != hipSuccess){                                              \
@@ -38,6 +39,7 @@
         exit(error);                                                      \
     }                                                                     \
 }
+#endif
 
 #define ASSERT(condition) {                                               \
   if (!(condition)) {                                                     \
@@ -55,7 +57,7 @@
   }                                                                       \
 }
 
-static int get_launcher_local_rank() {
+[[maybe_unused]] static int get_launcher_local_rank() {
     char *local_rank_str = nullptr;
 
     local_rank_str = getenv("OMPI_COMM_WORLD_LOCAL_RANK");

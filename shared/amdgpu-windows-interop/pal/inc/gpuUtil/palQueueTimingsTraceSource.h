@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -192,11 +192,7 @@ public:
 
     virtual Pal::uint64 QueryGpuWorkMask() const override { return 0; }
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 908
     virtual void OnTraceAccepted(Pal::uint32 gpuIndex, Pal::ICmdBuffer* pCmdBuf) override;
-#else
-    virtual void OnTraceAccepted() override;
-#endif
     virtual void OnTraceBegin(Pal::uint32 gpuIndex, Pal::ICmdBuffer* pCmdBuf) override { };
 #if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 939
     virtual void OnPostambleEnd(
@@ -232,6 +228,8 @@ private:
     GpaSession*           m_pGpaSession;      // Handle to GpaSession object for tracking queue timings
     bool                  m_traceIsHealthy;   // Internal flag for tracking resource and state health
     std::atomic<bool>     m_timingInProgress; // Flag for tracking if queue timings operations are ongoing
+
+    Pal::uint32           m_traceGpuIndex;
 
 };
 

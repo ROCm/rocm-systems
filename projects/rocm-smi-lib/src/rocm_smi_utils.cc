@@ -342,7 +342,13 @@ rsmi_status_t ErrnoToRsmiStatus(int err) {
       return RSMI_STATUS_PERMISSION;
     case EPERM:
     case ENOENT:
+    case ENOTSUP:
       return RSMI_STATUS_NOT_SUPPORTED;
+    case EROFS:
+      // Sysfs is read-only (e.g. unprivileged container). Distinct from a
+      // kernel-unsupported feature (ENOENT/ENOTSUP -> NOT_SUPPORTED above);
+      // map to PERMISSION so callers can tell the two apart.
+      return RSMI_STATUS_PERMISSION;
     case EBADF:
     case EISDIR:
       return RSMI_STATUS_FILE_ERROR;
@@ -675,7 +681,7 @@ std::tuple<bool, std::string> readTmpFile(uint32_t dv_ind, std::string stateName
 // rsmi_status_t ret - return value of RSMI API function
 // bool fullStatus - defaults to true, set to false to chop off description
 // Returns:
-// string - if fullStatus == true, returns full decription of return value
+// string - if fullStatus == true, returns full description of return value
 //      ex. 'RSMI_STATUS_SUCCESS: The function has been executed successfully.'
 // string - if fullStatus == false, returns a minimalized return value
 //      ex. 'RSMI_STATUS_SUCCESS'

@@ -37,6 +37,7 @@
 #include "amd_smi/impl/nic/amd_smi_no_drm_nic.h"
 #include "amd_smi/impl/nic/amd_smi_no_drm_switch.h"
 #endif  // BRCM_NIC
+
 namespace amd::smi {
 
 // Singleton: Only one system in an application
@@ -75,7 +76,7 @@ class AMDSmiSystem {
 
   /* The GPU socket id is used to identify the socket, so that the XCDs
   on the same physical device will be collected under the same socket.
-  The BD part of the BDF is used as GPU socket to represent a phyiscal device.
+  The BD part of the BDF is used as GPU socket to represent a physical device.
   */
   amdsmi_status_t get_gpu_socket_id(uint32_t index, std::string& socketid);
   amdsmi_status_t populate_amd_gpu_devices();

@@ -28,6 +28,7 @@ set(ROCPROFILER_LIB_HSA_HEADERS
     queue_info_session.hpp
     rocprofiler_packet.hpp
     scratch_memory.hpp
+    signal.hpp
     utils.hpp)
 
 target_sources(rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_HSA_SOURCES}

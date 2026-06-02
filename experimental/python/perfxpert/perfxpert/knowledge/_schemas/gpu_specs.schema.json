@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "description": "Per-arch GPU spec map keyed by gfx_id (e.g., 'gfx942')",
+  "patternProperties": {
+    "^gfx[0-9a-f]+$": {"$ref": "#/properties/arch_entry"}
+  },
+  "additionalProperties": false,
+  "properties": {
+    "arch_entry": {
+      "type": "object",
+      "required": [
+        "name",
+        "codename",
+        "peak_fp64_tflops",
+        "peak_fp32_tflops",
+        "memory_bandwidth_tbs",
+        "cu_count",
+        "lds_kb",
+        "lds_per_cu_kb",
+        "wave_size",
+        "max_vgprs_per_thread",
+        "vgprs_per_simd",
+        "simds_per_cu",
+        "max_waves_per_simd",
+        "ridge_point"
+      ],
+      "properties": {
+        "name": {"type": "string"},
+        "codename": {"type": "string"},
+        "peak_fp64_tflops": {"type": "number", "minimum": 0},
+        "peak_fp32_tflops": {"type": "number", "minimum": 0},
+        "peak_bf16_tflops": {"type": "number", "minimum": 0},
+        "memory_bandwidth_tbs": {"type": "number", "minimum": 0},
+        "cu_count": {"type": "integer", "minimum": 1},
+        "lds_kb": {"type": "integer", "enum": [64, 128, 160]},
+        "lds_per_cu_kb": {"type": "integer", "enum": [64, 128, 160]},
+        "wave_size": {"type": "integer", "enum": [32, 64]},
+        "max_vgprs_per_thread": {"type": "integer", "minimum": 64},
+        "vgprs_per_simd": {"type": "integer", "minimum": 256},
+        "simds_per_cu": {"type": "integer", "minimum": 1},
+        "max_waves_per_simd": {"type": "integer", "minimum": 1},
+        "ridge_point": {"type": "number", "minimum": 0, "description": "FLOPS/Byte arithmetic intensity at which compute = memory peak"}
+      }
+    }
+  }
+}

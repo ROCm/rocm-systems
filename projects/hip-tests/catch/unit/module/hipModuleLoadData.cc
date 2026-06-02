@@ -36,7 +36,7 @@ HIP_TEST_CASE(Unit_hipModuleLoadData_Positive_Basic) {
 
   SECTION("Load compiled module from file with generic target in regular fatbin") {
     if (!isGenericTargetSupported()) {
-      fprintf(stderr, "Generic target test is skipped\n");
+      WARN("Skipping section: generic target is not supported on this device.");
       return;
     }
     const auto loaded_module = LoadModuleIntoBuffer("copyKernelGenericTarget.code");
@@ -50,7 +50,7 @@ HIP_TEST_CASE(Unit_hipModuleLoadData_Positive_Basic) {
 
   SECTION("Load compiled module from file with generic target in compressed fatbin") {
     if (!isGenericTargetSupported()) {
-      fprintf(stderr, "Generic target test is skipped\n");
+      WARN("Skipping section: generic target is not supported on this device.");
       return;
     }
     const auto loaded_module = LoadModuleIntoBuffer("copyKernelGenericTargetCompressed.code");

@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 
 project(rocprofiler-systems-roctx-example LANGUAGES CXX)
 
@@ -11,16 +11,15 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
 endif()
 
 find_package(hip QUIET HINTS ${ROCmVersion_DIR} PATHS ${ROCmVersion_DIR})
+find_package(Threads REQUIRED)
 
 find_program(
     HIPCC_EXECUTABLE
     NAMES hipcc
     HINTS ${ROCmVersion_DIR} ${ROCM_PATH}
+    PATHS /opt/rocm
+    PATH_SUFFIXES bin
     ENV ROCM_PATH
-    /opt/rocm
-    PATHS ${ROCmVersion_DIR} ${ROCM_PATH}
-    ENV ROCM_PATH
-    /opt/rocm
     NO_CACHE
 )
 mark_as_advanced(HIPCC_EXECUTABLE)
@@ -58,43 +57,67 @@ find_library(
     REQUIRED
 )
 
-add_executable(roctx roctx.cpp)
-target_link_libraries(roctx PRIVATE Threads::Threads ${ROCTX_LIBRARY})
-
-if(
-    CMAKE_CXX_COMPILER_ID MATCHES "Clang"
-    AND NOT CMAKE_CXX_COMPILER_IS_HIPCC
-    AND NOT HIPCC_EXECUTABLE
+set(ROCTX_EXAMPLE_TARGETS
+    roctx
+    pause_resume
+    selective_region
+    selective_region_pause_1
+    selective_region_pause_2
+    selective_region_pause_3
 )
-    target_link_libraries(
-        roctx
-        PRIVATE
-            $<TARGET_NAME_IF_EXISTS:rocprofiler-systems::rocprofiler-systems-compile-options>
-            $<TARGET_NAME_IF_EXISTS:hip::host>
-            $<TARGET_NAME_IF_EXISTS:hip::device>
+
+set(ROCTX_KERNEL_HEADER_TARGETS
+    pause_resume
+    selective_region
+    selective_region_pause_1
+    selective_region_pause_2
+    selective_region_pause_3
+)
+
+foreach(_target IN LISTS ROCTX_EXAMPLE_TARGETS)
+    set(_sources ${_target}.cpp)
+    if(${_target} IN_LIST ROCTX_KERNEL_HEADER_TARGETS)
+        list(APPEND _sources roctx_example_kernels.hpp)
+    endif()
+    add_executable(${_target} ${_sources})
+    target_link_libraries(${_target} PRIVATE Threads::Threads)
+
+    if(
+        CMAKE_CXX_COMPILER_ID MATCHES "Clang"
+        AND NOT CMAKE_CXX_COMPILER_IS_HIPCC
+        AND NOT HIPCC_EXECUTABLE
     )
-else()
-    target_compile_options(roctx PRIVATE -W -Wall)
-endif()
+        target_link_libraries(
+            ${_target}
+            PRIVATE
+                $<TARGET_NAME_IF_EXISTS:rocprofiler-systems::rocprofiler-systems-compile-options>
+                $<TARGET_NAME_IF_EXISTS:hip::host>
+                $<TARGET_NAME_IF_EXISTS:hip::device>
+        )
+    else()
+        target_compile_options(${_target} PRIVATE -W -Wall)
+    endif()
 
-if("${CMAKE_BUILD_TYPE}" MATCHES "Release")
-    target_compile_options(roctx PRIVATE -g1)
-endif()
+    target_link_libraries(${_target} PRIVATE ${ROCTX_LIBRARY})
 
-# Specify GPU architectures to compile for
-foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
-    target_compile_options(roctx PRIVATE --offload-arch=${arch})
-    target_link_options(roctx PRIVATE --offload-arch=${arch})
+    if("${CMAKE_BUILD_TYPE}" MATCHES "Release")
+        target_compile_options(${_target} PRIVATE -g1)
+    endif()
+
+    foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
+        target_compile_options(${_target} PRIVATE --offload-arch=${arch})
+        target_link_options(${_target} PUBLIC --offload-arch=${arch})
+    endforeach()
+
+    if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
+        rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET ${_target})
+    endif()
+
+    if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET ${_target})
+        install(
+            TARGETS ${_target}
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
+            COMPONENT rocprofiler-systems-examples
+        )
+    endif()
 endforeach()
-
-if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
-    rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET roctx)
-endif()
-
-if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET roctx)
-    install(
-        TARGETS roctx
-        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
-        COMPONENT rocprofiler-systems-examples
-    )
-endif()

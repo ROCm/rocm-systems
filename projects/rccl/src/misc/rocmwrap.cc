@@ -13,6 +13,7 @@
 #include "bootstrap.h"
 
 #include <dlfcn.h>
+#include <unistd.h>
 #include <sys/utsname.h>
 #include <fstream>
 
@@ -43,6 +44,16 @@ CUmemAllocationHandleType ncclCuMemHandleType = CU_MEM_HANDLE_TYPE_POSIX_FILE_DE
 
 static int ncclCuMemSupported = 0;
 
+// cuMem VMM API availability by HIP/driver version.
+#define NCCL_CUMEM_NATIVE_MIN_VERSION   71260540
+#define NCCL_CUMEM_BACKPORT_MIN_VERSION 70051831
+#define NCCL_CUMEM_BACKPORT_MAX_VERSION 70060000
+
+#define NCCL_CUMEM_VERSION_SUPPORTED(version)                  \
+  ((version) >= NCCL_CUMEM_NATIVE_MIN_VERSION ||               \
+   ((version) >= NCCL_CUMEM_BACKPORT_MIN_VERSION &&            \
+    (version) < NCCL_CUMEM_BACKPORT_MAX_VERSION))
+
 #define KERNEL_VERSION_CODE(major, minor) ((major << 16) | (minor << 8))
 
 static int ncclGetKernelVersionCode() {
@@ -70,9 +81,13 @@ int ncclIsCuMemSupported() {
     supported = 0;
   }
   CUDACHECKGOTO(cudaDriverGetVersion(&cudaDriverVersion), ret, error);
-  if (cudaDriverVersion < 71260540) {
-    WARN("cuMem support requires HIP_VERSION >= 7.12.60540");
-    supported = 0;
+  {
+    // Block scope prevents the goto in CUDACHECKGOTO from jumping over the bool initialization.
+    bool cuMemSupported = NCCL_CUMEM_VERSION_SUPPORTED(cudaDriverVersion);
+    if (!cuMemSupported) {
+      WARN("cuMem support requires HIP_VERSION >= 7.12.60540 (or ROCm 7.0.2.x backport)");
+      supported = 0;
+    }
   }
   CUDACHECKGOTO(cudaGetDevice(&cudaDev), ret, error);
   if (CUPFN(cuMemCreate) == NULL) supported = 0;
@@ -90,8 +105,14 @@ error:
 }
 
 int ncclCuMemEnable() {
+#if NCCL_CUMEM_VERSION_SUPPORTED(HIP_VERSION)
   int param = ncclParamCuMemEnable();
   return param >= 0 ? param : (param == -2 && ncclCuMemSupported);
+#else
+  if (ncclParamCuMemEnable() > 0)
+    WARN("NCCL_CUMEM_ENABLE=1 is set but cuMem VMM APIs are unavailable in this build (HIP_VERSION=%d); disabling cuMem", HIP_VERSION);
+  return 0;
+#endif
 }
 
 static int ncclCumemHostEnable = -1;
@@ -129,10 +150,12 @@ int ncclCuMemHostEnable() {
       CUCHECK(cuDeviceGet(&currentDev, cudaDev));
       CUCHECK(cuDeviceGetAttribute(&cpuNumaNodeId, hipDeviceAttributeHostNumaId, currentDev));
       if (cpuNumaNodeId < 0) cpuNumaNodeId = 0;
-      prop.location.type = hipMemLocationTypeHostNuma;
+      // CLR rejects HostNuma; probe with Host to match alloc.h's ncclCuMemHostAlloc.
+      prop.location.type = hipMemLocationTypeHost;
       prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
       prop.requestedHandleTypes = ncclCuMemHandleType;
-      prop.location.id = cpuNumaNodeId;
+      // HIP/CLR requires host id to be 0. cpuNumaNodeId can exceed GPU count and fail.
+      prop.location.id = 0;  // ignored on the Host path
       CUCHECK(cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM));
       size = 1;
       ALIGN_SIZE(size, granularity);
@@ -175,6 +198,8 @@ static void initOnceFunc() {
   if (hsaLib == NULL) {
     WARN("Failed to find ROCm runtime library in %s (RCCL_ROCR_PATH=%s)", ncclCudaPath, ncclCudaPath);
     goto error;
+  } else {
+    INFO(NCCL_INIT, "Using ROCr runtime at %s%s", path, ncclCudaPath ? " (RCCL_ROCR_PATH set)" : "");
   }
 
   /*
@@ -227,6 +252,11 @@ static void initOnceFunc() {
   {
       dmaBufSupport = 1;
       WARN("DMA_BUF Support is force enabled, so explicitly setting RCCL_FORCE_ENABLE_DMABUF=1");
+  }
+  else if (ncclCuMemEnable() && ncclParamDmaBufEnable() == 0)
+  {
+    dmaBufSupport = 1;
+    WARN("NCCL_CUMEM_ENABLE is set but NCCL_DMABUF_ENABLE is not. Forcefully enabling DMA-BUF for hipMem.");
   }
   else if (ncclParamDmaBufEnable() == 0)
   {
@@ -286,9 +316,13 @@ static void initOnceFunc() {
       snprintf(kernel_conf_file, sizeof(kernel_conf_file), path, utsname.release);
 
       if (strstr(path, "/proc/config.gz") != NULL) {
-        // Skip .gz files if zcat is not available
-        if (!has_zcat) {
-          INFO(NCCL_INIT, "zcat not available, skipping %s", kernel_conf_file);
+        // Skip if zcat is unavailable or /proc/config.gz does not exist.
+        // popen() succeeds even when the file is missing, producing an empty
+        // stream that falsely triggers the "not found" error path.
+        if (!has_zcat || access("/proc/config.gz", R_OK) != 0) {
+          INFO(NCCL_INIT, "Skipping %s (zcat %s, file %s)", kernel_conf_file,
+               has_zcat ? "available" : "unavailable",
+               access("/proc/config.gz", R_OK) == 0 ? "exists" : "not found");
           continue;
         }
         fp = popen("zcat /proc/config.gz 2>/dev/null", "r");
@@ -329,8 +363,30 @@ static void initOnceFunc() {
       }
     }
     if(fp == NULL) {
-      dmaBufSupport = 0;
-      INFO(NCCL_INIT,"Could not open kernel conf file");
+      // Fallback: check /proc/kallsyms for DMA-BUF and P2PDMA kernel symbols.
+      // Works inside Docker containers where /boot/config-* is unavailable.
+      INFO(NCCL_INIT, "Could not open kernel conf file, trying /proc/kallsyms fallback");
+      FILE *kallsyms = fopen("/proc/kallsyms", "r");
+      if (kallsyms) {
+        while (fgets(buf, sizeof(buf), kallsyms) != NULL) {
+          if (!found_opt1 && strstr(buf, "dma_buf_move_notify") != NULL)
+            found_opt1 = 1;
+          if (!found_opt2 && strstr(buf, "pci_p2pdma") != NULL)
+            found_opt2 = 1;
+          if (found_opt1 && found_opt2) break;
+        }
+        fclose(kallsyms);
+        if (found_opt1 && found_opt2) {
+          INFO(NCCL_INIT, "DMA_BUF Support Enabled via /proc/kallsyms (dma_buf_move_notify + pci_p2pdma)");
+        } else {
+          dmaBufSupport = 0;
+          INFO(NCCL_INIT, "DMA_BUF_SUPPORT Failed: missing kernel symbols in /proc/kallsyms");
+          goto error;
+        }
+      } else {
+        dmaBufSupport = 0;
+        INFO(NCCL_INIT, "Could not open /proc/kallsyms");
+      }
     }
   }
   /*

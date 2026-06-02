@@ -24,6 +24,7 @@
 #include <rocprofiler-sdk-rocattach/rocattach.h>
 #include <rocprofiler-sdk-rocattach/types.h>
 
+#include <signal.h>
 #include <stdlib.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -35,6 +36,7 @@
 
 #define ROCATTACH_CALL(func)                                                                       \
     {                                                                                              \
+        std::cout << "starting call to " #func << std::endl;                                       \
         rocattach_status_t status = func;                                                          \
         if(status != ROCATTACH_STATUS_SUCCESS)                                                     \
         {                                                                                          \
@@ -44,14 +46,14 @@
         }                                                                                          \
         else                                                                                       \
         {                                                                                          \
-            std::cout << "call to " #func " successful " << std::endl;                             \
+            std::cout << "call to " #func " successful" << std::endl;                              \
         }                                                                                          \
     }
 
 int
 main(int argc, char** argv)
 {
-    if(argc != 3)
+    if(argc < 3)
     {
         std::cout << "error: wrong number of arguments\n";
         return 1;
@@ -90,7 +92,7 @@ main(int argc, char** argv)
     }
     else
     {
-        // Wait a small amount of time for child processes to start executing
+        // Wait for child processes to exec
         std::this_thread::sleep_for(std::chrono::milliseconds(2500));
 
         setenv("ROCPROF_ATTACH_TOOL_LIBRARY", argv[2], true);
@@ -98,7 +100,26 @@ main(int argc, char** argv)
         ROCATTACH_CALL(rocattach_attach(pid1));
         ROCATTACH_CALL(rocattach_attach(pid2));
 
-        // Wait a small amount of time for child processes to continue executing
+        // Send signal to child processes after attaching
+        if(argc >= 4)
+        {
+            std::string signal_arg{argv[3]};
+            if(signal_arg == "--send-signal")
+            {
+                std::cout << "Sending SIGWINCH to PID " << pid1 << "\n";
+                if(kill(pid1, SIGWINCH) == -1)
+                {
+                    std::cout << "error: Failed to send signal to pid1\n";
+                }
+                std::cout << "Sending SIGWINCH to PID " << pid2 << "\n";
+                if(kill(pid2, SIGWINCH) == -1)
+                {
+                    std::cout << "error: Failed to send signal to pid2\n";
+                }
+            }
+        }
+
+        // Wait for child processes to continue executing
         std::this_thread::sleep_for(std::chrono::milliseconds(5000));
 
         ROCATTACH_CALL(rocattach_detach(pid1));

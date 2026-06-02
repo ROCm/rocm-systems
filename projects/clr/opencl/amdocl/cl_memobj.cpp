@@ -150,13 +150,9 @@ static bool validateImageDescriptor(const std::vector<amd::Device*>& devices,
   }
 
   // Check if any device supports mipmaps
-  bool mipMapSupport = false;
-  for (auto& dev : devices) {
-    if (dev->settings().checkExtension(ClKhrMipMapImage)) {
-      mipMapSupport = true;
-      break;
-    }
-  }
+  bool mipMapSupport = std::any_of(devices.begin(), devices.end(), [](const amd::Device* device) {
+    return device->settings().checkExtension(ClKhrMipMapImage);
+  });
 
   // Check if any device can accept mipmaps
   if ((desc->num_mip_levels != 0) && (!mipMapSupport || (hostPtr != NULL))) {
@@ -336,14 +332,11 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateBuffer,
     return (cl_mem)0;
   }
   const std::vector<amd::Device*>& devices = as_amd(context)->devices();
-  bool sizePass = false;
-  for (auto& dev : devices) {
-    if ((dev->info().maxMemAllocSize_ >= size) ||
-        (flags & (CL_MEM_USE_HOST_PTR | CL_MEM_ALLOC_HOST_PTR))) {
-      sizePass = true;
-      break;
-    }
-  }
+  bool sizePass =
+      std::any_of(devices.begin(), devices.end(), [size, flags](const amd::Device* device) {
+        return (device->info().maxMemAllocSize_ >= size) ||
+               (flags & (CL_MEM_USE_HOST_PTR | CL_MEM_ALLOC_HOST_PTR));
+      });
   if (!sizePass) {
     *not_null(errcode_ret) = CL_INVALID_BUFFER_SIZE;
     LogWarning("invalid parameter \"size\"");
@@ -465,14 +458,12 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateSubBuffer,
   const cl_buffer_region* region = (const cl_buffer_region*)buffer_create_info;
 
   // Check sub buffer offset alignment
-  bool alignmentPass = false;
   const std::vector<amd::Device*>& devices = buffer.getContext().devices();
-  for (auto& dev : devices) {
-    cl_uint deviceAlignmentBytes = dev->info().memBaseAddrAlign_ >> 3;
-    if (region->origin == amd::alignDown(region->origin, deviceAlignmentBytes)) {
-      alignmentPass = true;
-    }
-  }
+  bool alignmentPass =
+      std::any_of(devices.begin(), devices.end(), [region](const amd::Device* device) {
+        cl_uint deviceAlignmentBytes = device->info().memBaseAddrAlign_ >> 3;
+        return region->origin == amd::alignDown(region->origin, deviceAlignmentBytes);
+      });
 
   // Return an error if the offset is misaligned on all devices
   if (!alignmentPass) {
@@ -4011,13 +4002,8 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateImage,
   }
 
   const std::vector<amd::Device*>& devices = as_amd(context)->devices();
-  bool supportPass = false;
-  for (auto& dev : devices) {
-    if (dev->info().imageSupport_) {
-      supportPass = true;
-      break;
-    }
-  }
+  bool supportPass = std::any_of(devices.begin(), devices.end(),
+                                 [](const amd::Device* dev) { return dev->info().imageSupport_; });
 
   if (!supportPass) {
     *not_null(errcode_ret) = CL_INVALID_OPERATION;
@@ -4600,6 +4586,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueMigrateMemObjects,
   }
 
   std::vector<amd::Memory*> memObjects;
+  memObjects.reserve(num_mem_objects);
   for (uint i = 0; i < num_mem_objects; ++i) {
     if (!is_valid(mem_objects[i])) {
       return CL_INVALID_MEM_OBJECT;
@@ -4693,13 +4680,9 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateBufferFromImageAMD,
 
   amd::Context& amdContext = *as_amd(context);
   const std::vector<amd::Device*>& devices = amdContext.devices();
-  bool supportPass = false;
-  for (auto& dev : devices) {
-    if (dev->info().bufferFromImageSupport_) {
-      supportPass = true;
-      break;
-    }
-  }
+  bool supportPass = std::any_of(devices.begin(), devices.end(), [](const amd::Device* dev) {
+    return dev->info().bufferFromImageSupport_;
+  });
 
   if (!supportPass) {
     *not_null(errcode_ret) = CL_INVALID_OPERATION;

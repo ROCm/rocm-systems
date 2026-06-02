@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # ------------------------------------------------------------------------------#
 #
 # rocprofiler-systems-avail target
@@ -27,16 +30,14 @@ target_sources(
 )
 
 target_include_directories(rocprofiler-systems-avail PRIVATE ${CMAKE_CURRENT_LIST_DIR})
-target_compile_definitions(
-    rocprofiler-systems-avail
-    PRIVATE ROCPROFSYS_EXTERN_COMPONENTS=0
-)
 target_link_libraries(
     rocprofiler-systems-avail
     PRIVATE
         rocprofiler-systems::rocprofiler-systems-compile-definitions
         rocprofiler-systems::rocprofiler-systems-interface-library
         rocprofiler-systems::rocprofiler-systems-core
+        rocprofiler-systems::rocprofiler-systems-bin-common
+        rocprofiler-systems::rocprofiler-systems-json
 )
 set_target_properties(
     rocprofiler-systems-avail

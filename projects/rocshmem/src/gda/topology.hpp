@@ -43,7 +43,6 @@
 #include <stdbool.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
-#include <unistd.h>
 #include <filesystem>
 #include <fstream>
 
@@ -60,6 +59,27 @@ namespace rocshmem
   using std::pair;
   using std::set;
   using std::vector;
+
+  /**
+   * PCIe path types between GPU and NIC, ordered by increasing distance.
+   */
+  enum NicPathType {
+    NIC_PATH_PIX, ///< Through a single PCIe switch
+    NIC_PATH_PXB, ///< Through multiple PCIe switches (same root complex)
+    NIC_PATH_PHB, ///< Through the PCIe host bridge (same NUMA node)
+    NIC_PATH_SYS, ///< Across NUMA nodes
+  };
+
+  NicPathType ParseNicMergeLevel(const std::string &level_str);
+
+  std::vector<std::string> ParseNicList(const std::string &csv);
+
+  std::string SelectRankGroup(const std::string &spec, int rank);
+
+  std::vector<std::string> BuildFilteredNicAddresses(const char *hca_list);
+
+  NicPathType ComputeGpuNicPathType(int gpuIndex, const std::string &nicBusId,
+                                    int nicNuma);
 
   /**
    * Enumeration of GID priority
@@ -256,15 +276,42 @@ namespace rocshmem
    */
   int GetClosestCpuNumaToNic(int nicIndex);
 
+  struct IbvDevice {
+    void *devicePtr;
+    std::string name;
+    std::string busId;
+    bool hasActivePort;
+    int numaNode;
+    int gidIndex;
+    std::string gidDescriptor;
+    bool isRoce;
+  };
+
+  std::vector<IbvDevice> const &GetIbvDeviceList();
+
   /**
    * Returns the index of the NIC closest to the given GPU
    *
    * @param[in] gpuIndex Index of the GPU to query
    * @param[in] hca_list Include list of device names that can be used (Exclude if prefixed by ^)
-   * @param[out] dev_name Name of of IB Verbs capable NIC index closest to GPU gpuIndex
+   * @param[out] dev_name Name of the IB Verbs capable NIC index closest to GPU gpuIndex
    * @returns index of IB Verbs capable NIC index closest to GPU gpuIndex, or -1 if unable to detect
    */
-  int GetClosestNicToGpu(int gpuIndex, const char* hca_list, const char** dev_name);
+  int GetClosestNicToGpu(int gpuIndex, const char *hca_list,
+                         std::string *dev_name);
+
+  /**
+   * Returns the names of NICs closest to the given GPU within a PCIe path limit.
+   *
+   * @param[in] gpuIndex Index of the GPU to query
+   * @param[in] hca_list Include list of device names (Exclude if prefixed by ^)
+   * @param[in] max_path_type Maximum PCIe path distance to include
+   * @param[out] nic_names Populated with names of matching NICs
+   * @returns number of NICs found, or -1 on error
+   */
+  int GetClosestNicsToGpu(int gpuIndex, const char *hca_list,
+                          NicPathType max_path_type,
+                          std::vector<std::string> &nic_names);
 
   /**
    * Returns information about number of available Devices

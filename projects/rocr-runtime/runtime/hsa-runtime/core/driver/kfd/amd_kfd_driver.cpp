@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -141,7 +141,7 @@ hsa_status_t KfdDriver::Init() {
 
 hsa_status_t KfdDriver::ShutDown() {
   HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtRuntimeDisable());
-  if (ret != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  if (ret != HSAKMT_STATUS_SUCCESS && ret != HSAKMT_STATUS_NOT_SUPPORTED) return HSA_STATUS_ERROR;
 
   ret = HSAKMT_CALL(hsaKmtReleaseSystemProperties());
 
@@ -311,10 +311,14 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
     }
   }
 
-  const uint32_t node_id =
-      (alloc_flags & core::MemoryRegion::AllocateGTTAccess)
-          ? agent_node_id
-          : m_region.owner()->node_id();
+  // agent_node_id uses 0 as the allocator default/unspecified sentinel.
+  const bool has_agent_node_id = agent_node_id != 0;
+  const bool allocation_uses_agent_node =
+      (alloc_flags & (core::MemoryRegion::AllocateGTTAccess |
+                      core::MemoryRegion::AllocateQueueObject)) != 0;
+  const uint32_t node_id = has_agent_node_id && allocation_uses_agent_node
+      ? agent_node_id
+      : m_region.owner()->node_id();
 
   //// Allocate memory.
   //// If it fails attempt to release memory from the block allocator and retry.
@@ -389,14 +393,14 @@ hsa_status_t KfdDriver::FreeMemory(void *mem, size_t size) {
 
 hsa_status_t KfdDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
                                     HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id,
-                                    void* queue_addr, uint64_t queue_size_bytes, HsaEvent* event,
-                                    HsaQueueResource& queue_resource) const {
+                                    void* queue_addr, uint64_t queue_size_bytes, uint64_t queue_metadata_size_bytes,
+                                    HsaEvent* event, HsaQueueResource& queue_resource) const {
   // Convert from ROCR internal priority type to KFD type
   HSA_QUEUE_PRIORITY kfd_priority = HsaInternalToKfdPriority(priority);
 
-  if (HSAKMT_CALL(hsaKmtCreateQueueExt(node_id, type, queue_pct, kfd_priority, sdma_engine_id,
-                                       queue_addr, queue_size_bytes, event, &queue_resource)) !=
-      HSAKMT_STATUS_SUCCESS) {
+  if (HSAKMT_CALL(hsaKmtCreateQueueV2(node_id, type, queue_pct, kfd_priority, sdma_engine_id,
+                                         queue_addr, queue_size_bytes, queue_metadata_size_bytes,
+                                         event, &queue_resource)) != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
   return HSA_STATUS_SUCCESS;
@@ -463,7 +467,7 @@ hsa_status_t KfdDriver::ImportDMABuf(int dmabuf_fd, const core::Agent& agent,
   const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
   HsaExternalHandleDesc desc;
   desc.device_handle = gpu_agent.libThunkDev();
-  desc.fd = static_cast<HSAint32>(dmabuf_fd);
+  desc.fd = static_cast<HSAint64>(dmabuf_fd);
   desc.type = HSA_EXTERNAL_HANDLE_DMA_BUF;
   desc.mem = mem;
   desc.metadata = 0;
@@ -573,6 +577,45 @@ hsa_status_t KfdDriver::OpenSMI(uint32_t node_id, int* fd) const {
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t KfdDriver::ImportExternalSemaphore(uint32_t node_id, void* nt_handle,
+                                                hsa_amd_external_semaphore_handle_type_t type,
+                                                hsa_amd_external_semaphore_t* out_sem) const {
+  // hsa_amd_external_semaphore_handle_type_t maps 1:1 to
+  // HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE by design (see hsa_ext_amd.h).
+  HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE kmt_type =
+      static_cast<HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE>(type);
+
+  HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {};
+  HSAKMT_STATUS s =
+      HSAKMT_CALL(hsaKmtImportExternalSemaphore(node_id, nt_handle, kmt_type, &kmt_handle));
+
+  // libhsakmt distinguishes invalid input (null handle, unknown type)
+  // from "no node for this agent" and from generic KMD failures.
+  // Surface those distinctions to the public API instead of folding
+  // every non-success code into HSA_STATUS_ERROR.
+  switch (s) {
+    case HSAKMT_STATUS_SUCCESS:
+      break;
+    case HSAKMT_STATUS_INVALID_PARAMETER:  // e.g. null nt_handle
+    case HSAKMT_STATUS_NOT_SUPPORTED:      // unsupported handle type (incl. Linux stub)
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSAKMT_STATUS_INVALID_NODE_UNIT:  // no WDDM device for node
+      return HSA_STATUS_ERROR_INVALID_AGENT;
+    default:
+      return HSA_STATUS_ERROR;
+  }
+
+  out_sem->handle = kmt_handle.handle;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::DestroyExternalSemaphore(hsa_amd_external_semaphore_t sem) const {
+  HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {sem.handle};
+  if (HSAKMT_CALL(hsaKmtDestroyExternalSemaphore(kmt_handle)) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
 void *KfdDriver::AllocateKfdMemory(const HsaMemFlags &flags, uint32_t node_id,
                                    size_t size) {
   void *mem = nullptr;
@@ -582,12 +625,12 @@ void *KfdDriver::AllocateKfdMemory(const HsaMemFlags &flags, uint32_t node_id,
 
 bool KfdDriver::FreeKfdMemory(void *mem, size_t size) {
   if (mem == nullptr || size == 0) {
-    debug_print("Invalid free ptr:%p size:%lu\n", mem, size);
+    debug_print("Invalid free ptr:%p size:%zu\n", mem, size);
     return false;
   }
 
   if (HSAKMT_CALL(hsaKmtFreeMemory(mem, size)) != HSAKMT_STATUS_SUCCESS) {
-    debug_print("Failed to free ptr:%p size:%lu\n", mem, size);
+    debug_print("Failed to free ptr:%p size:%zu\n", mem, size);
     return false;
   }
   return true;

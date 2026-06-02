@@ -103,17 +103,6 @@ target_include_directories(
 set_property(TARGET ${ROCM_SMI_TARGET} PROPERTY SOVERSION "${VERSION_MAJOR}")
 set_property(TARGET ${ROCM_SMI_TARGET} PROPERTY VERSION "${SO_VERSION_STRING}")
 
-## If the library is a release, strip the target library
-if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
-    if(${BUILD_SHARED_LIBS}) #stripping only for .so
-        add_custom_command(
-            TARGET ${ROCM_SMI_TARGET}
-            POST_BUILD
-            COMMAND ${CMAKE_STRIP} lib${ROCM_SMI_TARGET}.so.${SO_VERSION_STRING}
-        )
-    endif()
-endif()
-
 #file reorganization changes
 #rocm_smi.py moved to libexec/rocm_smi. so creating rocm-smi symlink
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/bin)

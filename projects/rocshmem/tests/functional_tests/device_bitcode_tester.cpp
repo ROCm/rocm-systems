@@ -98,24 +98,30 @@ DeviceBitcodeTester::~DeviceBitcodeTester() {
   }
 }
 
-void DeviceBitcodeTester::launch(const char* kernel, void** args,
-                                 dim3 grid, dim3 block) {
+void DeviceBitcodeTester::launch(const char* kernel, void** args) {
   hipFunction_t fn;
   CHECK_HIP(hipModuleGetFunction(&fn, module, kernel));
-  CHECK_HIP(hipModuleLaunchKernel(fn, grid.x, grid.y, grid.z,
-                                  block.x, block.y, block.z,
-                                  0, nullptr, args, nullptr));
+  if (wf_size <= 0) {
+    fprintf(stderr, "[PE %d] invalid runtime wavefront size: %d\n",
+            my_pe, wf_size);
+    rocshmem_global_exit(1);
+  }
+  // Prefer one wave per block for bitcode kernels; kernel-side wf_id gating
+  // also protects wave barrier participation if launch geometry regresses.
+  unsigned bx = static_cast<unsigned>(wf_size);
+  CHECK_HIP(hipModuleLaunchKernel(fn, 1, 1, 1, bx, 1, 1, 0, nullptr, args,
+                                  nullptr));
   CHECK_HIP(hipDeviceSynchronize());
 }
 
 template <typename T>
 void DeviceBitcodeTester::run_rma_test(const char* label, const char* kernel,
                                        int count, T scale, T offset) {
-  T* sym_src = static_cast<T*>(rocshmem_malloc(count * sizeof(T)));
-  T* sym_dst = static_cast<T*>(rocshmem_malloc(count * sizeof(T)));
+  T* sym_src = static_cast<T*>(alloc_test_buffer(count * sizeof(T)));
+  T* sym_dst = static_cast<T*>(alloc_test_buffer(count * sizeof(T)));
   // Use symmetric heap for get result so GDA can write to it (only heap is
   // registered for RDMA); hipMalloc'd dest would never receive the get.
-  T* sym_result = static_cast<T*>(rocshmem_malloc(count * sizeof(T)));
+  T* sym_result = static_cast<T*>(alloc_test_buffer(count * sizeof(T)));
   for (int i = 0; i < count; i++) sym_result[i] = static_cast<T>(-1);
 
   for (int i = 0; i < count; i++) {
@@ -143,16 +149,16 @@ void DeviceBitcodeTester::run_rma_test(const char* label, const char* kernel,
     printf("[PE %d] %s: %d elements OK PASS\n", my_pe, label, count);
   if (!pass) all_pass = false;
 
-  rocshmem_free(sym_result);
-  rocshmem_free(sym_src);
-  rocshmem_free(sym_dst);
+  free_test_buffer(sym_result);
+  free_test_buffer(sym_src);
+  free_test_buffer(sym_dst);
 }
 
 template <typename T>
 void DeviceBitcodeTester::run_scalar_put_test(const char* label,
                                               const char* kernel,
                                               T scale, T offset) {
-  T* sym_buf = static_cast<T*>(rocshmem_malloc(sizeof(T)));
+  T* sym_buf = static_cast<T*>(alloc_test_buffer(sizeof(T)));
   *sym_buf = static_cast<T>(-1);
   rocshmem_barrier_all();
 
@@ -168,7 +174,7 @@ void DeviceBitcodeTester::run_scalar_put_test(const char* label,
          pass ? "PASS" : "FAIL");
   if (!pass) all_pass = false;
 
-  rocshmem_free(sym_buf);
+  free_test_buffer(sym_buf);
 }
 
 void DeviceBitcodeTester::execute() {
@@ -224,7 +230,7 @@ void DeviceBitcodeTester::execute() {
   rocshmem_barrier_all();
 
   { // test_typed_atomic (64-bit atomics for GDA compatibility)
-    int64_t* sym_counter = static_cast<int64_t*>(rocshmem_malloc(sizeof(int64_t)));
+    int64_t* sym_counter = static_cast<int64_t*>(alloc_test_buffer(sizeof(int64_t)));
     *sym_counter = 0;
     int64_t* d_old;
     CHECK_HIP(hipMalloc(&d_old, 2 * sizeof(int64_t)));
@@ -244,16 +250,16 @@ void DeviceBitcodeTester::execute() {
     if (!pass) all_pass = false;
 
     CHECK_HIP(hipFree(d_old));
-    rocshmem_free(sym_counter);
+    free_test_buffer(sym_counter);
   }
 
   rocshmem_barrier_all();
 
   { // test_typed_put_signal
     constexpr int COUNT = 4;
-    int* sym_src = static_cast<int*>(rocshmem_malloc(COUNT * sizeof(int)));
-    int* sym_dst = static_cast<int*>(rocshmem_malloc(COUNT * sizeof(int)));
-    uint64_t* sym_sig = static_cast<uint64_t*>(rocshmem_malloc(sizeof(uint64_t)));
+    int* sym_src = static_cast<int*>(alloc_test_buffer(COUNT * sizeof(int)));
+    int* sym_dst = static_cast<int*>(alloc_test_buffer(COUNT * sizeof(int)));
+    uint64_t* sym_sig = static_cast<uint64_t*>(alloc_test_buffer(sizeof(uint64_t)));
 
     for (int i = 0; i < COUNT; i++) {
       sym_src[i] = my_pe * 100 + i;
@@ -282,15 +288,15 @@ void DeviceBitcodeTester::execute() {
              my_pe, COUNT);
     if (!pass) all_pass = false;
 
-    rocshmem_free(sym_src);
-    rocshmem_free(sym_dst);
-    rocshmem_free(sym_sig);
+    free_test_buffer(sym_src);
+    free_test_buffer(sym_dst);
+    free_test_buffer(sym_sig);
   }
 
   rocshmem_barrier_all();
 
   { // test_typed_wait_until
-    int* sym_flag = static_cast<int*>(rocshmem_malloc(sizeof(int)));
+    int* sym_flag = static_cast<int*>(alloc_test_buffer(sizeof(int)));
     *sym_flag = 0;
     rocshmem_barrier_all();
 
@@ -305,7 +311,7 @@ void DeviceBitcodeTester::execute() {
            my_pe, *sym_flag, expected, sender, pass ? "PASS" : "FAIL");
     if (!pass) all_pass = false;
 
-    rocshmem_free(sym_flag);
+    free_test_buffer(sym_flag);
   }
 
   rocshmem_barrier_all();
@@ -315,7 +321,7 @@ void DeviceBitcodeTester::execute() {
   rocshmem_barrier_all();
 
   { // test_typed_amo_extended (64-bit atomics for GDA compatibility)
-    int64_t* sym_val = static_cast<int64_t*>(rocshmem_malloc(sizeof(int64_t)));
+    int64_t* sym_val = static_cast<int64_t*>(alloc_test_buffer(sizeof(int64_t)));
     *sym_val = 0;
     int64_t* d_results;
     CHECK_HIP(hipMalloc(&d_results, 3 * sizeof(int64_t)));
@@ -335,14 +341,14 @@ void DeviceBitcodeTester::execute() {
     if (!pass) all_pass = false;
 
     CHECK_HIP(hipFree(d_results));
-    rocshmem_free(sym_val);
+    free_test_buffer(sym_val);
   }
 
   rocshmem_barrier_all();
 
   { // test_typed_amo_bitwise (64-bit atomics for GDA compatibility)
     uint64_t* sym_val = static_cast<uint64_t*>(
-        rocshmem_malloc(sizeof(uint64_t)));
+        alloc_test_buffer(sizeof(uint64_t)));
     *sym_val = 0;
     uint64_t* d_results;
     CHECK_HIP(hipMalloc(&d_results, 3 * sizeof(uint64_t)));
@@ -362,7 +368,7 @@ void DeviceBitcodeTester::execute() {
     if (!pass) all_pass = false;
 
     CHECK_HIP(hipFree(d_results));
-    rocshmem_free(sym_val);
+    free_test_buffer(sym_val);
   }
 
   rocshmem_barrier_all();
@@ -374,7 +380,7 @@ void DeviceBitcodeTester::execute() {
 
   { // test_typed_wait_vector
     constexpr int COUNT = 4;
-    int* sym_arr = static_cast<int*>(rocshmem_malloc(COUNT * sizeof(int)));
+    int* sym_arr = static_cast<int*>(alloc_test_buffer(COUNT * sizeof(int)));
     for (int i = 0; i < COUNT; i++) sym_arr[i] = 0;
     int* d_idx;
     CHECK_HIP(hipMalloc(&d_idx, sizeof(int)));
@@ -406,7 +412,41 @@ void DeviceBitcodeTester::execute() {
     if (!pass) all_pass = false;
 
     CHECK_HIP(hipFree(d_idx));
-    rocshmem_free(sym_arr);
+    free_test_buffer(sym_arr);
+  }
+
+  rocshmem_barrier_all();
+
+  { // test_int_sum_reduce: source[i]=1 on every PE, expect dest[i]==n_pes
+    constexpr int COUNT = 4;
+    int* sym_src = static_cast<int*>(rocshmem_malloc(COUNT * sizeof(int)));
+    int* sym_dst = static_cast<int*>(rocshmem_malloc(COUNT * sizeof(int)));
+    for (int i = 0; i < COUNT; i++) {
+      sym_src[i] = 1;
+      sym_dst[i] = 0;
+    }
+    rocshmem_barrier_all();
+
+    int nreduce = COUNT;
+    int team = 0;
+    void* kargs[] = {&sym_dst, &sym_src, &nreduce, &team};
+    launch("test_int_sum_reduce", kargs);
+    rocshmem_barrier_all();
+
+    bool pass = true;
+    for (int i = 0; i < COUNT; i++) {
+      if (sym_dst[i] != n_pes) {
+        printf("[PE %d] test_int_sum_reduce: [%d] got=%d expect=%d FAIL\n",
+               my_pe, i, sym_dst[i], n_pes);
+        pass = false;
+      }
+    }
+    if (pass)
+      printf("[PE %d] test_int_sum_reduce: %d elements OK PASS\n", my_pe, COUNT);
+    if (!pass) all_pass = false;
+
+    rocshmem_free(sym_src);
+    rocshmem_free(sym_dst);
   }
 
   rocshmem_barrier_all();
@@ -418,8 +458,8 @@ void DeviceBitcodeTester::execute() {
   if (!all_pass) rocshmem_global_exit(1);
 }
 
-void DeviceBitcodeTester::resetBuffers(size_t) {}
+void DeviceBitcodeTester::resetBuffers(uint64_t) {}
 
-void DeviceBitcodeTester::launchKernel(dim3, dim3, int, size_t) {}
+void DeviceBitcodeTester::launchKernel(dim3, dim3, int, uint64_t) {}
 
-void DeviceBitcodeTester::verifyResults(size_t) {}
+void DeviceBitcodeTester::verifyResults(uint64_t) {}

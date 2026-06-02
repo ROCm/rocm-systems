@@ -7,7 +7,10 @@ multiproc:
   Unit_deviceAllocation_NewDelete_MultProcess: *level_2
   Unit_hipDeviceGet_MaskedDevices: *level_2
   Unit_hipDeviceGetPCIBusId_MaskedDevices: *level_2
-  Unit_hipDeviceGetPCIBusId_CheckPciBusIDWithLspci: *level_2
+  Unit_hipDeviceGetPCIBusId_CheckPciBusIDWithLspci:
+    <<: *level_2
+    # Note: no valid pci bdf in wsl
+    disabled: [amd_wsl]
   Unit_hipDeviceTotalMem_MaskedDevices: *level_2
   Unit_hipDeviceGetAttribute_MaskedDevices: *level_2
   Unit_hipGetDeviceCount_MaskedDevices: *level_2

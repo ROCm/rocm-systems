@@ -25,6 +25,7 @@
 
 #include <amd_smi/amdsmi.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #define nullptr ((void*)0)
@@ -162,8 +163,8 @@ goamdsmi_status_t go_shim_amdsmiapu_init(goamdsmi_Init_t goamdsmi_Init) {
         uint32_t num_gpu_devices = GOAMDSMI_VALUE_0;
 
         // CPU
-        processor_type_t cpu_processor_type = AMDSMI_PROCESSOR_TYPE_AMD_CPU;
-        processor_type_t cpu_core_processor_type = AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE;
+        amdsmi_processor_type_t cpu_processor_type = AMDSMI_PROCESSOR_TYPE_AMD_CPU;
+        amdsmi_processor_type_t cpu_core_processor_type = AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE;
         if ((AMDSMI_STATUS_SUCCESS == amdsmi_get_processor_handles_by_type(
                                           amdsmi_apusocket_handle_all_socket[socket_counter],
                                           cpu_processor_type, nullptr, &num_cpu)) &&
@@ -191,7 +192,7 @@ goamdsmi_status_t go_shim_amdsmiapu_init(goamdsmi_Init_t goamdsmi_Init) {
         }
 
         // GPU
-        processor_type_t gpu_device_processor_type = AMDSMI_PROCESSOR_TYPE_AMD_GPU;
+        amdsmi_processor_type_t gpu_device_processor_type = AMDSMI_PROCESSOR_TYPE_AMD_GPU;
         if ((AMDSMI_STATUS_SUCCESS == amdsmi_get_processor_handles_by_type(
                                           amdsmi_apusocket_handle_all_socket[socket_counter],
                                           gpu_device_processor_type, nullptr, &num_gpu_devices)) &&
@@ -238,8 +239,8 @@ goamdsmi_status_t go_shim_amdsmiapu_init(goamdsmi_Init_t goamdsmi_Init) {
       uint32_t num_cpu = GOAMDSMI_VALUE_0;
       uint32_t num_cpu_physicalCores = GOAMDSMI_VALUE_0;
 
-      processor_type_t cpu_processor_type = AMDSMI_PROCESSOR_TYPE_AMD_CPU;
-      processor_type_t cpu_core_processor_type = AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE;
+      amdsmi_processor_type_t cpu_processor_type = AMDSMI_PROCESSOR_TYPE_AMD_CPU;
+      amdsmi_processor_type_t cpu_core_processor_type = AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE;
       if ((AMDSMI_STATUS_SUCCESS == amdsmi_get_processor_handles_by_type(
                                         amdsmi_cpusocket_handle_all_socket[cpu_socket_counter],
                                         cpu_processor_type, nullptr, &num_cpu)) &&
@@ -297,7 +298,7 @@ goamdsmi_status_t go_shim_amdsmiapu_init(goamdsmi_Init_t goamdsmi_Init) {
          gpu_socket_counter++) {
       uint32_t num_gpu_devices = GOAMDSMI_VALUE_0;
 
-      processor_type_t gpu_device_processor_type = AMDSMI_PROCESSOR_TYPE_AMD_GPU;
+      amdsmi_processor_type_t gpu_device_processor_type = AMDSMI_PROCESSOR_TYPE_AMD_GPU;
       if ((AMDSMI_STATUS_SUCCESS == amdsmi_get_processor_handles_by_type(
                                         amdsmi_gpusocket_handle_all_socket[gpu_socket_counter],
                                         gpu_device_processor_type, nullptr, &num_gpu_devices)) &&
@@ -372,8 +373,10 @@ uint32_t goamdsmi_cpu_threads_per_core_get() {
   bool readSuccess = false;
   uint32_t threads_per_core_temp = GOAMDSMI_VALUE_0;
 
+#ifdef ENABLE_ESMI_LIB
   if ((AMDSMI_STATUS_SUCCESS == amdsmi_get_threads_per_core(&threads_per_core_temp)))
     readSuccess = true;
+#endif
   if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
     printf("AMDSMI, %s, CpuThreadsPerCore:%lu\n", readSuccess ? "Success" : "Failed",
            (unsigned long)(threads_per_core_temp));
@@ -410,11 +413,13 @@ uint64_t goamdsmi_cpu_core_energy_get(uint32_t thread_index) {
   uint64_t core_energy_temp = GOAMDSMI_UINT64_MAX;
   uint32_t physicalCore_index = thread_index % num_cpu_physicalCore_inAllSocket;
 
+#ifdef ENABLE_ESMI_LIB
   if (AMDSMI_STATUS_SUCCESS ==
       amdsmi_get_cpu_core_energy(
           amdsmi_processor_handle_all_cpu_physicalCore_across_socket[physicalCore_index],
           &core_energy_temp))
     readSuccess = true;
+#endif
   if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
     printf(
         "AMDSMI, %s for Thread:%d PC:%d, CpuCoreEnergy:%llu, CpuCoreEnergyJoules:%.6f, "
@@ -430,10 +435,14 @@ uint64_t goamdsmi_cpu_core_energy_get(uint32_t thread_index) {
 uint64_t goamdsmi_cpu_socket_energy_get(uint32_t socket_index) {
   bool readSuccess = false;
   uint64_t socket_energy_temp = GOAMDSMI_UINT64_MAX;
+#ifdef ENABLE_ESMI_LIB
   if ((AMDSMI_STATUS_SUCCESS ==
        amdsmi_get_cpu_socket_energy(amdsmi_processor_handle_all_cpu_across_socket[socket_index],
                                     &socket_energy_temp)))
     readSuccess = true;
+#else
+  (void)socket_index;
+#endif
   if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
     printf(
         "AMDSMI, %s for Socket:%d, CpuSocketEnergy:%llu, CpuSocketEnergyJoules:%.6f, "
@@ -448,10 +457,14 @@ uint64_t goamdsmi_cpu_socket_energy_get(uint32_t socket_index) {
 uint32_t goamdsmi_cpu_prochot_status_get(uint32_t socket_index) {
   bool readSuccess = false;
   uint32_t prochot_temp = GOAMDSMI_UINT32_MAX;
+#ifdef ENABLE_ESMI_LIB
   if ((AMDSMI_STATUS_SUCCESS ==
        amdsmi_get_cpu_prochot_status(amdsmi_processor_handle_all_cpu_across_socket[socket_index],
                                      &prochot_temp)))
     readSuccess = true;
+#else
+  (void)socket_index;
+#endif
   if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
     printf("AMDSMI, %s for Socket:%d, CpuProchotStatus:%lu\n", readSuccess ? "Success" : "Failed",
            socket_index, (unsigned long)(prochot_temp));
@@ -462,32 +475,32 @@ uint32_t goamdsmi_cpu_prochot_status_get(uint32_t socket_index) {
 
 uint32_t goamdsmi_cpu_socket_power_get(uint32_t socket_index) {
   bool readSuccess = false;
-  double socket_power_watts = 0;
+  uint32_t socket_power_watts = 0;
   if ((AMDSMI_STATUS_SUCCESS ==
        amdsmi_get_cpu_socket_power(amdsmi_processor_handle_all_cpu_across_socket[socket_index],
                                    &socket_power_watts)))
     readSuccess = true;
   if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
-    printf("AMDSMI, %s for Socket:%d, CpuSocketPowerWatt:%.3f\n",
-           readSuccess ? "Success" : "Failed", socket_index, socket_power_watts);
+    printf("AMDSMI, %s for Socket:%d, CpuSocketPowerWatt:%u\n", readSuccess ? "Success" : "Failed",
+           socket_index, socket_power_watts);
   }
 
-  return readSuccess ? (uint32_t)(socket_power_watts * 1000) : GOAMDSMI_UINT32_MAX;
+  return readSuccess ? socket_power_watts * 1000 : GOAMDSMI_UINT32_MAX;
 }
 
 uint32_t goamdsmi_cpu_socket_power_cap_get(uint32_t socket_index) {
   bool readSuccess = false;
-  double socket_power_cap_watts = 0;
+  uint32_t socket_power_cap_watts = 0;
   if ((AMDSMI_STATUS_SUCCESS ==
        amdsmi_get_cpu_socket_power_cap(amdsmi_processor_handle_all_cpu_across_socket[socket_index],
                                        &socket_power_cap_watts)))
     readSuccess = true;
   if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
-    printf("AMDSMI, %s for Socket:%d, CpuSocketPowerCapWatt:%.3f\n",
+    printf("AMDSMI, %s for Socket:%d, CpuSocketPowerCapWatt:%u\n",
            readSuccess ? "Success" : "Failed", socket_index, socket_power_cap_watts);
   }
 
-  return readSuccess ? (uint32_t)(socket_power_cap_watts * 1000) : GOAMDSMI_UINT32_MAX;
+  return readSuccess ? socket_power_cap_watts * 1000 : GOAMDSMI_UINT32_MAX;
 }
 
 uint32_t goamdsmi_cpu_core_boostlimit_get(uint32_t thread_index) {
@@ -495,11 +508,13 @@ uint32_t goamdsmi_cpu_core_boostlimit_get(uint32_t thread_index) {
   uint32_t core_boostlimit_temp = GOAMDSMI_UINT32_MAX;
   uint32_t physicalCore_index = thread_index % num_cpu_physicalCore_inAllSocket;
 
+#ifdef ENABLE_ESMI_LIB
   if (AMDSMI_STATUS_SUCCESS ==
       amdsmi_get_cpu_core_boostlimit(
           amdsmi_processor_handle_all_cpu_physicalCore_across_socket[physicalCore_index],
           &core_boostlimit_temp))
     readSuccess = true;
+#endif
   if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
     printf("AMDSMI, %s for Thread:%d PC:%d, CpuCoreBoostLimit:%lu\n",
            readSuccess ? "Success" : "Failed", thread_index, physicalCore_index,
@@ -626,7 +641,7 @@ uint64_t goamdsmi_gpu_dev_power_get(uint32_t dv_ind) {
       }
     }
     gpu_power = gpu_power_temp;
-    gpu_power = (gpu_power) * 1000000;  // to maintain backward compatibity with old ROCM SMI
+    gpu_power = (gpu_power) * 1000000;  // to maintain backward compatibility with old ROCM SMI
     if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
       printf("AMDSMI, Success for Gpu:%d, GpuPower:%llu, GpuPowerinWatt:%.6f\n", dv_ind,
              (unsigned long long)(gpu_power), ((double)(gpu_power)) / 1000000);
@@ -657,7 +672,7 @@ uint64_t goamdsmi_gpu_dev_power_get(uint32_t dv_ind) {
       }
     }
     gpu_power = gpu_power_temp;
-    gpu_power = (gpu_power) * 1000000;  // to maintain backward compatibity with old ROCM SMI
+    gpu_power = (gpu_power) * 1000000;  // to maintain backward compatibility with old ROCM SMI
     if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
       printf(
           "AMDSMI, Success for Gpu:%d, GpuPowerFromMetrics:%llu, GpuPowerFromMetricsinWatt:%.6f\n",
@@ -676,16 +691,16 @@ uint64_t goamdsmi_gpu_dev_power_get(uint32_t dv_ind) {
 uint64_t goamdsmi_gpu_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor, uint32_t metric) {
   bool readSuccess = false;
   uint64_t gpu_temperature = GOAMDSMI_UINT64_MAX;
-  uint64_t gpu_temperature_temp = GOAMDSMI_UINT64_MAX;
+  int64_t gpu_temperature_temp = (int64_t)GOAMDSMI_UINT64_MAX;
 
   if ((dv_ind < num_gpu_devices_inAllSocket) &&
       (AMDSMI_STATUS_SUCCESS ==
        amdsmi_get_temp_metric(amdsmi_processor_handle_all_gpu_device_across_socket[dv_ind], sensor,
                               metric, &gpu_temperature_temp))) {
     readSuccess = true;
-    gpu_temperature = gpu_temperature_temp;
+    gpu_temperature = (uint64_t)gpu_temperature_temp;
     gpu_temperature =
-        (gpu_temperature) * 1000;  // to maintain backward compatibity with old ROCM SMI
+        (gpu_temperature) * 1000;  // to maintain backward compatibility with old ROCM SMI
     if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
       printf(
           "AMDSMI, %s for Gpu:%d Sensor:%d Metric:%d, GpuTemperature:%llu, "

@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 """
 Tests for the user API.
@@ -19,6 +19,7 @@ pytestmark = [pytest.mark.user_api]
 @pytest.mark.parametrize(
     "mode", ["baseline", "sampling", "binary_rewrite", "runtime_instrument", "sys_run"]
 )
+@pytest.mark.class_name("user-api")
 class TestUserAPI(RocprofsysTest):
     REWRITE_ARGS = [
         "-e",

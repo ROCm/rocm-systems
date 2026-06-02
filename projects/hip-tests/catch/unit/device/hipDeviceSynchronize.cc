@@ -120,14 +120,9 @@ HIP_TEST_CASE(Unit_hipDeviceSynchronize_Functional) {
     HIP_CHECK(hipMemcpyAsync(A[i], Ad[i], _SIZE, hipMemcpyDeviceToHost, stream[i]));
   }
 
-
-  // This first check but relies on the kernel running for so long that the
-  // D2H async memcopy has not started yet. This will be true in an optimal
-  // asynchronous implementation.
-  // Conservative implementations which synchronize the hipMemcpyAsync will
-  // fail, ie if HIP_LAUNCH_BLOCKING=true.
-
-  REQUIRE(NUM_ITERS != A[NUM_STREAMS - 1][0] - 1);
+  // Do not assert on host-visible buffers before synchronize: the kernel may
+  // finish and D2H may complete before this thread runs again (fast GPU / CI),
+  // so "value not yet updated" is not reliable.
   HIP_CHECK(hipDeviceSynchronize());
   REQUIRE(NUM_ITERS == A[NUM_STREAMS - 1][0] - 1);
   for (int i = 0; i < NUM_STREAMS; i++) {

@@ -78,16 +78,26 @@ class WDDMQueue;
 #define IS_OVERLAPPING(start1, size1, start2, size2) \
   ((start1 < (start2 + size2)) && (start2 < (start1 + size1)))
 
+enum class SegmentKind {
+  kUnknown = 0,
+  kAperture,
+  kLocalMemory,
+  kSystemMemory,
+};
+
 struct SegmentInfo {
   uint32_t segment_id;
-  uint32_t segment_type;    // 0=aperture, 1=gpu memory, 2=system memory
-  bool aperture;
-  bool system_memory;
-  uint64_t commit_limit;
+  SegmentKind kind;
+  // Raw segment flags — kind collapses aperture+system_memory into kAperture,
+  // so preserve the source bits to identify non-local-heap segments later.
+  bool is_aperture;
+  bool is_system_memory;
 
   SegmentInfo()
-      : segment_id(0), segment_type(0), aperture(false),
-        system_memory(false), commit_limit(0) {}
+      : segment_id(0),
+        kind(SegmentKind::kUnknown),
+        is_aperture(false),
+        is_system_memory(false) {}
 };
 
 class WDDMDevice {
@@ -158,14 +168,18 @@ public:
   }
   uint32_t GetComputeEngine() { return device_info_.compute_schedid; }
 
-  uint64_t VramAvail();
+  hsa_status_t VramAvail(uint64_t* available_bytes);
 
   void GetClockCounters(uint64_t *gpu, uint64_t *cpu);
   uint32_t GetNumCpQueues() { return device_info_.num_cp_queues; }
   uint32_t NumXcc() const { return device_info_.num_xcc; }
 
   bool CreateSyncobj(D3DKMT_HANDLE *handle, uint64_t **addr);
-  void DestroySyncobj(D3DKMT_HANDLE handle);
+  // Returns true on STATUS_SUCCESS. Internal cleanup callers (queue
+  // teardown / rollback) intentionally ignore the result; the external
+  // semaphore close path propagates it so silent leaks become visible.
+  bool DestroySyncobj(D3DKMT_HANDLE handle);
+  bool OpenSyncobjFromNtHandle(void *nt_handle, D3DKMT_HANDLE *out_handle);
 
   bool CreateQueue(WDDMQueue *queue, uint64_t debugger_data = 0);
   void DestroyQueue(WDDMQueue *queue);
@@ -251,7 +265,7 @@ private:
   void InitCmdbufInfo(void);
 
   bool QuerySegmentInfo();
-  bool GetSegmentId(D3DKMT_QUERYSTATISTICS_SEGMENT_TYPE segment_type, uint32_t &segment_id);
+  bool FindSegmentId(SegmentKind segment_kind, uint32_t *segment_id);
 
   D3DKMT_HANDLE adapter_;
   LUID adapter_luid_;

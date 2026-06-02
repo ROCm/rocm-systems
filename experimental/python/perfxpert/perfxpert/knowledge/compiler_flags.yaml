@@ -1,0 +1,103 @@
+# Compiler flag catalog with allowlist markers for §5.8 compile.build enforcement.
+# Ref: llm-reference-guide.md lines 1751-1998.
+
+- flag: "-O0"
+  category: optimization_level
+  description: "No optimization"
+  allowlist: true
+  risk: low
+- flag: "-O1"
+  category: optimization_level
+  description: "Basic optimization"
+  allowlist: true
+  risk: low
+- flag: "-O2"
+  category: optimization_level
+  description: "Standard optimization"
+  allowlist: true
+  risk: low
+- flag: "-O3"
+  category: optimization_level
+  description: "Aggressive optimization"
+  allowlist: true
+  risk: low
+
+- flag: "-ffast-math"
+  category: fast_math
+  description: "Enable IEEE-incompatible fast math"
+  allowlist: true
+  risk: medium
+  note: "Changes IEEE semantics; validate numerical results"
+- flag: "-fno-math-errno"
+  category: fast_math
+  description: "Don't set errno on math errors"
+  allowlist: true
+  risk: low
+- flag: "-freciprocal-math"
+  category: fast_math
+  description: "Allow x / y as x * (1/y)"
+  allowlist: true
+  risk: medium
+
+- flag: "-mllvm -amdgpu-num-vgpr="
+  category: register_control
+  description: "Override VGPR count (suffix numeric)"
+  allowlist: true
+  risk: medium
+  note: "Takes a numeric suffix; e.g., -mllvm -amdgpu-num-vgpr=64"
+
+- flag: "-fopenmp"
+  category: parallelism
+  description: "Enable OpenMP"
+  allowlist: true
+  risk: low
+
+- flag: "-fno-unroll-loops"
+  category: loop_control
+  description: "Disable loop unrolling"
+  allowlist: true
+  risk: low
+
+- flag: "-funroll-loops"
+  category: loop_control
+  description: "Enable loop unrolling"
+  allowlist: true
+  risk: low
+
+- flag: "--offload-arch"
+  category: target_arch
+  description: "GPU target architecture (value required)"
+  allowlist: true
+  risk: low
+  value_required: true
+
+- flag: "-mllvm"
+  category: llvm_pass
+  description: "Pass option to LLVM backend"
+  allowlist: true
+  risk: medium
+  value_required: true
+
+- flag: "-save-temps"
+  category: debugging
+  description: "Save temporary compiler outputs"
+  allowlist: true
+  risk: low
+
+- flag: "-g"
+  category: debugging
+  description: "Generate debug symbols"
+  allowlist: true
+  risk: low
+
+# Deny-listed (never auto-apply):
+- flag: "-Xlinker"
+  category: linker
+  description: "Pass to linker — unbounded attack surface"
+  allowlist: false
+  risk: high
+- flag: "-Wl,-rpath"
+  category: linker
+  description: "Run-time library path"
+  allowlist: false
+  risk: high

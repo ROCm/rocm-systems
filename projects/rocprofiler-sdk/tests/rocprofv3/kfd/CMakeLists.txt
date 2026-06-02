@@ -23,29 +23,28 @@ set(kfd-xnack-on-env "${PRELOAD_ENV};HSA_XNACK=1")
 set(kfd-xnack-off-env "${PRELOAD_ENV};HSA_XNACK=0")
 
 foreach(_XNACK on off)
-    rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py)
-    add_test(
-        NAME rocprofv3-test-kfd-xnack-${_XNACK}-execute
+    rocprofiler_add_integration_execute_test(
+        rocprofv3-test-kfd-xnack-${_XNACK}
         COMMAND
             $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --kfd-trace -d
             ${CMAKE_CURRENT_BINARY_DIR}/kfd-xnack-${_XNACK}-trace -o out --output-format
-            json --log-level env -- $<TARGET_FILE:transpose>)
+            json --log-level env -- $<TARGET_FILE:transpose> 1 1 1 2048 2048
+        DEPENDS transpose
+        TIMEOUT 45
+        LABELS "integration-tests;multi-gpu"
+        ENVIRONMENT "${kfd-xnack-${_XNACK}-env}"
+        FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+        FIXTURES_SETUP rocprofv3-test-kfd-xnack-${_XNACK})
 
-    set_tests_properties(
-        rocprofv3-test-kfd-xnack-${_XNACK}-execute
-        PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT
-                   "${kfd-xnack-${_XNACK}-env}" FAIL_REGULAR_EXPRESSION
-                   "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
-
-    add_test(
-        NAME rocprofv3-test-kfd-xnack-${_XNACK}-validate
-        COMMAND
-            ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
-            ${CMAKE_CURRENT_BINARY_DIR}/kfd-xnack-${_XNACK}-trace/out_results.json)
-
-    set_tests_properties(
-        rocprofv3-test-kfd-xnack-${_XNACK}-validate
-        PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
-                   "rocprofv3-test-kfd-xnack-${_XNACK}-execute" FAIL_REGULAR_EXPRESSION
-                   "AssertionError")
+    rocprofiler_add_integration_validate_test(
+        rocprofv3-test-kfd-xnack-${_XNACK}
+        TEST_PATHS validate.py
+        COPY conftest.py
+        CONFIG pytest.ini
+        ARGS --json-input
+             ${CMAKE_CURRENT_BINARY_DIR}/kfd-xnack-${_XNACK}-trace/out_results.json
+        TIMEOUT 45
+        LABELS "integration-tests;multi-gpu"
+        FAIL_REGULAR_EXPRESSION "AssertionError"
+        FIXTURES_REQUIRED rocprofv3-test-kfd-xnack-${_XNACK})
 endforeach()

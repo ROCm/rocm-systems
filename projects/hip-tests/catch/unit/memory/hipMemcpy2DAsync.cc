@@ -16,7 +16,9 @@ HIP_TEST_CASE(Unit_hipMemcpy2DAsync_Positive_Basic) {
 
   constexpr bool async = true;
 
-  const auto stream_type = GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
+  const auto stream_type = isQuickLevel()
+      ? Streams::created
+      : GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
   const StreamGuard stream_guard(stream_type);
   const hipStream_t stream = stream_guard.stream();
 
@@ -48,7 +50,6 @@ HIP_TEST_CASE(Unit_hipMemcpy2DAsync_Positive_Basic) {
 }
 
 HIP_TEST_CASE(Unit_hipMemcpy2DAsync_Positive_Synchronization_Behavior) {
-  CHECK_IMAGE_SUPPORT
   using namespace std::placeholders;
 
   HIP_CHECK(hipDeviceSynchronize());
@@ -84,14 +85,12 @@ HIP_TEST_CASE(Unit_hipMemcpy2DAsync_Positive_Synchronization_Behavior) {
 }
 
 HIP_TEST_CASE(Unit_hipMemcpy2DAsync_Positive_Parameters) {
-  CHECK_IMAGE_SUPPORT
   using namespace std::placeholders;
   constexpr bool async = true;
   Memcpy2DZeroWidthHeight<async>(std::bind(hipMemcpy2DAsync, _1, _2, _3, _4, _5, _6, _7, nullptr));
 }
 
 HIP_TEST_CASE(Unit_hipMemcpy2DAsync_Negative_Parameters) {
-  CHECK_IMAGE_SUPPORT
   constexpr size_t cols = 128;
   constexpr size_t rows = 128;
 

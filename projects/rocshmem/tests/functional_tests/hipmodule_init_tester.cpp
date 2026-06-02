@@ -42,8 +42,8 @@
   } while(0)
 
 // Kernel source that defines ROCSHMEM_CTX_DEFAULT
-// This kernel mimics the rocshmem device context definition to ensure 
-// the device global symbol exists in the module's device symbol table and 
+// This kernel mimics the rocshmem device context definition to ensure
+// the device global symbol exists in the module's device symbol table and
 // can be queried later in rocshmem_hipmodule_init() host API for verification.
 const char* test_kernel_src = R"(
 #include <hip/hip_runtime.h>
@@ -61,6 +61,9 @@ extern "C" __device__ rocshmem_ctx_t __attribute__((visibility("default"))) ROCS
 
 // Define ROCSHMEM_TEAM_WORLD so rocshmem_hipmodule_init() can copy the team world into this module
 extern "C" __constant__ rocshmem_team_t __attribute__((visibility("default"))) ROCSHMEM_TEAM_WORLD {nullptr};
+
+// Define ROCSHMEM_TEAM_SHARED so rocshmem_hipmodule_init() can copy the team shared into this module
+extern "C" __constant__ rocshmem_team_t __attribute__((visibility("default"))) ROCSHMEM_TEAM_SHARED {nullptr};
 
 // stub kernel function used for module verification
 extern "C" __global__ void simple_test_kernel(int *result) {
@@ -157,7 +160,7 @@ HipModuleInitTester::~HipModuleInitTester() {
   }
 }
 
-void HipModuleInitTester::resetBuffers(size_t size) {
+void HipModuleInitTester::resetBuffers([[maybe_unused]] size_t size) {
   // Reset device result to 0
   CHECK_HIP(hipMemset(device_result, 0, sizeof(int)));
 }

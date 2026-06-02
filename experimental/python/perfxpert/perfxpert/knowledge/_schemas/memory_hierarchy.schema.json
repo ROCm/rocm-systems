@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": [
+    "levels",
+    "cache_hit_rate_thresholds"
+  ],
+  "properties": {
+    "levels": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "cache_hit_rate_thresholds": {
+      "type": "object"
+    }
+  }
+}

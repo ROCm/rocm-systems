@@ -35,7 +35,7 @@ Full documentation for rocm_smi_lib is available at [https://rocm.docs.amd.com/]
 ### Removed
 
 - **Removed backwards compatibility `rsmi_dev_gpu_metrics_info_get()`'s `jpeg_activity` or `vcn_activity` fields: use `xcp_stats.jpeg_busy` or `xcp_stats.vcn_busy`**  
-  - Backwards compability is removed for `jpeg_activity` and `vcn_activity` fields, if the `jpeg_busy` or `vcn_busy` field is available.
+  - Backwards compatibility is removed for `jpeg_activity` and `vcn_activity` fields, if the `jpeg_busy` or `vcn_busy` field is available.
     - <i>Reasons for this change</i>:
       - Providing both `vcn_activity`/`jpeg_activity` and XCP (partition) stats `vcn_busy`/`jpeg_busy` caused confusion for users about which field to use. By removing backward compatibility, it is easier to identify the relevant field.
       - The `jpeg_busy` field increased in size (for supported ASICs), making backward compatibility unable to fully copy the structure into `jpeg_activity`.
@@ -233,7 +233,7 @@ $ rocm-smi --showmetrics
 
 ## rocm_smi_lib for ROCm 6.3
 
-- **Added `rsmi_dev_memory_partition_capabilities_get` which returns driver memory partition capablities.**  
+- **Added `rsmi_dev_memory_partition_capabilities_get` which returns driver memory partition capabilities.**  
 Driver now has the ability to report what the user can set memory partition modes to. User can now see available
 memory partition modes upon an invalid argument return from memory partition mode set (`rsmi_dev_memory_partition_set`).
 
@@ -282,7 +282,7 @@ Now ROCm SMI APIs can show RSMI_STATUS_INVALID_ARGS when driver returns EINVAL.
 
 - **Re-enable C++ tests for `memorypartition_read_write`**.  
   - This change is part of the partition feature redesign.
-  - SMI's workflow needs to be adjusted in order to accomidate incoming driver changes to enable
+  - SMI's workflow needs to be adjusted in order to accommodate incoming driver changes to enable
   Dynamic memory partition feature. We plan on re-enabling testing for this feature during ROCm
   6.4.
 
@@ -315,14 +315,14 @@ The test segfault could be seen on all MI3x ASICs, if brought up in a non-SPX co
 ### Changed
 
 - **Added Partition ID API (`rsmi_dev_partition_id_get(..)`)**  
-Previously `rsmi_dev_partition_id_get` could only be retrived by querying through `rsmi_dev_pci_id_get()`
+Previously `rsmi_dev_partition_id_get` could only be retrieved by querying through `rsmi_dev_pci_id_get()`
 and parsing optional bits in our python CLI/API. We are now making this available directly through API.
-As well as added testing, in our compute partitioning tests verifing partition IDs update accordingly. 
+As well as added testing, in our compute partitioning tests verifying partition IDs update accordingly. 
 
 ### Resolved issues
 
 - **Partition ID CLI output**  
-Due to driver changes in KFD, some devices may report bits [31:28] or [2:0]. With the newly added `rsmi_dev_partition_id_get(..)`, we provided this fallback to properly retreive partition ID. We
+Due to driver changes in KFD, some devices may report bits [31:28] or [2:0]. With the newly added `rsmi_dev_partition_id_get(..)`, we provided this fallback to properly retrieve partition ID. We
 plan to eventually remove partition ID from the function portion of the BDF (Bus Device Function). See below for PCI ID description.
 
   - bits [63:32] = domain
@@ -349,7 +349,7 @@ The parsing of `pp_od_clk_voltage` was not dynamic enough to work with the dropp
 ### Added
 
 - **Unlock mutex if process is dead**
-Added in order to unlock mutex when process is dead. Additional debug output has been added if futher issues are detected.
+Added in order to unlock mutex when process is dead. Additional debug output has been added if further issues are detected.
 
 - **Added Partition ID to rocm-smi CLI**
 `rsmi_dev_pci_id_get()` now provides partition ID. See API for better detail. Previously these bits were reserved bits (right before domain) and partition id was within function.
@@ -550,7 +550,7 @@ Device  [Model : Revision]    Temp        Power     Partitions      SCLK   MCLK 
 ### Resolved issues
 
 - **Fixed HIP and ROCm SMI mismatch on GPU bus assignments**
-These changes prompted us to to provide better visability for our device nodes and partition IDs (see addition provided above). See examples below for fix overview.
+These changes prompted us to to provide better visibility for our device nodes and partition IDs (see addition provided above). See examples below for fix overview.
 1. MI300a GPU device `Domain:Bus:Device.function` clashes with another AMD USB device
 Cause(s):
 a. ROCm SMI did not propagate domain consistently (for partitioned devices)
@@ -560,7 +560,7 @@ Cause(s):
 a. ROCm SMI did not propagate domain consistently (for partitioned devices)
 3. Displayed topology will show disordered nodes when compared to HIP
 Cause(s):
-a. ROCm SMI did not propogate domain consistently (for partitioned devices)
+a. ROCm SMI did not propagate domain consistently (for partitioned devices)
 
 *Device in TPX*
 ```shell
@@ -673,22 +673,22 @@ GPU[3]          : Successfully set max sclk to 2100(MHz)
 ```
 
 - **Added `rsmi_dev_target_graphics_version_get()`**
-Users can now query through ROCm SMI API (`rsmi_dev_target_graphics_version_get()`) to retreive the target graphics version for a GPU device. Currently, this output is not supplied through our rocm-smi CLI.
+Users can now query through ROCm SMI API (`rsmi_dev_target_graphics_version_get()`) to retrieve the target graphics version for a GPU device. Currently, this output is not supplied through our rocm-smi CLI.
 
 ### Changed
 
 - **Removed non-unified API headers: Individual GPU metric APIs are no longer supported**
 The individual metric APIs (`rsmi_dev_metrics_*`) were removed in order to keep updates easier for new GPU metric support. By providing a simple API (`rsmi_dev_gpu_metrics_info_get()`) with its reported device metrics, it is worth noting there is a risk for ABI break-age using `rsmi_dev_gpu_metrics_info_get()`. It is vital to understand, that ABI breaks are necessary (in some cases) in order to support newer ASICs and metrics for our customers. We will continue to support `rsmi_dev_gpu_metrics_info_get()` with these considerations and limitations in mind.
 
-- **Depricated rsmi_dev_power_ave_get(),  use newer API rsmi_dev_power_get()**
-As outlined in change below for 6.0.0 (***Added a generic power API: rsmi_dev_power_get***), is now depricated. Please update your ROCm SMI API calls accordingly.
+- **Deprecated rsmi_dev_power_ave_get(),  use newer API rsmi_dev_power_get()**
+As outlined in change below for 6.0.0 (***Added a generic power API: rsmi_dev_power_get***), is now deprecated. Please update your ROCm SMI API calls accordingly.
 
 ### Resolved issues
 
 - Fix `--showpids` reporting `[PID] [PROCESS NAME] 1 UNKNOWN UNKNOWN UNKNOWN`
 Output was failing because cu_occupancy debugfs method is not provided on some graphics cards by design. `get_compute_process_info_by_pid` was updated to reflect this and returns with output needed by CLI.
 - Fix `rocm-smi --showpower` output was inconsistent on Navi32/31 devices
-Updated to use `rsmi_dev_power_get()` within CLI to provide a consistent device power output. This was caused due to using the now depricated `rsmi_dev_average_power_get()` API.
+Updated to use `rsmi_dev_power_get()` within CLI to provide a consistent device power output. This was caused due to using the now deprecated `rsmi_dev_average_power_get()` API.
 - Fixed `rocm-smi --setcomputepartition` and `rocm-smi --resetcomputepartition` to notate if device is EBUSY
 - Fixed `rocm-smi --setmemorypartition` and `rocm-smi --resetmemorypartition` read only SYSFS to return RSMI_STATUS_NOT_SUPPORTED
 The  `rsmi_dev_memory_partition_set` API is updated to handle the readonly SYSFS check. Corresponding tests and CLI (`rocm-smi --setmemorypartition` and `rocm-smi --resetmemorypartition`) calls were updated accordingly.
@@ -860,7 +860,7 @@ To allow for larger BDF data, we have increased the maximum BDF length from 256 
 Sphinx allows us to generate code documentation easier for our users. Helps us provide centrized HTML documentation at single website location. Here customers can see how to use our software and tools.
 
 - **Added a generic power API: `rsmi_dev_power_get()`**
-Older ASICs provided average socket power, newer ASICs (MI300) provide current socket power. The generic API provides one interface to retreive either of these power readings, allowing backwards compatability.
+Older ASICs provided average socket power, newer ASICs (MI300) provide current socket power. The generic API provides one interface to retrieve either of these power readings, allowing backwards compatibility.
 
 - **Added flexible temperature readings (`rocm-smi` and `rocm-smi --showtempgraph`)**
 Older ASICs provided edge temperature, newer ASICs (MI300) provide junction socket power (not edge). The rocm-smi CLI now provides a way to view which type of temperature is read across all sockets.

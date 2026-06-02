@@ -108,7 +108,7 @@ int main() {
     goto cleanup;
   }
   if (count == 0) {
-    std::cout << "No GPUs find on the sytem ";
+    std::cout << "No GPUs find on the system ";
     goto cleanup;
   } else {
     std::cout << count << " GPUs found in the system.\n";

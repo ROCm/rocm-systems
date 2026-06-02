@@ -1,28 +1,6 @@
 #!/usr/bin/env python3
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 import argparse
 import shutil
@@ -42,7 +20,8 @@ TOOLS_DIR = SCRIPT_DIR
 SOC_ROOT = REPO_ROOT / "src" / "rocprof_compute_soc"
 ANALYSIS_CONFIGS = SOC_ROOT / "analysis_configs"
 
-TEMPLATE_FILE = ANALYSIS_CONFIGS / "gfx9_config_template.yaml"
+GFX9_TEMPLATE = ANALYSIS_CONFIGS / "gfx9_config_template.yaml"
+GFX11_TEMPLATE = ANALYSIS_CONFIGS / "gfx11_config_template.yaml"
 HASH_JSON = REPO_ROOT / "src" / "utils" / ".config_hashes.json"
 BACKUP_DIR = SCRIPT_DIR / "backups"
 
@@ -130,7 +109,15 @@ def main():
     if not VERIFY_SCRIPT.exists():
         fatal("verify_against_config_template.py not found")
 
-    rc = run([PYTHON, VERIFY_SCRIPT, ANALYSIS_CONFIGS, TEMPLATE_FILE])
+    rc = run([
+        PYTHON,
+        VERIFY_SCRIPT,
+        ANALYSIS_CONFIGS,
+        "--gfx9-template",
+        GFX9_TEMPLATE,
+        "--gfx11-template",
+        GFX11_TEMPLATE,
+    ])
     if rc != 0:
         fatal("Template / architecture verification failed")
 
@@ -167,7 +154,15 @@ def main():
                 sys.exit(rc)
 
             # Re-verify after apply
-            rc = run([PYTHON, VERIFY_SCRIPT, ANALYSIS_CONFIGS, TEMPLATE_FILE])
+            rc = run([
+                PYTHON,
+                VERIFY_SCRIPT,
+                ANALYSIS_CONFIGS,
+                "--gfx9-template",
+                GFX9_TEMPLATE,
+                "--gfx11-template",
+                GFX11_TEMPLATE,
+            ])
             sys.exit(rc)
 
         sys.exit(0)
@@ -189,7 +184,12 @@ def main():
             sys.exit(0)
 
         # Back up the things we mutate
-        backup_path = backup([ANALYSIS_CONFIGS, TEMPLATE_FILE, HASH_JSON])
+        backup_path = backup([
+            ANALYSIS_CONFIGS,
+            GFX9_TEMPLATE,
+            GFX11_TEMPLATE,
+            HASH_JSON,
+        ])
 
         try:
             # 1) Update template
@@ -200,7 +200,7 @@ def main():
                 PYTHON,
                 PARSE_TEMPLATE_SCRIPT,
                 new_arch_dir,
-                TEMPLATE_FILE,
+                GFX9_TEMPLATE,
                 "--latest-arch",
                 new_latest,
             ])
@@ -233,7 +233,15 @@ def main():
                         f.unlink()
 
             # 3) Re-verify everything against updated template
-            rc = run([PYTHON, VERIFY_SCRIPT, ANALYSIS_CONFIGS, TEMPLATE_FILE])
+            rc = run([
+                PYTHON,
+                VERIFY_SCRIPT,
+                ANALYSIS_CONFIGS,
+                "--gfx9-template",
+                GFX9_TEMPLATE,
+                "--gfx11-template",
+                GFX11_TEMPLATE,
+            ])
             if rc != 0:
                 raise RuntimeError("Post-promotion verification failed")
 
@@ -264,7 +272,10 @@ def main():
 
         except Exception as e:
             print(f"\nERROR: {e}")
-            restore(backup_path, [ANALYSIS_CONFIGS, TEMPLATE_FILE, HASH_JSON])
+            restore(
+                backup_path,
+                [ANALYSIS_CONFIGS, GFX9_TEMPLATE, GFX11_TEMPLATE, HASH_JSON],
+            )
             sys.exit(1)
 
     # --------------------------------------------------------

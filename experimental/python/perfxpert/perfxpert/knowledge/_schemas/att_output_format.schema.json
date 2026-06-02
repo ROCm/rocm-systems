@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": [
+    "csv_schema",
+    "stall_ratio_thresholds",
+    "hitcount_minimum"
+  ],
+  "properties": {
+    "csv_schema": {
+      "type": "object"
+    },
+    "stall_ratio_thresholds": {
+      "type": "object",
+      "required": [
+        "critical",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "hitcount_minimum": {
+      "type": "integer",
+      "minimum": 1
+    }
+  }
+}

@@ -92,7 +92,7 @@ rocprofiler_add_unit_test(
     TIMEOUT 45
     ENVIRONMENT
         "ROCPROFILER_METRICS_PATH=${_ROCPROFILER_SHARE_DIR}"
-        "LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:/opt/rocm/lib:/opt/rocm/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     SKIP_REGULAR_EXPRESSION
         "Running non-intercept test(.*)could not be locked for profiling due to lack of permissions.*"
@@ -107,18 +107,22 @@ rocprofiler_add_unit_test(
 
 set(ROCPROFILER_LIB_CONSUMER_TEST_SOURCES consumer_test.cpp)
 
-add_executable(consumer-tests)
-target_sources(consumer-tests PRIVATE ${ROCPROFILER_LIB_CONSUMER_TEST_SOURCES})
+add_executable(consumer-test)
+target_sources(consumer-test PRIVATE ${ROCPROFILER_LIB_CONSUMER_TEST_SOURCES})
 
 target_link_libraries(
-    consumer-tests rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
-    rocprofiler-sdk::rocprofiler-sdk-hip rocprofiler-sdk::rocprofiler-sdk-common-library
-    rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest GTest::gtest_main)
+    consumer-test
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
+            rocprofiler-sdk::rocprofiler-sdk-hip
+            rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-static-library
+            GTest::gtest
+            GTest::gtest_main)
 
-rocprofiler_add_unit_test(
-    TARGET consumer-tests
+gtest_add_tests(
+    TARGET consumer-test
     SOURCES ${ROCPROFILER_LIB_CONSUMER_TEST_SOURCES}
-    TIMEOUT 45
-    ENVIRONMENT
-        "LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:/opt/rocm/lib:/opt/rocm/llvm/lib:$ENV{LD_LIBRARY_PATH}"
-    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    TEST_LIST consumer-tests_TESTS
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
+set_tests_properties(${consumer-tests_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests")

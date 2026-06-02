@@ -875,7 +875,7 @@ struct drm_get_cap {
  * cursor and have correctly set hotspot properties.
  * If this client cap is not set the DRM core will hide cursor plane on
  * those virtualized drivers because not setting it implies that the
- * client is not capable of dealing with those extra restictions.
+ * client is not capable of dealing with those extra restrictions.
  * Clients which do set cursor hotspot and treat the cursor plane
  * like a mouse cursor should set this property.
  * The client must enable &DRM_CLIENT_CAP_ATOMIC first.

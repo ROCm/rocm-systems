@@ -93,10 +93,12 @@ jobs:
       ROCPROFSYS_CI: ON
       OMPI_ALLOW_RUN_AS_ROOT: 1
       OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
+      ROCPROFSYS_KEEP_TEST_OUTPUT: '0'
     permissions:
       packages: read
     container:
       image: ghcr.io/rocm/rocprofiler-ubuntu:${{ matrix.system.os-release }}-systems-ci-${{ matrix.system.arch }}
+      # --env-file /etc/podinfo/gha-gpu-isolation-settings - Required for GPU isolation on OSSCI MIXXX runners
       options:
         --privileged
         --ipc host
@@ -104,11 +106,14 @@ jobs:
         --device /dev/kfd
         --device /dev/dri
         --cap-add CAP_SYS_ADMIN
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
 
     steps:
       - uses: actions/checkout@v6
         with:
-          sparse-checkout: projects/rocprofiler-systems/
+          sparse-checkout: |
+            projects/rocprofiler-systems/
+            .gitmodules
 
       - name: Setup Environment
         id: setup_env
@@ -161,9 +166,16 @@ jobs:
           echo "ROCm installed to: ${{ env.ROCM_PATH }}"
           echo "✅ ROCm Installation Complete!"
 
+      - name: Install Python Test Dependencies
+        timeout-minutes: 10
+        shell: bash
+        working-directory: projects/rocprofiler-systems/
+        run: |
+          python3 -m pip install --break-system-packages -r requirements.txt
+
       - name: Configure, Build, and Test
         id: run_ci
-        timeout-minutes: 30
+        timeout-minutes: 60
         working-directory: projects/rocprofiler-systems
         run: |
           set -e
@@ -181,7 +193,6 @@ jobs:
             -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
             -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \
             -DROCPROFSYS_BUILD_DYNINST=ON \
-            -DROCPROFSYS_BUILD_BOOST=ON \
             -DROCPROFSYS_BUILD_TBB=ON \
             -DROCPROFSYS_BUILD_ELFUTILS=ON \
             -DROCPROFSYS_BUILD_LIBIBERTY=ON \
@@ -190,8 +201,7 @@ jobs:
             -DROCPROFSYS_USE_PYTHON=ON \
             -DROCPROFSYS_MAX_THREADS=64 \
             -- \
-            -L "rocm" \
-            -LE "rccl|runtime|ompvv"
+            -L "rocm"
 
       - name: Check for Leftover Buffered Files
         timeout-minutes: 5

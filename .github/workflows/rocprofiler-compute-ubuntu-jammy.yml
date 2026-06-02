@@ -50,11 +50,14 @@ jobs:
           apt-get install -y git
           apt-get install -y python3-pip
           apt-get install -y cmake
+          apt-get install -y libdw1
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
-          sparse-checkout: projects/rocprofiler-compute
+          sparse-checkout: |
+            projects/rocprofiler-compute
+            shared/ctest
           set-safe-directory: true
 
       - name: Configure git safe directory

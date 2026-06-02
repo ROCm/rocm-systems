@@ -133,6 +133,8 @@ extern "C" __device__  rocshmem_ctx_t __attribute__((visibility("default"))) ROC
  * valid context.
  */
 extern __constant__ rocshmem_ctx_t ROCSHMEM_CTX_INVALID;
+
+extern __constant__  rocshmem_ctx_t *rocshmem_ctx_array;
 /**
  * Used internally to set default context.
  */
@@ -151,22 +153,32 @@ namespace device {
     extern "C" {
         extern __constant__ rocshmem_team_t
             __attribute__((visibility("default"))) ROCSHMEM_TEAM_WORLD;
+        extern __constant__ rocshmem_team_t
+            __attribute__((visibility("default"))) ROCSHMEM_TEAM_SHARED;
     }
 }
 namespace host {
     extern rocshmem_team_t ROCSHMEM_TEAM_WORLD;
+    extern rocshmem_team_t ROCSHMEM_TEAM_SHARED;
 }
 
 #if __HIP_DEVICE_COMPILE__
 using device::ROCSHMEM_TEAM_WORLD;
+using device::ROCSHMEM_TEAM_SHARED;
 #else
 using host::ROCSHMEM_TEAM_WORLD;
+using host::ROCSHMEM_TEAM_SHARED;
 #endif
 
 /**
  * Used internally to update the ROCSHMEM_TEAM_WORLD constant
  */
 void set_team_world_device(rocshmem_team_t team_world);
+
+/**
+ * Used internally to update the ROCSHMEM_TEAM_SHARED constant
+ */
+void set_team_shared_device(rocshmem_team_t team_shared);
 
 const rocshmem_team_t ROCSHMEM_TEAM_INVALID = nullptr;
 
@@ -180,7 +192,7 @@ const rocshmem_team_t ROCSHMEM_TEAM_INVALID = nullptr;
 using rocshmem_uniqueid_t = std::array<uint8_t, ROCSHMEM_UNIQUE_ID_BYTES>;
 
 /**
- * @brief Data structure used for attribute based 
+ * @brief Data structure used for attribute based
  *        initialization
  */
 struct rocshmem_init_attr_t  {

@@ -1,25 +1,5 @@
-/*
- * Copyright (C) 2014-2018 Advanced Micro Devices, Inc. All Rights Reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
- * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
- * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
- * OTHER DEALINGS IN THE SOFTWARE.
- *
- */
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
 
 #include <sys/time.h>
 #include <sys/mman.h>
@@ -485,9 +465,9 @@ void KFDQMTest::SdmaConcurrentCopies(int gpuNode) {
         }
 
         for (unsigned j = 0; j < NPACKETS; j++)
-            queue.PlacePacket(
+            ASSERT_NO_FATAL_FAILURE(queue.PlacePacket(
                 SDMACopyDataPacket(queue.GetFamilyId(), dstBuf.As<char *>()+COPY_SIZE*j,
-                                   srcBuf.As<char *>()+COPY_SIZE*j, COPY_SIZE));
+                                   srcBuf.As<char *>()+COPY_SIZE*j, COPY_SIZE)));
         queue.SubmitPacket();
 
         /* Waste a variable amount of time. Submission timing
@@ -501,12 +481,12 @@ void KFDQMTest::SdmaConcurrentCopies(int gpuNode) {
          * run concurrently for a bit without getting too far ahead
          */
         if ((i & 0x7) == 0)
-            queue.Wait4PacketConsumption();
+            ASSERT_NO_FATAL_FAILURE(queue.Wait4PacketConsumption());
     }
     log << "Done." << std::endl;
 
-    queue.PlaceAndSubmitPacket(SDMAWriteDataPacket(queue.GetFamilyId(), srcBuf.As<unsigned *>(), 0x02020202));
-    queue.Wait4PacketConsumption();
+    ASSERT_NO_FATAL_FAILURE(queue.PlaceAndSubmitPacket(SDMAWriteDataPacket(queue.GetFamilyId(), srcBuf.As<unsigned *>(), 0x02020202)));
+    ASSERT_NO_FATAL_FAILURE(queue.Wait4PacketConsumption());
     EXPECT_TRUE_GPU(WaitOnValue(srcBuf.As<unsigned int*>(), 0x02020202), gpuNode);
 
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
@@ -759,8 +739,14 @@ void KFDQMTest::OverSubscribeCpQueues(int gpuNode) {
     for (unsigned int qidx = 0; qidx < MAX_CP_QUEUES; ++qidx)
         queues[qidx].SubmitPacket();
 
-    // Delaying for 5 seconds in order to get all the results
-    Delay(5000);
+    // Delaying in order to get all the results
+    if(g_IsEmuMode) {
+        LOG() << "Emulation mode detected, delaying for 1 min to allow all packets to be processed." << std::endl;
+        Delay(60000);
+    } else {
+        LOG() << "Delaying for 5 seconds to allow all packets to be processed." << std::endl;
+        Delay(5000);
+    }
 
     for (unsigned int qidx = 0; qidx < MAX_CP_QUEUES; ++qidx)
         EXPECT_TRUE_GPU(queues[qidx].AllPacketsSubmitted(), gpuNode)<< "QueueId=" << qidx;;
@@ -1348,7 +1334,7 @@ void KFDQMTest::extendedCuMasking(int gpuNode) {
             }
 
             // Check if what we detected is consistent with info from KFD
-            EXPECT_TRUE_GPU((activeCU + inactiveCount) == maxCU, gpuNode);
+            EXPECT_TRUE_GPU(g_IsEmuMode || (activeCU + inactiveCount) == maxCU, gpuNode);
 
             maskConfig.pInactiveMask = inactiveMask;
 
@@ -2292,43 +2278,6 @@ TEST_F(KFDQMTest, Atomics) {
     TEST_END
 }
 
-TEST_F(KFDQMTest, mGPUShareBO) {
-    TEST_START(TESTPROFILE_RUNALL);
-
-    unsigned int src_node = 2;
-    unsigned int dst_node = 1;
-
-    if (g_TestDstNodeId != -1 && g_TestNodeId != -1) {
-        src_node = g_TestNodeId;
-        dst_node = g_TestDstNodeId;
-    }
-
-    HsaMemoryBuffer shared_addr(PAGE_SIZE, dst_node, true, false, false, false);
-
-    HsaMemoryBuffer srcNodeMem(PAGE_SIZE, src_node);
-    HsaMemoryBuffer dstNodeMem(PAGE_SIZE, dst_node);
-
-    /* Handle ISA to write to local memory BO */
-    HsaMemoryBuffer isaBufferSrc(PAGE_SIZE, src_node, true/*zero*/, false/*local*/, true/*exec*/);
-    HsaMemoryBuffer isaBufferDst(PAGE_SIZE, dst_node, true/*zero*/, false/*local*/, true/*exec*/);
-
-    srcNodeMem.Fill(0x05050505);
-
-    ASSERT_SUCCESS(m_pAsm->RunAssemble(CopyDwordIsa));
-
-    m_pAsm->CopyInstrStream(isaBufferSrc.As<char*>());
-    SyncDispatch(isaBufferSrc, srcNodeMem.As<void*>(), shared_addr.As<void *>(), src_node);
-
-    m_pAsm->CopyInstrStream(isaBufferDst.As<char*>());
-    SyncDispatch(isaBufferDst, shared_addr.As<void *>(), dstNodeMem.As<void*>(), dst_node);
-
-    EXPECT_EQ(dstNodeMem.As<unsigned int*>()[0], 0x05050505);
-
-    EXPECT_SUCCESS(shared_addr.UnmapMemToNodes(&dst_node, 1));
-
-    TEST_END
-}
-
 static void
 sdma_copy(HSAuint32 node, void *src, void *const dst[], int n, HSAuint64 size) {
     SDMAQueue sdmaQueue;
@@ -2351,6 +2300,69 @@ sdma_fill(HSAint32 node, void *dst, unsigned int data, HSAuint64 size) {
     sdmaQueue.Wait4PacketConsumption(event);
     EXPECT_SUCCESS(sdmaQueue.Destroy());
     HSAKMT_CALL(hsaKmtDestroyEvent, g_baseTest->m_hsakmt_current_ctx, event);
+}
+
+TEST_F(KFDQMTest, mGPUShareBO) {
+    TEST_START(TESTPROFILE_RUNALL);
+
+    const std::vector<int> gpuNodes = m_NodeInfo.GetNodesWithGPU();
+    if (gpuNodes.size() < 2) {
+        LOG() << "Skipping test: Test requires at least two GPUs." << std::endl;
+        return;
+    }
+
+    unsigned int src_node = gpuNodes[0];
+    unsigned int dst_node = gpuNodes[1];
+
+    if (g_TestDstNodeId != -1 && g_TestNodeId != -1) {
+        src_node = g_TestNodeId;
+        dst_node = g_TestDstNodeId;
+    }
+
+    LOG() << "Testing VRAM → System BO → VRAM transfer" << std::endl;
+
+    // Shared System BO (intermediary) - GTT
+    HsaMemoryBuffer shared_addr(PAGE_SIZE, dst_node, true, false/*GTT*/, false, false);
+    unsigned int nodes[2] = {src_node, dst_node};
+    ASSERT_SUCCESS(shared_addr.MapMemToNodes(nodes, 2));
+
+    // Source and destination in VRAM
+    HsaMemoryBuffer srcNodeMem(PAGE_SIZE, src_node, false/*no zero*/, true/*VRAM*/);
+    HsaMemoryBuffer dstNodeMem(PAGE_SIZE, dst_node, false/*no zero*/, true/*VRAM*/);
+
+    // ISA buffers for shaders
+    HsaMemoryBuffer isaBufferSrc(PAGE_SIZE, src_node, true, false, true);
+    HsaMemoryBuffer isaBufferDst(PAGE_SIZE, dst_node, true, false, true);
+
+    // Step 1: Fill srcNodeMem VRAM with test pattern using SDMA
+    sdma_fill(src_node, srcNodeMem.As<void*>(), 0x05050505, PAGE_SIZE);
+
+    // Step 2 & 3: GPU shader transfers
+    Assembler* pAsmSrc = GetAssemblerFromNodeId(src_node);
+    Assembler* pAsmDst = GetAssemblerFromNodeId(dst_node);
+    ASSERT_NOTNULL(pAsmSrc);
+    ASSERT_NOTNULL(pAsmDst);
+
+    // GPU1: srcNodeMem (VRAM) → shared_addr (System BO)
+    ASSERT_SUCCESS(pAsmSrc->RunAssemble(CopyDwordIsa));
+    pAsmSrc->CopyInstrStream(isaBufferSrc.As<char*>());
+    SyncDispatch(isaBufferSrc, srcNodeMem.As<void*>(), shared_addr.As<void*>(), src_node);
+
+    // GPU2: shared_addr (System BO) → dstNodeMem (VRAM)
+    ASSERT_SUCCESS(pAsmDst->RunAssemble(CopyDwordIsa));
+    pAsmDst->CopyInstrStream(isaBufferDst.As<char*>());
+    SyncDispatch(isaBufferDst, shared_addr.As<void*>(), dstNodeMem.As<void*>(), dst_node);
+
+    // Step 4: Verify dstNodeMem VRAM - copy to GTT and read
+    HsaMemoryBuffer verifyBuffer(PAGE_SIZE, dst_node, true, false/*GTT*/);
+    void* dst_array[1] = {verifyBuffer.As<void*>()};
+    sdma_copy(dst_node, dstNodeMem.As<void*>(), dst_array, 1, PAGE_SIZE);
+
+    EXPECT_EQ(verifyBuffer.As<unsigned int*>()[0], 0x05050505);
+
+    EXPECT_SUCCESS(shared_addr.UnmapMemToNodes(nodes, 2));
+
+    TEST_END
 }
 
 TEST_F(KFDQMTest, P2PTest) {

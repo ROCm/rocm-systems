@@ -199,13 +199,9 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateFromGLTexture,
   }
 
   const std::vector<amd::Device*>& devices = as_amd(context)->devices();
-  bool supportPass = false;
-  bool sizePass = false;
-  for (const auto& it : devices) {
-    if (it->info().imageSupport_) {
-      supportPass = true;
-    }
-  }
+  bool supportPass = std::any_of(devices.begin(), devices.end(), [](const amd::Device* device) {
+    return device->info().imageSupport_;
+  });
   if (!supportPass) {
     *not_null(errcode_ret) = CL_INVALID_OPERATION;
     LogWarning("there are no devices in context to support images");
@@ -284,13 +280,9 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateFromGLTexture2D,
   }
 
   const std::vector<amd::Device*>& devices = as_amd(context)->devices();
-  bool supportPass = false;
-  bool sizePass = false;
-  for (const auto& it : devices) {
-    if (it->info().imageSupport_) {
-      supportPass = true;
-    }
-  }
+  bool supportPass = std::any_of(devices.begin(), devices.end(), [](const amd::Device* device) {
+    return device->info().imageSupport_;
+  });
   if (!supportPass) {
     *not_null(errcode_ret) = CL_INVALID_OPERATION;
     LogWarning("there are no devices in context to support images");
@@ -364,13 +356,9 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateFromGLTexture3D,
   }
 
   const std::vector<amd::Device*>& devices = as_amd(context)->devices();
-  bool supportPass = false;
-  bool sizePass = false;
-  for (const auto& it : devices) {
-    if (it->info().imageSupport_) {
-      supportPass = true;
-    }
-  }
+  bool supportPass = std::any_of(devices.begin(), devices.end(), [](const amd::Device* device) {
+    return device->info().imageSupport_;
+  });
   if (!supportPass) {
     *not_null(errcode_ret) = CL_INVALID_OPERATION;
     LogWarning("there are no devices in context to support images");
@@ -1574,14 +1562,18 @@ static cl_int clSetInteropObjects(cl_uint num_objects, const cl_mem* mem_objects
     return CL_INVALID_VALUE;
   }
 
+  size_t originalSize = interopObjects.size();
+  interopObjects.reserve(originalSize + num_objects);
   while (num_objects-- > 0) {
     cl_mem obj = *mem_objects++;
     if (!is_valid(obj)) {
+      interopObjects.resize(originalSize);
       return CL_INVALID_MEM_OBJECT;
     }
 
     amd::Memory* mem = as_amd(obj);
     if (mem->getInteropObj() == NULL) {
+      interopObjects.resize(originalSize);
       return CL_INVALID_GL_OBJECT;
     }
 

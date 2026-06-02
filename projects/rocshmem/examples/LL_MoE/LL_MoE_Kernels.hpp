@@ -128,7 +128,6 @@ void dispatch_kernel(void *packed_recv_x, int *packed_recv_src_info,
   const size_t num_bytes_per_msg = sizeof(int) + hidden_bytes;
 
   DEVICE_ASSERT(num_bytes_per_msg % sizeof(int) == 0);
-  const size_t num_int_per_msg = num_bytes_per_msg / sizeof(int);
   
   // Expert counts
   __shared__ int shared_num_tokens_sent_per_expert[kNumWaveGroups];
@@ -458,7 +457,6 @@ void combine_kernel(T* combined_x, void* rdma_recv_x, int64_t* rdma_recv_flag,
   const int num_wgs = static_cast<int>(gridDim.x);
   const int num_threads = static_cast<int>(blockDim.x);
   const int lane_id = thread_id % kWaveSize;
-  constexpr int num_waves = kNumWavesPerGroup * kNumWaveGroups;
   const int num_local_experts = num_experts / num_ranks;
   const int wave_group_id = wave_id / kNumWavesPerGroup;
   const int sub_wave_id = wave_id % kNumWavesPerGroup;
@@ -545,8 +543,7 @@ void combine_kernel(T* combined_x, void* rdma_recv_x, int64_t* rdma_recv_flag,
 
     // Synchronize sub-warps in the warp group
     if (lane_id == 0) {
-      volatile int ret = __hip_atomic_fetch_add(
-          &sync_large_warp_counters[wave_group_id], 1,
+      __hip_atomic_fetch_add(&sync_large_warp_counters[wave_group_id], 1,
           __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
       warp_sync();
       while (sync_large_warp_counters[wave_group_id] < kNumWavesPerGroup);

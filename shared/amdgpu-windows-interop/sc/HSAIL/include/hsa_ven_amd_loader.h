@@ -236,7 +236,7 @@ hsa_status_t hsa_ven_amd_loader_query_segment_descriptors(
  * @retval HSA_STATUS_ERROR_NOT_INITIALIZED Runtime is not initialized.
  *
  * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT The input is invalid or there
- * is no exectuable found for this kernel code object.
+ * is no executable found for this kernel code object.
  */
 hsa_status_t hsa_ven_amd_loader_query_executable(
   const void *device_address,
@@ -348,7 +348,7 @@ typedef enum hsa_ven_amd_loader_loaded_code_object_info_e {
    * The signed byte address difference of the memory address at which the code
    * object is loaded minus the virtual address specified in the code object
    * that is loaded. The value of this attribute is only defined if the
-   * executable in which the code object is loaded is froozen. The type of this
+   * executable in which the code object is loaded is frozen. The type of this
    * attribute is ::int64_t.
    */
   HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_DELTA = 8,
@@ -357,14 +357,14 @@ typedef enum hsa_ven_amd_loader_loaded_code_object_info_e {
    * base address of the allocation for the lowest addressed segment of the code
    * object that is loaded. Note that any non-loaded segments before the first
    * loaded segment are ignored. The value of this attribute is only defined if
-   * the executable in which the code object is loaded is froozen. The type of
+   * the executable in which the code object is loaded is frozen. The type of
    * this attribute is ::uint64_t.
    */
   HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_BASE = 9,
   /**
    * The byte size of the loaded code objects contiguous memory allocation. The
    * value of this attribute is only defined if the executable in which the code
-   * object is loaded is froozen. The type of this attribute is ::uint64_t.
+   * object is loaded is frozen. The type of this attribute is ::uint64_t.
    */
   HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_SIZE = 10,
   /**
@@ -391,7 +391,7 @@ typedef enum hsa_ven_amd_loader_loaded_code_object_info_e {
    *
    * ``file_path`` is the file's path specified as a URI encoded UTF-8 string.
    * In URI encoding, every character that is not in the regular expression
-   * ``[a-zA-Z0-9/_.~-]`` is encoded as two uppercase hexidecimal digits
+   * ``[a-zA-Z0-9/_.~-]`` is encoded as two uppercase hexadecimal digits
    * proceeded by "%".  Directories in the path are separated by "/".
    *
    * ``offset`` is a 0-based byte offset to the start of the code object.  For a

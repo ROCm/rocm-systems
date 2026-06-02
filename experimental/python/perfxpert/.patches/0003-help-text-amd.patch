@@ -1,0 +1,14 @@
+diff --git a/packages/opencode/src/cli/cmd/tui/feature-plugins/home/tips-view.tsx b/packages/opencode/src/cli/cmd/tui/feature-plugins/home/tips-view.tsx
+index 1a9d907bb..6e01cf720 100644
+--- a/packages/opencode/src/cli/cmd/tui/feature-plugins/home/tips-view.tsx
++++ b/packages/opencode/src/cli/cmd/tui/feature-plugins/home/tips-view.tsx
+@@ -148,6 +148,9 @@ const TIPS = [
+   "Use {highlight}/review{/highlight} to review uncommitted changes, branches, or PRs",
+   "Run {highlight}/help{/highlight} or {highlight}Ctrl+X H{/highlight} to show the help dialog",
+   "Use {highlight}/rename{/highlight} to rename the current session",
++  "AMD ROCm PerfXpert: ask {highlight}'analyze my rocprofv3 trace'{/highlight} or {highlight}'optimize my HIP kernel'{/highlight}",
++  "PerfXpert tools: {highlight}intent_classify{/highlight}, {highlight}workflow_next_step{/highlight}, {highlight}bottleneck_*{/highlight}, {highlight}roofline_*{/highlight}, {highlight}counters_*{/highlight}",
++  "Set {highlight}PERFXPERT_LLM_FALLBACK_CHAIN=openai,anthropic{/highlight} to fall back on rate-limit",
+   ...(process.platform === "win32"
+     ? ["Press {highlight}Ctrl+Z{/highlight} to undo changes in your prompt"]
+     : ["Press {highlight}Ctrl+Z{/highlight} to suspend the terminal and return to your shell"]),

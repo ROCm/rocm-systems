@@ -1,28 +1,6 @@
 #!/usr/bin/env python3
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 """
 Hash consistency guard for rocprofiler-compute.
@@ -33,6 +11,9 @@ Errors (per arch):
 - If an older arch's panels changed but its delta did not
 - If an older arch's delta changed but neither latest panels nor this arch's
   panels changed
+
+Architectures without config_delta/*_diff.yaml (e.g. RDNA 3.5 gfx115*) skip
+the delta checks.
 
 """
 
@@ -51,9 +32,7 @@ from tools.config_management import hash_manager  # noqa: E402
 
 CONFIGS_ROOT: Path = PROJECT_ROOT / "src" / "rocprof_compute_soc" / "analysis_configs"
 HASH_FILE: Path = PROJECT_ROOT / "src" / "utils" / ".config_hashes.json"
-TEMPLATE_FILE: Path = (
-    PROJECT_ROOT / "tools" / "config_management" / "gfx9_config_template.yaml"
-)
+TEMPLATE_FILE: Path = CONFIGS_ROOT / "gfx9_config_template.yaml"
 
 
 # ---------- helpers ----------
@@ -98,6 +77,10 @@ def _prev_panels_and_delta(
     panels = dict(prev_arch.get("files") or {})
     delta_hash = prev_arch.get("delta_hash") or ""
     return panels, str(delta_hash)
+
+
+def _arch_has_delta_yaml(arch_dir: Path) -> bool:
+    return any((arch_dir / "config_delta").glob("*_diff.yaml"))
 
 
 def _changed_panel_files(cur: dict[str, str], prev: dict[str, str]) -> list[str]:
@@ -168,6 +151,9 @@ def main() -> int:
                 )
 
         else:
+            if not _arch_has_delta_yaml(arch_dir):
+                continue
+
             # C) Arch panels changed but its delta did not
             if panel_changed and not delta_changed:
                 snippet = ", ".join(_changed_panel_files(cur_panels, prev_panels)[:5])

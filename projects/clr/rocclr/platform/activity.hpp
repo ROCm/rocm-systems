@@ -7,6 +7,7 @@
 #pragma once
 
 #include "top.hpp"
+#include "platform/command_utils.hpp"
 
 #include <atomic>
 #include <array>
@@ -37,6 +38,9 @@ constexpr OpId OperationId(cl_command_type commandType) {
   switch (commandType) {
     case CL_COMMAND_NDRANGE_KERNEL:
     case CL_COMMAND_TASK:
+    case ROCCLR_COMMAND_STREAM_WAIT_VALUE:
+    case ROCCLR_COMMAND_STREAM_WRITE_VALUE:
+    case ROCCLR_COMMAND_BATCH_STREAM:
       return OP_ID_DISPATCH;
     case CL_COMMAND_READ_BUFFER:
     case CL_COMMAND_READ_BUFFER_RECT:
@@ -51,6 +55,7 @@ constexpr OpId OperationId(cl_command_type commandType) {
     case CL_COMMAND_FILL_IMAGE:
     case CL_COMMAND_COPY_BUFFER_TO_IMAGE:
     case CL_COMMAND_COPY_IMAGE_TO_BUFFER:
+    case ROCCLR_COMMAND_BATCH_COPY_BUFFER:
       return OP_ID_COPY;
     case CL_COMMAND_MARKER:
       return OP_ID_BARRIER;
@@ -62,6 +67,11 @@ constexpr OpId OperationId(cl_command_type commandType) {
 bool IsEnabled(OpId operation_id);
 void ReportActivity(const amd::Command& command);
 
+// Signals roctracer that CLR commits to delivering one activity record for
+// this operation. Must be called exactly once per command that will produce
+// a record. The counter lives in roctracer; this just forwards the signal
+// via the registered callback using a reserved sentinel (data = 0x1).
+void CommitRecord(OpId operation_id);
 
 const char* getOclCommandKindString(cl_command_type kind);
 }  // namespace amd::activity_prof

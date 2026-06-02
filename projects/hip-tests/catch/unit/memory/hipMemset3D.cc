@@ -16,7 +16,6 @@
  * Basic Functional test of hipMemset3D
  */
 HIP_TEST_CASE(Unit_hipMemset3D_BasicFunctional) {
-  CHECK_IMAGE_SUPPORT
 
   constexpr int memsetval = 0x22;
   constexpr size_t numH = 256;
@@ -66,7 +65,6 @@ HIP_TEST_CASE(Unit_hipMemset3D_BasicFunctional) {
  * Basic Functional test of hipMemset3DAsync
  */
 HIP_TEST_CASE(Unit_hipMemset3DAsync_BasicFunctional) {
-  CHECK_IMAGE_SUPPORT
 
   constexpr int memsetval = 0x22;
   constexpr size_t numH = 256;
@@ -133,9 +131,9 @@ HIP_TEST_CASE(Unit_hipMemset3DAsync_capturehipMemset3DAsync) {
   hipGraph_t graph{nullptr};
   hipGraphExec_t graphExec{nullptr};
   int row, col, dep;
-  row = GENERATE(3, 4, 100);
-  col = GENERATE(3, 4, 100);
-  dep = GENERATE(3, 4, 100);
+  row = isQuickLevel() ? GENERATE(3, 100) : GENERATE(3, 4, 100);
+  col = isQuickLevel() ? GENERATE(3, 100) : GENERATE(3, 4, 100);
+  dep = isQuickLevel() ? GENERATE(3, 100) : GENERATE(3, 4, 100);
   hipStream_t stream;
 
   A_h = reinterpret_cast<char*>(malloc(sizeof(char) * row * col * dep));
@@ -181,7 +179,6 @@ HIP_TEST_CASE(Unit_hipMemset3DAsync_capturehipMemset3DAsync) {
  *    - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Unit_hipMemset3D_Capture) {
-  CHECK_IMAGE_SUPPORT
 
   constexpr int memsetval = 0x22;
   constexpr size_t numH = 256;

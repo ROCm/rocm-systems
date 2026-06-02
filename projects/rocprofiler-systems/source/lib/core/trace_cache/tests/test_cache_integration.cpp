@@ -1,26 +1,8 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "mocked_types.hpp"
+#include <cstdint>
 
 #include "core/trace_cache/buffer_storage.hpp"
 #include "core/trace_cache/storage_parser.hpp"
@@ -31,7 +13,6 @@
 #include <memory>
 #include <random>
 #include <string>
-#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -59,7 +40,7 @@ struct sample_2_hash
     size_t operator()(const test_sample_2& s) const
     {
         size_t h1 = std::hash<double>{}(s.data);
-        size_t h2 = std::hash<uint32_t>{}(s.sample_id);
+        size_t h2 = std::hash<std::uint32_t>{}(s.sample_id);
         return h1 ^ (h2 << 1);
     }
 };
@@ -71,7 +52,7 @@ struct sample_3_hash
         size_t h = 0;
         for(auto byte : s.payload)
         {
-            h ^= std::hash<uint8_t>{}(byte) + 0x9e3779b9 + (h << 6) + (h >> 2);
+            h ^= std::hash<std::uint8_t>{}(byte) + 0x9e3779b9 + (h << 6) + (h >> 2);
         }
         return h;
     }
@@ -84,7 +65,7 @@ struct sample_4_hash
         size_t h = 0;
         for(auto val : s.data)
         {
-            h ^= std::hash<uint32_t>{}(val) + 0x9e3779b9 + (h << 6) + (h >> 2);
+            h ^= std::hash<std::uint32_t>{}(val) + 0x9e3779b9 + (h << 6) + (h >> 2);
         }
         return h;
     }
@@ -96,7 +77,7 @@ struct sample_5_hash
     {
         if(s.data.has_value())
         {
-            return std::hash<uint32_t>{}(s.data.value()) ^ 0x1;
+            return std::hash<std::uint32_t>{}(s.data.value()) ^ 0x1;
         }
         return 0;
     }
@@ -337,7 +318,7 @@ TEST_F(trace_cache_module_integration_test, buffer_fragmentation_handling)
         large_texts.push_back(std::string(1000, 'A' + (i % 26)));
         large_samples.push_back({ i, large_texts[i] });
 
-        std::vector<uint8_t> small_payload(10, static_cast<uint8_t>(i));
+        std::vector<std::uint8_t> small_payload(10, static_cast<std::uint8_t>(i));
         small_samples.emplace_back(small_payload);
     }
 
@@ -396,16 +377,15 @@ TEST_F(trace_cache_module_integration_test, content_validation_edge_cases)
     test_sample_1 special_chars(123, strings[3]);
 
     test_sample_2 max_double(std::numeric_limits<double>::max(),
-                             std::numeric_limits<uint32_t>::max());
+                             std::numeric_limits<std::uint32_t>::max());
     test_sample_2 min_double(std::numeric_limits<double>::lowest(), 0);
     test_sample_2 infinity(std::numeric_limits<double>::infinity(), 42);
     test_sample_2 neg_infinity(-std::numeric_limits<double>::infinity(), 43);
 
-    std::vector<uint8_t> max_vector(10000, 0xFF);
-    test_sample_3        large_payload(max_vector);
-    test_sample_3        empty_payload;
-    std::vector<uint8_t> single_zero = { 0x00 };
-    test_sample_3        zero_payload(single_zero);
+    std::vector<std::uint8_t> max_vector(10000, 0xFF);
+    test_sample_3             large_payload(max_vector);
+    test_sample_3             empty_payload;
+    test_sample_3             zero_payload({ 0x00 });
 
     std::vector<test_sample_1> expected_1;
     std::vector<test_sample_2> expected_2;
@@ -664,11 +644,11 @@ TEST_F(trace_cache_module_integration_test, uint32_vector_element_size_handling)
 
         for(int i = 0; i < 100; ++i)
         {
-            std::vector<uint32_t> data;
+            std::vector<std::uint32_t> data;
             data.reserve(10);
             for(int j = 0; j < 10; ++j)
             {
-                data.push_back(static_cast<uint32_t>(i * 1000 + j));
+                data.push_back(static_cast<std::uint32_t>(i * 1000 + j));
             }
             test_sample_4 sample(data);
             expected_4.push_back(sample);
@@ -707,18 +687,18 @@ TEST_F(trace_cache_module_integration_test, mixed_vector_element_sizes)
         {
             if(i % 2 == 0)
             {
-                std::vector<uint8_t> payload(20, static_cast<uint8_t>(i));
-                test_sample_3        sample(payload);
+                std::vector<std::uint8_t> payload(20, static_cast<std::uint8_t>(i));
+                test_sample_3             sample(payload);
                 expected_3.push_back(sample);
                 storage.store(sample);
             }
             else
             {
-                std::vector<uint32_t> data;
+                std::vector<std::uint32_t> data;
                 data.reserve(5);
                 for(int j = 0; j < 5; ++j)
                 {
-                    data.push_back(static_cast<uint32_t>(i * 100 + j));
+                    data.push_back(static_cast<std::uint32_t>(i * 100 + j));
                 }
                 test_sample_4 sample(data);
                 expected_4.push_back(sample);
@@ -748,7 +728,7 @@ TEST_F(trace_cache_module_integration_test, optional_field_roundtrip)
     std::string text_1 = "optional_test";
 
     test_sample_1 sample1(42, text_1);
-    test_sample_5 sample5_with_value(std::optional<uint32_t>{ 12345 });
+    test_sample_5 sample5_with_value(std::optional<std::uint32_t>{ 12345 });
     test_sample_5 sample5_nullopt(std::nullopt);
     test_sample_2 sample2(2.71828, 999);
 

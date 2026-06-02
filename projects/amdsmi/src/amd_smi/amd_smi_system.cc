@@ -27,6 +27,7 @@
 #include <cassert>
 #include <cerrno>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
@@ -237,7 +238,7 @@ amdsmi_status_t AMDSmiSystem::get_sys_num_of_cpu_sockets(uint32_t* sock_num) {
 std::vector<uint32_t> AMDSmiSystem::get_cpu_sockets_from_numa_node(int32_t numa_node) {
   std::vector<uint32_t> sockets;
   if (numa_node < 0) {
-    sockets[0] = std::numeric_limits<int32_t>::max();
+    sockets.push_back(std::numeric_limits<int32_t>::max());
     return sockets;
   }
   std::ifstream node_info("/sys/devices/system/node/node" + std::to_string(numa_node) + "/cpulist");
@@ -270,8 +271,7 @@ amdsmi_status_t AMDSmiSystem::init(uint64_t flags) {
   amdsmi_status_t amd_smi_status;
 
   // populate GPU sockets and processors
-  // Also initialize GPU devices when the test flag is set (for mutual exclusion testing)
-  if ((flags & AMDSMI_INIT_AMD_GPUS) || (flags & AMD_SMI_INIT_FLAG_RESRV_TEST1)) {
+  if (flags & AMDSMI_INIT_AMD_GPUS) {
     amd_smi_status = populate_amd_gpu_devices();
     if (amd_smi_status != AMDSMI_STATUS_SUCCESS) return amd_smi_status;
   }
@@ -342,8 +342,9 @@ amdsmi_status_t AMDSmiSystem::populate_amd_gpu_devices() {
   AMDSmiSystem::cleanup();
   // init rsmi — forward the test flag so the mutex becomes non-blocking
   rsmi_driver_state_t state;
-  uint64_t rsmi_flags =
-      (init_flag_ & AMD_SMI_INIT_FLAG_RESRV_TEST1) ? RSMI_INIT_FLAG_RESRV_TEST1 : 0;
+  uint64_t rsmi_flags = (init_flag_ & AMD_SMI_INIT_FLAG_RESRV_TEST1)
+                            ? static_cast<uint64_t>(RSMI_INIT_FLAG_RESRV_TEST1)
+                            : 0ULL;
   rsmi_status_t ret = rsmi_init(rsmi_flags);
   if (ret != RSMI_STATUS_SUCCESS) {
     if (rsmi_driver_status(&state) == RSMI_STATUS_SUCCESS &&
@@ -553,13 +554,13 @@ amdsmi_status_t AMDSmiSystem::populate_brcm_nic_devices() {
     std::string nicPath;
     if ((no_drm_nic_.get_device_path_by_index(i, &nicPath)) != AMDSMI_STATUS_SUCCESS) continue;
     std::string driverPath = nicPath + "/driver";
-    std::string command = "readlink " + driverPath;
-    std::string getData;
-    if (smi_brcm_execute_cmd_get_data(command, &getData) != AMDSMI_STATUS_SUCCESS) continue;
-    if (getData.find("bnxt_en") == std::string::npos) continue;
+    std::error_code ec;
+    auto target = std::filesystem::read_symlink(driverPath, ec);
+    if (ec) continue;
+    if (target.string().find("bnxt_en") == std::string::npos) continue;
 
     socket->add_processor(device.get());
-    nic_processors_.insert(deviceget());
+    nic_processors_.insert(device.get());
     device.release();
   }
 #endif  // BRCM_NIC

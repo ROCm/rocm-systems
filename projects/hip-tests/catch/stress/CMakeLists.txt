@@ -2,8 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-add_custom_target(stress_test COMMAND "${CMAKE_CTEST_COMMAND}" -R "Stress_"
-                              COMMENT "Build complete, now executing the stress test ...")
+add_custom_target(stress_test)
 
 add_subdirectory(memory)
 add_subdirectory(module)

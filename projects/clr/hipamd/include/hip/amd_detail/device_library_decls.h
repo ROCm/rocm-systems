@@ -100,13 +100,6 @@ extern "C" __device__ __hip_uint64_t __ockl_fprintf_append_string_n(__hip_uint64
                                                                     __hip_uint64_t length,
                                                                     __hip_uint32_t is_last);
 
-// Introduce local address space
-#define __local __attribute__((address_space(3)))
-
-#ifdef __HIP_DEVICE_COMPILE__
-__device__ inline static __local void* __to_local(unsigned x) { return (__local void*)x; }
-#endif  //__HIP_DEVICE_COMPILE__
-
 // Using hip.amdgcn.bc - sync threads
 #define __CLK_LOCAL_MEM_FENCE  0x01
 #define __CLK_GLOBAL_MEM_FENCE 0x02

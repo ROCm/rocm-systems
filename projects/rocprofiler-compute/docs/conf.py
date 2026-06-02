@@ -1,27 +1,5 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 # Configuration file for the Sphinx documentation builder.
 #
@@ -60,19 +38,19 @@ exclude_patterns = ["archive", "*/includes"]
 html_static_path = ["sphinx/static/css"]
 html_css_files = ["o_custom.css"]
 
-# Load per-arch metrics YAMLs
+# Load per-arch CDNA metrics YAMLs
 arch_metrics = {}
 for arch in ["gfx908", "gfx90a", "gfx942", "gfx950"]:
     with open(f"data/metrics/{arch}_metrics.yaml") as f:
         arch_metrics[arch] = yaml.safe_load(f)
 
-# Section name mapping: context-name -> YAML section name
-section_map = {
+# CDNA section name mapping: jinja context id -> YAML section name
+cdna_section_map = {
     "wavefront-launch-stats": "Wavefront launch stats",
     "wavefront-runtime-stats": "Wavefront runtime stats",
     "instruction-mix": "Overall instruction mix",
     "valu-arith-instruction-mix": "VALU arithmetic instruction mix",
-    "mfma-instruction-mix": "MFMA instruction mix",
+    "matrix-instruction-mix": "Matrix instruction mix",
     "compute-speed-of-light": "Compute Speed-of-Light",
     "pipeline-stats": "Pipeline statistics",
     "arithmetic-operations": "Arithmetic operations",
@@ -104,15 +82,88 @@ section_map = {
     "sys-sol": "System Speed-of-Light",
 }
 
-# Generate per-arch jinja contexts (4 contexts per section)
+# Generate per-arch CDNA jinja contexts
 jinja_contexts = {}
-for context_name, section_name in section_map.items():
+for context_name, section_name in cdna_section_map.items():
     for arch in ["gfx908", "gfx90a", "gfx942", "gfx950"]:
-        # Handle missing sections in gfx908 (only 30 sections vs 34)
         if section_name in arch_metrics[arch]:
             jinja_contexts[f"{context_name}-{arch}"] = {
                 "data": arch_metrics[arch][section_name],
             }
+
+# Load gfx1151 (RDNA) metrics YAML
+with open("data/metrics/gfx1151_metrics.yaml") as f:
+    gfx1151_metrics = yaml.safe_load(f)
+
+# RDNA gfx1151 section mapping: jinja context id -> YAML section name
+rdna_gfx1151_section_map = {
+    "sys-sol-gfx1151": "System Speed-of-Light",
+    "rdna1151-roofline-performance-rates-gfx1151": "Roofline Performance Rates",
+    "rdna1151-roofline-plot-points-gfx1151": "Roofline Plot Points",
+    "rdna1151-wgp-utilization-gfx1151": "WGP Utilization",
+    "rdna1151-wavefront-launch-stats-gfx1151": "Wavefront Launch Stats",
+    "rdna1151-wave-dispatch-gfx1151": "Wave Dispatch",
+    "rdna1151-wave-life-gfx1151": "Wave Life",
+    "rdna1151-wave-instruction-mix-gfx1151": "Wave Instruction Mix",
+    "rdna1151-vmem-instruction-mix-gfx1151": "VMEM Instruction Mix",
+    "rdna1151-lds-instruction-mix-gfx1151": "LDS Instruction Mix",
+    "rdna1151-wait-state-analysis-gfx1151": "Wait State Analysis",
+    "rdna1151-wgp-instruction-cache-gfx1151": "WGP Instruction Cache",
+    "rdna1151-wgp-scalar-data-cache-gfx1151": "WGP Scalar Data Cache",
+    "rdna1151-gpu-utilization-gfx1151": "GPU Utilization",
+    "rdna1151-shader-engine-utilization-gfx1151": "Shader Engine Utilization",
+    "rdna1151-spi-utilization-gfx1151": "SPI Utilization",
+    "rdna1151-wave-dispatch-statistics-gfx1151": "Wave Dispatch Statistics",
+    "rdna1151-cpc-utilization-gfx1151": "CPC Utilization",
+    "rdna1151-cpc-interface-utilization-gfx1151": "CPC Interface Utilization",
+    "rdna1151-mec-stall-cycles-gfx1151": "MEC Stall Cycles",
+    "rdna1151-cpc-memory-requests-gfx1151": "CPC Memory Requests",
+    "rdna1151-mec-instruction-cache-gfx1151": "MEC Instruction Cache",
+    "rdna1151-gl0-utilization-gfx1151": "GL0 Utilization",
+    "rdna1151-gl0-request-statistics-gfx1151": "GL0 Request Statistics",
+    "rdna1151-gl0-cache-performance-gfx1151": "GL0 Cache Performance",
+    "rdna1151-gl0-gl1-interface-gfx1151": "GL0-GL1 Interface",
+    "rdna1151-gl0-stalls-gfx1151": "GL0 Stalls",
+    "rdna1151-gl1-cache-utilization-gfx1151": "GL1 Cache Utilization",
+    "rdna1151-gl1-cache-request-statistics-gfx1151": "GL1 Cache Request Statistics",
+    "rdna1151-gl1-cache-performance-gfx1151": "GL1 Cache Performance",
+    "rdna1151-gl1-cache-stalls-gfx1151": "GL1 Cache Stalls",
+    "rdna1151-gl1-gl2-interface-gfx1151": "GL1-GL2 Interface",
+    "rdna1151-gl2-cache-performance-gfx1151": "GL2 Cache Performance",
+    "rdna1151-gl2-cache-request-statistics-gfx1151": "GL2 Cache Request Statistics",
+    "rdna1151-gl2-cache-bandwidth-gfx1151": "GL2 Cache Bandwidth",
+    "rdna1151-dram-read-interface-gfx1151": "DRAM Read Interface",
+    "rdna1151-dram-write-interface-gfx1151": "DRAM Write Interface",
+    "rdna1151-system-arbiter-sarb-gfx1151": "System Arbiter (SARB)",
+    "rdna1151-return-interface-gfx1151": "Return Interface",
+    "rdna1151-memory-chart-instruction-cache-gfx1151": (
+        "Memory chart - Instruction Cache"
+    ),
+    "rdna1151-memory-chart-scalar-data-cache-gfx1151": (
+        "Memory chart - Scalar Data Cache"
+    ),
+    "rdna1151-memory-chart-tcp-cache-gfx1151": ("Memory chart - TCP Cache"),
+    "rdna1151-memory-chart-lds-local-data-share-gfx1151": (
+        "Memory chart - LDS (Local Data Share)"
+    ),
+    "rdna1151-memory-chart-tcp-gl1-interface-gfx1151": (
+        "Memory chart - TCP-GL1 Interface"
+    ),
+    "rdna1151-memory-chart-gl1-cache-gfx1151": ("Memory chart - GL1 Cache"),
+    "rdna1151-memory-chart-gl1-gl2-interface-gfx1151": (
+        "Memory chart - GL1-GL2 Interface"
+    ),
+    "rdna1151-memory-chart-gl2-cache-gfx1151": ("Memory chart - GL2 Cache"),
+    "rdna1151-memory-chart-gcea-to-system-memory-gfx1151": (
+        "Memory chart - GCEA to System Memory"
+    ),
+}
+
+# Generate gfx1151 jinja contexts
+for context_name, section_name in rdna_gfx1151_section_map.items():
+    jinja_contexts[context_name] = {
+        "data": gfx1151_metrics.get(section_name, {}),
+    }
 
 external_toc_path = "./sphinx/_toc.yml"
 external_projects_current_project = "rocprofiler-compute"

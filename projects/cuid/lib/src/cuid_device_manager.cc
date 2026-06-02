@@ -25,6 +25,7 @@
 #include "src/cuid_gpu.h"
 #include "src/cuid_cpu.h"
 #include "src/cuid_nic.h"
+#include "src/cuid_npu.h"
 #include "src/cuid_platform.h"
 #include "src/cuid_util.h"
 #include "src/ipc_protocol.h"
@@ -174,14 +175,27 @@ amdcuid_status_t CuidDeviceManager::get_devices_on_system() {
             discovered_devices.push_back(nic);
         }
     }
-
+    // Discover NPU devices
+    std::vector<DevicePtr> npu_devices;
+    status = CuidNpu::discover(npu_devices);
     if (status == AMDCUID_STATUS_SUCCESS) {
+        for (const auto& npu : npu_devices) {
+            discovered_devices.push_back(npu);
+        }
+    }
+
+    // Accept discovered devices if any were found, regardless of
+    // individual subsystem discover() return codes. Some subsystems
+    // (e.g., NPU) may legitimately return UNSUPPORTED on systems
+    // that lack those devices.
+    if (!discovered_devices.empty()) {
         std::lock_guard<std::mutex> lock(manager_mutex_);
         devices_.clear();
         devices_ = discovered_devices;
     }
 
-    return status;
+    return discovered_devices.empty() ? AMDCUID_STATUS_DEVICE_NOT_FOUND
+                                      : AMDCUID_STATUS_SUCCESS;
 }
 
 // helper function to convert CuidFileEntry to appropriate CuidDevice
@@ -242,7 +256,17 @@ void _convert_entry_to_device(CuidFileEntry& entry, DevicePtr& device){
             device = std::make_shared<CuidNic>(nic_info);
             break;
         }
-        // Add cases for other device types as needed
+        case AMDCUID_DEVICE_TYPE_NPU: {
+            amdcuid_npu_info npu_info = {};
+            npu_info.header.fields.npu.vendor_id = entry.vendor_id;
+            npu_info.header.fields.npu.device_id = entry.device_id;
+            npu_info.header.fields.npu.pci_class = entry.pci_class;
+            npu_info.header.fields.npu.revision_id = entry.revision_id;
+            npu_info.accel_node = entry.device_node;
+            npu_info.bdf = entry.bdf;
+            device = std::make_shared<CuidNpu>(npu_info);
+            break;
+        }
         default: {
             device = nullptr;
             break;
