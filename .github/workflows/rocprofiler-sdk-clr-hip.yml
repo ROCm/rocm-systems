@@ -1,0 +1,164 @@
+name: rocprofiler-sdk build CLR/HIP CI
+
+on:
+  push:
+    branches: [ develop ]
+    paths:
+      - 'projects/clr/**'
+      - 'projects/hip/**'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
+  pull_request:
+    paths:
+      - 'projects/clr/**'
+      - 'projects/hip/**'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  ROCM_PATH: "/opt/rocm"
+  PATH: "/usr/bin:$PATH"
+
+  GLOBAL_CMAKE_OPTIONS: ""
+  ENABLE_ROCR_BUILD: "true"
+  ENABLE_HIP_CLR_BUILD: "true"
+  ENABLE_ROCPROFILER_REGISTER_BUILD: "true"
+  ENABLE_AQLPROFILE_BUILD: "true"
+  ENABLE_ROCDECODE_BUILD: "true"
+  ENABLE_ROCJPEG_BUILD: "true"
+  INSTALL_NIGHTLY_ROCM: "true"
+
+jobs:
+  core-deb:
+    name: Build rocprofiler-sdk for CLR • ubuntu-22.04
+    runs-on: azure-linux-scale-rocm
+    container:
+      image: docker.io/rocm/rocprofiler-private:ubuntu-22.04-gfx94X-latest
+      credentials:
+        username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
+        password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
+      env:
+        DEBIAN_FRONTEND: noninteractive
+    env:
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+    steps:
+      - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            .github/actions/rocprofiler-sdk-util
+            projects/rocprofiler-sdk
+            projects/aqlprofile
+            projects/rocprofiler-register
+            projects/rocprof-trace-decoder
+            projects/rocr-runtime
+            projects/clr
+            projects/hip
+          submodules: false
+          set-safe-directory: true
+
+      - name: Compute submodule cache key
+        id: submods
+        shell: bash
+        run: |
+          git --version
+          git config --global --add safe.directory '*'
+          git submodule status --recursive | awk '{print $1,$2}' > .git-submodules-status
+          echo "hash=$(sha256sum .git-submodules-status | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          git config --file .gitmodules --get-regexp path | awk '{print $2}' > .git-submodule-paths
+          { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
+
+      - name: Restore submodule cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .git/modules
+            ${{ steps.submods.outputs.paths }}
+          key: submods-${{ runner.os }}-${{ steps.submods.outputs.hash }}
+          restore-keys: |
+            submods-${{ runner.os }}-
+            submods-
+
+      - name: Init/Update submodules
+        run: git submodule update --init --recursive --jobs 16
+
+      - name: Clone ROCDecode
+        uses: actions/checkout@v6
+        with:
+          repository: 'ROCm/rocDecode'
+          ref: 'release/rocm-rel-7.0'
+          set-safe-directory: true
+          path: 'rocDecode'
+
+      - name: Clone ROCJPEG
+        uses: actions/checkout@v6
+        with:
+          repository: 'ROCm/rocJPEG'
+          ref: 'release/rocm-rel-7.0'
+          set-safe-directory: true
+          path: 'rocJPEG'
+
+      - name: Install requirements
+        timeout-minutes: 10
+        shell: bash
+        working-directory: projects/rocprofiler-sdk
+        run: |
+          git config --global --add safe.directory '*'
+          apt-get update
+          apt-get install -y g++-11 g++-12 cmake python3-pip libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config rpm libzstd-dev
+          update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
+          update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
+          python3 -m pip install -U --user -r requirements.txt
+          python3 -m pip install -U --user cmake==3.24.0
+
+      - name: Build ROCProfiler SDK Dependencies
+        uses: ./.github/actions/rocprofiler-sdk-util
+        with:
+          rocm-path: ${{ env.ROCM_PATH }}
+          gpu-target: gfx94X
+          compiler-launcher: /usr/bin/ccache
+          enable-rocr-build: ${{ env.ENABLE_ROCR_BUILD }}
+          enable-hip-clr-build: ${{ env.ENABLE_HIP_CLR_BUILD }}
+          enable-rocprofiler-register-build: ${{ env.ENABLE_ROCPROFILER_REGISTER_BUILD }}
+          enable-aqlprofile-build: ${{ env.ENABLE_AQLPROFILE_BUILD }}
+          enable-rocdecode-build: ${{ env.ENABLE_ROCDECODE_BUILD }}
+          enable-rocjpeg-build: ${{ env.ENABLE_ROCJPEG_BUILD }}
+          enable-rocprof-trace-decoder-build: 'true'
+          install-nightly-rocm: ${{ env.INSTALL_NIGHTLY_ROCM }}
+          ccache-key: ccache-ubuntu-22.04-azure-linux-scale-rocm-clr-hip
+          ccache-variant: ccache
+
+      - name: Configure and Build
+        timeout-minutes: 45
+        shell: bash
+        working-directory: projects/rocprofiler-sdk
+        run: |
+          export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH
+          cmake -B build \
+            -DROCPROFILER_DEP_ROCMCORE=ON \
+            -DROCPROFILER_BUILD_DOCS=OFF \
+            -DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DPython3_EXECUTABLE=$(which python3) \
+            -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm' \
+            ${{ env.GLOBAL_CMAKE_OPTIONS }}
+          cmake --build build --parallel 16
