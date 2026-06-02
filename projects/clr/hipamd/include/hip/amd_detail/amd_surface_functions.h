@@ -258,6 +258,7 @@ static __device__ __hip_img_chk__ void surf2DLayeredread(T* data, hipSurfaceObje
                                                          int y, int layer) {
   __HIP_SURFACE_OBJECT_PARAMETERS_INIT
   x = __hipGetPixelAddr(x, __ockl_image_channel_data_type_2D(i), __ockl_image_channel_order_2D(i));
+  // 2Da coordinate layout: {x, y, layer, w}; the 4th component is unused (padding).
   int4 coords{x, y, layer, 0};
   auto tmp = __ockl_image_load_2Da(i, get_native_vector(coords));
   *data = __hipMapFrom<T>(tmp);
@@ -279,6 +280,7 @@ static __device__ __hip_img_chk__ void surf2DLayeredwrite(T data, hipSurfaceObje
                                                           int y, int layer) {
   __HIP_SURFACE_OBJECT_PARAMETERS_INIT
   x = __hipGetPixelAddr(x, __ockl_image_channel_data_type_2D(i), __ockl_image_channel_order_2D(i));
+  // 2Da coordinate layout: {x, y, layer, w}; the 4th component is unused (padding).
   int4 coords{x, y, layer, 0};
   auto tmp = __hipMapTo<float4::Native_vec_>(data);
   __ockl_image_store_2Da(i, get_native_vector(coords), tmp);
