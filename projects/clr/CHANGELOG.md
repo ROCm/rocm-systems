@@ -126,7 +126,7 @@ This approach reduces dispatch overhead and improves GPU utilization by overlapp
 
 ### Optimized
 
-* Reduced hipGraphLaunch latency for multi-list graphs. The HIP runtime’s graph dispatch mechanism has been optimized, reducing launch latency for workloads using hipGraphLaunch with multi-list graph topologies.
+* Reduced `hipGraphLaunch` latency for multi-list graphs. The HIP runtime’s graph dispatch mechanism has been optimized, reducing launch latency for workloads using `hipGraphLaunch` with multi-list graph topologies.
 
 ## HIP 7.2.1 for ROCm 7.2.1
 
