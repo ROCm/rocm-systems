@@ -1,20 +1,18 @@
 //! `mirage_rocjitsu` — rocjitsu integration for the mirage binary.
 //!
-//! This crate embeds the rocjitsu artifacts that the mirage binary
-//! needs at runtime and exposes helpers to materialise them on disk:
+//! This crate exposes helpers the mirage binary needs at runtime:
 //!
-//! * [`KMD_LIB_BYTES`] — `librocjitsu_kmd.so`, the LD_PRELOAD KFD
-//!   interposer that routes real HIP/HSA syscalls into the simulator.
 //! * [`SCHEMA_FBS_BYTES`] — `simulation_config.fbs`, the flatbuffer
-//!   schema the kmd config is validated against.
+//!   schema the kmd config is validated against. This is the one
+//!   rocjitsu artifact mirage embeds directly.
 //!
-//! See `build.rs` for how these assets are located/built at compile
-//! time and the embedding fallback when the rocjitsu source tree is
-//! unavailable.
+//! mirage does **not** build or embed the rocjitsu *libraries*
+//! (`librocjitsu_kmd.so`, `librocjitsu.so`); they are discovered at
+//! runtime from the installed system (see [`kmd_preload`]).
 //!
 //! Runtime entry points:
 //!
-//! * [`ensure_assets`] extracts the kmd library + schema into
+//! * [`ensure_assets`] extracts the embedded schema into
 //!   `<MIRAGE_CACHE>/emulator/rocjitsu/`.
 //! * [`kmd_config`] synthesises a runtime `SimulationConfig` JSON
 //!   from an [`mirage_core::emulator::EmulatorDef`] by resolving its
@@ -23,7 +21,7 @@
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use mirage_core::agent::AgentDef;
 use mirage_core::common::MaybeRef;
@@ -49,17 +47,10 @@ pub fn describe() -> EmulatorDescription {
     }
 }
 
-/// `librocjitsu_kmd.so` bytes. Empty when the build script could not
-/// locate or build the artifact.
-pub static KMD_LIB_BYTES: &[u8] = include_bytes!(env!("ROCJITSU_KMD_LIB_BYTES_PATH"));
-
-/// `librocjitsu.so` bytes. Empty when the build script could not
-/// locate or build the artifact.
-pub static LIB_BYTES: &[u8] = include_bytes!(env!("ROCJITSU_LIB_BYTES_PATH"));
-
-/// `simulation_config.fbs` schema bytes. Empty when not available at
-/// build time.
-pub static SCHEMA_FBS_BYTES: &[u8] = include_bytes!(env!("ROCJITSU_SCHEMA_FBS_PATH"));
+/// `simulation_config.fbs` schema bytes, embedded from the rocjitsu
+/// source tree at build time.
+pub static SCHEMA_FBS_BYTES: &[u8] =
+    include_bytes!("../../../rocjitsu/schemas/simulation_config.fbs");
 
 /// Subdirectory under `<MIRAGE_CACHE>/emulator/` where the extracted
 /// runtime assets (`librocjitsu_kmd.so`, `librocjitsu.so`,
@@ -98,38 +89,22 @@ pub fn schema_fbs_path() -> PathBuf {
     asset_dir().join(SCHEMA_FBS_NAME)
 }
 
-/// Write the embedded rocjitsu libraries + schema into
+/// Write the embedded rocjitsu schema into
 /// `<MIRAGE_CACHE>/emulator/rocjitsu/`.
 ///
-/// If `force` is true, existing files are overwritten. Otherwise
-/// only missing files are written. Empty embedded assets (i.e. the
-/// build script could not find the source artifact) are skipped.
+/// If `force` is true an existing file is overwritten; otherwise it is
+/// only written when missing.
 ///
 /// Returns the list of `(name, written)` entries.
 pub fn ensure_assets(force: bool) -> Result<Vec<(String, bool)>> {
-    let mut report = Vec::new();
-    for (name, bytes, path) in [
-        (KMD_LIB_NAME, KMD_LIB_BYTES, kmd_lib_path()),
-        (LIB_NAME, LIB_BYTES, lib_path()),
-        (SCHEMA_FBS_NAME, SCHEMA_FBS_BYTES, schema_fbs_path()),
-    ] {
-        if bytes.is_empty() {
-            report.push((name.to_string(), false));
-            continue;
-        }
-        if path.exists() && !force {
-            report.push((name.to_string(), false));
-            continue;
-        }
-        mirage_core::state::write_bytes(&path, bytes)?;
-        // Mark `.so` files executable; LD_PRELOAD doesn't require it
-        // but it makes the file usable from a shell as well.
-        if name.ends_with(".so") {
-            let _ = make_executable(&path);
-        }
-        report.push((name.to_string(), true));
-    }
-    Ok(report)
+    let path = schema_fbs_path();
+    let written = if path.exists() && !force {
+        false
+    } else {
+        mirage_core::state::write_bytes(&path, SCHEMA_FBS_BYTES)?;
+        true
+    };
+    Ok(vec![(SCHEMA_FBS_NAME.to_string(), written)])
 }
 
 /// Returns the path mirage should pass as `LD_PRELOAD` to an
@@ -234,26 +209,10 @@ pub fn root() -> PathBuf {
         .join("rocjitsu")
 }
 
-/// Returns true if rocjitsu is reachable in any form on this machine
-/// — either the embedded KMD library was non-empty at build time, or
-/// a system install / sibling build has been detected.
+/// Returns true if rocjitsu is reachable on this machine — i.e. a
+/// system install or sibling build of the KMD library is detected.
 pub fn is_installed() -> bool {
-    if !KMD_LIB_BYTES.is_empty() {
-        return true;
-    }
     mirage_core::discovery::is_lib_installed(&kmd_lib_search())
-}
-
-#[cfg(unix)]
-fn make_executable(path: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    let mut perm = std::fs::metadata(path)?.permissions();
-    perm.set_mode(perm.mode() | 0o111);
-    std::fs::set_permissions(path, perm)
-}
-#[cfg(not(unix))]
-fn make_executable(_: &Path) -> std::io::Result<()> {
-    Ok(())
 }
 
 #[cfg(test)]
@@ -266,21 +225,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         mirage_core::paths::set_test_root(tmp.path());
         let report = ensure_assets(false).unwrap();
-        assert_eq!(report.len(), 3);
-        for (name, written) in &report {
-            let (path, bytes_empty) = match name.as_str() {
-                KMD_LIB_NAME => (kmd_lib_path(), KMD_LIB_BYTES.is_empty()),
-                LIB_NAME => (lib_path(), LIB_BYTES.is_empty()),
-                SCHEMA_FBS_NAME => (schema_fbs_path(), SCHEMA_FBS_BYTES.is_empty()),
-                other => panic!("unexpected asset {other}"),
-            };
-            if bytes_empty {
-                assert!(!written, "empty asset {name} should not be written");
-                assert!(!path.exists());
-            } else {
-                assert!(written, "{name} should have been written on first run");
-                assert!(path.exists());
-            }
-        }
+        assert_eq!(report.len(), 1);
+        let (name, written) = &report[0];
+        assert_eq!(name, SCHEMA_FBS_NAME);
+        assert!(written, "schema should have been written on first run");
+        assert!(schema_fbs_path().exists());
     }
 }
