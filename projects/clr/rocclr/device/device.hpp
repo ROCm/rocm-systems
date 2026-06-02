@@ -715,7 +715,8 @@ class Settings {
       uint kernel_arg_impl_ : 2;              //!< Kernel argument implementation
       uint sdma_swap_supported_ : 1;         //!< SDMA linear swap copy (gfx94x/gfx95x)
       uint groupMemCarveout_ : 1;             //!< Group memory carveout functionality
-      uint reserved_ : 10;
+      uint sdma_indirect_supported_ : 1;     //!< SDMA linear indirect copy (gfx1250+)
+      uint reserved_ : 9;
     };
     uint value_;
   };
