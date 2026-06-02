@@ -30,7 +30,7 @@ ncclResult_t rcclCpuRunWorkColl(
 
   if (ctx->workType == ncclDevWorkTypeCollReg) {
     auto* reg = reinterpret_cast<struct ncclDevWorkCollReg*>(ctx->workStorage);
-    int subtn = reg->coll.nWarps * ctx->warpSize;
+    int subtn = std::min(tn, reg->coll.nWarps * ctx->warpSize);
     if (tid < subtn) {
       NCCLCHECK(rcclCpuExecuteCollWork(ctx, bar, tid, subtn, &reg->coll, desc));
     }
@@ -38,10 +38,18 @@ ncclResult_t rcclCpuRunWorkColl(
   }
 
   for (int w = 0; w < ctx->nWorks; w++) {
+    if (ctx->workSize <= 0 ||
+        (w + 1) * ctx->workSize > static_cast<int>(sizeof(ctx->workStorage))) {
+      return ncclInternalError;
+    }
     struct ncclDevWorkColl* work =
         reinterpret_cast<struct ncclDevWorkColl*>(ctx->workStorage + w * ctx->workSize);
-    int subtn = work->nWarps * ctx->warpSize;
-  if (tid >= subtn) continue;
+    if (work < reinterpret_cast<struct ncclDevWorkColl*>(ctx->workStorage) ||
+        work >= reinterpret_cast<struct ncclDevWorkColl*>(ctx->workStorage + sizeof(ctx->workStorage))) {
+      return ncclInternalError;
+    }
+    int subtn = std::min(tn, static_cast<int>(work->nWarps) * ctx->warpSize);
+    if (tid >= subtn) continue;
 
   if (w != 0) {
     struct ncclDevWorkColl* workPrev =
@@ -79,7 +87,7 @@ ncclResult_t rcclCpuRunWorkP2p(
 }  // namespace
 
 ncclResult_t rcclCpuDispatchWork(struct rcclCpuBlockContext* ctx, struct rcclCpuBlockBarrier* bar, int tid, int tn) {
-  if (ctx->comm.abortFlag && rcclCpuLoadSeqCstU32(const_cast<uint32_t*>(ctx->comm.abortFlag))) {
+  if (ctx->hostAbortFlag && rcclCpuLoadSeqCstU32(const_cast<uint32_t*>(ctx->hostAbortFlag))) {
     ctx->aborted = 1;
     return ncclSuccess;
   }
@@ -96,6 +104,6 @@ ncclResult_t rcclCpuDispatchWork(struct rcclCpuBlockContext* ctx, struct rcclCpu
     return ncclInternalError;
   }
 
-  ctx->channel.workCounter += ctx->nWorks;
+  if (ctx->channel) ctx->channel->workCounter += ctx->nWorks;
   return ncclSuccess;
 }

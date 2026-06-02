@@ -1905,8 +1905,12 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   int smem = rcclShmemDynamicSize(comm->cudaArch, comm->WarpSize);
   cudaStream_t launchStream = planner->streams->stream;
 
-  if (rcclCpuKernelEnabled() && rcclCpuKernelPlanSupported(plan)) {
-    return rcclLaunchKernelCpu(comm, plan, grid.x, block.x, launchStream);
+  if (rcclCpuKernelEnabled() && rcclCpuKernelPlanSupported(comm, plan)) {
+    ncclResult_t cpuRet = rcclLaunchKernelCpu(comm, plan, grid.x, block.x, launchStream);
+    if (cpuRet == ncclSuccess) return ncclSuccess;
+    if (comm->rank == 0) {
+      INFO(NCCL_ENV, "RCCL CPU kernel launch unavailable, falling back to GPU kernel");
+    }
   }
 
   NCCLCHECK(ncclProfilerStartKernelLaunchEvent(plan, launchStream));

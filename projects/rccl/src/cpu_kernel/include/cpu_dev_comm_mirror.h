@@ -8,9 +8,23 @@
 #include "comm.h"
 #include "device.h"
 
-ncclResult_t rcclCpuMirrorDevComm(struct ncclComm* comm, struct ncclKernelComm** outHostComm);
-void rcclCpuReleaseCommMirror();
-bool rcclCpuCommMirrorValid();
-ncclResult_t rcclCpuWritebackChannelCounters(struct ncclComm* comm, int channelId, uint64_t workCounter);
+#include <vector>
+
+struct rcclCpuCommMirrorState {
+  struct ncclKernelCommAndChannels hostBlob;
+  std::vector<struct ncclDevChannelPeer> peerStorage;
+  std::vector<struct ncclDevChannelPeer*> peerPtrStorage;
+  std::vector<int> ringUserRanksStorage;
+  bool valid = false;
+};
+
+ncclResult_t rcclCpuMirrorDevComm(
+    struct ncclComm* comm, struct rcclCpuCommMirrorState* mirror, struct ncclKernelComm** outHostComm);
+ncclResult_t rcclCpuWritebackChannelCounters(
+    struct ncclComm* comm, struct rcclCpuCommMirrorState* mirror, int channelId, uint64_t workCounter);
+
+// Returns true when mirrored P2P channels have usable SIMPLE connections for ring peers.
+bool rcclCpuMirrorChannelsReady(
+    struct ncclComm* comm, struct rcclCpuCommMirrorState* mirror, struct ncclDevKernelArgs* args);
 
 #endif

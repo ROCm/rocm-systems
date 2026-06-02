@@ -3,54 +3,35 @@
  ************************************************************************/
 
 #include "cpu_mem.h"
+#include "cpu_device_guard.h"
 
 #include <hip/hip_runtime.h>
 
-#include <mutex>
-#include <unordered_map>
-#include <vector>
-
-namespace {
-
-struct StagingBuf {
-  void* devicePtr;
-  size_t bytes;
-  std::vector<char> host;
-};
-
-static std::mutex g_stagingMutex;
-static thread_local std::unordered_map<void*, StagingBuf> g_staging;
-
-}  // namespace
-
-ncclResult_t rcclCpuMapDevicePtr(void* devicePtr, size_t bytes, void** hostPtr, bool* needsUnmap) {
-  if (hostPtr == nullptr || needsUnmap == nullptr) return ncclInvalidArgument;
-  *needsUnmap = false;
-  if (devicePtr == nullptr || bytes == 0) {
-    *hostPtr = devicePtr;
-    return ncclSuccess;
-  }
-
-  hipPointerAttribute_t attr{};
-  hipError_t err = hipPointerGetAttributes(&attr, devicePtr);
-  if (err == hipSuccess && (attr.type == hipMemoryTypeHost || attr.isManaged)) {
-    *hostPtr = devicePtr;
-    return ncclSuccess;
-  }
-
-  StagingBuf& s = g_staging[devicePtr];
-  if (s.host.size() < bytes) s.host.resize(bytes);
-  s.devicePtr = devicePtr;
-  s.bytes = bytes;
-  CUDACHECK(hipMemcpy(s.host.data(), devicePtr, bytes, hipMemcpyDeviceToHost));
-  *hostPtr = s.host.data();
-  *needsUnmap = true;
+ncclResult_t rcclCpuCopyBytes(int cudaDev, void* dst, void const* src, size_t bytes) {
+  if (bytes == 0 || dst == src) return ncclSuccess;
+  if (dst == nullptr || src == nullptr) return ncclInvalidArgument;
+  rcclCpuDeviceGuard guard(cudaDev);
+  CUDACHECK(hipMemcpy(dst, src, bytes, hipMemcpyDefault));
   return ncclSuccess;
 }
 
-void rcclCpuUnmapDevicePtr(void* devicePtr, void* hostPtr, bool needsUnmap) {
-  if (!needsUnmap || devicePtr == nullptr) return;
-  auto it = g_staging.find(devicePtr);
-  if (it == g_staging.end()) return;
-  (void)hipMemcpy(devicePtr, it->second.host.data(), it->second.bytes, hipMemcpyHostToDevice);
+ncclResult_t rcclCpuLoadDevU64(int cudaDev, uint64_t const* devPtr, uint64_t* out) {
+  if (devPtr == nullptr || out == nullptr) return ncclInvalidArgument;
+  rcclCpuDeviceGuard guard(cudaDev);
+  CUDACHECK(hipMemcpy(out, devPtr, sizeof(uint64_t), hipMemcpyDeviceToHost));
+  return ncclSuccess;
+}
+
+ncclResult_t rcclCpuStoreDevU64(int cudaDev, uint64_t* devPtr, uint64_t val) {
+  if (devPtr == nullptr) return ncclInvalidArgument;
+  rcclCpuDeviceGuard guard(cudaDev);
+  CUDACHECK(hipMemcpy(devPtr, &val, sizeof(uint64_t), hipMemcpyHostToDevice));
+  return ncclSuccess;
+}
+
+ncclResult_t rcclCpuStoreDevU32(int cudaDev, uint32_t* devPtr, uint32_t val) {
+  if (devPtr == nullptr) return ncclInvalidArgument;
+  rcclCpuDeviceGuard guard(cudaDev);
+  CUDACHECK(hipMemcpy(devPtr, &val, sizeof(uint32_t), hipMemcpyHostToDevice));
+  return ncclSuccess;
 }

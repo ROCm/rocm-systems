@@ -21,8 +21,8 @@ using rcclCpuPrimitives = ::rcclCpuPrimitives;
 
 ncclResult_t runRingAllReduce(
     rcclCpuPrimitives& prims, int tid, int tn, struct ncclDevWorkColl* work, int proto) {
-  ncclRing* ring = &prims.ctx->channel.ring;
-  int nranks = prims.ctx->comm.nRanks;
+  ncclRing* ring = &prims.ctx->channel->ring;
+  int nranks = prims.ctx->comm->nRanks;
   int eltSize = ncclTypeSize(prims.desc.datatype);
   ssize_t size, gridOffset, channelCount, chunkCount;
   rcclCpuCollCbdPart(work, prims.ctx->channelId, proto, eltSize, &size, &gridOffset, &channelCount, &chunkCount);
@@ -70,7 +70,7 @@ ncclResult_t runRingAllReduce(
 
 ncclResult_t runRingBroadcast(
     rcclCpuPrimitives& prims, int tid, int tn, struct ncclDevWorkColl* work, int proto) {
-  ncclRing* ring = &prims.ctx->channel.ring;
+  ncclRing* ring = &prims.ctx->channel->ring;
   int rank = ring->userRanks[0];
   int nextRank = ring->userRanks[1];
   int root = work->root;
@@ -95,7 +95,7 @@ ncclResult_t runRingBroadcast(
 
 ncclResult_t runRingReduce(
     rcclCpuPrimitives& prims, int tid, int tn, struct ncclDevWorkColl* work, int proto) {
-  ncclRing* ring = &prims.ctx->channel.ring;
+  ncclRing* ring = &prims.ctx->channel->ring;
   int rank = ring->userRanks[0];
   int root = work->root;
   int eltSize = ncclTypeSize(prims.desc.datatype);
@@ -113,9 +113,9 @@ ncclResult_t runRingReduce(
 
 ncclResult_t runRingAllGather(
     rcclCpuPrimitives& prims, int tid, int tn, struct ncclDevWorkColl* work, int proto) {
-  ncclRing* ring = &prims.ctx->channel.ring;
-  int nranks = prims.ctx->comm.nRanks;
-  int rank = prims.ctx->comm.rank;
+  ncclRing* ring = &prims.ctx->channel->ring;
+  int nranks = prims.ctx->comm->nRanks;
+  int rank = prims.ctx->comm->rank;
   int eltSize = ncclTypeSize(prims.desc.datatype);
   ssize_t size, gridOffset, channelCount, chunkCount;
   rcclCpuCollCbdPart(work, prims.ctx->channelId, proto, eltSize, &size, &gridOffset, &channelCount, &chunkCount);
@@ -149,10 +149,12 @@ ncclResult_t runTreeAllReduce(
 ncclResult_t dispatchRing(
     struct rcclCpuBlockContext* ctx, struct rcclCpuBlockBarrier* bar,
     int tid, int tn, struct ncclDevWorkColl* work, struct rcclCpuFuncDesc const& desc) {
-  int prev = ctx->channel.ring.prev;
-  int next = ctx->channel.ring.next;
+  int prev = ctx->channel->ring.prev;
+  int next = ctx->channel->ring.next;
   int peers[2] = {prev, next};
-  rcclCpuPrimitives prims(ctx, bar, desc, tid, tn, &peers[0], &peers[1], work);
+  struct ncclDevWorkColl workLocal = *work;
+  int cpuTn = 1;
+  rcclCpuPrimitives prims(ctx, bar, desc, tid, cpuTn, &peers[0], &peers[1], &workLocal);
 
   switch (desc.coll) {
   case ncclFuncAllReduce:
@@ -173,11 +175,12 @@ ncclResult_t dispatchRing(
 ncclResult_t dispatchTree(
     struct rcclCpuBlockContext* ctx, struct rcclCpuBlockBarrier* bar,
     int tid, int tn, struct ncclDevWorkColl* work, struct rcclCpuFuncDesc const& desc) {
-  int up = ctx->channel.tree.up;
-  int down0 = ctx->channel.tree.down[0];
+  int up = ctx->channel->tree.up;
+  int down0 = ctx->channel->tree.down[0];
   int recvPeers[3] = {up, down0, -1};
   int sendPeers[3] = {down0, up, -1};
-  rcclCpuPrimitives prims(ctx, bar, desc, tid, tn, recvPeers, sendPeers, work);
+  int cpuTn = 1;
+  rcclCpuPrimitives prims(ctx, bar, desc, tid, cpuTn, recvPeers, sendPeers, work);
   return runTreeAllReduce(prims, tid, tn, work, desc.proto);
 }
 
@@ -189,7 +192,7 @@ ncclResult_t rcclCpuExecuteCollWork(
     int tid, int tn,
     struct ncclDevWorkColl* work,
     struct rcclCpuFuncDesc const& desc) {
-  if (ctx->comm.abortFlag && rcclCpuLoadSeqCstU32(const_cast<uint32_t*>(ctx->comm.abortFlag))) {
+  if (ctx->hostAbortFlag && rcclCpuLoadSeqCstU32(const_cast<uint32_t*>(ctx->hostAbortFlag))) {
     ctx->aborted = 1;
     return ncclSuccess;
   }
@@ -235,9 +238,10 @@ ncclResult_t rcclCpuExecuteP2pWork(
 
   if (work->sendRank >= 0) {
     int sendPeer = work->sendRank;
-    rcclCpuPrimitives prims(ctx, bar, desc, tid, tn, nullptr, &sendPeer, &coll);
+    int cpuTn = 1;
+    rcclCpuPrimitives prims(ctx, bar, desc, tid, cpuTn, nullptr, &sendPeer, &coll);
     size_t bytes = work->sendBytes;
-    int chunk = ctx->comm.p2pChunkSize;
+    int chunk = ctx->comm->p2pChunkSize;
   size_t cursor = 0;
     while (cursor < bytes) {
       int n = static_cast<int>(std::min(static_cast<size_t>(chunk), bytes - cursor));
@@ -248,9 +252,10 @@ ncclResult_t rcclCpuExecuteP2pWork(
   if (work->recvRank >= 0) {
     int recvPeer = work->recvRank;
     coll.connIndex = work->recvConnIndex;
-    rcclCpuPrimitives prims(ctx, bar, desc, tid, tn, &recvPeer, nullptr, &coll);
+    int cpuTn = 1;
+    rcclCpuPrimitives prims(ctx, bar, desc, tid, cpuTn, &recvPeer, nullptr, &coll);
     size_t bytes = work->recvBytes;
-    int chunk = ctx->comm.p2pChunkSize;
+    int chunk = ctx->comm->p2pChunkSize;
     size_t cursor = 0;
     while (cursor < bytes) {
       int n = static_cast<int>(std::min(static_cast<size_t>(chunk), bytes - cursor));

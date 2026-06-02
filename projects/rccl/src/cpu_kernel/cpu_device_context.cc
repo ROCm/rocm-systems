@@ -46,6 +46,10 @@ void rcclCpuBlockBarrierWait(struct rcclCpuBlockBarrier* b, int tid, int tn) {
 void rcclCpuBlockContextInit(struct rcclCpuBlockContext* ctx, int warpSize) {
   std::memset(ctx, 0, sizeof(*ctx));
   ctx->warpSize = warpSize;
+  ctx->cudaDev = -1;
+  ctx->comm = nullptr;
+  ctx->channel = nullptr;
+  ctx->hostAbortFlag = nullptr;
   ctx->nextBatchIx = -1;
   ctx->aborted = 0;
 }

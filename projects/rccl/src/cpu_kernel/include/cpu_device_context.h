@@ -15,12 +15,14 @@
 
 struct rcclCpuBlockContext {
   struct ncclDevKernelArgs args;
-  struct ncclKernelComm comm;
-  struct ncclDevChannel channel;
+  struct ncclKernelComm* comm;
+  struct ncclDevChannel* channel;
   int channelId;
   int blockId;
   int threadCount;
   int warpSize;
+  int cudaDev;
+  volatile uint32_t* hostAbortFlag;
   unsigned funcId;
   int workType;
   int workSize;

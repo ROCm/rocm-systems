@@ -10,42 +10,49 @@
 #include "checks.h"
 
 #include <cstring>
+#include <memory>
 
 ncclResult_t rcclCpuExecuteBlock(
     struct ncclComm* comm,
+    struct rcclCpuCommMirrorState* mirror,
     struct ncclKernelComm* hostComm,
     struct ncclDevKernelArgs* args,
     int blockId,
     int threadCount,
     int warpSize) {
-  struct rcclCpuBlockContext ctx;
+  // HIP host-function callbacks run on a small stack; keep the large block context on the heap.
+  auto ctx = std::make_unique<rcclCpuBlockContext>();
   struct rcclCpuBlockBarrier bar;
-  rcclCpuBlockContextInit(&ctx, warpSize);
+  rcclCpuBlockContextInit(ctx.get(), warpSize);
   rcclCpuBlockBarrierInit(&bar);
 
-  ctx.threadCount = threadCount;
-  std::memcpy(&ctx.args, args, sizeof(ctx.args));
-  ctx.comm = *hostComm;
-  ctx.channelId = rcclCpuMapBlockToChannel(args, blockId, warpSize);
-  ctx.channel = hostComm->channels[ctx.channelId];
-  ctx.channel.workCounter = hostComm->channels[ctx.channelId].workCounter;
+  constexpr int kCpuLogicalThreads = 1;
+  (void)threadCount;
+  ctx->threadCount = kCpuLogicalThreads;
+  ctx->cudaDev = comm->cudaDev;
+  ctx->hostAbortFlag = comm->abortFlag;
+  std::memcpy(&ctx->args, args, sizeof(ctx->args));
+  ctx->comm = hostComm;
+  ctx->channelId = rcclCpuMapBlockToChannel(args, blockId, warpSize);
+  if (ctx->channelId < 0 || ctx->channelId >= MAXCHANNELS) return ncclInternalError;
+  ctx->channel = &hostComm->channels[ctx->channelId];
 
-  if (ctx.comm.abortFlag && rcclCpuLoadSeqCstU32(const_cast<uint32_t*>(ctx.comm.abortFlag))) {
-    ctx.aborted = 1;
+  if (ctx->hostAbortFlag && rcclCpuLoadSeqCstU32(const_cast<uint32_t*>(ctx->hostAbortFlag))) {
+    ctx->aborted = 1;
     goto finish;
   }
 
-  NCCLCHECK(rcclCpuLoadWorkBatch(&ctx, args, blockId, &bar));
+  NCCLCHECK(rcclCpuLoadWorkBatch(ctx.get(), args, blockId, &bar));
 
-  while (ctx.aborted == 0) {
-    NCCLCHECK(rcclCpuDispatchWork(&ctx, &bar, 0, threadCount));
-    if (ctx.nextBatchIx < 0) break;
-    int batchIx = ctx.nextBatchIx;
-    rcclCpuBlockBarrierWait(&bar, 0, threadCount);
-    NCCLCHECK(rcclCpuLoadWorkBatch(&ctx, args, batchIx, &bar));
+  while (ctx->aborted == 0) {
+    NCCLCHECK(rcclCpuDispatchWork(ctx.get(), &bar, 0, kCpuLogicalThreads));
+    if (ctx->nextBatchIx < 0) break;
+    int batchIx = ctx->nextBatchIx;
+    rcclCpuBlockBarrierWait(&bar, 0, kCpuLogicalThreads);
+    NCCLCHECK(rcclCpuLoadWorkBatch(ctx.get(), args, batchIx, &bar));
   }
 
-  NCCLCHECK(rcclCpuWritebackChannelCounters(comm, ctx.channelId, ctx.channel.workCounter));
+  NCCLCHECK(rcclCpuWritebackChannelCounters(comm, mirror, ctx->channelId, ctx->channel->workCounter));
 
 finish:
   rcclCpuBlockBarrierDestroy(&bar);

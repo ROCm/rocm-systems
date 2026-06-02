@@ -14,6 +14,16 @@ Optional:
 ```bash
 # Max blocks (channels) to run in parallel (default: active channel count)
 export RCCL_CPU_KERNEL_THREADS=16
+
+# Confirm CPU launches in logs (rank 0 only)
+export NCCL_DEBUG=INFO
+export NCCL_DEBUG_SUBSYS=COLL,ENV
+```
+
+When active, rank 0 prints lines like:
+
+```text
+Launching RCCL collective kernel on CPU (grid=... block=... nWorkBatches=... stream=...)
 ```
 
 ## Design

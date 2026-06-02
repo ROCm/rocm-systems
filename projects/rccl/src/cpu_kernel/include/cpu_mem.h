@@ -8,10 +8,11 @@
 #include "checks.h"
 
 #include <cstddef>
+#include <cstdint>
 
-// Returns a host pointer suitable for load/store. Device-only pointers are
-// copied into thread-local staging (synced on demand).
-ncclResult_t rcclCpuMapDevicePtr(void* devicePtr, size_t bytes, void** hostPtr, bool* needsUnmap);
-void rcclCpuUnmapDevicePtr(void* devicePtr, void* hostPtr, bool needsUnmap);
+ncclResult_t rcclCpuCopyBytes(int cudaDev, void* dst, void const* src, size_t bytes);
+ncclResult_t rcclCpuLoadDevU64(int cudaDev, uint64_t const* devPtr, uint64_t* out);
+ncclResult_t rcclCpuStoreDevU64(int cudaDev, uint64_t* devPtr, uint64_t val);
+ncclResult_t rcclCpuStoreDevU32(int cudaDev, uint32_t* devPtr, uint32_t val);
 
 #endif

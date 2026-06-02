@@ -3,6 +3,8 @@
  ************************************************************************/
 
 #include "cpu_kernel_internal.h"
+#include "cpu_device_guard.h"
+#include "cpu_mem.h"
 
 #include <algorithm>
 #include <cstring>
@@ -63,9 +65,13 @@ ncclResult_t rcclCpuLoadWorkBatch(
   int totalBytes = nWorks * workSize;
   if (totalBytes > static_cast<int>(sizeof(ctx->workStorage))) return ncclInternalError;
 
-  int tn = std::min(ctx->threadCount, std::max(1, (totalBytes + 15) / 16));
-  for (int t = 0; t < tn; t++) {
-    rcclCpuCopy16(t, tn, ctx->workStorage, workBase, totalBytes);
+  if (args->workStorageType == ncclDevWorkStorageTypeArgs) {
+    int tn = std::min(ctx->threadCount, std::max(1, (totalBytes + 15) / 16));
+    for (int t = 0; t < tn; t++) {
+      rcclCpuCopy16(t, tn, ctx->workStorage, workBase, totalBytes);
+    }
+  } else {
+    NCCLCHECK(rcclCpuCopyBytes(ctx->cudaDev, ctx->workStorage, workBase, totalBytes));
   }
   rcclCpuBlockBarrierWait(bar, 0, 1);
   return ncclSuccess;

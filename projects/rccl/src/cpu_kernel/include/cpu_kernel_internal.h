@@ -6,6 +6,7 @@
 #define RCCL_CPU_KERNEL_INTERNAL_H_
 
 #include "cpu_device_context.h"
+#include "cpu_dev_comm_mirror.h"
 #include "comm.h"
 #include "device.h"
 
@@ -19,6 +20,7 @@ ncclResult_t rcclCpuDispatchWork(struct rcclCpuBlockContext* ctx, struct rcclCpu
 
 ncclResult_t rcclCpuExecuteBlock(
     struct ncclComm* comm,
+    struct rcclCpuCommMirrorState* mirror,
     struct ncclKernelComm* hostComm,
     struct ncclDevKernelArgs* args,
     int blockId,

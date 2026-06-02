@@ -24,7 +24,7 @@
 bool rcclCpuKernelEnabled();
 
 // True when this plan can be executed on the CPU path.
-bool rcclCpuKernelPlanSupported(struct ncclKernelPlan* plan);
+bool rcclCpuKernelPlanSupported(struct ncclComm* comm, struct ncclKernelPlan* plan);
 
 // Launch collective kernel work on CPU threads with MI300 ordering, enqueueing
 // completion on launchStream (same ordering contract as cuLaunchKernel).
