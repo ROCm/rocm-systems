@@ -30,10 +30,11 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/platform/agent.hpp"
-#include "lib/rocprofiler-sdk/platform/gnulinux/agent.hpp"
-#include "lib/rocprofiler-sdk/platform/wsl/agent.hpp"
 #ifdef _WIN32
 #    include "lib/rocprofiler-sdk/platform/windows/agent.hpp"
+#else
+#    include "lib/rocprofiler-sdk/platform/gnulinux/agent.hpp"
+#    include "lib/rocprofiler-sdk/platform/wsl/agent.hpp"
 #endif
 
 #include <rocprofiler-sdk/agent.h>
@@ -290,21 +291,27 @@ using unique_agent_t = ::rocprofiler::platform::unique_agent_t;
 
 // Selects the platform enumerator at runtime.
 //
-// Precedence:
-//   1. ROCPROFILER_FORCE_PLATFORM={gnulinux|wsl|windows} overrides everything.
-//      Unknown values are logged and ignored.
+// Linux builds compile only gnulinux/ and wsl/ (the WIN32 branch of
+// platform/CMakeLists.txt swaps in windows/), so only the enumerators built
+// into this binary are candidates here.
+//
+// Precedence on Linux:
+//   1. ROCPROFILER_FORCE_PLATFORM={gnulinux|wsl} overrides autodetect.
+//      Values not built into this binary are logged and ignored.
 //   2. gnulinux::is_available() (KFD sysfs present) - the common bare-metal
 //      Linux case, kept first to preserve existing behaviour byte-for-byte.
 //   3. wsl::is_available() (/dev/dxg + libdxcore.so) - WSL guest with the
 //      DXCore driver shimmed in.
-//   4. windows::is_available() - only true on _WIN32 builds.
-//   5. Fallback: gnulinux enumerator (will log and return an empty vector).
+//   4. Fallback: gnulinux enumerator (will log and return an empty vector).
+//
+// Windows builds collapse to a single candidate (platform::windows).
 std::vector<unique_agent_t>
 enumerate_platform_agents()
 {
     const auto forced = common::get_env("ROCPROFILER_FORCE_PLATFORM", std::string{});
     if(!forced.empty())
     {
+#ifndef _WIN32
         if(forced == "gnulinux")
         {
             ROCP_INFO << "agent topology: forced gnulinux via ROCPROFILER_FORCE_PLATFORM";
@@ -315,25 +322,21 @@ enumerate_platform_agents()
             ROCP_INFO << "agent topology: forced wsl via ROCPROFILER_FORCE_PLATFORM";
             return platform::wsl::enumerate();
         }
+#endif
+#ifdef _WIN32
         if(forced == "windows")
         {
-#ifdef _WIN32
             ROCP_INFO << "agent topology: forced windows via ROCPROFILER_FORCE_PLATFORM";
             return platform::windows::enumerate();
-#else
-            ROCP_WARNING << "agent topology: ROCPROFILER_FORCE_PLATFORM=windows ignored on "
-                            "non-Windows build";
+        }
 #endif
-        }
-        else
-        {
-            ROCP_WARNING << fmt::format(
-                "agent topology: unknown ROCPROFILER_FORCE_PLATFORM='{}' (expected "
-                "gnulinux|wsl|windows); falling back to autodetect",
-                forced);
-        }
+        ROCP_WARNING << fmt::format(
+            "agent topology: ROCPROFILER_FORCE_PLATFORM='{}' is not built into this binary "
+            "(expected gnulinux|wsl on Linux, windows on Windows); falling back to autodetect",
+            forced);
     }
 
+#ifndef _WIN32
     if(platform::gnulinux::is_available())
     {
         ROCP_INFO << "agent topology: selected " << platform::gnulinux::name << " (sysfs present)";
@@ -345,17 +348,19 @@ enumerate_platform_agents()
                   << " (libdxcore.so present)";
         return platform::wsl::enumerate();
     }
-#ifdef _WIN32
+    ROCP_WARNING << "agent topology: no platform matched; falling back to "
+                 << platform::gnulinux::name << " (will return empty)";
+    return platform::gnulinux::enumerate();
+#else
     if(platform::windows::is_available())
     {
         ROCP_INFO << "agent topology: selected " << platform::windows::name;
         return platform::windows::enumerate();
     }
-#endif
-
     ROCP_WARNING << "agent topology: no platform matched; falling back to "
-                 << platform::gnulinux::name << " (will return empty)";
-    return platform::gnulinux::enumerate();
+                 << platform::windows::name << " (will return empty)";
+    return platform::windows::enumerate();
+#endif
 }
 
 auto&

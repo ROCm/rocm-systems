@@ -39,7 +39,6 @@
 
 #include <cstdint>
 #include <cstring>
-#include <cwchar>
 #include <limits>
 #include <memory>
 #include <random>
@@ -59,10 +58,18 @@ using ::rocprofiler::agent::update_agent_runtime_visibility;
 using NTSTATUS                = int32_t;
 constexpr NTSTATUS kNtSuccess = 0;
 
-using D3DKMT_HANDLE      = uint32_t;
-using DXC_WCHAR          = wchar_t;
+using D3DKMT_HANDLE = uint32_t;
+// Linux libdxcore.so widens the original Windows WCHAR (UTF-16, 16-bit) to
+// 32-bit Unicode code points, so we use char32_t directly rather than relying
+// on Linux's wchar_t happening to be 4 bytes.
+using DXC_WCHAR          = char32_t;
 constexpr size_t kMaxStr = 260;
 
+// Local re-declarations of the D3DKMT ABI consumed via libdxcore.so. The DDK
+// headers (d3dkmthk.h / d3dukmdt.h) ship with the Windows SDK and are not
+// available on Linux toolchains, so we duplicate just the subset of structs
+// and enums this file calls into. Sizes are pinned with static_asserts below
+// to catch any future drift.
 struct DxcLuid
 {
     uint32_t LowPart;
@@ -157,20 +164,22 @@ struct DxcSegmentSizeInfo
 static_assert(sizeof(DxcAdapterInfo) == 20, "DxcAdapterInfo ABI mismatch");
 static_assert(sizeof(DxcSegmentSizeInfo) == 24, "DxcSegmentSizeInfo ABI mismatch");
 static_assert(sizeof(DxcDeviceIds) == 24, "DxcDeviceIds ABI mismatch");
-static_assert(sizeof(wchar_t) == 4, "DxcAdapterRegistryInfo expects 32-bit wchar_t on Linux");
 
 using PFN_D3DKMTEnumAdapters3    = NTSTATUS (*)(DxcEnumAdapters3*);
 using PFN_D3DKMTQueryAdapterInfo = NTSTATUS (*)(DxcQueryAdapterInfo*);
 using PFN_D3DKMTCloseAdapter     = NTSTATUS (*)(const DxcCloseAdapter*);
 
-constexpr const char* kLibDxcorePrimary  = "/usr/lib/wsl/lib/libdxcore.so";
-constexpr const char* kLibDxcoreFallback = "libdxcore.so";
+// Try the unqualified soname first so users can override via LD_LIBRARY_PATH
+// (e.g. a packaged copy or a debug build). Fall back to the canonical WSL
+// install path that ships the library by default.
+constexpr const char* kLibDxcoreSoname  = "libdxcore.so";
+constexpr const char* kLibDxcoreWslPath = "/usr/lib/wsl/lib/libdxcore.so";
 
 void*
 open_libdxcore()
 {
-    void* h = ::dlopen(kLibDxcorePrimary, RTLD_NOW | RTLD_LOCAL);
-    if(!h) h = ::dlopen(kLibDxcoreFallback, RTLD_NOW | RTLD_LOCAL);
+    void* h = ::dlopen(kLibDxcoreSoname, RTLD_NOW | RTLD_LOCAL);
+    if(!h) h = ::dlopen(kLibDxcoreWslPath, RTLD_NOW | RTLD_LOCAL);
     return h;
 }
 
@@ -183,16 +192,21 @@ probe_libdxcore()
             ROCP_INFO << "wsl::is_available: /dev/dxg not present; not a WSL GPU environment";
             return false;
         }
+        // /dev/dxg passed, so we are inside WSL with the GPU paravirt driver
+        // loaded; anything missing from here on is genuinely unexpected and
+        // worth surfacing as a warning rather than swallowing at INFO.
         void* h = open_libdxcore();
         if(!h)
         {
-            ROCP_INFO << "wsl::is_available: dlopen(libdxcore.so) failed: " << ::dlerror();
+            ROCP_WARNING << "wsl::is_available: /dev/dxg present but dlopen(libdxcore.so) failed: "
+                         << ::dlerror();
             return false;
         }
         void* sym = ::dlsym(h, "D3DKMTEnumAdapters3");
         if(!sym)
         {
-            ROCP_INFO << "wsl::is_available: dlsym(D3DKMTEnumAdapters3) failed";
+            ROCP_WARNING
+                << "wsl::is_available: libdxcore.so loaded but D3DKMTEnumAdapters3 not exported";
             ::dlclose(h);
             return false;
         }
@@ -217,6 +231,19 @@ get_agent_offset()
     return _v;
 }
 
+// UTF-8 encoding constants per RFC 3629. Boundary thresholds delimit the
+// 1/2/3/4-byte ranges; lead-byte prefixes mark how many continuation bytes
+// follow; the continuation prefix tags every trailing byte; the payload mask
+// extracts the 6 data bits each continuation byte carries.
+constexpr uint32_t kUtf8OneByteMax    = 0x80;     // < 0x80         => 1 byte
+constexpr uint32_t kUtf8TwoByteMax    = 0x800;    // < 0x800        => 2 bytes
+constexpr uint32_t kUtf8ThreeByteMax  = 0x10000;  // < 0x10000      => 3 bytes
+constexpr uint8_t  kUtf8LeadTwoByte   = 0xC0;
+constexpr uint8_t  kUtf8LeadThreeByte = 0xE0;
+constexpr uint8_t  kUtf8LeadFourByte  = 0xF0;
+constexpr uint8_t  kUtf8ContPrefix    = 0x80;
+constexpr uint32_t kUtf8ContPayload   = 0x3F;
+
 std::string
 wchar_to_utf8(const DXC_WCHAR* src, size_t max_len)
 {
@@ -225,27 +252,27 @@ wchar_to_utf8(const DXC_WCHAR* src, size_t max_len)
     for(size_t i = 0; i < max_len && src[i] != 0; ++i)
     {
         auto cp = static_cast<uint32_t>(src[i]);
-        if(cp < 0x80)
+        if(cp < kUtf8OneByteMax)
         {
             out.push_back(static_cast<char>(cp));
         }
-        else if(cp < 0x800)
+        else if(cp < kUtf8TwoByteMax)
         {
-            out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
-            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+            out.push_back(static_cast<char>(kUtf8LeadTwoByte | (cp >> 6)));
+            out.push_back(static_cast<char>(kUtf8ContPrefix | (cp & kUtf8ContPayload)));
         }
-        else if(cp < 0x10000)
+        else if(cp < kUtf8ThreeByteMax)
         {
-            out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
-            out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
-            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+            out.push_back(static_cast<char>(kUtf8LeadThreeByte | (cp >> 12)));
+            out.push_back(static_cast<char>(kUtf8ContPrefix | ((cp >> 6) & kUtf8ContPayload)));
+            out.push_back(static_cast<char>(kUtf8ContPrefix | (cp & kUtf8ContPayload)));
         }
         else
         {
-            out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
-            out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
-            out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
-            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+            out.push_back(static_cast<char>(kUtf8LeadFourByte | (cp >> 18)));
+            out.push_back(static_cast<char>(kUtf8ContPrefix | ((cp >> 12) & kUtf8ContPayload)));
+            out.push_back(static_cast<char>(kUtf8ContPrefix | ((cp >> 6) & kUtf8ContPayload)));
+            out.push_back(static_cast<char>(kUtf8ContPrefix | (cp & kUtf8ContPayload)));
         }
     }
     return out;

@@ -9,9 +9,9 @@ set(ROCPROFILER_PLATFORM_HEADERS agent.hpp)
 
 target_sources(rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_PLATFORM_HEADERS})
 
-add_subdirectory(gnulinux)
-add_subdirectory(wsl)
-
 if(WIN32)
     add_subdirectory(windows)
+else()
+    add_subdirectory(gnulinux)
+    add_subdirectory(wsl)
 endif()
