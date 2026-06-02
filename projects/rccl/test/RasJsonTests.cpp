@@ -20,21 +20,43 @@
 #include "common/ErrCode.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
 
-// Keep in sync with src/ras/ras_internal.h
-#define NCCL_RAS_CLIENT_PORT 28028
-
 namespace RcclUnitTesting {
+
+// Picks a likely-free TCP port by binding to port 0 and reading the kernel
+// assignment, then closes the probe socket. Caller must use SO_REUSEADDR (the
+// RAS listener does) or accept a small race window before the chosen port is
+// reused by something else on the host.
+static int pickFreePort() {
+  int s = ::socket(AF_INET, SOCK_STREAM, 0);
+  if (s < 0) return 0;
+  sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  addr.sin_port = 0;
+  if (::bind(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+    ::close(s);
+    return 0;
+  }
+  socklen_t len = sizeof(addr);
+  if (::getsockname(s, reinterpret_cast<sockaddr*>(&addr), &len) != 0) {
+    ::close(s);
+    return 0;
+  }
+  int port = ntohs(addr.sin_port);
+  ::close(s);
+  return port;
+}
 
 // Connects to the local RAS server and runs one STATUS query in the requested
 // format ("text" or "json"). Returns the entire response body, or an empty
 // string on connection/protocol failure. Uses getaddrinfo so it works whether
 // the RAS listener bound to IPv4 (127.0.0.1) or IPv6 (::1).
-static std::string queryRas(const std::string& format) {
+static std::string queryRas(const std::string& format, const std::string& portStrIn) {
   int sock = -1;
   addrinfo hints{};
   hints.ai_family   = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
-  const char* portStr = "28028";  // matches NCCL_RAS_CLIENT_PORT
+  const char* portStr = portStrIn.c_str();
 
   for (int attempt = 0; attempt < 20 && sock < 0; ++attempt) {
     addrinfo* results = nullptr;
@@ -80,9 +102,17 @@ static std::string queryRas(const std::string& format) {
 // actually returns a structured document rather than the human-readable text
 // banner.
 TEST(RasJson, JsonFormatIsSupportedAndDistinctFromText) {
+  // Pick a free port in the parent so the isolated child uses an address that
+  // doesn't collide with stale/other RCCL processes on the host (the RAS
+  // default port 28028 is shared and may already be in use).
+  int port = pickFreePort();
+  ASSERT_GT(port, 0) << "Could not allocate a free TCP port for RAS";
+  std::string portStr = std::to_string(port);
+  std::string rasAddr = "localhost:" + portStr;
+
   RUN_ISOLATED_TEST_WITH_ENV(
       "RasJson_JsonFormatIsSupportedAndDistinctFromText",
-      []() {
+      [portStr]() {
         int devCount = 0;
         if (hipGetDeviceCount(&devCount) != hipSuccess || devCount < 1) {
           GTEST_SKIP() << "No HIP-visible GPU; skipping";
@@ -98,8 +128,8 @@ TEST(RasJson, JsonFormatIsSupportedAndDistinctFromText) {
         // Give the RAS listener a brief moment to come up after init.
         std::this_thread::sleep_for(std::chrono::milliseconds(250));
 
-        std::string textBody = queryRas("text");
-        std::string jsonBody = queryRas("json");
+        std::string textBody = queryRas("text", portStr);
+        std::string jsonBody = queryRas("json", portStr);
 
         ASSERT_FALSE(textBody.empty()) << "RAS returned no text response";
         ASSERT_FALSE(jsonBody.empty())
@@ -118,7 +148,7 @@ TEST(RasJson, JsonFormatIsSupportedAndDistinctFromText) {
 
         ASSERT_EQ(ncclCommDestroy(comm), ncclSuccess);
       },
-      {{"NCCL_RAS_ENABLE", "1"}});
+      {{"NCCL_RAS_ENABLE", "1"}, {"NCCL_RAS_ADDR", rasAddr}});
 }
 
 }  // namespace RcclUnitTesting
