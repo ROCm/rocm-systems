@@ -633,14 +633,10 @@ add_test(
         tests/test_tui_components.py ${WORKING_DIR_OPTION}
 )
 
-# roctx_recordfn pybind11 extension used by --torch-trace. Built only
-# when ENABLE_TESTS=ON, as a CI test fixture: the torch-trace tests
-# below pin the loader to this configure-time artifact via
-# ROCPROFCOMPUTE_ROCTX_RECORDFN_SO so pytest never shells out to cmake
-# or torch.utils.cpp_extension at test time. Production installs ship
-# the sources (rule below) and the runtime loader's cmake-tier builds
-# the .so on first --torch-trace use in the user's PyTorch env.
-# See src/lib/roctx_recordfn/CMakeLists.txt for the full contract.
+# Build the roctx_recordfn pybind11 extension as a test fixture so the
+# torch-trace tests below can pin the loader to a known artifact via
+# ROCPROFCOMPUTE_ROCTX_RECORDFN_SO. Production installs ship the
+# sources and the runtime loader builds the .so on first use.
 if(ENABLE_TESTS)
     add_subdirectory(src/lib/roctx_recordfn)
 endif()
@@ -669,11 +665,9 @@ set_tests_properties(
     PROPERTIES TIMEOUT 1800 LABELS "profile" RESOURCE_GROUPS gpus:1
 )
 
-# Pin the loader to the configure-time .so so pytest never falls
-# through to the cmake / cpp_extension build tiers. ROCTX_RECORDFN_SO_PATH
-# is exported from src/lib/roctx_recordfn/CMakeLists.txt when the .so
-# is built (ENABLE_TESTS=ON + torch present); when it is not exported,
-# the test skips at the loader-resolution step.
+# Pin the torch-trace coverage test to the configure-time .so. When
+# ROCTX_RECORDFN_SO_PATH is unset (no torch at configure time), the
+# test skips during loader resolution.
 if(ROCTX_RECORDFN_SO_PATH)
     message(
         STATUS
@@ -860,13 +854,8 @@ install(
     PATTERN "rooflines*" EXCLUDE
     PATTERN "__pycache__" EXCLUDE
 )
-# Always install the roctx_recordfn sources next to the loader's
-# search path so the runtime cmake-tier (utils/inject_roctx_loader.py:
-# _try_cmake_build) can rebuild against the user's torch env, even
-# when no prebuilt .so was baked at package time. Independent of
-# SKIP_NATIVE_TOOL_BUILD: the SKIP block below installs src/lib/
-# wholesale but only fires in source-shipping mode; this rule keeps
-# the cmake-tier alive in the default (compiled-tool) mode too.
+# Install the roctx_recordfn sources so the runtime loader can rebuild
+# the extension against the user's PyTorch environment on first use.
 install(
     DIRECTORY src/lib/roctx_recordfn
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/lib
@@ -976,9 +965,7 @@ if(NOT SKIP_NATIVE_TOOL_BUILD)
     )
 else()
     # Install source files for runtime compilation. roctx_recordfn/ is
-    # excluded here because it has its own dedicated, unconditional
-    # install rule above (the runtime cmake-tier needs the sources
-    # available in both SKIP_NATIVE_TOOL_BUILD modes).
+    # installed by a dedicated rule above and excluded here.
     install(
         DIRECTORY src/lib/
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/lib

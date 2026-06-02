@@ -1,16 +1,13 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 //
-// ROCTX bridge for PyTorch's RecordFunction callback. Subscribes to
-// FUNCTION + BACKWARD_FUNCTION and propagates the main-thread
-// USER_SCOPE chain into the autograd worker via two correlation
-// channels: RecordFunction::seqNr() (forward op -> backward Node) and
-// c10::ThreadLocalDebugInfo (main thread -> worker scope chain).
-// Leaf sentinels: aten:0, aten.nested:0, autograd.engine:0, autograd.bwd:0.
+// ROCTX bridge for PyTorch's RecordFunction callback. Subscribes to the
+// FUNCTION and BACKWARD_FUNCTION scopes and propagates the main-thread
+// USER_SCOPE chain into autograd workers via RecordFunction::seqNr()
+// and c10::ThreadLocalDebugInfo.
 
 #include "leaf_context.h"
 
-// Avoid torch/extension.h: pulls torch/all.h, stripped from some ROCm wheels.
 #include <ATen/record_function.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 #include <pybind11/pybind11.h>
@@ -43,9 +40,8 @@ struct StackEntry
     std::string context;
 };
 
-// Carried from start_cb to end_cb so end_cb only undoes what start_cb
-// committed. Returning nullptr on hard failure makes end_cb a no-op,
-// keeping push/pop counts and g_stack consistent.
+// Records what start_cb committed so end_cb can unwind exactly that.
+// A null context from start_cb signals end_cb to do nothing.
 struct RoctxObsCtx : public at::ObserverContext
 {
     bool        pushed_roctx_range     = false;
@@ -53,11 +49,11 @@ struct RoctxObsCtx : public at::ObserverContext
     std::size_t pushed_snapshot_frames = 0;
 };
 
-// Per-OS-thread marker stack. Autograd worker starts empty and is
-// re-seeded from the seqNr snapshot + TLS DebugInfo USER_SCOPE chain.
+// Per-thread marker stack. Autograd workers start empty and are
+// re-seeded from the seqNr snapshot and the TLS USER_SCOPE chain.
 thread_local std::vector<StackEntry> g_stack;
 
-// Carries the main-thread USER_SCOPE chain to the autograd worker.
+// Carries the main-thread USER_SCOPE chain to autograd workers.
 class RoctxUserScopeChain : public c10::DebugInfoBase
 {
 public:
@@ -69,10 +65,8 @@ public:
     std::vector<StackEntry> chain;
 };
 
-// Private TLDI slot via pointer-identity string_view (PyTorch >= ~2.7).
-// Avoids collisions with PRODUCER_INFO (torch.jit), PROFILER_STATE,
-// PARAM_COMMS_INFO, INFERENCE_CONTEXT. Older PyTorch falls back to
-// TEST_INFO_2 (dormant outside PyTorch's own gtest suite).
+// Use a private DebugInfoKind slot keyed by string_view identity when
+// the PyTorch ABI supports it; otherwise reuse the TEST_INFO_2 slot.
 #ifdef ROCPROF_TORCHTRACE_HAS_CUSTOM_DBGINFOKIND
 inline constexpr std::string_view kRoctxUserScopeName = "ROCPROF_TORCHTRACE_INFO";
 inline const c10::DebugInfoKind   kRoctxDbgKind(&kRoctxUserScopeName);
@@ -80,32 +74,29 @@ inline const c10::DebugInfoKind   kRoctxDbgKind(&kRoctxUserScopeName);
 constexpr c10::DebugInfoKind kRoctxDbgKind = c10::DebugInfoKind::TEST_INFO_2;
 #endif
 
-// LIFO of DebugInfoGuards (driving non-RAII push/pop via RAII).
+// LIFO of DebugInfoGuards mirroring push_user_scope/pop_user_scope.
 thread_local std::vector<std::unique_ptr<c10::DebugInfoGuard>> g_dbg_guards;
 
-// Sharded seqNr -> stack snapshot. 64 shards past the contention point.
+// Sharded seqNr -> forward-stack snapshot store.
 constexpr std::size_t NUM_SHARDS = 64;
 
 struct Shard
 {
-    std::mutex                                                mu;
-    std::unordered_map<std::int64_t, std::vector<StackEntry>> snapshots;
-    std::list<std::int64_t>                                   lru_order;
-    // O(1) index into lru_order; without it remove/touch is O(N).
+    std::mutex                                                          mu;
+    std::unordered_map<std::int64_t, std::vector<StackEntry>>           snapshots;
+    std::list<std::int64_t>                                             lru_order;
     std::unordered_map<std::int64_t, std::list<std::int64_t>::iterator> lru_idx;
 };
 
 std::array<Shard, NUM_SHARDS> g_shards;
 
-// Detached forwards leak entries; at the cap evict one LRU snapshot.
+// Per-shard cap. Snapshots whose backward never runs are evicted in LRU order.
 constexpr std::size_t SHARD_SOFT_CAP = 10000;
 
 std::atomic<at::CallbackHandle> g_handle{at::INVALID_CALLBACK_HANDLE};
 std::atomic<bool>               g_installed{false};
-// Without this, install()/uninstall() can race into (true, INVALID).
-std::mutex g_install_mu;
+std::mutex                      g_install_mu;
 
-// dump_stats() counters.
 std::atomic<std::uint64_t> g_n_pushes{0};
 std::atomic<std::uint64_t> g_n_pops{0};
 std::atomic<std::uint64_t> g_n_snapshots_saved{0};
@@ -116,7 +107,7 @@ std::atomic<std::uint64_t> g_n_user_scope_pushes{0};
 std::atomic<std::uint64_t> g_n_user_scope_pops{0};
 std::atomic<std::uint64_t> g_n_userscope_inherits{0};
 
-// Opt-in test capture: one relaxed atomic load per marker when off.
+// Opt-in capture buffer used by the test hook.
 std::atomic<bool>        g_capturing{false};
 std::mutex               g_capture_mu;
 std::vector<std::string> g_captured;
@@ -133,7 +124,7 @@ void maybe_capture(const std::string& s)
     }
 }
 
-// "<marker1>/.../<markerN>:<context1>/.../<contextN>", split on ":#".
+// Renders the stack as "marker1/.../markerN:context1/.../contextN".
 std::string build_marker_string(const std::vector<StackEntry>& stack)
 {
     std::size_t marker_len = 0;
@@ -230,8 +221,8 @@ bool consume_snapshot(std::int64_t seq, std::vector<StackEntry>* out)
     return true;
 }
 
-// Push `chain` onto g_stack, skipping byte-identical (marker+context)
-// leading prefix. Returns pushed count.
+// Pushes `chain` onto g_stack, skipping any leading prefix that is
+// already present. Returns the number of frames pushed.
 std::size_t push_with_prefix_dedup(const std::vector<StackEntry>& chain)
 {
     const std::size_t maxc   = std::min(chain.size(), g_stack.size());
@@ -253,7 +244,7 @@ std::size_t push_with_prefix_dedup(const std::vector<StackEntry>& chain)
     return pushed;
 }
 
-// Overlay backward-time USER_SCOPE chain (from TLS DebugInfo) onto g_stack.
+// Overlays the published USER_SCOPE chain onto g_stack.
 std::size_t apply_userscope_overlay()
 {
     auto* base       = c10::ThreadLocalDebugInfo::get(kRoctxDbgKind);
@@ -262,8 +253,6 @@ std::size_t apply_userscope_overlay()
     {
         return 0;
     }
-    // Local copy: PyTorch doesn't formally document the raw DebugInfoBase*
-    // outliving the worker thread, so copying makes the lifetime safe.
     const std::vector<StackEntry> chain_copy = chain_info->chain;
     const std::size_t             pushed     = push_with_prefix_dedup(chain_copy);
     if (pushed > 0)
@@ -275,7 +264,6 @@ std::size_t apply_userscope_overlay()
 
 std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& fn)
 {
-    // Outside the try so catch can roll back partial commits.
     std::unique_ptr<RoctxObsCtx> ctx;
     try
     {
@@ -292,10 +280,9 @@ std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& fn)
         const bool stack_was_empty          = g_stack.empty();
         bool       stack_was_empty_for_leaf = stack_was_empty;
 
-        // Apply TLS overlay on first record on this thread (covers both
-        // the outer FUNCTION evaluator and the inner BACKWARD_FUNCTION).
-        // No-op on the main thread: push_user_scope pushes to both
-        // g_stack and TLS, so a published overlay here means worker.
+        // Apply the TLS overlay on the first record observed on this
+        // thread; this re-seeds autograd workers from the main-thread
+        // chain and is a no-op on the main thread.
         if (stack_was_empty)
         {
             const std::size_t overlay_frames = apply_userscope_overlay();
@@ -306,7 +293,6 @@ std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& fn)
             }
         }
 
-        // Backward Node: restore forward chain from seqNr snapshot.
         if (scope == at::RecordScope::BACKWARD_FUNCTION && seq >= 0)
         {
             std::vector<StackEntry> snapshot;
@@ -323,13 +309,12 @@ std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& fn)
         g_stack.push_back(std::move(leaf));
         ctx->pushed_leaf = true;
 
-        // Forward op with seqNr: save stack for the matching backward.
         if (scope == at::RecordScope::FUNCTION && seq >= 0)
         {
             save_snapshot(seq, g_stack);
         }
 
-        // ROCTX emit last: earlier failure rolls back without unmatched pop.
+        // Emit ROCTX last so a prior failure rolls back without an unmatched pop.
         const std::string full = build_marker_string(g_stack);
         roctxRangePushA(full.c_str());
         ctx->pushed_roctx_range = true;
@@ -340,7 +325,6 @@ std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& fn)
     catch (...)
     {
         g_n_callback_errors.fetch_add(1, std::memory_order_relaxed);
-        // Best-effort rollback of partial commits before re-throw.
         try
         {
             if (ctx)
@@ -363,16 +347,12 @@ std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& fn)
         {
             g_n_callback_errors.fetch_add(1, std::memory_order_relaxed);
         }
-        // Null obs ctx signals end_cb to skip every pop.
         return nullptr;
     }
 }
 
 void end_cb(const at::RecordFunction& /*fn*/, at::ObserverContext* obs_ctx)
 {
-    // start_cb returned nullptr on a hard failure (or never started a
-    // matching push); skip every pop so counters and g_stack stay
-    // paired with what was actually committed.
     if (obs_ctx == nullptr)
     {
         return;
@@ -400,8 +380,8 @@ void end_cb(const at::RecordFunction& /*fn*/, at::ObserverContext* obs_ctx)
     }
 }
 
-// Main-thread USER_SCOPE push. All-or-nothing: partial failures roll
-// back and rethrow so the Python caller can fall through to its tier.
+// Pushes a USER_SCOPE frame on the calling thread. All-or-nothing:
+// partial failures roll back and rethrow.
 void push_user_scope(const std::string& marker, const std::string& context)
 {
     bool pushed_to_stack  = false;
@@ -415,8 +395,8 @@ void push_user_scope(const std::string& marker, const std::string& context)
         g_stack.push_back(std::move(e));
         pushed_to_stack = true;
 
-        // Always push a guard (real or null sentinel) so pop_user_scope
-        // stays balanced with g_stack.
+        // Always push a guard slot (real or null) to keep g_dbg_guards
+        // balanced with g_stack for pop_user_scope().
         std::unique_ptr<c10::DebugInfoGuard> guard;
         try
         {
@@ -425,7 +405,6 @@ void push_user_scope(const std::string& marker, const std::string& context)
         }
         catch (...)
         {
-            // Degrades worker overlay only; roctx range still emits.
         }
         g_dbg_guards.push_back(std::move(guard));
         pushed_to_guards = true;
@@ -468,8 +447,6 @@ void pop_user_scope()
 {
     try
     {
-        // Imbalance = unmatched push/pop. No-op (don't mask Python
-        // finally exceptions); bump callback_errors so it's visible.
         if (g_stack.empty() || g_dbg_guards.empty())
         {
             g_n_callback_errors.fetch_add(1, std::memory_order_relaxed);
@@ -489,7 +466,6 @@ void pop_user_scope()
 
 std::int64_t install()
 {
-    // g_handle published only after addGlobalCallback returns.
     std::lock_guard<std::mutex> lock(g_install_mu);
     const auto                  existing = g_handle.load();
     if (existing != at::INVALID_CALLBACK_HANDLE)
@@ -566,16 +542,16 @@ PYBIND11_MODULE(roctx_recordfn, m)
 {
     m.doc() = "ROCTX bridge for PyTorch's RecordFunction callback.";
 
-    m.def("install", &install, "Install the global RecordFunction callback. Idempotent: second call returns existing handle.");
+    m.def("install", &install, "Install the global RecordFunction callback. Idempotent.");
     m.def("uninstall", &uninstall, "Remove the registered callback.");
-    m.def("is_installed", &is_installed, "True if installed.");
+    m.def("is_installed", &is_installed, "Return True if the callback is installed.");
     m.def("push_user_scope",
           &push_user_scope,
           pybind11::arg("marker"),
           pybind11::arg("context"),
-          "Push a USER_SCOPE frame, emit a ROCTX range, publish chain into TLS DebugInfo.");
-    m.def("pop_user_scope", &pop_user_scope, "Pop the most recent push_user_scope() frame on this thread.");
-    m.def("dump_stats", &dump_stats, "Internal counters for tests/debugging.");
-    m.def("start_capture", &start_capture, "Begin recording wire strings (test hook).");
-    m.def("stop_capture", &stop_capture, "Stop and return captured wire strings.");
+          "Push a USER_SCOPE frame on the calling thread.");
+    m.def("pop_user_scope", &pop_user_scope, "Pop the most recent USER_SCOPE frame on the calling thread.");
+    m.def("dump_stats", &dump_stats, "Return internal counters.");
+    m.def("start_capture", &start_capture, "Begin recording emitted marker strings.");
+    m.def("stop_capture", &stop_capture, "Stop recording and return the captured marker strings.");
 }

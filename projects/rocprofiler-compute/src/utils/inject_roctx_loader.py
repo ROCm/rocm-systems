@@ -3,11 +3,10 @@
 
 """Resolve and load the roctx_recordfn pybind11 extension.
 
-Tier order: prebuilt, JIT cache, cmake build, torch.utils.cpp_extension.
-Returns None when every tier misses (caller drops to the Python-only
-injector). Cache keyed by SHA-256 fingerprint of the C++ inputs; failed
-builds drop a tag-scoped negative-cache marker. Set
-ROCPROFCOMPUTE_REBUILD_ROCTX=1 to bypass caches.
+Resolution order: explicit pin, prebuilt, JIT cache, cmake build,
+``torch.utils.cpp_extension``. Returns ``None`` when no tier succeeds.
+Caches are keyed by a fingerprint of the C++ inputs and the active
+PyTorch ABI. Set ``ROCPROFCOMPUTE_REBUILD_ROCTX=1`` to bypass caches.
 """
 
 import hashlib
@@ -48,8 +47,7 @@ C_TIER_NAMES = frozenset((
 _LAST_LOAD_DIAGNOSTICS: list[tuple[str, str]] = []
 _LAST_LOADED_TIER: Optional[str] = None
 
-# Any new build inputs must be included here so source/build edits
-# invalidate the cache tag.
+# Inputs hashed into the cache tag. Add any new build input here.
 _FINGERPRINT_INPUTS = (_SO_SOURCE, _SO_BUILDFILE)
 
 _REBUILD_ENV_VAR = "ROCPROFCOMPUTE_REBUILD_ROCTX"
@@ -57,7 +55,7 @@ _EXPLICIT_SO_ENV_VAR = "ROCPROFCOMPUTE_ROCTX_RECORDFN_SO"
 
 
 def _safe_log(level: str, msg: str) -> None:
-    """Log via utils.logger if importable, else stderr; tee to the trail."""
+    """Log via ``utils.logger`` if importable, otherwise stderr."""
     _LAST_LOAD_DIAGNOSTICS.append((level, msg))
     try:
         from utils.logger import console_error, console_log, console_warning
@@ -71,12 +69,12 @@ def _safe_log(level: str, msg: str) -> None:
 
 
 def loaded_tier() -> Optional[str]:
-    """Tier that won on the most recent load(), or None."""
+    """Return the tier that succeeded on the most recent ``load()``."""
     return _LAST_LOADED_TIER
 
 
 def consume_diagnostics() -> tuple[Optional[str], list[tuple[str, str]]]:
-    """Drain and return (tier_loaded, [(level, msg), ...])."""
+    """Drain and return ``(tier_loaded, [(level, msg), ...])``."""
     diagnostics = list(_LAST_LOAD_DIAGNOSTICS)
     _LAST_LOAD_DIAGNOSTICS.clear()
     return _LAST_LOADED_TIER, diagnostics
@@ -87,7 +85,7 @@ def format_load_diagnostic_trail(
     *,
     max_lines: int = 24,
 ) -> str:
-    """Render trail as indented lines, capped at max_lines."""
+    """Render diagnostics as indented lines, capped at ``max_lines``."""
     if not diagnostics:
         return ""
     rendered = [f"  [{lvl}] {msg}" for lvl, msg in diagnostics[-max_lines:]]
@@ -95,7 +93,7 @@ def format_load_diagnostic_trail(
 
 
 def _source_fingerprint() -> str:
-    """First 12 hex of SHA-256 over _FINGERPRINT_INPUTS, or "missing"."""
+    """Return the first 12 hex characters of the source SHA-256, or ``"missing"``."""
     h = hashlib.sha256()
     seen = 0
     for path in _FINGERPRINT_INPUTS:
@@ -103,7 +101,6 @@ def _source_fingerprint() -> str:
             data = path.read_bytes()
         except OSError:
             continue
-        # Length-delimit so cross-boundary edits can't collide hashes.
         h.update(f"{path.name}:{len(data)}\n".encode("ascii"))
         h.update(data)
         seen += 1
@@ -113,7 +110,7 @@ def _source_fingerprint() -> str:
 
 
 def compute_tag() -> Optional[str]:
-    """py{X}.{Y}_torch{Z}_abi{0|1}_src{12-hex}, or None if no torch."""
+    """Return the cache tag for the active PyTorch ABI, or ``None``."""
     try:
         import torch
         import torch._C
@@ -134,7 +131,7 @@ def compute_tag() -> Optional[str]:
 
 
 def _import_module_from_path(name: str, path: Path) -> types.ModuleType:
-    """Import a .so from a filesystem path."""
+    """Import a shared object from a filesystem path."""
     spec = importlib.util.spec_from_file_location(name, str(path))
     if spec is None or spec.loader is None:
         raise ImportError(f"failed to build importlib spec for {path}")
@@ -144,17 +141,15 @@ def _import_module_from_path(name: str, path: Path) -> types.ModuleType:
 
 
 def _install_tree_prebuilt_candidates(tag: str) -> list[Path]:
-    """Packager-baked .so candidates under <install-prefix>/lib*/<project>/."""
+    """Return prebuilt ``.so`` candidates under the install prefix."""
     install_root = _THIS_DIR.parent.parent.parent
     so_name = f"roctx_recordfn-{tag}.so"
-    # lib* glob pattern handles CMAKE_INSTALL_LIBDIR variations (lib, lib64,
-    # distro multiarch layouts) in the same way as NativeToolFinder.
     pattern = f"lib*/{_INSTALL_TREE_PROJECT_NAME}/{so_name}"
     return sorted(install_root.glob(pattern))
 
 
 def _try_explicit_so(tag: str) -> Optional[types.ModuleType]:
-    """Honour ROCPROFCOMPUTE_ROCTX_RECORDFN_SO; no build-tier fallback on miss."""
+    """Load the ``.so`` pinned via ``ROCPROFCOMPUTE_ROCTX_RECORDFN_SO``."""
     env_path_str = os.environ.get(_EXPLICIT_SO_ENV_VAR)
     if not env_path_str:
         return None
@@ -211,7 +206,7 @@ _PREBUILT_HINT = (
 
 
 def _explain_cppext_failure(err: Exception) -> tuple[str, str]:
-    """Classify cpp_extension failure into (reason, hint). Never recommends ninja."""
+    """Classify a ``torch.utils.cpp_extension`` failure into ``(reason, hint)``."""
     text = str(err).lower()
     if "ninja" in text:
         return (
@@ -247,10 +242,7 @@ def _explain_cppext_failure(err: Exception) -> tuple[str, str]:
 def _explain_cmake_failure(
     phase: str, err: Exception, stderr_tail: str
 ) -> tuple[str, str]:
-    """Classify cmake-tier failure into (reason, hint).
-
-    phase: invoke/configure/build/missing-output/load.
-    """
+    """Classify a cmake-tier failure into ``(reason, hint)``."""
     text = (str(err) + "\n" + (stderr_tail or "")).lower()
     if "could not find torch" in text or "torch_dir" in text:
         return (
@@ -286,14 +278,14 @@ def _explain_cmake_failure(
 
 
 def _log_cppext_failure(err: Exception) -> None:
-    """Log a classified cpp_extension failure at LOG level."""
+    """Log a classified ``cpp_extension`` failure."""
     reason, hint = _explain_cppext_failure(err)
     _safe_log("log", f"cpp_extension JIT skipped: {reason}: {err}")
     _safe_log("log", f"to enable the C++ tier, {hint}")
 
 
 def _log_cmake_failure(phase: str, err: Exception, stderr_tail: str) -> None:
-    """Same as _log_cppext_failure plus a cmake stderr tail."""
+    """Log a classified cmake failure, including a stderr tail."""
     reason, hint = _explain_cmake_failure(phase, err, stderr_tail or "")
     _safe_log("log", f"cmake build skipped: {reason}: {err}")
     if stderr_tail:
@@ -304,7 +296,7 @@ def _log_cmake_failure(phase: str, err: Exception, stderr_tail: str) -> None:
 
 
 def _jit_compile_viable(cpp_ext: types.ModuleType) -> bool:
-    """True if cpp_extension.load is likely to succeed without pulling ninja."""
+    """Return True when ``cpp_extension.load`` can run without requiring ninja."""
     import inspect
 
     try:
@@ -316,7 +308,7 @@ def _jit_compile_viable(cpp_ext: types.ModuleType) -> bool:
 
 
 def _jit_failure_marker(tag: str) -> Path:
-    """Tag-scoped negative-cache marker, co-located with the cached .so."""
+    """Return the failure-marker path for ``tag``."""
     return _jit_cache_dir() / f"roctx_recordfn-{tag}.build-failed"
 
 
@@ -326,7 +318,7 @@ def _record_jit_failure(
     reason: str = _CPPEXT_TIER_NAME,
     stderr: str = "",
 ) -> None:
-    """Drop a tag-scoped marker shared by both build tiers."""
+    """Write a failure marker shared by both build tiers."""
     try:
         payload = f"{reason}: {type(err).__name__}: {err}\n"
         if stderr:
@@ -342,7 +334,7 @@ def _record_jit_failure(
 
 
 def _previous_jit_failure(tag: str) -> Optional[str]:
-    """Cached failure summary for tag, or None."""
+    """Return the cached failure summary for ``tag``."""
     try:
         marker = _jit_failure_marker(tag)
         if marker.exists():
@@ -356,7 +348,7 @@ def _previous_jit_failure(tag: str) -> Optional[str]:
 
 
 def _clear_jit_failure(tag: str) -> None:
-    """Remove the failure marker (best-effort)."""
+    """Remove the failure marker for ``tag``."""
     try:
         _jit_failure_marker(tag).unlink()
     except FileNotFoundError:
@@ -366,7 +358,7 @@ def _clear_jit_failure(tag: str) -> None:
 
 
 def _install_cached_so(src_so: Path, cached_so: Path) -> None:
-    """Best-effort copy of src_so onto cached_so for next-run JIT cache hit."""
+    """Copy ``src_so`` onto ``cached_so`` for the next-run JIT cache hit."""
     if not src_so.exists():
         return
     try:
@@ -397,12 +389,12 @@ def _try_jit_cached(tag: str) -> Optional[types.ModuleType]:
 
 
 def _cmake_executable() -> Optional[str]:
-    """cmake binary from $CMAKE or PATH, or None."""
+    """Return the cmake executable from ``$CMAKE`` or ``PATH``."""
     return shutil.which(os.environ.get("CMAKE", "cmake"))
 
 
 def _try_cmake_build(tag: str) -> Optional[types.ModuleType]:
-    """Build the .so via our CMakeLists.txt. No ninja required."""
+    """Build the extension via the bundled ``CMakeLists.txt``."""
     if not _SO_SOURCE.exists() or not _SO_BUILDFILE.exists():
         _safe_log(
             "log",
@@ -431,7 +423,6 @@ def _try_cmake_build(tag: str) -> Optional[types.ModuleType]:
         _record_jit_failure(tag, e, reason=_CMAKE_TIER_NAME)
         return None
 
-    # Pin python so the cmake-side tag matches compute_tag().
     configure_argv = [
         cmake_exe,
         "-S",
@@ -514,9 +505,9 @@ def _try_cmake_build(tag: str) -> Optional[types.ModuleType]:
 
 
 def _try_jit_build(tag: str) -> Optional[types.ModuleType]:
-    """Fallback build via torch.utils.cpp_extension.load.
+    """Build the extension via ``torch.utils.cpp_extension.load``.
 
-    Skipped when it would need ninja.
+    Skipped when the call would require ninja.
     """
     if not _SO_SOURCE.exists():
         _safe_log("log", f"source not found at {_SO_SOURCE}; cannot JIT-compile")
@@ -537,7 +528,6 @@ def _try_jit_build(tag: str) -> Optional[types.ModuleType]:
         _record_jit_failure(tag, e, reason=_CPPEXT_TIER_NAME)
         return None
 
-    # Profile Mode Dependency Policy: never pull ninja.
     if not _jit_compile_viable(cpp_ext):
         err = RuntimeError(
             "the running PyTorch's torch.utils.cpp_extension.load "
@@ -555,14 +545,12 @@ def _try_jit_build(tag: str) -> Optional[types.ModuleType]:
         f"-L{rocm_path / 'lib'}",
         "-lrocprofiler-sdk-roctx",
     ]
-    # No feature probe here, so the .so uses TEST_INFO_2 (dormant in
-    # production; only collides with PyTorch's own gtest binaries).
     extra_cflags = ["-O2", "-fvisibility=hidden", "-Wno-deprecated-declarations"]
 
     build_dir = _jit_cache_dir() / f"build-{tag}"
     build_dir.mkdir(parents=True, exist_ok=True)
 
-    # use_ninja=False is removed on newer PyTorch; retry without it on TypeError.
+    # ``use_ninja=False`` is rejected on newer PyTorch; retry without it.
     load_kwargs = dict(
         name="roctx_recordfn",
         sources=[str(_SO_SOURCE)],
@@ -604,10 +592,11 @@ def _try_jit_build(tag: str) -> Optional[types.ModuleType]:
 
 
 def load(force_python_fallback: bool = False) -> Optional[types.ModuleType]:
-    """Return the roctx_recordfn module, or None for the Python fallback.
+    """Return the ``roctx_recordfn`` module, or ``None`` for the Python fallback.
 
-    ROCPROFCOMPUTE_ROCTX_RECORDFN_SO=<path> pins to that .so; no build-tier
-    fallback on miss. ROCPROFCOMPUTE_REBUILD_ROCTX=1 skips cached tiers.
+    ``ROCPROFCOMPUTE_ROCTX_RECORDFN_SO=<path>`` pins to that shared
+    object with no fallback. ``ROCPROFCOMPUTE_REBUILD_ROCTX=1`` skips
+    cached tiers and forces a fresh build.
     """
     global _LAST_LOADED_TIER
     _LAST_LOAD_DIAGNOSTICS.clear()
@@ -622,7 +611,6 @@ def load(force_python_fallback: bool = False) -> Optional[types.ModuleType]:
         _safe_log("warning", "torch not importable; using Python-only injector")
         return None
 
-    # Explicit pin: no build-tier fallback on miss.
     if os.environ.get(_EXPLICIT_SO_ENV_VAR):
         explicit_mod = _try_explicit_so(tag)
         if explicit_mod is not None:

@@ -1,9 +1,9 @@
 ## Copyright (c) Advanced Micro Devices, Inc.
 ## SPDX-License-Identifier:  MIT
 ##
-## Builds roctx_recordfn-<tag>.so for --torch-trace.
-##   A. parent add_subdirectory() under ENABLE_TESTS (CI fixture).
-##   B. standalone (runtime cmake-tier from inject_roctx_loader.py).
+## Builds the roctx_recordfn pybind11 extension used by --torch-trace.
+## Configured either as a subdirectory of the parent project (test
+## fixture) or standalone by the runtime loader.
 set(_rcfn_standalone OFF)
 if(NOT PROJECT_NAME)
     cmake_minimum_required(VERSION 3.20)
@@ -15,7 +15,7 @@ if(NOT _rcfn_standalone AND NOT ENABLE_TESTS)
     return()
 endif()
 
-# -DTORCH_TRACE_PYTHON wins (set by loader cmake-tier); else find_package.
+# Honor TORCH_TRACE_PYTHON when provided; otherwise locate an interpreter.
 if(TORCH_TRACE_PYTHON)
     set(_rcfn_python "${TORCH_TRACE_PYTHON}")
 else()
@@ -27,7 +27,7 @@ else()
     endif()
 endif()
 
-# Missing torch is a soft skip in both modes.
+# Skip the build when torch is not importable.
 set(_rcfn_torch_ok OFF)
 if(_rcfn_python)
     execute_process(
@@ -58,11 +58,11 @@ if(NOT _rcfn_torch_ok)
     return()
 endif()
 
-# Pin so every downstream find_package / probe consults the same Python.
+# Pin the interpreter for all downstream find_package and probe calls.
 set(TORCH_TRACE_PYTHON
     "${_rcfn_python}"
     CACHE FILEPATH
-    "Pinned to the interpreter whose torch we built against."
+    "Interpreter used to build roctx_recordfn."
     FORCE
 )
 
@@ -88,7 +88,7 @@ if(NOT _torch_probe_rc EQUAL 0)
     message(
         FATAL_ERROR
         "TORCH_TRACE_PYTHON probe failed: ${TORCH_TRACE_PYTHON} could not "
-        "report (python, torch, abi); torch imported but introspection crashed."
+        "report python/torch/abi metadata."
     )
 endif()
 
@@ -100,7 +100,7 @@ list(GET _probe_list 3 _cxx11_abi)
 list(GET _probe_list 4 _torch_includes)
 list(GET _probe_list 5 _torch_libs)
 
-# Single source of truth for the source fingerprint formula.
+# Compute the source fingerprint via the loader so build and runtime agree.
 execute_process(
     COMMAND
         "${TORCH_TRACE_PYTHON}" -c
@@ -116,7 +116,7 @@ if(NOT _fp_rc EQUAL 0)
     message(
         FATAL_ERROR
         "roctx_recordfn: failed to compute source fingerprint via "
-        "${TORCH_TRACE_PYTHON}; .so filename may not match the loader."
+        "${TORCH_TRACE_PYTHON}."
     )
 endif()
 
@@ -125,11 +125,11 @@ set(_tag
 )
 set(_so_name "roctx_recordfn-${_tag}")
 
-# Pin so Development.Module headers come from the same interpreter.
+# Pin Python3 lookup to the same interpreter as TORCH_TRACE_PYTHON.
 set(Python3_EXECUTABLE
     "${TORCH_TRACE_PYTHON}"
     CACHE FILEPATH
-    "Pinned to TORCH_TRACE_PYTHON for the roctx_recordfn prebuilt"
+    "Interpreter used to build roctx_recordfn."
     FORCE
 )
 find_package(
@@ -160,7 +160,7 @@ find_path(
 
 add_library(${_so_name} MODULE roctx_recordfn.cpp)
 
-# No "lib" prefix, tag in filename: loader resolves by tag via spec_from_file_location.
+# The "lib" prefix is omitted; the loader resolves the module by tag.
 set_target_properties(
     ${_so_name}
     PROPERTIES
@@ -176,8 +176,8 @@ target_include_directories(
     PRIVATE ${_torch_includes} ${ROCTX_INCLUDE_DIR} ${Python3_INCLUDE_DIRS}
 )
 
-# Absolute-path resolution + wheel-lib fallback: some ROCm wheels report
-# library_paths() dirs that lack symlinks, making -L<dir> fail opaquely.
+# Resolve torch libraries by absolute path. The wheel lib directory is
+# added as a fallback because some wheels omit it from library_paths().
 message(STATUS "roctx_recordfn: torch lib dirs reported by probe: ${_torch_libs}")
 
 execute_process(
@@ -197,7 +197,6 @@ message(
 set(_torch_required_libs torch torch_cpu torch_python c10)
 set(_torch_resolved_libs "")
 foreach(_libname IN LISTS _torch_required_libs)
-    # Per-wheel cache key prevents stale finds across configure passes.
     set(_cachevar "_TORCH_RESOLVED_${_libname}_${_tag}")
     find_library(
         ${_cachevar}
@@ -209,11 +208,7 @@ foreach(_libname IN LISTS _torch_required_libs)
         message(
             FATAL_ERROR
             "roctx_recordfn: lib${_libname}.so not found in any of:\n  "
-            "${_torch_lib_search_dirs}\n"
-            "Likely a stripped wheel. Verify with:\n"
-            "  ${TORCH_TRACE_PYTHON} -c \"import os, torch; "
-            "p=os.path.join(os.path.dirname(torch.__file__), 'lib'); "
-            "print(p, sorted(os.listdir(p)))\""
+            "${_torch_lib_search_dirs}"
         )
     endif()
     message(STATUS "roctx_recordfn: resolved ${_libname} -> ${${_cachevar}}")
@@ -222,8 +217,8 @@ endforeach()
 
 target_link_libraries(${_so_name} PRIVATE ${_torch_resolved_libs} ${ROCTX_LIB})
 
-# Probe whether c10::DebugInfoKind accepts custom string_view-backed keys.
-# When unavailable, fall back to TEST_INFO_2.
+# Detect whether c10::DebugInfoKind accepts a custom string_view-backed
+# key. When unavailable, the source falls back to TEST_INFO_2.
 include(CheckCXXSourceCompiles)
 set(_rcfn_saved_required_flags ${CMAKE_REQUIRED_FLAGS})
 set(_rcfn_saved_required_libs ${CMAKE_REQUIRED_LIBRARIES})
@@ -259,10 +254,7 @@ target_compile_options(
     PRIVATE -fvisibility=hidden -Wno-deprecated-declarations
 )
 
-# Export artifact path so parent can pin CTest via ROCPROFCOMPUTE_ROCTX_RECORDFN_SO.
 if(NOT _rcfn_standalone)
-    # Install the prebuilt under <libdir>/rocprofiler-compute to match the
-    # native-tool discovery convention (lib* glob over install prefix).
     install(
         TARGETS ${_so_name}
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${CMAKE_PROJECT_NAME} COMPONENT main
@@ -271,8 +263,6 @@ if(NOT _rcfn_standalone)
     set(ROCTX_RECORDFN_SO_PATH "$<TARGET_FILE:${_so_name}>" PARENT_SCOPE)
 endif()
 
-# Producer-side leaf-label contract tests. Guard on gtest availability because
-# roctx_recordfn can still be configured standalone by the runtime cmake-tier.
 if(NOT _rcfn_standalone AND ENABLE_TESTS AND TARGET gtest_main)
     add_subdirectory(tests)
 endif()

@@ -3553,20 +3553,16 @@ def test_profile_invalid_workloads_no_torch_trace(
 def test_torch_trace_deep_tensor_wraps_overhead(
     binary_handler_profile_rocprof_compute,
 ):
-    """Optional manual benchmark for deep tensor wrap overhead.
+    """Manual benchmark for the deep tensor wrap overhead.
 
-    This benchmark is skipped by default to keep CI stable/time-bounded.
-    Run manually with ROCPROFCOMPUTE_RUN_DEEP_TENSOR_WRAP_BENCH=1.
+    Skipped unless ``ROCPROFCOMPUTE_RUN_DEEP_TENSOR_WRAP_BENCH=1``.
     """
     require_torch(gpu=True)
 
     run_bench = os.environ.get("ROCPROFCOMPUTE_RUN_DEEP_TENSOR_WRAP_BENCH", "")
     if run_bench.strip().lower() not in ("1", "true", "yes", "on"):
         pytest.skip(
-            (
-                "set ROCPROFCOMPUTE_RUN_DEEP_TENSOR_WRAP_BENCH=1 "
-                "to run this manual benchmark"
-            )
+            "set ROCPROFCOMPUTE_RUN_DEEP_TENSOR_WRAP_BENCH=1 to run this benchmark"
         )
 
     def _run_once(*, deep_wraps: bool, param_id: str) -> tuple[float, float]:

@@ -1,10 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Torch-dependent helpers + OP_SPECS for test_torch_trace_coverage.
+"""Torch-dependent helpers and ``OP_SPECS`` for the coverage test.
 
-OP_SPECS: ATen "<name>[.overload]" -> OpSpec (builder or skip reason).
-Use CoverageTensorArg for structural inputs (probs, SPD, etc.).
+``OP_SPECS`` maps each ATen operator to an :class:`OpSpec` that either
+builds arguments or records a skip reason.
 """
 
 import os
@@ -26,9 +26,7 @@ import torch
 
 
 class CoverageTensorArg(NamedTuple):
-    """Tensor slot with a fixed factory (rand/spd/pivots_1based/etc.)
-    for cases where randn would violate a structural invariant.
-    """
+    """Tensor slot with a specific factory for structurally-constrained inputs."""
 
     shape: Tuple[int, ...]
     emit: str
@@ -40,15 +38,13 @@ ArgBuilder = Callable[[str], Tuple[List[Any], Dict[str, Any]]]
 
 @dataclass(frozen=True)
 class OpSpec:
-    """One op: either a builder that produces (args, kwargs), or a skip reason."""
+    """One operator: a builder that produces ``(args, kwargs)`` or a skip reason."""
 
     build: Optional[ArgBuilder] = None
     skip: Optional[str] = None
 
 
-# -----------------------------------------------------------------------------
-# Compact tensor factories used by builders
-# -----------------------------------------------------------------------------
+# Compact tensor factories used by builders.
 
 
 def f(device: str, *shape: int, dtype: torch.dtype = torch.float32) -> torch.Tensor:
@@ -77,18 +73,11 @@ def spd(device: str, n: int = 4) -> torch.Tensor:
     return a @ a.mT + torch.eye(n, device=device) * 0.1
 
 
-# -----------------------------------------------------------------------------
-# Multi-line builder helpers (kept out of the table for readability)
-# -----------------------------------------------------------------------------
+# Multi-line builder helpers.
 
 
 def linalg_householder_product_args(device: str) -> Tuple[List[Any], Dict[str, Any]]:
-    """Build (input, tau) for linalg_householder_product across torch builds.
-
-    Some ROCm wheels omit torch.linalg.geqrf; fall back to the top-level
-    torch.geqrf, then to a CPU geqrf copied to device. Last
-    resort: tensors with valid ranks only (may be numerically weaker).
-    """
+    """Build ``(input, tau)`` for ``linalg_householder_product``."""
     a = torch.randn(6, 4, device=device)
     for geqrf in (getattr(torch.linalg, "geqrf", None), getattr(torch, "geqrf", None)):
         if geqrf is None:
@@ -109,12 +98,7 @@ def linalg_householder_product_args(device: str) -> Tuple[List[Any], Dict[str, A
 
 
 def lu_unpack_args(device: str) -> Tuple[List[Any], Dict[str, Any]]:
-    # Schema: (LU_data, LU_pivots, unpack_data=True, unpack_pivots=True).
-    # LU_pivots is used by the kernel as row-swap indices, so its *values*
-    # matter, not just shape/dtype.  CoverageTensorArg(emit="pivots_1based")
-    # tells the emitter to produce torch.arange(1, n+1, dtype=int32) — a
-    # valid identity permutation.  Plain randint indices would walk off
-    # the row table and trigger HIP 719.
+    # Schema: (LU_data, LU_pivots, unpack_data, unpack_pivots).
     return [
         torch.randn(4, 4, device=device),
         CoverageTensorArg(shape=(4,), emit="pivots_1based"),
@@ -124,8 +108,7 @@ def lu_unpack_args(device: str) -> Tuple[List[Any], Dict[str, Any]]:
 
 
 def lu_solve_args(device: str) -> Tuple[List[Any], Dict[str, Any]]:
-    # Schema: (LU, pivots, B, *, left=True, adjoint=False).  See lu_unpack_args
-    # comment for why pivots uses the pivots_1based emit mode.
+    # Schema: (LU, pivots, B, *, left, adjoint).
     return [
         torch.randn(4, 4, device=device),
         CoverageTensorArg(shape=(4,), emit="pivots_1based"),
@@ -139,18 +122,14 @@ def ldl_solve_args(device: str) -> Tuple[List[Any], Dict[str, Any]]:
 
 
 def solve_triangular_args(device: str) -> Tuple[List[Any], Dict[str, Any]]:
-    # Schema: linalgsolve_triangular_args(self=A, B, *, upper, left=True,
-    # unitriangular=False).  upper is kwarg-only, and the first positional
-    # is A (triangular), not B.
+    # Schema: linalg_solve_triangular(A, B, *, upper, left, unitriangular).
     a = torch.randn(4, 4, device=device).tril()
     b = torch.randn(4, 2, device=device)
     return [a, b], {"upper": False, "left": True, "unitriangular": False}
 
 
 def ormqr_args(device: str) -> Tuple[List[Any], Dict[str, Any]]:
-    # Schema: (self[m,k], tau[k], other[m,n], left=True, transpose=False).
-    # With left=True the constraint is other.shape[-2] == self.shape[-2]
-    # so pick square A = (4,4), tau = (4,), other = (4, 2).
+    # Schema: (self[m,k], tau[k], other[m,n], left, transpose).
     return (
         [
             torch.randn(4, 4, device=device),
@@ -207,10 +186,8 @@ def native_batch_norm_backward_args(
 
 
 def batch_norm_backward_args(device: str) -> Tuple[List[Any], Dict[str, Any]]:
-    # Pass an empty reserve tensor for compatibility with schemas that expose
-    # a trailing reserve argument on this op.
     args, kwargs = native_batch_norm_backward_args(device)
-    args.append(torch.empty(0, device=device))  # reserve
+    args.append(torch.empty(0, device=device))
     return args, kwargs
 
 
@@ -235,10 +212,7 @@ def native_group_norm_backward_args(device: str) -> Tuple[List[Any], Dict[str, A
 
 
 def fused_adam_args(device: str) -> Tuple[List[Any], Dict[str, Any]]:
-    """Build list-of-tensors positionals for _fused_adam_/_fused_adamw_.
-    Lengths must match; max_exp_avg_sqs empty when amsgrad=False;
-    state_steps elements are scalar float tensors.
-    """
+    """Build positional list-of-tensor arguments for ``_fused_adam_``."""
     params = [torch.randn(4, device=device)]
     grads = [torch.randn(4, device=device)]
     exp_avgs = [torch.zeros(4, device=device)]
@@ -277,25 +251,11 @@ def native_layer_norm_backward_args(device: str) -> Tuple[List[Any], Dict[str, A
     )
 
 
-# -----------------------------------------------------------------------------
-# The unified table.  Keys are ATen short names.
-# -----------------------------------------------------------------------------
-#
-# Skip entries appear first, followed by hardcoded-argument builders
-# grouped by operator category. Adding a new operator to the coverage
-# workload requires exactly one entry in this table (OpSpec.build or
-# OpSpec.skip); removing an entry causes build_args_for_op to
-# report the operator as SKIP.
+# Operator table keyed by ATen short name. Each entry is an OpSpec
+# carrying either a builder or a skip reason.
 
 OP_SPECS: Dict[str, OpSpec] = {
-    # ---------------------------------------------------------------
-    # Skipped entirely: the op advertises CUDA dispatch but faults at
-    # runtime under our synthetic workload (or specifically under
-    # torch.profiler).
-    # ---------------------------------------------------------------
     "_sparse_semi_structured_mm": OpSpec(skip="CUTLASS 2:4 sparse; NVIDIA-only."),
-    # FFT ops SIGSEGV inside torch.profiler on ROCm (kernel + ROCTracer race).
-    # They run fine outside the profiler, but the test needs profiler ground truth.
     "_fft_r2c": OpSpec(skip="SIGSEGV under torch.profiler on ROCm."),
     "_fft_c2c": OpSpec(skip="SIGSEGV under torch.profiler on ROCm."),
     "_fft_c2r": OpSpec(skip="SIGSEGV under torch.profiler on ROCm."),
@@ -304,17 +264,12 @@ OP_SPECS: Dict[str, OpSpec] = {
         skip="Requires cdist output tied to x1/x2; serialized workload cannot "
         "preserve that correlation.",
     ),
-    # igamma / igammac kernels hit HIP 719 (illegal memory access) on ROCm
-    # and poison the HIP context.
     "igamma": OpSpec(skip="ROCm kernel: HIP 719 illegal memory access."),
     "igammac": OpSpec(skip="ROCm kernel: HIP 719 illegal memory access."),
     "cudnn_batch_norm_backward": OpSpec(
         skip="Needs save_mean / save_var / reserveSpace from a matching forward.",
     ),
     "cudnn_batch_norm": OpSpec(skip="cuDNN-only; ROCm uses miopen_batch_norm."),
-    # Specialised quantised / low-precision GEMMs: signatures require matching
-    # qScaleAndZeros / scales / layouts that are backend-specific. Skip until a
-    # proper per-backend builder exists.
     "_weight_int4pack_mm": OpSpec(
         skip="Requires packed int4 weights + matching qScaleAndZeros layout.",
     ),
@@ -324,7 +279,7 @@ OP_SPECS: Dict[str, OpSpec] = {
     "_native_multi_head_attention": OpSpec(
         skip="Requires specific QKV/mask layout + matching projection weights.",
     ),
-    # observer_on, fake_quant_on, zero_point must be int32 (op rejects int64).
+    # ``observer_on``, ``fake_quant_on``, ``zero_point`` must be int32.
     "_fused_moving_avg_obs_fq_helper": OpSpec(
         build=lambda d: (
             [
@@ -348,8 +303,6 @@ OP_SPECS: Dict[str, OpSpec] = {
     "_scaled_grouped_mm": OpSpec(
         skip="Requires mat2 to be transposed with scale tensors; backend-specific.",
     ),
-    # Nested-tensor APIs need a coherent values/offsets/max_lengths contract
-    # the emitter can't yet synthesize.
     "_jagged_to_padded_dense_forward": OpSpec(skip="shape contract TBD."),
     "_padded_dense_to_jagged_forward": OpSpec(skip="shape contract TBD."),
     # ---------------------------------------------------------------
@@ -394,17 +347,14 @@ OP_SPECS: Dict[str, OpSpec] = {
     "embedding": OpSpec(
         build=lambda d: ([f(d, 10, 8), torch.randint(0, 10, (4,), device=d)], {}),
     ),
-    # grad_output (*, embed_dim), indices must be Long; num_weights > max index.
     "embedding_dense_backward": OpSpec(
         build=lambda d: (
             [f(d, 8, 16), torch.randint(0, 32, (8,), device=d), 32, -1, False],
             {},
         ),
     ),
-    # Schema: (weight, indices, offsets, scale_grad_by_freq=False, mode=0,
-    #          sparse=False, per_sample_weights=None, include_last_offset=False,
-    #          padding_idx=-1). offsets must be int64 (not float) and
-    #          describe the bag boundaries into indices.
+    # Schema: (weight, indices, offsets, scale_grad_by_freq, mode, sparse,
+    #          per_sample_weights, include_last_offset, padding_idx).
     "_embedding_bag": OpSpec(
         build=lambda d: (
             [
@@ -428,9 +378,6 @@ OP_SPECS: Dict[str, OpSpec] = {
             {},
         ),
     ),
-    # Backward variants require matching offset2bag / bag_size /
-    # maximum_indices tensors produced by the forward; faking them reliably
-    # across all modes (sum/mean/max) is brittle, so skip them.
     "_embedding_bag_backward": OpSpec(
         skip="Requires offset2bag/bag_size from matched forward run.",
     ),
@@ -444,12 +391,6 @@ OP_SPECS: Dict[str, OpSpec] = {
     # Linalg / Cholesky (need structured input)
     # ---------------------------------------------------------------
     "linalg_householder_product": OpSpec(build=linalg_householder_product_args),
-    # cholesky raises _LinAlgError on non-PD input. CoverageTensorArg(
-    # emit="spd") tells the emitter to produce a @ a.mT + n * I —
-    # diagonal-dominant, always SPD. The build-time _spd helper was not
-    # enough because serialize_arg only reads shape+dtype and would drop
-    # the SPD structure. linalg_cholesky_ex / cholesky_inverse do not
-    # raise, but they still need an SPD input for meaningful kernels.
     "cholesky": OpSpec(
         build=lambda d: ([CoverageTensorArg(shape=(4, 4), emit="spd")], {}),
     ),
@@ -464,21 +405,9 @@ OP_SPECS: Dict[str, OpSpec] = {
         build=lambda d: ([f(d, 4, 2), spd(d).tril(), False], {}),
     ),
     "linalg_cross": OpSpec(build=lambda d: ([f(d, 2, 3), f(d, 2, 3)], {})),
-    # ldl_solve on CUDA/ROCm requires PyTorch built with MAGMA/LAPACK support;
-    # not available in common ROCm builds.
     "linalg_ldl_solve": OpSpec(
-        skip="Requires the MAGMA library (libmagma) for the GPU path.  On "
-        "ROCm the equivalent would be rocSOLVER, but PyTorch's LDL solve "
-        "currently only dispatches to MAGMA.  Cannot be enabled by "
-        "import: PyTorch must be built against MAGMA for this op to be "
-        "callable on GPU.",
+        skip="Requires PyTorch built against the MAGMA library.",
     ),
-    # lu_unpack / linalglu_solve_args feed LU_pivots to the kernel as
-    # row-swap indices, so the *values* must form a valid 1-based
-    # permutation (otherwise the kernel reads past the end of the row
-    # table → HIP 719).  lu_unpack_args / lu_solve_args use
-    # CoverageTensorArg(emit="pivots_1based") which serializes to
-    # torch.arange(1, n+1, dtype=int32) — a safe identity permutation.
     "linalg_lu_solve": OpSpec(build=lu_solve_args),
     "linalg_solve_triangular": OpSpec(build=solve_triangular_args),
     "lu_unpack": OpSpec(build=lu_unpack_args),
@@ -489,8 +418,6 @@ OP_SPECS: Dict[str, OpSpec] = {
     "cross_entropy_loss": OpSpec(
         build=lambda d: ([f(d, 4, 10), torch.randint(0, 10, (4,), device=d)], {}),
     ),
-    # input / target in [0, 1]; randn has triggered ROCm HSA
-    # exceptions in binary_cross_entropy*_cuda.
     "binary_cross_entropy": OpSpec(
         build=lambda _d: (
             [CoverageTensorArg((4, 4), "rand"), CoverageTensorArg((4, 4), "rand")],
@@ -520,8 +447,7 @@ OP_SPECS: Dict[str, OpSpec] = {
         ),
     ),
     # Schema: nll_loss_backward(grad_output, self, target, weight?, reduction,
-    #                          ignore_index, total_weight).
-    # With reduction=Mean (=1), grad_output/total_weight are scalars.
+    #                           ignore_index, total_weight).
     "nll_loss_backward": OpSpec(
         build=lambda d: (
             [
@@ -548,8 +474,6 @@ OP_SPECS: Dict[str, OpSpec] = {
             {},
         ),
     ),
-    # Same schema as the 1-D variant but with (N, C, H, W) inputs / (N, H, W)
-    # targets.  total_weight approximates N*H*W for reduction=Mean.
     "nll_loss2d_backward": OpSpec(
         build=lambda d: (
             [
@@ -564,9 +488,7 @@ OP_SPECS: Dict[str, OpSpec] = {
             {},
         ),
     ),
-    # Schema: multi_margin_loss(self, target, p=1, margin=1, weight?, reduction=Mean).
-    # weight is Tensor? — passing 0 trips the dispatcher; use None
-    # to fall back to unit weights.
+    # Schema: multi_margin_loss(self, target, p, margin, weight?, reduction).
     "multi_margin_loss": OpSpec(
         build=lambda d: (
             [
@@ -635,8 +557,7 @@ OP_SPECS: Dict[str, OpSpec] = {
         ),
     ),
     # Schema: (input, grad_output, weight, running_mean?, running_var?,
-    #          save_mean?, save_var?, epsilon). grad_output must match input
-    #          shape (not a 1-D tensor).
+    #          save_mean?, save_var?, epsilon).
     "miopen_batch_norm_backward": OpSpec(
         build=lambda d: (
             [
@@ -730,8 +651,6 @@ OP_SPECS: Dict[str, OpSpec] = {
         build=lambda d: ([f(d, 1, 1, 4, 4, 4), f(d, 1, 1, 8, 8, 8)], {}),
     ),
     "adaptive_max_pool2d": OpSpec(build=lambda d: ([f(d, 1, 3, 8, 8), [2, 2]], {})),
-    # adaptive_max_pool2d_backward: grad_output and indices must match the
-    # pool-output shape (N, C, out_h, out_w); self carries the input shape.
     "adaptive_max_pool2d_backward": OpSpec(
         build=lambda d: (
             [f(d, 1, 3, 2, 2), f(d, 1, 3, 8, 8), i(d, 1, 3, 2, 2)],
@@ -748,8 +667,6 @@ OP_SPECS: Dict[str, OpSpec] = {
         ),
     ),
     "avg_pool2d": OpSpec(build=lambda d: ([f(d, 1, 1, 8, 8), [2, 2]], {})),
-    # Schema takes 8 positionals; divisor_override is int? and must be
-    # supplied (as None) because it is positional, not kwarg-only.
     "avg_pool2d_backward": OpSpec(
         build=lambda d: (
             [
@@ -794,9 +711,6 @@ OP_SPECS: Dict[str, OpSpec] = {
         ),
     ),
     # Schema: (self, kernel_size, stride, padding, dilation, ceil_mode).
-    # Stride must be > 0, and backward takes (grad_output, self, kernel, stride,
-    # padding, dilation, ceil_mode, indices) — grad_output / indices shapes
-    # match the pool output, not the input.
     "max_pool2d_with_indices": OpSpec(
         build=lambda d: (
             [f(d, 1, 1, 8, 8), [2, 2], [2, 2], [0, 0], [1, 1], False],
@@ -965,14 +879,10 @@ OP_SPECS: Dict[str, OpSpec] = {
         ),
     ),
     # Schema: im2col(self, kernel_size, dilation, padding, stride).
-    # The final argument is stride and must be > 0; swapping stride/padding
-    # produces stride should be greater than zero.
     "im2col": OpSpec(
         build=lambda d: ([f(d, 1, 1, 8, 8), [3, 3], [1, 1], [0, 0], [1, 1]], {}),
     ),
-    # Schema: col2im(self, output_size[2], kernel_size, dilation, padding, stride).
-    # Input (1, C*kH*kW, L) unfolds back to (N, C, H, W) with
-    # output_size=[H, W] — must be a 2-element list, not 4.
+    # Schema: col2im(self, output_size, kernel_size, dilation, padding, stride).
     "col2im": OpSpec(
         build=lambda d: (
             [f(d, 1, 4, 9), [4, 4], [2, 2], [1, 1], [0, 0], [1, 1]],
@@ -1018,9 +928,7 @@ OP_SPECS: Dict[str, OpSpec] = {
             {},
         ),
     ),
-    # ---------------------------------------------------------------
-    # Integer / bitwise (CUDA rejects float)
-    # ---------------------------------------------------------------
+    # Integer / bitwise.
     "__ilshift__": OpSpec(build=lambda d: ([i(d, 4, 4), i(d, 4, 4, high=4)], {})),
     "__irshift__": OpSpec(build=lambda d: ([i(d, 4, 4), i(d, 4, 4)], {})),
     "__rshift__": OpSpec(build=lambda d: ([i(d, 4, 4), i(d, 4, 4)], {})),
@@ -1058,23 +966,14 @@ OP_SPECS: Dict[str, OpSpec] = {
     "one_hot": OpSpec(
         build=lambda d: ([torch.randint(0, 5, (4,), device=d)], {}),
     ),
-    # Poisson expects non-negative rates; randn can trigger ROCm HSA
-    # faults. The emitted workload must use rand * scale.
     "poisson": OpSpec(
         build=lambda _d: ([CoverageTensorArg((4, 4), "rand_uniform", 4.0), None], {}),
     ),
-    # bernoulli_ expects probabilities in [0, 1]; see note above.
     "bernoulli_": OpSpec(
         build=lambda d: ([f(d, 4, 4), CoverageTensorArg((4, 4), "rand")], {}),
     ),
-    # multinomial runs fine standalone but SIGSEGVs under
-    # torch.profiler(CPU+CUDA) on ROCm (renormRowsL1 kernel path
-    # interacting with ROCTracer). Confirmed by scripts/torch_trace_coverage_
-    # scan_ops.py with --workers=1. Revisit after driver/profiler updates.
     "multinomial": OpSpec(
-        skip="torch.profiler cannot collect ground truth: ROCm ROCTracer + "
-        "renormRowsL1 kernel race produces SIGSEGV inside the profiler "
-        "subprocess (op itself runs fine outside the profiler).",
+        skip="SIGSEGV under torch.profiler on ROCm.",
     ),
     "geometric_": OpSpec(build=lambda d: ([f(d, 4, 4), 0.5], {})),
     "repeat_interleave": OpSpec(build=lambda d: ([i1(d, 16)], {})),
@@ -1099,16 +998,13 @@ OP_SPECS: Dict[str, OpSpec] = {
             {},
         ),
     ),
-    # Schema: native_dropout_backward(Tensor grad_output, Tensor mask, float scale).
-    # Passing a second float tensor between grad_output and mask produces
-    # "expected at most 3 argument(s) but received 4".
+    # Schema: native_dropout_backward(grad_output, mask, scale).
     "native_dropout_backward": OpSpec(
         build=lambda d: ([f(d, 4, 4), b(d), 0.5], {}),
     ),
     # ---------------------------------------------------------------
     # Indexing / scatter / gather
     # ---------------------------------------------------------------
-    # aten.index.Tensor needs a real Tensor?[], not None.
     "index": OpSpec(
         build=lambda d: (
             [
@@ -1118,7 +1014,6 @@ OP_SPECS: Dict[str, OpSpec] = {
             {},
         ),
     ),
-    # List[int] defaults like [1, 1] duplicate a dim on 2D tensors.
     "flip": OpSpec(build=lambda d: ([f(d, 4, 4), [0]], {})),
     "index_copy": OpSpec(
         build=lambda d: ([f(d, 4, 4), 0, i1(d, 2), f(d, 2, 4)], {}),
@@ -1132,8 +1027,6 @@ OP_SPECS: Dict[str, OpSpec] = {
     "index_add_": OpSpec(
         build=lambda d: ([f(d, 4, 4), 0, i1(d, 2), f(d, 2, 4)], {}),
     ),
-    # include_self is kwarg-only; passing as 6th positional trips the
-    # dispatcher with "takes 5 positional argument(s) but 6 was/were given".
     "index_reduce": OpSpec(
         build=lambda d: (
             [f(d, 4, 4), 0, i1(d, 4), f(d, 4, 4), "prod"],
@@ -1150,7 +1043,6 @@ OP_SPECS: Dict[str, OpSpec] = {
         build=lambda d: ([f(d, 4, 4), 0, i1(d, 2), torch.tensor(0.0, device=d)], {}),
     ),
     "index_select": OpSpec(build=lambda d: ([f(d, 4, 4), 0, i1(d, 2)], {})),
-    # gather needs index to be int64; schema fallback gives float.
     "gather": OpSpec(
         build=lambda d: ([f(d, 4, 4), 0, i(d, 4, 4, low=0, high=4)], {}),
     ),
@@ -1166,7 +1058,6 @@ OP_SPECS: Dict[str, OpSpec] = {
     "scatter_add_": OpSpec(
         build=lambda d: ([f(d, 4, 4), 0, i(d, 4, 4), f(d, 4, 4)], {}),
     ),
-    # include_self is kwarg-only on both the functional and in-place form.
     "scatter_reduce": OpSpec(
         build=lambda d: (
             [f(d, 4, 4), 0, i(d, 4, 4), f(d, 4, 4), "sum"],
@@ -1180,12 +1071,6 @@ OP_SPECS: Dict[str, OpSpec] = {
         ),
     ),
     "take": OpSpec(build=lambda d: ([f(d, 4, 4), i1(d, 8)], {})),
-    # segment_reduce: most arguments (lengths, indices,
-    # offsets, axis, unsafe, initial) are kwarg-only. The
-    # kernel normally checks lengths.sum() == data.size(axis), but the
-    # emitter replaces tensor literals with random torch.randint
-    # values; unsafe=True bypasses the check so the reduction kernel
-    # still launches.
     "segment_reduce": OpSpec(
         build=lambda d: (
             [f(d, 8), "sum"],
@@ -1195,8 +1080,6 @@ OP_SPECS: Dict[str, OpSpec] = {
             },
         ),
     ),
-    # _segment_reduce_backward: (grad, output, data, reduce, *, lengths?,
-    # offsets?, axis=0, initial?).
     "_segment_reduce_backward": OpSpec(
         build=lambda d: (
             [
@@ -1214,7 +1097,6 @@ OP_SPECS: Dict[str, OpSpec] = {
     "_chunk_cat": OpSpec(
         build=lambda d: ([[f(d, 2, 4), f(d, 2, 4)], 0, 2], {}),
     ),
-    # Schema takes 4 positionals; compute_mode is int? but positional.
     "_cdist_forward": OpSpec(
         build=lambda d: ([f(d, 2, 4, 8), f(d, 2, 5, 8), 2.0, None], {}),
     ),
@@ -1228,8 +1110,7 @@ OP_SPECS: Dict[str, OpSpec] = {
     "bucketize": OpSpec(build=lambda d: ([f(d, 8), f(d, 5)], {})),
     "roll": OpSpec(build=lambda d: ([f(d, 4, 4), [1], [0]], {})),
     "unfold": OpSpec(build=lambda d: ([f(d, 2, 8), 1, 4, 2], {})),
-    # Schema: unfold_backward(grad_in, SymInt[] input_sizes, dim, size, step).
-    # input_sizes is a list of ints, not a tensor.
+    # Schema: unfold_backward(grad_in, input_sizes, dim, size, step).
     "unfold_backward": OpSpec(
         build=lambda d: ([f(d, 2, 4, 4), [2, 10], 1, 4, 2], {}),
     ),
@@ -1237,14 +1118,8 @@ OP_SPECS: Dict[str, OpSpec] = {
     "view_as_real": OpSpec(
         build=lambda d: ([torch.randn(4, 2, device=d, dtype=torch.complex64)], {}),
     ),
-    # Schema: view(self, SymInt[] size).  Passing 8, 2 as two ints
-    # does not match the List[int] slot.
     "view": OpSpec(build=lambda d: ([f(d, 4, 4), [8, 2]], {})),
-    # Schema: glu_backward(grad_output, self, dim).  grad_output matches the
-    # glu output shape (self halved along dim); don't swap the two.
     "glu_backward": OpSpec(build=lambda d: ([f(d, 2, 4), f(d, 2, 8), 1], {})),
-    # Quantized / packed matmul (working subset; layout-specific ones are
-    # in the skip block above).
     "_int_mm": OpSpec(
         build=lambda d: (
             [
@@ -1254,9 +1129,6 @@ OP_SPECS: Dict[str, OpSpec] = {
             {},
         ),
     ),
-    # _convert_weight_to_int4pack expects uint8 weight shaped [N][K/2] and
-    # legal innerKTiles values; use a shape/value pair that satisfies those
-    # constraints and reaches dispatch.
     "_convert_weight_to_int4pack": OpSpec(
         build=lambda d: (
             [torch.randint(0, 255, (128, 64), device=d, dtype=torch.uint8), 8],
@@ -1266,10 +1138,6 @@ OP_SPECS: Dict[str, OpSpec] = {
     # ---------------------------------------------------------------
     # Softmax backward (mixed-dtype accumulation)
     # ---------------------------------------------------------------
-    # ROCm/CPU enforce grad.scalar_type() == input_dtype OR
-    # (grad==Float && input_dtype==Half). With grad and output already
-    # in fp16, the input_dtype param must also be fp16 (passing fp32
-    # there hits the dtype-mismatch check before any kernel launches).
     "_log_softmax_backward_data": OpSpec(
         build=lambda d: (
             [
@@ -1296,7 +1164,6 @@ OP_SPECS: Dict[str, OpSpec] = {
     # Misc / AMP / assertions
     # ---------------------------------------------------------------
     # Schema: (Tensor[] self, Tensor found_inf, Tensor inv_scale) -> ().
-    # Omitting inv_scale fails the dispatcher.
     "_amp_foreach_non_finite_check_and_unscale_": OpSpec(
         build=lambda d: (
             [
@@ -1315,8 +1182,6 @@ OP_SPECS: Dict[str, OpSpec] = {
             {},
         ),
     ),
-    # nonzero_static: size and fill_value are kwarg-only; the schema
-    # fallback can't synthesise the kwargs, so hand them in explicitly.
     "nonzero_static": OpSpec(
         build=lambda d: ([f(d, 4, 4)], {"size": 8}),
     ),
@@ -1329,8 +1194,6 @@ OP_SPECS: Dict[str, OpSpec] = {
     # ---------------------------------------------------------------
     "_fused_adam_": OpSpec(build=fused_adam_args),
     "_fused_adamw_": OpSpec(build=fused_adam_args),
-    # Backend-gated families (flash-attn, fp8 gemm, 2:4 sparse, grouped mm,
-    # nested-tensor): need dedicated workloads, not schema-driven args.
     "_scaled_dot_product_cudnn_attention": OpSpec(skip="cuDNN-only."),
     "_scaled_dot_product_cudnn_attention_backward": OpSpec(skip="cuDNN-only."),
     "_scaled_dot_product_efficient_attention": OpSpec(skip="xFormers CUDA-only."),
@@ -1370,19 +1233,12 @@ OP_SPECS: Dict[str, OpSpec] = {
 }
 
 
-# -----------------------------------------------------------------------------
-# Bulk-registered builders
-# -----------------------------------------------------------------------------
-# Register repetitive short-name builders in bulk to avoid OP_SPECS bloat.
-# dict.setdefault preserves explicit per-op overrides in the main table.
-# Buckets that need custom argument design remain explicitly listed there.
+# Bulk-registered builders. ``dict.setdefault`` preserves explicit
+# per-operator overrides in ``OP_SPECS``.
 
 
 def _register_bulk_unary_float_builders() -> None:
-    """Register short-name builders for unary float Tensor->Tensor ops
-    (single 8x8 float32 input, no kwargs). Output dtype follows input
-    so .out variants are covered too.
-    """
+    """Register builders for unary float ``Tensor -> Tensor`` operators."""
 
     def template(d: str) -> Tuple[List[Any], Dict[str, Any]]:
         return ([f(d, 8, 8)], {})
@@ -1416,13 +1272,7 @@ def _register_bulk_unary_float_builders() -> None:
 
 
 def _register_bulk_whole_tensor_reduction_builders() -> None:
-    """Register builders for ops that reduce over every element.
-
-    Single 8x8 float32 input; the dispatcher routes to the no-dim
-    default overload. `.dim` / `.dim_IntList` variants of these names
-    still need explicit entries with a `dim` arg (see the
-    "reduction along dim" bucket).
-    """
+    """Register builders for whole-tensor reduction operators."""
 
     def template(d: str) -> Tuple[List[Any], Dict[str, Any]]:
         return ([f(d, 8, 8)], {})
@@ -1453,9 +1303,7 @@ def _register_bulk_whole_tensor_reduction_builders() -> None:
 
 
 def _register_bulk_unary_special_builders() -> None:
-    """Register builders for unary special_* functions (rand-uniform
-    in (0, 2)). Binary polynomial families need per-op entries.
-    """
+    """Register builders for unary ``special_*`` functions."""
 
     def template(d: str) -> Tuple[List[Any], Dict[str, Any]]:
         return ([torch.rand(8, 8, device=d) * 2.0], {})
@@ -1484,9 +1332,7 @@ def _register_bulk_unary_special_builders() -> None:
 
 
 def _register_bulk_binary_tensor_elementwise_builders() -> None:
-    """Register builders for binary elementwise short names (two
-    same-shape 8x8 float32 tensors).
-    """
+    """Register builders for binary elementwise operators."""
 
     def template(d: str) -> Tuple[List[Any], Dict[str, Any]]:
         return ([f(d, 8, 8), f(d, 8, 8)], {})
@@ -1517,9 +1363,7 @@ def _register_bulk_binary_tensor_elementwise_builders() -> None:
 
 
 def _register_high_impact_individual_builders() -> None:
-    """Per-op short-name builders for high-impact gaps. Each entry is
-    one builder; see the inline comment for the schema.
-    """
+    """Register individual builders for high-impact operators."""
     individual = {
         # (input, value, value) — fused multiply-add variants
         "addcmul": OpSpec(
@@ -1685,28 +1529,8 @@ _register_bulk_binary_tensor_elementwise_builders()
 _register_high_impact_individual_builders()
 
 
-# -----------------------------------------------------------------------------
-# Zero-copy view ops that intentionally launch no GPU kernels
-# -----------------------------------------------------------------------------
-#
-# These ATen ops only reinterpret a tensor's metadata
-# (shape / stride / dtype-view / storage offset) and return a new tensor
-# that shares the underlying storage. They issue no HIP/CUDA kernel
-# launches by design, so a correct ROCTX trace MUST show the marker
-# present with an empty kernel-correlation set.
-#
-# torch.profiler's ground truth is misleading for these ops: it
-# attributes any GPU kernel whose dispatch happens to overlap the op's
-# CPU span to the op itself, even when that kernel was launched by an
-# unrelated adjacent op (e.g. a copy_ that follows view). This is a
-# documented limitation of CPU-span-based kernel attribution in
-# torch.profiler and is the sole source of the historical "marker found
-# but no correlated kernels" failures for this family.
-#
-# compare_single_op treats these ops as PASS once the ROCTX marker is
-# observed and emits an explanatory note explaining (a) why the op
-# launches no kernels and (b) why the empty ROCTX correlation set is
-# the correct outcome.
+# Zero-copy view ops that launch no GPU kernels. A correct ROCTX trace
+# shows the marker with an empty kernel-correlation set.
 KNOWN_KERNEL_FREE_ATEN_OPS: Set[str] = {
     "view",
     "view_as_real",
@@ -1715,27 +1539,9 @@ KNOWN_KERNEL_FREE_ATEN_OPS: Set[str] = {
 }
 
 
-# -----------------------------------------------------------------------------
-# Hardware-incompatible CUDA-only ops (filtered out at discovery)
-# -----------------------------------------------------------------------------
-#
-# A subset of ATen ops are advertised as CUDA-dispatched but require a
-# strictly NVIDIA-only backend (CUTLASS, cuDNN, xFormers, cuSPARSELt,
-# FlashAttention, fp8 GEMM, packed int4/int8 weights, grouped matmul,
-# ...). These ops cannot run on ROCm hardware regardless of how the
-# workload synthesizes arguments, so including them in the coverage
-# sample only contributes noise to the SKIP count.
-#
-# discover_operators uses is_hardware_incompatible_cuda_only to filter
-# such ops out at enumeration time. They never reach the workload, the
-# ground-truth subprocess, the per-op log, or the SKIP breakdown — but
-# the count is surfaced once in the session header so the exclusion is
-# auditable.
-#
-# The keyword set is shared with categorize_skip_reason so the
-# discovery-time filter and the runtime SKIP categorizer remain in
-# lockstep; OpSpec.skip entries in OP_SPECS are the single source of
-# truth for which ops are CUDA-only.
+# CUDA-only / NVIDIA-only backends that cannot run on ROCm. Ops whose
+# OpSpec.skip text contains any of these keywords are filtered out at
+# discovery time.
 _HARDWARE_INCOMPATIBLE_CUDA_KEYWORDS: Tuple[str, ...] = (
     "cuda-only",
     "cuda only",
@@ -1758,20 +1564,15 @@ _HARDWARE_INCOMPATIBLE_CUDA_KEYWORDS: Tuple[str, ...] = (
 
 
 def is_hardware_incompatible_cuda_only(text: Optional[str]) -> bool:
-    """True if text contains any CUDA-only / NVIDIA-only backend keyword.
-
-    Used both at discovery (to drop the op from the coverage sample) and
-    at runtime SKIP categorization (to bucket any reason that slipped
-    through). Case-insensitive; returns False for None / empty input.
-    """
+    """Return True when ``text`` references a CUDA-only or NVIDIA-only backend."""
     if not text:
         return False
     lowered = text.lower()
     return any(k in lowered for k in _HARDWARE_INCOMPATIBLE_CUDA_KEYWORDS)
 
 
-# One row in the coverage sample. category is "aten" or "structural";
-# schema is a torch FunctionSchema for ATen rows, None for structural.
+# One row in the coverage sample. ``category`` is "aten" or
+# "structural"; ``schema`` is a ``FunctionSchema`` for ATen rows.
 class OpEntry(NamedTuple):
     name: str
     category: str
@@ -1779,15 +1580,14 @@ class OpEntry(NamedTuple):
 
 
 # status is "pass" / "skip" / "fail"; reason is empty on pass, otherwise the
-# skip explanation or failure reason.
 class OpCompareOutcome(NamedTuple):
     status: str
     reason: str
     log_lines: Tuple[str, ...]
 
 
-# Standalone runner source: one torch.profiler window per op, dumped to JSON.
-# Stored as a string so the generated workload stays free of profiler/JSON code.
+# Subprocess runner that records one ``torch.profiler`` window per
+# operator and dumps results to JSON.
 COVERAGE_GROUND_TRUTH_RUNNER_SOURCE = textwrap.dedent(
     """
 import importlib.util
@@ -1795,11 +1595,7 @@ import json
 import os
 import sys
 
-# Configure synchronous kernel dispatch before the HIP/CUDA runtime is
-# initialised. AMD_SERIALIZE_KERNEL is read once at context creation;
-# synchronous dispatch is required for asynchronous faults to surface at
-# their launch site so per-operator attribution (START / OK / FAIL banners
-# and the device-liveness probe) remains correct.
+# Synchronous dispatch attributes faults to the launching op.
 os.environ.setdefault("AMD_SERIALIZE_KERNEL", "3")
 
 import torch
@@ -1807,14 +1603,7 @@ from torch.profiler import profile, ProfilerActivity
 
 
 def probe_device() -> None:
-    \"\"\"Dispatch and synchronise a minimal CUDA kernel to surface sticky faults.
-
-    torch.cuda.synchronize alone is not a reliable liveness check on
-    ROCm: the runtime clears a sticky error on the synchronise call that
-    reports it, so a subsequent synchronise with no pending work returns
-    success even though the next kernel launch would fail. Launching a
-    real kernel reproduces the sticky state and raises deterministically.
-    \"\"\"
+    \"\"\"Launch a small kernel and synchronise to surface device faults.\"\"\"
     t = torch.empty(1, device=\"cuda\")
     t.add_(1)
     torch.cuda.synchronize()
@@ -1891,32 +1680,19 @@ def unique_get_output_param_id(prefix: str) -> str:
     return f"{prefix}_{worker}_{os.getpid()}_{threading.get_ident()}_{uuid.uuid4().hex}"
 
 
-# -- ATen name helpers --
-#
-# ATen sample labels take one of two forms: torch.ops.aten.<op> for the
-# default overload, or torch.ops.aten.<op>.<overload> for a named
-# overload (.Tensor, .Scalar, .out, etc.).
-# inject_roctx.instrument_all_torch_ops wraps the packet rather
-# than individual overloads, so the generated workload always calls
-# torch.ops.aten.<op> and relies on the dispatcher to route to the
-# target overload from the synthesized argument types.
+# Sample labels: ``torch.ops.aten.<op>`` for the default overload and
+# ``torch.ops.aten.<op>.<overload>`` for named overloads. The workload
+# always calls the packet and lets the dispatcher pick the overload.
 
 
 def aten_op_short_name(op_name: str) -> str:
-    """Return the ATen op name without any overload suffix.
-
-    torch.ops.aten.add → "add"; torch.ops.aten.add.Tensor → "add".
-    Returns "" for non-ATen labels.
-    """
+    """Return the ATen op name without any overload suffix."""
     parts = op_name.split(".")
     return parts[3] if len(parts) >= 4 and parts[:3] == ["torch", "ops", "aten"] else ""
 
 
 def aten_overload_key(op_name: str) -> Optional[str]:
-    """Return <op>.<overload> for non-default overload labels, else None.
-
-    torch.ops.aten.add → None; torch.ops.aten.add.Tensor → "add.Tensor".
-    """
+    """Return ``<op>.<overload>`` for non-default overloads, else ``None``."""
     parts = op_name.split(".")
     if len(parts) >= 5 and parts[:3] == ["torch", "ops", "aten"]:
         return ".".join(parts[3:])
@@ -1924,37 +1700,18 @@ def aten_overload_key(op_name: str) -> Optional[str]:
 
 
 def aten_packet_call_path(op_name: str) -> str:
-    """Strip any overload suffix so the emitted call hits the wrapped packet.
-
-    torch.ops.aten.add.Tensor → "torch.ops.aten.add"; names without
-    an overload suffix are returned unchanged.
-    """
+    """Return the packet call path for ``op_name`` without any overload suffix."""
     parts = op_name.split(".")
     if len(parts) >= 5 and parts[:3] == ["torch", "ops", "aten"]:
         return ".".join(parts[:4])
     return op_name
 
 
-# -- Argument synthesis --
-#
-# Argument generation is restricted to hand-authored, per-operator builders
-# registered in torch_trace_coverage_utils. An ATen operator is
-# emitted into the coverage workload only when OP_SPECS contains an
-# OpSpec.build entry for it (looked up by overload-specific key first,
-# then by packet key). Operators with OpSpec.skip set, and operators
-# with no entry at all, are reported as SKIP. Structural entries carry no
-# arguments.
-#
-# Keep ROCm-safe argument generation in per-op verified builders.
-# Two coverage extensions reuse existing builders:
-#   * .out overloads: add out=torch.empty(0, ...) when schema/shape guards pass
-#   * in-place overloads: reuse the out-of-place sibling builder
-# Both only apply when a base short-name builder already exists in OP_SPECS.
+# Argument synthesis. An ATen operator is emitted only when ``OP_SPECS``
+# holds a builder for the overload key or the packet key. ``.out`` and
+# in-place overloads reuse the out-of-place builder when guards pass.
 
 
-# Overload suffixes whose .out variant accepts a single out=Tensor argument.
-# Suffixes that bind a different parameter name or return multiple tensors are
-# intentionally excluded and handled by the schema guards.
 _SINGLE_TENSOR_OUT_OVERLOAD_SUFFIXES: frozenset = frozenset({
     "out",
     "Tensor_out",
@@ -1964,9 +1721,8 @@ _SINGLE_TENSOR_OUT_OVERLOAD_SUFFIXES: frozenset = frozenset({
 })
 
 
-# Short names excluded from generic .out injection because output dtype does not
-# follow input dtype (predicates, argsort family, bool reductions, index ops).
-# Multi-output .out variants are filtered by schema-return-count checks.
+# Short names excluded from generic .out injection because the output
+# dtype does not follow the input dtype.
 _OUT_MECHANISM_EXCLUDED_SHORT_NAMES: frozenset = frozenset({
     "eq",
     "ne",
@@ -1997,13 +1753,7 @@ _OUT_MECHANISM_EXCLUDED_SHORT_NAMES: frozenset = frozenset({
 
 
 def _first_tensor_dtype(args: List[Any]) -> Optional[torch.dtype]:
-    """Return the dtype of the first Tensor found in args (recurses one
-    level into the first element when it's a list/tuple, to handle
-    list-of-tensors signatures like cat / stack).
-
-    Returns None when no Tensor is found, which lets callers fall back
-    to the default float dtype.
-    """
+    """Return the dtype of the first Tensor in ``args``, or ``None``."""
     for arg in args:
         if isinstance(arg, torch.Tensor):
             return arg.dtype
@@ -2015,10 +1765,7 @@ def _first_tensor_dtype(args: List[Any]) -> Optional[torch.dtype]:
 
 
 def _schema_returns_single_tensor(schema: object) -> bool:
-    """True iff a torch FunctionSchema declares exactly one return.
-    Used to guard single-Tensor out= injection from multi-output
-    .out variants. Returns False when schema is None.
-    """
+    """Return True when ``schema`` declares exactly one return value."""
     if schema is None:
         return False
     returns = getattr(schema, "returns", None)
@@ -2033,20 +1780,12 @@ def _schema_returns_single_tensor(schema: object) -> bool:
 def build_args_for_op(
     op: OpEntry,
 ) -> Optional[Tuple[List[Any], dict]]:
-    """Return (args, kwargs) for op on CUDA, or None to SKIP.
-    Structural -> ([], {}). ATen lookup: overload key, packet key,
-    .out / trailing-underscore in-place fallbacks; else None.
-    """
+    """Return ``(args, kwargs)`` for ``op`` on CUDA, or ``None`` to skip."""
     device = "cuda"
 
     if op.category == "structural":
         return [], {}
 
-    # Lookup order:
-    #   1) overload-specific key (<op>.<overload>)
-    #   2) .out mechanism (single-Tensor out= reuse of short-name builder)
-    #   3) packet/short-name key (<op>)
-    #   4) in-place mechanism (reuse out-of-place sibling builder)
     overload_key = aten_overload_key(op.name)
     short_name = aten_op_short_name(op.name) or op.name.rsplit(".", 1)[-1]
 
@@ -2068,12 +1807,6 @@ def build_args_for_op(
             base = OP_SPECS.get(short_name)
             if base is not None and base.build is not None:
                 base_args, base_kwargs = base.build(device)
-                # The output dtype matches the first Tensor arg's
-                # dtype for every short-name builder cleared by the
-                # exclusion list above (pure float→float, int→int, or
-                # complex→complex elementwise ops). torch.empty(0, ...)
-                # is then resized to the actual output shape by
-                # PyTorch's .out contract without raising.
                 out_dtype = _first_tensor_dtype(base_args)
                 if out_dtype is None:
                     out_dtype = torch.get_default_dtype()
@@ -2119,12 +1852,10 @@ def _op_skip_text(op: OpEntry) -> Optional[str]:
 
 
 def discover_operators() -> Tuple[List[OpEntry], List[OpEntry], List[OpEntry]]:
-    """Enumerate ATen + structural operators for the coverage sample.
+    """Enumerate ATen and structural operators for the coverage sample.
 
-    Walks torch.ops.aten emitting one OpEntry per overload with a CUDA
-    kernel. Returns (kept_aten_ops, structural_ops, excluded_aten_ops);
-    excluded ops are NVIDIA-/CUDA-only backends incompatible with ROCm
-    and are surfaced for reporting only.
+    Returns ``(kept_aten_ops, structural_ops, excluded_aten_ops)``;
+    excluded ops are CUDA-only backends incompatible with ROCm.
     """
     aten_ops: List[OpEntry] = []
     seen: Set[str] = set()
@@ -2168,9 +1899,6 @@ def discover_operators() -> Tuple[List[OpEntry], List[OpEntry], List[OpEntry]]:
                 schema = getattr(overload, "_schema", None)
                 aten_ops.append(OpEntry(full, "aten", schema))
 
-    # Partition the enumerated ATen ops: CUDA-only backends are dropped
-    # at discovery so they never enter the workload or the SKIP report.
-    # Structural ops are not partitioned — they don't carry an OpSpec.
     kept_aten_ops: List[OpEntry] = []
     excluded_aten_ops: List[OpEntry] = []
     for op in aten_ops:
@@ -2179,8 +1907,6 @@ def discover_operators() -> Tuple[List[OpEntry], List[OpEntry], List[OpEntry]]:
         else:
             kept_aten_ops.append(op)
 
-    # Structural entries come from STRUCTURAL_BUILDERS; sorted keeps
-    # emission deterministic across hash-seed randomization.
     structural_ops = [
         OpEntry(name, "structural", None) for name in sorted(STRUCTURAL_BUILDERS.keys())
     ]
@@ -2192,18 +1918,10 @@ def discover_operators() -> Tuple[List[OpEntry], List[OpEntry], List[OpEntry]]:
 
 
 def marker_matches_op(op_name: str, marker_leaf: str) -> bool:
-    """Return whether a ROCTX Function leaf counts as coverage for op_name.
-
-    Class-specific structural entries (e.g. nn.Module.Conv2d.__call__) only
-    match class-specific markers (nn.Module.Conv2d.forward); generic
-    labels fall through to *.forward / *.step suffix matching.
-    """
+    """Return True when ``marker_leaf`` counts as coverage for ``op_name``."""
     if op_name == marker_leaf:
         return True
 
-    # Class-specific structural patterns: nn.Module.<Class>.__call__ only
-    # matches markers ending in <Class>.forward (inject_roctx rewrites
-    # __call__ to forward). Generic labels fall through to the suffix rule.
     if (
         op_name.startswith("nn.Module.")
         and op_name.endswith(".__call__")
@@ -2226,8 +1944,6 @@ def marker_matches_op(op_name: str, marker_leaf: str) -> bool:
             return True
         return False
 
-    # ATen overload labels (torch.ops.aten.<op>.<overload>) match the
-    # packet-level marker torch.ops.aten.<op> that inject_roctx emits.
     if op_name.startswith("torch.ops.aten."):
         op_short = aten_op_short_name(op_name)
         if op_short:
@@ -2248,7 +1964,6 @@ def marker_matches_op(op_name: str, marker_leaf: str) -> bool:
     if marker_leaf.endswith(f".{op_leaf}"):
         return True
 
-    # Generic "any module / any optimizer" fallbacks.
     if op_name == "Optimizer.step" and marker_leaf.endswith(".step"):
         return True
     if (
@@ -2262,7 +1977,7 @@ def marker_matches_op(op_name: str, marker_leaf: str) -> bool:
 
 # -- Workload script generation --
 
-# Ruff E501 uses 88 columns; workload def bodies are indented by 4 spaces.
+# Maximum content width for emitted workload bodies (88 - 4 indent).
 WORKLOAD_EMIT_BODY_CONTENT_MAX = 84
 
 
@@ -2301,11 +2016,7 @@ def workload_emit_tensor_rand_setup(
 
 
 def factory_expr_for_dtype(shape: Tuple[Any, ...], dtype: torch.dtype) -> str:
-    """Return a random-tensor factory expression that preserves dtype.
-
-    randn for real/complex floats, randint for integers, and
-    randint(0, 2, ..., dtype=bool) for bool.
-    """
+    """Return a random-tensor factory expression that preserves ``dtype``."""
     if dtype == torch.bool:
         return f"torch.randint(0, 2, {shape}, device=device, dtype=torch.bool)"
     if dtype.is_floating_point or dtype.is_complex:
@@ -2351,11 +2062,7 @@ def workload_emit_tensor_pivots_1based_setup(
     vname: str,
     shape: Tuple[Any, ...],
 ) -> List[str]:
-    """Emit a 1-D 1-based identity int32 permutation for LU pivots.
-
-    lu_unpack / linalg_lu_solve require pivots in [1, n]; random
-    int32 values would walk off the row table and trigger HIP 719.
-    """
+    """Emit a 1-D, 1-based identity int32 permutation for LU pivots."""
     if len(shape) != 1:
         raise ValueError(
             f"CoverageTensorArg(emit='pivots_1based') expects a 1-D shape, "
@@ -2372,9 +2079,7 @@ def workload_emit_tensor_cumsum_offsets_setup(
     shape: Tuple[Any, ...],
     segment_length: int,
 ) -> List[str]:
-    """Emit [0, k, 2k, ..., n*k] int64 offsets for nested/jagged ops
-    (length n+1; terminal entry == values.numel()).
-    """
+    """Emit int64 offsets ``[0, k, ..., n*k]`` for nested/jagged ops."""
     if len(shape) != 1:
         raise ValueError(
             f"CoverageTensorArg(emit='cumsum_offsets') expects a 1-D shape, "
@@ -2393,11 +2098,7 @@ def workload_emit_tensor_bool_all_true_setup(
     vname: str,
     shape: Tuple[Any, ...],
 ) -> List[str]:
-    """Emit an all-True bool tensor of shape.
-
-    Needed by _assert_async and similar ops that trap on False input;
-    the default random emitter would produce False half the time.
-    """
+    """Emit an all-True bool tensor of ``shape``."""
     return [
         f"{vname} = torch.ones({shape}, device=device, dtype=torch.bool)",
     ]
@@ -2457,13 +2158,11 @@ COVERAGE_TENSOR_ARG_EMITTERS: Dict[
 
 
 def serialize_arg(argument_value: Any, vname: str) -> Tuple[List[str], str]:
-    """Build emitted-source lines defining vname plus an expression
-    to pass. Returns (setup_lines, expr): setup_lines run before the
-    profiled call (empty for scalars), expr appears inside call_expr.
+    """Return ``(setup_lines, expr)`` defining ``vname`` and the call expression.
 
-    Value-lossy for plain torch.Tensor inputs: only shape+dtype survive
-    and values are re-randomized by the emitted factory. Use
-    CoverageTensorArg when the builder needs specific values.
+    For plain ``torch.Tensor`` inputs only shape and dtype are
+    preserved; values are re-randomized at emit time. Use
+    ``CoverageTensorArg`` when the builder requires specific values.
     """
     if isinstance(argument_value, CoverageTensorArg):
         emitter = COVERAGE_TENSOR_ARG_EMITTERS.get(argument_value.emit)
@@ -2483,9 +2182,6 @@ def serialize_arg(argument_value: Any, vname: str) -> Tuple[List[str], str]:
             vname,
         )
 
-    # Serialize list / tuple elements independently: preserves heterogeneous
-    # shapes and routes CoverageTensorArg / nested tensor entries through
-    # their emitters instead of repr (which would emit unbound names).
     if isinstance(argument_value, (list, tuple)):
         open_b, close_b = ("[", "]") if isinstance(argument_value, list) else ("(", ")")
         if not argument_value:
@@ -2503,18 +2199,13 @@ def serialize_arg(argument_value: Any, vname: str) -> Tuple[List[str], str]:
 
     if argument_value is None:
         return [], "None"
-    # Scalars / dtypes / strings: repr round-trips to valid Python source.
     return [], repr(argument_value)
 
 
-# -- Structural builder registry ----------------------------------------------
-#
-# A builder is safe_var -> (setup_lines, call_expr, call_args): statements
-# placed inside def _run_<safe_var>() before the call, a callable expression,
-# and the comma-separated argument substring. STRUCTURAL_BUILDERS is the
-# single source of truth for the structural sample — both
-# discover_operators and emit_structural_preamble consume it, so
-# adding a new API surface is one entry.
+# Structural builder registry. A builder maps ``safe_var`` to
+# ``(setup_lines, call_expr, call_args)``: statements placed inside
+# ``def _run_<safe_var>()`` before the call, the callable expression,
+# and the comma-separated argument substring.
 StructuralBuilder = Callable[[str], Tuple[List[str], str, str]]
 
 
@@ -2524,11 +2215,7 @@ def builder_nn_module_call(
     *,
     extra_setup: Tuple[str, ...] = (),
 ) -> StructuralBuilder:
-    """Instantiate ctor_expr on CUDA and call it with input_expr.
-
-    extra_setup prepends extra statements for auxiliary tensors referenced
-    by input_expr.
-    """
+    """Instantiate ``ctor_expr`` on CUDA and call it with ``input_expr``."""
 
     def build(safe_var: str) -> Tuple[List[str], str, str]:
         setup: List[str] = ["import torch.nn as nn"]
@@ -2540,11 +2227,10 @@ def builder_nn_module_call(
 
 
 def builder_optimizer_step(optimizer_ctor: str) -> StructuralBuilder:
-    """Run forward+backward on a tiny Linear, then call optim.step().
+    """Run forward and backward on a small ``Linear``, then ``optim.step()``.
 
-    optimizer_ctor substitutes PARAMS with the Linear's parameters
-    (e.g. "torch.optim.Adam(PARAMS, lr=1e-3)"). Real gradients are needed
-    so stateful optimizers actually launch kernels.
+    ``optimizer_ctor`` must reference ``PARAMS`` where the Linear
+    parameters should be substituted.
     """
 
     def build(safe_var: str) -> Tuple[List[str], str, str]:
@@ -2564,13 +2250,9 @@ def builder_optimizer_step(optimizer_ctor: str) -> StructuralBuilder:
     return build
 
 
-# Idempotent single-GPU process-group bootstrap inlined by distributed
-# builders. Uses a file:// rendezvous in a per-process tmpdir so concurrent
-# pytest workers (xdist, CI shards) cannot collide on a TCP port. The
-# atexit hook destroys the process group on interpreter shutdown regardless
-# of HIP/CUDA context state; without it, rocBLAS or NCCL cleanup on a
-# faulted device can abort the interpreter with SIGABRT and mask the
-# original failure.
+# Single-GPU process-group bootstrap inlined by distributed builders.
+# Uses a per-process ``file://`` rendezvous and destroys the group at
+# interpreter shutdown.
 DISTRIBUTED_BOOTSTRAP_SETUP: Tuple[str, ...] = (
     "import atexit as _atexit",
     "import tempfile as _tempfile",
@@ -2599,11 +2281,7 @@ def builder_distributed(
     tensor_setup: Tuple[str, ...] = ("_t = torch.randn(4, 4, device=device)",),
     call_args: str = "_t",
 ) -> StructuralBuilder:
-    """Run a torch.distributed.* collective on a single-GPU process group.
-
-    Systems without a working NCCL/RCCL raise at init_process_group and the
-    op is reported as SKIP — multi-GPU topology is not required.
-    """
+    """Run a ``torch.distributed.*`` collective on a single-GPU group."""
 
     def build(_safe_var: str) -> Tuple[List[str], str, str]:
         setup = list(DISTRIBUTED_BOOTSTRAP_SETUP) + list(tensor_setup)
@@ -2612,7 +2290,7 @@ def builder_distributed(
     return build
 
 
-# Per-module builders: name -> (ctor_expr, input_expr, extra_setup).
+# Per-module builders: name -> ``(ctor_expr, input_expr, extra_setup)``.
 NN_MODULE_BUILDERS: Dict[str, Tuple[str, str, Tuple[str, ...]]] = {
     # Dense / linear layers
     "nn.Module.Linear.__call__": (
@@ -2784,7 +2462,7 @@ NN_MODULE_BUILDERS: Dict[str, Tuple[str, str, Tuple[str, ...]]] = {
 }
 
 
-# Per-optimizer builders ------------------------------------------------------
+# Per-optimizer builders.
 OPTIMIZER_BUILDERS: Dict[str, str] = {
     "Optimizer.SGD.step": "torch.optim.SGD(PARAMS, lr=0.01)",
     "Optimizer.Adam.step": "torch.optim.Adam(PARAMS, lr=1e-3)",
@@ -2799,7 +2477,7 @@ OPTIMIZER_BUILDERS: Dict[str, str] = {
 }
 
 
-# Autograd builders: tiny Linear + scalar loss so backward launches real kernels.
+# Autograd builders.
 
 
 def builder_autograd_grad(safe_var: str) -> Tuple[List[str], str, str]:
@@ -2908,7 +2586,7 @@ def builder_autograd_functional_jvp(safe_var: str) -> Tuple[List[str], str, str]
     )
 
 
-# Compile / JIT builders: best-effort — compile/trace failures map to SKIP.
+# Compile / JIT builders.
 
 
 def builder_torch_compile(safe_var: str) -> Tuple[List[str], str, str]:
@@ -2953,8 +2631,7 @@ def builder_torch_jit_script(safe_var: str) -> Tuple[List[str], str, str]:
     )
 
 
-# CUDA utilities: mostly host-side. "Marker present, no kernels" counts as PASS
-# in compare_single_op, so a missing marker flags a wrapper gap.
+# CUDA utility builders.
 
 
 def builder_cuda_synchronize(_safe_var: str) -> Tuple[List[str], str, str]:
@@ -2994,8 +2671,8 @@ def builder_cuda_set_device(_safe_var: str) -> Tuple[List[str], str, str]:
 def builder_cuda_stream(safe_var: str) -> Tuple[List[str], str, str]:
     """Create a torch.cuda.Stream and submit one op on it.
 
-    The real work (stream context + kernel + sync) runs in setup; the emitted
-    "call" is a no-op because markers have already fired.
+    The stream context, kernel, and sync run in setup; the emitted call
+    is a no-op.
     """
     return (
         [
@@ -3025,16 +2702,14 @@ def builder_cuda_event(safe_var: str) -> Tuple[List[str], str, str]:
     )
 
 
-# Assembly of the registry ----------------------------------------------------
+# Registry assembly.
 
 
 def build_structural_builder_registry() -> Dict[str, StructuralBuilder]:
     """Flat name -> StructuralBuilder map. Duplicate names raise."""
     registry: Dict[str, StructuralBuilder] = {}
 
-    # Generic fallback entries: nn.Module.__call__, Optimizer.step, and
-    # torch.Tensor.backward match any marker whose class-specific variant
-    # below is not present (or is bypassed by a subclass override).
+    # Generic fallbacks used when no class-specific builder applies.
     def _generic_nn_call(safe_var: str) -> Tuple[List[str], str, str]:
         return (
             [
@@ -3182,11 +2857,7 @@ def emit_structural_preamble(
     op_name: str,
     safe_var: str,
 ) -> Tuple[List[str], str, str]:
-    """Dispatch into STRUCTURAL_BUILDERS for one structural workload.
-
-    Unknown names fall through to ([], op_name, ""); the resulting bare
-    call raises at runtime and the comparison layer maps it to SKIP.
-    """
+    """Dispatch into ``STRUCTURAL_BUILDERS`` for one structural workload."""
     builder = STRUCTURAL_BUILDERS.get(op_name)
     if builder is None:
         return [], op_name, ""
@@ -3194,19 +2865,11 @@ def emit_structural_preamble(
 
 
 def build_workload_module_lines(operators: List[OpEntry]) -> List[str]:
-    """Emit source lines for a minimal coverage_workload.py module.
-
-    One def per operator plus run_all. The ground-truth runner imports
-    this module and wraps each ALL_OPS entry with torch.profiler;
-    run_all() is the entry point when rocprof-compute runs this script.
-    """
+    """Emit source lines for a minimal ``coverage_workload.py`` module."""
     lines = [
         "import os",
         "import sys",
-        # AMD_SERIALIZE_KERNEL must be set before import torch: HIP
-        # reads it once at runtime initialisation. Synchronous dispatch is
-        # required for asynchronous faults to surface at their launch site
-        # so per-operator attribution is correct.
+        # Set before ``import torch``; HIP reads it at runtime init.
         'os.environ.setdefault("AMD_SERIALIZE_KERNEL", "3")',
         "import torch",
         "",
@@ -3232,8 +2895,6 @@ def build_workload_module_lines(operators: List[OpEntry]) -> List[str]:
             op_setup.extend(stmts)
             arg_strs.append(expr)
 
-        # Route kwargs through serialize_arg so tensor kwargs emit factory
-        # calls instead of bare tensor([...]) reprs (which NameError).
         kwarg_strs: List[str] = []
         for keyword, value in kwargs.items():
             vname = f"_kwarg_{safe_var}_{keyword}"
@@ -3243,11 +2904,6 @@ def build_workload_module_lines(operators: List[OpEntry]) -> List[str]:
         call_args = ", ".join(arg_strs + kwarg_strs)
 
         if op.name.startswith("torch.ops."):
-            # Always call the packet — inject_roctx wraps packets, not specific
-            # overloads, and replaces the packet attribute with a plain
-            # function (so <packet>.<overload> is not accessible in the
-            # instrumented run). Argument types drive dispatch to the target
-            # overload.
             call_expr = aten_packet_call_path(op.name)
         elif op.category == "structural":
             extra_setup, call_expr, call_args = emit_structural_preamble(
@@ -3286,15 +2942,6 @@ def build_workload_module_lines(operators: List[OpEntry]) -> List[str]:
         lines.append(f"    {fn},")
     lines.append("]")
     lines.append("")
-    # run_all iterates over every emitted operator. Per-operator
-    # exceptions are logged and do not halt iteration. START / OK / FAIL
-    # banners are flushed to stderr so that a native-code termination can
-    # be attributed to the last operator whose START has no matching
-    # terminal banner. torch.cuda.synchronize() anchors asynchronous
-    # completion before OK is logged. After a per-operator failure,
-    # probe_device() dispatches a minimal kernel to test context
-    # liveness; if the probe also raises, iteration terminates with a
-    # DEVICE_DEAD banner identifying the terminal operator.
     lines.append("def probe_device():")
     lines.append("    t = torch.empty(1, device=device)")
     lines.append("    t.add_(1)")
@@ -3367,12 +3014,7 @@ def with_correlation_id_standard_name(marker_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def segments_from_function_cell(func: object) -> List[str]:
-    """Return every chain segment of a ROCTX Function cell, in order.
-
-    A cell looks like ``aten::view/aten::_to_copy:#1@main.py:60``; we
-    strip the ``:#...`` context tail and split the remainder on ``/``.
-    Empty cells return ``[]``.
-    """
+    """Return chain segments of a ROCTX ``Function`` cell, in order."""
     if not isinstance(func, str):
         return []
     op_path = func.split(":#")[0] if ":#" in func else func
@@ -3468,9 +3110,7 @@ def kernels_by_marker_leaf(
 
 
 def _read_roctx_marker_dataframe(workload_dir: str) -> Optional[pd.DataFrame]:
-    """Concatenate marker_api_trace.csv files under workload_dir;
-    returns None when no marker CSV is present.
-    """
+    """Concatenate ``marker_api_trace.csv`` files under ``workload_dir``."""
     marker_files = sorted(Path(workload_dir).glob("**/*marker_api_trace.csv"))
     if not marker_files:
         return None
@@ -3484,12 +3124,11 @@ def _read_roctx_marker_dataframe(workload_dir: str) -> Optional[pd.DataFrame]:
 def parse_roctx_markers(
     workload_dir: str,
 ) -> Tuple[Dict[str, Set[str]], Set[str]]:
-    """Parse rocprof-compute marker + counter CSVs under workload_dir.
+    """Parse rocprof-compute marker and counter CSVs under ``workload_dir``.
 
-    Returns (op_to_kernels, marker_ops): marker_ops is every distinct
-    marker leaf, op_to_kernels maps a leaf to correlated GPU kernel names
-    (leaves without kernels are omitted). Returns ({}, set()) if no marker
-    CSV exists.
+    Returns ``(op_to_kernels, marker_ops)`` where ``marker_ops`` lists
+    every distinct marker leaf and ``op_to_kernels`` maps a leaf to its
+    correlated GPU kernel names.
     """
     marker_df = _read_roctx_marker_dataframe(workload_dir)
     if marker_df is None:
@@ -3505,12 +3144,8 @@ def parse_roctx_markers(
     return op_to_kernels, marker_ops
 
 
-# C++ RecordFunction tier signature detection. compare_single_op()
-# PASSes on either tier (markers + kernel intersection); these
-# sentinels are the only way to prove the C++ tier ran. Source of
-# truth: src/lib/roctx_recordfn/roctx_recordfn.cpp:default_leaf_context().
-
-
+# Sentinel leaf-context labels emitted by the C++ RecordFunction tier.
+# Source of truth: roctx_recordfn.cpp ``default_leaf_context``.
 C_TIER_LEAF_CONTEXT_SENTINELS: Tuple[str, ...] = (
     "aten:0",
     "aten.nested:0",
@@ -3518,7 +3153,7 @@ C_TIER_LEAF_CONTEXT_SENTINELS: Tuple[str, ...] = (
     "autograd.bwd:0",
 )
 
-# Subset that proves backward-pass instrumentation specifically.
+# Backward-pass sentinels.
 C_TIER_BACKWARD_SENTINELS: Tuple[str, ...] = (
     "autograd.engine:0",
     "autograd.bwd:0",
@@ -3528,9 +3163,11 @@ C_TIER_BACKWARD_SENTINELS: Tuple[str, ...] = (
 def cpp_tier_signature_in_markers(
     marker_df: pd.DataFrame,
 ) -> Tuple[bool, Dict[str, int]]:
-    """Scan marker_df["Function"] for "@<sentinel>" tokens. Returns
-    (cpp_tier_active, sentinel_counts). The "@" prefix avoids false
-    positives against file paths. Missing column -> (False, {}).
+    """Scan ``marker_df["Function"]`` for ``@<sentinel>`` tokens.
+
+    Returns ``(cpp_tier_active, sentinel_counts)``. The ``@`` prefix
+    avoids false positives against file paths. A missing column returns
+    ``(False, {})``.
     """
     counts: Dict[str, int] = {}
     if marker_df is None or marker_df.empty:
@@ -3553,9 +3190,7 @@ def cpp_tier_signature_in_markers(
 def detect_cpp_tier_signature(
     workload_dir: str,
 ) -> Tuple[bool, Dict[str, int]]:
-    """Workload-dir entry point for cpp_tier_signature_in_markers.
-    Returns (False, {}) when no marker CSV exists.
-    """
+    """Workload-dir entry point for :func:`cpp_tier_signature_in_markers`."""
     marker_df = _read_roctx_marker_dataframe(workload_dir)
     if marker_df is None:
         return False, {}
@@ -3566,16 +3201,11 @@ def format_cpp_tier_signature_report(
     cpp_tier_active: bool,
     sentinel_counts: Dict[str, int],
 ) -> Tuple[str, ...]:
-    """Render the C++ tier outcome as 1-4 indented stdout lines:
-    NONE (Python fallback), FORWARD-ONLY (no autograd in workload),
-    or FULL (forward + backward sentinels).
-    """
+    """Render the C++ tier outcome as ``NONE``, ``FORWARD-ONLY``, or ``FULL``."""
     if not cpp_tier_active:
         return (
-            "C++ tier signature: NONE — markers carry no aten:0 / "
-            "aten.nested:0 / autograd.engine:0 / autograd.bwd:0 "
-            "sentinel. Workload ran on the Python TorchDispatchMode "
-            "fallback (degraded backward-thread context propagation).",
+            "C++ tier signature: NONE; workload ran on the Python "
+            "TorchDispatchMode fallback.",
         )
 
     backward_observed = any(
@@ -3603,10 +3233,7 @@ def format_cpp_tier_signature_report(
 
     return (
         f"C++ tier signature: FORWARD-ONLY — {summary}.",
-        "  No autograd.engine:0 / autograd.bwd:0 sentinels observed; "
-        "this is expected for workloads that do no .backward() but "
-        "indicates degraded backward propagation if your workload "
-        "*should* have triggered autograd.",
+        "  No autograd.engine:0 / autograd.bwd:0 sentinels observed.",
     )
 
 
@@ -3691,19 +3318,8 @@ def describe_missing_or_errored_op(
     )
 
 
-# -- Skip-reason categorization --
-#
-# SKIP outcomes have many distinct underlying causes (missing builder,
-# upstream ROCm fault, NVIDIA-only feature, paired-forward dependency,
-# missing external library, ...). The end-of-test summary aggregates
-# these into a small set of operator-author-facing buckets so the SKIP
-# count is actionable rather than opaque.
-#
-# Categorization is keyword-based: each branch is keyed on a stable
-# phrase emitted by describe_missing_or_errored_op or by the literal
-# text of an OpSpec.skip reason in OP_SPECS. Adding a new bucket
-# requires (1) a new key in SKIP_CATEGORY_LABELS and (2) a matching
-# branch in categorize_skip_reason.
+# Skip-reason categorization. Each bucket is identified by a stable
+# keyword in the outcome reason string.
 
 SKIP_CATEGORY_LABELS: Dict[str, str] = {
     "argument_builder_gap": (
@@ -3748,13 +3364,7 @@ SKIP_CATEGORY_LABELS: Dict[str, str] = {
 
 
 def categorize_skip_reason(reason: str) -> str:
-    """Return the stable SKIP-category key for an outcome.reason string.
-
-    Branches are ordered: structural lookup paths first (origin-based),
-    then OpSpec.skip text matched by keyword. Returns "other" when no
-    branch matches — adding a new SKIP source should extend both this
-    function and SKIP_CATEGORY_LABELS.
-    """
+    """Return the SKIP-category key for an ``outcome.reason`` string."""
     r = reason.lower()
 
     if "no opspec.build entry" in r:
@@ -3778,11 +3388,6 @@ def categorize_skip_reason(reason: str) -> str:
         )
     ):
         return "upstream_rocm_bug"
-    # discover_operators filters CUDA-only ops out of the sample using the
-    # same helper, so this branch normally only fires if an OpSpec.skip
-    # text matches the keyword set but wasn't caught at enumeration time
-    # (e.g. a structural label or a future code path that bypasses
-    # discover_operators).
     if is_hardware_incompatible_cuda_only(r):
         return "hardware_incompatible_cuda_only"
     if any(
@@ -3814,20 +3419,8 @@ def _short_op_name(op_name: str) -> str:
     return op_name[len(prefix) :] if op_name.startswith(prefix) else op_name
 
 
-# -- argument-builder-gap Pareto (family classifier) -------------------------
-#
-# The argument_builder_gap SKIP bucket dominates the coverage report because
-# OP_SPECS only carries hand-authored short-name builders. The remaining ops
-# are not random — they cluster into a small number of structural families,
-# each addressable by one shared template builder. missing_builder_family
-# returns a stable family key for an op name; format_missing_arg_builder_report
-# prints the family Pareto so the developer can attack the largest families
-# first.
-#
-# Family keys are also used as keys into _MISSING_BUILDER_FAMILY_HINTS, which
-# records the one-line "fix pattern" for each family. Adding a new family
-# requires (1) a new branch in missing_builder_family and (2) a matching
-# hint entry; otherwise the report will fall back to the generic "other".
+# Family classifier for the ``argument_builder_gap`` bucket. Maps each
+# op name to a structural family and a short fix-pattern hint.
 
 
 _MISSING_BUILDER_FAMILY_HINTS: Dict[str, str] = {
@@ -3891,12 +3484,7 @@ _MISSING_BUILDER_FAMILY_HINTS: Dict[str, str] = {
 
 
 def missing_builder_family(op_name: str) -> str:
-    """Heuristic family bucket for ops missing an OpSpec.build entry.
-
-    Name-based classification (no schema parsing) so the function works
-    even when called from offline tooling that doesn't have torch loaded.
-    Priority-ordered: more-specific buckets are checked first.
-    """
+    """Return a family bucket key for an op missing an ``OpSpec.build`` entry."""
     short = aten_op_short_name(op_name) or op_name.rsplit(".", 1)[-1]
     overload_key = aten_overload_key(op_name)
     suffix = (
@@ -3982,33 +3570,19 @@ def missing_builder_family(op_name: str) -> str:
     if suffix in ("dim", "dim_IntList", "dim_int", "dim_values"):
         return "reduction along dim"
 
-    # Generic elementwise overloads — apply only when no domain-family
-    # match fired above, so e.g. add.Tensor still buckets here but
-    # softmax.int does not.
     if suffix in ("Tensor", "Tensor_Tensor"):
         return "elementwise — Tensor overload"
     if suffix in ("Scalar", "Tensor_Scalar", "Scalar_Tensor"):
         return "elementwise — Scalar overload"
 
-    # Hand-curated short names that are unary float Tensor → Tensor
-    # primitives (math, activations, predicates). All share the same
-    # one-line template builder: lambda d: ([f(d, N, N)], {}). Added
-    # here rather than via heuristics because the names have no
-    # exploitable pattern.
     if short in _KNOWN_UNARY_FLOAT_ELEMENTWISE:
         return "elementwise — unary float Tensor → Tensor"
-    # Hand-curated whole-tensor reductions (no dim arg) — single
-    # template (input tensor) covers all.
     if short in _KNOWN_WHOLE_TENSOR_REDUCTIONS:
         return "reduction (whole-tensor)"
     return "other / uncategorized"
 
 
-# Curated short-name allowlists for the family classifier. These names
-# have no exploitable structural pattern (e.g. cos / sin are plain
-# words), but they all accept the same minimal builder signature, so
-# bucketing them lets the report flag a single template that knocks
-# out the entire group.
+# Curated short-name allowlists for the family classifier.
 _KNOWN_UNARY_FLOAT_ELEMENTWISE: frozenset = frozenset({
     # trig / hyperbolic
     "acos",
@@ -4123,17 +3697,7 @@ def format_missing_arg_builder_report(
     include_hints: bool = True,
     indent: str = "    ",
 ) -> List[str]:
-    """Family Pareto for ops missing an OpSpec.build entry.
-
-    Triage workflow: pick the family with the highest count, write one
-    template builder that covers every op in it, and watch the
-    argument_builder_gap SKIP bucket shrink in the next run.
-
-    Returns an empty list when op_names is empty so callers can drop the
-    section entirely. Examples per family are alphabetized and truncated
-    to max_examples; the trailing "+ N more" makes the truncation
-    auditable.
-    """
+    """Render a family Pareto for ops missing an ``OpSpec.build`` entry."""
     if not op_names:
         return []
 
@@ -4147,10 +3711,7 @@ def format_missing_arg_builder_report(
     width = max(len(str(len(ops))) for _, ops in rows)
     sub_indent = f"{indent}{' ' * width}  "
 
-    lines = [
-        f"  argument-builder gap — by family ({len(op_names)} ops, "
-        f"target the largest families first):"
-    ]
+    lines = [f"  argument-builder gap — by family ({len(op_names)} ops):"]
     for family, names in rows:
         sample = sorted(names)[:max_examples]
         suffix = (
@@ -4174,19 +3735,7 @@ def format_skip_breakdown_lines(
     max_names_per_category: int = 12,
     indent: str = "    ",
 ) -> List[str]:
-    """Render a SKIP breakdown table (sorted by count desc, then by label).
-
-    When skip_op_names is provided, each category line is followed by a
-    secondary ``ops: …`` line listing the offending operators (short
-    form, alphabetized). Lists longer than max_names_per_category are
-    truncated with a ``(+N more)`` tail so the section stays bounded
-    even when one bucket dominates.
-
-    Returns an empty list when there are zero skips so callers can drop
-    the section entirely without a special case. The total line is
-    appended last as a defensive cross-check against the loop's
-    skipped counter.
-    """
+    """Render a SKIP breakdown table sorted by count then label."""
     if not skip_counts:
         return []
 
@@ -4195,8 +3744,6 @@ def format_skip_breakdown_lines(
         key=lambda kv: (-kv[1], SKIP_CATEGORY_LABELS.get(kv[0], kv[0])),
     )
     width = max(len(str(count)) for _, count in rows)
-    # Secondary "ops:" lines align under the label column, i.e. past
-    # the count + the two-space gutter that follows it.
     sub_indent = f"{indent}{' ' * width}  "
     lines = ["  SKIP breakdown:"]
     for category, count in rows:
@@ -4253,14 +3800,11 @@ def compare_single_op(
     *,
     match_verbose: bool = False,
 ) -> OpCompareOutcome:
-    """Compare one op's profiler JSON entry to parsed ROCTX markers and kernels.
+    """Compare one op's profiler entry against ROCTX markers and kernels.
 
-    PASS rule: structural ops need a matching marker leaf only; ATen
-    ops with profiler kernels also need a non-empty intersection of
-    profiler cuda_kernels and ROCTX-correlated kernels. Marker-to-op
-    matching is structural (leaf name); kernel intersection uses the
-    torch.profiler ground truth. With match_verbose=True, every
-    outcome logs the matched marker leaves and both kernel sets.
+    Structural ops pass when a matching marker leaf is present. ATen
+    ops with profiler kernels also require a non-empty intersection of
+    profiler ``cuda_kernels`` and ROCTX-correlated kernels.
     """
     ground_truth_entry = ground_truth.get(op.name)
 
@@ -4309,8 +3853,6 @@ def compare_single_op(
 
     verbose_tail = _match_verbose_lines()
 
-    # Structural ops are hierarchical wrappers; inner ATen ops own
-    # the kernels. Marker presence == PASS.
     if op.category == "structural":
         if marker_found:
             return OpCompareOutcome(
@@ -4345,8 +3887,6 @@ def compare_single_op(
         )
 
     if marker_found and roctx_kernels:
-        # Require >=1 kernel in common with profiler ground truth;
-        # roctx kernels alone may belong to unrelated dispatches.
         overlap = profiler_kernel_set & roctx_kernels
         if overlap:
             return OpCompareOutcome(
@@ -4369,16 +3909,9 @@ def compare_single_op(
         )
 
     if marker_found:
-        # Zero-copy view ops issue no kernel launches; ROCTX correctly
-        # reports an empty kernel-correlation set while profiler's
-        # CPU-span overlap attributes adjacent kernels.
         short_name = aten_op_short_name(op.name)
         if short_name and short_name in KNOWN_KERNEL_FREE_ATEN_OPS:
-            note_lines = (
-                "kernel-free aten op (zero-copy view).",
-                "ROCTX reports zero correlated kernels; profiler "
-                "attributes adjacent kernels via CPU-span overlap.",
-            )
+            note_lines = ("kernel-free aten op (zero-copy view).",)
             return OpCompareOutcome(
                 "pass",
                 "",
@@ -4407,13 +3940,7 @@ def print_torch_trace_coverage_session_header(
     structural_operator_count: int,
     excluded_operator_count: int = 0,
 ) -> None:
-    """Print seed / sampling summary (pytest -s); warn for default capture.
-
-    excluded_operator_count is the number of CUDA-only ATen ops dropped
-    by discover_operators (hardware-incompatible on ROCm). It's printed
-    on its own line when non-zero so the exclusion is auditable; the
-    "selected from" count is post-exclusion.
-    """
+    """Print the seed and sampling summary for a coverage session."""
     print(
         f"\n  Seed: {seed} | {sampled_operator_count} operators"
         f" selected from {aten_operator_count} CUDA ATen ops"
@@ -4423,9 +3950,7 @@ def print_torch_trace_coverage_session_header(
     if excluded_operator_count:
         print(
             f"  Excluded {excluded_operator_count} CUDA-only ATen ops "
-            f"(hardware-incompatible: CUTLASS / cuDNN / xFormers / "
-            f"cuSPARSELt / FlashAttention / fp8 / packed int4-int8 / "
-            f"grouped matmul)"
+            "(hardware-incompatible)."
         )
     print()
     reproduce_cmd = (
@@ -4451,14 +3976,13 @@ def signal_name(returncode: int) -> str:
 
 
 def describe_subprocess_exit_code(returncode: int) -> str:
-    """Human-readable explanation for subprocess returncode (POSIX)."""
+    """Return a human-readable description of a subprocess return code."""
     if returncode < 0:
         name = signal_name(returncode)
         name_part = f" ({name})" if name else ""
         return (
             f"Child process terminated by signal {-returncode}{name_part} "
-            f"(exit {returncode}): native code fault (GPU kernel, driver, or "
-            "profiler hook)."
+            f"(exit {returncode})."
         )
     return f"Child process exited with status {returncode}."
 
@@ -4547,14 +4071,7 @@ def copy_failed_coverage_artifacts_to_cwd(
 
 
 def extract_device_fault_banner(stderr_text: str) -> str:
-    """Summarise device-fault markers emitted by the generated workload.
-
-    Scans stderr_text for DEVICE_DEAD banners and for the most
-    recent START without a matching OK or FAIL terminal
-    banner; both identify the operator implicated in a context-faulting
-    failure. Returns the combined hint, or an empty string when neither
-    signal is present.
-    """
+    """Summarise device-fault markers emitted by the generated workload."""
     if not stderr_text:
         return ""
     dead: List[str] = []
