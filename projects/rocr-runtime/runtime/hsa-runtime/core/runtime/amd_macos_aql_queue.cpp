@@ -50,7 +50,30 @@ constexpr uint32_t COMPUTE_PGM_LO = 0x2E0C;
 constexpr uint32_t COMPUTE_PGM_RSRC1 = 0x2E12;
 constexpr uint32_t COMPUTE_RESOURCE_LIMITS = 0x2E15;
 constexpr uint32_t COMPUTE_TMPRING_SIZE = 0x2E18;
+// gfx12 architected-flat-scratch dispatch base (gc_12_0_0 regCOMPUTE_DISPATCH_
+// SCRATCH_BASE_LO/HI 0x1bb0/0x1bb1 + the 0x1260 MMIO->SH offset used by every
+// other reg constant in this file). Value = backing VA >> 8 (256-byte units).
+// Corroborated by tinygrad's working gfx11/12 direct-PM4 path which writes this
+// per-dispatch for target >= gfx11.
+constexpr uint32_t COMPUTE_DISPATCH_SCRATCH_BASE_LO = 0x2E10;
+constexpr uint32_t COMPUTE_DISPATCH_SCRATCH_BASE_HI = 0x2E11;
+// The base is written as a single 2-dword SET_SH_REG starting at _LO, which
+// must land on _LO then _HI; assert they are consecutive.
+static_assert(COMPUTE_DISPATCH_SCRATCH_BASE_HI == COMPUTE_DISPATCH_SCRATCH_BASE_LO + 1,
+              "scratch base LO/HI must be consecutive SH registers");
 constexpr uint32_t COMPUTE_RESTART_X = 0x2E1B;
+
+// gfx11/gfx12 COMPUTE_TMPRING_SIZE.WAVESIZE counts 256-byte blocks per wave.
+constexpr uint32_t kScratchGranularity = 256;
+// Worst-case concurrent wave-slot bound for gfx1201 (Navi48 / RX 9070 XT):
+// num_cu * MaxSlotsScratchCU. 64 * 32 = 2048, fits the 12-bit WAVES field.
+constexpr uint32_t kGfx1201NumCu = 64;
+constexpr uint32_t kMaxSlotsScratchCU = 32;
+constexpr uint32_t kScratchMaxWaves = kGfx1201NumCu * kMaxSlotsScratchCU;
+// Over-allocate the backing buffer to cover per-shader-engine scratch striping
+// (the exact wave->offset layout is the one item to confirm on hardware); cheap
+// insurance against an out-of-bounds scratch access faulting the CP.
+constexpr uint32_t kScratchSeFactor = 4;
 constexpr uint32_t COMPUTE_PGM_RSRC3_GFX12 = 0x2E28;
 constexpr uint32_t COMPUTE_USER_DATA_0 = 0x2E40;
 constexpr uint32_t COMPUTE_START_X = 0x2E04;
@@ -298,6 +321,7 @@ MacAqlQueue::MacAqlQueue(core::SharedQueue* shared_queue, MacGpuAgent* agent,
 
 MacAqlQueue::~MacAqlQueue() {
   MacAqlQueue::Inactivate();
+  if (gpu_scratch_cpu_) driver_.FreeMemory(gpu_scratch_cpu_, gpu_scratch_size_);
   if (scratch_cpu_) driver_.FreeMemory(scratch_cpu_, scratch_size_);
   if (marker_cpu_base_) driver_.FreeMemory(marker_cpu_base_, 4096);
   if (ring_buf_) core::Runtime::runtime_singleton_->system_deallocator()(ring_buf_);
@@ -419,6 +443,20 @@ hsa_status_t MacAqlQueue::AllocateDispatchScratch(size_t size, size_t align, voi
   *cpu = static_cast<char*>(scratch_cpu_) + scratch_offset_;
   *gpu = scratch_gpu_ + scratch_offset_;
   scratch_offset_ += static_cast<size_t>(rounded);
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t MacAqlQueue::EnsureGpuScratch(size_t size) {
+  if (size <= gpu_scratch_size_) return HSA_STATUS_SUCCESS;
+  const size_t rounded = static_cast<size_t>(AlignUp(size, 64 * 1024));
+  void* cpu = nullptr;
+  uint64_t gpu = 0;
+  hsa_status_t status = driver_.AllocateVram(rounded, 4096, &cpu, &gpu);
+  if (status != HSA_STATUS_SUCCESS) return status;
+  if (gpu_scratch_cpu_) driver_.FreeMemory(gpu_scratch_cpu_, gpu_scratch_size_);
+  gpu_scratch_cpu_ = cpu;
+  gpu_scratch_gpu_ = gpu;
+  gpu_scratch_size_ = rounded;
   return HSA_STATUS_SUCCESS;
 }
 
@@ -547,10 +585,60 @@ hsa_status_t MacAqlQueue::SubmitKernel(const hsa_kernel_dispatch_packet_t& packe
     CopyToBar(dispatch_packet_cpu, &gpu_packet, sizeof(gpu_packet));
   }
 
-  if ((kd->kernel_code_properties & kPropPrivateSegmentBuffer) != 0 ||
-      ((kd->kernel_code_properties & kPropFlatScratchInit) != 0 &&
-       packet.private_segment_size != 0)) {
+  // The enable_sgpr_private_segment_buffer (V# in user SGPRs) path is genuinely
+  // unimplemented and is not used by the gfx12 architected-flat-scratch dispatch
+  // path; keep rejecting it.
+  if ((kd->kernel_code_properties & kPropPrivateSegmentBuffer) != 0) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+  // KNOWN-INCOMPLETE on this no-MES path. gfx12 uses architected flat scratch:
+  // FLAT_SCRATCH is a readonly, SPI-initialized register, and the SPI sources
+  // the per-wave scratch base from per-QUEUE state (MQD / amd_queue_t) that MES
+  // normally programs. The register writes below (DISPATCH_SCRATCH_BASE +
+  // TMPRING) plus the SH_MEM_BASES/CONFIG aperture set up in the bring-up are
+  // necessary but NOT sufficient without that per-queue scratch state: a
+  // scratch-using kernel still faults the CP with FLAT_SCRATCH=0 (GCVM L2
+  // permission fault at VA 0). Until per-queue scratch is wired (via MES
+  // submission or MQD scratch fields), the knob below defaults OFF and we reject
+  // scratch-using kernels cleanly (OUT_OF_RESOURCES) instead of wedging the GPU.
+  const bool enable_scratch = EnvEnabled("ROCR_MACOS_AQL_ENABLE_SCRATCH");
+  // A kernel uses scratch iff it has a nonzero per-work-item private segment.
+  // gfx12 architected scratch does NOT set kPropFlatScratchInit, so don't key on
+  // that. Take the larger of packet and descriptor sizes. (RSRC2.ENABLE_PRIVATE_
+  // SEGMENT can be set with a zero fixed size and no real spilling, so it is not
+  // used as the trigger.)
+  const uint32_t scratch_bytes_per_thread = std::max<uint32_t>(
+      packet.private_segment_size, kd->private_segment_fixed_size);
+  const bool wants_scratch = scratch_bytes_per_thread != 0;
+  if (wants_scratch && !enable_scratch) {
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
+  uint64_t gpu_scratch_base_256 = 0;
+  uint32_t compute_tmpring_size = 0;
+  if (wants_scratch) {
+    const uint32_t lanes =
+        (kd->kernel_code_properties & kPropWave32) != 0 ? 32u : 64u;
+    const uint32_t bytes_per_thread = static_cast<uint32_t>(
+        AlignUp(scratch_bytes_per_thread, kScratchGranularity / lanes));
+    const uint32_t wave_bytes = bytes_per_thread * lanes;
+    const uint32_t wavesize_units = CeilDiv(wave_bytes, kScratchGranularity);
+    const uint64_t backing =
+        static_cast<uint64_t>(wave_bytes) * kScratchMaxWaves * kScratchSeFactor;
+    status = EnsureGpuScratch(static_cast<size_t>(backing));
+    if (status != HSA_STATUS_SUCCESS) return status;
+    gpu_scratch_base_256 = gpu_scratch_gpu_ >> 8;
+    compute_tmpring_size =
+        (kScratchMaxWaves & 0xFFFu) | ((wavesize_units & 0x3FFFFu) << 12);
+    if (TraceAql()) {
+      std::fprintf(stderr,
+                   "ROCR macOS AQL scratch base=0x%llx pss=%u lanes=%u bpt=%u "
+                   "wave_bytes=%u wavesize=%u waves=%u tmpring=0x%x backing=%zu\n",
+                   static_cast<unsigned long long>(gpu_scratch_gpu_),
+                   scratch_bytes_per_thread, lanes, bytes_per_thread, wave_bytes,
+                   wavesize_units, kScratchMaxWaves, compute_tmpring_size,
+                   gpu_scratch_size_);
+    }
   }
 
   std::vector<uint32_t> user_data;
@@ -655,7 +743,11 @@ hsa_status_t MacAqlQueue::SubmitKernel(const hsa_kernel_dispatch_packet_t& packe
   SetShReg(pm4, COMPUTE_PGM_RSRC1,
            {kd->compute_pgm_rsrc1, kd->compute_pgm_rsrc2 | (lds_blocks << 15)});
   SetShReg(pm4, COMPUTE_PGM_RSRC3_GFX12, {compute_pgm_rsrc3});
-  SetShReg(pm4, COMPUTE_TMPRING_SIZE, {0});
+  if (gpu_scratch_base_256 != 0) {
+    SetShReg(pm4, COMPUTE_DISPATCH_SCRATCH_BASE_LO,
+             {Low32(gpu_scratch_base_256), High32(gpu_scratch_base_256)});
+  }
+  SetShReg(pm4, COMPUTE_TMPRING_SIZE, {compute_tmpring_size});
   SetShReg(pm4, COMPUTE_RESTART_X, {0, 0, 0});
   if (!user_data.empty()) SetShReg(pm4, COMPUTE_USER_DATA_0, user_data);
   if (!resource_skip) {

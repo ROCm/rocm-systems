@@ -79,6 +79,11 @@ class MacAqlQueue : public core::Queue,
   hsa_status_t SubmitBarrier(const hsa_barrier_and_packet_t& packet, bool is_or);
   hsa_status_t SubmitPm4AndWait(const std::vector<uint32_t>& pm4);
   hsa_status_t AllocateDispatchScratch(size_t size, size_t align, void** cpu, uint64_t* gpu);
+  // Lazily allocate (grow-only) a dedicated GPU private-segment scratch backing
+  // buffer for scratch-using kernels. Distinct from the dispatch-staging scratch
+  // above (scratch_cpu_/AllocateDispatchScratch), which is a CPU-coherent kernarg
+  // staging bump allocator, NOT GPU private memory.
+  hsa_status_t EnsureGpuScratch(size_t size);
   void CompleteSignal(hsa_signal_t signal, hsa_signal_value_t value);
   void ReportAsyncError(hsa_status_t status);
 
@@ -100,6 +105,13 @@ class MacAqlQueue : public core::Queue,
   uint64_t scratch_gpu_ = 0;
   size_t scratch_size_ = 0;
   size_t scratch_offset_ = 0;
+
+  // Dedicated GPU private-segment (scratch) backing for kernels that spill to
+  // private memory. Lazily allocated, grow-only; programmed via
+  // COMPUTE_DISPATCH_SCRATCH_BASE + COMPUTE_TMPRING_SIZE on gfx12.
+  void* gpu_scratch_cpu_ = nullptr;
+  uint64_t gpu_scratch_gpu_ = 0;
+  size_t gpu_scratch_size_ = 0;
 
   static __forceinline int& rtti_id() {
     static int rtti_id_ = 0;
