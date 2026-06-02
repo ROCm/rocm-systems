@@ -72,6 +72,10 @@ def test_rocshmem(json_data):
         assert "end_timestamp" in node
         assert "start_timestamp" in node
         assert "thread_id" in node
+        # rocprofv3 consumes the extended (EXT) buffer records, so every record
+        # carries the function argument(s) and return value.
+        assert "args" in node
+        assert "retval" in node
 
         assert node.size > 0
         assert node.thread_id > 0
@@ -79,7 +83,20 @@ def test_rocshmem(json_data):
         assert node.end_timestamp > 0
         assert node.start_timestamp < node.end_timestamp
 
-        assert data.strings.buffer_records[node.kind].kind == "ROCSHMEM_API"
+        # every traced rocSHMEM host-stream API takes at least one argument, so the
+        # args payload must be present and well-formed ({type, name, value}).
+        assert len(node.args) > 0
+        for arg in node.args:
+            assert "type" in arg
+            assert "name" in arg
+            assert "value" in arg
+
+        # the buffer service registers the EXT domain, so records report the
+        # ROCSHMEM_API_EXT kind (the basic ROCSHMEM_API kind shares the same ops).
+        assert data.strings.buffer_records[node.kind].kind in (
+            "ROCSHMEM_API",
+            "ROCSHMEM_API_EXT",
+        )
         assert (
             data.strings.buffer_records[node.kind].operations[node.operation]
             in bf_op_names
@@ -116,7 +133,7 @@ def test_csv_data(csv_data):
 
         api_calls.append(row["Function"])
 
-        assert row["Domain"] == "ROCSHMEM_API"
+        assert row["Domain"] in ("ROCSHMEM_API", "ROCSHMEM_API_EXT")
         assert int(row["Process_Id"]) > 0
         assert int(row["Thread_Id"]) > 0
         assert int(row["Start_Timestamp"]) > 0

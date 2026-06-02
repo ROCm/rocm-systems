@@ -1384,10 +1384,11 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                     static_cast<rocprofiler_buffer_tracing_hip_graph_record_t*>(header->payload);
 
                 tool::write_ring_buffer(*record, domain_type::HIP_GRAPH);
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_ROCSHMEM_API)
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_ROCSHMEM_API_EXT)
             {
-                auto* record =
-                    static_cast<rocprofiler_buffer_tracing_rocshmem_api_record_t*>(header->payload);
+                auto* record = static_cast<rocprofiler_buffer_tracing_rocshmem_api_ext_record_t*>(
+                    header->payload);
 
                 tool::write_ring_buffer(*record, domain_type::ROCSHMEM);
             }
@@ -2757,7 +2758,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                             ROCPROFILER_BUFFER_TRACING_ROCJPEG_API,
                                             get_buffers().rocjpeg_api_trace},
                       buffer_service_config{tool::get_config().rocshmem_api_trace,
-                                            ROCPROFILER_BUFFER_TRACING_ROCSHMEM_API,
+                                            ROCPROFILER_BUFFER_TRACING_ROCSHMEM_API_EXT,
                                             get_buffers().rocshmem_api_trace},
                       // Enable only the ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED operation
                       // for KFD QUEUE events; all other QUEUE related events are published as range

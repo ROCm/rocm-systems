@@ -243,8 +243,8 @@ generate_stats(const output_config& /*cfg*/,
 
 stats_entry_t
 generate_stats(const output_config& /*cfg*/,
-               const metadata&                                                    tool_metadata,
-               const generator<rocprofiler_buffer_tracing_rocshmem_api_record_t>& data)
+               const metadata&                                                        tool_metadata,
+               const generator<rocprofiler_buffer_tracing_rocshmem_api_ext_record_t>& data)
 {
     auto rocshmem_stats = stats_map_t{};
     for(auto ditr : data)

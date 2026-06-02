@@ -64,6 +64,7 @@ def get_perfetto_category_name(category):
         "HIP_RUNTIME_API_EXT": "hip_api",
         "HIP_COMPILER_API_EXT": "hip_api",
         "ROCDECODE_API_EXT": "rocdecode_api",
+        "ROCSHMEM_API_EXT": "rocshmem_api",
         "KFD_EVENT_PAGE_MIGRATE": "kfd_events",
         "KFD_EVENT_PAGE_FAULT": "kfd_events",
         "KFD_EVENT_QUEUE": "kfd_events",

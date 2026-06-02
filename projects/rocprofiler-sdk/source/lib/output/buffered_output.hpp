@@ -210,7 +210,7 @@ using rocdecode_buffered_output_t =
 using rocjpeg_buffered_output_t =
     buffered_output<rocprofiler_buffer_tracing_rocjpeg_api_record_t, domain_type::ROCJPEG>;
 using rocshmem_buffered_output_t =
-    buffered_output<rocprofiler_buffer_tracing_rocshmem_api_record_t, domain_type::ROCSHMEM>;
+    buffered_output<rocprofiler_buffer_tracing_rocshmem_api_ext_record_t, domain_type::ROCSHMEM>;
 using kernel_dispatch_buffered_output_ext_t =
     buffered_output<tool_buffer_tracing_kernel_dispatch_ext_record_t, domain_type::KERNEL_DISPATCH>;
 using memory_copy_buffered_output_ext_t =

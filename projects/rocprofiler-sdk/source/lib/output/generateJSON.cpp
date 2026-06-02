@@ -199,7 +199,7 @@ write_json(
     const generator<tool_buffer_tracing_memory_allocation_ext_record_t>&    memory_allocation_gen,
     const generator<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>& rocdecode_api_gen,
     const generator<rocprofiler_buffer_tracing_rocjpeg_api_record_t>&       rocjpeg_api_gen,
-    const generator<rocprofiler_buffer_tracing_rocshmem_api_record_t>&      rocshmem_api_gen,
+    const generator<rocprofiler_buffer_tracing_rocshmem_api_ext_record_t>&  rocshmem_api_gen,
     const generator<rocprofiler_tool_pc_sampling_host_trap_record_t>&  pc_sampling_host_trap_gen,
     const generator<rocprofiler_tool_pc_sampling_stochastic_record_t>& pc_sampling_stochastic_gen,
     const generator<tool_spm_counter_record_t>&                        spm_gen,
