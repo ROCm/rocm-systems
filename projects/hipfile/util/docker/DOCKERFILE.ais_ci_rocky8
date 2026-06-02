@@ -4,7 +4,7 @@
 
 ARG ROCKY_MAJOR_VERSION=8
 ARG ROCKY_VERSION=${ROCKY_MAJOR_VERSION}.10
-FROM rockylinux/rockylinux:${ROCKY_VERSION}-minimal
+FROM rockylinux/rockylinux:${ROCKY_VERSION}-minimal AS base
 LABEL org.opencontainers.image.source=https://github.com/ROCm/hipFile
 # Brings ROCKY_VERSION in-scope
 ARG ROCKY_MAJOR_VERSION
@@ -81,27 +81,8 @@ RUN cat <<EOF > /etc/ld.so.conf.d/rocm.conf
 EOF
 RUN ldconfig
 
-# Install a minimal CUDA SDK
-# HIP depends on the ROCm libraries being installed.
-# This means we are unable to have a separate CUDA+HIP image
-# without ROCm.
-RUN curl https://developer.download.nvidia.com/compute/cuda/repos/rhel${ROCKY_MAJOR_VERSION}/x86_64/cuda-rhel${ROCKY_MAJOR_VERSION}.repo \
-        -o /etc/yum.repos.d/cuda-rhel${ROCKY_MAJOR_VERSION}.repo && \
-    dnf makecache
-
-# https://gitlab.com/nvidia/container-images/cuda/blob/master/dist/12.6.1/ubuntu2404/devel/Dockerfile
-# Attempt a "minimal" CUDA Dev install.
-# libcufile-dev-X.Y == libcufile-devel-X.Y
-# libnvidia-compute-570-server == nvidia-driver-cuda + kmod-nvidia-open-dkms
-RUN dnf module enable -y nvidia-driver:570-open && \
-    dnf install -y \
-        cuda-minimal-build-12-9 \
-        kmod-nvidia-open-dkms \
-        libcufile-devel-12-9 \
-        nvidia-driver-cuda
-
-# Add ROCm and CUDA bin directories to the path
-ENV PATH=/usr/local/cuda/bin:/opt/rocm/bin:${PATH}
+# Add ROCm bin directory to the path
+ENV PATH=/opt/rocm/bin:${PATH}
 
 # Environment Build Arg for ROCm
 ENV ROCM_VERSION="${ROCM_VERSION}"
@@ -119,3 +100,28 @@ VOLUME /mnt/ais
 
 # Generic Mount point for container to access AIS-capable storage.
 VOLUME /mnt/ais-fs
+
+# ---- Stage 2: NVIDIA (extends base with CUDA SDK) ----
+# The HIP runtime must be present to use hipFile with NVIDIA GPUs,
+# which is why this stage inherits from base rather than a bare CUDA image.
+FROM base AS nvidia
+ARG ROCKY_MAJOR_VERSION=8
+
+# Install a minimal CUDA SDK
+RUN curl https://developer.download.nvidia.com/compute/cuda/repos/rhel${ROCKY_MAJOR_VERSION}/x86_64/cuda-rhel${ROCKY_MAJOR_VERSION}.repo \
+        -o /etc/yum.repos.d/cuda-rhel${ROCKY_MAJOR_VERSION}.repo && \
+    dnf makecache
+
+# https://gitlab.com/nvidia/container-images/cuda/blob/master/dist/12.6.1/ubuntu2404/devel/Dockerfile
+# Attempt a "minimal" CUDA Dev install.
+# libcufile-dev-X.Y == libcufile-devel-X.Y
+# libnvidia-compute-570-server == nvidia-driver-cuda + kmod-nvidia-open-dkms
+RUN dnf module enable -y nvidia-driver:570-open && \
+    dnf install -y \
+        cuda-minimal-build-12-9 \
+        kmod-nvidia-open-dkms \
+        libcufile-devel-12-9 \
+        nvidia-driver-cuda
+
+# Add CUDA bin directory to the path
+ENV PATH=/usr/local/cuda/bin:${PATH}

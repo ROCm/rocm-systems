@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2015-2023, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #include "argcheck.h" // Need some checks here since we access comm
 #include "collectives.h"
@@ -12,6 +13,8 @@
 #include "api_trace.h"
 #include "nvtx_payload_schemas.h"
 #include "device/hierarchical_ag_shuffle.h"
+#include "dda_all_reduce_ipc.h"
+
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
 #endif
@@ -31,6 +34,9 @@ const char* ncclFuncToString(ncclFunc_t fn) {
   case ncclFuncScatter: return "Scatter";
   case ncclFuncSendRecv: return "SendRecv";
   case ncclFuncSend: return "Send";
+  case ncclFuncPutSignal: return "PutSignal";
+  case ncclFuncSignal: return "Signal";
+  case ncclFuncWaitSignal: return "WaitSignal";
   default: return "Invalid";
   }
 }
@@ -88,25 +94,34 @@ const char* ncclProtoToString(int proto) {
 NCCL_API(ncclResult_t, ncclAllGather, const void* sendbuff, void* recvbuff, size_t sendcount,
     ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
 
+// Direct AllGather: posts Send/Recv to every peer (including self) for every
+// rank using the same iteration order on all ranks. Mirrors the AlltoAll
+// scheduling path so that, when RCCL_P2P_BATCH_ENABLE=1, all ranks emit the
+// same sequence of (sendRank, recvRank) rounds and therefore the same fused
+// ncclDevWorkBatch composition.
+//
+// We deliberately keep this minimal:
+//   - No (rank + r) % nRanks rotation: all ranks visit peers in order 0..N-1.
+//   - No in-place self-peer skip: send/recv to self is always posted; the
+//     device kernel handles isCopy = (sendRank == self) as a local memcpy
+//     (see device/sendrecv.h).
+//   - Posting is delegated to taskAppend() via a single ncclEnqueueCheck
+//     call. taskAppend() then loops once and calls p2pTaskAppend directly,
+//     the same way ncclAlltoAll does, avoiding the per-peer ncclSend/ncclRecv
+//     overhead (ArgsCheck, Recorder, profiler events, group start/end
+//     internal) that previously made cross-rank batch composition fragile at
+//     scale.
 static ncclResult_t rcclDirectAllGather(const void* sendbuff, void* recvbuff, size_t sendcount,
-    ncclDataType_t datatype, int in_place, ncclComm_t comm, cudaStream_t stream) {
-  int nRanks = comm->nRanks;
-  int rank = comm->rank;
-  size_t rankOffset = sendcount * ncclTypeSize(datatype);
-
-  NCCLCHECK(ncclGroupStart());
-  for (int r = 0; r < nRanks; r++) {
-    int peer = (rank + r) % nRanks;
-    if (peer == rank && in_place) continue;
-    NCCLCHECK(ncclSend(((char*)sendbuff), sendcount, datatype, peer, comm, stream));
-    NCCLCHECK(ncclRecv(((char*)recvbuff) + peer * rankOffset, sendcount, datatype, peer, comm, stream));
-  }
-  NCCLCHECK(ncclGroupEnd());
-
-  return ncclSuccess;
+    ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream) {
+  struct ncclInfo info = { ncclFuncAllGather, "AllGather",
+    sendbuff, recvbuff, sendcount, datatype, ncclSum, 0, comm, stream,
+    ALLGATHER_CHUNKSTEPS, ALLGATHER_SLICESTEPS, nullptr };
+  info.useDirect = true;
+  return ncclEnqueueCheck(&info);
 }
 
 RCCL_PARAM(HierarchicalAllGather, "HIERARCHICAL_ALLGATHER", 0);
+RCCL_PARAM(DdaEnable, "DDA_ENABLE", 1);
 
 static bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize) {
   if (comm->nNodes < 8) return false;
@@ -144,7 +159,7 @@ static ncclResult_t ncclHierarchicalAllGather_Impl(const void* sendbuff, void* r
   size_t interMsgSize = sendcount * nNodes * typeSize;
   if (rcclUseAllGatherDirect(interComm, interMsgSize)) {
     // Use direct allgather
-    NCCLCHECK(rcclDirectAllGather(interSendBuff, recvbuff, sendcount, datatype, 0, interComm, stream));
+    NCCLCHECK(rcclDirectAllGather(interSendBuff, recvbuff, sendcount, datatype, interComm, stream));
   } else {
     struct ncclInfo infoInterAG = { ncclFuncAllGather, "HierarchicalAllGather-Inter",
       interSendBuff, recvbuff, sendcount, datatype, ncclSum, 0, interComm, stream,
@@ -157,7 +172,7 @@ static ncclResult_t ncclHierarchicalAllGather_Impl(const void* sendbuff, void* r
   size_t intraMsgSize = intraSendCount * typeSize * localRanks;
   if (rcclUseAllGatherDirect(intraComm, intraMsgSize)) {
     // Use direct allgather
-    NCCLCHECK(rcclDirectAllGather(recvbuff, tempBuffer, intraSendCount, datatype, 0, intraComm, stream));
+    NCCLCHECK(rcclDirectAllGather(recvbuff, tempBuffer, intraSendCount, datatype, intraComm, stream));
   } else {
     struct ncclInfo infoIntraAG = { ncclFuncAllGather, "HierarchicalAllGather-Intra",
       recvbuff, tempBuffer, intraSendCount, datatype, ncclSum, 0, intraComm, stream,
@@ -193,9 +208,6 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
     sendbuff, recvbuff, sendcount, datatype, ncclSum, 0, comm, stream, /* Args */
     chunkSteps, sliceSteps, nullptr };
   int nRanks, rank;
-  int in_place = 0;
-  const void* srcBuf;
-  void* dstBuf;
   NCCLCHECK(ncclCommCount(comm, &nRanks));
   NCCLCHECK(ncclCommUserRank(comm, &rank));
   size_t msgSize = sendcount * ncclTypeSize(datatype) * nRanks;
@@ -207,22 +219,15 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
   }
 
   if (rcclUseAllGatherDirect(comm, msgSize) && ncclGroupDepth == 0) {
-     INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER count = %zu, msgSize = %zu, comm = %p, stream = %p, rank = %d, sendbuff = %p, recvbuff = %p",
-		     sendcount, msgSize, comm, stream, rank, sendbuff, recvbuff);
-     // use direct allgather (only when not in a group; in-group use Ring so ncclGroupSimulateEnd gets estimatedTime)
-     if (sendcount == 0) return ncclSuccess;
-     size_t rankOffset = sendcount * ncclTypeSize(datatype);
-     if (sendbuff == (((char*)recvbuff) + rank * rankOffset)) {
-        srcBuf = ((char*)recvbuff) + rank * rankOffset;
-        dstBuf = recvbuff;
-        in_place = 1;
-     } else {
-        srcBuf = sendbuff;
-        dstBuf = recvbuff;
-     }
-
-    NCCLCHECK(rcclDirectAllGather(srcBuf, dstBuf, sendcount, datatype, in_place, comm, stream));
-    return ncclSuccess;
+    INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER count = %zu, msgSize = %zu, comm = %p, stream = %p, rank = %d, sendbuff = %p, recvbuff = %p",
+        sendcount, msgSize, comm, stream, rank, sendbuff, recvbuff);
+    // Use direct allgather (only when not in a group; in-group use Ring so
+    // ncclGroupSimulateEnd gets estimatedTime).
+    if (sendcount == 0) return ncclSuccess;
+    // Mark the info so taskAppend posts this as A2A-style per-peer Send/Recv
+    // P2P tasks (no peer rotation, no in-place self skip).
+    info.useDirect = true;
+    return ncclEnqueueCheck(&info);
   } else {
      // use ring allgather
      return ncclEnqueueCheck(&info);
@@ -230,6 +235,7 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
 }
 
 RCCL_PARAM(AlltoAllPivotEnable, "ALL_TO_ALL_PIVOT_ENABLE", 0);
+RCCL_PARAM(DdaThreshold, "DDA_THRESHOLD", (size_t)(67108864));
 
 NCCL_API(ncclResult_t, ncclAlltoAll, const void* sendbuff, void* recvbuff, size_t count,
     ncclDataType_t datatype, ncclComm* comm, cudaStream_t stream);
@@ -368,6 +374,7 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
 
   // RCCL update slice steps for AllReduce if single node
   const bool isGfx950 = IsArchMatch(comm->archName, "gfx950");
+  const bool isGfx942 = IsArchMatch(comm->archName, "gfx942");
   int chunkSteps = (isGfx950 && comm->rcclUseOneSlice)? 1 : ALLREDUCE_CHUNKSTEPS;
   int sliceSteps = comm->rcclUseOneSlice
       ? (isGfx950 ? 1 : ALLREDUCE_SLICESTEPS_SINGLE_NODE)
@@ -378,6 +385,25 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
     chunkSteps, sliceSteps, nullptr };
 
   NCCLCHECK(Recorder::instance().record(rrAllReduce, info));
+
+  size_t ddaThreshold =  rcclParamDdaThreshold();
+  if (isGfx942) {
+     ddaThreshold = (size_t)(8388608);
+  } else if (!isGfx950) {
+     ddaThreshold = 0;	
+  }
+
+  if (rcclParamDdaEnable() && (count * ncclTypeSize(datatype) <= ddaThreshold) && (ddaThreshold > 0) && ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op) && ncclGroupDepth == 0) {
+    NCCLCHECK(ncclAllReduceDdaIpc(
+        sendbuff,
+        recvbuff,
+        count,
+        datatype,
+        op,
+        comm,
+        stream));
+    return ncclSuccess;
+  }
 
   return ncclEnqueueCheck(&info);
 }
@@ -562,5 +588,91 @@ ncclResult_t ncclRecv_impl(void* recvbuff, size_t count, ncclDataType_t datatype
 
   NCCLCHECK(Recorder::instance().record(rrRecv, info));
 
+  return ncclEnqueueCheck(&info);
+}
+
+NCCL_API(ncclResult_t, ncclPutSignal, const void* localbuff, size_t count, ncclDataType_t datatype,
+    int peer, ncclWindow_t peerWin, size_t peerWinOffset, int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, cudaStream_t stream);
+ncclResult_t ncclPutSignal(const void* localbuff, size_t count, ncclDataType_t datatype,
+    int peer, ncclWindow_t peerWin, size_t peerWinOffset, int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, cudaStream_t stream) {
+  NVTX3_FUNC_WITH_PARAMS(PutSignal, NcclNvtxParamsPut,
+    NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), peer, ctx));
+
+  struct ncclInfo info = {};
+  info.coll = ncclFuncPutSignal;
+  info.opName = "PutSignal";
+  info.sendbuff = localbuff;
+  info.recvbuff = NULL;
+  info.count = count;
+  info.datatype = datatype;
+  info.op = ncclSum;
+  info.root = peer;
+  info.comm = comm;
+  info.stream = stream;
+  info.chunkSteps = 1;
+  info.sliceSteps = 1;
+  info.peerWinOffset = peerWinOffset;
+  info.peerWin = peerWin;
+  info.sigIdx = sigIdx;
+  info.ctx = ctx;
+  info.flags = flags;
+  info.nDesc = 0;
+  info.signalDescs = NULL;
+  return ncclEnqueueCheck(&info);
+}
+
+NCCL_API(ncclResult_t, ncclSignal, int peer, int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, cudaStream_t stream);
+ncclResult_t ncclSignal(int peer, int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, cudaStream_t stream) {
+  NVTX3_FUNC_WITH_PARAMS(Signal, NcclNvtxParamsSignal,
+    NVTX3_PAYLOAD(comm ? comm->commHash : 0, peer, ctx));
+
+  struct ncclInfo info = {};
+  info.coll = ncclFuncSignal;
+  info.opName = "Signal";
+  info.sendbuff = NULL;
+  info.recvbuff = NULL;
+  info.count = 0;
+  info.datatype = ncclInt8;
+  info.op = ncclSum;
+  info.root = peer;
+  info.comm = comm;
+  info.stream = stream;
+  info.chunkSteps = 1;
+  info.sliceSteps = 1;
+  info.peerWinOffset = 0;
+  info.peerWin = NULL;
+  info.sigIdx = sigIdx;
+  info.ctx = ctx;
+  info.flags = flags;
+  info.nDesc = 0;
+  info.signalDescs = NULL;
+  return ncclEnqueueCheck(&info);
+}
+
+NCCL_API(ncclResult_t, ncclWaitSignal, int nDesc, ncclWaitSignalDesc_t* signalDescs, ncclComm_t comm, cudaStream_t stream);
+ncclResult_t ncclWaitSignal(int nDesc, ncclWaitSignalDesc_t* signalDescs, ncclComm_t comm, cudaStream_t stream) {
+  NVTX3_FUNC_WITH_PARAMS(WaitSignal, NcclNvtxParamsWaitSignal,
+    NVTX3_PAYLOAD(comm ? comm->commHash : 0, nDesc, 0));
+
+  struct ncclInfo info = {};
+  info.coll = ncclFuncWaitSignal;
+  info.opName = "WaitSignal";
+  info.sendbuff = NULL;
+  info.recvbuff = NULL;
+  info.count = 0;
+  info.datatype = ncclInt32;
+  info.op = ncclSum;
+  info.root = 0;
+  info.comm = comm;
+  info.stream = stream;
+  info.chunkSteps = 1;
+  info.sliceSteps = 1;
+  info.peerWinOffset = 0;
+  info.peerWin = NULL;
+  info.sigIdx = 0;
+  info.ctx = 0;
+  info.flags = 0;
+  info.nDesc = nDesc;
+  info.signalDescs = signalDescs;
   return ncclEnqueueCheck(&info);
 }

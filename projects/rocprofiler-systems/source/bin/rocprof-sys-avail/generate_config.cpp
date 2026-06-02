@@ -423,10 +423,16 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
             }
             if((_options[VAL] || fmt_opts.all_info) && !itr->get_choices().empty())
             {
-                _ss << "# choices:\n";
-                for(const auto& iitr : itr->get_choices())
-                    _ss << "#    " << iitr << "\n";
-                _ss << "#\n";
+                auto _choices = itr->get_choices();
+                filter_operations(itr->get_env_name(), _choices);
+
+                if(!_choices.empty())
+                {
+                    _ss << "# choices:\n";
+                    for(const auto& iitr : _choices)
+                        _ss << "#    " << iitr << "\n";
+                    _ss << "#\n";
+                }
             }
             if(_has_info) _ss << "\n";
             _ss << std::left << std::setw(_w + 10) << itr->get_env_name() << " = ";
