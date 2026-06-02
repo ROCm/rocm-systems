@@ -20,38 +20,43 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-
 #ifndef TEST_CTRL_TEST_ASSERT_H_
 #define TEST_CTRL_TEST_ASSERT_H_
 
-#define TEST_ASSERT(cond)                                                                    \
-  {                                                                                          \
-    if (!(cond)) {                                                                           \
-      std::cerr << "Assert failed(" << #cond << ") at " << __FILE__ << ", line " << __LINE__ \
-                << std::endl;                                                                \
-      exit(-1);                                                                              \
-    }                                                                                        \
-  }
+#define TEST_ASSERT(cond)                                                                          \
+    {                                                                                              \
+        if(!(cond))                                                                                \
+        {                                                                                          \
+            std::cerr << "Assert failed(" << #cond << ") at " << __FILE__ << ", line " << __LINE__ \
+                      << std::endl;                                                                \
+            exit(-1);                                                                              \
+        }                                                                                          \
+    }
 
-//Make sure value and expected_val can be compared. Also make sure that they can be printed using std::cerr.
-#define TEST_ASSERT_EQUAL(value, expected_val, msg_string)                                                                    \
-  {                                                                                          \
-    if (value != expected_val) {                                                                           \
-      std::cerr << msg_string << ":: " << "Assert failed(" << value << " " << " is not equal to " << #expected_val << ") at " << __FILE__ << ", line " << __LINE__ \
-                << std::endl;                                                                \
-      exit(-1);                                                                              \
-    }                                                                                        \
-  }
+// Make sure value and expected_val can be compared. Also make sure that they can be printed using
+// std::cerr.
+#define TEST_ASSERT_EQUAL(value, expected_val, msg_string)                                         \
+    {                                                                                              \
+        if(value != expected_val)                                                                  \
+        {                                                                                          \
+            std::cerr << msg_string << ":: "                                                       \
+                      << "Assert failed(" << value << " "                                          \
+                      << " is not equal to " << #expected_val << ") at " << __FILE__ << ", line "  \
+                      << __LINE__ << std::endl;                                                    \
+            exit(-1);                                                                              \
+        }                                                                                          \
+    }
 
-#define TEST_STATUS(cond)                                                              \
-  {                                                                                    \
-    if (!(cond)) {                                                                     \
-      std::cerr << "Test error at " << __FILE__ << ", line " << __LINE__ << std::endl; \
-      const char* message;                                                             \
-      rocprofiler_error_string(&message);                                              \
-      std::cerr << "ERROR: " << message << std::endl;                                  \
-      exit(-1);                                                                        \
-    }                                                                                  \
-  }
+#define TEST_STATUS(cond)                                                                          \
+    {                                                                                              \
+        if(!(cond))                                                                                \
+        {                                                                                          \
+            std::cerr << "Test error at " << __FILE__ << ", line " << __LINE__ << std::endl;       \
+            const char* message;                                                                   \
+            rocprofiler_error_string(&message);                                                    \
+            std::cerr << "ERROR: " << message << std::endl;                                        \
+            exit(-1);                                                                              \
+        }                                                                                          \
+    }
 
 #endif  // TEST_CTRL_TEST_ASSERT_H_

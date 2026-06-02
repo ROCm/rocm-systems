@@ -20,9 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-
-//This one is for use in aqlprofiler V2 API testing
-//Copies from ./projects/aqlprofile/test/ctrl/run_kernel.h
+// This one is for use in aqlprofiler V2 API testing
+// Copies from ./projects/aqlprofile/test/ctrl/run_kernel.h
 
 #ifndef TEST_CTRL_RUN_KERNEL_H_
 #define TEST_CTRL_RUN_KERNEL_H_
@@ -31,67 +30,77 @@
 #include "util/test_assert.h"
 
 template <class Kernel, class Test>
-bool RunKernel(int argc, char* argv[], int count = 1) {
-  bool ret_val = false;
+bool
+RunKernel(int argc, char* argv[], int count = 1)
+{
+    bool ret_val = false;
 
-  // Create test kernel object
-  Kernel test_kernel;
-  TestAql* test_hsa = new TestHsa(&test_kernel);
-  TEST_ASSERT(test_hsa != NULL);
-  if (test_hsa == NULL) return false;
-  TestAql* test_aql = new Test(test_hsa);
-  TEST_ASSERT(test_aql != NULL);
-  if (test_aql == NULL) {
-    delete test_hsa;
-    return false;
-  }
-
-  // Initialization of Hsa Runtime
-  ret_val = test_aql->Initialize(argc, argv);
-  if (ret_val == false) {
-    std::cerr << "Error in the test initialization" << std::endl;
-    // TEST_ASSERT(ret_val);
-    delete test_aql;
-    return false;
-  }
-
-  // Setup Hsa resources needed for execution
-  ret_val = test_aql->Setup();
-  if (ret_val == false) {
-    std::cerr << "Error in creating hsa resources" << std::endl;
-    delete test_aql;
-    TEST_ASSERT(ret_val);
-    return false;
-  }
-
-  // Kernel dspatch iterations
-  for (int i = 0; i < count; ++i) {
-    // Run test kernel
-    ret_val = test_aql->Run();
-    if (ret_val == false) {
-      std::cerr << "Error in running the test kernel" << std::endl;
-      test_aql->Cleanup();
-      delete test_aql;
-      TEST_ASSERT(ret_val);
-      return false;
+    // Create test kernel object
+    Kernel   test_kernel;
+    TestAql* test_hsa = new TestHsa(&test_kernel);
+    TEST_ASSERT(test_hsa != NULL);
+    if(test_hsa == NULL) return false;
+    TestAql* test_aql = new Test(test_hsa);
+    TEST_ASSERT(test_aql != NULL);
+    if(test_aql == NULL)
+    {
+        delete test_hsa;
+        return false;
     }
 
-    // Verify the results of the execution
-    ret_val = test_aql->VerifyResults();
-    if (ret_val) {
-      std::clog << "Test : Passed" << std::endl;
-    } else {
-      std::clog << "Test : Failed" << std::endl;
+    // Initialization of Hsa Runtime
+    ret_val = test_aql->Initialize(argc, argv);
+    if(ret_val == false)
+    {
+        std::cerr << "Error in the test initialization" << std::endl;
+        // TEST_ASSERT(ret_val);
+        delete test_aql;
+        return false;
     }
-  }
 
-  // Print time taken by sample
-  test_aql->PrintTime();
+    // Setup Hsa resources needed for execution
+    ret_val = test_aql->Setup();
+    if(ret_val == false)
+    {
+        std::cerr << "Error in creating hsa resources" << std::endl;
+        delete test_aql;
+        TEST_ASSERT(ret_val);
+        return false;
+    }
 
-  test_aql->Cleanup();
-  delete test_aql;
+    // Kernel dspatch iterations
+    for(int i = 0; i < count; ++i)
+    {
+        // Run test kernel
+        ret_val = test_aql->Run();
+        if(ret_val == false)
+        {
+            std::cerr << "Error in running the test kernel" << std::endl;
+            test_aql->Cleanup();
+            delete test_aql;
+            TEST_ASSERT(ret_val);
+            return false;
+        }
 
-  return ret_val;
+        // Verify the results of the execution
+        ret_val = test_aql->VerifyResults();
+        if(ret_val)
+        {
+            std::clog << "Test : Passed" << std::endl;
+        }
+        else
+        {
+            std::clog << "Test : Failed" << std::endl;
+        }
+    }
+
+    // Print time taken by sample
+    test_aql->PrintTime();
+
+    test_aql->Cleanup();
+    delete test_aql;
+
+    return ret_val;
 }
 
 #endif  // TEST_CTRL_RUN_KERNEL_H_

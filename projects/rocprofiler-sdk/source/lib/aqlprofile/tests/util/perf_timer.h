@@ -20,7 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-
 #ifndef TEST_UTIL_PERF_TIMER_H_
 #define TEST_UTIL_PERF_TIMER_H_
 
@@ -32,53 +31,59 @@
 #include <stdlib.h>
 
 #if defined(_MSC_VER)
-#include <intrin.h>
-#include <time.h>
-#include <windows.h>
+#    include <intrin.h>
+#    include <time.h>
+#    include <windows.h>
 #else
-#if defined(__GNUC__)
-#include <sys/time.h>
-#include <x86intrin.h>
-#endif  // __GNUC__
-#endif  // _MSC_VER
+#    if defined(__GNUC__)
+#        include <sys/time.h>
+#        include <x86intrin.h>
+#    endif  // __GNUC__
+#endif      // _MSC_VER
 
 #include <iostream>
 #include <string>
 #include <vector>
 
-class PerfTimer {
- public:
-  enum { SUCCESS = 0, FAILURE = 1 };
+class PerfTimer
+{
+public:
+    enum
+    {
+        SUCCESS = 0,
+        FAILURE = 1
+    };
 
-  PerfTimer();
-  ~PerfTimer();
+    PerfTimer();
+    ~PerfTimer();
 
-  // General Linux timing method
-  int CreateTimer();
-  int StartTimer(int index);
-  int StopTimer(int index);
+    // General Linux timing method
+    int CreateTimer();
+    int StartTimer(int index);
+    int StopTimer(int index);
 
-  // retrieve time
-  double ReadTimer(int index);
-  // write into a file
-  double WriteTimer(int index);
+    // retrieve time
+    double ReadTimer(int index);
+    // write into a file
+    double WriteTimer(int index);
 
- private:
-  struct Timer {
-    std::string name; /* name of time object */
-    long long freq;   /* frequency */
-    double clocks;    /* number of ticks at end */
-    double start;     /* start point ticks */
-  };
+private:
+    struct Timer
+    {
+        std::string name;   /* name of time object */
+        long long   freq;   /* frequency */
+        double      clocks; /* number of ticks at end */
+        double      start;  /* start point ticks */
+    };
 
-  std::vector<Timer*> timers_; /* vector to Timer objects */
-  double freq_in_100mhz_;
+    std::vector<Timer*> timers_; /* vector to Timer objects */
+    double              freq_in_100mhz_;
 
-  // AMD timing method
-  uint64_t CoarseTimestampUs();
-  uint64_t MeasureTSCFreqHz();
+    // AMD timing method
+    uint64_t CoarseTimestampUs();
+    uint64_t MeasureTSCFreqHz();
 
-  void Error(std::string str);
+    void Error(std::string str);
 };
 
 #endif  // TEST_UTIL_PERF_TIMER_H_
