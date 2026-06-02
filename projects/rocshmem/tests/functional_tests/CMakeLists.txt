@@ -40,6 +40,7 @@ target_include_directories(
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
+target_compile_definitions(${PROJECT_NAME} PRIVATE HIP_ENABLE_WARP_SYNC_BUILTINS=1)
 
 target_sources(
   ${PROJECT_NAME}
