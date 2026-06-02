@@ -1633,7 +1633,7 @@ def lock_env(base_env: dict[str, str]) -> dict[str, str]:
         "ROCPROFSYS_COUT_OUTPUT": "ON",
         "ROCPROFSYS_TIME_OUTPUT": "OFF",
         "ROCPROFSYS_TIMELINE_PROFILE": "OFF",
-        "ROCPROFSYS_LOG_LEVEL": "trace",
+        "ROCPROFSYS_LOG_LEVEL": "info",
         "LD_LIBRARY_PATH": base_env.get("LD_LIBRARY_PATH", ""),
     }
 
