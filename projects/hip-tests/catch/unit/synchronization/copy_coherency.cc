@@ -275,17 +275,6 @@ void testWrapper(size_t numElements) {
     }
   }
 
-#if 0
-  runTestImpl(COPY, STREAM_SYNC, MODULE_KERNEL, stream1, stream2,
-              numElements, Ad, Bd, Cd, Ch, expected);
-  runTestImpl(COPY, STREAM_SYNC, KERNEL, stream1, stream2, numElements,
-              Ad, Bd, Cd, Ch, expected);
-  runTestImpl(COPY, STREAM_WAIT_EVENT, MODULE_KERNEL, stream1, stream2,
-               numElements, Ad, Bd, Cd, Ch, expected);
-  runTestImpl(COPY, STREAM_WAIT_EVENT, KERNEL, stream1, stream2, numElements,
-              Ad, Bd, Cd, Ch, expected);
-#endif
-
   HIP_CHECK(hipFree(Ad));
   HIP_CHECK(hipFree(Bd));
   HIP_CHECK(hipFree(Cd));
