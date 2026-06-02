@@ -146,3 +146,97 @@ These settings may impact performance and stability and should only be used when
       - ``0``
       - | 0: Normal caching behavior (L2 cache enabled).
         | 1: Disables L2 cache entirely. Sets all memory regions as uncacheable (MTYPE=UC) in the GPU, bypassing the L2 cache. Useful for diagnosing cache-related performance or correctness issues.
+
+
+Logging Environment Variables
+-----------------------------
+
+ROCR provides a comprehensive logging system for debugging and production monitoring.
+Logging is disabled by default with zero performance overhead.
+
+**CLR/HIP Integration:** For HIP applications, use ``AMD_LOG_LEVEL >= 6`` for unified CLR and ROCR logging.
+When ``AMD_LOG_LEVEL >= 6``, the ``HSA_LOG_*`` variables below are ignored and CLR controls ROCR logging
+via the ``hsa_amd_enable_logging()`` API. Both CLR and ROCR logs go to the same output.
+
+For standalone HSA applications (not using HIP/CLR), use the ``HSA_LOG_*`` variables directly.
+
+Set ``HSA_LOG_LEVEL=help`` to print usage information at runtime.
+
+.. _rocr-log-env:
+.. list-table::
+    :header-rows: 1
+    :widths: 35,14,51
+
+    * - Environment variable
+      - Default value
+      - Value
+
+    * - | ``HSA_LOG_LEVEL``
+        | Controls log verbosity. Set to ``help`` to print usage information.
+      - ``0``
+      - | 0: Disabled (default, no overhead).
+        | 1: ERROR - Critical errors only.
+        | 2: WARNING - Warnings and errors.
+        | 3: INFO - General operational information.
+        | 4: DEBUG - Detailed debug information.
+        | 5: TRACE - Very detailed tracing.
+        | 6: VERBOSE - Function entry/exit with arguments.
+        | ``help``: Print usage information and exit.
+
+    * - | ``HSA_LOG_MASK``
+        | Hex bitmask to filter log categories. Combine values with OR.
+      - ``0x7FFFFFFF``
+      - | 0x1: INIT - Runtime init/shutdown.
+        | 0x2: QUEUE - Queue create/destroy.
+        | 0x4: MEM - Memory alloc/free.
+        | 0x8: SIGNAL - Signal operations.
+        | 0x10: IPC - IPC create/attach/detach.
+        | 0x20: AGENT - Agent/topology discovery.
+        | 0x40: AQL - AQL packet logging.
+        | 0x80: SDMA - SDMA operations.
+        | 0x100: COPY - Copy operations.
+        | 0x200: BLIT - BlitKernel operations.
+        | 0x400: SCRATCH - Scratch allocation.
+        | 0x800: POOL - Memory/signal pools.
+        | 0x2000: FAULT - VM faults.
+        | 0x8000: EXCEPT - Exception handlers.
+        | 0x10000: WAIT - Signal waits.
+
+    * - | ``HSA_LOG_FILE``
+        | Output file path. Process ID is automatically appended to the filename.
+      - None (stderr)
+      - | Path to log file. Example: ``/tmp/rocr`` creates ``/tmp/rocr.<PID>.log``.
+
+    * - | ``HSA_LOG_SIZE``
+        | Maximum log file size in megabytes before automatic truncation.
+      - ``2048``
+      - Integer value in MB.
+
+    * - | ``HSA_LOG_ASYNC``
+        | Enables asynchronous logging with a lock-free ring buffer and background flush thread.
+        | Reduces logging overhead for high-frequency events.
+      - ``0``
+      - | 0: Synchronous logging (default).
+        | 1: Asynchronous logging with crash-safe signal handler.
+
+    * - | ``HSA_LOG_FORMAT``
+        | Controls log output format.
+      - None (text)
+      - | ``json``: Structured JSON output for log aggregation tools.
+
+**Logging Examples:**
+
+- Unified CLR+ROCR logging (HIP apps): ``AMD_LOG_LEVEL=6 ./app``
+- Error logging only: ``HSA_LOG_LEVEL=1 ./app``
+- Debug memory issues: ``HSA_LOG_LEVEL=4 HSA_LOG_MASK=0x4 ./app``
+- Debug IPC issues: ``HSA_LOG_LEVEL=4 HSA_LOG_MASK=0x10 ./app``
+- Full trace to file: ``HSA_LOG_LEVEL=5 HSA_LOG_FILE=/tmp/rocr ./app``
+- JSON output: ``HSA_LOG_LEVEL=3 HSA_LOG_FORMAT=json ./app``
+
+**Production Health Warnings:**
+
+At WARNING level (``HSA_LOG_LEVEL=2``), the logging system automatically reports:
+
+- Memory pressure warnings when utilization exceeds 90% of peak.
+- IPC leak detection when active attachments exceed 100.
+- Queue saturation warnings when queue depth exceeds 75%.

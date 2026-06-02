@@ -334,6 +334,11 @@ static void rocr_log_print_help() {
     "  HSA_LOG_ASYNC   0/1            Async ring buffer mode\n"
     "  HSA_LOG_FORMAT  json           Structured JSON output\n"
     "\n"
+    "CLR/HIP Integration:\n"
+    "  When AMD_LOG_LEVEL >= 6, CLR enables ROCR logging via hsa_amd_enable_logging().\n"
+    "  Both CLR and ROCR logs go to the same file. Use AMD_LOG_LEVEL for unified logging.\n"
+    "  HSA_LOG_* variables are ignored when AMD_LOG_LEVEL >= 6.\n"
+    "\n"
     "Log Levels:\n"
     "  0  NONE     Disabled (default)\n"
     "  1  ERROR    Critical errors\n"
@@ -351,9 +356,9 @@ static void rocr_log_print_help() {
     "  0x2000 FAULT      0x8000 EXCEPT     0x10000 WAIT\n"
     "\n"
     "Examples:\n"
-    "  HSA_LOG_LEVEL=1 ./app                    # Errors only\n"
-    "  HSA_LOG_LEVEL=4 HSA_LOG_MASK=0x4 ./app   # Debug memory\n"
-    "  HSA_LOG_LEVEL=5 HSA_LOG_FILE=/tmp/r ./app # Trace to file\n"
+    "  HSA_LOG_LEVEL=1 ./app                    # Errors only (standalone)\n"
+    "  HSA_LOG_LEVEL=4 HSA_LOG_MASK=0x4 ./app   # Debug memory (standalone)\n"
+    "  AMD_LOG_LEVEL=6 ./app                    # Unified CLR+ROCR logging\n"
     "\n");
 }
 
@@ -362,12 +367,32 @@ void rocr_log_init() {
     return;
   }
 
-  // Parse HSA_LOG_LEVEL - check for "help" first
+  // Check for help request first - always honor this regardless of AMD_LOG_LEVEL
   std::string var = os::GetEnvVar("HSA_LOG_LEVEL");
   if (var == "help" || var == "HELP" || var == "?") {
     rocr_log_print_help();
     g_rocr_log_state.log_level = 0;  // Don't enable logging after help
-  } else if (!var.empty()) {
+    g_rocr_log_state.initialized = true;
+    return;
+  }
+
+  // Check AMD_LOG_LEVEL (CLR/HIP integration)
+  // When AMD_LOG_LEVEL >= 6 (LOG_EXTRA_DEBUG), CLR will call hsa_amd_enable_logging()
+  // with its output file. In this case, defer to CLR for unified logging.
+  std::string amd_log_level = os::GetEnvVar("AMD_LOG_LEVEL");
+  if (!amd_log_level.empty()) {
+    int amd_level = atoi(amd_log_level.c_str());
+    if (amd_level >= 6) {
+      // CLR will configure logging via hsa_amd_enable_logging()
+      // Don't process HSA_LOG_* variables - let CLR control everything
+      g_rocr_log_state.clr_controlled = true;
+      g_rocr_log_state.initialized = true;
+      return;
+    }
+  }
+
+  // Parse HSA_LOG_LEVEL
+  if (!var.empty()) {
     g_rocr_log_state.log_level = atoi(var.c_str());
   }
 

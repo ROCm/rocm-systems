@@ -46,7 +46,15 @@
 //
 // HIP-style logging with environment variable control. Disabled by default.
 //
-// ENVIRONMENT VARIABLES:
+// CLR/HIP INTEGRATION:
+//   When AMD_LOG_LEVEL >= 6, CLR enables ROCR logging via hsa_amd_enable_logging().
+//   Both CLR and ROCR logs go to the same file for unified debugging.
+//   HSA_LOG_* variables are ignored when AMD_LOG_LEVEL >= 6.
+//
+//   For HIP applications, use AMD_LOG_LEVEL for unified CLR+ROCR logging:
+//     AMD_LOG_LEVEL=6 ./hip_app
+//
+// ENVIRONMENT VARIABLES (standalone HSA applications):
 //   HSA_LOG_LEVEL   0-6     Log verbosity (0=none, 1=error, 2=warn, 3=info,
 //                           4=debug, 5=trace, 6=verbose). Set to "help" for usage.
 //   HSA_LOG_MASK    hex     Category bitmask (default all enabled)
@@ -80,13 +88,16 @@
 //   0x8000 EXCEPT    Exception handlers
 //
 // QUICK START:
-//   # Error logging only
+//   # Unified CLR+ROCR logging (HIP applications)
+//   AMD_LOG_LEVEL=6 ./app
+//
+//   # Error logging only (standalone HSA)
 //   HSA_LOG_LEVEL=1 ./app
 //
-//   # Debug memory issues
+//   # Debug memory issues (standalone HSA)
 //   HSA_LOG_LEVEL=4 HSA_LOG_MASK=0x4 ./app
 //
-//   # Full trace to file
+//   # Full trace to file (standalone HSA)
 //   HSA_LOG_LEVEL=5 HSA_LOG_FILE=/tmp/rocr ./app
 //
 //   # Show help
@@ -290,6 +301,7 @@ struct RocrLoggingState {
   int log_file_fd;                // File descriptor for async-signal-safe crash flush
   bool owns_log_file;             // True if we opened log_file and should close it
   bool initialized;               // Whether logging is initialized
+  bool clr_controlled;            // True if AMD_LOG_LEVEL is set (CLR controls logging)
   std::mutex file_mutex;          // Mutex for file operations
 
   RocrLoggingState()
@@ -301,7 +313,8 @@ struct RocrLoggingState {
         log_file(stderr),
         log_file_fd(STDERR_FILENO),
         owns_log_file(false),
-        initialized(false) {}
+        initialized(false),
+        clr_controlled(false) {}
 };
 
 // Global logging state instance
