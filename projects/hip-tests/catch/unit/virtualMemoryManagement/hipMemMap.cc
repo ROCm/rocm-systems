@@ -844,9 +844,9 @@ HIP_TEST_CASE(Unit_hipMemMap_Positive_APU_LargeAllocSpill) {
   HIP_CHECK(hipMemAddressReserve(&va, size, 0, nullptr, 0));
   REQUIRE(va != nullptr);
 
-  hipMemGenericAllocationHandle_t handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(nullptr);
+  hipMemGenericAllocationHandle_t handle{};
   HIP_CHECK(hipMemCreate(&handle, size, &aprop, 0));
-  REQUIRE(handle != reinterpret_cast<hipMemGenericAllocationHandle_t>(nullptr));
+  REQUIRE(handle != hipMemGenericAllocationHandle_t{});
 
   HIP_CHECK(hipMemMap(va, size, 0, handle, 0));
 
