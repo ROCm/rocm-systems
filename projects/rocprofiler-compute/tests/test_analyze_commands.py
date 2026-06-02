@@ -2217,7 +2217,7 @@ def test_join_prof_renames_sq_accum_prev_hires_to_bucket_target(tmp_path):
 
 
 def test_join_prof_rocpd_falls_back_to_results_csv(tmp_path):
-    """rocpd workloads with only results_*.csv remain analyzable."""
+    """join_prof reads results_*.csv when a rocpd workload has no pass DB files."""
     (tmp_path / "profiling_config.yaml").write_text("format_rocprof_output: rocpd\n")
     results_file = tmp_path / "results_pmc_perf_0.csv"
     results_file.write_text(

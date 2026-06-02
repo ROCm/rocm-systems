@@ -799,7 +799,8 @@ def write_rocpd_torch_trace_inputs(
     rocpd_db_path: str,
 ) -> None:
     """
-    Write the trace-specific CSV bridge used by current torch trace analysis.
+    Write the counter-collection and marker-API-trace CSVs that torch trace
+    analysis reads, extracted from the rocpd database.
     """
     counter_rows = rocpd_data.read_counter_collection_rows([rocpd_db_path])
     marker_rows = rocpd_data.read_marker_api_trace_rows([rocpd_db_path])

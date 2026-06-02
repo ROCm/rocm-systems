@@ -447,8 +447,8 @@ Examples:
             "\t\t\tSet the format of output file of rocprof.\n"
             "\t\t\t  rocpd (default): emits a rocpd .db; recommended for\n"
             "\t\t\t    all metrics workloads.\n"
-            "\t\t\t  csv (legacy): emits results_*.csv; retained for\n"
-            "\t\t\t    backward compatibility on older ROCm."
+            "\t\t\t  csv: emits results_*.csv; for ROCm versions\n"
+            "\t\t\t    without rocpd support."
         ),
     )
     profile_group.add_argument(

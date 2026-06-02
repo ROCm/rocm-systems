@@ -865,8 +865,8 @@ def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:
     ]
 
     # Duplicate (group_columns, Counter_Name) rows are tolerated: the pivot
-    # below uses aggfunc="first" so the first value wins, matching the prior
-    # explicit fallback path without an extra O(N) duplicated() scan.
+    # below uses aggfunc="first" so the first value wins without an extra
+    # O(N) duplicated() scan.
 
     metadata_df = (
         df[group_columns + metadata_columns]
@@ -902,19 +902,16 @@ def build_rocpd_pmc_dataframe(counter_df: pd.DataFrame) -> pd.DataFrame:
 
 def normalize_rocpd_counter_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Apply rocprofiler-compute rocpd counter ID normalization in memory.
-
-    Does not mutate ``df`` - the first non-trivial step (``drop``) returns a
-    new frame, so we read from ``df`` and write to ``normalized_df``.
+    Apply rocpd counter ID normalization in memory, returning a new frame
+    without mutating ``df``.
     """
     if df.empty:
         return df
 
     # Align dispatches across passes by Pass_ID, not PID: each replay pass is a
     # separate process launch, so PID is not stable across passes. Within a
-    # pass, dispatches are aligned positionally by Start_Timestamp order, which
-    # matches the legacy per-pass assign_group_ids behavior in develop. PID is
-    # only used as a fallback for inputs that predate Pass_ID tagging.
+    # pass, dispatches are aligned positionally by Start_Timestamp order. PID is
+    # used only as a fallback when Pass_ID is not present.
     pass_group_columns: list[str] = []
     if "Pass_ID" in df.columns:
         pass_group_columns.append("Pass_ID")
