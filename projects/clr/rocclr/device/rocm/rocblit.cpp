@@ -770,10 +770,12 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
   }
 
   // Submit each non-empty engine group as a separate batch with its own signal.
-  // Within each group, ops are grouped by src_agent:
-  //  - Same (src, size) with multiple dsts → BROADCAST
-  //  - Multiple remaining ops from same src_agent → MULTI
-  //  - Single remaining op → LINEAR
+  // Within each group, ops are grouped by type (SWAP and each INDIRECT mode
+  // each become one multi-entry op; see the bucket declarations below).
+  // LINEAR ops are further grouped by src_agent:
+  //  - Same (src, size) with multiple dsts (SdmaD2D) → BROADCAST
+  //  - Multiple remaining ops from same src_agent    → MULTI
+  //  - Single remaining op                           → LINEAR
   hsa_status_t status = HSA_STATUS_SUCCESS;
   std::vector<ProfilingSignal*> groupSignals;
 
@@ -813,6 +815,27 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
     MultiArrays swapPending;
     hsa_agent_t swapSrcAgent = {};
 
+    // Indirect ops are bucketed by their indirect mode (SRC / DST / SRCDST)
+    // into multi-entry HSA ops, one bucket per mode.  All entries in one
+    // bucket share the same op.type because the indirect mode is encoded in
+    // op.type; src_agent is captured from the first op in each bucket.
+    struct IndirectBucket {
+      MultiArrays pending;
+      hsa_agent_t src_agent = {};
+    };
+    std::map<hsa_amd_memory_copy_op_type_t, IndirectBucket> indirectPending;
+
+    auto isIndirectType = [](hsa_amd_memory_copy_op_type_t type) -> bool {
+      switch (type) {
+        case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC:
+        case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST:
+        case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST:
+          return true;
+        default:
+          return false;
+      }
+    };
+
     for (const auto& op : ops) {
       if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP) {
         assert(op.src_size == op.dst_size && "Asymmetric swap not yet supported");
@@ -821,6 +844,16 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
         swapPending.dsts.push_back(op.dst);
         swapPending.dst_agents.push_back(op.dst_agent);
         swapPending.sizes.push_back(op.src_size);
+        continue;
+      }
+      const auto opType = static_cast<hsa_amd_memory_copy_op_type_t>(op.type);
+      if (isIndirectType(opType)) {
+        auto& bucket = indirectPending[opType];
+        if (bucket.pending.srcs.empty()) bucket.src_agent = op.src_agent;
+        bucket.pending.srcs.push_back(op.src);
+        bucket.pending.dsts.push_back(op.dst);
+        bucket.pending.dst_agents.push_back(op.dst_agent);
+        bucket.pending.sizes.push_back(op.size);
         continue;
       }
       auto& ag = agent_groups[op.src_agent.handle];
@@ -837,10 +870,14 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
     gpu().Barriers().SetActiveEngine(engine);
 
     std::vector<MultiArrays> multiStore;
-    multiStore.reserve(agent_groups.size());
+    // Upper-bound entries that land in multiStore: one swap bucket + one
+    // multi bucket per src_agent group + one per populated indirect-mode
+    // bucket.
+    multiStore.reserve(1 + agent_groups.size() + indirectPending.size());
 
     std::vector<hsa_amd_memory_copy_op_t> finalOps;
 
+    // --- Emit SWAP batch ---
     if (!swapPending.srcs.empty()) {
       multiStore.push_back(std::move(swapPending));
       auto& stored = multiStore.back();
@@ -857,6 +894,7 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
       finalOps.push_back(swap);
     }
 
+    // --- Emit LINEAR / BROADCAST batches (one group per src_agent) ---
     for (auto& [agent_handle, ag] : agent_groups) {
       MultiArrays pending;
 
@@ -909,6 +947,27 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
       }
     }
 
+    // --- Emit INDIRECT batches ---
+    // The runtime accepts both the multi-entry form (num_entries > 0, with
+    // *_list arrays) and the scalar form (num_entries == 0, with the scalar
+    // src/dst/size fields) for indirect dispatch. We always emit the
+    // multi-entry form here for consistency with the rest of the batch path.
+    for (auto& [type, bucket] : indirectPending) {
+      multiStore.push_back(std::move(bucket.pending));
+      auto& stored = multiStore.back();
+
+      hsa_amd_memory_copy_op_t indirect = {};
+      indirect.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
+      indirect.type = type;
+      indirect.src_agent = bucket.src_agent;
+      indirect.src_list = stored.srcs.data();
+      indirect.dst_list = stored.dsts.data();
+      indirect.dst_agent_list = stored.dst_agents.data();
+      indirect.size_list = stored.sizes.data();
+      indirect.num_entries = static_cast<uint16_t>(stored.srcs.size());
+      finalOps.push_back(indirect);
+    }
+
     // Assign one completion signal per op in a single place.
     for (auto& op : finalOps) {
       op.completion_signal = gpu().Barriers().ActiveSignal(1, gpu().timestamp());
@@ -933,6 +992,21 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
                   "size=%zu, wait_event=0x%zx, completion_signal=0x%zx",
                   d + 1, op.num_entries, EngineOpName(engine), op.src_list[d],
                   op.dst_list[d], op.size_list[d],
+                  (wait_events.size() != 0) ? wait_events[0].handle : 0,
+                  op.completion_signal.handle);
+        }
+      } else if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC ||
+                 op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST ||
+                 op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST) {
+        const char* indirect_kind =
+            (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC) ? "Src" :
+            (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST) ? "Dst" : "SrcDst";
+        for (uint32_t d = 0; d < op.num_entries; ++d) {
+          ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
+                  "HSA BatchCopy Indirect%s [%u/%u] engineOp=%s, dst=%p, src=%p, "
+                  "size=%zu, wait_event=0x%zx, completion_signal=0x%zx",
+                  indirect_kind, d + 1, op.num_entries, EngineOpName(engine),
+                  op.dst_list[d], op.src_list[d], op.size_list[d],
                   (wait_events.size() != 0) ? wait_events[0].handle : 0,
                   op.completion_signal.handle);
         }
