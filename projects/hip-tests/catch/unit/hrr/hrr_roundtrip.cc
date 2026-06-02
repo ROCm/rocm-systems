@@ -406,14 +406,18 @@ HIP_TEST_CASE(Unit_HRR_StressApisRoundtrip) {
 // ---------------------------------------------------------------------------
 // Helper: shared roundtrip body — capture → verify archive → playback.
 //
-// min_events: minimum number of events expected in events.bin.  Every workload
-// must produce at least a few events (malloc, memcpy, kernel, free) — a value
-// of 5 is a conservative floor that would catch a totally empty capture.
-// Use a higher value for workloads known to emit many events (StressApis, etc.).
+// min_events:  minimum number of events expected in events.bin.  Every workload
+//   must produce at least a few events (malloc, memcpy, kernel, free) — a value
+//   of 5 is a conservative floor that would catch a totally empty capture.
+//   Use a higher value for workloads known to emit many events (StressApis, etc.).
+// require_d2h: if true (default), asserts that playback validated at least one
+//   D2H blob.  Pass false for workloads that conditionally skip D2H (e.g. the
+//   texture workload on devices without image support).
 // ---------------------------------------------------------------------------
 static void hrr_run_roundtrip(const std::string& direct_case,
                                const fs::path& cap_path,
-                               size_t min_events = 5) {
+                               size_t min_events = 5,
+                               bool require_d2h = true) {
   { hip::SpawnProc proc(HRR_TEST_EXE);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());
     { set_proc_search_path(proc); }
@@ -435,7 +439,7 @@ static void hrr_run_roundtrip(const std::string& direct_case,
   REQUIRE(arc_ok);
   REQUIRE(arc.events.size() >= min_events);
 
-  hrr_run_playback(cap_path);
+  hrr_run_playback(cap_path, /*extra_args=*/"", require_d2h);
 }
 
 HIP_TEST_CASE(Unit_HRR_MemsetVariantsRoundtrip) {
@@ -537,9 +541,14 @@ HIP_TEST_CASE(Unit_HRR_DrvMemcpy3DRoundtrip) {
 
 HIP_TEST_CASE(Unit_HRR_TextureRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_texture"};
-  // min_events=1: on devices without image support the workload exits early
-  // after hipDeviceGetAttribute, producing a near-empty archive legitimately.
-  hrr_run_roundtrip("Unit_HRR_Texture_Direct", cap.path, 1);
+  // On devices without image support the workload exits early after
+  // hipDeviceGetAttribute (no D2H memcpy), so D2H validation is skipped.
+  int imageSupport = 0;
+  (void)hipDeviceGetAttribute(&imageSupport, hipDeviceAttributeImageSupport, 0);
+  // min_events=1: a near-empty archive (fat-binary events only) is legitimate
+  // on no-image-support devices.
+  hrr_run_roundtrip("Unit_HRR_Texture_Direct", cap.path,
+                    /*min_events=*/1, /*require_d2h=*/imageSupport != 0);
 }
 
 HIP_TEST_CASE(Unit_HRR_GraphExplicitRoundtrip) {
