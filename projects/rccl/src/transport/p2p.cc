@@ -1357,6 +1357,20 @@ static ncclResult_t p2pProxyRegister(struct ncclProxyConnection* connection, str
   INFO(NCCL_REG, "Proxy rank %d register success regAddr %p size %ld offset %ld legacyIpcCap %d sameProcess %d", proxyState->tpRank, regAddr, ipcExpInfo->size, ipcExpInfo->offset, ipcExpInfo->legacyIpcCap, connection->sameProcess);
 
 exit:
+  // Enqueue the imported handle (single segment) so p2pProxyDeregister()
+  // can release it; the 2.29.x sync dropped this, segfaulting on teardown.
+  if (regAddr) {
+    struct proxyMemHandle* memHandle;
+    struct ncclIpcImpInfo* ipcInfo;
+    NCCLCHECK(ncclCalloc(&memHandle, 1));
+    NCCLCHECK(ncclCalloc(&ipcInfo, 1));
+    ipcInfo->rmtRegAddr = regAddr;
+    ipcInfo->offset = ipcExpInfo->offset;
+    ipcInfo->legacyIpcCap = ipcExpInfo->legacyIpcCap;
+    ipcInfo->numSegments = 1;
+    memHandle->handle = (void*)ipcInfo;
+    ncclIntruQueueEnqueue(&connection->proxyMemHandleQueue, memHandle);
+  }
   memcpy(respBuff, (void*)&regAddr, sizeof(void*));
   *done = 1;
   return ret;
