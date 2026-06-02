@@ -133,12 +133,29 @@ set(TEST_tile_get_rowmajor 114)
 set(TEST_tile_get_colmajor 115)
 set(TEST_tile_get_arbitrary 116)
 
-# Find MPI runtime
-find_program(MPIRUN_EXECUTABLE NAMES mpirun mpiexec)
-if(NOT MPIRUN_EXECUTABLE)
-    message(WARNING "mpirun not found - functional tests will not be added")
+# MPI should already be found by the parent CMakeLists.txt
+# Use standard CMake MPI variables set by find_package(MPI)
+if(NOT MPIEXEC_EXECUTABLE)
+    message(WARNING "MPIEXEC_EXECUTABLE not found - functional tests will not be added")
     return()
 endif()
+
+# MCA parameters can be overridden via environment variables at CMake configure time
+# or via CMake cache variables. Defaults to ucx for both.
+set(OMPI_MCA_PML "$ENV{OMPI_MCA_pml}" CACHE STRING "OpenMPI MCA pml parameter")
+set(OMPI_MCA_OSC "$ENV{OMPI_MCA_osc}" CACHE STRING "OpenMPI MCA osc parameter")
+
+# Use ucx as default if not specified
+if(NOT OMPI_MCA_PML)
+    set(OMPI_MCA_PML "ucx")
+endif()
+if(NOT OMPI_MCA_OSC)
+    set(OMPI_MCA_OSC "ucx")
+endif()
+
+message(STATUS "MPI executable: ${MPIEXEC_EXECUTABLE}")
+message(STATUS "MPI numproc flag: ${MPIEXEC_NUMPROC_FLAG}")
+message(STATUS "MPI MCA parameters: pml=${OMPI_MCA_PML}, osc=${OMPI_MCA_OSC}")
 
 ###############################################################################
 # Variant Definitions
@@ -464,14 +481,15 @@ function(_add_single_rocshmem_test)
         set(TEST_TIMEOUT 300)  # 5 minutes
     endif()
 
-    # Build test command
+    # Build test command using standard CMake MPI variables
     set(TEST_COMMAND
         ${CMAKE_CURRENT_SOURCE_DIR}/test_wrapper.sh
         ${FULL_TEST_NAME}
-        ${MPIRUN_EXECUTABLE}
-        -n ${TEST_RANKS}
-        -mca pml ucx
-        -mca osc ucx
+        ${MPIEXEC_EXECUTABLE}
+        ${MPIEXEC_NUMPROC_FLAG} ${TEST_RANKS}
+        ${MPIEXEC_PREFLAGS}
+        -mca pml ${OMPI_MCA_PML}
+        -mca osc ${OMPI_MCA_OSC}
     )
 
     # Export environment variables to MPI ranks via -x flags

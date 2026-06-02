@@ -24,10 +24,27 @@ test_categories:
       - "put_n2_w8_z1_1048576B"
       - "get_n2_w8_z1_1048576B"
 
+      # Context-specific RMA tests
+      - "defaultctxput_.*"
+      - "defaultctxget_.*"
+
       # Single collective test
       - "barrierall_n2_w8_z1"
 
-      # Unit tests
+      # Stream tests (basic)
+      - "putmem_on_stream_.*"
+
+      # AMO operations (basic)
+      - "amo_fadd_.*"
+
+      # Specialized tests
+      - "pingpong_.*"
+
+      # Single element operations
+      - "p_n.*"
+      - "g_n.*"
+
+# Unit tests
       - "unit_tests_n4"
 
     labels:
@@ -45,7 +62,6 @@ test_categories:
 
       # AMO operations (basic)
       - "amo_add_.*"
-      - "amo_fadd_.*"
       - "amo_inc_.*"
       - "amo_finc_.*"
 
@@ -64,7 +80,6 @@ test_categories:
       - "signalfetch_.*"
 
       # Stream tests (basic)
-      - "putmem_on_stream_.*"
       - "putmem_signal_on_stream_.*"
       - "barrier_all_on_stream_.*"
       - "signal_wait_until_on_stream_.*"
@@ -156,7 +171,6 @@ test_categories:
       - "teamctxsubsetparentinfra_.*"
 
       # Specialized tests
-      - "pingpong_.*"
       - "pingall_.*"
       - "randomaccess_.*"
       - "init_.*"

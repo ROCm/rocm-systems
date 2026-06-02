@@ -7,12 +7,29 @@
 # CTest-based unit test definitions
 # This replaces the shell-based driver.sh with native CTest integration
 
-# Find MPI runtime
-find_program(MPIRUN_EXECUTABLE NAMES mpirun mpiexec)
-if(NOT MPIRUN_EXECUTABLE)
-    message(WARNING "mpirun not found - unit tests will not be added")
+# MPI should already be found by the parent CMakeLists.txt
+# Use standard CMake MPI variables set by find_package(MPI)
+if(NOT MPIEXEC_EXECUTABLE)
+    message(WARNING "MPIEXEC_EXECUTABLE not found - unit tests will not be added")
     return()
 endif()
+
+# MCA parameters can be overridden via environment variables at CMake configure time
+# or via CMake cache variables. Defaults to ucx for both.
+set(OMPI_MCA_PML "$ENV{OMPI_MCA_pml}" CACHE STRING "OpenMPI MCA pml parameter")
+set(OMPI_MCA_OSC "$ENV{OMPI_MCA_osc}" CACHE STRING "OpenMPI MCA osc parameter")
+
+# Use ucx as default if not specified
+if(NOT OMPI_MCA_PML)
+    set(OMPI_MCA_PML "ucx")
+endif()
+if(NOT OMPI_MCA_OSC)
+    set(OMPI_MCA_OSC "ucx")
+endif()
+
+message(STATUS "MPI executable: ${MPIEXEC_EXECUTABLE}")
+message(STATUS "MPI numproc flag: ${MPIEXEC_NUMPROC_FLAG}")
+message(STATUS "MPI MCA parameters: pml=${OMPI_MCA_PML}, osc=${OMPI_MCA_OSC}")
 
 # Helper function to add a unit test with MPI
 # Usage:
@@ -43,12 +60,16 @@ function(add_rocshmem_unit_test)
     endif()
 
     # Build test command with wrapper (handles GPU count checking and skip logic)
+    # Use standard CMake MPI variables
     set(TEST_COMMAND
         ${CMAKE_CURRENT_SOURCE_DIR}/unit_test_wrapper.sh
         ${FULL_TEST_NAME}
         ${TEST_RANKS}
-        ${MPIRUN_EXECUTABLE}
-        -np ${TEST_RANKS}
+        ${MPIEXEC_EXECUTABLE}
+        ${MPIEXEC_NUMPROC_FLAG} ${TEST_RANKS}
+        ${MPIEXEC_PREFLAGS}
+        -mca pml ${OMPI_MCA_PML}
+        -mca osc ${OMPI_MCA_OSC}
         --timeout ${TEST_TIMEOUT}
         $<TARGET_FILE:rocshmem_unit_tests>
         --gtest_filter=${TEST_GTEST_FILTER}
