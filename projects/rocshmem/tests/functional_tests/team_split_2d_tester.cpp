@@ -55,7 +55,9 @@ TeamSplit2DTester::TeamSplit2DTester(TesterArguments args) : Tester(args)
   }
 }
 
-TeamSplit2DTester::~TeamSplit2DTester() {}
+TeamSplit2DTester::~TeamSplit2DTester() {
+  rocshmem_team_destroy(team_world_dup);
+}
 
 void TeamSplit2DTester::resetBuffers([[maybe_unused]] size_t size) {}
 
@@ -69,6 +71,7 @@ void TeamSplit2DTester::verifyResults([[maybe_unused]] size_t size) {
     }
     else {
       printf("FAIL: rocshmem_team_split_2d failed %d times\n", test_failed);
+      exit(-1);
     }
   }
 }
@@ -108,7 +111,7 @@ void TeamSplit2DTester::postLaunchKernel() {
   int y_size = rocshmem_team_n_pes(y_team);
   if (y_size != n_pes / xrange){
     fprintf(stderr,
-            "PE %d FAIL: xaxis_team size = %d, expected %d\n",
+            "PE %d FAIL: yaxis_team size = %d, expected %d\n",
             my_pe, y_size, n_pes / xrange);
     test_failed++;
   }

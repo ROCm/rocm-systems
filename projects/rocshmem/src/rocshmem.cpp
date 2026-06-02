@@ -802,13 +802,18 @@ __host__ int rocshmem_team_split_2d(rocshmem_team_t parent_team, int xrange, con
                                     const rocshmem_team_config_t *yaxis_config, long yaxis_mask, 
                                     rocshmem_team_t *yaxis_team)
 {
+  VERIFY_BACKEND();
   *yaxis_team = ROCSHMEM_TEAM_INVALID;
   *xaxis_team = ROCSHMEM_TEAM_INVALID;
 
   if (parent_team == ROCSHMEM_TEAM_INVALID) {
-      LOG_ERROR("Parent team is invaid");
-      return ROCSHMEM_ERROR;
-    }
+    LOG_ERROR("Parent team is invaid");
+    return ROCSHMEM_ERROR;
+  }
+  if (xrange < 1) {
+    LOG_ERROR("xrange must be >= 1 (got %d)", xrange);
+    return ROCSHMEM_ERROR;
+  }
 
   Team *parent_team_obj = get_internal_team(parent_team);
   const int parent_size = parent_team_obj->num_pes;
@@ -816,7 +821,7 @@ __host__ int rocshmem_team_split_2d(rocshmem_team_t parent_team, int xrange, con
   const int _xrange = (xrange > parent_size) ? parent_size : xrange;
   const int yrange = parent_size / _xrange;
 
-  const int num_xteams = ceil(parent_size / static_cast<float>(_xrange));
+  const int num_xteams = (parent_size + _xrange - 1) / _xrange;
   const int num_yteams = _xrange;
   const int remainder = parent_size % _xrange;
 
@@ -831,7 +836,7 @@ __host__ int rocshmem_team_split_2d(rocshmem_team_t parent_team, int xrange, con
                                       &my_xteam);
 
     if (ret) {
-      LOG_ERROR("Unable to make xteam %d/%d", i + 1, num_xteams);
+      LOG_ERROR("Unable to make xteam %d out of %d", i + 1, num_xteams);
       return ROCSHMEM_ERROR;
     }
     
@@ -852,7 +857,7 @@ __host__ int rocshmem_team_split_2d(rocshmem_team_t parent_team, int xrange, con
                                       yaxis_mask, &my_yteam);
 
     if (ret) {
-      LOG_ERROR("Unable to make yteam %d/%d", i + 1, num_yteams);
+      LOG_ERROR("Unable to make yteam %d out of %d", i + 1, num_yteams);
       return ROCSHMEM_ERROR;
     }
 
