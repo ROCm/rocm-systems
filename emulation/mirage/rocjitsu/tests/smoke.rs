@@ -5,10 +5,8 @@
 //! discoverable on this machine (rocjitsu not installed).
 
 use mirage_core::common::MaybeRef;
-use mirage_core::emulator::{EmulatorDef, ExecMode};
-use mirage_rocjitsu::{
-    SCHEMA_FBS_BYTES, ensure_assets, kmd_config, kmd_preload, schema_fbs_path,
-};
+use mirage_core::emulator::{EmulatorDef, EmulatorKind, ExecMode};
+use mirage_rocjitsu::{SCHEMA_FBS_BYTES, ensure_assets, kmd_config, kmd_preload, schema_fbs_path};
 
 #[test]
 fn embedded_assets_extract_round_trip() {
@@ -34,7 +32,7 @@ fn embedded_assets_extract_round_trip() {
             .next()
             .expect("at least one builtin agent");
         let def = EmulatorDef {
-            emulator: "rocjitsu".to_string(),
+            emulator: EmulatorKind::Rocjitsu,
             plugins: Default::default(),
             exec_mode: ExecMode::Functional,
             options: Default::default(),

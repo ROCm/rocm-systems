@@ -25,9 +25,105 @@ use std::path::PathBuf;
 
 use mirage_core::agent::AgentDef;
 use mirage_core::common::MaybeRef;
-use mirage_core::emulator::{EmulatorDef, EmulatorDescription, ExecMode, SupportStatus};
+use mirage_core::config::OptionDef;
+use mirage_core::emulator::{Emulator, EmulatorDef, EmulatorDescription, ExecMode, SupportStatus};
 use mirage_core::error::{MirageError, Result};
+use mirage_core::exec::InjectionDef;
+use mirage_core::plugin::PluginsDef;
+use mirage_core::profile::ProfileDef;
+use mirage_core::session::SessionHealth;
 use mirage_core::topology::TopologyDef;
+
+/// rocjitsu [`Emulator`] implementation. Bundles the rocjitsu-specific
+/// injection (the KMD `LD_PRELOAD` plus the `RJ_CONFIG`/`RJ_SCHEMA` env
+/// vars) and profile validation so callers dispatch generically on
+/// [`mirage_core::emulator::EmulatorKind`].
+pub struct Rocjitsu {
+    profile: ProfileDef,
+}
+
+impl Emulator for Rocjitsu {
+    fn description() -> EmulatorDescription {
+        describe()
+    }
+
+    fn new(def: ProfileDef) -> Self {
+        Self { profile: def }
+    }
+
+    fn options() -> Vec<OptionDef> {
+        Vec::new()
+    }
+
+    fn shutdown(self) {}
+
+    fn validate_profile(def: &ProfileDef) -> std::result::Result<(), String> {
+        // Make sure the runtime assets (the flatbuffer schema in
+        // particular) are present so this mirrors exactly what session
+        // start will do.
+        let _ = ensure_assets(false);
+        // Building the kmd config resolves the topology + agent
+        // references and checks the schema is available; any error here
+        // is precisely what would otherwise surface at run time.
+        kmd_config(&def.emulator)
+            .map(|_| ())
+            .map_err(|e| format!("rocjitsu cannot use this profile: {e}"))
+    }
+
+    fn def(&self) -> &EmulatorDef {
+        &self.profile.emulator
+    }
+
+    fn installed() -> bool {
+        is_installed()
+    }
+
+    fn discover_plugins() -> Vec<PluginsDef> {
+        Vec::new()
+    }
+
+    fn health(&self) -> SessionHealth {
+        let installed = is_installed();
+        SessionHealth {
+            healthy: installed,
+            state: Some(if installed { "ready" } else { "error" }.to_string()),
+            terminal: false,
+            message: if installed {
+                None
+            } else {
+                Some(format!("rocjitsu KMD library ({KMD_LIB_NAME}) not found"))
+            },
+            ..Default::default()
+        }
+    }
+
+    fn injection_def(&self) -> Result<InjectionDef> {
+        let def = &self.profile.emulator;
+        // Extract embedded assets if they aren't on disk yet; the
+        // authoritative "assets missing" error comes from `kmd_config`
+        // below, so this is best-effort.
+        let _ = ensure_assets(false);
+        let (config, schema) = kmd_config(def)?;
+        // Refuse to run unemulated: if the KMD interposer can't be
+        // located there is nothing to emulate the workload, so fail
+        // loudly rather than silently running on real hardware.
+        let ld_preload = kmd_preload().ok_or_else(|| {
+            MirageError::Other(format!(
+                "rocjitsu: KMD preload library ({KMD_LIB_NAME}) not found; \
+                 cannot emulate workload"
+            ))
+        })?;
+        let mut env = std::collections::BTreeMap::new();
+        env.insert("RJ_CONFIG".to_string(), config.display().to_string());
+        env.insert("RJ_SCHEMA".to_string(), schema.display().to_string());
+        Ok(InjectionDef {
+            wrapper: None,
+            ld_preload: Some(ld_preload.display().to_string()),
+            files: Default::default(),
+            env,
+        })
+    }
+}
 
 /// Describe the rocjitsu emulator backend for the registry. Owned by
 /// this crate (rather than `mirage_core`) so that all rocjitsu-

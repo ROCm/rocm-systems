@@ -15,7 +15,7 @@
 //! [`crate::agent::store`] / [`crate::topology::store`].
 
 use crate::common::{MaybeRef, SimpleMap};
-use crate::emulator::{EmulatorDef, EmulatorDescription, ExecMode, SupportStatus};
+use crate::emulator::{EmulatorDef, EmulatorDescription, EmulatorKind, ExecMode, SupportStatus};
 use crate::topology::TopologyDef;
 
 /// The canonical name of the built-in pass-through emulator.
@@ -43,7 +43,7 @@ pub fn default_emulator(specs: &[EmulatorDescription]) -> &EmulatorDescription {
 /// supplied system topology.
 pub fn make_def(spec: &EmulatorDescription, topology: TopologyDef) -> EmulatorDef {
     EmulatorDef {
-        emulator: spec.name.clone(),
+        emulator: spec.name.parse().unwrap_or(EmulatorKind::Noop),
         plugins: Default::default(),
         exec_mode: ExecMode::default(),
         options: SimpleMap::default(),

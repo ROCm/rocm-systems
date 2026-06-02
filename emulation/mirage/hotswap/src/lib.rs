@@ -15,8 +15,14 @@
 
 use std::path::PathBuf;
 
+use mirage_core::config::OptionDef;
 use mirage_core::discovery::{self, LibSearch};
-use mirage_core::emulator::{EmulatorDescription, SupportStatus};
+use mirage_core::emulator::{Emulator, EmulatorDef, EmulatorDescription, SupportStatus};
+use mirage_core::error::{MirageError, Result};
+use mirage_core::exec::InjectionDef;
+use mirage_core::plugin::PluginsDef;
+use mirage_core::profile::ProfileDef;
+use mirage_core::session::SessionHealth;
 
 /// The HSA tools library file name HotSwap ships as.
 pub const LIB_NAME: &str = "libhsa-hotswap.so";
@@ -35,6 +41,92 @@ pub const DISPLAY_NAME: &str = "HotSwap";
 /// `gfx1250` code on a `gfx942`/`gfx950` GPU). Without one of these
 /// GPUs physically present there is nothing for HotSwap to run on.
 pub const SUPPORTED_GPUS: &[(u32, &str)] = &[(90402, "gfx942"), (90500, "gfx950")];
+
+/// HotSwap [`Emulator`] implementation. HotSwap is loaded by the ROCm
+/// runtime as an HSA tools library, so the only injection needed is
+/// pointing `HSA_TOOLS_LIB` at `libhsa-hotswap.so`.
+pub struct Hotswap {
+    profile: ProfileDef,
+}
+
+impl Emulator for Hotswap {
+    fn description() -> EmulatorDescription {
+        describe()
+    }
+
+    fn new(def: ProfileDef) -> Self {
+        Self { profile: def }
+    }
+
+    fn options() -> Vec<OptionDef> {
+        Vec::new()
+    }
+
+    fn shutdown(self) {}
+
+    fn validate_profile(_def: &ProfileDef) -> std::result::Result<(), String> {
+        // HotSwap is not bundled or built by mirage; it must be
+        // installed separately. Surface actionable guidance now, at
+        // profile-creation time, rather than only when a session is
+        // later started.
+        if is_installed() {
+            Ok(())
+        } else {
+            Err(install_guidance())
+        }
+    }
+
+    fn def(&self) -> &EmulatorDef {
+        &self.profile.emulator
+    }
+
+    fn installed() -> bool {
+        is_installed()
+    }
+
+    fn discover_plugins() -> Vec<PluginsDef> {
+        Vec::new()
+    }
+
+    fn health(&self) -> SessionHealth {
+        let support = support_status();
+        let installed = is_installed();
+        let healthy = installed && support.supported;
+        SessionHealth {
+            healthy,
+            state: Some(if healthy { "ready" } else { "error" }.to_string()),
+            terminal: false,
+            message: if healthy {
+                None
+            } else if !installed {
+                Some(format!("{LIB_NAME} not found"))
+            } else {
+                Some(support.reason)
+            },
+            ..Default::default()
+        }
+    }
+
+    fn injection_def(&self) -> Result<InjectionDef> {
+        // Refuse to run unemulated: without the tools library the ROCm
+        // runtime has nothing to load, so fail loudly with guidance
+        // rather than silently running the workload on real hardware.
+        let lib = hsa_tools_lib().ok_or_else(|| {
+            MirageError::Other(format!(
+                "hotswap: {LIB_NAME} not found; workload cannot be emulated.\n{}",
+                install_guidance()
+            ))
+        })?;
+        let mut env = std::collections::BTreeMap::new();
+        env.insert("HSA_TOOLS_LIB".to_string(), lib);
+        Ok(InjectionDef {
+            wrapper: None,
+            ld_preload: None,
+            files: Default::default(),
+            env,
+        })
+    }
+}
 
 /// Describe the hotswap emulator backend for the registry. Owned by
 /// this crate (rather than `mirage_core`) so that all hotswap-specific

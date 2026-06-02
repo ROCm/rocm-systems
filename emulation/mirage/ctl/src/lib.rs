@@ -48,10 +48,11 @@ pub fn init_logging(verbose: u8) {
 /// and resolved runtime path, so building the registry probes the
 /// machine.
 pub fn registry() -> Vec<EmulatorDescription> {
+    use mirage_core::emulator::Emulator;
     vec![
-        mirage_core::registry::noop(),
-        mirage_rocjitsu::describe(),
-        mirage_hotswap::describe(),
+        mirage_core::emulator::Noop::description(),
+        mirage_rocjitsu::Rocjitsu::description(),
+        mirage_hotswap::Hotswap::description(),
     ]
 }
 
@@ -158,41 +159,11 @@ pub fn ensure_builtins_present() {
 /// Shared by the CLI profile commands and the daemon's profile
 /// endpoint so both validate identically.
 pub fn validate_profile(def: &ProfileDef) -> std::result::Result<(), String> {
-    let emulator = def.emulator.emulator.as_str();
-    if find_emulator(emulator).is_none() {
-        let known = registry()
-            .into_iter()
-            .map(|e| e.name)
-            .collect::<Vec<_>>()
-            .join(", ");
-        return Err(format!("unknown emulator `{emulator}` (known: {known})"));
-    }
-    match emulator {
-        "rocjitsu" => {
-            // Make sure the runtime assets (the flatbuffer schema in
-            // particular) are present so this mirrors exactly what
-            // session start will do.
-            let _ = mirage_rocjitsu::ensure_assets(false);
-            // Building the kmd config resolves the topology + agent
-            // references and checks the schema is available; any error
-            // here is precisely what would otherwise surface at run
-            // time, so we report it now with the profile in hand.
-            mirage_rocjitsu::kmd_config(&def.emulator)
-                .map(|_| ())
-                .map_err(|e| format!("rocjitsu cannot use this profile: {e}"))
-        }
-        "hotswap" => {
-            // HotSwap is not bundled or built by mirage; it must be
-            // installed separately. Surface actionable guidance now,
-            // at profile-creation time, rather than only when a
-            // session is later started.
-            if mirage_hotswap::is_installed() {
-                Ok(())
-            } else {
-                Err(mirage_hotswap::install_guidance())
-            }
-        }
-        _ => Ok(()),
+    use mirage_core::emulator::{Emulator, EmulatorKind, Noop};
+    match def.emulator.emulator {
+        EmulatorKind::Rocjitsu => mirage_rocjitsu::Rocjitsu::validate_profile(def),
+        EmulatorKind::Hotswap => mirage_hotswap::Hotswap::validate_profile(def),
+        EmulatorKind::Noop => Noop::validate_profile(def),
     }
 }
 

@@ -36,7 +36,7 @@ fn rocjitsu_env() -> Option<(PathBuf, PathBuf, PathBuf)> {
     let agents = mirage_core::agent::store::list().ok()?;
     let agent_name = agents.into_iter().next()?;
     let def = mirage_core::emulator::EmulatorDef {
-        emulator: "rocjitsu".to_string(),
+        emulator: mirage_core::emulator::EmulatorKind::Rocjitsu,
         plugins: Default::default(),
         exec_mode: mirage_core::emulator::ExecMode::Functional,
         options: Default::default(),

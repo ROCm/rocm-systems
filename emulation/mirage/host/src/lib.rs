@@ -38,6 +38,7 @@ use std::time::Duration;
 
 use chrono::Utc;
 use mirage_core::common::MaybeRef;
+use mirage_core::emulator::{Emulator, EmulatorKind};
 use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::{ExecDef, ExecId, ExecStatus, InjectionDef, NodeStatus};
 use mirage_core::paths::{ExecLayout, SessionLayout};
@@ -221,14 +222,15 @@ fn process_signal_requests(layout: &SessionLayout) {
 }
 
 /// Resolve the emulator-level injection for a session by reading its
-/// on-disk definition, resolving its profile, and computing the env
-/// vars / `LD_PRELOAD` the configured emulator backend needs.
+/// on-disk definition, resolving its profile, and dispatching to the
+/// configured [`EmulatorKind`]'s [`EmulatorBackend`] implementation to
+/// compute the env vars / `LD_PRELOAD` it needs.
 ///
 /// Returns an empty [`InjectionDef`] for emulators that need no
-/// injection (e.g. `noop`). Errors only when a configured emulator
-/// cannot produce its required assets (e.g. rocjitsu can't build its
-/// simulation config), so a misconfigured session fails loudly instead
-/// of silently running unemulated.
+/// injection (`noop`). Errors when a configured emulator cannot produce
+/// its required assets or its runtime library is missing, so a
+/// misconfigured session fails loudly instead of silently running
+/// unemulated.
 fn resolve_injection(session: &SessionId) -> Result<InjectionDef> {
     let session_def: SessionDef = read_json(&SessionLayout::for_id(session).def())?;
     let profile: ProfileDef = match session_def.profile {
@@ -243,68 +245,10 @@ fn resolve_injection(session: &SessionId) -> Result<InjectionDef> {
     };
     let emulator = &profile.emulator;
 
-    match emulator.emulator.as_str() {
-        "rocjitsu" => {
-            // Extract embedded assets if they aren't on disk yet, then
-            // compute the preload + simulation config for this profile.
-            if let Err(e) = mirage_rocjitsu::ensure_assets(false) {
-                tracing::warn!("rocjitsu: failed to extract assets: {e:#}");
-            }
-            let (config, schema) = match mirage_rocjitsu::kmd_config(emulator) {
-                Ok(paths) => paths,
-                Err(e) => {
-                    // Can't build the sim config (e.g. rocjitsu assets not
-                    // available on this machine). Warn and run unemulated
-                    // rather than failing the exec outright.
-                    tracing::warn!(
-                        "rocjitsu: could not build simulation config; \
-                         running without emulation env: {e:#}"
-                    );
-                    return Ok(InjectionDef::default());
-                }
-            };
-            let mut env = std::collections::BTreeMap::new();
-            env.insert("RJ_CONFIG".to_string(), config.display().to_string());
-            env.insert("RJ_SCHEMA".to_string(), schema.display().to_string());
-            let ld_preload = mirage_rocjitsu::kmd_preload().map(|p| p.display().to_string());
-            if ld_preload.is_none() {
-                tracing::warn!(
-                    "rocjitsu: no KMD preload library found; workload will not be emulated"
-                );
-            }
-            Ok(InjectionDef {
-                wrapper: None,
-                ld_preload,
-                files: Default::default(),
-                env,
-            })
-        }
-        // HotSwap is loaded by the ROCm runtime as an HSA tools
-        // library: we only need to discover `libhsa-hotswap.so` and
-        // point `HSA_TOOLS_LIB` at it. mirage does not build or bundle
-        // HotSwap — see `mirage_hotswap`.
-        "hotswap" => match mirage_hotswap::hsa_tools_lib() {
-            Some(lib) => {
-                let mut env = std::collections::BTreeMap::new();
-                env.insert("HSA_TOOLS_LIB".to_string(), lib);
-                Ok(InjectionDef {
-                    wrapper: None,
-                    ld_preload: None,
-                    files: Default::default(),
-                    env,
-                })
-            }
-            None => {
-                tracing::warn!(
-                    "hotswap: {lib} not found; workload will not be emulated.\n{guidance}",
-                    lib = mirage_hotswap::LIB_NAME,
-                    guidance = mirage_hotswap::install_guidance(),
-                );
-                Ok(InjectionDef::default())
-            }
-        },
-        // `noop` and any other emulator currently need no injection.
-        _ => Ok(InjectionDef::default()),
+    match emulator.emulator {
+        EmulatorKind::Rocjitsu => mirage_rocjitsu::Rocjitsu::new(profile).injection_def(),
+        EmulatorKind::Hotswap => mirage_hotswap::Hotswap::new(profile).injection_def(),
+        EmulatorKind::Noop => mirage_core::emulator::Noop::new(profile).injection_def(),
     }
 }
 
