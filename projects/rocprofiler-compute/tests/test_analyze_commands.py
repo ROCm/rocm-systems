@@ -720,9 +720,14 @@ def test_dispatch_5(binary_handler_analyze_rocprof_compute):
 def test_gpu_ids(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         if (
-            dir == "tests/workloads/vcopy/MI350"
+            dir == "tests/workloads/vcopy/MI100"
+            or dir == "tests/workloads/vcopy/MI200"
+            or dir == "tests/workloads/vcopy/MI350"
             or dir == "tests/workloads/vcopy/RDNA35_HALO"
         ):
+            # MI100/MI200 workloads (rocpd format) have GPU IDs re-ranked to
+            # 0-based consecutive integers by process_rocpd_csv(). MI350 and
+            # RDNA35_HALO also use GPU ID 0.
             gpu_id = "0"
         else:
             gpu_id = "2"

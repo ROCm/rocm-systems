@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from utils.logger import console_error, console_warning, demarcate
+from utils.metrics.aggregation import calc_pct_of_peak
 from utils.metrics.common import ValuDualIssueDetector
 from utils.metrics.debug_row_tracker import DebugRowTracker, debug_row_tracker
 from utils.metrics.expression import build_eval_string
@@ -21,6 +22,7 @@ from utils.metrics.noise_clamper import (
     print_noise_clamp_summary,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
+from utils.utils_analysis import PEAK_COL_PREFERENCE, VALUE_COL_PREFERENCE
 from utils.utils_common import SUPPORTED_FIELD
 from utils.utils_counter_defs import extract_counters_and_variables, get_build_in_vars
 
@@ -213,7 +215,10 @@ def eval_metric(
         if dfs_type[df_id] == "metric_table":
             for row_id, row in df.iterrows():
                 for expr in df.columns:
-                    if expr in SUPPORTED_FIELD and expr.lower() != "alias":
+                    if expr in SUPPORTED_FIELD and expr.lower() not in {
+                        "alias",
+                        "pct of peak",
+                    }:
                         if row[expr]:
                             exprs_to_eval.append((df_id, row_id, expr, row[expr]))
 
@@ -250,8 +255,37 @@ def eval_metric(
     # Print aggregated summary of any noise clamping warnings
     print_noise_clamp_summary()
 
+    # Derive Pct of Peak from evaluated Value and Peak columns
+    compute_pct_of_peak(dfs, dfs_type)
+
     # Check for metrics exceeding theoretical peak due to dual-issue
     validate_dual_issue_metrics(dfs, dfs_type, sys_info, raw_pmc_df)
+
+
+def compute_pct_of_peak(dfs: dict, dfs_type: dict) -> None:
+    """Compute and store 100 * value / peak for each row where pop is True."""
+    pop_col = "Pct of Peak"
+    for df_id, df in dfs.items():
+        if dfs_type[df_id] != "metric_table":
+            continue
+        if pop_col not in df.columns:
+            continue
+
+        # Detect value and peak columns using canonical preference order
+        value_col = next(
+            (col for col in VALUE_COL_PREFERENCE if col in df.columns), None
+        )
+        peak_col = next((col for col in PEAK_COL_PREFERENCE if col in df.columns), None)
+        if not value_col or not peak_col:
+            continue
+
+        # astype(bool) handles both Python bool and numpy.bool_ from pandas dtypes
+        mask = df[pop_col].astype(bool)
+        df[pop_col] = ""
+        df.loc[mask, pop_col] = [
+            pct if (pct := calc_pct_of_peak(v, p)) is not None else ""
+            for v, p in zip(df.loc[mask, value_col], df.loc[mask, peak_col])
+        ]
 
 
 def validate_dual_issue_metrics(

@@ -56,7 +56,6 @@ SUPPORTED_FIELD: list[str] = [
     "Min",
     "Max",
     "Avg",
-    "Pct of Peak",
     "Peak",
     "Peak (Empirical)",
     "Count",
@@ -66,6 +65,7 @@ SUPPORTED_FIELD: list[str] = [
     "Q1",
     "Q3",
     "Expression",
+    "Pct of Peak",
     # Special keywords for L2 channel
     "Channel",
     "L2 Cache Hit Rate",

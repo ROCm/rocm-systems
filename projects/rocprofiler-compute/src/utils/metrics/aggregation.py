@@ -11,6 +11,19 @@ import numpy as np
 import pandas as pd
 
 
+def calc_pct_of_peak(
+    value: float | str | None,
+    peak: float | str | None,
+) -> float | None:
+    """Return 100.0 * value / peak, or None on invalid, NaN, or zero-peak input."""
+    if pd.isna(value) or pd.isna(peak):
+        return None
+    try:
+        return float(value) / float(peak) * 100.0
+    except (ValueError, TypeError, ZeroDivisionError):
+        return None
+
+
 def to_min(*args: Any) -> float:
     if len(args) == 1 and isinstance(args[0], pd.Series):
         return args[0].min()
