@@ -27,7 +27,7 @@ This directory contains NAS Parallel Benchmarks (NPB) implemented with OpenMP th
   - `amdclang++` is **required** for the C++ examples (`openmp-cg`, `openmp-lu`, and the `openmp-common` shared utility objects).
   - `amdflang` (version 20 or newer) is **required** for the Fortran examples (`fortran/host.f90`, `fortran/offload.f90`).
 
-If either compiler is missing, CMake configuration fails with a `FATAL_ERROR`.
+If a required compiler for an **enabled** target is missing, CMake configuration fails with a `FATAL_ERROR` (append `openmp` to `ROCPROFSYS_DISABLE_EXAMPLES` to skip building these examples).
 
 ## Building
 

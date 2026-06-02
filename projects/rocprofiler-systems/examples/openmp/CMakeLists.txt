@@ -1,6 +1,12 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+if(ROCPROFSYS_DISABLE_EXAMPLES)
+    if("openmp" IN_LIST ROCPROFSYS_DISABLE_EXAMPLES)
+        return()
+    endif()
+endif()
+
 cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 
 project(rocprofiler-systems-openmp LANGUAGES CXX)
