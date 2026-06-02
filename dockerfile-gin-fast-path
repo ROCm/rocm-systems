@@ -136,8 +136,8 @@ ARG DEBUG_BUILD=0
 ## building rocSHMEM
 # ARG ROCSHMEM_BRANCH=users/abouteiller/gin-stage1-wip
 # ARG ROCSHMEM_BRANCH=users/abouteiller/gin-stage1
-# ARG ROCSHMEM_BRANCH=users/dondai/gin-stage2a-anvil
-ARG ROCSHMEM_BRANCH=users/dondai/gin-rocshmem-sdma-backend
+# ARG ROCSHMEM_BRANCH=users/dondai/gin-rocshmem-sdma-backend
+ARG ROCSHMEM_BRANCH=users/dondai/gin-stage2a-anvil
 ARG ROCSHMEM_CACHE_BUST=1
 RUN if [ "${USE_LOCAL_SRC}" = "1" ]; then \
     cp -r projects/rocshmem/ /tmp/local/projects/rocshmem/; \
@@ -171,8 +171,8 @@ RUN cd rocshmem/src/projects/rocshmem \
 #ARG RCCL_BRANCH=users/prasanna-amd/nccl-sync-v2-28-9-gin-rebased-0501
 # ARG RCCL_BRANCH=users/abouteiller/gin-stage1-wip
 # ARG RCCL_BRANCH=users/abouteiller/gin-stage1
-# ARG RCCL_BRANCH=users/dondai/gin-stage2a-anvil
-ARG RCCL_BRANCH=users/dondai/gin-rocshmem-sdma-backend
+# ARG RCCL_BRANCH=users/dondai/gin-rocshmem-sdma-backend
+ARG RCCL_BRANCH=users/dondai/gin-stage2a-anvil
 ARG RCCL_CACHE_BUST=1
 RUN if [ "${USE_LOCAL_SRC}" = "1" ]; then \
     cp -r projects/rccl/      /tmp/local/projects/rccl/;  \
