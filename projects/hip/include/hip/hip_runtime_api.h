@@ -5286,17 +5286,17 @@ hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes, hipMemcp
  */
 hipError_t hipMemset(void* dst, int value, size_t sizeBytes);
 /**
- *  @brief Fills the first sizeBytes bytes of the memory area pointed to by dest with the constant
+ *  @brief Fills the first sizeBytes bytes of the memory area pointed to by dst with the constant
  * byte value value.
  *
- *  @param[in,out] dest  Data ptr to be filled
+ *  @param[in,out] dst   Data ptr to be filled
  *  @param[in]  value  Value to be set
  *  @param[in]  count  Number of values to be set
  *  @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotInitialized
  */
-hipError_t hipMemsetD8(hipDeviceptr_t dest, unsigned char value, size_t count);
+hipError_t hipMemsetD8(hipDeviceptr_t dst, unsigned char value, size_t count);
 /**
- *  @brief Fills the first sizeBytes bytes of the memory area pointed to by dest with the constant
+ *  @brief Fills the first sizeBytes bytes of the memory area pointed to by dst with the constant
  * byte value value.
  *
  * hipMemsetD8Async() is asynchronous with respect to the host, so the call may return before the
@@ -5304,26 +5304,26 @@ hipError_t hipMemsetD8(hipDeviceptr_t dest, unsigned char value, size_t count);
  * stream argument. If stream is non-zero, the operation may overlap with operations in other
  * streams.
  *
- *  @param[in,out] dest  Data ptr to be filled
+ *  @param[in,out] dst   Data ptr to be filled
  *  @param[in]  value  Constant value to be set
  *  @param[in]  count  Number of values to be set
  *  @param[in]  stream  Stream identifier
  *  @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotInitialized
  */
-hipError_t hipMemsetD8Async(hipDeviceptr_t dest, unsigned char value, size_t count,
+hipError_t hipMemsetD8Async(hipDeviceptr_t dst, unsigned char value, size_t count,
                             hipStream_t stream __dparm(0));
 /**
- *  @brief Fills the first sizeBytes bytes of the memory area pointed to by dest with the constant
+ *  @brief Fills the first sizeBytes bytes of the memory area pointed to by dst with the constant
  * short value value.
  *
- *  @param[in,out] dest  Data ptr to be filled
+ *  @param[in,out] dst   Data ptr to be filled
  *  @param[in]  value  Constant value to be set
  *  @param[in]  count  Number of values to be set
  *  @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotInitialized
  */
-hipError_t hipMemsetD16(hipDeviceptr_t dest, unsigned short value, size_t count);
+hipError_t hipMemsetD16(hipDeviceptr_t dst, unsigned short value, size_t count);
 /**
- *  @brief Fills the first sizeBytes bytes of the memory area pointed to by dest with the constant
+ *  @brief Fills the first sizeBytes bytes of the memory area pointed to by dst with the constant
  * short value value.
  *
  * hipMemsetD16Async() is asynchronous with respect to the host, so the call may return before the
@@ -5331,24 +5331,24 @@ hipError_t hipMemsetD16(hipDeviceptr_t dest, unsigned short value, size_t count)
  * stream argument. If stream is non-zero, the operation may overlap with operations in other
  * streams.
  *
- *  @param[in,out] dest  Data ptr to be filled
+ *  @param[in,out] dst   Data ptr to be filled
  *  @param[in]  value  Constant value to be set
  *  @param[in]  count  Number of values to be set
  *  @param[in]  stream  Stream identifier
  *  @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotInitialized
  */
-hipError_t hipMemsetD16Async(hipDeviceptr_t dest, unsigned short value, size_t count,
+hipError_t hipMemsetD16Async(hipDeviceptr_t dst, unsigned short value, size_t count,
                              hipStream_t stream __dparm(0));
 /**
- *  @brief Fills the memory area pointed to by dest with the constant integer
+ *  @brief Fills the memory area pointed to by dst with the constant integer
  * value for specified number of times.
  *
- *  @param[in,out] dest  Data being filled
+ *  @param[in,out] dst   Data being filled
  *  @param[in]  value  Constant value to be set
  *  @param[in]  count  Number of values to be set
  *  @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotInitialized
  */
-hipError_t hipMemsetD32(hipDeviceptr_t dest, int value, size_t count);
+hipError_t hipMemsetD32(hipDeviceptr_t dst, int value, size_t count);
 /**
  *  @brief Fills the first sizeBytes bytes of the memory area pointed to by dev with the constant
  * byte value value.
