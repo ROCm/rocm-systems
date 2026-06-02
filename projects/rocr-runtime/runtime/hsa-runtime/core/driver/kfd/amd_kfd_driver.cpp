@@ -586,8 +586,12 @@ hsa_status_t KfdDriver::ImportExternalSemaphore(uint32_t node_id, void* nt_handl
       static_cast<HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE>(type);
 
   HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {};
+  // Optional thunk: missing export -> NOT_SUPPORTED, not a null call.
+  const bool loaded =
+      core::Runtime::runtime_singleton_->thunkLoader()->HSAKMT_PFN(hsaKmtImportExternalSemaphore) != nullptr;
   HSAKMT_STATUS s =
-      HSAKMT_CALL(hsaKmtImportExternalSemaphore(node_id, nt_handle, kmt_type, &kmt_handle));
+      loaded ? HSAKMT_CALL(hsaKmtImportExternalSemaphore(node_id, nt_handle, kmt_type, &kmt_handle))
+             : HSAKMT_STATUS_NOT_SUPPORTED;
 
   // libhsakmt distinguishes invalid input (null handle, unknown type)
   // from "no node for this agent" and from generic KMD failures.
@@ -611,6 +615,9 @@ hsa_status_t KfdDriver::ImportExternalSemaphore(uint32_t node_id, void* nt_handl
 
 hsa_status_t KfdDriver::DestroyExternalSemaphore(hsa_amd_external_semaphore_t sem) const {
   HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {sem.handle};
+  // Optional thunk: no export means this driver can't own the handle.
+  if (core::Runtime::runtime_singleton_->thunkLoader()->HSAKMT_PFN(hsaKmtDestroyExternalSemaphore) == nullptr)
+    return HSA_STATUS_ERROR;
   if (HSAKMT_CALL(hsaKmtDestroyExternalSemaphore(kmt_handle)) != HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
   return HSA_STATUS_SUCCESS;
@@ -637,6 +644,9 @@ hsa_status_t KfdDriver::SignalExternalSemaphore(uint64_t queue_id,
                                                 hsa_amd_external_semaphore_t sem,
                                                 uint64_t value) const {
   HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {sem.handle};
+  // Optional thunk: missing export maps to NOT_SUPPORTED, not a null call.
+  if (core::Runtime::runtime_singleton_->thunkLoader()->HSAKMT_PFN(hsaKmtQueueSignalExternalSemaphore) == nullptr)
+    return MapQueueExtSemStatus(HSAKMT_STATUS_NOT_SUPPORTED);
   return MapQueueExtSemStatus(
       HSAKMT_CALL(hsaKmtQueueSignalExternalSemaphore(queue_id, kmt_handle, value)));
 }
@@ -645,6 +655,9 @@ hsa_status_t KfdDriver::WaitExternalSemaphore(uint64_t queue_id,
                                               hsa_amd_external_semaphore_t sem,
                                               uint64_t value) const {
   HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {sem.handle};
+  // Optional thunk: missing export maps to NOT_SUPPORTED, not a null call.
+  if (core::Runtime::runtime_singleton_->thunkLoader()->HSAKMT_PFN(hsaKmtQueueWaitExternalSemaphore) == nullptr)
+    return MapQueueExtSemStatus(HSAKMT_STATUS_NOT_SUPPORTED);
   return MapQueueExtSemStatus(
       HSAKMT_CALL(hsaKmtQueueWaitExternalSemaphore(queue_id, kmt_handle, value)));
 }

@@ -404,17 +404,12 @@ namespace core {
       HSAKMT_PFN(hsaKmtHandleImport) = (HSAKMT_DEF(hsaKmtHandleImport)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtHandleImport");
       if (HSAKMT_PFN(hsaKmtHandleImport) == nullptr) goto LOAD_ERROR;
 
+      // Optional: a missing export leaves the pfn null (KfdDriver guards
+      // each call) instead of failing the whole table load.
       HSAKMT_PFN(hsaKmtImportExternalSemaphore) = (HSAKMT_DEF(hsaKmtImportExternalSemaphore)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtImportExternalSemaphore");
-      if (HSAKMT_PFN(hsaKmtImportExternalSemaphore) == nullptr) goto LOAD_ERROR;
-
       HSAKMT_PFN(hsaKmtDestroyExternalSemaphore) = (HSAKMT_DEF(hsaKmtDestroyExternalSemaphore)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtDestroyExternalSemaphore");
-      if (HSAKMT_PFN(hsaKmtDestroyExternalSemaphore) == nullptr) goto LOAD_ERROR;
-
       HSAKMT_PFN(hsaKmtQueueSignalExternalSemaphore) = (HSAKMT_DEF(hsaKmtQueueSignalExternalSemaphore)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtQueueSignalExternalSemaphore");
-      if (HSAKMT_PFN(hsaKmtQueueSignalExternalSemaphore) == nullptr) goto LOAD_ERROR;
-
       HSAKMT_PFN(hsaKmtQueueWaitExternalSemaphore) = (HSAKMT_DEF(hsaKmtQueueWaitExternalSemaphore)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtQueueWaitExternalSemaphore");
-      if (HSAKMT_PFN(hsaKmtQueueWaitExternalSemaphore) == nullptr) goto LOAD_ERROR;
 
       HSAKMT_PFN(hsaKmtMemoryVaMap) = (HSAKMT_DEF(hsaKmtMemoryVaMap)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtMemoryVaMap");
       if (HSAKMT_PFN(hsaKmtMemoryVaMap) == nullptr) goto LOAD_ERROR;
