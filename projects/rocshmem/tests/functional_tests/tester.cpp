@@ -46,7 +46,6 @@
 #include "signal_wait_until_on_stream_tester.hpp"
 #include "ping_all_tester.hpp"
 #include "ping_pong_tester.hpp"
-#include "primitive_mr_tester.hpp"
 #include "primitive_tester.hpp"
 #include "random_access_tester.hpp"
 #include "shmem_ptr_tester.hpp"
@@ -526,10 +525,6 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case WGPutNBITestType:
       test_name = "Non-Blocking WG level Puts";
       testers.push_back(new WorkGroupPrimitiveTester(args));
-      break;
-    case PutNBIMRTestType:
-      test_name = "Non-Blocking Put message rate";
-      testers.push_back(new PrimitiveMRTester(args));
       break;
     case WAVEGetTestType:
       test_name = "Blocking WAVE level Gets";

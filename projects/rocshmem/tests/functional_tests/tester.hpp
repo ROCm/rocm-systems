@@ -81,7 +81,7 @@
   X(TeamCtxPut,                36)  \
   X(TeamCtxPutNBI,             37)  \
   X(TeamCtxInfra,              38)  \
-  X(PutNBIMR,                  39)  \
+  /* 39: PutNBIMR removed, use PutNBI with -b instead */ \
   X(AMO_Set,                   40)  \
   X(AMO_Swap,                  41)  \
   X(AMO_FetchAnd,              42)  \

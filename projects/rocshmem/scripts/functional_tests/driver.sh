@@ -72,7 +72,7 @@ declare -A TEST_NUMBERS=(
   ["teamctxput"]="36"
   ["teamctxputnbi"]="37"
   ["teamctxinfra"]="38"
-  ["putnbimr"]="39"
+  # 39: putnbimr removed, use putnbi with -b instead
   ["amo_set"]="40"
   ["amo_swap"]="41"
   ["amo_fetchand"]="42"
@@ -219,7 +219,7 @@ ExecTest() {
       )
   # Construct Test Command
   TEST_LOG_NAME="$TEST_NAME"_n"$NUM_RANKS"_w"$NUM_WG"_z"$NUM_THREADS"
-  cmd+=( "$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap} )
+  cmd+=( "$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap} ${ROCSHMEM_TEST_ARGS:-} )
   if [[ "" != "$MAX_MSG_SIZE" ]]
   then
     # Check if in volume mode
