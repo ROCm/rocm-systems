@@ -71,16 +71,16 @@ seed_file(const fs::path &path, std::size_t bytes, std::uint32_t seed)
     std::uniform_int_distribution<uint16_t> dist(0, 255);
     std::ofstream                           out(path, std::ios::binary);
     if (!out) {
-        std::fprintf(stderr, "tmpdriver: cannot open %s for write: %s\n", path.c_str(),
-                     std::strerror(errno));
+        std::fprintf(stderr, "tmpdriver: cannot open %s for write: %s\n", path.c_str(), std::strerror(errno));
         std::exit(2);
     }
-    constexpr std::size_t            kChunk = 4096;
-    std::vector<unsigned char>       buf(kChunk);
-    std::size_t                      written = 0;
+    constexpr std::size_t      kChunk = 4096;
+    std::vector<unsigned char> buf(kChunk);
+    std::size_t                written = 0;
     while (written < bytes) {
         std::size_t n = std::min(kChunk, bytes - written);
-        for (std::size_t i = 0; i < n; ++i) buf[i] = static_cast<unsigned char>(dist(gen));
+        for (std::size_t i = 0; i < n; ++i)
+            buf[i] = static_cast<unsigned char>(dist(gen));
         out.write(reinterpret_cast<char *>(buf.data()), static_cast<std::streamsize>(n));
         written += n;
     }
@@ -90,13 +90,13 @@ std::string
 substitute(std::string s, const std::string &tmpdir, const std::string &input)
 {
     auto replace = [&](const std::string &token, const std::string &value) {
-        for (std::size_t pos = 0; (pos = s.find(token, pos)) != std::string::npos;
-             pos += value.size()) {
+        for (std::size_t pos = 0; (pos = s.find(token, pos)) != std::string::npos; pos += value.size()) {
             s.replace(pos, token.size(), value);
         }
     };
     replace("{TMPDIR}", tmpdir);
-    if (!input.empty()) replace("{INPUT}", input);
+    if (!input.empty())
+        replace("{INPUT}", input);
     return s;
 }
 
@@ -110,7 +110,7 @@ usage(const char *prog)
     std::exit(2);
 }
 
-}  // namespace
+} // namespace
 
 int
 main(int argc, char **argv)
@@ -124,30 +124,35 @@ main(int argc, char **argv)
         std::string a = argv[i];
         if (a == "--base" && i + 1 < argc) {
             base = argv[++i];
-        } else if (a == "--seed-input" && i + 1 < argc) {
+        }
+        else if (a == "--seed-input" && i + 1 < argc) {
             seed_bytes = std::stoull(argv[++i]);
-        } else if (a == "--seed" && i + 1 < argc) {
+        }
+        else if (a == "--seed" && i + 1 < argc) {
             seed = static_cast<std::uint32_t>(std::stoul(argv[++i]));
-        } else if (a == "--") {
+        }
+        else if (a == "--") {
             ++i;
             break;
-        } else {
+        }
+        else {
             usage(argv[0]);
         }
     }
-    if (base.empty() || i >= argc) usage(argv[0]);
+    if (base.empty() || i >= argc)
+        usage(argv[0]);
 
     std::error_code ec;
-    fs::create_directories(base, ec);  // ok if exists
+    fs::create_directories(base, ec); // ok if exists
     std::string tmpl = base + "/hipfile_ex.XXXXXX";
     if (mkdtemp(tmpl.data()) == nullptr) {
-        std::fprintf(stderr, "tmpdriver: mkdtemp(%s) failed: %s\n", tmpl.c_str(),
-                     std::strerror(errno));
+        std::fprintf(stderr, "tmpdriver: mkdtemp(%s) failed: %s\n", tmpl.c_str(), std::strerror(errno));
         return 2;
     }
     g_scratch = tmpl;
     std::atexit(cleanup);
-    for (int s : {SIGINT, SIGTERM, SIGHUP}) signal(s, on_signal);
+    for (int s : {SIGINT, SIGTERM, SIGHUP})
+        signal(s, on_signal);
 
     std::string input_path;
     if (seed_bytes > 0) {
@@ -157,11 +162,13 @@ main(int argc, char **argv)
 
     std::vector<std::string> child_args;
     child_args.reserve(argc - i);
-    for (; i < argc; ++i) child_args.push_back(substitute(argv[i], g_scratch.string(), input_path));
+    for (; i < argc; ++i)
+        child_args.push_back(substitute(argv[i], g_scratch.string(), input_path));
 
     std::vector<char *> cargs;
     cargs.reserve(child_args.size() + 1);
-    for (auto &s : child_args) cargs.push_back(s.data());
+    for (auto &s : child_args)
+        cargs.push_back(s.data());
     cargs.push_back(nullptr);
 
     g_child = fork();
@@ -186,7 +193,9 @@ main(int argc, char **argv)
         return 2;
     }
     g_child = -1;
-    if (WIFEXITED(status)) return WEXITSTATUS(status);
-    if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
+    if (WIFEXITED(status))
+        return WEXITSTATUS(status);
+    if (WIFSIGNALED(status))
+        return 128 + WTERMSIG(status);
     return 2;
 }
