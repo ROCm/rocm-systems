@@ -9,7 +9,8 @@ set(ROCPROFILER_LIB_COUNTERS_SOURCES
     controller.cpp
     device_counting.cpp
     ioctl.cpp
-    firmware_restrictions.cpp)
+    firmware_restrictions.cpp
+    raw_counter.cpp)
 set(ROCPROFILER_LIB_COUNTERS_HEADERS
     metrics.hpp
     dimensions.hpp
@@ -22,7 +23,8 @@ set(ROCPROFILER_LIB_COUNTERS_HEADERS
     device_counting.hpp
     sample_consumer.hpp
     ioctl.hpp
-    firmware_restrictions.hpp)
+    firmware_restrictions.hpp
+    raw_counter.hpp)
 target_sources(rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_COUNTERS_SOURCES}
                                                       ${ROCPROFILER_LIB_COUNTERS_HEADERS})
 add_subdirectory(parser)

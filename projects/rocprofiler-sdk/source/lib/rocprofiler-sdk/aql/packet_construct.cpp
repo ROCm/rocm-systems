@@ -99,6 +99,31 @@ CounterPacketConstruct::CounterPacketConstruct(rocprofiler_agent_id_t           
     _events = get_all_events();
 }
 
+CounterPacketConstruct::CounterPacketConstruct(
+    rocprofiler_agent_id_t                    agent,
+    const std::vector<aqlprofile_pmc_event_t>& raw_events)
+: _agent(agent)
+{
+    auto aql_agent = *CHECK_NOTNULL(rocprofiler::agent::get_aql_agent(agent));
+
+    for(const auto& event : raw_events)
+    {
+        bool validate_result = false;
+        LOG_IF(FATAL,
+               aqlprofile_validate_pmc_event(aql_agent, &event, &validate_result) !=
+                   HSA_STATUS_SUCCESS);
+        ROCP_FATAL_IF(!validate_result) << fmt::format(
+            "Invalid raw event: block={} index={} counter_id={}",
+            static_cast<int>(event.block_name),
+            event.block_index,
+            event.event_id);
+
+        _metrics.emplace_back().instances.push_back(event);
+        _metrics.back().events.push_back(event);
+    }
+    _events = get_all_events();
+}
+
 std::unique_ptr<hsa::CounterAQLPacket>
 CounterPacketConstruct::construct_packet(const CoreApiTable& coreapi, const AmdExtTable& ext)
 {

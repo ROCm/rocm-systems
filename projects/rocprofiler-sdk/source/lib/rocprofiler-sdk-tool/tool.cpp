@@ -59,6 +59,9 @@
 #include "lib/output/timestamps.hpp"
 #include "lib/output/tmp_file.hpp"
 #include "lib/output/tmp_file_buffer.hpp"
+#include "lib/rocprofiler-sdk/aql/packet_construct.hpp"
+#include "lib/rocprofiler-sdk/counters/core.hpp"
+#include "lib/rocprofiler-sdk/counters/raw_counter.hpp"
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/buffer_tracing.h>
@@ -1444,15 +1447,63 @@ generate_agent_profiles()
     std::unordered_map<rocprofiler_agent_id_t, std::atomic<uint64_t>> pos;
     for(const auto& agent : get_gpu_agents())
     {
+        if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+
         for(const auto& counter_set : tool::get_config().counters)
         {
-            if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
             auto profile = construct_counter_collection_profile(agent->id, counter_set);
             if(profile.has_value())
             {
                 profiles[agent->id].push_back(profile.value());
             }
         }
+
+        // pmc_raw / ROCPROF_RAW_COUNTERS: resolve per-agent and create a single profile.
+        const auto& raw_specs = tool::get_config().raw_counter_specs;
+        if(!raw_specs.empty())
+        {
+            auto events = std::vector<aqlprofile_pmc_event_t>{};
+            for(const auto& spec : raw_specs)
+            {
+                auto rc = rocprofiler::counters::parse_raw_counter_string(spec, agent->id);
+                if(rc)
+                {
+                    events.push_back(
+                        {.block_index = rc->block_index,
+                         .event_id    = rc->counter_id,
+                         .flags       = aqlprofile_pmc_event_flags_t{0},
+                         .block_name  = static_cast<hsa_ven_amd_aqlprofile_block_name_t>(
+                             rc->block_id)});
+                }
+                else
+                {
+                    ROCP_WARNING << "Could not resolve raw counter spec '" << spec
+                                 << "' for agent " << agent->node_id << " (" << agent->name
+                                 << ") — skipping";
+                }
+            }
+
+            if(!events.empty())
+            {
+                auto config           = std::make_shared<rocprofiler::counters::counter_config>();
+                config->agent         = agent;
+                config->pkt_generator = std::make_unique<rocprofiler::aql::CounterPacketConstruct>(
+                    agent->id, events);
+
+                if(config->pkt_generator->can_collect() == ROCPROFILER_STATUS_SUCCESS &&
+                   rocprofiler::counters::create_counter_profile(config) ==
+                       ROCPROFILER_STATUS_SUCCESS)
+                {
+                    profiles[agent->id].push_back(config->id);
+                }
+                else
+                {
+                    ROCP_WARNING << "Failed to create raw counter profile for agent "
+                                 << agent->node_id << " (" << agent->name << ")";
+                }
+            }
+        }
+
         pos[agent->id] = 0;
     }
     return agent_profiles{std::move(pos), tool::get_config().counter_groups_interval, profiles};
