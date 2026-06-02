@@ -133,6 +133,16 @@ class DmaBlitManager : public device::HostBlitManager {
       const std::vector<amd::BatchCopyOp>& copyOps  //!< Batch of copy operations
   ) const;
 
+  //! Copies pageable host-to-device operations in a batch
+  bool WriteBufferBatch(
+      const std::vector<amd::BatchWriteMemoryOp>& write_ops  //!< Batch of write operations
+  ) const override;
+
+  //! Copies device-to-pageable-host operations in a batch
+  bool ReadBufferBatch(
+      const std::vector<amd::BatchReadMemoryOp>& read_ops  //!< Batch of read operations
+  ) const override;
+
   //! Copies an image object to a buffer object
   virtual bool copyImageToBuffer(
       device::Memory& srcMemory,                            //!< Source memory object

@@ -3358,6 +3358,65 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
 }
 
 // ================================================================================================
+void VirtualGPU::SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd) {
+  // Make sure VirtualGPU has an exclusive access to the resources
+  std::scoped_lock lock(execution());
+
+  profilingBegin(cmd, true);
+
+  const std::vector<amd::BatchWriteMemoryOp>& write_ops = cmd.WriteOps();
+
+  if (!amd::IS_HIP) {
+    device::Memory::SyncFlags sync_flags;
+    sync_flags.skipEntire_ = false;
+
+    for (const amd::BatchWriteMemoryOp& op : write_ops) {
+      dev().getRocMemory(op.dst_memory_)->syncCacheFromHost(*this, sync_flags);
+    }
+  }
+
+  if (!blitMgr().WriteBufferBatch(write_ops)) {
+    LogError("SubmitBatchWriteMemory: Batch write failed!");
+    cmd.setStatus(CL_OUT_OF_RESOURCES);
+    profilingEnd();
+    return;
+  }
+
+  if (!amd::IS_HIP) {
+    for (const amd::BatchWriteMemoryOp& op : write_ops) {
+      op.dst_memory_->signalWrite(&dev());
+    }
+  }
+
+  profilingEnd();
+}
+
+// ================================================================================================
+void VirtualGPU::SubmitBatchReadMemory(amd::BatchReadMemoryCommand& cmd) {
+  // Make sure VirtualGPU has an exclusive access to the resources
+  std::scoped_lock lock(execution());
+
+  profilingBegin(cmd, true);
+
+  const std::vector<amd::BatchReadMemoryOp>& read_ops = cmd.ReadOps();
+
+  if (!amd::IS_HIP) {
+    for (const amd::BatchReadMemoryOp& op : read_ops) {
+      dev().getRocMemory(op.src_memory_)->syncCacheFromHost(*this);
+    }
+  }
+
+  if (!blitMgr().ReadBufferBatch(read_ops)) {
+    LogError("SubmitBatchReadMemory: Batch read failed!");
+    cmd.setStatus(CL_OUT_OF_RESOURCES);
+    profilingEnd();
+    return;
+  }
+
+  profilingEnd();
+}
+
+// ================================================================================================
 void VirtualGPU::submitSvmMapMemory(amd::SvmMapMemoryCommand& cmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
   std::scoped_lock lock(execution());

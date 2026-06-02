@@ -361,6 +361,32 @@ bool HostBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& copyO
   return true;
 }
 
+bool HostBlitManager::WriteBufferBatch(
+    const std::vector<amd::BatchWriteMemoryOp>& write_ops) const {
+  for (const amd::BatchWriteMemoryOp& op : write_ops) {
+    device::Memory* dst_dev_mem =
+        op.dst_memory_->getDeviceMemory(*op.dst_memory_->getContext().devices()[0]);
+
+    if (!writeBuffer(op.src_host_, *dst_dev_mem, amd::Coord3D(op.dst_offset_),
+                     amd::Coord3D(op.size_), false, op.metadata_)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool HostBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp>& read_ops) const {
+  for (const amd::BatchReadMemoryOp& op : read_ops) {
+    device::Memory* src_dev_mem =
+        op.src_memory_->getDeviceMemory(*op.src_memory_->getContext().devices()[0]);
+    if (!readBuffer(*src_dev_mem, op.dst_host_, amd::Coord3D(op.src_offset_),
+                    amd::Coord3D(op.size_), false, op.metadata_)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool HostBlitManager::copyImageToBuffer(device::Memory& srcMemory, device::Memory& dstMemory,
                                         const amd::Coord3D& srcOrigin,
                                         const amd::Coord3D& dstOrigin, const amd::Coord3D& size,
