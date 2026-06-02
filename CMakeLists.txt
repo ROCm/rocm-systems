@@ -42,10 +42,6 @@ if ( NOT DEFINED PACKAGE_VERSION OR "${PACKAGE_VERSION}" STREQUAL "" )
 endif ()
 set ( ROCDXG_VERSION "${PACKAGE_VERSION}" )
 
-# Optional pre-release suffix (e.g. -DROCDXG_VERSION_PRERELEASE=rc1 produces 1.1.2~rc1).
-# Leave empty for a normal release build (1.1.2).
-set ( ROCDXG_VERSION_PRERELEASE "" CACHE STRING "Pre-release suffix appended to package version (e.g. rc1). Empty for release." )
-
 project ( ${ROCDXG_TARGET} VERSION ${ROCDXG_VERSION} )
 # Project/version initialized; expose version to code via target defs below
 
@@ -70,6 +66,7 @@ set ( CMAKE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX} CACHE STRING "Default install
 
 ## Include common cmake modules
 include ( utils )
+include ( package_version )
 include ( GNUInstallDirs )
 
 ## Setup the package version.
@@ -304,12 +301,7 @@ file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/conffiles"
 
 # Prepare final version for the CPACK use
 set(PACKAGE_VERSION_STR "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
-if ( NOT "${ROCDXG_VERSION_PRERELEASE}" STREQUAL "" )
-    string ( TOLOWER "${ROCDXG_VERSION_PRERELEASE}" _ROCDXG_VERSION_PRERELEASE_LC )
-    # Use Debian's '~' separator so pre-releases sort BEFORE the final release.
-    set(PACKAGE_VERSION_STR "${PACKAGE_VERSION_STR}~${_ROCDXG_VERSION_PRERELEASE_LC}")
-    message(STATUS "Building pre-release version: ${PACKAGE_VERSION_STR}")
-endif()
+apply_package_version_suffix("${PACKAGE_VERSION_STR}" PACKAGE_VERSION_STR)
 set(CPACK_PACKAGE_VERSION "${PACKAGE_VERSION_STR}")
 
 # Debian package specific variables

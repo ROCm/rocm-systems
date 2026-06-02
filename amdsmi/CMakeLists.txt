@@ -34,6 +34,7 @@ set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/" CACHE INTERNA
 ## Include common cmake modules
 include(utils)
 include(help_package)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake_modules/package_version.cmake)
 find_package(PkgConfig)
 
 generic_add_rocm()
@@ -62,16 +63,16 @@ if(NOT DEFINED PACKAGE_VERSION OR "${PACKAGE_VERSION}" STREQUAL "")
     string(STRIP "${PACKAGE_VERSION}" PACKAGE_VERSION)
 endif()
 set(AMDSMI_PACKAGE_VERSION "${PACKAGE_VERSION}")
-set(CPACK_PACKAGE_VERSION "${AMDSMI_PACKAGE_VERSION}")
 
 # Parse AMDSMI_PACKAGE_VERSION as the single source of truth
 get_package_version_number(${AMDSMI_PACKAGE_VERSION})
+set(AMDSMI_PACKAGE_VERSION_BASE "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
 message("Package version: ${AMDSMI_PACKAGE_VERSION}")
 set(${AMD_SMI_LIBS_TARGET}_VERSION_MAJOR "${CPACK_PACKAGE_VERSION_MAJOR}")
 set(${AMD_SMI_LIBS_TARGET}_VERSION_MINOR "${CPACK_PACKAGE_VERSION_MINOR}")
 set(${AMD_SMI_LIBS_TARGET}_VERSION_PATCH "${CPACK_PACKAGE_VERSION_PATCH}")
 # Used by configure_file() in py-interface and amdsmi_cli for _version.py, setup.py, pyproject.toml
-set(${AMD_SMI_LIBS_TARGET}_VERSION_STRING "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
+set(${AMD_SMI_LIBS_TARGET}_VERSION_STRING "${AMDSMI_PACKAGE_VERSION_BASE}")
 
 # The following default version values should be updated as appropriate for
 # ABI breaks (update MAJOR and MINOR), and ABI/API additions (update MINOR).
@@ -199,7 +200,7 @@ configure_package_config_file(
     PATH_VARS CMAKE_INSTALL_LIBDIR CMAKE_INSTALL_INCLUDEDIR CMAKE_INSTALL_BINDIR)
 
 write_basic_package_version_file(${CMAKE_CURRENT_BINARY_DIR}/amd_smi-config-version.cmake
-                                 VERSION "${CPACK_PACKAGE_VERSION}" COMPATIBILITY SameMajorVersion)
+                                 VERSION "${AMDSMI_PACKAGE_VERSION_BASE}" COMPATIBILITY SameMajorVersion)
 
 install(
     FILES ${CMAKE_CURRENT_BINARY_DIR}/amd_smi-config.cmake ${CMAKE_CURRENT_BINARY_DIR}/amd_smi-config-version.cmake
@@ -333,6 +334,8 @@ endif()
 #Set the names now using CPACK utility
 set(CPACK_GENERATOR "DEB")
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
+
+apply_package_version_suffix("${AMDSMI_PACKAGE_VERSION_BASE}" CPACK_PACKAGE_VERSION)
 
 # Configure Lintian Specific Package Data
 configure_pkg( ${CPACK_PACKAGE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL})
