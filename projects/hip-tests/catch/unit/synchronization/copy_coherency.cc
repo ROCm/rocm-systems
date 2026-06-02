@@ -103,7 +103,6 @@ const char* CmdTypeStr(CmdType c) {
 }
 
 enum SyncType {
-  NONE,
   EVENT_QUERY,
   EVENT_SYNC,
   STREAM_WAIT_EVENT,
@@ -115,7 +114,6 @@ enum SyncType {
 
 const char* SyncTypeStr(SyncType s) {
   switch (s) {
-    ENUM_CASE_STR(NONE);
     ENUM_CASE_STR(EVENT_QUERY);
     ENUM_CASE_STR(EVENT_SYNC);
     ENUM_CASE_STR(STREAM_WAIT_EVENT);
@@ -191,8 +189,6 @@ void runTestImpl(CmdType cmdAType, SyncType syncType, CmdType cmdBType, hipStrea
 
   // Sync in-between?
   switch (syncType) {
-    case NONE:
-      break;
     case EVENT_QUERY: {
       hipError_t st = hipErrorNotReady;
       HIP_CHECK(hipEventRecord(e, stream1));
@@ -258,7 +254,6 @@ void testWrapper(size_t numElements) {
     for (int cmdB = 0; cmdB < MAX_CmdType; cmdB++) {
       for (int syncMode = 0; syncMode < MAX_SyncType; syncMode++) {
         switch (syncMode) {
-          // case NONE::
           case EVENT_QUERY:
           case EVENT_SYNC:
           case STREAM_WAIT_EVENT:
