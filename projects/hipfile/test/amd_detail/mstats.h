@@ -32,5 +32,7 @@ public:
                 (const, noexcept, override));
     MOCK_METHOD(void, error, (IoType ioType, StatsBackend backend, uint64_t bytes),
                 (const, noexcept, override));
+    MOCK_METHOD(void, fileRegistration, (), (const, noexcept, override));
+    MOCK_METHOD(void, bufferRegistration, (), (const, noexcept, override));
 };
 }

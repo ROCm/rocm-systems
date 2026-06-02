@@ -271,7 +271,9 @@ release(bool, DEBUG_CLR_DISABLE_IMAGE, false,                                 \
 release(bool, DEBUG_CLR_ENABLE_PREFETCH_METADATA, true,                       \
         "Enable metadata prefetch for some Aql packets")                      \
 release(uint, DEBUG_CLR_DOORBELL_SKIP, 16,                                    \
-        "Number of consecutive dispatches that may skip the doorbell flush.")
+        "Number of consecutive dispatches that may skip the doorbell flush.") \
+release(bool, DEBUG_CLR_DISABLE_FALLBACK, false,                              \
+        "Disables certain fallback paths")
 
 
 namespace amd {

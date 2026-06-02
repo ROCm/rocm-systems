@@ -971,6 +971,93 @@
       ]
     },
 
+    "resiliency_failover": {
+      "extends": "cast_base",
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
+        "NCCL_IB_MERGE_NICS": "1",
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      },
+      "tests": [
+        {
+          "name": "Resiliency_FailoverErrorCodeWhitelist",
+          "description": "Validate non-fatal error code classification (WR_FLUSH_ERR, RETRY_EXC_ERR)",
+          "test_filter": "NetIbMPITest.FailoverErrorCodeWhitelist"
+        },
+        {
+          "name": "Resiliency_FailoverCqeErrorRecovered",
+          "description": "Core failover: inject CQE error on one device, traffic continues on surviving device",
+          "test_filter": "NetIbMPITest.FailoverCqeErrorRecovered"
+        },
+        {
+          "name": "Resiliency_FailoverSingleDeviceTopology",
+          "description": "Single-device topology (ndevs=1): error is fatal, no failover possible",
+          "test_filter": "NetIbMPITest.FailoverSingleDeviceTopology"
+        },
+        {
+          "name": "Resiliency_FailoverAllDevicesFailed",
+          "description": "All devices driven to ERR: connection becomes fatal",
+          "test_filter": "NetIbMPITest.FailoverAllDevicesFailed"
+        },
+        {
+          "name": "Resiliency_FailoverLargeMessageDataIntegrity",
+          "description": "Large message data integrity preserved after failover to surviving device",
+          "test_filter": "NetIbMPITest.FailoverLargeMessageDataIntegrity"
+        },
+        {
+          "name": "Resiliency_FailoverDeviceOneFailure",
+          "description": "Device 1 failure: device 0 continues sending, data integrity verified",
+          "test_filter": "NetIbMPITest.FailoverDeviceOneFailure"
+        },
+        {
+          "name": "Resiliency_FailoverMultiRequestInFlight",
+          "description": "Multiple in-flight requests during failover: all complete with correct data",
+          "test_filter": "NetIbMPITest.FailoverMultiRequestInFlight"
+        }
+      ]
+    },
+
+    "resiliency_recovery": {
+      "extends": "cast_base",
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
+        "NCCL_IB_RESILIENCY_PORT_RECOVERY": "1",
+        "NCCL_IB_MERGE_NICS": "1",
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      },
+      "tests": [
+        {
+          "name": "Resiliency_RecoveryThreadStartedOnlyWithParam",
+          "description": "Recovery thread enabled only when PORT_RECOVERY=1 is set",
+          "test_filter": "NetIbMPITest.RecoveryThreadStartedOnlyWithParam"
+        },
+        {
+          "name": "Resiliency_RecoverySuccessRestoresTraffic",
+          "description": "Core recovery: inject error, QP destroy+recreate, traffic restored on recovered device",
+          "test_filter": "NetIbMPITest.RecoverySuccessRestoresTraffic"
+        },
+        {
+          "name": "Resiliency_RecoveryPendingWhileLinkDown",
+          "description": "Recovery stays in pending state while link remains down",
+          "test_filter": "NetIbMPITest.RecoveryPendingWhileLinkDown"
+        },
+        {
+          "name": "Resiliency_RecoveryDeviceOneFailure",
+          "description": "Device 1 recovery with per-device recovery counter verification",
+          "test_filter": "NetIbMPITest.RecoveryDeviceOneFailure"
+        },
+        {
+          "name": "Resiliency_RecoveryUdTimeoutExhaustsAttempts",
+          "description": "UD recovery timeout exhausts max attempts, device stays failed",
+          "test_filter": "NetIbMPITest.RecoveryUdTimeoutExhaustsAttempts"
+        }
+      ]
+    },
+
     "graph_capture_multi_node": {
       "extends": "default",
       "is_gtest": true,
@@ -1496,6 +1583,67 @@
           "test_filter": "CeFaultInjTest.MultipleFaultsArmedAndCleared"
         }
       ]
+    },
+
+    "net_ib_initialization_cast": {
+      "extends": "net_ib_initialization",
+      "env_variables": { "NCCL_NET": "ib-cast" }
+    },
+    "net_ib_properties_cast": {
+      "extends": "net_ib_properties",
+      "env_variables": { "NCCL_NET": "ib-cast" }
+    },
+    "net_ib_connection_cast": {
+      "extends": "net_ib_connection",
+      "env_variables": { "NCCL_NET": "ib-cast" }
+    },
+    "net_ib_memory_cast": {
+      "extends": "net_ib_memory",
+      "env_variables": { "NCCL_NET": "ib-cast" }
+    },
+    "net_ib_transfer_cast": {
+      "extends": "net_ib_transfer",
+      "env_variables": { "NCCL_NET": "ib-cast" }
+    },
+    "net_ib_multirecv_cast": {
+      "extends": "net_ib_multirecv",
+      "env_variables": { "NCCL_NET": "ib-cast" }
+    },
+    "net_ib_cts_stress_cast": {
+      "extends": "net_ib_cts_stress",
+      "env_variables": { "NCCL_NET": "ib-cast" }
+    },
+    "net_ib_branch_coverage_cast": {
+      "extends": "net_ib_branch_coverage",
+      "env_variables": { "NCCL_NET": "ib-cast" }
+    },
+    "net_ib_stress_cast": {
+      "extends": "net_ib_stress",
+      "env_variables": { "NCCL_NET": "ib-cast" }
+    },
+    "net_ib_stress_4rank_cast": {
+      "extends": "net_ib_stress_4rank",
+      "env_variables": { "NCCL_NET": "ib-cast" }
+    },
+    "net_ib_stress_multi_qp_split_cast": {
+      "extends": "net_ib_stress_multi_qp_split",
+      "env_variables": { "NCCL_NET": "ib-cast" }
+    },
+    "net_ib_stress_multi_qp_nosplit_cast": {
+      "extends": "net_ib_stress_multi_qp_nosplit",
+      "env_variables": { "NCCL_NET": "ib-cast" }
+    },
+    "net_ib_stress_multi_qp_fanin_cast": {
+      "extends": "net_ib_stress_multi_qp_fanin",
+      "env_variables": { "NCCL_NET": "ib-cast" }
+    },
+    "net_ib_stress_ar_cast": {
+      "extends": "net_ib_stress_ar",
+      "env_variables": { "NCCL_NET": "ib-cast" }
+    },
+    "net_ib_stress_inline_cast": {
+      "extends": "net_ib_stress_inline",
+      "env_variables": { "NCCL_NET": "ib-cast" }
     }
   },
   "test_suites": [
@@ -1662,6 +1810,18 @@
       "enabled": true
     },
     {
+      "name": "NET IB - Resiliency Port Failover",
+      "description": "Port failover tests: error classification, CQE recovery, multi-device failover, data integrity under failure",
+      "config": "resiliency_failover",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Resiliency Port Recovery",
+      "description": "Port recovery tests: QP destroy+recreate, UD-based QPN exchange, recovery timeout exhaustion",
+      "config": "resiliency_recovery",
+      "enabled": true
+    },
+    {
       "name": "NET IB - Stress (2-rank)",
       "description": "Resource exhaustion, connection lifecycle, endurance, bidirectional, GPU stress",
       "config": "net_ib_stress",
@@ -1761,6 +1921,96 @@
       "name": "CE Fault Injection Tests",
       "description": "Per-function error injection for CE code paths (ENABLE_FAULT_INJECTION build). Verifies ncclSystemError propagation and recovery for Init, SyncPrep, and LaunchOp faults.",
       "config": "ce_fault_injection",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Initialization Tests (ib-cast)",
+      "description": "InfiniBand plugin initialization and device enumeration via ib-cast plugin (NCCL_NET=ib-cast)",
+      "config": "net_ib_initialization_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Device Properties (ib-cast)",
+      "description": "InfiniBand device properties via ib-cast plugin (NCCL_NET=ib-cast)",
+      "config": "net_ib_properties_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Connection Setup (ib-cast)",
+      "description": "InfiniBand connection setup via ib-cast plugin (NCCL_NET=ib-cast)",
+      "config": "net_ib_connection_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Memory Registration (ib-cast)",
+      "description": "InfiniBand memory registration via ib-cast plugin (NCCL_NET=ib-cast)",
+      "config": "net_ib_memory_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Data Transfer (ib-cast)",
+      "description": "InfiniBand data transfer via ib-cast plugin (NCCL_NET=ib-cast)",
+      "config": "net_ib_transfer_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - MultiRecv (ib-cast)",
+      "description": "InfiniBand multi-recv path via ib-cast plugin (NCCL_NET=ib-cast)",
+      "config": "net_ib_multirecv_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CTS Depth Stress (ib-cast)",
+      "description": "InfiniBand CTS depth stress via ib-cast plugin (NCCL_NET=ib-cast)",
+      "config": "net_ib_cts_stress_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Branch Coverage (ib-cast)",
+      "description": "InfiniBand branch coverage tests via ib-cast plugin (NCCL_NET=ib-cast)",
+      "config": "net_ib_branch_coverage_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Stress (2-rank) (ib-cast)",
+      "description": "InfiniBand 2-rank stress via ib-cast plugin (NCCL_NET=ib-cast)",
+      "config": "net_ib_stress_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Stress (4-rank) (ib-cast)",
+      "description": "InfiniBand 4-rank stress via ib-cast plugin (NCCL_NET=ib-cast)",
+      "config": "net_ib_stress_4rank_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Stress Multi-QP Split (ib-cast)",
+      "description": "InfiniBand multi-QP split-data stress via ib-cast plugin (NCCL_NET=ib-cast)",
+      "config": "net_ib_stress_multi_qp_split_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Stress Multi-QP NoSplit (ib-cast)",
+      "description": "InfiniBand multi-QP no-split stress via ib-cast plugin (NCCL_NET=ib-cast)",
+      "config": "net_ib_stress_multi_qp_nosplit_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Stress Multi-QP Fan-In (ib-cast)",
+      "description": "InfiniBand multi-QP fan-in stress via ib-cast plugin (NCCL_NET=ib-cast)",
+      "config": "net_ib_stress_multi_qp_fanin_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Stress AR Threshold (ib-cast)",
+      "description": "InfiniBand AR threshold stress via ib-cast plugin (NCCL_NET=ib-cast)",
+      "config": "net_ib_stress_ar_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Stress Inline CTS (ib-cast)",
+      "description": "InfiniBand inline CTS stress via ib-cast plugin (NCCL_NET=ib-cast)",
+      "config": "net_ib_stress_inline_cast",
       "enabled": true
     }
   ]

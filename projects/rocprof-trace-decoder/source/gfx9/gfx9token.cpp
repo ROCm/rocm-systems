@@ -89,7 +89,7 @@ Token MITokenGenerator::next()
         globaltime += token.delta * 4;
         token.time = globaltime;
 
-        if (token.type == 0 && token.fields.misc.misc_type == 1) // This is time reset
+        if (token.type == 0 && token.fields.misc.misc_type == MISC_TYPE_TIME_RESET)
             patch_time();
         else if (token.type != 1)
             return token;
@@ -115,7 +115,7 @@ void MITokenGenerator::patch_time()
             lookahead.erase(lookahead.begin() + i);
             return;
         }
-        else if (token.type == 0 && token.fields.misc.misc_type == 1)
+        else if (token.type == 0 && token.fields.misc.misc_type == MISC_TYPE_TIME_RESET)
             return;
     }
 
@@ -127,7 +127,7 @@ void MITokenGenerator::patch_time()
             update(token.time);
             return;
         }
-        else if (token.type == 0 && token.fields.misc.misc_type == 1)
+        else if (token.type == 0 && token.fields.misc.misc_type == MISC_TYPE_TIME_RESET)
             return;
         lookahead.push_back(token);
     }

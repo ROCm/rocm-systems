@@ -302,6 +302,9 @@ class Flag {
     var = os::GetEnvVar("HSA_CO_DMACOPY_SIZE");
     co_dmacopy_size_ = var.empty() ? 1024*1024 : atoi(var.c_str());
 
+    var = os::GetEnvVar("HSA_ENABLE_SDMA_FASTPATH_DEBUG");
+    enable_sdma_fastpath_debug_ = (var == "1") ? true : false;
+
     var = os::GetEnvVar("HSA_COREDUMP_SHOW_PROGRESS");
     enable_core_dump_progress_ = (var == "1");
 
@@ -460,6 +463,8 @@ class Flag {
 
   bool enable_3d_swizzle() const { return enable_3d_swizzle_; }
 
+  bool enable_sdma_fastpath_debug() const { return enable_sdma_fastpath_debug_; }
+
   bool enable_dtif() const { return enable_dtif_; }
 
   bool enable_dxg_detection() const { return enable_dxg_detection_; }
@@ -587,6 +592,8 @@ class Flag {
 
   // Map GPU index post RVD to its default cu mask.
   std::map<uint32_t, std::vector<uint32_t>> cu_mask_;
+
+  bool enable_sdma_fastpath_debug_;
 
   void parse_masks(std::string& args, uint32_t maxGpu, uint32_t maxCU);
 

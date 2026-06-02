@@ -128,11 +128,24 @@ class BlitSdmaBase : public core::Blit {
       const std::vector<core::Signal*>& dep_signals,
       core::Signal& out_signal) = 0;
 
+  // Linear copy body with optional source and/or destination address
+  // indirection, combined wait+signal.  The SDMA engine dereferences
+  // @p src (when @p indirect_src) and/or @p dst (when @p indirect_dst)
+  // to obtain the real copy pointers before performing the transfer.
+  // At least one of @p indirect_src or @p indirect_dst must be true.
+  // Only available on gfx1250.
+  virtual hsa_status_t SubmitLinearCopyBodyIndirectWaitSignal(
+      void* dst, const void* src, size_t size,
+      bool indirect_src, bool indirect_dst,
+      const std::vector<core::Signal*>& dep_signals,
+      core::Signal& out_signal) = 0;
+
   virtual hsa_status_t SubmitNotifyPrologue(
       core::Signal* prologue_signal = nullptr) = 0;
   virtual hsa_status_t SubmitNotifyEpilogue(core::Signal& out_signal) = 0;
 
   virtual bool SwapSupported() const = 0;
+  virtual bool IndirectCopySupported() const = 0;
   virtual bool UsesGCR() const = 0;
 };
 
@@ -258,11 +271,18 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
       const std::vector<core::Signal*>& dep_signals,
       core::Signal& out_signal) override;
 
+  hsa_status_t SubmitLinearCopyBodyIndirectWaitSignal(
+      void* dst, const void* src, size_t size,
+      bool indirect_src, bool indirect_dst,
+      const std::vector<core::Signal*>& dep_signals,
+      core::Signal& out_signal) override;
+
   hsa_status_t SubmitNotifyPrologue(
       core::Signal* prologue_signal = nullptr) override;
   hsa_status_t SubmitNotifyEpilogue(core::Signal& out_signal) override;
 
   bool SwapSupported() const override { return swap_supported_; }
+  bool IndirectCopySupported() const override { return indirect_copy_supported_; }
   bool UsesGCR() const override { return useGCR; }
 
  private:
@@ -349,6 +369,13 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
                                   size_t size_a, size_t size_b,
                                   const core::Signal* wait_signal,
                                   core::Signal* signal_signal);
+
+  void BuildWaitSignalIndirectCopyCommand(
+      char* cmd_addr,
+      void* dst, const void* src, size_t size,
+      bool indirect_src, bool indirect_dst,
+      const core::Signal* wait_signal,
+      core::Signal* signal_signal);
 
   void BuildAtomicDecrementCommand(char* cmd_addr, void* addr);
 
@@ -481,6 +508,9 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
 
   /// True if SDMA supports linear swap copy (gfx94X+).
   bool swap_supported_;
+
+  /// True if SDMA supports the linear wait/signal-indirect copy packet (gfx1250).
+  bool indirect_copy_supported_;
 };
 
 
