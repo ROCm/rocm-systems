@@ -67,12 +67,13 @@ jobs:
         id: ci-flags
         run: |
           echo "changed_dockerfile=$(./util/files-changed.sh "origin/${GITHUB_BASE_REF}" HEAD 'projects/hipfile/util/docker/DOCKERFILE.*')" >> "${GITHUB_OUTPUT}"
-      - name: Sanity-check jq commands
-        # Ensure that the jq commands work as expected before using them.
+      - name: Sanity-check util script test suites
+        # Ensure the util scripts work as expected before using them.
         working-directory: rocm-systems/projects/hipfile
         run: |
           util/ci-matrices.sh --test
           util/ci-images.sh --test
+          util/resolve-rocm-nightly.sh --test
       - name: Compute matrix configurations
         id: matrices
         working-directory: rocm-systems/projects/hipfile
@@ -88,6 +89,21 @@ jobs:
           echo "${full_CI_images_matrix}" | jq .
           echo "ci_matrix=${ci_matrix}" >> "${GITHUB_OUTPUT}"
           echo "full_CI_images_matrix=${full_CI_images_matrix}" >> "${GITHUB_OUTPUT}"
+      - name: Resolve ROCm nightly metadata
+        id: nightly
+        working-directory: rocm-systems/projects/hipfile
+        env:
+          FULL_CI_IMAGES_MATRIX: ${{ steps.matrices.outputs.full_CI_images_matrix }}
+        # Only resolves when a nightly row is present; otherwise emit empty values
+        # so the downstream image-name step stays wired up unconditionally.
+        run: |
+          if printf '%s' "${FULL_CI_IMAGES_MATRIX}" \
+              | jq -e '.include[]? | select(.rocm_versions == "nightly")' >/dev/null; then
+            ./util/resolve-rocm-nightly.sh | tee -a "${GITHUB_OUTPUT}"
+          else
+            echo "nightly_build=" >> "${GITHUB_OUTPUT}"
+            echo "nightly_rocm_version=" >> "${GITHUB_OUTPUT}"
+          fi
       - name: Compute CI image names
         id: ci-images
         working-directory: rocm-systems/projects/hipfile
