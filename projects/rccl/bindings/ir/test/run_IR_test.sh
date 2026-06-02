@@ -17,6 +17,10 @@
 #   BC         path to librccl_device.bc      (default $BUILD/lib/librccl_device.bc)
 #   GPU        HIP_VISIBLE_DEVICES value      (default: unset — all GPUs)
 #   OUTDIR     directory for the compiled exe (default /tmp/ir_test)
+#   GTEST_ROOT GoogleTest install prefix      (default $BUILD/gtest)
+#   BUILD_ONLY 1 = compile the test and exit (skip the run). Useful for the
+#              pytest harness, which compiles once then runs gtest filters.
+#   RUN_ARGS   extra args appended to the test binary (e.g. --gtest_filter=...)
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -27,6 +31,9 @@ ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
 BUILD="${BUILD:-$REPO/build/release}"
 BC="${BC:-$BUILD/lib/librccl_device.bc}"
 OUTDIR="${OUTDIR:-/tmp/ir_test}"
+GTEST_ROOT="${GTEST_ROOT:-$BUILD/gtest}"
+BUILD_ONLY="${BUILD_ONLY:-0}"
+RUN_ARGS="${RUN_ARGS:-}"
 mkdir -p "$OUTDIR"
 
 EXE="$OUTDIR/IR_test.exe"
@@ -56,10 +63,31 @@ if [[ ! -f "$GENERATED_INC/rccl/rccl.h" && ! -f "$GENERATED_INC/nccl.h" ]]; then
   exit 2
 fi
 
+# ── Locate GoogleTest (built/installed by the RCCL CMake build) ───────
+# Dependencies.cmake installs gtest under $BUILD/gtest with libs in lib or
+# lib64. Allow GTEST_ROOT to point at any GTest install prefix.
+GTEST_INC="$GTEST_ROOT/include"
+GTEST_LIBDIR=""
+for d in "$GTEST_ROOT/lib" "$GTEST_ROOT/lib64" \
+         "$GTEST_ROOT"/lib/*-linux-gnu; do
+  if [[ -f "$d/libgtest.a" || -f "$d/libgtest.so" ]]; then
+    GTEST_LIBDIR="$d"; break
+  fi
+done
+
+if [[ ! -d "$GTEST_INC" || -z "$GTEST_LIBDIR" ]]; then
+  echo "ERROR: GoogleTest not found under GTEST_ROOT=$GTEST_ROOT" >&2
+  echo "Expected $GTEST_INC and lib{,64}/libgtest.a." >&2
+  echo "Build RCCL with -DBUILD_TESTS=ON (it fetches/installs gtest), or set" >&2
+  echo "GTEST_ROOT to an existing GoogleTest install prefix." >&2
+  exit 2
+fi
+
 echo "[IR_test] arch        = $ARCH"
 echo "[IR_test] bc          = $BC  ($(stat -c%s "$BC") bytes)"
 echo "[IR_test] hipified    = $HIPIFIED_INC"
 echo "[IR_test] generated   = $GENERATED_INC"
+echo "[IR_test] gtest        = $GTEST_INC | $GTEST_LIBDIR"
 echo "[IR_test] exe         = $EXE"
 echo ""
 
@@ -108,21 +136,28 @@ echo "[IR_test] Compiling IR_test.cpp..."
   -I"$HIPIFIED_INC" \
   -I"$HIPIFIED_INC/nccl_device" \
   -I"$GENERATED_INC" \
+  -I"$GTEST_INC" \
   "$HERE/IR_test.cpp" \
   -Xoffload-linker "$BC" \
   -Xoffload-linker -plugin-opt=-amdgpu-internalize-symbols=false \
+  -L"$GTEST_LIBDIR" -lgtest_main -lgtest -lpthread \
   -o "$EXE"
 
 echo "[IR_test] Compiled: $EXE"
 echo ""
 
+if [[ "$BUILD_ONLY" == "1" ]]; then
+  echo "[IR_test] BUILD_ONLY=1 — skipping run."
+  exit 0
+fi
+
 # ── Run the test ──────────────────────────────────────────────────────
 
 if [[ -n "${GPU:-}" ]]; then
   echo "[IR_test] HIP_VISIBLE_DEVICES=$GPU"
-  HIP_VISIBLE_DEVICES="$GPU" "$EXE"
+  HIP_VISIBLE_DEVICES="$GPU" "$EXE" $RUN_ARGS
 else
-  "$EXE"
+  "$EXE" $RUN_ARGS
 fi
 
 echo ""
