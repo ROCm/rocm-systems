@@ -93,7 +93,7 @@ executable_destroy(hsa_executable_t executable)
     auto snapshot = std::vector<code_object_cb_entry_t>{};
     {
         std::lock_guard lg(registration->mutex);
-        snapshot  = registration->cb_list;
+        snapshot  = std::vector<code_object_cb_entry_t>{registration->cb_list};
         auto pred = [&](const hsa_executable_t& a) { return a.handle == executable.handle; };
         auto itr  = std::find_if(
             registration->code_objects.begin(), registration->code_objects.end(), pred);

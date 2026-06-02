@@ -165,7 +165,7 @@ create_queue(hsa_agent_t        agent,
         ROCP_FATAL_IF(registration->queues.count(new_queue) > 0)
             << "Queue registration already contains an entry for new queue handle " << new_queue;
         registration->queues.insert({new_queue, entry});
-        snapshot = registration->cb_list;
+        snapshot = std::vector<queue_cb_entry_t>{registration->cb_list};
     }
     auto* write_interceptor_data = &(registration->queues.at(new_queue));
 
@@ -206,7 +206,7 @@ destroy_queue(hsa_queue_t* hsa_queue)
             {
                 agent    = it->second.agent;
                 found    = true;
-                snapshot = registration->cb_list;
+                snapshot = std::vector<queue_cb_entry_t>{registration->cb_list};
                 registration->queues.erase(it);
             }
             else
