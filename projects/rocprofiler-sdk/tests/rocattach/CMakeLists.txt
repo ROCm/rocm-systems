@@ -115,6 +115,7 @@ rocprofiler_add_integration_execute_test(
     ARGS $<TARGET_FILE:attachment-test> attach
     TIMEOUT 45
     DISABLED ${IS_DISABLED}
+    LABELS "attachment"
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "${rocattach-without-env-test-env}"
     PASS_REGULAR_EXPRESSION "Test PASSED: attach failed cleanly without crashing target"
@@ -127,6 +128,7 @@ rocprofiler_add_integration_execute_test(
     ARGS $<TARGET_FILE:attachment-test> attach-tree
     TIMEOUT 45
     DISABLED ${IS_DISABLED}
+    LABELS "attachment"
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "${rocattach-without-env-test-env}"
     PASS_REGULAR_EXPRESSION "Test PASSED: attach failed cleanly without crashing target"

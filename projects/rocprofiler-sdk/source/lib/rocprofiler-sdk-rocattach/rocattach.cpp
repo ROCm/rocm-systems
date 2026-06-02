@@ -225,8 +225,8 @@ resolve_attach_tid(pid_t pid)
 
     if(ec)
     {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Failed to scan " << task_dir << ": "
-                   << ec.message();
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Failed to scan " << task_dir
+                   << " for 'rocp-bg-attach' thread: " << ec.message();
     }
     else
     {
