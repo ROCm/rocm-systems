@@ -784,6 +784,10 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
         extern ncclGin_t ncclGinRocshmem;
         INFO(NCCL_INIT, "Using built-in GIN rocshmem plugin");
         sharedRes->ginState.ncclGin = &ncclGinRocshmem;
+      } else if (ncclParamGinType() == NCCL_NET_DEVICE_GIN_ANVIL) {
+        extern ncclGin_t ncclGinAnvilPlugin;
+        INFO(NCCL_INIT, "Using built-in GIN anvil plugin (NCCL_GIN_TYPE=5, intra-node xGMI SDMA)");
+        sharedRes->ginState.ncclGin = &ncclGinAnvilPlugin;
       }
     }
 #endif
