@@ -3701,12 +3701,12 @@ typedef struct hip_api_data_s {
       hipStream_t stream;
     } hipMemsetAsync;
     struct {
-      hipDeviceptr_t dest;
+      hipDeviceptr_t dst;
       unsigned short value;
       size_t count;
     } hipMemsetD16;
     struct {
-      hipDeviceptr_t dest;
+      hipDeviceptr_t dst;
       unsigned short value;
       size_t count;
       hipStream_t stream;
@@ -3757,7 +3757,7 @@ typedef struct hip_api_data_s {
       hipStream_t stream;
     } hipMemsetD2D8Async;
     struct {
-      hipDeviceptr_t dest;
+      hipDeviceptr_t dst;
       int value;
       size_t count;
     } hipMemsetD32;
@@ -3768,12 +3768,12 @@ typedef struct hip_api_data_s {
       hipStream_t stream;
     } hipMemsetD32Async;
     struct {
-      hipDeviceptr_t dest;
+      hipDeviceptr_t dst;
       unsigned char value;
       size_t count;
     } hipMemsetD8;
     struct {
-      hipDeviceptr_t dest;
+      hipDeviceptr_t dst;
       unsigned char value;
       size_t count;
       hipStream_t stream;
@@ -6560,15 +6560,15 @@ typedef struct hip_api_data_s {
   cb_data.args.hipMemsetAsync.sizeBytes = (size_t)sizeBytes; \
   cb_data.args.hipMemsetAsync.stream = (hipStream_t)stream; \
 };
-// hipMemsetD16[('hipDeviceptr_t', 'dest'), ('unsigned short', 'value'), ('size_t', 'count')]
+// hipMemsetD16[('hipDeviceptr_t', 'dst'), ('unsigned short', 'value'), ('size_t', 'count')]
 #define INIT_hipMemsetD16_CB_ARGS_DATA(cb_data) { \
-  cb_data.args.hipMemsetD16.dest = (hipDeviceptr_t)dst; \
+  cb_data.args.hipMemsetD16.dst = (hipDeviceptr_t)dst; \
   cb_data.args.hipMemsetD16.value = (unsigned short)value; \
   cb_data.args.hipMemsetD16.count = (size_t)count; \
 };
-// hipMemsetD16Async[('hipDeviceptr_t', 'dest'), ('unsigned short', 'value'), ('size_t', 'count'), ('hipStream_t', 'stream')]
+// hipMemsetD16Async[('hipDeviceptr_t', 'dst'), ('unsigned short', 'value'), ('size_t', 'count'), ('hipStream_t', 'stream')]
 #define INIT_hipMemsetD16Async_CB_ARGS_DATA(cb_data) { \
-  cb_data.args.hipMemsetD16Async.dest = (hipDeviceptr_t)dst; \
+  cb_data.args.hipMemsetD16Async.dst = (hipDeviceptr_t)dst; \
   cb_data.args.hipMemsetD16Async.value = (unsigned short)value; \
   cb_data.args.hipMemsetD16Async.count = (size_t)count; \
   cb_data.args.hipMemsetD16Async.stream = (hipStream_t)stream; \
@@ -6624,9 +6624,9 @@ typedef struct hip_api_data_s {
   cb_data.args.hipMemsetD2D8Async.height = (size_t)height; \
   cb_data.args.hipMemsetD2D8Async.stream = (hipStream_t)stream; \
 };
-// hipMemsetD32[('hipDeviceptr_t', 'dest'), ('int', 'value'), ('size_t', 'count')]
+// hipMemsetD32[('hipDeviceptr_t', 'dst'), ('int', 'value'), ('size_t', 'count')]
 #define INIT_hipMemsetD32_CB_ARGS_DATA(cb_data) { \
-  cb_data.args.hipMemsetD32.dest = (hipDeviceptr_t)dst; \
+  cb_data.args.hipMemsetD32.dst = (hipDeviceptr_t)dst; \
   cb_data.args.hipMemsetD32.value = (int)value; \
   cb_data.args.hipMemsetD32.count = (size_t)count; \
 };
@@ -6637,15 +6637,15 @@ typedef struct hip_api_data_s {
   cb_data.args.hipMemsetD32Async.count = (size_t)count; \
   cb_data.args.hipMemsetD32Async.stream = (hipStream_t)stream; \
 };
-// hipMemsetD8[('hipDeviceptr_t', 'dest'), ('unsigned char', 'value'), ('size_t', 'count')]
+// hipMemsetD8[('hipDeviceptr_t', 'dst'), ('unsigned char', 'value'), ('size_t', 'count')]
 #define INIT_hipMemsetD8_CB_ARGS_DATA(cb_data) { \
-  cb_data.args.hipMemsetD8.dest = (hipDeviceptr_t)dst; \
+  cb_data.args.hipMemsetD8.dst = (hipDeviceptr_t)dst; \
   cb_data.args.hipMemsetD8.value = (unsigned char)value; \
   cb_data.args.hipMemsetD8.count = (size_t)count; \
 };
-// hipMemsetD8Async[('hipDeviceptr_t', 'dest'), ('unsigned char', 'value'), ('size_t', 'count'), ('hipStream_t', 'stream')]
+// hipMemsetD8Async[('hipDeviceptr_t', 'dst'), ('unsigned char', 'value'), ('size_t', 'count'), ('hipStream_t', 'stream')]
 #define INIT_hipMemsetD8Async_CB_ARGS_DATA(cb_data) { \
-  cb_data.args.hipMemsetD8Async.dest = (hipDeviceptr_t)dst; \
+  cb_data.args.hipMemsetD8Async.dst = (hipDeviceptr_t)dst; \
   cb_data.args.hipMemsetD8Async.value = (unsigned char)value; \
   cb_data.args.hipMemsetD8Async.count = (size_t)count; \
   cb_data.args.hipMemsetD8Async.stream = (hipStream_t)stream; \
@@ -8693,10 +8693,10 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
 // hipMemsetAsync[('void*', 'dst'), ('int', 'value'), ('size_t', 'sizeBytes'), ('hipStream_t', 'stream')]
     case HIP_API_ID_hipMemsetAsync:
       break;
-// hipMemsetD16[('hipDeviceptr_t', 'dest'), ('unsigned short', 'value'), ('size_t', 'count')]
+// hipMemsetD16[('hipDeviceptr_t', 'dst'), ('unsigned short', 'value'), ('size_t', 'count')]
     case HIP_API_ID_hipMemsetD16:
       break;
-// hipMemsetD16Async[('hipDeviceptr_t', 'dest'), ('unsigned short', 'value'), ('size_t', 'count'), ('hipStream_t', 'stream')]
+// hipMemsetD16Async[('hipDeviceptr_t', 'dst'), ('unsigned short', 'value'), ('size_t', 'count'), ('hipStream_t', 'stream')]
     case HIP_API_ID_hipMemsetD16Async:
       break;
 // hipMemsetD2D16[('hipDeviceptr_t', 'dst'), ('size_t', 'dstPitch'), ('unsigned short', 'value'), ('size_t', 'width'), ('size_t', 'height')]
@@ -8717,16 +8717,16 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
 // hipMemsetD2D8Async[('hipDeviceptr_t', 'dst'), ('size_t', 'dstPitch'), ('unsigned char', 'value'), ('size_t', 'width'), ('size_t', 'height'), ('hipStream_t', 'stream')]
     case HIP_API_ID_hipMemsetD2D8Async:
       break;
-// hipMemsetD32[('hipDeviceptr_t', 'dest'), ('int', 'value'), ('size_t', 'count')]
+// hipMemsetD32[('hipDeviceptr_t', 'dst'), ('int', 'value'), ('size_t', 'count')]
     case HIP_API_ID_hipMemsetD32:
       break;
 // hipMemsetD32Async[('hipDeviceptr_t', 'dst'), ('int', 'value'), ('size_t', 'count'), ('hipStream_t', 'stream')]
     case HIP_API_ID_hipMemsetD32Async:
       break;
-// hipMemsetD8[('hipDeviceptr_t', 'dest'), ('unsigned char', 'value'), ('size_t', 'count')]
+// hipMemsetD8[('hipDeviceptr_t', 'dst'), ('unsigned char', 'value'), ('size_t', 'count')]
     case HIP_API_ID_hipMemsetD8:
       break;
-// hipMemsetD8Async[('hipDeviceptr_t', 'dest'), ('unsigned char', 'value'), ('size_t', 'count'), ('hipStream_t', 'stream')]
+// hipMemsetD8Async[('hipDeviceptr_t', 'dst'), ('unsigned char', 'value'), ('size_t', 'count'), ('hipStream_t', 'stream')]
     case HIP_API_ID_hipMemsetD8Async:
       break;
 // hipMipmappedArrayCreate[('hipMipmappedArray_t*', 'pHandle'), ('HIP_ARRAY3D_DESCRIPTOR*', 'pMipmappedArrayDesc'), ('unsigned int', 'numMipmapLevels')]
@@ -12071,14 +12071,14 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
     break;
     case HIP_API_ID_hipMemsetD16:
       oss << "hipMemsetD16(";
-      oss << "dest="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemsetD16.dest);
+      oss << "dst="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemsetD16.dst);
       oss << ", value="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemsetD16.value);
       oss << ", count="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemsetD16.count);
       oss << ")";
     break;
     case HIP_API_ID_hipMemsetD16Async:
       oss << "hipMemsetD16Async(";
-      oss << "dest="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemsetD16Async.dest);
+      oss << "dst="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemsetD16Async.dst);
       oss << ", value="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemsetD16Async.value);
       oss << ", count="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemsetD16Async.count);
       oss << ", stream="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemsetD16Async.stream);
@@ -12143,7 +12143,7 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
     break;
     case HIP_API_ID_hipMemsetD32:
       oss << "hipMemsetD32(";
-      oss << "dest="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemsetD32.dest);
+      oss << "dst="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemsetD32.dst);
       oss << ", value="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemsetD32.value);
       oss << ", count="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemsetD32.count);
       oss << ")";
@@ -12158,14 +12158,14 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
     break;
     case HIP_API_ID_hipMemsetD8:
       oss << "hipMemsetD8(";
-      oss << "dest="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemsetD8.dest);
+      oss << "dst="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemsetD8.dst);
       oss << ", value="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemsetD8.value);
       oss << ", count="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemsetD8.count);
       oss << ")";
     break;
     case HIP_API_ID_hipMemsetD8Async:
       oss << "hipMemsetD8Async(";
-      oss << "dest="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemsetD8Async.dest);
+      oss << "dst="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemsetD8Async.dst);
       oss << ", value="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemsetD8Async.value);
       oss << ", count="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemsetD8Async.count);
       oss << ", stream="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemsetD8Async.stream);
