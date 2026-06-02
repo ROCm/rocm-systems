@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -34,12 +36,24 @@ pub struct EmulatorDef {
     pub topology: MaybeRef<TopologyDef>,
 }
 
-/// a description of the emulator, including its name, version, and a brief description.
+/// A description of an emulator backend: its identity (name, version,
+/// blurb) plus its current runtime status on this machine (whether it
+/// is installed and, if so, the resolved path to its runtime library).
+///
+/// This is the single descriptor the registry exposes for every
+/// backend; the generic pass-through `noop` and each emulator-specific
+/// crate produce one of these.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EmulatorDescription {
     pub name: String,
     pub version: String,
     pub description: String,
+    /// `true` if this emulator's runtime is present on this machine.
+    pub installed: bool,
+    /// Resolved path to the emulator's runtime library, when installed
+    /// and locatable. `None` for backends without an external runtime
+    /// (e.g. `noop`) or when the library could not be found.
+    pub path: Option<PathBuf>,
 }
 
 pub trait Emulator {

@@ -29,25 +29,20 @@ use mirage_core::agent::AgentDef;
 use mirage_core::common::MaybeRef;
 use mirage_core::emulator::{EmulatorDef, EmulatorDescription, ExecMode};
 use mirage_core::error::{MirageError, Result};
-use mirage_core::registry::EmulatorSpec;
 use mirage_core::topology::TopologyDef;
 
-/// Registry entry describing the rocjitsu emulator backend. Owned by
+/// Describe the rocjitsu emulator backend for the registry. Owned by
 /// this crate (rather than `mirage_core`) so that all rocjitsu-
 /// specific policy lives alongside the rocjitsu runtime integration.
-pub const SPEC: EmulatorSpec = EmulatorSpec {
-    name: "rocjitsu",
-    description: "ROCm just-in-time GPU emulator (cycle-accurate or functional)",
-    installed: is_installed,
-    describe: spec_describe,
-};
-
-fn spec_describe() -> EmulatorDescription {
+/// Reports whether rocjitsu is installed and the resolved path to its
+/// runtime KMD library when available.
+pub fn describe() -> EmulatorDescription {
     EmulatorDescription {
         name: "rocjitsu".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
-        description: "ROCm GPU simulator (decodes AMDGPU/RISC-V ISA, event-driven PDES core)."
-            .to_string(),
+        description: "ROCm just-in-time GPU emulator (cycle-accurate or functional)".to_string(),
+        installed: is_installed(),
+        path: kmd_preload(),
     }
 }
 

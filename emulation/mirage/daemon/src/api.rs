@@ -157,7 +157,7 @@ async fn get_paths() -> Json<PathsResponse> {
 #[derive(Serialize)]
 struct SystemResponse {
     daemon_version: &'static str,
-    default_emulator: &'static str,
+    default_emulator: String,
 }
 
 async fn get_system() -> Json<SystemResponse> {
@@ -169,27 +169,33 @@ async fn get_system() -> Json<SystemResponse> {
 
 #[derive(Serialize)]
 struct EmulatorEntry {
-    name: &'static str,
-    description: &'static str,
+    name: String,
+    description: String,
     installed: bool,
     is_default: bool,
+    path: Option<std::path::PathBuf>,
     available_plugins: Vec<&'static str>,
 }
 
 async fn list_emulators() -> Json<Vec<EmulatorEntry>> {
     let default_name = mirage_ctl::default_emulator().name;
     let entries = mirage_ctl::registry()
-        .iter()
-        .map(|spec| EmulatorEntry {
-            name: spec.name,
-            description: spec.description,
-            installed: (spec.installed)(),
-            is_default: spec.name == default_name,
-            // Plugin discovery requires constructing a live backend
-            // instance; the registry doesn't expose a static plugin
-            // list yet, so we return an empty set here. Future work:
-            // surface declared plugin slots on `EmulatorSpec`.
-            available_plugins: Vec::new(),
+        .into_iter()
+        .map(|spec| {
+            let is_default = spec.name == default_name;
+            EmulatorEntry {
+                name: spec.name,
+                description: spec.description,
+                installed: spec.installed,
+                is_default,
+                path: spec.path,
+                // Plugin discovery requires constructing a live backend
+                // instance; the registry doesn't expose a static plugin
+                // list yet, so we return an empty set here. Future work:
+                // surface declared plugin slots on the emulator
+                // description.
+                available_plugins: Vec::new(),
+            }
         })
         .collect();
     Json(entries)

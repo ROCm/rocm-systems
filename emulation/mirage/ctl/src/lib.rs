@@ -18,9 +18,9 @@ use anyhow::Context as _;
 use clap::{Args, Subcommand};
 use mirage_core::common::MaybeRef;
 use mirage_core::ctl::{CreateSessionRequest, MirageCtl, StdStream, StreamPacket};
+use mirage_core::emulator::EmulatorDescription;
 use mirage_core::exec::{ExecArgs, ExecDef, ExecId, ExecRef};
 use mirage_core::profile::ProfileDef;
-use mirage_core::registry::EmulatorSpec;
 use mirage_core::session::SessionId;
 use tokio_stream::StreamExt;
 
@@ -41,28 +41,30 @@ pub fn init_logging(verbose: u8) {
 }
 
 /// The full emulator registry: the generic pass-through
-/// ([`mirage_core::registry::NOOP`]) plus the emulator-specific
+/// ([`mirage_core::registry::noop`]) plus the emulator-specific
 /// backends, each of which is owned by its own crate. Assembled here
 /// because `mirage_ctl` is the lowest crate that depends on every
-/// emulator integration.
-pub fn registry() -> &'static [EmulatorSpec] {
-    static REGISTRY: [EmulatorSpec; 3] = [
-        mirage_core::registry::NOOP,
-        mirage_rocjitsu::SPEC,
-        mirage_hotswap::SPEC,
-    ];
-    &REGISTRY
+/// emulator integration. Each entry reports its current install state
+/// and resolved runtime path, so building the registry probes the
+/// machine.
+pub fn registry() -> Vec<EmulatorDescription> {
+    vec![
+        mirage_core::registry::noop(),
+        mirage_rocjitsu::describe(),
+        mirage_hotswap::describe(),
+    ]
 }
 
 /// Lookup an emulator by its canonical name in the full [`registry`].
-pub fn find_emulator(name: &str) -> Option<&'static EmulatorSpec> {
-    mirage_core::registry::find(registry(), name)
+pub fn find_emulator(name: &str) -> Option<EmulatorDescription> {
+    registry().into_iter().find(|e| e.name == name)
 }
 
 /// The default emulator for new profiles: the first installed,
 /// non-noop entry, falling back to `noop`.
-pub fn default_emulator() -> &'static EmulatorSpec {
-    mirage_core::registry::default_emulator(registry())
+pub fn default_emulator() -> EmulatorDescription {
+    let specs = registry();
+    mirage_core::registry::default_emulator(&specs).clone()
 }
 
 /// Best-effort: materialise all builtin state on disk — agents,
@@ -98,7 +100,7 @@ pub fn validate_profile(def: &ProfileDef) -> std::result::Result<(), String> {
     let emulator = def.emulator.emulator.as_str();
     if find_emulator(emulator).is_none() {
         let known = registry()
-            .iter()
+            .into_iter()
             .map(|e| e.name)
             .collect::<Vec<_>>()
             .join(", ");
@@ -537,7 +539,7 @@ fn profile_cmd(ctl: &dyn MirageCtl, cmd: ProfileCmd, json: bool) -> anyhow::Resu
                     None => anyhow::bail!(
                         "unknown emulator: {n}. Known: {}",
                         registry()
-                            .iter()
+                            .into_iter()
                             .map(|e| e.name)
                             .collect::<Vec<_>>()
                             .join(", ")
@@ -554,7 +556,7 @@ fn profile_cmd(ctl: &dyn MirageCtl, cmd: ProfileCmd, json: bool) -> anyhow::Resu
             let p = ProfileDef {
                 name: name.clone(),
                 description,
-                emulator: mirage_core::registry::make_def(spec, topo),
+                emulator: mirage_core::registry::make_def(&spec, topo),
             };
             if let Err(e) = validate_profile(&p) {
                 anyhow::bail!("cannot create profile {name}: {e}");
@@ -1151,14 +1153,15 @@ fn profile_wizard(
         .interact_text()?;
 
     let specs = registry();
+    let default_name = default_emulator().name;
     let default_idx = specs
         .iter()
-        .position(|s| s.name == default_emulator().name)
+        .position(|s| s.name == default_name)
         .unwrap_or(0);
     let labels: Vec<String> = specs
         .iter()
         .map(|s| {
-            let installed = if (s.installed)() {
+            let installed = if s.installed {
                 "[installed]"
             } else {
                 "[not installed]"
