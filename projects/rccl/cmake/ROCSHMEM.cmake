@@ -22,6 +22,19 @@
 
 include(ExternalProject)
 
+# Anvil headers live under rocshmem/src/sdma and are not installed with the library.
+function(_rocshmem_set_sdma_src_dir)
+    set(ROCSHMEM_SDMA_SRC_DIR "")
+    if(ROCSHMEM_SOURCE_DIR AND EXISTS "${ROCSHMEM_SOURCE_DIR}/src/sdma/anvil.hpp")
+        set(ROCSHMEM_SDMA_SRC_DIR "${ROCSHMEM_SOURCE_DIR}/src")
+        return()
+    endif()
+    get_filename_component(_rs_src "${CMAKE_SOURCE_DIR}/../rocshmem/src" REALPATH)
+    if(EXISTS "${_rs_src}/sdma/anvil.hpp")
+        set(ROCSHMEM_SDMA_SRC_DIR "${_rs_src}")
+    endif()
+endfunction()
+
 function(add_rocshmem_targets)
 
     # Common dependency: libibverbs is required for all rocSHMEM paths
@@ -40,6 +53,8 @@ function(add_rocshmem_targets)
         if(rocshmem_static_FOUND)
             set(ROCSHMEM_INCLUDE_DIR "${ROCSHMEM_INCLUDE_DIR}" PARENT_SCOPE)
             set(ROCSHMEM_LIBRARY     "${ROCSHMEM_LIBRARY}"      PARENT_SCOPE)
+            _rocshmem_set_sdma_src_dir()
+            set(ROCSHMEM_SDMA_SRC_DIR "${ROCSHMEM_SDMA_SRC_DIR}" PARENT_SCOPE)
             return()
         endif()
     endif()
@@ -84,6 +99,8 @@ function(add_rocshmem_targets)
     set(ROCSHMEM_INSTALL_DIR  "${ROCSHMEM_INSTALL_DIR}"          PARENT_SCOPE)
     set(ROCSHMEM_INCLUDE_DIR "${ROCSHMEM_INSTALL_DIR}/include" PARENT_SCOPE)
     set(ROCSHMEM_LIBRARY     "${ROCSHMEM_INSTALL_DIR}/lib/librocshmem.a" PARENT_SCOPE)
+    _rocshmem_set_sdma_src_dir()
+    set(ROCSHMEM_SDMA_SRC_DIR "${ROCSHMEM_SDMA_SRC_DIR}" PARENT_SCOPE)
 
     add_custom_target(rocshmem_static ALL DEPENDS rocshmem_ext)
 

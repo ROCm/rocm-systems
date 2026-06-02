@@ -195,6 +195,8 @@ set(SRC_FILES
   include/nccl_device/gin/proxy/gin_proxy_device_host_common.h
   include/nccl_device/gin/rocshmem/gin_rocshmem.h
   include/nccl_device/gin/rocshmem/gin_rocshmem_device_host_common.h
+  include/nccl_device/gin/anvil/gin_anvil.h
+  include/nccl_device/gin/anvil/gin_anvil_device_host_common.h
   include/nccl_device/ll_a2a.h
   include/nccl_device/lsa_barrier.h
   include/nccl_device/ptr.h
@@ -685,6 +687,9 @@ if (ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
   if (ROCSHMEM_INCLUDE_DIR)
     target_include_directories(rccl PRIVATE ${ROCSHMEM_INCLUDE_DIR})
   endif()
+  if (ROCSHMEM_SDMA_SRC_DIR)
+    target_include_directories(rccl PRIVATE ${ROCSHMEM_SDMA_SRC_DIR})
+  endif()
 endif()
 if (ENABLE_ROCSHMEM)
   target_link_libraries(rccl PRIVATE ${IBVERBS})
@@ -1089,8 +1094,12 @@ if(ENABLE_ROCSHMEM)
   list(REMOVE_DUPLICATES _rocshmem_offload_arch_flags)
   target_link_options(rccl PRIVATE -fgpu-rdc --hip-link ${_rocshmem_offload_arch_flags})
 elseif(ENABLE_ROCSHMEM_GIN)
-  # GIN-only rocshmem: host code compiled, rocshmem host symbols resolved at
-  # runtime from the executable that links librocshmem.a
+  # GIN rocshmem: device rocshmem symbols resolved from the executable; host
+  # may still need librocshmem (e.g. GIN_ANVIL uses Anvil SDMA in librocshmem).
+  if(ROCSHMEM_LIBRARY)
+    target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
+    target_link_libraries(rccl PRIVATE hsakmt)
+  endif()
   target_link_options(rccl PRIVATE "LINKER:--allow-shlib-undefined")
 endif()
 
