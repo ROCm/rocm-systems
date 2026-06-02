@@ -71,6 +71,10 @@ ROCP_SDK_ENFORCE_ABI_VERSIONING(::AmdExtTable, 82);
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::AmdExtTable, 83);
 #elif HSA_AMD_EXT_API_TABLE_STEP_VERSION == 0x0E
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::AmdExtTable, 85);
+#elif HSA_AMD_EXT_API_TABLE_STEP_VERSION == 0x0F
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::AmdExtTable, 86);
+#elif HSA_AMD_EXT_API_TABLE_STEP_VERSION == 0x10
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::AmdExtTable, 87);
 #else
 INTERNAL_CI_ROCP_SDK_ENFORCE_ABI_VERSIONING(::AmdExtTable, 0);
 #endif
@@ -330,6 +334,12 @@ ROCP_SDK_ENFORCE_ABI(::AmdExtTable, hsa_amd_signal_get_event_id_fn, 82);
 #if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0E
 ROCP_SDK_ENFORCE_ABI(::AmdExtTable, hsa_amd_external_semaphore_handle_open_fn, 83);
 ROCP_SDK_ENFORCE_ABI(::AmdExtTable, hsa_amd_external_semaphore_handle_close_fn, 84);
+#endif
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0F
+ROCP_SDK_ENFORCE_ABI(::AmdExtTable, hsa_amd_queue_signal_external_semaphore_fn, 85);
+#endif
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
+ROCP_SDK_ENFORCE_ABI(::AmdExtTable, hsa_amd_queue_wait_external_semaphore_fn, 86);
 #endif
 
 ROCP_SDK_ENFORCE_ABI(::ImageExtTable, hsa_ext_image_get_capability_fn, 1);

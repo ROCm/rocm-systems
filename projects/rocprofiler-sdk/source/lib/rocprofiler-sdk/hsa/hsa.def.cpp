@@ -588,6 +588,24 @@ HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
                           hsa_amd_external_semaphore_handle_close_fn,
                           sem)
 #        endif
+#        if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0F
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_queue_signal_external_semaphore,
+                          hsa_amd_queue_signal_external_semaphore,
+                          hsa_amd_queue_signal_external_semaphore_fn,
+                          queue,
+                          sem,
+                          value)
+#        endif
+#        if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_queue_wait_external_semaphore,
+                          hsa_amd_queue_wait_external_semaphore,
+                          hsa_amd_queue_wait_external_semaphore_fn,
+                          queue,
+                          sem,
+                          value)
+#        endif
 #    endif
 
 #elif defined(ROCPROFILER_LIB_ROCPROFILER_HSA_ASYNC_COPY_CPP_IMPL) &&                              \

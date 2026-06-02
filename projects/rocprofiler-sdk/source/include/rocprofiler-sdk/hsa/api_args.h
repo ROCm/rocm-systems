@@ -1526,6 +1526,22 @@ typedef union rocprofiler_hsa_api_args_t
         hsa_amd_external_semaphore_t sem;
     } hsa_amd_external_semaphore_handle_close;
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0F
+    struct
+    {
+        hsa_queue_t*                 queue;
+        hsa_amd_external_semaphore_t sem;
+        uint64_t                     value;
+    } hsa_amd_queue_signal_external_semaphore;
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
+    struct
+    {
+        hsa_queue_t*                 queue;
+        hsa_amd_external_semaphore_t sem;
+        uint64_t                     value;
+    } hsa_amd_queue_wait_external_semaphore;
+#    endif
 #endif
 } rocprofiler_hsa_api_args_t;
 
