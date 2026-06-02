@@ -3269,8 +3269,10 @@ hsa_status_t HSA_API hsa_amd_external_semaphore_handle_close(
  * routes to D3DKMTSignalSynchronizationObjectFromGpu via libhsakmt;
  * Linux / KFD is currently a stub (HSA_STATUS_ERROR).
  *
- * @param queue Must be an AMD GPU AQL queue from the agent that
- *   imported @p sem; others return HSA_STATUS_ERROR_INVALID_QUEUE.
+ * @param queue Must be an AMD GPU AQL queue. A null, non-GPU, or
+ *   non-AQL queue returns HSA_STATUS_ERROR_INVALID_QUEUE; a valid AQL
+ *   queue whose node differs from the one that imported @p sem returns
+ *   HSA_STATUS_ERROR_INVALID_AGENT.
  * @param sem   Handle from hsa_amd_external_semaphore_handle_open.
  * @param value Fence value written to the syncobj (passed verbatim).
  *
@@ -3300,9 +3302,10 @@ hsa_status_t HSA_API hsa_amd_queue_signal_external_semaphore(
  * stub returning HSA_STATUS_ERROR (NOT_SUPPORTED at the libhsakmt
  * layer).
  *
- * @param queue HSA queue created from the agent that imported @p sem.
- *   Must be an AMD GPU AQL queue; HostQueue / AIE queues return
- *   HSA_STATUS_ERROR_INVALID_QUEUE.
+ * @param queue Must be an AMD GPU AQL queue. Null, HostQueue, and AIE
+ *   queues return HSA_STATUS_ERROR_INVALID_QUEUE; a valid AQL queue
+ *   whose node differs from the one that imported @p sem returns
+ *   HSA_STATUS_ERROR_INVALID_AGENT.
  * @param sem   Handle returned by hsa_amd_external_semaphore_handle_open.
  * @param value Fence value to wait for. Vulkan binary semaphores
  *   conventionally use 0 / 1 but the value is passed through verbatim

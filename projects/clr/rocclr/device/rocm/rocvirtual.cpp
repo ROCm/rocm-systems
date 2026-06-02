@@ -4636,6 +4636,9 @@ void VirtualGPU::submitAccumulate(amd::AccumulateCommand& vcmd) {
 
 // ================================================================================================
 void VirtualGPU::submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) {
+  // Serialize queue access like the other submit* paths.
+  std::scoped_lock lock(execution());
+
   // Unwrap the hsa_amd_external_semaphore_t stashed as the CLR-visible
   // handle. Read-only: passed by value into the HSA call.
   const auto* holder = static_cast<const hsa_amd_external_semaphore_t*>(
@@ -4646,9 +4649,10 @@ void VirtualGPU::submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) {
   }
 
   if (cmd.semaphoreCmd() == amd::ExternalSemaphoreCmd::COMMAND_SIGNAL_EXTSEMAPHORE) {
-    // GPU-side signal. The host-queue worker runs sequentially, so
-    // prior AQL packets are already enqueued; the KMD appends the
-    // signal command behind them.
+    // Drain in-flight work (incl. SDMA) before the signal; the
+    // flushDMA(MainEngine) equivalent, on signal only.
+    dispatchBarrierPacket(kBarrierPacketHeader, /*skipSignal=*/true);
+
     hsa_status_t s = hsa_amd_queue_signal_external_semaphore(
         gpu_queue_, *holder, cmd.fence());
     if (s != HSA_STATUS_SUCCESS) {
