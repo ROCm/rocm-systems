@@ -195,14 +195,14 @@ def pytest_addoption(parser):
 
 def require_torch(*, gpu: bool = False) -> None:
     """Skip when PyTorch (or, with gpu=True, GPU) is unavailable."""
-
     if importlib.util.find_spec("torch") is None:
         pytest.skip("PyTorch is not installed")
-    if gpu:
+    try:
         import torch
-
-        if not torch.cuda.is_available():
-            pytest.skip("torch.cuda.is_available() is False")
+    except Exception as e:
+        pytest.skip(f"PyTorch import failed: {type(e).__name__}: {e}")
+    if gpu and not torch.cuda.is_available():
+        pytest.skip("torch.cuda.is_available() is False")
 
 
 @pytest.fixture(autouse=True)

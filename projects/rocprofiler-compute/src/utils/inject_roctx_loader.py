@@ -190,10 +190,17 @@ def _try_prebuilt(tag: str) -> Optional[types.ModuleType]:
     return None
 
 
-def _jit_cache_dir() -> Path:
+def _jit_cache_dir() -> Optional[Path]:
     base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
     d = Path(base) / "rocprofiler-compute" / "roctx_recordfn"
-    d.mkdir(parents=True, exist_ok=True)
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        _safe_log(
+            "log",
+            f"jit cache dir unavailable ({d}): {type(e).__name__}: {e}",
+        )
+        return None
     return d
 
 
@@ -307,9 +314,12 @@ def _jit_compile_viable(cpp_ext: types.ModuleType) -> bool:
     return shutil.which("ninja") is not None
 
 
-def _jit_failure_marker(tag: str) -> Path:
-    """Return the failure-marker path for ``tag``."""
-    return _jit_cache_dir() / f"roctx_recordfn-{tag}.build-failed"
+def _jit_failure_marker(tag: str) -> Optional[Path]:
+    """Return the failure-marker path for ``tag``, or ``None`` if no cache dir."""
+    cache_dir = _jit_cache_dir()
+    if cache_dir is None:
+        return None
+    return cache_dir / f"roctx_recordfn-{tag}.build-failed"
 
 
 def _record_jit_failure(
@@ -320,12 +330,15 @@ def _record_jit_failure(
 ) -> None:
     """Write a failure marker shared by both build tiers."""
     try:
+        marker = _jit_failure_marker(tag)
+        if marker is None:
+            return
         payload = f"{reason}: {type(err).__name__}: {err}\n"
         if stderr:
             tail = "\n".join(stderr.strip().splitlines()[-20:])
             if tail:
                 payload += f"--- stderr tail ---\n{tail}\n"
-        _jit_failure_marker(tag).write_text(payload)
+        marker.write_text(payload)
     except Exception as exc:
         _safe_log(
             "log",
@@ -337,7 +350,7 @@ def _previous_jit_failure(tag: str) -> Optional[str]:
     """Return the cached failure summary for ``tag``."""
     try:
         marker = _jit_failure_marker(tag)
-        if marker.exists():
+        if marker is not None and marker.exists():
             return marker.read_text().strip() or None
     except Exception as exc:
         _safe_log(
@@ -349,8 +362,11 @@ def _previous_jit_failure(tag: str) -> Optional[str]:
 
 def _clear_jit_failure(tag: str) -> None:
     """Remove the failure marker for ``tag``."""
+    marker = _jit_failure_marker(tag)
+    if marker is None:
+        return
     try:
-        _jit_failure_marker(tag).unlink()
+        marker.unlink()
     except FileNotFoundError:
         pass
     except Exception:
@@ -372,6 +388,8 @@ def _install_cached_so(src_so: Path, cached_so: Path) -> None:
 
 def _try_jit_cached(tag: str) -> Optional[types.ModuleType]:
     cache_dir = _jit_cache_dir()
+    if cache_dir is None:
+        return None
     so_path = cache_dir / f"roctx_recordfn-{tag}.so"
     if not so_path.exists():
         return None
@@ -415,7 +433,11 @@ def _try_cmake_build(tag: str) -> Optional[types.ModuleType]:
         )
         return None
 
-    build_dir = _jit_cache_dir() / f"cmake-build-{tag}"
+    cache_dir = _jit_cache_dir()
+    if cache_dir is None:
+        _safe_log("log", "jit cache dir unavailable; skipping cmake tier")
+        return None
+    build_dir = cache_dir / f"cmake-build-{tag}"
     try:
         build_dir.mkdir(parents=True, exist_ok=True)
     except OSError as e:
@@ -487,7 +509,7 @@ def _try_cmake_build(tag: str) -> Optional[types.ModuleType]:
         _record_jit_failure(tag, err, reason=_CMAKE_TIER_NAME)
         return None
 
-    cached_so = _jit_cache_dir() / f"roctx_recordfn-{tag}.so"
+    cached_so = cache_dir / f"roctx_recordfn-{tag}.so"
     _install_cached_so(produced, cached_so)
 
     try:
@@ -547,8 +569,18 @@ def _try_jit_build(tag: str) -> Optional[types.ModuleType]:
     ]
     extra_cflags = ["-O2", "-fvisibility=hidden", "-Wno-deprecated-declarations"]
 
-    build_dir = _jit_cache_dir() / f"build-{tag}"
-    build_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir = _jit_cache_dir()
+    if cache_dir is None:
+        err = RuntimeError("jit cache dir unavailable; cannot host cpp_extension build")
+        _log_cppext_failure(err)
+        return None
+    build_dir = cache_dir / f"build-{tag}"
+    try:
+        build_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        _log_cppext_failure(e)
+        _record_jit_failure(tag, e, reason=_CPPEXT_TIER_NAME)
+        return None
 
     # ``use_ninja=False`` is rejected on newer PyTorch; retry without it.
     load_kwargs = dict(
@@ -583,7 +615,7 @@ def _try_jit_build(tag: str) -> Optional[types.ModuleType]:
 
     _install_cached_so(
         build_dir / "roctx_recordfn.so",
-        _jit_cache_dir() / f"roctx_recordfn-{tag}.so",
+        cache_dir / f"roctx_recordfn-{tag}.so",
     )
     _clear_jit_failure(tag)
 
