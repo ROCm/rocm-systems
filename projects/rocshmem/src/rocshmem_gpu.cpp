@@ -835,7 +835,7 @@ __global__ ATTR_NO_INLINE void rocshmem_reduce_on_stream_kernel(rocshmem_team_t 
   rocshmem_reduce_wg<T, Op>(ctx, team, dest,
                             source, nreduce);
 
-  if (ctx_result == 0)
+  if (ctx != ROCSHMEM_CTX_INVALID || ctx != ROCSHMEM_CTX_DEFAULT)
     rocshmem_wg_ctx_destroy(&ctx);
 }
 
