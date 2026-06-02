@@ -53,7 +53,7 @@ public:
         std::unique_lock<std::mutex> lk(mut);
 
         if(valid.exchange(true)) return;
-        exited = 0;
+        exited = consumers.size();
 
         for(auto& consumer : consumers)
         {
@@ -69,7 +69,7 @@ public:
 
         valid.store(false);
         cv.notify_all();
-        cv.wait(lk, [&] { return exited >= consumers.size(); });
+        cv.wait(lk, [&] { return exited == 0; });
         for(auto& consumer : consumers)
             if(consumer.joinable()) consumer.join();
     }
@@ -102,7 +102,7 @@ protected:
                 cv.wait(lk, [&] { return read_ptr != write_ptr || !valid; });
                 if(read_ptr == write_ptr)
                 {
-                    exited++;
+                    exited--;
                     cv.notify_all();
                     return;
                 }
