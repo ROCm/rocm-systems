@@ -2959,13 +2959,23 @@ static hipError_t EnqueueBatchCommands(std::vector<std::vector<Operation>>& oper
       wait_list.push_back(stream_wait_cmd);
     }
 
+    bool finish_before_return = !is_async;
+    if (!AMD_DIRECT_DISPATCH && command_type == ROCCLR_COMMAND_BATCH_WRITE_BUFFER) {
+      for (const Operation &op : operations) {
+        if (op.metadata_.srcAccessOrder_ == amd::CopyMetadata::kSrcAccessOrderDuringApiCall) {
+          finish_before_return = true;
+          break;
+        }
+      }
+    }
+
     Command* batch_cmd = new Command(*queue_stream, command_type, wait_list, std::move(operations));
     if (batch_cmd == nullptr) {
       return hipErrorOutOfMemory;
     }
 
     batch_cmd->enqueue();
-    if (!is_async) {
+    if (finish_before_return) {
       batch_cmd->queue()->finishCommand(batch_cmd);
     } else if (queue_stream != &stream) {
       batch_cmd->retain();

@@ -577,6 +577,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_H2D_Pageable_DuringApiCall_SourceAccess) 
                                 attrs_idxs, 1, nullptr, stream_guard.stream()));
   FillHostBuffers(src, copy_size, kAlteredValue);
   HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+  VerifyDeviceBuffers(dst_ptrs, copy_size, kOriginalValue);
   VerifyHostBuffers(src, copy_size, kAlteredValue);
 }
 
