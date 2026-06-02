@@ -734,7 +734,7 @@ hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKin
   amd::Memory* srcDeviceMemory = nullptr;
   amd::Memory* dstDeviceMemory = nullptr;
   getMemoryObjectPairs(src, dst, srcDeviceMemory, dstDeviceMemory, sOffset, dOffset);
-  
+
   // Handle kind vs memobject miss matches
   if (kind == hipMemcpyDeviceToHost && srcDeviceMemory == nullptr) {
     return hipErrorInvalidValue;
@@ -3015,33 +3015,74 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
 
   // Handle buffer-to-buffer copies as a batch
   if (!bufferCopyIndices.empty()) {
-    std::vector<amd::BatchCopyOp> copyOps;
-    copyOps.reserve(bufferCopyIndices.size());
+    std::vector<std::vector<amd::BatchCopyOp>> copy_ops_by_device(g_devices.size());
 
     for (size_t idx : bufferCopyIndices) {
-      if (srcMemories[idx] == nullptr || dstMemories[idx] == nullptr) {
-        return hipErrorInvalidValue;
+      const int device_id = dstMemories[idx]->getUserData().deviceId;
+      amd::CopyMetadata metadata =
+          buildCopyMetadataFromAttrs(attrs, attrsIdxs, numAttrs, idx, isAsync);
+      copy_ops_by_device[device_id].emplace_back(srcMemories[idx], dstMemories[idx],
+                                                 srcOffsets[idx], dstOffsets[idx], sizes[idx],
+                                                 metadata);
+    }
+
+    amd::Command::EventWaitList marker_wait_list;
+    amd::Command* stream_wait_cmd = stream.getLastQueuedCommand(true);
+    for (size_t device_id = 0; device_id < copy_ops_by_device.size(); ++device_id) {
+      auto& copy_ops = copy_ops_by_device[device_id];
+      if (copy_ops.empty()) {
+        continue;
       }
 
-      amd::CopyMetadata metadata = buildCopyMetadataFromAttrs(attrs, attrsIdxs, numAttrs, idx, isAsync);
-      copyOps.emplace_back(srcMemories[idx], dstMemories[idx], srcOffsets[idx], dstOffsets[idx], sizes[idx],
-                           metadata);
+      hip::Stream* queue_stream = static_cast<int>(device_id) == stream.DeviceId()
+                                      ? &stream
+                                      : hip::getNullStream(*g_devices[device_id]->asContext());
+      amd::Command::EventWaitList wait_list;
+      if (queue_stream != &stream && stream_wait_cmd != nullptr) {
+        wait_list.push_back(stream_wait_cmd);
+      }
+
+      amd::BatchCopyMemoryCommand* batch_cmd = new amd::BatchCopyMemoryCommand(
+          *queue_stream, ROCCLR_COMMAND_BATCH_COPY_BUFFER, wait_list, std::move(copy_ops));
+
+      if (batch_cmd == nullptr) {
+        if (stream_wait_cmd != nullptr) {
+          stream_wait_cmd->release();
+        }
+        for (auto* cmd : marker_wait_list) {
+          cmd->release();
+        }
+        return hipErrorOutOfMemory;
+      }
+
+      batch_cmd->enqueue();
+      if (!isAsync) {
+        batch_cmd->queue()->finishCommand(batch_cmd);
+      } else if (queue_stream != &stream) {
+        batch_cmd->retain();
+        marker_wait_list.push_back(batch_cmd);
+      }
+      batch_cmd->release();
     }
 
-    // Create and enqueue batch copy command
-    amd::Command::EventWaitList waitList;
-    amd::BatchCopyMemoryCommand* batchCmd = new amd::BatchCopyMemoryCommand(
-        stream, ROCCLR_COMMAND_BATCH_COPY_BUFFER, waitList, std::move(copyOps));
-
-    if (batchCmd == nullptr) {
-      return hipErrorOutOfMemory;
+    if (stream_wait_cmd != nullptr) {
+      stream_wait_cmd->release();
     }
 
-    batchCmd->enqueue();
-    if (!isAsync) {
-      batchCmd->queue()->finishCommand(batchCmd);
+    if (!marker_wait_list.empty()) {
+      amd::Command* dependent_marker = new amd::Marker(stream, true, marker_wait_list);
+      if (dependent_marker == nullptr) {
+        for (auto* cmd : marker_wait_list) {
+          cmd->release();
+        }
+        return hipErrorOutOfMemory;
+      }
+      dependent_marker->enqueue();
+      dependent_marker->release();
+      for (auto* cmd : marker_wait_list) {
+        cmd->release();
+      }
     }
-    batchCmd->release();
   }
 
   // Handle write buffer (host to device) copies.

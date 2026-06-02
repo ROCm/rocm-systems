@@ -704,16 +704,29 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_H2H_Functional) {
 HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Mixed_Functional) {
   constexpr size_t copy_size = kMediumCopySize;
   const size_t copy_elements = CopyElements(copy_size);
+
+  if (HipTest::getDeviceCount() < 3) {
+    HIP_SKIP_TEST("Test requires at least three GPUs.");
+  }
+
+  HIP_CHECK(hipSetDevice(0));
   StreamGuard stream_guard(Streams::created);
 
   LinearAllocGuard<int> h2d_src(LinearAllocs::malloc, copy_size);
   LinearAllocGuard<int> h2d_dst(LinearAllocs::hipMalloc, copy_size);
+
+  HIP_CHECK(hipSetDevice(1));
   LinearAllocGuard<int> d2d_src(LinearAllocs::hipMalloc, copy_size);
   LinearAllocGuard<int> d2d_dst(LinearAllocs::hipMalloc, copy_size);
+
+  HIP_CHECK(hipSetDevice(2));
   LinearAllocGuard<int> d2h_src(LinearAllocs::hipMalloc, copy_size);
+
   LinearAllocGuard<int> d2h_dst(LinearAllocs::malloc, copy_size);
   LinearAllocGuard<int> h2h_src(LinearAllocs::malloc, copy_size);
   LinearAllocGuard<int> h2h_dst(LinearAllocs::malloc, copy_size);
+
+  HIP_CHECK(hipSetDevice(0));
   std::array<void*, 4> src_ptrs{h2d_src.ptr(), d2d_src.ptr(), d2h_src.ptr(), h2h_src.ptr()};
   std::array<void*, 4> dst_ptrs{h2d_dst.ptr(), d2d_dst.ptr(), d2h_dst.ptr(), h2h_dst.ptr()};
   std::array<size_t, 4> sizes{copy_size, copy_size, copy_size, copy_size};
