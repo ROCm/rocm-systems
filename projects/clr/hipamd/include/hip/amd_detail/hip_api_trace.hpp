@@ -48,7 +48,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 1
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 29
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 30
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -1105,6 +1105,7 @@ typedef hipError_t (*t_hipLibraryGetGlobal)(void** dptr, size_t* bytes,
                                             hipLibrary_t library, const char* name);
 typedef hipError_t (*t_hipLibraryGetManaged)(void** dptr, size_t* bytes,
                                              hipLibrary_t library, const char* name);
+typedef void (*t_hipDummyBreakingBuild)();
 typedef hipError_t (*t_hipLibraryEnumerateKernels)(hipKernel_t* kernels, unsigned int numKernels,
                                                    hipLibrary_t library);
 typedef hipError_t (*t_hipKernelGetLibrary)(hipLibrary_t* library, hipKernel_t kernel);
@@ -1800,6 +1801,7 @@ struct HipDispatchTable {
 
   // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 30
+  t_hipDummyBreakingBuild hipDummyBreakingBuild_fn;
 
   // ******************************************************************************************* //
   //
