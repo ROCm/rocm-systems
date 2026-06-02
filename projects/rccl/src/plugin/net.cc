@@ -10,6 +10,7 @@
 #include "checks.h"
 #include "plugin.h"
 #include "nccl_net.h"
+#include "nccl_device/net_device.h"
 
 #include <string.h>
 #include <errno.h>
@@ -203,7 +204,11 @@ static ncclResult_t ncclNetPluginInit(struct ncclComm* comm, netPluginLib_t* plu
   }
 
   if (pluginLib->ncclGinPluginState == ncclNetPluginStateInitReady && pluginLib->ncclGin) {
-    if ((ncclParamGinType() == -1) && (pluginLib->ncclGin == (ncclGin_t *)-1)) {
+    if (ncclParamGinType() == NCCL_NET_DEVICE_GIN_ROCSHMEM ||
+        ncclParamGinType() == NCCL_NET_DEVICE_GIN_ANVIL) {
+      // Built-in ROCm GIN plugins are initialized via ncclGinInit().
+      pluginLib->ncclGinPluginState = ncclNetPluginStateDisabled;
+    } else if ((ncclParamGinType() == -1) && (pluginLib->ncclGin == (ncclGin_t *)-1)) {
 #if !defined(__HIP_PLATFORM_AMD__)
       void* throwAwayContext = nullptr;
       if (ncclGinIbGdaki.init(&throwAwayContext, comm->commHash, ncclDebugLog) == ncclSuccess) {
@@ -351,6 +356,7 @@ static void initPluginLibsOnceFunc() {
       else if (ncclParamGinType() == NCCL_GIN_TYPE_GDAKI)
         netPluginLibs[pluginCounter].ncclGin = &ncclGinIbGdaki;
 #endif
+      // NCCL_GIN_TYPE=4/5 (rocshmem/anvil): leave ncclGin NULL; ncclGinInit handles them.
       netPluginLibs[pluginCounter].ncclNetPluginState = ncclNetPluginStateInitReady;
       ++pluginCounter;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)

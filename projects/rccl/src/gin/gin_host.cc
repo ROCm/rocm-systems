@@ -61,7 +61,12 @@ ncclResult_t setLocalGinType(struct ncclComm* comm) {
   ncclNetProperties_t props;
   NCCLCHECK(ginState.ncclGin->getProperties(0, &props));
   if (props.netDeviceType == NCCL_NET_DEVICE_GIN_PROXY ||
-      props.netDeviceType == NCCL_NET_DEVICE_GIN_GDAKI) {
+      props.netDeviceType == NCCL_NET_DEVICE_GIN_GDAKI
+#ifdef ENABLE_ROCSHMEM_GIN
+      || props.netDeviceType == NCCL_NET_DEVICE_GIN_ROCSHMEM
+      || props.netDeviceType == NCCL_NET_DEVICE_GIN_ANVIL
+#endif
+      ) {
     // NOTE: The following cast is valid because ncclGinType_t variant values
     // should match NCCL_NET_DEVICE_GIN_* values from `enum ncclNetDeviceType`.
     ginState.ginType = static_cast<ncclGinType_t>(props.netDeviceType);
@@ -85,6 +90,8 @@ void* ncclGinProgress(struct ncclGinState* ginState_) {
 #ifdef ENABLE_ROCSHMEM_GIN
         } else if (ginState->ginType == NCCL_NET_DEVICE_GIN_ROCSHMEM) {
           ret = ncclGinRocshmemProgress(ginState->ncclGin, ginState->ginCtx[n]);
+        } else if (ginState->ginType == NCCL_NET_DEVICE_GIN_ANVIL) {
+          ret = ncclGinAnvilProgress(ginState->ncclGin, ginState->ginCtx[n]);
 #endif
         } else {
           ret = ginState->ncclGin->ginProgress(ginState->ginComms[n]);
@@ -247,6 +254,11 @@ ncclResult_t ncclGinConnectOnce(struct ncclComm* comm, ncclGinConnectionType_t r
                                                   ginState->signalSpaceSize, ginState->counterSpaceSize,
                                                   &ginState->ginCtx[n], &ginState->ginDevHandles[n]),
                     ret, fail);
+    } else if (ginState->ginType == NCCL_NET_DEVICE_GIN_ANVIL) {
+      NCCLCHECKGOTO(ncclGinAnvilCreateContext(comm, ginState->ginComms[n], localNets[n%nLocalNets],
+                                              ginState->signalSpaceSize, ginState->counterSpaceSize,
+                                              &ginState->ginCtx[n], &ginState->ginDevHandles[n]),
+                    ret, fail);
 #endif
     } else {
       NCCLCHECKGOTO(ginState->ncclGin->connect( comm->ginContext, handles, nGinRanks, myGinRank,
@@ -323,6 +335,14 @@ ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) {
       }
     }
   }
+  if (ginState->ginType == NCCL_NET_DEVICE_GIN_ANVIL) {
+    for (int n = 0; n < ginState->ginCommCount; n++) {
+      if (ginState->ginCtx[n] != NULL) {
+        NCCLCHECK(ncclGinAnvilDestroyContext(ginState->ncclGin, ginState->ginCtx[n]));
+        ginState->ginCtx[n] = NULL;
+      }
+    }
+  }
 #endif
 
   for (int n = 0; n < ginState->ginCommCount; n++) {
@@ -368,6 +388,8 @@ ncclResult_t ncclGinDeregister(struct ncclComm* comm, void* ginHostWins[NCCL_GIN
 #ifdef ENABLE_ROCSHMEM_GIN
     } else if (ginState->ginType == NCCL_NET_DEVICE_GIN_ROCSHMEM) {
       NCCLCHECK(ncclGinRocshmemDeregister(ginState->ncclGin, ginState->ginCtx[n], ginHostWins[n]));
+    } else if (ginState->ginType == NCCL_NET_DEVICE_GIN_ANVIL) {
+      NCCLCHECK(ncclGinAnvilDeregister(ginState->ncclGin, ginState->ginCtx[n], ginHostWins[n]));
 #endif
     } else {
       NCCLCHECK(ginState->ncclGin->deregMrSym(ginState->ginComms[n], ginHostWins[n]));
@@ -416,6 +438,8 @@ ncclResult_t ncclGinQueryLastError(struct ncclGinState* ginState, bool* hasError
 #ifdef ENABLE_ROCSHMEM_GIN
     else if (ginState->ginType == NCCL_NET_DEVICE_GIN_ROCSHMEM)
       NCCLCHECK(ncclGinRocshmemQueryLastError(ginState->ncclGin, ginState->ginCtx[n], &hasError_));
+    else if (ginState->ginType == NCCL_NET_DEVICE_GIN_ANVIL)
+      NCCLCHECK(ncclGinAnvilQueryLastError(ginState->ncclGin, ginState->ginCtx[n], &hasError_));
 #endif
     else
       NCCLCHECK(ginState->ncclGin->queryLastError(ginState->ginCtx[n], &hasError_));

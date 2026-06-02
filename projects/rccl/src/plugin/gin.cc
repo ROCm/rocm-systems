@@ -10,6 +10,8 @@
 #include "checks.h"
 #include "plugin.h"
 #include "nccl_gin.h"
+#include "gin/gin_host.h"
+#include "nccl_device/net_device.h"
 
 #include <string.h>
 #include <errno.h>
@@ -30,7 +32,13 @@ NCCL_PARAM(GinType, "GIN_TYPE", -1);
 int ncclGinVersion[NCCL_GIN_VERSION_COUNT] = {12, 11};
 getNcclGin_t* getNcclGin[NCCL_GIN_VERSION_COUNT] = {getNcclGin_v12, getNcclGin_v11};
 
+#if defined(ENABLE_ROCSHMEM) || defined(ENABLE_ROCSHMEM_GIN)
+extern ncclGin_t ncclGinRocshmem;
+extern ncclGin_t ncclGinAnvilPlugin;
+#define NCCL_GIN_NUM_INTERNAL_PLUGINS 3
+#else
 #define NCCL_GIN_NUM_INTERNAL_PLUGINS 1
+#endif
 
 typedef enum ncclGinPluginState {
   ncclGinPluginStateDisabled        = -2,       // Plugin library failed to initialize
@@ -209,6 +217,15 @@ static void initPluginLibsOnceFunc() {
     pluginCounter++;
   }
 
+#if defined(ENABLE_ROCSHMEM) || defined(ENABLE_ROCSHMEM_GIN)
+  // Built-in ROCm GIN plugins (NCCL_GIN_TYPE=4 rocshmem, NCCL_GIN_TYPE=5 anvil)
+  ginPluginLibs[pluginCounter].ncclGin = &ncclGinRocshmem;
+  ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
+  pluginCounter++;
+  ginPluginLibs[pluginCounter].ncclGin = &ncclGinAnvilPlugin;
+  ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
+  pluginCounter++;
+#endif
   // Add internal ib plugin
   ginPluginLibs[pluginCounter].ncclGin = &ncclGinIb;
   ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
@@ -216,6 +233,23 @@ static void initPluginLibsOnceFunc() {
   ginPluginLibs[pluginCounter].ncclRmaPluginState = ncclGinPluginStateInitReady;
   pluginCounter++;
   pluginCount = pluginCounter;
+}
+
+
+static bool ncclGinPluginMatchesRequest(ginPluginLib_t* pluginLib) {
+  if (pluginLib->ncclGin == nullptr) return false;
+  int64_t requested = ncclParamGinType();
+  if (requested == NCCL_NET_DEVICE_GIN_ROCSHMEM) {
+    return pluginLib->ncclGin == &ncclGinRocshmem;
+  }
+  if (requested == NCCL_NET_DEVICE_GIN_ANVIL) {
+    return pluginLib->ncclGin == &ncclGinAnvilPlugin;
+  }
+  if (requested == NCCL_GIN_TYPE_PROXY || requested == NCCL_GIN_TYPE_GDAKI) {
+    return pluginLib->ncclGin != &ncclGinRocshmem && pluginLib->ncclGin != &ncclGinAnvilPlugin;
+  }
+  // Default: skip built-in ROCm plugins unless explicitly requested.
+  return pluginLib->ncclGin != &ncclGinRocshmem && pluginLib->ncclGin != &ncclGinAnvilPlugin;
 }
 
 static ncclResult_t ncclGinPluginFinalize(struct ncclComm* comm, int pluginIndex) {
@@ -236,6 +270,7 @@ ncclResult_t ncclGinInit(struct ncclComm* comm) {
       NCCLCHECK(ncclGinPluginLoad(&ginPluginLibs[pluginIndex]));
     }
     if (ginPluginLibs[pluginIndex].ncclGinPluginState >= ncclGinPluginStateInitReady) {
+      if (!ncclGinPluginMatchesRequest(&ginPluginLibs[pluginIndex])) continue;
       // plugin init must be done by all comms to setup the context, therefore we use ">="
       NCCLCHECK(ncclGinPluginInit(comm, &ginPluginLibs[pluginIndex]));
       if (ginPluginLibs[pluginIndex].ncclGinPluginState == ncclGinPluginStateEnabled) {
@@ -245,6 +280,11 @@ ncclResult_t ncclGinInit(struct ncclComm* comm) {
           // If one external plugin is assigned to a comm, then disable all other external plugins
           ncclGinPluginDisableOtherExternal(pluginIndex);
           ncclGinPluginInitialized = true;
+          if (ncclParamGinType() == NCCL_NET_DEVICE_GIN_ANVIL) {
+            INFO(NCCL_INIT, "Using built-in GIN anvil plugin (NCCL_GIN_TYPE=5, intra-node xGMI SDMA)");
+          } else if (ncclParamGinType() == NCCL_NET_DEVICE_GIN_ROCSHMEM) {
+            INFO(NCCL_INIT, "Using built-in GIN rocshmem plugin");
+          }
           break;
         } else {
           ncclGinPluginFinalize(comm, pluginIndex);
