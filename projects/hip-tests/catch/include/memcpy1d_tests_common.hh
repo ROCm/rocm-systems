@@ -35,7 +35,8 @@ template <bool should_synchronize, typename F>
 void MemcpyDeviceToHostShell(F memcpy_func, const hipStream_t kernel_stream = nullptr) {
   using LA = LinearAllocs;
   const auto allocation_size =
-      isQuickLevel() ? kPageSize : GENERATE(kPageSize / 2, kPageSize, kPageSize * 2);
+      isQuickLevel() ? GENERATE(kPageSize / 2, kPageSize * 2)
+                     : GENERATE(kPageSize / 2, kPageSize, kPageSize * 2);
   const auto host_allocation_type =
       isQuickLevel() ? LA::hipHostMalloc : GENERATE(LA::malloc, LA::hipHostMalloc);
   const auto host_allocation_flags = GenerateLinearAllocationFlagCombinations(host_allocation_type);
@@ -64,7 +65,8 @@ template <bool should_synchronize, typename F>
 void MemcpyHostToDeviceShell(F memcpy_func, const hipStream_t kernel_stream = nullptr) {
   using LA = LinearAllocs;
   const auto allocation_size =
-      isQuickLevel() ? kPageSize : GENERATE(kPageSize / 2, kPageSize, kPageSize * 2);
+      isQuickLevel() ? GENERATE(kPageSize / 2, kPageSize * 2)
+                     : GENERATE(kPageSize / 2, kPageSize, kPageSize * 2);
   const auto host_allocation_type =
       isQuickLevel() ? LA::hipHostMalloc : GENERATE(LA::malloc, LA::hipHostMalloc);
   const auto host_allocation_flags = GenerateLinearAllocationFlagCombinations(host_allocation_type);
@@ -94,7 +96,8 @@ template <bool should_synchronize, typename F>
 void MemcpyHostToHostShell(F memcpy_func, const hipStream_t kernel_stream = nullptr) {
   using LA = LinearAllocs;
   const auto allocation_size =
-      isQuickLevel() ? kPageSize : GENERATE(kPageSize / 2, kPageSize, kPageSize * 2);
+      isQuickLevel() ? GENERATE(kPageSize / 2, kPageSize * 2)
+                     : GENERATE(kPageSize / 2, kPageSize, kPageSize * 2);
   const auto src_allocation_type =
       isQuickLevel() ? LA::hipHostMalloc : GENERATE(LA::malloc, LA::hipHostMalloc);
   const auto dst_allocation_type =
@@ -120,7 +123,8 @@ void MemcpyHostToHostShell(F memcpy_func, const hipStream_t kernel_stream = null
 template <bool should_synchronize, bool enable_peer_access, typename F>
 void MemcpyDeviceToDeviceShell(F memcpy_func, const hipStream_t kernel_stream = nullptr) {
   const auto allocation_size =
-      isQuickLevel() ? kPageSize : GENERATE(kPageSize / 2, kPageSize, kPageSize * 2);
+      isQuickLevel() ? GENERATE(kPageSize / 2, kPageSize * 2)
+                     : GENERATE(kPageSize / 2, kPageSize, kPageSize * 2);
   const auto device_count = HipTest::getDeviceCount();
   const auto src_device = isQuickLevel() ? 0 : GENERATE_COPY(range(0, device_count));
   const auto dst_device = isQuickLevel() ? 0 : GENERATE_COPY(range(0, device_count));
