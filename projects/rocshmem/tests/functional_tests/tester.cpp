@@ -707,6 +707,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case TileGetArbitraryTestType:
       test_name = "Tile Get Arbitrary Strides";
       testers.push_back(new TileRMATester(args));
+      break;
     case HostTeamSyncBarrierTestType:
       test_name = "Host Team Sync/Barrier";
       testers.push_back(new HostTeamSyncBarrierTester(args));
