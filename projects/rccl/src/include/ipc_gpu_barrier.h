@@ -46,7 +46,7 @@ __device__ __forceinline__ void waitFlag(uint32_t* addr) {
     ;
 }
 
-constexpr int NRANKS = 8;
+constexpr int NRANKS = 4;
 
 } // namespace
 
