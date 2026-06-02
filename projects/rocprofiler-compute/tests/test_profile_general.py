@@ -387,7 +387,7 @@ def validate(test_name, workload_dir, file_dict, args=[]):
 
 
 def normalize_counter_dataframe_for_comparison(df):
-    """Return long-form counter rows; wide CSV/rocpd outputs are melted and already-long frames pass through."""
+    """Return long-form counter rows for comparing wide and already-long outputs."""
     if {ROCPD_COUNTER_NAME_COLUMN, ROCPD_COUNTER_VALUE_COLUMN}.issubset(df.columns):
         return df
 
