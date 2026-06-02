@@ -2,9 +2,10 @@
 Multi-PE tests; require at least 2 PEs.
 """
 
+import time
+
 import pytest
 
-import rocshmem4py
 from rocshmem4py import (
     ROCSHMEM_SUCCESS,
     ROCSHMEM_TEAM_INVALID,
@@ -23,8 +24,13 @@ from rocshmem4py import (
     rocshmem_barrier_on_stream,
     rocshmem_team_sync_on_stream,
     hip_device_synchronize,
+    rocshmem_malloc,
+    rocshmem_free,
+    rocshmem_putmem_on_stream,
+    rocshmem_getmem_on_stream,
 )
 from conftest import requires_multi_pe
+from hip_test_utils import HipStream, load_u64, store_u64
 
 
 def test_team_config_struct():
@@ -69,10 +75,10 @@ def test_split_strided_even_subteam():
     )
     assert status == ROCSHMEM_SUCCESS
 
-    me = rocshmem_my_pe()
-    if me % 2 == 0:
+    my_pe = rocshmem_my_pe()
+    if my_pe % 2 == 0:
         assert team != ROCSHMEM_TEAM_INVALID
-        assert rocshmem_team_my_pe(team) == me // 2
+        assert rocshmem_team_my_pe(team) == my_pe // 2
         assert rocshmem_team_n_pes(team) == even_size
     else:
         # Odd PEs are non-members of the even-subteam; the binding's
@@ -111,12 +117,12 @@ def test_split_strided_subset_parent_then_split():
     if n < 4:
         pytest.skip("requires >= 4 PEs to form non-trivial subset parents")
 
-    me = rocshmem_my_pe()
+    my_pe = rocshmem_my_pe()
     cfg = TeamConfig()
     cfg.num_contexts = 1
 
     # ---------- Step 1: subset parent via parity split ----------
-    parity = me % 2
+    parity = my_pe % 2
     start_pe = parity  # 0 for even, 1 for odd
     subset_size = n // 2
     if (n % 2) != 0 and parity == 0:
@@ -127,11 +133,11 @@ def test_split_strided_subset_parent_then_split():
     )
     assert status == ROCSHMEM_SUCCESS
     assert subset_parent != ROCSHMEM_TEAM_INVALID, (
-        f"PE {me}: subset parent (parity={parity}, size={subset_size}) "
+        f"PE {my_pe}: subset parent (parity={parity}, size={subset_size}) "
         "must be valid; every PE is a member of exactly one parity subset"
     )
     assert rocshmem_team_n_pes(subset_parent) == subset_size
-    assert rocshmem_team_my_pe(subset_parent) == me // 2
+    assert rocshmem_team_my_pe(subset_parent) == my_pe // 2
 
     # ---------- Step 2: split the subset parent (non-WORLD) into halves ----------
     subset_n = rocshmem_team_n_pes(subset_parent)
@@ -152,7 +158,7 @@ def test_split_strided_subset_parent_then_split():
     )
     assert status == ROCSHMEM_SUCCESS
     assert child != ROCSHMEM_TEAM_INVALID, (
-        f"PE {me}: child team (subset_parent parity={parity}, "
+        f"PE {my_pe}: child team (subset_parent parity={parity}, "
         f"start={child_start}, size={child_size}) must be valid; every PE in "
         "the subset parent participates in exactly one half"
     )
@@ -179,18 +185,18 @@ def test_split_strided_recursive_split_world():
     if n < 4:
         pytest.skip("requires >= 4 PEs so each half can be split again")
 
-    me = rocshmem_my_pe()
+    my_pe = rocshmem_my_pe()
     cfg = TeamConfig()
     cfg.num_contexts = 1
 
     # First-level split: lower half {0..mid-1}, upper half {mid..n-1}.
     mid = n // 2
-    if me < mid:
+    if my_pe < mid:
         half_start, half_size = 0, mid
-        my_half_pe = me
+        my_half_pe = my_pe
     else:
         half_start, half_size = mid, n - mid
-        my_half_pe = me - mid
+        my_half_pe = my_pe - mid
 
     status, half = rocshmem_team_split_strided(
         ROCSHMEM_TEAM_WORLD, half_start, 1, half_size, cfg, 0,
@@ -261,16 +267,72 @@ def test_team_translate_pe_round_trip():
 
 
 @requires_multi_pe
-def test_team_destroy_idempotent_on_special_handles():
-    """Destroying ROCSHMEM_TEAM_{INVALID,WORLD} is a documented no-op."""
-    rocshmem_team_destroy(ROCSHMEM_TEAM_INVALID)
-    rocshmem_team_destroy(ROCSHMEM_TEAM_WORLD)
-    # Just survives without segfault.
+def test_team_sync_barrier_member_scoped():
+    """Non-members should not block on team collectives.
+
+    Construct an even-rank subteam. Delay one team member before entering
+    team sync / barrier, then assert:
+      - other members block waiting for the delayed member
+      - non-members (TEAM_INVALID path) return quickly
+    """
+    n = rocshmem_n_pes()
+    if n < 4:
+        pytest.skip("requires >= 4 PEs to exercise member/non-member timing")
+
+    cfg = TeamConfig()
+    cfg.num_contexts = 1
+    even_size = (n + 1) // 2
+    status, even_team = rocshmem_team_split_strided(
+        ROCSHMEM_TEAM_WORLD, 0, 2, even_size, cfg, 0,
+    )
+    assert status == ROCSHMEM_SUCCESS
+
+    my_pe = rocshmem_my_pe()
+    is_member = (my_pe % 2) == 0
+    if is_member:
+        assert even_team != ROCSHMEM_TEAM_INVALID
+        team_rank = rocshmem_team_my_pe(even_team)
+    else:
+        assert even_team == ROCSHMEM_TEAM_INVALID
+        team_rank = -1
+
+    delay_s = 0.8
+
+    # Phase 1: sync timing
+    rocshmem_barrier_all()
+    if is_member and team_rank == 0:
+        time.sleep(delay_s)
+    t0 = time.perf_counter()
+    rocshmem_team_sync(even_team)
+    sync_dt = time.perf_counter() - t0
+
+    # Phase 2: barrier timing
+    rocshmem_barrier_all()
+    if is_member and team_rank == 0:
+        time.sleep(delay_s)
+    t0 = time.perf_counter()
+    rocshmem_barrier(even_team)
+    barrier_dt = time.perf_counter() - t0
+
+    rocshmem_barrier_all()
+    rocshmem_team_destroy(even_team)
+    rocshmem_barrier_all()
+
+    if is_member and team_rank != 0:
+        # Other team members must wait for delayed member.
+        # higher time on the non-delayed member is the expected 
+        # behavior for a collective barrier/sync.
+        assert sync_dt > delay_s * 0.6
+        assert barrier_dt > delay_s * 0.6
+    if not is_member:
+        # Non-members pass TEAM_INVALID and should not wait for team progress.
+        assert sync_dt < delay_s * 0.5
+        assert barrier_dt < delay_s * 0.5
 
 
 @requires_multi_pe
-def test_team_barrier_and_sync_on_split_team():
-    """Members participate in team sync/barrier; non-members can no-op safely."""
+def test_team_sync_store_visibility():
+    """`team_sync` gates team-local store visibility for member communication."""
     n = rocshmem_n_pes()
     if n < 4:
         pytest.skip("requires >= 4 PEs to exercise member/non-member behavior")
@@ -283,28 +345,59 @@ def test_team_barrier_and_sync_on_split_team():
     )
     assert status == ROCSHMEM_SUCCESS
 
-    # Members call into the team-scoped primitives; non-members pass INVALID
-    # and rely on no-op semantics.
-    rocshmem_team_sync(even_team)
-    rocshmem_barrier(even_team)
+    my_pe = rocshmem_my_pe()
+    is_member = (my_pe % 2) == 0
+    if is_member:
+        assert even_team != ROCSHMEM_TEAM_INVALID
+        team_rank = rocshmem_team_my_pe(even_team)
+        team_n = rocshmem_team_n_pes(even_team)
+    else:
+        assert even_team == ROCSHMEM_TEAM_INVALID
+        team_rank = -1
+        team_n = 0
 
-    rocshmem_barrier_all()
-    rocshmem_team_destroy(even_team)
-    rocshmem_barrier_all()
+    local_val = rocshmem_malloc(8)
+    pull_buf = rocshmem_malloc(8)
+    try:
+        store_u64(local_val, my_pe + 5000)
+        store_u64(pull_buf, 0xFFFFFFFFFFFFFFFF)
 
+        # team_sync is the ONLY synchronization gating the cross-member read
+        # below.  Per rocSHMEM semantics it must guarantee every member's
+        # local store (above) is complete and visible to the other members
+        # before any of them returns. 
+        rocshmem_team_sync(even_team)
 
-def test_team_barrier_sync_on_stream_symbols_exported():
-    """The stream-ordered team barrier/sync bindings are exported."""
-    assert hasattr(rocshmem4py, "rocshmem_barrier_on_stream")
-    assert hasattr(rocshmem4py, "rocshmem_team_sync_on_stream")
+        if is_member and team_n > 1:
+            prev_rank = (team_rank - 1 + team_n) % team_n
+            prev_world = rocshmem_team_translate_pe(
+                even_team, prev_rank, ROCSHMEM_TEAM_WORLD
+            )
+            rocshmem_getmem_on_stream(pull_buf, local_val, 8, prev_world, 0)
+            hip_device_synchronize()
+            assert load_u64(pull_buf) == prev_world + 5000
+
+        rocshmem_barrier_all()
+    finally:
+        rocshmem_free(local_val)
+        rocshmem_free(pull_buf)
+        rocshmem_barrier_all()
+        rocshmem_team_destroy(even_team)
+        rocshmem_barrier_all()
 
 
 @requires_multi_pe
-def test_team_barrier_and_sync_on_stream_on_split_team():
-    """Stream-ordered team sync/barrier; members enqueue, non-members no-op.
+def test_team_barrier_rma_ordering():
+    """Team `barrier` synchronizes members after remote RMA so each member
+    can safely read data a peer wrote into its inbox.
 
-    Uses the default stream (handle 0) so this exercises the real binding
-    path on both the torch and the mpi4py bootstraps (no torch dependency).
+    Production gotcha exercised here: the put is issued via the stream-ordered
+    API and flushed with ``hip_device_synchronize()`` *before* the blocking
+    host barrier.  A blocking host barrier does NOT flush stream-enqueued RMA,
+    so omitting that device sync would race.  The team barrier's load-bearing
+    role is the cross-PE arrival ordering -- a member cannot read its inbox
+    until the writing peer has reached the barrier, i.e. issued and locally
+    completed its put.
     """
     n = rocshmem_n_pes()
     if n < 4:
@@ -318,22 +411,214 @@ def test_team_barrier_and_sync_on_stream_on_split_team():
     )
     assert status == ROCSHMEM_SUCCESS
 
-    # Members enqueue the team collective on the default stream; non-members
-    # pass ROCSHMEM_TEAM_INVALID and rely on the documented no-op (nothing
-    # enqueued).  Synchronizing the device then re-joining barrier_all confirms
-    # the enqueued kernels completed without a hang.
-    rocshmem_team_sync_on_stream(even_team, 0)
-    rocshmem_barrier_on_stream(even_team, 0)
-    hip_device_synchronize()
+    my_pe = rocshmem_my_pe()
+    is_member = (my_pe % 2) == 0
+    if is_member:
+        assert even_team != ROCSHMEM_TEAM_INVALID
+        team_rank = rocshmem_team_my_pe(even_team)
+        team_n = rocshmem_team_n_pes(even_team)
+    else:
+        assert even_team == ROCSHMEM_TEAM_INVALID
+        team_rank = -1
+        team_n = 0
 
-    # Passing the INVALID sentinel explicitly must be a no-op for every rank.
-    rocshmem_barrier_on_stream(ROCSHMEM_TEAM_INVALID, 0)
-    rocshmem_team_sync_on_stream(ROCSHMEM_TEAM_INVALID, 0)
-    hip_device_synchronize()
+    inbox = rocshmem_malloc(8)
+    send_val_ptr = rocshmem_malloc(8)
+    try:
+        store_u64(inbox, 0xABCDEF00 + my_pe)
+        store_u64(send_val_ptr, my_pe + 7000)
+
+        rocshmem_barrier_all()
+
+        if is_member and team_n > 1:
+            next_rank = (team_rank + 1) % team_n
+            next_world = rocshmem_team_translate_pe(
+                even_team, next_rank, ROCSHMEM_TEAM_WORLD
+            )
+            rocshmem_putmem_on_stream(inbox, send_val_ptr, 8, next_world, 0)
+            # Required: flush the stream-enqueued put before the blocking host
+            # barrier, which has no visibility into stream-ordered RMA.
+            hip_device_synchronize()
+
+        # Cross-PE arrival ordering: no member proceeds past here until every
+        # member has reached the barrier, i.e. completed its put above.
+        rocshmem_barrier(even_team)
+
+        if is_member and team_n > 1:
+            prev_rank = (team_rank - 1 + team_n) % team_n
+            prev_world = rocshmem_team_translate_pe(
+                even_team, prev_rank, ROCSHMEM_TEAM_WORLD
+            )
+            assert load_u64(inbox) == prev_world + 7000
+
+        rocshmem_barrier_all()
+    finally:
+        rocshmem_free(inbox)
+        rocshmem_free(send_val_ptr)
+        rocshmem_barrier_all()
+        rocshmem_team_destroy(even_team)
+        rocshmem_barrier_all()
+
+
+@requires_multi_pe
+def test_team_barrier_on_stream_rma_ordering():
+    """Stream-ordered team barrier orders an enqueued put against a later read.
+
+    This is the realistic overlap pattern: the put, the team barrier, and the
+    dependent consumption are all driven from a single dedicated ``hipStream_t``
+    with NO host-side device sync in between.  Correctness relies on two
+    properties together:
+      1. in-order stream execution -- the put copy completes before the
+         barrier kernel on the same stream begins; and
+      2. the collective team barrier -- a member's barrier completes only
+         after every member (including the peer writing into its inbox) has
+         reached the barrier, so the peer's put has landed and is visible.
+
+    Non-members pass ROCSHMEM_TEAM_INVALID and must no-op while members make
+    real RMA progress -- exercising the INVALID path interleaved with live
+    team traffic, not in isolation.
+    """
+    n = rocshmem_n_pes()
+    if n < 4:
+        pytest.skip("requires >= 4 PEs to exercise member/non-member behavior")
+
+    cfg = TeamConfig()
+    cfg.num_contexts = 1
+    even_size = (n + 1) // 2
+    status, even_team = rocshmem_team_split_strided(
+        ROCSHMEM_TEAM_WORLD, 0, 2, even_size, cfg, 0,
+    )
+    assert status == ROCSHMEM_SUCCESS
+
+    my_pe = rocshmem_my_pe()
+    is_member = (my_pe % 2) == 0
+    if is_member:
+        assert even_team != ROCSHMEM_TEAM_INVALID
+        team_rank = rocshmem_team_my_pe(even_team)
+        team_n = rocshmem_team_n_pes(even_team)
+    else:
+        assert even_team == ROCSHMEM_TEAM_INVALID
+        team_rank = -1
+        team_n = 0
+
+    inbox = rocshmem_malloc(8)
+    send_val_ptr = rocshmem_malloc(8)
+    try:
+        store_u64(inbox, 0xABCDEF00 + my_pe)
+        store_u64(send_val_ptr, my_pe + 9000)
+
+        # Every inbox must be initialized before any peer writes into it,
+        # otherwise a late init store could clobber a received value.
+        rocshmem_barrier_all()
+
+        with HipStream() as s:
+            if is_member and team_n > 1:
+                next_rank = (team_rank + 1) % team_n
+                next_world = rocshmem_team_translate_pe(
+                    even_team, next_rank, ROCSHMEM_TEAM_WORLD
+                )
+                rocshmem_putmem_on_stream(
+                    inbox, send_val_ptr, 8, next_world, s.handle
+                )
+            # Stream-ordered team barrier: orders the put enqueued above and
+            # synchronizes members.  Non-members enqueue the INVALID no-op.
+            rocshmem_barrier_on_stream(even_team, s.handle)
+            s.synchronize()
+
+        if is_member and team_n > 1:
+            prev_rank = (team_rank - 1 + team_n) % team_n
+            prev_world = rocshmem_team_translate_pe(
+                even_team, prev_rank, ROCSHMEM_TEAM_WORLD
+            )
+            assert load_u64(inbox) == prev_world + 9000
+
+        # Explicit INVALID sentinel on a dedicated stream must no-op for every
+        # rank (members and non-members alike) without hanging.
+        with HipStream() as s2:
+            rocshmem_barrier_on_stream(ROCSHMEM_TEAM_INVALID, s2.handle)
+            rocshmem_team_sync_on_stream(ROCSHMEM_TEAM_INVALID, s2.handle)
+            s2.synchronize()
+
+        rocshmem_barrier_all()
+    finally:
+        rocshmem_free(inbox)
+        rocshmem_free(send_val_ptr)
+        rocshmem_barrier_all()
+        rocshmem_team_destroy(even_team)
+        rocshmem_barrier_all()
+
+
+@requires_multi_pe
+def test_team_sync_barrier_on_stream_member_scoped():
+    """Stream-ordered team sync/barrier are team-scoped: non-members no-op.
+
+    Stream analogue of ``test_team_sync_barrier_member_scoped``.  One team
+    member delays *before* it enqueues + drives its stream-ordered collective,
+    so its barrier kernel rendezvouses late.  Then:
+      - other members block in ``stream.synchronize()`` waiting for the
+        delayed member's barrier kernel to arrive on the device, and
+      - non-members (TEAM_INVALID) enqueue nothing, so their
+        ``stream.synchronize()`` on an empty stream returns promptly.
+
+    This is the property the explicit-INVALID block in the data test cannot
+    show: a non-member must not stall on team progress driven by the stream.
+    """
+    n = rocshmem_n_pes()
+    if n < 4:
+        pytest.skip("requires >= 4 PEs to exercise member/non-member timing")
+
+    cfg = TeamConfig()
+    cfg.num_contexts = 1
+    even_size = (n + 1) // 2
+    status, even_team = rocshmem_team_split_strided(
+        ROCSHMEM_TEAM_WORLD, 0, 2, even_size, cfg, 0,
+    )
+    assert status == ROCSHMEM_SUCCESS
+
+    my_pe = rocshmem_my_pe()
+    is_member = (my_pe % 2) == 0
+    if is_member:
+        assert even_team != ROCSHMEM_TEAM_INVALID
+        team_rank = rocshmem_team_my_pe(even_team)
+    else:
+        assert even_team == ROCSHMEM_TEAM_INVALID
+        team_rank = -1
+
+    delay_s = 0.8
+
+    # Phase 1: sync_on_stream timing
+    rocshmem_barrier_all()
+    if is_member and team_rank == 0:
+        time.sleep(delay_s)
+    t0 = time.perf_counter()
+    with HipStream() as s:
+        rocshmem_team_sync_on_stream(even_team, s.handle)
+        s.synchronize()
+    sync_dt = time.perf_counter() - t0
+
+    # Phase 2: barrier_on_stream timing
+    rocshmem_barrier_all()
+    if is_member and team_rank == 0:
+        time.sleep(delay_s)
+    t0 = time.perf_counter()
+    with HipStream() as s:
+        rocshmem_barrier_on_stream(even_team, s.handle)
+        s.synchronize()
+    barrier_dt = time.perf_counter() - t0
 
     rocshmem_barrier_all()
     rocshmem_team_destroy(even_team)
     rocshmem_barrier_all()
+
+    if is_member and team_rank != 0:
+        # Members must wait on the device rendezvous for the delayed member.
+        assert sync_dt > delay_s * 0.6
+        assert barrier_dt > delay_s * 0.6
+    if not is_member:
+        # Non-members enqueue nothing for INVALID; the empty stream drains
+        # immediately and must not wait for the team's progress.
+        assert sync_dt < delay_s * 0.5
+        assert barrier_dt < delay_s * 0.5
 
 
 @requires_multi_pe

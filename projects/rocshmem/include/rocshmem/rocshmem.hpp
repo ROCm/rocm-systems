@@ -549,9 +549,7 @@ __host__ void rocshmem_barrier_all_on_stream(hipStream_t stream);
  * @brief enqueues a collective barrier across all PEs in \p team on given
  * stream.
  *
- * The barrier is stream-ordered: it executes after previously enqueued work on
- * \p stream and before subsequently enqueued work. Passing
- * ROCSHMEM_TEAM_INVALID is a no-op (nothing is enqueued).
+ * Passing ROCSHMEM_TEAM_INVALID is a no-op.
  *
  * @param[in] team    Team participating in the barrier.
  * @param[in] stream  HIP stream on which to enqueue the operation.
