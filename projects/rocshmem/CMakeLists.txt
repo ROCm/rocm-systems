@@ -203,9 +203,7 @@ if (NOT BUILD_TESTS_ONLY)
   #############################################################################
   # GDA links libnuma directly; hsakmt (USE_SDMA) also depends on numa::numa
   if(USE_GDA OR USE_SDMA)
-    find_package(NUMA QUIET
-      PATHS /opt/rocm/lib/rocm_sysdeps /opt/rocm
-      PATH_SUFFIXES lib/cmake/NUMA)
+    find_package(NUMA QUIET HINTS "${ROCM_PATH}/lib/rocm_sysdeps")
     if(NOT TARGET numa::numa)
       find_package(PkgConfig QUIET)
       if(PKG_CONFIG_FOUND)
