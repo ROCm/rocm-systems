@@ -84,7 +84,7 @@ jobs:
       rocm_version: ${{ inputs.rocm_version }}
 
   build_and_test_NVIDIA:
-    if: ${{ !startsWith(inputs.rocm_version, '7.13.') }}
+    if: ${{ !startsWith(inputs.rocm_version, '7.13.') && inputs.rocm_version != 'nightly' }}
     uses: ./.github/workflows/hipfile-build-nvidia.yml
     with:
       ci_image: ${{ inputs.ci_image_nvidia }}

@@ -7,6 +7,7 @@ env:
   AIS_INPUT_CI_IMAGE_NAME_NVIDIA: ${{ inputs.ci_image_name_nvidia }}
   AIS_INPUT_CI_IMAGE_CACHE_NVIDIA: ${{ inputs.ci_image_cache_nvidia }}
   AIS_INPUT_ROCM_VERSION: ${{ inputs.rocm_version }}
+  AIS_INPUT_ROCM_NIGHTLY_BUILD: ${{ inputs.rocm_nightly_build }}
   AIS_INPUT_PLATFORM: ${{ inputs.platform }}
 
 on:
@@ -34,6 +35,11 @@ on:
       rocm_version:
         description: "Target ROCm MAJOR.MINOR.PATCH Version"
         required: true
+        type: string
+      rocm_nightly_build:
+        description: "Nightly build id (YYYYMMDD-<gha_run_id>); empty for non-nightly"
+        required: false
+        default: ""
         type: string
     outputs:
       ci_image:
@@ -75,12 +81,14 @@ jobs:
           cache-binary: false # True uses the GHA Cache Backend
 
       - name: Build base image for AIS CI
+        # Current caveat: At this time we don't have nightlies being cleanly cached
         run: |
           docker buildx build \
             -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.ais_ci_${AIS_INPUT_PLATFORM}" \
             --target base \
             --build-arg BUILDKIT_INLINE_CACHE=1 \
             --build-arg ROCM_VERSION=${AIS_INPUT_ROCM_VERSION} \
+            --build-arg ROCM_NIGHTLY_BUILD=${AIS_INPUT_ROCM_NIGHTLY_BUILD} \
             --cache-from=type=registry,ref="${AIS_INPUT_CI_IMAGE_NAME}" \
             --cache-from=type=registry,ref="${AIS_INPUT_CI_IMAGE_CACHE}" \
             --push \
@@ -94,6 +102,8 @@ jobs:
             --target nvidia \
             --build-arg BUILDKIT_INLINE_CACHE=1 \
             --build-arg ROCM_VERSION=${AIS_INPUT_ROCM_VERSION} \
+            --build-arg ROCM_NIGHTLY_BUILD=${AIS_INPUT_ROCM_NIGHTLY_BUILD} \
+            --cache-from=type=registry,ref="${AIS_INPUT_CI_IMAGE_NAME}" \
             --cache-from=type=registry,ref="${AIS_INPUT_CI_IMAGE_NAME_NVIDIA}" \
             --cache-from=type=registry,ref="${AIS_INPUT_CI_IMAGE_CACHE_NVIDIA}" \
             --push \
