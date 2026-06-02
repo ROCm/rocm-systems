@@ -3,17 +3,26 @@
 //! HotSwap is a load-time ISA rewriter that runs a workload built for
 //! one AMD GPU architecture on a different physical GPU (e.g.
 //! `gfx1250` on `gfx942`/`gfx950`) by rewriting device code as it is
-//! loaded. It plugs into the ROCm runtime as an HSA tools library: the
-//! runtime loads it when `HSA_TOOLS_LIB` points at
-//! `libhsa-hotswap.so`.
+//! loaded.
 //!
-//! mirage does **not** build or bundle HotSwap. This crate only
-//! *discovers* an existing `libhsa-hotswap.so` install (using the
-//! shared [`mirage_core::discovery`] search policy) and exposes the
-//! `HSA_TOOLS_LIB` value plus install guidance. See
-//! [`../README.md`](../README.md) for the user-facing docs.
+//! HotSwap is **not** a single HSA tools library. It is a set of
+//! co-installed artifacts (see the reference Docker recipe), staged
+//! into one tree:
+//!
+//! * `libhotswap_intercept.so` — the HIP intercept, `LD_PRELOAD`ed.
+//! * `libhsa-runtime64.so.1`   — the HotSwap-patched ROCR runtime.
+//! * `libamd_comgr.so`         — the COMGR transpiler.
+//! * `llvm-tools/`             — `llc`/`llvm-mc`/`lld` the transpiler
+//!   shells out to, plus a `runtime/hotswap_py/` python runtime.
+//!
+//! mirage does not build HotSwap by default (the `MIRAGE_BUILD_HOTSWAP`
+//! CMake flag does an opt-in source build). This crate *discovers* an
+//! installed HotSwap tree — anchored on `libhotswap_intercept.so` via
+//! the shared [`mirage_core::discovery`] search policy — and wires it
+//! into a workload through the HotSwap env contract (`HOTSWAP_*` vars +
+//! the preloaded intercept). See [`../README.md`](../README.md).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use mirage_core::config::OptionDef;
 use mirage_core::discovery::{self, LibSearch};
@@ -24,15 +33,31 @@ use mirage_core::plugin::PluginsDef;
 use mirage_core::profile::ProfileDef;
 use mirage_core::session::SessionHealth;
 
-/// The HSA tools library file name HotSwap ships as.
-pub const LIB_NAME: &str = "libhsa-hotswap.so";
+/// The HIP intercept library HotSwap ships. It is the artifact mirage
+/// anchors discovery on (its directory is the HotSwap lib dir) and the
+/// library the env contract `LD_PRELOAD`s.
+pub const LIB_NAME: &str = "libhotswap_intercept.so";
+
+/// The HotSwap-patched ROCR runtime, expected alongside [`LIB_NAME`].
+pub const ROCR_LIB: &str = "libhsa-runtime64.so.1";
+
+/// The COMGR transpiler, expected alongside [`LIB_NAME`].
+pub const COMGR_LIB: &str = "libamd_comgr.so";
 
 /// Subdirectory under the mirage cache / `./emulator/` where a
-/// HotSwap library may be dropped.
+/// HotSwap install may be dropped.
 pub const ASSET_SUBDIR: &str = "hotswap";
 
 /// Human-facing name used in guidance messages.
 pub const DISPLAY_NAME: &str = "HotSwap";
+
+/// Default source GPU target the workload was built for, in the
+/// `gfx<arch>:<wave>` form the HotSwap env contract expects. Injected
+/// as `HOTSWAP_SOURCE_TARGET`; overridable from the exec environment.
+pub const DEFAULT_SOURCE_TARGET: &str = "gfx1250:32";
+
+/// Default HotSwap adapter policy (`HOTSWAP_ADAPTER_POLICY`).
+pub const DEFAULT_ADAPTER_POLICY: &str = "compile";
 
 /// The physical GPU architectures HotSwap can retarget code *onto*,
 /// as KFD `gfx_target_version` values paired with their conventional
@@ -42,9 +67,10 @@ pub const DISPLAY_NAME: &str = "HotSwap";
 /// GPUs physically present there is nothing for HotSwap to run on.
 pub const SUPPORTED_GPUS: &[(u32, &str)] = &[(90402, "gfx942"), (90500, "gfx950")];
 
-/// HotSwap [`Emulator`] implementation. HotSwap is loaded by the ROCm
-/// runtime as an HSA tools library, so the only injection needed is
-/// pointing `HSA_TOOLS_LIB` at `libhsa-hotswap.so`.
+/// HotSwap [`Emulator`] implementation. HotSwap is wired into a
+/// workload via the env contract: the patched ROCR + COMGR shadow the
+/// system copies (`LD_LIBRARY_PATH`), the HIP intercept is `LD_PRELOAD`ed,
+/// and the `HOTSWAP_*` variables select the source target and policy.
 pub struct Hotswap {
     profile: ProfileDef,
 }
@@ -108,20 +134,40 @@ impl Emulator for Hotswap {
     }
 
     fn injection_def(&self) -> Result<InjectionDef> {
-        // Refuse to run unemulated: without the tools library the ROCm
-        // runtime has nothing to load, so fail loudly with guidance
-        // rather than silently running the workload on real hardware.
-        let lib = hsa_tools_lib().ok_or_else(|| {
+        // Refuse to run unemulated: without the HotSwap tree the
+        // workload would silently run on real hardware, so fail loudly
+        // with guidance instead.
+        let dir = lib_dir().ok_or_else(|| {
             MirageError::Other(format!(
                 "hotswap: {LIB_NAME} not found; workload cannot be emulated.\n{}",
                 install_guidance()
             ))
         })?;
+        let intercept = dir.join(LIB_NAME);
+
         let mut env = std::collections::BTreeMap::new();
-        env.insert("HSA_TOOLS_LIB".to_string(), lib);
+        env.insert("HOTSWAP_ENABLE".to_string(), "1".to_string());
+        env.insert("HOTSWAP_LIB_DIR".to_string(), dir.display().to_string());
+        // The patched ROCR + COMGR shadow the system copies via the
+        // loader search path. The host launcher inherits a minimal env
+        // (no LD_LIBRARY_PATH), so set it explicitly to the HotSwap lib
+        // dir; an exec-level override still wins (applied afterwards).
+        env.insert("LD_LIBRARY_PATH".to_string(), dir.display().to_string());
+        env.insert(
+            "HOTSWAP_SOURCE_TARGET".to_string(),
+            DEFAULT_SOURCE_TARGET.to_string(),
+        );
+        env.insert(
+            "HOTSWAP_ADAPTER_POLICY".to_string(),
+            DEFAULT_ADAPTER_POLICY.to_string(),
+        );
+        if let Some(py) = py_dir() {
+            env.insert("HOTSWAP_PY_DIR".to_string(), py.display().to_string());
+        }
+
         Ok(InjectionDef {
             wrapper: None,
-            ld_preload: None,
+            ld_preload: Some(intercept.display().to_string()),
             files: Default::default(),
             env,
         })
@@ -177,35 +223,65 @@ pub fn support_status() -> SupportStatus {
     ))
 }
 
-/// Search policy mirage uses to locate `libhsa-hotswap.so`.
+/// Search policy mirage uses to locate the HotSwap install. Discovery
+/// is anchored on `libhotswap_intercept.so`; its directory is the
+/// HotSwap lib dir (where the patched ROCR and COMGR also live).
 pub fn lib_search() -> LibSearch<'static> {
     LibSearch {
-        // An explicit path to the `.so`. `HSA_TOOLS_LIB` is the ROCm
-        // runtime's own variable, so honouring it here keeps mirage
-        // consistent with a manually-exported environment.
+        // An explicit path straight to the intercept `.so`. `HSA_TOOLS_LIB`
+        // is the ROCm runtime's own variable, so honouring it here keeps
+        // mirage consistent with a manually-exported environment.
         file_env: &["HOTSWAP_LIB", "HSA_TOOLS_LIB"],
+        // The HotSwap lib dir; also the `HOTSWAP_LIB_DIR` env contract var.
         dir_env: &["HOTSWAP_LIB_DIR"],
         lib_name: LIB_NAME,
         binary_relative_dirs: &[],
     }
 }
 
-/// Locate `libhsa-hotswap.so`, returning its path if HotSwap is
-/// installed anywhere mirage knows to look.
+/// Locate the HotSwap intercept library, returning its path if HotSwap
+/// is installed anywhere mirage knows to look.
 pub fn lib_path() -> Option<PathBuf> {
     discovery::find_emulator_lib(&lib_search())
 }
 
-/// The value mirage should set for `HSA_TOOLS_LIB` when running a
-/// workload under HotSwap, if the library can be found.
-pub fn hsa_tools_lib() -> Option<String> {
-    lib_path().map(|p| p.display().to_string())
+/// The HotSwap lib dir: the directory containing the intercept, the
+/// patched ROCR, and the COMGR transpiler. This is the value the env
+/// contract exposes as `HOTSWAP_LIB_DIR`.
+pub fn lib_dir() -> Option<PathBuf> {
+    lib_path().and_then(|p| p.parent().map(Path::to_path_buf))
 }
 
-/// Returns `true` if a usable `libhsa-hotswap.so` is present on this
-/// machine.
+/// The HotSwap install root — the parent of the lib dir — under which
+/// the `llvm-tools/` and `runtime/hotswap_py/` siblings live.
+fn install_root() -> Option<PathBuf> {
+    lib_dir().and_then(|d| d.parent().map(Path::to_path_buf))
+}
+
+/// The python adapter runtime directory, if present. Honours an
+/// explicit `HOTSWAP_PY_DIR`, else `runtime/hotswap_py` under the
+/// install root.
+pub fn py_dir() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("HOTSWAP_PY_DIR")
+        && !p.is_empty()
+    {
+        let p = PathBuf::from(p);
+        if p.is_dir() {
+            return Some(p);
+        }
+    }
+    install_root()
+        .map(|r| r.join("runtime/hotswap_py"))
+        .filter(|p| p.is_dir())
+}
+
+/// Returns `true` if a usable HotSwap install is present on this
+/// machine (the intercept, patched ROCR, and COMGR all co-located).
 pub fn is_installed() -> bool {
-    discovery::is_lib_installed(&lib_search())
+    match lib_dir() {
+        Some(dir) => dir.join(ROCR_LIB).is_file() && dir.join(COMGR_LIB).is_file(),
+        None => false,
+    }
 }
 
 /// Multi-line, user-facing guidance describing where mirage looked for
@@ -219,15 +295,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn search_targets_the_hsa_tools_lib() {
+    fn search_targets_the_intercept_lib() {
         let s = lib_search();
-        assert_eq!(s.lib_name, "libhsa-hotswap.so");
-        assert!(s.file_env.contains(&"HSA_TOOLS_LIB"));
+        assert_eq!(s.lib_name, "libhotswap_intercept.so");
+        assert!(s.dir_env.contains(&"HOTSWAP_LIB_DIR"));
     }
 
     #[test]
     fn guidance_mentions_the_library() {
-        assert!(install_guidance().contains("libhsa-hotswap.so"));
+        assert!(install_guidance().contains("libhotswap_intercept.so"));
     }
 
     #[test]

@@ -24,6 +24,9 @@ cmake_minimum_required(VERSION 3.20)
 project(mirage NONE)
 
 option(MIRAGE_BUILD_DASHBOARD "Build the web dashboard SPA" ON)
+# HotSwap is a full LLVM + COMGR + ROCR source build, so it is opt-in. When ON,
+# cmake/Hotswap.cmake builds and stages the HotSwap artifacts mirage discovers.
+option(MIRAGE_BUILD_HOTSWAP "Build HotSwap (COMGR + patched ROCR + intercept) from source" OFF)
 set(MIRAGE_CARGO_PROFILE "release" CACHE STRING "Cargo build profile")
 set(MIRAGE_CARGO "" CACHE FILEPATH "Path to cargo binary (auto-detect if empty)")
 
@@ -57,6 +60,12 @@ add_custom_target(mirage_build ALL
     COMMENT "Building mirage with cargo (${MIRAGE_CARGO_PROFILE})"
     VERBATIM
 )
+
+# HotSwap source build (opt-in). Kept in its own module since it pulls in
+# ExternalProject and a multi-stage LLVM/COMGR/ROCR build.
+if(MIRAGE_BUILD_HOTSWAP)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/hotswap/cmake/Hotswap.cmake)
+endif()
 
 install(PROGRAMS ${_mirage_bin}
         DESTINATION bin

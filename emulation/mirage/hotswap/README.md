@@ -12,27 +12,35 @@ Because the rewrite happens once, at code-object load time, it is much faster
 than a full simulator while still letting you exercise code for an architecture
 you don't physically have.
 
-HotSwap plugs into the ROCm runtime as an **HSA tools library**. The ROCm
-runtime (HSA) loads it automatically when you point the `HSA_TOOLS_LIB`
-environment variable at it:
+## What HotSwap actually is
 
-```sh
-HSA_TOOLS_LIB=/path/to/libhsa-hotswap.so ./my-rocm-app
+HotSwap is **not** a single `libhsa-hotswap.so`. It is a set of co-installed
+artifacts (the same ones the reference Docker recipe produces), staged into one
+tree:
+
+```
+<hotswap-root>/
+  lib/        libhotswap_intercept.so   # HIP intercept, LD_PRELOADed
+              libhsa-runtime64.so.1     # HotSwap-patched ROCR runtime
+              libamd_comgr.so           # COMGR transpiler
+  llvm-tools/ llc llvm-mc lld ld.lld    # the transpiler shells out to these
+  runtime/hotswap_py/                   # python adapter runtime
 ```
 
-`mirage` automates this for you: create a profile that uses the `hotswap`
-emulator, and mirage discovers the installed `libhsa-hotswap.so` and injects
-`HSA_TOOLS_LIB` into every command it runs under that profile.
+mirage wires these into a workload through the **HotSwap env contract**: the
+patched ROCR + COMGR shadow the system copies via `LD_LIBRARY_PATH`, the HIP
+intercept is `LD_PRELOAD`ed, and a few `HOTSWAP_*` variables select the source
+target and adapter policy.
 
 ## Status
 
-HotSwap is **not bundled with mirage**. mirage will *find* and *use* an existing
-HotSwap install, but it does not build or ship one for you. You install HotSwap
-yourself (see below), and mirage locates it automatically.
+By default mirage does **not** build HotSwap — it *finds* and *uses* an existing
+install. An opt-in CMake flag (`MIRAGE_BUILD_HOTSWAP`, see below) can build it
+from source as part of the mirage build.
 
 ## Usage with mirage
 
-Once `libhsa-hotswap.so` is installed somewhere mirage can find it (see
+Once a HotSwap tree is installed somewhere mirage can find it (see
 [Where mirage looks](#where-mirage-looks)):
 
 ```sh
@@ -41,97 +49,104 @@ mirage profile create rdna --emulator hotswap
 mirage run --profile rdna -- ./my-rocm-app --flag
 ```
 
-If mirage can't find `libhsa-hotswap.so`, `mirage profile create --emulator
+mirage discovers the install, sets `HOTSWAP_ENABLE`, `HOTSWAP_LIB_DIR`,
+`HOTSWAP_SOURCE_TARGET` (default `gfx1250:32`), `HOTSWAP_ADAPTER_POLICY`
+(default `compile`) and `HOTSWAP_PY_DIR`, points `LD_LIBRARY_PATH` at the lib
+dir, and `LD_PRELOAD`s the intercept. Any of these can be overridden from the
+exec environment.
+
+If mirage can't find a HotSwap install, `mirage profile create --emulator
 hotswap` fails with guidance describing exactly which locations were searched
-and how to make the library discoverable. mirage also logs the same guidance
-at run time and falls back to running the workload unemulated.
+and how to make it discoverable. mirage also fails loudly at run time rather
+than silently running the workload unemulated.
 
 ### Where mirage looks
 
-mirage searches for `libhsa-hotswap.so` in the following locations, in order
+Discovery is anchored on `libhotswap_intercept.so`; the directory that contains
+it is the HotSwap lib dir. mirage searches in the following locations, in order
 (the first match wins):
 
-1. Any directory on `$LD_LIBRARY_PATH`.
-2. ../../../rocjitsu/build/lib/rocjitsu/src/rocjitsu/kmd/ rel to the `mirage` binary. 
-3. `$ROCM_HOME` / `$ROCM_PATH` — the ROCm install root (`<root>/lib`).
-4. in `../lib` rel to the `mirage` binary.
-5. Standard system / ROCm library directories: `/opt/rocm/lib`,
+1. `$HOTSWAP_LIB` / `$HSA_TOOLS_LIB` — an explicit path straight to the
+   intercept `.so`.
+2. `$HOTSWAP_LIB_DIR` — the HotSwap lib dir directly.
+3. Any directory on `$LD_LIBRARY_PATH`.
+4. `$ROCM_HOME` / `$ROCM_PATH` — the ROCm install root (`<root>/lib`).
+5. `../lib` relative to the `mirage` binary.
+6. Standard system / ROCm library directories: `/opt/rocm/lib`,
    `/usr/local/lib`, `/usr/lib`, `/usr/lib/x86_64-linux-gnu`.
+
+The `llvm-tools/` and `runtime/hotswap_py/` directories are resolved relative to
+the lib dir's parent (or via `$HOTSWAP_PY_DIR`).
 
 ## Installation
 
-HotSwap ships as a single shared library, `libhsa-hotswap.so`. You can either
-install a prebuilt copy or build it from source.
+### Install a prebuilt tree
 
-### Install a prebuilt library
-
-Place `libhsa-hotswap.so` in any location from
-[Where mirage looks](#where-mirage-looks). The simplest options:
+Place the `lib/`, `llvm-tools/` and `runtime/hotswap_py/` directories under any
+location from [Where mirage looks](#where-mirage-looks), e.g.:
 
 ```sh
-# Option A: install into your ROCm tree (visible to all ROCm tooling).
-sudo cp libhsa-hotswap.so "${ROCM_PATH:-/opt/rocm}/lib/"
-
-# Option B: drop it into the mirage cache (visible only to mirage).
-mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/mirage/emulator/hotswap"
-cp libhsa-hotswap.so \
-   "${XDG_CACHE_HOME:-$HOME/.cache}/mirage/emulator/hotswap/"
-
-# Option C: point an env var at it directly.
-export HOTSWAP_LIB=/abs/path/to/libhsa-hotswap.so
+export HOTSWAP_LIB_DIR=/abs/path/to/hotswap/lib
+# (llvm-tools/ and runtime/hotswap_py/ are expected next to that lib dir)
 ```
 
-Verify with `mirage profile create test --emulator hotswap` — it succeeds once
-mirage can find the library, and prints install guidance otherwise.
+### Build from source (opt-in, via mirage's CMake)
 
-### Build from source
-
-HotSwap lives in a fork of `llvm-project` that carries the ISA-rewriter runtime:
-
-- Source: <https://github.com/martin-luecke/llvm-project> on the `hotswap`
-  branch (being upstreamed into the `amd-staging` branch of
-  <https://github.com/ROCm/llvm-project>).
-- Reference commit at time of writing:
-  <https://github.com/ROCm/llvm-project/tree/a48e8a9cc3c2a7131ffdd7d9d3a8371890d3a68b>
-- Reference build recipe:
-  <https://github.com/ROCm/aise/blob/mluecke/hotswap-transformers-ut/docker/huggingface_ut_hotswap.ubuntu.amd.Dockerfile>
-
-The [`scripts/build-and-package.sh`](scripts/build-and-package.sh) helper
-wraps the checkout, build, and packaging steps so you end up with a
-`libhsa-hotswap.so` ready to install:
+HotSwap is built by a dedicated, opt-in CMake path. It is a full LLVM + COMGR +
+ROCR source build, so it is **off by default**:
 
 ```sh
-# Build from the default upstream source into ./target/lib/:
-./scripts/build-and-package.sh
-
-# Or build from a local checkout into a custom output directory:
-./scripts/build-and-package.sh --src /path/to/llvm-project --out ./dist
+cmake -S . -B build -DMIRAGE_BUILD_HOTSWAP=ON
+cmake --build build --target hotswap
 ```
 
-The script **builds and packages only** — it deliberately does not install the
-result. Choose an install location from
-[Where mirage looks](#where-mirage-looks) and copy the produced
-`target/lib/libhsa-hotswap.so` there yourself.
+This mirrors the reference Docker recipe and produces three artifact sets,
+staged under `target/hotswap/` (which discovery searches automatically):
 
-Run `./scripts/build-and-package.sh --help` for all options.
+1. **COMGR transpiler** (`libamd_comgr.so`) + the LLVM tools, from the
+   `llvm-project` HotSwap fork. The in-tree
+   [`../llvm-project-hotswap`](../llvm-project-hotswap) checkout is used as the
+   source by default to avoid re-cloning llvm-project.
+2. **HotSwap-patched ROCR** (`libhsa-runtime64.so.1`), from the `rocm-systems`
+   HotSwap fork (built with `ROCR_ENABLE_HOTSWAP_COMGR_ADAPTER=ON`).
+3. **HIP intercept** (`libhotswap_intercept.so`) + the python runtime, from the
+   HotSwap testing repo.
+
+Useful cache variables (see [`cmake/Hotswap.cmake`](cmake/Hotswap.cmake)
+for the full list):
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `MIRAGE_HOTSWAP_STAGE` | Where artifacts are staged | `target/hotswap` |
+| `MIRAGE_HOTSWAP_LLVM_SRC` | Existing llvm-project (HotSwap fork) checkout | `llvm-project-hotswap` |
+| `MIRAGE_HOTSWAP_ROCR_REPO` / `_REF` | ROCR fork URL / ref | `martin-luecke/rocm-systems` @ `users/mluecke/hotswap-compatibility` |
+| `MIRAGE_HOTSWAP_TESTING_REPO` / `_REF` | intercept repo URL / ref | `harsh-amd/rocm-hotswap-testing` @ `mluecke/hotswap-env-contract` |
+| `MIRAGE_HOTSWAP_ROCM_PATH` | ROCm prefix for the ROCR build | `$ROCM_PATH` or `/opt/rocm` |
+| `MIRAGE_HOTSWAP_JOBS` | Parallel build jobs | host CPU count |
+
+The ROCR and intercept sources are private forks: clone over HTTPS using
+whatever credentials git is configured with (a token in the URL, a credential
+helper, or an SSH rewrite).
 
 ## How it works (under the hood)
 
 ```mermaid
 flowchart TD
-    ENV["HSA_TOOLS_LIB=…/libhsa-hotswap.so"] -->|loaded by| HSA
-    HSA["ROCm / HSA runtime"] -->|loads tools lib| HS["libhsa-hotswap.so<br/>(load-time ISA rewriter)"]
-    HS -->|rewrites gfx1250 → gfx942/gfx950<br/>at code-object load| HSA
-    HSA -->|dispatches rewritten kernels| GPU["real GPU (gfx942 / gfx950)<br/>executes natively"]
+    ENV["HOTSWAP_* env contract<br/>LD_PRELOAD=libhotswap_intercept.so<br/>LD_LIBRARY_PATH=…/hotswap/lib"] -->|set by mirage| APP
+    APP["ROCm app"] -->|HIP calls intercepted| INT["libhotswap_intercept.so"]
+    INT -->|patched runtime shadows system| ROCR["libhsa-runtime64.so.1<br/>(HotSwap-patched ROCR)"]
+    ROCR -->|transpiles gfx1250 → gfx942/gfx950<br/>at code-object load| COMGR["libamd_comgr.so<br/>(COMGR transpiler)"]
+    COMGR -->|shells out to| TOOLS["llc / llvm-mc / lld"]
+    ROCR -->|dispatches rewritten kernels| GPU["real GPU (gfx942 / gfx950)"]
 ```
 
-mirage's only job is discovery + wiring: it finds `libhsa-hotswap.so` and sets
-`HSA_TOOLS_LIB` for the workload. The rewriting itself is entirely inside the
-HotSwap library and the ROCm runtime.
+mirage's job is discovery + wiring: it finds the HotSwap tree and sets the env
+contract. The rewriting itself lives in the patched ROCR + COMGR.
 
 ## See also
 
 - [`../rocjitsu/`](../rocjitsu/) — the software GPU simulator backend.
+- [`cmake/Hotswap.cmake`](cmake/Hotswap.cmake) — the source build.
 - [`../README.md`](../README.md) — the mirage CLI/dashboard overview.
 - [HotSwap Design & Brainstorming Hub][confluence] (internal).
 
