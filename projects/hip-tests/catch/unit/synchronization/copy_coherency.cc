@@ -257,7 +257,7 @@ void testWrapper(size_t numElements) {
           case EVENT_QUERY:
           case EVENT_SYNC:
           case STREAM_WAIT_EVENT:
-          // case STREAM_QUERY:
+          case STREAM_QUERY:
           case STREAM_SYNC:
           case DEVICE_SYNC:
             runTestImpl(CmdType(cmdA), SyncType(syncMode), CmdType(cmdB), stream1, stream2,
