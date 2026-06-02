@@ -1,6 +1,6 @@
 .. meta::
-   :description: ROCm Compute Profiler - RDNA3.5 GCEA and DRAM interface metrics (gfx1151)
-   :keywords: ROCm Compute Profiler, RDNA, gfx1151, GCEA, DRAM
+   :description: ROCm Compute Profiler - RDNA3.5 GCEA and DRAM interface metrics (gfx11.5)
+   :keywords: ROCm Compute Profiler, RDNA, gfx11.5, GCEA, DRAM
 
 .. _rdna-gcea:
 
@@ -11,7 +11,7 @@ GCEA
 **GCEA** names the stage where traffic leaves the on-chip cache hierarchy toward **DRAM**, covering memory-channel interfaces, the system arbiter (SARB), and return paths.
 Use these panels when analyzing bandwidth limits or memory-controller behavior after GL2.
 
-The sections below list RDNA3.5 (gfx1151) GCEA / DRAM interface metric descriptions.
+The sections below list RDNA3.5 (gfx11.5) GCEA / DRAM interface metric descriptions.
 
 For on-chip GL2 cache tables, see :doc:`gl2-cache`.
 
@@ -24,10 +24,10 @@ DRAM read interface
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx1151)
+   .. tab-item:: RDNA 3.5 (gfx11.5)
       :selected:
 
-      .. jinja:: rdna1151-dram-read-interface-gfx1151
+      .. jinja:: rdna115-dram-read-interface-gfx115
          :file: _templates/metrics_table.j2
 
 DRAM write interface
@@ -35,10 +35,10 @@ DRAM write interface
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx1151)
+   .. tab-item:: RDNA 3.5 (gfx11.5)
       :selected:
 
-      .. jinja:: rdna1151-dram-write-interface-gfx1151
+      .. jinja:: rdna115-dram-write-interface-gfx115
          :file: _templates/metrics_table.j2
 
 System Arbiter (SARB)
@@ -46,10 +46,10 @@ System Arbiter (SARB)
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx1151)
+   .. tab-item:: RDNA 3.5 (gfx11.5)
       :selected:
 
-      .. jinja:: rdna1151-system-arbiter-sarb-gfx1151
+      .. jinja:: rdna115-system-arbiter-sarb-gfx115
          :file: _templates/metrics_table.j2
 
 Return interface
@@ -57,10 +57,10 @@ Return interface
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx1151)
+   .. tab-item:: RDNA 3.5 (gfx11.5)
       :selected:
 
-      .. jinja:: rdna1151-return-interface-gfx1151
+      .. jinja:: rdna115-return-interface-gfx115
          :file: _templates/metrics_table.j2
 
 Memory chart: GCEA to system memory
@@ -74,8 +74,8 @@ Memory chart - GCEA to system memory
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx1151)
+   .. tab-item:: RDNA 3.5 (gfx11.5)
       :selected:
 
-      .. jinja:: rdna1151-memory-chart-gcea-to-system-memory-gfx1151
+      .. jinja:: rdna115-memory-chart-gcea-to-system-memory-gfx115
          :file: _templates/metrics_table.j2
