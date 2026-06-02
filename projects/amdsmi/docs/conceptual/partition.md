@@ -102,6 +102,11 @@ System
       └── ...
 ```
 
+For management purposes, Amd Smi equates Processor 0 (XCP 0) with the physical device. We
+therefore call XCP 0 the primary or master partition, as the device can still be managed
+from the primary partition and the primary partition has full visibility in terms of device
+metrics. All other partitions are referred to as secondary partitions.
+
 **Practical implications**
 
 - Partition mode is a property of the **socket** (physical GPU). Changing it affects all
@@ -113,6 +118,9 @@ System
 - Metrics such as socket power (`socket_power`, `average_socket_power`) are reported at
   the socket level and reflect the total physical GPU. Per-XCP metrics (clocks, utilization,
   violations) are reported at the processor handle level.
+- The primary partition can see the totals of metrics of workloads since it has full visibility
+  of metrics on the device. Secondary partitions only have visibility of each of their own
+  respective partition metrics.
 - On a bare-metal system `amdsmi_get_socket_handles()` returns one handle per physical
   GPU. On a hypervisor host the socket model reflects the physical topology. Inside an
   SR-IOV guest, each assigned VF appears as a separate processor handle, but the socket
