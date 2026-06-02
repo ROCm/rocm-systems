@@ -1,0 +1,234 @@
+## base docker image
+#ARG ROCM_IMAGE_NAME=rocm/dev-ubuntu-24.04
+#ARG ROCM_IMAGE_TAG=latest
+#FROM "${ROCM_IMAGE_NAME}:${ROCM_IMAGE_TAG}"
+FROM ubuntu:24.04
+
+#Example build: from a github pull
+#docker build -f Dockerfile-rccl-gin-gda -t rccl-gingda713 --build-arg GPU_TARGETS=gfx950  .
+#--build-arg ROCSHMEM_CACHE_BUST=N: increase N to force pull rocSHMEM and rebuilding
+#--build-arg RCCL_CACHE_BUST=N: increase N to force pull RCCL and RCCL-test and rebuilding
+#--build-arg ROCSHMEM_BRANCH=users/abouteiller/gin-stage1-wip (RCCL_BRANCH): pull and build that specific branch from github
+# Example build: from local sources, CWD in the rocm-systems pull
+#docker build -f Dockerfile-rccl-gin-gda -t rccl-gingda713 --build-arg GPU_TARGETS=gfx950 --build-arg ROCSHMEM_CACHE_BUST=5 --build-arg USE_LOCAL_SRC=1  .
+
+# Example command lines:
+#docker run -it --rm --shm-size 64G   --network host --device /dev/dri --device /dev/kfd --device /dev/infiniband --ipc host   --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged  rccl-gingda mpirun -n 8 -mca pml ob1 -mca btl ^openib -x RCCL_ROCSHMEM_ENABLE=0 -x RCCL_ROCSHMEM_THRESHOLD=$((128*1024*1024)) -x NCCL_DEBUG=VERSION -x NCCL_GIN_ENABLE=1 -x NCCL_GIN_TYPE=2 -x NCCL_DEBUG_SUBSYS=INIT,NET -x NCCL_CUMEM_ENABLE=1 -x RCCL_ENABLE_INTRANET=1  -x NCCL_DMABUF_ENABLE=1 -x NCCL_MSCCL_ENABLE=0 -x HSA_NO_SCRATCH_RECLAIM=1 rccl-tests/alltoall_perf -b 128 -e 128M -f 2 -g 1 -R 2 -D 3 -A 1
+#docker run -it --rm --shm-size 64G   --network host --device /dev/dri --device /dev/kfd --device /dev/infiniband --ipc host   --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged  rccl-gingda mpirun -n 8 -mca pml ob1 -mca btl ^openib rocshmem/bin/rocshmem_functional_tests -a 19 -w 1 -z 256 -v $((128*1024*1024)) -noverif
+
+## creating scratch space
+ENV WORKDIR /workspace
+RUN mkdir -p ${WORKDIR}
+WORKDIR ${WORKDIR}
+ENV SRC /src
+RUN mkdir -p ${SRC}
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+ && apt-get install -y sudo wget curl gpg ca-certificates
+RUN mkdir --parents --mode=0755 /etc/apt/keyrings \
+ && wget https://repo.amd.com/rocm/packages/gpg/rocm.gpg -O - | gpg --dearmor | tee /etc/apt/keyrings/amdrocm.gpg > /dev/null \
+ && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/amdrocm.gpg] https://repo.amd.com/rocm/packages-multi-arch/ubuntu2404 stable main" > /etc/apt/sources.list.d/rocm.list
+RUN apt-get update \
+ && apt-get install -y amdrocm-core7.13-gfx950 amdrocm-core7.13-gfx942 amdrocm-core-dev7.13 amdrocm-developer-tools7.13 amdrocm-runtime-dev \
+ && ln -s /opt/rocm/core/.info /opt/rocm/.info
+
+## install dependencies
+RUN apt-get install -y --no-install-recommends \
+    build-essential  \
+    git \
+    make \
+    cmake \
+    ninja-build \
+    pkg-config \
+    libnuma-dev \
+    libpthread-stubs0-dev \
+    libzstd-dev \
+    lcov \
+    zip \
+    zlib1g-dev \
+    wget \
+    pkg-config \
+    unzip \
+    chrpath \
+    doxygen \
+    lshw \
+    build-essential \
+    libssl-dev \
+    curl \
+    libncursesw5-dev \
+    xz-utils \
+    liblzma-dev \
+    python3-pip \
+    python3-setuptools \
+    python3-venv \
+    python3-dev \
+    python3-tk \
+    python3-yaml \
+    libfmt-dev \
+    vim \
+    less \
+    build-essential autoconf libtool flex bison pkg-config git \
+    libibverbs-dev ibverbs-utils libibumad-dev libpci-dev librdmacm-dev rdma-core infiniband-diags \
+    openmpi-bin openmpi-common libopenmpi-dev \
+ && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+## Not needed on Ubuntu 24, probably needed on Ubuntu22
+#RUN wget https://github.com/Kitware/CMake/releases/download/v3.28.0/cmake-3.28.0-linux-x86_64.sh \
+#    && chmod +x cmake-3.28.0-linux-x86_64.sh \
+#    && bash ./cmake-3.28.0-linux-x86_64.sh --prefix=/usr --exclude-subdir --skip-license \
+#    && rm cmake-3.28.0-linux-x86_64.sh
+
+## Set ROCm path
+ENV ROCM_PATH=/opt/rocm
+
+# We use MPI only as a launcher, any MPI will do, use system install
+## Install UCX
+ENV UCX_INSTALL_PREFIX=/opt/ucx
+RUN wget https://github.com/openucx/ucx/releases/download/v1.16.0/ucx-1.16.0.tar.gz \
+    && mkdir -p ucx \
+    && tar -zxf ucx-1.16.0.tar.gz -C ucx --strip-components=1 \
+    && cd ucx \
+    && mkdir build \
+    && cd build \
+    && ../configure --prefix=${UCX_INSTALL_PREFIX} --with-rocm=${ROCM_PATH} \
+    && make -j16 install \
+    && cd ../.. \
+    && rm -rf ucx ucx-1.16.0.tar.gz
+
+## Install OpenMPI
+ENV MPI_INSTALL_PREFIX=/opt/ompi
+RUN wget https://download.open-mpi.org/release/open-mpi/v4.1/openmpi-4.1.6.tar.gz \
+    && mkdir -p ompi4 \
+    && tar -zxf openmpi-4.1.6.tar.gz -C ompi4 --strip-components=1 \
+    && cd ompi4 \
+    && mkdir build \
+    && cd build \
+    && ../configure --prefix=${MPI_INSTALL_PREFIX} --with-ucx=${UCX_INSTALL_PREFIX} --disable-oshmem --disable-mpi-fortran --enable-orterun-prefix-by-default \
+    && make -j16 install \
+    && cd ../.. \
+    && rm -rf ompi4 openmpi-4.1.6.tar.gz
+ENV PATH="${MPI_INSTALL_PREFIX}/bin:${PATH}"
+
+# OPTIONAL: Install rocm-enabled IB perftest (used to validate if network config is sane)
+# The following block is OPTIONAL and can be commented out if you only want to run rocSHMEM
+RUN git clone https://github.com/ROCm/rdma-perftest
+RUN cd rdma-perftest \
+ && ./autogen.sh \
+ && ./configure --enable-rocm --with-rocm=/opt/rocm \
+ && make -j 8 #install
+
+## rccl repo
+ARG ROCM_REPO=https://github.com/ROCm/rocm-systems.git
+
+## AMD GPU Targets
+ARG GPU_TARGETS=gfx950
+
+# USE_LOCAL_SRC=1: use the CWD worktree instead of cloning from ROCM_REPO.
+# Build with:  docker build --build-arg USE_LOCAL_SRC=1 ...  from the repo root.
+# projects/ always exists even in a sparse checkout, so COPY never fails;
+# individual subdirs are checked in shell before use.
+ARG USE_LOCAL_SRC=0
+
+# DEBUG_BUILD=1: build all components with debug symbols (-g, Debug).
+ARG DEBUG_BUILD=0
+
+## building rocSHMEM
+# ARG ROCSHMEM_BRANCH=users/abouteiller/gin-stage1-wip
+# ARG ROCSHMEM_BRANCH=users/abouteiller/gin-stage1
+# ARG ROCSHMEM_BRANCH=users/dondai/gin-stage2a-anvil
+ARG ROCSHMEM_BRANCH=users/dondai/gin-rocshmem-sdma-backend
+ARG ROCSHMEM_CACHE_BUST=1
+RUN if [ "${USE_LOCAL_SRC}" = "1" ]; then \
+    cp -r projects/rocshmem/ /tmp/local/projects/rocshmem/; \
+  fi
+ENV ROCSHMEM_INSTALL_DIR=${WORKDIR}/rocshmem
+RUN if [ "${USE_LOCAL_SRC}" = "1" ]; then \
+      [ -d /tmp/local/projects/rocshmem ] || { echo "ERROR: projects/rocshmem not in build context"; exit 1; }; \
+      find /tmp/local/projects/rocshmem -name CMakeCache.txt -delete && \
+      find /tmp/local/projects/rocshmem -name CMakeFiles -type d -exec rm -rf {} + 2>/dev/null; \
+      find /tmp/local/projects/rocshmem -name build -type d -exec rm -rf {} + 2>/dev/null; \
+      mkdir -p ${WORKDIR}/rocshmem/src/projects && \
+      cp -r /tmp/local/projects/rocshmem ${WORKDIR}/rocshmem/src/projects/rocshmem; \
+    else \
+      git clone --no-checkout --filter=blob:none ${ROCM_REPO} ${WORKDIR}/rocshmem/src && \
+      cd ${WORKDIR}/rocshmem/src && \
+      git sparse-checkout set --cone projects/rocshmem && \
+      git checkout ${ROCSHMEM_BRANCH}; \
+    fi
+RUN cd rocshmem/src/projects/rocshmem \
+ && mkdir -p build && cd build \
+ && ../scripts/build_configs/all_backends \
+      -DBUILD_DEBUG_TRACE_DEVICE=ON -DBUILD_DEBUG_DEVICE=ON -DBUILD_DEBUG_TRACE_HOST=ON \
+      -DMPI_ROOT=${MPI_INSTALL_DIR} \
+      -DUSE_EXTERNAL_MPI=OFF \
+      -DGPU_TARGETS=${GPU_TARGETS} \
+      -DCMAKE_INSTALL_PREFIX=${ROCSHMEM_INSTALL_DIR} \
+      -DUSE_IPC=ON -DUSE_SDMA=ON \
+      $([ "${DEBUG_BUILD}" = "1" ] && echo "-DCMAKE_BUILD_TYPE=Debug")
+
+## building RCCL
+#ARG RCCL_BRANCH=users/prasanna-amd/nccl-sync-v2-28-9-gin-rebased-0501
+# ARG RCCL_BRANCH=users/abouteiller/gin-stage1-wip
+# ARG RCCL_BRANCH=users/abouteiller/gin-stage1
+# ARG RCCL_BRANCH=users/dondai/gin-stage2a-anvil
+ARG RCCL_BRANCH=users/dondai/gin-rocshmem-sdma-backend
+ARG RCCL_CACHE_BUST=1
+RUN if [ "${USE_LOCAL_SRC}" = "1" ]; then \
+    cp -r projects/rccl/      /tmp/local/projects/rccl/;  \
+    cp -r projects/rccl-tests/ /tmp/local/projects/rccl-tests/;  \
+  fi
+ENV RCCL_INSTALL_PREFIX=${WORKDIR}/rccl
+ENV ONLY_FUNCS="SendRecv|AlltoAllPivot|AlltoAllGda|AlltoAllvGda"
+RUN if [ "${USE_LOCAL_SRC}" = "1" ]; then \
+      [ -d /tmp/local/projects/rccl ]       || { echo "ERROR: projects/rccl not in build context";       exit 1; }; \
+      [ -d /tmp/local/projects/rccl-tests ] || { echo "ERROR: projects/rccl-tests not in build context"; exit 1; }; \
+      find /tmp/local/projects/rccl /tmp/local/projects/rccl-tests -name CMakeCache.txt -delete && \
+      find /tmp/local/projects/rccl /tmp/local/projects/rccl-tests -name CMakeFiles -type d -exec rm -rf {} + 2>/dev/null; \
+      find /tmp/local/projects/rccl /tmp/local/projects/rccl-tests -name build -type d -exec rm -rf {} + 2>/dev/null; \
+      mkdir -p ${WORKDIR}/rccl/src/projects && \
+      cp -r /tmp/local/projects/rccl       ${WORKDIR}/rccl/src/projects/rccl && \
+      cp -r /tmp/local/projects/rccl-tests ${WORKDIR}/rccl/src/projects/rccl-tests; \
+    else \
+      git clone --no-checkout --filter=blob:none "${ROCM_REPO}" ${WORKDIR}/rccl/src/ && \
+      cd ${WORKDIR}/rccl/src && \
+      git sparse-checkout set --cone projects/rccl && \
+      git checkout ${RCCL_BRANCH}; \
+    fi
+
+RUN cd rccl/src/projects/rccl \
+ && sed -i \
+       's/if (comm->enableRocshmem && comm->nNodes > 1 && (comm->nRanks\/comm->nNodes == 8) && comm->rocshmemThreshold <= 1048576)/if (comm->enableRocshmem)/' \
+       src/rccl_wrap.cc
+RUN cd rccl/src/projects/rccl \
+ && ./install.sh --amdgpu_targets=${GPU_TARGETS} --prefix=${RCCL_INSTALL_PREFIX} --no-device-linker --no_clean \
+      --cmake-options "-DENABLE_ROCSHMEM_GIN=ON -DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR}" \
+      $([ "${DEBUG_BUILD}" = "1" ] && echo "--debug")
+
+# Workaround: hipify renames core.h->core_tmp.h but gin headers still include ../core.h
+RUN RCCL_BUILD_DIR=$([ "${DEBUG_BUILD}" = "1" ] && echo "debug" || echo "release") \
+ && ln -sf core_tmp.h ${WORKDIR}/rccl/src/projects/rccl/build/${RCCL_BUILD_DIR}/include/nccl_device/core.h \
+ && ln -sf ../hipify/src/include/nccl_tuner.h ${WORKDIR}/rccl/src/projects/rccl/build/${RCCL_BUILD_DIR}/include/nccl_tuner.h \
+ && cp -r ${WORKDIR}/rccl/src/projects/rccl/build/${RCCL_BUILD_DIR}/include/* ${RCCL_INSTALL_PREFIX}/include/
+
+## building RCCL-Tests
+RUN if [ "${USE_LOCAL_SRC}" != "1" ]; then \
+      cd rccl/src && \
+      git sparse-checkout add --cone projects/rccl-tests && \
+      git checkout ${RCCL_BRANCH}; \
+    fi
+RUN mkdir rccl-tests \
+    && cd rccl-tests \
+    && cmake $([ "${DEBUG_BUILD}" = "1" ] && echo "-DCMAKE_BUILD_TYPE=Debug" || echo "-DCMAKE_BUILD_TYPE=Release") -DUSE_MPI=ON -DENABLE_DEVICE_API=ON -DENABLE_ROCSHMEM=ON -DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR} -DCMAKE_PREFIX_PATH="${RCCL_INSTALL_PREFIX};${MPI_INSTALL_PREFIX}" -DGPU_TARGETS=${GPU_TARGETS} ${WORKDIR}/rccl/src/projects/rccl-tests \
+    && make -j16 -k || true # keep going allreduce fails to build but alltoall builds
+
+## set environment variables
+ENV PATH="${MPI_INSTALL_PREFIX}/bin:${ROCM_PATH}/bin:${ROCM_PATH}/llvm/bin:${PATH}"
+ENV LD_LIBRARY_PATH="${RCCL_INSTALL_PREFIX}/lib:${MPI_INSTALL_PREFIX}/lib:${ROCM_PATH}/lib:${ROCM_PATH}/core/lib/rocm_sysdeps/lib:${LD_LIBRARY_PATH}"
+ENV UCX_WARN_UNUSED_ENV_VARS=n
+ENV OMPI_ALLOW_RUN_AS_ROOT=1
+ENV OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
+ENV NCCL_DEBUG=VERSION
+ENV ROCSHMEM_DEBUG_LEVEL=info:noversion
+ENV ROCSHMEM_TEST_UUID=1
+
