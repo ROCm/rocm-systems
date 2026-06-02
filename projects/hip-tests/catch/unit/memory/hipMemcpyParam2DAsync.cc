@@ -16,9 +16,7 @@ HIP_TEST_CASE(Unit_hipMemcpyParam2DAsync_Positive_Basic) {
 
   constexpr bool async = true;
 
-  const auto stream_type = isQuickLevel()
-      ? Streams::created
-      : GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
+  const auto stream_type = GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
   const StreamGuard stream_guard(stream_type);
   const hipStream_t stream = stream_guard.stream();
 

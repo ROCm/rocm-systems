@@ -24,9 +24,7 @@ void Memcpy2DDeviceToHostShell(F memcpy_func, const hipStream_t kernel_stream = 
 
   LinearAllocGuard2D<int, unaligned> device_alloc(cols, rows);
 
-  const size_t host_pitch =
-      isQuickLevel() ? device_alloc.width()
-                     : GENERATE_REF(device_alloc.width(), device_alloc.width() + 64);
+  const size_t host_pitch = GENERATE_REF(device_alloc.width(), device_alloc.width() + 64);
   LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc, host_pitch * rows);
 
   const dim3 threads_per_block(32, 32);
@@ -56,9 +54,9 @@ void Memcpy2DDeviceToDeviceShell(F memcpy_func, const hipStream_t kernel_stream 
   constexpr size_t rows = 128;
 
   const auto device_count = HipTest::getDeviceCount();
-  const auto src_device = isQuickLevel() ? 0 : GENERATE_COPY(range(0, device_count));
-  const auto dst_device = isQuickLevel() ? 0 : GENERATE_COPY(range(0, device_count));
-  const size_t src_cols_mult = isQuickLevel() ? 1 : GENERATE(1, 2);
+  const auto src_device = GENERATE_COPY(range(0, device_count));
+  const auto dst_device = GENERATE_COPY(range(0, device_count));
+  const size_t src_cols_mult = GENERATE(1, 2);
 
   INFO("Src device: " << src_device << ", Dst device: " << dst_device);
   if (device_count > 1) {
@@ -115,9 +113,7 @@ void Memcpy2DHostToDeviceShell(F memcpy_func, const hipStream_t kernel_stream = 
 
   LinearAllocGuard2D<int, unaligned> device_alloc(cols, rows);
 
-  const size_t host_pitch =
-      isQuickLevel() ? device_alloc.pitch()
-                     : GENERATE_REF(device_alloc.pitch(), 2 * device_alloc.pitch());
+  const size_t host_pitch = GENERATE_REF(device_alloc.pitch(), 2 * device_alloc.pitch());
 
   LinearAllocGuard<int> src_host_alloc(LinearAllocs::hipHostMalloc, host_pitch * rows);
   LinearAllocGuard<int> dst_host_alloc(LinearAllocs::hipHostMalloc, device_alloc.width() * rows);
@@ -150,8 +146,7 @@ void Memcpy2DHostToHostShell(F memcpy_func, const hipStream_t kernel_stream = nu
   constexpr size_t cols = 127;
   constexpr size_t rows = 128;
 
-  const size_t src_pitch = isQuickLevel() ? cols * sizeof(int)
-                                         : GENERATE_REF(cols * sizeof(int), cols * sizeof(int) + 64);
+  const size_t src_pitch = GENERATE_REF(cols * sizeof(int), cols * sizeof(int) + 64);
 
   LinearAllocGuard<int> src_host(LinearAllocs::hipHostMalloc, src_pitch * rows);
   LinearAllocGuard<int> dst_host(LinearAllocs::hipHostMalloc, cols * sizeof(int) * rows);
@@ -231,10 +226,8 @@ template <typename F>
 void Memcpy2DHtoHSyncBehavior(F memcpy_func, const bool should_sync,
                               const hipStream_t kernel_stream = nullptr) {
   using LA = LinearAllocs;
-  const auto src_alloc_type =
-      isQuickLevel() ? LA::hipHostMalloc : GENERATE(LA::malloc, LA::hipHostMalloc);
-  const auto dst_alloc_type =
-      isQuickLevel() ? LA::hipHostMalloc : GENERATE(LA::malloc, LA::hipHostMalloc);
+  const auto src_alloc_type = GENERATE(LA::malloc, LA::hipHostMalloc);
+  const auto dst_alloc_type = GENERATE(LA::malloc, LA::hipHostMalloc);
 
   LinearAllocGuard<int> src_alloc(src_alloc_type, 32 * sizeof(int) * 32);
   LinearAllocGuard<int> dst_alloc(dst_alloc_type, 32 * sizeof(int) * 32);

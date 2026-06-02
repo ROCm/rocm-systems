@@ -189,9 +189,7 @@ template <typename T> void partialMemsetTest(T valA, T valB, size_t count, size_
 }
 
 HIP_TEST_CASE(Unit_hipMemsetFunctional_PartialSet_1D) {
-  auto widthOffset = isQuickLevel()
-      ? GENERATE(8, 128, 1024)
-      : GENERATE(8, 16, 32, 64, 128, 256, 512, 1024);
+  auto widthOffset = GENERATE(8, 16, 32, 64, 128, 256, 512, 1024);
   SECTION("hipMemset - Partial Set") {
     partialMemsetTest<char>(0x1, 0x42, 1024, widthOffset, hipMemsetTypeDefault, false);
   }

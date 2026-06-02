@@ -38,12 +38,11 @@ HIP_TEST_CASE(Unit_hipMemcpyPeer_Positive_Default) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
-  const auto allocation_size =
-      isQuickLevel() ? GENERATE(kPageSize / 2, kPageSize * 2) : GENERATE(kPageSize / 2, kPageSize, kPageSize * 2);
+  const auto allocation_size = GENERATE(kPageSize / 2, kPageSize, kPageSize * 2);
 
   int can_access_peer = 0;
-  const auto src_device = isQuickLevel() ? 0 : GENERATE(range(0, HipTest::getDeviceCount()));
-  const auto dst_device = isQuickLevel() ? 1 : GENERATE(range(0, HipTest::getDeviceCount()));
+  const auto src_device = GENERATE(range(0, HipTest::getDeviceCount()));
+  const auto dst_device = GENERATE(range(0, HipTest::getDeviceCount()));
   INFO("Src device: " << src_device << ", Dst device: " << dst_device);
 
   HIP_CHECK(hipSetDevice(src_device));

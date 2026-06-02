@@ -26,15 +26,12 @@ static constexpr std::initializer_list<tupletype> tableItems{
     std::make_tuple(100, 100, 0, 0),
 };
 
-static constexpr std::initializer_list<tupletype> quickTableItems{
-    std::make_tuple(100, 100, 20, 40),
-};
-
 
 /**
  * Basic Functionality of hipMemset2D
  */
 HIP_TEST_CASE(Unit_hipMemset2D_BasicFunctional) {
+
   constexpr int memsetval = 0x24;
   constexpr size_t numH = 256;
   constexpr size_t numW = 256;
@@ -72,6 +69,7 @@ HIP_TEST_CASE(Unit_hipMemset2D_BasicFunctional) {
  * Basic Functionality of hipMemset2DAsync
  */
 HIP_TEST_CASE(Unit_hipMemset2DAsync_BasicFunctional) {
+
   constexpr int memsetval = 0x26;
   constexpr size_t numH = 256;
   constexpr size_t numW = 256;
@@ -113,6 +111,7 @@ HIP_TEST_CASE(Unit_hipMemset2DAsync_BasicFunctional) {
  * Memset partial buffer with unique Width and Height
  */
 HIP_TEST_CASE(Unit_hipMemset2D_UniqueWidthHeight) {
+
   int width2D, height2D;
   int memsetWidth, memsetHeight;
   char *A_d, *A_h;
@@ -120,7 +119,7 @@ HIP_TEST_CASE(Unit_hipMemset2D_UniqueWidthHeight) {
   constexpr int memsetval = 0x26;
 
   std::tie(width2D, height2D, memsetWidth, memsetHeight) =
-      GENERATE(table<int, int, int, int>(isQuickLevel() ? quickTableItems : tableItems));
+      GENERATE(table<int, int, int, int>(tableItems));
 
   size_t width = width2D * sizeof(char);
   size_t sizeElements = width * height2D;
@@ -170,8 +169,8 @@ HIP_TEST_CASE(Unit_hipMemset2DAsync_capturehipMemset2DAsync) {
   hipGraph_t graph{nullptr};
   hipGraphExec_t graphExec{nullptr};
   int rows, cols;
-  rows = isQuickLevel() ? GENERATE(3, 100) : GENERATE(3, 4, 100);
-  cols = isQuickLevel() ? GENERATE(3, 100) : GENERATE(3, 4, 100);
+  rows = GENERATE(3, 4, 100);
+  cols = GENERATE(3, 4, 100);
   hipStream_t stream;
   size_t devPitch;
 
@@ -225,6 +224,7 @@ HIP_TEST_CASE(Unit_hipMemset2DAsync_capturehipMemset2DAsync) {
  *    - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Unit_hipMemset2D_Capture) {
+
   constexpr int memsetval = 0x24;
   constexpr size_t numH = 256;
   constexpr size_t numW = 256;
@@ -232,7 +232,8 @@ HIP_TEST_CASE(Unit_hipMemset2D_Capture) {
   size_t width = numW * sizeof(char);
   void* dst = nullptr;
 
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dst), &pitch_A, width, numH));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dst), &pitch_A, width,
+                          numH));
 
   hipError_t memcpy_err = hipSuccess;
   BEGIN_CAPTURE_SYNC(memcpy_err, false);

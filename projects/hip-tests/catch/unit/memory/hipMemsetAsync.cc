@@ -47,7 +47,7 @@ template <typename T> void runAsyncTests(hipStream_t stream, allocType type, mem
 template <typename T> static void doMemsetTest(allocType mallocType, memType memset_type,
                                                MultiDData data1, MultiDData data2) {
   enum StreamType { NULLSTR, CREATEDSTR };
-  StreamType streamType = isQuickLevel() ? CREATEDSTR : GENERATE(NULLSTR, CREATEDSTR);
+  auto streamType = GENERATE(NULLSTR, CREATEDSTR);
   hipStream_t stream{nullptr};
 
   if (streamType == CREATEDSTR) HIP_CHECK(hipStreamCreate(&stream));

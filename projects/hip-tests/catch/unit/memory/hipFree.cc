@@ -34,7 +34,7 @@ constexpr size_t numAllocs = 10;
 
 HIP_TEST_CASE(Unit_hipFreeImplicitSyncDev) {
   int* devPtr{};
-  size_t size_mult = isQuickLevel() ? GENERATE(1, 256) : GENERATE(1, 32, 64, 128, 256);
+  size_t size_mult = GENERATE(1, 32, 64, 128, 256);
   HIP_CHECK(hipMalloc(&devPtr, sizeof(*devPtr) * size_mult));
 
   HipTest::BlockingContext b_context{nullptr};
@@ -51,7 +51,7 @@ HIP_TEST_CASE(Unit_hipFreeImplicitSyncDev) {
 
 HIP_TEST_CASE(Unit_hipFreeImplicitSyncHost) {
   int* hostPtr{};
-  size_t size_mult = isQuickLevel() ? GENERATE(1, 256) : GENERATE(1, 32, 64, 128, 256);
+  size_t size_mult = GENERATE(1, 32, 64, 128, 256);
 
   HIP_CHECK(hipHostMalloc(&hostPtr, sizeof(*hostPtr) * size_mult));
 
@@ -76,8 +76,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipFreeImplicitSyncArray, char, float, float2, float
   DriverContext ctx;
 
 
-  size_t width = isQuickLevel() ? GENERATE(32, 1024) : GENERATE(32, 512, 1024);
-  size_t height = isQuickLevel() ? GENERATE(32, 1024) : GENERATE(32, 512, 1024);
+  size_t width = GENERATE(32, 512, 1024);
+  size_t height = GENERATE(32, 512, 1024);
 
   SECTION("ArrayFree") {
     hipArray_t arrayPtr{};
@@ -113,8 +113,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipFreeImplicitSyncArray, char, float, float2, float
 
   hipArray_t arrayPtr{};
   hipExtent extent{};
-  extent.width = isQuickLevel() ? GENERATE(32, 1024) : GENERATE(32, 128, 256, 512, 1024);
-  extent.height = isQuickLevel() ? GENERATE(0, 1024) : GENERATE(0, 32, 128, 256, 512, 1024);
+  extent.width = GENERATE(32, 128, 256, 512, 1024);
+  extent.height = GENERATE(0, 32, 128, 256, 512, 1024);
   hipChannelFormatDesc desc = hipCreateChannelDesc<TestType>();
 
   HIP_CHECK(hipMallocArray(&arrayPtr, &desc, extent.width, extent.height, hipArrayDefault));
@@ -196,7 +196,7 @@ HIP_TEST_CASE(Unit_hipFreeNegativeArray) {
 #endif
 
 HIP_TEST_CASE(Unit_hipFreeDoubleDevice) {
-  size_t width = isQuickLevel() ? GENERATE(32, 1024) : GENERATE(32, 512, 1024);
+  size_t width = GENERATE(32, 512, 1024);
   char* ptr{};
   size_t size_mult = width;
   HIP_CHECK(hipMalloc(&ptr, sizeof(char) * size_mult));
@@ -206,7 +206,7 @@ HIP_TEST_CASE(Unit_hipFreeDoubleDevice) {
 }
 
 HIP_TEST_CASE(Unit_hipFreeDoubleHost) {
-  size_t width = isQuickLevel() ? GENERATE(32, 1024) : GENERATE(32, 512, 1024);
+  size_t width = GENERATE(32, 512, 1024);
   char* ptr{};
   size_t size_mult = width;
 
@@ -220,8 +220,8 @@ HIP_TEST_CASE(Unit_hipFreeDoubleHost) {
 HIP_TEST_CASE(Unit_hipFreeDoubleArrayFree) {
   HIP_SKIP_TEST("tracked issue EXSWCPHIPT-120.");
 
-  size_t width = isQuickLevel() ? GENERATE(32, 1024) : GENERATE(32, 512, 1024);
-  size_t height = isQuickLevel() ? GENERATE(0, 1024) : GENERATE(0, 32, 512, 1024);
+  size_t width = GENERATE(32, 512, 1024);
+  size_t height = GENERATE(0, 32, 512, 1024);
   hipArray_t arrayPtr{};
   hipExtent extent{};
   extent.width = width;
@@ -238,8 +238,8 @@ HIP_TEST_CASE(Unit_hipFreeDoubleArrayDestroy) {
   HIP_SKIP_TEST("tracked issue EXSWCPHIPT-120.");
   using vec_info = vector_info<char>;
 
-  size_t width = isQuickLevel() ? GENERATE(32, 1024) : GENERATE(32, 512, 1024);
-  size_t height = isQuickLevel() ? GENERATE(0, 1024) : GENERATE(0, 32, 512, 1024);
+  size_t width = GENERATE(32, 512, 1024);
+  size_t height = GENERATE(0, 32, 512, 1024);
   DriverContext ctx{};
 
   hipArray_t ArrayPtr{};
@@ -258,8 +258,8 @@ HIP_TEST_CASE(Unit_hipFreeDoubleArrayDestroy) {
 HIP_TEST_CASE(Unit_hipFreeDoubleArray) {
   CHECK_IMAGE_SUPPORT
 
-  size_t width = isQuickLevel() ? GENERATE(32, 1024) : GENERATE(32, 512, 1024);
-  size_t height = isQuickLevel() ? GENERATE(0, 1024) : GENERATE(0, 32, 512, 1024);
+  size_t width = GENERATE(32, 512, 1024);
+  size_t height = GENERATE(0, 32, 512, 1024);
   hipArray_t arrayPtr{};
   hipExtent extent{};
   extent.width = width;
@@ -283,7 +283,7 @@ HIP_TEST_CASE(Unit_hipFreeDoubleArray) {
 
 HIP_TEMPLATE_TEST_CASE(Unit_hipFreeMultiTDev, char, int, float2, float4) {
   std::vector<TestType*> ptrs(numAllocs);
-  size_t allocSize = sizeof(TestType) * (isQuickLevel() ? GENERATE(1, 128) : GENERATE(1, 32, 64, 128));
+  size_t allocSize = sizeof(TestType) * GENERATE(1, 32, 64, 128);
 
   for (auto& ptr : ptrs) {
     HIP_CHECK(hipMalloc(&ptr, allocSize));
@@ -306,7 +306,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipFreeMultiTDev, char, int, float2, float4) {
 
 HIP_TEMPLATE_TEST_CASE(Unit_hipFreeMultiTHost, char, int, float2, float4) {
   std::vector<TestType*> ptrs(numAllocs);
-  size_t allocSize = sizeof(TestType) * (isQuickLevel() ? GENERATE(1, 128) : GENERATE(1, 32, 64, 128));
+  size_t allocSize = sizeof(TestType) * GENERATE(1, 32, 64, 128);
 
   for (auto& ptr : ptrs) {
     HIP_CHECK(hipHostMalloc(&ptr, allocSize));
@@ -331,8 +331,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipFreeMultiTHost, char, int, float2, float4) {
 HIP_TEMPLATE_TEST_CASE(Unit_hipFreeMultiTArray, char, int, float2, float4) {
   using vec_info = vector_info<TestType>;
 
-  size_t width = isQuickLevel() ? GENERATE(32, 1024) : GENERATE(32, 128, 256, 512, 1024);
-  size_t height = isQuickLevel() ? GENERATE(32, 1024) : GENERATE(32, 128, 256, 512, 1024);
+  size_t width = GENERATE(32, 128, 256, 512, 1024);
+  size_t height = GENERATE(32, 128, 256, 512, 1024);
   DriverContext ctx;
   std::vector<std::thread> threads;
 
@@ -394,8 +394,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipFreeMultiTArray, char, int, float2, float4) {
   using vec_info = vector_info<TestType>;
 
   hipExtent extent{};
-  extent.width = isQuickLevel() ? GENERATE(32, 1024) : GENERATE(32, 128, 256, 512, 1024);
-  extent.height = isQuickLevel() ? GENERATE(0, 1024) : GENERATE(0, 32, 128, 256, 512, 1024);
+  extent.width = GENERATE(32, 128, 256, 512, 1024);
+  extent.height = GENERATE(0, 32, 128, 256, 512, 1024);
   hipChannelFormatDesc desc = hipCreateChannelDesc<TestType>();
 
   std::vector<std::thread> threads;

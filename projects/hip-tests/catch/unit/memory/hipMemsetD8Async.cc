@@ -65,10 +65,7 @@ static bool testMemset(allocator_fn_t allocator, deallocator_fn_t deallocator) {
 
   HIP_CHECK(hipStreamCreate(&stream));
 
-  size_t count = 0;
   for (size_t size : buffer_nelems) {
-    if (isQuickLevel() && ++count > 2) break;
-
     void* ptr = nullptr;
 
     HIP_CHECK(allocator(&ptr, size * sizeof(test_target_t)));

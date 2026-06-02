@@ -75,8 +75,8 @@ HIP_TEST_CASE(Unit_hipMemsetD2D16Async_UnEvenRowsCols) {
   hipDeviceptr_t A_d;
   int rows, cols;
   constexpr int memsetval = 5;
-  rows = isQuickLevel() ? GENERATE(3, 100) : GENERATE(3, 4, 100);
-  cols = isQuickLevel() ? GENERATE(3, 100) : GENERATE(3, 4, 100);
+  rows = GENERATE(3, 4, 100);
+  cols = GENERATE(3, 4, 100);
   size_t devPitch;
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));

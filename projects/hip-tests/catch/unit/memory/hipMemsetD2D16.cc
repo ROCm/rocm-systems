@@ -70,8 +70,8 @@ HIP_TEST_CASE(Unit_hipMemsetD2D16_UnEvenRowsCols) {
   hipDeviceptr_t A_d;
   constexpr uint16_t memsetVal = 5;
   int rows, cols;
-  rows = isQuickLevel() ? GENERATE(3, 100) : GENERATE(3, 4, 100);
-  cols = isQuickLevel() ? GENERATE(5, 100) : GENERATE(5, 6, 100);
+  rows = GENERATE(3, 4, 100);
+  cols = GENERATE(5, 6, 100);
   size_t devPitch;
 
   size_t size = rows * cols;

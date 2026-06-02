@@ -17,9 +17,8 @@ static inline unsigned int GenerateLinearAllocationFlagCombinations(
     const LinearAllocs allocation_type) {
   switch (allocation_type) {
     case LinearAllocs::hipHostMalloc:
-      return isQuickLevel() ? hipHostMallocDefault
-                            : GENERATE(hipHostMallocDefault, hipHostMallocPortable,
-                                       hipHostMallocMapped, hipHostMallocWriteCombined);
+      return GENERATE(hipHostMallocDefault, hipHostMallocPortable, hipHostMallocMapped,
+                      hipHostMallocWriteCombined);
     case LinearAllocs::mallocAndRegister:
     case LinearAllocs::hipMallocManaged:
     case LinearAllocs::malloc:
@@ -34,11 +33,8 @@ static inline unsigned int GenerateLinearAllocationFlagCombinations(
 template <bool should_synchronize, typename F>
 void MemcpyDeviceToHostShell(F memcpy_func, const hipStream_t kernel_stream = nullptr) {
   using LA = LinearAllocs;
-  const auto allocation_size =
-      isQuickLevel() ? GENERATE(kPageSize / 2, kPageSize * 2)
-                     : GENERATE(kPageSize / 2, kPageSize, kPageSize * 2);
-  const auto host_allocation_type =
-      isQuickLevel() ? LA::hipHostMalloc : GENERATE(LA::malloc, LA::hipHostMalloc);
+  const auto allocation_size = GENERATE(kPageSize / 2, kPageSize, kPageSize * 2);
+  const auto host_allocation_type = GENERATE(LA::malloc, LA::hipHostMalloc);
   const auto host_allocation_flags = GenerateLinearAllocationFlagCombinations(host_allocation_type);
 
   LinearAllocGuard<int> host_allocation(host_allocation_type, allocation_size,
@@ -64,11 +60,8 @@ void MemcpyDeviceToHostShell(F memcpy_func, const hipStream_t kernel_stream = nu
 template <bool should_synchronize, typename F>
 void MemcpyHostToDeviceShell(F memcpy_func, const hipStream_t kernel_stream = nullptr) {
   using LA = LinearAllocs;
-  const auto allocation_size =
-      isQuickLevel() ? GENERATE(kPageSize / 2, kPageSize * 2)
-                     : GENERATE(kPageSize / 2, kPageSize, kPageSize * 2);
-  const auto host_allocation_type =
-      isQuickLevel() ? LA::hipHostMalloc : GENERATE(LA::malloc, LA::hipHostMalloc);
+  const auto allocation_size = GENERATE(kPageSize / 2, kPageSize, kPageSize * 2);
+  const auto host_allocation_type = GENERATE(LA::malloc, LA::hipHostMalloc);
   const auto host_allocation_flags = GenerateLinearAllocationFlagCombinations(host_allocation_type);
 
   LinearAllocGuard<int> src_host_allocation(host_allocation_type, allocation_size,
@@ -95,13 +88,9 @@ void MemcpyHostToDeviceShell(F memcpy_func, const hipStream_t kernel_stream = nu
 template <bool should_synchronize, typename F>
 void MemcpyHostToHostShell(F memcpy_func, const hipStream_t kernel_stream = nullptr) {
   using LA = LinearAllocs;
-  const auto allocation_size =
-      isQuickLevel() ? GENERATE(kPageSize / 2, kPageSize * 2)
-                     : GENERATE(kPageSize / 2, kPageSize, kPageSize * 2);
-  const auto src_allocation_type =
-      isQuickLevel() ? LA::hipHostMalloc : GENERATE(LA::malloc, LA::hipHostMalloc);
-  const auto dst_allocation_type =
-      isQuickLevel() ? LA::hipHostMalloc : GENERATE(LA::malloc, LA::hipHostMalloc);
+  const auto allocation_size = GENERATE(kPageSize / 2, kPageSize, kPageSize * 2);
+  const auto src_allocation_type = GENERATE(LA::malloc, LA::hipHostMalloc);
+  const auto dst_allocation_type = GENERATE(LA::malloc, LA::hipHostMalloc);
   const auto src_allocation_flags = GenerateLinearAllocationFlagCombinations(src_allocation_type);
   const auto dst_allocation_flags = GenerateLinearAllocationFlagCombinations(dst_allocation_type);
 
@@ -122,12 +111,10 @@ void MemcpyHostToHostShell(F memcpy_func, const hipStream_t kernel_stream = null
 
 template <bool should_synchronize, bool enable_peer_access, typename F>
 void MemcpyDeviceToDeviceShell(F memcpy_func, const hipStream_t kernel_stream = nullptr) {
-  const auto allocation_size =
-      isQuickLevel() ? GENERATE(kPageSize / 2, kPageSize * 2)
-                     : GENERATE(kPageSize / 2, kPageSize, kPageSize * 2);
+  const auto allocation_size = GENERATE(kPageSize / 2, kPageSize, kPageSize * 2);
   const auto device_count = HipTest::getDeviceCount();
-  const auto src_device = isQuickLevel() ? 0 : GENERATE_COPY(range(0, device_count));
-  const auto dst_device = isQuickLevel() ? 0 : GENERATE_COPY(range(0, device_count));
+  const auto src_device = GENERATE_COPY(range(0, device_count));
+  const auto dst_device = GENERATE_COPY(range(0, device_count));
 
   INFO("Src device: " << src_device << ", Dst device: " << dst_device);
 
@@ -202,28 +189,30 @@ void MemcpyWithDirectionCommonTests(F memcpy_func, const hipStream_t kernel_stre
     }
   }
 
-  if (!isQuickLevel()) {
-    SECTION("Host to host") {
-      MemcpyHostToHostShell<should_synchronize>(
-          std::bind(memcpy_func, _1, _2, _3, hipMemcpyHostToHost), kernel_stream);
-    }
+  SECTION("Host to host") {
+    MemcpyHostToHostShell<should_synchronize>(
+        std::bind(memcpy_func, _1, _2, _3, hipMemcpyHostToHost), kernel_stream);
+  }
 
+  if (!isQuickLevel()) {
     SECTION("Host to host with default kind") {
       MemcpyHostToHostShell<should_synchronize>(std::bind(memcpy_func, _1, _2, _3,
                                                 hipMemcpyDefault), kernel_stream);
     }
+  }
 
-    SECTION("Device to device") {
-      SECTION("Peer access enabled") {
-        MemcpyDeviceToDeviceShell<should_synchronize, true>(
-            std::bind(memcpy_func, _1, _2, _3, hipMemcpyDeviceToDevice), kernel_stream);
-      }
-      SECTION("Peer access disabled") {
-        MemcpyDeviceToDeviceShell<should_synchronize, false>(
-            std::bind(memcpy_func, _1, _2, _3, hipMemcpyDeviceToDevice), kernel_stream);
-      }
+  SECTION("Device to device") {
+    SECTION("Peer access enabled") {
+      MemcpyDeviceToDeviceShell<should_synchronize, true>(
+          std::bind(memcpy_func, _1, _2, _3, hipMemcpyDeviceToDevice), kernel_stream);
     }
+    SECTION("Peer access disabled") {
+      MemcpyDeviceToDeviceShell<should_synchronize, false>(
+          std::bind(memcpy_func, _1, _2, _3, hipMemcpyDeviceToDevice), kernel_stream);
+    }
+  }
 
+  if (!isQuickLevel()) {
     SECTION("Device to device with default kind") {
       SECTION("Peer access enabled") {
         MemcpyDeviceToDeviceShell<should_synchronize, true>(
@@ -299,10 +288,8 @@ template <typename F>
 void MemcpyHtoHSyncBehavior(F memcpy_func, const bool should_sync,
                             const hipStream_t kernel_stream = nullptr) {
   using LA = LinearAllocs;
-  auto src_alloc_type =
-      isQuickLevel() ? LA::hipHostMalloc : GENERATE(LA::malloc, LA::hipHostMalloc);
-  auto dst_alloc_type =
-      isQuickLevel() ? LA::hipHostMalloc : GENERATE(LA::malloc, LA::hipHostMalloc);
+  auto src_alloc_type = GENERATE(LA::malloc, LA::hipHostMalloc);
+  auto dst_alloc_type = GENERATE(LA::malloc, LA::hipHostMalloc);
 
   LinearAllocGuard<int> src_alloc(src_alloc_type, kPageSize);
   LinearAllocGuard<int> dst_alloc(dst_alloc_type, kPageSize);

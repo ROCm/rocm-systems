@@ -31,8 +31,8 @@
 HIP_TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_NegTst) {
   // declare host and device arrays
   int rows, cols;
-  rows = isQuickLevel() ? GENERATE(3, 100) : GENERATE(3, 4, 100);
-  cols = isQuickLevel() ? GENERATE(3, 100) : GENERATE(3, 4, 100);
+  rows = GENERATE(3, 4, 100);
+  cols = GENERATE(3, 4, 100);
   int *srcD, *srcH;
   int *dstD, *dstH;
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&srcD), sizeof(int) * rows * cols));
@@ -176,8 +176,8 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_FuncTst) {
           copied array contains correct values") {
     // declare host and device arrays
     int rows, cols;
-    rows = isQuickLevel() ? GENERATE(3, 100) : GENERATE(3, 4, 100);
-    cols = isQuickLevel() ? GENERATE(3, 100) : GENERATE(3, 4, 100);
+    rows = GENERATE(3, 4, 100);
+    cols = GENERATE(3, 4, 100);
     int *srcD, *srcH;
     int *dstD, *dstH;
     HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&srcD), sizeof(int) * rows * cols));

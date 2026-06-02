@@ -27,8 +27,8 @@ HIP_TEST_CASE(Unit_hipMemcpy2DFromArray_Positive_Default) {
 
   using namespace std::placeholders;
 
-  const auto width = isQuickLevel() ? GENERATE(16, 48) : GENERATE(16, 32, 48);
-  const auto height = isQuickLevel() ? GENERATE(1, 48) : GENERATE(1, 16, 32, 48);
+  const auto width = GENERATE(16, 32, 48);
+  const auto height = GENERATE(1, 16, 32, 48);
 
   SECTION("Array to host") {
     Memcpy2DHostFromAShell<false, int>(
@@ -82,8 +82,8 @@ HIP_TEST_CASE(Unit_hipMemcpy2DFromArray_Positive_Synchronization_Behavior) {
   HIP_CHECK(hipDeviceSynchronize());
 
   SECTION("Array to host") {
-    const auto width = isQuickLevel() ? GENERATE(16, 48) : GENERATE(16, 32, 48);
-    const auto height = isQuickLevel() ? GENERATE(16, 48) : GENERATE(16, 32, 48);
+    const auto width = GENERATE(16, 32, 48);
+    const auto height = GENERATE(16, 32, 48);
 
     MemcpyAtoHPageableSyncBehavior(std::bind(hipMemcpy2DFromArray, _1, width * sizeof(int), _2, 0,
                                              0, width * sizeof(int), height, hipMemcpyDeviceToHost),
@@ -94,8 +94,8 @@ HIP_TEST_CASE(Unit_hipMemcpy2DFromArray_Positive_Synchronization_Behavior) {
   }
 #if HT_NVIDIA  // EXSWHTEC-214
   SECTION("Array to device") {
-    const auto width = isQuickLevel() ? GENERATE(16, 48) : GENERATE(16, 32, 48);
-    const auto height = isQuickLevel() ? GENERATE(16, 48) : GENERATE(16, 32, 48);
+    const auto width = GENERATE(16, 32, 48);
+    const auto height = GENERATE(16, 32, 48);
 
     MemcpyAtoDSyncBehavior(std::bind(hipMemcpy2DFromArray, _1, _2, _3, 0, 0, width * sizeof(int),
                                      height, hipMemcpyDeviceToDevice),

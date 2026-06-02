@@ -18,7 +18,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyDtoA_Basic, char, int, float) {
   std::vector<TestType> src_host(N);
   std::vector<TestType> dst_host(N);
   size_t copy_size = N * sizeof(TestType);
-  size_t offset = isQuickLevel() ? 0 : GENERATE(0, N * sizeof(TestType) / 2);
+  size_t offset = GENERATE(0, N * sizeof(TestType) / 2);
 
   std::iota(src_host.begin(), src_host.end(), 0);
 

@@ -61,10 +61,7 @@ static bool checkBuffer(const test_target_t* buffer, size_t size, test_target_t 
 static bool testMemset(allocator_fn_t allocator, deallocator_fn_t deallocator) {
   bool result = true;
 
-  size_t count = 0;
   for (size_t size : buffer_nelems) {
-    if (isQuickLevel() && ++count > 2) break;
-
     void* ptr = nullptr;
 
     HIP_CHECK(allocator(&ptr, size * sizeof(test_target_t)));

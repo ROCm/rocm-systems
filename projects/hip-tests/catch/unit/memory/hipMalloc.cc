@@ -24,9 +24,8 @@ static constexpr size_t DEV_MEM_ALIGNMENT = 256;
 HIP_TEST_CASE(Unit_hipMalloc_Positive_Basic) {
   constexpr size_t page_size = 4096;
   void* ptr = nullptr;
-  const auto alloc_size = isQuickLevel()
-      ? GENERATE_COPY(10, page_size * 2)
-      : GENERATE_COPY(10, page_size / 2, page_size, page_size * 3 / 2, page_size * 2);
+  const auto alloc_size =
+      GENERATE_COPY(10, page_size / 2, page_size, page_size * 3 / 2, page_size * 2);
   HIP_CHECK(hipMalloc(&ptr, alloc_size));
   CHECK(ptr != nullptr);
   CHECK(reinterpret_cast<intptr_t>(ptr) % DEV_MEM_ALIGNMENT == 0);

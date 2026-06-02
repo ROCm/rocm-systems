@@ -112,15 +112,13 @@ hipError_t Memcpy3DWrapper(PtrVariant dst_ptr, hipPos dst_pos, PtrVariant src_pt
 
 template <bool should_synchronize, typename F>
 void Memcpy3DDeviceToHostShell(F memcpy_func, const hipStream_t kernel_stream = nullptr) {
-  const auto kind =
-      isQuickLevel() ? hipMemcpyDeviceToHost : GENERATE(hipMemcpyDeviceToHost, hipMemcpyDefault);
+  const auto kind = GENERATE(hipMemcpyDeviceToHost, hipMemcpyDefault);
 
   constexpr hipExtent extent{127 * sizeof(int), 128, 8};
 
   LinearAllocGuard3D<int> device_alloc(extent);
 
-  const size_t host_pitch =
-      isQuickLevel() ? device_alloc.width() : GENERATE_REF(device_alloc.width(), device_alloc.width() + 64);
+  const size_t host_pitch = GENERATE_REF(device_alloc.width(), device_alloc.width() + 64);
   LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc,
                                    host_pitch * device_alloc.height() * device_alloc.depth());
 
@@ -151,14 +149,13 @@ void Memcpy3DDeviceToHostShell(F memcpy_func, const hipStream_t kernel_stream = 
 
 template <bool should_synchronize, bool enable_peer_access, typename F>
 void Memcpy3DDeviceToDeviceShell(F memcpy_func, hipStream_t kernel_stream = nullptr) {
-  const auto kind = isQuickLevel() ? hipMemcpyDeviceToDevice
-                                   : GENERATE(hipMemcpyDeviceToDevice, hipMemcpyDefault);
+  const auto kind = GENERATE(hipMemcpyDeviceToDevice, hipMemcpyDefault);
 
   constexpr hipExtent extent{127 * sizeof(int), 128, 8};
 
   const auto device_count = HipTest::getDeviceCount();
-  const auto src_device = isQuickLevel() ? 0 : GENERATE_COPY(range(0, device_count));
-  const auto dst_device = isQuickLevel() ? 0 : GENERATE_COPY(range(0, device_count));
+  const auto src_device = GENERATE_COPY(range(0, device_count));
+  const auto dst_device = GENERATE_COPY(range(0, device_count));
 
   INFO("Src device: " << src_device << ", Dst device: " << dst_device);
 
@@ -225,15 +222,13 @@ void Memcpy3DDeviceToDeviceShell(F memcpy_func, hipStream_t kernel_stream = null
 
 template <bool should_synchronize, typename F>
 void Memcpy3DHostToDeviceShell(F memcpy_func, const hipStream_t kernel_stream = nullptr) {
-  const auto kind =
-      isQuickLevel() ? hipMemcpyHostToDevice : GENERATE(hipMemcpyHostToDevice, hipMemcpyDefault);
+  const auto kind = GENERATE(hipMemcpyHostToDevice, hipMemcpyDefault);
 
   constexpr hipExtent extent{127 * sizeof(int), 128, 8};
 
   LinearAllocGuard3D<int> device_alloc(extent);
 
-  const size_t host_pitch =
-      isQuickLevel() ? device_alloc.pitch() : GENERATE_REF(device_alloc.pitch(), 2 * device_alloc.pitch());
+  const size_t host_pitch = GENERATE_REF(device_alloc.pitch(), 2 * device_alloc.pitch());
 
   LinearAllocGuard<int> src_host_alloc(LinearAllocs::hipHostMalloc,
                                        host_pitch * device_alloc.height() * device_alloc.depth());
@@ -270,12 +265,11 @@ void Memcpy3DHostToDeviceShell(F memcpy_func, const hipStream_t kernel_stream = 
 
 template <bool should_synchronize, typename F>
 void Memcpy3DHostToHostShell(F memcpy_func, const hipStream_t kernel_stream = nullptr) {
-  const auto kind =
-      isQuickLevel() ? hipMemcpyHostToHost : GENERATE(hipMemcpyHostToHost, hipMemcpyDefault);
+  const auto kind = GENERATE(hipMemcpyHostToHost, hipMemcpyDefault);
 
   constexpr hipExtent extent{127 * sizeof(int), 128, 8};
 
-  const size_t padding = isQuickLevel() ? 0 : GENERATE_COPY(0, 64);
+  const size_t padding = GENERATE_COPY(0, 64);
   const size_t src_pitch = extent.width + padding;
 
   LinearAllocGuard<int> src_host(LinearAllocs::hipHostMalloc,
@@ -470,8 +464,8 @@ template <typename F>
 void Memcpy3DHtoHSyncBehavior(F memcpy_func, const bool should_sync,
                               const hipStream_t kernel_stream = nullptr) {
   using LA = LinearAllocs;
-  const auto src_alloc_type = isQuickLevel() ? LA::hipHostMalloc : GENERATE(LA::malloc, LA::hipHostMalloc);
-  const auto dst_alloc_type = isQuickLevel() ? LA::hipHostMalloc : GENERATE(LA::malloc, LA::hipHostMalloc);
+  const auto src_alloc_type = GENERATE(LA::malloc, LA::hipHostMalloc);
+  const auto dst_alloc_type = GENERATE(LA::malloc, LA::hipHostMalloc);
 
   LinearAllocGuard<int> src_alloc(src_alloc_type, 32 * sizeof(int) * 32 * 8);
   LinearAllocGuard<int> dst_alloc(dst_alloc_type, 32 * sizeof(int) * 32 * 8);

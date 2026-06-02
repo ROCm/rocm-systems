@@ -128,16 +128,8 @@ HIP_TEST_CASE(Unit_hipMemset_SetMemoryWithOffset) {
   size_t N;
   bool ret;
 
-  if (isQuickLevel()) {
-    N = 10013;
-    memsetval = 0x5a;
-    memsetD32val = static_cast<int>(0xDEADBEEF);
-    memsetD16val = static_cast<int16_t>(0xDEAD);
-    memsetD8val = static_cast<char>(0xDE);
-  } else {
-    std::tie(N, memsetval, memsetD32val, memsetD16val, memsetD8val) =
-        GENERATE(table<size_t, char, int, int16_t, char>(tableItems));
-  }
+  std::tie(N, memsetval, memsetD32val, memsetD16val, memsetD8val) =
+      GENERATE(table<size_t, char, int, int16_t, char>(tableItems));
 
 
   SECTION("Memset with hipMemsetTypeDefault") {
@@ -178,16 +170,8 @@ HIP_TEST_CASE(Unit_hipMemsetAsync_SetMemoryWithOffset) {
   size_t N;
   bool ret;
 
-  if (isQuickLevel()) {
-    N = 10013;
-    memsetval = 0x5a;
-    memsetD32val = static_cast<int>(0xDEADBEEF);
-    memsetD16val = static_cast<int16_t>(0xDEAD);
-    memsetD8val = static_cast<char>(0xDE);
-  } else {
-    std::tie(N, memsetval, memsetD32val, memsetD16val, memsetD8val) =
-        GENERATE(table<size_t, char, int, int16_t, char>(tableItems));
-  }
+  std::tie(N, memsetval, memsetD32val, memsetD16val, memsetD8val) =
+      GENERATE(table<size_t, char, int, int16_t, char>(tableItems));
 
 
   SECTION("Memset with hipMemsetTypeDefault") {
@@ -222,7 +206,7 @@ HIP_TEST_CASE(Unit_hipMemset_SmallBufferSizes) {
   char *A_d, *A_h;
   constexpr int memsetval = 0x24;
 
-  auto numElements = isQuickLevel() ? GENERATE(1) : GENERATE(range(1, 4));
+  auto numElements = GENERATE(range(1, 4));
   int numBytes = numElements * sizeof(char);
 
   HIP_CHECK(hipMalloc(&A_d, numBytes));

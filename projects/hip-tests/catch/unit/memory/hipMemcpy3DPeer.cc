@@ -36,9 +36,8 @@ HIP_TEST_CASE(Unit_hipMemcpy3DPeer_BasicFunctional) {
   if (device_count <= 1) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
-  const auto src_device = isQuickLevel() ? 0 : GENERATE_COPY(range(0, device_count));
-  const auto dst_device =
-      isQuickLevel() ? (device_count > 1 ? 1 : 0) : GENERATE_COPY(range(0, device_count));
+  const auto src_device = GENERATE_COPY(range(0, device_count));
+  const auto dst_device = GENERATE_COPY(range(0, device_count));
   if (src_device == dst_device) {
     INFO("Src device: " << src_device << ", Dst device: " << dst_device);
     HIP_SKIP_TEST(HipTest::SkipReason::kMemcpyPeerSameSrcDstDevice);
@@ -130,9 +129,8 @@ HIP_TEST_CASE(Unit_hipMemcpy3DPeer_NegativeTsts) {
 
   hipExtent extent = make_hipExtent(numW, numH, depth);
   const auto device_count = HipTest::getDeviceCount();
-  const auto src_device = isQuickLevel() ? 0 : GENERATE_COPY(range(0, device_count));
-  const auto dst_device =
-      isQuickLevel() ? (device_count > 1 ? 1 : 0) : GENERATE_COPY(range(0, device_count));
+  const auto src_device = GENERATE_COPY(range(0, device_count));
+  const auto dst_device = GENERATE_COPY(range(0, device_count));
   HIP_CHECK(hipSetDevice(src_device));
 
   // Array-2 Memory allocation

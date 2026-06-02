@@ -16,7 +16,7 @@ HIP_TEST_CASE(Unit_hipMemcpyAtoH_Positive_Default) {
 
   using namespace std::placeholders;
 
-  const auto width = isQuickLevel() ? GENERATE(512, 2048) : GENERATE(512, 1024, 2048);
+  const auto width = GENERATE(512, 1024, 2048);
   const auto allocation_size = width * sizeof(int);
 
   MemcpyAtoHShell<false, int>(std::bind(hipMemcpyAtoH, _1, _2, 0, allocation_size), width);
@@ -27,7 +27,7 @@ HIP_TEST_CASE(Unit_hipMemcpyAtoH_Positive_Synchronization_Behavior) {
 
   using namespace std::placeholders;
 
-  const auto width = isQuickLevel() ? GENERATE(512, 2048) : GENERATE(512, 1024, 2048);
+  const auto width = GENERATE(512, 1024, 2048);
   const auto height = 0;
   const auto allocation_size = width * sizeof(int);
 

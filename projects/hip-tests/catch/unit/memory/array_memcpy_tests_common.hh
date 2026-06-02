@@ -75,8 +75,8 @@ void Memcpy2DDeviceFromAShell(F memcpy_func, size_t width, size_t height,
   size_t allocation_size = width * height * sizeof(T);
 
   const auto device_count = HipTest::getDeviceCount();
-  const auto src_device = isQuickLevel() ? 0 : GENERATE_COPY(range(0, device_count));
-  const auto dst_device = isQuickLevel() ? 0 : GENERATE_COPY(range(0, device_count));
+  const auto src_device = GENERATE_COPY(range(0, device_count));
+  const auto dst_device = GENERATE_COPY(range(0, device_count));
   INFO("Src device: " << src_device << ", Dst device: " << dst_device);
 
   HIP_CHECK(hipSetDevice(src_device));
@@ -191,8 +191,8 @@ void Memcpy2DDevicetoAShell(F memcpy_func, size_t width, size_t height,
   size_t allocation_size = width * height * sizeof(T);
 
   const auto device_count = HipTest::getDeviceCount();
-  const auto src_device = isQuickLevel() ? 0 : GENERATE_COPY(range(0, device_count));
-  const auto dst_device = isQuickLevel() ? 0 : GENERATE_COPY(range(0, device_count));
+  const auto src_device = GENERATE_COPY(range(0, device_count));
+  const auto dst_device = GENERATE_COPY(range(0, device_count));
   INFO("Src device: " << src_device << ", Dst device: " << dst_device);
 
   HIP_CHECK(hipSetDevice(src_device));

@@ -18,7 +18,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyHtoAAsync_Basic, char, int, float) {
   std::vector<TestType> host_src(N);
   std::vector<TestType> host_dst(N);
   size_t copy_size = N * sizeof(TestType);
-  size_t offset = isQuickLevel() ? 0 : GENERATE(0, N * sizeof(TestType) / 2);
+  size_t offset = GENERATE(0, N * sizeof(TestType) / 2);
 
   std::iota(host_src.begin(), host_src.end(), 0);
 
@@ -99,7 +99,7 @@ HIP_TEST_CASE(Unit_hipMemcpyHtoAAsync_BasicTstsWithDiffStreams) {
   HIP_CHECK(hipSetDevice(0));
   int row, col;
   row = 1;
-  col = isQuickLevel() ? GENERATE(3, 100) : GENERATE(3, 4, 100);
+  col = GENERATE(3, 4, 100);
   int* A_h = reinterpret_cast<int*>(malloc(sizeof(int) * row * col));
   int* B_h = reinterpret_cast<int*>(malloc(sizeof(int) * row * col));
   for (int i = 0; i < (row * col); i++) {
@@ -163,7 +163,7 @@ HIP_TEST_CASE(Unit_hipMemcpyHtoAAsync_MultiDevice) {
     HIP_CHECK(hipSetDevice(i));
     int row, col;
     row = 1;
-    col = isQuickLevel() ? GENERATE(3, 100) : GENERATE(3, 4, 100);
+    col = GENERATE(3, 4, 100);
     int* A_h = reinterpret_cast<int*>(malloc(sizeof(int) * row * col));
     int* B_h = reinterpret_cast<int*>(malloc(sizeof(int) * row * col));
     for (int i = 0; i < (row * col); i++) {
@@ -195,7 +195,7 @@ HIP_TEST_CASE(Unit_HipMemcpyHtoAAsync_Capture) {
   auto host_src = std::make_unique<std::vector<int>>(N);
   auto host_dst = std::make_unique<std::vector<int>>(N);
   constexpr size_t kCopySize = N * sizeof(int);
-  size_t offset = isQuickLevel() ? 0 : GENERATE(0, N * sizeof(int) / 2);
+  size_t offset = GENERATE(0, N * sizeof(int) / 2);
 
   std::iota(host_src->begin(), host_src->end(), 0);
 

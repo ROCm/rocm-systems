@@ -120,9 +120,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMalloc3DArray_happy, char, uchar2, uint2, int4, s
 #if HT_AMD
   const unsigned int flags = hipArrayDefault;
 #else
-  const unsigned int flags = isQuickLevel()
-      ? hipArrayDefault
-      : GENERATE(hipArrayDefault, hipArraySurfaceLoadStore, hipArrayTextureGather);
+  const unsigned int flags =
+      GENERATE(hipArrayDefault, hipArraySurfaceLoadStore, hipArrayTextureGather);
 #endif
   constexpr size_t size = 64;
 
@@ -152,9 +151,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMalloc3DArray_MaxTexture, int, uint4, short, usho
 #if HT_AMD
   const unsigned int flag = hipArrayDefault;
 #else
-  const unsigned int flag = isQuickLevel()
-      ? hipArrayDefault
-      : GENERATE(hipArrayDefault, hipArraySurfaceLoadStore);
+  const unsigned int flag = GENERATE(hipArrayDefault, hipArraySurfaceLoadStore);
 #endif
   if (flag == hipArraySurfaceLoadStore) {
     HIP_SKIP_TEST("tracked issue EXSWCPHIPT-58.");
@@ -179,9 +176,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMalloc3DArray_MaxTexture, int, uint4, short, usho
         make_hipExtent(sizes.max3D[0], sizes.max3D[1], s),              // 3D max width and height
         make_hipExtent(sizes.max3D[0], sizes.max3D[1], sizes.max3D[2])  // 3D max
     };
-    const auto extent = isQuickLevel()
-        ? GENERATE_COPY(from_range(std::begin(extentsToTest), std::begin(extentsToTest) + 4))
-        : GENERATE_COPY(from_range(std::begin(extentsToTest), std::end(extentsToTest)));
+    const auto extent =
+        GENERATE_COPY(from_range(std::begin(extentsToTest), std::end(extentsToTest)));
     CAPTURE(extent.width, extent.height, extent.depth);
     auto maxArrayCreateError = hipMalloc3DArray(&array, &desc, extent, flag);
     // this can try to alloc many GB of memory, so out of memory is acceptable
@@ -206,9 +202,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMalloc3DArray_MaxTexture, int, uint4, short, usho
         make_hipExtent(sizes.max3D[0] + 1, sizes.max3D[1] + 1, s),  // 3D max width and height
         make_hipExtent(sizes.max3D[0] + 1, sizes.max3D[1] + 1, sizes.max3D[2] + 1)  // 3D max
     };
-    const auto extent = isQuickLevel()
-        ? GENERATE_COPY(from_range(std::begin(extentsToTest), std::begin(extentsToTest) + 4))
-        : GENERATE_COPY(from_range(std::begin(extentsToTest), std::end(extentsToTest)));
+    const auto extent =
+        GENERATE_COPY(from_range(std::begin(extentsToTest), std::end(extentsToTest)));
     CAPTURE(extent.width, extent.height, extent.depth);
     HIP_CHECK_ERROR(hipMalloc3DArray(&array, &desc, extent, flag), hipErrorInvalidValue);
   }
@@ -245,9 +240,7 @@ HIP_TEST_CASE(Unit_hipMalloc3DArray_Negative_NullArrayPtr) {
   hipChannelFormatDesc desc = hipCreateChannelDesc<float4>();
   constexpr size_t s = 6;
 
-  const auto flag = isQuickLevel()
-      ? GENERATE(from_range(std::begin(validFlags), std::begin(validFlags) + 1))
-      : GENERATE(from_range(std::begin(validFlags), std::end(validFlags)));
+  const auto flag = GENERATE(from_range(std::begin(validFlags), std::end(validFlags)));
   HIP_CHECK_ERROR(hipMalloc3DArray(nullptr, &desc, makeExtent(flag, s), flag),
                   hipErrorInvalidValue);
 }
@@ -259,9 +252,7 @@ HIP_TEST_CASE(Unit_hipMalloc3DArray_Negative_NullDescPtr) {
   constexpr size_t s = 6;  // 6 to keep cubemap happy
   hipArray_t array;
 
-  const auto flag = isQuickLevel()
-      ? GENERATE(from_range(std::begin(validFlags), std::begin(validFlags) + 1))
-      : GENERATE(from_range(std::begin(validFlags), std::end(validFlags)));
+  const auto flag = GENERATE(from_range(std::begin(validFlags), std::end(validFlags)));
 
   HIP_CHECK_ERROR(hipMalloc3DArray(&array, nullptr, makeExtent(flag, s), flag),
                   hipErrorInvalidValue);
@@ -275,9 +266,7 @@ HIP_TEST_CASE(Unit_hipMalloc3DArray_Negative_ZeroWidth) {
   hipArray_t array;
   hipChannelFormatDesc desc = hipCreateChannelDesc<float4>();
 
-  const auto flag = isQuickLevel()
-      ? GENERATE(from_range(std::begin(validFlags), std::begin(validFlags) + 1))
-      : GENERATE(from_range(std::begin(validFlags), std::end(validFlags)));
+  const auto flag = GENERATE(from_range(std::begin(validFlags), std::end(validFlags)));
 
   HIP_CHECK_ERROR(hipMalloc3DArray(&array, &desc, make_hipExtent(0, s, s), flag),
                   hipErrorInvalidValue);
@@ -293,9 +282,7 @@ HIP_TEST_CASE(Unit_hipMalloc3DArray_Negative_ZeroHeight) {
   std::array<unsigned int, 2> exceptions{hipArrayLayered,
                                          hipArrayLayered | hipArraySurfaceLoadStore};
 
-  const auto flag = isQuickLevel()
-      ? GENERATE(from_range(std::begin(validFlags), std::begin(validFlags) + 1))
-      : GENERATE(from_range(std::begin(validFlags), std::end(validFlags)));
+  const auto flag = GENERATE(from_range(std::begin(validFlags), std::end(validFlags)));
 
   if (std::find(std::begin(exceptions), std::end(exceptions), flag) == std::end(exceptions)) {
     // flag is not in list of exceptions
@@ -337,9 +324,7 @@ void testInvalidDescription(hipChannelFormatDesc desc) {
   hipError_t expectedError = hipErrorInvalidValue;
 #endif
 
-  const auto flag = isQuickLevel()
-      ? GENERATE(from_range(std::begin(validFlags), std::begin(validFlags) + 1))
-      : GENERATE(from_range(std::begin(validFlags), std::end(validFlags)));
+  const auto flag = GENERATE(from_range(std::begin(validFlags), std::end(validFlags)));
   HIP_CHECK_ERROR(hipMalloc3DArray(&array, &desc, makeExtent(flag, s), flag), expectedError);
 }
 
@@ -431,9 +416,7 @@ HIP_TEST_CASE(Unit_hipMalloc3DArray_Negative_NumericLimit) {
   hipChannelFormatDesc desc = hipCreateChannelDesc<float>();
 
   size_t size = std::numeric_limits<size_t>::max();
-  const auto flag = isQuickLevel()
-      ? GENERATE(from_range(std::begin(validFlags), std::begin(validFlags) + 1))
-      : GENERATE(from_range(std::begin(validFlags), std::end(validFlags)));
+  const auto flag = GENERATE(from_range(std::begin(validFlags), std::end(validFlags)));
   HIP_CHECK_ERROR(hipMalloc3DArray(&arrayPtr, &desc, makeExtent(flag, size), flag),
                   hipErrorInvalidValue);
 }

@@ -73,12 +73,8 @@ HIP_TEST_CASE(Unit_hipHostGetFlags_flagCombos) {
   constexpr auto SIZE{LEN * sizeof(int)};
   int* A_h{nullptr};
 
-  const unsigned int FlagPart1 = isQuickLevel()
-      ? GENERATE(from_range(FlagPart1Vec.begin(), FlagPart1Vec.begin() + 3))
-      : GENERATE(from_range(FlagPart1Vec.begin(), FlagPart1Vec.end()));
-  const unsigned int FlagPart2 = isQuickLevel()
-      ? FlagPart2Vec[0]
-      : GENERATE(from_range(FlagPart2Vec.begin(), FlagPart2Vec.end()));
+  const unsigned int FlagPart1 = GENERATE(from_range(FlagPart1Vec.begin(), FlagPart1Vec.end()));
+  const unsigned int FlagPart2 = GENERATE(from_range(FlagPart2Vec.begin(), FlagPart2Vec.end()));
 
   unsigned int FlagComp = FlagPart1 | FlagPart2;
 
@@ -109,12 +105,8 @@ HIP_TEST_CASE(Unit_hipHostGetFlags_DifferentThreads) {
   constexpr auto SIZE{LEN * sizeof(int)};
   int* A_h{nullptr};
 
-  const unsigned int FlagPart1 = isQuickLevel()
-      ? GENERATE(from_range(FlagPart1Vec.begin(), FlagPart1Vec.begin() + 3))
-      : GENERATE(from_range(FlagPart1Vec.begin(), FlagPart1Vec.end()));
-  const unsigned int FlagPart2 = isQuickLevel()
-      ? FlagPart2Vec[0]
-      : GENERATE(from_range(FlagPart2Vec.begin(), FlagPart2Vec.end()));
+  const unsigned int FlagPart1 = GENERATE(from_range(FlagPart1Vec.begin(), FlagPart1Vec.end()));
+  const unsigned int FlagPart2 = GENERATE(from_range(FlagPart2Vec.begin(), FlagPart2Vec.end()));
 
 
   unsigned int FlagComp = FlagPart1 | FlagPart2;

@@ -73,8 +73,8 @@ HIP_TEST_CASE(Unit_hipMemsetD2D8Async_BasicFunctional) {
 HIP_TEST_CASE(Unit_hipMemsetD2D8Async_UnEvenRowsCols) {
   hipDeviceptr_t A_d;
   int rows, cols;
-  rows = isQuickLevel() ? GENERATE(3, 100) : GENERATE(3, 4, 100);
-  cols = isQuickLevel() ? GENERATE(3, 100) : GENERATE(3, 4, 100);
+  rows = GENERATE(3, 4, 100);
+  cols = GENERATE(3, 4, 100);
   size_t devPitch;
   constexpr char memsetval = 'c';
   hipStream_t stream = nullptr;

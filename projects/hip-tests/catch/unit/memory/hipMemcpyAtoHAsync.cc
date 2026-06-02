@@ -37,7 +37,7 @@ HIP_TEST_CASE(Unit_hipMemcpyAtoHAsync_Basic) {
   CHECK_IMAGE_SUPPORT
   int row, col;
   row = 1;
-  col = isQuickLevel() ? GENERATE(3, 100) : GENERATE(3, 4, 100);
+  col = GENERATE(3, 4, 100);
   int* A_h = reinterpret_cast<int*>(malloc(sizeof(int) * row * col));
   int* B_h = reinterpret_cast<int*>(malloc(sizeof(int) * row * col));
   for (int i = 0; i < (row * col); i++) {
