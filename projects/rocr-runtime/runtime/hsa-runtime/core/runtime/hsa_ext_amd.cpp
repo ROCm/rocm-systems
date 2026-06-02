@@ -1971,16 +1971,11 @@ hsa_status_t hsa_amd_external_semaphore_handle_close(
   CATCH;
 }
 
-// Tool layers (e.g. rocprofiler) wrap the user queue in a
-// core::InterceptQueue, which is a QueueProxy -- NOT an AMD::AqlQueue.
-// static_cast'ing such a wrapper straight to AqlQueue* is undefined
-// behaviour and corrupts aql_queue_id(). Descend through any wrapper
-// layers (interception can nest) and verify the concrete type via the
-// runtime's custom RTTI before the reverse-cast. RTTI/dynamic_cast is
-// disabled in this tree, so IsType() is the native equivalent. Returns
-// nullptr if the queue is not (or does not wrap) an AMD AQL queue --
-// notably an AMD::AieAqlQueue shares the kAmdGpuDevice agent type yet is
-// not an AqlQueue, so a device-type gate alone would not be safe.
+// Tool layers wrap the queue in a core::InterceptQueue, which is not an
+// AqlQueue, so a direct static_cast is UB. Peel off any (nestable) wrapper
+// layers and confirm the concrete type via IsType() (dynamic_cast is
+// unavailable; RTTI is off). Returns nullptr if the queue is not, or does
+// not wrap, an AqlQueue.
 static AMD::AqlQueue *UnwrapAqlQueue(core::Queue *core_queue) {
   while (core_queue != nullptr && core::InterceptQueue::IsType(core_queue)) {
     core_queue = static_cast<core::InterceptQueue *>(core_queue)->wrapped.get();
@@ -2002,9 +1997,7 @@ hsa_status_t hsa_amd_queue_signal_external_semaphore(
   core::Queue *core_queue = core::Queue::Convert(queue);
   IS_VALID(core_queue);
 
-  // Only AMD GPU AQL queues carry a KMD queue id. Unwrap any tool
-  // interception layers and verify the concrete type before the
-  // libhsakmt reverse-cast to a WDDMQueue *.
+  // Only AMD AQL queues carry a KMD queue id; unwrap tool layers first.
   AMD::AqlQueue *aql = UnwrapAqlQueue(core_queue);
   if (aql == nullptr) return HSA_STATUS_ERROR_INVALID_QUEUE;
 
@@ -2040,9 +2033,7 @@ hsa_status_t hsa_amd_queue_wait_external_semaphore(
   core::Queue *core_queue = core::Queue::Convert(queue);
   IS_VALID(core_queue);
 
-  // Same unwrap as the signal path -- only AMD GPU AQL queues have a
-  // meaningful HSA_QUEUEID for the KMD reverse-cast, and tool
-  // interception wrappers must be peeled off first.
+  // Same unwrap as the signal path.
   AMD::AqlQueue *aql = UnwrapAqlQueue(core_queue);
   if (aql == nullptr) return HSA_STATUS_ERROR_INVALID_QUEUE;
 

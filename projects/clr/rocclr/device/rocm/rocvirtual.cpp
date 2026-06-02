@@ -4636,9 +4636,8 @@ void VirtualGPU::submitAccumulate(amd::AccumulateCommand& vcmd) {
 
 // ================================================================================================
 void VirtualGPU::submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) {
-  // Unwrap the hsa_amd_external_semaphore_t that importExtSemaphore
-  // heap-allocated and stashed as the CLR-visible handle. The holder is
-  // only read (passed by value into the HSA call), so keep it const.
+  // Unwrap the hsa_amd_external_semaphore_t stashed as the CLR-visible
+  // handle. Read-only: passed by value into the HSA call.
   const auto* holder = static_cast<const hsa_amd_external_semaphore_t*>(
       cmd.sem_ptr());
   if (holder == nullptr || gpu_queue_ == nullptr) {
