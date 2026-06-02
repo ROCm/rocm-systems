@@ -133,8 +133,10 @@ jobs:
           REGISTRY_URL: ghcr.io/${{ github.repository_owner }}
           CHANGED_DOCKERFILE: ${{ steps.ci-flags.outputs.changed_dockerfile }}
           FULL_CI_IMAGES_MATRIX: ${{ steps.matrices.outputs.full_CI_images_matrix }}
+          NIGHTLY_BUILD: ${{ steps.nightly.outputs.nightly_build }}
         # ci_images is computed by util/ci-images.sh. Sourcing it sets ci_images
-        # from REGISTRY_URL, tag, and FULL_CI_IMAGES_MATRIX in the environment.
+        # from REGISTRY_URL, tag, FULL_CI_IMAGES_MATRIX, and NIGHTLY_BUILD in
+        # the environment.
         run: |
           if [ "${CHANGED_DOCKERFILE}" = "1" ]; then
             # sanitize ref for tag
