@@ -1147,6 +1147,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirage_hotswap"
+version = "0.1.0"
+
+[[package]]
 name = "mirage_rocjitsu"
 version = "0.1.0"
 dependencies = [
