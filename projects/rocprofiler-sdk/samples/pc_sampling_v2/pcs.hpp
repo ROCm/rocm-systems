@@ -66,7 +66,10 @@ struct tool_agent_info
 };
 
 // GPU agents supporting some kind of PC sampling.
-extern tool_agent_info_vec_t gpu_agents;
+// Heap-allocated in init() and released in fini() (mirrors get_pc_sampling_buffer_ids()) to avoid
+// static-destruction-order issues.
+tool_agent_info_vec_t*
+get_gpu_agents();
 
 // Must be called first (prior to any other function from this namespace)
 void
@@ -101,6 +104,12 @@ query_most_comprehensive_config_for_agent(tool_agent_info* agent_info);
 /**
  * @brief Query snapshot ext_data fields supported by the agent and store them
  * in agent_info->ext_fields.
+ *
+ * Implicitly operates on agent_info->most_comprehensive_record_kind, i.e. the most comprehensive
+ * record version discovered during the query phase. Must be called after
+ * query_most_comprehensive_config_for_agent() has populated that field. Record kinds that carry no
+ * snapshot information (host-trap suitable records V0/V1/V3) yield an empty field list, which is
+ * handled gracefully.
  */
 void
 query_snapshot_ext_fields_for_agent(tool_agent_info* agent_info);

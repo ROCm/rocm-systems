@@ -35,7 +35,7 @@ namespace client
 {
 namespace pcs
 {
-tool_agent_info_vec_t        gpu_agents = {};
+tool_agent_info_vec_t*       gpu_agents = nullptr;
 pc_sampling_buffer_id_vec_t* buffer_ids = nullptr;
 
 namespace
@@ -60,6 +60,10 @@ query_v2_configs(rocprofiler_agent_id_t                agent_id,
         return ROCPROFILER_STATUS_SUCCESS;
     };
 
+    // INVALID_SAMPLE is method-agnostic: it does not constrain method selection, so it neither
+    // blocks the stochastic->host-trap fallback nor causes host-trap configurations to be filtered
+    // out. Requesting it uniformly keeps the sample simple; host-trap sessions simply deliver no
+    // invalid records today.
     rocprofiler_pc_sampling_record_kind_t record_kinds[] = {
         record_kind, ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE};
 
@@ -76,6 +80,7 @@ void
 init()
 {
     buffer_ids = new pc_sampling_buffer_id_vec_t();
+    gpu_agents = new tool_agent_info_vec_t();
 }
 
 void
@@ -84,12 +89,22 @@ fini()
     buffer_ids->clear();
     delete buffer_ids;
     buffer_ids = nullptr;
+
+    gpu_agents->clear();
+    delete gpu_agents;
+    gpu_agents = nullptr;
 }
 
 pc_sampling_buffer_id_vec_t*
 get_pc_sampling_buffer_ids()
 {
     return buffer_ids;
+}
+
+tool_agent_info_vec_t*
+get_gpu_agents()
+{
+    return gpu_agents;
 }
 
 rocprofiler_status_t
@@ -145,7 +160,7 @@ find_all_gpu_agents_supporting_pc_sampling()
         rocprofiler_query_available_agents(ROCPROFILER_AGENT_INFO_VERSION_0,
                                            &find_all_gpu_agents_supporting_pc_sampling_impl,
                                            sizeof(rocprofiler_agent_t),
-                                           static_cast<void*>(&gpu_agents)));
+                                           static_cast<void*>(get_gpu_agents())));
 }
 
 bool
@@ -160,8 +175,13 @@ query_most_comprehensive_config_for_agent(tool_agent_info* agent_info)
     constexpr auto flags = ROCPROFILER_PC_SAMPLING_API_FLAG_PREFER_STOCHASTIC;
 
     // Iterate from the most comprehensive record version down to V0.
-    // Unsupported versions (e.g. V3-V5) will be rejected by the library,
+    // Unsupported versions (e.g. V3/V4 on non-GFX12 agents) will be rejected by the library,
     // so the loop naturally skips them.
+    //
+    // This top-down scan assumes newer (more comprehensive) record kinds are introduced for newer
+    // architectures only. If a future record kind were ever made available on older architectures,
+    // this scan could select it (and its associated method) on an older arch; revisit the discovery
+    // strategy here if that ever happens. In practice this does not occur today.
     for(int kind = static_cast<int>(ROCPROFILER_PC_SAMPLING_RECORD_LAST) - 1;
         kind >= static_cast<int>(ROCPROFILER_PC_SAMPLING_RECORD_V0_SAMPLE);
         --kind)
@@ -206,6 +226,9 @@ query_snapshot_ext_fields_for_agent(tool_agent_info* agent_info)
         return ROCPROFILER_STATUS_SUCCESS;
     };
 
+    // Call unconditionally for the chosen record kind. Record kinds that carry no snapshot
+    // information (host-trap suitable records V0/V1/V3) return SUCCESS with an empty field list, so
+    // an empty result simply means ext_data extraction is not applicable -- no special-casing here.
     auto status = rocprofiler_pc_sampling_query_snapshot_ext_fields(
         agent_info->agent_id,
         agent_info->most_comprehensive_record_kind,
@@ -220,6 +243,15 @@ query_snapshot_ext_fields_for_agent(tool_agent_info* agent_info)
            << " failed with status=" << status << " :: " << rocprofiler_get_status_string(status)
            << "\n";
         *utils::get_output_stream() << ss.str();
+        return;
+    }
+
+    if(agent_info->ext_fields->empty())
+    {
+        ss << "Agent " << agent_info->agent_id.handle
+           << " exposes no snapshot ext_data fields for the selected record kind ("
+           << static_cast<int>(agent_info->most_comprehensive_record_kind) << ").\n";
+        *utils::get_output_stream() << ss.str() << std::flush;
         return;
     }
 
@@ -269,6 +301,9 @@ configure_pc_sampling_for_agent(tool_agent_info*         agent_info,
     auto interval = (cfg.unit == ROCPROFILER_PC_SAMPLING_UNIT_CYCLES) ? STOCHASTIC_INTERVAL
                                                                      : HOST_TRAP_INTERVAL;
 
+    // INVALID_SAMPLE is method-agnostic (see query_v2_configs): it does not affect method
+    // selection, so it is safe to request alongside any record kind. On host-trap sessions no
+    // invalid records are delivered today; on stochastic sessions it opts into invalid-sample delivery.
     rocprofiler_pc_sampling_record_kind_t record_kinds[] = {
         agent_info->most_comprehensive_record_kind, ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE};
 
@@ -351,6 +386,104 @@ print_sample_v1(std::ostream& os, const rocprofiler_pc_sampling_record_v1_t* sam
 }
 
 /**
+ * @brief Print the snapshot_information block (wave issued/stalled + wave_count) shared by the
+ * stochastic records V2 and V4. Emits a trailing ", ".
+ */
+void
+print_snapshot_information(std::ostream&                                            os,
+                           const rocprofiler_pc_sampling_snapshot_information_v0_t& snap)
+{
+    if(snap.wave_issued)
+    {
+        const char* inst_name     = nullptr;
+        uint64_t    inst_name_len = 0;
+        auto        inst_status   = rocprofiler_pc_sampling_get_instruction_type_name_v2(
+            static_cast<rocprofiler_pc_sampling_instruction_type_t>(snap.instruction_type),
+            &inst_name,
+            &inst_name_len);
+        if(inst_status == ROCPROFILER_STATUS_SUCCESS && inst_name != nullptr)
+            os << "wave issued " << std::string(inst_name, inst_name_len) << " instruction, ";
+        else
+            os << "wave issued instruction (type="
+               << static_cast<unsigned int>(snap.instruction_type) << "), ";
+    }
+    else
+    {
+        const char* reason_name     = nullptr;
+        uint64_t    reason_name_len = 0;
+        auto        reason_status =
+            rocprofiler_pc_sampling_get_instruction_not_issued_reason_name_v2(
+                static_cast<rocprofiler_pc_sampling_instruction_not_issued_reason_t>(
+                    snap.no_issue_reason),
+                &reason_name,
+                &reason_name_len);
+        if(reason_status == ROCPROFILER_STATUS_SUCCESS && reason_name != nullptr)
+            os << "wave stalled: " << std::string(reason_name, reason_name_len) << ", ";
+        else
+            os << "wave stalled (reason=" << static_cast<unsigned int>(snap.no_issue_reason)
+               << "), ";
+    }
+
+    os << "wave_count: " << static_cast<unsigned int>(snap.wave_count) << ", ";
+}
+
+/**
+ * @brief Decode and print the ext_data block for a stochastic record (V2/V4) using the per-agent
+ * snapshot ext fields and the memoized name map (avoids calling the name API per-sample).
+ *
+ * Prints nothing when the agent exposes no ext fields (e.g. host-trap suitable records).
+ */
+void
+print_snapshot_ext_data(std::ostream&                         os,
+                        rocprofiler_pc_sampling_record_kind_t record_kind,
+                        const void*                           sample,
+                        const tool_agent_info*                agent_info)
+{
+    if(agent_info == nullptr || agent_info->ext_fields == nullptr ||
+       agent_info->ext_fields->empty())
+        return;
+
+    os << "ext_data: {";
+
+    struct ext_cb_data
+    {
+        std::ostream*               os;
+        const ext_field_name_map_t* name_map;
+    };
+    auto cb_data = ext_cb_data{&os, &agent_info->ext_field_names};
+
+    auto ext_cb = [](const rocprofiler_pc_sampling_snapshot_ext_field_id_t* field_ids,
+                     const uint32_t*                                        values,
+                     size_t                                                 num_fields,
+                     void* user_data) -> rocprofiler_status_t {
+        auto& data  = *static_cast<ext_cb_data*>(user_data);
+        bool  first = true;
+        for(size_t i = 0; i < num_fields; i++)
+        {
+            // Extract the field name from the memoized map.
+            auto it = data.name_map->find(field_ids[i]);
+            if(it == data.name_map->end()) continue;
+            if(!first) *data.os << ", ";
+            // Show the field name and the value.
+            *data.os << it->second << "=" << values[i];
+            first = false;
+        }
+        return ROCPROFILER_STATUS_SUCCESS;
+    };
+
+    auto extract_status = rocprofiler_pc_sampling_extract_snapshot_ext_field_values(
+        record_kind,
+        sample,
+        agent_info->ext_fields->data(),
+        agent_info->ext_fields->size(),
+        ext_cb,
+        static_cast<void*>(&cb_data));
+
+    if(extract_status != ROCPROFILER_STATUS_SUCCESS) os << "ERROR extracting ext_data fields";
+    os << "}";
+}
+
+/**
  * @brief Print a V2 stochastic PC sampling record, including ext_data
  * decoded via the per-agent snapshot ext fields.
  *
@@ -367,86 +500,10 @@ print_sample_v2(std::ostream&                              os,
     print_sample_common_fields(os, sample);
     os << ", ";
 
-    // Print snapshot_information fields
-    auto& snap = sample->snapshot_information;
-    if(snap.wave_issued)
-    {
-        const char* inst_name     = nullptr;
-        uint64_t    inst_name_len = 0;
-        auto        inst_status   = rocprofiler_pc_sampling_get_instruction_type_name_v2(
-            static_cast<rocprofiler_pc_sampling_instruction_type_t>(snap.instruction_type),
-            &inst_name,
-            &inst_name_len);
-        if(inst_status == ROCPROFILER_STATUS_SUCCESS && inst_name != nullptr)
-            os << "wave issued " << std::string(inst_name, inst_name_len) << " instruction, ";
-        else
-            os << "wave issued instruction (type=" << static_cast<unsigned int>(snap.instruction_type)
-               << "), ";
-    }
-    else
-    {
-        const char* reason_name     = nullptr;
-        uint64_t    reason_name_len = 0;
-        auto        reason_status   = rocprofiler_pc_sampling_get_instruction_not_issued_reason_name_v2(
-            static_cast<rocprofiler_pc_sampling_instruction_not_issued_reason_t>(
-                snap.no_issue_reason),
-            &reason_name,
-            &reason_name_len);
-        if(reason_status == ROCPROFILER_STATUS_SUCCESS && reason_name != nullptr)
-            os << "wave stalled: " << std::string(reason_name, reason_name_len) << ", ";
-        else
-            os << "wave stalled (reason=" << static_cast<unsigned int>(snap.no_issue_reason)
-               << "), ";
-    }
+    print_snapshot_information(os, sample->snapshot_information);
 
-    os << "wave_count: " << static_cast<unsigned int>(snap.wave_count) << ", ";
-
-    // Decode ext_data using the pre-queried per-agent snapshot ext fields
-    // and the memoized name map (avoids calling the name API per-sample).
-    if(agent_info != nullptr && agent_info->ext_fields != nullptr &&
-       !agent_info->ext_fields->empty())
-    {
-        os << "ext_data: {";
-
-        // Use the extraction API to get field values; look up names from the LUT.
-        struct ext_cb_data
-        {
-            std::ostream*                    os;
-            const ext_field_name_map_t*   name_map;
-        };
-        auto cb_data = ext_cb_data{&os, &agent_info->ext_field_names};
-
-        auto ext_cb = [](const rocprofiler_pc_sampling_snapshot_ext_field_id_t* field_ids,
-                            const uint32_t*                                           values,
-                            size_t                                                    num_fields,
-                            void* user_data) -> rocprofiler_status_t {
-            auto&  data  = *static_cast<ext_cb_data*>(user_data);
-            bool   first = true;
-            for(size_t i = 0; i < num_fields; i++)
-            {
-                auto it = data.name_map->find(field_ids[i]);
-                if(it == data.name_map->end()) continue;
-                if(!first) *data.os << ", ";
-                *data.os << it->second << "=" << values[i];
-                first = false;
-            }
-            return ROCPROFILER_STATUS_SUCCESS;
-        };
-
-        auto extract_status = rocprofiler_pc_sampling_extract_snapshot_ext_field_values(
-            ROCPROFILER_PC_SAMPLING_RECORD_V2_SAMPLE,
-            static_cast<const void*>(sample),
-            agent_info->ext_fields->data(),
-            agent_info->ext_fields->size(),
-            ext_cb,
-            static_cast<void*>(&cb_data));
-
-        if(extract_status != ROCPROFILER_STATUS_SUCCESS)
-        {
-            os << "ERROR extracting ext_data fields";
-        }
-        os << "}";
-    }
+    print_snapshot_ext_data(
+        os, ROCPROFILER_PC_SAMPLING_RECORD_V2_SAMPLE, static_cast<const void*>(sample), agent_info);
 
     os << "\n";
 }
@@ -501,38 +558,7 @@ print_sample_v4(std::ostream&                              os,
     os << ", ";
 
     // Print snapshot_information fields (same as V2)
-    auto& snap = sample->snapshot_information;
-    if(snap.wave_issued)
-    {
-        const char* inst_name     = nullptr;
-        uint64_t    inst_name_len = 0;
-        auto        inst_status   = rocprofiler_pc_sampling_get_instruction_type_name_v2(
-            static_cast<rocprofiler_pc_sampling_instruction_type_t>(snap.instruction_type),
-            &inst_name,
-            &inst_name_len);
-        if(inst_status == ROCPROFILER_STATUS_SUCCESS && inst_name != nullptr)
-            os << "wave issued " << std::string(inst_name, inst_name_len) << " instruction, ";
-        else
-            os << "wave issued instruction (type=" << static_cast<unsigned int>(snap.instruction_type)
-               << "), ";
-    }
-    else
-    {
-        const char* reason_name     = nullptr;
-        uint64_t    reason_name_len = 0;
-        auto        reason_status   = rocprofiler_pc_sampling_get_instruction_not_issued_reason_name_v2(
-            static_cast<rocprofiler_pc_sampling_instruction_not_issued_reason_t>(
-                snap.no_issue_reason),
-            &reason_name,
-            &reason_name_len);
-        if(reason_status == ROCPROFILER_STATUS_SUCCESS && reason_name != nullptr)
-            os << "wave stalled: " << std::string(reason_name, reason_name_len) << ", ";
-        else
-            os << "wave stalled (reason=" << static_cast<unsigned int>(snap.no_issue_reason)
-               << "), ";
-    }
-
-    os << "wave_count: " << static_cast<unsigned int>(snap.wave_count) << ", ";
+    print_snapshot_information(os, sample->snapshot_information);
 
     // Print memory counters
     auto& mc = sample->memory_counters;
@@ -548,50 +574,8 @@ print_sample_v4(std::ostream&                              os,
        << ", xnack=" << static_cast<unsigned int>(mc.xnack_count)
        << "}, ";
 
-    // Decode ext_data using the pre-queried per-agent snapshot ext fields
-    if(agent_info != nullptr && agent_info->ext_fields != nullptr &&
-       !agent_info->ext_fields->empty())
-    {
-        os << "ext_data: {";
-
-        struct ext_cb_data
-        {
-            std::ostream*                    os;
-            const ext_field_name_map_t*   name_map;
-        };
-        auto cb_data = ext_cb_data{&os, &agent_info->ext_field_names};
-
-        auto ext_cb = [](const rocprofiler_pc_sampling_snapshot_ext_field_id_t* field_ids,
-                            const uint32_t*                                           values,
-                            size_t                                                    num_fields,
-                            void* user_data) -> rocprofiler_status_t {
-            auto&  data  = *static_cast<ext_cb_data*>(user_data);
-            bool   first = true;
-            for(size_t i = 0; i < num_fields; i++)
-            {
-                auto it = data.name_map->find(field_ids[i]);
-                if(it == data.name_map->end()) continue;
-                if(!first) *data.os << ", ";
-                *data.os << it->second << "=" << values[i];
-                first = false;
-            }
-            return ROCPROFILER_STATUS_SUCCESS;
-        };
-
-        auto extract_status = rocprofiler_pc_sampling_extract_snapshot_ext_field_values(
-            ROCPROFILER_PC_SAMPLING_RECORD_V4_SAMPLE,
-            static_cast<const void*>(sample),
-            agent_info->ext_fields->data(),
-            agent_info->ext_fields->size(),
-            ext_cb,
-            static_cast<void*>(&cb_data));
-
-        if(extract_status != ROCPROFILER_STATUS_SUCCESS)
-        {
-            os << "ERROR extracting ext_data fields";
-        }
-        os << "}";
-    }
+    print_snapshot_ext_data(
+        os, ROCPROFILER_PC_SAMPLING_RECORD_V4_SAMPLE, static_cast<const void*>(sample), agent_info);
 
     os << "\n";
 }

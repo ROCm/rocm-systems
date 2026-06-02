@@ -1484,13 +1484,17 @@ typedef rocprofiler_status_t (*rocprofiler_pc_sampling_snapshot_ext_fields_cb_t)
  * and record kind. To extract field values from the ext_data bitfield, use
  * ::rocprofiler_pc_sampling_extract_snapshot_ext_field_values.
  *
- * When the agent and @p record_kind combination does not expose any ext_data
- * (for example, the agent does not support ext_data on this record kind, or the
- * record kind itself does not carry snapshot information such as host-trap record
- * kinds V1 and V3), the function still returns ::ROCPROFILER_STATUS_SUCCESS and
- * invokes the callback once with @c num_fields = 0. The caller can therefore use
- * an empty result as the signal that ext_data extraction is not applicable, instead
- * of treating it as an error.
+ * When the agent and @p record_kind combination does not expose any ext_data, the function still
+ * returns ::ROCPROFILER_STATUS_SUCCESS and invokes the callback once with @c num_fields = 0. The
+ * caller can therefore use an empty result as the signal that ext_data extraction is not
+ * applicable, instead of treating it as an error. This empty-but-success case covers:
+ * - the agent does not support ext_data on this record kind;
+ * - the record kind itself carries no snapshot information: the host-trap suitable records
+ *   (V0, V1, V3), or the ::ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE record.
+ *
+ * Only the version record kinds (V0-V4) and ::ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE are
+ * recognized inputs; any other @p record_kind value is rejected with
+ * ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT.
  *
  * @param[in] agent_id - ID of the agent to query
  * @param[in] record_kind - The record kind to query fields for
@@ -1500,7 +1504,8 @@ typedef rocprofiler_status_t (*rocprofiler_pc_sampling_snapshot_ext_fields_cb_t)
  * @retval ::ROCPROFILER_STATUS_SUCCESS @p cb successfully finished (including the
  * empty-list case described above)
  * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT invalid @p agent_id, null
- * @p cb, or @p record_kind is not a recognized PC sampling record kind
+ * @p cb, or @p record_kind is not a recognized PC sampling record kind (i.e. not one of
+ * V0-V4 or INVALID_SAMPLE)
  * @retval ::ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE agent does not support PC sampling
  */
 ROCPROFILER_SDK_EXPERIMENTAL

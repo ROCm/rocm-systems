@@ -929,8 +929,17 @@ rocprofiler_pc_sampling_query_snapshot_ext_fields(
     rocprofiler_pc_sampling_snapshot_ext_fields_cb_t  cb,
     void*                                             user_data)
 {
-    if(!record_kind_has_snapshot_information(record_kind))
+    // Reject unrecognized record kinds up front. The valid inputs are the version record kinds
+    // (V0-V4) and the INVALID_SAMPLE record.
+    if(!is_valid_version_record_kind(record_kind) &&
+       record_kind != ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE)
         return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    // Record kinds that carry no snapshot information (host-trap suitable records V0/V1/V3, and the
+    // INVALID_SAMPLE record) expose no ext_data fields. Per the documented contract, deliver an
+    // empty list with SUCCESS rather than an error, so callers can treat "no fields" uniformly
+    // regardless of the negotiated method.
+    if(!record_kind_has_snapshot_information(record_kind)) return cb(nullptr, 0, user_data);
 
     const auto* agent = rocprofiler::agent::get_agent(agent_id);
     if(!agent) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;

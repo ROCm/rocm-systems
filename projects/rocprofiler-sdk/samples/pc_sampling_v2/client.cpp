@@ -42,13 +42,12 @@
 #include "pcs.hpp"
 #include "utils.hpp"
 
-#include <rocprofiler-sdk/registration.h>
-#include <rocprofiler-sdk/rocprofiler.h>
-
 #include "common/defines.hpp"
 #include "common/filesystem.hpp"
 
-#include <cassert>
+#include <rocprofiler-sdk/registration.h>
+#include <rocprofiler-sdk/rocprofiler.h>
+
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -79,7 +78,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* /*tool_data*/)
 
     client::pcs::find_all_gpu_agents_supporting_pc_sampling();
 
-    if(client::pcs::gpu_agents.empty())
+    if(client::pcs::get_gpu_agents()->empty())
     {
         *utils::get_output_stream() << "No available gpu agents supporting PC sampling"
                                     << std::endl;
@@ -93,7 +92,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* /*tool_data*/)
 
     auto* buff_ids_vec = pcs::get_pc_sampling_buffer_ids();
 
-    for(auto& gpu_agent : pcs::gpu_agents)
+    for(auto& gpu_agent : *pcs::get_gpu_agents())
     {
         // Create one buffer per agent. Pass the agent info as client_data so
         // the buffer callback has direct access to the per-agent arbiter
@@ -138,8 +137,8 @@ tool_fini(void* /*tool_data*/)
     if(client_id)
     {
         int state = -1;
-        ROCPROFILER_CHECK(rocprofiler_context_is_active(client_ctx, &state))
-        assert(state == 0);
+        ROCPROFILER_CHECK(rocprofiler_context_is_active(client_ctx, &state));
+        utils::pcs_assert(state == 0, "PC sampling context is still active during tool_fini");
 
         for(auto buff_id : *pcs::get_pc_sampling_buffer_ids())
         {
@@ -161,24 +160,6 @@ tool_fini(void* /*tool_data*/)
 }
 
 }  // namespace
-
-void
-setup();
-
-void
-setup()
-{
-    if(int status = 0;
-       rocprofiler_is_initialized(&status) == ROCPROFILER_STATUS_SUCCESS && status == 0)
-    {
-        ROCPROFILER_CHECK(rocprofiler_force_configure(&rocprofiler_configure));
-    }
-}
-
-void
-shutdown()
-{}
-
 }  // namespace client
 
 extern "C" rocprofiler_tool_configure_result_t*

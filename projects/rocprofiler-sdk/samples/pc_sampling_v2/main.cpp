@@ -30,7 +30,6 @@
 #include <iostream>
 #include <mutex>
 #include <random>
-#include <sstream>
 #include <stdexcept>
 #include <thread>
 
@@ -73,12 +72,6 @@ run(int rank, int tid, int devid, int argc, char** argv);
 
 void
 run_transpose(int rank, int tid, hipStream_t stream, int argc, char** argv);
-
-void
-run_migrate(int rank, int tid, hipStream_t stream, int, char** argv);
-
-void
-run_scratch(int rank, int tid, hipStream_t stream, int argc, char** argv);
 
 int
 main(int argc, char** argv)
@@ -142,61 +135,6 @@ transpose(const int* in, int* out, int M, int N)
     out[idx] = tile[threadIdx.x][threadIdx.y];
 }
 
-template <typename Tp>
-__global__ void
-test_page_migrate(Tp* data, Tp val)
-{
-    int idx = (blockIdx.x * blockDim.x) + threadIdx.x;
-    data[idx] += val;
-}
-
-__global__ void
-test_kern_large(uint64_t* output)
-{
-    uint64_t result = 0;
-    int      test[4000];
-    memset(test, 5, 4000);
-    for(int& i : test)
-    {
-        i = i + 7;
-        *output += i;
-        result += i;
-    }
-    *output ^= result;
-    *output ^= result;
-}
-
-__global__ void
-test_kern_medium(uint64_t* output)
-{
-    uint64_t result = 0;
-    int      test[175];
-    memset(test, 5, 175);
-    for(int& i : test)
-    {
-        i = i + 7;
-        *output += i;
-        result += i;
-    }
-    *output ^= result;
-    *output ^= result;
-}
-
-__global__ void
-test_kern_small(uint64_t* output)
-{
-    uint64_t result = 0;
-    int      test[2];
-    for(int& i : test)
-    {
-        i = i + 7;
-        *output += i;
-        result += i;
-    }
-    *output ^= result;
-    *output ^= result;
-}
-
 void
 run(int rank, int tid, int devid, int argc, char** argv)
 {
@@ -204,8 +142,6 @@ run(int rank, int tid, int devid, int argc, char** argv)
     HIP_API_CALL(hipSetDevice(devid));
     HIP_API_CALL(hipStreamCreate(&stream));
 
-    run_migrate(rank, tid, stream, argc, argv);
-    run_scratch(rank, tid, stream, argc, argv);
     run_transpose(rank, tid, stream, argc, argv);
 
     HIP_API_CALL(hipStreamSynchronize(stream));
@@ -295,95 +231,6 @@ run_transpose(int rank, int tid, hipStream_t stream, int argc, char** argv)
 
     delete[] inp_matrix;
     delete[] out_matrix;
-}
-
-void
-run_scratch(int rank, int tid, hipStream_t stream, int, char** argv)
-{
-    auto t1 = std::chrono::high_resolution_clock::now();
-
-    HIP_API_CALL(hipStreamSynchronize(stream));
-
-    const auto* exe_name = basename(argv[0]);
-
-    uint64_t* data_ptr = nullptr;
-    HIP_API_CALL(HIP_HOST_ALLOC_FUNC(&data_ptr, sizeof(uint64_t), 0));
-    *data_ptr = 0;
-
-    test_kern_small<<<1000, 1, 0, stream>>>(data_ptr);
-    test_kern_medium<<<1000, 1, 0, stream>>>(data_ptr);
-    test_kern_small<<<1000, 1, 0, stream>>>(data_ptr);
-    test_kern_large<<<1100, 1, 0, stream>>>(data_ptr);
-    HIP_API_CALL(hipStreamSynchronize(stream));
-
-    test_kern_small<<<1000, 1, 0, stream>>>(data_ptr);
-    HIP_API_CALL(hipStreamSynchronize(stream));
-
-    test_kern_medium<<<1000, 1, 0, stream>>>(data_ptr);
-    HIP_API_CALL(hipStreamSynchronize(stream));
-
-    test_kern_small<<<1000, 1, 0, stream>>>(data_ptr);
-    HIP_API_CALL(hipStreamSynchronize(stream));
-
-    test_kern_large<<<1100, 1, 0, stream>>>(data_ptr);
-    HIP_API_CALL(hipStreamSynchronize(stream));
-
-    auto   t2   = std::chrono::high_resolution_clock::now();
-    double time = std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1).count();
-
-    print_lock.lock();
-    std::cout << "[" << exe_name << "][scratch][" << rank << "][" << tid
-              << "] Runtime of scratch is " << time << " sec\n";
-    print_lock.unlock();
-}
-
-void
-run_migrate(int rank, int tid, hipStream_t stream, int, char** argv)
-{
-    using data_type            = uint64_t;
-    constexpr data_type init_v = 1;
-    constexpr data_type incr_v = 1;
-
-    auto t1 = std::chrono::high_resolution_clock::now();
-
-    HIP_API_CALL(hipStreamSynchronize(stream));
-
-    const auto* exe_name  = basename(argv[0]);
-    auto        page_data = std::vector<data_type>(1024, 0);
-
-    HIP_API_CALL(hipHostRegister(
-        page_data.data(), page_data.size() * sizeof(data_type), hipHostRegisterDefault));
-
-    data_type* d_ptr = nullptr;
-    HIP_API_CALL(hipHostGetDevicePointer(reinterpret_cast<void**>(&d_ptr), page_data.data(), 0));
-
-    for(auto& itr : page_data)
-        itr = init_v;
-
-    test_page_migrate<<<1, 1024, 0, stream>>>(d_ptr, incr_v);
-
-    HIP_API_CALL(hipStreamSynchronize(stream));
-
-    for(auto& itr : page_data)
-    {
-        auto diff = (itr - incr_v);
-        if(diff != init_v)
-        {
-            auto msg = std::stringstream{};
-            msg << "invalid diff: " << diff << ". expected: " << init_v;
-            throw std::runtime_error{msg.str()};
-        }
-    }
-
-    HIP_API_CALL(hipHostUnregister(page_data.data()));
-
-    auto   t2   = std::chrono::high_resolution_clock::now();
-    double time = std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1).count();
-
-    print_lock.lock();
-    std::cout << "[" << exe_name << "][migrate][" << rank << "][" << tid
-              << "] Runtime of migrate is " << time << " sec\n";
-    print_lock.unlock();
 }
 
 namespace
