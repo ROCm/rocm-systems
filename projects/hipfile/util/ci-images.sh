@@ -5,35 +5,35 @@
 #
 # Single source of truth for the ci_images jq used by the Precheck job in
 # .github/workflows/hipfile-ci-toplevel.yml ("Compute CI image names" step).
-# ci_images consumes build_ci_image_matrix.include and emits the keyed map of
+# ci_images consumes full_CI_images_matrix.include and emits the keyed map of
 # image names (and caches) used by the downstream build/test jobs.
 #
 # Two ways to use it:
 #   Sourced (CI):  source ci-images.sh
 #                  -> sets shell var ci_images from the env vars REGISTRY_URL,
-#                     tag, BUILD_CI_IMAGE_MATRIX
+#                     tag, FULL_CI_IMAGES_MATRIX
 #   Tests:         bash ci-images.sh --test
 #
 # Because the same jq is both shipped to CI and exercised by --test, the two
 # can never drift. The tests are self-contained: they feed literal
-# build_ci_image_matrix fixtures into compute_ci_images and assert the map, so
+# full_CI_images_matrix fixtures into compute_ci_images and assert the map, so
 # they do not depend on ci-matrices.sh or on any env vars.
 
 # --- pure functions: the jq, one copy -------------------------------------
 
-# Consume build_ci_image_matrix.include directly: it is already the
+# Consume full_CI_images_matrix.include directly: it is already the
 # deduplicated set of (platform, version) pairs to build. Single source of
 # truth -- no parallel exclude/include logic here. A partial-axis include row
 # (missing rocm_versions) produces a malformed image URL (e.g. "...:latest-rocm"
 # with no version); the resulting docker-pull failure surfaces the malformed
 # include to the maintainer.
-# Args: registry tag build_ci_image_matrix (JSON)
+# Args: registry tag full_CI_images_matrix (JSON)
 compute_ci_images() {
-  local registry="$1" tag="$2" build_ci_image_matrix="$3"
+  local registry="$1" tag="$2" full_CI_images_matrix="$3"
   jq -c -n \
     --arg registry "${registry}" \
     --arg tag "${tag}" \
-    --argjson build_matrix "${build_ci_image_matrix}" \
+    --argjson build_matrix "${full_CI_images_matrix}" \
     '
       $build_matrix.include
       | map({ platform: .supported_platforms,
@@ -143,9 +143,9 @@ _run_tests() {
 # Do NOT set shell options here: sourcing must not mutate the caller's shell.
 if [ "${BASH_SOURCE[0]}" != "${0}" ]; then
   # SC2034: ci_images is consumed by the sourcing CI step.
-  # SC2153: BUILD_CI_IMAGE_MATRIX is a CI env var, not a typo of build_ci_image_matrix.
+  # SC2153: FULL_CI_IMAGES_MATRIX is a CI env var, not a typo of full_CI_images_matrix.
   # shellcheck disable=SC2034,SC2153
-  ci_images=$(compute_ci_images "${REGISTRY_URL}" "${tag}" "${BUILD_CI_IMAGE_MATRIX}")
+  ci_images=$(compute_ci_images "${REGISTRY_URL}" "${tag}" "${FULL_CI_IMAGES_MATRIX}")
 else
   set -euo pipefail
   case "${1:-}" in
