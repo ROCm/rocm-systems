@@ -21,45 +21,35 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  *****************************************************************************/
+#ifndef _CTX_CREATE_TESTER_HPP_
+#define _CTX_CREATE_TESTER_HPP_
 
-#include "ctx_create_tester.hpp"
-
-#include <iostream>
-
-#include <rocshmem/rocshmem.hpp>
-
-using namespace rocshmem;
+#include "tester.hpp"
 
 /******************************************************************************
- * HOST TESTER CLASS METHODS
+ * HOST TESTER CLASS
  *****************************************************************************/
-CtxCreateTester::CtxCreateTester(TesterArguments args)
-    : Tester(args) {
-  _print_results = false;
-}
+class HostCtxCreateTester : public Tester {
+ public:
+  explicit HostCtxCreateTester(TesterArguments args);
+  virtual ~HostCtxCreateTester();
 
-CtxCreateTester::~CtxCreateTester() {}
+ protected:
+  virtual void resetBuffers(size_t size) override;
 
-void CtxCreateTester::resetBuffers([[maybe_unused]] size_t size) {}
+  virtual void preLaunchKernel() override;
 
-void CtxCreateTester::preLaunchKernel() {
-  int ret = rocshmem_ctx_create(0, &_ctx);
-  if (ret != ROCSHMEM_SUCCESS) {
-    std::cerr << "FAIL: rocshmem_ctx_create returned " << ret << "\n";
-    exit(ret);
-  }
-}
+  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
+                            size_t size) override;
 
-void CtxCreateTester::launchKernel(
-    [[maybe_unused]] dim3 gridSize, [[maybe_unused]] dim3 blockSize,
-    [[maybe_unused]] int loop, [[maybe_unused]] size_t size) {}
+  virtual void postLaunchKernel() override;
 
-void CtxCreateTester::postLaunchKernel() {
-  rocshmem_ctx_destroy(_ctx);
-}
+  virtual void verifyResults(size_t size) override;
 
-void CtxCreateTester::verifyResults([[maybe_unused]] size_t size) {
-  if (rocshmem_my_pe() == 0) {
-    std::cout << "PASS: rocshmem_ctx_create, and rocshmem_ctx_destroy succeeded\n";
-  }
-}
+ private:
+  rocshmem_ctx_t _ctx{};
+};
+
+#include "host_ctx_create_tester.cpp"
+
+#endif  // _CTX_CREATE_TESTER_HPP_

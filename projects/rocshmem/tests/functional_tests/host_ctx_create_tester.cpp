@@ -21,35 +21,45 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  *****************************************************************************/
-#ifndef _CTX_CREATE_TESTER_HPP_
-#define _CTX_CREATE_TESTER_HPP_
 
-#include "tester.hpp"
+#include "host_ctx_create_tester.hpp"
+
+#include <iostream>
+
+#include <rocshmem/rocshmem.hpp>
+
+using namespace rocshmem;
 
 /******************************************************************************
- * HOST TESTER CLASS
+ * HOST TESTER CLASS METHODS
  *****************************************************************************/
-class CtxCreateTester : public Tester {
- public:
-  explicit CtxCreateTester(TesterArguments args);
-  virtual ~CtxCreateTester();
+HostCtxCreateTester::HostCtxCreateTester(TesterArguments args)
+    : Tester(args) {
+  _print_results = false;
+}
 
- protected:
-  virtual void resetBuffers(size_t size) override;
+HostCtxCreateTester::~HostCtxCreateTester() {}
 
-  virtual void preLaunchKernel() override;
+void HostCtxCreateTester::resetBuffers([[maybe_unused]] size_t size) {}
 
-  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                            size_t size) override;
+void HostCtxCreateTester::preLaunchKernel() {
+  int ret = rocshmem_ctx_create(0, &_ctx);
+  if (ret != ROCSHMEM_SUCCESS) {
+    std::cerr << "FAIL: rocshmem_ctx_create returned " << ret << "\n";
+    exit(ret);
+  }
+}
 
-  virtual void postLaunchKernel() override;
+void HostCtxCreateTester::launchKernel(
+    [[maybe_unused]] dim3 gridSize, [[maybe_unused]] dim3 blockSize,
+    [[maybe_unused]] int loop, [[maybe_unused]] size_t size) {}
 
-  virtual void verifyResults(size_t size) override;
+void HostCtxCreateTester::postLaunchKernel() {
+  rocshmem_ctx_destroy(_ctx);
+}
 
- private:
-  rocshmem_ctx_t _ctx{};
-};
-
-#include "ctx_create_tester.cpp"
-
-#endif  // _CTX_CREATE_TESTER_HPP_
+void HostCtxCreateTester::verifyResults([[maybe_unused]] size_t size) {
+  if (rocshmem_my_pe() == 0) {
+    std::cout << "PASS: rocshmem_ctx_create, and rocshmem_ctx_destroy succeeded\n";
+  }
+}

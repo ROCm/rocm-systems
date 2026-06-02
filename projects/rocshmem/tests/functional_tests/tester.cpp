@@ -73,7 +73,7 @@
 #include "fence_ordering_tester.hpp"
 #include "tile_rma_tester.hpp"
 #include "reduce_on_stream_tester.hpp"
-#include "ctx_create_tester.hpp"
+#include "host_ctx_create_tester.hpp"
 
 #include "backend_bc.hpp"
 extern Backend* backend;
@@ -713,9 +713,9 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Reduce On Stream";
       testers.push_back(new ReduceOnStreamTester(args));
       break;
-    case CtxCreateTestType:
+    case HostCtxCreateTestType:
       test_name = "Host CTX Create";
-      testers.push_back(new CtxCreateTester(args));
+      testers.push_back(new HostCtxCreateTester(args));
       break;
     default:
       test_name = "Empty";
@@ -804,7 +804,7 @@ void Tester::execute() {
         _type != TeamCtxInfraOddEvenTestType &&
         _type != TeamCtxSharedInfraTestType &&
         _type != TeamCtxSubsetParentInfraTestType &&
-        _type != CtxCreateTestType) {
+        _type != HostCtxCreateTestType) {
       print(size);
     }
   }

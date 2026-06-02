@@ -151,7 +151,7 @@ declare -A TEST_NUMBERS=(
   ["tile_get_colmajor"]="115"
   ["tile_get_arbitrary"]="116"
   ["reduce_on_stream"]="117"
-  ["ctx_create"]="118"
+  ["host_ctx_create"]="118"
 )
 
 ExecTest() {
@@ -639,7 +639,7 @@ TestOther() {
   ExecTest  "teamctxsubsetparentinfra" 4  1            1
   ExecTest  "teamctxsubsetparentinfra" 5  1            1
   export ROCSHMEM_MAX_NUM_HOST_CONTEXTS=1024
-  ExecTest  "ctx_create"          2       1            1
+  ExecTest  "host_ctx_create"          2       1            1
   unset ROCSHMEM_MAX_NUM_CONTEXTS
   unset ROCSHMEM_MAX_NUM_HOST_CONTEXTS
 
