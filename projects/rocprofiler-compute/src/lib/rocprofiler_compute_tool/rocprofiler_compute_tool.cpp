@@ -87,6 +87,20 @@ void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                            rocprofiler_user_data_t* /*user_data*/,
                            void* callback_data)
 {
+    if (record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
+        record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD && record.operation == ROCPROFILER_CODE_OBJECT_LOAD)
+    {
+        assert(callback_data);
+        auto* tool_data = static_cast<std::unique_ptr<tool_data_t>*>(callback_data)->get();
+        if (tool_data->pc_sampling.enabled())
+        {
+            assert(record.payload);
+            const auto* obj_data = static_cast<rocprofiler_callback_tracing_code_object_load_data_t*>(
+                record.payload);
+            tool_data->pc_sampling.on_code_object_load(*obj_data);
+        }
+        return;
+    }
     g_sdk_callbacks->tool_tracing_callback(record, callback_data);
 }
 
@@ -146,15 +160,13 @@ void generate_output(tool_data_t* tool_data)
                                                         }),
                                          tool_data->counter_records.end());
     }
-    if (tool_data->counter_records.empty())
-    {
-        return;
-    }
-    // Write collected counter records and clean up
-    if (!tool_data->output_filename.empty())
+    if (!tool_data->counter_records.empty() && !tool_data->output_filename.empty())
     {
         g_counters_writer->write_counters(tool_data);
     }
+
+    if (tool_data->pc_sampling.enabled())
+        tool_data->pc_sampling.finalize();
 }
 
 void tool_fini(void* user_data)
@@ -172,21 +184,30 @@ void tool_fini(void* user_data)
 
 }  // namespace rocprofiler_compute_tool
 
-static std::string generate_output_filename(std::string_view output_path)
+static std::string generate_output_filename(std::string_view output_path, std::string_view suffix)
 {
     std::string filename{output_path};
     if (filename.back() != '/')
         filename += '/';
-
-    std::string base_filename = std::to_string(getpid()) + "_native_counter_collection.csv";
-    return filename + base_filename;
+    filename += std::to_string(getpid());
+    filename.append(suffix);
+    return filename;
 }
 
 std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
 {
     auto tool_data = std::make_unique<tool_data_t>();
 
-    tool_data->output_filename = generate_output_filename(g_input_parameters->get_output_path());
+    const auto output_path = g_input_parameters->get_output_path();
+    tool_data->output_filename = generate_output_filename(output_path, "_native_counter_collection.csv");
+
+    if (!g_input_parameters->get_pc_sampling_beta_enabled().empty())
+    {
+        const auto pc_mode = parse_pc_sampling_mode(
+            std::string{g_input_parameters->get_pc_sampling_method()});
+        tool_data->pc_sampling =
+            pc_sampling_feature_t{pc_mode, generate_output_filename(output_path, "_code_obj_info.json")};
+    }
 
     // ROCPROF_COUNTERS env. var. is a string like "pmc: counter1 counter2 ..."
     tool_data->requested_counters = std::string{g_input_parameters->get_requested_counters()};
