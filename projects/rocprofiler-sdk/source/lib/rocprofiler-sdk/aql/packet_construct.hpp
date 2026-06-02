@@ -74,11 +74,16 @@ namespace aql
  * consturcted start/stop/read packets along with allocated buffers needed
  * to collect the counter data.
  */
-class CounterPacketConstruct
+class __attribute__((visibility("default"))) CounterPacketConstruct
 {
 public:
     CounterPacketConstruct(rocprofiler_agent_id_t               agent,
                            const std::vector<counters::Metric>& metrics);
+
+    // Construct a packet generator for raw block counters (no Metric / YAML lookup required).
+    CounterPacketConstruct(rocprofiler_agent_id_t                    agent,
+                           const std::vector<aqlprofile_pmc_event_t>& raw_events);
+
     std::unique_ptr<hsa::CounterAQLPacket> construct_packet(const CoreApiTable&,
                                                             const AmdExtTable&);
 

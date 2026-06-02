@@ -251,6 +251,24 @@ parse_counter_envs()
     }
     return {};
 }
+// Parse ROCPROF_RAW_COUNTERS into a list of unparsed spec strings.
+// The env var contains space- or newline-separated specs such as "CPC,0,0" or "0:0:0".
+// Agent-based block name resolution is deferred to per-agent profile construction time
+// in tool.cpp, since an agent_id is required to resolve string block names.
+std::vector<std::string>
+parse_raw_counter_envs()
+{
+    auto raw = get_env("ROCPROF_RAW_COUNTERS", std::string{});
+    if(raw.empty()) return {};
+
+    auto specs = std::vector<std::string>{};
+    // Tokenise on spaces and newlines.
+    for(const auto& tok : rocprofiler::sdk::parse::tokenize(raw, " \t\n\r"))
+    {
+        if(!tok.empty()) specs.emplace_back(tok);
+    }
+    return specs;
+}
 }  // namespace
 
 config::config()
@@ -260,6 +278,7 @@ config::config()
 , counters{parse_counter_envs()}
 , att_param_perfcounters{
       parse_att_counters(get_env("ROCPROF_ATT_PARAM_PERFCOUNTERS", std::string{}))}
+, raw_counter_specs{parse_raw_counter_envs()}
 {
     if(kernel_filter_include.empty()) kernel_filter_include = std::string{".*"};
 

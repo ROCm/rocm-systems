@@ -110,6 +110,23 @@ process_completed_cb(completed_cb_params_t&& params)
         }
     }
 
+    // Raw-counter path: no ASTs are built (raw events bypass the YAML metric system).
+    // decoded_pkt already contains one entry per raw event keyed by synthetic metric ID;
+    // emit those records directly.
+    if(prof_config->asts.empty())
+    {
+        for(auto& [metric_id, records] : decoded_pkt)
+        {
+            out.reserve(out.size() + records.size());
+            for(auto& val : records)
+            {
+                val.agent_id    = prof_config->agent->id;
+                val.dispatch_id = _dispatch_id;
+                out.emplace_back(val);
+            }
+        }
+    }
+
     if(!out.empty())
     {
         if(buf)

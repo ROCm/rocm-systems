@@ -115,7 +115,7 @@ get_agent_cache(hsa_agent_t agent);
 std::unordered_set<std::string>&
 get_agent_available_properties();
 
-const aqlprofile_agent_handle_t*
+__attribute__((visibility("default"))) const aqlprofile_agent_handle_t*
 get_aql_agent(rocprofiler_agent_id_t id);
 
 void

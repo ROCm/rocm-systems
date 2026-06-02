@@ -59,6 +59,9 @@
 #include "lib/output/timestamps.hpp"
 #include "lib/output/tmp_file.hpp"
 #include "lib/output/tmp_file_buffer.hpp"
+#include "lib/rocprofiler-sdk/aql/packet_construct.hpp"
+#include "lib/rocprofiler-sdk/counters/core.hpp"
+#include "lib/rocprofiler-sdk/counters/raw_counter.hpp"
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/buffer_tracing.h>
@@ -1442,15 +1445,110 @@ generate_agent_profiles()
     std::unordered_map<rocprofiler_agent_id_t, std::atomic<uint64_t>> pos;
     for(const auto& agent : get_gpu_agents())
     {
+        if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+
         for(const auto& counter_set : tool::get_config().counters)
         {
-            if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
             auto profile = construct_counter_collection_profile(agent->id, counter_set);
             if(profile.has_value())
             {
                 profiles[agent->id].push_back(profile.value());
             }
         }
+
+        // pmc_raw / ROCPROF_RAW_COUNTERS: resolve per-agent and create a single profile.
+        const auto& raw_specs = tool::get_config().raw_counter_specs;
+        if(!raw_specs.empty())
+        {
+            auto events     = std::vector<aqlprofile_pmc_event_t>{};
+            auto event_specs = std::vector<std::string>{};  // parallel to events
+            for(const auto& spec : raw_specs)
+            {
+                auto rc = rocprofiler::counters::parse_raw_counter_string(spec, agent->id);
+                if(rc)
+                {
+                    events.push_back(
+                        {.block_index = rc->block_index,
+                         .event_id    = rc->counter_id,
+                         .flags       = aqlprofile_pmc_event_flags_t{0},
+                         .block_name  = static_cast<hsa_ven_amd_aqlprofile_block_name_t>(
+                             rc->block_id)});
+                    event_specs.push_back(spec);
+                }
+                else
+                {
+                    ROCP_WARNING << "Could not resolve raw counter spec '" << spec
+                                 << "' for agent " << agent->node_id << " (" << agent->name
+                                 << ") — skipping";
+                }
+            }
+
+            ROCP_INFO << fmt::format(
+                "[pmc_raw debug] generate_agent_profiles: agent={} events={} specs={}",
+                agent->node_id,
+                events.size(),
+                event_specs.size());
+
+            if(!events.empty())
+            {
+                auto config           = std::make_shared<rocprofiler::counters::counter_config>();
+                config->agent         = agent;
+                config->pkt_generator = std::make_unique<rocprofiler::aql::CounterPacketConstruct>(
+                    agent->id, events);
+
+                auto can_collect_status = config->pkt_generator->can_collect();
+                ROCP_INFO << fmt::format(
+                    "[pmc_raw debug] can_collect status={}", static_cast<int>(can_collect_status));
+
+                auto create_status = rocprofiler::counters::create_counter_profile(config);
+                ROCP_INFO << fmt::format(
+                    "[pmc_raw debug] create_counter_profile status={} config_id={}",
+                    static_cast<int>(create_status),
+                    config->id.handle);
+
+                if(can_collect_status == ROCPROFILER_STATUS_SUCCESS &&
+                   create_status == ROCPROFILER_STATUS_SUCCESS)
+                {
+                    profiles[agent->id].push_back(config->id);
+
+                    // Register synthetic counter info for each resolved raw event so that
+                    // generateCSV can map the counter_id back to a human-readable name.
+                    // The synthetic base metric ID matches what CounterPacketConstruct assigns:
+                    // 0x8000 + position-in-events-vector.
+                    constexpr uint64_t raw_id_base = 0x8000;
+                    auto& agent_info =
+                        CHECK_NOTNULL(tool_metadata)->agent_counter_info[agent->id];
+                    for(size_t idx = 0; idx < events.size(); ++idx)
+                    {
+                        auto counter_id  = rocprofiler_counter_id_t{.handle = raw_id_base + idx};
+                        auto parent_info = rocprofiler_counter_info_v1_t{
+                            .size        = sizeof(rocprofiler_counter_info_v1_t),
+                            .id          = counter_id,
+                            .name        = common::get_string_entry(event_specs[idx])->c_str(),
+                            .description = "",
+                            .block       = "",
+                            .expression  = "",
+                            .is_constant = 0,
+                            .is_derived  = 0,
+                            .dimensions_count           = 0,
+                            .dimensions                 = nullptr,
+                            .dimensions_instances_count = 0,
+                            .dimensions_instances       = nullptr,
+                            .spm_support                = 0,
+                            .reserved_padding           = {}};
+                        agent_info.emplace_back(agent->id, parent_info,
+                                                tool::counter_dimension_id_vec_t{},
+                                                tool::counter_dimension_info_vec_t{});
+                    }
+                }
+                else
+                {
+                    ROCP_WARNING << "Failed to create raw counter profile for agent "
+                                 << agent->node_id << " (" << agent->name << ")";
+                }
+            }
+        }
+
         pos[agent->id] = 0;
     }
     return agent_profiles{std::move(pos), tool::get_config().counter_groups_interval, profiles};
@@ -1758,14 +1856,33 @@ counter_dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_
     auto kernel_id = dispatch_data.dispatch_info.kernel_id;
     auto agent_id  = dispatch_data.dispatch_info.agent_id;
 
+    ROCP_INFO << fmt::format("[pmc_raw debug] counter_dispatch_callback: kernel_id={} agent={}",
+                             kernel_id,
+                             agent_id.handle);
+
     if(!is_targeted_kernel(kernel_id, kernel_iteration))
     {
+        ROCP_INFO << fmt::format("[pmc_raw debug] kernel_id={} not targeted — skipping",
+                                 kernel_id);
         return;
     }
-    else if(auto profile = get_device_counting_service(agent_id))
+
+    if(auto profile = get_device_counting_service(agent_id))
     {
+        ROCP_INFO << fmt::format(
+            "[pmc_raw debug] kernel_id={} targeted — profile config_id={} assigned",
+            kernel_id,
+            profile->handle);
         *config          = *profile;
         user_data->value = common::get_tid();
+    }
+    else
+    {
+        ROCP_INFO << fmt::format(
+            "[pmc_raw debug] kernel_id={} targeted but get_device_counting_service returned "
+            "nullopt for agent={}",
+            kernel_id,
+            agent_id.handle);
     }
 }
 
@@ -1799,6 +1916,10 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
         serialized_records.emplace_back(
             tool::tool_counter_value_t{_counter_id, record_data[count].counter_value});
     }
+
+    ROCP_INFO << fmt::format("[pmc_raw debug] counter_record_callback: record_count={} serialized={}",
+                             record_count,
+                             serialized_records.size());
 
     if(!serialized_records.empty())
     {
@@ -2177,7 +2298,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     const uint64_t buffer_size      = 16 * common::units::get_page_size();
     const uint64_t buffer_watermark = 15 * common::units::get_page_size();
 
-    tool_metadata->init(tool::metadata::inprocess_with_counters{get_config_perf_counters()});
+    tool_metadata->init(tool::metadata::inprocess_with_counters{
+        get_config_perf_counters(), !tool::get_config().raw_counter_specs.empty()});
 
     auto create_pause_resume_ctx = [](rocprofiler_context_id_t& ctx, std::string_view msg) {
         if(ctx == null_context_id)

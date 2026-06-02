@@ -1147,7 +1147,7 @@ get_agent(rocprofiler_agent_id_t id)
     return nullptr;
 }
 
-const aqlprofile_agent_handle_t*
+__attribute__((visibility("default"))) const aqlprofile_agent_handle_t*
 get_aql_agent(rocprofiler_agent_id_t id)
 {
     size_t pos = 0;

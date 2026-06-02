@@ -1597,6 +1597,9 @@ def run(app_args, args, **kwargs):
     if args.pmc_groups:
         trace_count += 1
 
+    if args.pmc_raw:
+        trace_count += 1
+
     # if marker tracing was requested, LD_PRELOAD the rocprofiler-sdk-roctx library
     # to override the roctx symbols of an app linked to the old roctracer roctx
     if args.marker_trace and not args.suppress_marker_preload:
@@ -1902,6 +1905,12 @@ def run(app_args, args, **kwargs):
             # args.pmc is a list of counter names: ['SQ_WAVES', 'FETCH_SIZE']
             counter_str = " ".join(args.pmc)
             update_env("ROCPROF_COUNTERS", f"pmc: {counter_str}", overwrite=True)
+
+    if args.pmc_raw:
+        # pmc_raw comes from the input file as a flat list of spec strings,
+        # e.g. ["CPC,0,0", "SQ,0,1"] or ["0:0:0"].
+        update_env("ROCPROF_COUNTER_COLLECTION", True, overwrite=True)
+        update_env("ROCPROF_RAW_COUNTERS", " ".join(args.pmc_raw), overwrite=True)
 
     if args.pmc_groups:
         group_env = ""

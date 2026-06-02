@@ -200,7 +200,7 @@ get_controller()
     return controller;
 }
 
-rocprofiler_status_t
+__attribute__((visibility("default"))) rocprofiler_status_t
 create_counter_profile(std::shared_ptr<counter_config> config)
 {
     auto status = ROCPROFILER_STATUS_SUCCESS;

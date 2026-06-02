@@ -15,7 +15,15 @@
                       "type" : "array",
                       "description": "list of counters to collect"
                      },
-                    
+
+                    "pmc_raw": {
+                      "type": "array",
+                      "description": "List of raw hardware block counter specs to collect, bypassing YAML metric definitions. Each entry is a string in one of the following formats: 'BLOCK_NAME,block_index,counter_id' (e.g. 'CPC,0,0'), 'HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPC,0,0', 'AQLPROFILE_BLOCK_NAME_CPC,0,0', or the all-numeric form 'block_id:block_index:counter_id' (e.g. '0:0:0'). Spaces around commas are ignored.",
+                      "items": {
+                        "type": "string"
+                      }
+                     },
+
                     "pmc_groups": {
                          "type" : "array",
                          "description": "An array containing lists of PMC counters to collect in a multiplexing fashion (e.x. [[counter1, counter2], [counter3, counter4]])"

@@ -1171,6 +1171,9 @@ write_perfetto(
                 {
                     for(auto& [counter_id, counter_value] : it->second)
                     {
+                        auto name_it = counter_id_to_name.find(counter_id);
+                        if(name_it == counter_id_to_name.end()) continue;
+
                         counters_endpoints[info.agent_id][counter_id].emplace(
                             counters_extremes.first - extremes_endpoint_buffer, 0);
                         counters_endpoints[info.agent_id][counter_id].emplace(
@@ -1181,7 +1184,7 @@ write_perfetto(
                         auto track_name_ss = std::stringstream{};
                         track_name_ss << agent_index_info.label << " [" << agent_index_info.index
                                       << "] "
-                                      << "PMC " << counter_id_to_name.at(counter_id);
+                                      << "PMC " << name_it->second;
 
                         auto track_name = track_name_ss.str();
 

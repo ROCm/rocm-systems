@@ -143,7 +143,8 @@ struct metadata
     // Tag type for initializing with specific counters for rocprofv3 tool.
     struct inprocess_with_counters
     {
-        std::set<std::string> counters = {};
+        std::set<std::string> counters         = {};
+        bool                  has_raw_counters = false;
     };
 
     pid_t                             process_id                  = 0;

@@ -99,6 +99,48 @@ CounterPacketConstruct::CounterPacketConstruct(rocprofiler_agent_id_t           
     _events = get_all_events();
 }
 
+CounterPacketConstruct::CounterPacketConstruct(
+    rocprofiler_agent_id_t                    agent,
+    const std::vector<aqlprofile_pmc_event_t>& raw_events)
+: _agent(agent)
+{
+    auto aql_agent = *CHECK_NOTNULL(rocprofiler::agent::get_aql_agent(agent));
+
+    // Raw counter IDs use the range [0x8000, 0x8000 + N) to avoid collisions with
+    // YAML-derived metric IDs which start at 1 and are typically < 0x8000.
+    constexpr uint64_t raw_id_base = 0x8000;
+
+    for(size_t i = 0; i < raw_events.size(); ++i)
+    {
+        const auto& event = raw_events[i];
+
+        bool validate_result = false;
+        LOG_IF(FATAL,
+               aqlprofile_validate_pmc_event(aql_agent, &event, &validate_result) !=
+                   HSA_STATUS_SUCCESS);
+        ROCP_FATAL_IF(!validate_result) << fmt::format(
+            "Invalid raw event: block={} index={} counter_id={}",
+            static_cast<int>(event.block_name),
+            event.block_index,
+            event.event_id);
+
+        // Synthesise a Metric so that EvaluateAST::read_pkt can map the raw event back
+        // to a record ID and counter name. The name encodes the raw spec as written by
+        // the user; the ID is unique within this packet.
+        auto synthetic_name = fmt::format("{},{},{}",
+                                          static_cast<int>(event.block_name),
+                                          event.block_index,
+                                          event.event_id);
+        auto metric = counters::Metric("", synthetic_name, "", "", "", "", "", raw_id_base + i);
+
+        _metrics.emplace_back().instances.push_back(event);
+        _metrics.back().events.push_back(event);
+        _metrics.back().metric   = metric;
+        _event_to_metric[event]  = metric;
+    }
+    _events = get_all_events();
+}
+
 std::unique_ptr<hsa::CounterAQLPacket>
 CounterPacketConstruct::construct_packet(const CoreApiTable& coreapi, const AmdExtTable& ext)
 {
@@ -259,7 +301,7 @@ CounterPacketConstruct::get_counter_events(const counters::Metric& metric) const
     throw std::runtime_error(fmt::format("Cannot Find Events for {}", metric));
 }
 
-rocprofiler_status_t
+__attribute__((visibility("default"))) rocprofiler_status_t
 CounterPacketConstruct::can_collect()
 {
     // Verify that the counters fit within harrdware limits

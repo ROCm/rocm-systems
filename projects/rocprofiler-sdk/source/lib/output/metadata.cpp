@@ -275,7 +275,7 @@ metadata::init(inprocess_with_counters&& data)
     inprocess_init = true;
 
     // No counters to process, exit early. Kernel trace doesn't have to iterate counters.
-    if(data.counters.empty()) return;
+    if(data.counters.empty() && !data.has_raw_counters) return;
 
     auto gpu_index_to_counters_map = std::map<int, std::set<std::string>>{};
     for(const auto& agent : agents)

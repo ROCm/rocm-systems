@@ -637,6 +637,8 @@ generate_csv(const output_config&                    cfg,
             auto row_ss    = std::stringstream{};
             for(auto& [counter_id, counter_value] : counter_id_value)
             {
+                auto name_it = counter_id_to_name.find(counter_id);
+                if(name_it == counter_id_to_name.end()) continue;
                 tool::csv::counter_collection_csv_encoder::write_row(
                     row_ss,
                     correlation_id.internal,
@@ -658,7 +660,7 @@ generate_csv(const output_config&                    cfg,
                     kernel_info->arch_vgpr_count,
                     kernel_info->accum_vgpr_count,
                     kernel_info->sgpr_count,
-                    counter_id_to_name.at(counter_id),
+                    name_it->second,
                     counter_value,
                     record.dispatch_data.start_timestamp,
                     record.dispatch_data.end_timestamp);

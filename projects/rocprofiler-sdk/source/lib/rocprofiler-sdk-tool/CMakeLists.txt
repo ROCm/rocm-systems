@@ -26,6 +26,15 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-amd-comgr
             rocprofiler-sdk::rocprofiler-sdk-att-parser)
 
+# Prevent aqlprofile static-lib symbols (e.g. hsa_ven_amd_aqlprofile_get_info,
+# HsaRsrcFactory, fallback_init) from being exported by the tool .so.
+# Those symbols must only be resolved from librocprofiler-sdk.so, which has a
+# properly initialised HsaRsrcFactory.  If the tool .so exports them too, the
+# dynamic linker's first-definition rule causes the tool's uninitialised copy
+# to interpose the SDK's copy, leading to a null dlsym_table call and SIGSEGV.
+target_link_options(rocprofiler-sdk-tool
+    PRIVATE "-Wl,--exclude-libs,librocprofiler-sdk-aqlprofile.a")
+
 set_target_properties(
     rocprofiler-sdk-tool
     PROPERTIES LIBRARY_OUTPUT_DIRECTORY

@@ -126,7 +126,8 @@ struct config : output_config
     bool   kfd_queue_trace               = get_env("ROCPROF_KFD_QUEUE_TRACE", false);
     bool   kfd_dropped_events_trace      = get_env("ROCPROF_KFD_DROPPED_EVENTS_TRACE", false);
     bool   scratch_memory_trace          = get_env("ROCPROF_SCRATCH_MEMORY_TRACE", false);
-    bool   counter_collection            = get_env("ROCPROF_COUNTER_COLLECTION", false);
+    bool   counter_collection            = get_env("ROCPROF_COUNTER_COLLECTION", false) ||
+                                          !get_env("ROCPROF_RAW_COUNTERS", std::string{}).empty();
     bool   hip_runtime_api_trace         = get_env("ROCPROF_HIP_RUNTIME_API_TRACE", false);
     bool   hip_compiler_api_trace        = get_env("ROCPROF_HIP_COMPILER_API_TRACE", false);
     bool   rccl_api_trace                = get_env("ROCPROF_RCCL_API_TRACE", false);
@@ -173,6 +174,9 @@ struct config : output_config
     std::unordered_set<size_t>         kernel_filter_range    = {};
     std::vector<std::set<std::string>> counters               = {};
     std::vector<att_perfcounter>       att_param_perfcounters = {};
+    // Raw block counter specs from ROCPROF_RAW_COUNTERS (unparsed strings).
+    // Resolved per-agent at profile construction time in tool.cpp.
+    std::vector<std::string> raw_counter_specs = {};
 
     std::queue<CollectionPeriod> collection_periods = {};
     uint64_t counter_groups_random_seed = get_env("ROCPROF_COUNTER_GROUPS_RANDOM_SEED", 0);
