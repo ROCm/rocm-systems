@@ -1020,66 +1020,16 @@ NCCL_PARAM(ChunkSize, "CHUNK_SIZE", 0);
 // Note that NCCL enables batching by default and it is needed to achieve perf for with smaller messages <= 4MB
 // Currently, p2p-batching thresholds are only used for gfx950 for 16 nodes and above
 // previously, p2p-batching was causing regression on all node-counts for larger message sizes (64KB "per-rank")
-// we want to enable by default only for gfx950, so we use rcclEffectiveP2pBatchEnable helper to branch based on arch
-//
-// RCCL_P2P_BATCH_FORCE_ENABLE=1 overrides the AINIC CTS check for testing.
-RCCL_PARAM(P2pBatchEnable,      "P2P_BATCH_ENABLE",       0);
-RCCL_PARAM(P2pBatchThreshold,   "P2P_BATCH_THRESHOLD",    1 << 16);  // 64k per-rank message size
-RCCL_PARAM(P2pBatchForceEnable, "P2P_BATCH_FORCE_ENABLE", 0); // Force-enable regardless of CTS state
-
-// Weak declarations of AINIC plugin (net_ib_cast) param accessors.
-// When the AINIC plugin is not linked in these resolve
-// to nullptr, allowing a safe null-check before calling.
-__attribute__((weak)) int64_t rcclParamIbCastCtsOffloadEnabled();
-__attribute__((weak)) int64_t rcclParamIbCastP2pDisableCts();
-
-// Param-based heuristic mirroring IbCastIsCtsOffloadEnabled(isP2p=1) from
-// net_ib_cast/connect.cc.  Returns true when P2P CTS offloading appears active
-// based on env params alone.  Returns false if the AINIC plugin is not linked
-// (non-AINIC build).
-//
-// Note: This is intentionally conservative (may return true even when the
-// runtime has disabled CTS via IbCastOffloadEnabled).  False positives —
-// treating CTS as active when it is not — are acceptable here because this
-// function is used as a safety gate; suppressing P2P batching unnecessarily is
-// preferable to enabling it incorrectly.  If precise runtime state is needed,
-// use RCCL_P2P_BATCH_FORCE_ENABLE to override the decision explicitly.
-static bool rcclAINIC_P2pCtsActive() {
-  // Plugin not linked → no CTS capability → not active.
-  if (!rcclParamIbCastCtsOffloadEnabled || !rcclParamIbCastP2pDisableCts) return false;
-
-  // Global CTS: param==0 → disabled; -1 (default) or positive → enabled.
-  int64_t ctsGlobal = rcclParamIbCastCtsOffloadEnabled();
-  if (ctsGlobal == 0) return false;  // global CTS off → P2P CTS also off
-
-  // P2P-specific: RCCL_IB_P2P_DISABLE_CTS != 0 → CTS disabled for P2P (default 1).
-  int64_t p2pDis = rcclParamIbCastP2pDisableCts();
-  return (p2pDis == 0);  // CTS active for P2P only when explicitly set to 0
-}
+// we want to auto-enable only for gfx950 paired with a non-AINIC NIC, so we use
+// rcclEffectiveP2pBatchEnable helper to branch based on arch and NIC type.
+RCCL_PARAM(P2pBatchEnable,    "P2P_BATCH_ENABLE",    -1);
+RCCL_PARAM(P2pBatchThreshold, "P2P_BATCH_THRESHOLD", 1 << 16);  // 64k per-rank message size
 
 static int rcclEffectiveP2pBatchEnable(struct ncclComm* comm) {
-  (void)comm;
-  // rcclUseAinic() (net.h / net.cc) detects AMD Pollara via PCI device IDs;
-  // it caches the result internally via std::call_once.
-  if (rcclUseAinic()) {
-    // AINIC gating (P2P batching + CTS offloading combination still in progress):
-    //   CTS active   → RCCL_P2P_BATCH_ENABLE=1 alone is suppressed;
-    //                  only RCCL_P2P_BATCH_FORCE_ENABLE=1 can enable batching.
-    //   CTS inactive → either RCCL_P2P_BATCH_ENABLE=1 or
-    //                  RCCL_P2P_BATCH_FORCE_ENABLE=1 enables batching.
-    bool ctsActive = rcclAINIC_P2pCtsActive();
-    bool enabled = (rcclParamP2pBatchForceEnable() > 0) ||
-                   (!ctsActive && rcclParamP2pBatchEnable() > 0);
-    INFO(NCCL_INIT, "RCCL P2P batching on AINIC: %s (P2P CTS %s)",
-         enabled ? "enabled" : "disabled",
-         ctsActive ? "active" : "inactive");
-    return enabled ? 1 : 0;
-  }
-
-  // Non-AINIC: respect RCCL_P2P_BATCH_ENABLE; off by default.
   auto userInput = rcclParamP2pBatchEnable();
   if (userInput >= 0) return userInput;
-  return 0;
+  bool isGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
+  return (isGfx950 && !rcclUseAinic()) ? 1 : 0;
 }
 
 // Put p2p op in plan assuming there is sizeof(ncclDevWorkBatch) in batch budget
