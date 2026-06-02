@@ -33,7 +33,11 @@ include(ExternalProject)
 enable_language(CXX)
 
 # ---- knobs ------------------------------------------------------------------
-set(MIRAGE_HOTSWAP_STAGE "${CMAKE_CURRENT_SOURCE_DIR}/target/hotswap"
+# Stage into the workspace Rust target dir so the lib lands in `target/lib`,
+# which mirage discovers automatically (it searches `../lib` relative to the
+# `target/<profile>/mirage` binary). The LLVM tools and python runtime land in
+# the sibling `target/llvm-tools` and `target/runtime/hotswap_py`.
+set(MIRAGE_HOTSWAP_STAGE "${CMAKE_CURRENT_SOURCE_DIR}/target"
     CACHE PATH "Directory the built HotSwap artifacts are staged into")
 
 # Stage 1: COMGR transpiler (llvm-project fork). Default to the in-tree

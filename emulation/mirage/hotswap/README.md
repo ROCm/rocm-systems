@@ -101,7 +101,8 @@ cmake --build build --target hotswap
 ```
 
 This mirrors the reference Docker recipe and produces three artifact sets,
-staged under `target/hotswap/` (which discovery searches automatically):
+staged under `target/` (the lib lands in `target/lib`, which discovery searches
+automatically):
 
 1. **COMGR transpiler** (`libamd_comgr.so`) + the LLVM tools, from the
    `llvm-project` HotSwap fork. The in-tree
@@ -117,7 +118,7 @@ for the full list):
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
-| `MIRAGE_HOTSWAP_STAGE` | Where artifacts are staged | `target/hotswap` |
+| `MIRAGE_HOTSWAP_STAGE` | Where artifacts are staged | `target` |
 | `MIRAGE_HOTSWAP_LLVM_SRC` | Existing llvm-project (HotSwap fork) checkout | `llvm-project-hotswap` |
 | `MIRAGE_HOTSWAP_ROCR_REPO` / `_REF` | ROCR fork URL / ref | `martin-luecke/rocm-systems` @ `users/mluecke/hotswap-compatibility` |
 | `MIRAGE_HOTSWAP_TESTING_REPO` / `_REF` | intercept repo URL / ref | `harsh-amd/rocm-hotswap-testing` @ `mluecke/hotswap-env-contract` |
