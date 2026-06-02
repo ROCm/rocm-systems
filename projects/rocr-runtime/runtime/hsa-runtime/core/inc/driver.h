@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -158,7 +158,6 @@ public:
   /// if @p type is one of the SDMA queue types.
   /// @param[in] queue_addr Address of the queue's ring buffer.
   /// @param[in] queue_size_bytes Size of the queue's ring buffer in bytes.
-  /// @param[in] queue_metadata_addr Address of the queue's metadata ring buffer.
   /// @param[in] queue_metadata_size_bytes Size of the queue's metadata ring buffer in bytes.
   /// @param[in] event HsaEvent for event-driven callbacks.
   /// @param[out] queue_resource Queue resource information populated by the driver.
@@ -291,6 +290,31 @@ public:
   /// @retval HSA_STATUS_ERROR_INVALID_AGENT if the agent's driver doesn't support
   /// SMI events.
   virtual hsa_status_t OpenSMI(uint32_t node_id, int* fd) const {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  /// @brief Imports an OS-native external semaphore handle (e.g. a
+  /// Vulkan-exported NT handle on Windows) into the kernel-mode driver
+  /// and returns an opaque hsa_amd_external_semaphore_t whose lifecycle
+  /// the runtime owns.
+  /// @param[in] node_id Node ID of the agent that will use the semaphore.
+  /// @param[in] nt_handle OS-native handle (NT handle for Win32 types).
+  /// @param[in] type Handle type from the public hsa_amd extension.
+  /// @param[out] out_sem On success, the imported semaphore.
+  /// @retval HSA_STATUS_ERROR_INVALID_AGENT if the agent's driver does
+  /// not support external semaphore import.
+  virtual hsa_status_t ImportExternalSemaphore(uint32_t node_id, void* nt_handle,
+                                               hsa_amd_external_semaphore_handle_type_t type,
+                                               hsa_amd_external_semaphore_t* out_sem) const {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  /// @brief Releases an external semaphore handle previously returned by
+  /// @ref ImportExternalSemaphore.
+  /// @param[in] sem Semaphore to release.
+  /// @retval HSA_STATUS_ERROR_INVALID_AGENT if the driver does not support
+  /// external semaphores.
+  virtual hsa_status_t DestroyExternalSemaphore(hsa_amd_external_semaphore_t sem) const {
     return HSA_STATUS_ERROR_INVALID_AGENT;
   }
 

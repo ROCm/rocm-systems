@@ -46,7 +46,7 @@ CODE_COVERAGE_USE_FAKE=1 ./code-coverage
 **Arguments:**
 
 | Position | Description | Default |
-|----------|-------------|---------|
+| ---------- | ------------- | --------- |
 | 1 | Fibonacci number to compute | 10 |
 | 2 | Number of threads | min(16, hardware concurrency) |
 | 3 | Number of iterations per thread | 5000 |
@@ -54,7 +54,7 @@ CODE_COVERAGE_USE_FAKE=1 ./code-coverage
 **Environment:**
 
 | Variable | Description |
-|----------|-------------|
+| ---------- | ------------- |
 | `CODE_COVERAGE_USE_FAKE` | If set, switches to `run_fake()` code path |
 
 ## Profiling with rocprofiler-systems
@@ -70,7 +70,7 @@ rocprof-sys-run -e CODE_COVERAGE_USE_FAKE=1 -- ./code-coverage 10 4 2000
 ### Recommended Configuration
 
 | Variable | Value | Purpose |
-|----------|-------|---------|
+| ---------- | ------- | --------- |
 | `ROCPROFSYS_TRACE` | `true` | Generate Perfetto trace |
 | `ROCPROFSYS_PROFILE` | `true` | Generate call-stack profile showing exercised functions |
 | `ROCPROFSYS_USE_SAMPLING` | `ON` | Enable sampling for coverage correlation |

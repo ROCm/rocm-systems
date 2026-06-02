@@ -32,6 +32,29 @@
 
 namespace amd {
 
+// Compile-time upper bound for DynDataPrefetch region arrays.
+// The actual device limit is queried at runtime via hipDeviceAttributeMaxDynDataPrefetchRegions.
+constexpr uint32_t kDynDataPrefetchMaxRegions = 2;
+
+struct DynDataPrefetchRegion {
+  void*    baseAddress;
+  size_t   burstSize;
+  uint32_t numBursts;
+  uint32_t stride;
+};
+
+struct DynDataPrefetchConfig {
+  uint32_t             numRegions;
+  uint8_t              hints;
+  DynDataPrefetchRegion regions[kDynDataPrefetchMaxRegions];
+
+  DynDataPrefetchConfig() : numRegions(0), hints(0) {
+    memset(regions, 0, sizeof(regions));
+  }
+
+  bool isEnabled() const { return numRegions > 0; }
+};
+
 /*! \addtogroup Runtime
  *  @{
  *
@@ -53,7 +76,7 @@ class Event : public RuntimeObject {
   typedef void(CL_CALLBACK* CallBackFunction)(cl_event event, int32_t command_exec_status,
                                               void* user_data);
 
-  struct CallBackEntry : public HeapObject {
+  struct CallBackEntry {
     struct CallBackEntry* next_;  //!< the next entry in the callback list.
 
     std::atomic<CallBackFunction> callback_;  //!< callback function pointer.
@@ -259,9 +282,8 @@ union CopyMetadata {
     uint32_t isAsync_ : 1;
     uint32_t copyEnginePreference_ : 2;
     uint32_t srcAccessOrder_ : 2;       //!< Source access ordering for batch copies
-    uint32_t preferCE_ : 1;             //!< Prefer compute engine over SDMA
     uint32_t copyOpType_ : 3;           //!< Operation type (CopyOpType)
-    uint32_t reserved_ : 23;            //!< Reserved for future use
+    uint32_t reserved_ : 24;            //!< Reserved for future use
   };
   uint32_t flags_;
   CopyMetadata() : flags_(0) {}
@@ -269,7 +291,6 @@ union CopyMetadata {
       : isAsync_(isAsync),
         copyEnginePreference_(copyEnginePreference),
         srcAccessOrder_(kSrcAccessOrderStream),
-        preferCE_(0),
         copyOpType_(kCopyOpLinear),
         reserved_(0) {}
   CopyMetadata(bool isAsync, CopyEnginePreference copyEnginePreference,
@@ -277,7 +298,6 @@ union CopyMetadata {
       : isAsync_(isAsync),
         copyEnginePreference_(copyEnginePreference),
         srcAccessOrder_(srcAccessOrder),
-        preferCE_(0),
         copyOpType_(kCopyOpLinear),
         reserved_(0) {}
 };
@@ -1173,7 +1193,7 @@ class BatchCopyMemoryCommand : public Command {
   virtual void submit(device::VirtualDevice& device) { device.submitBatchCopyMemory(*this); }
 
   //! Return the vector of copy operations
-  std::vector<BatchCopyOp>& copyOps() { return copyOps_; }
+  const std::vector<BatchCopyOp>& copyOps() const { return copyOps_; }
 
   //! Return the number of copy operations in the batch
   size_t count() const { return copyOps_.size(); }
@@ -1326,6 +1346,7 @@ class NDRangeKernelCommand : public Command {
   uint64_t allGridSum_;      //!< A sum of all grids in multi GPU launch
   uint32_t firstDevice_;     //!< Device index of the first device in the gridc
   uint32_t numWorkgroups_;   //!< Total number of workgroups in the current launch
+  DynDataPrefetchConfig dynDataPrefetchConfig_;  //!< Dynamic data prefetch configuration
 
  public:
   enum {
@@ -1394,6 +1415,9 @@ class NDRangeKernelCommand : public Command {
   uint64_t firstDevice() const { return firstDevice_; }
 
   uint32_t numWorkgroups() const { return numWorkgroups_; }
+
+  const DynDataPrefetchConfig& dynDataPrefetchConfig() const { return dynDataPrefetchConfig_; }
+  void setDynDataPrefetchConfig(const DynDataPrefetchConfig& cfg) { dynDataPrefetchConfig_ = cfg; }
 
   //! Set the local work size.
   void setLocalWorkSize(const NDRange& local) { sizes_.local() = local; }
@@ -1471,6 +1495,9 @@ class ExternalSemaphoreCmd : public Command {
 
 
 class Marker : public Command {
+  device::Signal* ipc_completion_signal_ = nullptr;
+  device::Signal* ipc_dep_signal_ = nullptr;
+
  public:
   //! Create a new Marker
   Marker(HostQueue& queue, bool userVisible, const EventWaitList& eventWaitList = nullWaitList,
@@ -1478,6 +1505,14 @@ class Marker : public Command {
       : Command(queue, userVisible ? CL_COMMAND_MARKER : 0, eventWaitList, 0, waitingEvent) {
     cpu_wait_ = cpu_wait;
   }
+
+  //! Attach an IPC signal as completion_signal on the barrier packet (for event record)
+  void setIpcCompletionSignal(device::Signal* s) { ipc_completion_signal_ = s; }
+  device::Signal* ipcCompletionSignal() const { return ipc_completion_signal_; }
+
+  //! Attach an IPC signal as dep_signal on the barrier packet (for stream wait)
+  void setIpcDepSignal(device::Signal* s) { ipc_dep_signal_ = s; }
+  device::Signal* ipcDepSignal() const { return ipc_dep_signal_; }
 
   //! The actual command implementation.
   virtual void submit(device::VirtualDevice& device) { device.submitMarker(*this); }
@@ -1513,6 +1548,9 @@ class AccumulateCommand : public Command {
       }
     }
   }
+
+  //! Get HW events map (for profiling pre-patched graph signals)
+  const std::unordered_map<Device*, std::vector<void*>>& getHwEvents() const { return hw_events_; }
 
   //! Add kernel name to the list if available
   void addKernelName(const std::string* kernelName) { kernelNames_.push_back(kernelName); }

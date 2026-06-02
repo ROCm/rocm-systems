@@ -25,9 +25,11 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/counters/ioctl.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 #include "lib/rocprofiler-sdk/counters/tests/code_object_loader.hpp"
 #include "lib/rocprofiler-sdk/counters/tests/hsa_tables.hpp"
+#include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
@@ -645,6 +647,25 @@ protected:
 
 TEST_F(device_counting_service_test, sync_counters) { test_run(); }
 TEST_F(device_counting_service_test, async_counters) { test_run(ROCPROFILER_COUNTER_FLAG_ASYNC); }
+
+TEST(profiler_ioctl_request, version_1_22_uses_legacy_request)
+{
+    EXPECT_EQ(counters::get_profiler_ioctl_request_for_version(1, 22),
+              static_cast<unsigned long>(AMDKFD_IOC_PROFILER));
+}
+
+TEST(profiler_ioctl_request, version_1_23_uses_mainline_request)
+{
+    EXPECT_EQ(counters::get_profiler_ioctl_request_for_version(1, 23),
+              static_cast<unsigned long>(AMDKFD_IOWR(0x28, struct kfd_ioctl_profiler_args)));
+}
+
+TEST(profiler_ioctl_request, version_2_0_uses_mainline_request)
+{
+    EXPECT_EQ(counters::get_profiler_ioctl_request_for_version(2, 0),
+              static_cast<unsigned long>(AMDKFD_IOWR(0x28, struct kfd_ioctl_profiler_args)));
+}
+
 TEST_F(device_counting_service_test, sync_grbm_verify)
 {
     test_run(ROCPROFILER_COUNTER_FLAG_NONE, {"GRBM_COUNT"}, 50000);

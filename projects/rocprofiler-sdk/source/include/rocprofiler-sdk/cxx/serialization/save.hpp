@@ -1274,6 +1274,7 @@ save(ArchiveT& ar, rocprofiler_counter_info_v1_t data)
     ROCP_SDK_SAVE_VALUE("instances",
                         rocprofiler::sdk::container::make_c_array(data.dimensions_instances,
                                                                   data.dimensions_instances_count));
+    ROCP_SDK_SAVE_DATA_FIELD(spm_support);
 }
 
 template <typename ArchiveT>

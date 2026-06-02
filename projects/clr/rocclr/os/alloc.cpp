@@ -63,9 +63,4 @@ void GuardedMemory::deallocate(void* ptr) {
   Os::releaseMemory(static_cast<address>(ptr) - offset, size);
 }
 
-void* HeapObject::operator new(size_t size) { return malloc(size); }
-
-void HeapObject::operator delete(void* obj) { free(obj); }
-
-
 }  // namespace amd

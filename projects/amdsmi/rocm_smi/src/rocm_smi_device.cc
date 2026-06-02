@@ -22,7 +22,6 @@
 
 #include "rocm_smi/rocm_smi_device.h"
 
-#include <pthread.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -117,7 +116,6 @@ static const char* kDevNumaNodeFName = "numa_node";
 static const char* kDevGpuMetricsFName = "gpu_metrics";
 
 // GPU Overdrive (gpu_od) paths - used internally via Device helper methods
-static const char* kDevGpuOdPath = "gpu_od";
 static const char* kDevGpuOdFanMinPwmFName = "gpu_od/fan_ctrl/fan_minimum_pwm";
 
 static const char* kDevGpuPartitionMetricsFName = "xcp/xcp_metrics";

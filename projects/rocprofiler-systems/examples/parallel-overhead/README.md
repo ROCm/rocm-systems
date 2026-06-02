@@ -30,7 +30,7 @@ cmake --build <build_dir> --target parallel-overhead parallel-overhead-locks
 ```
 
 | Target | Description |
-|--------|-------------|
+| -------- | ------------- |
 | `parallel-overhead` | Lock-free atomic accumulation |
 | `parallel-overhead-locks` | Mutex-based accumulation (`USE_LOCKS=1`) |
 
@@ -50,7 +50,7 @@ cmake --build <build_dir> --target parallel-overhead parallel-overhead-locks
 **Arguments:**
 
 | Position | Description | Default |
-|----------|-------------|---------|
+| ---------- | ------------- | --------- |
 | 1 | Fibonacci number to compute | 10 |
 | 2 | Number of threads | min(16, hardware concurrency) |
 | 3 | Number of iterations per thread | 50000 |
@@ -70,7 +70,7 @@ rocprof-sys-run -- ./parallel-overhead-locks 10 8 10000
 ### Recommended Configuration
 
 | Variable | Value | Purpose |
-|----------|-------|---------|
+| ---------- | ------- | --------- |
 | `ROCPROFSYS_TRACE` | `true` | Generate Perfetto trace for timeline analysis |
 | `ROCPROFSYS_PROFILE` | `true` | Generate call-stack profile |
 | `ROCPROFSYS_USE_SAMPLING` | `ON` | Enable statistical sampling |

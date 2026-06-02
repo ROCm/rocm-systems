@@ -61,7 +61,7 @@ HIP_TEST_CASE(Unit_hipStreamDestroy_WithPendingWork) {
   HIP_CHECK(hipMalloc(&deviceData, sizeof(int) * numDataPoints));
   HIP_CHECK(hipMemset(deviceData, 0, sizeof(int) * numDataPoints));
 
-  LaunchDelayKernel(std::chrono::milliseconds(500), stream);
+  LaunchDelayKernel(std::chrono::milliseconds(isQuickLevel() ? 50 : 500), stream);
   setToOne<<<1, numDataPoints, 0, stream>>>(deviceData, numDataPoints);
   SECTION("Without stream query") { fprintf(stderr, "Without stream query\n"); }
   SECTION("With stream query") {

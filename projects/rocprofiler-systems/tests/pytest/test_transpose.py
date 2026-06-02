@@ -44,7 +44,8 @@ from rocprofsys import (
 def transpose_env() -> dict[str, str]:
     """Environment variables for transpose tests."""
     return {
-        "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,kernel_dispatch,memory_copy,memory_allocation,hsa_api"
+        "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,kernel_dispatch,memory_copy,memory_allocation,hsa_api",
+        "ROCPROFSYS_AMD_SMI_METRICS": "busy,temp,power,mem_usage,gfx_clock,mem_clock",
     }
 
 
@@ -53,6 +54,16 @@ def rocprofiler_env(transpose_env: dict[str, str], gpu_info: GPUInfo) -> dict[st
     """Environment with ROCm events configured."""
     env = transpose_env.copy()
     env["ROCPROFSYS_ROCM_EVENTS"] = gpu_info.rocm_events_for_test
+    return env
+
+
+@pytest.fixture
+def gpu_perf_counter_env(
+    transpose_env: dict[str, str], gpu_info: GPUInfo
+) -> dict[str, str]:
+    """Environment with GPU perf counters configured."""
+    env = transpose_env.copy()
+    env["ROCPROFSYS_GPU_PERF_COUNTERS"] = gpu_info.gpu_perf_counters_for_test
     return env
 
 
@@ -67,6 +78,16 @@ def transpose_rules(validation_rules_dir: Path) -> list[Path]:
         rules_dir / "cpu-metrics-rules.json",
         rules_dir / "timer-sampling-rules.json",
         rules_dir / "sdk-metrics-rules.json",
+    ]
+
+
+@pytest.fixture
+def rocprofiler_rules(validation_rules_dir: Path) -> list[Path]:
+    """Get validation rules for GPU hardware counter RocPD output."""
+    rules_dir = validation_rules_dir / "transpose"
+    return [
+        validation_rules_dir / "default-rules.json",
+        rules_dir / "hw-counter-rules.json",
     ]
 
 
@@ -112,6 +133,12 @@ class TestTranspose(RocprofsysTest):
         "uniform_int_distribution",
     ]
     LOOPS_RUN_ARGS = ["2", "100", "50"]
+    SAMPLING_RUN_ARGS = ["4", "500", "100"]
+    SAMPLING_ENV = {
+        "ROCPROFSYS_SAMPLING_REALTIME": "ON",
+        "ROCPROFSYS_SAMPLING_REALTIME_FREQ": "300",
+        "ROCPROFSYS_SAMPLING_CPUTIME": "OFF",
+    }
 
     @pytest.mark.parametrize(
         "mode",
@@ -145,10 +172,13 @@ class TestTranspose(RocprofsysTest):
     @pytest.mark.timeout(120)
     @pytest.mark.rocpd("transpose_env")
     def test_sampling(self, transpose_env, transpose_rules, num_processes):
+        env = transpose_env.copy()
+        env.update(self.SAMPLING_ENV)
         result = self.run_test(
             "sampling",
             target="transpose",
-            env=transpose_env,
+            env=env,
+            run_args=self.SAMPLING_RUN_ARGS,
             check_target_arch=True,
             launcher="mpi",
             num_procs=num_processes,
@@ -258,7 +288,8 @@ class TestTransposeROCProfiler(RocprofsysTest):
     REWRITE_ARGS = ["-e", "-v", "2", "-E", "uniform_int_distribution"]
 
     @pytest.mark.timeout(120)
-    def test(self, mode, rocprofiler_env, gpu_info, num_processes):
+    @pytest.mark.rocpd("rocprofiler_env")
+    def test(self, mode, rocprofiler_env, gpu_info, num_processes, rocprofiler_rules):
         result = self.run_test(
             mode,
             "transpose",
@@ -284,4 +315,50 @@ class TestTransposeROCProfiler(RocprofsysTest):
                 result,
                 subtest_name="Perfetto counter validation",
                 counter_names=gpu_info.counter_names,
+                check_counter_pairing=True,
             )
+            self.assert_rocpd(
+                result,
+                subtest_name="RocPD HW counter validation",
+                rules_files=rocprofiler_rules,
+            )
+
+
+# ============================================================================
+# Test Class: GPU Performance Counter Collection (Device Counting Service)
+# ============================================================================
+
+
+@pytest.mark.mpi_optional("transpose")
+@pytest.mark.rocprofiler
+@pytest.mark.class_name("transpose-gpu-perf-counters")
+class TestTransposeGPUPerfCounters(RocprofsysTest):
+
+    @pytest.mark.rocpd("gpu_perf_counter_env")
+    def test(
+        self,
+        gpu_perf_counter_env,
+        gpu_info,
+        num_processes,
+        validation_rules_dir,
+    ):
+        result = self.run_test(
+            "sampling",
+            "transpose",
+            env=gpu_perf_counter_env,
+            check_target_arch=True,
+            timeout=120,
+            mpi_ranks=num_processes,
+        )
+        self.assert_regex(result)
+        self.assert_perfetto(
+            result,
+            subtest_name="Perfetto GPU perf counter validation",
+            counter_names=gpu_info.counter_names,
+        )
+        rules_dir = validation_rules_dir / "transpose"
+        self.assert_rocpd(
+            result,
+            subtest_name="ROCpd GPU perf counter validation",
+            rules_files=[rules_dir / "gpu-perf-counter-rules.json"],
+        )

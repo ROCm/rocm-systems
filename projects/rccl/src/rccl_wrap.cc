@@ -430,11 +430,6 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
     return false;
   }
 
-  if (comm->nNodes > 32) {
-    INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER disabled when using more than 32 nodes.");
-    return false;
-  }
-
   // Check if user explicitly set threshold
   static int userThresholdInput = -2;
   if (userThresholdInput == -2) {
@@ -444,20 +439,24 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
 
   size_t threshold = rcclParamDirectAllGatherThreshold();
 
+  // Disable Direct AllGather for all architectures when CE-based AllGather is active.
+  // CTAPolicy ZERO indicates CE dispatch is enabled; Direct AllGather conflicts with it on
+  // single-node topologies regardless of GPU architecture.
+  if (!userThresholdInput && comm->nNodes == 1 &&
+      comm->symmetricSupport && comm->config.CTAPolicy == NCCL_CTA_POLICY_ZERO) {
+    INFO(NCCL_INIT, "RCCL Direct AllGather disabled: CTA policy ZERO, using CE-based AllGather.");
+    return false;
+  }
+
   // Only perform auto-selection if user didn't explicitly set the threshold and threshold is not -1
   if (!userThresholdInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && threshold != -1) {
     if (comm->nNodes == 1) {
-      // Disable Direct AllGather on single-node when CE-based AllGather is enabled
-      if (comm->symmetricSupport && comm->config.CTAPolicy == NCCL_CTA_POLICY_ZERO){
-        INFO(NCCL_INIT, "RCCL Direct AllGather disabled: CTA policy ZERO, using CE-based AllGather.");
-        return false;
-      }
       threshold = 8388608;
     } else if (comm->nNodes < 64) {
       threshold = comm->nNodes * 2097152;
     }
   } else if (!userThresholdInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") && threshold != -1) {
-	  threshold = 4194304;
+    threshold = 4194304;
   }
 
   comm->enableCustColl = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") || IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942");

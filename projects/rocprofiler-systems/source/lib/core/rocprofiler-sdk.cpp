@@ -524,6 +524,14 @@ get_buffered_domains()
                             [&domainv](const auto& aitr) { return (aitr == domainv); });
     };
 
+#if(ROCPROFILER_VERSION >= 10000)  // KFD tracing APIs available in headers
+    // rocprofiler-sdk < 1.2.2 has a fatal bug parsing KFD events with
+    // undefined node IDs (0xFFFFFFFF). Guard at runtime to avoid abort().
+    constexpr std::uint32_t kfd_min_version = 10202;  // 1.2.2
+    const auto              kfd_version     = get_version();
+    const bool kfd_supported_by_runtime     = (kfd_version.formatted >= kfd_min_version);
+#endif
+
     for(const auto& itr : _domains)
     {
         if(invalid_domain(itr))
@@ -566,11 +574,7 @@ get_buffered_domains()
                 itr == "kfd_event_queue" || itr == "kfd_event_unmap_from_gpu" ||
                 itr == "kfd_event_dropped_events")
         {
-            // rocprofiler-sdk < 1.2.2 has a fatal bug parsing KFD events with
-            // undefined node IDs (0xFFFFFFFF). Guard at runtime to avoid abort().
-            constexpr std::uint32_t kfd_min_version = 10202;  // 1.2.2
-            auto                    _ver            = get_version();
-            if(_ver.formatted < kfd_min_version)
+            if(!kfd_supported_by_runtime)
             {
                 static bool _warned = false;
                 if(!_warned)
@@ -578,7 +582,8 @@ get_buffered_domains()
                     LOG_WARNING("KFD tracing domain '{}' disabled: rocprofiler-sdk "
                                 "{}.{}.{} has a "
                                 "bug with undefined KFD node IDs (fixed in >= 1.2.2)",
-                                itr, _ver.major, _ver.minor, _ver.patch);
+                                itr, kfd_version.major, kfd_version.minor,
+                                kfd_version.patch);
                     _warned = true;
                 }
                 continue;
@@ -622,6 +627,27 @@ get_buffered_domains()
         }
     }
 
+#if(ROCPROFILER_VERSION >= 10000)
+    // Automatically enable KFD domains when unified memory profiling is enabled
+    if(config::get_use_unified_memory_profiling())
+    {
+        if(kfd_supported_by_runtime)
+        {
+            LOG_INFO("ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON: implicitly enabling "
+                     "KFD page_fault and page_migrate buffered tracing domains");
+            _data.emplace(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT);
+            _data.emplace(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE);
+        }
+        else
+        {
+            LOG_WARNING("ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON requested KFD "
+                        "page_fault/page_migrate tracing, but rocprofiler-sdk "
+                        "{}.{}.{} is too old (requires >= 1.2.2)",
+                        kfd_version.major, kfd_version.minor, kfd_version.patch);
+        }
+    }
+#endif
+
     return _data;
 }
 
@@ -631,16 +657,6 @@ get_rocm_events()
     return tim::delimit(
         get_setting_value<std::string>("ROCPROFSYS_ROCM_EVENTS").value_or(std::string{}),
         " ,;\t\n");
-}
-
-bool
-get_group_by_queue(void)
-{
-    std::optional<bool> _group_by_queue =
-        config::get_setting_value<bool>("ROCPROFSYS_ROCM_GROUP_BY_QUEUE");
-    bool _ret = _group_by_queue.value_or(true);
-
-    return _ret;
 }
 
 std::vector<std::int32_t>

@@ -99,6 +99,11 @@ hipify:
 	$(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) hipify_rccl/include/latency_profiler/*.h
 	$(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) hipify_rccl/include/plugin/*.h
 	$(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) hipify_rccl/src/device/include/*.h
+	# The nccl_device/ subtree was added by the NCCL 2.28.9 sync and has its
+	# own subdirectories (impl/, gin/, gin/proxy/, gin/gdaki/). Hipify it
+	# recursively so future additions are covered automatically.
+	find hipify_rccl/include/nccl_device -type f -name '*.h' \
+	    -exec $(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) {} +
 	# PATCH 1: Fix device includes - remove "device/" prefix since files are in same directory
 	sed -i 's|#include "device/|#include "|g' hipify_rccl/src/device/include/*.h
 	sed -i 's|#include "device/|#include "|g' hipify_rccl/include/*.h
@@ -118,6 +123,13 @@ hipify:
 	echo 'inline void initNvtxRegisteredEnums() {}' >> hipify_rccl/include/nvtx.h
 	# PATCH 5: Add nccl_tuner.h include to get NCCL_NUM_ALGORITHMS and NCCL_NUM_PROTOCOLS macros
 	sed -i '/#include "core.h"/a #include "plugin/nccl_tuner.h"' hipify_rccl/include/rccl_common.h
+	# PATCH 7: hipify-perl rewrites __CUDACC__ -> __HIPCC__ in nccl_device/utility.h,
+	# which then enables a `#if __HIP_PLATFORM_AMD__` block whose macro can be
+	# defined-but-empty during host preprocessing (causing 'expected value in
+	# expression'), and whose #else branch pulls in <cuda/atomic>. Restore the
+	# original __CUDACC__ guard so the whole block is skipped under hipcc.
+	find hipify_rccl/include/nccl_device -type f -name '*.h' \
+	    -exec sed -i 's|__HIPCC__|__CUDACC__|g' {} +
 	# PATCH 6: Guard RCCL_EXPOSE_STATIC so -DRCCL_EXPOSE_STATIC from CXXFLAGS does not trigger redefinition warning
 	sed -i 's|^#define RCCL_EXPOSE_STATIC \(.*\)|#ifndef RCCL_EXPOSE_STATIC\n#define RCCL_EXPOSE_STATIC \1\n#endif|' hipify_rccl/include/rccl_vars.h
 	@echo ">>> Hipify complete."

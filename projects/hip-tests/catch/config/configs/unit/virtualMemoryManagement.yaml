@@ -180,6 +180,7 @@ virtualMemoryManagement:
     # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_wsl]
   Unit_hipMemGetAllocationPropertiesFromHandle_Capture: *level_2
+  Unit_hipMemMap_Positive_APU_LargeAllocSpill: *level_2
   Unit_hipMemMap_SameMemoryReuse:
     <<: *level_2
     # (amd_windows) SWDEV-444041: These tests fail randomly in gfx1030 MGU
