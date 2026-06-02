@@ -393,15 +393,17 @@ static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
   }
 
   // Guard: the reader's SIZE_OK macro skips typed decode for undersized payloads
-  // but still retains the event in the archive.  A malformed archive could deliver
-  // an event whose raw_payload is smaller than sizeof(hrr_event_header) + any fields
-  // the handler will cast to.  Handlers assume at least the full header is present;
-  // skip dispatch rather than allowing an OOB cast.
-  if (ev.raw_payload.size() < sizeof(hrr_event_header)) {
+  // but still retains the event in the archive.  Validate against the per-type
+  // minimum size (sizeof(hrr_args_*)) so handlers can safely cast raw_payload
+  // without reading past the end on malformed archives.
+  const uint32_t min_size = (etype < HRR_API_COUNT)
+                              ? hrr_api_min_payload_size[etype]
+                              : static_cast<uint32_t>(sizeof(hrr_event_header));
+  if (ev.raw_payload.size() < min_size) {
     if (log)
-      fprintf(stderr, "[HRR] T%llu Event %zu (%s): payload too small (%zu bytes) — skipping\n",
+      fprintf(stderr, "[HRR] T%llu Event %zu (%s): payload too small (%zu < %u bytes) — skipping\n",
               (unsigned long long)ev.header().thread_id, idx,
-              hrr::event_type_name(etype), ev.raw_payload.size());
+              hrr::event_type_name(etype), ev.raw_payload.size(), min_size);
     return hipSuccess;
   }
 
@@ -531,12 +533,14 @@ static bool run_pass(PlaybackContext& ctx,
   }
   if (log) printf("[HRR] All code objects pre-loaded OK.\n");
 
+  // Reset the sequence counter to the first event's seq_id before every pass
+  // so MT threads start waiting at the right value, and ST kernel-filter
+  // passes don't hang after a warm-up pass left next_seq at the end.
+  if (!archive.events.empty())
+    ctx.next_seq.store(archive.events.front().header().sequence_id,
+                       std::memory_order_relaxed);
+
   if (use_mt) {
-    // Reset the global sequence counter to the first event's seq_id so
-    // threads start waiting at the right value for each pass.
-    if (!archive.events.empty())
-      ctx.next_seq.store(archive.events.front().header().sequence_id,
-                         std::memory_order_relaxed);
 
     std::vector<std::thread> threads;
     threads.reserve(archive.threads.size());

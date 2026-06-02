@@ -167,10 +167,16 @@ static void serialize_kernel_launch(
   push_u32(bx); push_u32(by); push_u32(bz);
   push_u32(shared_mem);
 
+  // When both kbuf and kernel_params are null (hipLaunchByPtr path) we have
+  // no access to the argument values — write num_args=0 so parse_kernel_launch
+  // accepts the event.  The replay will launch with null params (device memory
+  // already populated from prior H2D transfers).
   uint32_t n_all = sig.numParametersAll();
   uint16_t num_args = 0;
-  for (uint32_t i = 0; i < n_all; i++)
-    if (!sig.at(i).info_.hidden_) num_args++;
+  if (kbuf || kernel_params) {
+    for (uint32_t i = 0; i < n_all; i++)
+      if (!sig.at(i).info_.hidden_) num_args++;
+  }
   push_u16(num_args);
   push_u16(0);  // num_snapshots
 
@@ -276,7 +282,7 @@ hipError_t capture_hipMemcpyAsync(void* dst, const void* src,
                                           size_t sizeBytes, hipMemcpyKind kind,
                                           hipStream_t stream) {
   hipError_t r = g_real_table.hipMemcpyAsync_fn(dst, src, sizeBytes, kind, stream);
-  if (r == hipSuccess) {
+  if (r == hipSuccess && hip_capture_enabled()) {
     hrr_cap::Hash128 h{0, 0};
     if (kind == hipMemcpyHostToDevice && src && sizeBytes > 0) {
       h = hrr_cap::writer::write_blob(src, sizeBytes);
@@ -360,7 +366,7 @@ hipError_t capture_hipMemcpyDtoH(void* dst, hipDeviceptr_t src, size_t sizeBytes
 hipError_t capture_hipMemcpyDtoHAsync(void* dst, hipDeviceptr_t src,
                                       size_t sizeBytes, hipStream_t stream) {
   hipError_t r = g_real_table.hipMemcpyDtoHAsync_fn(dst, src, sizeBytes, stream);
-  if (r == hipSuccess) {
+  if (r == hipSuccess && hip_capture_enabled()) {
     hrr_cap::Hash128 h{0, 0};
     if (dst && sizeBytes > 0) {
       // Sync the stream so host dst is valid before we snapshot it.
@@ -569,6 +575,33 @@ hipError_t capture_hipLaunchKernel(const void* function_address,
   return r;
 }
 
+hipError_t capture___hipPushCallConfiguration(dim3 gridDim, dim3 blockDim,
+                                              size_t sharedMem, hipStream_t stream) {
+  hipError_t r = g_real_compiler_table.__hipPushCallConfiguration_fn(
+      gridDim, blockDim, sharedMem, stream);
+  if (r == hipSuccess) {
+    // Save into TLS so capture_hipLaunchByPtr can read the launch dimensions.
+    g_pushed_grid   = gridDim;
+    g_pushed_block  = blockDim;
+    g_pushed_shared = sharedMem;
+    g_pushed_stream = stream;
+    if (hip_capture_enabled()) {
+      hrr_args___hipPushCallConfiguration a{};
+      a.ret        = static_cast<int32_t>(r);
+      a.gridDim_x  = gridDim.x;
+      a.gridDim_y  = gridDim.y;
+      a.gridDim_z  = gridDim.z;
+      a.blockDim_x = blockDim.x;
+      a.blockDim_y = blockDim.y;
+      a.blockDim_z = blockDim.z;
+      a.sharedMem  = static_cast<decltype(a.sharedMem)>(sharedMem);
+      a.stream     = reinterpret_cast<uint64_t>(stream);
+      hrr_cap::writer::write_event_raw(HRR_API_HIPPUSHCALLCONFIGURATION, &a.hdr, sizeof(a));
+    }
+  }
+  return r;
+}
+
 hipError_t capture_hipLaunchByPtr(const void* func) {
   hipError_t r = g_real_table.hipLaunchByPtr_fn(func);
   if (r == hipSuccess && hip_capture_enabled()) {
@@ -770,6 +803,7 @@ template <typename T>
 static void capture_memcpy3d_impl(
     T& a, hrr_api_id_t api_id,
     const struct hipMemcpy3DParms* p, hipStream_t stream, bool is_async) {
+  if (!hip_capture_enabled()) return;
   if (!p) {
     hrr_cap::writer::write_event_raw(api_id, &a.hdr, sizeof(a));
     return;

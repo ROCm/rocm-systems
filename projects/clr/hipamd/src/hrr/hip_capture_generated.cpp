@@ -74,24 +74,6 @@ static hipError_t capture___hipPopCallConfiguration(dim3* gridDim, dim3* blockDi
   return r;
 }
 
-// Generated shim
-static hipError_t capture___hipPushCallConfiguration(dim3 gridDim, dim3 blockDim, size_t sharedMem, hipStream_t stream) {
-  hipError_t r = g_real_compiler_table.__hipPushCallConfiguration_fn(gridDim, blockDim, sharedMem, stream);
-  if (r == hipSuccess) {
-    hrr_args___hipPushCallConfiguration a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.gridDim_x = gridDim.x;
-    a.gridDim_y = gridDim.y;
-    a.gridDim_z = gridDim.z;
-    a.blockDim_x = blockDim.x;
-    a.blockDim_y = blockDim.y;
-    a.blockDim_z = blockDim.z;
-    a.sharedMem = static_cast<decltype(a.sharedMem)>(sharedMem);
-    a.stream = reinterpret_cast<uint64_t>(stream);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPPUSHCALLCONFIGURATION, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
 
 // Generated shim
@@ -6987,6 +6969,36 @@ static hipError_t capture_hipLibraryGetKernelCount(unsigned int* count, hipLibra
 }
 
 // Generated shim
+static hipError_t capture_hipLibraryGetGlobal(void** dptr, size_t* bytes, hipLibrary_t library, const char* name) {
+  hipError_t r = g_real_table.hipLibraryGetGlobal_fn(dptr, bytes, library, name);
+  if (r == hipSuccess) {
+    hrr_args_hipLibraryGetGlobal a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.bytes = reinterpret_cast<uint64_t>(bytes);
+    a.library = reinterpret_cast<uint64_t>(library);
+    a.name = reinterpret_cast<uint64_t>(name);
+    if (dptr) a.dptr = reinterpret_cast<uint64_t>(*dptr);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPLIBRARYGETGLOBAL, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipLibraryGetManaged(void** dptr, size_t* bytes, hipLibrary_t library, const char* name) {
+  hipError_t r = g_real_table.hipLibraryGetManaged_fn(dptr, bytes, library, name);
+  if (r == hipSuccess) {
+    hrr_args_hipLibraryGetManaged a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.bytes = reinterpret_cast<uint64_t>(bytes);
+    a.library = reinterpret_cast<uint64_t>(library);
+    a.name = reinterpret_cast<uint64_t>(name);
+    if (dptr) a.dptr = reinterpret_cast<uint64_t>(*dptr);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPLIBRARYGETMANAGED, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
 static hipError_t capture_hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels, hipLibrary_t library) {
   hipError_t r = g_real_table.hipLibraryEnumerateKernels_fn(kernels, numKernels, library);
   if (r == hipSuccess) {
@@ -7178,6 +7190,215 @@ static hipError_t capture_hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryR
   return r;
 }
 
+// Generated shim
+static hipError_t capture_hipGreenCtxCreate(hipExecutionCtx_t* ctx, hipDevResourceDesc_t desc, int device, unsigned int flags) {
+  hipError_t r = g_real_table.hipGreenCtxCreate_fn(ctx, desc, device, flags);
+  if (r == hipSuccess) {
+    hrr_args_hipGreenCtxCreate a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.ctx = reinterpret_cast<uint64_t>(ctx);
+    a.desc = reinterpret_cast<uint64_t>(desc);
+    a.device = static_cast<decltype(a.device)>(device);
+    a.flags = static_cast<decltype(a.flags)>(flags);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPGREENCTXCREATE, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipExecutionCtxDestroy(hipExecutionCtx_t ctx) {
+  hipError_t r = g_real_table.hipExecutionCtxDestroy_fn(ctx);
+  if (r == hipSuccess) {
+    hrr_args_hipExecutionCtxDestroy a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.ctx = reinterpret_cast<uint64_t>(ctx);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPEXECUTIONCTXDESTROY, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipExecutionCtxStreamCreate(hipStream_t* stream, hipExecutionCtx_t greenctx, unsigned int flags, int priority) {
+  hipError_t r = g_real_table.hipExecutionCtxStreamCreate_fn(stream, greenctx, flags, priority);
+  if (r == hipSuccess) {
+    hrr_args_hipExecutionCtxStreamCreate a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.greenctx = reinterpret_cast<uint64_t>(greenctx);
+    a.flags = static_cast<decltype(a.flags)>(flags);
+    a.priority = static_cast<decltype(a.priority)>(priority);
+    if (stream) a.stream = reinterpret_cast<uint64_t>(*stream);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPEXECUTIONCTXSTREAMCREATE, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipDeviceGetDevResource(hipDevice_t device, hipDevResource* resource, hipDevResourceType type) {
+  hipError_t r = g_real_table.hipDeviceGetDevResource_fn(device, resource, type);
+  if (r == hipSuccess) {
+    hrr_args_hipDeviceGetDevResource a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.device = static_cast<uint64_t>(static_cast<int>(device));
+    a.resource = reinterpret_cast<uint64_t>(resource);
+    a.type = static_cast<decltype(a.type)>(type);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPDEVICEGETDEVRESOURCE, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipDevSmResourceSplitByCount(hipDevResource* result, unsigned int* nbGroups, const hipDevResource* input, hipDevResource* remainder, unsigned int flags, unsigned int minCount) {
+  hipError_t r = g_real_table.hipDevSmResourceSplitByCount_fn(result, nbGroups, input, remainder, flags, minCount);
+  if (r == hipSuccess) {
+    hrr_args_hipDevSmResourceSplitByCount a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.result = reinterpret_cast<uint64_t>(result);
+    a.nbGroups = reinterpret_cast<uint64_t>(nbGroups);
+    a.input = reinterpret_cast<uint64_t>(input);
+    a.remainder = reinterpret_cast<uint64_t>(remainder);
+    a.flags = static_cast<decltype(a.flags)>(flags);
+    a.minCount = static_cast<decltype(a.minCount)>(minCount);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPDEVSMRESOURCESPLITBYCOUNT, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipDevSmResourceSplit(hipDevResource* result, unsigned int nbGroups, const hipDevResource* input, hipDevResource* remainder, unsigned int flags, hipDevSmResourceGroupParams* groupParams) {
+  hipError_t r = g_real_table.hipDevSmResourceSplit_fn(result, nbGroups, input, remainder, flags, groupParams);
+  if (r == hipSuccess) {
+    hrr_args_hipDevSmResourceSplit a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.result = reinterpret_cast<uint64_t>(result);
+    a.nbGroups = static_cast<decltype(a.nbGroups)>(nbGroups);
+    a.input = reinterpret_cast<uint64_t>(input);
+    a.remainder = reinterpret_cast<uint64_t>(remainder);
+    a.flags = static_cast<decltype(a.flags)>(flags);
+    a.groupParams = reinterpret_cast<uint64_t>(groupParams);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPDEVSMRESOURCESPLIT, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipDevResourceGenerateDesc(hipDevResourceDesc_t* phDesc, hipDevResource* resources, unsigned int nbResources) {
+  hipError_t r = g_real_table.hipDevResourceGenerateDesc_fn(phDesc, resources, nbResources);
+  if (r == hipSuccess) {
+    hrr_args_hipDevResourceGenerateDesc a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.phDesc = reinterpret_cast<uint64_t>(phDesc);
+    a.resources = reinterpret_cast<uint64_t>(resources);
+    a.nbResources = static_cast<decltype(a.nbResources)>(nbResources);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPDEVRESOURCEGENERATEDESC, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipDeviceGetExecutionCtx(hipExecutionCtx_t* ctx, int device) {
+  hipError_t r = g_real_table.hipDeviceGetExecutionCtx_fn(ctx, device);
+  if (r == hipSuccess) {
+    hrr_args_hipDeviceGetExecutionCtx a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.ctx = reinterpret_cast<uint64_t>(ctx);
+    a.device = static_cast<decltype(a.device)>(device);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPDEVICEGETEXECUTIONCTX, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipExecutionCtxGetDevResource(hipExecutionCtx_t ctx, hipDevResource* resource, hipDevResourceType type) {
+  hipError_t r = g_real_table.hipExecutionCtxGetDevResource_fn(ctx, resource, type);
+  if (r == hipSuccess) {
+    hrr_args_hipExecutionCtxGetDevResource a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.ctx = reinterpret_cast<uint64_t>(ctx);
+    a.resource = reinterpret_cast<uint64_t>(resource);
+    a.type = static_cast<decltype(a.type)>(type);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPEXECUTIONCTXGETDEVRESOURCE, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipExecutionCtxGetDevice(int* device, hipExecutionCtx_t ctx) {
+  hipError_t r = g_real_table.hipExecutionCtxGetDevice_fn(device, ctx);
+  if (r == hipSuccess) {
+    hrr_args_hipExecutionCtxGetDevice a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.device = reinterpret_cast<uint64_t>(device);
+    a.ctx = reinterpret_cast<uint64_t>(ctx);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPEXECUTIONCTXGETDEVICE, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipExecutionCtxGetId(hipExecutionCtx_t ctx, unsigned long long* ctxId) {
+  hipError_t r = g_real_table.hipExecutionCtxGetId_fn(ctx, ctxId);
+  if (r == hipSuccess) {
+    hrr_args_hipExecutionCtxGetId a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.ctx = reinterpret_cast<uint64_t>(ctx);
+    a.ctxId = reinterpret_cast<uint64_t>(ctxId);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPEXECUTIONCTXGETID, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipStreamGetDevResource(hipStream_t hStream, hipDevResource* resource, hipDevResourceType type) {
+  hipError_t r = g_real_table.hipStreamGetDevResource_fn(hStream, resource, type);
+  if (r == hipSuccess) {
+    hrr_args_hipStreamGetDevResource a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.hStream = reinterpret_cast<uint64_t>(hStream);
+    a.resource = reinterpret_cast<uint64_t>(resource);
+    a.type = static_cast<decltype(a.type)>(type);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPSTREAMGETDEVRESOURCE, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipExecutionCtxRecordEvent(hipExecutionCtx_t ctx, hipEvent_t event) {
+  hipError_t r = g_real_table.hipExecutionCtxRecordEvent_fn(ctx, event);
+  if (r == hipSuccess) {
+    hrr_args_hipExecutionCtxRecordEvent a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.ctx = reinterpret_cast<uint64_t>(ctx);
+    a.event = reinterpret_cast<uint64_t>(event);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPEXECUTIONCTXRECORDEVENT, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipExecutionCtxSynchronize(hipExecutionCtx_t ctx) {
+  hipError_t r = g_real_table.hipExecutionCtxSynchronize_fn(ctx);
+  if (r == hipSuccess) {
+    hrr_args_hipExecutionCtxSynchronize a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.ctx = reinterpret_cast<uint64_t>(ctx);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPEXECUTIONCTXSYNCHRONIZE, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEvent_t event) {
+  hipError_t r = g_real_table.hipExecutionCtxWaitEvent_fn(ctx, event);
+  if (r == hipSuccess) {
+    hrr_args_hipExecutionCtxWaitEvent a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.ctx = reinterpret_cast<uint64_t>(ctx);
+    a.event = reinterpret_cast<uint64_t>(event);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPEXECUTIONCTXWAITEVENT, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
 // ============================================================
 // Table builders
 // ============================================================
@@ -7211,6 +7432,7 @@ extern hipError_t capture_hipMemcpy3D_spt(const struct hipMemcpy3DParms* p);
 extern hipError_t capture_hipMemcpy3DAsync_spt(const hipMemcpy3DParms* p, hipStream_t stream);
 extern hipError_t capture_hipExtModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX, uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ, uint32_t localWorkSizeX, uint32_t localWorkSizeY, uint32_t localWorkSizeZ, size_t sharedMemBytes, hipStream_t hStream, void** kernelParams, void** extra, hipEvent_t startEvent, hipEvent_t stopEvent, uint32_t flags);
 extern hipError_t capture_hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr, const hipStreamAttrValue* value);
+extern hipError_t capture___hipPushCallConfiguration(dim3 gridDim, dim3 blockDim, size_t sharedMem, hipStream_t stream);
 extern void** capture___hipRegisterFatBinary(const void* data);
 
 void hip_capture_build_table() {
@@ -7728,6 +7950,8 @@ void hip_capture_build_table() {
   g_cap_table.hipLibraryUnload_fn = capture_hipLibraryUnload;
   g_cap_table.hipLibraryGetKernel_fn = capture_hipLibraryGetKernel;
   g_cap_table.hipLibraryGetKernelCount_fn = capture_hipLibraryGetKernelCount;
+  g_cap_table.hipLibraryGetGlobal_fn = capture_hipLibraryGetGlobal;
+  g_cap_table.hipLibraryGetManaged_fn = capture_hipLibraryGetManaged;
   g_cap_table.hipLibraryEnumerateKernels_fn = capture_hipLibraryEnumerateKernels;
   g_cap_table.hipKernelGetLibrary_fn = capture_hipKernelGetLibrary;
   g_cap_table.hipKernelGetName_fn = capture_hipKernelGetName;
@@ -7742,6 +7966,21 @@ void hip_capture_build_table() {
   g_cap_table.hipMemSetMemPool_fn = capture_hipMemSetMemPool;
   g_cap_table.hipMemGetMemPool_fn = capture_hipMemGetMemPool;
   g_cap_table.hipMipmappedArrayGetMemoryRequirements_fn = capture_hipMipmappedArrayGetMemoryRequirements;
+  g_cap_table.hipGreenCtxCreate_fn = capture_hipGreenCtxCreate;
+  g_cap_table.hipExecutionCtxDestroy_fn = capture_hipExecutionCtxDestroy;
+  g_cap_table.hipExecutionCtxStreamCreate_fn = capture_hipExecutionCtxStreamCreate;
+  g_cap_table.hipDeviceGetDevResource_fn = capture_hipDeviceGetDevResource;
+  g_cap_table.hipDevSmResourceSplitByCount_fn = capture_hipDevSmResourceSplitByCount;
+  g_cap_table.hipDevSmResourceSplit_fn = capture_hipDevSmResourceSplit;
+  g_cap_table.hipDevResourceGenerateDesc_fn = capture_hipDevResourceGenerateDesc;
+  g_cap_table.hipDeviceGetExecutionCtx_fn = capture_hipDeviceGetExecutionCtx;
+  g_cap_table.hipExecutionCtxGetDevResource_fn = capture_hipExecutionCtxGetDevResource;
+  g_cap_table.hipExecutionCtxGetDevice_fn = capture_hipExecutionCtxGetDevice;
+  g_cap_table.hipExecutionCtxGetId_fn = capture_hipExecutionCtxGetId;
+  g_cap_table.hipStreamGetDevResource_fn = capture_hipStreamGetDevResource;
+  g_cap_table.hipExecutionCtxRecordEvent_fn = capture_hipExecutionCtxRecordEvent;
+  g_cap_table.hipExecutionCtxSynchronize_fn = capture_hipExecutionCtxSynchronize;
+  g_cap_table.hipExecutionCtxWaitEvent_fn = capture_hipExecutionCtxWaitEvent;
 }
 
 void hip_capture_build_compiler_table() {

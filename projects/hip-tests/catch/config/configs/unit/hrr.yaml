@@ -108,6 +108,9 @@ hrr:
   Unit_HRR_VMMRoundtrip:
     <<: *level_2
     tags: [capture, vmm, playback, roundtrip]
+  Unit_HRR_ChevronLaunchRoundtrip:
+    <<: *level_2
+    tags: [capture, launch, playback, roundtrip]
   Unit_HRR_MultiThreadRoundtrip:
     <<: *level_2
     tags: [capture, multithread, playback, roundtrip]

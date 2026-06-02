@@ -88,6 +88,8 @@ MANUAL_CAPTURE_APIS: Set[str] = {
     "hipExtModuleLaunchKernel",
     "hipLaunchKernel",
     "hipLaunchByPtr",
+    # <<<>>> launch config — must save grid/block/shared/stream into TLS for hipLaunchByPtr
+    "__hipPushCallConfiguration",
     # Module load — code object snapshotting to disk
     "hipModuleLoadData",
     "hipModuleLoadDataEx",
@@ -696,6 +698,8 @@ _HANDLE_TYPES = {
     "hipUserObject_t", "hipMemGenericAllocationHandle_t",
     "hipExternalMemory_t", "hipExternalSemaphore_t",
     "hipKernel_t", "hipLibrary_t",
+    # HIP 7.14+ green context / device resource handles
+    "hipExecutionCtx_t", "hipDevResourceDesc_t",
 }
 
 # Types that cannot be cast to uint64_t (structs by value, function pointers)
@@ -1917,6 +1921,17 @@ def generate_playback_shim(entry: ApiEntry) -> str:
 def generate_dispatch_table(entries: List[ApiEntry]) -> str:
     """Generate the hrr_playback_dispatch array indexed by hrr_api_id_t."""
     lines = []
+    lines.append("// ============================================================")
+    lines.append("// Minimum payload size per event type — indexed by hrr_api_id_t")
+    lines.append("// dispatch_event() checks raw_payload.size() against this before")
+    lines.append("// calling any handler to prevent OOB casts on malformed archives.")
+    lines.append("// ============================================================")
+    lines.append("const uint32_t hrr_api_min_payload_size[HRR_API_COUNT] = {")
+    for idx, e in enumerate(entries):
+        enum_name = "HRR_API_" + e.name.lstrip('_').upper()
+        lines.append(f"    static_cast<uint32_t>(sizeof(hrr_args_{e.name})),  // [{idx}] {enum_name}")
+    lines.append("};")
+    lines.append("")
     lines.append("// ============================================================")
     lines.append("// Playback dispatch table — indexed by hrr_api_id_t")
     lines.append("// ============================================================")

@@ -295,3 +295,4 @@ typedef hipError_t (*hrr_playback_fn_t)(PlaybackContext& ctx, const uint8_t* pay
 
 // Indexed by hrr_api_id_t — defined in hip_playback_generated.cpp
 extern hrr_playback_fn_t hrr_playback_dispatch[HRR_API_COUNT];
+extern const uint32_t    hrr_api_min_payload_size[HRR_API_COUNT];

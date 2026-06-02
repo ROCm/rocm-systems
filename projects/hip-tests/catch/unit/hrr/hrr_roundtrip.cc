@@ -537,7 +537,9 @@ HIP_TEST_CASE(Unit_HRR_DrvMemcpy3DRoundtrip) {
 
 HIP_TEST_CASE(Unit_HRR_TextureRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_texture"};
-  hrr_run_roundtrip("Unit_HRR_Texture_Direct", cap.path);
+  // min_events=1: on devices without image support the workload exits early
+  // after hipDeviceGetAttribute, producing a near-empty archive legitimately.
+  hrr_run_roundtrip("Unit_HRR_Texture_Direct", cap.path, 1);
 }
 
 HIP_TEST_CASE(Unit_HRR_GraphExplicitRoundtrip) {
@@ -558,6 +560,13 @@ HIP_TEST_CASE(Unit_HRR_ModuleAPIRoundtrip) {
 HIP_TEST_CASE(Unit_HRR_VMMRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_vmm"};
   hrr_run_roundtrip("Unit_HRR_VMM_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_ChevronLaunchRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_chevron"};
+  // Exercises __hipPushCallConfiguration → hipLaunchByPtr path.
+  // min_events=5: malloc + stream + push + launch + D2H.
+  hrr_run_roundtrip("Unit_HRR_ChevronLaunch_Direct", cap.path, 5);
 }
 
 /**

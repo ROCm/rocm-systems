@@ -4958,6 +4958,26 @@ typedef struct {
     uint64_t library;
 } hrr_args_hipLibraryGetKernelCount;
 
+/* hipError_t hipLibraryGetGlobal(void** dptr, size_t* bytes, hipLibrary_t library, const char* name) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t dptr;
+    uint64_t bytes;
+    uint64_t library;
+    uint64_t name;
+} hrr_args_hipLibraryGetGlobal;
+
+/* hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes, hipLibrary_t library, const char* name) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t dptr;
+    uint64_t bytes;
+    uint64_t library;
+    uint64_t name;
+} hrr_args_hipLibraryGetManaged;
+
 /* hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels, hipLibrary_t library) */
 typedef struct {
     hrr_event_header hdr;
@@ -5079,6 +5099,140 @@ typedef struct {
     uint64_t mipmap;
     uint64_t device;
 } hrr_args_hipMipmappedArrayGetMemoryRequirements;
+
+/* hipError_t hipGreenCtxCreate(hipExecutionCtx_t* ctx, hipDevResourceDesc_t desc, int device, unsigned int flags) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t ctx;
+    uint64_t desc;
+    int32_t device;
+    uint32_t flags;
+} hrr_args_hipGreenCtxCreate;
+
+/* hipError_t hipExecutionCtxDestroy(hipExecutionCtx_t ctx) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t ctx;
+} hrr_args_hipExecutionCtxDestroy;
+
+/* hipError_t hipExecutionCtxStreamCreate(hipStream_t* stream, hipExecutionCtx_t greenctx, unsigned int flags, int priority) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t stream;
+    uint64_t greenctx;
+    uint32_t flags;
+    int32_t priority;
+} hrr_args_hipExecutionCtxStreamCreate;
+
+/* hipError_t hipDeviceGetDevResource(hipDevice_t device, hipDevResource* resource, hipDevResourceType type) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t device;
+    uint64_t resource;
+    uint64_t /* hipDevResourceType */ type;
+} hrr_args_hipDeviceGetDevResource;
+
+/* hipError_t hipDevSmResourceSplitByCount(hipDevResource* result, unsigned int* nbGroups, const hipDevResource* input, hipDevResource* remainder, unsigned int flags, unsigned int minCount) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t result;
+    uint64_t nbGroups;
+    uint64_t input;
+    uint64_t remainder;
+    uint32_t flags;
+    uint32_t minCount;
+} hrr_args_hipDevSmResourceSplitByCount;
+
+/* hipError_t hipDevSmResourceSplit(hipDevResource* result, unsigned int nbGroups, const hipDevResource* input, hipDevResource* remainder, unsigned int flags, hipDevSmResourceGroupParams* groupParams) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t result;
+    uint32_t nbGroups;
+    uint64_t input;
+    uint64_t remainder;
+    uint32_t flags;
+    uint64_t groupParams;
+} hrr_args_hipDevSmResourceSplit;
+
+/* hipError_t hipDevResourceGenerateDesc(hipDevResourceDesc_t* phDesc, hipDevResource* resources, unsigned int nbResources) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t phDesc;
+    uint64_t resources;
+    uint32_t nbResources;
+} hrr_args_hipDevResourceGenerateDesc;
+
+/* hipError_t hipDeviceGetExecutionCtx(hipExecutionCtx_t* ctx, int device) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t ctx;
+    int32_t device;
+} hrr_args_hipDeviceGetExecutionCtx;
+
+/* hipError_t hipExecutionCtxGetDevResource(hipExecutionCtx_t ctx, hipDevResource* resource, hipDevResourceType type) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t ctx;
+    uint64_t resource;
+    uint64_t /* hipDevResourceType */ type;
+} hrr_args_hipExecutionCtxGetDevResource;
+
+/* hipError_t hipExecutionCtxGetDevice(int* device, hipExecutionCtx_t ctx) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t device;
+    uint64_t ctx;
+} hrr_args_hipExecutionCtxGetDevice;
+
+/* hipError_t hipExecutionCtxGetId(hipExecutionCtx_t ctx, unsigned long long* ctxId) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t ctx;
+    uint64_t ctxId;
+} hrr_args_hipExecutionCtxGetId;
+
+/* hipError_t hipStreamGetDevResource(hipStream_t hStream, hipDevResource* resource, hipDevResourceType type) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t hStream;
+    uint64_t resource;
+    uint64_t /* hipDevResourceType */ type;
+} hrr_args_hipStreamGetDevResource;
+
+/* hipError_t hipExecutionCtxRecordEvent(hipExecutionCtx_t ctx, hipEvent_t event) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t ctx;
+    uint64_t event;
+} hrr_args_hipExecutionCtxRecordEvent;
+
+/* hipError_t hipExecutionCtxSynchronize(hipExecutionCtx_t ctx) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t ctx;
+} hrr_args_hipExecutionCtxSynchronize;
+
+/* hipError_t hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEvent_t event) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t ctx;
+    uint64_t event;
+} hrr_args_hipExecutionCtxWaitEvent;
 
 /* ---- API id enumeration ---- */
 typedef enum hrr_api_id {
@@ -5597,21 +5751,38 @@ typedef enum hrr_api_id {
     HRR_API_HIPLIBRARYUNLOAD = 512,
     HRR_API_HIPLIBRARYGETKERNEL = 513,
     HRR_API_HIPLIBRARYGETKERNELCOUNT = 514,
-    HRR_API_HIPLIBRARYENUMERATEKERNELS = 515,
-    HRR_API_HIPKERNELGETLIBRARY = 516,
-    HRR_API_HIPKERNELGETNAME = 517,
-    HRR_API_HIPGETPROCADDRESS_SPT = 518,
-    HRR_API_HIPEXTDISABLELOGGING = 519,
-    HRR_API_HIPEXTENABLELOGGING = 520,
-    HRR_API_HIPEXTSETLOGGINGPARAMS = 521,
-    HRR_API_HIPKERNELGETATTRIBUTE = 522,
-    HRR_API_HIPKERNELSETATTRIBUTE = 523,
-    HRR_API_HIPKERNELGETFUNCTION = 524,
-    HRR_API_HIPKERNELGETPARAMINFO = 525,
-    HRR_API_HIPMEMSETMEMPOOL = 526,
-    HRR_API_HIPMEMGETMEMPOOL = 527,
-    HRR_API_HIPMIPMAPPEDARRAYGETMEMORYREQUIREMENTS = 528,
-    HRR_API_COUNT = 529
+    HRR_API_HIPLIBRARYGETGLOBAL = 515,
+    HRR_API_HIPLIBRARYGETMANAGED = 516,
+    HRR_API_HIPLIBRARYENUMERATEKERNELS = 517,
+    HRR_API_HIPKERNELGETLIBRARY = 518,
+    HRR_API_HIPKERNELGETNAME = 519,
+    HRR_API_HIPGETPROCADDRESS_SPT = 520,
+    HRR_API_HIPEXTDISABLELOGGING = 521,
+    HRR_API_HIPEXTENABLELOGGING = 522,
+    HRR_API_HIPEXTSETLOGGINGPARAMS = 523,
+    HRR_API_HIPKERNELGETATTRIBUTE = 524,
+    HRR_API_HIPKERNELSETATTRIBUTE = 525,
+    HRR_API_HIPKERNELGETFUNCTION = 526,
+    HRR_API_HIPKERNELGETPARAMINFO = 527,
+    HRR_API_HIPMEMSETMEMPOOL = 528,
+    HRR_API_HIPMEMGETMEMPOOL = 529,
+    HRR_API_HIPMIPMAPPEDARRAYGETMEMORYREQUIREMENTS = 530,
+    HRR_API_HIPGREENCTXCREATE = 531,
+    HRR_API_HIPEXECUTIONCTXDESTROY = 532,
+    HRR_API_HIPEXECUTIONCTXSTREAMCREATE = 533,
+    HRR_API_HIPDEVICEGETDEVRESOURCE = 534,
+    HRR_API_HIPDEVSMRESOURCESPLITBYCOUNT = 535,
+    HRR_API_HIPDEVSMRESOURCESPLIT = 536,
+    HRR_API_HIPDEVRESOURCEGENERATEDESC = 537,
+    HRR_API_HIPDEVICEGETEXECUTIONCTX = 538,
+    HRR_API_HIPEXECUTIONCTXGETDEVRESOURCE = 539,
+    HRR_API_HIPEXECUTIONCTXGETDEVICE = 540,
+    HRR_API_HIPEXECUTIONCTXGETID = 541,
+    HRR_API_HIPSTREAMGETDEVRESOURCE = 542,
+    HRR_API_HIPEXECUTIONCTXRECORDEVENT = 543,
+    HRR_API_HIPEXECUTIONCTXSYNCHRONIZE = 544,
+    HRR_API_HIPEXECUTIONCTXWAITEVENT = 545,
+    HRR_API_COUNT = 546
 } hrr_api_id_t;
 
 /* Array of API names indexed by hrr_api_id_t */
@@ -6132,6 +6303,8 @@ const char* const hrr_api_names[HRR_API_COUNT] = {
     "hipLibraryUnload",
     "hipLibraryGetKernel",
     "hipLibraryGetKernelCount",
+    "hipLibraryGetGlobal",
+    "hipLibraryGetManaged",
     "hipLibraryEnumerateKernels",
     "hipKernelGetLibrary",
     "hipKernelGetName",
@@ -6146,6 +6319,21 @@ const char* const hrr_api_names[HRR_API_COUNT] = {
     "hipMemSetMemPool",
     "hipMemGetMemPool",
     "hipMipmappedArrayGetMemoryRequirements",
+    "hipGreenCtxCreate",
+    "hipExecutionCtxDestroy",
+    "hipExecutionCtxStreamCreate",
+    "hipDeviceGetDevResource",
+    "hipDevSmResourceSplitByCount",
+    "hipDevSmResourceSplit",
+    "hipDevResourceGenerateDesc",
+    "hipDeviceGetExecutionCtx",
+    "hipExecutionCtxGetDevResource",
+    "hipExecutionCtxGetDevice",
+    "hipExecutionCtxGetId",
+    "hipStreamGetDevResource",
+    "hipExecutionCtxRecordEvent",
+    "hipExecutionCtxSynchronize",
+    "hipExecutionCtxWaitEvent",
 };
 #else
 extern const char* const hrr_api_names[HRR_API_COUNT];
