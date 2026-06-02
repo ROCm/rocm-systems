@@ -120,10 +120,9 @@ Run `./scripts/build-and-package.sh --help` for all options.
 ```mermaid
 flowchart TD
     ENV["HSA_TOOLS_LIB=…/libhsa-hotswap.so"] -->|loaded by| HSA
-    HSA["ROCm / HSA runtime"] <-->|loads tools lib| HS["libhsa-hotswap.so<br/>(load-time ISA rewriter)"]
+    HSA["ROCm / HSA runtime"] -->|loads tools lib| HS["libhsa-hotswap.so<br/>(load-time ISA rewriter)"]
     HS -->|rewrites gfx1250 → gfx942/gfx950<br/>at code-object load| HSA
-    HSA -->|dispatches rewritten kernels| GPU["real GPU (gfx942 / gfx950)"]
-    GPU -->|executes natively| GPU
+    HSA -->|dispatches rewritten kernels| GPU["real GPU (gfx942 / gfx950)<br/>executes natively"]
 ```
 
 mirage's only job is discovery + wiring: it finds `libhsa-hotswap.so` and sets
