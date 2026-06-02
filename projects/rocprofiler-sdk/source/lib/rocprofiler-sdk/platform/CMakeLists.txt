@@ -15,3 +15,7 @@ else()
     add_subdirectory(gnulinux)
     add_subdirectory(wsl)
 endif()
+
+if(ROCPROFILER_BUILD_TESTS)
+    add_subdirectory(tests)
+endif()

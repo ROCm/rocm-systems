@@ -222,7 +222,7 @@ probe_libdxcore()
 uint64_t
 get_agent_offset()
 {
-    static uint64_t _v = []() {
+    static const uint64_t _v = []() {
         auto gen = std::mt19937{std::random_device{}()};
         auto rng = std::uniform_int_distribution<uint64_t>{std::numeric_limits<uint8_t>::max(),
                                                            std::numeric_limits<uint16_t>::max()};
@@ -389,9 +389,10 @@ enumerate()
         return out;
     }
 
-    const auto offset    = get_agent_offset();
-    uint64_t   logical   = 0;
-    uint64_t   gpu_count = 0;
+    const auto offset = get_agent_offset();
+    // Every adapter enumerated through DXCore is a GPU, so the logical node
+    // id and the per-type id move in lockstep.
+    uint64_t logical = 0;
 
     for(uint32_t i = 0; i < e.NumAdapters; ++i)
     {
@@ -476,7 +477,7 @@ enumerate()
         info.logical_node_id      = logical;
         info.node_id              = static_cast<uint32_t>(logical);
         info.id.handle            = logical + offset;
-        info.logical_node_type_id = gpu_count++;
+        info.logical_node_type_id = logical;
         ++logical;
 
         info.vendor_id   = devids.DeviceIds.VendorID;
