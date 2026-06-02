@@ -606,6 +606,7 @@ typedef enum hipDeviceAttribute_t {
 
   hipDeviceAttributeAmdSpecificEnd = 19999,
   hipDeviceAttributeVendorSpecificBegin = 20000,
+  hipDeviceDummyBreakingBuild = 20001,
   // Extended attributes for vendors
 } hipDeviceAttribute_t;
 
