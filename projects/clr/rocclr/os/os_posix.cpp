@@ -449,36 +449,6 @@ bool Os::isThreadAlive(const Thread& thread) {
   return ::pthread_kill((pthread_t)thread.handle(), 0) == 0;
 }
 
-static size_t tlsSize = 0;
-
-// Try to guess the size of TLS (plus some frames)
-void* guessTlsSizeThread(void* param) {
-  address stackBase;
-  address currentFrame;
-  size_t stackSize;
-  Os::currentStackInfo(&stackBase, &stackSize);
-  currentFrame = reinterpret_cast<address>(&stackSize);
-  tlsSize = stackBase - currentFrame;
-  // align up to page boundary
-  tlsSize = alignUp(tlsSize, amd::Os::pageSize());
-  return NULL;
-}
-
-static void guessTlsSize(void) {
-  int retval;
-  pthread_t handle;
-  pthread_attr_t threadAttr;
-
-  ::pthread_attr_init(&threadAttr);
-  retval = ::pthread_create(&handle, &threadAttr, guessTlsSizeThread, NULL);
-  if (retval == 0) {
-    pthread_join(handle, NULL);
-  } else {
-    fatal("pthread_create() failed with default stack size");
-  }
-  ::pthread_attr_destroy(&threadAttr);
-}
-
 const void* Os::createOsThread(amd::Thread* thread) {
   pthread_attr_t threadAttr;
   ::pthread_attr_init(&threadAttr);
@@ -489,20 +459,25 @@ const void* Os::createOsThread(amd::Thread* thread) {
       fatal("pthread_attr_getguardsize() failed");
     }
 
-    static std::once_flag initOnce;
-    std::call_once(initOnce, guessTlsSize);
-    ::pthread_attr_setstacksize(&threadAttr, thread->stackSize_ + guardsize + tlsSize);
+    if (0 != ::pthread_attr_setstacksize(&threadAttr, thread->stackSize_ + guardsize)) {
+      fatal("pthread_attr_setstacksize() failed");
+    }
   }
 
   // We never plan the use join, so free the resources now.
-  ::pthread_attr_setdetachstate(&threadAttr, PTHREAD_CREATE_DETACHED);
+  if (0 != ::pthread_attr_setdetachstate(&threadAttr, PTHREAD_CREATE_DETACHED)) {
+    fatal("pthread_attr_setdetachstate() failed");
+  }
 
   pthread_t handle = 0;
   if (0 != ::pthread_create(&handle, &threadAttr, (void* (*)(void*)) & Thread::entry, thread)) {
     thread->setState(Thread::FAILED);
+    guarantee(false, "pthread_create() failed");
   }
 
-  ::pthread_attr_destroy(&threadAttr);
+  if (0 != ::pthread_attr_destroy(&threadAttr)) {
+    fatal("pthread_attr_destroy() failed");
+  };
   return reinterpret_cast<const void*>(handle);
 }
 
@@ -847,6 +822,10 @@ bool Os::CloseFileHandle(FileDesc fdesc) {
   }
 
   return true;
+}
+
+amd::Os::FileDesc Os::DupFileHandle(FileDesc fdesc) {
+  return dup(fdesc);
 }
 
 bool Os::GetFileHandle(const char* fname, FileDesc* fd_ptr, size_t* sz_ptr) {

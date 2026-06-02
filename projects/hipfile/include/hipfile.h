@@ -335,9 +335,8 @@ typedef struct hipFileDriverProps {
         unsigned minor_version; //!< Minor version of the GPU IO driver
 
         uint64_t poll_thresh_size;   //!< Maximum IO size (in KiB) for which polling is used when poll mode is
-                                     //!< enabled. Must be a multiple of 4K on NVIDIA.
-        uint64_t max_direct_io_size; //!< Maximum IO size (in KiB) used by the GPU IO driver. Must be a
-                                     //!< multiple of 64K on NVIDIA.
+                                     //!< enabled
+        uint64_t max_direct_io_size; //!< Maximum IO size (in KiB) used by the GPU IO driver
 
         unsigned driver_status_flags;  //!< Bitfield that maps to hipFileDriverStatusFlags_t
         unsigned driver_control_flags; //!< Bitfield that maps to hipFileDriverControlFlags_t
@@ -346,11 +345,9 @@ typedef struct hipFileDriverProps {
     unsigned feature_flags; //!< Bitfield that maps to hipFileFeatureFlags_t
 
     uint64_t max_device_cache_size; //!< Maximum amount of GPU memory (in KiB) that can be used for bounce
-                                    //!< buffers. Must be a multiple of 4K on NVIDIA.
-    uint64_t per_buffer_cache_size; //!< Amount of GPU memory (in KiB) allocated for each bounce buffer.
-                                    //!< Must be a multiple of 4K on NVIDIA.
-    uint64_t max_device_pinned_mem_size; //!< Maximum amount of GPU memory (in KiB) that can be pinned.
-                                         //!< Must be a multiple of 4K on NVIDIA.
+                                    //!< buffers
+    uint64_t per_buffer_cache_size; //!< Amount of GPU memory (in KiB) allocated for each bounce buffer
+    uint64_t max_device_pinned_mem_size; //!< Maximum amount of GPU memory (in KiB) that can be pinned
 
     unsigned max_batch_io_count;         //!< Maximum number of batch operations that can be submitted at once
     unsigned max_batch_io_timeout_msecs; //!< Timeout (in msec) for a batch operation to complete
@@ -610,8 +607,6 @@ hipFileError_t hipFileDriverGetProperties(hipFileDriverProps_t *props);
  * @brief Enable/disable polling mode for GPU IO
  * @ingroup driver
  *
- * @note On NVIDIA, `poll_threshold_size` must be an increment of 4K
- *
  * \warn_not_implemented
  *
  * @param [in] poll `true` to enable polling, `false` to disable
@@ -627,8 +622,6 @@ hipFileError_t hipFileDriverSetPollMode(bool poll, size_t poll_threshold_size);
  * @brief Set the maximum IO chunk size
  * @ingroup driver
  *
- * @note Must be in 64k increments on NVIDIA
- *
  * \warn_not_implemented
  *
  * @param [in] max_direct_io_size Maximum IO chunk size (in KiB) for each IO request
@@ -642,8 +635,6 @@ hipFileError_t hipFileDriverSetMaxDirectIOSize(size_t max_direct_io_size);
  * @brief Set the maximum amount of GPU memory that can be used for bounce buffers
  * @ingroup driver
  *
- * @note Must be in 4k increments on NVIDIA
- *
  * \warn_not_implemented
  *
  * @param [in] max_cache_size Maximum GPU memory (in KiB) that can be reserved for bounce buffers
@@ -656,8 +647,6 @@ hipFileError_t hipFileDriverSetMaxCacheSize(size_t max_cache_size);
 /*!
  * @brief Set the maximum amount of GPU memory that can be pinned
  * @ingroup driver
- *
- * @note Must be in 4K increments on NVIDIA
  *
  * \warn_not_implemented
  *

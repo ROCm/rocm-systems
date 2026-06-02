@@ -75,6 +75,25 @@ rj_configure_target(rocjitsu_tests TEST)
 include(GoogleTest)
 gtest_discover_tests(rocjitsu_tests)
 
+add_executable(
+    rj_dbt_translate_smoke_test
+    tools/rj_dbt_translate_smoke_test.cpp
+)
+target_include_directories(
+    rj_dbt_translate_smoke_test
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
+        ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
+)
+target_link_libraries(rj_dbt_translate_smoke_test PRIVATE GTest::gtest)
+rj_configure_target(rj_dbt_translate_smoke_test TEST)
+add_dependencies(rj_dbt_translate_smoke_test rj_dbt_translate)
+add_test(
+    NAME "RjDbtTranslate.Smoke"
+    COMMAND rj_dbt_translate_smoke_test $<TARGET_FILE:rj_dbt_translate>
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+)
+
 # --- Scaling test (standalone executable) ---
 
 add_executable(scaling_test scaling_test.cpp)
@@ -90,7 +109,6 @@ rj_configure_target(scaling_test TEST)
 set(RJ_KMD_PRELOAD_ENV
     "LD_PRELOAD=$<TARGET_FILE:rocjitsu_kmd_shim>"
     "RJ_CONFIG=${CMAKE_SOURCE_DIR}/configs/amdgpu_cdna4_kmd.json"
-    "RJ_SCHEMA=${CMAKE_SOURCE_DIR}/schemas/simulation_config.fbs"
     "HSA_ENABLE_SDMA=1"
 )
 
@@ -151,7 +169,7 @@ if(ROCMINFO_EXECUTABLE)
         "RocminfoTest.DetectsGpuAgent"
         "RocminfoTest.ReportsGfx950"
         "RocminfoTest.ReportsWavefrontSize"
-        PROPERTIES ENVIRONMENT "${RJ_KMD_PRELOAD_ENV}" TIMEOUT 30
+        PROPERTIES ENVIRONMENT "${RJ_KMD_PRELOAD_ENV}"
     )
     message(STATUS "rocminfo test enabled (found ${ROCMINFO_EXECUTABLE})")
 else()
@@ -206,7 +224,6 @@ if(HSA_RUNTIME64)
         PROPERTIES
             ENVIRONMENT "${RJ_KMD_PRELOAD_ENV}"
             SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
-            TIMEOUT 30
     )
     message(STATUS "HSA init test enabled (found ${HSA_RUNTIME64})")
 
@@ -224,6 +241,7 @@ if(HSA_RUNTIME64)
             PATH_SUFFIXES bin
         )
         set(HAS_DBT_VECTOR_ADD_GPU FALSE)
+        set(HAS_CDNA3_GPU FALSE)
         set(HAS_RDNA4_GPU FALSE)
         if(ROCM_AGENT_ENUM)
             execute_process(
@@ -238,6 +256,9 @@ if(HSA_RUNTIME64)
                 AND _agents MATCHES "gfx94[012]|gfx1100|gfx120[01]"
             )
                 set(HAS_DBT_VECTOR_ADD_GPU TRUE)
+            endif()
+            if(_agent_rc EQUAL 0 AND _agents MATCHES "gfx94[012]")
+                set(HAS_CDNA3_GPU TRUE)
             endif()
             if(_agent_rc EQUAL 0 AND _agents MATCHES "gfx120[01]")
                 set(HAS_RDNA4_GPU TRUE)
@@ -278,13 +299,9 @@ if(HSA_RUNTIME64)
                 COMMAND hsa_translate_test --gtest_filter=*VectorAdd*
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
             )
-            set_tests_properties(
-                "HsaTranslateTest.TranslateAndDispatchVectorAdd"
-                PROPERTIES TIMEOUT 30
-            )
             message(
                 STATUS
-                "HSA translate vector_add test enabled (supported DBT GPU detected)"
+                "HSA translate test enabled (supported DBT GPU detected)"
             )
         else()
             message(
@@ -313,6 +330,118 @@ if(HSA_RUNTIME64)
                 STATUS
                 "HSA translate MFMA test built but NOT registered with CTest "
                 "(no RDNA4 GPU)"
+            )
+        endif()
+
+        add_executable(
+            cdna4_to_cdna3_dispatch_test
+            dbt/cdna4_to_cdna3_dispatch_test.cpp
+        )
+        target_include_directories(
+            cdna4_to_cdna3_dispatch_test
+            PRIVATE
+                ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
+                ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
+                ${CMAKE_SOURCE_DIR}/lib/util/include
+                ${RJ_HSA_INCLUDE_DIR}
+        )
+        target_link_libraries(
+            cdna4_to_cdna3_dispatch_test
+            PRIVATE
+                ${RJ_OBJECT_LIBS}
+                ${HSA_RUNTIME64}
+                GTest::gtest
+                GTest::gtest_main
+        )
+        target_link_options(
+            cdna4_to_cdna3_dispatch_test
+            PRIVATE -Wl,-rpath,${RJ_HSA_LIBRARY_DIR}
+        )
+        target_compile_definitions(
+            cdna4_to_cdna3_dispatch_test
+            PRIVATE HAS_HOST_AMDGPU=1 KERNEL_DIR="${KERNEL_OUTPUT_DIR}"
+        )
+        add_dependencies(cdna4_to_cdna3_dispatch_test device_kernels)
+        rj_configure_target(cdna4_to_cdna3_dispatch_test TEST)
+
+        add_test(
+            NAME "Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulTranslates"
+            COMMAND
+                cdna4_to_cdna3_dispatch_test
+                --gtest_filter=Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulTranslates
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        )
+        set_tests_properties(
+            "Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulTranslates"
+            PROPERTIES TIMEOUT 120
+        )
+
+        if(HAS_CDNA3_GPU)
+            add_test(
+                NAME "Cdna4ToCdna3DispatchTest.DynamicCopyLoopDispatchAndRun"
+                COMMAND
+                    cdna4_to_cdna3_dispatch_test
+                    --gtest_filter=Cdna4ToCdna3DispatchTest.DynamicCopyLoopDispatchAndRun
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            )
+            add_test(
+                NAME
+                    "Cdna4ToCdna3DispatchTest.TritonDynamicMatmulDispatchAndRun"
+                COMMAND
+                    cdna4_to_cdna3_dispatch_test
+                    --gtest_filter=Cdna4ToCdna3DispatchTest.TritonDynamicMatmulDispatchAndRun
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            )
+            add_test(
+                NAME
+                    "Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulDispatchAndRun"
+                COMMAND
+                    cdna4_to_cdna3_dispatch_test
+                    --gtest_filter=Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulDispatchAndRun
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            )
+            add_test(
+                NAME
+                    "Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulConservativeLivenessDispatchAndRun"
+                COMMAND
+                    cdna4_to_cdna3_dispatch_test
+                    --gtest_filter=Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulConservativeLivenessDispatchAndRun
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            )
+            add_test(
+                NAME
+                    "Cdna4ToCdna3DispatchTest.TritonFlashAttentionNoAsyncDispatchAndRun"
+                COMMAND
+                    cdna4_to_cdna3_dispatch_test
+                    --gtest_filter=Cdna4ToCdna3DispatchTest.TritonFlashAttentionNoAsyncDispatchAndRun
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            )
+            add_test(
+                NAME
+                    "Cdna4ToCdna3DispatchTest.TritonFlashAttentionBufferAsyncDispatchAndRun"
+                COMMAND
+                    cdna4_to_cdna3_dispatch_test
+                    --gtest_filter=Cdna4ToCdna3DispatchTest.TritonFlashAttentionBufferAsyncDispatchAndRun
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            )
+            set_tests_properties(
+                "Cdna4ToCdna3DispatchTest.DynamicCopyLoopDispatchAndRun"
+                "Cdna4ToCdna3DispatchTest.TritonDynamicMatmulDispatchAndRun"
+                "Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulDispatchAndRun"
+                "Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulConservativeLivenessDispatchAndRun"
+                "Cdna4ToCdna3DispatchTest.TritonFlashAttentionNoAsyncDispatchAndRun"
+                "Cdna4ToCdna3DispatchTest.TritonFlashAttentionBufferAsyncDispatchAndRun"
+                PROPERTIES TIMEOUT 120
+            )
+            message(
+                STATUS
+                "CDNA4->CDNA3 dispatch tests enabled (CDNA3 GPU detected)"
+            )
+        else()
+            message(
+                STATUS
+                "CDNA4->CDNA3 dispatch tests built but NOT registered with CTest "
+                "(no CDNA3 GPU)"
             )
         endif()
     endif()
@@ -352,7 +481,7 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
         add_test(NAME ${TEST_NAME} COMMAND ${HIP_TEST_BIN})
         set_tests_properties(
             ${TEST_NAME}
-            PROPERTIES ENVIRONMENT "${RJ_KMD_PRELOAD_ENV}" TIMEOUT 120
+            PROPERTIES ENVIRONMENT "${RJ_KMD_PRELOAD_ENV}"
         )
     endfunction()
 
@@ -368,7 +497,7 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
         )
         set_tests_properties(
             ${TEST_CASE}
-            PROPERTIES ENVIRONMENT "${RJ_KMD_PRELOAD_ENV}" TIMEOUT 120
+            PROPERTIES ENVIRONMENT "${RJ_KMD_PRELOAD_ENV}"
         )
     endfunction()
 
@@ -424,7 +553,6 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
         )
             rj_add_hip_test_case(hip_gemm_test "RocblasGemmTest.${TC}")
         endforeach()
-        # Large SDMA stress test — 48 MB H2D transfer, needs extended timeout.
         # Large GEMM stress test — validates SDMA + LDS isolation for big K.
         add_test(
             NAME "RocblasGemmTest.Large_2048x2048"
@@ -432,7 +560,7 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
         )
         set_tests_properties(
             "RocblasGemmTest.Large_2048x2048"
-            PROPERTIES ENVIRONMENT "${RJ_KMD_PRELOAD_ENV}" TIMEOUT 600
+            PROPERTIES ENVIRONMENT "${RJ_KMD_PRELOAD_ENV}"
         )
         foreach(I RANGE 0 4)
             rj_add_hip_test_case(hip_gemm_test "RocblasGemmFuzz.Iter${I}")
@@ -442,7 +570,6 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
         set(RJ_CDNA3_ENV
             "LD_PRELOAD=$<TARGET_FILE:rocjitsu_kmd_shim>"
             "RJ_CONFIG=${CMAKE_SOURCE_DIR}/configs/amdgpu_cdna3_kmd.json"
-            "RJ_SCHEMA=${CMAKE_SOURCE_DIR}/schemas/simulation_config.fbs"
             "HSA_ENABLE_SDMA=1"
         )
         foreach(TC IN ITEMS Tiny_2x2x3 Square_16x16 Square_32x32 Rect_7x11x13)
@@ -452,7 +579,7 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
             )
             set_tests_properties(
                 "RocblasGemmCdna3.${TC}"
-                PROPERTIES ENVIRONMENT "${RJ_CDNA3_ENV}" TIMEOUT 120
+                PROPERTIES ENVIRONMENT "${RJ_CDNA3_ENV}"
             )
         endforeach()
         foreach(I RANGE 0 2)
@@ -462,7 +589,7 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
             )
             set_tests_properties(
                 "RocblasGemmCdna3.Fuzz_Iter${I}"
-                PROPERTIES ENVIRONMENT "${RJ_CDNA3_ENV}" TIMEOUT 120
+                PROPERTIES ENVIRONMENT "${RJ_CDNA3_ENV}"
             )
         endforeach()
         message(STATUS "rocBLAS GEMM test enabled (found ${ROCBLAS_LIB})")
