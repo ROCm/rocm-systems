@@ -206,19 +206,23 @@ void PrimitiveTester::verifyResults(size_t size) {
           : 1;
 
   if (args.myid == check_id) {
+    int start_slot = (batch_size - (args.skip % batch_size)) % batch_size;
+    int verify_iters = std::min(batch_size, num_loops + args.skip);
     size_t buf_bytes = size * batch_size;
-    size_t num_buffers = args.wg_size * args.num_wgs;
-    size_t total = buf_bytes * num_buffers;
+    size_t concurrency = args.wg_size * args.num_wgs;
+    size_t total = size * verify_iters * concurrency;
     size_t verify_wg_size = std::min((size_t) 1024, total);
     size_t verify_num_wgs = (total + verify_wg_size - 1) / verify_wg_size;
 
     hipLaunchKernelGGL(verify_results_kernel_char, verify_num_wgs, verify_wg_size, 0, stream,
-                       dest, size, num_buffers, batch_size, verification_error);
+                       dest, size, buf_bytes, concurrency,
+                       num_loops, args.skip, batch_size, verification_error);
     CHECK_HIP(hipStreamSynchronize(stream));
 
     if (*verification_error) {
-      for (size_t b = 0; b < num_buffers; b++) {
-        for (int slot = 0; slot < batch_size; slot++) {
+      for (size_t b = 0; b < concurrency; b++) {
+        for (int iter = 0; iter < verify_iters; iter++) {
+          int slot = (start_slot + iter) % batch_size;
           for (size_t i = 0; i < size; i++) {
             if (dest[b * buf_bytes + slot * size + i] != 'a') {
               std::cerr << "Data validation error at buffer " << b

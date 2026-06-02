@@ -207,11 +207,14 @@ void DefaultCTXPrimitiveTester::verifyResults(size_t size) {
           : 1;
 
   if (args.myid == check_id) {
+    int start_slot = (batch_size - (args.skip % batch_size)) % batch_size;
+    int verify_iters = std::min(batch_size, num_loops + args.skip);
     size_t buf_bytes = size * batch_size;
-    size_t num_buffers = args.wg_size * args.num_wgs;
+    size_t concurrency = args.wg_size * args.num_wgs;
 
-    for (size_t b = 0; b < num_buffers; b++) {
-      for (int slot = 0; slot < batch_size; slot++) {
+    for (size_t b = 0; b < concurrency; b++) {
+      for (int iter = 0; iter < verify_iters; iter++) {
+        int slot = (start_slot + iter) % batch_size;
         for (size_t i = 0; i < size; i++) {
           if (dest[b * buf_bytes + slot * size + i] != 'a') {
             std::cerr << "Data validation error at buffer " << b
