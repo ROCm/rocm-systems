@@ -36,10 +36,19 @@ enum ncclGinOptFlags {
   ncclGinOptFlagsAggregateRequests = (1 << 1),
 };
 
+#ifndef NCCL_GIN_ANVIL_ENABLE
+#if defined(__HIP_PLATFORM_AMD__) && defined(ENABLE_ROCSHMEM_GIN)
+#define NCCL_GIN_ANVIL_ENABLE 1
+#else
+#define NCCL_GIN_ANVIL_ENABLE 0
+#endif
+#endif
+
 #define NCCL_GIN_BACKEND_MASK_ALL                                               \
   (((NCCL_GIN_PROXY_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_PROXY | \
    ((NCCL_GIN_GDAKI_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_GDAKI | \
-   ((NCCL_GIN_ROCSHMEM_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_ROCSHMEM)
+   ((NCCL_GIN_ROCSHMEM_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_ROCSHMEM | \
+   ((NCCL_GIN_ANVIL_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_ANVIL)
 
 struct ncclGinCtx {
   unsigned backendMask;
@@ -149,6 +158,11 @@ NCCL_DEVICE_INLINE static decltype(auto) ncclGinCallImpl(unsigned beMask, ncclGi
     case (int)NCCL_NET_DEVICE_GIN_ROCSHMEM:
       if (!(1 & (beMask >> (int)NCCL_NET_DEVICE_GIN_ROCSHMEM))) __builtin_unreachable();
       return ApiFn<NCCL_NET_DEVICE_GIN_ROCSHMEM>::call(ctx, static_cast<Arg&&>(arg)...);
+#endif
+#if NCCL_GIN_ANVIL_ENABLE
+    case (int)NCCL_NET_DEVICE_GIN_ANVIL:
+      if (!(1 & (beMask >> (int)NCCL_NET_DEVICE_GIN_ANVIL))) __builtin_unreachable();
+      return ApiFn<NCCL_NET_DEVICE_GIN_ANVIL>::call(ctx, static_cast<Arg&&>(arg)...);
 #endif
     default:
       __builtin_unreachable();
