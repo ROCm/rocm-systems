@@ -24,22 +24,32 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <filesystem>
 #include <fstream>
 #include <random>
 #include <string>
 #include <vector>
 
+#include <ftw.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
-namespace fs = std::filesystem;
-
 namespace {
 
-fs::path g_scratch;
-pid_t    g_child = -1;
+// std::filesystem deliberately avoided: rocky8 (in the hipFile CI matrix)
+// ships GCC 8, where libstdc++ requires linking -lstdc++fs. Sticking to
+// POSIX keeps the driver buildable across rocky / rocky8 / suse / ubuntu.
+
+std::string g_scratch;
+pid_t       g_child = -1;
+
+int
+nftw_unlink(const char *path, const struct stat *, int, struct FTW *)
+{
+    remove(path);
+    return 0;
+}
 
 void
 cleanup()
@@ -50,9 +60,24 @@ cleanup()
         g_child = -1;
     }
     if (!g_scratch.empty()) {
-        std::error_code ec;
-        fs::remove_all(g_scratch, ec);
+        nftw(g_scratch.c_str(), nftw_unlink, 16, FTW_DEPTH | FTW_PHYS);
         g_scratch.clear();
+    }
+}
+
+void
+mkdir_p(const std::string &path)
+{
+    std::size_t pos = 0;
+    while (pos != std::string::npos) {
+        pos             = path.find('/', pos + 1);
+        std::string sub = path.substr(0, pos);
+        if (sub.empty()) continue;
+        if (mkdir(sub.c_str(), 0755) != 0 && errno != EEXIST) {
+            std::fprintf(stderr, "tmpdriver: mkdir(%s) failed: %s\n", sub.c_str(),
+                         std::strerror(errno));
+            std::exit(2);
+        }
     }
 }
 
@@ -65,7 +90,7 @@ on_signal(int sig)
 }
 
 void
-seed_file(const fs::path &path, std::size_t bytes, std::uint32_t seed)
+seed_file(const std::string &path, std::size_t bytes, std::uint32_t seed)
 {
     std::mt19937                            gen(seed);
     std::uniform_int_distribution<uint16_t> dist(0, 255);
@@ -142,8 +167,7 @@ main(int argc, char **argv)
     if (base.empty() || i >= argc)
         usage(argv[0]);
 
-    std::error_code ec;
-    fs::create_directories(base, ec); // ok if exists
+    mkdir_p(base); // ok if exists
     std::string tmpl = base + "/hipfile_ex.XXXXXX";
     if (mkdtemp(tmpl.data()) == nullptr) {
         std::fprintf(stderr, "tmpdriver: mkdtemp(%s) failed: %s\n", tmpl.c_str(), std::strerror(errno));
@@ -156,14 +180,14 @@ main(int argc, char **argv)
 
     std::string input_path;
     if (seed_bytes > 0) {
-        input_path = (g_scratch / "input.bin").string();
+        input_path = g_scratch + "/input.bin";
         seed_file(input_path, seed_bytes, seed);
     }
 
     std::vector<std::string> child_args;
     child_args.reserve(argc - i);
     for (; i < argc; ++i)
-        child_args.push_back(substitute(argv[i], g_scratch.string(), input_path));
+        child_args.push_back(substitute(argv[i], g_scratch, input_path));
 
     std::vector<char *> cargs;
     cargs.reserve(child_args.size() + 1);

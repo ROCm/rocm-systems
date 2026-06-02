@@ -148,6 +148,7 @@ jobs:
             ${GITHUB_WORKSPACE}/hipfile-build-dir/test/amd_detail/batch_mt \
             ${GITHUB_WORKSPACE}/hipfile-build-dir/test/amd_detail/state_mt \
             ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/aiscp/aiscp \
+            ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/common/examples_tmpdriver \
             ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/basics/bufregister-write \
             ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/basics/no-bufregister-write \
             ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/basics/no-odirect-write \
