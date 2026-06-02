@@ -603,16 +603,9 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
 inline void DmaBlitManager::resolveAgents(const Memory& srcMem, const Memory& dstMem,
                                           address srcAddr, address dstAddr,
                                           hsa_agent_t& srcAgent, hsa_agent_t& dstAgent) const {
-  if (&srcMem.dev() == &dstMem.dev()) {
-    // Different devices -- use each memory's device backend agent
-    srcAgent = srcMem.dev().getBackendDevice();
-    dstAgent = dstMem.dev().getBackendDevice();
-  } else {
-    // Use agents stored in memory objects during creation
-    srcAgent = srcMem.getOwningAgent();
-    dstAgent = dstMem.getOwningAgent();
-
-  }
+  // Use agents stored in memory objects during creation
+  srcAgent = srcMem.getOwningAgent();
+  dstAgent = dstMem.getOwningAgent();
 
   // Handle invalid agent (shouldn't happen if create() properly initialized)
   if (srcAgent.handle == 0) {
