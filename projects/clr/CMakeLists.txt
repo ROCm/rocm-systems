@@ -69,7 +69,6 @@ if(CLR_BUILD_HIP)
         message(FATAL_ERROR "Please pass HIP using -DHIP_COMMON_DIR. HIP_COMMON_DIR is incorrect")
     endif()
     # Determine HIP_PLATFORM: prefer explicit -DHIP_PLATFORM, then env var, then default to "amd".
-    # hipconfig-based auto-detection is removed as hipconfig is deprecated.
     if(NOT DEFINED HIP_PLATFORM)
         if(DEFINED ENV{HIP_PLATFORM})
             set(HIP_PLATFORM "$ENV{HIP_PLATFORM}")
