@@ -296,7 +296,7 @@ typedef enum {
   /**
    * @brief ECC deferred error fields
    */
-  RDC_FI_ECC_SDMA_DE = 650,
+  RDC_FI_ECC_SDMA_DE,
   RDC_FI_ECC_GFX_DE,
   RDC_FI_ECC_MMHUB_DE,
   RDC_FI_ECC_ATHUB_DE,

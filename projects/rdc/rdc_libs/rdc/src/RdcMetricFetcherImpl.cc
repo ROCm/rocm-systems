@@ -1270,6 +1270,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
             value->value.l_int = static_cast<int64_t>(violation_status.acc_ppt_pwr);
             break;
           case RDC_HEALTH_THERMAL_THROTTLE_TIME:
+          case RDC_HEALTH_SOCKET_THRM_ACC:  // alias — same underlying acc_socket_thrm counter
             value->value.l_int = static_cast<int64_t>(violation_status.acc_socket_thrm);
             break;
           case RDC_HEALTH_VIOLATION_COUNTER:
@@ -1283,9 +1284,6 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
             break;
           case RDC_HEALTH_PPT_RESIDENCY_PCT:
             value->value.l_int = static_cast<int64_t>(violation_status.per_ppt_pwr);
-            break;
-          case RDC_HEALTH_SOCKET_THRM_ACC:
-            value->value.l_int = static_cast<int64_t>(violation_status.acc_socket_thrm);
             break;
           case RDC_HEALTH_SOCKET_THRM_PCT:
             value->value.l_int = static_cast<int64_t>(violation_status.per_socket_thrm);
