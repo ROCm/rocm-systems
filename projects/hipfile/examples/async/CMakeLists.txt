@@ -43,34 +43,19 @@ endforeach()
 # Gated on BUILD_TESTING; AIS_INSTALL_EXAMPLES is already enforced by the
 # parent CMakeLists which only adds this subdirectory when examples are built.
 if(BUILD_TESTING)
-    set(ASYNC_TEST_DIR "${AIS_CAPABLE_DIR}/hipfile_async_tests")
-
-    add_test(
-        NAME async_setup_dir
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${ASYNC_TEST_DIR}
-    )
-    add_test(
-        NAME async_cleanup
-        COMMAND ${CMAKE_COMMAND} -E rm -rf ${ASYNC_TEST_DIR}
-    )
-    set_tests_properties(async_setup_dir PROPERTIES
-        FIXTURES_SETUP async_scratch
-    )
-    set_tests_properties(async_cleanup PROPERTIES
-        FIXTURES_CLEANUP async_scratch
-    )
-
-    # Each async example calls seed_read_file() to truncate+seed its READ_FILE,
-    # so we give every test its own input path. This avoids parallel-run races
-    # on a shared input file and removes the need for an upfront dd seeding.
+    # Each async example calls seed_read_file() internally to truncate+seed
+    # its READ_FILE, so the driver only needs to provide a fresh scratch dir
+    # per test — no --seed-input. This removes the prior shared-fixture model
+    # (and its SHA256 runner-tag namespacing hack for shared CI volumes).
     foreach(example ${ASYNC_EXAMPLES})
         add_test(
             NAME async_${example}
-            COMMAND $<TARGET_FILE:${example}> in_${example}.bin out_${example}.bin
-            WORKING_DIRECTORY ${ASYNC_TEST_DIR}
+            COMMAND
+                $<TARGET_FILE:examples_tmpdriver> --base ${AIS_CAPABLE_DIR}
+                -- $<TARGET_FILE:${example}>
+                   {TMPDIR}/in_${example}.bin {TMPDIR}/out_${example}.bin
         )
         set_tests_properties(async_${example} PROPERTIES
-            FIXTURES_REQUIRED async_scratch
             LABELS "system;hipfile;async"
         )
     endforeach()
