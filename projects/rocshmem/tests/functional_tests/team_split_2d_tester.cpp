@@ -46,6 +46,13 @@ TeamSplit2DTester::TeamSplit2DTester(TesterArguments args) : Tester(args)
   team_world_dup = ROCSHMEM_TEAM_INVALID;
   x_team = ROCSHMEM_TEAM_INVALID;
   y_team = ROCSHMEM_TEAM_INVALID;
+
+  if (rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, n_pes, nullptr, 0, 
+                                    &team_world_dup) != ROCSHMEM_SUCCESS){
+    fprintf(stderr, 
+            "ERROR: Unable to start test. Error in rocshmem_team_split_strided\n");
+    exit(-1);
+  }
 }
 
 TeamSplit2DTester::~TeamSplit2DTester() {}
@@ -68,13 +75,8 @@ void TeamSplit2DTester::verifyResults([[maybe_unused]] size_t size) {
 
 void TeamSplit2DTester::preLaunchKernel() {
   int ret = 0;
-  ret = rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, n_pes, nullptr, 0, 
-                                    &team_world_dup);
-  if (ret != ROCSHMEM_SUCCESS){
-    fprintf(stderr, 
-            "ERROR: Unable to start test. Error in rocshmem_team_split_strided\n");
-    exit(-1);
-  }
+  x_team = ROCSHMEM_TEAM_INVALID;
+  y_team = ROCSHMEM_TEAM_INVALID;
   ret = rocshmem_team_split_2d(team_world_dup, xrange, nullptr, 0, &x_team, 
                                nullptr, 0, &y_team);
   if (ret != 0){
@@ -110,5 +112,6 @@ void TeamSplit2DTester::postLaunchKernel() {
             my_pe, y_size, n_pes / xrange);
     test_failed++;
   }
-  
+  rocshmem_team_destroy(x_team);
+  rocshmem_team_destroy(y_team);
 }
