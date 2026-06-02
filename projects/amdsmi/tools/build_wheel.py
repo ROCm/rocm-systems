@@ -80,8 +80,18 @@ log = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 OS_VARIANTS = (
-    "RHEL8", "RHEL9", "RHEL10", "AlmaLinux8", "SLES", "AzureLinux3",
-    "Ubuntu20", "Ubuntu22", "Ubuntu24", "Debian10", "Debian11", "Debian12",
+    "RHEL8",
+    "RHEL9",
+    "RHEL10",
+    "AlmaLinux8",
+    "SLES",
+    "AzureLinux3",
+    "Ubuntu20",
+    "Ubuntu22",
+    "Ubuntu24",
+    "Debian10",
+    "Debian11",
+    "Debian12",
 )
 
 # Variants that need QA_RPATHS to silence rpath-related QA failures.
@@ -175,8 +185,7 @@ def cmake_and_build(project_dir, build_dir, cmake_python, args, extra_env):
         cwd=str(build_dir),
         env=extra_env or None,
     )
-    run(["make", "-j" + str(os.cpu_count() or 4)], cwd=str(build_dir),
-        env=extra_env or None)
+    run(["make", "-j" + str(os.cpu_count() or 4)], cwd=str(build_dir), env=extra_env or None)
 
 
 def build_wheels(pkg_dir, raw_wheels_dir, interpreters):
@@ -196,9 +205,14 @@ def build_wheels(pkg_dir, raw_wheels_dir, interpreters):
 
         run(
             [
-                py, "-m", "pip", "wheel",
-                "--no-deps", "--no-build-isolation",
-                "-w", str(raw_wheels_dir),
+                py,
+                "-m",
+                "pip",
+                "wheel",
+                "--no-deps",
+                "--no-build-isolation",
+                "-w",
+                str(raw_wheels_dir),
                 ".",
             ],
             cwd=str(pkg_dir),
@@ -212,10 +226,14 @@ def repair_or_copy(raw_wheels, output_dir, cmake_python, repair):
             shutil.copy2(whl, output_dir)
         return
 
-    auditwheel_ok = subprocess.run(
-        [cmake_python, "-m", "auditwheel", "--version"],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-    ).returncode == 0
+    auditwheel_ok = (
+        subprocess.run(
+            [cmake_python, "-m", "auditwheel", "--version"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        ).returncode
+        == 0
+    )
 
     if not auditwheel_ok:
         log.warning("auditwheel not available; copying raw wheels.")
@@ -226,8 +244,7 @@ def repair_or_copy(raw_wheels, output_dir, cmake_python, repair):
     log.info("Repairing wheels with auditwheel ...")
     for whl in raw_wheels:
         result = run(
-            [cmake_python, "-m", "auditwheel", "repair",
-             str(whl), "--wheel-dir", str(output_dir)],
+            [cmake_python, "-m", "auditwheel", "repair", str(whl), "--wheel-dir", str(output_dir)],
             check=False,
         )
         if result.returncode != 0:
@@ -245,38 +262,76 @@ def parse_args():
         description="Build AMDSMI Python wheels (Linux / manylinux).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--project-dir", type=Path, required=True,
-                   help="AMDSMI project root (the directory with CMakeLists.txt).")
-    p.add_argument("--build-dir", type=Path, default=Path("/tmp/amdsmi-build"),
-                   help="CMake build directory  [default: /tmp/amdsmi-build].")
-    p.add_argument("--raw-wheels-dir", type=Path, default=Path("/tmp/raw-wheels"),
-                   help="Staging dir for raw wheels  [default: /tmp/raw-wheels].")
-    p.add_argument("--output-dir", type=Path, default=None,
-                   help="Final wheel output dir  [default: <project-dir>/wheels].")
-    p.add_argument("--build-type", default="Release",
-                   choices=["Release", "Debug", "RelWithDebInfo", "MinSizeRel"],
-                   help="CMake build type  [default: Release].")
-    p.add_argument("--enable-esmi", dest="enable_esmi",
-                   action="store_true", default=True,
-                   help="Enable ESMI library build (default).")
-    p.add_argument("--no-esmi", dest="enable_esmi", action="store_false",
-                   help="Disable ESMI library build.")
-    p.add_argument("--python-bins", default=None,
-                   help="Comma-separated Python executables  "
-                        "(default: /opt/python/cp3*/bin/python3 if present, "
-                        "else system python3).")
-    p.add_argument("--os-variant", choices=list(OS_VARIANTS), default=None,
-                   help="Target OS variant (only affects QA_RPATHS handling).")
-    p.add_argument("--repair", dest="repair",
-                   action="store_true", default=False,
-                   help="Run auditwheel repair for manylinux tags.")
-    p.add_argument("--no-repair", dest="repair", action="store_false",
-                   help="Skip the auditwheel repair step.")
-    p.add_argument("--build-tests", action="store_true",
-                   help="Build C/C++ tests  [default: OFF].")
-    p.add_argument("--clean", action="store_true",
-                   help="Wipe --build-dir entirely before configuring  "
-                        "[default: surgical clean of CMakeCache.txt only].")
+    p.add_argument(
+        "--project-dir",
+        type=Path,
+        required=True,
+        help="AMDSMI project root (the directory with CMakeLists.txt).",
+    )
+    p.add_argument(
+        "--build-dir",
+        type=Path,
+        default=Path("/tmp/amdsmi-build"),
+        help="CMake build directory  [default: /tmp/amdsmi-build].",
+    )
+    p.add_argument(
+        "--raw-wheels-dir",
+        type=Path,
+        default=Path("/tmp/raw-wheels"),
+        help="Staging dir for raw wheels  [default: /tmp/raw-wheels].",
+    )
+    p.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        help="Final wheel output dir  [default: <project-dir>/wheels].",
+    )
+    p.add_argument(
+        "--build-type",
+        default="Release",
+        choices=["Release", "Debug", "RelWithDebInfo", "MinSizeRel"],
+        help="CMake build type  [default: Release].",
+    )
+    p.add_argument(
+        "--enable-esmi",
+        dest="enable_esmi",
+        action="store_true",
+        default=True,
+        help="Enable ESMI library build (default).",
+    )
+    p.add_argument(
+        "--no-esmi", dest="enable_esmi", action="store_false", help="Disable ESMI library build."
+    )
+    p.add_argument(
+        "--python-bins",
+        default=None,
+        help="Comma-separated Python executables  "
+        "(default: /opt/python/cp3*/bin/python3 if present, "
+        "else system python3).",
+    )
+    p.add_argument(
+        "--os-variant",
+        choices=list(OS_VARIANTS),
+        default=None,
+        help="Target OS variant (only affects QA_RPATHS handling).",
+    )
+    p.add_argument(
+        "--repair",
+        dest="repair",
+        action="store_true",
+        default=False,
+        help="Run auditwheel repair for manylinux tags.",
+    )
+    p.add_argument(
+        "--no-repair", dest="repair", action="store_false", help="Skip the auditwheel repair step."
+    )
+    p.add_argument("--build-tests", action="store_true", help="Build C/C++ tests  [default: OFF].")
+    p.add_argument(
+        "--clean",
+        action="store_true",
+        help="Wipe --build-dir entirely before configuring  "
+        "[default: surgical clean of CMakeCache.txt only].",
+    )
     return p.parse_args()
 
 
@@ -294,8 +349,7 @@ def main():
 
     build_dir = args.build_dir.resolve()
     raw_wheels_dir = args.raw_wheels_dir.resolve()
-    output_dir = (args.output_dir.resolve() if args.output_dir
-                  else project_dir / "wheels")
+    output_dir = args.output_dir.resolve() if args.output_dir else project_dir / "wheels"
 
     interpreters = collect_interpreters(args.python_bins)
     if not interpreters:
@@ -337,8 +391,7 @@ def main():
     prepare_wheel_dirs(raw_wheels_dir, output_dir)
 
     best_effort_pip_upgrade(
-        cmake_python,
-        ["pip", "setuptools", "wheel"] + (["auditwheel"] if args.repair else []),
+        cmake_python, ["pip", "setuptools", "wheel"] + (["auditwheel"] if args.repair else [])
     )
 
     build_wheels(pkg_dir, raw_wheels_dir, interpreters)

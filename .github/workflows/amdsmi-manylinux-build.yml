@@ -50,7 +50,13 @@ jobs:
         if: matrix.target.id == 'debian'
         run: |
           sudo apt-get update
-          sudo apt-get install -y git make gcc g++ cmake ninja-build libssl-dev libdrm-dev
+          sudo apt-get install -y git make gcc g++ cmake ninja-build libssl-dev libdrm-dev \
+            libnl-3-dev libnl-genl-3-dev libmnl-dev
+
+      - name: Install RPM build prerequisites
+        if: matrix.target.id == 'rpm'
+        run: |
+          dnf install -y libnl3-devel libmnl-devel
 
       - name: Mark workspace safe for git
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
