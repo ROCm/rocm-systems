@@ -15,9 +15,6 @@
 #if defined(__HIP_PLATFORM_AMD__)
 namespace hipFile {
 
-// Local declarations; the canonical declarations for the amd backend live in
-// src/amd_detail/api_trace/api-trace-internal.h, but this file is also
-// compiled into the nvidia backend which does not have access to that header.
 const char    *hipFileGetOpErrorString(hipFileOpError_t status);
 hipFileError_t hipFileGetVersion(unsigned *major, unsigned *minor, unsigned *patch);
 #endif
