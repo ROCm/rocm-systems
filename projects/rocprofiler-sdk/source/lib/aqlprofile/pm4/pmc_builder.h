@@ -833,14 +833,20 @@ public:
                         {
                             for(int wgp = 0; wgp < wgp_per_sa_; wgp++)
                             {
-                                grbm_value =
-                                    Primitives::grbm_se_sh_wgp_index_value(se_index, sarray, wgp);
+                                if(block_info->instance_count > 1)
+                                    grbm_value = Primitives::grbm_inst_se_sh_wgp_index_value(
+                                        block_des.index, se_index, sarray, wgp);
+                                else
+                                    grbm_value = Primitives::grbm_se_sh_wgp_index_value(
+                                        se_index, sarray, wgp);
                                 SetGrbmGfxIndex(cmd_buffer, grbm_value);
+                                uint32_t dw_mask = reg_info.register_addr_hi.offset ? 3 : 1;
                                 builder.BuildCopyCounterDataPacket(cmd_buffer,
                                                                    reg_info.register_addr_lo,
                                                                    reg_info.register_addr_hi,
                                                                    buf + read_counter,
-                                                                   1);
+                                                                   dw_mask);
+                                if(buf && (dw_mask == 1)) buf[read_counter + 1] = 0;
                                 read_counter += 2;
                             }
                         }
