@@ -34,7 +34,7 @@ IF (BUILD_UNIT_TESTS)
 ENDIF()
 
 # Print top-level test summary if CTest is enabled
-if(ROCSHMEM_USE_CTEST AND (BUILD_FUNCTIONAL_TESTS OR BUILD_UNIT_TESTS))
+if(BUILD_CTESTS AND (BUILD_FUNCTIONAL_TESTS OR BUILD_UNIT_TESTS))
     # Get all tests from this directory and subdirectories
     get_directory_property(all_tests TESTS)
     list(LENGTH all_tests total_tests)

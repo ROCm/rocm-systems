@@ -149,8 +149,8 @@ rocm_install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/unit_test_wrapper.sh
              COMPONENT tests DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem)
 
 # Include CTest-based unit tests
-# Set ROCSHMEM_USE_CTEST=ON to register unit tests
-if(ROCSHMEM_USE_CTEST)
+# Set BUILD_CTESTS=ON to register unit tests
+if(BUILD_CTESTS)
     message(STATUS "Registering CTest-based unit tests")
     include(${CMAKE_CURRENT_SOURCE_DIR}/CTestUnitTests.cmake)
     register_all_unit_tests()

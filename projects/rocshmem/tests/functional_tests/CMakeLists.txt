@@ -136,9 +136,9 @@ rocm_install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/test_wrapper.sh
              COMPONENT tests DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem)
 
 # Include CTest-based functional tests
-# Set ROCSHMEM_USE_CTEST=ON to register all tests (can be slow for large test suites)
+# Set BUILD_CTESTS=ON to register all tests (can be slow for large test suites)
 # By default, only the shell script is installed for compatibility
-if(ROCSHMEM_USE_CTEST)
+if(BUILD_CTESTS)
     message(STATUS "Registering CTest-based functional tests")
     include(${CMAKE_CURRENT_SOURCE_DIR}/CTestFunctionalTests.cmake)
     register_all_functional_tests()
