@@ -288,6 +288,7 @@ class RocprofsysConfig:
             "ROCPROFSYS_USE_SAMPLING": "ON",
             "ROCPROFSYS_TIME_OUTPUT": "OFF",
             "ROCPROFSYS_USE_PID": "OFF",
+            "ROCPROFSYS_LOG_LEVEL": "info",
             "LD_LIBRARY_PATH": self.get_library_path(),
             "ROCPROFSYS_CONFIG_FILE": "",
         }
