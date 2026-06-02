@@ -17,7 +17,7 @@ pub mod topologies;
 
 use mirage_core::error::Result;
 
-pub use agents::{agents, mi300x, mi350x};
+pub use agents::{agents, mi300x, mi350x, mi450x};
 pub use topologies::{default_topology, topologies};
 
 /// Write all builtin agents to disk.
