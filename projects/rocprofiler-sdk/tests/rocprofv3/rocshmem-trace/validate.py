@@ -102,6 +102,26 @@ def test_rocshmem(json_data):
             in bf_op_names
         )
 
+    # The structure checks above prove every EXT record carries well-formed
+    # args/retval; this additionally pins a known argument name + value (parity
+    # with rocdecode-trace, which asserts args[1].name == "input_file_path").
+    # The rocshmem-demo always transfers kPerPeBytes (= 64) via
+    # putmem_on_stream(dest, source, nelems, pe, stream).
+    putmem_records = [
+        node
+        for node in rocshmem_data
+        if data.strings.buffer_records[node.kind].operations[node.operation]
+        == "putmem_on_stream"
+    ]
+    assert len(putmem_records) > 0, "expected at least one putmem_on_stream record"
+
+    putmem_args = {arg.name: arg.value for arg in putmem_records[0].args}
+    for expected in ("dest", "source", "nelems", "pe", "stream"):
+        assert expected in putmem_args, f"putmem_on_stream missing arg '{expected}'"
+
+    # kPerPeBytes is a compile-time constant (64) in the rocshmem-demo app.
+    assert int(putmem_args["nelems"], 0) == 64, putmem_args["nelems"]
+
 
 def test_csv_data(csv_data):
     # If rocSHMEM tracing is not supported, end early
