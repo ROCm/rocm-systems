@@ -49,6 +49,9 @@ public:
     using database_t  = typename SqlitePolicy::database_t;
     using statement_t = typename SqlitePolicy::statement_t;
 
+    static_assert(std::is_pointer_v<statement_t>,
+                  "SqlitePolicy::statement_t must be a pointer type");
+
     // =========================================================================
     // Opaque statement handle
     //

@@ -317,8 +317,9 @@ basic_sqlite_backend<SqlitePolicy>::flush()
     const int rc = SqlitePolicy::backup_to_file(m_sqlite3, m_db_path.c_str());
     if(rc != SqlitePolicy::result_ok)
     {
-        throw std::runtime_error("Database flush (backup) failed: rc=" +
-                                 std::to_string(rc));
+        throw std::runtime_error(
+            "Database flush (backup) failed: rc=" + std::to_string(rc) + ": " +
+            SqlitePolicy::errmsg(m_sqlite3));
     }
     m_flushed = true;
 }

@@ -6,6 +6,7 @@
 #include <gmock/gmock.h>
 
 #include <cstdint>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 
@@ -195,10 +196,13 @@ private:
     static sqlite3_recorder& active()
     {
         auto* recorder = active_slot();
-        // A null slot means a mock_sqlite3 operation ran with no active
-        // recorder -- the test forgot its scoped_bind.
-        EXPECT_NE(recorder, nullptr)
-            << "mock_sqlite3 used without an active sqlite3_recorder scoped_bind";
+        if(recorder == nullptr)
+        {
+            ADD_FAILURE()
+                << "mock_sqlite3 used without an active sqlite3_recorder scoped_bind";
+            throw std::logic_error(
+                "mock_sqlite3 used without an active sqlite3_recorder scoped_bind");
+        }
         return *recorder;
     }
 };
