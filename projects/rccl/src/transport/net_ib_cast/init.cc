@@ -26,12 +26,9 @@ extern int64_t ncclParamIbCastUseInline();
 static int IbCastGetNumaNodeFromPath(const char* pciPath);
 static ncclResult_t IbCastGetPciRootFromPath(const char* pciPath, char* root, size_t rootLen);
 
-// RCCL's pciPathToInt64 (defined in graph/topo.cc) takes 4 args; NCCL 2.30 callers use 2.
-// Declare the 4-arg version and provide a 2-arg shim.
-ncclResult_t pciPathToInt64(char* path, int offset, int minOffset, int64_t* id);
-static ncclResult_t pciPathToInt64(char* path, int64_t* id) {
-  return pciPathToInt64(path, (int)strlen(path), 0, id);
-}
+// Forward declaration for the 2-arg pciPathToInt64 defined in src/misc/utils.cc.
+// Matches the resolution pattern used by net_ib/init.cc (via common.h).
+ncclResult_t pciPathToInt64(char* path, int64_t* id);
 
 NCCL_PARAM(IbCastPciRelaxedOrdering, "IB_PCI_RELAXED_ORDERING", 2);
 NCCL_PARAM(IbCastAdaptiveRouting, "IB_ADAPTIVE_ROUTING", -2);
