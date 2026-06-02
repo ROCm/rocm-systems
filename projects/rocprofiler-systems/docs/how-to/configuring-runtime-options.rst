@@ -336,10 +336,15 @@ ROCpd outputs:
 
 * ``unified_memory.txt`` -- human-readable per-GPU summary with fault counts,
   trigger breakdown (``gpu_page_fault``, ``cpu_page_fault``, ``prefetch``), and
-  host-to-device / device-to-host migration bandwidth.
+  host-to-device / device-to-host effective migration throughput.
 * ``unified_memory.json`` -- machine-readable equivalent with the same fields
   plus an ``xnack_enabled`` flag and an always-present
   ``device_to_device`` direction bucket for schema stability.
+
+The migration-throughput value is computed as migrated bytes divided by KFD
+page-migration event duration. It is an end-to-end migration-service metric and
+should not be interpreted as PCIe, XGMI, SDMA, HBM, or raw memory-subsystem
+bandwidth.
 
 Requires an XNACK-capable AMD GPU with ``HSA_XNACK=1`` and
 ROCProfiler-SDK 1.2.2 or above. The KFD tracing domains
@@ -380,6 +385,15 @@ Filtering on ``Region2`` captures only activity inside the inner ``Region2`` sco
 
    When combined with ``roctxProfilerPause`` / ``roctxProfilerResume``, a pause issued
    outside an active target region is ignored — each region entry resets the pause state.
+
+.. note::
+
+   Counter tracks may show a small latency between the region boundary and the
+   closing zero-valued sentinel sample.  This is expected behavior — the sentinel
+   is written by a callback that executes after ``roctxRangeStop()`` returns, so a
+   gap of a few tens of microseconds is normal and does not indicate any problem
+   with the trace.  Increasing the process-sampling frequency
+   (``ROCPROFSYS_PROCESS_SAMPLING_FREQ``) will reduce this gap.
 
 Example: trace only activity inside a region named ``Compute``:
 

@@ -26,7 +26,9 @@ def gen_vector_mbcnt(dst: list[str], src: list[str], op: str | None) -> str:
     L.append(f'    uint32_t mask = {src[0]}.read_lane(wf, lane);')
     L.append(f'    uint32_t base = {src[1]}.read_lane(wf, lane);')
     if op == 'lo':
-        L.append('    uint32_t thread_mask = lane < 32 ? (1u << lane) - 1 : 0xFFFFFFFFu;')
+        L.append(
+            '    uint32_t thread_mask = lane < 32 ? (1u << lane) - 1 : 0xFFFFFFFFu;'
+        )
         L.append('    uint32_t count = std::popcount(mask & thread_mask);')
     else:  # hi
         L.append('    uint32_t shift = lane >= 32 ? lane - 32 : 0;')
@@ -35,6 +37,7 @@ def gen_vector_mbcnt(dst: list[str], src: list[str], op: str | None) -> str:
     L.append(f'    {dst[0]}.write_lane(wf, lane, base + count);')
     L.append('  }')
     return '\n'.join(L)
+
 
 def gen_vector_mad_64_32(dst: list[str], src: list[str], dtype: str | None) -> str:
     """Generate V_MAD_U64_U32 / V_MAD_I64_I32 body.
@@ -50,9 +53,15 @@ def gen_vector_mad_64_32(dst: list[str], src: list[str], dtype: str | None) -> s
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     if dtype == 'i64':
-        L.append(f'    int64_t s0 = static_cast<int32_t>({src[0]}.read_lane(wf, lane));')
-        L.append(f'    int64_t s1 = static_cast<int32_t>({src[1]}.read_lane(wf, lane));')
-        L.append(f'    int64_t s2 = static_cast<int64_t>({src[2]}.read_lane64(wf, lane));')
+        L.append(
+            f'    int64_t s0 = static_cast<int32_t>({src[0]}.read_lane(wf, lane));'
+        )
+        L.append(
+            f'    int64_t s1 = static_cast<int32_t>({src[1]}.read_lane(wf, lane));'
+        )
+        L.append(
+            f'    int64_t s2 = static_cast<int64_t>({src[2]}.read_lane64(wf, lane));'
+        )
         L.append('    uint64_t result = static_cast<uint64_t>(s0 * s1 + s2);')
     else:
         L.append(f'    uint64_t s0 = {src[0]}.read_lane(wf, lane);')
@@ -62,6 +71,7 @@ def gen_vector_mad_64_32(dst: list[str], src: list[str], dtype: str | None) -> s
     L.append(f'    {dst[0]}.write_lane64(wf, lane, result);')
     L.append('  }')
     return '\n'.join(L)
+
 
 def gen_vector_mad_32_16(dst: list[str], src: list[str], dtype: str | None) -> str:
     """Generate V_MAD_U32_U16 / V_MAD_I32_I16 body.
@@ -74,10 +84,18 @@ def gen_vector_mad_32_16(dst: list[str], src: list[str], dtype: str | None) -> s
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     if dtype == 'i32':
-        L.append(f'    int32_t s0 = static_cast<int16_t>({src[0]}.read_lane(wf, lane) & 0xFFFF);')
-        L.append(f'    int32_t s1 = static_cast<int16_t>({src[1]}.read_lane(wf, lane) & 0xFFFF);')
-        L.append(f'    int32_t s2 = static_cast<int32_t>({src[2]}.read_lane(wf, lane));')
-        L.append(f'    {dst[0]}.write_lane(wf, lane, static_cast<uint32_t>(s0 * s1 + s2));')
+        L.append(
+            f'    int32_t s0 = static_cast<int16_t>({src[0]}.read_lane(wf, lane) & 0xFFFF);'
+        )
+        L.append(
+            f'    int32_t s1 = static_cast<int16_t>({src[1]}.read_lane(wf, lane) & 0xFFFF);'
+        )
+        L.append(
+            f'    int32_t s2 = static_cast<int32_t>({src[2]}.read_lane(wf, lane));'
+        )
+        L.append(
+            f'    {dst[0]}.write_lane(wf, lane, static_cast<uint32_t>(s0 * s1 + s2));'
+        )
     else:
         L.append(f'    uint32_t s0 = {src[0]}.read_lane(wf, lane) & 0xFFFFu;')
         L.append(f'    uint32_t s1 = {src[1]}.read_lane(wf, lane) & 0xFFFFu;')
@@ -86,16 +104,29 @@ def gen_vector_mad_32_16(dst: list[str], src: list[str], dtype: str | None) -> s
     L.append('  }')
     return '\n'.join(L)
 
-def gen_vector_div_fixup(dst: list[str], src: list[str], dtype: str | None, is_vop3: bool = False, has_abs: bool = False) -> str:
+
+def gen_vector_div_fixup(
+    dst: list[str],
+    src: list[str],
+    dtype: str | None,
+    is_vop3: bool = False,
+    has_abs: bool = False,
+) -> str:
     """Generate V_DIV_FIXUP body (corrects division result)."""
     L = []
     L.append('  uint64_t exec = wf.exec();')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     if dtype == 'f64':
-        L.append(f'    double p = std::bit_cast<double>({src[0]}.read_lane64(wf, lane));')
-        L.append(f'    double b = std::bit_cast<double>({src[1]}.read_lane64(wf, lane));')
-        L.append(f'    double c = std::bit_cast<double>({src[2]}.read_lane64(wf, lane));')
+        L.append(
+            f'    double p = std::bit_cast<double>({src[0]}.read_lane64(wf, lane));'
+        )
+        L.append(
+            f'    double b = std::bit_cast<double>({src[1]}.read_lane64(wf, lane));'
+        )
+        L.append(
+            f'    double c = std::bit_cast<double>({src[2]}.read_lane64(wf, lane));'
+        )
         if is_vop3:
             L.extend(vop3_src_mod('p', 0, has_abs))
             L.extend(vop3_src_mod('b', 1, has_abs))
@@ -103,22 +134,40 @@ def gen_vector_div_fixup(dst: list[str], src: list[str], dtype: str | None, is_v
         L.append('    double result;')
         L.append('    if (std::isnan(b)) result = b;')
         L.append('    else if (std::isnan(c)) result = c;')
-        L.append('    else if (c == 0.0 && b == 0.0) result = std::numeric_limits<double>::quiet_NaN();')
-        L.append('    else if (std::isinf(c) && std::isinf(b)) result = std::numeric_limits<double>::quiet_NaN();')
+        L.append(
+            '    else if (c == 0.0 && b == 0.0) result = std::numeric_limits<double>::quiet_NaN();'
+        )
+        L.append(
+            '    else if (std::isinf(c) && std::isinf(b)) result = std::numeric_limits<double>::quiet_NaN();'
+        )
         L.append('    else if (b == 0.0) {')
-        L.append('      result = std::copysign(std::numeric_limits<double>::infinity(),')
-        L.append('                             std::bit_cast<double>(std::bit_cast<uint64_t>(b) ^ std::bit_cast<uint64_t>(c)));')
+        L.append(
+            '      result = std::copysign(std::numeric_limits<double>::infinity(),'
+        )
+        L.append(
+            '                             std::bit_cast<double>(std::bit_cast<uint64_t>(b) ^ std::bit_cast<uint64_t>(c)));'
+        )
         L.append('    }')
-        L.append('    else if (c == 0.0) result = std::copysign(0.0, std::bit_cast<double>(std::bit_cast<uint64_t>(b) ^ std::bit_cast<uint64_t>(c)));')
+        L.append(
+            '    else if (c == 0.0) result = std::copysign(0.0, std::bit_cast<double>(std::bit_cast<uint64_t>(b) ^ std::bit_cast<uint64_t>(c)));'
+        )
         L.append('    else if (std::isinf(c)) {')
-        L.append('      result = std::copysign(std::numeric_limits<double>::infinity(),')
-        L.append('                             std::bit_cast<double>(std::bit_cast<uint64_t>(b) ^ std::bit_cast<uint64_t>(c)));')
+        L.append(
+            '      result = std::copysign(std::numeric_limits<double>::infinity(),'
+        )
+        L.append(
+            '                             std::bit_cast<double>(std::bit_cast<uint64_t>(b) ^ std::bit_cast<uint64_t>(c)));'
+        )
         L.append('    }')
-        L.append('    else if (std::isinf(b)) result = std::copysign(0.0, std::bit_cast<double>(std::bit_cast<uint64_t>(b) ^ std::bit_cast<uint64_t>(c)));')
+        L.append(
+            '    else if (std::isinf(b)) result = std::copysign(0.0, std::bit_cast<double>(std::bit_cast<uint64_t>(b) ^ std::bit_cast<uint64_t>(c)));'
+        )
         L.append('    else result = p;')
         if is_vop3:
             L.extend(vop3_dst_mod_f64('result'))
-        L.append(f'    {dst[0]}.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));')
+        L.append(
+            f'    {dst[0]}.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));'
+        )
     else:
         L.append(f'    float p = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
         L.append(f'    float b = std::bit_cast<float>({src[1]}.read_lane(wf, lane));')
@@ -130,18 +179,30 @@ def gen_vector_div_fixup(dst: list[str], src: list[str], dtype: str | None, is_v
         L.append('    float result;')
         L.append('    if (std::isnan(b)) result = b;')
         L.append('    else if (std::isnan(c)) result = c;')
-        L.append('    else if (c == 0.0f && b == 0.0f) result = std::numeric_limits<float>::quiet_NaN();')
-        L.append('    else if (std::isinf(c) && std::isinf(b)) result = std::numeric_limits<float>::quiet_NaN();')
+        L.append(
+            '    else if (c == 0.0f && b == 0.0f) result = std::numeric_limits<float>::quiet_NaN();'
+        )
+        L.append(
+            '    else if (std::isinf(c) && std::isinf(b)) result = std::numeric_limits<float>::quiet_NaN();'
+        )
         L.append('    else if (b == 0.0f) {')
         L.append('      result = std::copysign(std::numeric_limits<float>::infinity(),')
-        L.append('                             std::bit_cast<float>(std::bit_cast<uint32_t>(b) ^ std::bit_cast<uint32_t>(c)));')
+        L.append(
+            '                             std::bit_cast<float>(std::bit_cast<uint32_t>(b) ^ std::bit_cast<uint32_t>(c)));'
+        )
         L.append('    }')
-        L.append('    else if (c == 0.0f) result = std::copysign(0.0f, std::bit_cast<float>(std::bit_cast<uint32_t>(b) ^ std::bit_cast<uint32_t>(c)));')
+        L.append(
+            '    else if (c == 0.0f) result = std::copysign(0.0f, std::bit_cast<float>(std::bit_cast<uint32_t>(b) ^ std::bit_cast<uint32_t>(c)));'
+        )
         L.append('    else if (std::isinf(c)) {')
         L.append('      result = std::copysign(std::numeric_limits<float>::infinity(),')
-        L.append('                             std::bit_cast<float>(std::bit_cast<uint32_t>(b) ^ std::bit_cast<uint32_t>(c)));')
+        L.append(
+            '                             std::bit_cast<float>(std::bit_cast<uint32_t>(b) ^ std::bit_cast<uint32_t>(c)));'
+        )
         L.append('    }')
-        L.append('    else if (std::isinf(b)) result = std::copysign(0.0f, std::bit_cast<float>(std::bit_cast<uint32_t>(b) ^ std::bit_cast<uint32_t>(c)));')
+        L.append(
+            '    else if (std::isinf(b)) result = std::copysign(0.0f, std::bit_cast<float>(std::bit_cast<uint32_t>(b) ^ std::bit_cast<uint32_t>(c)));'
+        )
         L.append('    else result = p;')
         if is_vop3:
             L.extend(vop3_dst_mod('result'))
@@ -149,14 +210,21 @@ def gen_vector_div_fixup(dst: list[str], src: list[str], dtype: str | None, is_v
     L.append('  }')
     return '\n'.join(L)
 
-def gen_vector_div_scale(dst: list[str], src: list[str], dtype: str | None, is_vop3: bool = False, has_abs: bool = False) -> str:
+
+def gen_vector_div_scale(
+    dst: list[str],
+    src: list[str],
+    dtype: str | None,
+    is_vop3: bool = False,
+    has_abs: bool = False,
+) -> str:
     """Generate V_DIV_SCALE body per ISA pseudocode (CDNA4 p.363-365).
 
     S1 = denominator, S2 = numerator. S0 selects which to scale
     (S0==S1 → scale denominator, S0==S2 → scale numerator).
     VCC is set when V_DIV_FMAS must apply post-scaling.
     """
-    is_f64 = (dtype == 'f64')
+    is_f64 = dtype == 'f64'
     scale_exp = 128 if is_f64 else 64
     exp_threshold = 768 if is_f64 else 96
     tiny_exp = 53 if is_f64 else 23
@@ -171,9 +239,15 @@ def gen_vector_div_scale(dst: list[str], src: list[str], dtype: str | None, is_v
     L.append('  uint64_t vcc = wf.vcc();')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
-    L.append(f'    {fp_type} s0 = std::bit_cast<{fp_type}>({src[0]}.{read_fn}(wf, lane));')
-    L.append(f'    {fp_type} s1 = std::bit_cast<{fp_type}>({src[1]}.{read_fn}(wf, lane));')
-    L.append(f'    {fp_type} s2 = std::bit_cast<{fp_type}>({src[2]}.{read_fn}(wf, lane));')
+    L.append(
+        f'    {fp_type} s0 = std::bit_cast<{fp_type}>({src[0]}.{read_fn}(wf, lane));'
+    )
+    L.append(
+        f'    {fp_type} s1 = std::bit_cast<{fp_type}>({src[1]}.{read_fn}(wf, lane));'
+    )
+    L.append(
+        f'    {fp_type} s2 = std::bit_cast<{fp_type}>({src[2]}.{read_fn}(wf, lane));'
+    )
     if is_vop3:
         L.extend(vop3_src_mod('s0', 0, has_abs))
         L.extend(vop3_src_mod('s1', 1, has_abs))
@@ -196,14 +270,18 @@ def gen_vector_div_scale(dst: list[str], src: list[str], dtype: str | None, is_v
         L.append(f'      }} else if (std::fpclassify(1.0 / s1) == FP_SUBNORMAL &&')
         L.append(f'                 std::fpclassify(s2 / s1) == FP_SUBNORMAL) {{')
     else:
-        L.append(f'      }} else if (std::fpclassify(1.0 / static_cast<double>(s1)) == FP_SUBNORMAL &&')
+        L.append(
+            f'      }} else if (std::fpclassify(1.0 / static_cast<double>(s1)) == FP_SUBNORMAL &&'
+        )
         L.append(f'                 std::fpclassify(s2 / s1) == FP_SUBNORMAL) {{')
     L.append('        set_vcc = true;')
     L.append(f'        if (s0 == s1) result = std::ldexp(s0, {scale_exp});')
     if is_f64:
         L.append(f'      }} else if (std::fpclassify(1.0 / s1) == FP_SUBNORMAL) {{')
     else:
-        L.append(f'      }} else if (std::fpclassify(1.0 / static_cast<double>(s1)) == FP_SUBNORMAL) {{')
+        L.append(
+            f'      }} else if (std::fpclassify(1.0 / static_cast<double>(s1)) == FP_SUBNORMAL) {{'
+        )
     L.append(f'        result = std::ldexp(s0, -{scale_exp});')
     L.append(f'      }} else if (std::fpclassify(s2 / s1) == FP_SUBNORMAL) {{')
     L.append('        set_vcc = true;')
@@ -219,7 +297,14 @@ def gen_vector_div_scale(dst: list[str], src: list[str], dtype: str | None, is_v
     L.append('  wf.set_vcc(vcc);')
     return '\n'.join(L)
 
-def gen_vector_div_fmas(dst: list[str], src: list[str], dtype: str | None, is_vop3: bool = False, has_abs: bool = False) -> str:
+
+def gen_vector_div_fmas(
+    dst: list[str],
+    src: list[str],
+    dtype: str | None,
+    is_vop3: bool = False,
+    has_abs: bool = False,
+) -> str:
     """Generate V_DIV_FMAS body (FMA with scale based on VCC)."""
     L = []
     L.append('  uint64_t exec = wf.exec();')
@@ -227,9 +312,15 @@ def gen_vector_div_fmas(dst: list[str], src: list[str], dtype: str | None, is_vo
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     if dtype == 'f64':
-        L.append(f'    double s0 = std::bit_cast<double>({src[0]}.read_lane64(wf, lane));')
-        L.append(f'    double s1 = std::bit_cast<double>({src[1]}.read_lane64(wf, lane));')
-        L.append(f'    double s2 = std::bit_cast<double>({src[2]}.read_lane64(wf, lane));')
+        L.append(
+            f'    double s0 = std::bit_cast<double>({src[0]}.read_lane64(wf, lane));'
+        )
+        L.append(
+            f'    double s1 = std::bit_cast<double>({src[1]}.read_lane64(wf, lane));'
+        )
+        L.append(
+            f'    double s2 = std::bit_cast<double>({src[2]}.read_lane64(wf, lane));'
+        )
         if is_vop3:
             L.extend(vop3_src_mod('s0', 0, has_abs))
             L.extend(vop3_src_mod('s1', 1, has_abs))
@@ -238,7 +329,9 @@ def gen_vector_div_fmas(dst: list[str], src: list[str], dtype: str | None, is_vo
         L.append('    if (vcc & (1ULL << lane)) {')
         L.append('      result = std::ldexp(result, 64);')
         L.append('    }')
-        L.append(f'    {dst[0]}.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));')
+        L.append(
+            f'    {dst[0]}.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));'
+        )
     else:
         L.append(f'    float s0 = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
         L.append(f'    float s1 = std::bit_cast<float>({src[1]}.read_lane(wf, lane));')
@@ -255,7 +348,10 @@ def gen_vector_div_fmas(dst: list[str], src: list[str], dtype: str | None, is_vo
     L.append('  }')
     return '\n'.join(L)
 
-def gen_vector_dot(dst: list[str], src: list[str], op: str | None, dtype: str | None) -> str:
+
+def gen_vector_dot(
+    dst: list[str], src: list[str], op: str | None, dtype: str | None
+) -> str:
     """Generate V_DOT*C body (dot product accumulate)."""
     L = []
     d = dst[0] if dst else src[0]
@@ -283,9 +379,13 @@ def gen_vector_dot(dst: list[str], src: list[str], op: str | None, dtype: str | 
     elif op == 'dot2c' and dtype == 'f32':
         # V_DOT2C_F32_F16: D.f32 += f16_lo(A)*f16_lo(B) + f16_hi(A)*f16_hi(B)
         L.append('    float a0 = util::f16_to_f32(static_cast<uint16_t>(a & 0xFFFF));')
-        L.append('    float a1 = util::f16_to_f32(static_cast<uint16_t>((a >> 16) & 0xFFFF));')
+        L.append(
+            '    float a1 = util::f16_to_f32(static_cast<uint16_t>((a >> 16) & 0xFFFF));'
+        )
         L.append('    float b0 = util::f16_to_f32(static_cast<uint16_t>(b & 0xFFFF));')
-        L.append('    float b1 = util::f16_to_f32(static_cast<uint16_t>((b >> 16) & 0xFFFF));')
+        L.append(
+            '    float b1 = util::f16_to_f32(static_cast<uint16_t>((b >> 16) & 0xFFFF));'
+        )
         L.append('    float facc = std::bit_cast<float>(static_cast<uint32_t>(acc));')
         L.append('    facc += a0 * b0 + a1 * b1;')
         L.append('    acc = static_cast<int32_t>(std::bit_cast<uint32_t>(facc));')
@@ -295,12 +395,15 @@ def gen_vector_dot(dst: list[str], src: list[str], op: str | None, dtype: str | 
         L.append('    int16_t a1 = static_cast<int16_t>((a >> 16) & 0xFFFF);')
         L.append('    int16_t b0 = static_cast<int16_t>(b & 0xFFFF);')
         L.append('    int16_t b1 = static_cast<int16_t>((b >> 16) & 0xFFFF);')
-        L.append('    acc += static_cast<int32_t>(a0) * b0 + static_cast<int32_t>(a1) * b1;')
+        L.append(
+            '    acc += static_cast<int32_t>(a0) * b0 + static_cast<int32_t>(a1) * b1;'
+        )
     else:
         L.append(f'    (void)a; (void)b; // unhandled dot variant: {op}/{dtype}')
     L.append(f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(acc));')
     L.append('  }')
     return '\n'.join(L)
+
 
 def gen_vector_dot2c_bf16(dst: list[str], src: list[str]) -> str:
     """Generate V_DOT2C_F32_BF16 body: D.f32 += A.bf16[0]*B.bf16[0] + A.bf16[1]*B.bf16[1]."""
@@ -314,13 +417,18 @@ def gen_vector_dot2c_bf16(dst: list[str], src: list[str]) -> str:
     L.append(f'    uint32_t b = {s1}.read_lane(wf, lane);')
     L.append(f'    float acc = std::bit_cast<float>({d}.read_lane(wf, lane));')
     L.append('    float a0 = util::bf16_to_f32(static_cast<uint16_t>(a & 0xFFFF));')
-    L.append('    float a1 = util::bf16_to_f32(static_cast<uint16_t>((a >> 16) & 0xFFFF));')
+    L.append(
+        '    float a1 = util::bf16_to_f32(static_cast<uint16_t>((a >> 16) & 0xFFFF));'
+    )
     L.append('    float b0 = util::bf16_to_f32(static_cast<uint16_t>(b & 0xFFFF));')
-    L.append('    float b1 = util::bf16_to_f32(static_cast<uint16_t>((b >> 16) & 0xFFFF));')
+    L.append(
+        '    float b1 = util::bf16_to_f32(static_cast<uint16_t>((b >> 16) & 0xFFFF));'
+    )
     L.append('    acc += a0 * b0 + a1 * b1;')
     L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>(acc));')
     L.append('  }')
     return '\n'.join(L)
+
 
 def gen_vector_bitop3(dst: list[str], src: list[str], dtype: str | None) -> str:
     """Generate V_BITOP3_B32/B16 body: 3-input LUT-based bitwise operation.
@@ -344,15 +452,17 @@ def gen_vector_bitop3(dst: list[str], src: list[str], dtype: str | None) -> str:
     L.append(f'    uint32_t c = {src[2]}.read_lane(wf, lane);')
     L.append(f'    uint32_t result = 0;')
     L.append(f'    for (int i = 0; i < {nbits}; ++i) {{')
-    L.append('      uint32_t idx = (((a >> i) & 1) << 2) | (((b >> i) & 1) << 1) | ((c >> i) & 1);')
+    L.append(
+        '      uint32_t idx = (((a >> i) & 1) << 2) | (((b >> i) & 1) << 1) | ((c >> i) & 1);'
+    )
     L.append('      result |= ((truth_table >> idx) & 1) << i;')
     L.append('    }')
     L.append(f'    {dst[0]}.write_lane(wf, lane, result);')
     L.append('  }')
     return '\n'.join(L)
 
-def gen_vector_permlane_swap(dst: list[str], src: list[str],
-                               stride: int) -> str:
+
+def gen_vector_permlane_swap(dst: list[str], src: list[str], stride: int) -> str:
     """Generate V_PERMLANE{16,32}_SWAP_B32.
 
     For each lane N in [0..stride-1]:
@@ -376,8 +486,10 @@ def gen_vector_permlane_swap(dst: list[str], src: list[str],
     L.append('  }')
     return '\n'.join(L)
 
-def gen_vector_permlane(dst: list[str], src: list[str],
-                          op: str | None, cross: bool) -> str:
+
+def gen_vector_permlane(
+    dst: list[str], src: list[str], op: str | None, cross: bool
+) -> str:
     """Generate V_PERMLANE16_B32 / V_PERMLANEX16_B32 (imm and var forms).
 
     For each lane i, read from lane (i & ~0xF) | selector[i & 0xF].
@@ -387,7 +499,7 @@ def gen_vector_permlane(dst: list[str], src: list[str],
     For permlanex16 (cross=True), XOR bit 4 into the source lane to
     enable cross-16-group fetches.
     """
-    is_var = (op == 'var')
+    is_var = op == 'var'
     L = []
     L.append('  constexpr bool fi = false, bound_ctrl = false;')
     L.append('  uint64_t exec = wf.exec();')
@@ -417,6 +529,7 @@ def gen_vector_permlane(dst: list[str], src: list[str],
     L.append('  }')
     return '\n'.join(L)
 
+
 def gen_vector_permlane64(dst: list[str], src: list[str]) -> str:
     """Generate V_PERMLANE64_B32: swap lane i with lane i ^ 32."""
     L = []
@@ -432,6 +545,7 @@ def gen_vector_permlane64(dst: list[str], src: list[str]) -> str:
     L.append('  }')
     return '\n'.join(L)
 
+
 def gen_vector_cvt_pk(dst: list[str], src: list[str], cls: str, op: str | None) -> str:
     """Generate pack/convert instructions."""
     L = []
@@ -439,32 +553,44 @@ def gen_vector_cvt_pk(dst: list[str], src: list[str], cls: str, op: str | None) 
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     if cls == 'vector_cvt_pk_u8_f32':
-        L.append(f'    float fval = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
+        L.append(
+            f'    float fval = std::bit_cast<float>({src[0]}.read_lane(wf, lane));'
+        )
         L.append(f'    uint32_t byte_sel = {src[1]}.read_lane(wf, lane) & 3;')
         # V_CVT_PK_U8_F32 has 3 srcs; V_CVT_PKACCUM reads old from dst
         old_src = src[2] if len(src) > 2 else dst[0]
         L.append(f'    uint32_t old = {old_src}.read_lane(wf, lane);')
-        L.append('    uint32_t byte = static_cast<uint32_t>(std::clamp(fval, 0.0f, 255.0f));')
+        L.append(
+            '    uint32_t byte = static_cast<uint32_t>(std::clamp(fval, 0.0f, 255.0f));'
+        )
         L.append('    uint32_t mask = ~(0xFFu << (byte_sel * 8));')
-        L.append(f'    {dst[0]}.write_lane(wf, lane, (old & mask) | (byte << (byte_sel * 8)));')
+        L.append(
+            f'    {dst[0]}.write_lane(wf, lane, (old & mask) | (byte << (byte_sel * 8)));'
+        )
     elif cls == 'vector_cvt_pknorm':
         L.append(f'    float s0 = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
         L.append(f'    float s1 = std::bit_cast<float>({src[1]}.read_lane(wf, lane));')
         if op == 'i16':
             L.append('    auto cvt_i16 = [](float f) -> int16_t {')
             L.append('      if (std::isnan(f)) return 0;')
-            L.append('      return static_cast<int16_t>(std::clamp(f * 32767.0f, -32768.0f, 32767.0f));')
+            L.append(
+                '      return static_cast<int16_t>(std::clamp(f * 32767.0f, -32768.0f, 32767.0f));'
+            )
             L.append('    };')
             L.append('    int16_t lo = cvt_i16(s0);')
             L.append('    int16_t hi = cvt_i16(s1);')
         else:  # u16
             L.append('    auto cvt_u16 = [](float f) -> uint16_t {')
             L.append('      if (std::isnan(f)) return 0;')
-            L.append('      return static_cast<uint16_t>(std::clamp(f * 65535.0f, 0.0f, 65535.0f));')
+            L.append(
+                '      return static_cast<uint16_t>(std::clamp(f * 65535.0f, 0.0f, 65535.0f));'
+            )
             L.append('    };')
             L.append('    uint16_t lo = cvt_u16(s0);')
             L.append('    uint16_t hi = cvt_u16(s1);')
-        L.append(f'    {dst[0]}.write_lane(wf, lane, (static_cast<uint32_t>(hi) << 16) | (static_cast<uint32_t>(lo) & 0xFFFF));')
+        L.append(
+            f'    {dst[0]}.write_lane(wf, lane, (static_cast<uint32_t>(hi) << 16) | (static_cast<uint32_t>(lo) & 0xFFFF));'
+        )
     elif cls == 'vector_cvt_pkrtz_f16_f32':
         L.append(f'    float s0 = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
         L.append(f'    float s1 = std::bit_cast<float>({src[1]}.read_lane(wf, lane));')
@@ -478,9 +604,15 @@ def gen_vector_cvt_pk(dst: list[str], src: list[str], cls: str, op: str | None) 
             L.append('    uint16_t lo = static_cast<uint16_t>(std::min(s0, 0xFFFFu));')
             L.append('    uint16_t hi = static_cast<uint16_t>(std::min(s1, 0xFFFFu));')
         else:  # i16_i32
-            L.append('    int16_t lo = static_cast<int16_t>(std::clamp(static_cast<int32_t>(s0), -32768, 32767));')
-            L.append('    int16_t hi = static_cast<int16_t>(std::clamp(static_cast<int32_t>(s1), -32768, 32767));')
-        L.append(f'    {dst[0]}.write_lane(wf, lane, (static_cast<uint32_t>(static_cast<uint16_t>(hi)) << 16) | static_cast<uint32_t>(static_cast<uint16_t>(lo)));')
+            L.append(
+                '    int16_t lo = static_cast<int16_t>(std::clamp(static_cast<int32_t>(s0), -32768, 32767));'
+            )
+            L.append(
+                '    int16_t hi = static_cast<int16_t>(std::clamp(static_cast<int32_t>(s1), -32768, 32767));'
+            )
+        L.append(
+            f'    {dst[0]}.write_lane(wf, lane, (static_cast<uint32_t>(static_cast<uint16_t>(hi)) << 16) | static_cast<uint32_t>(static_cast<uint16_t>(lo)));'
+        )
     elif cls == 'vector_cvt_pk_f16_f32':
         L.append(f'    float s0 = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
         L.append(f'    float s1 = std::bit_cast<float>({src[1]}.read_lane(wf, lane));')
@@ -500,10 +632,13 @@ def gen_vector_cvt_pk(dst: list[str], src: list[str], cls: str, op: str | None) 
     elif cls == 'vector_cvt_sr_f16_f32':
         # Stochastic rounding: use src1 as random bits for rounding
         L.append(f'    float s0 = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
-        L.append(f'    {dst[0]}.write_lane(wf, lane, static_cast<uint32_t>(util::f32_to_f16(s0)));')
+        L.append(
+            f'    {dst[0]}.write_lane(wf, lane, static_cast<uint32_t>(util::f32_to_f16(s0)));'
+        )
     elif cls == 'vector_cvt_sr_bf16_f32':
         L.append(f'    float s0 = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
-        L.append(f'    {dst[0]}.write_lane(wf, lane, static_cast<uint32_t>(util::f32_to_bf16(s0)));')
+        L.append(
+            f'    {dst[0]}.write_lane(wf, lane, static_cast<uint32_t>(util::f32_to_bf16(s0)));'
+        )
     L.append('  }')
     return '\n'.join(L)
-

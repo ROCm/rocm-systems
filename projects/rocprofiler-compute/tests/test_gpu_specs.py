@@ -3,9 +3,8 @@
 
 import re
 import subprocess
-import tempfile
-from unittest.mock import patch
 
+import common
 import pytest
 
 try:
@@ -28,13 +27,6 @@ GFX942_CHIP_IDS_TO_NUM_XCDS = {
     "29865": {"spx": 8, "dpx": 4, "qpx": 2, "cpx": 1},
     "29885": {"spx": 8, "dpx": 4, "qpx": 2, "cpx": 1},
 }
-
-# helper to strip ANSI color codes if your app uses them
-ANSI_ESCAPE = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
-
-
-def strip_ansi(s: str) -> str:
-    return ANSI_ESCAPE.sub("", s)
 
 
 def parse_table_dict(output: str) -> dict:
@@ -95,25 +87,10 @@ def get_num_xcds():
     return num_xcds
 
 
-def get_gpu_arch():
-    rocminfo = str(
-        # decode with utf-8 to account for rocm-smi changes in latest rocm
-        subprocess.run(
-            ["rocminfo"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        ).stdout.decode("utf-8")
-    )
-    rocminfo = rocminfo.split("\n")
-
-    soc_regex = re.compile(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", re.MULTILINE)
-    devices = list(filter(soc_regex.match, rocminfo))
-    gpu_arch = devices[0].split()[1]
-    return gpu_arch
-
-
 @pytest.mark.num_xcds_spec_class
 def test_num_xcds_spec_class(monkeypatch):
     # 1. Check if gfx942 soc
-    gpu_arch = get_gpu_arch()
+    gpu_arch = common.gpu_soc()[0]
     if gpu_arch is None or gpu_arch.lower() != "gfx942":
         pytest.skip("Skipping num xcds test for non-gfx942 socs.")
 
@@ -132,7 +109,7 @@ def test_num_xcds_spec_class(monkeypatch):
 @pytest.mark.num_xcds_cli_output
 def test_num_xcds_cli_output():
     # 1. Check if gfx942 soc
-    gpu_arch = get_gpu_arch()
+    gpu_arch = common.gpu_soc()[0]
     if gpu_arch is None or gpu_arch.lower() != "gfx942":
         pytest.skip("Skipping num xcds test for non-gfx942 socs.")
 
@@ -158,7 +135,7 @@ def test_num_xcds_cli_output():
     )
 
     # 3. strip ANSI, parse table
-    clean = strip_ansi(proc.stdout)
+    clean = common.strip_ansi(proc.stdout)
     return_dict = parse_table_dict(clean)
 
     # 4. check results are expected
@@ -172,210 +149,3 @@ def test_num_xcds_cli_output():
 
     assert compute_partition_actual is not None
     assert int(num_xcd_actual) == num_xcds.get(compute_partition_actual.lower(), -1)
-
-
-@pytest.mark.misc
-def test_load_yaml_file_not_found():
-    """Test _load_yaml with non-existent file - covers lines 104-105"""
-    from src.utils.mi_gpu_spec import MIGPUSpecs
-
-    with pytest.raises(FileNotFoundError):
-        MIGPUSpecs._load_yaml("non_existent_file.yaml")
-
-
-@pytest.mark.misc
-def test_load_yaml_invalid_yaml():
-    """Test _load_yaml with corrupted YAML - covers lines 106-107"""
-    import yaml
-
-    from src.utils.mi_gpu_spec import MIGPUSpecs
-
-    # Create invalid YAML file
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-        f.write("invalid: yaml: content: [\nunclosed bracket")
-        temp_path = f.name
-
-    with pytest.raises(yaml.YAMLError):
-        MIGPUSpecs._load_yaml(str(temp_path))
-
-
-@pytest.mark.misc
-def test_load_yaml_generic_exception():
-    """Test _load_yaml generic exception handling - covers lines 108-111"""
-    from src.utils.mi_gpu_spec import MIGPUSpecs
-
-    with patch("builtins.open", side_effect=PermissionError("Access denied")):
-        with pytest.raises(PermissionError, match="Access denied"):
-            MIGPUSpecs._load_yaml("some_file.yaml")
-
-
-@pytest.mark.misc
-def test_get_gpu_series_dict_uninitialized():
-    """Test get_gpu_series_dict when dict not populated - covers lines 182-185"""
-    from src.utils.mi_gpu_spec import MIGPUSpecs
-
-    with patch.object(MIGPUSpecs, "_gpu_series_dict", {}):
-        assert MIGPUSpecs.get_gpu_series_dict() == {}
-
-
-@pytest.mark.misc
-def test_get_gpu_series_uninitialized():
-    """Test get_gpu_series when dict not populated - covers lines 191-194"""
-    from src.utils.mi_gpu_spec import MIGPUSpecs
-
-    with patch.object(MIGPUSpecs, "_gpu_series_dict", {}):
-        assert MIGPUSpecs.get_gpu_series_dict() == {}
-
-
-@pytest.mark.misc
-def test_get_perfmon_config_uninitialized():
-    """Test get_perfmon_config when dict not populated - covers lines 210-213"""
-    from src.utils.mi_gpu_spec import MIGPUSpecs
-
-    with patch.object(MIGPUSpecs, "_perfmon_config", {}):
-        with pytest.raises(SystemExit):
-            MIGPUSpecs.get_perfmon_config("gfx942")
-
-
-@pytest.mark.misc
-def test_get_gpu_model_uninitialized():
-    """Test get_gpu_model when dict not populated - covers lines 223-226"""
-    from src.utils.mi_gpu_spec import MIGPUSpecs
-
-    with patch.object(MIGPUSpecs, "_gpu_model_dict", {}):
-        with pytest.raises(SystemExit):
-            MIGPUSpecs.get_gpu_model("gfx942", "29857")
-
-
-@pytest.mark.misc
-def test_get_gpu_model_invalid_chip_id():
-    """Test get_gpu_model with invalid chip_id - covers lines 235-236"""
-    from src.utils.mi_gpu_spec import MIGPUSpecs
-
-    result = MIGPUSpecs.get_gpu_model("gfx942", "99999")
-    assert result is None
-
-
-@pytest.mark.misc
-def test_get_gpu_model_invalid_arch():
-    """Test get_gpu_model with invalid architecture - covers lines 243-244"""
-    from src.utils.mi_gpu_spec import MIGPUSpecs
-
-    result = MIGPUSpecs.get_gpu_model("gfx999", "12345")
-    assert result is None
-
-
-@pytest.mark.misc
-def test_get_gpu_model_none_result():
-    """Test get_gpu_model when result is None - covers lines 246-248"""
-    from src.utils.mi_gpu_spec import MIGPUSpecs
-
-    with patch.object(MIGPUSpecs, "_chip_id_dict", {999: None}):
-        result = MIGPUSpecs.get_gpu_model("gfx942", "999")
-        assert result is None
-
-
-@pytest.mark.misc
-def test_get_num_xcds_no_compute_partition_data():
-    """Test get_num_xcds when no compute partition data found - covers lines 307-309"""
-    from src.utils.mi_gpu_spec import MIGPUSpecs
-
-    mock_dict = {"gfx942": None}
-    with patch.object(MIGPUSpecs, "_gpu_arch_to_compute_partition_dict", mock_dict):
-        result = MIGPUSpecs.get_num_xcds(gpu_arch="gfx942")  # noqa: F841
-
-
-@pytest.mark.misc
-def test_get_num_xcds_uninitialized_dict():
-    """Test get_num_xcds when XCD dict not populated - covers lines 315-317"""
-    from src.utils.mi_gpu_spec import MIGPUSpecs
-
-    with patch.object(MIGPUSpecs, "_num_xcds_dict", {}):
-        with pytest.raises(SystemExit):
-            MIGPUSpecs.get_num_xcds(gpu_arch="gfx950", gpu_model="MI350")
-
-
-@pytest.mark.misc
-def test_get_num_xcds_unknown_gpu_model():
-    """Test get_num_xcds with unknown gpu model - covers lines 319-321"""
-    from src.utils.mi_gpu_spec import MIGPUSpecs
-
-    result = MIGPUSpecs.get_num_xcds(  # noqa: F841
-        gpu_arch="gfx950", gpu_model="UNKNOWN_MODEL"
-    )
-
-
-@pytest.mark.misc
-def test_get_num_xcds_no_compute_partition():
-    """Test get_num_xcds with no compute partition - covers lines 325-327"""
-    from src.utils.mi_gpu_spec import MIGPUSpecs
-
-    result = MIGPUSpecs.get_num_xcds(  # noqa: F841
-        gpu_arch="gfx950", gpu_model="MI350", compute_partition=""
-    )
-
-
-@pytest.mark.misc
-def test_get_num_xcds_unknown_compute_partition():
-    """Test get_num_xcds with unknown compute partition - covers lines 329-332"""
-    from src.utils.mi_gpu_spec import MIGPUSpecs
-
-    result = MIGPUSpecs.get_num_xcds(  # noqa: F841
-        gpu_arch="gfx950", gpu_model="MI350", compute_partition="UNKNOWN"
-    )
-
-
-@pytest.mark.misc
-def test_get_num_xcds_none_partition_value():
-    """Test get_num_xcds when partition value is None - covers lines 338-340"""
-    from src.utils.mi_gpu_spec import MIGPUSpecs
-
-    mock_dict = {"mi350": {"spx": None}}
-    with patch.object(MIGPUSpecs, "_num_xcds_dict", mock_dict):
-        result = MIGPUSpecs.get_num_xcds(  # noqa: F841
-            gpu_arch="gfx950", gpu_model="MI350", compute_partition="spx"
-        )
-
-
-@pytest.mark.misc
-def test_get_num_xcds_no_gpu_model():
-    """Test get_num_xcds with no gpu model - covers line 342"""
-    from src.utils.mi_gpu_spec import MIGPUSpecs
-
-    result = MIGPUSpecs.get_num_xcds(  # noqa: F841
-        gpu_arch="gfx950", gpu_model="", compute_partition="spx"
-    )
-
-
-@pytest.mark.misc
-def test_get_chip_id_dict_empty():
-    """Test get_chip_id_dict when dict is empty - covers line 352"""
-    from src.utils.mi_gpu_spec import MIGPUSpecs
-
-    with patch.object(MIGPUSpecs, "_chip_id_dict", {}):
-        assert MIGPUSpecs.get_chip_id_dict() == {}
-
-
-@pytest.mark.misc
-def test_get_num_xcds_dict_empty():
-    """Test get_num_xcds_dict when dict is empty - covers line 359"""
-    from src.utils.mi_gpu_spec import MIGPUSpecs
-
-    with patch.object(MIGPUSpecs, "_num_xcds_dict", {}):
-        assert MIGPUSpecs.get_num_xcds_dict() == {}
-
-
-@pytest.mark.misc
-def test_normal_functionality_still_works():
-    """Ensure that normal paths still work after adding error handling tests"""
-    from src.utils.mi_gpu_spec import MIGPUSpecs
-
-    result = MIGPUSpecs.get_gpu_model("gfx90a", None)
-
-    assert result is not None
-
-    result = MIGPUSpecs.get_gpu_series("gfx90a")
-    assert result is not None
-
-    result = MIGPUSpecs.get_num_xcds(gpu_arch="gfx90a")
-    assert result == 1

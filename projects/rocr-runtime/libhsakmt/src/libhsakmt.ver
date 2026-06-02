@@ -29,6 +29,8 @@ hsaKmtFreeMemory;
 hsaKmtAvailableMemory;
 hsaKmtRegisterMemory;
 hsaKmtRegisterMemoryToNodes;
+hsaKmtImportExternalSemaphore;
+hsaKmtDestroyExternalSemaphore;
 hsaKmtRegisterMemoryWithFlags;
 hsaKmtRegisterGraphicsHandleToNodes;
 hsaKmtShareMemory;

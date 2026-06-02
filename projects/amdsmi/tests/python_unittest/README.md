@@ -38,14 +38,15 @@ The Unittest Run calls the tests directly. The cache provider will always be use
 
 options:
   -  -h, --help           show this help message and exit
+  -  -l, --list           List all available tests and exit
   -  -v, --verbose        Verbose output
   -  -q, --quiet          Quiet output
   -  -b, --buffer         Buffer stdout and stderr during tests
   -  -k "testname"        Only run tests which match the given substring
 
 ### Unittest: not verbose
-Runs all tests. Silence print statements to stdout. Lists tests results.
-This is also the best way to list all tests available.
+Runs all tests. Silences print statements to stdout. Lists test results.
+To list all available test names without running them, use `-l` instead.
 
 ```/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -b```
 ```/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -b```

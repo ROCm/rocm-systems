@@ -1475,32 +1475,33 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyBroadcastCommand(
 
 template <bool useGCR, bool scopeFields>
 hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyB2BCommand(
-    const std::vector<void*>& dsts, const void* src, size_t size,
-    std::vector<core::Signal*>& dep_signals,
+    const std::vector<void*>& dsts, const std::vector<const void*>& srcs,
+    const std::vector<size_t>& sizes, std::vector<core::Signal*>& dep_signals,
     core::Signal& out_signal) {
 
-  if (dsts.empty() || size == 0) {
+  const size_t num_entries = srcs.size();
+  if (num_entries == 0 || dsts.size() != num_entries || sizes.size() != num_entries) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
   const size_t max_copy_size = max_single_linear_copy_size_ ? max_single_linear_copy_size_
                                                              : kMaxSingleCopySize;
-  const uint32_t num_chunks = static_cast<uint32_t>((size + max_copy_size - 1) / max_copy_size);
 
-  // One set of linear copy packets per destination, all packed back-to-back.
-  const size_t per_dst_bytes =
-      static_cast<size_t>(num_chunks) * static_cast<size_t>(linear_copy_command_size_);
-  const size_t total_cmd_size = dsts.size() * per_dst_bytes;
-
-  std::vector<char> cmd_buf(total_cmd_size);  // BuildCopyCommand memsets each packet
-  char* cmd_ptr = cmd_buf.data();
-
-  for (void* dst : dsts) {
-    BuildCopyCommand(cmd_ptr, num_chunks, dst, src, size);
-    cmd_ptr += per_dst_bytes;
+  std::vector<uint32_t> chunks(num_entries);
+  size_t total_cmd_size = 0;
+  uint64_t total_bytes_moved = 0;
+  for (size_t i = 0; i < num_entries; i++) {
+    chunks[i] = static_cast<uint32_t>((sizes[i] + max_copy_size - 1) / max_copy_size);
+    total_cmd_size += static_cast<size_t>(chunks[i]) * linear_copy_command_size_;
+    total_bytes_moved += sizes[i];
   }
 
-  const uint64_t total_bytes_moved = static_cast<uint64_t>(size) * dsts.size();
+  std::vector<char> cmd_buf(total_cmd_size);
+  char* cmd_ptr = cmd_buf.data();
+  for (size_t i = 0; i < num_entries; i++) {
+    BuildCopyCommand(cmd_ptr, chunks[i], dsts[i], srcs[i], sizes[i]);
+    cmd_ptr += static_cast<size_t>(chunks[i]) * linear_copy_command_size_;
+  }
 
   std::vector<core::Signal*> no_gang;
   return SubmitCommand(cmd_buf.data(), total_cmd_size, total_bytes_moved,

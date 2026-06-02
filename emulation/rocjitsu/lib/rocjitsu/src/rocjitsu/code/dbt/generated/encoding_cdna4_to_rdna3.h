@@ -449,10 +449,10 @@ inline TranslationResult encode_smem_rdna3(const SmemFields &f, uint16_t dst_op)
   dst.op = dst_op;
   dst.sbase = f.sbase & 0x3F;
   dst.sdata = f.sdata & 0x7F;
+  dst.glc = f.glc & 0x1;
   dst.offset = f.ioffset & 0x1FFFFF;
   dst.soffset = f.soffset & 0x7F;
   dst.dlc = 0;
-  dst.glc = 0;
   if (dst.soffset == 0x7F)
     dst.soffset = 0x7C;
   if (f.soffset_en == 0)

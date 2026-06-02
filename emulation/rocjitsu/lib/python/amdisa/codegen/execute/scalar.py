@@ -11,7 +11,9 @@ bit compare, and saveexec.
 from __future__ import annotations
 
 
-def gen_scalar_unary(dst: list[str], src: list[str], op: str | None, dtype: str | None, scc: str | None) -> str:
+def gen_scalar_unary(
+    dst: list[str], src: list[str], op: str | None, dtype: str | None, scc: str | None
+) -> str:
     """Generate C++ execute_impl body for scalar unary ALU instructions (SOP1).
 
     Covers bitwise (not, brev, bcnt, ff0/ff1, flbit, wqm, quadmask),
@@ -39,8 +41,12 @@ def gen_scalar_unary(dst: list[str], src: list[str], op: str | None, dtype: str 
     if op == 'flbit_i32_i64':
         # 64-bit signed input → 32-bit output (find first bit of sign).
         L.append(f'  int64_t sval = static_cast<int64_t>({src[0]}.read_scalar64(wf));')
-        L.append('  uint64_t uval = sval < 0 ? ~static_cast<uint64_t>(sval) : static_cast<uint64_t>(sval);')
-        L.append('  uint32_t result = uval == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(uval));')
+        L.append(
+            '  uint64_t uval = sval < 0 ? ~static_cast<uint64_t>(sval) : static_cast<uint64_t>(sval);'
+        )
+        L.append(
+            '  uint32_t result = uval == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(uval));'
+        )
         L.append(f'  {dst[0]}.write_scalar(wf, result);')
         if scc and scc != 'none':
             L.append('  wf.write_scc(result != 0);')
@@ -49,7 +55,9 @@ def gen_scalar_unary(dst: list[str], src: list[str], op: str | None, dtype: str 
     if op == 'clz64':
         # 64-bit unsigned input → 32-bit output (count leading zeros).
         L.append(f'  uint64_t val = {src[0]}.read_scalar64(wf);')
-        L.append('  uint32_t result = val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(val));')
+        L.append(
+            '  uint32_t result = val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(val));'
+        )
         L.append(f'  {dst[0]}.write_scalar(wf, result);')
         if scc and scc != 'none':
             L.append('  wf.write_scc(result != 0);')
@@ -58,8 +66,12 @@ def gen_scalar_unary(dst: list[str], src: list[str], op: str | None, dtype: str 
     if op == 'cls64':
         # 64-bit signed input → 32-bit output (count leading sign bits).
         L.append(f'  int64_t sval = static_cast<int64_t>({src[0]}.read_scalar64(wf));')
-        L.append('  uint64_t uval = sval < 0 ? ~static_cast<uint64_t>(sval) : static_cast<uint64_t>(sval);')
-        L.append('  uint32_t result = uval == 0 ? 63u : static_cast<uint32_t>(std::countl_zero(uval)) - 1;')
+        L.append(
+            '  uint64_t uval = sval < 0 ? ~static_cast<uint64_t>(sval) : static_cast<uint64_t>(sval);'
+        )
+        L.append(
+            '  uint32_t result = uval == 0 ? 63u : static_cast<uint32_t>(std::countl_zero(uval)) - 1;'
+        )
         L.append(f'  {dst[0]}.write_scalar(wf, result);')
         if scc and scc != 'none':
             L.append('  wf.write_scc(result != 0);')
@@ -67,7 +79,9 @@ def gen_scalar_unary(dst: list[str], src: list[str], op: str | None, dtype: str 
 
     if op == 'ctz' and is_64:
         L.append(f'  uint64_t val = {src[0]}.read_scalar64(wf);')
-        L.append('  uint32_t result = val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(val));')
+        L.append(
+            '  uint32_t result = val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(val));'
+        )
         L.append(f'  {dst[0]}.write_scalar(wf, result);')
         if scc and scc != 'none':
             L.append('  wf.write_scc(result != 0);')
@@ -75,7 +89,9 @@ def gen_scalar_unary(dst: list[str], src: list[str], op: str | None, dtype: str 
 
     if op == 'clz' and is_64:
         L.append(f'  uint64_t val = {src[0]}.read_scalar64(wf);')
-        L.append('  uint32_t result = val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(val));')
+        L.append(
+            '  uint32_t result = val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(val));'
+        )
         L.append(f'  {dst[0]}.write_scalar(wf, result);')
         if scc and scc != 'none':
             L.append('  wf.write_scc(result != 0);')
@@ -83,8 +99,12 @@ def gen_scalar_unary(dst: list[str], src: list[str], op: str | None, dtype: str 
 
     if op == 'cls' and is_64:
         L.append(f'  int64_t sval = static_cast<int64_t>({src[0]}.read_scalar64(wf));')
-        L.append('  uint64_t uval = sval < 0 ? ~static_cast<uint64_t>(sval) : static_cast<uint64_t>(sval);')
-        L.append('  uint32_t result = uval == 0 ? 63u : static_cast<uint32_t>(std::countl_zero(uval)) - 1;')
+        L.append(
+            '  uint64_t uval = sval < 0 ? ~static_cast<uint64_t>(sval) : static_cast<uint64_t>(sval);'
+        )
+        L.append(
+            '  uint32_t result = uval == 0 ? 63u : static_cast<uint32_t>(std::countl_zero(uval)) - 1;'
+        )
         L.append(f'  {dst[0]}.write_scalar(wf, result);')
         if scc and scc != 'none':
             L.append('  wf.write_scc(result != 0);')
@@ -94,9 +114,13 @@ def gen_scalar_unary(dst: list[str], src: list[str], op: str | None, dtype: str 
         # 32-bit input (bit index), 64-bit read-modify-write destination.
         L.append(f'  uint32_t bit = {src[0]}.read_scalar(wf);')
         if op == 'bitset0':
-            L.append(f'  uint64_t result = {dst[0]}.read_scalar64(wf) & ~(1ULL << (bit & 63));')
+            L.append(
+                f'  uint64_t result = {dst[0]}.read_scalar64(wf) & ~(1ULL << (bit & 63));'
+            )
         else:
-            L.append(f'  uint64_t result = {dst[0]}.read_scalar64(wf) | (1ULL << (bit & 63));')
+            L.append(
+                f'  uint64_t result = {dst[0]}.read_scalar64(wf) | (1ULL << (bit & 63));'
+            )
         L.append(f'  {dst[0]}.write_scalar64(wf, result);')
         return '\n'.join(L)
 
@@ -114,10 +138,14 @@ def gen_scalar_unary(dst: list[str], src: list[str], op: str | None, dtype: str 
         }
         if op == 'brev':
             L.append('  uint64_t result = 0;')
-            L.append('  for (int i = 0; i < 64; ++i) result |= ((val >> i) & 1) << (63 - i);')
+            L.append(
+                '  for (int i = 0; i < 64; ++i) result |= ((val >> i) & 1) << (63 - i);'
+            )
         elif op == 'quadmask':
             L.append('  uint64_t result = 0;')
-            L.append('  for (int q = 0; q < 16; ++q) if (val & (0xFULL << (q * 4))) result |= (1ULL << q);')
+            L.append(
+                '  for (int q = 0; q < 16; ++q) if (val & (0xFULL << (q * 4))) result |= (1ULL << q);'
+            )
         elif op in op_map:
             L.append(f'  uint64_t result = {op_map[op]};')
         else:
@@ -132,21 +160,35 @@ def gen_scalar_unary(dst: list[str], src: list[str], op: str | None, dtype: str 
             L.append('  uint32_t result = val < 0 ? (0u - uval) : uval;')
         elif op == 'sext8':
             L.append(f'  uint32_t val = {src[0]}.read_scalar(wf);')
-            L.append('  uint32_t result = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int8_t>(val & 0xFF)));')
+            L.append(
+                '  uint32_t result = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int8_t>(val & 0xFF)));'
+            )
         elif op == 'sext16':
             L.append(f'  uint32_t val = {src[0]}.read_scalar(wf);')
-            L.append('  uint32_t result = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(val & 0xFFFF)));')
+            L.append(
+                '  uint32_t result = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(val & 0xFFFF)));'
+            )
         elif op == 'flbit_i32':
-            L.append(f'  int32_t sval = static_cast<int32_t>({src[0]}.read_scalar(wf));')
-            L.append('  uint32_t val = sval < 0 ? ~static_cast<uint32_t>(sval) : static_cast<uint32_t>(sval);')
-            L.append('  uint32_t result = val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(val));')
+            L.append(
+                f'  int32_t sval = static_cast<int32_t>({src[0]}.read_scalar(wf));'
+            )
+            L.append(
+                '  uint32_t val = sval < 0 ? ~static_cast<uint32_t>(sval) : static_cast<uint32_t>(sval);'
+            )
+            L.append(
+                '  uint32_t result = val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(val));'
+            )
         elif op == 'bitset0':
             # b64 case handled by early return above (is_64 branch).
             L.append(f'  uint32_t bit = {src[0]}.read_scalar(wf);')
-            L.append(f'  uint32_t result = {dst[0]}.read_scalar(wf) & ~(1u << (bit & 31));')
+            L.append(
+                f'  uint32_t result = {dst[0]}.read_scalar(wf) & ~(1u << (bit & 31));'
+            )
         elif op == 'bitset1':
             L.append(f'  uint32_t bit = {src[0]}.read_scalar(wf);')
-            L.append(f'  uint32_t result = {dst[0]}.read_scalar(wf) | (1u << (bit & 31));')
+            L.append(
+                f'  uint32_t result = {dst[0]}.read_scalar(wf) | (1u << (bit & 31));'
+            )
         else:
             L.append(f'  uint32_t val = {src[0]}.read_scalar(wf);')
             op_map = {
@@ -161,53 +203,101 @@ def gen_scalar_unary(dst: list[str], src: list[str], op: str | None, dtype: str 
             }
             if op == 'brev':
                 L.append('  uint32_t result = 0;')
-                L.append('  for (int i = 0; i < 32; ++i) result |= ((val >> i) & 1) << (31 - i);')
+                L.append(
+                    '  for (int i = 0; i < 32; ++i) result |= ((val >> i) & 1) << (31 - i);'
+                )
             elif op == 'ceil' and dtype == 'f32':
-                L.append('  uint32_t result = std::bit_cast<uint32_t>(std::ceil(std::bit_cast<float>(val)));')
+                L.append(
+                    '  uint32_t result = std::bit_cast<uint32_t>(std::ceil(std::bit_cast<float>(val)));'
+                )
             elif op == 'ceil' and dtype == 'f16':
-                L.append('  float f = util::f16_to_f32(static_cast<uint16_t>(val & 0xFFFF));')
-                L.append('  uint32_t result = static_cast<uint32_t>(util::f32_to_f16(std::ceil(f)));')
+                L.append(
+                    '  float f = util::f16_to_f32(static_cast<uint16_t>(val & 0xFFFF));'
+                )
+                L.append(
+                    '  uint32_t result = static_cast<uint32_t>(util::f32_to_f16(std::ceil(f)));'
+                )
             elif op == 'floor' and dtype == 'f32':
-                L.append('  uint32_t result = std::bit_cast<uint32_t>(std::floor(std::bit_cast<float>(val)));')
+                L.append(
+                    '  uint32_t result = std::bit_cast<uint32_t>(std::floor(std::bit_cast<float>(val)));'
+                )
             elif op == 'floor' and dtype == 'f16':
-                L.append('  float f = util::f16_to_f32(static_cast<uint16_t>(val & 0xFFFF));')
-                L.append('  uint32_t result = static_cast<uint32_t>(util::f32_to_f16(std::floor(f)));')
+                L.append(
+                    '  float f = util::f16_to_f32(static_cast<uint16_t>(val & 0xFFFF));'
+                )
+                L.append(
+                    '  uint32_t result = static_cast<uint32_t>(util::f32_to_f16(std::floor(f)));'
+                )
             elif op == 'trunc' and dtype == 'f32':
-                L.append('  uint32_t result = std::bit_cast<uint32_t>(std::trunc(std::bit_cast<float>(val)));')
+                L.append(
+                    '  uint32_t result = std::bit_cast<uint32_t>(std::trunc(std::bit_cast<float>(val)));'
+                )
             elif op == 'trunc' and dtype == 'f16':
-                L.append('  float f = util::f16_to_f32(static_cast<uint16_t>(val & 0xFFFF));')
-                L.append('  uint32_t result = static_cast<uint32_t>(util::f32_to_f16(std::trunc(f)));')
+                L.append(
+                    '  float f = util::f16_to_f32(static_cast<uint16_t>(val & 0xFFFF));'
+                )
+                L.append(
+                    '  uint32_t result = static_cast<uint32_t>(util::f32_to_f16(std::trunc(f)));'
+                )
             elif op == 'rndne' and dtype == 'f32':
-                L.append('  uint32_t result = std::bit_cast<uint32_t>(std::nearbyint(std::bit_cast<float>(val)));')
+                L.append(
+                    '  uint32_t result = std::bit_cast<uint32_t>(std::nearbyint(std::bit_cast<float>(val)));'
+                )
             elif op == 'rndne' and dtype == 'f16':
-                L.append('  float f = util::f16_to_f32(static_cast<uint16_t>(val & 0xFFFF));')
-                L.append('  uint32_t result = static_cast<uint32_t>(util::f32_to_f16(std::nearbyint(f)));')
+                L.append(
+                    '  float f = util::f16_to_f32(static_cast<uint16_t>(val & 0xFFFF));'
+                )
+                L.append(
+                    '  uint32_t result = static_cast<uint32_t>(util::f32_to_f16(std::nearbyint(f)));'
+                )
             elif op == 'cvt_f32_i32':
-                L.append('  uint32_t result = std::bit_cast<uint32_t>(static_cast<float>(static_cast<int32_t>(val)));')
+                L.append(
+                    '  uint32_t result = std::bit_cast<uint32_t>(static_cast<float>(static_cast<int32_t>(val)));'
+                )
             elif op == 'cvt_f32_u32':
-                L.append('  uint32_t result = std::bit_cast<uint32_t>(static_cast<float>(val));')
+                L.append(
+                    '  uint32_t result = std::bit_cast<uint32_t>(static_cast<float>(val));'
+                )
             elif op == 'cvt_i32_f32':
                 L.append('  float f = std::bit_cast<float>(val);')
-                L.append('  int32_t r = std::isnan(f) ? 0 : (f >= 2147483648.0f ? INT32_MAX : (f < -2147483648.0f ? INT32_MIN : static_cast<int32_t>(f)));')
+                L.append(
+                    '  int32_t r = std::isnan(f) ? 0 : (f >= 2147483648.0f ? INT32_MAX : (f < -2147483648.0f ? INT32_MIN : static_cast<int32_t>(f)));'
+                )
                 L.append('  uint32_t result = static_cast<uint32_t>(r);')
             elif op == 'cvt_u32_f32':
                 L.append('  float f = std::bit_cast<float>(val);')
-                L.append('  uint32_t result = (std::isnan(f) || f < 0.0f) ? 0u : (f >= 4294967296.0f ? UINT32_MAX : static_cast<uint32_t>(f));')
+                L.append(
+                    '  uint32_t result = (std::isnan(f) || f < 0.0f) ? 0u : (f >= 4294967296.0f ? UINT32_MAX : static_cast<uint32_t>(f));'
+                )
             elif op == 'cvt_f16_f32':
-                L.append('  uint32_t result = static_cast<uint32_t>(util::f32_to_f16(std::bit_cast<float>(val)));')
+                L.append(
+                    '  uint32_t result = static_cast<uint32_t>(util::f32_to_f16(std::bit_cast<float>(val)));'
+                )
             elif op == 'cvt_f32_f16':
-                L.append('  uint32_t result = std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>(val & 0xFFFF)));')
+                L.append(
+                    '  uint32_t result = std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>(val & 0xFFFF)));'
+                )
             elif op == 'cvt_hi_f32_f16':
-                L.append('  uint32_t result = std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>((val >> 16) & 0xFFFF)));')
+                L.append(
+                    '  uint32_t result = std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>((val >> 16) & 0xFFFF)));'
+                )
             elif op == 'ctz':
-                L.append('  uint32_t result = val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(val));')
+                L.append(
+                    '  uint32_t result = val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(val));'
+                )
             elif op == 'clz':
-                L.append('  uint32_t result = val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(val));')
+                L.append(
+                    '  uint32_t result = val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(val));'
+                )
             elif op == 'cls':
                 # Count leading sign bits: number of consecutive bits matching the sign bit.
                 L.append('  int32_t sval = static_cast<int32_t>(val);')
-                L.append('  uint32_t uval = sval < 0 ? ~static_cast<uint32_t>(sval) : static_cast<uint32_t>(sval);')
-                L.append('  uint32_t result = uval == 0 ? 31u : static_cast<uint32_t>(std::countl_zero(uval)) - 1;')
+                L.append(
+                    '  uint32_t uval = sval < 0 ? ~static_cast<uint32_t>(sval) : static_cast<uint32_t>(sval);'
+                )
+                L.append(
+                    '  uint32_t result = uval == 0 ? 31u : static_cast<uint32_t>(std::countl_zero(uval)) - 1;'
+                )
             elif op in op_map:
                 L.append(f'  uint32_t result = {op_map[op]};')
             else:
@@ -218,7 +308,10 @@ def gen_scalar_unary(dst: list[str], src: list[str], op: str | None, dtype: str 
 
     return '\n'.join(L)
 
-def gen_scalar_binop(dst: list[str], src: list[str], op: str | None, dtype: str | None, scc: str | None) -> str:
+
+def gen_scalar_binop(
+    dst: list[str], src: list[str], op: str | None, dtype: str | None, scc: str | None
+) -> str:
     """Generate C++ execute_impl body for scalar binary ALU instructions (SOP2).
 
     Covers arithmetic (add, sub, addc, subb, mul, mulhi, absdiff),
@@ -244,8 +337,12 @@ def gen_scalar_binop(dst: list[str], src: list[str], op: str | None, dtype: str 
 
     if is_64:
         if dtype == 'i64':
-            L.append(f'  int64_t s0 = static_cast<int64_t>({src[0]}.read_scalar64(wf));')
-            L.append(f'  int64_t s1 = static_cast<int64_t>({src[1]}.read_scalar64(wf));')
+            L.append(
+                f'  int64_t s0 = static_cast<int64_t>({src[0]}.read_scalar64(wf));'
+            )
+            L.append(
+                f'  int64_t s1 = static_cast<int64_t>({src[1]}.read_scalar64(wf));'
+            )
         else:
             L.append(f'  uint64_t s0 = {src[0]}.read_scalar64(wf);')
             L.append(f'  uint64_t s1 = {src[1]}.read_scalar64(wf);')
@@ -261,39 +358,57 @@ def gen_scalar_binop(dst: list[str], src: list[str], op: str | None, dtype: str 
         L.append(f'  {dst[0]}.write_scalar64(wf, static_cast<uint64_t>(s0 * s1));')
     elif dtype in ('i32',) and op in ('add', 'sub'):
         sign = '+' if op == 'add' else '-'
-        L.append(f'  int64_t wide = static_cast<int64_t>(s0) {sign} static_cast<int64_t>(s1);')
+        L.append(
+            f'  int64_t wide = static_cast<int64_t>(s0) {sign} static_cast<int64_t>(s1);'
+        )
         L.append('  int32_t result = static_cast<int32_t>(wide);')
         L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(result));')
         L.append('  wf.write_scc(wide != static_cast<int64_t>(result));')
     elif dtype in ('u32',) and op == 'add':
-        L.append('  uint64_t wide = static_cast<uint64_t>(s0) + static_cast<uint64_t>(s1);')
+        L.append(
+            '  uint64_t wide = static_cast<uint64_t>(s0) + static_cast<uint64_t>(s1);'
+        )
         L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(wide));')
         L.append('  wf.write_scc(wide > 0xFFFFFFFFULL);')
     elif dtype in ('u32',) and op == 'sub':
         L.append(f'  {dst[0]}.write_scalar(wf, s0 - s1);')
         L.append('  wf.write_scc(s0 < s1);')
     elif dtype in ('u32',) and op == 'addc':
-        L.append('  uint64_t wide = static_cast<uint64_t>(s0) + static_cast<uint64_t>(s1) + (wf.read_scc() ? 1u : 0u);')
+        L.append(
+            '  uint64_t wide = static_cast<uint64_t>(s0) + static_cast<uint64_t>(s1) + (wf.read_scc() ? 1u : 0u);'
+        )
         L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(wide));')
         L.append('  wf.write_scc(wide > 0xFFFFFFFFULL);')
     elif dtype in ('u32',) and op == 'subb':
         L.append('  uint32_t bin = wf.read_scc() ? 1u : 0u;')
-        L.append('  uint64_t wide = static_cast<uint64_t>(s0) - static_cast<uint64_t>(s1) - bin;')
+        L.append(
+            '  uint64_t wide = static_cast<uint64_t>(s0) - static_cast<uint64_t>(s1) - bin;'
+        )
         L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(wide));')
-        L.append('  wf.write_scc(static_cast<uint64_t>(s0) < static_cast<uint64_t>(s1) + bin);')
+        L.append(
+            '  wf.write_scc(static_cast<uint64_t>(s0) < static_cast<uint64_t>(s1) + bin);'
+        )
     elif dtype in ('i32',) and op == 'mul':
         # Use unsigned multiply to avoid signed overflow UB. The lower 32
         # bits are identical for signed and unsigned multiplication.
-        L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(static_cast<uint32_t>(s0) * static_cast<uint32_t>(s1)));')
+        L.append(
+            f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(static_cast<uint32_t>(s0) * static_cast<uint32_t>(s1)));'
+        )
     elif dtype in ('u32',) and op == 'mul':
         L.append(f'  {dst[0]}.write_scalar(wf, s0 * s1);')
     elif op == 'mulhi':
         if dtype in ('u32',):
-            L.append('  uint64_t wide = static_cast<uint64_t>(s0) * static_cast<uint64_t>(s1);')
+            L.append(
+                '  uint64_t wide = static_cast<uint64_t>(s0) * static_cast<uint64_t>(s1);'
+            )
             L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(wide >> 32));')
         else:
-            L.append('  int64_t wide = static_cast<int64_t>(s0) * static_cast<int64_t>(s1);')
-            L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(static_cast<uint64_t>(wide) >> 32));')
+            L.append(
+                '  int64_t wide = static_cast<int64_t>(s0) * static_cast<int64_t>(s1);'
+            )
+            L.append(
+                f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(static_cast<uint64_t>(wide) >> 32));'
+            )
     elif op == 'min':
         if dtype in ('i32',):
             L.append(f'  int32_t result = s0 < s1 ? s0 : s1;')
@@ -317,31 +432,42 @@ def gen_scalar_binop(dst: list[str], src: list[str], op: str | None, dtype: str 
         # near INT32_MIN/INT32_MAX (e.g., INT32_MAX - INT32_MIN).
         L.append('  int64_t wide_s0 = static_cast<int64_t>(s0);')
         L.append('  int64_t wide_s1 = static_cast<int64_t>(s1);')
-        L.append('  uint32_t result = static_cast<uint32_t>(wide_s0 > wide_s1 ? (wide_s0 - wide_s1) : (wide_s1 - wide_s0));')
+        L.append(
+            '  uint32_t result = static_cast<uint32_t>(wide_s0 > wide_s1 ? (wide_s0 - wide_s1) : (wide_s1 - wide_s0));'
+        )
         L.append(f'  {dst[0]}.write_scalar(wf, result);')
         L.append('  wf.write_scc(result != 0);')
     elif op == 'bfm':
         if is_64:
             L.append('  uint64_t count = s0 & 63u;')
             L.append('  uint64_t offset = s1 & 63u;')
-            L.append('  uint64_t result = count == 0 ? 0 : ((1ULL << count) - 1) << offset;')
+            L.append(
+                '  uint64_t result = count == 0 ? 0 : ((1ULL << count) - 1) << offset;'
+            )
             L.append(f'  {dst[0]}.write_scalar64(wf, result);')
         else:
             L.append('  uint32_t count = s0 & 31u;')
             L.append('  uint32_t offset = s1 & 31u;')
-            L.append('  uint32_t result = count == 0 ? 0 : ((1u << count) - 1) << offset;')
+            L.append(
+                '  uint32_t result = count == 0 ? 0 : ((1u << count) - 1) << offset;'
+            )
             L.append(f'  {dst[0]}.write_scalar(wf, result);')
     elif op == 'bfe':
         return gen_scalar_bfe(dst, src, dtype)
     elif op in ('lshl1_add', 'lshl2_add', 'lshl3_add', 'lshl4_add'):
         shift = op[4]  # extract digit
-        L.append(f'  uint64_t wide = (static_cast<uint64_t>(s0) << {shift}u) + static_cast<uint64_t>(s1);')
+        L.append(
+            f'  uint64_t wide = (static_cast<uint64_t>(s0) << {shift}u) + static_cast<uint64_t>(s1);'
+        )
         L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(wide));')
         L.append('  wf.write_scc(wide > 0xFFFFFFFFULL);')
     elif dtype == 'f32' and op in ('add', 'sub', 'mul', 'min', 'max', 'fma'):
         fp_op = {
-            'add': 'f0 + f1', 'sub': 'f0 - f1', 'mul': 'f0 * f1',
-            'min': 'std::fmin(f0, f1)', 'max': 'std::fmax(f0, f1)',
+            'add': 'f0 + f1',
+            'sub': 'f0 - f1',
+            'mul': 'f0 * f1',
+            'min': 'std::fmin(f0, f1)',
+            'max': 'std::fmax(f0, f1)',
             'fma': 'std::fma(f0, f1, std::bit_cast<float>(static_cast<uint32_t>(wf.read_scc())))',
         }
         L.append('  float f0 = std::bit_cast<float>(s0);')
@@ -350,19 +476,28 @@ def gen_scalar_binop(dst: list[str], src: list[str], op: str | None, dtype: str 
         L.append(f'  {dst[0]}.write_scalar(wf, std::bit_cast<uint32_t>(fr));')
     elif dtype == 'f16' and op in ('add', 'sub', 'mul', 'min', 'max'):
         fp_op = {
-            'add': 'f0 + f1', 'sub': 'f0 - f1', 'mul': 'f0 * f1',
-            'min': 'std::fmin(f0, f1)', 'max': 'std::fmax(f0, f1)',
+            'add': 'f0 + f1',
+            'sub': 'f0 - f1',
+            'mul': 'f0 * f1',
+            'min': 'std::fmin(f0, f1)',
+            'max': 'std::fmax(f0, f1)',
         }
         L.append('  float f0 = util::f16_to_f32(static_cast<uint16_t>(s0 & 0xFFFF));')
         L.append('  float f1 = util::f16_to_f32(static_cast<uint16_t>(s1 & 0xFFFF));')
         L.append(f'  float fr = {fp_op[op]};')
-        L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(util::f32_to_f16(fr)));')
+        L.append(
+            f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(util::f32_to_f16(fr)));'
+        )
     elif op == 'pack_ll':
-        L.append(f'  {dst[0]}.write_scalar(wf, (s0 & 0xFFFFu) | ((s1 & 0xFFFFu) << 16));')
+        L.append(
+            f'  {dst[0]}.write_scalar(wf, (s0 & 0xFFFFu) | ((s1 & 0xFFFFu) << 16));'
+        )
     elif op == 'pack_lh':
         L.append(f'  {dst[0]}.write_scalar(wf, (s0 & 0xFFFFu) | (s1 & 0xFFFF0000u));')
     elif op == 'pack_hh':
-        L.append(f'  {dst[0]}.write_scalar(wf, ((s0 >> 16) & 0xFFFFu) | (s1 & 0xFFFF0000u));')
+        L.append(
+            f'  {dst[0]}.write_scalar(wf, ((s0 >> 16) & 0xFFFFu) | (s1 & 0xFFFF0000u));'
+        )
     else:
         # Bitwise / shift ops
         utype = 'uint64_t' if is_64 else 'uint32_t'
@@ -404,6 +539,7 @@ def gen_scalar_binop(dst: list[str], src: list[str], op: str | None, dtype: str 
             L.append('  wf.write_scc(result != 0);')
 
     return '\n'.join(L)
+
 
 def gen_scalar_bfe(dst: list[str], src: list[str], dtype: str | None) -> str:
     """Generate C++ execute_impl body for scalar bit field extract (S_BFE_*).
@@ -459,6 +595,7 @@ def gen_scalar_bfe(dst: list[str], src: list[str], dtype: str | None) -> str:
         L.append('  }')
     return '\n'.join(L)
 
+
 def gen_scalar_cmp(src: list[str], op: str | None, dtype: str | None) -> str:
     """Generate C++ execute_impl body for scalar compare instructions (SOPC).
 
@@ -477,8 +614,13 @@ def gen_scalar_cmp(src: list[str], op: str | None, dtype: str | None) -> str:
     """
     L = []
     cmp_map = {
-        'eq': '==', 'ne': '!=', 'lg': '!=',
-        'gt': '>', 'ge': '>=', 'lt': '<', 'le': '<=',
+        'eq': '==',
+        'ne': '!=',
+        'lg': '!=',
+        'gt': '>',
+        'ge': '>=',
+        'lt': '<',
+        'le': '<=',
     }
     if dtype in ('i32',):
         L.append(f'  int32_t s0 = static_cast<int32_t>({src[0]}.read_scalar(wf));')
@@ -495,7 +637,10 @@ def gen_scalar_cmp(src: list[str], op: str | None, dtype: str | None) -> str:
     L.append(f'  wf.write_scc(s0 {cmp_map[op]} s1);')
     return '\n'.join(L)
 
-def gen_scalar_cmpk(dst: list[str], src: list[str], op: str | None, dtype: str | None) -> str:
+
+def gen_scalar_cmpk(
+    dst: list[str], src: list[str], op: str | None, dtype: str | None
+) -> str:
     """Generate C++ execute_impl body for scalar compare-with-immediate (SOPK).
 
     Compares an SGPR against a 16-bit inline immediate and sets SCC.
@@ -515,17 +660,25 @@ def gen_scalar_cmpk(dst: list[str], src: list[str], op: str | None, dtype: str |
     """
     L = []
     cmp_map = {
-        'eq': '==', 'ne': '!=', 'lg': '!=',
-        'gt': '>', 'ge': '>=', 'lt': '<', 'le': '<=',
+        'eq': '==',
+        'ne': '!=',
+        'lg': '!=',
+        'gt': '>',
+        'ge': '>=',
+        'lt': '<',
+        'le': '<=',
     }
     if dtype in ('i32',):
         L.append(f'  int32_t s0 = static_cast<int32_t>({dst[0]}.read_scalar(wf));')
         L.append(f'  int32_t imm = static_cast<int16_t>({src[0]}.encoding_value_);')
     else:
         L.append(f'  uint32_t s0 = {dst[0]}.read_scalar(wf);')
-        L.append(f'  uint32_t imm = static_cast<uint32_t>(static_cast<uint16_t>({src[0]}.encoding_value_));')
+        L.append(
+            f'  uint32_t imm = static_cast<uint32_t>(static_cast<uint16_t>({src[0]}.encoding_value_));'
+        )
     L.append(f'  wf.write_scc(s0 {cmp_map[op]} imm);')
     return '\n'.join(L)
+
 
 def gen_scalar_bitcmp(src: list[str], op: str | None, dtype: str | None) -> str:
     """Generate C++ execute_impl body for scalar bit compare (S_BITCMP0/1_*).
@@ -556,6 +709,7 @@ def gen_scalar_bitcmp(src: list[str], op: str | None, dtype: str | None) -> str:
     else:
         L.append('  wf.write_scc((val & (1ULL << bit)) != 0);')
     return '\n'.join(L)
+
 
 def gen_scalar_saveexec(dst: list[str], src: list[str], op: str | None) -> str:
     """Generate C++ execute_impl body for saveexec instructions (S_*_SAVEEXEC_B64).
@@ -604,10 +758,13 @@ def gen_scalar_saveexec(dst: list[str], src: list[str], op: str | None) -> str:
     expr = saveexec_map.get(op, f'old_exec /* TODO: {op} */')
     L.append(f'  uint64_t result = {expr};')
     L.append(f'  util::Logger::vm([&](auto &os) {{')
-    L.append(f'    os << std::format("saveexec ssrc0_ev={{}} src={{:#x}} exec={{:#x}}->{{:#x}}",')
-    L.append(f'                      {src[0]}.encoding_value(), src, old_exec, result);')
+    L.append(
+        f'    os << std::format("saveexec ssrc0_ev={{}} src={{:#x}} exec={{:#x}}->{{:#x}}",'
+    )
+    L.append(
+        f'                      {src[0]}.encoding_value(), src, old_exec, result);'
+    )
     L.append(f'  }});')
     L.append('  wf.set_exec(result);')
     L.append('  wf.write_scc(result != 0);')
     return '\n'.join(L)
-

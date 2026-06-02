@@ -9,28 +9,41 @@ if(NOT ROCPROFSYS_GFX_TARGETS)
 endif()
 
 if(NOT OMP_TARGET_COMPILER)
-    find_program(
-        amdclangpp_EXECUTABLE
-        NAMES amdclang++
-        HINTS ${ROCM_PATH}
-        ENV ROCM_PATH
-        /opt/rocm
-        PATHS ${ROCM_PATH}
-        ENV ROCM_PATH
-        /opt/rocm
-        PATH_SUFFIXES bin llvm/bin
-    )
-    mark_as_advanced(amdclangpp_EXECUTABLE)
+    # Prefer amdclang++ from the same bin/ directory as the active CXX compiler
+    # so its LLVM version matches the ASan bitcode (asanrtl.bc) built into the
+    # same toolchain tree. Use if(EXISTS) rather than find_program to bypass
+    # the result cache — a stale entry from a different ROCm installation would
+    # otherwise take precedence over the path derived from the active compiler.
+    get_filename_component(_cxx_bin_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set(_toolchain_amdclangpp "${_cxx_bin_dir}/amdclang++")
 
-    if(amdclangpp_EXECUTABLE)
+    if(EXISTS "${_toolchain_amdclangpp}")
         set(OMP_TARGET_COMPILER
-            "${amdclangpp_EXECUTABLE}"
+            "${_toolchain_amdclangpp}"
             CACHE FILEPATH
             "OpenMP target compiler"
         )
     else()
-        message(WARNING "OpenMP target compiler not found. Skipping this example.")
-        return()
+        find_program(
+            amdclangpp_EXECUTABLE
+            NAMES amdclang++
+            PATHS "${ROCM_PATH}"
+            ENV ROCM_PATH
+            /opt/rocm
+            PATH_SUFFIXES bin llvm/bin
+        )
+        mark_as_advanced(amdclangpp_EXECUTABLE)
+
+        if(amdclangpp_EXECUTABLE)
+            set(OMP_TARGET_COMPILER
+                "${amdclangpp_EXECUTABLE}"
+                CACHE FILEPATH
+                "OpenMP target compiler"
+            )
+        else()
+            message(WARNING "OpenMP target compiler not found. Skipping this example.")
+            return()
+        endif()
     endif()
 endif()
 

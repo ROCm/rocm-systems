@@ -23,10 +23,6 @@
 #include "lib/rocprofiler-sdk/spm/interface.hpp"
 #include "lib/common/static_object.hpp"
 
-#include <fmt/format.h>
-
-#include <cstdint>
-
 namespace rocprofiler
 {
 namespace spm
@@ -42,7 +38,6 @@ construct_spm_interface()
 
 #if defined(ROCPROFILER_BUILD_AQLPROFILE) && ROCPROFILER_BUILD_AQLPROFILE
     cached->spm_create_packets             = &aqlprofile_spm_create_packets;
-    cached->spm_delete_packets             = &aqlprofile_spm_delete_packets;
     cached->spm_start                      = &aqlprofile_spm_start;
     cached->spm_stop                       = &aqlprofile_spm_stop;
     cached->spm_decode_stream_v1           = &aqlprofile_spm_decode_stream_v1;

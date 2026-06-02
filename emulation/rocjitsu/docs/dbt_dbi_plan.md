@@ -467,7 +467,7 @@ The per-lane address formulas are implemented in `shared/addr_calc_scalar.h` (SM
 
 Additionally, when calculating the spill set at a patch site containing an MFMA instruction on **CDNA2+ targets** (GFX90A, GFX940/941/942, GFX950), `SpillManager` must account for AccVGPR ranges clobbered by the MFMA. The clobbered output registers are identified by calling `mfma_exec.h`'s `output_loc_32()` / `output_loc_64()` with the MFMA dimensions extracted from the `Vop3pMachineInst` encoding — these functions return the exact `{reg, lane}` pairs written, from which the AccVGPR range can be derived and added to the spill set. On CDNA1 (GFX908/MI100), MFMA instructions write to regular VGPRs (not AccVGPRs); there is no AccVGPR range to account for.
 
-NOTE (05/06/2026): SpillManager was implemented in Phase 5. Accounting for 
+NOTE (05/06/2026): SpillManager was implemented in Phase 5. Accounting for
 AccVGPR ranges clobbered by the MFMA has been deferred.
 
 The per-lane base address is:
