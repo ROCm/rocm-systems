@@ -415,6 +415,12 @@ namespace core {
       HSAKMT_PFN(hsaKmtHandleExport) = (HSAKMT_DEF(hsaKmtHandleExport)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtHandleExport");
       if (HSAKMT_PFN(hsaKmtHandleExport) == nullptr) goto LOAD_ERROR;
 
+      HSAKMT_PFN(hsaKmtQueueSignalExternalSemaphore) = (HSAKMT_DEF(hsaKmtQueueSignalExternalSemaphore)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtQueueSignalExternalSemaphore");
+      if (HSAKMT_PFN(hsaKmtQueueSignalExternalSemaphore) == nullptr) goto LOAD_ERROR;
+
+      HSAKMT_PFN(hsaKmtQueueWaitExternalSemaphore) = (HSAKMT_DEF(hsaKmtQueueWaitExternalSemaphore)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtQueueWaitExternalSemaphore");
+      if (HSAKMT_PFN(hsaKmtQueueWaitExternalSemaphore) == nullptr) goto LOAD_ERROR;
+
       HSAKMT_PFN(hsaKmtMemoryVaMap) = (HSAKMT_DEF(hsaKmtMemoryVaMap)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtMemoryVaMap");
       if (HSAKMT_PFN(hsaKmtMemoryVaMap) == nullptr) goto LOAD_ERROR;
 
@@ -577,6 +583,8 @@ LOAD_ERROR:
       HSAKMT_PFN(hsaKmtHandleImport) = (HSAKMT_DEF(hsaKmtHandleImport)*)(&hsaKmtHandleImport);
       HSAKMT_PFN(hsaKmtImportExternalSemaphore) = (HSAKMT_DEF(hsaKmtImportExternalSemaphore)*)(&hsaKmtImportExternalSemaphore);
       HSAKMT_PFN(hsaKmtDestroyExternalSemaphore) = (HSAKMT_DEF(hsaKmtDestroyExternalSemaphore)*)(&hsaKmtDestroyExternalSemaphore);
+      HSAKMT_PFN(hsaKmtQueueSignalExternalSemaphore) = (HSAKMT_DEF(hsaKmtQueueSignalExternalSemaphore)*)(&hsaKmtQueueSignalExternalSemaphore);
+      HSAKMT_PFN(hsaKmtQueueWaitExternalSemaphore) = (HSAKMT_DEF(hsaKmtQueueWaitExternalSemaphore)*)(&hsaKmtQueueWaitExternalSemaphore);
       HSAKMT_PFN(hsaKmtHandleExport) = (HSAKMT_DEF(hsaKmtHandleExport)*)(&hsaKmtHandleExport);
       HSAKMT_PFN(hsaKmtMemoryVaMap) = (HSAKMT_DEF(hsaKmtMemoryVaMap)*)(&hsaKmtMemoryVaMap);
       HSAKMT_PFN(hsaKmtMemoryVaUnmap) = (HSAKMT_DEF(hsaKmtMemoryVaUnmap)*)(&hsaKmtMemoryVaUnmap);
