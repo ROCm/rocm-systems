@@ -36,51 +36,57 @@
 
 #include <hip/hip_runtime.h>
 #include <cassert>
-
+#include "ipc_test_config.hpp"
 
 namespace rocshmem {
 
+template <typename IpcImplT>
 __global__
 void
-kernel_simple_coarse_copy(IpcImpl *ipc_impl, int *src, int *dest, size_t bytes) {
+kernel_simple_coarse_copy(IpcImplT *ipc_impl, int *src, int *dest, size_t bytes) {
     if (!threadIdx.x) {
-      ipc_impl->ipcCopy(dest, src, bytes);
+      ipc_impl->ipcCopy(dest, src, bytes, 1);
       ipc_impl->ipcFence();
     }
     __syncthreads();
 }
 
+template <typename IpcImplT>
 __global__
 void
-kernel_simple_coarse_copy_block(IpcImpl *ipc_impl, int *src, int *dest, size_t bytes) {
-    ipc_impl->ipcCopy_wg(dest, src, bytes);
+kernel_simple_coarse_copy_block(IpcImplT *ipc_impl, int *src, int *dest, size_t bytes) {
+    ipc_impl->ipcCopy_wg(dest, src, bytes, 1);
     ipc_impl->ipcFence();
     __syncthreads();
 }
 
+template <typename IpcImplT>
 __global__
 void
-kernel_simple_coarse_copy_warp(IpcImpl *ipc_impl, int *src, int *dest, size_t bytes) {
-    ipc_impl->ipcCopy_wave(dest, src, bytes);
+kernel_simple_coarse_copy_warp(IpcImplT *ipc_impl, int *src, int *dest, size_t bytes) {
+    ipc_impl->ipcCopy_wave(dest, src, bytes, 1);
     ipc_impl->ipcFence();
     __syncthreads();
 }
 
+template <typename Config>
 class IPCImplSimpleCoarse : public ::testing::TestWithParam<std::tuple<int, int, int>> {
+    using IpcImplT = typename Config::impl_type;
     using HEAP_T = HeapMemoryType;
     using MPI_T = RemoteHeapInfo<CommunicatorMPI>;
-    using FN_T = void (*)(IpcImpl*, int*, int*, size_t);
+    using FN_T = void (*)(IpcImplT*, int*, int*, size_t);
 
   public:
     IPCImplSimpleCoarse() {
         MPIInstance::mpilib_dl_init();
         mpi_ = new MPI_T (heap_mem_.get_ptr(), heap_mem_.get_size(), MPI_COMM_WORLD);
 
+        Config::preInit();
         ipc_impl_.ipcHostInit(mpi_->my_pe(), mpi_->get_heap_bases(), MPI_COMM_WORLD);
         assert(ipc_impl_dptr_ == nullptr);
-        hip_allocator_.allocate((void**)&ipc_impl_dptr_, sizeof(IpcImpl));
+        hip_allocator_.allocate((void**)&ipc_impl_dptr_, sizeof(IpcImplT));
         CHECK_HIP(hipMemcpy(ipc_impl_dptr_, &ipc_impl_,
-                            sizeof(IpcImpl), hipMemcpyHostToDevice));
+                            sizeof(IpcImplT), hipMemcpyHostToDevice));
     }
 
     virtual ~IPCImplSimpleCoarse() {
@@ -192,39 +198,39 @@ class IPCImplSimpleCoarse : public ::testing::TestWithParam<std::tuple<int, int,
     HEAP_T heap_mem_ {hip_allocator_};
     MPI_T *mpi_{nullptr};
 
-    IpcImpl ipc_impl_ {};
-    IpcImpl *ipc_impl_dptr_ {nullptr};
+    IpcImplT ipc_impl_ {};
+    IpcImplT *ipc_impl_dptr_ {nullptr};
 };
 
-class DegenerateSimpleCoarse : public IPCImplSimpleCoarse {
+class DegenerateSimpleCoarse : public IPCImplSimpleCoarse<IpcOnTestConfig> {
   public:
     ~DegenerateSimpleCoarse() override {};
 };
 
-class ParameterizedBlockSimpleCoarse : public IPCImplSimpleCoarse {
+class ParameterizedBlockSimpleCoarse : public IPCImplSimpleCoarse<IpcOnTestConfig> {
   public:
     ~ParameterizedBlockSimpleCoarse() override {};
 
     void copy(IPCImplSimpleCoarse::TestType test, dim3 grid, dim3 block) override {
-        execute(test, kernel_simple_coarse_copy_block, grid, block);
+        execute(test, kernel_simple_coarse_copy_block<IpcOnImpl>, grid, block);
     }
 };
 
-class ParameterizedWarpSimpleCoarse : public IPCImplSimpleCoarse {
+class ParameterizedWarpSimpleCoarse : public IPCImplSimpleCoarse<IpcOnTestConfig> {
   public:
     ~ParameterizedWarpSimpleCoarse() override {};
 
     void copy(IPCImplSimpleCoarse::TestType test, dim3 grid, dim3 block) override {
-        execute(test, kernel_simple_coarse_copy_warp, grid, block);
+        execute(test, kernel_simple_coarse_copy_warp<IpcOnImpl>, grid, block);
     }
 };
 
-class ParameterizedThreadSimpleCoarse : public IPCImplSimpleCoarse {
+class ParameterizedThreadSimpleCoarse : public IPCImplSimpleCoarse<IpcOnTestConfig> {
   public:
     ~ParameterizedThreadSimpleCoarse() override {};
 
     void copy(IPCImplSimpleCoarse::TestType test, dim3 grid, dim3 block) override {
-        execute(test, kernel_simple_coarse_copy, grid, block);
+        execute(test, kernel_simple_coarse_copy<IpcOnImpl>, grid, block);
     }
 };
 

@@ -6,11 +6,9 @@
 
 #ifndef _NCCL_DEVICE_MEM_BARRIER_H_
 #define _NCCL_DEVICE_MEM_BARRIER_H_
+#include "hip_compat.h"
 #include "impl/core__types.h"
 #include "core_tmp.h"
-
-#undef __CUDACC__
-#define __CUDACC__ 0
 
 struct ncclLsaBarrierHandle;
 

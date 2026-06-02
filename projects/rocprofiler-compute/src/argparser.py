@@ -168,6 +168,8 @@ def add_general_group(
         default=False,
         help=(
             "Enable experimental feature(s):\n"
+            "   GUI (--gui)\n"
+            "   TUI (--tui)\n"
             "   Spatial multiplexing (--spatial-multiplexing)\n"
             "   Torch trace (--torch-trace, --list-torch-operators, --torch-operator)\n"
         ),
@@ -216,6 +218,7 @@ Examples:
 \trocprof-compute profile -n vcopy_kernel -k vecCopy -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_disp -d 0 -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_roof --roof-only -- ./vcopy -n 1048576 -b 256
+\trocprof-compute profile -n my_bench --bench-only
 ---------------------------------------------------------------------------------
         """,  # noqa: E501
         prog="tool",
@@ -275,19 +278,6 @@ Examples:
         ),
     )
     profile_group.add_argument(
-        "-p",
-        "--path",
-        metavar="",
-        type=str,
-        dest="path",
-        default=str(Path.cwd() / "workloads"),
-        required=False,
-        help=(
-            f"\t\t\t(DEPRECATED) Specify path to save workload.\n\t\t\t(DEFAULT: {Path.cwd()}/workloads/<name>)\n"  # noqa: E501
-            "\t\t\t --path is deprecated. Use --output-directory instead."  # noqa: E501
-        ),
-    )
-    profile_group.add_argument(
         "--output-directory",
         metavar="",
         type=str,
@@ -303,18 +293,6 @@ Examples:
             '\t\t\t   %%env{NAME}%%: Environment variable "NAME"\n'
             "\t\t\t(DEFAULT: <current-working-directory>/workloads/<name>/%%gpumodel%%) without MPI,\n"  # noqa: E501
             "\t\t\t <current-working-directory>/workloads/<name>/%%rank%% with MPI.)"
-        ),
-    )
-    profile_group.add_argument(
-        "--subpath",
-        metavar="",
-        type=str,
-        dest="subpath",
-        default="gpu_model",
-        required=False,
-        help=(
-            "\t\t\t(DEPRECATED) Specify the type of subpath to save workload: node_name, gpu_model."  # noqa: E501
-            "\n\t\t\t --subpath is deprecated. Use --output-directory with parameterization instead."  # noqa: E501
         ),
     )
     profile_group.add_argument(
@@ -362,8 +340,10 @@ Examples:
         dest="dispatch",
         required=False,
         help=(
-            "\t\t\tWhich dispatch iterations of the kernel to filter \n"
-            "\t\t\t(e.g. 1 3:5 captures 1st, 3rd, 4th and 5th iterations)."
+            "\t\t\tWhich dispatch iterations of each kernel to filter \n"
+            "\t\t\t(1-based; positive integer or 'start:end'/'start-end' \n"
+            "\t\t\trange, e.g. 1 3:5 captures 1st, 3rd, 4th and 5th \n"
+            "\t\t\titerations)."
         ),
     )
     profile_group.add_argument(
@@ -411,7 +391,7 @@ Examples:
             "\t\t\tAlternatively, specify block alias(es) for filtering "
             "(e.g. lds, l1i, sl1d).\n"
             "\t\t\tCan provide multiple space separated arguments.\n"
-            "\t\t\tCannot be used with --set or --roof-only"
+            "\t\t\tCannot be used with --set, --roof-only, or --bench-only"
         ),
     )
     profile_group.add_argument(
@@ -427,7 +407,7 @@ Examples:
             "\t\t\tProfile a set of metrics of topic of interest by collecting "
             "counters in a single pass.\n"
             "\t\t\tFor available sets, see --list-sets\n"
-            "\t\t\tCannot be used with --block or --roof-only"
+            "\t\t\tCannot be used with --block, --roof-only, or --bench-only"
         ),
     )
     profile_group.add_argument(
@@ -524,8 +504,8 @@ Examples:
             "\t\t\t(DEPRECATED) Retain the large raw rocpd database "
             "in workload directory.\n"
             "\t\t\tThis option requires --format-rocprof-output rocpd.\n"
-            "\t\t\t --retain-rocpd-output is deprecated. .db files will "
-            "be retained by default in a future release."
+            "\t\t\t --retain-rocpd-output is deprecated. .db files "
+            "will be retained by default in a future release."
         ),
     )
 
@@ -537,7 +517,19 @@ Examples:
         action="store_true",
         help=(
             "\t\t\tProfile roofline data only.\n"
-            "\t\t\tCannot be used with --block or --set"
+            "\t\t\tCannot be used with --block, --set, or --bench-only"
+        ),
+    )
+    roofline_group.add_argument(
+        "--bench-only",
+        required=False,
+        default=False,
+        action="store_true",
+        help=(
+            "\t\t\tRun roofline microbenchmark only.\n"
+            "\t\t\tNo application profiling or counter collection.\n"
+            "\t\t\tNo application run is required.\n"
+            "\t\t\tCannot be used with --block, --set, --roof-only, or --no-roof"
         ),
     )
     roofline_group.add_argument(
@@ -546,7 +538,10 @@ Examples:
         required=False,
         default=0,
         type=int,
-        help="\t\t\tTarget GPU device ID. (DEFAULT: 0)",
+        help=(
+            "\t\t\tTarget GPU device ID per amd-smi for roofline benchmarking"
+            " (Default: 0)"
+        ),
     )
 
     ## ----------------------------
@@ -594,7 +589,6 @@ rocprof-compute analyze --path <workload_path> [analyze options]
 Examples:
 \trocprof-compute analyze -p workloads/vcopy/mi200/ --list-metrics gfx90a
 \trocprof-compute analyze -p workloads/mixbench/mi200/ --dispatch 12 34 --decimal 3
-\trocprof-compute analyze -p workloads/mixbench/mi200/ --gui
 -----------------------------------------------------------------------------------
         """,
         prog="tool",
@@ -720,12 +714,19 @@ Examples:
         choices=["stdout", "txt", "csv", "db"],
         default="stdout",
         help=(
-            "\t\tSet the format of output file or folder containing analysis data.\n"
-            "\t\tBy default, file or folder created will "
-            "have the name rocprof_compute_<uuid>.\n"
-            "\t\tFile or folder name can be overriden using --output-name.\n"
-            "\t\tDefault output format is stdout which will not "
-            "generate any file/folder.\n"
+            "\t\tFormat of the analysis output. One of: stdout, txt, csv, db.\n"
+            "\t\t  stdout - print report to the terminal (no file/folder created).\n"
+            "\t\t  txt    - write report to <name>.txt; disables terminal output.\n"
+            "\t\t  csv    - write one CSV per analysis view into a folder <name>/.\n"
+            "\t\t           Requires profiles collected with\n"
+            "\t\t           --format-rocprof-output rocpd. Disables terminal output.\n"
+            "\t\t  db     - write a SQLite database <name>.db (see analysis\n"
+            "\t\t           database schema in the docs). Requires profiles\n"
+            "\t\t           collected with --format-rocprof-output rocpd.\n"
+            "\t\t           Disables terminal output.\n"
+            "\t\tDefault <name> is rocprof_compute_<uuid>; override with"
+            " --output-name.\n"
+            "\t\tDefault format is stdout.\n"
         ),
     )
     analyze_group.add_argument(
@@ -737,22 +738,6 @@ Examples:
             "with the specified name.\n"
             "\t\tThis is only applicable when --output-format txt/csv/db is used.\n"
         ),
-    )
-    analyze_group.add_argument(
-        "--gui",
-        type=int,
-        nargs="?",
-        const=8050,
-        help=(
-            "\t\tActivate a GUI to interate with rocprofiler-compute metrics.\n"
-            "\t\tOptionally, specify port to launch application (DEFAULT: 8050)"
-        ),
-    )
-    analyze_group.add_argument(
-        "--tui",
-        action="store_true",
-        help="\t\tActivate a Textual User Interface (TUI) to "
-        "interact with rocprofiler-compute metrics.",
     )
     analyze_group.add_argument(
         "--pc-sampling-sorting-type",
@@ -990,4 +975,32 @@ Examples:
         nargs=0,
         const=True,
         help="\t\tEnable block 30 (memory bandwidth specific) for analysis mode.",
+    )
+
+    analyze_group.add_argument(
+        "--gui",
+        type=int,
+        nargs="?",
+        const=8050,
+        default=None,
+        base_action="store",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="GUI",
+        help=(
+            "\t\tActivate a GUI to interate with rocprofiler-compute metrics.\n"
+            "\t\tOptionally, specify port to launch application (DEFAULT: 8050)"
+        ),
+    )
+    analyze_group.add_argument(
+        "--tui",
+        default=False,
+        const=True,
+        nargs=0,
+        base_action="store_true",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="TUI",
+        help="\t\tActivate a Textual User Interface (TUI) to "
+        "interact with rocprofiler-compute metrics.",
     )

@@ -78,17 +78,23 @@ in practice.
 
           * :doc:`conceptual/rdna/system-speed-of-light`
 
-          * :doc:`conceptual/rdna/wgp`
+          * :doc:`conceptual/rdna/shader-engine`
 
-          * :doc:`conceptual/rdna/tcp-cache`
+            * :doc:`conceptual/rdna/spi`
 
-          * :doc:`conceptual/rdna/gl1-cache`
+            * :doc:`conceptual/rdna/wgp`
+
+            * :doc:`conceptual/rdna/gl0-cache`
+
+            * :doc:`conceptual/rdna/gl1-cache`
 
           * :doc:`conceptual/rdna/gl2-cache`
 
-          * :doc:`conceptual/rdna/shader-engine`
+          * :doc:`conceptual/rdna/gcea`
 
           * :doc:`conceptual/rdna/command-processor`
+
+          * :doc:`conceptual/rdna/grbm`
 
           * :doc:`conceptual/rdna/references`
 

@@ -675,6 +675,8 @@ struct Info : public amd::EmbeddedObject {
 
   bool dmabufSupported_;  //!< DMABuf support flag
   bool gpuDirectRdmaWithHipVmmSupported_;  //!< GPU Direct RDMA with HIP VMM (DMA-Buf + HIP VMM)
+
+  uint32_t maxDynDataPrefetchRegions_;  //!< Max L2 prefetch regions (0 if unsupported)
 };
 
 //! Device settings

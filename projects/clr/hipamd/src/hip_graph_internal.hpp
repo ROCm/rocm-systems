@@ -6,11 +6,13 @@
 
 #pragma once
 #include <algorithm>
+#include <atomic>
 #include <queue>
 #include <stack>
 #include <iostream>
 #include <unordered_map>
 #include <unordered_set>
+#include <shared_mutex>
 #include <vector>
 
 #include "hip/hip_runtime.h"
@@ -194,7 +196,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
             const char* label = "")
       : type_(type),
         visited_(false),
-        id_(nextID++),
+        id_(nextID.fetch_add(1, std::memory_order_relaxed)),
         parentGraph_(nullptr),
         isEnabled_(1),
         dev_id_(ihipGetDevice()),
@@ -465,7 +467,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   int hw_queue_id_ = -1; //! Hardware queue ID on which this node will be executed
   int32_t segment_id_ = -1;  //! Segment ID on which this node will be executed
   int32_t launch_id_ = -1;  //! Launch ID of this node in the entire graph execution sequence
-  static int nextID;
+  static std::atomic<int> nextID;
   Graph* parentGraph_;
   static std::unordered_set<GraphNode*> nodeSet_;
   static amd::Monitor nodeSetLock_;
@@ -541,7 +543,9 @@ class Graph {
   static std::unordered_set<Graph*> graphSet_;
   static amd::Monitor graphSetLock_;
   Graph(hip::Device* device, const Graph* original = nullptr)
-      : pOriginalGraph_(original), id_(nextID++), device_(device) {
+      : pOriginalGraph_(original),
+        id_(nextID.fetch_add(1, std::memory_order_relaxed)),
+        device_(device) {
     amd::ScopedLock lock(graphSetLock_);
     graphSet_.insert(this);
     mem_pool_ = device->GetGraphMemoryPool();
@@ -906,7 +910,7 @@ class Graph {
   //!< graphUserObj_.second stores refcount owned by this graph for user object,
   std::unordered_map<UserObject*, int> graphUserObj_;
   unsigned int id_;
-  static int nextID;
+  static std::atomic<int> nextID;
   uint32_t memalloc_nodes_ = 0;  //!< Count of unreleased Memalloc nodes
   std::vector<Node> roots_;      //!< Root nodes, used in parallel launches
   std::vector<Node> leafs_;      //!< The list of leaf nodes on every parallel stream
@@ -948,6 +952,7 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   static std::unordered_set<GraphExec*> graphExecSet_;
   static std::recursive_mutex graphExecSetLock_;
   static std::recursive_mutex graphExecStreamCreateLock_;
+  static std::shared_mutex graphExecTrimLock_;
   bool graph_dumped_ = false;
   GraphExec(uint64_t flags = 0)
       : ReferenceCountedObject(), Graph(hip::getCurrentDevice()), flags_(flags) {

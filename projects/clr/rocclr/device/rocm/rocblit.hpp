@@ -604,6 +604,11 @@ class KernelBlitManager : public DmaBlitManager {
                         const uint32_t blitWg, amd::CopyMetadata copyMetadata,
                         bool attachSignal = false) const;
 
+  //! Returns true if a linear buffer copy should use the shader path.
+  bool useShaderCopyBufferPath(const Memory& srcMemory, const Memory& dstMemory, size_t size,
+                               amd::CopyMetadata copyMetadata,
+                               bool* useLimitedP2pBlitWg = nullptr) const;
+
   //! Copies a batch of buffers using a single/multiple shader dispatch
   bool ShaderCopyBufferBatch(const std::vector<amd::BatchCopyOp>& copy_ops) const;
 

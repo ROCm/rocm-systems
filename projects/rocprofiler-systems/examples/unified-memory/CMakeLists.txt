@@ -54,9 +54,27 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+set(_unified_memory_archs)
+foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
+    rocprofiler_systems_lookup_gfx(${arch} GPU_CATEGORIES)
+    if(NOT "instinct" IN_LIST GPU_CATEGORIES)
+        continue()
+    endif()
+    list(APPEND _unified_memory_archs ${arch})
+endforeach()
+
+list(LENGTH _unified_memory_archs _instinct_arch_count)
+if(_instinct_arch_count EQUAL 0)
+    rocprofiler_systems_message(
+        AUTHOR_WARNING
+        "Skipping unified-memory example: an Instinct GPU is required (XNACK support)"
+    )
+    return()
+endif()
+
 add_executable(unified-memory unified-memory.cpp)
 
-foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
+foreach(arch IN LISTS _unified_memory_archs)
     target_compile_options(unified-memory PRIVATE --offload-arch=${arch})
     target_link_options(unified-memory PRIVATE --offload-arch=${arch})
 endforeach()

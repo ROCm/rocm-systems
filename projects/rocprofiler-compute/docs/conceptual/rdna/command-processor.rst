@@ -8,17 +8,18 @@
 Command processor (CP)
 =========================
 
-The command processor (CP) connects the host and kernel driver to on-GPU
-scheduling. During the process it pulls work from HSA queues, decodes packets, and dispatches the kernel
-launches to the front-end (SPI / WGP path). On Instinct GPUs, the profiler
-often seperates the metrics into command processor fetcher (CPF) and command processor compute (CPC). The
-gfx1151 analysis panels emphasize CPC and ME (Micro Engine) activity, including utilization,
+The **command processor (CP)** is the GPU front-end that connects the host and
+kernel driver to on-GPU scheduling: it pulls work from HSA queues, decodes
+packets, and dispatches kernel launches to the shader-engine SPI / WGP path.
+On Instinct GPUs, the profiler often separates the metrics into command processor
+fetcher (CPF) and command processor compute (CPC). The gfx1151 analysis panels
+emphasize CPC and ME (Micro Engine) activity, including utilization,
 interface utilization, stall cycles, memory requests, and instruction cache.
 
 For the complete CDNA architecture overview and the CPF and CPC metric tabs across MI-series GPUs, see
 :doc:`../cdna/command-processor` under CDNA-CDNA4.
 
-Command processor compute (CPC) — gfx1151
+Command processor compute (CPC) - gfx1151
 ===========================================
 
 CPC utilization

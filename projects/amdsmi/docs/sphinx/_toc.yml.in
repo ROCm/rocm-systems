@@ -12,7 +12,7 @@ subtrees:
 - caption: Install
   entries:
   - file: install/install.md
-    title: Library and CLI tool installation
+    title: Install AMD SMI
   - file: install/build.md
     title: Build from source
 
@@ -53,6 +53,8 @@ subtrees:
 
 - caption: Conceptual
   entries:
+  - file: conceptual/partition.md
+    title: GPU partitioning
   - file: conceptual/gpu-violations.md
   - file: conceptual/perf-determinism.md
     title: Performance determinism
