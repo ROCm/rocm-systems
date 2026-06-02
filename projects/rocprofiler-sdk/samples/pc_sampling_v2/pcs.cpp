@@ -51,9 +51,7 @@ query_v2_configs(rocprofiler_agent_id_t                agent_id,
 {
     auto configs = std::vector<rocprofiler_pc_sampling_configuration_v2_t>{};
 
-    auto cb = [](const rocprofiler_pc_sampling_configuration_v2_t** cfgs,
-                 size_t                                             num,
-                 void*                                              ud) {
+    auto cb = [](const rocprofiler_pc_sampling_configuration_v2_t** cfgs, size_t num, void* ud) {
         auto* out = static_cast<std::vector<rocprofiler_pc_sampling_configuration_v2_t>*>(ud);
         for(size_t i = 0; i < num; i++)
             out->emplace_back(*cfgs[i]);
@@ -125,16 +123,15 @@ find_all_gpu_agents_supporting_pc_sampling_impl(rocprofiler_agent_version_t vers
     size_t gpu_index = 0;
     for(size_t i = 0; i < num_agents; i++)
     {
-        ss << "  " << (i + 1) << ". " << _agents[i]->name
-           << " (id=" << _agents[i]->id.handle
+        ss << "  " << (i + 1) << ". " << _agents[i]->name << " (id=" << _agents[i]->id.handle
            << ", type=" << _agents[i]->type << ")\n";
 
         if(_agents[i]->type == ROCPROFILER_AGENT_TYPE_GPU)
         {
-            auto tool_gpu_agent            = std::make_unique<tool_agent_info>();
-            tool_gpu_agent->agent_id       = _agents[i]->id;
+            auto tool_gpu_agent        = std::make_unique<tool_agent_info>();
+            tool_gpu_agent->agent_id   = _agents[i]->id;
             tool_gpu_agent->ext_fields = std::make_unique<ext_fields_vec_t>();
-            tool_gpu_agent->agent          = _agents[i];
+            tool_gpu_agent->agent      = _agents[i];
 
             ++gpu_index;
             // Discover the most comprehensive record version via the v2 query API.
@@ -196,8 +193,7 @@ query_most_comprehensive_config_for_agent(tool_agent_info* agent_info)
             agent_info->most_comprehensive_config      = configs[0];
 
             ss << "  Selected record kind: " << static_cast<int>(record_kind)
-               << ", unit: " << configs[0].unit
-               << ", interval: [" << configs[0].min_interval
+               << ", unit: " << configs[0].unit << ", interval: [" << configs[0].min_interval
                << ", " << configs[0].max_interval << "]\n";
             *utils::get_output_stream() << ss.str() << std::flush;
             return true;
@@ -216,8 +212,8 @@ query_snapshot_ext_fields_for_agent(tool_agent_info* agent_info)
     agent_info->ext_field_names.clear();
 
     auto cb = [](const rocprofiler_pc_sampling_snapshot_ext_field_id_t* fields,
-                 size_t                                                    num_fields,
-                 void*                                                     user_data) {
+                 size_t                                                 num_fields,
+                 void*                                                  user_data) {
         auto* out = static_cast<ext_fields_vec_t*>(user_data);
         for(size_t i = 0; i < num_fields; i++)
         {
@@ -256,8 +252,8 @@ query_snapshot_ext_fields_for_agent(tool_agent_info* agent_info)
     }
 
     // Build the field-name LUT once so the buffer callback never has to query names.
-    ss << "Agent " << agent_info->agent_id.handle << " supports "
-       << agent_info->ext_fields->size() << " snapshot ext_data field(s):\n";
+    ss << "Agent " << agent_info->agent_id.handle << " supports " << agent_info->ext_fields->size()
+       << " snapshot ext_data field(s):\n";
     size_t field_index = 0;
     for(auto field_id : *agent_info->ext_fields)
     {
@@ -290,8 +286,9 @@ configure_pc_sampling_for_agent(tool_agent_info*         agent_info,
 {
     if(agent_info->most_comprehensive_record_kind == ROCPROFILER_PC_SAMPLING_RECORD_NONE)
     {
-        ROCPROFILER_CALL(ROCPROFILER_STATUS_ERROR,
-                         "configure_pc_sampling_for_agent called without previous configuration inquiry");
+        ROCPROFILER_CALL(
+            ROCPROFILER_STATUS_ERROR,
+            "configure_pc_sampling_for_agent called without previous configuration inquiry");
     }
 
     auto& cfg = agent_info->most_comprehensive_config;
@@ -299,11 +296,12 @@ configure_pc_sampling_for_agent(tool_agent_info*         agent_info,
     // Cycle-based (stochastic) sampling needs a larger interval due to
     // hardware constraints; time-based (host-trap) uses a fixed 10ms interval.
     auto interval = (cfg.unit == ROCPROFILER_PC_SAMPLING_UNIT_CYCLES) ? STOCHASTIC_INTERVAL
-                                                                     : HOST_TRAP_INTERVAL;
+                                                                      : HOST_TRAP_INTERVAL;
 
     // INVALID_SAMPLE is method-agnostic (see query_v2_configs): it does not affect method
     // selection, so it is safe to request alongside any record kind. On host-trap sessions no
-    // invalid records are delivered today; on stochastic sessions it opts into invalid-sample delivery.
+    // invalid records are delivered today; on stochastic sessions it opts into invalid-sample
+    // delivery.
     rocprofiler_pc_sampling_record_kind_t record_kinds[] = {
         agent_info->most_comprehensive_record_kind, ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE};
 
@@ -312,20 +310,20 @@ configure_pc_sampling_for_agent(tool_agent_info*         agent_info,
     {
         auto status =
             rocprofiler_pc_sampling_configure_service_v2(context_id,
-                                                        agent_info->agent_id,
-                                                        cfg.unit,
-                                                        interval,
-                                                        buffer_id,
-                                                        record_kinds,
-                                                        2,
-                                                        agent_info->most_comprehensive_api_flags);
+                                                         agent_info->agent_id,
+                                                         cfg.unit,
+                                                         interval,
+                                                         buffer_id,
+                                                         record_kinds,
+                                                         2,
+                                                         agent_info->most_comprehensive_api_flags);
         if(status == ROCPROFILER_STATUS_SUCCESS)
         {
             *utils::get_output_stream()
                 << ">>> Configured PC sampling (record kind="
                 << static_cast<int>(agent_info->most_comprehensive_record_kind)
-                << ", interval=" << interval
-                << ") on agent " << agent_info->agent->id.handle << "\n";
+                << ", interval=" << interval << ") on agent " << agent_info->agent->id.handle
+                << "\n";
             return;
         }
         else if(status != ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE)
@@ -352,8 +350,8 @@ void
 print_sample_common_fields(std::ostream& os, const PcSamplingRecordT* sample)
 {
     os << "(code_obj_id, offset): (" << sample->pc.code_object_id << ", 0x" << std::hex
-       << sample->pc.code_object_offset << "), " << std::dec
-       << "timestamp: " << sample->timestamp << ", "
+       << sample->pc.code_object_offset << "), " << std::dec << "timestamp: " << sample->timestamp
+       << ", "
        << "exec: " << std::hex << std::setw(16) << sample->exec_mask << std::dec << ", "
        << "workgroup_pos_(x=" << std::setw(5) << sample->workgroup_position.x << ", "
        << "y=" << std::setw(5) << sample->workgroup_position.y << ", "
@@ -369,8 +367,8 @@ void
 print_sample_v0(std::ostream& os, const rocprofiler_pc_sampling_record_v0_t* sample)
 {
     os << "(code_obj_id, offset): (" << sample->pc.code_object_id << ", 0x" << std::hex
-       << sample->pc.code_object_offset << "), " << std::dec
-       << "timestamp: " << sample->timestamp << ", "
+       << sample->pc.code_object_offset << "), " << std::dec << "timestamp: " << sample->timestamp
+       << ", "
        << "exec: " << std::hex << std::setw(16) << sample->exec_mask << std::dec << ", "
        << "dispatch_id: " << std::setw(7) << sample->dispatch_id << ", "
        << "correlation: {internal=" << std::setw(7) << sample->correlation_id.internal << ", "
@@ -411,12 +409,11 @@ print_snapshot_information(std::ostream&                                        
     {
         const char* reason_name     = nullptr;
         uint64_t    reason_name_len = 0;
-        auto        reason_status =
-            rocprofiler_pc_sampling_get_instruction_not_issued_reason_name_v2(
-                static_cast<rocprofiler_pc_sampling_instruction_not_issued_reason_t>(
-                    snap.no_issue_reason),
-                &reason_name,
-                &reason_name_len);
+        auto reason_status = rocprofiler_pc_sampling_get_instruction_not_issued_reason_name_v2(
+            static_cast<rocprofiler_pc_sampling_instruction_not_issued_reason_t>(
+                snap.no_issue_reason),
+            &reason_name,
+            &reason_name_len);
         if(reason_status == ROCPROFILER_STATUS_SUCCESS && reason_name != nullptr)
             os << "wave stalled: " << std::string(reason_name, reason_name_len) << ", ";
         else
@@ -471,13 +468,13 @@ print_snapshot_ext_data(std::ostream&                         os,
         return ROCPROFILER_STATUS_SUCCESS;
     };
 
-    auto extract_status = rocprofiler_pc_sampling_extract_snapshot_ext_field_values(
-        record_kind,
-        sample,
-        agent_info->ext_fields->data(),
-        agent_info->ext_fields->size(),
-        ext_cb,
-        static_cast<void*>(&cb_data));
+    auto extract_status =
+        rocprofiler_pc_sampling_extract_snapshot_ext_field_values(record_kind,
+                                                                  sample,
+                                                                  agent_info->ext_fields->data(),
+                                                                  agent_info->ext_fields->size(),
+                                                                  ext_cb,
+                                                                  static_cast<void*>(&cb_data));
 
     if(extract_status != ROCPROFILER_STATUS_SUCCESS) os << "ERROR extracting ext_data fields";
     os << "}";
@@ -524,8 +521,7 @@ print_sample_v3(std::ostream& os, const rocprofiler_pc_sampling_record_v3_t* sam
            << ", y=" << static_cast<unsigned int>(sample->cluster_nwg_y)
            << ", z=" << static_cast<unsigned int>(sample->cluster_nwg_z) << ")"
            << ", cluster_pos_(x=" << sample->cluster_position.x
-           << ", y=" << sample->cluster_position.y
-           << ", z=" << sample->cluster_position.z << ")";
+           << ", y=" << sample->cluster_position.y << ", z=" << sample->cluster_position.z << ")";
     }
     os << "\n";
 }
@@ -552,8 +548,7 @@ print_sample_v4(std::ostream&                              os,
            << ", y=" << static_cast<unsigned int>(sample->cluster_nwg_y)
            << ", z=" << static_cast<unsigned int>(sample->cluster_nwg_z) << ")"
            << ", cluster_pos_(x=" << sample->cluster_position.x
-           << ", y=" << sample->cluster_position.y
-           << ", z=" << sample->cluster_position.z << ")";
+           << ", y=" << sample->cluster_position.y << ", z=" << sample->cluster_position.z << ")";
     }
     os << ", ";
 
@@ -571,8 +566,7 @@ print_sample_v4(std::ostream&                              os,
        << ", sample=" << static_cast<unsigned int>(mc.sample_count)
        << ", async=" << static_cast<unsigned int>(mc.async_count)
        << ", tensor=" << static_cast<unsigned int>(mc.tensor_count)
-       << ", xnack=" << static_cast<unsigned int>(mc.xnack_count)
-       << "}, ";
+       << ", xnack=" << static_cast<unsigned int>(mc.xnack_count) << "}, ";
 
     print_snapshot_ext_data(
         os, ROCPROFILER_PC_SAMPLING_RECORD_V4_SAMPLE, static_cast<const void*>(sample), agent_info);

@@ -155,9 +155,7 @@ protected:
      * @brief Parses the given input data and generates pc sampling records.
      * Calls generate_upcoming_pc_record().
      */
-    template <typename GFX,
-              typename PcSamplingRecordT,
-              rocprofiler_pc_sampling_method_t Method>
+    template <typename GFX, typename PcSamplingRecordT, rocprofiler_pc_sampling_method_t Method>
     pcsample_status_t _parse(const upcoming_samples_t& upcoming,
                              const generic_sample_t*   data_,
                              bool                      deliver_invalid,
@@ -227,8 +225,8 @@ protected:
     mutable std::shared_mutex mut;
 
 private:
-    using parse_funct_ptr_t = pcsample_status_t (PCSamplingParserContext::*)(
-        const upcoming_samples_t&, const generic_sample_t*, bool, bool);
+    using parse_funct_ptr_t = pcsample_status_t (
+        PCSamplingParserContext::*)(const upcoming_samples_t&, const generic_sample_t*, bool, bool);
 
     template <typename GFXIP>
     parse_funct_ptr_t _get_parse_func_for_method(rocprofiler_pc_sampling_method_t pcs_method);

@@ -257,8 +257,7 @@ is_invalid_sample(const PcSamplingRecordT& sample)
 // --- V0 ---
 template <>
 inline bool
-is_invalid_sample<rocprofiler_pc_sampling_record_v0_t,
-                  ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>(
+is_invalid_sample<rocprofiler_pc_sampling_record_v0_t, ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>(
     const rocprofiler_pc_sampling_record_v0_t& /*sample*/)
 {
     return false;
@@ -266,8 +265,7 @@ is_invalid_sample<rocprofiler_pc_sampling_record_v0_t,
 
 template <>
 inline bool
-is_invalid_sample<rocprofiler_pc_sampling_record_v0_t,
-                  ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(
+is_invalid_sample<rocprofiler_pc_sampling_record_v0_t, ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(
     const rocprofiler_pc_sampling_record_v0_t& sample)
 {
     return sample.timestamp == 0;
@@ -276,8 +274,7 @@ is_invalid_sample<rocprofiler_pc_sampling_record_v0_t,
 // --- V1 ---
 template <>
 inline bool
-is_invalid_sample<rocprofiler_pc_sampling_record_v1_t,
-                  ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>(
+is_invalid_sample<rocprofiler_pc_sampling_record_v1_t, ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>(
     const rocprofiler_pc_sampling_record_v1_t& /*sample*/)
 {
     return false;
@@ -285,8 +282,7 @@ is_invalid_sample<rocprofiler_pc_sampling_record_v1_t,
 
 template <>
 inline bool
-is_invalid_sample<rocprofiler_pc_sampling_record_v1_t,
-                  ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(
+is_invalid_sample<rocprofiler_pc_sampling_record_v1_t, ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(
     const rocprofiler_pc_sampling_record_v1_t& sample)
 {
     return sample.timestamp == 0;
@@ -295,8 +291,7 @@ is_invalid_sample<rocprofiler_pc_sampling_record_v1_t,
 // --- V2 (stochastic-only) ---
 template <>
 inline bool
-is_invalid_sample<rocprofiler_pc_sampling_record_v2_t,
-                  ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(
+is_invalid_sample<rocprofiler_pc_sampling_record_v2_t, ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(
     const rocprofiler_pc_sampling_record_v2_t& sample)
 {
     return sample.timestamp == 0;
@@ -305,8 +300,7 @@ is_invalid_sample<rocprofiler_pc_sampling_record_v2_t,
 // --- V3 ---
 template <>
 inline bool
-is_invalid_sample<rocprofiler_pc_sampling_record_v3_t,
-                  ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>(
+is_invalid_sample<rocprofiler_pc_sampling_record_v3_t, ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>(
     const rocprofiler_pc_sampling_record_v3_t& /*sample*/)
 {
     return false;
@@ -314,8 +308,7 @@ is_invalid_sample<rocprofiler_pc_sampling_record_v3_t,
 
 template <>
 inline bool
-is_invalid_sample<rocprofiler_pc_sampling_record_v3_t,
-                  ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(
+is_invalid_sample<rocprofiler_pc_sampling_record_v3_t, ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(
     const rocprofiler_pc_sampling_record_v3_t& sample)
 {
     return sample.timestamp == 0;
@@ -324,8 +317,7 @@ is_invalid_sample<rocprofiler_pc_sampling_record_v3_t,
 // --- V4 (stochastic-only) ---
 template <>
 inline bool
-is_invalid_sample<rocprofiler_pc_sampling_record_v4_t,
-                  ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(
+is_invalid_sample<rocprofiler_pc_sampling_record_v4_t, ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>(
     const rocprofiler_pc_sampling_record_v4_t& sample)
 {
     return sample.timestamp == 0;

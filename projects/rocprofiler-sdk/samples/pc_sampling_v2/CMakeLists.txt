@@ -28,7 +28,8 @@ endforeach()
 find_package(rocprofiler-sdk REQUIRED)
 
 add_library(pc-sampling-v2-client SHARED)
-target_sources(pc-sampling-v2-client PRIVATE client.cpp pcs.hpp pcs.cpp utils.hpp utils.cpp)
+target_sources(pc-sampling-v2-client PRIVATE client.cpp pcs.hpp pcs.cpp utils.hpp
+                                             utils.cpp)
 target_link_libraries(
     pc-sampling-v2-client
     PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::samples-build-flags

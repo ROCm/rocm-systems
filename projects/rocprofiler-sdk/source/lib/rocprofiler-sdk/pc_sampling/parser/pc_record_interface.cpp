@@ -192,17 +192,19 @@ PCSamplingParserContext::_get_parse_func_for_record_kind_and_method(
                        ? &PCSamplingParserContext::_parse<GFXIP,
                                                           rocprofiler_pc_sampling_record_v0_t,
                                                           ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>
-                       : &PCSamplingParserContext::_parse<GFXIP,
-                                                          rocprofiler_pc_sampling_record_v0_t,
-                                                          ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>;
+                       : &PCSamplingParserContext::_parse<
+                             GFXIP,
+                             rocprofiler_pc_sampling_record_v0_t,
+                             ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>;
         case ROCPROFILER_PC_SAMPLING_RECORD_V1_SAMPLE:
             return is_host_trap
                        ? &PCSamplingParserContext::_parse<GFXIP,
                                                           rocprofiler_pc_sampling_record_v1_t,
                                                           ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>
-                       : &PCSamplingParserContext::_parse<GFXIP,
-                                                          rocprofiler_pc_sampling_record_v1_t,
-                                                          ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>;
+                       : &PCSamplingParserContext::_parse<
+                             GFXIP,
+                             rocprofiler_pc_sampling_record_v1_t,
+                             ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>;
         case ROCPROFILER_PC_SAMPLING_RECORD_V2_SAMPLE:
             // V2 is stochastic-only; (V2, HOST_TRAP) is rejected by the validator and must
             // never reach here.
@@ -212,25 +214,23 @@ PCSamplingParserContext::_get_parse_func_for_record_kind_and_method(
                                                     ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>;
         case ROCPROFILER_PC_SAMPLING_RECORD_V3_SAMPLE:
             if constexpr(std::is_same_v<GFXIP, GFX1250>)
-                return is_host_trap
-                           ? &PCSamplingParserContext::_parse<
-                                 GFXIP,
-                                 rocprofiler_pc_sampling_record_v3_t,
-                                 ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>
-                           : &PCSamplingParserContext::_parse<
-                                 GFXIP,
-                                 rocprofiler_pc_sampling_record_v3_t,
-                                 ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>;
+                return is_host_trap ? &PCSamplingParserContext::_parse<
+                                          GFXIP,
+                                          rocprofiler_pc_sampling_record_v3_t,
+                                          ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP>
+                                    : &PCSamplingParserContext::_parse<
+                                          GFXIP,
+                                          rocprofiler_pc_sampling_record_v3_t,
+                                          ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>;
             else
                 return nullptr;
         case ROCPROFILER_PC_SAMPLING_RECORD_V4_SAMPLE:
             // V4 is stochastic-only; (V4, HOST_TRAP) is rejected by the validator.
             if(is_host_trap) return nullptr;
             if constexpr(std::is_same_v<GFXIP, GFX1250>)
-                return &PCSamplingParserContext::_parse<
-                    GFXIP,
-                    rocprofiler_pc_sampling_record_v4_t,
-                    ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>;
+                return &PCSamplingParserContext::_parse<GFXIP,
+                                                        rocprofiler_pc_sampling_record_v4_t,
+                                                        ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC>;
             else
                 return nullptr;
         default: return nullptr;
@@ -293,41 +293,36 @@ PCSamplingParserContext::parse(
     {
         if(gfxip_minor == 5)
         {
-            parseSample_func =
-                is_v2 ? _get_parse_func_for_record_kind_and_method<GFX950>(requested_record_kind,
-                                                                           pcs_method)
-                      : _get_parse_func_for_method<GFX950>(pcs_method);
+            parseSample_func = is_v2 ? _get_parse_func_for_record_kind_and_method<GFX950>(
+                                           requested_record_kind, pcs_method)
+                                     : _get_parse_func_for_method<GFX950>(pcs_method);
         }
         else
         {
-            parseSample_func =
-                is_v2 ? _get_parse_func_for_record_kind_and_method<GFX9>(requested_record_kind,
-                                                                         pcs_method)
-                      : _get_parse_func_for_method<GFX9>(pcs_method);
+            parseSample_func = is_v2 ? _get_parse_func_for_record_kind_and_method<GFX9>(
+                                           requested_record_kind, pcs_method)
+                                     : _get_parse_func_for_method<GFX9>(pcs_method);
         }
     }
     else if(gfxip_major == 11)
     {
-        parseSample_func =
-            is_v2 ? _get_parse_func_for_record_kind_and_method<GFX11>(requested_record_kind,
-                                                                      pcs_method)
-                  : _get_parse_func_for_method<GFX11>(pcs_method);
+        parseSample_func = is_v2 ? _get_parse_func_for_record_kind_and_method<GFX11>(
+                                       requested_record_kind, pcs_method)
+                                 : _get_parse_func_for_method<GFX11>(pcs_method);
     }
     else if(gfxip_major == 12)
     {
         if(gfxip_minor == 5)
         {
-            parseSample_func =
-                is_v2 ? _get_parse_func_for_record_kind_and_method<GFX1250>(requested_record_kind,
-                                                                            pcs_method)
-                      : _get_parse_func_for_method<GFX1250>(pcs_method);
+            parseSample_func = is_v2 ? _get_parse_func_for_record_kind_and_method<GFX1250>(
+                                           requested_record_kind, pcs_method)
+                                     : _get_parse_func_for_method<GFX1250>(pcs_method);
         }
         else
         {
-            parseSample_func =
-                is_v2 ? _get_parse_func_for_record_kind_and_method<GFX12>(requested_record_kind,
-                                                                          pcs_method)
-                      : _get_parse_func_for_method<GFX12>(pcs_method);
+            parseSample_func = is_v2 ? _get_parse_func_for_record_kind_and_method<GFX12>(
+                                           requested_record_kind, pcs_method)
+                                     : _get_parse_func_for_method<GFX12>(pcs_method);
         }
     }
     else
@@ -394,7 +389,8 @@ PCSamplingParserContext::shouldFlipRocrBuffer(const dispatch_pkt_id_t& pkt) cons
 
 // Compile-time mapping from a parsed record type to its public record-kind enum value.
 template <typename PcSamplingRecordT>
-constexpr rocprofiler_pc_sampling_record_kind_t record_kind_for();
+constexpr rocprofiler_pc_sampling_record_kind_t
+record_kind_for();
 
 template <>
 constexpr rocprofiler_pc_sampling_record_kind_t

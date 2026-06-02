@@ -35,20 +35,20 @@ namespace client
 {
 namespace pcs
 {
-constexpr size_t   BUFFER_SIZE_BYTES    = 4 * 1024 * 1024;  // 4 MB
-constexpr size_t   WATERMARK            = (BUFFER_SIZE_BYTES * 3 / 4);
-constexpr uint64_t HOST_TRAP_INTERVAL   = 10000;    // 10000 us
-constexpr uint64_t STOCHASTIC_INTERVAL  = 1048576;  // 2^20 cycles
+constexpr size_t   BUFFER_SIZE_BYTES   = 4 * 1024 * 1024;  // 4 MB
+constexpr size_t   WATERMARK           = (BUFFER_SIZE_BYTES * 3 / 4);
+constexpr uint64_t HOST_TRAP_INTERVAL  = 10000;    // 10000 us
+constexpr uint64_t STOCHASTIC_INTERVAL = 1048576;  // 2^20 cycles
 
 struct tool_agent_info;
-using ext_fields_vec_t         = std::vector<rocprofiler_pc_sampling_snapshot_ext_field_id_t>;
-using ext_field_name_map_t    = std::map<rocprofiler_pc_sampling_snapshot_ext_field_id_t, std::string>;
+using ext_fields_vec_t     = std::vector<rocprofiler_pc_sampling_snapshot_ext_field_id_t>;
+using ext_field_name_map_t = std::map<rocprofiler_pc_sampling_snapshot_ext_field_id_t, std::string>;
 using tool_agent_info_vec_t       = std::vector<std::unique_ptr<tool_agent_info>>;
 using pc_sampling_buffer_id_vec_t = std::vector<rocprofiler_buffer_id_t>;
 
 struct tool_agent_info
 {
-    rocprofiler_agent_id_t    agent_id;
+    rocprofiler_agent_id_t     agent_id;
     const rocprofiler_agent_t* agent;
 
     /// Snapshot ext_data fields supported by this GPU agent (queried per-agent).
@@ -59,10 +59,13 @@ struct tool_agent_info
     ext_field_name_map_t ext_field_names;
 
     /// Most comprehensive PC sampling configuration discovered during the query phase.
-    /// Populated by query_most_comprehensive_config_for_agent(); consumed by configure_pc_sampling_for_agent().
-    rocprofiler_pc_sampling_record_kind_t      most_comprehensive_record_kind = ROCPROFILER_PC_SAMPLING_RECORD_NONE;
-    rocprofiler_pc_sampling_api_flags_t        most_comprehensive_api_flags   = ROCPROFILER_PC_SAMPLING_API_FLAG_NONE;
-    rocprofiler_pc_sampling_configuration_v2_t most_comprehensive_config      = {};
+    /// Populated by query_most_comprehensive_config_for_agent(); consumed by
+    /// configure_pc_sampling_for_agent().
+    rocprofiler_pc_sampling_record_kind_t most_comprehensive_record_kind =
+        ROCPROFILER_PC_SAMPLING_RECORD_NONE;
+    rocprofiler_pc_sampling_api_flags_t most_comprehensive_api_flags =
+        ROCPROFILER_PC_SAMPLING_API_FLAG_NONE;
+    rocprofiler_pc_sampling_configuration_v2_t most_comprehensive_config = {};
 };
 
 // GPU agents supporting some kind of PC sampling.

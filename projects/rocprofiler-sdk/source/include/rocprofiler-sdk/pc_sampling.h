@@ -535,7 +535,6 @@ ROCPROFILER_SDK_EXPERIMENTAL const char*
 rocprofiler_get_pc_sampling_instruction_not_issued_reason_name(
     rocprofiler_pc_sampling_instruction_not_issued_reason_t not_issued_reason) ROCPROFILER_API;
 
-
 /**
  * @brief (experimental) Flags for controlling PC sampling method selection in the v2 API.
  *
@@ -829,7 +828,6 @@ rocprofiler_pc_sampling_configure_service_v2(
     size_t                                       num_record_kinds,
     rocprofiler_pc_sampling_api_flags_t          flags) ROCPROFILER_API;
 
-
 /**
  * @brief (experimental) Enumeration describing values of flags of
  * ::rocprofiler_pc_sampling_configuration_v2_t (output-only, bitmask).
@@ -843,7 +841,6 @@ typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_configuration_
     /// @var ROCPROFILER_PC_SAMPLING_CONFIGURATION_V2_FLAG_INTERVAL_POW2
     /// @brief The interval value must be a power of 2.
 } rocprofiler_pc_sampling_configuration_flags_v2_t;
-
 
 /**
  * @brief (experimental) PC sampling configuration supported by a GPU agent (v2).
@@ -1112,11 +1109,11 @@ ROCPROFILER_CXX_CODE(
  */
 typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_memory_counters_v1_t
 {
-    uint8_t load_count;    ///< Number of VMEM load instructions issued but not yet completed
-    uint8_t store_count;   ///< Number of VMEM store instructions issued but not yet completed
-    uint8_t ds_count;      ///< Number of LDS instructions issued but not yet completed
-    uint8_t km_count;      ///< Number of scalar memory reads/instructions issued but not yet completed
-    uint8_t bvh_count;     ///< Number of VMEM BVH instructions issued but not yet completed
+    uint8_t load_count;   ///< Number of VMEM load instructions issued but not yet completed
+    uint8_t store_count;  ///< Number of VMEM store instructions issued but not yet completed
+    uint8_t ds_count;     ///< Number of LDS instructions issued but not yet completed
+    uint8_t km_count;   ///< Number of scalar memory reads/instructions issued but not yet completed
+    uint8_t bvh_count;  ///< Number of VMEM BVH instructions issued but not yet completed
     uint8_t sample_count;  ///< Number of VMEM sample instructions issued but not yet completed
     uint8_t async_count;   ///< Number of async instructions issued but not yet completed (gfx1250)
     uint8_t tensor_count;  ///< Number of tensor instructions issued but not yet completed (gfx1250)
@@ -1128,7 +1125,6 @@ ROCPROFILER_CXX_CODE(
     static_assert(sizeof(rocprofiler_pc_sampling_memory_counters_v1_t) == 9,
                   "Increasing the size of the rocprofiler_pc_sampling_memory_counters_v1_t is not "
                   "permitted");)
-
 
 /**
  * @brief Information about where was running when sampled.
@@ -1412,7 +1408,8 @@ typedef enum
     /// @var ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_EXP
     /// @brief Any wave issued an export instruction at the moment of sampling.
     /// @var ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_BRMSG_MISC
-    /// @brief Any wave issued a branch, message, or miscellaneous instruction at the moment of sampling.
+    /// @brief Any wave issued a branch, message, or miscellaneous instruction at the moment of
+    /// sampling.
     /// @var ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_VALU
     /// @brief Arbiter accepted an instruction, but it was stalled by the VALU pipeline
     /// (any wave observed VALU execution pipeline back-pressure).
@@ -1469,8 +1466,8 @@ typedef enum
 ROCPROFILER_SDK_EXPERIMENTAL
 typedef rocprofiler_status_t (*rocprofiler_pc_sampling_snapshot_ext_fields_cb_t)(
     const rocprofiler_pc_sampling_snapshot_ext_field_id_t* fields,
-    size_t                                                    num_fields,
-    void*                                                     user_data);
+    size_t                                                 num_fields,
+    void*                                                  user_data);
 
 /**
  * @brief (experimental) Query supported snapshot ext_data fields for a GPU agent.
@@ -1511,11 +1508,10 @@ typedef rocprofiler_status_t (*rocprofiler_pc_sampling_snapshot_ext_fields_cb_t)
 ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
 rocprofiler_pc_sampling_query_snapshot_ext_fields(
-    rocprofiler_agent_id_t                            agent_id,
-    rocprofiler_pc_sampling_record_kind_t             record_kind,
-    rocprofiler_pc_sampling_snapshot_ext_fields_cb_t  cb,
-    void*                                             user_data) ROCPROFILER_API
-    ROCPROFILER_NONNULL(3);
+    rocprofiler_agent_id_t                           agent_id,
+    rocprofiler_pc_sampling_record_kind_t            record_kind,
+    rocprofiler_pc_sampling_snapshot_ext_fields_cb_t cb,
+    void* user_data) ROCPROFILER_API ROCPROFILER_NONNULL(3);
 
 /**
  * @brief (experimental) Callback to receive extracted snapshot ext_data field values.
@@ -1529,9 +1525,9 @@ rocprofiler_pc_sampling_query_snapshot_ext_fields(
 ROCPROFILER_SDK_EXPERIMENTAL
 typedef rocprofiler_status_t (*rocprofiler_pc_sampling_snapshot_ext_field_values_cb_t)(
     const rocprofiler_pc_sampling_snapshot_ext_field_id_t* field_ids,
-    const uint32_t*                                           values,
-    size_t                                                    num_fields,
-    void*                                                     user_data);
+    const uint32_t*                                        values,
+    size_t                                                 num_fields,
+    void*                                                  user_data);
 
 /**
  * @brief (experimental) Extract multiple ext_data field values from the bitfield.
@@ -1568,13 +1564,12 @@ typedef rocprofiler_status_t (*rocprofiler_pc_sampling_snapshot_ext_field_values
 ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
 rocprofiler_pc_sampling_extract_snapshot_ext_field_values(
-    rocprofiler_pc_sampling_record_kind_t                 record_kind,
-    const void*                                          record,
+    rocprofiler_pc_sampling_record_kind_t                  record_kind,
+    const void*                                            record,
     const rocprofiler_pc_sampling_snapshot_ext_field_id_t* field_ids,
-    size_t                                                num_fields,
+    size_t                                                 num_fields,
     rocprofiler_pc_sampling_snapshot_ext_field_values_cb_t cb,
     void* user_data) ROCPROFILER_API ROCPROFILER_NONNULL(2, 3, 5);
-
 
 /**
  * @brief (experimental) Return the string encoding of ::rocprofiler_pc_sampling_instruction_type_t
@@ -1627,9 +1622,8 @@ ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
 rocprofiler_pc_sampling_get_snapshot_ext_field_name(
     rocprofiler_pc_sampling_snapshot_ext_field_id_t field_id,
-    const char**                                       name,
-    uint64_t*                                          name_len) ROCPROFILER_API;
-
+    const char**                                    name,
+    uint64_t*                                       name_len) ROCPROFILER_API;
 
 /** @} */
 

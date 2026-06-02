@@ -80,8 +80,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* /*tool_data*/)
 
     if(client::pcs::get_gpu_agents()->empty())
     {
-        *utils::get_output_stream() << "No available gpu agents supporting PC sampling"
-                                    << std::endl;
+        *utils::get_output_stream()
+            << "No available gpu agents supporting PC sampling" << std::endl;
         // Emit the message to explicitly skip the sample.
         std::cerr << "PC sampling unavailable" << std::endl;
         // Exit with no error if none of the GPUs support PC sampling.
@@ -108,8 +108,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* /*tool_data*/)
                                                     &buffer_id));
 
         // Configure using the memoized most comprehensive config from the query phase.
-        client::pcs::configure_pc_sampling_for_agent(
-            gpu_agent.get(), client_ctx, buffer_id);
+        client::pcs::configure_pc_sampling_for_agent(gpu_agent.get(), client_ctx, buffer_id);
 
         auto client_agent_thread = rocprofiler_callback_thread_t{};
         ROCPROFILER_CHECK(rocprofiler_create_callback_thread(&client_agent_thread));

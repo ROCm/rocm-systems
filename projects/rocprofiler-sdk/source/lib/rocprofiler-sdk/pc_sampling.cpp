@@ -121,9 +121,9 @@ get_no_issue_reason_name(rocprofiler_pc_sampling_instruction_not_issued_reason_t
 }
 
 // Snapshot ext_data field name infrastructure (same pattern as instruction_type_string)
-#define ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(CODE)                                             \
+#define ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(CODE)                                                \
     template <>                                                                                    \
-    struct snapshot_ext_field_string<CODE>                                                      \
+    struct snapshot_ext_field_string<CODE>                                                         \
     {                                                                                              \
         static constexpr auto name = #CODE;                                                        \
     };
@@ -132,28 +132,40 @@ template <size_t Idx>
 struct snapshot_ext_field_string;
 
 ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_NONE);
-ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_VALU);
-ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_MATRIX);
-ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_LDS);
+ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_VALU);
+ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_MATRIX);
+ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_LDS);
 ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(
     ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_LDS_DIRECT);
-ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_SCALAR);
+ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_SCALAR);
 ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(
     ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_VMEM_TEX);
-ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_FLAT);
-ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_EXP);
+ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_FLAT);
+ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_EXP);
 ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(
     ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_BRMSG_MISC);
-ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_VALU);
-ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_MATRIX);
-ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_LDS);
+ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_VALU);
+ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_MATRIX);
+ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_LDS);
 ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(
     ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_LDS_DIRECT);
-ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_SCALAR);
+ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_SCALAR);
 ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(
     ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_VMEM_TEX);
-ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_FLAT);
-ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_EXP);
+ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_FLAT);
+ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_EXP);
 ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(
     ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_BRMSG_MISC);
 ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(
@@ -164,7 +176,7 @@ ROCPROFILER_SNAPSHOT_EXT_FIELD_STRING(
 template <size_t Idx, size_t... Tail>
 const char*
 get_snapshot_ext_field_name(rocprofiler_pc_sampling_snapshot_ext_field_id_t field_id,
-                               std::index_sequence<Idx, Tail...>)
+                            std::index_sequence<Idx, Tail...>)
 {
     if(field_id == Idx) return snapshot_ext_field_string<Idx>::name;
     if constexpr(sizeof...(Tail) > 0)
@@ -426,12 +438,11 @@ validate_record_kinds_against_flags(const rocprofiler_pc_sampling_record_kind_t*
  * @return ROCPROFILER_STATUS_SUCCESS or error
  */
 rocprofiler_status_t
-infer_method_from_record_kinds_and_flags(
-    const rocprofiler_pc_sampling_record_kind_t* record_kinds,
-    size_t                                       num_record_kinds,
-    rocprofiler_pc_sampling_api_flags_t          flags,
-    rocprofiler_pc_sampling_method_t*            out_method,
-    bool*                                        is_required)
+infer_method_from_record_kinds_and_flags(const rocprofiler_pc_sampling_record_kind_t* record_kinds,
+                                         size_t                              num_record_kinds,
+                                         rocprofiler_pc_sampling_api_flags_t flags,
+                                         rocprofiler_pc_sampling_method_t*   out_method,
+                                         bool*                               is_required)
 {
     auto f = static_cast<uint32_t>(flags);
 
@@ -631,16 +642,14 @@ rocprofiler_pc_sampling_configure_service_v2(
     if(validate_status != ROCPROFILER_STATUS_SUCCESS) return validate_status;
 
     // Cross-cutting validation (flags x records): reject REQUIRE_HOST_TRAP + V2/V4
-    auto cross_status =
-        validate_record_kinds_against_flags(record_kinds, num_record_kinds, flags);
+    auto cross_status = validate_record_kinds_against_flags(record_kinds, num_record_kinds, flags);
     if(cross_status != ROCPROFILER_STATUS_SUCCESS) return cross_status;
 
     // Infer the sampling method from record_kinds + flags
-    auto method      = ROCPROFILER_PC_SAMPLING_METHOD_NONE;
-    auto is_required = false;
-    auto infer_status =
-        infer_method_from_record_kinds_and_flags(record_kinds, num_record_kinds, flags,
-                                                 &method, &is_required);
+    auto method       = ROCPROFILER_PC_SAMPLING_METHOD_NONE;
+    auto is_required  = false;
+    auto infer_status = infer_method_from_record_kinds_and_flags(
+        record_kinds, num_record_kinds, flags, &method, &is_required);
     if(infer_status != ROCPROFILER_STATUS_SUCCESS) return infer_status;
 
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
@@ -696,7 +705,7 @@ rocprofiler_pc_sampling_configure_service_v2(
         auto fallback = (method == ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC)
                             ? ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP
                             : ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC;
-        status = rocprofiler::pc_sampling::configure_pc_sampling_service_v2(
+        status        = rocprofiler::pc_sampling::configure_pc_sampling_service_v2(
             ctx, agent, fallback, unit, interval, buffer_id, record_kinds, num_record_kinds);
     }
 
@@ -770,16 +779,14 @@ rocprofiler_pc_sampling_query_agent_configurations_v2(
     if(validate_status != ROCPROFILER_STATUS_SUCCESS) return validate_status;
 
     // Cross-cutting validation (flags x records): reject REQUIRE_HOST_TRAP + V2/V4
-    auto cross_status =
-        validate_record_kinds_against_flags(record_kinds, num_record_kinds, flags);
+    auto cross_status = validate_record_kinds_against_flags(record_kinds, num_record_kinds, flags);
     if(cross_status != ROCPROFILER_STATUS_SUCCESS) return cross_status;
 
     // Infer preferred method
-    auto method      = ROCPROFILER_PC_SAMPLING_METHOD_NONE;
-    auto is_required = false;
-    auto infer_status =
-        infer_method_from_record_kinds_and_flags(record_kinds, num_record_kinds, flags,
-                                                 &method, &is_required);
+    auto method       = ROCPROFILER_PC_SAMPLING_METHOD_NONE;
+    auto is_required  = false;
+    auto infer_status = infer_method_from_record_kinds_and_flags(
+        record_kinds, num_record_kinds, flags, &method, &is_required);
     if(infer_status != ROCPROFILER_STATUS_SUCCESS) return infer_status;
 
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
@@ -853,15 +860,14 @@ rocprofiler_pc_sampling_query_agent_configurations_v2(
     {
         if(filter_by_method && cfg.method != method) continue;
 
-        auto v2_cfg          = rocprofiler_pc_sampling_configuration_v2_t{};
-        v2_cfg.size          = sizeof(rocprofiler_pc_sampling_configuration_v2_t);
-        v2_cfg.unit          = cfg.unit;
-        v2_cfg.min_interval  = cfg.min_interval;
-        v2_cfg.max_interval  = cfg.max_interval;
-        v2_cfg.flags =
-            (cfg.flags == ROCPROFILER_PC_SAMPLING_CONFIGURATION_FLAGS_INTERVAL_POW2)
-                ? ROCPROFILER_PC_SAMPLING_CONFIGURATION_V2_FLAG_INTERVAL_POW2
-                : ROCPROFILER_PC_SAMPLING_CONFIGURATION_V2_FLAG_NONE;
+        auto v2_cfg         = rocprofiler_pc_sampling_configuration_v2_t{};
+        v2_cfg.size         = sizeof(rocprofiler_pc_sampling_configuration_v2_t);
+        v2_cfg.unit         = cfg.unit;
+        v2_cfg.min_interval = cfg.min_interval;
+        v2_cfg.max_interval = cfg.max_interval;
+        v2_cfg.flags = (cfg.flags == ROCPROFILER_PC_SAMPLING_CONFIGURATION_FLAGS_INTERVAL_POW2)
+                           ? ROCPROFILER_PC_SAMPLING_CONFIGURATION_V2_FLAG_INTERVAL_POW2
+                           : ROCPROFILER_PC_SAMPLING_CONFIGURATION_V2_FLAG_NONE;
         v2_configs.push_back(v2_cfg);
     }
 
@@ -890,14 +896,13 @@ rocprofiler_pc_sampling_query_agent_configurations_v2(
 rocprofiler_status_t
 rocprofiler_pc_sampling_get_snapshot_ext_field_name(
     rocprofiler_pc_sampling_snapshot_ext_field_id_t field_id,
-    const char**                                       name,
-    uint64_t*                                          name_len)
+    const char**                                    name,
+    uint64_t*                                       name_len)
 {
     if(!name || !name_len) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
     const char* n = get_snapshot_ext_field_name(
-        field_id,
-        std::make_index_sequence<ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_LAST>{});
+        field_id, std::make_index_sequence<ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_LAST>{});
     if(!n) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
     *name     = n;
@@ -915,19 +920,17 @@ record_kind_has_snapshot_information(rocprofiler_pc_sampling_record_kind_t recor
     switch(record_kind)
     {
         case ROCPROFILER_PC_SAMPLING_RECORD_V2_SAMPLE:
-        case ROCPROFILER_PC_SAMPLING_RECORD_V4_SAMPLE:
-            return true;
-        default:
-            return false;
+        case ROCPROFILER_PC_SAMPLING_RECORD_V4_SAMPLE: return true;
+        default: return false;
     }
 }
 
 rocprofiler_status_t
 rocprofiler_pc_sampling_query_snapshot_ext_fields(
-    rocprofiler_agent_id_t                            agent_id,
-    rocprofiler_pc_sampling_record_kind_t             record_kind,
-    rocprofiler_pc_sampling_snapshot_ext_fields_cb_t  cb,
-    void*                                             user_data)
+    rocprofiler_agent_id_t                           agent_id,
+    rocprofiler_pc_sampling_record_kind_t            record_kind,
+    rocprofiler_pc_sampling_snapshot_ext_fields_cb_t cb,
+    void*                                            user_data)
 {
     // Reject unrecognized record kinds up front. The valid inputs are the version record kinds
     // (V0-V4) and the INVALID_SAMPLE record.
@@ -987,18 +990,15 @@ get_ext_data_from_record(rocprofiler_pc_sampling_record_kind_t record_kind, cons
     {
         case ROCPROFILER_PC_SAMPLING_RECORD_V2_SAMPLE:
         {
-            const auto* rec =
-                static_cast<const rocprofiler_pc_sampling_record_v2_t*>(record);
+            const auto* rec = static_cast<const rocprofiler_pc_sampling_record_v2_t*>(record);
             return rec->snapshot_information.ext_data;
         }
         case ROCPROFILER_PC_SAMPLING_RECORD_V4_SAMPLE:
         {
-            const auto* rec =
-                static_cast<const rocprofiler_pc_sampling_record_v4_t*>(record);
+            const auto* rec = static_cast<const rocprofiler_pc_sampling_record_v4_t*>(record);
             return rec->snapshot_information.ext_data;
         }
-        default:
-            return std::nullopt;
+        default: return std::nullopt;
     }
 }
 
@@ -1006,16 +1006,15 @@ rocprofiler_status_t
 rocprofiler_pc_sampling_extract_snapshot_ext_field_values(
     rocprofiler_pc_sampling_record_kind_t                  record_kind,
     const void*                                            record,
-    const rocprofiler_pc_sampling_snapshot_ext_field_id_t*  field_ids,
+    const rocprofiler_pc_sampling_snapshot_ext_field_id_t* field_ids,
     size_t                                                 num_fields,
-    rocprofiler_pc_sampling_snapshot_ext_field_values_cb_t  cb,
+    rocprofiler_pc_sampling_snapshot_ext_field_values_cb_t cb,
     void*                                                  user_data)
 {
     if(num_fields == 0) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
     auto ext_data_opt = get_ext_data_from_record(record_kind, record);
-    if(!ext_data_opt.has_value())
-        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    if(!ext_data_opt.has_value()) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
     auto ext_data = ext_data_opt.value();
 
