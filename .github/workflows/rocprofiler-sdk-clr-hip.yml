@@ -5,6 +5,7 @@ on:
     paths:
       - 'projects/clr/**'
       - 'projects/hip/**'
+      - '.github/workflows/rocprofiler-sdk-clr-hip.yml'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
@@ -12,7 +13,6 @@ on:
       - '!**/.readthedocs.yaml'
       - '!**/.spellcheck.local.yaml'
       - '!**/.wordlist.txt'
-      - '.github/workflows/rocprofiler-sdk-clr-hip.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -116,11 +116,6 @@ jobs:
           update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
           python3 -m pip install -U --user -r requirements.txt
           python3 -m pip install -U --user cmake==3.24.0
-
-      - name: Configure Env
-        shell: bash
-        run: |
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Build ROCProfiler SDK Dependencies
         uses: ./.github/actions/rocprofiler-sdk-util
