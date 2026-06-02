@@ -2001,23 +2001,10 @@ hsa_status_t hsa_amd_queue_signal_external_semaphore(
   AMD::AqlQueue *aql = UnwrapAqlQueue(core_queue);
   if (aql == nullptr) return HSA_STATUS_ERROR_INVALID_QUEUE;
 
-  HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = { sem.handle };
-  HSAKMT_STATUS s = hsaKmtQueueSignalExternalSemaphore(
-      aql->aql_queue_id(), kmt_handle, value);
+  core::Agent *core_agent = aql->GetAgent();
+  IS_VALID(core_agent);
 
-  // Map libhsakmt status onto hsa_status_t, as handle_open does.
-  switch (s) {
-    case HSAKMT_STATUS_SUCCESS:
-      return HSA_STATUS_SUCCESS;
-    case HSAKMT_STATUS_INVALID_HANDLE:
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSAKMT_STATUS_INVALID_NODE_UNIT:
-      return HSA_STATUS_ERROR_INVALID_AGENT;
-    case HSAKMT_STATUS_NOT_SUPPORTED:
-      return HSA_STATUS_ERROR;
-    default:
-      return HSA_STATUS_ERROR;
-  }
+  return core_agent->driver().SignalExternalSemaphore(aql->aql_queue_id(), sem, value);
   CATCH;
 }
 
@@ -2037,22 +2024,10 @@ hsa_status_t hsa_amd_queue_wait_external_semaphore(
   AMD::AqlQueue *aql = UnwrapAqlQueue(core_queue);
   if (aql == nullptr) return HSA_STATUS_ERROR_INVALID_QUEUE;
 
-  HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = { sem.handle };
-  HSAKMT_STATUS s = hsaKmtQueueWaitExternalSemaphore(
-      aql->aql_queue_id(), kmt_handle, value);
+  core::Agent *core_agent = aql->GetAgent();
+  IS_VALID(core_agent);
 
-  switch (s) {
-    case HSAKMT_STATUS_SUCCESS:
-      return HSA_STATUS_SUCCESS;
-    case HSAKMT_STATUS_INVALID_HANDLE:
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSAKMT_STATUS_INVALID_NODE_UNIT:
-      return HSA_STATUS_ERROR_INVALID_AGENT;
-    case HSAKMT_STATUS_NOT_SUPPORTED:
-      return HSA_STATUS_ERROR;
-    default:
-      return HSA_STATUS_ERROR;
-  }
+  return core_agent->driver().WaitExternalSemaphore(aql->aql_queue_id(), sem, value);
   CATCH;
 }
 

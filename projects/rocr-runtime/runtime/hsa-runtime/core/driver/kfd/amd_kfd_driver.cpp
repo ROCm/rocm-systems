@@ -616,6 +616,39 @@ hsa_status_t KfdDriver::DestroyExternalSemaphore(hsa_amd_external_semaphore_t se
   return HSA_STATUS_SUCCESS;
 }
 
+namespace {
+// Preserve the libhsakmt distinctions a caller can act on (bad handle vs.
+// wrong node vs. generic failure) instead of folding everything into ERROR.
+hsa_status_t MapQueueExtSemStatus(HSAKMT_STATUS s) {
+  switch (s) {
+    case HSAKMT_STATUS_SUCCESS:
+      return HSA_STATUS_SUCCESS;
+    case HSAKMT_STATUS_INVALID_HANDLE:
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSAKMT_STATUS_INVALID_NODE_UNIT:
+      return HSA_STATUS_ERROR_INVALID_AGENT;
+    default:
+      return HSA_STATUS_ERROR;
+  }
+}
+}  // namespace
+
+hsa_status_t KfdDriver::SignalExternalSemaphore(uint64_t queue_id,
+                                                hsa_amd_external_semaphore_t sem,
+                                                uint64_t value) const {
+  HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {sem.handle};
+  return MapQueueExtSemStatus(
+      HSAKMT_CALL(hsaKmtQueueSignalExternalSemaphore(queue_id, kmt_handle, value)));
+}
+
+hsa_status_t KfdDriver::WaitExternalSemaphore(uint64_t queue_id,
+                                              hsa_amd_external_semaphore_t sem,
+                                              uint64_t value) const {
+  HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {sem.handle};
+  return MapQueueExtSemStatus(
+      HSAKMT_CALL(hsaKmtQueueWaitExternalSemaphore(queue_id, kmt_handle, value)));
+}
+
 void *KfdDriver::AllocateKfdMemory(const HsaMemFlags &flags, uint32_t node_id,
                                    size_t size) {
   void *mem = nullptr;
