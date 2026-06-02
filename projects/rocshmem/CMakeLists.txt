@@ -89,7 +89,7 @@ message(STATUS "rocSHMEM Version: " "${VERSION_STRING}")
 
 project(rocshmem VERSION ${VERSION_STRING} LANGUAGES CXX)
 
-find_package(ROCmCMakeBuildTools PATHS /opt/rocm)
+find_package(ROCmCMakeBuildTools)
 include(ROCMCreatePackage)
 include(ROCMInstallTargets)
 include(ROCMCheckTargetIds)
@@ -111,7 +111,7 @@ endif()
 # Try to find AMD SMI library
 find_library(AMDSMI_LIBRARY
   NAMES amd_smi
-  PATHS /opt/rocm/lib /opt/rocm/lib64
+  HINTS ${ROCM_PATH}/lib ${ROCM_PATH}/lib64
   NO_DEFAULT_PATH
 )
 
@@ -250,11 +250,11 @@ if (NOT BUILD_TESTS_ONLY)
     endif()
   endif()
 
-  find_package(hip REQUIRED PATHS /opt/rocm)
+  find_package(hip REQUIRED)
   find_package(hsa-runtime64 REQUIRED)
 
   if (USE_SDMA)
-    find_package(hsakmt REQUIRED PATHS /opt/rocm)
+    find_package(hsakmt REQUIRED)
   endif()
 
   set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
