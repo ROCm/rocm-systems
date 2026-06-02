@@ -19,7 +19,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-#include "computepartitionmemallocmode_read_write.h"
+#include "computepartition_memallocmode_read_write.h"
 
 #include <gtest/gtest.h>
 
@@ -80,6 +80,19 @@ void TestComputePartitionMemAllocModeReadWrite::Run(void) {
   if (num_monitor_devs() == 0) {
     return;
   }
+
+  // Invalid input tests (device-independent)
+  ret = amdsmi_get_gpu_compute_partition_mem_alloc_mode(processor_handles_[0], nullptr);
+  EXPECT_EQ(ret, AMDSMI_STATUS_INVAL);
+
+  ret = amdsmi_set_gpu_compute_partition_mem_alloc_mode(processor_handles_[0],
+                                                        AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_INVALID);
+  EXPECT_EQ(ret, AMDSMI_STATUS_INVAL);
+
+  ret = amdsmi_set_gpu_compute_partition_mem_alloc_mode(
+      processor_handles_[0],
+      static_cast<amdsmi_compute_partition_mem_alloc_mode_t>(99));
+  EXPECT_EQ(ret, AMDSMI_STATUS_INVAL);
 
   const bool isVerbose = (verbosity() > 0);
   const std::vector<amdsmi_compute_partition_mem_alloc_mode_t> modes_to_test = {

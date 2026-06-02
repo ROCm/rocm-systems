@@ -6064,9 +6064,6 @@ rsmi_status_t rsmi_dev_compute_partition_mem_alloc_mode_set(
   ss << __PRETTY_FUNCTION__ << " | ======= start =======, " << dv_ind;
   LOG_TRACE(ss);
   REQUIRE_ROOT_ACCESS
-  if (!amd::smi::is_sudo_user()) {
-    return RSMI_STATUS_PERMISSION;
-  }
 
   std::string newModeStr;
   switch (mode) {
@@ -6081,21 +6078,6 @@ rsmi_status_t rsmi_dev_compute_partition_mem_alloc_mode_set(
          << " | Returning = " << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
       LOG_ERROR(ss);
       return RSMI_STATUS_INVALID_ARGS;
-  }
-
-  // Read current value; skip write if already set
-  std::string currentModeStr;
-  {
-    DEVICE_MUTEX
-    rsmi_status_t ret_get =
-        get_dev_value_str(amd::smi::kDevComputePartitionMemAllocMode, dv_ind, &currentModeStr);
-    if (ret_get == RSMI_STATUS_SUCCESS && currentModeStr == newModeStr) {
-      ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
-         << " | Success - mode already set | Device #: " << dv_ind << " | Data: " << newModeStr
-         << " | Returning = " << getRSMIStatusString(RSMI_STATUS_SUCCESS) << " |";
-      LOG_TRACE(ss);
-      return RSMI_STATUS_SUCCESS;
-    }
   }
 
   GET_DEV_FROM_INDX

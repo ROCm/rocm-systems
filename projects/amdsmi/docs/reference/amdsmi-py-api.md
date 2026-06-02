@@ -51,6 +51,8 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
+Refer to [amd_smi_violation_example.py](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/example/amd_smi_violation_example.py) for a complete Python usage example.
+
 Initialize CPUs only example:
 
 ```python
@@ -5588,21 +5590,29 @@ Exceptions that can be thrown by `amdsmi_get_gpu_compute_partition_mem_alloc_mod
 
 - `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported on this device or driver version
 - `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_UNEXPECTED_DATA` - Unexpected data read from driver/sysfs
 
 Example:
 
 ```python
+import amdsmi
+
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            mode = amdsmi_get_gpu_compute_partition_mem_alloc_mode(device)
+            mode = amdsmi.amdsmi_get_gpu_compute_partition_mem_alloc_mode(device)
             print(mode)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
+
+Refer to [amd_smi_violation_example.py](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/example/amd_smi_violation_example.py) for a complete Python usage example.
 
 ### amdsmi_set_gpu_compute_partition_mem_alloc_mode
 
@@ -5623,24 +5633,31 @@ Exceptions that can be thrown by `amdsmi_set_gpu_compute_partition_mem_alloc_mod
 #### Possible Library Exceptions
 
 - `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported on this device or driver version
-- `AMDSMI_STATUS_NO_PERM` - Permission Denied (requires sudo)
+- `AMDSMI_STATUS_PERMISSION` - Permission Denied (requires sudo)
 - `AMDSMI_STATUS_INVAL` - Invalid parameters
 
 Example:
 
 ```python
+import amdsmi
+
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            amdsmi_set_gpu_compute_partition_mem_alloc_mode(
-                device, AmdSmiComputePartitionMemAllocModeType.CAPPING
+            amdsmi.amdsmi_set_gpu_compute_partition_mem_alloc_mode(
+                device, amdsmi.AmdSmiComputePartitionMemAllocModeType.CAPPING
             )
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
+
+Refer to [amd_smi_violation_example.py](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/example/amd_smi_violation_example.py) for a complete Python usage example.
 
 ### amdsmi_set_gpu_compute_partition
 

@@ -6915,7 +6915,7 @@ amdsmi_status_t amdsmi_get_gpu_compute_partition_mem_alloc_mode(
  *  - ::AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL — each XCP may use the
  *    full memory partition size.
  *
- *  @param[in] processor_handle Device which to query
+ *  @param[in] processor_handle Device which to modify
  *
  *  @param[in] mode using enum ::amdsmi_compute_partition_mem_alloc_mode_t,
  *  define what the selected device's memory allocation mode should be
@@ -6924,8 +6924,6 @@ amdsmi_status_t amdsmi_get_gpu_compute_partition_mem_alloc_mode(
  *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
  *  @retval ::AMDSMI_STATUS_PERMISSION function requires admin/sudo privileges
  *  @retval ::AMDSMI_STATUS_INVAL the provided arguments are not valid
- *  @retval ::AMDSMI_STATUS_SETTING_UNAVAILABLE the provided setting is
- *  unavailable for the selected device
  *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function
  */
