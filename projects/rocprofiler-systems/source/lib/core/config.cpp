@@ -2823,7 +2823,7 @@ is_rank_in_filter(std::string enabled_ranks_str)
     auto enabled_ranks = rocprofsys::utility::parse_numeric_range<
         std::int64_t, std::unordered_set<std::int64_t>>(enabled_ranks_str, "ranks", 1L);
 
-    // Drop enabled ranks that are out of range of existing MPI ranks
+    // Check current_rank and enabled_ranks against total number of existing MPI ranks
     const auto world_size = get_mpi_world_size_from_env();
     if(world_size)
     {
@@ -2840,6 +2840,14 @@ is_rank_in_filter(std::string enabled_ranks_str)
             {
                 ++it;
             }
+        }
+
+        if(current_rank.value() >= world_size.value())
+        {
+            LOG_WARNING("MPI output filtering DISABLED: MPI rank {} >= total number of "
+                        "MPI ranks {}",
+                        current_rank.value(), world_size.value());
+            return true;
         }
     }
 
