@@ -1014,36 +1014,149 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_sync_wg(
  *
  * @return int (Zero on successful local completion. Nonzero otherwise.)
  */
-#define REDUCTION_ON_STREAM_DEF_GEN(T, TNAME, Op, Op_API)  \
-    int rocshmem_ctx_##TNAME##_##Op##_reduce_on_stream(    \
-        rocshmem_ctx_t ctx, rocshmem_team_t team,          \
-        T *dest, const T *source, int nreduce, hipStream_t stream);
+ATTR_NO_INLINE int rocshmem_ctx_short_sum_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  short *dest, const short *source, int nreduce, hipStream_t stream);
 
-#define REDUCTION_ON_STREAM_DEF_GEN_ARITH(T, TNAME) \
-    REDUCTION_ON_STREAM_DEF_GEN(T, TNAME, sum, ROCSHMEM_SUM) \
-    REDUCTION_ON_STREAM_DEF_GEN(T, TNAME, min, ROCSHMEM_MIN) \
-    REDUCTION_ON_STREAM_DEF_GEN(T, TNAME, max, ROCSHMEM_MAX) \
-    REDUCTION_ON_STREAM_DEF_GEN(T, TNAME, prod, ROCSHMEM_PROD)
+ATTR_NO_INLINE int rocshmem_ctx_short_min_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  short *dest, const short *source, int nreduce, hipStream_t stream);
 
-#define REDUCTION_ON_STREAM_DEF_GEN_BITWISE(T, TNAME)  \
-  REDUCTION_ON_STREAM_DEF_GEN(T, TNAME, or, ROCSHMEM_OR)  \
-  REDUCTION_ON_STREAM_DEF_GEN(T, TNAME, and, ROCSHMEM_AND) \
-  REDUCTION_ON_STREAM_DEF_GEN(T, TNAME, xor, ROCSHMEM_XOR)
+ATTR_NO_INLINE int rocshmem_ctx_short_max_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  short *dest, const short *source, int nreduce, hipStream_t stream);
 
-#define INT_REDUCTION_ON_STREAM_GEN(T, TNAME) \
-  REDUCTION_ON_STREAM_DEF_GEN_ARITH(T, TNAME)     \
-  REDUCTION_ON_STREAM_DEF_GEN_BITWISE(T, TNAME)
+ATTR_NO_INLINE int rocshmem_ctx_short_prod_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  short *dest, const short *source, int nreduce, hipStream_t stream);
 
-#define FLOAT_REDUCTION_ON_STREAM_GEN(T, TNAME) REDUCTION_ON_STREAM_DEF_GEN_ARITH(T, TNAME)
+ATTR_NO_INLINE int rocshmem_ctx_short_or_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  short *dest, const short *source, int nreduce, hipStream_t stream);
 
-INT_REDUCTION_ON_STREAM_GEN(int, int)
-INT_REDUCTION_ON_STREAM_GEN(long, long)
-INT_REDUCTION_ON_STREAM_GEN(long long, longlong)
-INT_REDUCTION_ON_STREAM_GEN(short, short)
+ATTR_NO_INLINE int rocshmem_ctx_short_and_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  short *dest, const short *source, int nreduce, hipStream_t stream);
 
-FLOAT_REDUCTION_ON_STREAM_GEN(float, float)
-FLOAT_REDUCTION_ON_STREAM_GEN(double, double)
+ATTR_NO_INLINE int rocshmem_ctx_short_xor_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  short *dest, const short *source, int nreduce, hipStream_t stream);
 
+ATTR_NO_INLINE int rocshmem_ctx_int_sum_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  int *dest, const int *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_int_min_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  int *dest, const int *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_int_max_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  int *dest, const int *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_int_prod_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  int *dest, const int *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_int_or_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  int *dest, const int *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_int_and_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  int *dest, const int *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_int_xor_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  int *dest, const int *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_long_sum_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  long *dest, const long *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_long_min_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  long *dest, const long *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_long_max_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  long *dest, const long *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_long_prod_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  long *dest, const long *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_long_or_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  long *dest, const long *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_long_and_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  long *dest, const long *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_long_xor_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  long *dest, const long *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_longlong_sum_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  long long *dest, const long long *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_longlong_min_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  long long *dest, const long long *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_longlong_max_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  long long *dest, const long long *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_longlong_prod_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  long long *dest, const long long *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_longlong_or_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  long long *dest, const long long *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_longlong_and_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  long long *dest, const long long *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_longlong_xor_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  long long *dest, const long long *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_float_sum_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  float *dest, const float *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_float_min_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  float *dest, const float *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_float_max_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  float *dest, const float *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_float_prod_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  float *dest, const float *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_double_sum_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  double *dest, const double *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_double_min_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  double *dest, const double *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_double_max_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  double *dest, const double *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_double_prod_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  double *dest, const double *source, int nreduce, hipStream_t stream);
 }  // namespace rocshmem
 
 #endif  // LIBRARY_INCLUDE_ROCSHMEM_COLL_HPP
