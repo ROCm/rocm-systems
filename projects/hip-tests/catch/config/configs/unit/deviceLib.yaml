@@ -495,3 +495,48 @@ deviceLib:
   Unit_ocp_cxx_fp8_host_conv:
     <<: *level_3
     tags: [types]
+  Unit_amd_ocp_type_to_hip_type:
+    <<: *level_3
+    tags: [types]
+  Unit_amd_ocp_extract_tests:
+    <<: *level_3
+    tags: [types]
+  Unit_ocp_fp8x2_host_device:
+    <<: *level_3
+    tags: [types]
+  Unit_ocp_cxx_fp8:
+    <<: *level_3
+    tags: [types]
+  Unit_ocp_cxx_fp8x2:
+    <<: *level_3
+    tags: [types]
+  Unit_ocp_cxx_fp6x32:
+    <<: *level_3
+    tags: [types]
+  Unit_ocp_cxx_fp4x2:
+    <<: *level_3
+    tags: [types]
+  Unit_amd_ocp_fp8:
+    <<: *level_3
+    tags: [types]
+  Unit_fp8_pack_unpack:
+    <<: *level_3
+    tags: [types]
+  Unit_amd_ocp_fp6:
+    <<: *level_3
+    tags: [types]
+  Unit_amd_ocp_fp4:
+    <<: *level_3
+    tags: [types]
+  Unit_amd_ocp_fp4x8:
+    <<: *level_3
+    tags: [types]
+  Unit_amd_ocp_cpp_types:
+    <<: *level_3
+    tags: [types]
+  Unit_amd_ocp_hip_to_compiler_types:
+    <<: *level_3
+    tags: [types]
+  Unit_ocp_host_fp8_device_compare:
+    <<: *level_3
+    tags: [types]

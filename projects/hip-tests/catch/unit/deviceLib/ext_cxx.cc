@@ -272,7 +272,7 @@ __global__ void fp8x2_e4m3_cxx_convert_bf16(__amd_bf16x2_storage_t* in, __amd_bf
   }
 }
 
-TEST_CASE("Unit_ocp_fp8x2_host_device") {
+HIP_TEST_CASE(Unit_ocp_fp8x2_host_device) {
   SECTION("floatx2 to e4m3") {
     __amd_floatx2_storage_t in{-10.0f, 10.0f}, *d_in, *d_out, out{0.0f, 0.0f};
     HIP_CHECK(hipMalloc(&d_in, sizeof(__amd_floatx2_storage_t)));
@@ -456,7 +456,7 @@ __global__ void kernel_fp8_e5m2_to_fp16_scale(__amd_fp16_storage_t* in, __amd_fp
 }
 }  // namespace cxx_ocp
 
-TEST_CASE("Unit_ocp_cxx_fp8") {
+HIP_TEST_CASE(Unit_ocp_cxx_fp8) {
   using namespace cxx_ocp;
   const float in = 20.0f;
   float *d_in, *d_out;
@@ -706,7 +706,7 @@ __global__ void kernel_fp8x2_e5m2_to_fp16_scale(__amd_fp16x2_storage_t* in,
 }
 }  // namespace cxx_ocp
 
-TEST_CASE("Unit_ocp_cxx_fp8x2") {
+HIP_TEST_CASE(Unit_ocp_cxx_fp8x2) {
   using namespace cxx_ocp;
   const __amd_floatx2_storage_t in = {-5.0f, 7.0f};
   __amd_floatx2_storage_t *d_in, *d_out;
@@ -902,7 +902,7 @@ __global__ void kernel_fp6x32_e2m3_to_float_scale(__amd_floatx32_storage_t* in,
 }  // namespace cxx_ocp
 
 #if __AVX512F__
-TEST_CASE("Unit_ocp_cxx_fp6x32") {
+HIP_TEST_CASE(Unit_ocp_cxx_fp6x32) {
   using namespace cxx_ocp;
   __amd_floatx32_storage_t in;
   float iter = -8.0f;
@@ -967,7 +967,7 @@ __global__ void kernel_fp4x2_e2m1_to_float_scale(__amd_floatx2_storage_t* in,
 }
 }  // namespace cxx_ocp
 
-TEST_CASE("Unit_ocp_cxx_fp4x2") {
+HIP_TEST_CASE(Unit_ocp_cxx_fp4x2) {
   using namespace cxx_ocp;
   const __amd_floatx2_storage_t in = {-2.0f, 3.0f};
   __amd_floatx2_storage_t *d_in, *d_out;

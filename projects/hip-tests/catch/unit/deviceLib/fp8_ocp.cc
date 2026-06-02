@@ -18,7 +18,7 @@
 
 static_assert(sizeof(unsigned int) == sizeof(float));
 
-std::string arch_type() {
+static std::string arch_type() {
   hipDeviceProp_t prop;
   int device;
   HIP_CHECK(hipGetDevice(&device));

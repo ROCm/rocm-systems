@@ -24,7 +24,7 @@ THE SOFTWARE.
 #include <hip/hip_fp16.h>
 #include <hip_test_common.hh>
 
-TEST_CASE("Unit_amd_ocp_type_to_hip_type") {
+HIP_TEST_CASE(Unit_amd_ocp_type_to_hip_type) {
   SECTION("fp16") {
     float in = 10.0f;
     __half hf = in;
@@ -83,7 +83,7 @@ static __global__ void t_lambda_launch(Kernel k, Args... args) {
   }
 }
 
-TEST_CASE("Unit_amd_ocp_extract_tests") {
+HIP_TEST_CASE(Unit_amd_ocp_extract_tests) {
   SECTION("fp8x2 host") {
     constexpr auto interpret = __AMD_OCP_E4M3;
     __amd_floatx2_storage_t in{-10.0f, 10.0f};

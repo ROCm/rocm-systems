@@ -27,9 +27,6 @@ THE SOFTWARE.
 #include <iostream>
 #include <vector>
 
-// List of all gfx which support OCP HW capabilities, append here
-static const std::vector<std::string> ocp_capeable_hw{"gfx950"};
-
 static __global__ void float_to_fp8_sr(float* in, __amd_fp8_storage_t* out,
                                        __amd_fp8_interpretation_t interpret, int size,
                                        unsigned int rng = 0) {
@@ -128,14 +125,14 @@ static __global__ void cxx_fp8_to_float_e5m2(float* res1, float* res2, float* re
   float a = aa + i;
   __half hf = a;
   __hip_bfloat16 bf16 = a;
-  auto fp8_e4m3 = __hipext_ocp_fp8_e5m2(a);
-  auto fp8_e4m3_seed = __hipext_ocp_fp8_e5m2(a, seed);
-  auto fp8_e4m3_scale_seed = __hipext_ocp_fp8_e5m2(a, seed, scale);
+  auto fp8_e5m2 = __hipext_ocp_fp8_e5m2(a);
+  auto fp8_e5m2_seed = __hipext_ocp_fp8_e5m2(a, seed);
+  auto fp8_e5m2_scale_seed = __hipext_ocp_fp8_e5m2(a, seed, scale);
   auto fp8_from_half = __hipext_ocp_fp8_e5m2(__amd_cvt_half_to_fp16(hf), seed, scale);
   auto fp8_from_bf16 = __hipext_ocp_fp8_e5m2(__amd_cvt_hipbf16_to_bf16(bf16), seed, scale);
-  res1[i] = fp8_e4m3;
-  res2[i] = fp8_e4m3_seed;
-  res3[i] = fp8_e4m3_scale_seed.get_scaled_float(scale);
+  res1[i] = fp8_e5m2;
+  res2[i] = fp8_e5m2_seed;
+  res3[i] = fp8_e5m2_scale_seed.get_scaled_float(scale);
   res4[i] = fp8_from_half.get_scaled_float(scale);
   res5[i] = fp8_from_bf16.get_scaled_float(scale);
 }
@@ -254,7 +251,7 @@ static __global__ void pack_and_unpack_fp8x4(float* a) {
   }
 }
 
-TEST_CASE("Unit_amd_ocp_fp8") {
+HIP_TEST_CASE(Unit_amd_ocp_fp8) {
   constexpr int size = 32;
   SECTION("E4M3") {
     constexpr __amd_fp8_interpretation_t interpret = __AMD_OCP_E4M3;
@@ -472,7 +469,7 @@ TEST_CASE("Unit_amd_ocp_fp8") {
   }
 }
 
-TEST_CASE("Unit_fp8_pack_unpack") {
+HIP_TEST_CASE(Unit_fp8_pack_unpack) {
   float* d_a;
   HIP_CHECK(hipMalloc(&d_a, sizeof(float) * 4));
   std::vector<float> a(4, 0.0f);
@@ -624,7 +621,7 @@ static __global__ void floatx16_to_fp6_sr(__amd_floatx32_storage_t* in,
   }
 }
 
-TEST_CASE("Unit_amd_ocp_fp6") {
+HIP_TEST_CASE(Unit_amd_ocp_fp6) {
   __amd_floatx32_storage_t fpx32, out;
   __amd_floatx32_storage_t *d_in = nullptr, *d_out = nullptr;
   float iter = 0.0f;
@@ -714,7 +711,7 @@ TEST_CASE("Unit_amd_ocp_fp6") {
     }
   }
 
-  SECTION("fpf16 to fp6 E2M3 sr") {
+  SECTION("fp16 to fp6 E2M3 sr") {
     __amd_scale_t scale = 1;
     fp16_to_fp6_sr<<<1, 32>>>(d_in, d_out, __AMD_OCP_E2M3, 0, scale);
     HIP_CHECK(hipMemcpy(&out, d_out, sizeof(__amd_floatx32_storage_t), hipMemcpyDeviceToHost));
@@ -808,7 +805,7 @@ TEST_CASE("Unit_amd_ocp_fp6") {
     }
   }
 
-  SECTION("fpf16 to fp6 E3M2 sr") {
+  SECTION("fp16 to fp6 E3M2 sr") {
     __amd_scale_t scale = 1;
     fp16_to_fp6_sr<<<1, 32>>>(d_in, d_out, __AMD_OCP_E3M2, 0, scale);
     HIP_CHECK(hipMemcpy(&out, d_out, sizeof(__amd_floatx32_storage_t), hipMemcpyDeviceToHost));
@@ -906,7 +903,7 @@ static __global__ void bf16_to_fp4_sr(__amd_floatx2_storage_t* in, __amd_floatx2
   }
 }
 
-TEST_CASE("Unit_amd_ocp_fp4") {
+HIP_TEST_CASE(Unit_amd_ocp_fp4) {
   __amd_floatx2_storage_t fpx2{4.0f, 2.0f}, *d_in, *d_out;
   HIP_CHECK(hipMalloc(&d_in, sizeof(__amd_floatx2_storage_t)));
   HIP_CHECK(hipMalloc(&d_out, sizeof(__amd_floatx2_storage_t)));
@@ -1079,7 +1076,7 @@ static __global__ void floatx8_to_fp4x8_scale(__amd_floatx8_storage_t* in,
 }
 #endif
 
-TEST_CASE("Unit_amd_ocp_fp4x8") {
+HIP_TEST_CASE(Unit_amd_ocp_fp4x8) {
   __amd_fp4x8_storage_t* d_tmp;
   __amd_floatx8_storage_t in;
 
@@ -1247,7 +1244,7 @@ TEST_CASE("Unit_amd_ocp_fp4x8") {
   HIP_CHECK(hipFree(d_tmp));
 }
 
-TEST_CASE("Unit_amd_ocp_cpp_types") {
+HIP_TEST_CASE(Unit_amd_ocp_cpp_types) {
   SECTION("fp8 to float e4m3") {
     constexpr size_t size = 32;
     float *d_res1, *d_res2, *d_res3, *d_res4, *d_res5;
@@ -1368,7 +1365,7 @@ TEST_CASE("Unit_amd_ocp_cpp_types") {
       REQUIRE(std::fabs(res4[i][0] - input_val1) <= 2.0f);
       REQUIRE(std::fabs(res4[i][1] - input_val2) <= 2.0f);
       REQUIRE(std::fabs(res5[i][0] - input_val1) <= 2.0f);
-      REQUIRE(std::fabs(res6[i][1] - input_val2) <= 2.0f);
+      REQUIRE(std::fabs(res5[i][1] - input_val2) <= 2.0f);
       REQUIRE(std::fabs(res6[i][0] - input_val1) <= 2.0f);
       REQUIRE(std::fabs(res6[i][1] - input_val2) <= 2.0f);
     }
@@ -1426,7 +1423,7 @@ TEST_CASE("Unit_amd_ocp_cpp_types") {
       REQUIRE(std::fabs(res4[i][0] - input_val1) <= 2.0f);
       REQUIRE(std::fabs(res4[i][1] - input_val2) <= 2.0f);
       REQUIRE(std::fabs(res5[i][0] - input_val1) <= 2.0f);
-      REQUIRE(std::fabs(res6[i][1] - input_val2) <= 2.0f);
+      REQUIRE(std::fabs(res5[i][1] - input_val2) <= 2.0f);
       REQUIRE(std::fabs(res6[i][0] - input_val1) <= 2.0f);
       REQUIRE(std::fabs(res6[i][1] - input_val2) <= 2.0f);
     }
@@ -1456,7 +1453,7 @@ TEST_CASE("Unit_amd_ocp_cpp_types") {
     __amd_floatx32_storage_t* d_res;
     __amd_floatx32_storage_t res;
     HIP_CHECK(hipMalloc(&d_res, sizeof(__amd_floatx32_storage_t)));
-    const __amd_scale_t scale = 1.0f;
+    const __amd_scale_t scale = 1;
     cxx_fp6x32_to_floatx32_e3m2<<<1, 32>>>(d_res, scale);
     HIP_CHECK(hipMemcpy(&res, d_res, sizeof(__amd_floatx32_storage_t), hipMemcpyDeviceToHost));
     for (int i = 0; i < 32; i++) {
@@ -1488,6 +1485,12 @@ TEST_CASE("Unit_amd_ocp_cpp_types") {
     for (size_t i = 0; i < size; i++) {
       CHECK(res1[i][0] == a);
       CHECK(res1[i][1] == b);
+      CHECK(res2[i][0] == a);
+      CHECK(res2[i][1] == b);
+      CHECK(res3[i][0] == a);
+      CHECK(res3[i][1] == b);
+      CHECK(res4[i][0] == a);
+      CHECK(res4[i][1] == b);
     }
     HIP_CHECK(hipFree(d_res1));
     HIP_CHECK(hipFree(d_res2));
@@ -1496,7 +1499,7 @@ TEST_CASE("Unit_amd_ocp_cpp_types") {
   }
 }
 
-TEST_CASE("Unit_amd_ocp_hip_to_compiler_types") {
+HIP_TEST_CASE(Unit_amd_ocp_hip_to_compiler_types) {
   SECTION("bf16") {
     const float f_in = 1.5f;
     __amd_bf16_storage_t in = f_in;
@@ -1748,7 +1751,7 @@ __global__ void fp4x2_sr_scale_convert(__amd_floatx2_storage_t* in, __amd_floatx
   }
 }
 
-TEST_CASE("Unit_ocp_host_fp8_device_compare") {
+HIP_TEST_CASE(Unit_ocp_host_fp8_device_compare) {
   SECTION("e4m3") {
     constexpr size_t size = 447 * 2 + 1;
     constexpr __amd_fp8_interpretation_t interpret = __AMD_OCP_E4M3;
