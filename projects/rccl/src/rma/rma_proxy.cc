@@ -340,7 +340,7 @@ ncclResult_t ncclRmaProxyRegister(struct ncclComm* comm, void* address, size_t s
       struct ncclRmaProxyState* rmaProxyState = &comm->rmaState.rmaProxyState;
       for (int n = 0; n < rmaProxyState->ginCommCount; n++) {
 	  ncclNetProperties_t props_tmp = rmaProxyState->props[n];
-	  if (ncclParamRmaProxyUseDMABUF() == 0) {
+	  if (rcclParamRmaProxyUseDMABUF() == 0) {
             props_tmp.ptrSupport &= ~NCCL_PTR_DMABUF;
 	  }
           NCCLCHECK(ncclRmaProxyRegMrSym(rmaProxyState->ncclGin, rmaProxyState->ginComms[n], props_tmp, address, size,
