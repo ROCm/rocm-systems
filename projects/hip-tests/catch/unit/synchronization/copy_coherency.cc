@@ -52,7 +52,6 @@ void MemcpyFunction::launch(int* dst, const int* src, size_t numElements,
                                   reinterpret_cast<void**>(&config)));
 }
 
-bool g_warnOnFail = true;
 int g_elementSizes[] = {128 * 1000, 256 * 1000, 16 * 1000 * 1000};
 
 // Set value of array to specified 32-bit integer:
@@ -75,13 +74,10 @@ __global__ void memcpyIntKernel(int* dst, const int* src, size_t numElements) {
 // Check arrays in reverse order, to more easily detect cases where
 // the copy is "partially" done.
 void checkReverse(const int* ptr, int numElements, int expected) {
-  int mismatchCnt = 0;
   for (int i = numElements - 1; i >= 0; i--) {
-    if (!g_warnOnFail) {
+    if (ptr[i] != expected) {
+      INFO("Mismatch at index " << i << ": got " << ptr[i] << ", expected " << expected);
       REQUIRE(ptr[i] == expected);
-    }
-    if (++mismatchCnt >= 10) {
-      break;
     }
   }
 }
