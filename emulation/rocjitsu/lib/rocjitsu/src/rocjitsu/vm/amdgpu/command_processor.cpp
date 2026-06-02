@@ -698,9 +698,11 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   });
   util::Logger::cp([&](auto &os) {
     os << std::format(
-        "DISPATCH #{} d={} \"{}\" wgs={} wfs/wg={} sig={:#x} pid={} ko={:#x} pc={:#x}",
+        "DISPATCH #{} d={} \"{}\" wgs={} wfs/wg={} sig={:#x} pid={} ko={:#x} pc={:#x}"
+        " kernarg={:#x} user_sgprs={}",
         total_dispatched_, dp.dispatch_id, kernel_sym.empty() ? "?" : kernel_sym, total_wgs,
-        wfs_per_wg, dp.completion_signal, dp.process_id, pkt.kernel_object, entry_pc);
+        wfs_per_wg, dp.completion_signal, dp.process_id, pkt.kernel_object, entry_pc,
+        dp.kernarg_addr, dp.num_user_sgprs);
     if (memory_) {
       auto *ko_ptr = memory_->translate_debug(pkt.kernel_object, queue.process_id);
       auto *pc_ptr = memory_->translate_debug(entry_pc, queue.process_id);

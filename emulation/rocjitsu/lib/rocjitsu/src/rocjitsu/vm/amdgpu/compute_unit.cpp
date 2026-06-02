@@ -119,9 +119,7 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sg
   }
 
   // Zero the allocated register blocks so reused slots don't inherit stale
-  // values from previous kernel runs. Without this, wavefronts reading
-  // uninitialized registers (e.g., user SGPRs not set by init_wavefront_regs)
-  // see leftover data from the prior occupant.
+  // values from previous kernel runs.
   std::fill(&sgpr_file_[sgpr_base], &sgpr_file_[sgpr_base] + config_.sgprs_per_wf, 0u);
   std::memset(vgpr_data(static_cast<uint32_t>(vgpr_base)), 0,
               config_.vgprs_per_wf * wf_size_ * sizeof(uint32_t));
@@ -145,6 +143,9 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sg
                     private_aperture_limit_);
   wf->state_ = WfState::RUNNING;
   wf->set_ready_cycle(cycle_counter_);
+  wf->trace_inst_count_ = 0;
+  util::Logger::cp("DISPATCH_WF cu=", this->full_path(), " wf=", wf->wf_id(), " slot=", slot,
+                   " pc=0x", std::hex, pc, std::dec, " wg=", wg_id, " pid=", wf->process_id());
   return wf;
 }
 
@@ -328,14 +329,6 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   for (int i = 0; i < 4; ++i)
     words[i] = memory_->fetch32(active->pc + i * 4, vmid);
 
-  if (words[0] == 0 && words[1] == 0 && active->trace_inst_count_ < 2) {
-    bool mapped = memory_->translate_debug(active->pc, vmid) != nullptr;
-    auto pt_info = memory_->debug_page_table_info(vmid, active->pc >> 12);
-    util::Logger::cp("CU ", this->name(), " wf", active->wf_id(), " FETCH-ZERO pc=0x", std::hex,
-                     active->pc, std::dec, " vmid=", vmid, " mapped=", mapped, " mem=0x", std::hex,
-                     reinterpret_cast<uintptr_t>(memory_), std::dec, " ", pt_info);
-  }
-
   active->trace_inst_count_++;
 
   Instruction *inst = nullptr;
@@ -384,6 +377,22 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
 
   plugin_group_->onAmdgpuExecuteInstruction(active->pc, *inst);
 
+  {
+    auto mn = std::string_view(inst->mnemonic());
+    if (mn.find("s_setpc") != std::string_view::npos ||
+        mn.find("s_swappc") != std::string_view::npos) {
+      uint32_t ssrc0_idx = words[0] & 0x7F;
+      uint32_t sb = active->sgpr_alloc().base;
+      uint64_t target = static_cast<uint64_t>(read_sgpr(sb + ssrc0_idx)) |
+                        (static_cast<uint64_t>(read_sgpr(sb + ssrc0_idx + 1)) << 32);
+      if (target == 0) {
+        active->halt();
+        delete inst;
+        return;
+      }
+    }
+  }
+
   execute_instruction(inst, *active);
 
   if constexpr (util::Logger::group_enabled(util::Logger::GROUP_VM)) {
@@ -431,7 +440,7 @@ bool ComputeUnitCore::step() {
   if constexpr (util::Logger::group_enabled(util::Logger::GROUP_CP)) {
     if ((step_count_ & 0xFFFFF) == 0) {
       util::Logger::cp([&](auto &os) {
-        os << std::format("CU[{}] steps={}M", this->name(), step_count_ >> 20);
+        os << std::format("CU[{}] steps={}M", this->full_path(), step_count_ >> 20);
         for (auto &wf : wfs_) {
           auto st = wf->state();
           if (st == WfState::RUNNING || st == WfState::WAITCNT || st == WfState::BARRIER)

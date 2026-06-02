@@ -471,6 +471,21 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     rj_add_hip_test(hip_vector_add_test)
     rj_add_hip_test_case(hip_vector_add_test "HipVectorAddTest.CorrectResult")
 
+    # --- RCCL collective test ---
+    find_library(
+        RCCL_LIB
+        rccl
+        PATHS /opt/rocm/lib
+        ENV ROCM_PATH
+        PATH_SUFFIXES lib
+    )
+    if(RCCL_LIB)
+        rj_add_hip_test(hip_rccl_test EXTRA_LIBS -lrccl)
+        message(STATUS "RCCL collective test enabled (found ${RCCL_LIB})")
+    else()
+        message(STATUS "RCCL collective test disabled (librccl not found)")
+    endif()
+
     # --- Daemon RPC tests (gtest-driven) ---
     # A gtest fixture manages the daemon lifecycle: fork+exec the daemon in
     # SetUp, run the HIP test binary as a subprocess, tear down in TearDown.
@@ -484,6 +499,7 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
             RJ_PRELOAD_LIB="$<TARGET_FILE:rocjitsu_kmd_shim>"
             RJ_HIP_VECTOR_ADD_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_vector_add_test"
             RJ_HIP_MEMCPY_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_memcpy_test"
+            RJ_HIP_RCCL_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_rccl_test"
     )
     target_link_libraries(daemon_test PRIVATE GTest::gtest_main)
     add_dependencies(
@@ -492,6 +508,9 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
         hip_vector_add_test_target
         hip_memcpy_test_target
     )
+    if(RCCL_LIB)
+        add_dependencies(daemon_test hip_rccl_test_target)
+    endif()
 
     set(RJ_DAEMON_TESTS
         DaemonTest.HipVectorAdd
@@ -504,6 +523,22 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
         add_test(NAME ${TC} COMMAND daemon_test --gtest_filter=${TC})
         set_tests_properties(${TC} PROPERTIES TIMEOUT 120 LABELS "daemon")
     endforeach()
+
+    if(RCCL_LIB)
+        set(RJ_RCCL_TESTS
+            RcclDaemonTest.AllReduce
+            RcclDaemonTest.Broadcast
+            RcclDaemonTest.AllGather
+            RcclDaemonTest.ReduceScatter
+            RcclDaemonTest.SendRecv
+        )
+        foreach(TC IN LISTS RJ_RCCL_TESTS)
+            add_test(NAME ${TC} COMMAND daemon_test --gtest_filter=${TC})
+            set_tests_properties(
+                ${TC} PROPERTIES TIMEOUT 180 LABELS "daemon;rccl"
+            )
+        endforeach()
+    endif()
 
     # --- rocBLAS GEMM test ---
     find_library(
