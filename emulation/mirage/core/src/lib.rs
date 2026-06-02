@@ -23,6 +23,7 @@ pub mod discovery;
 pub mod emulator;
 pub mod error;
 pub mod exec;
+pub mod hardware;
 pub mod metric;
 pub mod paths;
 pub mod plugin;

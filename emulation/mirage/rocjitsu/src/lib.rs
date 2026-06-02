@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 
 use mirage_core::agent::AgentDef;
 use mirage_core::common::MaybeRef;
-use mirage_core::emulator::{EmulatorDef, EmulatorDescription, ExecMode};
+use mirage_core::emulator::{EmulatorDef, EmulatorDescription, ExecMode, SupportStatus};
 use mirage_core::error::{MirageError, Result};
 use mirage_core::topology::TopologyDef;
 
@@ -43,6 +43,9 @@ pub fn describe() -> EmulatorDescription {
         description: "ROCm just-in-time GPU emulator (cycle-accurate or functional)".to_string(),
         installed: is_installed(),
         path: kmd_preload(),
+        // rocjitsu emulates the GPU in software, so it runs on any
+        // host regardless of the physical hardware present.
+        support: SupportStatus::supported("software emulator; no special hardware required"),
     }
 }
 

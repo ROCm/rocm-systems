@@ -36,6 +36,41 @@ pub struct EmulatorDef {
     pub topology: MaybeRef<TopologyDef>,
 }
 
+/// Whether the host's hardware/environment can actually run an
+/// emulator. This is distinct from [`EmulatorDescription::installed`]:
+/// an emulator can be installed yet unsupported (e.g. HotSwap installed
+/// on a machine with no compatible physical GPU), or supported yet not
+/// installed. Both signals are surfaced so the UX/CLI can explain
+/// exactly what a user needs to do.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SupportStatus {
+    /// `true` if this host meets the emulator's hardware/environment
+    /// requirements.
+    pub supported: bool,
+    /// Human-readable explanation of the support decision — what was
+    /// required and what was found. Always populated so the UX/CLI can
+    /// show a reason whether or not the host is supported.
+    pub reason: String,
+}
+
+impl SupportStatus {
+    /// The host meets this emulator's requirements.
+    pub fn supported(reason: impl Into<String>) -> Self {
+        Self {
+            supported: true,
+            reason: reason.into(),
+        }
+    }
+
+    /// The host does not meet this emulator's requirements.
+    pub fn unsupported(reason: impl Into<String>) -> Self {
+        Self {
+            supported: false,
+            reason: reason.into(),
+        }
+    }
+}
+
 /// A description of an emulator backend: its identity (name, version,
 /// blurb) plus its current runtime status on this machine (whether it
 /// is installed and, if so, the resolved path to its runtime library).
@@ -54,6 +89,10 @@ pub struct EmulatorDescription {
     /// and locatable. `None` for backends without an external runtime
     /// (e.g. `noop`) or when the library could not be found.
     pub path: Option<PathBuf>,
+    /// Whether this host's hardware/environment can run the emulator
+    /// (some backends require specific physical GPUs). Reported
+    /// independently of `installed`.
+    pub support: SupportStatus,
 }
 
 pub trait Emulator {

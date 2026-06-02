@@ -15,7 +15,7 @@
 //! [`crate::agent::store`] / [`crate::topology::store`].
 
 use crate::common::{MaybeRef, SimpleMap};
-use crate::emulator::{EmulatorDef, EmulatorDescription, ExecMode};
+use crate::emulator::{EmulatorDef, EmulatorDescription, ExecMode, SupportStatus};
 use crate::topology::TopologyDef;
 
 /// The canonical name of the built-in pass-through emulator.
@@ -64,6 +64,7 @@ pub fn noop() -> EmulatorDescription {
         description: "no-op emulator: runs commands directly with no GPU emulation".to_string(),
         installed: true,
         path: None,
+        support: SupportStatus::supported("runs commands directly; no special hardware required"),
     }
 }
 

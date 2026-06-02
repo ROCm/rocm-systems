@@ -16,7 +16,7 @@
 use std::path::PathBuf;
 
 use mirage_core::discovery::{self, LibSearch};
-use mirage_core::emulator::EmulatorDescription;
+use mirage_core::emulator::{EmulatorDescription, SupportStatus};
 
 /// The HSA tools library file name HotSwap ships as.
 pub const LIB_NAME: &str = "libhsa-hotswap.so";
@@ -28,11 +28,20 @@ pub const ASSET_SUBDIR: &str = "hotswap";
 /// Human-facing name used in guidance messages.
 pub const DISPLAY_NAME: &str = "HotSwap";
 
+/// The physical GPU architectures HotSwap can retarget code *onto*,
+/// as KFD `gfx_target_version` values paired with their conventional
+/// `gfx` name. HotSwap rewrites device code at load time so a workload
+/// built for one architecture runs on one of these cards (e.g.
+/// `gfx1250` code on a `gfx942`/`gfx950` GPU). Without one of these
+/// GPUs physically present there is nothing for HotSwap to run on.
+pub const SUPPORTED_GPUS: &[(u32, &str)] = &[(90402, "gfx942"), (90500, "gfx950")];
+
 /// Describe the hotswap emulator backend for the registry. Owned by
 /// this crate (rather than `mirage_core`) so that all hotswap-specific
 /// policy lives alongside the hotswap discovery integration. Reports
-/// whether hotswap is installed and the resolved path to its runtime
-/// library when available.
+/// whether hotswap is installed, the resolved path to its runtime
+/// library when available, and whether this host has a physical GPU
+/// HotSwap can actually run on.
 pub fn describe() -> EmulatorDescription {
     EmulatorDescription {
         name: "hotswap".to_string(),
@@ -40,7 +49,40 @@ pub fn describe() -> EmulatorDescription {
         description: "load-time ISA rewriter: run a GPU's code on a different GPU (e.g. gfx1250 on gfx942/gfx950)".to_string(),
         installed: is_installed(),
         path: lib_path(),
+        support: support_status(),
     }
+}
+
+/// Determine whether this host has a physical GPU HotSwap can retarget
+/// onto. HotSwap needs a real, compatible GPU present (it rewrites code
+/// to run on the hardware), so this inspects the host GPUs reported by
+/// the kernel and matches them against [`SUPPORTED_GPUS`].
+pub fn support_status() -> SupportStatus {
+    let present = mirage_core::hardware::gpu_gfx_versions();
+    let matched: Vec<&str> = SUPPORTED_GPUS
+        .iter()
+        .filter(|(version, _)| present.contains(version))
+        .map(|(_, name)| *name)
+        .collect();
+
+    if !matched.is_empty() {
+        return SupportStatus::supported(format!("compatible GPU present: {}", matched.join(", ")));
+    }
+
+    let required: Vec<&str> = SUPPORTED_GPUS.iter().map(|(_, name)| *name).collect();
+    let detected = if present.is_empty() {
+        "none".to_string()
+    } else {
+        present
+            .iter()
+            .map(|v| mirage_core::hardware::gfx_name(*v))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    SupportStatus::unsupported(format!(
+        "no compatible GPU found (HotSwap requires one of: {}); detected: {detected}",
+        required.join(", ")
+    ))
 }
 
 /// Search policy mirage uses to locate `libhsa-hotswap.so`.
@@ -94,5 +136,19 @@ mod tests {
     #[test]
     fn guidance_mentions_the_library() {
         assert!(install_guidance().contains("libhsa-hotswap.so"));
+    }
+
+    #[test]
+    fn support_status_always_has_a_reason() {
+        // Whatever this host looks like, the support check must produce
+        // a non-empty, human-readable reason for the UX/CLI to show.
+        let status = support_status();
+        assert!(!status.reason.is_empty());
+        // The required architectures should be named in the reason so
+        // the user knows what HotSwap needs.
+        if !status.supported {
+            assert!(status.reason.contains("gfx942"));
+            assert!(status.reason.contains("gfx950"));
+        }
     }
 }

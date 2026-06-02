@@ -67,6 +67,67 @@ pub fn default_emulator() -> EmulatorDescription {
     mirage_core::registry::default_emulator(&specs).clone()
 }
 
+/// Render the emulator registry for the `mirage emulators` command:
+/// each backend with whether its runtime is installed and whether this
+/// host's hardware supports it. With `json` the full descriptions are
+/// emitted as-is; otherwise a compact table (or, with `long`, a
+/// detailed block including the support reason and runtime path).
+fn emulators_cmd(long: bool, json: bool) {
+    let specs = registry();
+    if json {
+        match serde_json::to_string_pretty(&specs) {
+            Ok(s) => println!("{s}"),
+            Err(e) => eprintln!("failed to serialize emulators: {e}"),
+        }
+        return;
+    }
+
+    let default_name = default_emulator().name;
+
+    if long {
+        for spec in &specs {
+            let default_marker = if spec.name == default_name {
+                " (default)"
+            } else {
+                ""
+            };
+            println!("{}{}", spec.name, default_marker);
+            println!("  {}", spec.description);
+            println!("  installed: {}", if spec.installed { "yes" } else { "no" });
+            println!(
+                "  supported: {}  ({})",
+                if spec.support.supported { "yes" } else { "no" },
+                spec.support.reason
+            );
+            if let Some(path) = &spec.path {
+                println!("  runtime:   {}", path.display());
+            }
+            println!();
+        }
+        return;
+    }
+
+    println!(
+        "{:<10} {:<10} {:<10} {}",
+        "NAME", "INSTALLED", "SUPPORTED", "DESCRIPTION"
+    );
+    for spec in &specs {
+        let name = if spec.name == default_name {
+            format!("{}*", spec.name)
+        } else {
+            spec.name.clone()
+        };
+        println!(
+            "{:<10} {:<10} {:<10} {}",
+            name,
+            if spec.installed { "yes" } else { "no" },
+            if spec.support.supported { "yes" } else { "no" },
+            spec.description
+        );
+    }
+    println!("\n* = default emulator for new profiles");
+}
+
 /// Best-effort: materialise all builtin state on disk — agents,
 /// topologies, and the rocjitsu runtime assets — writing only what's
 /// missing. Errors are logged, never fatal; the user can always force
@@ -154,6 +215,13 @@ pub enum CtlCmd {
     /// Manage agents (hardware GPU definitions).
     #[command(subcommand)]
     Agent(AgentCmd),
+
+    /// List emulator backends and their install / support status.
+    Emulators {
+        /// Show long form (description, runtime path, support reason).
+        #[arg(short = 'l', long)]
+        long: bool,
+    },
 
     /// Manage sessions.
     #[command(subcommand)]
@@ -476,6 +544,10 @@ pub async fn dispatch<C: MirageCtl + 'static>(
         CtlCmd::Profile(c) => profile_cmd(&*ctl, c, json),
         CtlCmd::Topology(c) => topology_cmd(&*ctl, c, json),
         CtlCmd::Agent(c) => agent_cmd(&*ctl, c, json),
+        CtlCmd::Emulators { long } => {
+            emulators_cmd(long, json);
+            Ok(ExitCode::from(0))
+        }
         CtlCmd::Session(c) => session_cmd(&*ctl, c, json).await,
         CtlCmd::Exec(c) => exec_cmd(ctl.clone(), c, json).await,
         CtlCmd::State(c) => state_cmd(ctl.clone(), c, json).await,
@@ -1166,7 +1238,12 @@ fn profile_wizard(
             } else {
                 "[not installed]"
             };
-            format!("{:<10} {installed}  {}", s.name, s.description)
+            let supported = if s.support.supported {
+                ""
+            } else {
+                " [unsupported hardware]"
+            };
+            format!("{:<10} {installed}{supported}  {}", s.name, s.description)
         })
         .collect();
     let pick = Select::with_theme(&theme)
