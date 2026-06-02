@@ -49,10 +49,10 @@ pub fn init_logging(verbose: u8) {
 /// auto-unpack the builtins the first time they run, instead of
 /// requiring the user to invoke `mirage state builtins` by hand.
 pub fn ensure_builtins_present() {
-    if let Err(e) = mirage_core::agent::store::ensure_builtins(false) {
+    if let Err(e) = mirage_builtin::ensure_agents(false) {
         tracing::warn!("failed to preload builtin agents: {e:#}");
     }
-    if let Err(e) = mirage_core::topology::store::ensure_builtins(false) {
+    if let Err(e) = mirage_builtin::ensure_topologies(false) {
         tracing::warn!("failed to preload builtin topologies: {e:#}");
     }
     if let Err(e) = mirage_rocjitsu::ensure_assets(false) {
@@ -92,6 +92,17 @@ pub fn validate_profile(def: &ProfileDef) -> std::result::Result<(), String> {
             mirage_rocjitsu::kmd_config(&def.emulator)
                 .map(|_| ())
                 .map_err(|e| format!("rocjitsu cannot use this profile: {e}"))
+        }
+        "hotswap" => {
+            // HotSwap is not bundled or built by mirage; it must be
+            // installed separately. Surface actionable guidance now,
+            // at profile-creation time, rather than only when a
+            // session is later started.
+            if mirage_hotswap::is_installed() {
+                Ok(())
+            } else {
+                Err(mirage_hotswap::install_guidance())
+            }
         }
         _ => Ok(()),
     }
@@ -1291,8 +1302,8 @@ async fn state_cmd<C: MirageCtl + 'static>(
 ) -> anyhow::Result<ExitCode> {
     match cmd {
         StateCmd::Builtins => {
-            let agents = mirage_core::agent::store::ensure_builtins(true)?;
-            let topologies = mirage_core::topology::store::ensure_builtins(true)?;
+            let agents = mirage_builtin::ensure_agents(true)?;
+            let topologies = mirage_builtin::ensure_topologies(true)?;
             let assets = mirage_rocjitsu::ensure_assets(true)?;
             if json {
                 let entries: Vec<_> = agents

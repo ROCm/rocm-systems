@@ -1044,6 +1044,7 @@ dependencies = [
  "clap",
  "futures-util",
  "libc",
+ "mirage_builtin",
  "mirage_core",
  "mirage_ctl",
  "mirage_daemon",
@@ -1058,6 +1059,14 @@ dependencies = [
  "tokio-tungstenite 0.24.0",
  "tracing-subscriber",
  "tungstenite 0.24.0",
+]
+
+[[package]]
+name = "mirage_builtin"
+version = "0.1.0"
+dependencies = [
+ "mirage_core",
+ "tempfile",
 ]
 
 [[package]]
@@ -1088,6 +1097,7 @@ dependencies = [
  "dialoguer",
  "futures",
  "libc",
+ "mirage_builtin",
  "mirage_core",
  "mirage_hotswap",
  "mirage_rocjitsu",
@@ -1161,6 +1171,7 @@ name = "mirage_rocjitsu"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "mirage_builtin",
  "mirage_core",
  "serde",
  "serde_json",

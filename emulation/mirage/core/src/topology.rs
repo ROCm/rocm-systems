@@ -95,17 +95,22 @@ pub mod store {
         Ok(p)
     }
 
-    /// Write all builtin topologies to disk.
-    pub fn ensure_builtins(force: bool) -> Result<Vec<(String, bool)>> {
+    /// Write the supplied builtin topologies to disk.
+    ///
+    /// Topology definitions are supplied by the `mirage_builtin`
+    /// crate; this function owns only the on-disk store policy.
+    pub fn write_builtins(
+        builtins: &[(&str, TopologyDef)],
+        force: bool,
+    ) -> Result<Vec<(String, bool)>> {
         let mut report = Vec::new();
-        for (name, build) in crate::registry::builtin_topologies() {
+        for (name, topology) in builtins {
             let p = crate::paths::topology_path(name);
-            let exists = p.exists();
-            if exists && !force {
+            if p.exists() && !force {
                 report.push((name.to_string(), false));
                 continue;
             }
-            crate::state::write_json(&p, &build())?;
+            crate::state::write_json(&p, topology)?;
             report.push((name.to_string(), true));
         }
         Ok(report)
@@ -129,16 +134,26 @@ mod tests {
     }
 
     #[test]
-    fn ensure_builtins_writes_then_skips() {
+    fn write_builtins_writes_then_skips() {
         let _g = crate::paths::test_env_lock();
         let tmp = tempfile::tempdir().unwrap();
         crate::paths::set_test_root(tmp.path());
 
-        let first = store::ensure_builtins(false).unwrap();
+        let builtins = [(
+            "single",
+            TopologyDef {
+                racks: 1,
+                nodes_per_rack: 1,
+                gpus_per_node: 1,
+                agent: MaybeRef::Ref("noop".to_string()),
+            },
+        )];
+
+        let first = store::write_builtins(&builtins, false).unwrap();
         assert!(!first.is_empty(), "expected at least one builtin topology");
         assert!(first.iter().all(|(_, w)| *w));
 
-        let second = store::ensure_builtins(false).unwrap();
+        let second = store::write_builtins(&builtins, false).unwrap();
         assert!(second.iter().all(|(_, w)| !*w));
     }
 }

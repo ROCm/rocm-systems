@@ -32,7 +32,7 @@ fn rocjitsu_env() -> Option<(PathBuf, PathBuf, PathBuf)> {
     let kmd = mirage_rocjitsu::kmd_preload()?;
     // Build a minimal EmulatorDef referencing a builtin agent so
     // rocjitsu can synthesise the sim config.
-    let _ = mirage_core::agent::store::ensure_builtins(false).ok()?;
+    let _ = mirage_builtin::ensure_agents(false).ok()?;
     let agents = mirage_core::agent::store::list().ok()?;
     let agent_name = agents.into_iter().next()?;
     let def = mirage_core::emulator::EmulatorDef {

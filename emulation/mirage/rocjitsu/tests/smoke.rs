@@ -22,7 +22,7 @@ fn embedded_assets_extract_round_trip() {
     mirage_core::paths::set_test_root(tmp.path());
 
     let asset_report = ensure_assets(false).unwrap();
-    let agent_report = mirage_core::agent::store::ensure_builtins(false).unwrap();
+    let agent_report = mirage_builtin::ensure_agents(false).unwrap();
 
     let on_disk = kmd_lib_path();
     assert!(on_disk.exists(), "kmd lib should have been extracted");

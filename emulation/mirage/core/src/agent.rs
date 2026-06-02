@@ -283,26 +283,24 @@ pub mod store {
         Ok(p)
     }
 
-    /// Write all builtin agents to disk.
+    /// Write the supplied builtin agents to disk.
     ///
     /// If `force` is true, existing files are overwritten. Otherwise
-    /// only missing agents are written. Embedded JSON is parsed as
-    /// an [`AgentDef`] and reserialized so the on-disk file contains
-    /// only fields mirage understands.
-    pub fn ensure_builtins(force: bool) -> Result<Vec<(String, bool)>> {
+    /// only missing agents are written. The agent definitions are
+    /// supplied by the `mirage_builtin` crate; this function owns only
+    /// the on-disk store policy. Returns `(name, written)` per agent.
+    pub fn write_builtins(
+        builtins: &[(&str, AgentDef)],
+        force: bool,
+    ) -> Result<Vec<(String, bool)>> {
         let mut report = Vec::new();
-        for (name, json) in crate::registry::builtin_agents() {
+        for (name, agent) in builtins {
             let p = crate::paths::agent_path(name);
             if p.exists() && !force {
                 report.push((name.to_string(), false));
                 continue;
             }
-            let agent: AgentDef = serde_json::from_str(json).map_err(|e| {
-                MirageError::Other(format!(
-                    "builtin agent {name}: parse embedded JSON as AgentDef: {e}"
-                ))
-            })?;
-            crate::state::write_json(&p, &agent)?;
+            crate::state::write_json(&p, agent)?;
             report.push((name.to_string(), true));
         }
         Ok(report)
@@ -312,41 +310,47 @@ pub mod store {
 #[cfg(test)]
 mod tests {
     use super::store;
+    use super::*;
+
+    fn sample() -> AgentDef {
+        AgentDef {
+            vm: VirtualMachineConfig {
+                arch: "test".to_string(),
+                ..Default::default()
+            },
+            topology: AgentTopologyDef::default(),
+        }
+    }
 
     #[test]
-    fn ensure_builtins_writes_then_skips() {
+    fn write_builtins_writes_then_skips() {
         let _g = crate::paths::test_env_lock();
         let tmp = tempfile::tempdir().unwrap();
         crate::paths::set_test_root(tmp.path());
 
-        let first = store::ensure_builtins(false).unwrap();
-        // Core ships no builtin agents; backends contribute them.
-        // We just check the call is idempotent and well-formed.
+        let builtins = [("alpha", sample()), ("beta", sample())];
+
+        let first = store::write_builtins(&builtins, false).unwrap();
         assert!(
             first.iter().all(|(_, w)| *w),
             "first run should write every builtin"
         );
 
-        let names: Vec<_> = first.iter().map(|(n, _)| n.clone()).collect();
-        assert_eq!(store::list().unwrap(), {
-            let mut s = names.clone();
-            s.sort();
-            s
-        });
+        assert_eq!(store::list().unwrap(), vec!["alpha", "beta"]);
 
-        let second = store::ensure_builtins(false).unwrap();
+        let second = store::write_builtins(&builtins, false).unwrap();
         assert!(
             second.iter().all(|(_, w)| !*w),
             "second run should not rewrite existing builtins"
         );
 
-        let forced = store::ensure_builtins(true).unwrap();
+        let forced = store::write_builtins(&builtins, true).unwrap();
         assert!(
             forced.iter().all(|(_, w)| *w),
             "force should rewrite every builtin"
         );
 
-        for name in &names {
+        for (name, _) in &builtins {
             assert!(store::get(name).is_ok(), "{name} should be readable");
         }
     }

@@ -16,4 +16,5 @@ tracing = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+mirage_builtin = { workspace = true }
 tempfile = { workspace = true }
