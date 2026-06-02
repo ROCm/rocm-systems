@@ -26,7 +26,7 @@
 # NOTE: This will eventually be part of ROCm-CMake and should be removed at that time
 function(rocm_local_targets VARIABLE)
   set(${VARIABLE} "NOTFOUND" PARENT_SCOPE)
-  find_program(_rocm_agent_enumerator rocm_agent_enumerator HINTS ${ROCM_PATH}/bin)
+  find_program(_rocm_agent_enumerator rocm_agent_enumerator)
   if(NOT _rocm_agent_enumerator STREQUAL "_rocm_agent_enumerator-NOTFOUND")
     execute_process(
       COMMAND "${_rocm_agent_enumerator}"

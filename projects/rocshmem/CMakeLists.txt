@@ -109,16 +109,15 @@ endif()
 # DETECT POD CAPABILITY
 #############################################################################
 # Try to find AMD SMI library
-find_library(AMDSMI_LIBRARY
-  NAMES amd_smi
-  HINTS ${ROCM_PATH}/lib ${ROCM_PATH}/lib64
-  NO_DEFAULT_PATH
-)
+find_package(amd_smi QUIET)
 
-if(AMDSMI_LIBRARY)
-  # Check if the library has the amdsmi_get_gpu_fabric_info function
+if(TARGET amd_smi)
   include(CheckLibraryExists)
-  check_library_exists(${AMDSMI_LIBRARY} amdsmi_get_gpu_fabric_info "" HAVE_AMDSMI_GPU_FABRIC_INFO)
+  include(CMakePushCheckState)
+  cmake_push_check_state(RESET)
+  set(CMAKE_REQUIRED_LIBRARIES amd_smi)
+  check_library_exists(amd_smi amdsmi_get_gpu_fabric_info "" HAVE_AMDSMI_GPU_FABRIC_INFO)
+  cmake_pop_check_state()
 
   if(HAVE_AMDSMI_GPU_FABRIC_INFO)
     message(STATUS "AMD SMI library found with fabric info support - enabling pod-based IPC capability detection")
