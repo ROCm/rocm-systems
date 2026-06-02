@@ -1,18 +1,6 @@
 name: rocprofiler-sdk build CLR/HIP CI
 
 on:
-  push:
-    branches: [ develop ]
-    paths:
-      - 'projects/clr/**'
-      - 'projects/hip/**'
-      - '!**/*.md'
-      - '!**/*.rtf'
-      - '!**/*.rst'
-      - '!**/.markdownlint-ci2.yaml'
-      - '!**/.readthedocs.yaml'
-      - '!**/.spellcheck.local.yaml'
-      - '!**/.wordlist.txt'
   pull_request:
     paths:
       - 'projects/clr/**'
