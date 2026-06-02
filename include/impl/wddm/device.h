@@ -48,7 +48,6 @@
 
 #include <atomic>
 #include <memory>
-#include <vector>
 
 #include "shared/include/d3dkmt_types.h"
 #include "shared/include/device.h"
@@ -72,18 +71,6 @@ class WDDMQueue;
 #define END_NON_CANONICAL_ADDR (~0UL - (1UL << 47))
 #define IS_OVERLAPPING(start1, size1, start2, size2) \
   ((start1 < (start2 + size2)) && (start2 < (start1 + size1)))
-
-struct SegmentInfo {
-  uint32_t segment_id;
-  uint32_t segment_type;    // 0=aperture, 1=gpu memory, 2=system memory
-  bool aperture;
-  bool system_memory;
-  uint64_t commit_limit;
-
-  SegmentInfo()
-      : segment_id(0), segment_type(0), aperture(false),
-        system_memory(false), commit_limit(0) {}
-};
 
 class WDDMDevice {
 public:
@@ -215,10 +202,6 @@ private:
   void SetPowerOptimization(bool restore);
   void InitCmdbufInfo(void);
 
-  bool QuerySegmentInfo();
-  bool GetSegmentId(D3DKMT_QUERYSTATISTICS_SEGMENT_TYPE segment_type,
-                    uint32_t &segment_id);
-
   D3DKMT_HANDLE adapter_;
   Device *shared_dev_ = nullptr;
 
@@ -231,7 +214,6 @@ private:
   uint32_t cmdbuf_aql_frame_size_;
   static const uint32_t cmdbuf_aql_frame_num_;
   uint32_t node_id_;
-  std::vector<SegmentInfo> segment_infos_;
   //CmdUtil cmd_util;
 };
 

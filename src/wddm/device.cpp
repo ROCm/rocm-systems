@@ -40,9 +40,6 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#include <cinttypes>
-#include <bitset>
-
 #include <sys/mman.h>
 #include <sys/sysinfo.h>
 #include <sys/stat.h>
@@ -87,72 +84,6 @@ WDDMDevice::~WDDMDevice() {
   SetPowerOptimization(true);
 }
 
-bool WDDMDevice::QuerySegmentInfo()
-{
-  uint32_t segmentCount = 0;
-  segment_infos_.clear();
-
-  // Get the number of segments
-  D3DKMT_QUERYSTATISTICS adapterQuery = {};
-  adapterQuery.Type = D3DKMT_QUERYSTATISTICS_ADAPTER;
-  adapterQuery.AdapterLuid = GetLuid();
-
-  ErrorCode ret = dx::QueryStatistics(&adapterQuery);
-  if (ret == ErrorCode::Success) {
-    segmentCount = adapterQuery.QueryResult.AdapterInformation.NbSegments;
-    pr_debug("Total Segments: %u\n", segmentCount);
-  } else {
-    pr_err("Failed to query adapter info\n");
-    return false;
-  }
-
-  for (uint32_t i = 0; i < segmentCount; i++) {
-
-    D3DKMT_QUERYSTATISTICS segQuery = {};
-    segQuery.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
-    segQuery.AdapterLuid = GetLuid();
-    segQuery.QuerySegment.SegmentId = i;
-
-    ret = dx::QueryStatistics(&segQuery);
-    if (ret != ErrorCode::Success) {
-      pr_err("Failed to query segment %u info\n", i);
-      return false;
-    }
-
-    const auto& seg = segQuery.QueryResult.SegmentInformation;
-
-    SegmentInfo info;
-    info.segment_id = i;
-    info.segment_type = seg.SegmentProperties.SegmentType;
-    info.system_memory = seg.SegmentProperties.SystemMemory;
-    info.aperture = seg.Aperture;
-    info.commit_limit = seg.CommitLimit;
-
-    segment_infos_.push_back(info);
-
-    pr_info("segment %u: type %u system_memory %u aperture %u "
-            "commit_limit %" PRIu64 "MB bytes_resident %" PRIu64
-            "MB bytes_committed %" PRIu64 "MB\n",
-            i, info.segment_type, info.system_memory ? 1u : 0u,
-            info.aperture ? 1u : 0u, info.commit_limit >> 20,
-            seg.BytesResident >> 20, seg.BytesCommitted >> 20);
-  }
-
-  return true;
-}
-
-bool WDDMDevice::GetSegmentId(D3DKMT_QUERYSTATISTICS_SEGMENT_TYPE segment_type,
-                              uint32_t &segment_id) {
-  for (const auto& seg_info : segment_infos_) {
-    if (seg_info.segment_type == segment_type) {
-      segment_id = seg_info.segment_id;
-      return true;
-    }
-  }
-  pr_warn("Failed to get segment id for type %u\n", segment_type);
-  return false;
-}
-
 /*Local heap(dedicated GPU memory) includes visiable heap and invisiable heap.
  *Non local heap refers to shared GPU memory and it is sytem memory.
  */
@@ -167,150 +98,26 @@ ErrorCode WDDMDevice::VramAvail(uint64_t *avail) {
   if (!CpuWait(&page_syncobj_, &value, 1, false))
     return ErrorCode::Unknown;
 
-  // Segment group usage query requires WDDM 3.1+.
-  bool seg_fallback =
-      Platform::instance().WddmVersion() < KMT_DRIVERVERSION_WDDM_3_1;
-  bool segment_info_queried = false;
-  bool have_segment_info = false;
-
-  auto ensure_segment_info = [&]() -> bool {
-    if (segment_info_queried)
-      return have_segment_info;
-    segment_info_queried = true;
-    have_segment_info = QuerySegmentInfo();
-    return have_segment_info;
-  };
-
-  auto query_segment_usage = [this](uint32_t segment_id,
-                                    uint64_t *bytes_resident) -> ErrorCode {
-    D3DKMT_QUERYSTATISTICS seg_stats{};
-    seg_stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
-    seg_stats.AdapterLuid = GetLuid();
-    seg_stats.QuerySegment.SegmentId = segment_id;
-
-    ErrorCode seg_ret = dx::QueryStatistics(&seg_stats);
-    if (seg_ret != ErrorCode::Success) {
-      pr_err("Segment %u usage query failed (%d)\n", segment_id,
-             static_cast<int>(seg_ret));
-      *bytes_resident = 0;
-      return seg_ret;
-    }
-
-    *bytes_resident = seg_stats.QueryResult.SegmentInformation.BytesResident;
-    return ErrorCode::Success;
-  };
-
-  auto query_segment_group_usage = [this](uint32_t segment_group,
-                                          const char *name,
-                                          uint64_t *bytes_allocated) -> ErrorCode {
-    D3DKMT_QUERYSTATISTICS sg_stats{};
-    sg_stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT_GROUP_USAGE;
-    sg_stats.AdapterLuid = GetLuid();
-    sg_stats.QuerySegmentGroupUsage.PhysicalAdapterIndex = 0;
-    sg_stats.QuerySegmentGroupUsage.SegmentGroup = segment_group;
-
-    ErrorCode sg_ret = dx::QueryStatistics(&sg_stats);
-    if (sg_ret != ErrorCode::Success) {
-      *bytes_allocated = 0;
-      return sg_ret;
-    }
-
-    const auto &usage = sg_stats.QueryResult.SegmentGroupUsageInformation;
-    *bytes_allocated = usage.AllocatedBytes;
-    pr_info("%s segment group usage: allocated %" PRIu64 "MB, free %" PRIu64
-            "MB, zero %" PRIu64 "MB, modified %" PRIu64 "MB, standby %" PRIu64
-            "MB\n",
-            name, usage.AllocatedBytes >> 20, usage.FreeBytes >> 20,
-            usage.ZeroBytes >> 20, usage.ModifiedBytes >> 20,
-            usage.StandbyBytes >> 20);
-    return ErrorCode::Success;
-  };
-
-  auto resolve_segment_id =
-      [&](D3DKMT_QUERYSTATISTICS_SEGMENT_TYPE segment_type,
-          uint32_t hardcoded_id) -> uint32_t {
-    uint32_t segment_id = hardcoded_id;
-    if (ensure_segment_info() && GetSegmentId(segment_type, segment_id))
-      return segment_id;
-
-    pr_warn("[VramAvail] segment type %u not found, using hardcoded segment %u\n",
-            segment_type, hardcoded_id);
-    return hardcoded_id;
-  };
-
-  auto local_used = [&](uint64_t *used) -> ErrorCode {
-    if (!used)
-      return ErrorCode::InvalidPointer;
-
-    *used = 0;
-    if (!seg_fallback &&
-        query_segment_group_usage(D3DKMT_MEMORY_SEGMENT_GROUP_LOCAL, "Local",
-                                  used) == ErrorCode::Success)
-      return ErrorCode::Success;
-
-    if (!seg_fallback) {
-      pr_warn("Local segment group usage query failed, falling back to segment query\n");
-      seg_fallback = true;
-    }
-
-    uint32_t segment_id =
-        resolve_segment_id(D3DKMT_QUERYSTATISTICS_SEGMENT_TYPE_MEMORY, 0);
-
-    uint64_t vis = 0;
-    ErrorCode ret = query_segment_usage(segment_id, &vis);
-    if (ret != ErrorCode::Success)
-      return ret;
-    *used = vis;
-
-    if (LocalInvisibleHeapSize()) {
-      segment_id++;
-      uint64_t inv = 0;
-      ret = query_segment_usage(segment_id, &inv);
-      if (ret != ErrorCode::Success)
-        return ret;
-      *used += inv;
-    }
-    return ErrorCode::Success;
-  };
-
-  auto nonlocal_used = [&](uint64_t *used) -> ErrorCode {
-    if (!used)
-      return ErrorCode::InvalidPointer;
-
-    *used = 0;
-    if (!seg_fallback) {
-      if (query_segment_group_usage(D3DKMT_MEMORY_SEGMENT_GROUP_NON_LOCAL,
-                                    "Non-local", used) == ErrorCode::Success)
-        return ErrorCode::Success;
-
-      pr_warn("Non-local segment group usage query failed, falling back to segment query\n");
-    }
-
-    const uint32_t hardcoded_id = LocalInvisibleHeapSize() ? 4 : 3;
-    const uint32_t segment_id =
-        resolve_segment_id(D3DKMT_QUERYSTATISTICS_SEGMENT_TYPE_SYSMEM,
-                           hardcoded_id);
-    return query_segment_usage(segment_id, used);
-  };
-
-  uint64_t usedLocal = 0;
-  ErrorCode ret = local_used(&usedLocal);
+  uint64_t used_local = 0;
+  ErrorCode ret =
+      shared_dev_->QueryVramSegmentUsage(VramSegmentKind::kLocal, &used_local);
   if (ret != ErrorCode::Success)
     return ret;
 
   if (IsDgpu()) {
     const uint64_t total = LocalHeapSize();
-    *avail = usedLocal >= total ? 0 : total - usedLocal;
+    *avail = used_local >= total ? 0 : total - used_local;
     return ErrorCode::Success;
   }
 
-  uint64_t usedNonLocal = 0;
-  ret = nonlocal_used(&usedNonLocal);
+  uint64_t used_non_local = 0;
+  ret = shared_dev_->QueryVramSegmentUsage(VramSegmentKind::kNonLocal,
+                                           &used_non_local);
   if (ret != ErrorCode::Success)
     return ret;
 
   const uint64_t total = LocalHeapSize() + NonLocalHeapSize();
-  const uint64_t used = usedLocal + usedNonLocal;
+  const uint64_t used = used_local + used_non_local;
   *avail = used >= total ? 0 : total - used;
   return ErrorCode::Success;
 }

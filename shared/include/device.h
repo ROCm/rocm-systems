@@ -1,6 +1,7 @@
 #ifndef _WSL_SHARED_INC_DEVICE_H_
 #define _WSL_SHARED_INC_DEVICE_H_
 
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -13,6 +14,20 @@ namespace wsl {
 namespace thunk {
 
 constexpr gpusize PageSize = 0x1000u;
+
+// WDDM memory segment buckets used for VRAM availability accounting.
+enum class VramSegmentKind : uint8_t {
+  kFb,        // local visible (framebuffer)
+  kInvFb,     // local invisible
+  kLocal,     // kFb + kInvFb (local heap)
+  kNonLocal,  // shared system memory segment
+};
+
+struct VramSegmentIds {
+  uint32_t fb = 0;
+  uint32_t inv_fb = 1;
+  uint32_t non_local = 3;
+};
 
 class Platform;
 class LdaChain;
@@ -39,8 +54,10 @@ public:
 
   ErrorCode QueryVBiosInfo(VBiosInfo *info) const;
 
-  // Called once after creation to pre-fetch sensor limits.
   ErrorCode Init();
+
+  // Query resident bytes for a VRAM segment bucket (see VramSegmentKind).
+  ErrorCode QueryVramSegmentUsage(VramSegmentKind kind, uint64_t *usage) const;
 
   ErrorCode QueryPowerInfo(PowerInfo *info) const;
 
@@ -137,9 +154,12 @@ private:
   Device(Platform *platform, LdaChain *lda_chain, u32 chainIndex,
          std::unique_ptr<thunk_proxy::DeviceContext> device_ctx);
 
+  ErrorCode InitSegmentIds();
+
   std::unique_ptr<thunk_proxy::DeviceContext> device_ctx_;
   LdaChain *const lda_chain_ = nullptr;
   const u32       chain_index_ = 0;
+  VramSegmentIds segment_ids_{};
 };
 
 } // namespace thunk

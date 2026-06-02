@@ -1,13 +1,115 @@
 #include "shared/include/thunks.h"
 #include "shared/include/device.h"
 #include "shared/include/lda_chain.h"
+#include "shared/include/platform.h"
 #include "shared/include/thunk_proxy/thunk_proxy.h"
+#include <limits>
 #include <memory>
+#include <vector>
 
 using namespace std;
 
 namespace wsl {
 namespace thunk {
+
+namespace dx = wsl::thunk::d3dthunk;
+
+namespace {
+
+constexpr uint32_t kInvalidSegmentId = std::numeric_limits<uint32_t>::max();
+
+struct SegmentInfo {
+  uint32_t segment_id = 0;
+  uint32_t segment_type = 0;
+};
+
+ErrorCode QueryAllSegments(LUID luid, std::vector<SegmentInfo> *segments) {
+  if (!segments)
+    return ErrorCode::InvalidPointer;
+
+  segments->clear();
+
+  D3DKMT_QUERYSTATISTICS adapter_query{};
+  adapter_query.Type = D3DKMT_QUERYSTATISTICS_ADAPTER;
+  adapter_query.AdapterLuid = luid;
+
+  ErrorCode ret = dx::QueryStatistics(&adapter_query);
+  if (ret != ErrorCode::Success)
+    return ret;
+
+  const uint32_t segment_count =
+      adapter_query.QueryResult.AdapterInformation.NbSegments;
+
+  for (uint32_t i = 0; i < segment_count; i++) {
+    D3DKMT_QUERYSTATISTICS seg_query{};
+    seg_query.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
+    seg_query.AdapterLuid = luid;
+    seg_query.QuerySegment.SegmentId = i;
+
+    ret = dx::QueryStatistics(&seg_query);
+    if (ret != ErrorCode::Success)
+      return ret;
+
+    const auto &seg = seg_query.QueryResult.SegmentInformation;
+    SegmentInfo info;
+    info.segment_id = i;
+    info.segment_type = seg.SegmentProperties.SegmentType;
+    segments->push_back(info);
+  }
+
+  return ErrorCode::Success;
+}
+
+bool ResolveSegmentId(const std::vector<SegmentInfo> &segments,
+                      D3DKMT_QUERYSTATISTICS_SEGMENT_TYPE segment_type,
+                      uint32_t default_id, uint32_t *segment_id) {
+  for (const auto &seg : segments) {
+    if (seg.segment_type == segment_type) {
+      *segment_id = seg.segment_id;
+      return true;
+    }
+  }
+  *segment_id = default_id;
+  return false;
+}
+
+ErrorCode QuerySegmentGroupUsage(LUID luid, uint32_t segment_group,
+                                 uint64_t *bytes_allocated) {
+  D3DKMT_QUERYSTATISTICS stats{};
+  stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT_GROUP_USAGE;
+  stats.AdapterLuid = luid;
+  stats.QuerySegmentGroupUsage.PhysicalAdapterIndex = 0;
+  stats.QuerySegmentGroupUsage.SegmentGroup = segment_group;
+
+  const ErrorCode ret = dx::QueryStatistics(&stats);
+  if (ret != ErrorCode::Success) {
+    *bytes_allocated = 0;
+    return ret;
+  }
+
+  *bytes_allocated =
+      stats.QueryResult.SegmentGroupUsageInformation.AllocatedBytes;
+  return ErrorCode::Success;
+}
+
+ErrorCode QuerySegmentBytesResident(LUID luid, uint32_t segment_id,
+                                    uint64_t *bytes_resident) {
+  D3DKMT_QUERYSTATISTICS stats{};
+  stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
+  stats.AdapterLuid = luid;
+  stats.QuerySegment.SegmentId = segment_id;
+
+  const ErrorCode ret = dx::QueryStatistics(&stats);
+  if (ret != ErrorCode::Success) {
+    *bytes_resident = 0;
+    return ret;
+  }
+
+  *bytes_resident = stats.QueryResult.SegmentInformation.BytesResident;
+  return ErrorCode::Success;
+}
+
+} // namespace
 
 Device::Device(Platform *platform, LdaChain *lda_chain, u32 chainIndex,
                std::unique_ptr<thunk_proxy::DeviceContext> device_ctx)
@@ -63,7 +165,104 @@ ErrorCode Device::QueryVBiosInfo(VBiosInfo *info) const {
 }
 
 ErrorCode Device::Init() {
-  return device_ctx_->Init();
+  ErrorCode ret = device_ctx_->Init();
+  if (ret != ErrorCode::Success)
+    return ret;
+  return InitSegmentIds();
+}
+
+ErrorCode Device::InitSegmentIds() {
+  // Default to hardcoded segment ids; these act as fallbacks when the
+  // runtime segment query is unavailable or fails.
+  segment_ids_.fb = 0;
+  segment_ids_.inv_fb = LocalInvisibleHeapSize() ? 1 : kInvalidSegmentId;
+  segment_ids_.non_local = LocalInvisibleHeapSize() ? 4 : 3;
+
+  if (Platform::instance().WddmVersion() >= KMT_DRIVERVERSION_WDDM_3_1) {
+    const LUID luid = AdapterLuid();
+    std::vector<SegmentInfo> segments;
+    if (QueryAllSegments(luid, &segments) != ErrorCode::Success) {
+      // Keep hardcoded fallback ids
+      return ErrorCode::Success;
+    }
+
+    ResolveSegmentId(segments, D3DKMT_QUERYSTATISTICS_SEGMENT_TYPE_MEMORY, segment_ids_.fb,
+                    &segment_ids_.fb);
+
+    if (LocalInvisibleHeapSize())
+      segment_ids_.inv_fb = segment_ids_.fb + 1;
+
+    ResolveSegmentId(segments, D3DKMT_QUERYSTATISTICS_SEGMENT_TYPE_SYSMEM,
+                    segment_ids_.non_local, &segment_ids_.non_local);
+  }
+
+  return ErrorCode::Success;
+}
+
+ErrorCode Device::QueryVramSegmentUsage(VramSegmentKind kind,
+                                        uint64_t *usage) const {
+  if (!usage)
+    return ErrorCode::InvalidPointer;
+
+  *usage = 0;
+
+  if (kind == VramSegmentKind::kInvFb &&
+      segment_ids_.inv_fb == kInvalidSegmentId)
+    return ErrorCode::Success;
+
+  const LUID luid = AdapterLuid();
+  const bool seg_group_supported =
+      Platform::instance().WddmVersion() >= KMT_DRIVERVERSION_WDDM_3_1;
+
+  if (kind == VramSegmentKind::kLocal && seg_group_supported) {
+    ErrorCode ret = QuerySegmentGroupUsage(
+        luid, D3DKMT_MEMORY_SEGMENT_GROUP_LOCAL, usage);
+    if (ret == ErrorCode::Success)
+      return ErrorCode::Success;
+  }
+
+  if (kind == VramSegmentKind::kNonLocal && seg_group_supported) {
+    ErrorCode ret = QuerySegmentGroupUsage(
+        luid, D3DKMT_MEMORY_SEGMENT_GROUP_NON_LOCAL, usage);
+    if (ret == ErrorCode::Success)
+      return ErrorCode::Success;
+  }
+
+  if (kind == VramSegmentKind::kLocal) {
+    uint64_t fb = 0;
+    ErrorCode ret =
+        QuerySegmentBytesResident(luid, segment_ids_.fb, &fb);
+    if (ret != ErrorCode::Success)
+      return ret;
+
+    *usage = fb;
+    if (segment_ids_.inv_fb == kInvalidSegmentId)
+      return ErrorCode::Success;
+
+    uint64_t inv = 0;
+    ret = QuerySegmentBytesResident(luid, segment_ids_.inv_fb, &inv);
+    if (ret != ErrorCode::Success)
+      return ret;
+    *usage += inv;
+    return ErrorCode::Success;
+  }
+
+  uint32_t segment_id = 0;
+  switch (kind) {
+  case VramSegmentKind::kFb:
+    segment_id = segment_ids_.fb;
+    break;
+  case VramSegmentKind::kInvFb:
+    segment_id = segment_ids_.inv_fb;
+    break;
+  case VramSegmentKind::kNonLocal:
+    segment_id = segment_ids_.non_local;
+    break;
+  default:
+    return ErrorCode::InvalidParams;
+  }
+
+  return QuerySegmentBytesResident(luid, segment_id, usage);
 }
 
 ErrorCode Device::QueryPowerInfo(PowerInfo *info) const {
