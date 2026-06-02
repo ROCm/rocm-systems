@@ -94,27 +94,6 @@ pub mod store {
         crate::state::write_json(&p, topology)?;
         Ok(p)
     }
-
-    /// Write the supplied builtin topologies to disk.
-    ///
-    /// Topology definitions are supplied by the `mirage_builtin`
-    /// crate; this function owns only the on-disk store policy.
-    pub fn write_builtins(
-        builtins: &[(&str, TopologyDef)],
-        force: bool,
-    ) -> Result<Vec<(String, bool)>> {
-        let mut report = Vec::new();
-        for (name, topology) in builtins {
-            let p = crate::paths::topology_path(name);
-            if p.exists() && !force {
-                report.push((name.to_string(), false));
-                continue;
-            }
-            crate::state::write_json(&p, topology)?;
-            report.push((name.to_string(), true));
-        }
-        Ok(report)
-    }
 }
 
 #[cfg(test)]
@@ -131,29 +110,5 @@ mod tests {
         };
         assert_eq!(t.total_nodes(), 8);
         assert_eq!(t.total_gpus(), 64);
-    }
-
-    #[test]
-    fn write_builtins_writes_then_skips() {
-        let _g = crate::paths::test_env_lock();
-        let tmp = tempfile::tempdir().unwrap();
-        crate::paths::set_test_root(tmp.path());
-
-        let builtins = [(
-            "single",
-            TopologyDef {
-                racks: 1,
-                nodes_per_rack: 1,
-                gpus_per_node: 1,
-                agent: MaybeRef::Ref("noop".to_string()),
-            },
-        )];
-
-        let first = store::write_builtins(&builtins, false).unwrap();
-        assert!(!first.is_empty(), "expected at least one builtin topology");
-        assert!(first.iter().all(|(_, w)| *w));
-
-        let second = store::write_builtins(&builtins, false).unwrap();
-        assert!(second.iter().all(|(_, w)| !*w));
     }
 }
