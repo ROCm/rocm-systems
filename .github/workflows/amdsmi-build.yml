@@ -95,35 +95,21 @@ jobs:
             --os-label "${{ matrix.os }}" \
             --test-results-dir "/tmp/test-results-${{ matrix.os }}"
 
-      - name: AMDSMI Build Result
-        if: always()
+      # The previous step exits non-zero if any build/install/wheel-verify
+      # stage failed; on failure we dump the per-stage result files for
+      # quick triage in the GitHub Actions log. Full logs are still
+      # uploaded via the test-results artifact below.
+      - name: Dump build/install/wheel result files on failure
+        if: failure()
         run: |
-          set -euo pipefail
-          RESULT="/tmp/test-results-${{ matrix.os }}/build_result.txt"
-          if [ -f "$RESULT" ]; then
-            cat "$RESULT"
-            grep -q "FAILED" "$RESULT" && echo "::error::Build FAILED for ${{ matrix.os }}" || true
-          fi
-
-      - name: AMDSMI Installation Result
-        if: always()
-        run: |
-          set -euo pipefail
-          RESULT="/tmp/test-results-${{ matrix.os }}/install_result.txt"
-          if [ -f "$RESULT" ]; then
-            cat "$RESULT"
-            grep -q "FAILED" "$RESULT" && echo "::error::Installation FAILED for ${{ matrix.os }}" || true
-          fi
-
-      - name: Verify Wheel Site-Packages Result
-        if: always()
-        run: |
-          set -euo pipefail
-          RESULT="/tmp/test-results-${{ matrix.os }}/verify_wheel_result.txt"
-          if [ -f "$RESULT" ]; then
-            cat "$RESULT"
-            grep -q "FAILED" "$RESULT" && echo "::error::Wheel verification FAILED for ${{ matrix.os }}" || true
-          fi
+          set +e
+          for f in build_result.txt install_result.txt verify_wheel_result.txt; do
+            path="/tmp/test-results-${{ matrix.os }}/$f"
+            if [ -f "$path" ]; then
+              echo "===== $f ====="
+              cat "$path"
+            fi
+          done
 
       - name: Upload Package Artifact
         if: github.event_name == 'pull_request'

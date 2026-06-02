@@ -506,6 +506,82 @@ def install_build_prereqs(cfg: "RunnerConfig") -> None:
         )
 
 
+def install_netlink_deps(cfg: "RunnerConfig") -> None:
+    """Install libnl-3 / libmnl development headers used by amdsmi's CMake.
+
+    CMakeLists.txt requires libnl-3.0 and libmnl via pkg_check_modules. Most
+    base container images do not ship these, so install them here. No-op if
+    pkg-config can already locate both modules.
+    """
+    pkg_config = shutil.which("pkg-config")
+    if pkg_config:
+        try:
+            subprocess.check_call(
+                [pkg_config, "--exists", "libnl-3.0", "libmnl"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return
+        except subprocess.CalledProcessError:
+            pass
+
+    print("Installing netlink development headers (libnl-3, libmnl)...")
+    if cfg.package_manager == "apt":
+        if cfg.refresh_apt:
+            run_command(
+                ["apt-get", "update"],
+                name="apt-update-netlink",
+                retries=cfg.retries,
+                log_dir=cfg.log_dir,
+            )
+        run_command(
+            [
+                "apt-get",
+                "install",
+                "-y",
+                "--no-install-recommends",
+                "libnl-3-dev",
+                "libnl-genl-3-dev",
+                "libmnl-dev",
+            ],
+            name="apt-install-netlink",
+            retries=cfg.retries,
+            log_dir=cfg.log_dir,
+        )
+    elif cfg.package_manager == "dnf":
+        # AzureLinux 3 ships tdnf; prefer it when present, fall back to dnf.
+        is_tdnf = bool(shutil.which("tdnf"))
+        installer = "tdnf" if is_tdnf else "dnf"
+        cmd = [installer, "install", "-y", "--setopt=skip_if_unavailable=True"]
+        # AzureLinux 3 CI containers ship a tdnfrepogpgcheck plugin that
+        # rejects all repo metadata when the Azure Linux GPG keys are
+        # missing/expired, which disables every repo before install can run.
+        # --noplugins skips that check; --nogpgcheck covers package-level
+        # signing if that also trips.
+        if is_tdnf:
+            cmd += ["--noplugins", "--nogpgcheck"]
+        cmd += ["libnl3-devel", "libmnl-devel"]
+        run_command(
+            cmd,
+            name=f"{installer}-install-netlink",
+            retries=cfg.retries,
+            log_dir=cfg.log_dir,
+        )
+    elif cfg.package_manager == "zypper":
+        run_command(
+            [
+                "zypper",
+                "--non-interactive",
+                "install",
+                "libnl3-devel",
+                "libmnl-devel",
+            ],
+            name="zypper-install-netlink",
+            retries=cfg.retries,
+            log_dir=cfg.log_dir,
+        )
+
+
 def clean_stale_artifacts(log_dir: Path) -> None:
     """Remove SWIG-based .so baked into Docker images.
 
@@ -566,17 +642,44 @@ def repair_cmake(log_dir: Path) -> None:
 
 
 def update_debian10_sources(log_dir: Path, retries: int) -> None:
+    # buster-backports provides newer linux-libc-dev (kernel >= 5.10) which
+    # supplies <linux/time_types.h> that ualoe_lib requires. Without it the
+    # build dies on Debian 10's 4.19-based headers.
     content = (
         "deb http://archive.debian.org/debian buster main\n"
         "deb http://archive.debian.org/debian-security buster/updates main\n"
+        "deb http://archive.debian.org/debian buster-backports main\n"
     )
     sources_list = Path("/etc/apt/sources.list")
-    print("Updating sources.list for Debian10 (archived repos)")
+    print("Updating sources.list for Debian10 (archived repos + backports)")
     sources_list.write_text(content, encoding="utf-8")
     Path("/etc/apt/apt.conf.d/99-disable-check-valid-until").write_text(
         'Acquire::Check-Valid-Until "false";\n', encoding="utf-8"
     )
     run_command(["apt", "update"], name="apt-update", retries=retries, log_dir=log_dir)
+
+
+def install_debian10_kernel_headers(log_dir: Path, retries: int) -> None:
+    """Pull linux-libc-dev from buster-backports for newer UAPI headers.
+
+    Required so that ualoe_lib (which unconditionally includes
+    <linux/time_types.h>, added to UAPI in kernel 5.1) builds on Debian 10.
+    """
+    print("Installing linux-libc-dev from buster-backports for newer UAPI headers")
+    run_command(
+        [
+            "apt-get",
+            "install",
+            "-y",
+            "--no-install-recommends",
+            "-t",
+            "buster-backports",
+            "linux-libc-dev",
+        ],
+        name="apt-install-linux-libc-dev-backports",
+        retries=retries,
+        log_dir=log_dir,
+    )
 
 
 def _mark_safe_git_dir(path: Path) -> None:
@@ -1152,6 +1255,7 @@ def main() -> None:
         print("Warning: --debian10-sources ignored because package manager is not apt")
     if cfg.debian10_sources:
         update_debian10_sources(cfg.log_dir, cfg.retries)
+        install_debian10_kernel_headers(cfg.log_dir, cfg.retries)
 
     # 2. Install more_itertools if requested (e.g. AzureLinux3)
     if cfg.install_more_itertools:
@@ -1169,6 +1273,9 @@ def main() -> None:
 
     # 4b. Ensure cmake + toolchain exist (some base images ship without cmake)
     install_build_prereqs(cfg)
+
+    # 4c. Install libnl-3 / libmnl headers required by amdsmi's CMake config.
+    install_netlink_deps(cfg)
 
     # 5. Build
     if not cfg.skip_build:
