@@ -46,11 +46,14 @@ inline int rcclLL128DataElemsFromArch(char const* arch) {
   return rcclLL128LineElemsFromArch(arch) - 1;
 }
 
-/* Host Code: gfx12xx uses 120 (= 8 lines * 15 dataElems) for its 128-byte non-tearing
- * line support, matching the 8 lines-per-thread layout used by NCCL upstream.
- * gfx9xx uses 28 (= 4 lines * 7 dataElems) for 64-byte lines. */
+/* Host Code: lines per thread is 8 on gfx12xx (matches NCCL upstream's 128 byte
+ * non tearing line layout) and 4 on gfx9xx (64 byte lines). Total elems per
+ * thread is linesPerThread * dataElemsPerLine, so gfx12xx = 8 * 15 = 120 and
+ * gfx9xx = 4 * 7 = 28. Derived from rcclLL128DataElemsFromArch so the value
+ * stays in sync if the line size ever changes. */
 inline int rcclLL128ElemsPerThreadFromArch(char const* arch) {
-  return IsArchMatch(arch, "gfx1250") ? 120 : 28;
+  int linesPerThread = IsArchMatch(arch, "gfx1250") ? 8 : 4;
+  return linesPerThread * rcclLL128DataElemsFromArch(arch);
 }
 
 #endif // ARCHINFO_H
