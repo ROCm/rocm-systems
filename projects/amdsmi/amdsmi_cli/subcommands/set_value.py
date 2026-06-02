@@ -395,17 +395,17 @@ class SetValueCommands:
         if args.cpu_xgmi_link_width:
             static_dict["set_xgmi_link_width"] = {}
             if (
-                  args.cpu_xgmi_link_width[0][0] < 0
-                  or args.cpu_xgmi_link_width[0][0] > 1
-                  or args.cpu_xgmi_link_width[0][1] < 0
-                  or args.cpu_xgmi_link_width[0][1] > 1
-              ):
-                  static_dict["set_xgmi_link_width"]["Warning_MSG"] = (
-                      f"minimum and maximum width values should be in range 0 to 1"
-                  )
-                  self.logger.store_cpu_output(args.cpu, "values", static_dict)
-                  self.logger.print_output()
-                  return
+                args.cpu_xgmi_link_width[0][0] < 0
+                or args.cpu_xgmi_link_width[0][0] > 1
+                or args.cpu_xgmi_link_width[0][1] < 0
+                or args.cpu_xgmi_link_width[0][1] > 1
+            ):
+                static_dict["set_xgmi_link_width"]["Warning_MSG"] = (
+                    f"minimum and maximum width values should be in range 0 to 1"
+                )
+                self.logger.store_cpu_output(args.cpu, "values", static_dict)
+                self.logger.print_output()
+                return
             try:
                 amdsmi_interface.amdsmi_set_cpu_xgmi_width(
                     args.cpu, args.cpu_xgmi_link_width[0][0], args.cpu_xgmi_link_width[0][1]
@@ -430,10 +430,10 @@ class SetValueCommands:
                 or args.cpu_lclk_dpm_level[0][1] > 3
                 or args.cpu_lclk_dpm_level[0][2] < 0
                 or args.cpu_lclk_dpm_level[0][2] > 3
-              ):
+            ):
                 static_dict["set_lclk_dpm_level"]["Warning_MSG"] = (
                     f"Die index, MIN_DPM, MAX_DPM should be in range 0 to 3"
-                  )
+                )
                 self.logger.store_cpu_output(args.cpu, "values", static_dict)
                 self.logger.print_output()
                 return
