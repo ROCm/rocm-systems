@@ -293,7 +293,7 @@ def extract_gpu_info(gpu_arch: Optional[str]) -> dict[str, Any]:
     is_partition_supported = False
     if gpu_arch and gpu_arch.startswith("gfx") and len(gpu_arch) >= 6:
         try:
-            is_partition_supported = int(gpu_arch[3:6], 16) >= 0x940
+            is_partition_supported = int(gpu_arch[3:6]) >= 940
         except ValueError:
             pass  # Invalid hex string, keep is_partition_supported as False
 
