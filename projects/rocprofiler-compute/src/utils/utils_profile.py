@@ -279,7 +279,7 @@ def run_prof(
                 process_kokkos_trace_output(workload_dir, fbase)
         # Add torch operator trace processing
         if torch_trace_enabled:
-            # move counter collection and marker trace to workload dir
+            # copy counter collection and marker trace to workload dir
             save_torch_trace_inputs(workload_dir, fbase)
         # Combine results into single CSV file
         if results_files:
@@ -824,7 +824,7 @@ def save_torch_trace_inputs(
     fbase: str,
 ) -> None:
     """
-    Move counter_collection and marker_api_trace data to workload_dir,
+    Copy counter_collection and marker_api_trace data to workload_dir,
     for creation of PyTorch operator trace in Analyze mode.
     """
     src_dir = Path(workload_dir) / "out" / "pmc_1"

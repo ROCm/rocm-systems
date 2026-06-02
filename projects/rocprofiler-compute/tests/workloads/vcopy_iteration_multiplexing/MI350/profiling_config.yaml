@@ -4,7 +4,7 @@ config_dir: /home/abchoudh/rocm/iteration_multiplexing/projects/rocprofiler-comp
 device: 0
 dispatch: null
 filter_blocks: []
-format_rocprof_output: csv
+format_rocprof_output: rocpd
 iteration_multiplexing: kernel
 join_type: grid
 kernel: null

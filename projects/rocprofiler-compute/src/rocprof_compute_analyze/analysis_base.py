@@ -400,14 +400,18 @@ class OmniAnalyze_Base:
     def join_prof(
         self, workload_dir: Path, out: Optional[str] = None
     ) -> Optional[pd.DataFrame]:
-        """Join separated profiler outputs into single pmc_perf.csv.
+        """Join separated profiler outputs into a single pmc_perf.csv.
 
         Args:
             workload_dir: Path to workload directory containing profile outputs
             out: Optional output file path (defaults to workload_dir/pmc_perf.csv)
 
         Returns:
-            DataFrame if called programmatically, None if saving to file
+            For rocpd pass databases, the wide PMC DataFrame (also written to
+            ``pmc_perf.csv``) so callers can reuse it without re-reading the
+            file. Returns ``None`` for the CSV-join paths (legacy
+            ``results_*.csv`` fallback and the non-rocpd format), which only
+            write ``pmc_perf.csv``.
         """
         output_file = out or str(workload_dir / "pmc_perf.csv")
 
@@ -688,7 +692,7 @@ class OmniAnalyze_Base:
                 console_debug(f"Using existing {pmc_perf}")
                 return None
             if list(directory.glob("results_*.csv")):
-                console_log(f"Joining rocpd results_*.csv for {directory}...")
+                console_log(f"Joining legacy rocpd results_*.csv for {directory}...")
                 self.join_prof(directory, out=str(pmc_perf))
                 if pmc_perf.exists():
                     console_log(f"Created {pmc_perf}")

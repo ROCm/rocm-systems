@@ -20,6 +20,11 @@ choose.
    analyze still merges separate counter collection CSV files into the same
    ``pmc_perf.csv`` artifact.
 
+   If a rocpd workload predates ``.db`` output and contains only legacy
+   ``results_*.csv`` files, analyze falls back to joining those into
+   ``pmc_perf.csv`` and emits a deprecation warning recommending that you
+   re-profile with a ROCm version that produces rocpd databases.
+
 See the following sections to explore ROCm Compute Profiler's analysis and visualization
 options.
 

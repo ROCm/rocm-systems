@@ -910,6 +910,11 @@ def normalize_rocpd_counter_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
 
+    # Align dispatches across passes by Pass_ID, not PID: each replay pass is a
+    # separate process launch, so PID is not stable across passes. Within a
+    # pass, dispatches are aligned positionally by Start_Timestamp order, which
+    # matches the legacy per-pass assign_group_ids behavior in develop. PID is
+    # only used as a fallback for inputs that predate Pass_ID tagging.
     pass_group_columns: list[str] = []
     if "Pass_ID" in df.columns:
         pass_group_columns.append("Pass_ID")

@@ -37,6 +37,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
     `--format-rocprof-output csv` remains supported for environments without
     rocpd support and for paths such as PC sampling that still use CSV/JSON
     outputs.
+  * `rocprof-compute analyze` falls back to joining legacy `results_*.csv`
+    files into `pmc_perf.csv` when a rocpd workload has no pass `.db` files,
+    emitting a deprecation warning recommending a re-profile.
 
 * Reworded the N/A metric-evaluation warning to "divide-by-zero or empty counter data" (the prior "missing counter data" message could only fire for non-missing causes).
 

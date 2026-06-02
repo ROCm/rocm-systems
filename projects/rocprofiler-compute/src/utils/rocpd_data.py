@@ -126,6 +126,12 @@ def get_rocpd_pass_db_paths(workload_dir: Path) -> list[Path]:
     return pass_db_paths
 
 
+def get_expected_pass_count(workload_dir: Path) -> int:
+    """Return the number of perfmon pass configs profiled for this workload."""
+    perfmon_dir = workload_dir / "perfmon"
+    return len(list(perfmon_dir.glob("pmc_perf*.yaml")))
+
+
 def has_counter_collection_rows(db_path: Path) -> bool:
     """Return whether a rocpd pass DB exposes counter collection rows.
 

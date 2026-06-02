@@ -21,17 +21,17 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.utils_common import normalize_filter_to_str_list
+from utils.utils_common import canonical_config_arch, normalize_filter_to_str_list
 
 # TODO: use pandas chunksize or dask to read really large csv file
 # from dask import dataframe as dd
 
 
-def load_sys_info(f: str) -> pd.DataFrame:
+def load_sys_info(filepath: str) -> pd.DataFrame:
     """
     Load sys running info from csv file to a df.
     """
-    return pd.read_csv(f)
+    return pd.read_csv(filepath)
 
 
 def load_panel_configs(
@@ -287,6 +287,14 @@ def write_pmc_perf_from_rocpd(
     if not pass_db_paths:
         return None
 
+    expected_passes = rocpd_data.get_expected_pass_count(workload_dir)
+    if expected_passes and len(pass_db_paths) < expected_passes:
+        console_warning(
+            f"Found {len(pass_db_paths)} of {expected_passes} expected rocpd "
+            f"pass databases in {workload_dir}. Analysis will proceed with the "
+            "available passes, but counter coverage may be incomplete."
+        )
+
     counter_df = _read_rocpd_counter_dataframes(pass_db_paths)
     if counter_df.empty:
         return None
@@ -316,9 +324,10 @@ def _read_rocpd_counter_dataframes(pass_db_paths: list[Path]) -> pd.DataFrame:
     """Read all pass DBs into one long-form counter DataFrame.
 
     Pass DBs are read concurrently across processes using
-    ``ProcessPoolExecutor``. Process-level parallelism (rather than threads)
-    is required. For workloads with a single pass DB or non-rocpd format, this
-    falls back to the serial path to avoid the process-spawn overhead.
+    ``ProcessPoolExecutor``: sqlite and pandas are GIL-bound on these
+    workloads, so process-level parallelism (rather than threads) is required.
+    A single pass DB is read on the serial path to avoid process-spawn
+    overhead.
     """
     sorted_paths = sorted(pass_db_paths)
     if not sorted_paths:
@@ -371,14 +380,14 @@ def create_df_pmc(
         if preloaded_df is None and not pmc_perf_path.is_file():
             return pd.DataFrame()
 
-        df = (
-            preloaded_df.copy()
-            if preloaded_df is not None
-            else pd.read_csv(pmc_perf_path)
-        )
-
-        if config_dict.get("format_rocprof_output") == "rocpd":
-            df = utils_analysis.process_rocpd_csv(df)
+        if preloaded_df is not None:
+            # Preloaded frames are already wide (pivoted by
+            # build_rocpd_pmc_dataframe), so skip re-processing them.
+            df = preloaded_df.copy()
+        else:
+            df = pd.read_csv(pmc_perf_path)
+            if config_dict.get("format_rocprof_output") == "rocpd":
+                df = utils_analysis.process_rocpd_csv(df)
 
         if df.empty:
             return df
@@ -486,7 +495,9 @@ def is_single_panel_config(
     archs, or one for each arch.
     """
     # If not single config, verify all supported archs have defined configs
-    arch_names = list(supported_archs.keys())
+    arch_names = {
+        canonical_config_arch(arch) or arch for arch in supported_archs.keys()
+    }
     root_path = Path(root_dir)
     arch_count = sum(1 for arch in arch_names if (root_path / arch).exists())
 

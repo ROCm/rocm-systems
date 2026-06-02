@@ -6,7 +6,7 @@ dispatch: null
 experimental: false
 filter_blocks:
 - '21'
-format_rocprof_output: csv
+format_rocprof_output: rocpd
 iteration_multiplexing: null
 join_type: grid
 kernel: null

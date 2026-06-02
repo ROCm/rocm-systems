@@ -307,9 +307,18 @@ class db_analysis(OmniAnalyze_Base):
         args = self.get_args()
 
         for workload_path in self._runs.keys():
-            preloaded_pmc_df = self._joined_pmc_df_by_directory.get(
-                str(Path(workload_path).resolve())
-            )
+            resolved_path = str(Path(workload_path).resolve())
+            preloaded_pmc_df = self._joined_pmc_df_by_directory.get(resolved_path)
+            if preloaded_pmc_df is None:
+                # Multi-node / spatial-multiplexing preloads are keyed by
+                # subdirectory; gather and concatenate them for the workload.
+                subdir_frames = [
+                    frame
+                    for directory, frame in self._joined_pmc_df_by_directory.items()
+                    if str(Path(directory).parent) == resolved_path
+                ]
+                if subdir_frames:
+                    preloaded_pmc_df = pd.concat(subdir_frames, ignore_index=True)
             if preloaded_pmc_df is not None:
                 pmc_df = preloaded_pmc_df.copy()
             elif not (Path(workload_path) / "pmc_perf.csv").exists():
