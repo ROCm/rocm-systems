@@ -820,7 +820,7 @@ public:
                         }
 
                         bool bIsWGPcounter11 = Primitives::GFXIP_LEVEL == 11 &&
-                                               (block_info->attr & (CounterBlockSqAttr | CounterBlockWgpAttr))
+                                               (block_info->attr & CounterBlockWgpAttr);
                         bool bIsWGPcounter12 = Primitives::GFXIP_LEVEL >= 12 &&
                                                (block_info->attr & CounterBlockWgpAttr);
 
