@@ -148,6 +148,11 @@ static inline bool bootstrapNetEnabledEffective(int nranks) {
 // overhead must be amortised over enough ranks. Defaults are documented above.
 //
 // Exposed (non-static) so test/BootstrapBidirTests.cpp can verify the env-var contract.
+// The visibility("hidden") attribute keeps the symbol off librccl.so's exported
+// dynsym table even in BUILD_TESTS=ON Debug builds (which globally relax visibility
+// to let tests link against internal helpers). Defense-in-depth on top of the
+// production -fvisibility=hidden flag — see src/CMakeLists.txt visibility block.
+__attribute__((visibility("hidden")))
 bool bootstrapBidirEnabled(int nranks, int kind) {
   if (nranks < 3) return false;
   bool netOn = bootstrapNetEnabledEffective(nranks);
@@ -161,6 +166,9 @@ bool bootstrapBidirEnabled(int nranks, int kind) {
     int64_t thr = ncclParamBootstrapBidirThreshold();
     return thr > 0 && nranks >= (int)thr;
   }
+  // Any unrecognised kind (negative, >=2, etc.) falls through to false.
+  // This is the contract verified by BootstrapBidir.UnknownKind_ReturnsFalse:
+  // callers adding a third transport must extend this gate explicitly.
   return false;
 }
 

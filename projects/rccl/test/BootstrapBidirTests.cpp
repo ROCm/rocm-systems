@@ -6,12 +6,11 @@
 
 // Unit tests for the bootstrap bidirectional AllGather gating contract.
 //
-// Branch users/ilkosare/sock-bidir-default-on flipped NCCL_BOOTSTRAP_BIDIR_ALLGATHER
-// from 0 to 1 (socket bidir on by default) while leaving NCCL_OOB_NET_ENABLE and
-// NCCL_BOOTSTRAP_BIDIR_NET off. The pure helper `bootstrapBidirEnabled(nranks, kind)`
+// Socket bidir is on by default (NCCL_BOOTSTRAP_BIDIR_ALLGATHER=1); net OOB and
+// net bidir are off by default. The helper `bootstrapBidirEnabled(nranks, kind)`
 // in src/bootstrap.cc is the single source of truth that bootstrapInit,
 // bootstrapAllGather and bootstrapClose all consult; if its contract drifts the
-// runtime quietly diverges between setup and teardown.
+// runtime quietly diverges between setup and teardown, hence these tests pin it.
 //
 // Each case runs in an isolated process (via RUN_ISOLATED_TEST_WITH_ENV) because
 // NCCL_PARAM caches the env value on first read for the lifetime of the process,
@@ -19,10 +18,9 @@
 
 #include <gtest/gtest.h>
 #include "common/ProcessIsolatedTestRunner.hpp"
-
-// Forward-declared rather than #include "bootstrap.h" to keep the test TU light:
-// bootstrap.h drags in comm.h and nccl.h, neither of which we need here.
-extern bool bootstrapBidirEnabled(int nranks, int kind);
+#include "bootstrap.h"  // bootstrapBidirEnabled — single source of truth for the
+                        // signature; if it drifts we get a compile error here, not
+                        // a deferred linker error against librccl.so.
 
 namespace RcclUnitTesting {
 
@@ -249,8 +247,9 @@ TEST(BootstrapBidir, NetBidir_AutoThreshold_Zero_DisablesAuto)
 }
 
 // -----------------------------------------------------------------------------
-// BIDIR_NET explicit-zero: even when net OOB is enabled, BIDIR_NET=0 short-circuits
-// (line 147 v==0 branch). The other tests cover BIDIR_NET=1 / -1 only.
+// BIDIR_NET explicit-zero: even when net OOB is enabled, BIDIR_NET=0 must
+// short-circuit (the `v == 0` branch in bootstrapBidirEnabled's kind==1 arm).
+// Other tests only cover BIDIR_NET=1 / -1.
 // -----------------------------------------------------------------------------
 TEST(BootstrapBidir, NetBidir_ExplicitZero_With_NetOob_DisablesNet)
 {
@@ -268,9 +267,9 @@ TEST(BootstrapBidir, NetBidir_ExplicitZero_With_NetOob_DisablesNet)
 
 // -----------------------------------------------------------------------------
 // Net OOB auto path: NCCL_OOB_NET_ENABLE=-1 + threshold gates the underlying
-// bootstrapNetEnabledEffective helper. Without this case the v==-1 branch on
-// line 124 and the entire `thr > 0 && nranks >= thr` expression on line 127
-// in bootstrapNetEnabledEffective stay at zero hits.
+// bootstrapNetEnabledEffective helper. Without this case the auto (`v == -1`)
+// branch and the `thr > 0 && nranks >= thr` short-circuit inside
+// bootstrapNetEnabledEffective stay at zero hits in coverage.
 // -----------------------------------------------------------------------------
 TEST(BootstrapBidir, NetOob_Auto_Threshold_BelowAndAbove_GatesSocketShadow)
 {
@@ -297,7 +296,7 @@ TEST(BootstrapBidir, NetOob_Auto_Threshold_Zero_KeepsNetOff)
         {
             // thr==0 makes the auto-net-on path fail (never crosses), so socket
             // bidir is allowed unconditionally — covers the false branch of the
-            // `thr > 0 && ...` short-circuit on line 127.
+            // `thr > 0 && ...` short-circuit in bootstrapNetEnabledEffective.
             EXPECT_TRUE(bootstrapBidirEnabled(8,    kKindSocket));
             EXPECT_TRUE(bootstrapBidirEnabled(1024, kKindSocket));
         },
