@@ -5411,8 +5411,6 @@ rsmi_status_t rsmi_dev_memory_partition_capabilities_get(uint32_t dv_ind,
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function
- *  @retval ::RSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
- *  the amdgpu driver
  *  @retval ::RSMI_STATUS_BUSY A resource or mutex could not be acquired
  *  because it is already being used - device is busy
  *

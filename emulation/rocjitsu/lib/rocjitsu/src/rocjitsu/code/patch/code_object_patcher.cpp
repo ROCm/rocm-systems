@@ -502,6 +502,16 @@ bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation 
       AMDHSA_BITS_SET(desc->compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX10_PLUS_INST_PREF_SIZE,
                       inst_pref);
     }
+  } else if (target_uses_gfx90a_accum_offset(target_arch) && translation.target_accvgpr_base != 0) {
+    // On GFX90A/GFX942/GFX950, AccVGPRs are placed by ACCUM_OFFSET rather than
+    // by the ordinary VGPR count. KernelDescriptorTranslator decides whether the
+    // base must move up to make room for semantic-lowering scratch; the patcher
+    // only materializes that already-translated target base.
+    assert(translation.target_accvgpr_base >= 4 &&
+           "ACCUM_OFFSET base must encode at least 4 VGPRs");
+    assert(translation.target_accvgpr_base % 4 == 0 && "ACCUM_OFFSET base must be 4-VGPR aligned");
+    AMDHSA_BITS_SET(desc->compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
+                    (translation.target_accvgpr_base / 4 - 1));
   }
 
   desc->private_segment_fixed_size = translation.target_private_size;
