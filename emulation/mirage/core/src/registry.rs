@@ -1,8 +1,13 @@
-//! Emulator registry.
+//! Emulator registry primitives.
 //!
-//! [`builtins`] is the append-only list of registered emulator
-//! backends. Each [`EmulatorSpec`] knows how to describe itself and
-//! report whether its runtime is installed.
+//! [`EmulatorSpec`] is the generic descriptor each emulator backend
+//! provides: it knows how to describe itself and report whether its
+//! runtime is installed. The built-in pass-through [`NOOP`] lives here
+//! because it has no external runtime. Emulator-specific specs live in
+//! their own crates and are assembled into the full registry by
+//! `mirage_ctl`; this module only provides the generic [`find`] /
+//! [`default_emulator`] / [`make_def`] helpers that operate over a
+//! supplied slice of specs.
 //!
 //! Named hardware agents ([`crate::agent::AgentDef`]) and system
 //! topologies ([`crate::topology::TopologyDef`]) live in the
@@ -28,23 +33,18 @@ pub struct EmulatorSpec {
     pub describe: fn() -> EmulatorDescription,
 }
 
-/// Built-in emulator registry. Append-only by intent.
-pub fn builtins() -> &'static [EmulatorSpec] {
-    &[NOOP, ROCJITSU, HOTSWAP]
-}
-
-/// Lookup an emulator by its canonical name.
-pub fn find(name: &str) -> Option<&'static EmulatorSpec> {
-    builtins().iter().find(|e| e.name == name)
+/// Lookup an emulator by its canonical name within `specs`.
+pub fn find<'a>(specs: &'a [EmulatorSpec], name: &str) -> Option<&'a EmulatorSpec> {
+    specs.iter().find(|e| e.name == name)
 }
 
 /// The default emulator for new profiles when the user doesn't pick
-/// one explicitly. Picks the first installed entry in registration
-/// order, falling back to `noop`.
-pub fn default_emulator() -> &'static EmulatorSpec {
-    builtins()
+/// one explicitly. Picks the first installed, non-noop entry in
+/// registration order, falling back to [`NOOP`].
+pub fn default_emulator(specs: &[EmulatorSpec]) -> &EmulatorSpec {
+    specs
         .iter()
-        .find(|e| !std::ptr::eq(*e, &NOOP) && (e.installed)())
+        .find(|e| e.name != NOOP.name && (e.installed)())
         .unwrap_or(&NOOP)
 }
 
@@ -83,91 +83,15 @@ fn noop_describe() -> EmulatorDescription {
     }
 }
 
-// =============================================================================
-// rocjitsu
-// =============================================================================
-
-pub const ROCJITSU: EmulatorSpec = EmulatorSpec {
-    name: "rocjitsu",
-    description: "ROCm just-in-time GPU emulator (cycle-accurate or functional)",
-    installed: rocjitsu_installed,
-    describe: rocjitsu_describe,
-};
-
-/// rocjitsu is "installed" if the dynamic library `librocjitsu.so`
-/// can be found in the mirage emulator cache (extracted by
-/// `mirage_rocjitsu::ensure_assets`), via the loader's standard
-/// search path, or if the user has set `ROCJITSU_LIB_DIR` /
-/// `ROCJITSU_ROOT`.
-fn rocjitsu_installed() -> bool {
-    crate::discovery::is_lib_installed(&rocjitsu_lib_search())
-}
-
-/// Shared discovery policy for `librocjitsu.so`.
-fn rocjitsu_lib_search() -> crate::discovery::LibSearch<'static> {
-    crate::discovery::LibSearch {
-        file_env: &["ROCJITSU_LIB"],
-        dir_env: &["ROCJITSU_LIB_DIR", "ROCJITSU_ROOT"],
-        lib_name: "librocjitsu.so",
-    }
-}
-
-fn rocjitsu_describe() -> EmulatorDescription {
-    EmulatorDescription {
-        name: "rocjitsu".to_string(),
-        version: env!("CARGO_PKG_VERSION").to_string(),
-        description: "ROCm GPU simulator (decodes AMDGPU/RISC-V ISA, event-driven PDES core)."
-            .to_string(),
-    }
-}
-
-// =============================================================================
-// hotswap
-// =============================================================================
-
-pub const HOTSWAP: EmulatorSpec = EmulatorSpec {
-    name: "hotswap",
-    description: "load-time ISA rewriter: run a GPU's code on a different GPU (e.g. gfx1250 on gfx942/gfx950)",
-    installed: hotswap_installed,
-    describe: hotswap_describe,
-};
-
-/// Shared discovery policy for `libhsa-hotswap.so`. Mirrors
-/// `mirage_hotswap::lib_search` so the registry's "installed" check
-/// and the runtime injection agree on where to look.
-fn hotswap_lib_search() -> crate::discovery::LibSearch<'static> {
-    crate::discovery::LibSearch {
-        file_env: &["HOTSWAP_LIB", "HSA_TOOLS_LIB"],
-        dir_env: &["HOTSWAP_LIB_DIR"],
-        lib_name: "libhsa-hotswap.so",
-    }
-}
-
-/// hotswap is "installed" if `libhsa-hotswap.so` can be located in any
-/// of the standard discovery locations (see `crate::discovery`).
-fn hotswap_installed() -> bool {
-    crate::discovery::is_lib_installed(&hotswap_lib_search())
-}
-
-fn hotswap_describe() -> EmulatorDescription {
-    EmulatorDescription {
-        name: "hotswap".to_string(),
-        version: env!("CARGO_PKG_VERSION").to_string(),
-        description: "Load-time ISA rewriter loaded via HSA_TOOLS_LIB; \
-                      runs one GPU architecture's code on another real GPU."
-            .to_string(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn registry_lookup() {
-        assert_eq!(find("noop").map(|e| e.name), Some("noop"));
-        assert_eq!(find("rocjitsu").map(|e| e.name), Some("rocjitsu"));
-        assert!(find("bogus").is_none());
+    fn find_locates_by_name() {
+        let specs = [NOOP];
+        assert_eq!(find(&specs, "noop").map(|e| e.name), Some("noop"));
+        assert!(find(&specs, "bogus").is_none());
     }
 
     #[test]
@@ -176,11 +100,8 @@ mod tests {
     }
 
     #[test]
-    fn default_matches_installation_state() {
-        if (ROCJITSU.installed)() {
-            assert_eq!(default_emulator().name, "rocjitsu");
-        } else {
-            assert_eq!(default_emulator().name, "noop");
-        }
+    fn default_falls_back_to_noop() {
+        let specs = [NOOP];
+        assert_eq!(default_emulator(&specs).name, "noop");
     }
 }

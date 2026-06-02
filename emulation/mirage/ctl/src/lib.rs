@@ -20,7 +20,7 @@ use mirage_core::common::MaybeRef;
 use mirage_core::ctl::{CreateSessionRequest, MirageCtl, StdStream, StreamPacket};
 use mirage_core::exec::{ExecArgs, ExecDef, ExecId, ExecRef};
 use mirage_core::profile::ProfileDef;
-use mirage_core::registry;
+use mirage_core::registry::EmulatorSpec;
 use mirage_core::session::SessionId;
 use tokio_stream::StreamExt;
 
@@ -38,6 +38,31 @@ pub fn init_logging(verbose: u8) {
         .with_env_filter(env)
         .with_writer(std::io::stderr)
         .try_init();
+}
+
+/// The full emulator registry: the generic pass-through
+/// ([`mirage_core::registry::NOOP`]) plus the emulator-specific
+/// backends, each of which is owned by its own crate. Assembled here
+/// because `mirage_ctl` is the lowest crate that depends on every
+/// emulator integration.
+pub fn registry() -> &'static [EmulatorSpec] {
+    static REGISTRY: [EmulatorSpec; 3] = [
+        mirage_core::registry::NOOP,
+        mirage_rocjitsu::SPEC,
+        mirage_hotswap::SPEC,
+    ];
+    &REGISTRY
+}
+
+/// Lookup an emulator by its canonical name in the full [`registry`].
+pub fn find_emulator(name: &str) -> Option<&'static EmulatorSpec> {
+    mirage_core::registry::find(registry(), name)
+}
+
+/// The default emulator for new profiles: the first installed,
+/// non-noop entry, falling back to `noop`.
+pub fn default_emulator() -> &'static EmulatorSpec {
+    mirage_core::registry::default_emulator(registry())
 }
 
 /// Best-effort: materialise all builtin state on disk — agents,
@@ -71,8 +96,8 @@ pub fn ensure_builtins_present() {
 /// endpoint so both validate identically.
 pub fn validate_profile(def: &ProfileDef) -> std::result::Result<(), String> {
     let emulator = def.emulator.emulator.as_str();
-    if registry::find(emulator).is_none() {
-        let known = registry::builtins()
+    if find_emulator(emulator).is_none() {
+        let known = registry()
             .iter()
             .map(|e| e.name)
             .collect::<Vec<_>>()
@@ -507,18 +532,18 @@ fn profile_cmd(ctl: &dyn MirageCtl, cmd: ProfileCmd, json: bool) -> anyhow::Resu
         } => {
             // Resolve emulator: explicit > registry default.
             let spec = match emulator.as_deref() {
-                Some(n) => match registry::find(n) {
+                Some(n) => match find_emulator(n) {
                     Some(s) => s,
                     None => anyhow::bail!(
                         "unknown emulator: {n}. Known: {}",
-                        registry::builtins()
+                        registry()
                             .iter()
                             .map(|e| e.name)
                             .collect::<Vec<_>>()
                             .join(", ")
                     ),
                 },
-                None => registry::default_emulator(),
+                None => default_emulator(),
             };
             let topo = mirage_core::topology::TopologyDef {
                 racks,
@@ -529,7 +554,7 @@ fn profile_cmd(ctl: &dyn MirageCtl, cmd: ProfileCmd, json: bool) -> anyhow::Resu
             let p = ProfileDef {
                 name: name.clone(),
                 description,
-                emulator: registry::make_def(spec, topo),
+                emulator: mirage_core::registry::make_def(spec, topo),
             };
             if let Err(e) = validate_profile(&p) {
                 anyhow::bail!("cannot create profile {name}: {e}");
@@ -1125,10 +1150,10 @@ fn profile_wizard(
         })
         .interact_text()?;
 
-    let specs = registry::builtins();
+    let specs = registry();
     let default_idx = specs
         .iter()
-        .position(|s| s.name == registry::default_emulator().name)
+        .position(|s| s.name == default_emulator().name)
         .unwrap_or(0);
     let labels: Vec<String> = specs
         .iter()
@@ -1202,7 +1227,7 @@ fn profile_wizard(
         } else {
             Some(description)
         },
-        emulator: registry::make_def(spec, topo),
+        emulator: mirage_core::registry::make_def(spec, topo),
     };
     if let Err(e) = validate_profile(&p) {
         anyhow::bail!("cannot create profile {name}: {e}");

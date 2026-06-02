@@ -16,6 +16,8 @@
 use std::path::PathBuf;
 
 use mirage_core::discovery::{self, LibSearch};
+use mirage_core::emulator::EmulatorDescription;
+use mirage_core::registry::EmulatorSpec;
 
 /// The HSA tools library file name HotSwap ships as.
 pub const LIB_NAME: &str = "libhsa-hotswap.so";
@@ -27,6 +29,26 @@ pub const ASSET_SUBDIR: &str = "hotswap";
 /// Human-facing name used in guidance messages.
 pub const DISPLAY_NAME: &str = "HotSwap";
 
+/// Registry entry describing the hotswap emulator backend. Owned by
+/// this crate (rather than `mirage_core`) so that all hotswap-specific
+/// policy lives alongside the hotswap discovery integration.
+pub const SPEC: EmulatorSpec = EmulatorSpec {
+    name: "hotswap",
+    description: "load-time ISA rewriter: run a GPU's code on a different GPU (e.g. gfx1250 on gfx942/gfx950)",
+    installed: is_installed,
+    describe: spec_describe,
+};
+
+fn spec_describe() -> EmulatorDescription {
+    EmulatorDescription {
+        name: "hotswap".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        description: "Load-time ISA rewriter loaded via HSA_TOOLS_LIB; \
+                      runs one GPU architecture's code on another real GPU."
+            .to_string(),
+    }
+}
+
 /// Search policy mirage uses to locate `libhsa-hotswap.so`.
 pub fn lib_search() -> LibSearch<'static> {
     LibSearch {
@@ -36,6 +58,7 @@ pub fn lib_search() -> LibSearch<'static> {
         file_env: &["HOTSWAP_LIB", "HSA_TOOLS_LIB"],
         dir_env: &["HOTSWAP_LIB_DIR"],
         lib_name: LIB_NAME,
+        binary_relative_dirs: &[],
     }
 }
 

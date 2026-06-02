@@ -27,9 +27,29 @@ use std::path::{Path, PathBuf};
 
 use mirage_core::agent::AgentDef;
 use mirage_core::common::MaybeRef;
-use mirage_core::emulator::{EmulatorDef, ExecMode};
+use mirage_core::emulator::{EmulatorDef, EmulatorDescription, ExecMode};
 use mirage_core::error::{MirageError, Result};
+use mirage_core::registry::EmulatorSpec;
 use mirage_core::topology::TopologyDef;
+
+/// Registry entry describing the rocjitsu emulator backend. Owned by
+/// this crate (rather than `mirage_core`) so that all rocjitsu-
+/// specific policy lives alongside the rocjitsu runtime integration.
+pub const SPEC: EmulatorSpec = EmulatorSpec {
+    name: "rocjitsu",
+    description: "ROCm just-in-time GPU emulator (cycle-accurate or functional)",
+    installed: is_installed,
+    describe: spec_describe,
+};
+
+fn spec_describe() -> EmulatorDescription {
+    EmulatorDescription {
+        name: "rocjitsu".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        description: "ROCm GPU simulator (decodes AMDGPU/RISC-V ISA, event-driven PDES core)."
+            .to_string(),
+    }
+}
 
 /// `librocjitsu_kmd.so` bytes. Empty when the build script could not
 /// locate or build the artifact.
@@ -137,6 +157,10 @@ fn kmd_lib_search() -> mirage_core::discovery::LibSearch<'static> {
         file_env: &["ROCJITSU_KMD_LIB"],
         dir_env: &["ROCJITSU_LIB_DIR", "ROCJITSU_ROOT"],
         lib_name: KMD_LIB_NAME,
+        // rocjitsu's in-tree KMD build output, relative to the mirage
+        // binary, so a monorepo `cargo build` finds a fresh build
+        // without extra configuration.
+        binary_relative_dirs: &["../../../rocjitsu/build/lib/rocjitsu/src/rocjitsu/kmd"],
     }
 }
 

@@ -1,10 +1,10 @@
 //! Shared discovery logic for locating emulator runtime libraries.
 //!
-//! mirage does not bundle or build its emulator backends (rocjitsu,
-//! hotswap, …). Instead it expects the user to install them and then
-//! *finds* the relevant shared library at runtime. This module
-//! implements the common search policy so every backend looks in the
-//! same set of well-known locations.
+//! mirage does not bundle or build its emulator backends. Instead it
+//! expects the user to install them and then *finds* the relevant
+//! shared library at runtime. This module implements the common search
+//! policy so every backend looks in the same set of well-known
+//! locations.
 //!
 //! An explicit override always wins first: any env var in
 //! [`LibSearch::file_env`] holding an absolute path to the `.so`, then
@@ -15,8 +15,10 @@
 //! match wins), as implemented by [`LibSearch::search_dirs`]:
 //!
 //! 1. Every directory on `$LD_LIBRARY_PATH`.
-//! 2. `../../../rocjitsu/build/lib/rocjitsu/src/rocjitsu/kmd/` relative
-//!    to the `mirage` binary.
+//! 2. Any backend-specific [`LibSearch::binary_relative_dirs`],
+//!    resolved relative to the `mirage` binary. Lets an in-tree
+//!    `cargo build` of the monorepo find a freshly-built emulator
+//!    without any extra configuration.
 //! 3. `$ROCM_HOME` / `$ROCM_PATH` — the ROCm install root
 //!    (`<root>/lib`).
 //! 4. `../lib` relative to the `mirage` binary.
@@ -33,11 +35,6 @@ pub const STANDARD_LIB_DIRS: &[&str] = &[
     "/usr/lib/x86_64-linux-gnu",
 ];
 
-/// rocjitsu's KMD build output, relative to the `mirage` binary's
-/// directory. Searched so an in-tree `cargo build` of the monorepo can
-/// find a freshly-built emulator without any extra configuration.
-const BINARY_RELATIVE_KMD_BUILD: &str = "../../../rocjitsu/build/lib/rocjitsu/src/rocjitsu/kmd";
-
 /// Describes how to locate one emulator's shared library.
 #[derive(Debug, Clone)]
 pub struct LibSearch<'a> {
@@ -45,8 +42,12 @@ pub struct LibSearch<'a> {
     pub file_env: &'a [&'a str],
     /// Env vars whose value is a directory containing the `.so`.
     pub dir_env: &'a [&'a str],
-    /// The library file name, e.g. `"libhsa-hotswap.so"`.
+    /// The library file name, e.g. `"libemulator.so"`.
     pub lib_name: &'a str,
+    /// Backend-specific directories to probe relative to the `mirage`
+    /// binary's own directory (e.g. an in-tree build output). Empty
+    /// for backends with no such location.
+    pub binary_relative_dirs: &'a [&'a str],
 }
 
 impl LibSearch<'_> {
@@ -88,9 +89,12 @@ impl LibSearch<'_> {
             }
         }
 
-        // 2. rocjitsu KMD build output, relative to the mirage binary.
+        // 2. Backend-specific build outputs, relative to the mirage
+        //    binary.
         if let Some(dir) = &exe_dir {
-            dirs.push(dir.join(BINARY_RELATIVE_KMD_BUILD));
+            for rel in self.binary_relative_dirs {
+                dirs.push(dir.join(rel));
+            }
         }
 
         // 3. ROCm install root ($ROCM_HOME / $ROCM_PATH) lib dir.
@@ -195,9 +199,10 @@ mod tests {
 
     fn search() -> LibSearch<'static> {
         LibSearch {
-            file_env: &["TEST_HOTSWAP_LIB"],
-            dir_env: &["TEST_HOTSWAP_LIB_DIR"],
-            lib_name: "libhsa-hotswap.so",
+            file_env: &["TEST_EMULATOR_LIB"],
+            dir_env: &["TEST_EMULATOR_LIB_DIR"],
+            lib_name: "libtest-emulator.so",
+            binary_relative_dirs: &[],
         }
     }
 
@@ -205,15 +210,15 @@ mod tests {
     fn finds_explicit_file_override() {
         let _g = crate::paths::test_env_lock();
         let tmp = tempfile::tempdir().unwrap();
-        let lib = tmp.path().join("libhsa-hotswap.so");
+        let lib = tmp.path().join("libtest-emulator.so");
         std::fs::write(&lib, b"x").unwrap();
         // SAFETY: guarded by the test env lock.
         unsafe {
-            std::env::set_var("TEST_HOTSWAP_LIB", &lib);
+            std::env::set_var("TEST_EMULATOR_LIB", &lib);
         }
         let found = find_emulator_lib(&search());
         unsafe {
-            std::env::remove_var("TEST_HOTSWAP_LIB");
+            std::env::remove_var("TEST_EMULATOR_LIB");
         }
         assert_eq!(found, Some(lib));
     }
@@ -222,15 +227,15 @@ mod tests {
     fn finds_via_dir_override() {
         let _g = crate::paths::test_env_lock();
         let tmp = tempfile::tempdir().unwrap();
-        let lib = tmp.path().join("libhsa-hotswap.so");
+        let lib = tmp.path().join("libtest-emulator.so");
         std::fs::write(&lib, b"x").unwrap();
         // SAFETY: guarded by the test env lock.
         unsafe {
-            std::env::set_var("TEST_HOTSWAP_LIB_DIR", tmp.path());
+            std::env::set_var("TEST_EMULATOR_LIB_DIR", tmp.path());
         }
         let found = find_emulator_lib(&search());
         unsafe {
-            std::env::remove_var("TEST_HOTSWAP_LIB_DIR");
+            std::env::remove_var("TEST_EMULATOR_LIB_DIR");
         }
         assert_eq!(found, Some(lib));
     }
@@ -240,16 +245,17 @@ mod tests {
         let _g = crate::paths::test_env_lock();
         // Ensure no override leaks in from the environment.
         unsafe {
-            std::env::remove_var("TEST_HOTSWAP_LIB");
-            std::env::remove_var("TEST_HOTSWAP_LIB_DIR");
+            std::env::remove_var("TEST_EMULATOR_LIB");
+            std::env::remove_var("TEST_EMULATOR_LIB_DIR");
         }
         let s = LibSearch {
-            file_env: &["TEST_HOTSWAP_LIB"],
-            dir_env: &["TEST_HOTSWAP_LIB_DIR"],
+            file_env: &["TEST_EMULATOR_LIB"],
+            dir_env: &["TEST_EMULATOR_LIB_DIR"],
             lib_name: "definitely-not-a-real-lib-xyz.so",
+            binary_relative_dirs: &[],
         };
         assert!(!is_lib_installed(&s));
-        let guidance = install_guidance("HotSwap", &s);
+        let guidance = install_guidance("TestEmulator", &s);
         assert!(guidance.contains("definitely-not-a-real-lib-xyz.so"));
     }
 }

@@ -163,7 +163,7 @@ struct SystemResponse {
 async fn get_system() -> Json<SystemResponse> {
     Json(SystemResponse {
         daemon_version: env!("CARGO_PKG_VERSION"),
-        default_emulator: mirage_core::registry::default_emulator().name,
+        default_emulator: mirage_ctl::default_emulator().name,
     })
 }
 
@@ -177,8 +177,8 @@ struct EmulatorEntry {
 }
 
 async fn list_emulators() -> Json<Vec<EmulatorEntry>> {
-    let default_name = mirage_core::registry::default_emulator().name;
-    let entries = mirage_core::registry::builtins()
+    let default_name = mirage_ctl::default_emulator().name;
+    let entries = mirage_ctl::registry()
         .iter()
         .map(|spec| EmulatorEntry {
             name: spec.name,
