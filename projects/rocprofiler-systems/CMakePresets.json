@@ -83,7 +83,6 @@
                 "ROCPROFSYS_MAX_THREADS": "64",
                 "ROCPROFSYS_STRIP_LIBRARIES": "OFF",
                 "ROCPROFSYS_USE_MPI": "ON",
-                "ROCPROFSYS_USE_PYTESTS": "ON",
                 "USE_CLANG_OMP": "OFF"
             },
             "description": "Build with GCC code coverage instrumentation",
