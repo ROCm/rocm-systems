@@ -222,8 +222,7 @@ pub fn is_installed() -> bool {
     if !KMD_LIB_BYTES.is_empty() {
         return true;
     }
-    if std::env::var_os("ROCJITSU_LIB_DIR").is_some()
-        || std::env::var_os("ROCJITSU_ROOT").is_some()
+    if std::env::var_os("ROCJITSU_LIB_DIR").is_some() || std::env::var_os("ROCJITSU_ROOT").is_some()
     {
         return true;
     }

@@ -478,7 +478,10 @@ fn spawn_node(
         }))
         // Make sure programs that consult $TERM behave like a real
         // terminal even if the host's own environment has none set.
-        .env("TERM", std::env::var("TERM").unwrap_or_else(|_| "xterm-256color".into()))
+        .env(
+            "TERM",
+            std::env::var("TERM").unwrap_or_else(|_| "xterm-256color".into()),
+        )
         // Emulator-provided env (e.g. rocjitsu's RJ_CONFIG / RJ_SCHEMA)
         // is applied before the user's env so an explicit exec env can
         // still override it if needed.

@@ -368,8 +368,7 @@ impl MirageCtl for FileCtl {
         // the container terminates the host, all execs, and their
         // children. We do it before signalling the host so the
         // container runtime sees the request first.
-        let def: Option<crate::session::SessionDef> =
-            crate::state::read_json_opt(&layout.def())?;
+        let def: Option<crate::session::SessionDef> = crate::state::read_json_opt(&layout.def())?;
         if let Some(def) = def.as_ref()
             && let Some(container) = def.container.as_ref()
             && let Some(cid) = crate::state::read_small_str(&layout.container_id())?

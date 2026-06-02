@@ -169,9 +169,7 @@ fn build_target(
     let build_dir = out_dir.join("rocjitsu-build");
     fs::create_dir_all(&build_dir).ok()?;
 
-    println!(
-        "cargo:warning=mirage_rocjitsu: building {label} via cmake (this may take a while)"
-    );
+    println!("cargo:warning=mirage_rocjitsu: building {label} via cmake (this may take a while)");
     let generator = if has_cmd("ninja") {
         "Ninja"
     } else {

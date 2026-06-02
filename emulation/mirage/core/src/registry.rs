@@ -151,8 +151,7 @@ fn rocjitsu_installed() -> bool {
     if cached.exists() {
         return true;
     }
-    if std::env::var_os("ROCJITSU_LIB_DIR").is_some()
-        || std::env::var_os("ROCJITSU_ROOT").is_some()
+    if std::env::var_os("ROCJITSU_LIB_DIR").is_some() || std::env::var_os("ROCJITSU_ROOT").is_some()
     {
         return true;
     }

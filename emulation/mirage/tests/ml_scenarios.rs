@@ -126,7 +126,11 @@ fn compile_tiny_hip(out_dir: &Path) -> PathBuf {
         .arg(&bin)
         .status()
         .expect("failed to invoke hipcc");
-    assert!(status.success(), "hipcc failed to compile {}", src.display());
+    assert!(
+        status.success(),
+        "hipcc failed to compile {}",
+        src.display()
+    );
     bin
 }
 
@@ -364,4 +368,3 @@ fn hip_kernel_runs_inside_container_with_kmd_preload() {
         "expected `hip_kernel_ok`; stdout was:\n{stdout}"
     );
 }
-

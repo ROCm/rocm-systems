@@ -80,9 +80,7 @@ impl Env {
         if keep {
             args.push("--keep");
         }
-        args.extend([
-            "--detach", "--", "/bin/sh", "-c", "sleep 30",
-        ]);
+        args.extend(["--detach", "--", "/bin/sh", "-c", "sleep 30"]);
         let out = self.mirage().args(&args).output().unwrap();
         assert!(out.status.success(), "exec start failed: {:?}", out);
         String::from_utf8_lossy(&out.stdout).trim().to_string()
@@ -228,9 +226,7 @@ fn keep_false_exec_is_removed_after_natural_exit() {
     env.start_profile_and_session("s-natural");
     let out = env
         .mirage()
-        .args([
-            "exec", "start", "s-natural", "--detach", "--", "/bin/true",
-        ])
+        .args(["exec", "start", "s-natural", "--detach", "--", "/bin/true"])
         .output()
         .unwrap();
     assert!(out.status.success());
@@ -294,7 +290,13 @@ fn session_destroy_invokes_container_provider_when_id_present() {
     // a container. The destroy path only reads from def.json.
     env.mirage()
         .args([
-            "session", "start", "--profile", "p", "--id", "s-cont", "--no-host",
+            "session",
+            "start",
+            "--profile",
+            "p",
+            "--id",
+            "s-cont",
+            "--no-host",
         ])
         .assert()
         .success();

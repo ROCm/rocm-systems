@@ -165,10 +165,18 @@ fn paths_endpoint_reports_overridden_dirs() {
     let (s, v) = d.get_json("/api/paths");
     assert!(s.is_success());
     assert!(
-        v["config"].as_str().unwrap().starts_with(d.config.to_str().unwrap()),
+        v["config"]
+            .as_str()
+            .unwrap()
+            .starts_with(d.config.to_str().unwrap()),
         "expected config under tempdir, got {v}"
     );
-    assert!(v["runtime"].as_str().unwrap().starts_with(d.runtime.to_str().unwrap()));
+    assert!(
+        v["runtime"]
+            .as_str()
+            .unwrap()
+            .starts_with(d.runtime.to_str().unwrap())
+    );
 }
 
 #[test]
@@ -316,7 +324,10 @@ async fn exec_attach_streams_output_via_websocket() {
     // The exec runs under a PTY, so stdout and stderr are merged onto the
     // terminal (the stdout stream), exactly as in a real terminal.
     let combined = format!("{stdout}{stderr}");
-    assert!(combined.contains("hello-from-exec"), "got output: {combined:?}");
+    assert!(
+        combined.contains("hello-from-exec"),
+        "got output: {combined:?}"
+    );
     assert!(combined.contains("err"), "got output: {combined:?}");
     assert_eq!(exit_code, Some(7));
 
@@ -359,7 +370,11 @@ async fn create_profile_async(client: &reqwest::Client, d: &Daemon, name: &str) 
         .send()
         .await
         .unwrap();
-    assert!(r.status().is_success(), "put profile failed: {}", r.status());
+    assert!(
+        r.status().is_success(),
+        "put profile failed: {}",
+        r.status()
+    );
 }
 
 #[test]

@@ -49,14 +49,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/agents/{name}", put(put_agent))
         .route("/agents/{name}", delete(delete_agent))
         .route("/sessions", get(list_sessions).post(create_session))
-        .route(
-            "/sessions/{id}",
-            get(get_session).delete(delete_session),
-        )
-        .route(
-            "/sessions/{id}/execs",
-            get(list_execs).post(create_exec),
-        )
+        .route("/sessions/{id}", get(get_session).delete(delete_session))
+        .route("/sessions/{id}/execs", get(list_execs).post(create_exec))
         .route(
             "/sessions/{id}/execs/{exec}",
             get(get_exec).delete(delete_exec),
@@ -145,8 +139,12 @@ struct PathsResponse {
 
 async fn get_paths() -> Json<PathsResponse> {
     Json(PathsResponse {
-        config: mirage_core::paths::mirage_config_dir().display().to_string(),
-        runtime: mirage_core::paths::mirage_runtime_dir().display().to_string(),
+        config: mirage_core::paths::mirage_config_dir()
+            .display()
+            .to_string(),
+        runtime: mirage_core::paths::mirage_runtime_dir()
+            .display()
+            .to_string(),
         state: mirage_core::paths::mirage_state_dir().display().to_string(),
         cache: mirage_core::paths::mirage_cache_dir().display().to_string(),
         profiles: mirage_core::paths::profile_root().display().to_string(),
@@ -396,9 +394,11 @@ async fn create_session(
     let def = s.ctl.session_create(CreateSessionRequest {
         id: body.id,
         profile: MaybeRef::Ref(body.profile),
-        workdir: body
-            .workdir
-            .unwrap_or_else(|| std::env::current_dir().map(|p| p.display().to_string()).unwrap_or("/".to_string())),
+        workdir: body.workdir.unwrap_or_else(|| {
+            std::env::current_dir()
+                .map(|p| p.display().to_string())
+                .unwrap_or("/".to_string())
+        }),
         container: None,
     })?;
     if body.spawn_host {

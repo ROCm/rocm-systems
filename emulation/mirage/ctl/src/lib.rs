@@ -1153,10 +1153,7 @@ fn profile_wizard(
     let agent: String = if known_agents.is_empty() {
         "MI350X".to_string()
     } else {
-        let default_idx = known_agents
-            .iter()
-            .position(|n| n == "MI350X")
-            .unwrap_or(0);
+        let default_idx = known_agents.iter().position(|n| n == "MI350X").unwrap_or(0);
         let pick = Select::with_theme(&theme)
             .with_prompt("Agent")
             .items(&known_agents)
