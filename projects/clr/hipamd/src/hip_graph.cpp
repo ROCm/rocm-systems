@@ -1150,7 +1150,7 @@ hipError_t hipStreamBeginCaptureToGraph(hipStream_t stream, hipGraph_t graph,
                                         size_t numDependencies, hipStreamCaptureMode mode) {
   HIP_INIT_API(hipStreamBeginCapture, stream, graph, dependencies, dependencyData, numDependencies,
                mode);
-  CHECK_STREAM_DETACHED(stream);
+  CHECK_STREAM_DETACHED_API(stream);
   if (dependencyData != nullptr) {
     return hipErrorNotSupported;
   } else if (graph == nullptr) {

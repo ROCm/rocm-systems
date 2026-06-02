@@ -305,7 +305,7 @@ hipError_t hipSignalExternalSemaphoresAsync(const hipExternalSemaphore_t* extSem
   if (extSemArray == nullptr || paramsArray == nullptr || !hip::isValid(stream)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  CHECK_STREAM_DETACHED(stream);
+  CHECK_STREAM_DETACHED_API(stream);
   hip::Stream* hip_stream = hip::getStream(stream);
   if (hip_stream == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
@@ -341,7 +341,7 @@ hipError_t hipWaitExternalSemaphoresAsync(const hipExternalSemaphore_t* extSemAr
   if (!hip::isValid(stream)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  CHECK_STREAM_DETACHED(stream);
+  CHECK_STREAM_DETACHED_API(stream);
   hip::Stream* hip_stream = hip::getStream(stream);
   if (hip_stream == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
@@ -1727,7 +1727,7 @@ hipError_t hipMemcpyAsync_spt(void* dst, const void* src, size_t sizeBytes, hipM
 hipError_t hipMemcpyHtoDAsync(hipDeviceptr_t dstDevice, const void* srcHost, size_t ByteCount,
                               hipStream_t stream) {
   HIP_INIT_API(hipMemcpyHtoDAsync, dstDevice, srcHost, ByteCount, stream);
-  CHECK_STREAM_DETACHED(stream);
+  CHECK_STREAM_DETACHED_API(stream);
   hipMemcpyKind kind = hipMemcpyHostToDevice;
   STREAM_CAPTURE(hipMemcpyHtoDAsync, stream, dstDevice, srcHost, ByteCount, kind);
   if (static_cast<uint32_t>(kind) > hipMemcpyDefault && kind != hipMemcpyDeviceToDeviceNoCU) {
@@ -1746,7 +1746,7 @@ hipError_t hipMemcpyHtoDAsync(hipDeviceptr_t dstDevice, const void* srcHost, siz
 hipError_t hipMemcpyDtoDAsync(hipDeviceptr_t dstDevice, hipDeviceptr_t srcDevice, size_t ByteCount,
                               hipStream_t stream) {
   HIP_INIT_API(hipMemcpyDtoDAsync, dstDevice, srcDevice, ByteCount, stream);
-  CHECK_STREAM_DETACHED(stream);
+  CHECK_STREAM_DETACHED_API(stream);
   hipMemcpyKind kind = hipMemcpyDeviceToDevice;
   STREAM_CAPTURE(hipMemcpyDtoDAsync, stream, dstDevice, srcDevice, ByteCount, kind);
   if (static_cast<uint32_t>(kind) > hipMemcpyDefault && kind != hipMemcpyDeviceToDeviceNoCU) {
@@ -1765,7 +1765,7 @@ hipError_t hipMemcpyDtoDAsync(hipDeviceptr_t dstDevice, hipDeviceptr_t srcDevice
 hipError_t hipMemcpyDtoHAsync(void* dstHost, hipDeviceptr_t srcDevice, size_t ByteCount,
                               hipStream_t stream) {
   HIP_INIT_API(hipMemcpyDtoHAsync, dstHost, srcDevice, ByteCount, stream);
-  CHECK_STREAM_DETACHED(stream);
+  CHECK_STREAM_DETACHED_API(stream);
   hipMemcpyKind kind = hipMemcpyDeviceToHost;
   STREAM_CAPTURE(hipMemcpyDtoHAsync, stream, dstHost, srcDevice, ByteCount, kind);
   if (static_cast<uint32_t>(kind) > hipMemcpyDefault && kind != hipMemcpyDeviceToDeviceNoCU) {
@@ -2568,7 +2568,7 @@ hipError_t hipMemcpy2D_spt(void* dst, size_t dpitch, const void* src, size_t spi
 hipError_t hipMemcpy2DAsync(void* dst, size_t dpitch, const void* src, size_t spitch, size_t width,
                             size_t height, hipMemcpyKind kind, hipStream_t stream) {
   HIP_INIT_API(hipMemcpy2DAsync, dst, dpitch, src, spitch, width, height, kind, stream);
-  CHECK_STREAM_DETACHED(stream);
+  CHECK_STREAM_DETACHED_API(stream);
   STREAM_CAPTURE(hipMemcpy2DAsync, stream, dst, dpitch, src, spitch, width, height, kind);
   HIP_RETURN_DURATION(
       hipMemcpy2D_common(dst, dpitch, src, spitch, width, height, kind, stream, true));
@@ -2876,7 +2876,7 @@ hipError_t hipDrvMemcpy3D(const HIP_MEMCPY3D* pCopy) {
 
 hipError_t hipDrvMemcpy3DAsync(const HIP_MEMCPY3D* pCopy, hipStream_t stream) {
   HIP_INIT_API(hipDrvMemcpy3DAsync, pCopy, stream);
-  CHECK_STREAM_DETACHED(stream);
+  CHECK_STREAM_DETACHED_API(stream);
   HIP_RETURN_DURATION(ihipMemcpyParam3D(pCopy, stream, true));
 }
 
@@ -3087,7 +3087,7 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
   if (!hip::isValid(stream)) {
     HIP_RETURN(hipErrorInvalidResourceHandle);
   }
-  CHECK_STREAM_DETACHED(stream);
+  CHECK_STREAM_DETACHED_API(stream);
 
   // validate inputs
   if (dsts == nullptr || srcs == nullptr || sizes == nullptr || count == 0) {
@@ -3151,7 +3151,7 @@ hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opLis
   if (!hip::isValid(stream)) {
     HIP_RETURN(hipErrorInvalidResourceHandle);
   }
-  CHECK_STREAM_DETACHED(stream);
+  CHECK_STREAM_DETACHED_API(stream);
 
   hipError_t status = hipSuccess;
 
@@ -3341,7 +3341,7 @@ hipError_t hipMemsetD8(hipDeviceptr_t dst, unsigned char value, size_t count) {
 hipError_t hipMemsetD8Async(hipDeviceptr_t dst, unsigned char value, size_t count,
                             hipStream_t stream) {
   HIP_INIT_API(hipMemsetD8Async, dst, value, count, stream);
-  CHECK_STREAM_DETACHED(stream);
+  CHECK_STREAM_DETACHED_API(stream);
   int iValue = value;
   size_t valueSize = sizeof(int8_t);
   size_t sizeBytes = count * sizeof(int8_t);
@@ -3358,7 +3358,7 @@ hipError_t hipMemsetD16(hipDeviceptr_t dst, unsigned short value, size_t count) 
 hipError_t hipMemsetD16Async(hipDeviceptr_t dst, unsigned short value, size_t count,
                              hipStream_t stream) {
   HIP_INIT_API(hipMemsetD16Async, dst, value, count, stream);
-  CHECK_STREAM_DETACHED(stream);
+  CHECK_STREAM_DETACHED_API(stream);
   int iValue = value;
   size_t valueSize = sizeof(int16_t);
   size_t sizeBytes = count * sizeof(int16_t);
@@ -3374,7 +3374,7 @@ hipError_t hipMemsetD32(hipDeviceptr_t dst, int value, size_t count) {
 
 hipError_t hipMemsetD32Async(hipDeviceptr_t dst, int value, size_t count, hipStream_t stream) {
   HIP_INIT_API(hipMemsetD32Async, dst, value, count, stream);
-  CHECK_STREAM_DETACHED(stream);
+  CHECK_STREAM_DETACHED_API(stream);
   int iValue = value;
   size_t valueSize = sizeof(int32_t);
   size_t sizeBytes = count * sizeof(int32_t);

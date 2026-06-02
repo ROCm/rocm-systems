@@ -274,10 +274,21 @@ const char* ihipGetErrorName(hipError_t hip_error);
 // APIs must early-return hipErrorStreamDetached. Default / legacy /
 // per-thread streams are never owned by an ExecutionCtx and therefore
 // never detach.
+//
+// Use CHECK_STREAM_DETACHED_API at top-level API entry points (those that ran
+// HIP_INIT_API) so the return goes through HIP_RETURN and updates the
+// per-thread last-error state / API-return trace; use CHECK_STREAM_DETACHED in
+// internal helpers whose caller already wraps the result in HIP_RETURN.
 #define CHECK_STREAM_DETACHED(stream)                                                              \
   if ((stream) != nullptr && (stream) != hipStreamLegacy && (stream) != hipStreamPerThread &&      \
       reinterpret_cast<hip::Stream*>(stream)->IsDetached()) {                                      \
     return hipErrorStreamDetached;                                                                 \
+  }
+
+#define CHECK_STREAM_DETACHED_API(stream)                                                          \
+  if ((stream) != nullptr && (stream) != hipStreamLegacy && (stream) != hipStreamPerThread &&      \
+      reinterpret_cast<hip::Stream*>(stream)->IsDetached()) {                                      \
+    HIP_RETURN(hipErrorStreamDetached);                                                            \
   }
 
 /// Stores the kernel launch configuration set by hipConfigureCall /
