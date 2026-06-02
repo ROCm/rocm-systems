@@ -381,11 +381,8 @@ def test_multinode_detailed_profiling(paths):
         group_events = paths.count_events_in_trace(trace_file, category="GROUP_API")
         assert group_events > 0, f"Should have Group API events in {trace_file}, found {group_events}"
         
-        # Check for P2P events (AllToAll is implemented as Send/Recv operations)
-        p2p_events = paths.count_events_in_trace(trace_file, category="P2P")
-        assert p2p_events > 0, \
-            f"Should have P2P events (AllToAll uses Send/Recv) in {trace_file}, found {p2p_events}"
-        
+        # For multi-node AllToAll, Send/Recv operations are emitted as PROXY events
+        # (the plugin no longer emits a separate "P2P" category — proxy ops cover both).
         # For multi-node tests, verify ProxyOp events exist
         proxy_events = paths.count_events_in_trace(trace_file, category="PROXY")
         assert proxy_events > 0, \

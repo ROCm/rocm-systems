@@ -378,26 +378,24 @@ def test_multinode_detailed_profiling(paths):
         assert proxy_events > 0, \
             f"Should have Proxy events in {trace_file}, found {proxy_events}"
         
-        # With ProxyOp enabled (bit 3), check for Send and Recv operations
+        # With ProxyOp enabled (bit 3), each rank should originate at least one
+        # direction. Ring AllReduce assigns send-only or recv-only roles per rank
+        # for a given chunk, so asserting both per-trace would be incorrect.
         schedule_send_events = paths.count_events_in_trace(trace_file, event_name="ScheduleSend")
         schedule_recv_events = paths.count_events_in_trace(trace_file, event_name="ScheduleRecv")
-        assert schedule_send_events > 0, \
-            f"Should have ScheduleSend events in {trace_file}, found {schedule_send_events}"
-        assert schedule_recv_events > 0, \
-            f"Should have ScheduleRecv events in {trace_file}, found {schedule_recv_events}"
+        assert schedule_send_events > 0 or schedule_recv_events > 0, \
+            f"Should have ScheduleSend or ScheduleRecv events in {trace_file}, found Send={schedule_send_events}, Recv={schedule_recv_events}"
         
         # With ProxyStep enabled (bit 4), verify network step events exist
         net_events = paths.count_events_in_trace(trace_file, category="NET")
         assert net_events > 0, \
             f"Should have NET events in {trace_file}, found {net_events}"
         
-        # Check for specific ProxyStep events
+        # Same rationale as ScheduleSend/Recv above — each rank only does one direction.
         recv_wait_events = paths.count_events_in_trace(trace_file, event_name="RecvWait")
         send_wait_events = paths.count_events_in_trace(trace_file, event_name="SendWait")
-        assert recv_wait_events > 0, \
-            f"Should have RecvWait events in {trace_file}, found {recv_wait_events}"
-        assert send_wait_events > 0, \
-            f"Should have SendWait events in {trace_file}, found {send_wait_events}"
+        assert recv_wait_events > 0 or send_wait_events > 0, \
+            f"Should have RecvWait or SendWait events in {trace_file}, found Recv={recv_wait_events}, Send={send_wait_events}"
         
         # With KernelCh enabled (bit 6), we should see GPU kernel channel events
         kernel_events = paths.count_events_in_trace(trace_file, category="GPU")

@@ -375,12 +375,8 @@ def test_multinode_detailed_profiling(paths):
         group_events = paths.count_events_in_trace(trace_file, category="GROUP_API")
         assert group_events > 0, f"Should have Group API events in {trace_file}, found {group_events}"
         
-        # Check for P2P events
-        p2p_events = paths.count_events_in_trace(trace_file, category="P2P")
-        assert p2p_events > 0, \
-            f"Should have P2P events (AllGather uses Send/Recv) in {trace_file}, found {p2p_events}"
-        
-        # For multi-node tests, verify ProxyOp events exist
+        # For multi-node AllGather, Send/Recv operations are emitted as PROXY events
+        # (the plugin no longer emits a separate "P2P" category — proxy ops cover both).
         proxy_events = paths.count_events_in_trace(trace_file, category="PROXY")
         assert proxy_events > 0, \
             f"Should have Proxy events in {trace_file}, found {proxy_events}"

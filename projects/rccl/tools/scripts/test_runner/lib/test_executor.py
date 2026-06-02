@@ -809,6 +809,11 @@ class TestExecutor:
             if key != 'LD_LIBRARY_PATH':
                 env[key] = str(value)
 
+        # Use the resolved binary path so absolute paths, custom
+        # test_binary_dir, and external scripts all work (cwd is fixed to
+        # build_dir/test, which would otherwise break `./binary`).
+        binary_invocation = shlex.quote(test_binary_path)
+
         # Build command based on test type
         if num_ranks == 1:
             # Non-MPI test - prepend environment variables to the command.
@@ -823,16 +828,16 @@ class TestExecutor:
             if is_gtest:
                 # GTest-based test - use --gtest_filter syntax
                 if test_filter == "ALL" or test_filter == "*":
-                    cmd = f"{env_prefix}./{binary}"
+                    cmd = f"{env_prefix}{binary_invocation}"
                 else:
-                    cmd = f"{env_prefix}./{binary} --gtest_filter={test_filter}"
+                    cmd = f"{env_prefix}{binary_invocation} --gtest_filter={test_filter}"
 
                 # Add custom arguments if provided
                 if custom_args:
                     cmd += f" {custom_args}"
             else:
                 # Non-gtest test (perf, custom, etc.) - run binary with args
-                cmd = f"{env_prefix}./{binary}"
+                cmd = f"{env_prefix}{binary_invocation}"
                 if custom_args:
                     cmd += f" {custom_args}"
 
@@ -907,15 +912,15 @@ class TestExecutor:
             if is_gtest:
                 # GTest-based test - use --gtest_filter syntax
                 if test_filter == "ALL" or test_filter == "*":
-                    cmd = f"{mpi_cmd} {mpi_args} ./{binary}"
+                    cmd = f"{mpi_cmd} {mpi_args} {binary_invocation}"
                 else:
-                    cmd = f"{mpi_cmd} {mpi_args} ./{binary} --gtest_filter={test_filter}"
+                    cmd = f"{mpi_cmd} {mpi_args} {binary_invocation} --gtest_filter={test_filter}"
 
                 if custom_args:
                     cmd += f" {custom_args}"
             else:
                 # Non-gtest test (perf, custom, etc.) - run binary with args
-                cmd = f"{mpi_cmd} {mpi_args} ./{binary}"
+                cmd = f"{mpi_cmd} {mpi_args} {binary_invocation}"
                 if custom_args:
                     cmd += f" {custom_args}"
 
@@ -927,18 +932,25 @@ class TestExecutor:
             os.close(fd)
             cmd += f" --gtest_output=json:{shlex.quote(gtest_json_path)}"
 
+        test_subdir_preview = os.path.join(self.build_dir, "test")
+        run_cwd_preview = test_subdir_preview if os.path.isdir(test_subdir_preview) else self.build_dir
         if self.args.verbose:
             print(f"\n  Command: {cmd}")
-            print(f"  Working directory: {os.path.join(self.build_dir, 'test')}")
+            print(f"  Working directory: {run_cwd_preview}")
             print(f"  LD_LIBRARY_PATH: {env.get('LD_LIBRARY_PATH', '')}")
             print(f"  LLVM_PROFILE_FILE: {env.get('LLVM_PROFILE_FILE', 'Not set')}\n")
 
         # Inherit stdout/stderr (no PIPE capture). For gtest, --gtest_output=json:…
         # (temp file, removed in finally) supplies reliable SKIPPED vs PASSED on exit 0.
+        # cwd defaults to <build_dir>/test (where gtest binaries live), but falls
+        # back to <build_dir> when that subdir is absent (e.g. release builds
+        # without --enable-mpi-tests, or external-script tests).
+        test_subdir = os.path.join(self.build_dir, "test")
+        run_cwd = test_subdir if os.path.isdir(test_subdir) else self.build_dir
         start_time = time.time()
         run_kwargs = {
             "shell": True,
-            "cwd": os.path.join(self.build_dir, "test"),
+            "cwd": run_cwd,
             "env": env,
             "capture_output": False,
         }

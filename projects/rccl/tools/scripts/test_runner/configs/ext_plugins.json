@@ -1,0 +1,54 @@
+{
+  "system_configurations": {
+    "name": "RCCL-Tests-ExtPlugins",
+    "description": "RCCL Test Configuration - Ext Plugins (CSV Tuner / Profiler / Inspector) only"
+  },
+  "paths": {
+    "workdir": "${WORKDIR:-$PWD}",
+    "rocm_path": "${ROCM_PATH:-/opt/rocm}",
+    "mpi_path": "${MPI_PATH:-/opt/ompi}"
+  },
+  "env_variables": {
+    "HSA_NO_SCRATCH_RECLAIM": "1",
+    "NCCL_SOCKET_IFNAME": "eth0,eth1",
+    "NCCL_IB_HCA": "^mlx5_1,mlx5_6",
+    "NCCL_DEBUG": "INFO"
+  },
+  "build_configuration": {
+    "install_flags": ["--debug", "-t", "-l", "--log-trace", "--enable-code-coverage", "--enable-mpi-tests", "--no_clean"],
+    "cmake_options": "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+    "parallel_jobs": 64
+  },
+  "test_configurations": {
+    "default": {
+      "env_variables": {
+        "NCCL_LAUNCH_MODE": "GROUP"
+      },
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      }
+    },
+    "ext_plugin_tests": {
+      "is_gtest": false,
+      "binary": "${WORKDIR}/test/ext-plugins/run_ext-plugin_tests.sh",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 3600,
+      "tests": [
+        {
+          "name": "Ext_Plugin_Tests_All",
+          "description": "Builds rccl-tests and the RCCL ext-tuner/profiler/inspector plugins, then runs the full pytest suite under test/ext-plugins"
+        }
+      ]
+    }
+  },
+  "test_suites": [
+    {
+      "name": "Ext Plugin Tests (CSV Tuner / Profiler / Inspector)",
+      "description": "Builds rccl-tests + ext-plugin .so's and runs the pytest suite under test/ext-plugins",
+      "config": "ext_plugin_tests",
+      "enabled": true
+    }
+  ]
+}

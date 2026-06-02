@@ -1857,6 +1857,21 @@
     "net_ib_stress_inline_cast": {
       "extends": "net_ib_stress_inline",
       "env_variables": { "NCCL_NET": "ib-cast" }
+    },
+
+    "ext_plugin_tests": {
+      "is_gtest": false,
+      "binary": "${WORKDIR}/test/ext-plugins/run_ext-plugin_tests.sh",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 3600,
+      "tests": [
+        {
+          "name": "Ext_Plugin_Tests_All",
+          "description": "Builds rccl-tests and the RCCL ext-tuner/profiler/inspector plugins, then runs the full pytest suite under test/ext-plugins"
+        }
+      ]
     }
   },
   "test_suites": [
@@ -2242,6 +2257,12 @@
       "name": "NET IB - Stress Inline CTS (ib-cast)",
       "description": "InfiniBand inline CTS stress via ib-cast plugin (NCCL_NET=ib-cast)",
       "config": "net_ib_stress_inline_cast",
+      "enabled": true
+    },
+    {
+      "name": "Ext Plugin Tests (CSV Tuner / Profiler / Inspector)",
+      "description": "Builds rccl-tests + ext-plugin .so's and runs the pytest suite under test/ext-plugins",
+      "config": "ext_plugin_tests",
       "enabled": true
     }
   ]
