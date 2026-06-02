@@ -13,8 +13,9 @@ find_path(
     _rcfn_python_include
     NAMES Python.h
     HINTS ${Python3_INCLUDE_DIRS}
-    PATHS /usr/include/python${_py_major}.${_py_minor}
-          /usr/local/include/python${_py_major}.${_py_minor}
+    PATHS
+        /usr/include/python${_py_major}.${_py_minor}
+        /usr/local/include/python${_py_major}.${_py_minor}
 )
 if(NOT _rcfn_libpython OR NOT _rcfn_python_include)
     message(
@@ -65,7 +66,8 @@ set_target_properties(
 find_path(
     _rcfn_openblas_dir
     NAMES librocm-openblas.so.0
-    HINTS ENV ROCM_PATH
+    HINTS
+    ENV ROCM_PATH
     PATHS /opt/rocm
     PATH_SUFFIXES lib/host-math/lib lib lib64
 )
