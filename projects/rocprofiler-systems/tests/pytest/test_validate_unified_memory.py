@@ -17,10 +17,24 @@ import pytest
 pytestmark = [pytest.mark.validation_usm]
 
 
+def resolve_validator_script(tests_dir: Path) -> Path:
+    """Resolve the unified-memory validator across build and install layouts."""
+    candidates = [
+        tests_dir / "validate-unified-memory.py",
+        Path(__file__).resolve().parents[1] / "validate-unified-memory.py",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+
+    searched = ", ".join(str(candidate) for candidate in candidates)
+    raise FileNotFoundError(f"Unable to find validate-unified-memory.py in {searched}")
+
+
 @pytest.fixture(scope="module")
-def validator() -> ModuleType:
+def validator(tests_dir: Path) -> ModuleType:
     """Import validate-unified-memory.py as a test module."""
-    script = Path(__file__).resolve().parents[1] / "validate-unified-memory.py"
+    script = resolve_validator_script(tests_dir)
     spec = spec_from_file_location("validate_unified_memory", script)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Unable to load validator module from {script}")
