@@ -254,8 +254,6 @@ void testWrapper(size_t numElements) {
   HIP_CHECK(hipStreamCreate(&stream2));
   HIP_CHECK(hipDeviceSynchronize());
 
-  runTestImpl(COPY, EVENT_SYNC, KERNEL, stream1, stream2, numElements, Ad, Bd, Cd, Ch, expected);
-
   for (int cmdA = 0; cmdA < MAX_CmdType; cmdA++) {
     for (int cmdB = 0; cmdB < MAX_CmdType; cmdB++) {
       for (int syncMode = 0; syncMode < MAX_SyncType; syncMode++) {
