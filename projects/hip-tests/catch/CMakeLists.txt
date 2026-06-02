@@ -50,7 +50,7 @@ include_directories(${hip_INCLUDE_DIRS})
 find_package(hiprtc)
 find_package(Git)
 find_package(Python 3 COMPONENTS Interpreter REQUIRED)
-# hipconfig is deprecated; HIP version is available directly from find_package(hip)
+# HIP version is available directly from find_package(hip)
 set(HIP_VERSION ${hip_VERSION})
 
 # hip root dir is 3 levels down the hip-config.cmake file path
