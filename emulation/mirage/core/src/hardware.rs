@@ -56,10 +56,10 @@ fn detect_from(root: &Path) -> Vec<u32> {
         let Ok(text) = fs::read_to_string(&props) else {
             continue;
         };
-        if let Some(v) = parse_gfx_target_version(&text) {
-            if v != 0 {
-                out.push(v);
-            }
+        if let Some(v) = parse_gfx_target_version(&text)
+            && v != 0
+        {
+            out.push(v);
         }
     }
     out

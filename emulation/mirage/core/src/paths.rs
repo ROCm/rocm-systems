@@ -61,10 +61,10 @@ pub const APP_NAMESPACE: &str = "mirage";
 
 /// Returns `$XDG_CONFIG_HOME` (or `$HOME/.config` if unset).
 pub fn xdg_config_home() -> PathBuf {
-    if let Ok(p) = std::env::var("XDG_CONFIG_HOME") {
-        if !p.is_empty() {
-            return PathBuf::from(p);
-        }
+    if let Ok(p) = std::env::var("XDG_CONFIG_HOME")
+        && !p.is_empty()
+    {
+        return PathBuf::from(p);
     }
     home_dir().join(".config")
 }
@@ -73,10 +73,10 @@ pub fn xdg_config_home() -> PathBuf {
 ///
 /// Falls back to `$TMPDIR/mirage-<uid>` if unset (per XDG spec note).
 pub fn xdg_runtime_dir() -> PathBuf {
-    if let Ok(p) = std::env::var("XDG_RUNTIME_DIR") {
-        if !p.is_empty() {
-            return PathBuf::from(p);
-        }
+    if let Ok(p) = std::env::var("XDG_RUNTIME_DIR")
+        && !p.is_empty()
+    {
+        return PathBuf::from(p);
     }
     let tmp = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".to_string());
     // SAFETY: getuid is always safe.
@@ -86,20 +86,20 @@ pub fn xdg_runtime_dir() -> PathBuf {
 
 /// Returns `$XDG_STATE_HOME` (or `$HOME/.local/state`).
 pub fn xdg_state_home() -> PathBuf {
-    if let Ok(p) = std::env::var("XDG_STATE_HOME") {
-        if !p.is_empty() {
-            return PathBuf::from(p);
-        }
+    if let Ok(p) = std::env::var("XDG_STATE_HOME")
+        && !p.is_empty()
+    {
+        return PathBuf::from(p);
     }
     home_dir().join(".local").join("state")
 }
 
 /// Returns `$XDG_CACHE_HOME` (or `$HOME/.cache` if unset).
 pub fn xdg_cache_home() -> PathBuf {
-    if let Ok(p) = std::env::var("XDG_CACHE_HOME") {
-        if !p.is_empty() {
-            return PathBuf::from(p);
-        }
+    if let Ok(p) = std::env::var("XDG_CACHE_HOME")
+        && !p.is_empty()
+    {
+        return PathBuf::from(p);
     }
     home_dir().join(".cache")
 }
@@ -115,10 +115,10 @@ fn home_dir() -> PathBuf {
 /// Honors `$MIRAGE_CONFIG` as a direct override; otherwise returns
 /// `$XDG_CONFIG_HOME/mirage`.
 pub fn mirage_config_dir() -> PathBuf {
-    if let Ok(p) = std::env::var("MIRAGE_CONFIG") {
-        if !p.is_empty() {
-            return PathBuf::from(p);
-        }
+    if let Ok(p) = std::env::var("MIRAGE_CONFIG")
+        && !p.is_empty()
+    {
+        return PathBuf::from(p);
     }
     xdg_config_home().join(APP_NAMESPACE)
 }
@@ -128,10 +128,10 @@ pub fn mirage_config_dir() -> PathBuf {
 /// Honors `$MIRAGE_STATE` as a direct override; otherwise returns
 /// `$XDG_STATE_HOME/mirage`.
 pub fn mirage_state_dir() -> PathBuf {
-    if let Ok(p) = std::env::var("MIRAGE_STATE") {
-        if !p.is_empty() {
-            return PathBuf::from(p);
-        }
+    if let Ok(p) = std::env::var("MIRAGE_STATE")
+        && !p.is_empty()
+    {
+        return PathBuf::from(p);
     }
     xdg_state_home().join(APP_NAMESPACE)
 }
@@ -141,10 +141,10 @@ pub fn mirage_state_dir() -> PathBuf {
 /// Honors `$MIRAGE_CACHE` as a direct override; otherwise returns
 /// `$XDG_CACHE_HOME/mirage`.
 pub fn mirage_cache_dir() -> PathBuf {
-    if let Ok(p) = std::env::var("MIRAGE_CACHE") {
-        if !p.is_empty() {
-            return PathBuf::from(p);
-        }
+    if let Ok(p) = std::env::var("MIRAGE_CACHE")
+        && !p.is_empty()
+    {
+        return PathBuf::from(p);
     }
     xdg_cache_home().join(APP_NAMESPACE)
 }
@@ -154,10 +154,10 @@ pub fn mirage_cache_dir() -> PathBuf {
 /// Honors `$MIRAGE_RUNTIME` as a direct override; otherwise returns
 /// `$XDG_RUNTIME_DIR/mirage`.
 pub fn mirage_runtime_dir() -> PathBuf {
-    if let Ok(p) = std::env::var("MIRAGE_RUNTIME") {
-        if !p.is_empty() {
-            return PathBuf::from(p);
-        }
+    if let Ok(p) = std::env::var("MIRAGE_RUNTIME")
+        && !p.is_empty()
+    {
+        return PathBuf::from(p);
     }
     xdg_runtime_dir().join(APP_NAMESPACE)
 }

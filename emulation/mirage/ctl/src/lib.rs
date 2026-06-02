@@ -109,8 +109,8 @@ fn emulators_cmd(long: bool, json: bool) {
     }
 
     println!(
-        "{:<10} {:<10} {:<10} {}",
-        "NAME", "INSTALLED", "SUPPORTED", "DESCRIPTION"
+        "{:<10} {:<10} {:<10} DESCRIPTION",
+        "NAME", "INSTALLED", "SUPPORTED"
     );
     for spec in &specs {
         let name = if spec.name == default_name {
@@ -544,7 +544,7 @@ fn profile_cmd(ctl: &dyn MirageCtl, cmd: ProfileCmd, json: bool) -> anyhow::Resu
                 if names.is_empty() {
                     eprintln!("(no profiles)");
                 }
-                println!("{:<24} {:<16} {}", "NAME", "EMULATOR", "DESCRIPTION");
+                println!("{:<24} {:<16} DESCRIPTION", "NAME", "EMULATOR");
                 for n in names {
                     match ctl.profile_get(&n) {
                         Ok(p) => println!(
@@ -757,7 +757,7 @@ async fn session_cmd<C: MirageCtl>(
                 if ids.is_empty() {
                     eprintln!("(no sessions)");
                 }
-                println!("{:<32} {:<10} {}", "ID", "HEALTHY", "STATE");
+                println!("{:<32} {:<10} STATE", "ID", "HEALTHY");
                 for id in ids {
                     let h = ctl.session_health(&id).unwrap_or_default();
                     println!(
@@ -859,10 +859,10 @@ fn find_host_bin_for_session_spawn() -> anyhow::Result<std::path::PathBuf> {
             p.display()
         );
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if exe.is_file() {
-            return Ok(exe);
-        }
+    if let Ok(exe) = std::env::current_exe()
+        && exe.is_file()
+    {
+        return Ok(exe);
     }
     if let Some(p) = which_on_path("mirage") {
         return Ok(p);
@@ -930,7 +930,7 @@ async fn exec_cmd<C: MirageCtl + 'static>(
                 if ids.is_empty() {
                     eprintln!("(no execs)");
                 }
-                println!("{:<14} {:<8} {:<8} {}", "EXEC", "STARTED", "ENDED", "EXIT");
+                println!("{:<14} {:<8} {:<8} EXIT", "EXEC", "STARTED", "ENDED");
                 for id in ids {
                     let r = ExecRef {
                         session: session.clone(),

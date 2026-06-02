@@ -72,10 +72,10 @@ impl Daemon {
         let deadline = Instant::now() + Duration::from_secs(15);
         let url = format!("{}/api/paths", self.base);
         while Instant::now() < deadline {
-            if let Ok(resp) = reqwest::blocking::get(&url) {
-                if resp.status().is_success() {
-                    return;
-                }
+            if let Ok(resp) = reqwest::blocking::get(&url)
+                && resp.status().is_success()
+            {
+                return;
             }
             std::thread::sleep(Duration::from_millis(50));
         }
@@ -131,11 +131,11 @@ impl Drop for Daemon {
         if let Ok(rd) = std::fs::read_dir(self.runtime.join("mirage/session")) {
             for ent in rd.flatten() {
                 let pidf = ent.path().join("host.pid");
-                if let Ok(s) = std::fs::read_to_string(&pidf) {
-                    if let Ok(pid) = s.trim().parse::<i32>() {
-                        unsafe {
-                            libc::kill(pid, libc::SIGKILL);
-                        }
+                if let Ok(s) = std::fs::read_to_string(&pidf)
+                    && let Ok(pid) = s.trim().parse::<i32>()
+                {
+                    unsafe {
+                        libc::kill(pid, libc::SIGKILL);
                     }
                 }
             }

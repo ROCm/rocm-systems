@@ -239,10 +239,11 @@ async fn get_metrics(State(s): State<Arc<AppState>>) -> Result<Json<MetricsRespo
                     session: id.clone(),
                     exec: eid,
                 };
-                if let Ok(status) = s.ctl.exec_status(&r) {
-                    if status.started && !status.ended {
-                        execs_running += 1;
-                    }
+                if let Ok(status) = s.ctl.exec_status(&r)
+                    && status.started
+                    && !status.ended
+                {
+                    execs_running += 1;
                 }
             }
         }
@@ -605,7 +606,7 @@ mod base64_decode {
             bits += 6;
             if bits >= 8 {
                 bits -= 8;
-                out.push((buf >> bits) as u8 & 0xff);
+                out.push((buf >> bits) as u8);
             }
         }
         Ok(out)

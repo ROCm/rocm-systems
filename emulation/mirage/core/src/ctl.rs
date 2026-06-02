@@ -379,25 +379,25 @@ impl MirageCtl for FileCtl {
         // signal the host process if any (this is also the fallback
         // path when there is no container, or when the container has
         // already exited).
-        if let Some(pid_str) = crate::state::read_small_str(&layout.host_pid())? {
-            if let Ok(pid) = pid_str.parse::<i32>() {
+        if let Some(pid_str) = crate::state::read_small_str(&layout.host_pid())?
+            && let Ok(pid) = pid_str.parse::<i32>()
+        {
+            let _ = nix::sys::signal::kill(
+                nix::unistd::Pid::from_raw(pid),
+                nix::sys::signal::Signal::SIGTERM,
+            );
+            // wait briefly for clean exit
+            for _ in 0..50 {
+                if !process_alive(pid) {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            if process_alive(pid) {
                 let _ = nix::sys::signal::kill(
                     nix::unistd::Pid::from_raw(pid),
-                    nix::sys::signal::Signal::SIGTERM,
+                    nix::sys::signal::Signal::SIGKILL,
                 );
-                // wait briefly for clean exit
-                for _ in 0..50 {
-                    if !process_alive(pid) {
-                        break;
-                    }
-                    std::thread::sleep(Duration::from_millis(20));
-                }
-                if process_alive(pid) {
-                    let _ = nix::sys::signal::kill(
-                        nix::unistd::Pid::from_raw(pid),
-                        nix::sys::signal::Signal::SIGKILL,
-                    );
-                }
             }
         }
 
