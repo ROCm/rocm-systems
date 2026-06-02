@@ -13,6 +13,7 @@ mirage_ctl = { workspace = true }
 mirage_host = { workspace = true }
 mirage_daemon = { workspace = true }
 mirage_rocjitsu = { workspace = true }
+mirage_hotswap = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
 tokio = { workspace = true }
@@ -56,3 +57,4 @@ mirage_ctl = { path = "ctl" }
 mirage_host = { path = "host" }
 mirage_daemon = { path = "daemon" }
 mirage_rocjitsu = { path = "rocjitsu" }
+mirage_hotswap = { path = "hotswap" }

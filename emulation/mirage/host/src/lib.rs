@@ -279,6 +279,30 @@ fn resolve_injection(session: &SessionId) -> Result<InjectionDef> {
                 env,
             })
         }
+        // HotSwap is loaded by the ROCm runtime as an HSA tools
+        // library: we only need to discover `libhsa-hotswap.so` and
+        // point `HSA_TOOLS_LIB` at it. mirage does not build or bundle
+        // HotSwap — see `mirage_hotswap`.
+        "hotswap" => match mirage_hotswap::hsa_tools_lib() {
+            Some(lib) => {
+                let mut env = std::collections::BTreeMap::new();
+                env.insert("HSA_TOOLS_LIB".to_string(), lib);
+                Ok(InjectionDef {
+                    wrapper: None,
+                    ld_preload: None,
+                    files: Default::default(),
+                    env,
+                })
+            }
+            None => {
+                tracing::warn!(
+                    "hotswap: {lib} not found; workload will not be emulated.\n{guidance}",
+                    lib = mirage_hotswap::LIB_NAME,
+                    guidance = mirage_hotswap::install_guidance(),
+                );
+                Ok(InjectionDef::default())
+            }
+        },
         // `noop` and any other emulator currently need no injection.
         _ => Ok(InjectionDef::default()),
     }

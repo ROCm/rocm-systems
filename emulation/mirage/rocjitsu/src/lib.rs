@@ -119,28 +119,25 @@ pub fn ensure_assets(force: bool) -> Result<Vec<(String, bool)>> {
 ///
 /// Prefers the extracted on-disk copy under
 /// `<MIRAGE_CACHE>/emulator/rocjitsu/` (after [`ensure_assets`] has
-/// run); falls back to probing the rocjitsu source/build/install
-/// layout for backwards compatibility with workspaces that don't
-/// use the embedded copy.
+/// run); falls back to the shared [`mirage_core::discovery`] search
+/// (ROCM_HOME, LD_LIBRARY_PATH, next-to-binary, `./emulator/rocjitsu/`,
+/// standard system/ROCm dirs, …) for workspaces that rely on a
+/// separately-installed rocjitsu.
 pub fn kmd_preload() -> Option<PathBuf> {
     let extracted = kmd_lib_path();
     if extracted.exists() {
         return Some(extracted);
     }
-    let root = root();
-    let candidates = [
-        root.join("build/lib/rocjitsu/src/rocjitsu/kmd")
-            .join(KMD_LIB_NAME),
-        root.join("build-clean/lib/rocjitsu/src/rocjitsu/kmd")
-            .join(KMD_LIB_NAME),
-        root.join("build/lib").join(KMD_LIB_NAME),
-        root.join("artifacts/lib").join(KMD_LIB_NAME),
-        PathBuf::from("/usr/local/lib").join(KMD_LIB_NAME),
-        PathBuf::from("/usr/lib").join(KMD_LIB_NAME),
-        PathBuf::from("/usr/lib/x86_64-linux-gnu").join(KMD_LIB_NAME),
-        PathBuf::from("/opt/rocm/lib").join(KMD_LIB_NAME),
-    ];
-    candidates.into_iter().find(|p| p.exists())
+    mirage_core::discovery::find_emulator_lib(&kmd_lib_search())
+}
+
+/// Shared discovery policy for the KMD interposer (`librocjitsu_kmd.so`).
+fn kmd_lib_search() -> mirage_core::discovery::LibSearch<'static> {
+    mirage_core::discovery::LibSearch {
+        file_env: &["ROCJITSU_KMD_LIB"],
+        dir_env: &["ROCJITSU_LIB_DIR", "ROCJITSU_ROOT"],
+        lib_name: KMD_LIB_NAME,
+    }
 }
 
 /// Synthesise a rocjitsu `SimulationConfig` JSON file from the given
@@ -222,21 +219,7 @@ pub fn is_installed() -> bool {
     if !KMD_LIB_BYTES.is_empty() {
         return true;
     }
-    if std::env::var_os("ROCJITSU_LIB_DIR").is_some() || std::env::var_os("ROCJITSU_ROOT").is_some()
-    {
-        return true;
-    }
-    for candidate in [
-        "/usr/local/lib/librocjitsu.so",
-        "/usr/lib/librocjitsu.so",
-        "/usr/lib/x86_64-linux-gnu/librocjitsu.so",
-        "/opt/rocm/lib/librocjitsu.so",
-    ] {
-        if Path::new(candidate).exists() {
-            return true;
-        }
-    }
-    kmd_preload().is_some()
+    mirage_core::discovery::is_lib_installed(&kmd_lib_search())
 }
 
 #[cfg(unix)]

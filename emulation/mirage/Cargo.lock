@@ -1048,6 +1048,7 @@ dependencies = [
  "mirage_ctl",
  "mirage_daemon",
  "mirage_host",
+ "mirage_hotswap",
  "mirage_rocjitsu",
  "predicates",
  "reqwest",
@@ -1088,6 +1089,7 @@ dependencies = [
  "futures",
  "libc",
  "mirage_core",
+ "mirage_hotswap",
  "mirage_rocjitsu",
  "nix",
  "serde",
@@ -1137,6 +1139,7 @@ dependencies = [
  "clap",
  "libc",
  "mirage_core",
+ "mirage_hotswap",
  "mirage_rocjitsu",
  "nix",
  "serde",
@@ -1149,6 +1152,9 @@ dependencies = [
 [[package]]
 name = "mirage_hotswap"
 version = "0.1.0"
+dependencies = [
+ "mirage_core",
+]
 
 [[package]]
 name = "mirage_rocjitsu"

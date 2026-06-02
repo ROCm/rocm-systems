@@ -19,6 +19,7 @@ pub mod common;
 pub mod config;
 pub mod container;
 pub mod ctl;
+pub mod discovery;
 pub mod emulator;
 pub mod error;
 pub mod exec;

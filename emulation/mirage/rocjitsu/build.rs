@@ -17,9 +17,12 @@
 //! 2. The rocjitsu source tree at `$ROCJITSU_ROOT` or the sibling
 //!    `../../rocjitsu` checkout. JSON configs are read from
 //!    `<root>/configs/` and the schema from `<root>/schemas/`.
-//! 3. For the `.so` libraries: a pre-built artifact under `<root>/build/`,
-//!    with a fallback to invoking `cmake` to build them on demand
-//!    (only when `cmake` is on `$PATH` and `MIRAGE_ROCJITSU_BUILD!=0`).
+//! 3. For the `.so` libraries: a pre-built artifact under `<root>/build/`.
+//!
+//! mirage does **not** build emulators itself. If a `.so` is not
+//! found as a prebuilt artifact, an empty placeholder is embedded and
+//! the library is discovered at runtime from the installed system
+//! (see `mirage_rocjitsu::kmd_preload` and `mirage_core::discovery`).
 //!
 //! If an asset cannot be located, an empty placeholder is staged in
 //! `$OUT_DIR` so the crate still compiles. Runtime helpers
@@ -28,14 +31,12 @@
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 fn main() {
     println!("cargo:rerun-if-env-changed=ROCJITSU_ROOT");
     println!("cargo:rerun-if-env-changed=ROCJITSU_KMD_LIB");
     println!("cargo:rerun-if-env-changed=ROCJITSU_LIB");
     println!("cargo:rerun-if-env-changed=ROCJITSU_SCHEMA_FBS");
-    println!("cargo:rerun-if-env-changed=MIRAGE_ROCJITSU_BUILD");
 
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR is set by cargo"));
     let root = rocjitsu_root();
@@ -45,17 +46,13 @@ fn main() {
         &out_dir.join("librocjitsu_kmd.so"),
         find_shared_lib(
             &root,
-            &out_dir,
             "ROCJITSU_KMD_LIB",
-            "librocjitsu_kmd.so",
-            "rocjitsu_kmd_shim",
             &[
                 "build/lib/rocjitsu/src/rocjitsu/kmd/librocjitsu_kmd.so",
                 "build-clean/lib/rocjitsu/src/rocjitsu/kmd/librocjitsu_kmd.so",
                 "build/lib/librocjitsu_kmd.so",
                 "artifacts/lib/librocjitsu_kmd.so",
             ],
-            "lib/rocjitsu/src/rocjitsu/kmd/librocjitsu_kmd.so",
         ),
     );
     stage_asset(
@@ -63,17 +60,13 @@ fn main() {
         &out_dir.join("librocjitsu.so"),
         find_shared_lib(
             &root,
-            &out_dir,
             "ROCJITSU_LIB",
-            "librocjitsu.so",
-            "rocjitsu_shared",
             &[
                 "build/librocjitsu.so",
                 "build-clean/librocjitsu.so",
                 "build/lib/librocjitsu.so",
                 "artifacts/lib/librocjitsu.so",
             ],
-            "librocjitsu.so",
         ),
     );
     stage_asset(
@@ -125,21 +118,18 @@ fn find_in_root(env_key: &str, root: Option<&Path>, rel: &str) -> Option<PathBuf
     if p.exists() { Some(p) } else { None }
 }
 
-fn find_shared_lib(
-    root: &Option<PathBuf>,
-    out_dir: &Path,
-    env_key: &str,
-    label: &str,
-    cmake_target: &str,
-    candidates: &[&str],
-    built_rel: &str,
-) -> Option<PathBuf> {
+fn find_shared_lib(root: &Option<PathBuf>, env_key: &str, candidates: &[&str]) -> Option<PathBuf> {
+    // 1. Explicit path supplied by the user.
     if let Some(p) = env::var_os(env_key) {
         let p = PathBuf::from(p);
         if p.exists() {
             return Some(p);
         }
     }
+    // 2. A prebuilt artifact inside the rocjitsu source tree. mirage
+    //    does NOT build emulators itself — if a prebuilt copy isn't
+    //    present, an empty placeholder is embedded and the library is
+    //    discovered at runtime (see `mirage_rocjitsu::kmd_preload`).
     let root = root.as_deref()?;
     for cand in candidates {
         let p = root.join(cand);
@@ -147,73 +137,7 @@ fn find_shared_lib(
             return Some(p);
         }
     }
-    if env::var_os("MIRAGE_ROCJITSU_BUILD") == Some("0".into()) {
-        return None;
-    }
-    if !has_cmd("cmake") {
-        println!(
-            "cargo:warning=mirage_rocjitsu: {label} not found and cmake unavailable; skipping build"
-        );
-        return None;
-    }
-    build_target(root, out_dir, cmake_target, built_rel, label)
-}
-
-fn build_target(
-    root: &Path,
-    out_dir: &Path,
-    cmake_target: &str,
-    built_rel: &str,
-    label: &str,
-) -> Option<PathBuf> {
-    let build_dir = out_dir.join("rocjitsu-build");
-    fs::create_dir_all(&build_dir).ok()?;
-
-    println!("cargo:warning=mirage_rocjitsu: building {label} via cmake (this may take a while)");
-    let generator = if has_cmd("ninja") {
-        "Ninja"
-    } else {
-        "Unix Makefiles"
-    };
-    let configure = Command::new("cmake")
-        .arg("-S")
-        .arg(root)
-        .arg("-B")
-        .arg(&build_dir)
-        .arg("-G")
-        .arg(generator)
-        .arg("-DCMAKE_BUILD_TYPE=Release")
-        .status();
-    match configure {
-        Ok(s) if s.success() => {}
-        Ok(s) => {
-            println!("cargo:warning=mirage_rocjitsu: cmake configure failed ({s})");
-            return None;
-        }
-        Err(e) => {
-            println!("cargo:warning=mirage_rocjitsu: cmake configure failed: {e}");
-            return None;
-        }
-    }
-    let build = Command::new("cmake")
-        .arg("--build")
-        .arg(&build_dir)
-        .arg("--target")
-        .arg(cmake_target)
-        .status();
-    match build {
-        Ok(s) if s.success() => {}
-        Ok(s) => {
-            println!("cargo:warning=mirage_rocjitsu: cmake build failed ({s})");
-            return None;
-        }
-        Err(e) => {
-            println!("cargo:warning=mirage_rocjitsu: cmake build failed: {e}");
-            return None;
-        }
-    }
-    let built = build_dir.join(built_rel);
-    if built.exists() { Some(built) } else { None }
+    None
 }
 
 fn rocjitsu_root() -> Option<PathBuf> {
@@ -229,14 +153,4 @@ fn rocjitsu_root() -> Option<PathBuf> {
         return Some(sibling);
     }
     None
-}
-
-fn has_cmd(name: &str) -> bool {
-    Command::new(name)
-        .arg("--version")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
 }

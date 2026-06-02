@@ -36,7 +36,7 @@ pub struct EmulatorSpec {
 
 /// Built-in emulator registry. Append-only by intent.
 pub fn builtins() -> &'static [EmulatorSpec] {
-    &[NOOP, ROCJITSU]
+    &[NOOP, ROCJITSU, HOTSWAP]
 }
 
 /// Lookup an emulator by its canonical name.
@@ -144,24 +144,16 @@ pub const ROCJITSU: EmulatorSpec = EmulatorSpec {
 /// search path, or if the user has set `ROCJITSU_LIB_DIR` /
 /// `ROCJITSU_ROOT`.
 fn rocjitsu_installed() -> bool {
-    let cached = crate::paths::mirage_cache_dir()
-        .join("emulator")
-        .join("rocjitsu")
-        .join("librocjitsu.so");
-    if cached.exists() {
-        return true;
+    crate::discovery::is_lib_installed(&rocjitsu_lib_search())
+}
+
+/// Shared discovery policy for `librocjitsu.so`.
+fn rocjitsu_lib_search() -> crate::discovery::LibSearch<'static> {
+    crate::discovery::LibSearch {
+        file_env: &["ROCJITSU_LIB"],
+        dir_env: &["ROCJITSU_LIB_DIR", "ROCJITSU_ROOT"],
+        lib_name: "librocjitsu.so",
     }
-    if std::env::var_os("ROCJITSU_LIB_DIR").is_some() || std::env::var_os("ROCJITSU_ROOT").is_some()
-    {
-        return true;
-    }
-    let candidates = [
-        "/usr/local/lib/librocjitsu.so",
-        "/usr/lib/librocjitsu.so",
-        "/usr/lib/x86_64-linux-gnu/librocjitsu.so",
-        "/opt/rocm/lib/librocjitsu.so",
-    ];
-    candidates.iter().any(|p| std::path::Path::new(p).exists())
 }
 
 fn rocjitsu_describe() -> EmulatorDescription {
@@ -169,6 +161,44 @@ fn rocjitsu_describe() -> EmulatorDescription {
         name: "rocjitsu".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         description: "ROCm GPU simulator (decodes AMDGPU/RISC-V ISA, event-driven PDES core)."
+            .to_string(),
+    }
+}
+
+// =============================================================================
+// hotswap
+// =============================================================================
+
+pub const HOTSWAP: EmulatorSpec = EmulatorSpec {
+    name: "hotswap",
+    description: "load-time ISA rewriter: run a GPU's code on a different GPU (e.g. gfx1250 on gfx942/gfx950)",
+    installed: hotswap_installed,
+    describe: hotswap_describe,
+};
+
+/// Shared discovery policy for `libhsa-hotswap.so`. Mirrors
+/// `mirage_hotswap::lib_search` so the registry's "installed" check
+/// and the runtime injection agree on where to look.
+fn hotswap_lib_search() -> crate::discovery::LibSearch<'static> {
+    crate::discovery::LibSearch {
+        file_env: &["HOTSWAP_LIB", "HSA_TOOLS_LIB"],
+        dir_env: &["HOTSWAP_LIB_DIR"],
+        lib_name: "libhsa-hotswap.so",
+    }
+}
+
+/// hotswap is "installed" if `libhsa-hotswap.so` can be located in any
+/// of the standard discovery locations (see `crate::discovery`).
+fn hotswap_installed() -> bool {
+    crate::discovery::is_lib_installed(&hotswap_lib_search())
+}
+
+fn hotswap_describe() -> EmulatorDescription {
+    EmulatorDescription {
+        name: "hotswap".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        description: "Load-time ISA rewriter loaded via HSA_TOOLS_LIB; \
+                      runs one GPU architecture's code on another real GPU."
             .to_string(),
     }
 }
