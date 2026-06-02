@@ -662,7 +662,7 @@ hsa_status_t XdnaDriver::GetCacheProperties(uint32_t node_id, uint32_t processor
 hsa_status_t
 XdnaDriver::AllocateMemory(const core::MemoryRegion &mem_region,
                            core::MemoryRegion::AllocateFlags alloc_flags,
-                           void **mem, size_t size, /* uint64_t* mmap_offset,*/ uint32_t node_id) {
+                           void **mem, size_t size, uint32_t node_id) {
   const MemoryRegion& m_region = static_cast<const MemoryRegion&>(mem_region);
 
   if (!m_region.IsSystem()) {
