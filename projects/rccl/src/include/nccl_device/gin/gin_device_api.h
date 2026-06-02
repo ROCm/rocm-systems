@@ -18,5 +18,8 @@
 #if NCCL_GIN_ROCSHMEM_ENABLE
 #include "rocshmem/gin_rocshmem.h"
 #endif
+#if NCCL_GIN_ANVIL_ENABLE
+#include "anvil/gin_anvil.h"
+#endif
 
 #endif
