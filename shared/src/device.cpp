@@ -265,6 +265,33 @@ ErrorCode Device::QueryVramSegmentUsage(VramSegmentKind kind,
   return QuerySegmentBytesResident(luid, segment_id, usage);
 }
 
+uint64_t Device::VramTotal() const {
+  uint64_t total = LocalVisibleHeapSize() + LocalInvisibleHeapSize();
+  if (!IsDgpu())
+    total += NonLocalHeapSize();
+  return total;
+}
+
+ErrorCode Device::QueryVramUsage(uint64_t *usage_bytes) const {
+  if (!usage_bytes)
+    return ErrorCode::InvalidPointer;
+
+  ErrorCode ret = QueryVramSegmentUsage(VramSegmentKind::kLocal, usage_bytes);
+  if (ret != ErrorCode::Success)
+    return ret;
+
+  if (IsDgpu())
+    return ErrorCode::Success;
+
+  uint64_t used_non_local = 0;
+  ret = QueryVramSegmentUsage(VramSegmentKind::kNonLocal, &used_non_local);
+  if (ret != ErrorCode::Success)
+    return ret;
+
+  *usage_bytes += used_non_local;
+  return ErrorCode::Success;
+}
+
 ErrorCode Device::QueryPowerInfo(PowerInfo *info) const {
   return device_ctx_->QueryPowerInfo(info);
 }

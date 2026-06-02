@@ -59,6 +59,12 @@ public:
   // Query resident bytes for a VRAM segment bucket (see VramSegmentKind).
   ErrorCode QueryVramSegmentUsage(VramSegmentKind kind, uint64_t *usage) const;
 
+  // Total VRAM reported to upper stacks.
+  uint64_t VramTotal() const;
+
+  // WDDM segment usage for VramTotal() buckets.
+  ErrorCode QueryVramUsage(uint64_t *usage_bytes) const;
+
   ErrorCode QueryPowerInfo(PowerInfo *info) const;
 
   ErrorCode QueryTempMetric(uint32_t sensor_type, uint32_t metric,

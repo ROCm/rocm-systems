@@ -98,26 +98,12 @@ ErrorCode WDDMDevice::VramAvail(uint64_t *avail) {
   if (!CpuWait(&page_syncobj_, &value, 1, false))
     return ErrorCode::Unknown;
 
-  uint64_t used_local = 0;
-  ErrorCode ret =
-      shared_dev_->QueryVramSegmentUsage(VramSegmentKind::kLocal, &used_local);
+  uint64_t used = 0;
+  ErrorCode ret = shared_dev_->QueryVramUsage(&used);
   if (ret != ErrorCode::Success)
     return ret;
 
-  if (IsDgpu()) {
-    const uint64_t total = LocalHeapSize();
-    *avail = used_local >= total ? 0 : total - used_local;
-    return ErrorCode::Success;
-  }
-
-  uint64_t used_non_local = 0;
-  ret = shared_dev_->QueryVramSegmentUsage(VramSegmentKind::kNonLocal,
-                                           &used_non_local);
-  if (ret != ErrorCode::Success)
-    return ret;
-
-  const uint64_t total = LocalHeapSize() + NonLocalHeapSize();
-  const uint64_t used = used_local + used_non_local;
+  const uint64_t total = shared_dev_->VramTotal();
   *avail = used >= total ? 0 : total - used;
   return ErrorCode::Success;
 }
