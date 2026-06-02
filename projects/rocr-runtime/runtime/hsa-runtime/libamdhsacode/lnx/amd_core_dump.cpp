@@ -375,7 +375,7 @@ static void GetCoreDeviceInfo(const AMD::GpuAgent* agent, kfd_dbg_device_info_en
   entry.gpu_id = gpu_id;
   entry.vendor_id = props.VendorId;
   entry.device_id = props.DeviceId;
-  entry.array_count = props.NumArrays;
+  entry.array_count = props.NumArrays * props.NumShaderBanks;
 
   // Calculate gfx version from EngineId - decimal encoding for KFD 1.13 compatibility
   entry.gfx_target_version = (props.EngineId.ui32.Major * 10000
