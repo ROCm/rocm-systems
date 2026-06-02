@@ -90,7 +90,6 @@ AmdGpuCodeObject::AmdGpuCodeObject(AmdGpuCodeObject &&other) noexcept
   header_ = std::move(other.header_);
   sections_ = std::move(other.sections_);
   text_sections_ = std::move(other.text_sections_);
-  code_sections_ = std::move(other.code_sections_);
   rodata_sections_ = std::move(other.rodata_sections_);
 }
 
@@ -224,9 +223,6 @@ void AmdGpuCodeObject::load_sections() {
       text_sections_.push_back(sections_.back().get());
     else if (sec_name == ".rodata")
       rodata_sections_.push_back(sections_.back().get());
-
-    if (is_executable_section(shdr))
-      code_sections_.push_back(sections_.back().get());
   }
 
   // Parse symbol table for kernel descriptor offsets.
