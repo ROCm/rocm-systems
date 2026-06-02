@@ -1166,6 +1166,12 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
     case RDC_FI_PCIE_LC_PERF_OTHER_END_RECOVERY:
     case RDC_FI_PCIE_NAK_RCVD_COUNT_ACC:
     case RDC_FI_PCIE_NAK_SENT_COUNT_ACC:
+    case RDC_FI_GFX_ACTIVITY_ACC:
+    case RDC_FI_MEM_ACTIVITY_ACC:
+    case RDC_FI_ACCUMULATION_COUNTER:
+    case RDC_FI_GPU_GFX_BUSY_INST:
+    case RDC_FI_GPU_VCN_BUSY_INST:
+    case RDC_FI_GPU_JPEG_BUSY_INST:
       read_gpu_metrics_uint64_t();
       break;
     case RDC_HEALTH_XGMI_ERROR: {
