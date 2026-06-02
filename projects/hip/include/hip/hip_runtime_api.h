@@ -606,7 +606,6 @@ typedef enum hipDeviceAttribute_t {
 
   hipDeviceAttributeAmdSpecificEnd = 19999,
   hipDeviceAttributeVendorSpecificBegin = 20000,
-  hipDeviceDummyBreakingBuild = 20001,
   // Extended attributes for vendors
 } hipDeviceAttribute_t;
 
@@ -1720,6 +1719,7 @@ typedef enum hipLaunchAttributeID {
   hipLaunchAttributeMemSyncDomainMap = 9,       ///< Valid for streams, graph nodes, launches
   hipLaunchAttributeMemSyncDomain = 10,         ///< Valid for streams, graph nodes, launches
   hipLaunchAttributeExtDynDataPrefetch = 1024,  ///< Valid for launches. Prefetch data into L2 before kernel execution.
+  hipDeviceDummyBreakingBuild,
   hipLaunchAttributeMax
 } hipLaunchAttributeID;
 
