@@ -126,16 +126,10 @@ inline dim3 GenerateThreadDimensions() {
 }
 
 inline dim3 GenerateThreadDimensionsForShuffle() {
-  const auto multipliers = {1.0};
-  return GenerateThreadDimensionsImpl(multipliers);
-}
-
-// Full multiplier sweep for stress-tagged shuffle tests. Not currently called;
-// reserved for follow-up stress variants that opt into the wider parametric
-// sweep on a slower CI cadence.
-inline dim3 GenerateThreadDimensionsForShuffleFull() {
-  const auto multipliers = {0.5, 1.0, 2.0};
-  return GenerateThreadDimensionsImpl(multipliers);
+  if (isQuickLevel()) {
+    return GenerateThreadDimensionsImpl({1.0});
+  }
+  return GenerateThreadDimensionsImpl({0.5, 1.0, 2.0});
 }
 
 inline dim3 GenerateThreadDimensionsForShuffleWarp() {
@@ -166,15 +160,10 @@ inline dim3 GenerateBlockDimensions() {
 }
 
 inline dim3 GenerateBlockDimensionsForShuffle() {
-  const auto multipliers = {1.0};
-  return GenerateBlockDimensionsImpl(multipliers);
-}
-
-// Full multiplier sweep for stress-tagged shuffle tests. Pairs with
-// GenerateThreadDimensionsForShuffleFull(); see comment there.
-inline dim3 GenerateBlockDimensionsForShuffleFull() {
-  const auto multipliers = {0.5, 1.0};
-  return GenerateBlockDimensionsImpl(multipliers);
+  if (isQuickLevel()) {
+    return GenerateBlockDimensionsImpl({1.0});
+  }
+  return GenerateBlockDimensionsImpl({0.5, 1.0});
 }
 
 inline dim3 GenerateBlockDimensionsForShuffleWarp() {
