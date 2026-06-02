@@ -358,6 +358,78 @@ inline native<uint32_t> f32_to_f16_simd(native<float> val) {
   return out;
 }
 
+/// Bit-exact SIMD rounding helpers (trunc / ceil / floor / round-to-nearest-even).
+///
+/// libstdc++'s `std::experimental::simd` rounding intrinsics are NOT bit-exact
+/// against the scalar `std::trunc/ceil/floor/nearbyint` at every vector width:
+/// at SSE width (native_simd<float> of size 4) they (a) drop the sign of a
+/// zero-magnitude result (e.g. trunc(-0.3) yields +0.0 instead of -0.0) and
+/// (b) mangle the payload/quiet bit of a NaN input instead of returning it
+/// unchanged. The scalar generated bodies these SIMD fast paths must match use
+/// the libc functions, which preserve sign-of-zero and pass NaNs through
+/// verbatim. So we run the stdx intrinsic for the finite, nonzero-result lanes
+/// and then repair the two edge cases by blend:
+///   - NaN input lane: return the input bits unchanged.
+///   - zero-magnitude result lane: copy the input's sign bit onto the +0 the
+///     intrinsic produced (IEEE-754 round-to-integer keeps the operand sign on
+///     a zero result, so this is exactly the sign of the *input*).
+/// Bit-identical to the scalar reference at every native width.
+template <class Float, class Round>
+inline native<Float> round_fixup_simd(native<Float> a, Round round) {
+  using F = native<Float>;
+  using U = std::conditional_t<sizeof(Float) == 4, native<uint32_t>, native<uint64_t>>;
+  using Bits = typename U::value_type;
+  static_assert(sizeof(Bits) == sizeof(Float));
+  constexpr Bits kSign = Bits(1) << (sizeof(Bits) * 8 - 1);
+  // Quiet bit = MSB of the mantissa (bit 22 for f32, bit 51 for f64).
+  constexpr Bits kQuiet = Bits(1) << (sizeof(Float) == 4 ? 22 : 51);
+
+  const U ai = std::bit_cast<U>(a);
+  F r = round(a);
+  // All blends use float-domain masks (simd_mask<Float>) to match the existing
+  // f64 transcendental helpers' compile-tested pattern (== / isnan), keeping the
+  // 64-bit-mask path off the libstdc++ AVX-512 `_S_to_bits<long long>` hazard.
+  //
+  // Zero-magnitude result inherits the input sign: round-to-integer of x in
+  // (-1, 0] is -0.0 (scalar libc result), but the stdx intrinsic yields +0.0 at
+  // narrow widths. `r == 0` matches both +0 and -0 lanes.
+  const F signed_zero = std::bit_cast<F>(ai & U(kSign));
+  stdx::where(r == F(Float(0)), r) = signed_zero;
+  // NaN input -> canonical quiet NaN (sign + payload preserved, quiet bit set),
+  // exactly what scalar `std::trunc/ceil/floor/nearbyint` produce: qNaN passes
+  // through unchanged and sNaN is quieted. The stdx intrinsic instead clears the
+  // quiet bit at narrow widths, so blend the bit-correct value in explicitly.
+  const F quieted = std::bit_cast<F>(ai | U(kQuiet));
+  stdx::where(stdx::isnan(a), r) = quieted;
+  return r;
+}
+
+inline native<float> trunc_simd(native<float> a) {
+  return round_fixup_simd<float>(a, [](native<float> x) { return stdx::trunc(x); });
+}
+inline native<float> ceil_simd(native<float> a) {
+  return round_fixup_simd<float>(a, [](native<float> x) { return stdx::ceil(x); });
+}
+inline native<float> floor_simd(native<float> a) {
+  return round_fixup_simd<float>(a, [](native<float> x) { return stdx::floor(x); });
+}
+inline native<float> rndne_simd(native<float> a) {
+  return round_fixup_simd<float>(a, [](native<float> x) { return stdx::nearbyint(x); });
+}
+
+inline native<double> trunc_simd(native<double> a) {
+  return round_fixup_simd<double>(a, [](native<double> x) { return stdx::trunc(x); });
+}
+inline native<double> ceil_simd(native<double> a) {
+  return round_fixup_simd<double>(a, [](native<double> x) { return stdx::ceil(x); });
+}
+inline native<double> floor_simd(native<double> a) {
+  return round_fixup_simd<double>(a, [](native<double> x) { return stdx::floor(x); });
+}
+inline native<double> rndne_simd(native<double> a) {
+  return round_fixup_simd<double>(a, [](native<double> x) { return stdx::nearbyint(x); });
+}
+
 /// Flush f32 denormals to sign-preserving zero (FTZ). Branchless vector port of
 /// `amdgpu::transcendental::flush_denorm_f32`: a lane with biased exponent 0 and
 /// nonzero mantissa becomes ±0 (sign preserved); every other lane (normal, Inf,
@@ -674,12 +746,59 @@ inline native<uint32_t> perm_b32_simd(native<uint32_t> a, native<uint32_t> b, na
   }
   return r;
 }
+
+/// High 32 bits of the 64-bit UNSIGNED product a*b (v_mul_hi_u32 semantics).
+///
+/// Computed purely with 32-bit-lane SIMD ops via the 16x16 partial-product
+/// decomposition, deliberately avoiding `fixed_size_simd<uint64_t, N>`: clang +
+/// libstdc++ miscompile the 64-bit-lane multiply/shift of an over-native-width
+/// `fixed_size_simd` (the high half comes out wrong), so the int64-widening
+/// approach diverges from the scalar `(uint64)a * b >> 32` at every SIMD width.
+/// This decomposition uses only native<uint32_t> arithmetic, so it is
+/// bit-identical to the scalar reference on every host. aHi/bHi/aLo/bLo are the
+/// 16-bit halves; each 16x16 partial fits in 32 bits and the carry chain stays
+/// below 2^32 (cross <= 3*0xFFFF), so no intermediate overflows.
+inline native<uint32_t> mul_hi_u32_simd(native<uint32_t> a, native<uint32_t> b) {
+  using U = native<uint32_t>;
+  const U aLo = a & U(0xFFFFu), aHi = a >> 16;
+  const U bLo = b & U(0xFFFFu), bHi = b >> 16;
+  const U lolo = aLo * bLo;
+  const U hilo = aHi * bLo;
+  const U lohi = aLo * bHi;
+  const U hihi = aHi * bHi;
+  const U cross = (lolo >> 16) + (hilo & U(0xFFFFu)) + (lohi & U(0xFFFFu));
+  return hihi + (hilo >> 16) + (lohi >> 16) + (cross >> 16);
+}
+
+/// High 32 bits of the 64-bit SIGNED product a*b (v_mul_hi_i32 semantics).
+/// Derived from the unsigned high word with the standard signed correction
+/// `hi_s = hi_u - (a<0 ? b : 0) - (b<0 ? a : 0)`. Same clang/libstdc++
+/// motivation as `mul_hi_u32_simd`: no `fixed_size_simd<int64_t, N>`.
+inline native<uint32_t> mul_hi_i32_simd(native<uint32_t> a, native<uint32_t> b) {
+  using U = native<uint32_t>;
+  U hi = mul_hi_u32_simd(a, b);
+  // Sign correction in the uint domain (the negative test is the high bit, so
+  // the where-mask type matches `hi` and avoids a signed/unsigned mask mismatch).
+  stdx::where((a >> 31) != U(0u), hi) = hi - b;
+  stdx::where((b >> 31) != U(0u), hi) = hi - a;
+  return hi;
+}
 #endif // __has_include(<experimental/simd>)
 
 #if !__has_include(<experimental/simd>)
 // Fallback stub for non-template gtest callers (e.g. UtilSimd.FlushDenormF32),
 // whose discarded `if constexpr (has_stdx_simd)` branch is still type-checked.
 template <class T> inline native<T> flush_denorm_f32_simd(native<T>) { return {}; }
+inline native<float> trunc_simd(native<float>) { return {}; }
+inline native<float> ceil_simd(native<float>) { return {}; }
+inline native<float> floor_simd(native<float>) { return {}; }
+inline native<float> rndne_simd(native<float>) { return {}; }
+inline native<double> trunc_simd(native<double>) { return {}; }
+inline native<double> ceil_simd(native<double>) { return {}; }
+inline native<double> floor_simd(native<double>) { return {}; }
+inline native<double> rndne_simd(native<double>) { return {}; }
+inline native<uint32_t> mul_hi_u32_simd(native<uint32_t>, native<uint32_t>) { return {}; }
+inline native<uint32_t> mul_hi_i32_simd(native<uint32_t>, native<uint32_t>) { return {}; }
 #endif
 
 } // namespace util

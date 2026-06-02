@@ -88,27 +88,26 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
         ' auto sb = (util::stdx::static_simd_cast<util::native<int32_t>>(b) << 8) >> 8;'
         ' return util::stdx::static_simd_cast<util::native<uint32_t>>(sa * sb); }',
     ),
-    # High 32 bits of the 24-bit multiply (48-bit product). The 32x32->64 step is
-    # done by widening the lanes to a 64-bit fixed_size_simd, multiplying, and
-    # shifting right by 32 (arithmetic for the signed form) before truncating
-    # back to uint32 — bit-identical to the scalar uint64/int64 intermediates.
+    # High 32 bits of the 24-bit multiply (48-bit product). The 32x32->high32
+    # step uses util::mul_hi_{u,i}32_simd, a 16x16 partial-product decomposition
+    # in pure native<uint32_t> arithmetic. It deliberately avoids
+    # fixed_size_simd<{u,i}64, N>: clang + libstdc++ miscompile the 64-bit-lane
+    # multiply/shift of an over-native-width fixed_size_simd, so the int64
+    # widening diverges from the scalar uint64/int64 intermediates at every SIMD
+    # width. The decomposition is bit-identical to the scalar reference.
     'v_mul_hi_u32_u24_vop2': (
         'uint32_t',
         '[](auto a, auto b) {'
-        ' using U64 = util::stdx::fixed_size_simd<uint64_t, util::native<uint32_t>::size()>;'
-        ' auto pa = util::stdx::static_simd_cast<U64>(a & 0x00FFFFFFu);'
-        ' auto pb = util::stdx::static_simd_cast<U64>(b & 0x00FFFFFFu);'
-        ' return util::stdx::static_simd_cast<util::native<uint32_t>>((pa * pb) >> 32); }',
+        ' return util::mul_hi_u32_simd(a & 0x00FFFFFFu, b & 0x00FFFFFFu); }',
     ),
     'v_mul_hi_i32_i24_vop2': (
         'uint32_t',
         '[](auto a, auto b) {'
         ' auto sa = (util::stdx::static_simd_cast<util::native<int32_t>>(a) << 8) >> 8;'
         ' auto sb = (util::stdx::static_simd_cast<util::native<int32_t>>(b) << 8) >> 8;'
-        ' using I64 = util::stdx::fixed_size_simd<int64_t, util::native<int32_t>::size()>;'
-        ' auto pa = util::stdx::static_simd_cast<I64>(sa);'
-        ' auto pb = util::stdx::static_simd_cast<I64>(sb);'
-        ' return util::stdx::static_simd_cast<util::native<uint32_t>>((pa * pb) >> 32); }',
+        ' return util::mul_hi_i32_simd('
+        ' util::stdx::static_simd_cast<util::native<uint32_t>>(sa),'
+        ' util::stdx::static_simd_cast<util::native<uint32_t>>(sb)); }',
     ),
     'v_max_u32_vop2': (
         'uint32_t',
@@ -533,27 +532,27 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
     'v_floor_f32_vop1': (
         'float32_t',
         'float32_t',
-        '[](auto a) { return util::stdx::floor(a); }',
+        '[](auto a) { return util::floor_simd(a); }',
     ),
     'v_ceil_f32_vop1': (
         'float32_t',
         'float32_t',
-        '[](auto a) { return util::stdx::ceil(a); }',
+        '[](auto a) { return util::ceil_simd(a); }',
     ),
     'v_trunc_f32_vop1': (
         'float32_t',
         'float32_t',
-        '[](auto a) { return util::stdx::trunc(a); }',
+        '[](auto a) { return util::trunc_simd(a); }',
     ),
     'v_rndne_f32_vop1': (
         'float32_t',
         'float32_t',
-        '[](auto a) { return util::stdx::nearbyint(a); }',
+        '[](auto a) { return util::rndne_simd(a); }',
     ),
     'v_fract_f32_vop1': (
         'float32_t',
         'float32_t',
-        '[](auto a) { return a - util::stdx::floor(a); }',
+        '[](auto a) { return a - util::floor_simd(a); }',
     ),
     # --- transcendental div / sqrt. These mirror amdgpu::transcendental::*_f32
     # exactly via util::*_f32_simd (FTZ input/output flush + canonical-qNaN and
@@ -647,30 +646,30 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
     'v_floor_f16_vop1': (
         'uint32_t',
         'uint32_t',
-        '[](auto a) { return util::f32_to_f16_simd(util::stdx::floor(util::f16_to_f32_simd(a))); }',
+        '[](auto a) { return util::f32_to_f16_simd(util::floor_simd(util::f16_to_f32_simd(a))); }',
     ),
     'v_ceil_f16_vop1': (
         'uint32_t',
         'uint32_t',
-        '[](auto a) { return util::f32_to_f16_simd(util::stdx::ceil(util::f16_to_f32_simd(a))); }',
+        '[](auto a) { return util::f32_to_f16_simd(util::ceil_simd(util::f16_to_f32_simd(a))); }',
     ),
     'v_trunc_f16_vop1': (
         'uint32_t',
         'uint32_t',
-        '[](auto a) { return util::f32_to_f16_simd(util::stdx::trunc(util::f16_to_f32_simd(a))); }',
+        '[](auto a) { return util::f32_to_f16_simd(util::trunc_simd(util::f16_to_f32_simd(a))); }',
     ),
     'v_rndne_f16_vop1': (
         'uint32_t',
         'uint32_t',
         '[](auto a) {'
-        ' return util::f32_to_f16_simd(util::stdx::nearbyint(util::f16_to_f32_simd(a))); }',
+        ' return util::f32_to_f16_simd(util::rndne_simd(util::f16_to_f32_simd(a))); }',
     ),
     'v_fract_f16_vop1': (
         'uint32_t',
         'uint32_t',
         '[](auto a) {'
         ' auto f = util::f16_to_f32_simd(a);'
-        ' return util::f32_to_f16_simd(f - util::stdx::floor(f)); }',
+        ' return util::f32_to_f16_simd(f - util::floor_simd(f)); }',
     ),
     # f16 transcendentals mirror the scalar f32_to_f16(<op>_f32(f16_to_f32(x)))
     # by applying the f32-domain util::*_f32_simd helper (FTZ flush + canonical
@@ -904,11 +903,11 @@ SIMD_VOP2_FMA_F64: dict[str, str] = {
 # the glue note + UtilSimd.*F64*_BitExact guards). v_mov_b64 is a pure 64-bit
 # copy (T = uint64_t).
 SIMD_VOP1_UNARY_F64: dict[str, tuple[str, str]] = {
-    'v_ceil_f64_vop1': ('double', '[](auto a) { return util::stdx::ceil(a); }'),
-    'v_floor_f64_vop1': ('double', '[](auto a) { return util::stdx::floor(a); }'),
-    'v_trunc_f64_vop1': ('double', '[](auto a) { return util::stdx::trunc(a); }'),
-    'v_rndne_f64_vop1': ('double', '[](auto a) { return util::stdx::nearbyint(a); }'),
-    'v_fract_f64_vop1': ('double', '[](auto a) { return a - util::stdx::floor(a); }'),
+    'v_ceil_f64_vop1': ('double', '[](auto a) { return util::ceil_simd(a); }'),
+    'v_floor_f64_vop1': ('double', '[](auto a) { return util::floor_simd(a); }'),
+    'v_trunc_f64_vop1': ('double', '[](auto a) { return util::trunc_simd(a); }'),
+    'v_rndne_f64_vop1': ('double', '[](auto a) { return util::rndne_simd(a); }'),
+    'v_fract_f64_vop1': ('double', '[](auto a) { return a - util::floor_simd(a); }'),
     'v_rcp_f64_vop1': (
         'double',
         '[](auto a) { return util::native<double>(1.0) / a; }',
@@ -1673,27 +1672,18 @@ SIMD_VOP3_BINARY_INT_EXTRA: dict[str, tuple[str, str]] = {
     # 32-bit integer multiply: low 32 bits of the product is just `a * b`
     # (uint32 wrap is identical signed/unsigned for the low half).
     'v_mul_lo_u32_vop3': ('uint32_t', '[](auto a, auto b) { return a * b; }'),
-    # High 32 bits of the 32x32 -> 64 multiply, via the same widening pattern
-    # as v_mul_hi_u32_u24: cast lanes to a 64-bit fixed_size_simd, multiply,
-    # shift right by 32, narrow back. Unsigned uses uint64_t / logical shift;
-    # signed uses int64_t / arithmetic shift (preserves the sign).
+    # High 32 bits of the 32x32 -> 64 multiply via util::mul_hi_{u,i}32_simd
+    # (16x16 partial-product decomposition in pure native<uint32_t>). Avoids
+    # fixed_size_simd<{u,i}64, N>, which clang + libstdc++ miscompile at every
+    # SIMD width (over-native-width 64-bit-lane multiply/shift). Bit-identical to
+    # the scalar uint64/int64 `(a * b) >> 32`.
     'v_mul_hi_u32_vop3': (
         'uint32_t',
-        '[](auto a, auto b) {'
-        ' using U64 = util::stdx::fixed_size_simd<uint64_t, util::native<uint32_t>::size()>;'
-        ' auto pa = util::stdx::static_simd_cast<U64>(a);'
-        ' auto pb = util::stdx::static_simd_cast<U64>(b);'
-        ' return util::stdx::static_simd_cast<util::native<uint32_t>>((pa * pb) >> 32); }',
+        '[](auto a, auto b) { return util::mul_hi_u32_simd(a, b); }',
     ),
     'v_mul_hi_i32_vop3': (
         'uint32_t',
-        '[](auto a, auto b) {'
-        ' using I64 = util::stdx::fixed_size_simd<int64_t, util::native<int32_t>::size()>;'
-        ' auto sa = util::stdx::static_simd_cast<util::native<int32_t>>(a);'
-        ' auto sb = util::stdx::static_simd_cast<util::native<int32_t>>(b);'
-        ' auto pa = util::stdx::static_simd_cast<I64>(sa);'
-        ' auto pb = util::stdx::static_simd_cast<I64>(sb);'
-        ' return util::stdx::static_simd_cast<util::native<uint32_t>>((pa * pb) >> 32); }',
+        '[](auto a, auto b) { return util::mul_hi_i32_simd(a, b); }',
     ),
     # v_bfm_b32: ((1 << (a & 31)) - 1) << (b & 31). Two shift counts both
     # masked to low 5 bits — same vpsllvd-vs-shl rationale as v_lshl_add_u32.
@@ -1760,15 +1750,16 @@ SIMD_VOP3_BINARY_FP64: dict[str, str] = {
 
 # Plain f64 unary: scalar bodies are std::ceil / std::floor / std::trunc /
 # std::nearbyint applied to the (modifier-applied) double, then omod/clamp on
-# the result. stdx provides ceil/floor/trunc/nearbyint as native<double>
-# primitives — bit-identical to the scalar libm calls for every finite/Inf
-# input (and the NaN result has the same payload because the scalar libm
-# rounding ops are sign/payload preserving on NaN inputs).
+# the result. util::{ceil,floor,trunc,rndne}_simd wrap the stdx native<double>
+# rounding primitives and repair the two edge cases libstdc++ gets wrong at
+# narrow widths (sign-of-zero on a zero-magnitude result, NaN-payload
+# preservation), so they are bit-identical to the scalar libm calls for every
+# finite / Inf / NaN / signed-zero input.
 SIMD_VOP3_UNARY_FP64: dict[str, str] = {
-    'v_ceil_f64_vop3': '[](auto a) { return util::stdx::ceil(a); }',
-    'v_floor_f64_vop3': '[](auto a) { return util::stdx::floor(a); }',
-    'v_trunc_f64_vop3': '[](auto a) { return util::stdx::trunc(a); }',
-    'v_rndne_f64_vop3': '[](auto a) { return util::stdx::nearbyint(a); }',
+    'v_ceil_f64_vop3': '[](auto a) { return util::ceil_simd(a); }',
+    'v_floor_f64_vop3': '[](auto a) { return util::floor_simd(a); }',
+    'v_trunc_f64_vop3': '[](auto a) { return util::trunc_simd(a); }',
+    'v_rndne_f64_vop3': '[](auto a) { return util::rndne_simd(a); }',
     # sqrt_f64 is correctly-rounded IEEE (scalar uses transcendental::sqrt_f64
     # which is `std::sqrt` after NaN/negative guards); stdx::sqrt matches.
     'v_sqrt_f64_vop3': (
@@ -1778,10 +1769,10 @@ SIMD_VOP3_UNARY_FP64: dict[str, str] = {
         ' util::stdx::where(a < 0.0, r) = std::numeric_limits<double>::quiet_NaN();'
         ' return r; }'
     ),
-    # v_fract_f64: scalar = v - std::floor(v); stdx::floor on native<double>
-    # matches std::floor bit-exact (NaN-floor(NaN) = NaN; NaN result skipped
-    # by the test like any other NaN-result lane).
-    'v_fract_f64_vop3': '[](auto a) { return a - util::stdx::floor(a); }',
+    # v_fract_f64: scalar = v - std::floor(v); util::floor_simd matches
+    # std::floor bit-exact incl. sign-of-zero (NaN-floor(NaN) = NaN; NaN result
+    # skipped by the test like any other NaN-result lane).
+    'v_fract_f64_vop3': '[](auto a) { return a - util::floor_simd(a); }',
     # frexp mantissa: same functor as the VOP1 form; the f64 unary FP glue applies
     # abs/neg on the source and omod/clamp on the mantissa, matching the scalar.
     'v_frexp_mant_f64_vop3': '[](auto a) { return util::frexp_mant_f64_simd(a); }',
@@ -1807,10 +1798,10 @@ SIMD_VOP3_UNARY_FP64: dict[str, str] = {
 # blends + NaN-passthrough), so the f16 scalar
 # f32_to_f16(transcendental::op_f32(f16_to_f32(...))) maps directly.
 SIMD_VOP3_UNARY_FP16: dict[str, str] = {
-    'v_ceil_f16_vop3': '[](auto a) { return util::stdx::ceil(a); }',
-    'v_floor_f16_vop3': '[](auto a) { return util::stdx::floor(a); }',
-    'v_trunc_f16_vop3': '[](auto a) { return util::stdx::trunc(a); }',
-    'v_rndne_f16_vop3': '[](auto a) { return util::stdx::nearbyint(a); }',
+    'v_ceil_f16_vop3': '[](auto a) { return util::ceil_simd(a); }',
+    'v_floor_f16_vop3': '[](auto a) { return util::floor_simd(a); }',
+    'v_trunc_f16_vop3': '[](auto a) { return util::trunc_simd(a); }',
+    'v_rndne_f16_vop3': '[](auto a) { return util::rndne_simd(a); }',
     'v_sqrt_f16_vop3': (
         '[](auto a) {'
         ' auto r = util::stdx::sqrt(a);'
@@ -1824,7 +1815,7 @@ SIMD_VOP3_UNARY_FP16: dict[str, str] = {
     'v_log_f16_vop3': '[](auto a) { return util::log_f32_simd(a); }',
     # v_fract_f16: x - floor(x) in the widened f32 domain (the glue widens/narrows
     # and applies abs/neg/omod/clamp), mirroring the covered v_fract_f16_vop1.
-    'v_fract_f16_vop3': '[](auto a) { return a - util::stdx::floor(a); }',
+    'v_fract_f16_vop3': '[](auto a) { return a - util::floor_simd(a); }',
 }
 
 

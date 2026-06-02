@@ -84,8 +84,8 @@ uint32_t *AmdgpuIsaOperand<Isa>::simd_dst_ptr(amdgpu::Wavefront &wf, uint32_t la
 }
 
 template <typename Isa>
-std::pair<const uint32_t *, const uint32_t *>
-AmdgpuIsaOperand<Isa>::simd_lane_ptr64(const amdgpu::Wavefront &wf, uint32_t lane_base) const {
+amdgpu::ConstVgprPair64 AmdgpuIsaOperand<Isa>::simd_lane_ptr64(const amdgpu::Wavefront &wf,
+                                                               uint32_t lane_base) const {
   if (this->delegate())
     return amdgpu::SimdAccess::lane_ptr64(*this->delegate(), wf, lane_base);
   if (auto off = Isa::resolved_vgpr_offset(this->opr_type_, this->encoding_value_)) {
@@ -100,8 +100,8 @@ AmdgpuIsaOperand<Isa>::simd_lane_ptr64(const amdgpu::Wavefront &wf, uint32_t lan
 }
 
 template <typename Isa>
-std::pair<uint32_t *, uint32_t *> AmdgpuIsaOperand<Isa>::simd_dst_ptr64(amdgpu::Wavefront &wf,
-                                                                        uint32_t lane_base) const {
+amdgpu::VgprPair64 AmdgpuIsaOperand<Isa>::simd_dst_ptr64(amdgpu::Wavefront &wf,
+                                                         uint32_t lane_base) const {
   if (auto off = Isa::resolved_vgpr_offset(this->opr_type_, this->encoding_value_)) {
     uint32_t reg = wf.vgpr_alloc().base + *off;
     uint8_t *lo = wf.cu().vgpr_data(reg);

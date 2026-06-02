@@ -3008,16 +3008,38 @@ class CodeGenerator:
                                 f'{_dpp_cleanup}'
                                 f'{_sdwa_postamble}}}'
                             )
-                            # Store the shared template body. setdefault keeps the
-                            # first writer: for a can_share op that is its plan
-                            # owner; for a force-shared portable probe op (no plan
-                            # owner on any ISA) the body is arch-independent, so
-                            # whichever ISA writes first is correct and identical.
+                            # Store the shared template body. First writer wins:
+                            # for a can_share op that is its plan owner; for a
+                            # force-shared portable probe op (no plan owner on any
+                            # ISA) the body is arch-independent, so whichever ISA
+                            # writes first is correct. That arch-independence is an
+                            # invariant, not a hope: verify it. If a later ISA
+                            # produces a DIFFERENT body for the same
+                            # (mnemonic, enc) key, the "shared" body is silently
+                            # arch-dependent and emitting just the first writer's
+                            # version would miscompile the other arch. Assert
+                            # instead of discarding.
                             body_key = (inst.mnemonic, enc.enc_name)
-                            self._shared_execute_bodies.setdefault(
-                                body_key,
-                                (inst, sem, body, enc.enc_name),
-                            )
+                            existing = self._shared_execute_bodies.get(body_key)
+                            if existing is None:
+                                self._shared_execute_bodies[body_key] = (
+                                    inst,
+                                    sem,
+                                    body,
+                                    enc.enc_name,
+                                )
+                            elif existing[2] != body:
+                                _exist_inst, _, _exist_body, _ = existing
+                                raise AssertionError(
+                                    'shared execute body collision: '
+                                    f'mnemonic={inst.mnemonic!r} '
+                                    f'enc={enc.enc_name!r} produced two '
+                                    'different bodies for the same shared-template '
+                                    'key (the body is not arch-independent, so '
+                                    'first-writer-wins would miscompile one arch).'
+                                    f'\n--- first writer body ---\n{_exist_body}'
+                                    f'\n--- this writer body ---\n{body}'
+                                )
                         else:
                             exec_impl = cgen.Line(
                                 f'void {inst.fmt_name}::execute_impl'

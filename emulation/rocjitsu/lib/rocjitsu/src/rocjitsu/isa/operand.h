@@ -18,6 +18,20 @@ namespace rocjitsu {
 namespace amdgpu {
 class Wavefront;
 struct SimdAccess;
+
+/// @brief A `{lo, hi}` pair of per-lane VGPR lane pointers for a 64-bit-lane
+/// operand. `lo` points at the lower-numbered VGPR (reg N, bits [31:0]); `hi`
+/// at reg N+1 (bits [63:32]). Either both are valid or both are nullptr.
+struct VgprPair64 {
+  uint32_t *lo;
+  uint32_t *hi;
+};
+
+/// @brief Read-only counterpart of `VgprPair64`.
+struct ConstVgprPair64 {
+  const uint32_t *lo;
+  const uint32_t *hi;
+};
 } // namespace amdgpu
 
 /// @brief Base class for an instruction operand with value resolution.
@@ -207,8 +221,8 @@ private:
   /// `{lo, hi}` pair of contiguous lane pointers (lo = reg N, hi = reg N+1).
   /// Returns `{nullptr, nullptr}` when the operand is not contiguous VGPR
   /// storage — the caller then broadcasts via `read_scalar64`.
-  virtual std::pair<const uint32_t *, const uint32_t *> simd_lane_ptr64(const amdgpu::Wavefront &wf,
-                                                                        uint32_t lane_base) const {
+  virtual amdgpu::ConstVgprPair64 simd_lane_ptr64(const amdgpu::Wavefront &wf,
+                                                  uint32_t lane_base) const {
     if (delegate_)
       return delegate_->simd_lane_ptr64(wf, lane_base);
     (void)lane_base;
@@ -217,8 +231,7 @@ private:
 
   /// @brief 64-bit-lane counterpart of `simd_dst_ptr`; returns writable
   /// `{lo, hi}` lane pointers or `{nullptr, nullptr}`.
-  virtual std::pair<uint32_t *, uint32_t *> simd_dst_ptr64(amdgpu::Wavefront &wf,
-                                                           uint32_t lane_base) const {
+  virtual amdgpu::VgprPair64 simd_dst_ptr64(amdgpu::Wavefront &wf, uint32_t lane_base) const {
     (void)wf;
     (void)lane_base;
     return {nullptr, nullptr};
@@ -274,10 +287,9 @@ public:
 private:
   const uint32_t *simd_lane_ptr(const amdgpu::Wavefront &wf, uint32_t lane_base) const override;
   uint32_t *simd_dst_ptr(amdgpu::Wavefront &wf, uint32_t lane_base) const override;
-  std::pair<const uint32_t *, const uint32_t *> simd_lane_ptr64(const amdgpu::Wavefront &wf,
-                                                                uint32_t lane_base) const override;
-  std::pair<uint32_t *, uint32_t *> simd_dst_ptr64(amdgpu::Wavefront &wf,
-                                                   uint32_t lane_base) const override;
+  amdgpu::ConstVgprPair64 simd_lane_ptr64(const amdgpu::Wavefront &wf,
+                                          uint32_t lane_base) const override;
+  amdgpu::VgprPair64 simd_dst_ptr64(amdgpu::Wavefront &wf, uint32_t lane_base) const override;
 };
 
 /// @brief DPP-aware operand proxy that applies lane permutation on read.
@@ -352,13 +364,11 @@ struct SimdAccess {
     return op.simd_dst_ptr(wf, lane_base);
   }
   template <typename Op>
-  static std::pair<const uint32_t *, const uint32_t *> lane_ptr64(const Op &op, const Wavefront &wf,
-                                                                  uint32_t lane_base) {
+  static ConstVgprPair64 lane_ptr64(const Op &op, const Wavefront &wf, uint32_t lane_base) {
     return op.simd_lane_ptr64(wf, lane_base);
   }
   template <typename Op>
-  static std::pair<uint32_t *, uint32_t *> dst_ptr64(const Op &op, Wavefront &wf,
-                                                     uint32_t lane_base) {
+  static VgprPair64 dst_ptr64(const Op &op, Wavefront &wf, uint32_t lane_base) {
     return op.simd_dst_ptr64(wf, lane_base);
   }
 };
