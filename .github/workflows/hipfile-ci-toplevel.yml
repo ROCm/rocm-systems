@@ -77,10 +77,15 @@ jobs:
       - name: Compute matrix configurations
         id: matrices
         working-directory: rocm-systems/projects/hipfile
+        env:
+          CHANGED_DOCKERFILE: ${{ steps.ci-flags.outputs.changed_dockerfile }}
         # ci_matrix (the full strategy.matrix handed to the Linux test job)
         # and full_CI_images_matrix (which drives the image-build job) are both
         # computed by util/ci-matrices.sh. Sourcing it sets both shell vars from
         # the job-level matrix env vars.
+        #
+        # build_CI_images_matrix is the subset we actually (re)build this run
+        # (see below).
         run: |
           source ./util/ci-matrices.sh
           echo "hipFile CI Matrix: "
@@ -89,6 +94,23 @@ jobs:
           echo "${full_CI_images_matrix}" | jq .
           echo "ci_matrix=${ci_matrix}" >> "${GITHUB_OUTPUT}"
           echo "full_CI_images_matrix=${full_CI_images_matrix}" >> "${GITHUB_OUTPUT}"
+
+          # build_CI_images_matrix drives which images are actually (re)built this
+          # run. When a Dockerfile changed we rebuild everything; otherwise only
+          # the nightly rows, whose target moves daily and so cannot be served
+          # from a pre-existing latest tag. (Other versions reuse their
+          # latest-rocm<ver> image.)
+          if [ "${CHANGED_DOCKERFILE}" = "1" ]; then
+            build_CI_images_matrix="${full_CI_images_matrix}"
+          else
+            build_CI_images_matrix=$(
+              printf '%s' "${full_CI_images_matrix}" \
+                | jq -c '{include: [.include[] | select(.rocm_versions == "nightly")]}'
+            )
+          fi
+          echo "hipFile Build CI Images Matrix: "
+          echo "${build_CI_images_matrix}" | jq .
+          echo "build_CI_images_matrix=${build_CI_images_matrix}" >> "${GITHUB_OUTPUT}"
       - name: Resolve ROCm nightly metadata
         id: nightly
         working-directory: rocm-systems/projects/hipfile
