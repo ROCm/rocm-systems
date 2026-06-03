@@ -46,7 +46,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
         with:
           sparse-checkout: projects/rocprofiler-sdk
           submodules: true
@@ -103,7 +103,7 @@ jobs:
           echo "PATH=/usr/bin:$PATH" >> "$GITHUB_ENV"
 
       - name: Clone ROCProfiler SDK & HIP/CLR & ROCR-Runtime
-        uses: actions/checkout@v6
+        uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
         with:
           sparse-checkout: |
             .github/actions/rocprofiler-sdk-util

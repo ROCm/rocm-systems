@@ -31,14 +31,14 @@ jobs:
         shell: powershell
     steps:
       - name: Checkout repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
         with:
           sparse-checkout: |
             projects/rocr-runtime
           sparse-checkout-cone-mode: true
 
       - name: Configure MSVC and Windows SDK
-        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+        uses: ilammy/msvc-dev-cmd@a102174a2b586eec2ea151a69e6fd14404a8ce7c # v1.13.0
 
       - name: Detect Windows SDK version
         id: detect-sdk
@@ -57,7 +57,7 @@ jobs:
           }
 
       - name: Set up WSL with Ubuntu
-        uses: Vampire/setup-wsl@6a8db447be7ed35f2f499c02c6e60ff77ef11278 # v6.0.0
+        uses: Vampire/setup-wsl@5fae231e29d976722de11654d8323419501bb327 # v7.0.0
         with:
           distribution: Ubuntu-24.04
           update: true
@@ -88,16 +88,16 @@ jobs:
         run: |
           set -euo pipefail
           cd ~/rocm-systems/projects/rocr-runtime/libhsakmt
-          
+
           echo "Building libhsakmt in WSL with Windows SDK..."
-          
+
           # Use the detected Windows SDK version from the host
           WIN_SDK_VERSION="${WIN_SDK_VERSION:-10.0.26100.0}"
           export win_sdk="/mnt/c/Program Files (x86)/Windows Kits/10/Include/${WIN_SDK_VERSION}/"
-          
+
           echo "Using Windows SDK version: ${WIN_SDK_VERSION}"
           echo "Windows SDK path: ${win_sdk}"
-          
+
           # Verify the Windows SDK is accessible from WSL
           if [ ! -d "${win_sdk}" ]; then
             echo "ERROR: Windows SDK not found at ${win_sdk}"
@@ -105,11 +105,11 @@ jobs:
             ls -la "/mnt/c/Program Files (x86)/Windows Kits/10/Include/" || echo "SDK directory not accessible"
             exit 1
           fi
-          
+
           # Build the library
           mkdir -p build
           cd build
           cmake .. -G Ninja -DWIN_SDK="${win_sdk}/shared"
           ninja
-          
+
           echo "libhsakmt build completed successfully!"

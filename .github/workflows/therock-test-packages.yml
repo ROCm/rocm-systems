@@ -32,7 +32,7 @@ jobs:
       sanity_component: ${{ steps.configure.outputs.sanity_component }}
     steps:
       - name: "Fetch 'build_tools' from repository"
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
         with:
           sparse-checkout: build_tools
           path: "prejob"
@@ -46,13 +46,13 @@ jobs:
         run: . '${{ github.workspace }}\prejob\build_tools\github_actions\cleanup_processes.ps1'
 
       - name: "Checking out repository"
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
         with:
           repository: "ROCm/TheRock"
           ref: 685f8c3b89006309b34a7c16de17e841400f0d76 # 2025-05-29 commit
 
       - name: Setting up Python
-        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: 3.12
 

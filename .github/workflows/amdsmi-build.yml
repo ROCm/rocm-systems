@@ -124,7 +124,7 @@ jobs:
 
       - name: Upload Debian Package Artifacts
         if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: amd-smi-lib-deb-${{ matrix.os }}-${{ env.PR_NUMBER }}-${{ env.BUILD_DATE }}
           path: ${{ env.PROJECT_DIR }}/build/amd-smi-lib*99999-local_amd64.deb
@@ -309,7 +309,7 @@ jobs:
 
       - name: Upload AMDSMI Command Test Results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: amdsmi-command-tests-${{ matrix.os }}
           path: /tmp/test-results-${{ matrix.os }}
@@ -534,7 +534,7 @@ jobs:
 
       - name: Upload RPM Package Artifacts (RHEL10 & AlmaLinux8)
         if: github.event_name == 'pull_request' && (matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: amd-smi-lib-rpm-${{ matrix.os }}-${{ env.PR_NUMBER }}-${{ env.BUILD_DATE }}
           path: ${{ env.PROJECT_DIR }}/build/amd-smi-lib-*99999-local*.rpm
@@ -583,7 +583,7 @@ jobs:
 
       - name: Upload RPM Package Artifacts
         if: github.event_name == 'pull_request' && matrix.os != 'RHEL10' && matrix.os != 'AlmaLinux8'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: amd-smi-lib-rpm-${{ matrix.os }}-${{ env.PR_NUMBER }}-${{ env.BUILD_DATE }}
           path: ${{ env.PROJECT_DIR }}/build/amd-smi-lib-*99999-local*.rpm
@@ -875,7 +875,7 @@ jobs:
 
       - name: Upload AMDSMI Command Test Results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: amdsmi-command-tests-${{ matrix.os }}
           path: /tmp/test-results-${{ matrix.os }}
