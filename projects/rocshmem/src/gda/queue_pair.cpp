@@ -292,14 +292,14 @@ __device__ void QueuePair::put_nbi(void *dest, const void *source,
 
 __device__ void QueuePair::put_nbi_with_keys(void *raddr, uint32_t rkey,
     const void *laddr, uint32_t lkey,
-    size_t size, int pe, ActiveWFInfo &wf_info) {
+    size_t size, ActiveWFInfo &wf_info) {
   uintptr_t l = reinterpret_cast<uintptr_t>(laddr);
   uintptr_t r = reinterpret_cast<uintptr_t>(raddr);
-  post_wqe_rma_with_keys(pe, static_cast<uint32_t>(size), r, rkey, l, lkey,
+  post_wqe_rma_with_keys(static_cast<uint32_t>(size), r, rkey, l, lkey,
                           gda_op_rdma_write, wf_info);
 }
 
-__device__ void QueuePair::post_wqe_rma_with_keys([[maybe_unused]] int pe,
+__device__ void QueuePair::post_wqe_rma_with_keys(
     uint32_t size, uintptr_t raddr, uint32_t rkey,
     uintptr_t laddr, uint32_t lkey,
     uint8_t opcode, ActiveWFInfo &wf_info) {

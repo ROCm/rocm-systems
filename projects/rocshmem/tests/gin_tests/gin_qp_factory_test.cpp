@@ -52,7 +52,7 @@ __global__ void gin_put_kernel(rocshmem::QueuePair **qps,
                                int peer, uint32_t dst_rkey, uint32_t src_lkey) {
   if (threadIdx.x == 0 && blockIdx.x == 0) {
     rocshmem::ActiveWFInfo wf_info(peer, rocshmem::ThreadScope::thread);
-    qps[peer]->put_nbi_with_keys(dst, dst_rkey, src, src_lkey, nbytes, peer, wf_info);
+    qps[peer]->put_nbi_with_keys(dst, dst_rkey, src, src_lkey, nbytes, wf_info);
     qps[peer]->quiet(wf_info);
   }
 }

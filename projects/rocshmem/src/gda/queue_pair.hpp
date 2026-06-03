@@ -189,12 +189,11 @@ class QueuePair {
    * @param[in] laddr Local source address.
    * @param[in] lkey Local key for the source buffer.
    * @param[in] size Size in bytes of data transmission.
-   * @param[in] pe Destination processing element of data transmission.
    * @param[in] wf_info Wavefront information.
    */
   __device__ void put_nbi_with_keys(void *raddr, uint32_t rkey,
       const void *laddr, uint32_t lkey,
-      size_t size, int pe, ActiveWFInfo &wf_info);
+      size_t size, ActiveWFInfo &wf_info);
 
   /**
    * @brief Create and enqueue a non-blocking get work queue entry (wqe).
@@ -348,7 +347,7 @@ class QueuePair {
       uint8_t opcode, bool ring_db);
 
   __device__ __attribute__((noinline)) void
-  post_wqe_rma_with_keys(int pe, uint32_t size, uintptr_t raddr, uint32_t rkey,
+  post_wqe_rma_with_keys(uint32_t size, uintptr_t raddr, uint32_t rkey,
       uintptr_t laddr, uint32_t lkey,
       uint8_t opcode, ActiveWFInfo &wf_info);
 
