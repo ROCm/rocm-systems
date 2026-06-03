@@ -127,7 +127,7 @@ FetchContent_MakeAvailable(googletest)
 
 configure_file(../../scripts/unit_tests/driver.sh rocshmem_unit_driver.sh COPYONLY)
 rocm_install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/rocshmem_unit_driver.sh COMPONENT tests DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem)
-rocm_install(TARGETS rocshmem_unit_tests COMPONENT tests)
+install(TARGETS rocshmem_unit_tests COMPONENT tests RUNTIME DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/rocshmem)
 
 target_link_libraries(
   ${PROJECT_NAME}

@@ -8,8 +8,8 @@
 # Note: Test commands use relative paths from the working directory
 # Working directory is automatically set to the subdirectory containing each CTestTestfile.cmake
 # Tests reference files relative to their working directory:
-#   - Executables: ../../../rocshmem_*_tests (from <install>/bin/)
-#   - Wrapper scripts: ../../../../share/rocshmem/test_wrapper.sh (from <install>/share/rocshmem/)
+#   - Executables: ../../../../libexec/rocshmem/rocshmem_*_tests
+#   - Wrapper scripts: ../../../../share/rocshmem/test_wrapper.sh
 
 # Find MPI (required for all tests)
 find_program(MPIEXEC_EXECUTABLE NAMES mpiexec mpirun)
