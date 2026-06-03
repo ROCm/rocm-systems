@@ -14,8 +14,8 @@ def run_calc_ai_analyze_with_values(monkeypatch, metric_values):
     Build mocks and invoke calc_ai_analyze with controlled metric values.
 
     ``metric_values`` is a dict with keys ``ai_hbm``, ``ai_l2``, ``ai_l1``,
-    ``performance`` whose values are injected into the table-402 DataFrame that
-    ``eval_metric`` would normally populate.
+    ``ai_lds``, ``performance`` whose values are injected into the table-402
+    DataFrame that ``eval_metric`` would normally populate.
 
     Returns the plot-points dict produced by ``calc_ai_analyze``.
     """
@@ -49,6 +49,7 @@ def run_calc_ai_analyze_with_values(monkeypatch, metric_values):
                 "AI HBM",
                 "AI L2",
                 "AI L1",
+                "AI LDS",
                 "Performance (GFLOPs)",
             ],
             "Value": pd.array(
@@ -56,6 +57,7 @@ def run_calc_ai_analyze_with_values(monkeypatch, metric_values):
                     metric_values["ai_hbm"],
                     metric_values["ai_l2"],
                     metric_values["ai_l1"],
+                    metric_values["ai_lds"],
                     metric_values["performance"],
                 ],
                 dtype=object,
@@ -82,6 +84,7 @@ def test_calc_ai_analyze_replaces_inf_with_zero(monkeypatch):
             "ai_hbm": np.inf,
             "ai_l2": -np.inf,
             "ai_l1": 1.5,
+            "ai_lds": np.inf,
             "performance": 100.0,
         },
     )
@@ -93,6 +96,8 @@ def test_calc_ai_analyze_replaces_inf_with_zero(monkeypatch):
     assert result["ai_l2"][1] == [100.0]
     assert result["ai_l1"][0] == [1.5], "valid float should pass through"
     assert result["ai_l1"][1] == [100.0]
+    assert result["ai_lds"][0] == [0], "np.inf should be replaced with 0"
+    assert result["ai_lds"][1] == [100.0]
 
 
 def test_calc_ai_analyze_replaces_none_with_zero(monkeypatch):
@@ -103,6 +108,7 @@ def test_calc_ai_analyze_replaces_none_with_zero(monkeypatch):
             "ai_hbm": None,
             "ai_l2": None,
             "ai_l1": None,
+            "ai_lds": None,
             "performance": 50.0,
         },
     )
@@ -111,6 +117,7 @@ def test_calc_ai_analyze_replaces_none_with_zero(monkeypatch):
     assert result["ai_hbm"][0] == [0], "None should be replaced with 0"
     assert result["ai_l2"][0] == [0], "None should be replaced with 0"
     assert result["ai_l1"][0] == [0], "None should be replaced with 0"
+    assert result["ai_lds"][0] == [0], "None should be replaced with 0"
 
 
 def test_calc_ai_analyze_valid_values_pass_through(monkeypatch):
@@ -121,6 +128,7 @@ def test_calc_ai_analyze_valid_values_pass_through(monkeypatch):
             "ai_hbm": 2.5,
             "ai_l2": 3.0,
             "ai_l1": 1.5,
+            "ai_lds": 4.0,
             "performance": 100.0,
         },
     )
@@ -132,6 +140,8 @@ def test_calc_ai_analyze_valid_values_pass_through(monkeypatch):
     assert result["ai_l2"][1] == [100.0]
     assert result["ai_l1"][0] == [1.5]
     assert result["ai_l1"][1] == [100.0]
+    assert result["ai_lds"][0] == [4.0]
+    assert result["ai_lds"][1] == [100.0]
 
 
 def test_calc_ai_analyze_na_and_empty_replaced(monkeypatch):
@@ -142,6 +152,7 @@ def test_calc_ai_analyze_na_and_empty_replaced(monkeypatch):
             "ai_hbm": "N/A",
             "ai_l2": "",
             "ai_l1": "N/A",
+            "ai_lds": "",
             "performance": 75.0,
         },
     )
@@ -150,6 +161,7 @@ def test_calc_ai_analyze_na_and_empty_replaced(monkeypatch):
     assert result["ai_hbm"][0] == [0], "'N/A' should be replaced with 0"
     assert result["ai_l2"][0] == [0], "'' should be replaced with 0"
     assert result["ai_l1"][0] == [0], "'N/A' should be replaced with 0"
+    assert result["ai_lds"][0] == [0], "'' should be replaced with 0"
 
 
 def test_sanitize_ai_value_replaces_invalid_values_with_zero():

@@ -163,6 +163,7 @@ class db_analysis(OmniAnalyze_Base):
                         l1_cache_data=getattr(roofline_data, "l1_cache_data", None),
                         l2_cache_data=getattr(roofline_data, "l2_cache_data", None),
                         hbm_cache_data=getattr(roofline_data, "hbm_cache_data", None),
+                        lds_cache_data=getattr(roofline_data, "lds_cache_data", None),
                         kernel=kernel_objs[kernel_name],
                     )
                 )
@@ -176,6 +177,7 @@ class db_analysis(OmniAnalyze_Base):
                         l1_cache_data=workload_roofline.get("l1_cache_data"),
                         l2_cache_data=workload_roofline.get("l2_cache_data"),
                         hbm_cache_data=workload_roofline.get("hbm_cache_data"),
+                        lds_cache_data=workload_roofline.get("lds_cache_data"),
                         workload=workload_obj,
                     )
                 )
@@ -975,6 +977,7 @@ class db_analysis(OmniAnalyze_Base):
                 "l1_cache_data": roofline_data_expressions.get("AI L1", ""),
                 "l2_cache_data": roofline_data_expressions.get("AI L2", ""),
                 "hbm_cache_data": roofline_data_expressions.get("AI HBM", ""),
+                "lds_cache_data": roofline_data_expressions.get("AI LDS", ""),
             }
 
             # Calculate kernel-level roofline data

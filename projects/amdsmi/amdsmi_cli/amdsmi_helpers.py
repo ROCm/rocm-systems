@@ -119,6 +119,20 @@ class AMDSMIHelpers:
                     "Unable to determine virtualization status: " + str(e.get_error_code())
                 )
 
+        self.convert_clock_type = {
+            "sys": amdsmi_interface.AmdSmiClkType.SYS,
+            "mem": amdsmi_interface.AmdSmiClkType.MEM,
+            "df": amdsmi_interface.AmdSmiClkType.DF,
+            "fclk": amdsmi_interface.AmdSmiClkType.DF,
+            "soc": amdsmi_interface.AmdSmiClkType.SOC,
+            "dcef": amdsmi_interface.AmdSmiClkType.DCEF,
+            # vclk and dclk currently do not support levels so average clk is given for frequency levels
+            "vclk0": amdsmi_interface.AmdSmiClkType.VCLK0,
+            "vclk1": amdsmi_interface.AmdSmiClkType.VCLK1,
+            "dclk0": amdsmi_interface.AmdSmiClkType.DCLK0,
+            "dclk1": amdsmi_interface.AmdSmiClkType.DCLK1,
+        }
+
     def increment_set_count(self):
         self._count_of_sets_called += 1
 
@@ -2966,6 +2980,19 @@ class AMDSMIHelpers:
             amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_11_HBM_D,
             amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDD_USR,
             amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_11_E32,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_04_HBM_B,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_04_HBM_D,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_075_HBM_B,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_075_HBM_D,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_11_GTA_A,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_11_GTA_C,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDAN_075_GTA_A,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDAN_075_GTA_C,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_075_UCIE,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_065_UCIEAA,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_065_UCIEAM_A,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_065_UCIEAM_C,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDAN_075,
         ]
 
         for temp_type in gpu_board_temp_types:

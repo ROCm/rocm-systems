@@ -190,6 +190,11 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
   return target_supports_wave32(arch);
 }
 
+[[nodiscard]] bool target_uses_gfx90a_accum_offset(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+         arch == ROCJITSU_CODE_ARCH_CDNA4;
+}
+
 [[nodiscard]] bool target_clears_rsrc1_mode_bits(rj_code_arch_t arch) {
   // DX10_CLAMP and IEEE_MODE are deprecated on GFX12. Preserve them for GFX10
   // and GFX11 targets where they still affect floating-point behavior.
@@ -463,6 +468,16 @@ bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation 
   AMDHSA_BITS_SET(desc->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                   translation.target_sgpr_granulated);
 
+  if (target_uses_gfx90a_accum_offset(target_arch) && translation.target_accvgpr_base != 0) {
+    // GFX90A-style descriptors encode the first AccVGPR as (field + 1) * 4.
+    // KernelDescriptorTranslator may move this base upward when semantic
+    // lowering needs ordinary VGPR scratch above the source AccVGPR window, so
+    // the patcher must write the recomputed base alongside the VGPR allocation.
+    const uint32_t encoded_accum_offset = (translation.target_accvgpr_base / 4) - 1;
+    AMDHSA_BITS_SET(desc->compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
+                    encoded_accum_offset);
+  }
+
   if (target_uses_gfx10_plus_mode_bits(target_arch)) {
     if (target_clears_rsrc1_mode_bits(target_arch)) {
       AMDHSA_BITS_SET(desc->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_ENABLE_DX10_CLAMP, 0);
@@ -487,6 +502,16 @@ bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation 
       AMDHSA_BITS_SET(desc->compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX10_PLUS_INST_PREF_SIZE,
                       inst_pref);
     }
+  } else if (target_uses_gfx90a_accum_offset(target_arch) && translation.target_accvgpr_base != 0) {
+    // On GFX90A/GFX942/GFX950, AccVGPRs are placed by ACCUM_OFFSET rather than
+    // by the ordinary VGPR count. KernelDescriptorTranslator decides whether the
+    // base must move up to make room for semantic-lowering scratch; the patcher
+    // only materializes that already-translated target base.
+    assert(translation.target_accvgpr_base >= 4 &&
+           "ACCUM_OFFSET base must encode at least 4 VGPRs");
+    assert(translation.target_accvgpr_base % 4 == 0 && "ACCUM_OFFSET base must be 4-VGPR aligned");
+    AMDHSA_BITS_SET(desc->compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
+                    (translation.target_accvgpr_base / 4 - 1));
   }
 
   desc->private_segment_fixed_size = translation.target_private_size;

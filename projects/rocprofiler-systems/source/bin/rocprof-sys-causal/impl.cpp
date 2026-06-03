@@ -159,8 +159,7 @@ get_initial_environment()
     update_env(_env, "ROCPROFSYS_LAUNCHER", "rocprof-sys-causal");
 
     // Ensure libomptarget.so can be found by the target (OpenMP/HIP apps)
-    if(auto llvm_dir =
-           rocprofsys::common::discover_llvm_libdir_for_ompt(get_verbose() > 0);
+    if(auto llvm_dir = rocprofsys::common::discover_llvm_libdir_for_ompt();
        !llvm_dir.empty())
     {
         update_env(_env, "LD_LIBRARY_PATH", llvm_dir, /*append=*/true);
