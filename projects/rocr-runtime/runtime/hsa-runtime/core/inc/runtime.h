@@ -305,15 +305,17 @@ class Runtime {
   hsa_status_t GetPreferredEngine(core::Agent* dst_agent, core::Agent* src_agent,
                                   uint32_t* recommended_ids_mask);
 
-  /// @brief Fill the first @p count of uint32_t in ptr with value.
+  /// @brief Fill memory buffer with specified value.
   ///
   /// @param [in] ptr Memory address to be filled.
   /// @param [in] value The value/pattern that will be used to set @p ptr.
-  /// @param [in] count Number of uint32_t element to be set.
+  /// @param [in] count Number of elements to be set.
+  /// @param [in] element_size Size of each element (1 for byte, 4 for uint32_t).
   ///
   /// @retval ::HSA_STATUS_SUCCESS if memory fill is successful and completed.
   #undef FillMemory
-  hsa_status_t FillMemory(void* ptr, uint32_t value, size_t count);
+  hsa_status_t FillMemory(void* ptr, uint32_t value, size_t count, size_t element_size);
+
 
   /// @brief Set agents as the whitelist to access ptr.
   ///

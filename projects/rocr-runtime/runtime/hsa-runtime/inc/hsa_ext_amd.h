@@ -76,9 +76,10 @@
  * - 1.22 - hsa_amd_queue_get_info: per-queue VM fault state queries
  * - 1.23 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS
  * - 1.24 - hsa_amd_external_semaphore_handle_open/hsa_amd_external_semaphore_handle_close
+ * - 1.25 - hsa_amd_memory_fill_byte
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 24
+#define HSA_AMD_INTERFACE_VERSION_MINOR 25
 
 #ifdef __cplusplus
 extern "C" {
@@ -2843,6 +2844,34 @@ hsa_status_t HSA_API hsa_amd_memory_unlock(void* host_ptr);
  */
 hsa_status_t HSA_API
     hsa_amd_memory_fill(void* ptr, uint32_t value, size_t count);
+
+/**
+ * @brief Sets the first @p count bytes of the block of memory pointed by
+ * @p ptr to the specified @p value.
+ *
+ * @details This function fills memory at byte granularity, unlike
+ * ::hsa_amd_memory_fill which operates on 4-byte aligned uint32_t elements.
+ * This allows filling buffers of any size and alignment.
+ *
+ * @param[in] ptr Pointer to the block of memory to fill.
+ *
+ * @param[in] value Byte value (0-255) to be set. Only the least significant
+ * byte is used.
+ *
+ * @param[in] count Number of bytes to be set to the value.
+ *
+ * @retval HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been
+ * initialized.
+ *
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT @p ptr is NULL.
+ *
+ * @retval HSA_STATUS_ERROR_INVALID_ALLOCATION if the given memory
+ * region was not allocated with HSA runtime APIs.
+ */
+hsa_status_t HSA_API
+    hsa_amd_memory_fill_byte(void* ptr, uint8_t value, size_t count);
 
 /**
  * @brief Maps an interop object into the HSA flat address space and establishes

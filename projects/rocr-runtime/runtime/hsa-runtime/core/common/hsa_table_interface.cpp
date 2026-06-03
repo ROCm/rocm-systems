@@ -1108,6 +1108,12 @@ hsa_status_t HSA_API
 }
 
 // Mirrors Amd Extension Apis
+hsa_status_t HSA_API
+    hsa_amd_memory_fill_byte(void* ptr, uint8_t value, size_t count) {
+  return amdExtTable->hsa_amd_memory_fill_byte_fn(ptr, value, count);
+}
+
+// Mirrors Amd Extension Apis
 hsa_status_t HSA_API hsa_amd_interop_map_buffer(uint32_t num_agents, hsa_agent_t* agents,
                                                 hsa_handle_t interop_handle, uint32_t flags,
                                                 size_t* size, void** ptr, size_t* metadata_size,

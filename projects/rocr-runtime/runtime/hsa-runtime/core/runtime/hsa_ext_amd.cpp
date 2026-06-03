@@ -247,10 +247,25 @@ hsa_status_t hsa_amd_memory_fill(void* ptr, uint32_t value, size_t count) {
     return HSA_STATUS_SUCCESS;
   }
 
-  return core::Runtime::runtime_singleton_->FillMemory(ptr, value, count);
+  return core::Runtime::runtime_singleton_->FillMemory(ptr, value, count, sizeof(uint32_t));
   CATCH;
 }
 
+hsa_status_t hsa_amd_memory_fill_byte(void* ptr, uint8_t value, size_t count) {
+  TRY;
+  IS_OPEN();
+
+  if (ptr == nullptr) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  if (count == 0) {
+    return HSA_STATUS_SUCCESS;
+  }
+
+  return core::Runtime::runtime_singleton_->FillMemory(ptr, value, count, sizeof(uint8_t));
+  CATCH;
+}
 hsa_status_t hsa_amd_memory_async_copy(void* dst, hsa_agent_t dst_agent_handle, const void* src,
                                        hsa_agent_t src_agent_handle, size_t size,
                                        uint32_t num_dep_signals, const hsa_signal_t* dep_signals,

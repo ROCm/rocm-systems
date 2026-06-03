@@ -88,6 +88,7 @@
 #include "suites/functional/cu_masking.h"
 #include "suites/functional/filter_devices.h"
 #include "suites/functional/gpu_coredump.h"
+#include "suites/functional/memory_fill.h"
 #include "amd_smi/amdsmi.h"
 #include "common/common.h"
 #include "suites/functional/counted_queues.h"
@@ -470,6 +471,27 @@ TEST(rocrtstFunc, Memory_Alignment_Test) {
     MemoryAlignmentTest ma;
     if (!RunCustomTestProlog(&ma)) return;
     ma.MemoryPoolAlignment();
+    RunCustomTestEpilog(&ma);
+}
+
+TEST(rocrtstFunc, Memory_Fill_Byte) {
+    MemoryFillTest ma(ByteBasic);
+    if (!RunCustomTestProlog(&ma)) return;
+    ma.MemoryFillByteTest();
+    RunCustomTestEpilog(&ma);
+}
+
+TEST(rocrtstFunc, Memory_Fill_Byte_Unaligned) {
+    MemoryFillTest mt(ByteUnAligned);
+    if (!RunCustomTestProlog(&mt)) return;
+    mt.MemoryFillByteTest();
+    RunCustomTestEpilog(&mt);
+}
+
+TEST(rocrtstFunc, Memory_Fill_Errors) {
+    MemoryFillTest ma;
+    if (!RunCustomTestProlog(&ma)) return;
+    ma.TestMemoryFillErrors();
     RunCustomTestEpilog(&ma);
 }
 

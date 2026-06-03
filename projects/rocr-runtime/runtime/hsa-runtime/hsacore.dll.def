@@ -145,6 +145,7 @@ EXPORTS
   hsa_amd_queue_cu_set_mask
   hsa_amd_queue_cu_get_mask
   hsa_amd_memory_fill
+  hsa_amd_memory_fill_byte
   hsa_amd_memory_async_copy
   hsa_amd_memory_async_copy_on_engine
   hsa_amd_memory_async_batch_copy

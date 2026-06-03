@@ -221,6 +221,7 @@ struct AmdExtTable {
   decltype(hsa_amd_memory_lock)* hsa_amd_memory_lock_fn;
   decltype(hsa_amd_memory_unlock)* hsa_amd_memory_unlock_fn;
   decltype(hsa_amd_memory_fill)* hsa_amd_memory_fill_fn;
+  decltype(hsa_amd_memory_fill_byte)* hsa_amd_memory_fill_byte_fn;
   decltype(hsa_amd_interop_map_buffer)* hsa_amd_interop_map_buffer_fn;
   decltype(hsa_amd_interop_unmap_buffer)* hsa_amd_interop_unmap_buffer_fn;
   decltype(hsa_amd_image_create)* hsa_amd_image_create_fn;

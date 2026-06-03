@@ -227,6 +227,10 @@ hsa_status_t
     hsa_amd_memory_fill(void* ptr, uint32_t value, size_t count);
 
 // Mirrors Amd Extension Apis
+hsa_status_t
+    hsa_amd_memory_fill_byte(void* ptr, uint8_t value, size_t count);
+
+// Mirrors Amd Extension Apis
 hsa_status_t hsa_amd_interop_map_buffer(uint32_t num_agents,
                                         hsa_agent_t* agents,
                                         hsa_handle_t interop_handle,

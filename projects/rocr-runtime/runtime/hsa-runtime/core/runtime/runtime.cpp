@@ -639,7 +639,12 @@ hsa_status_t Runtime::GetPreferredEngine(core::Agent* dst_agent, core::Agent* sr
   return copy_agent->DmaPreferredEngine(*dst_agent, *src_agent, recommended_ids_mask);
 }
 
-hsa_status_t Runtime::FillMemory(void* ptr, uint32_t value, size_t count) {
+hsa_status_t Runtime::FillMemory(void* ptr, uint32_t value, size_t count, size_t size) {
+  // Validate element size
+  if (size != 1 && size != 4) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
   // Choose blit agent from pointer info
   hsa_amd_pointer_info_t info = {};
   uint32_t agent_count = 0;
@@ -649,7 +654,7 @@ hsa_status_t Runtime::FillMemory(void* ptr, uint32_t value, size_t count) {
   hsa_status_t err = PtrInfo(ptr, &info, malloc, &agent_count, &accessible);
   if (err != HSA_STATUS_SUCCESS) return err;
 
-  ptrdiff_t endPtr = (ptrdiff_t)ptr + count * sizeof(uint32_t);
+  ptrdiff_t endPtr = (ptrdiff_t)ptr + count * size;
 
   // Check for GPU fill
   // Selects GPU fill for SVM and Locked allocations if a GPU address is given and is mapped.
@@ -671,7 +676,7 @@ hsa_status_t Runtime::FillMemory(void* ptr, uint32_t value, size_t count) {
 
   // Host and unmapped SVM addresses copy via host.
   if (info.hostBaseAddress <= ptr && endPtr <= (ptrdiff_t)info.hostBaseAddress + info.sizeInBytes) {
-    memset(ptr, value, count * sizeof(uint32_t));
+    memset(ptr, value, count * size);
     return HSA_STATUS_SUCCESS;
   }
 
