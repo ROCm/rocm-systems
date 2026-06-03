@@ -280,7 +280,8 @@ iterate_args_callback(rocprofiler_buffer_tracing_kind_t /*kind*/,
     ROCP_FATAL_IF(data == nullptr) << "nullptr to data for iterate_args_callback";
 
     auto* _data = static_cast<function_args_t*>(data);
-    if(arg_type && arg_name && arg_value_str) {
+    if(arg_type && arg_name && arg_value_str)
+    {
         const char* arg_val = *arg_value_str != '\0' ? arg_value_str : "<unknown>";
         _data->emplace_back(
             argument_info{arg_number, common::cxx_demangle(arg_type), arg_name, arg_val});
