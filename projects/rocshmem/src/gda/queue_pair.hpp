@@ -252,6 +252,20 @@ class QueuePair {
   __device__ void atomic_nofetch_single(void *dest, int64_t value);
 
   /**
+   * @brief Non-fetching atomic add with explicit remote key.
+   *
+   * Used by GIN where the signal buffer has its own rkey distinct from
+   * the QP's default heap key.
+   *
+   * @param[in] raddr Remote destination address.
+   * @param[in] rkey  Remote key for the destination buffer.
+   * @param[in] value Atomic add value.
+   * @param[in] wf_info Wavefront information.
+   */
+  __device__ void atomic_add_with_keys(void *raddr, uint32_t rkey,
+      int64_t value, ActiveWFInfo &wf_info);
+
+  /**
    * @brief Create and enqueue an atomic cas work queue entry (wqe).
    *
    * @param[in] dest Destination address for data transmission.
@@ -294,6 +308,23 @@ class QueuePair {
   post_wqe_amo(int32_t size, uintptr_t raddr, uint8_t opcode,
       int64_t atomic_data, int64_t atomic_cmp, bool fetch,
       ActiveWFInfo &wf_info);
+
+  __device__ __attribute__((noinline)) void
+  post_wqe_amo_with_keys(uintptr_t raddr, uint32_t rkey, uint8_t opcode,
+      int64_t atomic_data, ActiveWFInfo &wf_info);
+
+#if defined(GDA_IONIC)
+  __device__ void ionic_post_wqe_amo_with_keys(uintptr_t raddr, uint32_t rkey,
+      uint8_t opcode, int64_t atomic_data, ActiveWFInfo &wf_info);
+#endif
+#if defined(GDA_BNXT)
+  __device__ void bnxt_post_wqe_amo_with_keys(uintptr_t raddr, uint32_t rkey,
+      uint8_t opcode, int64_t atomic_data, ActiveWFInfo &wf_info);
+#endif
+#if defined(GDA_MLX5)
+  __device__ void mlx5_post_wqe_amo_with_keys(uintptr_t raddr, uint32_t rkey,
+      uint8_t opcode, int64_t atomic_data, ActiveWFInfo &wf_info);
+#endif
 
   __device__ __attribute__((noinline)) uint64_t post_wqe_amo_single(uintptr_t raddr,
       uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching);

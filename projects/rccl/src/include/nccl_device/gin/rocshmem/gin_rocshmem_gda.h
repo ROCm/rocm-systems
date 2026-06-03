@@ -53,7 +53,8 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
     if (hasSignal) {
       if (signalOp == ncclGinSignalInc) signalOpArg = 1;
       uintptr_t sigAddr = loadConst(loadConst(&rsCtx->signal_raddrs) + peer) + sizeof(uint64_t) * signalId;
-      qp->atomic_nofetch((void*)sigAddr, (int64_t)signalOpArg, 0, wf_info);
+      uint32_t sigRkey = loadConst(loadConst(&rsCtx->signal_rkeys) + peer);
+      qp->atomic_add_with_keys((void*)sigAddr, sigRkey, (int64_t)signalOpArg, wf_info);
     }
 
     if (hasCounter) {
@@ -88,7 +89,8 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
       qp->quiet(wf_info);
       if (signalOp == ncclGinSignalInc) signalOpArg = 1;
       uintptr_t sigAddr = loadConst(loadConst(&rsCtx->signal_raddrs) + peer) + sizeof(uint64_t) * signalId;
-      qp->atomic_nofetch((void*)sigAddr, (int64_t)signalOpArg, 0, wf_info);
+      uint32_t sigRkey = loadConst(loadConst(&rsCtx->signal_rkeys) + peer);
+      qp->atomic_add_with_keys((void*)sigAddr, sigRkey, (int64_t)signalOpArg, wf_info);
     }
   }
 };

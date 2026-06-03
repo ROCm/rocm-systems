@@ -381,6 +381,35 @@ __device__ void QueuePair::atomic_nofetch_single(void *dest, int64_t value) {
   post_wqe_amo_single(dst, gda_op_atomic_fa, value, 0, false);
 }
 
+__device__ void QueuePair::atomic_add_with_keys(void *raddr, uint32_t rkey,
+    int64_t value, ActiveWFInfo &wf_info) {
+  uintptr_t r = reinterpret_cast<uintptr_t>(raddr);
+  post_wqe_amo_with_keys(r, rkey, gda_op_atomic_fa, value, wf_info);
+}
+
+__device__ void QueuePair::post_wqe_amo_with_keys(uintptr_t raddr, uint32_t rkey,
+    uint8_t opcode, int64_t atomic_data, ActiveWFInfo &wf_info) {
+  switch (gda_provider_) {
+#if defined(GDA_IONIC)
+  case GDAProvider::IONIC:
+    ionic_post_wqe_amo_with_keys(raddr, rkey, opcode, atomic_data, wf_info);
+    return;
+#endif
+#if defined(GDA_BNXT)
+  case GDAProvider::BNXT:
+    bnxt_post_wqe_amo_with_keys(raddr, rkey, opcode, atomic_data, wf_info);
+    return;
+#endif
+#if defined(GDA_MLX5)
+  case GDAProvider::MLX5:
+    mlx5_post_wqe_amo_with_keys(raddr, rkey, opcode, atomic_data, wf_info);
+    return;
+#endif
+  default:
+    assert(false /* invalid nic provider */);
+  }
+}
+
 int QueuePair::buffer_register(uintptr_t addr, size_t length) {
   struct ibv_mr *mr = nullptr;
   int access = 0;

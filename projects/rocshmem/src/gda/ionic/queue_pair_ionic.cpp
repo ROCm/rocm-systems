@@ -588,4 +588,41 @@ __device__ uint64_t QueuePair::ionic_post_wqe_amo_single([[maybe_unused]] int32_
   return ret;
 }
 
+__device__ void QueuePair::ionic_post_wqe_amo_with_keys(uintptr_t raddr, uint32_t rkey,
+    uint8_t opcode, int64_t atomic_data, ActiveWFInfo &wf_info) {
+  uint32_t num_wqes = wf_info.num_pe_group_lanes;
+  uint32_t my_sq_prod = reserve_sq(wf_info, num_wqes);
+  uint32_t my_sq_pos = my_sq_prod + wf_info.pe_group_logical_lane_id;
+  struct ionic_v1_wqe *wqe = &ionic_sq_buf[my_sq_pos & sq_mask];
+  uint16_t wqe_flags = 0;
+
+  if (!(my_sq_pos & (sq_mask + 1))) {
+    wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_COLOR);
+  }
+  if (wf_info.is_pe_group_last) {
+    wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_SIG);
+  }
+
+  wqe->base.wqe_idx = my_sq_pos;
+  wqe->base.op = opcode;
+  wqe->base.num_sge_key = 1;
+  wqe->base.imm_data_key = byteswap<uint32_t>(0);
+
+  wqe->atomic_v2.remote_va_high = byteswap<uint32_t>(raddr >> 32);
+  wqe->atomic_v2.remote_va_low  = byteswap<uint32_t>(raddr);
+  wqe->atomic_v2.remote_rkey    = byteswap<uint32_t>(rkey);
+  wqe->atomic_v2.swap_add_high  = byteswap<uint32_t>(atomic_data >> 32);
+  wqe->atomic_v2.swap_add_low   = byteswap<uint32_t>(atomic_data);
+  wqe->atomic_v2.compare_high   = 0;
+  wqe->atomic_v2.compare_low    = 0;
+  wqe->atomic_v2.local_va =
+      byteswap<uint64_t>(reinterpret_cast<uint64_t>(nonfetching_atomic));
+  wqe->atomic_v2.lkey = byteswap<uint32_t>(nonfetching_atomic_lkey);
+
+  __hip_atomic_store(&wqe->base.flags, wqe_flags, __ATOMIC_RELEASE,
+    __HIP_MEMORY_SCOPE_AGENT);
+
+  commit_sq(wf_info, my_sq_prod, my_sq_pos, num_wqes);
+}
+
 }  // namespace rocshmem
