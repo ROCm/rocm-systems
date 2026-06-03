@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// Test that attach fails cleanly when ROCP_TOOL_ATTACH=1 is not set, instead of
+// Test that attach fails gracefully when ROCP_TOOL_ATTACH=1 is not set, instead of
 // crashing the target application.
 //
 // Spawns a child process WITHOUT setting ROCP_TOOL_ATTACH=1, then attempts to attach
@@ -94,7 +94,10 @@ main(int argc, char** argv)
     }
     else
     {
-        // Parent process: wait for child to exec
+        // Parent process: heuristic wait for the child to execl(). This is a synchronization
+        // hack: if the child has not exec'd yet, the /proc scan can find no bg-attach thread
+        // and the test may pass for the wrong reason, since that is the expected outcome here.
+        // A pipe handshake would be more robust if this test becomes flaky or more critical.
         std::this_thread::sleep_for(std::chrono::milliseconds(2500));
 
         const char* attach_mode_str =
@@ -103,6 +106,12 @@ main(int argc, char** argv)
                   << " (should fail with ROCATTACH_STATUS_ERROR)\n";
 
         // Attempt to attach - this should FAIL because bg-attach thread doesn't exist
+        //
+        // NOTE: for the attach-tree mode, this test spawns a single child with no descendants,
+        // so rocattach_attach_tree() reduces to one setup() call and the returned last_status
+        // is deterministically ROCATTACH_STATUS_ERROR. If this test is extended to a real
+        // process tree, revisit this expectation because last_status only reflects the last
+        // failure encountered.
         rocattach_status_t status =
             use_tree_attach ? rocattach_attach_tree(child_pid) : rocattach_attach(child_pid);
 
@@ -139,7 +148,7 @@ main(int argc, char** argv)
         {
             // Child is still running
             std::cout << "VERIFIED: child process " << child_pid << " is still running\n";
-            std::cout << "Test PASSED: attach failed cleanly without crashing target\n";
+            std::cout << "Test PASSED: attach failed gracefully without crashing target\n";
 
             // Clean up: kill the child
             kill(child_pid, SIGTERM);
