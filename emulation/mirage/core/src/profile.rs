@@ -97,6 +97,17 @@ pub struct ContainerizedDef {
     /// Extra bind mounts applied to every node container.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mounts: Vec<FileMount>,
+
+    /// Host device nodes to expose to every node container (`--device`),
+    /// e.g. `/dev/kfd` and `/dev/dri` for AMD GPU access.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub devices: Vec<String>,
+
+    /// Supplementary groups to add inside every node container
+    /// (`--group-add`), e.g. `video`/`render` so the workload may open
+    /// the GPU device nodes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<String>,
 }
 
 /// A profile is a named, on-disk emulator preset that can be referenced

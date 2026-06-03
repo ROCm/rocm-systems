@@ -299,10 +299,13 @@ fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Res
     };
 
     // Merge the emulator-declared mounts (e.g. HotSwap's runtime + cache
-    // trees, bind-mounted under `/mnt/mirage`) into the node containers so
-    // the injected `LD_PRELOAD`/env paths resolve inside each container.
+    // trees, bind-mounted under `/mnt/mirage`) and GPU device/group
+    // passthrough into the node containers so the injected
+    // `LD_PRELOAD`/env paths resolve and the workload can reach the GPU.
     let injection = resolve_injection(session)?;
     def.mounts.extend(injection.mounts.iter().cloned());
+    def.devices.extend(injection.devices.iter().cloned());
+    def.groups.extend(injection.groups.iter().cloned());
 
     publish_health(
         layout,

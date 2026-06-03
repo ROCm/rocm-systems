@@ -444,6 +444,8 @@ async fn create_session(
                     provider: body.provider,
                     image,
                     mounts,
+                    devices: Vec::new(),
+                    groups: Vec::new(),
                 });
             }
         }

@@ -859,6 +859,8 @@ fn build_containerize(
             provider,
             image,
             mounts: parse_mounts(mounts)?,
+            devices: Vec::new(),
+            groups: Vec::new(),
         })),
         None => {
             if !mounts.is_empty() || provider.is_some() {
@@ -1113,6 +1115,8 @@ fn apply_container_overrides(
                 provider,
                 image,
                 mounts: parsed,
+                devices: Vec::new(),
+                groups: Vec::new(),
             });
         }
     }

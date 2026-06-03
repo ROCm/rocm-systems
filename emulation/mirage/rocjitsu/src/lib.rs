@@ -122,6 +122,8 @@ impl Emulator for Rocjitsu {
             files: Default::default(),
             env,
             mounts: Default::default(),
+            devices: Default::default(),
+            groups: Default::default(),
         })
     }
 }

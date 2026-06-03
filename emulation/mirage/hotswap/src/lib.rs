@@ -165,12 +165,25 @@ impl Emulator for Hotswap {
         let (ld_preload, env, mounts) =
             build_hotswap_env(&dir, self.profile.containerize.is_some());
 
+        // HotSwap retargets device code onto a *physical* GPU, so the
+        // host's AMD GPU device nodes must be exposed to each node's
+        // container (with the matching `video`/`render` groups so the
+        // workload can open them). Only meaningful for containerised
+        // sessions; non-containerised runs already see the host devices.
+        let (devices, groups) = if self.profile.containerize.is_some() {
+            (gpu_devices(), gpu_groups())
+        } else {
+            (Vec::new(), Vec::new())
+        };
+
         Ok(InjectionDef {
             wrapper: None,
             ld_preload: Some(ld_preload),
             files: Default::default(),
             env,
             mounts,
+            devices,
+            groups,
         })
     }
 }
@@ -214,6 +227,27 @@ fn physical_target_gfx() -> String {
 /// mirage cache dir. Mirrors env_contract.py's `branch_root`.
 fn hotswap_branch_root() -> PathBuf {
     mirage_core::paths::mirage_cache_dir().join("hotswap")
+}
+
+/// Host AMD GPU device nodes to pass through to a node's container
+/// (`--device`). HotSwap runs the retargeted code on the real GPU, so
+/// the workload needs the KFD compute device (`/dev/kfd`) and the DRM
+/// render nodes (`/dev/dri`). Only paths that actually exist on the
+/// host are returned, so a host without one simply omits it.
+fn gpu_devices() -> Vec<String> {
+    ["/dev/kfd", "/dev/dri"]
+        .iter()
+        .filter(|p| Path::new(p).exists())
+        .map(|p| (*p).to_string())
+        .collect()
+}
+
+/// Supplementary groups a workload needs inside the container to open
+/// the passed-through GPU device nodes (`--group-add`). `video` and
+/// `render` are the conventional owners of `/dev/kfd` and the
+/// `/dev/dri/render*` nodes on ROCm hosts.
+fn gpu_groups() -> Vec<String> {
+    vec!["video".to_string(), "render".to_string()]
 }
 
 /// Cache subdirectories created under [`hotswap_branch_root`].

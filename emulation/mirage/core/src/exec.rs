@@ -167,6 +167,19 @@ pub struct InjectionDef {
     /// convention these target locations live under `/mnt/mirage`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mounts: Vec<FileMount>,
+
+    /// Host device nodes the emulator needs exposed to each node's
+    /// container (`--device`), e.g. `/dev/kfd` and `/dev/dri` for AMD
+    /// GPU access. Empty for non-containerised sessions and emulators
+    /// that need no device passthrough.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub devices: Vec<String>,
+
+    /// Supplementary groups the emulator needs added inside each node's
+    /// container (`--group-add`), e.g. `video`/`render` so the workload
+    /// may open the passed-through GPU device nodes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<String>,
 }
 
 #[cfg(test)]

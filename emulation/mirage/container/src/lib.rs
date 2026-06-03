@@ -106,6 +106,8 @@ impl Engine {
         image: &str,
         network: Option<&str>,
         mounts: &[FileMount],
+        devices: &[String],
+        groups: &[String],
         env: &[(String, String)],
     ) -> Vec<String> {
         let mut argv = vec![
@@ -127,6 +129,14 @@ impl Engine {
         for m in mounts {
             argv.push("-v".to_string());
             argv.push(m.to_volume_arg());
+        }
+        for d in devices {
+            argv.push("--device".to_string());
+            argv.push(d.clone());
+        }
+        for g in groups {
+            argv.push("--group-add".to_string());
+            argv.push(g.clone());
         }
         argv.push(image.to_string());
         // Keep the container alive; the real work arrives via `exec`.
@@ -226,9 +236,11 @@ impl Engine {
         image: &str,
         network: Option<&str>,
         mounts: &[FileMount],
+        devices: &[String],
+        groups: &[String],
         env: &[(String, String)],
     ) -> Result<String> {
-        let argv = Self::run_argv(name, image, network, mounts, env);
+        let argv = Self::run_argv(name, image, network, mounts, devices, groups, env);
         let out = self.output(&argv)?;
         Ok(String::from_utf8_lossy(&out).trim().to_string())
     }
@@ -303,7 +315,15 @@ impl Engine {
         for rank in 0..node_count {
             let name = mirage_core::container::container_name(session, rank);
             let env = node_env(rank);
-            match self.launch_node(&name, &def.image, Some(&network), &def.mounts, &env) {
+            match self.launch_node(
+                &name,
+                &def.image,
+                Some(&network),
+                &def.mounts,
+                &def.devices,
+                &def.groups,
+                &env,
+            ) {
                 Ok(cid) => {
                     cids.push((rank, cid));
                     state.nodes.push(NodeContainer { rank, name });
@@ -419,11 +439,15 @@ mod tests {
             ("MIRAGE_HEAD_PORT".to_string(), "5000".to_string()),
         ];
         let mounts = vec![mount("/data:/data:ro"), mount("/h:/c")];
+        let devices = vec!["/dev/kfd".to_string(), "/dev/dri".to_string()];
+        let groups = vec!["video".to_string(), "render".to_string()];
         let argv = Engine::run_argv(
             "mirage-s-node-0",
             "img:latest",
             Some("mirage-s"),
             &mounts,
+            &devices,
+            &groups,
             &env,
         );
 
@@ -434,12 +458,16 @@ mod tests {
         assert!(joined.contains("-e MIRAGE_HEAD_PORT=5000"));
         assert!(joined.contains("-v /data:/data:ro"));
         assert!(joined.contains("-v /h:/c"));
+        assert!(joined.contains("--device /dev/kfd"));
+        assert!(joined.contains("--device /dev/dri"));
+        assert!(joined.contains("--group-add video"));
+        assert!(joined.contains("--group-add render"));
         assert!(joined.ends_with("img:latest sleep infinity"));
     }
 
     #[test]
     fn run_argv_omits_network_when_none() {
-        let argv = Engine::run_argv("n", "img", None, &[], &[]);
+        let argv = Engine::run_argv("n", "img", None, &[], &[], &[], &[]);
         assert!(!argv.iter().any(|a| a == "--network"));
         assert_eq!(argv.last().map(String::as_str), Some("infinity"));
     }
@@ -484,6 +512,8 @@ mod tests {
             provider: Some("docker".to_string()),
             image: "img".to_string(),
             mounts: vec![],
+            devices: vec![],
+            groups: vec![],
         };
         let engine = Engine::resolve(&def).unwrap();
         assert_eq!(engine.provider(), "docker");
@@ -534,7 +564,7 @@ mod tests {
         let engine = Engine::with_provider(provider.to_string_lossy().to_string());
 
         let cid = engine
-            .launch_node("mirage-s-node-0", "img", Some("mirage-s"), &[], &[])
+            .launch_node("mirage-s-node-0", "img", Some("mirage-s"), &[], &[], &[], &[])
             .unwrap();
         assert_eq!(cid, "fake-cid-123");
         let recorded = std::fs::read_to_string(&log).unwrap();
@@ -556,6 +586,8 @@ mod tests {
             provider: Some(provider.to_string_lossy().to_string()),
             image: "img:latest".to_string(),
             mounts: vec![],
+            devices: vec![],
+            groups: vec![],
         };
 
         let (state, cids) = engine
