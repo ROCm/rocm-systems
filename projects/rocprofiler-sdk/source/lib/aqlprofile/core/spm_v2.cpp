@@ -11,6 +11,7 @@
 #include "lib/aqlprofile/core/logger.hpp"
 #include "lib/aqlprofile/core/pm4_factory.h"
 #include "lib/common/static_object.hpp"
+#include "lib/common/environment.hpp"
 
 #include <thread>
 #include <condition_variable>
@@ -177,8 +178,9 @@ is_virtualization_enabled()
 bool
 is_agent_supported_for_spm(const AgentInfo* agentInfo)
 {
-    const char* env_val = getenv("AQLPROFILE_SPM_OVERRIDE_AGENT_CHECK");
-    if(env_val && *env_val != '0' && *env_val != '\0') return true;
+    // Check value, not just presence (must be non-empty and non-zero to override)
+    auto env_val = rocprofiler::common::get_env_optional("AQLPROFILE_SPM_OVERRIDE_AGENT_CHECK");
+    if(env_val && !env_val->empty() && env_val->front() != '0') return true;
 
     // if the device is gfx90a, then spm is not supported
     if(strncmp(agentInfo->gfxip, "gfx90a", 6) == 0)

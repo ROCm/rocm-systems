@@ -39,6 +39,7 @@ AMD SMI is the successor to [ROCm SMI](https://github.com/ROCm/rocm-systems/tree
 * [Python library usage](./how-to/amdsmi-py-lib.md)
 * [Go library usage](./how-to/amdsmi-go-lib.md)
 * [CLI tool usage](./how-to/amdsmi-cli-tool.md)
+* [AI NIC integration](./how-to/amdsmi-nic-integration.md)
 * [Use AMD SMI in a Docker container](./how-to/setup-docker-container.md)
 :::
 
@@ -54,6 +55,7 @@ AMD SMI is the successor to [ROCm SMI](https://github.com/ROCm/rocm-systems/tree
 :::
 
 :::{grid-item-card} Conceptual
+* [GPU partitioning](./conceptual/partition.md)
 * [GPU violations](./conceptual/gpu-violations.md)
 * [Performance determinism](./conceptual/perf-determinism.md)
 * [Reliability, availability, serviceability](./conceptual/ras.md)

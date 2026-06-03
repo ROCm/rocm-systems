@@ -58,7 +58,6 @@ jobs:
       AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
     steps:
       - name: "Fetch 'build_tools' from repository"
-        if: ${{ runner.os == 'Windows' }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
@@ -70,11 +69,16 @@ jobs:
         shell: powershell
         run: . '${{ github.workspace }}\prejob\build_tools\github_actions\cleanup_processes.ps1'
 
+      - name: Pre-job cleanup GPU processes on Linux
+        if: ${{ runner.os == 'Linux' }}
+        timeout-minutes: 5
+        run: bash ./prejob/build_tools/github_actions/cleanup_processes.sh
+
       - name: Checkout Repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
-          ref: 42cdfac66fed8bcabe230611e6517d577a1127f9 # 2026-05-27 commit
+          ref: 685f8c3b89006309b34a7c16de17e841400f0d76 # 2025-05-29 commit
 
       - name: Run setup test environment workflow
         uses: './.github/actions/setup_test_environment'
@@ -116,3 +120,8 @@ jobs:
         if: ${{ always() && runner.os == 'Windows' }}
         shell: powershell
         run: . '${{ github.workspace }}\build_tools\github_actions\cleanup_processes.ps1'
+
+      - name: Post-job cleanup GPU processes on Linux
+        if: ${{ always() && runner.os == 'Linux' }}
+        timeout-minutes: 5
+        run: bash ./build_tools/github_actions/cleanup_processes.sh
