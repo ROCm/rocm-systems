@@ -65,13 +65,17 @@ set_target_properties(
 )
 
 set(_rcfn_openblas_dir "")
-foreach(_dir IN ITEMS
+foreach(
+    _dir
+    IN
+    ITEMS
         "$ENV{ROCM_PATH}/lib/host-math/lib"
         "/opt/rocm/lib/host-math/lib"
         "$ENV{ROCM_PATH}/lib"
         "/opt/rocm/lib"
         "$ENV{ROCM_PATH}/lib64"
-        "/opt/rocm/lib64")
+        "/opt/rocm/lib64"
+)
     file(GLOB _rcfn_openblas_hits "${_dir}/librocm-openblas.so*")
     if(_rcfn_openblas_hits)
         list(SORT _rcfn_openblas_hits COMPARE NATURAL ORDER DESCENDING)
@@ -88,7 +92,12 @@ if(_rcfn_openblas_dir)
 endif()
 list(JOIN _rcfn_test_ld_paths ":" _rcfn_test_ld_path)
 
-add_test(NAME ${target} COMMAND ${target})
+if(TEST_FROM_INSTALL)
+    set(_rcfn_test_cmd tests/${target})
+else()
+    set(_rcfn_test_cmd $<TARGET_FILE:${target}>)
+endif()
+add_test(NAME ${target} COMMAND ${_rcfn_test_cmd})
 set_tests_properties(
     ${target}
     PROPERTIES
