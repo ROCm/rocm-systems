@@ -119,10 +119,17 @@ def test_random_operator_kernel_coverage(
         trail_str = inject_roctx_loader.format_load_diagnostic_trail(
             loader_diagnostic_trail,
         )
+        trail_suffix = f"\n{trail_str}" if trail_str else ""
+        if os.environ.get("ROCPROFCOMPUTE_ROCTX_RECORDFN_SO"):
+            pytest.fail(
+                f"Pinned roctx_recordfn.so failed to load "
+                f"(loaded_tier={loader_tier!r}).{trail_suffix}"
+            )
         pytest.skip(
-            "Skipping torch_trace coverage: C++ tier unavailable in parent "
-            f"loader probe (loaded_tier={loader_tier!r}).\n"
-            f"Loader trail:\n{trail_str or '  (no diagnostic lines captured)'}"
+            f"C++ tier unavailable (loaded_tier={loader_tier!r}). "
+            "Ensure torch, cmake, and ROCm are available, or set "
+            "ROCPROFCOMPUTE_ROCTX_RECORDFN_SO=<path> to pin a prebuilt .so."
+            f"{trail_suffix}"
         )
 
     aten_ops, structural_ops, excluded_aten_ops = discover_operators()

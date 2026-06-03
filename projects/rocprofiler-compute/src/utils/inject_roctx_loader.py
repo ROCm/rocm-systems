@@ -618,6 +618,7 @@ def _try_jit_build(tag: str) -> Optional[types.ModuleType]:
         cache_dir / f"roctx_recordfn-{tag}.so",
     )
     _clear_jit_failure(tag)
+    shutil.rmtree(build_dir, ignore_errors=True)
 
     _safe_log("log", f"JIT-compiled roctx_recordfn.so for {tag}")
     return mod

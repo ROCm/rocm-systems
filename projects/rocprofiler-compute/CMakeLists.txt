@@ -862,6 +862,7 @@ install(
     COMPONENT main
     PATTERN "_build" EXCLUDE
     PATTERN "build" EXCLUDE
+    PATTERN "tests" EXCLUDE
     PATTERN "__pycache__" EXCLUDE
 )
 # src/roofline
