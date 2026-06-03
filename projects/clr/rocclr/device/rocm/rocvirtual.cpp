@@ -4668,8 +4668,14 @@ void VirtualGPU::submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) {
     // data dependency in the meantime.
     hsa_status_t s = hsa_amd_queue_wait_external_semaphore(
         gpu_queue_, *holder, cmd.fence());
-    if (s != HSA_STATUS_SUCCESS)
+    if (s != HSA_STATUS_SUCCESS) {
       LogError("Failed to wait on external semaphore");
+    } else {
+      // Barrier publishes the wait to cross-engine deps (dep_signal[]) so a
+      // later SDMA copy can't bypass it; acquire scope makes the producer's
+      // writes visible to GPU consumers.
+      dispatchBarrierPacket(kBarrierPacketAcquireHeader);
+    }
   }
 }
 
