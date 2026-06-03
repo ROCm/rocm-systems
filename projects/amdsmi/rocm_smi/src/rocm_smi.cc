@@ -1428,11 +1428,15 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type, rsmi_clk_type_
     }
   }
 
-  // Some older drivers will not have the current frequency set
-  // assert(f->current < f->num_supported);
+  // Some older drivers, and SMU power-gated domains on APUs (e.g. gfx1151
+  // SYS/DF/DCEF/SOC/MEM at idle), expose the supported DPM table in
+  // pp_dpm_* without flagging any level as current ('*' marker absent).
+  // Treat that as "current unknown" rather than discarding the parsed
+  // table: keep f->num_supported / f->frequency populated and signal
+  // "no current level" via f->current = -1 so callers can still report
+  // the frequency table.
   if (f->current >= f->num_supported) {
     f->current = -1;
-    return RSMI_STATUS_UNEXPECTED_DATA;
   }
 
   return RSMI_STATUS_SUCCESS;
