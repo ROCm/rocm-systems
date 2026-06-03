@@ -22,12 +22,12 @@
 
 // WINDOWS-DIVERGENCE: This file replaces the POSIX dlopen/dlsym/dlclose +
 // /proc/<pid>/maps machinery with the Win32 module loader and PSAPI module
-// enumeration. It is built only on Windows; loader_posix.cpp covers Linux.
+// enumeration. It is built only on Windows; gnulinux/loader.cpp covers Linux.
 
-#include "loader.hpp"
+#include "details/platform/loader.hpp"
 
 #include "details/filesystem.hpp"
-#include "encoding_win.hpp"
+#include "details/platform/windows/encoding.hpp"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #    define WIN32_LEAN_AND_MEAN

@@ -22,7 +22,7 @@
 
 #define GNU_SOURCE 1
 
-#include "loader.hpp"
+#include "details/platform/loader.hpp"
 
 #include "details/filesystem.hpp"
 #include "details/utility.hpp"

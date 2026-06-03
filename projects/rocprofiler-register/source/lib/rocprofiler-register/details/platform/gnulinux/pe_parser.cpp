@@ -25,7 +25,7 @@
 // (which reads /proc/self/maps). The functions defined here are stubs that
 // keep the header link-compatible across platforms.
 
-#include "pe_parser.hpp"
+#include "details/platform/pe_parser.hpp"
 
 namespace rocprofiler_register
 {

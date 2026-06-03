@@ -24,9 +24,9 @@
 // using VirtualQuery + EnumProcessModulesEx. Linux exposes this information via
 // /proc/self/maps; on Windows the equivalent metadata only comes from VirtualQuery.
 
-#include "pe_parser.hpp"
+#include "details/platform/pe_parser.hpp"
 
-#include "encoding_win.hpp"
+#include "details/platform/windows/encoding.hpp"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #    define WIN32_LEAN_AND_MEAN

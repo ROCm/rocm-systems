@@ -26,7 +26,7 @@ if(WIN32)
     # WINDOWS-DIVERGENCE: dl/rt are POSIX system libraries with no Windows
     # equivalent (the dynamic-loader functionality is in kernel32.dll, which
     # is implicitly linked, and the realtime extensions are subsumed by the
-    # standard CRT). The platform abstraction in details/platform/loader_win.cpp
+    # standard CRT). The platform abstraction in details/platform/windows/loader.cpp
     # links psapi directly via target_link_libraries; no foreach probing here.
     rocprofiler_register_target_compile_definitions(
         rocprofiler-register-dl INTERFACE ROCPROFILER_REGISTER_DL=0)
