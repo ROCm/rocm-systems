@@ -431,7 +431,9 @@ endif (NOT BUILD_TESTS_ONLY)
 ###############################################################################
 # TEST SUBDIRECTORIES
 ###############################################################################
-enable_testing()
+if(BUILD_CTESTS)
+    enable_testing()
+endif()
 add_subdirectory(tests)
 
 if (BUILD_EXAMPLES)

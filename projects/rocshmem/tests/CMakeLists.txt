@@ -23,7 +23,9 @@
 ###############################################################################
 
 # Enable testing at the top level
-enable_testing()
+if(BUILD_CTESTS)
+    enable_testing()
+endif()
 
 IF (BUILD_FUNCTIONAL_TESTS)
     add_subdirectory(functional_tests)
