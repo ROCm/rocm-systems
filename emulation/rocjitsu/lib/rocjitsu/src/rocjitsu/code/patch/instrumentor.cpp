@@ -23,7 +23,8 @@ namespace rocjitsu {
 namespace {
 
 void report(std::string *out, const char *msg) {
-  if (out) *out = msg;
+  if (out)
+    *out = msg;
 }
 
 // PC-relative instructions that may not surface in flags() or
@@ -40,14 +41,14 @@ constexpr std::string_view kRfePrefix = "s_rfe_";
 
 [[nodiscard]] bool is_denylisted_mnemonic(std::string_view mnemonic) {
   for (auto m : kPcRelativeDenylist)
-    if (mnemonic == m) return true;
-  if (mnemonic.size() >= kRfePrefix.size() &&
-      mnemonic.substr(0, kRfePrefix.size()) == kRfePrefix)
+    if (mnemonic == m)
+      return true;
+  if (mnemonic.size() >= kRfePrefix.size() && mnemonic.substr(0, kRfePrefix.size()) == kRfePrefix)
     return true;
   return false;
 }
 
-// Per-site result of patch_relocation_only's preflight: the chosen trampoline
+// Per-site result of Instrumentor::patch's preflight: the chosen trampoline
 // offset and the concrete bytes we'll splice in once all preflights succeed.
 struct AppliedSite {
   const ResolvedInstrumentationSite *site;
@@ -58,36 +59,34 @@ struct AppliedSite {
 } // namespace
 
 std::optional<ResolvedInstrumentationSite>
-validate_relocation_anchor(const Instruction &anchor, uint64_t anchor_offset,
-                           std::span<const uint8_t> text_bytes,
-                           const InstrumentationPoint &pt,
+validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
+                           std::span<const uint8_t> text_bytes, const InstrumentationPoint &pt,
                            [[maybe_unused]] rj_code_arch_t arch, std::string *error_out) {
   if (pt.filter_flags != 0) {
-    report(error_out, "InstrumentationPoint::filter_flags must be 0 in the inline-nop smoke build");
+    report(error_out, "InstrumentationPoint::filter_flags must be 0 in the inline-nop milestone");
     return std::nullopt;
   }
-  // TODO(future milestone): support AfterInst / BlockEntry / BlockExit.
+  // TODO: support AfterInst / BlockEntry / BlockExit.
   if (pt.kind != InstrumentationKind::BeforeInst) {
     report(error_out,
-           "InstrumentationPoint::kind must be BeforeInst in the inline-nop smoke build");
+           "InstrumentationPoint::kind must be BeforeInst in the inline-nop milestone");
     return std::nullopt;
   }
-  // TODO(future milestone): consume probe_obj / probe_symbol when probe-call
-  // trampolines are supported.
+  // TODO: consume probe_obj / probe_symbol when probe-call trampolines are
+  // supported.
   if (pt.probe_obj != nullptr) {
-    report(error_out, "InstrumentationPoint::probe_obj must be null in the inline-nop smoke build");
+    report(error_out, "InstrumentationPoint::probe_obj must be null in the inline-nop milestone");
     return std::nullopt;
   }
   if (!pt.probe_symbol.empty()) {
     report(error_out,
-           "InstrumentationPoint::probe_symbol must be empty in the inline-nop smoke build");
+           "InstrumentationPoint::probe_symbol must be empty in the inline-nop milestone");
     return std::nullopt;
   }
-  // TODO(future milestone): consume force_full_exec when EXEC policy
-  // management lands.
+  // TODO: consume force_full_exec when EXEC policy management is implemented
   if (pt.force_full_exec) {
     report(error_out,
-           "InstrumentationPoint::force_full_exec must be false in the inline-nop smoke build");
+           "InstrumentationPoint::force_full_exec must be false in the inline-nop milestone");
     return std::nullopt;
   }
   if (anchor_offset % sizeof(uint32_t) != 0) {
@@ -135,27 +134,25 @@ validate_relocation_anchor(const Instruction &anchor, uint64_t anchor_offset,
   return site;
 }
 
-bool validate_inline_nop_smoke_plan(const TrampolinePlan &plan, std::string *error_out) {
+bool validate_inline_nop_plan(const TrampolinePlan &plan, std::string *error_out) {
   if (!plan.emit_original) {
-    report(error_out,
-           "trampoline plan: emit_original must be true for the inline-nop smoke build");
+    report(error_out, "trampoline plan: emit_original must be true for the inline-nop milestone");
     return false;
   }
   if (!plan.after_items.empty()) {
-    report(error_out, "trampoline plan: after_items must be empty for the inline-nop smoke build");
+    report(error_out, "trampoline plan: after_items must be empty for the inline-nop milestone");
     return false;
   }
   if (plan.before_items.size() != 1 || plan.before_items[0].words.size() != 1 ||
       plan.before_items[0].words[0] != build_s_nop(0, plan.arch)) {
-    report(error_out,
-           "trampoline plan: before_items must be exactly { { s_nop 0 } } "
-           "for the inline-nop smoke build");
+    report(error_out, "trampoline plan: before_items must be exactly { { s_nop 0 } } "
+                      "for the inline-nop milestone");
     return false;
   }
   return true;
 }
 
-TrampolinePlan make_relocation_only_plan(const ResolvedInstrumentationSite &site,
+TrampolinePlan make_trampoline_plan(const ResolvedInstrumentationSite &site,
                                          rj_code_arch_t arch, uint64_t trampoline_offset) {
   TrampolinePlan plan;
   plan.arch = arch;
@@ -197,7 +194,8 @@ std::span<const std::unique_ptr<BasicBlock>> Instrumentor::owned_blocks() {
 }
 
 void Instrumentor::ensure_blocks_built() {
-  if (blocks_built_) return;
+  if (blocks_built_)
+    return;
   decoder_ = Decoder::create(arch_);
   blocks_ = BasicBlock::build(obj_, *decoder_);
   blocks_built_ = true;
@@ -209,7 +207,8 @@ const Instruction *Instrumentor::find_instruction_at_offset(uint64_t anchor_offs
       continue;
     uint64_t cur = block->start_offset();
     for (const Instruction &inst : block->instructions()) {
-      if (cur == anchor_offset) return &inst;
+      if (cur == anchor_offset)
+        return &inst;
       cur += static_cast<uint64_t>(inst.size());
     }
     return nullptr;
@@ -217,12 +216,13 @@ const Instruction *Instrumentor::find_instruction_at_offset(uint64_t anchor_offs
   return nullptr;
 }
 
-std::optional<uint64_t>
-Instrumentor::resolve_anchor_inst_to_offset(const Instruction *target, std::string *err) {
+std::optional<uint64_t> Instrumentor::resolve_anchor_inst_to_offset(const Instruction *target,
+                                                                    std::string *err) {
   for (const auto &block : blocks_) {
     uint64_t cur = block->start_offset();
     for (const Instruction &inst : block->instructions()) {
-      if (&inst == target) return cur;
+      if (&inst == target)
+        return cur;
       cur += static_cast<uint64_t>(inst.size());
     }
   }
@@ -242,19 +242,19 @@ Instrumentor::ResolveResult Instrumentor::resolve_and_validate() {
   // would need to identify which .text section they belong to.
   if (obj_.text_sections().size() > 1) {
     result.errors.emplace_back(
-        "code object has multiple .text sections; the inline-nop smoke build supports only one");
+        "code object has multiple .text sections; the inline-nop milestone supports only one");
     return result;
   }
   const Section *text = obj_.text_sections().front();
-  const std::span<const uint8_t> text_bytes(
-      reinterpret_cast<const uint8_t *>(text->data()), text->size());
+  const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
+                                            text->size());
 
   // All-or-nothing: per-point errors accumulate in `result.errors`; per-point
   // successes accumulate in `sites` but are only published to `result.sites`
   // if `errors` ends up empty. Multi-site callers therefore can't tell
   // *which* points succeeded when any fail — only the failures are itemized.
-  // Acceptable for PC01-A (single-site only); revisit if a future milestone
-  // exposes multi-site to callers.
+  // TODO: Currently only supporting single site so this is fine for now but
+  // revisit when exposing multi-site to callers.
   std::vector<ResolvedInstrumentationSite> sites;
   sites.reserve(points_.size());
   for (const auto &pt : points_) {
@@ -288,7 +288,7 @@ Instrumentor::ResolveResult Instrumentor::resolve_and_validate() {
     }
 
     std::string err;
-    auto site = validate_relocation_anchor(*anchor, offset, text_bytes, pt, arch_, &err);
+    auto site = validate_anchor(*anchor, offset, text_bytes, pt, arch_, &err);
     if (!site) {
       result.errors.push_back(std::move(err));
       continue;
@@ -296,28 +296,28 @@ Instrumentor::ResolveResult Instrumentor::resolve_and_validate() {
     sites.push_back(std::move(*site));
   }
 
-  if (result.errors.empty()) result.sites = std::move(sites);
+  if (result.errors.empty())
+    result.sites = std::move(sites);
   return result;
 }
 
-InstrumentedCodeObject Instrumentor::patch_relocation_only() {
+InstrumentedCodeObject Instrumentor::patch() {
   InstrumentedCodeObject result;
 
   if (patched_) {
-    result.errors.emplace_back(
-        "patch_relocation_only has already been called on this Instrumentor");
+    result.errors.emplace_back("Instrumentor::patch has already been called on this Instrumentor");
     return result;
   }
   patched_ = true;
 
-  // Inline-nop smoke restriction: exactly one queued point.
+  // Inline-nop milestone restriction: exactly one queued point.
   if (points_.empty()) {
-    result.errors.emplace_back("patch_relocation_only requires exactly one queued point; got zero");
+    result.errors.emplace_back("Instrumentor::patch requires exactly one queued point; got zero");
     return result;
   }
   if (points_.size() > 1) {
     result.errors.emplace_back(
-        "patch_relocation_only accepts only one queued point in the inline-nop smoke build");
+        "Instrumentor::patch accepts only one queued point in the inline-nop milestone");
     return result;
   }
 
@@ -329,10 +329,10 @@ InstrumentedCodeObject Instrumentor::patch_relocation_only() {
   const auto &sites = resolved.sites;
 
   // Construct the patcher and preflight builder output before mutating it.
-  // TODO(future cleanup): the "cave" terminology is inherited from the
-  // patcher API (originally added for DBT). For DBI the appended section is
-  // not really "unused space" — rename the patcher API to something like
-  // `appended_section_*` so DBI reads naturally too.
+  // TODO: The "cave" terminology is inherited from the patcher API (originally
+  // added for DBT). For DBI the appended section is not really "unused space".
+  // Rename the patcher API to something like `appended_section_*` so DBI
+  // reads naturally too.
   CodeObjectPatcher patcher(obj_);
   patcher.set_cave_start(patcher.text_size());
 
@@ -341,12 +341,13 @@ InstrumentedCodeObject Instrumentor::patch_relocation_only() {
   uint64_t cave_cursor = patcher.text_size();
   for (const auto &site : sites) {
     const uint64_t trampoline_offset = cave_cursor;
-    TrampolinePlan plan = make_relocation_only_plan(site, arch_, trampoline_offset);
-    // Defense-in-depth: make_relocation_only_plan always produces a
-    // canonical inline-nop smoke plan today, so this never fires in
-    // practice. If it does, that's a bug in plan construction.
+    TrampolinePlan plan = make_trampoline_plan(site, arch_, trampoline_offset);
+    // make_trampoline_plan always produces a canonical inline-nop plan today,
+    // but TrampolinePlan is a generic shape. Defense-in-depth check that we
+    // didn't accidentally feed a richer plan into a builder path that the
+    // milestone hasn't validated yet.
     std::string err;
-    if (!validate_inline_nop_smoke_plan(plan, &err)) {
+    if (!validate_inline_nop_plan(plan, &err)) {
       result.errors.push_back(std::move(err));
       return result;
     }
@@ -359,18 +360,16 @@ InstrumentedCodeObject Instrumentor::patch_relocation_only() {
     applied.push_back({&site, trampoline_offset, std::move(*bytes)});
   }
 
-  // Preflight invariant: every per-site validation, branch-range check, and
-  // trampoline-byte construction has succeeded before this point. The patcher
-  // is now mutated. `append_cave_section` below is the one operation that
-  // *can* still fail after mutation; in practice it only fails when the
-  // `.text` section header is missing, which was caught earlier by the
-  // `text_sections().empty()` check.
+  // Every per-site validation, branch-range check, and trampoline-byte
+  // construction has succeeded up to this point. Now time to patch.
+  // `append_cave_section` below could theoretically fail if the `.text`
+  // section is missing, but that should have been caught earlier.
   // Splice patched anchors into a local copy of .text, then overwrite once.
   const auto text_span = patcher.text_bytes();
   std::vector<uint8_t> local_text(text_span.begin(), text_span.end());
   for (const auto &a : applied) {
-    std::memcpy(local_text.data() + a.site->anchor_offset,
-                a.bytes.patched_anchor_bytes.data(), a.site->original_size);
+    std::memcpy(local_text.data() + a.site->anchor_offset, a.bytes.patched_anchor_bytes.data(),
+                a.site->original_size);
   }
   patcher.overwrite_text(local_text);
 

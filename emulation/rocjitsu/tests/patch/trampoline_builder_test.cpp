@@ -299,11 +299,11 @@ TEST(TrampolineBuilder, ReturnSimm16AtNegativeLimitSucceeds) {
             build_s_branch(std::numeric_limits<int16_t>::min(), kArch));
 }
 
-// NOTE: the inline-nop smoke guardrail used to live in TrampolineBuilder and
-// was tested here. It has been moved to the orchestrator boundary as
-// validate_inline_nop_smoke_plan() in instrumentor.h, and the test moved with
-// it (see InlineNopSmokeGuardrail.* in instrumentor_test.cpp). The builder is
-// now generic and accepts any well-formed plan; milestone-scoped restrictions
+// NOTE: the inline-nop guardrail used to live in TrampolineBuilder and was
+// tested here. It has been moved to the orchestrator boundary as
+// validate_inline_nop_plan() in instrumentor.h, and the test moved with it
+// (see InlineNopGuardrail.* in instrumentor_test.cpp). The builder is now
+// generic and accepts any well-formed plan; milestone-scoped restrictions
 // are the orchestrator's responsibility.
 
 } // namespace

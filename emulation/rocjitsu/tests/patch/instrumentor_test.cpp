@@ -52,7 +52,7 @@ std::vector<uint8_t> dummy_text(size_t size = 16) {
 }
 
 //==============================================================================
-// Section 1: validate_relocation_anchor (synthetic)
+// Section 1: validate_anchor (synthetic)
 //==============================================================================
 
 TEST(Validator, AcceptsFourByteRelocatable) {
@@ -62,7 +62,7 @@ TEST(Validator, AcceptsFourByteRelocatable) {
   InstrumentationPoint pt;
 
   std::string err;
-  auto site = validate_relocation_anchor(anchor, /*anchor_offset=*/0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err);
+  auto site = validate_anchor(anchor, /*anchor_offset=*/0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err);
   ASSERT_TRUE(site.has_value()) << err;
   EXPECT_EQ(site->original_size, 4u);
   EXPECT_EQ(site->original_bytes.size(), 4u);
@@ -77,7 +77,7 @@ TEST(Validator, AcceptsEightByteRelocatable) {
   InstrumentationPoint pt;
 
   std::string err;
-  auto site = validate_relocation_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err);
+  auto site = validate_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err);
   ASSERT_TRUE(site.has_value()) << err;
   EXPECT_EQ(site->original_size, 8u);
   EXPECT_EQ(site->original_bytes.size(), 8u);
@@ -90,7 +90,7 @@ TEST(Validator, RejectsNonZeroFilterFlags) {
   InstrumentationPoint pt;
   pt.filter_flags = 1;
   std::string err;
-  EXPECT_FALSE(validate_relocation_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value());
+  EXPECT_FALSE(validate_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value());
   EXPECT_FALSE(err.empty());
 }
 
@@ -109,7 +109,7 @@ TEST(Validator, RejectsControlFlowFlags) {
   for (auto [name, flag] : cases) {
     TestInstruction anchor("test_inst", 4, flag, std::nullopt, &kRaw);
     std::string err;
-    EXPECT_FALSE(validate_relocation_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value())
+    EXPECT_FALSE(validate_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value())
         << "flag " << name << " should be rejected";
     EXPECT_FALSE(err.empty());
   }
@@ -121,7 +121,7 @@ TEST(Validator, RejectsNonNullBranchOffsetBytes) {
   auto text = dummy_text();
   InstrumentationPoint pt;
   std::string err;
-  EXPECT_FALSE(validate_relocation_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value());
+  EXPECT_FALSE(validate_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value());
   EXPECT_FALSE(err.empty());
 }
 
@@ -130,7 +130,7 @@ TEST(Validator, RejectsNullRawEncoding) {
   auto text = dummy_text();
   InstrumentationPoint pt;
   std::string err;
-  EXPECT_FALSE(validate_relocation_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value());
+  EXPECT_FALSE(validate_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value());
   EXPECT_FALSE(err.empty());
 }
 
@@ -140,7 +140,7 @@ TEST(Validator, RejectsUnsupportedSize) {
   auto text = dummy_text();
   InstrumentationPoint pt;
   std::string err;
-  EXPECT_FALSE(validate_relocation_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value());
+  EXPECT_FALSE(validate_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value());
   EXPECT_FALSE(err.empty());
 }
 
@@ -151,7 +151,7 @@ TEST(Validator, RejectsUnalignedOffset) {
   InstrumentationPoint pt;
   std::string err;
   EXPECT_FALSE(
-      validate_relocation_anchor(anchor, /*anchor_offset=*/2, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value());
+      validate_anchor(anchor, /*anchor_offset=*/2, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value());
   EXPECT_FALSE(err.empty());
 }
 
@@ -162,7 +162,7 @@ TEST(Validator, RejectsOutOfBoundsOffset) {
   InstrumentationPoint pt;
   std::string err;
   EXPECT_FALSE(
-      validate_relocation_anchor(anchor, /*anchor_offset=*/4, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value());
+      validate_anchor(anchor, /*anchor_offset=*/4, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value());
   EXPECT_FALSE(err.empty());
 }
 
@@ -176,7 +176,7 @@ TEST(Validator, RejectsNonBeforeInstKind) {
     InstrumentationPoint pt;
     pt.kind = kind;
     std::string err;
-    EXPECT_FALSE(validate_relocation_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value())
+    EXPECT_FALSE(validate_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value())
         << "kind != BeforeInst must be rejected";
     EXPECT_FALSE(err.empty());
   }
@@ -193,7 +193,7 @@ TEST(Validator, RejectsNonNullProbeObj) {
   pt.probe_obj = kSentinel;
 
   std::string err;
-  EXPECT_FALSE(validate_relocation_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value());
+  EXPECT_FALSE(validate_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value());
   EXPECT_FALSE(err.empty());
 }
 
@@ -205,7 +205,7 @@ TEST(Validator, RejectsNonEmptyProbeSymbol) {
   pt.probe_symbol = "my_probe";
 
   std::string err;
-  EXPECT_FALSE(validate_relocation_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value());
+  EXPECT_FALSE(validate_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value());
   EXPECT_FALSE(err.empty());
 }
 
@@ -217,7 +217,7 @@ TEST(Validator, RejectsForceFullExec) {
   pt.force_full_exec = true;
 
   std::string err;
-  EXPECT_FALSE(validate_relocation_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value());
+  EXPECT_FALSE(validate_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value());
   EXPECT_FALSE(err.empty());
 }
 
@@ -231,20 +231,20 @@ TEST(Validator, RejectsDenylistedMnemonic) {
                         "s_rfe_b64"}) {
     TestInstruction anchor(m, 4, /*flags=*/0, std::nullopt, &kRaw);
     std::string err;
-    EXPECT_FALSE(validate_relocation_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value())
+    EXPECT_FALSE(validate_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value())
         << "mnemonic " << m << " should be rejected";
     EXPECT_FALSE(err.empty());
   }
 }
 
 //==============================================================================
-// Section 1b: validate_inline_nop_smoke_plan
+// Section 1b: validate_inline_nop_plan
 //
 // This guardrail used to live in TrampolineBuilder. It now lives at the
 // orchestrator boundary so the builder stays generic. Tests moved with it.
 //==============================================================================
 
-TEST(InlineNopSmokeGuardrail, RejectsNonCanonicalBody) {
+TEST(InlineNopGuardrail, RejectsNonCanonicalBody) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
 
   auto valid_plan = [&] {
@@ -262,14 +262,14 @@ TEST(InlineNopSmokeGuardrail, RejectsNonCanonicalBody) {
 
   // Sanity: the unmutated plan is accepted, so each sub-case below is
   // exercising exactly one guardrail dimension.
-  ASSERT_TRUE(validate_inline_nop_smoke_plan(valid_plan()));
+  ASSERT_TRUE(validate_inline_nop_plan(valid_plan()));
 
   // Extra before-item.
   {
     auto plan = valid_plan();
     plan.before_items.push_back(InlineAsmItem{{build_s_nop(0, kArch)}});
     std::string err;
-    EXPECT_FALSE(validate_inline_nop_smoke_plan(plan, &err))
+    EXPECT_FALSE(validate_inline_nop_plan(plan, &err))
         << "extra before-item must be rejected";
     EXPECT_FALSE(err.empty());
   }
@@ -279,7 +279,7 @@ TEST(InlineNopSmokeGuardrail, RejectsNonCanonicalBody) {
     auto plan = valid_plan();
     plan.before_items = {InlineAsmItem{{build_s_branch(0, kArch)}}};
     std::string err;
-    EXPECT_FALSE(validate_inline_nop_smoke_plan(plan, &err))
+    EXPECT_FALSE(validate_inline_nop_plan(plan, &err))
         << "non-placeholder before-item must be rejected";
     EXPECT_FALSE(err.empty());
   }
@@ -289,7 +289,7 @@ TEST(InlineNopSmokeGuardrail, RejectsNonCanonicalBody) {
     auto plan = valid_plan();
     plan.after_items.push_back(InlineAsmItem{{build_s_nop(0, kArch)}});
     std::string err;
-    EXPECT_FALSE(validate_inline_nop_smoke_plan(plan, &err))
+    EXPECT_FALSE(validate_inline_nop_plan(plan, &err))
         << "non-empty after_items must be rejected";
     EXPECT_FALSE(err.empty());
   }
@@ -299,14 +299,14 @@ TEST(InlineNopSmokeGuardrail, RejectsNonCanonicalBody) {
     auto plan = valid_plan();
     plan.emit_original = false;
     std::string err;
-    EXPECT_FALSE(validate_inline_nop_smoke_plan(plan, &err))
+    EXPECT_FALSE(validate_inline_nop_plan(plan, &err))
         << "emit_original = false must be rejected";
     EXPECT_FALSE(err.empty());
   }
 }
 
 //==============================================================================
-// Section 2: make_relocation_only_plan
+// Section 2: make_trampoline_plan
 //==============================================================================
 
 TEST(MakeRelocationOnlyPlan, FillsCanonicalBodyAndCopiesSiteFields) {
@@ -318,7 +318,7 @@ TEST(MakeRelocationOnlyPlan, FillsCanonicalBodyAndCopiesSiteFields) {
   site.mnemonic = "buffer_load_dword";
 
   const uint64_t kTrampolineOffset = 0x400;
-  TrampolinePlan plan = make_relocation_only_plan(site, kArch, kTrampolineOffset);
+  TrampolinePlan plan = make_trampoline_plan(site, kArch, kTrampolineOffset);
 
   EXPECT_EQ(plan.arch, kArch);
   EXPECT_EQ(plan.anchor_offset, 0x100u);
@@ -671,7 +671,7 @@ TEST(Instrumentor, MutuallyExclusiveAnchorFieldsFails) {
 }
 
 //==============================================================================
-// Section 4: Instrumentor::patch_relocation_only end-to-end
+// Section 4: Instrumentor::patch end-to-end
 //
 // The synthetic ELF places .text at file offset 0x100 with two s_nop 0
 // instructions (size = 8 bytes total). Patching the second instruction at
@@ -691,7 +691,7 @@ TEST(InstrumentorPatch, EmitsValidElfWithExpectedPatchSummary) {
   Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instrumentor.add_point_by_offset(/*anchor_offset=*/4);
 
-  auto result = instrumentor.patch_relocation_only();
+  auto result = instrumentor.patch();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
   EXPECT_FALSE(result.elf_bytes.empty());
@@ -725,7 +725,7 @@ TEST(InstrumentorPatch, RejectsZeroQueuedPoints) {
   Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_CDNA4);
   // No points queued.
 
-  auto result = instrumentor.patch_relocation_only();
+  auto result = instrumentor.patch();
   EXPECT_TRUE(result.elf_bytes.empty());
   EXPECT_TRUE(result.patches.empty());
   EXPECT_FALSE(result.errors.empty());
@@ -738,7 +738,7 @@ TEST(InstrumentorPatch, RejectsMoreThanOneQueuedPoint) {
   instrumentor.add_point_by_offset(0);
   instrumentor.add_point_by_offset(4);
 
-  auto result = instrumentor.patch_relocation_only();
+  auto result = instrumentor.patch();
   EXPECT_TRUE(result.elf_bytes.empty());
   EXPECT_TRUE(result.patches.empty());
   EXPECT_FALSE(result.errors.empty());
@@ -751,7 +751,7 @@ TEST(InstrumentorPatch, ValidationFailurePropagates) {
   // Unaligned offset — validator rejects.
   instrumentor.add_point_by_offset(/*anchor_offset=*/2);
 
-  auto result = instrumentor.patch_relocation_only();
+  auto result = instrumentor.patch();
   EXPECT_TRUE(result.elf_bytes.empty());
   EXPECT_TRUE(result.patches.empty());
   EXPECT_FALSE(result.errors.empty());
@@ -763,11 +763,11 @@ TEST(InstrumentorPatch, IsSingleCall) {
   Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instrumentor.add_point_by_offset(4);
 
-  auto first = instrumentor.patch_relocation_only();
+  auto first = instrumentor.patch();
   ASSERT_TRUE(first.errors.empty()) << first.errors.front();
   EXPECT_FALSE(first.elf_bytes.empty());
 
-  auto second = instrumentor.patch_relocation_only();
+  auto second = instrumentor.patch();
   EXPECT_TRUE(second.elf_bytes.empty());
   EXPECT_TRUE(second.patches.empty());
   EXPECT_FALSE(second.errors.empty());
@@ -781,12 +781,12 @@ TEST(InstrumentorPatch, FailedFirstCallStillBurnsSingleAttemptBudget) {
   AmdGpuCodeObject obj(image.data(), image.size());
   Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_CDNA4);
   // First call: no queued points — fatal error.
-  auto first = instrumentor.patch_relocation_only();
+  auto first = instrumentor.patch();
   ASSERT_FALSE(first.errors.empty()) << "first call must fail with zero points";
 
   // Try to recover by queueing a valid point and calling again.
   instrumentor.add_point_by_offset(4);
-  auto second = instrumentor.patch_relocation_only();
+  auto second = instrumentor.patch();
   EXPECT_TRUE(second.elf_bytes.empty()) << "single-attempt budget must already be spent";
   EXPECT_TRUE(second.patches.empty());
   EXPECT_FALSE(second.errors.empty());
@@ -803,7 +803,7 @@ TEST(InstrumentorPatch, RejectsMultiTextCodeObject) {
 
   Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instrumentor.add_point_by_offset(0);
-  auto result = instrumentor.patch_relocation_only();
+  auto result = instrumentor.patch();
   EXPECT_TRUE(result.elf_bytes.empty());
   EXPECT_TRUE(result.patches.empty());
   EXPECT_FALSE(result.errors.empty());
@@ -812,7 +812,7 @@ TEST(InstrumentorPatch, RejectsMultiTextCodeObject) {
 // Branch-range overflow at the orchestrator level. The trampoline is placed
 // at .text_size; with anchor at offset 0 we need .text_size > 131072 to push
 // forward_simm16 past INT16_MAX. .text_size = 131076 gives forward_simm16 =
-// 32768 → overflow. The builder returns an error; patch_relocation_only must
+// 32768 → overflow. The builder returns an error; Instrumentor::patch must
 // surface it and emit no ELF.
 TEST(InstrumentorPatch, BranchRangeOverflowPropagatesAsFatalError) {
   // 32769 × 4 = 131076 bytes of s_nop in .text.
@@ -822,7 +822,7 @@ TEST(InstrumentorPatch, BranchRangeOverflowPropagatesAsFatalError) {
 
   Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instrumentor.add_point_by_offset(/*anchor_offset=*/0);
-  auto result = instrumentor.patch_relocation_only();
+  auto result = instrumentor.patch();
 
   EXPECT_TRUE(result.elf_bytes.empty()) << "overflow must not leak a half-built ELF";
   EXPECT_TRUE(result.patches.empty());
@@ -848,7 +848,7 @@ protected:
 
     Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_CDNA4);
     instrumentor.add_point_by_offset(/*anchor_offset=*/4);
-    result_ = instrumentor.patch_relocation_only();
+    result_ = instrumentor.patch();
     ASSERT_TRUE(result_.errors.empty())
         << (result_.errors.empty() ? std::string{} : result_.errors.front());
     ASSERT_FALSE(result_.elf_bytes.empty());
@@ -938,7 +938,7 @@ protected:
 
     Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_CDNA4);
     instrumentor.add_point_by_offset(/*anchor_offset=*/4);
-    result_ = instrumentor.patch_relocation_only();
+    result_ = instrumentor.patch();
     ASSERT_TRUE(result_.errors.empty())
         << (result_.errors.empty() ? std::string{} : result_.errors.front());
     ASSERT_FALSE(result_.elf_bytes.empty());
