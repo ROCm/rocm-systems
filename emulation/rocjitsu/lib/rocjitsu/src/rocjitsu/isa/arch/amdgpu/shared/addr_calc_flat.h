@@ -61,11 +61,17 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
       saddr_val = cu.read_sgpr(sb);
     }
     uint32_t lane_stride = wf.scratch_lane_size();
+    bool has_vaddr = true;
+    if constexpr (requires { inst.sve; })
+      has_vaddr = (inst.sve == 1);
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(exec & (1ULL << lane)))
         continue;
-      uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
-      uint32_t vaddr = cu.read_vgpr(vbase, lane);
+      uint32_t vaddr = 0;
+      if (has_vaddr) {
+        uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
+        vaddr = cu.read_vgpr(vbase, lane);
+      }
       d.per_lane_addr[lane] =
           scratch_base + static_cast<uint64_t>(lane) * lane_stride + vaddr + saddr_val + offset;
     }

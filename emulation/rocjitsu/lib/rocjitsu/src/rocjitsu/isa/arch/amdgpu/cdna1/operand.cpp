@@ -1118,6 +1118,10 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
 namespace {
 
 uint32_t resolve_src_scalar(const amdgpu::Wavefront &wf, int ev) {
+  if (ev == 102)
+    return static_cast<uint32_t>(wf.scratch_base());
+  if (ev == 103)
+    return static_cast<uint32_t>(wf.scratch_base() >> 32);
   if (ev <= 105)
     return wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
   if (ev == 106)
@@ -1183,6 +1187,8 @@ bool can_resolve_src_scalar(int ev) {
 }
 
 uint64_t resolve_src_scalar64(const amdgpu::Wavefront &wf, int ev) {
+  if (ev == 102)
+    return wf.scratch_base();
   if (ev <= 105) {
     uint32_t lo = wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
     uint32_t hi = wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));
@@ -1226,6 +1232,16 @@ uint64_t resolve_src_scalar64(const amdgpu::Wavefront &wf, int ev) {
 }
 
 void resolve_dst_write(amdgpu::Wavefront &wf, int ev, uint32_t val) {
+  if (ev == 102) {
+    uint64_t sb = wf.scratch_base();
+    wf.set_scratch_base((sb & 0xFFFFFFFF00000000ULL) | val);
+    return;
+  }
+  if (ev == 103) {
+    uint64_t sb = wf.scratch_base();
+    wf.set_scratch_base((sb & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));
+    return;
+  }
   if (ev <= 105) {
     wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);
     return;
@@ -1254,6 +1270,10 @@ void resolve_dst_write(amdgpu::Wavefront &wf, int ev, uint32_t val) {
 }
 
 void resolve_dst_write64(amdgpu::Wavefront &wf, int ev, uint64_t val) {
+  if (ev == 102) {
+    wf.set_scratch_base(val);
+    return;
+  }
   if (ev <= 105) {
     wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev),
                        static_cast<uint32_t>(val));
