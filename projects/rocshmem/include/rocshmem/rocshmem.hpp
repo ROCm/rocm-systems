@@ -311,6 +311,11 @@ __host__ int rocshmem_buffer_register(void *addr, size_t length);
 __host__ int rocshmem_buffer_unregister(void *addr);
 
 /**
+ * @brief Deregisters all previously registered user memory
+ */
+__host__ void rocshmem_buffer_unregister_all();
+
+/**
  * @brief Query for the number of PEs.
  *
  * @return Number of PEs.

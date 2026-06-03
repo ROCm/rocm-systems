@@ -604,6 +604,11 @@ __host__ int rocshmem_buffer_unregister(void *addr) {
   return backend->buffer_unregister(addr);
 }
 
+__host__ void rocshmem_buffer_unregister_all() {
+  VERIFY_BACKEND();
+  backend->buffer_unregister_all();
+}
+
 [[maybe_unused]] __host__ void rocshmem_free(void *ptr) {
   VERIFY_BACKEND();
 

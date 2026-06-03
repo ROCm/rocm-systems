@@ -131,3 +131,12 @@ Deregisters a previously registered buffer that was registered using
 `rocshmem_buffer_register`.
 Currently, this call is only implemented for IPC and RO, GDA is
 not supported.
+
+ROCSHMEM_BUFFER_UNREGISTER_ALL
+------------------------------
+
+.. cpp:function:: __host__ void rocshmem_buffer_unregister_all();
+
+**Description:**
+Deregisters all buffers that were previously registered using
+`rocshmem_buffer_register`.
