@@ -55,7 +55,6 @@ class RocprofsysConfig:
     rocprofsys_causal: Path
     rocprofsys_avail: Path
     rocprofsys_attach: Optional[Path]
-    rocm_path: Path
     rocm_path: Optional[Path]
     rocprofsys_lib_dir: Path
     rocprofsys_bin_dir: Path
@@ -407,7 +406,6 @@ def _find_rocprofsys_core_executables(
     rocprof_run = _find_executable("rocprof-sys-run", search_paths)
     rocprof_causal = _find_executable("rocprof-sys-causal", search_paths)
     rocprof_avail = _find_executable("rocprof-sys-avail", search_paths)
-    rocprof_attach = _find_executable("rocprof-sys-attach", search_paths)
 
     required_executables = {
         "rocprof-sys-instrument": rocprof_instrument,
@@ -424,8 +422,7 @@ def _find_rocprofsys_core_executables(
             f"Searched in: {search_paths}"
         )
 
-    # rocprof-sys-attach is optional: tests that need it should skip when None.
-    return {**required_executables, "rocprof-sys-attach": rocprof_attach}
+    return required_executables
 
 
 def _find_rocprofsys_python(
@@ -562,6 +559,8 @@ def discover_install_config(
 
     search_paths = [bin_dir]
     sys_execs = _find_rocprofsys_core_executables(search_paths)
+    # rocprof-sys-attach is optional: tests that need it should skip when None.
+    rocprof_attach = _find_executable("rocprof-sys-attach", search_paths)
     rocprofsys_python, rocprofsys_site_packages = _find_rocprofsys_python(
         search_paths, install_dir
     )
@@ -573,7 +572,7 @@ def discover_install_config(
         rocprofsys_sample=sys_execs["rocprof-sys-sample"],
         rocprofsys_causal=sys_execs["rocprof-sys-causal"],
         rocprofsys_avail=sys_execs["rocprof-sys-avail"],
-        rocprofsys_attach=sys_execs["rocprof-sys-attach"],
+        rocprofsys_attach=rocprof_attach,
         rocm_path=rocm_path,
         rocprofsys_lib_dir=lib_dir,
         rocprofsys_bin_dir=bin_dir,
@@ -656,6 +655,8 @@ def discover_build_config(
 
     search_paths = [bin_dir]
     sys_execs = _find_rocprofsys_core_executables(search_paths)
+    # rocprof-sys-attach is optional: tests that need it should skip when None.
+    rocprof_attach = _find_executable("rocprof-sys-attach", search_paths)
     rocprofsys_python, rocprofsys_site_packages = _find_rocprofsys_python(
         search_paths, build_dir
     )
@@ -676,7 +677,7 @@ def discover_build_config(
         rocprofsys_sample=sys_execs["rocprof-sys-sample"],
         rocprofsys_causal=sys_execs["rocprof-sys-causal"],
         rocprofsys_avail=sys_execs["rocprof-sys-avail"],
-        rocprofsys_attach=sys_execs["rocprof-sys-attach"],
+        rocprofsys_attach=rocprof_attach,
         rocm_path=rocm_path,
         rocprofsys_lib_dir=lib_dir,
         rocprofsys_bin_dir=bin_dir,

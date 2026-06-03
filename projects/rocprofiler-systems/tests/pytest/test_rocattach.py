@@ -19,21 +19,10 @@ from pathlib import Path
 import pytest
 
 pytestmark = [
+    pytest.mark.rocattach,
     pytest.mark.gpu,
     pytest.mark.attach,
-    pytest.mark.ci_enable,
 ]
-
-
-def _ptrace_scope_permissive() -> bool:
-    """Return True when the kernel allows non-parent ptrace attach."""
-    scope_path = Path("/proc/sys/kernel/yama/ptrace_scope")
-    if not scope_path.exists():
-        return True
-    try:
-        return scope_path.read_text().strip() == "0"
-    except OSError:
-        return False
 
 
 @pytest.mark.parametrize("n_sessions", [1, 2, 3])
@@ -50,16 +39,11 @@ class TestRocattach:
         self,
         n_sessions: int,
         rocprof_config,
-        gpu_info,
         test_output_dir: Path,
     ) -> None:
         """Run N attach sessions sequentially against a single transpose process."""
         if rocprof_config.rocprofsys_attach is None:
-            pytest.skip("rocprof-sys-attach binary not built")
-        if not gpu_info.available:
-            pytest.skip("no GPU available")
-        if not _ptrace_scope_permissive():
-            pytest.skip("kernel.yama.ptrace_scope != 0")
+            pytest.skip("rocprof-sys-attach binary not found")
 
         try:
             transpose = rocprof_config.get_target_executable("transpose")

@@ -353,6 +353,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "selective_regions",
         "minimal",
         "rank_filter",
+        "rocattach",
     ]
     for label in non_functional_markers + generic_functional_markers:
         config.addinivalue_line("markers", f"{label}: label test as {label}")
