@@ -1,45 +1,35 @@
-defaults:
-  numbered: false
 root: index
 subtrees:
-
-- entries:
-  - file: introduction.rst
-    title: Introduction
-
-- caption: Build and install
-  entries:
-  - file: config_build.rst
-    title: Configure and build
-  - file: sanitizers.rst
-    title: Sanitizers
-
-- caption: Using hipFile
-  entries:
-  - file: hipify.rst
-    title: hipify
-  - file: nvidia_compat.rst
-    title: cuFile compatibility
-  - file: fio.rst
-    title: fio support
-  - file: stats_collection.rst
-    title: Collecting statistics
-
-- caption: API reference
-  entries:
-  - file: api/errors.rst
-    title: Errors
-  - file: api/core.rst
-    title: Core
-  - file: api/driver.rst
-    title: Drivers
-  - file: api/file.rst
-    title: File operations
-  - file: api/async.rst
-    title: Asynchronous operations
-  - file: api/batch.rst
-    title: Batch operations
-  - file: api/rdma.rst
-    title: RDMA
-  - file: api/misc_api.rst
-    title: Other
+  - caption: Install
+    entries:
+      - file: install/install
+      - file: install/build-from-source
+      - file: install/python-bindings
+  - caption: Conceptual
+    entries:
+      - file: conceptual/io-backends
+      - file: conceptual/filesystem-requirements
+      - file: conceptual/driver-lifecycle
+      - file: conceptual/statistics-collection
+      - file: conceptual/nvidia-compatibility
+  - caption: How to
+    entries:
+      - file: how-to/register-file-and-buffer
+      - file: how-to/configure-io-backend
+      - file: how-to/collect-io-statistics
+  - caption: Tutorials
+    entries:
+      - file: tutorials/copy-a-file
+      - file: tutorials/get-version
+      - file: tutorials/python-gpu-io
+  - caption: Reference
+    entries:
+      - file: reference/cmake-options
+      - file: reference/environment-variables
+      - file: reference/api-reference
+      - file: reference/error-codes
+      - file: reference/python-api-reference
+      - file: reference/ais-stats-tool
+  - caption: About
+    entries:
+      - file: license
