@@ -296,6 +296,7 @@ set(SRC_FILES
   include/plugin/nccl_gin.h
   include/plugin/gin/gin_v11.h
   include/plugin/gin/gin_v12.h
+  include/plugin/gin/gin_v13.h
   misc/alt_rsmi.cc
   misc/archinfo.cc
   misc/argcheck.cc
@@ -362,6 +363,7 @@ set(SRC_FILES
   plugin/gin.cc
   plugin/gin/gin_v11.cc
   plugin/gin/gin_v12.cc
+  plugin/gin/gin_v13.cc
   ras/client.cc
   ras/client_support.cc
   ras/collectives.cc
