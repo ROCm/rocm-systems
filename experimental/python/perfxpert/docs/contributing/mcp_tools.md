@@ -2,70 +2,95 @@
 
 ## What you're adding
 
-A wrapper that exposes a perfxpert tool to external clients (Claude Desktop,
-Cursor, etc.) via the Model Context Protocol. MCP tools must preserve the
-`READ_ONLY` class invariant — no `EXECUTION` tools are exposed.
+A deterministic PerfXpert tool that is safe for external clients
+(Claude Desktop, Cursor, Codex, Gemini, opencode, etc.) to call through
+the Model Context Protocol. The MCP server does not have hand-written
+per-tool wrappers; it auto-discovers READ_ONLY callables at startup.
+
+Source of truth:
+
+- Discovery: `mcp_server/_registry.py::discover_read_only_tools`
+- Server: `mcp_server/server.py`
+- Tool class marker: `perfxpert/tools/_class.py`
 
 ## File locations
 
-- MCP server: `mcp_server/`
-- Tool wrapper: `mcp_server/tools/<name>.py`
-- Tests: `tests/test_mcp/test_<name>.py`
+- Implementation: `perfxpert/tools/<module>.py`
+- Tests: `tests/test_tools/test_<module>.py`
+- MCP exposure policy: `tests/test_integration/test_mcp_exposure.py`
+- Public inventory docs: `docs/integration/mcp-server.md`
+
+There is no `mcp_server/tools/<name>.py` wrapper directory in the current
+implementation. Adding a public MCP tool means adding or updating a
+`perfxpert.tools.*` function and marking it READ_ONLY.
 
 ## Key constraint
 
-**Only `READ_ONLY` tools are exposed via MCP.** `EXECUTION` tools must remain
-in-process only. CI enforces this via `tests/test_integration/test_mcp_exposure.py`.
+**Only `READ_ONLY` tools are exposed via MCP.** `EXECUTION` tools must
+remain in-process only. CI enforces this via
+`tests/test_integration/test_mcp_exposure.py`.
+
+The registry walks `perfxpert.tools.*` recursively, skips private /
+internal modules listed in `_SKIP_MODULES`, and registers public
+functions whose `__tool_class__` is `ToolClass.READ_ONLY`. If a function
+sets `__tool_name__`, that value becomes the MCP registry key;
+otherwise the key is `<module_path>.<function>`.
 
 ## Template
 
 ```python
-# SKIP-SAMPLE — template: <name> is a placeholder
-"""<name> MCP tool wrapper."""
+# SKIP-SAMPLE — template: <module> and fields are placeholders
+"""<module> — <one-line purpose>.
+
+Tool class: READ_ONLY (MCP-safe).
+"""
 
 from typing import Any, Dict
 
-import mcp.types as types
-from mcp.server import RequestContext
-
-from perfxpert.tools import my_read_only_tool
+from perfxpert.tools._class import ToolClass, tool_class
 
 
-async def handle_name(
-    context: RequestContext,
-    **kwargs: Any
-) -> list[types.TextContent | types.ImageContent]:
-    """MCP handler for <name>."""
-    try:
-        result = my_read_only_tool(**kwargs)
-        return [types.TextContent(type="text", text=str(result))]
-    except Exception as e:
-        return [types.TextContent(type="text", text=f"Error: {e}")]
+@tool_class(ToolClass.READ_ONLY)
+def my_tool(arg: str) -> Dict[str, Any]:
+    """Return deterministic analysis for arg.
+
+    Args:
+        arg: Input identifier to analyze.
+
+    Returns:
+        JSON-serializable analysis dictionary.
+    """
+    return {"arg": arg, "status": "ok"}
 ```
 
 ## Registration
 
-Add to MCP server tool list:
+No manual registration step is required. On every `perfxpert-mcp` boot,
+`discover_read_only_tools()` imports `perfxpert.tools.*`, finds public
+READ_ONLY functions, and exposes them on the MCP wire with dots replaced
+by underscores. For example:
 
-```python
-# SKIP-SAMPLE — template: `server` and `handle_tool_call` are placeholders
-server.set_request_handler(
-    types.messages.CallToolRequest,
-    lambda ctx, req: handle_tool_call(ctx, req)
-)
+```text
+gpu_discovery.discover_runtime_gpu_specs
 ```
 
-## Schema constraints (CI-enforced)
+appears to MCP clients as:
 
-- Wrapping tool must have `ToolClass.READ_ONLY` set
-- MCP exposure test (`test_mcp_exposure.py`) verifies no `EXECUTION` tools leak
-- Type hints on wrapper args + return
+```text
+gpu_discovery_discover_runtime_gpu_specs
+```
+
+Some clients additionally prefix the server name in their UI or tool-call
+syntax (for example `mcp__perfxpert__...`).
 
 ## Tests you must add
 
-- `test_<name>_mcp_wraps_read_only_tool()` — class invariant
-- `test_<name>_returns_valid_mcp_content()` — output shape
-- `test_<name>_handles_error()` — error path
+- `test_<module>_returns_expected_shape()` — happy path
+- `test_<module>_handles_bad_input()` — error path
+- `test_<module>_is_read_only_class()` — MCP exposure policy
+- Update / rely on `test_mcp_exposure.py` so no EXECUTION tools leak
+- If the public inventory changed, update
+  `docs/integration/mcp-server.md`
 
 ## Review requirements
 
@@ -75,12 +100,18 @@ server.set_request_handler(
 
 ## Common pitfalls
 
-- Don't wrap EXECUTION tools — they must stay in-process
-- MCP responses are text + images only — complex types must serialize to JSON
-- Error messages should not leak internal details
+- Do not wrap EXECUTION tools. Profiling, patching, compiling, and test
+  anchors stay in-process.
+- Return JSON-serializable data. The MCP server serializes the result
+  into text content.
+- Do not add side effects to a READ_ONLY tool; SQL reads and knowledge
+  YAML loads are fine, filesystem writes and live profiling are not.
+- Keep the docs snapshot in `docs/integration/mcp-server.md` current if
+  the tool count or public inventory changes.
 
 ## Related docs
 
-- Design spec: Appendix A (tool-class split)
+- [MCP server](../integration/mcp-server.md)
+- [New tool guide](tools.md)
 - MCP spec: https://modelcontextprotocol.io/
 - Exposure test: `tests/test_integration/test_mcp_exposure.py`

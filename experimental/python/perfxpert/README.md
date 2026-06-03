@@ -145,7 +145,7 @@ flowchart TD
 
   knowledge["Deterministic tools + validated knowledge YAMLs<br/>classifiers, counters, hardware facts, trace diff"]
   gates["Correctness middleware<br/>gate_cascade + intent router"]
-  readonly["56 READ_ONLY MCP tools<br/>8 agent tools + 47 classifier/knowledge tools + 1 diff tool"]
+  readonly["57 READ_ONLY MCP tools<br/>8 agent tools + 48 classifier/knowledge tools + 1 diff tool"]
 
   analyze --> runtime
   code --> runtime
@@ -210,7 +210,7 @@ an [RFC](docs/rfcs/README.md).
     - [BackendAdapter protocol (multi-backend launcher)](docs/architecture/backend-adapter.md)
 - **Integration**
   - [Integration index](docs/integration/README.md)
-    - [MCP server (`perfxpert-mcp`) — 56 READ_ONLY tools (8 agent-hierarchy + 47 knowledge/classifier + 1 trace_diff)](docs/integration/mcp-server.md)
+    - [MCP server (`perfxpert-mcp`) — 57 READ_ONLY tools (8 agent-hierarchy + 48 knowledge/classifier + 1 trace_diff)](docs/integration/mcp-server.md)
     - [Python API (`perfxpert.api`) — 1:1 mirror of the 8 agent MCP tools](docs/guides/python-api.md)
 - **Contributing**
   - [CONTRIBUTING.md](CONTRIBUTING.md)

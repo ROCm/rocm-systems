@@ -45,7 +45,7 @@ docs/
 │   └── assets/gifs/         ← checked-in guide demo recordings
 ├── integration/
 │   ├── README.md
-│   └── mcp-server.md        ← the MCP wire surface (56 tools)
+│   └── mcp-server.md        ← the MCP wire surface (57 tools)
 ├── contributing/
 │   ├── README.md            ← per-surface extension guides
 │   ├── tools.md, knowledge.md, providers.md, agents.md, mcp_tools.md,
@@ -69,6 +69,8 @@ docs/
 - Every Python / bash code block intended as illustrative (not executable
   in CI) is prefixed with `# SKIP-SAMPLE — <reason>` so
   `scripts/test-samples.py --strict` skips it.
+- Docs-audit scripts are POSIX-oriented and validated on Linux / macOS /
+  WSL. Windows-native docs-audit execution is out of scope for now.
 - All cross-doc links are relative paths within this tree; external links
   are flagged out-of-scope by `scripts/link-checker.py`.
 - The user-facing brand is **PerfXpert**. `rocinsight` / `ROCINSIGHT` are

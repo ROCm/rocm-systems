@@ -39,6 +39,7 @@ human-readable install hint if the dep isn't available; your tool never
 has to hand-craft a "not found" error message.
 
 ```python
+# SKIP-SAMPLE — illustrative dependency-registration snippet; requires host tools
 import os
 
 from perfxpert.tools._tooldep import require_tool, ExternalToolMissing

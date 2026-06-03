@@ -54,8 +54,9 @@ See [architecture/agent-hierarchy.md](architecture/agent-hierarchy.md) for the t
 ## Tools (spec §3 + Appendix A)
 
 perfxpert ships dozens of deterministic Python tools. The current MCP
-surface exposes **56 READ_ONLY tools**; side-effecting tools remain
-in-process only. The split is:
+surface exposes **57 READ_ONLY tools** (8 agent-hierarchy entry points,
+48 classifier / knowledge / analysis helpers, and 1 trace-diff tool);
+side-effecting tools remain in-process only. The split is:
 
 - **READ_ONLY** — safe for MCP (agent lookups, analysis, classification)
 - **EXECUTION** — in-process only (profile.run, compile.build, patch.apply)
@@ -64,7 +65,7 @@ Every tool is pure (modulo knowledge YAML loads and SQL reads); < 100 ms p99.
 
 ## Knowledge (spec §3 Appendix B)
 
-22 YAML files under `perfxpert/knowledge/`, each paired with a JSON schema
+30 YAML files under `perfxpert/knowledge/`, each paired with a JSON schema
 in `_schemas/`.
 CI validates every YAML against its schema on every PR.
 

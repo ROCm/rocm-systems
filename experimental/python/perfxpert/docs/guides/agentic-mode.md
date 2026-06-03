@@ -99,10 +99,10 @@ When `airgap=False` (the default), `build_session`:
 Behavior differences vs air-gap:
 
 - `recommendations[]["name"]` carries the technique identifier (e.g.
-  `"async_stream_overlap"`, `"vgpr_reduction"`) — same key as
-  air-gap mode, but `title` / `description` / `rationale` are
-  LLM-rewritten for the specific kernel instead of being templated
-  verbatim from the knowledge YAMLs.
+  `"async_stream_overlap"`, `"vgpr_reduction"`). The current root
+  air-gap path leaves structured `recommendations[]` empty, so use
+  LLM-enabled mode when callers require populated recommendation
+  records rather than only bottleneck classification + narrative.
 - `narrative` is a full natural-language summary.
 - Each agent's fence slice shapes the LLM's voice + constraints —
   never concatenated with the others.

@@ -75,14 +75,16 @@ with **dotted** names because that's what `discover_read_only_tools()`
 returns; the equivalent wire names have the dots replaced by
 underscores.
 
-## Tools exposed (56)
+## Tools exposed (57)
 
 Auto-discovered by `mcp_server._registry.discover_read_only_tools()`
 every boot. The registry walks `perfxpert.tools.*` modules but skips
-a small private `_`-prefixed skip list (currently `_class`; hardcoded
-in `_registry.py:21`) because those entries are machinery, not
-tools. Current set (enumerate yourself at any time by running the
-Python snippet below):
+a small internal-module skip list (`_class`, `_safety`,
+`compute_techniques`, `memory_techniques`, and `latency_techniques` at
+the time of writing) because those entries are machinery or
+specialist-internal catalog shims, not user-facing MCP tools. Current
+set (enumerate yourself at any time by running the Python snippet
+below):
 
 ```python
 # Print every READ_ONLY tool the MCP server exposes at boot time.
@@ -124,11 +126,12 @@ Call it conversationally from any TUI backend ("diff this run against
 baseline.db", "what got slower since yesterday's trace?") instead of
 running `analyze` twice.
 
-### Snapshot: classifier / knowledge tools (48)
+### Snapshot: lower-level READ_ONLY tools (49)
 
 Lower-level building blocks the agents themselves compose. External
 clients can call these directly when they want the raw classifier
-output without routing through the agent hierarchy.
+output without routing through the agent hierarchy. This set is 48
+classifier / knowledge / analysis helpers plus `trace_diff.diff_runs`.
 
 ```
 arch.lookup_peaks
@@ -142,6 +145,7 @@ compiler.lookup_flags
 counters.lookup_info
 counters.validate_for_gpu
 dependency_graph.reconstruct_dag            # DAG critical-path / bubble finder
+gpu_discovery.discover_runtime_gpu_specs    # Runtime GPU discovery / arch confirmation
 gpu_runtime_monitor.analyze_thermal         # Thermal envelope
 gpu_runtime_monitor.parse_amd_smi_json      # amd-smi monitor log parser
 gpu_runtime_monitor.parse_rocm_smi_json     # rocm-smi log parser
@@ -181,8 +185,8 @@ unified_memory.analyze_paging               # MI300X paging / XCD penalty
 workflow.next_step
 ```
 
-`trace_diff.diff_runs` is the newest READ_ONLY tool (Confluence row
-#7): compares two rocpd databases and returns a schema-0.3.1 diff dict.
+`trace_diff.diff_runs` compares two rocpd databases and returns a
+schema-0.3.1 diff dict.
 Same engine powers the `perfxpert diff` + `perfxpert ci` CLI
 subcommands, the `perfxpert analyze --baseline <db>` splice, and the
 gate-cascade `trace_diff_regression_rule` — one brain, one number.
@@ -368,10 +372,12 @@ resolve to the same Python function).
 See [contributing/mcp_tools.md](../contributing/mcp_tools.md) for the
 full procedure. The short version:
 
-1. Decorate the function with `@tool_class(ToolClass.READ_ONLY)`.
-2. Keep side effects out — the CI exposure test will reject the PR
+1. Add the function under `perfxpert/tools/<module>.py`.
+2. Decorate it with `@tool_class(ToolClass.READ_ONLY)`.
+3. Keep side effects out — the CI exposure test will reject the PR
    otherwise.
-3. Add a unit test under `tests/test_mcp/test_<name>.py`.
+4. Add a unit test under `tests/test_tools/test_<module>.py`.
+5. Update this snapshot if the public MCP inventory changes.
 
 Adding an EXECUTION tool requires an RFC; the exposure invariant is
 load-bearing for the security posture in spec §5.8.
@@ -379,7 +385,7 @@ load-bearing for the security posture in spec §5.8.
 ## Client integration
 
 `perfxpert-mcp` speaks stdio MCP (JSON-RPC, protocol `2024-11-05`), so
-any MCP-compatible client can consume the 56 READ_ONLY tools. The
+any MCP-compatible client can consume the 57 READ_ONLY tools. The
 `command` field in every example below must resolve on the client's
 `PATH` — run `which perfxpert-mcp` to get an absolute path if your
 client launches with a narrower env than your login shell.
@@ -403,7 +409,7 @@ add a `perfxpert` entry under `mcpServers`:
 }
 ```
 
-Restart Claude Desktop. The 56 tools appear under the 🔌 panel with
+Restart Claude Desktop. The 57 tools appear under the 🔌 panel with
 `perfxpert_` name prefixes (underscored-on-the-wire — see §"Naming
 convention").
 
@@ -586,12 +592,14 @@ Surfaces per backend:
 - **Gemini** — native `BeforeTool` / `AfterTool` hook entries in
   `.gemini/settings.json` + runtime sidecar at
   `.gemini/runtime/perfxpert-gate-<session_id>.json`.
-- **Codex** — prompt-layer-only (rejection-language stanza in the
-  perfxpert-managed `AGENTS.override.md` compatibility file). Codex's
-  native `PreToolUse` hook currently intercepts Bash only, not MCP /
-  Write / other tools, so it cannot satisfy the event-based gate
-  contract. Rationale is captured in the local Codex hook-surface
-  decision record.
+- **Codex** — same tool-priority policy staged as prompt-layer
+  rejection language in the perfxpert-managed `AGENTS.override.md`
+  compatibility file. This serves the same routing purpose for the
+  model, but it is lower assurance than a mechanical pre-tool gate:
+  Codex's native `PreToolUse` hook currently intercepts Bash only, not
+  MCP / Write / other tools, so the adapter cannot block every
+  non-PerfXpert tool call before execution. Rationale is captured in
+  the local Codex hook-surface decision record.
 - **opencode** — `{block, retryWith}` from patched
   `tool.execute.before` plugin (fork-only — patch 0020).
 
@@ -629,4 +637,7 @@ create one).
 ### Platform boundary
 
 POSIX only (Linux + macOS + WSL). Windows-native is explicitly
-out of scope; a tracking issue follows.
+out of scope. The docs-audit helper scripts (`scripts/lint.sh`,
+`scripts/link-checker.py`, `scripts/test-samples.py`) are validated in
+that POSIX boundary; running them from a native Windows checkout may
+hit shell and line-ending assumptions that are not release blockers.

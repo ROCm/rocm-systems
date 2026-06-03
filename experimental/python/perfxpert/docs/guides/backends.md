@@ -13,8 +13,9 @@ native TUI with `perfxpert-mcp` already attached.
 This guide covers the user-visible surface. For the architectural
 contract every adapter satisfies, see
 [../architecture/backend-adapter.md](../architecture/backend-adapter.md).
-For the underlying MCP server (56 READ_ONLY tools — 8 agent-hierarchy
-entry points + 47 classifier/knowledge tools + 1 `trace_diff.diff_runs`),
+For the underlying MCP server (57 READ_ONLY tools — 8 agent-hierarchy
+entry points + 48 classifier/knowledge/analysis helpers + 1
+`trace_diff.diff_runs`),
 see
 [../integration/mcp-server.md](../integration/mcp-server.md). The
 rationale for the Claude PreToolUse choice is captured in the local
@@ -24,7 +25,7 @@ Codex is captured in the local Codex hook-surface decision record.
 **Backend LLM freely picks tools.** There is no
 forced-call contract between `perfxpert_intent_classify` and any
 aggregator tool. The backend LLM reads the agent hierarchy as
-reference in `AGENTS.md` and calls whichever of the 56 MCP tools
+reference in `AGENTS.md` and calls whichever of the 57 MCP tools
 match the user's intent — it may invoke any agent-hierarchy tool
 (`perfxpert_agent_root`, `perfxpert_agent_analysis`,
 `perfxpert_agent_diff_specialist`, etc.) directly,
@@ -56,7 +57,7 @@ fork-only opencode gate hook without any extra backend install.
 | **opencode** (default patched path) | `perfxpert-code` | Any (via opencode provider) | `~/.cache/perfxpert/opencode/opencode.json` | Per-bundle / per-checkout | Patched system prompt + fork patches 0010, 0020 | `perfxpert_*` |
 | **Claude Code** | `perfxpert-code claude` | Anthropic Claude | `./.mcp.json` + `./CLAUDE.local.md` + `./.claude/settings.json` | Project | Native `PreToolUse` hook (event-based lift) | `mcp__perfxpert__*` |
 | **Gemini CLI** | `perfxpert-code gemini` | Google Gemini | `./.gemini/settings.json` + `./.perfxpert/AGENTS.md` | Project | Native `BeforeTool` / `AfterTool` hooks (event-based lift) | `mcp_perfxpert_*` |
-| **Codex CLI** | `perfxpert-code codex` | OpenAI | `~/.codex/config.toml` (trust) + `./.codex/config.toml` when trusted or fallback `~/.codex/config.toml` for MCP + `./AGENTS.override.md` | Trust in user config; MCP project-local when trusted | Prompt-layer-only (Codex `PreToolUse` is Bash-only — see decision record) | `mcp__perfxpert__*` |
+| **Codex CLI** | `perfxpert-code codex` | OpenAI | `~/.codex/config.toml` (trust) + `./.codex/config.toml` when trusted or fallback `~/.codex/config.toml` for MCP + `./AGENTS.override.md` | Trust in user config; MCP project-local when trusted | Same tool-priority policy via prompt-layer enforcement; lower assurance than native hooks because Codex `PreToolUse` is Bash-only — see decision record | `mcp__perfxpert__*` |
 
 Consent is requested once per **(backend, cwd-hash, file-set-hash)**
 tuple and persisted — re-running the same subcommand in the same
@@ -186,9 +187,12 @@ intercept every non-PerfXpert-prefixed tool call until
 `intent_classify` returns, so a Bash-only hook cannot satisfy the
 contract. Installing one anyway would give false confidence.
 
-Instead, the Codex install relies on the rejection-language stanza
-embedded in a perfxpert-managed `AGENTS.override.md`
-(prompt-layer enforcement). When the repo already has a root
+Instead, the Codex install relies on the same tool-priority policy as
+the other backends, embedded as a rejection-language stanza in a
+perfxpert-managed `AGENTS.override.md` (prompt-layer enforcement).
+That serves the same routing purpose for the model, but it is lower
+assurance than a mechanical pre-tool gate because nothing prevents a
+model from ignoring advisory text. When the repo already has a root
 `AGENTS.md`, the adapter shadow-copies that file into the override and
 appends a perfxpert-managed block so Codex sees both the repo guidance
 and the perfxpert gate. `AGENTS.override.md` is a compatibility file
@@ -425,7 +429,7 @@ the specific models used are:
 | opencode | opencode-default                | patched `{block, retryWith}` gate (bundled patch 0020). |
 | claude   | `claude-haiku-4-5`              | native `PreToolUse` hook. R-new-4 scope: verified on haiku-4-5; other small models require independent re-verification at acceptance time. |
 | gemini   | `gemini-2.5-flash`              | Native `BeforeTool` / `AfterTool` hooks + runtime-state file for event-based lift. |
-| codex    | *not probed*                    | Gate is prompt-layer-only (Codex `PreToolUse` is Bash-only). `install()` emits a warning-level log (`codex gate hook unsupported on this backend`) and records `gate_hook_installed=False`; `verify_mcp_live` still runs its connectivity checks (e.g. `codex mcp list`) but skips the gate-probe canary. Rationale is captured in the local Codex hook-surface decision record. |
+| codex    | *not probed*                    | Same tool-priority policy is staged prompt-layer-only because Codex `PreToolUse` is Bash-only. `install()` emits a warning-level log (`codex gate hook unsupported on this backend`) and records `gate_hook_installed=False`; `verify_mcp_live` still runs connectivity checks (e.g. `codex mcp list`) but skips the mechanical gate-probe canary. Rationale is captured in the local Codex hook-surface decision record. |
 
 If you re-verify against a different small model for a non-Codex
 backend (for example `claude-haiku-5` when it ships, or
@@ -441,8 +445,8 @@ here.
 - [../architecture/backend-adapter.md](../architecture/backend-adapter.md)
   — the `BackendAdapter` protocol + lifecycle contract (contributors)
 - [../integration/mcp-server.md](../integration/mcp-server.md) —
-  underlying MCP server + 56 READ_ONLY tool list (8 agent-hierarchy
-  + 47 classifier/knowledge + 1 `trace_diff.diff_runs`)
+  underlying MCP server + 57 READ_ONLY tool list (8 agent-hierarchy
+  + 48 classifier/knowledge/analysis helpers + 1 `trace_diff.diff_runs`)
 - Local Claude hook-surface decision record — why Claude uses the
   native `PreToolUse` hook surface.
 - Local Codex hook-surface decision record — why Codex uses

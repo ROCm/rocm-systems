@@ -25,7 +25,7 @@ ruff check perfxpert/       # lint (optional — CI runs it anyway)
 | New proven optimization | `perfxpert/knowledge/proven_optimizations.yaml` + fixture pair | [docs/contributing/proven_optimizations.md](docs/contributing/proven_optimizations.md) |
 | New agent | `perfxpert/agents/<name>.py` + `agents/fence/<name>.md` | [docs/contributing/agents.md](docs/contributing/agents.md) |
 | New LLM provider | `perfxpert/providers/<name>_model.py` | [docs/contributing/providers.md](docs/contributing/providers.md) |
-| New MCP tool | `mcp_server/tools/<name>.py` | [docs/contributing/mcp_tools.md](docs/contributing/mcp_tools.md) |
+| New MCP tool | `perfxpert/tools/<module>.py` + `@tool_class(ToolClass.READ_ONLY)` | [docs/contributing/mcp_tools.md](docs/contributing/mcp_tools.md) |
 | New test fixture | `tests/fixtures/<name>.db` + `.md` | [docs/contributing/fixtures.md](docs/contributing/fixtures.md) |
 | New GPU arch | `knowledge/gpu_specs.yaml` + `vgpr_occupancy_tables.yaml` | [docs/contributing/gpu_arch.md](docs/contributing/gpu_arch.md) |
 | External-tool dependency (`require_tool` registration) | `perfxpert/tools/_tooldep.py` | [docs/contributing/external-tools.md](docs/contributing/external-tools.md) |

@@ -2,11 +2,12 @@
 
 ## Codex gate is prompt-layer only
 
-`perfxpert-code codex` stages the same MCP surface as
-the other backends, but its gate remains prompt-layer-only. As of April
-2026 Codex's native `PreToolUse` surface intercepts Bash only, not MCP /
-Write / other tool calls, so it cannot satisfy PerfXpert's "block every
-non-perfxpert tool until `intent_classify` returns" contract.
+`perfxpert-code codex` stages the same MCP surface and the same
+tool-priority policy as the other backends, but its gate remains
+prompt-layer-only. As of April 2026 Codex's native `PreToolUse` surface
+intercepts Bash only, not MCP / Write / other tool calls, so the adapter
+cannot mechanically satisfy PerfXpert's "block every non-perfxpert tool
+until `intent_classify` returns" contract.
 
 Current backend split:
 
@@ -18,6 +19,8 @@ Current backend split:
 - **Codex CLI** — prompt-layer rejection language in the
   perfxpert-managed `AGENTS.override.md` compatibility override
 
+Codex therefore serves the same routing purpose at the model-instruction
+layer, but it has lower enforcement assurance than the mechanical gates.
 If you need a hard pre-tool-call gate today, use the default patched
 opencode path, Claude Code, or Gemini CLI instead of Codex.
 
@@ -132,8 +135,9 @@ one-line rationale + optional follow-up tracking id.
 
 ### Zero-violation baseline
 
-None. All three scanners (`scripts/lint.sh`, `scripts/link-checker.py`,
-`scripts/test-samples.py`) report zero violations live, enforced by
+None on the supported POSIX runner. All three scanners
+(`scripts/lint.sh`, `scripts/link-checker.py`, `scripts/test-samples.py`)
+report zero violations live there, enforced by
 `tests/test_docs_tooling/test_ship_readiness.py` — which runs each
 scanner in `--strict` mode and asserts `rc == 0`. Green test = zero
 violations today; no frozen JSON snapshot is kept in the repo.
@@ -142,6 +146,17 @@ violations today; no frozen JSON snapshot is kept in the repo.
 
 Documented here so users reading "zero violations" know what is and
 isn't covered.
+
+#### Platform boundary
+
+- **Supported docs-audit execution:** Linux, macOS, or WSL. The helper
+  scripts use POSIX shell conventions and are validated inside that
+  boundary.
+- **Windows-native execution is out of scope.** A native Windows
+  checkout may expose shell or line-ending assumptions (for example,
+  CRLF-normalized `.sh` files under Bash). Treat those as platform
+  boundary issues unless the same failure reproduces on Linux, macOS, or
+  WSL.
 
 #### `scripts/link-checker.py`
 - **External URLs not validated.** Any `http://` or `https://` link is

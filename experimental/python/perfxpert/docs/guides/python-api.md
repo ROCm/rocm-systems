@@ -9,7 +9,7 @@ tooling without running the MCP server.
 Cross-links:
 
 - [MCP server](../integration/mcp-server.md) — the same 8 agent tools
-  + 48 classifier / knowledge tools re-exposed over stdio JSON-RPC.
+  plus 49 lower-level READ_ONLY tools re-exposed over stdio JSON-RPC.
   **This API is the same surface as the MCP tools.**
 - [Agent hierarchy](../architecture/agent-hierarchy.md) — tier map,
   fence-slice pattern, and where each agent lives in source.

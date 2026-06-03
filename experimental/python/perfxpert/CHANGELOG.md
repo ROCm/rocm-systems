@@ -63,10 +63,10 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `perfxpert_agent_latency_specialist`,
   `perfxpert_agent_diff_specialist`. Backend TUIs (Claude Code,
   Gemini CLI, Codex CLI, opencode) read the agent hierarchy as
-  reference in `AGENTS.md` and freely pick whichever of the **56**
+  reference in `AGENTS.md` and freely pick whichever of the **57**
   MCP tools matches the user's intent. Current MCP tool
-  inventory: **56** (8 agent-hierarchy + 48 classifier / knowledge
-  / advanced-specialist / trace_diff). Schemas remain frozen per
+  inventory: **57** (8 agent-hierarchy + 48 classifier / knowledge
+  / advanced-specialist helpers + 1 trace_diff). Schemas remain frozen per
   `perfxpert/agents/schemas.py`.
 - **Public Python API (`perfxpert.api`).** 1:1 mirror of the 8 agent
   MCP tools (`api.agent_root`, `api.agent_analysis`, etc.) for
@@ -107,7 +107,7 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   call a single `perfxpert_run_root_analysis` after
   `perfxpert_intent_classify`. The "MUST call
   `perfxpert_run_root_analysis`" contract is gone; backends choose
-  any of the 56 MCP tools based on intent. The tool-priority gate
+  any of the 57 MCP tools based on intent. The tool-priority gate
   still requires `perfxpert_intent_classify` as the first call.
 - **FallbackProvider exception taxonomy.** Documented the full
   typed-error set — `AuthError`, `RateLimitError`,
@@ -118,8 +118,11 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `docs/guides/agentic-mode.md` §"Fallback chain".
 
 ### Docs
-- `README.md` — MCP count 34→43, 5-provider list restored, pip
-  upgrade hint, fast-install wrapper surfaced.
+- `README.md`, `docs/architecture.md`, and MCP guides — MCP inventory
+  refreshed to 57 READ_ONLY tools; knowledge inventory refreshed to
+  30 YAML files; MCP contributor guide updated for auto-discovery.
+- `README.md` — MCP inventory, 5-provider list, pip upgrade hint, and
+  fast-install wrapper surfaced.
 - `docs/guides/getting-started.md` — MCP count refreshed in 3
   places, §10 LLM Providers rebuilt for all 5 providers with
   CLI/API parity, duplicate §3/4/5/6 heading numbering fixed

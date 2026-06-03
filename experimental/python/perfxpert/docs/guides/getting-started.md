@@ -11,9 +11,11 @@ lives elsewhere.
 PerfXpert is an AI-augmented GPU profiling and optimization tool for
 AMD ROCm. It reads `rocprofv3` trace databases (`.db`), classifies
 bottlenecks against hardware SoL bounds, and produces targeted
-recommendations — either deterministically (air-gap) or with an LLM
-specialist agent. Supported GPUs: MI100 / MI200 / MI300 / MI350 and
-RDNA2 / RDNA3.
+recommendations with an LLM specialist agent. Air-gap mode remains
+deterministic and credential-free, but currently returns bottleneck
+classification + narrative rather than populated structured
+recommendation dicts. Supported GPUs: MI100 / MI200 / MI300 / MI350
+and RDNA2 / RDNA3.
 
 ## 1. Install
 
@@ -61,10 +63,12 @@ producing a broken `perfxpert-code`.
 
 #### Note on Windows
 
-PerfXpert does not auto-bootstrap bun on Windows. If the bundled
-`opencode` build is not available on your host, use the multi-backend
-launcher (`perfxpert-code claude` / `codex` / `gemini`) against a native
-backend CLI instead.
+PerfXpert's supported install, bundled-opencode build, and docs-audit
+tooling are POSIX-oriented (Linux, macOS, or WSL). Windows-native is out
+of scope for now. If the bundled `opencode` build is not available on
+your host, use the multi-backend launcher (`perfxpert-code claude` /
+`codex` / `gemini`) against a native backend CLI from a supported POSIX
+environment.
 
 ### Distro package setup
 
@@ -201,6 +205,7 @@ never touches.
 `scripts/pip-install-from-git.sh` wraps pip with these env vars set:
 
 ```bash
+# SKIP-SAMPLE — env-var illustration consumed by pip/git during install
 GIT_CONFIG_COUNT=1
 GIT_CONFIG_KEY_0=submodule.active
 GIT_CONFIG_VALUE_0=experimental/python/perfxpert/opencode
@@ -268,7 +273,7 @@ perfxpert doctor
 ![doctor](assets/gifs/03-doctor.gif)
 
 *`perfxpert doctor` end-to-end: Python check, MCP server reachable
-(56 tools registered), hosted/local/private LLM provider readiness,
+(57 tools registered), hosted/local/private LLM provider readiness,
 bundled opencode availability, `ALL CLEAN`.*
 
 Expected output ends with `ALL CLEAN` when everything is wired. The
@@ -276,7 +281,7 @@ doctor checks:
 
 - `perfxpert` version + Python ≥ 3.10
 - openai-agents SDK
-- MCP server reachable (`perfxpert-mcp` boots + 56 tools registered — 8 agent-hierarchy + 47 classifier/knowledge + 1 `trace_diff.diff_runs`)
+- MCP server reachable (`perfxpert-mcp` boots + 57 tools registered — 8 agent-hierarchy + 48 classifier/knowledge/analysis helpers + 1 `trace_diff.diff_runs`)
 - task store (`~/.perfxpert` or `$PERFXPERT_TASK_ROOT`)
 - patched opencode binary resolution + bundled opencode config dir
 - LLM providers configured (counts hosted/local/private providers against
@@ -300,10 +305,10 @@ agent runtime.
   a rocprofv3 `.db`, emits a single report (text / JSON / markdown /
   webview HTML). Deterministic with `--llm` omitted; LLM-augmented
   with `--llm {anthropic,openai,ollama,private,opencode}`.
-- **`perfxpert-mcp`** — stdio MCP server that re-exposes the 56
+- **`perfxpert-mcp`** — stdio MCP server that re-exposes the 57
   READ-ONLY analysis tools over JSON-RPC (8 agent-hierarchy entry
   points — Root, Analysis, Recommendation, Correctness, +3 technique
-  specialists, + diff specialist — plus 47 classifier / knowledge
+  specialists, + diff specialist — plus 48 classifier / knowledge / analysis
   tools and 1 `trace_diff.diff_runs`). Meant to be
   spawned by an MCP client (Claude Desktop, Claude Code, Codex CLI,
   Gemini CLI, opencode). See `../integration/mcp-server.md`.
@@ -337,10 +342,11 @@ your existing LLM workflow.
   `<cwd>/.codex/config.toml` when the project is trusted (otherwise
   falls back to `~/.codex/config.toml`), writes a project-root
   `AGENTS.override.md` compatibility override so Codex actually loads
-  the perfxpert prompt, and execs `codex`. Gate
-  enforcement is prompt-layer-only because Codex's native
-  `PreToolUse` hook is Bash-only as of April 2026; the trust gate
-  runs before MCP registration and either prompts or honors
+  the perfxpert prompt, and execs `codex`. It stages the same
+  tool-priority policy as the other backends, but enforcement is
+  prompt-layer-only because Codex's native `PreToolUse` hook is
+  Bash-only as of April 2026; the trust gate runs before MCP registration
+  and either prompts or honors
   `PERFXPERT_AUTO_TRUST=1` (see §3.2 below).
 
 Short recipe per backend:
@@ -362,8 +368,8 @@ reference (`PERFXPERT_MCP_WARMUP_TIMEOUT_S`,
 `PERFXPERT_ASSUME_CONSENT`). The gate-probe coverage table in
 [backends.md §Gate-probe](backends.md) documents which small-model
 probe each backend uses to verify mechanical gate enforcement at
-`install()` time — Codex is not probed because its gate is
-prompt-layer-only.
+`install()` time — Codex is not probed because its prompt-layer gate has
+the same policy goal but no mechanical pre-tool-call hook to validate.
 
 ## 3.2 Codex trust gate
 
@@ -943,9 +949,10 @@ perfxpert analyze -i trace.db
 ```
 
 Air-gap mode: no outbound calls, rule-based classification against
-the knowledge YAMLs. `primary_bottleneck` is still set.
-`recommendations[].name` populates only with LLM mode; air-gap
-returns bottleneck + narrative only (verbatim from the rule tables).
+the knowledge YAMLs. `primary_bottleneck` is still set, but the root
+air-gap path currently leaves structured `recommendations[]` empty.
+Use LLM-enabled mode when you need populated recommendation names,
+titles, descriptions, and rationales.
 
 ### LLM-enabled
 
@@ -1388,9 +1395,9 @@ See `python-api.md` for the full surface.
 
 ## 13. Connecting other MCP clients
 
-Any MCP-compatible client can consume the 56 READ-ONLY tools exposed
-by `perfxpert-mcp` (8 agent-hierarchy entry points + 47
-classifier/knowledge tools + 1 `trace_diff.diff_runs`). Configuration snippets for Claude Desktop,
+Any MCP-compatible client can consume the 57 READ-ONLY tools exposed
+by `perfxpert-mcp` (8 agent-hierarchy entry points + 48
+classifier/knowledge/analysis helpers + 1 `trace_diff.diff_runs`). Configuration snippets for Claude Desktop,
 Claude Code, Codex CLI, Gemini CLI, and generic stdio clients live in
 `../integration/mcp-server.md` under §"Client integration". The
 default patched opencode path inside `perfxpert-code` wires `perfxpert-mcp`
@@ -1464,7 +1471,7 @@ payload / public JSON).
   integration
 - `../guides/agentic-mode.md` — air-gap vs LLM + provider ladder +
   fallback chain
-- `../guides/python-api.md` — `perfxpert.api` (1:1 mirror of the 7
+- `../guides/python-api.md` — `perfxpert.api` (1:1 mirror of the 8
   agent MCP tools) for embedding PerfXpert's analysis brain in your
   own tooling
 
