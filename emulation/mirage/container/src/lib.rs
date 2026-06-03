@@ -101,6 +101,16 @@ impl Engine {
     ///
     /// The container is named and given a matching hostname so peers can
     /// resolve it by name on the shared network.
+    /// Build the argv (after the provider binary) for launching a
+    /// detached node container.
+    ///
+    /// `command` is the container's foreground process (PID 1). Mirage
+    /// runs each node's own `mirage host --session <id> --rank <n>` here
+    /// so the container hosts its node directly; an empty `command`
+    /// leaves the image's default entrypoint in place.
+    ///
+    /// The container is named and given a matching hostname so peers can
+    /// resolve it by name on the shared network.
     pub fn run_argv(
         name: &str,
         image: &str,
@@ -109,6 +119,7 @@ impl Engine {
         devices: &[String],
         groups: &[String],
         env: &[(String, String)],
+        command: &[String],
     ) -> Vec<String> {
         let mut argv = vec![
             "run".to_string(),
@@ -139,9 +150,9 @@ impl Engine {
             argv.push(g.clone());
         }
         argv.push(image.to_string());
-        // Keep the container alive; the real work arrives via `exec`.
-        argv.push("sleep".to_string());
-        argv.push("infinity".to_string());
+        // The container's foreground process. Mirage hosts the node from
+        // inside the container, so this is normally `mirage host ...`.
+        argv.extend(command.iter().cloned());
         argv
     }
 
@@ -239,8 +250,9 @@ impl Engine {
         devices: &[String],
         groups: &[String],
         env: &[(String, String)],
+        command: &[String],
     ) -> Result<String> {
-        let argv = Self::run_argv(name, image, network, mounts, devices, groups, env);
+        let argv = Self::run_argv(name, image, network, mounts, devices, groups, env, command);
         let out = self.output(&argv)?;
         Ok(String::from_utf8_lossy(&out).trim().to_string())
     }
@@ -274,19 +286,23 @@ impl Engine {
     ///
     /// `node_env(rank)` yields the environment for the node of that rank
     /// (mirage injects `MIRAGE_RANK`/`MIRAGE_HEAD_ADDR`/`MIRAGE_HEAD_PORT`
-    /// there). On any failure the partially-created containers and
+    /// there). `node_command(rank)` yields the container's foreground
+    /// command for that rank (mirage runs the node's own `mirage host
+    /// --rank <n>`). On any failure the partially-created containers and
     /// network are torn down before returning the error, so a failed
     /// bring-up never leaks resources.
-    pub fn bring_up<F>(
+    pub fn bring_up<F, G>(
         &self,
         session: &mirage_core::session::SessionId,
         def: &ContainerizedDef,
         node_count: u32,
         head_port: u16,
         mut node_env: F,
+        mut node_command: G,
     ) -> Result<(ContainerState, Vec<(u32, String)>)>
     where
         F: FnMut(u32) -> Vec<(String, String)>,
+        G: FnMut(u32) -> Vec<String>,
     {
         let network = mirage_core::container::network_name(session);
         self.pull(&def.image)?;
@@ -315,6 +331,7 @@ impl Engine {
         for rank in 0..node_count {
             let name = mirage_core::container::container_name(session, rank);
             let env = node_env(rank);
+            let command = node_command(rank);
             match self.launch_node(
                 &name,
                 &def.image,
@@ -323,6 +340,7 @@ impl Engine {
                 &def.devices,
                 &def.groups,
                 &env,
+                &command,
             ) {
                 Ok(cid) => {
                     cids.push((rank, cid));
@@ -441,6 +459,14 @@ mod tests {
         let mounts = vec![mount("/data:/data:ro"), mount("/h:/c")];
         let devices = vec!["/dev/kfd".to_string(), "/dev/dri".to_string()];
         let groups = vec!["video".to_string(), "render".to_string()];
+        let command = vec![
+            "/mnt/mirage/bin/mirage".to_string(),
+            "host".to_string(),
+            "--session".to_string(),
+            "s".to_string(),
+            "--rank".to_string(),
+            "0".to_string(),
+        ];
         let argv = Engine::run_argv(
             "mirage-s-node-0",
             "img:latest",
@@ -449,6 +475,7 @@ mod tests {
             &devices,
             &groups,
             &env,
+            &command,
         );
 
         let joined = argv.join(" ");
@@ -462,12 +489,13 @@ mod tests {
         assert!(joined.contains("--device /dev/dri"));
         assert!(joined.contains("--group-add video"));
         assert!(joined.contains("--group-add render"));
-        assert!(joined.ends_with("img:latest sleep infinity"));
+        assert!(joined.ends_with("img:latest /mnt/mirage/bin/mirage host --session s --rank 0"));
     }
 
     #[test]
     fn run_argv_omits_network_when_none() {
-        let argv = Engine::run_argv("n", "img", None, &[], &[], &[], &[]);
+        let command = vec!["sleep".to_string(), "infinity".to_string()];
+        let argv = Engine::run_argv("n", "img", None, &[], &[], &[], &[], &command);
         assert!(!argv.iter().any(|a| a == "--network"));
         assert_eq!(argv.last().map(String::as_str), Some("infinity"));
     }
@@ -572,6 +600,7 @@ mod tests {
                 &[],
                 &[],
                 &[],
+                &["sleep".to_string(), "infinity".to_string()],
             )
             .unwrap();
         assert_eq!(cid, "fake-cid-123");
@@ -599,9 +628,21 @@ mod tests {
         };
 
         let (state, cids) = engine
-            .bring_up(&session, &def, 2, 6000, |rank| {
-                vec![("MIRAGE_RANK".to_string(), rank.to_string())]
-            })
+            .bring_up(
+                &session,
+                &def,
+                2,
+                6000,
+                |rank| vec![("MIRAGE_RANK".to_string(), rank.to_string())],
+                |rank| {
+                    vec![
+                        "mirage".to_string(),
+                        "host".to_string(),
+                        "--rank".to_string(),
+                        rank.to_string(),
+                    ]
+                },
+            )
             .unwrap();
 
         assert_eq!(state.image, "img:latest");
