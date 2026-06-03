@@ -349,7 +349,7 @@ __device__ void QueuePair::bnxt_write_rma_wqe_with_keys(uintptr_t raddr, uint32_
 
 __device__ void QueuePair::bnxt_post_wqe_rma_with_keys(uint32_t size,
     uintptr_t raddr, uint32_t rkey, uintptr_t laddr, uint32_t lkey,
-    uint8_t opcode, ActiveWFInfo &wf_info) {
+    uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db) {
   if (wf_info.is_pe_group_first) {
     lock(&bnxt_sq.lock);
   }
@@ -358,7 +358,9 @@ __device__ void QueuePair::bnxt_post_wqe_rma_with_keys(uint32_t size,
     if (i == wf_info.pe_group_logical_lane_id) {
       bnxt_write_rma_wqe_with_keys(raddr, rkey, laddr, lkey,
                                     size, opcode);
-      bnxt_ring_doorbell(bnxt_sq.tail);
+      if (ring_db) {
+        bnxt_ring_doorbell(bnxt_sq.tail);
+      }
     }
   }
 
@@ -517,7 +519,7 @@ __device__ uint64_t QueuePair::bnxt_post_wqe_amo_single(uintptr_t raddr,
 }
 
 __device__ void QueuePair::bnxt_post_wqe_amo_with_keys(uintptr_t raddr, uint32_t rkey,
-    uint8_t opcode, int64_t atomic_data, ActiveWFInfo &wf_info) {
+    uint8_t opcode, int64_t atomic_data, ActiveWFInfo &wf_info, bool fence) {
   if (wf_info.is_pe_group_first) {
     lock(&bnxt_sq.lock);
   }
@@ -531,6 +533,9 @@ __device__ void QueuePair::bnxt_post_wqe_amo_with_keys(uintptr_t raddr, uint32_t
       uint32_t wqe_size  = BNXT_RE_HDR_WS_MASK & GDA_BNXT_WQE_SLOT_COUNT;
       uint32_t hdr_flags = ((uint32_t)BNXT_RE_HDR_FLAGS_MASK)
                          & ((uint32_t)BNXT_RE_WR_FLAGS_SIGNALED);
+      if (fence) {
+        hdr_flags |= ((uint32_t)BNXT_RE_WR_FLAGS_UC_FENCE);
+      }
       uint32_t wqe_type  = BNXT_RE_HDR_WT_MASK & opcode;
 
       bnxt_poll_cq_until(GDA_BNXT_WQE_SLOT_COUNT);

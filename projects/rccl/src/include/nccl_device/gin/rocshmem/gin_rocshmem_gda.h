@@ -36,25 +36,16 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
       uint32_t dstRkey = loadConst(&dstMh->rkey);
       uint32_t srcLkey = loadConst(&srcMh->lkey);
 
-      qp->put_nbi_with_keys((void*)dstAddr, dstRkey, (void*)srcAddr, srcLkey, bytes, wf_info);
-
-      // Track pending WQEs for granular flush
-      uint32_t* pending = loadConst(&rsCtx->pendingWqeCount);
-      if (pending) atomicAdd(&pending[peer], 1u);
-    }
-
-    if (hasSignal || hasCounter) {
-      qp->quiet(wf_info);
-      // After quiet, no more pending WQEs for this peer
-      uint32_t* pending = loadConst(&rsCtx->pendingWqeCount);
-      if (pending) pending[peer] = 0;
+      qp->put_nbi_with_keys((void*)dstAddr, dstRkey, (void*)srcAddr, srcLkey, bytes, wf_info, !hasSignal);
     }
 
     if (hasSignal) {
       if (signalOp == ncclGinSignalInc) signalOpArg = 1;
       uintptr_t sigAddr = loadConst(loadConst(&rsCtx->signal_raddrs) + peer) + sizeof(uint64_t) * signalId;
       uint32_t sigRkey = loadConst(loadConst(&rsCtx->signal_rkeys) + peer);
-      qp->atomic_add_with_keys((void*)sigAddr, sigRkey, (int64_t)signalOpArg, wf_info);
+      qp->atomic_add_with_keys((void*)sigAddr, sigRkey, (int64_t)signalOpArg, wf_info, /*fence=*/true);
+    } else if (hasCounter) {
+      qp->quiet(wf_info);
     }
 
     if (hasCounter) {
@@ -81,16 +72,15 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
     uintptr_t dstAddr = loadConst(&dstMh->baseAddr) + dstOff;
     uint32_t dstRkey = loadConst(&dstMh->rkey);
 
-    // Pass srcVal by address — put_nbi_with_keys copies it inline into the WQE
-    // (inline_threshold >= sizeof(T)), so no registered MR or lkey is needed.
-    qp->put_nbi_with_keys((void*)dstAddr, dstRkey, &srcVal, 0, sizeof(T), wf_info);
+    // lkey=0: put_nbi_with_keys copies srcVal inline into the WQE
+    // (inline_threshold >= sizeof(T)), so no registered MR is needed.
+    qp->put_nbi_with_keys((void*)dstAddr, dstRkey, &srcVal, 0, sizeof(T), wf_info, !hasSignal);
 
     if (hasSignal) {
-      qp->quiet(wf_info);
       if (signalOp == ncclGinSignalInc) signalOpArg = 1;
       uintptr_t sigAddr = loadConst(loadConst(&rsCtx->signal_raddrs) + peer) + sizeof(uint64_t) * signalId;
       uint32_t sigRkey = loadConst(loadConst(&rsCtx->signal_rkeys) + peer);
-      qp->atomic_add_with_keys((void*)sigAddr, sigRkey, (int64_t)signalOpArg, wf_info);
+      qp->atomic_add_with_keys((void*)sigAddr, sigRkey, (int64_t)signalOpArg, wf_info, /*fence=*/true);
     }
   }
 };
@@ -134,14 +124,10 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
     using nccl::utility::loadConst;
     ncclGinRocshmemGdaGPUContext* rsCtx = (ncclGinRocshmemGdaGPUContext*)ctx.handle;
     rocshmem::QueuePair** qps = loadConst(&rsCtx->qps);
-    uint32_t* pending = loadConst(&rsCtx->pendingWqeCount);
 #pragma unroll 1
     for (int peer = coop.thread_rank(); peer < ctx.nRanks; peer += coop.size()) {
-      // Skip peers with no pending WQEs (granular flush)
-      if (pending && pending[peer] == 0) continue;
       rocshmem::ActiveWFInfo wf_info(peer, rocshmem::ThreadScope::thread);
       loadConst(qps + peer)->quiet(wf_info);
-      if (pending) pending[peer] = 0;
     }
   }
 };

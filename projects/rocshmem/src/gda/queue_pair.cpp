@@ -292,34 +292,34 @@ __device__ void QueuePair::put_nbi(void *dest, const void *source,
 
 __device__ void QueuePair::put_nbi_with_keys(void *raddr, uint32_t rkey,
     const void *laddr, uint32_t lkey,
-    size_t size, ActiveWFInfo &wf_info) {
+    size_t size, ActiveWFInfo &wf_info, bool ring_db) {
   uintptr_t l = reinterpret_cast<uintptr_t>(laddr);
   uintptr_t r = reinterpret_cast<uintptr_t>(raddr);
   post_wqe_rma_with_keys(static_cast<uint32_t>(size), r, rkey, l, lkey,
-                          gda_op_rdma_write, wf_info);
+                          gda_op_rdma_write, wf_info, ring_db);
 }
 
 __device__ void QueuePair::post_wqe_rma_with_keys(
     uint32_t size, uintptr_t raddr, uint32_t rkey,
     uintptr_t laddr, uint32_t lkey,
-    uint8_t opcode, ActiveWFInfo &wf_info) {
+    uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db) {
   switch (gda_provider_) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     ionic_post_wqe_rma_with_keys(size, raddr, rkey, laddr, lkey,
-                                  opcode, wf_info);
+                                  opcode, wf_info, ring_db);
     return;
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
     bnxt_post_wqe_rma_with_keys(size, raddr, rkey, laddr, lkey,
-                                 opcode, wf_info);
+                                 opcode, wf_info, ring_db);
     return;
 #endif
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
     mlx5_post_wqe_rma_with_keys(size, raddr, rkey, laddr, lkey,
-                                 opcode, wf_info);
+                                 opcode, wf_info, ring_db);
     return;
 #endif
   default:
@@ -382,27 +382,27 @@ __device__ void QueuePair::atomic_nofetch_single(void *dest, int64_t value) {
 }
 
 __device__ void QueuePair::atomic_add_with_keys(void *raddr, uint32_t rkey,
-    int64_t value, ActiveWFInfo &wf_info) {
+    int64_t value, ActiveWFInfo &wf_info, bool fence) {
   uintptr_t r = reinterpret_cast<uintptr_t>(raddr);
-  post_wqe_amo_with_keys(r, rkey, gda_op_atomic_fa, value, wf_info);
+  post_wqe_amo_with_keys(r, rkey, gda_op_atomic_fa, value, wf_info, fence);
 }
 
 __device__ void QueuePair::post_wqe_amo_with_keys(uintptr_t raddr, uint32_t rkey,
-    uint8_t opcode, int64_t atomic_data, ActiveWFInfo &wf_info) {
+    uint8_t opcode, int64_t atomic_data, ActiveWFInfo &wf_info, bool fence) {
   switch (gda_provider_) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
-    ionic_post_wqe_amo_with_keys(raddr, rkey, opcode, atomic_data, wf_info);
+    ionic_post_wqe_amo_with_keys(raddr, rkey, opcode, atomic_data, wf_info, fence);
     return;
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
-    bnxt_post_wqe_amo_with_keys(raddr, rkey, opcode, atomic_data, wf_info);
+    bnxt_post_wqe_amo_with_keys(raddr, rkey, opcode, atomic_data, wf_info, fence);
     return;
 #endif
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
-    mlx5_post_wqe_amo_with_keys(raddr, rkey, opcode, atomic_data, wf_info);
+    mlx5_post_wqe_amo_with_keys(raddr, rkey, opcode, atomic_data, wf_info, fence);
     return;
 #endif
   default:

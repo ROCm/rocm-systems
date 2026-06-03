@@ -163,14 +163,6 @@ ncclResult_t ncclGinRocshmemGdaCreateContext(struct ncclComm *comm, void *collCo
     hipMemset(ctx->gpuCtxHost.counters, 0, sizeof(uint64_t) * nCounters);
   }
 
-  // Allocate per-peer pending WQE count array for granular flush
-  if (hipMalloc(&ctx->gpuCtxHost.pendingWqeCount,
-                sizeof(uint32_t) * ctx->nRanks) != hipSuccess) {
-    ret = ncclSystemError;
-    goto fail;
-  }
-  hipMemset(ctx->gpuCtxHost.pendingWqeCount, 0, sizeof(uint32_t) * ctx->nRanks);
-
   // Copy GPU context to device
   if (hipMemcpy(ctx->gpuCtxDev, &ctx->gpuCtxHost, sizeof(ncclGinRocshmemGdaGPUContext),
                 hipMemcpyHostToDevice) != hipSuccess) {
@@ -195,7 +187,6 @@ fail:
     if (ctx->gpuCtxHost.counters) hipFree(ctx->gpuCtxHost.counters);
     if (ctx->gpuCtxHost.signal_rkeys) hipFree(ctx->gpuCtxHost.signal_rkeys);
     if (ctx->gpuCtxHost.signal_raddrs) hipFree(ctx->gpuCtxHost.signal_raddrs);
-    if (ctx->gpuCtxHost.pendingWqeCount) hipFree(ctx->gpuCtxHost.pendingWqeCount);
     if (ctx->gpuCtxDev) hipFree(ctx->gpuCtxDev);
     free(ctx->devHandle);
     free(ctx);
@@ -215,7 +206,6 @@ ncclResult_t ncclGinRocshmemGdaDestroyContext(ncclGin_t *ginComm, void *ginCtx) 
   if (ctx->gpuCtxHost.counters) hipFree(ctx->gpuCtxHost.counters);
   if (ctx->gpuCtxHost.signal_rkeys) hipFree(ctx->gpuCtxHost.signal_rkeys);
   if (ctx->gpuCtxHost.signal_raddrs) hipFree(ctx->gpuCtxHost.signal_raddrs);
-  if (ctx->gpuCtxHost.pendingWqeCount) hipFree(ctx->gpuCtxHost.pendingWqeCount);
   if (ctx->gpuCtxDev) hipFree(ctx->gpuCtxDev);
   free(ctx->devHandle);
   free(ctx);

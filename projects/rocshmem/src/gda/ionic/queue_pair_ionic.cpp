@@ -349,7 +349,7 @@ __device__ void QueuePair::ionic_post_wqe_rma(int32_t size, uintptr_t laddr,
 
 __device__ void QueuePair::ionic_post_wqe_rma_with_keys(uint32_t size,
     uintptr_t raddr, uint32_t rkey, uintptr_t laddr, uint32_t lkey,
-    uint8_t opcode, ActiveWFInfo &wf_info) {
+    uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db) {
   uint32_t num_wqes = 1;
   if (wf_info.scope == ThreadScope::thread) {
     num_wqes = wf_info.num_pe_group_lanes;
@@ -402,7 +402,9 @@ __device__ void QueuePair::ionic_post_wqe_rma_with_keys(uint32_t size,
   __hip_atomic_store(&wqe->base.flags, wqe_flags, __ATOMIC_RELEASE,
     __HIP_MEMORY_SCOPE_AGENT);
 
-  commit_sq(wf_info, my_sq_prod, my_sq_pos, num_wqes);
+  if (ring_db) {
+    commit_sq(wf_info, my_sq_prod, my_sq_pos, num_wqes);
+  }
 }
 
 __device__ void QueuePair::ionic_post_wqe_rma_single(int32_t size,
@@ -589,7 +591,7 @@ __device__ uint64_t QueuePair::ionic_post_wqe_amo_single([[maybe_unused]] int32_
 }
 
 __device__ void QueuePair::ionic_post_wqe_amo_with_keys(uintptr_t raddr, uint32_t rkey,
-    uint8_t opcode, int64_t atomic_data, ActiveWFInfo &wf_info) {
+    uint8_t opcode, int64_t atomic_data, ActiveWFInfo &wf_info, bool fence) {
   uint32_t num_wqes = wf_info.num_pe_group_lanes;
   uint32_t my_sq_prod = reserve_sq(wf_info, num_wqes);
   uint32_t my_sq_pos = my_sq_prod + wf_info.pe_group_logical_lane_id;
@@ -601,6 +603,9 @@ __device__ void QueuePair::ionic_post_wqe_amo_with_keys(uintptr_t raddr, uint32_
   }
   if (wf_info.is_pe_group_last) {
     wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_SIG);
+  }
+  if (fence) {
+    wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_FENCE);
   }
 
   wqe->base.wqe_idx = my_sq_pos;

@@ -295,7 +295,7 @@ __device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t laddr, ui
 
 __device__ void QueuePair::mlx5_post_wqe_rma_with_keys(uint32_t size, uintptr_t raddr,
     uint32_t rkey, uintptr_t laddr, uint32_t lkey,
-    uint8_t opcode, ActiveWFInfo &wf_info) {
+    uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db) {
   if (wf_info.is_pe_group_last) {
     acquire_lock(&mlx5_sq.lock);
     mlx5_poll_cq_until(wf_info.num_pe_group_lanes);
@@ -313,7 +313,9 @@ __device__ void QueuePair::mlx5_post_wqe_rma_with_keys(uint32_t size, uintptr_t 
 
   if (wf_info.is_pe_group_last) {
     mlx5_sq.post += wf_info.num_pe_group_lanes;
-    mlx5_ring_doorbell(mlx5_sq.post, wqe);
+    if (ring_db) {
+      mlx5_ring_doorbell(mlx5_sq.post, wqe);
+    }
     release_lock(&mlx5_sq.lock);
   }
 }
@@ -455,7 +457,7 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo_single([[maybe_unused]] int32_t
 }
 
 __device__ void QueuePair::mlx5_post_wqe_amo_with_keys(uintptr_t raddr, uint32_t rkey,
-    uint8_t opcode, int64_t atomic_data, ActiveWFInfo &wf_info) {
+    uint8_t opcode, int64_t atomic_data, ActiveWFInfo &wf_info, bool fence) {
   if (wf_info.is_pe_group_last) {
     acquire_lock(&mlx5_sq.lock);
     mlx5_poll_cq_until(wf_info.num_pe_group_lanes);
@@ -464,7 +466,10 @@ __device__ void QueuePair::mlx5_post_wqe_amo_with_keys(uintptr_t raddr, uint32_t
   uint16_t wqe_idx = mlx5_wqe_idx(mlx5_sq, wf_info.pe_group_logical_lane_id);
   uint16_t sq_idx  = mlx5_sq_idx(mlx5_sq, wqe_idx);
 
-  gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, MLX5_WQE_CTRL_CQ_UPDATE,
+  uint8_t fm_ce_se = MLX5_WQE_CTRL_CQ_UPDATE;
+  if (fence) fm_ce_se |= MLX5_WQE_CTRL_FENCE;
+
+  gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, fm_ce_se,
                    raddr, byteswap<uint32_t>(rkey),
                    static_cast<uint64_t>(atomic_data), static_cast<uint64_t>(0),
                    reinterpret_cast<uintptr_t>(nonfetching_atomic), nonfetching_atomic_lkey};

@@ -190,10 +190,11 @@ class QueuePair {
    * @param[in] lkey Local key for the source buffer.
    * @param[in] size Size in bytes of data transmission.
    * @param[in] wf_info Wavefront information.
+   * @param[in] ring_db Ring doorbell after posting (default true).
    */
   __device__ void put_nbi_with_keys(void *raddr, uint32_t rkey,
       const void *laddr, uint32_t lkey,
-      size_t size, ActiveWFInfo &wf_info);
+      size_t size, ActiveWFInfo &wf_info, bool ring_db = true);
 
   /**
    * @brief Create and enqueue a non-blocking get work queue entry (wqe).
@@ -262,7 +263,7 @@ class QueuePair {
    * @param[in] wf_info Wavefront information.
    */
   __device__ void atomic_add_with_keys(void *raddr, uint32_t rkey,
-      int64_t value, ActiveWFInfo &wf_info);
+      int64_t value, ActiveWFInfo &wf_info, bool fence = false);
 
   /**
    * @brief Create and enqueue an atomic cas work queue entry (wqe).
@@ -310,19 +311,19 @@ class QueuePair {
 
   __device__ __attribute__((noinline)) void
   post_wqe_amo_with_keys(uintptr_t raddr, uint32_t rkey, uint8_t opcode,
-      int64_t atomic_data, ActiveWFInfo &wf_info);
+      int64_t atomic_data, ActiveWFInfo &wf_info, bool fence);
 
 #if defined(GDA_IONIC)
   __device__ void ionic_post_wqe_amo_with_keys(uintptr_t raddr, uint32_t rkey,
-      uint8_t opcode, int64_t atomic_data, ActiveWFInfo &wf_info);
+      uint8_t opcode, int64_t atomic_data, ActiveWFInfo &wf_info, bool fence);
 #endif
 #if defined(GDA_BNXT)
   __device__ void bnxt_post_wqe_amo_with_keys(uintptr_t raddr, uint32_t rkey,
-      uint8_t opcode, int64_t atomic_data, ActiveWFInfo &wf_info);
+      uint8_t opcode, int64_t atomic_data, ActiveWFInfo &wf_info, bool fence);
 #endif
 #if defined(GDA_MLX5)
   __device__ void mlx5_post_wqe_amo_with_keys(uintptr_t raddr, uint32_t rkey,
-      uint8_t opcode, int64_t atomic_data, ActiveWFInfo &wf_info);
+      uint8_t opcode, int64_t atomic_data, ActiveWFInfo &wf_info, bool fence);
 #endif
 
   __device__ __attribute__((noinline)) uint64_t post_wqe_amo_single(uintptr_t raddr,
@@ -349,7 +350,7 @@ class QueuePair {
   __device__ __attribute__((noinline)) void
   post_wqe_rma_with_keys(uint32_t size, uintptr_t raddr, uint32_t rkey,
       uintptr_t laddr, uint32_t lkey,
-      uint8_t opcode, ActiveWFInfo &wf_info);
+      uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
 
 #if defined(GDA_MLX5)
   __device__ uint64_t mlx5_post_wqe_amo(int32_t size, uintptr_t raddr,
@@ -364,7 +365,7 @@ class QueuePair {
       uintptr_t raddr, uint8_t opcode, bool ring_db);
   __device__ void mlx5_post_wqe_rma_with_keys(uint32_t size, uintptr_t raddr,
       uint32_t rkey, uintptr_t laddr, uint32_t lkey,
-      uint8_t opcode, ActiveWFInfo &wf_info);
+      uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
   __device__ void mlx5_quiet();
   __device__ void mlx5_quiet_single();
 #endif
@@ -390,7 +391,7 @@ class QueuePair {
       uintptr_t raddr, uint8_t opcode, bool ring_db);
   __device__ void bnxt_post_wqe_rma_with_keys(uint32_t size, uintptr_t raddr,
       uint32_t rkey, uintptr_t laddr, uint32_t lkey,
-      uint8_t opcode, ActiveWFInfo &wf_info);
+      uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
   __device__ void bnxt_quiet();
   __device__ void bnxt_quiet_single();
 #endif
@@ -407,7 +408,7 @@ class QueuePair {
       uintptr_t laddr, uintptr_t raddr, uint8_t opcode);
   __device__ void ionic_post_wqe_rma_with_keys(uint32_t size, uintptr_t raddr,
       uint32_t rkey, uintptr_t laddr, uint32_t lkey,
-      uint8_t opcode, ActiveWFInfo &wf_info);
+      uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
   __device__ void ionic_quiet(ActiveWFInfo &wf_info);
   __device__ void ionic_quiet_single();
 #endif
