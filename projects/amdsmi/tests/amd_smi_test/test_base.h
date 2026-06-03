@@ -141,7 +141,7 @@ class TestBase {
   bool dont_fail_;         ///< Don't quit test on individual failure if true
   uint64_t init_options_;  ///< rsmi initialization options
   uint32_t num_iterations_;
-  bool non_privileged_;  ///< Skip tests requiring hardware access (for CI)
+  bool non_privileged_;    ///< Skip tests requiring hardware access (for CI)
 };
 
 #define VERB(VB) ((verbosity() && verbosity() >= (TestBase::VERBOSE_##VB)))
