@@ -723,6 +723,9 @@ perfetto_processor_t::get_thread_track(std::uint64_t thread_id)
     auto _track = ::perfetto::ThreadTrack::ForThread(
         static_cast<::perfetto::base::PlatformThreadId>(thread_id));
 
+    // - Worker threads (sequent_value > 0) get a "Thread N" descriptor.
+    // - The main thread (sequent_value == 0) is intentionally left with its
+    //   default descriptor.
     const auto& _info = thread_info::get(static_cast<std::int64_t>(thread_id), SystemTID);
     if(_info && _info->index_data && _info->index_data->sequent_value > 0)
     {
