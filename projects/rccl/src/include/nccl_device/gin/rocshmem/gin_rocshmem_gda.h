@@ -80,12 +80,9 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
     uintptr_t dstAddr = loadConst(&dstMh->baseAddr) + dstOff;
     uint32_t dstRkey = loadConst(&dstMh->rkey);
 
-    // Write value to staging buffer and put it
-    void* staging = loadConst(&rsCtx->putValueStagingBuf);
-    *(T*)staging = srcVal;
-    uint32_t stagingLkey = loadConst(&rsCtx->putValueStagingLkey);
-
-    qp->put_nbi_with_keys((void*)dstAddr, staging, sizeof(T), peer, wf_info, dstRkey, stagingLkey);
+    // Pass srcVal by address — put_nbi_with_keys copies it inline into the WQE
+    // (inline_threshold >= sizeof(T)), so no registered MR or lkey is needed.
+    qp->put_nbi_with_keys((void*)dstAddr, &srcVal, sizeof(T), peer, wf_info, dstRkey, 0);
 
     if (hasSignal) {
       qp->quiet(wf_info);

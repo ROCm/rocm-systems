@@ -35,10 +35,9 @@ struct ginRocshmemCtx {
   // QP set from gin_qp_factory (owns IB resources)
   rocshmem_gin_qp_set_t qpSet;
 
-  // MRs for signal/counter/staging buffers
+  // MRs for signal/counter buffers
   void *signalMr;
   void *counterMr;
-  void *stagingMr;
 };
 
 // Host-side memory handle that wraps the GPU handle
@@ -75,8 +74,6 @@ ncclResult_t ncclGinRocshmemGdaCreateContext(struct ncclComm *comm, void *collCo
   ctx->qpSet = nullptr;
   ctx->signalMr = nullptr;
   ctx->counterMr = nullptr;
-  ctx->stagingMr = nullptr;
-
   // Allocate device handle
   NCCLCHECK(ncclCalloc(&ctx->devHandle, 1));
   ctx->devHandle->netDeviceType = NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA;
@@ -174,23 +171,6 @@ ncclResult_t ncclGinRocshmemGdaCreateContext(struct ncclComm *comm, void *collCo
   }
   hipMemset(ctx->gpuCtxHost.pendingWqeCount, 0, sizeof(uint32_t) * ctx->nRanks);
 
-  // Allocate and register putValue staging buffer (8 bytes)
-  if (hipMalloc(&ctx->gpuCtxHost.putValueStagingBuf, 8) != hipSuccess) {
-    ret = ncclSystemError;
-    goto fail;
-  }
-  {
-    uint32_t stagingLkey, stagingRkey;
-    if (rocshmem_gin_reg_mr(ctx->qpSet, ctx->gpuCtxHost.putValueStagingBuf, 8,
-                             /*atomic=*/0, &ctx->stagingMr,
-                             &stagingLkey, &stagingRkey) != 0) {
-      WARN("GIN rocshmem: failed to register staging buffer MR");
-      ret = ncclSystemError;
-      goto fail;
-    }
-    ctx->gpuCtxHost.putValueStagingLkey = stagingLkey;
-  }
-
   // Copy GPU context to device
   if (hipMemcpy(ctx->gpuCtxDev, &ctx->gpuCtxHost, sizeof(ncclGinRocshmemGdaGPUContext),
                 hipMemcpyHostToDevice) != hipSuccess) {
@@ -210,14 +190,12 @@ ncclResult_t ncclGinRocshmemGdaCreateContext(struct ncclComm *comm, void *collCo
 fail:
   if (ctx) {
     if (ctx->signalMr) rocshmem_gin_dereg_mr(ctx->signalMr);
-    if (ctx->stagingMr) rocshmem_gin_dereg_mr(ctx->stagingMr);
     if (ctx->qpSet) rocshmem_gin_destroy_qps(ctx->qpSet);
     if (ctx->gpuCtxHost.signals) hipFree(ctx->gpuCtxHost.signals);
     if (ctx->gpuCtxHost.counters) hipFree(ctx->gpuCtxHost.counters);
     if (ctx->gpuCtxHost.signal_rkeys) hipFree(ctx->gpuCtxHost.signal_rkeys);
     if (ctx->gpuCtxHost.signal_raddrs) hipFree(ctx->gpuCtxHost.signal_raddrs);
     if (ctx->gpuCtxHost.pendingWqeCount) hipFree(ctx->gpuCtxHost.pendingWqeCount);
-    if (ctx->gpuCtxHost.putValueStagingBuf) hipFree(ctx->gpuCtxHost.putValueStagingBuf);
     if (ctx->gpuCtxDev) hipFree(ctx->gpuCtxDev);
     free(ctx->devHandle);
     free(ctx);
@@ -231,7 +209,6 @@ ncclResult_t ncclGinRocshmemGdaDestroyContext(ncclGin_t *ginComm, void *ginCtx) 
 
   if (ctx->signalMr) rocshmem_gin_dereg_mr(ctx->signalMr);
   if (ctx->counterMr) rocshmem_gin_dereg_mr(ctx->counterMr);
-  if (ctx->stagingMr) rocshmem_gin_dereg_mr(ctx->stagingMr);
   if (ctx->qpSet) rocshmem_gin_destroy_qps(ctx->qpSet);
 
   if (ctx->gpuCtxHost.signals) hipFree(ctx->gpuCtxHost.signals);
@@ -239,7 +216,6 @@ ncclResult_t ncclGinRocshmemGdaDestroyContext(ncclGin_t *ginComm, void *ginCtx) 
   if (ctx->gpuCtxHost.signal_rkeys) hipFree(ctx->gpuCtxHost.signal_rkeys);
   if (ctx->gpuCtxHost.signal_raddrs) hipFree(ctx->gpuCtxHost.signal_raddrs);
   if (ctx->gpuCtxHost.pendingWqeCount) hipFree(ctx->gpuCtxHost.pendingWqeCount);
-  if (ctx->gpuCtxHost.putValueStagingBuf) hipFree(ctx->gpuCtxHost.putValueStagingBuf);
   if (ctx->gpuCtxDev) hipFree(ctx->gpuCtxDev);
   free(ctx->devHandle);
   free(ctx);

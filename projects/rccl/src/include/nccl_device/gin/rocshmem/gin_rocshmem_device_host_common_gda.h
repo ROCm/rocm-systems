@@ -19,8 +19,6 @@ struct ncclGinRocshmemGdaGPUContext {
   uint64_t* counters;               // GPU-allocated counter array
   uint32_t* signal_rkeys;           // Per-peer rkeys for signal memory
   uintptr_t* signal_raddrs;         // Per-peer remote base addresses for signals
-  void* putValueStagingBuf;         // 8-byte staging buffer for inline puts
-  uint32_t putValueStagingLkey;     // lkey for staging buffer
   uint32_t* pendingWqeCount;        // Per-peer pending WQE count for granular flush
   uint32_t nSignals;
   uint32_t nCounters;
