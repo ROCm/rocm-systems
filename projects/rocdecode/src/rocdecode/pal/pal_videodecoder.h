@@ -119,8 +119,9 @@ private:
  * @brief DPB (Decoded Picture Buffer) slot for reference frames
  */
 struct PalDpbSlot {
-    PalObject<Pal::IImage> image;           // Decoded frame surface (NV12/P010)
+    PalObject<Pal::IImage> image;            // Decoded frame surface (NV12/P010)
     PalObject<Pal::IGpuMemory> image_memory; // Backing GPU memory
+    PalObject<Pal::IFence> fence;            // Signaled when this slot's decode completes
     uint32_t image_index;                    // Array layer (usually 0)
 
     bool occupied;
@@ -289,7 +290,6 @@ private:
     PalObject<Pal::IQueue> video_queue_;
     PalObject<Pal::ICmdAllocator> cmd_allocator_;
     PalObject<Pal::ICmdBuffer> cmd_buffer_;
-    PalObject<Pal::IFence> fence_;
     PalObject<Pal::IVideoDecoder> video_decoder_;
 
     rocDecVideoCodec codec_;
@@ -305,6 +305,7 @@ private:
 
     bool initialized_;
     bool session_begun_;
+    int32_t last_submitted_slot_idx_; // DPB slot index of the most recently submitted frame
     std::mutex mutex_;
 
     // Platform singleton state (recursive mutex because GetPalDevice calls GetPalPlatform)
