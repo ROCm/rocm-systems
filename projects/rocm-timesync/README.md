@@ -38,27 +38,27 @@ to communicate via explicit IPC with the ROCm-timesync service to get timesync
 data. We envision an API with at least the following API functions
 
 1. `query_timesync_freq(hsa_agent_id_t agent, uint32_t *hz int *num_hz)`
-- return to the caller a set of streaming frequencies, in Hz, supported by ROCR-timesync for agent `agent` on this system
+    - return to the caller a set of streaming frequencies, in Hz, supported by ROCR-timesync for agent `agent` on this system
 
 2. `enable_timesync_freq(hsa_agent_id_t agent, uint32_t freq)`
-- enable timestamp generation at `freq` Hz for agent `agent`
+    - enable timestamp generation at `freq` Hz for agent `agent`
 
-Notes:
-- If not already running, deploys new thread which attaches to the *lttng* data stream and marshals data into the persistent datastore (e.g., *InfluxDB*)
-- If already running, update a counter indicating the presence of an additional active consumer
+**Notes**
+    - If not already running, deploys new thread which attaches to the *lttng* data stream and marshals data into the persistent datastore (e.g., *InfluxDB*)
+    - If already running, update a counter indicating the presence of an additional active consumer
 
 3. `disable_timesync_freq(hsa_agent_id_t agent, uint32_t freq)`
-- disable timestamp generation at `freq` Hz for agent `agent`
+    - disable timestamp generation at `freq` Hz for agent `agent`
 
-Notes:
-- Decrement count of active consumers for *{agent, freq} lttng stream*.
-    - If this count reaches 0, thread can detach from *lttng* data stream.
-- Decrement count of total active consumers across *all lttng streams*.
-    - If this count reached 0, the backend storage can be deleted, pruned, etc
-        - Exact decision is according to policy; the upshot is that such storage is not needed for ROCR time translation as there are no active ROCR instances.
+**Notes**
+    - Decrement count of active consumers for *{agent, freq} lttng stream*.
+        - If this count reaches 0, thread can detach from *lttng* data stream.
+    - Decrement count of total active consumers across *all lttng streams*.
+        - If this count reached 0, the backend storage can be deleted, pruned, etc
+            - Exact decision is according to policy; the upshot is that such storage is not needed for ROCR time translation as there are no active ROCR instances.
 
 4. attach_stream(hsa_agent_id_t agent, uint32_t freq)
-- Exports raw *{agent, freq} lttng stream* for external consumption (e.g., debugging or piping to a customer datastore)
+    - Exports raw *{agent, freq} lttng stream* for external consumption (e.g., debugging or piping to a customer datastore)
 
 5. translate_time_to_system(hsa_agent_id_t agent, uint64_t agent_timestamp)
-- Translates 'timestamp' from 'agent' domain to system (PTP) domain by querying the internal backend data store
+    - Translates 'timestamp' from 'agent' domain to system (PTP) domain by querying the internal backend data store
