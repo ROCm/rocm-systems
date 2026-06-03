@@ -128,6 +128,14 @@ impl Engine {
             name.to_string(),
             "--hostname".to_string(),
             name.to_string(),
+            // Run the GPU device nodes unconfined and keep the launching
+            // user's supplementary groups inside the container so the
+            // workload can open `/dev/kfd` and `/dev/dri/*` (podman drops
+            // them by default, which breaks ROCm device access).
+            "--security-opt".to_string(),
+            "seccomp=unconfined".to_string(),
+            "--group-add".to_string(),
+            "keep-groups".to_string(),
         ];
         if let Some(net) = network {
             argv.push("--network".to_string());
@@ -480,6 +488,8 @@ mod tests {
 
         let joined = argv.join(" ");
         assert!(joined.starts_with("run -d --name mirage-s-node-0 --hostname mirage-s-node-0"));
+        assert!(joined.contains("--security-opt seccomp=unconfined"));
+        assert!(joined.contains("--group-add keep-groups"));
         assert!(joined.contains("--network mirage-s"));
         assert!(joined.contains("-e MIRAGE_RANK=0"));
         assert!(joined.contains("-e MIRAGE_HEAD_PORT=5000"));
