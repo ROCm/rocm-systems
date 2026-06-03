@@ -47,9 +47,7 @@ private:
   std::optional<int64_t> branch_delta_;
 };
 
-std::vector<uint8_t> dummy_text(size_t size = 16) {
-  return std::vector<uint8_t>(size, 0xCC);
-}
+std::vector<uint8_t> dummy_text(size_t size = 16) { return std::vector<uint8_t>(size, 0xCC); }
 
 //==============================================================================
 // Section 1: validate_anchor (synthetic)
@@ -62,7 +60,8 @@ TEST(Validator, AcceptsFourByteRelocatable) {
   InstrumentationPoint pt;
 
   std::string err;
-  auto site = validate_anchor(anchor, /*anchor_offset=*/0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err);
+  auto site =
+      validate_anchor(anchor, /*anchor_offset=*/0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err);
   ASSERT_TRUE(site.has_value()) << err;
   EXPECT_EQ(site->original_size, 4u);
   EXPECT_EQ(site->original_bytes.size(), 4u);
@@ -151,7 +150,8 @@ TEST(Validator, RejectsUnalignedOffset) {
   InstrumentationPoint pt;
   std::string err;
   EXPECT_FALSE(
-      validate_anchor(anchor, /*anchor_offset=*/2, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value());
+      validate_anchor(anchor, /*anchor_offset=*/2, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err)
+          .has_value());
   EXPECT_FALSE(err.empty());
 }
 
@@ -162,7 +162,8 @@ TEST(Validator, RejectsOutOfBoundsOffset) {
   InstrumentationPoint pt;
   std::string err;
   EXPECT_FALSE(
-      validate_anchor(anchor, /*anchor_offset=*/4, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value());
+      validate_anchor(anchor, /*anchor_offset=*/4, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err)
+          .has_value());
   EXPECT_FALSE(err.empty());
 }
 
@@ -227,8 +228,7 @@ TEST(Validator, RejectsDenylistedMnemonic) {
   InstrumentationPoint pt;
 
   // PC-relative semantics that may not surface in flags / branch_offset_bytes.
-  for (const char *m : {"s_getpc_b64", "s_call_b64", "s_setpc_b64", "s_swappc_b64",
-                        "s_rfe_b64"}) {
+  for (const char *m : {"s_getpc_b64", "s_call_b64", "s_setpc_b64", "s_swappc_b64", "s_rfe_b64"}) {
     TestInstruction anchor(m, 4, /*flags=*/0, std::nullopt, &kRaw);
     std::string err;
     EXPECT_FALSE(validate_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value())
@@ -269,8 +269,7 @@ TEST(InlineNopGuardrail, RejectsNonCanonicalBody) {
     auto plan = valid_plan();
     plan.before_items.push_back(InlineAsmItem{{build_s_nop(0, kArch)}});
     std::string err;
-    EXPECT_FALSE(validate_inline_nop_plan(plan, &err))
-        << "extra before-item must be rejected";
+    EXPECT_FALSE(validate_inline_nop_plan(plan, &err)) << "extra before-item must be rejected";
     EXPECT_FALSE(err.empty());
   }
 
@@ -289,8 +288,7 @@ TEST(InlineNopGuardrail, RejectsNonCanonicalBody) {
     auto plan = valid_plan();
     plan.after_items.push_back(InlineAsmItem{{build_s_nop(0, kArch)}});
     std::string err;
-    EXPECT_FALSE(validate_inline_nop_plan(plan, &err))
-        << "non-empty after_items must be rejected";
+    EXPECT_FALSE(validate_inline_nop_plan(plan, &err)) << "non-empty after_items must be rejected";
     EXPECT_FALSE(err.empty());
   }
 
@@ -299,8 +297,7 @@ TEST(InlineNopGuardrail, RejectsNonCanonicalBody) {
     auto plan = valid_plan();
     plan.emit_original = false;
     std::string err;
-    EXPECT_FALSE(validate_inline_nop_plan(plan, &err))
-        << "emit_original = false must be rejected";
+    EXPECT_FALSE(validate_inline_nop_plan(plan, &err)) << "emit_original = false must be rejected";
     EXPECT_FALSE(err.empty());
   }
 }
@@ -853,14 +850,15 @@ protected:
         << (result_.errors.empty() ? std::string{} : result_.errors.front());
     ASSERT_FALSE(result_.elf_bytes.empty());
 
-    patched_ = std::make_unique<AmdGpuCodeObject>(result_.elf_bytes.data(),
-                                                  result_.elf_bytes.size());
+    patched_ =
+        std::make_unique<AmdGpuCodeObject>(result_.elf_bytes.data(), result_.elf_bytes.size());
     ASSERT_TRUE(patched_->is_valid());
   }
 
   const Section *find_section(std::string_view name) const {
     for (const Section *s : patched_->code_sections())
-      if (s->name() == name) return s;
+      if (s->name() == name)
+        return s;
     return nullptr;
   }
 
@@ -877,8 +875,7 @@ TEST_F(InstrumentorPatchElfShape, RjTrampolinesSectionExists) {
 TEST_F(InstrumentorPatchElfShape, RjTrampolinesIsExecutable) {
   const Section *tramp = find_section(".rj_trampolines");
   ASSERT_NE(tramp, nullptr);
-  EXPECT_NE(tramp->flags() & SHF_EXECINSTR, 0u)
-      << ".rj_trampolines must have SHF_EXECINSTR";
+  EXPECT_NE(tramp->flags() & SHF_EXECINSTR, 0u) << ".rj_trampolines must have SHF_EXECINSTR";
 }
 
 TEST_F(InstrumentorPatchElfShape, RjTrampolinesPlacedImmediatelyAfterText) {
@@ -913,8 +910,10 @@ TEST_F(InstrumentorPatchElfShape, CodeSectionsIncludesTextAndTrampoline) {
   bool saw_text = false;
   bool saw_tramp = false;
   for (const Section *s : patched_->code_sections()) {
-    if (s->name() == ".text") saw_text = true;
-    if (s->name() == ".rj_trampolines") saw_tramp = true;
+    if (s->name() == ".text")
+      saw_text = true;
+    if (s->name() == ".rj_trampolines")
+      saw_tramp = true;
   }
   EXPECT_TRUE(saw_text) << "code_sections() must include .text";
   EXPECT_TRUE(saw_tramp) << "code_sections() must include .rj_trampolines";
@@ -943,8 +942,8 @@ protected:
         << (result_.errors.empty() ? std::string{} : result_.errors.front());
     ASSERT_FALSE(result_.elf_bytes.empty());
 
-    patched_ = std::make_unique<AmdGpuCodeObject>(result_.elf_bytes.data(),
-                                                  result_.elf_bytes.size());
+    patched_ =
+        std::make_unique<AmdGpuCodeObject>(result_.elf_bytes.data(), result_.elf_bytes.size());
     ASSERT_TRUE(patched_->is_valid());
 
     decoder_ = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
@@ -953,7 +952,8 @@ protected:
 
   const Section *find_section(std::string_view name) const {
     for (const Section *s : patched_->code_sections())
-      if (s->name() == name) return s;
+      if (s->name() == name)
+        return s;
     return nullptr;
   }
 
@@ -981,8 +981,7 @@ TEST_F(InstrumentorPatchDecoded, PatchedAnchorDecodesAsForwardSBranch) {
   ASSERT_TRUE(inst->branch_offset_bytes().has_value())
       << "patched anchor must report a PC-relative branch offset";
   EXPECT_GE(*inst->branch_offset_bytes(), 0)
-      << "forward branch offset must be non-negative; got "
-      << *inst->branch_offset_bytes();
+      << "forward branch offset must be non-negative; got " << *inst->branch_offset_bytes();
 }
 
 TEST_F(InstrumentorPatchDecoded, UnpatchedTextInstructionIsUnchanged) {
@@ -1035,8 +1034,7 @@ TEST_F(InstrumentorPatchDecoded, TrampolineReturnDecodesAsBackwardSBranch) {
   ASSERT_TRUE(inst->branch_offset_bytes().has_value())
       << "return must report a PC-relative branch offset";
   EXPECT_LT(*inst->branch_offset_bytes(), 0)
-      << "return branch offset must be negative; got "
-      << *inst->branch_offset_bytes();
+      << "return branch offset must be negative; got " << *inst->branch_offset_bytes();
 }
 
 // End-to-end behavioral check: decode the patched s_branch and the return

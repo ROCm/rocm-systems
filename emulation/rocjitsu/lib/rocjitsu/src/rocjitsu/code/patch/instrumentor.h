@@ -138,8 +138,7 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 /// Fills before_items = {{ s_nop 0 }}, after_items = {}, emit_original = true.
 /// The caller chooses @p trampoline_offset (typically `patcher.text_size()`).
 [[nodiscard]] TrampolinePlan make_trampoline_plan(const ResolvedInstrumentationSite &site,
-                                                  rj_code_arch_t arch,
-                                                  uint64_t trampoline_offset);
+                                                  rj_code_arch_t arch, uint64_t trampoline_offset);
 
 /// @brief Verify @p plan matches the inline-nop canonical body shape: exactly
 ///        one `before_items` entry containing `s_nop 0`, empty `after_items`,
@@ -231,8 +230,8 @@ private:
 
   void ensure_blocks_built();
   [[nodiscard]] const Instruction *find_instruction_at_offset(uint64_t anchor_offset);
-  [[nodiscard]] std::optional<uint64_t>
-  resolve_anchor_inst_to_offset(const Instruction *target, std::string *error_out);
+  [[nodiscard]] std::optional<uint64_t> resolve_anchor_inst_to_offset(const Instruction *target,
+                                                                      std::string *error_out);
 };
 
 } // namespace rocjitsu

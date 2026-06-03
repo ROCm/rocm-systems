@@ -70,11 +70,10 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
 ///
 /// Shared by DBT cave-entry/return branches and the DBI relocation trampoline
 /// so both paths fail closed on the same range.
-[[nodiscard]] inline constexpr std::optional<int16_t>
-compute_sopp_branch_simm16(uint64_t branch_pc, uint64_t target) {
+[[nodiscard]] inline constexpr std::optional<int16_t> compute_sopp_branch_simm16(uint64_t branch_pc,
+                                                                                 uint64_t target) {
   constexpr int64_t kBranchPcBiasBytes = static_cast<int64_t>(sizeof(uint32_t));
-  constexpr uint64_t kMaxSignedTarget =
-      static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
+  constexpr uint64_t kMaxSignedTarget = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
   constexpr uint64_t kMaxSignedBranchPc =
       static_cast<uint64_t>(std::numeric_limits<int64_t>::max() - kBranchPcBiasBytes);
   if (branch_pc > kMaxSignedBranchPc || target > kMaxSignedTarget)

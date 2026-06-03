@@ -459,7 +459,10 @@ if(HSA_RUNTIME64)
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
             )
             if(RJ_DBI_TIMEOUT)
-                set_tests_properties("${name}" PROPERTIES TIMEOUT ${RJ_DBI_TIMEOUT})
+                set_tests_properties(
+                    "${name}"
+                    PROPERTIES TIMEOUT ${RJ_DBI_TIMEOUT}
+                )
             endif()
         endfunction()
 
@@ -473,10 +476,7 @@ if(HSA_RUNTIME64)
             register_hsa_dbi_smoke_case(Hardware PatchedElfLoadsAndValidatesInHsaExecutable)
             register_hsa_dbi_smoke_case(Hardware PatchedKernelDispatchMatchesOriginal TIMEOUT 30)
             register_hsa_dbi_smoke_case(Hardware TrampolineIsActuallyExecutedByGpu TIMEOUT 30)
-            message(
-                STATUS
-                "HSA DBI smoke test enabled (gfx90a detected)"
-            )
+            message(STATUS "HSA DBI smoke test enabled (gfx90a detected)")
         else()
             message(
                 STATUS

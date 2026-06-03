@@ -38,9 +38,7 @@ using namespace rocjitsu;
 
 namespace {
 
-std::string kernel_path(const char *name) {
-  return std::string(KERNEL_DIR) + "/" + name + ".o";
-}
+std::string kernel_path(const char *name) { return std::string(KERNEL_DIR) + "/" + name + ".o"; }
 
 // Find a GPU agent whose ISA name contains "gfx90a". Returns {handle=0} if
 // no such agent is present.
@@ -165,14 +163,14 @@ std::vector<float> dispatch_vector_add(std::span<const uint8_t> elf_bytes, hsa_a
 
   bool ok = (gpu_pool.handle != 0) && (kernarg_pool.handle != 0);
   if (ok)
-    ok = hsa_amd_memory_pool_allocate(gpu_pool, buf_size, 0,
-                                      reinterpret_cast<void **>(&A_dev)) == HSA_STATUS_SUCCESS;
+    ok = hsa_amd_memory_pool_allocate(gpu_pool, buf_size, 0, reinterpret_cast<void **>(&A_dev)) ==
+         HSA_STATUS_SUCCESS;
   if (ok)
-    ok = hsa_amd_memory_pool_allocate(gpu_pool, buf_size, 0,
-                                      reinterpret_cast<void **>(&B_dev)) == HSA_STATUS_SUCCESS;
+    ok = hsa_amd_memory_pool_allocate(gpu_pool, buf_size, 0, reinterpret_cast<void **>(&B_dev)) ==
+         HSA_STATUS_SUCCESS;
   if (ok)
-    ok = hsa_amd_memory_pool_allocate(gpu_pool, buf_size, 0,
-                                      reinterpret_cast<void **>(&C_dev)) == HSA_STATUS_SUCCESS;
+    ok = hsa_amd_memory_pool_allocate(gpu_pool, buf_size, 0, reinterpret_cast<void **>(&C_dev)) ==
+         HSA_STATUS_SUCCESS;
   if (ok)
     ok = hsa_amd_memory_pool_allocate(kernarg_pool, kKernArgsBytes, 0, &kernarg) ==
          HSA_STATUS_SUCCESS;
@@ -273,7 +271,6 @@ std::vector<float> dispatch_vector_add(std::span<const uint8_t> elf_bytes, hsa_a
 //   - HsaDbiSmokeHardware.* - registered only when HAS_CDNA2_GPU is set
 class HsaDbiSmokeFixture : public ::testing::Test {
 protected:
-
   // Load a vector_add_gfx90a.o device ELF and instrument a single instruction
   // with the inlined nop functionality currently available in Instrumentor
   void SetUp() override {
@@ -285,9 +282,9 @@ protected:
     ASSERT_NE(co, nullptr);
 
     // Snapshot the original device ELF so we can dispatch it too
-    original_elf_bytes_.assign(
-        reinterpret_cast<const uint8_t *>(co->image_data()),
-        reinterpret_cast<const uint8_t *>(co->image_data()) + co->image_size());
+    original_elf_bytes_.assign(reinterpret_cast<const uint8_t *>(co->image_data()),
+                               reinterpret_cast<const uint8_t *>(co->image_data()) +
+                                   co->image_size());
 
     // Decode .text and find the first v_add_f32-mnemonic anchor that
     // satisfies the validator's relocatability rules. Decode-and-search so
@@ -301,14 +298,12 @@ protected:
     for (const auto &block : blocks) {
       uint64_t cur = block->start_offset();
       for (const Instruction &inst : block->instructions()) {
-        const bool is_vadd =
-            inst.mnemonic().find("v_add_f32") != std::string_view::npos;
+        const bool is_vadd = inst.mnemonic().find("v_add_f32") != std::string_view::npos;
         // TODO: Okay for now but Instrumentor should do this check
         const bool relocatable = inst.size() == 4 && inst.raw_encoding() != nullptr &&
-                                 !inst.is_branch() &&
-                                 !inst.branch_offset_bytes().has_value();
+                                 !inst.is_branch() && !inst.branch_offset_bytes().has_value();
         if (is_vadd && relocatable) {
-          anchor_offset_ = cur;   // Instrumentor will need offset
+          anchor_offset_ = cur; // Instrumentor will need offset
           anchor_mnemonic_ = std::string(inst.mnemonic());
           found = true;
           break;
@@ -373,8 +368,8 @@ TEST_F(HsaDbiSmokeStatic, PatchedElfActuallyContainsInstrumentation) {
   std::unique_ptr<Instruction> decoded(decoder->decode(&anchor_word));
   ASSERT_NE(decoded, nullptr);
   EXPECT_NE(decoded->mnemonic().find("s_branch"), std::string_view::npos)
-      << "Anchor at offset " << anchor_offset_ << " should now decode as s_branch; got: "
-      << decoded->mnemonic();
+      << "Anchor at offset " << anchor_offset_
+      << " should now decode as s_branch; got: " << decoded->mnemonic();
   EXPECT_NE(decoded->mnemonic(), anchor_mnemonic_)
       << "Anchor mnemonic unchanged (" << anchor_mnemonic_ << ") - was the patch applied?";
 
@@ -403,15 +398,14 @@ TEST_F(HsaDbiSmokeHardware, PatchedElfLoadsAndValidatesInHsaExecutable) {
   }
 
   hsa_code_object_reader_t reader{};
-  ASSERT_EQ(hsa_code_object_reader_create_from_memory(
-                patched_elf_bytes_.data(), patched_elf_bytes_.size(), &reader),
+  ASSERT_EQ(hsa_code_object_reader_create_from_memory(patched_elf_bytes_.data(),
+                                                      patched_elf_bytes_.size(), &reader),
             HSA_STATUS_SUCCESS)
       << "Patched ELF rejected by hsa_code_object_reader_create_from_memory";
 
   hsa_executable_t executable{};
-  ASSERT_EQ(hsa_executable_create_alt(HSA_PROFILE_FULL,
-                                       HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT,
-                                       nullptr, &executable),
+  ASSERT_EQ(hsa_executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT,
+                                      nullptr, &executable),
             HSA_STATUS_SUCCESS);
 
   ASSERT_EQ(hsa_executable_load_agent_code_object(executable, gpu, reader, nullptr, nullptr),
@@ -422,8 +416,7 @@ TEST_F(HsaDbiSmokeHardware, PatchedElfLoadsAndValidatesInHsaExecutable) {
 
   uint32_t validate_result = 0;
   ASSERT_EQ(hsa_executable_validate(executable, &validate_result), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(validate_result, 0u)
-      << "hsa_executable_validate reported error: " << validate_result;
+  EXPECT_EQ(validate_result, 0u) << "hsa_executable_validate reported error: " << validate_result;
 
   // Sanity: the kernel symbol is still findable post-patch.
   hsa_executable_symbol_t symbol{};
@@ -486,9 +479,9 @@ TEST_F(HsaDbiSmokeHardware, PatchedKernelDispatchMatchesOriginal) {
     if (std::abs(orig_out[i] - golden[i]) > 1e-5f)
       ++orig_mismatches;
   }
-  ASSERT_EQ(orig_mismatches, 0)
-      << "original vector_add dispatch produced " << orig_mismatches << "/" << N
-      << " mismatches against CPU golden (test fixture problem)";
+  ASSERT_EQ(orig_mismatches, 0) << "original vector_add dispatch produced " << orig_mismatches
+                                << "/" << N
+                                << " mismatches against CPU golden (test fixture problem)";
 
   // The real check: patched dispatch must produce the same buffer as the
   // original. Bit-identical because the trampoline body is just s_nop 0
@@ -543,16 +536,14 @@ TEST_F(HsaDbiSmokeHardware, TrampolineIsActuallyExecutedByGpu) {
   // s_nop 0. If this assertion fails, the orchestrator's trampoline layout
   // no longer starts with the placeholder we think it does, and the
   // sabotage premise ("we replaced the no-op with s_endpgm") would be a lie.
-  // TODO: With multiple instrumentation points, this will no longer be a good 
+  // TODO: With multiple instrumentation points, this will no longer be a good
   // assumption. Will likely need to sabotage the whole section.
   constexpr uint32_t kSNop0 = 0xBF800000u;
   uint32_t pre_overwrite = 0;
-  std::memcpy(&pre_overwrite, sabotaged.data() + tramp->sectionOffset(),
-              sizeof(pre_overwrite));
-  ASSERT_EQ(pre_overwrite, kSNop0)
-      << "Expected s_nop 0 (0x" << std::hex << kSNop0
-      << ") at start of .rj_trampolines but found 0x" << pre_overwrite
-      << " - trampoline body layout changed?";
+  std::memcpy(&pre_overwrite, sabotaged.data() + tramp->sectionOffset(), sizeof(pre_overwrite));
+  ASSERT_EQ(pre_overwrite, kSNop0) << "Expected s_nop 0 (0x" << std::hex << kSNop0
+                                   << ") at start of .rj_trampolines but found 0x" << pre_overwrite
+                                   << " - trampoline body layout changed?";
 
   // s_endpgm 0 on CDNA: SOPP prefix (0x17F) << 23 | opcode 1 << 16 | simm16 0.
   constexpr uint32_t kSEndpgm0 = 0xBF810000u;

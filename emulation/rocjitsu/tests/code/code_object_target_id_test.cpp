@@ -163,7 +163,8 @@ void expect_c_api_accepts_target(uint32_t mach_flag, rj_code_target_id_t target)
   //   - blocks came from _create()   -> refcount 0 -> destroy only.
   //   - obj    came from _get_code_object() -> refcount 1 -> destroy + release.
   //   - exec   came from _create()   -> refcount 0 -> destroy only.
-  if (blocks) rj_code_basic_block_list_destroy(blocks);
+  if (blocks)
+    rj_code_basic_block_list_destroy(blocks);
   rj_code_object_destroy(obj);
   rj_code_object_release(obj);
   rj_code_executable_destroy(exec);

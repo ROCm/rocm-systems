@@ -69,8 +69,8 @@ public:
   /// The builder does not enforce milestone-scoped restrictions on body
   /// shape; the orchestrator decides what kind of plan to emit and calls
   /// validate_inline_nop_plan (in instrumentor.h) when appropriate.
-  [[nodiscard]] static std::optional<TrampolineBytes>
-  build(const TrampolinePlan &plan, std::string *error_out = nullptr);
+  [[nodiscard]] static std::optional<TrampolineBytes> build(const TrampolinePlan &plan,
+                                                            std::string *error_out = nullptr);
 };
 
 } // namespace rocjitsu
