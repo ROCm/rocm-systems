@@ -18,6 +18,8 @@
 #include <cstdint>
 
 #include <map>
+#include <memory>
+#include <mutex>
 #include <thread>
 #include <timemory/components/gotcha/backends.hpp>
 #include <timemory/hash/types.hpp>
@@ -52,10 +54,59 @@ struct entry_key
 
 using timestamp_t = std::uint64_t;
 
-inline thread_local std::map<entry_key, std::vector<timestamp_t>> map_name_to_args;
+/// Per-thread stack of in-flight (started but not yet stopped) region begin
+/// timestamps, keyed by name+category
+struct pending_region_storage_t
+{
+    std::uint64_t                                 thread_id        = 0;
+    std::map<entry_key, std::vector<timestamp_t>> map_name_to_args = {};
+};
+
+/// Global registry of every thread's pending-region storage. The registry owns the
+/// storages so they outlive the threads that created them, allowing the finalizing
+/// thread to flush orphaned frames belonging to parked/exited workers
+struct pending_region_registry_t
+{
+    static inline std::vector<std::unique_ptr<pending_region_storage_t>>
+                             thread_storages      = {};
+    static inline std::mutex thread_storage_mutex = {};
+
+    static pending_region_storage_t* acquire()
+    {
+        std::lock_guard<std::mutex> _lk{ thread_storage_mutex };
+        thread_storages.emplace_back(std::make_unique<pending_region_storage_t>());
+        return thread_storages.back().get();
+    }
+};
 
 namespace
 {
+
+/// Per-thread handle into the global registry. The first access on a thread allocates
+/// and registers a dedicated storage; subsequent accesses reuse the cached pointer
+inline pending_region_storage_t&
+get_pending_region_storage()
+{
+    static thread_local pending_region_storage_t* _v =
+        pending_region_registry_t::acquire();
+    return *_v;
+}
+
+/// Resolve the calling thread's system tid and make sure its metadata is registered
+inline std::uint64_t
+current_region_thread_id()
+{
+    const auto& extended_info = rocprofsys::thread_info::get(std::this_thread::get_id());
+    if(extended_info.has_value() && extended_info->index_data.has_value())
+    {
+        constexpr size_t    UNKNOWN_TIME = 0;
+        const std::uint64_t thread_id    = extended_info->index_data->system_value;
+        rocprofsys::trace_cache::get_metadata_registry().add_thread_info(
+            { getppid(), getpid(), thread_id, UNKNOWN_TIME, UNKNOWN_TIME, "{}" });
+        return thread_id;
+    }
+    return 0;
+}
 
 void
 cache_region(std::uint64_t thread_id, const std::string& name, std::uint64_t start_ts,
@@ -76,69 +127,78 @@ cache_start(const char* name)
 {
     const auto start_ts =
         static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
-    map_name_to_args[{ name, rocprofsys::trait::name<CategoryT>::value }].push_back(
-        start_ts);
+    auto& _storage = get_pending_region_storage();
+    if(_storage.thread_id == 0) _storage.thread_id = current_region_thread_id();
+    _storage.map_name_to_args[{ name, rocprofsys::trait::name<CategoryT>::value }]
+        .push_back(start_ts);
 }
 
 template <typename CategoryT>
 void
 cache_stop(const char* name)
 {
+    auto&     _storage = get_pending_region_storage();
     entry_key key{ name, rocprofsys::trait::name<CategoryT>::value };
-    auto      x = map_name_to_args.find(key);
-    if(x != map_name_to_args.end() && !x->second.empty())
+    auto      x = _storage.map_name_to_args.find(key);
+    if(x != _storage.map_name_to_args.end() && !x->second.empty())
     {
         auto timestamp = x->second.back();
         x->second.pop_back();
-        if(x->second.empty()) map_name_to_args.erase(x);
+        if(x->second.empty()) _storage.map_name_to_args.erase(x);
 
         const auto end_ts =
             static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
-        std::uint64_t thread_id = 0;
-
-        const auto& extended_info =
-            rocprofsys::thread_info::get(std::this_thread::get_id());
-        if(extended_info.has_value() && extended_info->index_data.has_value())
-        {
-            constexpr size_t UNKNOWN_TIME = 0;
-            thread_id                     = extended_info->index_data->system_value;
-            rocprofsys::trace_cache::get_metadata_registry().add_thread_info(
-                { getppid(), getpid(), thread_id, UNKNOWN_TIME, UNKNOWN_TIME, "{}" });
-        }
+        const auto thread_id = current_region_thread_id();
+        if(_storage.thread_id == 0) _storage.thread_id = thread_id;
 
         cache_region(thread_id, name, timestamp, end_ts,
                      rocprofsys::trait::name<CategoryT>::value);
     }
 }
 
+/// Drain a single thread's pending storage, emitting one region per outstanding
+/// push with a synthetic end timestamp. The frame name is also suffixed with
+/// "[incomplete]" (excluding the main thread's program-entry frame)
+inline void
+flush_pending_storage(pending_region_storage_t& _storage, timestamp_t end_ts)
+{
+    static constexpr std::string_view incomplete_suffix{ "incomplete" };
+    // The main thread's program-entry frame (named after the executable) is
+    // always open at finalization by design. It should not be tagged as incomplete
+    const auto& _exe_name = rocprofsys::config::get_exe_name();
+    for(const auto& [key, start_ts_stack] : _storage.map_name_to_args)
+    {
+        const auto _name = (key.name == _exe_name)
+                               ? key.name
+                               : fmt::format("{} [{}]", key.name, incomplete_suffix);
+        for(const auto& start_ts : start_ts_stack)
+        {
+            cache_region(_storage.thread_id, _name, start_ts, end_ts, key.category);
+        }
+    }
+    _storage.map_name_to_args.clear();
+}
+
 /// Flush all pending cached entries for this thread.
-/// Called during finalization to ensure entries that were started but not stopped
-/// (e.g., main entry point) are written to the trace cache. Every pending frame
-/// in each per-key stack is emitted, so recursive/self-nested regions that were
-/// never popped still produce one region per outstanding push.
 inline void
 flush_pending_cached_entries()
 {
     const auto end_ts = static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
-    std::uint64_t thread_id = 0;
+    flush_pending_storage(get_pending_region_storage(), end_ts);
+}
 
-    const auto& extended_info = rocprofsys::thread_info::get(std::this_thread::get_id());
-    if(extended_info.has_value() && extended_info->index_data.has_value())
+/// Flush pending cached entries across every thread.
+/// Identical to flush_pending_cached_entries() but drains the storages of all threads
+/// registered in the global registry, not just the calling thread
+inline void
+flush_all_pending_cached_entries()
+{
+    const auto end_ts = static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
+    std::lock_guard<std::mutex> _lk{ pending_region_registry_t::thread_storage_mutex };
+    for(auto& _storage : pending_region_registry_t::thread_storages)
     {
-        constexpr size_t UNKNOWN_TIME = 0;
-        thread_id                     = extended_info->index_data->system_value;
-        rocprofsys::trace_cache::get_metadata_registry().add_thread_info(
-            { getppid(), getpid(), thread_id, UNKNOWN_TIME, UNKNOWN_TIME, "{}" });
+        if(_storage) flush_pending_storage(*_storage, end_ts);
     }
-
-    for(const auto& [key, start_ts_stack] : map_name_to_args)
-    {
-        for(const auto& start_ts : start_ts_stack)
-        {
-            cache_region(thread_id, key.name, start_ts, end_ts, key.category);
-        }
-    }
-    map_name_to_args.clear();
 }
 }  // namespace
 
