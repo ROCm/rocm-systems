@@ -488,13 +488,13 @@ int ParseGpuOdFanCurrentPwm(const std::string& path, uint64_t* current_pwm) {
 rsmi_status_t WriteGpuOdFanPwm(const std::string& path, const std::string& value) {
   int write_ret = WriteSysfsStr(path, value);
   if (write_ret != 0) {
-    return SysfsWriteErrnoToRsmiStatus(write_ret);
+    return ErrnoToRsmiStatus(write_ret);
   }
 
   // Commit by writing 'c'
   write_ret = WriteSysfsStr(path, "c");
   if (write_ret != 0) {
-    return SysfsWriteErrnoToRsmiStatus(write_ret);
+    return ErrnoToRsmiStatus(write_ret);
   }
   return RSMI_STATUS_SUCCESS;
 }
