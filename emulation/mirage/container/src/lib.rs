@@ -564,7 +564,15 @@ mod tests {
         let engine = Engine::with_provider(provider.to_string_lossy().to_string());
 
         let cid = engine
-            .launch_node("mirage-s-node-0", "img", Some("mirage-s"), &[], &[], &[], &[])
+            .launch_node(
+                "mirage-s-node-0",
+                "img",
+                Some("mirage-s"),
+                &[],
+                &[],
+                &[],
+                &[],
+            )
             .unwrap();
         assert_eq!(cid, "fake-cid-123");
         let recorded = std::fs::read_to_string(&log).unwrap();
