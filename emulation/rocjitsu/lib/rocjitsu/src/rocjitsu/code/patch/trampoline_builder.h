@@ -10,7 +10,7 @@
 /// matches, branch ranges fit). It does not touch the ELF, does not own
 /// layout assignment, and does not enforce milestone-scoped restrictions
 /// (e.g. "only emit s_nop placeholder bodies" — that lives in the
-/// orchestrator as `validate_inline_nop_smoke_plan` in instrumentor.h).
+/// orchestrator as `validate_inline_nop_plan` in instrumentor.h).
 /// See code_object_patcher.h for the ELF mutation layer.
 
 #pragma once
@@ -68,7 +68,7 @@ public:
   ///
   /// The builder does not enforce milestone-scoped restrictions on body
   /// shape; the orchestrator decides what kind of plan to emit and calls
-  /// validate_inline_nop_smoke_plan (in instrumentor.h) when appropriate.
+  /// validate_inline_nop_plan (in instrumentor.h) when appropriate.
   [[nodiscard]] static std::optional<TrampolineBytes>
   build(const TrampolinePlan &plan, std::string *error_out = nullptr);
 };

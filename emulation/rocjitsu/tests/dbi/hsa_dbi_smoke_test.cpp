@@ -3,8 +3,8 @@
 
 /// @file hsa_dbi_smoke_test.cpp
 /// @brief End-to-end DBI smoke: patch a real compiled gfx90a kernel with
-///        Instrumentor::patch_relocation_only, then load and
-///        eventually dispatch the patched ELF via HSA.
+///        Instrumentor::patch, then load and eventually dispatch the patched
+///        ELF via HSA.
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -321,12 +321,12 @@ protected:
     ASSERT_TRUE(found) << "No relocatable v_add_f32 anchor in vector_add_gfx90a.o; "
                           "did the compiler change the lowering?";
 
-    // Patch via with the inlined nop (patch_relocation_only)
+    // Apply the inline-nop trampoline.
     Instrumentor instrumentor(*co, ROCJITSU_CODE_ARCH_CDNA2);
     instrumentor.add_point_by_offset(anchor_offset_);
-    auto result = instrumentor.patch_relocation_only();
+    auto result = instrumentor.patch();
     ASSERT_TRUE(result.errors.empty())
-        << "patch_relocation_only failed: "
+        << "Instrumentor::patch failed: "
         << (result.errors.empty() ? std::string{} : result.errors.front());
     patched_elf_bytes_ = std::move(result.elf_bytes);
     ASSERT_FALSE(patched_elf_bytes_.empty());
@@ -349,7 +349,7 @@ class HsaDbiSmokeHardware : public HsaDbiSmokeFixture {};
 // Static verification: prove the patcher actually changed the kernel before
 // any HSA / dispatch tests run. No GPU or HSA runtime required. Catches
 // failure modes that the byte-equality dispatch check cannot:
-//   - patcher silently produced the original bytes (e.g. patch_relocation_only
+//   - patcher silently produced the original bytes (e.g. Instrumentor::patch
 //     short-circuited without applying the patch)
 //   - patch landed at a different offset than anchor_offset_ records
 //   - .rj_trampolines section is missing from the patched ELF

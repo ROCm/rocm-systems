@@ -79,7 +79,7 @@ struct ResolvedInstrumentationSite {
   std::string mnemonic; // Diagnostic/debug only.
 };
 
-/// @brief Per-site patch record returned by patch_relocation_only().
+/// @brief Per-site patch record returned by Instrumentor::patch().
 ///
 /// Intended for test assertions and debugging only — a fresh disassembly of
 /// the emitted ELF would expose the same information. Not a proposed public
@@ -93,7 +93,7 @@ struct InstrumentationPatch {
   std::vector<uint8_t> patched_anchor_bytes;
 };
 
-/// @brief Result of patch_relocation_only().
+/// @brief Result of Instrumentor::patch().
 ///
 /// All-or-nothing: when any fatal error occurs, `elf_bytes` and `patches`
 /// are empty and `errors` is non-empty. On success, `errors` is empty,
@@ -106,7 +106,7 @@ struct InstrumentedCodeObject {
   std::vector<std::string> warnings;
 };
 
-/// @brief Validate that @p anchor is a legal relocation target.
+/// @brief Validate that @p anchor is a legal trampoline anchor.
 ///
 /// Called by Instrumentor::resolve_and_validate() and also directly by tests
 /// (the free-function form lets test fixtures use synthetic TestInstruction
@@ -129,35 +129,36 @@ struct InstrumentedCodeObject {
 ///   - anchor.mnemonic() is not in the small PC-relative denylist
 ///     (s_getpc_b64, s_call_b64, s_setpc_b64, s_swappc_b64, s_rfe_*).
 [[nodiscard]] std::optional<ResolvedInstrumentationSite>
-validate_relocation_anchor(const Instruction &anchor, uint64_t anchor_offset,
-                           std::span<const uint8_t> text_bytes,
-                           const InstrumentationPoint &pt, rj_code_arch_t arch,
-                           std::string *error_out = nullptr);
+validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
+                std::span<const uint8_t> text_bytes, const InstrumentationPoint &pt,
+                rj_code_arch_t arch, std::string *error_out = nullptr);
 
-/// @brief Build the inline-nop smoke TrampolinePlan from a validated site.
+/// @brief Build the inline-nop TrampolinePlan from a validated site.
 ///
 /// Fills before_items = {{ s_nop 0 }}, after_items = {}, emit_original = true.
 /// The caller chooses @p trampoline_offset (typically `patcher.text_size()`).
-[[nodiscard]] TrampolinePlan
-make_relocation_only_plan(const ResolvedInstrumentationSite &site, rj_code_arch_t arch,
-                          uint64_t trampoline_offset);
+[[nodiscard]] TrampolinePlan make_trampoline_plan(const ResolvedInstrumentationSite &site,
+                                                  rj_code_arch_t arch,
+                                                  uint64_t trampoline_offset);
 
-/// @brief Verify @p plan matches the inline-nop smoke build's canonical body
-///        shape: exactly one `before_items` entry containing `s_nop 0`, empty
-///        `after_items`, and `emit_original == true`.
+/// @brief Verify @p plan matches the inline-nop canonical body shape: exactly
+///        one `before_items` entry containing `s_nop 0`, empty `after_items`,
+///        and `emit_original == true`.
 ///
-/// Lives at the orchestrator boundary rather than inside TrampolineBuilder so
-/// the builder stays generic and ready for future probe-call / clobber-bearing
-/// inline-asm bodies. Called by Instrumentor::patch_relocation_only as a
-/// defense-in-depth check (make_relocation_only_plan always produces canonical
+/// One of several places where inline-nop milestone constraints are enforced.
+/// The others: validate_anchor() rejects reserved InstrumentationPoint fields,
+/// and Instrumentor::patch() rejects multi-text code objects and the multi-
+/// point case. This one lives at the orchestrator boundary rather than inside
+/// TrampolineBuilder so the builder stays generic and ready for future probe-
+/// call / clobber-bearing inline-asm bodies. Called by Instrumentor::patch()
+/// as a defense-in-depth check (make_trampoline_plan always produces canonical
 /// plans today) and also directly by tests so the guardrail logic is
 /// exercised at the layer where it lives.
 ///
 /// TODO(future milestone): delete this once arbitrary inline-asm bodies with
 /// declared clobbers are supported.
-[[nodiscard]] bool
-validate_inline_nop_smoke_plan(const TrampolinePlan &plan,
-                               std::string *error_out = nullptr);
+[[nodiscard]] bool validate_inline_nop_plan(const TrampolinePlan &plan,
+                                            std::string *error_out = nullptr);
 
 /// @brief DBI orchestrator owning point collection and resolution.
 ///
@@ -206,16 +207,16 @@ public:
 
   /// @brief Resolve, validate, plan, build, and patch the queued points.
   ///
-  /// Inline-nop smoke build accepts exactly one queued point; queuing zero
-  /// or more than one is a fatal error. The orchestrator preflights all
-  /// builder output before mutating the patcher, so a branch-range failure
-  /// can't leak a half-built ELF.
+  /// Inline-nop milestone accepts exactly one queued point; queuing zero or
+  /// more than one is a fatal error. The orchestrator preflights all builder
+  /// output before mutating the patcher, so a branch-range failure can't leak
+  /// a half-built ELF.
   ///
   /// Single-attempt: any call (success or failure) consumes the Instrumentor's
   /// budget. A second call returns an empty result with a fatal error, even
   /// if the first call failed for argument reasons (e.g., zero queued points).
   /// Callers that hit a recoverable error must construct a new Instrumentor.
-  [[nodiscard]] InstrumentedCodeObject patch_relocation_only();
+  [[nodiscard]] InstrumentedCodeObject patch();
 
 private:
   const AmdGpuCodeObject &obj_;
