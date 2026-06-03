@@ -150,6 +150,8 @@ declare -A TEST_NUMBERS=(
   ["tile_get_rowmajor"]="114"
   ["tile_get_colmajor"]="115"
   ["tile_get_arbitrary"]="116"
+  ["reduce_on_stream"]="117"
+  ["host_ctx_create"]="118"
 )
 
 ExecTest() {
@@ -211,6 +213,7 @@ ExecTest() {
         -x "ROCSHMEM_MAX_NUM_CONTEXTS=$ROCSHMEM_MAX_NUM_CONTEXTS"
         -x "UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384"
         -x "ROCSHMEM_HEAP_SIZE=$HEAP_SIZE"
+        ${ROCSHMEM_MAX_NUM_HOST_CONTEXTS:+-x "ROCSHMEM_MAX_NUM_HOST_CONTEXTS=$ROCSHMEM_MAX_NUM_HOST_CONTEXTS"}
         ${ROCSHMEM_TEST_USE_DEFAULT_STREAM:+-x "ROCSHMEM_TEST_USE_DEFAULT_STREAM=$ROCSHMEM_TEST_USE_DEFAULT_STREAM"}
         ${ROCSHMEM_TEST_UUID:+-x "ROCSHMEM_TEST_UUID=$ROCSHMEM_TEST_UUID"}
         ${TIMEOUT:+--timeout "$TIMEOUT"}
@@ -576,6 +579,11 @@ TestOnStream() {
   ExecTest  "sync_all_on_stream"     2  1           1
   ExecTest  "alltoallmem_on_stream"  2  1           64        1048576
   ExecTest  "broadcastmem_on_stream" 2  1           64        1048576
+  export ROCSHMEM_MAX_NUM_CONTEXTS=1024
+  export ROCSHMEM_MAX_NUM_HOST_CONTEXTS=1024
+  ExecTest  "reduce_on_stream"       2  1           64        1048576
+  unset ROCSHMEM_MAX_NUM_CONTEXTS
+  unset ROCSHMEM_MAX_NUM_HOST_CONTEXTS
 }
 
 TestOther() {
@@ -630,7 +638,10 @@ TestOther() {
   ExecTest  "teamctxsharedinfra"  5       1            1
   ExecTest  "teamctxsubsetparentinfra" 4  1            1
   ExecTest  "teamctxsubsetparentinfra" 5  1            1
+  export ROCSHMEM_MAX_NUM_HOST_CONTEXTS=1024
+  ExecTest  "host_ctx_create"          2       1            1
   unset ROCSHMEM_MAX_NUM_CONTEXTS
+  unset ROCSHMEM_MAX_NUM_HOST_CONTEXTS
 
   ExecTest  "shmemptr"         2       1            1         8
   ExecTest  "shmemptr"         2       1            1024      8

@@ -959,6 +959,10 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
     //                                        in a preset would break config
     //                                        file handling.
     //   ROCPROFSYS_CI                      - Internal CI mode flag.
+    //   ROCPROFSYS_LOG_LEVEL               - Diagnostic logging verbosity for
+    //                                        the profiler itself; controls how
+    //                                        the tool reports its own activity,
+    //                                        not what/how to profile.
     //   ROCPROFSYS_TMPDIR                  - Base directory for temporary
     //                                        files; depends on the system's
     //                                        filesystem layout, not profiling
