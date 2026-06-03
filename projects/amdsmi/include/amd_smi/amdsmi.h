@@ -1241,7 +1241,11 @@ typedef enum {
   AMDSMI_LINK_TYPE_PCIE = 1,            //!< Peripheral Component Interconnect Express Link Type
   AMDSMI_LINK_TYPE_XGMI = 2,            //!< GPU Memory Interconnect (multi GPU communication)
   AMDSMI_LINK_TYPE_NOT_APPLICABLE = 3,  //!< Not Applicable Link Type
-  AMDSMI_LINK_TYPE_UNKNOWN = 4          //!< Unknown Link Type
+  AMDSMI_LINK_TYPE_UNKNOWN = 4,         //!< Unknown Link Type
+  AMDSMI_LINK_TYPE_NUMA = 5,  //!< Two processors connect via different PCIe switches but on the
+                              //!< same CPU (NIC-to-GPU only)
+  AMDSMI_LINK_TYPE_XNUMA =
+      6  //!< Two processors connect via different PCIe switches on different CPUs (NIC-to-GPU only)
 } amdsmi_link_type_t;
 
 /**
