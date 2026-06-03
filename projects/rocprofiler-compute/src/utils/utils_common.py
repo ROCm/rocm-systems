@@ -8,6 +8,7 @@ import errno
 import io
 import os
 import pty
+import queue
 import re
 import select
 import shutil
@@ -535,24 +536,46 @@ def capture_subprocess_output(
     input_thread = threading.Thread(target=forward_input, daemon=True)
     input_thread.start()
 
-    # Read until the child closes its end. Pipes signal EOF with an empty
-    # string; PTYs signal it with OSError(EIO). The two never overlap.
-    while True:
-        try:
-            line = process_stdout.readline()
-        except OSError as e:
-            if e.errno == errno.EIO:
+    # Read subprocess output. PTY signals EOF via EIO; pipe via empty string.
+    # In PTY mode, grandchild processes inherit the slave fd and may outlive
+    # the direct child, delaying EIO. Use a daemon reader thread and stop once
+    # the direct child exits and no output arrives within a 1-second window.
+    if profileMode:
+        line_queue: queue.Queue[str] = queue.Queue()
+        reader_thread = threading.Thread(
+            target=_read_pty_lines_into_queue,
+            args=(process_stdout, line_queue),
+            daemon=True,
+        )
+        reader_thread.start()
+
+        while True:
+            try:
+                line = line_queue.get(timeout=1.0)
+            except queue.Empty:
+                if process.poll() is not None:
+                    break  # direct child done; grandchildren may still hold slave
+                continue
+            _buffer_and_log_subprocess_line(line, buf, enable_logging, profileMode)
+
+        # Drain any lines queued between the timeout and the poll() check.
+        while True:
+            try:
+                line = line_queue.get_nowait()
+            except queue.Empty:
                 break
-            raise
-        if not line:
-            break
-        buf.write(line)
-        if not enable_logging:
-            continue
-        if profileMode:
-            console_log(get_rocprof_cmd(), line.strip(), indent_level=1)
-        else:
-            console_log(line.strip())
+            _buffer_and_log_subprocess_line(line, buf, enable_logging, profileMode)
+    else:
+        while True:
+            try:
+                line = process_stdout.readline()
+            except OSError as exc:
+                if exc.errno == errno.EIO:
+                    break
+                raise
+            if not line:
+                break
+            _buffer_and_log_subprocess_line(line, buf, enable_logging, profileMode)
 
     process_stdout.close()
     input_thread.join(timeout=1)
@@ -567,6 +590,39 @@ def capture_subprocess_output(
     buf.close()
 
     return success, output
+
+
+def _read_pty_lines_into_queue(
+    process_stdout: io.TextIOWrapper,
+    line_queue: "queue.Queue[str]",
+) -> None:
+    """Feed lines from a PTY into a queue until EIO or EOF."""
+    while True:
+        try:
+            line = process_stdout.readline()
+        except OSError as exc:
+            if exc.errno == errno.EIO:
+                break
+            raise
+        if not line:
+            break
+        line_queue.put(line)
+
+
+def _buffer_and_log_subprocess_line(
+    line: str,
+    output_buffer: io.StringIO,
+    enable_logging: bool,
+    profile_mode: bool,
+) -> None:
+    """Append a subprocess output line to the buffer and log it if enabled."""
+    output_buffer.write(line)
+    if not enable_logging:
+        return
+    if profile_mode:
+        console_log(get_rocprof_cmd(), line.strip(), indent_level=1)
+    else:
+        console_log(line.strip())
 
 
 def get_agent_dict(data: dict[str, Any]) -> dict[Any, Any]:
