@@ -294,9 +294,15 @@ fn pick_head_port() -> u16 {
 /// not containerised.
 fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Result<()> {
     let profile = resolve_profile(session)?;
-    let Some(def) = profile.containerize.clone() else {
+    let Some(mut def) = profile.containerize.clone() else {
         return Ok(());
     };
+
+    // Merge the emulator-declared mounts (e.g. HotSwap's runtime + cache
+    // trees, bind-mounted under `/mnt/mirage`) into the node containers so
+    // the injected `LD_PRELOAD`/env paths resolve inside each container.
+    let injection = resolve_injection(session)?;
+    def.mounts.extend(injection.mounts.iter().cloned());
 
     publish_health(
         layout,

@@ -31,7 +31,7 @@ use mirage_core::emulator::{Emulator, EmulatorDef, EmulatorDescription, SupportS
 use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::InjectionDef;
 use mirage_core::plugin::PluginsDef;
-use mirage_core::profile::ProfileDef;
+use mirage_core::profile::{FileMount, ProfileDef};
 use mirage_core::session::SessionHealth;
 
 /// The HIP intercept library HotSwap ships. It is the artifact mirage
@@ -48,6 +48,18 @@ pub const COMGR_LIB: &str = "libamd_comgr.so";
 /// Subdirectory under the mirage cache / `./emulator/` where a
 /// HotSwap install may be dropped.
 pub const ASSET_SUBDIR: &str = "hotswap";
+
+/// In-container mount point for the HotSwap runtime tree (lib,
+/// `llvm-tools/`, `runtime/hotswap_py/`). All mirage system mounts live
+/// under `/mnt/mirage`; the HotSwap install root is bind-mounted here so
+/// the injected `LD_PRELOAD`/`HOTSWAP_HOME`/`PYTHONPATH` paths resolve
+/// inside each node's container.
+pub const CONTAINER_HOTSWAP_DIR: &str = "/mnt/mirage/emulator/hotswap";
+
+/// In-container mount point for HotSwap's read-write cache tree
+/// (translation + per-framework caches), bind-mounted from the host
+/// cache dir so artifacts persist across runs.
+pub const CONTAINER_HOTSWAP_CACHE: &str = "/mnt/mirage/cache/hotswap";
 
 /// Human-facing name used in guidance messages.
 pub const DISPLAY_NAME: &str = "HotSwap";
@@ -150,13 +162,15 @@ impl Emulator for Hotswap {
             ))
         })?;
 
-        let (ld_preload, env) = build_hotswap_env(&dir);
+        let (ld_preload, env, mounts) =
+            build_hotswap_env(&dir, self.profile.containerize.is_some());
 
         Ok(InjectionDef {
             wrapper: None,
             ld_preload: Some(ld_preload),
             files: Default::default(),
             env,
+            mounts,
         })
     }
 }
@@ -219,13 +233,15 @@ const HOTSWAP_CACHE_SUBDIRS: &[&str] = &[
 /// `PYTHONPATH`, and the source-arch overrides selected by the adapter
 /// policy. Returns the `LD_PRELOAD` value (patched ROCR + intercept)
 /// separately so the host can merge it with any user-supplied preload.
-fn build_hotswap_env(dir: &Path) -> (String, BTreeMap<String, String>) {
+fn build_hotswap_env(
+    dir: &Path,
+    containerized: bool,
+) -> (String, BTreeMap<String, String>, Vec<FileMount>) {
     // Canonicalize to an absolute path: `dir` may be discovered via a
     // relative probe (e.g. `../../build/hotswap/lib`), and the workload
     // runs from a different cwd, so every path derived from it (LD_PRELOAD,
     // LD_LIBRARY_PATH, HOTSWAP_HOME) must be absolute.
-    let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
-    let dir = dir.as_path();
+    let host_dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
     let source_target = std::env::var("HSA_HOTSWAP_SOURCE_TARGET")
         .ok()
         .filter(|s| !s.is_empty())
@@ -238,14 +254,58 @@ fn build_hotswap_env(dir: &Path) -> (String, BTreeMap<String, String>) {
     let source_arch = source_arch_of(&source_target).to_string();
     let target_gfx = physical_target_gfx();
 
+    let root = hotswap_branch_root();
+    let _ = ensure_cache_dirs(&root);
+    let host_cache_root = std::fs::canonicalize(&root).unwrap_or(root);
+
+    // Establish host→workload path mappings. For a containerised session
+    // every host tree HotSwap relies on is bind-mounted under
+    // `/mnt/mirage` and the workload must reference the in-container path;
+    // otherwise it sees the host paths directly. The install root is
+    // mounted read-only (immutable runtime libs/tools), the cache root
+    // read-write so framework caches persist.
+    let mut mounts: Vec<FileMount> = Vec::new();
+    let mut mappings: Vec<(PathBuf, PathBuf)> = Vec::new();
+    if containerized {
+        if let Some(home) = host_dir.parent() {
+            mounts.push(FileMount {
+                host_path: home.display().to_string(),
+                container_path: CONTAINER_HOTSWAP_DIR.to_string(),
+                read_only: true,
+            });
+            mappings.push((home.to_path_buf(), PathBuf::from(CONTAINER_HOTSWAP_DIR)));
+        }
+        mounts.push(FileMount {
+            host_path: host_cache_root.display().to_string(),
+            container_path: CONTAINER_HOTSWAP_CACHE.to_string(),
+            read_only: false,
+        });
+        mappings.push((
+            host_cache_root.clone(),
+            PathBuf::from(CONTAINER_HOTSWAP_CACHE),
+        ));
+    }
+    // Rewrite a host path to the path the workload sees: any path under a
+    // mounted host root maps to its container target; everything else is
+    // left as the host path (correct for non-containerised runs).
+    let remap = |p: &Path| -> PathBuf {
+        for (host_root, container_root) in &mappings {
+            if let Ok(rel) = p.strip_prefix(host_root) {
+                return container_root.join(rel);
+            }
+        }
+        p.to_path_buf()
+    };
+
+    let dir = remap(&host_dir);
+    let dir = dir.as_path();
+
     // env_contract.py preloads the patched ROCR first, then the intercept.
     let libhsa = dir.join(ROCR_LIB);
     let intercept = dir.join(LIB_NAME);
     let ld_preload = format!("{}:{}", libhsa.display(), intercept.display());
 
-    let root = hotswap_branch_root();
-    let _ = ensure_cache_dirs(&root);
-    let cache = |name: &str| root.join(name).display().to_string();
+    let cache = |name: &str| remap(&host_cache_root.join(name)).display().to_string();
 
     let mut env: BTreeMap<String, String> = BTreeMap::new();
     env.insert(
@@ -289,7 +349,7 @@ fn build_hotswap_env(dir: &Path) -> (String, BTreeMap<String, String>) {
     if let Some(py) = py_dir() {
         // `sitecustomize.py` lives at the root of the python runtime, so
         // putting it on PYTHONPATH auto-activates the adapter layer.
-        env.insert("PYTHONPATH".into(), py.display().to_string());
+        env.insert("PYTHONPATH".into(), remap(&py).display().to_string());
     }
 
     // Steer the frameworks' own arch selection at the source arch so they
@@ -320,7 +380,7 @@ fn build_hotswap_env(dir: &Path) -> (String, BTreeMap<String, String>) {
         env.insert("TRITON_CORPUS_FORCE_TARGET".into(), source_target);
     }
 
-    (ld_preload, env)
+    (ld_preload, env, mounts)
 }
 
 /// Best-effort creation of the HotSwap cache subdirectories.

@@ -121,6 +121,7 @@ impl Emulator for Rocjitsu {
             ld_preload: Some(ld_preload.display().to_string()),
             files: Default::default(),
             env,
+            mounts: Default::default(),
         })
     }
 }
