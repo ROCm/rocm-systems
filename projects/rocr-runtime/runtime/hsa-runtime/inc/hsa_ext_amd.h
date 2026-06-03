@@ -3272,7 +3272,8 @@ hsa_status_t HSA_API hsa_amd_external_semaphore_handle_close(
  * @retval HSA_STATUS_SUCCESS                Signal queued.
  * @retval HSA_STATUS_ERROR_INVALID_QUEUE    Null/invalid/non-GPU queue.
  * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT sem.handle is malformed.
- * @retval HSA_STATUS_ERROR_INVALID_AGENT    Queue's node has no WDDM device.
+ * @retval HSA_STATUS_ERROR_INVALID_AGENT    Queue's node has no WDDM
+ *   device, or its node differs from the one that imported @p sem.
  * @retval HSA_STATUS_ERROR_NOT_SUPPORTED    libhsakmt lacks the thunk
  *   (incl. Linux/KFD stub).
  * @retval HSA_STATUS_ERROR                  KMD signal ioctl failed.
@@ -3310,7 +3311,8 @@ hsa_status_t HSA_API hsa_amd_queue_signal_external_semaphore(
  *   not an AMD GPU AQL queue.
  * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT sem.handle is malformed.
  * @retval HSA_STATUS_ERROR_INVALID_AGENT    The queue's KMD node has
- *   no associated WDDM device.
+ *   no associated WDDM device, or it differs from the one that
+ *   imported @p sem.
  * @retval HSA_STATUS_ERROR_NOT_SUPPORTED    libhsakmt lacks the thunk
  *   (incl. Linux/KFD stub).
  * @retval HSA_STATUS_ERROR                  Underlying KMD wait
