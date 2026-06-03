@@ -9,6 +9,24 @@ export interface ProfileDef {
   name: string;
   description?: string;
   emulator: EmulatorDef;
+  containerize?: ContainerizedDef;
+}
+
+/// Mirror of `mirage_core::profile::ContainerizedDef`. When present,
+/// every node of a session runs inside a container built from `image`.
+export interface ContainerizedDef {
+  /// Container provider (`podman`, `docker`, or a path). Omitted ⇒
+  /// autodetected (podman, then docker) by the host.
+  provider?: string;
+  image: string;
+  mounts?: FileMount[];
+}
+
+/// Mirror of `mirage_core::profile::FileMount`.
+export interface FileMount {
+  host_path: string;
+  container_path: string;
+  read_only?: boolean;
 }
 
 export interface EmulatorDef {

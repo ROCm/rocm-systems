@@ -1132,6 +1132,32 @@
   gap: 6px;
 }
 
+.checkbox-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-h);
+}
+
+.checkbox-row input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+}
+
+.mount-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.mount-row input {
+  flex: 1 1 160px;
+  min-width: 120px;
+}
+
 .segmented {
   display: inline-flex;
   border: 1px solid var(--border);

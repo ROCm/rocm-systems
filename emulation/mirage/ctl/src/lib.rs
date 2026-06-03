@@ -10,6 +10,7 @@
 //! All commands are documented in `docs/cli.md`.
 
 use std::io::Write;
+use std::io::IsTerminal;
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
@@ -232,8 +233,15 @@ pub enum ProfileCmd {
     /// Show a profile as JSON.
     Show { name: String },
     /// Create a new profile.
+    ///
+    /// Any field not given as a flag is prompted for interactively when
+    /// stdin is a terminal; otherwise its default is used. This makes
+    /// `profile create <name>` an interactive UI while `profile create
+    /// <name> --emulator ... --agent ...` stays fully non-interactive
+    /// (e.g. in scripts and tests).
     Create {
-        name: String,
+        /// Profile name. Prompted for when omitted on a terminal.
+        name: Option<String>,
         /// Emulator name (e.g. `rocjitsu`, `noop`). Defaults to the
         /// first installed emulator (rocjitsu if present, otherwise
         /// noop).
@@ -241,17 +249,17 @@ pub enum ProfileCmd {
         emulator: Option<String>,
         /// Agent name from `<MIRAGE_CONFIG>/agent/` (e.g. `MI300X`,
         /// `MI350X`). Defaults to `MI350X`.
-        #[arg(long, default_value = "MI350X")]
-        agent: String,
+        #[arg(long)]
+        agent: Option<String>,
         /// Number of racks.
-        #[arg(long, default_value_t = 1)]
-        racks: u32,
+        #[arg(long)]
+        racks: Option<u32>,
         /// Nodes per rack.
-        #[arg(long, default_value_t = 1)]
-        nodes_per_rack: u32,
+        #[arg(long)]
+        nodes_per_rack: Option<u32>,
         /// GPUs per node.
-        #[arg(long, default_value_t = 1)]
-        gpus_per_node: u32,
+        #[arg(long)]
+        gpus_per_node: Option<u32>,
         /// Optional description.
         #[arg(long)]
         description: Option<String>,
@@ -269,6 +277,10 @@ pub enum ProfileCmd {
         /// `--image`.
         #[arg(long)]
         provider: Option<String>,
+        /// Never prompt; use defaults for any unspecified field even on
+        /// a terminal.
+        #[arg(long)]
+        no_input: bool,
     },
     /// Interactive wizard: prompts for every field.
     Wizard {
@@ -613,43 +625,30 @@ fn profile_cmd(ctl: &dyn MirageCtl, cmd: ProfileCmd, json: bool) -> anyhow::Resu
             image,
             mounts,
             provider,
+            no_input,
         } => {
-            // Resolve emulator: explicit > registry default.
-            let spec = match emulator.as_deref() {
-                Some(n) => match find_emulator(n) {
-                    Some(s) => s,
-                    None => anyhow::bail!(
-                        "unknown emulator: {n}. Known: {}",
-                        registry()
-                            .into_iter()
-                            .map(|e| e.name)
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    ),
-                },
-                None => default_emulator(),
-            };
-            let topo = mirage_core::topology::TopologyDef {
+            let interactive = !no_input && std::io::stdin().is_terminal();
+            let p = build_profile_create(
+                name,
+                emulator,
+                agent,
                 racks,
                 nodes_per_rack,
                 gpus_per_node,
-                agent: MaybeRef::Ref(agent),
-            };
-            let containerize = build_containerize(image, &mounts, provider)?;
-            let p = ProfileDef {
-                name: name.clone(),
                 description,
-                emulator: mirage_core::registry::make_def(&spec, topo),
-                containerize,
-            };
+                image,
+                mounts,
+                provider,
+                interactive,
+            )?;
             if let Err(e) = validate_profile(&p) {
-                anyhow::bail!("cannot create profile {name}: {e}");
+                anyhow::bail!("cannot create profile {}: {e}", p.name);
             }
             ctl.profile_put(&p)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&p)?);
             } else {
-                println!("created profile {name}");
+                println!("created profile {}", p.name);
             }
         }
         ProfileCmd::Wizard { name } => {
@@ -877,6 +876,208 @@ fn build_containerize(
             }
             Ok(None)
         }
+    }
+}
+
+/// Build a [`ProfileDef`] for `profile create`.
+///
+/// Every field passed as a flag is used verbatim. When `interactive`
+/// is set, any field left unspecified is prompted for; otherwise the
+/// field's default is used. This keeps `profile create <name>` a
+/// friendly interactive UI on a terminal while remaining fully
+/// non-interactive (defaults) in scripts, pipes and tests.
+#[allow(clippy::too_many_arguments)]
+fn build_profile_create(
+    name: Option<String>,
+    emulator: Option<String>,
+    agent: Option<String>,
+    racks: Option<u32>,
+    nodes_per_rack: Option<u32>,
+    gpus_per_node: Option<u32>,
+    description: Option<String>,
+    image: Option<String>,
+    mounts: Vec<String>,
+    provider: Option<String>,
+    interactive: bool,
+) -> anyhow::Result<ProfileDef> {
+    use dialoguer::{Confirm, Input, Select};
+    let theme = dialoguer::theme::ColorfulTheme::default();
+
+    // ----- name -----
+    let name = match name {
+        Some(n) => n,
+        None if interactive => Input::with_theme(&theme)
+            .with_prompt("Profile name")
+            .validate_with(|s: &String| -> Result<(), &str> {
+                if s.trim().is_empty() {
+                    Err("name required")
+                } else {
+                    Ok(())
+                }
+            })
+            .interact_text()?,
+        None => anyhow::bail!("a profile name is required"),
+    };
+
+    // ----- emulator -----
+    let spec = match emulator.as_deref() {
+        Some(n) => match find_emulator(n) {
+            Some(s) => s,
+            None => anyhow::bail!(
+                "unknown emulator: {n}. Known: {}",
+                registry()
+                    .into_iter()
+                    .map(|e| e.name)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        },
+        None if interactive => {
+            let specs = registry();
+            let default_name = default_emulator().name;
+            let default_idx = specs
+                .iter()
+                .position(|s| s.name == default_name)
+                .unwrap_or(0);
+            let labels: Vec<String> = specs
+                .iter()
+                .map(|s| {
+                    let installed = if s.installed {
+                        "[installed]"
+                    } else {
+                        "[not installed]"
+                    };
+                    let supported = if s.support.supported {
+                        ""
+                    } else {
+                        " [unsupported hardware]"
+                    };
+                    format!("{:<10} {installed}{supported}  {}", s.name, s.description)
+                })
+                .collect();
+            let pick = Select::with_theme(&theme)
+                .with_prompt("Emulator")
+                .items(&labels)
+                .default(default_idx)
+                .interact()?;
+            specs[pick].clone()
+        }
+        None => default_emulator(),
+    };
+
+    // ----- topology -----
+    let nodes_per_rack = resolve_count(nodes_per_rack, "Nodes per rack", interactive, &theme)?;
+    let racks = resolve_count(racks, "Number of racks", interactive, &theme)?;
+    let gpus_per_node = resolve_count(gpus_per_node, "GPUs per node", interactive, &theme)?;
+
+    // ----- agent -----
+    let agent = match agent {
+        Some(a) => a,
+        None if interactive => {
+            let known = mirage_core::agent::store::list().unwrap_or_default();
+            if known.is_empty() {
+                "MI350X".to_string()
+            } else {
+                let default_idx = known.iter().position(|n| n == "MI350X").unwrap_or(0);
+                let pick = Select::with_theme(&theme)
+                    .with_prompt("Agent")
+                    .items(&known)
+                    .default(default_idx)
+                    .interact()?;
+                known[pick].clone()
+            }
+        }
+        None => "MI350X".to_string(),
+    };
+
+    // ----- description -----
+    let description = match description {
+        Some(d) => Some(d),
+        None if interactive => {
+            let d: String = Input::with_theme(&theme)
+                .with_prompt("Description (optional)")
+                .allow_empty(true)
+                .interact_text()?;
+            if d.is_empty() { None } else { Some(d) }
+        }
+        None => None,
+    };
+
+    // ----- containerisation -----
+    let containerize = if image.is_some() || !mounts.is_empty() || provider.is_some() {
+        // Any explicit container flag: build directly (errors if mounts
+        // or provider were given without an image).
+        build_containerize(image, &mounts, provider)?
+    } else if interactive
+        && Confirm::with_theme(&theme)
+            .with_prompt("Run each node inside a container?")
+            .default(false)
+            .interact()?
+    {
+        let img: String = Input::with_theme(&theme)
+            .with_prompt("Image")
+            .validate_with(|s: &String| -> Result<(), &str> {
+                if s.trim().is_empty() {
+                    Err("image required")
+                } else {
+                    Ok(())
+                }
+            })
+            .interact_text()?;
+        let prov: String = Input::with_theme(&theme)
+            .with_prompt("Provider (blank to auto-detect)")
+            .allow_empty(true)
+            .interact_text()?;
+        let mut specs: Vec<String> = Vec::new();
+        while Confirm::with_theme(&theme)
+            .with_prompt("Add a bind mount?")
+            .default(false)
+            .interact()?
+        {
+            let m: String = Input::with_theme(&theme)
+                .with_prompt("Mount (HOST[:CONTAINER[:ro|rw]])")
+                .interact_text()?;
+            if !m.trim().is_empty() {
+                specs.push(m);
+            }
+        }
+        build_containerize(
+            Some(img),
+            &specs,
+            if prov.is_empty() { None } else { Some(prov) },
+        )?
+    } else {
+        None
+    };
+
+    let topo = mirage_core::topology::TopologyDef {
+        racks,
+        nodes_per_rack,
+        gpus_per_node,
+        agent: MaybeRef::Ref(agent),
+    };
+    Ok(ProfileDef {
+        name,
+        description,
+        emulator: mirage_core::registry::make_def(&spec, topo),
+        containerize,
+    })
+}
+
+/// Resolve a topology count: explicit value, interactive prompt, or 1.
+fn resolve_count(
+    value: Option<u32>,
+    prompt: &str,
+    interactive: bool,
+    theme: &dialoguer::theme::ColorfulTheme,
+) -> anyhow::Result<u32> {
+    match value {
+        Some(v) => Ok(v),
+        None if interactive => Ok(dialoguer::Input::with_theme(theme)
+            .with_prompt(prompt)
+            .default(1)
+            .interact_text()?),
+        None => Ok(1),
     }
 }
 
