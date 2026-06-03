@@ -10,8 +10,11 @@
 // NOLINTNEXTLINE(bugprone-suspicious-include)
 #include "../roctx_recordfn.cpp"
 
+#include <ATen/ATen.h>
+#include <ATen/Context.h>
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -54,6 +57,44 @@ protected:
 
     void TearDown() override { reset_state(); }
 };
+
+class RoctxRecordFnRealOpsTest : public RoctxRecordFnTest
+{
+protected:
+    void SetUp() override
+    {
+        RoctxRecordFnTest::SetUp();
+        if (!at::hasCUDA())
+        {
+            GTEST_SKIP() << "ATen built without CUDA support";
+        }
+    }
+};
+
+std::size_t pending_snapshots()
+{
+    std::size_t pending = 0;
+    for (auto& shard : g_shards)
+    {
+        std::lock_guard<std::mutex> guard(shard.mu);
+        pending += shard.snapshots.size();
+    }
+    return pending;
+}
+
+std::size_t count_in_marker_path(const std::string& wire, const std::string& needle)
+{
+    const auto  colon = wire.find(':');
+    const auto  path  = (colon == std::string::npos) ? wire : wire.substr(0, colon);
+    std::size_t count = 0;
+    std::size_t pos   = 0;
+    while ((pos = path.find(needle, pos)) != std::string::npos)
+    {
+        ++count;
+        pos += needle.size();
+    }
+    return count;
+}
 
 }  // namespace
 
@@ -313,4 +354,177 @@ TEST_F(RoctxRecordFnTest, DedupesIdenticalPrefix)
     EXPECT_EQ(apply_userscope_overlay(), 0u);
     EXPECT_EQ(g_stack.size(), 2u);
     EXPECT_EQ(g_n_userscope_inherits.load(), 0u);
+}
+
+TEST_F(RoctxRecordFnRealOpsTest, FwdBwdCounterSanity)
+{
+    install();
+
+    auto x = at::randn({8, 8}, at::TensorOptions().device(at::kCUDA)).requires_grad_(true);
+    push_user_scope("test.fwd_bwd", "#1@test:1");
+    auto y = (x * 2).sum();
+    pop_user_scope();
+    y.backward();
+
+    EXPECT_GT(g_n_snapshots_saved.load(), 0u);
+    EXPECT_GT(g_n_snapshots_consumed.load(), 0u);
+    EXPECT_EQ(g_n_callback_errors.load(), 0u);
+    EXPECT_EQ(g_n_pushes.load(), g_n_pops.load());
+    EXPECT_EQ(g_n_user_scope_pushes.load(), g_n_user_scope_pops.load());
+    EXPECT_LE(pending_snapshots(), 4u);
+}
+
+TEST_F(RoctxRecordFnRealOpsTest, CaptureLeafLabelsAndUserScope)
+{
+    install();
+    start_capture();
+
+    {
+        auto warmup = at::randn({4, 4}, at::TensorOptions().device(at::kCUDA));
+        (void)(warmup * 2).sum();
+    }
+
+    push_user_scope("test.outer_step", "#1@test:7");
+    auto x = at::randn({32, 32}, at::TensorOptions().device(at::kCUDA)).requires_grad_(true);
+    auto y = (x.matmul(x)).sum();
+    y.backward();
+    pop_user_scope();
+
+    const auto captured = stop_capture();
+    ASSERT_FALSE(captured.empty());
+
+    bool        saw_aten_top    = false;
+    bool        saw_aten_nested = false;
+    bool        saw_bwd_leaf    = false;
+    bool        saw_legacy      = false;
+    std::size_t bwd_total       = 0;
+    std::size_t bwd_under_scope = 0;
+
+    for (const auto& m : captured)
+    {
+        if (m.find("aten:0") != std::string::npos)
+            saw_aten_top = true;
+        if (m.find("aten.nested:0") != std::string::npos)
+            saw_aten_nested = true;
+        if (m.find("autograd.bwd:0") != std::string::npos)
+            saw_bwd_leaf = true;
+        if (m.find("dispatcher:0") != std::string::npos)
+            saw_legacy = true;
+
+        if (m.find("autograd.bwd:0") != std::string::npos ||
+            m.find("autograd.engine:0") != std::string::npos)
+        {
+            ++bwd_total;
+            if (m.rfind("test.outer_step/", 0) == 0)
+            {
+                ++bwd_under_scope;
+                EXPECT_EQ(count_in_marker_path(m, "test.outer_step"), 1u) << m;
+            }
+        }
+    }
+
+    EXPECT_FALSE(saw_legacy);
+    EXPECT_TRUE(saw_aten_top);
+    EXPECT_TRUE(saw_aten_nested);
+    EXPECT_TRUE(saw_bwd_leaf);
+    ASSERT_GT(bwd_total, 0u);
+    EXPECT_GT(bwd_under_scope, 0u);
+    EXPECT_GT(g_n_userscope_inherits.load(), 0u);
+}
+
+TEST_F(RoctxRecordFnRealOpsTest, ManyStepsCorrelation)
+{
+    install();
+    constexpr int n_steps = 16;
+    for (int i = 0; i < n_steps; ++i)
+    {
+        auto x = at::randn({128, 128}, at::TensorOptions().device(at::kCUDA)).requires_grad_(true);
+        auto y = ((x.matmul(x)) + x).sum();
+        y.backward();
+    }
+
+    const auto saved    = g_n_snapshots_saved.load();
+    const auto consumed = g_n_snapshots_consumed.load();
+    EXPECT_GT(saved, 0u);
+    EXPECT_GE(consumed, saved / 2);
+    EXPECT_EQ(g_n_snapshots_dropped.load(), 0u);
+    EXPECT_EQ(g_n_callback_errors.load(), 0u);
+}
+
+TEST_F(RoctxRecordFnRealOpsTest, DetachedForwardBounded)
+{
+    install();
+    for (int i = 0; i < 50; ++i)
+    {
+        auto x = at::randn({32, 32}, at::TensorOptions().device(at::kCUDA)).requires_grad_(true);
+        auto y = (x.matmul(x)).sum().detach();
+        (void)y;
+    }
+
+    EXPECT_GT(g_n_snapshots_saved.load(), 0u);
+    EXPECT_EQ(g_n_callback_errors.load(), 0u);
+    EXPECT_LT(pending_snapshots(), static_cast<std::size_t>(640000));
+}
+
+TEST_F(RoctxRecordFnRealOpsTest, ConcurrentThreadsScopedMarkers)
+{
+    install();
+    start_capture();
+
+    constexpr int            n_workers = 4;
+    std::vector<std::thread> threads;
+    threads.reserve(n_workers);
+    for (int wid = 0; wid < n_workers; ++wid)
+    {
+        threads.emplace_back(
+            [wid]()
+            {
+                const std::string scope = "test.concurrent.worker" + std::to_string(wid);
+                push_user_scope(scope, "#1@test_thread:" + std::to_string(wid));
+                for (int i = 0; i < 4; ++i)
+                {
+                    auto x = at::randn({64, 64}, at::TensorOptions().device(at::kCUDA)).requires_grad_(true);
+                    (x.matmul(x)).sum().backward();
+                }
+                pop_user_scope();
+            });
+    }
+    for (auto& t : threads)
+    {
+        t.join();
+    }
+
+    const auto captured = stop_capture();
+    ASSERT_FALSE(captured.empty());
+
+    const std::array<std::string, 4> cpp_leaves = {"aten:0",
+                                                   "aten.nested:0",
+                                                   "autograd.bwd:0",
+                                                   "autograd.engine:0"};
+
+    for (int wid = 0; wid < n_workers; ++wid)
+    {
+        const std::string prefix = "test.concurrent.worker" + std::to_string(wid) + "/";
+        bool              saw    = false;
+        for (const auto& m : captured)
+        {
+            if (m.rfind(prefix, 0) != 0)
+                continue;
+            for (const auto& leaf : cpp_leaves)
+            {
+                if (m.find(leaf) != std::string::npos)
+                {
+                    saw = true;
+                    break;
+                }
+            }
+            if (saw)
+                break;
+        }
+        EXPECT_TRUE(saw) << "worker " << wid;
+    }
+
+    EXPECT_EQ(g_n_callback_errors.load(), 0u);
+    EXPECT_EQ(g_n_pushes.load(), g_n_pops.load());
+    EXPECT_EQ(g_n_user_scope_pushes.load(), g_n_user_scope_pops.load());
 }
