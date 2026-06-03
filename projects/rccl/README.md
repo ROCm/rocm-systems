@@ -13,6 +13,8 @@ RCCL (pronounced "Rickle") is a stand-alone library of standard collective commu
 
 The collective operations are implemented using ring and tree algorithms and have been optimized for throughput and latency. For best performance, small operations can be either batched into larger operations or aggregated through the API.
 
+Additionally, RCCL supports zero-CU collectives for selected operations, including all-gather, all-to-all, gather, and scatter. These collectives leverage SDMA engines to offload data movement, enabling communication to proceed without consuming GPU compute units. On MI350, they outperform CU-based collectives for large message sizes and provide better overlap in scenarios where computation and communication run concurrently.
+
 ## Requirements
 
 1. ROCm supported GPUs
