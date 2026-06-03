@@ -1,8 +1,8 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import fnmatch
 from abc import ABC, abstractmethod
-from pathlib import PurePosixPath
 
 
 class PatternMatcherInterface(ABC):
@@ -15,12 +15,17 @@ class PatternMatcherInterface(ABC):
 
 class PurePosixGlobHierarchyMatcher(PatternMatcherInterface):
     """
-    Match slash-delimited hierarchy strings using PurePosixPath glob semantics.
+    Match slash-delimited hierarchy strings using fnmatch glob semantics.
 
-    Delegates entirely to PurePosixPath.match() for glob evaluation.
-    Normalizations applied before matching:
-      "all"        ->  "**"      (match everything)
-      leading "/"  ->  stripped  (cosmetic, PurePosixPath treats "/" as anchor)
+    The pattern is matched against the full target string with
+    ``fnmatch.fnmatchcase``. ``*`` matches any sequence of characters,
+    ``?`` matches a single character, and ``[seq]`` matches one character
+    from the given set. Matching is case-sensitive.
+
+    Pattern normalization:
+      ``"all"``    -> ``"*"``
+      leading ``/``  stripped
+      trailing ``/`` stripped (except when the pattern is exactly ``"/"``)
     """
 
     @staticmethod
@@ -28,10 +33,12 @@ class PurePosixGlobHierarchyMatcher(PatternMatcherInterface):
         pattern = raw_pattern.strip()
         if not pattern:
             return ""
-        if pattern in ("all", "*"):
-            return "**"
+        if pattern == "all":
+            return "*"
         if pattern.startswith("/"):
             pattern = pattern[1:]
+        if pattern.endswith("/") and pattern != "/":
+            pattern = pattern.rstrip("/")
         return pattern
 
     def matches(self, pattern: str, target: str) -> bool:
@@ -42,7 +49,7 @@ class PurePosixGlobHierarchyMatcher(PatternMatcherInterface):
         if not glob_pattern:
             return False
 
-        return PurePosixPath(target).match(glob_pattern)
+        return fnmatch.fnmatchcase(target, glob_pattern)
 
 
 class PatternMatcherEngine:

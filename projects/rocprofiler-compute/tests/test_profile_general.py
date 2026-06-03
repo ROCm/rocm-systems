@@ -3039,10 +3039,8 @@ def test_torch_trace_profile(
 
     # --- Verify torch-operator cli output ---
 
-    # 17. Multi-component pattern matches operator in the middle of hierarchy.
-    #     torch.nn.functional.relu is a wrapper that delegates to torch.relu;
-    #     only the leaf operator appears in consolidated trace, so we use
-    #     wildcards to match through the hierarchy.
+    # 17. Substring wildcard pattern matches torch.nn.functional.relu at any
+    #     position in the hierarchy.
     capsys.readouterr()
     rc_exact = binary_handler_analyze_rocprof_compute([
         "--experimental",
@@ -3050,10 +3048,10 @@ def test_torch_trace_profile(
         "--path",
         workload_dir,
         "--torch-operator",
-        "*/torch.nn.functional.relu/*",
+        "*torch.nn.functional.relu*",
     ])
     assert rc_exact == 0, (
-        "Analyze with --torch-operator */torch.nn.functional.relu/* failed"
+        "Analyze with --torch-operator *torch.nn.functional.relu* failed"
     )
     out_exact = capsys.readouterr().out
     assert "Matched PyTorch Operators" in out_exact, (
@@ -3063,7 +3061,7 @@ def test_torch_trace_profile(
         "Expected call tree with dispatches stats in --torch-operator output"
     )
 
-    # 18. Glob wildcard pattern (*relu) matches the relu operator
+    # 18. Glob wildcard pattern (*relu*) matches the relu operator subtree
     capsys.readouterr()
     rc_glob = binary_handler_analyze_rocprof_compute([
         "--experimental",
@@ -3071,12 +3069,12 @@ def test_torch_trace_profile(
         "--path",
         workload_dir,
         "--torch-operator",
-        "*relu",
+        "*relu*",
     ])
-    assert rc_glob == 0, "Analyze with --torch-operator *relu failed"
+    assert rc_glob == 0, "Analyze with --torch-operator *relu* failed"
     out_glob = capsys.readouterr().out
     assert "dispatches" in out_glob, (
-        "Glob pattern *relu should match relu operator and render call tree"
+        "Glob pattern *relu* should match relu operator and render call tree"
     )
 
     # 19. 'all' keyword matches every operator
