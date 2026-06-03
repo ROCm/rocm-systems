@@ -112,7 +112,7 @@ export function SessionDetailPage() {
   const [session, setSession] = useState<SessionState | null>(null);
   const [execs, setExecs] = useState<ExecListItem[]>([]);
   const [error, setError] = useState("");
-  const [command, setCommand] = useState("/bin/sh -c 'echo hello'");
+  const [command, setCommand] = useState("rocminfo");
   const [keep, setKeep] = useState(true);
   const [envInput, setEnvInput] = useState("");
   const [envs, setEnvs] = useState<string[]>([]);
