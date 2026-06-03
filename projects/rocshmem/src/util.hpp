@@ -492,7 +492,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   if (size == 0) return;
 
   constexpr int ChunkSize = 16;
-  constexpr int Unroll    = 8;
+  constexpr int Unroll    = 16;
   // Compile-time bypass policy: cache-bypass in the direction of the remote side.
   constexpr CachePolicy LP = is_put(Kind) ? CachePolicy::Standard    : CachePolicy::SystemScope;
   constexpr CachePolicy SP = is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard;
@@ -509,7 +509,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
     }
 
     if (n_chunks > 0) {
-      copy_bulk<ChunkSize, CachePolicy::Standard, CachePolicy::Standard, Unroll>(
+      copy_bulk<ChunkSize, CachePolicy::Standard, CachePolicy::Standard, 4>(
           dst, src, n_chunks, 0, 1);
     }
     copy_remainder<CachePolicy::Standard, CachePolicy::Standard>(
