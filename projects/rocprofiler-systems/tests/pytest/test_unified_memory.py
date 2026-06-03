@@ -57,7 +57,7 @@ class TestUnifiedMemory(RocprofsysTest):
         self.assert_regex(
             result,
             subtest_name="Unified-memory completion check",
-            pass_regex=[r"6 tests completed"],
+            pass_regex=[r"9 tests completed"],
         )
 
         self.assert_unified_memory_output(
