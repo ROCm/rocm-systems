@@ -385,6 +385,32 @@ this file.
    :alt: Visualization of ROCm GPU metrics in Perfetto
    :width: 800
 
+.. note::
+   **Crossing regions may not visualize correctly.** Perfetto renders each thread as a
+   single track that uses a last-in-first-out (LIFO) stack-based nesting model. As a result,
+   a region that *begins* inside one region and *ends* inside a different one (a "crossing" region)
+   will not be visualized correctly:
+
+   .. code-block:: text
+
+      time ──────────────────────────────────────────────▶
+
+      frames:   [ frame_A ──────────]   [ frame_B ──────────]
+      region:              [ region X ───────────────]
+                           ^begin (inside A)     ^end (inside B)
+
+      region X starts while frame_A is on the stack but ends after frame_A
+      has already been popped and frame_B has been pushed. It is neither
+      nested in frame_A nor in frame_B, so perfetto cannot place it faithfully
+      relative to its neighbors.
+
+   This behavior is observed with OpenMP (OMPT) events when profiling an application built
+   with the LLVM OpenMP runtime in ``runtime-instrument`` mode. In that mode the LLVM OpenMP runtime
+   internals (``__kmp_*`` frames) are themselves instrumented and frequently straddle the begin/end
+   of an OMPT region, producing the crossing pattern shown above.
+
+   To avoid this issue, prefer generating a ``rocpd`` output file and viewing it with ROCm Optiq.
+
 Timemory output
 ========================================
 
