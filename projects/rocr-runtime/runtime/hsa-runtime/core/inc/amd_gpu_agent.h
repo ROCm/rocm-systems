@@ -567,8 +567,12 @@ class GpuAgent : public GpuAgentInt {
     *size = scratch_pool_.size();
   }
 
-  /// @brief Get list of AQL queues for core dump filtering
-  const std::vector<core::Queue*>& GetAqlQueues() const { return aql_queues_; }
+  /// @brief Get a snapshot of AQL queues for core dump filtering.
+  /// Returns a copy to avoid iterator invalidation from concurrent queue destruction.
+  std::vector<core::Queue*> GetAqlQueues() const {
+    std::lock_guard<std::mutex> lock(aql_queues_lock_);
+    return aql_queues_;
+  }
 
   /// @brief Remove a destroyed AQL queue from agent-owned tracking.
   void UnregisterAqlQueue(core::Queue* queue);
@@ -877,6 +881,9 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief list of AQL queues owned by this agent. Indexed by queue pointer
   std::vector<core::Queue*> aql_queues_;
+
+  // @brief Protects aql_queues_ from concurrent modification/iteration.
+  mutable std::mutex aql_queues_lock_;
 
   // Sets and Tracks pending SDMA status check or request counts
   void SetCopyRequestRefCount(bool set);
