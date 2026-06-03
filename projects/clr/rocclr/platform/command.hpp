@@ -1549,6 +1549,9 @@ class AccumulateCommand : public Command {
     }
   }
 
+  //! Get HW events map (for profiling pre-patched graph signals)
+  const std::unordered_map<Device*, std::vector<void*>>& getHwEvents() const { return hw_events_; }
+
   //! Add kernel name to the list if available
   void addKernelName(const std::string* kernelName) { kernelNames_.push_back(kernelName); }
 

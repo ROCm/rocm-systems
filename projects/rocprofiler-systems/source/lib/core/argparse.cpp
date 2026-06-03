@@ -139,11 +139,11 @@ add_ld_library_path(parser_data& _data)
 }
 
 parser_data&
-add_torch_library_path(parser_data& _data, bool verbose)
+add_torch_library_path(parser_data& _data)
 {
     if(_data.out.command.empty()) return _data;
     rocprofsys::common::add_torch_library_path(
-        _data.env.current, _data.out.command.front(), verbose, _data.env.updated);
+        _data.env.current, _data.out.command.front(), _data.env.updated);
     return _data;
 }
 
@@ -915,7 +915,6 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 { "--cpus" },
                 "CPU IDs for frequency sampling. Supports integers and/or ranges")
             .dtype("int and/or range")
-            .required({ "host" })
             .action([&](parser_t& p) {
                 update_env(_data, "ROCPROFSYS_SAMPLING_CPUS",
                            fmt::format("{}", fmt::join(p.get<strvec_t>("cpus"), ",")));
@@ -931,7 +930,6 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .add_argument({ "--gpus" },
                           "GPU IDs for SMI queries. Supports integers and/or ranges")
             .dtype("int and/or range")
-            .required({ "device" })
             .action([&](parser_t& p) {
                 update_env(_data, "ROCPROFSYS_SAMPLING_GPUS",
                            fmt::format("{}", fmt::join(p.get<strvec_t>("gpus"), ",")));
@@ -947,7 +945,6 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .add_argument({ "--ai-nics" },
                           "AI NIC IDs for SMI queries. Supports comma-separated list")
             .dtype("list of strings")
-            .required({ "device" })
             .action([&](parser_t& p) {
                 update_env(_data, "ROCPROFSYS_SAMPLING_AINICS",
                            fmt::format("{}", fmt::join(p.get<strvec_t>("ai-nics"), ",")));

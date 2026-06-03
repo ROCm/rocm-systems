@@ -938,7 +938,30 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(TIMEMORY_BUILD_HIDDEN_VISIBILITY OFF CACHE BOOL "" FORCE)
 endif()
 
+# Under sanitizer builds, ASan's globals-dead-stripping optimization converts
+# timemory's explicit template instantiations (STB_GLOBAL) into COMDAT groups
+# with STB_GLOBAL leaders. Rocprofiler-systems TUs that include timemory headers
+# produce COMDAT groups with STB_WEAK leaders for the same symbols (implicit
+# instantiation). lld rejects the resulting mix of STB_WEAK and STB_GLOBAL
+# COMDAT group leaders for the same symbol.
+#
+# -fno-sanitize-address-globals-dead-stripping disables this COMDAT conversion
+# for timemory's compilation, keeping explicit instantiations as regular
+# STB_GLOBAL symbols (as they are without sanitizers). lld then applies its
+# normal STB_GLOBAL-overrides-COMDAT-STB_WEAK rule, which is the same
+# behaviour as non-sanitizer builds and what GNU ld always does.
+string(FIND "${CMAKE_CXX_FLAGS}" "-fsanitize" _timemory_sanitizer_flag_pos)
+if(_timemory_sanitizer_flag_pos GREATER -1)
+    set(TIMEMORY_BUILD_HIDDEN_VISIBILITY OFF CACHE BOOL "" FORCE)
+    set(_timemory_saved_cxx_flags "${CMAKE_CXX_FLAGS}")
+    string(APPEND CMAKE_CXX_FLAGS " -fno-sanitize-address-globals-dead-stripping")
+endif()
+
 add_subdirectory(external/timemory EXCLUDE_FROM_ALL)
+
+if(_timemory_sanitizer_flag_pos GREATER -1)
+    set(CMAKE_CXX_FLAGS "${_timemory_saved_cxx_flags}")
+endif()
 
 install(
     TARGETS gotcha

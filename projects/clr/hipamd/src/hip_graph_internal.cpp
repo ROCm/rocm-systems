@@ -533,19 +533,10 @@ void GraphExec::BuildSyncPlan() {
           {completion_barrier, nullptr, segment.id,
            amd::Device::HwEventPatch::kCompletionSignal});
     } else if (!lastBatch.dispatchPackets.empty()) {
-      // All nodes are capturable — append a real completion barrier packet so that
-      // ApplyHwEventPatches patches the barrier's completion signal, not the last
-      // kernel dispatch's. Patching the last kernel dispatch directly causes
-      // dispatchAqlPacketBatchFlat to see a pre-patched non-zero signal and skip
-      // profiling setup (reserved2 / isPacketDispatch_) for that kernel.
-      uint8_t* completion_barrier = device->CreateBarrierPacket();
-      sync_plan_.barrier_packets.push_back(completion_barrier);
-
-      lastBatch.dispatchPackets.push_back(completion_barrier);
-      lastBatch.dispatchKernelNames.push_back(kBarrierKernelNamePtr);
-
+      // Safe to patch the last kernel dispatch directly
+      uint8_t* last_pkt = lastBatch.dispatchPackets.back();
       sync_plan_.patch_list.push_back(
-          {completion_barrier, nullptr, segment.id,
+          {last_pkt, nullptr, segment.id,
            amd::Device::HwEventPatch::kCompletionSignal});
     }
 

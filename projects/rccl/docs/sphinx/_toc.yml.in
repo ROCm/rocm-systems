@@ -8,11 +8,11 @@ subtrees:
 - caption: Install
   entries:
   - file: install/installation
-    title: Installation guide
-  - file: install/docker-install
-    title: Running RCCL using Docker
+    title: Install RCCL
   - file: install/building-installing
-    title: Building and installing from source
+    title: Build from source
+  - file: install/docker-install
+    title: Run RCCL using Docker
 
 - caption: How to
   entries:
@@ -26,9 +26,9 @@ subtrees:
 
 - caption: Examples
   entries:
-  - url: https://github.com/ROCm/rccl/tree/develop/ext-tuner/example
+  - url: https://github.com/ROCm/rccl/tree/develop/plugins/tuner/example
     title: RCCL Tuner plugin examples
-  - url: https://github.com/ROCm/rccl/tree/develop/ext-net/example
+  - url: https://github.com/ROCm/rccl/tree/develop/plugins/net/example
     title: NCCL Net plugin examples
 
 - caption: API reference
