@@ -79,6 +79,19 @@ endif()
 
 # Install CTest infrastructure for running tests from installation directory
 if(BUILD_CTESTS AND (BUILD_FUNCTIONAL_TESTS OR BUILD_UNIT_TESTS))
+    # Set subdirs() calls based on what's built
+    if(BUILD_FUNCTIONAL_TESTS)
+        set(BUILD_FUNCTIONAL_TESTS_SUBDIRS "subdirs(\"tests/functional\")")
+    else()
+        set(BUILD_FUNCTIONAL_TESTS_SUBDIRS "# Functional tests not built")
+    endif()
+
+    if(BUILD_UNIT_TESTS)
+        set(BUILD_UNIT_TESTS_SUBDIRS "subdirs(\"tests/unit\")")
+    else()
+        set(BUILD_UNIT_TESTS_SUBDIRS "# Unit tests not built")
+    endif()
+
     # Generate and install top-level CTestTestfile.cmake
     configure_file(
         ${CMAKE_CURRENT_SOURCE_DIR}/CTestInstallRoot.cmake.in

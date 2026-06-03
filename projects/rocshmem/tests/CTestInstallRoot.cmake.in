@@ -41,8 +41,8 @@ message(STATUS "MPI executable: ${MPIEXEC_EXECUTABLE}")
 message(STATUS "MPI MCA parameters: pml=${OMPI_MCA_PML}, osc=${OMPI_MCA_OSC}")
 
 # Subdirectories containing test definitions
-subdirs("tests/functional")
-subdirs("tests/unit")
+@BUILD_FUNCTIONAL_TESTS_SUBDIRS@
+@BUILD_UNIT_TESTS_SUBDIRS@
 
 # Tier labels are available for monorepo CI filtering:
 #   ctest -L quick           # Quick smoke tests
