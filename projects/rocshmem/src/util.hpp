@@ -448,7 +448,7 @@ __device__ __forceinline__ void copy_remainder(uint8_t* dst,
   if (remainder & 8) {
     auto val = AsmAccess<8, LP, SP>::load(src);
     if constexpr (LP != CachePolicy::Standard) {
-      wait_on_vmem_loads(0);
+      wait_on_vmem_and_lds(0);
     }
     AsmAccess<8, LP, SP>::store(dst, val);
     dst += 8;
@@ -457,7 +457,7 @@ __device__ __forceinline__ void copy_remainder(uint8_t* dst,
   if (remainder & 4) {
     auto val = AsmAccess<4, LP, SP>::load(src);
     if constexpr (LP != CachePolicy::Standard) {
-      wait_on_vmem_loads(0);
+      wait_on_vmem_and_lds(0);
     }
     AsmAccess<4, LP, SP>::store(dst, val);
     dst += 4;
@@ -466,7 +466,7 @@ __device__ __forceinline__ void copy_remainder(uint8_t* dst,
   if (remainder & 2) {
     auto val = AsmAccess<2, LP, SP>::load(src);
     if constexpr (LP != CachePolicy::Standard) {
-      wait_on_vmem_loads(0);
+      wait_on_vmem_and_lds(0);
     }
     AsmAccess<2, LP, SP>::store(dst, val);
     dst += 2;
@@ -475,7 +475,7 @@ __device__ __forceinline__ void copy_remainder(uint8_t* dst,
   if (remainder & 1) {
     auto val = AsmAccess<1, LP, SP>::load(src);
     if constexpr (LP != CachePolicy::Standard) {
-      wait_on_vmem_loads(0);
+      wait_on_vmem_and_lds(0);
     }
     AsmAccess<1, LP, SP>::store(dst, val);
   }
