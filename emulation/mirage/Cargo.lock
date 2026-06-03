@@ -1070,6 +1070,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirage_container"
+version = "0.1.0"
+dependencies = [
+ "mirage_core",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
 name = "mirage_core"
 version = "0.1.0"
 dependencies = [
@@ -1148,6 +1158,7 @@ dependencies = [
  "chrono",
  "clap",
  "libc",
+ "mirage_container",
  "mirage_core",
  "mirage_hotswap",
  "mirage_rocjitsu",

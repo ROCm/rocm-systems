@@ -37,6 +37,9 @@
 //!   health.json       # SessionHealth (written by host)
 //!   host.pid          # pid of the host process
 //!   host.log          # host's stderr log
+//!   container/        # only present for containerised sessions
+//!     state.json      # ContainerState (provider, network, node containers)
+//!     <rank>.cid      # per-node container id
 //!   exec/
 //!     <exec-id>/
 //!       def.json      # ExecDef
@@ -231,10 +234,21 @@ impl SessionLayout {
     pub fn host_log(&self) -> PathBuf {
         self.root.join("host.log")
     }
-    /// File written by whoever launches the container; contains the
-    /// container id/name that the configured provider can `rm -f`.
-    pub fn container_id(&self) -> PathBuf {
-        self.root.join("container.id")
+    /// Directory holding container runtime state for a containerised
+    /// session.
+    pub fn container_dir(&self) -> PathBuf {
+        self.root.join("container")
+    }
+    /// File recording the provider, network, and per-node containers
+    /// backing a containerised session (a [`crate::container::ContainerState`]).
+    /// Read by `mirage_core::container::teardown` to remove everything.
+    pub fn container_state(&self) -> PathBuf {
+        self.container_dir().join("state.json")
+    }
+    /// Per-node container id file, written by the host when it launches
+    /// node `rank`'s container.
+    pub fn node_cid(&self, rank: u32) -> PathBuf {
+        self.container_dir().join(format!("{rank}.cid"))
     }
     pub fn exec_root(&self) -> PathBuf {
         self.root.join("exec")

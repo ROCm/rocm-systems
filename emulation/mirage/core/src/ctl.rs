@@ -51,12 +51,12 @@ pub enum StdStream {
 pub struct CreateSessionRequest {
     /// Pre-validated id; if `None` mirage generates one.
     pub id: Option<SessionId>,
-    /// Inline or by-name profile reference.
+    /// Inline or by-name profile reference. Containerisation (image,
+    /// mounts, provider) travels with the profile via
+    /// [`crate::profile::ContainerizedDef`].
     pub profile: crate::common::MaybeRef<ProfileDef>,
     /// Working directory used as the default cwd for execs.
     pub workdir: String,
-    /// Optional container in which to run the session host.
-    pub container: Option<crate::container::ContainerizedDef>,
 }
 
 /// The control-plane API the CLI talks to.
@@ -297,7 +297,13 @@ impl MirageCtl for FileCtl {
         }
         let def: SessionDef = crate::state::read_json(&layout.def())?;
         let health = self.session_health(id)?;
-        Ok(SessionState { def, health })
+        let container =
+            crate::state::read_json_opt(&layout.container_state()).unwrap_or(None);
+        Ok(SessionState {
+            def,
+            health,
+            container,
+        })
     }
 
     fn session_health(&self, id: &SessionId) -> Result<SessionHealth> {
@@ -334,7 +340,6 @@ impl MirageCtl for FileCtl {
         let def = SessionDef {
             id: id.clone(),
             profile: req.profile,
-            container: req.container,
             workdir: req.workdir,
             created_at: Utc::now(),
         };
@@ -362,19 +367,14 @@ impl MirageCtl for FileCtl {
             return Err(MirageError::SessionNotFound(id.to_string()));
         }
 
-        // If this session is containerised and we know the container
-        // id, ask the configured provider to remove it. This is the
+        // If this session is containerised, remove its per-node
+        // containers and virtual network first. This is the
         // authoritative shutdown for containerised sessions: killing
-        // the container terminates the host, all execs, and their
-        // children. We do it before signalling the host so the
-        // container runtime sees the request first.
-        let def: Option<crate::session::SessionDef> = crate::state::read_json_opt(&layout.def())?;
-        if let Some(def) = def.as_ref()
-            && let Some(container) = def.container.as_ref()
-            && let Some(cid) = crate::state::read_small_str(&layout.container_id())?
-        {
-            stop_container(&container.provider, &cid);
-        }
+        // the containers terminates every node, exec, and child. It is
+        // best-effort and idempotent (a no-op when the session was not
+        // containerised), and we do it before signalling the host so
+        // the container runtime sees the request first.
+        crate::container::teardown(&layout.container_state());
 
         // signal the host process if any (this is also the fallback
         // path when there is no container, or when the container has
@@ -644,19 +644,8 @@ fn all_session_node_pids(layout: &crate::paths::SessionLayout) -> Vec<i32> {
     pids
 }
 
-/// Best-effort container removal. Runs `<provider> rm -f <id>` and
-/// ignores any error: the caller still proceeds to remove the
-/// on-disk session, and signalling the host pid catches any case
-/// where the container runtime is unavailable.
-fn stop_container(provider: &str, container_id: &str) {
-    let _ = std::process::Command::new(provider)
-        .args(["rm", "-f", container_id])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
-}
-
+/// Allocate the next exec id by scanning the existing exec directory
+/// for the highest `e-<n>` counter.
 fn next_exec_id(exec_root: &Path) -> Result<ExecId> {
     let mut max: u32 = 0;
     if exec_root.exists() {
@@ -723,6 +712,7 @@ mod tests {
                     agent: MaybeRef::Ref("MI350X".to_string()),
                 }),
             },
+            containerize: None,
         }
     }
 
@@ -753,7 +743,6 @@ mod tests {
                 id: Some(SessionId::new("s1").unwrap()),
                 profile: MaybeRef::Ref("p".to_string()),
                 workdir: "/tmp".to_string(),
-                container: None,
             })
             .unwrap();
         assert_eq!(def.id.as_str(), "s1");
@@ -773,7 +762,6 @@ mod tests {
             id: Some(SessionId::new("dup").unwrap()),
             profile: MaybeRef::Ref("p".to_string()),
             workdir: "/tmp".to_string(),
-            container: None,
         };
         ctl.session_create(req()).unwrap();
         assert!(matches!(
@@ -790,7 +778,6 @@ mod tests {
             id: Some(s.clone()),
             profile: MaybeRef::Ref("p".to_string()),
             workdir: "/tmp".to_string(),
-            container: None,
         })
         .unwrap();
         let def = ExecDef {
@@ -837,7 +824,6 @@ mod tests {
             id: Some(s.clone()),
             profile: MaybeRef::Ref("p".to_string()),
             workdir: "/tmp".to_string(),
-            container: None,
         })
         .unwrap();
         let r = make_exec_dir(&ctl, &s);
@@ -857,7 +843,6 @@ mod tests {
             id: Some(s.clone()),
             profile: MaybeRef::Ref("p".to_string()),
             workdir: "/tmp".to_string(),
-            container: None,
         })
         .unwrap();
         let r = make_exec_dir(&ctl, &s);
@@ -876,7 +861,6 @@ mod tests {
             id: Some(s.clone()),
             profile: MaybeRef::Ref("p".to_string()),
             workdir: "/tmp".to_string(),
-            container: None,
         })
         .unwrap();
         let r = ExecRef {
@@ -893,7 +877,8 @@ mod tests {
     fn session_destroy_container_invokes_provider() {
         let (ctl, env) = fresh_ctl();
         // Mock provider script: appends every invocation to a log
-        // file so we can assert it was called with "rm -f <id>".
+        // file so we can assert it was called to remove containers
+        // and the network.
         let tmp_dir = env._dir.path();
         let log = tmp_dir.join("provider.log");
         let provider = tmp_dir.join("mock-provider.sh");
@@ -910,30 +895,48 @@ mod tests {
             id: Some(s.clone()),
             profile: MaybeRef::Ref("p".to_string()),
             workdir: "/tmp".to_string(),
-            container: Some(crate::container::ContainerizedDef {
-                provider: provider.to_string_lossy().to_string(),
-                image: "ignored:latest".to_string(),
-                files: vec![],
-                network: crate::container::NetworkConfigDef::None,
-            }),
         })
         .unwrap();
-        // Simulate the host having recorded a container id.
+        // Simulate the host having recorded the container state.
         let layout = crate::paths::SessionLayout::for_id(&s);
-        crate::state::write_bytes(&layout.container_id(), b"mirage-c1-xyz").unwrap();
+        let state = crate::container::ContainerState {
+            provider: provider.to_string_lossy().to_string(),
+            image: "ignored:latest".to_string(),
+            network: Some("mirage-c1".to_string()),
+            head_port: 12345,
+            nodes: vec![
+                crate::container::NodeContainer {
+                    rank: 0,
+                    name: "mirage-c1-node-0".to_string(),
+                },
+                crate::container::NodeContainer {
+                    rank: 1,
+                    name: "mirage-c1-node-1".to_string(),
+                },
+            ],
+        };
+        crate::state::write_json(&layout.container_state(), &state).unwrap();
 
         ctl.session_destroy(&s).unwrap();
 
         let recorded = std::fs::read_to_string(&log).unwrap();
         assert!(
-            recorded.contains("rm -f mirage-c1-xyz"),
-            "expected provider call, got: {recorded:?}"
+            recorded.contains("rm -f mirage-c1-node-0"),
+            "expected node 0 removal, got: {recorded:?}"
+        );
+        assert!(
+            recorded.contains("rm -f mirage-c1-node-1"),
+            "expected node 1 removal, got: {recorded:?}"
+        );
+        assert!(
+            recorded.contains("network rm mirage-c1"),
+            "expected network removal, got: {recorded:?}"
         );
         assert!(!layout.root.exists(), "session dir should be removed");
     }
 
     #[test]
-    fn session_destroy_without_container_id_skips_provider() {
+    fn session_destroy_without_container_state_skips_provider() {
         let (ctl, env) = fresh_ctl();
         let tmp_dir = env._dir.path();
         let log = tmp_dir.join("provider.log");
@@ -951,15 +954,9 @@ mod tests {
             id: Some(s.clone()),
             profile: MaybeRef::Ref("p".to_string()),
             workdir: "/tmp".to_string(),
-            container: Some(crate::container::ContainerizedDef {
-                provider: provider.to_string_lossy().to_string(),
-                image: "ignored:latest".to_string(),
-                files: vec![],
-                network: crate::container::NetworkConfigDef::None,
-            }),
         })
         .unwrap();
-        // No container.id was ever written → provider must not be
+        // No container state was ever written → provider must not be
         // called.
         ctl.session_destroy(&s).unwrap();
         assert!(!log.exists(), "provider must not be invoked");

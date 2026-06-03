@@ -20,7 +20,7 @@ use mirage_core::common::MaybeRef;
 use mirage_core::ctl::{CreateSessionRequest, MirageCtl, StdStream, StreamPacket};
 use mirage_core::emulator::EmulatorDescription;
 use mirage_core::exec::{ExecArgs, ExecDef, ExecId, ExecRef};
-use mirage_core::profile::ProfileDef;
+use mirage_core::profile::{ContainerizedDef, FileMount, ProfileDef};
 use mirage_core::session::SessionId;
 use tokio_stream::StreamExt;
 
@@ -255,6 +255,20 @@ pub enum ProfileCmd {
         /// Optional description.
         #[arg(long)]
         description: Option<String>,
+        /// Containerise the profile: run every node inside a container
+        /// built from this image. Enables `--mount`/`--provider`.
+        #[arg(long)]
+        image: Option<String>,
+        /// Bind mount applied to every node container, as
+        /// `HOST[:CONTAINER[:ro|rw]]`. May be repeated. Requires
+        /// `--image`.
+        #[arg(long = "mount", value_name = "HOST[:CONTAINER[:ro|rw]]")]
+        mounts: Vec<String>,
+        /// Container provider to use (`podman`, `docker`, or a path).
+        /// Autodetected (podman, then docker) when omitted. Requires
+        /// `--image`.
+        #[arg(long)]
+        provider: Option<String>,
     },
     /// Interactive wizard: prompts for every field.
     Wizard {
@@ -374,6 +388,17 @@ pub struct StartArgs {
     /// How long to wait for the host to report ready (seconds).
     #[arg(long, default_value_t = 10)]
     pub ready_timeout: u64,
+    /// Override/enable containerisation: run every node inside a
+    /// container built from this image.
+    #[arg(long)]
+    pub image: Option<String>,
+    /// Extra bind mount (`HOST[:CONTAINER[:ro|rw]]`). May be repeated.
+    #[arg(long = "mount", value_name = "HOST[:CONTAINER[:ro|rw]]")]
+    pub mounts: Vec<String>,
+    /// Container provider (`podman`, `docker`, or a path). Autodetected
+    /// when omitted.
+    #[arg(long)]
+    pub provider: Option<String>,
 }
 
 // ----- exec ------------------------------------------------------------------
@@ -466,6 +491,17 @@ pub struct RunArgs {
     /// `KEY=VALUE` form. May be repeated.
     #[arg(long = "env", value_name = "KEY=VALUE")]
     envs: Vec<String>,
+    /// Override/enable containerisation: run every node inside a
+    /// container built from this image.
+    #[arg(long)]
+    image: Option<String>,
+    /// Extra bind mount (`HOST[:CONTAINER[:ro|rw]]`). May be repeated.
+    #[arg(long = "mount", value_name = "HOST[:CONTAINER[:ro|rw]]")]
+    mounts: Vec<String>,
+    /// Container provider (`podman`, `docker`, or a path). Autodetected
+    /// when omitted.
+    #[arg(long)]
+    provider: Option<String>,
     /// The command and its arguments.
     #[arg(trailing_var_arg = true, required = true, allow_hyphen_values = true)]
     argv: Vec<String>,
@@ -574,6 +610,9 @@ fn profile_cmd(ctl: &dyn MirageCtl, cmd: ProfileCmd, json: bool) -> anyhow::Resu
             nodes_per_rack,
             gpus_per_node,
             description,
+            image,
+            mounts,
+            provider,
         } => {
             // Resolve emulator: explicit > registry default.
             let spec = match emulator.as_deref() {
@@ -596,10 +635,12 @@ fn profile_cmd(ctl: &dyn MirageCtl, cmd: ProfileCmd, json: bool) -> anyhow::Resu
                 gpus_per_node,
                 agent: MaybeRef::Ref(agent),
             };
+            let containerize = build_containerize(image, &mounts, provider)?;
             let p = ProfileDef {
                 name: name.clone(),
                 description,
                 emulator: mirage_core::registry::make_def(&spec, topo),
+                containerize,
             };
             if let Err(e) = validate_profile(&p) {
                 anyhow::bail!("cannot create profile {name}: {e}");
@@ -757,14 +798,30 @@ async fn session_cmd<C: MirageCtl>(
                 if ids.is_empty() {
                     eprintln!("(no sessions)");
                 }
-                println!("{:<32} {:<10} STATE", "ID", "HEALTHY");
+                println!("{:<32} {:<10} {:<12} CONTAINER", "ID", "HEALTHY", "STATE");
                 for id in ids {
-                    let h = ctl.session_health(&id).unwrap_or_default();
+                    let state = ctl.session_state(&id).ok();
+                    let h = state
+                        .as_ref()
+                        .map(|s| s.health.clone())
+                        .or_else(|| ctl.session_health(&id).ok())
+                        .unwrap_or_default();
+                    let container = match state.as_ref().and_then(|s| s.container.as_ref()) {
+                        Some(c) => format!(
+                            "{} {} ({} node{})",
+                            c.provider,
+                            c.image,
+                            c.nodes.len(),
+                            if c.nodes.len() == 1 { "" } else { "s" }
+                        ),
+                        None => "-".to_string(),
+                    };
                     println!(
-                        "{:<32} {:<10} {}",
+                        "{:<32} {:<10} {:<12} {}",
                         id,
                         h.healthy,
-                        h.state.unwrap_or_default()
+                        h.state.unwrap_or_default(),
+                        container
                     );
                 }
             }
@@ -798,22 +855,107 @@ async fn session_cmd<C: MirageCtl>(
     Ok(ExitCode::from(0))
 }
 
+/// Build a [`ContainerizedDef`] from CLI container flags.
+///
+/// Returns `None` when no container flags were given. `--mount` and
+/// `--provider` require `--image` (there is no base image to attach
+/// them to otherwise).
+fn build_containerize(
+    image: Option<String>,
+    mounts: &[String],
+    provider: Option<String>,
+) -> anyhow::Result<Option<ContainerizedDef>> {
+    match image {
+        Some(image) => Ok(Some(ContainerizedDef {
+            provider,
+            image,
+            mounts: parse_mounts(mounts)?,
+        })),
+        None => {
+            if !mounts.is_empty() || provider.is_some() {
+                anyhow::bail!("--mount/--provider require --image");
+            }
+            Ok(None)
+        }
+    }
+}
+
+/// Parse CLI `--mount` specs into [`FileMount`]s.
+fn parse_mounts(mounts: &[String]) -> anyhow::Result<Vec<FileMount>> {
+    mounts
+        .iter()
+        .map(|m| FileMount::parse(m).map_err(|e| anyhow::anyhow!(e)))
+        .collect()
+}
+
+/// Apply container override flags to a freshly-loaded profile.
+///
+/// When no container flags are present and the profile is referenced by
+/// name, returns a [`MaybeRef::Ref`] so the host resolves the profile
+/// itself (the common, cheap path). When flags are present, they enable
+/// or extend the profile's containerisation and the (now modified)
+/// profile is returned inline via [`MaybeRef::Owned`].
+fn apply_container_overrides(
+    profile: &mut ProfileDef,
+    image: Option<String>,
+    mounts: &[String],
+    provider: Option<String>,
+    profile_name: &str,
+) -> anyhow::Result<MaybeRef<ProfileDef>> {
+    if image.is_none() && mounts.is_empty() && provider.is_none() {
+        // No overrides: keep the cheap by-name reference.
+        return Ok(MaybeRef::Ref(profile_name.to_string()));
+    }
+    let parsed = parse_mounts(mounts)?;
+    match &mut profile.containerize {
+        Some(c) => {
+            if let Some(img) = image {
+                c.image = img;
+            }
+            if let Some(p) = provider {
+                c.provider = Some(p);
+            }
+            c.mounts.extend(parsed);
+        }
+        None => {
+            let image = image.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "--mount/--provider require a containerised profile or --image"
+                )
+            })?;
+            profile.containerize = Some(ContainerizedDef {
+                provider,
+                image,
+                mounts: parsed,
+            });
+        }
+    }
+    Ok(MaybeRef::Owned(profile.clone()))
+}
+
 async fn session_start<C: MirageCtl>(
     ctl: &C,
     args: StartArgs,
     json: bool,
 ) -> anyhow::Result<ExitCode> {
-    // Validate profile exists.
-    ctl.profile_get(&args.profile)?;
+    // Validate profile exists and resolve it so container overrides can
+    // be applied.
+    let mut profile = ctl.profile_get(&args.profile)?;
+    let profile_ref = apply_container_overrides(
+        &mut profile,
+        args.image,
+        &args.mounts,
+        args.provider,
+        &args.profile,
+    )?;
     let def = ctl.session_create(CreateSessionRequest {
         id: args.id,
-        profile: MaybeRef::Ref(args.profile.clone()),
+        profile: profile_ref,
         workdir: args.workdir.unwrap_or_else(|| {
             std::env::current_dir()
                 .map(|p| p.display().to_string())
                 .unwrap_or("/".to_string())
         }),
-        container: None,
     })?;
     if !args.no_host {
         spawn_host_for(&def.id)?;
@@ -1126,16 +1268,22 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
         Some(id) => (id, false),
         None => {
             // create transient session
-            ctl.profile_get(&a.profile)?;
+            let mut profile = ctl.profile_get(&a.profile)?;
+            let profile_ref = apply_container_overrides(
+                &mut profile,
+                a.image.clone(),
+                &a.mounts,
+                a.provider.clone(),
+                &a.profile,
+            )?;
             let def = ctl.session_create(CreateSessionRequest {
                 id: None,
-                profile: MaybeRef::Ref(a.profile.clone()),
+                profile: profile_ref,
                 workdir: a.workdir.clone().unwrap_or_else(|| {
                     std::env::current_dir()
                         .map(|p| p.display().to_string())
                         .unwrap_or("/".to_string())
                 }),
-                container: None,
             })?;
             spawn_host_for(&def.id)?;
             ctl.session_wait_ready(&def.id, Duration::from_secs(10))?;
@@ -1279,6 +1427,7 @@ fn profile_wizard(
             Some(description)
         },
         emulator: mirage_core::registry::make_def(spec, topo),
+        containerize: None,
     };
     if let Err(e) = validate_profile(&p) {
         anyhow::bail!("cannot create profile {name}: {e}");
@@ -1355,6 +1504,9 @@ async fn session_wizard<C: MirageCtl>(ctl: &C, json: bool) -> anyhow::Result<Exi
             workdir: Some(workdir),
             no_host: false,
             ready_timeout,
+            image: None,
+            mounts: Vec::new(),
+            provider: None,
         },
         json,
     )

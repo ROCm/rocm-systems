@@ -366,6 +366,17 @@ struct CreateSessionBody {
     id: Option<SessionId>,
     #[serde(default)]
     workdir: Option<String>,
+    /// Override/enable containerisation: run every node inside a
+    /// container built from this image.
+    #[serde(default)]
+    image: Option<String>,
+    /// Extra bind mounts (`HOST[:CONTAINER[:ro|rw]]`).
+    #[serde(default)]
+    mounts: Vec<String>,
+    /// Container provider (`podman`, `docker`, or a path). Autodetected
+    /// when omitted.
+    #[serde(default)]
+    provider: Option<String>,
     /// If true (default), the daemon spawns the per-session host
     /// process. Tests can set this to false to drive the host
     /// themselves.
@@ -402,17 +413,54 @@ async fn create_session(
     State(s): State<Arc<AppState>>,
     Json(body): Json<CreateSessionBody>,
 ) -> Result<Json<SessionDef>, ApiError> {
-    // validate profile.
-    s.ctl.profile_get(&body.profile)?;
+    // validate profile, resolving it so container overrides can apply.
+    let mut profile = s.ctl.profile_get(&body.profile)?;
+    let profile_ref = if body.image.is_some()
+        || !body.mounts.is_empty()
+        || body.provider.is_some()
+    {
+        let mut mounts = Vec::with_capacity(body.mounts.len());
+        for m in &body.mounts {
+            mounts.push(
+                mirage_core::profile::FileMount::parse(m)
+                    .map_err(mirage_core::error::MirageError::other)?,
+            );
+        }
+        match &mut profile.containerize {
+            Some(c) => {
+                if let Some(img) = body.image {
+                    c.image = img;
+                }
+                if let Some(p) = body.provider {
+                    c.provider = Some(p);
+                }
+                c.mounts.extend(mounts);
+            }
+            None => {
+                let image = body.image.ok_or_else(|| {
+                    mirage_core::error::MirageError::other(
+                        "mounts/provider require a containerised profile or image",
+                    )
+                })?;
+                profile.containerize = Some(mirage_core::profile::ContainerizedDef {
+                    provider: body.provider,
+                    image,
+                    mounts,
+                });
+            }
+        }
+        MaybeRef::Owned(profile)
+    } else {
+        MaybeRef::Ref(body.profile)
+    };
     let def = s.ctl.session_create(CreateSessionRequest {
         id: body.id,
-        profile: MaybeRef::Ref(body.profile),
+        profile: profile_ref,
         workdir: body.workdir.unwrap_or_else(|| {
             std::env::current_dir()
                 .map(|p| p.display().to_string())
                 .unwrap_or("/".to_string())
         }),
-        container: None,
     })?;
     if body.spawn_host {
         mirage_ctl::spawn_host_for(&def.id)?;

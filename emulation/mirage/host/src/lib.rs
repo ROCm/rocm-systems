@@ -30,7 +30,7 @@
 //! notifications are notoriously platform-dependent; a 50ms cadence
 //! gives interactive-feeling latency without burning CPU.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -38,13 +38,16 @@ use std::time::Duration;
 
 use chrono::Utc;
 use mirage_core::common::MaybeRef;
+use mirage_core::container::{
+    ContainerState, ENV_HEAD_ADDR, ENV_HEAD_PORT, ENV_RANK, container_name,
+};
 use mirage_core::emulator::{Emulator, EmulatorKind};
 use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::{ExecDef, ExecId, ExecStatus, InjectionDef, NodeStatus};
 use mirage_core::paths::{ExecLayout, SessionLayout};
 use mirage_core::profile::ProfileDef;
 use mirage_core::session::{SessionDef, SessionHealth, SessionId};
-use mirage_core::state::{read_json, read_small_str, write_bytes, write_json};
+use mirage_core::state::{read_json, read_json_opt, read_small_str, write_bytes, write_json};
 use nix::sys::stat::Mode;
 use nix::unistd::mkfifo;
 use tokio::sync::Notify;
@@ -72,6 +75,26 @@ pub async fn run(config: HostConfig, shutdown: Arc<Notify>) -> Result<()> {
         &layout.host_pid(),
         std::process::id().to_string().as_bytes(),
     )?;
+
+    // If the session's profile is containerised, bring up one container
+    // per node on a shared per-session network *before* declaring the
+    // session ready. This pulls the image, creates the network, starts
+    // the containers, and persists the runtime record + per-node cids so
+    // execs run inside the right container and teardown can find them.
+    if let Err(e) = maybe_bring_up_containers(&config.session, &layout) {
+        // A containerised session that cannot start is fatal: surface it
+        // as terminal health so clients stop waiting, and abort.
+        let h = SessionHealth {
+            timestamp: Utc::now(),
+            healthy: false,
+            state: Some("failed".to_string()),
+            terminal: true,
+            message: Some(format!("container bring-up failed: {e}")),
+        };
+        let _ = write_json(&layout.health(), &h);
+        return Err(e);
+    }
+
     publish_health(&layout, true, "ready", None)?;
 
     // Install signal handlers.
@@ -145,6 +168,11 @@ pub async fn run(config: HostConfig, shutdown: Arc<Notify>) -> Result<()> {
         let _ = tokio::time::timeout(remaining.max(Duration::from_millis(10)), t).await;
     }
     signal_all_execs(&layout, nix::sys::signal::Signal::SIGKILL);
+    // Tear down any per-node containers and the per-session network.
+    // Idempotent and a no-op for non-containerised sessions; the control
+    // plane also calls this on `session destroy`, so a crashed host never
+    // leaks containers.
+    mirage_core::container::teardown(&layout.container_state());
     publish_health(&layout, false, "stopped", None).ok();
     Ok(())
 }
@@ -221,6 +249,92 @@ fn process_signal_requests(layout: &SessionLayout) {
     }
 }
 
+/// Read a session's on-disk definition and resolve its profile (whether
+/// stored inline or referenced by name).
+fn resolve_profile(session: &SessionId) -> Result<ProfileDef> {
+    let session_def: SessionDef = read_json(&SessionLayout::for_id(session).def())?;
+    match session_def.profile {
+        MaybeRef::Owned(p) => Ok(p),
+        MaybeRef::Ref(name) => {
+            let p = mirage_core::paths::profile_path(&name);
+            if !p.exists() {
+                return Err(MirageError::ProfileNotFound(name));
+            }
+            read_json(&p)
+        }
+    }
+}
+
+/// Resolve the number of nodes a profile's topology describes (defaults
+/// to 1 for the common single-node case).
+fn resolve_node_count(profile: &ProfileDef) -> Result<u32> {
+    let topology = match &profile.emulator.topology {
+        MaybeRef::Owned(t) => t.clone(),
+        MaybeRef::Ref(name) => mirage_core::topology::store::get(name)?,
+    };
+    Ok(topology.total_nodes().max(1))
+}
+
+/// Pick an ephemeral TCP port by binding to `127.0.0.1:0` and reading
+/// back the assigned port. Used as the head node's advertised port.
+fn pick_head_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .ok()
+        .and_then(|l| l.local_addr().ok())
+        .map(|a| a.port())
+        // 0 is a harmless fallback: it just means no port was reserved.
+        .unwrap_or(0)
+}
+
+/// Bring up the per-node containers + network for a containerised
+/// session and persist the runtime record. A no-op when the profile is
+/// not containerised.
+fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Result<()> {
+    let profile = resolve_profile(session)?;
+    let Some(def) = profile.containerize.clone() else {
+        return Ok(());
+    };
+
+    publish_health(layout, true, "pulling", Some(format!("pulling image {}", def.image)))?;
+
+    let engine = mirage_container::Engine::resolve(&def)
+        .map_err(|e| MirageError::other(format!("{e}")))?;
+    let node_count = resolve_node_count(&profile)?;
+    let head_port = pick_head_port();
+    let head_addr = container_name(session, 0);
+
+    let (state, cids) = engine
+        .bring_up(session, &def, node_count, head_port, |rank| {
+            node_mirage_env(rank, &head_addr, head_port)
+        })
+        .map_err(|e| MirageError::other(format!("{e}")))?;
+
+    // Persist the runtime record (used by execs and teardown) and the
+    // per-node container ids under the session's container directory.
+    write_json(&layout.container_state(), &state)?;
+    for (rank, cid) in &cids {
+        write_bytes(&layout.node_cid(*rank), cid.as_bytes())?;
+    }
+    Ok(())
+}
+
+/// Build the always-present mirage environment for a node of `rank`.
+///
+/// `MIRAGE_RANK` and `MIRAGE_HEAD_PORT` are set on every node;
+/// `MIRAGE_HEAD_ADDR` is set on every node *except* the head (rank 0),
+/// which is itself the head. These are injected whether or not the
+/// session is containerised.
+fn node_mirage_env(rank: u32, head_addr: &str, head_port: u16) -> Vec<(String, String)> {
+    let mut env = vec![
+        (ENV_RANK.to_string(), rank.to_string()),
+        (ENV_HEAD_PORT.to_string(), head_port.to_string()),
+    ];
+    if rank != 0 {
+        env.push((ENV_HEAD_ADDR.to_string(), head_addr.to_string()));
+    }
+    env
+}
+
 /// Resolve the emulator-level injection for a session by reading its
 /// on-disk definition, resolving its profile, and dispatching to the
 /// configured [`EmulatorKind`]'s [`EmulatorBackend`] implementation to
@@ -232,20 +346,8 @@ fn process_signal_requests(layout: &SessionLayout) {
 /// misconfigured session fails loudly instead of silently running
 /// unemulated.
 fn resolve_injection(session: &SessionId) -> Result<InjectionDef> {
-    let session_def: SessionDef = read_json(&SessionLayout::for_id(session).def())?;
-    let profile: ProfileDef = match session_def.profile {
-        MaybeRef::Owned(p) => p,
-        MaybeRef::Ref(name) => {
-            let p = mirage_core::paths::profile_path(&name);
-            if !p.exists() {
-                return Err(MirageError::ProfileNotFound(name));
-            }
-            read_json(&p)?
-        }
-    };
-    let emulator = &profile.emulator;
-
-    match emulator.emulator {
+    let profile = resolve_profile(session)?;
+    match profile.emulator.emulator {
         EmulatorKind::Rocjitsu => mirage_rocjitsu::Rocjitsu::new(profile).injection_def(),
         EmulatorKind::Hotswap => mirage_hotswap::Hotswap::new(profile).injection_def(),
         EmulatorKind::Noop => mirage_core::emulator::Noop::new(profile).injection_def(),
@@ -269,58 +371,93 @@ async fn run_exec(layout: ExecLayout) -> Result<()> {
     };
     write_json(&layout.status(), &status)?;
 
-    // Determine node count. For now: head is node 0; if worker_exec is
-    // set, spawn one worker on nodes 1..N where N comes from the
-    // session's profile. We don't have direct access to the profile
-    // here without a parse, so just spawn head-only for now and let
-    // workers be added when we wire emulator-level injection.
-    let mut handles = Vec::new();
-    let head_layout = layout.node(0);
-    std::fs::create_dir_all(&head_layout.root).map_err(|e| MirageError::Io {
-        path: head_layout.root.clone(),
-        source: e,
-    })?;
-    let head = match spawn_node(&def, 0, head_layout.clone(), &injection) {
-        Ok(head) => head,
-        Err(e) => {
-            // Spawning the node failed (e.g. the command doesn't exist).
-            // Rather than leaving the exec stuck in a perpetual "started
-            // but never ended" state, surface the reason on the node's
-            // stderr (which attach clients tail) and finish the exec with
-            // the conventional 127 "command not found" exit code.
-            let msg = format!("mirage: {e}\n");
-            let _ = std::fs::write(head_layout.stderr(), msg.as_bytes());
-            let _ = write_bytes(&head_layout.exit_code(), b"127");
-            status.started = true;
-            status.ended = true;
-            status.ended_at = Some(Utc::now());
-            status.exit_code = Some(127);
-            status.nodes.insert(
-                0,
-                NodeStatus {
-                    pid: None,
-                    exit_code: Some(127),
-                },
-            );
-            write_json(&layout.status(), &status)?;
-            if !def.keep {
-                let _ = std::fs::remove_dir_all(&layout.root);
-            }
-            return Ok(());
+    // Resolve how many nodes to spawn and how they reach the head.
+    //
+    // * Containerised sessions: the container bring-up already decided
+    //   the node count and head port and recorded them, so we read that
+    //   back and run each node's command *inside* its container via the
+    //   provider's `exec`. The head is reachable by its container name.
+    // * Non-containerised sessions: the node count comes from the
+    //   profile's topology (defaulting to 1), the head listens on
+    //   loopback, and we pick an ephemeral port per exec.
+    let session_layout = SessionLayout::for_id(&def.session);
+    let container_state: Option<ContainerState> =
+        read_json_opt(&session_layout.container_state())?;
+    let (node_count, head_port, head_addr) = match &container_state {
+        Some(state) => (
+            state.nodes.len().max(1) as u32,
+            state.head_port,
+            container_name(&def.session, 0),
+        ),
+        None => {
+            let profile = resolve_profile(&def.session)?;
+            (
+                resolve_node_count(&profile)?,
+                pick_head_port(),
+                "127.0.0.1".to_string(),
+            )
         }
     };
-    status.started = true;
-    status.nodes.insert(
-        0,
-        NodeStatus {
-            pid: Some(head.pid),
-            exit_code: None,
-        },
-    );
-    write_json(&layout.status(), &status)?;
-    handles.push((0u32, head, head_layout));
 
-    let mut overall_code: i32 = 0;
+    let mut handles = Vec::new();
+    for rank in 0..node_count {
+        let nlayout = layout.node(rank);
+        std::fs::create_dir_all(&nlayout.root).map_err(|e| MirageError::Io {
+            path: nlayout.root.clone(),
+            source: e,
+        })?;
+        // Per-node container target, if containerised.
+        let container = container_state.as_ref().and_then(|state| {
+            state
+                .nodes
+                .iter()
+                .find(|n| n.rank == rank)
+                .map(|n| ContainerExec {
+                    provider: state.provider.clone(),
+                    name: n.name.clone(),
+                })
+        });
+        let mirage_env = node_mirage_env(rank, &head_addr, head_port);
+        match spawn_node(&def, rank, nlayout.clone(), &injection, &mirage_env, container) {
+            Ok(node) => {
+                status.started = true;
+                status.nodes.insert(
+                    rank,
+                    NodeStatus {
+                        pid: Some(node.pid),
+                        exit_code: None,
+                    },
+                );
+                handles.push((rank, node, nlayout));
+            }
+            Err(e) => {
+                // Spawning the node failed (e.g. the command doesn't
+                // exist). Rather than leaving the exec stuck in a
+                // perpetual "started but never ended" state, surface the
+                // reason on the node's stderr (which attach clients tail)
+                // and record the conventional 127 "command not found"
+                // exit code for this node.
+                let msg = format!("mirage: {e}\n");
+                let _ = std::fs::write(nlayout.stderr(), msg.as_bytes());
+                let _ = write_bytes(&nlayout.exit_code(), b"127");
+                status.started = true;
+                status.nodes.insert(
+                    rank,
+                    NodeStatus {
+                        pid: None,
+                        exit_code: Some(127),
+                    },
+                );
+            }
+        }
+    }
+    write_json(&layout.status(), &status)?;
+
+    let mut overall_code: i32 = status
+        .nodes
+        .values()
+        .filter_map(|n| n.exit_code)
+        .fold(0, |acc, c| if c.abs() > acc.abs() { c } else { acc });
     for (node, child, nlayout) in handles {
         let code = wait_node(child).await;
         write_bytes(&nlayout.exit_code(), code.to_string().as_bytes())?;
@@ -360,19 +497,30 @@ struct SpawnedNode {
     bridge: tokio::task::JoinHandle<()>,
 }
 
+/// Target container for running a node's command, when the session is
+/// containerised: the resolved provider binary plus the node's
+/// container name.
+struct ContainerExec {
+    provider: String,
+    name: String,
+}
+
 fn spawn_node(
     def: &ExecDef,
     node: u32,
     nlayout: mirage_core::paths::NodeLayout,
     injection: &InjectionDef,
+    mirage_env: &[(String, String)],
+    container: Option<ContainerExec>,
 ) -> Result<SpawnedNode> {
-    // Pick the args for this node.
+    // Pick the args for this node. The head (rank 0) runs `def.exec`;
+    // workers run `worker_exec` when set, otherwise they reuse the head's
+    // command so a multi-node session runs the same workload everywhere
+    // unless a distinct worker command was provided.
     let args = if node == 0 {
         &def.exec
-    } else if let Some(w) = &def.worker_exec {
-        w
     } else {
-        return Err(MirageError::other("no worker exec for non-head node"));
+        def.worker_exec.as_ref().unwrap_or(&def.exec)
     };
 
     // Create FIFO for stdin. The control plane (`session_stdin`) writes
@@ -431,43 +579,96 @@ fn spawn_node(
         source: e,
     })?;
 
-    let mut cmd = tokio::process::Command::new(&args.command);
-    cmd.args(&args.args)
-        .stdin(Stdio::from(slave_in))
-        .stdout(Stdio::from(slave_out))
-        .stderr(Stdio::from(slave_err))
-        .env_clear()
-        // inherit a minimal environment by default
-        .envs(std::env::vars().filter(|(k, _)| {
-            matches!(
-                k.as_str(),
-                "PATH" | "HOME" | "USER" | "LANG" | "LC_ALL" | "TERM" | "TMPDIR"
-            )
-        }))
-        // Make sure programs that consult $TERM behave like a real
-        // terminal even if the host's own environment has none set.
-        .env(
-            "TERM",
-            std::env::var("TERM").unwrap_or_else(|_| "xterm-256color".into()),
-        )
-        // Emulator-provided env (e.g. rocjitsu's RJ_CONFIG / RJ_SCHEMA)
-        // is applied before the user's env so an explicit exec env can
-        // still override it if needed.
-        .envs(&injection.env)
-        .envs(&args.env);
-    // `LD_PRELOAD` is special: the emulator's interposer must stay on the
-    // preload list, so combine it with any user-supplied value rather than
-    // letting one clobber the other.
+    // Build the combined environment that the workload should see. The
+    // emulator injection is applied first, then the user's exec env, then
+    // the always-present mirage variables (rank/head addr/port), so the
+    // mirage variables can't be accidentally clobbered. `LD_PRELOAD` is
+    // special-cased so the emulator's interposer is preserved alongside
+    // any user-supplied value rather than one clobbering the other.
+    let mut workload_env: BTreeMap<String, String> = BTreeMap::new();
+    for (k, v) in &injection.env {
+        workload_env.insert(k.clone(), v.clone());
+    }
+    for (k, v) in &args.env {
+        workload_env.insert(k.clone(), v.clone());
+    }
+    for (k, v) in mirage_env {
+        workload_env.insert(k.clone(), v.clone());
+    }
     if let Some(preload) = &injection.ld_preload {
         let combined = match args.env.get("LD_PRELOAD") {
             Some(user) if !user.is_empty() => format!("{preload}:{user}"),
             _ => preload.clone(),
         };
-        cmd.env("LD_PRELOAD", combined);
+        workload_env.insert("LD_PRELOAD".to_string(), combined);
     }
-    if let Some(wd) = &args.workdir {
-        cmd.current_dir(wd);
-    }
+
+    let mut cmd = if let Some(c) = &container {
+        // Containerised: run the workload *inside* the node's container
+        // via the provider's `exec`. The environment is passed explicitly
+        // with `-e` (so it lands inside the container) rather than
+        // inherited from the host, and the working directory is resolved
+        // inside the container with `-w`.
+        let env_pairs: Vec<(String, String)> = workload_env.into_iter().collect();
+        let argv = mirage_container::Engine::exec_argv(
+            &c.name,
+            args.workdir.as_deref(),
+            &env_pairs,
+            &args.command,
+            &args.args,
+        );
+        let mut cmd = tokio::process::Command::new(&c.provider);
+        cmd.args(&argv)
+            .stdin(Stdio::from(slave_in))
+            .stdout(Stdio::from(slave_out))
+            .stderr(Stdio::from(slave_err))
+            .env_clear()
+            // The provider binary itself only needs a minimal host env to
+            // find its config/socket; the workload's env travels in argv.
+            .envs(std::env::vars().filter(|(k, _)| {
+                matches!(
+                    k.as_str(),
+                    "PATH"
+                        | "HOME"
+                        | "USER"
+                        | "XDG_RUNTIME_DIR"
+                        | "DOCKER_HOST"
+                        | "CONTAINER_HOST"
+                )
+            }))
+            .env(
+                "TERM",
+                std::env::var("TERM").unwrap_or_else(|_| "xterm-256color".into()),
+            );
+        cmd
+    } else {
+        // Non-containerised: run the workload directly on the host with a
+        // minimal inherited environment plus the computed workload env.
+        let mut cmd = tokio::process::Command::new(&args.command);
+        cmd.args(&args.args)
+            .stdin(Stdio::from(slave_in))
+            .stdout(Stdio::from(slave_out))
+            .stderr(Stdio::from(slave_err))
+            .env_clear()
+            // inherit a minimal environment by default
+            .envs(std::env::vars().filter(|(k, _)| {
+                matches!(
+                    k.as_str(),
+                    "PATH" | "HOME" | "USER" | "LANG" | "LC_ALL" | "TERM" | "TMPDIR"
+                )
+            }))
+            // Make sure programs that consult $TERM behave like a real
+            // terminal even if the host's own environment has none set.
+            .env(
+                "TERM",
+                std::env::var("TERM").unwrap_or_else(|_| "xterm-256color".into()),
+            )
+            .envs(&workload_env);
+        if let Some(wd) = &args.workdir {
+            cmd.current_dir(wd);
+        }
+        cmd
+    };
 
     // After fork, in the child: start a new session and make the PTY our
     // controlling terminal. By the time these closures run, the standard

@@ -33,7 +33,7 @@ tungstenite = "0.24"
 libc = { workspace = true }
 
 [workspace]
-members = ["builtin","core", "ctl", "daemon", "dashboard", "host", "hotswap", "rocjitsu"]
+members = ["builtin","core", "container", "ctl", "daemon", "dashboard", "host", "hotswap", "rocjitsu"]
 
 [workspace.dependencies]
 chrono = { version = "0.4", features = ["serde"] }
@@ -60,3 +60,4 @@ mirage_host = { path = "host" }
 mirage_daemon = { path = "daemon" }
 mirage_rocjitsu = { path = "rocjitsu" }
 mirage_hotswap = { path = "hotswap" }
+mirage_container = { path = "container" }

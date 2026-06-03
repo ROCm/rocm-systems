@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{common::MaybeRef, container::ContainerizedDef, profile::ProfileDef};
+use crate::{common::MaybeRef, profile::ProfileDef};
 
 /// A session identifier.
 ///
@@ -161,6 +161,13 @@ pub struct SessionDef {
 pub struct SessionState {
     pub def: SessionDef,
     pub health: SessionHealth,
+
+    /// Container runtime state for containerised sessions: the
+    /// provider, network, and per-node containers the host launched.
+    /// `None` for non-containerised sessions or before the host has
+    /// started the containers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container: Option<crate::container::ContainerState>,
 }
 
 #[cfg(test)]
