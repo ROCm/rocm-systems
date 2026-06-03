@@ -19,6 +19,11 @@
 // Initialize rocshmem before ncclCommInit so that rocshmem_malloc etc. work.
 // Called via test_pre_init_callback from common.cu's main(), after MPI_Init.
 static void rocshmemPreInit(int rank, int nranks) {
+  // GIN_ANVIL / GIN proxy device tests use RCCL GIN + ncclMemAlloc (-R 2), not
+  // rocshmem_malloc from the test binary. Skip when RCCL owns rocSHMEM init.
+  const char* skip = getenv("RCCL_TEST_SKIP_ROCSHMEM_PREINIT");
+  if (skip && skip[0] == '1') return;
+
   // Set the correct GPU before rocshmem_init so that device symbols
   // (ROCSHMEM_CTX_DEFAULT etc.) are initialized on the right device.
   int nGpus = 0;
