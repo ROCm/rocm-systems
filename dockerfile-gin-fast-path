@@ -139,9 +139,7 @@ ARG DEBUG_BUILD=0
 # ARG ROCSHMEM_BRANCH=users/dondai/gin-rocshmem-sdma-backend
 ARG ROCSHMEM_BRANCH=users/dondai/gin-stage2a-anvil
 ARG ROCSHMEM_CACHE_BUST=1
-RUN if [ "${USE_LOCAL_SRC}" = "1" ]; then \
-    cp -r projects/rocshmem/ /tmp/local/projects/rocshmem/; \
-  fi
+COPY projects/rocshmem/ /tmp/local/projects/rocshmem/
 ENV ROCSHMEM_INSTALL_DIR=${WORKDIR}/rocshmem
 RUN if [ "${USE_LOCAL_SRC}" = "1" ]; then \
       [ -d /tmp/local/projects/rocshmem ] || { echo "ERROR: projects/rocshmem not in build context"; exit 1; }; \
@@ -174,10 +172,8 @@ RUN cd rocshmem/src/projects/rocshmem \
 # ARG RCCL_BRANCH=users/dondai/gin-rocshmem-sdma-backend
 ARG RCCL_BRANCH=users/dondai/gin-stage2a-anvil
 ARG RCCL_CACHE_BUST=1
-RUN if [ "${USE_LOCAL_SRC}" = "1" ]; then \
-    cp -r projects/rccl/      /tmp/local/projects/rccl/;  \
-    cp -r projects/rccl-tests/ /tmp/local/projects/rccl-tests/;  \
-  fi
+COPY projects/rccl/      /tmp/local/projects/rccl/
+COPY projects/rccl-tests/ /tmp/local/projects/rccl-tests/
 ENV RCCL_INSTALL_PREFIX=${WORKDIR}/rccl
 ENV ONLY_FUNCS="SendRecv|AlltoAllPivot|AlltoAllGda|AlltoAllvGda"
 RUN if [ "${USE_LOCAL_SRC}" = "1" ]; then \
@@ -202,14 +198,16 @@ RUN cd rccl/src/projects/rccl \
        src/rccl_wrap.cc
 RUN cd rccl/src/projects/rccl \
  && ./install.sh --amdgpu_targets=${GPU_TARGETS} --prefix=${RCCL_INSTALL_PREFIX} --no-device-linker --no_clean \
-      --cmake-options "-DENABLE_ROCSHMEM_GIN=ON -DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR}" \
+      --cmake-options "-DENABLE_ROCSHMEM_GIN=ON -DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR} -DROCSHMEM_SOURCE_DIR=${WORKDIR}/rocshmem/src/projects/rocshmem" \
       $([ "${DEBUG_BUILD}" = "1" ] && echo "--debug")
 
 # Workaround: hipify renames core.h->core_tmp.h but gin headers still include ../core.h
+# Also ship Anvil SDMA device headers (not in rocshmem install prefix) for GIN_ANVIL device API.
 RUN RCCL_BUILD_DIR=$([ "${DEBUG_BUILD}" = "1" ] && echo "debug" || echo "release") \
  && ln -sf core_tmp.h ${WORKDIR}/rccl/src/projects/rccl/build/${RCCL_BUILD_DIR}/include/nccl_device/core.h \
  && ln -sf ../hipify/src/include/nccl_tuner.h ${WORKDIR}/rccl/src/projects/rccl/build/${RCCL_BUILD_DIR}/include/nccl_tuner.h \
- && cp -r ${WORKDIR}/rccl/src/projects/rccl/build/${RCCL_BUILD_DIR}/include/* ${RCCL_INSTALL_PREFIX}/include/
+ && cp -r ${WORKDIR}/rccl/src/projects/rccl/build/${RCCL_BUILD_DIR}/include/* ${RCCL_INSTALL_PREFIX}/include/ \
+ && cp -r ${WORKDIR}/rocshmem/src/projects/rocshmem/src/sdma ${RCCL_INSTALL_PREFIX}/include/sdma
 
 ## building RCCL-Tests
 RUN if [ "${USE_LOCAL_SRC}" != "1" ]; then \

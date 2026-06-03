@@ -30,4 +30,3 @@ ncclResult_t ncclGinAnvilQueryLastError(ncclGin_t *ginComm, void *ginCtx, bool *
 extern ncclGin_v11_t ncclGinAnvilPlugin;
 
 #endif
-
