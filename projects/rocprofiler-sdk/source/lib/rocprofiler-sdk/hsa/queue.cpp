@@ -202,7 +202,8 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 
         if(packet.is_serialized)
         {
-            // count this completion before notifying the serializer (drives barrier drain detection)
+            // count this completion before notifying the serializer (drives barrier drain
+            // detection)
             queue_info_session.queue.serialized_completed_inc();
             CHECK_NOTNULL(hsa::get_queue_controller())
                 ->serializer(&queue_info_session.queue)

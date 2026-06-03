@@ -84,7 +84,7 @@ profiler_serializer::kernel_completion_signal(const Queue& completed)
     for(auto& barrier : _barrier)
         barrier.barrier->notify_drain(&completed);
 
-    // We do not want to track kernel compleiton signals before we have reached the barrier
+    // We do not want to track kernel completion signals before we have reached the barrier
     clear_complete_barriers(_barrier);
 
     // Find the state of this barrier
