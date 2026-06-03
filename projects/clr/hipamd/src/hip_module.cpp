@@ -1388,7 +1388,7 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
   }
 
   if (config->numAttrs == 0) {
-    HIP_RETURN(ihipModuleLaunchKernel(f, launch_params, hStream, kernelParams, nullptr,
+    HIP_RETURN(ihipModuleLaunchKernel(f, launch_params, hStream, kernelParams, extra,
                                       nullptr, nullptr, 0));
   }
 
@@ -1401,7 +1401,7 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
       case hipLaunchAttributeCooperative: {
         if (attr.value.cooperative != 0) {
           HIP_RETURN(ihipModuleLaunchKernel(f, launch_params, hStream, kernelParams,
-                                            nullptr, nullptr, nullptr, 0,
+                                            extra, nullptr, nullptr, 0,
                                             amd::NDRangeKernelCommand::CooperativeGroups));
         }
         break;
