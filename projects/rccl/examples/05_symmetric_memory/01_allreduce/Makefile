@@ -64,7 +64,7 @@ install: $(TARGET)
 
 # Help
 help:
-	@echo "NCCL Example: Symmetric Memeory Allreduce"
+	@echo "NCCL Example: Symmetric Memory Allreduce"
 	@echo "=============================================="
 	@echo ""
 	@echo "Targets:"

@@ -135,7 +135,7 @@ Symmetric memory registration provides several performance advantages:
 
 For more information on the performance benefits see the [Enabling Fast
 Inference and Resilient Training with NCCL
-2.27]()https://developer.nvidia.com/blog/enabling-fast-inference-and-resilient-training-with-nccl-2-27/)
+2.27](https://developer.nvidia.com/blog/enabling-fast-inference-and-resilient-training-with-nccl-2-27/)
 blog.
 
 **Important**: Buffers must be allocated using the HIP Virtual Memory

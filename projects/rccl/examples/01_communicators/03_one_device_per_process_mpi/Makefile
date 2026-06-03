@@ -54,7 +54,7 @@ help:
 	@echo "=========================================="
 	@echo ""
 	@echo "This example shows how to use ncclCommInitRank to create"
-	@echo "communicators for multiple GPUs using pthreads."
+	@echo "communicators for multiple GPUs using MPI."
 	@echo ""
 	@echo "Targets:"
 	@echo "  all           - Build the example (default)"

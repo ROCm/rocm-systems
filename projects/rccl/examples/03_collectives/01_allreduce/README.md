@@ -34,7 +34,7 @@ sum using `ncclCommInitAll` for simplified setup.
 ### Build the Example
 ```bash
 cd examples/03_collectives/01_allreduce
-make [NCCL_HOME=<path-to-nccl>] [CUDA_HOME=<path-to-cuda>]
+make [ROCM_PATH=<path-to-rocm>] [RCCL_HOME=<path-to-rccl>]
 ```
 
 ### Run with All Available GPUs
@@ -44,7 +44,7 @@ make [NCCL_HOME=<path-to-nccl>] [CUDA_HOME=<path-to-cuda>]
 
 ### Run with Specific GPUs
 ```bash
-CUDA_VISIBLE_DEVICES=0,1,2,3 ./allreduce
+HIP_VISIBLE_DEVICES=0,1,2,3 ./allreduce
 ```
 
 ## Code Walk-through
@@ -57,12 +57,12 @@ float rank_value = (float)i;
 size_t size; // size is the number of float to be sent
 
 // Allocate device memory for send buffers
-CUDACHECK(cudaMalloc((void **)&sendbuff[i], size * sizeof(float)));
+CUDACHECK(hipMalloc((void **)&sendbuff[i], size * sizeof(float)));
 
 // Each GPU contributes its rank (GPU i contributes value i)
 // Zero the entire buffer, then set first element to rank
-CUDACHECK(cudaMemset(sendbuff[i], 0, size * sizeof(float)));
-CUDACHECK(cudaMemcpy(sendbuff[i], &rank_value, sizeof(float), cudaMemcpyHostToDevice));
+CUDACHECK(hipMemset(sendbuff[i], 0, size * sizeof(float)));
+CUDACHECK(hipMemcpy(sendbuff[i], &rank_value, sizeof(float), hipMemcpyHostToDevice));
 ```
 
 ### AllReduce Operation
@@ -70,10 +70,10 @@ All GPUs participate in the sum reduction. The operations are evaluated in paral
 ```cpp
 float** recvbuff;
 ncclComm_t *comms;  // comms are set during ncclCommInitAll
-cudaStream_t *streams; // streams are set in cudaStreamCreate
+hipStream_t *streams; // streams are set in hipStreamCreate
 
 // Allocate device memory for receive buffers
-CUDACHECK(cudaMalloc((void **)&recvbuff[i], size * sizeof(float)));
+CUDACHECK(hipMalloc((void **)&recvbuff[i], size * sizeof(float)));
 
 NCCLCHECK(ncclGroupStart());
 for (int i = 0; i < num_gpus; i++) {
@@ -114,7 +114,7 @@ Example completed successfully!
 ## Key Insights
 - `ncclCommInitAll` simplifies single-node multi-GPU setup
 - No MPI or pthreads needed for single-node patterns
-- Allocate device buffer via ``cudaMalloc` and initialize via `cudaMemset`.
+- Allocate device buffer via `hipMalloc` and initialize via `hipMemset`.
 - Best practices to wrap all collective calls in ncclGroupStart/End
 - All communication happens in parallel
 

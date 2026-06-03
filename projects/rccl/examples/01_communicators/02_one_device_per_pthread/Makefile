@@ -36,7 +36,7 @@ test: $(TARGET)
 	@echo "Running with default thread count (number of GPUs)"
 	./$(TARGET)
 	@echo ""
-	@if [ "$$(nvidia-smi -L | wc -l)" -ge 2 ]; then \
+	@if [ "$$(rocm-smi --showid 2>/dev/null | grep -oE '^GPU\[[0-9]+\]' | sort -u | wc -l)" -ge 2 ]; then \
 		echo "Running with 2 threads"; \
 		NTHREADS=2 ./$(TARGET); \
 	fi

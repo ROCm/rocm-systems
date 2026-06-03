@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 #include "hip/hip_runtime.h"
+#include <rccl/rccl.h>
 
 // Error checking
 #define NCCLCHECK(cmd)                                                         \
@@ -31,9 +32,9 @@
   do {                                                                         \
     hipError_t err = cmd;                                                     \
     if (err != hipSuccess) {                                                  \
-      fprintf(stderr, "Failed: Cuda error %s:%d '%s'\n", __FILE__, __LINE__,   \
+      fprintf(stderr, "Failed: HIP error %s:%d '%s'\n", __FILE__, __LINE__,   \
               hipGetErrorString(err));                                        \
-      fprintf(stderr, "Failed CUDA operation: %s\n", #cmd);                    \
+      fprintf(stderr, "Failed HIP operation: %s\n", #cmd);                    \
       exit(EXIT_FAILURE);                                                      \
     }                                                                          \
   } while (0)

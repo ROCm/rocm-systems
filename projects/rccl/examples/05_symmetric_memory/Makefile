@@ -30,7 +30,7 @@ test: all
 
 # Help
 help:
-	@echo "NCCL Symmetric Memeory Examples"
+	@echo "NCCL Symmetric Memory Examples"
 	@echo "==============================="
 	@echo ""
 	@echo "Targets:"

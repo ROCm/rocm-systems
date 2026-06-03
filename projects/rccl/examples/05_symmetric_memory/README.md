@@ -72,4 +72,4 @@ cd 01_allreduce && make
 - [NCCL API
   Reference](https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api.html)
 - [HIP Programming
-  Guide](https://docs.nvidia.com/cuda/cuda-c-programming-guide/)
+  Guide](https://rocm.docs.amd.com/projects/HIP/en/latest/programming_guide.html)
