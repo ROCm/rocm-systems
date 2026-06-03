@@ -1468,6 +1468,7 @@ def test_roofline_plot_points_data_generation():
             "ai_l1": [[0.5, 1.2], [100.0, 150.0]],
             "ai_l2": [[0.3, 0.8], [80.0, 120.0]],
             "ai_hbm": [[0.1, 0.4], [50.0, 90.0]],
+            "ai_lds": [[0.7, 1.5], [100.0, 150.0]],
             "kernelNames": ["kernel_A", "kernel_B"],
         }
 
@@ -1475,6 +1476,7 @@ def test_roofline_plot_points_data_generation():
             "l1": [[0.01, 10], [10, 1000], 100],
             "l2": [[0.01, 10], [10, 800], 80],
             "hbm": [[0.01, 10], [10, 500], 50],
+            "lds": [[0.01, 10], [10, 1200], 120],
             "valu": [[1, 100], [200, 200], 200],
             "matrix_ops": [[1, 100], [500, 500], 500],
         }
@@ -1484,6 +1486,7 @@ def test_roofline_plot_points_data_generation():
             "ai_l1": "blue",
             "ai_l2": "green",
             "ai_hbm": "red",
+            "ai_lds": "orange",
         }
 
         run_parameters = {
@@ -1496,7 +1499,7 @@ def test_roofline_plot_points_data_generation():
         }
         roofline_instance = Roofline(args, mspec, run_parameters)
 
-        for cache_level in ["ai_l1", "ai_l2", "ai_hbm"]:
+        for cache_level in ["ai_l1", "ai_l2", "ai_hbm", "ai_lds"]:
             if cache_level in mock_ai_data:
                 x_vals = mock_ai_data[cache_level][0]
                 y_vals = mock_ai_data[cache_level][1]
@@ -1531,7 +1534,7 @@ def test_roofline_plot_points_data_generation():
             assert "kernel_idx" in point
             assert "color" in point
 
-            assert point["cache_level"] in ["L1", "L2", "HBM"]
+            assert point["cache_level"] in ["L1", "L2", "HBM", "LDS"]
 
             assert point["status"] in ["Memory Bound", "Compute Bound", "Unknown"]
 
@@ -1575,6 +1578,7 @@ def test_roofline_bound_status_calculation():
 
         ceiling_data = {
             "hbm": [[0.01, 10], [10, 1000], 100],
+            "lds": [[0.01, 10], [10, 1200], 120],
             "valu": [[1, 100], [200, 200], 200],
             "matrix_ops": [[1, 100], [500, 500], 500],
         }
@@ -1594,6 +1598,16 @@ def test_roofline_bound_status_calculation():
             ceiling_data=ceiling_data,
         )
         assert status2 == "Compute Bound", f"Expected Compute Bound, got {status2}"
+
+        status_lds = roofline_instance._determine_kernel_bound_status(
+            ai_value=1.0,
+            performance=100.0,
+            cache_level="ai_lds",
+            ceiling_data=ceiling_data,
+        )
+        assert status_lds == "Memory Bound", (
+            f"Expected LDS Memory Bound, got {status_lds}"
+        )
 
         status3 = roofline_instance._determine_kernel_bound_status(
             ai_value=1.0,
