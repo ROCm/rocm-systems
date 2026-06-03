@@ -2938,21 +2938,6 @@ typedef struct {
 #define AMDSMI_MAX_NIC_FW 16        //!< Maximum number of NIC firmwares
 
 /**
- * @brief NIC Link Types. This enum is used to identify the link type between
- * NIC and GPU processors based on their PCIe and NUMA connectivity.
- *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
- */
-typedef enum {
-  AMDSMI_NIC_LINK_TYPE_UNKNOWN,  //!< unknown type.
-  AMDSMI_NIC_LINK_TYPE_PCIE,     //!< two processors connect via same PCIe
-  AMDSMI_NIC_LINK_TYPE_NUMA,     /**< two processors connect via different PCIe switches but on the
-                                      same CPU */
-  AMDSMI_NIC_LINK_TYPE_X_NUMA,   /**< two processors connect via  different  PCIe switches but on
-                                      different CPUs */
-} amdsmi_nic_link_type_t;
-
-/**
  * @brief Structure for NIC statistic name-value pairs
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond

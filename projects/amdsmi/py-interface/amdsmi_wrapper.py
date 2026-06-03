@@ -2747,18 +2747,6 @@ struct_amdsmi_sock_info_t._fields_ = [
 
 amdsmi_sock_info_t = struct_amdsmi_sock_info_t
 
-# values for enumeration 'amdsmi_nic_link_type_t'
-amdsmi_nic_link_type_t__enumvalues = {
-    0: 'AMDSMI_NIC_LINK_TYPE_UNKNOWN',
-    1: 'AMDSMI_NIC_LINK_TYPE_PCIE',
-    2: 'AMDSMI_NIC_LINK_TYPE_NUMA',
-    3: 'AMDSMI_NIC_LINK_TYPE_X_NUMA',
-}
-AMDSMI_NIC_LINK_TYPE_UNKNOWN = 0
-AMDSMI_NIC_LINK_TYPE_PCIE = 1
-AMDSMI_NIC_LINK_TYPE_NUMA = 2
-AMDSMI_NIC_LINK_TYPE_X_NUMA = 3
-amdsmi_nic_link_type_t = ctypes.c_uint32 # enum
 class struct_amdsmi_nic_stat_t(Structure):
     pass
 
@@ -4822,9 +4810,7 @@ __all__ = \
     'AMDSMI_MEM_TYPE_GTT', 'AMDSMI_MEM_TYPE_LAST',
     'AMDSMI_MEM_TYPE_VIS_VRAM', 'AMDSMI_MEM_TYPE_VRAM',
     'AMDSMI_MM_UVD', 'AMDSMI_MM_VCE', 'AMDSMI_MM_VCN',
-    'AMDSMI_MM__MAX', 'AMDSMI_NIC_LINK_TYPE_NUMA',
-    'AMDSMI_NIC_LINK_TYPE_PCIE', 'AMDSMI_NIC_LINK_TYPE_UNKNOWN',
-    'AMDSMI_NIC_LINK_TYPE_X_NUMA', 'AMDSMI_NPM_STATUS_DISABLED',
+    'AMDSMI_MM__MAX', 'AMDSMI_NPM_STATUS_DISABLED',
     'AMDSMI_NPM_STATUS_ENABLED', 'AMDSMI_POWER_CAP_TYPE_PPT0',
     'AMDSMI_POWER_CAP_TYPE_PPT1', 'AMDSMI_PROCESSOR_TYPE_AMD_APU',
     'AMDSMI_PROCESSOR_TYPE_AMD_CPU',
@@ -5151,7 +5137,7 @@ __all__ = \
     'amdsmi_mm_ip_t', 'amdsmi_name_value_t', 'amdsmi_nic_asic_info_t',
     'amdsmi_nic_bus_info_t', 'amdsmi_nic_driver_info_t',
     'amdsmi_nic_fw_info_t', 'amdsmi_nic_fw_t',
-    'amdsmi_nic_link_type_t', 'amdsmi_nic_numa_info_t',
+    'amdsmi_nic_numa_info_t',
     'amdsmi_nic_port_info_t', 'amdsmi_nic_port_t',
     'amdsmi_nic_rdma_dev_info_t', 'amdsmi_nic_rdma_devices_info_t',
     'amdsmi_nic_rdma_port_info_t', 'amdsmi_nic_stat_t',
