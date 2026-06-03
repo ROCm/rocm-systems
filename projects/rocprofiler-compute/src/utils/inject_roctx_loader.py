@@ -81,7 +81,7 @@ def format_load_diagnostic_trail(
 
 
 def _source_fingerprint() -> str:
-    """Return the first 12 hex chars of a SHA-256 over the source inputs, or ``"missing"``."""
+    """First 12 hex chars of a SHA-256 over the source inputs, or ``"missing"``."""
     h = hashlib.sha256()
     seen = 0
     for path in _FINGERPRINT_INPUTS:
