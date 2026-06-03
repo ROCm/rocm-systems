@@ -6,13 +6,17 @@ Use it for quick performance checks and backend-path validation.
 
 Command-line Tool
 -----------------
+
 ``ais-stats`` can be run in two modes:
+
 * ``$ ais-stats -p <PID> [-i]`` collects stats from a running process.
   ``-i`` reports immediately rather than waiting for process exit.
 * ``$ ais-stats <program> [args...]`` launches ``<program>`` with the
   provided arguments and reports stats after waiting for the process to exit.
 
-Quick start examples: ::
+Quick start examples:
+
+.. code-block:: console
 
     $ export HIPFILE_STATS_LEVEL=1
     $ ais-stats -p 12345
@@ -21,18 +25,27 @@ Quick start examples: ::
 
 Configuration
 -------------
+
 Collection is controlled by the environment variable ``HIPFILE_STATS_LEVEL``.
 
-===== =================================================
-Value Description
-===== =================================================
-0     Disabled
-1     Basic (default value)
-2     Detailed (currently same as basic; reserved for future use)
-===== =================================================
+.. list-table::
+   :header-rows: 1
+   :widths: 10 90
+
+   * - Value
+     - Description
+   * - 0
+     - Disabled
+   * - 1
+     - Basic (default value)
+   * - 2
+     - Detailed (currently same as basic; reserved for future use)
 
 Stats Collected
 ---------------
+
+* Basic: Number of file handle registrations.
+* Basic: Number of buffer registrations.
 * Basic: Bytes read/written on the fastpath/fallback backends.
 * Basic: Bandwidth for reads/writes on the fastpath/fallback backends.
 * Basic: Latency for reads/writes on the fastpath/fallback backends.
@@ -41,12 +54,18 @@ Stats Collected
 
 Output
 ------
+
 The report shows total counters for each metric, followed by histograms of the metrics broken down by I/O size.
 
-Example output shape: ::
+Example output shape:
+
+.. code-block:: text
 
     AIS-STATS Version: 1
     HipFile Stats Level: 1
+    File Handle Registrations: 1
+    Buffer Registrations: 1
+
     Total Fastpath Read Size (B): 67108864
     Average Fastpath Read Bandwidth (GiB/s): 0.776272
     Average Fastpath Read Latency (us): 1258.02
@@ -104,6 +123,7 @@ Example output shape: ::
 
 Scope and Limitations
 ---------------------
+
 * Reported values reflect hipFile-managed I/O paths.
 * Stats are broken out by backend to help identify fastpath/fallback usage.
 * Detailed mode (``HIPFILE_STATS_LEVEL=2``) is reserved for future expansion.
@@ -111,6 +131,7 @@ Scope and Limitations
 
 Troubleshooting
 ---------------
+
 * No report produced: ensure ``HIPFILE_STATS_LEVEL`` is set to ``1`` or ``2``,
   verify ``ais-stats`` is available in ``PATH``, and confirm the target process
   performed hipFile I/O.
@@ -121,5 +142,6 @@ Troubleshooting
 
 Related documentation
 ---------------------
+
 * See :doc:`fio` for a benchmark workflow that can generate I/O activity.
 * See the project ``README.md`` for build and runtime setup details.

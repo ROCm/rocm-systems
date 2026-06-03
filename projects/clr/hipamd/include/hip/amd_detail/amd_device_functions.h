@@ -274,7 +274,7 @@ __device__ static inline long long __mul64hi(long long int x, long long int y) {
   return x1 * y1 + z2 + (z1 >> 32);
 }
 
-__device__ static inline int __mulhi(int x, int y) { return (int)(((long)x * (long)y) >> 32); }
+__device__ static inline int __mulhi(int x, int y) { return (int)(((__hip_int64_t)x * (__hip_int64_t)y) >> 32); }
 
 __device__ static inline int __rhadd(int x, int y) {
   return ((__hip_int64_t)x + (__hip_int64_t)y + 1) >> 1;
