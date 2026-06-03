@@ -18,6 +18,9 @@ def run_calc_ai_analyze_with_values(monkeypatch, metric_values):
     DataFrame that ``eval_metric`` would normally populate.
 
     Returns the plot-points dict produced by ``calc_ai_analyze``.
+
+    Note: this mock simulates MI350 AI metric values based on the architecture's cache
+    levels available on the hardware. Cache levels will vary for other architectures.
     """
     kernel_name = "test_kernel"
     kernel_id = 0
