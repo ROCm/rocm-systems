@@ -151,7 +151,7 @@ Supported rank specification syntax (same for both filters):
 
 When the total number of MPI ranks (world size) can be determined from the launcher environment
 (``OMPI_COMM_WORLD_SIZE``, ``MV2_COMM_WORLD_SIZE``, ``PMI_SIZE``, ``SLURM_NTASKS``, or ``SLURM_NPROCS``),
-any filter value outside the valid range ``[0, world_size)`` triggers a warning and is ignored.
+any filter value outside the valid range ``[0, world_size - 1]`` triggers a warning and is ignored.
 If every value in the filter is out of range, filtering is disabled and output is produced for all ranks.
 When the world size cannot be determined, no such validation is performed and specifying correct
 rank values is the user's responsibility.
@@ -171,7 +171,7 @@ Supported rank identification variables:
 - **SLURM_PROCID**
 
 If rank detection fails, both filters are disabled and output is produced for all ranks.
-The same applies if the detected rank is itself outside ``[0, world_size)``:
+The same applies if the detected rank is itself outside ``[0, world_size - 1]``:
 filtering is disabled for that rank and it produces output.
 
 .. note::
