@@ -202,6 +202,16 @@ RCCL_PARAM( InitChannels, "INIT_CHANNELS", -1) ;
 // RCCL_LAZY_KERNEL_INIT unset (default).
 RCCL_PARAM_NCCL_ALIAS(LazyKernelInit, "LAZY_KERNEL_INIT", 0);
 
+// Async kernel-init prefetch (orthogonal to RCCL_LAZY_KERNEL_INIT). When set,
+// ncclInitKernelsForDevice is skipped during init (like lazy) but is run on a
+// background thread started early in ncclCommInitRankFunc, so the ~1.2s+ HSA
+// code-object load overlaps bootstrap/transport setup instead of blocking init
+// (eager) or stalling the first collective (lazy). The first ncclLaunchKernel
+// then usually finds the per-device gate already done. Same cudaDeviceReset
+// caveat as RCCL_LAZY_KERNEL_INIT (the gate is process-static). If both are set,
+// prefetch wins (it also skips the eager load and engages the launch gate).
+RCCL_PARAM_NCCL_ALIAS(KernelInitPrefetch, "KERNEL_INIT_PREFETCH", 0);
+
 // GDRCOPY support: Off by default
 NCCL_PARAM(GdrCopyEnable, "GDRCOPY_ENABLE", 0);
 
@@ -2383,6 +2393,11 @@ fail:
 // and the lazy init path (called from ncclLaunchKernel) so the same stack
 // configuration is applied regardless of when kernel init actually runs.
 ncclResult_t applyKernelStackLimits(const char* archName, size_t maxLocalSizeBytes) {
+  // archName may be null if a caller's strdup() failed (e.g. the async prefetch
+  // path copies archName under memory pressure). Treat null as an empty/unknown
+  // arch so the IsArchMatch() (strncmp) calls below are safe; "" matches no
+  // gfxNNN target, so we fall through to the generic stack-size path.
+  if (archName == nullptr) archName = "";
 #ifdef USE_INDIRECT_FUNCTION_CALL
   if (ncclParamSetStackSize() == 1 && !IsArchMatch(archName,"gfx942") && !IsArchMatch(archName,"gfx950")) {
     int64_t stackSize = rcclParamStackSizeOverride() ? rcclParamStackSizeOverride() : (int64_t)maxLocalSizeBytes;
@@ -2463,6 +2478,28 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     goto fail;
   }
 
+  // Async prefetch: kick the HSA code-object load onto a background thread as
+  // early as possible (here, before bootstrap) so it overlaps the whole
+  // bootstrap + transport setup. Uses local device params, not comm (which may
+  // be NULL for NCCL_SPLIT_NOCOLOR at this point). The first ncclLaunchKernel
+  // observes the same per-device gate. cudaDev is validated here, at init time,
+  // so a misconfigured device fails fast instead of on the first launch.
+  if (rcclParamKernelInitPrefetch()) {
+    if (cudaDev < 0 || cudaDev >= MAX_ALLOC_TRACK_NGPU) {
+      WARN("KernelInitPrefetch: cudaDev %d out of range [0,%d); cannot prefetch kernels",
+           cudaDev, MAX_ALLOC_TRACK_NGPU);
+      res = ncclInvalidUsage;
+      goto fail;
+    }
+    // Rank for the prefetch worker's log lines: for SPLIT/SHRINK children
+    // job->myrank is not computed until commGetSplitInfo()/getParentRanks()
+    // below, so it is not yet assigned at this early start point. Pass -1 as a
+    // clear "rank not yet assigned" sentinel in that case (dev is always the
+    // reliable key); fresh init already has the final rank here.
+    int prefetchRank = job->parent ? -1 : job->myrank;
+    NCCLCHECKGOTO(ncclStartKernelInitPrefetch(cudaDev, cudaArch, maxSharedMem, archName, prefetchRank), res, fail);
+  }
+
   // NOTE: kernel init (eager or lazy) and comm->maxSharedMem assignment are
   // deferred until after the parent/NOCOLOR exit so we do not deref a NULL
   // comm for NCCL_SPLIT_NOCOLOR child jobs, and so the PreBoot INFO line
@@ -2531,7 +2568,11 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   comm->ll128DataElems = rcclLL128DataElemsFromArch(comm->archName);
 
   timers[TIMER_INIT_KERNELS] = clockNano();
-  if (rcclParamLazyKernelInit() == 0) {
+  if (rcclParamKernelInitPrefetch()) {
+    // Async prefetch: the background worker started before bootstrap is loading
+    // the kernels concurrently (cudaDev was validated there). Nothing to do
+    // here; the first ncclLaunchKernel waits on the per-device gate if needed.
+  } else if (rcclParamLazyKernelInit() == 0) {
     NCCLCHECK(ncclInitKernelsForDevice(cudaArch, maxSharedMem, &maxLocalSizeBytes));
     // Set the maximum kernel stack size of all kernels to avoid
     // a CUDA memory reconfig on load (c.f. NVSHMEM issue).
@@ -2549,9 +2590,9 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   }
   timers[TIMER_INIT_KERNELS] = clockNano() - timers[TIMER_INIT_KERNELS];
   INFO(NCCL_INIT | NCCL_BOOTSTRAP | NCCL_PROFILE,
-       "PreBoot timings rank %d kernels_us %llu lazy %d",
+       "PreBoot timings rank %d kernels_us %llu lazy %d prefetch %d",
        job->myrank, (unsigned long long)(timers[TIMER_INIT_KERNELS] / 1000),
-       (int)rcclParamLazyKernelInit());
+       (int)rcclParamLazyKernelInit(), (int)rcclParamKernelInitPrefetch());
 
   NCCLCHECKGOTO(initTransportsRank(comm, job->parent, timers), res, fail);
 

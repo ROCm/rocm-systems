@@ -6,9 +6,11 @@
 #include <rccl/rccl.h>
 #include "common/ProcessIsolatedTestRunner.hpp"
 
-// Forward-declare rcclParamLazyKernelInit() in the global namespace so the
-// regression test below can call into the same symbol that init.cc defines.
+// Forward-declare rcclParamLazyKernelInit() / rcclParamKernelInitPrefetch() in
+// the global namespace so the regression tests below can call into the same
+// symbols that init.cc defines.
 RCCL_PARAM_DECLARE(LazyKernelInit);
+RCCL_PARAM_DECLARE(KernelInitPrefetch);
 
 namespace RcclUnitTesting {
 TEST(ParamTests, initEnv_ParseValidConfFile) {
@@ -103,6 +105,48 @@ TEST(ParamTests, LazyKernelInit_NcclAlias_IsRead) {
           unsetenv("RCCL_LAZY_KERNEL_INIT");
           unsetenv("NCCL_LAZY_KERNEL_INIT");
           ASSERT_EQ(rcclParamLazyKernelInit(), 0);
+      });
+}
+
+// Same alias contract for the async prefetch param: RCCL_KERNEL_INIT_PREFETCH
+// and NCCL_KERNEL_INIT_PREFETCH must both be honored, RCCL_ taking precedence,
+// default 0. Mirrors LazyKernelInit_NcclAlias_IsRead.
+TEST(ParamTests, KernelInitPrefetch_NcclAlias_IsRead) {
+  RUN_ISOLATED_TEST(
+      "KernelInitPrefetch_NcclAlias_OnlyNcclSet",
+      []()
+      {
+          unsetenv("RCCL_KERNEL_INIT_PREFETCH");
+          setenv("NCCL_KERNEL_INIT_PREFETCH", "1", 1);
+          ASSERT_EQ(rcclParamKernelInitPrefetch(), 1);
+          unsetenv("NCCL_KERNEL_INIT_PREFETCH");
+      });
+  RUN_ISOLATED_TEST(
+      "KernelInitPrefetch_NcclAlias_OnlyRcclSet",
+      []()
+      {
+          unsetenv("NCCL_KERNEL_INIT_PREFETCH");
+          setenv("RCCL_KERNEL_INIT_PREFETCH", "1", 1);
+          ASSERT_EQ(rcclParamKernelInitPrefetch(), 1);
+          unsetenv("RCCL_KERNEL_INIT_PREFETCH");
+      });
+  RUN_ISOLATED_TEST(
+      "KernelInitPrefetch_NcclAlias_RcclWinsOverNccl",
+      []()
+      {
+          setenv("RCCL_KERNEL_INIT_PREFETCH", "0", 1);
+          setenv("NCCL_KERNEL_INIT_PREFETCH", "1", 1);
+          ASSERT_EQ(rcclParamKernelInitPrefetch(), 0);
+          unsetenv("RCCL_KERNEL_INIT_PREFETCH");
+          unsetenv("NCCL_KERNEL_INIT_PREFETCH");
+      });
+  RUN_ISOLATED_TEST(
+      "KernelInitPrefetch_NcclAlias_DefaultIsZero",
+      []()
+      {
+          unsetenv("RCCL_KERNEL_INIT_PREFETCH");
+          unsetenv("NCCL_KERNEL_INIT_PREFETCH");
+          ASSERT_EQ(rcclParamKernelInitPrefetch(), 0);
       });
 }
 } // namespace RcclUnitTesting

@@ -27,6 +27,17 @@ ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* ma
 // comm pointer is needed: the call is purely device-scoped and runs on the
 // current CUDA device (set by the caller via cudaSetDevice/launch context).
 ncclResult_t applyKernelStackLimits(const char* archName, size_t maxLocalSizeBytes);
+// Async kernel-init prefetch (RCCL_KERNEL_INIT_PREFETCH): start a background
+// worker that loads the HSA code object on a side thread so it overlaps
+// bootstrap/transport setup. Takes plain device parameters (not ncclComm) so it
+// can be started before the parent/NOCOLOR exit and safely detached.
+// Failure handling: if the worker cannot start/attach (thread spawn or
+// cudaSetDevice fails) the gate is left UNINIT and the first ncclLaunchKernel
+// loads the kernels inline. If the worker runs but the load itself fails, it
+// poisons the per-device gate (LAZY_FAILED) and that error is propagated to the
+// launch path — same as the lazy path; there is no inline retry in that case.
+ncclResult_t ncclStartKernelInitPrefetch(int cudaDev, int cudaArch, int maxSharedMem,
+                                         const char* archName, int rank);
 ncclResult_t ncclEnqueueCheck(struct ncclInfo* info);
 ncclResult_t ncclLaunchPrepare(struct ncclComm* comm);
 ncclResult_t ncclLaunchKernelBefore_NoUncapturedCuda(struct ncclComm* comm, struct ncclKernelPlan* plan);
