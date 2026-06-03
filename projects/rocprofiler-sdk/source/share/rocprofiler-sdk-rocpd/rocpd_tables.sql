@@ -365,6 +365,90 @@ CREATE TABLE IF NOT EXISTS
         FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE
     );
 
+
+-- ============================================================
+-- Self-describing blob schema (supports any packed struct type)
+-- ============================================================
+
+-- One row per struct version; source_table drives the TEMP VIEW name.
+CREATE TABLE IF NOT EXISTS
+    `rocpd_info_blob_schema{{uuid}}` (
+        "id"           INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        "guid"         TEXT    DEFAULT "{{guid}}" NOT NULL,
+        "nid"          INTEGER NOT NULL,
+        "pid"          INTEGER NOT NULL,
+        "name"         TEXT    NOT NULL,
+        "source_table" TEXT    NOT NULL,   -- domain table correlated by event_id
+        "description"  TEXT,
+        "byte_order"   TEXT    CHECK ("byte_order" IN ('little', 'big')),
+        "alignment"    INTEGER NOT NULL,
+        "struct_size"  INTEGER NOT NULL,
+        "version"      INTEGER NOT NULL,
+        "extdata"      JSONB   DEFAULT "{}" NOT NULL,
+        FOREIGN KEY (nid) REFERENCES `rocpd_info_node{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (pid) REFERENCES `rocpd_info_process{{uuid}}` (id) ON UPDATE CASCADE
+    );
+
+-- One row per field in a struct.
+CREATE TABLE IF NOT EXISTS
+    `rocpd_info_blob_field{{uuid}}` (
+        "id"          INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        "guid"        TEXT    DEFAULT "{{guid}}" NOT NULL,
+        "schema_id"   INTEGER NOT NULL,
+        "name"        TEXT    NOT NULL,
+        "offset"      INTEGER NOT NULL,
+        "size"        INTEGER NOT NULL,
+        "data_type"   TEXT    NOT NULL,
+        "is_signed"   INTEGER NOT NULL DEFAULT 0,
+        "description" TEXT,
+        "extdata"     JSONB   DEFAULT "{}" NOT NULL,
+        FOREIGN KEY (schema_id) REFERENCES `rocpd_info_blob_schema{{uuid}}` (id)
+            ON UPDATE CASCADE
+    );
+
+-- One row per blob instance; correlated to domain rows via shared event_id
+-- (same pattern as rocpd_arg and rocpd_pmc_event).
+CREATE TABLE IF NOT EXISTS
+    `rocpd_blob_event{{uuid}}` (
+        "id"        INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        "guid"      TEXT    DEFAULT "{{guid}}" NOT NULL,
+        "nid"       INTEGER NOT NULL,
+        "pid"       INTEGER NOT NULL,
+        "event_id"  INTEGER NOT NULL,
+        "schema_id" INTEGER NOT NULL,
+        "blob"      BLOB    NOT NULL,
+        FOREIGN KEY (event_id)  REFERENCES `rocpd_event{{uuid}}` (id)
+            ON UPDATE CASCADE,
+        FOREIGN KEY (schema_id) REFERENCES `rocpd_info_blob_schema{{uuid}}` (id)
+            ON UPDATE CASCADE,
+        FOREIGN KEY (nid) REFERENCES `rocpd_info_node{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (pid) REFERENCES `rocpd_info_process{{uuid}}` (id) ON UPDATE CASCADE
+    );
+
+-- GPU PC samples: architecture-independent columns here; arch-specific packed
+-- binary data lives in rocpd_blob_event (correlated by shared event_id).
+CREATE TABLE IF NOT EXISTS
+    `rocpd_gpu_pc_sample{{uuid}}` (
+        "id"                 INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        "guid"               TEXT    DEFAULT "{{guid}}" NOT NULL,
+        "nid"                INTEGER NOT NULL,
+        "pid"                INTEGER NOT NULL,
+        "agent_id"           INTEGER NOT NULL,
+        "dispatch_id"        INTEGER NOT NULL,
+        "timestamp"          BIGINT  NOT NULL,
+        "exec"               INTEGER,
+        "code_object_id"     INTEGER,
+        "code_object_offset" INTEGER,
+        "wave_in_group"      INTEGER,
+        "correlation_id"     INTEGER,
+        "event_id"           INTEGER NOT NULL,
+        "extdata"            JSONB   DEFAULT "{}" NOT NULL,
+        FOREIGN KEY (nid)      REFERENCES `rocpd_info_node{{uuid}}` (id)      ON UPDATE CASCADE,
+        FOREIGN KEY (pid)      REFERENCES `rocpd_info_process{{uuid}}` (id)   ON UPDATE CASCADE,
+        FOREIGN KEY (agent_id) REFERENCES `rocpd_info_agent{{uuid}}` (id)     ON UPDATE CASCADE,
+        FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id)          ON UPDATE CASCADE
+    );
+
 INSERT INTO
     `rocpd_metadata{{uuid}}` ("tag", "value")
 VALUES

@@ -23,9 +23,10 @@ Lifecycle
 4.  Introspect each struct's _fields_ list to automatically insert rows into
     rocpd_info_blob_schema (one row per struct) and rocpd_info_blob_field (one
     row per field) — no hand-written byte offsets needed.
-5.  Generate N rows of deterministic fake data, serialise each ctypes struct
+5.  Generate rows of deterministic fake data, serialise each ctypes struct
     instance to raw bytes via bytes(instance), and insert one rocpd_blob_event
-    row per sample.  Store the returned blob_event_id in the domain table row.
+    row per sample. Blob rows carry event_id and domain rows use the same
+    event_id for correlation.
 6.  Commit and close the connection.
 7.  Re-open the same database file.
 8.  Call setup_blob_views(conn) — defined in this file — which reads the three
@@ -74,8 +75,8 @@ def setup_blob_views(conn: sqlite3.Connection) -> None:
     Step 2 — register rocpd_blob_field(blob, schema_id, field_name) as a
              connection-scoped SQLite scalar function backed by struct.unpack_from.
     Step 3 — CREATE TEMP VIEW {source_table}_decoded as a LEFT JOIN of the
-             domain table with rocpd_blob_event on blob_event_id, with every
-             blob field projected as a decoded column.
+             domain table with rocpd_blob_event on event_id, with every blob
+             field projected as a decoded column.
     """
     try:
         schemas = conn.execute(
@@ -127,9 +128,7 @@ def setup_blob_views(conn: sqlite3.Connection) -> None:
         except sqlite3.OperationalError:
             domain_cols = []
 
-        domain_select = ",\n    ".join(
-            f"s.{col}" for col in domain_cols if col != "blob_event_id"
-        )
+        domain_select = ",\n    ".join(f"s.{col}" for col in domain_cols)
 
         try:
             field_names = [row[0] for row in conn.execute(
@@ -151,7 +150,8 @@ def setup_blob_views(conn: sqlite3.Connection) -> None:
             f"    {domain_select}{separator}\n"
             f"    {blob_select}\n"
             f"FROM {source_table} s\n"
-            f"LEFT JOIN rocpd_blob_event e ON e.id = s.blob_event_id"
+            f"LEFT JOIN rocpd_blob_event e ON "
+            f"e.event_id = s.event_id AND e.schema_id = {schema_id}"
         )
         try:
             conn.execute(view_sql)
@@ -191,41 +191,58 @@ CREATE TABLE IF NOT EXISTS rocpd_info_blob_field (
     FOREIGN KEY (schema_id) REFERENCES rocpd_info_blob_schema(id)
 );
 
+-- Shared event table (mirrors rocpd_event usage in full rocpd schema).
+CREATE TABLE IF NOT EXISTS rocpd_event (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    correlation_id INTEGER
+);
+
 -- One row per blob instance (the actual packed binary data).
 CREATE TABLE IF NOT EXISTS rocpd_blob_event (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id  INTEGER NOT NULL,
     schema_id INTEGER NOT NULL,
     blob      BLOB    NOT NULL,
+    FOREIGN KEY (event_id) REFERENCES rocpd_event(id),
     FOREIGN KEY (schema_id) REFERENCES rocpd_info_blob_schema(id)
+);
+
+-- Domain table used to correlate dispatches with samples through event_id.
+CREATE TABLE IF NOT EXISTS kernel_dispatch (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    dispatch_id INTEGER NOT NULL,
+    event_id    INTEGER NOT NULL,
+    kernel_name TEXT,
+    FOREIGN KEY (event_id) REFERENCES rocpd_event(id)
 );
 
 -- Domain table 1: GPU PC sample
 --   Architecture-independent columns live here; arch-specific data is in the blob.
 CREATE TABLE IF NOT EXISTS gpu_pc_sample (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id           INTEGER NOT NULL,
     timestamp          INTEGER NOT NULL,
     dispatch_id        INTEGER NOT NULL,
     code_object_offset INTEGER,
-    blob_event_id      INTEGER,
-    FOREIGN KEY (blob_event_id) REFERENCES rocpd_blob_event(id)
+    FOREIGN KEY (event_id) REFERENCES rocpd_event(id)
 );
 
 -- Domain table 2: Memory allocation event
 CREATE TABLE IF NOT EXISTS memory_alloc (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp     INTEGER NOT NULL,
-    alloc_size    INTEGER NOT NULL,
-    blob_event_id INTEGER,
-    FOREIGN KEY (blob_event_id) REFERENCES rocpd_blob_event(id)
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id   INTEGER NOT NULL,
+    timestamp  INTEGER NOT NULL,
+    alloc_size INTEGER NOT NULL,
+    FOREIGN KEY (event_id) REFERENCES rocpd_event(id)
 );
 
 -- Domain table 3: HW performance counter snapshot
 CREATE TABLE IF NOT EXISTS hw_counter_snap (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp     INTEGER NOT NULL,
-    kernel_id     INTEGER NOT NULL,
-    blob_event_id INTEGER,
-    FOREIGN KEY (blob_event_id) REFERENCES rocpd_blob_event(id)
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id  INTEGER NOT NULL,
+    timestamp INTEGER NOT NULL,
+    kernel_id INTEGER NOT NULL,
+    FOREIGN KEY (event_id) REFERENCES rocpd_event(id)
 );
 """
 
@@ -350,7 +367,7 @@ def register_struct(conn: sqlite3.Connection,
     ----------
     conn         : open sqlite3 connection to the rocpd database
     struct_cls   : a ctypes.Structure subclass with _pack_ = 1
-    source_table : name of the domain table whose rows reference blob_event_id
+    source_table : name of the domain table whose rows correlate by event_id
                    (drives the TEMP VIEW name: {source_table}_decoded)
     description  : optional human-readable description of the struct
     """
@@ -384,19 +401,19 @@ def register_struct(conn: sqlite3.Connection,
 
 
 def insert_blob_event(conn: sqlite3.Connection,
+                      event_id: int,
                       schema_id: int,
                       struct_instance) -> int:
     """Serialise a ctypes struct instance to raw bytes and insert one
-    rocpd_blob_event row.  Returns the new blob_event_id.
+    rocpd_blob_event row.  Returns the new blob_event row id.
 
-    The caller stores this id in the domain table row (e.g. gpu_pc_sample
-    .blob_event_id) so that setup_blob_views can JOIN the two tables when
-    building the decoded TEMP VIEW.
+    Correlation is done via event_id (same pattern as rocpd_arg and
+    rocpd_pmc_event in rocpd): the domain row and blob row both share event_id.
     """
     blob = bytes(struct_instance)
     cur = conn.execute(
-        "INSERT INTO rocpd_blob_event (schema_id, blob) VALUES (?, ?)",
-        (schema_id, sqlite3.Binary(blob)),
+        "INSERT INTO rocpd_blob_event (event_id, schema_id, blob) VALUES (?, ?, ?)",
+        (event_id, schema_id, sqlite3.Binary(blob)),
     )
     return cur.lastrowid
 
@@ -455,12 +472,28 @@ def _write_database(db_path: str) -> None:
           f"  ctr={len(CounterSnapshotExtdataV1._fields_)}")
 
     # ------------------------------------------------------------------
-    # Step B: generate fake GPU PC sample rows.
-    # Each sample: fill a PcSampleExtdataV1, call bytes() to get the
-    # packed bytes, insert into rocpd_blob_event, store blob_event_id in
-    # the gpu_pc_sample domain row.
+    # Step B: create dispatches that are correlated through event_id.
     # ------------------------------------------------------------------
-    N_PC = 8
+    dispatch_event_ids = {}
+    for dispatch_id in range(3):
+        cur = conn.execute(
+            "INSERT INTO rocpd_event (correlation_id) VALUES (?)",
+            (10_000 + dispatch_id,),
+        )
+        event_id = cur.lastrowid
+        dispatch_event_ids[dispatch_id] = event_id
+        conn.execute(
+            "INSERT INTO kernel_dispatch (dispatch_id, event_id, kernel_name) "
+            "VALUES (?, ?, ?)",
+            (dispatch_id, event_id, f"vector_add_{dispatch_id}"),
+        )
+
+    # Step C: generate fake GPU PC sample rows.
+    # Each sample gets its OWN event_id for blob correlation (1:1 with
+    # rocpd_blob_event).  Samples are linked to their parent dispatch via
+    # dispatch_id, not via a shared event_id.
+    # ------------------------------------------------------------------
+    N_PC = 9  # 3 samples per dispatch
     for i in range(N_PC):
         # Simulate a stochastic sample: hw_id always set, arb_state random
         ext = PcSampleExtdataV1(
@@ -481,18 +514,27 @@ def _write_database(db_path: str) -> None:
             arb_state_stall_lds    = rng.randint(0, 1),
             arb_state_stall_scalar = rng.randint(0, 1),
         )
-        blob_id = insert_blob_event(conn, pc_schema_id, ext)
+        dispatch_id = i // 3  # 3 samples per dispatch
+        pc_event_id = conn.execute(
+            "INSERT INTO rocpd_event (correlation_id) VALUES (?)",
+            (20_000 + i,),
+        ).lastrowid
+        insert_blob_event(conn, pc_event_id, pc_schema_id, ext)
         conn.execute(
             "INSERT INTO gpu_pc_sample"
-            "    (timestamp, dispatch_id, code_object_offset, blob_event_id)"
+            "    (event_id, timestamp, dispatch_id, code_object_offset)"
             " VALUES (?, ?, ?, ?)",
-            (1_000_000 * (i + 1), i // 3, 0x1A00 + i * 4, blob_id),
+            (pc_event_id, 1_000_000 * (i + 1), dispatch_id, 0x1A00 + i * 4),
         )
 
     # ------------------------------------------------------------------
-    # Step C: generate fake memory allocation events.
+    # Step D: generate fake memory allocation events.
     # ------------------------------------------------------------------
     for i in range(4):
+        mem_event_id = conn.execute(
+            "INSERT INTO rocpd_event (correlation_id) VALUES (?)",
+            (20_000 + i,),
+        ).lastrowid
         ext = MemoryAllocExtdataV1(
             virtual_address  = 0x7F00_0000_0000 + i * 0x10000,
             physical_address = 0x8000_0000 + i * 0x10000,
@@ -503,17 +545,21 @@ def _write_database(db_path: str) -> None:
             is_managed       = rng.randint(0, 1),
             is_coherent      = rng.randint(0, 1),
         )
-        blob_id = insert_blob_event(conn, mem_schema_id, ext)
+        insert_blob_event(conn, mem_event_id, mem_schema_id, ext)
         conn.execute(
-            "INSERT INTO memory_alloc (timestamp, alloc_size, blob_event_id)"
+            "INSERT INTO memory_alloc (event_id, timestamp, alloc_size)"
             " VALUES (?, ?, ?)",
-            (2_000_000 * (i + 1), rng.choice([4096, 65536, 1 << 20]), blob_id),
+            (mem_event_id, 2_000_000 * (i + 1), rng.choice([4096, 65536, 1 << 20])),
         )
 
     # ------------------------------------------------------------------
-    # Step D: generate fake HW counter snapshots.
+    # Step E: generate fake HW counter snapshots.
     # ------------------------------------------------------------------
     for i in range(5):
+        ctr_event_id = conn.execute(
+            "INSERT INTO rocpd_event (correlation_id) VALUES (?)",
+            (30_000 + i,),
+        ).lastrowid
         ext = CounterSnapshotExtdataV1(
             sq_waves          = rng.randint(1_000,   65_535),
             sq_insts_valu     = rng.randint(100_000, 10_000_000),
@@ -526,16 +572,17 @@ def _write_database(db_path: str) -> None:
             grbm_count        = rng.randint(100_000, 1_000_000),
             grbm_gui_active   = rng.randint(80_000,  900_000),
         )
-        blob_id = insert_blob_event(conn, ctr_schema_id, ext)
+        insert_blob_event(conn, ctr_event_id, ctr_schema_id, ext)
         conn.execute(
-            "INSERT INTO hw_counter_snap (timestamp, kernel_id, blob_event_id)"
+            "INSERT INTO hw_counter_snap (event_id, timestamp, kernel_id)"
             " VALUES (?, ?, ?)",
-            (3_000_000 * (i + 1), i + 1, blob_id),
+            (ctr_event_id, 3_000_000 * (i + 1), i + 1),
         )
 
     conn.commit()
     conn.close()
-    print(f"  Rows inserted :  {N_PC} gpu_pc_sample  4 memory_alloc  5 hw_counter_snap")
+    print(f"  Rows inserted :  3 kernel_dispatch  {N_PC} gpu_pc_sample  4 memory_alloc  5 hw_counter_snap")
+    print(f"  event rows    :  {3 + N_PC + 4 + 5} rocpd_event")
     print(f"  blob_event rows: {N_PC + 4 + 5}  (one per sample, all in rocpd_blob_event)")
 
 
@@ -560,15 +607,16 @@ def _read_database(db_path: str) -> None:
     # Query gpu_pc_sample_decoded
     # Equivalent SQL (generated dynamically by setup_blob_views):
     #
-    #   SELECT s.id, s.timestamp, s.dispatch_id, s.code_object_offset,
+    #   SELECT s.id, s.event_id, s.timestamp, s.dispatch_id, s.code_object_offset,
     #          rocpd_blob_field(e.blob, 1, 'hw_id_chiplet')    AS hw_id_chiplet,
     #          rocpd_blob_field(e.blob, 1, 'hw_id_wave_id')    AS hw_id_wave_id,
     #          ...
     #   FROM gpu_pc_sample s
-    #   LEFT JOIN rocpd_blob_event e ON e.id = s.blob_event_id
+    #   LEFT JOIN rocpd_blob_event e ON e.event_id = s.event_id
+    #                               AND e.schema_id = 1
     # ------------------------------------------------------------------
     cols_pc = [
-        "id", "dispatch_id", "code_object_offset",
+        "id", "event_id", "dispatch_id", "code_object_offset",
         "hw_id_chiplet", "hw_id_wave_id", "hw_id_simd_id",
         "hw_id_cu_or_wgp_id", "hw_id_shader_engine_id",
         "arb_state_issue_valu", "arb_state_stall_valu",
@@ -581,6 +629,34 @@ def _read_database(db_path: str) -> None:
     _print_table(
         "gpu_pc_sample_decoded  —  PC sampling: decoded arch-specific fields",
         [tuple(r) for r in rows_pc], cols_pc,
+    )
+
+    # ------------------------------------------------------------------
+    # Demonstrate kernel_dispatch -> pc samples correlation by event_id.
+    # ------------------------------------------------------------------
+    target_event_id = conn.execute(
+        "SELECT event_id FROM kernel_dispatch WHERE dispatch_id = 1"
+    ).fetchone()[0]
+    cols_link = [
+        "kernel_dispatch_id", "dispatch_id", "event_id",
+        "pc_sample_id", "code_object_offset",
+        "hw_id_chiplet", "hw_id_wave_id", "arb_state_issue_valu",
+    ]
+    rows_link = conn.execute(
+        "SELECT "
+        "    kd.id AS kernel_dispatch_id, kd.dispatch_id, kd.event_id, "
+        "    psd.id AS pc_sample_id, psd.code_object_offset, "
+        "    psd.hw_id_chiplet, psd.hw_id_wave_id, psd.arb_state_issue_valu "
+        "FROM kernel_dispatch kd "
+        "JOIN gpu_pc_sample_decoded psd ON psd.dispatch_id = kd.dispatch_id "
+        "WHERE kd.event_id = ? "
+        "ORDER BY psd.id",
+        (target_event_id,),
+    ).fetchall()
+    _print_table(
+        f"kernel_dispatch (event_id={target_event_id}) -> gpu_pc_sample_decoded via dispatch_id",
+        [tuple(r) for r in rows_link],
+        cols_link,
     )
 
     # ------------------------------------------------------------------

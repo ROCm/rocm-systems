@@ -67,8 +67,8 @@ def setup_blob_views(conn: sqlite3.Connection) -> None:
     **Step 3 – CREATE TEMP VIEW ``{source_table}_decoded``.**
 
     For each schema, the view is a ``LEFT JOIN`` of the domain table
-    (``source_table``) with ``rocpd_blob_event`` on ``blob_event_id``.
-    Domain columns (except ``blob_event_id``) are projected directly; each
+    (``source_table``) with ``rocpd_blob_event`` on ``event_id``.
+    Domain columns are projected directly; each
     blob field becomes ``rocpd_blob_field(e.blob, schema_id, 'field') AS field``.
 
     The view is created with ``IF NOT EXISTS`` so calling this function more
@@ -149,9 +149,7 @@ def setup_blob_views(conn: sqlite3.Connection) -> None:
         except sqlite3.OperationalError:
             domain_cols = []
 
-        domain_select = ",\n    ".join(
-            f"s.{col}" for col in domain_cols if col != "blob_event_id"
-        )
+        domain_select = ",\n    ".join(f"s.{col}" for col in domain_cols)
 
         try:
             field_names = [
@@ -178,7 +176,8 @@ def setup_blob_views(conn: sqlite3.Connection) -> None:
             f"    {domain_select}{separator}\n"
             f"    {blob_select}\n"
             f"FROM {source_table} s\n"
-            f"LEFT JOIN rocpd_blob_event e ON e.id = s.blob_event_id"
+            f"LEFT JOIN rocpd_blob_event e ON "
+            f"e.event_id = s.event_id AND e.schema_id = {schema_id}"
         )
         try:
             conn.execute(view_sql)
