@@ -1769,7 +1769,7 @@ HIP_TEST_CASE(Unit_ocp_host_fp8_device_compare) {
     // CPU calc
     std::vector<float> cpu_res(size, 0.0f);
     for (size_t i = 0; i < size; i++) {
-      auto tmp = __amd_cvt_float_to_fp8_sr(in[i], interpret, 1 /*seed*/);
+      auto tmp = __amd_cvt_float_to_fp8_sr(in[i], interpret, 0 /*seed*/);
       cpu_res[i] = __amd_cvt_fp8_to_float(tmp, interpret);
     }
     std::vector<float> gpu_res(size, 0.0f);
@@ -1799,7 +1799,7 @@ HIP_TEST_CASE(Unit_ocp_host_fp8_device_compare) {
     // CPU calc
     std::vector<float> cpu_res(size, 0.0f);
     for (size_t i = 0; i < size; i++) {
-      auto tmp = __amd_cvt_float_to_fp8_sr(in[i], interpret, 1 /*seed*/);
+      auto tmp = __amd_cvt_float_to_fp8_sr(in[i], interpret, 0 /*seed*/);
       cpu_res[i] = __amd_cvt_fp8_to_float(tmp, interpret);
     }
     std::vector<float> gpu_res(size, 0.0f);

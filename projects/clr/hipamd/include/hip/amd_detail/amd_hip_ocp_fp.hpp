@@ -306,8 +306,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp8_storage_t __amd_cvt_float_to_fp8_sr(
     float f32;
     __amd_fp8_storage_t fp8[4];
   } u{0};
-#if __has_builtin(__builtin_amdgcn_cvt_sr_fp8_f32) &&                                             \
-    __has_builtin(__builtin_amdgcn_cvt_sr_bf8_f32)
+#if HIP_ENABLE_GFX950_OCP_BUILTINS
   if (interpret == __AMD_OCP_E4M3) {
     u.ui32 = __builtin_amdgcn_cvt_sr_fp8_f32(val, seed, u.ui32, 0);
   } else {
