@@ -93,10 +93,9 @@ static const struct option long_options[] = {{"iterations", required_argument, n
                                              {"monitor_verbose", required_argument, nullptr, 'm'},
                                              {"dont_fail", no_argument, nullptr, 'f'},
                                              {"amdsmitst_help", no_argument, nullptr, 'r'},
-                                             {"non-privileged", no_argument, nullptr, 'n'},
 
                                              {nullptr, 0, nullptr, 0}};
-static const char* short_options = "i:v:m:frn";
+static const char* short_options = "i:v:m:fr";
 
 static const std::map<uint32_t, std::string> kVoltSensorNameMap = {
     {AMDSMI_VOLT_TYPE_VDDGFX, "Vddgfx"},
@@ -108,7 +107,6 @@ static void PrintHelp(void) {
                "--dont_fail, -f if set, don't fail test when individual test fails; "
                "default is to fail when an individual test fails\n"
                "--amdsmitst_help, -r print this help message\n"
-               "--non-privileged, -n skip tests requiring hardware access (for CI containers)\n"
                "--verbosity, -v <verbosity level>\n"
                "  Verbosity levels:\n"
                "   0    -- minimal; just summary information\n"
@@ -155,10 +153,6 @@ uint32_t ProcessCmdline(AMDSMITstGlobals* test, int arg_cnt, char** arg_list) {
 
       case 'f':
         test->dont_fail = true;
-        break;
-
-      case 'n':
-        test->non_privileged = true;
         break;
 
       default:

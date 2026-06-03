@@ -71,16 +71,6 @@ void TestFanReadWrite::Run(void) {
     return;
   }
 
-  // Skip hardware write operations if in non-privileged mode (CI containers)
-  if (non_privileged()) {
-    IF_VERB(STANDARD) {
-      std::cout << "** Running in --non-privileged mode: Skipping fan write tests **" << std::endl;
-      std::cout << "** (This mode is for CI containers with sudo but no hardware access) **"
-                << std::endl;
-    }
-    return;
-  }
-
   for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
     PrintDeviceHeader(processor_handles_[dv_ind]);
 

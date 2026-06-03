@@ -42,7 +42,6 @@ struct AMDSMITstGlobals {
   uint32_t num_iterations;
   uint64_t init_options;
   bool dont_fail;
-  bool non_privileged;
 };
 
 uint32_t ProcessCmdline(AMDSMITstGlobals* test, int arg_cnt, char** arg_list);

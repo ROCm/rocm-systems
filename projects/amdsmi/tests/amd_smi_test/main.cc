@@ -74,7 +74,6 @@ static void SetFlags(TestBase* test) {
   test->set_dont_fail(sRSMIGlvalues->dont_fail);
   test->set_init_options(sRSMIGlvalues->init_options);
   test->set_num_iterations(sRSMIGlvalues->num_iterations);
-  test->set_non_privileged(sRSMIGlvalues->non_privileged);
 }
 
 static void RunCustomTestProlog(TestBase* test) {
@@ -358,19 +357,9 @@ int main(int argc, char** argv) {
   settings.num_iterations = 1;
   settings.dont_fail = false;
   settings.init_options = 0;
-  settings.non_privileged = false;
 
   if (ProcessCmdline(&settings, argc, argv)) {
     return 1;
-  }
-
-  // Warn if not running as root (unless in non-privileged mode)
-  if (!settings.non_privileged && !amd::smi::is_sudo_user()) {
-    std::cerr << "\n========================================" << std::endl;
-    std::cerr << "WARNING: Not running as root/sudo." << std::endl;
-    std::cerr << "Many write tests will be SKIPPED." << std::endl;
-    std::cerr << "Run with: sudo ./amdsmitst" << std::endl;
-    std::cerr << "========================================\n" << std::endl;
   }
 
   sRSMIGlvalues = &settings;
