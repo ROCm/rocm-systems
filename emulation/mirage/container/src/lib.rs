@@ -226,10 +226,13 @@ impl Engine {
             argv.push("--device".to_string());
             argv.push(d.clone());
         }
-        for g in groups {
-            argv.push("--group-add".to_string());
-            argv.push(g.clone());
-        }
+        // We always pass `--group-add keep-groups` above, which inherits
+        // the launching user's supplementary groups (including `video`/
+        // `render`) into the container. podman rejects combining
+        // `keep-groups` with any other `--group-add`, so the named groups
+        // are intentionally dropped here: keep-groups already covers them,
+        // and adding them would fail with exit 125.
+        let _ = groups;
         argv.push(image.to_string());
         // The container's foreground process. Mirage hosts the node from
         // inside the container, so this is normally `mirage host ...`.
@@ -606,8 +609,11 @@ mod tests {
         assert!(joined.contains("-v /h:/c"));
         assert!(joined.contains("--device /dev/kfd"));
         assert!(joined.contains("--device /dev/dri"));
-        assert!(joined.contains("--group-add video"));
-        assert!(joined.contains("--group-add render"));
+        // Named groups are intentionally dropped: `--group-add
+        // keep-groups` (always emitted) cannot be combined with other
+        // `--group-add` options, and already inherits them from the host.
+        assert!(!joined.contains("--group-add video"));
+        assert!(!joined.contains("--group-add render"));
         assert!(joined.ends_with("img:latest /mnt/mirage/bin/mirage host --session s --rank 0"));
     }
 
