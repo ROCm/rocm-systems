@@ -119,6 +119,20 @@ class AMDSMIHelpers:
                     "Unable to determine virtualization status: " + str(e.get_error_code())
                 )
 
+        self.convert_clock_type = {
+            "sys": amdsmi_interface.AmdSmiClkType.SYS,
+            "mem": amdsmi_interface.AmdSmiClkType.MEM,
+            "df": amdsmi_interface.AmdSmiClkType.DF,
+            "fclk": amdsmi_interface.AmdSmiClkType.DF,
+            "soc": amdsmi_interface.AmdSmiClkType.SOC,
+            "dcef": amdsmi_interface.AmdSmiClkType.DCEF,
+            # vclk and dclk currently do not support levels so average clk is given for frequency levels
+            "vclk0": amdsmi_interface.AmdSmiClkType.VCLK0,
+            "vclk1": amdsmi_interface.AmdSmiClkType.VCLK1,
+            "dclk0": amdsmi_interface.AmdSmiClkType.DCLK0,
+            "dclk1": amdsmi_interface.AmdSmiClkType.DCLK1,
+        }
+
     def increment_set_count(self):
         self._count_of_sets_called += 1
 
