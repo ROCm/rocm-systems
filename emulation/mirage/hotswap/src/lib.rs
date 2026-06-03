@@ -220,6 +220,12 @@ const HOTSWAP_CACHE_SUBDIRS: &[&str] = &[
 /// policy. Returns the `LD_PRELOAD` value (patched ROCR + intercept)
 /// separately so the host can merge it with any user-supplied preload.
 fn build_hotswap_env(dir: &Path) -> (String, BTreeMap<String, String>) {
+    // Canonicalize to an absolute path: `dir` may be discovered via a
+    // relative probe (e.g. `../../build/hotswap/lib`), and the workload
+    // runs from a different cwd, so every path derived from it (LD_PRELOAD,
+    // LD_LIBRARY_PATH, HOTSWAP_HOME) must be absolute.
+    let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+    let dir = dir.as_path();
     let source_target = std::env::var("HSA_HOTSWAP_SOURCE_TARGET")
         .ok()
         .filter(|s| !s.is_empty())
