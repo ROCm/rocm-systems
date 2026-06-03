@@ -42,10 +42,7 @@ _common_excludes: &common_excludes
   - "shmem-pingpong.*"
   - "video-decode.*"
 
-# Marker labels that opt a test out of the default CI tiers (heavy /
-# environment-dependent suites).  These are already emitted as CTest LABELS
-# by conftest based on pytest markers, so listing them here is enough to
-# suppress the corresponding tier label injection.
+# Marker labels that are always excluded for now, pending AIPROFSYST-441.
 _heavy_labels: &heavy_labels
   - "annotate"
   - "mpi"
@@ -88,12 +85,14 @@ test_categories:
       - "precheckin"
 
   comprehensive:
-    description: "Nightly tier (target: < 7 hours) - includes mpi / lulesh / network / annotate"
-    # Adds back the heavy markers excluded from the standard tier.  Still
-    # honours the always-broken AIPROFSYST-441 exclude list.
+    description: "Nightly tier (target: < 7 hours)"
+    # Honours the always-broken AIPROFSYST-441 exclude list.  Heavy markers
+    # remain excluded for now (pending AIPROFSYST-441); revisit once that
+    # ticket lands so the nightly tier can run the full marker set.
     test_patterns:
       - ".*"
     exclude: *common_excludes
+    excluded_labels: *heavy_labels
     labels:
       - "comprehensive"
       - "nightly"
@@ -101,9 +100,11 @@ test_categories:
 
   full:
     description: "Complete suite - everything that can run"
+    # Heavy markers remain excluded for now (pending AIPROFSYST-441).
     test_patterns:
       - ".*"
     exclude: *common_excludes
+    excluded_labels: *heavy_labels
     labels:
       - "full"
       - "all"
