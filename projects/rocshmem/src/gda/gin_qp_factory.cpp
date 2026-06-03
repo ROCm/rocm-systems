@@ -361,7 +361,6 @@ static int gin_load_dv_library(rocshmem_gin_qp_set *set) {
 ///////////////////////////////////////////////////////////////////////////////
 
 static int gin_create_parent_domain(rocshmem_gin_qp_set *set) {
-  GinNicDevice &nic = set->nic;
   struct ibv_parent_domain_init_attr pattr;
 
   memset(&pattr, 0, sizeof(pattr));
