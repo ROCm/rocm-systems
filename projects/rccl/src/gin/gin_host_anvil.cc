@@ -7,6 +7,7 @@
 #ifdef ENABLE_ROCSHMEM_GIN
 
 #include "gin/gin_host_anvil.h"
+#include "bootstrap.h"
 #include "comm.h"
 #include "dev_runtime.h"
 #include "nccl_device/gin/anvil/gin_anvil_device_host_common.h"
@@ -53,6 +54,9 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
                                        ncclNetDeviceHandle_v11_t** outDevHandle) {
   ncclResult_t ret = ncclSuccess;
   ginAnvilCtx* ctx = nullptr;
+  uint64_t* signalsLocal = nullptr;
+  uint64_t* countersLocal = nullptr;
+  struct ncclDevrState* devr = nullptr;
   NCCLCHECK(ncclCalloc(&ctx, 1));
   ctx->comm = comm;
   ctx->collComm = collComm;
@@ -66,8 +70,6 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
   }
 
   // Allocate local signal/counter storage in device memory.
-  uint64_t* signalsLocal = nullptr;
-  uint64_t* countersLocal = nullptr;
   if (nSignals > 0) {
     if (hipMalloc(&signalsLocal, sizeof(uint64_t) * nSignals) != hipSuccess) { ret = ncclSystemError; goto fail; }
     hipMemset(signalsLocal, 0, sizeof(uint64_t) * nSignals);
@@ -79,7 +81,7 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
 
   // Exchange the per-rank signal base pointers inside the LSA team (single node assumption).
   // We rely on symmetric ranks being in the same node subset (devr->lsaRankList).
-  struct ncclDevrState* devr = &comm->devrState;
+  devr = &comm->devrState;
   // Ensure symmetric runtime is initialized (for lsaRankList/bigSize fields).
   NCCLCHECK(ncclDevrInitOnce(comm));
 
@@ -162,6 +164,8 @@ fail:
     free(ctx->signalsBaseHost);
     free(ctx);
   }
+  if (signalsLocal) hipFree(signalsLocal);
+  if (countersLocal) hipFree(countersLocal);
   return ret;
 }
 

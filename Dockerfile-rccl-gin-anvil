@@ -10,7 +10,7 @@ FROM ubuntu:24.04
 #--build-arg RCCL_CACHE_BUST=N: increase N to force pull RCCL and RCCL-test and rebuilding
 #--build-arg ROCSHMEM_BRANCH=users/abouteiller/gin-stage1-wip (RCCL_BRANCH): pull and build that specific branch from github
 # Example build: from local sources, CWD in the rocm-systems pull
-#docker build -f Dockerfile-rccl-gin-gda -t rccl-gingda713 --build-arg GPU_TARGETS=gfx950 --build-arg ROCSHMEM_CACHE_BUST=5 --build-arg USE_LOCAL_SRC=1  .
+#docker build -f Dockerfile-rccl-gin-anvil -t rccl-gingda713 --build-arg GPU_TARGETS=gfx950 --build-arg ROCSHMEM_CACHE_BUST=5 --build-arg USE_LOCAL_SRC=1  .
 
 # Example command lines:
 # GIN proxy (inter-node capable): NCCL_GIN_TYPE=2
@@ -87,31 +87,31 @@ ENV ROCM_PATH=/opt/rocm
 
 # We use MPI only as a launcher, any MPI will do, use system install
 ## Install UCX
-#ENV UCX_INSTALL_PREFIX=/opt/ucx
-#RUN wget https://github.com/openucx/ucx/releases/download/v1.16.0/ucx-1.16.0.tar.gz \
-#    && mkdir -p ucx \
-#    && tar -zxf ucx-1.16.0.tar.gz -C ucx --strip-components=1 \
-#    && cd ucx \
-#    && mkdir build \
-#    && cd build \
-#    && ../configure --prefix=${UCX_INSTALL_PREFIX} --with-rocm=${ROCM_PATH} \
-#    && make -j16 install \
-#    && cd ../.. \
-#    && rm -rf ucx ucx-1.16.0.tar.gz
+ENV UCX_INSTALL_PREFIX=/opt/ucx
+RUN wget https://github.com/openucx/ucx/releases/download/v1.16.0/ucx-1.16.0.tar.gz \
+    && mkdir -p ucx \
+    && tar -zxf ucx-1.16.0.tar.gz -C ucx --strip-components=1 \
+    && cd ucx \
+    && mkdir build \
+    && cd build \
+    && ../configure --prefix=${UCX_INSTALL_PREFIX} --with-rocm=${ROCM_PATH} \
+    && make -j16 install \
+    && cd ../.. \
+    && rm -rf ucx ucx-1.16.0.tar.gz
 
 ## Install OpenMPI
-#ENV MPI_INSTALL_PREFIX=/opt/ompi
-#RUN wget https://download.open-mpi.org/release/open-mpi/v4.1/openmpi-4.1.6.tar.gz \
-#    && mkdir -p ompi4 \
-#    && tar -zxf openmpi-4.1.6.tar.gz -C ompi4 --strip-components=1 \
-#    && cd ompi4 \
-#    && mkdir build \
-#    && cd build \
-#    && ../configure --prefix=${MPI_INSTALL_PREFIX} --with-ucx=${UCX_INSTALL_PREFIX} --disable-oshmem --disable-mpi-fortran --enable-orterun-prefix-by-default \
-#    && make -j16 install \
-#    && cd ../.. \
-#    && rm -rf ompi4 openmpi-4.1.6.tar.gz
-#ENV PATH="${MPI_INSTALL_PREFIX}/bin:${PATH}"
+ENV MPI_INSTALL_PREFIX=/opt/ompi
+RUN wget https://download.open-mpi.org/release/open-mpi/v4.1/openmpi-4.1.6.tar.gz \
+    && mkdir -p ompi4 \
+    && tar -zxf openmpi-4.1.6.tar.gz -C ompi4 --strip-components=1 \
+    && cd ompi4 \
+    && mkdir build \
+    && cd build \
+    && ../configure --prefix=${MPI_INSTALL_PREFIX} --with-ucx=${UCX_INSTALL_PREFIX} --disable-oshmem --disable-mpi-fortran --enable-orterun-prefix-by-default \
+    && make -j16 install \
+    && cd ../.. \
+    && rm -rf ompi4 openmpi-4.1.6.tar.gz
+ENV PATH="${MPI_INSTALL_PREFIX}/bin:${PATH}"
 
 # OPTIONAL: Install rocm-enabled IB perftest (used to validate if network config is sane)
 # The following block is OPTIONAL and can be commented out if you only want to run rocSHMEM
@@ -138,9 +138,11 @@ ARG DEBUG_BUILD=0
 
 ## building rocSHMEM
 # ARG ROCSHMEM_BRANCH=users/abouteiller/gin-stage1-wip
-ARG ROCSHMEM_BRANCH=users/abouteiller/gin-stage2a-anvil
+ARG ROCSHMEM_BRANCH=users/dondai/gin-stage2a-anvil
 ARG ROCSHMEM_CACHE_BUST=1
-COPY projects/rocshmem/ /tmp/local/projects/rocshmem/
+RUN if [ "${USE_LOCAL_SRC}" = "1" ]; then \
+    cp -r projects/rocshmem/ /tmp/local/projects/rocshmem/; \
+  fi
 ENV ROCSHMEM_INSTALL_DIR=${WORKDIR}/rocshmem
 RUN if [ "${USE_LOCAL_SRC}" = "1" ]; then \
       [ -d /tmp/local/projects/rocshmem ] || { echo "ERROR: projects/rocshmem not in build context"; exit 1; }; \
@@ -169,10 +171,12 @@ RUN cd rocshmem/src/projects/rocshmem \
 ## building RCCL
 #ARG RCCL_BRANCH=users/prasanna-amd/nccl-sync-v2-28-9-gin-rebased-0501
 # ARG RCCL_BRANCH=users/abouteiller/gin-stage1-wip
-ARG RCCL_BRANCH=users/abouteiller/gin-stage2a-anvil
+ARG RCCL_BRANCH=users/dondai/gin-stage2a-anvil
 ARG RCCL_CACHE_BUST=1
-COPY projects/rccl/      /tmp/local/projects/rccl/
-COPY projects/rccl-tests/ /tmp/local/projects/rccl-tests/
+RUN if [ "${USE_LOCAL_SRC}" = "1" ]; then \
+    cp -r projects/rccl/      /tmp/local/projects/rccl/;  \
+    cp -r projects/rccl-tests/ /tmp/local/projects/rccl-tests/;  \
+  fi
 ENV RCCL_INSTALL_PREFIX=${WORKDIR}/rccl
 ENV ONLY_FUNCS="SendRecv|AlltoAllPivot|AlltoAllGda|AlltoAllvGda"
 RUN if [ "${USE_LOCAL_SRC}" = "1" ]; then \
@@ -225,7 +229,7 @@ ENV LD_LIBRARY_PATH="${RCCL_INSTALL_PREFIX}/lib:${MPI_INSTALL_PREFIX}/lib:${ROCM
 ENV UCX_WARN_UNUSED_ENV_VARS=n
 ENV OMPI_ALLOW_RUN_AS_ROOT=1
 ENV OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
-ENV NCL_DEBUG=VERSION
+ENV NCCL_DEBUG=VERSION
 ENV ROCSHMEM_DEBUG_LEVEL=info:noversion
 ENV ROCSHMEM_TEST_UUID=1
 
