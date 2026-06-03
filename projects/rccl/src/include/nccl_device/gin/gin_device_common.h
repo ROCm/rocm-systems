@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef _NCCL_GIN_DEVICE_COMMON_H_
 #define _NCCL_GIN_DEVICE_COMMON_H_
@@ -29,15 +30,23 @@
 #endif
 #endif
 
+enum ncclGinOptFlags {
+  ncclGinOptFlagsDefault = 0,
+  ncclGinOptFlagsMaySkipCreditCheck = (1 << 0),
+  ncclGinOptFlagsAggregateRequests = (1 << 1),
+};
+
 #define NCCL_GIN_BACKEND_MASK_ALL                                               \
   (((NCCL_GIN_PROXY_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_PROXY | \
    ((NCCL_GIN_GDAKI_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_GDAKI)
 
 struct ncclGinCtx {
+  unsigned backendMask;
   ncclNetDeviceType backend;
   int rank;
   int nRanks;
   void* handle;
+  int contextId;
 };
 
 template <unsigned backendMask>
@@ -47,29 +56,51 @@ struct ncclGinDescriptorSmem {
   alignas(16) char space[64];
 };
 
-#if __CUDACC__
+enum ncclGinSignalType {
+  NCCL_GIN_SIGNAL_TYPE_NONE,
+  NCCL_GIN_SIGNAL_TYPE_VA,
+  NCCL_GIN_SIGNAL_TYPE_INDEXED,
+};
+
+struct ncclGinSignalDescriptor {
+  ncclGinSignalType type;
+  union {
+    struct {
+      ncclGinWindow_t signalWindow;
+      size_t signalOffset;
+      ncclWindow_t ncclWindow;
+    } vaSignal;
+    struct {
+      ncclGinSignal_t signalId;
+    } indexedSignal;
+  };
+};
+
+#if NCCL_CHECK_CUDACC
 template <ncclNetDeviceType backend>
 struct ncclGinApi_Put {
   template <typename Coop>
   NCCL_DEVICE_INLINE static void call(ncclGinCtx, Coop coop, int peer, bool hasWins,
                                       ncclGinWindow_t dstWin, size_t dstOff, ncclGinWindow_t srcWin,
-                                      size_t srcOff, size_t bytes, bool hasSignal,
-                                      ncclGinSignal_t signalId, ncclGinSignalOp_t signalOp,
+                                      size_t srcOff, size_t bytes,
+                                      ncclGinSignalDescriptor signal, ncclGinSignalOp_t signalOp,
                                       uint64_t signalOpArg, bool hasCounter,
                                       ncclGinCounter_t counterId, bool hasDescriptor,
                                       ncclGinDescriptorSmem* descriptor,
-                                      cuda::thread_scope required, cuda::thread_scope given);
+                                      cuda::thread_scope required, cuda::thread_scope given,
+                                      uint32_t optFlags = ncclGinOptFlagsDefault);
 };
 
 template <ncclNetDeviceType backend>
 struct ncclGinApi_PutValue {
   template <typename Coop, typename T>
   NCCL_DEVICE_INLINE static void call(ncclGinCtx, Coop coop, int peer, ncclGinWindow_t dstWin,
-                                      size_t dstOff, T srcData, bool hasSignal,
-                                      ncclGinSignal_t signalId, ncclGinSignalOp_t signalOp,
+                                      size_t dstOff, T srcData,
+                                      ncclGinSignalDescriptor signal, ncclGinSignalOp_t signalOp,
                                       uint64_t signalOpArg, bool hasDescriptor,
                                       ncclGinDescriptorSmem* descriptor,
-                                      cuda::thread_scope required, cuda::thread_scope given);
+                                      cuda::thread_scope required, cuda::thread_scope given,
+                                      uint32_t optFlags = ncclGinOptFlagsDefault);
 };
 
 template <ncclNetDeviceType backend>
@@ -83,7 +114,7 @@ struct ncclGinApi_GetCounterPtr {
 
 template <ncclNetDeviceType backend>
 struct ncclGinApi_ResetSignal {
-  NCCL_DEVICE_INLINE static void call(ncclGinCtx, ncclGinSignal_t signalId);
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx, ncclGinSignalDescriptor signal);
 };
 
 template <ncclNetDeviceType backend>
@@ -94,13 +125,13 @@ struct ncclGinApi_ResetCounter {
 template <ncclNetDeviceType backend>
 struct ncclGinApi_Flush {
   template <typename Coop>
-  NCCL_DEVICE_INLINE static void call(ncclGinCtx, Coop, cuda::memory_order ord);
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx, Coop, cuda::memory_order ord, uint32_t* abortFlag);
 };
 #endif
 
-#if __CUDACC__
-template <template <ncclNetDeviceType> typename ApiFn, unsigned beMask, typename... Arg>
-NCCL_DEVICE_INLINE static decltype(auto) ncclGinCall(ncclGinCtx_M<beMask> ctx, Arg&&... arg) {
+#if NCCL_CHECK_CUDACC
+template <template <ncclNetDeviceType> typename ApiFn, typename... Arg>
+NCCL_DEVICE_INLINE static decltype(auto) ncclGinCallImpl(unsigned beMask, ncclGinCtx ctx, Arg&&... arg) {
   bool singleton = (beMask & (beMask - 1)) == 0;  // Only one bit set
   switch (singleton ? __popc(beMask - 1) : (int)ctx.backend) {
 #if NCCL_GIN_PROXY_ENABLE
@@ -116,6 +147,16 @@ NCCL_DEVICE_INLINE static decltype(auto) ncclGinCall(ncclGinCtx_M<beMask> ctx, A
     default:
       __builtin_unreachable();
   }
+}
+
+template <template <ncclNetDeviceType> typename ApiFn, typename... Arg>
+NCCL_DEVICE_INLINE static decltype(auto) ncclGinCall(ncclGinCtx ctx, Arg&&... arg) {
+  return ncclGinCallImpl<ApiFn>(ctx.backendMask, ctx, static_cast<Arg&&>(arg)...);
+}
+
+template <template <ncclNetDeviceType> typename ApiFn, unsigned beMask, typename... Arg>
+NCCL_DEVICE_INLINE static decltype(auto) ncclGinCall(ncclGinCtx_M<beMask> ctx, Arg&&... arg) {
+  return ncclGinCallImpl<ApiFn>(beMask, ctx, static_cast<Arg&&>(arg)...);
 }
 #endif
 

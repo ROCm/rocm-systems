@@ -2261,6 +2261,10 @@ def assert_perfetto(
 ):
     """Fixture that returns an assert_perfetto function.
 
+    Trace validation kwargs (``categories``, ``labels``, ``counts``, ``depths``,
+    ``label_substrings``, etc.) are forwarded to
+    ``validate_perfetto_trace``; see that function's docstring.
+
     Args not from validate_perfetto_trace:
         subtest_name: Name shown in subtest output (defaults to "Perfetto validation")
         perfetto_file: (Optional) Name of the perfetto file in the test output directory (e.g., for merged.proto)

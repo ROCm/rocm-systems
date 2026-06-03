@@ -37,11 +37,14 @@ IF (BUILD_PYTHON_TESTS)
     rocm_install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/rocshmem_python_driver.sh
                  COMPONENT tests DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem)
 
+    # Install all Python test files so adding new tests does not require
+    # touching this CMake list.
+    file(GLOB ROCSHMEM_PYTHON_TEST_FILES CONFIGURE_DEPENDS
+        ${CMAKE_SOURCE_DIR}/python/tests/*.py)
+    list(SORT ROCSHMEM_PYTHON_TEST_FILES)
+
     rocm_install(FILES
-        ${CMAKE_SOURCE_DIR}/python/tests/test_smoke.py
-        ${CMAKE_SOURCE_DIR}/python/tests/test_basic.py
-        ${CMAKE_SOURCE_DIR}/python/tests/test_collective.py
-        ${CMAKE_SOURCE_DIR}/python/tests/conftest.py
+        ${ROCSHMEM_PYTHON_TEST_FILES}
         COMPONENT tests
         DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem/python_tests)
 

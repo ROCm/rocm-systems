@@ -444,6 +444,32 @@ endif()
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME core)
 
 if(ROCPROFSYS_BUILD_CODECOV)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} -m gcovr --version
+        OUTPUT_VARIABLE _gcovr_version_output
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE _gcovr_result
+    )
+    if(NOT _gcovr_result EQUAL 0)
+        message(
+            FATAL_ERROR
+            "gcovr not found in the active Python environment (${Python3_EXECUTABLE}). "
+            "Install with: pip install 'gcovr>=8.4'"
+        )
+    endif()
+    string(REGEX MATCH "([0-9]+)\\.([0-9]+)" _gcovr_version "${_gcovr_version_output}")
+    set(_gcovr_major ${CMAKE_MATCH_1})
+    set(_gcovr_minor ${CMAKE_MATCH_2})
+    if(_gcovr_major LESS 8 OR (_gcovr_major EQUAL 8 AND _gcovr_minor LESS 4))
+        message(
+            FATAL_ERROR
+            "gcovr >= 8.4 is required for ROCPROFSYS_BUILD_CODECOV "
+            "(found ${_gcovr_version}). Install with: pip install 'gcovr>=8.4'"
+        )
+    endif()
+    message(STATUS "Found gcovr: ${Python3_EXECUTABLE} -m gcovr (${_gcovr_version})")
+
     rocprofiler_systems_save_variables(CODECOV_FLAGS VARIABLES CMAKE_C_FLAGS
         CMAKE_CXX_FLAGS
     )
