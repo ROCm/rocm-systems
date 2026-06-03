@@ -308,7 +308,10 @@ impl MirageCtl for FileCtl {
     fn session_health(&self, id: &SessionId) -> Result<SessionHealth> {
         let layout = crate::paths::SessionLayout::for_id(id);
         if let Some(h) = crate::state::read_json_opt::<SessionHealth>(&layout.health())? {
-            return Ok(h);
+            // A running host re-stamps its heartbeat; if it stopped, the
+            // record still claims `healthy`. Escalate a stale record to
+            // `stalled`/`dead` so callers see the host died.
+            return Ok(h.escalate_if_stale());
         }
         Ok(SessionHealth {
             timestamp: Utc::now(),

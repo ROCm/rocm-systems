@@ -46,7 +46,7 @@ use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::{ExecDef, ExecId, ExecStatus, InjectionDef, NodeStatus};
 use mirage_core::paths::{ExecLayout, SessionLayout};
 use mirage_core::profile::{FileMount, ProfileDef};
-use mirage_core::session::{SessionDef, SessionHealth, SessionId};
+use mirage_core::session::{HEALTH_HEARTBEAT_INTERVAL, SessionDef, SessionHealth, SessionId};
 use mirage_core::state::{read_json, read_json_opt, read_small_str, write_bytes, write_json};
 use nix::sys::stat::Mode;
 use nix::unistd::mkfifo;
@@ -156,6 +156,13 @@ pub async fn run(config: HostConfig, shutdown: Arc<Notify>) -> Result<()> {
     let mut seen: HashSet<ExecId> = HashSet::new();
     let mut tasks: Vec<tokio::task::JoinHandle<()>> = Vec::new();
 
+    // Heartbeat: the orchestrator re-stamps session health periodically
+    // so readers can tell a live host from a crashed one. A host that
+    // stops beating is reported as `stalled` and then terminally `dead`
+    // (see `SessionHealth::escalate_if_stale`). Per-node hosts do not own
+    // session-level health, so only the orchestrator beats.
+    let mut last_heartbeat = tokio::time::Instant::now();
+
     loop {
         // Discover new execs. The orchestrator host of a containerised
         // session does not run execs itself (the per-node hosts do), so
@@ -192,6 +199,12 @@ pub async fn run(config: HostConfig, shutdown: Arc<Notify>) -> Result<()> {
 
         // Handle pending signal requests across all execs.
         process_signal_requests(&layout);
+
+        // Re-stamp the heartbeat so readers know the host is still alive.
+        if manages_session && last_heartbeat.elapsed() >= HEALTH_HEARTBEAT_INTERVAL {
+            publish_health(&layout, true, "ready", None).ok();
+            last_heartbeat = tokio::time::Instant::now();
+        }
 
         // Wait for either shutdown or the next poll tick.
         let woke = tokio::select! {
@@ -631,12 +644,7 @@ async fn run_exec(layout: ExecLayout, host_rank: Option<u32>) -> Result<()> {
     // this loop has nothing to wait on.)
     if is_aggregator {
         for rank in 0..node_count {
-            if status
-                .nodes
-                .get(&rank)
-                .and_then(|n| n.exit_code)
-                .is_some()
-            {
+            if status.nodes.get(&rank).and_then(|n| n.exit_code).is_some() {
                 continue;
             }
             let nlayout = layout.node(rank);
