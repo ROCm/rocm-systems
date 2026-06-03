@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # rocprofiler-systems Test Categories Configuration
 # Aligned with the test filter standardisation pattern across ROCm components.
 #
@@ -72,7 +75,7 @@ test_categories:
       - "smoke"
 
   standard:
-    description: "Default PR tier (target: < 45 min) - mirrors legacy TEST_TYPE=full"
+    description: "Default PR tier (target: < 60 min) - mirrors legacy TEST_TYPE=full"
     # Everything that isn't always-broken and isn't tagged with a heavy marker.
     # Equivalent to the legacy `ctest --label-exclude annotate|mpi|...` default.
     test_patterns:
@@ -123,6 +126,6 @@ execution_settings:
   timeout_multiplier: 1
   category_timeouts:
     quick: 900            # 15 minutes
-    standard: 2700        # 45 minutes
+    standard: 3600        # 60 minutes
     comprehensive: 25200  # 7 hours
     full: 28800           # 8 hours

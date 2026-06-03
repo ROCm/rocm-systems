@@ -18,8 +18,8 @@ import sys
 import shutil
 
 try:
-    import yaml  # PyYAML; optional - tier label injection is skipped if absent
-except ImportError:  # pragma: no cover - graceful no-op
+    import yaml
+except ImportError:  # pragma: no cover
     yaml = None  # type: ignore[assignment]
 
 # Add the pytest directory to Python path for rocprofsys package
