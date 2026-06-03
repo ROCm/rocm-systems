@@ -4512,6 +4512,66 @@ amdsmi_status_t amdsmi_get_gpu_fan_speed_max(amdsmi_processor_handle processor_h
                                              uint32_t sensor_ind, uint64_t* max_speed);
 
 /**
+ *  @brief Get the min. fan speed of the device with provided processor handle. It is
+ *  not supported on virtual machine guest
+ *
+ *  @ingroup tagPhysicalStateQuery
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details Given a processor handle @p processor_handle and a pointer to a uint64_t
+ *  @p min_speed, this function will write the minimum fan speed possible to
+ *  the uint64_t pointed to by @p min_speed.
+ *  For legacy hwmon GPUs this is 0.
+ *  For GPUs with the gpu_od sysfs interface, the minimum is read from the
+ *  OD_RANGE section of the fan_minimum_pwm sysfs file (e.g. 20)
+ *
+ *  @param[in] processor_handle a processor handle
+ *
+ *  @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
+ *  If a device has more than one sensor, it could be greater than 0.
+ *
+ *  @param[out] min_speed a pointer to uint64_t to which the minimum speed
+ *  will be written
+ *  If this parameter is nullptr, this function will return
+ *  ::AMDSMI_STATUS_INVAL if the function is supported with the provided
+ *  arguments and ::AMDSMI_STATUS_NOT_SUPPORTED if it is not supported with the
+ *  provided arguments.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_gpu_fan_speed_min(amdsmi_processor_handle processor_handle,
+                                             uint32_t sensor_ind, uint64_t* min_speed);
+
+/**
+ *  @brief Check if the GPU has the gpu_od sysfs interface enabled for fan control.
+ *  It is not supported on virtual machine guest
+ *
+ *  @ingroup tagPhysicalStateQuery
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details Given a processor handle @p processor_handle, this function checks if the
+ *  GPU supports the gpu_od sysfs interface for fan control (Navi3x/4x and newer GPUs).
+ *  GPUs with gpu_od use a different fan control mechanism and typically have a fan
+ *  speed range defined in OD_RANGE (e.g., 20-100) rather than the legacy hwmon
+ *  range of 0-255.
+ *
+ *  @param[in] processor_handle a processor handle
+ *
+ *  @param[out] is_enabled a pointer to bool to which the gpu_od enablement
+ *  status will be written (true if gpu_od is available, false for legacy hwmon)
+ *  If this parameter is nullptr, this function will return
+ *  ::AMDSMI_STATUS_INVAL if the function is supported with the provided
+ *  arguments and ::AMDSMI_STATUS_NOT_SUPPORTED if it is not supported with the
+ *  provided arguments.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_is_gpu_od_enabled(amdsmi_processor_handle processor_handle,
+                                         bool* is_enabled);
+
+/**
  *  @brief Returns gpu cache info.
  *
  *  @ingroup tagPhysicalStateQuery

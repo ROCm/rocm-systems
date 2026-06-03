@@ -918,7 +918,10 @@ class SetValueCommands:
                 input_value, is_percentage = args.fan
 
                 # Check if gpu_od interface is available
-                has_gpu_od, gpu_od_path = self.helpers.detect_gpu_od(gpu_bdf)
+                try:
+                    has_gpu_od = amdsmi_interface.amdsmi_is_gpu_od_enabled(args.gpu)
+                except amdsmi_exception.AmdSmiLibraryException:
+                    has_gpu_od = False
 
                 # Helper function for consistent error formatting
                 def format_fan_error(message, include_driver_note=False):
@@ -933,44 +936,54 @@ class SetValueCommands:
                         )
                     return error_msg
 
-                # Convert based on interface type and input format
+                # Get the min and max fan speed
+                try:
+                    min_speed = amdsmi_interface.amdsmi_get_gpu_fan_speed_min(args.gpu, 0)
+                    max_speed = amdsmi_interface.amdsmi_get_gpu_fan_speed_max(args.gpu, 0)
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    result = format_fan_error(
+                        f"[{e.get_error_info(detailed=False)}] Unable to get fan speed range",
+                        include_driver_note=has_gpu_od,
+                    )
+                    self.logger.store_output(args.gpu, "fan", result)
+                    self.logger.print_output()
+                    self.logger.clear_multiple_devices_output()
+                    return
+
                 if has_gpu_od:
-                    # For gpu_od interface: read OD_RANGE dynamically using shared helper
-                    od_min, od_max = self.helpers.parse_gpu_od_fan_range(gpu_od_path)
-                    if od_min is None:
-                        # Parsing failed - cannot proceed without valid range
+                    # For gpu_od interface: use dynamic min/max range
+                    speed_range = max_speed - min_speed
+
+                    # Validate speed range
+                    if speed_range <= 0:
                         result = format_fan_error(
-                            f"Unable to read gpu_od OD_RANGE from {gpu_od_path}. Cannot set fan speed.",
-                            include_driver_note=True,
+                            f"Invalid fan speed range detected: min={min_speed}, max={max_speed}. "
+                            f"Cannot set fan speed with invalid range.",
+                            include_driver_note=True
                         )
                         self.logger.store_output(args.gpu, "fan", result)
                         self.logger.print_output()
                         self.logger.clear_multiple_devices_output()
                         return
 
-                    od_range = od_max - od_min
                     if is_percentage:
-                        # Convert percentage (0-100%) to hardware range (od_min-od_max)
-                        hw_value = od_min + int((input_value / 100) * od_range)
+                        # Convert percentage (0-100%) to hardware value (min-max)
+                        hw_value = min_speed + int((input_value / 100) * speed_range)
                         fan_percentage = input_value
                     else:
-                        # Direct hardware value
-                        if od_min <= input_value <= od_max:
-                            hw_value = input_value
-                            fan_percentage = (
-                                int(((input_value - od_min) / od_range) * 100)
-                                if od_range > 0
-                                else 0
-                            )
-                        else:
+                        # Direct hardware value - validate range and calculate percentage
+                        if not (min_speed <= input_value <= max_speed):
                             result = format_fan_error(
-                                f"Invalid fan speed value {input_value} for gpu_od interface. Valid range: {od_min}-{od_max} or use percentage (0-100%)",
-                                include_driver_note=True,
+                                f"Invalid fan speed value {input_value} for gpu_od interface. "
+                                f"Valid range: {min_speed}-{max_speed} or use percentage (0-100%)",
+                                include_driver_note=True
                             )
                             self.logger.store_output(args.gpu, "fan", result)
                             self.logger.print_output()
                             self.logger.clear_multiple_devices_output()
                             return
+                        hw_value = input_value
+                        fan_percentage = int(((input_value - min_speed) / speed_range) * 100)
                 else:
                     # For legacy hwmon: range 0-255
                     if is_percentage:
@@ -978,18 +991,15 @@ class SetValueCommands:
                         hw_value = math.ceil((input_value / 100) * 255)
                         fan_percentage = input_value
                     else:
-                        # Direct PWM value
-                        if 0 <= input_value <= 255:
-                            hw_value = input_value
-                            fan_percentage = int(
-                                (input_value / 255) * 100 // 1
-                            )  # round down (aka floor) to nearest whole number
-                        else:
+                        # Direct PWM value - validate range
+                        if not (0 <= input_value <= 255):
                             result = f"Invalid fan speed value {input_value}. Valid range: 0-255 or use percentage (0-100%)"
                             self.logger.store_output(args.gpu, "fan", result)
                             self.logger.print_output()
                             self.logger.clear_multiple_devices_output()
                             return
+                        hw_value = input_value
+                        fan_percentage = int((input_value / 255) * 100 // 1)
 
                 try:
                     amdsmi_interface.amdsmi_set_gpu_fan_speed(args.gpu, 0, hw_value)
