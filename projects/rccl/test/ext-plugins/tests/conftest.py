@@ -6,6 +6,7 @@
 
 import os
 import pytest
+import socket
 import subprocess
 import re
 from types import SimpleNamespace
@@ -46,6 +47,9 @@ os.makedirs(LOGDIR, exist_ok=True)
 PROFILER_DUMP_DIR = os.path.join(WORKDIR, "profiler_dumps")
 INSPECTOR_DUMP_DIR = os.path.join(WORKDIR, "inspector_dumps")
 
+# Host running the test driver; single-node tests pin mpirun to it via --host.
+LOCAL_HOST = os.environ.get("SLURMD_NODENAME") or socket.gethostname()
+
 # Helper Functions
 def get_avg_bus_bandwidth(log_content: str):
     """Extract average bus bandwidth from RCCL test log"""
@@ -64,18 +68,14 @@ def check_node_interface(node: str, interface: str) -> bool:
         return False
 
 def find_common_interface(nodelist):
-    """Find a common network interface across all nodes"""
-    interfaces_to_check = ["eth0", "eth1"]
+    """Return a comma-separated NCCL_SOCKET_IFNAME list of candidate interfaces"""
 
-    for interface in interfaces_to_check:
-        all_nodes_have_interface = True
-        for node in nodelist:
-            if not check_node_interface(node, interface):
-                all_nodes_have_interface = False
-                break
-        if all_nodes_have_interface:
-            return interface
-    return None
+    interfaces_to_check = ["eth0", "eth1"]
+    common = [
+        iface for iface in interfaces_to_check
+        if all(check_node_interface(node, iface) for node in nodelist)
+    ]
+    return ",".join(common) if common else ",".join(interfaces_to_check)
 
 def get_available_nodes():
     """Get available nodes from SLURM environment"""
@@ -189,6 +189,7 @@ def paths():
         LOGDIR=LOGDIR,
         PROFILER_DUMP_DIR=PROFILER_DUMP_DIR,
         INSPECTOR_DUMP_DIR=INSPECTOR_DUMP_DIR,
+        LOCAL_HOST=LOCAL_HOST,
         # Helper Functions for Ext-Tuner
         get_avg_bus_bandwidth=get_avg_bus_bandwidth,
         check_node_interface=check_node_interface,

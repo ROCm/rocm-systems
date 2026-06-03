@@ -36,6 +36,7 @@ def test_single_node(paths, inspector_helpers):
 
     args = [
         f"{paths.OMPI_INSTALL_DIR}/bin/mpirun", "-np", "8",
+        "--host", f"{paths.LOCAL_HOST}:8",
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/all_reduce_perf",
@@ -122,6 +123,7 @@ def test_single_node_verbose(paths, inspector_helpers):
 
     args = [
         f"{paths.OMPI_INSTALL_DIR}/bin/mpirun", "-np", "8",
+        "--host", f"{paths.LOCAL_HOST}:8",
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/all_reduce_perf",

@@ -37,6 +37,7 @@ def test_profiler_initialization(paths):
     
     args = [
         f"{paths.OMPI_INSTALL_DIR}/bin/mpirun", "-np", "4",
+        "--host", f"{paths.LOCAL_HOST}:4",
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/all_gather_perf",
@@ -112,6 +113,7 @@ def test_invalid_mask_value(paths):
     
     args = [
         f"{paths.OMPI_INSTALL_DIR}/bin/mpirun", "-np", "4",
+        "--host", f"{paths.LOCAL_HOST}:4",
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/all_gather_perf",
@@ -187,6 +189,7 @@ def test_single_node_detailed_profiling(paths):
     
     args = [
         f"{paths.OMPI_INSTALL_DIR}/bin/mpirun", "-np", "8",
+        "--host", f"{paths.LOCAL_HOST}:8",
         "--bind-to", "none",
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",

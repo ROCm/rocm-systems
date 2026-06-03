@@ -26,6 +26,7 @@ def test_valid_config_with_wildcards(paths):
 
     args = [
         f"{paths.OMPI_INSTALL_DIR}/bin/mpirun", "-np", "4",
+        "--host", f"{paths.LOCAL_HOST}:4",
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/all_reduce_perf",
@@ -82,6 +83,7 @@ def test_valid_config_without_wildcards(paths):
 
     args = [
         f"{paths.OMPI_INSTALL_DIR}/bin/mpirun", "-np", "4",
+        "--host", f"{paths.LOCAL_HOST}:4",
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/all_reduce_perf",
@@ -139,6 +141,7 @@ def test_no_matching_config(paths):
 
     args = [
         f"{paths.OMPI_INSTALL_DIR}/bin/mpirun", "-np", "8",
+        "--host", f"{paths.LOCAL_HOST}:8",
         "--bind-to", "none",
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
@@ -196,6 +199,7 @@ def test_incorrect_values_config(paths):
 
     args = [
         f"{paths.OMPI_INSTALL_DIR}/bin/mpirun", "-np", "4",
+        "--host", f"{paths.LOCAL_HOST}:4",
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/all_reduce_perf",
@@ -253,6 +257,7 @@ def test_unsupported_algo_proto_config(paths):
 
     args = [
         f"{paths.OMPI_INSTALL_DIR}/bin/mpirun", "-np", "4",
+        "--host", f"{paths.LOCAL_HOST}:4",
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/all_reduce_perf",
@@ -310,6 +315,7 @@ def test_singlenode_config(paths):
 
     args = [
         f"{paths.OMPI_INSTALL_DIR}/bin/mpirun", "-np", "8",
+        "--host", f"{paths.LOCAL_HOST}:8",
         "--bind-to", "none",
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
