@@ -617,6 +617,8 @@ inline void DmaBlitManager::resolveAgents(const Memory& srcMem, const Memory& ds
           Hsa::pointer_info(const_cast<address>(srcAddr), &info, nullptr, nullptr, nullptr)) {
         srcAgent = info.agentOwner;
       }
+    } else {
+        srcAgent = srcMem.isHostMemDirectAccess() ? srcMem.dev().getCpuAgent() : srcMem.dev().getBackendDevice();
     }
   }
   if (dstAgent.handle == 0) {
@@ -627,6 +629,8 @@ inline void DmaBlitManager::resolveAgents(const Memory& srcMem, const Memory& ds
       if (HSA_STATUS_SUCCESS == Hsa::pointer_info(dstAddr, &info, nullptr, nullptr, nullptr)) {
         dstAgent = info.agentOwner;
       }
+    } else {
+        dstAgent = dstMem.isHostMemDirectAccess() ? dstMem.dev().getCpuAgent() : dstMem.dev().getBackendDevice();
     }
   }
 }
