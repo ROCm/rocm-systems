@@ -91,8 +91,11 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
   // If not available, we fall back to exchanging raw pointers (requires peer access).
   // Enable peer access on all GPUs in the node.
   for (int r = 0; r < comm->nRanks; r++) {
+    if (r == comm->rank) continue;
     if (comm->rankToNode[r] != comm->rankToNode[comm->rank]) continue;
-    rocshmem::anvil::EnablePeerAccess(comm->cudaDev, comm->peerInfo[r].cudaDev);
+    int peerDev = comm->peerInfo[r].cudaDev;
+    if (comm->cudaDev == peerDev) continue;
+    rocshmem::anvil::EnablePeerAccess(comm->cudaDev, peerDev);
   }
 
   // Gather pointers across all ranks (world). For off-node ranks, entries are nullptr.

@@ -140,9 +140,7 @@ ARG DEBUG_BUILD=0
 # ARG ROCSHMEM_BRANCH=users/abouteiller/gin-stage1-wip
 ARG ROCSHMEM_BRANCH=users/dondai/gin-stage2a-anvil
 ARG ROCSHMEM_CACHE_BUST=1
-RUN if [ "${USE_LOCAL_SRC}" = "1" ]; then \
-    cp -r projects/rocshmem/ /tmp/local/projects/rocshmem/; \
-  fi
+COPY projects/rocshmem/ /tmp/local/projects/rocshmem/
 ENV ROCSHMEM_INSTALL_DIR=${WORKDIR}/rocshmem
 RUN if [ "${USE_LOCAL_SRC}" = "1" ]; then \
       [ -d /tmp/local/projects/rocshmem ] || { echo "ERROR: projects/rocshmem not in build context"; exit 1; }; \
@@ -173,21 +171,29 @@ RUN cd rocshmem/src/projects/rocshmem \
 # ARG RCCL_BRANCH=users/abouteiller/gin-stage1-wip
 ARG RCCL_BRANCH=users/dondai/gin-stage2a-anvil
 ARG RCCL_CACHE_BUST=1
-RUN if [ "${USE_LOCAL_SRC}" = "1" ]; then \
-    cp -r projects/rccl/      /tmp/local/projects/rccl/;  \
-    cp -r projects/rccl-tests/ /tmp/local/projects/rccl-tests/;  \
-  fi
+COPY projects/rccl/ /tmp/local/projects/rccl/
+# rccl-tests is optional in sparse-checkout worktrees; fetched via git in RUN when absent.
 ENV RCCL_INSTALL_PREFIX=${WORKDIR}/rccl
 ENV ONLY_FUNCS="SendRecv|AlltoAllPivot|AlltoAllGda|AlltoAllvGda"
 RUN if [ "${USE_LOCAL_SRC}" = "1" ]; then \
-      [ -d /tmp/local/projects/rccl ]       || { echo "ERROR: projects/rccl not in build context";       exit 1; }; \
-      [ -d /tmp/local/projects/rccl-tests ] || { echo "ERROR: projects/rccl-tests not in build context"; exit 1; }; \
-      find /tmp/local/projects/rccl /tmp/local/projects/rccl-tests -name CMakeCache.txt -delete && \
-      find /tmp/local/projects/rccl /tmp/local/projects/rccl-tests -name CMakeFiles -type d -exec rm -rf {} + 2>/dev/null; \
-      find /tmp/local/projects/rccl /tmp/local/projects/rccl-tests -name build -type d -exec rm -rf {} + 2>/dev/null; \
+      [ -d /tmp/local/projects/rccl ] || { echo "ERROR: projects/rccl not in build context"; exit 1; }; \
+      find /tmp/local/projects/rccl -name CMakeCache.txt -delete && \
+      find /tmp/local/projects/rccl -name CMakeFiles -type d -exec rm -rf {} + 2>/dev/null; \
+      find /tmp/local/projects/rccl -name build -type d -exec rm -rf {} + 2>/dev/null; \
       mkdir -p ${WORKDIR}/rccl/src/projects && \
-      cp -r /tmp/local/projects/rccl       ${WORKDIR}/rccl/src/projects/rccl && \
-      cp -r /tmp/local/projects/rccl-tests ${WORKDIR}/rccl/src/projects/rccl-tests; \
+      cp -r /tmp/local/projects/rccl ${WORKDIR}/rccl/src/projects/rccl && \
+      if [ -d /tmp/local/projects/rccl-tests ]; then \
+        find /tmp/local/projects/rccl-tests -name CMakeCache.txt -delete && \
+        find /tmp/local/projects/rccl-tests -name CMakeFiles -type d -exec rm -rf {} + 2>/dev/null; \
+        find /tmp/local/projects/rccl-tests -name build -type d -exec rm -rf {} + 2>/dev/null; \
+        cp -r /tmp/local/projects/rccl-tests ${WORKDIR}/rccl/src/projects/rccl-tests; \
+      else \
+        git clone --no-checkout --filter=blob:none "${ROCM_REPO}" /tmp/rccl-tests-fetch && \
+        cd /tmp/rccl-tests-fetch && \
+        git sparse-checkout set --cone projects/rccl-tests && \
+        git checkout ${RCCL_BRANCH} && \
+        cp -r projects/rccl-tests ${WORKDIR}/rccl/src/projects/rccl-tests; \
+      fi; \
     else \
       git clone --no-checkout --filter=blob:none "${ROCM_REPO}" ${WORKDIR}/rccl/src/ && \
       cd ${WORKDIR}/rccl/src && \

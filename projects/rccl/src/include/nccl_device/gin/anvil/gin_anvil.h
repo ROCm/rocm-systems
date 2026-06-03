@@ -91,7 +91,7 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ANVIL> {
 
 template <>
 struct ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ANVIL> {
-  NCCL_DEVICE_INLINE static uint64_t* call(ncclGinCtx ctx, int, ncclGinCounter_t counterId) {
+  NCCL_DEVICE_INLINE static uint64_t* call(ncclGinCtx ctx, ncclGinCounter_t counterId) {
     auto* aCtx = (ncclGinAnvilGPUContext*)ctx.handle;
     return nccl::utility::loadConst(&aCtx->counters) + counterId;
   }
@@ -107,10 +107,11 @@ struct ncclGinApi_ResetCounter<NCCL_NET_DEVICE_GIN_ANVIL> {
 
 template <>
 struct ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ANVIL> {
-  NCCL_DEVICE_INLINE static uint64_t* call(ncclGinCtx ctx, int peer, ncclGinSignal_t signalId) {
+  NCCL_DEVICE_INLINE static uint64_t* call(ncclGinCtx ctx, ncclGinSignal_t signalId) {
     auto* aCtx = (ncclGinAnvilGPUContext*)ctx.handle;
-    uint64_t* peerBase = (uint64_t*)nccl::utility::loadConst(&aCtx->signalsBase[peer]);
-    return peerBase + signalId;
+    // readSignal/waitSignal operate on this rank's signal array (remote puts increment it)
+    uint64_t* localBase = (uint64_t*)nccl::utility::loadConst(&aCtx->signalsBase[ctx.rank]);
+    return localBase + signalId;
   }
 };
 
