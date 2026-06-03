@@ -10,6 +10,7 @@ LABEL org.opencontainers.image.source=https://github.com/ROCm/hipFile
 ARG ROCKY_MAJOR_VERSION
 ARG ROCKY_VERSION
 ARG ROCM_VERSION=7.2.2
+ARG ONETBB_VERSION=2023.0.0
 
 # If the target ROCm Version on the package repository is non-standard, you can forcibly
 # set the ROCm version used in the package repo URL.
@@ -73,6 +74,26 @@ RUN dnf makecache && \
         llvm-devel \
         python3.12-devel \
         rpm-build
+
+# Build and install a fixed oneTBB release.
+RUN curl -L --fail \
+        "https://github.com/uxlfoundation/oneTBB/archive/refs/tags/v${ONETBB_VERSION}.tar.gz" \
+        -o /tmp/oneTBB-${ONETBB_VERSION}.tar.gz && \
+    tar -xzf /tmp/oneTBB-${ONETBB_VERSION}.tar.gz -C /tmp && \
+    cmake -S /tmp/oneTBB-${ONETBB_VERSION} \
+        -B /tmp/oneTBB-${ONETBB_VERSION}-build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_C_COMPILER=gcc \
+        -DCMAKE_CXX_COMPILER=g++ \
+        -DTBB_TEST=OFF \
+        -DTBB_STRICT=OFF && \
+    cmake --build /tmp/oneTBB-${ONETBB_VERSION}-build --parallel && \
+    cmake --install /tmp/oneTBB-${ONETBB_VERSION}-build && \
+    rm -rf /tmp/oneTBB-${ONETBB_VERSION} \
+        /tmp/oneTBB-${ONETBB_VERSION}-build \
+        /tmp/oneTBB-${ONETBB_VERSION}.tar.gz && \
+    echo /usr/local/lib64 > /etc/ld.so.conf.d/local.conf && \
+    ldconfig
 
 # Configure system linker for ROCm
 RUN cat <<EOF > /etc/ld.so.conf.d/rocm.conf

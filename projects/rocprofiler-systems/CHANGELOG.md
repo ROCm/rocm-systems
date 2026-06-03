@@ -51,6 +51,9 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   backward compatibility.
 - Allow presets to use `--gpus`/`--cpu`/`--ai-nics` flags without
   `--device`/`--host` flags.
+- Minimum required C++ standard raised from C++17 to C++20. timemory now builds
+  against the `rocprofiler-systems-cppstd20` branch and spdlog was bumped to
+  v1.17.0 (bundled fmt v12).
 
 ### Resolved issues
 

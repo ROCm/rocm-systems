@@ -34,4 +34,20 @@ ncclResult_t bootstrapIntraNodeAllGather(void* commState, int *ranks, int rank, 
 ncclResult_t bootstrapIntraNodeBroadcast(void* commState, int *ranks, int rank, int nranks, int root, void* bcastData, int size);
 ncclResult_t bootstrapClose(void* commState);
 ncclResult_t bootstrapAbort(void* commState);
+
+// Bootstrap bidirectional AllGather gating. Exposed for unit tests; production
+// callers go through bootstrapInit / bootstrapAllGather. Reads (and depends on
+// the process-global cache of) NCCL_BOOTSTRAP_BIDIR_ALLGATHER,
+// NCCL_BOOTSTRAP_BIDIR_NET, NCCL_BOOTSTRAP_BIDIR_THRESHOLD and
+// NCCL_OOB_NET_ENABLE — same inputs as the dispatcher, so the test can verify
+// the exact contract production uses.
+//   nranks: total ranks in the comm (returns false unconditionally for < 3).
+//   kind:   0 = socket OOB path, 1 = net (IB/OFI) OOB path.
+// Visibility is left to the global -fvisibility flag: hidden (not exported) in
+// production and Release builds, default (exported, so rccl-UnitTestsFixturesDebug
+// can link it) in BUILD_TESTS + Debug builds. See the note on the definition in
+// src/bootstrap.cc — an explicit visibility("hidden") attribute here would override
+// that flag and break the Debug test link.
+bool bootstrapBidirEnabled(int nranks, int kind);
+
 #endif
