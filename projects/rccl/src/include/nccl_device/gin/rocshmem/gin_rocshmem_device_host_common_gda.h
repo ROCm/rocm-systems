@@ -26,7 +26,6 @@ struct ncclGinRocshmemGdaGPUContext {
 };
 
 struct ncclGinRocshmemGdaMemHandle {
-  uintptr_t baseAddr;   // Virtual address of the start of the registered buffer
   uint32_t lkey;         // Local key for this MR
   uint32_t *rkeys;       // Per-peer rkeys (GPU array, nRanks entries, allgathered)
 };

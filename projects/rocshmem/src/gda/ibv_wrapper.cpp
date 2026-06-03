@@ -265,6 +265,32 @@ struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr, size_t length, 
   }
 }
 
+struct ibv_mr* IBVWrapper::reg_mr_iova0(struct ibv_pd* pd, void* addr, size_t length, int access) {
+  hipPointerAttribute_t attr;
+  CHECK_HIP(hipPointerGetAttributes(&attr, addr));
+  bool is_device_ptr = attr.type == hipMemoryTypeDevice;
+
+  if (is_dmabuf_supported() && is_device_ptr) {
+    uint64_t offset = 0;
+    int fd = -1;
+    HIPAllocator* alloc = get_default_allocator();
+    hipError_t err = alloc->GetDmabufHandle(addr, length, &fd, &offset);
+    if (err == hipSuccess) {
+      struct ibv_mr *mr = ibv.reg_dmabuf_mr(pd, offset, length, 0, fd, access);
+      if (mr) {
+        dmabuf_fd_map[(uintptr_t) mr] = fd;
+        LOG_TRACE("reg_mr_iova0: dmabuf for %p size %zd", addr, length);
+        return mr;
+      }
+      close(fd);
+    }
+    LOG_TRACE("reg_mr_iova0: dmabuf failed, trying iova2 fallback");
+  }
+
+  LOG_TRACE("reg_mr_iova0: ibv_reg_mr_iova2(%p, %zd, iova=0)", addr, length);
+  return ibv.reg_mr_iova2(pd, addr, length, 0, access);
+}
+
 int IBVWrapper::dereg_mr(struct ibv_mr *mr) {
   if (is_dmabuf_supported()) {
     int fd = dmabuf_fd_map.erase((uintptr_t) mr);
