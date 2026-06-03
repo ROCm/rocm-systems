@@ -21,11 +21,10 @@ DOCKER_IMAGE="gin-anvil:latest"
 
 # --- build
 if ${BUILD_FLAG}; then
-  # docker build -f dockerfile-gin-sdma -t gin-sdma:latest .
-  # docker build -f Dockerfile-rccl-gin-gda -t rccl-gingda --build-arg GPU_TARGETS=gfx950  .
-  docker rmi --force ${DOCKER_IMAGE}
+  # docker rmi --force ${DOCKER_IMAGE}
   N=1
-  docker build -f ${DOCKERFILE} -t ${DOCKER_IMAGE} --build-arg GPU_TARGETS=${TARGET_GPU_ARCH} --no-cache --build-arg USE_LOCAL_SRC=1 --build-arg ROCSHMEM_CACHE_BUST=$((N++)) .
+  # docker build -f ${DOCKERFILE} -t ${DOCKER_IMAGE} --build-arg GPU_TARGETS=${TARGET_GPU_ARCH} --no-cache --build-arg USE_LOCAL_SRC=1 --build-arg ROCSHMEM_CACHE_BUST=$((N++)) .
+  docker build -f ${DOCKERFILE} -t ${DOCKER_IMAGE} --build-arg GPU_TARGETS=${TARGET_GPU_ARCH} --build-arg USE_LOCAL_SRC=1 --build-arg ROCSHMEM_CACHE_BUST=$((N++)) .
 fi
 
 # --- run test
