@@ -160,9 +160,13 @@ if(BUILD_CTESTS)
     include(${ROCM_SYSTEMS_ROOT}/shared/ctest/TestCategories.cmake OPTIONAL)
     if(COMMAND apply_ctest_category_labels AND EXISTS "${_test_categories_yaml}")
         # Apply tier labels to build-time tests
-        # Note: Install-time tests don't get tier labels due to CTest limitations,
-        # but they still have functional/unit labels for basic filtering
         apply_ctest_category_labels("${_test_categories_yaml}")
+    endif()
+
+    # Apply tier labels to install-time CTest file
+    include(${CMAKE_SOURCE_DIR}/tests/ApplyInstallTierLabels.cmake)
+    if(COMMAND apply_install_tier_labels AND EXISTS "${_test_categories_yaml}")
+        apply_install_tier_labels("${INSTALL_CTEST_OUTPUT}" "${_test_categories_yaml}")
     endif()
 
     # Install the generated install-time CTest file

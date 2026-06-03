@@ -44,27 +44,7 @@ message(STATUS "MPI MCA parameters: pml=${OMPI_MCA_PML}, osc=${OMPI_MCA_OSC}")
 subdirs("tests/functional")
 subdirs("tests/unit")
 
-# Apply tier labels from installed YAML
-# CMAKE_CURRENT_LIST_DIR points to the directory containing this file (<install>/share/rocshmem)
-set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake" ${CMAKE_MODULE_PATH})
-set(_test_categories_yaml "${CMAKE_CURRENT_LIST_DIR}/test_categories.yaml")
-
-message(STATUS "DEBUG: CMAKE_CURRENT_LIST_DIR = '${CMAKE_CURRENT_LIST_DIR}'")
-message(STATUS "DEBUG: CMAKE_MODULE_PATH = '${CMAKE_MODULE_PATH}'")
-message(STATUS "DEBUG: _test_categories_yaml = '${_test_categories_yaml}'")
-message(STATUS "DEBUG: File exists check: '${EXISTS}'")
-
-include(TestCategories OPTIONAL RESULT_VARIABLE _tc_result)
-message(STATUS "DEBUG: include result = '${_tc_result}'")
-message(STATUS "DEBUG: COMMAND check = '${COMMAND}'")
-
-if(COMMAND apply_ctest_category_labels AND EXISTS "${_test_categories_yaml}")
-    message(STATUS "Applying tier labels from: ${_test_categories_yaml}")
-    apply_ctest_category_labels("${_test_categories_yaml}")
-elseif(NOT COMMAND apply_ctest_category_labels)
-    message(WARNING "TestCategories.cmake not found or apply_ctest_category_labels command not available")
-    message(WARNING "Tier labels (quick/standard/comprehensive/full) will not be available")
-elseif(NOT EXISTS "${_test_categories_yaml}")
-    message(WARNING "test_categories.yaml missing at: ${_test_categories_yaml}")
-    message(WARNING "Tier labels (quick/standard/comprehensive/full) will not be available")
-endif()
+# Note: Tier labels (quick/standard/comprehensive/full) are not available
+# from the install directory due to CTest runtime limitations.
+# Use the build directory for tier-based test filtering:
+#   cd <build> && ctest -L quick
