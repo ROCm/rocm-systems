@@ -44,6 +44,7 @@ def test_compute_tag_returns_well_formed_string():
 
 
 def test_compute_tag_is_stable_across_calls():
+    """``compute_tag()`` returns the same value for repeated calls in one process."""
     assert inject_roctx_loader.compute_tag() == inject_roctx_loader.compute_tag()
 
 
@@ -284,10 +285,11 @@ def test_install_cached_so_is_a_noop_when_src_missing(tmp_path):
 
 
 def test_jit_cache_dir_is_creatable(monkeypatch, tmp_path):
+    """``_jit_cache_dir`` creates the directory on first call and is idempotent."""
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     d = inject_roctx_loader._jit_cache_dir()
     assert d.exists() and d.is_dir()
-    inject_roctx_loader._jit_cache_dir()
+    assert inject_roctx_loader._jit_cache_dir() == d
 
 
 def test_cmake_executable_honors_env_var_then_falls_back(monkeypatch):
@@ -970,7 +972,7 @@ def test_format_load_diagnostic_trail_includes_level_per_line():
 # ---------------------------------------------------------------------------
 
 
-def test_python_fallback_path_is_silent_about_so(monkeypatch):
+def test_python_fallback_path_still_works_without_so(monkeypatch):
     """With the loader returning ``None``, the Python fallback still works."""
     try:
         import torch  # noqa: F401

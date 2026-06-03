@@ -463,7 +463,10 @@ TEST_F(RoctxRecordFnRealOpsTest, DetachedForwardBounded)
 
     EXPECT_GT(g_n_snapshots_saved.load(), 0u);
     EXPECT_EQ(g_n_callback_errors.load(), 0u);
-    EXPECT_LT(pending_snapshots(), static_cast<std::size_t>(640000));
+    // 50 forward-only iterations should stay well below a single shard's
+    // soft cap; eviction kicking in here would indicate a per-iteration leak.
+    EXPECT_LT(pending_snapshots(), SHARD_SOFT_CAP);
+    EXPECT_EQ(g_n_snapshots_dropped.load(), 0u);
 }
 
 TEST_F(RoctxRecordFnRealOpsTest, ConcurrentThreadsScopedMarkers)
