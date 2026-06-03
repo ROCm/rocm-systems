@@ -91,7 +91,7 @@ executionControl:
     # Note: intermittent Seg fault failure
     disabled: [amd_windows, amd_wsl]
     tags: [attributes, kernel]
-  Unit_hipFuncSetCacheConfig_Negative_Not_Supported:
+  Unit_hipFuncSetCacheConfig_Positive_VerifyCarveoutMapping:
     <<: *level_2
     tags: [attributes, kernel]
   Unit_hipFuncSetSharedMemConfig_Positive_Basic:

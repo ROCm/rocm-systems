@@ -3450,8 +3450,8 @@ Output: Dictionary with fields
 Field | Description
 ---|---
 `num_supported` | The number of supported frequencies
-`current` | The current frequency index
-`frequency` | List of frequencies, only the first num_supported frequencies are valid
+`current` | The index of the currently active frequency
+`frequency` | List of frequencies in Hz
 
 Exceptions that can be thrown by `amdsmi_get_clk_freq` function:
 
