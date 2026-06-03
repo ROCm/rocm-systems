@@ -335,7 +335,7 @@ public:
   /// @return HSA_STATUS_SUCCESS, or HSA_STATUS_ERROR if the kernel/driver does
   ///         not support the opt-in (callers may treat as non-fatal).
   virtual hsa_status_t SetSigbusDelay(uint32_t /*node_id*/, uint32_t /*delay_ms*/) const {
-    return HSA_STATUS_SUCCESS;
+    return HSA_STATUS_ERROR;
   }
 
   /// @brief Gets the device handle for a specific node.
