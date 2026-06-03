@@ -115,8 +115,6 @@ ROCSHMEM_BUFFER_REGISTER
 Registers a user-allocated buffer. This buffer can be used as a local
 buffer to most rocSHMEM communication calls. It is erroneous to use it for a
 remote buffer.
-Currently, this call is only implemented for IPC and RO, GDA is
-not supported.
 
 ROCSHMEM_BUFFER_UNREGISTER
 --------------------------
@@ -129,8 +127,6 @@ ROCSHMEM_BUFFER_UNREGISTER
 **Description:**
 Deregisters a previously registered buffer that was registered using
 `rocshmem_buffer_register`.
-Currently, this call is only implemented for IPC and RO, GDA is
-not supported.
 
 ROCSHMEM_BUFFER_UNREGISTER_ALL
 ------------------------------

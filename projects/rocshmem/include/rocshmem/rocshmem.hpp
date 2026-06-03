@@ -270,10 +270,11 @@ __host__ void *rocshmem_align(size_t alignment, size_t size);
  * ``count * size`` bytes, every byte set to ``0``. The pointer satisfies the
  * same default symmetric-heap alignment as ::rocshmem_malloc.
  *
- * Returns ``NULL`` (and emits a warning) when:
+ * Returns ``NULL`` when:
  *   - \p count is \c 0,
  *   - \p size is \c 0,
- *   - ``count * size`` would overflow ``size_t``, or
+ *   - ``count * size`` would overflow ``size_t`` (a warning is emitted in
+ *     this case), or
  *   - the underlying allocation cannot be satisfied.
  *
  * The collective barrier is still entered on the NULL-return paths so that
