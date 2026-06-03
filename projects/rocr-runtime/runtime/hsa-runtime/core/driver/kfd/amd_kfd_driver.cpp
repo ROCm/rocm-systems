@@ -604,8 +604,9 @@ hsa_status_t KfdDriver::ImportExternalSemaphore(uint32_t node_id, void* nt_handl
     case HSAKMT_STATUS_SUCCESS:
       break;
     case HSAKMT_STATUS_INVALID_PARAMETER:  // e.g. null nt_handle
-    case HSAKMT_STATUS_NOT_SUPPORTED:      // unsupported handle type (incl. Linux stub)
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSAKMT_STATUS_NOT_SUPPORTED:      // missing thunk / unsupported type / Linux stub
+      return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
     case HSAKMT_STATUS_INVALID_NODE_UNIT:  // no WDDM device for node
       return HSA_STATUS_ERROR_INVALID_AGENT;
     default:

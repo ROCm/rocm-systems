@@ -3245,8 +3245,10 @@ typedef struct {
  * @retval HSA_STATUS_SUCCESS Imported.
  * @retval HSA_STATUS_ERROR_INVALID_AGENT Agent is not a GPU, or its
  *   KMD node has no associated WDDM device.
- * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT desc/out_sem null,
- *   the OS handle is null, or the handle type is unsupported.
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT desc/out_sem null, or the
+ *   OS handle is null.
+ * @retval HSA_STATUS_ERROR_NOT_SUPPORTED The handle type is unsupported,
+ *   or libhsakmt lacks the import/destroy thunks (incl. Linux/KFD stub).
  * @retval HSA_STATUS_ERROR Underlying KMD import failed.
  */
 hsa_status_t HSA_API hsa_amd_external_semaphore_handle_open(
@@ -3267,7 +3269,7 @@ hsa_status_t HSA_API hsa_amd_external_semaphore_handle_close(
  * @brief Submits a GPU-side signal of an imported external semaphore
  * onto @p queue, queued behind prior packets on the AQL ring. Windows
  * routes to D3DKMTSignalSynchronizationObjectFromGpu via libhsakmt;
- * Linux / KFD is currently a stub (HSA_STATUS_ERROR).
+ * Linux / KFD is currently a stub (HSA_STATUS_ERROR_NOT_SUPPORTED).
  *
  * @param queue Must be an AMD GPU AQL queue. A null, non-GPU, or
  *   non-AQL queue returns HSA_STATUS_ERROR_INVALID_QUEUE; a valid AQL
@@ -3280,6 +3282,8 @@ hsa_status_t HSA_API hsa_amd_external_semaphore_handle_close(
  * @retval HSA_STATUS_ERROR_INVALID_QUEUE    Null/invalid/non-GPU queue.
  * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT sem.handle is malformed.
  * @retval HSA_STATUS_ERROR_INVALID_AGENT    Queue's node has no WDDM device.
+ * @retval HSA_STATUS_ERROR_NOT_SUPPORTED    libhsakmt lacks the thunk
+ *   (incl. Linux/KFD stub).
  * @retval HSA_STATUS_ERROR                  KMD signal ioctl failed.
  */
 hsa_status_t HSA_API hsa_amd_queue_signal_external_semaphore(
@@ -3299,8 +3303,7 @@ hsa_status_t HSA_API hsa_amd_queue_signal_external_semaphore(
  * Wired to KMD via libhsakmt's hsaKmtQueueWaitExternalSemaphore,
  * which on Windows resolves to D3DKMTWaitForSynchronizationObjectFromGpu
  * against the queue's WDDM context. Linux / KFD route is currently a
- * stub returning HSA_STATUS_ERROR (NOT_SUPPORTED at the libhsakmt
- * layer).
+ * stub returning HSA_STATUS_ERROR_NOT_SUPPORTED.
  *
  * @param queue Must be an AMD GPU AQL queue. Null, HostQueue, and AIE
  *   queues return HSA_STATUS_ERROR_INVALID_QUEUE; a valid AQL queue
@@ -3317,6 +3320,8 @@ hsa_status_t HSA_API hsa_amd_queue_signal_external_semaphore(
  * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT sem.handle is malformed.
  * @retval HSA_STATUS_ERROR_INVALID_AGENT    The queue's KMD node has
  *   no associated WDDM device.
+ * @retval HSA_STATUS_ERROR_NOT_SUPPORTED    libhsakmt lacks the thunk
+ *   (incl. Linux/KFD stub).
  * @retval HSA_STATUS_ERROR                  Underlying KMD wait
  *   ioctl failed.
  */
