@@ -225,6 +225,7 @@ fn kmd_lib_search() -> mirage_core::discovery::LibSearch<'static> {
     mirage_core::discovery::LibSearch {
         file_env: &["ROCJITSU_KMD_LIB"],
         dir_env: &["ROCJITSU_LIB_DIR", "ROCJITSU_ROOT"],
+        home_env: &[],
         lib_name: KMD_LIB_NAME,
         // rocjitsu's in-tree KMD build output, relative to the mirage
         // binary, so a monorepo `cargo build` finds a fresh build

@@ -9,7 +9,8 @@
 //! An explicit override always wins first: any env var in
 //! [`LibSearch::file_env`] holding an absolute path to the `.so`, then
 //! any env var in [`LibSearch::dir_env`] holding a directory that
-//! contains it.
+//! contains it, then any env var in [`LibSearch::home_env`] holding an
+//! install root (with the library under `<root>/lib`).
 //!
 //! Absent an override, directories are searched in this order (first
 //! match wins), as implemented by [`LibSearch::search_dirs`]:
@@ -42,6 +43,10 @@ pub struct LibSearch<'a> {
     pub file_env: &'a [&'a str],
     /// Env vars whose value is a directory containing the `.so`.
     pub dir_env: &'a [&'a str],
+    /// Env vars whose value is an install *root*, with the library
+    /// expected under `<root>/lib` (e.g. `$HOTSWAP_HOME`). Checked
+    /// after [`Self::dir_env`] and before the fixed directory search.
+    pub home_env: &'a [&'a str],
     /// The library file name, e.g. `"libemulator.so"`.
     pub lib_name: &'a str,
     /// Backend-specific directories to probe relative to the `mirage`
@@ -64,6 +69,11 @@ impl LibSearch<'_> {
         for key in self.dir_env {
             if let Some(p) = non_empty_var(key) {
                 out.push(PathBuf::from(p).join(self.lib_name));
+            }
+        }
+        for key in self.home_env {
+            if let Some(p) = non_empty_var(key) {
+                out.push(PathBuf::from(p).join("lib").join(self.lib_name));
             }
         }
         for dir in self.search_dirs() {
@@ -139,6 +149,15 @@ pub fn find_emulator_lib(search: &LibSearch) -> Option<PathBuf> {
             }
         }
     }
+    // Explicit install-root overrides (`<root>/lib/<lib>`).
+    for key in search.home_env {
+        if let Some(p) = non_empty_var(key) {
+            let candidate = PathBuf::from(p).join("lib").join(search.lib_name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
     // The fixed 5-step directory search.
     for dir in search.search_dirs() {
         let candidate = dir.join(search.lib_name);
@@ -201,6 +220,7 @@ mod tests {
         LibSearch {
             file_env: &["TEST_EMULATOR_LIB"],
             dir_env: &["TEST_EMULATOR_LIB_DIR"],
+            home_env: &[],
             lib_name: "libtest-emulator.so",
             binary_relative_dirs: &[],
         }
@@ -251,6 +271,7 @@ mod tests {
         let s = LibSearch {
             file_env: &["TEST_EMULATOR_LIB"],
             dir_env: &["TEST_EMULATOR_LIB_DIR"],
+            home_env: &[],
             lib_name: "definitely-not-a-real-lib-xyz.so",
             binary_relative_dirs: &[],
         };

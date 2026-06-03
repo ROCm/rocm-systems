@@ -29,8 +29,8 @@ tree:
 
 mirage wires these into a workload through the **HotSwap env contract**: the
 patched ROCR + COMGR shadow the system copies via `LD_LIBRARY_PATH`, the HIP
-intercept is `LD_PRELOAD`ed, and a few `HOTSWAP_*` variables select the source
-target and adapter policy.
+intercept is `LD_PRELOAD`ed, and the `HSA_HOTSWAP_*` variables select the source
+target and adapter policy (mirroring the reference `env_contract.py`).
 
 ## Status
 
@@ -49,11 +49,18 @@ mirage profile create rdna --emulator hotswap
 mirage run --profile rdna -- ./my-rocm-app --flag
 ```
 
-mirage discovers the install, sets `HOTSWAP_ENABLE`, `HOTSWAP_LIB_DIR`,
-`HOTSWAP_SOURCE_TARGET` (default `gfx1250:32`), `HOTSWAP_ADAPTER_POLICY`
-(default `compile`) and `HOTSWAP_PY_DIR`, points `LD_LIBRARY_PATH` at the lib
-dir, and `LD_PRELOAD`s the intercept. Any of these can be overridden from the
-exec environment.
+mirage discovers the install and builds the HotSwap env contract (mirroring the
+reference `env_contract.py`): it `LD_PRELOAD`s the patched ROCR + intercept,
+points `LD_LIBRARY_PATH` at the lib dir, sets `HOTSWAP_HOME` to the install root,
+puts the python `sitecustomize` on `PYTHONPATH`, and sets the `HSA_HOTSWAP_*`
+variables — `HSA_HOTSWAP_SOURCE_TARGET`
+(default `gfx1250:32`), `HSA_HOTSWAP_ISA_OVERRIDE` (the physical GPU detected on
+this host), `HSA_HOTSWAP_BACKEND_ADAPTER_POLICY` (default `compile`),
+`HSA_HOTSWAP_IR_RAISER`, `HSA_HOTSWAP_STRICT`, the `HSA_HOTSWAP_CACHE_DIR` /
+framework cache redirects, and the policy-driven source-arch overrides
+(`PYTORCH_ROCM_ARCH`, `TRITON_OVERRIDE_ARCH`, …). `HSA_HOTSWAP_SOURCE_TARGET` and
+`HSA_HOTSWAP_BACKEND_ADAPTER_POLICY` can be overridden from the exec
+environment.
 
 If mirage can't find a HotSwap install, `mirage profile create --emulator
 hotswap` fails with guidance describing exactly which locations were searched
@@ -69,10 +76,14 @@ it is the HotSwap lib dir. mirage searches in the following locations, in order
 1. `$HOTSWAP_LIB` / `$HSA_TOOLS_LIB` — an explicit path straight to the
    intercept `.so`.
 2. `$HOTSWAP_LIB_DIR` — the HotSwap lib dir directly.
-3. Any directory on `$LD_LIBRARY_PATH`.
-4. `$ROCM_HOME` / `$ROCM_PATH` — the ROCm install root (`<root>/lib`).
-5. `../lib` relative to the `mirage` binary.
-6. Standard system / ROCm library directories: `/opt/rocm/lib`,
+3. `$HOTSWAP_HOME` — the HotSwap install root (`<root>/lib`).
+4. Any directory on `$LD_LIBRARY_PATH`.
+5. `../../build/hotswap/lib` relative to the `mirage` binary — where the
+   `MIRAGE_BUILD_HOTSWAP` source build stages, so a monorepo build is found
+   automatically.
+6. `$ROCM_HOME` / `$ROCM_PATH` — the ROCm install root (`<root>/lib`).
+7. `../lib` relative to the `mirage` binary.
+8. Standard system / ROCm library directories: `/opt/rocm/lib`,
    `/usr/local/lib`, `/usr/lib`, `/usr/lib/x86_64-linux-gnu`.
 
 The `llvm-tools/` and `runtime/hotswap_py/` directories are resolved relative to
@@ -101,8 +112,9 @@ cmake --build build --target hotswap
 ```
 
 This mirrors the reference Docker recipe and produces three artifact sets,
-staged under `target/` (the lib lands in `target/lib`, which discovery searches
-automatically):
+staged under `build/hotswap/` (`lib/`, `llvm-tools/`, `runtime/hotswap_py/`).
+mirage discovers this tree automatically (it probes `../../build/hotswap/lib`
+relative to the binary); no extra configuration is needed for an in-tree build.
 
 1. **COMGR transpiler** (`libamd_comgr.so`) + the LLVM tools, from the
    `llvm-project` HotSwap fork. The in-tree
@@ -118,7 +130,7 @@ for the full list):
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
-| `MIRAGE_HOTSWAP_STAGE` | Where artifacts are staged | `target` |
+| `MIRAGE_HOTSWAP_STAGE` | Where artifacts are staged | `build/hotswap` |
 | `MIRAGE_HOTSWAP_LLVM_SRC` | Existing llvm-project (HotSwap fork) checkout | `llvm-project-hotswap` |
 | `MIRAGE_HOTSWAP_ROCR_REPO` / `_REF` | ROCR fork URL / ref | `martin-luecke/rocm-systems` @ `users/mluecke/hotswap-compatibility` |
 | `MIRAGE_HOTSWAP_TESTING_REPO` / `_REF` | intercept repo URL / ref | `harsh-amd/rocm-hotswap-testing` @ `mluecke/hotswap-env-contract` |

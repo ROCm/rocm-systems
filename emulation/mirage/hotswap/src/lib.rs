@@ -19,9 +19,10 @@
 //! CMake flag does an opt-in source build). This crate *discovers* an
 //! installed HotSwap tree — anchored on `libhotswap_intercept.so` via
 //! the shared [`mirage_core::discovery`] search policy — and wires it
-//! into a workload through the HotSwap env contract (`HOTSWAP_*` vars +
-//! the preloaded intercept). See [`../README.md`](../README.md).
+//! into a workload through the HotSwap env contract (`HSA_HOTSWAP_*`
+//! vars + the preloaded intercept). See [`../README.md`](../README.md).
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use mirage_core::config::OptionDef;
@@ -53,11 +54,16 @@ pub const DISPLAY_NAME: &str = "HotSwap";
 
 /// Default source GPU target the workload was built for, in the
 /// `gfx<arch>:<wave>` form the HotSwap env contract expects. Injected
-/// as `HOTSWAP_SOURCE_TARGET`; overridable from the exec environment.
+/// as `HSA_HOTSWAP_SOURCE_TARGET`; overridable from the exec environment.
 pub const DEFAULT_SOURCE_TARGET: &str = "gfx1250:32";
 
-/// Default HotSwap adapter policy (`HOTSWAP_ADAPTER_POLICY`).
+/// Default HotSwap adapter policy (`HSA_HOTSWAP_BACKEND_ADAPTER_POLICY`).
 pub const DEFAULT_ADAPTER_POLICY: &str = "compile";
+
+/// The recognised HotSwap adapter policies, mirroring env_contract.py's
+/// `ADAPTER_POLICIES`. Each maps to a set of backend adapters via
+/// [`adapter_backends_for_policy`].
+pub const ADAPTER_POLICIES: &[&str] = &["none", "env", "native_build", "triton", "compile", "full"];
 
 /// The physical GPU architectures HotSwap can retarget code *onto*,
 /// as KFD `gfx_target_version` values paired with their conventional
@@ -70,7 +76,7 @@ pub const SUPPORTED_GPUS: &[(u32, &str)] = &[(90402, "gfx942"), (90500, "gfx950"
 /// HotSwap [`Emulator`] implementation. HotSwap is wired into a
 /// workload via the env contract: the patched ROCR + COMGR shadow the
 /// system copies (`LD_LIBRARY_PATH`), the HIP intercept is `LD_PRELOAD`ed,
-/// and the `HOTSWAP_*` variables select the source target and policy.
+/// and the `HSA_HOTSWAP_*` variables select the source target and policy.
 pub struct Hotswap {
     profile: ProfileDef,
 }
@@ -143,35 +149,180 @@ impl Emulator for Hotswap {
                 install_guidance()
             ))
         })?;
-        let intercept = dir.join(LIB_NAME);
 
-        let mut env = std::collections::BTreeMap::new();
-        env.insert("HOTSWAP_ENABLE".to_string(), "1".to_string());
-        env.insert("HOTSWAP_LIB_DIR".to_string(), dir.display().to_string());
-        // The patched ROCR + COMGR shadow the system copies via the
-        // loader search path. The host launcher inherits a minimal env
-        // (no LD_LIBRARY_PATH), so set it explicitly to the HotSwap lib
-        // dir; an exec-level override still wins (applied afterwards).
-        env.insert("LD_LIBRARY_PATH".to_string(), dir.display().to_string());
-        env.insert(
-            "HOTSWAP_SOURCE_TARGET".to_string(),
-            DEFAULT_SOURCE_TARGET.to_string(),
-        );
-        env.insert(
-            "HOTSWAP_ADAPTER_POLICY".to_string(),
-            DEFAULT_ADAPTER_POLICY.to_string(),
-        );
-        if let Some(py) = py_dir() {
-            env.insert("HOTSWAP_PY_DIR".to_string(), py.display().to_string());
-        }
+        let (ld_preload, env) = build_hotswap_env(&dir);
 
         Ok(InjectionDef {
             wrapper: None,
-            ld_preload: Some(intercept.display().to_string()),
+            ld_preload: Some(ld_preload),
             files: Default::default(),
             env,
         })
     }
+}
+
+/// The backend adapters a policy enables, mirroring env_contract.py's
+/// `_ADAPTERS_BY_POLICY`. Any unrecognised value falls back to the
+/// default `compile` set.
+fn adapter_backends_for_policy(policy: &str) -> &'static [&'static str] {
+    match policy {
+        "none" => &[],
+        "env" => &["extension_jit"],
+        "native_build" => &["extension_jit", "native_build"],
+        "triton" => &["extension_jit", "triton"],
+        "full" => &["extension_jit", "native_build", "triton", "inductor"],
+        // "compile" (the default) and any unknown value.
+        _ => &["extension_jit", "triton", "inductor"],
+    }
+}
+
+/// The `gfx` arch portion of a `gfx<arch>:<wave>` source-target spec
+/// (env_contract.py's `parse_target_spec(...)[0]`). `gfx1250:32` →
+/// `gfx1250`.
+fn source_arch_of(source_target: &str) -> &str {
+    source_target.split(':').next().unwrap_or(source_target)
+}
+
+/// The physical GPU HotSwap retargets code *onto*: the first present
+/// [`SUPPORTED_GPUS`] entry, else the first supported arch as a
+/// fallback. Drives `HSA_HOTSWAP_ISA_OVERRIDE`.
+fn physical_target_gfx() -> String {
+    let present = mirage_core::hardware::gpu_gfx_versions();
+    SUPPORTED_GPUS
+        .iter()
+        .find(|(version, _)| present.contains(version))
+        .or_else(|| SUPPORTED_GPUS.first())
+        .map(|(_, name)| (*name).to_string())
+        .unwrap_or_default()
+}
+
+/// Scratch root for HotSwap's translation/framework caches, under the
+/// mirage cache dir. Mirrors env_contract.py's `branch_root`.
+fn hotswap_branch_root() -> PathBuf {
+    mirage_core::paths::mirage_cache_dir().join("hotswap")
+}
+
+/// Cache subdirectories created under [`hotswap_branch_root`].
+const HOTSWAP_CACHE_SUBDIRS: &[&str] = &[
+    "hotswap_translation_cache",
+    "triton_cache",
+    "torchinductor_cache",
+    "torch_extensions",
+    "pytorch_kernel_cache",
+    "miopen_user_db",
+    "miopen_cache",
+];
+
+/// Build the HotSwap env contract for a workload, mirroring
+/// env_contract.py's `build_hotswap_env`: the `HSA_HOTSWAP_*` variables,
+/// the per-framework cache redirects, the python `sitecustomize` on
+/// `PYTHONPATH`, and the source-arch overrides selected by the adapter
+/// policy. Returns the `LD_PRELOAD` value (patched ROCR + intercept)
+/// separately so the host can merge it with any user-supplied preload.
+fn build_hotswap_env(dir: &Path) -> (String, BTreeMap<String, String>) {
+    let source_target = std::env::var("HSA_HOTSWAP_SOURCE_TARGET")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| DEFAULT_SOURCE_TARGET.to_string());
+    let policy = std::env::var("HSA_HOTSWAP_BACKEND_ADAPTER_POLICY")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| DEFAULT_ADAPTER_POLICY.to_string());
+    let backends = adapter_backends_for_policy(&policy);
+    let source_arch = source_arch_of(&source_target).to_string();
+    let target_gfx = physical_target_gfx();
+
+    // env_contract.py preloads the patched ROCR first, then the intercept.
+    let libhsa = dir.join(ROCR_LIB);
+    let intercept = dir.join(LIB_NAME);
+    let ld_preload = format!("{}:{}", libhsa.display(), intercept.display());
+
+    let root = hotswap_branch_root();
+    let _ = ensure_cache_dirs(&root);
+    let cache = |name: &str| root.join(name).display().to_string();
+
+    let mut env: BTreeMap<String, String> = BTreeMap::new();
+    env.insert(
+        "HSA_HOTSWAP_CACHE_DIR".into(),
+        cache("hotswap_translation_cache"),
+    );
+    env.insert("HSA_HOTSWAP_CACHE_DEBUG".into(), "1".into());
+    env.insert("HSA_HOTSWAP_ISA_OVERRIDE".into(), target_gfx);
+    env.insert("HSA_HOTSWAP_IR_RAISER".into(), "1".into());
+    env.insert("HSA_HOTSWAP_STRICT".into(), "1".into());
+    env.insert("HSA_HOTSWAP_SOURCE_TARGET".into(), source_target.clone());
+    env.insert("HSA_HOTSWAP_BACKEND_ADAPTER_POLICY".into(), policy.clone());
+    env.insert("HSA_HOTSWAP_BACKEND_ADAPTERS".into(), backends.join(","));
+
+    // Force-compile framework caches so a swapped target never reuses a
+    // host-targeted artifact.
+    env.insert("TRITON_ALWAYS_COMPILE".into(), "1".into());
+    env.insert("TRITON_CACHE_DIR".into(), cache("triton_cache"));
+    env.insert(
+        "TORCHINDUCTOR_CACHE_DIR".into(),
+        cache("torchinductor_cache"),
+    );
+    env.insert("TORCH_EXTENSIONS_DIR".into(), cache("torch_extensions"));
+    env.insert(
+        "PYTORCH_KERNEL_CACHE_PATH".into(),
+        cache("pytorch_kernel_cache"),
+    );
+    env.insert("MIOPEN_USER_DB_PATH".into(), cache("miopen_user_db"));
+    env.insert("MIOPEN_CUSTOM_CACHE_DIR".into(), cache("miopen_cache"));
+
+    // The patched ROCR + COMGR shadow the system copies via the loader
+    // search path. The host launcher inherits a minimal env (no
+    // LD_LIBRARY_PATH), so set it explicitly to the HotSwap lib dir; an
+    // exec-level override still wins (applied afterwards).
+    env.insert("LD_LIBRARY_PATH".into(), dir.display().to_string());
+    // Expose the install root so the workload/runtime can resolve the
+    // sibling `llvm-tools/` and `runtime/hotswap_py/` trees.
+    if let Some(home) = dir.parent() {
+        env.insert("HOTSWAP_HOME".into(), home.display().to_string());
+    }
+    if let Some(py) = py_dir() {
+        // `sitecustomize.py` lives at the root of the python runtime, so
+        // putting it on PYTHONPATH auto-activates the adapter layer.
+        env.insert("PYTHONPATH".into(), py.display().to_string());
+    }
+
+    // Steer the frameworks' own arch selection at the source arch so they
+    // emit code HotSwap can raise and re-target.
+    if policy != "none" {
+        for key in [
+            "PYTORCH_ROCM_ARCH",
+            "PYTORCH_ROCM_ARCH_OVERRIDE",
+            "GPU_ARCHS",
+            "AITER_GPU_ARCHS",
+            "TRITON_OVERRIDE_ARCH",
+        ] {
+            env.insert(key.into(), source_arch.clone());
+        }
+    }
+    if backends.contains(&"native_build") {
+        for key in [
+            "HIP_ARCHITECTURES",
+            "CMAKE_HIP_ARCHITECTURES",
+            "AMDGPU_TARGETS",
+            "HCC_AMDGPU_TARGET",
+            "ROCM_TARGETS",
+        ] {
+            env.insert(key.into(), source_arch.clone());
+        }
+    }
+    if backends.contains(&"triton") {
+        env.insert("TRITON_CORPUS_FORCE_TARGET".into(), source_target);
+    }
+
+    (ld_preload, env)
+}
+
+/// Best-effort creation of the HotSwap cache subdirectories.
+fn ensure_cache_dirs(root: &Path) -> std::io::Result<()> {
+    for name in HOTSWAP_CACHE_SUBDIRS {
+        std::fs::create_dir_all(root.join(name))?;
+    }
+    Ok(())
 }
 
 /// Describe the hotswap emulator backend for the registry. Owned by
@@ -234,8 +385,16 @@ pub fn lib_search() -> LibSearch<'static> {
         file_env: &["HOTSWAP_LIB", "HSA_TOOLS_LIB"],
         // The HotSwap lib dir; also the `HOTSWAP_LIB_DIR` env contract var.
         dir_env: &["HOTSWAP_LIB_DIR"],
+        // The HotSwap install root: `$HOTSWAP_HOME/lib` holds the libs.
+        // This is what the `MIRAGE_BUILD_HOTSWAP` source build stages to
+        // (under `build/hotswap`), and the var mirage injects.
+        home_env: &["HOTSWAP_HOME"],
         lib_name: LIB_NAME,
-        binary_relative_dirs: &[],
+        // The in-tree `MIRAGE_BUILD_HOTSWAP` source build stages to
+        // `build/hotswap/lib`. Relative to the mirage binary at
+        // `target/<profile>/mirage`, that is `../../build/hotswap/lib`,
+        // so a monorepo build finds it without extra configuration.
+        binary_relative_dirs: &["../../build/hotswap/lib"],
     }
 }
 
@@ -304,6 +463,27 @@ mod tests {
     #[test]
     fn guidance_mentions_the_library() {
         assert!(install_guidance().contains("libhotswap_intercept.so"));
+    }
+
+    #[test]
+    fn source_arch_strips_the_wave_suffix() {
+        assert_eq!(source_arch_of("gfx1250:32"), "gfx1250");
+        assert_eq!(source_arch_of("gfx942"), "gfx942");
+    }
+
+    #[test]
+    fn adapter_policies_map_to_backends() {
+        assert!(adapter_backends_for_policy("none").is_empty());
+        assert_eq!(adapter_backends_for_policy("env"), &["extension_jit"]);
+        // The default and any unknown value resolve to the `compile` set.
+        let compile = ["extension_jit", "triton", "inductor"];
+        assert_eq!(
+            adapter_backends_for_policy(DEFAULT_ADAPTER_POLICY),
+            &compile
+        );
+        assert_eq!(adapter_backends_for_policy("bogus"), &compile);
+        // Every named policy is recognised (no fallthrough surprises).
+        assert!(ADAPTER_POLICIES.contains(&DEFAULT_ADAPTER_POLICY));
     }
 
     #[test]
