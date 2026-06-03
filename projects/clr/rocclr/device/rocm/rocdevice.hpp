@@ -496,6 +496,10 @@ class Device : public NullDevice {
   virtual bool CreateUserEvent(amd::UserEvent* event) const override;
   virtual void SetUserEvent(amd::UserEvent* event) const override;
 
+  virtual bool importExtSemaphore(void** extSemaphore, const amd::Os::FileDesc& handle,
+                                  amd::ExternalSemaphoreHandleType sem_handle_type) override;
+  virtual void DestroyExtSemaphore(void* extSemaphore) override;
+
   //! Allocate host memory in terms of numa policy set by user
   void* hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg) const;
 

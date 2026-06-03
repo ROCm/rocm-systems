@@ -102,6 +102,10 @@ ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_rx_ucast_bytes, ROCPROFSYS_CATE
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_rx_ucast_pkts, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_RX_UCAST_PKTS, "nic_rx_ucast_pkts", "AI NIC RX UCAST PKTS")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_tx_ucast_bytes, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_TX_UCAST_BYTES, "nic_tx_ucast_bytes", "AI NIC TX UCAST BYTES")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_tx_ucast_pkts, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_TX_UCAST_PKTS, "nic_tx_ucast_pkts", "AI NIC TX UCAST PKTS")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_tx_rdma_ack_timeout, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_TX_ACK_TIMEOUT, "nic_tx_rdma_ack_timeout", "AI NIC TX ACK TIMEOUT")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_resp_tx_pkt_seq_err, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_RESP_TX_PKT_SEQ_ERR, "nic_resp_tx_pkt_seq_err", "AI NIC RESP TX PKT SEQ ERROR")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_req_rx_pkt_seq_err, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_REQ_RX_PKT_SEQ_ERR, "nic_req_rx_pkt_seq_err", "AI NIC REQ RX PKT SEQ ERROR")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_req_rx_impl_nak_seq_err, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_REQ_RX_IMPL_NAK_SEQ_ERR, "nic_req_rx_impl_nak_seq_err", "AI NIC REQ RX IMPL NAK SEQ ERROR")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_gfx_busy, ROCPROFSYS_CATEGORY_AMD_SMI_BUSY_GFX, "device_busy_gfx", "Busy percentage of GFX engine on a GPU device")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_umc_busy, ROCPROFSYS_CATEGORY_AMD_SMI_BUSY_UMC, "device_busy_umc", "Busy percentage of UMC engin on a GPU device")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_mm_busy, ROCPROFSYS_CATEGORY_AMD_SMI_BUSY_MM, "device_busy_mm", "Busy percentage of MM engine on a GPU device")
@@ -201,6 +205,10 @@ using name = perfetto_category<Tp...>;
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_tx_ucast_bytes),              \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_rx_ucast_pkts),               \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_tx_ucast_pkts),               \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_tx_rdma_ack_timeout),         \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_resp_tx_pkt_seq_err),         \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_req_rx_pkt_seq_err),          \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_req_rx_impl_nak_seq_err),     \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_gfx_busy),                        \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_umc_busy),                        \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_mm_busy),                         \
