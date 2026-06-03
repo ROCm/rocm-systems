@@ -129,6 +129,7 @@ set(SRC_FILES
   include/gin/gin_host.h
   include/gin/gin_host_proxy.h
   include/gin/gin_host_rocshmem.h
+  include/gin/gin_host_anvil.h
   include/hip_rocm_version_info.h
   include/ibvcore.h
   include/ibvsymbols.h
