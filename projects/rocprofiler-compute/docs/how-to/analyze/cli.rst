@@ -537,7 +537,7 @@ Interactive Roofline HTML:
    * Zoom, pan, reset scale
 * Zooming in a specific area of the plot can also be done with click-and-drag box selection with your mouse to isolate the area you would like to see closer. Resetting the view can be done through the hover menu in the top righthand corner of the page (described in above bulletpoint)
 
-Below is an example of HTML plot interactivity, with L2 kenrel points, L2-FP32 empirical bandwidth, and Peak VALU-FP32 empirical roofline toggled on:
+Below is an example of HTML plot interactivity, with L2 kernel points, L2-FP32 empirical bandwidth, and Peak VALU-FP32 empirical roofline toggled on:
 
 .. image:: ../../data/analyze/cli/roofline_html_interact.png
    :align: center
