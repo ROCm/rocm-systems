@@ -132,6 +132,11 @@ lite::DirectQueueOptions MacDirectQueueOptions() {
   options.trace_verbose = TraceDirectQueueVerbose();
   options.dequeue_settle_us = DirectQueueDequeueSettleUs();
   options.trace_prefix = "ROCR macOS direct queue";
+  // M2: route compute dispatch through MES (lite:: MapLegacyQueueWithMes) instead
+  // of the hand-rolled direct HQD. Env-gated, default off (direct HQD remains the
+  // proven fallback). When on, MES owns HQD activation -> clears the ~13-submit
+  // multi-dispatch ceiling.
+  options.use_mes_queue = std::getenv("ROCR_MACOS_USE_MES_QUEUE") != nullptr;
   return options;
 }
 

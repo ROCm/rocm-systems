@@ -711,7 +711,19 @@ hsa_status_t SubmitRingPm4(const DirectQueuePlatform& platform,
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
   const uint64_t ring_dw = ring.ring_size_bytes / sizeof(uint32_t);
-  const uint64_t start = ring.wptr % ring_dw;
+  // A PM4 packet must not straddle the ring-end boundary: the CP reads each
+  // packet as a contiguous run, so if this packet would wrap past the end,
+  // NOP-fill the tail and place the packet at offset 0. Without this the first
+  // ring wrap (~ring_size/packet_size submits) writes a split packet and the CP
+  // faults (HSA 0x1000) — which capped sustained dispatch at ~13 on the 4 KiB
+  // ring (the macOS multi-op limit).
+  uint64_t start = ring.wptr % ring_dw;
+  if (start + dword_count > ring_dw) {
+    const uint64_t tail = ring_dw - start;
+    for (uint64_t i = 0; i < tail; ++i) ring.ring_cpu[start + i] = ring.ring_nop;
+    ring.wptr += tail;  // advance past the NOP tail so wptr % ring_dw == 0
+    start = 0;
+  }
   for (size_t i = 0; i < dword_count; ++i) {
     ring.ring_cpu[(start + i) % ring_dw] = pm4[i];
   }
