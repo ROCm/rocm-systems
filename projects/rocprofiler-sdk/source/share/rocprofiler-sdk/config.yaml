@@ -3134,21 +3134,6 @@ rocprofiler-sdk:
             - gfx1250
           block: SQ
           event: 642
-    - name: SQC_ICACHE_MISSES
-      description: Number of cache misses, includes uncached requests. {per-Bank, nondeterministic, 
-        C2}
-      properties: []
-      definitions:
-        - architectures:
-            - gfx12
-            - gfx1200
-            - gfx1201
-          block: SQ
-          event: 303
-        - architectures:
-            - gfx1250
-          block: SQ
-          event: 643
     - name: SQC_ICACHE_INPUT_VALID_READYB
       description: ' Input stalled by SQC (per-SQ, nondeterministic, unwindowed)'
       properties: []
@@ -3174,6 +3159,16 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 272
+        - architectures:
+            - gfx12
+            - gfx1200
+            - gfx1201
+          block: SQ
+          event: 303
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 643
     - name: SQC_ICACHE_MISSES_DUPLICATE
       description: Number of misses that were duplicates (access to a non-resident, miss pending 
         CL). (per-SQ, per-Bank, nondeterministic)
