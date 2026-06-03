@@ -298,10 +298,15 @@ fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Res
         return Ok(());
     };
 
-    publish_health(layout, true, "pulling", Some(format!("pulling image {}", def.image)))?;
+    publish_health(
+        layout,
+        true,
+        "pulling",
+        Some(format!("pulling image {}", def.image)),
+    )?;
 
-    let engine = mirage_container::Engine::resolve(&def)
-        .map_err(|e| MirageError::other(format!("{e}")))?;
+    let engine =
+        mirage_container::Engine::resolve(&def).map_err(|e| MirageError::other(format!("{e}")))?;
     let node_count = resolve_node_count(&profile)?;
     let head_port = pick_head_port();
     let head_addr = container_name(session, 0);
@@ -388,8 +393,7 @@ async fn run_exec(layout: ExecLayout) -> Result<()> {
     //   profile's topology (defaulting to 1), the head listens on
     //   loopback, and we pick an ephemeral port per exec.
     let session_layout = SessionLayout::for_id(&def.session);
-    let container_state: Option<ContainerState> =
-        read_json_opt(&session_layout.container_json())?;
+    let container_state: Option<ContainerState> = read_json_opt(&session_layout.container_json())?;
     let (node_count, head_port, head_addr) = match &container_state {
         Some(state) => (
             state.nodes.len().max(1) as u32,
@@ -425,7 +429,14 @@ async fn run_exec(layout: ExecLayout) -> Result<()> {
                 })
         });
         let mirage_env = node_mirage_env(rank, &head_addr, head_port);
-        match spawn_node(&def, rank, nlayout.clone(), &injection, &mirage_env, container) {
+        match spawn_node(
+            &def,
+            rank,
+            nlayout.clone(),
+            &injection,
+            &mirage_env,
+            container,
+        ) {
             Ok(node) => {
                 status.started = true;
                 status.nodes.insert(
@@ -635,12 +646,7 @@ fn spawn_node(
             .envs(std::env::vars().filter(|(k, _)| {
                 matches!(
                     k.as_str(),
-                    "PATH"
-                        | "HOME"
-                        | "USER"
-                        | "XDG_RUNTIME_DIR"
-                        | "DOCKER_HOST"
-                        | "CONTAINER_HOST"
+                    "PATH" | "HOME" | "USER" | "XDG_RUNTIME_DIR" | "DOCKER_HOST" | "CONTAINER_HOST"
                 )
             }))
             .env(

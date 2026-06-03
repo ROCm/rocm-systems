@@ -191,10 +191,7 @@ mod tests {
 
     #[test]
     fn resolve_provider_prefers_explicit() {
-        assert_eq!(
-            resolve_provider(Some("docker")),
-            Some("docker".to_string())
-        );
+        assert_eq!(resolve_provider(Some("docker")), Some("docker".to_string()));
     }
 
     #[test]

@@ -9,8 +9,8 @@
 //!
 //! All commands are documented in `docs/cli.md`.
 
-use std::io::Write;
 use std::io::IsTerminal;
+use std::io::Write;
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
@@ -251,9 +251,6 @@ pub enum ProfileCmd {
         /// `MI350X`). Defaults to `MI350X`.
         #[arg(long)]
         agent: Option<String>,
-        /// Number of racks.
-        #[arg(long)]
-        racks: Option<u32>,
         /// Nodes per rack.
         #[arg(long)]
         nodes_per_rack: Option<u32>,
@@ -315,9 +312,6 @@ pub enum TopologyCmd {
         /// Agent name referenced by this topology.
         #[arg(long, default_value = "MI350X")]
         agent: String,
-        /// Number of racks.
-        #[arg(long, default_value_t = 1)]
-        racks: u32,
         /// Nodes per rack.
         #[arg(long, default_value_t = 1)]
         nodes_per_rack: u32,
@@ -618,7 +612,6 @@ fn profile_cmd(ctl: &dyn MirageCtl, cmd: ProfileCmd, json: bool) -> anyhow::Resu
             name,
             emulator,
             agent,
-            racks,
             nodes_per_rack,
             gpus_per_node,
             description,
@@ -632,7 +625,6 @@ fn profile_cmd(ctl: &dyn MirageCtl, cmd: ProfileCmd, json: bool) -> anyhow::Resu
                 name,
                 emulator,
                 agent,
-                racks,
                 nodes_per_rack,
                 gpus_per_node,
                 description,
@@ -698,12 +690,10 @@ fn topology_cmd(ctl: &dyn MirageCtl, cmd: TopologyCmd, json: bool) -> anyhow::Re
         TopologyCmd::Create {
             name,
             agent,
-            racks,
             nodes_per_rack,
             gpus_per_node,
         } => {
             let t = mirage_core::topology::TopologyDef {
-                racks,
                 nodes_per_rack,
                 gpus_per_node,
                 agent: MaybeRef::Ref(agent),
@@ -891,7 +881,6 @@ fn build_profile_create(
     name: Option<String>,
     emulator: Option<String>,
     agent: Option<String>,
-    racks: Option<u32>,
     nodes_per_rack: Option<u32>,
     gpus_per_node: Option<u32>,
     description: Option<String>,
@@ -967,7 +956,6 @@ fn build_profile_create(
 
     // ----- topology -----
     let nodes_per_rack = resolve_count(nodes_per_rack, "Nodes per rack", interactive, &theme)?;
-    let racks = resolve_count(racks, "Number of racks", interactive, &theme)?;
     let gpus_per_node = resolve_count(gpus_per_node, "GPUs per node", interactive, &theme)?;
 
     // ----- agent -----
@@ -1051,7 +1039,6 @@ fn build_profile_create(
     };
 
     let topo = mirage_core::topology::TopologyDef {
-        racks,
         nodes_per_rack,
         gpus_per_node,
         agent: MaybeRef::Ref(agent),
@@ -1120,9 +1107,7 @@ fn apply_container_overrides(
         }
         None => {
             let image = image.ok_or_else(|| {
-                anyhow::anyhow!(
-                    "--mount/--provider require a containerised profile or --image"
-                )
+                anyhow::anyhow!("--mount/--provider require a containerised profile or --image")
             })?;
             profile.containerize = Some(ContainerizedDef {
                 provider,
@@ -1580,10 +1565,6 @@ fn profile_wizard(
         .with_prompt("Nodes per rack")
         .default(1)
         .interact_text()?;
-    let racks: u32 = Input::with_theme(&theme)
-        .with_prompt("Number of racks")
-        .default(1)
-        .interact_text()?;
     let gpus_per_node: u32 = Input::with_theme(&theme)
         .with_prompt("GPUs per node")
         .default(1)
@@ -1607,7 +1588,7 @@ fn profile_wizard(
 
     let proceed = Confirm::with_theme(&theme)
         .with_prompt(format!(
-            "Create profile {name} using {} ({racks} rack(s) x {nodes} node(s) x {gpus_per_node} GPU(s), agent={agent})?",
+            "Create profile {name} using {} ({nodes} node(s) x {gpus_per_node} GPU(s), agent={agent})?",
             spec.name
         ))
         .default(true)
@@ -1618,7 +1599,6 @@ fn profile_wizard(
     }
 
     let topo = mirage_core::topology::TopologyDef {
-        racks,
         nodes_per_rack: nodes,
         gpus_per_node,
         agent: MaybeRef::Ref(agent),

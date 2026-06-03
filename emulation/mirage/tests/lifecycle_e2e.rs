@@ -389,4 +389,3 @@ fn session_destroy_skips_provider_when_no_container_state() {
         "provider must not be invoked without container state"
     );
 }
-

@@ -37,7 +37,6 @@ fn embedded_assets_extract_round_trip() {
             exec_mode: ExecMode::Functional,
             options: Default::default(),
             topology: MaybeRef::Owned(mirage_core::topology::TopologyDef {
-                racks: 1,
                 nodes_per_rack: 1,
                 gpus_per_node: 1,
                 agent: MaybeRef::Ref(agent_name),

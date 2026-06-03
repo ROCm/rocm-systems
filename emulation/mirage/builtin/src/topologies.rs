@@ -9,22 +9,21 @@ use mirage_core::topology::TopologyDef;
 /// All builtin topologies, keyed by the name written to disk.
 pub fn topologies() -> Vec<(&'static str, TopologyDef)> {
     vec![
-        ("MI350X-1x1", layout(1, 1, 1, "MI350X")),
-        ("MI350X-1x8", layout(1, 1, 8, "MI350X")),
-        ("MI350X-2x8", layout(1, 2, 8, "MI350X")),
-        ("MI300X-1x8", layout(1, 1, 8, "MI300X")),
+        ("MI350X-1x1", layout(1, 1, "MI350X")),
+        ("MI350X-1x8", layout(1, 8, "MI350X")),
+        ("MI350X-2x8", layout(2, 8, "MI350X")),
+        ("MI300X-1x8", layout(1, 8, "MI300X")),
     ]
 }
 
 /// Default topology referenced by a fresh profile: a single GPU
 /// driven by the `MI350X` agent.
 pub fn default_topology() -> TopologyDef {
-    layout(1, 1, 1, "MI350X")
+    layout(1, 1, "MI350X")
 }
 
-fn layout(racks: u32, nodes_per_rack: u32, gpus_per_node: u32, agent: &str) -> TopologyDef {
+fn layout(nodes_per_rack: u32, gpus_per_node: u32, agent: &str) -> TopologyDef {
     TopologyDef {
-        racks,
         nodes_per_rack,
         gpus_per_node,
         agent: MaybeRef::Ref(agent.to_string()),

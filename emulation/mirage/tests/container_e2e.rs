@@ -211,9 +211,7 @@ fn containerized_session_writes_cid_then_cleans_up_on_stop() {
     env.create_containerized_profile("cp");
 
     env.mirage()
-        .args([
-            "session", "start", "--profile", "cp", "--id", "s-box",
-        ])
+        .args(["session", "start", "--profile", "cp", "--id", "s-box"])
         .assert()
         .success();
 

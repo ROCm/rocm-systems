@@ -1,8 +1,8 @@
 //! System topology definitions.
 //!
-//! A [`TopologyDef`] describes the *system layout* — how many racks,
-//! how many nodes per rack, and how many GPUs per node — together
-//! with the [`crate::agent::AgentDef`] used for each GPU slot.
+//! A [`TopologyDef`] describes the *system layout* — how many nodes
+//! and how many GPUs per node — together with the
+//! [`crate::agent::AgentDef`] used for each GPU slot.
 //!
 //! The agent is referenced via [`MaybeRef`]: callers can either
 //! embed a full agent definition inline or refer to a named entry
@@ -19,14 +19,10 @@ fn one() -> u32 {
     1
 }
 
-/// System-level topology: rack/node/GPU counts plus the agent
+/// System-level topology: node/GPU counts plus the agent
 /// definition each GPU instantiates.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TopologyDef {
-    /// Number of racks. Defaults to 1.
-    #[serde(default = "one")]
-    pub racks: u32,
-
     /// Number of nodes per rack. Defaults to 1.
     #[serde(default = "one")]
     pub nodes_per_rack: u32,
@@ -41,9 +37,9 @@ pub struct TopologyDef {
 }
 
 impl TopologyDef {
-    /// Total number of nodes (`racks * nodes_per_rack`).
+    /// Total number of nodes.
     pub fn total_nodes(&self) -> u32 {
-        self.racks.saturating_mul(self.nodes_per_rack)
+        self.nodes_per_rack
     }
 
     /// Total number of GPUs across the whole system.
@@ -103,12 +99,11 @@ mod tests {
     #[test]
     fn totals() {
         let t = TopologyDef {
-            racks: 2,
             nodes_per_rack: 4,
             gpus_per_node: 8,
             agent: MaybeRef::Ref("noop".to_string()),
         };
-        assert_eq!(t.total_nodes(), 8);
-        assert_eq!(t.total_gpus(), 64);
+        assert_eq!(t.total_nodes(), 4);
+        assert_eq!(t.total_gpus(), 32);
     }
 }

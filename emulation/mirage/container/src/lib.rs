@@ -248,20 +248,12 @@ impl Engine {
 
     /// Best-effort removal of a single container.
     pub fn rm(&self, name: &str) {
-        let _ = self.status(&[
-            "rm".to_string(),
-            "-f".to_string(),
-            name.to_string(),
-        ]);
+        let _ = self.status(&["rm".to_string(), "-f".to_string(), name.to_string()]);
     }
 
     /// Best-effort removal of a network.
     pub fn network_rm(&self, name: &str) {
-        let _ = self.status(&[
-            "network".to_string(),
-            "rm".to_string(),
-            name.to_string(),
-        ]);
+        let _ = self.status(&["network".to_string(), "rm".to_string(), name.to_string()]);
     }
 
     /// Pull the image, create the network, and launch one container per
@@ -427,7 +419,13 @@ mod tests {
             ("MIRAGE_HEAD_PORT".to_string(), "5000".to_string()),
         ];
         let mounts = vec![mount("/data:/data:ro"), mount("/h:/c")];
-        let argv = Engine::run_argv("mirage-s-node-0", "img:latest", Some("mirage-s"), &mounts, &env);
+        let argv = Engine::run_argv(
+            "mirage-s-node-0",
+            "img:latest",
+            Some("mirage-s"),
+            &mounts,
+            &env,
+        );
 
         let joined = argv.join(" ");
         assert!(joined.starts_with("run -d --name mirage-s-node-0 --hostname mirage-s-node-0"));
@@ -459,7 +457,15 @@ mod tests {
         assert_eq!(
             argv,
             vec![
-                "exec", "-i", "-w", "/work", "-e", "K=V", "mirage-s-node-1", "/bin/echo", "hi",
+                "exec",
+                "-i",
+                "-w",
+                "/work",
+                "-e",
+                "K=V",
+                "mirage-s-node-1",
+                "/bin/echo",
+                "hi",
                 "there",
             ]
         );
@@ -513,7 +519,10 @@ mod tests {
 
         engine.ensure_network("mirage-s").unwrap();
         let recorded = std::fs::read_to_string(&log).unwrap();
-        assert!(recorded.contains("network inspect mirage-s"), "{recorded:?}");
+        assert!(
+            recorded.contains("network inspect mirage-s"),
+            "{recorded:?}"
+        );
         assert!(recorded.contains("network create mirage-s"), "{recorded:?}");
     }
 
@@ -529,7 +538,10 @@ mod tests {
             .unwrap();
         assert_eq!(cid, "fake-cid-123");
         let recorded = std::fs::read_to_string(&log).unwrap();
-        assert!(recorded.contains("run -d --name mirage-s-node-0"), "{recorded:?}");
+        assert!(
+            recorded.contains("run -d --name mirage-s-node-0"),
+            "{recorded:?}"
+        );
     }
 
     #[test]
@@ -565,8 +577,14 @@ mod tests {
         let recorded = std::fs::read_to_string(&log).unwrap();
         assert!(recorded.contains("pull img:latest"), "{recorded:?}");
         assert!(recorded.contains("network create mirage-s"), "{recorded:?}");
-        assert!(recorded.contains("run -d --name mirage-s-node-0"), "{recorded:?}");
-        assert!(recorded.contains("run -d --name mirage-s-node-1"), "{recorded:?}");
+        assert!(
+            recorded.contains("run -d --name mirage-s-node-0"),
+            "{recorded:?}"
+        );
+        assert!(
+            recorded.contains("run -d --name mirage-s-node-1"),
+            "{recorded:?}"
+        );
         assert!(recorded.contains("-e MIRAGE_RANK=0"), "{recorded:?}");
         assert!(recorded.contains("-e MIRAGE_RANK=1"), "{recorded:?}");
     }

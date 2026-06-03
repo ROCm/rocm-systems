@@ -12,7 +12,6 @@ const DEFAULT_NEW_PROFILE = {
   topology_mode: "new" as "new" | "existing",
   topology_pick: "",
   topology_save_as: "",
-  racks: 1,
   nodes_per_rack: 1,
   gpus_per_node: 1,
   agent: "MI350X",
@@ -93,7 +92,6 @@ export function ProfilesPage() {
         topology = form.topology_pick;
       } else {
         const inline = {
-          racks: form.racks,
           nodes_per_rack: form.nodes_per_rack,
           gpus_per_node: form.gpus_per_node,
           agent: form.agent,
@@ -360,19 +358,6 @@ export function ProfilesPage() {
             </div>
           ) : (
             <>
-              <label className="form-field">
-                <span>Racks</span>
-                <input
-                  type="number"
-                  min={1}
-                  value={form.racks}
-                  data-testid="wizard-racks"
-                  onChange={(e) =>
-                    setForm({ ...form, racks: Math.max(1, +e.target.value || 1) })
-                  }
-                />
-              </label>
-
               <label className="form-field">
                 <span>Nodes per rack</span>
                 <input

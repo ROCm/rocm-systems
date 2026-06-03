@@ -297,8 +297,7 @@ impl MirageCtl for FileCtl {
         }
         let def: SessionDef = crate::state::read_json(&layout.def())?;
         let health = self.session_health(id)?;
-        let container =
-            crate::state::read_json_opt(&layout.container_json()).unwrap_or(None);
+        let container = crate::state::read_json_opt(&layout.container_json()).unwrap_or(None);
         Ok(SessionState {
             def,
             health,
@@ -706,7 +705,6 @@ mod tests {
                 exec_mode: Default::default(),
                 options: Default::default(),
                 topology: MaybeRef::Owned(crate::topology::TopologyDef {
-                    racks: 1,
                     nodes_per_rack: 1,
                     gpus_per_node: 1,
                     agent: MaybeRef::Ref("MI350X".to_string()),

@@ -415,9 +415,7 @@ async fn create_session(
 ) -> Result<Json<SessionDef>, ApiError> {
     // validate profile, resolving it so container overrides can apply.
     let mut profile = s.ctl.profile_get(&body.profile)?;
-    let profile_ref = if body.image.is_some()
-        || !body.mounts.is_empty()
-        || body.provider.is_some()
+    let profile_ref = if body.image.is_some() || !body.mounts.is_empty() || body.provider.is_some()
     {
         let mut mounts = Vec::with_capacity(body.mounts.len());
         for m in &body.mounts {

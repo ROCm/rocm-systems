@@ -8,7 +8,6 @@ import { useToast } from "../components/ui/Toast";
 const DEFAULT_FORM = {
   name: "",
   agent: "MI350X",
-  racks: 1,
   nodes_per_rack: 1,
   gpus_per_node: 1,
 };
@@ -63,7 +62,6 @@ export function TopologiesPage() {
     setBusy(true);
     try {
       await api.putTopology(name, {
-        racks: form.racks,
         nodes_per_rack: form.nodes_per_rack,
         gpus_per_node: form.gpus_per_node,
         agent: form.agent,
@@ -205,18 +203,6 @@ export function TopologiesPage() {
               onChange={(e) => setForm({ ...form, name: e.target.value })}
               data-testid="topology-create-name"
               placeholder="e.g. MI350X-2x4"
-            />
-          </label>
-          <label className="form-field">
-            <span>Racks</span>
-            <input
-              type="number"
-              min={1}
-              value={form.racks}
-              data-testid="topology-create-racks"
-              onChange={(e) =>
-                setForm({ ...form, racks: Math.max(1, +e.target.value || 1) })
-              }
             />
           </label>
           <label className="form-field">
