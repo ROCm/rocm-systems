@@ -20,7 +20,6 @@
 #define DECLARE_ROCM_PFN(symbol) PFN_##symbol pfn_##symbol = nullptr
 
 DECLARE_ROCM_PFN(hsa_amd_portable_export_dmabuf); // DMA-BUF support
-DECLARE_ROCM_PFN(hsa_amd_portable_export_dmabuf_v2); // DMA-BUF support
 NCCL_PARAM(DmaBufEnable, "DMABUF_ENABLE", 1);
 RCCL_PARAM(ForceEnableDMABUF, "FORCE_ENABLE_DMABUF", 0);
 /* ROCr Driver functions loaded with dlsym() */
@@ -276,10 +275,6 @@ static void initOnceFunc() {
     if (pfn_hsa_amd_portable_export_dmabuf == NULL) {
       WARN("Failed to load ROCr missing symbol hsa_amd_portable_export_dmabuf");
       goto error;
-    }
-    pfn_hsa_amd_portable_export_dmabuf_v2 = (PFN_hsa_amd_portable_export_dmabuf_v2) dlsym(hsaLib, "hsa_amd_portable_export_dmabuf_v2");
-    if (pfn_hsa_amd_portable_export_dmabuf_v2 == NULL) {
-      WARN("Failed to load ROCr missing symbol hsa_amd_portable_export_dmabuf_v2");
     }
   }
 
