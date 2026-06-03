@@ -904,6 +904,8 @@ rocDecStatus VaContext::CheckDecCapForCodecType(RocdecDecodeCaps *dec_cap) {
                         va_contexts_[va_ctx_id].output_format_mask |= 1 << rocDecVideoSurfaceFormat_NV12;
                         break;
                     case VA_FOURCC_P016:
+                    case VA_FOURCC_P012:
+                    case VA_FOURCC_P010:
                         va_contexts_[va_ctx_id].output_format_mask |= 1 << rocDecVideoSurfaceFormat_P016;
                         break;
                     default:
