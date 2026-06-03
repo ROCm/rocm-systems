@@ -153,7 +153,7 @@ def test_analyze_torch_trace_filter_operator_MI350(
         "--path",
         workload_dir,
         "--torch-operator",
-        "*relu",
+        "*relu*",
     ])
     assert code == 0
 
@@ -178,8 +178,8 @@ def test_analyze_torch_trace_multi_operator_MI350(
         "--path",
         workload_dir,
         "--torch-operator",
-        "*relu",
-        "*ones_like",
+        "*relu*",
+        "*ones_like*",
     ])
     assert code == 0
 
@@ -218,7 +218,7 @@ def test_analyze_torch_trace_hierarchy_path_MI350(
 ):
     workload_dir = common.setup_workload_dir("tests/workloads/torch_trace/MI350")
 
-    hierarchy = "nn.Module.SimpleNet.forward/torch.nn.functional.relu/torch.relu"
+    hierarchy = "*nn.Module.SimpleNet.forward/torch.nn.functional.relu/torch.relu*"
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",
         "analyze",
@@ -249,7 +249,7 @@ def test_analyze_torch_trace_torch_prefix_MI350(
         "--path",
         workload_dir,
         "--torch-operator",
-        "torch.relu",
+        "*torch.relu*",
     ])
     assert code == 0
 
