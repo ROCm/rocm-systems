@@ -12,6 +12,18 @@ on:
     # image on demand.
     - cron: "0 10 * * *"
   workflow_dispatch:
+  # Refresh on merge of a Dockerfile/resolver change so the published nightly
+  # image + floating cache track develop. Without this, the per-PR registry
+  # skip could serve an image built from an out-of-date Dockerfile.
+  pull_request_target:
+    types:
+      - closed
+    branches:
+      - develop
+    paths:
+      - projects/hipfile/util/docker/**
+      - projects/hipfile/util/resolve-rocm-nightly.sh
+      - .github/workflows/hipfile-image-update-nightly.yml
 
 concurrency:
   group: ${{ github.workflow }}
@@ -25,6 +37,9 @@ jobs:
   # Resolve runs on the runner (not the docker:28.5 container) because the
   # resolver needs curl/bash, which the Alpine-based docker image lacks.
   resolve_nightly:
+    # pull_request_target/closed fires for un-merged PRs too; only act on merges.
+    # (The downstream build job needs this one, so skipping here skips both.)
+    if: ${{ github.event_name != 'pull_request_target' || github.event.pull_request.merged == true }}
     runs-on: [ubuntu-24.04]
     outputs:
       nightly_build: ${{ steps.nightly.outputs.nightly_build }}
