@@ -2962,7 +2962,7 @@ static hipError_t EnqueueBatchCommands(std::vector<std::vector<Operation>>& oper
     bool finish_before_return = !is_async;
     if (!AMD_DIRECT_DISPATCH && command_type == ROCCLR_COMMAND_BATCH_WRITE_BUFFER) {
       for (const Operation &op : operations) {
-        if (op.metadata_.srcAccessOrder_ == amd::CopyMetadata::kSrcAccessOrderDuringApiCall) {
+        if (op.metadata.srcAccessOrder_ == amd::CopyMetadata::kSrcAccessOrderDuringApiCall) {
           finish_before_return = true;
           break;
         }

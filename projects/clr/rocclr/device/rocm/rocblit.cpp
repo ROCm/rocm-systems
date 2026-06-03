@@ -365,7 +365,7 @@ bool DmaBlitManager::WriteBufferBatch(const std::vector<amd::BatchWriteMemoryOp>
   std::vector<amd::Memory*> pinned_memories;
 
   for (const amd::BatchWriteMemoryOp& op : write_ops) {
-    if (op.metadata_.srcAccessOrder_ == amd::CopyMetadata::kSrcAccessOrderStream) {
+    if (op.metadata.srcAccessOrder_ == amd::CopyMetadata::kSrcAccessOrderStream) {
       gpu().releaseGpuMemoryFence();
       break;
     }
@@ -375,7 +375,7 @@ bool DmaBlitManager::WriteBufferBatch(const std::vector<amd::BatchWriteMemoryOp>
   copy_ops.reserve(write_ops.size());
   for (const amd::BatchWriteMemoryOp& op : write_ops) {
     size_t pinned_offset = 0;
-    amd::Memory* pinned_source = pinHostMemory(op.src_host_, op.size_, pinned_offset);
+    amd::Memory* pinned_source = pinHostMemory(op.srcHost, op.size, pinned_offset);
     if (pinned_source == nullptr) {
       LogError("DmaBlitManager::WriteBufferBatch: Failed to pin pageable source!");
       for (amd::Memory* pinned_memory : pinned_memories) {
@@ -384,8 +384,8 @@ bool DmaBlitManager::WriteBufferBatch(const std::vector<amd::BatchWriteMemoryOp>
       return false;
     }
     pinned_memories.push_back(pinned_source);
-    copy_ops.emplace_back(pinned_source, op.dst_memory_, pinned_offset, op.dst_offset_, op.size_,
-                          op.metadata_);
+    copy_ops.emplace_back(pinned_source, op.dstMemory, pinned_offset, op.dstOffset, op.size,
+                          op.metadata);
   }
 
   if (!copyBufferBatch(copy_ops)) {
@@ -409,7 +409,7 @@ bool DmaBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp>& 
   copy_ops.reserve(read_ops.size());
   for (const amd::BatchReadMemoryOp& op : read_ops) {
     size_t pinned_offset = 0;
-    amd::Memory* pinned_destination = pinHostMemory(op.dst_host_, op.size_, pinned_offset);
+    amd::Memory* pinned_destination = pinHostMemory(op.dstHost, op.size, pinned_offset);
     if (pinned_destination == nullptr) {
       LogError(
           "DmaBlitManager::ReadBufferBatch: Failed to pin pageable "
@@ -420,8 +420,8 @@ bool DmaBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp>& 
       return false;
     }
     pinned_memories.push_back(pinned_destination);
-    copy_ops.emplace_back(op.src_memory_, pinned_destination, op.src_offset_, pinned_offset,
-                          op.size_, op.metadata_);
+    copy_ops.emplace_back(op.srcMemory, pinned_destination, op.srcOffset, pinned_offset, op.size,
+                          op.metadata);
   }
 
   if (!copyBufferBatch(copy_ops)) {

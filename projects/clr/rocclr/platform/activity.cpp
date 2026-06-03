@@ -115,7 +115,7 @@ void ReportActivity(const amd::Command& command) {
           static_cast<const amd::BatchWriteMemoryCommand&>(command).WriteOps();
       size_t total = 0;
       for (const amd::BatchWriteMemoryOp& op : ops) {
-        total += op.size_;
+        total += op.size;
       }
       record.bytes = total;
       break;
@@ -125,7 +125,7 @@ void ReportActivity(const amd::Command& command) {
           static_cast<const amd::BatchReadMemoryCommand&>(command).ReadOps();
       size_t total = 0;
       for (const amd::BatchReadMemoryOp& op : ops) {
-        total += op.size_;
+        total += op.size;
       }
       record.bytes = total;
       break;

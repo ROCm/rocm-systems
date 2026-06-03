@@ -1194,37 +1194,37 @@ struct BatchCopyOp {
 //! Structure to hold pageable host-to-device write operation info for batch
 //! writes
 struct BatchWriteMemoryOp {
-  const void* src_host_;   //!< Source host pointer
-  Memory* dst_memory_;     //!< Destination memory object
-  size_t dst_offset_;      //!< Offset in destination buffer
-  size_t size_;            //!< Size of the copy in bytes
-  CopyMetadata metadata_;  //!< Copy metadata for this operation
+  const void* srcHost;    //!< Source host pointer
+  Memory* dstMemory;      //!< Destination memory object
+  size_t dstOffset;       //!< Offset in destination buffer
+  size_t size;            //!< Size of the copy in bytes
+  CopyMetadata metadata;  //!< Copy metadata for this operation
 
   BatchWriteMemoryOp(const void* src_host_arg, Memory* dst_memory_arg, size_t dst_offset_arg,
                      size_t size_arg, CopyMetadata metadata_arg = CopyMetadata())
-      : src_host_(src_host_arg),
-        dst_memory_(dst_memory_arg),
-        dst_offset_(dst_offset_arg),
-        size_(size_arg),
-        metadata_(metadata_arg) {}
+      : srcHost(src_host_arg),
+        dstMemory(dst_memory_arg),
+        dstOffset(dst_offset_arg),
+        size(size_arg),
+        metadata(metadata_arg) {}
 };
 
 //! Structure to hold device-to-pageable-host read operation info for batch
 //! reads
 struct BatchReadMemoryOp {
-  Memory* src_memory_;     //!< Source memory object
-  void* dst_host_;         //!< Destination host pointer
-  size_t src_offset_;      //!< Offset in source buffer
-  size_t size_;            //!< Size of the copy in bytes
-  CopyMetadata metadata_;  //!< Copy metadata for this operation
+  Memory* srcMemory;      //!< Source memory object
+  void* dstHost;          //!< Destination host pointer
+  size_t srcOffset;       //!< Offset in source buffer
+  size_t size;            //!< Size of the copy in bytes
+  CopyMetadata metadata;  //!< Copy metadata for this operation
 
   BatchReadMemoryOp(Memory* src_memory_arg, void* dst_host_arg, size_t src_offset_arg,
                     size_t size_arg, CopyMetadata metadata_arg = CopyMetadata())
-      : src_memory_(src_memory_arg),
-        dst_host_(dst_host_arg),
-        src_offset_(src_offset_arg),
-        size_(size_arg),
-        metadata_(metadata_arg) {}
+      : srcMemory(src_memory_arg),
+        dstHost(dst_host_arg),
+        srcOffset(src_offset_arg),
+        size(size_arg),
+        metadata(metadata_arg) {}
 };
 
 /*! \brief  A batch copy memory command for multiple buffer-to-buffer copies
@@ -1276,9 +1276,6 @@ class BatchCopyMemoryCommand : public Command {
  *           batch write path.
  */
 class BatchWriteMemoryCommand : public Command {
- private:
-  std::vector<BatchWriteMemoryOp> write_ops_;  //!< Vector of write operations
-
  public:
   BatchWriteMemoryCommand(HostQueue& queue, cl_command_type cmd_type,
                           const EventWaitList& event_wait_list,
@@ -1289,6 +1286,9 @@ class BatchWriteMemoryCommand : public Command {
 
   //! Return the vector of write operations
   const std::vector<BatchWriteMemoryOp>& WriteOps() const { return write_ops_; }
+
+ private:
+  std::vector<BatchWriteMemoryOp> write_ops_;  //!< Vector of write operations
 };
 
 /*! \brief  A batch read memory command for multiple device-to-pageable-host
@@ -1298,9 +1298,6 @@ class BatchWriteMemoryCommand : public Command {
  * backend's batch read path.
  */
 class BatchReadMemoryCommand : public Command {
- private:
-  std::vector<BatchReadMemoryOp> read_ops_;  //!< Vector of read operations
-
  public:
   BatchReadMemoryCommand(HostQueue& queue, cl_command_type cmd_type,
                          const EventWaitList& event_wait_list,
@@ -1311,6 +1308,9 @@ class BatchReadMemoryCommand : public Command {
 
   //! Return the vector of read operations
   const std::vector<BatchReadMemoryOp>& ReadOps() const { return read_ops_; }
+
+ private:
+  std::vector<BatchReadMemoryOp> read_ops_;  //!< Vector of read operations
 };
 
 /*! \brief  A generic map memory command. Makes a memory object accessible to the host.
