@@ -4560,13 +4560,13 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
     hsa_signal_t ipc_s{0};
     if (vcmd.ipcCompletionSignal() != nullptr) {
       ipc_s.handle = static_cast<uint64_t>(
-          reinterpret_cast<uintptr_t>(vcmd.ipcCompletionSignal()->getGpuHandle()));
+          reinterpret_cast<uintptr_t>(vcmd.ipcCompletionSignal()->getHandle()));
     }
 
     if (vcmd.ipcDepSignal() != nullptr) {
       hsa_signal_t s;
       s.handle = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(
-          vcmd.ipcDepSignal()->getGpuHandle()));
+          vcmd.ipcDepSignal()->getHandle()));
       WaitCompleteSignal(s);
     } else if (timestamp_ != nullptr || ipc_s.handle != 0) {
       // IPC event record: if ipc_s is non-zero, first dispatch a NOP barrier with

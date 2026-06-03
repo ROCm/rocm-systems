@@ -78,7 +78,7 @@ bool IpcSignal::IpcExport(void* handle, size_t handle_size) {
   return true;
 }
 
-bool IpcSignal::IpcImport(const void* handle, size_t handle_size, const amd::Device* dev) {
+bool IpcSignal::IpcImport(const void* handle, size_t handle_size) {
   if (handle_size < sizeof(hsa_amd_ipc_signal_t)) {
     return false;
   }
@@ -88,15 +88,6 @@ bool IpcSignal::IpcImport(const void* handle, size_t handle_size, const amd::Dev
   hsa_status_t status = Hsa::ipc_signal_attach(&ipc_handle, &signal_);
   if (status != HSA_STATUS_SUCCESS) {
     return false;
-  }
-
-  // Lock the imported signal memory for GPU access.
-  // The IPC signal is CPU-only after dma-buf import.
-  if (dev != nullptr) {
-    auto* rocDev = static_cast<const roc::Device*>(dev);
-    constexpr size_t kSignalAbiSize = 4096;
-    gpu_ptr_ = rocDev->hostLock(reinterpret_cast<void*>(signal_.handle),
-                                kSignalAbiSize, amd::Device::kNoAtomics);
   }
 
   ws_ = WaitState::Active;
