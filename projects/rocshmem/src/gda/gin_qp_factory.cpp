@@ -307,9 +307,11 @@ static int gin_load_dv_library(rocshmem_gin_qp_set *set) {
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT: {
-    set->dv_handle = dlopen("libbnxt_re_dv.so", RTLD_LAZY);
+    set->dv_handle = dlopen("libbnxt_re.so", RTLD_LAZY);
+    if (!set->dv_handle)
+      set->dv_handle = dlopen("/usr/local/lib/libbnxt_re.so", RTLD_LAZY);
     if (!set->dv_handle) {
-      LOG_ERROR("GIN QP factory: failed to load libbnxt_re_dv.so: %s", dlerror());
+      LOG_ERROR("GIN QP factory: failed to load libbnxt_re.so: %s", dlerror());
       return -1;
     }
 
