@@ -7,13 +7,13 @@
 /// v_ashrrev_i64 (shift the 64-bit src1 by the 32-bit src0, masked to [0,63])
 /// and v_lshl_add_u64 ((src0 << (src1 & 63)) + src2). These use the new
 /// mixed-width 64-bit shift glue (32-bit count + 64-bit value); shifts produce
-/// no NaN so every value is recorded exactly. The process runs one fixed execute
-/// mode (RJ_FORCE_SCALAR, immutable); the f64 dst (lo,hi per lane) is recorded
-/// and the scalar-vs-SIMD equivalence is asserted by diffing the two runs (see
-/// simd_ab.h / the simd_ab_diff CTest entry). In-process inactive lanes must
-/// keep the sentinel.
+/// no NaN so every value is compared exactly. Each case runs TWICE in the same
+/// process -- once forcing the scalar body, once the SIMD fast path, with
+/// identical inputs/EXEC -- and the f64 dst results are asserted equal with
+/// EXPECT_EQ (util::set_force_scalar_for_testing flips the gate in-process).
+/// In-process inactive lanes must keep the sentinel.
 
-#include "simd_ab.h"
+#include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -99,18 +99,43 @@ struct Fixture {
   }
 };
 
+// Restores the process force-scalar gate on scope exit so flipping it for an
+// in-process A/B comparison cannot leak into later tests in the same process.
+struct ForceScalarGuard {
+  bool orig;
+  ForceScalarGuard() : orig(util::force_scalar()) {}
+  ~ForceScalarGuard() { util::set_force_scalar_for_testing(orig); }
+};
+
+void compare_and_check_inactive(const char *name, uint64_t exec,
+                                const std::array<uint64_t, WF_SIZE> &scalar_out,
+                                const std::array<uint64_t, WF_SIZE> &simd_out,
+                                const std::string &sub) {
+  EXPECT_EQ(scalar_out, simd_out) << name << " " << sub << ": SIMD path diverged from scalar body";
+  for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+    const bool active = (exec >> lane) & 1ULL;
+    if (!active) {
+      EXPECT_EQ(simd_out[lane], dst_sentinel(lane)) << name << ": clobbered inactive lane " << lane;
+      EXPECT_EQ(scalar_out[lane], dst_sentinel(lane))
+          << name << ": clobbered inactive lane " << lane;
+    }
+  }
+}
+
 // Reverse shifts: src0 = v0 (32-bit count), src1 = v2:v3 (64-bit value),
 // dst = v6:v7.
 void check_revshift(const char *name, uint32_t op, uint64_t exec) {
-  Fixture fx;
-  ASSERT_NE(fx.cu, nullptr);
-  ASSERT_NE(fx.wf, nullptr);
-  uint32_t words[2] = {0u, 0u};
-  vop3_encode(op, kDstVgpr, /*src0=*/256, /*src1=*/258, /*src2=*/0, words);
-  Instruction *inst = fx.decoder->decode(words);
-  ASSERT_NE(inst, nullptr) << name << " decode failed";
-  uint32_t vb = fx.wf->vgpr_alloc().base;
-  auto run = [&](uint32_t srot, uint32_t vrot) {
+  ForceScalarGuard gate_guard;
+  auto run = [&](bool force_scalar, uint32_t srot, uint32_t vrot) -> std::array<uint64_t, WF_SIZE> {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx;
+    EXPECT_NE(fx.cu, nullptr);
+    EXPECT_NE(fx.wf, nullptr);
+    uint32_t words[2] = {0u, 0u};
+    vop3_encode(op, kDstVgpr, /*src0=*/256, /*src1=*/258, /*src2=*/0, words);
+    Instruction *inst = fx.decoder->decode(words);
+    EXPECT_NE(inst, nullptr) << name << " decode failed";
+    uint32_t vb = fx.wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       fx.cu->write_vgpr(vb + 0, lane, kShifts[(lane + srot) % kShifts.size()]);
       fx.write64(vb + 2, lane, kVals64[(lane + vrot) % kVals64.size()]);
@@ -121,43 +146,32 @@ void check_revshift(const char *name, uint32_t op, uint64_t exec) {
     std::array<uint64_t, WF_SIZE> out{};
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
       out[lane] = fx.read64(vb + kDstVgpr, lane);
+    delete inst;
     return out;
   };
   for (uint32_t srot = 0; srot < kShifts.size(); ++srot)
     for (uint32_t vrot = 0; vrot < kVals64.size(); vrot += 3) {
-      auto out = run(srot, vrot);
-
-      uint32_t words_out[2 * WF_SIZE];
-      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-        words_out[2 * lane] = static_cast<uint32_t>(out[lane]);
-        words_out[2 * lane + 1] = static_cast<uint32_t>(out[lane] >> 32);
-      }
-      const std::string sub =
-          std::string(name) + ":s" + std::to_string(srot) + ":v" + std::to_string(vrot);
-      simd_ab::record(sub, exec, words_out, 2 * WF_SIZE);
-
-      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-        const bool active = (exec >> lane) & 1ULL;
-        if (!active) {
-          EXPECT_EQ(out[lane], dst_sentinel(lane)) << name << ": clobbered inactive lane " << lane;
-        }
-      }
+      const auto scalar_out = run(/*force_scalar=*/true, srot, vrot);
+      const auto simd_out = run(/*force_scalar=*/false, srot, vrot);
+      compare_and_check_inactive(name, exec, scalar_out, simd_out,
+                                 "s" + std::to_string(srot) + ":v" + std::to_string(vrot));
     }
-  delete inst;
 }
 
 // v_lshl_add_u64: src0 = v0:v1 (64-bit value), src1 = v2 (32-bit shift),
 // src2 = v4:v5 (64-bit addend), dst = v6:v7.
 void check_lshl_add(uint64_t exec) {
-  Fixture fx;
-  ASSERT_NE(fx.cu, nullptr);
-  ASSERT_NE(fx.wf, nullptr);
-  uint32_t words[2] = {0u, 0u};
-  vop3_encode(/*op=*/520, kDstVgpr, /*src0=*/256, /*src1=*/258, /*src2=*/260, words);
-  Instruction *inst = fx.decoder->decode(words);
-  ASSERT_NE(inst, nullptr) << "v_lshl_add_u64 decode failed";
-  uint32_t vb = fx.wf->vgpr_alloc().base;
-  auto run = [&](uint32_t srot, uint32_t crot) {
+  ForceScalarGuard gate_guard;
+  auto run = [&](bool force_scalar, uint32_t srot, uint32_t crot) -> std::array<uint64_t, WF_SIZE> {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx;
+    EXPECT_NE(fx.cu, nullptr);
+    EXPECT_NE(fx.wf, nullptr);
+    uint32_t words[2] = {0u, 0u};
+    vop3_encode(/*op=*/520, kDstVgpr, /*src0=*/256, /*src1=*/258, /*src2=*/260, words);
+    Instruction *inst = fx.decoder->decode(words);
+    EXPECT_NE(inst, nullptr) << "v_lshl_add_u64 decode failed";
+    uint32_t vb = fx.wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       fx.write64(vb + 0, lane, kVals64[lane % kVals64.size()]);
       fx.cu->write_vgpr(vb + 2, lane, kShifts[(lane + srot) % kShifts.size()]);
@@ -169,44 +183,32 @@ void check_lshl_add(uint64_t exec) {
     std::array<uint64_t, WF_SIZE> out{};
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
       out[lane] = fx.read64(vb + kDstVgpr, lane);
+    delete inst;
     return out;
   };
   for (uint32_t srot = 0; srot < kShifts.size(); ++srot)
     for (uint32_t crot = 0; crot < kVals64.size(); crot += 3) {
-      auto out = run(srot, crot);
-
-      uint32_t words_out[2 * WF_SIZE];
-      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-        words_out[2 * lane] = static_cast<uint32_t>(out[lane]);
-        words_out[2 * lane + 1] = static_cast<uint32_t>(out[lane] >> 32);
-      }
-      const std::string sub =
-          "v_lshl_add_u64:s" + std::to_string(srot) + ":c" + std::to_string(crot);
-      simd_ab::record(sub, exec, words_out, 2 * WF_SIZE);
-
-      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-        const bool active = (exec >> lane) & 1ULL;
-        if (!active) {
-          EXPECT_EQ(out[lane], dst_sentinel(lane))
-              << "v_lshl_add_u64: clobbered inactive lane " << lane;
-        }
-      }
+      const auto scalar_out = run(/*force_scalar=*/true, srot, crot);
+      const auto simd_out = run(/*force_scalar=*/false, srot, crot);
+      compare_and_check_inactive("v_lshl_add_u64", exec, scalar_out, simd_out,
+                                 "s" + std::to_string(srot) + ":c" + std::to_string(crot));
     }
-  delete inst;
 }
 
 // v_mad_u64_u32 / v_mad_i64_i32: src0 = v0 (32-bit), src1 = v2 (32-bit),
 // src2 = v4:v5 (64-bit addend), dst = v6:v7.
 void check_mad64(const char *name, uint32_t op, uint64_t exec) {
-  Fixture fx;
-  ASSERT_NE(fx.cu, nullptr);
-  ASSERT_NE(fx.wf, nullptr);
-  uint32_t words[2] = {0u, 0u};
-  vop3_encode(op, kDstVgpr, /*src0=*/256, /*src1=*/258, /*src2=*/260, words);
-  Instruction *inst = fx.decoder->decode(words);
-  ASSERT_NE(inst, nullptr) << name << " decode failed";
-  uint32_t vb = fx.wf->vgpr_alloc().base;
-  auto run = [&](uint32_t arot, uint32_t crot) {
+  ForceScalarGuard gate_guard;
+  auto run = [&](bool force_scalar, uint32_t arot, uint32_t crot) -> std::array<uint64_t, WF_SIZE> {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx;
+    EXPECT_NE(fx.cu, nullptr);
+    EXPECT_NE(fx.wf, nullptr);
+    uint32_t words[2] = {0u, 0u};
+    vop3_encode(op, kDstVgpr, /*src0=*/256, /*src1=*/258, /*src2=*/260, words);
+    Instruction *inst = fx.decoder->decode(words);
+    EXPECT_NE(inst, nullptr) << name << " decode failed";
+    uint32_t vb = fx.wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       fx.cu->write_vgpr(vb + 0, lane, kShifts[lane % kShifts.size()]);
       fx.cu->write_vgpr(vb + 2, lane, kShifts[(lane + arot) % kShifts.size()]);
@@ -218,29 +220,16 @@ void check_mad64(const char *name, uint32_t op, uint64_t exec) {
     std::array<uint64_t, WF_SIZE> out{};
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
       out[lane] = fx.read64(vb + kDstVgpr, lane);
+    delete inst;
     return out;
   };
   for (uint32_t arot = 0; arot < kShifts.size(); ++arot)
     for (uint32_t crot = 0; crot < kVals64.size(); crot += 3) {
-      auto out = run(arot, crot);
-
-      uint32_t words_out[2 * WF_SIZE];
-      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-        words_out[2 * lane] = static_cast<uint32_t>(out[lane]);
-        words_out[2 * lane + 1] = static_cast<uint32_t>(out[lane] >> 32);
-      }
-      const std::string sub =
-          std::string(name) + ":a" + std::to_string(arot) + ":c" + std::to_string(crot);
-      simd_ab::record(sub, exec, words_out, 2 * WF_SIZE);
-
-      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-        const bool active = (exec >> lane) & 1ULL;
-        if (!active) {
-          EXPECT_EQ(out[lane], dst_sentinel(lane)) << name << ": clobbered inactive lane " << lane;
-        }
-      }
+      const auto scalar_out = run(/*force_scalar=*/true, arot, crot);
+      const auto simd_out = run(/*force_scalar=*/false, arot, crot);
+      compare_and_check_inactive(name, exec, scalar_out, simd_out,
+                                 "a" + std::to_string(arot) + ":c" + std::to_string(crot));
     }
-  delete inst;
 }
 
 TEST(Vop3Shift64SimdCorrectness, MadWide64) {

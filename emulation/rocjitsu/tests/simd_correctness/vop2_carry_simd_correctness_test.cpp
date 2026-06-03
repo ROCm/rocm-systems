@@ -7,16 +7,17 @@
 ///   v_add_co_u32, v_sub_co_u32, v_subrev_co_u32,
 ///   v_addc_co_u32, v_subb_co_u32, v_subbrev_co_u32.
 /// Unlike the plain binary VOP2 path these write per-lane carry/borrow into
-/// VCC, and the addc/subb/subbrev forms read VCC as a carry-in. The process
-/// runs in a single execute mode (RJ_FORCE_SCALAR, immutable); each op records
-/// its 64-lane destination AND the full 64-bit VCC (as two uint32 words), and
-/// the scalar-vs-SIMD equivalence on BOTH is asserted by diffing the two runs
-/// (see simd_ab.h / the simd_ab_diff CTest entry). Inputs deliberately seed the
+/// VCC, and the addc/subb/subbrev forms read VCC as a carry-in. Each op runs
+/// TWICE in the same process -- once forcing the scalar body, once the SIMD fast
+/// path, with identical seed/inputs/EXEC/VCC-in -- and the scalar-vs-SIMD
+/// equivalence on BOTH the 64-lane destination AND the full 64-bit VCC is
+/// asserted with EXPECT_EQ (util::set_force_scalar_for_testing flips the gate
+/// in-process). Inputs deliberately seed the
 /// 32-bit carry/borrow boundary (0xFFFFFFFF+1, a<b, a==b+cin, ...) on the low
 /// lanes — random-only inputs hide these corners. In-process the test still
 /// checks inactive-lane dst/VCC preservation under full and partial EXEC masks.
 
-#include "simd_ab.h"
+#include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -143,41 +144,64 @@ const uint64_t kVccPatterns[] = {
     0x5555555555555555ULL, 0x0123456789ABCDEFULL,
 };
 
+// Restores the process force-scalar gate on scope exit so flipping it for an
+// in-process A/B comparison cannot leak into later tests in the same process.
+struct ForceScalarGuard {
+  bool orig;
+  ForceScalarGuard() : orig(util::force_scalar()) {}
+  ~ForceScalarGuard() { util::set_force_scalar_for_testing(orig); }
+};
+
 void check_case(const CarryCase &c, uint64_t exec) {
-  Fixture fx;
-  ASSERT_NE(fx.cu, nullptr);
-  ASSERT_NE(fx.wf, nullptr);
-  uint32_t enc = vop2_encode(c.opcode, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256);
-  uint32_t words[4] = {enc, 0u, 0u, 0u};
-  Instruction *inst = fx.decoder->decode(words);
-  ASSERT_NE(inst, nullptr) << c.label << ": decode failed";
+  ForceScalarGuard gate_guard;
 
   constexpr uint64_t SEED = 0xC0FFEE'1234'5678ULL;
-  for (uint64_t vcc_in : kVccPatterns) {
-    auto out = fx.run(inst, SEED, exec, vcc_in);
 
-    // Record the destination words and the full 64-bit VCC (low, high) so the
-    // cross-run diff covers BOTH outputs. vcc_in is folded into the sublabel so
-    // each (case, vcc_in) line is unique.
-    const std::string base = std::string(c.label) + ":vcc_in" + std::to_string(vcc_in);
-    simd_ab::record(base, exec, out.dst.data(), WF_SIZE);
-    const uint32_t vcc_words[2] = {static_cast<uint32_t>(out.vcc),
-                                   static_cast<uint32_t>(out.vcc >> 32)};
-    simd_ab::record(base + ":vcc", exec, vcc_words, 2);
+  // Runs one (case, vcc_in) in the requested execute mode (fresh Fixture +
+  // decode per run isolates VGPR/VCC state).
+  auto run_mode = [&](bool force_scalar, uint64_t vcc_in) -> Fixture::Result {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx;
+    EXPECT_NE(fx.cu, nullptr);
+    EXPECT_NE(fx.wf, nullptr);
+    uint32_t enc = vop2_encode(c.opcode, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256);
+    uint32_t words[4] = {enc, 0u, 0u, 0u};
+    Instruction *inst = fx.decoder->decode(words);
+    EXPECT_NE(inst, nullptr) << c.label << ": decode failed";
+    auto out = fx.run(inst, SEED, exec, vcc_in);
+    delete inst;
+    return out;
+  };
+
+  for (uint64_t vcc_in : kVccPatterns) {
+    const auto scalar_out = run_mode(/*force_scalar=*/true, vcc_in);
+    const auto simd_out = run_mode(/*force_scalar=*/false, vcc_in);
+
+    // Core A/B equivalence on BOTH the destination words and the full 64-bit
+    // VCC carry/borrow output.
+    EXPECT_EQ(scalar_out.dst, simd_out.dst)
+        << c.label << " vcc_in=0x" << std::hex << vcc_in << " (exec=0x" << exec
+        << "): SIMD dst diverged from scalar body";
+    EXPECT_EQ(scalar_out.vcc, simd_out.vcc)
+        << c.label << " vcc_in=0x" << std::hex << vcc_in << " (exec=0x" << exec
+        << "): SIMD VCC diverged from scalar body";
 
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       const bool active = (exec >> lane) & 1ULL;
       if (!active) {
-        EXPECT_EQ(out.dst[lane], DST_SENTINEL)
+        EXPECT_EQ(simd_out.dst[lane], DST_SENTINEL)
+            << c.label << ": clobbered inactive dst lane " << lane;
+        EXPECT_EQ(scalar_out.dst[lane], DST_SENTINEL)
             << c.label << ": clobbered inactive dst lane " << lane;
       }
     }
     // Inactive EXEC lanes must keep their incoming VCC bit.
     const uint64_t inactive = ~exec;
-    EXPECT_EQ(out.vcc & inactive, vcc_in & inactive)
+    EXPECT_EQ(simd_out.vcc & inactive, vcc_in & inactive)
+        << c.label << " vcc_in=0x" << std::hex << vcc_in << ": altered an inactive-lane VCC bit";
+    EXPECT_EQ(scalar_out.vcc & inactive, vcc_in & inactive)
         << c.label << " vcc_in=0x" << std::hex << vcc_in << ": altered an inactive-lane VCC bit";
   }
-  delete inst;
 }
 
 TEST(Vop2CarrySimdCorrectness, FullExecMask) {

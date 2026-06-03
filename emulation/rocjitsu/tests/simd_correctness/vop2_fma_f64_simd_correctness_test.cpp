@@ -9,16 +9,16 @@
 /// so the SIMD path reads/writes through the split lo/hi pointer pair
 /// (util::load64 / masked_store64). The first test directly validates that
 /// layout assumption (write_lane64 round-trips through load64 via the operand's
-/// 64-bit lane pointers). The process runs one fixed execute mode
-/// (RJ_FORCE_SCALAR, immutable); the destination f64 pair is recorded (lo,hi per
-/// lane) and the scalar-vs-SIMD equivalence is asserted by diffing the two runs
-/// (see simd_ab.h / the simd_ab_diff CTest entry). util::stdx::fma over
-/// native<double> is bit-exact to std::fma for finite/Inf inputs; NaN-result
-/// lanes may diverge in NaN payload (accepted), so those lanes are overwritten
-/// with a fixed sentinel before recording — NaN-ness of the result is
-/// deterministic from the inputs, so both runs mask the same lanes.
+/// 64-bit lane pointers). The v_fmac_f64 check runs TWICE in the same process
+/// -- once forcing the scalar body, once the SIMD fast path, with identical
+/// inputs/EXEC -- and the destination f64 results are asserted equal per
+/// non-skipped lane (util::set_force_scalar_for_testing flips the gate
+/// in-process). util::stdx::fma over native<double> is bit-exact to std::fma for
+/// finite/Inf inputs; NaN-result lanes may diverge in NaN payload (accepted), so
+/// those lanes are excluded from the comparison — NaN-ness of the result is
+/// deterministic from the inputs, so both runs skip the same lanes.
 
-#include "simd_ab.h"
+#include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -47,9 +47,6 @@ constexpr uint32_t SGPRS_PER_WF = 106;
 constexpr uint32_t VGPRS_PER_WF = 256;
 [[maybe_unused]] constexpr uint64_t LO_SENTINEL = 0xDEADBEEFu;
 [[maybe_unused]] constexpr uint64_t HI_SENTINEL = 0xFEEDFACEu;
-// Fixed marker written over accepted-divergence (NaN-result) lanes before
-// recording, so the cross-run diff ignores them identically in both runs.
-constexpr uint32_t SKIP_SENTINEL = 0xA11D1FFFu;
 
 // CDNA4 VOP2: opcode[30:25], vdst[24:17], vsrc1[16:9], src0[8:0]. Bit 31 = 0.
 constexpr uint32_t vop2_encode(uint32_t opcode, uint32_t vdst, uint32_t vsrc1, uint32_t src0) {
@@ -163,35 +160,44 @@ TEST(Vop2FmaF64SimdCorrectness, LaneLayoutRoundTrip) {
   }
 }
 
+// Restores the process force-scalar gate on scope exit so flipping it for an
+// in-process A/B comparison cannot leak into later tests in the same process.
+struct ForceScalarGuard {
+  bool orig;
+  ForceScalarGuard() : orig(util::force_scalar()) {}
+  ~ForceScalarGuard() { util::set_force_scalar_for_testing(orig); }
+};
+
 void check_fmac(uint64_t exec) {
-  Fixture fx;
-  ASSERT_NE(fx.cu, nullptr);
-  ASSERT_NE(fx.wf, nullptr);
-  // v_fmac_f64 = VOP2 op 4. src0 = v0:v1 (enc 256), vsrc1 = v2:v3, vdst = v4:v5.
-  uint32_t enc = vop2_encode(/*opcode=*/4, /*vdst=*/4, /*vsrc1=*/2, /*src0=*/256);
-  uint32_t words[4] = {enc, 0u, 0u, 0u};
-  Instruction *inst = fx.decoder->decode(words);
-  ASSERT_NE(inst, nullptr) << "v_fmac_f64 decode failed";
+  ForceScalarGuard gate_guard;
 
-  auto out = fx.run(inst, exec);
+  auto run_mode = [&](bool force_scalar) -> std::array<uint64_t, WF_SIZE> {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx;
+    EXPECT_NE(fx.cu, nullptr);
+    EXPECT_NE(fx.wf, nullptr);
+    // v_fmac_f64 = VOP2 op 4. src0 = v0:v1 (enc 256), vsrc1 = v2:v3, vdst = v4:v5.
+    uint32_t enc = vop2_encode(/*opcode=*/4, /*vdst=*/4, /*vsrc1=*/2, /*src0=*/256);
+    uint32_t words[4] = {enc, 0u, 0u, 0u};
+    Instruction *inst = fx.decoder->decode(words);
+    EXPECT_NE(inst, nullptr) << "v_fmac_f64 decode failed";
+    auto out = fx.run(inst, exec);
+    delete inst;
+    return out;
+  };
 
-  // Record the f64 dst as (lo, hi) word pairs. Lanes whose result is NaN carry a
-  // possibly-different NaN payload between the packed and scalar bodies (accepted
-  // divergence); NaN-ness of the result is deterministic from the inputs, so both
-  // runs mask the same lanes with a fixed sentinel and the diff stays meaningful.
-  uint32_t words_out[2 * WF_SIZE];
+  const auto scalar_out = run_mode(/*force_scalar=*/true);
+  const auto simd_out = run_mode(/*force_scalar=*/false);
+
+  // Core A/B equivalence per non-skipped lane. NaN-result lanes carry a
+  // possibly-different NaN payload and are excluded identically in both runs
+  // (NaN-ness of the result is deterministic from the inputs).
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-    uint64_t v = out[lane];
-    if (is_f64_nan(v)) {
-      words_out[2 * lane] = SKIP_SENTINEL;
-      words_out[2 * lane + 1] = SKIP_SENTINEL;
-    } else {
-      words_out[2 * lane] = static_cast<uint32_t>(v);
-      words_out[2 * lane + 1] = static_cast<uint32_t>(v >> 32);
-    }
+    if (is_f64_nan(scalar_out[lane]) || is_f64_nan(simd_out[lane]))
+      continue;
+    EXPECT_EQ(scalar_out[lane], simd_out[lane])
+        << "v_fmac_f64 lane " << lane << ": SIMD path diverged from scalar body";
   }
-  simd_ab::record("v_fmac_f64", exec, words_out, 2 * WF_SIZE);
-  delete inst;
 }
 
 TEST(Vop2FmaF64SimdCorrectness, FullExecMask) {

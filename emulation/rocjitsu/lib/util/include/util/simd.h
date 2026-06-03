@@ -49,10 +49,8 @@ inline bool g_force_scalar = init_force_scalar();
 /// test-only seam (util/simd_test_hooks.h) may override it in-process so a
 /// single test can drive both the scalar and SIMD execute paths and compare.
 ///
-/// A/B testing can also select the mode by setting `RJ_FORCE_SCALAR` before
-/// launch (the SIMD correctness suite is run twice and the per-case result
-/// dumps diffed; see tests/simd_ab.h), and e2e runs force the scalar codepath
-/// the same way without recompiling.
+/// e2e runs force the scalar codepath by setting `RJ_FORCE_SCALAR` before
+/// launch, without recompiling.
 inline bool force_scalar() { return detail::g_force_scalar; }
 
 #if __has_include(<experimental/simd>)

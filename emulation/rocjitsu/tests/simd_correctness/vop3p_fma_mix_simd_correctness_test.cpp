@@ -3,14 +3,14 @@
 
 /// @file vop3p_fma_mix_simd_correctness_test.cpp
 /// @brief Bit-identity check (SIMD fast path vs scalar body) for the six VOP3P
-/// fma_mix / mad_mix mixed-precision ops. The process runs one fixed execute
-/// mode (RJ_FORCE_SCALAR, immutable); each result is recorded and the
-/// scalar-vs-SIMD equivalence is asserted by diffing the two runs (see simd_ab.h
-/// / the simd_ab_diff CTest entry). NaN-input lanes carry an accepted
-/// NaN-payload divergence and are overwritten with a fixed sentinel before
-/// recording — the skip condition is computed from the inputs, identical in both
-/// runs, so both mask the same lanes. In-process inactive lanes must keep the
-/// dst seed. The six ops:
+/// fma_mix / mad_mix mixed-precision ops. Each case runs TWICE in the same
+/// process -- once forcing the scalar body, once the SIMD fast path, with
+/// identical inputs/EXEC -- and the results are asserted equal per active,
+/// non-skipped lane (util::set_force_scalar_for_testing flips the gate
+/// in-process). NaN-input lanes carry an accepted NaN-payload divergence and are
+/// excluded from the comparison — the skip condition is computed from the
+/// inputs, identical in both runs, so both skip the same lanes. In-process
+/// inactive lanes must keep the dst seed. The six ops:
 ///   - RDNA3+ : v_fma_mix_f32 / v_fma_mixlo_f16 / v_fma_mixhi_f16
 ///   - CDNA1-4: v_mad_mix_f32 / v_mad_mixlo_f16 / v_mad_mixhi_f16
 ///
@@ -32,7 +32,7 @@
 /// different payloads (accepted divergence, mirroring the existing VOP3
 /// ternary tests).
 
-#include "simd_ab.h"
+#include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -62,9 +62,14 @@ constexpr uint32_t SGPRS_PER_WF = 106;
 constexpr uint32_t VGPRS_PER_WF = 256;
 constexpr uint32_t kDstVgpr = 6;
 constexpr uint32_t DST_SENTINEL = 0xCDCDCDCDu;
-// Fixed marker written over accepted-divergence (NaN-input) lanes before
-// recording, so the cross-run diff ignores them identically in both runs.
-constexpr uint32_t SKIP_SENTINEL = 0xA11D1FFFu;
+
+// Restores the process force-scalar gate on scope exit so flipping it for an
+// in-process A/B comparison cannot leak into later tests in the same process.
+struct ForceScalarGuard {
+  bool orig;
+  ForceScalarGuard() : orig(util::force_scalar()) {}
+  ~ForceScalarGuard() { util::set_force_scalar_for_testing(orig); }
+};
 
 // VOP3P encoding word0 layout (shared between CDNA4 and RDNA3 except for the
 // width of the encoding marker): bits 0-7 vdst, 8-10 neg_hi, 11-13 op_sel,
@@ -319,30 +324,41 @@ bool input_lane_is_nan(uint32_t raw0, uint32_t raw1, uint32_t raw2, bool widen0,
 }
 
 template <uint32_t WF_SIZE, int ArchTag>
-void check_combo(Fixture<WF_SIZE, ArchTag> &fx, uint32_t opcode, const ModCombo &mc, uint64_t exec,
-                 uint32_t dst_seed, const char *label) {
-  uint32_t words[4] = {0u, 0u, 0u, 0u};
-  if constexpr (ArchTag == 0) {
-    vop3p_encode_rdna3(opcode, kDstVgpr, /*neg_hi=*/0, mc.op_sel, mc.op_sel_hi_2, mc.clamp,
-                       /*src0=*/256, /*src1=*/257, /*src2=*/258, mc.op_sel_hi, mc.neg, words);
-  } else {
-    vop3p_encode_cdna4(opcode, kDstVgpr, /*neg_hi=*/0, mc.op_sel, mc.op_sel_hi_2, mc.clamp,
-                       /*src0=*/256, /*src1=*/257, /*src2=*/258, mc.op_sel_hi, mc.neg, words);
-  }
-  Instruction *inst = fx.decoder->decode(words);
-  ASSERT_NE(inst, nullptr) << label << " decode failed";
+void check_combo(uint32_t opcode, const ModCombo &mc, uint64_t exec, uint32_t dst_seed,
+                 const char *label) {
   const bool widen0 = (mc.op_sel_hi & 1u) != 0;
   const bool widen1 = ((mc.op_sel_hi >> 1) & 1u) != 0;
   const bool widen2 = mc.op_sel_hi_2 != 0;
-  for (uint32_t rot = 0; rot < 4; ++rot) {
-    auto out = fx.run(inst, rot, widen0, widen1, widen2, exec, dst_seed);
 
-    // Mask NaN-input lanes (accepted NaN-payload divergence). The skip condition
-    // is computed from the inputs, identical in both runs.
-    uint32_t words_out[WF_SIZE];
+  auto run_mode = [&](bool force_scalar, uint32_t rot) -> std::array<uint32_t, WF_SIZE> {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture<WF_SIZE, ArchTag> fx;
+    EXPECT_NE(fx.cu, nullptr);
+    EXPECT_NE(fx.wf, nullptr);
+    uint32_t words[4] = {0u, 0u, 0u, 0u};
+    if constexpr (ArchTag == 0) {
+      vop3p_encode_rdna3(opcode, kDstVgpr, /*neg_hi=*/0, mc.op_sel, mc.op_sel_hi_2, mc.clamp,
+                         /*src0=*/256, /*src1=*/257, /*src2=*/258, mc.op_sel_hi, mc.neg, words);
+    } else {
+      vop3p_encode_cdna4(opcode, kDstVgpr, /*neg_hi=*/0, mc.op_sel, mc.op_sel_hi_2, mc.clamp,
+                         /*src0=*/256, /*src1=*/257, /*src2=*/258, mc.op_sel_hi, mc.neg, words);
+    }
+    Instruction *inst = fx.decoder->decode(words);
+    EXPECT_NE(inst, nullptr) << label << " decode failed";
+    auto out = fx.run(inst, rot, widen0, widen1, widen2, exec, dst_seed);
+    delete inst;
+    return out;
+  };
+
+  for (uint32_t rot = 0; rot < 4; ++rot) {
+    const auto scalar_out = run_mode(/*force_scalar=*/true, rot);
+    const auto simd_out = run_mode(/*force_scalar=*/false, rot);
+
+    // Core A/B equivalence per active, non-skipped lane. NaN-input lanes carry an
+    // accepted NaN-payload divergence and are excluded identically in both runs
+    // (the skip condition is input-derived).
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       const bool active = (exec >> lane) & 1ULL;
-      bool skip = false;
       if (active) {
         uint32_t i0 = (lane + rot) % kSrcA.size();
         uint32_t i1 = (lane + 2 * rot + 3) % kSrcA.size();
@@ -350,34 +366,25 @@ void check_combo(Fixture<WF_SIZE, ArchTag> &fx, uint32_t opcode, const ModCombo 
         uint32_t raw0 = widen0 ? kSrcA_f16[i0] : kSrcA[i0];
         uint32_t raw1 = widen1 ? kSrcB_f16[i1] : kSrcB[i1];
         uint32_t raw2 = widen2 ? kSrcC_f16[i2] : kSrcC[i2];
-        skip = input_lane_is_nan(raw0, raw1, raw2, widen0, widen1, widen2, mc.op_sel);
-      }
-      words_out[lane] = (active && skip) ? SKIP_SENTINEL : out[lane];
-    }
-    const std::string sub = std::string(label) + ":n" + std::to_string(mc.neg) + "s" +
-                            std::to_string(mc.op_sel) + "h" + std::to_string(mc.op_sel_hi) + "H" +
-                            std::to_string(mc.op_sel_hi_2) + "c" + std::to_string(mc.clamp) + "r" +
-                            std::to_string(rot);
-    simd_ab::record(sub, exec, words_out, WF_SIZE);
-
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-      const bool active = (exec >> lane) & 1ULL;
-      if (!active) {
-        EXPECT_EQ(out[lane], dst_seed)
+        if (input_lane_is_nan(raw0, raw1, raw2, widen0, widen1, widen2, mc.op_sel))
+          continue;
+        EXPECT_EQ(scalar_out[lane], simd_out[lane])
+            << label << " rot=" << rot << " lane=" << lane << ": SIMD path diverged from scalar";
+      } else {
+        EXPECT_EQ(simd_out[lane], dst_seed)
+            << label << " rot=" << rot << " lane=" << lane << ": clobbered inactive lane";
+        EXPECT_EQ(scalar_out[lane], dst_seed)
             << label << " rot=" << rot << " lane=" << lane << ": clobbered inactive lane";
       }
     }
   }
-  delete inst;
 }
 
 template <uint32_t WF_SIZE, int ArchTag>
 void check_op(uint32_t opcode, uint64_t exec, uint32_t dst_seed, const char *label) {
-  Fixture<WF_SIZE, ArchTag> fx;
-  ASSERT_NE(fx.cu, nullptr);
-  ASSERT_NE(fx.wf, nullptr);
+  ForceScalarGuard gate_guard;
   for (const auto &mc : kModCombos)
-    check_combo<WF_SIZE, ArchTag>(fx, opcode, mc, exec, dst_seed, label);
+    check_combo<WF_SIZE, ArchTag>(opcode, mc, exec, dst_seed, label);
 }
 
 constexpr uint32_t kVop3pOpFmaMixF32 = 32;

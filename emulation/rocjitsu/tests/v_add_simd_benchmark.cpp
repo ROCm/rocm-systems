@@ -7,7 +7,7 @@
 /// immutable), so each run times one mode and reports ns/instruction. Compare
 /// SIMD vs scalar throughput by running twice: `RJ_FORCE_SCALAR=1` (scalar)
 /// then unset (SIMD). Scalar-vs-SIMD bit-equivalence is verified separately by
-/// the simd_ab_diff CTest job, not here.
+/// the *SimdCorrectness* suites (in-process double-run + EXPECT_EQ), not here.
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -154,10 +154,11 @@ void run_words(const char *label, uint32_t w0, uint32_t w1, bool sanitize_finite
 
   constexpr uint64_t SEED = 0xC0FFEE'1234'5678ULL;
 
-  // force_scalar() is immutable per process, so this benchmark times whichever
-  // execute mode the process is in. Scalar-vs-SIMD bit-equivalence is checked
-  // separately by the simd_ab_diff CTest job. To compare throughput, run the
-  // benchmark twice: `RJ_FORCE_SCALAR=1 ...` (scalar) and unset (SIMD).
+  // This benchmark times whichever execute mode the process starts in (seeded
+  // from RJ_FORCE_SCALAR). Scalar-vs-SIMD bit-equivalence is checked separately
+  // by the *SimdCorrectness* suites (in-process double-run + EXPECT_EQ). To
+  // compare throughput, run the benchmark twice: `RJ_FORCE_SCALAR=1 ...`
+  // (scalar) and unset (SIMD).
   const char *mode = amdgpu::simd_force_scalar() ? "scalar" : "simd";
   ModeStats s = time_mode(fx, inst, SEED, sanitize_finite);
 

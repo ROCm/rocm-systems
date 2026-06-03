@@ -5,11 +5,11 @@
 /// @brief Bit-identity check (SIMD fast path vs scalar body) for the RDNA-only
 /// VOP1 / VOP2 / VOP3 aliases routed into existing SIMD glue tables in the
 /// 2026-05-29 sweep slice. RDNA3 fixture (wave32, encoding markers VOP3=0x35).
-/// The process runs one fixed execute mode (RJ_FORCE_SCALAR, immutable); the
-/// destination VGPR (and VCC for the carry forms) is recorded and the
-/// scalar-vs-SIMD equivalence is asserted by diffing the two runs (see simd_ab.h
-/// / the simd_ab_diff CTest entry). In-process inactive lanes must keep the
-/// sentinel.
+/// Each case runs TWICE in the same process -- once forcing the scalar body,
+/// once the SIMD fast path, with identical inputs/EXEC/VCC-in -- and the
+/// scalar-vs-SIMD equivalence on the destination VGPR (and VCC for the carry
+/// forms) is asserted with EXPECT_EQ (util::set_force_scalar_for_testing flips
+/// the gate in-process). In-process inactive lanes must keep the sentinel.
 ///
 /// Ops covered:
 ///   VOP2 (6, RDNA-only naming):
@@ -26,7 +26,7 @@
 ///     modifiers — verified inline in the regen for this slice) + 2 ints
 ///     missing from CDNA4 (v_minmax / v_maxmin u32/i32 are RDNA3+ only).
 
-#include "simd_ab.h"
+#include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -189,60 +189,78 @@ const uint64_t kVccPatterns[] = {
     0x0000000055555555ULL, 0x000000000123456FULL,
 };
 
-void check_case(const VopCase &c, uint64_t exec) {
-  Fixture fx;
-  ASSERT_NE(fx.cu, nullptr);
-  ASSERT_NE(fx.wf, nullptr);
+// Restores the process force-scalar gate on scope exit so flipping it for an
+// in-process A/B comparison cannot leak into later tests in the same process.
+struct ForceScalarGuard {
+  bool orig;
+  ForceScalarGuard() : orig(util::force_scalar()) {}
+  ~ForceScalarGuard() { util::set_force_scalar_for_testing(orig); }
+};
 
-  uint32_t words[4] = {0u, 0u, 0u, 0u};
-  switch (c.kind) {
-  case VopCase::Kind::VOP1:
-    words[0] = vop1_encode(c.opcode, /*vdst=*/kDstVgpr, /*src0=*/SRC0_VGPR);
-    break;
-  case VopCase::Kind::VOP2:
-  case VopCase::Kind::VOP2_CARRY:
-    words[0] =
-        vop2_encode(c.opcode, /*vdst=*/kDstVgpr, /*vsrc1=*/(SRC1_VGPR & 0xFFu), /*src0=*/SRC0_VGPR);
-    break;
-  case VopCase::Kind::VOP3_UNARY:
-    vop3_encode(c.opcode, kDstVgpr, SRC0_VGPR, /*src1=*/0, /*src2=*/0, words);
-    break;
-  case VopCase::Kind::VOP3_TERNARY:
-    vop3_encode(c.opcode, kDstVgpr, SRC0_VGPR, SRC1_VGPR, SRC2_VGPR, words);
-    break;
-  }
-  Instruction *inst = fx.decoder->decode(words);
-  ASSERT_NE(inst, nullptr) << c.name << ": decode failed";
+void check_case(const VopCase &c, uint64_t exec) {
+  ForceScalarGuard gate_guard;
 
   const bool has_vcc_in = (c.kind == VopCase::Kind::VOP2_CARRY);
-  const uint64_t *vcc_set = has_vcc_in ? kVccPatterns : kVccPatterns;
+
+  // Runs one (case, vcc_in, rot) in the requested execute mode (fresh Fixture +
+  // decode per run isolates VGPR/VCC state).
+  auto run_mode = [&](bool force_scalar, uint64_t vcc_in, uint32_t rot) -> Fixture::Result {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx;
+    EXPECT_NE(fx.cu, nullptr);
+    EXPECT_NE(fx.wf, nullptr);
+    uint32_t words[4] = {0u, 0u, 0u, 0u};
+    switch (c.kind) {
+    case VopCase::Kind::VOP1:
+      words[0] = vop1_encode(c.opcode, /*vdst=*/kDstVgpr, /*src0=*/SRC0_VGPR);
+      break;
+    case VopCase::Kind::VOP2:
+    case VopCase::Kind::VOP2_CARRY:
+      words[0] = vop2_encode(c.opcode, /*vdst=*/kDstVgpr, /*vsrc1=*/(SRC1_VGPR & 0xFFu),
+                             /*src0=*/SRC0_VGPR);
+      break;
+    case VopCase::Kind::VOP3_UNARY:
+      vop3_encode(c.opcode, kDstVgpr, SRC0_VGPR, /*src1=*/0, /*src2=*/0, words);
+      break;
+    case VopCase::Kind::VOP3_TERNARY:
+      vop3_encode(c.opcode, kDstVgpr, SRC0_VGPR, SRC1_VGPR, SRC2_VGPR, words);
+      break;
+    }
+    Instruction *inst = fx.decoder->decode(words);
+    EXPECT_NE(inst, nullptr) << c.name << ": decode failed";
+    auto out = fx.run(inst, rot, exec, vcc_in);
+    delete inst;
+    return out;
+  };
+
   const size_t vcc_n = has_vcc_in ? std::size(kVccPatterns) : 1u;
   for (size_t v = 0; v < vcc_n; ++v) {
-    uint64_t vcc_in = vcc_set[v];
+    uint64_t vcc_in = kVccPatterns[v];
     for (uint32_t rot = 0; rot < kVals.size(); ++rot) {
-      auto out = fx.run(inst, rot, exec, vcc_in);
+      const auto scalar_out = run_mode(/*force_scalar=*/true, vcc_in, rot);
+      const auto simd_out = run_mode(/*force_scalar=*/false, vcc_in, rot);
 
-      // Record the dst words; for carry forms also the full 64-bit VCC (lo, hi).
-      // (name, vcc_in, rot) keep the line unique.
-      const std::string base =
-          std::string(c.name) + ":vcc" + std::to_string(vcc_in) + ":r" + std::to_string(rot);
-      simd_ab::record(base, exec, out.dst.data(), WF_SIZE);
+      // Core A/B equivalence on the dst; for carry forms also the full 64-bit VCC.
+      EXPECT_EQ(scalar_out.dst, simd_out.dst)
+          << c.name << " vcc=0x" << std::hex << vcc_in << " rot=" << std::dec << rot
+          << ": SIMD dst diverged from scalar body";
       if (has_vcc_in) {
-        const uint32_t vcc_words[2] = {static_cast<uint32_t>(out.vcc),
-                                       static_cast<uint32_t>(out.vcc >> 32)};
-        simd_ab::record(base + ":vcc", exec, vcc_words, 2);
+        EXPECT_EQ(scalar_out.vcc, simd_out.vcc)
+            << c.name << " vcc=0x" << std::hex << vcc_in << " rot=" << std::dec << rot
+            << ": SIMD VCC diverged from scalar body";
       }
 
       for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         const bool active = (exec >> lane) & 1ULL;
         if (!active) {
-          EXPECT_EQ(out.dst[lane], DST_SENTINEL)
+          EXPECT_EQ(simd_out.dst[lane], DST_SENTINEL)
+              << c.name << " rot=" << rot << ": clobbered inactive lane " << lane;
+          EXPECT_EQ(scalar_out.dst[lane], DST_SENTINEL)
               << c.name << " rot=" << rot << ": clobbered inactive lane " << lane;
         }
       }
     }
   }
-  delete inst;
 }
 
 TEST(VopAliasRdnaSimdCorrectness, FullExec) {

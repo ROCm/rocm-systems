@@ -8,19 +8,20 @@
 /// per-op), so the VOP3 form is bit-identical to the VOP1 form and reuses the
 /// existing try_execute_cvt_{f64_to_b32, b32_to_f64}_simd glue via a `_vop3 ->
 /// _vop1` fallback in simd_probe_line. The process runs one fixed execute mode
-/// (RJ_FORCE_SCALAR, immutable); the destination word pair is recorded and the
-/// scalar-vs-SIMD equivalence is asserted by diffing the two runs (see simd_ab.h
-/// / the simd_ab_diff CTest entry). In-process inactive lanes must stay
-/// preserved under full and partial EXEC.
+/// (RJ_FORCE_SCALAR, immutable); each case runs TWICE in the same process -- once
+/// forcing the scalar body, once the SIMD fast path, with identical inputs/EXEC
+/// -- and the destination word pairs are asserted equal with EXPECT_EQ
+/// (util::set_force_scalar_for_testing flips the gate in-process). In-process
+/// inactive lanes must stay preserved under full and partial EXEC.
 ///
 /// The float-result conversions (f32_f64 / f64_f32) are correctly rounded
 /// (vcvtpd2ps / vcvtps2pd), bit-exact for finite/Inf inputs; a NaN result may
-/// differ in payload between packed and scalar (accepted), so those lanes are
-/// overwritten with a fixed sentinel before recording — NaN-ness is
-/// deterministic from the inputs, so both runs mask the same lanes. The int
-/// conversions are exact (NaN -> 0, saturating clamp), recorded with no carve-out.
+/// differ in payload between packed and scalar (accepted), so those words are
+/// excluded from the comparison — NaN-ness is deterministic from the inputs, so
+/// both runs skip the same words. The int conversions are exact (NaN -> 0,
+/// saturating clamp), compared with no carve-out.
 
-#include "simd_ab.h"
+#include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -161,49 +162,67 @@ struct Fixture {
   }
 };
 
-void check_case(const CvtCase &c, uint64_t exec) {
-  Fixture fx;
-  ASSERT_NE(fx.cu, nullptr);
-  ASSERT_NE(fx.wf, nullptr);
-  uint32_t words[4] = {0u, 0u, 0u, 0u};
-  vop3_encode(c.opcode, /*vdst=*/2, /*src0=*/256, words);
-  Instruction *inst = fx.decoder->decode(words);
-  ASSERT_NE(inst, nullptr) << c.name << " decode failed";
-  auto out = fx.run(inst, c, exec);
+// Restores the process force-scalar gate on scope exit so flipping it for an
+// in-process A/B comparison cannot leak into later tests in the same process.
+struct ForceScalarGuard {
+  bool orig;
+  ForceScalarGuard() : orig(util::force_scalar()) {}
+  ~ForceScalarGuard() { util::set_force_scalar_for_testing(orig); }
+};
 
-  // Record the dst word pair (lo, hi). For float-result conversions a NaN-result
-  // lane carries a possibly-different NaN payload (accepted divergence); the
-  // NaN-ness is deterministic from the inputs, so both runs mask the same lanes
-  // with a fixed sentinel. For the 32-bit-dst forms the high half is the
-  // (deterministic) sentinel, recorded as-is so the high-half no-write invariant
-  // is also covered by the cross-run diff.
-  uint32_t words_out[2 * WF_SIZE];
+void check_case(const CvtCase &c, uint64_t exec) {
+  ForceScalarGuard gate_guard;
+
+  auto run_mode = [&](bool force_scalar) -> std::array<uint64_t, WF_SIZE> {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx;
+    EXPECT_NE(fx.cu, nullptr);
+    EXPECT_NE(fx.wf, nullptr);
+    uint32_t words[4] = {0u, 0u, 0u, 0u};
+    vop3_encode(c.opcode, /*vdst=*/2, /*src0=*/256, words);
+    Instruction *inst = fx.decoder->decode(words);
+    EXPECT_NE(inst, nullptr) << c.name << " decode failed";
+    auto out = fx.run(inst, c, exec);
+    delete inst;
+    return out;
+  };
+
+  const auto scalar_out = run_mode(/*force_scalar=*/true);
+  const auto simd_out = run_mode(/*force_scalar=*/false);
+
+  // Mask accepted-divergence words (float-result NaN payload, possibly differing
+  // between packed and scalar) in BOTH arrays identically, then compare word by
+  // word. For dst64 forms a NaN result masks the whole pair; for the 32-bit-dst
+  // forms only the lo word can be a float NaN (hi is the deterministic sentinel,
+  // always compared). The int conversions never set skip_nan.
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     const bool active = (exec >> lane) & 1ULL;
-    uint64_t v = out[lane];
-    uint32_t lo = static_cast<uint32_t>(v);
-    uint32_t hi = static_cast<uint32_t>(v >> 32);
+    uint32_t s_lo = static_cast<uint32_t>(scalar_out[lane]);
+    uint32_t s_hi = static_cast<uint32_t>(scalar_out[lane] >> 32);
+    uint32_t m_lo = static_cast<uint32_t>(simd_out[lane]);
+    uint32_t m_hi = static_cast<uint32_t>(simd_out[lane] >> 32);
     if (active && c.skip_nan) {
       if (c.dst64) {
-        if (is_f64_nan(v)) {
-          lo = SKIP_SENTINEL;
-          hi = SKIP_SENTINEL;
+        if (is_f64_nan(scalar_out[lane]) || is_f64_nan(simd_out[lane])) {
+          s_lo = m_lo = SKIP_SENTINEL;
+          s_hi = m_hi = SKIP_SENTINEL;
         }
-      } else if (is_f32_nan(lo)) {
-        lo = SKIP_SENTINEL;
+      } else if (is_f32_nan(s_lo) || is_f32_nan(m_lo)) {
+        s_lo = m_lo = SKIP_SENTINEL;
       }
     }
-    words_out[2 * lane] = lo;
-    words_out[2 * lane + 1] = hi;
+    EXPECT_EQ(s_lo, m_lo) << c.name << " lane " << lane << " lo: SIMD path diverged from scalar";
+    EXPECT_EQ(s_hi, m_hi) << c.name << " lane " << lane << " hi: SIMD path diverged from scalar";
   }
-  simd_ab::record(c.name, exec, words_out, 2 * WF_SIZE);
 
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     if (!(exec & (1ULL << lane))) {
-      EXPECT_EQ(out[lane], dst_sentinel(lane)) << c.name << " clobbered inactive lane " << lane;
+      EXPECT_EQ(simd_out[lane], dst_sentinel(lane))
+          << c.name << " clobbered inactive lane " << lane;
+      EXPECT_EQ(scalar_out[lane], dst_sentinel(lane))
+          << c.name << " clobbered inactive lane " << lane;
     }
   }
-  delete inst;
 }
 
 TEST(Vop3CvtF64SimdCorrectness, FullExec) {

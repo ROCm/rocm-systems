@@ -7,13 +7,13 @@
 /// src0/src1 and carries per-source abs/neg and per-instruction omod/clamp
 /// modifiers. f32 ops apply the modifiers in-vector (so the fast path fires even
 /// when modifiers are set — every abs/neg/omod/clamp combination is swept);
-/// integer/bitwise ops apply none. The process runs one fixed execute mode
-/// (RJ_FORCE_SCALAR, immutable); each (case, modifier combo) result is recorded
-/// and the scalar-vs-SIMD equivalence is asserted by diffing the two runs (see
-/// simd_ab.h / the simd_ab_diff CTest entry). In-process inactive lanes must
-/// stay preserved under full and partial EXEC.
+/// integer/bitwise ops apply none. Each (case, modifier combo) runs TWICE in the
+/// same process -- once forcing the scalar body, once the SIMD fast path, with
+/// identical inputs/EXEC -- and the two 64-lane result arrays are asserted equal
+/// with EXPECT_EQ (util::set_force_scalar_for_testing flips the gate in-process).
+/// In-process inactive lanes must stay preserved under full and partial EXEC.
 
-#include "simd_ab.h"
+#include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -193,33 +193,55 @@ struct Fixture {
   }
 };
 
+// Restores the process force-scalar gate on scope exit so flipping it for an
+// in-process A/B comparison cannot leak into later tests in the same process.
+struct ForceScalarGuard {
+  bool orig;
+  ForceScalarGuard() : orig(util::force_scalar()) {}
+  ~ForceScalarGuard() { util::set_force_scalar_for_testing(orig); }
+};
+
 void check(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32_t clamp,
            uint64_t exec) {
-  Fixture fx;
-  ASSERT_NE(fx.cu, nullptr);
-  ASSERT_NE(fx.wf, nullptr);
-  uint32_t words[4] = {0u, 0u, 0u, 0u};
-  vop3_encode(c.opcode, /*vdst=*/kDstVgpr, /*src0=*/256, /*src1=*/257, abs, neg, omod, clamp,
-              words);
-  Instruction *inst = fx.decoder->decode(words);
-  ASSERT_NE(inst, nullptr) << c.name << " decode failed";
-  auto out = fx.run(inst, c.kind, exec);
+  ForceScalarGuard gate_guard;
 
-  // Fold the modifier combo into the sublabel so each (case, mods) line is unique.
-  const std::string sub = std::string(c.name) + ":a" + std::to_string(abs) + "n" +
-                          std::to_string(neg) + "o" + std::to_string(omod) + "c" +
-                          std::to_string(clamp);
-  simd_ab::record(sub, exec, out.data(), WF_SIZE);
+  // Run the same (case, modifier combo) in both execute modes with identical
+  // deterministic inputs (fresh Fixture + decode per run isolates VGPR state).
+  auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx;
+    EXPECT_NE(fx.cu, nullptr);
+    EXPECT_NE(fx.wf, nullptr);
+    uint32_t words[4] = {0u, 0u, 0u, 0u};
+    vop3_encode(c.opcode, /*vdst=*/kDstVgpr, /*src0=*/256, /*src1=*/257, abs, neg, omod, clamp,
+                words);
+    Instruction *inst = fx.decoder->decode(words);
+    EXPECT_NE(inst, nullptr) << c.name << " decode failed";
+    auto out = fx.run(inst, c.kind, exec);
+    delete inst;
+    return out;
+  };
+
+  const auto scalar_out = run_mode(/*force_scalar=*/true);
+  const auto simd_out = run_mode(/*force_scalar=*/false);
+
+  // Core A/B equivalence: SIMD fast path must be bit-identical to the scalar
+  // body across all 64 lanes (active and inactive).
+  EXPECT_EQ(scalar_out, simd_out) << c.name << " abs=" << abs << " neg=" << neg << " omod=" << omod
+                                  << " clamp=" << clamp << " (exec=0x" << std::hex << exec
+                                  << "): SIMD path diverged from scalar body";
 
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     const bool active = (exec >> lane) & 1ULL;
     if (!active) {
-      EXPECT_EQ(out[lane], DST_SENTINEL)
+      EXPECT_EQ(simd_out[lane], DST_SENTINEL)
+          << c.name << " abs=" << abs << " neg=" << neg << " omod=" << omod << " clamp=" << clamp
+          << ": clobbered inactive lane " << lane;
+      EXPECT_EQ(scalar_out[lane], DST_SENTINEL)
           << c.name << " abs=" << abs << " neg=" << neg << " omod=" << omod << " clamp=" << clamp
           << ": clobbered inactive lane " << lane;
     }
   }
-  delete inst;
 }
 
 // f32 ops: sweep every abs/neg/omod/clamp combination.

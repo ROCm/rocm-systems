@@ -8,14 +8,15 @@
 /// per-source abs/neg and result omod/clamp in the f64 domain (the new
 /// apply_vop3_*_mod_f64 helpers), then op. Bit-exact for finite/Inf on the
 /// add/mul/cvt/sqrt ops; the min/max ops accept the standard ±0 / NaN payload
-/// divergences. The process runs one fixed execute mode (RJ_FORCE_SCALAR,
-/// immutable); the f64 dst (lo,hi per lane) is recorded and the scalar-vs-SIMD
-/// equivalence is asserted by diffing the two runs (see simd_ab.h / the
-/// simd_ab_diff CTest entry). Accepted-divergence lanes (NaN/±0-tie, all
-/// determined from the inputs) are overwritten with a fixed sentinel so both
-/// runs mask the same lanes. In-process inactive lanes must stay preserved.
+/// divergences. Each (case, mods, rot) runs TWICE in the same process -- once
+/// forcing the scalar body, once the SIMD fast path, with identical inputs/EXEC
+/// -- and the f64 dst results are asserted equal per active, non-skipped lane
+/// (util::set_force_scalar_for_testing flips the gate in-process). Accepted-
+/// divergence lanes (NaN/±0-tie, all determined from the inputs) are excluded
+/// from the comparison so both runs skip the same lanes. In-process inactive
+/// lanes must stay preserved.
 
-#include "simd_ab.h"
+#include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -41,9 +42,6 @@ using namespace rocjitsu;
 constexpr uint32_t WF_SIZE = 64;
 constexpr uint32_t SGPRS_PER_WF = 106;
 constexpr uint32_t VGPRS_PER_WF = 256;
-// Fixed marker written over accepted-divergence (NaN/±0-tie) lanes before
-// recording, so the cross-run diff ignores them identically in both runs.
-constexpr uint32_t SKIP_SENTINEL = 0xA11D1FFFu;
 constexpr uint32_t kDstVgpr = 4; // v4:v5
 
 constexpr uint64_t dst_sentinel(uint32_t lane) {
@@ -147,30 +145,46 @@ struct Fixture {
   }
 };
 
+// Restores the process force-scalar gate on scope exit so flipping it for an
+// in-process A/B comparison cannot leak into later tests in the same process.
+struct ForceScalarGuard {
+  bool orig;
+  ForceScalarGuard() : orig(util::force_scalar()) {}
+  ~ForceScalarGuard() { util::set_force_scalar_for_testing(orig); }
+};
+
 void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32_t clamp,
                 uint64_t exec) {
-  Fixture fx;
-  ASSERT_NE(fx.cu, nullptr);
-  ASSERT_NE(fx.wf, nullptr);
-  uint32_t words[4] = {0u, 0u, 0u, 0u};
-  vop3_encode(c.opcode, /*vdst=*/kDstVgpr, /*src0=*/256, /*src1=*/258, abs, neg, omod, clamp,
-              words);
-  Instruction *inst = fx.decoder->decode(words);
-  ASSERT_NE(inst, nullptr) << c.name << " decode failed";
+  ForceScalarGuard gate_guard;
+
+  auto run_mode = [&](bool force_scalar, uint32_t rot) -> std::array<uint64_t, WF_SIZE> {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx;
+    EXPECT_NE(fx.cu, nullptr);
+    EXPECT_NE(fx.wf, nullptr);
+    uint32_t words[4] = {0u, 0u, 0u, 0u};
+    vop3_encode(c.opcode, /*vdst=*/kDstVgpr, /*src0=*/256, /*src1=*/258, abs, neg, omod, clamp,
+                words);
+    Instruction *inst = fx.decoder->decode(words);
+    EXPECT_NE(inst, nullptr) << c.name << " decode failed";
+    auto out = fx.run(inst, rot, exec);
+    delete inst;
+    return out;
+  };
+
   const std::size_t kRotMax = (c.kind == Kind::Una) ? 1u : kF64.size();
   for (uint32_t rot = 0; rot < kRotMax; ++rot) {
-    auto out = fx.run(inst, rot, exec);
+    const auto scalar_out = run_mode(/*force_scalar=*/true, rot);
+    const auto simd_out = run_mode(/*force_scalar=*/false, rot);
 
-    // Record the f64 dst as (lo, hi) word pairs. Accepted-divergence lanes (for
-    // min/max: NaN-input / ±0-tie; for any op: NaN result) are masked with a
-    // fixed sentinel; every skip condition is deterministic from the inputs, so
-    // both runs mask the same lanes and the diff stays meaningful on the rest.
-    uint32_t words_out[2 * WF_SIZE];
+    // Core A/B equivalence per active, non-skipped lane. Accepted-divergence
+    // lanes (for min/max: NaN-input / ±0-tie; for any op: NaN result) are
+    // excluded; every skip condition is deterministic from the inputs, so both
+    // runs skip the same lanes.
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       const bool active = (exec >> lane) & 1ULL;
-      uint64_t v = out[lane];
-      bool skip = false;
       if (active) {
+        bool skip = false;
         if (c.kind == Kind::BinMinMax) {
           uint64_t a = kF64[lane % kF64.size()];
           uint64_t b = kF64[(lane + rot) % kF64.size()];
@@ -179,31 +193,21 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
           if (is_f64_zero(a) && is_f64_zero(b))
             skip = true; // accepted ±0-tie divergence
         }
-        if (is_f64_nan(v))
+        if (is_f64_nan(scalar_out[lane]) || is_f64_nan(simd_out[lane]))
           skip = true; // NaN result: payload may differ
-      }
-      if (active && skip) {
-        words_out[2 * lane] = SKIP_SENTINEL;
-        words_out[2 * lane + 1] = SKIP_SENTINEL;
+        if (skip)
+          continue;
+        EXPECT_EQ(scalar_out[lane], simd_out[lane])
+            << c.name << " a" << abs << "n" << neg << "o" << omod << "c" << clamp << "r" << rot
+            << " lane " << lane << ": SIMD path diverged from scalar body";
       } else {
-        words_out[2 * lane] = static_cast<uint32_t>(v);
-        words_out[2 * lane + 1] = static_cast<uint32_t>(v >> 32);
-      }
-    }
-    const std::string sub = std::string(c.name) + ":a" + std::to_string(abs) + "n" +
-                            std::to_string(neg) + "o" + std::to_string(omod) + "c" +
-                            std::to_string(clamp) + "r" + std::to_string(rot);
-    simd_ab::record(sub, exec, words_out, 2 * WF_SIZE);
-
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-      const bool active = (exec >> lane) & 1ULL;
-      if (!active) {
-        EXPECT_EQ(out[lane], dst_sentinel(lane))
+        EXPECT_EQ(simd_out[lane], dst_sentinel(lane))
+            << c.name << " abs=" << abs << " neg=" << neg << ": clobbered inactive lane " << lane;
+        EXPECT_EQ(scalar_out[lane], dst_sentinel(lane))
             << c.name << " abs=" << abs << " neg=" << neg << ": clobbered inactive lane " << lane;
       }
     }
   }
-  delete inst;
 }
 
 // Binary sweep: 4 abs combos × 4 neg combos × 4 omod × 2 clamp × all rotations.

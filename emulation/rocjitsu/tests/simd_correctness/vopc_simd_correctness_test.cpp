@@ -6,16 +6,17 @@
 /// compares wired into SIMD_VOPC / SIMD_VOPC64: the f32/f16/f64 relations
 /// (eq/ge/gt/le/lg/lt/neq/nge/ngt/nle/nlg/nlt/o/u/f/tru) and the
 /// i32/u32/i16/u16/i64/u64 relations (eq/ge/gt/le/lt/ne/f/t). Each writes one bit
-/// per active EXEC lane into VCC, preserving inactive bits. The process runs one
-/// fixed execute mode (RJ_FORCE_SCALAR, immutable); the full 64-bit VCC is
-/// recorded (as two words) per (opcode, vcc_in) and the scalar-vs-SIMD
-/// equivalence is asserted by diffing the two runs (see simd_ab.h / the
-/// simd_ab_diff CTest entry). In-process inactive-lane VCC bits must stay
+/// per active EXEC lane into VCC, preserving inactive bits. Each (opcode,
+/// vcc_in) runs TWICE in the same process -- once forcing the scalar body, once
+/// the SIMD fast path, with identical inputs/EXEC/VCC-in -- and the full 64-bit
+/// VCC compare results are asserted equal with EXPECT_EQ
+/// (util::set_force_scalar_for_testing flips the gate in-process). In-process
+/// inactive-lane VCC bits must stay
 /// preserved under full and partial EXEC. The 64-bit relations exercise the
 /// split lo/hi VGPR-pair read path. Inputs seed NaN/±Inf/±0/denorm (floats) and
 /// signed/extreme boundaries (ints); float compares are bit-exact in both modes.
 
-#include "simd_ab.h"
+#include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -156,32 +157,52 @@ std::vector<VopcCase> all_cases() {
   return cs;
 }
 
+// Restores the process force-scalar gate on scope exit so flipping it for an
+// in-process A/B comparison cannot leak into later tests in the same process.
+struct ForceScalarGuard {
+  bool orig;
+  ForceScalarGuard() : orig(util::force_scalar()) {}
+  ~ForceScalarGuard() { util::set_force_scalar_for_testing(orig); }
+};
+
 void check_all(uint64_t exec) {
-  Fixture fx;
-  ASSERT_NE(fx.cu, nullptr);
-  ASSERT_NE(fx.wf, nullptr);
+  ForceScalarGuard gate_guard;
+
   const uint64_t kVcc[] = {0x0000000000000000ULL, 0xFFFFFFFFFFFFFFFFULL, 0xA5A5A5A5A5A5A5A5ULL};
-  for (const auto &c : all_cases()) {
+
+  // Runs one (case, vcc_in) in the requested execute mode (fresh Fixture +
+  // decode per run isolates VGPR/VCC state).
+  auto run_mode = [&](bool force_scalar, const VopcCase &c, uint64_t vcc_in) -> uint64_t {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx;
+    EXPECT_NE(fx.cu, nullptr);
+    EXPECT_NE(fx.wf, nullptr);
     // 64-bit operands span a VGPR pair: vsrc1 = v2:v3, else vsrc1 = v1.
     uint32_t vsrc1 = is_64bit(c.kind) ? 2u : 1u;
     uint32_t enc = vopc_encode(c.opcode, /*src0=*/256, vsrc1);
     uint32_t words[4] = {enc, 0u, 0u, 0u};
     Instruction *inst = fx.decoder->decode(words);
-    ASSERT_NE(inst, nullptr) << "VOPC opcode " << c.opcode << " decode failed";
-    for (uint64_t vcc_in : kVcc) {
-      uint64_t vcc = fx.run(inst, c.kind, exec, vcc_in);
+    EXPECT_NE(inst, nullptr) << "VOPC opcode " << c.opcode << " decode failed";
+    uint64_t vcc = fx.run(inst, c.kind, exec, vcc_in);
+    delete inst;
+    return vcc;
+  };
 
-      // Record the full 64-bit VCC as two words; (opcode, vcc_in) keep the line
-      // unique. The cross-run diff covers the compare result.
-      const std::string sub = "op" + std::to_string(c.opcode) + ":vcc_in" + std::to_string(vcc_in);
-      const uint32_t vcc_words[2] = {static_cast<uint32_t>(vcc), static_cast<uint32_t>(vcc >> 32)};
-      simd_ab::record(sub, exec, vcc_words, 2);
+  for (const auto &c : all_cases()) {
+    for (uint64_t vcc_in : kVcc) {
+      const uint64_t scalar_vcc = run_mode(/*force_scalar=*/true, c, vcc_in);
+      const uint64_t simd_vcc = run_mode(/*force_scalar=*/false, c, vcc_in);
+
+      // Core A/B equivalence on the full 64-bit VCC compare result.
+      EXPECT_EQ(scalar_vcc, simd_vcc) << "VOPC opcode " << c.opcode << " vcc_in=0x" << std::hex
+                                      << vcc_in << ": SIMD VCC diverged from scalar body";
 
       const uint64_t inactive = ~exec;
-      EXPECT_EQ(vcc & inactive, vcc_in & inactive)
+      EXPECT_EQ(simd_vcc & inactive, vcc_in & inactive)
+          << "VOPC opcode " << c.opcode << ": altered an inactive-lane VCC bit";
+      EXPECT_EQ(scalar_vcc & inactive, vcc_in & inactive)
           << "VOPC opcode " << c.opcode << ": altered an inactive-lane VCC bit";
     }
-    delete inst;
   }
 }
 

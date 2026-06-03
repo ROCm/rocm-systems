@@ -4,9 +4,10 @@
 /// @file vop3p_pk_binary_int_simd_correctness_test.cpp
 /// @brief Bit-identity check (SIMD fast path vs scalar body) for the VOP3P
 /// packed-16 integer binary family wired into SIMD_VOP3P_PK_BINARY_INT on CDNA4.
-/// The process runs one fixed execute mode (RJ_FORCE_SCALAR, immutable); each
-/// (case, rot) result is recorded and the scalar-vs-SIMD equivalence is asserted
-/// by diffing the two runs (see simd_ab.h / the simd_ab_diff CTest entry).
+/// Each (case, rot) runs TWICE in the same process -- once forcing the scalar
+/// body, once the SIMD fast path, with identical inputs/EXEC -- and the two
+/// 64-lane result arrays are asserted equal with EXPECT_EQ
+/// (util::set_force_scalar_for_testing flips the gate in-process).
 /// In-process inactive lanes must keep the sentinel. Ops covered:
 ///   v_pk_add_u16 / v_pk_add_i16 / v_pk_sub_u16 / v_pk_sub_i16
 ///   v_pk_mul_lo_u16
@@ -20,7 +21,7 @@
 /// shift-saturation, and identical-pair cases on both halves
 /// independently.
 
-#include "simd_ab.h"
+#include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -147,32 +148,54 @@ struct Fixture {
   }
 };
 
-void check_case(const Case &c, uint64_t exec) {
-  Fixture fx;
-  ASSERT_NE(fx.cu, nullptr);
-  ASSERT_NE(fx.wf, nullptr);
-  uint32_t words[2] = {0u, 0u};
-  if (c.ternary)
-    vop3p_encode_default_ternary(c.opcode, kDstVgpr, /*src0=*/256, /*src1=*/257, /*src2=*/258,
-                                 words);
-  else
-    vop3p_encode_default_binary(c.opcode, kDstVgpr, /*src0=*/256, /*src1=*/257, words);
-  Instruction *inst = fx.decoder->decode(words);
-  ASSERT_NE(inst, nullptr) << c.name << " decode failed";
-  for (uint32_t rot = 0; rot < kVals.size(); ++rot) {
-    auto out = fx.run(inst, rot, exec);
+// Restores the process force-scalar gate on scope exit so flipping it for an
+// in-process A/B comparison cannot leak into later tests in the same process.
+struct ForceScalarGuard {
+  bool orig;
+  ForceScalarGuard() : orig(util::force_scalar()) {}
+  ~ForceScalarGuard() { util::set_force_scalar_for_testing(orig); }
+};
 
-    simd_ab::record(std::string(c.name) + ":r" + std::to_string(rot), exec, out.data(), WF_SIZE);
+void check_case(const Case &c, uint64_t exec) {
+  ForceScalarGuard gate_guard;
+
+  // Runs one (case, rot) in the requested execute mode (fresh Fixture + decode
+  // per run isolates VGPR state).
+  auto run_mode = [&](bool force_scalar, uint32_t rot) -> std::array<uint32_t, WF_SIZE> {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx;
+    EXPECT_NE(fx.cu, nullptr);
+    EXPECT_NE(fx.wf, nullptr);
+    uint32_t words[2] = {0u, 0u};
+    if (c.ternary)
+      vop3p_encode_default_ternary(c.opcode, kDstVgpr, /*src0=*/256, /*src1=*/257, /*src2=*/258,
+                                   words);
+    else
+      vop3p_encode_default_binary(c.opcode, kDstVgpr, /*src0=*/256, /*src1=*/257, words);
+    Instruction *inst = fx.decoder->decode(words);
+    EXPECT_NE(inst, nullptr) << c.name << " decode failed";
+    auto out = fx.run(inst, rot, exec);
+    delete inst;
+    return out;
+  };
+
+  for (uint32_t rot = 0; rot < kVals.size(); ++rot) {
+    const auto scalar_out = run_mode(/*force_scalar=*/true, rot);
+    const auto simd_out = run_mode(/*force_scalar=*/false, rot);
+
+    EXPECT_EQ(scalar_out, simd_out) << c.name << " rot=" << rot << " (exec=0x" << std::hex << exec
+                                    << "): SIMD path diverged from scalar body";
 
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       const bool active = (exec >> lane) & 1ULL;
       if (!active) {
-        EXPECT_EQ(out[lane], DST_SENTINEL)
+        EXPECT_EQ(simd_out[lane], DST_SENTINEL)
+            << c.name << " rot=" << rot << ": clobbered inactive lane " << lane;
+        EXPECT_EQ(scalar_out[lane], DST_SENTINEL)
             << c.name << " rot=" << rot << ": clobbered inactive lane " << lane;
       }
     }
   }
-  delete inst;
 }
 
 TEST(Vop3pPkBinaryIntSimdCorrectness, FullExec) {

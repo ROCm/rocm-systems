@@ -6,12 +6,12 @@
 /// mixed-width VOP3 ldexp ops on CDNA4: v_ldexp_f32 (f32 src0 + int32 src1
 /// exp) and v_ldexp_f64 (f64 src0 + int32 src1 exp). stdx::ldexp is bit-exact
 /// to std::ldexp for every input incl. NaN (proven in the VOP2 v_ldexp_f16
-/// path), so no carve-out needed. The process runs one fixed execute mode
-/// (RJ_FORCE_SCALAR, immutable); each (case, mods, rot) result is recorded and
-/// the scalar-vs-SIMD equivalence is asserted by diffing the two runs (see
-/// simd_ab.h / the simd_ab_diff CTest entry).
+/// path), so no carve-out needed. Each (case, mods, rot) runs TWICE in the same
+/// process -- once forcing the scalar body, once the SIMD fast path, with
+/// identical inputs/EXEC -- and the result arrays are asserted equal with
+/// EXPECT_EQ (util::set_force_scalar_for_testing flips the gate in-process).
 
-#include "simd_ab.h"
+#include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -144,33 +144,43 @@ struct Fixture {
   }
 };
 
+// Restores the process force-scalar gate on scope exit so flipping it for an
+// in-process A/B comparison cannot leak into later tests in the same process.
+struct ForceScalarGuard {
+  bool orig;
+  ForceScalarGuard() : orig(util::force_scalar()) {}
+  ~ForceScalarGuard() { util::set_force_scalar_for_testing(orig); }
+};
+
 void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32_t clamp,
                 uint64_t exec) {
-  Fixture fx;
-  ASSERT_NE(fx.cu, nullptr);
-  ASSERT_NE(fx.wf, nullptr);
-  const uint32_t src1_v = c.f64 ? 2u : 1u;
-  uint32_t words[4] = {0u, 0u, 0u, 0u};
-  vop3_encode(c.opcode, /*vdst=*/4, /*src0=*/256, /*src1=*/256 + src1_v, abs, neg, omod, clamp,
-              words);
-  Instruction *inst = fx.decoder->decode(words);
-  ASSERT_NE(inst, nullptr) << c.name << " decode failed";
-  for (uint32_t rot = 0; rot < kExp.size(); ++rot) {
-    auto out = fx.run(inst, c.f64, rot, exec);
+  ForceScalarGuard gate_guard;
 
-    // Record the dst result as (lo, hi) word pairs (hi is 0 for the 32-bit form,
-    // deterministic). No NaN carve-out: ldexp is bit-exact in both modes.
-    uint32_t words_out[2 * WF_SIZE];
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-      words_out[2 * lane] = static_cast<uint32_t>(out[lane]);
-      words_out[2 * lane + 1] = static_cast<uint32_t>(out[lane] >> 32);
-    }
-    const std::string sub = std::string(c.name) + ":a" + std::to_string(abs) + "n" +
-                            std::to_string(neg) + "o" + std::to_string(omod) + "c" +
-                            std::to_string(clamp) + "r" + std::to_string(rot);
-    simd_ab::record(sub, exec, words_out, 2 * WF_SIZE);
+  auto run_mode = [&](bool force_scalar, uint32_t rot) -> std::array<uint64_t, WF_SIZE> {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx;
+    EXPECT_NE(fx.cu, nullptr);
+    EXPECT_NE(fx.wf, nullptr);
+    const uint32_t src1_v = c.f64 ? 2u : 1u;
+    uint32_t words[4] = {0u, 0u, 0u, 0u};
+    vop3_encode(c.opcode, /*vdst=*/4, /*src0=*/256, /*src1=*/256 + src1_v, abs, neg, omod, clamp,
+                words);
+    Instruction *inst = fx.decoder->decode(words);
+    EXPECT_NE(inst, nullptr) << c.name << " decode failed";
+    auto out = fx.run(inst, c.f64, rot, exec);
+    delete inst;
+    return out;
+  };
+
+  // ldexp is bit-exact in both modes (no NaN carve-out), so the full result
+  // arrays must match.
+  for (uint32_t rot = 0; rot < kExp.size(); ++rot) {
+    const auto scalar_out = run_mode(/*force_scalar=*/true, rot);
+    const auto simd_out = run_mode(/*force_scalar=*/false, rot);
+    EXPECT_EQ(scalar_out, simd_out)
+        << c.name << " a" << abs << "n" << neg << "o" << omod << "c" << clamp << "r" << rot
+        << ": SIMD path diverged from scalar body";
   }
-  delete inst;
 }
 
 void check_all_mods(const Case &c, uint64_t exec) {

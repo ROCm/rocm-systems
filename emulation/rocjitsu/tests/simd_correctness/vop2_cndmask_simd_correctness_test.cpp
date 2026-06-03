@@ -6,12 +6,13 @@
 /// (CDNA4 VOP2 opcode 0): dst[lane] = (VCC bit) ? vsrc1 : src0. VCC is an input
 /// side-channel that drives the per-lane select. The test seeds distinct
 /// src0/vsrc1 values and sweeps several VCC patterns (which lanes pick vsrc1).
-/// The process runs one fixed execute mode (RJ_FORCE_SCALAR, immutable); each
-/// (vcc) result is recorded and the scalar-vs-SIMD equivalence is asserted by
-/// diffing the two runs (see simd_ab.h / the simd_ab_diff CTest entry).
+/// Each (vcc) case runs TWICE in the same process -- once forcing the scalar
+/// body, once the SIMD fast path, with identical seed/inputs/EXEC/VCC -- and the
+/// two 64-lane result arrays are asserted equal with EXPECT_EQ
+/// (util::set_force_scalar_for_testing flips the gate in-process).
 /// In-process inactive EXEC lanes must keep the dst sentinel.
 
-#include "simd_ab.h"
+#include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -94,31 +95,50 @@ const uint64_t kVccPatterns[] = {
     0x5555555555555555ULL, 0x0123456789ABCDEFULL, 0xF0F0F0F00F0F0F0FULL,
 };
 
+// Restores the process force-scalar gate on scope exit so flipping it for an
+// in-process A/B comparison cannot leak into later tests in the same process.
+struct ForceScalarGuard {
+  bool orig;
+  ForceScalarGuard() : orig(util::force_scalar()) {}
+  ~ForceScalarGuard() { util::set_force_scalar_for_testing(orig); }
+};
+
 void check_case(uint64_t exec) {
-  Fixture fx;
-  ASSERT_NE(fx.cu, nullptr);
-  ASSERT_NE(fx.wf, nullptr);
-  uint32_t enc = vop2_encode(/*opcode=*/0, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256);
-  uint32_t words[4] = {enc, 0u, 0u, 0u};
-  Instruction *inst = fx.decoder->decode(words);
-  ASSERT_NE(inst, nullptr) << "v_cndmask_b32: decode failed";
+  ForceScalarGuard gate_guard;
 
   constexpr uint64_t SEED = 0xCD'1234'5678'9AB0ULL;
-  for (uint64_t vcc : kVccPatterns) {
-    auto out = fx.run(inst, SEED, exec, vcc);
 
-    // vcc is folded into the sublabel so each (vcc) record line is unique.
-    simd_ab::record("v_cndmask_b32:vcc" + std::to_string(vcc), exec, out.data(), WF_SIZE);
+  auto run_mode = [&](bool force_scalar, uint64_t vcc) -> std::array<uint32_t, WF_SIZE> {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx;
+    EXPECT_NE(fx.cu, nullptr);
+    EXPECT_NE(fx.wf, nullptr);
+    uint32_t enc = vop2_encode(/*opcode=*/0, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256);
+    uint32_t words[4] = {enc, 0u, 0u, 0u};
+    Instruction *inst = fx.decoder->decode(words);
+    EXPECT_NE(inst, nullptr) << "v_cndmask_b32: decode failed";
+    auto out = fx.run(inst, SEED, exec, vcc);
+    delete inst;
+    return out;
+  };
+
+  for (uint64_t vcc : kVccPatterns) {
+    const auto scalar_out = run_mode(/*force_scalar=*/true, vcc);
+    const auto simd_out = run_mode(/*force_scalar=*/false, vcc);
+
+    EXPECT_EQ(scalar_out, simd_out) << "v_cndmask_b32 vcc=0x" << std::hex << vcc << " (exec=0x"
+                                    << exec << "): SIMD path diverged from scalar body";
 
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       const bool active = (exec >> lane) & 1ULL;
       if (!active) {
-        EXPECT_EQ(out[lane], DST_SENTINEL)
+        EXPECT_EQ(simd_out[lane], DST_SENTINEL)
+            << "vcc=0x" << std::hex << vcc << ": clobbered inactive lane " << std::dec << lane;
+        EXPECT_EQ(scalar_out[lane], DST_SENTINEL)
             << "vcc=0x" << std::hex << vcc << ": clobbered inactive lane " << std::dec << lane;
       }
     }
   }
-  delete inst;
 }
 
 TEST(Vop2CndmaskSimdCorrectness, FullExecMask) {

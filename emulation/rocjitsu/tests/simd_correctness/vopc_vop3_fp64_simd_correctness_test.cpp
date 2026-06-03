@@ -8,12 +8,13 @@
 /// path, apply abs/neg in the f64 domain, compare. Result merges into an
 /// SGPR-pair dst (pointed at VCC=106 here so the same harness reads via
 /// wf.vcc()). The process runs one fixed execute mode (RJ_FORCE_SCALAR,
-/// immutable); the 64-bit result is recorded (as two words) and the
-/// scalar-vs-SIMD equivalence is asserted by diffing the two runs (see simd_ab.h
-/// / the simd_ab_diff CTest entry). In-process inactive SGPR-pair bits must be
-/// preserved.
+/// immutable); each (case, abs, neg, rot, vcc_in) runs TWICE in the same process
+/// -- once forcing the scalar body, once the SIMD fast path, with identical
+/// inputs/EXEC/VCC-in -- and the 64-bit compare results are asserted equal with
+/// EXPECT_EQ (util::set_force_scalar_for_testing flips the gate in-process).
+/// In-process inactive SGPR-pair bits must be preserved.
 
-#include "simd_ab.h"
+#include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -132,35 +133,55 @@ struct Fixture {
   }
 };
 
+// Restores the process force-scalar gate on scope exit so flipping it for an
+// in-process A/B comparison cannot leak into later tests in the same process.
+struct ForceScalarGuard {
+  bool orig;
+  ForceScalarGuard() : orig(util::force_scalar()) {}
+  ~ForceScalarGuard() { util::set_force_scalar_for_testing(orig); }
+};
+
 void check_case(const Case &c, uint64_t exec) {
-  Fixture fx;
-  ASSERT_NE(fx.cu, nullptr);
-  ASSERT_NE(fx.wf, nullptr);
+  ForceScalarGuard gate_guard;
+
+  // Runs one (case, abs, neg, rot, vcc_in) in the requested execute mode (fresh
+  // Fixture + decode per run isolates VGPR/VCC state).
+  auto run_mode = [&](bool force_scalar, uint32_t abs, uint32_t neg, uint32_t rot,
+                      uint64_t vcc_in) -> uint64_t {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx;
+    EXPECT_NE(fx.cu, nullptr);
+    EXPECT_NE(fx.wf, nullptr);
+    uint32_t words[4] = {0u, 0u, 0u, 0u};
+    vop3_cmp_encode(c.opcode, /*vdst=*/kVccSdst, /*src0=*/256, /*src1=*/258, abs, neg, words);
+    Instruction *inst = fx.decoder->decode(words);
+    EXPECT_NE(inst, nullptr) << c.name << " decode failed (abs=" << abs << " neg=" << neg << ")";
+    uint64_t vcc = fx.run(inst, rot, exec, vcc_in);
+    delete inst;
+    return vcc;
+  };
+
   const uint64_t kVcc[] = {0x0000000000000000ULL, 0xFFFFFFFFFFFFFFFFULL, 0xA5A5A5A5A5A5A5A5ULL};
   for (uint32_t abs = 0; abs < 4; ++abs) {
     for (uint32_t neg = 0; neg < 4; ++neg) {
-      uint32_t words[4] = {0u, 0u, 0u, 0u};
-      vop3_cmp_encode(c.opcode, /*vdst=*/kVccSdst, /*src0=*/256, /*src1=*/258, abs, neg, words);
-      Instruction *inst = fx.decoder->decode(words);
-      ASSERT_NE(inst, nullptr) << c.name << " decode failed (abs=" << abs << " neg=" << neg << ")";
       for (uint32_t rot = 0; rot < kF64.size(); ++rot) {
         for (uint64_t vcc_in : kVcc) {
-          uint64_t vcc = fx.run(inst, rot, exec, vcc_in);
+          const uint64_t scalar_vcc = run_mode(/*force_scalar=*/true, abs, neg, rot, vcc_in);
+          const uint64_t simd_vcc = run_mode(/*force_scalar=*/false, abs, neg, rot, vcc_in);
 
-          const std::string sub = std::string(c.name) + ":a" + std::to_string(abs) + "n" +
-                                  std::to_string(neg) + ":r" + std::to_string(rot) + ":vcc" +
-                                  std::to_string(vcc_in);
-          const uint32_t vcc_words[2] = {static_cast<uint32_t>(vcc),
-                                         static_cast<uint32_t>(vcc >> 32)};
-          simd_ab::record(sub, exec, vcc_words, 2);
+          EXPECT_EQ(scalar_vcc, simd_vcc)
+              << c.name << " abs=" << abs << " neg=" << neg << " rot=" << rot << " vcc_in=0x"
+              << std::hex << vcc_in << ": SIMD result diverged from scalar body";
 
           const uint64_t inactive = ~exec;
-          EXPECT_EQ(vcc & inactive, vcc_in & inactive)
+          EXPECT_EQ(simd_vcc & inactive, vcc_in & inactive)
+              << c.name << " abs=" << abs << " neg=" << neg << " rot=" << rot
+              << ": altered inactive-lane dst bit";
+          EXPECT_EQ(scalar_vcc & inactive, vcc_in & inactive)
               << c.name << " abs=" << abs << " neg=" << neg << " rot=" << rot
               << ": altered inactive-lane dst bit";
         }
       }
-      delete inst;
     }
   }
 }

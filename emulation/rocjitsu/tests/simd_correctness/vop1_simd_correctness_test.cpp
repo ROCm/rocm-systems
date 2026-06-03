@@ -3,11 +3,12 @@
 
 /// @file vop1_simd_correctness_test.cpp
 /// @brief Bit-identity check (SIMD fast path vs scalar body) for the Tier-2
-/// unary VOP1 instructions wired into SIMD_VOP1_UNARY. The process runs in a
-/// single execute mode (RJ_FORCE_SCALAR, immutable); each op records its 64
-/// lane results and the scalar-vs-SIMD equivalence is asserted by diffing the
-/// two runs (see simd_ab.h / the simd_ab_diff CTest entry). In-process the test
-/// still checks inactive-lane preservation under full and partial EXEC masks.
+/// unary VOP1 instructions wired into SIMD_VOP1_UNARY. Each op runs TWICE in the
+/// same process -- once forcing the scalar body, once the SIMD fast path, with
+/// identical seed/inputs/EXEC -- and the two 64-lane result arrays are asserted
+/// equal with EXPECT_EQ (util::set_force_scalar_for_testing flips the gate
+/// in-process). In-process the test also checks inactive-lane preservation under
+/// full and partial EXEC masks.
 ///
 /// All wired ops (move/bitwise, exact int<->float casts, and correctly-rounded
 /// IEEE floor/ceil/trunc/rndne/fract/rcp/rsq/sqrt) are bit-identical to their
@@ -15,7 +16,7 @@
 /// raw random with explicit edge lanes injected (0, ±0, ±Inf, NaN, denormal,
 /// INT32 extremes) rather than sanitized to finite normals.
 
-#include "simd_ab.h"
+#include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -199,35 +200,57 @@ const Vop1Case kCases[] = {
     {"v_frexp_exp_i16_f16", 67},
 };
 
+// Restores the process force-scalar gate on scope exit so flipping it for an
+// in-process A/B comparison cannot leak into later tests in the same process.
+struct ForceScalarGuard {
+  bool orig;
+  ForceScalarGuard() : orig(util::force_scalar()) {}
+  ~ForceScalarGuard() { util::set_force_scalar_for_testing(orig); }
+};
+
 void check_case(const Vop1Case &c, uint64_t exec) {
-  Fixture fx;
-  ASSERT_NE(fx.cu, nullptr);
-  ASSERT_NE(fx.wf, nullptr);
-  uint32_t enc = vop1_encode(c.opcode, /*vdst=*/2, /*src0=*/256);
-  uint32_t words[4] = {enc, 0u, 0u, 0u};
-  Instruction *inst = fx.decoder->decode(words);
-  ASSERT_NE(inst, nullptr) << c.label << ": decode failed";
+  ForceScalarGuard gate_guard;
+
+  // Runs the op for one seed in the requested execute mode (fresh Fixture +
+  // decode per run isolates VGPR state). All wired ops are bit-exact for every
+  // input, so the full 64-lane arrays must match between the two modes.
+  auto run_mode = [&](bool force_scalar, uint64_t seed) -> std::array<uint32_t, WF_SIZE> {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx;
+    EXPECT_NE(fx.cu, nullptr);
+    EXPECT_NE(fx.wf, nullptr);
+    uint32_t enc = vop1_encode(c.opcode, /*vdst=*/2, /*src0=*/256);
+    uint32_t words[4] = {enc, 0u, 0u, 0u};
+    Instruction *inst = fx.decoder->decode(words);
+    EXPECT_NE(inst, nullptr) << c.label << ": decode failed";
+    auto out = fx.run(inst, seed, exec);
+    delete inst;
+    return out;
+  };
 
   // Sweep several seeds so the random (non-edge) lanes cover more of the
   // input space — in particular the [2^31, 2^32) cvt range and clamp regions.
   for (uint64_t seed = 0; seed < 16; ++seed) {
-    auto out = fx.run(inst, seed, exec);
+    const auto scalar_out = run_mode(/*force_scalar=*/true, seed);
+    const auto simd_out = run_mode(/*force_scalar=*/false, seed);
 
-    // Record per-lane results for the cross-run scalar-vs-SIMD diff (seed is
-    // folded into the sublabel so each (case, seed) line is unique).
-    simd_ab::record(std::string(c.label) + ":seed" + std::to_string(seed), exec, out.data(),
-                    WF_SIZE);
+    // Core A/B equivalence: SIMD fast path must be bit-identical to the scalar
+    // body across all 64 lanes (active and inactive).
+    EXPECT_EQ(scalar_out, simd_out)
+        << c.label << " (exec=0x" << std::hex << exec << ", seed=" << std::dec << seed
+        << "): SIMD path diverged from scalar body";
 
     // Inactive lanes must keep the destination sentinel in either mode.
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       const bool active = (exec >> lane) & 1ULL;
       if (!active) {
-        EXPECT_EQ(out[lane], DST_SENTINEL)
+        EXPECT_EQ(simd_out[lane], DST_SENTINEL)
+            << c.label << ": clobbered inactive lane " << lane << " at seed " << seed;
+        EXPECT_EQ(scalar_out[lane], DST_SENTINEL)
             << c.label << ": clobbered inactive lane " << lane << " at seed " << seed;
       }
     }
   }
-  delete inst;
 }
 
 TEST(Vop1SimdCorrectness, FullExecMask) {

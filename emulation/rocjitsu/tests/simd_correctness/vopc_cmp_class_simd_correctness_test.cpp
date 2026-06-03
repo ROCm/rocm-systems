@@ -6,11 +6,11 @@
 /// v_cmp_class VOPC ops on CDNA4. v_cmp_class tests src0's IEEE-754 float class
 /// against a 10-bit class mask in vsrc1 and writes one VCC bit per active lane;
 /// it is not a relational compare, so it uses a class-decode functor over the
-/// existing VOPC glue. The process runs one fixed execute mode (RJ_FORCE_SCALAR,
-/// immutable); the full 64-bit VCC is recorded (as two words) and the
-/// scalar-vs-SIMD equivalence is asserted by diffing the two runs (see simd_ab.h
-/// / the simd_ab_diff CTest entry). In-process inactive-lane VCC bits must stay
-/// preserved under full and partial EXEC.
+/// existing VOPC glue. Each case runs TWICE in the same process -- once forcing
+/// the scalar body, once the SIMD fast path, with identical inputs/EXEC/VCC-in
+/// -- and the full 64-bit VCC results are asserted equal with EXPECT_EQ
+/// (util::set_force_scalar_for_testing flips the gate in-process). In-process
+/// inactive-lane VCC bits must stay preserved under full and partial EXEC.
 ///
 /// f16 and f32 read src0 as 32-bit raw bits; f64 reads src0 as a 64-bit VGPR pair
 /// while vsrc1 stays a 32-bit mask (the mixed-width class glue). The
@@ -18,7 +18,7 @@
 /// outcomes for every input incl. NaN payload), so the compare is bit-exact with
 /// no carve-out.
 
-#include "simd_ab.h"
+#include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -201,33 +201,47 @@ struct Fixture {
   }
 };
 
+// Restores the process force-scalar gate on scope exit so flipping it for an
+// in-process A/B comparison cannot leak into later tests in the same process.
+struct ForceScalarGuard {
+  bool orig;
+  ForceScalarGuard() : orig(util::force_scalar()) {}
+  ~ForceScalarGuard() { util::set_force_scalar_for_testing(orig); }
+};
+
 void check_all(uint64_t exec) {
-  Fixture fx;
-  ASSERT_NE(fx.cu, nullptr);
-  ASSERT_NE(fx.wf, nullptr);
+  ForceScalarGuard gate_guard;
   const uint64_t kVcc[] = {0x0000000000000000ULL, 0xFFFFFFFFFFFFFFFFULL, 0xA5A5A5A5A5A5A5A5ULL};
   for (const auto &c : kCases) {
-    uint32_t vsrc1 = (c.kind == Kind::F64) ? 2u : 1u; // f64 src0 spans v0:v1
-    uint32_t enc = vopc_encode(c.opcode, /*src0=*/256, vsrc1);
-    uint32_t words[4] = {enc, 0u, 0u, 0u};
-    Instruction *inst = fx.decoder->decode(words);
-    ASSERT_NE(inst, nullptr) << c.name << " decode failed";
+    auto run_mode = [&](bool force_scalar, uint32_t rot, uint64_t vcc_in) -> uint64_t {
+      util::set_force_scalar_for_testing(force_scalar);
+      Fixture fx;
+      EXPECT_NE(fx.cu, nullptr);
+      EXPECT_NE(fx.wf, nullptr);
+      uint32_t vsrc1 = (c.kind == Kind::F64) ? 2u : 1u; // f64 src0 spans v0:v1
+      uint32_t enc = vopc_encode(c.opcode, /*src0=*/256, vsrc1);
+      uint32_t words[4] = {enc, 0u, 0u, 0u};
+      Instruction *inst = fx.decoder->decode(words);
+      EXPECT_NE(inst, nullptr) << c.name << " decode failed";
+      uint64_t vcc = fx.run(inst, c.kind, rot, exec, vcc_in);
+      delete inst;
+      return vcc;
+    };
     for (uint32_t rot = 0; rot < kMasks.size(); ++rot) {
       for (uint64_t vcc_in : kVcc) {
-        uint64_t vcc = fx.run(inst, c.kind, rot, exec, vcc_in);
+        const uint64_t scalar_vcc = run_mode(/*force_scalar=*/true, rot, vcc_in);
+        const uint64_t simd_vcc = run_mode(/*force_scalar=*/false, rot, vcc_in);
 
-        const std::string sub =
-            std::string(c.name) + ":r" + std::to_string(rot) + ":vcc" + std::to_string(vcc_in);
-        const uint32_t vcc_words[2] = {static_cast<uint32_t>(vcc),
-                                       static_cast<uint32_t>(vcc >> 32)};
-        simd_ab::record(sub, exec, vcc_words, 2);
+        EXPECT_EQ(scalar_vcc, simd_vcc) << c.name << " rot=" << rot << " vcc_in=0x" << std::hex
+                                        << vcc_in << ": SIMD VCC diverged from scalar body";
 
         const uint64_t inactive = ~exec;
-        EXPECT_EQ(vcc & inactive, vcc_in & inactive)
+        EXPECT_EQ(simd_vcc & inactive, vcc_in & inactive)
+            << c.name << " rot=" << rot << ": altered an inactive-lane VCC bit";
+        EXPECT_EQ(scalar_vcc & inactive, vcc_in & inactive)
             << c.name << " rot=" << rot << ": altered an inactive-lane VCC bit";
       }
     }
-    delete inst;
   }
 }
 
@@ -246,35 +260,41 @@ const std::array<Vop3ClassCase, 3> kVop3Cases = {{
 }};
 
 void check_all_vop3(uint64_t exec) {
-  Fixture fx;
-  ASSERT_NE(fx.cu, nullptr);
-  ASSERT_NE(fx.wf, nullptr);
+  ForceScalarGuard gate_guard;
   const uint64_t kVcc[] = {0x0000000000000000ULL, 0xFFFFFFFFFFFFFFFFULL, 0xA5A5A5A5A5A5A5A5ULL};
   for (const auto &c : kVop3Cases) {
     const uint32_t src1 = 256u + ((c.kind == Kind::F64) ? 2u : 1u); // mask vgpr
     for (uint32_t abs = 0; abs <= 1; ++abs) {
       for (uint32_t neg = 0; neg <= 1; ++neg) {
-        uint32_t words[4] = {0u, 0u, 0u, 0u};
-        vop3_encode(c.opcode, /*vdst=*/kVccSdst, /*src0=*/256, src1, abs, neg, words);
-        Instruction *inst = fx.decoder->decode(words);
-        ASSERT_NE(inst, nullptr) << c.name << " decode failed";
+        auto run_mode = [&](bool force_scalar, uint32_t rot, uint64_t vcc_in) -> uint64_t {
+          util::set_force_scalar_for_testing(force_scalar);
+          Fixture fx;
+          EXPECT_NE(fx.cu, nullptr);
+          EXPECT_NE(fx.wf, nullptr);
+          uint32_t words[4] = {0u, 0u, 0u, 0u};
+          vop3_encode(c.opcode, /*vdst=*/kVccSdst, /*src0=*/256, src1, abs, neg, words);
+          Instruction *inst = fx.decoder->decode(words);
+          EXPECT_NE(inst, nullptr) << c.name << " decode failed";
+          uint64_t vcc = fx.run(inst, c.kind, rot, exec, vcc_in);
+          delete inst;
+          return vcc;
+        };
         for (uint32_t rot = 0; rot < kMasks.size(); ++rot) {
           for (uint64_t vcc_in : kVcc) {
-            uint64_t vcc = fx.run(inst, c.kind, rot, exec, vcc_in);
+            const uint64_t scalar_vcc = run_mode(/*force_scalar=*/true, rot, vcc_in);
+            const uint64_t simd_vcc = run_mode(/*force_scalar=*/false, rot, vcc_in);
 
-            const std::string sub = std::string(c.name) + ":a" + std::to_string(abs) + "n" +
-                                    std::to_string(neg) + ":r" + std::to_string(rot) + ":vcc" +
-                                    std::to_string(vcc_in);
-            const uint32_t vcc_words[2] = {static_cast<uint32_t>(vcc),
-                                           static_cast<uint32_t>(vcc >> 32)};
-            simd_ab::record(sub, exec, vcc_words, 2);
+            EXPECT_EQ(scalar_vcc, simd_vcc)
+                << c.name << " abs=" << abs << " neg=" << neg << " rot=" << rot << " vcc_in=0x"
+                << std::hex << vcc_in << ": SIMD VCC diverged from scalar body";
 
             const uint64_t inactive = ~exec;
-            EXPECT_EQ(vcc & inactive, vcc_in & inactive)
+            EXPECT_EQ(simd_vcc & inactive, vcc_in & inactive)
+                << c.name << " abs=" << abs << " neg=" << neg << ": altered inactive VCC bit";
+            EXPECT_EQ(scalar_vcc & inactive, vcc_in & inactive)
                 << c.name << " abs=" << abs << " neg=" << neg << ": altered inactive VCC bit";
           }
         }
-        delete inst;
       }
     }
   }

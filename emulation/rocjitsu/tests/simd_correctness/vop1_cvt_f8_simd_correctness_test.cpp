@@ -7,12 +7,13 @@
 /// their VOP1 and VOP3 encodings. The 8-bit source has only 256 distinct
 /// values, so every byte 0..255 is swept exhaustively (4 wavefront fills of 64
 /// lanes) under both a full and a partial EXEC mask. The process runs one fixed
-/// execute mode (RJ_FORCE_SCALAR, immutable); each (encoding, block) result is
-/// recorded and the scalar-vs-SIMD equivalence is asserted by diffing the two
-/// runs (see simd_ab.h / the simd_ab_diff CTest entry). In-process inactive
-/// lanes must keep the DST sentinel.
+/// execute mode (RJ_FORCE_SCALAR, immutable); each (encoding, block) runs TWICE
+/// in the same process -- once forcing the scalar body, once the SIMD fast path,
+/// with identical inputs/EXEC -- and the two 64-lane result arrays are asserted
+/// equal with EXPECT_EQ (util::set_force_scalar_for_testing flips the gate
+/// in-process). In-process inactive lanes must keep the DST sentinel.
 
-#include "simd_ab.h"
+#include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -107,28 +108,46 @@ struct Fixture {
   }
 };
 
-// Decode `words` and exhaustively sweep all 256 byte values; record per block
-// for the cross-run scalar-vs-SIMD diff. `label` must be unique per encoding.
-void check_words(const std::string &label, const uint32_t words[4], uint64_t exec) {
-  Fixture fx;
-  ASSERT_NE(fx.cu, nullptr);
-  ASSERT_NE(fx.wf, nullptr);
-  Instruction *inst = fx.decoder->decode(words);
-  ASSERT_NE(inst, nullptr) << label << " decode failed";
-  for (uint32_t block = 0; block < 4; ++block) { // 4 * 64 = all 256 byte values
-    auto out = fx.run(inst, block, exec);
+// Restores the process force-scalar gate on scope exit so flipping it for an
+// in-process A/B comparison cannot leak into later tests in the same process.
+struct ForceScalarGuard {
+  bool orig;
+  ForceScalarGuard() : orig(util::force_scalar()) {}
+  ~ForceScalarGuard() { util::set_force_scalar_for_testing(orig); }
+};
 
-    // block is folded into the sublabel so each (encoding, block) line is unique.
-    simd_ab::record(label + ":block" + std::to_string(block), exec, out.data(), WF_SIZE);
+// Decode `words` and exhaustively sweep all 256 byte values; compare scalar vs
+// SIMD per block. `label` must be unique per encoding.
+void check_words(const std::string &label, const uint32_t words[4], uint64_t exec) {
+  ForceScalarGuard gate_guard;
+
+  auto run_mode = [&](bool force_scalar, uint32_t block) -> std::array<uint32_t, WF_SIZE> {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx;
+    EXPECT_NE(fx.cu, nullptr);
+    EXPECT_NE(fx.wf, nullptr);
+    Instruction *inst = fx.decoder->decode(words);
+    EXPECT_NE(inst, nullptr) << label << " decode failed";
+    auto out = fx.run(inst, block, exec);
+    delete inst;
+    return out;
+  };
+
+  for (uint32_t block = 0; block < 4; ++block) { // 4 * 64 = all 256 byte values
+    const auto scalar_out = run_mode(/*force_scalar=*/true, block);
+    const auto simd_out = run_mode(/*force_scalar=*/false, block);
+
+    EXPECT_EQ(scalar_out, simd_out)
+        << label << " block=" << block << ": SIMD path diverged from scalar body";
 
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       const bool active = (exec >> lane) & 1ULL;
       if (!active) {
-        EXPECT_EQ(out[lane], DST_SENTINEL) << label << ": clobbered inactive lane " << lane;
+        EXPECT_EQ(simd_out[lane], DST_SENTINEL) << label << ": clobbered inactive lane " << lane;
+        EXPECT_EQ(scalar_out[lane], DST_SENTINEL) << label << ": clobbered inactive lane " << lane;
       }
     }
   }
-  delete inst;
 }
 
 void check_both_encodings(const Case &c, uint64_t exec) {

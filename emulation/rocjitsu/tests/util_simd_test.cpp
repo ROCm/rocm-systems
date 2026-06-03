@@ -223,10 +223,10 @@ TEST(UtilSimd, NarrowBridgeCast_DoubleToFromB32) {
 }
 
 TEST(UtilSimd, ForceScalar_ImmutableProcessWide) {
-  // force_scalar() is read once from RJ_FORCE_SCALAR and fixed for the process
-  // lifetime: no setter, no mutable reference. It must be stable across calls
-  // and identical on every thread. A/B testing selects the mode by launching
-  // the process with the env var set (see tests/simd_ab.h), not by mutating it.
+  // force_scalar() is seeded once from RJ_FORCE_SCALAR at startup. Absent the
+  // test-only setter (util/simd_test_hooks.h), it is stable across calls and
+  // identical on every thread; this test exercises that steady-state behaviour
+  // without flipping the gate.
   const bool v = util::force_scalar();
   EXPECT_EQ(util::force_scalar(), v) << "force_scalar() must be stable within a process";
 

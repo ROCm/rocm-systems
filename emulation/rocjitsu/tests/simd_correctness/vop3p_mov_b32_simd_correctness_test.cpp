@@ -6,13 +6,13 @@
 /// v_pk_mov_b32_vop3p on CDNA4. Default packing only (op_sel=0,
 /// op_sel_hi=3): the 64-bit result is (src0_lo, src1_hi), where each src
 /// pair lives in consecutive VGPRs {base, base+1}. The SIMD path uses
-/// read_simd64/write_simd64 to fetch and store the 64-bit pair. The process runs
-/// one fixed execute mode (RJ_FORCE_SCALAR, immutable); the 64-bit dst (lo,hi
-/// per lane) is recorded and the scalar-vs-SIMD equivalence is asserted by
-/// diffing the two runs (see simd_ab.h / the simd_ab_diff CTest entry).
-/// In-process inactive lanes must keep the sentinel.
+/// read_simd64/write_simd64 to fetch and store the 64-bit pair. Each case runs
+/// TWICE in the same process -- once forcing the scalar body, once the SIMD fast
+/// path, with identical inputs/EXEC -- and the 64-bit dst results are asserted
+/// equal with EXPECT_EQ (util::set_force_scalar_for_testing flips the gate
+/// in-process). In-process inactive lanes must keep the sentinel.
 
-#include "simd_ab.h"
+#include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -112,34 +112,50 @@ struct Fixture {
   }
 };
 
-void check(uint64_t exec) {
-  Fixture fx;
-  ASSERT_NE(fx.cu, nullptr);
-  ASSERT_NE(fx.wf, nullptr);
-  uint32_t words[2] = {0u, 0u};
-  // src0 = VGPR 256 (pair v0:v1), src1 = VGPR 258 (pair v2:v3).
-  vop3p_encode(/*op=*/51, kDstVgpr, /*src0=*/256, /*src1=*/258, words);
-  Instruction *inst = fx.decoder->decode(words);
-  ASSERT_NE(inst, nullptr) << "v_pk_mov_b32_vop3p decode failed";
-  for (uint32_t rot = 0; rot < kVals.size(); ++rot) {
-    auto out = fx.run(inst, rot, exec);
+// Restores the process force-scalar gate on scope exit so flipping it for an
+// in-process A/B comparison cannot leak into later tests in the same process.
+struct ForceScalarGuard {
+  bool orig;
+  ForceScalarGuard() : orig(util::force_scalar()) {}
+  ~ForceScalarGuard() { util::set_force_scalar_for_testing(orig); }
+};
 
-    uint32_t words_out[2 * WF_SIZE];
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-      words_out[2 * lane] = static_cast<uint32_t>(out[lane]);
-      words_out[2 * lane + 1] = static_cast<uint32_t>(out[lane] >> 32);
-    }
-    simd_ab::record("v_pk_mov_b32_vop3p:r" + std::to_string(rot), exec, words_out, 2 * WF_SIZE);
+void check(uint64_t exec) {
+  ForceScalarGuard gate_guard;
+
+  auto run_mode = [&](bool force_scalar, uint32_t rot) -> std::array<uint64_t, WF_SIZE> {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx;
+    EXPECT_NE(fx.cu, nullptr);
+    EXPECT_NE(fx.wf, nullptr);
+    uint32_t words[2] = {0u, 0u};
+    // src0 = VGPR 256 (pair v0:v1), src1 = VGPR 258 (pair v2:v3).
+    vop3p_encode(/*op=*/51, kDstVgpr, /*src0=*/256, /*src1=*/258, words);
+    Instruction *inst = fx.decoder->decode(words);
+    EXPECT_NE(inst, nullptr) << "v_pk_mov_b32_vop3p decode failed";
+    auto out = fx.run(inst, rot, exec);
+    delete inst;
+    return out;
+  };
+
+  for (uint32_t rot = 0; rot < kVals.size(); ++rot) {
+    const auto scalar_out = run_mode(/*force_scalar=*/true, rot);
+    const auto simd_out = run_mode(/*force_scalar=*/false, rot);
+
+    EXPECT_EQ(scalar_out, simd_out)
+        << "v_pk_mov_b32_vop3p rot=" << rot << ": SIMD path diverged from scalar body";
 
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       const bool active = (exec >> lane) & 1ULL;
       if (!active) {
-        EXPECT_EQ(out[lane], (uint64_t{DST_SENTINEL} | (uint64_t{DST_SENTINEL} << 32)))
+        const uint64_t sentinel = uint64_t{DST_SENTINEL} | (uint64_t{DST_SENTINEL} << 32);
+        EXPECT_EQ(simd_out[lane], sentinel)
+            << "rot=" << rot << ": clobbered inactive lane " << lane;
+        EXPECT_EQ(scalar_out[lane], sentinel)
             << "rot=" << rot << ": clobbered inactive lane " << lane;
       }
     }
   }
-  delete inst;
 }
 
 TEST(Vop3pMovB32SimdCorrectness, FullExec) {

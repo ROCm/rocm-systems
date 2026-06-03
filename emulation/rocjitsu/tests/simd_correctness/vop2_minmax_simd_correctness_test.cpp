@@ -8,16 +8,17 @@
 /// path uses util::stdx::fmax/fmin, which is bit-exact for finite/Inf and the
 /// signed-zero tie cases. NaN-input lanes (and signed-zero ties) can differ in
 /// payload/sign between the scalar and SIMD bodies — an accepted divergence — so
-/// those lanes are overwritten with a fixed sentinel before recording (the skip
-/// condition is computed from the inputs, identical in both runs, so both runs
-/// mask the same lanes and the cross-run diff stays meaningful on the rest).
-/// The process runs one fixed execute mode (RJ_FORCE_SCALAR, immutable); the
-/// scalar-vs-SIMD equivalence is asserted by diffing the two runs (see
-/// simd_ab.h / the simd_ab_diff CTest entry). The inputs deliberately pair up
+/// those lanes are excluded from the per-lane comparison (the skip condition is
+/// computed from the inputs, identical in both runs, so both runs skip the same
+/// lanes and the comparison stays meaningful on the rest). Each op runs TWICE
+/// in the same process -- once forcing the scalar body, once the SIMD fast path,
+/// with identical seed/inputs/EXEC -- and the two result arrays are asserted
+/// equal per active, non-skipped lane (util::set_force_scalar_for_testing flips
+/// the gate in-process). The inputs deliberately pair up
 /// ±0 and NaN in both operand orders on the low lanes — the corner cases the
 /// earlier (reverted) f16 min/max shipped without and silently diverged on.
 
-#include "simd_ab.h"
+#include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -44,9 +45,6 @@ constexpr uint32_t WF_SIZE = 64;
 constexpr uint32_t SGPRS_PER_WF = 106;
 constexpr uint32_t VGPRS_PER_WF = 256;
 constexpr uint32_t DST_SENTINEL = 0xCAFEF00Du;
-// Fixed marker written over accepted-divergence (skipped) lanes before
-// recording, so the cross-run diff ignores them identically in both runs.
-constexpr uint32_t SKIP_SENTINEL = 0xA11D1FFFu;
 
 constexpr uint32_t vop2_encode(uint32_t opcode, uint32_t vdst, uint32_t vsrc1, uint32_t src0) {
   return ((opcode & 0x3F) << 25) | ((vdst & 0xFF) << 17) | ((vsrc1 & 0xFF) << 9) | (src0 & 0x1FF);
@@ -171,40 +169,62 @@ const MinMaxCase kCases[] = {
     {"v_min_f16", 46, true},
 };
 
+// Restores the process force-scalar gate on scope exit so flipping it for an
+// in-process A/B comparison cannot leak into later tests in the same process.
+struct ForceScalarGuard {
+  bool orig;
+  ForceScalarGuard() : orig(util::force_scalar()) {}
+  ~ForceScalarGuard() { util::set_force_scalar_for_testing(orig); }
+};
+
 void check_case(const MinMaxCase &c, uint64_t exec) {
-  Fixture fx;
-  ASSERT_NE(fx.cu, nullptr);
-  ASSERT_NE(fx.wf, nullptr);
-  uint32_t enc = vop2_encode(c.opcode, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256);
-  uint32_t words[4] = {enc, 0u, 0u, 0u};
-  Instruction *inst = fx.decoder->decode(words);
-  ASSERT_NE(inst, nullptr) << c.label << ": decode failed";
+  ForceScalarGuard gate_guard;
 
   constexpr uint64_t SEED = 0x3E12'7777'1234ULL;
 
-  auto nan_lane = fx.seed_inputs(SEED, c.is_f16, exec);
-  fx.cu->execute_instruction(inst, *fx.wf);
-  auto out = fx.snapshot_dst();
+  std::array<bool, WF_SIZE> nan_lane{};
 
-  // Mask accepted-divergence lanes (NaN-payload / signed-zero tie) with a fixed
-  // sentinel before recording. The skip condition is computed from the inputs
-  // (identical in both runs), so both the scalar and SIMD runs mask the same
-  // lanes and the cross-run diff stays bit-exact on the comparable lanes.
+  // Run the same instruction with identical seed/inputs/EXEC in both execute
+  // modes. The accepted-divergence (NaN-payload / signed-zero tie) lane set is
+  // computed from the inputs, identical in both runs.
+  auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx;
+    EXPECT_NE(fx.cu, nullptr);
+    EXPECT_NE(fx.wf, nullptr);
+    uint32_t enc = vop2_encode(c.opcode, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256);
+    uint32_t words[4] = {enc, 0u, 0u, 0u};
+    Instruction *inst = fx.decoder->decode(words);
+    EXPECT_NE(inst, nullptr) << c.label << ": decode failed";
+    nan_lane = fx.seed_inputs(SEED, c.is_f16, exec);
+    fx.cu->execute_instruction(inst, *fx.wf);
+    auto out = fx.snapshot_dst();
+    delete inst;
+    return out;
+  };
+
+  const auto scalar_out = run_mode(/*force_scalar=*/true);
+  const auto simd_out = run_mode(/*force_scalar=*/false);
+
+  // Core A/B equivalence per active, non-skipped lane: accepted-divergence
+  // lanes (NaN-payload / signed-zero tie) are excluded identically in both runs.
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     const bool active = (exec >> lane) & 1ULL;
     if (active && nan_lane[lane])
-      out[lane] = SKIP_SENTINEL;
+      continue;
+    EXPECT_EQ(scalar_out[lane], simd_out[lane])
+        << c.label << " (exec=0x" << std::hex << exec << "): SIMD path diverged from scalar body "
+        << "at lane " << std::dec << lane;
   }
-  simd_ab::record(c.label, exec, out.data(), WF_SIZE);
 
   // Inactive-lane preservation holds regardless of NaN/signed-zero status.
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     const bool active = (exec >> lane) & 1ULL;
     if (!active) {
-      EXPECT_EQ(out[lane], DST_SENTINEL) << c.label << ": clobbered inactive lane " << lane;
+      EXPECT_EQ(simd_out[lane], DST_SENTINEL) << c.label << ": clobbered inactive lane " << lane;
+      EXPECT_EQ(scalar_out[lane], DST_SENTINEL) << c.label << ": clobbered inactive lane " << lane;
     }
   }
-  delete inst;
 }
 
 TEST(Vop2MinMaxSimdCorrectness, FullExecMask) {

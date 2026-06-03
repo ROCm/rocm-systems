@@ -8,14 +8,15 @@
 /// omod/clamp, narrows back via f32_to_f16. The new SIMD glue
 /// (try_execute_unary_vop3_fp16_simd) does the same chain in-vector. The process
 /// runs one fixed execute mode (RJ_FORCE_SCALAR, immutable); each (case, mods)
-/// result is recorded and the scalar-vs-SIMD equivalence is asserted by diffing
-/// the two runs (see simd_ab.h / the simd_ab_diff CTest entry). NaN-result lanes
-/// carry an accepted payload divergence and are overwritten with a fixed
-/// sentinel before recording — NaN-ness is deterministic from the inputs, so
-/// both runs mask the same lanes. In-process inactive lanes must keep the
+/// runs TWICE in the same process -- once forcing the scalar body, once the SIMD
+/// fast path, with identical inputs/EXEC -- and the results are asserted equal
+/// per active, non-skipped lane (util::set_force_scalar_for_testing flips the
+/// gate in-process). NaN-result lanes carry an accepted payload divergence and
+/// are excluded from the comparison — NaN-ness is deterministic from the inputs,
+/// so both runs skip the same lanes. In-process inactive lanes must keep the
 /// sentinel.
 
-#include "simd_ab.h"
+#include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -43,9 +44,6 @@ constexpr uint32_t SGPRS_PER_WF = 106;
 constexpr uint32_t VGPRS_PER_WF = 256;
 constexpr uint32_t kDstVgpr = 2;
 constexpr uint32_t DST_SENTINEL = 0xCDCDCDCDu;
-// Fixed marker written over accepted-divergence (NaN-result) lanes before
-// recording, so the cross-run diff ignores them identically in both runs.
-constexpr uint32_t SKIP_SENTINEL = 0xA11D1FFFu;
 
 constexpr void vop3_encode(uint32_t op, uint32_t vdst, uint32_t src0, uint32_t abs, uint32_t neg,
                            uint32_t omod, uint32_t clamp, uint32_t words[2]) {
@@ -133,37 +131,52 @@ struct Fixture {
   }
 };
 
+// Restores the process force-scalar gate on scope exit so flipping it for an
+// in-process A/B comparison cannot leak into later tests in the same process.
+struct ForceScalarGuard {
+  bool orig;
+  ForceScalarGuard() : orig(util::force_scalar()) {}
+  ~ForceScalarGuard() { util::set_force_scalar_for_testing(orig); }
+};
+
 void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32_t clamp,
                 uint64_t exec) {
-  Fixture fx;
-  ASSERT_NE(fx.cu, nullptr);
-  ASSERT_NE(fx.wf, nullptr);
-  uint32_t words[4] = {0u, 0u, 0u, 0u};
-  vop3_encode(c.opcode, /*vdst=*/kDstVgpr, /*src0=*/256, abs, neg, omod, clamp, words);
-  Instruction *inst = fx.decoder->decode(words);
-  ASSERT_NE(inst, nullptr) << c.name << " decode failed";
-  auto out = fx.run(inst, exec);
+  ForceScalarGuard gate_guard;
 
-  // Mask NaN-result lanes (accepted f16 NaN-payload divergence) before recording.
-  // NaN-ness is deterministic from the inputs, so both runs mask identically.
-  uint32_t words_out[WF_SIZE];
+  auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx;
+    EXPECT_NE(fx.cu, nullptr);
+    EXPECT_NE(fx.wf, nullptr);
+    uint32_t words[4] = {0u, 0u, 0u, 0u};
+    vop3_encode(c.opcode, /*vdst=*/kDstVgpr, /*src0=*/256, abs, neg, omod, clamp, words);
+    Instruction *inst = fx.decoder->decode(words);
+    EXPECT_NE(inst, nullptr) << c.name << " decode failed";
+    auto out = fx.run(inst, exec);
+    delete inst;
+    return out;
+  };
+
+  const auto scalar_out = run_mode(/*force_scalar=*/true);
+  const auto simd_out = run_mode(/*force_scalar=*/false);
+
+  // Core A/B equivalence per active, non-skipped lane. NaN-result lanes carry an
+  // accepted f16 NaN-payload divergence and are excluded identically in both runs.
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     const bool active = (exec >> lane) & 1ULL;
-    words_out[lane] = (active && is_f16_nan(out[lane])) ? SKIP_SENTINEL : out[lane];
-  }
-  const std::string sub = std::string(c.name) + ":a" + std::to_string(abs) + "n" +
-                          std::to_string(neg) + "o" + std::to_string(omod) + "c" +
-                          std::to_string(clamp);
-  simd_ab::record(sub, exec, words_out, WF_SIZE);
-
-  for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-    const bool active = (exec >> lane) & 1ULL;
-    if (!active) {
-      EXPECT_EQ(out[lane], DST_SENTINEL)
+    if (active) {
+      if (is_f16_nan(scalar_out[lane]) || is_f16_nan(simd_out[lane]))
+        continue;
+      EXPECT_EQ(scalar_out[lane], simd_out[lane])
+          << c.name << " abs=" << abs << " neg=" << neg << " omod=" << omod << " clamp=" << clamp
+          << " lane " << lane << ": SIMD path diverged from scalar body";
+    } else {
+      EXPECT_EQ(simd_out[lane], DST_SENTINEL)
+          << c.name << " abs=" << abs << " neg=" << neg << ": clobbered inactive lane " << lane;
+      EXPECT_EQ(scalar_out[lane], DST_SENTINEL)
           << c.name << " abs=" << abs << " neg=" << neg << ": clobbered inactive lane " << lane;
     }
   }
-  delete inst;
 }
 
 void check_all_mods(const Case &c, uint64_t exec) {

@@ -7,19 +7,19 @@
 /// ternary fp glue applies per-source abs/neg and result omod/clamp in the f32 /
 /// f64 domain; f16 widens each src then operates in f32 then narrows. NaN-result
 /// lanes are an accepted divergence (gcc-13 packed FMA quiets a different NaN
-/// operand). The process runs one fixed execute mode (RJ_FORCE_SCALAR,
-/// immutable); the dst is recorded (lo,hi per lane) and the scalar-vs-SIMD
-/// equivalence is asserted by diffing the two runs (see simd_ab.h / the
-/// simd_ab_diff CTest entry). NaN-result lanes are overwritten with a fixed
-/// sentinel before recording — NaN-ness is deterministic from the inputs, so
-/// both runs mask the same lanes.
+/// operand). Each (case, mods, rot) runs TWICE in the same process -- once
+/// forcing the scalar body, once the SIMD fast path, with identical inputs/EXEC
+/// -- and the dst results are asserted equal per active, non-skipped lane
+/// (util::set_force_scalar_for_testing flips the gate in-process). NaN-result
+/// lanes are excluded from the comparison — NaN-ness is deterministic from the
+/// inputs, so both runs skip the same lanes.
 ///
 /// The dst-accumulate variants (v_fmac_f32 / v_mac_f32 / v_fmac_f16 / v_mac_f16
 /// / v_fmac_f64) are NOT exercised here: their per-isa codegen classes only
 /// initialize src0+src1+vdst (the third FMA arg comes from vdst, no src2
 /// member), so they need a separate accumulate-form glue path.
 
-#include "simd_ab.h"
+#include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -48,9 +48,6 @@ constexpr uint32_t VGPRS_PER_WF = 256;
 constexpr uint32_t kDstVgpr32 = 6;
 constexpr uint32_t kDstVgpr64 = 6; // v6:v7
 constexpr uint32_t DST_SENTINEL32 = 0xCDCDCDCDu;
-// Fixed marker written over accepted-divergence (NaN-result) lanes before
-// recording, so the cross-run diff ignores them identically in both runs.
-constexpr uint32_t SKIP_SENTINEL = 0xA11D1FFFu;
 
 constexpr void vop3_encode(uint32_t op, uint32_t vdst, uint32_t src0, uint32_t src1, uint32_t src2,
                            uint32_t abs, uint32_t neg, uint32_t omod, uint32_t clamp,
@@ -216,51 +213,61 @@ struct Fixture {
   }
 };
 
+// Restores the process force-scalar gate on scope exit so flipping it for an
+// in-process A/B comparison cannot leak into later tests in the same process.
+struct ForceScalarGuard {
+  bool orig;
+  ForceScalarGuard() : orig(util::force_scalar()) {}
+  ~ForceScalarGuard() { util::set_force_scalar_for_testing(orig); }
+};
+
+bool result_is_nan(Kind k, uint64_t v) {
+  if (k == Kind::F32)
+    return is_f32_nan(static_cast<uint32_t>(v));
+  if (k == Kind::F16)
+    return is_f16_nan(static_cast<uint32_t>(v));
+  return is_f64_nan(v);
+}
+
 void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32_t clamp,
                 uint64_t exec) {
-  Fixture fx;
-  ASSERT_NE(fx.cu, nullptr);
-  ASSERT_NE(fx.wf, nullptr);
-  const uint32_t vdst = (c.kind == Kind::F64) ? kDstVgpr64 : kDstVgpr32;
-  const uint32_t src1_v = (c.kind == Kind::F64) ? 2u : 1u;
-  const uint32_t src2_v = (c.kind == Kind::F64) ? 4u : 2u;
-  uint32_t words[4] = {0u, 0u, 0u, 0u};
-  vop3_encode(c.opcode, vdst, /*src0=*/256, /*src1=*/256 + src1_v, /*src2=*/256 + src2_v, abs, neg,
-              omod, clamp, words);
-  Instruction *inst = fx.decoder->decode(words);
-  ASSERT_NE(inst, nullptr) << c.name << " decode failed";
+  ForceScalarGuard gate_guard;
+
+  auto run_mode = [&](bool force_scalar, uint32_t rot) -> std::array<uint64_t, WF_SIZE> {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx;
+    EXPECT_NE(fx.cu, nullptr);
+    EXPECT_NE(fx.wf, nullptr);
+    const uint32_t vdst = (c.kind == Kind::F64) ? kDstVgpr64 : kDstVgpr32;
+    const uint32_t src1_v = (c.kind == Kind::F64) ? 2u : 1u;
+    const uint32_t src2_v = (c.kind == Kind::F64) ? 4u : 2u;
+    uint32_t words[4] = {0u, 0u, 0u, 0u};
+    vop3_encode(c.opcode, vdst, /*src0=*/256, /*src1=*/256 + src1_v, /*src2=*/256 + src2_v, abs,
+                neg, omod, clamp, words);
+    Instruction *inst = fx.decoder->decode(words);
+    EXPECT_NE(inst, nullptr) << c.name << " decode failed";
+    auto out = fx.run(inst, c.kind, rot, exec);
+    delete inst;
+    return out;
+  };
+
   const std::size_t rot_max = (c.kind == Kind::F64) ? kF64.size() : kF32.size();
   for (uint32_t rot = 0; rot < rot_max; ++rot) {
-    auto out = fx.run(inst, c.kind, rot, exec);
+    const auto scalar_out = run_mode(/*force_scalar=*/true, rot);
+    const auto simd_out = run_mode(/*force_scalar=*/false, rot);
 
-    // Record the dst as (lo, hi) word pairs. NaN-result lanes carry an accepted
-    // payload divergence; NaN-ness is deterministic from the inputs, so both runs
-    // mask the same lanes with a fixed sentinel.
-    uint32_t words_out[2 * WF_SIZE];
+    // Core A/B equivalence per active, non-skipped lane. NaN-result lanes carry
+    // an accepted payload divergence and are excluded identically in both runs.
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       const bool active = (exec >> lane) & 1ULL;
-      uint64_t v = out[lane];
-      bool nan = false;
-      if (c.kind == Kind::F32)
-        nan = is_f32_nan(static_cast<uint32_t>(v));
-      else if (c.kind == Kind::F16)
-        nan = is_f16_nan(static_cast<uint32_t>(v));
-      else
-        nan = is_f64_nan(v);
-      if (active && nan) {
-        words_out[2 * lane] = SKIP_SENTINEL;
-        words_out[2 * lane + 1] = SKIP_SENTINEL;
-      } else {
-        words_out[2 * lane] = static_cast<uint32_t>(v);
-        words_out[2 * lane + 1] = static_cast<uint32_t>(v >> 32);
-      }
+      if (active &&
+          (result_is_nan(c.kind, scalar_out[lane]) || result_is_nan(c.kind, simd_out[lane])))
+        continue;
+      EXPECT_EQ(scalar_out[lane], simd_out[lane])
+          << c.name << " a" << abs << "n" << neg << "o" << omod << "c" << clamp << "r" << rot
+          << " lane " << lane << ": SIMD path diverged from scalar body";
     }
-    const std::string sub = std::string(c.name) + ":a" + std::to_string(abs) + "n" +
-                            std::to_string(neg) + "o" + std::to_string(omod) + "c" +
-                            std::to_string(clamp) + "r" + std::to_string(rot);
-    simd_ab::record(sub, exec, words_out, 2 * WF_SIZE);
   }
-  delete inst;
 }
 
 void check_all_mods(const Case &c, uint64_t exec) {

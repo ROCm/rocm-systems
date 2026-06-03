@@ -9,16 +9,16 @@
 /// Each 32-bit lane holds two f16 values. The SIMD path widens each half to
 /// f32, applies per-half sign-flip from neg/neg_hi, runs the functor in
 /// f32, narrows back to f16 and packs. Default packing (op_sel = 0,
-/// op_sel_hi = 3) only — non-default modes bail to scalar. The process runs one
-/// fixed execute mode (RJ_FORCE_SCALAR, immutable); each result is recorded and
-/// the scalar-vs-SIMD equivalence is asserted by diffing the two runs (see
-/// simd_ab.h / the simd_ab_diff CTest entry). NaN-input lanes carry a
-/// toolchain-dependent NaN-payload divergence and are overwritten with a fixed
-/// sentinel before recording — the skip condition is computed from the inputs,
-/// identical in both runs, so both mask the same lanes. In-process inactive
-/// lanes must keep the sentinel.
+/// op_sel_hi = 3) only — non-default modes bail to scalar. Each case runs TWICE
+/// in the same process -- once forcing the scalar body, once the SIMD fast path,
+/// with identical inputs/EXEC -- and the results are asserted equal per active,
+/// non-skipped lane (util::set_force_scalar_for_testing flips the gate
+/// in-process). NaN-input lanes carry a toolchain-dependent NaN-payload
+/// divergence and are excluded from the comparison — the skip condition is
+/// computed from the inputs, identical in both runs, so both skip the same
+/// lanes. In-process inactive lanes must keep the sentinel.
 
-#include "simd_ab.h"
+#include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -46,9 +46,6 @@ constexpr uint32_t SGPRS_PER_WF = 106;
 constexpr uint32_t VGPRS_PER_WF = 256;
 constexpr uint32_t kDstVgpr = 6;
 constexpr uint32_t DST_SENTINEL = 0xCDCDCDCDu;
-// Fixed marker written over accepted-divergence (NaN-input) lanes before
-// recording, so the cross-run diff ignores them identically in both runs.
-constexpr uint32_t SKIP_SENTINEL = 0xA11D1FFFu;
 
 // CDNA4 VOP3P encoding. neg goes into word1 bits 29:31; neg_hi goes into
 // word0 bits 8:10; op_sel/op_sel_hi packed for default lo/hi pick.
@@ -153,56 +150,70 @@ struct Fixture {
   }
 };
 
-void check_case(const Case &c, uint64_t exec, uint32_t neg, uint32_t neg_hi) {
-  Fixture fx;
-  ASSERT_NE(fx.cu, nullptr);
-  ASSERT_NE(fx.wf, nullptr);
-  uint32_t words[2] = {0u, 0u};
-  if (c.ternary)
-    vop3p_encode_ternary(c.opcode, kDstVgpr, neg_hi, /*src0=*/256, /*src1=*/257, /*src2=*/258, neg,
-                         words);
-  else
-    vop3p_encode_binary(c.opcode, kDstVgpr, neg_hi, /*src0=*/256, /*src1=*/257, neg, words);
-  Instruction *inst = fx.decoder->decode(words);
-  ASSERT_NE(inst, nullptr) << c.name << " decode failed";
-  for (uint32_t rot = 0; rot < kF16Bits.size(); ++rot) {
-    auto out = fx.run(inst, rot, exec);
+// Restores the process force-scalar gate on scope exit so flipping it for an
+// in-process A/B comparison cannot leak into later tests in the same process.
+struct ForceScalarGuard {
+  bool orig;
+  ForceScalarGuard() : orig(util::force_scalar()) {}
+  ~ForceScalarGuard() { util::set_force_scalar_for_testing(orig); }
+};
 
-    // Mask NaN-input lanes (accepted f16 NaN-payload divergence) before recording.
-    // The skip condition is computed from the inputs (identical in both runs), so
-    // both the scalar and SIMD runs mask the same lanes.
-    uint32_t words_out[WF_SIZE];
+void check_case(const Case &c, uint64_t exec, uint32_t neg, uint32_t neg_hi) {
+  ForceScalarGuard gate_guard;
+
+  auto run_mode = [&](bool force_scalar, uint32_t rot) -> std::array<uint32_t, WF_SIZE> {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx;
+    EXPECT_NE(fx.cu, nullptr);
+    EXPECT_NE(fx.wf, nullptr);
+    uint32_t words[2] = {0u, 0u};
+    if (c.ternary)
+      vop3p_encode_ternary(c.opcode, kDstVgpr, neg_hi, /*src0=*/256, /*src1=*/257, /*src2=*/258,
+                           neg, words);
+    else
+      vop3p_encode_binary(c.opcode, kDstVgpr, neg_hi, /*src0=*/256, /*src1=*/257, neg, words);
+    Instruction *inst = fx.decoder->decode(words);
+    EXPECT_NE(inst, nullptr) << c.name << " decode failed";
+    auto out = fx.run(inst, rot, exec);
+    delete inst;
+    return out;
+  };
+
+  for (uint32_t rot = 0; rot < kF16Bits.size(); ++rot) {
+    const auto scalar_out = run_mode(/*force_scalar=*/true, rot);
+    const auto simd_out = run_mode(/*force_scalar=*/false, rot);
+
+    // Core A/B equivalence per active, non-skipped lane. NaN-input lanes carry a
+    // toolchain-dependent NaN-payload divergence and are excluded identically in
+    // both runs (the skip condition is input-derived).
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       const bool active = (exec >> lane) & 1ULL;
-      bool skip = false;
       if (active) {
         uint16_t a_lo = kF16Bits[lane % kF16Bits.size()];
         uint16_t a_hi = kF16Bits[(lane + 3) % kF16Bits.size()];
         uint16_t b_lo = kF16Bits[(lane + rot) % kF16Bits.size()];
         uint16_t b_hi = kF16Bits[(lane + rot + 5) % kF16Bits.size()];
-        skip = is_f16_nan(a_lo) || is_f16_nan(a_hi) || is_f16_nan(b_lo) || is_f16_nan(b_hi);
+        bool skip = is_f16_nan(a_lo) || is_f16_nan(a_hi) || is_f16_nan(b_lo) || is_f16_nan(b_hi);
         if (!skip && c.ternary) {
           uint16_t c_lo = kF16Bits[(lane + 2 * rot + 1) % kF16Bits.size()];
           uint16_t c_hi = kF16Bits[(lane + 2 * rot + 7) % kF16Bits.size()];
           skip = is_f16_nan(c_lo) || is_f16_nan(c_hi);
         }
-      }
-      words_out[lane] = (active && skip) ? SKIP_SENTINEL : out[lane];
-    }
-    const std::string sub = std::string(c.name) + ":n" + std::to_string(neg) + "h" +
-                            std::to_string(neg_hi) + "r" + std::to_string(rot);
-    simd_ab::record(sub, exec, words_out, WF_SIZE);
-
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-      const bool active = (exec >> lane) & 1ULL;
-      if (!active) {
-        EXPECT_EQ(out[lane], DST_SENTINEL)
+        if (skip)
+          continue;
+        EXPECT_EQ(scalar_out[lane], simd_out[lane])
+            << c.name << " neg=" << neg << " neg_hi=" << neg_hi << " rot=" << rot << " lane "
+            << lane << ": SIMD path diverged from scalar body";
+      } else {
+        EXPECT_EQ(simd_out[lane], DST_SENTINEL)
+            << c.name << " neg=" << neg << " neg_hi=" << neg_hi << " rot=" << rot
+            << ": clobbered inactive lane " << lane;
+        EXPECT_EQ(scalar_out[lane], DST_SENTINEL)
             << c.name << " neg=" << neg << " neg_hi=" << neg_hi << " rot=" << rot
             << ": clobbered inactive lane " << lane;
       }
     }
   }
-  delete inst;
 }
 
 TEST(Vop3pPkBinaryFp16SimdCorrectness, FullExecAllModifiers) {

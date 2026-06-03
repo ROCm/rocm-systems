@@ -11,15 +11,16 @@
 /// All six cin-form scalar bodies pull per-lane carry-in from
 /// `inst.src2.read_scalar64(wf)` (SGPR-pair) and write co into
 /// `inst.sdst.write_scalar64`, with inactive lanes preserved from the
-/// incoming VCC. The process runs one fixed execute mode (RJ_FORCE_SCALAR,
-/// immutable); the destination VGPR AND the full 64-bit SGPR-pair carry result
-/// are recorded and the scalar-vs-SIMD equivalence on BOTH is asserted by
-/// diffing the two runs (see simd_ab.h / the simd_ab_diff CTest entry), sweeping
+/// incoming VCC. Each (case, vcc_in, cin) runs TWICE in the same process -- once
+/// forcing the scalar body, once the SIMD fast path, with identical inputs --
+/// and the scalar-vs-SIMD equivalence on BOTH the destination VGPR AND the full
+/// 64-bit SGPR-pair carry result is asserted with EXPECT_EQ
+/// (util::set_force_scalar_for_testing flips the gate in-process), sweeping
 /// {full, partial} EXEC × {VCC seeds} × {cin patterns}. In-process inactive dst
 /// lanes must keep the sentinel. Inputs deliberately seed the 32-bit
 /// carry/borrow boundary on the low lanes.
 
-#include "simd_ab.h"
+#include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -184,28 +185,50 @@ const CarryCase kRdnaCases[] = {
     {"v_subrev_co_ci_u32_vop3", 290, true},
 };
 
+// Restores the process force-scalar gate on scope exit so flipping it for an
+// in-process A/B comparison cannot leak into later tests in the same process.
+struct ForceScalarGuard {
+  bool orig;
+  ForceScalarGuard() : orig(util::force_scalar()) {}
+  ~ForceScalarGuard() { util::set_force_scalar_for_testing(orig); }
+};
+
 template <int WaveSize>
-void check_case(WaveFixture<WaveSize> &fx, const CarryCase &c, uint32_t encoding_marker,
-                uint64_t exec) {
-  ASSERT_NE(fx.cu, nullptr);
-  ASSERT_NE(fx.wf, nullptr);
-  uint32_t sb = fx.wf->sgpr_alloc().base;
-  // SGPR-pair carry-out target; must be an even-aligned SREG index.
-  ASSERT_EQ(sb % 2u, 0u) << c.label << ": sgpr_alloc base not pair-aligned";
-  // Second pair (sb+2) holds the cin word for cin-form ops; for no-cin
-  // ops it is unused and the src2 field encodes 0 (the body ignores it).
-  uint32_t cin_pair = c.has_cin ? (sb + 2u) : 0u;
-  uint32_t src2_field = c.has_cin ? cin_pair : 0u;
-  uint32_t words[2] = {0u, 0u};
-  vop3_sdstenc_encode(c.opcode, /*vdst=*/2, /*sdst=*/sb,
-                      /*src0=*/256, /*src1=*/257, /*src2=*/src2_field, encoding_marker, words);
-  Instruction *inst = fx.decoder->decode(words);
-  ASSERT_NE(inst, nullptr) << c.label << ": decode failed";
+void check_case(const char *mem_label, const char *l2_label, const char *cu_label,
+                rj_code_arch_t arch, const CarryCase &c, uint32_t encoding_marker, uint64_t exec) {
+  ForceScalarGuard gate_guard;
+
+  using Result = typename WaveFixture<WaveSize>::Result;
 
   constexpr uint64_t SEED = 0xC0FFEE'1234'5678ULL;
   // Seed the SGPR-pair sdst with a recognisable pattern so any "didn't write"
   // bug surfaces as a divergent (incoming vs scalar) result.
   constexpr uint64_t SDST_SEED = 0xDEADBEEFCAFEF00DULL;
+
+  // Runs one (case, vcc_in, cin_word) in the requested execute mode (fresh
+  // WaveFixture + decode per run isolates VGPR/SGPR/VCC state).
+  auto run_mode = [&](bool force_scalar, uint64_t vcc_in, uint64_t cin_word) -> Result {
+    util::set_force_scalar_for_testing(force_scalar);
+    WaveFixture<WaveSize> fx(mem_label, l2_label, cu_label, arch);
+    EXPECT_NE(fx.cu, nullptr);
+    EXPECT_NE(fx.wf, nullptr);
+    uint32_t sb = fx.wf->sgpr_alloc().base;
+    // SGPR-pair carry-out target; must be an even-aligned SREG index.
+    EXPECT_EQ(sb % 2u, 0u) << c.label << ": sgpr_alloc base not pair-aligned";
+    // Second pair (sb+2) holds the cin word for cin-form ops; for no-cin
+    // ops it is unused and the src2 field encodes 0 (the body ignores it).
+    uint32_t cin_pair = c.has_cin ? (sb + 2u) : 0u;
+    uint32_t src2_field = c.has_cin ? cin_pair : 0u;
+    uint32_t words[2] = {0u, 0u};
+    vop3_sdstenc_encode(c.opcode, /*vdst=*/2, /*sdst=*/sb,
+                        /*src0=*/256, /*src1=*/257, /*src2=*/src2_field, encoding_marker, words);
+    Instruction *inst = fx.decoder->decode(words);
+    EXPECT_NE(inst, nullptr) << c.label << ": decode failed";
+    auto out = fx.run(inst, SEED, exec, vcc_in, SDST_SEED, sb, cin_word, cin_pair);
+    delete inst;
+    return out;
+  };
+
   for (uint64_t vcc_in : kVccPatterns) {
     // No-cin ops still sweep VCC (their glue seeds the sdst inactive bits
     // from VCC). Cin ops also sweep cin word from src2 SGPR-pair.
@@ -213,43 +236,40 @@ void check_case(WaveFixture<WaveSize> &fx, const CarryCase &c, uint32_t encoding
     const size_t cin_n = c.has_cin ? std::size(kCinPatterns) : 1u;
     for (size_t i = 0; i < cin_n; ++i) {
       uint64_t cin_word = c.has_cin ? cin_set[i] : 0ULL;
-      auto out = fx.run(inst, SEED, exec, vcc_in, SDST_SEED, sb, cin_word, cin_pair);
+      const auto scalar_out = run_mode(/*force_scalar=*/true, vcc_in, cin_word);
+      const auto simd_out = run_mode(/*force_scalar=*/false, vcc_in, cin_word);
 
-      // Record the dst words and the full 64-bit sdst (lo, hi) so the cross-run
-      // diff covers BOTH outputs. (label, vcc_in, cin) keep the line unique.
-      const std::string base = std::string(c.label) + ":vcc" + std::to_string(vcc_in) + ":cin" +
-                               std::to_string(cin_word);
-      simd_ab::record(base, exec, out.dst.data(), WaveSize);
-      const uint32_t sdst_words[2] = {static_cast<uint32_t>(out.sdst),
-                                      static_cast<uint32_t>(out.sdst >> 32)};
-      simd_ab::record(base + ":sdst", exec, sdst_words, 2);
+      // Core A/B equivalence on BOTH the dst words and the full 64-bit sdst.
+      EXPECT_EQ(scalar_out.dst, simd_out.dst)
+          << c.label << " vcc=0x" << std::hex << vcc_in << " cin=0x" << cin_word
+          << ": SIMD dst diverged from scalar body";
+      EXPECT_EQ(scalar_out.sdst, simd_out.sdst)
+          << c.label << " vcc=0x" << std::hex << vcc_in << " cin=0x" << cin_word
+          << ": SIMD sdst diverged from scalar body";
 
       for (uint32_t lane = 0; lane < WaveSize; ++lane) {
         const bool active = (exec >> lane) & 1ULL;
         if (!active) {
-          EXPECT_EQ(out.dst[lane], DST_SENTINEL)
+          EXPECT_EQ(simd_out.dst[lane], DST_SENTINEL)
+              << c.label << ": clobbered inactive dst lane " << lane;
+          EXPECT_EQ(scalar_out.dst[lane], DST_SENTINEL)
               << c.label << ": clobbered inactive dst lane " << lane;
         }
       }
     }
   }
-  delete inst;
 }
 
 void run_cdna4(uint64_t exec) {
-  for (const auto &c : kCdna4Cases) {
-    WaveFixture<64> fx("vop3_carry_simd_mem", "vop3_carry_simd_l2", "cu_vop3_carry_simd",
-                       ROCJITSU_CODE_ARCH_CDNA4);
-    check_case(fx, c, kCdna4Encoding, exec);
-  }
+  for (const auto &c : kCdna4Cases)
+    check_case<64>("vop3_carry_simd_mem", "vop3_carry_simd_l2", "cu_vop3_carry_simd",
+                   ROCJITSU_CODE_ARCH_CDNA4, c, kCdna4Encoding, exec);
 }
 
 void run_rdna(uint64_t exec) {
-  for (const auto &c : kRdnaCases) {
-    WaveFixture<32> fx("vop3_carry_simd_rdna_mem", "vop3_carry_simd_rdna_l2",
-                       "cu_vop3_carry_simd_rdna", ROCJITSU_CODE_ARCH_RDNA3);
-    check_case(fx, c, kRdna3Encoding, exec);
-  }
+  for (const auto &c : kRdnaCases)
+    check_case<32>("vop3_carry_simd_rdna_mem", "vop3_carry_simd_rdna_l2", "cu_vop3_carry_simd_rdna",
+                   ROCJITSU_CODE_ARCH_RDNA3, c, kRdna3Encoding, exec);
 }
 
 TEST(Vop3CarrySimdCorrectness, Cdna4FullExecMask) {
