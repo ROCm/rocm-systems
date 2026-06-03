@@ -2260,8 +2260,9 @@ TEST_F(GinMPIDeviceTests, Disable_Error) {
   ncclDevComm devComm{};
   ncclResult_t r = ncclDevCommCreate(comm, &reqs, &devComm);
 
-  ASSERT_NE(ncclSuccess, r)
-      << "ncclDevCommCreate must fail when NCCL_GIN_ENABLE=0; got ncclSuccess";
+  ASSERT_TRUE(r == ncclInvalidUsage || r == ncclInvalidArgument)
+      << "ncclDevCommCreate must fail with a request-rejected error when "
+         "NCCL_GIN_ENABLE=0; got result " << (int)r;
 }
 
 // With an oversized signal pool the runtime should silently clamp to its
