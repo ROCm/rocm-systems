@@ -12,7 +12,7 @@
 #include <rocshmem/rocshmem.hpp>
 
 template <>
-struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM> {
+struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_API> {
   template <typename Coop>
   NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, int peer, bool hasWins,
                                       ncclGinWindow_t dstWin, size_t dstOff, ncclGinWindow_t srcWin,
@@ -54,7 +54,7 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM> {
 };
 
 template <>
-struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM> {
+struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_API> {
   template <typename Coop, typename T>
   NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, int peer, ncclGinWindow_t dstWin,
                                       size_t dstOff, T srcVal, bool hasSignal,
@@ -88,7 +88,7 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM> {
 };
 
 template <>
-struct ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM> {
+struct ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM_API> {
   NCCL_DEVICE_INLINE static uint64_t* call(ncclGinCtx ctx, ncclGinCounter_t counterId) {
     ncclGinRocshmemGPUContext* rsCtx = (ncclGinRocshmemGPUContext*)ctx.handle;
     return nccl::utility::loadConst(&rsCtx->counters) + counterId;
@@ -96,7 +96,7 @@ struct ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM> {
 };
 
 template <>
-struct ncclGinApi_ResetCounter<NCCL_NET_DEVICE_GIN_ROCSHMEM> {
+struct ncclGinApi_ResetCounter<NCCL_NET_DEVICE_GIN_ROCSHMEM_API> {
   NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, ncclGinCounter_t counterId) {
     ncclGinRocshmemGPUContext* rsCtx = (ncclGinRocshmemGPUContext*)ctx.handle;
     nccl::utility::loadConst(&rsCtx->counters)[counterId] = 0;
@@ -104,7 +104,7 @@ struct ncclGinApi_ResetCounter<NCCL_NET_DEVICE_GIN_ROCSHMEM> {
 };
 
 template <>
-struct ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM> {
+struct ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM_API> {
   NCCL_DEVICE_INLINE static uint64_t* call(ncclGinCtx ctx, ncclGinSignal_t signalId) {
     ncclGinRocshmemGPUContext* rsCtx = (ncclGinRocshmemGPUContext*)ctx.handle;
     return nccl::utility::loadConst(&rsCtx->signals) + signalId;
@@ -112,7 +112,7 @@ struct ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM> {
 };
 
 template <>
-struct ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_ROCSHMEM> {
+struct ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_ROCSHMEM_API> {
   NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, ncclGinSignal_t signalId) {
     ncclGinRocshmemGPUContext* rsCtx = (ncclGinRocshmemGPUContext*)ctx.handle;
     nccl::utility::loadConst(&rsCtx->signals)[signalId] = 0;
@@ -120,7 +120,7 @@ struct ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_ROCSHMEM> {
 };
 
 template <>
-struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ROCSHMEM> {
+struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ROCSHMEM_API> {
   template <typename Coop>
   NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, cuda::memory_order ord) {
     rocshmem::rocshmem_quiet();

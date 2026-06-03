@@ -111,7 +111,7 @@ endif()
 # Set CMAKE flags
 #==================================================================================================
 set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "")
-set(CMAKE_CXX_STANDARD   14)   # We use C++14 features, this will add compile option: -std=c++14
+set(CMAKE_CXX_STANDARD   17)   # rocshmem GIN QP device headers require C++17
 set(CMAKE_CXX_EXTENSIONS OFF)  # Without this line, it will add -std=gnu++14 instead, which has some issues.
 set(CPACK_PACKAGING_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Path to install to when packaged.")
 if(ROCM_PATH)
@@ -216,6 +216,16 @@ if (ENABLE_ROCSHMEM)
     endif()
     # Device headers include <rocshmem/rocshmem.hpp> when ENABLE_ROCSHMEM is set
     include_directories(${ROCSHMEM_INSTALL_DIR}/include)
+    # GIN QP device headers depend on rocshmem internals (queue_pair.hpp etc.)
+    if (ROCSHMEM_SOURCE_DIR)
+        include_directories(${ROCSHMEM_SOURCE_DIR}/src)
+        include_directories(${ROCSHMEM_SOURCE_DIR}/include)
+        if (ROCSHMEM_BUILD_DIR)
+            include_directories(${ROCSHMEM_BUILD_DIR})
+        else()
+            include_directories(${ROCSHMEM_SOURCE_DIR}/build/include)
+        endif()
+    endif()
     # rccl-tests device code calls rocshmem device functions via GIN template
     # specializations. librocshmem.a is compiled with -fgpu-rdc, so tests that
     # use GIN must also use -fgpu-rdc and device-link with it.

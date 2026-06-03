@@ -293,6 +293,31 @@ __device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t laddr, ui
   }
 }
 
+__device__ void QueuePair::mlx5_post_wqe_rma_with_keys(int32_t length, uintptr_t laddr,
+    uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info,
+    uint32_t override_rkey, uint32_t override_lkey) {
+  if (wf_info.is_pe_group_last) {
+    acquire_lock(&mlx5_sq.lock);
+    mlx5_poll_cq_until(wf_info.num_pe_group_lanes);
+  }
+
+  uint16_t wqe_idx = mlx5_wqe_idx(mlx5_sq, wf_info.pe_group_logical_lane_id);
+  uint16_t sq_idx = mlx5_sq_idx(mlx5_sq, wqe_idx);
+  bool send_inline = gda_mlx5_wqe_rma::can_inline(opcode, length, inline_threshold);
+
+  gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, MLX5_WQE_CTRL_CQ_UPDATE,
+                   raddr, override_rkey, laddr, override_lkey,
+                   static_cast<uint32_t>(length), send_inline};
+
+  mlx5_sq.buf[sq_idx] = wqe;
+
+  if (wf_info.is_pe_group_last) {
+    mlx5_sq.post += wf_info.num_pe_group_lanes;
+    mlx5_ring_doorbell(mlx5_sq.post, wqe);
+    release_lock(&mlx5_sq.lock);
+  }
+}
+
 // precondition: called with all active lanes using different QPs
 __device__ void QueuePair::mlx5_post_wqe_rma_single(int32_t length, uintptr_t laddr, uintptr_t raddr,
                                                     uint8_t opcode, bool ring_db) {

@@ -10,7 +10,7 @@
  * Built-in GIN plugin for rocshmem.
  *
  * Currently a thin shim: rocshmem_init() (called from init.cc) handles
- * all transport setup. The plugin reports NCCL_NET_DEVICE_GIN_ROCSHMEM
+ * all transport setup. The plugin reports NCCL_NET_DEVICE_GIN_ROCSHMEM_API
  * and provides stubs for listen/connect (no-ops since rocshmem manages
  * its own QP connectivity).
  *
@@ -53,7 +53,7 @@ static ncclResult_t ginRocshmemGetProperties(int dev, ncclNetProperties_v11_t* p
   props->pciPath = nullptr;
   props->guid = 0;
   props->ptrSupport = NCCL_PTR_CUDA;
-  props->netDeviceType = NCCL_NET_DEVICE_GIN_ROCSHMEM;
+  props->netDeviceType = NCCL_NET_DEVICE_GIN_ROCSHMEM_API;
   props->netDeviceVersion = NCCL_GIN_ROCSHMEM_VERSION;
   props->maxP2pBytes = 1ULL << 30;
   props->maxCollBytes = 1ULL << 30;

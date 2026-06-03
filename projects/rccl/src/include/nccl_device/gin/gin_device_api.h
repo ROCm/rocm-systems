@@ -16,6 +16,7 @@
 #endif
 #if NCCL_GIN_ROCSHMEM_ENABLE
 #include "rocshmem/gin_rocshmem.h"
+#include "rocshmem/gin_rocshmem_gda.h"
 #endif
 
 #endif

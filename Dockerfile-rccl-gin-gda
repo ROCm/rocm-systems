@@ -192,7 +192,7 @@ RUN cd rccl/src/projects/rccl \
        src/rccl_wrap.cc
 RUN cd rccl/src/projects/rccl \
  && ./install.sh --amdgpu_targets=${GPU_TARGETS} --prefix=${RCCL_INSTALL_PREFIX} --no-device-linker --no_clean \
-      --cmake-options "-DENABLE_ROCSHMEM_GIN=ON -DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR}" \
+      --cmake-options "-DENABLE_ROCSHMEM_GIN=ON -DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR} -DROCSHMEM_SOURCE_DIR=${WORKDIR}/rocshmem/src/projects/rocshmem -DROCSHMEM_BUILD_DIR=${WORKDIR}/rocshmem/src/projects/rocshmem/build/include/rocshmem" \
       $([ "${DEBUG_BUILD}" = "1" ] && echo "--debug")
 
 # Workaround: hipify renames core.h->core_tmp.h but gin headers still include ../core.h
@@ -209,7 +209,7 @@ RUN if [ "${USE_LOCAL_SRC}" != "1" ]; then \
     fi
 RUN mkdir rccl-tests \
     && cd rccl-tests \
-    && cmake $([ "${DEBUG_BUILD}" = "1" ] && echo "-DCMAKE_BUILD_TYPE=Debug" || echo "-DCMAKE_BUILD_TYPE=Release") -DUSE_MPI=ON -DENABLE_DEVICE_API=ON -DENABLE_ROCSHMEM=ON -DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR} -DCMAKE_PREFIX_PATH="${RCCL_INSTALL_PREFIX};${MPI_INSTALL_PREFIX}" -DGPU_TARGETS=${GPU_TARGETS} ${WORKDIR}/rccl/src/projects/rccl-tests \
+    && cmake $([ "${DEBUG_BUILD}" = "1" ] && echo "-DCMAKE_BUILD_TYPE=Debug" || echo "-DCMAKE_BUILD_TYPE=Release") -DUSE_MPI=ON -DENABLE_DEVICE_API=ON -DENABLE_ROCSHMEM=ON -DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR} -DROCSHMEM_SOURCE_DIR=${WORKDIR}/rocshmem/src/projects/rocshmem -DROCSHMEM_BUILD_DIR=${WORKDIR}/rocshmem/src/projects/rocshmem/build/include/rocshmem -DCMAKE_PREFIX_PATH="${RCCL_INSTALL_PREFIX};${MPI_INSTALL_PREFIX}" -DGPU_TARGETS=${GPU_TARGETS} ${WORKDIR}/rccl/src/projects/rccl-tests \
     && make -j16 -k || true # keep going allreduce fails to build but alltoall builds
 
 ## set environment variables

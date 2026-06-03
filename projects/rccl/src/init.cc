@@ -780,10 +780,14 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
     // Assign built-in GIN rocshmem plugin if requested and no GIN plugin was loaded
     if (sharedRes->ginState.ncclGin == nullptr) {
       extern int64_t ncclParamGinType();
-      if (ncclParamGinType() == NCCL_NET_DEVICE_GIN_ROCSHMEM) {
+      if (ncclParamGinType() == NCCL_NET_DEVICE_GIN_ROCSHMEM_API) {
         extern ncclGin_t ncclGinRocshmem;
-        INFO(NCCL_INIT, "Using built-in GIN rocshmem plugin");
+        INFO(NCCL_INIT, "Using built-in GIN rocshmem API plugin");
         sharedRes->ginState.ncclGin = &ncclGinRocshmem;
+      } else if (ncclParamGinType() == NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA) {
+        extern ncclGin_v11_t ncclGinRocshmemGdaPlugin;
+        INFO(NCCL_INIT, "Using built-in GIN rocshmem QP plugin");
+        sharedRes->ginState.ncclGin = &ncclGinRocshmemGdaPlugin;
       }
     }
 #endif

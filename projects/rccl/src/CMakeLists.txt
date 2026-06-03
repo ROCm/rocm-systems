@@ -116,6 +116,7 @@ set(SRC_FILES
   include/gin/gin_host.h
   include/gin/gin_host_proxy.h
   include/gin/gin_host_rocshmem.h
+  include/gin/gin_host_rocshmem_gda.h
   include/hip_rocm_version_info.h
   include/ibvcore.h
   include/ibvsymbols.h
@@ -182,6 +183,8 @@ set(SRC_FILES
   include/nccl_device/gin/proxy/gin_proxy_device_host_common.h
   include/nccl_device/gin/rocshmem/gin_rocshmem.h
   include/nccl_device/gin/rocshmem/gin_rocshmem_device_host_common.h
+  include/nccl_device/gin/rocshmem/gin_rocshmem_gda.h
+  include/nccl_device/gin/rocshmem/gin_rocshmem_device_host_common_gda.h
   include/nccl_device/ll_a2a.h
   include/nccl_device/lsa_barrier.h
   include/nccl_device/ptr.h
@@ -349,6 +352,8 @@ set(SRC_FILES
   gin/gin_host_proxy.cc
   gin/gin_host_rocshmem.cc
   gin/gin_plugin_rocshmem.cc
+  gin/gin_host_rocshmem_gda.cc
+  gin/gin_plugin_rocshmem_gda.cc
   transport/gdaki/gin_host_gdaki.h
   include/latency_profiler/CollTrace.h
   include/latency_profiler/CollTraceEvent.h
@@ -634,6 +639,15 @@ if (ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
   endif()
   if (ROCSHMEM_INCLUDE_DIR)
     target_include_directories(rccl PRIVATE ${ROCSHMEM_INCLUDE_DIR})
+  endif()
+  if (ROCSHMEM_SOURCE_DIR)
+    target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/src)
+    target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/include)
+    if (ROCSHMEM_BUILD_DIR)
+      target_include_directories(rccl PRIVATE ${ROCSHMEM_BUILD_DIR})
+    else()
+      target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/build/include/rocshmem)
+    endif()
   endif()
 endif()
 if (ENABLE_ROCSHMEM)

@@ -63,7 +63,7 @@ ncclResult_t ncclGinRocshmemCreateContext(struct ncclComm *comm, void *collComm,
   ctx->hasError = false;
 
   NCCLCHECK(ncclCalloc(&ctx->devHandle, 1));
-  ctx->devHandle->netDeviceType = NCCL_NET_DEVICE_GIN_ROCSHMEM;
+  ctx->devHandle->netDeviceType = NCCL_NET_DEVICE_GIN_ROCSHMEM_API;
   ctx->devHandle->netDeviceVersion = NCCL_GIN_ROCSHMEM_VERSION;
   ctx->devHandle->needsProxyProgress = 0;
 
@@ -251,7 +251,7 @@ static ncclResult_t ncclGinRocshmemGetProperties(int dev, ncclNetProperties_t* p
   props->pciPath = NULL;
   props->guid = 0;
   props->ptrSupport = NCCL_PTR_CUDA;
-  props->netDeviceType = NCCL_NET_DEVICE_GIN_ROCSHMEM;
+  props->netDeviceType = NCCL_NET_DEVICE_GIN_ROCSHMEM_API;
   props->netDeviceVersion = NCCL_GIN_ROCSHMEM_VERSION;
   return ncclSuccess;
 }

@@ -290,6 +290,42 @@ __device__ void QueuePair::put_nbi(void *dest, const void *source,
   post_wqe_rma(pe, nelems, src, dst, gda_op_rdma_write, wf_info);
 }
 
+__device__ void QueuePair::put_nbi_with_keys(void *dest, const void *source,
+    size_t nelems, int pe, ActiveWFInfo &wf_info,
+    uint32_t dst_rkey, uint32_t src_lkey) {
+  uintptr_t src = reinterpret_cast<uintptr_t>(source);
+  uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
+  post_wqe_rma_with_keys(pe, nelems, src, dst, gda_op_rdma_write, wf_info,
+                          dst_rkey, src_lkey);
+}
+
+__device__ void QueuePair::post_wqe_rma_with_keys([[maybe_unused]] int pe,
+    int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode,
+    ActiveWFInfo &wf_info, uint32_t override_rkey, uint32_t override_lkey) {
+  switch (gda_provider_) {
+#if defined(GDA_IONIC)
+  case GDAProvider::IONIC:
+    ionic_post_wqe_rma_with_keys(size, laddr, raddr, opcode, wf_info,
+                                  override_rkey, override_lkey);
+    return;
+#endif
+#if defined(GDA_BNXT)
+  case GDAProvider::BNXT:
+    bnxt_post_wqe_rma_with_keys(size, laddr, raddr, opcode, wf_info,
+                                 override_rkey, override_lkey);
+    return;
+#endif
+#if defined(GDA_MLX5)
+  case GDAProvider::MLX5:
+    mlx5_post_wqe_rma_with_keys(size, laddr, raddr, opcode, wf_info,
+                                 override_rkey, override_lkey);
+    return;
+#endif
+  default:
+    assert(false /* invalid nic provider */);
+  }
+}
+
 // Used in all to all
 __device__ void QueuePair::put_nbi_single(void *dest, const void *source,
     size_t nelems, bool ring_db) {

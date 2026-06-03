@@ -50,6 +50,8 @@
 
 #include <map>
 
+struct rocshmem_gin_qp_set;
+
 namespace rocshmem {
 
 class GDABackend;
@@ -149,6 +151,7 @@ class ActiveWFInfo {
 class QueuePair {
  public:
   friend GDABackend;
+  friend struct ::rocshmem_gin_qp_set;
 
   /**
    * @brief Constructor.
@@ -174,6 +177,24 @@ class QueuePair {
 
   __device__ void put_nbi_single(void *dest, const void *source, size_t nelems,
       bool ring_db);
+
+  /**
+   * @brief Create and enqueue a non-blocking put with explicit rkey/lkey.
+   *
+   * Thread-safe (uses locking). Used by GIN integration where each buffer
+   * registration has its own keys, distinct from the QP's default heap keys.
+   *
+   * @param[in] dest Destination address for data transmission.
+   * @param[in] source Source address for data transmission.
+   * @param[in] nelems Size in bytes of data transmission.
+   * @param[in] pe Destination processing element of data transmission.
+   * @param[in] wf_info Wavefront information.
+   * @param[in] dst_rkey Remote key for the destination buffer.
+   * @param[in] src_lkey Local key for the source buffer.
+   */
+  __device__ void put_nbi_with_keys(void *dest, const void *source,
+      size_t nelems, int pe, ActiveWFInfo &wf_info,
+      uint32_t dst_rkey, uint32_t src_lkey);
 
   /**
    * @brief Create and enqueue a non-blocking get work queue entry (wqe).
@@ -295,6 +316,11 @@ class QueuePair {
   post_wqe_rma_single(int32_t size, uintptr_t laddr, uintptr_t raddr,
       uint8_t opcode, bool ring_db);
 
+  __device__ __attribute__((noinline)) void
+  post_wqe_rma_with_keys(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr,
+      uint8_t opcode, ActiveWFInfo &wf_info,
+      uint32_t override_rkey, uint32_t override_lkey);
+
 #if defined(GDA_MLX5)
   __device__ uint64_t mlx5_post_wqe_amo(int32_t size, uintptr_t raddr,
       uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetch,
@@ -306,6 +332,9 @@ class QueuePair {
       uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info);
   __device__ void mlx5_post_wqe_rma_single(int32_t size, uintptr_t laddr,
       uintptr_t raddr, uint8_t opcode, bool ring_db);
+  __device__ void mlx5_post_wqe_rma_with_keys(int32_t size, uintptr_t laddr,
+      uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info,
+      uint32_t override_rkey, uint32_t override_lkey);
   __device__ void mlx5_quiet();
   __device__ void mlx5_quiet_single();
 #endif
@@ -313,6 +342,8 @@ class QueuePair {
 
   __device__ void bnxt_write_rma_wqe(uintptr_t raddr, uintptr_t laddr,
       int32_t length, uint8_t opcode);
+  __device__ void bnxt_write_rma_wqe_with_keys(uintptr_t raddr, uintptr_t laddr,
+      int32_t length, uint8_t opcode, uint32_t override_rkey, uint32_t override_lkey);
   __device__ uint32_t bnxt_write_amo_wqe(uintptr_t raddr, uint8_t opcode,
       int64_t atomic_data, int64_t atomic_cmp, bool fetching);
 
@@ -327,6 +358,9 @@ class QueuePair {
 
   __device__ void bnxt_post_wqe_rma_single(int32_t size, uintptr_t laddr,
       uintptr_t raddr, uint8_t opcode, bool ring_db);
+  __device__ void bnxt_post_wqe_rma_with_keys(int32_t size, uintptr_t laddr,
+      uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info,
+      uint32_t override_rkey, uint32_t override_lkey);
   __device__ void bnxt_quiet();
   __device__ void bnxt_quiet_single();
 #endif
@@ -341,6 +375,9 @@ class QueuePair {
       uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info);
   __device__ void ionic_post_wqe_rma_single(int32_t size,
       uintptr_t laddr, uintptr_t raddr, uint8_t opcode);
+  __device__ void ionic_post_wqe_rma_with_keys(int32_t size, uintptr_t laddr,
+      uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info,
+      uint32_t override_rkey, uint32_t override_lkey);
   __device__ void ionic_quiet(ActiveWFInfo &wf_info);
   __device__ void ionic_quiet_single();
 #endif

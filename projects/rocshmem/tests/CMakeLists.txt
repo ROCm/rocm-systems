@@ -30,6 +30,10 @@ IF (BUILD_UNIT_TESTS)
     add_subdirectory(unit_tests)
 ENDIF()
 
+IF (BUILD_FUNCTIONAL_TESTS)
+    add_subdirectory(gin_tests)
+ENDIF()
+
 IF (BUILD_PYTHON_TESTS)
     # Canonical source of truth is projects/rocshmem/python/tests.
     # This test CMake path only installs those assets into the test package.
