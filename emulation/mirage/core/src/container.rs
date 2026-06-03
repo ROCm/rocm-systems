@@ -32,7 +32,7 @@ use crate::session::SessionId;
 pub const ENV_RANK: &str = "MIRAGE_RANK";
 
 /// Environment variable carrying the head node's address. Set on every
-/// node *except* the head (rank 0).
+/// node, including the head (rank 0), which gets `localhost`.
 pub const ENV_HEAD_ADDR: &str = "MIRAGE_HEAD_ADDR";
 
 /// Environment variable carrying the port the head node may listen on.

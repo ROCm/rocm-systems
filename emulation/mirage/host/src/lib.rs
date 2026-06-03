@@ -328,19 +328,18 @@ fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Res
 
 /// Build the always-present mirage environment for a node of `rank`.
 ///
-/// `MIRAGE_RANK` and `MIRAGE_HEAD_PORT` are set on every node;
-/// `MIRAGE_HEAD_ADDR` is set on every node *except* the head (rank 0),
-/// which is itself the head. These are injected whether or not the
-/// session is containerised.
+/// `MIRAGE_RANK` and `MIRAGE_HEAD_PORT` are set on every node.
+/// `MIRAGE_HEAD_ADDR` is also set on every node: worker nodes get the
+/// head's address, while the head (rank 0) gets `localhost` since it is
+/// itself the head. These are injected whether or not the session is
+/// containerised.
 fn node_mirage_env(rank: u32, head_addr: &str, head_port: u16) -> Vec<(String, String)> {
-    let mut env = vec![
+    let head = if rank == 0 { "localhost" } else { head_addr };
+    vec![
         (ENV_RANK.to_string(), rank.to_string()),
         (ENV_HEAD_PORT.to_string(), head_port.to_string()),
-    ];
-    if rank != 0 {
-        env.push((ENV_HEAD_ADDR.to_string(), head_addr.to_string()));
-    }
-    env
+        (ENV_HEAD_ADDR.to_string(), head.to_string()),
+    ]
 }
 
 /// Resolve the emulator-level injection for a session by reading its
