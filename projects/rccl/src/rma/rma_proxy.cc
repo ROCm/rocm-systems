@@ -34,6 +34,7 @@ extern int64_t ncclParamGinType();
 NCCL_PARAM(RmaProxyDumpSignal, "RMA_PROXY_DUMP_SIGNAL", -1);
 NCCL_PARAM(RmaProxyQueueSize, "RMA_PROXY_QUEUE_SIZE", -1);
 
+
 #include <signal.h>
 static ncclRmaProxyState* ncclLastRmaProxyState;
 
@@ -67,6 +68,21 @@ static ncclResult_t getDmaBufFd(void *addr, size_t length, int *fd,
 
   return ncclInvalidUsage;
 }
+#else
+static ncclResult_t getDmaBufFd(void *addr, size_t length, int *fd,
+                                bool forceNonDataDirect = false) {
+  if (ncclParamDmaBufEnable() == 0) return ncclInvalidUsage;
+#if HIP_VERSION >= 70000000
+  static size_t hostPageSize = ncclOsGetPageSize();
+  size_t alignedSize = length;
+  uint64_t offset;
+  ncclResult_t ret = ncclSuccess;
+  ALIGN_SIZE(alignedSize, hostPageSize);
+  HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)addr, alignedSize, fd, &offset), ret, fail);
+fail:
+#endif
+  return ncclInvalidUsage;
+}
 #endif
 
 // Check if the GIN plugin supports DMA-BUF, if so we can try to get the DMA-BUF handle from CUDA,
@@ -79,7 +95,7 @@ static ncclResult_t ncclRmaProxyRegMrSym(ncclGin_t *ginComm, void *ginCollComm, 
   } else if (type == NCCL_PTR_CUDA) {
     ncclResult_t dmabufResult = ncclInvalidUsage;
     if (ncclParamDmaBufEnable() && (props.ptrSupport & NCCL_PTR_DMABUF)) {
-      ncclResult_t registrationResult = ncclSuccess;
+      ncclResult_t registrationResult = ncclInternalError;
       int dmabufFd = -1;
       dmabufResult = getDmaBufFd(addr, size, &dmabufFd);
       if (dmabufResult == ncclSuccess) {
@@ -118,9 +134,9 @@ static ncclResult_t ncclRmaProxyCtxAlloc(struct ncclComm* comm, ncclGin_t* ginCo
   size_t signalsBufSize = (comm->nRanks + 1) * sizeof(uint64_t);
 #if !defined(__HIP_PLATFORM_AMD__) && ! defined(__HIPCC__)
   NCCLCHECK(ncclCuMemAlloc((void **)&rmaProxyCtx->signalsDev, &rmaProxyCtx->signalsCumemhandle,
-                           CU_MEM_HANDLE_TYPE_NONE, signalsBufSize /*, comm->memManager*/));
+                           CU_MEM_HANDLE_TYPE_NONE, signalsBufSize , comm->memManager));
 #else
-  CUDACHECK(hipExtMallocWithFlags((void**)&rmaProxyCtx->signalsDev, signalsBufSize, hipDeviceMallocFinegrained));
+  CUDACHECK(hipExtMallocWithFlags((void**)&rmaProxyCtx->signalsDev, signalsBufSize, hipDeviceMallocUncached));
 #endif
   CUDACHECK(cudaMemset(rmaProxyCtx->signalsDev, 0, signalsBufSize));
   NCCLCHECK(ncclRmaProxyRegMrSym(ginComm, rmaProxyCtx->ginCollComm, rmaProxyCtx->props, rmaProxyCtx->signalsDev, signalsBufSize,
@@ -172,6 +188,7 @@ static ncclResult_t ncclRmaProxyCtxAlloc(struct ncclComm* comm, ncclGin_t* ginCo
   for (int i = 0; i < comm->nRanks; i++) {
     ncclIntruQueueConstruct(&rmaProxyCtx->inProgressQueues[i]);
   }
+
   return ncclSuccess;
 }
 
@@ -191,7 +208,7 @@ static ncclResult_t ncclRmaProxyCtxAllocGraph(struct ncclComm* comm, ncclGin_t* 
   size_t flushBufSize = comm->nRanks * sizeof(uint64_t);
 #if !defined(__HIP_PLATFORM_AMD__) && ! defined(__HIPCC__)
   NCCLCHECK(ncclCuMemAlloc((void **)&rmaProxyCtx->flushBufDev, &rmaProxyCtx->flushBufCumemhandle,
-                           CU_MEM_HANDLE_TYPE_NONE, flushBufSize/*, comm->memManager*/));
+                           CU_MEM_HANDLE_TYPE_NONE, flushBufSize, comm->memManager));
 #else
   CUDACHECK(hipExtMallocWithFlags((void**)&rmaProxyCtx->flushBufDev, flushBufSize, hipDeviceMallocFinegrained));
 #endif
@@ -308,12 +325,12 @@ ncclResult_t ncclRmaProxyDestroyContext(ncclGin_t* ginComm, void* rmaProxyCtx){
   // Free signals
   if (ginComm && ctx->ginCollComm && ctx->signalsMhandle)
     NCCLCHECK(ginComm->deregMrSym(ctx->ginCollComm, ctx->signalsMhandle));
-  if (ctx->signalsDev) NCCLCHECK(ncclCudaFree(ctx->signalsDev/*, ctx->comm->memManager*/));
+  if (ctx->signalsDev) NCCLCHECK(ncclCudaFree(ctx->signalsDev, ctx->comm->memManager));
 
   // Free flush buffer
   if (ginComm && ctx->ginCollComm && ctx->flushBufMhandle)
     ginComm->deregMrSym(ctx->ginCollComm, ctx->flushBufMhandle);
-  if (ctx->flushBufDev) ncclCudaFree(ctx->flushBufDev/*, ctx->comm->memManager*/);
+  if (ctx->flushBufDev) ncclCudaFree(ctx->flushBufDev, ctx->comm->memManager);
 
   // Free CPU-accessible signals
   if (ginComm && ctx->ginCollComm && ctx->cpuAccessSignalsMhandle)
@@ -343,7 +360,7 @@ ncclResult_t ncclRmaProxyRegister(struct ncclComm* comm, void* address, size_t s
 	  if (rcclParamRmaProxyUseDMABUF() == 0) {
             props_tmp.ptrSupport &= ~NCCL_PTR_DMABUF;
 	  }
-          NCCLCHECK(ncclRmaProxyRegMrSym(rmaProxyState->ncclGin, rmaProxyState->ginComms[n], props_tmp, address, size,
+	  NCCLCHECK(ncclRmaProxyRegMrSym(rmaProxyState->ncclGin, rmaProxyState->ginComms[n], props_tmp, address, size,
                                          NCCL_PTR_CUDA, 0, &rmaHostWins[n], &rmaDevWins[n]));
         if (rmaHostWins[n] == NULL) {
           WARN("rank %d - GIN Symmetric register failed: buff %p, size %ld", comm->rank, address, size);

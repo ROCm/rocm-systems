@@ -354,7 +354,7 @@ static ncclResult_t freeMemCPUAccessible(T *ptr, void *gdrHandle, struct ncclMem
 #if !defined(__HIP_PLATFORM_AMD__) && ! defined(__HIPCC__)
     NCCLCHECK(ncclCuMemHostFree(ptr));
 #else
-    CUDACHECK(hipFree(ptr));
+    CUDACHECK(hipHostFree(ptr));
 #endif
   }
   return ncclSuccess;

@@ -188,6 +188,7 @@ set(SRC_FILES
   include/ionic/ionicdvcore.h
   include/ionic/ionicdvsymbols.h
   include/ionic/ionicdvwrap.h
+  include/nccl_merge_stubs.h
   include/nccl_device/comm.h
   include/nccl_device/coop.h
   include/nccl_device/core.h
@@ -334,6 +335,8 @@ set(SRC_FILES
   rma/rma.cc
   rma/rma_ce.cc
   rma/rma_proxy.cc
+  rma/rma_proxy_launch.cc
+  rma/rma_proxy_progress.cc
   include/rma/rma.h
   include/rma/rma_ce.h
   include/rma/rma_proxy.h

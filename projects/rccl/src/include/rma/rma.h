@@ -10,8 +10,9 @@
 
 #include "nccl.h"
 #include "nccl_common.h"
-//#include "rma/rma_ce.h"
+#include "rma/rma_ce.h"
 #include "rma/rma_proxy.h"
+#include "nccl_merge_stubs.h"
 
 // Internal signal mode enum
 typedef enum {
@@ -24,12 +25,12 @@ struct ncclRmaArgs{
   ncclFunc_t func;
   int nRmaTasks;
   int nRmaTasksProxy;
-//  int nRmaTasksCe;
+  int nRmaTasksCe;
 };
 
 struct ncclRmaState {
   struct ncclRmaProxyState rmaProxyState;
-//  struct ncclRmaCeState rmaCeState;
+  struct ncclRmaCeState rmaCeState;
 };
 
 // Main RMA function declarations

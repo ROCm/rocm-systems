@@ -15,7 +15,6 @@ typedef hsa_status_t (*PFN_hsa_init)();
 typedef hsa_status_t (*PFN_hsa_system_get_info)(hsa_system_info_t attribute, void* value);
 typedef hsa_status_t (*PFN_hsa_status_string)(hsa_status_t status, const char ** status_string);
 typedef hsa_status_t (*PFN_hsa_amd_portable_export_dmabuf)(const void* ptr, size_t size, int* dmabuf, uint64_t* offset);
-typedef hsa_status_t (*PFN_hsa_amd_portable_export_dmabuf_v2)(const void *ptr, size_t size, int *dmabuf, uint64_t *offset, uint64_t flags);
 
 #ifdef __HIP_PLATFORM_AMD__
 #define CUPFN(symbol) symbol
@@ -84,7 +83,6 @@ typedef hsa_status_t (*PFN_hsa_amd_portable_export_dmabuf_v2)(const void *ptr, s
 #define DECLARE_ROCM_PFN_EXTERN(symbol) extern PFN_##symbol pfn_##symbol
 
 DECLARE_ROCM_PFN_EXTERN(hsa_amd_portable_export_dmabuf); // DMA-BUF support
-DECLARE_ROCM_PFN_EXTERN(hsa_amd_portable_export_dmabuf_v2); // DMA-BUF support
 
 /* ROCr Driver functions loaded with dlsym() */
 DECLARE_ROCM_PFN_EXTERN(hsa_init);
