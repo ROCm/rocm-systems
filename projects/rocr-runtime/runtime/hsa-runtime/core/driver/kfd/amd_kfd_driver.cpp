@@ -619,9 +619,10 @@ hsa_status_t KfdDriver::ImportExternalSemaphore(uint32_t node_id, void* nt_handl
 
 hsa_status_t KfdDriver::DestroyExternalSemaphore(hsa_amd_external_semaphore_t sem) const {
   HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {sem.handle};
-  // Optional thunk: no export means this driver can't own the handle.
+  // No export -> not this driver's handle. INVALID_AGENT (base-class
+  // contract) lets handle_close keep polling other drivers.
   if (core::Runtime::runtime_singleton_->thunkLoader()->HSAKMT_PFN(hsaKmtDestroyExternalSemaphore) == nullptr)
-    return HSA_STATUS_ERROR;
+    return HSA_STATUS_ERROR_INVALID_AGENT;
   if (HSAKMT_CALL(hsaKmtDestroyExternalSemaphore(kmt_handle)) != HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
   return HSA_STATUS_SUCCESS;

@@ -3206,12 +3206,8 @@ typedef enum {
  * @brief Imported external semaphore. Opaque; created by
  * hsa_amd_external_semaphore_handle_open and released by
  * hsa_amd_external_semaphore_handle_close. Internally encodes the
- * libhsakmt HSA_EXTERNAL_SEMAPHORE_HANDLE.
- *
- * @note This release adds the import / close half only. The HSA queue
- * signal/wait APIs that consume hsa_amd_external_semaphore_t will land
- * in a separate change; until then the imported handle is only useful
- * as a lifecycle owner.
+ * libhsakmt HSA_EXTERNAL_SEMAPHORE_HANDLE. Consumed by
+ * hsa_amd_queue_signal_external_semaphore / _wait_external_semaphore.
  */
 typedef struct hsa_amd_external_semaphore_s {
   uint64_t handle;
@@ -3233,11 +3229,6 @@ typedef struct {
  * agent's KMD node. The returned semaphore must be released with
  * hsa_amd_external_semaphore_handle_close.
  *
- * @note This release adds the import / close path only. There is no
- * HSA queue signal/wait API in this header that consumes
- * hsa_amd_external_semaphore_t yet; the submission half will land in
- * a separate change.
- *
  * @param[in] agent A GPU agent whose node owns the imported syncobj.
  * @param[in] desc Descriptor naming the OS handle and its type.
  * @param[out] out_sem On success, the imported semaphore.
@@ -3257,10 +3248,10 @@ hsa_status_t HSA_API hsa_amd_external_semaphore_handle_open(
     hsa_amd_external_semaphore_t *out_sem);
 
 /**
- * @brief Releases an imported external semaphore. Until the HSA queue
- * signal/wait API for hsa_amd_external_semaphore_t is added, callers
- * are expected to keep the handle alive only for as long as the
- * higher-level (HIP / rocclr) wrapper that owns the same syncobj.
+ * @brief Releases an imported external semaphore. Keep the handle alive
+ * as long as any queued signal/wait that references it may still be
+ * in flight, and as long as the higher-level (HIP / rocclr) wrapper that
+ * owns the same syncobj.
  */
 hsa_status_t HSA_API hsa_amd_external_semaphore_handle_close(
     hsa_amd_external_semaphore_t sem);

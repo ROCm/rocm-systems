@@ -1941,14 +1941,12 @@ hsa_status_t hsa_amd_external_semaphore_handle_open(
       core_agent->device_type() != core::Agent::kAmdGpuDevice)
     return HSA_STATUS_ERROR_INVALID_AGENT;
 
-  // The descriptor union has separate active members per handle type
-  // (win32_handle for OPAQUE_WIN32 / OPAQUE_WIN32_KMT, fd for OPAQUE_FD).
-  // Only the Win32 NT-handle path is wired through the driver today, so
-  // reject other types up front: reading an inactive union member is
-  // undefined behaviour in C++.
+  // Only the Win32 NT-handle path is wired today. Reject other types up
+  // front: NOT_SUPPORTED (vs malformed-handle INVALID_ARGUMENT), and reading
+  // the wrong union member would be UB anyway.
   if (desc->type != HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32 &&
       desc->type != HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_KMT) {
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
   }
 
   return core_agent->driver().ImportExternalSemaphore(
