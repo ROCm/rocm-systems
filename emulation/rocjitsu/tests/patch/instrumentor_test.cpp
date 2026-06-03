@@ -306,7 +306,7 @@ TEST(InlineNopGuardrail, RejectsNonCanonicalBody) {
 // Section 2: make_trampoline_plan
 //==============================================================================
 
-TEST(MakeRelocationOnlyPlan, FillsCanonicalBodyAndCopiesSiteFields) {
+TEST(MakeTrampolinePlan, FillsCanonicalBodyAndCopiesSiteFields) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   ResolvedInstrumentationSite site;
   site.anchor_offset = 0x100;
@@ -578,7 +578,7 @@ TEST(Instrumentor, AddPointByOffsetResolvesValidatedSite) {
   Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instrumentor.add_point_by_offset(/*anchor_offset=*/4);
 
-  auto result = instrumentor.resolve_and_validate();
+  auto result = instrumentor.validate_points();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
   ASSERT_EQ(result.sites.size(), 1u);
@@ -587,84 +587,6 @@ TEST(Instrumentor, AddPointByOffsetResolvesValidatedSite) {
   EXPECT_EQ(result.sites[0].original_bytes.size(), 4u);
   EXPECT_NE(result.sites[0].mnemonic.find("s_nop"), std::string::npos)
       << "mnemonic was: " << result.sites[0].mnemonic;
-}
-
-TEST(Instrumentor, AnchorInstFromOwnedBlockResolves) {
-  auto image = make_gfx950_elf_with_two_nops();
-  AmdGpuCodeObject obj(image.data(), image.size());
-  ASSERT_TRUE(obj.is_valid());
-
-  Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_CDNA4);
-  auto blocks = instrumentor.owned_blocks();
-  ASSERT_FALSE(blocks.empty());
-
-  // Pick the second instruction in the first block.
-  const Instruction *second = nullptr;
-  size_t i = 0;
-  for (const Instruction &inst : blocks.front()->instructions()) {
-    if (i++ == 1) {
-      second = &inst;
-      break;
-    }
-  }
-  ASSERT_NE(second, nullptr);
-
-  InstrumentationPoint pt;
-  pt.anchor_inst = second;
-  instrumentor.add_point(pt);
-
-  auto result = instrumentor.resolve_and_validate();
-  ASSERT_TRUE(result.errors.empty())
-      << (result.errors.empty() ? std::string{} : result.errors.front());
-  ASSERT_EQ(result.sites.size(), 1u);
-  EXPECT_EQ(result.sites[0].anchor_offset, 4u);
-  EXPECT_EQ(result.sites[0].anchor_inst, second);
-}
-
-TEST(Instrumentor, AnchorInstNotInOwnedBlocksFails) {
-  auto image = make_gfx950_elf_with_two_nops();
-  AmdGpuCodeObject obj(image.data(), image.size());
-
-  Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_CDNA4);
-
-  // External Instruction not from instrumentor's owned blocks.
-  static constexpr uint32_t kRaw = 0xBF800000u;
-  TestInstruction external("s_nop", 4, 0, std::nullopt, &kRaw);
-
-  InstrumentationPoint pt;
-  pt.anchor_inst = &external;
-  instrumentor.add_point(pt);
-
-  auto result = instrumentor.resolve_and_validate();
-  EXPECT_TRUE(result.sites.empty());
-  EXPECT_FALSE(result.errors.empty());
-}
-
-TEST(Instrumentor, MutuallyExclusiveAnchorFieldsFails) {
-  auto image = make_gfx950_elf_with_two_nops();
-  AmdGpuCodeObject obj(image.data(), image.size());
-
-  // Both set.
-  {
-    static constexpr uint32_t kRaw = 0xBF800000u;
-    TestInstruction inst("s_nop", 4, 0, std::nullopt, &kRaw);
-    InstrumentationPoint pt;
-    pt.anchor_inst = &inst;
-    pt.anchor_offset = 0;
-    Instrumentor i2(obj, ROCJITSU_CODE_ARCH_CDNA4);
-    i2.add_point(pt);
-    auto result = i2.resolve_and_validate();
-    EXPECT_FALSE(result.errors.empty()) << "both anchor_inst and anchor_offset set";
-  }
-
-  // Neither set.
-  {
-    InstrumentationPoint pt;
-    Instrumentor i3(obj, ROCJITSU_CODE_ARCH_CDNA4);
-    i3.add_point(pt);
-    auto result = i3.resolve_and_validate();
-    EXPECT_FALSE(result.errors.empty()) << "neither anchor_inst nor anchor_offset set";
-  }
 }
 
 //==============================================================================
