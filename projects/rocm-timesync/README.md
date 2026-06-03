@@ -1,6 +1,6 @@
-# ROCR Timesync
+# ROCm Timesync
 
-ROCR Timesync is an open source library that support precision time
+ROCm Timesync is an open source library that support precision time
 synchronization on AMD platforms. It works in conjunction with
 [rocr-runtime](../rocr-runtime) to support translation of time from HSA agents
 to a common global system timeline.
