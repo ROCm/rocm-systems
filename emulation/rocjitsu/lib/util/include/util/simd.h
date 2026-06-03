@@ -29,24 +29,31 @@ inline constexpr bool has_stdx_simd =
     false;
 #endif
 
-/// Process-wide, immutable switch that callers check before taking the
-/// SIMD fast path. Read ONCE from the `RJ_FORCE_SCALAR` env var on first
-/// call (unset/empty/"0" => false, any other value => true) and fixed for
-/// the process lifetime. Returned by value: there is no setter and no
-/// mutable reference, so production code cannot flip it at runtime and the
-/// public API leaks no mutable global state.
-///
-/// A/B testing selects the mode by setting `RJ_FORCE_SCALAR` before launch
-/// (the SIMD correctness suite is run twice and the per-case result dumps
-/// diffed; see tests/simd_ab.h), and e2e runs force the scalar codepath the
-/// same way without recompiling.
-inline bool force_scalar() {
-  static const bool flag = [] {
-    const char *e = std::getenv("RJ_FORCE_SCALAR");
-    return e && e[0] && !(e[0] == '0' && e[1] == '\0');
-  }();
-  return flag;
+namespace detail {
+inline bool init_force_scalar() {
+  const char *e = std::getenv("RJ_FORCE_SCALAR");
+  return e && e[0] && !(e[0] == '0' && e[1] == '\0');
 }
+/// Process-wide force-scalar gate, initialized ONCE from the `RJ_FORCE_SCALAR`
+/// env var at startup (dynamic init) and read with a plain load thereafter --
+/// no per-call guard byte. Mutable so a test-only seam can override it
+/// in-process (see util/simd_test_hooks.h); production code never writes it.
+/// Safe as a dynamic-init global because force_scalar() is only ever read at
+/// runtime instruction-execute, never during another TU's static construction.
+inline bool g_force_scalar = init_force_scalar();
+} // namespace detail
+
+/// Process-wide switch that callers check before taking the SIMD fast path.
+/// Read ONCE from the `RJ_FORCE_SCALAR` env var at startup (unset/empty/"0" =>
+/// false, any other value => true). Production code never writes it; a
+/// test-only seam (util/simd_test_hooks.h) may override it in-process so a
+/// single test can drive both the scalar and SIMD execute paths and compare.
+///
+/// A/B testing can also select the mode by setting `RJ_FORCE_SCALAR` before
+/// launch (the SIMD correctness suite is run twice and the per-case result
+/// dumps diffed; see tests/simd_ab.h), and e2e runs force the scalar codepath
+/// the same way without recompiling.
+inline bool force_scalar() { return detail::g_force_scalar; }
 
 #if __has_include(<experimental/simd>)
 namespace stdx = std::experimental;

@@ -3,13 +3,15 @@
 
 /// @file vop2_simd_correctness_test.cpp
 /// @brief Bit-identity check (SIMD fast path vs scalar body) for the Tier-1
-/// VOP2 binary instructions wired into SIMD_VOP2_BINARY. The process runs in a
-/// single execute mode (RJ_FORCE_SCALAR, immutable); each op records its 64
-/// lane results and the scalar-vs-SIMD equivalence is asserted by diffing the
-/// two runs (see simd_ab.h / the simd_ab_diff CTest entry). In-process the test
-/// still checks inactive-lane preservation under full and partial EXEC masks.
+/// VOP2 binary instructions wired into SIMD_VOP2_BINARY. Each op runs TWICE in
+/// the same process -- once forcing the scalar body, once the SIMD fast path,
+/// with identical seed/inputs/EXEC -- and the two 64-lane result arrays are
+/// asserted equal with EXPECT_EQ (util::set_force_scalar_for_testing flips the
+/// gate in-process; the prior two-process file-dump diff is no longer needed
+/// here). In-process the test also checks inactive-lane preservation under full
+/// and partial EXEC masks.
 
-#include "simd_ab.h"
+#include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
@@ -95,9 +97,9 @@ struct Fixture {
     return out;
   }
 
-  // Runs the instruction in the process's fixed execute mode (SIMD or scalar,
-  // selected once by RJ_FORCE_SCALAR). The scalar-vs-SIMD comparison happens
-  // across two process runs via the recorded dump; see simd_ab.h.
+  // Runs the instruction in the process's current execute mode (SIMD or
+  // scalar, selected by util::force_scalar()). The caller flips the gate
+  // between two calls with identical seed/inputs to compare the paths.
   std::array<uint32_t, WF_SIZE> run(Instruction *inst, uint64_t seed, bool is_float,
                                     uint64_t exec) {
     seed_inputs(seed, is_float, exec);
@@ -161,32 +163,57 @@ const Vop2Case kCases[] = {
     // not SIMD-bit-reproducible on signed zero / NaN (see simd_codegen.py).
 };
 
+// Restores the process force-scalar gate on scope exit so flipping it for an
+// in-process A/B comparison cannot leak into later tests in the same process.
+struct ForceScalarGuard {
+  bool orig;
+  ForceScalarGuard() : orig(util::force_scalar()) {}
+  ~ForceScalarGuard() { util::set_force_scalar_for_testing(orig); }
+};
+
 void check_case(const Vop2Case &c, uint64_t exec) {
-  Fixture fx;
-  ASSERT_NE(fx.cu, nullptr);
-  ASSERT_NE(fx.wf, nullptr);
-  uint32_t enc = vop2_encode(c.opcode, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256);
-  uint32_t words[4] = {enc, 0u, 0u, 0u};
-  Instruction *inst = fx.decoder->decode(words);
-  ASSERT_NE(inst, nullptr) << c.label << ": decode failed";
+  ForceScalarGuard gate_guard;
 
   constexpr uint64_t SEED = 0xC0FFEE'1234'5678ULL;
-  auto out = fx.run(inst, SEED, c.is_float, exec);
 
-  // Record per-lane results for the cross-run scalar-vs-SIMD diff (the two
-  // RJ_FORCE_SCALAR runs must emit identical dumps).
-  simd_ab::record(c.label, exec, out.data(), WF_SIZE);
+  // Run the same instruction with identical seed/inputs/EXEC in both execute
+  // modes. A fresh Fixture per run isolates VGPR state; finite_normal inputs
+  // (f32) plus the bit-exact f16/ldexp ops and the deliberate omission of
+  // v_max_f16/v_min_f16 mean every active lane is bit-reproducible, so no
+  // per-lane NaN skip is needed -- the full 64-lane arrays must match.
+  auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx;
+    EXPECT_NE(fx.cu, nullptr);
+    EXPECT_NE(fx.wf, nullptr);
+    uint32_t enc = vop2_encode(c.opcode, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256);
+    uint32_t words[4] = {enc, 0u, 0u, 0u};
+    Instruction *inst = fx.decoder->decode(words);
+    EXPECT_NE(inst, nullptr) << c.label << ": decode failed";
+    auto out = fx.run(inst, SEED, c.is_float, exec);
+    delete inst;
+    return out;
+  };
+
+  const auto scalar_out = run_mode(/*force_scalar=*/true);
+  const auto simd_out = run_mode(/*force_scalar=*/false);
+
+  // Core A/B equivalence: the SIMD fast path must be bit-identical to the
+  // scalar generated body across all 64 lanes (active and inactive).
+  EXPECT_EQ(scalar_out, simd_out) << c.label << " (exec=0x" << std::hex << exec << "): SIMD path "
+                                  << "diverged from scalar body";
 
   // In-process invariant that holds in either mode: inactive lanes must keep
   // the destination sentinel (no out-of-bounds writes / masked-store leaks).
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     const bool active = (exec >> lane) & 1ULL;
     if (!active) {
-      EXPECT_EQ(out[lane], DST_SENTINEL) << c.label << ": clobbered inactive lane " << lane
-                                         << std::hex << " value=0x" << out[lane];
+      EXPECT_EQ(simd_out[lane], DST_SENTINEL) << c.label << ": clobbered inactive lane " << lane
+                                              << std::hex << " value=0x" << simd_out[lane];
+      EXPECT_EQ(scalar_out[lane], DST_SENTINEL) << c.label << ": clobbered inactive lane " << lane
+                                                << std::hex << " value=0x" << scalar_out[lane];
     }
   }
-  delete inst;
 }
 
 TEST(Vop2SimdCorrectness, FullExecMask) {
