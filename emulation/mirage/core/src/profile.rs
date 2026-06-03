@@ -17,4 +17,8 @@ pub struct ProfileDef {
 
     /// The emulator to use for this profile.
     pub emulator: EmulatorDef,
+
+    /// Optionaly containerize the session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub containerize: Option<ContainerizedDef>,
 }

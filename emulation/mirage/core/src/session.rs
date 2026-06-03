@@ -149,10 +149,6 @@ pub struct SessionDef {
     /// emulator runtime.
     pub profile: MaybeRef<ProfileDef>,
 
-    /// Optional container in which to run the session.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub container: Option<ContainerizedDef>,
-
     /// Working directory used as the default `cwd` for execs.
     pub workdir: String,
 
