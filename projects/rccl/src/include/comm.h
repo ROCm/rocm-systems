@@ -553,6 +553,10 @@ struct ncclPeerInfo {
 #endif
   int cuMemSupport;
   int version;
+  ncclGinType_t supportedGinType;
+  bool crossNicSupport;
+  bool rmaPluginAvailable;
+  bool cuMemGdrSupport;
 };
 
 typedef enum ncclGroupTaskType {
@@ -595,6 +599,7 @@ struct ncclComm {
   ncclNet_t* ncclNet;
   void* netContext;
   void* ginContext;
+  void* rmaGinContext;
   int netPluginIndex;
   int ginPluginIndex;
   int ncclNetVer;
@@ -852,7 +857,7 @@ struct ncclComm {
 
   // RMA state
   struct ncclRmaState rmaState;
-  struct ncclIntruQueue<struct ncclRmaCeInitTask, &ncclRmaCeInitTask::next> rmaCeInitTaskQueue;
+//  struct ncclIntruQueue<struct ncclRmaCeInitTask, &ncclRmaCeInitTask::next> rmaCeInitTaskQueue;
 
   // Debug check
   struct ncclIntruQueue<struct ncclArgsInfo, &ncclArgsInfo::next> argsInfoQueue;
