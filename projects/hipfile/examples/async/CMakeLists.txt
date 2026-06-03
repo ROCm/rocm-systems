@@ -53,7 +53,7 @@ if(BUILD_TESTING)
             COMMAND
                 $<TARGET_FILE:examples_tmpdriver> --base ${AIS_CAPABLE_DIR}
                 -- $<TARGET_FILE:${example}>
-                   {TMPDIR}/in_${example}.bin {TMPDIR}/out_${example}.bin
+                {TMPDIR}/in_${example}.bin {TMPDIR}/out_${example}.bin
         )
         set_tests_properties(async_${example} PROPERTIES
             LABELS "system;hipfile;async"

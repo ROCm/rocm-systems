@@ -90,7 +90,7 @@ if(BUILD_TESTING)
                 $<TARGET_FILE:examples_tmpdriver> --base ${AIS_CAPABLE_DIR}
                                                   --seed-input ${_basics_input_bytes}
                 -- $<TARGET_FILE:various-mem-rw>
-                   {INPUT} {TMPDIR}/out_vmrw_${mode_name}.bin ${mode_num}
+                {INPUT} {TMPDIR}/out_vmrw_${mode_name}.bin ${mode_num}
         )
         set_tests_properties(basics_various-mem-rw_${mode_name} PROPERTIES
             LABELS "system;hipfile;basics"
