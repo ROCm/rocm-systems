@@ -72,7 +72,7 @@ BUILD_IN_VARS: dict[str, str] = {
         $GRBM_GUI_ACTIVE_PER_XCD)), 0), $max_waves_per_cu), 8)), $cu_per_gpu))",
     "kernelBusyCycles": "ROUND(AVG((((End_Timestamp - Start_Timestamp) / \
         1000) * $max_sclk)), 0)",
-    "hbmBandwidth": "($max_mclk / 1000 * 32 * $num_hbm_channels)",
+    "hbmBandwidth": "($max_mclk / 1000 * 32 * $num_memory_channels)",
 }
 
 SUPPORTED_CALL: dict[str, str] = {
@@ -1106,7 +1106,7 @@ def create_sys_vars(sys_info: pd.Series) -> dict[str, Union[int, float]]:
         ("max_mclk", float, "max_mclk"),
         ("max_sclk", float, "max_sclk"),
         ("max_waves_per_cu", int, "max_waves_per_cu"),
-        ("num_hbm_channels", float, "num_hbm_channels"),
+        ("num_memory_channels", float, "num_memory_channels"),
         ("num_xcd", int, "num_xcd"),
         ("wave_size", int, "wave_size"),
     ]

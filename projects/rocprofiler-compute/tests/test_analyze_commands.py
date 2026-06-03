@@ -1448,7 +1448,7 @@ def test_analyze_with_debug_mode(binary_handler_analyze_rocprof_compute):
         max_sclk = 2100.0
         max_mclk = 1600.0
         max_waves_per_cu = 40
-        num_hbm_channels = 4
+        num_memory_channels = 4
         total_l2_chan = 32
         num_xcd = 1
         wave_size = 64

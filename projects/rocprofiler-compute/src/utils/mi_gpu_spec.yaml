@@ -265,6 +265,31 @@ mi_gpu_spec:
               physical: 29861
               virtual: 29881
 
+  - gpu_series: rdna3.5
+    gpu_archs:
+      - gpu_arch: gfx1151
+        perfmon_config:
+          SQ: 8
+          TA: 2
+          TD: 2
+          TCP: 4
+          TCC: 4
+          CPC: 2
+          CPF: 2
+          SPI: 6
+          GRBM: 2
+          GDS: 4
+        models:
+          - gpu_model: strix_halo
+            # APUs have no compute partition — use "n/a" to return 1 die
+            # so that per-XCD analysis formulas work correctly.
+            partition_mode:
+              compute_partition_mode:
+                num_xcds:
+                  n/a: 1
+            chip_ids:
+              physical: 5510 # 0x1586
+
   - gpu_series: mi350
     gpu_archs:
       - gpu_arch: gfx950
