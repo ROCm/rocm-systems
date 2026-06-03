@@ -3044,8 +3044,7 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
     if (copyFlags & kExtOpFlagMask) {
       switch (type) {
         case hipCopyBuffer:
-        case hipCopyBufferSDMA:
-        case hipCopyBufferP2P: {
+        case hipCopyBufferSDMA: {
           // Narrow to H<->D for both swap and indirect.
           amd::Memory* sMem = srcMemories[i];
           amd::Memory* dMem = dstMemories[i];
@@ -3054,10 +3053,11 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
           }
           break;
         }
+        case hipCopyBufferP2P:
+          break;
         case hipHostToHost:
         case hipWriteBuffer:
         case hipReadBuffer:
-
           return hipErrorNotSupported;
       }
     }
