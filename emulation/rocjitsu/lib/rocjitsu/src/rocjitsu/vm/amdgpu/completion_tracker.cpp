@@ -3,6 +3,12 @@
 
 #include "rocjitsu/vm/amdgpu/completion_tracker.h"
 
+#include "rocjitsu/base/rj_compiler.h"
+RJ_DIAGNOSTIC_PUSH
+RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "hsa/amd_hsa_queue.h"
+RJ_DIAGNOSTIC_POP
+
 #include "util/log.h"
 
 #include <atomic>
@@ -52,14 +58,77 @@ void CompletionTracker::drain_completions(std::vector<HwQueueState> &queues) {
 
       qs.entries.pop_front();
     }
-    // HQD idle interrupt: when the queue transitions from active to empty,
-    // broadcast to all type-0 events for the owning process. Matches the
-    // real CP's HQD idle interrupt that fires after the last packet drains.
-    if (had_entries && qs.entries.empty() && interrupt_cb_ && last_process_id != 0) {
-      util::Logger::cp("HQD_IDLE_BROADCAST: pid=", last_process_id);
-      interrupt_cb_(last_process_id, 0);
+    // HQD idle: write the queue's inactive signal and fire the interrupt.
+    // On real hardware the CP writes the HQD status to amd_signal_t::value
+    // and kfd_signal_event_interrupt broadcasts to all type-0 events.
+    if (had_entries && qs.entries.empty() && last_process_id != 0) {
+      if (qs.queue_desc_va != 0)
+        fire_queue_idle_signal(qs.queue_desc_va, last_process_id);
+      if (interrupt_cb_)
+        interrupt_cb_(last_process_id, 0);
     }
   }
+}
+
+void CompletionTracker::fire_queue_idle_signal(uint64_t queue_desc_va, uint32_t process_id) {
+  if (!memory_)
+    return;
+
+  constexpr uint64_t kQueueInactiveSigOff = offsetof(amd_queue_t, queue_inactive_signal);
+  constexpr uint32_t MAILBOX_PTR_OFF = 16;
+  constexpr uint32_t EVENT_ID_OFF = 24;
+
+  uint64_t sig_handle_va = queue_desc_va + kQueueInactiveSigOff;
+  auto *desc_page = memory_->resolve_host_ptr(sig_handle_va, process_id);
+  if (!desc_page)
+    return;
+
+  size_t page_offset = sig_handle_va & 0xFFF;
+  if (page_offset + sizeof(uint64_t) > 0x1000)
+    return;
+
+  uint64_t sig_addr = 0;
+  std::memcpy(&sig_addr, desc_page + page_offset, sizeof(sig_addr));
+  if (sig_addr == 0)
+    return;
+
+  if ((sig_addr & 0x3F) != 0)
+    return;
+  auto *sig_page = memory_->resolve_host_ptr(sig_addr, process_id);
+  if (!sig_page)
+    return;
+  auto *sig_base = sig_page + (sig_addr & 0xFFF);
+
+  constexpr uint32_t SIG_VAL_OFF = 8;
+  constexpr uint64_t kIdleStatus = 0x10;
+
+  // CAS: write the idle status only if the value is currently 0. This
+  // prevents clobbering ROCR's destructor sentinel (0x8000000000000000)
+  // which the handler must see to complete the shutdown handshake.
+  auto *val_ptr = reinterpret_cast<uint64_t *>(sig_base + SIG_VAL_OFF);
+  uint64_t expected = 0;
+  std::atomic_ref<uint64_t>(*val_ptr).compare_exchange_strong(
+      expected, kIdleStatus, std::memory_order_release, std::memory_order_relaxed);
+
+  // Always fire the mailbox write and event-specific interrupt regardless
+  // of whether we wrote the value. During shutdown ROCR's destructor has
+  // already stored 0x8000… but the handler may be in the pending list and
+  // needs the event age advance to trigger the merge.
+  uint32_t event_id = 0;
+  std::memcpy(&event_id, sig_base + EVENT_ID_OFF, sizeof(event_id));
+
+  uint64_t mailbox_ptr = 0;
+  std::memcpy(&mailbox_ptr, sig_base + MAILBOX_PTR_OFF, sizeof(mailbox_ptr));
+  if (mailbox_ptr != 0) {
+    auto *mb_page = memory_->resolve_host_ptr(mailbox_ptr, process_id);
+    if (mb_page) {
+      auto *mb_ptr = reinterpret_cast<uint64_t *>(mb_page + (mailbox_ptr & 0xFFF));
+      std::atomic_ref<uint64_t>(*mb_ptr).store(uint64_t(event_id), std::memory_order_release);
+    }
+  }
+
+  if (interrupt_cb_ && event_id != 0)
+    interrupt_cb_(process_id, event_id);
 }
 
 void CompletionTracker::flush_caches(uint32_t vmid) {

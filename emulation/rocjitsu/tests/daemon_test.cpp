@@ -264,7 +264,8 @@ protected:
     cmd += " HIP_VISIBLE_DEVICES=";
     cmd += std::to_string(rank);
     cmd += " NCCL_P2P_DISABLE=1 NCCL_SHM_DISABLE=1 HSA_NO_SCRATCH_RECLAIM=1"
-           " NCCL_SOCKET_NTHREADS=1 NCCL_NSOCKS_PERTHREAD=1 ";
+           " NCCL_SOCKET_NTHREADS=1 NCCL_NSOCKS_PERTHREAD=1"
+           " NCCL_SOCKET_IFNAME=lo ";
     cmd += RJ_DAEMON_BIN;
     cmd += " --attach --config ";
     cmd += RJ_DAEMON_CONFIG_2GPU;

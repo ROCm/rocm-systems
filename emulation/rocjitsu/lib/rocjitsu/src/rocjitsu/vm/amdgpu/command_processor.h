@@ -63,6 +63,7 @@ struct HwQueue {
   uint64_t last_doorbell = 0;
   bool host_accessible = false;
   bool is_sdma = false;
+  uint64_t queue_desc_va = 0;
 };
 
 /// @brief AMDGPU command processor that dispatches wavefronts to compute units.

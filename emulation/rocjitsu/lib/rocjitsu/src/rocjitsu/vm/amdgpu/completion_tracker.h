@@ -41,6 +41,9 @@ public:
   /// @brief Check if all queues have no pending entries.
   bool all_complete(const std::vector<HwQueueState> &queues) const;
 
+  /// @brief Write queue-idle status to the queue's inactive signal.
+  void fire_queue_idle_signal(uint64_t queue_desc_va, uint32_t process_id);
+
 private:
   void fire_signal(const DispatchEntry &entry);
 

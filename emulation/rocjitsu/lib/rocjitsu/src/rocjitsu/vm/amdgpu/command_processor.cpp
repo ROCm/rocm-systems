@@ -208,8 +208,11 @@ void CommandProcessor::register_queue(HwQueue queue) {
   bool start_poll = queue.host_accessible;
   {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    HwQueueState qs{};
+    qs.owner_process_id = queue.process_id;
+    qs.queue_desc_va = queue.queue_desc_va;
     hw_queues_.push_back(std::move(queue));
-    new_queue_states_.push_back(HwQueueState{});
+    new_queue_states_.push_back(std::move(qs));
     if (!is_primary_ && engine()) {
       engine()->register_as_primary();
       is_primary_ = true;
@@ -350,9 +353,12 @@ void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
     if (poll_count % 100 == 0) {
       std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
       for (size_t i = 0; i < hw_queues_.size(); ++i) {
-        if (new_queue_states_[i].entries.empty() && interrupt_cb_ &&
-            hw_queues_[i].process_id != 0) {
-          interrupt_cb_(hw_queues_[i].process_id, 0);
+        if (new_queue_states_[i].entries.empty() && hw_queues_[i].process_id != 0) {
+          if (new_queue_states_[i].queue_desc_va != 0 && completion_)
+            completion_->fire_queue_idle_signal(new_queue_states_[i].queue_desc_va,
+                                                hw_queues_[i].process_id);
+          if (interrupt_cb_)
+            interrupt_cb_(hw_queues_[i].process_id, 0);
         }
       }
     }

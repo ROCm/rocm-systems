@@ -5,6 +5,12 @@
 #include "embedded_schema.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
+
+#include "rocjitsu/base/rj_compiler.h"
+RJ_DIAGNOSTIC_PUSH
+RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "hsa/amd_hsa_queue.h"
+RJ_DIAGNOSTIC_POP
 #include "rocjitsu/vm/amdgpu/xcd.h"
 #include "util/except.h"
 #include "util/log.h"
@@ -1211,6 +1217,9 @@ int SimulatedDriver::create_queue_ioctl(KfdProcess &proc, void *arg) {
   hw.is_sdma = (args->queue_type == 1 /*KFD_IOC_QUEUE_TYPE_SDMA*/ ||
                 args->queue_type == 3 /*KFD_IOC_QUEUE_TYPE_SDMA_XGMI*/ ||
                 args->queue_type == 4 /*KFD_IOC_QUEUE_TYPE_SDMA_BY_ENG_ID*/);
+  // amd_queue_t base: write_pointer_address points to write_dispatch_id.
+  if (!hw.is_sdma)
+    hw.queue_desc_va = args->write_pointer_address - offsetof(amd_queue_t, write_dispatch_id);
   if (hw.is_sdma && !daemon_mode_) {
     auto *wptr = reinterpret_cast<uint64_t *>(args->write_pointer_address);
     auto *rptr = reinterpret_cast<uint64_t *>(args->read_pointer_address);
