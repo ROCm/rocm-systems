@@ -104,6 +104,9 @@ static void CreateMockComm(
     mockComm->nNodes = 1; // Default to single node for P2P tests
     mockComm->rank   = 0; // Default rank
 
+    mockComm->pxnDisable      = RCCL_VALUE_UNSET;
+    mockComm->p2pNetChunkSize = RCCL_VALUE_UNSET;
+
     // Initialize topology
     memset(&mockTopo, 0, sizeof(mockTopo));
     mockComm->topo = &mockTopo;
@@ -204,7 +207,6 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_UsesLL128WhenInRange)
     unsetenv("NCCL_PROTO");
 
     ncclComm_t comm = new ncclComm();
-    *comm           = {};
     // Manually populate minimal fields for comm
     comm->nRanks                    = 1;
     comm->nNodes                    = 2; // triggers inter-node logic
@@ -247,7 +249,6 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_WarnsOnGfx942Arch)
     unsetenv("NCCL_PROTO");
 
     ncclComm_t comm = new ncclComm();
-    *comm           = {};
     // Manually populate minimal fields for comm
     comm->nRanks                    = 1;
     comm->nNodes                    = 2; // triggers inter-node logic
@@ -289,7 +290,6 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_HonorsUserProtocolEnv)
     setenv("NCCL_PROTO", "1", 1); // Simulate manual override
 
     ncclComm_t comm = new ncclComm();
-    *comm           = {};
     // Manually populate minimal fields for comm
     comm->nRanks = 1;
     comm->nNodes = 2; // triggers inter-node logic
@@ -324,7 +324,6 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_SimpleFallbackWhenNoRanges)
     unsetenv("NCCL_PROTO");
 
     ncclComm_t comm = new ncclComm();
-    *comm           = {};
     // Manually populate minimal fields for comm
     comm->nRanks = 1;
     comm->nNodes = 2; // triggers inter-node logic

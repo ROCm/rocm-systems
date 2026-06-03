@@ -361,6 +361,14 @@ SPMMemoryPool::Alloc(void** ptr, size_t size, aqlprofile_buffer_desc_flags_t fla
         return status;
     }
 
+    status = pool.fill_fn(*ptr, 0u, size / sizeof(uint32_t));
+    if(status != HSA_STATUS_SUCCESS) return status;
+
+    // Allow access only for command buffer. Output buffer is not accessed by GPU
+    if(flags.device_access)
+    {
+        status = pool.allow_access_fn(1, &pool.gpu_agent, nullptr, *ptr);
+    }
     return status;
 }
 

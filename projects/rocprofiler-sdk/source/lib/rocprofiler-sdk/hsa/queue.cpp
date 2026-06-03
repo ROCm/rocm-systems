@@ -376,7 +376,8 @@ WriteInterceptor(const void* packets,
     // these are for the services (dispatch counter collection, pc sampling, ATT) which use
     // the queue/queue_controller callback mechanism
     const auto queue_callback_context_filter = [](const context::context* ctx) {
-        return (ctx->dispatch_counter_collection || ctx->pc_sampler || ctx->dispatch_thread_trace);
+        return (ctx->dispatch_counter_collection || ctx->pc_sampler || ctx->dispatch_thread_trace ||
+                ctx->dispatch_spm);
     };
 
     auto tracing_data_v = tracing::tracing_data{};
