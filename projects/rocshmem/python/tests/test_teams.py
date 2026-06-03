@@ -2,7 +2,9 @@
 Multi-PE tests; require at least 2 PEs.
 """
 
+import os
 import time
+from collections.abc import Callable
 
 import pytest
 
@@ -30,7 +32,81 @@ from rocshmem4py import (
     rocshmem_getmem_on_stream,
 )
 from conftest import requires_multi_pe
-from hip_test_utils import HipStream, load_u64, store_u64
+from tests.hip_test_utils import HipStream, load_u64, store_u64
+
+# Wall-clock delay before the delayed team member enters a collective.
+# Override on slow CI hosts: ROCSHMEM_TEST_TEAM_DELAY_S=2.5 pytest ...
+_TEAM_DELAY_S = float(os.environ.get("ROCSHMEM_TEST_TEAM_DELAY_S", "1.5"))
+# Waiting members (team rank != 0) must observe at least this fraction of
+# ``_TEAM_DELAY_S``; non-members must finish faster than
+# ``_NONMEMBER_TO_MEMBER_RATIO * min(member elapsed)``.  The ratio check
+# is tolerant of uniform host slowdown (both sides scale) but still fails
+# if non-members block on the team's delayed rendezvous.
+_MEMBER_MIN_FRACTION = 0.5
+_NONMEMBER_TO_MEMBER_RATIO = 0.35
+
+
+def _read_elapsed_us(table: int, pe: int, scratch: int) -> int:
+    rocshmem_getmem_on_stream(scratch, table + pe * 8, 8, pe, 0)
+    hip_device_synchronize()
+    return load_u64(scratch)
+
+
+def _assert_team_collective_member_scoping(
+    even_team: int,
+    delay_s: float,
+    invoke: Callable[[], None],
+) -> None:
+    """Members wait on a delayed peer; non-members (INVALID) do not.
+
+    Each PE records wall time for ``invoke()`` in symmetric memory, then
+    gathers all entries and checks cross-rank ordering instead of absolute
+    per-rank ceilings.  That avoids flakes when CI is loaded (members and
+    non-members slow down together) while still catching a broken INVALID
+    path that joins the team rendezvous.
+    """
+    n = rocshmem_n_pes()
+    my_pe = rocshmem_my_pe()
+    is_member = (my_pe % 2) == 0
+    team_rank = rocshmem_team_my_pe(even_team) if is_member else -1
+
+    table = rocshmem_malloc(n * 8)
+    scratch = rocshmem_malloc(8)
+    try:
+        rocshmem_barrier_all()
+        if is_member and team_rank == 0:
+            time.sleep(delay_s)
+
+        t0 = time.perf_counter()
+        invoke()
+        elapsed_us = int((time.perf_counter() - t0) * 1_000_000)
+        store_u64(table + my_pe * 8, elapsed_us)
+
+        rocshmem_barrier_all()
+
+        # Even world PEs are team members; PE 0 is the intentional delayer.
+        member_us = [_read_elapsed_us(table, pe, scratch) for pe in range(2, n, 2)]
+        non_member_us = [_read_elapsed_us(table, pe, scratch) for pe in range(1, n, 2)]
+        if not member_us or not non_member_us:
+            pytest.skip("need >= 2 even team members and >= 1 non-member")
+
+        min_member_us = min(member_us)
+        max_non_member_us = max(non_member_us)
+        delay_us = int(delay_s * 1_000_000)
+
+        assert min_member_us >= delay_us * _MEMBER_MIN_FRACTION, (
+            f"waiting member elapsed too short: min_member={min_member_us}us, "
+            f"expected >= {_MEMBER_MIN_FRACTION * 100:.0f}% of delay={delay_us}us; "
+            f"all_member={member_us}"
+        )
+        assert max_non_member_us < min_member_us * _NONMEMBER_TO_MEMBER_RATIO, (
+            f"non-member blocked on team collective: max_non_member="
+            f"{max_non_member_us}us, min_member={min_member_us}us, "
+            f"all_non_member={non_member_us}"
+        )
+    finally:
+        rocshmem_free(scratch)
+        rocshmem_free(table)
 
 
 def test_team_config_struct():
@@ -270,10 +346,16 @@ def test_team_translate_pe_round_trip():
 def test_team_sync_barrier_member_scoped():
     """Non-members should not block on team collectives.
 
-    Construct an even-rank subteam. Delay one team member before entering
-    team sync / barrier, then assert:
-      - other members block waiting for the delayed member
-      - non-members (TEAM_INVALID path) return quickly
+    Construct an even-rank subteam. Delay team rank 0 before entering
+    team sync / barrier, then compare elapsed times across ranks via
+    symmetric memory:
+
+      - waiting members (team rank != 0) must observe most of the delay;
+      - non-members (TEAM_INVALID) must finish much faster than members.
+
+    Uses a cross-rank ratio (not absolute per-rank ceilings) so the check
+    survives uniform CI host slowdown.  Tune delay with
+    ``ROCSHMEM_TEST_TEAM_DELAY_S`` (default 1.5s).
     """
     n = rocshmem_n_pes()
     if n < 4:
@@ -288,46 +370,22 @@ def test_team_sync_barrier_member_scoped():
     assert status == ROCSHMEM_SUCCESS
 
     my_pe = rocshmem_my_pe()
-    is_member = (my_pe % 2) == 0
-    if is_member:
+    if my_pe % 2 == 0:
         assert even_team != ROCSHMEM_TEAM_INVALID
-        team_rank = rocshmem_team_my_pe(even_team)
     else:
         assert even_team == ROCSHMEM_TEAM_INVALID
-        team_rank = -1
 
-    delay_s = 0.8
-
-    # Phase 1: sync timing
-    rocshmem_barrier_all()
-    if is_member and team_rank == 0:
-        time.sleep(delay_s)
-    t0 = time.perf_counter()
-    rocshmem_team_sync(even_team)
-    sync_dt = time.perf_counter() - t0
-
-    # Phase 2: barrier timing
-    rocshmem_barrier_all()
-    if is_member and team_rank == 0:
-        time.sleep(delay_s)
-    t0 = time.perf_counter()
-    rocshmem_barrier(even_team)
-    barrier_dt = time.perf_counter() - t0
-
-    rocshmem_barrier_all()
-    rocshmem_team_destroy(even_team)
-    rocshmem_barrier_all()
-
-    if is_member and team_rank != 0:
-        # Other team members must wait for delayed member.
-        # higher time on the non-delayed member is the expected 
-        # behavior for a collective barrier/sync.
-        assert sync_dt > delay_s * 0.6
-        assert barrier_dt > delay_s * 0.6
-    if not is_member:
-        # Non-members pass TEAM_INVALID and should not wait for team progress.
-        assert sync_dt < delay_s * 0.5
-        assert barrier_dt < delay_s * 0.5
+    try:
+        _assert_team_collective_member_scoping(
+            even_team, _TEAM_DELAY_S, lambda: rocshmem_team_sync(even_team),
+        )
+        _assert_team_collective_member_scoping(
+            even_team, _TEAM_DELAY_S, lambda: rocshmem_barrier(even_team),
+        )
+    finally:
+        rocshmem_barrier_all()
+        rocshmem_team_destroy(even_team)
+        rocshmem_barrier_all()
 
 
 @requires_multi_pe
@@ -552,16 +610,9 @@ def test_team_barrier_on_stream_rma_ordering():
 def test_team_sync_barrier_on_stream_member_scoped():
     """Stream-ordered team sync/barrier are team-scoped: non-members no-op.
 
-    Stream analogue of ``test_team_sync_barrier_member_scoped``.  One team
-    member delays *before* it enqueues + drives its stream-ordered collective,
-    so its barrier kernel rendezvouses late.  Then:
-      - other members block in ``stream.synchronize()`` waiting for the
-        delayed member's barrier kernel to arrive on the device, and
-      - non-members (TEAM_INVALID) enqueue nothing, so their
-        ``stream.synchronize()`` on an empty stream returns promptly.
-
-    This is the property the explicit-INVALID block in the data test cannot
-    show: a non-member must not stall on team progress driven by the stream.
+    Stream analogue of ``test_team_sync_barrier_member_scoped``.  Uses the
+    same cross-rank elapsed-time ratio as the blocking test (see
+    ``_assert_team_collective_member_scoping``).
     """
     n = rocshmem_n_pes()
     if n < 4:
@@ -576,49 +627,30 @@ def test_team_sync_barrier_on_stream_member_scoped():
     assert status == ROCSHMEM_SUCCESS
 
     my_pe = rocshmem_my_pe()
-    is_member = (my_pe % 2) == 0
-    if is_member:
+    if my_pe % 2 == 0:
         assert even_team != ROCSHMEM_TEAM_INVALID
-        team_rank = rocshmem_team_my_pe(even_team)
     else:
         assert even_team == ROCSHMEM_TEAM_INVALID
-        team_rank = -1
 
-    delay_s = 0.8
+    def _sync_on_stream() -> None:
+        with HipStream() as s:
+            rocshmem_team_sync_on_stream(even_team, s.handle)
+            s.synchronize()
 
-    # Phase 1: sync_on_stream timing
-    rocshmem_barrier_all()
-    if is_member and team_rank == 0:
-        time.sleep(delay_s)
-    t0 = time.perf_counter()
-    with HipStream() as s:
-        rocshmem_team_sync_on_stream(even_team, s.handle)
-        s.synchronize()
-    sync_dt = time.perf_counter() - t0
+    def _barrier_on_stream() -> None:
+        with HipStream() as s:
+            rocshmem_barrier_on_stream(even_team, s.handle)
+            s.synchronize()
 
-    # Phase 2: barrier_on_stream timing
-    rocshmem_barrier_all()
-    if is_member and team_rank == 0:
-        time.sleep(delay_s)
-    t0 = time.perf_counter()
-    with HipStream() as s:
-        rocshmem_barrier_on_stream(even_team, s.handle)
-        s.synchronize()
-    barrier_dt = time.perf_counter() - t0
-
-    rocshmem_barrier_all()
-    rocshmem_team_destroy(even_team)
-    rocshmem_barrier_all()
-
-    if is_member and team_rank != 0:
-        # Members must wait on the device rendezvous for the delayed member.
-        assert sync_dt > delay_s * 0.6
-        assert barrier_dt > delay_s * 0.6
-    if not is_member:
-        # Non-members enqueue nothing for INVALID; the empty stream drains
-        # immediately and must not wait for the team's progress.
-        assert sync_dt < delay_s * 0.5
-        assert barrier_dt < delay_s * 0.5
+    try:
+        _assert_team_collective_member_scoping(even_team, _TEAM_DELAY_S, _sync_on_stream)
+        _assert_team_collective_member_scoping(
+            even_team, _TEAM_DELAY_S, _barrier_on_stream,
+        )
+    finally:
+        rocshmem_barrier_all()
+        rocshmem_team_destroy(even_team)
+        rocshmem_barrier_all()
 
 
 @requires_multi_pe
