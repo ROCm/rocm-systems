@@ -139,11 +139,11 @@ add_ld_library_path(parser_data& _data)
 }
 
 parser_data&
-add_torch_library_path(parser_data& _data, bool verbose)
+add_torch_library_path(parser_data& _data)
 {
     if(_data.out.command.empty()) return _data;
     rocprofsys::common::add_torch_library_path(
-        _data.env.current, _data.out.command.front(), verbose, _data.env.updated);
+        _data.env.current, _data.out.command.front(), _data.env.updated);
     return _data;
 }
 
