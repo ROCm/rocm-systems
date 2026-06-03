@@ -44,6 +44,7 @@ struct ginRocshmemCtx {
 struct ginRocshmemMemHandle {
   ncclGinRocshmemGdaMemHandle *devHandle;  // GPU-side handle
   void *mr;                              // ibv_mr from gin_qp_factory
+  uint32_t *rkeys_dev;                   // GPU array of per-peer rkeys
 };
 
 // Bootstrap allgather wrapper for gin_qp_factory callback
@@ -229,26 +230,45 @@ ncclResult_t ncclGinRocshmemGdaRegister(ncclGin_t *ginComm, void *ginCtx, void *
   uint32_t lkey, rkey;
   if (rocshmem_gin_reg_mr(ctx->qpSet, addr, size, /*atomic=*/0,
                            &mh->mr, &lkey, &rkey) != 0) {
+    WARN("GIN rocshmem GDA: ibv_reg_mr failed for buffer %p size %zu", addr, size);
     hipFree(mh->devHandle);
     free(mh);
     return ncclSystemError;
   }
 
+  // Allgather rkeys across all peers
+  uint32_t *rkeys_buf = (uint32_t *)malloc(sizeof(uint32_t) * ctx->nRanks);
+  rkeys_buf[ctx->rank] = rkey;
+  bootstrapAllGather(ctx->comm->bootstrap, rkeys_buf, sizeof(uint32_t));
+
+  uint32_t *rkeys_dev = nullptr;
+  if (hipMalloc(&rkeys_dev, sizeof(uint32_t) * ctx->nRanks) != hipSuccess) {
+    free(rkeys_buf);
+    rocshmem_gin_dereg_mr(mh->mr);
+    hipFree(mh->devHandle);
+    free(mh);
+    return ncclSystemError;
+  }
+  hipMemcpy(rkeys_dev, rkeys_buf, sizeof(uint32_t) * ctx->nRanks, hipMemcpyHostToDevice);
+  free(rkeys_buf);
+
   // Populate host copy of mem handle
   ncclGinRocshmemGdaMemHandle hostMh;
   hostMh.baseAddr = (uintptr_t)addr;
   hostMh.lkey = lkey;
-  hostMh.rkey = rkey;
+  hostMh.rkeys = rkeys_dev;
 
   // Copy to device
   if (hipMemcpy(mh->devHandle, &hostMh, sizeof(ncclGinRocshmemGdaMemHandle),
                 hipMemcpyHostToDevice) != hipSuccess) {
+    hipFree(rkeys_dev);
     rocshmem_gin_dereg_mr(mh->mr);
     hipFree(mh->devHandle);
     free(mh);
     return ncclSystemError;
   }
 
+  mh->rkeys_dev = rkeys_dev;
   *mhandle = mh;
   *ginHandle = mh->devHandle;
   return ncclSuccess;
@@ -258,6 +278,7 @@ ncclResult_t ncclGinRocshmemGdaDeregister(ncclGin_t *ginComm, void *ginCtx, void
   struct ginRocshmemMemHandle *mh = (struct ginRocshmemMemHandle *)mhandle;
   if (mh == NULL) return ncclSuccess;
 
+  if (mh->rkeys_dev) hipFree(mh->rkeys_dev);
   if (mh->mr) rocshmem_gin_dereg_mr(mh->mr);
   if (mh->devHandle) hipFree(mh->devHandle);
   free(mh);
