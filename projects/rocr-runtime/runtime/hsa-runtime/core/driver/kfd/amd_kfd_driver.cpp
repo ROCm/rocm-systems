@@ -586,9 +586,12 @@ hsa_status_t KfdDriver::ImportExternalSemaphore(uint32_t node_id, void* nt_handl
       static_cast<HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE>(type);
 
   HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {};
-  // Optional thunk: missing export -> NOT_SUPPORTED, not a null call.
+  // Require both thunks up front: importing without destroy would leak the
+  // handle. Missing either -> NOT_SUPPORTED, not a null call.
+  auto* thunk_loader = core::Runtime::runtime_singleton_->thunkLoader();
   const bool loaded =
-      core::Runtime::runtime_singleton_->thunkLoader()->HSAKMT_PFN(hsaKmtImportExternalSemaphore) != nullptr;
+      thunk_loader->HSAKMT_PFN(hsaKmtImportExternalSemaphore) != nullptr &&
+      thunk_loader->HSAKMT_PFN(hsaKmtDestroyExternalSemaphore) != nullptr;
   HSAKMT_STATUS s =
       loaded ? HSAKMT_CALL(hsaKmtImportExternalSemaphore(node_id, nt_handle, kmt_type, &kmt_handle))
              : HSAKMT_STATUS_NOT_SUPPORTED;
@@ -634,6 +637,8 @@ hsa_status_t MapQueueExtSemStatus(HSAKMT_STATUS s) {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     case HSAKMT_STATUS_INVALID_NODE_UNIT:
       return HSA_STATUS_ERROR_INVALID_AGENT;
+    case HSAKMT_STATUS_NOT_SUPPORTED:  // missing thunk / platform stub
+      return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
     default:
       return HSA_STATUS_ERROR;
   }
