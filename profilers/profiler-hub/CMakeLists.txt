@@ -238,7 +238,7 @@ foreach(_target profiler-hub profiler-hub-static)
             $<BUILD_INTERFACE:profiler-hub_queries>
             $<BUILD_INTERFACE:profiler-hub-sqlite3>
             $<BUILD_INTERFACE:spdlog::spdlog>
-            $<BUILD_INTERFACE:fmt::fmt>
+            fmt::fmt
             $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>
     )
 
@@ -263,7 +263,6 @@ endforeach()
 # ------------------------------------------------------------ #
 
 include(CMakePackageConfigHelpers)
-include(GNUInstallDirs)
 
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME profiler-hub)
 set(PACKAGE_NAME "profiler-hub")

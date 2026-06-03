@@ -3,9 +3,9 @@
 
 include_guard(DIRECTORY)
 
-set(FMT_VERSION "10.2.1" CACHE STRING "fmt version")
+set(FMT_VERSION "11.2.0" CACHE STRING "fmt version")
 
-find_package(fmt QUIET)
+find_package(fmt ${FMT_VERSION} QUIET)
 
 if(fmt_FOUND)
     message(STATUS "Using system fmt (version ${fmt_VERSION})")
@@ -23,7 +23,6 @@ else()
     set(FMT_INSTALL OFF CACHE BOOL "" FORCE)
     set(FMT_DOC OFF CACHE BOOL "" FORCE)
     set(FMT_TEST OFF CACHE BOOL "" FORCE)
-    set(CMAKE_POSITION_INDEPENDENT_CODE ON CACHE BOOL "" FORCE)
 
     FetchContent_MakeAvailable(fmt)
 

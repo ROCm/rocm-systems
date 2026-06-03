@@ -3,9 +3,30 @@
 
 include_guard(DIRECTORY)
 
-set(SPDLOG_VERSION "1.14.1" CACHE STRING "spdlog version")
+set(SPDLOG_VERSION "1.15.3" CACHE STRING "spdlog version")
 
-find_package(spdlog QUIET)
+find_package(spdlog ${SPDLOG_VERSION} QUIET)
+
+# A system spdlog is only safe to reuse if it was built with external fmt.
+# If it was built against its bundled fmt, its public headers pull in
+# <spdlog/fmt/bundled/...> and libspdlog exports bundled-fmt symbols, which
+# would coexist with the external fmt that profiler-hub links - two fmt
+# copies in one binary. Detect this via the interface compile definition
+# that spdlog's exported target carries when SPDLOG_FMT_EXTERNAL was set.
+if(spdlog_FOUND)
+    get_target_property(
+        _spdlog_iface_defs
+        spdlog::spdlog
+        INTERFACE_COMPILE_DEFINITIONS
+    )
+    if(NOT _spdlog_iface_defs MATCHES "SPDLOG_FMT_EXTERNAL")
+        message(
+            STATUS
+            "System spdlog uses bundled fmt; falling back to FetchContent with external fmt"
+        )
+        set(spdlog_FOUND FALSE)
+    endif()
+endif()
 
 if(spdlog_FOUND)
     message(STATUS "Using system spdlog (version ${spdlog_VERSION})")
@@ -27,7 +48,6 @@ else()
     set(SPDLOG_INSTALL OFF CACHE BOOL "" FORCE)
     set(SPDLOG_FMT_EXTERNAL ON CACHE BOOL "" FORCE)
     set(SPDLOG_BUILD_PIC ON CACHE BOOL "" FORCE)
-    set(CMAKE_POSITION_INDEPENDENT_CODE ON CACHE BOOL "" FORCE)
 
     # Spdlog workaround for building static library
     set(_PROFILER_HUB_BUILD_SHARED_LIBS_BACKUP ${BUILD_SHARED_LIBS})
