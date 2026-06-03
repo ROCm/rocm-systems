@@ -603,7 +603,8 @@ hsaKmtDestroyExternalSemaphore(
 /**
   Enqueues a GPU-side signal of an imported external semaphore on
   QueueId, ordered behind prior submissions. Handle must come from
-  hsaKmtImportExternalSemaphore on a node reachable from the queue.
+  hsaKmtImportExternalSemaphore on the same node as QueueId's device;
+  cross-adapter use returns HSAKMT_STATUS_INVALID_NODE_UNIT.
 */
 
 HSAKMT_STATUS
@@ -618,8 +619,8 @@ hsaKmtQueueSignalExternalSemaphore(
   Posts a GPU-side wait on an imported external semaphore. The wait
   blocks any subsequent submissions on QueueId until the syncobj
   reaches Value. The semaphore must have been imported via
-  hsaKmtImportExternalSemaphore on a node reachable from the same
-  device as the queue.
+  hsaKmtImportExternalSemaphore on the same node as QueueId's device;
+  cross-adapter use returns HSAKMT_STATUS_INVALID_NODE_UNIT.
 */
 
 HSAKMT_STATUS
