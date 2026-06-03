@@ -1,10 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-if(ROCPROFSYS_DISABLE_EXAMPLES)
-    if("openmp-lu" IN_LIST ROCPROFSYS_DISABLE_EXAMPLES)
-        return()
-    endif()
+check_rocprofsys_disable_examples("openmp-lu" _OPENMP_LU_DISABLED)
+if(_OPENMP_LU_DISABLED)
+    return()
 endif()
 
 include(${CMAKE_CURRENT_LIST_DIR}/../openmp-helper.cmake)
