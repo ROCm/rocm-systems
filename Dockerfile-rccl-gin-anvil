@@ -164,6 +164,8 @@ RUN cd rocshmem/src/projects/rocshmem \
       -DGPU_TARGETS=${GPU_TARGETS} \
       -DCMAKE_INSTALL_PREFIX=${ROCSHMEM_INSTALL_DIR} \
       -DUSE_IPC=ON -DUSE_SDMA=ON \
+      -DUSE_HEAP_DEVICE_FINEGRAIN=OFF \
+      -DUSE_HEAP_DEVICE_VMM_POSIX=ON \
       $([ "${DEBUG_BUILD}" = "1" ] && echo "-DCMAKE_BUILD_TYPE=Debug")
 
 ## building RCCL
