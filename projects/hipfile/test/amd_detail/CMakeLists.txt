@@ -12,6 +12,7 @@ set(SHARED_SOURCE_FILES
 )
 
 set(TEST_SOURCE_FILES
+    api_trace.cpp
     async.cpp
     backend.cpp
     batch/batch.cpp
@@ -31,6 +32,7 @@ set(TEST_SOURCE_FILES
     mountinfo.cpp
     stats.cpp
     stream.cpp
+    thread-pool.cpp
 )
 
 set(TEST_SYSINCLS

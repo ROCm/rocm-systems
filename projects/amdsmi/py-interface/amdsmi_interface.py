@@ -3891,6 +3891,79 @@ def amdsmi_get_gpu_process_list(
     return result
 
 
+def amdsmi_get_gpu_process_list_by_pid(processor_handles: list) -> list:
+    """Get process list grouped by PID across multiple GPUs.
+
+    Args:
+        processor_handles: List of processor handles to query.
+
+    Returns:
+        List of dicts with keys: pid, name, container_name, gpus.
+        Each gpu entry has: gpu_index, mem, engine_usage, memory_usage,
+        cu_occupancy, sdma_usage, evicted_time.
+    """
+    for h in processor_handles:
+        if not isinstance(h, amdsmi_wrapper.amdsmi_processor_handle):
+            raise AmdSmiParameterException(h, amdsmi_wrapper.amdsmi_processor_handle)
+
+    num = len(processor_handles)
+    handle_array = (amdsmi_wrapper.amdsmi_processor_handle * num)(*processor_handles)
+
+    max_processes = ctypes.c_uint32(MAX_NUM_PROCESSES)
+    process_list = (amdsmi_wrapper.amdsmi_proc_info_by_pid_t * max_processes.value)()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_gpu_process_list_by_pid(
+            handle_array, num, process_list, ctypes.byref(max_processes)
+        )
+    )
+
+    self_pid = os.getpid()
+    result = []
+    for i in range(max_processes.value):
+        entry = process_list[i]
+        pid = int(entry.pid)
+        if pid == self_pid:
+            continue
+
+        process_name = entry.name.decode("utf-8").strip()
+        if process_name == "":
+            process_name = "N/A"
+
+        gpus = []
+        for g in range(entry.num_gpus):
+            ge = entry.gpus[g]
+            gpus.append(
+                {
+                    "gpu_index": ge.gpu_index,
+                    "mem": ge.mem,
+                    "engine_usage": {"gfx": ge.engine_usage.gfx, "enc": ge.engine_usage.enc},
+                    "memory_usage": {
+                        "gtt_mem": ge.memory_usage.gtt_mem,
+                        "cpu_mem": ge.memory_usage.cpu_mem,
+                        "vram_mem": ge.memory_usage.vram_mem,
+                    },
+                    "cu_occupancy": _validate_if_max_uint(
+                        ge.cu_occupancy, MaxUIntegerTypes.UINT32_T
+                    ),
+                    "sdma_usage": _validate_if_max_uint(ge.sdma_usage, MaxUIntegerTypes.UINT64_T),
+                    "evicted_time": _validate_if_max_uint(
+                        ge.evicted_time, MaxUIntegerTypes.UINT32_T
+                    ),
+                }
+            )
+
+        result.append(
+            {
+                "pid": pid,
+                "name": process_name,
+                "container_name": entry.container_name.decode("utf-8").strip(),
+                "gpus": gpus,
+            }
+        )
+
+    return result
+
+
 def amdsmi_get_nic_fw_version(processor_handle: amdsmi_wrapper.amdsmi_processor_handle) -> str:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
