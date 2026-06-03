@@ -1220,6 +1220,44 @@ bool resetThreadAffinity() {
 }
 }  // namespace numa
 
+// ================================================================================================
+// Hint the kernel to place pages of [ptr, ptr+size) on NUMA node `node`.
+// Soft preference (MPOL_PREFERRED): falls back to other nodes under pressure.
+// Failure is non-fatal and logged at LOG_DEBUG. Per-VMA policy, not inherited
+// across fork()+exec(), so safe to apply silently from launcher processes.
+//
+// Hot-path frequency: called from PacketBatch::rebuild*FlatBuffer() only when
+// the underlying std::vector storage actually relocates (callers cache the
+// last bound .data() pointer to elide redundant calls), so it fires at most
+// once per buffer per growth event — not per graph launch.
+bool Os::numaBindPreferred(void* ptr, size_t size, uint32_t node) {
+  if (ptr == nullptr || size == 0) return true;
+
+  // Cache page size; it's a system constant.
+  static const uintptr_t kPageSize = static_cast<uintptr_t>(sysconf(_SC_PAGESIZE));
+  static const uintptr_t kPageMask = kPageSize - 1;
+
+  // mbind requires page-aligned [start, end). Round start down, end up.
+  const uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
+  const uintptr_t start = addr & ~kPageMask;
+  const uintptr_t end = (addr + size + kPageMask) & ~kPageMask;
+
+  // Single-word nodemask: supports up to 64 NUMA nodes, more than any real
+  // system today. mbind's maxnode counts bits (not bytes).
+  const unsigned long nodemask = 1UL << node;
+  constexpr unsigned long kMaxNode = 8 * sizeof(nodemask);
+  constexpr int kMpolPreferred = 1;  // <linux/mempolicy.h>
+
+  if (node >= kMaxNode ||
+      syscall(__NR_mbind, reinterpret_cast<void*>(start), end - start,
+              kMpolPreferred, &nodemask, kMaxNode, 0u) != 0) {
+    ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE,
+            "mbind(MPOL_PREFERRED, node=%u) failed: errno=%d", node, errno);
+    return false;
+  }
+  return true;
+}
+
 }  // namespace amd
 
 #endif  // !defined(_WIN32) && !defined(__CYGWIN__)

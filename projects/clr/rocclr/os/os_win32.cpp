@@ -834,6 +834,14 @@ bool resetThreadAffinity() {
 
 }  // namespace numa
 
+// ================================================================================================
+// Windows stub: NUMA memory placement is handled differently on Windows
+// (VirtualAllocExNuma etc.). Treat as a successful no-op so callers can use
+// this API unconditionally for cross-platform code.
+bool Os::numaBindPreferred(void* /*ptr*/, size_t /*size*/, uint32_t /*node*/) {
+  return true;
+}
+
 }  // namespace amd
 
 #endif  // _WIN32 || __CYGWIN__

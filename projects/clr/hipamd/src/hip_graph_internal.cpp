@@ -461,7 +461,7 @@ void GraphExec::BuildSyncPlan() {
 
     // Ensure at least one PacketBatch exists for barrier placement
     if (segBatch.packet_batches.empty()) {
-      segBatch.packet_batches.emplace_back();
+      segBatch.packet_batches.emplace_back(PreferredNumaNode());
     }
 
     auto& firstBatch = segBatch.packet_batches[0];
@@ -1299,8 +1299,22 @@ void GraphExec::PacketBatch::rebuildFilteredLists(
 
   enabledPackets.reserve(dispatchPackets.size());
   enabledKernelNames.reserve(dispatchPackets.size());
+  const size_t prev_capacity = filteredFlatPacketData.capacity();
   filteredFlatPacketData.reserve(dispatchPackets.size() * kAqlPktSize);
   filteredValidPacketFullHeaders.reserve(dispatchPackets.size());
+
+  // Hint kernel to place filteredFlatPacketData pages on the GPU's near NUMA
+  // node so the host's memcpy into the queue ring (also near the GPU) stays
+  // on one socket. Gated by AMD_GRAPH_NUMA_BIND for runtime disable. mbind
+  // only on actual storage relocation: reserve() is a no-op when capacity
+  // is already sufficient, and the common replay path (clear + reserve(same_n))
+  // keeps capacity unchanged.
+  if (AMD_GRAPH_NUMA_BIND && preferred_numa_node_ != kNumaNodeUnset &&
+      filteredFlatPacketData.capacity() != prev_capacity) {
+    amd::Os::numaBindPreferred(filteredFlatPacketData.data(),
+                               filteredFlatPacketData.capacity(),
+                               preferred_numa_node_);
+  }
 
   // packet pointer -> index in the filtered flat buffer, built during the
   // single pass below so patch_list resolution is O(patches) not O(p*n).
@@ -1363,8 +1377,8 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
       auto& childSegBatch = it->second;
       childSegBatch.node_capture_status.resize(segment.nodes.size(), false);
       childSegBatch.has_uncaptured_nodes = true;
-      childSegBatch.packet_batches.emplace_back();  // leading: dep barriers
-      childSegBatch.packet_batches.emplace_back();  // trailing: completion barrier
+      childSegBatch.packet_batches.emplace_back(PreferredNumaNode());  // leading: dep barriers
+      childSegBatch.packet_batches.emplace_back(PreferredNumaNode());  // trailing: completion barrier
       continue;
     }
 
@@ -1380,7 +1394,7 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
     // If the first node is non-capturable, create a leading empty batch so
     // BuildSyncPlan can prepend dependency barriers that execute before it
     if (first_node_is_uncaptured) {
-      currentSegBatch.packet_batches.emplace_back();
+      currentSegBatch.packet_batches.emplace_back(PreferredNumaNode());
     }
 
     for (size_t i = 0; i < segment.nodes.size(); ++i) {
@@ -1397,7 +1411,7 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
 
       if (node->GraphCaptureEnabled()) {
         // Start of a new batch
-        PacketBatch newBatch;
+        PacketBatch newBatch(PreferredNumaNode());
 
         // Collect packets from consecutive captured nodes
         size_t j = i;
@@ -1456,7 +1470,7 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
     bool last_node_uncaptured = currentSegBatch.has_uncaptured_nodes &&
         !segment.nodes.empty() && !currentSegBatch.node_capture_status.back();
     if (last_node_uncaptured) {
-      currentSegBatch.packet_batches.emplace_back();
+      currentSegBatch.packet_batches.emplace_back(PreferredNumaNode());
     }
   }
 
@@ -1727,8 +1741,22 @@ void GraphExec::PacketBatch::rebuildFlatBuffer() {
   flatPacketData.clear();
   validPacketFullHeaders.clear();
   filteredCacheValid = false;
+  const size_t prev_capacity = flatPacketData.capacity();
   flatPacketData.reserve(n * kAqlPktSize);
   validPacketFullHeaders.reserve(n);
+
+  // Hint kernel to place flatPacketData pages on the GPU's near NUMA node.
+  // Gated by AMD_GRAPH_NUMA_BIND for runtime disable. mbind only on actual
+  // storage relocation: reserve() is a no-op when capacity is already
+  // sufficient, and the common replay path (clear + reserve(same_n)) keeps
+  // capacity unchanged.
+  if (AMD_GRAPH_NUMA_BIND && preferred_numa_node_ != kNumaNodeUnset &&
+      flatPacketData.capacity() != prev_capacity) {
+    amd::Os::numaBindPreferred(flatPacketData.data(),
+                               flatPacketData.capacity(),
+                               preferred_numa_node_);
+  }
+
   for (const uint8_t* pkt_raw : dispatchPackets) {
     appendPacketToFlatBuffer(pkt_raw, flatPacketData, validPacketFullHeaders);
   }

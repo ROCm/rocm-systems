@@ -167,6 +167,14 @@ class Os : AllStatic {
   inline static void setPreferredNumaNode(uint32_t node);
   static void resetPreferredNumaNode();
 
+  //! Hint the kernel to back the pages of [ptr, ptr+size) on NUMA node `node`.
+  //! Uses MPOL_PREFERRED: a soft preference that falls back to other nodes
+  //! under memory pressure. Failure is non-fatal (logged at LOG_DEBUG) so
+  //! callers can use this unconditionally for hot-path host buffers that
+  //! benefit from being placed near a specific GPU's NUMA node.
+  //! No-op on Windows. Returns true on success or no-op.
+  static bool numaBindPreferred(void* ptr, size_t size, uint32_t node);
+
   // File/Path helper routines:
   //
 

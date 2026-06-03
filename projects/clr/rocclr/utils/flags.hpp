@@ -205,6 +205,9 @@ release(size_t, PAL_PREPINNED_MEMORY_SIZE, 64,                                \
         "Size in KBytes of prepinned memory")                                 \
 release(bool, AMD_CPU_AFFINITY, true,                                         \
         "Prefer GPU-local NUMA CPU affinity when the application has not set a CPU mask") \
+release(bool, AMD_GRAPH_NUMA_BIND, false,                                      \
+        "Place HIP graph flat packet buffers on the GPU's nearest NUMA node " \
+        "via mbind(MPOL_PREFERRED). Memory-side hint only; no thread affinity.") \
 release(bool, ROC_USE_FGS_KERNARG, true,                                      \
         "Use fine grain kernel args segment for supported asics")             \
 release(uint, ROC_P2P_SDMA_SIZE, 1024,                                        \

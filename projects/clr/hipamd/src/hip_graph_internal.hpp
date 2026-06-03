@@ -7,6 +7,7 @@
 #pragma once
 #include <algorithm>
 #include <atomic>
+#include <limits>
 #include <queue>
 #include <stack>
 #include <iostream>
@@ -1015,6 +1016,12 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     kernArgManager_ = kernArgManager;
   }
   GraphKernelArgManager* GetKernelArgManager() { return kernArgManager_; }
+  //! NUMA node nearest the GPU this GraphExec runs on. Used to bind
+  //! per-batch flat packet buffers so the host's memcpy into the queue
+  //! ring (already placed near the GPU by ROCr) stays on one socket.
+  uint32_t PreferredNumaNode() {
+    return Device()->devices()[0]->getPreferredNumaNode();
+  }
   static void DecrementRefCount(cl_event event, cl_int command_exec_status, void* user_data);
   hipError_t CaptureAndFormPacketsForGraph();
   void GetKernelArgSizeForGraph(std::unordered_map<int, size_t>& kernArgSizeForGraph);
@@ -1084,7 +1091,19 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     std::vector<NodeRange> nodeRanges;
     std::unordered_map<GraphNode*, size_t> nodeToRangeIndex;  // O(1) lookup
     int disabledNodeCount = 0;  // Count of currently disabled nodes
+
+    // NUMA node nearest the GPU this batch will be dispatched to. Used to
+    // bind flatPacketData / filteredFlatPacketData pages near that node so
+    // the host's memcpy into the queue ring (also placed near the GPU by
+    // ROCr) stays on one socket. Sentinel = kNumaNodeUnset (no hint).
+    // The bind is only re-issued when std::vector reserve() actually moves
+    // storage (capacity grows past the previous high-water), so the syscall
+    // is elided on the common "clear + reserve(same_n)" replay path.
+    static constexpr uint32_t kNumaNodeUnset = std::numeric_limits<uint32_t>::max();
+    uint32_t preferred_numa_node_ = kNumaNodeUnset;
+
     PacketBatch() {}
+    explicit PacketBatch(uint32_t numa_node) : preferred_numa_node_(numa_node) {}
     // O(1) enable/disable operations - just update state
     void setEnabled(GraphNode* node, bool enabled);
     // Rebuild cached filtered lists if cache is stale.
