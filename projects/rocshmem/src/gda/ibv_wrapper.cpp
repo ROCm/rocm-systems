@@ -277,10 +277,18 @@ struct ibv_mr* IBVWrapper::reg_mr_iova0(struct ibv_pd* pd, void* addr, size_t le
         (void *)&fd, (hipDeviceptr_t)addr, aligned_size,
         hipMemRangeHandleTypeDmaBufFd, 0);
     if (err == hipSuccess && fd >= 0) {
+      // Try iova=0 first (offset-based addressing, no baseAddr needed)
       struct ibv_mr *mr = ibv.reg_dmabuf_mr(pd, 0, aligned_size, 0, fd, access);
       if (mr) {
         dmabuf_fd_map[(uintptr_t) mr] = fd;
-        LOG_TRACE("reg_mr_iova0: dmabuf (hipMemGetHandleForAddressRange) for %p size %zd", addr, length);
+        LOG_TRACE("reg_mr_iova0: dmabuf iova=0 for %p size %zd", addr, length);
+        return mr;
+      }
+      // Fallback: iova=VA (some NICs like bnxt require VA-based addressing)
+      mr = ibv.reg_dmabuf_mr(pd, 0, aligned_size, (uint64_t)addr, fd, access);
+      if (mr) {
+        dmabuf_fd_map[(uintptr_t) mr] = fd;
+        LOG_WARN("reg_mr_iova0: dmabuf iova=VA fallback for %p size %zd (offset addressing unavailable)", addr, length);
         return mr;
       }
       close(fd);
