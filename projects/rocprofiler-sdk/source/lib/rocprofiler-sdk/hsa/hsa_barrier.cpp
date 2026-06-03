@@ -45,20 +45,24 @@ hsa_barrier::~hsa_barrier()
         return;
     }
 
-    // If this barrier is destroyed and has queued packets, a future signal creation may
-    // inadvertently block these packets if the same handle is re-used by HSA.
-    if(!complete())
+    bool outstanding = false;
+    _barrier_enqueued.rlock(
+        [&](const auto& barrier_enqueued) { outstanding = !barrier_enqueued.empty(); });
+
+    // release the signal so any stale transition packet can pass
+    clear_barrier();
+
+    // Backstop: retirement is gated on safe_to_retire(), so this should not happen. If a packet
+    // still references this signal, leak it rather than let HSA recycle the handle into a barrier.
+    if(outstanding)
     {
-        _barrier_enqueued.rlock([&](auto& barrier_enqueued) {
-            if(!barrier_enqueued.empty())
-            {
-                ROCP_WARNING << "An incomplete hsa_barrier which was enqueued is being destroyed.";
-            }
-        });
+        ROCP_WARNING << "hsa_barrier (handle: " << _barrier_signal.handle
+                     << ") destroyed with outstanding transition packets; leaking its signal to "
+                        "avoid handle reuse.";
+        return;
     }
 
-    // Clear and destroy the barrier signal
-    clear_barrier();
+    // Destroy the barrier signal
     _core_api.hsa_signal_destroy_fn(_barrier_signal);
 }
 
@@ -93,7 +97,8 @@ hsa_barrier::enqueue_packet(const Queue* queue)
         if(barrier_enqueued.find(queue->get_id().handle) == barrier_enqueued.end())
         {
             return_block = true;
-            barrier_enqueued.insert(queue->get_id().handle);
+            // stamp the queue with the dispatch id that carries this transition packet
+            barrier_enqueued.emplace(queue->get_id().handle, queue->serialized_dispatched());
         }
     });
 
@@ -108,8 +113,26 @@ hsa_barrier::enqueue_packet(const Queue* queue)
 }
 
 void
+hsa_barrier::notify_drain(const Queue* queue)
+{
+    _barrier_enqueued.wlock([&](auto& barrier_enqueued) {
+        auto it = barrier_enqueued.find(queue->get_id().handle);
+        if(it == barrier_enqueued.end()) return;
+        // packet executed once completions reach the carrying dispatch id (queue is in-order)
+        if(queue->serialized_completed() >= it->second)
+        {
+            barrier_enqueued.erase(it);
+        }
+    });
+}
+
+void
 hsa_barrier::remove_queue(const Queue* queue)
 {
+    // a torn-down queue can't execute its packet, so release its pin too
+    _barrier_enqueued.wlock(
+        [&](auto& barrier_enqueued) { barrier_enqueued.erase(queue->get_id().handle); });
+
     _queue_waiting.wlock([&](auto& queue_waiting) {
         if(queue_waiting.find(queue->get_id().handle) == queue_waiting.end()) return;
         queue_waiting.erase(queue->get_id().handle);
@@ -144,6 +167,16 @@ bool
 hsa_barrier::complete() const
 {
     return _core_api.hsa_signal_load_scacquire_fn(_barrier_signal) == 0;
+}
+
+bool
+hsa_barrier::safe_to_retire() const
+{
+    if(!complete()) return false;
+    bool no_outstanding = false;
+    _barrier_enqueued.rlock(
+        [&](const auto& barrier_enqueued) { no_outstanding = barrier_enqueued.empty(); });
+    return no_outstanding;
 }
 
 void

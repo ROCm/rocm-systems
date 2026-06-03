@@ -202,6 +202,8 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 
         if(packet.is_serialized)
         {
+            // count this completion before notifying the serializer (drives barrier drain detection)
+            queue_info_session.queue.serialized_completed_inc();
             CHECK_NOTNULL(hsa::get_queue_controller())
                 ->serializer(&queue_info_session.queue)
                 .wlock([&](auto& serializer) {
@@ -631,6 +633,8 @@ WriteInterceptor(const void* packets,
             if(_packet_data.is_serialized)
             {
                 inserted_before = true;
+                // count this dispatch before enqueue_packet() stamps the barrier with its id
+                queue.serialized_dispatched_inc();
                 CHECK_NOTNULL(hsa::get_queue_controller())
                     ->serializer(&queue)
                     .rlock([&](const auto& serializer) {

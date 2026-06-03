@@ -45,9 +45,11 @@ profiler_serializer_ready_signal_handler(hsa_signal_value_t /* signal_value */, 
 void
 clear_complete_barriers(std::deque<profiler_serializer::barrier_with_state>& barriers)
 {
+    // Retire only when safe_to_retire(): complete AND no queue still references the signal.
+    // Otherwise the barrier stays parked (signal at 0, stale packets pass) until its packets drain.
     while(!barriers.empty())
     {
-        if(barriers.front().barrier->complete())
+        if(barriers.front().barrier->safe_to_retire())
         {
             barriers.pop_front();
         }
@@ -78,6 +80,10 @@ profiler_serializer::add_queue(hsa_queue_t** hsa_queues, const Queue& queue)
 void
 profiler_serializer::kernel_completion_signal(const Queue& completed)
 {
+    // let each barrier drop `completed` if its transition packet on that queue has now executed
+    for(auto& barrier : _barrier)
+        barrier.barrier->notify_drain(&completed);
+
     // We do not want to track kernel compleiton signals before we have reached the barrier
     clear_complete_barriers(_barrier);
 

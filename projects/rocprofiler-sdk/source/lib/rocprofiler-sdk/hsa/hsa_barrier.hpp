@@ -35,7 +35,6 @@
 #include <functional>
 #include <optional>
 #include <unordered_map>
-#include <unordered_set>
 
 namespace rocprofiler
 {
@@ -65,18 +64,29 @@ public:
     // barrier and marks it as complete. Returns true if the given queue had async packets waiting.
     bool register_completion(const Queue* queue);
 
+    // Drop the queue from the outstanding set once it has executed past the dispatch that
+    // carried this barrier's transition packet (called on each serialized completion).
+    void notify_drain(const Queue* queue);
+
     // Checks if this barrier is complete
     bool complete() const;
 
-    // Removes a queue from the barrier dependency list.
+    // complete() AND no queue still references the signal -> safe to destroy (no handle reuse).
+    bool safe_to_retire() const;
+
+    // Removes a queue from the barrier dependency list (waiting + outstanding transition packets).
     // If this is the last queue waiting, clears the barrier and marks it as complete.
     void remove_queue(const Queue* queue);
+
+    // Handle of the underlying barrier signal.
+    uint64_t signal_handle() const { return _barrier_signal.handle; }
 
 private:
     std::function<void()>                                      _barrier_finished = {};
     CoreApiTable                                               _core_api         = {};
     common::Synchronized<std::unordered_map<int64_t, int64_t>> _queue_waiting    = {};
-    common::Synchronized<std::unordered_set<int64_t>>          _barrier_enqueued = {};
+    // queue id -> serialized-dispatch id carrying this barrier's transition packet
+    common::Synchronized<std::unordered_map<int64_t, uint64_t>> _barrier_enqueued = {};
 
     void clear_barrier();
 

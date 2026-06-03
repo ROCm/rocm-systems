@@ -170,6 +170,19 @@ public:
     {
         return _core_api.hsa_signal_load_scacquire_fn(_active_kernels);
     }
+
+    // In-order dispatch ids for serialized kernels; hsa_barrier uses them to tell when a
+    // transition packet handed to this queue has executed (completed >= dispatched-at-enqueue).
+    void serialized_dispatched_inc() { _serialized_dispatched.fetch_add(1, std::memory_order_release); }
+    void serialized_completed_inc() { _serialized_completed.fetch_add(1, std::memory_order_release); }
+    uint64_t serialized_dispatched() const
+    {
+        return _serialized_dispatched.load(std::memory_order_acquire);
+    }
+    uint64_t serialized_completed() const
+    {
+        return _serialized_completed.load(std::memory_order_acquire);
+    }
     void sync() const;
 
     void register_callback(ClientID id, queue_callbacks_t callbacks);
@@ -188,6 +201,8 @@ public:
 private:
     std::atomic<int>                     _notifiers            = {0};
     std::atomic<int64_t>                 _active_async_packets = {0};
+    std::atomic<uint64_t>                _serialized_dispatched = {0};
+    std::atomic<uint64_t>                _serialized_completed  = {0};
     CoreApiTable                         _core_api             = {};
     AmdExtTable                          _ext_api              = {};
     const AgentCache&                    _agent;
