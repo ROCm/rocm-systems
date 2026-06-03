@@ -141,14 +141,35 @@ rocm_install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/test_wrapper.sh
 if(BUILD_CTESTS)
     message(STATUS "Registering CTest-based functional tests")
     include(${CMAKE_CURRENT_SOURCE_DIR}/CTestFunctionalTests.cmake)
+
+    # Initialize install-time test generation
+    set(INSTALL_CTEST_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/CTestFunctionalInstall.cmake")
+    init_install_ctest_generation("${INSTALL_CTEST_OUTPUT}")
+
+    # Configure template header
+    configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/CTestFunctionalInstall.cmake.in
+        ${INSTALL_CTEST_OUTPUT}
+        @ONLY)
+
+    # Register all tests (this will populate both build-time and install-time)
     register_all_functional_tests()
 
-    # Apply YAML-based tier labels
+    # Apply YAML-based tier labels (build-time only)
     set(_test_categories_yaml "${CMAKE_SOURCE_DIR}/tests/test_categories.yaml")
     include(${ROCM_SYSTEMS_ROOT}/shared/ctest/TestCategories.cmake OPTIONAL)
     if(COMMAND apply_ctest_category_labels AND EXISTS "${_test_categories_yaml}")
+        # Apply tier labels to build-time tests
+        # Note: Install-time tests don't get tier labels due to CTest limitations,
+        # but they still have functional/unit labels for basic filtering
         apply_ctest_category_labels("${_test_categories_yaml}")
     endif()
+
+    # Install the generated install-time CTest file
+    rocm_install(FILES "${INSTALL_CTEST_OUTPUT}"
+                 COMPONENT tests
+                 DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem/tests/functional
+                 RENAME CTestTestfile.cmake)
 
     # Print summary
     get_directory_property(all_tests TESTS)
@@ -158,6 +179,7 @@ if(BUILD_CTESTS)
     message(STATUS "Run with retry: ./ctest_with_retry.sh -L functional")
     message(STATUS "Run specific suite: ctest -L RMA")
     message(STATUS "Exclude RO-incompatible: ctest -LE fails_on_ro")
+    message(STATUS "Install-time CTest file: ${INSTALL_CTEST_OUTPUT}")
 endif()
 
 # For backward compatibility and development, also install the shell script

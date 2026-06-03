@@ -77,6 +77,32 @@ if(BUILD_CTESTS AND (BUILD_FUNCTIONAL_TESTS OR BUILD_UNIT_TESTS))
     message(STATUS "")
 endif()
 
+# Install CTest infrastructure for running tests from installation directory
+if(BUILD_CTESTS AND (BUILD_FUNCTIONAL_TESTS OR BUILD_UNIT_TESTS))
+    # Install test categorization YAML
+    rocm_install(FILES test_categories.yaml
+                 COMPONENT tests
+                 DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem)
+
+    # Install CMake modules for tier label application
+    rocm_install(FILES
+                 ${ROCM_SYSTEMS_ROOT}/shared/ctest/TestCategories.cmake
+                 ${ROCM_SYSTEMS_ROOT}/shared/ctest/parse_ctest_categories.py
+                 COMPONENT tests
+                 DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem/cmake)
+
+    # Generate and install top-level CTestTestfile.cmake
+    configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/CTestInstallRoot.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/CTestInstallRoot.cmake
+        @ONLY)
+
+    rocm_install(FILES ${CMAKE_CURRENT_BINARY_DIR}/CTestInstallRoot.cmake
+                 COMPONENT tests
+                 DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem
+                 RENAME CTestTestfile.cmake)
+endif()
+
 IF (BUILD_PYTHON_TESTS)
     # Canonical source of truth is projects/rocshmem/python/tests.
     # This test CMake path only installs those assets into the test package.

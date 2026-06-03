@@ -160,6 +160,85 @@ message(STATUS "MPI numproc flag: ${MPIEXEC_NUMPROC_FLAG}")
 message(STATUS "MPI MCA parameters: pml=${OMPI_MCA_PML}, osc=${OMPI_MCA_OSC}")
 
 ###############################################################################
+# Install-Time CTest Generation Support
+###############################################################################
+
+# Global variable to store install-time test definitions
+set(INSTALL_CTEST_FILE "" CACHE INTERNAL "Install-time CTest file path")
+
+# Function to initialize install-time test generation
+function(init_install_ctest_generation output_file)
+    set(INSTALL_CTEST_FILE "${output_file}" CACHE INTERNAL "Install-time CTest file path")
+    # Clear the file
+    file(WRITE "${INSTALL_CTEST_FILE}" "")
+endfunction()
+
+# Helper function to write install-time test definition
+function(write_install_test_definition TEST_NAME TEST_COMMAND TEST_LABELS TEST_TIMEOUT TEST_RANKS)
+    if(NOT INSTALL_CTEST_FILE)
+        return()  # Not generating install tests
+    endif()
+
+    # Build install-time command by iterating through the list
+    # and replacing build-time paths with install-time relative paths
+    # Working directory for tests is: <install>/share/rocshmem/tests/functional
+    set(INSTALL_CMD_PARTS "")
+    foreach(part IN LISTS TEST_COMMAND)
+        # Replace build-time paths with install-time relative paths
+        if("${part}" STREQUAL "${CMAKE_CURRENT_SOURCE_DIR}/test_wrapper.sh")
+            # Wrapper is at: <install>/share/rocshmem/test_wrapper.sh
+            # Relative from working dir: ../../test_wrapper.sh
+            list(APPEND INSTALL_CMD_PARTS "../../test_wrapper.sh")
+        elseif("${part}" STREQUAL "$<TARGET_FILE:rocshmem_functional_tests>")
+            # Executable is at: <install>/bin/rocshmem_functional_tests
+            # Relative from working dir: ../../../../bin/rocshmem_functional_tests
+            list(APPEND INSTALL_CMD_PARTS "../../../../bin/rocshmem_functional_tests")
+        elseif("${part}" STREQUAL "${MPIEXEC_EXECUTABLE}")
+            # Use the MPI executable found at configure time (absolute path)
+            list(APPEND INSTALL_CMD_PARTS "${MPIEXEC_EXECUTABLE}")
+        elseif("${part}" STREQUAL "${MPIEXEC_NUMPROC_FLAG}")
+            list(APPEND INSTALL_CMD_PARTS "${MPIEXEC_NUMPROC_FLAG}")
+        elseif("${part}" STREQUAL "${OMPI_MCA_PML}")
+            list(APPEND INSTALL_CMD_PARTS "${OMPI_MCA_PML}")
+        elseif("${part}" STREQUAL "${OMPI_MCA_OSC}")
+            list(APPEND INSTALL_CMD_PARTS "${OMPI_MCA_OSC}")
+        else()
+            # Keep the part as-is
+            list(APPEND INSTALL_CMD_PARTS "${part}")
+        endif()
+    endforeach()
+
+    # Write add_test() command using legacy syntax (no NAME/COMMAND keywords)
+    # This matches the format CMake generates in build-time CTestTestfile.cmake files
+    file(APPEND "${INSTALL_CTEST_FILE}" "\nadd_test(${TEST_NAME}")
+    foreach(arg IN LISTS INSTALL_CMD_PARTS)
+        # Escape quotes and write each argument
+        string(REPLACE "\"" "\\\"" escaped_arg "${arg}")
+        file(APPEND "${INSTALL_CTEST_FILE}" " \"${escaped_arg}\"")
+    endforeach()
+    file(APPEND "${INSTALL_CTEST_FILE}" ")\n")
+
+    # Write test properties
+    if(TEST_TIMEOUT GREATER 0)
+        file(APPEND "${INSTALL_CTEST_FILE}" "set_tests_properties(${TEST_NAME} PROPERTIES\n")
+        file(APPEND "${INSTALL_CTEST_FILE}" "    TIMEOUT ${TEST_TIMEOUT}\n")
+        file(APPEND "${INSTALL_CTEST_FILE}" "    SKIP_RETURN_CODE 125\n")
+        file(APPEND "${INSTALL_CTEST_FILE}" "    LABELS \"${TEST_LABELS}\"\n")
+        file(APPEND "${INSTALL_CTEST_FILE}" "    PROCESSORS ${TEST_RANKS}\n")
+        file(APPEND "${INSTALL_CTEST_FILE}" "    WILL_FAIL FALSE\n")
+        file(APPEND "${INSTALL_CTEST_FILE}" "    FAIL_REGULAR_EXPRESSION \"FAILED\")\n")
+    else()
+        # Heatmap tests - no timeout
+        file(APPEND "${INSTALL_CTEST_FILE}" "set_tests_properties(${TEST_NAME} PROPERTIES\n")
+        file(APPEND "${INSTALL_CTEST_FILE}" "    SKIP_RETURN_CODE 125\n")
+        file(APPEND "${INSTALL_CTEST_FILE}" "    LABELS \"${TEST_LABELS}\"\n")
+        file(APPEND "${INSTALL_CTEST_FILE}" "    PROCESSORS ${TEST_RANKS}\n")
+        file(APPEND "${INSTALL_CTEST_FILE}" "    WILL_FAIL FALSE\n")
+        file(APPEND "${INSTALL_CTEST_FILE}" "    FAIL_REGULAR_EXPRESSION \"FAILED\")\n")
+    endif()
+endfunction()
+
+###############################################################################
 # Variant Definitions
 ###############################################################################
 
@@ -578,6 +657,9 @@ function(_add_single_rocshmem_test)
             FAIL_REGULAR_EXPRESSION "FAILED"
         )
     endif()
+
+    # Also write install-time test definition if generating install tests
+    write_install_test_definition("${FULL_TEST_NAME}" "${TEST_COMMAND}" "${TEST_LABELS}" "${TEST_TIMEOUT}" "${TEST_RANKS}")
 endfunction()
 
 ###############################################################################
