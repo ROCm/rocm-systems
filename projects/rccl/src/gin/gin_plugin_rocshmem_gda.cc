@@ -39,7 +39,7 @@ static ncclResult_t ginRocshmemGdaDevices(int* ndev) {
 
 static ncclResult_t ginRocshmemGdaGetProperties(int dev, ncclNetProperties_v11_t* props) {
   memset(props, 0, sizeof(*props));
-  props->name = "rocshmem_gda";
+  props->name = const_cast<char*>("rocshmem_gda");
   props->pciPath = nullptr;
   props->guid = 0;
   props->ptrSupport = NCCL_PTR_CUDA;

@@ -4,8 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#ifndef _NCCL_DEVICE_GIN_ROCSHMEM_DEVICE_HOST_COMMON_QP_H_
-#define _NCCL_DEVICE_GIN_ROCSHMEM_DEVICE_HOST_COMMON_QP_H_
+#ifndef _NCCL_DEVICE_GIN_ROCSHMEM_DEVICE_HOST_COMMON_GDA_H_
+#define _NCCL_DEVICE_GIN_ROCSHMEM_DEVICE_HOST_COMMON_GDA_H_
 
 #include <stdint.h>
 
@@ -30,4 +30,4 @@ struct ncclGinRocshmemGdaMemHandle {
   uint32_t *rkeys;       // Per-peer rkeys (GPU array, nRanks entries, allgathered)
 };
 
-#endif // _NCCL_DEVICE_GIN_ROCSHMEM_DEVICE_HOST_COMMON_QP_H_
+#endif // _NCCL_DEVICE_GIN_ROCSHMEM_DEVICE_HOST_COMMON_GDA_H_
