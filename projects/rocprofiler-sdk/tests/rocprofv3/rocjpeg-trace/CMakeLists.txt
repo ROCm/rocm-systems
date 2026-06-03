@@ -38,7 +38,7 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
 
 set(rocjpeg-tracing-env "${PRELOAD_ENV}")
 
-set(rocJPEG_IMAGE_DIR "${ROCM_PATH}/share/rocjpeg/images")
+set(rocJPEG_IMAGE_DIR "${rocJPEG_ROOT_DIR}/share/rocjpeg/images")
 if(TARGET rocjpeg-demo AND NOT EXISTS "${rocJPEG_IMAGE_DIR}")
     message(
         WARNING "Unable to find image directory for rocjpeg tests: ${rocJPEG_IMAGE_DIR}")
