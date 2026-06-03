@@ -64,8 +64,7 @@ TEST(ComputeSoppBranchSimm16, MaxNegativeSimm16) {
 
 TEST(ComputeSoppBranchSimm16, PositiveOverflowFails) {
   constexpr uint64_t pc = 0x10000;
-  constexpr int64_t kJustOver =
-      (static_cast<int64_t>(std::numeric_limits<int16_t>::max()) + 1) * 4;
+  constexpr int64_t kJustOver = (static_cast<int64_t>(std::numeric_limits<int16_t>::max()) + 1) * 4;
   EXPECT_FALSE(compute_sopp_branch_simm16(pc, pc + 4 + kJustOver).has_value());
 }
 
@@ -73,10 +72,9 @@ TEST(ComputeSoppBranchSimm16, NegativeOverflowFails) {
   constexpr uint64_t pc = 0x10'0000;
   constexpr int64_t kJustUnder =
       (static_cast<int64_t>(std::numeric_limits<int16_t>::min()) - 1) * 4;
-  EXPECT_FALSE(
-      compute_sopp_branch_simm16(
-          pc, static_cast<uint64_t>(static_cast<int64_t>(pc) + 4 + kJustUnder))
-          .has_value());
+  EXPECT_FALSE(compute_sopp_branch_simm16(
+                   pc, static_cast<uint64_t>(static_cast<int64_t>(pc) + 4 + kJustUnder))
+                   .has_value());
 }
 
 TEST(ComputeSoppBranchSimm16, NonDwordAlignedTargetFails) {
@@ -102,8 +100,7 @@ TEST(ComputeSoppBranchSimm16, BranchPcNearInt64MaxFails) {
 }
 
 TEST(ComputeSoppBranchSimm16, TargetNearUint64MaxFails) {
-  constexpr uint64_t kHugeTarget =
-      static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) + 1;
+  constexpr uint64_t kHugeTarget = static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) + 1;
   EXPECT_FALSE(compute_sopp_branch_simm16(0x1000, kHugeTarget).has_value());
 }
 

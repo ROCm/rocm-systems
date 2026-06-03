@@ -65,8 +65,7 @@ std::optional<TrampolineBytes> TrampolineBuilder::build(const TrampolinePlan &pl
   for (const InlineAsmItem &item : plan.after_items)
     body.insert(body.end(), item.words.begin(), item.words.end());
 
-  const uint64_t return_branch_pc =
-      plan.trampoline_offset + body.size() * sizeof(uint32_t);
+  const uint64_t return_branch_pc = plan.trampoline_offset + body.size() * sizeof(uint32_t);
   const auto ret = compute_sopp_branch_simm16(return_branch_pc, plan.return_target);
   if (!ret) {
     report(error_out, "relocation trampoline return branch exceeds s_branch simm16");

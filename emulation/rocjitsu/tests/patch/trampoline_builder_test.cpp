@@ -24,9 +24,7 @@ uint32_t word_at(const std::vector<uint8_t> &bytes, size_t byte_off) {
   return w;
 }
 
-int16_t decode_sopp_simm16(uint32_t word) {
-  return static_cast<int16_t>(word & 0xFFFFu);
-}
+int16_t decode_sopp_simm16(uint32_t word) { return static_cast<int16_t>(word & 0xFFFFu); }
 
 uint64_t resolve_sopp_target(uint64_t branch_pc, uint32_t branch_word) {
   return branch_pc + 4 + static_cast<int64_t>(decode_sopp_simm16(branch_word)) * 4;
@@ -135,8 +133,7 @@ TEST(TrampolineBuilder, ForwardBranchOverflowFails) {
   // forward_simm16 = (trampoline - (anchor + 4)) / 4. Place trampoline one
   // dword past the positive INT16 limit so the forward branch cannot fit.
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
-  constexpr int64_t kJustOver =
-      (static_cast<int64_t>(std::numeric_limits<int16_t>::max()) + 1) * 4;
+  constexpr int64_t kJustOver = (static_cast<int64_t>(std::numeric_limits<int16_t>::max()) + 1) * 4;
   constexpr uint64_t kAnchor = 0x100;
   const uint64_t kTrampoline = kAnchor + 4 + static_cast<uint64_t>(kJustOver);
 
@@ -233,10 +230,8 @@ TEST(TrampolineBuilder, EncodedBranchesRoundTripToPlanCoordinates) {
   // return_target. This is the only assertion in the file that exercises the
   // negative-immediate sign-extension path semantically rather than by byte
   // equality against build_s_branch(-66, ...).
-  const uint64_t ret_pc =
-      kTrampoline + (bytes->trampoline_words.size() - 1) * sizeof(uint32_t);
-  EXPECT_EQ(resolve_sopp_target(ret_pc, bytes->trampoline_words.back()),
-            plan.return_target);
+  const uint64_t ret_pc = kTrampoline + (bytes->trampoline_words.size() - 1) * sizeof(uint32_t);
+  EXPECT_EQ(resolve_sopp_target(ret_pc, bytes->trampoline_words.back()), plan.return_target);
 }
 
 // Under the inline-nop smoke body (1 nop + 1-2 original words = 8-12 bytes

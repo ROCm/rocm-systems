@@ -60,16 +60,15 @@ struct AppliedSite {
 
 std::optional<ResolvedInstrumentationSite>
 validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
-                           std::span<const uint8_t> text_bytes, const InstrumentationPoint &pt,
-                           [[maybe_unused]] rj_code_arch_t arch, std::string *error_out) {
+                std::span<const uint8_t> text_bytes, const InstrumentationPoint &pt,
+                [[maybe_unused]] rj_code_arch_t arch, std::string *error_out) {
   if (pt.filter_flags != 0) {
     report(error_out, "InstrumentationPoint::filter_flags must be 0 in the inline-nop milestone");
     return std::nullopt;
   }
   // TODO: support AfterInst / BlockEntry / BlockExit.
   if (pt.kind != InstrumentationKind::BeforeInst) {
-    report(error_out,
-           "InstrumentationPoint::kind must be BeforeInst in the inline-nop milestone");
+    report(error_out, "InstrumentationPoint::kind must be BeforeInst in the inline-nop milestone");
     return std::nullopt;
   }
   // TODO: consume probe_obj / probe_symbol when probe-call trampolines are
@@ -152,8 +151,8 @@ bool validate_inline_nop_plan(const TrampolinePlan &plan, std::string *error_out
   return true;
 }
 
-TrampolinePlan make_trampoline_plan(const ResolvedInstrumentationSite &site,
-                                         rj_code_arch_t arch, uint64_t trampoline_offset) {
+TrampolinePlan make_trampoline_plan(const ResolvedInstrumentationSite &site, rj_code_arch_t arch,
+                                    uint64_t trampoline_offset) {
   TrampolinePlan plan;
   plan.arch = arch;
   plan.anchor_offset = site.anchor_offset;
