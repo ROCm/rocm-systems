@@ -89,16 +89,6 @@ static ncclResult_t allocMemCPUAccessible(T **ptr, T **devPtr, size_t nelem, int
   return ncclSuccess;
 }
 
-// [RCCL] Manager-aware overload added by the NCCL 2.29.7 sync; the manager
-// argument is currently ignored (memory tracking lives in mem_manager.cc and
-// isn't wired through this path yet).
-template <typename T>
-static ncclResult_t allocMemCPUAccessible(T **ptr, T **devPtr, size_t nelem, int host_flags,
-                                          void **gdrHandle, struct ncclMemManager* /*manager*/,
-                                          bool forceHost = false) {
-  return allocMemCPUAccessible(ptr, devPtr, nelem, host_flags, gdrHandle, forceHost);
-}
-
 // Depending on GDR, free memory on the CPU or GPU.
 template <typename T>
 static ncclResult_t freeMemCPUAccessible(T *ptr, void *gdrHandle) {
@@ -110,12 +100,6 @@ static ncclResult_t freeMemCPUAccessible(T *ptr, void *gdrHandle) {
   return ncclSuccess;
 }
 
-// [RCCL] Manager-aware overload added by the NCCL 2.29.7 sync; the manager
-// argument is currently ignored.
-template <typename T>
-static ncclResult_t freeMemCPUAccessible(T *ptr, void *gdrHandle, struct ncclMemManager* /*manager*/) {
-  return freeMemCPUAccessible(ptr, gdrHandle);
-}
 
 static ncclResult_t getDmaBufFd(void *addr, size_t length, int *fd,
                                 bool forceNonDataDirect = false) {
@@ -302,9 +286,9 @@ static ncclResult_t proxyGinProcessGfd(ncclGin_t *ginComm, void *collComm, struc
     void *signalHandle = (void *)(uint64_t)gfd->qword[ncclGinProxyGfdVASignalHandle].vaSignalHandle.vaSignalHandle;
     signalVal = extractSignalVal(gfd);
     signalOp = mapGfdOpToSignalOp(gfd);
-    NCCLCHECK(ginComm->iputSignal(collComm, 0, nullptr, 0, 0, nullptr,
+    NCCLCHECK(ginComm->iputSignal(ctx, hostGpuCtx->contextId, 0, nullptr, 0, 0, nullptr,
                                   targetRank, signalOff, signalHandle, signalVal,
-                                  signalOp, hostGpuCtx->contextId, &state->request));
+                                  signalOp, &state->request));
     return ncclSuccess;
   }
 
@@ -338,16 +322,16 @@ static ncclResult_t proxyGinProcessGfd(ncclGin_t *ginComm, void *collComm, struc
       signalOp = mapGfdOpToSignalOp(gfd);
       if (signalOp == -1) {
         // First cast from 63 bits to 64 bits and then to void * to avoid warnings
-        NCCLCHECK(ginComm->iput(collComm, srcOff, srcHandle, size, dstOff, dstHandle,
-                                targetRank, hostGpuCtx->contextId, &state->request));
+        NCCLCHECK(ginComm->iput(ctx, hostGpuCtx->contextId, srcOff, srcHandle, size, dstOff, dstHandle,
+                                targetRank, &state->request));
       } else {
         // Reconstruct the signal value
         signalVal = extractSignalVal(gfd);
         uint64_t signalOff = (gfd->qword[ncclGinProxyGfdCompletion].completion.signalId +
                               hostGpuCtx->contextId * ctx->nSignalsPerContext) * sizeof(uint64_t);
-        NCCLCHECK(ginComm->iputSignal(collComm, srcOff, srcHandle, size, dstOff, dstHandle,
+        NCCLCHECK(ginComm->iputSignal(ctx, hostGpuCtx->contextId, srcOff, srcHandle, size, dstOff, dstHandle,
                                       targetRank, signalOff, ctx->signalsGinHandle, signalVal,
-                                      signalOp, hostGpuCtx->contextId, &state->request));
+                                      signalOp, &state->request));
       }
       break;
     default:

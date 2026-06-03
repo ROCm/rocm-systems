@@ -3457,7 +3457,7 @@ ncclResult_t ncclGinIbGdakiQueryLastError(void *ginCtx, bool *hasError) {
   return ncclGinGdakiQueryLastError(ginCtx, hasError);
 }
 
-ncclGin_t ncclGinIbGdaki = {
+ncclGin_v12_t ncclGinIbGdaki = {
   "GIN_IB_GDAKI",
   ncclGinIbGdakiInit,
   ncclGinIbGdakiDevices,
@@ -3718,7 +3718,7 @@ ncclResult_t ncclGinIbProxyTest(void *collComm, void *request, int *done) {
 }
 
 // No support for NCCL_IB_SPLIT_DATA_ON_QPS or NCCL_IB_MERGE_NICS
-ncclGin_t ncclGinIbProxy = {
+ncclGin_v12_t ncclGinIbProxy = {
   "GIN_IB_PROXY",
   ncclGinIbInit,
   ncclIbDevices,
@@ -3746,7 +3746,7 @@ ncclGin_t ncclGinIbProxy = {
 // implementation -- this is a strict subset that always works on ROCm
 // HCAs and matches the existing behaviour. Whoever wires up GDAKI in
 // the future can replace this with a real dispatcher.
-ncclGin_t ncclGinIb = {
+ncclGin_v12_t ncclGinIb = {
   "GIN_IB",
   ncclGinIbInit,
   ncclIbDevices,
