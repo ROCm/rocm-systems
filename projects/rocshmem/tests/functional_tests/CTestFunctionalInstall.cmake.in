@@ -6,7 +6,7 @@
 # This file registers functional tests using installed binaries and scripts.
 # Test commands use relative paths from the working directory:
 #   - Wrapper script: ../../../../share/rocshmem/test_wrapper.sh
-#   - Test executable: ../../../../libexec/rocshmem/rocshmem_functional_tests
+#   - Test executable: ../../../../share/rocshmem/rocshmem_functional_tests
 #   - MPI paths are absolute (found at build configure time)
 #
 # Note: Test definitions are generated during CMake configuration
