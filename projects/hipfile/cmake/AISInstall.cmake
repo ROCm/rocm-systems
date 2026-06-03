@@ -18,7 +18,12 @@ rocm_install(
 )
 
 # Install AIS tools
+if(AIS_INSTALL_TOOLS)
 install(PROGRAMS tools/ais-check/ais-check DESTINATION bin)
+    if(TARGET ais-stats)
+        install(TARGETS ais-stats DESTINATION bin)
+    endif()
+endif()
 
 # Install example code
 # Since the input DIRECTORY is `examples` don't include it in
