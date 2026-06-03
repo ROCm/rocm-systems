@@ -13,8 +13,10 @@ BUILD_FLAG=${3:-false}
 # TARGET_GPU_ARCH=${4:-gfx942}
 TARGET_GPU_ARCH=${4:-gfx950}
 
-DOCKERFILE="dockerfile-gin-fast-path"
-DOCKER_IMAGE="gin-fast-path:latest"
+# DOCKERFILE="dockerfile-gin-fast-path"
+# DOCKER_IMAGE="gin-fast-path:latest"
+DOCKERFILE="Dockerfile-rccl-gin-anvil"
+DOCKER_IMAGE="gin-anvil:latest"
 
 
 # --- build

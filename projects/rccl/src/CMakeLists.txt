@@ -1030,10 +1030,13 @@ target_link_libraries(rccl PRIVATE   ${SMI_LIBRARIES})
 # a FetchContent-built fmt-header-only target leaks into rccl's link
 # interface and breaks install(EXPORT) for static builds.
 target_link_libraries(rccl PRIVATE $<BUILD_INTERFACE:fmt::fmt-header-only>)
+if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
+  find_package(hsakmt REQUIRED PATHS ${ROCM_PATH})
+endif()
 if(ENABLE_ROCSHMEM)
   # Full rocshmem: link librocshmem.a with -fgpu-rdc device linking
   target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
-  target_link_libraries(rccl PRIVATE hsakmt)
+  target_link_libraries(rccl PRIVATE hsakmt::hsakmt)
   target_link_libraries(rccl PRIVATE ${IBVERBS})
   set(_rocshmem_offload_arch_flags "")
   foreach(_gpu_raw ${GPU_TARGETS})
@@ -1047,7 +1050,7 @@ elseif(ENABLE_ROCSHMEM_GIN)
   # may still need librocshmem (e.g. GIN_ANVIL uses Anvil SDMA in librocshmem).
   if(ROCSHMEM_LIBRARY)
     target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
-    target_link_libraries(rccl PRIVATE hsakmt)
+    target_link_libraries(rccl PRIVATE hsakmt::hsakmt)
   endif()
   target_link_options(rccl PRIVATE "LINKER:--allow-shlib-undefined")
 endif()
