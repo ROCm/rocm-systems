@@ -617,7 +617,13 @@ hsa_status_t ProgramMesQueueRegisters(const DirectQueuePlatform& platform,
              doorbell_ctl & ~0x40000000u) ||
       !write(kGcBase0, regCP_MQD_BASE_ADDR, mqd[0x80]) ||
       !write(kGcBase0, regCP_MQD_BASE_ADDR_HI, mqd[0x81]) ||
-      !write(kGcBase0, regCP_MQD_CONTROL, 0) ||
+      !write(kGcBase0, regCP_MQD_CONTROL, mqd[0xA2]) ||
+      // gfx12 requires a valid EOP window for the KIQ/MES HQD to latch ACTIVE.
+      // The compute HQD path (ProgramHqdRegisters) writes these; the MES path
+      // previously omitted them (+ MQD_CONTROL=0), so the KIQ never activated.
+      !write(kGcBase0, regCP_HQD_EOP_BASE_ADDR, mqd[0xA5]) ||
+      !write(kGcBase0, regCP_HQD_EOP_BASE_ADDR_HI, mqd[0xA6]) ||
+      !write(kGcBase0, regCP_HQD_EOP_CONTROL, mqd[0xA7]) ||
       !write(kGcBase0, regCP_HQD_PQ_BASE, mqd[0x88]) ||
       !write(kGcBase0, regCP_HQD_PQ_BASE_HI, mqd[0x89]) ||
       !write(kGcBase0, regCP_HQD_PQ_RPTR_REPORT_ADDR, mqd[0x8B]) ||
@@ -627,7 +633,14 @@ hsa_status_t ProgramMesQueueRegisters(const DirectQueuePlatform& platform,
       !write(kGcBase0, regCP_HQD_PQ_WPTR_POLL_ADDR_HI, mqd[0x8E]) ||
       !write(kGcBase0, regCP_HQD_PQ_DOORBELL_CONTROL, mqd[0x8F]) ||
       !write(kGcBase0, regCP_HQD_PERSISTENT_STATE, mqd[0x84]) ||
+      !write(kGcBase0, regCP_HQD_GFX_CONTROL, kCpHqdGfxControlDbUpdatedMsgEn) ||
       !write(kGcBase0, regCP_HQD_ACTIVE, 1)) {
+    DeselectHqd(platform);
+    return status;
+  }
+  uint32_t pq_status = 0;
+  if (!read(kGcBase0, regCP_PQ_STATUS, &pq_status) ||
+      !write(kGcBase0, regCP_PQ_STATUS, pq_status | (1u << 1))) {
     DeselectHqd(platform);
     return status;
   }
