@@ -489,7 +489,8 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_Functional) {
   std::vector<void*> dst_ptrs = MakeBatchPtrs(dst, offset_bytes);
   std::vector<size_t> sizes(config.copy_count, config.copy_size);
   size_t attrs_idxs[1] = {0};
-  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, flag};
+  hipMemcpyAttributes attr{
+      hipMemcpySrcAccessOrderStream, {}, {}, static_cast<unsigned int>(flag)};
 
   if (pointer_pattern == PointerPattern::BroadcastSource) {
     FillDeviceBuffers(src_ptrs, copy_size, kPatternValue);
@@ -596,7 +597,6 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_H2D_Pageable_DuringApiCall_SourceAccess) 
 HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_H2D_Pageable_Stream_SourceAccess) {
   constexpr size_t copy_count = 1;
   size_t copy_size = GENERATE(kSmallCopySize, kLargeCopySize);
-  constexpr int kInitialValue = 31;
   constexpr int kStreamProducedValue = 47;
   BatchConfig config{copy_count, copy_size};
   StreamGuard stream_guard(Streams::created);
@@ -854,7 +854,8 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_P2P_Functional) {
   std::vector<void*> src_ptrs;
   std::vector<void*> dst_ptrs;
   std::vector<size_t> sizes(total_copy_count, copy_size);
-  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, flag};
+  hipMemcpyAttributes attr{
+      hipMemcpySrcAccessOrderStream, {}, {}, static_cast<unsigned int>(flag)};
   size_t attrs_idxs[1] = {0};
 
   EnablePeerAccess(peer_pairs);
