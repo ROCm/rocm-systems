@@ -36,6 +36,7 @@ SYMBOLS = [0, 1, 2, 3, 4, 5, 13, 17, 18, 20]
 # entry per rendering backend so both the HTML (Plotly hex) and CLI (plotext
 # token) plots draw from a single source of truth.
 _TRACE_COLORS: dict[str, dict[str, str]] = {
+    "l0": {"html": "#F0E442", "cli": "brown+"},
     "l1": {"html": "#0072B2", "cli": "red+"},
     "l2": {"html": "#009E73", "cli": "green+"},
     "hbm": {"html": "#D55E00", "cli": "blue+"},
