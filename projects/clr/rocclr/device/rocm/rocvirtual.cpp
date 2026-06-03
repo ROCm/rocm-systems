@@ -4649,9 +4649,10 @@ void VirtualGPU::submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) {
   }
 
   if (cmd.semaphoreCmd() == amd::ExternalSemaphoreCmd::COMMAND_SIGNAL_EXTSEMAPHORE) {
-    // Drain in-flight work (incl. SDMA) before the signal; the
-    // flushDMA(MainEngine) equivalent, on signal only.
-    dispatchBarrierPacket(kBarrierPacketHeader, /*skipSignal=*/true);
+    // Drain in-flight work before the signal. Default skipSignal=false
+    // populates dep_signal[] from WaitingSignal() so async SDMA copies (on
+    // separate engines) are waited on, not just in-order compute packets.
+    dispatchBarrierPacket(kBarrierPacketHeader);
 
     hsa_status_t s = hsa_amd_queue_signal_external_semaphore(
         gpu_queue_, *holder, cmd.fence());
