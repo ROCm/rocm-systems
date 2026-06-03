@@ -91,7 +91,7 @@ __device__ int Context::reduce(rocshmem_team_t team, T *dest, const T *source,
   }
 
   if (is_thread_zero_in_block()) {
-    ctxStats.incStat(NUM_TO_ALL);
+    ctxStats.incStat(NUM_REDUCE);
   }
 
   DISPATCH_RET(reduce<PAIR(T, Op)>(team, dest, source, nreduce));

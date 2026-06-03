@@ -87,10 +87,10 @@ mutable_kernel_descriptor(MutableKernelDescriptorImage &fixture) {
 
 std::vector<rocjitsu::KdTranslation>
 translate_mutable_descriptor(const MutableKernelDescriptorImage &fixture, rj_code_arch_t guest_arch,
-                             rj_code_arch_t host_arch) {
+                             rj_code_arch_t host_arch,
+                             const rocjitsu::KernelDescriptorTranslationOptions &options = {}) {
   rocjitsu::KernelDescriptorTranslator translator(guest_arch, host_arch);
-  return translator.translate_image(fixture.image, fixture.text_offset, fixture.text_size,
-                                    rocjitsu::KernelDescriptorTranslationOptions{});
+  return translator.translate_image(fixture.image, fixture.text_offset, fixture.text_size, options);
 }
 
 } // namespace
@@ -112,13 +112,12 @@ TEST(BinaryTranslatorE2E, TranslateVectorAddCdna4ToRdna4) {
 
   EXPECT_FALSE(result.elf_bytes.empty()) << "Translation produced empty ELF";
   EXPECT_EQ(result.host_arch, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(result.ok()) << "Translation diagnostic: " << result.diagnostics.front().message;
 
-  // Verify ELF machine flags contain GFX1200.
-  ASSERT_GE(result.elf_bytes.size(), 48u);
-  uint32_t e_flags = 0;
-  std::memcpy(&e_flags, result.elf_bytes.data() + 48, sizeof(e_flags));
-  constexpr uint32_t kEfAmdgpuMachGfx1200 = 0x48;
-  EXPECT_EQ(e_flags & 0xFF, kEfAmdgpuMachGfx1200)
+  // Verify ELF machine flags through the typed header so the bounds check covers e_flags.
+  ASSERT_GE(result.elf_bytes.size(), sizeof(rocjitsu::Elf64_Ehdr));
+  const auto *ehdr = reinterpret_cast<const rocjitsu::Elf64_Ehdr *>(result.elf_bytes.data());
+  EXPECT_EQ(ehdr->e_flags & rocjitsu::EF_AMDGPU_MACH, rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1200)
       << "ELF e_flags should contain GFX1200 machine type";
 }
 
@@ -135,14 +134,12 @@ TEST(BinaryTranslatorE2E, TranslateVectorAddCdna4ToCdna3) {
 
   EXPECT_FALSE(result.elf_bytes.empty()) << "Translation produced empty ELF";
   EXPECT_EQ(result.host_arch, ROCJITSU_CODE_ARCH_CDNA3);
-  EXPECT_TRUE(result.warnings.empty())
-      << "Vector-add CDNA4→CDNA3 translation should not require unhandled lowering";
+  EXPECT_TRUE(result.ok())
+      << "Vector-add CDNA4->CDNA3 translation should not require unhandled lowering";
 
-  ASSERT_GE(result.elf_bytes.size(), 48u);
-  uint32_t e_flags = 0;
-  std::memcpy(&e_flags, result.elf_bytes.data() + 48, sizeof(e_flags));
-  constexpr uint32_t kEfAmdgpuMachGfx942 = 0x4C;
-  EXPECT_EQ(e_flags & 0xFF, kEfAmdgpuMachGfx942)
+  ASSERT_GE(result.elf_bytes.size(), sizeof(rocjitsu::Elf64_Ehdr));
+  const auto *ehdr = reinterpret_cast<const rocjitsu::Elf64_Ehdr *>(result.elf_bytes.data());
+  EXPECT_EQ(ehdr->e_flags & rocjitsu::EF_AMDGPU_MACH, rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX942)
       << "ELF e_flags should contain GFX942 machine type";
 
   ASSERT_FALSE(co->text_sections().empty());
@@ -339,7 +336,7 @@ TEST(KernelDescriptorTranslator, CdnaAccVgprExpansionGrowsUnifiedVgprAllocationF
     auto *kd = mutable_kernel_descriptor(fixture);
     kd->compute_pgm_rsrc1 = 0;
     kd->compute_pgm_rsrc3 = 0;
-    AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 7);
+    AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 15);
     AMDHSA_BITS_SET(kd->compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 15);
 
     const auto translations =
@@ -351,9 +348,51 @@ TEST(KernelDescriptorTranslator, CdnaAccVgprExpansionGrowsUnifiedVgprAllocationF
     ASSERT_NE(translated, translations.end());
     EXPECT_EQ(translated->accvgpr_base, 64u);
     EXPECT_EQ(translated->guest_vgpr_count, 64u);
+    EXPECT_EQ(translated->guest_agpr_count, 64u);
     EXPECT_EQ(translated->target_vgpr_count, 128u);
+    EXPECT_EQ(translated->target_vgpr_allocation_count, 128u);
     EXPECT_EQ(translated->target_vgpr_granulated, 31u);
   }
+}
+
+TEST(KernelDescriptorTranslator, CdnaToCdnaMovesAccVgprBaseAboveSemanticScratch) {
+  using namespace rocr::llvm::amdhsa;
+
+  auto fixture = mutable_vector_add_descriptor(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(fixture.valid);
+
+  auto *kd = mutable_kernel_descriptor(fixture);
+  kd->compute_pgm_rsrc1 = 0;
+  kd->compute_pgm_rsrc3 = 0;
+  AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 13);
+  AMDHSA_BITS_SET(kd->compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 23);
+
+  rocjitsu::KernelDescriptorTranslationOptions options;
+  options.minimum_vgprs = 128;
+  const auto translations = translate_mutable_descriptor(fixture, ROCJITSU_CODE_ARCH_CDNA4,
+                                                         ROCJITSU_CODE_ARCH_CDNA3, options);
+  const auto translated =
+      std::find_if(translations.begin(), translations.end(), [&fixture](const auto &translation) {
+        return translation.descriptor_file_offset == fixture.kd_file_off;
+      });
+  ASSERT_NE(translated, translations.end());
+  EXPECT_EQ(translated->accvgpr_base, 96u);
+  EXPECT_EQ(translated->target_accvgpr_base, 128u);
+  EXPECT_EQ(translated->target_vgpr_count, 128u);
+  EXPECT_EQ(translated->target_agpr_count, 16u);
+  EXPECT_EQ(translated->target_vgpr_allocation_count, 144u);
+  EXPECT_EQ(translated->target_vgpr_granulated, 17u);
+
+  rocjitsu::AmdGpuCodeObject mutated(fixture.image.data(), fixture.image.size());
+  ASSERT_TRUE(mutated.is_valid());
+  rocjitsu::CodeObjectPatcher patcher(mutated);
+  ASSERT_TRUE(patcher.apply_kernel_descriptor_translation(*translated, ROCJITSU_CODE_ARCH_CDNA3));
+
+  const auto patched_image = patcher.emit();
+  const auto *patched_kd =
+      reinterpret_cast<const kernel_descriptor_t *>(patched_image.data() + fixture.kd_file_off);
+  EXPECT_EQ(AMDHSA_BITS_GET(patched_kd->compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET),
+            31u);
 }
 
 TEST(KernelDescriptorTranslator, RdnaWave64UsesAmdhsaDescriptorVgprEncoding) {
@@ -428,6 +467,7 @@ TEST(BinaryTranslatorE2E, DescriptorPrologueRedirectsEntryWithoutOverwritingOrig
   BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
   auto result = translator.translate(*co);
   ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.ok());
 
   rocjitsu::AmdGpuCodeObject translated_co(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(translated_co.is_valid());
@@ -446,8 +486,9 @@ TEST(BinaryTranslatorE2E, DescriptorPrologueRedirectsEntryWithoutOverwritingOrig
 
   EXPECT_GT(translated_info->entry_text_offset, original_info->entry_text_offset)
       << "CDNA4 workgroup-id SGPRs must be materialized from RDNA4's TTMP launch payload";
-  EXPECT_GE(translated_info->guest_vgpr_count, 128u)
-      << "DBT semantic lowerings need conservative temporary VGPR headroom in the descriptor";
+  EXPECT_GE(translated_info->guest_vgpr_count, original_info->guest_vgpr_count)
+      << "Descriptor translation should not fabricate conservative VGPR headroom; semantic "
+         "lowerings grow the descriptor through explicit resource feedback when needed";
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);
@@ -806,9 +847,9 @@ TEST(BinaryTranslatorE2E, DumpTranslation) {
     dump("RDNA4 translated", reinterpret_cast<const uint8_t *>(sec->data()), sec->size(),
          ROCJITSU_CODE_ARCH_RDNA4);
 
-  if (!result.warnings.empty()) {
-    printf("\n--- Warnings (%zu) ---\n", result.warnings.size());
-    for (const auto &w : result.warnings)
-      printf("  %s\n", w.c_str());
+  if (!result.diagnostics.empty()) {
+    printf("\n--- Diagnostics (%zu) ---\n", result.diagnostics.size());
+    for (const auto &diagnostic : result.diagnostics)
+      printf("  %s\n", diagnostic.message.c_str());
   }
 }
