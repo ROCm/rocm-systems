@@ -147,8 +147,8 @@ static void* gin_pd_alloc_device_uncached(struct ibv_pd*, void*, size_t size,
   void* ptr = nullptr;
   if (hipExtMallocWithFlags(&ptr, size, hipDeviceMallocUncached) != hipSuccess)
     return nullptr;
-  hipMemset(ptr, 0, size);
-  hipStreamSynchronize(0);
+  (void)hipMemset(ptr, 0, size);
+  (void)hipStreamSynchronize(0);
   return ptr;
 }
 
@@ -162,7 +162,7 @@ static void* gin_pd_alloc_host(struct ibv_pd*, void*, size_t size,
 }
 
 static void gin_pd_release(struct ibv_pd*, void*, void* ptr, uint64_t) {
-  hipFree(ptr);
+  (void)hipFree(ptr);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -461,7 +461,7 @@ static int gin_create_cqs(rocshmem_gin_qp_set *set) {
       set->bnxt_scqs[i].depth = cq_attr.ncqe;
       set->qp_allocator->allocate(reinterpret_cast<void**>(&set->bnxt_scqs[i].buf),
                                    set->bnxt_scqs[i].length);
-      hipMemset(set->bnxt_scqs[i].buf, 0, set->bnxt_scqs[i].length);
+      (void)hipMemset(set->bnxt_scqs[i].buf, 0, set->bnxt_scqs[i].length);
 
       struct bnxt_re_dv_umem_reg_attr umem_attr;
       memset(&umem_attr, 0, sizeof(umem_attr));
@@ -488,7 +488,7 @@ static int gin_create_cqs(rocshmem_gin_qp_set *set) {
       set->bnxt_rcqs[i].depth = cq_attr.ncqe;
       set->qp_allocator->allocate(reinterpret_cast<void**>(&set->bnxt_rcqs[i].buf),
                                    set->bnxt_rcqs[i].length);
-      hipMemset(set->bnxt_rcqs[i].buf, 0, set->bnxt_rcqs[i].length);
+      (void)hipMemset(set->bnxt_rcqs[i].buf, 0, set->bnxt_rcqs[i].length);
 
       memset(&umem_attr, 0, sizeof(umem_attr));
       umem_attr.addr = set->bnxt_rcqs[i].buf;
@@ -579,7 +579,7 @@ static int gin_create_qps(rocshmem_gin_qp_set *set) {
 
       void *sq_ptr = nullptr;
       set->qp_allocator->allocate(&sq_ptr, set->bnxt_qps[i].mem_info.sq_len);
-      hipMemset(sq_ptr, 0, set->bnxt_qps[i].mem_info.sq_len);
+      (void)hipMemset(sq_ptr, 0, set->bnxt_qps[i].mem_info.sq_len);
       set->bnxt_qps[i].mem_info.sq_va = (uint64_t)sq_ptr;
       set->bnxt_qps[i].sq_buf = sq_ptr;
 
@@ -598,7 +598,7 @@ static int gin_create_qps(rocshmem_gin_qp_set *set) {
 
       void *rq_ptr = nullptr;
       set->qp_allocator->allocate(&rq_ptr, set->bnxt_qps[i].mem_info.rq_len);
-      hipMemset(rq_ptr, 0, set->bnxt_qps[i].mem_info.rq_len);
+      (void)hipMemset(rq_ptr, 0, set->bnxt_qps[i].mem_info.rq_len);
       set->bnxt_qps[i].mem_info.rq_va = (uint64_t)rq_ptr;
       set->bnxt_qps[i].rq_buf = rq_ptr;
 
@@ -796,7 +796,7 @@ int rocshmem_gin_qp_set::initialize_gpu_qp(QueuePair *gpu_qp, int idx) {
     ionic_dv.get_ctx(&dvctx, nic.context);
 
     int hip_dev_id = -1;
-    hipGetDevice(&hip_dev_id);
+    if (hipGetDevice(&hip_dev_id) != hipSuccess) return -1;
 
     void *gpu_db_page = nullptr;
     rocm_memory_lock_to_fine_grain(dvctx.db_page, 0x1000, &gpu_db_page, hip_dev_id);
@@ -858,10 +858,10 @@ int rocshmem_gin_qp_set::initialize_gpu_qp(QueuePair *gpu_qp, int idx) {
     gpu_qp->bnxt_sq.mtu = 128 << this->nic.portinfo.active_mtu; // ibv_mtu enum: 1=256, 2=512, 3=1024, 4=2048, 5=4096
 
     // Export doorbell
-    hipHostRegister(this->bnxt_qps[idx].db_region_attr->dbr, getpagesize(),
-                    hipHostRegisterDefault);
-    hipHostGetDevicePointer((void**)&gpu_qp->bnxt_dbr,
-                            bnxt_qps[idx].db_region_attr->dbr, 0);
+    if (hipHostRegister(this->bnxt_qps[idx].db_region_attr->dbr, getpagesize(),
+                        hipHostRegisterDefault) != hipSuccess) return -1;
+    if (hipHostGetDevicePointer((void**)&gpu_qp->bnxt_dbr,
+                                bnxt_qps[idx].db_region_attr->dbr, 0) != hipSuccess) return -1;
 
     gpu_qp->qp_num = this->ibv_qps[idx]->qp_num;
     gpu_qp->inline_threshold = inline_threshold;
@@ -873,7 +873,7 @@ int rocshmem_gin_qp_set::initialize_gpu_qp(QueuePair *gpu_qp, int idx) {
     mlx5_devx_qp &qp = mlx5_qps[idx];
 
     int hip_dev_id = -1;
-    hipGetDevice(&hip_dev_id);
+    if (hipGetDevice(&hip_dev_id) != hipSuccess) return -1;
 
     gpu_qp->mlx5_cq = gda_mlx5_device_cq(
       (mlx5_cqe64*)qp.cq,
@@ -1021,8 +1021,8 @@ int rocshmem_gin_create_qps(int nRanks, int myRank,
 
     for (int i = 0; i < nRanks; i++) {
       new (&set->host_qps[i]) QueuePair(set->nic.pd_orig, set->provider);
-      hipMemcpy(&set->gpu_qps[i], &set->host_qps[i], sizeof(QueuePair),
-                hipMemcpyHostToDevice);
+      if (hipMemcpy(&set->gpu_qps[i], &set->host_qps[i], sizeof(QueuePair),
+                    hipMemcpyHostToDevice) != hipSuccess) goto fail;
 
       // 9. Initialize GPU-specific state (doorbells, CQ/SQ buffers)
       if (set->initialize_gpu_qp(&set->gpu_qps[i], i) != 0) goto fail;
@@ -1038,8 +1038,12 @@ int rocshmem_gin_create_qps(int nRanks, int myRank,
       free(host_ptrs);
       goto fail;
     }
-    hipMemcpy(gpu_ptr_array, host_ptrs, nRanks * sizeof(void*),
-              hipMemcpyHostToDevice);
+    if (hipMemcpy(gpu_ptr_array, host_ptrs, nRanks * sizeof(void*),
+                  hipMemcpyHostToDevice) != hipSuccess) {
+      free(host_ptrs);
+      (void)hipFree(gpu_ptr_array);
+      goto fail;
+    }
     free(host_ptrs);
 
     *out_gpu_qps = gpu_ptr_array;
@@ -1065,7 +1069,7 @@ void rocshmem_gin_destroy_qps(rocshmem_gin_qp_set_t qp_set) {
       qp_set->host_qps[i].~QueuePair();
     free(qp_set->host_qps);
   }
-  if (qp_set->gpu_qps) hipFree(qp_set->gpu_qps);
+  if (qp_set->gpu_qps) (void)hipFree(qp_set->gpu_qps);
 
   // Destroy IBV QPs
   for (auto *qp : qp_set->ibv_qps) {

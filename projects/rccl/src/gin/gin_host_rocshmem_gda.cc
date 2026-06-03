@@ -117,7 +117,10 @@ ncclResult_t ncclGinRocshmemGdaCreateContext(struct ncclComm *comm, void *collCo
       ret = ncclSystemError;
       goto fail;
     }
-    hipMemset(ctx->gpuCtxHost.signals, 0, sizeof(uint64_t) * nSignals);
+    if (hipMemset(ctx->gpuCtxHost.signals, 0, sizeof(uint64_t) * nSignals) != hipSuccess) {
+      ret = ncclSystemError;
+      goto fail;
+    }
 
     // Register signal buffer for RDMA atomic access
     uint32_t sigLkey, sigRkey;
@@ -146,10 +149,15 @@ ncclResult_t ncclGinRocshmemGdaCreateContext(struct ncclComm *comm, void *collCo
       bootstrapAllGather(comm->bootstrap, rkeys_buf, sizeof(uint32_t));
       bootstrapAllGather(comm->bootstrap, raddrs_buf, sizeof(uintptr_t));
 
-      hipMemcpy(ctx->gpuCtxHost.signal_rkeys, rkeys_buf,
-                sizeof(uint32_t) * ctx->nRanks, hipMemcpyHostToDevice);
-      hipMemcpy(ctx->gpuCtxHost.signal_raddrs, raddrs_buf,
-                sizeof(uintptr_t) * ctx->nRanks, hipMemcpyHostToDevice);
+      if (hipMemcpy(ctx->gpuCtxHost.signal_rkeys, rkeys_buf,
+                    sizeof(uint32_t) * ctx->nRanks, hipMemcpyHostToDevice) != hipSuccess ||
+          hipMemcpy(ctx->gpuCtxHost.signal_raddrs, raddrs_buf,
+                    sizeof(uintptr_t) * ctx->nRanks, hipMemcpyHostToDevice) != hipSuccess) {
+        free(rkeys_buf);
+        free(raddrs_buf);
+        ret = ncclSystemError;
+        goto fail;
+      }
 
       free(rkeys_buf);
       free(raddrs_buf);
@@ -161,7 +169,10 @@ ncclResult_t ncclGinRocshmemGdaCreateContext(struct ncclComm *comm, void *collCo
       ret = ncclSystemError;
       goto fail;
     }
-    hipMemset(ctx->gpuCtxHost.counters, 0, sizeof(uint64_t) * nCounters);
+    if (hipMemset(ctx->gpuCtxHost.counters, 0, sizeof(uint64_t) * nCounters) != hipSuccess) {
+      ret = ncclSystemError;
+      goto fail;
+    }
   }
 
   // Copy GPU context to device
@@ -184,11 +195,11 @@ fail:
   if (ctx) {
     if (ctx->signalMr) rocshmem_gin_dereg_mr(ctx->signalMr);
     if (ctx->qpSet) rocshmem_gin_destroy_qps(ctx->qpSet);
-    if (ctx->gpuCtxHost.signals) hipFree(ctx->gpuCtxHost.signals);
-    if (ctx->gpuCtxHost.counters) hipFree(ctx->gpuCtxHost.counters);
-    if (ctx->gpuCtxHost.signal_rkeys) hipFree(ctx->gpuCtxHost.signal_rkeys);
-    if (ctx->gpuCtxHost.signal_raddrs) hipFree(ctx->gpuCtxHost.signal_raddrs);
-    if (ctx->gpuCtxDev) hipFree(ctx->gpuCtxDev);
+    if (ctx->gpuCtxHost.signals) (void)hipFree(ctx->gpuCtxHost.signals);
+    if (ctx->gpuCtxHost.counters) (void)hipFree(ctx->gpuCtxHost.counters);
+    if (ctx->gpuCtxHost.signal_rkeys) (void)hipFree(ctx->gpuCtxHost.signal_rkeys);
+    if (ctx->gpuCtxHost.signal_raddrs) (void)hipFree(ctx->gpuCtxHost.signal_raddrs);
+    if (ctx->gpuCtxDev) (void)hipFree(ctx->gpuCtxDev);
     free(ctx->devHandle);
     free(ctx);
   }
@@ -203,11 +214,11 @@ ncclResult_t ncclGinRocshmemGdaDestroyContext(ncclGin_t *ginComm, void *ginCtx) 
   if (ctx->counterMr) rocshmem_gin_dereg_mr(ctx->counterMr);
   if (ctx->qpSet) rocshmem_gin_destroy_qps(ctx->qpSet);
 
-  if (ctx->gpuCtxHost.signals) hipFree(ctx->gpuCtxHost.signals);
-  if (ctx->gpuCtxHost.counters) hipFree(ctx->gpuCtxHost.counters);
-  if (ctx->gpuCtxHost.signal_rkeys) hipFree(ctx->gpuCtxHost.signal_rkeys);
-  if (ctx->gpuCtxHost.signal_raddrs) hipFree(ctx->gpuCtxHost.signal_raddrs);
-  if (ctx->gpuCtxDev) hipFree(ctx->gpuCtxDev);
+  if (ctx->gpuCtxHost.signals) (void)hipFree(ctx->gpuCtxHost.signals);
+  if (ctx->gpuCtxHost.counters) (void)hipFree(ctx->gpuCtxHost.counters);
+  if (ctx->gpuCtxHost.signal_rkeys) (void)hipFree(ctx->gpuCtxHost.signal_rkeys);
+  if (ctx->gpuCtxHost.signal_raddrs) (void)hipFree(ctx->gpuCtxHost.signal_raddrs);
+  if (ctx->gpuCtxDev) (void)hipFree(ctx->gpuCtxDev);
   free(ctx->devHandle);
   free(ctx);
   return ncclSuccess;
@@ -231,7 +242,7 @@ ncclResult_t ncclGinRocshmemGdaRegister(ncclGin_t *ginComm, void *ginCtx, void *
   if (rocshmem_gin_reg_mr(ctx->qpSet, addr, size, /*atomic=*/0,
                            &mh->mr, &lkey, &rkey) != 0) {
     WARN("GIN rocshmem GDA: ibv_reg_mr failed for buffer %p size %zu", addr, size);
-    hipFree(mh->devHandle);
+    (void)hipFree(mh->devHandle);
     free(mh);
     return ncclSystemError;
   }
@@ -245,11 +256,18 @@ ncclResult_t ncclGinRocshmemGdaRegister(ncclGin_t *ginComm, void *ginCtx, void *
   if (hipMalloc(&rkeys_dev, sizeof(uint32_t) * ctx->nRanks) != hipSuccess) {
     free(rkeys_buf);
     rocshmem_gin_dereg_mr(mh->mr);
-    hipFree(mh->devHandle);
+    (void)hipFree(mh->devHandle);
     free(mh);
     return ncclSystemError;
   }
-  hipMemcpy(rkeys_dev, rkeys_buf, sizeof(uint32_t) * ctx->nRanks, hipMemcpyHostToDevice);
+  if (hipMemcpy(rkeys_dev, rkeys_buf, sizeof(uint32_t) * ctx->nRanks, hipMemcpyHostToDevice) != hipSuccess) {
+    free(rkeys_buf);
+    (void)hipFree(rkeys_dev);
+    rocshmem_gin_dereg_mr(mh->mr);
+    (void)hipFree(mh->devHandle);
+    free(mh);
+    return ncclSystemError;
+  }
   free(rkeys_buf);
 
   // Populate host copy of mem handle
@@ -261,9 +279,9 @@ ncclResult_t ncclGinRocshmemGdaRegister(ncclGin_t *ginComm, void *ginCtx, void *
   // Copy to device
   if (hipMemcpy(mh->devHandle, &hostMh, sizeof(ncclGinRocshmemGdaMemHandle),
                 hipMemcpyHostToDevice) != hipSuccess) {
-    hipFree(rkeys_dev);
+    (void)hipFree(rkeys_dev);
     rocshmem_gin_dereg_mr(mh->mr);
-    hipFree(mh->devHandle);
+    (void)hipFree(mh->devHandle);
     free(mh);
     return ncclSystemError;
   }
@@ -278,9 +296,9 @@ ncclResult_t ncclGinRocshmemGdaDeregister(ncclGin_t *ginComm, void *ginCtx, void
   struct ginRocshmemMemHandle *mh = (struct ginRocshmemMemHandle *)mhandle;
   if (mh == NULL) return ncclSuccess;
 
-  if (mh->rkeys_dev) hipFree(mh->rkeys_dev);
+  if (mh->rkeys_dev) (void)hipFree(mh->rkeys_dev);
   if (mh->mr) rocshmem_gin_dereg_mr(mh->mr);
-  if (mh->devHandle) hipFree(mh->devHandle);
+  if (mh->devHandle) (void)hipFree(mh->devHandle);
   free(mh);
   return ncclSuccess;
 }
