@@ -3,8 +3,39 @@
 
 /// @file instrumentor.h
 /// @brief DBI orchestrator: resolves InstrumentationPoints to .text-relative
-///        anchors, validates them, and (in a later slice) drives byte-level
-///        patching via TrampolineBuilder and CodeObjectPatcher.
+///        anchors, validates them, and drives byte-level patching via
+///        TrampolineBuilder and CodeObjectPatcher.
+///
+/// Mental model
+/// ------------
+/// The Instrumentor is the central hub. Callers queue InstrumentationPoints
+/// (the requests). On patch(), the orchestrator runs a multi-stage pipeline:
+///
+///   InstrumentationPoint        -- request: "instrument here, with this body"
+///         |  validate_points()
+///         v
+///   ResolvedInstrumentationSite -- one validated anchor + snapshot of the
+///         |                        original bytes (captured before mutation)
+///         |  make_trampoline_plan() + TrampolineBuilder::build()
+///         v
+///   (preflight: per-site plan + built bytes, accumulated locally)
+///         |  splice anchors + append .rj_trampolines + emit()
+///         v
+///   InstrumentedCodeObject      -- patched ELF + per-site InstrumentationPatch
+///
+/// Current pipeline is single-point and all-or-nothing: any per-site failure
+/// aborts the whole patch.
+/// TODOs:: predicate-based anchor selection (Instrumentor walks blocks itself),
+/// multi-site with per-site failure tolerance, probe-call bodies,
+/// AfterInst / BlockEntry / BlockExit kinds, EXEC policy management.
+/// As that lands the per-stage types will thicken
+/// (e.g. ResolvedInstrumentationSite probably gains an ordered list of bodies)
+/// and a layout/negotiation stage will appear between planning and splicing.
+///
+/// Layer split: this file is the orchestrator. TrampolineBuilder
+/// (trampoline_builder.h) is the generic byte emitter — it knows nothing
+/// about points or milestones. CodeObjectPatcher (code_object_patcher.h)
+/// owns ELF mutation.
 
 #pragma once
 
@@ -43,21 +74,19 @@ enum class InstrumentationKind {
 
 /// @brief A request to instrument one site.
 ///
-/// The anchor is identified by either @ref anchor_inst (when the caller
-/// already has a decoded Instruction pointer from an Instrumentor-owned
-/// block) or @ref anchor_offset (test/internal shortcut). Exactly one must
-/// be set; setting both or neither is a fatal error during resolution.
+/// The anchor is identified by @ref anchor_offset (a .text-relative byte
+/// offset). The orchestrator looks up the decoded Instruction at that offset
+/// during validation.
 struct InstrumentationPoint {
-  const Instruction *anchor_inst = nullptr;
-  std::optional<uint64_t> anchor_offset;
+  uint64_t anchor_offset = 0;
 
   InstrumentationKind kind = InstrumentationKind::BeforeInst;
-  uint32_t filter_flags = 0; // Must be 0 in the inline-nop smoke build.
+  uint32_t filter_flags = 0; // Must be 0 in the inline-nop build.
 
   // Reserved for later milestones — must remain default in the inline-nop
-  // smoke build. The validator rejects any non-default value to keep the
+  // build. The validator rejects any non-default value to keep the
   // contract honest until each field is actually implemented.
-  // TODO(future milestone): consume probe_obj / probe_symbol when probe-call
+  // TODO: consume probe_obj / probe_symbol when probe-call
   // trampolines are supported; consume force_full_exec when EXEC policy
   // management lands.
   const AmdGpuCodeObject *probe_obj = nullptr;
@@ -66,12 +95,7 @@ struct InstrumentationPoint {
 };
 
 /// @brief Per-site record produced after validation and byte capture.
-///
-/// @note `anchor_inst` points into BasicBlock storage owned by the
-///       Instrumentor that produced the site. Consumers must not retain
-///       sites past the Instrumentor's lifetime.
 struct ResolvedInstrumentationSite {
-  const Instruction *anchor_inst = nullptr;
   InstrumentationKind kind = InstrumentationKind::BeforeInst;
   uint64_t anchor_offset = 0;
   uint32_t original_size = 0; // 4 or 8 in the inline-nop smoke build.
@@ -106,21 +130,15 @@ struct InstrumentedCodeObject {
   std::vector<std::string> warnings;
 };
 
-/// @brief Validate that @p anchor is a legal trampoline anchor.
+/// @brief Permanent structural checks: would @p anchor work as a trampoline
+///        anchor at @p anchor_offset, ignoring any milestone-scoped policy?
 ///
-/// Called by Instrumentor::resolve_and_validate() and also directly by tests
-/// (the free-function form lets test fixtures use synthetic TestInstruction
-/// objects without standing up an AmdGpuCodeObject). The anchor identity is
-/// already resolved by the caller; @p pt is read for `filter_flags`, `kind`,
-/// and reserved fields. @p arch is accepted now so a future denylist can
-/// grow ISA-specific entries without an API change; today's checks are
-/// uniform across all AMDGPU ISAs.
+/// Pure predicate. Does not look at any InstrumentationPoint — it answers
+/// "can the trampoline machinery splice an `s_branch` here and relocate the
+/// original safely?" only. Reusable by future predicate-based anchor
+/// selection (the orchestrator walks blocks itself and filters candidates).
 ///
-/// Rules enforced:
-///   - @p pt.filter_flags is zero.
-///   - @p pt.kind is BeforeInst (other kinds are unsupported in this milestone).
-///   - @p pt.probe_obj is null, @p pt.probe_symbol is empty, and
-///     @p pt.force_full_exec is false.
+/// Rules enforced (all permanent; none are milestone-scoped):
 ///   - @p anchor_offset is dword aligned.
 ///   - anchor.size() is 4 or 8 and fits inside @p text_bytes.
 ///   - anchor.raw_encoding() is non-null.
@@ -128,6 +146,30 @@ struct InstrumentedCodeObject {
 ///     program terminator, and branch_offset_bytes() is nullopt.
 ///   - anchor.mnemonic() is not in the small PC-relative denylist
 ///     (s_getpc_b64, s_call_b64, s_setpc_b64, s_swappc_b64, s_rfe_*).
+///
+/// @p arch is accepted now so a future denylist can grow ISA-specific entries
+/// without an API change; today's checks are uniform across all AMDGPU ISAs.
+[[nodiscard]] bool is_relocatable_anchor(const Instruction &anchor, uint64_t anchor_offset,
+                                         std::span<const uint8_t> text_bytes, rj_code_arch_t arch,
+                                         std::string *error_out = nullptr);
+
+/// @brief Validate that @p anchor is a legal trampoline anchor for @p pt.
+///
+/// Called by Instrumentor::validate_points() and also directly by tests
+/// (the free-function form lets test fixtures use synthetic TestInstruction
+/// objects without standing up an AmdGpuCodeObject). The anchor identity is
+/// already resolved by the caller; @p pt is read for `filter_flags`, `kind`,
+/// and reserved fields.
+///
+/// Layering: this function combines milestone-scoped policy (reserved-field
+/// rejections — temporary) with permanent structural relocatability
+/// (delegated to is_relocatable_anchor — see there for the structural rules).
+///
+/// Milestone-scoped rules enforced here:
+///   - @p pt.filter_flags is zero.
+///   - @p pt.kind is BeforeInst (other kinds are unsupported in this milestone).
+///   - @p pt.probe_obj is null, @p pt.probe_symbol is empty, and
+///     @p pt.force_full_exec is false.
 [[nodiscard]] std::optional<ResolvedInstrumentationSite>
 validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
                 std::span<const uint8_t> text_bytes, const InstrumentationPoint &pt,
@@ -172,7 +214,7 @@ public:
   Instrumentor(const Instrumentor &) = delete;
   Instrumentor &operator=(const Instrumentor &) = delete;
 
-  /// @brief Queue a point. The point is not validated until resolve_and_validate().
+  /// @brief Queue a point. The point is not validated until validate_points().
   void add_point(InstrumentationPoint pt);
 
   /// @brief Convenience: queue a point identified only by .text-relative offset.
@@ -181,28 +223,17 @@ public:
   void add_point_by_offset(uint64_t anchor_offset,
                            InstrumentationKind kind = InstrumentationKind::BeforeInst);
 
-  /// @brief Force the lazy block build and return the owned blocks.
-  ///
-  /// Callers walk these to choose anchor candidates, then queue the chosen
-  /// Instruction* via add_point(). Pointers obtained any other way fail
-  /// resolution.
-  [[nodiscard]] std::span<const std::unique_ptr<BasicBlock>> owned_blocks();
-
-  struct ResolveResult {
+  struct ValidationResult {
     std::vector<ResolvedInstrumentationSite> sites;
     std::vector<std::string> errors; // Fatal; sites is empty when non-empty.
   };
 
-  /// @brief Resolve and validate all queued points.
+  /// @brief Look up each queued point's anchor and validate it.
   ///
   /// All-or-nothing: on any failure, `sites` is empty and `errors` lists every
   /// fatal diagnostic encountered. On success, `sites` contains one record per
   /// queued point in insertion order and `errors` is empty.
-  ///
-  /// @note `sites[i].anchor_inst` points into BasicBlock storage owned by
-  ///       this Instrumentor. Consumers must not retain sites past this
-  ///       Instrumentor's lifetime.
-  [[nodiscard]] ResolveResult resolve_and_validate();
+  [[nodiscard]] ValidationResult validate_points();
 
   /// @brief Resolve, validate, plan, build, and patch the queued points.
   ///
@@ -230,8 +261,6 @@ private:
 
   void ensure_blocks_built();
   [[nodiscard]] const Instruction *find_instruction_at_offset(uint64_t anchor_offset);
-  [[nodiscard]] std::optional<uint64_t> resolve_anchor_inst_to_offset(const Instruction *target,
-                                                                      std::string *error_out);
 };
 
 } // namespace rocjitsu

@@ -58,10 +58,49 @@ struct AppliedSite {
 
 } // namespace
 
+bool is_relocatable_anchor(const Instruction &anchor, uint64_t anchor_offset,
+                           std::span<const uint8_t> text_bytes,
+                           [[maybe_unused]] rj_code_arch_t arch, std::string *error_out) {
+  if (anchor_offset % sizeof(uint32_t) != 0) {
+    report(error_out, "anchor_offset must be dword aligned");
+    return false;
+  }
+  // Instruction::size() returns int by convention; the `!= 4 && != 8` check
+  // also rejects negative values (which decoders never produce in practice).
+  const int size = anchor.size();
+  if (size != 4 && size != 8) {
+    report(error_out, "anchor instruction size must be 4 or 8 bytes");
+    return false;
+  }
+  if (anchor_offset + static_cast<uint64_t>(size) > text_bytes.size()) {
+    report(error_out, "anchor extends past end of .text");
+    return false;
+  }
+  if (anchor.raw_encoding() == nullptr) {
+    report(error_out, "anchor instruction has no raw encoding bytes");
+    return false;
+  }
+  constexpr uint64_t kControlFlowFlags =
+      BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR;
+  if (anchor.flags() & kControlFlowFlags) {
+    report(error_out, "anchor instruction is a branch / indirect / program terminator");
+    return false;
+  }
+  if (anchor.branch_offset_bytes().has_value()) {
+    report(error_out, "anchor instruction has a PC-relative branch offset");
+    return false;
+  }
+  if (is_denylisted_mnemonic(anchor.mnemonic())) {
+    report(error_out, "anchor mnemonic is in the PC-relative denylist");
+    return false;
+  }
+  return true;
+}
+
 std::optional<ResolvedInstrumentationSite>
 validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
                 std::span<const uint8_t> text_bytes, const InstrumentationPoint &pt,
-                [[maybe_unused]] rj_code_arch_t arch, std::string *error_out) {
+                rj_code_arch_t arch, std::string *error_out) {
   if (pt.filter_flags != 0) {
     report(error_out, "InstrumentationPoint::filter_flags must be 0 in the inline-nop milestone");
     return std::nullopt;
@@ -88,45 +127,15 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
            "InstrumentationPoint::force_full_exec must be false in the inline-nop milestone");
     return std::nullopt;
   }
-  if (anchor_offset % sizeof(uint32_t) != 0) {
-    report(error_out, "anchor_offset must be dword aligned");
-    return std::nullopt;
-  }
-  // Instruction::size() returns int by convention; the `!= 4 && != 8` check
-  // also rejects negative values (which decoders never produce in practice).
-  const int size = anchor.size();
-  if (size != 4 && size != 8) {
-    report(error_out, "anchor instruction size must be 4 or 8 bytes");
-    return std::nullopt;
-  }
-  if (anchor_offset + static_cast<uint64_t>(size) > text_bytes.size()) {
-    report(error_out, "anchor extends past end of .text");
-    return std::nullopt;
-  }
-  if (anchor.raw_encoding() == nullptr) {
-    report(error_out, "anchor instruction has no raw encoding bytes");
-    return std::nullopt;
-  }
-  constexpr uint64_t kControlFlowFlags =
-      BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR;
-  if (anchor.flags() & kControlFlowFlags) {
-    report(error_out, "anchor instruction is a branch / indirect / program terminator");
-    return std::nullopt;
-  }
-  if (anchor.branch_offset_bytes().has_value()) {
-    report(error_out, "anchor instruction has a PC-relative branch offset");
-    return std::nullopt;
-  }
-  if (is_denylisted_mnemonic(anchor.mnemonic())) {
-    report(error_out, "anchor mnemonic is in the PC-relative denylist");
-    return std::nullopt;
-  }
 
+  if (!is_relocatable_anchor(anchor, anchor_offset, text_bytes, arch, error_out))
+    return std::nullopt;
+
+  const auto size = static_cast<uint32_t>(anchor.size());
   ResolvedInstrumentationSite site;
-  site.anchor_inst = &anchor;
   site.kind = pt.kind;
   site.anchor_offset = anchor_offset;
-  site.original_size = static_cast<uint32_t>(size);
+  site.original_size = size;
   site.original_bytes.assign(text_bytes.begin() + anchor_offset,
                              text_bytes.begin() + anchor_offset + size);
   site.mnemonic = std::string(anchor.mnemonic());
@@ -187,11 +196,6 @@ void Instrumentor::add_point_by_offset(uint64_t anchor_offset, InstrumentationKi
   points_.push_back(std::move(pt));
 }
 
-std::span<const std::unique_ptr<BasicBlock>> Instrumentor::owned_blocks() {
-  ensure_blocks_built();
-  return blocks_;
-}
-
 void Instrumentor::ensure_blocks_built() {
   if (blocks_built_)
     return;
@@ -215,22 +219,8 @@ const Instruction *Instrumentor::find_instruction_at_offset(uint64_t anchor_offs
   return nullptr;
 }
 
-std::optional<uint64_t> Instrumentor::resolve_anchor_inst_to_offset(const Instruction *target,
-                                                                    std::string *err) {
-  for (const auto &block : blocks_) {
-    uint64_t cur = block->start_offset();
-    for (const Instruction &inst : block->instructions()) {
-      if (&inst == target)
-        return cur;
-      cur += static_cast<uint64_t>(inst.size());
-    }
-  }
-  report(err, "anchor_inst does not belong to any Instrumentor-owned block");
-  return std::nullopt;
-}
-
-Instrumentor::ResolveResult Instrumentor::resolve_and_validate() {
-  ResolveResult result;
+Instrumentor::ValidationResult Instrumentor::validate_points() {
+  ValidationResult result;
   ensure_blocks_built();
 
   if (obj_.text_sections().empty()) {
@@ -257,37 +247,14 @@ Instrumentor::ResolveResult Instrumentor::resolve_and_validate() {
   std::vector<ResolvedInstrumentationSite> sites;
   sites.reserve(points_.size());
   for (const auto &pt : points_) {
-    const bool has_inst = pt.anchor_inst != nullptr;
-    const bool has_off = pt.anchor_offset.has_value();
-    if (has_inst == has_off) {
-      result.errors.emplace_back(
-          has_inst ? "InstrumentationPoint sets both anchor_inst and anchor_offset"
-                   : "InstrumentationPoint sets neither anchor_inst nor anchor_offset");
+    const Instruction *anchor = find_instruction_at_offset(pt.anchor_offset);
+    if (anchor == nullptr) {
+      result.errors.emplace_back("no decoded instruction starts at the requested anchor_offset");
       continue;
     }
 
-    uint64_t offset = 0;
-    const Instruction *anchor = nullptr;
-    if (has_inst) {
-      std::string err;
-      auto off = resolve_anchor_inst_to_offset(pt.anchor_inst, &err);
-      if (!off) {
-        result.errors.push_back(std::move(err));
-        continue;
-      }
-      offset = *off;
-      anchor = pt.anchor_inst;
-    } else {
-      offset = *pt.anchor_offset;
-      anchor = find_instruction_at_offset(offset);
-      if (anchor == nullptr) {
-        result.errors.emplace_back("no decoded instruction starts at the requested anchor_offset");
-        continue;
-      }
-    }
-
     std::string err;
-    auto site = validate_anchor(*anchor, offset, text_bytes, pt, arch_, &err);
+    auto site = validate_anchor(*anchor, pt.anchor_offset, text_bytes, pt, arch_, &err);
     if (!site) {
       result.errors.push_back(std::move(err));
       continue;
@@ -320,12 +287,12 @@ InstrumentedCodeObject Instrumentor::patch() {
     return result;
   }
 
-  auto resolved = resolve_and_validate();
-  if (!resolved.errors.empty()) {
-    result.errors = std::move(resolved.errors);
+  auto validation = validate_points();
+  if (!validation.errors.empty()) {
+    result.errors = std::move(validation.errors);
     return result;
   }
-  const auto &sites = resolved.sites;
+  const auto &sites = validation.sites;
 
   // Construct the patcher and preflight builder output before mutating it.
   // TODO: The "cave" terminology is inherited from the patcher API (originally
