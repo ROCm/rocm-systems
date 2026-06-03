@@ -22,33 +22,27 @@ add_executable(rocprofiler-register-details-tests)
 set(rocprofiler_register_details_test_sources environment.cpp loader.cpp
                                               logging.cpp pe_parser.cpp)
 
-# utility.cpp is required because loader_posix.cpp calls utility::delimit,
+# utility.cpp is required because gnulinux/loader.cpp calls utility::delimit,
 # whose explicit template instantiations live there (extern template in
 # utility.hpp). It is platform-agnostic and harmless to compile in on Windows.
 set(rocprofiler_register_details_test_impls ../environment.cpp ../logging.cpp
                                             ../utility.cpp)
-
-if(WIN32)
-    list(APPEND rocprofiler_register_details_test_impls
-         ../platform/loader_win.cpp ../platform/pe_parser_win.cpp)
-else()
-    list(APPEND rocprofiler_register_details_test_impls
-         ../platform/loader_posix.cpp ../platform/pe_parser_posix.cpp)
-endif()
 
 target_sources(
     rocprofiler-register-details-tests
     PRIVATE ${rocprofiler_register_details_test_sources}
             ${rocprofiler_register_details_test_impls})
 
+# Platform-abstraction sources (loader / pe_parser) live in subdirectories of
+# details/platform/. Per CONTRIBUTING.md ("Never add sources from another
+# directory"), the test exe pulls them in by linking against the shared
+# library rather than listing the .cpp files here. psapi is provided
+# transitively on Windows via the windows/ subdir's target_link_libraries.
 target_link_libraries(
     rocprofiler-register-details-tests
-    PRIVATE rocprofiler-register::headers rocprofiler-register::build-flags
+    PRIVATE rocprofiler-register::rocprofiler-register
+            rocprofiler-register::headers rocprofiler-register::build-flags
             GTest::gtest GTest::gtest_main fmt::fmt glog::glog)
-
-if(WIN32)
-    target_link_libraries(rocprofiler-register-details-tests PRIVATE psapi)
-endif()
 
 target_include_directories(
     rocprofiler-register-details-tests
