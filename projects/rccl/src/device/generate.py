@@ -81,12 +81,8 @@ is_colltrace       = 1 if sys.argv[3] == "ON" else 0
 is_local_arch_only = 1 if sys.argv[5] == "ON" else 0
 is_rocshmem        = 1 if sys.argv[6] == "ON" else 0
 
-# RCCL_BUILD_UNROLL: optional single-unroll build (empty = build all)
-build_unroll_arg = sys.argv[7] if len(sys.argv) > 7 and sys.argv[7] != "" else ""
-if build_unroll_arg:
-    assert build_unroll_arg in all_unrolls, \
-        f"RCCL_BUILD_UNROLL={build_unroll_arg} not in all_unrolls={all_unrolls}"
-    all_unrolls = [build_unroll_arg]
+# build all 6 unroll factors when --all-unrolls passed (argv[7] == "ALL"); default is arch-specific
+build_all_unrolls = len(sys.argv) > 7 and sys.argv[7] == "ALL"
 
 func_pattern = sys.argv[8:9]
 
@@ -242,8 +238,8 @@ def calc_unroll_and_pipeline_for_local_arch():
         unroll,pipeline = ["4"], all_pipelines
     else:
       unroll,pipeline = all_unrolls, all_pipelines
-  if build_unroll_arg:
-    unroll = [build_unroll_arg]
+  if build_all_unrolls:
+    unroll = all_unrolls
   return (unroll, pipeline)
 
 local_unroll, local_pipeline = calc_unroll_and_pipeline_for_local_arch()

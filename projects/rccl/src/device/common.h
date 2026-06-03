@@ -687,9 +687,6 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
 #define _RCCL_FUNC_TABLE(N) _RCCL_PASTE2(ncclDevFuncTable_,N)
 #define _RCCL_CALL_FUNCS(N) _RCCL_PASTE2(NCCL_CALL_FUNCTIONS_,N)
 #if defined(USE_INDIRECT_FUNCTION_CALL) || defined(RCCL_DEVICE_LINKER)
-#  ifdef RCCL_BUILD_UNROLL
-      _RCCL_FUNC_TABLE(RCCL_BUILD_UNROLL)[ncclShmem.funcId]();
-#  else
       if (COLL_UNROLL == 1)
         ncclDevFuncTable_1[ncclShmem.funcId]();
       else if (COLL_UNROLL == 2)
@@ -702,11 +699,7 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
         ncclDevFuncTable_16[ncclShmem.funcId]();
       else
         ncclDevFuncTable_32[ncclShmem.funcId]();
-#  endif
 #else
-#  ifdef RCCL_BUILD_UNROLL
-      _RCCL_CALL_FUNCS(RCCL_BUILD_UNROLL)(ncclShmem.funcId);
-#  else
       if (COLL_UNROLL == 1)
         NCCL_CALL_FUNCTIONS_1(ncclShmem.funcId);
       else if (COLL_UNROLL == 2)
@@ -719,7 +712,6 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
         NCCL_CALL_FUNCTIONS_16(ncclShmem.funcId);
       else
         NCCL_CALL_FUNCTIONS_32(ncclShmem.funcId);
-#  endif
 #endif
 #endif
     }
@@ -754,44 +746,20 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
 #endif
 }
 
-#if !defined(RCCL_BUILD_UNROLL) || RCCL_BUILD_UNROLL == 1
 __global__ void ncclDevKernel_Generic_1(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
-#endif
-#if !defined(RCCL_BUILD_UNROLL) || RCCL_BUILD_UNROLL == 2
 __global__ void ncclDevKernel_Generic_2(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
-#endif
-#if !defined(RCCL_BUILD_UNROLL) || RCCL_BUILD_UNROLL == 4
 __global__ void ncclDevKernel_Generic_4(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
-#endif
-#if !defined(RCCL_BUILD_UNROLL) || RCCL_BUILD_UNROLL == 8
 __global__ void ncclDevKernel_Generic_8(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
-#endif
-#if !defined(RCCL_BUILD_UNROLL) || RCCL_BUILD_UNROLL == 16
 __global__ void ncclDevKernel_Generic_16(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
-#endif
-#if !defined(RCCL_BUILD_UNROLL) || RCCL_BUILD_UNROLL == 32
 __global__ void ncclDevKernel_Generic_32(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
-#endif
 
 #ifdef ENABLE_COLLTRACE
-#if !defined(RCCL_BUILD_UNROLL) || RCCL_BUILD_UNROLL == 1
 __global__ void ncclDevKernelDebug_Generic_1(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
-#endif
-#if !defined(RCCL_BUILD_UNROLL) || RCCL_BUILD_UNROLL == 2
 __global__ void ncclDevKernelDebug_Generic_2(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
-#endif
-#if !defined(RCCL_BUILD_UNROLL) || RCCL_BUILD_UNROLL == 4
 __global__ void ncclDevKernelDebug_Generic_4(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
-#endif
-#if !defined(RCCL_BUILD_UNROLL) || RCCL_BUILD_UNROLL == 8
 __global__ void ncclDevKernelDebug_Generic_8(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
-#endif
-#if !defined(RCCL_BUILD_UNROLL) || RCCL_BUILD_UNROLL == 16
 __global__ void ncclDevKernelDebug_Generic_16(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
-#endif
-#if !defined(RCCL_BUILD_UNROLL) || RCCL_BUILD_UNROLL == 32
 __global__ void ncclDevKernelDebug_Generic_32(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
-#endif
 #endif
 
 #define DEFINE_ncclDevKernel_nop(suffix, coll, redop, ty, algo, proto, specializedFnId) \

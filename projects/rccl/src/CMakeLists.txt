@@ -484,9 +484,16 @@ if(ONLY_FUNCS)
   message(WARNING "Using ONLY_FUNCS = ${ONLY_FUNCS}. Not meant for release builds.")
 endif()
 
+# Determine unroll argument for generate.py
+if(RCCL_BUILD_ALL_UNROLLS)
+  set(RCCL_BUILD_UNROLLS_ARG "ALL")
+else()
+  set(RCCL_BUILD_UNROLLS_ARG "")
+endif()
+
 # Execute the python script to generate required collective functions
 execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${RCCL_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} ${IFC_ENABLED} ${COLLTRACE} OFF ${BUILD_LOCAL_GPU_TARGET_ONLY} ${ENABLE_ROCSHMEM} "${RCCL_BUILD_UNROLL}" ${ONLY_FUNCS}
+    COMMAND ${Python3_EXECUTABLE} ${RCCL_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} ${IFC_ENABLED} ${COLLTRACE} OFF ${BUILD_LOCAL_GPU_TARGET_ONLY} ${ENABLE_ROCSHMEM} "${RCCL_BUILD_UNROLLS_ARG}" ${ONLY_FUNCS}
     WORKING_DIRECTORY ${RCCL_SOURCE_DIR}
     RESULT_VARIABLE gen_py_result
     ERROR_VARIABLE gen_py_error
@@ -607,9 +614,6 @@ else()
 endif()
 if(ENABLE_WARP_SPEED)
   target_compile_definitions(rccl PRIVATE ENABLE_WARP_SPEED)
-endif()
-if(RCCL_BUILD_UNROLL)
-  target_compile_definitions(rccl PRIVATE RCCL_BUILD_UNROLL=${RCCL_BUILD_UNROLL})
 endif()
 if(ENABLE_ROCSHMEM)
   target_compile_definitions(rccl PRIVATE ENABLE_ROCSHMEM)
