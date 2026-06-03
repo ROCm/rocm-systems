@@ -36,7 +36,7 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
       uint32_t dstRkey = loadConst(&dstMh->rkey);
       uint32_t srcLkey = loadConst(&srcMh->lkey);
 
-      qp->put_nbi_with_keys((void*)dstAddr, (void*)srcAddr, bytes, peer, wf_info, dstRkey, srcLkey);
+      qp->put_nbi_with_keys((void*)dstAddr, dstRkey, (void*)srcAddr, srcLkey, bytes, peer, wf_info);
 
       // Track pending WQEs for granular flush
       uint32_t* pending = loadConst(&rsCtx->pendingWqeCount);
@@ -82,7 +82,7 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
 
     // Pass srcVal by address — put_nbi_with_keys copies it inline into the WQE
     // (inline_threshold >= sizeof(T)), so no registered MR or lkey is needed.
-    qp->put_nbi_with_keys((void*)dstAddr, &srcVal, sizeof(T), peer, wf_info, dstRkey, 0);
+    qp->put_nbi_with_keys((void*)dstAddr, dstRkey, &srcVal, 0, sizeof(T), peer, wf_info);
 
     if (hasSignal) {
       qp->quiet(wf_info);

@@ -347,9 +347,9 @@ __device__ void QueuePair::ionic_post_wqe_rma(int32_t size, uintptr_t laddr,
   commit_sq(wf_info, my_sq_prod, my_sq_pos, num_wqes);
 }
 
-__device__ void QueuePair::ionic_post_wqe_rma_with_keys(int32_t size,
-    uintptr_t laddr, uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info,
-    uint32_t override_rkey, uint32_t override_lkey) {
+__device__ void QueuePair::ionic_post_wqe_rma_with_keys(uint32_t size,
+    uintptr_t raddr, uint32_t rkey, uintptr_t laddr, uint32_t lkey,
+    uint8_t opcode, ActiveWFInfo &wf_info) {
   uint32_t num_wqes = 1;
   if (wf_info.scope == ThreadScope::thread) {
     num_wqes = wf_info.num_pe_group_lanes;
@@ -380,11 +380,11 @@ __device__ void QueuePair::ionic_post_wqe_rma_with_keys(int32_t size,
 
   wqe->common.rdma.remote_va_high = byteswap<uint32_t>(raddr >> 32);
   wqe->common.rdma.remote_va_low = byteswap<uint32_t>(raddr);
-  wqe->common.rdma.remote_rkey = byteswap<uint32_t>(override_rkey);
+  wqe->common.rdma.remote_rkey = byteswap<uint32_t>(rkey);
   wqe->common.length = byteswap<uint32_t>(size);
 
   if (size) {
-    if (opcode == IONIC_V2_OP_RDMA_WRITE && static_cast<int32_t>(size) <= static_cast<int32_t>(inline_threshold)) {
+    if (opcode == IONIC_V2_OP_RDMA_WRITE && size <= inline_threshold) {
       wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_INL);
       wqe->base.num_sge_key = 0;
       if (!laddr) {
@@ -395,7 +395,7 @@ __device__ void QueuePair::ionic_post_wqe_rma_with_keys(int32_t size,
     } else {
       wqe->common.pld.sgl[0].va = byteswap<uint64_t>(laddr);
       wqe->common.pld.sgl[0].len = byteswap<uint32_t>(size);
-      wqe->common.pld.sgl[0].lkey = byteswap<uint32_t>(override_lkey);
+      wqe->common.pld.sgl[0].lkey = byteswap<uint32_t>(lkey);
     }
   }
 

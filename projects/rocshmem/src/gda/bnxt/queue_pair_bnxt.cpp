@@ -288,8 +288,8 @@ __device__ void QueuePair::bnxt_write_rma_wqe(uintptr_t raddr, uintptr_t laddr, 
   bnxt_re_incr_tail(&bnxt_sq, GDA_BNXT_WQE_SLOT_COUNT);
 }
 
-__device__ void QueuePair::bnxt_write_rma_wqe_with_keys(uintptr_t raddr, uintptr_t laddr,
-    int32_t length, uint8_t opcode, uint32_t override_rkey, uint32_t override_lkey) {
+__device__ void QueuePair::bnxt_write_rma_wqe_with_keys(uintptr_t raddr, uint32_t rkey,
+    uintptr_t laddr, uint32_t lkey, uint32_t size, uint8_t opcode) {
   struct bnxt_re_bsqe hdr;
   struct bnxt_re_rdma rdma;
   struct bnxt_re_sge sge;
@@ -301,7 +301,7 @@ __device__ void QueuePair::bnxt_write_rma_wqe_with_keys(uintptr_t raddr, uintptr
   uint32_t hdr_flags;
   uint32_t inline_msg;
 
-  inline_msg = static_cast<int32_t>(length) <= static_cast<int32_t>(inline_threshold) &&
+  inline_msg = size <= inline_threshold &&
                opcode == gda_op_rdma_write;
 
   bnxt_poll_cq_until(GDA_BNXT_WQE_SLOT_COUNT);
@@ -323,41 +323,41 @@ __device__ void QueuePair::bnxt_write_rma_wqe_with_keys(uintptr_t raddr, uintptr
                     | (hdr_flags << BNXT_RE_HDR_FLAGS_SHIFT)
                     | wqe_type;
   hdr.key_immd      = 0;
-  hdr.lhdr.qkey_len = length;
+  hdr.lhdr.qkey_len = size;
 
   rdma.rva  = raddr;
-  rdma.rkey = override_rkey;
+  rdma.rkey = rkey;
 
   if (!inline_msg) {
     sge.pa     = laddr;
-    sge.lkey   = override_lkey;
-    sge.length = length;
+    sge.lkey   = lkey;
+    sge.length = size;
   }
 
   memcpy(hdr_ptr,  &hdr,  sizeof(struct bnxt_re_bsqe));
   memcpy(rdma_ptr, &rdma, sizeof(struct bnxt_re_rdma));
 
   if (inline_msg) {
-    memcpy(sge_ptr,  reinterpret_cast<const void*>(laddr),  length);
+    memcpy(sge_ptr,  reinterpret_cast<const void*>(laddr),  size);
   } else {
     memcpy(sge_ptr,  &sge,  sizeof(struct bnxt_re_sge));
   }
 
-  bnxt_re_fill_psns_for_msntbl(&bnxt_sq, length);
+  bnxt_re_fill_psns_for_msntbl(&bnxt_sq, size);
   bnxt_re_incr_tail(&bnxt_sq, GDA_BNXT_WQE_SLOT_COUNT);
 }
 
-__device__ void QueuePair::bnxt_post_wqe_rma_with_keys(int32_t length,
-    uintptr_t laddr, uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info,
-    uint32_t override_rkey, uint32_t override_lkey) {
+__device__ void QueuePair::bnxt_post_wqe_rma_with_keys(uint32_t size,
+    uintptr_t raddr, uint32_t rkey, uintptr_t laddr, uint32_t lkey,
+    uint8_t opcode, ActiveWFInfo &wf_info) {
   if (wf_info.is_pe_group_first) {
     lock(&bnxt_sq.lock);
   }
 
   for (int i = 0; i < wf_info.num_pe_group_lanes; i++) {
     if (i == wf_info.pe_group_logical_lane_id) {
-      bnxt_write_rma_wqe_with_keys(raddr, laddr, length, opcode,
-                                    override_rkey, override_lkey);
+      bnxt_write_rma_wqe_with_keys(raddr, rkey, laddr, lkey,
+                                    size, opcode);
       bnxt_ring_doorbell(bnxt_sq.tail);
     }
   }

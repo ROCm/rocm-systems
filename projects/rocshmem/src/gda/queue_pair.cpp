@@ -290,35 +290,36 @@ __device__ void QueuePair::put_nbi(void *dest, const void *source,
   post_wqe_rma(pe, nelems, src, dst, gda_op_rdma_write, wf_info);
 }
 
-__device__ void QueuePair::put_nbi_with_keys(void *dest, const void *source,
-    size_t nelems, int pe, ActiveWFInfo &wf_info,
-    uint32_t dst_rkey, uint32_t src_lkey) {
-  uintptr_t src = reinterpret_cast<uintptr_t>(source);
-  uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
-  post_wqe_rma_with_keys(pe, nelems, src, dst, gda_op_rdma_write, wf_info,
-                          dst_rkey, src_lkey);
+__device__ void QueuePair::put_nbi_with_keys(void *raddr, uint32_t rkey,
+    const void *laddr, uint32_t lkey,
+    size_t size, int pe, ActiveWFInfo &wf_info) {
+  uintptr_t l = reinterpret_cast<uintptr_t>(laddr);
+  uintptr_t r = reinterpret_cast<uintptr_t>(raddr);
+  post_wqe_rma_with_keys(pe, static_cast<uint32_t>(size), r, rkey, l, lkey,
+                          gda_op_rdma_write, wf_info);
 }
 
 __device__ void QueuePair::post_wqe_rma_with_keys([[maybe_unused]] int pe,
-    int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode,
-    ActiveWFInfo &wf_info, uint32_t override_rkey, uint32_t override_lkey) {
+    uint32_t size, uintptr_t raddr, uint32_t rkey,
+    uintptr_t laddr, uint32_t lkey,
+    uint8_t opcode, ActiveWFInfo &wf_info) {
   switch (gda_provider_) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
-    ionic_post_wqe_rma_with_keys(size, laddr, raddr, opcode, wf_info,
-                                  override_rkey, override_lkey);
+    ionic_post_wqe_rma_with_keys(size, raddr, rkey, laddr, lkey,
+                                  opcode, wf_info);
     return;
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
-    bnxt_post_wqe_rma_with_keys(size, laddr, raddr, opcode, wf_info,
-                                 override_rkey, override_lkey);
+    bnxt_post_wqe_rma_with_keys(size, raddr, rkey, laddr, lkey,
+                                 opcode, wf_info);
     return;
 #endif
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
-    mlx5_post_wqe_rma_with_keys(size, laddr, raddr, opcode, wf_info,
-                                 override_rkey, override_lkey);
+    mlx5_post_wqe_rma_with_keys(size, raddr, rkey, laddr, lkey,
+                                 opcode, wf_info);
     return;
 #endif
   default:
