@@ -3354,6 +3354,112 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 267
+    - name: SQG_BUSY_CYCLES
+      description: Number of clock cycles SQG is reporting that it is busy (per shader engine). 
+        SQG_PERF_SEL_BUSY_CYCLES.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQG
+          event: 16
+    - name: SQG_CYCLES
+      description: Number of SQG clock cycles (per shader engine). SQG_PERF_SEL_CYCLES.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQG
+          event: 15
+    - name: SQG_ITEMS
+      description: Sum of work items processed by SQG-tracked waves. Useful for computing average 
+        wave occupancy across pipeline stages (per shader engine). SQG_PERF_SEL_ITEMS.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQG
+          event: 24
+    - name: SQG_MSG
+      description: Number of S_SENDMSG instructions issued by waves observed by SQG (per shader 
+        engine). SQG_PERF_SEL_MSG.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQG
+          event: 18
+    - name: SQG_REFCLKS
+      description: Number of SQG reference clock cycles (per shader engine). SQG_PERF_SEL_REFCLKS.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQG
+          event: 33
+    - name: SQG_WAVES
+      description: Number of waves dispatched and observed by SQG, summed across all graphics and 
+        compute pipeline stages (per shader engine). SQG_PERF_SEL_WAVES.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQG
+          event: 20
+    - name: SQG_WAVES_INITIAL_PREFETCH
+      description: Number of waves that issued an initial instruction prefetch (per shader engine). 
+        SQG_PERF_SEL_WAVES_INITIAL_PREFETCH.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQG
+          event: 10
+    - name: SQG_WAVES_RESTORED
+      description: Number of waves restored by context-switch (per shader engine). 
+        SQG_PERF_SEL_WAVES_RESTORED.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQG
+          event: 12
+    - name: SQG_WAVES_SAVED
+      description: Number of waves saved by context-switch (per shader engine). 
+        SQG_PERF_SEL_WAVES_SAVED.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQG
+          event: 13
     - name: SQ_ACCUM_PREV
       description: This is a hardware register that can be used for accumulating values for other 
         counters. This is useful in expressions where you want to integrate over time. Only 
@@ -11262,6 +11368,16 @@ rocprofiler-sdk:
         - architectures:
             - gfx906
           expression: ((TCC_EA1_WRREQ_sum-TCC_EA1_WRREQ_64B_sum)*32+TCC_EA1_WRREQ_64B_sum*64)
+    - name: WGPUtilization
+      description: 'WGP Utilization - SQG busy cycles as a percent of SQG cycles.'
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          expression: 100*reduce(SQG_BUSY_CYCLES,sum)/reduce(SQG_CYCLES,sum)
     - name: WRITE_REQ_32B
       description: The total number of 32-byte effective memory writes.
       properties: []
