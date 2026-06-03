@@ -239,7 +239,7 @@ ncclResult_t ncclGinRocshmemGdaRegister(ncclGin_t *ginComm, void *ginCtx, void *
 
   // Register buffer with iova=0 — remote addr in WQE is offset, not VA
   uint32_t lkey, rkey;
-  if (rocshmem_gin_reg_mr_iova0(ctx->qpSet, addr, size, /*atomic=*/0,
+  if (rocshmem_gin_reg_mr_vmm(ctx->qpSet, addr, size, /*atomic=*/0,
                                  &mh->mr, &lkey, &rkey) != 0) {
     WARN("GIN rocshmem GDA: MR registration failed for buffer %p size %zu", addr, size);
     (void)hipFree(mh->devHandle);
@@ -272,6 +272,7 @@ ncclResult_t ncclGinRocshmemGdaRegister(ncclGin_t *ginComm, void *ginCtx, void *
 
   // Populate host copy of mem handle
   ncclGinRocshmemGdaMemHandle hostMh;
+  hostMh.baseAddr = (uintptr_t)addr;
   hostMh.lkey = lkey;
   hostMh.rkeys = rkeys_dev;
 

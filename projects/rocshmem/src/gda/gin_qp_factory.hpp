@@ -105,15 +105,15 @@ int rocshmem_gin_reg_mr(rocshmem_gin_qp_set_t qp_set,
                          void** out_mr, uint32_t* out_lkey, uint32_t* out_rkey);
 
 /**
- * @brief Register a memory buffer with iova=0 addressing.
+ * @brief Register a VMM-allocated memory buffer for RDMA.
  *
- * Uses dmabuf when available, falls back to ibv_reg_mr_iova2.
- * With iova=0, the remote address in RDMA WQEs is an offset from 0,
- * not the buffer's VA — matching the GIN window offset model.
+ * Uses hipMemGetHandleForAddressRange for dmabuf FD extraction (works
+ * for both hipMalloc and VMM allocations), then ibv_reg_dmabuf_mr.
+ * Falls back to ibv_reg_mr_iova2. Both use iova=VA.
  */
-int rocshmem_gin_reg_mr_iova0(rocshmem_gin_qp_set_t qp_set,
-                               void* addr, size_t size, int atomic,
-                               void** out_mr, uint32_t* out_lkey, uint32_t* out_rkey);
+int rocshmem_gin_reg_mr_vmm(rocshmem_gin_qp_set_t qp_set,
+                              void* addr, size_t size, int atomic,
+                              void** out_mr, uint32_t* out_lkey, uint32_t* out_rkey);
 
 /**
  * @brief Deregister a memory buffer.

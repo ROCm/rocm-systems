@@ -1122,16 +1122,16 @@ int rocshmem_gin_reg_mr(rocshmem_gin_qp_set_t qp_set,
   return 0;
 }
 
-int rocshmem_gin_reg_mr_iova0(rocshmem_gin_qp_set_t qp_set,
-                              void *addr, size_t size, int atomic,
-                              void **out_mr, uint32_t *out_lkey, uint32_t *out_rkey) {
+int rocshmem_gin_reg_mr_vmm(rocshmem_gin_qp_set_t qp_set,
+                             void *addr, size_t size, int atomic,
+                             void **out_mr, uint32_t *out_lkey, uint32_t *out_rkey) {
   if (!qp_set || !qp_set->nic.pd_orig) return -1;
 
   int access = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE
              | IBV_ACCESS_REMOTE_READ;
   if (atomic) access |= IBV_ACCESS_REMOTE_ATOMIC;
 
-  struct ibv_mr *mr = ibv.reg_mr_iova0(qp_set->nic.pd_orig, addr, size, access);
+  struct ibv_mr *mr = ibv.reg_mr_vmm(qp_set->nic.pd_orig, addr, size, access);
   if (!mr) return -1;
 
   *out_mr = mr;

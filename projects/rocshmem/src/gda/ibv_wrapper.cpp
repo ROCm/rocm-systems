@@ -265,40 +265,43 @@ struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr, size_t length, 
   }
 }
 
-struct ibv_mr* IBVWrapper::reg_mr_iova0(struct ibv_pd* pd, void* addr, size_t length, int access) {
+struct ibv_mr* IBVWrapper::reg_mr_vmm(struct ibv_pd* pd, void* addr, size_t length, int access) {
 #if HIP_VERSION >= 70000000
   if (is_dmabuf_supported()) {
     int fd = -1;
     static size_t page_size = sysconf(_SC_PAGESIZE);
-    size_t aligned_size = length;
-    aligned_size = (aligned_size + page_size - 1) & ~(page_size - 1);
+    size_t aligned_size = (length + page_size - 1) & ~(page_size - 1);
 
     hipError_t err = hipMemGetHandleForAddressRange(
         (void *)&fd, (hipDeviceptr_t)addr, aligned_size,
         hipMemRangeHandleTypeDmaBufFd, 0);
     if (err == hipSuccess && fd >= 0) {
-      // Try iova=0 first (offset-based addressing, no baseAddr needed)
+#if 0
+      // iova=0: offset-based addressing, no baseAddr needed on device side.
+      // Requires NIC support (mlx5 yes, bnxt no as of 2026-06).
       struct ibv_mr *mr = ibv.reg_dmabuf_mr(pd, 0, aligned_size, 0, fd, access);
+#else
+      struct ibv_mr *mr = ibv.reg_dmabuf_mr(pd, 0, aligned_size, (uint64_t)addr, fd, access);
+#endif
       if (mr) {
         dmabuf_fd_map[(uintptr_t) mr] = fd;
-        LOG_TRACE("reg_mr_iova0: dmabuf iova=0 for %p size %zd", addr, length);
-        return mr;
-      }
-      // Fallback: iova=VA (some NICs like bnxt require VA-based addressing)
-      mr = ibv.reg_dmabuf_mr(pd, 0, aligned_size, (uint64_t)addr, fd, access);
-      if (mr) {
-        dmabuf_fd_map[(uintptr_t) mr] = fd;
-        LOG_WARN("reg_mr_iova0: dmabuf iova=VA fallback for %p size %zd (offset addressing unavailable)", addr, length);
+        LOG_TRACE("reg_mr_vmm: dmabuf for %p size %zd", addr, length);
         return mr;
       }
       close(fd);
     }
-    LOG_TRACE("reg_mr_iova0: dmabuf failed, trying iova2 fallback");
+    LOG_TRACE("reg_mr_vmm: dmabuf failed, trying iova2 fallback");
   }
 #endif
 
-  LOG_TRACE("reg_mr_iova0: ibv_reg_mr_iova2(%p, %zd, iova=0)", addr, length);
+#if 0
+  // iova=0 fallback for NICs that support offset-based addressing
+  LOG_TRACE("reg_mr_vmm: ibv_reg_mr_iova2(%p, %zd, iova=0)", addr, length);
   return ibv.reg_mr_iova2(pd, addr, length, 0, access);
+#else
+  LOG_TRACE("reg_mr_vmm: ibv_reg_mr_iova2(%p, %zd)", addr, length);
+  return ibv.reg_mr_iova2(pd, addr, length, (uintptr_t)addr, access);
+#endif
 }
 
 int IBVWrapper::dereg_mr(struct ibv_mr *mr) {

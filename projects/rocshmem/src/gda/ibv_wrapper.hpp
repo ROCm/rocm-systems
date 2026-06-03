@@ -65,7 +65,7 @@ class IBVWrapper {
     int dealloc_pd(struct ibv_pd *pd);
 
     struct ibv_mr* reg_mr(struct ibv_pd *pd, void *addr, size_t length, int access, HIPAllocator *allocator = nullptr);
-    struct ibv_mr* reg_mr_iova0(struct ibv_pd *pd, void *addr, size_t length, int access);
+    struct ibv_mr* reg_mr_vmm(struct ibv_pd *pd, void *addr, size_t length, int access);
     int dereg_mr(struct ibv_mr *mr);
 
     struct ibv_cq_ex* create_cq_ex(struct ibv_context *context,
