@@ -27,6 +27,7 @@ set(TOOL_OUTPUT_HEADERS
     output_config.hpp
     output_key.hpp
     output_stream.hpp
+    pc_sampling_pc_correction.hpp
     statistics.hpp
     stream_info.hpp
     timestamps.hpp
@@ -49,6 +50,7 @@ set(TOOL_OUTPUT_SOURCES
     output_config.cpp
     output_key.cpp
     output_stream.cpp
+    pc_sampling_pc_correction.cpp
     statistics.cpp
     tmp_file_buffer.cpp
     tmp_file.cpp)
