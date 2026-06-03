@@ -25,6 +25,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
     * Number of kernel dispatches
     * Min/Max/Mean and Total duration of kernel dispatches
 
+* `--torch-trace` now uses a native C++ RecordFunction tier (JIT-built on first run, cached under `~/.cache/rocprofiler-compute/`) with broader operator coverage.
+
 * Profile workload output folder name for Strix Halo series (gfx1151) is changed from `strix_halo` to `rdna35_halo`
 
 * Unified accumulator handling across profile and analyze so each `_ACCUM`-suffixed counter is preserved instead of collapsing to `SQ_ACCUM_PREV_HIRES`
