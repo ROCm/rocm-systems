@@ -132,6 +132,8 @@ set(TEST_tile_get_wave_contiguous 113)
 set(TEST_tile_get_rowmajor 114)
 set(TEST_tile_get_colmajor 115)
 set(TEST_tile_get_arbitrary 116)
+set(TEST_reduce_on_stream 117)
+set(TEST_host_ctx_create 118)
 
 # MPI should already be found by the parent CMakeLists.txt
 # Use standard CMake MPI variables set by find_package(MPI)
@@ -900,6 +902,7 @@ function(add_stream_tests)
     begin_test_group(CATEGORY "COLLECTIVE;STREAM" TIER full BACKENDS "all" GPUS "all")
         add_rocshmem_functional_test(NAME quiet_on_stream RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME sync_all_on_stream RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME reduce_on_stream RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576)
         add_rocshmem_functional_test(NAME alltoallmem_on_stream RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576)
         add_rocshmem_functional_test(NAME broadcastmem_on_stream RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576)
     end_test_group()
@@ -958,6 +961,11 @@ function(add_other_tests)
         add_rocshmem_functional_test(NAME flood_add RANKS 8 WORKGROUPS 64 THREADS 1024)
         add_rocshmem_functional_test(NAME flood_fadd RANKS 8 WORKGROUPS 64 THREADS 1024)
         add_rocshmem_functional_test(NAME flood_waitadd RANKS 8 WORKGROUPS 64 THREADS 1024)
+    end_test_group()
+
+    # Host context creation test
+    begin_test_group(CATEGORY "CTX;INFRA" TIER full BACKENDS "all" GPUS "all")
+        add_rocshmem_functional_test(NAME host_ctx_create RANKS 2 WORKGROUPS 1 THREADS 1)
     end_test_group()
 
     # Team context infrastructure tests - need ROCSHMEM_MAX_NUM_CONTEXTS=1024
