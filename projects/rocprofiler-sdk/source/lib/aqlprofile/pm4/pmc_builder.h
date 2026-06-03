@@ -819,8 +819,13 @@ public:
                             grbm_value = Primitives::grbm_se_index_value(se_index);
                         }
 
+                        // gfx11 per-WGP read iteration only applies to SQ counters that are
+                        // physically replicated per-WGP. SQG counters are SE-level
+                        // (CounterBlockSqAttr without CounterBlockWgpAttr) and must not iterate
+                        // WGPs.
                         bool bIsWGPcounter11 = Primitives::GFXIP_LEVEL == 11 &&
-                                               (block_info->attr & CounterBlockSqAttr);
+                                               (block_info->attr & CounterBlockSqAttr) &&
+                                               (block_info->attr & CounterBlockWgpAttr);
                         bool bIsWGPcounter12 = Primitives::GFXIP_LEVEL >= 12 &&
                                                (block_info->attr & CounterBlockWgpAttr);
 
