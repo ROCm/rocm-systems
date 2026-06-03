@@ -1996,6 +1996,156 @@ int run_test_l2_distance(const char* co) {
   return ok == N ? 0 : 1;
 }
 
+// ── permlane16 test kernel ──────────────────────────────────────────────────
+// v_permlane16_b32 with selector=1: XOR each lane index with 1 within 16-lane groups
+// Swaps adjacent lanes: 0↔1, 2↔3, 4↔5, ... within each group of 16
+
+extern "C" __global__ void permlane16_test(int* out, const int* in, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
+    int val = in[i];
+    int result;
+    // v_permlane16_b32 vDst, vSrc, sA=1, sB=1: lane i reads from lane (i^1) in same group
+    asm volatile("v_permlane16_b32 %0, %1, 1, 1" : "=v"(result) : "v"(val));
+    out[i] = result;
+  }
+}
+
+// ── permlanex16 test kernel ────────────────────────────────────────────────
+// v_permlanex16_b32 with selector=0: cross-group swap (lanes 0-15 ↔ lanes 16-31)
+
+extern "C" __global__ void permlanex16_test(int* out, const int* in, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
+    int val = in[i];
+    int result;
+    // v_permlanex16_b32 vDst, vSrc, sA=0, sB=0: lane i reads from lane (i^16)
+    asm volatile("v_permlanex16_b32 %0, %1, 0, 0" : "=v"(result) : "v"(val));
+    out[i] = result;
+  }
+}
+
+// ── vopd (dual-issue) test kernel ──────────────────────────────────────────
+// Tests v_dual_add_f32 :: v_dual_mul_f32 split into sequential ops
+
+extern "C" __global__ void vopd_ops(float* out, const float* a, const float* b, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
+    float x, y;
+    // VOPD: add and multiply in parallel
+    asm volatile(
+      "v_dual_add_f32 %0, %2, %3 :: v_dual_mul_f32 %1, %4, %5"
+      : "=v"(x), "=v"(y)
+      : "v"(a[i]), "v"(1.0f), "v"(b[i]), "v"(2.0f)
+    );
+    out[i] = x + y;  // (a[i] + 1.0) + (b[i] * 2.0)
+  }
+}
+
+// ── permlane16 test harness ────────────────────────────────────────────────
+
+int run_test_permlane16(const char* co) {
+  // Use exactly 32 threads (one wavefront) to test intra-wave permutation
+  int N = 32, bs = 32, nb = 1;
+  int *h_in = (int*)malloc(N * sizeof(int));
+  int *h_o = (int*)calloc(N, sizeof(int));
+  for (int i = 0; i < N; i++) h_in[i] = i * 10 + 1;  // distinct values per lane
+  int *d_in, *d_o;
+  CHECK(hipMalloc(&d_in, N * sizeof(int)));
+  CHECK(hipMalloc(&d_o, N * sizeof(int)));
+  CHECK(hipMemcpy(d_in, h_in, N * sizeof(int), hipMemcpyHostToDevice));
+  hipModule_t m; hipFunction_t f;
+  CHECK(hipModuleLoad(&m, co));
+  CHECK(hipModuleGetFunction(&f, m, "permlane16_test"));
+  int n = N; void* args[] = {&d_o, &d_in, &n};
+  CHECK(hipModuleLaunchKernel(f, nb,1,1, bs,1,1, 0,0, args, NULL));
+  CHECK(hipDeviceSynchronize());
+  CHECK(hipMemcpy(h_o, d_o, N * sizeof(int), hipMemcpyDeviceToHost));
+  int ok = 0;
+  for (int i = 0; i < N; i++) {
+    // v_permlane16 with selector=1: within each 16-lane group, lane i reads from lane (i^1)
+    int group_base = (i / 16) * 16;
+    int lane_in_group = i % 16;
+    int src_lane = group_base + (lane_in_group ^ 1);
+    int expected = h_in[src_lane];
+    if (h_o[i] == expected) ok++;
+    else if (i < 4) printf("    lane %d: got %d, expected %d (from lane %d)\n", i, h_o[i], expected, src_lane);
+  }
+  printf("  permlane16:       %d/%d %s\n", ok, N, ok==N?"PASS":"FAIL");
+  hipFree(d_in); hipFree(d_o); hipModuleUnload(m);
+  free(h_in); free(h_o);
+  return ok == N ? 0 : 1;
+}
+
+// ── permlanex16 test harness ───────────────────────────────────────────────
+
+int run_test_permlanex16(const char* co) {
+  int N = 32, bs = 32, nb = 1;
+  int *h_in = (int*)malloc(N * sizeof(int));
+  int *h_o = (int*)calloc(N, sizeof(int));
+  for (int i = 0; i < N; i++) h_in[i] = i * 10 + 1;
+  int *d_in, *d_o;
+  CHECK(hipMalloc(&d_in, N * sizeof(int)));
+  CHECK(hipMalloc(&d_o, N * sizeof(int)));
+  CHECK(hipMemcpy(d_in, h_in, N * sizeof(int), hipMemcpyHostToDevice));
+  hipModule_t m; hipFunction_t f;
+  CHECK(hipModuleLoad(&m, co));
+  CHECK(hipModuleGetFunction(&f, m, "permlanex16_test"));
+  int n = N; void* args[] = {&d_o, &d_in, &n};
+  CHECK(hipModuleLaunchKernel(f, nb,1,1, bs,1,1, 0,0, args, NULL));
+  CHECK(hipDeviceSynchronize());
+  CHECK(hipMemcpy(h_o, d_o, N * sizeof(int), hipMemcpyDeviceToHost));
+  int ok = 0;
+  for (int i = 0; i < N; i++) {
+    // v_permlanex16 with selector=0: lane i reads from lane (i ^ 16)
+    // Group 0 reads from group 1, group 1 reads from group 0
+    int src_lane = i ^ 16;
+    int expected = h_in[src_lane];
+    if (h_o[i] == expected) ok++;
+    else if (i < 4) printf("    lane %d: got %d, expected %d (from lane %d)\n", i, h_o[i], expected, src_lane);
+  }
+  printf("  permlanex16:      %d/%d %s\n", ok, N, ok==N?"PASS":"FAIL");
+  hipFree(d_in); hipFree(d_o); hipModuleUnload(m);
+  free(h_in); free(h_o);
+  return ok == N ? 0 : 1;
+}
+
+// ── vopd test harness ──────────────────────────────────────────────────────
+
+int run_test_vopd(const char* co) {
+  int N = 256, bs = 32, nb = N / bs;
+  float *h_a = (float*)malloc(N * sizeof(float));
+  float *h_b = (float*)malloc(N * sizeof(float));
+  float *h_o = (float*)calloc(N, sizeof(float));
+  for (int i = 0; i < N; i++) {
+    h_a[i] = (float)(i + 1);
+    h_b[i] = (float)(N - i);
+  }
+  float *d_a, *d_b, *d_o;
+  CHECK(hipMalloc(&d_a, N * sizeof(float)));
+  CHECK(hipMalloc(&d_b, N * sizeof(float)));
+  CHECK(hipMalloc(&d_o, N * sizeof(float)));
+  CHECK(hipMemcpy(d_a, h_a, N * sizeof(float), hipMemcpyHostToDevice));
+  CHECK(hipMemcpy(d_b, h_b, N * sizeof(float), hipMemcpyHostToDevice));
+  hipModule_t m; hipFunction_t f;
+  CHECK(hipModuleLoad(&m, co));
+  CHECK(hipModuleGetFunction(&f, m, "vopd_ops"));
+  int n = N; void* args[] = {&d_o, &d_a, &d_b, &n};
+  CHECK(hipModuleLaunchKernel(f, nb,1,1, bs,1,1, 0,0, args, NULL));
+  CHECK(hipDeviceSynchronize());
+  CHECK(hipMemcpy(h_o, d_o, N * sizeof(float), hipMemcpyDeviceToHost));
+  int ok = 0;
+  for (int i = 0; i < N; i++) {
+    // out = (a[i] + 1.0) + (b[i] * 2.0)
+    float expected = (h_a[i] + 1.0f) + (h_b[i] * 2.0f);
+    if (fabsf(h_o[i] - expected) <= 1e-5f * fabsf(expected) + 1e-6f) ok++;
+  }
+  printf("  vopd_ops:         %d/%d %s\n", ok, N, ok==N?"PASS":"FAIL");
+  hipFree(d_a); hipFree(d_b); hipFree(d_o); hipModuleUnload(m);
+  free(h_a); free(h_b); free(h_o);
+  return ok == N ? 0 : 1;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 int main() {
@@ -2048,10 +2198,15 @@ int main() {
   fails += run_test_rmsnorm("/tmp/rmsnorm_kernel_gfx1250.elf");
   fails += run_test_l2_distance("/tmp/l2_distance_kernel_gfx1250.elf");
   fails += run_test_f64_math("/tmp/f64_math_gfx1250.elf");
+  // Cross-lane permutation tests
+  fails += run_test_permlane16("/tmp/permlane16_test_gfx1250.elf");
+  fails += run_test_permlanex16("/tmp/permlanex16_test_gfx1250.elf");
+  // VOPD (dual-issue) test
+  fails += run_test_vopd("/tmp/vopd_ops_gfx1250.elf");
   // Queue-poisoning tests last: attn crashes prevent subsequent tests from running
   fails += run_test_attn_forward("/tmp/attn_forward_gfx1250.elf");
   fails += run_test_attn_multihead("/tmp/attn_multihead_gfx1250.elf");
-  int total = 42;
+  int total = 45;
   printf("\n%s: %d/%d tests passed\n", fails?"SOME FAILED":"ALL PASSED", total-fails, total);
   return fails;
 }

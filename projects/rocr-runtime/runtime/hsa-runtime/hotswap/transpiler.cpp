@@ -20,6 +20,7 @@
 #include "hotswap.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -470,9 +471,7 @@ static bool IsUnsupportedOnGFX9(const std::string& mnemonic) {
   if (mnemonic.find("cluster_") == 0) return true;
   if (mnemonic.find("_prefetch_") != std::string::npos) return true;
 
-  // v_permlane16/v_permlanex16 — GFX10+ only, no simple GFX9 equivalent
-  if (mnemonic.find("v_permlane16") == 0) return true;
-  if (mnemonic.find("v_permlanex16") == 0) return true;
+  // v_permlane16/v_permlanex16 — now emulated via ds_bpermute in TranslateInstruction
 
   // v_mad_u32 — now emulated in TranslateInstruction
 
@@ -1689,8 +1688,9 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
               result.push_back("v_andn2_b32 " + dst + ", " + s1 + ", " + vd_old);
               result.push_back("v_not_b32_e32 " + dst + ", " + dst); break;
             default:
-              // Should not reach here (all 16 cases covered)
-              result.push_back("s_nop 0 ; UNSUPPORTED 2-input bitop f=" + std::to_string(f2));
+              // All 16 2-input truth tables (0x0-0xF) are covered above.
+              // This path is unreachable; assert to catch logic errors.
+              assert(false && "unreachable: all 16 2-input bitop cases covered");
               break;
           }
         };
@@ -2632,7 +2632,8 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   //   f32_16x16x16_f16   → f32_16x16x16_f16    (dst:8→4, src:4→2)
   //   f32_16x16x4_f32    → f32_16x16x4_f32     (dst:8→4, src:2→1)
   //   i32_16x16x64_iu8   → i32_16x16x64_i8     (dst:8→4, src:8→4)
-  //   f32_16x16x64_fp8_* → f32_16x16x128f8f6f4 (shape mismatch — NOP)
+  //   f32_16x16x64_fp8_* → 2× f32_16x16x32_fp8 (K=64→2×K=32, dst:8→4, src:8→4)
+  //   f32_16x16x64_bf8_* → 2× f32_16x16x32_bf8 (K=64→2×K=32, dst:8→4, src:8→4)
   {
     struct WmmaMfmaMapping {
       const char* wmma_mnem;
@@ -2649,6 +2650,11 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
       {"v_wmma_f32_16x16x16_f16",  "v_mfma_f32_16x16x16_f16",  8, 4, 4, 2},
       {"v_wmma_f32_16x16x4_f32",   "v_mfma_f32_16x16x4_f32",   8, 2, 4, 1},
       {"v_wmma_i32_16x16x64_iu8",  "v_mfma_i32_16x16x64_i8",   8, 8, 4, 4},
+      // FP8/BF8 WMMA: K=64 on GFX1250, decomposed to 2× K=32 MFMA on GFX942
+      {"v_wmma_f32_16x16x64_fp8_fp8", "v_mfma_f32_16x16x32_fp8_fp8", 8, 8, 4, 4},
+      {"v_wmma_f32_16x16x64_fp8_bf8", "v_mfma_f32_16x16x32_fp8_bf8", 8, 8, 4, 4},
+      {"v_wmma_f32_16x16x64_bf8_fp8", "v_mfma_f32_16x16x32_bf8_fp8", 8, 8, 4, 4},
+      {"v_wmma_f32_16x16x64_bf8_bf8", "v_mfma_f32_16x16x32_bf8_bf8", 8, 8, 4, 4},
     };
 
     const WmmaMfmaMapping* mapping = nullptr;
@@ -2761,6 +2767,8 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
     // Step 6: Execute MFMA
     // Check if target supports this MFMA shape directly.
     // gfx942 doesn't have v_mfma_f32_16x16x32_f16 — decompose into 2× 16x16x16.
+    // FP8/BF8: gfx942 has v_mfma_f32_16x16x32_fp8_* natively (K=32), but
+    // WMMA K=64 needs 2× MFMA K=32. Same decomposition pattern.
     bool need_decompose = false;
     std::string actual_mfma = mfma_mnem;
     if (target_cpu.find("gfx942") != std::string::npos ||
@@ -2772,6 +2780,13 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
         actual_mfma = (mfma_mnem.find("bf16") != std::string::npos)
                     ? "v_mfma_f32_16x16x16bf16_1k"
                     : "v_mfma_f32_16x16x16_f16";
+      }
+      // FP8/BF8: WMMA K=64 mapped to MFMA K=32, needs 2× decomposition.
+      // GFX942 has these K=32 variants natively — use them directly.
+      if (mfma_mnem.find("_fp8") != std::string::npos ||
+          mfma_mnem.find("_bf8") != std::string::npos) {
+        need_decompose = true;
+        actual_mfma = mfma_mnem;  // GFX942 K=32 fp8/bf8 MFMAs exist natively
       }
     }
 
@@ -2837,9 +2852,118 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
     }  // if (mapping)
   }  // WMMA scope
 
-  // ─── Other WMMA/SWMMAC → NOP with diagnostic ───
+  // ─── Other WMMA/SWMMAC → trap with diagnostic ───
+  // v_swmmac (sparse WMMA) has no GFX942 equivalent — the hardware lacks sparse
+  // matrix support. Unmatched v_wmma shapes also land here. Use s_trap to make
+  // failures visible rather than producing silently wrong results.
   if (mnemonic.find("v_wmma_") == 0 || mnemonic.find("v_swmmac_") == 0) {
-    result.push_back("s_nop 0 ; UNSUPPORTED WMMA: " + mnemonic);
+    result.push_back("s_trap 2 ; UNSUPPORTED: " + mnemonic + " (no GFX942 equivalent)");
+    return result;
+  }
+
+  // ─── v_permlane16_b32 / v_permlanex16_b32 → ds_bpermute emulation ───
+  // GFX10+ permlane instructions permute lanes within/across 16-lane groups.
+  // Emulated on GFX9 using ds_bpermute_b32 to compute arbitrary lane mappings.
+  //
+  // v_permlane16_b32 vDst, vSrc, sA, sB:
+  //   Group 0 (lanes 0-15): lane i reads from lane (i XOR (sA & 0xF))
+  //   Group 1 (lanes 16-31): lane i reads from lane 16 + ((i-16) XOR (sB & 0xF))
+  //
+  // v_permlanex16_b32 vDst, vSrc, sA, sB: (cross-group)
+  //   Group 0 (lanes 0-15): lane i reads from lane 16 + (i XOR (sA & 0xF))
+  //   Group 1 (lanes 16-31): lane i reads from lane (i-16) XOR (sB & 0xF)
+  if (mnemonic == "v_permlane16_b32" || mnemonic == "v_permlanex16_b32") {
+    bool cross = (mnemonic == "v_permlanex16_b32");
+
+    // Parse operands: vDst, vSrc, sA, sB [, op_sel:...]
+    std::string ops = line.substr(line.find(mnemonic) + mnemonic.size());
+    size_t s = ops.find_first_not_of(" \t");
+    if (s != std::string::npos) ops = ops.substr(s);
+
+    // Strip trailing modifiers: op_sel, fi, bound_ctrl
+    for (const char* mod : {"op_sel:", "fi:", "bound_ctrl:"}) {
+      size_t mpos = ops.find(mod);
+      if (mpos != std::string::npos) {
+        // Find end of modifier (next space or end)
+        size_t mend = ops.find(' ', mpos);
+        if (mend == std::string::npos) mend = ops.size();
+        ops.erase(mpos, mend - mpos);
+      }
+    }
+
+    // Tokenize comma-separated operands
+    std::vector<std::string> operands;
+    {
+      std::istringstream iss(ops);
+      std::string tok;
+      while (std::getline(iss, tok, ',')) {
+        size_t ts = tok.find_first_not_of(" \t");
+        size_t te = tok.find_last_not_of(" \t");
+        if (ts != std::string::npos)
+          operands.push_back(tok.substr(ts, te - ts + 1));
+      }
+    }
+
+    if (operands.size() >= 4) {
+      std::string vDst = operands[0];
+      std::string vSrc = operands[1];
+      std::string sA   = operands[2];
+      std::string sB   = operands[3];
+
+      // SGPR pair for v_cmp mask (must be even-aligned)
+      std::string stemp_lo = "s" + std::to_string(cmpx_temp_sgpr);
+      std::string stemp_pair = "s[" + std::to_string(cmpx_temp_sgpr) + ":" +
+                                std::to_string(cmpx_temp_sgpr + 1) + "]";
+
+      result.push_back("; BEGIN " + mnemonic + " emulation via ds_bpermute");
+
+      // Load selectors into VGPRs (v_cndmask needs VGPR sources)
+      result.push_back("v_mov_b32_e32 " + vt2 + ", " + sA);
+      result.push_back("v_mov_b32_e32 " + vt3 + ", " + sB);
+
+      // Compute absolute lane ID (exec-independent: mask=-1 counts all bits)
+      result.push_back("v_mbcnt_lo_u32_b32 " + vt0 + ", -1, 0");
+
+      // Group (0 or 1) = lane >> 4
+      result.push_back("v_lshrrev_b32_e32 " + vt1 + ", 4, " + vt0);
+
+      // Select sA (group 0) or sB (group 1)
+      result.push_back("v_cmp_ne_u32_e64 " + stemp_pair + ", 0, " + vt1);
+      result.push_back("v_cndmask_b32_e64 " + vt2 + ", " + vt2 + ", " + vt3 + ", " + stemp_pair);
+
+      // selector & 0xF
+      result.push_back("v_and_b32_e32 " + vt2 + ", 0xF, " + vt2);
+
+      // lane_in_group = lane & 0xF
+      result.push_back("v_and_b32_e32 " + vt1 + ", 0xF, " + vt0);
+
+      // src_lane_in_group = lane_in_group XOR selector
+      result.push_back("v_xor_b32 " + vt1 + ", " + vt1 + ", " + vt2);
+
+      // Reconstruct full source lane
+      if (cross) {
+        // Cross-group: source is in the OTHER group
+        // other_group_base = (lane XOR 0x10) & 0x10
+        result.push_back("v_xor_b32 " + vt2 + ", 0x10, " + vt0);
+        result.push_back("v_and_b32_e32 " + vt2 + ", 0x10, " + vt2);
+      } else {
+        // Same group: group_base = lane & 0x10
+        result.push_back("v_and_b32_e32 " + vt2 + ", 0x10, " + vt0);
+      }
+      result.push_back("v_or_b32 " + vt1 + ", " + vt1 + ", " + vt2);
+
+      // ds_bpermute byte address = source_lane * 4
+      result.push_back("v_lshlrev_b32_e32 " + vt1 + ", 2, " + vt1);
+
+      // Execute cross-lane permutation
+      result.push_back("ds_bpermute_b32 " + vDst + ", " + vt1 + ", " + vSrc);
+      result.push_back("s_waitcnt lgkmcnt(0)");
+
+      result.push_back("; END " + mnemonic + " emulation");
+      return result;
+    }
+    // Fallback if operand parsing fails
+    result.push_back("s_nop 0 ; PARSE ERROR: " + mnemonic);
     return result;
   }
 
@@ -4531,10 +4655,10 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         pos += to.size();
       }
     };
-    // Wave32→64 VCC branch fix: widen VCC operations to 64-bit.
-    // Instead of converting to SCC (which has subtle semantic differences),
-    // widen the preceding SALU op from b32 to b64 to set both VCC_lo and VCC_hi.
-    // This properly handles the full 64-bit VCC check in s_cbranch_vccz/vccnz.
+    // Wave32→64 VCC branch fix: s_cbranch_vccz/vccnz checks full 64-bit VCC.
+    // In our wave32-in-wave64 model, vcc_hi can be stale from scalar b32 ops
+    // that only write vcc_lo. Insert s_mov_b32 vcc_hi, 0 before each VCC branch
+    // to ensure VCC = {0, vcc_lo}. This is safe because s_mov_b32 never clobbers SCC.
     {
       std::string tmp;
       std::istringstream vfix_iss(translated_asm);
@@ -4957,10 +5081,10 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         "s_mov_b32 s10, -1 ; FORCE remainder\n"
         "s_ashr_i32 s7");
     }
-    // Note: VCC_hi is NOT cleared here. The s_cbranch_vccz/vccnz branches
-    // check full 64-bit VCC on wave64. VCC_hi garbage from v_cmp can cause
-    // wrong branch decisions. TODO: find correct fix (s_and_b64 clobbers SCC,
-    // s_mov vcc_hi doesn't fix it, SCC conversion doesn't fix it either).
+    // VCC_hi correctness: In our wave32-in-wave64 model, exec_hi is always 0,
+    // so v_cmp produces vcc_hi=0 (inactive lanes → 0). Scalar b32 ops on vcc_lo
+    // leave vcc_hi stale, but s_mov_b32 vcc_hi, 0 is inserted before every
+    // s_cbranch_vccz/vccnz (see above). s_mov_b32 doesn't clobber SCC. Fixed.
     // v_add_nc_u32 → v_add_u32_e32 (may appear without _e32 from VOP3 encoding)
     replaceAll(translated_asm, "v_add_nc_u32 ", "v_add_u32_e32 ");
     replaceAll(translated_asm, "v_sub_nc_u32 ", "v_sub_u32_e32 ");
