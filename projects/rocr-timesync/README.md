@@ -11,30 +11,58 @@ allow this (e.g., PTP/PTM)
 
 ### Background
 
-Intro to PTP
+TODO
 
 ## Overview
 
-What we are doing
-
 ## Architecture
 
-ROCR Runtime -> ROCR Timesync API -> ROCR Timesync library -> ROCR Timesync backend (currently based on influxdb)
+### In-process
 
-ROCR Timesync is built as a library. It is linked into rocr-runtime. Timesync can operate in 2 modes:
-1) in-process
-2) out-of-process
+![](doc/img/in-process.png)
 
+### Out-of-process
 
-#### In-process
+![](doc/img/out-of-process.png)
 
-With in-process mode, ROCR Timesync creates a datastore for timestamp deltas and directly implements the Timesync API service by querying this datastore. On process teardown, the datastore is deleted.
+In contrast to an in-process design, an out-of-process design removes the need
+for every timesync client to store timestamp data. The benefit is that, because
+timesync data is not process specific, there is no need for each process to
+maintain its own copy.
 
-With out-of-process mode, ROCR Timesync establishes connectivity to a remote datastore and implements the Timesync API by calling out to that datastore. On process teardown, the datastore is _not_ deleted.
-In-proce
+#### Consumer API
 
-## Implementation
+The out-of-process architecture requires a ROCR instance to communicate with
+the ROCm-timesync consumer service. We envision an API with at least the following API functions
 
-In its current form, this just just provides a simple time translation interface and uses a
-time-series database to store timestamps
+1. `query_timesync_freq(uint32_t *hz int *num_hz)
+- return to the caller a set of streaming frequencies, in Hzm supported by ROCR-timesync on this system
+
+2. `enable_timesync_freq(uint32_t freq)
+- enable timestamp generation at `freq` Hz
+
+Notes:
+- If not already running, deploys new thread which attaches to the *lttng* data stream and marshals data into the persistent datastore (e.g., *InfluxDB*)
+- If already running, update a counter indicating the presence of an additional active consumer
+
+3. `disable_timesync_freq(uint32_t freq)
+- disable timestamp generation at `freq` Hz
+
+Notes:
+- Decrement count of active consumers
+- If count reaches 0, datastore can be destroyed
+
+- If more than one active consumer is present, simpl
+
+2. attach_stream(precision)
+- precision=[high,low]
+
+- Exports raw lttng stream for external consumption (e.g., debugging or piping to a customer datastore)
+
+3. translate_time_to_system(agent, timestamp)
+- agent: HSA agent_id
+- timestamp: timestamp from 'agent' domain
+
+Translates 'timestamp' from 'agent' domain to system (PTP) domain by querying the internal backend data store
+
 
