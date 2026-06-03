@@ -45,6 +45,7 @@ struct ginRocshmemMemHandle {
   ncclGinRocshmemGdaMemHandle *devHandle;  // GPU-side handle
   void *mr;                              // ibv_mr from gin_qp_factory
   uint32_t *rkeys_dev;                   // GPU array of per-peer rkeys
+  uintptr_t *remote_vas_dev;                    // GPU array of per-peer base VAs
 };
 
 // Bootstrap allgather wrapper for gin_qp_factory callback
@@ -247,32 +248,44 @@ ncclResult_t ncclGinRocshmemGdaRegister(ncclGin_t *ginComm, void *ginCtx, void *
     return ncclSystemError;
   }
 
-  // Allgather rkeys across all peers
+  // Allgather rkeys and base VAs across all peers
   uint32_t *rkeys_buf = (uint32_t *)malloc(sizeof(uint32_t) * ctx->nRanks);
+  uintptr_t *vas_buf = (uintptr_t *)malloc(sizeof(uintptr_t) * ctx->nRanks);
   rkeys_buf[ctx->rank] = rkey;
+  vas_buf[ctx->rank] = (uintptr_t)addr;
   bootstrapAllGather(ctx->comm->bootstrap, rkeys_buf, sizeof(uint32_t));
+  bootstrapAllGather(ctx->comm->bootstrap, vas_buf, sizeof(uintptr_t));
 
   uint32_t *rkeys_dev = nullptr;
-  if (hipMalloc(&rkeys_dev, sizeof(uint32_t) * ctx->nRanks) != hipSuccess) {
+  uintptr_t *remote_vas_dev = nullptr;
+  if (hipMalloc(&rkeys_dev, sizeof(uint32_t) * ctx->nRanks) != hipSuccess ||
+      hipMalloc(&remote_vas_dev, sizeof(uintptr_t) * ctx->nRanks) != hipSuccess) {
     free(rkeys_buf);
-    rocshmem_gin_dereg_mr(mh->mr);
-    (void)hipFree(mh->devHandle);
-    free(mh);
-    return ncclSystemError;
-  }
-  if (hipMemcpy(rkeys_dev, rkeys_buf, sizeof(uint32_t) * ctx->nRanks, hipMemcpyHostToDevice) != hipSuccess) {
-    free(rkeys_buf);
+    free(vas_buf);
     (void)hipFree(rkeys_dev);
     rocshmem_gin_dereg_mr(mh->mr);
     (void)hipFree(mh->devHandle);
     free(mh);
     return ncclSystemError;
   }
+  if (hipMemcpy(rkeys_dev, rkeys_buf, sizeof(uint32_t) * ctx->nRanks, hipMemcpyHostToDevice) != hipSuccess ||
+      hipMemcpy(remote_vas_dev, vas_buf, sizeof(uintptr_t) * ctx->nRanks, hipMemcpyHostToDevice) != hipSuccess) {
+    free(rkeys_buf);
+    free(vas_buf);
+    (void)hipFree(rkeys_dev);
+    (void)hipFree(remote_vas_dev);
+    rocshmem_gin_dereg_mr(mh->mr);
+    (void)hipFree(mh->devHandle);
+    free(mh);
+    return ncclSystemError;
+  }
   free(rkeys_buf);
+  free(vas_buf);
 
   // Populate host copy of mem handle
   ncclGinRocshmemGdaMemHandle hostMh;
-  hostMh.baseAddr = (uintptr_t)addr;
+  hostMh.local_va = (uintptr_t)addr;
+  hostMh.remote_vas = remote_vas_dev;
   hostMh.lkey = lkey;
   hostMh.rkeys = rkeys_dev;
 
@@ -287,6 +300,7 @@ ncclResult_t ncclGinRocshmemGdaRegister(ncclGin_t *ginComm, void *ginCtx, void *
   }
 
   mh->rkeys_dev = rkeys_dev;
+  mh->remote_vas_dev = remote_vas_dev;
   *mhandle = mh;
   *ginHandle = mh->devHandle;
   return ncclSuccess;
@@ -297,6 +311,7 @@ ncclResult_t ncclGinRocshmemGdaDeregister(ncclGin_t *ginComm, void *ginCtx, void
   if (mh == NULL) return ncclSuccess;
 
   if (mh->rkeys_dev) (void)hipFree(mh->rkeys_dev);
+  if (mh->remote_vas_dev) (void)hipFree(mh->remote_vas_dev);
   if (mh->mr) rocshmem_gin_dereg_mr(mh->mr);
   if (mh->devHandle) (void)hipFree(mh->devHandle);
   free(mh);

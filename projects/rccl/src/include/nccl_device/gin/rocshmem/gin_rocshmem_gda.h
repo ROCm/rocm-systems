@@ -31,8 +31,8 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
       ncclGinRocshmemGdaMemHandle* dstMh = (ncclGinRocshmemGdaMemHandle*)dstWin;
       ncclGinRocshmemGdaMemHandle* srcMh = (ncclGinRocshmemGdaMemHandle*)srcWin;
 
-      uintptr_t dstAddr = loadConst(&dstMh->baseAddr) + dstOff;
-      uintptr_t srcAddr = loadConst(&srcMh->baseAddr) + srcOff;
+      uintptr_t dstAddr = loadConst(loadConst(&dstMh->remote_vas) + peer) + dstOff;
+      uintptr_t srcAddr = loadConst(&srcMh->local_va) + srcOff;
       uint32_t dstRkey = loadConst(loadConst(&dstMh->rkeys) + peer);
       uint32_t srcLkey = loadConst(&srcMh->lkey);
 
@@ -73,7 +73,7 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
     rocshmem::ActiveWFInfo wf_info(peer, rocshmem::ThreadScope::thread);
 
     ncclGinRocshmemGdaMemHandle* dstMh = (ncclGinRocshmemGdaMemHandle*)dstWin;
-    uintptr_t dstAddr = loadConst(&dstMh->baseAddr) + dstOff;
+    uintptr_t dstAddr = loadConst(loadConst(&dstMh->remote_vas) + peer) + dstOff;
     uint32_t dstRkey = loadConst(loadConst(&dstMh->rkeys) + peer);
 
     // lkey=0: put_nbi_with_keys copies srcVal inline into the WQE
