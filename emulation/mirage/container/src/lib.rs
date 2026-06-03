@@ -61,6 +61,79 @@ pub enum ContainerError {
 /// Result alias for container operations.
 pub type Result<T> = std::result::Result<T, ContainerError>;
 
+/// A phase of container bring-up, reported to the `progress` callback of
+/// [`Engine::bring_up`] so the host can surface detailed, live status to
+/// clients as a session starts.
+///
+/// Each variant maps to a `(state, message)` pair via [`Self::health`],
+/// keeping the full set of bring-up conditions described in one place.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BringUpPhase {
+    /// The image is already present locally, so the pull is skipped.
+    ImagePresent { image: String },
+    /// Pulling the image from its registry (can take a while).
+    Pulling { image: String },
+    /// The image pull finished successfully.
+    Pulled { image: String },
+    /// Reusing a per-session network that already exists.
+    NetworkExists { network: String },
+    /// Creating the per-session network.
+    CreatingNetwork { network: String },
+    /// Starting node container `rank` (0-based) of `total`.
+    LaunchingNode { rank: u32, total: u32, name: String },
+    /// Node container `rank` (0-based) of `total` has started.
+    NodeStarted { rank: u32, total: u32, name: String },
+}
+
+impl BringUpPhase {
+    /// The lifecycle `state` slug for this phase: one of `"pulling"`,
+    /// `"networking"`, or `"starting"`. Stable enough for clients to key
+    /// off while [`message`](Self::message) carries the human detail.
+    pub fn state(&self) -> &'static str {
+        match self {
+            BringUpPhase::ImagePresent { .. }
+            | BringUpPhase::Pulling { .. }
+            | BringUpPhase::Pulled { .. } => "pulling",
+            BringUpPhase::NetworkExists { .. } | BringUpPhase::CreatingNetwork { .. } => {
+                "networking"
+            }
+            BringUpPhase::LaunchingNode { .. } | BringUpPhase::NodeStarted { .. } => "starting",
+        }
+    }
+
+    /// A detailed, human-readable description of this phase, suitable for
+    /// surfacing directly to the user as the session's status message.
+    pub fn message(&self) -> String {
+        match self {
+            BringUpPhase::ImagePresent { image } => {
+                format!("image {image} already present locally; skipping pull")
+            }
+            BringUpPhase::Pulling { image } => {
+                format!("pulling image {image} (this can take a while)…")
+            }
+            BringUpPhase::Pulled { image } => format!("image {image} ready"),
+            BringUpPhase::NetworkExists { network } => {
+                format!("reusing existing session network {network}")
+            }
+            BringUpPhase::CreatingNetwork { network } => {
+                format!("creating session network {network}")
+            }
+            BringUpPhase::LaunchingNode { rank, total, name } => {
+                format!("starting node {}/{total} ({name})", rank + 1)
+            }
+            BringUpPhase::NodeStarted { rank, total, name } => {
+                format!("node {}/{total} ({name}) started", rank + 1)
+            }
+        }
+    }
+
+    /// Convenience pairing of [`state`](Self::state) and
+    /// [`message`](Self::message).
+    pub fn health(&self) -> (&'static str, String) {
+        (self.state(), self.message())
+    }
+}
+
 /// A resolved container provider plus the operations mirage performs on
 /// it. Cheap to clone; holds only the provider binary name/path.
 #[derive(Debug, Clone)]
@@ -296,10 +369,12 @@ impl Engine {
     /// (mirage injects `MIRAGE_RANK`/`MIRAGE_HEAD_ADDR`/`MIRAGE_HEAD_PORT`
     /// there). `node_command(rank)` yields the container's foreground
     /// command for that rank (mirage runs the node's own `mirage host
-    /// --rank <n>`). On any failure the partially-created containers and
-    /// network are torn down before returning the error, so a failed
-    /// bring-up never leaks resources.
-    pub fn bring_up<F, G>(
+    /// --rank <n>`). `progress(phase)` is invoked before/after each step
+    /// ([`BringUpPhase`]) so callers can surface detailed live status.
+    /// On any failure the partially-created containers and network are
+    /// torn down before returning the error, so a failed bring-up never
+    /// leaks resources.
+    pub fn bring_up<F, G, P>(
         &self,
         session: &mirage_core::session::SessionId,
         def: &ContainerizedDef,
@@ -307,13 +382,30 @@ impl Engine {
         head_port: u16,
         mut node_env: F,
         mut node_command: G,
+        mut progress: P,
     ) -> Result<(ContainerState, Vec<(u32, String)>)>
     where
         F: FnMut(u32) -> Vec<(String, String)>,
         G: FnMut(u32) -> Vec<String>,
+        P: FnMut(BringUpPhase),
     {
         let network = mirage_core::container::network_name(session);
-        self.pull(&def.image)?;
+
+        // Pull the image unless it is already present locally; pulling a
+        // large image is the slowest, most visible step, so report it.
+        if self.image_present(&def.image) {
+            progress(BringUpPhase::ImagePresent {
+                image: def.image.clone(),
+            });
+        } else {
+            progress(BringUpPhase::Pulling {
+                image: def.image.clone(),
+            });
+            self.pull(&def.image)?;
+            progress(BringUpPhase::Pulled {
+                image: def.image.clone(),
+            });
+        }
 
         let mut state = ContainerState {
             provider: self.provider.clone(),
@@ -332,12 +424,24 @@ impl Engine {
             engine.network_rm(&network);
         };
 
-        if let Err(e) = self.ensure_network(&network) {
-            return Err(e);
+        if self.network_exists(&network) {
+            progress(BringUpPhase::NetworkExists {
+                network: network.clone(),
+            });
+        } else {
+            progress(BringUpPhase::CreatingNetwork {
+                network: network.clone(),
+            });
+            self.ensure_network(&network)?;
         }
 
         for rank in 0..node_count {
             let name = mirage_core::container::container_name(session, rank);
+            progress(BringUpPhase::LaunchingNode {
+                rank,
+                total: node_count,
+                name: name.clone(),
+            });
             let env = node_env(rank);
             let command = node_command(rank);
             match self.launch_node(
@@ -351,6 +455,11 @@ impl Engine {
                 &command,
             ) {
                 Ok(cid) => {
+                    progress(BringUpPhase::NodeStarted {
+                        rank,
+                        total: node_count,
+                        name: name.clone(),
+                    });
                     cids.push((rank, cid));
                     state.nodes.push(NodeContainer { rank, name });
                 }
@@ -637,6 +746,7 @@ mod tests {
             groups: vec![],
         };
 
+        let mut phases: Vec<BringUpPhase> = Vec::new();
         let (state, cids) = engine
             .bring_up(
                 &session,
@@ -652,6 +762,7 @@ mod tests {
                         rank.to_string(),
                     ]
                 },
+                |phase| phases.push(phase),
             )
             .unwrap();
 
@@ -678,5 +789,43 @@ mod tests {
         );
         assert!(recorded.contains("-e MIRAGE_RANK=0"), "{recorded:?}");
         assert!(recorded.contains("-e MIRAGE_RANK=1"), "{recorded:?}");
+
+        // The progress callback reports each bring-up phase in order: the
+        // mock image-inspect fails, so the image is pulled, the network
+        // is created, and each node is launched then confirmed started.
+        assert_eq!(
+            phases,
+            vec![
+                BringUpPhase::Pulling {
+                    image: "img:latest".to_string()
+                },
+                BringUpPhase::Pulled {
+                    image: "img:latest".to_string()
+                },
+                BringUpPhase::CreatingNetwork {
+                    network: "mirage-s".to_string()
+                },
+                BringUpPhase::LaunchingNode {
+                    rank: 0,
+                    total: 2,
+                    name: "mirage-s-node-0".to_string()
+                },
+                BringUpPhase::NodeStarted {
+                    rank: 0,
+                    total: 2,
+                    name: "mirage-s-node-0".to_string()
+                },
+                BringUpPhase::LaunchingNode {
+                    rank: 1,
+                    total: 2,
+                    name: "mirage-s-node-1".to_string()
+                },
+                BringUpPhase::NodeStarted {
+                    rank: 1,
+                    total: 2,
+                    name: "mirage-s-node-1".to_string()
+                },
+            ]
+        );
     }
 }

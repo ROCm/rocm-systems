@@ -255,6 +255,15 @@ export function SessionsPage() {
                       </dd>
                     </div>
                   </dl>
+                  {s.health.message ? (
+                    <p
+                      className="session-card-message"
+                      data-testid={`session-message-${s.def.id}`}
+                      title={s.health.message}
+                    >
+                      {s.health.message}
+                    </p>
+                  ) : null}
                 </div>
                 <footer className="session-card-actions">
                   <Link

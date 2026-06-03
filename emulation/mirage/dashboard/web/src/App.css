@@ -1291,6 +1291,34 @@
   color: var(--text-h);
 }
 
+.session-card-message {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.session-status-banner {
+  margin: 12px 0 0;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-2, rgba(127, 127, 127, 0.08));
+  color: var(--text-h);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.session-status-banner.is-terminal {
+  border-color: var(--danger, #d9534f);
+  background: rgba(217, 83, 79, 0.12);
+  color: var(--danger, #d9534f);
+}
+
 .session-card-actions {
   display: flex;
   gap: 6px;

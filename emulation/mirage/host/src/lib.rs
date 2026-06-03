@@ -118,12 +118,14 @@ pub async fn run(config: HostConfig, shutdown: Arc<Notify>) -> Result<()> {
         if let Err(e) = maybe_bring_up_containers(&config.session, &layout) {
             // A containerised session that cannot start is fatal: surface
             // it as terminal health so clients stop waiting, and abort.
+            // `e` already names the phase that failed (e.g. "pulling
+            // image … failed: <provider error>").
             let h = SessionHealth {
                 timestamp: Utc::now(),
                 healthy: false,
                 state: Some("failed".to_string()),
                 terminal: true,
-                message: Some(format!("container bring-up failed: {e}")),
+                message: Some(e.to_string()),
             };
             let _ = write_json(&layout.health(), &h);
             return Err(e);
@@ -409,8 +411,11 @@ fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Res
     publish_health(
         layout,
         true,
-        "pulling",
-        Some(format!("pulling image {}", def.image)),
+        "preparing",
+        Some(format!(
+            "resolving container provider for image {}",
+            def.image
+        )),
     )?;
 
     let engine =
@@ -419,6 +424,12 @@ fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Res
     let head_port = pick_head_port();
     let head_addr = container_name(session, 0);
     let session_str = session.to_string();
+
+    // Track the most recent bring-up phase so that, if a step fails, the
+    // error we surface names exactly what mirage was doing (e.g. "while
+    // pulling image …") rather than a bare provider error.
+    let last_phase: std::cell::RefCell<Option<mirage_container::BringUpPhase>> =
+        std::cell::RefCell::new(None);
 
     let (state, cids) = engine
         .bring_up(
@@ -441,8 +452,28 @@ fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Res
                     rank.to_string(),
                 ]
             },
+            |phase| {
+                // Mirror each bring-up phase into session health so
+                // clients see live, detailed progress (pulling the image,
+                // creating the network, starting each node).
+                let (state, message) = phase.health();
+                let _ = publish_health(layout, false, state, Some(message));
+                *last_phase.borrow_mut() = Some(phase);
+            },
         )
-        .map_err(|e| MirageError::other(format!("{e}")))?;
+        .map_err(|e| {
+            // Name the phase that was in flight so the failure is
+            // actionable (e.g. a registry auth error while pulling, or a
+            // device-permission error while starting a node).
+            let context = match last_phase.into_inner() {
+                Some(p) => format!(
+                    "{} failed: {e}",
+                    p.message().trim_end_matches('…').trim_end()
+                ),
+                None => format!("container bring-up failed: {e}"),
+            };
+            MirageError::other(context)
+        })?;
 
     // Persist the runtime record (used by execs and teardown) and the
     // per-node container ids under each node's runtime directory.

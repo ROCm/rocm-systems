@@ -242,6 +242,18 @@ export function SessionDetailPage() {
         </div>
       </div>
 
+      {session?.health.message && (
+        <div
+          className={`session-status-banner${
+            session.health.terminal ? " is-terminal" : ""
+          }`}
+          role={session.health.terminal ? "alert" : "status"}
+          data-testid="session-status-message"
+        >
+          {session.health.message}
+        </div>
+      )}
+
       {error && <div className="error" role="alert">{error}</div>}
 
       <div className="session-grid-2col">

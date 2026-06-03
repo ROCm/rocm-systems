@@ -809,9 +809,15 @@ async fn session_cmd<C: MirageCtl>(
                         "{:<32} {:<10} {:<12} {}",
                         id,
                         h.healthy,
-                        h.state.unwrap_or_default(),
+                        h.state.clone().unwrap_or_default(),
                         container
                     );
+                    // Surface the detailed status/error message (image
+                    // pull progress, network/node bring-up, stall/crash
+                    // diagnostics) on an indented continuation line.
+                    if let Some(msg) = h.message.as_deref() {
+                        println!("{:>32}   {}", "", msg);
+                    }
                 }
             }
         }
@@ -822,7 +828,11 @@ async fn session_cmd<C: MirageCtl>(
         SessionCmd::Wait { id, timeout } => {
             let h = ctl.session_wait_ready(&id, Duration::from_secs(timeout))?;
             if !h.healthy {
-                eprintln!("session is unhealthy: {}", h.state.unwrap_or_default());
+                let state = h.state.clone().unwrap_or_default();
+                match h.message.as_deref() {
+                    Some(msg) => eprintln!("session is unhealthy ({state}): {msg}"),
+                    None => eprintln!("session is unhealthy: {state}"),
+                }
                 return Ok(ExitCode::from(2));
             }
             println!("{}", serde_json::to_string_pretty(&h)?);
