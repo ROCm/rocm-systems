@@ -6,7 +6,7 @@
 ## fixture) or standalone by the runtime loader.
 set(_rcfn_standalone OFF)
 if(NOT PROJECT_NAME)
-    cmake_minimum_required(VERSION 3.20)
+    cmake_minimum_required(VERSION 3.16)
     project(roctx_recordfn_runtime LANGUAGES CXX)
     set(_rcfn_standalone ON)
 endif()
@@ -75,7 +75,6 @@ execute_process(
 print(sys.version_info.major); \
 print(sys.version_info.minor); \
 print(torch.__version__); \
-print(int(torch._C._GLIBCXX_USE_CXX11_ABI)); \
 import torch.utils.cpp_extension as e; \
 print(';'.join(e.include_paths())); \
 print(';'.join(e.library_paths()))"
@@ -88,7 +87,7 @@ if(NOT _torch_probe_rc EQUAL 0)
     message(
         FATAL_ERROR
         "TORCH_TRACE_PYTHON probe failed: ${TORCH_TRACE_PYTHON} could not "
-        "report python/torch/abi metadata."
+        "report python/torch metadata."
     )
 endif()
 
@@ -96,9 +95,8 @@ string(REPLACE "\n" ";" _probe_list "${_torch_probe}")
 list(GET _probe_list 0 _py_major)
 list(GET _probe_list 1 _py_minor)
 list(GET _probe_list 2 _torch_version)
-list(GET _probe_list 3 _cxx11_abi)
-list(GET _probe_list 4 _torch_includes)
-list(GET _probe_list 5 _torch_libs)
+list(GET _probe_list 3 _torch_includes)
+list(GET _probe_list 4 _torch_libs)
 
 # Compute the source fingerprint via the loader so build and runtime agree.
 execute_process(
@@ -121,7 +119,7 @@ if(NOT _fp_rc EQUAL 0)
 endif()
 
 set(_tag
-    "py${_py_major}.${_py_minor}_torch${_torch_version}_abi${_cxx11_abi}_src${_src_fingerprint}"
+    "py${_py_major}.${_py_minor}_torch${_torch_version}_src${_src_fingerprint}"
 )
 set(_so_name "roctx_recordfn-${_tag}")
 
@@ -225,7 +223,7 @@ set(_rcfn_saved_required_libs ${CMAKE_REQUIRED_LIBRARIES})
 set(_rcfn_saved_required_includes ${CMAKE_REQUIRED_INCLUDES})
 get_target_property(_rcfn_inc_dirs ${_so_name} INCLUDE_DIRECTORIES)
 set(CMAKE_REQUIRED_INCLUDES ${_rcfn_inc_dirs})
-set(CMAKE_REQUIRED_FLAGS "-std=c++17 -D_GLIBCXX_USE_CXX11_ABI=${_cxx11_abi}")
+set(CMAKE_REQUIRED_FLAGS "-std=c++17")
 check_cxx_source_compiles(
     "#include <c10/util/ThreadLocalDebugInfo.h>
      #include <string_view>
@@ -246,8 +244,6 @@ if(ROCPROF_TORCHTRACE_HAS_CUSTOM_DBGINFOKIND)
 else()
     message(STATUS "roctx_recordfn: legacy enum; using TEST_INFO_2")
 endif()
-
-target_compile_definitions(${_so_name} PRIVATE _GLIBCXX_USE_CXX11_ABI=${_cxx11_abi})
 
 target_compile_options(
     ${_so_name}

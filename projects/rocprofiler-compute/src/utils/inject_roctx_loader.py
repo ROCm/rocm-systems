@@ -113,21 +113,14 @@ def compute_tag() -> Optional[str]:
     """Return the cache tag for the active PyTorch ABI, or ``None``."""
     try:
         import torch
-        import torch._C
     except Exception:
         return None
 
     py_major = sys.version_info.major
     py_minor = sys.version_info.minor
     torch_version = torch.__version__
-    try:
-        cxx11_abi = int(torch._C._GLIBCXX_USE_CXX11_ABI)
-    except Exception:
-        cxx11_abi = 1
     fingerprint = _source_fingerprint()
-    return (
-        f"py{py_major}.{py_minor}_torch{torch_version}_abi{cxx11_abi}_src{fingerprint}"
-    )
+    return f"py{py_major}.{py_minor}_torch{torch_version}_src{fingerprint}"
 
 
 def _import_module_from_path(name: str, path: Path) -> types.ModuleType:

@@ -25,14 +25,13 @@ def _isolate_explicit_so_env(monkeypatch):
 
 
 def test_compute_tag_returns_well_formed_string():
-    """The cache tag follows ``py<X>.<Y>_torch<ver>_abi<0|1>_src<12-hex>``."""
+    """The cache tag follows ``py<X>.<Y>_torch<ver>_src<12-hex>``."""
     tag = inject_roctx_loader.compute_tag()
     if tag is None:
         pytest.skip("torch not importable")
     parts = tag.split("_")
     assert any(p.startswith("py") for p in parts)
     assert any(p.startswith("torch") for p in parts)
-    assert any(p.startswith("abi") for p in parts)
     src_components = [p for p in parts if p.startswith("src")]
     assert len(src_components) == 1, (
         f"expected exactly one '_src...' component in tag {tag!r}"
@@ -321,7 +320,7 @@ def test_jit_compile_viable_falls_back_to_path_probe(monkeypatch):
 def test_jit_failure_marker_round_trip(monkeypatch, tmp_path):
     """``_previous_jit_failure`` reads the reason from ``_record_jit_failure``."""
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-    tag = "py3.12_torch2.9_abi1_src000000000000"
+    tag = "py3.12_torch2.9_src000000000000"
 
     assert inject_roctx_loader._previous_jit_failure(tag) is None
     inject_roctx_loader._record_jit_failure(tag, RuntimeError("ninja missing"))
@@ -334,7 +333,7 @@ def test_jit_failure_marker_round_trip(monkeypatch, tmp_path):
 def test_jit_failure_marker_cleared_on_demand(monkeypatch, tmp_path):
     """_clear_jit_failure() must remove the marker and be idempotent."""
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-    tag = "py3.12_torch2.9_abi1_src000000000000"
+    tag = "py3.12_torch2.9_src000000000000"
 
     inject_roctx_loader._record_jit_failure(tag, RuntimeError("x"))
     assert inject_roctx_loader._previous_jit_failure(tag) is not None
@@ -396,7 +395,7 @@ def test_install_cached_so_is_a_noop_when_src_missing(tmp_path):
 
 # Synthetic tag for routing tests; stubs compute_tag so these tests
 # don't need a torch import.
-_FAKE_TAG = "py3.12_torch2.9_abi1_src000000000000"
+_FAKE_TAG = "py3.12_torch2.9_src000000000000"
 
 
 def test_rebuild_env_var_skips_prebuilt_and_cache(monkeypatch):
@@ -566,7 +565,7 @@ def test_no_prebuilt_returns_none_for_unknown_tag(monkeypatch):
         "_install_tree_prebuilt_candidates",
         lambda _tag: [],
     )
-    assert inject_roctx_loader._try_prebuilt("py3.10_torch2.9_abi1") is None
+    assert inject_roctx_loader._try_prebuilt("py3.10_torch2.9") is None
 
 
 def test_jit_cache_dir_is_creatable(monkeypatch, tmp_path):

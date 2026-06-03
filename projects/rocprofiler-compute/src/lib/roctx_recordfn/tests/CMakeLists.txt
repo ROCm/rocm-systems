@@ -21,8 +21,10 @@ if(NOT _rcfn_libpython OR NOT _rcfn_python_include)
     message(
         WARNING
         "roctx_recordfn: skipping ${target}: Python ${_py_major}.${_py_minor} "
-        "development files not found (install libpython${_py_major}.${_py_minor}-dev "
-        "or equivalent to enable this test)."
+        "development files (headers + libpython) not found. Install the "
+        "python development package for your distro to enable this test "
+        "(e.g. libpython${_py_major}.${_py_minor}-dev on Debian/Ubuntu, "
+        "python${_py_major}${_py_minor}-devel on RHEL/Fedora)."
     )
     return()
 endif()
@@ -45,7 +47,6 @@ target_include_directories(
         ${_rcfn_python_include}
 )
 
-target_compile_definitions(${target} PRIVATE _GLIBCXX_USE_CXX11_ABI=${_cxx11_abi})
 if(ROCPROF_TORCHTRACE_HAS_CUSTOM_DBGINFOKIND)
     target_compile_definitions(
         ${target}
@@ -63,14 +64,23 @@ set_target_properties(
         INSTALL_RPATH "${_torch_lib_search_dirs};${_roctx_lib_dir}"
 )
 
-find_path(
-    _rcfn_openblas_dir
-    NAMES librocm-openblas.so.0
-    HINTS
-    ENV ROCM_PATH
-    PATHS /opt/rocm
-    PATH_SUFFIXES lib/host-math/lib lib lib64
-)
+set(_rcfn_openblas_dir "")
+foreach(_dir IN ITEMS
+        "$ENV{ROCM_PATH}/lib/host-math/lib"
+        "/opt/rocm/lib/host-math/lib"
+        "$ENV{ROCM_PATH}/lib"
+        "/opt/rocm/lib"
+        "$ENV{ROCM_PATH}/lib64"
+        "/opt/rocm/lib64")
+    file(GLOB _rcfn_openblas_hits "${_dir}/librocm-openblas.so*")
+    if(_rcfn_openblas_hits)
+        list(SORT _rcfn_openblas_hits COMPARE NATURAL ORDER DESCENDING)
+        list(GET _rcfn_openblas_hits 0 _rcfn_openblas_latest)
+        set(_rcfn_openblas_dir "${_dir}")
+        message(STATUS "roctx_recordfn: using openblas ${_rcfn_openblas_latest}")
+        break()
+    endif()
+endforeach()
 
 set(_rcfn_test_ld_paths "${_torch_lib_search_dirs}")
 if(_rcfn_openblas_dir)
