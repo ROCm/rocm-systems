@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef _NCCL_DEVICE_LL_A2A__FUNCS_H_
 #define _NCCL_DEVICE_LL_A2A__FUNCS_H_
@@ -11,7 +12,7 @@
 #include "../utility.h"
 #include "../rccl_ptr.h"
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 NCCL_DEVICE_INLINE void amdLLA2aStoreLine(uint32_t* dst, uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3) {
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
   union { v4u v; uint32_t w[4]; } u;
@@ -47,7 +48,7 @@ NCCL_DEVICE_INLINE void amdLLA2aLoadLine(const uint32_t* src, uint32_t& o0, uint
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename Coop>
 NCCL_DEVICE_INLINE ncclLLA2ASession<Coop>::ncclLLA2ASession(
     Coop coop, ncclDevComm const& comm, ncclTeam team,
@@ -65,7 +66,7 @@ NCCL_DEVICE_INLINE ncclLLA2ASession<Coop>::ncclLLA2ASession(
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename Coop>
 NCCL_DEVICE_INLINE ncclLLA2ASession<Coop>::~ncclLLA2ASession() {
   uint4* line = (uint4*)ncclGetResourceBufferLocalPointer(this->comm, this->handle.bufHandle);
@@ -75,7 +76,7 @@ NCCL_DEVICE_INLINE ncclLLA2ASession<Coop>::~ncclLLA2ASession() {
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename Coop>
 template<typename T>
 NCCL_DEVICE_INLINE void ncclLLA2ASession<Coop>::send(int peer, int elt, T data) {
@@ -86,7 +87,7 @@ NCCL_DEVICE_INLINE void ncclLLA2ASession<Coop>::send(int peer, int elt, T data) 
   buf += this->slotsOffset + elt;
   #pragma unroll
   for (int u=0; u < divUp(sizeof(T), 8); u++) {
-#if __HIP_PLATFORM_AMD__
+#if defined(__HIP_PLATFORM_AMD__)
     uint32_t* dst = reinterpret_cast<uint32_t*>(buf + u * this->pitch);
     amdLLA2aStoreLine(dst, u32[u][0], (uint32_t)this->epoch, u32[u][1], (uint32_t)this->epoch);
 #else
@@ -99,7 +100,7 @@ NCCL_DEVICE_INLINE void ncclLLA2ASession<Coop>::send(int peer, int elt, T data) 
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename Coop>
 template<typename T>
 NCCL_DEVICE_INLINE void ncclLLA2ASession<Coop>::bcast(int elt, T data) {
@@ -111,7 +112,7 @@ NCCL_DEVICE_INLINE void ncclLLA2ASession<Coop>::bcast(int elt, T data) {
     bufmc += this->slotsOffset + elt;
     #pragma unroll
     for (int u=0; u < divUp(sizeof(T), 8); u++) {
-#if __HIP_PLATFORM_AMD__
+#if defined(__HIP_PLATFORM_AMD__)
       uint32_t* dst = reinterpret_cast<uint32_t*>(bufmc + this->pitch*u);
       amdLLA2aStoreLine(dst, u32[u][0], (uint32_t)this->epoch, u32[u][1], (uint32_t)this->epoch);
 #else
@@ -134,7 +135,7 @@ NCCL_DEVICE_INLINE void ncclLLA2ASession<Coop>::bcast(int elt, T data) {
         buf += this->slotsOffset + elt;
         #pragma unroll
         for (int u=0; u < divUp(sizeof(T),8); u++) {
-#if __HIP_PLATFORM_AMD__
+#if defined(__HIP_PLATFORM_AMD__)
           uint32_t* dst = reinterpret_cast<uint32_t*>(buf + u*this->pitch);
           amdLLA2aStoreLine(dst, u32[u][0], (uint32_t)this->epoch, u32[u][1], (uint32_t)this->epoch);
 #else
@@ -155,7 +156,7 @@ NCCL_DEVICE_INLINE void ncclLLA2ASession<Coop>::bcast(int elt, T data) {
       buf += this->slotsOffset + elt;
       #pragma unroll
       for (int u=0; u < divUp(sizeof(T),8); u++) {
-#if __HIP_PLATFORM_AMD__
+#if defined(__HIP_PLATFORM_AMD__)
         uint32_t* dst = reinterpret_cast<uint32_t*>(buf + u*this->pitch);
         amdLLA2aStoreLine(dst, u32[u][0], (uint32_t)this->epoch, u32[u][1], (uint32_t)this->epoch);
 #else
@@ -172,7 +173,7 @@ NCCL_DEVICE_INLINE void ncclLLA2ASession<Coop>::bcast(int elt, T data) {
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename Coop>
 template<typename T>
 NCCL_DEVICE_INLINE T ncclLLA2ASession<Coop>::recv(int elt) {
@@ -182,7 +183,7 @@ NCCL_DEVICE_INLINE T ncclLLA2ASession<Coop>::recv(int elt) {
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename Coop>
 template<int MinEltCount, int MaxEltCount, typename T>
 NCCL_DEVICE_INLINE void ncclLLA2ASession<Coop>::recvUnrolled(int eltStart, int eltCount, int eltStride, T(&elts)[MaxEltCount]) {
@@ -198,7 +199,7 @@ NCCL_DEVICE_INLINE void ncclLLA2ASession<Coop>::recvUnrolled(int eltStart, int e
       if (u < MinEltCount || u < eltCount) {
         #pragma unroll
         for (int v=0; v < divUp(sizeof(T), 8); v++) {
-#if __HIP_PLATFORM_AMD__
+#if defined(__HIP_PLATFORM_AMD__)
           const uint32_t* src = reinterpret_cast<const uint32_t*>(buf + u*eltStride + v*this->pitch);
           uint4 t;
           amdLLA2aLoadLine(src, t.x, t.y, t.z, t.w);
@@ -240,7 +241,7 @@ NCCL_DEVICE_INLINE void ncclLLA2ASession<Coop>::recvUnrolled(int eltStart, int e
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename Coop>
 template<int Unroll, typename Elt, typename EltToAcc, typename Reduce>
 NCCL_DEVICE_INLINE auto ncclLLA2ASession<Coop>::recvReduce(
@@ -272,7 +273,7 @@ NCCL_DEVICE_INLINE auto ncclLLA2ASession<Coop>::recvReduce(
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename Coop>
 NCCL_DEVICE_INLINE void ncclLLA2ASession<Coop>::endEpoch(Coop) {
   if (__builtin_expect(this->epoch >= -2u, false)) {
@@ -281,7 +282,7 @@ NCCL_DEVICE_INLINE void ncclLLA2ASession<Coop>::endEpoch(Coop) {
     buf += this->slotsOffset;
     #pragma unroll 4
     for (int i=this->coop.thread_rank(); i < this->handle.nSlots; i += this->coop.size()) {
-#if __HIP_PLATFORM_AMD__
+#if defined(__HIP_PLATFORM_AMD__)
       amdLLA2aStoreLine(reinterpret_cast<uint32_t*>(buf + i), 0, 0, 0, 0);
 #else
       buf[i] = uint4{0, 0, 0, 0};

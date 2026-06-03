@@ -4,11 +4,12 @@
 
 ARG SUSE_MAJOR_VERSION=15
 ARG SUSE_MINOR_VERSION=6
-FROM opensuse/leap:${SUSE_MAJOR_VERSION}.${SUSE_MINOR_VERSION}
+FROM opensuse/leap:${SUSE_MAJOR_VERSION}.${SUSE_MINOR_VERSION} AS base
 LABEL org.opencontainers.image.source=https://github.com/ROCm/hipFile
 ARG SUSE_MAJOR_VERSION
 ARG SUSE_MINOR_VERSION
 ARG ROCM_VERSION=7.2.2
+ARG ONETBB_VERSION=2023.0.0
 
 # If the target ROCm Version on the package repository is non-standard, you can forcibly
 # set the ROCm version used in the package repo URL.
@@ -68,6 +69,7 @@ RUN zypper install -y \
         hip-devel \
         libmount-devel \
         llvm19-devel \
+        python312-devel \
         rocm-device-libs \
         rpm-build
 
@@ -78,10 +80,51 @@ RUN cat <<EOF > /etc/ld.so.conf.d/rocm.conf
 EOF
 RUN ldconfig
 
+# Add ROCm bin directory to the path
+ENV PATH=/opt/rocm/bin:${PATH}
+
+# Environment Build Arg for ROCm Packaging
+ENV ROCM_VERSION="${ROCM_VERSION}"
+ENV SLES_BUILD_ID_PREFIX="opensuse${SUSE_MAJOR_VERSION}${SUSE_MINOR_VERSION}."
+
+# Configure SUSE to use GCC-13 by default
+RUN update-alternatives \
+        --install /usr/bin/gcc gcc /usr/bin/gcc-13 100 \
+        --slave /usr/bin/cc cc /usr/bin/gcc-13 \
+        --slave /usr/bin/g++ g++ /usr/bin/g++-13
+
+# Build and install a fixed oneTBB release.
+RUN curl -L --fail \
+        "https://github.com/uxlfoundation/oneTBB/archive/refs/tags/v${ONETBB_VERSION}.tar.gz" \
+        -o /tmp/oneTBB-${ONETBB_VERSION}.tar.gz && \
+    tar -xzf /tmp/oneTBB-${ONETBB_VERSION}.tar.gz -C /tmp && \
+    cmake -S /tmp/oneTBB-${ONETBB_VERSION} \
+        -B /tmp/oneTBB-${ONETBB_VERSION}-build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_C_COMPILER=/usr/bin/gcc \
+        -DCMAKE_CXX_COMPILER=/usr/bin/g++ \
+        -DTBB_TEST=OFF \
+        -DTBB_STRICT=OFF && \
+    cmake --build /tmp/oneTBB-${ONETBB_VERSION}-build --parallel && \
+    cmake --install /tmp/oneTBB-${ONETBB_VERSION}-build && \
+    rm -rf /tmp/oneTBB-${ONETBB_VERSION} \
+        /tmp/oneTBB-${ONETBB_VERSION}-build \
+        /tmp/oneTBB-${ONETBB_VERSION}.tar.gz && \
+    ldconfig
+
+# AIS Code Repository Mount Point
+VOLUME /mnt/ais
+
+# Generic Mount point for container to access AIS-capable storage.
+VOLUME /mnt/ais-fs
+
+# ---- Stage 2: NVIDIA (extends base with CUDA SDK) ----
+# The HIP runtime must be present to use hipFile with NVIDIA GPUs,
+# which is why this stage inherits from base rather than a bare CUDA image.
+FROM base AS nvidia
+ARG SUSE_MAJOR_VERSION=15
+
 # Install a minimal CUDA SDK
-# HIP depends on the ROCm libraries being installed.
-# This means we are unable to have a separate CUDA+HIP image
-# without ROCm.
 RUN curl https://developer.download.nvidia.com/compute/cuda/repos/opensuse${SUSE_MAJOR_VERSION}/$(uname -m)/cuda-opensuse${SUSE_MAJOR_VERSION}.repo \
         -o /etc/zypp/repos.d/cuda-opensuse${SUSE_MAJOR_VERSION}.repo && \
     zypper --gpg-auto-import-keys refresh
@@ -99,21 +142,9 @@ RUN zypper install -y \
         nvidia-compute-G06=575.57.08-1 \
         nvidia-open-driver-G06=575.57.08-1
 
-# Add ROCm and CUDA bin directories to the path
-ENV PATH=/usr/local/cuda/bin:/opt/rocm/bin:${PATH}
+# Repair set alternative in case above zypper install
+# broke the symlink.
+RUN update-alternatives --auto gcc
 
-# Environment Build Arg for ROCm Packaging
-ENV ROCM_VERSION="${ROCM_VERSION}"
-ENV SLES_BUILD_ID_PREFIX="opensuse${SUSE_MAJOR_VERSION}${SUSE_MINOR_VERSION}."
-
-# Configure SUSE to use GCC-13 by default
-RUN update-alternatives \
-        --install /usr/bin/gcc gcc /usr/bin/gcc-13 100 \
-        --slave /usr/bin/cc cc /usr/bin/gcc-13 \
-        --slave /usr/bin/g++ g++ /usr/bin/g++-13
-
-# AIS Code Repository Mount Point
-VOLUME /mnt/ais
-
-# Generic Mount point for container to access AIS-capable storage.
-VOLUME /mnt/ais-fs
+# Add CUDA bin directory to the path
+ENV PATH=/usr/local/cuda/bin:${PATH}

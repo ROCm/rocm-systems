@@ -9,6 +9,15 @@ graph:
   Unit_hipGraphAddEmptyNode_BarrierFunc:
     <<: *level_2
     tags: [node]
+  Unit_hipGraph_ConcurrentCreate_GraphIDRace:
+    <<: *level_2
+    tags: [node]
+  Unit_hipGraph_ConcurrentConstruct_NextIDRace:
+    <<: *level_2
+    tags: [node]
+  Unit_hipGraph_ConcurrentConstruct_LaunchDropSmoke:
+    <<: *level_2
+    tags: [node]
   Unit_hipGraphAddDependencies_Positive_Functional:
     <<: *level_2
     tags: [dependency]
@@ -466,7 +475,7 @@ graph:
     tags: [lifecycle]
   Unit_hipGraphInstantiate_Basic:
     <<: *level_2
-    tags: [lifecycle]
+    tags: [lifecycle, smoke]
   Unit_hipGraphInstantiate_InvalidCyclicGraph:
     <<: *level_2
     tags: [lifecycle]
@@ -963,6 +972,9 @@ graph:
   Unit_hipStreamEndCapture_Positive_Thread:
     <<: *level_2
     tags: [capture]
+  Unit_hipStreamEndCapture_Negative_InvalidatedStateReset:
+    <<: *level_2
+    tags: [capture]
   Unit_hipStreamEndCapture_Negative:
     <<: *level_2
     tags: [capture]
@@ -1076,7 +1088,7 @@ graph:
     tags: [exec]
   Unit_hipGraphLaunch_Positive:
     <<: *level_2
-    tags: [exec]
+    tags: [exec, smoke]
   Unit_hipGraphLaunch_Negative_Parameters:
     <<: *level_2
     tags: [exec]
@@ -1164,10 +1176,10 @@ graph:
     tags: [lifecycle]
   Unit_hipGraphCreate_Positive_Basic:
     <<: *level_2
-    tags: [lifecycle]
+    tags: [lifecycle, smoke]
   Unit_hipGraphDestroy_Positive_Basic:
     <<: *level_2
-    tags: [lifecycle]
+    tags: [lifecycle, smoke]
   Unit_hipGraphDestroy_Negative_Parameters:
     <<: *level_2
     tags: [lifecycle]

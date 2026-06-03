@@ -149,10 +149,32 @@ public:
                            [](const PerGpuStats &stats) { return stats.inUse.load() != 0; });
     }
 
+    std::atomic_uint64_t &getFileRegistrations() noexcept
+    {
+        return m_fileRegistrations;
+    }
+
+    const std::atomic_uint64_t &getFileRegistrations() const noexcept
+    {
+        return m_fileRegistrations;
+    }
+
+    std::atomic_uint64_t &getBufferRegistrations() noexcept
+    {
+        return m_bufferRegistrations;
+    }
+
+    const std::atomic_uint64_t &getBufferRegistrations() const noexcept
+    {
+        return m_bufferRegistrations;
+    }
+
 private:
-    const uint64_t   m_version{PerGpuStatsT::version};
-    StatsLevel       m_level{};
-    PerGpuStatsArray m_perGpuStats{};
+    const uint64_t       m_version{PerGpuStatsT::version};
+    StatsLevel           m_level{};
+    std::atomic_uint64_t m_fileRegistrations{};
+    std::atomic_uint64_t m_bufferRegistrations{};
+    PerGpuStatsArray     m_perGpuStats{};
 };
 
 using StatsV1 = StatsTemplate<PerGpuStatsV1, 16>;
@@ -266,5 +288,7 @@ public:
     virtual ~StatsCollection() = default;
     virtual void addIo(IoType ioType, StatsBackend backend, uint64_t bytes, uint64_t timeUs) const noexcept;
     virtual void error(IoType ioType, StatsBackend backend, uint64_t bytes) const noexcept;
+    virtual void fileRegistration() const noexcept;
+    virtual void bufferRegistration() const noexcept;
 };
 }

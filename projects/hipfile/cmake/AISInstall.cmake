@@ -65,9 +65,28 @@ endif()
 # where these dependencies are added.
 # For now, just add both runtime & dev deps.
 
-# AMD Runtime Dependencies
+# AMD ROCm Runtime + Dev Dependencies
 if(CMAKE_HIP_PLATFORM STREQUAL "amd")
-    rocm_package_add_dependencies(DEPENDS hip-runtime-amd) # Need minimum version
+    string(REGEX MATCH "^([0-9]+)\\.([0-9]+)" _rocm_mm "${ROCM_VERSION}")
+    if(NOT _rocm_mm)
+        message(FATAL_ERROR
+            "ROCM_VERSION='${ROCM_VERSION}' does not match the expected "
+            "MAJOR.MINOR[.PATCH] form (e.g., 7.13.0).")
+    endif()
+    set(_rocm_major "${CMAKE_MATCH_1}")
+    set(_rocm_minor "${CMAKE_MATCH_2}")
+    if(_rocm_major GREATER 7 OR (_rocm_major EQUAL 7 AND _rocm_minor GREATER_EQUAL 11))
+        # 7.11+ ships runtime + dev as a single amdrocm-runtime-dev<MAJOR>.<MINOR>
+        # meta-package on repo.amd.com; rocm-core, hip-runtime-amd, and hip-dev
+        # do not exist there, so suppress rocm-cmake's auto-added rocm-core dep.
+        set(ROCM_DEP_ROCMCORE OFF CACHE BOOL "" FORCE)
+        rocm_package_add_deb_dependencies(DEPENDS "amdrocm-runtime-dev${_rocm_major}.${_rocm_minor}")
+    else()
+        rocm_package_add_dependencies(DEPENDS hip-runtime-amd) # Need minimum version
+        rocm_package_add_deb_dependencies(DEPENDS hip-dev) # Need minimum version
+        rocm_package_add_rpm_dependencies(DEPENDS hip-devel)
+    endif()
+
     # Suppressing libmount RELEASE dependency for now for the following:
     # 1) We currently default to DEV builds.
     # 2) libmount naming convention is not consistent across distros.
@@ -76,13 +95,6 @@ if(CMAKE_HIP_PLATFORM STREQUAL "amd")
     #    rocky    (RPM): libmount
     #    Ubuntu   (DEB): libmount1
     #rocm_package_add_dependencies(DEPENDS libmount)
-endif()
-
-# AMD Development Dependencies
-if(CMAKE_HIP_PLATFORM STREQUAL "amd")
-    rocm_package_add_deb_dependencies(DEPENDS hip-dev) # Need minimum version
-    rocm_package_add_rpm_dependencies(DEPENDS hip-devel)
-
     rocm_package_add_deb_dependencies(DEPENDS libmount-dev)
     rocm_package_add_rpm_dependencies(DEPENDS libmount-devel)
 endif()

@@ -126,6 +126,7 @@ set ( ROCDXG_SRC "src/dxg/debug.cpp"
                  "src/dxg/wddm/va_mgr.cpp"
                  "src/dxg/wddm/queue.cpp"
                  "src/dxg/wddm/cmd_util.cpp"
+                 "src/dxg/extsem.cpp"
                  ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/hsa-runtime/core/util/timer.cpp
                  ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/hsa-runtime/core/util/small_heap.cpp
                  ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/hsa-runtime/core/util/lnx/os_linux.cpp )

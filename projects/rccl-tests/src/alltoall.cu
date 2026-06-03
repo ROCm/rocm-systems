@@ -116,11 +116,7 @@ __device__ void AlltoAllScalarImpl(ncclWindow_t sendwin, size_t sendoffset, nccl
 template <typename T>
 __global__ void NvlAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
   ncclLsaBarrierSession<ncclCoopCta> bar { ncclCoopCta(), devComm, ncclTeamLsa(devComm), devComm.lsaBarrier, blockIdx.x };
-#if __HIP_PLATFORM_AMD__
-  bar.sync(ncclCoopCta(), std::memory_order_relaxed);
-#else
   bar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
-#endif
 
   int rank = devComm.rank, nRanks = devComm.nRanks;
   int tid = threadIdx.x + blockDim.x * blockIdx.x;
@@ -128,22 +124,14 @@ __global__ void NvlAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
 
   AlltoAllScalarImpl<T>(sendwin, sendoffset, recvwin, recvoffset, count, rank, nRanks, tid, nthreads);
 
-#if __HIP_PLATFORM_AMD__
-  bar.sync(ncclCoopCta(), std::memory_order_release);
-#else
   bar.sync(ncclCoopCta(), cuda::memory_order_release);
-#endif
 }
 
 // Device implementation #2 - optimized NVL kernel using vectorization and unrolling
 template <typename T>
 __global__ void NvlAlltoAllKernelOptimized(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
   ncclLsaBarrierSession<ncclCoopCta> bar { ncclCoopCta(), devComm, ncclTeamLsa(devComm), devComm.lsaBarrier, blockIdx.x };
-#if __HIP_PLATFORM_AMD__
-  bar.sync(ncclCoopCta(), std::memory_order_relaxed);
-#else
   bar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
-#endif
 
   using TN = typename VectorTypeMapping<T>::Type;
   constexpr int VECTOR_FACTOR = sizeof(TN) / sizeof(T);
@@ -217,11 +205,7 @@ __global__ void NvlAlltoAllKernelOptimized(ncclWindow_t sendwin, size_t sendoffs
     AlltoAllScalarImpl<T>(sendwin, sendoffset, recvwin, recvoffset, count, rank, nRanks, tid, nthreads);
   }
 
-#if __HIP_PLATFORM_AMD__
-  bar.sync(ncclCoopCta(), std::memory_order_release);
-#else
   bar.sync(ncclCoopCta(), cuda::memory_order_release);
-#endif
 }
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
@@ -233,11 +217,7 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
   uint64_t signalValue = gin.readSignal(signalIndex);
 
   ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x };
-#if __HIP_PLATFORM_AMD__
-  bar.sync(ncclCoopCta(), std::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
-#else
   bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
-#endif
 
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   int nthreads = blockDim.x * gridDim.x;
@@ -254,11 +234,7 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
   gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + devComm.nRanks);
   gin.flush(ncclCoopCta());
 
-#if __HIP_PLATFORM_AMD__
-  bar.sync(ncclCoopCta(), std::memory_order_release, ncclGinFenceLevel::Relaxed);
-#else
   bar.sync(ncclCoopCta(), cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
-#endif
 }
 
 template <typename T>
@@ -269,11 +245,7 @@ __global__ void HybridAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, nc
   uint64_t signalValue = gin.readSignal(signalIndex);
 
   ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x };
-#if __HIP_PLATFORM_AMD__
-  bar.sync(ncclCoopCta(), std::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
-#else
   bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
-#endif
 
   int tid = threadIdx.x + blockIdx.x*blockDim.x;
   int nthreads = blockDim.x * gridDim.x;
@@ -312,11 +284,7 @@ __global__ void HybridAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, nc
   gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + numRemotePeers);
   gin.flush(ncclCoopCta());
 
-#if __HIP_PLATFORM_AMD__
-  bar.sync(ncclCoopCta(), std::memory_order_release, ncclGinFenceLevel::Relaxed);
-#else
   bar.sync(ncclCoopCta(), cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
-#endif
 }
 #endif
 #endif

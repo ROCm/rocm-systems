@@ -59,7 +59,6 @@ jobs:
         strip: ['OFF']
         hidden: ['ON']
         build-type: ['Release']
-        mpi-headers: ['OFF']
         build-dyninst: ['ON']
         rocm-version: ['6.3', '6.4', '7.0', '7.1', '7.2']
 
@@ -69,6 +68,7 @@ jobs:
       ROCPROFSYS_CI: 'ON'
       ROCPROFSYS_MAX_THREADS: '64'
       ROCPROFSYS_KEEP_TEST_OUTPUT: '0'
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
 
     steps:
     - &sparse-checkout
@@ -98,6 +98,24 @@ jobs:
           apt-get upgrade -y &&
           apt-get install -y ${{ matrix.compiler }} &&
           apt-get autoclean
+
+    - name: Restore ccache
+      uses: actions/cache@v4
+      with:
+        path: ${{ github.workspace }}/.ccache
+        key: ccache-ubuntu-jammy-${{ github.job }}-${{ matrix.compiler }}-${{ matrix.rocm-version }}-${{ matrix.build-type }}-${{ github.sha }}
+        restore-keys: |
+          ccache-ubuntu-jammy-${{ github.job }}-${{ matrix.compiler }}-${{ matrix.rocm-version }}-${{ matrix.build-type }}-
+          ccache-ubuntu-jammy-${{ github.job }}-${{ matrix.compiler }}-${{ matrix.rocm-version }}-
+
+    - &configure-ccache
+      name: Configure ccache
+      run: |
+        mkdir -p "${CCACHE_DIR}"
+        ccache --max-size=1G
+        ccache --set-config=sloppiness=time_macros,include_file_mtime,include_file_ctime,pch_defines
+        ccache -z
+        ccache -p | head -20
 
     - name: Install Python Test Dependencies
       timeout-minutes: 10
@@ -136,6 +154,9 @@ jobs:
       timeout-minutes: 115
       shell: bash
       working-directory: projects/rocprofiler-systems/
+      env:
+        CMAKE_C_COMPILER_LAUNCHER: ccache
+        CMAKE_CXX_COMPILER_LAUNCHER: ccache
       run: |
         git config --global --add safe.directory ${GITHUB_WORKSPACE}
         git config --global --add safe.directory ${PWD}
@@ -146,7 +167,6 @@ jobs:
         append-tagname() { if [ "${1}" == "ON" ]; then TAG="${TAG}-${2}"; fi; }
         append-tagname ${{ matrix.rocm }} rocm-${{ matrix.rocm-version }}
         append-tagname ${{ matrix.python }} python
-        append-tagname ${{ matrix.mpi-headers }} mpip
         append-tagname ${{ matrix.build-dyninst }} internal-dyninst
         append-tagname ${{ matrix.strip }} strip
         append-tagname ${{ matrix.hidden }} hidden-viz
@@ -161,9 +181,7 @@ jobs:
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev \
           -DROCPROFSYS_BUILD_TESTING=ON \
           -DROCPROFSYS_USE_PYTHON=${{ matrix.python }} \
-          -DROCPROFSYS_USE_MPI_HEADERS=${{ matrix.mpi-headers }} \
           -DROCPROFSYS_BUILD_DYNINST=${{ matrix.build-dyninst }} \
-          -DROCPROFSYS_BUILD_BOOST=${{ matrix.build-dyninst }} \
           -DROCPROFSYS_BUILD_TBB=${{ matrix.build-dyninst }} \
           -DROCPROFSYS_BUILD_ELFUTILS=${{ matrix.build-dyninst }} \
           -DROCPROFSYS_BUILD_LIBIBERTY=${{ matrix.build-dyninst }} \
@@ -177,6 +195,15 @@ jobs:
           -DUSE_CLANG_OMP=OFF \
           -- \
           -LE "network|gpu"
+
+    - &ccache-stats
+      name: ccache stats
+      if: always()
+      run: |
+        echo "=== ccache stats ==="
+        ccache -s -v || true
+        echo "=== ccache dir size ==="
+        du -sh "${CCACHE_DIR}" || true
 
     - name: Check for Leftover Buffered Files
       timeout-minutes: 5
@@ -268,6 +295,7 @@ jobs:
       ROCPROFSYS_CI: 'ON'
       ROCPROFSYS_MAX_THREADS: '64'
       ROCPROFSYS_KEEP_TEST_OUTPUT: '0'
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
 
     steps:
     - *sparse-checkout
@@ -295,6 +323,16 @@ jobs:
             libdw-dev libdwarf-dev libelf-dev libiberty-dev &&
           apt-get autoclean
 
+    - name: Restore ccache
+      uses: actions/cache@v4
+      with:
+        path: ${{ github.workspace }}/.ccache
+        key: ccache-ubuntu-jammy-system-deps-${{ github.job }}-${{ matrix.compiler }}-${{ github.sha }}
+        restore-keys: |
+          ccache-ubuntu-jammy-system-deps-${{ github.job }}-${{ matrix.compiler }}-
+
+    - *configure-ccache
+
     - name: Install Python Test Dependencies
       timeout-minutes: 10
       shell: bash
@@ -318,6 +356,9 @@ jobs:
       timeout-minutes: 115
       shell: bash
       working-directory: projects/rocprofiler-systems/
+      env:
+        CMAKE_C_COMPILER_LAUNCHER: ccache
+        CMAKE_CXX_COMPILER_LAUNCHER: ccache
       run: |
         git config --global --add safe.directory ${GITHUB_WORKSPACE}
         git config --global --add safe.directory ${PWD}
@@ -336,9 +377,7 @@ jobs:
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev \
           -DROCPROFSYS_BUILD_TESTING=ON \
           -DROCPROFSYS_USE_PYTHON=ON \
-          -DROCPROFSYS_USE_MPI_HEADERS=OFF \
           -DROCPROFSYS_BUILD_DYNINST=ON \
-          -DROCPROFSYS_BUILD_BOOST=OFF \
           -DROCPROFSYS_BUILD_TBB=OFF \
           -DROCPROFSYS_BUILD_ELFUTILS=OFF \
           -DROCPROFSYS_BUILD_LIBIBERTY=OFF \
@@ -352,6 +391,8 @@ jobs:
           -DUSE_CLANG_OMP=${{ matrix.use-clang-omp }} \
           -- \
           -LE "network|gpu"
+
+    - *ccache-stats
 
     - name: Install
       timeout-minutes: 10
@@ -390,97 +431,3 @@ jobs:
           projects/rocprofiler-systems/build/rocprofsys-tests-config/*.cfg
           projects/rocprofiler-systems/build/rocprofsys-tests-output/**/*.txt
           projects/rocprofiler-systems/build/rocprofsys-tests-output/**/*-instr*.json
-
-  ubuntu-jammy-codecov:
-    runs-on: ubuntu-latest
-
-    container:
-      image: dgaliffiamd/rocprofiler-systems:ci-rocm-7.2-ubuntu-22.04
-      options: --cap-add CAP_SYS_ADMIN
-
-    env:
-      ROCPROFSYS_VERBOSE: 2
-      ROCPROFSYS_CAUSAL_BACKEND: perf
-      ROCPROFSYS_CI: 'ON'
-      ROCPROFSYS_MAX_THREADS: '64'
-      OMPI_ALLOW_RUN_AS_ROOT: 1
-      OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
-
-    steps:
-    - *sparse-checkout
-
-    - name: Configure ROCm Environment
-      shell: bash
-      run: |
-        echo "/opt/rocm/bin" >> $GITHUB_PATH
-        echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV
-        echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
-
-    - name: Install Packages
-      timeout-minutes: 25
-      uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 #v4.0.0
-      with:
-        retry_wait_seconds: 30
-        timeout_minutes: 25
-        max_attempts: 5
-        command: |
-          cd projects/rocprofiler-systems/
-          apt-get update &&
-          apt-get remove -y --purge 'libopenmpi-dev' 'libopenmpi3' 'openmpi-bin' 'openmpi-common' &&
-          apt-get autoremove -y --purge &&
-          apt-get upgrade -y &&
-          apt-get install -y libmpich-dev mpich &&
-          apt-get autoclean
-
-    - name: Install Python Test Dependencies
-      timeout-minutes: 10
-      shell: bash
-      working-directory: projects/rocprofiler-systems/
-      run: |
-        for env_dir in /opt/conda/envs/py3.{8,9,10,11}/; do
-          if [ -d "${env_dir}" ] && [ -x "${env_dir}bin/python3" ]; then
-            echo "Installing requirements into ${env_dir}"
-            "${env_dir}bin/python3" -m pip install -r requirements.txt
-          fi
-        done
-
-    - name: Configure Env
-      run:
-        echo "${HOME}/.local/bin" >> $GITHUB_PATH
-
-    - name: Configure, Build, and Test
-      timeout-minutes: 115
-      shell: bash
-      working-directory: projects/rocprofiler-systems/
-      env:
-        GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-      run: |
-        git config --global --add safe.directory ${GITHUB_WORKSPACE}
-        git config --global --add safe.directory ${PWD}
-        echo "CMake version: $(cmake --version | head -n 1)"
-        echo "Compiler version: $(gcc --version | head -n 1)"
-        python3 ./scripts/run-ci.py -B build \
-          --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-jammy-codecov-mpi-python-ompt-papi \
-          --build-jobs $(nproc) \
-          --site GitHub \
-          --coverage \
-          -- \
-          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \
-          -DROCPROFSYS_BUILD_CI=OFF \
-          -DROCPROFSYS_BUILD_TESTING=ON \
-          -DROCPROFSYS_BUILD_DYNINST=ON \
-          -DROCPROFSYS_BUILD_BOOST=ON \
-          -DROCPROFSYS_BUILD_TBB=ON \
-          -DROCPROFSYS_BUILD_ELFUTILS=ON \
-          -DROCPROFSYS_BUILD_LIBIBERTY=ON \
-          -DROCPROFSYS_BUILD_DEBUG=OFF \
-          -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=OFF \
-          -DROCPROFSYS_USE_MPI=ON \
-          -DROCPROFSYS_USE_PYTHON=ON \
-          -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
-          -DROCPROFSYS_PYTHON_ENVS="py3.8;py3.9;py3.10;py3.11" \
-          -DROCPROFSYS_MAX_THREADS=64 \
-          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;videodecode;jpegdecode;openmp" \
-          -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
-          -- \
-          -LE "network|gpu"

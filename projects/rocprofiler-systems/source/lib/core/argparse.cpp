@@ -139,11 +139,11 @@ add_ld_library_path(parser_data& _data)
 }
 
 parser_data&
-add_torch_library_path(parser_data& _data, bool verbose)
+add_torch_library_path(parser_data& _data)
 {
     if(_data.out.command.empty()) return _data;
     rocprofsys::common::add_torch_library_path(
-        _data.env.current, _data.out.command.front(), verbose, _data.env.updated);
+        _data.env.current, _data.out.command.front(), _data.env.updated);
     return _data;
 }
 
@@ -506,7 +506,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                           "MPI output filtering")
             .max_count(1)
             .dtype("string")
-            .required({ "rank-filter-output" })
+            .required({ "rank-filter-output|rank-filter-logs" })
             .action([&](parser_t& p) {
                 update_env(_data, "ROCPROFSYS_RANK_FILTER_ID",
                            p.get<std::string>("rank-filter-id"));
@@ -532,6 +532,25 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             });
 
         _data.reg.processed_environs.emplace("rank_filter_output");
+    }
+
+    if(_data.reg.environ_filter("rank_filter_logs", _data))
+    {
+        _parser
+            .add_argument({ "--rank-filter-logs" },
+                          "Ranks for which console output is generated. Values should be "
+                          "separated by commas and can be explicit or ranges, e.g. "
+                          "0,1,5-8. An empty value enables output for all ranks")
+            .max_count(1)
+            .dtype("int and/or range")
+            .action([&](parser_t& p) {
+                update_env(
+                    _data, "ROCPROFSYS_RANK_FILTER_LOGS",
+                    fmt::format("{}",
+                                fmt::join(p.get<strvec_t>("rank-filter-logs"), ",")));
+            });
+
+        _data.reg.processed_environs.emplace("rank_filter_logs");
     }
 
     strset_t _backend_choices = { "all",        "kokkosp", "mpip", "ompt",
@@ -896,7 +915,6 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 { "--cpus" },
                 "CPU IDs for frequency sampling. Supports integers and/or ranges")
             .dtype("int and/or range")
-            .required({ "host" })
             .action([&](parser_t& p) {
                 update_env(_data, "ROCPROFSYS_SAMPLING_CPUS",
                            fmt::format("{}", fmt::join(p.get<strvec_t>("cpus"), ",")));
@@ -912,7 +930,6 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .add_argument({ "--gpus" },
                           "GPU IDs for SMI queries. Supports integers and/or ranges")
             .dtype("int and/or range")
-            .required({ "device" })
             .action([&](parser_t& p) {
                 update_env(_data, "ROCPROFSYS_SAMPLING_GPUS",
                            fmt::format("{}", fmt::join(p.get<strvec_t>("gpus"), ",")));
@@ -928,7 +945,6 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .add_argument({ "--ai-nics" },
                           "AI NIC IDs for SMI queries. Supports comma-separated list")
             .dtype("list of strings")
-            .required({ "device" })
             .action([&](parser_t& p) {
                 update_env(_data, "ROCPROFSYS_SAMPLING_AINICS",
                            fmt::format("{}", fmt::join(p.get<strvec_t>("ai-nics"), ",")));
@@ -1207,7 +1223,7 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
         auto _name = itr->get_name();
         auto _pos  = std::string::npos;
         while((_pos = _name.find('_')) != std::string::npos)
-            _name = _name.replace(_pos, 1, "-");
+            _name[_pos] = '-';
         return _name;
     };
 
@@ -1221,7 +1237,7 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
 
         _data.reg.processed_settings.emplace(itr.get());
 
-        auto _opt_name = std::string{ "--" } + _name;
+        auto _opt_name = fmt::format("--{}", _name);
         itr->set_command_line({ _opt_name });
         auto* _arg = static_cast<parser_t::argument*>(itr->add_argument(_parser));
         if(_arg)
@@ -1231,7 +1247,8 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
                 if(_value.empty()) _value = p.get<std::string>(_name);
                 if(_value.empty()) _value = fmt::format("{}", p.get<bool>(_name));
                 if(_value.empty())
-                    throw exception<std::runtime_error>("Error! no value for " + _name);
+                    throw exception<std::runtime_error>(
+                        fmt::format("Error! no value for {}", _name));
                 update_env(_data, itr->get_env_name(), _value);
             });
         }
@@ -1243,8 +1260,8 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
                     auto _value =
                         fmt::format("{}", fmt::join(p.get<strvec_t>(_name), " "));
                     if(_value.empty())
-                        throw exception<std::runtime_error>("Error! no value for " +
-                                                            _name);
+                        throw exception<std::runtime_error>(
+                            fmt::format("Error! no value for {}", _name));
                     update_env(_data, itr->get_env_name(), _value);
                 });
         }

@@ -9,6 +9,7 @@
 
 #include <stdint.h>
 #include "net_ib_limits.h"
+#include "plugin/nccl_net.h"  /* NCCL_NET_MAX_DEVS_PER_NIC */
 
 #ifdef __cplusplus
 #include "nccl.h"  /* ncclResult_t */
@@ -19,10 +20,8 @@ extern "C" {
 
 /*
  * Test-only introspection API for the net-ib-cast WRR scheduler.
- *
- * Implementation lives in src/transport/net_ib_cast/scheduler.cc and is
- * compiled into librccl.so.  Both the library and the unit tests include this
- * one header so the struct layout and function signatures can never diverge.
+ * Shared between librccl.so and the unit tests so the struct layout
+ * and signatures cannot diverge.
  */
 
 struct ncclIbCastSchedState {
@@ -39,23 +38,45 @@ struct ncclIbCastSchedState {
   bool     splitData;
 };
 
-/* Copy WRR scheduler state out of a sendComm.
- * sendComm must be a valid ncclIbSendComm* from IbCastConnect/IbCastAccept.
- * Returns ncclInvalidArgument if either pointer is null. */
+/* Copy scheduler state out of a connected sendComm.
+ * Returns ncclInvalidArgument on null pointers. */
 ncclResult_t ncclIbCastGetSchedState(void* sendComm, struct ncclIbCastSchedState* out);
 
-/* Force-initialize the WRR token table, bypassing RTT-based scheduling.
- * Immediately sets qpTxSchedInit=true.
- * nqps must equal the connection's actual nqps (base->nqps). */
+/* Force-initialize the WRR token table, bypassing RTT-driven scheduling.
+ * nqps must match the connection's nqps. */
 ncclResult_t ncclIbCastSetTokens(void* sendComm, const int* qpTokens, int nqps);
 
-/* Override schedParms fields for mid-test toggling.
- * Takes effect on the very next isend; does not require re-connection. */
+/* Override schedParms; takes effect on the next isend, no reconnect needed. */
 ncclResult_t ncclIbCastSetSchedParms(void* sendComm,
                                       bool schedEnable,
                                       bool doWrr,
                                       bool splitData,
                                       uint32_t splitDataMin);
+
+/* ── Resiliency state introspection (requires ENABLE_FAULT_INJECTION) ── */
+#ifdef ENABLE_FAULT_INJECTION
+
+struct ncclIbCastResiliencyState {
+  bool recoveryEnabled;
+  bool inProgress;
+  int  outstandingRequests;
+  int  outstandingRecovery;
+  int  ndevs;
+  int  devState[NCCL_NET_MAX_DEVS_PER_NIC];
+  int  recoveryCount[NCCL_NET_MAX_DEVS_PER_NIC];
+};
+
+/* Fills out with the current resiliency state of the communicator.
+ * sendComm must have resiliency enabled (NCCL_IB_RESILIENCY_PORT_FAILOVER=1).
+ * Returns ncclInvalidArgument if resiliency context is NULL. */
+ncclResult_t ncclIbCastGetResiliencyState(void* sendComm, struct ncclIbCastResiliencyState* out);
+
+/* Returns the number of times IbCastResiliencyRepostRequest was called
+ * (i.e. selective retransmit count). Counter is stored in the resiliency
+ * context and incremented in p2p_resiliency.cc. */
+ncclResult_t ncclIbCastGetRepostCount(void* sendComm, int* out);
+
+#endif /* ENABLE_FAULT_INJECTION */
 
 #ifdef __cplusplus
 } /* extern "C" */
