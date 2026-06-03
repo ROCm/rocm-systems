@@ -54,8 +54,8 @@ prefork_setup()
     if(get_state() < State::Active && !config::settings_are_configured())
         rocprofsys_init_library_hidden();
 
-    tim::set_env("ROCPROFSYS_PRELOAD", "0", 1);
-    tim::set_env("ROCPROFSYS_ROOT_PROCESS", process::get_id(), 0);
+    rocprofsys::set_env("ROCPROFSYS_PRELOAD", "0", 1);
+    rocprofsys::set_env("ROCPROFSYS_ROOT_PROCESS", process::get_id(), 0);
     rocprofsys_reset_preload_hidden();
     LOG_INFO("fork() called on PID {} (rank: {}), TID {}", process::get_id(), dmp::rank(),
              threading::get_id());

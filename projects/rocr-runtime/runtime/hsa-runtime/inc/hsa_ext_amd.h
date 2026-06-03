@@ -2241,25 +2241,30 @@ typedef enum {
  *   dst_size        -- size of the destination region in bytes
  *   num_entries     -- 0
  *
- * LINEAR_INDIRECT_SRC (source address resolved via indirection):
- *   src             -- void** pointing to the actual source address
- *   dst             -- regular destination pointer
- *   wait.scope      -- hsa_fence_scope_t for indirect address reads
+ * LINEAR_INDIRECT_SRC / _DST / _SRCDST: one or more indirect transfers whose
+ * source and/or destination address is resolved at execution time by the
+ * SDMA engine dereferencing a pointer-to-pointer slot.  The op.type chooses
+ * which side is indirect: SRC -> src is void**; DST -> dst is void**;
+ * SRCDST -> both are void**.  All entries in a single op share the same
+ * indirect mode.
  *
- * LINEAR_INDIRECT_DST (destination address resolved via indirection):
- *   src             -- regular source pointer
- *   dst             -- void** pointing to the actual destination address
- *   wait.scope      -- hsa_fence_scope_t for indirect address reads
- *
- * LINEAR_INDIRECT_SRCDST (both addresses resolved via indirection):
- *   src             -- void** pointing to the actual source address
- *   dst             -- void** pointing to the actual destination address
- *   wait.scope      -- hsa_fence_scope_t for indirect address reads
- *
- * For all INDIRECT_* types:
- *   src_agent, dst_agent -- source and destination agents
+ * LINEAR_INDIRECT_* (single, when num_entries == 0):
+ *   src, src_agent  -- source pointer (void** for SRC/SRCDST) and agent
+ *   dst, dst_agent  -- destination pointer (void** for DST/SRCDST) and agent
  *   size            -- copy size in bytes
- *   num_entries        -- must be 0
+ *   num_entries     -- 0
+ *   wait.scope      -- hsa_fence_scope_t for indirect address reads
+ *
+ * LINEAR_INDIRECT_* (multi-entry, when num_entries > 0):
+ *   src_list        -- array of num_entries void** (SRC/SRCDST) or void*
+ *                      (DST) pointers
+ *   dst_list        -- array of num_entries void** (DST/SRCDST) or void*
+ *                      (SRC) pointers
+ *   dst_agent_list  -- array of num_entries destination agents
+ *   size_list       -- array of num_entries copy sizes in bytes
+ *   src_agent       -- source agent (common to all entries)
+ *   num_entries     -- >= 1 and <= 1024
+ *   wait.scope      -- hsa_fence_scope_t for indirect address reads
  *
  * Future-proofing unions (reserved, must not be used):
  *   src_agent_list           -- reserved for future gather operations
@@ -2268,7 +2273,7 @@ typedef enum {
 typedef struct hsa_amd_memory_copy_op_s {
   uint16_t version;                       /**< Struct version. Must be HSA_AMD_MEMORY_COPY_OP_VERSION. */
   uint16_t type;                          /**< Operation type (hsa_amd_memory_copy_op_type_t) */
-  uint16_t num_entries;                    /**< LINEAR multi / BROADCAST / SWAP: number of entries; others: must be 0 */
+  uint16_t num_entries;                    /**< Number of entries for multi-entry forms (LINEAR / SWAP / INDIRECT_*: 0 = scalar form; BROADCAST: always >= 1) */
   uint16_t traffic_class;                 /**< QoS traffic class. 0 = default/unspecified. */
   hsa_signal_t completion_signal;         /**< Completion signal for this operation */
   union {

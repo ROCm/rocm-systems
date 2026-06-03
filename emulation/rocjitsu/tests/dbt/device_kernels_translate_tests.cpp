@@ -486,6 +486,9 @@ TEST(BinaryTranslatorE2E, DescriptorPrologueRedirectsEntryWithoutOverwritingOrig
 
   EXPECT_GT(translated_info->entry_text_offset, original_info->entry_text_offset)
       << "CDNA4 workgroup-id SGPRs must be materialized from RDNA4's TTMP launch payload";
+  EXPECT_GE(translated_info->guest_vgpr_count, original_info->guest_vgpr_count)
+      << "Descriptor translation should not fabricate conservative VGPR headroom; semantic "
+         "lowerings grow the descriptor through explicit resource feedback when needed";
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);
