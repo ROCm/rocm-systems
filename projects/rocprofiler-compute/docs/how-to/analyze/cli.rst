@@ -475,7 +475,9 @@ This generates enhanced roofline output showing per-kernel performance rates and
       |   ├─────────────┼──────────────────────┼─────────┼────────────┤
       |   │ 4.2.2       │ AI L1                │         │ Flops/byte │
       |   ├─────────────┼──────────────────────┼─────────┼────────────┤
-      |   │ 4.2.3       │ Performance (GFLOPs) │         │ Gflop/s    │
+      |   │ 4.2.3       │ AI LDS               │         │ Flops/byte │
+      |   ├─────────────┼──────────────────────┼─────────┼────────────┤
+      |   │ 4.2.4       │ Performance (GFLOPs) │         │ Gflop/s    │
       |   ╘═════════════╧══════════════════════╧═════════╧════════════╛
 
 The per-kernel analysis uses YAML-based metric evaluation for accurate calculations.

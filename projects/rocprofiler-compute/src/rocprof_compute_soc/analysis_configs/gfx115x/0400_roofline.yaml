@@ -70,6 +70,10 @@ Panel Config:
         AI L1:
           value: ( SUM($wave_size * SQ_INSTS_VALU_sum) / SUM(TCP_REQ_sum * 64) )
           unit: FLOPs/Byte
+        AI LDS:
+          value: ( SUM($wave_size * SQ_INSTS_VALU_sum) / SUM((SQC_LDS_IDX_ACTIVE_sum -
+            SQC_LDS_BANK_CONFLICT_sum) * 4 * $lds_banks_per_cu) )
+          unit: FLOPs/Byte
         Performance (GFLOPs):
           value: ( SUM($wave_size * SQ_INSTS_VALU_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9) ) / 1e9
           unit: GFLOP/s
@@ -108,6 +112,11 @@ Panel Config:
       Arithmetic Intensity relative to the L1 cache (TCP). Higher values indicate
       more compute operations per byte of data loaded, suggesting compute-bound
       behavior. Lower values suggest memory-bound behavior limited by L1 bandwidth.
+    AI LDS: >-
+      Arithmetic Intensity relative to the Local Data Share (LDS). Higher values
+      indicate more compute per byte of LDS traffic, suggesting effective reuse
+      of shared data within a workgroup. Lower values suggest memory-bound
+      behavior limited by LDS bandwidth or bank-conflict pressure.
     Performance (GFLOPs): >-
       Achieved compute throughput measured in billions of floating-point operations
       per second. This value, combined with arithmetic intensity, determines the
