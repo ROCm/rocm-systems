@@ -2221,6 +2221,28 @@ void* Device::hostLock(void* hostMem, size_t size, const MemorySegment memSegmen
   return deviceMemory;
 }
 
+void Device::hostUnlock(void* hostMem, size_t size) const {
+  // Nothing to unlock for a null pointer; hsa_amd_memory_unlock rejects it.
+  if (hostMem == nullptr) {
+    return;
+  }
+  // Before releasing the pin, revoke this device's GPU access to the range so
+  // the kernel-side SVM range is not left with stale GPU-access attributes once
+  // the host pages are freed.  Only the SVM-API (HMM) path needs this; the
+  // legacy userptr deregister already unmaps on its own.  Best-effort: a failed
+  // revoke must not block the unlock.
+  if (info().hmmSupported_) {
+    hsa_amd_svm_attribute_pair_t attr{HSA_AMD_SVM_ATTRIB_AGENT_NO_ACCESS,
+                                      getBackendDevice().handle};
+    hsa_status_t status = Hsa::svm_attributes_set(hostMem, size, &attr, 1);
+    if (status != HSA_STATUS_SUCCESS) {
+      ClPrint(amd::LOG_DEBUG, amd::LOG_MEM,
+              "hostUnlock: NO_ACCESS revoke failed for %p, status: %d", hostMem, status);
+    }
+  }
+  Hsa::memory_unlock(hostMem);
+}
+
 void Device::hostFree(void* ptr, size_t size) const { memFree(ptr, size); }
 
 bool Device::deviceAllowAccess(void* ptr) const {
