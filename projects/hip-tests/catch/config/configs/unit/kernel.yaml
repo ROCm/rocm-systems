@@ -19,10 +19,10 @@ kernel:
     tags: [memory]
   Unit_hipEmptyKernel:
     <<: *level_2
-    tags: [language]
+    tags: [language, smoke]
   Unit_hipGridLaunch:
     <<: *level_2
-    tags: [launch]
+    tags: [launch, smoke]
   Unit_hipLanguageExtensions:
     <<: *level_2
     tags: [language]
@@ -43,7 +43,7 @@ kernel:
     tags: [memory]
   Unit_kernel_LaunchBounds_Functional:
     <<: *level_2
-    tags: [attributes]
+    tags: [attributes, smoke]
   Unit_kernel_Assign_threadIdx_to_auto:
     <<: *level_2
     tags: [language]
