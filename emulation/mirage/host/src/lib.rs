@@ -64,6 +64,23 @@ const CONTAINER_MIRAGE_BIN: &str = "/mnt/mirage/bin/mirage";
 /// same on-disk session state.
 const CONTAINER_RUNTIME_DIR: &str = "/mnt/mirage/runtime";
 
+/// Mirage config root inside every node container. The orchestrator's
+/// config directory is bind-mounted here read-only and `MIRAGE_CONFIG`
+/// points at it so the in-container host can resolve profiles and
+/// topologies that are stored *by reference* (rather than inline) in the
+/// session definition.
+const CONTAINER_CONFIG_DIR: &str = "/mnt/mirage/config";
+
+/// Mirage state root inside every node container. Set via `MIRAGE_STATE`
+/// so the in-container host resolves state at a deterministic location
+/// instead of falling back to a non-existent in-container XDG path.
+const CONTAINER_STATE_DIR: &str = "/mnt/mirage/state";
+
+/// Mirage cache root inside every node container. Set via `MIRAGE_CACHE`
+/// so the in-container host resolves its cache at a deterministic
+/// location instead of a non-existent in-container XDG path.
+const CONTAINER_CACHE_DIR: &str = "/mnt/mirage/cache";
+
 /// Configuration for running a host.
 #[derive(Debug, Clone)]
 pub struct HostConfig {
@@ -389,12 +406,28 @@ fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Res
         read_only: false,
     });
 
+    // Mount the orchestrator's config directory read-only so the
+    // in-container host can resolve profiles and topologies that are
+    // referenced by name (not stored inline) in the session definition.
+    // Without this, `resolve_profile`/`resolve_node_count` inside the
+    // container would look in a non-existent XDG path and the per-node
+    // host would silently fail to run requested execs.
+    let host_config_dir = mirage_core::paths::mirage_config_dir();
+    if host_config_dir.exists() {
+        def.mounts.push(FileMount {
+            host_path: host_config_dir.to_string_lossy().into_owned(),
+            container_path: CONTAINER_CONFIG_DIR.to_string(),
+            read_only: true,
+        });
+    }
+
     // Environment every node container inherits: the emulator's injected
     // env (already remapped to container paths), its `LD_PRELOAD`, and
-    // `MIRAGE_RUNTIME` so the in-container host resolves the session
-    // directory at its mounted location. The in-container host forwards
-    // this environment to the workload child, so no separate per-exec
-    // injection happens inside the container.
+    // the `MIRAGE_*` directory overrides so the in-container host
+    // resolves every mirage directory at its mounted (or deterministic
+    // in-container) location instead of a non-existent XDG fallback. The
+    // in-container host forwards this environment to the workload child,
+    // so no separate per-exec injection happens inside the container.
     let mut injected_env: Vec<(String, String)> = injection
         .env
         .iter()
@@ -407,6 +440,12 @@ fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Res
         "MIRAGE_RUNTIME".to_string(),
         CONTAINER_RUNTIME_DIR.to_string(),
     ));
+    injected_env.push((
+        "MIRAGE_CONFIG".to_string(),
+        CONTAINER_CONFIG_DIR.to_string(),
+    ));
+    injected_env.push(("MIRAGE_STATE".to_string(), CONTAINER_STATE_DIR.to_string()));
+    injected_env.push(("MIRAGE_CACHE".to_string(), CONTAINER_CACHE_DIR.to_string()));
 
     publish_health(
         layout,
