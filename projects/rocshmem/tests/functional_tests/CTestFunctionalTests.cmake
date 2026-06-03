@@ -181,18 +181,18 @@ function(write_install_test_definition TEST_NAME TEST_COMMAND TEST_LABELS TEST_T
 
     # Build install-time command by iterating through the list
     # and replacing build-time paths with install-time relative paths
-    # Working directory for tests is: <install>/share/rocshmem/tests/functional
+    # Working directory for tests is: <install>/bin/rocshmem/tests/functional
     set(INSTALL_CMD_PARTS "")
     foreach(part IN LISTS TEST_COMMAND)
         # Replace build-time paths with install-time relative paths
         if("${part}" STREQUAL "${CMAKE_CURRENT_SOURCE_DIR}/test_wrapper.sh")
             # Wrapper is at: <install>/share/rocshmem/test_wrapper.sh
-            # Relative from working dir: ../../test_wrapper.sh
-            list(APPEND INSTALL_CMD_PARTS "../../test_wrapper.sh")
+            # Relative from working dir: ../../../../share/rocshmem/test_wrapper.sh
+            list(APPEND INSTALL_CMD_PARTS "../../../../share/rocshmem/test_wrapper.sh")
         elseif("${part}" STREQUAL "$<TARGET_FILE:rocshmem_functional_tests>")
             # Executable is at: <install>/bin/rocshmem_functional_tests
-            # Relative from working dir: ../../../../bin/rocshmem_functional_tests
-            list(APPEND INSTALL_CMD_PARTS "../../../../bin/rocshmem_functional_tests")
+            # Relative from working dir: ../../../rocshmem_functional_tests
+            list(APPEND INSTALL_CMD_PARTS "../../../rocshmem_functional_tests")
         elseif("${part}" STREQUAL "${MPIEXEC_EXECUTABLE}")
             # Use the MPI executable found at configure time (absolute path)
             list(APPEND INSTALL_CMD_PARTS "${MPIEXEC_EXECUTABLE}")

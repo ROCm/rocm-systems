@@ -184,7 +184,7 @@ if(BUILD_CTESTS)
     # Install the generated install-time CTest file
     rocm_install(FILES "${INSTALL_CTEST_OUTPUT}"
                  COMPONENT tests
-                 DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem/tests/unit
+                 DESTINATION ${CMAKE_INSTALL_BINDIR}/rocshmem/tests/unit
                  RENAME CTestTestfile.cmake)
 
     # Print summary

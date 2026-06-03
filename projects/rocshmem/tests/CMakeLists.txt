@@ -87,7 +87,7 @@ if(BUILD_CTESTS AND (BUILD_FUNCTIONAL_TESTS OR BUILD_UNIT_TESTS))
 
     rocm_install(FILES ${CMAKE_CURRENT_BINARY_DIR}/CTestInstallRoot.cmake
                  COMPONENT tests
-                 DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem
+                 DESTINATION ${CMAKE_INSTALL_BINDIR}/rocshmem
                  RENAME CTestTestfile.cmake)
 endif()
 
