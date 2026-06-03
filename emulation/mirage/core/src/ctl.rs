@@ -298,7 +298,7 @@ impl MirageCtl for FileCtl {
         let def: SessionDef = crate::state::read_json(&layout.def())?;
         let health = self.session_health(id)?;
         let container =
-            crate::state::read_json_opt(&layout.container_state()).unwrap_or(None);
+            crate::state::read_json_opt(&layout.container_json()).unwrap_or(None);
         Ok(SessionState {
             def,
             health,
@@ -374,12 +374,12 @@ impl MirageCtl for FileCtl {
         // best-effort and idempotent (a no-op when the session was not
         // containerised), and we do it before signalling the host so
         // the container runtime sees the request first.
-        crate::container::teardown(&layout.container_state());
+        crate::container::teardown(&layout.container_json());
 
         // signal the host process if any (this is also the fallback
         // path when there is no container, or when the container has
         // already exited).
-        if let Some(pid_str) = crate::state::read_small_str(&layout.host_pid())?
+        if let Some(pid_str) = crate::state::read_small_str(&layout.node(0).pid())?
             && let Ok(pid) = pid_str.parse::<i32>()
         {
             let _ = nix::sys::signal::kill(
@@ -915,7 +915,7 @@ mod tests {
                 },
             ],
         };
-        crate::state::write_json(&layout.container_state(), &state).unwrap();
+        crate::state::write_json(&layout.container_json(), &state).unwrap();
 
         ctl.session_destroy(&s).unwrap();
 

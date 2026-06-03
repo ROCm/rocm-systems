@@ -35,11 +35,12 @@
 //! $XDG_RUNTIME_DIR/mirage/session/<session>/
 //!   def.json          # SessionDef
 //!   health.json       # SessionHealth (written by host)
-//!   host.pid          # pid of the host process
-//!   host.log          # host's stderr log
-//!   container/        # only present for containerised sessions
-//!     state.json      # ContainerState (provider, network, node containers)
-//!     <rank>.cid      # per-node container id
+//!   container.json    # ContainerState (only for containerised sessions)
+//!   node/             # per-node runtime state (one dir per rank)
+//!     <rank>/
+//!       pid           # pid of the node's host process
+//!       host.log      # the node host's stderr log
+//!       cid           # container id (containerised sessions only)
 //!   exec/
 //!     <exec-id>/
 //!       def.json      # ExecDef
@@ -228,27 +229,25 @@ impl SessionLayout {
     pub fn health(&self) -> PathBuf {
         self.root.join("health.json")
     }
-    pub fn host_pid(&self) -> PathBuf {
-        self.root.join("host.pid")
+    /// Root directory holding per-node runtime state: `<session>/node`.
+    pub fn node_root(&self) -> PathBuf {
+        self.root.join("node")
     }
-    pub fn host_log(&self) -> PathBuf {
-        self.root.join("host.log")
-    }
-    /// Directory holding container runtime state for a containerised
-    /// session.
-    pub fn container_dir(&self) -> PathBuf {
-        self.root.join("container")
+    /// Per-node runtime directory for `rank`: `<session>/node/<rank>`.
+    ///
+    /// Each node runs its own host process; this directory records that
+    /// node host's `pid`, its `host.log`, and (for containerised
+    /// sessions) the backing container's `cid`.
+    pub fn node(&self, rank: u32) -> SessionNodeLayout {
+        SessionNodeLayout {
+            root: self.node_root().join(rank.to_string()),
+        }
     }
     /// File recording the provider, network, and per-node containers
     /// backing a containerised session (a [`crate::container::ContainerState`]).
     /// Read by `mirage_core::container::teardown` to remove everything.
-    pub fn container_state(&self) -> PathBuf {
-        self.container_dir().join("state.json")
-    }
-    /// Per-node container id file, written by the host when it launches
-    /// node `rank`'s container.
-    pub fn node_cid(&self, rank: u32) -> PathBuf {
-        self.container_dir().join(format!("{rank}.cid"))
+    pub fn container_json(&self) -> PathBuf {
+        self.root.join("container.json")
     }
     pub fn exec_root(&self) -> PathBuf {
         self.root.join("exec")
@@ -257,6 +256,31 @@ impl SessionLayout {
         ExecLayout {
             root: self.exec_root().join(id.as_str()),
         }
+    }
+}
+
+/// Layout helper for a single node's session-level runtime directory.
+///
+/// Each node of a session runs its own host process; this directory
+/// (`<session>/node/<rank>`) records that node host's pid, log, and the
+/// backing container id when the session is containerised.
+#[derive(Debug, Clone)]
+pub struct SessionNodeLayout {
+    pub root: PathBuf,
+}
+
+impl SessionNodeLayout {
+    /// Pid of the node's host process.
+    pub fn pid(&self) -> PathBuf {
+        self.root.join("pid")
+    }
+    /// The node host's stderr log.
+    pub fn host_log(&self) -> PathBuf {
+        self.root.join("host.log")
+    }
+    /// Container id backing this node (containerised sessions only).
+    pub fn cid(&self) -> PathBuf {
+        self.root.join("cid")
     }
 }
 

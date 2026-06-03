@@ -8,8 +8,8 @@
 //!   containerisation on the profile;
 //! * starting a containerised session brings up the per-node container
 //!   and network (the host pulls the image, creates the network, and
-//!   runs the node container) and persists `container/state.json` plus a
-//!   per-node `<rank>.cid` file;
+//!   runs the node container) and persists `container.json` plus a
+//!   per-node `node/<rank>/cid` file;
 //! * `mirage run` against a containerised profile actually executes the
 //!   workload *inside* the container (via the mock provider's `exec`,
 //!   which runs the command) and the MIRAGE_* environment is injected;
@@ -219,18 +219,14 @@ fn containerized_session_writes_cid_then_cleans_up_on_stop() {
 
     // The host should have persisted the runtime record and the per-node
     // container id.
-    let container_dir = env.session_dir("s-box").join("container");
+    let container_json = env.session_dir("s-box").join("container.json");
     assert!(
-        wait_for(Duration::from_secs(5), || container_dir
-            .join("state.json")
-            .exists()),
-        "container/state.json was never written"
+        wait_for(Duration::from_secs(5), || container_json.exists()),
+        "container.json was never written"
     );
-    assert!(
-        container_dir.join("0.cid").exists(),
-        "per-node cid file missing"
-    );
-    let cid = std::fs::read_to_string(container_dir.join("0.cid")).unwrap();
+    let cid_path = env.session_dir("s-box").join("node/0/cid");
+    assert!(cid_path.exists(), "per-node cid file missing");
+    let cid = std::fs::read_to_string(&cid_path).unwrap();
     assert_eq!(cid.trim(), "cid-12345");
 
     // Stopping the session must remove the container + network and delete

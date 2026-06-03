@@ -13,7 +13,7 @@
 //! * `keep=true` execs persist after death and after the kill,
 //! * destroying a session with a containerised runtime record invokes
 //!   the provider with `rm -f <container>` for each node and
-//!   `network rm <network>` when `container/state.json` is present (and
+//!   `network rm <network>` when `container.json` is present (and
 //!   skips the provider entirely when absent).
 
 use std::path::PathBuf;
@@ -288,7 +288,7 @@ fn session_destroy_invokes_container_provider_when_state_present() {
 
     // Create the session without a host, then write the container
     // runtime record the host would normally persist. `session destroy`
-    // reads `container/state.json` and tears every node + the network
+    // reads `container.json` and tears every node + the network
     // down via the recorded provider.
     env.mirage()
         .args([
@@ -302,8 +302,7 @@ fn session_destroy_invokes_container_provider_when_state_present() {
         ])
         .assert()
         .success();
-    let container_dir = env.session_dir("s-cont").join("container");
-    std::fs::create_dir_all(&container_dir).unwrap();
+    let session_dir = env.session_dir("s-cont");
     let state = serde_json::json!({
         "provider": provider.to_string_lossy(),
         "image": "ignored:latest",
@@ -315,12 +314,14 @@ fn session_destroy_invokes_container_provider_when_state_present() {
         ],
     });
     std::fs::write(
-        container_dir.join("state.json"),
+        session_dir.join("container.json"),
         serde_json::to_vec_pretty(&state).unwrap(),
     )
     .unwrap();
-    std::fs::write(container_dir.join("0.cid"), "cid-0").unwrap();
-    std::fs::write(container_dir.join("1.cid"), "cid-1").unwrap();
+    std::fs::create_dir_all(session_dir.join("node/0")).unwrap();
+    std::fs::create_dir_all(session_dir.join("node/1")).unwrap();
+    std::fs::write(session_dir.join("node/0/cid"), "cid-0").unwrap();
+    std::fs::write(session_dir.join("node/1/cid"), "cid-1").unwrap();
 
     env.mirage()
         .args(["session", "stop", "s-cont", "-f"])
@@ -377,7 +378,7 @@ fn session_destroy_skips_provider_when_no_container_state() {
         ])
         .assert()
         .success();
-    // No container/state.json is written → the provider must not run.
+    // No container.json is written → the provider must not run.
 
     env.mirage()
         .args(["session", "stop", "s-no-cid", "-f"])

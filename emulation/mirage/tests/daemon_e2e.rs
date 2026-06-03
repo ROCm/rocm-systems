@@ -130,7 +130,7 @@ impl Drop for Daemon {
         // (in case session_destroy wasn't called from the test).
         if let Ok(rd) = std::fs::read_dir(self.runtime.join("mirage/session")) {
             for ent in rd.flatten() {
-                let pidf = ent.path().join("host.pid");
+                let pidf = ent.path().join("node/0/pid");
                 if let Ok(s) = std::fs::read_to_string(&pidf)
                     && let Ok(pid) = s.trim().parse::<i32>()
                 {

@@ -1027,11 +1027,14 @@ pub fn spawn_host_for(id: &SessionId) -> anyhow::Result<()> {
     // binary is used via `MIRAGE_BIN`.
     let bin = find_host_bin_for_session_spawn()?;
     let layout = mirage_core::paths::SessionLayout::for_id(id);
-    // ensure host.log file exists for stderr redirect
+    // The session host is node 0's host: redirect its stderr to
+    // `node/0/host.log`. Ensure the node directory exists first.
+    let node0 = layout.node(0);
+    std::fs::create_dir_all(&node0.root)?;
     let log = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(layout.host_log())?;
+        .open(node0.host_log())?;
     // spawn and detach via setsid()
     let mut cmd = std::process::Command::new(bin);
     cmd.arg("host")

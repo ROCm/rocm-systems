@@ -8,7 +8,7 @@
 //!
 //! A host owns exactly one session directory. While running, it:
 //!
-//! 1. Writes `host.pid` (its own pid) and an initial `health.json`
+//! 1. Writes `node/0/pid` (its own pid) and an initial `health.json`
 //!    (`healthy=true`, `state="ready"`) once startup is complete.
 //! 2. Polls `exec/` for new exec definitions (i.e. directories that
 //!    have a `def.json` but no `status.json` yet).
@@ -70,11 +70,14 @@ pub async fn run(config: HostConfig, shutdown: Arc<Notify>) -> Result<()> {
         return Err(MirageError::SessionNotFound(config.session.to_string()));
     }
 
-    // Publish pid + initial health.
-    write_bytes(
-        &layout.host_pid(),
-        std::process::id().to_string().as_bytes(),
-    )?;
+    // Publish pid + initial health. The session host is node 0's host:
+    // its pid and log live under `node/0`.
+    let node0 = layout.node(0);
+    std::fs::create_dir_all(&node0.root).map_err(|e| MirageError::Io {
+        path: node0.root.clone(),
+        source: e,
+    })?;
+    write_bytes(&node0.pid(), std::process::id().to_string().as_bytes())?;
 
     // If the session's profile is containerised, bring up one container
     // per node on a shared per-session network *before* declaring the
@@ -172,7 +175,7 @@ pub async fn run(config: HostConfig, shutdown: Arc<Notify>) -> Result<()> {
     // Idempotent and a no-op for non-containerised sessions; the control
     // plane also calls this on `session destroy`, so a crashed host never
     // leaks containers.
-    mirage_core::container::teardown(&layout.container_state());
+    mirage_core::container::teardown(&layout.container_json());
     publish_health(&layout, false, "stopped", None).ok();
     Ok(())
 }
@@ -310,10 +313,15 @@ fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Res
         .map_err(|e| MirageError::other(format!("{e}")))?;
 
     // Persist the runtime record (used by execs and teardown) and the
-    // per-node container ids under the session's container directory.
-    write_json(&layout.container_state(), &state)?;
+    // per-node container ids under each node's runtime directory.
+    write_json(&layout.container_json(), &state)?;
     for (rank, cid) in &cids {
-        write_bytes(&layout.node_cid(*rank), cid.as_bytes())?;
+        let nlayout = layout.node(*rank);
+        std::fs::create_dir_all(&nlayout.root).map_err(|e| MirageError::Io {
+            path: nlayout.root.clone(),
+            source: e,
+        })?;
+        write_bytes(&nlayout.cid(), cid.as_bytes())?;
     }
     Ok(())
 }
@@ -382,7 +390,7 @@ async fn run_exec(layout: ExecLayout) -> Result<()> {
     //   loopback, and we pick an ephemeral port per exec.
     let session_layout = SessionLayout::for_id(&def.session);
     let container_state: Option<ContainerState> =
-        read_json_opt(&session_layout.container_state())?;
+        read_json_opt(&session_layout.container_json())?;
     let (node_count, head_port, head_addr) = match &container_state {
         Some(state) => (
             state.nodes.len().max(1) as u32,
