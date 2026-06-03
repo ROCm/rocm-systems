@@ -35,14 +35,31 @@ target_sources(
 
 # Platform-abstraction sources (loader / pe_parser) live in subdirectories of
 # details/platform/. Per CONTRIBUTING.md ("Never add sources from another
-# directory"), the test exe pulls them in by linking against the shared
-# library rather than listing the .cpp files here. psapi is provided
-# transitively on Windows via the windows/ subdir's target_link_libraries.
+# directory"), the test exe pulls them in by linking against the platform
+# OBJECT library that the corresponding subdir defines. The OBJECT-library
+# route is required on Windows because rocprofiler-register.dll does not
+# export the internal platform symbols (PE/COFF requires explicit
+# __declspec(dllexport)); the same route is used on Linux for parity.
 target_link_libraries(
     rocprofiler-register-details-tests
     PRIVATE rocprofiler-register::rocprofiler-register
             rocprofiler-register::headers rocprofiler-register::build-flags
             GTest::gtest GTest::gtest_main fmt::fmt glog::glog)
+
+if(WIN32)
+    target_link_libraries(
+        rocprofiler-register-details-tests
+        PRIVATE rocprofiler-register-platform-windows-objects)
+    # WINDOWS-DIVERGENCE: psapi is the system import library backing
+    # EnumProcessModulesEx / GetModuleInformation in the platform objects.
+    # OBJECT libraries do not propagate link-line additions to consumers, so
+    # the test exe must add the system import library itself.
+    target_link_libraries(rocprofiler-register-details-tests PRIVATE psapi)
+else()
+    target_link_libraries(
+        rocprofiler-register-details-tests
+        PRIVATE rocprofiler-register-platform-gnulinux-objects)
+endif()
 
 target_include_directories(
     rocprofiler-register-details-tests
