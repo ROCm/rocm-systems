@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2015-2022, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef NCCL_BOOTSTRAP_H_
 #define NCCL_BOOTSTRAP_H_
@@ -13,13 +14,15 @@
 struct ncclBootstrapHandle {
   uint64_t magic;
   union ncclSocketAddress addr;
+  int nRanks; // number of existing ranks
 };
 static_assert(sizeof(struct ncclBootstrapHandle) <= sizeof(ncclUniqueId), "Bootstrap handle is too large to fit inside NCCL unique ID");
 
 ncclResult_t bootstrapNetInit();
 ncclResult_t bootstrapCreateRoot(struct ncclBootstrapHandle* handle, bool idFromEnv);
-ncclResult_t bootstrapGetUniqueId(struct ncclBootstrapHandle* handle);
-ncclResult_t bootstrapInit(int nHandles, void* handle, struct ncclComm* comm);
+ncclResult_t bootstrapGetUniqueId(struct ncclBootstrapHandle* handle, struct ncclComm* comm);
+ncclResult_t bcastGrowHandle(struct ncclBootstrapHandle* handle, struct ncclComm* parent, bool isRoot);
+ncclResult_t bootstrapInit(int nHandles, void* handle, struct ncclComm* comm, struct ncclComm* parent);
 ncclResult_t bootstrapSplit(uint64_t magic, struct ncclComm* comm, struct ncclComm* parent, int color, int key, int* parentRanks);
 ncclResult_t bootstrapAllGather(void* commState, void* allData, int size);
 ncclResult_t bootstrapSend(void* commState, int peer, int tag, void* data, int size);

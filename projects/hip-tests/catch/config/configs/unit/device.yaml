@@ -50,6 +50,9 @@ device:
   Unit_hipDeviceSetCacheConfig_Positive_Basic:
     <<: *level_2
     tags: [config]
+  Unit_hipDeviceSetCacheConfig_Positive_Carveout:
+    <<: *level_2
+    tags: [config]
   Unit_hipDeviceGetCacheConfig_Positive_Default:
     <<: *level_2
     tags: [config]
