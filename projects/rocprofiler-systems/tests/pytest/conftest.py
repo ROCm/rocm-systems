@@ -933,13 +933,20 @@ def _load_test_categories() -> Optional[dict]:
     def _compile_list(patterns):
         compiled = []
         for p in patterns or []:
-            try:
-                compiled.append(re.compile(p))
-            except re.error as exc:
-                print(
-                    f"[test_categories] Skipping invalid regex {p!r}: {exc}",
-                    file=sys.stderr,
-                )
+            # A YAML alias of a sequence (e.g. `- *common_excludes`) substitutes
+            # the anchored list as a single element, producing a list-of-lists
+            # here. Flatten one level so callers can mix shared anchors with
+            # per-tier additions, mirroring the idiom at
+            # shared/ctest/parse_test_categories.py (`exclude_gpu.test_patterns`,
+            # see comment "test_patterns may be either a flat list or list-of-lists").
+            for pattern in p if isinstance(p, list) else [p]:
+                try:
+                    compiled.append(re.compile(pattern))
+                except re.error as exc:
+                    print(
+                        f"[test_categories] Skipping invalid regex {pattern!r}: {exc}",
+                        file=sys.stderr,
+                    )
         return compiled
 
     tier_cfg: dict = {}
