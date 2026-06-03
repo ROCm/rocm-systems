@@ -1143,6 +1143,8 @@ def test_rocprofiler_sdk_env_log_excludes_user_env(tmp_path, monkeypatch):
     )
 
     assert sum("env vars" in m for m in logs) >= 2
+    env_log_lines = [m for m in logs if "env vars" in m]
+    assert any("ROCPROF_COUNTER_COLLECTION" in m for m in env_log_lines)
     assert not any("SHOULD_NOT_APPEAR" in m for m in logs)
 
 
