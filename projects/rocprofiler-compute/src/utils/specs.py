@@ -295,7 +295,7 @@ def extract_gpu_info(gpu_arch: Optional[str]) -> dict[str, Any]:
         try:
             is_partition_supported = int(gpu_arch[3:6]) >= 940
         except ValueError:
-            pass  # Invalid hex string, keep is_partition_supported as False
+            pass  # Invalid architecture numeric string; keep is_partition_supported as False
 
     result: dict[str, Optional[str]] = {
         "vbios": None,
