@@ -612,19 +612,6 @@ rocDecStatus PalVideoDecoder::AllocateDecodedFrame(uint32_t width, uint32_t heig
     Pal::GpuMemoryRequirements mem_reqs = {};
     img->GetGpuMemoryRequirements(&mem_reqs);
 
-    /*static const char* kHeapNames[] = { "Local(0)", "Invisible(1)", "GartUswc(2)", "GartCacheable(3)" };
-    std::string heap_list;
-    for (uint32_t i = 0; i < mem_reqs.heapCount; ++i) {
-        uint32_t h = static_cast<uint32_t>(mem_reqs.heaps[i]);
-        heap_list += (h < 4 ? kHeapNames[h] : ROCDEC_STR("Unknown(") + ROCDEC_TOSTR(h) + ")");
-        if (i + 1 < mem_reqs.heapCount) heap_list += ", ";
-    }
-    InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: DPB mem_reqs size=") + ROCDEC_TOSTR(mem_reqs.size) +
-            " alignment=" + ROCDEC_TOSTR(mem_reqs.alignment) +
-            " heapCount=" + ROCDEC_TOSTR(mem_reqs.heapCount) +
-            " heaps=[" + heap_list + "]");*/
-
-
     Pal::GpuMemoryCreateInfo mem_ci = {};
     mem_ci.size = mem_reqs.size;
     mem_ci.alignment = mem_reqs.alignment;
