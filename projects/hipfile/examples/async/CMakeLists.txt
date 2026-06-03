@@ -43,34 +43,21 @@ endforeach()
 # Gated on BUILD_TESTING; AIS_INSTALL_EXAMPLES is already enforced by the
 # parent CMakeLists which only adds this subdirectory when examples are built.
 if(BUILD_TESTING)
-    set(ASYNC_TEST_DIR "${AIS_CAPABLE_DIR}/hipfile_async_tests")
-
-    add_test(
-        NAME async_setup_dir
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${ASYNC_TEST_DIR}
-    )
-    add_test(
-        NAME async_cleanup
-        COMMAND ${CMAKE_COMMAND} -E rm -rf ${ASYNC_TEST_DIR}
-    )
-    set_tests_properties(async_setup_dir PROPERTIES
-        FIXTURES_SETUP async_scratch
-    )
-    set_tests_properties(async_cleanup PROPERTIES
-        FIXTURES_CLEANUP async_scratch
-    )
-
+    # Each test runs in its own mktemp directory so that parallel ctest
+    # invocations and concurrent CI runners cannot interfere with one another.
+    # The binary is passed as $0 so "$0" "$@" runs it with the file args;
+    # trap ensures the directory is removed even on failure.
+    #
     # Each async example calls seed_read_file() to truncate+seed its READ_FILE,
-    # so we give every test its own input path. This avoids parallel-run races
-    # on a shared input file and removes the need for an upfront dd seeding.
+    # so no upfront dd seeding is needed.
     foreach(example ${ASYNC_EXAMPLES})
         add_test(
             NAME async_${example}
-            COMMAND $<TARGET_FILE:${example}> in_${example}.bin out_${example}.bin
-            WORKING_DIRECTORY ${ASYNC_TEST_DIR}
+            COMMAND sh -c
+                "dir=$(mktemp -d '${AIS_CAPABLE_DIR}/hipfile_async_XXXXXX') && trap 'rm -rf \"$dir\"' EXIT && \"$0\" \"$dir/in_${example}.bin\" \"$dir/out_${example}.bin\""
+                $<TARGET_FILE:${example}>
         )
         set_tests_properties(async_${example} PROPERTIES
-            FIXTURES_REQUIRED async_scratch
             LABELS "system;hipfile;async"
         )
     endforeach()

@@ -46,56 +46,46 @@ endforeach()
 # Gated on BUILD_TESTING; AIS_INSTALL_EXAMPLES is already enforced by the
 # parent CMakeLists which only adds this subdirectory when examples are built.
 if(BUILD_TESTING)
-    set(BASICS_TEST_DIR "${AIS_CAPABLE_DIR}/hipfile_basics_tests")
-    set(BASICS_INPUT "${BASICS_TEST_DIR}/input.bin")
+    # Each test runs in its own mktemp directory so that parallel ctest
+    # invocations and concurrent CI runners cannot interfere with one another.
+    # The binary is passed as $0 so "$0" "$@" runs it with the file args;
+    # trap ensures the directory is removed even on failure.
 
-    add_test(
-        NAME basics_setup_dir
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${BASICS_TEST_DIR}
-    )
-    add_test(
-        NAME basics_setup_input
-        COMMAND dd if=/dev/urandom of=${BASICS_INPUT} bs=4096 count=64 status=none
-    )
-    add_test(
-        NAME basics_cleanup
-        COMMAND ${CMAKE_COMMAND} -E rm -rf ${BASICS_TEST_DIR}
-    )
-    set_tests_properties(basics_setup_dir PROPERTIES
-        FIXTURES_SETUP basics_scratch
-    )
-    set_tests_properties(basics_setup_input PROPERTIES
-        FIXTURES_SETUP basics_scratch
-        DEPENDS basics_setup_dir
-    )
-    set_tests_properties(basics_cleanup PROPERTIES
-        FIXTURES_CLEANUP basics_scratch
-    )
-
-    # The read-style basics tests (iterative-read, iterative-devmem-offset-read,
-    # subregion-write, various-mem-rw) consume BASICS_INPUT read-only, so they
-    # can safely share the dd-seeded fixture file under `ctest --parallel`.
-    # The write-style tests (bufregister-write, no-bufregister-write,
-    # no-odirect-write, roundtrip-verify) create their own output files.
-    function(_basics_add_test name)
+    # Write-only tests: no input file needed, just a fresh working directory.
+    function(_basics_add_write_test name)
         add_test(
             NAME basics_${name}
-            COMMAND $<TARGET_FILE:${name}> ${ARGN}
-            WORKING_DIRECTORY ${BASICS_TEST_DIR}
+            COMMAND sh -c
+                "dir=$(mktemp -d '${AIS_CAPABLE_DIR}/hipfile_basics_XXXXXX') && trap 'rm -rf \"$dir\"' EXIT && cd \"$dir\" && \"$0\" \"$@\""
+                $<TARGET_FILE:${name}> ${ARGN}
         )
         set_tests_properties(basics_${name} PROPERTIES
-            FIXTURES_REQUIRED basics_scratch
             LABELS "system;hipfile;basics"
         )
     endfunction()
 
-    _basics_add_test(bufregister-write            out_bufregister.bin)
-    _basics_add_test(no-bufregister-write         out_no_bufregister.bin)
-    _basics_add_test(no-odirect-write             out_no_odirect.bin)
-    _basics_add_test(iterative-read               ${BASICS_INPUT} out_iter.bin)
-    _basics_add_test(iterative-devmem-offset-read ${BASICS_INPUT} out_iter_off.bin)
-    _basics_add_test(subregion-write              ${BASICS_INPUT} out_subregion.bin)
-    _basics_add_test(roundtrip-verify             rtv_created.bin rtv_copied.bin)
+    # Read tests: seed a fresh input.bin in the temp dir, then run.
+    # Callers pass 'input.bin' as the input argument; it resolves relative to
+    # the cd'd temp dir.
+    function(_basics_add_read_test name)
+        add_test(
+            NAME basics_${name}
+            COMMAND sh -c
+                "dir=$(mktemp -d '${AIS_CAPABLE_DIR}/hipfile_basics_XXXXXX') && trap 'rm -rf \"$dir\"' EXIT && dd if=/dev/urandom of=\"$dir/input.bin\" bs=4096 count=64 status=none && cd \"$dir\" && \"$0\" \"$@\""
+                $<TARGET_FILE:${name}> ${ARGN}
+        )
+        set_tests_properties(basics_${name} PROPERTIES
+            LABELS "system;hipfile;basics"
+        )
+    endfunction()
+
+    _basics_add_write_test(bufregister-write            out_bufregister.bin)
+    _basics_add_write_test(no-bufregister-write         out_no_bufregister.bin)
+    _basics_add_write_test(no-odirect-write             out_no_odirect.bin)
+    _basics_add_read_test(iterative-read               input.bin out_iter.bin)
+    _basics_add_read_test(iterative-devmem-offset-read input.bin out_iter_off.bin)
+    _basics_add_read_test(subregion-write              input.bin out_subregion.bin)
+    _basics_add_write_test(roundtrip-verify            rtv_created.bin rtv_copied.bin)
 
     # various-mem-rw exercises MODE = 1 (device), 2 (managed), 3 (pinned-host).
     foreach(mode_pair "1;device" "2;managed" "3;pinned")
@@ -103,13 +93,11 @@ if(BUILD_TESTING)
         list(GET mode_pair 1 mode_name)
         add_test(
             NAME basics_various-mem-rw_${mode_name}
-            COMMAND
-                $<TARGET_FILE:various-mem-rw> ${BASICS_INPUT}
-                out_vmrw_${mode_name}.bin ${mode_num}
-            WORKING_DIRECTORY ${BASICS_TEST_DIR}
+            COMMAND sh -c
+                "dir=$(mktemp -d '${AIS_CAPABLE_DIR}/hipfile_basics_XXXXXX') && trap 'rm -rf \"$dir\"' EXIT && dd if=/dev/urandom of=\"$dir/input.bin\" bs=4096 count=64 status=none && cd \"$dir\" && \"$0\" \"$@\""
+                $<TARGET_FILE:various-mem-rw> input.bin out_vmrw_${mode_name}.bin ${mode_num}
         )
         set_tests_properties(basics_various-mem-rw_${mode_name} PROPERTIES
-            FIXTURES_REQUIRED basics_scratch
             LABELS "system;hipfile;basics"
         )
         if(mode_name STREQUAL "managed" OR mode_name STREQUAL "pinned")
