@@ -2936,22 +2936,26 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
   }
 
   if (!result) {
-    // Check CL_MEM_SVM_ATOMICS flag to see if we used system_coarse_segment_
-    auto memFlags = srcMemory.owner()->getMemFlags();
-    bool srcSvmAtomics = (memFlags & CL_MEM_SVM_ATOMICS) != 0;
-    if ((!srcSvmAtomics && srcMemory.isHostMemDirectAccess()) || (!copyMetadata.isAsync_)) {
-      // Flush caches for coherency as the MTYPE of the src buffer is
-      // non-coherent(ie read it again from memory).
-      // For device to device copy(intra device), we dont need a flush.
-      // If the source is host memory and the copy is blocking(aka memory need
-      // to be coherent), then add system scope. For non blocking rely on the release
-      // scope issued by synchronization packet.
-      gpu().addSystemScope();
+    if (DEBUG_CLR_DISABLE_FALLBACK) {
+      guarantee(false, "DMA copy failed and fallback path is disabled");
+    } else {
+      // Check CL_MEM_SVM_ATOMICS flag to see if we used system_coarse_segment_
+      auto memFlags = srcMemory.owner()->getMemFlags();
+      bool srcSvmAtomics = (memFlags & CL_MEM_SVM_ATOMICS) != 0;
+      if ((!srcSvmAtomics && srcMemory.isHostMemDirectAccess()) || (!copyMetadata.isAsync_)) {
+        // Flush caches for coherency as the MTYPE of the src buffer is
+        // non-coherent(ie read it again from memory).
+        // For device to device copy(intra device), we dont need a flush.
+        // If the source is host memory and the copy is blocking(aka memory need
+        // to be coherent), then add system scope. For non blocking rely on the release
+        // scope issued by synchronization packet.
+        gpu().addSystemScope();
+      }
+      result =
+          shaderCopyBuffer(reinterpret_cast<address>(dstMemory.virtualAddress()),
+                           reinterpret_cast<address>(srcMemory.virtualAddress()), dstOrigin,
+                           srcOrigin, sizeIn, entire, blitWg, copyMetadata, !copyMetadata.isAsync_);
     }
-    result =
-        shaderCopyBuffer(reinterpret_cast<address>(dstMemory.virtualAddress()),
-                         reinterpret_cast<address>(srcMemory.virtualAddress()), dstOrigin,
-                         srcOrigin, sizeIn, entire, blitWg, copyMetadata, !copyMetadata.isAsync_);
   }
 
   synchronize();
