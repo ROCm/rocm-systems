@@ -68,13 +68,13 @@ gfx10::Token TokenGenerator::next()
 
         auto& info = lookupbits.lookup(current);
         RdnaType type = (RdnaType) info.type;
-        if (type == RdnaType::NOP)
+        bits_toread = info.length;
+        if (type == RdnaType::NOP || bits_toread == 0)
         {
             bits_toread = 8;
             continue;
         }
 
-        bits_toread = info.length;
         bIsExt = type == WAVE_START_EXT;
 
         int64_t real = 0;
@@ -127,13 +127,13 @@ gfx10::Token TokenGenerator::next()
 
         auto& info = lookupbits.lookup(current);
         RdnaType type = (RdnaType) info.type;
-        if (type == RdnaType::NOP)
+        bits_toread = info.length;
+        if (type == RdnaType::NOP || bits_toread == 0)
         {
             bits_toread = 8;
             continue;
         }
 
-        bits_toread = info.length;
         bIsExt = type == WAVE_START_EXT;
 
         int64_t real = 0;
