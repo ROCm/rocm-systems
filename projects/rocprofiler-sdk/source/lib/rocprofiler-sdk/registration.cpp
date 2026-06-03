@@ -1485,6 +1485,10 @@ rocprofiler_set_api_table(const char* name,
 
         auto* rocattach_api = static_cast<RocAttachDispatchTable*>(tables[0]);
 
+        // Set has_attach_table before other initialization so that supports_attachment()
+        // will be correct for any installed interceptions.
+        rocprofiler::registration::get_attach_status()->has_attach_table = true;
+
         // unlike other APIs, we do not offer tracing for our own attach library
         // forward the table to the relevant code sections, then move on
         rocprofiler::code_object::initialize(rocattach_api);
@@ -1492,8 +1496,6 @@ rocprofiler_set_api_table(const char* name,
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
         rocprofiler::pc_sampling::code_object::initialize(rocattach_api);
 #endif
-
-        rocprofiler::registration::get_attach_status()->has_attach_table = true;
     }
     else
     {
