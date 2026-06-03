@@ -1114,6 +1114,16 @@
   outline-offset: 1px;
 }
 
+.form-field input[aria-invalid="true"] {
+  border-color: #ef4444;
+}
+
+.form-field-error {
+  font-size: 12px;
+  color: #ef4444;
+  font-weight: 500;
+}
+
 .form-help {
   font-size: 12px;
   color: var(--text);
