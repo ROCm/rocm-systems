@@ -633,10 +633,7 @@ add_test(
         tests/test_tui_components.py ${WORKING_DIR_OPTION}
 )
 
-# Build the roctx_recordfn pybind11 extension as a test fixture so the
-# torch-trace tests below can pin the loader to a known artifact via
-# ROCPROFCOMPUTE_ROCTX_RECORDFN_SO. Production installs ship the
-# sources and the runtime loader builds the .so on first use.
+# Build the roctx_recordfn pybind11 extension and its gtest.
 if(ENABLE_TESTS)
     add_subdirectory(src/lib/roctx_recordfn)
 endif()
@@ -664,21 +661,6 @@ set_tests_properties(
     test_torch_trace_coverage
     PROPERTIES TIMEOUT 1800 LABELS "profile" RESOURCE_GROUPS gpus:1
 )
-
-# Pin the torch-trace coverage test to the configure-time .so. When
-# ROCTX_RECORDFN_SO_PATH is unset (no torch at configure time), the
-# test skips during loader resolution.
-if(ROCTX_RECORDFN_SO_PATH)
-    message(
-        STATUS
-        "torch trace: pinning test_torch_trace_coverage to ${ROCTX_RECORDFN_SO_PATH}"
-    )
-    set_property(
-        TEST test_torch_trace_coverage
-        APPEND
-        PROPERTY ENVIRONMENT "ROCPROFCOMPUTE_ROCTX_RECORDFN_SO=${ROCTX_RECORDFN_SO_PATH}"
-    )
-endif()
 
 add_test(
     NAME test_inject_roctx_loader

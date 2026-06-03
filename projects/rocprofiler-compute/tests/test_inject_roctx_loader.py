@@ -3,9 +3,9 @@
 
 """Unit tests for ``utils.inject_roctx_loader``.
 
-These tests stub the loader to verify tier ordering, cache fingerprint
-stability, the ``ROCPROFCOMPUTE_REBUILD_ROCTX`` override, and the
-no-ninja policy. End-to-end builds are exercised in
+The tests stub the loader to verify tier ordering, cache fingerprint
+stability, and the ``ROCPROFCOMPUTE_REBUILD_ROCTX`` override across the
+prebuilt and JIT tiers. End-to-end builds are exercised in
 ``test_torch_trace_coverage``.
 """
 
@@ -17,11 +17,12 @@ import pytest
 
 from utils import inject_roctx_loader
 
+_FAKE_TAG = "py3.12_torch2.9_src000000000000"
 
-@pytest.fixture(autouse=True)
-def _isolate_explicit_so_env(monkeypatch):
-    """Unset the explicit-pin env var so other tier tests are not bypassed."""
-    monkeypatch.delenv(inject_roctx_loader._EXPLICIT_SO_ENV_VAR, raising=False)
+
+# ---------------------------------------------------------------------------
+# compute_tag / fingerprint
+# ---------------------------------------------------------------------------
 
 
 def test_compute_tag_returns_well_formed_string():
@@ -84,7 +85,7 @@ def test_source_fingerprint_is_missing_sentinel_when_no_inputs_readable(
     tmp_path,
     monkeypatch,
 ):
-    """Unreadable inputs yield the ``"missing"`` sentinel."""
+    """When no inputs are readable, the fingerprint is the ``"missing"`` sentinel."""
     monkeypatch.setattr(
         inject_roctx_loader,
         "_FINGERPRINT_INPUTS",
@@ -106,25 +107,6 @@ def test_source_fingerprint_is_length_delimited(tmp_path, monkeypatch):
     b.write_bytes(b"BC")
     fp2 = inject_roctx_loader._source_fingerprint()
     assert fp1 != fp2, "fingerprint collided across an input boundary"
-
-
-def test_force_python_fallback_returns_none():
-    assert inject_roctx_loader.load(force_python_fallback=True) is None
-
-
-def test_install_cached_so_overwrites_stale_artifact(tmp_path):
-    """``_install_cached_so`` overwrites an existing cached ``.so``."""
-    src = tmp_path / "build" / "roctx_recordfn.so"
-    src.parent.mkdir()
-    src.write_bytes(b"new content")
-    cached = tmp_path / "cache" / "roctx_recordfn-tag.so"
-    cached.parent.mkdir()
-    cached.write_bytes(b"STALE content -- must be overwritten")
-
-    inject_roctx_loader._install_cached_so(src, cached)
-    assert cached.read_bytes() == b"new content", (
-        "cache copy did not overwrite the existing cached .so"
-    )
 
 
 def test_cmake_and_runtime_compute_identical_fingerprint():
@@ -153,9 +135,13 @@ def test_cmake_and_runtime_compute_identical_fingerprint():
     )
 
 
+# ---------------------------------------------------------------------------
+# Source / buildfile hygiene
+# ---------------------------------------------------------------------------
+
+
 def test_roctx_recordfn_source_avoids_torch_umbrella_headers():
     """The source must not include ``<torch/{extension,all,torch}.h>``."""
-
     cpp_path = inject_roctx_loader._SO_SOURCE
     assert cpp_path.is_file(), f"missing C++ source at {cpp_path}"
     active_lines = [
@@ -173,6 +159,21 @@ def test_roctx_recordfn_source_avoids_torch_umbrella_headers():
     for header in forbidden:
         directive = f"#include {header}"
         assert directive not in active_src, f"must not include {header}"
+
+
+def test_roctx_recordfn_source_uses_narrow_includes():
+    """The source includes only the required narrow PyTorch headers."""
+    cpp_path = inject_roctx_loader._SO_SOURCE
+    src = cpp_path.read_text()
+
+    required = (
+        "#include <ATen/record_function.h>",
+        "#include <c10/util/ThreadLocalDebugInfo.h>",
+        "#include <pybind11/pybind11.h>",
+        "#include <pybind11/stl.h>",
+    )
+    for directive in required:
+        assert directive in src, f"must include {directive}"
 
 
 def test_cmake_buildfile_does_not_override_output_name():
@@ -208,26 +209,10 @@ def test_loader_and_cmake_agree_on_artifact_filename_shape():
     """The loader and CMake produce identical artifact filenames."""
     import inspect
 
-    src = inspect.getsource(inject_roctx_loader._try_cmake_build)
+    src = inspect.getsource(inject_roctx_loader._try_jit)
     assert 'f"roctx_recordfn-{tag}.so"' in src, (
         "artifact filename has changed; update this test accordingly"
     )
-
-
-def test_roctx_recordfn_source_uses_narrow_includes():
-    """The source includes only the required narrow PyTorch headers."""
-
-    cpp_path = inject_roctx_loader._SO_SOURCE
-    src = cpp_path.read_text()
-
-    required = (
-        "#include <ATen/record_function.h>",
-        "#include <c10/util/ThreadLocalDebugInfo.h>",
-        "#include <pybind11/pybind11.h>",
-        "#include <pybind11/stl.h>",
-    )
-    for directive in required:
-        assert directive in src, f"must include {directive}"
 
 
 def test_loader_source_never_recommends_installing_ninja():
@@ -248,135 +233,40 @@ def test_loader_source_never_recommends_installing_ninja():
         assert token not in src, f"loader source must not contain {token!r}"
 
 
-def test_explain_cppext_failure_never_recommends_installing_ninja():
-    """Ninja-flavoured failures steer users to the cmake or prebuilt tier."""
-    samples = [
-        RuntimeError("Ninja is required to load C++ extensions"),
-        RuntimeError("ninja: command not found"),
-        RuntimeError("Could not find ninja on PATH"),
-    ]
-    for err in samples:
-        reason, hint = inject_roctx_loader._explain_cppext_failure(err)
-        assert "ninja" in reason.lower(), (
-            f"ninja-flavoured failure must be classified as such: {reason!r}"
-        )
-        forbidden = ("install ninja", "pip install ninja", "apt install ninja")
-        joined = (reason + " " + hint).lower()
-        for token in forbidden:
-            assert token not in joined, (
-                f"recovery hint must not recommend installing ninja "
-                f"(found {token!r} in: {hint!r})"
-            )
-        assert "cmake" in hint.lower() or "prebuilt" in hint.lower(), (
-            f"ninja-class hint must mention cmake or prebuilt: {hint!r}"
-        )
+# ---------------------------------------------------------------------------
+# Tier-name surface
+# ---------------------------------------------------------------------------
 
 
-def test_explain_cppext_failure_classifies_compiler_and_header_cases():
-    """Non-ninja errors classify into compiler or libtorch buckets."""
-    cases = [
-        (RuntimeError("g++: command not found"), "compiler"),
-        (RuntimeError("clang: not found"), "compiler"),
-        (RuntimeError("fatal error: torch/extension.h: No such file"), "libtorch"),
-    ]
-    for err, expected_keyword in cases:
-        reason, hint = inject_roctx_loader._explain_cppext_failure(err)
-        assert expected_keyword in reason.lower(), (
-            f"{err!r}: reason {reason!r} missing {expected_keyword!r}"
-        )
-        assert "prebuilt" in hint.lower(), (
-            f"{err!r}: hint should mention prebuilt fallback: {hint!r}"
-        )
+def test_c_tier_names_matches_the_tier_ladder():
+    """``C_TIER_NAMES`` enumerates exactly the prebuilt and JIT tiers."""
+    assert inject_roctx_loader.C_TIER_NAMES == frozenset((
+        inject_roctx_loader.TIER_PREBUILT,
+        inject_roctx_loader.TIER_JIT,
+    ))
 
 
-def test_jit_compile_viable_true_when_use_ninja_in_signature(monkeypatch):
-    """``_jit_compile_viable`` is True when ``load`` accepts ``use_ninja``."""
-
-    class FakeCppExt:
-        @staticmethod
-        def load(name, sources, use_ninja=False, **kwargs):
-            pass
-
-    assert inject_roctx_loader._jit_compile_viable(FakeCppExt) is True
+# ---------------------------------------------------------------------------
+# Misc helpers
+# ---------------------------------------------------------------------------
 
 
-def test_jit_compile_viable_falls_back_to_path_probe(monkeypatch):
-    """When ``use_ninja`` is absent, viability requires ninja on ``PATH``."""
-
-    class FakeCppExt:
-        @staticmethod
-        def load(name, sources, **kwargs):
-            pass
-
-    import shutil as _shutil
-
-    monkeypatch.setattr(_shutil, "which", lambda _exe: None)
-    assert inject_roctx_loader._jit_compile_viable(FakeCppExt) is False
-
-    monkeypatch.setattr(_shutil, "which", lambda exe: "/usr/bin/ninja")
-    assert inject_roctx_loader._jit_compile_viable(FakeCppExt) is True
+def test_force_python_fallback_returns_none():
+    assert inject_roctx_loader.load(force_python_fallback=True) is None
 
 
-def test_jit_failure_marker_round_trip(monkeypatch, tmp_path):
-    """``_previous_jit_failure`` reads the reason from ``_record_jit_failure``."""
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-    tag = "py3.12_torch2.9_src000000000000"
+def test_install_cached_so_overwrites_stale_artifact(tmp_path):
+    """``_install_cached_so`` overwrites an existing cached ``.so``."""
+    src = tmp_path / "build" / "roctx_recordfn.so"
+    src.parent.mkdir()
+    src.write_bytes(b"new content")
+    cached = tmp_path / "cache" / "roctx_recordfn-tag.so"
+    cached.parent.mkdir()
+    cached.write_bytes(b"STALE content -- must be overwritten")
 
-    assert inject_roctx_loader._previous_jit_failure(tag) is None
-    inject_roctx_loader._record_jit_failure(tag, RuntimeError("ninja missing"))
-    recorded = inject_roctx_loader._previous_jit_failure(tag)
-    assert recorded is not None
-    assert "ninja missing" in recorded
-    assert "RuntimeError" in recorded
-
-
-def test_jit_failure_marker_cleared_on_demand(monkeypatch, tmp_path):
-    """_clear_jit_failure() must remove the marker and be idempotent."""
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-    tag = "py3.12_torch2.9_src000000000000"
-
-    inject_roctx_loader._record_jit_failure(tag, RuntimeError("x"))
-    assert inject_roctx_loader._previous_jit_failure(tag) is not None
-    inject_roctx_loader._clear_jit_failure(tag)
-    assert inject_roctx_loader._previous_jit_failure(tag) is None
-    inject_roctx_loader._clear_jit_failure(tag)
-
-
-def test_rebuild_env_var_clears_failure_marker(monkeypatch, tmp_path):
-    """``ROCPROFCOMPUTE_REBUILD_ROCTX=1`` clears any cached failure marker."""
-    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-    monkeypatch.setenv(inject_roctx_loader._REBUILD_ENV_VAR, "1")
-
-    inject_roctx_loader._record_jit_failure(_FAKE_TAG, RuntimeError("stale failure"))
-    assert inject_roctx_loader._previous_jit_failure(_FAKE_TAG) is not None
-
-    sentinel = object()
-    monkeypatch.setattr(
-        inject_roctx_loader,
-        "_try_prebuilt",
-        lambda _t: pytest.fail("prebuilt must be skipped under REBUILD"),
-    )
-    monkeypatch.setattr(
-        inject_roctx_loader,
-        "_try_jit_cached",
-        lambda _t: pytest.fail("cached must be skipped under REBUILD"),
-    )
-    monkeypatch.setattr(
-        inject_roctx_loader,
-        "_try_cmake_build",
-        lambda _t: None,
-    )
-    monkeypatch.setattr(
-        inject_roctx_loader,
-        "_try_jit_build",
-        lambda _t: sentinel,
-    )
-
-    result = inject_roctx_loader.load()
-    assert result is sentinel
-    assert inject_roctx_loader._previous_jit_failure(_FAKE_TAG) is None, (
-        "REBUILD must clear the negative cache before the forced rebuild"
+    inject_roctx_loader._install_cached_so(src, cached)
+    assert cached.read_bytes() == b"new content", (
+        "cache copy did not overwrite the existing cached .so"
     )
 
 
@@ -393,169 +283,29 @@ def test_install_cached_so_is_a_noop_when_src_missing(tmp_path):
     )
 
 
-# Synthetic tag for routing tests; stubs compute_tag so these tests
-# don't need a torch import.
-_FAKE_TAG = "py3.12_torch2.9_src000000000000"
+def test_jit_cache_dir_is_creatable(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    d = inject_roctx_loader._jit_cache_dir()
+    assert d.exists() and d.is_dir()
+    inject_roctx_loader._jit_cache_dir()
 
 
-def test_rebuild_env_var_skips_prebuilt_and_cache(monkeypatch):
-    """REBUILD=1 routes directly to the build tiers (cmake then
-    cpp_extension), skipping prebuilt and JIT cache.
-    """
-    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
-    calls = []
-    monkeypatch.setattr(
-        inject_roctx_loader,
-        "_try_prebuilt",
-        lambda tag: calls.append(("prebuilt", tag)) or None,
-    )
-    monkeypatch.setattr(
-        inject_roctx_loader,
-        "_try_jit_cached",
-        lambda tag: calls.append(("cached", tag)) or None,
-    )
-    sentinel = object()
-    monkeypatch.setattr(
-        inject_roctx_loader,
-        "_try_cmake_build",
-        lambda tag: calls.append(("cmake_build", tag)) or sentinel,
-    )
-    monkeypatch.setattr(
-        inject_roctx_loader,
-        "_try_jit_build",
-        lambda tag: (
-            calls.append(("jit_build", tag))
-            or pytest.fail(
-                "cpp_extension tier must not be reached when cmake succeeds",
-            )
-        ),
-    )
-    monkeypatch.setenv(inject_roctx_loader._REBUILD_ENV_VAR, "1")
+def test_cmake_executable_honors_env_var_then_falls_back(monkeypatch):
+    """``$CMAKE`` takes precedence over ``PATH``."""
+    seen = []
 
-    result = inject_roctx_loader.load()
-    assert result is sentinel
-    assert [c[0] for c in calls] == ["cmake_build"], (
-        f"expected only _try_cmake_build to fire under REBUILD; saw {calls!r}"
-    )
-    assert calls[0][1] == _FAKE_TAG, "tag must propagate to the build step"
+    def fake_which(name):
+        seen.append(name)
+        return f"/fake/bin/{name}"
 
+    monkeypatch.setattr(inject_roctx_loader.shutil, "which", fake_which)
+    monkeypatch.setenv("CMAKE", "my-custom-cmake")
+    assert inject_roctx_loader._cmake_executable() == "/fake/bin/my-custom-cmake"
+    assert seen[-1] == "my-custom-cmake"
 
-def test_rebuild_env_var_falls_through_to_cppext_when_cmake_fails(monkeypatch):
-    """Under REBUILD, ``cmake -> None`` falls through to ``cpp_extension``."""
-    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
-    monkeypatch.setattr(inject_roctx_loader, "_try_prebuilt", lambda _t: None)
-    monkeypatch.setattr(inject_roctx_loader, "_try_jit_cached", lambda _t: None)
-    monkeypatch.setattr(inject_roctx_loader, "_try_cmake_build", lambda _t: None)
-    sentinel = object()
-    monkeypatch.setattr(inject_roctx_loader, "_try_jit_build", lambda _t: sentinel)
-    monkeypatch.setenv(inject_roctx_loader._REBUILD_ENV_VAR, "1")
-    assert inject_roctx_loader.load() is sentinel
-
-
-def test_rebuild_env_var_returns_none_when_build_fails(monkeypatch):
-    """Under REBUILD, both build tiers failing yields ``None`` and no fallback."""
-    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
-    monkeypatch.setattr(
-        inject_roctx_loader,
-        "_try_prebuilt",
-        lambda _t: pytest.fail(
-            "_try_prebuilt called despite rebuild env var",
-        ),
-    )
-    monkeypatch.setattr(
-        inject_roctx_loader,
-        "_try_jit_cached",
-        lambda _t: pytest.fail(
-            "_try_jit_cached called despite rebuild env var",
-        ),
-    )
-    monkeypatch.setattr(inject_roctx_loader, "_try_cmake_build", lambda _t: None)
-    monkeypatch.setattr(inject_roctx_loader, "_try_jit_build", lambda _t: None)
-    monkeypatch.setenv(inject_roctx_loader._REBUILD_ENV_VAR, "1")
-    assert inject_roctx_loader.load() is None
-
-
-def test_default_load_path_still_tries_prebuilt_first(monkeypatch):
-    """The prebuilt tier short-circuits the default load path."""
-    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
-    monkeypatch.delenv(inject_roctx_loader._REBUILD_ENV_VAR, raising=False)
-    calls = []
-    sentinel = object()
-    monkeypatch.setattr(
-        inject_roctx_loader,
-        "_try_prebuilt",
-        lambda tag: calls.append("prebuilt") or sentinel,
-    )
-    monkeypatch.setattr(
-        inject_roctx_loader,
-        "_try_jit_cached",
-        lambda tag: calls.append("cached") or None,
-    )
-    monkeypatch.setattr(
-        inject_roctx_loader,
-        "_try_cmake_build",
-        lambda tag: calls.append("cmake_build") or None,
-    )
-    monkeypatch.setattr(
-        inject_roctx_loader,
-        "_try_jit_build",
-        lambda tag: calls.append("jit_build") or None,
-    )
-    assert inject_roctx_loader.load() is sentinel
-    assert calls == ["prebuilt"], (
-        f"expected prebuilt to short-circuit before cached/cmake/jit; saw {calls!r}"
-    )
-
-
-def test_default_load_path_walks_all_four_tiers_in_order(monkeypatch):
-    """Tiers are tried in order: prebuilt, cached, cmake, cpp_extension."""
-    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
-    monkeypatch.delenv(inject_roctx_loader._REBUILD_ENV_VAR, raising=False)
-    calls = []
-    monkeypatch.setattr(
-        inject_roctx_loader,
-        "_try_prebuilt",
-        lambda tag: calls.append("prebuilt") or None,
-    )
-    monkeypatch.setattr(
-        inject_roctx_loader,
-        "_try_jit_cached",
-        lambda tag: calls.append("cached") or None,
-    )
-    sentinel = object()
-    monkeypatch.setattr(
-        inject_roctx_loader,
-        "_try_cmake_build",
-        lambda tag: calls.append("cmake_build") or sentinel,
-    )
-    monkeypatch.setattr(
-        inject_roctx_loader,
-        "_try_jit_build",
-        lambda tag: (
-            calls.append("jit_build")
-            or pytest.fail(
-                "cpp_extension tier must not be reached when cmake succeeds",
-            )
-        ),
-    )
-    assert inject_roctx_loader.load() is sentinel
-    assert calls == [
-        "prebuilt",
-        "cached",
-        "cmake_build",
-    ], f"expected order prebuilt -> cached -> cmake_build, saw {calls!r}"
-
-
-def test_default_load_path_falls_through_to_cppext_when_cmake_misses(monkeypatch):
-    """``cmake -> None`` falls through to ``cpp_extension`` on the default path."""
-    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
-    monkeypatch.delenv(inject_roctx_loader._REBUILD_ENV_VAR, raising=False)
-    monkeypatch.setattr(inject_roctx_loader, "_try_prebuilt", lambda _t: None)
-    monkeypatch.setattr(inject_roctx_loader, "_try_jit_cached", lambda _t: None)
-    monkeypatch.setattr(inject_roctx_loader, "_try_cmake_build", lambda _t: None)
-    sentinel = object()
-    monkeypatch.setattr(inject_roctx_loader, "_try_jit_build", lambda _t: sentinel)
-    assert inject_roctx_loader.load() is sentinel
+    monkeypatch.delenv("CMAKE", raising=False)
+    assert inject_roctx_loader._cmake_executable() == "/fake/bin/cmake"
+    assert seen[-1] == "cmake"
 
 
 def test_no_prebuilt_returns_none_for_unknown_tag(monkeypatch):
@@ -568,174 +318,84 @@ def test_no_prebuilt_returns_none_for_unknown_tag(monkeypatch):
     assert inject_roctx_loader._try_prebuilt("py3.10_torch2.9") is None
 
 
-def test_jit_cache_dir_is_creatable(monkeypatch, tmp_path):
+# ---------------------------------------------------------------------------
+# JIT failure marker
+# ---------------------------------------------------------------------------
+
+
+def test_jit_failure_marker_round_trip(monkeypatch, tmp_path):
+    """``_previous_jit_failure`` reads the reason from ``_record_jit_failure``."""
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-    d = inject_roctx_loader._jit_cache_dir()
-    assert d.exists() and d.is_dir()
-    inject_roctx_loader._jit_cache_dir()
+    tag = _FAKE_TAG
+
+    assert inject_roctx_loader._previous_jit_failure(tag) is None
+    inject_roctx_loader._record_jit_failure(tag, RuntimeError("ninja missing"))
+    recorded = inject_roctx_loader._previous_jit_failure(tag)
+    assert recorded is not None
+    assert "ninja missing" in recorded
+    assert "RuntimeError" in recorded
 
 
-_BUILD_TIERS = (
-    "_try_prebuilt",
-    "_try_jit_cached",
-    "_try_cmake_build",
-    "_try_jit_build",
-)
+def test_jit_failure_marker_cleared_on_demand(monkeypatch, tmp_path):
+    """_clear_jit_failure() must remove the marker and be idempotent."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    tag = _FAKE_TAG
+
+    inject_roctx_loader._record_jit_failure(tag, RuntimeError("x"))
+    assert inject_roctx_loader._previous_jit_failure(tag) is not None
+    inject_roctx_loader._clear_jit_failure(tag)
+    assert inject_roctx_loader._previous_jit_failure(tag) is None
+    inject_roctx_loader._clear_jit_failure(tag)
 
 
-def _fail_if_called(name: str):
-    """Return a tier-function stub that fails the test when invoked."""
-    return lambda _t, _n=name: pytest.fail(f"{_n} called unexpectedly")
+# ---------------------------------------------------------------------------
+# _try_jit: cache-hit path
+# ---------------------------------------------------------------------------
 
 
-def test_explicit_so_env_var_short_circuits_other_tiers(monkeypatch, tmp_path):
-    """``ROCPROFCOMPUTE_ROCTX_RECORDFN_SO`` short-circuits all other tiers."""
-    fake_so = tmp_path / "roctx_recordfn.so"
-    fake_so.write_bytes(b"placeholder")
+def test_try_jit_returns_cache_hit_without_invoking_cmake(monkeypatch, tmp_path):
+    """An on-disk cached ``.so`` is loaded directly, no cmake invocation."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    cache_dir = inject_roctx_loader._jit_cache_dir()
+    cached_so = cache_dir / f"roctx_recordfn-{_FAKE_TAG}.so"
+    cached_so.write_bytes(b"stub-so")
+
     sentinel = object()
-    monkeypatch.setenv(
-        inject_roctx_loader._EXPLICIT_SO_ENV_VAR,
-        str(fake_so),
-    )
-    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
     monkeypatch.setattr(
         inject_roctx_loader,
         "_import_module_from_path",
-        lambda _name, _path: sentinel,
+        lambda _n, _p: sentinel,
     )
-    for tier in _BUILD_TIERS:
-        monkeypatch.setattr(inject_roctx_loader, tier, _fail_if_called(tier))
-    assert inject_roctx_loader.load() is sentinel
-    assert inject_roctx_loader.loaded_tier() == inject_roctx_loader.TIER_EXPLICIT
-    assert inject_roctx_loader.TIER_EXPLICIT in inject_roctx_loader.C_TIER_NAMES
+
+    def fail_subprocess(*_a, **_k):
+        pytest.fail("subprocess.run must not fire on cache hit")
+
+    monkeypatch.setattr(inject_roctx_loader.subprocess, "run", fail_subprocess)
+
+    assert inject_roctx_loader._try_jit(_FAKE_TAG) is sentinel
 
 
-def test_explicit_so_env_var_missing_file_returns_none_no_fallback(
-    monkeypatch, tmp_path
-):
-    """An invalid explicit-pin path returns ``None`` without falling back."""
-    monkeypatch.setenv(
-        inject_roctx_loader._EXPLICIT_SO_ENV_VAR,
-        str(tmp_path / "nope.so"),
+def test_try_jit_force_rebuild_bypasses_cache(monkeypatch, tmp_path):
+    """``force_rebuild=True`` ignores the cache and reaches the build path."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    cache_dir = inject_roctx_loader._jit_cache_dir()
+    cached_so = cache_dir / f"roctx_recordfn-{_FAKE_TAG}.so"
+    cached_so.write_bytes(b"stale")
+
+    def must_not_import(_n, _p):
+        pytest.fail("cache hit must not be consulted under force_rebuild")
+
+    monkeypatch.setattr(
+        inject_roctx_loader, "_import_module_from_path", must_not_import
     )
-    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
-    for tier in _BUILD_TIERS:
-        monkeypatch.setattr(inject_roctx_loader, tier, _fail_if_called(tier))
-    assert inject_roctx_loader.load() is None
-    assert inject_roctx_loader.loaded_tier() is None
+    monkeypatch.setattr(inject_roctx_loader, "_SO_SOURCE", tmp_path / "missing.cpp")
+
+    assert inject_roctx_loader._try_jit(_FAKE_TAG, force_rebuild=True) is None
 
 
-def test_explicit_so_env_var_unimportable_returns_none_no_fallback(
-    monkeypatch, tmp_path
-):
-    """An explicit-pin import failure returns ``None`` without falling back."""
-    fake_so = tmp_path / "roctx_recordfn.so"
-    fake_so.write_bytes(b"not a real shared object")
-    monkeypatch.setenv(
-        inject_roctx_loader._EXPLICIT_SO_ENV_VAR,
-        str(fake_so),
-    )
-    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
-
-    def boom(_name, _path):
-        raise ImportError("synthetic import failure")
-
-    monkeypatch.setattr(inject_roctx_loader, "_import_module_from_path", boom)
-    for tier in _BUILD_TIERS:
-        monkeypatch.setattr(inject_roctx_loader, tier, _fail_if_called(tier))
-    assert inject_roctx_loader.load() is None
-    assert inject_roctx_loader.loaded_tier() is None
-
-
-def test_load_does_not_raise_when_torch_missing(monkeypatch):
-    """``load()`` returns ``None`` when ``torch`` is not importable."""
-    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: None)
-    assert inject_roctx_loader.load() is None
-
-
-def test_load_returns_module_or_none_no_raise():
-    """``load()`` returns a module exposing the documented API, or ``None``."""
-    mod = inject_roctx_loader.load()
-    if mod is not None:
-        for sym in (
-            "install",
-            "uninstall",
-            "is_installed",
-            "push_user_scope",
-            "pop_user_scope",
-            "dump_stats",
-        ):
-            assert hasattr(mod, sym), f"loaded module is missing {sym}"
-
-
-def test_python_fallback_path_is_silent_about_so(monkeypatch):
-    """With the loader returning ``None``, the Python fallback still works."""
-    try:
-        import torch  # noqa: F401
-    except ImportError:
-        pytest.skip("torch not importable")
-    monkeypatch.setattr(inject_roctx_loader, "load", lambda **kw: None)
-    if "utils.inject_roctx" in sys.modules:
-        del sys.modules["utils.inject_roctx"]
-    inject_roctx = importlib.import_module("utils.inject_roctx")
-    try:
-        assert inject_roctx.using_c_tier() is False
-        assert inject_roctx.dump_recordfn_stats() is None
-        inject_roctx._push_scope("py.tier.test", "#1@test:1")
-        inject_roctx._pop_scope()
-    finally:
-        sys.modules.pop("utils.inject_roctx", None)
-
-
-def test_python_fallback_uses_python_dispatch_sentinel(monkeypatch):
-    """No user frame -> 'python.dispatch:0' sentinel (distinct from
-    C++ tier leaf labels so analyzers can identify the tier).
-    """
-    try:
-        import torch  # noqa: F401
-    except ImportError:
-        pytest.skip("torch not importable; utils.inject_roctx module-load exits")
-    monkeypatch.setattr(inject_roctx_loader, "load", lambda **kw: None)
-    if "utils.inject_roctx" in sys.modules:
-        del sys.modules["utils.inject_roctx"]
-    inject_roctx = importlib.import_module("utils.inject_roctx")
-    try:
-        monkeypatch.setattr("inspect.currentframe", lambda: None)
-        assert inject_roctx.resolve_user_caller_location() == "python.dispatch:0"
-        import inspect as _stdlib_inspect
-
-        src = _stdlib_inspect.getsource(inject_roctx)
-        assert "dispatcher:0" not in src, "legacy 'dispatcher:0' sentinel still present"
-    finally:
-        sys.modules.pop("utils.inject_roctx", None)
-
-
-def test_import_does_not_apply_global_patches(monkeypatch):
-    """Importing ``utils.inject_roctx`` does not patch PyTorch."""
-    monkeypatch.setattr(inject_roctx_loader, "load", lambda **kw: None)
-    if "utils.inject_roctx" in sys.modules:
-        del sys.modules["utils.inject_roctx"]
-
-    try:
-        import torch  # noqa: F401
-    except Exception:
-        pytest.skip("torch not importable")
-
-    import torch as _torch
-
-    pre = {
-        "compile": getattr(_torch, "compile", None),
-    }
-
-    inject_roctx = importlib.import_module("utils.inject_roctx")
-    try:
-        post = {
-            "compile": getattr(_torch, "compile", None),
-        }
-        assert hasattr(inject_roctx, "install_global_wraps")
-        assert post["compile"] is pre["compile"], "torch.compile was replaced on import"
-    finally:
-        sys.modules.pop("utils.inject_roctx", None)
+# ---------------------------------------------------------------------------
+# _try_jit: cmake build path
+# ---------------------------------------------------------------------------
 
 
 class _StubCompleted:
@@ -761,46 +421,22 @@ def _set_so_inputs_present(monkeypatch, tmp_path):
     return src_dir
 
 
-def test_cmake_executable_honors_env_var_then_falls_back(monkeypatch):
-    """``$CMAKE`` takes precedence over ``PATH``."""
-    seen = []
-
-    def fake_which(name):
-        seen.append(name)
-        return f"/fake/bin/{name}"
-
-    monkeypatch.setattr(inject_roctx_loader.shutil, "which", fake_which)
-    monkeypatch.setenv("CMAKE", "my-custom-cmake")
-    assert inject_roctx_loader._cmake_executable() == "/fake/bin/my-custom-cmake"
-    assert seen[-1] == "my-custom-cmake"
-
-    monkeypatch.delenv("CMAKE", raising=False)
-    assert inject_roctx_loader._cmake_executable() == "/fake/bin/cmake"
-    assert seen[-1] == "cmake"
-
-
-def test_try_cmake_build_skips_when_sources_missing(monkeypatch, tmp_path):
-    """``_try_cmake_build`` returns ``None`` when sources are missing."""
+def test_try_jit_skips_when_sources_missing(monkeypatch, tmp_path):
+    """``_try_jit`` returns ``None`` when sources are missing (no cache hit)."""
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    monkeypatch.setattr(inject_roctx_loader, "_SO_SOURCE", tmp_path / "nonexistent.cpp")
     monkeypatch.setattr(
-        inject_roctx_loader,
-        "_SO_SOURCE",
-        tmp_path / "nonexistent.cpp",
-    )
-    monkeypatch.setattr(
-        inject_roctx_loader,
-        "_SO_BUILDFILE",
-        tmp_path / "nonexistent.txt",
+        inject_roctx_loader, "_SO_BUILDFILE", tmp_path / "nonexistent.txt"
     )
 
     def fail_subprocess(*_a, **_k):
         pytest.fail("subprocess.run must not be called when sources are missing")
 
     monkeypatch.setattr(inject_roctx_loader.subprocess, "run", fail_subprocess)
-    assert inject_roctx_loader._try_cmake_build(_FAKE_TAG) is None
+    assert inject_roctx_loader._try_jit(_FAKE_TAG) is None
 
 
-def test_try_cmake_build_skips_when_cmake_not_on_path(monkeypatch, tmp_path):
+def test_try_jit_skips_when_cmake_not_on_path(monkeypatch, tmp_path):
     """Absence of cmake on ``PATH`` does not write a failure marker."""
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     _set_so_inputs_present(monkeypatch, tmp_path)
@@ -810,41 +446,32 @@ def test_try_cmake_build_skips_when_cmake_not_on_path(monkeypatch, tmp_path):
         pytest.fail("subprocess.run must not be called when cmake is absent")
 
     monkeypatch.setattr(inject_roctx_loader.subprocess, "run", fail_subprocess)
-    assert inject_roctx_loader._try_cmake_build(_FAKE_TAG) is None
+    assert inject_roctx_loader._try_jit(_FAKE_TAG) is None
     assert inject_roctx_loader._previous_jit_failure(_FAKE_TAG) is None
 
 
-def test_try_cmake_build_short_circuits_on_prior_failure(monkeypatch, tmp_path):
-    """A prior failure marker vetoes ``_try_cmake_build``."""
+def test_try_jit_short_circuits_on_prior_failure(monkeypatch, tmp_path):
+    """A prior failure marker vetoes ``_try_jit``."""
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     _set_so_inputs_present(monkeypatch, tmp_path)
-    monkeypatch.setattr(
-        inject_roctx_loader,
-        "_cmake_executable",
-        lambda: "/fake/cmake",
-    )
+    monkeypatch.setattr(inject_roctx_loader, "_cmake_executable", lambda: "/fake/cmake")
     inject_roctx_loader._record_jit_failure(
         _FAKE_TAG,
         RuntimeError("earlier failure"),
-        reason=inject_roctx_loader._CPPEXT_TIER_NAME,
     )
 
     def fail_subprocess(*_a, **_k):
         pytest.fail("subprocess.run must not fire when marker is present")
 
     monkeypatch.setattr(inject_roctx_loader.subprocess, "run", fail_subprocess)
-    assert inject_roctx_loader._try_cmake_build(_FAKE_TAG) is None
+    assert inject_roctx_loader._try_jit(_FAKE_TAG) is None
 
 
-def test_try_cmake_build_passes_runtime_python_to_cmake(monkeypatch, tmp_path):
-    """``_try_cmake_build`` passes ``-DTORCH_TRACE_PYTHON=sys.executable`` to cmake."""
+def test_try_jit_passes_runtime_python_to_cmake(monkeypatch, tmp_path):
+    """``_try_jit`` passes ``-DTORCH_TRACE_PYTHON=sys.executable`` to cmake."""
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     _set_so_inputs_present(monkeypatch, tmp_path)
-    monkeypatch.setattr(
-        inject_roctx_loader,
-        "_cmake_executable",
-        lambda: "/fake/cmake",
-    )
+    monkeypatch.setattr(inject_roctx_loader, "_cmake_executable", lambda: "/fake/cmake")
 
     invocations = []
 
@@ -864,7 +491,7 @@ def test_try_cmake_build_passes_runtime_python_to_cmake(monkeypatch, tmp_path):
         lambda _n, _p: object(),
     )
 
-    inject_roctx_loader._try_cmake_build(_FAKE_TAG)
+    inject_roctx_loader._try_jit(_FAKE_TAG)
 
     assert len(invocations) == 2, f"expected two cmake invocations, saw {invocations!r}"
     configure_argv = invocations[0]
@@ -878,18 +505,11 @@ def test_try_cmake_build_passes_runtime_python_to_cmake(monkeypatch, tmp_path):
     )
 
 
-def test_try_cmake_build_records_failure_marker_on_configure_failure(
-    monkeypatch,
-    tmp_path,
-):
-    """A non-zero configure return code writes a cmake-tier failure marker."""
+def test_try_jit_records_failure_marker_on_configure_failure(monkeypatch, tmp_path):
+    """A non-zero configure return code writes a JIT failure marker."""
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     _set_so_inputs_present(monkeypatch, tmp_path)
-    monkeypatch.setattr(
-        inject_roctx_loader,
-        "_cmake_executable",
-        lambda: "/fake/cmake",
-    )
+    monkeypatch.setattr(inject_roctx_loader, "_cmake_executable", lambda: "/fake/cmake")
 
     def fake_run(argv, **_kw):
         return _StubCompleted(
@@ -898,24 +518,20 @@ def test_try_cmake_build_records_failure_marker_on_configure_failure(
         )
 
     monkeypatch.setattr(inject_roctx_loader.subprocess, "run", fake_run)
-    assert inject_roctx_loader._try_cmake_build(_FAKE_TAG) is None
+    assert inject_roctx_loader._try_jit(_FAKE_TAG) is None
     marker = inject_roctx_loader._previous_jit_failure(_FAKE_TAG)
     assert marker is not None
-    assert inject_roctx_loader._CMAKE_TIER_NAME in marker
+    assert inject_roctx_loader.TIER_JIT in marker
     assert "Could not find Torch" in marker, (
         f"marker must preserve stderr tail; saw {marker!r}"
     )
 
 
-def test_try_cmake_build_records_failure_marker_on_build_failure(monkeypatch, tmp_path):
-    """A non-zero build return code writes a cmake-tier failure marker."""
+def test_try_jit_records_failure_marker_on_build_failure(monkeypatch, tmp_path):
+    """A non-zero build return code writes a JIT failure marker."""
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     _set_so_inputs_present(monkeypatch, tmp_path)
-    monkeypatch.setattr(
-        inject_roctx_loader,
-        "_cmake_executable",
-        lambda: "/fake/cmake",
-    )
+    monkeypatch.setattr(inject_roctx_loader, "_cmake_executable", lambda: "/fake/cmake")
 
     call_count = [0]
 
@@ -929,43 +545,35 @@ def test_try_cmake_build_records_failure_marker_on_build_failure(monkeypatch, tm
         )
 
     monkeypatch.setattr(inject_roctx_loader.subprocess, "run", fake_run)
-    assert inject_roctx_loader._try_cmake_build(_FAKE_TAG) is None
+    assert inject_roctx_loader._try_jit(_FAKE_TAG) is None
     marker = inject_roctx_loader._previous_jit_failure(_FAKE_TAG)
     assert marker is not None
-    assert inject_roctx_loader._CMAKE_TIER_NAME in marker
+    assert inject_roctx_loader.TIER_JIT in marker
     assert "undefined reference" in marker
 
 
-def test_try_cmake_build_records_failure_marker_when_so_missing(monkeypatch, tmp_path):
+def test_try_jit_records_failure_marker_when_so_missing(monkeypatch, tmp_path):
     """A successful build with no ``.so`` output writes a failure marker."""
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     _set_so_inputs_present(monkeypatch, tmp_path)
-    monkeypatch.setattr(
-        inject_roctx_loader,
-        "_cmake_executable",
-        lambda: "/fake/cmake",
-    )
+    monkeypatch.setattr(inject_roctx_loader, "_cmake_executable", lambda: "/fake/cmake")
     monkeypatch.setattr(
         inject_roctx_loader.subprocess,
         "run",
         lambda *a, **k: _StubCompleted(returncode=0),
     )
-    assert inject_roctx_loader._try_cmake_build(_FAKE_TAG) is None
+    assert inject_roctx_loader._try_jit(_FAKE_TAG) is None
     marker = inject_roctx_loader._previous_jit_failure(_FAKE_TAG)
     assert marker is not None
-    assert inject_roctx_loader._CMAKE_TIER_NAME in marker
-    assert ".so missing" in marker or "missing" in marker
+    assert inject_roctx_loader.TIER_JIT in marker
+    assert "missing" in marker
 
 
-def test_try_cmake_build_cleans_build_dir_on_success(monkeypatch, tmp_path):
+def test_try_jit_cleans_build_dir_on_success(monkeypatch, tmp_path):
     """The build directory is removed after a successful build."""
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     _set_so_inputs_present(monkeypatch, tmp_path)
-    monkeypatch.setattr(
-        inject_roctx_loader,
-        "_cmake_executable",
-        lambda: "/fake/cmake",
-    )
+    monkeypatch.setattr(inject_roctx_loader, "_cmake_executable", lambda: "/fake/cmake")
     monkeypatch.setattr(
         inject_roctx_loader.subprocess,
         "run",
@@ -987,7 +595,7 @@ def test_try_cmake_build_cleans_build_dir_on_success(monkeypatch, tmp_path):
         lambda _n, _p: object(),
     )
 
-    result = inject_roctx_loader._try_cmake_build(_FAKE_TAG)
+    result = inject_roctx_loader._try_jit(_FAKE_TAG)
     assert result is not None
     assert not build_dir.exists(), (
         "build dir must be removed on success to bound cache disk usage"
@@ -998,24 +606,25 @@ def test_try_cmake_build_cleans_build_dir_on_success(monkeypatch, tmp_path):
     )
 
 
-def test_try_cmake_build_keeps_build_dir_on_failure(monkeypatch, tmp_path):
+def test_try_jit_keeps_build_dir_on_failure(monkeypatch, tmp_path):
     """Preserve the build dir on failure for post-mortem inspection."""
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     _set_so_inputs_present(monkeypatch, tmp_path)
-    monkeypatch.setattr(
-        inject_roctx_loader,
-        "_cmake_executable",
-        lambda: "/fake/cmake",
-    )
+    monkeypatch.setattr(inject_roctx_loader, "_cmake_executable", lambda: "/fake/cmake")
     monkeypatch.setattr(
         inject_roctx_loader.subprocess,
         "run",
         lambda *a, **k: _StubCompleted(returncode=1, stderr="boom\n"),
     )
 
-    assert inject_roctx_loader._try_cmake_build(_FAKE_TAG) is None
+    assert inject_roctx_loader._try_jit(_FAKE_TAG) is None
     build_dir = inject_roctx_loader._jit_cache_dir() / f"cmake-build-{_FAKE_TAG}"
     assert build_dir.exists(), "build dir must survive a failure"
+
+
+# ---------------------------------------------------------------------------
+# explain_cmake_failure classification
+# ---------------------------------------------------------------------------
 
 
 def test_explain_cmake_failure_classifies_torch_not_found():
@@ -1070,41 +679,177 @@ def test_explain_cmake_failure_never_recommends_installing_ninja():
             )
 
 
+# ---------------------------------------------------------------------------
+# load(): tier ordering and REBUILD override
+# ---------------------------------------------------------------------------
+
+
+def test_rebuild_env_var_clears_failure_marker(monkeypatch, tmp_path):
+    """``ROCPROFCOMPUTE_REBUILD_ROCTX=1`` clears any cached failure marker."""
+    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    monkeypatch.setenv(inject_roctx_loader._REBUILD_ENV_VAR, "1")
+
+    inject_roctx_loader._record_jit_failure(_FAKE_TAG, RuntimeError("stale failure"))
+    assert inject_roctx_loader._previous_jit_failure(_FAKE_TAG) is not None
+
+    sentinel = object()
+    monkeypatch.setattr(
+        inject_roctx_loader,
+        "_try_prebuilt",
+        lambda _t: pytest.fail("prebuilt must be skipped under REBUILD"),
+    )
+    monkeypatch.setattr(
+        inject_roctx_loader,
+        "_try_jit",
+        lambda _t, force_rebuild=False: sentinel,
+    )
+
+    result = inject_roctx_loader.load()
+    assert result is sentinel
+    assert inject_roctx_loader._previous_jit_failure(_FAKE_TAG) is None, (
+        "REBUILD must clear the negative cache before the forced rebuild"
+    )
+
+
+def test_rebuild_env_var_skips_prebuilt_and_forces_jit_rebuild(monkeypatch):
+    """REBUILD=1 routes directly to the JIT build, skipping prebuilt and cache."""
+    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
+    calls = []
+    monkeypatch.setattr(
+        inject_roctx_loader,
+        "_try_prebuilt",
+        lambda tag: calls.append(("prebuilt", tag)) or None,
+    )
+    sentinel = object()
+
+    def _jit(tag, force_rebuild=False):
+        calls.append(("jit", tag, force_rebuild))
+        return sentinel
+
+    monkeypatch.setattr(inject_roctx_loader, "_try_jit", _jit)
+    monkeypatch.setenv(inject_roctx_loader._REBUILD_ENV_VAR, "1")
+
+    result = inject_roctx_loader.load()
+    assert result is sentinel
+    assert [c[0] for c in calls] == ["jit"], (
+        f"expected only _try_jit to fire under REBUILD; saw {calls!r}"
+    )
+    assert calls[0][1] == _FAKE_TAG, "tag must propagate to the build step"
+    assert calls[0][2] is True, "REBUILD must pass force_rebuild=True"
+
+
+def test_rebuild_env_var_returns_none_when_build_fails(monkeypatch):
+    """Under REBUILD, JIT failing yields ``None`` with no fallback."""
+    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
+    monkeypatch.setattr(
+        inject_roctx_loader,
+        "_try_prebuilt",
+        lambda _t: pytest.fail("_try_prebuilt called despite rebuild env var"),
+    )
+    monkeypatch.setattr(
+        inject_roctx_loader,
+        "_try_jit",
+        lambda _t, force_rebuild=False: None,
+    )
+    monkeypatch.setenv(inject_roctx_loader._REBUILD_ENV_VAR, "1")
+    assert inject_roctx_loader.load() is None
+
+
+def test_default_load_path_still_tries_prebuilt_first(monkeypatch):
+    """The prebuilt tier short-circuits the default load path."""
+    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
+    monkeypatch.delenv(inject_roctx_loader._REBUILD_ENV_VAR, raising=False)
+    calls = []
+    sentinel = object()
+    monkeypatch.setattr(
+        inject_roctx_loader,
+        "_try_prebuilt",
+        lambda tag: calls.append("prebuilt") or sentinel,
+    )
+    monkeypatch.setattr(
+        inject_roctx_loader,
+        "_try_jit",
+        lambda tag, force_rebuild=False: calls.append("jit") or None,
+    )
+    assert inject_roctx_loader.load() is sentinel
+    assert calls == ["prebuilt"], (
+        f"expected prebuilt to short-circuit before jit; saw {calls!r}"
+    )
+
+
+def test_default_load_path_walks_prebuilt_then_jit(monkeypatch):
+    """Tiers are tried in order: prebuilt, then jit."""
+    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
+    monkeypatch.delenv(inject_roctx_loader._REBUILD_ENV_VAR, raising=False)
+    calls = []
+    monkeypatch.setattr(
+        inject_roctx_loader,
+        "_try_prebuilt",
+        lambda tag: calls.append("prebuilt") or None,
+    )
+    sentinel = object()
+    monkeypatch.setattr(
+        inject_roctx_loader,
+        "_try_jit",
+        lambda tag, force_rebuild=False: calls.append("jit") or sentinel,
+    )
+    assert inject_roctx_loader.load() is sentinel
+    assert calls == ["prebuilt", "jit"], (
+        f"expected order prebuilt -> jit, saw {calls!r}"
+    )
+
+
+def test_load_does_not_raise_when_torch_missing(monkeypatch):
+    """``load()`` returns ``None`` when ``torch`` is not importable."""
+    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: None)
+    assert inject_roctx_loader.load() is None
+
+
+def test_load_returns_module_or_none_no_raise():
+    """``load()`` returns a module exposing the documented API, or ``None``."""
+    mod = inject_roctx_loader.load()
+    if mod is not None:
+        for sym in (
+            "install",
+            "uninstall",
+            "is_installed",
+            "push_user_scope",
+            "pop_user_scope",
+            "dump_stats",
+        ):
+            assert hasattr(mod, sym), f"loaded module is missing {sym}"
+
+
+# ---------------------------------------------------------------------------
+# loaded_tier / consume_diagnostics / format_load_diagnostic_trail
+# ---------------------------------------------------------------------------
+
+
 def test_loaded_tier_records_successful_step(monkeypatch):
     """``loaded_tier()`` reports the name of the tier that returned a module."""
     monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
     monkeypatch.delenv(inject_roctx_loader._REBUILD_ENV_VAR, raising=False)
     sentinel = object()
     monkeypatch.setattr(inject_roctx_loader, "_try_prebuilt", lambda _t: None)
-    monkeypatch.setattr(inject_roctx_loader, "_try_jit_cached", lambda _t: None)
     monkeypatch.setattr(
         inject_roctx_loader,
-        "_try_cmake_build",
-        lambda _t: sentinel,
-    )
-    monkeypatch.setattr(
-        inject_roctx_loader,
-        "_try_jit_build",
-        lambda _t: pytest.fail(
-            "cppext tier must not run when cmake succeeds",
-        ),
+        "_try_jit",
+        lambda _t, force_rebuild=False: sentinel,
     )
     assert inject_roctx_loader.load() is sentinel
-    assert inject_roctx_loader.loaded_tier() == inject_roctx_loader.TIER_CMAKE_BUILD
-    assert inject_roctx_loader.TIER_CMAKE_BUILD in inject_roctx_loader.C_TIER_NAMES
+    assert inject_roctx_loader.loaded_tier() == inject_roctx_loader.TIER_JIT
+    assert inject_roctx_loader.TIER_JIT in inject_roctx_loader.C_TIER_NAMES
 
 
 def test_loaded_tier_is_none_when_all_tiers_miss(monkeypatch):
     """``loaded_tier()`` returns ``None`` when every tier returns ``None``."""
     monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
     monkeypatch.delenv(inject_roctx_loader._REBUILD_ENV_VAR, raising=False)
-    for name in (
-        "_try_prebuilt",
-        "_try_jit_cached",
-        "_try_cmake_build",
-        "_try_jit_build",
-    ):
-        monkeypatch.setattr(inject_roctx_loader, name, lambda _t: None)
+    monkeypatch.setattr(inject_roctx_loader, "_try_prebuilt", lambda _t: None)
+    monkeypatch.setattr(
+        inject_roctx_loader, "_try_jit", lambda _t, force_rebuild=False: None
+    )
     assert inject_roctx_loader.load() is None
     assert inject_roctx_loader.loaded_tier() is None
 
@@ -1121,9 +866,9 @@ def test_load_resets_diagnostics_on_entry(monkeypatch):
         "_try_prebuilt",
         lambda _t: object(),
     )
-    monkeypatch.setattr(inject_roctx_loader, "_try_jit_cached", lambda _t: None)
-    monkeypatch.setattr(inject_roctx_loader, "_try_cmake_build", lambda _t: None)
-    monkeypatch.setattr(inject_roctx_loader, "_try_jit_build", lambda _t: None)
+    monkeypatch.setattr(
+        inject_roctx_loader, "_try_jit", lambda _t, force_rebuild=False: None
+    )
 
     inject_roctx_loader.load()
     _tier, diagnostics = inject_roctx_loader.consume_diagnostics()
@@ -1154,17 +899,13 @@ def test_consume_diagnostics_drains_and_returns_tier(monkeypatch):
     monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
     monkeypatch.delenv(inject_roctx_loader._REBUILD_ENV_VAR, raising=False)
     monkeypatch.setattr(inject_roctx_loader, "_try_prebuilt", lambda _t: None)
-    monkeypatch.setattr(inject_roctx_loader, "_try_jit_cached", lambda _t: None)
     monkeypatch.setattr(
-        inject_roctx_loader,
-        "_try_cmake_build",
-        lambda _t: object(),
+        inject_roctx_loader, "_try_jit", lambda _t, force_rebuild=False: object()
     )
-    monkeypatch.setattr(inject_roctx_loader, "_try_jit_build", lambda _t: None)
 
     inject_roctx_loader.load()
     tier, trail = inject_roctx_loader.consume_diagnostics()
-    assert tier == inject_roctx_loader.TIER_CMAKE_BUILD
+    assert tier == inject_roctx_loader.TIER_JIT
     assert isinstance(trail, list)
 
     tier2, trail2 = inject_roctx_loader.consume_diagnostics()
@@ -1177,9 +918,9 @@ def test_consume_diagnostics_returns_python_tier_failure_trail(monkeypatch):
     monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
     monkeypatch.delenv(inject_roctx_loader._REBUILD_ENV_VAR, raising=False)
     monkeypatch.setattr(inject_roctx_loader, "_try_prebuilt", lambda _t: None)
-    monkeypatch.setattr(inject_roctx_loader, "_try_jit_cached", lambda _t: None)
-    monkeypatch.setattr(inject_roctx_loader, "_try_cmake_build", lambda _t: None)
-    monkeypatch.setattr(inject_roctx_loader, "_try_jit_build", lambda _t: None)
+    monkeypatch.setattr(
+        inject_roctx_loader, "_try_jit", lambda _t, force_rebuild=False: None
+    )
 
     inject_roctx_loader.load()
     tier, trail = inject_roctx_loader.consume_diagnostics()
@@ -1224,42 +965,74 @@ def test_format_load_diagnostic_trail_includes_level_per_line():
     assert "tier B failed" in rendered
 
 
-def test_cmake_failure_marker_vetoes_subsequent_cppext_attempt(monkeypatch, tmp_path):
-    """A cmake failure marker vetoes a subsequent ``cpp_extension`` attempt."""
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-    _set_so_inputs_present(monkeypatch, tmp_path)
-    monkeypatch.setattr(
-        inject_roctx_loader,
-        "_cmake_executable",
-        lambda: "/fake/cmake",
-    )
-    monkeypatch.setattr(
-        inject_roctx_loader.subprocess,
-        "run",
-        lambda *a, **k: _StubCompleted(returncode=1, stderr="boom\n"),
-    )
+# ---------------------------------------------------------------------------
+# Python fallback integration
+# ---------------------------------------------------------------------------
 
-    assert inject_roctx_loader._try_cmake_build(_FAKE_TAG) is None
-    assert inject_roctx_loader._previous_jit_failure(_FAKE_TAG) is not None
 
-    cppext_import_attempts = []
-    real_import = (
-        __builtins__["__import__"]
-        if isinstance(__builtins__, dict)
-        else __builtins__.__import__
-    )
+def test_python_fallback_path_is_silent_about_so(monkeypatch):
+    """With the loader returning ``None``, the Python fallback still works."""
+    try:
+        import torch  # noqa: F401
+    except ImportError:
+        pytest.skip("torch not importable")
+    monkeypatch.setattr(inject_roctx_loader, "load", lambda **kw: None)
+    if "utils.inject_roctx" in sys.modules:
+        del sys.modules["utils.inject_roctx"]
+    inject_roctx = importlib.import_module("utils.inject_roctx")
+    try:
+        assert inject_roctx.using_c_tier() is False
+        assert inject_roctx.dump_recordfn_stats() is None
+        inject_roctx._push_scope("py.tier.test", "#1@test:1")
+        inject_roctx._pop_scope()
+    finally:
+        sys.modules.pop("utils.inject_roctx", None)
 
-    def watching_import(name, *a, **kw):
-        if "cpp_extension" in name:
-            cppext_import_attempts.append(name)
-        return real_import(name, *a, **kw)
 
-    monkeypatch.setattr(
-        "builtins.__import__",
-        watching_import,
-    )
-    assert inject_roctx_loader._try_jit_build(_FAKE_TAG) is None
-    assert cppext_import_attempts == [], (
-        f"cpp_extension import attempted despite shared marker: "
-        f"{cppext_import_attempts!r}"
-    )
+def test_python_fallback_uses_python_dispatch_sentinel(monkeypatch):
+    """When no user frame is available the fallback emits ``python.dispatch:0``."""
+    try:
+        import torch  # noqa: F401
+    except ImportError:
+        pytest.skip("torch not importable; utils.inject_roctx module-load exits")
+    monkeypatch.setattr(inject_roctx_loader, "load", lambda **kw: None)
+    if "utils.inject_roctx" in sys.modules:
+        del sys.modules["utils.inject_roctx"]
+    inject_roctx = importlib.import_module("utils.inject_roctx")
+    try:
+        monkeypatch.setattr("inspect.currentframe", lambda: None)
+        assert inject_roctx.resolve_user_caller_location() == "python.dispatch:0"
+        import inspect as _stdlib_inspect
+
+        src = _stdlib_inspect.getsource(inject_roctx)
+        assert "dispatcher:0" not in src, "legacy 'dispatcher:0' sentinel still present"
+    finally:
+        sys.modules.pop("utils.inject_roctx", None)
+
+
+def test_import_does_not_apply_global_patches(monkeypatch):
+    """Importing ``utils.inject_roctx`` does not patch PyTorch."""
+    monkeypatch.setattr(inject_roctx_loader, "load", lambda **kw: None)
+    if "utils.inject_roctx" in sys.modules:
+        del sys.modules["utils.inject_roctx"]
+
+    try:
+        import torch  # noqa: F401
+    except Exception:
+        pytest.skip("torch not importable")
+
+    import torch as _torch
+
+    pre = {
+        "compile": getattr(_torch, "compile", None),
+    }
+
+    inject_roctx = importlib.import_module("utils.inject_roctx")
+    try:
+        post = {
+            "compile": getattr(_torch, "compile", None),
+        }
+        assert hasattr(inject_roctx, "install_global_wraps")
+        assert post["compile"] is pre["compile"], "torch.compile was replaced on import"
+    finally:
+        sys.modules.pop("utils.inject_roctx", None)

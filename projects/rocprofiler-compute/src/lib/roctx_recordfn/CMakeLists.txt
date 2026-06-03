@@ -118,9 +118,7 @@ if(NOT _fp_rc EQUAL 0)
     )
 endif()
 
-set(_tag
-    "py${_py_major}.${_py_minor}_torch${_torch_version}_src${_src_fingerprint}"
-)
+set(_tag "py${_py_major}.${_py_minor}_torch${_torch_version}_src${_src_fingerprint}")
 set(_so_name "roctx_recordfn-${_tag}")
 
 # Pin Python3 lookup to the same interpreter as TORCH_TRACE_PYTHON.
@@ -255,8 +253,6 @@ if(NOT _rcfn_standalone)
         TARGETS ${_so_name}
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${CMAKE_PROJECT_NAME} COMPONENT main
     )
-
-    set(ROCTX_RECORDFN_SO_PATH "$<TARGET_FILE:${_so_name}>" PARENT_SCOPE)
 endif()
 
 if(NOT _rcfn_standalone AND ENABLE_TESTS AND TARGET gtest_main)

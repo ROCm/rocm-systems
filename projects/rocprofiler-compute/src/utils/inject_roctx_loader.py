@@ -1,12 +1,14 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Resolve and load the roctx_recordfn pybind11 extension.
+"""Resolve and load the ``roctx_recordfn`` pybind11 extension.
 
-Resolution order: explicit pin, prebuilt, JIT cache, cmake build,
-``torch.utils.cpp_extension``. Returns ``None`` when no tier succeeds.
-Caches are keyed by a fingerprint of the C++ inputs and the active
-PyTorch ABI. Set ``ROCPROFCOMPUTE_REBUILD_ROCTX=1`` to bypass caches.
+The loader first looks for a prebuilt ``.so`` under the install
+prefix, then falls back to a cached cmake build under
+``~/.cache/rocprofiler-compute/``. Cache entries are keyed by the
+Python and torch versions in use and a fingerprint of the C++
+inputs. Set ``ROCPROFCOMPUTE_REBUILD_ROCTX=1`` to force a fresh
+build.
 """
 
 import hashlib
@@ -26,32 +28,18 @@ _SO_BUILDFILE = _SO_SOURCE_DIR / "CMakeLists.txt"
 
 _INSTALL_TREE_PROJECT_NAME = "rocprofiler-compute"
 
-_CMAKE_TIER_NAME = "cmake-build"
-_CPPEXT_TIER_NAME = "cpp-extension"
-
-TIER_EXPLICIT = "explicit"
 TIER_PREBUILT = "prebuilt"
-TIER_JIT_CACHED = "jit_cached"
-TIER_CMAKE_BUILD = "cmake_build"
-TIER_CPP_EXTENSION = "cpp_extension"
+TIER_JIT = "jit"
 
-C_TIER_NAMES = frozenset((
-    TIER_EXPLICIT,
-    TIER_PREBUILT,
-    TIER_JIT_CACHED,
-    TIER_CMAKE_BUILD,
-    TIER_CPP_EXTENSION,
-))
+C_TIER_NAMES = frozenset((TIER_PREBUILT, TIER_JIT))
 
 
 _LAST_LOAD_DIAGNOSTICS: list[tuple[str, str]] = []
 _LAST_LOADED_TIER: Optional[str] = None
 
-# Inputs hashed into the cache tag. Add any new build input here.
 _FINGERPRINT_INPUTS = (_SO_SOURCE, _SO_BUILDFILE)
 
 _REBUILD_ENV_VAR = "ROCPROFCOMPUTE_REBUILD_ROCTX"
-_EXPLICIT_SO_ENV_VAR = "ROCPROFCOMPUTE_ROCTX_RECORDFN_SO"
 
 
 def _safe_log(level: str, msg: str) -> None:
@@ -93,7 +81,7 @@ def format_load_diagnostic_trail(
 
 
 def _source_fingerprint() -> str:
-    """Return the first 12 hex characters of the source SHA-256, or ``"missing"``."""
+    """Return the first 12 hex chars of a SHA-256 over the source inputs, or ``"missing"``."""
     h = hashlib.sha256()
     seen = 0
     for path in _FINGERPRINT_INPUTS:
@@ -110,7 +98,7 @@ def _source_fingerprint() -> str:
 
 
 def compute_tag() -> Optional[str]:
-    """Return the cache tag for the active PyTorch ABI, or ``None``."""
+    """Return the cache tag for the active Python and torch versions, or ``None``."""
     try:
         import torch
     except Exception:
@@ -139,32 +127,6 @@ def _install_tree_prebuilt_candidates(tag: str) -> list[Path]:
     so_name = f"roctx_recordfn-{tag}.so"
     pattern = f"lib*/{_INSTALL_TREE_PROJECT_NAME}/{so_name}"
     return sorted(install_root.glob(pattern))
-
-
-def _try_explicit_so(tag: str) -> Optional[types.ModuleType]:
-    """Load the ``.so`` pinned via ``ROCPROFCOMPUTE_ROCTX_RECORDFN_SO``."""
-    env_path_str = os.environ.get(_EXPLICIT_SO_ENV_VAR)
-    if not env_path_str:
-        return None
-    env_path = Path(env_path_str)
-    if not env_path.is_file():
-        _safe_log(
-            "warning",
-            f"{_EXPLICIT_SO_ENV_VAR}={env_path_str} but the file does "
-            "not exist; skipping (no build-tier fallback)",
-        )
-        return None
-    try:
-        mod = _import_module_from_path("roctx_recordfn", env_path)
-    except Exception as e:
-        _safe_log(
-            "warning",
-            f"{_EXPLICIT_SO_ENV_VAR}={env_path_str} failed to import: "
-            f"{e}; skipping (no build-tier fallback)",
-        )
-        return None
-    _safe_log("log", f"loaded explicit .so from {_EXPLICIT_SO_ENV_VAR}={env_path}")
-    return mod
 
 
 def _try_prebuilt(tag: str) -> Optional[types.ModuleType]:
@@ -198,45 +160,9 @@ def _jit_cache_dir() -> Optional[Path]:
 
 
 _PREBUILT_HINT = (
-    "ship a prebuilt roctx_recordfn-{tag}.so under "
-    "<install-prefix>/lib*/" + _INSTALL_TREE_PROJECT_NAME + "/ (resolved by the "
-    "loader's prebuilt tier), or pin one explicitly via "
-    "ROCPROFCOMPUTE_ROCTX_RECORDFN_SO=<path>"
+    "ship a prebuilt roctx_recordfn-<tag>.so under "
+    "<install-prefix>/lib*/" + _INSTALL_TREE_PROJECT_NAME + "/"
 )
-
-
-def _explain_cppext_failure(err: Exception) -> tuple[str, str]:
-    """Classify a ``torch.utils.cpp_extension`` failure into ``(reason, hint)``."""
-    text = str(err).lower()
-    if "ninja" in text:
-        return (
-            "torch.utils.cpp_extension.load on this PyTorch build "
-            "requires the ninja build backend, which rocprof-compute "
-            "does not list as a dependency",
-            "install cmake to enable the cmake build tier (which does "
-            "not need ninja); alternatively, " + _PREBUILT_HINT,
-        )
-    if "torch/extension.h" in text or "torch/torch.h" in text:
-        return (
-            "libtorch headers not found via torch.utils.cpp_extension",
-            "ensure torch is fully installed (the official wheels "
-            "ship the headers under site-packages/torch/include); "
-            "alternatively, " + _PREBUILT_HINT,
-        )
-    if any(
-        tok in text
-        for tok in ("g++", "gcc", "clang", "no such file", "command not found")
-    ):
-        return (
-            "host C++ compiler not found or non-functional",
-            "ensure a working g++ or clang is on PATH; alternatively, "
-            + _PREBUILT_HINT,
-        )
-    return (
-        "torch.utils.cpp_extension.load raised an unrecognised error",
-        "see the torch exception above; if the failure is environmental, "
-        + _PREBUILT_HINT,
-    )
 
 
 def _explain_cmake_failure(
@@ -277,34 +203,15 @@ def _explain_cmake_failure(
     )
 
 
-def _log_cppext_failure(err: Exception) -> None:
-    """Log a classified ``cpp_extension`` failure."""
-    reason, hint = _explain_cppext_failure(err)
-    _safe_log("log", f"cpp_extension JIT skipped: {reason}: {err}")
-    _safe_log("log", f"to enable the C++ tier, {hint}")
-
-
 def _log_cmake_failure(phase: str, err: Exception, stderr_tail: str) -> None:
     """Log a classified cmake failure, including a stderr tail."""
     reason, hint = _explain_cmake_failure(phase, err, stderr_tail or "")
-    _safe_log("log", f"cmake build skipped: {reason}: {err}")
+    _safe_log("log", f"cmake build failed: {reason}: {err}")
     if stderr_tail:
         tail = "\n".join(stderr_tail.strip().splitlines()[-12:])
         if tail:
             _safe_log("log", f"cmake stderr (tail):\n{tail}")
     _safe_log("log", f"to enable the C++ tier, {hint}")
-
-
-def _jit_compile_viable(cpp_ext: types.ModuleType) -> bool:
-    """Return True when ``cpp_extension.load`` can run without requiring ninja."""
-    import inspect
-
-    try:
-        if "use_ninja" in inspect.signature(cpp_ext.load).parameters:
-            return True
-    except (TypeError, ValueError):
-        pass
-    return shutil.which("ninja") is not None
 
 
 def _jit_failure_marker(tag: str) -> Optional[Path]:
@@ -318,10 +225,10 @@ def _jit_failure_marker(tag: str) -> Optional[Path]:
 def _record_jit_failure(
     tag: str,
     err: Exception,
-    reason: str = _CPPEXT_TIER_NAME,
+    reason: str = TIER_JIT,
     stderr: str = "",
 ) -> None:
-    """Write a failure marker shared by both build tiers."""
+    """Write a failure marker for the JIT tier."""
     try:
         marker = _jit_failure_marker(tag)
         if marker is None:
@@ -340,7 +247,7 @@ def _record_jit_failure(
 
 
 def _previous_jit_failure(tag: str) -> Optional[str]:
-    """Return the cached failure summary for ``tag``."""
+    """Return the recorded failure summary for ``tag``, if any."""
     try:
         marker = _jit_failure_marker(tag)
         if marker is not None and marker.exists():
@@ -367,7 +274,7 @@ def _clear_jit_failure(tag: str) -> None:
 
 
 def _install_cached_so(src_so: Path, cached_so: Path) -> None:
-    """Copy ``src_so`` onto ``cached_so`` for the next-run JIT cache hit."""
+    """Copy ``src_so`` onto ``cached_so`` for the next-run cache hit."""
     if not src_so.exists():
         return
     try:
@@ -379,33 +286,33 @@ def _install_cached_so(src_so: Path, cached_so: Path) -> None:
         )
 
 
-def _try_jit_cached(tag: str) -> Optional[types.ModuleType]:
-    cache_dir = _jit_cache_dir()
-    if cache_dir is None:
-        return None
-    so_path = cache_dir / f"roctx_recordfn-{tag}.so"
-    if not so_path.exists():
-        return None
-    try:
-        mod = _import_module_from_path("roctx_recordfn", so_path)
-        _safe_log("log", f"loaded JIT-cached .so: {so_path}")
-        return mod
-    except Exception as e:
-        _safe_log("warning", f"JIT-cached .so at {so_path} failed to load: {e}")
-        try:
-            so_path.unlink()
-        except Exception:
-            pass
-        return None
-
-
 def _cmake_executable() -> Optional[str]:
     """Return the cmake executable from ``$CMAKE`` or ``PATH``."""
     return shutil.which(os.environ.get("CMAKE", "cmake"))
 
 
-def _try_cmake_build(tag: str) -> Optional[types.ModuleType]:
-    """Build the extension via the bundled ``CMakeLists.txt``."""
+def _try_jit(tag: str, *, force_rebuild: bool = False) -> Optional[types.ModuleType]:
+    """Return the cached or freshly cmake-built ``roctx_recordfn`` module."""
+    cache_dir = _jit_cache_dir()
+    if cache_dir is None:
+        return None
+    cached_so = cache_dir / f"roctx_recordfn-{tag}.so"
+
+    if not force_rebuild and cached_so.exists():
+        try:
+            mod = _import_module_from_path("roctx_recordfn", cached_so)
+            _safe_log("log", f"loaded JIT-cached .so: {cached_so}")
+            return mod
+        except Exception as e:
+            _safe_log(
+                "warning",
+                f"JIT-cached .so at {cached_so} failed to load: {e}",
+            )
+            try:
+                cached_so.unlink()
+            except Exception:
+                pass
+
     if not _SO_SOURCE.exists() or not _SO_BUILDFILE.exists():
         _safe_log(
             "log",
@@ -426,16 +333,12 @@ def _try_cmake_build(tag: str) -> Optional[types.ModuleType]:
         )
         return None
 
-    cache_dir = _jit_cache_dir()
-    if cache_dir is None:
-        _safe_log("log", "jit cache dir unavailable; skipping cmake tier")
-        return None
     build_dir = cache_dir / f"cmake-build-{tag}"
     try:
         build_dir.mkdir(parents=True, exist_ok=True)
     except OSError as e:
         _log_cmake_failure("setup", e, "")
-        _record_jit_failure(tag, e, reason=_CMAKE_TIER_NAME)
+        _record_jit_failure(tag, e)
         return None
 
     configure_argv = [
@@ -456,18 +359,13 @@ def _try_cmake_build(tag: str) -> Optional[types.ModuleType]:
         )
     except OSError as e:
         _log_cmake_failure("invoke", e, "")
-        _record_jit_failure(tag, e, reason=_CMAKE_TIER_NAME)
+        _record_jit_failure(tag, e)
         return None
 
     if configure.returncode != 0:
         err = RuntimeError(f"cmake configure exited with rc={configure.returncode}")
         _log_cmake_failure("configure", err, configure.stderr)
-        _record_jit_failure(
-            tag,
-            err,
-            reason=_CMAKE_TIER_NAME,
-            stderr=configure.stderr,
-        )
+        _record_jit_failure(tag, err, stderr=configure.stderr)
         return None
 
     try:
@@ -479,18 +377,13 @@ def _try_cmake_build(tag: str) -> Optional[types.ModuleType]:
         )
     except OSError as e:
         _log_cmake_failure("invoke", e, "")
-        _record_jit_failure(tag, e, reason=_CMAKE_TIER_NAME)
+        _record_jit_failure(tag, e)
         return None
 
     if build.returncode != 0:
         err = RuntimeError(f"cmake --build exited with rc={build.returncode}")
         _log_cmake_failure("build", err, build.stderr)
-        _record_jit_failure(
-            tag,
-            err,
-            reason=_CMAKE_TIER_NAME,
-            stderr=build.stderr,
-        )
+        _record_jit_failure(tag, err, stderr=build.stderr)
         return None
 
     produced = build_dir / f"roctx_recordfn-{tag}.so"
@@ -499,17 +392,16 @@ def _try_cmake_build(tag: str) -> Optional[types.ModuleType]:
             f"cmake build succeeded but expected .so missing at {produced}"
         )
         _log_cmake_failure("missing-output", err, "")
-        _record_jit_failure(tag, err, reason=_CMAKE_TIER_NAME)
+        _record_jit_failure(tag, err)
         return None
 
-    cached_so = cache_dir / f"roctx_recordfn-{tag}.so"
     _install_cached_so(produced, cached_so)
 
     try:
         mod = _import_module_from_path("roctx_recordfn", cached_so)
     except Exception as e:
         _log_cmake_failure("load", e, "")
-        _record_jit_failure(tag, e, reason=_CMAKE_TIER_NAME)
+        _record_jit_failure(tag, e)
         return None
 
     _clear_jit_failure(tag)
@@ -519,111 +411,8 @@ def _try_cmake_build(tag: str) -> Optional[types.ModuleType]:
     return mod
 
 
-def _try_jit_build(tag: str) -> Optional[types.ModuleType]:
-    """Build the extension via ``torch.utils.cpp_extension.load``.
-
-    Skipped when the call would require ninja.
-    """
-    if not _SO_SOURCE.exists():
-        _safe_log("log", f"source not found at {_SO_SOURCE}; cannot JIT-compile")
-        return None
-
-    prior = _previous_jit_failure(tag)
-    if prior is not None:
-        _safe_log(
-            "log",
-            f"skipping JIT build (prior failure cached for tag {tag}): {prior}",
-        )
-        return None
-
-    try:
-        import torch.utils.cpp_extension as cpp_ext
-    except Exception as e:
-        _log_cppext_failure(e)
-        _record_jit_failure(tag, e, reason=_CPPEXT_TIER_NAME)
-        return None
-
-    if not _jit_compile_viable(cpp_ext):
-        err = RuntimeError(
-            "the running PyTorch's torch.utils.cpp_extension.load "
-            "requires the ninja build backend, which rocprof-compute "
-            "does not depend on; the cpp_extension tier is skipped on "
-            "this host (the cmake tier is the supported alternative)"
-        )
-        _log_cppext_failure(err)
-        _record_jit_failure(tag, err, reason=_CPPEXT_TIER_NAME)
-        return None
-
-    rocm_path = Path(os.environ.get("ROCM_PATH", "/opt/rocm"))
-    extra_include_paths = [str(rocm_path / "include")]
-    extra_ldflags = [
-        f"-L{rocm_path / 'lib'}",
-        "-lrocprofiler-sdk-roctx",
-    ]
-    extra_cflags = ["-O2", "-fvisibility=hidden", "-Wno-deprecated-declarations"]
-
-    cache_dir = _jit_cache_dir()
-    if cache_dir is None:
-        err = RuntimeError("jit cache dir unavailable; cannot host cpp_extension build")
-        _log_cppext_failure(err)
-        return None
-    build_dir = cache_dir / f"build-{tag}"
-    try:
-        build_dir.mkdir(parents=True, exist_ok=True)
-    except OSError as e:
-        _log_cppext_failure(e)
-        _record_jit_failure(tag, e, reason=_CPPEXT_TIER_NAME)
-        return None
-
-    # ``use_ninja=False`` is rejected on newer PyTorch; retry without it.
-    load_kwargs = dict(
-        name="roctx_recordfn",
-        sources=[str(_SO_SOURCE)],
-        extra_include_paths=extra_include_paths,
-        extra_cflags=extra_cflags,
-        extra_ldflags=extra_ldflags,
-        build_directory=str(build_dir),
-        with_cuda=False,
-        verbose=False,
-        use_ninja=False,
-    )
-    try:
-        mod = cpp_ext.load(**load_kwargs)
-    except TypeError as type_err:
-        if "use_ninja" not in str(type_err):
-            _log_cppext_failure(type_err)
-            _record_jit_failure(tag, type_err, reason=_CPPEXT_TIER_NAME)
-            return None
-        load_kwargs.pop("use_ninja", None)
-        try:
-            mod = cpp_ext.load(**load_kwargs)
-        except Exception as e:
-            _log_cppext_failure(e)
-            _record_jit_failure(tag, e, reason=_CPPEXT_TIER_NAME)
-            return None
-    except Exception as e:
-        _log_cppext_failure(e)
-        _record_jit_failure(tag, e, reason=_CPPEXT_TIER_NAME)
-        return None
-
-    _install_cached_so(
-        build_dir / "roctx_recordfn.so",
-        cache_dir / f"roctx_recordfn-{tag}.so",
-    )
-    _clear_jit_failure(tag)
-    shutil.rmtree(build_dir, ignore_errors=True)
-
-    _safe_log("log", f"JIT-compiled roctx_recordfn.so for {tag}")
-    return mod
-
-
 def load(force_python_fallback: bool = False) -> Optional[types.ModuleType]:
-    """Return the ``roctx_recordfn`` module, or ``None`` for the Python fallback.
-
-    ``ROCPROFCOMPUTE_ROCTX_RECORDFN_SO=<path>`` pins to that shared
-    object with no fallback. ``ROCPROFCOMPUTE_REBUILD_ROCTX=1`` skips
-    cached tiers and forces a fresh build.
-    """
+    """Return the ``roctx_recordfn`` module, or ``None`` for the Python fallback."""
     global _LAST_LOADED_TIER
     _LAST_LOAD_DIAGNOSTICS.clear()
     _LAST_LOADED_TIER = None
@@ -637,34 +426,21 @@ def load(force_python_fallback: bool = False) -> Optional[types.ModuleType]:
         _safe_log("warning", "torch not importable; using Python-only injector")
         return None
 
-    if os.environ.get(_EXPLICIT_SO_ENV_VAR):
-        explicit_mod = _try_explicit_so(tag)
-        if explicit_mod is not None:
-            _LAST_LOADED_TIER = TIER_EXPLICIT
-        return explicit_mod
-
     if os.environ.get(_REBUILD_ENV_VAR) == "1":
         _safe_log(
             "warning",
-            f"{_REBUILD_ENV_VAR}=1: bypassing prebuilt and JIT-cached "
-            f".so, forcing fresh build for tag {tag}",
+            f"{_REBUILD_ENV_VAR}=1: bypassing prebuilt and JIT cache, "
+            f"forcing fresh build for tag {tag}",
         )
         _clear_jit_failure(tag)
-        for tier_name, step in (
-            (TIER_CMAKE_BUILD, _try_cmake_build),
-            (TIER_CPP_EXTENSION, _try_jit_build),
-        ):
-            mod = step(tag)
-            if mod is not None:
-                _LAST_LOADED_TIER = tier_name
-                return mod
-        return None
+        mod = _try_jit(tag, force_rebuild=True)
+        if mod is not None:
+            _LAST_LOADED_TIER = TIER_JIT
+        return mod
 
     for tier_name, step in (
         (TIER_PREBUILT, _try_prebuilt),
-        (TIER_JIT_CACHED, _try_jit_cached),
-        (TIER_CMAKE_BUILD, _try_cmake_build),
-        (TIER_CPP_EXTENSION, _try_jit_build),
+        (TIER_JIT, _try_jit),
     ):
         mod = step(tag)
         if mod is not None:
