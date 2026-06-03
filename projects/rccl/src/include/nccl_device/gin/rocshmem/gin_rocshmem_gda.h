@@ -36,6 +36,8 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
       uint32_t dstRkey = loadConst(loadConst(&dstMh->rkeys) + peer);
       uint32_t srcLkey = loadConst(&srcMh->lkey);
 
+      printf("GDA Put: rank=%d peer=%d dst=%p src=%p bytes=%zu dstRkey=0x%x srcLkey=0x%x\n",
+             ctx.rank, peer, (void*)dstAddr, (void*)srcAddr, bytes, dstRkey, srcLkey);
       qp->put_nbi_with_keys((void*)dstAddr, dstRkey, (void*)srcAddr, srcLkey, bytes, wf_info, !hasSignal);
     }
 
@@ -43,6 +45,8 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
       if (signalOp == ncclGinSignalInc) signalOpArg = 1;
       uintptr_t sigAddr = loadConst(loadConst(&rsCtx->signal_raddrs) + peer) + sizeof(uint64_t) * signalId;
       uint32_t sigRkey = loadConst(loadConst(&rsCtx->signal_rkeys) + peer);
+      printf("GDA Signal: rank=%d peer=%d sigAddr=%p sigRkey=0x%x val=%lld\n",
+             ctx.rank, peer, (void*)sigAddr, sigRkey, (long long)signalOpArg);
       qp->atomic_add_with_keys((void*)sigAddr, sigRkey, (int64_t)signalOpArg, wf_info, /*fence=*/true);
     } else if (hasCounter) {
       qp->quiet(wf_info);
