@@ -105,16 +105,11 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
 }
 
 void
-shader_data_callback(rocprofiler_agent_id_t /* agent */,
-                     int64_t /* se_id */,
-                     uint64_t /* chunk_index */,
-                     void*  se_data,
-                     size_t data_size,
-                     rocprofiler_thread_trace_shader_data_flags_t /* flags */,
+shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
                      rocprofiler_user_data_t /* userdata */)
 {
-    DECODER_CALL(
-        rocprof_trace_decoder_parse(decoder, se_data, data_size, &hotspots::accumulate, nullptr));
+    DECODER_CALL(rocprof_trace_decoder_parse(
+        decoder, shader_data.data, shader_data.data_size, &hotspots::accumulate, nullptr));
 }
 
 }  // namespace Decoder
