@@ -319,9 +319,7 @@ def validate_rocpd(
 
     for rule in rules:
         print(f"\nValidating table: {rule.get_table_identifier()}")
-        table_valid = validate_table(
-            cursor, rule, tables, available_metrics, host_is_apu
-        )
+        table_valid = validate_table(cursor, rule, tables, available_metrics, host_is_apu)
         db_valid = db_valid and table_valid
 
     if db_valid:

@@ -19,6 +19,7 @@ def expects_kfd_page_migrate() -> bool:
     """Discrete GPUs should record PAGE_MIGRATE; APUs often fault without migrate."""
     return not is_apu_host()
 
+
 pytestmark = [
     pytest.mark.gpu,
     pytest.mark.xnack,
