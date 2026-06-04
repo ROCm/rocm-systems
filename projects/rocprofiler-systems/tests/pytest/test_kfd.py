@@ -12,6 +12,12 @@ and the ROCpd database.
 from __future__ import annotations
 import pytest
 from conftest import RocprofsysTest
+from rocprofsys import is_apu_host
+
+
+def expects_kfd_page_migrate() -> bool:
+    """Discrete GPUs should record PAGE_MIGRATE; APUs often fault without migrate."""
+    return not is_apu_host()
 
 pytestmark = [
     pytest.mark.gpu,
@@ -94,13 +100,14 @@ class TestKFD(RocprofsysTest):
             pass_regex=[r"PAGE_FAULT"],
         )
 
-        self.assert_perfetto(
-            result,
-            subtest_name="Perfetto KFD page migrate validation",
-            categories=["rocm_kfd_page_migrate"],
-            print_output=True,
-            pass_regex=[r"PAGE_MIGRATE"],
-        )
+        if expects_kfd_page_migrate():
+            self.assert_perfetto(
+                result,
+                subtest_name="Perfetto KFD page migrate validation",
+                categories=["rocm_kfd_page_migrate"],
+                print_output=True,
+                pass_regex=[r"PAGE_MIGRATE"],
+            )
 
         self.assert_perfetto(
             result,
@@ -148,13 +155,14 @@ class TestKFD(RocprofsysTest):
             pass_regex=[r"6 tests completed"],
         )
 
-        self.assert_perfetto(
-            result,
-            subtest_name="Perfetto KFD prefetch migration validation",
-            categories=["rocm_kfd_page_migrate"],
-            print_output=True,
-            pass_regex=[r"PAGE_MIGRATE"],
-        )
+        if expects_kfd_page_migrate():
+            self.assert_perfetto(
+                result,
+                subtest_name="Perfetto KFD prefetch migration validation",
+                categories=["rocm_kfd_page_migrate"],
+                print_output=True,
+                pass_regex=[r"PAGE_MIGRATE"],
+            )
 
         self.assert_perfetto(
             result,
@@ -163,13 +171,22 @@ class TestKFD(RocprofsysTest):
             print_output=True,
         )
 
-        self.assert_perfetto(
-            result,
-            subtest_name="Perfetto KFD combined event validation",
-            categories=["rocm_kfd_page_fault", "rocm_kfd_page_migrate"],
-            print_output=True,
-            pass_regex=[r"PAGE_FAULT", r"PAGE_MIGRATE"],
-        )
+        if expects_kfd_page_migrate():
+            self.assert_perfetto(
+                result,
+                subtest_name="Perfetto KFD combined event validation",
+                categories=["rocm_kfd_page_fault", "rocm_kfd_page_migrate"],
+                print_output=True,
+                pass_regex=[r"PAGE_FAULT", r"PAGE_MIGRATE"],
+            )
+        else:
+            self.assert_perfetto(
+                result,
+                subtest_name="Perfetto KFD combined event validation",
+                categories=["rocm_kfd_page_fault"],
+                print_output=True,
+                pass_regex=[r"PAGE_FAULT"],
+            )
 
         self.assert_rocpd(
             result,
@@ -212,13 +229,14 @@ class TestKFD(RocprofsysTest):
             pass_regex=[r"PAGE_FAULT"],
         )
 
-        self.assert_perfetto(
-            result,
-            subtest_name="Perfetto KFD page migrate validation (pressure)",
-            categories=["rocm_kfd_page_migrate"],
-            print_output=True,
-            pass_regex=[r"PAGE_MIGRATE"],
-        )
+        if expects_kfd_page_migrate():
+            self.assert_perfetto(
+                result,
+                subtest_name="Perfetto KFD page migrate validation (pressure)",
+                categories=["rocm_kfd_page_migrate"],
+                print_output=True,
+                pass_regex=[r"PAGE_MIGRATE"],
+            )
 
         self.assert_perfetto(
             result,

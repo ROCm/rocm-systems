@@ -22,6 +22,7 @@ class validation_rule:
         error_message,
         requires=None,
         expected_result_max=None,
+        skip_on_apu=False,
     ):
         self.description = description
         self.query = query
@@ -30,6 +31,7 @@ class validation_rule:
         self.error_message = error_message
         self.requires = requires
         self.expected_result_max = expected_result_max
+        self.skip_on_apu = skip_on_apu
 
     def __repr__(self):
         return f"validation_rule(description={self.description}, query={self.query})"
@@ -145,7 +147,19 @@ def print_help():
     """)
 
 
-def validate_table(cursor, rule, tables, available_metrics=None) -> bool:
+def _import_is_apu_host():
+    tests_dir = Path(os.path.dirname(os.path.abspath(__file__)))
+    pytest_dir = tests_dir / "pytest"
+    if str(pytest_dir) not in sys.path:
+        sys.path.insert(0, str(pytest_dir))
+    from rocprofsys.gpu import is_apu_host
+
+    return is_apu_host
+
+
+def validate_table(
+    cursor, rule, tables, available_metrics=None, host_is_apu=False
+) -> bool:
     """
     Validates a database table against a set of rules.
     This function checks if a table specified by `rule` exists in the provided `tables` list,
@@ -235,6 +249,13 @@ def validate_table(cursor, rule, tables, available_metrics=None) -> bool:
                     )
                     continue
 
+                if validation_query.skip_on_apu and host_is_apu:
+                    print(
+                        f"⏭️  Skipping '{validation_query.description}' on '{table_name}' "
+                        f"(skip_on_apu: APU host — page migrate not expected)"
+                    )
+                    continue
+
                 try:
                     query = validation_query.query.replace("{table_name}", table_name)
                     cursor.execute(query)
@@ -276,7 +297,9 @@ def validate_table(cursor, rule, tables, available_metrics=None) -> bool:
     return all_tables_passed
 
 
-def validate_rocpd(cursor, rules, tables, available_metrics=None) -> bool:
+def validate_rocpd(
+    cursor, rules, tables, available_metrics=None, host_is_apu=False
+) -> bool:
     """
     Validation of a ROCPD database by applying a set of validation rules to specified tables.
     It iterates through each rule, validates the corresponding table, and provides feedback on the validation status.
@@ -296,7 +319,9 @@ def validate_rocpd(cursor, rules, tables, available_metrics=None) -> bool:
 
     for rule in rules:
         print(f"\nValidating table: {rule.get_table_identifier()}")
-        table_valid = validate_table(cursor, rule, tables, available_metrics)
+        table_valid = validate_table(
+            cursor, rule, tables, available_metrics, host_is_apu
+        )
         db_valid = db_valid and table_valid
 
     if db_valid:
@@ -346,6 +371,7 @@ def load_validation_rules(validation_rules) -> list:
                             error_message=vq["error_message"],
                             requires=vq.get("requires", None),
                             expected_result_max=vq.get("expected_result_max"),
+                            skip_on_apu=vq.get("skip_on_apu", False),
                         )
                         validation_queries.append(validation_query_obj)
 
@@ -444,6 +470,14 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Warning: Could not detect GPU metrics ({e}), running all queries")
 
+    host_is_apu = False
+    try:
+        host_is_apu = _import_is_apu_host()()
+        if host_is_apu:
+            print("APU host detected (rocminfo); skip_on_apu rules will be skipped")
+    except Exception as e:
+        print(f"Warning: Could not detect APU host ({e}), running all queries")
+
     print(f"Validating ROCPD. Database file: {args.database}")
 
     db_path = args.database
@@ -468,7 +502,9 @@ if __name__ == "__main__":
         cursor.execute("SELECT name FROM sqlite_master WHERE type IN ('table', 'view');")
         tables = cursor.fetchall()
 
-        validation_result = validate_rocpd(cursor, rules, tables, available_metrics)
+        validation_result = validate_rocpd(
+            cursor, rules, tables, available_metrics, host_is_apu
+        )
 
         conn.close()
 
