@@ -351,6 +351,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "rocm",
         "kfd",
         "unified_memory",
+        "validation_usm",
         "selective_regions",
         "minimal",
         "rank_filter",
@@ -1035,7 +1036,7 @@ def _emit_test_item_block(
     props: list[str] = []
     if labels:
         props.append(f'    LABELS "{";".join(sorted(labels))}"')
-    props.append(f"    TIMEOUT ${{_TEST_TIMEOUT}}")
+    props.append("    TIMEOUT ${_TEST_TIMEOUT}")
     props.append(f"    SKIP_RETURN_CODE {SKIP_RETURN_CODE}")
     props.append('    FIXTURES_REQUIRED "rocprofsys-global-tmp-files"')
     if run_serial:
@@ -1634,7 +1635,7 @@ def lock_env(base_env: dict[str, str]) -> dict[str, str]:
         "ROCPROFSYS_COUT_OUTPUT": "ON",
         "ROCPROFSYS_TIME_OUTPUT": "OFF",
         "ROCPROFSYS_TIMELINE_PROFILE": "OFF",
-        "ROCPROFSYS_LOG_LEVEL": "trace",
+        "ROCPROFSYS_LOG_LEVEL": "info",
         "LD_LIBRARY_PATH": base_env.get("LD_LIBRARY_PATH", ""),
     }
 
@@ -2261,6 +2262,10 @@ def assert_perfetto(
     subtests, tests_dir, record_subtest_failure, request, test_output_dir
 ):
     """Fixture that returns an assert_perfetto function.
+
+    Trace validation kwargs (``categories``, ``labels``, ``counts``, ``depths``,
+    ``label_substrings``, etc.) are forwarded to
+    ``validate_perfetto_trace``; see that function's docstring.
 
     Args not from validate_perfetto_trace:
         subtest_name: Name shown in subtest output (defaults to "Perfetto validation")
