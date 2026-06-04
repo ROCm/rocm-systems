@@ -248,6 +248,9 @@ ncclResult_t ncclGinRocshmemGdaRegister(ncclGin_t *ginComm, void *ginCtx, void *
     return ncclSystemError;
   }
 
+  INFO(NCCL_INIT, "GIN rocshmem GDA Register: rank=%d addr=%p size=%zu lkey=0x%x rkey=0x%x",
+       ctx->rank, addr, size, lkey, rkey);
+
   // Allgather rkeys and base VAs across all peers
   uint32_t *rkeys_buf = (uint32_t *)malloc(sizeof(uint32_t) * ctx->nRanks);
   uintptr_t *vas_buf = (uintptr_t *)malloc(sizeof(uintptr_t) * ctx->nRanks);
@@ -255,6 +258,11 @@ ncclResult_t ncclGinRocshmemGdaRegister(ncclGin_t *ginComm, void *ginCtx, void *
   vas_buf[ctx->rank] = (uintptr_t)addr;
   bootstrapAllGather(ctx->comm->bootstrap, rkeys_buf, sizeof(uint32_t));
   bootstrapAllGather(ctx->comm->bootstrap, vas_buf, sizeof(uintptr_t));
+
+  for (int i = 0; i < ctx->nRanks; i++) {
+    INFO(NCCL_INIT, "GIN rocshmem GDA Register: rank=%d peer=%d rkey=0x%x va=%p",
+         ctx->rank, i, rkeys_buf[i], (void*)vas_buf[i]);
+  }
 
   uint32_t *rkeys_dev = nullptr;
   uintptr_t *remote_vas_dev = nullptr;

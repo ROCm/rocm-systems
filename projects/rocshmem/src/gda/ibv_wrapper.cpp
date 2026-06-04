@@ -285,7 +285,8 @@ struct ibv_mr* IBVWrapper::reg_mr_vmm(struct ibv_pd* pd, void* addr, size_t leng
 #endif
       if (mr) {
         dmabuf_fd_map[(uintptr_t) mr] = fd;
-        LOG_TRACE("reg_mr_vmm: dmabuf for %p size %zd", addr, length);
+        LOG_TRACE("reg_mr_vmm: dmabuf for %p size %zd lkey=0x%x rkey=0x%x",
+                  addr, length, mr->lkey, mr->rkey);
         return mr;
       }
       close(fd);
