@@ -109,14 +109,13 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
 }
 
 void
-shader_data_callback(rocprofiler_agent_id_t /* agent */,
-                     int64_t /* se_id */,
-                     uint64_t chunk_index,
-                     void*    se_data,
-                     size_t   data_size,
-                     rocprofiler_thread_trace_shader_data_flags_t /* flags */,
-                     rocprofiler_user_data_t userdata)
+shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
+                     rocprofiler_user_data_t                userdata)
 {
+    auto  chunk_index = shader_data.chunk_index;
+    auto* se_data     = shader_data.data;
+    auto  data_size   = static_cast<size_t>(shader_data.data_size);
+
     static auto* is_slow  = std::getenv("ATT_SLOW_CALLBACK");
     static bool  do_sleep = is_slow ? atoi(is_slow) != 0 : false;
 
@@ -269,7 +268,7 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
         {
             uint32_t current_sdata = 0;
             auto&    buffer        = output_buffer.output_buffer;
-            size_t   output_size = std::min(output_buffer.output_size.exchange(0), buffer.size());
+            size_t   output_size   = std::min(output_buffer.output_size.exchange(0), buffer.size());
             rocprofiler_trace_decode(decoder, parse, buffer.data(), output_size, &current_sdata);
             total_size += output_size;
 

@@ -414,14 +414,11 @@ gpu_buffer_size()
 }
 
 void
-shader_data_callback(rocprofiler_agent_id_t /*agent*/,
-                     int64_t /*se_id*/,
-                     uint64_t                                     chunk_index,
-                     void*                                        se_data,
-                     size_t                                       data_size,
-                     rocprofiler_thread_trace_shader_data_flags_t flags,
-                     rocprofiler_user_data_t                      userdata)
+shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
+                     rocprofiler_user_data_t                userdata)
 {
+    auto flags = shader_data.flags;
+
     if(flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END)
         ScanState::flag_end.fetch_add(1, std::memory_order_relaxed);
     if(flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL)
@@ -429,7 +426,7 @@ shader_data_callback(rocprofiler_agent_id_t /*agent*/,
     if(flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL)
         ScanState::flag_cpu_full.fetch_add(1, std::memory_order_relaxed);
 
-    if(data_size == 0 || se_data == nullptr) return;
+    if(shader_data.data_size == 0 || shader_data.data == nullptr) return;
 
     // chunk_index 0 is the gfx9 trace header; payload chunks follow at 1, 2, ...
     // The per-agent state is bound into userdata at service-configure time
@@ -437,8 +434,10 @@ shader_data_callback(rocprofiler_agent_id_t /*agent*/,
     auto* state = static_cast<AgentTraceState*>(userdata.ptr);
     if(state == nullptr) return;
 
-    ScanState::scan_inline(
-        state->decoder, chunk_index, static_cast<const uint8_t*>(se_data), data_size);
+    ScanState::scan_inline(state->decoder,
+                           shader_data.chunk_index,
+                           static_cast<const uint8_t*>(shader_data.data),
+                           shader_data.data_size);
 }
 
 rocprofiler_status_t

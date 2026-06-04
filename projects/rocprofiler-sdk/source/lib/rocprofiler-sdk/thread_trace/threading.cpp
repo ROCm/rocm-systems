@@ -134,9 +134,17 @@ consumer_loop(
 
         ROCP_TRACE << "Worker handling chunk " << slot.chunk_index << " slot "
                    << parameters.slot_index << " ptr " << slot.memory;
-        auto flags = static_cast<rocprofiler_thread_trace_shader_data_flags_t>(slot.flags);
-        callback_fn(
-            agent_id, slot.se_id, slot.chunk_index, slot.memory, slot.size, flags, userdata);
+        auto shader_data             = rocprofiler_thread_trace_shader_data_t{};
+        shader_data.size             = sizeof(shader_data);
+        shader_data.data             = slot.memory;
+        shader_data.data_size        = slot.size;
+        shader_data.shader_engine_id = slot.se_id;
+        shader_data.chunk_index      = slot.chunk_index;
+        shader_data.read_offset      = slot.read_offset;
+        shader_data.agent            = agent_id;
+        shader_data.flags = static_cast<rocprofiler_thread_trace_shader_data_flags_t>(slot.flags);
+
+        callback_fn(shader_data, userdata);
 
         // Hand the slot back to the producer.
         slot.filled.store(false);
@@ -201,35 +209,40 @@ producer_loop(
         }
     };
 
-    auto send_to_consumer =
-        [&](void* src, size_t size, int flags, size_t slot_idx, bool isHeader = false) {
-            auto t0 = std::chrono::system_clock::now();
+    auto send_to_consumer = [&](void*    src,
+                                size_t   size,
+                                int      flags,
+                                size_t   slot_idx,
+                                bool     isHeader    = false,
+                                uint64_t read_offset = 0) {
+        auto t0 = std::chrono::system_clock::now();
 
-            auto&       buffer      = buffers[slot_idx];
-            const auto& near_cpu_v  = queue.near_cpu;
-            const auto& hsa_agent_v = queue.hsa_agent;
-            buffer.flags            = flags;
-            buffer.size             = size;
-            buffer.se_id            = shader_engine_id;
-            buffer.chunk_index      = next_chunk_index++;
+        auto&       buffer      = buffers[slot_idx];
+        const auto& near_cpu_v  = queue.near_cpu;
+        const auto& hsa_agent_v = queue.hsa_agent;
+        buffer.flags            = flags;
+        buffer.size             = size;
+        buffer.se_id            = shader_engine_id;
+        buffer.chunk_index      = next_chunk_index++;
+        buffer.read_offset      = read_offset;
 
-            if(!isHeader)
-                parameters.copy_data_fn(
-                    buffer.memory, src, near_cpu_v, hsa_agent_v, size, &submit_signal.sig);
-            else
-                std::memcpy(buffer.memory, src, size);
+        if(!isHeader)
+            parameters.copy_data_fn(
+                buffer.memory, src, near_cpu_v, hsa_agent_v, size, &submit_signal.sig);
+        else
+            std::memcpy(buffer.memory, src, size);
 
-            auto copy_time = (std::chrono::system_clock::now() - t0).count() * 1E-9f;
-            ROCP_TRACE << "Copy: " << copy_time << " s. BW: " << size / copy_time;
+        auto copy_time = (std::chrono::system_clock::now() - t0).count() * 1E-9f;
+        ROCP_TRACE << "Copy: " << copy_time << " s. BW: " << size / copy_time;
 
-            // Publish: producer's writes above happen-before the consumer's
-            // observation of `filled` via the slot mutex's release/acquire.
-            {
-                auto lk = std::unique_lock{buffer.mut};
-            }
-            buffer.filled.store(true);
-            buffer.cv.notify_one();
-        };
+        // Publish: producer's writes above happen-before the consumer's
+        // observation of `filled` via the slot mutex's release/acquire.
+        {
+            auto lk = std::unique_lock{buffer.mut};
+        }
+        buffer.filled.store(true);
+        buffer.cv.notify_one();
+    };
 
     auto stop_trace = [&]() {
         ROCP_INFO << "Stopping the trace";
@@ -300,7 +313,8 @@ producer_loop(
 
             // If CPU was full we must wait for a slot before we can publish.
             if(cpu_full) slot_idx = wait_for_free_slot();
-            send_to_consumer(status->data, buffer_size, flags, slot_idx);
+            send_to_consumer(
+                status->data, buffer_size, flags, slot_idx, false, status->read_offset);
 
             if(cpu_full || status->gpu_full)
             {
