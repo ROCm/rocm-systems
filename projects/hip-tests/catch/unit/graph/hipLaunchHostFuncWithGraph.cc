@@ -112,7 +112,8 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_Positive_Functional) {
 
 static void thread_func_pos(hipStream_t* stream, hipHostFn_t fn, float** data){
 
-    HIP_CHECK(hipLaunchHostFunc(*stream, fn, static_cast<void*>(data)))}
+    HIP_CHECK(hipLaunchHostFunc(*stream, fn, static_cast<void*>(data)));
+}
 
 /**
  * Test Description
