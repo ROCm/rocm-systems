@@ -44,7 +44,7 @@ def wrap_kernel_name(name: str) -> str:
 def scale_bw_columns(
     df: pd.DataFrame, value_columns: list[str], decimal: int = 2
 ) -> pd.DataFrame:
-    """Scale Bytes/s rows to human-readable units; recalculate Pct of Peak."""
+    """Scale Bytes/s rows to human-readable units; recalculate Percent of Peak."""
     if "Unit" not in df.columns:
         return df
 
@@ -54,7 +54,7 @@ def scale_bw_columns(
     if not bw_rows.any():
         return df_copy
 
-    pct_cols = ["Pct of Peak", "PoP"]
+    pct_cols = ["Percent of Peak", "Pct of Peak", "PoP"]
     value_col = "Value" if "Value" in df_copy.columns else "Avg"
     peak_col = "Peak (Empirical)" if "Peak (Empirical)" in df_copy.columns else "Peak"
 
