@@ -7,6 +7,7 @@
 #include <cxxabi.h>
 
 #include <algorithm>
+#include <cassert>
 #include <iostream>
 #include <map>
 #include <regex>
@@ -321,12 +322,14 @@ void SdkCallbacksImpl::tool_tracing_callback(rocprofiler_callback_tracing_record
         record.kind != ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT)
         return;
 
+    assert(callback_data);
     auto* tool = static_cast<std::unique_ptr<tool_data_t>*>(callback_data)->get();
 
     if (record.operation == ROCPROFILER_CODE_OBJECT_LOAD)
     {
         if (tool->pc_sampling.enabled())
         {
+            assert(record.payload);
             const auto* obj_data = static_cast<code_object_load_data_t*>(record.payload);
             tool->pc_sampling.on_code_object_load(*obj_data);
         }

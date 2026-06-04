@@ -165,22 +165,6 @@ TEST_F(TestSdkCallbacks, ProvidedTracingRecord_ToolTracingCbReturnsKernelIdsFrom
     EXPECT_EQ(*(++m_tool_data->target_kernel_ids.cbegin()), kernel_id_1);
 }
 
-namespace
-{
-class MockPcSamplingCollector : public pc_sampling_collector_t
-{
-public:
-    void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& /*info*/) override
-    {
-        ++load_count;
-    }
-
-    void write(code_object_writer_t& /*writer*/) override {}
-
-    int load_count = 0;
-};
-}  // namespace
-
 TEST_F(TestSdkCallbacks, ProvidedCodeObjectLoadWithPcSamplingEnabled_ForwardsToCollector)
 {
     auto collector = std::make_shared<MockPcSamplingCollector>();
