@@ -17,7 +17,6 @@ chrono = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 futures = { workspace = true }
-nix = { workspace = true }
 libc = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

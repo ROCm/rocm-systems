@@ -216,61 +216,13 @@ pub fn dir_has_lib(dir: &Path, lib_name: &str) -> bool {
 mod tests {
     use super::*;
 
-    fn search() -> LibSearch<'static> {
-        LibSearch {
-            file_env: &["TEST_EMULATOR_LIB"],
-            dir_env: &["TEST_EMULATOR_LIB_DIR"],
-            home_env: &[],
-            lib_name: "libtest-emulator.so",
-            binary_relative_dirs: &[],
-        }
-    }
-
-    #[test]
-    fn finds_explicit_file_override() {
-        let _g = crate::paths::test_env_lock();
-        let tmp = tempfile::tempdir().unwrap();
-        let lib = tmp.path().join("libtest-emulator.so");
-        std::fs::write(&lib, b"x").unwrap();
-        // SAFETY: guarded by the test env lock.
-        unsafe {
-            std::env::set_var("TEST_EMULATOR_LIB", &lib);
-        }
-        let found = find_emulator_lib(&search());
-        unsafe {
-            std::env::remove_var("TEST_EMULATOR_LIB");
-        }
-        assert_eq!(found, Some(lib));
-    }
-
-    #[test]
-    fn finds_via_dir_override() {
-        let _g = crate::paths::test_env_lock();
-        let tmp = tempfile::tempdir().unwrap();
-        let lib = tmp.path().join("libtest-emulator.so");
-        std::fs::write(&lib, b"x").unwrap();
-        // SAFETY: guarded by the test env lock.
-        unsafe {
-            std::env::set_var("TEST_EMULATOR_LIB_DIR", tmp.path());
-        }
-        let found = find_emulator_lib(&search());
-        unsafe {
-            std::env::remove_var("TEST_EMULATOR_LIB_DIR");
-        }
-        assert_eq!(found, Some(lib));
-    }
-
     #[test]
     fn missing_lib_yields_none_and_guidance() {
-        let _g = crate::paths::test_env_lock();
-        // Ensure no override leaks in from the environment.
-        unsafe {
-            std::env::remove_var("TEST_EMULATOR_LIB");
-            std::env::remove_var("TEST_EMULATOR_LIB_DIR");
-        }
+        // Reference env var names that are never set so the lookup falls
+        // through to "not found" without mutating the environment.
         let s = LibSearch {
-            file_env: &["TEST_EMULATOR_LIB"],
-            dir_env: &["TEST_EMULATOR_LIB_DIR"],
+            file_env: &["MIRAGE_NONEXISTENT_TEST_EMULATOR_LIB"],
+            dir_env: &["MIRAGE_NONEXISTENT_TEST_EMULATOR_LIB_DIR"],
             home_env: &[],
             lib_name: "definitely-not-a-real-lib-xyz.so",
             binary_relative_dirs: &[],

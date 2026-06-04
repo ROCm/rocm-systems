@@ -1114,7 +1114,6 @@ dependencies = [
  "mirage_core",
  "mirage_hotswap",
  "mirage_rocjitsu",
- "nix",
  "serde",
  "serde_json",
  "tokio",

@@ -13,6 +13,7 @@ use std::io::IsTerminal;
 use std::io::Write;
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use anyhow::Context as _;
@@ -25,6 +26,14 @@ use mirage_core::profile::{ContainerizedDef, FileMount, ProfileDef};
 use mirage_core::session::SessionId;
 use tokio_stream::StreamExt;
 
+/// Log directive that detached child processes (notably the per-session
+/// `mirage host`) should inherit, derived from the CLI's `-v`/`-vv`.
+///
+/// Set once by [`init_logging`] and applied explicitly to spawned hosts
+/// by [`spawn_host_for`] via the `MIRAGE_LOG` environment of the child
+/// `Command`, rather than mutating this process's own environment.
+static HOST_LOG_DIRECTIVE: OnceLock<String> = OnceLock::new();
+
 /// Initialize the global tracing subscriber. Honours `MIRAGE_LOG` if
 /// set, otherwise uses the level implied by `-v` / `-vv`.
 pub fn init_logging(verbose: u8) {
@@ -33,20 +42,17 @@ pub fn init_logging(verbose: u8) {
         1 => "info",
         _ => "debug",
     };
-    // Propagate the chosen level to child processes via `MIRAGE_LOG`.
-    // Most importantly this reaches the detached per-session `mirage
+    // Record the chosen level so detached child processes can inherit
+    // it. Most importantly this reaches the detached per-session `mirage
     // host`, which is re-exec'd from this binary without any `-v` flag
     // and would otherwise default to `warn`, silently dropping all of
-    // its info/debug host events. Exporting it here (only when the user
-    // hasn't set `MIRAGE_LOG` themselves) means a `-v`/`-vv` on the CLI
-    // is honoured by the host's own logger too, so host events land in
-    // the per-session `node/0/host.log` at the requested verbosity.
+    // its info/debug host events. `spawn_host_for` applies this directly
+    // to the child `Command`'s environment (only when the user hasn't
+    // set `MIRAGE_LOG` themselves), so a `-v`/`-vv` on the CLI is
+    // honoured by the host's own logger too, and host events land in the
+    // per-session `node/0/host.log` at the requested verbosity.
     if verbose > 0 && std::env::var_os("MIRAGE_LOG").is_none() {
-        // Safety: called once at the very start of `main`, before any
-        // additional threads (the tokio runtime) are spawned.
-        unsafe {
-            std::env::set_var("MIRAGE_LOG", level);
-        }
+        let _ = HOST_LOG_DIRECTIVE.set(level.to_string());
     }
     let env = tracing_subscriber::EnvFilter::try_from_env("MIRAGE_LOG")
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(level));
@@ -1274,7 +1280,9 @@ pub fn spawn_host_for(id: &SessionId) -> anyhow::Result<()> {
         .create(true)
         .append(true)
         .open(node0.host_log())?;
-    // spawn and detach via setsid()
+    // spawn and detach into its own process group so terminal-generated
+    // signals (e.g. Ctrl-C in the foreground shell) are not delivered to
+    // the detached host.
     let mut cmd = std::process::Command::new(bin);
     cmd.arg("host")
         .arg("--session")
@@ -1282,13 +1290,15 @@ pub fn spawn_host_for(id: &SessionId) -> anyhow::Result<()> {
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::from(log));
-    use std::os::unix::process::CommandExt;
-    unsafe {
-        cmd.pre_exec(|| {
-            nix::unistd::setsid().ok();
-            Ok(())
-        });
+    // Propagate the CLI's chosen log level to the detached host so its
+    // events are logged at the requested verbosity. Only set when the
+    // user didn't already provide `MIRAGE_LOG` (in which case the host
+    // inherits it from our environment as usual).
+    if let Some(level) = HOST_LOG_DIRECTIVE.get() {
+        cmd.env("MIRAGE_LOG", level);
     }
+    use std::os::unix::process::CommandExt;
+    cmd.process_group(0);
     cmd.spawn().with_context(|| {
         format!(
             "failed to launch session host via `{}`",
