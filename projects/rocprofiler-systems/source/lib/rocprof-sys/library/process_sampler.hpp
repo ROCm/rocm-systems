@@ -45,7 +45,10 @@ struct sampler
 
     template <typename Tp = nsec_t>
         requires(!std::is_same_v<std::decay_t<Tp>, nsec_t>)
-    static void poll(std::atomic<state_t>* _state, Tp&& _interval, promise_t*);
+    static void poll(std::atomic<state_t>* _state, Tp&& _interval, promise_t* _prom)
+    {
+        poll(_state, std::chrono::duration_cast<nsec_t>(_interval), _prom);
+    }
 
     static void setup();
     static void shutdown();
@@ -55,14 +58,6 @@ struct sampler
     static void set_state(state_t);
     static void poll(std::atomic<state_t>* _state, nsec_t _interval, promise_t*);
 };
-//
-template <typename Tp>
-    requires(!std::is_same_v<std::decay_t<Tp>, std::chrono::nanoseconds>)
-void
-sampler::poll(std::atomic<state_t>* _state, Tp&& _interval, promise_t* _prom)
-{
-    poll(_state, std::chrono::duration_cast<nsec_t>(_interval), _prom);
-}
 //
 inline void
 setup()
