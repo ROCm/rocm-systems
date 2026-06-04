@@ -188,33 +188,6 @@ if(HIP_PLATFORM MATCHES "amd")
                   -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
-  add_custom_target(addKernel.code
-                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} -mcode-object-version=5 --cuda-device-only -x hip
-                  ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
-                  -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/addKernel.code
-                  -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-
-  # TODO - Rock build failure from clang
-  if(NOT WIN32)
-    add_custom_target(addKernel.spv
-                    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} --cuda-device-only --offload-arch=amdgcnspirv
-                    --no-gpu-bundle-output
-                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
-                    -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
-                    -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
-                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-
-    add_custom_target(addKernel-bundle.spv
-                    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} --cuda-device-only --offload-arch=amdgcnspirv
-                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
-                    -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv
-                    -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
-                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-    #target_link_libraries(addKernel-bundle.spv hip::host hip::device)
-    set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
-    ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
-    ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv)
   endif()
 
 
@@ -256,7 +229,6 @@ if(HIP_PLATFORM MATCHES "amd")
   set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.s
-  ${CMAKE_CURRENT_BINARY_DIR}/addKernel.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernelCompressed.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernelGenericTarget.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernelGenericTargetCompressed.code
@@ -331,7 +303,6 @@ if(HIP_PLATFORM MATCHES "amd")
   ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel16.code
   ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel17.code
 )
-  endif()
 endif()
 
 if(HIP_PLATFORM MATCHES "amd")
@@ -360,12 +331,7 @@ add_dependencies(ModuleTest empty_module)
 
 if(HIP_PLATFORM MATCHES "amd")
   add_dependencies(build_tests copyKernel.code copyKernel.s)
-  add_dependencies(build_tests addKernel.code)
   # TODO - Rock build failure from clang
-  if(NOT WIN32)
-    add_dependencies(build_tests addKernel.spv)
-    add_dependencies(build_tests addKernel-bundle.spv)
-  endif()
   add_dependencies(build_tests copyKernelCompressed.code)
   add_dependencies(build_tests copyKernelGenericTarget.code)
   add_dependencies(build_tests copyKernelGenericTargetCompressed.code)
