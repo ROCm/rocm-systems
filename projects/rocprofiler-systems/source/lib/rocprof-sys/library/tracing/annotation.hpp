@@ -203,38 +203,28 @@ struct annotate<perfetto_event_context_t, Tp>
 {
     auto operator()(Tp& obj, perfetto_event_context_t& _ctx) const
     {
-        return sfinae(obj, 0, _ctx);
+        if constexpr(requires { obj.annotate(_ctx); })
+        {
+            return obj.annotate(_ctx);
+        }
+        else
+        {
+            using value_type = typename Tp::value_type;
+            if constexpr(!std::is_void_v<value_type>)
+            {
+                auto _obj_data = sfinae_data<Tp, decltype(obj.get())>(obj, 0);
+                for(size_t i = 0; i < std::get<0>(_obj_data); ++i)
+                {
+                    auto&& _label = std::get<1>(_obj_data).at(i);
+                    auto&& _value = std::get<2>(_obj_data).at(i);
+                    ::rocprofsys::tracing::add_perfetto_annotation(_ctx, _label, _value);
+                }
+            }
+            (void) _ctx;
+        }
     }
 
 private:
-    //  If the component has a annotate(...) member function
-    template <typename T>
-    static auto sfinae(T&                        obj, int,
-                       perfetto_event_context_t& _ctx) -> decltype(obj.annotate(_ctx))
-    {
-        static_assert(std::is_same<T, Tp>::value, "Error T != Tp");
-        return obj.annotate(_ctx);
-    }
-
-    //  If the component does not have a annotate(...) member function
-    template <typename T>
-    static void sfinae(T& obj, long, perfetto_event_context_t& _ctx)
-    {
-        static_assert(std::is_same<T, Tp>::value, "Error T != Tp");
-        using value_type = typename T::value_type;
-        if constexpr(!std::is_void<value_type>::value)
-        {
-            auto _obj_data = sfinae_data<Tp, decltype(obj.get())>(obj, 0);
-            for(size_t i = 0; i < std::get<0>(_obj_data); ++i)
-            {
-                auto&& _label = std::get<1>(_obj_data).at(i);
-                auto&& _value = std::get<2>(_obj_data).at(i);
-                ::rocprofsys::tracing::add_perfetto_annotation(_ctx, _label, _value);
-            }
-        }
-        (void) _ctx;
-    }
-
     template <typename T, typename DataT>
     static auto sfinae_data(T& obj, int)
         -> decltype(std::tuple<size_t, std::vector<std::string>, DataT>(obj.get().size(),
