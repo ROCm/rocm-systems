@@ -117,18 +117,21 @@ target_compile_options(openmp-target PRIVATE -fopenmp -ggdb)
 target_link_options(openmp-target PUBLIC -fopenmp)
 add_offload_flags(openmp-target)
 
-# GPU offload arches without xnack+ cannot support device-side AddressSanitizer:
-# the device ASan runtime only exists for xnack+ targets (e.g. gfx942/gfx950).
-# When building under a sanitizer, the OpenMP target offload device image would
-# otherwise be instrumented and fail to link with undefined __asan_* device
-# symbols. Disable device-side sanitizer instrumentation with -fno-gpu-sanitize
-# on non-xnack+ arches so the example still builds (host-side sanitizer only).
+# Only instinct GPUs (e.g. gfx90a/gfx942/gfx950) are xnack-capable and ship a
+# device-side AddressSanitizer runtime. ROCPROFSYS_GFX_TARGETS holds bare gfx
+# IDs, so classify each via rocprofiler_systems_lookup_gfx rather than parsing
+# an xnack suffix. When building under a sanitizer on non-instinct arches, the
+# OpenMP target offload device image would otherwise be instrumented and fail
+# to link with undefined __asan_* device symbols, so disable device-side
+# instrumentation with -fno-gpu-sanitize (host-side sanitizer only).
 string(FIND "${CMAKE_CXX_FLAGS}" "-fsanitize" _omp_target_sanitizer_pos)
 if(_omp_target_sanitizer_pos GREATER -1)
     set(_omp_target_device_sanitizer OFF)
     foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
-        if(arch MATCHES "xnack\\+")
+        rocprofiler_systems_lookup_gfx(${arch} _gpu_categories)
+        if("instinct" IN_LIST _gpu_categories)
             set(_omp_target_device_sanitizer ON)
+            break()
         endif()
     endforeach()
     if(NOT _omp_target_device_sanitizer)
