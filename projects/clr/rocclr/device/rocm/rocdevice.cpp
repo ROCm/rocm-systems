@@ -1756,6 +1756,17 @@ bool Device::populateOCLDeviceConstants() {
   }
   HIP_MEM_POOL_USE_VM &= info_.virtualMemoryManagement_;
 
+  // Host (NUMA) Virtual Memory Management Support.
+  // TODO(ROCr): replace the default below with the real capability query once
+  //   HSA_AMD_SYSTEM_INFO_HOST_VIRTUAL_MEM_API_SUPPORTED lands in hsa_ext_amd.h:
+  //     Hsa::system_get_info(
+  //         static_cast<hsa_system_info_t>(HSA_AMD_SYSTEM_INFO_HOST_VIRTUAL_MEM_API_SUPPORTED),
+  //         &info_.hostVirtualMemoryManagement_);
+  info_.hostVirtualMemoryManagement_ = false;
+  // Host VMM granularity is currently fixed at the system page size (4K).
+  // TODO(ROCr): query once a host granularity API is exposed.
+  info_.hostVirtualMemAllocGranularity_ = 4096;
+
   // Check Support for Buffer sharing with dma_buf
   std::ignore = Hsa::system_get_info(
                     static_cast<hsa_system_info_t>(HSA_AMD_SYSTEM_INFO_DMABUF_SUPPORTED),

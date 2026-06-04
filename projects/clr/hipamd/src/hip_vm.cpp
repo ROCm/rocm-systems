@@ -77,15 +77,29 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
     HIP_RETURN(hipErrorInvalidValue);
   }
 
+  const auto loc_type = prop->location.type;
+  const bool useHostDevice = (loc_type == hipMemLocationTypeHost ||
+                              loc_type == hipMemLocationTypeHostNuma ||
+                              loc_type == hipMemLocationTypeHostNumaCurrent);
+
   // Valid locations
-  if (auto loc_type = prop->location.type;
-      loc_type != hipMemLocationTypeDevice && loc_type != hipMemLocationTypeHost &&
-      loc_type != hipMemLocationTypeHostNuma && loc_type != hipMemLocationTypeHostNumaCurrent) {
+  if (loc_type != hipMemLocationTypeDevice && !useHostDevice) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  if (prop->location.id < 0 || prop->location.id >= g_devices.size()) {
-    HIP_RETURN(hipErrorInvalidDevice);
+  // location.id validation differs per location type:
+  //   - Device:           id must be a valid HIP device index
+  //   - Host:             id is ignored
+  //   - HostNuma:         id must be >= 0; the actual NUMA node range is validated by ROCr
+  //   - HostNumaCurrent:  id is ignored
+  if (loc_type == hipMemLocationTypeDevice) {
+    if (prop->location.id < 0 || prop->location.id >= g_devices.size()) {
+      HIP_RETURN(hipErrorInvalidDevice);
+    }
+  } else if (loc_type == hipMemLocationTypeHostNuma) {
+    if (prop->location.id < 0) {
+      HIP_RETURN(hipErrorInvalidValue);
+    }
   }
 
   if (prop->requestedHandleTypes != hipMemHandleTypeNone &&
@@ -99,7 +113,6 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
     ihipFlags |= CL_MEM_SVM_ATOMICS | ROCCLR_MEM_HSA_UNCACHED;
   }
 
-  bool useHostDevice = (prop->location.type == hipMemLocationTypeHost);
   amd::Context* curDevContext = hip::getCurrentDevice()->asContext();
   amd::Context* amdContext = useHostDevice ? hip::host_context : curDevContext;
 
@@ -108,6 +121,13 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
   }
 
   const auto& dev_info = amdContext->devices()[0]->info();
+
+  // Host-flavored allocations require ROCr-side host VMM support.
+  if ((loc_type == hipMemLocationTypeHostNuma ||
+       loc_type == hipMemLocationTypeHostNumaCurrent) &&
+      !dev_info.hostVirtualMemoryManagement_) {
+    HIP_RETURN(hipErrorNotSupported);
+  }
 
   if (dev_info.maxPhysicalMemAllocSize_ < size) {
     HIP_RETURN(hipErrorOutOfMemory);
@@ -205,22 +225,49 @@ hipError_t hipMemGetAllocationGranularity(size_t* granularity, const hipMemAlloc
 
   HIP_INIT_API(hipMemGetAllocationGranularity, granularity, prop, option);
 
-  if (granularity == nullptr || prop == nullptr || (prop->type != hipMemAllocationTypePinned &&
-      prop->type != hipMemAllocationTypeUncached) ||
-      (prop->location.type != hipMemLocationTypeDevice &&
-       prop->location.type != hipMemLocationTypeHost) ||
-      prop->location.id >= g_devices.size() ||
+  if (granularity == nullptr || prop == nullptr ||
+      (prop->type != hipMemAllocationTypePinned &&
+       prop->type != hipMemAllocationTypeUncached) ||
       (option != hipMemAllocationGranularityMinimum &&
        option != hipMemAllocationGranularityRecommended)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  bool useHostDevice = (prop->location.type == hipMemLocationTypeHost);
+  const auto loc_type = prop->location.type;
+  const bool useHostDevice = (loc_type == hipMemLocationTypeHost ||
+                              loc_type == hipMemLocationTypeHostNuma ||
+                              loc_type == hipMemLocationTypeHostNumaCurrent);
+
+  if (loc_type != hipMemLocationTypeDevice && !useHostDevice) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  // Only Device location uses location.id against the HIP device index. Host-flavored
+  // location ids are NUMA-node-space (HostNuma) or ignored (Host / HostNumaCurrent).
+  if (loc_type == hipMemLocationTypeDevice && prop->location.id >= g_devices.size()) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (loc_type == hipMemLocationTypeHostNuma && prop->location.id < 0) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
   amd::Context* curDevContext = hip::getCurrentDevice()->asContext();
   amd::Context* amdContext = useHostDevice ? hip::host_context : curDevContext;
   const auto& dev_info = amdContext->devices()[0]->info();
 
-  if (option == hipMemAllocationGranularityMinimum) {
+  // NUMA host VMM is gated on the ROCr-reported capability.
+  if ((loc_type == hipMemLocationTypeHostNuma ||
+       loc_type == hipMemLocationTypeHostNumaCurrent) &&
+      !dev_info.hostVirtualMemoryManagement_) {
+    HIP_RETURN(hipErrorNotSupported);
+  }
+
+  if (useHostDevice) {
+    // Host granularity is the system page size (4K today). ROCr does not yet expose
+    // a "recommended" host granularity separate from minimum, so we return the same
+    // value for both options.
+    *granularity = dev_info.hostVirtualMemAllocGranularity_;
+  } else if (option == hipMemAllocationGranularityMinimum) {
     *granularity = dev_info.virtualMemAllocGranularityMinimum_;
   } else {
     *granularity = dev_info.virtualMemAllocGranularityRecommended_;

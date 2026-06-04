@@ -665,6 +665,8 @@ struct Info : public amd::EmbeddedObject {
   bool virtualMemoryManagement_;       //!< Virtual memory management support
   size_t virtualMemAllocGranularityMinimum_;  //!< minimum virtual memory allocation size/addr granularity
   size_t virtualMemAllocGranularityRecommended_;  //!< recommended virtual memory allocation size/addr granularity
+  bool hostVirtualMemoryManagement_;   //!< Host (NUMA) virtual memory management support
+  size_t hostVirtualMemAllocGranularity_;  //!< host virtual memory allocation size/addr granularity (typically 4K)
   uint32_t driverNodeId_;
   //! Number of Physical SGPRs per SIMD
   uint32_t sgprsPerSimd_;
