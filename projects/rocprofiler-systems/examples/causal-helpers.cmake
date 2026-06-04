@@ -32,8 +32,7 @@ function(rocprofiler_systems_causal_example_executable _NAME)
             find_package(Threads REQUIRED)
             add_library(${_TARGET} INTERFACE)
             # bare 'pthread' (alongside Threads::Threads) ensures libpthread is
-            # linked for pthread_barrier_* used in causal.cpp, matching the
-            # fork/parallel-overhead examples
+            # linked for pthread_barrier_* used in causal.cpp
             target_link_libraries(
                 ${_TARGET}
                 INTERFACE Threads::Threads pthread ${CMAKE_DL_LIBS}
