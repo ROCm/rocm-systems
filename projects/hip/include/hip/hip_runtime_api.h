@@ -9829,6 +9829,13 @@ hipError_t hipMemImportFromShareableHandle(hipMemGenericAllocationHandle_t* hand
  *          change and might have outstanding issues.
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
+ *
+ * @note  It is the user's responsibility to ensure no work is using the
+ *        pointer prior to hipMemMap returning -- matches CUDA's contract.
+ *        hipMemMap performs no implicit synchronization on the virtual
+ *        address range; outstanding device work that references @p ptr must
+ *        be drained by the caller (e.g. via hipStreamSynchronize or
+ *        hipDeviceSynchronize) before invoking this API.
  */
 hipError_t hipMemMap(void* ptr, size_t size, size_t offset, hipMemGenericAllocationHandle_t handle,
                      unsigned long long flags);

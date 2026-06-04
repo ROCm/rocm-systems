@@ -287,13 +287,17 @@ hipError_t hipMemMap(void* ptr, size_t size, size_t offset, hipMemGenericAllocat
   hip::GenericAllocation* ga = reinterpret_cast<hip::GenericAllocation*>(handle);
   ga->retain();
 
-  auto& queue = *g_devices[ga->GetProperties().location.id]->NullStream();
-  // Map the physical address to virtual address
-  amd::Command* cmd = new amd::VirtualMapCommand(queue, amd::Command::EventWaitList{}, ptr, size,
-                                                 &ga->asAmdMemory());
-  cmd->enqueue();
-  cmd->awaitCompletion();
-  cmd->release();
+  // Direct synchronous path: bypass VirtualMapCommand/enqueue/awaitCompletion.
+  // The owning device of the physical handle performs the mapping. Per the
+  // documented contract, the caller must ensure no work is using `ptr` prior
+  // to hipMemMap returning -- no implicit sync is performed here. Stream
+  // capture / mempool async / graph paths continue to use VirtualMapCommand
+  // (see hip_graph_internal.hpp, hip_mempool_impl.cpp).
+  amd::Device* dev = g_devices[ga->GetProperties().location.id]->devices()[0];
+  if (!dev->virtualMap(ptr, size, &ga->asAmdMemory())) {
+    ga->release();
+    HIP_RETURN(hipErrorOutOfMemory);
+  }
 
   HIP_RETURN(hipSuccess);
 }
