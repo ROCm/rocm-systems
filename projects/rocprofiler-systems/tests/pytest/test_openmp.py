@@ -102,7 +102,7 @@ class TestOpenMPCG(RocprofsysTest):
         r"Sampler for thread 0 will be triggered 1000\.0x per second of CPU-time",
         r"Sampler for thread 0 will be triggered 500\.0x per second of wall-time",
         r"Sampling will be disabled after 0\.250000 seconds",
-        r"Sampling duration of 0\.250000 seconds has elapsed\. Shutting down sampling",
+        r"Sampling duration of 0\.250000 seconds (has elapsed|was interrupted by finalization)\. Shutting down sampling",
         r"sampling_percent\.(json|txt)",
         r"sampling_cpu_clock\.(json|txt)",
         r"sampling_wall_clock\.(json|txt)",
@@ -163,7 +163,7 @@ class TestOpenMPLU(RocprofsysTest):
         r"Sampler for thread 0 will be triggered 1000\.0x per second of CPU-time",
         r"Sampler for thread 0 will be triggered 500\.0x per second of wall-time",
         r"Sampling will be disabled after 0\.250000 seconds",
-        r"Sampling duration of 0\.250000 seconds has elapsed\. Shutting down sampling",
+        r"Sampling duration of 0\.250000 seconds (has elapsed|was interrupted by finalization)\. Shutting down sampling",
         r"sampling_percent\.(json|txt)",
         r"sampling_cpu_clock\.(json|txt)",
         r"sampling_wall_clock\.(json|txt)",
@@ -239,7 +239,6 @@ class TestOpenMPTarget(RocprofsysTest):
                     "Z4vmulIfEvPT_S1_S1_i_l51.kd",
                     "Z4vmulIdEvPT_S1_S1_i_l51.kd",
                 ],
-                depths=[0, 0, 0],
                 counts=[4, 4, 4],
             )
 

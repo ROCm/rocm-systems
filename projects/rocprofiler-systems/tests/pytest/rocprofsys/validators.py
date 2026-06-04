@@ -275,13 +275,18 @@ def validate_perfetto_trace(
 ) -> ValidationResult:
     """Validate a Perfetto trace file using validate-perfetto-proto.py.
 
+    Slice validation mode is inferred by validate-perfetto-proto.py: pass ``depths``
+    (-d) for positional row-by-row checks; omit ``depths`` for aggregate-by-name
+    (sum counts across depths). Omit ``counts`` (-c) in aggregate mode for
+    presence-only checks.
+
     Args:
         trace_path: Path to perfetto-trace.proto file
         tests_dir: Path to directory containing validation scripts
         categories: List of categories to filter by (-m flag)
         labels: Expected labels (-l flag)
         counts: Expected counts (-c flag)
-        depths: Expected depths (-d flag)
+        depths: Expected depths (-d flag); omit for aggregate-by-name validation
         label_substrings: Expected label substrings (-s flag)
         aggregate_by_name: Match labels by aggregating slice counts across all depths,
             independently of order (--aggregate-by-name flag)

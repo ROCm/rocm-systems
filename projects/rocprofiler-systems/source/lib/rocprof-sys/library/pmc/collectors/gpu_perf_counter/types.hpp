@@ -113,19 +113,6 @@ to_enabled_metrics(gpu_perf_counter_settings settings)
     return enabled_metrics{ std::move(settings.explicit_counters) };
 }
 
-inline std::string
-make_qualified_name(const counter_metadata& meta)
-{
-    if(meta.dimensions.empty()) return meta.name;
-    return fmt::format("{}[{}]", meta.name, fmt::join(meta.dimensions, ","));
-}
-
-inline std::string
-format_track_name(size_t gpu_id, const std::string& qualified_name)
-{
-    return fmt::format("GPU [{}] {} (S)", gpu_id, qualified_name);
-}
-
 }  // namespace rocprofsys::pmc::collectors::gpu_perf_counter
 
 template <>
@@ -140,3 +127,21 @@ struct fmt::formatter<rocprofsys::pmc::collectors::gpu_perf_counter::dimension_p
         return fmt::format_to(ctx.out(), "{}={}", dim.name, dim.position);
     }
 };
+
+namespace rocprofsys::pmc::collectors::gpu_perf_counter
+{
+
+inline std::string
+make_qualified_name(const counter_metadata& meta)
+{
+    if(meta.dimensions.empty()) return meta.name;
+    return fmt::format("{}[{}]", meta.name, fmt::join(meta.dimensions, ","));
+}
+
+inline std::string
+format_track_name(size_t gpu_id, const std::string& qualified_name)
+{
+    return fmt::format("GPU [{}] {} (S)", gpu_id, qualified_name);
+}
+
+}  // namespace rocprofsys::pmc::collectors::gpu_perf_counter

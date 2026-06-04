@@ -5,7 +5,10 @@
 
 import sys
 import os
+import time
 import argparse
+from collections import defaultdict
+
 from perfetto.trace_processor import TraceProcessor, TraceProcessorConfig
 
 
@@ -37,17 +40,13 @@ def load_trace(inp, max_tries=5, retry_wait=1, bin_path=None):
             if tries >= max_tries:
                 raise
             else:
-                import time
-
                 time.sleep(retry_wait)
         finally:
             tries += 1
     return tp
 
 
-def validate_perfetto(
-    data, labels, counts, depths, useSubstringForLabels=False, aggregate_by_name=False
-):
+def validate_perfetto(data, labels, counts, depths, useSubstringForLabels=False):
     """
     Validates the given perfetto data against expected labels, counts, and depths.
 
@@ -59,11 +58,6 @@ def validate_perfetto(
         depths (list of int): A list of expected depths corresponding to the labels.
         useSubstringForLabels (bool): If True, checks if the label in data contains
             the expected label as a substring. If False, checks for exact matches.
-        aggregate_by_name (bool): If True, validate each expected label by aggregating
-            its slice count across all depths, independently of order. The total number
-            of slices with that exact name (summed across all depths) must equal the
-            expected count. Other labels in the trace are ignored. Depths are not
-            checked in this mode.
     Raises:
         RuntimeError: If any of the labels, counts, or depths in the data do not match
             the expected values.
@@ -72,24 +66,13 @@ def validate_perfetto(
     if not data and labels:
         raise RuntimeError("Data is empty but labels are not")
 
-    if aggregate_by_name:
-        totals = {}
-        for ditr in data:
-            totals[ditr["label"]] = totals.get(ditr["label"], 0) + ditr["count"]
-        for litr, citr in zip(labels, counts):
-            actual = totals.get(litr, 0)
-            if actual != citr:
-                raise RuntimeError(f"Mismatched count for '{litr}': {actual} vs. {citr}")
-        return
+    if len(labels) != len(counts) or len(labels) != len(depths):
+        raise RuntimeError(
+            "labels, counts, and depths must have the same length "
+            f"(got {len(labels)}, {len(counts)}, {len(depths)})"
+        )
 
-    expected = []
-    for litr, citr, ditr in zip(labels, counts, depths):
-        entry = []
-        _label = litr
-        if ditr > 0:
-            _label = "{}".format(litr)
-        entry = [_label, citr, ditr]
-        expected.append(entry)
+    expected = [[litr, citr, ditr] for litr, citr, ditr in zip(labels, counts, depths)]
 
     for ditr, eitr in zip(data, expected):
         _label = ditr["label"]
@@ -99,16 +82,69 @@ def validate_perfetto(
         if useSubstringForLabels:
             if eitr[0] not in _label:
                 raise RuntimeError(
-                    f"Mismatched prefix: {_label} does not contain {eitr[0]}"
+                    f"Mismatched label (substring): {_label!r} does not contain {eitr[0]!r}"
                 )
         else:
             if _label != eitr[0]:
-                raise RuntimeError(f"Mismatched prefix: {_label} vs. {eitr[0]}")
+                raise RuntimeError(
+                    f"Mismatched label (exact): {_label!r} vs expected {eitr[0]!r}"
+                )
 
         if _count != eitr[1]:
             raise RuntimeError(f"Mismatched count: {_count} vs. {eitr[1]}")
         if _depth != eitr[2]:
             raise RuntimeError(f"Mismatched depth: {_depth} vs. {eitr[2]}")
+
+
+def validate_perfetto_by_label(
+    data,
+    labels,
+    counts,
+    useSubstringForLabels=False,
+):
+    """
+    Validate slice rows by matching each expected label to trace names (aggregate mode).
+
+    For each expected label, find matching slice rows in ``data`` by label (exact or
+    substring). Matching slice counts are summed **across all depths** so stack depth is
+    not part of validation. Trace rows whose names do not match any expected label are
+    ignored.
+
+    If ``counts`` is empty: require **at least one** matching slice per label (presence).
+
+    If ``counts`` is non-empty: it must parallel ``labels``, and the summed occurrence
+    count must equal each expected integer (exact match).
+
+    Slice ``count`` values come from Perfetto aggregation: number of slice records for
+    that kernel name at that depth; summing yields total kernel dispatches for that name.
+    """
+    presence_only = len(counts) == 0
+    if not presence_only and len(counts) != len(labels):
+        raise RuntimeError(
+            "counts must have one entry per label, or be omitted for presence-only mode"
+        )
+
+    totals_by_slice_name = defaultdict(int)
+    for srow in data:
+        totals_by_slice_name[srow["label"]] += srow["count"]
+
+    for i, litr in enumerate(labels):
+        if useSubstringForLabels:
+            total = sum(cnt for name, cnt in totals_by_slice_name.items() if litr in name)
+        else:
+            total = totals_by_slice_name.get(litr, 0)
+
+        if presence_only:
+            if total < 1:
+                raise RuntimeError(f"No slice found for expected label '{litr}'")
+            continue
+
+        citr = counts[i]
+        if total != citr:
+            raise RuntimeError(
+                f"Mismatched count for expected label '{litr}': "
+                f"got {total}, expected {citr}"
+            )
 
 
 if __name__ == "__main__":
@@ -126,7 +162,12 @@ if __name__ == "__main__":
         "-c", "--counts", nargs="+", type=int, help="Expected counts", default=[]
     )
     parser.add_argument(
-        "-d", "--depths", nargs="+", type=int, help="Expected depths", default=[]
+        "-d",
+        "--depths",
+        nargs="+",
+        type=int,
+        help="Expected depths (positional mode). Omit for aggregate-by-name mode.",
+        default=[],
     )
     parser.add_argument(
         "-s",
@@ -175,10 +216,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--aggregate-by-name",
         action="store_true",
-        help="Match each expected label by aggregating its slice count across all "
-        "depths, independently of order: the total number of slices with that exact "
-        "name (summed across depths) must equal the expected count. Other labels are "
-        "ignored and depths are not checked.",
+        help="Force aggregate-by-name validation: sum slice counts across all depths, "
+        "independently of order, ignoring slices that do not match an expected label. "
+        "This mode is also selected automatically when -d/--depths is omitted; the flag "
+        "lets you request it explicitly even when -d is provided (depths are ignored).",
     )
 
     args = parser.parse_args()
@@ -190,16 +231,39 @@ if __name__ == "__main__":
         )
 
     labels = args.labels if args.labels else args.label_substrings
+    # Aggregate-by-name is selected explicitly via --aggregate-by-name, or implicitly
+    # when -d/--depths is omitted. When forced via the flag, any provided depths are
+    # ignored.
+    aggregate_by_name = args.aggregate_by_name or not args.depths
 
-    # In aggregate-by-name mode depths are not used; default them so the length check
-    # passes.
-    if args.aggregate_by_name and not args.depths:
-        args.depths = [0] * len(labels)
+    if labels:
+        if aggregate_by_name:
+            count_mode = "presence-only" if not args.counts else "exact counts per label"
+            print(
+                "Perfetto slice validation mode: aggregate-by-name "
+                f"(sum counts across depths, ignore unmatched slices, {count_mode})"
+            )
+            if args.counts and len(args.counts) != len(labels):
+                raise RuntimeError(
+                    "In aggregate-by-name mode, provide no -c (presence-only) or one "
+                    "count per label"
+                )
+        else:
+            print(
+                "Perfetto slice validation mode: positional "
+                "(match label, count, and depth per trace row, in order)"
+            )
+            if len(labels) != len(args.counts) or len(labels) != len(args.depths):
+                raise RuntimeError(
+                    "The same number of labels, counts, and depths must be specified "
+                    "when -d is provided"
+                )
 
-    if len(labels) != len(args.counts) or len(labels) != len(args.depths):
-        raise RuntimeError(
-            "The same number of labels, counts, and depths must be specified"
-        )
+    if args.key_names or args.key_counts:
+        if len(args.key_names) != len(args.key_counts):
+            raise RuntimeError(
+                "--key-names and --key-counts must have the same number of entries"
+            )
 
     tp = load_trace(args.input, bin_path=args.trace_processor_shell)
 
@@ -241,14 +305,23 @@ if __name__ == "__main__":
 
     ret = 0
     try:
-        validate_perfetto(
-            perfetto_data,
-            labels,
-            args.counts,
-            args.depths,
-            useSubstringForLabels=args.label_substrings is not None,
-            aggregate_by_name=args.aggregate_by_name,
-        )
+        use_substrings = bool(args.label_substrings)
+        if labels:
+            if aggregate_by_name:
+                validate_perfetto_by_label(
+                    perfetto_data,
+                    labels,
+                    args.counts,
+                    useSubstringForLabels=use_substrings,
+                )
+            else:
+                validate_perfetto(
+                    perfetto_data,
+                    labels,
+                    args.counts,
+                    args.depths,
+                    useSubstringForLabels=use_substrings,
+                )
 
     except RuntimeError as e:
         print(f"Fail: {e}")
@@ -318,13 +391,11 @@ if __name__ == "__main__":
 
     if args.check_counter_pairing and args.counter_names:
         for counter_name in args.counter_names:
-            tracks = tp.query(
-                f"""SELECT counter_track.id, counter_track.name,
+            tracks = tp.query(f"""SELECT counter_track.id, counter_track.name,
                   COUNT(counter.id) AS num_entries
                   FROM counter_track JOIN counter ON counter.track_id = counter_track.id
                   WHERE counter_track.name LIKE '%{counter_name}%'
-                  GROUP BY counter_track.id"""
-            )
+                  GROUP BY counter_track.id""")
             for row in tracks:
                 if row.num_entries % 2 != 0:
                     print(
@@ -333,11 +404,9 @@ if __name__ == "__main__":
                     )
                     ret = 1
                 else:
-                    last_value = tp.query(
-                        f"""SELECT counter.value FROM counter
+                    last_value = tp.query(f"""SELECT counter.value FROM counter
                           WHERE counter.track_id = {row.id}
-                          ORDER BY counter.ts DESC LIMIT 1"""
-                    )
+                          ORDER BY counter.ts DESC LIMIT 1""")
                     for val_row in last_value:
                         if val_row.value != 0:
                             print(
