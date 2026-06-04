@@ -17,6 +17,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -164,6 +165,19 @@ TEST(Validator, RejectsOutOfBoundsOffset) {
   EXPECT_FALSE(
       validate_anchor(anchor, /*anchor_offset=*/4, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err)
           .has_value());
+  EXPECT_FALSE(err.empty());
+}
+
+TEST(Validator, RejectsOffsetThatWouldOverflow) {
+  // Pure predicate: huge offset must fail closed, not wrap the bounds check.
+  static constexpr uint32_t kRaw = 0xDEADBEEFu;
+  TestInstruction anchor("v_add_f32_e32", 4, 0, std::nullopt, &kRaw);
+  auto text = dummy_text();
+  // UINT64_MAX - 3 is dword aligned (UINT64_MAX = 2^64 - 1 ≡ 3 mod 4) and
+  // anchor_offset + 4 would wrap to 0 with the old additive check.
+  const uint64_t huge_offset = std::numeric_limits<uint64_t>::max() - 3;
+  std::string err;
+  EXPECT_FALSE(is_relocatable_anchor(anchor, huge_offset, text, ROCJITSU_CODE_ARCH_CDNA4, &err));
   EXPECT_FALSE(err.empty());
 }
 
@@ -589,6 +603,29 @@ TEST(Instrumentor, AddPointByOffsetResolvesValidatedSite) {
       << "mnemonic was: " << result.sites[0].mnemonic;
 }
 
+TEST(Instrumentor, UnsupportedArchReportsErrorInsteadOfCrashing) {
+  // Decoder::create returns nullptr for RV32I/RV64I/INVALID. The Instrumentor
+  // must surface that as a structured ValidationResult error rather than
+  // dereferencing a null decoder during block construction.
+  auto image = make_gfx950_elf_with_two_nops();
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+
+  Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_RV32I);
+  instrumentor.add_point_by_offset(/*anchor_offset=*/4);
+
+  auto result = instrumentor.validate_points();
+  EXPECT_TRUE(result.sites.empty());
+  ASSERT_FALSE(result.errors.empty());
+
+  // patch() must surface the same error rather than crashing.
+  Instrumentor instrumentor2(obj, ROCJITSU_CODE_ARCH_RV32I);
+  instrumentor2.add_point_by_offset(/*anchor_offset=*/4);
+  auto patched = instrumentor2.patch();
+  EXPECT_TRUE(patched.elf_bytes.empty());
+  ASSERT_FALSE(patched.errors.empty());
+}
+
 //==============================================================================
 // Section 4: Instrumentor::patch end-to-end
 //
@@ -610,7 +647,7 @@ TEST(InstrumentorPatch, EmitsValidElfWithExpectedPatchSummary) {
   Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_CDNA4);
   instrumentor.add_point_by_offset(/*anchor_offset=*/4);
 
-  auto result = instrumentor.patch();
+  auto result = instrumentor.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
   EXPECT_FALSE(result.elf_bytes.empty());
@@ -646,7 +683,6 @@ TEST(InstrumentorPatch, RejectsZeroQueuedPoints) {
 
   auto result = instrumentor.patch();
   EXPECT_TRUE(result.elf_bytes.empty());
-  EXPECT_TRUE(result.patches.empty());
   EXPECT_FALSE(result.errors.empty());
 }
 
@@ -659,7 +695,6 @@ TEST(InstrumentorPatch, RejectsMoreThanOneQueuedPoint) {
 
   auto result = instrumentor.patch();
   EXPECT_TRUE(result.elf_bytes.empty());
-  EXPECT_TRUE(result.patches.empty());
   EXPECT_FALSE(result.errors.empty());
 }
 
@@ -672,7 +707,6 @@ TEST(InstrumentorPatch, ValidationFailurePropagates) {
 
   auto result = instrumentor.patch();
   EXPECT_TRUE(result.elf_bytes.empty());
-  EXPECT_TRUE(result.patches.empty());
   EXPECT_FALSE(result.errors.empty());
 }
 
@@ -688,7 +722,6 @@ TEST(InstrumentorPatch, IsSingleCall) {
 
   auto second = instrumentor.patch();
   EXPECT_TRUE(second.elf_bytes.empty());
-  EXPECT_TRUE(second.patches.empty());
   EXPECT_FALSE(second.errors.empty());
 }
 
@@ -707,7 +740,6 @@ TEST(InstrumentorPatch, FailedFirstCallStillBurnsSingleAttemptBudget) {
   instrumentor.add_point_by_offset(4);
   auto second = instrumentor.patch();
   EXPECT_TRUE(second.elf_bytes.empty()) << "single-attempt budget must already be spent";
-  EXPECT_TRUE(second.patches.empty());
   EXPECT_FALSE(second.errors.empty());
 }
 
@@ -724,7 +756,6 @@ TEST(InstrumentorPatch, RejectsMultiTextCodeObject) {
   instrumentor.add_point_by_offset(0);
   auto result = instrumentor.patch();
   EXPECT_TRUE(result.elf_bytes.empty());
-  EXPECT_TRUE(result.patches.empty());
   EXPECT_FALSE(result.errors.empty());
 }
 
@@ -744,7 +775,6 @@ TEST(InstrumentorPatch, BranchRangeOverflowPropagatesAsFatalError) {
   auto result = instrumentor.patch();
 
   EXPECT_TRUE(result.elf_bytes.empty()) << "overflow must not leak a half-built ELF";
-  EXPECT_TRUE(result.patches.empty());
   ASSERT_FALSE(result.errors.empty());
   // The builder's diagnostic mentions "forward branch ... exceeds s_branch simm16".
   EXPECT_NE(result.errors.front().find("forward"), std::string::npos)

@@ -286,23 +286,25 @@ protected:
                                reinterpret_cast<const uint8_t *>(co->image_data()) +
                                    co->image_size());
 
-    // Decode .text and find the first v_add_f32-mnemonic anchor that
-    // satisfies the validator's relocatability rules. Decode-and-search so
-    // the test is stable across compiler revisions.
+    // Decode .text and find the first v_add_f32-mnemonic anchor that the
+    // trampoline machinery considers relocatable. Decode-and-search so the
+    // test is stable across compiler revisions.
     // TODO: instrument multiple instructions
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
     ASSERT_NE(decoder, nullptr);
     auto blocks = BasicBlock::build(*co, *decoder);
+
+    ASSERT_FALSE(co->text_sections().empty());
+    const auto *text = co->text_sections().front();
+    const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
+                                              text->size());
 
     bool found = false;
     for (const auto &block : blocks) {
       uint64_t cur = block->start_offset();
       for (const Instruction &inst : block->instructions()) {
         const bool is_vadd = inst.mnemonic().find("v_add_f32") != std::string_view::npos;
-        // TODO: Okay for now but Instrumentor should do this check
-        const bool relocatable = inst.size() == 4 && inst.raw_encoding() != nullptr &&
-                                 !inst.is_branch() && !inst.branch_offset_bytes().has_value();
-        if (is_vadd && relocatable) {
+        if (is_vadd && is_relocatable_anchor(inst, cur, text_bytes, ROCJITSU_CODE_ARCH_CDNA2)) {
           anchor_offset_ = cur; // Instrumentor will need offset
           anchor_mnemonic_ = std::string(inst.mnemonic());
           found = true;
@@ -339,7 +341,28 @@ class HsaDbiSmokeStatic : public HsaDbiSmokeFixture {};
 
 // Tests that need to load + dispatch on a real gfx90a GPU. Gated at CMake
 // time by HAS_CDNA2_GPU; bodies also GTEST_SKIP at runtime if no agent.
-class HsaDbiSmokeHardware : public HsaDbiSmokeFixture {};
+//
+// hsa_init / hsa_shut_down run once per suite (HSA tolerates per-test
+// init/shutdown but it isn't free). The gfx90a agent is enumerated once
+// in SetUpTestSuite and cached. Bodies pull the cached agent and skip if
+// initialization or enumeration didn't succeed.
+class HsaDbiSmokeHardware : public HsaDbiSmokeFixture {
+protected:
+  static void SetUpTestSuite() {
+    s_init_ok_ = (hsa_init() == HSA_STATUS_SUCCESS);
+    if (s_init_ok_)
+      s_gpu_ = find_gfx90a_agent();
+  }
+  static void TearDownTestSuite() {
+    if (s_init_ok_)
+      hsa_shut_down();
+    s_init_ok_ = false;
+    s_gpu_ = {};
+  }
+
+  static inline bool s_init_ok_ = false;
+  static inline hsa_agent_t s_gpu_{};
+};
 
 // Static verification: prove the patcher actually changed the kernel before
 // any HSA / dispatch tests run. No GPU or HSA runtime required. Catches
@@ -388,14 +411,11 @@ TEST_F(HsaDbiSmokeStatic, PatchedElfActuallyContainsInstrumentation) {
 // Gates on a real gfx90a agent because hsa_executable_load_agent_code_object
 // requires an agent whose ISA matches the code object.
 TEST_F(HsaDbiSmokeHardware, PatchedElfLoadsAndValidatesInHsaExecutable) {
-  if (hsa_init() != HSA_STATUS_SUCCESS)
+  if (!s_init_ok_)
     GTEST_SKIP() << "hsa_init failed (no HSA runtime at runtime)";
-
-  hsa_agent_t gpu = find_gfx90a_agent();
-  if (gpu.handle == 0) {
-    hsa_shut_down();
+  if (s_gpu_.handle == 0)
     GTEST_SKIP() << "No gfx90a agent present";
-  }
+  hsa_agent_t gpu = s_gpu_;
 
   hsa_code_object_reader_t reader{};
   ASSERT_EQ(hsa_code_object_reader_create_from_memory(patched_elf_bytes_.data(),
@@ -426,7 +446,6 @@ TEST_F(HsaDbiSmokeHardware, PatchedElfLoadsAndValidatesInHsaExecutable) {
 
   hsa_executable_destroy(executable);
   hsa_code_object_reader_destroy(reader);
-  hsa_shut_down();
 }
 
 // Dispatch both the original and patched kernels with identical
@@ -434,13 +453,11 @@ TEST_F(HsaDbiSmokeHardware, PatchedElfLoadsAndValidatesInHsaExecutable) {
 // semantically a no-op, so the patched kernel must produce the same buffer
 // as the original — anything else means the patch path corrupted execution.
 TEST_F(HsaDbiSmokeHardware, PatchedKernelDispatchMatchesOriginal) {
-  if (hsa_init() != HSA_STATUS_SUCCESS)
+  if (!s_init_ok_)
     GTEST_SKIP() << "hsa_init failed";
-  hsa_agent_t gpu = find_gfx90a_agent();
-  if (gpu.handle == 0) {
-    hsa_shut_down();
+  if (s_gpu_.handle == 0)
     GTEST_SKIP() << "No gfx90a agent present";
-  }
+  hsa_agent_t gpu = s_gpu_;
   hsa_agent_t cpu = find_cpu_agent();
   ASSERT_NE(cpu.handle, 0u) << "No CPU agent found";
 
@@ -492,8 +509,6 @@ TEST_F(HsaDbiSmokeHardware, PatchedKernelDispatchMatchesOriginal) {
   EXPECT_EQ(patched_out, orig_out)
       << "patched kernel output differs from original — the inline-nop placeholder "
          "should be semantically a no-op";
-
-  hsa_shut_down();
 }
 
 // "Sabotage" verification: overwrite the s_nop 0 placeholder in the patched
@@ -507,13 +522,11 @@ TEST_F(HsaDbiSmokeHardware, PatchedKernelDispatchMatchesOriginal) {
 // the other tests are statically verifiable (correct bytes, correct ELF
 // structure, semantically-equivalent dispatch output).
 TEST_F(HsaDbiSmokeHardware, TrampolineIsActuallyExecutedByGpu) {
-  if (hsa_init() != HSA_STATUS_SUCCESS)
+  if (!s_init_ok_)
     GTEST_SKIP() << "hsa_init failed";
-  hsa_agent_t gpu = find_gfx90a_agent();
-  if (gpu.handle == 0) {
-    hsa_shut_down();
+  if (s_gpu_.handle == 0)
     GTEST_SKIP() << "No gfx90a agent present";
-  }
+  hsa_agent_t gpu = s_gpu_;
   hsa_agent_t cpu = find_cpu_agent();
   ASSERT_NE(cpu.handle, 0u);
 
@@ -546,6 +559,8 @@ TEST_F(HsaDbiSmokeHardware, TrampolineIsActuallyExecutedByGpu) {
                                    << " - trampoline body layout changed?";
 
   // s_endpgm 0 on CDNA: SOPP prefix (0x17F) << 23 | opcode 1 << 16 | simm16 0.
+  // TODO: replace with build_s_endpgm(0, arch) once an arch-aware helper exists
+  // in instruction_builder.h (opcode differs across CDNA/RDNA generations).
   constexpr uint32_t kSEndpgm0 = 0xBF810000u;
   std::memcpy(sabotaged.data() + tramp->sectionOffset(), &kSEndpgm0, sizeof(kSEndpgm0));
 
@@ -586,8 +601,6 @@ TEST_F(HsaDbiSmokeHardware, TrampolineIsActuallyExecutedByGpu) {
   }
   EXPECT_LT(matches_golden, N) << "Sabotaged dispatch matched the golden in " << matches_golden
                                << "/" << N << " elements - trampoline appears bypassed";
-
-  hsa_shut_down();
 }
 
 #endif // HAS_HOST_AMDGPU

@@ -72,7 +72,10 @@ bool is_relocatable_anchor(const Instruction &anchor, uint64_t anchor_offset,
     report(error_out, "anchor instruction size must be 4 or 8 bytes");
     return false;
   }
-  if (anchor_offset + static_cast<uint64_t>(size) > text_bytes.size()) {
+  // Subtraction-based bounds check: a huge anchor_offset would otherwise wrap
+  // the addition and silently pass.
+  const uint64_t size_u = static_cast<uint64_t>(size);
+  if (anchor_offset > text_bytes.size() || size_u > text_bytes.size() - anchor_offset) {
     report(error_out, "anchor extends past end of .text");
     return false;
   }
@@ -101,30 +104,29 @@ std::optional<ResolvedInstrumentationSite>
 validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
                 std::span<const uint8_t> text_bytes, const InstrumentationPoint &pt,
                 rj_code_arch_t arch, std::string *error_out) {
+  // TODO: consume filter_flags to filter anchors based on InstFlags.
   if (pt.filter_flags != 0) {
-    report(error_out, "InstrumentationPoint::filter_flags must be 0 in the inline-nop milestone");
+    report(error_out, "InstrumentationPoint::filter_flags must be 0 temporarily");
     return std::nullopt;
   }
   // TODO: support AfterInst / BlockEntry / BlockExit.
   if (pt.kind != InstrumentationKind::BeforeInst) {
-    report(error_out, "InstrumentationPoint::kind must be BeforeInst in the inline-nop milestone");
+    report(error_out, "InstrumentationPoint::kind must be BeforeInst temporarily");
     return std::nullopt;
   }
   // TODO: consume probe_obj / probe_symbol when probe-call trampolines are
   // supported.
   if (pt.probe_obj != nullptr) {
-    report(error_out, "InstrumentationPoint::probe_obj must be null in the inline-nop milestone");
+    report(error_out, "InstrumentationPoint::probe_obj must be null temporarily");
     return std::nullopt;
   }
   if (!pt.probe_symbol.empty()) {
-    report(error_out,
-           "InstrumentationPoint::probe_symbol must be empty in the inline-nop milestone");
+    report(error_out, "InstrumentationPoint::probe_symbol must be empty temporarily");
     return std::nullopt;
   }
   // TODO: consume force_full_exec when EXEC policy management is implemented
   if (pt.force_full_exec) {
-    report(error_out,
-           "InstrumentationPoint::force_full_exec must be false in the inline-nop milestone");
+    report(error_out, "InstrumentationPoint::force_full_exec must be false temporarily");
     return std::nullopt;
   }
 
@@ -144,17 +146,17 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 
 bool validate_inline_nop_plan(const TrampolinePlan &plan, std::string *error_out) {
   if (!plan.emit_original) {
-    report(error_out, "trampoline plan: emit_original must be true for the inline-nop milestone");
+    report(error_out, "trampoline plan: emit_original must be true for the inlined nop");
     return false;
   }
   if (!plan.after_items.empty()) {
-    report(error_out, "trampoline plan: after_items must be empty for the inline-nop milestone");
+    report(error_out, "trampoline plan: after_items must be empty for the inline nop");
     return false;
   }
   if (plan.before_items.size() != 1 || plan.before_items[0].words.size() != 1 ||
       plan.before_items[0].words[0] != build_s_nop(0, plan.arch)) {
     report(error_out, "trampoline plan: before_items must be exactly { { s_nop 0 } } "
-                      "for the inline-nop milestone");
+                      "for the inlined nop");
     return false;
   }
   return true;
@@ -196,12 +198,18 @@ void Instrumentor::add_point_by_offset(uint64_t anchor_offset, InstrumentationKi
   points_.push_back(std::move(pt));
 }
 
-void Instrumentor::ensure_blocks_built() {
+bool Instrumentor::ensure_blocks_built(std::string *error_out) {
   if (blocks_built_)
-    return;
-  decoder_ = Decoder::create(arch_);
+    return true;
+  auto decoder = Decoder::create(arch_);
+  if (!decoder) {
+    report(error_out, "no decoder available for the requested architecture");
+    return false;
+  }
+  decoder_ = std::move(decoder);
   blocks_ = BasicBlock::build(obj_, *decoder_);
   blocks_built_ = true;
+  return true;
 }
 
 const Instruction *Instrumentor::find_instruction_at_offset(uint64_t anchor_offset) {
@@ -221,17 +229,21 @@ const Instruction *Instrumentor::find_instruction_at_offset(uint64_t anchor_offs
 
 Instrumentor::ValidationResult Instrumentor::validate_points() {
   ValidationResult result;
-  ensure_blocks_built();
+  std::string err;
+  if (!ensure_blocks_built(&err)) {
+    result.errors.push_back(std::move(err));
+    return result;
+  }
 
   if (obj_.text_sections().empty()) {
     result.errors.emplace_back("code object has no .text section");
     return result;
   }
-  // TODO(future milestone): support multi-text code objects. Anchor offsets
+  // TODO: support multi-text code objects. Anchor offsets
   // would need to identify which .text section they belong to.
   if (obj_.text_sections().size() > 1) {
     result.errors.emplace_back(
-        "code object has multiple .text sections; the inline-nop milestone supports only one");
+        "code object has multiple .text sections; currently supports only one");
     return result;
   }
   const Section *text = obj_.text_sections().front();
@@ -268,22 +280,28 @@ Instrumentor::ValidationResult Instrumentor::validate_points() {
 }
 
 InstrumentedCodeObject Instrumentor::patch() {
-  InstrumentedCodeObject result;
+  // Slice off the debug summaries; move the base subobject into the return.
+  auto debug = patch_with_debug_summaries();
+  return std::move(static_cast<InstrumentedCodeObject &>(debug));
+}
+
+InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
+  InstrumentedCodeObjectDebug result;
 
   if (patched_) {
-    result.errors.emplace_back("Instrumentor::patch has already been called on this Instrumentor");
+    result.errors.emplace_back(
+        "Instrumentor::patch / patch_with_debug_summaries has already been called");
     return result;
   }
   patched_ = true;
 
-  // Inline-nop milestone restriction: exactly one queued point.
+  // Temporary restriction: exactly one queued point.
   if (points_.empty()) {
     result.errors.emplace_back("Instrumentor::patch requires exactly one queued point; got zero");
     return result;
   }
   if (points_.size() > 1) {
-    result.errors.emplace_back(
-        "Instrumentor::patch accepts only one queued point in the inline-nop milestone");
+    result.errors.emplace_back("Instrumentor::patch temporarily accepts only one queued point");
     return result;
   }
 
@@ -304,7 +322,9 @@ InstrumentedCodeObject Instrumentor::patch() {
 
   std::vector<AppliedSite> applied;
   applied.reserve(sites.size());
-  uint64_t cave_cursor = patcher.text_size();
+  // Derive the trampoline cursor from the patcher's recorded cave_start so
+  // the cave coordinate is established in exactly one place.
+  uint64_t cave_cursor = patcher.cave_start();
   for (const auto &site : sites) {
     const uint64_t trampoline_offset = cave_cursor;
     TrampolinePlan plan = make_trampoline_plan(site, arch_, trampoline_offset);
