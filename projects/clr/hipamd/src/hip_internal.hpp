@@ -189,7 +189,7 @@ extern "C" void __hipOnError(const void *err_info);
       const char *desc;                                                                            \
     } err_info = {                                                                                 \
       1,                                                                                           \
-      hip::tls.last_command_error_,                                                                \
+      (uint32_t)hip::tls.last_command_error_,                                                      \
       hipGetErrorName(hip::tls.last_command_error_),                                               \
       hipGetErrorString(hip::tls.last_command_error_)                                              \
     };                                                                                             \
