@@ -98,6 +98,7 @@ struct TraceControl
     uint64_t gpu_clock_cnt_start{0};
     uint64_t gpu_clock_cnt_end{0};
     uint32_t status_double_buffer{0};
+    uint32_t wptr_doublebuffer{0};
 };
 
 // Encapsulates the various Api and structures that are used to enable
@@ -771,6 +772,13 @@ public:
         XCC_Packet_Lock<Builder> lock(builder, cmd_buffer, GetXCCNumber(), se_id / se_per_xcc);
         Select_GRBM_SE_SH0(cmd_buffer, se_id % se_per_xcc);
 
+        if(Primitives::GFXIP_LEVEL == 9)
+        {
+            const uint32_t mask_val      = Primitives::sqtt_busy_mask();
+            auto           status_offset = Primitives::SQ_THREAD_TRACE_STATUS_OFFSET;
+            builder.BuildWaitRegMemCommand(cmd_buffer, false, status_offset, false, mask_val, 1);
+        }
+
         auto status_addr = (Primitives::GFXIP_LEVEL >= 12)
                                ? Primitives::SQ_THREAD_TRACE_STATUS2_ADDR
                                : Primitives::SQ_THREAD_TRACE_STATUS_ADDR;
@@ -779,8 +787,13 @@ public:
                                        &control.status_double_buffer,
                                        Primitives::COPY_DATA_SEL_COUNT_1DW_PRM,
                                        false);
+        if(Primitives::GFXIP_LEVEL == 9)
+            builder.BuildCopyRegDataPacket(cmd_buffer,
+                                           Primitives::SQ_THREAD_TRACE_WPTR_ADDR,
+                                           &control.wptr_doublebuffer,
+                                           Primitives::COPY_DATA_SEL_COUNT_1DW_PRM,
+                                           false);
 
-        builder.BuildWriteWaitIdlePacket(cmd_buffer);
         builder.BuildCacheFlushPacket(cmd_buffer, size_t(&control), sizeof(TraceControl));
         SetGRBMToBroadcast(cmd_buffer);
     }
@@ -800,6 +813,10 @@ public:
 
         if(Primitives::GFXIP_LEVEL == 9)
         {
+            const uint32_t mask_val      = Primitives::sqtt_busy_mask();
+            auto           status_offset = Primitives::SQ_THREAD_TRACE_STATUS_OFFSET;
+            builder.BuildWaitRegMemCommand(cmd_buffer, false, status_offset, false, mask_val, 1);
+
             builder.BuildWriteUConfigRegPacket(cmd_buffer,
                                                Primitives::SQ_THREAD_TRACE_BASE_ADDR,
                                                Primitives::sqtt_base_value_lo(base_addr));
@@ -818,7 +835,6 @@ public:
                                : Primitives::SQ_THREAD_TRACE_BUF0_BASE_HI_ADDR;
 
             WriteConfigPacket(cmd_buffer, reg_lo, buff1_lo);
-            builder.BuildWriteWaitIdlePacket(cmd_buffer);
             WriteConfigPacket(cmd_buffer, reg_hi, buff1_hi);
         }
         builder.BuildCacheFlushPacket(cmd_buffer, size_t(prev), config->data_buffer_size);
