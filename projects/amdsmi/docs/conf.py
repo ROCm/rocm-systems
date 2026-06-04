@@ -89,7 +89,7 @@ doxygen_project = {
     "path": doxygen_root / "_out"/ "xml",
 }
 breathe_projects = {"amdsmi": doxygen_project["path"]}
-breathe_projects_source = {"amdsmi": (AMDSMI_H.parent, [AMDSMI_H.name])}
+# breathe_projects_source = {"amdsmi": (AMDSMI_H.parent, [AMDSMI_H.name])}
 breathe_default_project = "amdsmi"
 breathe_domain_by_extension = {"h": "c"}
 amdsmi_doxygen_tagfile = doxygen_root / "_out" / "tagfile.xml"

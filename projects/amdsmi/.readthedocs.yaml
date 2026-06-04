@@ -16,3 +16,7 @@ formats: [htmlzip, pdf]
 python:
    install:
    - requirements: projects/amdsmi/docs/sphinx/requirements.txt
+
+search:
+  ignore:
+    - "genindex.html"
