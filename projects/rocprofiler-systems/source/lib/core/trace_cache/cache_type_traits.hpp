@@ -117,6 +117,9 @@ inline constexpr bool is_supported_type_v =
     is_string_view_v<T> || is_vector_v<T> || is_optional_v<T> || is_array_v<T>;
 
 template <typename T>
+concept supported_cache_type = is_supported_type_v<std::decay_t<T>>;
+
+template <typename T>
 struct is_enum_class
 : std::bool_constant<std::is_enum_v<T> &&
                      !std::is_convertible_v<T, std::underlying_type_t<T>>>
