@@ -10,9 +10,8 @@
  * recreated to obtain a fresh QPN. The new QPNs are exchanged with the
  * remote peer via the ACK payload before RTR/RTS (two-phase handshake).
  *
- * Entry points called from p2p_resiliency_recovery.cc via the unified
- * wrappers IbCastPortRecoveryReceiverRestoreAndAck /
- * IbCastPortRecoverySenderRestoreAndAck.
+ * Entry points are invoked by p2p_resiliency_recovery.cc from the
+ * IbCastPortRecoveryQpsRestore / IbCastPortRecoveryPostAck flows.
  */
 
 #include "p2p_resiliency_recovery_internal.h"

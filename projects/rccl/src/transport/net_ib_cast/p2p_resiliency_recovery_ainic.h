@@ -10,7 +10,7 @@
 #include "nccl.h"
 #include "p2p_resiliency_cast.h"
 
-/* Forward declaration — ncclIbPortRecoveryContext is defined in recovery.cc */
+/* Forward declaration — ncclIbPortRecoveryContext is defined in p2p_resiliency_recovery_internal.h */
 struct ncclIbPortRecoveryContext;
 struct ibv_wc;
 
