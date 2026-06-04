@@ -80,9 +80,8 @@ ensure_ci_timeout_backtrace(double             _ci_timeout_seconds,
     std::uint64_t _ci_timeout_nitr    = 0;
     std::int64_t  _ci_timeout_nanosec = (_ci_timeout_seconds - _factor) * units::sec;
     auto          _ci_timeout_total_count =
-        get_env<std::uint64_t>("ROCPROFSYS_CI_TIMEOUT_COUNT", 1, false);
-    const auto root_pid =
-        get_env<pid_t>("ROCPROFSYS_ROOT_PROCESS", process::get_id(), false);
+        get_env<std::uint64_t>("ROCPROFSYS_CI_TIMEOUT_COUNT", 1);
+    const auto root_pid = get_env<pid_t>("ROCPROFSYS_ROOT_PROCESS", process::get_id());
 
     while(get_state() < State::Finalized && _ci_timeout_nitr < _ci_timeout_total_count)
     {
@@ -170,14 +169,14 @@ setup()
     // set, start a thread that will print out the backtrace for each thread
     // before the timeout is hit (i.e. killed by CTest) so we can potentially
     // diagnose where the code is stuck
-    auto _ci = get_env("ROCPROFSYS_CI", false, false);
+    auto _ci = get_env("ROCPROFSYS_CI", false);
     if(_ci)
     {
         // set by CTest
-        auto _ci_timeout_default = get_env("ROCPROFSYS_CI_TIMEOUT", -1.0, false);
+        auto _ci_timeout_default = get_env("ROCPROFSYS_CI_TIMEOUT", -1.0);
         // allow override by user
         auto _ci_timeout_seconds =
-            get_env("ROCPROFSYS_CI_TIMEOUT_OVERRIDE", _ci_timeout_default, false);
+            get_env("ROCPROFSYS_CI_TIMEOUT_OVERRIDE", _ci_timeout_default);
 
         if(_ci_timeout_seconds > 0.0)
         {

@@ -286,6 +286,87 @@
         }
       ]
     },
+    "net_ib_coverage_env": {
+      "extends": "net_ib_base",
+      "timeout": 300,
+      "_comment": "Coverage-oriented re-run of core transfer tests under alternate IB env. GID_INDEX=-1 forces RoCE GID auto-select (the auto-select path is skipped when a fixed index is pinned); PCI_RELAXED_ORDERING=0 exercises the relaxed-ordering-disabled registration/connect paths; ADAPTIVE_ROUTING=1 reaches the adaptive-routing threshold path. Env knobs are NIC-agnostic.",
+      "env_variables": {
+        "NCCL_IB_GID_INDEX": "-1",
+        "NCCL_IB_PCI_RELAXED_ORDERING": "0",
+        "NCCL_IB_ADAPTIVE_ROUTING": "1"
+      },
+      "tests": [
+        {
+          "name": "NetIB_Cov_SimpleSendRecv",
+          "description": "Send/recv under GID auto-select + relaxed-ordering-off + adaptive routing",
+          "test_filter": "NetIbMPITest.SimpleSendRecv",
+          "timeout": 180
+        },
+        {
+          "name": "NetIB_Cov_MultipleSizes",
+          "description": "Multi-size transfer under alternate IB env (GID auto-select / RO off / AR on)",
+          "test_filter": "NetIbMPITest.SendRecvMultipleSizes",
+          "timeout": 300
+        },
+        {
+          "name": "NetIB_Cov_LargeTransfer",
+          "description": "Large transfer crossing the AR threshold under adaptive routing",
+          "test_filter": "NetIbMPITest.LargeTransfer",
+          "timeout": 300
+        },
+        {
+          "name": "NetIB_Cov_RegisterHost",
+          "description": "Host MR registration under relaxed-ordering-disabled path",
+          "test_filter": "NetIbMPITest.RegisterHostMemory",
+          "timeout": 180
+        }
+      ]
+    },
+    "net_ib_merge_disabled": {
+      "extends": "net_ib_base",
+      "timeout": 60,
+      "_comment": "Exercises the makeVDevice merge-disabled guard, which only runs with NCCL_IB_MERGE_NICS=0 (the rest of the suite uses 1). Without this entry MakeVirtualDeviceMergeDisabled always GTEST_SKIPs in CI.",
+      "env_variables": {
+        "NCCL_IB_MERGE_NICS": "0"
+      },
+      "tests": [
+        {
+          "name": "NetIB_VNic_MergeDisabledGuard",
+          "description": "makeVDevice with a multi-device request must be rejected when NCCL_IB_MERGE_NICS=0",
+          "test_filter": "NetIbMPITest.MakeVirtualDeviceMergeDisabled"
+        }
+      ]
+    },
+    "net_ib_vnic_validation": {
+      "extends": "net_ib_base",
+      "timeout": 120,
+      "_comment": "makeVDevice / CheckVProps validation and topology error paths. WARN_RAIL_LOCAL=1 so the rail-local mismatch arm in DisjointMergeRailLocal_VNic is reachable. Topology-dependent cases (cross-NUMA, disjoint >=5-NIC merge) GTEST_SKIP when the hardware doesn't provide them.",
+      "env_variables": {
+        "NCCL_IB_WARN_RAIL_LOCAL": "1"
+      },
+      "tests": [
+        {
+          "name": "NetIB_VNic_OutOfRangeDev",
+          "description": "makeVDevice rejects an out-of-range physical device index",
+          "test_filter": "NetIbMPITest.MakeVirtualDeviceOutOfRangeDev"
+        },
+        {
+          "name": "NetIB_VNic_DuplicateDevs",
+          "description": "makeVDevice dedups a repeated device into a single-device vNIC",
+          "test_filter": "NetIbMPITest.MakeVirtualDeviceDuplicateDevs"
+        },
+        {
+          "name": "NetIB_VNic_CrossNuma",
+          "description": "makeVDevice warns (but succeeds) merging NICs across NUMA nodes",
+          "test_filter": "NetIbMPITest.MakeVirtualDeviceCrossNuma"
+        },
+        {
+          "name": "NetIB_VNic_DisjointRailLocal",
+          "description": "CheckVProps rail-local mismatch + ndevs-swap on a disjoint asymmetric vNIC merge",
+          "test_filter": "NetIbMPITest.DisjointMergeRailLocal_VNic"
+        }
+      ]
+    },
     "net_ib_multirecv": {
       "extends": "net_ib_base",
       "timeout": 300,
@@ -1585,6 +1666,219 @@
       ]
     },
 
+    "grow_mpi_tests": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "Grow_SendRecv",
+          "description": "Single grow (N-1 -> N), verify data with SendRecv ring on the grown communicator",
+          "test_filter": "GrowMPITest.Grow_SendRecv"
+        },
+        {
+          "name": "Grow_ThenAbort",
+          "description": "Grow then ncclCommAbort on the grown communicator must succeed cleanly on all ranks",
+          "test_filter": "GrowMPITest.Grow_ThenAbort"
+        },
+        {
+          "name": "Grow_RankPreservation",
+          "description": "After grow, existing ranks retain their original rank index and the new rank gets the expected index",
+          "test_filter": "GrowMPITest.Grow_RankPreservation"
+        },
+        {
+          "name": "Grow_ConfigInheritance",
+          "description": "Grown communicator inherits config (splitShare) from the parent via copyCommConfig path",
+          "test_filter": "GrowMPITest.Grow_ConfigInheritance"
+        },
+        {
+          "name": "Grow_NonBlocking",
+          "description": "Non-blocking grow via ncclConfig_t.blocking=0; poll ncclCommGetAsyncError until ncclSuccess, then AllReduce",
+          "test_filter": "GrowMPITest.Grow_NonBlocking"
+        },
+        {
+          "name": "Grow_ParentDestroyAfterGrow",
+          "description": "Destroy the parent communicator after grow; the grown communicator must still run AllReduce successfully",
+          "test_filter": "GrowMPITest.Grow_ParentDestroyAfterGrow"
+        },
+        {
+          "name": "Grow_ErrorRecoveryRegrow",
+          "description": "Abort grown and parent comms (simulated error), then recreate and grow again (torchcomms error recovery path)",
+          "test_filter": "GrowMPITest.Grow_ErrorRecoveryRegrow"
+        },
+        {
+          "name": "Grow_InvalidArguments",
+          "description": "ncclCommGrow with newcomm==NULL, nRanks<=0, or nRanks<=existing must return ncclInvalidArgument before GroupStart",
+          "test_filter": "GrowMPITest.Grow_InvalidArguments"
+        },
+        {
+          "name": "Grow_NewRankInvalidArgsThenSuccess",
+          "description": "New-rank validation (rank<0, uniqueId==NULL, rank>=nRanks) rejects correctly and leaves group counter balanced for a subsequent valid grow",
+          "test_filter": "GrowMPITest.Grow_NewRankInvalidArgsThenSuccess"
+        },
+        {
+          "name": "Grow_SingleRankParent",
+          "description": "1-rank parent comm exercises bcastGrowHandle early-return path (nRanks==1, coordinator is both rank 0 and nRanks-1)",
+          "test_filter": "GrowMPITest.Grow_SingleRankParent"
+        },
+        {
+          "name": "Grow_ExistingRankCustomConfig",
+          "description": "Existing rank passes non-NULL ncclConfig_t to ncclCommGrow, exercising parseCommConfig path instead of copyCommConfig",
+          "test_filter": "GrowMPITest.Grow_ExistingRankCustomConfig"
+        },
+        {
+          "name": "Grow_ExistingRankBadRankArg",
+          "description": "Existing-rank callers (comm != NULL) must pass rank=-1; any other value returns ncclInvalidArgument",
+          "test_filter": "GrowMPITest.Grow_ExistingRankBadRankArg"
+        },
+        {
+          "name": "Grow_NewRankNRanksEqualExisting",
+          "description": "nRanks == existing nRanks (not a grow) must be rejected with ncclInvalidArgument",
+          "test_filter": "GrowMPITest.Grow_NewRankNRanksEqualExisting"
+        },
+        {
+          "name": "GetUniqueId_NullComm",
+          "description": "ncclCommGetUniqueId with NULL comm must return ncclInvalidArgument (CommCheck early-return)",
+          "test_filter": "GrowMPITest.GetUniqueId_NullComm"
+        },
+        {
+          "name": "GetUniqueId_NullUniqueId",
+          "description": "ncclCommGetUniqueId with NULL uniqueId pointer must return ncclInvalidArgument (PtrCheck early-return)",
+          "test_filter": "GrowMPITest.GetUniqueId_NullUniqueId"
+        },
+        {
+          "name": "GetUniqueId_NullArgs_Combined",
+          "description": "Both CommCheck(nullptr) and PtrCheck(nullptr) paths, then a valid call succeeds after the failures",
+          "test_filter": "GrowMPITest.GetUniqueId_NullArgs_Combined"
+        },
+        {
+          "name": "GetUniqueId_NcclCommIdEnvRejection",
+          "description": "When NCCL_COMM_ID env is set, ncclCommGetUniqueId must return ncclInvalidUsage (bootstrapGetUniqueId env guard)",
+          "test_filter": "GrowMPITest.GetUniqueId_NcclCommIdEnvRejection"
+        }
+      ]
+    },
+
+    "grow_mpi_tests_8rank": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "Grow_CoordinatorOnlyUniqueId",
+          "description": "Only the coordinator passes uniqueId to ncclCommGrow; other existing ranks pass nullptr (NCCL convention)",
+          "test_filter": "GrowMPITest.Grow_CoordinatorOnlyUniqueId"
+        },
+        {
+          "name": "Grow_ThenShrink",
+          "description": "Grow N-1 -> N then ncclCommShrink back to N-1 (elastic scale-up/down cycle with NCCL_SHRINK_DEFAULT)",
+          "test_filter": "GrowMPITest.Grow_ThenShrink"
+        },
+        {
+          "name": "Grow_ThenShrinkAbort",
+          "description": "Grow then ncclCommShrink with NCCL_SHRINK_ABORT flag (torchcomms convention); AllReduce on shrunk comm",
+          "test_filter": "GrowMPITest.Grow_ThenShrinkAbort"
+        },
+        {
+          "name": "Grow_CoordinatorAtLastRank",
+          "description": "Coordinator is the last rank of the parent comm; exercises bcastGrowHandle self-send via unex queue",
+          "test_filter": "GrowMPITest.Grow_CoordinatorAtLastRank"
+        },
+        {
+          "name": "DoubleGrow_AllReduce",
+          "description": "Double grow (N-2 -> N-1 -> N) with AllReduce verification on the final communicator",
+          "test_filter": "GrowMPITest.DoubleGrow_AllReduce"
+        },
+        {
+          "name": "GetUniqueId_DistinctHandles",
+          "description": "Two sequential ncclCommGetUniqueId calls on the same parent produce distinct magic fields (childCount chain)",
+          "test_filter": "GrowMPITest.GetUniqueId_DistinctHandles"
+        },
+        {
+          "name": "ShrinkThenGrow",
+          "description": "Shrink N -> N-1 then grow back to N; verifies grow works on a communicator produced by shrink",
+          "test_filter": "GrowMPITest.ShrinkThenGrow"
+        },
+        {
+          "name": "GrowShrinkGrowCycle",
+          "description": "Full elastic cycle: grow N-1->N, shrink N->N-1, grow N-1->N again with AllReduce at each phase",
+          "test_filter": "GrowMPITest.GrowShrinkGrowCycle"
+        },
+        {
+          "name": "GetUniqueId_MagicChainThree",
+          "description": "Three sequential grows with distinct magic chain; verifies hashCombine(comm->magic, childCount+1) across 3 levels",
+          "test_filter": "GrowMPITest.GetUniqueId_MagicChainThree"
+        },
+        {
+          "name": "Grow_MultiRankJump",
+          "description": "Grow by 4 ranks at once (N-4 -> N); exercises bootstrapInit multi-root path with a larger new-rank segment",
+          "test_filter": "GrowMPITest.Grow_MultiRankJump"
+        }
+      ]
+    },
+
+    "grow_mpi_tests_multinode": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "Grow_SendRecv",
+          "description": "Single grow over IB transport; SendRecv ring verifies data path through network buffers on the grown communicator",
+          "test_filter": "GrowMPITest.Grow_SendRecv"
+        },
+        {
+          "name": "DoubleGrow_AllReduce",
+          "description": "Double grow (N-2 -> N-1 -> N) over IB transport; AllReduce on the final communicator verifies multi-hop bootstrap and QP setup",
+          "test_filter": "GrowMPITest.DoubleGrow_AllReduce"
+        },
+        {
+          "name": "Grow_ParentDestroyAfterGrow",
+          "description": "Destroy parent after grow over IB; verifies IB resource teardown on parent does not corrupt the grown communicator's QPs",
+          "test_filter": "GrowMPITest.Grow_ParentDestroyAfterGrow"
+        },
+        {
+          "name": "Grow_ThenShrink",
+          "description": "Grow then shrink over IB transport; exercises network buffer teardown and rebuild across the elastic cycle",
+          "test_filter": "GrowMPITest.Grow_ThenShrink"
+        },
+        {
+          "name": "GrowShrinkGrowCycle",
+          "description": "Full elastic cycle over IB: grow, shrink, grow again; verifies no leaked IB resources across multiple topology changes",
+          "test_filter": "GrowMPITest.GrowShrinkGrowCycle"
+        },
+        {
+          "name": "Grow_NonBlocking",
+          "description": "Non-blocking grow over IB transport; async-job worker thread must handle IB connection setup without races",
+          "test_filter": "GrowMPITest.Grow_NonBlocking"
+        }
+      ]
+    },
+
     "net_ib_initialization_cast": {
       "extends": "net_ib_initialization",
       "env_variables": { "NCCL_NET": "ib-cast" }
@@ -1603,6 +1897,10 @@
     },
     "net_ib_transfer_cast": {
       "extends": "net_ib_transfer",
+      "env_variables": { "NCCL_NET": "ib-cast" }
+    },
+    "net_ib_coverage_env_cast": {
+      "extends": "net_ib_coverage_env",
       "env_variables": { "NCCL_NET": "ib-cast" }
     },
     "net_ib_multirecv_cast": {
@@ -1693,6 +1991,24 @@
       "name": "NET IB - Data Transfer",
       "description": "InfiniBand data transfer and stress tests",
       "config": "net_ib_transfer",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Coverage Env (GID auto-select / RO off / AR)",
+      "description": "Core transfer tests re-run under alternate IB env to cover GID auto-select, relaxed-ordering-disabled, and adaptive-routing branches",
+      "config": "net_ib_coverage_env",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - vNIC Merge Disabled Guard",
+      "description": "Exercises the makeVDevice merge-disabled guard under NCCL_IB_MERGE_NICS=0",
+      "config": "net_ib_merge_disabled",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - vNIC Validation",
+      "description": "makeVDevice/CheckVProps validation and topology error paths (bounds, dedup, cross-NUMA, rail-local)",
+      "config": "net_ib_vnic_validation",
       "enabled": true
     },
     {
@@ -1924,6 +2240,24 @@
       "enabled": true
     },
     {
+      "name": "Grow MPI Tests (2-rank)",
+      "description": "ncclCommGrow coverage at 2 ranks on a single node: argument validation, rank preservation, config inheritance, non-blocking grow, parent destroy lifecycle, error recovery regrow, and ncclCommGetUniqueId edge cases",
+      "config": "grow_mpi_tests",
+      "enabled": true
+    },
+    {
+      "name": "Grow MPI Tests (8-rank, single-node)",
+      "description": "ncclCommGrow scenarios requiring 3-8 ranks on one node: coordinator-only uniqueId (NCCL convention), elastic grow/shrink cycles, double/triple grow with magic chain verification, multi-rank jump (4 ranks at once), and coordinator-at-last-rank bootstrap path",
+      "config": "grow_mpi_tests_8rank",
+      "enabled": true
+    },
+    {
+      "name": "Grow MPI Tests - Multi-Node (4-rank, 2-node)",
+      "description": "ncclCommGrow multi-node scenarios over IB transport: grow with SendRecv/AllReduce over network, parent destroy with IB teardown, elastic grow/shrink cycles over IB, and non-blocking grow with IB connection setup",
+      "config": "grow_mpi_tests_multinode",
+      "enabled": true
+    },
+    {
       "name": "NET IB - Initialization Tests (ib-cast)",
       "description": "InfiniBand plugin initialization and device enumeration via ib-cast plugin (NCCL_NET=ib-cast)",
       "config": "net_ib_initialization_cast",
@@ -1951,6 +2285,12 @@
       "name": "NET IB - Data Transfer (ib-cast)",
       "description": "InfiniBand data transfer via ib-cast plugin (NCCL_NET=ib-cast)",
       "config": "net_ib_transfer_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Coverage Env (ib-cast)",
+      "description": "Coverage-env transfer tests via ib-cast plugin: exercises CAST GID auto-select and relaxed-ordering paths (NCCL_NET=ib-cast)",
+      "config": "net_ib_coverage_env_cast",
       "enabled": true
     },
     {

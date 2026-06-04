@@ -21,6 +21,7 @@ class validation_rule:
         comparison,
         error_message,
         requires=None,
+        expected_result_max=None,
     ):
         self.description = description
         self.query = query
@@ -28,6 +29,7 @@ class validation_rule:
         self.comparison = comparison
         self.error_message = error_message
         self.requires = requires
+        self.expected_result_max = expected_result_max
 
     def __repr__(self):
         return f"validation_rule(description={self.description}, query={self.query})"
@@ -50,8 +52,24 @@ class validation_rule:
             return result <= self.expected_result
         elif self.comparison == "not_equals":
             return result != self.expected_result
+        elif self.comparison == "between_inclusive":
+            if self.expected_result_max is None:
+                raise ValueError(
+                    "between_inclusive requires expected_result (min) and "
+                    "expected_result_max (max) in the rule JSON"
+                )
+            return self.expected_result <= result <= self.expected_result_max
         else:
             raise ValueError(f"Unknown comparison operator: {self.comparison}")
+
+    def expected_summary(self):
+        """Human-readable expected value for failure messages."""
+        if self.comparison == "between_inclusive":
+            return (
+                f"{self.comparison} [{self.expected_result}, "
+                f"{self.expected_result_max}]"
+            )
+        return f"{self.comparison} {self.expected_result}"
 
 
 class required_table:
@@ -116,7 +134,8 @@ def print_help():
         - Verifies required columns exist in each table
         - Ensures minimum row count requirements are met
         - Executes custom SQL validation queries
-        - Supports various comparison operators (equals, greater_than, less_than, etc.)
+        - Supports various comparison operators (equals, greater_than, less_than,
+          between_inclusive, etc.)
 
     EXIT CODES:
         0  - All validations passed successfully
@@ -231,7 +250,8 @@ def validate_table(cursor, rule, tables, available_metrics=None) -> bool:
                             f"❌ ERROR: {validation_query.error_message} (Table: '{table_name}')"
                         )
                         print(
-                            f"   Expected: {validation_query.comparison} {validation_query.expected_result}, Got: {actual_result}"
+                            f"   Expected: {validation_query.expected_summary()}, "
+                            f"Got: {actual_result}"
                         )
                         all_queries_passed = False
                     else:
@@ -325,6 +345,7 @@ def load_validation_rules(validation_rules) -> list:
                             comparison=vq.get("comparison", "equals"),
                             error_message=vq["error_message"],
                             requires=vq.get("requires", None),
+                            expected_result_max=vq.get("expected_result_max"),
                         )
                         validation_queries.append(validation_query_obj)
 
