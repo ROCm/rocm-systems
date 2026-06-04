@@ -263,17 +263,6 @@ if(DEPENDENCIES_MET)
       message(FATAL_ERROR "PAL_ROOT (${PAL_ROOT}) does not contain inc/core directory")
     endif()
 
-    if(NOT DEFINED UVD_INCLUDE_DIR)
-      set(UVD_INCLUDE_DIR "" CACHE PATH "UVD firmware include directory containing drv_uvd_if.h (required for Windows build)")
-      message(FATAL_ERROR "UVD_INCLUDE_DIR must be set for Windows builds. Use: cmake -DUVD_INCLUDE_DIR=<path> ..")
-    endif()
-
-    if(NOT EXISTS "${UVD_INCLUDE_DIR}/drv_uvd_if.h")
-      message(FATAL_ERROR "UVD_INCLUDE_DIR (${UVD_INCLUDE_DIR}) does not contain drv_uvd_if.h")
-    endif()
-
-    include_directories(${UVD_INCLUDE_DIR})
-
     # Use the PAL package CMake target to extract its INTERFACE compile definitions,
     # include directories, and link libraries.  We store them in variables and apply
     # them to rocdecode after add_library, rather than linking the 'pal' target itself.
