@@ -175,7 +175,7 @@ auto cfg_fini_callbacks = std::vector<std::function<void()>>{};
 bool
 config_json_missing_expected_root(const std::string& path)
 {
-    if(path.find(".json") == std::string::npos) return false;
+    if(!path.ends_with(".json")) return false;
     std::ifstream ifs{ path };
     if(!ifs.is_open()) return false;
     try
