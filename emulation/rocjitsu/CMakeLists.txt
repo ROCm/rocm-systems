@@ -231,6 +231,7 @@ endif()
 # Tests and scaling tools.
 if(BUILD_TESTING)
     add_subdirectory(tests)
+    add_subdirectory(fuzzer)
 endif()
 
 # ---------------------------------------------------------------------------
