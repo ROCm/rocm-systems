@@ -217,7 +217,19 @@ stop_context(const context::context* ctx)
         enabled = false;
     });
 
-    if(controller) controller->disable_serialization();
+    if(controller)
+    {
+        controller->disable_serialization();
+
+        for(auto& cb : ctx->dispatch_counter_collection->callbacks)
+        {
+            if(cb->queue_id != rocprofiler::hsa::ClientID{-1})
+            {
+                controller->remove_callback(cb->queue_id);
+                cb->queue_id = rocprofiler::hsa::ClientID{-1};
+            }
+        }
+    }
 
     callback_thread_stop();
 }
