@@ -16,6 +16,7 @@ from therock_matrix import (
     project_map,
     trigger_windows_ci_for_subtrees_paths,
     windows_only_subtrees,
+    feature_groups_for_tests,
 )
 import time
 from typing import Mapping, Optional, Iterable
@@ -212,6 +213,12 @@ def retrieve_projects(args):
             logging.info("Only skippable paths were modified, skipping CI")
             return []
 
+    # When we cannot attribute the change to a specific subtree (CI infra
+    # changes, unknown paths, or an explicit "all" request), we fall back to a
+    # full THEROCK_ENABLE_ALL=ON build so coverage is never silently reduced for
+    # those cases. Clean per-subtree matches use the targeted (cheaper) flags.
+    force_enable_all = False
+
     # Push event → check which subtrees were modified
     if args.get("is_push"):
         matched_subtrees = {get_matched_subtree(p) for p in modified_paths} - {None}
@@ -220,6 +227,7 @@ def retrieve_projects(args):
         if check_for_workflow_file_related_to_ci(modified_paths):
             logging.info("CI workflow files changed, evaluating all subtrees")
             subtrees = list(subtree_to_project_map.keys())
+            force_enable_all = True
         elif matched_subtrees:
             # Known subtrees changed - run CI for those subtrees
             subtrees = list(matched_subtrees)
@@ -233,6 +241,7 @@ def retrieve_projects(args):
                 "Modified files did not match known subtrees, evaluating all projects"
             )
             subtrees = list(subtree_to_project_map.keys())
+            force_enable_all = True
         else:
             subtrees = []
 
@@ -240,6 +249,7 @@ def retrieve_projects(args):
     elif args.get("is_workflow_dispatch"):
         if args.get("input_projects") == "all":
             subtrees = list(subtree_to_project_map.keys())
+            force_enable_all = True
         else:
             subtrees = args.get("input_projects", "").split()
 
@@ -255,6 +265,7 @@ def retrieve_projects(args):
         if check_for_workflow_file_related_to_ci(modified_paths):
             logging.info("CI workflow files changed, evaluating all subtrees")
             subtrees = list(subtree_to_project_map.keys())
+            force_enable_all = True
 
         # Pull request
         elif args.get("is_pull_request"):
@@ -273,6 +284,7 @@ def retrieve_projects(args):
                 "Modified files did not match known subtrees, evaluating all projects"
             )
             subtrees = list(subtree_to_project_map.keys())
+            force_enable_all = True
 
     # Holds the python-specific cmake options passed to TheRock build.
     common_python_options = []
@@ -332,10 +344,16 @@ def retrieve_projects(args):
         tests = config.get("projects_to_test", "")
         if tests:
             merged_tests.update(t.strip() for t in tests.split(","))
-    if enable_all:
+    if enable_all or force_enable_all:
         final_flags_list = ["-DTHEROCK_ENABLE_ALL=ON"]
     else:
         final_flags_list = sorted(merged_flags)
+        # Auto-enable the math/ML library feature groups only when a selected
+        # test actually needs them (see feature_groups_for_tests). This keeps
+        # presubmit fast for runtime/profiler changes while still building and
+        # testing rocBLAS, MIOpen, etc. on demand.
+        for feature in sorted(feature_groups_for_tests(merged_tests)):
+            final_flags_list.append(f"-DTHEROCK_ENABLE_{feature}=ON")
     # Always append -DTHEROCK_ENABLE_CORE=ON as a default at the end
     final_flags_list.append("-DTHEROCK_ENABLE_CORE=ON")
     # Always append the Python options.

@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.fspath(Path(__file__).parent.parent))
 import therock_configure_ci
+import therock_matrix
 
 
 class ConfigureCITest(unittest.TestCase):
@@ -119,7 +120,9 @@ class ConfigureCITest(unittest.TestCase):
         self.assertTrue(therock_configure_ci.is_path_skippable(".gitignore"))
         self.assertTrue(therock_configure_ci.is_path_skippable(".github/labeler.yml"))
         self.assertTrue(therock_configure_ci.is_path_skippable(".github/labels.yml"))
-        self.assertTrue(therock_configure_ci.is_path_skippable(".github/workflows/labeler.yml"))
+        self.assertTrue(
+            therock_configure_ci.is_path_skippable(".github/workflows/labeler.yml")
+        )
 
         # Test non-skippable patterns
         self.assertFalse(
@@ -421,6 +424,108 @@ class ConfigureCITest(unittest.TestCase):
         projects = json.loads(outputs["projects"])
         self.assertGreaterEqual(len(projects), 1)
         self.assertEqual(outputs["run_linux_rccl_ci"], "false")
+
+    # --- Math/ML library scoping & detection -------------------------------
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_runtimes_change_excludes_math_ml_libs(self, mock_get_modified):
+        """A clean runtimes (clr) change must not build math/ML libraries and
+        must not fall back to THEROCK_ENABLE_ALL=ON."""
+        args = {"is_pull_request": True, "base_ref": "HEAD^", "platform": "linux"}
+        mock_get_modified.return_value = ["projects/clr/src/hip.cpp"]
+
+        project_to_run = therock_configure_ci.retrieve_projects(args)
+        self.assertEqual(len(project_to_run), 1)
+        cmake_options = project_to_run[0]["cmake_options"]
+        self.assertIn("DTHEROCK_ENABLE_ALL=OFF", cmake_options)
+        self.assertNotIn("DTHEROCK_ENABLE_ALL=ON", cmake_options)
+        self.assertNotIn("DTHEROCK_ENABLE_MATH_LIBS=ON", cmake_options)
+        self.assertNotIn("DTHEROCK_ENABLE_ML_LIBS=ON", cmake_options)
+        # Runtime changes still exercise core/profiler/debug tooling.
+        self.assertIn("DTHEROCK_ENABLE_CORE=ON", cmake_options)
+        self.assertIn("DTHEROCK_ENABLE_PROFILER=ON", cmake_options)
+        self.assertIn("DTHEROCK_ENABLE_DEBUG_TOOLS=ON", cmake_options)
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_profiler_change_excludes_math_ml_libs(self, mock_get_modified):
+        """A clean profiler change must not build math/ML libraries."""
+        args = {"is_pull_request": True, "base_ref": "HEAD^", "platform": "linux"}
+        mock_get_modified.return_value = ["projects/rocprofiler-sdk/src/x.cpp"]
+
+        project_to_run = therock_configure_ci.retrieve_projects(args)
+        self.assertEqual(len(project_to_run), 1)
+        cmake_options = project_to_run[0]["cmake_options"]
+        self.assertNotIn("DTHEROCK_ENABLE_ALL=ON", cmake_options)
+        self.assertNotIn("DTHEROCK_ENABLE_MATH_LIBS=ON", cmake_options)
+        self.assertNotIn("DTHEROCK_ENABLE_ML_LIBS=ON", cmake_options)
+        self.assertIn("DTHEROCK_ENABLE_PROFILER=ON", cmake_options)
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_unknown_path_forces_full_build(self, mock_get_modified):
+        """Unknown paths must still trigger a full THEROCK_ENABLE_ALL=ON build."""
+        args = {"is_pull_request": True, "base_ref": "HEAD^", "platform": "linux"}
+        mock_get_modified.return_value = ["some/unknown/path/file.cpp"]
+
+        project_to_run = therock_configure_ci.retrieve_projects(args)
+        self.assertEqual(len(project_to_run), 1)
+        self.assertIn("DTHEROCK_ENABLE_ALL=ON", project_to_run[0]["cmake_options"])
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_ci_file_change_forces_full_build(self, mock_get_modified):
+        """A CI workflow change must still trigger a full build."""
+        args = {"is_pull_request": True, "base_ref": "HEAD^", "platform": "linux"}
+        mock_get_modified.return_value = [".github/workflows/therock-ci.yml"]
+
+        project_to_run = therock_configure_ci.retrieve_projects(args)
+        self.assertEqual(len(project_to_run), 1)
+        self.assertIn("DTHEROCK_ENABLE_ALL=ON", project_to_run[0]["cmake_options"])
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_detects_math_libs_from_test_list(self, mock_get_modified):
+        """If a selected test needs math libs, MATH_LIBS is auto-enabled even in
+        an otherwise-reduced build."""
+        args = {"is_pull_request": True, "base_ref": "HEAD^", "platform": "linux"}
+        mock_get_modified.return_value = ["projects/clr/src/hip.cpp"]
+
+        # Inject a math test into the runtimes config for this test only.
+        original = therock_configure_ci.project_map["runtimes"]["projects_to_test"]
+        therock_configure_ci.project_map["runtimes"]["projects_to_test"] = (
+            original + ", rocblas"
+        )
+        try:
+            project_to_run = therock_configure_ci.retrieve_projects(args)
+        finally:
+            therock_configure_ci.project_map["runtimes"]["projects_to_test"] = original
+
+        cmake_options = project_to_run[0]["cmake_options"]
+        self.assertIn("DTHEROCK_ENABLE_MATH_LIBS=ON", cmake_options)
+        self.assertNotIn("DTHEROCK_ENABLE_ALL=ON", cmake_options)
+
+
+class MatrixDetectionTest(unittest.TestCase):
+    def test_feature_groups_for_tests_math(self):
+        self.assertEqual(
+            therock_matrix.feature_groups_for_tests(["rocblas"]), {"MATH_LIBS"}
+        )
+        self.assertEqual(
+            therock_matrix.feature_groups_for_tests(["rocfft", "hip-tests"]),
+            {"MATH_LIBS"},
+        )
+
+    def test_feature_groups_for_tests_ml_implies_math(self):
+        self.assertEqual(
+            therock_matrix.feature_groups_for_tests(["miopen"]),
+            {"MATH_LIBS", "ML_LIBS"},
+        )
+
+    def test_feature_groups_for_tests_none(self):
+        self.assertEqual(
+            therock_matrix.feature_groups_for_tests(
+                ["hip-tests", "rocrtst", "rocgdb", "rocprofiler-sdk"]
+            ),
+            set(),
+        )
+        self.assertEqual(therock_matrix.feature_groups_for_tests([""]), set())
+        self.assertEqual(therock_matrix.feature_groups_for_tests([]), set())
 
 
 if __name__ == "__main__":

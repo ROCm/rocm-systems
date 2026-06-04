@@ -35,6 +35,13 @@ jobs:
       AMDGPU_FAMILIES: "gfx94X-dcgpu"
       TEATIME_FORCE_INTERACTIVE: 0
       AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
+      # When "1", fetch the prebuilt amd-llvm/hipify/sysdeps artifacts that
+      # TheRock CI already built for the pinned TheRock commit and reuse them
+      # instead of recompiling/relinking the compiler on every run. This is a
+      # best-effort optimization: if no compatible prebuilt artifacts are found
+      # the build transparently falls back to building the compiler from source.
+      THEROCK_USE_PREBUILT_COMPILER: "1"
+      PREBUILT_ARTIFACTS_DIR: ${{ github.workspace }}/prebuilt-artifacts
     steps:
       - name: "Checking out repository for rocm-systems"
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -67,10 +74,130 @@ jobs:
         run: |
           ./TheRock/build_tools/health_status.py
 
+      # Reuse the prebuilt compiler toolchain (amd-llvm, hipify) and bundled
+      # system dependencies (sysdeps) that TheRock CI already built for the
+      # pinned TheRock commit, and -- when a selected test needs them -- the
+      # math/ML libraries too. These do not change for a rocm-systems PR, their
+      # multi-GB link/codegen steps are not cacheable by ccache, and reusing
+      # them removes the largest fixed costs from the build. The rocm-systems
+      # sources under test are always built locally. The lookup uses TheRock's
+      # own commit so the prebuilt artifacts match the build infrastructure.
+      # Everything is best-effort: if no compatible prebuilt artifacts are found
+      # the build transparently falls back to building from source.
+      - name: Resolve prebuilt artifacts
+        id: prebuilt
+        if: ${{ env.THEROCK_USE_PREBUILT_COMPILER == '1' }}
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          git config --global --add safe.directory "$(pwd)/TheRock" 2>/dev/null || true
+          therock_commit="$(git -C TheRock rev-parse HEAD)"
+          echo "Looking up prebuilt TheRock artifacts for ${therock_commit} (group ${AMDGPU_FAMILIES})"
+          run_id="$(python TheRock/build_tools/find_artifacts_for_commit.py \
+            --commit "${therock_commit}" \
+            --repo ROCm/TheRock \
+            --workflow multi_arch_ci.yml \
+            --platform linux \
+            --artifact-group "${AMDGPU_FAMILIES}" 2>/dev/null \
+            | awk '/Workflow run ID:/ {print $NF; exit}' || true)"
+          if [ -z "${run_id}" ]; then
+            echo "No compatible prebuilt artifacts found; building from source."
+          else
+            echo "Found prebuilt artifacts in TheRock run ${run_id}."
+          fi
+          echo "run_id=${run_id}" >> "${GITHUB_OUTPUT}"
+
+      - name: Fetch and bootstrap prebuilt artifacts
+        id: prebuilt_boot
+        if: ${{ env.THEROCK_USE_PREBUILT_COMPILER == '1' && steps.prebuilt.outputs.run_id != '' }}
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CMAKE_OPTIONS: ${{ inputs.cmake_options }}
+        run: |
+          set -euo pipefail
+          rm -rf "${PREBUILT_ARTIFACTS_DIR}"
+          # The compiler toolchain and sysdeps are always reused: they never
+          # depend on rocm-systems sources, so they are always ABI-compatible.
+          patterns=(amd-llvm hipify sysdeps)
+          # Artifact-name prefixes for the math-libs / ml-libs artifact groups in
+          # TheRock's BUILD_TOPOLOGY.toml. Keep in sync if those groups change.
+          math_lib_patterns=(^blas_ ^rand_ ^fft_ ^prim_ ^sparse_ ^solver_ ^rocwmma_ ^libhipcxx_ ^support_)
+          ml_lib_patterns=(^composable-kernel_ ^miopen_ ^hipdnn_ ^hipdnn-integration-tests_ ^miopenprovider_ ^hipblasltprovider_ ^hipdnn-samples_ ^hipkernelprovider_)
+          prebuilt_math_ml=""
+          # Reuse math/ML libraries as prebuilt only when a selected test needs
+          # them (THEROCK_ENABLE_MATH_LIBS/ML_LIBS, set by therock_configure_ci.py).
+          # NOTE: prebuilt math/ML libs are built against TheRock's pinned
+          # rocm-systems, so this trades a small ABI risk for speed. A full
+          # THEROCK_ENABLE_ALL=ON build (CI infra / unknown-path / nightly)
+          # intentionally keeps building them from source for maximum coverage.
+          case "${CMAKE_OPTIONS}" in
+            *THEROCK_ENABLE_ALL=ON*) ;;
+            *THEROCK_ENABLE_ML_LIBS=ON*)
+              patterns+=("${math_lib_patterns[@]}" "${ml_lib_patterns[@]}")
+              prebuilt_math_ml="true"
+              ;;
+            *THEROCK_ENABLE_MATH_LIBS=ON*)
+              patterns+=("${math_lib_patterns[@]}")
+              prebuilt_math_ml="true"
+              ;;
+          esac
+          python TheRock/build_tools/fetch_artifacts.py \
+            --run-id "${{ steps.prebuilt.outputs.run_id }}" \
+            --run-github-repo ROCm/TheRock \
+            --platform linux \
+            --artifact-group "${AMDGPU_FAMILIES}" \
+            --output-dir "${PREBUILT_ARTIFACTS_DIR}" \
+            "${patterns[@]}"
+          # Mark the fetched artifacts as prebuilt so CMake skips building them.
+          # This writes stage/ trees and .prebuilt markers into the build dir and
+          # must run before `cmake` configures the project.
+          python TheRock/build_tools/buildctl.py bootstrap \
+            --build-dir TheRock/build \
+            --artifact-dir "${PREBUILT_ARTIFACTS_DIR}" \
+            --target-families "${AMDGPU_FAMILIES}"
+          # Report what was actually fetched (a partial/expired prebuilt run may
+          # be missing artifacts). Anything not actually present must still have
+          # its source fetched and be built locally, so only claim a component as
+          # prebuilt when its artifacts are on disk.
+          compiler_prebuilt=""
+          if ls "${PREBUILT_ARTIFACTS_DIR}"/amd-llvm_* >/dev/null 2>&1; then
+            compiler_prebuilt="true"
+          fi
+          if [ -n "${prebuilt_math_ml}" ] && ! ls "${PREBUILT_ARTIFACTS_DIR}"/blas_* >/dev/null 2>&1; then
+            echo "WARNING: math/ML libraries requested but absent from the prebuilt run; building them from source."
+            prebuilt_math_ml=""
+          fi
+          echo "compiler=${compiler_prebuilt}" >> "${GITHUB_OUTPUT}"
+          echo "math_ml=${prebuilt_math_ml}" >> "${GITHUB_OUTPUT}"
+
       - name: Fetch sources
         timeout-minutes: 30
+        env:
+          CMAKE_OPTIONS: ${{ inputs.cmake_options }}
         run: |
-          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems
+          set -eo pipefail
+          flags=()
+          if [ "${THEROCK_USE_PREBUILT_COMPILER}" = "1" ]; then
+            # Skip fetching sources for anything provided as prebuilt above; those
+            # subprojects are not built locally so their (large) sources -- e.g.
+            # llvm-project, rocm-libraries -- are not needed.
+            if [ "${{ steps.prebuilt_boot.outputs.compiler }}" = "true" ]; then
+              flags+=(--no-include-compilers)
+            fi
+            # Math/ML sources are only needed when those libraries are built from
+            # source: enabled in the build AND not provided as prebuilt.
+            mathml_enabled=0
+            case "${CMAKE_OPTIONS}" in
+              *THEROCK_ENABLE_ALL=ON*|*THEROCK_ENABLE_MATH_LIBS=ON*|*THEROCK_ENABLE_ML_LIBS=ON*) mathml_enabled=1 ;;
+            esac
+            if [ "${mathml_enabled}" = "0" ] || [ "${{ steps.prebuilt_boot.outputs.math_ml }}" = "true" ]; then
+              flags+=(--no-include-rocm-libraries --no-include-math-libraries)
+            fi
+          fi
+          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems "${flags[@]}"
 
       - name: Patch rocm-systems
         run: |
