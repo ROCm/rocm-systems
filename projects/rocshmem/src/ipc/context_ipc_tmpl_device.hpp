@@ -1193,19 +1193,18 @@ __device__ inline int IPCContext::tile_allgather(rocshmem_team_t team,
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
   int team_size = team_obj->num_pes;
 
-  // Calculate tile size for computing destination offsets
-  size_t tile_size = 1;
-  for (int dim = 0; dim < ndim; dim++) {
-    tile_size *= (boundary[dim] - start_coord[dim]);
-  }
+  // Calculate tile extent along dimension 0
+  size_t tile_extent_dim0 = boundary[0] - start_coord[0];
 
   // Each PE gathers tiles from all PEs in the team
   for (int src_pe_in_team = 0; src_pe_in_team < team_size; src_pe_in_team++) {
     int src_pe_world = team_obj->get_pe_in_world(src_pe_in_team);
 
-    // Compute destination offset for this PE's tile
+    // Compute destination offset for this PE's tile using dst_strides[0]
+    // Stack tiles along dimension 0: each PE's tile is offset by tile_extent_dim0 * dst_strides[0]
     // Destination layout: [PE0's tile][PE1's tile]...[PEn's tile]
-    char* dst_offset = static_cast<char*>(dst_data) + src_pe_in_team * tile_size * element_size;
+    char* dst_offset = static_cast<char*>(dst_data) +
+                       src_pe_in_team * tile_extent_dim0 * dst_strides[0] * element_size;
 
     // Use tile_get to fetch this PE's tile into the appropriate destination slot
     int result = tile_get(dst_offset, src_data, dst_strides, src_strides, start_coord,
@@ -1234,18 +1233,17 @@ __device__ inline int IPCContext::tile_allgather_wave(rocshmem_team_t team,
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
   int team_size = team_obj->num_pes;
 
-  // Calculate tile size for computing destination offsets
-  size_t tile_size = 1;
-  for (int dim = 0; dim < ndim; dim++) {
-    tile_size *= (boundary[dim] - start_coord[dim]);
-  }
+  // Calculate tile extent along dimension 0
+  size_t tile_extent_dim0 = boundary[0] - start_coord[0];
 
   // Each PE gathers tiles from all PEs in the team (wave-collective)
   for (int src_pe_in_team = 0; src_pe_in_team < team_size; src_pe_in_team++) {
     int src_pe_world = team_obj->get_pe_in_world(src_pe_in_team);
 
-    // Compute destination offset for this PE's tile
-    char* dst_offset = static_cast<char*>(dst_data) + src_pe_in_team * tile_size * element_size;
+    // Compute destination offset for this PE's tile using dst_strides[0]
+    // Stack tiles along dimension 0: each PE's tile is offset by tile_extent_dim0 * dst_strides[0]
+    char* dst_offset = static_cast<char*>(dst_data) +
+                       src_pe_in_team * tile_extent_dim0 * dst_strides[0] * element_size;
 
     // Use tile_get_wave to fetch this PE's tile
     int result = tile_get_wave(dst_offset, src_data, dst_strides, src_strides, start_coord,
@@ -1274,18 +1272,17 @@ __device__ inline int IPCContext::tile_allgather_wg(rocshmem_team_t team,
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
   int team_size = team_obj->num_pes;
 
-  // Calculate tile size for computing destination offsets
-  size_t tile_size = 1;
-  for (int dim = 0; dim < ndim; dim++) {
-    tile_size *= (boundary[dim] - start_coord[dim]);
-  }
+  // Calculate tile extent along dimension 0
+  size_t tile_extent_dim0 = boundary[0] - start_coord[0];
 
   // Each PE gathers tiles from all PEs in the team (workgroup-collective)
   for (int src_pe_in_team = 0; src_pe_in_team < team_size; src_pe_in_team++) {
     int src_pe_world = team_obj->get_pe_in_world(src_pe_in_team);
 
-    // Compute destination offset for this PE's tile
-    char* dst_offset = static_cast<char*>(dst_data) + src_pe_in_team * tile_size * element_size;
+    // Compute destination offset for this PE's tile using dst_strides[0]
+    // Stack tiles along dimension 0: each PE's tile is offset by tile_extent_dim0 * dst_strides[0]
+    char* dst_offset = static_cast<char*>(dst_data) +
+                       src_pe_in_team * tile_extent_dim0 * dst_strides[0] * element_size;
 
     // Use tile_get_wg to fetch this PE's tile
     int result = tile_get_wg(dst_offset, src_data, dst_strides, src_strides, start_coord,

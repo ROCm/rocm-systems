@@ -212,6 +212,11 @@ TileBroadcastTester::TileBroadcastTester(TesterArguments args)
   // Allocate teams using hipHostMalloc
   CHECK_HIP(hipHostMalloc(&teams, num_teams * sizeof(rocshmem_team_t)));
 
+  // Initialize all team handles to ROCSHMEM_TEAM_INVALID
+  for (int i = 0; i < num_teams; i++) {
+    teams[i] = ROCSHMEM_TEAM_INVALID;
+  }
+
   // Allocate tile data
   tile_extent_0 = 8;  // Default tile size
   tile_extent_1 = 8;
