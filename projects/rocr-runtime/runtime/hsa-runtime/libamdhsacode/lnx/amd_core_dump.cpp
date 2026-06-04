@@ -391,18 +391,6 @@ static void GetCoreDeviceInfo(const AMD::GpuAgent* agent, kfd_dbg_device_info_en
   entry.exception_status = 0;  // Placeholder until agent exception tracking is implemented
 }
 
-// Minimal struct queue layout from libhsakmt/src/queues.c
-// Used to access cached CWSR info without ioctl that hangs on faulted queues
-struct queue_cwsr_info {
-  uint32_t queue_id;              // Offset 0
-  uint64_t wptr;                  // Offset 4 (with padding)
-  uint64_t rptr;                  // Offset 12
-  void *eop_buffer;               // Offset 20
-  void *ctx_save_restore;         // Offset 24/28 (CWSR address - cached at queue creation)
-  uint32_t ctx_save_restore_size; // Offset 32/36 (allocated size - never changes)
-  // ... rest of struct not needed
-};
-
 // Helper function to get queue snapshot from AqlQueue without debug mode
 static void GetCoreQueueInfo(AMD::AqlQueue* queue, kfd_queue_snapshot_entry& entry) {
   // Zero out the structure first
@@ -417,18 +405,19 @@ static void GetCoreQueueInfo(AMD::AqlQueue* queue, kfd_queue_snapshot_entry& ent
   entry.ring_size = queue->amd_queue_.hsa_queue.size;
   entry.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
 
-  // Runtime cached (1 field) - TODO: Get exception status when implemented
-  // entry.exception_status = queue->GetExceptionStatus();
-  entry.exception_status = 0;  // Placeholder until exception caching is implemented
+  // Exception status not needed for core dump functionality
+  entry.exception_status = 0;
 
-  // CWSR fields (2 fields) - Read directly from cached struct queue data
-  // This avoids calling hsaKmtGetQueueInfo which uses AMDKFD_IOC_GET_QUEUE_WAVE_STATE
-  // ioctl that hangs when GPU hardware is in faulted state
-  fprintf(stderr, "[Core Dump] Queue %u: Accessing cached CWSR info from struct queue\n", entry.queue_id);
-
-  struct queue_cwsr_info* q = (struct queue_cwsr_info*)(uintptr_t)queue->aql_queue_id();
-  entry.ctx_save_restore_address = (uint64_t)q->ctx_save_restore;
-  entry.ctx_save_restore_area_size = q->ctx_save_restore_size;
+  // GetQueueInfo (2 fields) - one non-debug ioctl for CWSR info
+  HsaQueueInfo queue_info;
+  if (HSAKMT_CALL(hsaKmtGetQueueInfo(queue->aql_queue_id(), &queue_info)) == HSAKMT_STATUS_SUCCESS) {
+    fprintf(stderr, "[Core Dump] hsaKmtGetQueueInfo success! \n");
+    entry.ctx_save_restore_address = (uint64_t)queue_info.SaveAreaHeader;
+    entry.ctx_save_restore_area_size = (uint32_t)queue_info.SaveAreaSizeInBytes;
+  }
+  else {
+    fprintf(stderr, "[Core Dump] hsaKmtGetQueueInfo failed! \n");
+  }
 
   fprintf(stderr, "[Core Dump] Queue %u: CWSR address=0x%lx, allocated_size=%u (from cache, no ioctl)\n",
           entry.queue_id,
