@@ -15,6 +15,15 @@
 
 namespace hipFile {
 
+class MBatchOperation : public IBatchOperation {
+public:
+    MOCK_METHOD(void, markPending, (), (override));
+    MOCK_METHOD(bool, tryCancel, (), (override));
+    MOCK_METHOD(void, run, (), (noexcept, override));
+    MOCK_METHOD(void, recordInternalError, (), (override));
+    MOCK_METHOD(hipFileIOEvents_t, event, (), (const, override));
+};
+
 class MBatchContext : public IBatchContext {
 public:
     MOCK_METHOD(unsigned, getCapacity, (), (const, noexcept, override));
