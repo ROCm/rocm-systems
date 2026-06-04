@@ -287,6 +287,22 @@ hipError_t HIPAllocatorVMMFabric::GetDmabufHandle(void *dev_ptr, size_t size, in
   return VMMGetDmabufHandleCommon(dev_ptr, size, &common_info, dmabuf_fd, dmabuf_offset);
 }
 
+void HIPAllocatorVMMFabric::DrainStaticMaps() {
+  while (!imported_allocations_.empty()) {
+    auto it = imported_allocations_.begin();
+    void* ptr = it->first;
+    VMMFabricAllocationInfo& info = it->second;
+    (void)hipMemUnmap(ptr, info.size);
+    (void)hipMemAddressFree(ptr, info.size);
+    (void)hipMemRelease(info.handle);
+    imported_allocations_.erase(it);
+  }
+  while (!allocations_.empty()) {
+    void* ptr = allocations_.begin()->first;
+    (void)VMMFree(ptr);
+  }
+}
+
 }  // namespace rocshmem
 
 #endif  // HIP_VERSION >= 70000000

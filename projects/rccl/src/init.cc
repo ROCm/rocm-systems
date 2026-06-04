@@ -706,7 +706,10 @@ skip_profiling:
 
   commPoison(comm); // poison comm before free to avoid comm reuse.
   NCCLCHECK(ncclProfilerPluginFinalize(comm));
-  if (sharedResRefCount == 0) NCCLCHECK(ncclNetFinalize(comm));
+  if (sharedResRefCount == 0) {
+    NCCLCHECK(ncclNetFinalize(comm));
+    NCCLCHECK(ncclGinFinalize(comm));
+  }
   if (ncclParamLaunchOrderImplicit()) {
     ncclCudaContextDrop(comm->context);
     INFO(NCCL_INIT, "cudaDev %d context tracking destroyed", comm->cudaDev);
@@ -805,7 +808,10 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
 
   if (parent == NULL || !parent->shareResources) {
     struct ncclSharedResources* sharedRes = NULL;
-    NCCLCHECK(ncclCalloc(&sharedRes, 1));
+    // Must use C++ allocation: ginState embeds std::thread/mutex/cond. ncclCalloc +
+    // delete sharedRes (in commFree) is undefined behavior and causes double-free at exit
+    // after GIN proxy / device-API AlltoAll teardown.
+    NEW_NOTHROW(sharedRes, ncclSharedResources);
     sharedRes->owner = comm;
     sharedRes->tpNRanks = comm->nRanks;
     NCCLCHECK(ncclCalloc(&sharedRes->tpRankToLocalRank, comm->nRanks));

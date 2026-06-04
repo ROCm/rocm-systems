@@ -18,11 +18,22 @@
 #endif
 // Initialize rocshmem before ncclCommInit so that rocshmem_malloc etc. work.
 // Called via test_pre_init_callback from common.cu's main(), after MPI_Init.
-static void rocshmemPreInit(int rank, int nranks) {
-  // GIN_ANVIL / GIN proxy device tests use RCCL GIN + ncclMemAlloc (-R 2), not
-  // rocshmem_malloc from the test binary. Skip when RCCL owns rocSHMEM init.
+static bool rocshmemTestPreInitialized = false;
+
+static bool shouldSkipRocshmemPreInit() {
   const char* skip = getenv("RCCL_TEST_SKIP_ROCSHMEM_PREINIT");
-  if (skip && skip[0] == '1') return;
+  if (skip && skip[0] == '1') return true;
+  // GIN proxy/anvil and other RCCL GIN tests set RCCL_ROCSHMEM_ENABLE explicitly.
+  // When RCCL owns rocSHMEM (1) preinit double-inits; when disabled (0) RCCL never
+  // calls rocshmem_finalize and VMM tracking maps self-destruct at exit (double-free
+  // when librccl.so also embeds rocshmem). Skip preinit whenever the env is set.
+  const char* rcclRocshmem = getenv("RCCL_ROCSHMEM_ENABLE");
+  if (rcclRocshmem != nullptr) return true;
+  return false;
+}
+
+static void rocshmemPreInit(int rank, int nranks) {
+  if (shouldSkipRocshmemPreInit()) return;
 
   // Set the correct GPU before rocshmem_init so that device symbols
   // (ROCSHMEM_CTX_DEFAULT etc.) are initialized on the right device.
@@ -38,10 +49,21 @@ static void rocshmemPreInit(int rank, int nranks) {
   rocshmem::rocshmem_init_attr_t attr;
   rocshmem::rocshmem_set_attr_uniqueid_args(rank, nranks, &uid, &attr);
   rocshmem::rocshmem_init_attr(rocshmem::ROCSHMEM_INIT_WITH_UNIQUEID, &attr);
+  rocshmemTestPreInitialized = true;
 }
+
+static void rocshmemTestFinalize() {
+  if (!rocshmemTestPreInitialized) return;
+  rocshmem::rocshmem_finalize();
+  rocshmemTestPreInitialized = false;
+}
+
 // Register the callback at static init time (before main)
 static struct RocshmemCallbackRegistrar {
-  RocshmemCallbackRegistrar() { test_pre_init_callback = rocshmemPreInit; }
+  RocshmemCallbackRegistrar() {
+    test_pre_init_callback = rocshmemPreInit;
+    test_post_finalize_callback = rocshmemTestFinalize;
+  }
 } _rocshmemReg;
 #endif
 

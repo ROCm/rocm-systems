@@ -66,6 +66,7 @@ echo "=== RCCL AlltoAll: GIN proxy (NCCL_GIN_TYPE=2, inter-node capable) np=${NP
 docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   mpirun ${MPIRUN_BASE} \
   -x RCCL_ROCSHMEM_ENABLE=0 \
+  -x RCCL_TEST_SKIP_ROCSHMEM_PREINIT=1 \
   -x NCCL_DEBUG=VERSION \
   -x NCCL_GIN_ENABLE=1 \
   -x NCCL_GIN_TYPE=2 \
@@ -87,6 +88,7 @@ echo "=== RCCL AlltoAll: GIN proxy (NCCL_GIN_TYPE=2, intra-node only) np=${NP} m
 docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   mpirun ${MPIRUN_BASE} \
   -x RCCL_ROCSHMEM_ENABLE=0 \
+  -x RCCL_TEST_SKIP_ROCSHMEM_PREINIT=1 \
   -x NCCL_DEBUG=VERSION \
   -x NCCL_GIN_ENABLE=1 \
   -x NCCL_GIN_TYPE=2 \

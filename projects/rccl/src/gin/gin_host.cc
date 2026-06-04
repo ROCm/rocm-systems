@@ -309,6 +309,38 @@ fail:
   goto exit;
 }
 
+// Reset GIN host state after teardown without touching C++ members (std::thread,
+// std::mutex, std::condition_variable). A blanket memset on ncclGinState leaves
+// those objects in an invalid state; ~ncclGinState during sharedRes deletion then
+// double-frees the progress thread and triggers "double free or corruption".
+static void ncclGinStateReset(struct ncclGinState* ginState) {
+  ncclSpaceDestruct(&ginState->signalSpace);
+  ncclSpaceDestruct(&ginState->counterSpace);
+
+  ginState->ncclGin = nullptr;
+  ginState->ginInstance = nullptr;
+  ginState->connected = false;
+  ginState->ginType = (ncclGinType_t)0;
+  ginState->ginCommCount = 0;
+  ginState->ginContextCount = 0;
+  ginState->needsProxyProgress = 0;
+  ginState->ginProgress = 0;
+  ginState->asyncResult = ncclSuccess;
+  ginState->ginVersion = 0;
+  ginState->signalSpaceSize = 0;
+  ginState->counterSpaceSize = 0;
+  ginState->ctxFirstAvailable = 0;
+  ginState->ctxLastExclusive = 0;
+  ginState->ginQueueDepth = 0;
+  ginState->ginConnectionType = (ncclGinConnectionType_t)0;
+  memset(ginState->ginComms, 0, sizeof(ginState->ginComms));
+  memset(ginState->ginCtx, 0, sizeof(ginState->ginCtx));
+  memset(ginState->ginDevHandles, 0, sizeof(ginState->ginDevHandles));
+
+  ncclSpaceConstruct(&ginState->signalSpace);
+  ncclSpaceConstruct(&ginState->counterSpace);
+}
+
 ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) {
   struct ncclGinState* ginState = &comm->sharedRes->ginState;
   if (!ginState->connected) return ncclSuccess;
@@ -359,7 +391,7 @@ ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) {
       ginState->ginComms[n] = NULL;
     }
   }
-  memset((void*)ginState, 0, sizeof(*ginState));
+  ncclGinStateReset(ginState);
   return ncclSuccess;
 }
 
@@ -395,6 +427,7 @@ ncclResult_t ncclGinRegister(struct ncclComm* comm, void* address, size_t size,
 ncclResult_t ncclGinDeregister(struct ncclComm* comm, void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS]) {
   struct ncclGinState* ginState = &comm->sharedRes->ginState;
   for (int n = 0; n < ginState->ginCommCount; n++) {
+    if (ginHostWins[n] == NULL) continue;
     if (ginState->ginType == NCCL_GIN_TYPE_PROXY) {
       NCCLCHECK(ncclGinProxyDeregister(ginState->ncclGin, ginState->ginCtx[n], ginHostWins[n]));
 #ifdef ENABLE_ROCSHMEM_GIN
@@ -406,6 +439,7 @@ ncclResult_t ncclGinDeregister(struct ncclComm* comm, void* ginHostWins[NCCL_GIN
     } else {
       NCCLCHECK(ginState->ncclGin->deregMrSym(ginState->ginComms[n], ginHostWins[n]));
     }
+    ginHostWins[n] = NULL;
   }
   return ncclSuccess;
 }

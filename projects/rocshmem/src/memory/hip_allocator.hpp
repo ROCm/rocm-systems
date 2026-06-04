@@ -217,6 +217,7 @@ class HIPAllocatorVMMPosixFd : public HIPAllocator {
   size_t GetIpcHandleSize() override;
   HIPIpcHandleVec* AllocateIpcHandleVec(int num_elems) override;
   hipError_t GetDmabufHandle(void *dev_ptr, size_t size, int *dmabuf_fd, uint64_t *dmabuf_offset) override;
+  static void DrainStaticMaps();
 };
 
 // Forward declarations for fabric handle support (part of future HIP releases)
@@ -285,6 +286,7 @@ class HIPAllocatorVMMFabric : public HIPAllocator {
   size_t GetIpcHandleSize() override;
   HIPIpcHandleVec* AllocateIpcHandleVec(int num_elems) override;
   hipError_t GetDmabufHandle(void *dev_ptr, size_t size, int *dmabuf_fd, uint64_t *dmabuf_offset) override;
+  static void DrainStaticMaps();
 };
 #endif
 

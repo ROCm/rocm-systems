@@ -657,7 +657,19 @@ ncclResult_t ncclRmaProxyFinalize(struct ncclComm* comm) {
 
   // Finalize the GIN instance
   NCCLCHECK(rmaProxyState->ncclGin->finalize(rmaProxyState->ginInstance));
-  memset((void*)rmaProxyState, 0, sizeof(*rmaProxyState));
+
+  rmaProxyState->ncclGin = nullptr;
+  rmaProxyState->ginInstance = nullptr;
+  rmaProxyState->connected = false;
+  rmaProxyState->ginType = 0;
+  rmaProxyState->ginCommCount = 0;
+  rmaProxyState->rmaProxyCtxCount = 0;
+  rmaProxyState->needsProxyProgress = 0;
+  rmaProxyState->ginProgress = 0;
+  rmaProxyState->asyncResult = ncclSuccess;
+  rmaProxyState->comm = nullptr;
+  memset(rmaProxyState->ginComms, 0, sizeof(rmaProxyState->ginComms));
+  memset(rmaProxyState->props, 0, sizeof(rmaProxyState->props));
   return ncclSuccess;
 }
 

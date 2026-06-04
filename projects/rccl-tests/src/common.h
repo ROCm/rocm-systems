@@ -409,6 +409,8 @@ extern thread_local int is_main_thread;
 // Optional pre-init callback, called after MPI_Init but before ncclCommInit.
 // Set by test-specific code (e.g., alltoall.cu sets this to call rocshmem_init).
 extern void (*test_pre_init_callback)(int rank, int nranks);
+// Optional post-finalize callback, invoked from main() before exit (rocshmem_finalize).
+extern void (*test_post_finalize_callback)(void);
 
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
 template <typename F>

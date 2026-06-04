@@ -137,7 +137,14 @@ namespace rocshmem {
   [[maybe_unused]] static void delete_default_allocator()
   {
     if (default_allocator_ != nullptr) {
+#if defined USE_HEAP_DEVICE_VMM_POSIX && HIP_VERSION >= 70000000
+      HIPAllocatorVMMPosixFd::DrainStaticMaps();
+#endif
+#if defined USE_HEAP_DEVICE_VMM_FABRIC && HIP_VERSION >= 70000000
+      HIPAllocatorVMMFabric::DrainStaticMaps();
+#endif
       delete default_allocator_;
+      default_allocator_ = nullptr;
     }
   }
 

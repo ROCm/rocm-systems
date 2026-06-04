@@ -34,6 +34,7 @@
 
 int test_ncclVersion = 0; // init'd with ncclGetVersion()
 void (*test_pre_init_callback)(int rank, int nranks) = nullptr;
+void (*test_post_finalize_callback)(void) = nullptr;
 int32_t gpu_block3;
 size_t cache_bytes = 192 * 1024 * 1024; // Use 192MB
 
@@ -1838,6 +1839,10 @@ int main(int argc, char* argv[], char **envp) {
   testResult_t result = run();
 
   outputFileFinalize(output_file_type);
+
+  if (test_post_finalize_callback) {
+    test_post_finalize_callback();
+  }
 
   TESTCHECK(result);
 

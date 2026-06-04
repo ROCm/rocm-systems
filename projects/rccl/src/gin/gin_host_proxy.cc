@@ -538,8 +538,10 @@ ncclResult_t ncclGinProxyDestroyContext(ncclGin_t *ginComm, void *ginCtx) {
       freeMemCPUAccessible(ctx->counters, ctx->countersGdrHandle, ctx->comm->memManager);
 
     // Free signals
-    if (ginComm && ctx->collComm && ctx->signalsMhandle)
+    if (ginComm && ctx->collComm && ctx->signalsMhandle) {
       ginComm->deregMrSym(ctx->collComm, ctx->signalsMhandle);
+      ctx->signalsMhandle = NULL;
+    }
     if (ctx->signalsDev) ncclCudaFree(ctx->signalsDev, ctx->comm->memManager);
 
     // Free hostGpuCtx and its allocations
@@ -550,8 +552,10 @@ ncclResult_t ncclGinProxyDestroyContext(ncclGin_t *ginComm, void *ginCtx) {
         if (hostGpuCtx->sis) free(hostGpuCtx->sis);
         if (hostGpuCtx->states) free(hostGpuCtx->states);
         if (hostGpuCtx->inlines) free(hostGpuCtx->inlines);
-        if (ginComm && ctx->collComm && hostGpuCtx->inlinesMhandle)
+        if (ginComm && ctx->collComm && hostGpuCtx->inlinesMhandle) {
           ginComm->deregMrSym(ctx->collComm, hostGpuCtx->inlinesMhandle);
+          hostGpuCtx->inlinesMhandle = NULL;
+        }
         if (hostGpuCtx->queues) freeMemCPUAccessible(hostGpuCtx->queues, NULL, ctx->comm->memManager);
         if (hostGpuCtx->cis || hostGpuCtx->cisGdrHandle)
           freeMemCPUAccessible(hostGpuCtx->cis, hostGpuCtx->cisGdrHandle, ctx->comm->memManager);
