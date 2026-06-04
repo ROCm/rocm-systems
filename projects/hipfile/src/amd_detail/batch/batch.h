@@ -265,7 +265,31 @@ namespace batchOperationState {
 }
 
 /// @brief Represents a single IO Request
-class BatchOperation {
+class IBatchOperation {
+public:
+    virtual ~IBatchOperation() = default;
+
+    /// @brief Mark the operation as accepted and ready to run.
+    virtual void markPending() = 0;
+
+    /// @brief Cancel the operation if it can be transitioned to Canceled; otherwise no-op.
+    virtual void tryCancel() = 0;
+
+    /// @brief Execute the operation.
+    virtual void run() noexcept = 0;
+
+    /// @brief Record an internal execution failure on the operation.
+    virtual void recordInternalError() = 0;
+
+    /// @brief Return a snapshot of the operation event state.
+    virtual hipFileIOEvents_t event() const = 0;
+
+    /// @brief Return whether the operation has reached a terminal status.
+    virtual bool isTerminal() const = 0;
+};
+
+/// @brief Represents a single IO Request
+class BatchOperation : public IBatchOperation {
 public:
     // Don't allow copying
     BatchOperation(const BatchOperation &)            = delete;
@@ -274,6 +298,7 @@ public:
     // Don't allow moving
     BatchOperation(BatchOperation &&)            = delete;
     BatchOperation &operator=(BatchOperation &&) = delete;
+    ~BatchOperation() override                   = default;
 
     /// @brief Create an operation to handle and track an IO request.
     /// @param [in] params IO parameters
@@ -283,22 +308,22 @@ public:
                    std::shared_ptr<IFile> file);
 
     /// @brief Mark the operation as accepted and ready to run.
-    void markPending();
+    void markPending() override;
 
     /// @brief Cancel the operation if it can be transitioned to Canceled; otherwise no-op.
-    void tryCancel();
+    void tryCancel() override;
 
     /// @brief Execute the operation.
-    void run() noexcept;
+    void run() noexcept override;
 
     /// @brief Record an internal execution failure on the operation.
-    void recordInternalError();
+    void recordInternalError() override;
 
     /// @brief Return a snapshot of the operation event state.
-    hipFileIOEvents_t event() const;
+    hipFileIOEvents_t event() const override;
 
     /// @brief Return whether the operation has reached a terminal status.
-    bool isTerminal() const;
+    bool isTerminal() const override;
 
 private:
     /// @brief A copy of the params provided by the application.
@@ -321,13 +346,30 @@ private:
     template <class Next> void transitionTo(Next next);
 };
 
+class IBatchOperationFactory {
+public:
+    virtual ~IBatchOperationFactory() = default;
+
+    virtual std::shared_ptr<IBatchOperation> create(std::unique_ptr<const hipFileIOParams_t> params,
+                                                    std::shared_ptr<IBuffer>                 buffer,
+                                                    std::shared_ptr<IFile>                   file) = 0;
+};
+
+class BatchOperationFactory : public IBatchOperationFactory {
+public:
+    std::shared_ptr<IBatchOperation> create(std::unique_ptr<const hipFileIOParams_t> params,
+                                            std::shared_ptr<IBuffer>                 buffer,
+                                            std::shared_ptr<IFile>                   file) override;
+};
+
 class IBatchContext {
 public:
     static constexpr unsigned MAX_SIZE = 128;
 
-    virtual ~IBatchContext()                                                                = default;
-    virtual unsigned getCapacity() const noexcept                                           = 0;
-    virtual void     submitOperations(const hipFileIOParams_t *params, unsigned num_params) = 0;
+    virtual ~IBatchContext()                                                               = default;
+    virtual unsigned getCapacity() const noexcept                                          = 0;
+    virtual void     submitOperations(const hipFileIOParams_t *params, unsigned num_params,
+                                      IBatchOperationFactory *operation_factory = nullptr) = 0;
 };
 
 class BatchContext : public IBatchContext {
@@ -357,7 +399,8 @@ public:
     /// @note This is an All or None operation. If one submitted operation is not valid, no operations
     ///       will be submitted.
     ///
-    void submitOperations(const hipFileIOParams_t *params, const unsigned num_params) override;
+    void submitOperations(const hipFileIOParams_t *params, const unsigned num_params,
+                          IBatchOperationFactory *operation_factory = nullptr) override;
 
 private:
     const unsigned capacity;
@@ -370,7 +413,7 @@ private:
     /// but is not yet complete or completed but not yet retrieved by the
     /// application.
     /// shared_ptr as it may need to be passed to a backend.
-    std::unordered_set<std::shared_ptr<BatchOperation>> outstanding_ops;
+    std::unordered_set<std::shared_ptr<IBatchOperation>> outstanding_ops;
 
     /// Task group used for all submitted operations owned by this context.
     std::unique_ptr<ITaskGroup> task_group;

@@ -280,6 +280,13 @@ BatchOperation::recordInternalError()
     transitionTo(Failed{-hipFileInternalError});
 }
 
+std::shared_ptr<IBatchOperation>
+BatchOperationFactory::create(std::unique_ptr<const hipFileIOParams_t> params,
+                              std::shared_ptr<IBuffer> buffer, std::shared_ptr<IFile> file)
+{
+    return std::make_shared<BatchOperation>(std::move(params), std::move(buffer), std::move(file));
+}
+
 BatchContext::BatchContext(unsigned _capacity) : capacity{_capacity}
 {
     if (_capacity == 0) {
@@ -301,7 +308,8 @@ BatchContext::getCapacity() const noexcept
 }
 
 void
-BatchContext::submitOperations(const hipFileIOParams_t *params, unsigned num_params)
+BatchContext::submitOperations(const hipFileIOParams_t *params, unsigned num_params,
+                               IBatchOperationFactory *operation_factory)
 {
     if (!params) {
         throw std::invalid_argument("params cannot be null");
@@ -316,7 +324,9 @@ BatchContext::submitOperations(const hipFileIOParams_t *params, unsigned num_par
         throw BatchFull();
     }
 
-    std::vector<std::shared_ptr<BatchOperation>> pending_ops{};
+    std::vector<std::shared_ptr<IBatchOperation>> pending_ops{};
+    BatchOperationFactory                         default_factory{};
+    IBatchOperationFactory &factory = operation_factory == nullptr ? default_factory : *operation_factory;
 
     // It would be more performant to be able to perform multiple lookups
     // rather than waiting to lock the DriverState lock for each lookup.
@@ -327,7 +337,7 @@ BatchContext::submitOperations(const hipFileIOParams_t *params, unsigned num_par
         // file flags.
         auto [_file, _buffer] =
             Context<DriverState>::get()->getFileAndBuffer(param_copy->fh, param_copy->u.batch.devPtr_base);
-        auto op = std::make_shared<BatchOperation>(std::move(param_copy), _buffer, _file);
+        auto op = factory.create(std::move(param_copy), std::move(_buffer), std::move(_file));
 
         pending_ops.push_back(std::move(op));
     }

@@ -10,6 +10,7 @@
 #include "hipfile-test.h"
 #include "hipfile-warnings.h"
 #include "invalid-enum.h"
+#include "mbatch.h"
 #include "mbuffer.h"
 #include "mfile.h"
 #include "mstate.h"
@@ -18,15 +19,16 @@
 
 #include "gmock/gmock.h"
 #include <array>
+#include <functional>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <memory>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 using ::testing::_;
 using ::testing::ByMove;
-using ::testing::DoDefault;
 using ::testing::Return;
 using ::testing::StrictMock;
 using ::testing::Throw;
@@ -323,6 +325,7 @@ struct HipFileBatchContext : public HipFileUnopened {
     std::unique_ptr<StrictMock<MDriverState>> mock_driver_state;
     std::unique_ptr<StrictMock<MThreadPool>>  mock_thread_pool;
     StrictMock<MTaskGroup>                   *mock_task_group = nullptr;
+    StrictMock<MBatchOperationFactory>        mock_operation_factory;
 
     hipFileIOParams_t                    io_params{};
     std::shared_ptr<StrictMock<MBuffer>> default_mock_buffer;
@@ -361,6 +364,35 @@ struct HipFileBatchContext : public HipFileUnopened {
         EXPECT_CALL(*mock_thread_pool, makeTaskGroup()).WillOnce(Return(ByMove(std::move(task_group))));
         return raw;
     }
+
+    std::shared_ptr<StrictMock<MBatchOperation>> makeOperation()
+    {
+        auto op = std::make_shared<StrictMock<MBatchOperation>>();
+        EXPECT_CALL(*op, markPending()).Times(1);
+        return op;
+    }
+
+    void expectOperationFactoryCreates(const std::vector<std::shared_ptr<StrictMock<MBatchOperation>>> &ops)
+    {
+        auto index = std::make_shared<size_t>(0);
+        EXPECT_CALL(mock_operation_factory, create(_, _, _))
+            .Times(static_cast<int>(ops.size()))
+            .WillRepeatedly([ops, index](std::unique_ptr<const hipFileIOParams_t>, std::shared_ptr<IBuffer>,
+                                         std::shared_ptr<IFile>) -> std::shared_ptr<IBatchOperation> {
+                return ops[(*index)++];
+            });
+    }
+
+    void submitMockOperations(const std::vector<std::shared_ptr<StrictMock<MBatchOperation>>> &ops)
+    {
+        std::vector<hipFileIOParams_t> params(ops.size(), io_params);
+
+        expectOperationFactoryCreates(ops);
+        EXPECT_CALL(*mock_task_group, run(_)).Times(static_cast<int>(ops.size()));
+
+        _context->submitOperations(params.data(), static_cast<unsigned>(params.size()),
+                                   &mock_operation_factory);
+    }
 };
 
 TEST_F(HipFileBatchContext, SubmitSingleGoodOp)
@@ -396,6 +428,60 @@ TEST_F(HipFileBatchContext, nullptrParamsThrows)
 TEST_F(HipFileBatchContext, zeroNumParamsThrows)
 {
     ASSERT_THROW(_context->submitOperations(&io_params, 0), std::invalid_argument);
+}
+
+TEST_F(HipFileBatchContext, SubmitUsesProvidedOperationFactory)
+{
+    auto op = makeOperation();
+
+    EXPECT_CALL(mock_operation_factory, create(_, _, _))
+        .WillOnce([this, op](std::unique_ptr<const hipFileIOParams_t> params, std::shared_ptr<IBuffer> buffer,
+                             std::shared_ptr<IFile> file) -> std::shared_ptr<IBatchOperation> {
+            EXPECT_EQ(params->fh, io_params.fh);
+            EXPECT_EQ(params->u.batch.devPtr_base, io_params.u.batch.devPtr_base);
+            EXPECT_EQ(buffer.get(), default_mock_buffer.get());
+            EXPECT_EQ(file.get(), default_mock_file.get());
+            return op;
+        });
+    EXPECT_CALL(*mock_task_group, run(_)).Times(1);
+
+    _context->submitOperations(&io_params, 1, &mock_operation_factory);
+}
+
+TEST_F(HipFileBatchContext, SubmittedFactoryOperationRunsFromQueuedWork)
+{
+    std::function<void()> enqueued_work;
+    auto                  op = makeOperation();
+
+    expectOperationFactoryCreates({op});
+    EXPECT_CALL(*mock_task_group, run(_)).WillOnce([&enqueued_work](std::function<void()> work) {
+        enqueued_work = std::move(work);
+    });
+
+    _context->submitOperations(&io_params, 1, &mock_operation_factory);
+    ASSERT_TRUE(enqueued_work);
+
+    EXPECT_CALL(*op, run()).Times(1);
+    enqueued_work();
+}
+
+TEST_F(HipFileBatchContext, SubmitFactoryFailureFailsBatch)
+{
+    std::array<hipFileIOParams_t, 2> params{io_params, io_params};
+    auto                             op = std::make_shared<StrictMock<MBatchOperation>>();
+
+    EXPECT_CALL(mock_operation_factory, create(_, _, _))
+        .WillOnce([op](std::unique_ptr<const hipFileIOParams_t>, std::shared_ptr<IBuffer>,
+                       std::shared_ptr<IFile>) -> std::shared_ptr<IBatchOperation> { return op; })
+        .WillOnce([](std::unique_ptr<const hipFileIOParams_t>, std::shared_ptr<IBuffer>,
+                     std::shared_ptr<IFile>) -> std::shared_ptr<IBatchOperation> {
+            throw std::invalid_argument("factory error");
+        });
+    EXPECT_CALL(*mock_task_group, run(_)).Times(0);
+
+    ASSERT_THROW(_context->submitOperations(params.data(), static_cast<unsigned>(params.size()),
+                                            &mock_operation_factory),
+                 std::invalid_argument);
 }
 
 TEST_F(HipFileBatchContext, SubmitOverCapacity)
