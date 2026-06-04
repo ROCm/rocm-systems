@@ -187,6 +187,9 @@ else()
     set(RJ_FUZZ_TWO_VECTOR_ADD_PERSISTENT_OUTPUT_DIR
         "${CMAKE_CURRENT_BINARY_DIR}/two_vector_add_persistent_findings"
     )
+    set(RJ_FUZZ_TWO_VECTOR_ADD_PRELOAD_SMOKE_BIN
+        "${CMAKE_CURRENT_BINARY_DIR}/bin/two_vector_add_preload_smoke"
+    )
     set(RJ_FUZZ_TWO_VECTOR_ADD_LIBRARY_PATH
         "${RJ_HIPRTC_LIBRARY_DIR}:${RJ_HIP_RUNTIME_LIBRARY_DIR}:$ENV{LD_LIBRARY_PATH}"
     )
@@ -224,6 +227,29 @@ else()
         DEPENDS "${RJ_FUZZ_TWO_VECTOR_ADD_BIN}"
     )
 
+    add_executable(
+        two_vector_add_preload_smoke
+        two_vector_add_preload_smoke.cpp
+    )
+    target_include_directories(
+        two_vector_add_preload_smoke
+        PRIVATE
+            "${CMAKE_SOURCE_DIR}/fuzzer/afl-dbi/include"
+            "${RJ_HIP_INCLUDE_DIR}"
+    )
+    target_compile_definitions(
+        two_vector_add_preload_smoke
+        PRIVATE __HIP_PLATFORM_AMD__
+    )
+    target_link_libraries(
+        two_vector_add_preload_smoke
+        PRIVATE ${RJ_HIP_RUNTIME_LIBRARY}
+    )
+    set_target_properties(
+        two_vector_add_preload_smoke
+        PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/bin"
+    )
+
     add_custom_command(
         OUTPUT "${RJ_FUZZ_TWO_VECTOR_ADD_PERSISTENT_BIN}"
         COMMAND
@@ -252,6 +278,11 @@ else()
         "${CMAKE_CURRENT_BINARY_DIR}/run_two_vector_add_afl_persistent.cmake"
         @ONLY
     )
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/run_two_vector_add_preload_smoke.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/run_two_vector_add_preload_smoke.cmake"
+        @ONLY
+    )
 
     add_test(
         NAME "RocFuzz.TwoVectorAddAFL"
@@ -268,6 +299,16 @@ else()
     )
     set_tests_properties(
         "RocFuzz.TwoVectorAddAFL.Persistent"
+        PROPERTIES TIMEOUT 60
+    )
+    add_test(
+        NAME "RocFuzz.TwoVectorAddAFL.Preload"
+        COMMAND
+            ${CMAKE_COMMAND} -P
+            "${CMAKE_CURRENT_BINARY_DIR}/run_two_vector_add_preload_smoke.cmake"
+    )
+    set_tests_properties(
+        "RocFuzz.TwoVectorAddAFL.Preload"
         PROPERTIES TIMEOUT 60
     )
 endif()

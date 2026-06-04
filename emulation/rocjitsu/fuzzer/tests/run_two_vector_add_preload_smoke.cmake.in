@@ -1,0 +1,28 @@
+execute_process(
+    COMMAND "@CMAKE_COMMAND@" --build "@CMAKE_BINARY_DIR@" --target
+            two_vector_add_afl
+            rocjitsu_afl_preload
+            two_vector_add_preload_smoke
+    RESULT_VARIABLE _rj_build_result
+)
+
+if(NOT _rj_build_result EQUAL 0)
+    message(FATAL_ERROR "two-vector-add preload smoke build failed: ${_rj_build_result}")
+endif()
+
+execute_process(
+    COMMAND
+        "@RJ_FUZZ_TWO_VECTOR_ADD_PRELOAD_SMOKE_BIN@"
+        "@RJ_FUZZ_TWO_VECTOR_ADD_BIN@"
+        "@RJ_AFL_PRELOAD_LIBRARY@"
+        "@RJ_FUZZ_TWO_VECTOR_ADD_INPUT_DIR@/seed0"
+        "@RJ_FUZZ_TWO_VECTOR_ADD_LIBRARY_PATH@"
+    RESULT_VARIABLE _rj_preload_smoke_result
+)
+
+if(NOT _rj_preload_smoke_result EQUAL 0)
+    message(
+        FATAL_ERROR
+        "two-vector-add preload smoke failed: ${_rj_preload_smoke_result}"
+    )
+endif()
