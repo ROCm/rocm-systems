@@ -1985,6 +1985,7 @@ class SetValueCommands:
             "ptl_status",
             "ptl_format",
             "mem_carveout",
+            "compute_partition_mem_alloc_mode",
         ]
         for attr in gpu_attributes:
             if hasattr(args, attr):
@@ -2053,6 +2054,7 @@ class SetValueCommands:
                         args.ptl_format is not None,
                         args.process_isolation is not None,
                         args.mem_carveout is not None,
+                        args.compute_partition_mem_alloc_mode is not None,
                     ]
                 )
             except AttributeError:
