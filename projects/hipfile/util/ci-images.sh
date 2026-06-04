@@ -142,6 +142,9 @@ _run_tests() {
 # shell); when executed they are equal. So "!=" means "we are being sourced".
 # Do NOT set shell options here: sourcing must not mutate the caller's shell.
 if [ "${BASH_SOURCE[0]}" != "${0}" ]; then
+  # SC2034: ci_images is consumed by the sourcing CI step.
+  # SC2153: BUILD_CI_IMAGE_MATRIX is a CI env var, not a typo of build_ci_image_matrix.
+  # shellcheck disable=SC2034,SC2153
   ci_images=$(compute_ci_images "${REGISTRY_URL}" "${tag}" "${BUILD_CI_IMAGE_MATRIX}")
 else
   set -euo pipefail
