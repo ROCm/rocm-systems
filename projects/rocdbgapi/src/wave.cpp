@@ -479,7 +479,7 @@ wave_t::set_state (amd_dbgapi_wave_state_t state,
               : "",
             to_cstring (pc ()));
 
-  architecture.wave_set_state (*this, state);
+  architecture.wave_set_state (*this, state, exceptions);
   m_state = state;
   queue ().wave_state_changed (*this);
 
