@@ -379,13 +379,11 @@ if __name__ == "__main__":
 
     if args.check_counter_pairing and args.counter_names:
         for counter_name in args.counter_names:
-            tracks = tp.query(
-                f"""SELECT counter_track.id, counter_track.name,
+            tracks = tp.query(f"""SELECT counter_track.id, counter_track.name,
                   COUNT(counter.id) AS num_entries
                   FROM counter_track JOIN counter ON counter.track_id = counter_track.id
                   WHERE counter_track.name LIKE '%{counter_name}%'
-                  GROUP BY counter_track.id"""
-            )
+                  GROUP BY counter_track.id""")
             for row in tracks:
                 if row.num_entries % 2 != 0:
                     print(
@@ -394,11 +392,9 @@ if __name__ == "__main__":
                     )
                     ret = 1
                 else:
-                    last_value = tp.query(
-                        f"""SELECT counter.value FROM counter
+                    last_value = tp.query(f"""SELECT counter.value FROM counter
                           WHERE counter.track_id = {row.id}
-                          ORDER BY counter.ts DESC LIMIT 1"""
-                    )
+                          ORDER BY counter.ts DESC LIMIT 1""")
                     for val_row in last_value:
                         if val_row.value != 0:
                             print(
