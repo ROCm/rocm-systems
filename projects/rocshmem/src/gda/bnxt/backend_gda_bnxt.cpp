@@ -79,8 +79,16 @@ void GDABackend::bnxt_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   gpu_qp->bnxt_sq.mtu         = ibv_mtu_to_int(nic.portinfo.active_mtu);
 
   /* Export DB */
+  {
+    auto *dbattr = bnxt_qps[conn_num].db_region_attr;
+    LOG_INFO("gda_qp dbr[%d]: handle=%u dpi=%u umdbr=0x%llx dbr_host=%p",
+             conn_num, dbattr->handle, dbattr->dpi,
+             (unsigned long long)dbattr->umdbr, (void*)dbattr->dbr);
+  }
   CHECK_HIP(hipHostRegister(bnxt_qps[conn_num].db_region_attr->dbr, getpagesize(), hipHostRegisterDefault));
   CHECK_HIP(hipHostGetDevicePointer((void**) &gpu_qp->bnxt_dbr, bnxt_qps[conn_num].db_region_attr->dbr, 0));
+  LOG_INFO("gda_qp dbr[%d]: host=%p -> device=%p",
+           conn_num, (void*)bnxt_qps[conn_num].db_region_attr->dbr, (void*)gpu_qp->bnxt_dbr);
 
   /* Export Memory Keys */
   gpu_qp->lkey = nic.heap_mr->lkey;

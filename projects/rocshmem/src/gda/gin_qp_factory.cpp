@@ -907,10 +907,23 @@ int rocshmem_gin_qp_set::initialize_gpu_qp(QueuePair *gpu_qp, int idx) {
     gpu_qp->bnxt_sq.mtu = 128 << this->nic.portinfo.active_mtu; // ibv_mtu enum: 1=256, 2=512, 3=1024, 4=2048, 5=4096
 
     // Export doorbell
+    {
+      auto *dbattr = this->bnxt_qps[idx].db_region_attr;
+      LOG_INFO("gin_qp dbr[%d]: handle=%u dpi=%u umdbr=0x%llx dbr_host=%p",
+               idx, dbattr->handle, dbattr->dpi,
+               (unsigned long long)dbattr->umdbr, (void*)dbattr->dbr);
+
+      hipPointerAttribute_t pattr;
+      hipError_t perr = hipPointerGetAttributes(&pattr, (void*)dbattr->dbr);
+      LOG_INFO("gin_qp dbr[%d]: hipPointerGetAttributes rc=%d type=%d device=%d",
+               idx, perr, pattr.type, pattr.device);
+    }
     if (hipHostRegister(this->bnxt_qps[idx].db_region_attr->dbr, getpagesize(),
                         hipHostRegisterDefault) != hipSuccess) return -1;
     if (hipHostGetDevicePointer((void**)&gpu_qp->bnxt_dbr,
                                 bnxt_qps[idx].db_region_attr->dbr, 0) != hipSuccess) return -1;
+    LOG_INFO("gin_qp dbr[%d]: host=%p -> device=%p",
+             idx, (void*)this->bnxt_qps[idx].db_region_attr->dbr, (void*)gpu_qp->bnxt_dbr);
 
     gpu_qp->qp_num = this->ibv_qps[idx]->qp_num;
     gpu_qp->inline_threshold = inline_threshold;
