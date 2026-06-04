@@ -810,27 +810,8 @@ __global__ ATTR_NO_INLINE void rocshmem_alltoallmem_kernel(rocshmem_team_t team,
                                                            void *dest,
                                                            const void *source,
                                                            size_t size) {
-  // Create a context for this workgroup to avoid contention on default context
-  // This allows parallel execution across multiple streams without serialization
-  __shared__ rocshmem_ctx_t ctx;
-  __shared__ int ctx_result;
-
-  ctx_result = rocshmem_wg_team_create_ctx(team, 0, &ctx);
-
-  // If context creation failed, fall back to default context
-  if (ctx_result != 0) {
-    ctx = ROCSHMEM_CTX_DEFAULT;
-    __syncthreads();
-  }
-
-  // Call device alltoall function with created context and provided team
-  // Using char type since size is in bytes (1 byte per element)
-  rocshmem_ctx_alltoall_wg<char>(ctx, team, (char *) dest,
+  rocshmem_ctx_alltoall_wg<char>(ROCSHMEM_CTX_DEFAULT, team, (char *) dest,
                                  (const char *) source, (int) size);
-
-  if (ctx_result == 0) {
-    rocshmem_wg_ctx_destroy(&ctx);
-  }
 }
 
 template <typename T, ROCSHMEM_OP Op>
@@ -839,24 +820,8 @@ __global__ ATTR_NO_INLINE void rocshmem_reduce_on_stream_kernel(rocshmem_team_t 
                                             const T *source,
                                             int nreduce)
 {
-  __shared__ rocshmem_ctx_t ctx;
-  __shared__ int ctx_result;
-
-  ctx_result = rocshmem_wg_team_create_ctx(team, 0, &ctx);
-
-  // If context creation failed, fall back to default context
-  if (ctx_result != 0)
-  {
-    ctx = ROCSHMEM_CTX_DEFAULT;
-    __syncthreads();
-  }
-
-  // Call device reduce function with created context and provided team
-  rocshmem_reduce_wg<T, Op>(ctx, team, dest,
+  rocshmem_reduce_wg<T, Op>(ROCSHMEM_CTX_DEFAULT, team, dest,
                             source, nreduce);
-
-  if (ctx != ROCSHMEM_CTX_INVALID || ctx != ROCSHMEM_CTX_DEFAULT)
-    rocshmem_wg_ctx_destroy(&ctx);
 }
 
 #define REDUCTION_ON_STREAM_KERNEL_DEF_GEN(T, TNAME, Op, Op_API) \
@@ -878,7 +843,7 @@ __global__ ATTR_NO_INLINE void rocshmem_reduce_on_stream_kernel(rocshmem_team_t 
   REDUCTION_ON_STREAM_KERNEL_DEF_GEN(T, TNAME, xor, ROCSHMEM_XOR)
 
 #define INT_REDUCTION_ON_STREAM_KERNEL_GEN(T, TNAME) \
-  REDUCTION_ON_STREAM_KERNEL_DEF_GEN_ARITH(T, TNAME)     \
+  REDUCTION_ON_STREAM_KERNEL_DEF_GEN_ARITH(T, TNAME) \
   REDUCTION_ON_STREAM_KERNEL_DEF_GEN_BITWISE(T, TNAME)
 
 #define FLOAT_REDUCTION_ON_STREAM_KERNEL_GEN(T, TNAME) REDUCTION_ON_STREAM_KERNEL_DEF_GEN_ARITH(T, TNAME)
@@ -886,25 +851,8 @@ __global__ ATTR_NO_INLINE void rocshmem_reduce_on_stream_kernel(rocshmem_team_t 
 __global__ ATTR_NO_INLINE void rocshmem_broadcastmem_kernel(
     rocshmem_team_t team, void *dest, const void *source, size_t nelems,
     int pe_root) {
-  __shared__ rocshmem_ctx_t ctx;
-  __shared__ int ctx_result;
-
-  ctx_result = rocshmem_wg_team_create_ctx(team, 0, &ctx);
-
-  // If context creation failed, fall back to default context
-  if (ctx_result != 0) {
-    ctx = ROCSHMEM_CTX_DEFAULT;
-    __syncthreads();
-  }
-
-  // Call device broadcast function with created context and provided team
-  // Using char type since nelems is in bytes (1 byte per element)
-  rocshmem_broadcast_wg<char>(ctx, team, (char *) dest, (const char *) source,
+  rocshmem_broadcast_wg<char>(ROCSHMEM_CTX_DEFAULT, team, (char *) dest, (const char *) source,
                               (int) nelems, pe_root);
-
-  if (ctx_result == 0) {
-    rocshmem_wg_ctx_destroy(&ctx);
-  }
 }
 
 __global__ ATTR_NO_INLINE void rocshmem_getmem_kernel(void *dest,
