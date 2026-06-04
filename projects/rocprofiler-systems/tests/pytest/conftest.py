@@ -2292,7 +2292,6 @@ def assert_perfetto(
         key_counts: Optional[list[int]] = None,
         trace_processor_path: Optional[Path] = None,
         print_output: bool = True,
-        aggregate_by_name: bool = False,
         timeout: int = 120,
         pass_regex: Optional[list[str]] = None,
         fail_regex: Optional[list[str]] = None,
@@ -2326,7 +2325,6 @@ def assert_perfetto(
                 key_counts=key_counts,
                 trace_processor_path=trace_processor_path,
                 print_output=print_output,
-                aggregate_by_name=aggregate_by_name,
                 timeout=timeout,
             )
             output = f"Command: {validation.command}\n\n{validation.message}"

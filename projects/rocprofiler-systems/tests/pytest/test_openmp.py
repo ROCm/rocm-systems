@@ -295,7 +295,6 @@ class TestOpenMPFortran(RocprofsysTest):
                 categories=["rocm_ompt_api"],
                 labels=["omp_implicit_task", "omp_implicit_task [incomplete]"],
                 counts=[1, self.WORKER_THREADS],
-                aggregate_by_name=True,
             )
             # Four barriers (two per thread). One for "parallel" construct and the other
             # for "do" construct. The worker's parallel barrier will not complete
@@ -305,7 +304,6 @@ class TestOpenMPFortran(RocprofsysTest):
                 categories=["rocm_ompt_api"],
                 labels=["omp_sync_region", "omp_sync_region [incomplete]"],
                 counts=[2 + self.WORKER_THREADS, self.WORKER_THREADS],
-                aggregate_by_name=True,
             )
             self.assert_perfetto(
                 result,
@@ -316,7 +314,6 @@ class TestOpenMPFortran(RocprofsysTest):
                     "omp_sync_region_wait [incomplete]",
                 ],
                 counts=[2 + self.WORKER_THREADS, self.WORKER_THREADS],
-                aggregate_by_name=True,
             )
 
     @pytest.mark.parametrize(
