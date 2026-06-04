@@ -3,9 +3,9 @@
 
 set(OPENMP_DIRECTIVE_USE_OFFLOAD TRUE)
 
-check_rocprofsys_disable_examples("fortran" _FORTAN_DISABLED)
-check_rocprofsys_disable_examples("openmp-fortran" _OPENMP_FORTAN_DISABLED)
-if(_FORTAN_DISABLED OR _OPENMP_FORTAN_DISABLED)
+check_rocprofsys_disable_examples("fortran" _FORTRAN_DISABLED)
+check_rocprofsys_disable_examples("openmp-fortran" _OPENMP_FORTRAN_DISABLED)
+if(_FORTRAN_DISABLED OR _OPENMP_FORTRAN_DISABLED)
     return()
 endif()
 
