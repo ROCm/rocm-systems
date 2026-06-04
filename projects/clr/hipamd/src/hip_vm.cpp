@@ -73,9 +73,14 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
 
   //  Currently we do not support Pinned memory
   if (handle == nullptr || size == 0 || flags != 0 || prop == nullptr ||
-      (prop->type != hipMemAllocationTypePinned && prop->type != hipMemAllocationTypeUncached) ||
-      (prop->location.type != hipMemLocationTypeDevice &&
-          prop->location.type != hipMemLocationTypeHost)) {
+      (prop->type != hipMemAllocationTypePinned && prop->type != hipMemAllocationTypeUncached)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  // Valid locations
+  if (auto loc_type = prop->location.type;
+      loc_type != hipMemLocationTypeDevice && loc_type != hipMemLocationTypeHost &&
+      loc_type != hipMemLocationTypeHostNuma && loc_type != hipMemLocationTypeHostNumaCurrent) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
