@@ -103,7 +103,7 @@ __device__ void GDAContext::amo_add(void *dst, T value, int pe) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      qps[qp_index].atomic_nofetch(base_heap[pe] + L_offset, value, 0, wf_info);
+      qps[qp_index].atomic_add_nbi(base_heap[pe] + L_offset, value, wf_info);
       need_turn = false;
     }
     turns = __ballot(need_turn);
@@ -135,7 +135,7 @@ __device__ T GDAContext::amo_swap(void *dst, T value, int pe) {
        * It may run additional times if contention on memory location.
        */
       while (wf_info.update(pe), (ret_val = qps[qp_index].atomic_cas(
-             base_heap[pe] + L_offset, value, cond, wf_info)) != cond) {
+             base_heap[pe] + L_offset, cond, value, wf_info)) != cond) {
         cond = ret_val;
       }
       need_turn = false;
@@ -161,7 +161,7 @@ __device__ T GDAContext::amo_fetch_and(void *dst, T value, int pe) {
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
       while (wf_info.update(pe), (ret_val = qps[qp_index].atomic_cas(
-             base_heap[pe] + L_offset, desired_val, cond, wf_info)) != cond) {
+             base_heap[pe] + L_offset, cond, desired_val, wf_info)) != cond) {
         cond = ret_val;
         desired_val = ret_val & value;
       }
@@ -193,7 +193,7 @@ __device__ T GDAContext::amo_fetch_or(void *dst, T value, int pe) {
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
       while (wf_info.update(pe), (ret_val = qps[qp_index].atomic_cas(
-             base_heap[pe] + L_offset, desired_val, cond, wf_info)) != cond) {
+             base_heap[pe] + L_offset, cond, desired_val, wf_info)) != cond) {
         cond = ret_val;
         desired_val = ret_val | value;
       }
@@ -225,7 +225,7 @@ __device__ T GDAContext::amo_fetch_xor(void *dst, T value, int pe) {
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
       while (wf_info.update(pe), (ret_val = qps[qp_index].atomic_cas(
-             base_heap[pe] + L_offset, desired_val, cond, wf_info)) != cond) {
+             base_heap[pe] + L_offset, cond, desired_val, wf_info)) != cond) {
         cond = ret_val;
         desired_val = ret_val ^ value;
       }
@@ -253,7 +253,7 @@ __device__ void GDAContext::amo_cas(void *dst, T value, T cond, int pe) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      qps[qp_index].atomic_cas_nofetch(base_heap[pe] + L_offset, value, cond, wf_info);
+      qps[qp_index].atomic_cas_nbi_nofetch(base_heap[pe] + L_offset, cond, value, wf_info);
       need_turn = false;
     }
     turns = __ballot(need_turn);
@@ -273,7 +273,7 @@ __device__ T GDAContext::amo_fetch_add(void *dst, T value, int pe) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      ret_val =  qps[qp_index].atomic_fetch(base_heap[pe] + L_offset, value, 0, wf_info);
+      ret_val =  qps[qp_index].atomic_fetch_add(base_heap[pe] + L_offset, value, wf_info);
       need_turn = false;
     }
     turns = __ballot(need_turn);
@@ -294,7 +294,7 @@ __device__ T GDAContext::amo_fetch_cas(void *dst, T value, T cond, int pe) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      ret_val = qps[qp_index].atomic_cas(base_heap[pe] + L_offset, value, cond, wf_info);
+      ret_val = qps[qp_index].atomic_cas(base_heap[pe] + L_offset, cond, value, wf_info);
       need_turn = false;
     }
     turns = __ballot(need_turn);
@@ -788,10 +788,10 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team, T *dest,
     if (nelems != 0) {
       T* src = (T*)((char*)source + (source_displs[j] * sizeof(T)));
       T* dst = (T*)((char*)&tmp_buf[constmem.my_pe * tmp_buf_off] + base_heap_offset);
-      qps[dest_pe].put_nbi_single(dst, src, nelems, false);
+      qps[dest_pe].put_nbi_single<false>(dst, src, nelems);
     }
 
-    qps[dest_pe].atomic_nofetch_single(amo_dst, 1);
+    qps[dest_pe].atomic_add_nbi_single(amo_dst, 1);
   }
 
   // wait until everyone has obtained their designated data
@@ -864,7 +864,7 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
     src = (uint64_t*)&ctrl_msg;
     dst = (uint64_t*)((char*)&tmp_buf[constmem.my_pe] + base_heap_offset);
 
-    qps[dest_pe].put_nbi_single(dst, src, sizeof(uint64_t), true);
+    qps[dest_pe].put_nbi_single<true>(dst, src, sizeof(uint64_t));
 
     /* Wait for Ctrl Message */
     uint64_t ctrl_value;
@@ -881,11 +881,11 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
     src = (uint64_t*)((char*)source + (displ_bits * sizeof(T)) + base_heap_offset);
     dst = (uint64_t*)((char*)dest + (dest_displs[j] * sizeof(T)));
 
-    qps[dest_pe].get_nbi_single(dst, src, nelems, true);
+    qps[dest_pe].get_nbi_single<true>(dst, src, nelems);
 
     /* Put Completion */
     char* amo_dst = ((char*)&pSync[alltoall_pSync_offset + my_pe_in_team] + base_heap_offset);
-    qps[dest_pe].atomic_nofetch_single(amo_dst, 1);
+    qps[dest_pe].atomic_add_nbi_single(amo_dst, 1);
 
     long *sync_flags = &pSync[alltoall_pSync_offset + dest_pe];
     while (uncached_load(sync_flags) != 1) { }
@@ -950,10 +950,10 @@ __device__ void GDAContext::alltoall_linear_thread_puts(rocshmem_team_t team,
   for (int j = tid; j < pe_size; j += step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
     uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[constmem.my_pe];
-    qps[dest_pe].put_nbi_single(
+    qps[dest_pe].put_nbi_single<false>(
       reinterpret_cast<char*>(&dst[my_pe_in_team * nelems]) + base_heap_offset,
-      &src[j * nelems], nelems * sizeof(T), false);
-    qps[dest_pe].atomic_nofetch_single(
+      &src[j * nelems], nelems * sizeof(T));
+    qps[dest_pe].atomic_add_nbi_single(
       reinterpret_cast<char *>(&pSync[alltoall_pSync_offset + my_pe_in_team]) +
       base_heap_offset, 1);
   }
@@ -1085,7 +1085,7 @@ __device__ void GDAContext::internal_amo_add(void *dst, T value, int pe,
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      qps[qp_index].atomic_nofetch(base_heap[pe] + L_offset, value, 0, wf_info);
+      qps[qp_index].atomic_add_nbi(base_heap[pe] + L_offset, value, wf_info);
       need_turn = false;
     }
     turns = __ballot(need_turn);
@@ -1104,7 +1104,7 @@ __device__ T GDAContext::internal_amo_fetch_add(void *dst, T value, int pe,
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      ret_val =  qps[qp_index].atomic_fetch(base_heap[pe] + L_offset, value, 0, wf_info);
+      ret_val =  qps[qp_index].atomic_fetch_add(base_heap[pe] + L_offset, value, wf_info);
       need_turn = false;
     }
     turns = __ballot(need_turn);
@@ -1131,7 +1131,7 @@ __device__ T GDAContext::internal_amo_swap(void *dst, T value, int pe,
        * It may run additional times if contention on memory location.
        */
       while (wf_info.update(pe), (ret_val = qps[qp_index].atomic_cas(
-             base_heap[pe] + L_offset, value, cond, wf_info)) != cond) {
+             base_heap[pe] + L_offset, cond, value, wf_info)) != cond) {
         cond = ret_val;
       }
       need_turn = false;

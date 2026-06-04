@@ -37,6 +37,7 @@
 #include "context_incl.hpp"
 #include "gda_context_proxy.hpp"
 #include "queue_pair.hpp"
+#include "queue_pair_provider.hpp"
 #include "bootstrap/bootstrap.hpp"
 #include "gda/ionic/provider_gda_ionic.hpp"
 #include "gda/bnxt/provider_gda_bnxt.hpp"
@@ -46,7 +47,6 @@ namespace rocshmem {
 
 class GDAContext;
 class GDAHostContext;
-class QueuePair;
 class HostInterface;
 
 inline constexpr uint32_t GDA_IONIC_VENDOR_ID = 0x1DD8;
@@ -90,7 +90,6 @@ class GDABackend : public Backend {
   int num_nics_{0};
 
   uint32_t inline_threshold = 8;
-  QueuePair *host_qps = nullptr;
   QueuePair *gpu_qps = nullptr;
   std::vector<ibv_qp*> qps;
   std::vector<ibv_cq*> cqs;

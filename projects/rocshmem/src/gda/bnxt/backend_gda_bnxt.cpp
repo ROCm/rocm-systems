@@ -30,6 +30,7 @@
 namespace rocshmem {
 
 void GDABackend::bnxt_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
+#if 0
   struct bnxt_re_dv_obj dv_obj;
   struct bnxt_re_dv_cq dv_cq;
   struct bnxt_re_dv_qp dv_qp;
@@ -92,6 +93,7 @@ void GDABackend::bnxt_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   /* Base Heap information */
   gpu_qp->base_heap = (uintptr_t) heap.get_local_heap_base();
   gpu_qp->base_heap_size = heap.get_size();
+#endif
 }
 
 void GDABackend::bnxt_create_cqs(int cqe) {

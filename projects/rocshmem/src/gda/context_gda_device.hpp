@@ -27,11 +27,9 @@
 
 #include "context.hpp"
 #include "team.hpp"
-#include "queue_pair.hpp"
+#include "queue_pair_provider.hpp"
 
 namespace rocshmem {
-
-class QueuePair;
 
 class GDAContext : public Context {
  public:

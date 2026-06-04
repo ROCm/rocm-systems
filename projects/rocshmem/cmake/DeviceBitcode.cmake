@@ -179,7 +179,7 @@ if(USE_GDA)
     ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/context_gda_device.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/context_gda_device_coll.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/backend_gda.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/queue_pair.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/queue_pair_generic.cpp
   )
   if(GDA_MLX5)
     list(APPEND BITCODE_SOURCES

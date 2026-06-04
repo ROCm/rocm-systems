@@ -117,9 +117,10 @@ union gda_mlx5_wqe_rma {
     return (byte_count <= 12 ? 3 : 4);
   }
 
-  __device__ static constexpr inline bool can_inline(
-      uint8_t opcode, uint32_t byte_count, uint32_t inline_threshold) {
-    return (opcode == MLX5_OPCODE_RDMA_WRITE) && (byte_count <= inline_threshold);
+  template <uint8_t OpCode>
+  __device__ static constexpr inline bool can_inline(uint32_t byte_count) {
+    return OpCode == MLX5_OPCODE_RDMA_WRITE &&
+           byte_count <= sizeof(gda_mlx5_wqe_inline_data::data);
   }
 } __attribute__((__packed__)) __attribute__((__aligned__(16)));
 

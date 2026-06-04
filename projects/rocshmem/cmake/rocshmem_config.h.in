@@ -46,6 +46,7 @@
 #cmakedefine GDA_IONIC
 #cmakedefine GDA_BNXT
 #cmakedefine GDA_MLX5
+#cmakedefine GDA_GENERIC
 #cmakedefine HAVE_EXTERNAL_MPI
 #cmakedefine HAVE_DEVICE_MALLOC_UNCACHED
 

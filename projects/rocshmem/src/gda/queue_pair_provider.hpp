@@ -22,26 +22,35 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#ifndef LIBRARY_SRC_GDA_ENUMS_HPP_
-#define LIBRARY_SRC_GDA_ENUMS_HPP_
+#ifndef LIBRARY_SRC_GDA_QUEUE_PAIR_PROVIDER_HPP_
+#define LIBRARY_SRC_GDA_QUEUE_PAIR_PROVIDER_HPP_
+
+#include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
+
+#include "queue_pair.hpp"
+
+#if   defined(GDA_GENERIC)
+#include "queue_pair_generic.hpp"
+#elif defined(GDA_IONIC)
+#include "gda/ionic/queue_pair_ionic.hpp"
+#elif defined(GDA_BNXT)
+#include "gda/bnxt/queue_pair_bnxt.hpp"
+#elif defined(GDA_MLX5)
+#include "gda/mlx5/queue_pair_mlx5.hpp"
+#endif
 
 namespace rocshmem {
-namespace gda {
-  enum class provider : int {
-    UNSET,
-    IONIC,
-    BNXT,
-    MLX5
-  };
 
-  enum alltoallv_wg_algos {
-    ALLTOALLV_WG_ALGO_GET = 0,
-    ALLTOALLV_WG_ALGO_COPY,
-  };
-}  // namespace gda
-
-using GDAProvider = gda::provider;
+#if defined(GDA_GENERIC)
+using QueuePair = QueuePairGeneric;
+#elif defined(GDA_IONIC)
+using QueuePair = QueuePairMLX5;
+#elif defined(GDA_BNXT)
+using QueuePair = QueuePairBNXT;
+#elif defined(GDA_MLX5)
+using QueuePair = QueuePairMLX5;
+#endif
 
 }  // namespace rocshmem
 
-#endif  // LIBRARY_SRC_GDA_ENUMS_HPP_
+#endif  // LIBRARY_SRC_GDA_QUEUE_PAIR_PROVIDER_HPP_

@@ -34,27 +34,27 @@
  * class.
  */
 
-#include "rocshmem_config.h"
-#include "endian.h"
+#include <limits>
+#include <map>
+#include <tuple>
+#include <type_traits>
+
+#include <hip/hip_runtime.h>
+
+#include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
+#include "rocshmem/rocshmem.hpp"
+#include "endian.hpp"
 #include "constants.hpp"
 #include "util.hpp"
 
 #include "ibv_wrapper.hpp"
 
-#include "gda/ionic/provider_gda_ionic.hpp"
-#include "gda/mlx5/provider_gda_mlx5.hpp"
-#include "gda/bnxt/provider_gda_bnxt.hpp"
-
-#include "containers/free_list.hpp"
+#include "containers/free_list_impl.hpp"
 #include "memory/hip_allocator.hpp"
-
-#include <map>
 
 namespace rocshmem {
 
-class GDABackend;
-
-struct user_buf_info_t {
+struct BufferInfo {
   uintptr_t addr;
   size_t    length;
   uint32_t  lkey;
@@ -146,408 +146,1111 @@ class ActiveWFInfo {
   }
 };
 
-class QueuePair {
- public:
-  friend GDABackend;
+/*
+ * @struct QueuePairTraits<Provider>
+ * @brief Defines Provider-specific types and constants.
+ *
+ * Each Provider subclass of QueuePairBase<Provider> should also define a specialization
+ * for QueuePairTraits<Provider> that defines the documented members:
+ *   - QueuePairTraits<Provider>::OpCode
+ *   - QueuePairTraits<Provider>::Endianness
+ *
+ * Sample specialization code for a QueuePairProvider subclass
+ * of QueuePairBase<QueuePairProvider>:
+ * @code
+ * class QueuePairProvider;
+ * template <> struct QueuePairTraits<QueuePairProvider> {
+ *   enum class OpCode : uint8_t {
+ *     RDMA_WRITE = ...,
+ *     RDMA_READ  = ...,
+ *     ATOMIC_FA  = ...,
+ *     ATOMIC_CS  = ...,
+ *   };
+ *
+ *   static constexpr endian::Order Endianness = endian::Order::...;
+ * };
+ * @endcode
+ *
+ * @tparam Provider Name of Provider class.
+ */
+
+/*
+ * @enum QueuePairTraits<Provider>::OpCode
+ * @brief Enumeration of the Provider-specific opcodes.
+ *
+ * @var QueuePairTraits<Provider>::OpCode::RDMA_WRITE
+ * Provider-specific RDMA Write opcode.
+ *
+ * @var QueuePairTraits<Provider>::OpCode::RDMA_READ
+ * Provider-specific RDMA Read opcode.
+ *
+ * @var QueuePairTraits<Provider>::OpCode::ATOMIC_FA
+ * Provider-specific Fetch-Add opcode.
+ *
+ * @var QueuePairTraits<Provider>::OpCode::ATOMIC_CS
+ * Provider-specific Compare-and-Swap opcode.
+ */
+
+/*
+ * @var endian::Order QueuePairTraits<Provider>::Endianness
+ * @brief Endianness order of data stored by the hardware for Provider.
+ *
+ * @qualifier static
+ * @qualifier constexpr
+ */
+
+template <typename Provider>
+struct QueuePairTraits;
+
+/*
+ * @brief Atomic Memory Operation fetching behavior
+ */
+enum class AMOFetchType {
+  Blocking,
+  NonBlocking,
+  NonFetching,
+};
+
+
+
+/*
+ * @brief CRTP mixin class supplying a common SHMEM-like interface to Queue Pair implementations.
+ */
+template <typename Provider>
+class QueuePairSHMEM {
+/**
+ * @name Provider-Defined Members
+ *
+ * Members that are defined based on specializations of QueuePairTraits<Provider>.
+ * Each Provider must supply their own definitions.
+ *
+ * @{
+ */
+public:
+  /**
+   * @brief Type alias for QueuePairTraits<Provider>.
+   */
+  using Traits = QueuePairTraits<Provider>;
 
   /**
-   * @brief Constructor.
+   * @brief Enumeration of the opcodes for Write, Read, Fetch-Add, and Compare-and-Swap.
+   *
+   * A definition must be provided by the QueuePairTraits<Provider> specialization
+   * of each Provider subclass.
    */
-  explicit QueuePair(struct ibv_pd* pd, int gda_provider);
+  using OpCode = typename Traits::OpCode;
+/**@}*/
 
+
+
+/**
+ * @name Member Types
+ *
+ * @{
+ */
+public:
   /**
-   * @brief Destructor.
+   * @brief Helper alias for defining post_wqe_amo and post_wqe_amo_single in subclasses
    */
-  virtual ~QueuePair();
+  template <AMOFetchType Fetch>
+  using amo_ret_t = std::conditional_t<Fetch == AMOFetchType::Blocking, uint64_t, void>;
+/**@}*/
 
+
+
+/**
+ * @name Remote Memory Access (RMA)
+ *
+ * @{
+ */
+public:
   /**
    * @brief Create and enqueue a non-blocking put work queue entry (wqe).
    *
    * @param[in] dest Destination address for data transmission.
    * @param[in] source Source address for data transmission.
-   * @param[in] length Size in bytes of data transmission.
+   * @param[in] nelems Size in bytes of data transmission.
    * @param[in] wf_info Wavefront information.
-   */
-  __device__ void put_nbi(void *dest, const void *source, size_t length,
-      ActiveWFInfo &wf_info);
-
-  __device__ void put_nbi_single(void *dest, const void *source, size_t length,
-      bool ring_db);
-
-  __device__ void put_nbi_single(void *raddr, uint32_t rkey,
-      const void *laddr, uint32_t lkey,
-      size_t length, bool ring_db = true);
-
-  /**
-   * @brief Create and enqueue a non-blocking put with explicit rkey/lkey.
    *
-   * Used when each buffer registration has its own keys, distinct from
-   * the QP's default heap keys.
-   *
-   * @param[in] length Size in bytes of data transmission.
-   * @param[in] raddr Remote destination address.
-   * @param[in] rkey Remote key for the destination buffer.
-   * @param[in] laddr Local source address.
-   * @param[in] lkey Local key for the source buffer.
-   * @param[in] wf_info Wavefront information.
-   * @param[in] ring_db Ring doorbell after posting (default true).
+   * @tparam RingDB Whether to ring the doorbell
    */
-  __device__ void put_nbi(void *raddr, uint32_t rkey,
-      const void *laddr, uint32_t lkey,
-      size_t length, ActiveWFInfo &wf_info, bool ring_db = true);
+  template <bool RingDB = true>
+  __device__ void put_nbi(void *dest, const void *source, size_t nelems,
+                          const ActiveWFInfo& wf_info);
+  template <bool RingDB = true>
+  __device__ void put_nbi_single(void *dest, const void *source, size_t nelems);
 
   /**
    * @brief Create and enqueue a non-blocking get work queue entry (wqe).
    *
    * @param[in] dest Destination address for data transmission.
    * @param[in] source Source address for data transmission.
-   * @param[in] length Size in bytes of data transmission.
+   * @param[in] nelems Size in bytes of data transmission.
    * @param[in] wf_info Wavefront information.
    */
-  __device__ void get_nbi(void *dest, const void *source, size_t length,
-      ActiveWFInfo &wf_info);
+  template <bool RingDB = true>
+  __device__ void get_nbi(void *dest, const void *source, size_t nelems,
+                          const ActiveWFInfo& wf_info);
+  template <bool RingDB = true>
+  __device__ void get_nbi_single(void *dest, const void *source, size_t nelems);
+/**@}*/
 
-  __device__ void get_nbi_single(void *dest, const void *source, size_t length,
-      bool ring_db);
 
+
+/**
+ * @name Atomic Memory Operations (AMO)
+ *
+ * @{
+ */
+public:
   /**
-   * @brief Empty all completions from the completion queue.
-   * @param[in] wf_info Wavefront information.
-   */
-  __device__ void quiet(ActiveWFInfo &wf_info);
-
-  __device__ void quiet_single();
-
-  /**
-   * @brief Empty all completions from the completion queue.
-   * @param[in] wf_info Wavefront information.
-   */
-  __device__ void quiet_scope(ActiveWFInfo &wf_info);
-
-  /**
-   * @brief Create and enqueue an atomic fetch work queue entry (wqe).
+   * @brief Create and enqueue a blocking atomic fetch-and-add work queue entry (wqe).
    *
    * @param[in] dest Destination address for data transmission.
    * @param[in] value Data value for the atomic operation.
-   * @param[in] cond Used in atomic comparisons.
    * @param[in] wf_info Wavefront information.
+   *
+   * @tparam RingDB Whether to ring the doorbell
    *
    * @return An atomic value
    */
-  __device__ int64_t atomic_fetch(void *dest, int64_t value, int64_t cond,
-      ActiveWFInfo &wf_info);
+  template <bool RingDB = true>
+  __device__ uint64_t atomic_fetch_add(void *dest, uint64_t value, const ActiveWFInfo& wf_info);
+  template <bool RingDB = true>
+  __device__ uint64_t atomic_fetch_add_single(void *dest, uint64_t value);
 
+#if 0
   /**
-   * @brief Create and enqueue an atomic fetch work queue entry (wqe).
+   * @brief Create and enqueue a non-blocking atomic fetch-and-add work queue entry (wqe).
    *
+   * @param[in] fetch Address for fetched value.
    * @param[in] dest Destination address for data transmission.
    * @param[in] value Data value for the atomic operation.
-   * @param[in] cond Used in atomic comparisons.
    * @param[in] wf_info Wavefront information.
-   */
-  __device__ void atomic_nofetch(void *dest, int64_t value, int64_t cond,
-      ActiveWFInfo &wf_info);
-
-  __device__ void atomic_nofetch_single(void *dest, int64_t value);
-
-  __device__ void atomic_add_single(void *raddr, uint32_t rkey,
-      int64_t value, bool fence = false);
-
-  /**
-   * @brief Non-fetching atomic add with explicit remote key.
    *
-   * Used when the signal buffer has its own rkey distinct from
-   * the QP's default heap key.
-   *
-   * @param[in] raddr Remote destination address.
-   * @param[in] rkey  Remote key for the destination buffer.
-   * @param[in] value Atomic add value.
-   * @param[in] wf_info Wavefront information.
-   */
-  __device__ void atomic_add(void *raddr, uint32_t rkey,
-      int64_t value, ActiveWFInfo &wf_info, bool fence = false);
-
-  /**
-   * @brief Create and enqueue an atomic cas work queue entry (wqe).
-   *
-   * @param[in] dest Destination address for data transmission.
-   * @param[in] value Data value for the atomic operation.
-   * @param[in] cond Used in atomic comparisons.
-   * @param[in] wf_info Wavefront information.
+   * @tparam RingDB Whether to ring the doorbell
    *
    * @return An atomic value
    */
-  __device__ int64_t atomic_cas(void *dest, int64_t atomic_data,
-      int64_t atomic_cmp, ActiveWFInfo &wf_info);
+  template <bool RingDB = true>
+  __device__ void atomic_fetch_add_nbi(uint64_t *fetch, void *dest, uint64_t value,
+                                       const ActiveWFInfo& wf_info);
+  template <bool RingDB = true>
+  __device__ void atomic_fetch_add_nbi_single(uint64_t *fetch, void *dest, uint64_t value);
+#endif
 
   /**
-   * @brief Create and enqueue an atomic cas work queue entry (wqe).
+   * @brief Create and enqueue a non-blocking atomic add work queue entry (wqe).
    *
    * @param[in] dest Destination address for data transmission.
    * @param[in] value Data value for the atomic operation.
+   * @param[in] wf_info Wavefront information.
+   *
+   * @tparam RingDB Whether to ring the doorbell
+   */
+  template <bool RingDB = true>
+  __device__ void atomic_add_nbi(void *dest, uint64_t value, const ActiveWFInfo& wf_info);
+  template <bool RingDB = true>
+  __device__ void atomic_add_nbi_single(void *dest, uint64_t value);
+
+  /**
+   * @brief Create and enqueue a blocking atomic compare-and-swap work queue entry (wqe).
+   *
+   * @param[in] dest Destination address for data transmission.
    * @param[in] cond Used in atomic comparisons.
+   * @param[in] value Data value for the atomic operation.
+   * @param[in] wf_info Wavefront information.
+   *
+   * @tparam RingDB Whether to ring the doorbell
+   *
+   * @return An atomic value
+   */
+  template <bool RingDB = true>
+  __device__ uint64_t atomic_cas(void *dest, uint64_t cond, uint64_t value,
+                                 const ActiveWFInfo& wf_info);
+  template <bool RingDB = true>
+  __device__ uint64_t atomic_cas_single(void *dest, uint64_t cond, uint64_t value);
+
+#if 0
+  /**
+   * @brief Create and enqueue a non-blocking atomic compare-and-swap work queue entry (wqe).
+   *
+   * @param[in] fetch Address for fetched value.
+   * @param[in] dest Destination address for data transmission.
+   * @param[in] cond Used in atomic comparisons.
+   * @param[in] value Data value for the atomic operation.
+   * @param[in] wf_info Wavefront information.
+   *
+   * @tparam RingDB Whether to ring the doorbell
+   *
+   * @return An atomic value
+   */
+  template <bool RingDB = true>
+  __device__ void atomic_cas_nbi(uint64_t *fetch, void *dest, uint64_t cond, uint64_t value,
+                                 const ActiveWFInfo& wf_info);
+  template <bool RingDB = true>
+  __device__ void atomic_cas_nbi_single(uint64_t *fetch, void *dest, uint64_t cond, uint64_t value);
+#endif
+
+  /**
+   * @brief Create and enqueue a non-fetching atomic compare-and-swap work queue entry (wqe).
+   *
+   * @param[in] dest Destination address for data transmission.
+   * @param[in] cond Used in atomic comparisons.
+   * @param[in] value Data value for the atomic operation.
+   * @param[in] wf_info Wavefront information.
+   *
+   * @tparam RingDB Whether to ring the doorbell
+   *
+   * @return An atomic value
+   */
+  template <bool RingDB = true>
+  __device__ void atomic_cas_nbi_nofetch(void *dest, uint64_t cond, uint64_t value,
+                                         const ActiveWFInfo& wf_info);
+  template <bool RingDB = true>
+  __device__ void atomic_cas_nbi_nofetch_single(void *dest, uint64_t cond, uint64_t value);
+/**@}*/
+
+
+/**
+ * @name Completion and Ordering.
+ *
+ * @{
+ */
+public:
+  /**
+   * @brief Empty all completions from the completion queue.
+   *
    * @param[in] wf_info Wavefront information.
    */
-  __device__ int64_t atomic_cas_nofetch(void *dest, int64_t atomic_data,
-      int64_t atomic_cmp, ActiveWFInfo &wf_info);
+  __device__ void quiet(const ActiveWFInfo& wf_info);
+/**@}*/
 
-  uintptr_t base_heap = 0;
-  size_t base_heap_size = 0;
 
- private:
+
+/**
+ * @name Internal
+ *
+ * @{
+ */
+protected:
+
+  /*
+   * @brief Provider is a friend of QueuePairSHMEM<Provider>.
+   */
+  friend Provider;
+
+  __host__  QueuePairSHMEM() = default;
+  __device__ QueuePairSHMEM() = delete;
+
+private:
+  __device__ Provider& provider() {
+    return static_cast<Provider&>(*this);
+  }
+/**@}*/
+};
+
+
+
+template <typename Provider>
+template <bool RingDB>
+__device__ void QueuePairSHMEM<Provider>::put_nbi(
+    void *dest, const void *source, size_t nelems, const ActiveWFInfo& wf_info) {
+  constexpr OpCode Op = OpCode::RDMA_WRITE;
+  uintptr_t laddr = reinterpret_cast<uintptr_t>(source);
+  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
+  provider().template post_wqe_rma<Op, RingDB>(laddr, raddr, nelems, wf_info);
+}
+
+template <typename Provider>
+template <bool RingDB>
+__device__ void QueuePairSHMEM<Provider>::put_nbi_single(
+    void *dest, const void *source, size_t nelems) {
+  constexpr OpCode Op = OpCode::RDMA_WRITE;
+  uintptr_t laddr = reinterpret_cast<uintptr_t>(source);
+  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
+  provider().template post_wqe_rma_single<Op, RingDB>(laddr, raddr, nelems);
+}
+
+template <typename Provider>
+template <bool RingDB>
+__device__ void QueuePairSHMEM<Provider>::get_nbi(
+    void *dest, const void *source, size_t nelems, const ActiveWFInfo& wf_info) {
+  constexpr OpCode Op = OpCode::RDMA_READ;
+  uintptr_t laddr = reinterpret_cast<uintptr_t>(dest);
+  uintptr_t raddr = reinterpret_cast<uintptr_t>(source);
+  provider().template post_wqe_rma<Op, RingDB>(laddr, raddr, nelems, wf_info);
+}
+
+template <typename Provider>
+template <bool RingDB>
+__device__ void QueuePairSHMEM<Provider>::get_nbi_single(
+    void *dest, const void *source, size_t nelems) {
+  constexpr OpCode Op = OpCode::RDMA_READ;
+  uintptr_t laddr = reinterpret_cast<uintptr_t>(dest);
+  uintptr_t raddr = reinterpret_cast<uintptr_t>(source);
+  provider().template post_wqe_rma_single<Op, RingDB>(laddr, raddr, nelems);
+}
+
+#if 0
+template <typename Provider>
+template <bool RingDB>
+__device__ uint64_t QueuePairSHMEM<Provider>::atomic_fetch_add(
+    void *dest, uint64_t value, const ActiveWFInfo& wf_info) {
+  constexpr OpCode Op = OpCode::ATOMIC_FA;
+  constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
+  uintptr_t laddr = /* TODO */
+  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
+  provider().template post_wqe_amo<Op, Fetch, RingDB>(laddr, raddr, value, 0, wf_info);
+  quiet(wf_info);
+  return *reinterpret_cast<uint64_t*>(laddr);
+}
+
+template <typename Provider>
+template <bool RingDB>
+__device__ uint64_t QueuePairSHMEM<Provider>::atomic_fetch_add_single(
+    void *dest, uint64_t value) {
+  constexpr OpCode Op = OpCode::ATOMIC_FA;
+  constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
+  uintptr_t laddr = /* TODO */
+  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
+  provider().template post_wqe_amo_single<Op, Fetch, RingDB>(laddr, raddr, value, 0);
+  provider().quiet_single();
+  return *reinterpret_cast<uint64_t*>(laddr);
+}
+
+template <typename Provider>
+template <bool RingDB>
+__device__ void QueuePairSHMEM<Provider>::atomic_fetch_add_nbi(
+    uint64_t *fetch, void *dest, uint64_t value, const ActiveWFInfo& wf_info) {
+  constexpr OpCode Op = OpCode::ATOMIC_FA;
+  constexpr AMOFetchType Fetch = AMOFetchType::NonBlocking;
+  uintptr_t laddr = reinterpret_cast<uintptr_t>(fetch);
+  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
+  provider().template post_wqe_amo<Op, Fetch, RingDB>(laddr, raddr, value, 0, wf_info);
+}
+
+template <typename Provider>
+template <bool RingDB>
+__device__ void QueuePairSHMEM<Provider>::atomic_fetch_add_nbi_single(
+    uint64_t *fetch, void *dest, uint64_t value) {
+  constexpr OpCode Op = OpCode::ATOMIC_FA;
+  constexpr AMOFetchType Fetch = AMOFetchType::NonBlocking;
+  uintptr_t laddr = reinterpret_cast<uintptr_t>(fetch);
+  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
+  provider().template post_wqe_amo_single<Op, Fetch, RingDB>(laddr, raddr, value, 0);
+}
+
+template <typename Provider>
+template <bool RingDB>
+__device__ void QueuePairSHMEM<Provider>::atomic_add_nbi(
+    void *dest, uint64_t value, const ActiveWFInfo& wf_info) {
+  constexpr OpCode Op = OpCode::ATOMIC_FA;
+  constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
+  uintptr_t laddr = reinterpret_cast<uintptr_t>(nonfetching_atomic);
+  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
+  provider().template post_wqe_amo<Op, Fetch, RingDB>(laddr, raddr, value, 0, wf_info);
+}
+
+template <typename Provider>
+template <bool RingDB>
+__device__ void QueuePairSHMEM<Provider>::atomic_add_nbi_single(void *dest, uint64_t value) {
+  constexpr OpCode Op = OpCode::ATOMIC_FA;
+  constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
+  uintptr_t laddr = reinterpret_cast<uintptr_t>(nonfetching_atomic);
+  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
+  provider().template post_wqe_amo_single<Op, Fetch, RingDB>(laddr, raddr, value, 0);
+}
+
+template <typename Provider>
+template <bool RingDB>
+__device__ uint64_t QueuePairSHMEM<Provider>::atomic_cas(
+    void *dest, uint64_t cond, uint64_t value, const ActiveWFInfo& wf_info) {
+  constexpr OpCode Op = OpCode::ATOMIC_CS;
+  constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
+  uintptr_t laddr = /* TODO */
+  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
+  provider().template post_wqe_amo<Op, Fetch, RingDB>(laddr, raddr, value, cond, wf_info);
+  quiet(wf_info);
+  return *reinterpret_cast<uint64_t*>(laddr);
+}
+
+template <typename Provider>
+template <bool RingDB>
+__device__ uint64_t QueuePairSHMEM<Provider>::atomic_cas_single(
+    void *dest, uint64_t cond, uint64_t value) {
+  constexpr OpCode Op = OpCode::ATOMIC_CS;
+  constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
+  uintptr_t laddr = /* TODO */
+  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
+  provider().template post_wqe_amo_single<Op, Fetch, RingDB>(laddr, raddr, value, cond);
+  quiet_single();
+  return *reinterpret_cast<uint64_t*>(laddr);
+}
+
+template <typename Provider>
+template <bool RingDB>
+__device__ void QueuePairSHMEM<Provider>::atomic_cas_nbi(
+    uint64_t *fetch, void *dest, uint64_t cond, uint64_t value, const ActiveWFInfo& wf_info) {
+  constexpr OpCode Op = OpCode::ATOMIC_CS;
+  constexpr AMOFetchType Fetch = AMOFetchType::NonBlocking;
+  uintptr_t laddr = reinterpret_cast<uintptr_t>(fetch);
+  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
+  provider().template post_wqe_amo<Op, Fetch, RingDB>(laddr, raddr, value, cond, wf_info);
+}
+
+template <typename Provider>
+template <bool RingDB>
+__device__ void QueuePairSHMEM<Provider>::atomic_cas_nbi_single(
+    uint64_t *fetch, void *dest, uint64_t cond, uint64_t value) {
+  constexpr OpCode Op = OpCode::ATOMIC_CS;
+  constexpr AMOFetchType Fetch = AMOFetchType::NonBlocking;
+  uintptr_t laddr = reinterpret_cast<uintptr_t>(fetch);
+  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
+  provider().template post_wqe_amo_single<Op, Fetch, RingDB>(laddr, raddr, value, cond);
+}
+
+template <typename Provider>
+template <bool RingDB>
+__device__ void QueuePairSHMEM<Provider>::atomic_cas_nbi_nofetch(
+    void *dest, uint64_t cond, uint64_t value, const ActiveWFInfo& wf_info) {
+  constexpr OpCode Op = OpCode::ATOMIC_CS;
+  constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
+  uintptr_t laddr = reinterpret_cast<uintptr_t>(nonfetching_atomic);
+  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
+  provider().template post_wqe_amo<Op, Fetch, RingDB>(laddr, raddr, value, cond, wf_info);
+}
+
+template <typename Provider>
+template <bool RingDB>
+__device__ void QueuePairSHMEM<Provider>::atomic_cas_nbi_nofetch_single(
+    void *dest, uint64_t cond, uint64_t value) {
+  constexpr OpCode Op = OpCode::ATOMIC_CS;
+  constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
+  uintptr_t laddr = reinterpret_cast<uintptr_t>(nonfetching_atomic);
+  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
+  provider().template post_wqe_amo_single<Op, Fetch, RingDB>(laddr, raddr, value, cond);
+}
+#endif
+
+template <typename Provider>
+template <bool RingDB>
+__device__ uint64_t QueuePairSHMEM<Provider>::atomic_fetch_add(
+    void *dest, uint64_t value, const ActiveWFInfo& wf_info) {
+  constexpr OpCode Op = OpCode::ATOMIC_FA;
+  constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
+  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
+  return provider().template post_wqe_amo<Op, Fetch, RingDB>(raddr, value, 0, wf_info);
+}
+
+template <typename Provider>
+template <bool RingDB>
+__device__ uint64_t QueuePairSHMEM<Provider>::atomic_fetch_add_single(
+    void *dest, uint64_t value) {
+  constexpr OpCode Op = OpCode::ATOMIC_FA;
+  constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
+  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
+  return provider().template post_wqe_amo_single<Op, Fetch, RingDB>(raddr, value, 0);
+}
+
+template <typename Provider>
+template <bool RingDB>
+__device__ void QueuePairSHMEM<Provider>::atomic_add_nbi(
+    void *dest, uint64_t value, const ActiveWFInfo& wf_info) {
+  constexpr OpCode Op = OpCode::ATOMIC_FA;
+  constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
+  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
+  provider().template post_wqe_amo<Op, Fetch, RingDB>(raddr, value, 0, wf_info);
+}
+
+template <typename Provider>
+template <bool RingDB>
+__device__ void QueuePairSHMEM<Provider>::atomic_add_nbi_single(void *dest, uint64_t value) {
+  constexpr OpCode Op = OpCode::ATOMIC_FA;
+  constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
+  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
+  provider().template post_wqe_amo_single<Op, Fetch, RingDB>(raddr, value, 0);
+}
+
+template <typename Provider>
+template <bool RingDB>
+__device__ uint64_t QueuePairSHMEM<Provider>::atomic_cas(
+    void *dest, uint64_t cond, uint64_t value, const ActiveWFInfo& wf_info) {
+  constexpr OpCode Op = OpCode::ATOMIC_CS;
+  constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
+  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
+  return provider().template post_wqe_amo<Op, Fetch, RingDB>(raddr, value, cond, wf_info);
+}
+
+template <typename Provider>
+template <bool RingDB>
+__device__ uint64_t QueuePairSHMEM<Provider>::atomic_cas_single(
+    void *dest, uint64_t cond, uint64_t value) {
+  constexpr OpCode Op = OpCode::ATOMIC_CS;
+  constexpr AMOFetchType Fetch = AMOFetchType::Blocking;
+  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
+  return provider().template post_wqe_amo_single<Op, Fetch, RingDB>(raddr, value, cond);
+}
+
+template <typename Provider>
+template <bool RingDB>
+__device__ void QueuePairSHMEM<Provider>::atomic_cas_nbi_nofetch(
+    void *dest, uint64_t cond, uint64_t value, const ActiveWFInfo& wf_info) {
+  constexpr OpCode Op = OpCode::ATOMIC_CS;
+  constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
+  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
+  provider().template post_wqe_amo<Op, Fetch, RingDB>(raddr, value, cond, wf_info);
+}
+
+template <typename Provider>
+template <bool RingDB>
+__device__ void QueuePairSHMEM<Provider>::atomic_cas_nbi_nofetch_single(
+    void *dest, uint64_t cond, uint64_t value) {
+  constexpr OpCode Op = OpCode::ATOMIC_CS;
+  constexpr AMOFetchType Fetch = AMOFetchType::NonFetching;
+  uintptr_t raddr = reinterpret_cast<uintptr_t>(dest);
+  provider().template post_wqe_amo_single<Op, Fetch, RingDB>(raddr, value, cond);
+}
+
+template <typename Provider>
+__device__ void QueuePairSHMEM<Provider>::quiet(const ActiveWFInfo& wf_info) {
+  if (wf_info.is_pe_group_first) {
+    provider().quiet_single();
+  }
+}
+
+
+
+/*
+ * @brief CRTP base class for Provider-specific Queue Pair implementations.
+ */
+template <typename Provider>
+class QueuePairBase : public QueuePairSHMEM<Provider> {
+/**
+ * @name Provider-Defined Members
+ *
+ * Members that are defined based on specializations of QueuePairTraits<Provider>.
+ * Each Provider must supply their own definitions.
+ *
+ * @{
+ */
+public:
   /**
-   * @brief Helper method to build work requests for the send queue.
+   * @brief Type alias for QueuePairTraits<Provider>.
+   */
+  using Traits = QueuePairTraits<Provider>;
+
+  /**
+   * @brief Constant defining the endianness required by the provider. Used for e.g. lkey and rkey.
    *
-   * @param[in] raddr Remote address.
-   * @param[in] rkey Remote key.
-   * @param[in] opcode Operation to be performed.
-   * @param[in] atomic_data An atomic data value to be used.
-   * @param[in] atomic_cmp An atomic comparison value.
-   * @param[in] wf_info Wavefront information.
-   * @param[in] fetching True if the operation returns a value.
-   * @param[in] fence True to set fence flag on the WQE.
+   * A definition must be provided by the QueuePairTraits<Provider> specialization
+   * of each Provider subclass.
    */
-  __device__ __attribute__((noinline)) uint64_t
-  post_wqe_amo(uintptr_t raddr, uint32_t rkey, uint8_t opcode,
-      int64_t atomic_data, int64_t atomic_cmp,
-      ActiveWFInfo &wf_info, bool fetching = false, bool fence = false);
+  static constexpr endian::Order ProviderEndianness = Traits::Endianness;
+/**@}*/
 
-#if defined(GDA_IONIC)
-  __device__ uint64_t ionic_post_wqe_amo(uintptr_t raddr, uint32_t rkey,
-      uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
-      ActiveWFInfo &wf_info, bool fetching = false, bool fence = false);
-#endif
-#if defined(GDA_BNXT)
-  __device__ uint64_t bnxt_post_wqe_amo(uintptr_t raddr, uint32_t rkey,
-      uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
-      ActiveWFInfo &wf_info, bool fetching = false, bool fence = false);
-#endif
-#if defined(GDA_MLX5)
-  __device__ uint64_t mlx5_post_wqe_amo(uintptr_t raddr, uint32_t rkey,
-      uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
-      ActiveWFInfo &wf_info, bool fetching = false, bool fence = false);
-#endif
 
-  __device__ __attribute__((noinline)) uint64_t post_wqe_amo_single(uintptr_t raddr,
-      uint32_t rkey, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
-      bool fetching = false, bool fence = false);
 
+/**
+ * @name Constructors and Destructors
+ *
+ * @{
+ */
+public:
   /**
-   * @brief Build and post an RMA work queue entry with explicit keys.
+   * @brief Constructor.
    *
-   * @param[in] size Size in bytes of data transmission.
-   * @param[in] raddr Remote address.
-   * @param[in] rkey Remote key.
-   * @param[in] laddr Local address.
-   * @param[in] lkey Local key.
-   * @param[in] opcode Operation to be performed.
-   * @param[in] wf_info Wavefront information.
-   * @param[in] ring_db Ring doorbell after posting.
+   * @param[in] qpn Queue Pair number.
+   * @param[in] base_heap Base address of local heap.
+   * @param[in] heap_size Size of heap, in bytes.
+   * @param[in] lkey LKey of local heap.
+   * @param[in] rkey RKey of remote heap.
+   * @param[in] pd IBVerbs Protection Domain for registering additional buffers and heaps.
    */
-  __device__ __attribute__((noinline)) void
-  post_wqe_rma(int32_t length, uintptr_t raddr, uint32_t rkey,
-      uintptr_t laddr, uint32_t lkey,
-      uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
+  __host__ explicit QueuePairBase(uint32_t qpn, void *base_heap, size_t heap_size,
+                                  uint32_t lkey, uint32_t rkey, struct ibv_pd* pd);
 
-  __device__ __attribute__((noinline)) void
-  post_wqe_rma_single(int32_t length, uintptr_t laddr, uint32_t lkey,
-      uintptr_t raddr, uint32_t rkey, uint8_t opcode, bool ring_db);
-
-#if defined(GDA_MLX5)
-  __device__ uint64_t mlx5_post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
-      uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
-      bool fetch = false, bool fence = false);
-  __device__ void mlx5_post_wqe_rma_single(int32_t length, uintptr_t laddr,
-      uint32_t lkey, uintptr_t raddr, uint32_t rkey,
-      uint8_t opcode, bool ring_db);
-  __device__ void mlx5_post_wqe_rma(int32_t length, uintptr_t raddr,
-      uint32_t rkey, uintptr_t laddr, uint32_t lkey,
-      uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
-  __device__ void mlx5_quiet();
-  __device__ void mlx5_quiet_single();
-#endif
-#if defined(GDA_BNXT)
-
-  __device__ void bnxt_write_rma_wqe(int32_t length, uintptr_t raddr,
-      uint32_t rkey, uintptr_t laddr, uint32_t lkey, uint8_t opcode);
-  __device__ uint32_t bnxt_write_amo_wqe(uintptr_t raddr, uint32_t rkey,
-      uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
-      bool fetching, bool fence);
-
-  __device__ uint64_t bnxt_post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
-      uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
-      bool fetching = false, bool fence = false);
-  __device__ void bnxt_post_wqe_rma_single(int32_t length, uintptr_t laddr,
-      uint32_t lkey, uintptr_t raddr, uint32_t rkey,
-      uint8_t opcode, bool ring_db);
-  __device__ void bnxt_post_wqe_rma(int32_t length, uintptr_t raddr,
-      uint32_t rkey, uintptr_t laddr, uint32_t lkey,
-      uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
-  __device__ void bnxt_quiet();
-  __device__ void bnxt_quiet_single();
-#endif
-#if defined(GDA_IONIC)
-  __device__ uint64_t ionic_post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
-      uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
-      bool fetch = false, bool fence = false);
-  __device__ void ionic_post_wqe_rma_single(int32_t length,
-      uintptr_t laddr, uint32_t lkey, uintptr_t raddr,
-      uint32_t rkey, uint8_t opcode, bool ring_db);
-  __device__ void ionic_post_wqe_rma(int32_t length, uintptr_t raddr,
-      uint32_t rkey, uintptr_t laddr, uint32_t lkey,
-      uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
-  __device__ void ionic_quiet(ActiveWFInfo &wf_info);
-  __device__ void ionic_quiet_single();
-#endif
-
+protected:
   /**
-   * @brief Helper method to ring the doorbell
+   * @brief Copy and Move Constructors and Assignment Operators.
+   */
+  /* NOTE: do we need to create definitions for these? define as deleted? */
+  /* move-only type? */
+
+  /*
+   * @brief Copy constructor is deleted.
+   */
+  __host__ QueuePairBase(const QueuePairBase& other) = delete;
+
+  /*
+   * @brief Copy assignment operator is deleted.
+   */
+  __host__ QueuePairBase& operator=(const QueuePairBase& other) = delete;
+
+  /*
+   * @brief Move constructor.
    *
-   * @param[in] db_val Doorbell value is written by method.
+   * Performs a member-wise move of all data members from other to *this,
+   * then resets allocated data members of other so that it can be safely reused or destroyed.
+   *
+   * @param[in,out] other QueuePairBase object to move from.
    */
-#if defined(GDA_MLX5)
-  __device__ void mlx5_ring_doorbell(uint64_t sq_post, const gda_mlx5_wqe& wqe);
-#endif
-#if defined(GDA_BNXT)
-  __device__ void bnxt_ring_doorbell(uint32_t slot_idx);
-#endif
-#if defined(GDA_IONIC)
-  __device__ void ionic_ring_doorbell(uint32_t pos);
-  __device__ void ionic_ring_doorbell_single(uint32_t pos);
-#endif
+  __host__ QueuePairBase(QueuePairBase&& other) noexcept;
 
-  // TODO: make private once gin_rocshmem_gda_factory uses a proper init API
- public:
-  /* GDAProvider::BNXT START */
-  uint64_t *bnxt_dbr;
-  struct bnxt_device_cq bnxt_cq;
-  struct bnxt_device_sq bnxt_sq;
-
-  __device__ void bnxt_poll_cq_until(uint32_t requested_available_slots);
-  [[maybe_unused]] __device__ __attribute__((noinline)) void bnxt_print_cqe_error(uint8_t status);
-
-  /* GDAProvider::BNXT END */
-
-  /* GDAProvider::MLX5 START */
-
-  gda_mlx5_device_cq mlx5_cq;
-  gda_mlx5_device_sq mlx5_sq;
-
-  __device__ void mlx5_poll_cq_until(uint16_t requested_available_slots);
-  [[maybe_unused]] __device__ __attribute__((noinline)) void mlx5_print_cqe_error(const mlx5_cqe64* cqe, uint8_t opcode);
-
-  /* GDAProvider::MLX5 END */
-
-  /* GDAProvider::IONIC START */
-
-  uint64_t *cq_dbreg{nullptr};
-  uint64_t cq_dbval{0};
-  uint64_t cq_mask{0};
-  struct ionic_v1_cqe *ionic_cq_buf{nullptr};
-  uint32_t cq_lock{SPIN_LOCK_UNLOCKED};
-  uint32_t cq_pos{0};
-  uint32_t cq_dbpos{0};
-
-  uint64_t *sq_dbreg{nullptr};
-  uint64_t sq_dbval{0};
-  uint64_t sq_mask{0};
-  struct ionic_v1_wqe *ionic_sq_buf{nullptr};
-  uint32_t sq_lock{SPIN_LOCK_UNLOCKED};
-  uint32_t sq_dbprod{0};
-  uint32_t sq_prod{0};
-  uint32_t sq_msn{0};
-
-  __device__ uint64_t get_same_qp_lane_mask();
+  /*
+   * @brief Move assignment operator.
+   *
+   * Cleans up all resources allocated by *this,
+   * performs a member-wise move of all data members from other to *this,
+   * then resets allocated data members of other so that it can be safely reused or destroyed.
+   *
+   * @param[in,out] other QueuePairBase object to move from.
+   * @return *this
+   */
+  __host__ QueuePairBase& operator=(QueuePairBase&& other);
 
   /**
-   * @brief Reserve space in the sq to post this many wqes.
-   * @param wf_info Wavefront information.
-   * @param num_wqes number of sq wqes to reserve for this wave.
-   * @return position of my_tid=0's wqe.
+   * @brief Destructor.
+   *
+   * Cleans up all resources allocated by *this.
    */
-  __device__ uint32_t reserve_sq(ActiveWFInfo &wf_info, uint32_t num_wqes);
-  __device__ uint32_t reserve_sq_single(uint32_t num_wqes);
+  __host__   ~QueuePairBase();
+/**@}*/
+
+
+
+/**
+ * @name Buffer Registration
+ *
+ * @{
+ */
+public:
+  /**
+   * @brief Register buffer for use as local address in rocSHMEM routines
+   *
+   * @param[in] addr Base address of buffer.
+   * @param[in] length Length of buffer.
+   *
+   * @retval ROCSHMEM_SUCCESS Buffer registered successfully.
+   * @retval ROCSHMEM_ERROR Buffer could not be registered.
+   */
+  __host__ int buffer_register(void *addr, size_t length);
 
   /**
-   * @brief Ring the sq doorbell maintaining order between waves.
-   * @param wf_info Wavefront information.
-   * @param my_sq_prod position of my_tid=0's wqe.
-   * @param num_wqes number of sq wqes posted in this wave.
-   * @param wqe this thread's wqe.
-   * @return doorbell producer index.
+   * @brief Unregister buffer.
+   * Buffer must have previously been registered with buffer_register(void *, size_t).
+   *
+   * @param[in] addr Base address of buffer.
+   *
+   * @retval ROCSHMEM_SUCCESS Buffer unregistered successfully.
    */
-  __device__ uint32_t commit_sq(ActiveWFInfo &wf_info, uint32_t my_sq_prod,
-      uint32_t my_sq_pos, uint32_t num_wqes);
-  __device__ uint32_t commit_sq_single(uint32_t my_sq_prod, uint32_t my_sq_pos,
-      uint32_t num_wqes);
+  __host__ int buffer_unregister(void *addr);
 
   /**
-   * @brief Helper method to poll the next completion queue entry.
+   * @brief Unregister all registered buffers.
+   *
+   * @retval ROCSHMEM_SUCCESS Buffers unregistered successfully.
    */
-  __device__ __attribute__((noinline))
-  void poll_wave_cqes(uint64_t active_lane_mask);
+  __host__ int buffer_unregister_all();
 
+protected:
   /**
-   * @brief Helper method to drain completion queue entries.
-   * @param wf_info Wavefront information.
-   * @param cons wait for sq_msn to catch up to this position.
+   * @brief Retrieve LKey for address.
+   *
+   * @param[in] addr Address to lookup LKey of.
+   *
+   * @return LKey for addr or std::numeric_limits<uint32_t>::max() if not found.
+   * Endianness of returned LKey value is ProviderEndianness.
    */
-  __device__ __attribute__((noinline))
-  void ionic_quiet_internal_ccqe(ActiveWFInfo &wf_info, uint32_t cons);
-  __device__ __attribute__((noinline))
-  void ionic_quiet_internal_ccqe_single(uint32_t cons);
+  __device__ uint32_t get_lkey(uintptr_t addr);
+/**@}*/
 
-  /**
-   * @brief Helper method to drain completion queue entries.
-   * @param wf_info Wavefront information.
-   * @param cons wait for sq_msn to catch up to this position.
+
+
+/**
+ * @name Internal
+ *
+ * @{
+ */
+protected:
+  /*
+   * @brief Provider is a friend of QueuePairBase<Provider>.
    */
-  __device__ __attribute__((noinline))
-  void ionic_quiet_internal(ActiveWFInfo &wf_info, uint32_t cons);
+  friend Provider;
 
-  /* GDAProvider::IONIC END */
+  template <AMOFetchType Fetch>
+  __device__ constexpr uint64_t* get_atomic_addr();
 
-  uint32_t inline_threshold{0};
+  template <AMOFetchType Fetch>
+  __device__ constexpr uint32_t get_atomic_lkey();
 
-  char dev_name[24];
-  uint32_t qp_num{0};
-  uint32_t rkey{0};
-  uint32_t lkey{0};
+private:
+  __device__ Provider& provider() {
+    return static_cast<Provider&>(*this);
+  }
 
-  uint64_t* nonfetching_atomic{nullptr};
-  uint32_t nonfetching_atomic_lkey{0};
-  struct ibv_mr *mr_nonfetching_atomic;
+  template <typename T>
+  __host__ std::tuple<T*, struct ibv_mr*, uint32_t> allocate_and_register(size_t size, int access);
+/**@}*/
 
-  uint64_t* fetching_atomic{nullptr};
-  uint32_t fetching_atomic_lkey{0};
+
+
+/**
+ * @name Non-static Data Members
+ *
+ * @{
+ */
+public:
+  uintptr_t base_heap;
+  size_t heap_size;
+
+protected:
+  // Used in most WQEs
+  uint32_t qp_num;
+  uint32_t lkey;
+  uint32_t rkey;
   uint32_t fetching_atomic_idx{0};
-  struct ibv_mr *mr_fetching_atomic;
 
-  static constexpr uint32_t FETCHING_ATOMIC_CNT{1024};
+private:
+  // Used by get_lkey
+  size_t num_user_buffers{0};
+  BufferInfo* buffer_info{nullptr};
+
+protected:
+  // Used in atomic WQEs
+  uint64_t* fetching_atomic{nullptr};
+  uint64_t* nonfetching_atomic{nullptr};
+
+  uint32_t fetching_atomic_lkey{0};
+  uint32_t nonfetching_atomic_lkey{0};
+
+  static constexpr size_t FETCHING_ATOMIC_CNT{1024};
   static_assert(FETCHING_ATOMIC_CNT % WF_SIZE == 0);
   using FreeListT = FreeList<uint64_t*>;
   FreeListT* fetching_atomic_freelist{nullptr};
 
   HIPAllocator allocator{};
 
-  uint8_t gda_op_rdma_write;
-  uint8_t gda_op_rdma_read;
-  uint8_t gda_op_atomic_fa;
-  uint8_t gda_op_atomic_cs;
-
-  struct ibv_pd* pd_;
-  std::map<uintptr_t, struct ibv_mr*> user_buffer_mrs;
-
-  struct user_buf_info_t *user_buf_info = nullptr;
-  size_t num_user_buffers = 0;
-  int gda_provider_{0};  // host-side only; device dispatch uses constmem.gda_provider
-
-  int buffer_register(uintptr_t addr, size_t length);
-  int buffer_unregister(uintptr_t addr);
-  void buffer_unregister_all();
-
-  __device__ uint32_t get_lkey(uintptr_t addr);
+private:
+  // Used by host in buffer_register, buffer_unregister
+  std::map<uintptr_t, struct ibv_mr*> buffer_mr_map{};
+  struct ibv_pd* pd;
+  struct ibv_mr* fetching_atomic_mr{nullptr};
+  struct ibv_mr* nonfetching_atomic_mr{nullptr};
+/**@}*/
 };
+
+
+
+template <typename Provider>
+__host__ QueuePairBase<Provider>::QueuePairBase(uint32_t qpn, void *base_heap, size_t heap_size,
+                                                uint32_t lkey, uint32_t rkey, struct ibv_pd* pd)
+  : base_heap{reinterpret_cast<uintptr_t>(base_heap)},
+    heap_size{heap_size},
+    qp_num{qpn},
+    lkey{endian::from_native<ProviderEndianness>(lkey)},
+    rkey{endian::from_native<ProviderEndianness>(rkey)},
+    pd{pd} {
+  int access = IBV_ACCESS_LOCAL_WRITE
+             | IBV_ACCESS_REMOTE_WRITE
+             | IBV_ACCESS_REMOTE_READ
+             | IBV_ACCESS_REMOTE_ATOMIC;
+
+  if (envvar::gda::pcie_relaxed_ordering) {
+    access |= IBV_ACCESS_RELAXED_ORDERING;
+  }
+
+  // Allocate and register the fetching and nonfetching atomics arrays
+  std::tie(nonfetching_atomic, nonfetching_atomic_mr, nonfetching_atomic_lkey)
+      = allocate_and_register<uint64_t>(1, access);
+  std::tie(fetching_atomic, fetching_atomic_mr, fetching_atomic_lkey)
+      = allocate_and_register<uint64_t>(FETCHING_ATOMIC_CNT, access);
+
+  allocator.allocate(reinterpret_cast<void**>(&fetching_atomic_freelist), sizeof(FreeListT));
+  new (fetching_atomic_freelist) FreeListT{allocator};
+
+  int deviceId;
+  CHECK_HIP(hipGetDevice(&deviceId));
+  int wf_size = get_wf_size(deviceId);
+  for (size_t i = 0; i < FETCHING_ATOMIC_CNT; i += wf_size) {
+    fetching_atomic_freelist->push_back(&fetching_atomic[i]);
+  }
+
+  /* Setup User Buffer Registration Mechanism */
+  num_user_buffers = envvar::gda::num_user_buffers;
+
+  CHECK_HIP(hipMalloc(&buffer_info, sizeof(BufferInfo) * num_user_buffers));
+  CHECK_HIP(hipMemset(buffer_info, 0, sizeof(BufferInfo) * num_user_buffers));
+}
+
+template <typename Provider>
+__host__ QueuePairBase<Provider>::QueuePairBase(QueuePairBase&& other) noexcept
+  : base_heap               {std::move(other.base_heap)},
+    heap_size               {std::move(other.heap_size)},
+    qp_num                  {std::move(other.qp_num)},
+    lkey                    {std::move(other.lkey)},
+    rkey                    {std::move(other.rkey)},
+    fetching_atomic_idx     {std::move(other.fetching_atomic_idx)},
+    num_user_buffers        {std::move(other.num_user_buffers)},
+    buffer_info             {std::move(other.buffer_info)},
+    fetching_atomic         {std::move(other.fetching_atomic)},
+    nonfetching_atomic      {std::move(other.nonfetching_atomic)},
+    fetching_atomic_lkey    {std::move(other.fetching_atomic_lkey)},
+    nonfetching_atomic_lkey {std::move(other.nonfetching_atomic_lkey)},
+    fetching_atomic_freelist{std::move(other.fetching_atomic_freelist)},
+    allocator               {std::move(other.allocator)},
+    buffer_mr_map           {std::move(other.buffer_mr_map)},
+    pd                      {std::move(other.pd)},
+    fetching_atomic_mr      {std::move(other.fetching_atomic_mr)},
+    nonfetching_atomic_mr   {std::move(other.nonfetching_atomic_mr)} {
+  other.buffer_info              = nullptr;
+  other.fetching_atomic          = nullptr;
+  other.nonfetching_atomic       = nullptr;
+  other.fetching_atomic_freelist = nullptr;
+  other.fetching_atomic_mr       = nullptr;
+  other.nonfetching_atomic_mr    = nullptr;
+}
+
+template <typename Provider>
+__host__ QueuePairBase<Provider>& QueuePairBase<Provider>::operator=(QueuePairBase&& other) {
+  int err = 0;
+
+  /* Step 1: ensure all resources in *this are deallocated */
+  if (!buffer_mr_map.empty()) {
+    LOG_WARN("Unmatched buffer_register detected: "
+             "move assignment operator %s called, but buffer registration map is not empty!",
+             __PRETTY_FUNCTION__ );
+    /* Deregister every memory region registered with this QP */
+    for (auto&& [addrint, mr] : buffer_mr_map) {
+      err = ibv.dereg_mr(mr);
+      CHECK_ZERO(err, "ibv_dereg_mr (QueuePairBase<Provider>::operator=(QueuePairBase&&))");
+    }
+  }
+
+  if (buffer_info) {
+    CHECK_HIP(hipFree(buffer_info));
+  }
+
+  if (fetching_atomic_freelist) {
+    fetching_atomic_freelist->~FreeListT();
+    allocator.deallocate(static_cast<void*>(fetching_atomic_freelist));
+  }
+
+  if (fetching_atomic_mr) {
+    err = ibv.dereg_mr(fetching_atomic_mr);
+    CHECK_ZERO(err, "ibv_dereg_mr (fetching_atomic)");
+  }
+
+  if (fetching_atomic) {
+    allocator.deallocate(static_cast<void*>(fetching_atomic));
+  }
+
+  if (nonfetching_atomic_mr) {
+    err = ibv.dereg_mr(nonfetching_atomic_mr);
+    CHECK_ZERO(err, "ibv_dereg_mr (nonfetching_atomic)");
+  }
+
+  if (nonfetching_atomic) {
+    allocator.deallocate(static_cast<void*>(nonfetching_atomic));
+  }
+
+  /* Step 2: member-wise move of all data members from other to *this */
+  base_heap                = std::move(other.base_heap);
+  heap_size                = std::move(other.heap_size);
+  qp_num                   = std::move(other.qp_num);
+  lkey                     = std::move(other.lkey);
+  rkey                     = std::move(other.lkey);
+  fetching_atomic_idx      = std::move(other.fetching_atomic_idx);
+  num_user_buffers         = std::move(other.num_user_buffers);
+  buffer_info              = std::move(other.buffer_info);
+  fetching_atomic          = std::move(other.fetching_atomic);
+  nonfetching_atomic       = std::move(other.nonfetching_atomic);
+  fetching_atomic_lkey     = std::move(other.fetching_atomic_lkey);
+  nonfetching_atomic_lkey  = std::move(other.nonfetching_atomic_lkey);
+  fetching_atomic_freelist = std::move(other.fetching_atomic_freelist);
+  allocator                = std::move(other.allocator);
+  buffer_mr_map            = std::move(other.buffer_mr_map);
+  pd                       = std::move(other.pd);
+  fetching_atomic_mr       = std::move(other.fetching_atomic_mr);
+  nonfetching_atomic_mr    = std::move(other.nonfetching_atomic_mr);
+
+  /* Step 3: reset allocated data members of other so that it can be safely reused or destroyed */
+  other.buffer_info              = nullptr;
+  other.fetching_atomic          = nullptr;
+  other.nonfetching_atomic       = nullptr;
+  other.fetching_atomic_freelist = nullptr;
+  other.fetching_atomic_mr       = nullptr;
+  other.nonfetching_atomic_mr    = nullptr;
+
+  /* Step 4: return *this */
+  return *this;
+}
+
+template <typename Provider>
+__host__ QueuePairBase<Provider>::~QueuePairBase() {
+  int err = 0;
+
+  if (!buffer_mr_map.empty()) {
+    LOG_WARN("Unmatched buffer_register detected: "
+             "destructor %s called, but buffer registration map is not empty!",
+             __PRETTY_FUNCTION__ );
+    /* Deregister every memory region registered with this QP */
+    for (auto&& [addrint, mr] : buffer_mr_map) {
+      err = ibv.dereg_mr(mr);
+      CHECK_ZERO(err, "ibv_dereg_mr (QueuePairBase<Provider>::~QueuePairBase)");
+    }
+  }
+
+  if (buffer_info) {
+    CHECK_HIP(hipFree(buffer_info));
+  }
+
+  if (fetching_atomic_freelist) {
+    fetching_atomic_freelist->~FreeListT();
+    allocator.deallocate(static_cast<void*>(fetching_atomic_freelist));
+  }
+
+  if (fetching_atomic_mr) {
+    err = ibv.dereg_mr(fetching_atomic_mr);
+    CHECK_ZERO(err, "ibv_dereg_mr (fetching_atomic)");
+  }
+
+  if (fetching_atomic) {
+    allocator.deallocate(static_cast<void*>(fetching_atomic));
+  }
+
+  if (nonfetching_atomic_mr) {
+    err = ibv.dereg_mr(nonfetching_atomic_mr);
+    CHECK_ZERO(err, "ibv_dereg_mr (nonfetching_atomic)");
+  }
+
+  if (nonfetching_atomic) {
+    allocator.deallocate(static_cast<void*>(nonfetching_atomic));
+  }
+}
+
+template <typename Provider>
+template <typename T>
+__host__ std::tuple<T*, struct ibv_mr*, uint32_t>
+QueuePairBase<Provider>::allocate_and_register(size_t count, int access) {
+  void* ptr = nullptr;
+  size_t size = sizeof(T) * count;
+  allocator.allocate(&ptr, size);
+  CHECK_HIP(hipMemset(ptr, 0, size));
+  struct ibv_mr* mr = ibv.reg_mr(pd, ptr, size, access, &allocator);
+  CHECK_NNULL(mr, "ibv_reg_mr");
+  return {static_cast<T*>(ptr), mr, endian::from_native<ProviderEndianness>(mr->lkey)};
+}
+
+template <typename Provider>
+__host__ int QueuePairBase<Provider>::buffer_register(void *addr, size_t length) {
+  if (buffer_mr_map.size() >= num_user_buffers) {
+    LOG_WARN("Unable to register user buffer with QP. "
+             "Please increase the value of %s.", envvar::gda::num_user_buffers.get_name().c_str());
+    return ROCSHMEM_ERROR;
+  }
+
+  int access = IBV_ACCESS_LOCAL_WRITE
+             | IBV_ACCESS_REMOTE_WRITE
+             | IBV_ACCESS_REMOTE_READ
+             | IBV_ACCESS_REMOTE_ATOMIC;
+
+  if (envvar::gda::pcie_relaxed_ordering) {
+    access |= IBV_ACCESS_RELAXED_ORDERING;
+  }
+
+  struct ibv_mr* mr = ibv.reg_mr(pd, addr, length, access, &allocator);
+  CHECK_NNULL(mr, "ibv_reg_mr (buffer_register)");
+
+  uintptr_t addr_int = reinterpret_cast<uintptr_t>(addr);
+  buffer_mr_map[addr_int] = mr;
+
+  for (size_t i = 0; i < num_user_buffers; i++) {
+    if (buffer_info[i].addr == 0) {
+      buffer_info[i].addr   = addr_int;
+      buffer_info[i].length = length;
+      buffer_info[i].lkey   = endian::from_native<ProviderEndianness>(mr->lkey);
+      break;
+    }
+  }
+
+  return ROCSHMEM_SUCCESS;
+}
+
+template <typename Provider>
+__host__ int QueuePairBase<Provider>::buffer_unregister(void *addr) {
+  // TODO: we don't verify that addr was actually registered, we should do that
+  uintptr_t addr_int = reinterpret_cast<uintptr_t>(addr);
+  for (size_t i = 0; i < num_user_buffers; i++) {
+    if (is_ptr_in_range(buffer_info[i].addr, buffer_info[i].length, addr_int)) {
+      CHECK_HIP(hipMemset(&buffer_info[i], 0, sizeof(BufferInfo)));
+      break;
+    }
+  }
+
+  auto it = buffer_mr_map.find(addr_int);
+  int err = ibv.dereg_mr(std::get<struct ibv_mr*>(*it));
+  CHECK_ZERO(err, "ibv_dereg_mr (buffer_unregister)");
+
+  buffer_mr_map.erase(it);
+
+  return ROCSHMEM_SUCCESS;
+}
+
+template <typename Provider>
+__host__ int QueuePairBase<Provider>::buffer_unregister_all() {
+  int err = 0;
+
+  /* Deregister every memory region registered with this QP */
+  for (auto&& [addrint, mr] : buffer_mr_map) {
+    err = ibv.dereg_mr(mr);
+    CHECK_ZERO(err, "ibv_dereg_mr (QueuePairBase<Provider>::~QueuePairBase)");
+  }
+  buffer_mr_map.clear();
+
+  /* Clear all buffer info slots */
+  CHECK_HIP(hipMemset(buffer_info, 0, sizeof(BufferInfo) * num_user_buffers));
+}
+
+template <typename Provider>
+__device__ uint32_t QueuePairBase<Provider>::get_lkey(uintptr_t addr) {
+  /* Check if in heap */
+  if (is_ptr_in_range(base_heap, heap_size, addr)) {
+    return lkey;
+  }
+
+  /* Get the correct lkey for the user buffer */
+  for (size_t i = 0; i < num_user_buffers; i++) {
+    if (is_ptr_in_range(buffer_info[i].addr, buffer_info[i].length, addr)) {
+      return buffer_info[i].lkey;
+    }
+  }
+
+  LOGD_ERROR_ABORT("Valid lkey for address %p not found", reinterpret_cast<void*>(addr));
+  return std::numeric_limits<uint32_t>::max();
+}
+
+template <typename Provider>
+template <AMOFetchType Fetch>
+__device__ constexpr uint64_t* QueuePairBase<Provider>::get_atomic_addr() {
+  static_assert(Fetch != AMOFetchType::NonBlocking);
+  if constexpr (Fetch == AMOFetchType::Blocking) {
+    return fetching_atomic;
+  } else if constexpr (Fetch == AMOFetchType::NonFetching) {
+    return nonfetching_atomic;
+  }
+}
+
+template <typename Provider>
+template <AMOFetchType Fetch>
+__device__ constexpr uint32_t QueuePairBase<Provider>::get_atomic_lkey() {
+  static_assert(Fetch != AMOFetchType::NonBlocking);
+  if constexpr (Fetch == AMOFetchType::Blocking) {
+    return fetching_atomic_lkey;
+  } else if constexpr (Fetch == AMOFetchType::NonFetching) {
+    return nonfetching_atomic_lkey;
+  }
+}
 
 }  // namespace rocshmem
 
