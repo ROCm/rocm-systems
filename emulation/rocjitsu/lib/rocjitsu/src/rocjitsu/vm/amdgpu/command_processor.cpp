@@ -230,20 +230,18 @@ void CommandProcessor::register_queue(HwQueue queue) {
 }
 
 void CommandProcessor::unregister_queue(uint32_t queue_id, uint32_t process_id) {
-  bool empty = false;
-  {
-    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-    for (size_t i = 0; i < hw_queues_.size(); ++i) {
-      if (hw_queues_[i].queue_id == queue_id && hw_queues_[i].process_id == process_id) {
-        hw_queues_.erase(hw_queues_.begin() + static_cast<ptrdiff_t>(i));
-        new_queue_states_.erase(new_queue_states_.begin() + static_cast<ptrdiff_t>(i));
-        break;
-      }
+  std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+  for (size_t i = 0; i < hw_queues_.size(); ++i) {
+    if (hw_queues_[i].queue_id == queue_id && hw_queues_[i].process_id == process_id) {
+      hw_queues_.erase(hw_queues_.begin() + static_cast<ptrdiff_t>(i));
+      new_queue_states_.erase(new_queue_states_.begin() + static_cast<ptrdiff_t>(i));
+      break;
     }
-    empty = hw_queues_.empty();
   }
-  if (empty)
-    stop_doorbell_monitor();
+  // Don't stop the doorbell monitor here — the join can deadlock when
+  // the poller thread is mid-iteration (holding engine or event state
+  // locks). The ~CommandProcessor destructor joins the thread safely
+  // after all client activity has ceased.
 }
 
 void CommandProcessor::update_queue(uint32_t queue_id, uint32_t process_id, uint64_t ring_base_va,
@@ -354,9 +352,6 @@ void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
       std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
       for (size_t i = 0; i < hw_queues_.size(); ++i) {
         if (new_queue_states_[i].entries.empty() && hw_queues_[i].process_id != 0) {
-          if (new_queue_states_[i].queue_desc_va != 0 && completion_)
-            completion_->fire_queue_idle_signal(new_queue_states_[i].queue_desc_va,
-                                                hw_queues_[i].process_id);
           if (interrupt_cb_)
             interrupt_cb_(hw_queues_[i].process_id, 0);
         }
