@@ -42,6 +42,7 @@
 #include "queue_pair.hpp"
 #include "ibv_wrapper.hpp"
 #include "backend_gda.hpp"
+#include "debug_gda.hpp"
 #include "util.hpp"
 #include "constants.hpp"
 #include "rocshmem/rocshmem_common.hpp"
@@ -1067,6 +1068,15 @@ int rocshmem_gin_create_qps(int nRanks, int myRank,
     if (gin_modify_qps_rtr_to_rts(set, remote_info.data()) != 0) {
       LOG_ERROR("GIN QP factory: QP state RTR->RTS failed");
       goto fail;
+    }
+
+    // Dump QP state for comparison with GDABackend
+    dump_ibv_context(set->nic.context);
+    dump_ibv_device(set->nic.context->device);
+    dump_ibv_pd(set->nic.pd_orig);
+    dump_ibv_port_attr(&set->nic.portinfo);
+    for (int i = 0; i < nRanks; i++) {
+      dump_ibv_qp(set->ibv_qps[i], i);
     }
   }
 
