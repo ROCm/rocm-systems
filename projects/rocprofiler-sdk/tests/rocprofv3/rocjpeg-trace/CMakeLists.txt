@@ -55,8 +55,8 @@ rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocjpeg-tracing
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --rocjpeg-trace -d
-        ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format json csv
-        --log-level env --
+        ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format json csv pftrace
+        otf2 --log-level env --
         $<IF:$<TARGET_EXISTS:rocjpeg-demo>,$<TARGET_FILE:rocjpeg-demo>,rocjpeg-demo> -i
         ${rocJPEG_IMAGE_DIR}
     DEPENDS rocjpeg-demo
