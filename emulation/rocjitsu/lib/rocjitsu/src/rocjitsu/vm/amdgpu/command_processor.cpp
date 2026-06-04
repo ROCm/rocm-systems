@@ -509,6 +509,8 @@ void CommandProcessor::on_cu_idle() {
   for (auto &qs : new_queue_states_) {
     if (qs.next_dispatch_idx < qs.entries.size()) {
       auto &entry = qs.entries[qs.next_dispatch_idx];
+      if (entry.barrier_bit && !barrier_satisfied(qs, qs.next_dispatch_idx))
+        continue;
       if (!entry.is_non_kernel() && !entry.fully_dispatched()) {
         uint32_t sent = dispatch_workgroups(entry);
         if (sent > 0 && entry.fully_dispatched())

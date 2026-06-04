@@ -31,6 +31,9 @@ RJ_DIAGNOSTIC_POP
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#ifndef MADV_POPULATE_WRITE
+#define MADV_POPULATE_WRITE 23
+#endif
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -1082,7 +1085,10 @@ bool SimulatedDriver::allocate_scratch_backing(uint32_t process_id, uint64_t gpu
     owned_fds_.insert(memfd);
   }
 
-  ftruncate(memfd, static_cast<off_t>(aligned_size));
+  if (ftruncate(memfd, static_cast<off_t>(aligned_size)) != 0) {
+    syscall(SYS_close, memfd);
+    return false;
+  }
   auto *host_ptr = safe_mmap(nullptr, aligned_size, PROT_READ | PROT_WRITE, MAP_SHARED, memfd, 0);
   if (host_ptr == MAP_FAILED) {
     syscall(SYS_close, memfd);

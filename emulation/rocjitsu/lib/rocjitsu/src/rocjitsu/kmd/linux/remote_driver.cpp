@@ -19,6 +19,9 @@ RJ_DIAGNOSTIC_POP
 #include <cstring>
 #include <fcntl.h>
 #include <linux/mman.h>
+#ifndef MADV_POPULATE_WRITE
+#define MADV_POPULATE_WRITE 23
+#endif
 #include <mutex>
 #include <poll.h>
 #include <sys/eventfd.h>
