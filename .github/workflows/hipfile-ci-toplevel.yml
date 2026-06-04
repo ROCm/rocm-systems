@@ -180,6 +180,9 @@ jobs:
       # and the build id separately; other versions pass the matrix value.
       rocm_version: ${{ matrix.rocm_versions == 'nightly' && needs.Precheck.outputs.nightly_rocm_version || matrix.rocm_versions }}
       rocm_nightly_build: ${{ matrix.rocm_versions == 'nightly' && needs.Precheck.outputs.nightly_build || '' }}
+      # Only a steady-state nightly fallback build refreshes the shared floating
+      # cache; a Dockerfile-change PR builds a PR-namespaced image and must not.
+      publish_cache: ${{ matrix.rocm_versions == 'nightly' && needs.Precheck.outputs.changed_dockerfile != '1' }}
 
   # Due to GHA matrix limitations, we cannot inspect the result of individual jobs
   # in the matrix. To avoid confusing errors, our only option is that if a single
