@@ -123,6 +123,8 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
       }
       reqs->barrierCount = deviceCtaCount;
       reqs->ginSignalCount = deviceCtaCount;
+      // Required when ginSignalCount/barrierCount > 0 (see NCCL 02_alltoall_gin example).
+      reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
       return testSuccess;
     default:
       return testNotImplemented;
@@ -144,6 +146,7 @@ bool AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* req
     case 4: // HybridAlltoAllKernel (LSA+GIN)
       reqs->barrierCount = deviceCtaCount;
       reqs->ginSignalCount = deviceCtaCount;
+      reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
       return true;
 #endif
     default:
