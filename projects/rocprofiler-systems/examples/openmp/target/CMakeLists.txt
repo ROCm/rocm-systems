@@ -1,6 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+check_rocprofsys_disable_examples("openmp-target" _OPENMP_TARGET_DISABLED)
+if(_OPENMP_TARGET_DISABLED)
+    return()
+endif()
+
 cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 
 if(NOT ROCPROFSYS_GFX_TARGETS)
@@ -24,26 +29,12 @@ if(NOT OMP_TARGET_COMPILER)
             "OpenMP target compiler"
         )
     else()
-        find_program(
-            amdclangpp_EXECUTABLE
-            NAMES amdclang++
-            PATHS "${ROCM_PATH}"
-            ENV ROCM_PATH
-            /opt/rocm
-            PATH_SUFFIXES bin llvm/bin
+        # Fall back to the amdclang++ discovered by openmp-helper.cmake
+        set(OMP_TARGET_COMPILER
+            "${amdclangpp_EXECUTABLE}"
+            CACHE FILEPATH
+            "OpenMP target compiler"
         )
-        mark_as_advanced(amdclangpp_EXECUTABLE)
-
-        if(amdclangpp_EXECUTABLE)
-            set(OMP_TARGET_COMPILER
-                "${amdclangpp_EXECUTABLE}"
-                CACHE FILEPATH
-                "OpenMP target compiler"
-            )
-        else()
-            message(WARNING "OpenMP target compiler not found. Skipping this example.")
-            return()
-        endif()
     endif()
 endif()
 

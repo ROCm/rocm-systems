@@ -361,6 +361,10 @@ StatsClient::generateReportV1(std::ostream &stream, const StatsV1 *stats)
     if (stats == nullptr) {
         return;
     }
+
+    stream << "File Handle Registrations: " << stats->getFileRegistrations().load() << '\n';
+    stream << "Buffer Registrations: " << stats->getBufferRegistrations().load() << "\n\n";
+
     static constexpr IoType       ioTypes[]{IoType::Read, IoType::Write};
     static constexpr StatsBackend backends[]{StatsBackend::Fastpath, StatsBackend::Fallback};
     for (const auto &backend : backends) {
@@ -516,5 +520,25 @@ StatsCollection::error(IoType ioType, StatsBackend backend, uint64_t bytes) cons
     size_t bucket = StatsHistogram::toHistogramBucket(bytes);
     errorCountHist->buckets[bucket].fetch_add(1, std::memory_order_relaxed);
     perGpuStats->inUse.store(1, std::memory_order_relaxed);
+}
+
+void
+StatsCollection::fileRegistration() const noexcept
+{
+    Stats *stats{Context<IStatsServer>::get()->getStats()};
+    if (stats == nullptr || stats->getLevel() < StatsLevel::Basic) {
+        return;
+    }
+    stats->getFileRegistrations().fetch_add(1, std::memory_order_relaxed);
+}
+
+void
+StatsCollection::bufferRegistration() const noexcept
+{
+    Stats *stats{Context<IStatsServer>::get()->getStats()};
+    if (stats == nullptr || stats->getLevel() < StatsLevel::Basic) {
+        return;
+    }
+    stats->getBufferRegistrations().fetch_add(1, std::memory_order_relaxed);
 }
 }

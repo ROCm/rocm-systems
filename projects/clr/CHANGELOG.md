@@ -118,6 +118,16 @@ This approach reduces dispatch overhead and improves GPU utilization by overlapp
 * Packet batch‑dispatch optimization: A new graph‑segment scheduling mechanism has been added to the HIP runtime to reduce CPU overhead during HIP graph launches. It uses hierarchical path discovery to construct execution segments that can be dispatched efficiently in parallel, replacing the traditional topological‑ordering approach.
 * Improved `hipGraphLaunch` parallelism for complex data‑parallel graphs. The HIP runtime now eliminates recursion, applies topological ordering, and removes an extra loop in `hipGraphLaunch` to streamline execution.
 
+## HIP 7.2.4 for ROCm 7.2.4
+
+### Resolved issues
+
+* Fixed H2D memory copy latency regression in CPX mode. HIP runtime synchronization behavior has been corrected on AMD Instinct MI300 Series GPUs in CPX mode, restoring latency to previous levels for inference workloads that run multiple HIP streams with concurrent memory copies.
+
+### Optimized
+
+* Reduced `hipGraphLaunch` latency for multi-list graphs. The HIP runtime’s graph dispatch mechanism has been optimized, reducing launch latency for workloads using `hipGraphLaunch` with multi-list graph topologies.
+
 ## HIP 7.2.1 for ROCm 7.2.1
 
 ### Resolved issues

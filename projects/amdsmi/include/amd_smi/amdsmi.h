@@ -243,7 +243,7 @@ typedef enum {
 #define AMDSMI_LIB_VERSION_MAJOR 26
 
 //! Minor version should be updated for each API change, but without changing headers
-#define AMDSMI_LIB_VERSION_MINOR 4
+#define AMDSMI_LIB_VERSION_MINOR 5
 
 //! Release version should be set to 0 as default and can be updated by the PMs for each CSP point
 //! release
@@ -1414,6 +1414,44 @@ typedef struct {
 } amdsmi_proc_info_t;
 
 /**
+ * @brief Per-GPU process entry within a PID-grouped result.
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef struct {
+  uint32_t gpu_index;  //!< GPU index
+  uint64_t mem;        //!< Total memory in bytes
+  struct {
+    uint64_t gfx;  //!< GFX engine usage in nanoseconds
+    uint64_t enc;  //!< ENC engine usage in nanoseconds
+    uint32_t reserved[12];
+  } engine_usage;
+  struct {
+    uint64_t gtt_mem;   //!< GTT memory in bytes
+    uint64_t cpu_mem;   //!< CPU memory in bytes
+    uint64_t vram_mem;  //!< VRAM memory in bytes
+    uint32_t reserved[10];
+  } memory_usage;
+  uint32_t cu_occupancy;  //!< Number of CUs utilized
+  uint32_t evicted_time;  //!< Queue eviction time in milliseconds
+  uint64_t sdma_usage;    //!< SDMA usage in microseconds
+  uint32_t reserved[8];
+} amdsmi_proc_gpu_entry_t;
+
+/**
+ * @brief Process info aggregated across all GPUs, keyed by PID.
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef struct {
+  amdsmi_process_handle_t pid;
+  char name[AMDSMI_MAX_STRING_LENGTH];
+  char container_name[AMDSMI_MAX_STRING_LENGTH];
+  uint32_t num_gpus;                                 //!< Number of GPU entries populated
+  amdsmi_proc_gpu_entry_t gpus[AMDSMI_MAX_DEVICES];  //!< Per-GPU data, num_gpus entries valid
+} amdsmi_proc_info_by_pid_t;
+
+/**
  * @brief IO Link P2P Capability
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
@@ -1940,8 +1978,12 @@ typedef struct {
 typedef struct {
   bool has_deep_sleep;     //!< Deep Sleep frequency is only supported by some GPUs
   uint32_t num_supported;  //!< The number of supported frequencies
-  uint32_t current;        //!< The current frequency index in MHz
-  uint64_t frequency[AMDSMI_MAX_NUM_FREQUENCIES]; /**< List of frequencies in MHz. Only the first
+  uint32_t current;        //!< The current frequency index. May be (uint32_t)-1
+                           //!< when the clock domain is power-gated / in sleep
+                           //!< mode and no current level is reported by the
+                           //!< kernel (e.g. SYS/MEM/DF/SOC/DCEF at idle on
+                           //!< some APUs).
+  uint64_t frequency[AMDSMI_MAX_NUM_FREQUENCIES]; /**< List of frequencies in Hz. Only the first
                                                        num_supported frequencies are valid */
 } amdsmi_frequencies_t;
 
@@ -3724,7 +3766,7 @@ amdsmi_status_t amdsmi_get_gpu_pci_bandwidth(amdsmi_processor_handle processor_h
  *
  *  @platform{gpu_bm_linux}
  *
- *  @details Give a processor handle @p processor_handle and a pointer to a uint64_t @p
+ *  @details Given a processor handle @p processor_handle and a pointer to a uint64_t @p
  *  bdfid, this function will write the Bus/Device/Function PCI identifier
  *  (BDFID) associated with device @p processor_handle to the value pointed to by
  *  @p bdfid.
@@ -3743,6 +3785,14 @@ amdsmi_status_t amdsmi_get_gpu_pci_bandwidth(amdsmi_processor_handle processor_h
  *  | Bus          | [15: 8] | "location id"    | (LOCATION & 0xFF00)          |
  *  | Device       | [ 7: 3] | "location id"    | (LOCATION & 0xF8)            |
  *  | Function     | [ 2: 0] | "location id"    | (LOCATION & 0x7)             |
+ *
+ *  Note: In some devices, the partition ID may be stored in the function bits
+ *  BDFID[2:0] instead of BDFID[31:28].
+ *
+ *  Note: For MI series devices, the function bits are only used to store the
+ *  partition ID, but this modified BDF is internal to the ROCm stack.
+ *  To the OS, partitions share the same BDF as the unpartitioned device and
+ *  have function bits = 0, which can be verified through lspci.
  *
  *  @param[in] processor_handle a processor handle
  *
@@ -5462,26 +5512,26 @@ typedef enum {
 } amdsmi_fabric_telemetry_category_t;
 
 /**
- * @brief Fabric telemetry category bitmask constructor
+ * @brief Fabric telemetry category bitmask values
  *
  */
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_UALOE (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE)
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_SWITCH (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_SWITCH)
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_CRYPTO (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO)
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_PFC (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_PFC)
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_NETPORT \
-  (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT)
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_UALOE \
-  (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE)
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_NETPORT \
-  (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT)
-
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_ALL_KNOWN                                         \
-  (AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_UALOE | AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_SWITCH | \
-   AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_CRYPTO | AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_PFC |   \
-   AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_NETPORT |                                              \
-   AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_UALOE |                                        \
-   AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_NETPORT)  //!< All known categories
+typedef enum {
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_UALOE = (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE),
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_SWITCH = (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_SWITCH),
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_CRYPTO = (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO),
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_PFC = (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_PFC),
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_NETPORT = (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT),
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_UALOE =
+      (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE),
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_NETPORT =
+      (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT),
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_ALL_KNOWN =
+      (AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_UALOE | AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_SWITCH |
+       AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_CRYPTO | AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_PFC |
+       AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_NETPORT |
+       AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_UALOE |
+       AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_NETPORT)  //!< All known categories
+} amdsmi_fabric_telemetry_category_mask_t;
 
 /**
  * @brief Fabric telemetry item structure
@@ -5621,8 +5671,16 @@ const char* amdsmi_fabric_telem_id_to_string(uint64_t telem_id);
 amdsmi_status_t amdsmi_free_fabric_telemetry(amdsmi_processor_handle processor_handle,
                                              amdsmi_fabric_telemetry_t* telemetry);
 
-#define AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE 32
-#define AMDSMI_FABRIC_MAX_LOCAL_GPUS 8
+/**
+ * @brief Fabric size constants
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef enum {
+  AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE =
+      32,  //!< Active accelerators bitmap size (32 x 32-bit words = 1024 bits)
+  AMDSMI_FABRIC_MAX_LOCAL_GPUS = 8  //!< Maximum local GPUs in fabric
+} amdsmi_fabric_size_constants_t;
 
 /**
  * @brief Fabric type
@@ -6785,7 +6843,7 @@ amdsmi_status_t amdsmi_get_gpu_compute_partition(amdsmi_processor_handle process
  *  updated to.
  *
  *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
- *  @retval ::AMDSMI_STATUS_PERMISSION function requires admin/sudo privileges
+ *  @retval ::AMDSMI_STATUS_NO_PERM function requires admin/sudo privileges
  *  @retval ::AMDSMI_STATUS_INVAL the provided arguments are not valid
  *  @retval ::AMDSMI_STATUS_SETTING_UNAVAILABLE the provided setting is
  *  unavailable for current device
@@ -6861,11 +6919,11 @@ amdsmi_status_t amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processo
  *  define what the selected device's current mode setting should be updated to.
  *
  *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
- *  @retval ::AMDSMI_STATUS_PERMISSION function requires admin/sudo privileges
+ *  @retval ::AMDSMI_STATUS_NO_PERM function requires admin/sudo privileges
  *  @retval ::AMDSMI_STATUS_INVAL the provided arguments are not valid
  *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function
- *  @retval ::AMDSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart the amdgpu driver
+ *  @retval ::AMDSMI_STATUS_BUSY device is busy, a resource or mutex could not be acquired
  *  @return ::amdsmi_status_t
  *
  */
@@ -7567,6 +7625,34 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
  */
 amdsmi_status_t amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_handle,
                                             uint32_t* max_processes, amdsmi_proc_info_t* list);
+
+/**
+ *  @brief Get the list of processes running on one or more GPUs, grouped by PID.
+ *
+ *  @details Aggregates per-GPU process lists across all provided processor handles
+ *  and returns one entry per unique PID. Each entry contains the per-GPU breakdown
+ *  for every GPU that PID is active on. Results are sorted ascending by PID.
+ *
+ *  @ingroup tagProcessInfo
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @param[in]  processor_handles  Array of processor handles to query
+ *  @param[in]  num_processors     Number of handles in processor_handles
+ *  @param[out] procs              Caller-allocated buffer of amdsmi_proc_info_by_pid_t.
+ *                                 Pass NULL to query the required size via max_processes.
+ *  @param[in,out] max_processes   On input: capacity of procs. On output: number of
+ *                                 unique PIDs written (or required if procs is NULL).
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
+ *                            | ::AMDSMI_STATUS_OUT_OF_RESOURCES if max_processes was too small,
+ *                            | ::AMDSMI_STATUS_INVAL if processor_handles is NULL or num_processors
+ * is 0
+ */
+amdsmi_status_t amdsmi_get_gpu_process_list_by_pid(amdsmi_processor_handle* processor_handles,
+                                                   uint32_t num_processors,
+                                                   amdsmi_proc_info_by_pid_t* procs,
+                                                   uint32_t* max_processes);
 
 /** @} End tagProcessInfo */
 
