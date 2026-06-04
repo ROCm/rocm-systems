@@ -2,6 +2,8 @@
 
 #include <hip/hip_runtime_api.h>
 
+#include <dlfcn.h>
+
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -24,6 +26,11 @@
 #ifndef __AFL_LOOP
 #define __AFL_LOOP(_count) rj_fuzz::fallback_afl_loop_once()
 #endif
+
+extern "C" {
+int rocjitsu_afl_persistent_begin() __attribute__((weak));
+int rocjitsu_afl_persistent_end() __attribute__((weak));
+}
 
 namespace rj_fuzz {
 
@@ -96,6 +103,24 @@ inline void crash_on_hip_error(const char *what, hipError_t status) {
   std::abort();
 }
 
+inline int persistent_iteration_begin() {
+  if (rocjitsu_afl_persistent_begin != nullptr)
+    return rocjitsu_afl_persistent_begin();
+  return 0;
+}
+
+inline int persistent_iteration_end() {
+  if (rocjitsu_afl_persistent_end != nullptr)
+    return rocjitsu_afl_persistent_end();
+
+  const hipError_t status = hipDeviceSynchronize();
+  if (status == hipSuccess)
+    return 0;
+
+  std::fprintf(stderr, "hipDeviceSynchronize failed: %s\n", hipGetErrorString(status));
+  return static_cast<int>(status);
+}
+
 template <typename T> class DeviceBuffer {
 public:
   DeviceBuffer() = default;
@@ -133,6 +158,25 @@ private:
 inline bool have_hip_device() {
   int device_count = 0;
   return hipGetDeviceCount(&device_count) == hipSuccess && device_count > 0;
+}
+
+using PersistentHook = int (*)();
+
+inline PersistentHook load_persistent_hook(const char *name) {
+  return reinterpret_cast<PersistentHook>(dlsym(RTLD_DEFAULT, name));
+}
+
+inline bool persistent_hooks_required() {
+  return std::getenv("ROCJITSU_AFL_REQUIRE_PERSISTENT_HOOKS") != nullptr;
+}
+
+inline int call_persistent_hook(PersistentHook hook, const char *name) {
+  if (hook == nullptr)
+    return 0;
+  const int rc = hook();
+  if (rc != 0)
+    std::fprintf(stderr, "%s failed with rc=%d\n", name, rc);
+  return rc;
 }
 
 } // namespace rj_fuzz

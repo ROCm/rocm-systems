@@ -120,7 +120,8 @@ unsigned interesting_vector_length(rj_fuzz::ByteStream &stream) {
   return stream.pick(kLengths);
 }
 
-int run_case(HipModule &module, const std::vector<uint8_t> &input) {
+int run_case(HipModule &module, const std::vector<uint8_t> &input, rj_fuzz::PersistentHook begin,
+             rj_fuzz::PersistentHook end) {
   using namespace rj_fuzz;
 
   ByteStream stream(input);
@@ -149,6 +150,9 @@ int run_case(HipModule &module, const std::vector<uint8_t> &input) {
       !device_d.copy_from_host(host_d) || !device_e.copy_from_host(host_e))
     return 0;
 
+  if (call_persistent_hook(begin, "rocjitsu_afl_persistent_begin") != 0)
+    return 3;
+
   constexpr unsigned block_size = 128;
   const unsigned grid_size = (n + block_size - 1) / block_size;
   float *a = device_a.get();
@@ -162,7 +166,12 @@ int run_case(HipModule &module, const std::vector<uint8_t> &input) {
                      hipModuleLaunchKernel(module.function, grid_size, 1, 1, block_size, 1, 1, 0,
                                            nullptr, args, nullptr));
 
-  crash_on_hip_error("hipDeviceSynchronize", hipDeviceSynchronize());
+  if (end != nullptr) {
+    if (call_persistent_hook(end, "rocjitsu_afl_persistent_end") != 0)
+      return 3;
+  } else {
+    crash_on_hip_error("hipDeviceSynchronize", hipDeviceSynchronize());
+  }
 
   std::vector<float> host_c(n);
   std::vector<float> host_f(n);
@@ -196,6 +205,13 @@ int main(int argc, char **argv) {
   const std::vector<char> code = compile_kernel();
   HipModule module(code);
 
+  rj_fuzz::PersistentHook begin = rj_fuzz::load_persistent_hook("rocjitsu_afl_persistent_begin");
+  rj_fuzz::PersistentHook end = rj_fuzz::load_persistent_hook("rocjitsu_afl_persistent_end");
+  if (rj_fuzz::persistent_hooks_required() && (begin == nullptr || end == nullptr)) {
+    std::fprintf(stderr, "rocjitsu AFL persistent hooks are not available\n");
+    return 4;
+  }
+
 #ifdef RJ_AFL_PERSISTENT_MODE
   __AFL_INIT();
 
@@ -204,19 +220,19 @@ int main(int argc, char **argv) {
   while (__AFL_LOOP(1000)) {
     const size_t len = __AFL_FUZZ_TESTCASE_LEN;
     std::vector<uint8_t> input(afl_buf, afl_buf + len);
-    const int rc = run_case(module, input);
+    const int rc = run_case(module, input, begin, end);
     if (rc != 0)
       return rc;
   }
 #else
   while (__AFL_LOOP(1)) {
-    const int rc = run_case(module, rj_fuzz::read_input(argc, argv));
+    const int rc = run_case(module, rj_fuzz::read_input(argc, argv), begin, end);
     if (rc != 0)
       return rc;
   }
 #endif
 #else
-  const int rc = run_case(module, rj_fuzz::read_input(argc, argv));
+  const int rc = run_case(module, rj_fuzz::read_input(argc, argv), begin, end);
   if (rc != 0)
     return rc;
 #endif

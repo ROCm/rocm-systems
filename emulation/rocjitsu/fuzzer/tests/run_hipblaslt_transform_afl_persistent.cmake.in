@@ -12,11 +12,25 @@ if(NOT _rj_afl_build_result EQUAL 0)
     )
 endif()
 
+execute_process(
+    COMMAND "@CMAKE_COMMAND@" --build "@CMAKE_BINARY_DIR@" --target
+            rocjitsu_afl_preload
+    RESULT_VARIABLE _rj_afl_preload_build_result
+)
+
+if(NOT _rj_afl_preload_build_result EQUAL 0)
+    message(
+        FATAL_ERROR
+        "rocjitsu AFL preload build failed: ${_rj_afl_preload_build_result}"
+    )
+endif()
+
 file(REMOVE_RECURSE "@RJ_FUZZ_HIPBLASLT_TRANSFORM_PERSISTENT_OUTPUT_DIR@")
 
 execute_process(
     COMMAND
         "@CMAKE_COMMAND@" -E env @RJ_FUZZ_HIPBLASLT_TRANSFORM_ENV@
+        LD_PRELOAD="@RJ_AFL_PRELOAD_LIBRARY@:$ENV{LD_PRELOAD}"
         AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 AFL_NO_UI=1
         AFL_SKIP_CPUFREQ=1 "@RJ_AFL_FUZZ_EXECUTABLE@" -i
         "@RJ_FUZZ_HIPBLASLT_TRANSFORM_INPUT_DIR@" -o

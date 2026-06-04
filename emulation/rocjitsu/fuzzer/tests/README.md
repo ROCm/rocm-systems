@@ -166,6 +166,11 @@ ctest --test-dir build/rocjitsu -R RocFuzz.TwoVectorAddAFL -V
 ctest --test-dir build/rocjitsu -R RocFuzz.HipblasLtTransformAFL -V
 ```
 
+The persistent two-vector-add and hipBLASLt CTest runners also build and
+preload `librocjitsu_afl_preload.so`, so those runs exercise
+`rocjitsu_afl_persistent_begin()` and `rocjitsu_afl_persistent_end()`. Manual
+runs can do the same by adding that library to `LD_PRELOAD`.
+
 ## Read AFL output
 
 AFL++ writes findings under the output directory:

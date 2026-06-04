@@ -23,7 +23,6 @@ find_program(
     HINTS "${RJ_AFL_ROOT}"
     PATH_SUFFIXES . bin
 )
-
 if(NOT RJ_AFL_CXX_EXECUTABLE OR NOT RJ_AFL_FUZZ_EXECUTABLE)
     message(
         STATUS
@@ -31,6 +30,10 @@ if(NOT RJ_AFL_CXX_EXECUTABLE OR NOT RJ_AFL_FUZZ_EXECUTABLE)
     )
     return()
 endif()
+
+set(RJ_AFL_PRELOAD_LIBRARY
+    "${CMAKE_BINARY_DIR}/fuzzer/afl-dbi/librocjitsu_afl_preload.so"
+)
 
 set(RJ_FUZZ_HELLO_WORLD_BIN "${CMAKE_CURRENT_BINARY_DIR}/bin/hello_world_afl")
 set(RJ_FUZZ_HELLO_WORLD_PERSISTENT_BIN
@@ -184,8 +187,11 @@ else()
     set(RJ_FUZZ_TWO_VECTOR_ADD_PERSISTENT_OUTPUT_DIR
         "${CMAKE_CURRENT_BINARY_DIR}/two_vector_add_persistent_findings"
     )
+    set(RJ_FUZZ_TWO_VECTOR_ADD_LIBRARY_PATH
+        "${RJ_HIPRTC_LIBRARY_DIR}:${RJ_HIP_RUNTIME_LIBRARY_DIR}:$ENV{LD_LIBRARY_PATH}"
+    )
     set(RJ_FUZZ_TWO_VECTOR_ADD_ENV
-        "LD_LIBRARY_PATH=${RJ_HIPRTC_LIBRARY_DIR}:${RJ_HIP_RUNTIME_LIBRARY_DIR}:$ENV{LD_LIBRARY_PATH}"
+        "LD_LIBRARY_PATH=${RJ_FUZZ_TWO_VECTOR_ADD_LIBRARY_PATH}"
     )
     set(RJ_FUZZ_TWO_VECTOR_ADD_COMPILE_FLAGS
         -std=c++20
@@ -197,6 +203,7 @@ else()
         "${RJ_HIP_RUNTIME_LIBRARY}"
         -Wl,-rpath,${RJ_HIPRTC_LIBRARY_DIR}
         -Wl,-rpath,${RJ_HIP_RUNTIME_LIBRARY_DIR}
+        -l${CMAKE_DL_LIBS}
     )
 
     add_custom_command(

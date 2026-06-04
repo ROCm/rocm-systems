@@ -120,13 +120,17 @@ int run_case(hipblasLtHandle_t handle, const std::vector<uint8_t> &input) {
   const float alpha = stream.next_float();
   const float beta = stream.next_float();
 
+  if (const int rc = rj_fuzz::persistent_iteration_begin(); rc != 0)
+    return rc;
+
   const hipblasStatus_t status = hipblasLtMatrixTransform(
       handle, transform.desc, &alpha, device_a.get(), layout_a.layout, &beta, device_b.get(),
       layout_b.layout, device_c.get(), layout_c.layout, nullptr);
   if (!ok(status))
     return 0;
 
-  rj_fuzz::crash_on_hip_error("hipDeviceSynchronize", hipDeviceSynchronize());
+  if (const int rc = rj_fuzz::persistent_iteration_end(); rc != 0)
+    return rc;
 
   std::vector<float> out(host_c.size());
   rj_fuzz::crash_on_hip_error("hipMemcpy D2H",
