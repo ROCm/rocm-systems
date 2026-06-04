@@ -913,6 +913,17 @@ int rocshmem_gin_qp_set::initialize_gpu_qp(QueuePair *gpu_qp, int idx) {
 
     gpu_qp->qp_num = this->ibv_qps[idx]->qp_num;
     gpu_qp->inline_threshold = inline_threshold;
+
+    LOG_INFO("gin_qp init[%d]: qp_num=%u sq.buf=%p sq.depth=%u sq.id=%u "
+             "cq.buf=%p cq.depth=%u cq.id=%u dbr=%p (host=%p) "
+             "msntbl=%p msn_tbl_sz=%u psn_sz_log2=%u mtu=%lu inline=%u",
+             idx, gpu_qp->qp_num,
+             gpu_qp->bnxt_sq.buf, gpu_qp->bnxt_sq.depth, gpu_qp->bnxt_sq.id,
+             gpu_qp->bnxt_cq.buf, gpu_qp->bnxt_cq.depth, gpu_qp->bnxt_cq.id,
+             (void*)gpu_qp->bnxt_dbr, (void*)this->bnxt_qps[idx].db_region_attr->dbr,
+             gpu_qp->bnxt_sq.msntbl, gpu_qp->bnxt_sq.msn_tbl_sz,
+             gpu_qp->bnxt_sq.psn_sz_log2, (unsigned long)gpu_qp->bnxt_sq.mtu,
+             gpu_qp->inline_threshold);
     return 0;
   }
 #endif

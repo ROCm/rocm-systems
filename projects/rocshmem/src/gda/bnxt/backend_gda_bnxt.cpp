@@ -92,6 +92,17 @@ void GDABackend::bnxt_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   /* Base Heap information */
   gpu_qp->base_heap = (uintptr_t) heap.get_local_heap_base();
   gpu_qp->base_heap_size = heap.get_size();
+
+  LOG_INFO("gda_qp init[%d]: qp_num=%u sq.buf=%p sq.depth=%u sq.id=%u "
+           "cq.buf=%p cq.depth=%u cq.id=%u dbr=%p (host=%p) "
+           "msntbl=%p msn_tbl_sz=%u psn_sz_log2=%u mtu=%lu inline=%u",
+           conn_num, gpu_qp->qp_num,
+           gpu_qp->bnxt_sq.buf, gpu_qp->bnxt_sq.depth, gpu_qp->bnxt_sq.id,
+           gpu_qp->bnxt_cq.buf, gpu_qp->bnxt_cq.depth, gpu_qp->bnxt_cq.id,
+           (void*)gpu_qp->bnxt_dbr, (void*)bnxt_qps[conn_num].db_region_attr->dbr,
+           gpu_qp->bnxt_sq.msntbl, gpu_qp->bnxt_sq.msn_tbl_sz,
+           gpu_qp->bnxt_sq.psn_sz_log2, (unsigned long)gpu_qp->bnxt_sq.mtu,
+           gpu_qp->inline_threshold);
 }
 
 void GDABackend::bnxt_create_cqs(int cqe) {

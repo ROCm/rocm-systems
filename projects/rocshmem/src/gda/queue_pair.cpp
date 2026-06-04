@@ -287,14 +287,23 @@ __device__ void QueuePair::quiet_single() {
  *****************************************************************************/
 __device__ void QueuePair::put_nbi(void *dest, const void *source,
     size_t nelems, int pe, ActiveWFInfo &wf_info) {
+#if 1
+  // Temporary: exercise _with_keys path using QP built-in keys
+  uint32_t dst_rkey = rkey;
+  uint32_t src_lkey = get_lkey(reinterpret_cast<uintptr_t>(source));
+  put_nbi_with_keys(dest, dst_rkey, source, src_lkey, nelems, wf_info);
+#else
   uintptr_t src = reinterpret_cast<uintptr_t>(source);
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
   post_wqe_rma(pe, nelems, src, dst, gda_op_rdma_write, wf_info);
+#endif
 }
 
 __device__ void QueuePair::put_nbi_with_keys(void *raddr, uint32_t rkey,
     const void *laddr, uint32_t lkey,
     size_t size, ActiveWFInfo &wf_info, bool ring_db) {
+  printf("put_nbi_with_keys: dst=%p rkey=0x%x src=%p lkey=0x%x size=%zu ring_db=%d\n",
+         raddr, rkey, laddr, lkey, size, (int)ring_db);
   uintptr_t l = reinterpret_cast<uintptr_t>(laddr);
   uintptr_t r = reinterpret_cast<uintptr_t>(raddr);
   post_wqe_rma_with_keys(static_cast<uint32_t>(size), r, rkey, l, lkey,
