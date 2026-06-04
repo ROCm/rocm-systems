@@ -1232,10 +1232,19 @@ ompt_pop_parallel_callback(
 }
 
 // Walks every per-thread storage in the registry, emitting any begins that
-// never received a matching end with an artificial end_ts
+// never received a matching end with an artificial end_ts.
 void
 ompt_finalize_orphan_events()
 {
+    // Only call this function when the tool is finalized
+    if(rocprofsys::get_state() != rocprofsys::State::Finalized)
+    {
+        LOG_WARNING("ompt_finalize_orphan_events() called while state is not "
+                    "Finalized (state={}); skipping orphan drain",
+                    std::to_string(rocprofsys::get_state()));
+        return;
+    }
+
     auto empty_call_stack =
         std::optional<std::vector<tim::unwind::processed_entry>>{ std::nullopt };
 
@@ -2858,12 +2867,12 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 void
 finalize_sdk_common()
 {
+    flush();
+    stop();
+
 #if(ROCPROFILER_VERSION >= 600)
     ompt_finalize_orphan_events();
 #endif
-
-    flush();
-    stop();
 
     if(get_counter_storage())
     {

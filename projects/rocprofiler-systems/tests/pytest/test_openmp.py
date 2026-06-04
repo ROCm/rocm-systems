@@ -273,11 +273,18 @@ class TestOpenMPFortran(RocprofsysTest):
             rewrite_args=self.REWRITE_ARGS,
             runtime_args=self.RUNTIME_ARGS,
         )
-        self.assert_regex(result)
+        if mode == "baseline":
+            self.assert_regex(result)
+        else:
+            self.assert_regex(
+                result,
+                fail_regex=[
+                    r"ompt_finalize_orphan_events\(\) called while state is not Finalized"
+                ],
+            )
 
         # Explicitly no runtime_instrument mode validation, as it does not work with perfetto
         if mode != "baseline" and mode != "runtime_instrument":
-            self.assert_regex(result, mode)
             # Each [incomplete] suffixed OMPT region occurs as the completion event
             # is received after our tool finalizes
 
