@@ -56,17 +56,17 @@ jobs:
             ci-args: '--memcheck ThreadSanitizer'
             ci-tag: '-thread-sanitizer'
             # DO NOT UPDATE: sanitizer builds and tests cause issue on prod machines
-            runner: 'linux-mi325-8gpu-ossci-rocm-sandbox'
+            runner: 'linux-mi325-gpu-rocm-cpu-sandbox'
           - compiler: 'gcc-12'
             ci-args: '--memcheck AddressSanitizer'
             ci-tag: '-address-sanitizer'
             # DO NOT UPDATE: sanitizer builds and tests cause issue on prod machines
-            runner: 'linux-mi325-8gpu-ossci-rocm-sandbox'
+            runner: 'linux-mi325-gpu-rocm-cpu-sandbox'
           - compiler: 'gcc-12'
             ci-args: '--memcheck LeakSanitizer'
             ci-tag: '-leak-sanitizer'
             # DO NOT UPDATE: sanitizer builds and tests cause issue on prod machines
-            runner: 'linux-mi325-8gpu-ossci-rocm-sandbox'
+            runner: 'linux-mi325-gpu-rocm-cpu-sandbox'
         #   - compiler: 'gcc-12'
         #     ci-args: '--memcheck UndefinedBehaviorSanitizer'
         #     ci-tag: '-undefined-behavior-sanitizer'
