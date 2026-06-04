@@ -127,6 +127,8 @@ __device__ void QueuePair::bnxt_ring_doorbell(uint32_t slot_idx) {
 
   hdr.typ_qid_indx = (key_lo | (key_hi << 32));
 
+  printf("bnxt_ring_db: qp=%u slot=%u epoch=%u dbr=%p val=0x%llx\n",
+         qp_num, slot_idx, epoch, (void*)bnxt_dbr, (unsigned long long)hdr.typ_qid_indx);
   __threadfence_system();
   __hip_atomic_store(bnxt_dbr, hdr.typ_qid_indx, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
 }
@@ -182,25 +184,26 @@ __device__ void QueuePair::bnxt_poll_cq_until(uint32_t requested_available_slots
   uint32_t available_slots;
 
   sq_depth = bnxt_sq.depth;
+  int poll_count = 0;
 
   do {
     cqe = (struct bnxt_re_req_cqe *) bnxt_cq.buf;
 
-#ifdef BUILD_DEBUG_DEVICE
     {
       uint32_t flg_val = __hip_atomic_load(
           static_cast<uint32_t*>(__builtin_assume_aligned(
               (char*)cqe + sizeof(struct bnxt_re_req_cqe) + offsetof(struct bnxt_re_bcqe, flg_st_typ_ph), 4)),
           __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
       uint8_t status = (flg_val >> BNXT_RE_BCQE_STATUS_SHIFT) & BNXT_RE_BCQE_STATUS_MASK;
-      if (status != BNXT_RE_REQ_ST_OK)
+      if (poll_count == 0) {
+        printf("bnxt_poll_cq: qp=%u req_slots=%u depth=%u cq_buf=%p flg=0x%x status=%u\n",
+               qp_num, requested_available_slots, sq_depth, (void*)bnxt_cq.buf, flg_val, status);
+      }
+      if (status != BNXT_RE_REQ_ST_OK && status != 0) {
         bnxt_print_cqe_error(status);
+      }
     }
-#endif
 
-    /* Update the SQ head
-     * This param provides us the wqe_idx but we need to convert to the slot idx.
-     * We assume a static slots size of GDA_BNXT_WQE_SLOT_COUNT thus can multiply by this value */
     sq_head = (((cqe->con_indx & 0xFFFF) * GDA_BNXT_WQE_SLOT_COUNT) % sq_depth);
     bnxt_sq.head = sq_head;
 
@@ -208,6 +211,12 @@ __device__ void QueuePair::bnxt_poll_cq_until(uint32_t requested_available_slots
 
     consumed_slots  = (sq_tail - sq_head + sq_depth) % sq_depth;
     available_slots = sq_depth - consumed_slots;
+
+    if (poll_count == 0) {
+      printf("bnxt_poll_cq: qp=%u head=%u tail=%u consumed=%u avail=%u con_indx=0x%x\n",
+             qp_num, sq_head, sq_tail, consumed_slots, available_slots, cqe->con_indx);
+    }
+    poll_count++;
   } while (available_slots < requested_available_slots);
 }
 
