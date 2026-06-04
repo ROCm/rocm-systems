@@ -211,7 +211,7 @@ ncclResult_t IbCastPortRecoveryPostAckWithQpnsAinic(struct ncclIbPortRecoveryCon
 void IbCastPortRecoveryExtractQpnsAinic(struct ncclIbPortRecoveryContext* recoveryContext, struct ibv_wc* wc) {
   if (!IbCastAinicRoce) return;
   struct ncclIbResiliencyDev* resDev = &recoveryContext->resCtx->devs[recoveryContext->devIndex];
-  int payloadLen = wc->byte_len - NCCL_IB_UD_GRH_SIZE;
+  int payloadLen = (int)(wc->byte_len - NCCL_IB_UD_GRH_SIZE);
   if (payloadLen <= 0) {
     recoveryContext->nRemoteQpns = 0;
     return;
