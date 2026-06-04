@@ -2275,6 +2275,37 @@ reset_output_thread(std::optional<std::thread>& thread_ptr)
     }
 }
 
+// Checks for a file in /tmp to see if this is a re-attach to a process that was already profiled,
+// and if so suffixes the output file name with the session number so that previous output files are
+// not overwritten.
+void
+assign_attach_output_session_suffix()
+{
+    const auto target_pid =
+        static_cast<pid_t>(common::get_env("ROCPROF_ATTACH_PID", static_cast<long>(getpid())));
+    const auto session_path = fmt::format("/tmp/rocprofv3_attach_{}.session", target_pid);
+
+    auto session = uint64_t{0};
+    if(fs::exists(session_path))
+    {
+        std::ifstream ifs{session_path};
+        if(ifs >> session) ++session;
+    }
+
+    {
+        std::ofstream ofs{session_path, std::ios::trunc};
+        ofs << session;
+    }
+
+    if(session > 0)
+    {
+        auto& cfg       = tool::get_config();
+        cfg.output_file = fmt::format("{}_{}", cfg.output_file, session);
+        ROCP_INFO << "Reattach #" << session << " for PID " << target_pid << ". Base file name is "
+                  << cfg.output_file;
+    }
+}
+
 int
 tool_attach(rocprofiler_client_detach_t /*detach_func*/,
             rocprofiler_context_id_t* context_ids,
@@ -2304,6 +2335,8 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
            "support changing the set of enabled tracing services between initial load and attach. "
            "After the initial attachment, it is recommended to just use `rocprofv3 --pid=<pid> [-o "
            "<output_file> -d <output_directory> ...]` to attach to a new process.";
+
+    assign_attach_output_session_suffix();
 
     pid_t target_pid = getppid();  // The target process we're attaching to
     pid_t tool_pid   = getpid();   // The rocprofv3 tool process
