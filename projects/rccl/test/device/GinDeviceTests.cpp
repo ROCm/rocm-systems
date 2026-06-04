@@ -58,7 +58,7 @@ __global__ void kernelConstructProxyOp(const OpCase* __restrict__ in,
   nccl::gin::proxy::constructProxyOp(
       op,
       in[i].hasInline,
-      in[i].hasSignal,
+      in[i].hasSignal ? NCCL_GIN_SIGNAL_TYPE_INDEXED : NCCL_GIN_SIGNAL_TYPE_NONE,
       static_cast<ncclGinSignalOp_t>(in[i].signalOp),
       in[i].hasCounter);
   out[i] = static_cast<uint8_t>(op);
@@ -133,7 +133,9 @@ __global__ void kernelBuildGfdPutOnly(ncclGinProxyGfd_t* gfd,
       /*size=*/size,
       /*counterId=*/0,
       /*signalId=*/0,
-      /*signalVal=*/0);
+      /*signalVal=*/0,
+      /*signalWindow=*/nullptr,
+      /*signalOff=*/0);
 }
 
 TEST_F(GinDeviceTest, BuildGfd_PutOnly) {
@@ -213,7 +215,9 @@ __global__ void kernelBuildGfdInline(ncclGinProxyGfd_t* gfd, T srcVal,
       /*size=*/sizeof(T),
       /*counterId=*/0,
       /*signalId=*/0,
-      /*signalVal=*/0);
+      /*signalVal=*/0,
+      /*signalWindow=*/nullptr,
+      /*signalOff=*/0);
 }
 
 TEST_F(GinDeviceTest, BuildGfd_Inline) {
@@ -345,7 +349,9 @@ __global__ void kernelBuildGfdSignalAndCounter(ncclGinProxyGfd_t* gfd,
       /*size=*/size,
       /*counterId=*/counterId,
       /*signalId=*/signalId,
-      /*signalVal=*/signalVal);
+      /*signalVal=*/signalVal,
+      /*signalWindow=*/nullptr,
+      /*signalOff=*/0);
 }
 
 TEST_F(GinDeviceTest, BuildGfd_SignalAndCounter) {
@@ -436,7 +442,9 @@ __global__ void kernelBuildGfdSizeClass(ncclGinProxyGfd_t* gfd, T srcVal) {
       /*size=*/sizeof(T),
       /*counterId=*/0,
       /*signalId=*/0,
-      /*signalVal=*/0);
+      /*signalVal=*/0,
+      /*signalWindow=*/nullptr,
+      /*signalOff=*/0);
 }
 
 TEST_F(GinDeviceTest, BuildGfd_SizeClasses) {
@@ -794,7 +802,10 @@ TEST_F(GinDeviceTest, PostGfd_PiCiOverflow) {
 
 __global__ void kernelResetSignal(ncclGinCtx ctx, ncclGinSignal_t signalId) {
   if (threadIdx.x != 0 || blockIdx.x != 0) return;
-  ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_PROXY>::call(ctx, signalId);
+  ncclGinSignalDescriptor signal{};
+  signal.type = NCCL_GIN_SIGNAL_TYPE_INDEXED;
+  signal.indexedSignal.signalId = signalId;
+  ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_PROXY>::call(ctx, signal);
 }
 
 TEST_F(GinDeviceTest, ResetSignal) {

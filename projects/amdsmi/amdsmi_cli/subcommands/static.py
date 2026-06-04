@@ -1225,6 +1225,13 @@ class StaticCommands:
                             continue
                         freq_dict = {}
                         current_level = frequencies["current"]
+                        # The C library reports current = (uint32_t)-1 when the
+                        # kernel exposes the pp_dpm_* table without a '*'
+                        # current-level marker (e.g. SMU power-gated domains
+                        # on gfx1151 APUs at idle). Surface that as N/A so
+                        # the CLI doesn't show 4294967295 to users.
+                        if current_level == 0xFFFFFFFF:
+                            current_level = "N/A"
                         # Add current_level first for proper output ordering
                         freq_dict.update({"current_level": current_level})
                         # Add frequency_levels second

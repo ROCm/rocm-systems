@@ -18,6 +18,16 @@ ROCM_VERSION := $(shell echo $$((10000 * $(ROCM_MAJOR) + 100 * $(ROCM_MINOR) + $
 
 EXE = topo_expl
 
+# Detect host OS so that headers like src/include/os.h can declare the
+# correct ncclSocketDescriptor/ncclAffinity typedefs. The main RCCL build
+# does the equivalent in CMakeLists.txt; topo_expl needs the same flag.
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Linux)
+NCCL_OS_DEFINE := -DNCCL_OS_LINUX
+else
+NCCL_OS_DEFINE := -DNCCL_OS_WINDOWS
+endif
+
 CXXFLAGS = -g -ffunction-sections -fdata-sections -DROCM_VERSION=$(ROCM_VERSION) \
            -std=c++17 \
            -Wl,--gc-sections -fgpu-rdc \
@@ -25,6 +35,7 @@ CXXFLAGS = -g -ffunction-sections -fdata-sections -DROCM_VERSION=$(ROCM_VERSION)
 		   -Ihipify_rccl/include/nccl_device \
            -Ihipify_rccl/src/device/include -Ihipify_rccl/graph -I/opt/rocm/include/ \
            -DTOPO_EXPL -DENABLE_TRACE -DENABLE_LL128 -DNVTX_NO_IMPL -DRCCL_EXPOSE_STATIC \
+           $(NCCL_OS_DEFINE) \
            -lpthread
 
 TOPO_EXPL_FILES = src/$(EXE).cpp src/topo_expl_api.cpp src/model.cpp src/topo_expl_impl.cpp src/utils.cpp src/stubs.cc test/topo_expl_tests.cpp
@@ -80,7 +91,7 @@ $(EXE): $(files)
 
 hipify:
 	rm -rf hipify_rccl
-	mkdir -p hipify_rccl/src/device/include hipify_rccl/include/network/unpack include/rccl
+	mkdir -p hipify_rccl/src/device/include hipify_rccl/include/network/unpack hipify_rccl/device/symmetric include/rccl
 	# Copy nccl.h.in from rccl source to always get latest API definitions
 	cp -a ../../src/nccl.h.in include/nccl.h
 	# Also copy to rccl/rccl.h for files that use #include <rccl/rccl.h>
@@ -89,21 +100,22 @@ hipify:
 	cp -a ../../src/graph/ hipify_rccl/
 	cp -a ../../src/device/*.h hipify_rccl/src/device/include
 	cp -a ../../src/device/network/unpack/*.h hipify_rccl/include/network/unpack
+	# src/include/sym_kernels.h includes "../device/symmetric/gin_scratch.h"
+	# (relative path), so mirror those headers under hipify_rccl/device/symmetric/.
+	cp -a ../../src/device/symmetric/*.h hipify_rccl/device/symmetric/
 	cp -a ../../src/enqueue.cc hipify_rccl/
 	cp -a ../../src/register/register.cc hipify_rccl/
 	cp -a ../../src/collectives.cc hipify_rccl/
 	cp -a ../../src/misc/archinfo.cc hipify_rccl/graph/
-	# Hipify all header and source files (CUDA -> HIP)
+	# Hipify all header and source files (CUDA -> HIP).
+	# Walk every subdirectory under hipify_rccl/include/ recursively so that
+	# any new subtrees added by future NCCL syncs (e.g. rma/, gin/, ionic/,
+	# mlx5/, algorithms/, etc.) are covered automatically.
+	# nvtx3/ is intentionally excluded because we swap in a stub via PATCH 2.
 	@echo ">>> Hipifying RCCL header files..."
-	$(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) hipify_rccl/include/*.h
-	$(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) hipify_rccl/include/latency_profiler/*.h
-	$(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) hipify_rccl/include/plugin/*.h
-	$(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) hipify_rccl/src/device/include/*.h
-	# The nccl_device/ subtree was added by the NCCL 2.28.9 sync and has its
-	# own subdirectories (impl/, gin/, gin/proxy/, gin/gdaki/). Hipify it
-	# recursively so future additions are covered automatically.
-	find hipify_rccl/include/nccl_device -type f -name '*.h' \
+	find hipify_rccl/include -type f -name '*.h' -not -path 'hipify_rccl/include/nvtx3/*' \
 	    -exec $(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) {} +
+	$(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) hipify_rccl/src/device/include/*.h
 	# PATCH 1: Fix device includes - remove "device/" prefix since files are in same directory
 	sed -i 's|#include "device/|#include "|g' hipify_rccl/src/device/include/*.h
 	sed -i 's|#include "device/|#include "|g' hipify_rccl/include/*.h
@@ -118,18 +130,29 @@ hipify:
 	# PATCH 3: Generate *_tmp.h files - these are build-time generated headers in rccl
 	cp hipify_rccl/include/nccl_device/core.h hipify_rccl/include/nccl_device/core_tmp.h
 	cp hipify_rccl/include/nccl_device/comm.h hipify_rccl/include/nccl_device/comm_tmp.h
+	cp hipify_rccl/include/nccl_device/gin.h hipify_rccl/include/nccl_device/gin_tmp.h
 	# PATCH 4: Add missing NVTX stub macros for topo_expl build
 	echo '#define NCCL_NVTX3_FUNC_RANGE do {} while(0)' >> hipify_rccl/include/nvtx.h
 	echo 'inline void initNvtxRegisteredEnums() {}' >> hipify_rccl/include/nvtx.h
 	# PATCH 5: Add nccl_tuner.h include to get NCCL_NUM_ALGORITHMS and NCCL_NUM_PROTOCOLS macros
 	sed -i '/#include "core.h"/a #include "plugin/nccl_tuner.h"' hipify_rccl/include/rccl_common.h
-	# PATCH 7: hipify-perl rewrites __CUDACC__ -> __HIPCC__ in nccl_device/utility.h,
-	# which then enables a `#if __HIP_PLATFORM_AMD__` block whose macro can be
-	# defined-but-empty during host preprocessing (causing 'expected value in
-	# expression'), and whose #else branch pulls in <cuda/atomic>. Restore the
-	# original __CUDACC__ guard so the whole block is skipped under hipcc.
+	# PATCH 7: hipify-perl rewrites __CUDACC__ -> __HIPCC__ in nccl_device/*.h.
+	# Restore the original __CUDACC__ guard so device-only blocks are skipped
+	# on the topo_expl host pass (no -x hip device compile here). This keeps
+	# caller-side guards aligned with the device-API *declarations* in
+	# nccl_device/core.h that are also gated on __CUDACC__.
 	find hipify_rccl/include/nccl_device -type f -name '*.h' \
 	    -exec sed -i 's|__HIPCC__|__CUDACC__|g' {} +
+	# PATCH 7b: nccl_device/hip_compat.h binds NCCL_CHECK_CUDACC to
+	# NCCL_DEVICE_COMPILE, which is true under defined(__HIP_PLATFORM_AMD__)
+	# on both host and device passes. Without this patch, callers under
+	# `#if NCCL_CHECK_CUDACC` (e.g. gin_scratch__types.h, ll_a2a__funcs.h,
+	# barrier__funcs.h) would reference device-API declarations from
+	# nccl_device/core.h that were skipped by PATCH 7's __CUDACC__ guard,
+	# producing 'undeclared identifier' errors. Force NCCL_CHECK_CUDACC to
+	# track __CUDACC__ so both sides are uniformly skipped on the host build.
+	sed -i 's|^#define NCCL_CHECK_CUDACC NCCL_DEVICE_COMPILE$$|#define NCCL_CHECK_CUDACC __CUDACC__|' \
+	    hipify_rccl/include/nccl_device/hip_compat.h
 	# PATCH 6: Guard RCCL_EXPOSE_STATIC so -DRCCL_EXPOSE_STATIC from CXXFLAGS does not trigger redefinition warning
 	sed -i 's|^#define RCCL_EXPOSE_STATIC \(.*\)|#ifndef RCCL_EXPOSE_STATIC\n#define RCCL_EXPOSE_STATIC \1\n#endif|' hipify_rccl/include/rccl_vars.h
 	@echo ">>> Hipify complete."
