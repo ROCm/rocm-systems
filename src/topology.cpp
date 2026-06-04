@@ -645,11 +645,7 @@ static HSAKMT_STATUS topology_sysfs_get_mem_props(uint32_t node_id,
 
   props.HeapType = HSA_HEAPTYPE_FRAME_BUFFER_PRIVATE;
 
-  if (device->IsDgpu())
-    props.SizeInBytes = device->LocalHeapSize();
-  else
-    // APU: report both dedicated and shared GPU memory
-    props.SizeInBytes = device->LocalHeapSize() + device->NonLocalHeapSize();
+  props.SizeInBytes = device->SharedDevice()->VramTotal();
 
   props.Width = device->MemoryBusWidth();
   props.MemoryClockMax = device->MaxMemoryClockMhz();

@@ -145,14 +145,8 @@ bool HeapManager::ReserveLocalHeapSpace() {
     device = get_wddmdev(j+1);
     if (device == nullptr)
       return -1;
-    /*
-     * For APU, use non local memory(shared GPU memory) as GPU memory,
-     * because it has small local memory
-    */
-    if (device->IsDgpu())
-      total_local_size = wsl::Max(device->LocalHeapSize(), total_local_size);
-    else
-      total_local_size = wsl::Max(device->LocalHeapSize() + device->NonLocalHeapSize(), total_local_size);
+
+    total_local_size = wsl::Max(device->SharedDevice()->VramTotal(), total_local_size);
   }
 
   total_local_size = wsl::AlignUp(total_local_size, align) * 4;
