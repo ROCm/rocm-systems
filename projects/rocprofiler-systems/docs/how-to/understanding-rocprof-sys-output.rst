@@ -54,6 +54,17 @@ generates the following:
    [rocprof-sys] Outputting 'rocprof-sys-example-output/2022-01-31_12.30_PM/wall-clock-63453.txt'...
    [rocprof-sys] Outputting 'rocprof-sys-example-output/2022-01-31_12.30_PM/wall-clock-63453.json'...
 
+Incomplete regions
+========================================
+
+The ``[incomplete]`` suffix marks regions that never received an end event. When a
+profiling session finalizes, some regions may still be open, meaning their begin event
+was recorded but no matching end event ever arrived. This commonly happens on worker
+threads whose frames (for example, an OMPT parallel region or an internal host runtime
+frame) are still active at shutdown. Rather than drop these regions, the profiler closes
+them with a synthetic end timestamp and appends an ``[incomplete]`` suffix to the region
+name.
+
 Metadata
 ========================================
 
