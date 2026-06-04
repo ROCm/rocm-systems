@@ -152,7 +152,9 @@ def run_prof(
         app_cmd = options.pop("APP_CMD") if "APP_CMD" in options else None
         for key, value in options.items():
             new_env[key] = value
-        console_debug(f"rocprof sdk env vars: {new_env}")
+        # Log only the os.environ delta to avoid leaking secrets in shared logs.
+        env_delta = {k: v for k, v in new_env.items() if os.environ.get(k) != v}
+        console_debug(f"rocprof sdk env vars: {env_delta}")
 
         if _is_live_attach(profiler_options):
             perform_attach_detach(new_env, options)
@@ -432,7 +434,9 @@ def pc_sampling_prof(
         new_env = os.environ.copy()
         for key, value in options.items():
             new_env[key] = value
-        console_debug(f"pc sampling rocprof sdk env vars: {new_env}")
+        # Log only the os.environ delta to avoid leaking secrets in shared logs.
+        env_delta = {k: v for k, v in new_env.items() if os.environ.get(k) != v}
+        console_debug(f"pc sampling rocprof sdk env vars: {env_delta}")
 
         if _is_live_attach(profiler_options):
             perform_attach_detach(new_env, options)
