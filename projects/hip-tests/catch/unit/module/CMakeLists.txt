@@ -280,7 +280,6 @@ if(HIP_PLATFORM MATCHES "amd")
   set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.s
-  ${CMAKE_CURRENT_BINARY_DIR}/addKernel.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernelCompressed.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernelGenericTarget.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernelGenericTargetCompressed.code
@@ -369,7 +368,6 @@ if(HIP_PLATFORM MATCHES "amd")
   ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel16.code
   ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel17.code
 )
-  endif()
 endif()
 
 if(HIP_PLATFORM MATCHES "amd")
@@ -397,6 +395,7 @@ add_dependencies(ModuleTest empty_file)
 add_dependencies(ModuleTest empty_module)
 
 if(HIP_PLATFORM MATCHES "amd")
+<<<<<<< HEAD
   # Wire kernel artifacts to ModuleTest so `make ModuleTest` builds them.
   # These are loaded at runtime by tests in the ModuleTest binary.
   add_dependencies(ModuleTest copyKernel_code copyKernel_s)
@@ -409,6 +408,13 @@ if(HIP_PLATFORM MATCHES "amd")
   add_dependencies(ModuleTest copyKernelCompressed_code)
   add_dependencies(ModuleTest copyKernelGenericTarget_code)
   add_dependencies(ModuleTest copyKernelGenericTargetCompressed_code)
+=======
+  add_dependencies(build_tests copyKernel.code copyKernel.s)
+  # TODO - Rock build failure from clang
+  add_dependencies(build_tests copyKernelCompressed.code)
+  add_dependencies(build_tests copyKernelGenericTarget.code)
+  add_dependencies(build_tests copyKernelGenericTargetCompressed.code)
+>>>>>>> 59cc2dfb2c (Fix build)
 
   if(UNIX)
     add_dependencies(ModuleTest copiousArgKernel_code copiousArgKernel0_code copiousArgKernel1_code copiousArgKernel2_code
