@@ -1600,7 +1600,11 @@ hipError_t ihipGraphInstantiate(hip::GraphExec** pGraphExec, hip::Graph* graph,
   *pGraphExec = new hip::GraphExec(flags);
   graph->clone(*pGraphExec, true);
 
-  hipError_t scheduleStatus = (*pGraphExec)->ScheduleNodesIntoBatches();
+  // Segment path (default): SelectStreamAssignment picks DFS or round-robin based on complexity.
+  // Classic path: use_segment_scheduling_=false (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING=0).
+  hipError_t scheduleStatus = (*pGraphExec)->IsSegmentSchedulingEnabled()
+                                  ? (*pGraphExec)->ScheduleNodesIntoBatches()
+                                  : (*pGraphExec)->ScheduleNodes();
   if (scheduleStatus != hipSuccess) {
     delete *pGraphExec;
     *pGraphExec = nullptr;
