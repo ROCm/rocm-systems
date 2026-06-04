@@ -122,19 +122,21 @@ void GDABackend::bnxt_create_cqs(int cqe) {
     qp_allocator_->allocate(reinterpret_cast<void**>(&bnxt_scqs[i].buf), bnxt_scqs[i].length);
     CHECK_HIP(hipMemset(bnxt_scqs[i].buf, 0, bnxt_scqs[i].length));
 
-    if (dmabuf_enabled) {
-      CHECK_HIP(qp_allocator_->GetDmabufHandle(bnxt_scqs[i].buf,
-                                               bnxt_scqs[i].length,
-                                               &bnxt_scqs[i].dmabuf_fd,
-                                               &bnxt_scqs[i].dmabuf_offset));
-    }
-
     /* Register SCQ UMEM */
     memset(&umem_attr, 0, sizeof(struct bnxt_re_dv_umem_reg_attr));
     umem_attr.addr         = bnxt_scqs[i].buf;
     umem_attr.size         = bnxt_scqs[i].length;
     umem_attr.access_flags = IBV_ACCESS_LOCAL_WRITE;
-    umem_attr.dmabuf_fd    = dmabuf_enabled ? bnxt_scqs[i].dmabuf_fd : 0;
+
+    if (dmabuf_enabled) {
+      CHECK_HIP(qp_allocator_->GetDmabufHandle(bnxt_scqs[i].buf,
+                                               bnxt_scqs[i].length,
+                                               &bnxt_scqs[i].dmabuf_fd,
+                                               &bnxt_scqs[i].dmabuf_offset));
+      /* Set comp_mask = BNXT_RE_DV_UMEM_FLAGS_DMABUF to use dmabuf_fd */
+      umem_attr.comp_mask = BNXT_RE_DV_UMEM_FLAGS_DMABUF;
+      umem_attr.dmabuf_fd = bnxt_scqs[i].dmabuf_fd;
+    }
 
     bnxt_scqs[i].umem_handle = bnxt_re_dv.umem_reg(ctx, &umem_attr);
     CHECK_NNULL(bnxt_scqs[i].umem_handle, "bnxt_re_dv_umem_reg(scq_buf)");
@@ -164,19 +166,21 @@ void GDABackend::bnxt_create_cqs(int cqe) {
     qp_allocator_->allocate(reinterpret_cast<void**>(&bnxt_rcqs[i].buf), bnxt_rcqs[i].length);
     CHECK_HIP(hipMemset(bnxt_rcqs[i].buf, 0, bnxt_rcqs[i].length));
 
-    if (dmabuf_enabled) {
-      CHECK_HIP(qp_allocator_->GetDmabufHandle(bnxt_rcqs[i].buf,
-                                               bnxt_rcqs[i].length,
-                                               &bnxt_rcqs[i].dmabuf_fd,
-                                               &bnxt_rcqs[i].dmabuf_offset));
-    }
-
     /* Register RCQ UMEM */
     memset(&umem_attr, 0, sizeof(struct bnxt_re_dv_umem_reg_attr));
     umem_attr.addr         = bnxt_rcqs[i].buf;
     umem_attr.size         = bnxt_rcqs[i].length;
     umem_attr.access_flags = IBV_ACCESS_LOCAL_WRITE;
-    umem_attr.dmabuf_fd    = dmabuf_enabled ? bnxt_rcqs[i].dmabuf_fd : 0;
+
+    if (dmabuf_enabled) {
+      CHECK_HIP(qp_allocator_->GetDmabufHandle(bnxt_rcqs[i].buf,
+                                               bnxt_rcqs[i].length,
+                                               &bnxt_rcqs[i].dmabuf_fd,
+                                               &bnxt_rcqs[i].dmabuf_offset));
+      /* Set comp_mask = BNXT_RE_DV_UMEM_FLAGS_DMABUF to use dmabuf_fd */
+      umem_attr.comp_mask = BNXT_RE_DV_UMEM_FLAGS_DMABUF;
+      umem_attr.dmabuf_fd = bnxt_rcqs[i].dmabuf_fd;
+    }
 
     bnxt_rcqs[i].umem_handle = bnxt_re_dv.umem_reg(ctx, &umem_attr);
     CHECK_NNULL(bnxt_rcqs[i].umem_handle, "bnxt_re_dv_umem_reg(rcq_buf)");
@@ -233,13 +237,6 @@ void GDABackend::bnxt_create_qps(int sq_length) {
     bnxt_qps[i].mem_info.sq_va = (uint64_t) sq_ptr;
     bnxt_qps[i].sq_buf = sq_ptr;
 
-    if (dmabuf_enabled) {
-      CHECK_HIP(qp_allocator_->GetDmabufHandle(sq_ptr,
-                                               bnxt_qps[i].mem_info.sq_len,
-                                               &bnxt_qps[i].sq_dmabuf_fd,
-                                               &bnxt_qps[i].sq_dmabuf_offset));
-    }
-
     /* Obtain MSN Table Pointer */
     msntbl_len             = (bnxt_qps[i].mem_info.sq_psn_sz * bnxt_qps[i].mem_info.sq_npsn);
     msntbl_offset          = bnxt_qps[i].mem_info.sq_len - msntbl_len;
@@ -251,7 +248,16 @@ void GDABackend::bnxt_create_qps(int sq_length) {
     umem_attr.addr         = (void*) bnxt_qps[i].mem_info.sq_va;
     umem_attr.size         = bnxt_qps[i].mem_info.sq_len;
     umem_attr.access_flags = IBV_ACCESS_LOCAL_WRITE;
-    umem_attr.dmabuf_fd    = dmabuf_enabled ? bnxt_qps[i].sq_dmabuf_fd : 0;
+
+    if (dmabuf_enabled) {
+      CHECK_HIP(qp_allocator_->GetDmabufHandle(sq_ptr,
+                                               bnxt_qps[i].mem_info.sq_len,
+                                               &bnxt_qps[i].sq_dmabuf_fd,
+                                               &bnxt_qps[i].sq_dmabuf_offset));
+      /* Set comp_mask = BNXT_RE_DV_UMEM_FLAGS_DMABUF to use dmabuf_fd */
+      umem_attr.comp_mask = BNXT_RE_DV_UMEM_FLAGS_DMABUF;
+      umem_attr.dmabuf_fd = bnxt_qps[i].sq_dmabuf_fd;
+    }
 
     sq_umem_handle = bnxt_re_dv.umem_reg(ctx, &umem_attr);
     CHECK_NNULL(sq_umem_handle, "bnxt_re_dv_umem_reg(sq)");
@@ -262,19 +268,21 @@ void GDABackend::bnxt_create_qps(int sq_length) {
     bnxt_qps[i].mem_info.rq_va = (uint64_t) rq_ptr;
     bnxt_qps[i].rq_buf = rq_ptr;
 
-    if (dmabuf_enabled) {
-      CHECK_HIP(qp_allocator_->GetDmabufHandle(rq_ptr,
-                                               bnxt_qps[i].mem_info.rq_len,
-                                               &bnxt_qps[i].rq_dmabuf_fd,
-                                               &bnxt_qps[i].rq_dmabuf_offset));
-    }
-
     /* Register RQ UMEM */
     memset(&umem_attr, 0, sizeof(struct bnxt_re_dv_umem_reg_attr));
     umem_attr.addr         = (void*) bnxt_qps[i].mem_info.rq_va;
     umem_attr.size         = bnxt_qps[i].mem_info.rq_len;
     umem_attr.access_flags = IBV_ACCESS_LOCAL_WRITE;
-    umem_attr.dmabuf_fd    = dmabuf_enabled ? bnxt_qps[i].rq_dmabuf_fd : 0;
+
+    if (dmabuf_enabled) {
+      CHECK_HIP(qp_allocator_->GetDmabufHandle(rq_ptr,
+                                               bnxt_qps[i].mem_info.rq_len,
+                                               &bnxt_qps[i].rq_dmabuf_fd,
+                                               &bnxt_qps[i].rq_dmabuf_offset));
+      /* Set comp_mask = BNXT_RE_DV_UMEM_FLAGS_DMABUF to use dmabuf_fd */
+      umem_attr.comp_mask = BNXT_RE_DV_UMEM_FLAGS_DMABUF;
+      umem_attr.dmabuf_fd = bnxt_qps[i].rq_dmabuf_fd;
+    }
 
     rq_umem_handle = bnxt_re_dv.umem_reg(ctx, &umem_attr);
     CHECK_NNULL(rq_umem_handle, "bnxt_re_dv_umem_reg(rq)");
