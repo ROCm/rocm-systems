@@ -400,13 +400,6 @@ int main(int argc, char **argv) {
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   MPI_Comm_size(MPI_COMM_WORLD, &nranks);
 
-  if (nranks < 2) {
-    if (rank == 0)
-      fprintf(stderr, "Error: need at least 2 ranks. Run with: mpirun -np 2 %s\n", argv[0]);
-    MPI_Finalize();
-    return 1;
-  }
-
   // Select GPU based on local rank (simple round-robin)
   int ndevices = 0;
   HIP_CHECK(hipGetDeviceCount(&ndevices));
