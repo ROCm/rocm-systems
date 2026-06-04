@@ -875,6 +875,14 @@ int rocshmem_gin_qp_set::initialize_gpu_qp(QueuePair *gpu_qp, int idx) {
     struct bnxt_re_dv_cq dv_cq;
     int err;
 
+    // Export QP (required for bnxt DV GPU-direct access)
+    struct bnxt_re_dv_qp dv_qp;
+    memset(&dv_obj, 0, sizeof(dv_obj));
+    dv_obj.qp.in = this->ibv_qps[idx];
+    dv_obj.qp.out = &dv_qp;
+    err = this->bnxt_re_dv.init_obj(&dv_obj, BNXT_RE_DV_OBJ_QP);
+    if (err) return -1;
+
     // Export SCQ
     memset(&dv_obj, 0, sizeof(dv_obj));
     dv_obj.cq.in = this->bnxt_scqs[idx].cq;
