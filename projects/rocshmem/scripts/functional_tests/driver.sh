@@ -135,6 +135,16 @@ declare -A TEST_NUMBERS=(
   ["host_ctx_create"]="118"
   ["teamsplit2d"]="119"
   ["hostteamsyncbarrier"]="120"
+  ["ipc_host_putmem"]="121"
+  ["ipc_host_getmem"]="122"
+  ["ipc_host_amo_fadd"]="123"
+  ["ipc_host_amo_fcswap"]="124"
+  ["ipc_host_ctx_putmem"]="125"
+  ["ipc_host_ctx_getmem"]="126"
+  ["ipc_host_int_amo_fadd"]="127"
+  ["ipc_host_int_amo_fcswap"]="128"
+  ["ipc_host_amo_all_pes"]="129"
+  ["ipc_host_amo_self"]="130"
 )
 
 # Detect which runtime to use
@@ -412,6 +422,7 @@ ExecTest_MPI() {
   fi
 
   unset ROCSHMEM_MAX_NUM_CONTEXTS
+  unset ROCSHMEM_MAX_NUM_HOST_CONTEXTS
 }
 
 TestRMAPut() {
@@ -719,6 +730,33 @@ TestOnStream() {
   ExecTest  "reduce_on_stream"       2  1           64        1048576
   unset ROCSHMEM_MAX_NUM_CONTEXTS
   unset ROCSHMEM_MAX_NUM_HOST_CONTEXTS
+}
+
+TestIpcHostRma() { #AIROCSHMEM-419
+  ##############################################################################
+  #       | Name                    | Ranks | WGs | Threads | Max Msg Size    #
+  # Run with ROCSHMEM_TEST_UUID=1 to exercise the non-MPI TcpBootstrap path. #
+  # IPC_HOST_NPES controls the PE count for the multi-PE concurrency tests.   #
+  # Default: 4. Override: IPC_HOST_NPES=8 ./driver.sh ...                     #
+  ##############################################################################
+  local npes=${IPC_HOST_NPES:-4}
+
+  # Default-context: rocshmem_fence / rocshmem_quiet
+  ExecTest  "ipc_host_putmem"         2        1      1        65536
+  ExecTest  "ipc_host_getmem"         2        1      1        65536
+  # Long (64-bit) AMOs: rocshmem_long_atomic_fetch_add/cas
+  ExecTest  "ipc_host_amo_fadd"       2        1      1
+  ExecTest  "ipc_host_amo_fcswap"     2        1      1
+  # Explicit-context: rocshmem_ctx_fence / rocshmem_ctx_quiet
+  # ROCSHMEM_MAX_NUM_HOST_CONTEXTS=2 — default context occupies slot 0, explicit ctx needs slot 1
+  ROCSHMEM_MAX_NUM_HOST_CONTEXTS=2 ExecTest "ipc_host_ctx_putmem"  2 1 1 65536
+  ROCSHMEM_MAX_NUM_HOST_CONTEXTS=2 ExecTest "ipc_host_ctx_getmem"  2 1 1 65536
+  # Int (32-bit) AMOs: rocshmem_int_atomic_fetch_add/cas (exercises 32-bit kernel path)
+  ExecTest  "ipc_host_int_amo_fadd"   2        1      1
+  ExecTest  "ipc_host_int_amo_fcswap" 2        1      1
+  # Concurrency tests — configurable PE count (IPC_HOST_NPES, default 4)
+  ExecTest  "ipc_host_amo_all_pes"    $npes    1      1
+  ExecTest  "ipc_host_amo_self"       $npes    1      1
 }
 
 TestOther() {
@@ -1040,6 +1078,7 @@ case $TEST in
     if [[ ! "$TEST" =~ ^(gda|ro) ]]; then
       TestTiles
     fi
+    TestIpcHostRma
     ;;
   *"rma")
     TestRMA

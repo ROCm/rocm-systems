@@ -317,6 +317,8 @@ void TesterArguments::get_arguments() {
     case FenceOrderFanoutTestType:
     case TeamSplit2DTestType:
     case HostTeamSyncBarrierTestType:
+    case IpcHostAmoAllPesTestType:
+    case IpcHostAmoSelfTestType:
       requires_two_pes = false;
       break;
     default:
