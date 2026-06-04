@@ -231,7 +231,7 @@ pub enum CtlCmd {
     /// Re-attach to a running exec's streams.
     Attach(AttachArgs),
 
-    /// Show or follow an exec's stdout/stderr.
+    /// Show or follow an exec's stdout.
     Logs(LogsArgs),
 
     /// Print where mirage stores its state on this machine.
@@ -546,12 +546,6 @@ pub struct LogsArgs {
     /// Follow output as it is appended.
     #[arg(short = 'f', long)]
     follow: bool,
-    /// Only show stderr.
-    #[arg(long)]
-    stderr: bool,
-    /// Only show stdout.
-    #[arg(long)]
-    stdout: bool,
 }
 
 // =============================================================================
@@ -1489,15 +1483,8 @@ async fn logs_cmd<C: MirageCtl>(ctl: Arc<C>, a: LogsArgs) -> anyhow::Result<Exit
     if !a.follow {
         for n in &nodes {
             let nl = layout.node(*n);
-            if !a.stderr
-                && let Ok(b) = std::fs::read(nl.stdout())
-            {
+            if let Ok(b) = std::fs::read(nl.stdout()) {
                 let _ = std::io::stdout().write_all(&b);
-            }
-            if !a.stdout
-                && let Ok(b) = std::fs::read(nl.stderr())
-            {
-                let _ = std::io::stderr().write_all(&b);
             }
         }
         return Ok(ExitCode::from(0));

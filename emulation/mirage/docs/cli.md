@@ -78,7 +78,7 @@ mirage exec remove <session> <exec>
 
 `exec start` is the workhorse:
 
-* By default it attaches to the new exec's stdout/stderr and exits
+* By default it attaches to the new exec's stdout and exits
   with the exec's exit code, then cleans up the on-disk exec directory.
 * `--detach` returns the exec id immediately without attaching.
 * `--keep` preserves the exec directory after it exits so you can
@@ -91,10 +91,10 @@ Re-attach to an exec that is still running (or to one that has
 finished, in which case the buffered output is replayed and the saved
 exit code is returned). Useful after a `--detach`.
 
-## `mirage logs <session> <exec> [-f] [--stdout|--stderr]`
+## `mirage logs <session> <exec> [-f]`
 
-Show the contents of `node/0/stdout` and `node/0/stderr`. With `-f`,
-follow the streams (uses the same attach machinery).
+Show the contents of `node/0/stdout`. With `-f`,
+follow the stream (uses the same attach machinery).
 
 ## `mirage run --profile NAME -- <cmd> [args...]`
 

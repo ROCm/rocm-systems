@@ -48,8 +48,7 @@
 //!       node/
 //!         <node-id>/
 //!           stdin     # FIFO (named pipe)
-//!           stdout    # plain file
-//!           stderr    # plain file
+//!           stdout    # plain file (merged stdout+stderr from the PTY)
 //!           pid       # pid of the spawned process
 //!           exit_code # exit code after the process terminates
 //! ```
@@ -328,9 +327,6 @@ impl NodeLayout {
     }
     pub fn stdout(&self) -> PathBuf {
         self.root.join("stdout")
-    }
-    pub fn stderr(&self) -> PathBuf {
-        self.root.join("stderr")
     }
     pub fn pid(&self) -> PathBuf {
         self.root.join("pid")

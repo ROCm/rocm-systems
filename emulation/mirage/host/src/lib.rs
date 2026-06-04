@@ -669,7 +669,7 @@ async fn run_exec(layout: ExecLayout, host_rank: Option<u32>) -> Result<()> {
             for &rank in &ranks {
                 let nlayout = layout.node(rank);
                 let _ = std::fs::create_dir_all(&nlayout.root);
-                let _ = std::fs::write(nlayout.stderr(), format!("mirage: {e}\n").as_bytes());
+                let _ = std::fs::write(nlayout.stdout(), format!("mirage: {e}\n").as_bytes());
                 let _ = write_bytes(&nlayout.exit_code(), b"127");
                 status.nodes.insert(
                     rank,
@@ -722,11 +722,11 @@ async fn run_exec(layout: ExecLayout, host_rank: Option<u32>) -> Result<()> {
                 // Spawning the node failed (e.g. the command doesn't
                 // exist). Rather than leaving the exec stuck in a
                 // perpetual "started but never ended" state, surface the
-                // reason on the node's stderr (which attach clients tail)
+                // reason on the node's stdout (which attach clients tail)
                 // and record the conventional 127 "command not found"
                 // exit code for this node.
                 let msg = format!("mirage: {e}\n");
-                let _ = std::fs::write(nlayout.stderr(), msg.as_bytes());
+                let _ = std::fs::write(nlayout.stdout(), msg.as_bytes());
                 let _ = write_bytes(&nlayout.exit_code(), b"127");
                 status.started = true;
                 status.nodes.insert(
@@ -856,23 +856,14 @@ fn spawn_node(
         mkfifo(&stdin_path, Mode::S_IRUSR | Mode::S_IWUSR)
             .map_err(|e| MirageError::other(format!("mkfifo {stdin_path:?}: {e}")))?;
     }
-    // Create the stdout file (the bridge appends merged PTY output here)
-    // and an empty stderr file (the PTY merges stderr into stdout, but
-    // attach clients still tail the stderr path, so it must exist).
+    // Create the stdout file (the bridge appends merged PTY output here;
+    // the child's stderr is merged into stdout by the PTY).
     let stdout_file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(nlayout.stdout())
         .map_err(|e| MirageError::Io {
             path: nlayout.stdout(),
-            source: e,
-        })?;
-    std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(nlayout.stderr())
-        .map_err(|e| MirageError::Io {
-            path: nlayout.stderr(),
             source: e,
         })?;
 
@@ -901,7 +892,7 @@ fn spawn_node(
         source: e,
     })?;
     let slave_err = slave.try_clone().map_err(|e| MirageError::Io {
-        path: nlayout.stderr(),
+        path: nlayout.stdout(),
         source: e,
     })?;
 
