@@ -267,7 +267,7 @@ struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr, size_t length, 
 
 struct ibv_mr* IBVWrapper::reg_mr_vmm(struct ibv_pd* pd, void* addr, size_t length, int access) {
 #if HIP_VERSION >= 70000000
-  if (is_dmabuf_supported()) {
+  if (ibv.reg_dmabuf_mr != NULL) {
     int fd = -1;
     static size_t page_size = sysconf(_SC_PAGESIZE);
     size_t aligned_size = (length + page_size - 1) & ~(page_size - 1);

@@ -447,6 +447,7 @@ static int gin_create_cqs(rocshmem_gin_qp_set *set) {
       set->qp_allocator = new HIPAllocator();
 
     int cqe = 1;  // CQE compression: only need length 1
+    int dmabuf_enabled = ibv.is_dmabuf_supported();
 
     for (int i = 0; i < n; i++) {
       auto *ctx = set->nic.context;
@@ -464,11 +465,20 @@ static int gin_create_cqs(rocshmem_gin_qp_set *set) {
                                    set->bnxt_scqs[i].length);
       (void)hipMemset(set->bnxt_scqs[i].buf, 0, set->bnxt_scqs[i].length);
 
+      if (dmabuf_enabled) {
+        if (set->qp_allocator->GetDmabufHandle(set->bnxt_scqs[i].buf,
+                                               set->bnxt_scqs[i].length,
+                                               &set->bnxt_scqs[i].dmabuf_fd,
+                                               &set->bnxt_scqs[i].dmabuf_offset) != hipSuccess)
+          return -1;
+      }
+
       struct bnxt_re_dv_umem_reg_attr umem_attr;
       memset(&umem_attr, 0, sizeof(umem_attr));
       umem_attr.addr = set->bnxt_scqs[i].buf;
       umem_attr.size = set->bnxt_scqs[i].length;
       umem_attr.access_flags = IBV_ACCESS_LOCAL_WRITE;
+      umem_attr.dmabuf_fd = dmabuf_enabled ? set->bnxt_scqs[i].dmabuf_fd : 0;
       set->bnxt_scqs[i].umem_handle = set->bnxt_re_dv.umem_reg(ctx, &umem_attr);
       if (!set->bnxt_scqs[i].umem_handle) return -1;
 
@@ -491,10 +501,19 @@ static int gin_create_cqs(rocshmem_gin_qp_set *set) {
                                    set->bnxt_rcqs[i].length);
       (void)hipMemset(set->bnxt_rcqs[i].buf, 0, set->bnxt_rcqs[i].length);
 
+      if (dmabuf_enabled) {
+        if (set->qp_allocator->GetDmabufHandle(set->bnxt_rcqs[i].buf,
+                                               set->bnxt_rcqs[i].length,
+                                               &set->bnxt_rcqs[i].dmabuf_fd,
+                                               &set->bnxt_rcqs[i].dmabuf_offset) != hipSuccess)
+          return -1;
+      }
+
       memset(&umem_attr, 0, sizeof(umem_attr));
       umem_attr.addr = set->bnxt_rcqs[i].buf;
       umem_attr.size = set->bnxt_rcqs[i].length;
       umem_attr.access_flags = IBV_ACCESS_LOCAL_WRITE;
+      umem_attr.dmabuf_fd = dmabuf_enabled ? set->bnxt_rcqs[i].dmabuf_fd : 0;
       set->bnxt_rcqs[i].umem_handle = set->bnxt_re_dv.umem_reg(ctx, &umem_attr);
       if (!set->bnxt_rcqs[i].umem_handle) return -1;
 
@@ -578,11 +597,21 @@ static int gin_create_qps(rocshmem_gin_qp_set *set) {
       if (set->bnxt_re_dv.qp_mem_alloc(pd, &ib_qp_attr, &set->bnxt_qps[i].mem_info) != 0)
         return -1;
 
+      int dmabuf_enabled = ibv.is_dmabuf_supported();
+
       void *sq_ptr = nullptr;
       set->qp_allocator->allocate(&sq_ptr, set->bnxt_qps[i].mem_info.sq_len);
       (void)hipMemset(sq_ptr, 0, set->bnxt_qps[i].mem_info.sq_len);
       set->bnxt_qps[i].mem_info.sq_va = (uint64_t)sq_ptr;
       set->bnxt_qps[i].sq_buf = sq_ptr;
+
+      if (dmabuf_enabled) {
+        if (set->qp_allocator->GetDmabufHandle(sq_ptr,
+                                               set->bnxt_qps[i].mem_info.sq_len,
+                                               &set->bnxt_qps[i].sq_dmabuf_fd,
+                                               &set->bnxt_qps[i].sq_dmabuf_offset) != hipSuccess)
+          return -1;
+      }
 
       uint64_t msntbl_len = set->bnxt_qps[i].mem_info.sq_psn_sz * set->bnxt_qps[i].mem_info.sq_npsn;
       uint64_t msntbl_offset = set->bnxt_qps[i].mem_info.sq_len - msntbl_len;
@@ -594,6 +623,7 @@ static int gin_create_qps(rocshmem_gin_qp_set *set) {
       sq_umem.addr = sq_ptr;
       sq_umem.size = set->bnxt_qps[i].mem_info.sq_len;
       sq_umem.access_flags = IBV_ACCESS_LOCAL_WRITE;
+      sq_umem.dmabuf_fd = dmabuf_enabled ? set->bnxt_qps[i].sq_dmabuf_fd : 0;
       void *sq_umem_handle = set->bnxt_re_dv.umem_reg(ctx, &sq_umem);
       if (!sq_umem_handle) return -1;
 
@@ -603,11 +633,20 @@ static int gin_create_qps(rocshmem_gin_qp_set *set) {
       set->bnxt_qps[i].mem_info.rq_va = (uint64_t)rq_ptr;
       set->bnxt_qps[i].rq_buf = rq_ptr;
 
+      if (dmabuf_enabled) {
+        if (set->qp_allocator->GetDmabufHandle(rq_ptr,
+                                               set->bnxt_qps[i].mem_info.rq_len,
+                                               &set->bnxt_qps[i].rq_dmabuf_fd,
+                                               &set->bnxt_qps[i].rq_dmabuf_offset) != hipSuccess)
+          return -1;
+      }
+
       struct bnxt_re_dv_umem_reg_attr rq_umem;
       memset(&rq_umem, 0, sizeof(rq_umem));
       rq_umem.addr = rq_ptr;
       rq_umem.size = set->bnxt_qps[i].mem_info.rq_len;
       rq_umem.access_flags = IBV_ACCESS_LOCAL_WRITE;
+      rq_umem.dmabuf_fd = dmabuf_enabled ? set->bnxt_qps[i].rq_dmabuf_fd : 0;
       void *rq_umem_handle = set->bnxt_re_dv.umem_reg(ctx, &rq_umem);
       if (!rq_umem_handle) return -1;
 
