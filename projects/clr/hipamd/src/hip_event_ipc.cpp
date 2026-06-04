@@ -276,6 +276,11 @@ hipError_t IPCEvent::OpenHandle(ihipIpcEventHandle_t* handle) {
 // ================================================================================================
 hipError_t IPCEvent::recordCommand(amd::Command*& command, amd::HostQueue* stream,
                                    uint32_t flags, bool batch_flush) {
+  // Protect ipc_signal_ creation against concurrent access. Not all callers hold
+  // Event::lock() (e.g. graph event-record nodes call this directly from
+  // CreateCommand); lock_ is recursive, so the normal addMarker path is safe.
+  std::scoped_lock lock(lock_);
+
   auto status = createIpcSignalIfNeeded();
   if (status != hipSuccess) {
     return status;
@@ -289,6 +294,23 @@ hipError_t IPCEvent::recordCommand(amd::Command*& command, amd::HostQueue* strea
 
 // ================================================================================================
 hipError_t IPCEvent::enqueueRecordCommand(hip::Stream* stream, amd::Command* command) {
+  // Protect event_/ipc_signal_ against concurrent query/synchronize/streamWait.
+  // Not all callers hold Event::lock() (e.g. graph event-record nodes enqueue
+  // directly), so take it here; lock_ is recursive, so the normal addMarker path
+  // that already holds it is unaffected.
+  std::scoped_lock lock(lock_);
+
+  // A single shared IPC signal cannot represent overlapping recordings, and the
+  // consumer is attached to this exact signal (it cannot be rotated). So we must
+  // serialize re-recordings: wait for the previous record's GPU work to drain
+  // before re-arming, otherwise the absolute Reset(1) races with the prior
+  // barrier's pending decrement and a waiter can wake on the wrong recording.
+  // Skip the wait on the first record (signal still at its initial value, never
+  // decremented) — waiting there would hang forever.
+  if (event_ != nullptr) {
+    ipc_signal_->Wait(1, amd::device::Signal::Condition::Lt, UINT64_MAX);
+  }
+
   // Re-arm the signal; GPU barrier will decrement to 0 when work completes
   ipc_signal_->Reset(1);
 
