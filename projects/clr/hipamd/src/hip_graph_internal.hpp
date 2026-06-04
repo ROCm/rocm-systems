@@ -1112,16 +1112,12 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   //! Find the number of streams required per device for packet engine mode
   //! This method analyzes segments to determine per-device stream requirements
   void FindStreamsReqPerDevForSegments();
-  //! Pre-compute segment-to-stream-index mapping and same-stream dep flags at instantiate
-  void PrecomputeStreamAssignment();
-  //! Recompute each segment's needs_completion_signal flag from its current
-  //! stream assignment. Called after the initial assignment and again if
-  //! BuildSyncPlan's collapse pass reassigns segments to a single stream.
-  void ComputeCompletionSignalFlags();
-  //! Barrier-ROI heuristic: decide whether the segment graph should be collapsed
-  //! onto a single stream because the cross-stream barriers multi-stream would
-  //! cost outweigh the work that could actually overlap. Returns true to collapse.
-  bool ShouldCollapseToSingleStream() const;
+  //! Round-robin stream assignment: spreads parallel segments evenly per dependency level
+  void RoundRobinStreamAssignment();
+  //! DFS stream assignment: preserves chain continuity, same algorithm as classic ScheduleOneNode
+  void DFSStreamAssignment();
+  //! Select stream assignment algorithm based on graph complexity
+  void SelectStreamAssignment();
   //! Get the parallel streams map for synchronization before destruction
   const std::unordered_map<int, std::vector<hip::Stream*>>& GetParallelStreams() const {
     return parallel_streams_;

@@ -252,27 +252,8 @@ void Graph::ScheduleOneNode(Node start, int stream_id) {
 // ================================================================================================
 hipError_t Graph::ScheduleNodes() {
   if (use_segment_scheduling_) {
-    // Segment packet scheduling logic
-    hipError_t result = ScheduleNodesIntoBatches();
-
-    // If ScheduleNodesIntoBatches returns hipErrorNotReady, it indicates
-    // a complex graph that would benefit from classic path, so fall back
-    if (result == hipErrorNotReady) {
-      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE,
-              "[hipGraph] Falling back to classic scheduling for complex graph");
-      // Clear any partial segment data that might have been created
-      segments_.clear();
-      node_to_segment_id_.clear();
-      segments_per_level_.clear();
-      max_dependency_level_ = -1;
-      // Disable segment scheduling for this graph permanently
-      use_segment_scheduling_ = false;
-
-      // Continue to classic scheduling logic below
-    } else {
-      // Return success or actual error (not the special fallback indicator)
-      return result;
-    }
+    // Segment path: DFS or round-robin stream assignment selected in SelectStreamAssignment()
+    return ScheduleNodesIntoBatches();
   }
 
   // Classic scheduling logic
@@ -329,27 +310,6 @@ hipError_t Graph::ScheduleNodesIntoBatches() {
     ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
             "[hipGraph] No valid segments created from execution paths");
     return hipErrorInvalidValue;
-  }
-
-  // Check if this is a complex graph that would benefit from classic path
-  // Complex graphs: 16+ segments with average segment length < 8
-  const size_t kSegmentSizeThreshold = 16;
-  const double kAvgSegmentLengthThreshold = 8.0;
-  if (segments_.size() >= kSegmentSizeThreshold && DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING != 2) {
-    size_t total_nodes = 0;
-    for (const auto& segment : segments_) {
-      total_nodes += segment.nodes.size();
-    }
-    double avg_segment_length = static_cast<double>(total_nodes) / segments_.size();
-
-    if (avg_segment_length < kAvgSegmentLengthThreshold) {
-      ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-              "[hipGraph] Complex graph detected: %zu segments, avg length %.2f - "
-              "falling back to classic path for better performance",
-              segments_.size(), avg_segment_length);
-      // Return special status to indicate fallback to classic path
-      return hipErrorNotReady;
-    }
   }
 
   // Resolve segment dependencies and calculate dependency levels
@@ -1237,7 +1197,7 @@ void GraphExec::FindStreamsReqPerDevForSegments() {
 }
 
 // ================================================================================================
-void GraphExec::PrecomputeStreamAssignment() {
+void GraphExec::RoundRobinStreamAssignment() {
   // max_streams_dev_ holds the raw parallelism count per device as computed by
   // FindStreamsReqPerDev[ForSegments]() and capped in Init(). CreateStreams() handles
   // the -1 adjustment for the instantiation device internally, so the value here
@@ -1295,162 +1255,136 @@ void GraphExec::ComputeCompletionSignalFlags() {
 }
 
 // ================================================================================================
-// Barrier-ROI heuristic.
-//
-// Multi-stream segment scheduling only pays off when the device-side overlap it
-// unlocks exceeds the cost of the cross-stream barriers/signals it requires. For
-// launch-overhead-bound graphs (many tiny kernels, near-serial dependencies) the
-// barriers have a high overhead: collapsing every segment onto one in-order stream
-// removes them entirely and is measurably faster on both the launch and the
-// instantiate path.
-//
-// Both sides are estimated in cheap structural units, with no device timing:
-//   * barrier_est   = number of barrier *packets* multi-stream would emit. This
-//                     mirrors BuildSyncPlan's materialization rather than the raw
-//                     dependency count: a single barrier packet resolves up to 5
-//                     dependencies ((deps + 4) / 5 packets), and a lone
-//                     dependency is folded into the segment's ext kernel-dispatch
-//                     packet with no separate barrier at all. PrecomputeStream-
-//                     Assignment() has already run by the time this is called, so
-//                     only *cross-stream/device* deps are counted (same-stream
-//                     deps are ordered by the in-order queue and emit no barrier),
-//                     matching what PASS 2/PASS 3 of BuildSyncPlan actually do.
-//   * signal_est    = number of completion *signals* multi-stream would emit.
-//                     Reuses each segment's needs_completion_signal flag (set by
-//                     PrecomputeStreamAssignment with the same cross-stream/leaf
-//                     criteria BuildSyncPlan uses), so producers whose consumers
-//                     share their stream are not over-counted. Signals are real
-//                     per-launch host cost (signal-pool acquire + packet patch)
-//                     that the barrier count alone misses, so they belong in the
-//                     ROI denominator alongside barriers.
-//   * parallel_slack = total work - critical-path work. The work that is
-//                      genuinely off the longest dependency chain and could
-//                      therefore overlap on another stream. Work is measured in
-//                      machine-occupancy passes, not node count: each kernel
-//                      weighs ceil(launch_threads / machine_threads) (>=1), so a
-//                      kernel that fills the GPU once is 1 unit and one needing N
-//                      passes is N. Non-kernel nodes and sub-machine launches are
-//                      1 unit, preserving the original node-count behaviour for
-//                      the small launch-bound kernels the gate targets. This is
-//                      what keeps two *long-running* independent kernels multi-
-//                      stream (their slack outgrows the threshold) while tiny
-//                      independent kernels (e.g. PyFR's stubs) still collapse.
-//
-// Collapse when parallel_slack < min_overlap * (barrier_est + signal_est): i.e.
-// keep multi-stream only when each unit of cross-stream sync overhead buys at
-// least min_overlap nodes of overlappable work. Folding collapse onto the launch
-// stream removes both barriers and signals (it runs inline, 0/0), so the full
-// sync cost is what multi-stream genuinely pays over collapse. Tunable via
-// DEBUG_HIP_GRAPH_MIN_OVERLAP; 0 disables the gate.
-bool GraphExec::ShouldCollapseToSingleStream() const {
-  const uint32_t min_overlap = DEBUG_HIP_GRAPH_MIN_OVERLAP;
-  if (min_overlap == 0) return false;            // gate disabled
-  if (segments_.size() < 2) return false;        // nothing to parallelize
-
-  // Collapse folds every segment onto stream 0, which EnqueueSegmentedGraph
-  // resolves to the launch stream (streams_[0]). That only works when all
-  // segments live on the same device; a multi-device graph would mis-route its
-  // off-device segments onto the launch stream, so never collapse one.
-  const int dev0 = segments_.front().dev_id;
-  for (const auto& seg : segments_) {
-    if (seg.dev_id != dev0) return false;
-  }
-
-  // Machine concurrent-thread capacity, used to convert a kernel's launch size
-  // into whole occupancy passes (the per-node work weight below). Falls back to
-  // node-count weighting (every node == 1) if the device info is unavailable.
-  size_t machine_threads = 0;
-  if (dev0 >= 0) {
-    const auto& dinfo = g_devices[dev0]->devices()[0]->info();
-    machine_threads = static_cast<size_t>(dinfo.maxComputeUnits_) * dinfo.maxThreadsPerCU_;
-  }
-  // Per-node work proxy: kernels are weighted by ceil(threads / machine_threads)
-  // — i.e. how many full-machine occupancy passes the launch needs — so a launch
-  // that fills the GPU once counts as 1, a launch needing N passes counts as N.
-  // Sub-machine launches (and all non-kernel nodes) stay at 1, which preserves
-  // the original node-count behaviour (and the min_overlap scale) for the small,
-  // launch-bound kernels the gate originally targeted. NOTE: this is occupancy-
-  // bound only; a small-grid kernel with a long internal loop is underweighted.
-  auto node_work = [machine_threads](Node n) -> size_t {
-    if (n == nullptr || n->GetType() != hipGraphNodeTypeKernel) return 1;
-    const size_t threads = static_cast<GraphKernelNode*>(n)->GetLaunchThreadCount();
-    if (threads == 0 || machine_threads == 0) return 1;
-    return std::max<size_t>(1, (threads + machine_threads - 1) / machine_threads);
+// DFS-based stream assignment for segment DAG — same algorithm as classic ScheduleOneNode
+// but operates on segments instead of individual nodes. Linear chains of segments stay
+// on the same stream; branches rotate to a new stream at each leaf.
+void GraphExec::DFSStreamAssignment() {
+  auto getPoolSize = [&](int dev_id) -> int {
+    auto it = max_streams_dev_.find(dev_id);
+    return (it != max_streams_dev_.end() && it->second > 0) ? it->second : 1;
   };
 
-  size_t barrier_est = 0;  // barrier packets multi-stream would emit (see header)
-  size_t signal_est = 0;   // completion signals multi-stream would emit (see header)
-  size_t total_work = 0;   // sum of per-node work over all segments
-  std::vector<size_t> seg_work(segments_.size(), 0);
-  for (size_t i = 0; i < segments_.size(); ++i) {
-    const auto& seg = segments_[i];
-    // Count only cross-stream/device dependencies. Same-stream deps are ordered
-    // by the in-order queue and never materialize a barrier, so including them
-    // would overstate multi-stream's cost and bias the gate toward collapse.
-    // PrecomputeStreamAssignment() has already assigned stream_id by the time
-    // this runs, so mirror the exact cross-stream filter PASS 2/PASS 3 use.
-    size_t cross_deps = 0;
-    for (int dep_id : seg.segment_ids_dependencies) {
-      if (dep_id < 0 || dep_id >= static_cast<int>(segments_.size())) continue;
-      const auto& dep_seg = segments_[dep_id];
-      if (dep_seg.dev_id != seg.dev_id || dep_seg.stream_id != seg.stream_id) {
-        ++cross_deps;
-      }
-    }
-    // cross_deps == 1 is embedded into the ext kernel-dispatch packet (no
-    // separate barrier); cross_deps >= 2 needs ceil(cross_deps / 5) barriers.
-    if (cross_deps >= 2) {
-      barrier_est += (cross_deps + 4) / 5;
-    }
-    // A segment emits a completion signal exactly when PrecomputeStreamAssignment
-    // flagged it (cross-stream/device consumer, or leaf when leaf-join back to
-    // the launch stream is required). Reuse that flag instead of counting every
-    // segment with downstream edges, which over-counts same-stream producers.
-    if (seg.needs_completion_signal) {
-      ++signal_est;
-    }
-    for (Node n : seg.nodes) seg_work[i] += node_work(n);
-    total_work += seg_work[i];
+  // Reset all stream IDs
+  for (auto& seg : segments_) {
+    seg.stream_id = -1;
   }
-  // Total per-launch cross-stream overhead multi-stream pays on the host path.
-  const size_t sync_cost = barrier_est + signal_est;
-  if (sync_cost == 0) return false;  // no barriers/signals => multi-stream is free
 
-  // Critical path (in work units) via DP over segments in dependency-level order:
-  // cp[seg] = work(seg) + max(cp[dep]); a dep always sits at a strictly lower level.
-  std::vector<size_t> cp(segments_.size(), 0);
-  size_t critical_path_work = 0;
-  for (int level = 0; level <= max_dependency_level_; ++level) {
-    auto it = segments_per_level_.find(level);
-    if (it == segments_per_level_.end()) continue;
-    for (int seg_id : it->second) {
-      if (seg_id < 0 || seg_id >= static_cast<int>(segments_.size())) continue;
-      const auto& seg = segments_[seg_id];
-      size_t best_dep = 0;
-      for (int dep_id : seg.segment_ids_dependencies) {
-        if (dep_id < 0 || dep_id >= static_cast<int>(segments_.size())) continue;
-        best_dep = std::max(best_dep, cp[dep_id]);
-      }
-      cp[seg_id] = best_dep + seg_work[seg_id];
-      critical_path_work = std::max(critical_path_work, cp[seg_id]);
+  int sid = 0;
+
+  // Find root segments (no dependencies) — these are DFS entry points
+  std::vector<int> roots;
+  for (int i = 0; i < static_cast<int>(segments_.size()); ++i) {
+    if (segments_[i].segment_ids_dependencies.empty()) {
+      roots.push_back(i);
     }
   }
 
-  // parallel_slack = overlappable work off the critical path. Weighting by work
-  // (not node count) keeps genuinely parallel long-running kernels multi-stream:
-  // their slack scales with launch size and outgrows min_overlap * sync_cost,
-  // while tiny launch-bound kernels still collapse.
-  const size_t parallel_slack =
-      (total_work > critical_path_work) ? (total_work - critical_path_work) : 0;
-  const bool collapse = parallel_slack < static_cast<size_t>(min_overlap) * sync_cost;
+  // Stack-based DFS over segment DAG — mirrors ScheduleOneNode exactly
+  std::vector<int> pending;
+  for (int i = static_cast<int>(roots.size()) - 1; i >= 0; --i) {
+    pending.push_back(roots[i]);
+  }
 
-  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE,
-          "[hipGraph] Single-stream gate: work=%zu critical_path=%zu slack=%zu "
-          "barrier_packets~=%zu signals~=%zu sync_cost=%zu min_overlap=%u -> %s",
-          total_work, critical_path_work, parallel_slack, barrier_est, signal_est,
-          sync_cost, min_overlap,
-          collapse ? "collapse to single stream" : "keep multi-stream");
-  return collapse;
+  while (!pending.empty()) {
+    int cur_id = pending.back();
+    pending.pop_back();
+
+    if (cur_id < 0 || cur_id >= static_cast<int>(segments_.size())) continue;
+    auto& cur = segments_[cur_id];
+
+    // Skip if already assigned
+    if (cur.stream_id != -1) continue;
+
+    // Assign current segment to current stream, capped per device pool
+    int pool = getPoolSize(cur.dev_id);
+    cur.stream_id = sid % pool;
+
+    // Push unassigned successors in reverse order (preserve left-to-right)
+    bool end_of_branch = true;
+    for (int i = static_cast<int>(cur.segment_ids_edges.size()) - 1; i >= 0; --i) {
+      int edge_id = cur.segment_ids_edges[i];
+      if (edge_id >= 0 && edge_id < static_cast<int>(segments_.size()) &&
+          segments_[edge_id].stream_id == -1) {
+        pending.push_back(edge_id);
+        end_of_branch = false;
+      }
+    }
+
+    // Rotate stream at leaf — same as classic ScheduleOneNode
+    if (end_of_branch) {
+      sid = (sid + 1) % static_cast<int>(DEBUG_HIP_FORCE_GRAPH_QUEUES);
+    }
+  }
+
+  // Compute needs_completion_signal — same logic as RoundRobinStreamAssignment
+  for (auto& seg : segments_) {
+    seg.needs_completion_signal = false;
+    if (seg.segment_ids_edges.empty()) {
+      seg.needs_completion_signal = true;
+      continue;
+    }
+    for (int edge_id : seg.segment_ids_edges) {
+      if (edge_id >= 0 && edge_id < static_cast<int>(segments_.size())) {
+        const auto& edge_seg = segments_[edge_id];
+        if (edge_seg.dev_id != seg.dev_id || edge_seg.stream_id != seg.stream_id) {
+          seg.needs_completion_signal = true;
+          break;
+        }
+      }
+    }
+  }
+}
+
+// ================================================================================================
+// Select stream assignment algorithm:
+//   DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING == 2 → force DFS
+//   DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING == 3 → force round-robin
+//   otherwise (auto): complex graphs (16+ segs, avg length < 8) → DFS
+//                     simple/parallel graphs                     → round-robin
+void GraphExec::SelectStreamAssignment() {
+  // Forced modes via env var
+  if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING == 2) {
+    ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+            "[hipGraph] SelectStreamAssignment: forced DFS (%zu segs)", segments_.size());
+    DFSStreamAssignment();
+    return;
+  }
+  if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING == 3) {
+    ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+            "[hipGraph] SelectStreamAssignment: forced round-robin (%zu segs)", segments_.size());
+    RoundRobinStreamAssignment();
+    return;
+  }
+
+  // Auto selection based on graph complexity
+  const size_t kSegmentSizeThreshold = 16;
+  const double kAvgSegmentLengthThreshold = 8.0;
+
+  bool use_dfs = false;
+  if (segments_.size() >= kSegmentSizeThreshold) {
+    size_t total_nodes = 0;
+    for (const auto& seg : segments_) {
+      total_nodes += seg.nodes.size();
+    }
+    double avg = static_cast<double>(total_nodes) / segments_.size();
+    if (avg < kAvgSegmentLengthThreshold) {
+      use_dfs = true;
+      ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+              "[hipGraph] SelectStreamAssignment: complex graph (%zu segs, avg %.2f nodes) "
+              "→ DFS stream assignment",
+              segments_.size(), avg);
+    }
+  }
+
+  if (use_dfs) {
+    DFSStreamAssignment();
+  } else {
+    ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+            "[hipGraph] SelectStreamAssignment: simple/parallel graph (%zu segs) "
+            "→ round-robin stream assignment",
+            segments_.size());
+    RoundRobinStreamAssignment();
+  }
 }
 
 // ================================================================================================
@@ -1489,10 +1423,10 @@ hipError_t GraphExec::Init() {
   }
 
   if (use_segment_scheduling_) {
-    // Pre-compute stream assignment before packet capture so that BuildSyncPlan
+    // Select and apply stream assignment before packet capture so that BuildSyncPlan
     // (called inside CaptureAQLPackets) can see each segment's stream_id and
     // skip same-stream dependency barriers.
-    PrecomputeStreamAssignment();
+    SelectStreamAssignment();
 
     // For graph nodes capture AQL packets to dispatch them directly during graph launch.
     // BuildSyncPlan (inside) runs the barrier-ROI collapse pass, which may fold the

@@ -1600,7 +1600,7 @@ hipError_t ihipGraphInstantiate(hip::GraphExec** pGraphExec, hip::Graph* graph,
   *pGraphExec = new hip::GraphExec(flags);
   graph->clone(*pGraphExec, true);
 
-  hipError_t scheduleStatus = (*pGraphExec)->ScheduleNodes();
+  hipError_t scheduleStatus = (*pGraphExec)->ScheduleNodesIntoBatches();
   if (scheduleStatus != hipSuccess) {
     delete *pGraphExec;
     *pGraphExec = nullptr;
