@@ -114,7 +114,7 @@ add_perfetto_annotation(perfetto_event_context_t& ctx, Np&& _name, Tp&& _val,
     {
         _get_dbg()->set_pointer_value(reinterpret_cast<std::uint64_t>(_val));
     }
-    else if constexpr(concepts::can_stringify<value_type>::value)
+    else if constexpr(concepts::can_stringify<value_type>)
     {
         _get_dbg()->set_string_value(fmt::format("{}", std::forward<Tp>(_val)));
     }
