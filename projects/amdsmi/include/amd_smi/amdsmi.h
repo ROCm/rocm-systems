@@ -1241,7 +1241,11 @@ typedef enum {
   AMDSMI_LINK_TYPE_PCIE = 1,            //!< Peripheral Component Interconnect Express Link Type
   AMDSMI_LINK_TYPE_XGMI = 2,            //!< GPU Memory Interconnect (multi GPU communication)
   AMDSMI_LINK_TYPE_NOT_APPLICABLE = 3,  //!< Not Applicable Link Type
-  AMDSMI_LINK_TYPE_UNKNOWN = 4          //!< Unknown Link Type
+  AMDSMI_LINK_TYPE_UNKNOWN = 4,         //!< Unknown Link Type
+  AMDSMI_LINK_TYPE_NUMA = 5,  //!< Two processors connect via different PCIe switches but on the
+                              //!< same CPU (NIC-to-GPU only)
+  AMDSMI_LINK_TYPE_XNUMA =
+      6  //!< Two processors connect via different PCIe switches on different CPUs (NIC-to-GPU only)
 } amdsmi_link_type_t;
 
 /**
@@ -2936,21 +2940,6 @@ typedef struct {
 #define AMDSMI_MAX_NIC_PORTS 32     //!< Maximum number of NIC ports
 #define AMDSMI_MAX_NIC_RDMA_DEV 32  //!< Maximum number of NIC RDMA devices
 #define AMDSMI_MAX_NIC_FW 16        //!< Maximum number of NIC firmwares
-
-/**
- * @brief NIC Link Types. This enum is used to identify the link type between
- * NIC and GPU processors based on their PCIe and NUMA connectivity.
- *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
- */
-typedef enum {
-  AMDSMI_NIC_LINK_TYPE_UNKNOWN,  //!< unknown type.
-  AMDSMI_NIC_LINK_TYPE_PCIE,     //!< two processors connect via same PCIe
-  AMDSMI_NIC_LINK_TYPE_NUMA,     /**< two processors connect via different PCIe switches but on the
-                                      same CPU */
-  AMDSMI_NIC_LINK_TYPE_X_NUMA,   /**< two processors connect via  different  PCIe switches but on
-                                      different CPUs */
-} amdsmi_nic_link_type_t;
 
 /**
  * @brief Structure for NIC statistic name-value pairs
