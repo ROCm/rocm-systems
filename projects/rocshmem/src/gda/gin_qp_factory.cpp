@@ -43,6 +43,7 @@
 #include "ibv_wrapper.hpp"
 #include "backend_gda.hpp"
 #include "debug_gda.hpp"
+#include "envvar.hpp"
 #include "util.hpp"
 #include "constants.hpp"
 #include "rocshmem/rocshmem_common.hpp"
@@ -136,7 +137,7 @@ struct rocshmem_gin_qp_set {
   QueuePair *gpu_qps = nullptr;
 
   uint32_t inline_threshold = 8;
-  uint32_t sq_size = 128;
+  uint32_t sq_size = envvar::gda::sq_size;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -244,21 +245,55 @@ static int gin_open_ib_device(rocshmem_gin_qp_set *set) {
     set->nic.nic_name = ibv.get_device_name(dev_list[d]);
     set->provider = provider;
 
-    // Select GID (prefer RoCEv2 / IPv4)
-    union ibv_gid gid;
-    for (int gi = 0; gi < port_attr.gid_tbl_len; gi++) {
-      if (ibv.query_gid(ctx, port, gi, &gid) == 0) {
-        // Use first non-zero GID
-        bool all_zero = true;
-        for (int b = 0; b < 16; b++) {
-          if (gid.raw[b] != 0) { all_zero = false; break; }
-        }
-        if (!all_zero) {
-          set->nic.gid = gid;
-          set->nic.gid_index = gi;
+    // Select GID — matches GDABackend::select_gid_index() logic:
+    //   1. IB type → use immediately (non-Ethernet)
+    //   2. Skip link-local (FE80 prefix) and all-zero
+    //   3. Prefer RoCEv2 over RoCEv1
+    {
+      const uint8_t local_gid_prefix[2] = {0xFE, 0x80};
+      int gid_tbl_len = port_attr.gid_tbl_len;
+      struct ibv_gid_entry *gid_entries = (struct ibv_gid_entry*)calloc(gid_tbl_len, sizeof(struct ibv_gid_entry));
+      ssize_t n = ibv.query_gid_table(ctx, gid_entries, gid_tbl_len, 0);
+      int selected_idx = -1;
+      uint32_t selected_type = IBV_GID_TYPE_ROCE_V1;
+
+      for (int i = 0; i < n; i++) {
+        union ibv_gid *g = &gid_entries[i].gid;
+        uint32_t gtype = gid_entries[i].gid_type;
+
+        // IB mode: use immediately
+        if (gtype == IBV_GID_TYPE_IB) {
+          selected_idx = i;
+          selected_type = gtype;
+          set->nic.gid = *g;
+          set->nic.gid_index = i;
           break;
         }
+
+        // Skip link-local
+        if (memcmp(g->raw, local_gid_prefix, 2) == 0) continue;
+        // Skip all-zero
+        bool all_zero = true;
+        for (int b = 0; b < 16; b++) { if (g->raw[b] != 0) { all_zero = false; break; } }
+        if (all_zero) continue;
+
+        // First valid, or prefer higher type (RoCEv2 > RoCEv1)
+        if (selected_idx == -1 || gtype > selected_type) {
+          selected_idx = i;
+          selected_type = gtype;
+          set->nic.gid = *g;
+          set->nic.gid_index = i;
+        }
       }
+      set->nic.gid_type = selected_type;
+      LOG_INFO("GIN QP factory: selected GID index=%d type=%u "
+               "gid=%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x",
+               set->nic.gid_index, set->nic.gid_type,
+               set->nic.gid.raw[0],  set->nic.gid.raw[1],  set->nic.gid.raw[2],  set->nic.gid.raw[3],
+               set->nic.gid.raw[4],  set->nic.gid.raw[5],  set->nic.gid.raw[6],  set->nic.gid.raw[7],
+               set->nic.gid.raw[8],  set->nic.gid.raw[9],  set->nic.gid.raw[10], set->nic.gid.raw[11],
+               set->nic.gid.raw[12], set->nic.gid.raw[13], set->nic.gid.raw[14], set->nic.gid.raw[15]);
+      free(gid_entries);
     }
 
     // Allocate PD
@@ -759,6 +794,7 @@ static int gin_modify_qps_init_to_rtr(rocshmem_gin_qp_set *set,
       attr.ah_attr.is_global = 1;
       attr.ah_attr.grh.hop_limit = 255;
       attr.ah_attr.sl = 1;
+      attr.ah_attr.grh.traffic_class = envvar::gda::traffic_class;
       memcpy(&attr.ah_attr.grh.dgid, &remote_info[i].gid, 16);
     } else {
       attr.ah_attr.is_global = 0;
