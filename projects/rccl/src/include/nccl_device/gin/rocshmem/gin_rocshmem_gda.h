@@ -40,10 +40,12 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
       uint32_t dstRkey = loadConst(loadConst(&dstMh->rkeys) + peer);
       uint32_t srcLkey = loadConst(&srcMh->lkey);
 
-      printf("GDA Put: rank=%d peer=%d dst=%p src=%p bytes=%zu dstRkey=0x%x srcLkey=0x%x ring_db=%d\n",
-             ctx.rank, peer, (void*)dstAddr, (void*)srcAddr, bytes, dstRkey, srcLkey, (int)!hasSignal);
-      qp->put_nbi_with_keys((void*)dstAddr, dstRkey, (void*)srcAddr, srcLkey, bytes, wf_info, !hasSignal);
-      printf("GDA Put done: rank=%d peer=%d\n", ctx.rank, peer);
+      printf("GDA Put: rank=%d peer=%d dst=%p src=%p bytes=%zu dstRkey=0x%x srcLkey=0x%x ring_db=1(forced)\n",
+             ctx.rank, peer, (void*)dstAddr, (void*)srcAddr, bytes, dstRkey, srcLkey);
+      qp->put_nbi_with_keys((void*)dstAddr, dstRkey, (void*)srcAddr, srcLkey, bytes, wf_info, /*ring_db=*/true);
+      printf("GDA Put done: rank=%d peer=%d, calling quiet to test put alone...\n", ctx.rank, peer);
+      qp->quiet(wf_info);
+      printf("GDA Put+quiet done: rank=%d peer=%d\n", ctx.rank, peer);
     }
 
     if (hasSignal) {

@@ -553,6 +553,11 @@ __device__ void QueuePair::bnxt_post_wqe_amo_with_keys(uintptr_t raddr, uint32_t
       sge.lkey   = nonfetching_atomic_lkey;
       sge.length = sizeof(uint64_t);
 
+      printf("bnxt_amo_with_keys: raddr=%p rkey=0x%x data=%lld fence=%d "
+             "sge.pa=%p sge.lkey=0x%x qp_num=%u\n",
+             (void*)raddr, rkey, (long long)atomic_data, (int)fence,
+             (void*)sge.pa, sge.lkey, qp_num);
+
       auto *hdr_ptr = (struct bnxt_re_bsqe*)  bnxt_re_get_hwqe(&bnxt_sq, 0);
       auto *amo_ptr = (struct bnxt_re_atomic*) bnxt_re_get_hwqe(&bnxt_sq, 1);
       auto *sge_ptr = (struct bnxt_re_sge*)    bnxt_re_get_hwqe(&bnxt_sq, 2);
