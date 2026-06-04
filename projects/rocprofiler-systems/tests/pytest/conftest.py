@@ -973,13 +973,18 @@ def _load_test_categories() -> Optional[dict]:
 def _resolve_tier_labels(test_name: str, existing_labels: set[str]) -> set[str]:
     """Return tier labels (subset of TIER_ORDER) for *test_name*.
 
-    A test gets tier T if its name matches any of T's `test_patterns` AND
-    doesn't match any of T's `exclude` patterns AND none of its
-    `existing_labels` (pytest-marker-derived) appear in T's `excluded_labels`.
+    Each tier is evaluated independently. A test is granted tier T iff:
+      * its name matches any of T's ``test_patterns``,
+      * its name does NOT match any of T's ``exclude`` patterns, AND
+      * none of its ``existing_labels`` (pytest-marker-derived) appear in
+        T's ``excluded_labels``.
 
-    Matches are inclusive: matching `quick` also yields standard/comprehensive/
-    full, mirroring the rocJenkins-style tiering used across the standardised
-    components (hipsolver, rocblas, hipfft, ...).
+    The rocJenkins-style cascade ("matching quick also yields standard /
+    comprehensive / full") is achieved by having those higher tiers use
+    broad include patterns (typically ``test_patterns: [".*"]``). Per-tier
+    ``exclude`` punches a hole through the cascade for individual tests:
+    listing ``testA`` under ``standard.exclude`` drops ``standard`` from
+    its label set even if ``quick`` / ``comprehensive`` / ``full`` match.
     """
     categories = _load_test_categories()
     if not categories:
@@ -994,9 +999,7 @@ def _resolve_tier_labels(test_name: str, existing_labels: set[str]) -> set[str]:
         if existing_labels & cfg.get("excluded_labels", set()):
             continue
         matched_indices.append(i)
-    if not matched_indices:
-        return set()
-    return {TIER_ORDER[i] for i in range(min(matched_indices), len(TIER_ORDER))}
+    return {TIER_ORDER[i] for i in matched_indices}
 
 
 def _resolve_arch_exclude_labels(test_name: str) -> set[str]:
