@@ -63,7 +63,7 @@ class Instruction;
 /// placeholders so the descriptor evolves into the Section 2 probe shape
 /// without renaming.
 ///
-/// TODO(future milestone): implement AfterInst, BlockEntry, and BlockExit.
+/// TODO: implement AfterInst, BlockEntry, and BlockExit.
 /// Today the validator rejects any kind other than BeforeInst.
 enum class InstrumentationKind {
   BeforeInst,
@@ -81,14 +81,13 @@ struct InstrumentationPoint {
   uint64_t anchor_offset = 0;
 
   InstrumentationKind kind = InstrumentationKind::BeforeInst;
-  uint32_t filter_flags = 0; // Must be 0 in the inline-nop build.
 
-  // Reserved for later milestones — must remain default in the inline-nop
-  // build. The validator rejects any non-default value to keep the
+  // Not used yet. The validator rejects any non-default value to keep the
   // contract honest until each field is actually implemented.
   // TODO: consume probe_obj / probe_symbol when probe-call
   // trampolines are supported; consume force_full_exec when EXEC policy
-  // management lands.
+  // management lands; consume filter_flags to filter based on InstFlags
+  uint32_t filter_flags = 0;
   const AmdGpuCodeObject *probe_obj = nullptr;
   std::string probe_symbol;
   bool force_full_exec = false;
@@ -98,16 +97,17 @@ struct InstrumentationPoint {
 struct ResolvedInstrumentationSite {
   InstrumentationKind kind = InstrumentationKind::BeforeInst;
   uint64_t anchor_offset = 0;
-  uint32_t original_size = 0; // 4 or 8 in the inline-nop smoke build.
+  uint32_t original_size = 0;
   std::vector<uint8_t> original_bytes;
   std::string mnemonic; // Diagnostic/debug only.
 };
 
-/// @brief Per-site patch record returned by Instrumentor::patch().
+/// @brief Per-site patch record, for testing and debugging.
 ///
-/// Intended for test assertions and debugging only — a fresh disassembly of
-/// the emitted ELF would expose the same information. Not a proposed public
-/// metadata surface.
+/// Returned from Instrumentor::patch_with_debug_summaries(), not from the
+/// regular patch() entry point. The schema is not yet stable; the same
+/// information is also recoverable from a fresh disassembly of the emitted
+/// ELF.
 struct InstrumentationPatch {
   uint64_t anchor_offset;
   uint32_t original_size;
@@ -119,26 +119,31 @@ struct InstrumentationPatch {
 
 /// @brief Result of Instrumentor::patch().
 ///
-/// All-or-nothing: when any fatal error occurs, `elf_bytes` and `patches`
-/// are empty and `errors` is non-empty. On success, `errors` is empty,
-/// `elf_bytes` contains a re-parseable patched ELF, and `patches` contains
-/// one record per applied site.
+/// All-or-nothing: when any fatal error occurs, `elf_bytes` is empty and
+/// `errors` is non-empty. On success, `errors` is empty and `elf_bytes`
+/// contains a re-parseable patched ELF.
 struct InstrumentedCodeObject {
   std::vector<uint8_t> elf_bytes;
-  std::vector<InstrumentationPatch> patches;
   std::vector<std::string> errors;
   std::vector<std::string> warnings;
 };
 
+/// @brief Result of Instrumentor::patch_with_debug_summaries().
+///
+/// Extends InstrumentedCodeObject with one InstrumentationPatch per applied
+/// site. Test / debug surface only; the per-site schema is unstable.
+struct InstrumentedCodeObjectDebug : InstrumentedCodeObject {
+  std::vector<InstrumentationPatch> patches;
+};
+
 /// @brief Permanent structural checks: would @p anchor work as a trampoline
-///        anchor at @p anchor_offset, ignoring any milestone-scoped policy?
+///        anchor at @p anchor_offset?
 ///
-/// Pure predicate. Does not look at any InstrumentationPoint — it answers
+/// Pure predicate. Does not look at any InstrumentationPoint. Answers only
 /// "can the trampoline machinery splice an `s_branch` here and relocate the
-/// original safely?" only. Reusable by future predicate-based anchor
-/// selection (the orchestrator walks blocks itself and filters candidates).
+/// original safely?"
 ///
-/// Rules enforced (all permanent; none are milestone-scoped):
+/// Rules enforced (last two will eventually be relaxed):
 ///   - @p anchor_offset is dword aligned.
 ///   - anchor.size() is 4 or 8 and fits inside @p text_bytes.
 ///   - anchor.raw_encoding() is non-null.
@@ -159,13 +164,9 @@ struct InstrumentedCodeObject {
 /// (the free-function form lets test fixtures use synthetic TestInstruction
 /// objects without standing up an AmdGpuCodeObject). The anchor identity is
 /// already resolved by the caller; @p pt is read for `filter_flags`, `kind`,
-/// and reserved fields.
+/// and reserved fields. See is_relocatable_anchor for rules.
 ///
-/// Layering: this function combines milestone-scoped policy (reserved-field
-/// rejections — temporary) with permanent structural relocatability
-/// (delegated to is_relocatable_anchor — see there for the structural rules).
-///
-/// Milestone-scoped rules enforced here:
+/// Temporary rules enforced here:
 ///   - @p pt.filter_flags is zero.
 ///   - @p pt.kind is BeforeInst (other kinds are unsupported in this milestone).
 ///   - @p pt.probe_obj is null, @p pt.probe_symbol is empty, and
@@ -175,39 +176,51 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
                 std::span<const uint8_t> text_bytes, const InstrumentationPoint &pt,
                 rj_code_arch_t arch, std::string *error_out = nullptr);
 
-/// @brief Build the inline-nop TrampolinePlan from a validated site.
+/// @brief Build a TrampolinePlan from a validated site.
 ///
+/// Temporarily fills it ONLY with a plan to instrument with a nop.
 /// Fills before_items = {{ s_nop 0 }}, after_items = {}, emit_original = true.
 /// The caller chooses @p trampoline_offset (typically `patcher.text_size()`).
 [[nodiscard]] TrampolinePlan make_trampoline_plan(const ResolvedInstrumentationSite &site,
                                                   rj_code_arch_t arch, uint64_t trampoline_offset);
 
-/// @brief Verify @p plan matches the inline-nop canonical body shape: exactly
-///        one `before_items` entry containing `s_nop 0`, empty `after_items`,
-///        and `emit_original == true`.
+/// @brief Verify @p plan matches the (temporary) inlined nop body shape:
+///        exactly one `before_items` entry containing `s_nop 0`, empty
+///        `after_items`, and `emit_original == true`.
 ///
-/// One of several places where inline-nop milestone constraints are enforced.
+/// One of several places where temporary inlined nop constraints are enforced.
 /// The others: validate_anchor() rejects reserved InstrumentationPoint fields,
 /// and Instrumentor::patch() rejects multi-text code objects and the multi-
 /// point case. This one lives at the orchestrator boundary rather than inside
-/// TrampolineBuilder so the builder stays generic and ready for future probe-
-/// call / clobber-bearing inline-asm bodies. Called by Instrumentor::patch()
-/// as a defense-in-depth check (make_trampoline_plan always produces canonical
-/// plans today) and also directly by tests so the guardrail logic is
-/// exercised at the layer where it lives.
+/// TrampolineBuilder so the builder stays generic.
+/// Called by Instrumentor::patch() as a defense-check (make sure users/agents
+/// do not misinterpret current DBI support) and also directly by tests
 ///
-/// TODO(future milestone): delete this once arbitrary inline-asm bodies with
-/// declared clobbers are supported.
+/// TODO: delete this when DBI supports more plans
 [[nodiscard]] bool validate_inline_nop_plan(const TrampolinePlan &plan,
                                             std::string *error_out = nullptr);
 
-/// @brief DBI orchestrator owning point collection and resolution.
+/// @brief DBI orchestrator. Collects InstrumentationPoints, validates each
+///        anchor, plans + builds per-site trampolines, and drives the
+///        CodeObjectPatcher to splice the patches into a new ELF. See the
+///        mental-model diagram at the top of this file for the full pipeline.
 ///
-/// PC01-A scope: resolve points to .text-relative offsets, validate, capture
-/// original bytes. Patching (TrampolineBuilder lowering + CodeObjectPatcher
-/// mutation) arrives in the next slice.
+/// Single-attempt: each Instrumentor instance owns one call to patch() or
+/// patch_with_debug_summaries(), success or failure. Could expand to allow
+/// calls again upon failure. Re-instrumenting and already instrumented code
+/// is a much more difficult task.
+///
+/// Block decoding is lazy so the CFG is built on the first call that needs
+/// it (validate_points / find_instruction_at_offset). An Instrumentor that
+/// never gets patched also never decodes.
 class Instrumentor {
 public:
+  /// @param obj  The code object to instrument. Borrowed; must outlive the
+  ///             Instrumentor.
+  /// @param arch The ISA used to decode @p obj. An arch that has no
+  ///             registered Decoder (RV32I/RV64I/INVALID/etc.) surfaces as
+  ///             a ValidationResult / InstrumentedCodeObject error at
+  ///             validate_points() / patch() time rather than at construction.
   Instrumentor(const AmdGpuCodeObject &obj, rj_code_arch_t arch);
   ~Instrumentor();
 
@@ -217,9 +230,10 @@ public:
   /// @brief Queue a point. The point is not validated until validate_points().
   void add_point(InstrumentationPoint pt);
 
-  /// @brief Convenience: queue a point identified only by .text-relative offset.
-  ///        Equivalent to constructing an InstrumentationPoint with
-  ///        anchor_offset set.
+  /// @brief Convenience: queue a point identified by its .text-relative byte
+  ///        offset. Equivalent to constructing an InstrumentationPoint with
+  ///        anchor_offset set. Handy when callers walk basic blocks themselves
+  ///        and already have the offset of each candidate instruction.
   void add_point_by_offset(uint64_t anchor_offset,
                            InstrumentationKind kind = InstrumentationKind::BeforeInst);
 
@@ -230,23 +244,31 @@ public:
 
   /// @brief Look up each queued point's anchor and validate it.
   ///
-  /// All-or-nothing: on any failure, `sites` is empty and `errors` lists every
-  /// fatal diagnostic encountered. On success, `sites` contains one record per
-  /// queued point in insertion order and `errors` is empty.
+  /// Currently all-or-nothing: on any failure, `sites` is empty and `errors`
+  /// lists every fatal diagnostic encountered. On success, `sites` contains
+  /// one record per queued point in insertion order and `errors` is empty.
   [[nodiscard]] ValidationResult validate_points();
 
-  /// @brief Resolve, validate, plan, build, and patch the queued points.
+  /// @brief Validate, plan, build, and apply the queued points; emit a
+  ///        patched ELF.
   ///
-  /// Inline-nop milestone accepts exactly one queued point; queuing zero or
-  /// more than one is a fatal error. The orchestrator preflights all builder
-  /// output before mutating the patcher, so a branch-range failure can't leak
-  /// a half-built ELF.
+  /// All per-site validation and builder output is preflighted before any
+  /// patcher mutation, so a late failure (e.g. branch-range overflow) can't
+  /// leak a half-built ELF. Thus `elf_bytes` is either fully populated or empty
+  /// with diagnostics in `errors`.
   ///
-  /// Single-attempt: any call (success or failure) consumes the Instrumentor's
-  /// budget. A second call returns an empty result with a fatal error, even
-  /// if the first call failed for argument reasons (e.g., zero queued points).
-  /// Callers that hit a recoverable error must construct a new Instrumentor.
+  /// Current support is single-point: queuing zero or more than one
+  /// InstrumentationPoint is a fatal error. Shares the single-attempt budget
+  /// with patch_with_debug_summaries(); see the class-level note.
   [[nodiscard]] InstrumentedCodeObject patch();
+
+  /// @brief Same as patch(), plus per-site InstrumentationPatch summaries.
+  ///
+  /// Currently intended for tests and debugging, although could eventually
+  /// be used to communicate important information for the host (an ordering
+  /// of which instructions were instrumented and should be analyzed further
+  /// for post-processing. Per-site info not yet stable.
+  [[nodiscard]] InstrumentedCodeObjectDebug patch_with_debug_summaries();
 
 private:
   const AmdGpuCodeObject &obj_;
@@ -259,7 +281,10 @@ private:
   std::vector<std::unique_ptr<BasicBlock>> blocks_;
   bool blocks_built_ = false;
 
-  void ensure_blocks_built();
+  // Returns false if no decoder exists for arch_ (RV32I/RV64I/INVALID/etc.);
+  // in that case *error_out is set and blocks_built_ stays false so the failure
+  // is reported instead of crashing in BasicBlock::build.
+  [[nodiscard]] bool ensure_blocks_built(std::string *error_out = nullptr);
   [[nodiscard]] const Instruction *find_instruction_at_offset(uint64_t anchor_offset);
 };
 
