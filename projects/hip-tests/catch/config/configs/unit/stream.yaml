@@ -2,7 +2,7 @@
 stream:
   Unit_hipStreamCreate_default:
     <<: *level_2
-    tags: [lifecycle]
+    tags: [lifecycle, smoke]
   Unit_hipStreamCreate_Negative:
     <<: *level_2
     tags: [lifecycle]
@@ -103,7 +103,7 @@ stream:
     tags: [lifecycle]
   Unit_hipStreamDestroy_Default:
     <<: *level_2
-    tags: [lifecycle]
+    tags: [lifecycle, smoke]
   Unit_hipStreamDestroy_Negative_NullStream:
     <<: *level_2
     tags: [lifecycle]
@@ -148,7 +148,7 @@ stream:
     <<: *level_2
     # Note: TDR (pass)
     disabled: [amd_wsl]
-    tags: [synchronization]
+    tags: [synchronization, smoke]
   Unit_hipStreamSynchronize_NullStreamSynchronization:
     <<: *level_2
     # (amd_windows) mlsejenkins_Window_Failures_on_gfx1201
@@ -170,7 +170,7 @@ stream:
     <<: *level_2
     # Note: Windows disabled
     disabled: [amd_windows, amd_wsl]
-    tags: [synchronization]
+    tags: [synchronization, smoke]
   Unit_hipStreamQuery_SubmitWorkOnStreamAndQueryNullStream:
     <<: *level_2
     # Note: TDR (pass)
@@ -338,7 +338,7 @@ stream:
     tags: [synchronization]
   Unit_hipStreamWaitEvent_Default:
     <<: *level_2
-    tags: [synchronization]
+    tags: [synchronization, smoke]
   Unit_hipStreamWaitEvent_DifferentStreams:
     <<: *level_2
     # Note: Windows disabled
