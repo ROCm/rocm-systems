@@ -484,13 +484,21 @@ SPMPacket::kfd_stop()
 
 SPMPacket::~SPMPacket()
 {
+    if(!sym) return;
+
     running.wlock([&](auto& _running) {
-        if(_running == false) return;
+        if(!_running) return;
         auto status = sym->spm_stop(this->handle);
         ROCP_WARNING_IF(status != HSA_STATUS_SUCCESS)
             << "spm_stop failed with HSA status: " << status;
         _running = false;
     });
+
+    if(handle.handle != 0 && sym->spm_delete_packets)
+    {
+        sym->spm_delete_packets(this->handle);
+        handle.handle = 0;
+    }
 }
 }  // namespace hsa
 }  // namespace rocprofiler
