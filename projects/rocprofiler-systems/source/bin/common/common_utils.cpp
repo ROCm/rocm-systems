@@ -551,7 +551,7 @@ get_domain_help_map()
     static const domain_help_map map = {
         { "gpu",
           { "GPU metrics, device sampling, GPU counters",
-            { "--gpu", "-D", "--device", "-H", "--host", "--gpus", "--process-freq",
+            { "--gpu", "-D", "--device", "--gpus", "--process-freq",
               "--process-wait", "--process-duration", "-G", "--gpu-events", "--ai-nics",
               "--use-amd-smi", "--amd-smi-metrics" } } },
         { "cpu",
