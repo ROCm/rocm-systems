@@ -266,13 +266,11 @@ struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr, size_t length, 
 }
 
 struct ibv_mr* IBVWrapper::reg_mr_vmm(struct ibv_pd* pd, void* addr, size_t length, int access) {
-  static size_t page_size = sysconf(_SC_PAGESIZE);
-  size_t aligned_size = (length + page_size - 1) & ~(page_size - 1);
-
 #if HIP_VERSION >= 70000000
-  // Temporarily skip dmabuf to test iova2 with VMM memory on bnxt
-  if (0 && ibv.reg_dmabuf_mr != NULL) {
+  if (ibv.reg_dmabuf_mr != NULL) {
     int fd = -1;
+    static size_t page_size = sysconf(_SC_PAGESIZE);
+    size_t aligned_size = (length + page_size - 1) & ~(page_size - 1);
 
     hipError_t err = hipMemGetHandleForAddressRange(
         (void *)&fd, (hipDeviceptr_t)addr, aligned_size,
@@ -297,18 +295,14 @@ struct ibv_mr* IBVWrapper::reg_mr_vmm(struct ibv_pd* pd, void* addr, size_t leng
   }
 #endif
 
-  // Try ibv_reg_mr_iova2 with iova=VA
-  LOG_TRACE("reg_mr_vmm: ibv_reg_mr_iova2(%p, %zd, iova=VA)", addr, aligned_size);
-  struct ibv_mr *mr = ibv.reg_mr_iova2(pd, addr, aligned_size, (uintptr_t)addr, access);
-  if (mr) {
-    LOG_TRACE("reg_mr_vmm: iova2 for %p size %zd lkey=0x%x rkey=0x%x",
-              addr, length, mr->lkey, mr->rkey);
-    return mr;
-  }
-
-  // Last resort: plain ibv_reg_mr
-  LOG_TRACE("reg_mr_vmm: iova2 failed, trying plain ibv_reg_mr(%p, %zd)", addr, aligned_size);
-  return ibv.reg_mr(pd, addr, aligned_size, access);
+#if 0
+  // iova=0 fallback for NICs that support offset-based addressing
+  LOG_TRACE("reg_mr_vmm: ibv_reg_mr_iova2(%p, %zd, iova=0)", addr, length);
+  return ibv.reg_mr_iova2(pd, addr, length, 0, access);
+#else
+  LOG_TRACE("reg_mr_vmm: ibv_reg_mr_iova2(%p, %zd)", addr, length);
+  return ibv.reg_mr_iova2(pd, addr, length, (uintptr_t)addr, access);
+#endif
 }
 
 int IBVWrapper::dereg_mr(struct ibv_mr *mr) {
