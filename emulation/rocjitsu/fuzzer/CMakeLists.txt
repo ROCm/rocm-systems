@@ -1,1 +1,4 @@
-add_subdirectory(tests)
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+add_subdirectory(afl-dbi)

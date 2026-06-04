@@ -420,6 +420,51 @@ CodeObjectPatcher::CodeObjectPatcher(const AmdGpuCodeObject &obj)
   }
 }
 
+std::optional<KernelEntryProloguePlan>
+plan_kernel_entry_prologue(uint64_t cave_start, uint64_t cave_body_size,
+                           uint64_t entry_text_offset,
+                           std::span<const uint32_t> prologue_words,
+                           rj_code_arch_t arch) {
+  assert(!prologue_words.empty() && "empty kernel entry prologue");
+
+  // A kernel descriptor entry point is a hardware launch address, not an
+  // ordinary branch target. CP expects that instruction address to be
+  // 256-byte-aligned. The patcher works in .text-relative offsets, so preserve
+  // the original entry's 256-byte residue; if the original virtual address was
+  // aligned, the redirected virtual address stays aligned too.
+  const uint64_t current_offset = cave_start + cave_body_size;
+  const uint64_t required_residue = entry_text_offset % 256;
+  const uint64_t alignment_padding = (required_residue + 256 - (current_offset % 256)) % 256;
+  assert(alignment_padding % sizeof(uint32_t) == 0 && "unaligned cave padding");
+
+  const uint64_t cave_byte_offset = current_offset + alignment_padding;
+  assert(cave_byte_offset % 256 == required_residue &&
+         "kernel descriptor entry lost its 256-byte alignment");
+
+  // The descriptor enters the cave directly. The only control-flow fixup is a
+  // final branch from the prologue body to the original, untouched entry.
+  const int64_t branch_pc =
+      static_cast<int64_t>(cave_byte_offset + prologue_words.size() * sizeof(uint32_t));
+  const int64_t target = static_cast<int64_t>(entry_text_offset);
+  const int64_t target_delta_bytes = target - (branch_pc + 4);
+  if (target_delta_bytes % static_cast<int64_t>(sizeof(uint32_t)) != 0)
+    return std::nullopt;
+
+  const int64_t target_dwords = target_delta_bytes / static_cast<int64_t>(sizeof(uint32_t));
+  if (target_dwords < std::numeric_limits<int16_t>::min() ||
+      target_dwords > std::numeric_limits<int16_t>::max())
+    return std::nullopt;
+
+  KernelEntryProloguePlan plan;
+  plan.new_entry_text_offset = cave_byte_offset;
+  plan.cave_words.reserve(alignment_padding / sizeof(uint32_t) + prologue_words.size() + 1);
+  for (uint64_t i = 0; i < alignment_padding; i += sizeof(uint32_t))
+    plan.cave_words.push_back(build_s_nop(0, arch));
+  plan.cave_words.insert(plan.cave_words.end(), prologue_words.begin(), prologue_words.end());
+  plan.cave_words.push_back(build_s_branch(static_cast<int16_t>(target_dwords), arch));
+  return plan;
+}
+
 std::span<uint8_t> CodeObjectPatcher::text_bytes() {
   return {image_.data() + text_offset_, text_size_};
 }
@@ -441,10 +486,141 @@ void CodeObjectPatcher::update_elf_flags(uint32_t new_mach) {
 
 bool CodeObjectPatcher::patch_kernel_descriptor(uint64_t file_offset,
                                                 std::span<const uint8_t> descriptor) {
-  if (!image_contains_range(image_.size(), file_offset, descriptor.size()))
+  return patch_bytes(file_offset, descriptor);
+}
+
+bool CodeObjectPatcher::patch_bytes(uint64_t file_offset, std::span<const uint8_t> bytes) {
+  if (!image_contains_range(image_.size(), file_offset, bytes.size()))
     return false;
 
-  std::memcpy(image_.data() + file_offset, descriptor.data(), descriptor.size());
+  std::memcpy(image_.data() + file_offset, bytes.data(), bytes.size());
+  return true;
+}
+
+bool CodeObjectPatcher::replace_note_section(uint64_t section_file_offset,
+                                             std::span<const uint8_t> section_bytes) {
+  if (section_bytes.empty())
+    return false;
+  if (image_.size() < sizeof(Elf64_Ehdr))
+    return false;
+
+  Elf64_Ehdr header{};
+  std::memcpy(&header, image_.data(), sizeof(header));
+  if (header.e_shentsize != sizeof(Elf64_Shdr) || header.e_shoff > image_.size() ||
+      static_cast<uint64_t>(header.e_shnum) * sizeof(Elf64_Shdr) >
+          image_.size() - header.e_shoff) {
+    return false;
+  }
+  if (header.e_phnum != 0 &&
+      (header.e_phentsize != sizeof(Elf64_Phdr) || header.e_phoff > image_.size() ||
+       static_cast<uint64_t>(header.e_phnum) * sizeof(Elf64_Phdr) >
+           image_.size() - header.e_phoff)) {
+    return false;
+  }
+
+  std::vector<Elf64_Shdr> shdrs = read_section_headers(image_, header);
+  std::vector<Elf64_Phdr> phdrs = read_program_headers(image_, header);
+
+  std::optional<size_t> target_section_index;
+  for (size_t i = 0; i < shdrs.size(); ++i) {
+    if (shdrs[i].sh_type == SHT_NOTE && shdrs[i].sh_offset == section_file_offset) {
+      target_section_index = i;
+      break;
+    }
+  }
+  if (!target_section_index)
+    return false;
+
+  const Elf64_Shdr old_section = shdrs[*target_section_index];
+  if (!image_contains_range(image_.size(), old_section.sh_offset, old_section.sh_size))
+    return false;
+  if (section_bytes.size() < old_section.sh_size)
+    return false;
+
+  std::optional<size_t> note_segment_index;
+  for (size_t i = 0; i < phdrs.size(); ++i) {
+    const Elf64_Phdr &phdr = phdrs[i];
+    const uint64_t segment_end = phdr.p_offset + phdr.p_filesz;
+    const uint64_t section_end = old_section.sh_offset + old_section.sh_size;
+    if (phdr.p_type == PT_NOTE && phdr.p_offset <= old_section.sh_offset &&
+        section_end <= segment_end) {
+      note_segment_index = i;
+      break;
+    }
+  }
+
+  uint64_t old_region_offset = old_section.sh_offset;
+  uint64_t old_region_size = old_section.sh_size;
+  uint64_t section_relative_offset = 0;
+  uint64_t alignment = std::max<uint64_t>(4, old_section.sh_addralign);
+  if (note_segment_index) {
+    const Elf64_Phdr &phdr = phdrs[*note_segment_index];
+    if (!image_contains_range(image_.size(), phdr.p_offset, phdr.p_filesz))
+      return false;
+    old_region_offset = phdr.p_offset;
+    old_region_size = phdr.p_filesz;
+    section_relative_offset = old_section.sh_offset - phdr.p_offset;
+    alignment = checked_lcm_u64(alignment, phdr.p_align == 0 ? 1 : phdr.p_align);
+    if (alignment == 0)
+      return false;
+  }
+
+  const uint64_t old_section_end = old_section.sh_offset + old_section.sh_size;
+  const uint64_t old_region_end = old_region_offset + old_region_size;
+  const uint64_t delta = section_bytes.size() - old_section.sh_size;
+  if (delta > std::numeric_limits<uint64_t>::max() - old_region_size)
+    return false;
+  std::vector<uint8_t> replacement_region;
+  replacement_region.reserve(static_cast<size_t>(old_region_size + delta));
+  replacement_region.insert(
+      replacement_region.end(), image_.begin() + static_cast<std::ptrdiff_t>(old_region_offset),
+      image_.begin() + static_cast<std::ptrdiff_t>(old_section.sh_offset));
+  replacement_region.insert(replacement_region.end(), section_bytes.begin(),
+                            section_bytes.end());
+  replacement_region.insert(
+      replacement_region.end(), image_.begin() + static_cast<std::ptrdiff_t>(old_section_end),
+      image_.begin() + static_cast<std::ptrdiff_t>(old_region_end));
+
+  const uint64_t new_region_offset = align_up(image_.size(), alignment);
+  if (new_region_offset < image_.size())
+    return false;
+
+  const uint64_t new_section_offset = new_region_offset + section_relative_offset;
+  for (size_t i = 0; i < shdrs.size(); ++i) {
+    Elf64_Shdr &section = shdrs[i];
+    if (section.sh_type != SHT_NOTE)
+      continue;
+    const uint64_t section_end = section.sh_offset + section.sh_size;
+    if (section.sh_offset < old_region_offset || section_end > old_region_end)
+      continue;
+    const uint64_t old_relative = section.sh_offset - old_region_offset;
+    uint64_t new_relative = old_relative;
+    if (i == *target_section_index) {
+      section.sh_size = section_bytes.size();
+    } else if (section.sh_offset >= old_section_end) {
+      new_relative += delta;
+    } else if (section_end > old_section.sh_offset) {
+      return false;
+    }
+    section.sh_offset = new_region_offset + new_relative;
+    if (note_segment_index && (section.sh_flags & SHF_ALLOC) != 0)
+      section.sh_addr = phdrs[*note_segment_index].p_vaddr + new_relative;
+  }
+  shdrs[*target_section_index].sh_offset = new_section_offset;
+  shdrs[*target_section_index].sh_size = section_bytes.size();
+
+  if (note_segment_index) {
+    Elf64_Phdr &phdr = phdrs[*note_segment_index];
+    if (delta > std::numeric_limits<uint64_t>::max() - phdr.p_memsz)
+      return false;
+    phdr.p_offset = new_region_offset;
+    phdr.p_filesz = replacement_region.size();
+    phdr.p_memsz += delta;
+  }
+
+  image_.resize(static_cast<size_t>(new_region_offset), 0);
+  image_.insert(image_.end(), replacement_region.begin(), replacement_region.end());
+  write_elf_tables(image_, header, shdrs, phdrs);
   return true;
 }
 
@@ -533,44 +709,14 @@ bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation 
 
 std::optional<uint64_t> CodeObjectPatcher::append_kernel_entry_prologue(
     uint64_t entry_text_offset, std::span<const uint32_t> prologue_words, rj_code_arch_t arch) {
-  assert(!prologue_words.empty() && "empty kernel entry prologue");
-
-  // A kernel descriptor entry point is a hardware launch address, not an
-  // ordinary branch target. CP expects that instruction address to be 256-byte
-  // aligned. The patcher works in .text-relative offsets, so preserve the
-  // original entry's 256-byte residue; if the original virtual address was
-  // aligned, the redirected virtual address stays aligned too.
-  const uint64_t current_offset = cave_start_ + cave_body_size();
-  const uint64_t required_residue = entry_text_offset % 256;
-  const uint64_t alignment_padding = (required_residue + 256 - (current_offset % 256)) % 256;
-  assert(alignment_padding % sizeof(uint32_t) == 0 && "unaligned cave padding");
-
-  std::vector<uint32_t> cave_words(prologue_words.begin(), prologue_words.end());
-  const uint64_t cave_byte_offset = current_offset + alignment_padding;
-  assert(cave_byte_offset % 256 == required_residue &&
-         "kernel descriptor entry lost its 256-byte alignment");
-
-  // The descriptor now enters the cave directly. The only control-flow fixup is
-  // a final branch from the prologue body to the original, untouched entry.
-  const int64_t branch_pc = static_cast<int64_t>(cave_byte_offset + cave_words.size() * 4);
-  const int64_t target = static_cast<int64_t>(entry_text_offset);
-  const int64_t target_delta_bytes = target - (branch_pc + 4);
-  if (target_delta_bytes % static_cast<int64_t>(sizeof(uint32_t)) != 0)
+  std::optional<KernelEntryProloguePlan> plan =
+      plan_kernel_entry_prologue(cave_start_, cave_body_size(), entry_text_offset,
+                                 prologue_words, arch);
+  if (!plan)
     return std::nullopt;
 
-  const int64_t target_dwords = target_delta_bytes / static_cast<int64_t>(sizeof(uint32_t));
-  if (target_dwords < std::numeric_limits<int16_t>::min() ||
-      target_dwords > std::numeric_limits<int16_t>::max())
-    return std::nullopt;
-
-  if (alignment_padding != 0) {
-    std::vector<uint32_t> padding(alignment_padding / sizeof(uint32_t), build_s_nop(0, arch));
-    append_cave_body(padding);
-  }
-  cave_words.push_back(build_s_branch(static_cast<int16_t>(target_dwords), arch));
-
-  append_cave_body(cave_words);
-  return cave_byte_offset;
+  append_cave_body(plan->cave_words);
+  return plan->new_entry_text_offset;
 }
 
 bool CodeObjectPatcher::redirect_kernel_entry(uint64_t descriptor_file_offset,
@@ -624,10 +770,12 @@ bool CodeObjectPatcher::append_cave_section(std::string_view section_name) {
   // Insert the executable bytes at the exact address assumed by branch stub
   // construction: .text-relative offset text_size_. Any later PT_LOAD segment
   // must keep p_offset congruent with p_vaddr modulo p_align, so the total file
-  // delta is padded up to the required load alignment. Later allocated sections
-  // also move forward in virtual address space; otherwise a large cave can
-  // overlap the following LOAD segment in memory. The padding is part of the RX
-  // LOAD segment but not part of the .rj_translations section.
+  // delta is padded up to the required load alignment. If the padded cave still
+  // fits in the virtual gap after .text, preserve later virtual addresses. This
+  // keeps ET_DYN metadata such as .dynamic entries valid for code objects with
+  // writable LOAD segments after .text. If the cave would overlap the next
+  // allocated address, fall back to moving later allocated sections in virtual
+  // address space.
   const uint64_t file_delta_alignment = shifted_load_delta_alignment(phdrs, cave_file_offset);
   const uint64_t padded_file_delta = align_up(cave_body_.size(), file_delta_alignment);
   assert(padded_file_delta >= cave_body_.size() && "aligned cave delta underflowed");
@@ -637,19 +785,35 @@ bool CodeObjectPatcher::append_cave_section(std::string_view section_name) {
   std::vector<uint8_t> cave_file_bytes(cave_body_.begin(), cave_body_.end());
   cave_file_bytes.resize(padded_file_delta, 0);
 
+  uint64_t next_alloc_vaddr = std::numeric_limits<uint64_t>::max();
+  for (size_t i = 0; i < shdrs.size(); ++i) {
+    if (i == *text_index || shdrs[i].sh_type == SHT_NULL)
+      continue;
+    if ((shdrs[i].sh_flags & SHF_ALLOC) != 0 && shdrs[i].sh_addr >= cave_vaddr)
+      next_alloc_vaddr = std::min(next_alloc_vaddr, shdrs[i].sh_addr);
+  }
+  for (const Elf64_Phdr &phdr : phdrs) {
+    if (phdr.p_type == PT_LOAD && phdr.p_offset >= cave_file_offset && phdr.p_vaddr >= cave_vaddr)
+      next_alloc_vaddr = std::min(next_alloc_vaddr, phdr.p_vaddr);
+  }
+  const bool preserve_later_vaddrs = next_alloc_vaddr == std::numeric_limits<uint64_t>::max() ||
+                                     padded_file_delta <= next_alloc_vaddr - cave_vaddr;
+
   // insert_file_bytes handles file offsets. These side maps record which
   // already-existing allocated objects also need virtual-address adjustments.
   std::vector<bool> shift_section_vaddr(shdrs.size(), false);
   for (size_t i = 0; i < shdrs.size(); ++i) {
     if (i == *text_index || shdrs[i].sh_type == SHT_NULL)
       continue;
-    if ((shdrs[i].sh_flags & SHF_ALLOC) != 0 && shdrs[i].sh_addr >= cave_vaddr)
+    if (!preserve_later_vaddrs && (shdrs[i].sh_flags & SHF_ALLOC) != 0 &&
+        shdrs[i].sh_addr >= cave_vaddr)
       shift_section_vaddr[i] = true;
   }
 
   std::vector<bool> shift_segment_vaddr(phdrs.size(), false);
   for (size_t i = 0; i < phdrs.size(); ++i) {
-    if (phdrs[i].p_vaddr >= cave_vaddr && phdrs[i].p_offset >= cave_file_offset)
+    if (!preserve_later_vaddrs && phdrs[i].p_vaddr >= cave_vaddr &&
+        phdrs[i].p_offset >= cave_file_offset)
       shift_segment_vaddr[i] = true;
   }
 

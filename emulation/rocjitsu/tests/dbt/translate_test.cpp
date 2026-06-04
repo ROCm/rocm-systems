@@ -1162,6 +1162,48 @@ TEST(CodeObjectPatcher, CaveInsertionPreservesLoadSegmentAlignment) {
       << "symbols in unmoved .text must keep their original virtual address";
 }
 
+TEST(CodeObjectPatcher, CaveInsertionPreservesLaterVirtualAddressesWhenGapAllows) {
+  constexpr uint64_t load_align = 0x1000;
+  constexpr uint64_t padded_file_delta = load_align;
+
+  auto image = make_minimal_amdgpu_elf_with_load_segments();
+  AmdGpuCodeObject co(image.data(), image.size());
+  ASSERT_TRUE(co.is_valid());
+  ASSERT_FALSE(co.text_sections().empty());
+  const Section *original_rodata = find_section(co, ".rodata");
+  ASSERT_NE(original_rodata, nullptr);
+
+  CodeObjectPatcher patcher(co);
+  patcher.set_cave_start(co.text_sections()[0]->size());
+  const std::array<uint32_t, 2> cave_words = {0xDEADBEEFu, 0xCAFEBABEu};
+  patcher.append_cave_body(cave_words);
+  ASSERT_TRUE(patcher.append_cave_section());
+
+  auto patched_bytes = patcher.emit();
+  AmdGpuCodeObject patched(patched_bytes.data(), patched_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+
+  const Section *text = patched.text_sections()[0];
+  const Section *translations = find_section(patched, ".rj_translations");
+  const Section *rodata = find_section(patched, ".rodata");
+  ASSERT_NE(text, nullptr);
+  ASSERT_NE(translations, nullptr);
+  ASSERT_NE(rodata, nullptr);
+  EXPECT_EQ(translations->vaddr(), text->vaddr() + text->size());
+  EXPECT_EQ(rodata->sectionOffset(), original_rodata->sectionOffset() + padded_file_delta);
+  EXPECT_EQ(rodata->vaddr(), original_rodata->vaddr())
+      << "later ET_DYN virtual addresses should stay stable when the cave fits in the gap";
+
+  const auto *ehdr = reinterpret_cast<const Elf64_Ehdr *>(patched_bytes.data());
+  ASSERT_EQ(ehdr->e_phnum, 2u);
+  const auto *phdrs = reinterpret_cast<const Elf64_Phdr *>(patched_bytes.data() + ehdr->e_phoff);
+  EXPECT_EQ(phdrs[0].p_filesz, text->size() + padded_file_delta);
+  EXPECT_EQ(phdrs[0].p_memsz, text->size() + padded_file_delta);
+  EXPECT_EQ(phdrs[1].p_offset, rodata->sectionOffset());
+  EXPECT_EQ(phdrs[1].p_vaddr, rodata->vaddr());
+  EXPECT_LE(phdrs[0].p_vaddr + phdrs[0].p_memsz, phdrs[1].p_vaddr);
+}
+
 TEST(CodeObjectPatcher, CaveInsertionPreservesMovedKernelDescriptorEntryAddress) {
   using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
   constexpr uint64_t load_align = 0x1000;

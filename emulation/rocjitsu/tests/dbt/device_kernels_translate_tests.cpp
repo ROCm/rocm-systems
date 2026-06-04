@@ -577,6 +577,8 @@ TEST(CodeObjectPatcher, KernelEntryPrologueRejectsOutOfRangeBranch) {
                              rocjitsu::KernelDescriptorTranslationOptions{});
   ASSERT_FALSE(infos.empty());
 
+  const std::vector<uint8_t> original_image(patcher.image_bytes().begin(),
+                                            patcher.image_bytes().end());
   patcher.set_cave_start(infos[0].entry_text_offset + 200000);
   const std::array<uint32_t, 1> prologue = {rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4)};
   const auto prologue_entry = patcher.append_kernel_entry_prologue(
@@ -584,6 +586,8 @@ TEST(CodeObjectPatcher, KernelEntryPrologueRejectsOutOfRangeBranch) {
 
   EXPECT_FALSE(prologue_entry.has_value());
   EXPECT_EQ(patcher.cave_body_size(), 0u);
+  EXPECT_EQ(std::vector<uint8_t>(patcher.image_bytes().begin(), patcher.image_bytes().end()),
+            original_image);
 }
 
 TEST(CodeObjectPatcher, RejectsOutOfRangeKernelDescriptorUpdates) {

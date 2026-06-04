@@ -91,6 +91,34 @@ inline constexpr uint32_t elf_mach_for_arch(rj_code_arch_t arch) {
   }
 }
 
+inline constexpr rj_code_arch_t arch_from_elf_flags(uint32_t flags) {
+  switch (flags & EF_AMDGPU_MACH) {
+  case EF_AMDGPU_MACH_AMDGCN_GFX908:
+    return ROCJITSU_CODE_ARCH_CDNA1;
+  case EF_AMDGPU_MACH_AMDGCN_GFX90A:
+  case EF_AMDGPU_MACH_AMDGCN_GFX940:
+  case EF_AMDGPU_MACH_AMDGCN_GFX941:
+    return ROCJITSU_CODE_ARCH_CDNA2;
+  case EF_AMDGPU_MACH_AMDGCN_GFX942:
+    return ROCJITSU_CODE_ARCH_CDNA3;
+  case EF_AMDGPU_MACH_AMDGCN_GFX950:
+    return ROCJITSU_CODE_ARCH_CDNA4;
+  case EF_AMDGPU_MACH_AMDGCN_GFX1010:
+    return ROCJITSU_CODE_ARCH_RDNA1;
+  case EF_AMDGPU_MACH_AMDGCN_GFX1030:
+    return ROCJITSU_CODE_ARCH_RDNA2;
+  case EF_AMDGPU_MACH_AMDGCN_GFX1100:
+    return ROCJITSU_CODE_ARCH_RDNA3;
+  case EF_AMDGPU_MACH_AMDGCN_GFX1150:
+    return ROCJITSU_CODE_ARCH_RDNA3_5;
+  case EF_AMDGPU_MACH_AMDGCN_GFX1200:
+  case EF_AMDGPU_MACH_AMDGCN_GFX1201:
+    return ROCJITSU_CODE_ARCH_RDNA4;
+  default:
+    return ROCJITSU_CODE_ARCH_INVALID;
+  }
+}
+
 inline constexpr uint32_t SHT_NULL = 0;
 inline constexpr uint32_t SHT_PROGBITS = 1;
 inline constexpr uint32_t SHT_SYMTAB = 2;
