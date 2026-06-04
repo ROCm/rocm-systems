@@ -87,20 +87,6 @@ void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                            rocprofiler_user_data_t* /*user_data*/,
                            void* callback_data)
 {
-    if (record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
-        record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD && record.operation == ROCPROFILER_CODE_OBJECT_LOAD)
-    {
-        assert(callback_data);
-        auto* tool_data = static_cast<std::unique_ptr<tool_data_t>*>(callback_data)->get();
-        if (tool_data->pc_sampling.enabled())
-        {
-            assert(record.payload);
-            const auto* obj_data = static_cast<rocprofiler_callback_tracing_code_object_load_data_t*>(
-                record.payload);
-            tool_data->pc_sampling.on_code_object_load(*obj_data);
-        }
-        return;
-    }
     g_sdk_callbacks->tool_tracing_callback(record, callback_data);
 }
 

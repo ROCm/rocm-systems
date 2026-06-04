@@ -165,6 +165,39 @@ TEST_F(TestSdkCallbacks, ProvidedTracingRecord_ToolTracingCbReturnsKernelIdsFrom
     EXPECT_EQ(*(++m_tool_data->target_kernel_ids.cbegin()), kernel_id_1);
 }
 
+namespace
+{
+class MockPcSamplingCollector : public pc_sampling_collector_t
+{
+public:
+    void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& /*info*/) override
+    {
+        ++load_count;
+    }
+
+    void write(code_object_writer_t& /*writer*/) override {}
+
+    int load_count = 0;
+};
+}  // namespace
+
+TEST_F(TestSdkCallbacks, ProvidedCodeObjectLoadWithPcSamplingEnabled_ForwardsToCollector)
+{
+    auto collector = std::make_shared<MockPcSamplingCollector>();
+    m_tool_data->pc_sampling = pc_sampling_feature_t{PcSamplingMode::HostTrap, "unused.json", collector};
+
+    rocprofiler_callback_tracing_record_t                record  = {};
+    rocprofiler_callback_tracing_code_object_load_data_t payload = {};
+    record.phase                                                 = ROCPROFILER_CALLBACK_PHASE_LOAD;
+    record.kind      = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
+    record.operation = ROCPROFILER_CODE_OBJECT_LOAD;
+    record.payload   = &payload;
+
+    m_sdk_callbacks->tool_tracing_callback(record, &m_tool_data);
+
+    EXPECT_EQ(collector->load_count, 1);
+}
+
 TEST_P(TestSdkCallbacksKernelFiltering, ProvidedKernelFilteringEnabled_ReturnsKernelIdsOnlyForMathing)
 {
     constexpr uint64_t kernel_id_0           = 10;
