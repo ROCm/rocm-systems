@@ -230,6 +230,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
     Several items were misaligned in the default output, and this change ensures a consistent left-aligned format across all fields.
   - *This change is purely cosmetic and does not affect any functionality.*
 
+- **Fixed `amd-smi static -C` reporting `N/A` for SYS/MEM/DF/SOC/DCEF clocks at idle on gfx1151-class APUs**.
+  - `get_frequencies()` in the rsmi backend no longer discards a parsed `pp_dpm_*` DPM table with `STATUS_UNEXPECTED_DATA` when the kernel omits the `*` current-level marker (which happens whenever the SMU power-gates the domain at idle). The supported frequency table is now returned and `current` is reported as `-1` (unknown) until the marker reappears, so `amdsmi_get_clk_freq()` and all callers see the table at idle as well as under load.
+
 ## amd_smi_lib for ROCm 7.12.0
 
 ### Added

@@ -358,6 +358,12 @@ public:
     void        populate_after() override;
     bool        valid() const { return is_valid; }
 
+    void clear()
+    {
+        AQLPacket::clear();
+        cb = {};
+    }
+
     SPMCallbackContext             cb{};
     SPMProfileData                 profile{};
     std::shared_ptr<SPMMemoryPool> pool{};

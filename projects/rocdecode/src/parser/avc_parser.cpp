@@ -1039,10 +1039,8 @@ ParserResult AvcVideoParser::ParseSps(uint8_t *p_stream, size_t size) {
 
     p_sps->vui_parameters_present_flag = Parser::GetBit(p_stream, offset);
     if (p_sps->vui_parameters_present_flag == 1) {
-        ParserResult ret;
-        if ((ret = GetVuiParameters(p_stream, offset, &p_sps->vui_seq_parameters)) != PARSER_OK) {
-            return ret;
-        }
+        // Treat VUI parameter parsing failure as non-fatal error and continue parsing since VUI parameters are not necessary for decoding.
+        GetVuiParameters(p_stream, offset, &p_sps->vui_seq_parameters);
     }
 
     p_sps->is_received = 1;  // confirm SPS with seq_parameter_set_id received (but not activated)
@@ -1640,15 +1638,24 @@ ParserResult AvcVideoParser::GetVuiParameters(uint8_t *p_stream, size_t &offset,
             p_vui_params->colour_primaries = Parser::ReadBits(p_stream, offset, 8);
             p_vui_params->transfer_characteristics = Parser::ReadBits(p_stream, offset, 8);
             p_vui_params->matrix_coefficients = Parser::ReadBits(p_stream, offset, 8);
+        } else {
+            p_vui_params->colour_primaries = 2;           // Unspecified
+            p_vui_params->transfer_characteristics = 2;   // Unspecified
+            p_vui_params->matrix_coefficients = 2;         // Unspecified
         }
+    } else {
+        p_vui_params->video_format = 5;                    // Unspecified
+        p_vui_params->colour_primaries = 2;                // Unspecified
+        p_vui_params->transfer_characteristics = 2;        // Unspecified
+        p_vui_params->matrix_coefficients = 2;             // Unspecified
     }
 
     p_vui_params->chroma_loc_info_present_flag = Parser::GetBit(p_stream, offset);
     if (p_vui_params->chroma_loc_info_present_flag == 1) {
         p_vui_params->chroma_sample_loc_type_top_field = Parser::ExpGolomb::ReadUe(p_stream, offset);
-        CHECK_ALLOWED_RANGE("chroma_sample_loc_type_top_field", p_vui_params->chroma_sample_loc_type_top_field, 0, 5);
+        CHECK_RANGE_AND_SET_DEFAULT("chroma_sample_loc_type_top_field", p_vui_params->chroma_sample_loc_type_top_field, 0, 5, 0);
         p_vui_params->chroma_sample_loc_type_bottom_field = Parser::ExpGolomb::ReadUe(p_stream, offset);
-        CHECK_ALLOWED_RANGE("chroma_sample_loc_type_bottom_field", p_vui_params->chroma_sample_loc_type_bottom_field, 0, 5);
+        CHECK_RANGE_AND_SET_DEFAULT("chroma_sample_loc_type_bottom_field", p_vui_params->chroma_sample_loc_type_bottom_field, 0, 5, 0);
     }
 
     p_vui_params->timing_info_present_flag = Parser::GetBit(p_stream, offset);
@@ -1661,7 +1668,7 @@ ParserResult AvcVideoParser::GetVuiParameters(uint8_t *p_stream, size_t &offset,
     p_vui_params->nal_hrd_parameters_present_flag = Parser::GetBit(p_stream, offset);
     if (p_vui_params->nal_hrd_parameters_present_flag == 1 ) {
         p_vui_params->nal_hrd_parameters.cpb_cnt_minus1 = Parser::ExpGolomb::ReadUe(p_stream, offset);
-        CHECK_ALLOWED_RANGE("cpb_cnt_minus1", p_vui_params->nal_hrd_parameters.cpb_cnt_minus1, 0, 31);
+        CHECK_RANGE_AND_SET_DEFAULT("cpb_cnt_minus1", p_vui_params->nal_hrd_parameters.cpb_cnt_minus1, 0, 31, 0);
         p_vui_params->nal_hrd_parameters.bit_rate_scale = Parser::ReadBits(p_stream, offset, 4);
         p_vui_params->nal_hrd_parameters.cpb_size_scale = Parser::ReadBits(p_stream, offset, 4);
         for (int SchedSelIdx = 0; SchedSelIdx <= p_vui_params->nal_hrd_parameters.cpb_cnt_minus1; SchedSelIdx ++) {
@@ -1678,6 +1685,7 @@ ParserResult AvcVideoParser::GetVuiParameters(uint8_t *p_stream, size_t &offset,
     p_vui_params->vcl_hrd_parameters_present_flag = Parser::GetBit(p_stream, offset);
     if (p_vui_params->vcl_hrd_parameters_present_flag == 1) {
         p_vui_params->vcl_hrd_parameters.cpb_cnt_minus1 = Parser::ExpGolomb::ReadUe(p_stream, offset);
+        CHECK_RANGE_AND_SET_DEFAULT("cpb_cnt_minus1", p_vui_params->vcl_hrd_parameters.cpb_cnt_minus1, 0, 31, 0);
         p_vui_params->vcl_hrd_parameters.bit_rate_scale = Parser::ReadBits(p_stream, offset, 4);
         p_vui_params->vcl_hrd_parameters.cpb_size_scale = Parser::ReadBits(p_stream, offset, 4);
         for (int SchedSelIdx = 0; SchedSelIdx <= p_vui_params->vcl_hrd_parameters.cpb_cnt_minus1; SchedSelIdx ++) {
@@ -1692,6 +1700,8 @@ ParserResult AvcVideoParser::GetVuiParameters(uint8_t *p_stream, size_t &offset,
     }
     if (p_vui_params->nal_hrd_parameters_present_flag == 1 || p_vui_params->vcl_hrd_parameters_present_flag == 1) {
         p_vui_params->low_delay_hrd_flag = Parser::GetBit(p_stream, offset);
+    } else {
+        p_vui_params->low_delay_hrd_flag = 1 - p_vui_params->fixed_frame_rate_flag;
     }
     
     p_vui_params->pic_struct_present_flag = Parser::GetBit(p_stream, offset);
@@ -1699,15 +1709,23 @@ ParserResult AvcVideoParser::GetVuiParameters(uint8_t *p_stream, size_t &offset,
     if (p_vui_params->bitstream_restriction_flag) {
         p_vui_params->motion_vectors_over_pic_boundaries_flag = Parser::GetBit(p_stream, offset);
         p_vui_params->max_bytes_per_pic_denom = Parser::ExpGolomb::ReadUe(p_stream, offset);
-        CHECK_ALLOWED_RANGE("max_bytes_per_pic_denom", p_vui_params->max_bytes_per_pic_denom, 0, 16);
+        CHECK_RANGE_AND_SET_DEFAULT("max_bytes_per_pic_denom", p_vui_params->max_bytes_per_pic_denom, 0, 16, 2);
         p_vui_params->max_bits_per_mb_denom = Parser::ExpGolomb::ReadUe(p_stream, offset);
-        CHECK_ALLOWED_RANGE("max_bits_per_mb_denom", p_vui_params->max_bits_per_mb_denom, 0, 16);
+        CHECK_RANGE_AND_SET_DEFAULT("max_bits_per_mb_denom", p_vui_params->max_bits_per_mb_denom, 0, 16, 1);
         p_vui_params->log2_max_mv_length_horizontal = Parser::ExpGolomb::ReadUe(p_stream, offset);
-        CHECK_ALLOWED_RANGE("log2_max_mv_length_horizontal", p_vui_params->log2_max_mv_length_horizontal, 0, 15);
+        CHECK_RANGE_AND_SET_DEFAULT("log2_max_mv_length_horizontal", p_vui_params->log2_max_mv_length_horizontal, 0, 15, 15);
         p_vui_params->log2_max_mv_length_vertical = Parser::ExpGolomb::ReadUe(p_stream, offset);
-        CHECK_ALLOWED_RANGE("log2_max_mv_length_vertical", p_vui_params->log2_max_mv_length_vertical, 0, 15);
+        CHECK_RANGE_AND_SET_DEFAULT("log2_max_mv_length_vertical", p_vui_params->log2_max_mv_length_vertical, 0, 15, 15);
         p_vui_params->max_num_reorder_frames = Parser::ExpGolomb::ReadUe(p_stream, offset);
         p_vui_params->max_dec_frame_buffering = Parser::ExpGolomb::ReadUe(p_stream, offset);
+    } else {
+        p_vui_params->motion_vectors_over_pic_boundaries_flag = 1;
+        p_vui_params->max_bytes_per_pic_denom = 2;
+        p_vui_params->max_bits_per_mb_denom = 1;
+        p_vui_params->log2_max_mv_length_horizontal = 15;
+        p_vui_params->log2_max_mv_length_vertical = 15;
+        p_vui_params->max_num_reorder_frames = AVC_MAX_DPB_FRAMES;
+        p_vui_params->max_dec_frame_buffering = AVC_MAX_DPB_FRAMES;
     }
     return PARSER_OK;
 }

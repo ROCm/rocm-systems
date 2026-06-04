@@ -239,7 +239,6 @@ class TestOpenMPTarget(RocprofsysTest):
                     "Z4vmulIfEvPT_S1_S1_i_l51.kd",
                     "Z4vmulIdEvPT_S1_S1_i_l51.kd",
                 ],
-                depths=[0, 0, 0],
                 counts=[4, 4, 4],
             )
 

@@ -664,6 +664,17 @@ class GpuAgent : public GpuAgentInt {
   // Protects xgmi_peer_list_
   std::mutex xgmi_peer_list_lock_;
 
+  // @brief Number of H2D/D2H engines
+  // On systems with more than 2 SDMA engines, this is capped at 2.
+  size_t num_h2d_d2h_engines_;
+
+  // @brief Number of P2P engines
+  // P2P engines are used for P2P copies between two GPUs.
+  // On platforms with xGMI, these are the xGMI engines.
+  // On platforms with more than 2 SDMA engines, these are the SDMA engines.
+  size_t num_p2p_engines_;
+
+
   // @brief AQL queues for cache management and blit compute usage.
   enum QueueEnum {
     QueueUtility,     // Cache management and device to {host,device} blit compute
