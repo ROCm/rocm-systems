@@ -5,6 +5,7 @@
  */
 
 #include <hip/hip_runtime.h>
+#include <set>
 #include "hip_internal.hpp"
 #include "hip_vm.hpp"
 namespace hip {
@@ -287,12 +288,7 @@ hipError_t hipMemMap(void* ptr, size_t size, size_t offset, hipMemGenericAllocat
   hip::GenericAllocation* ga = reinterpret_cast<hip::GenericAllocation*>(handle);
   ga->retain();
 
-  // Direct synchronous path: bypass VirtualMapCommand/enqueue/awaitCompletion.
-  // The owning device of the physical handle performs the mapping. Per the
-  // documented contract, the caller must ensure no work is using `ptr` prior
-  // to hipMemMap returning -- no implicit sync is performed here. Stream
-  // capture / mempool async / graph paths continue to use VirtualMapCommand
-  // (see hip_graph_internal.hpp, hip_mempool_impl.cpp).
+  // Direct synchronous path, do not wait on streams or other work
   amd::Device* dev = g_devices[ga->GetProperties().location.id]->devices()[0];
   if (!dev->virtualMap(ptr, size, &ga->asAmdMemory())) {
     ga->release();
@@ -444,7 +440,39 @@ hipError_t hipMemUnmap(void* ptr, size_t size) {
     HIP_RETURN(status);
   }
 
-  // Unmap all sub-buffers in the range
+  // Direct synchronous path; synchronize all devices with access to memory
+
+  // Step 1: Find all devices which have access the full range [ptr, ptr+size)
+  std::set<int> sync_device_ids;
+  {
+    amd::Memory* it = vaddr_sub_obj;
+    address end_addr = reinterpret_cast<address>(vaddr_sub_obj->getSvmPtr()) + size;
+    while (it && NextSubBufferPtr(it) <= end_addr) {
+      amd::Memory* phys_mem_obj = it->getUserData().phys_mem_obj;
+      if (phys_mem_obj != nullptr) {
+        auto* ga = reinterpret_cast<hip::GenericAllocation*>(phys_mem_obj->getUserData().data);
+        if (ga != nullptr) {
+          sync_device_ids.insert(ga->GetProperties().location.id);
+        }
+      }
+      it = amd::MemObjMap::FindMemObj(NextSubBufferPtr(it));
+    }
+    for (size_t dev_idx = 0; dev_idx < g_devices.size(); ++dev_idx) {
+      amd::Device::VmmAccess access_flags = amd::Device::VmmAccess::kNone;
+      if (g_devices[dev_idx]->devices()[0]->GetMemAccess(ptr, &access_flags) &&
+          access_flags != amd::Device::VmmAccess::kNone) {
+        sync_device_ids.insert(static_cast<int>(dev_idx));
+      }
+    }
+  }
+
+  // Step 2: SyncAllStreams once per device in the union BEFORE the sub-buffer
+  // loop, so the unmap doesn't race in-flight access-device work.
+  for (int dev_id : sync_device_ids) {
+    g_devices[dev_id]->SyncAllStreams();
+  }
+
+  // Step 3: Sub-buffer unmap loop.
   address end_address = reinterpret_cast<address>(vaddr_sub_obj->getSvmPtr()) + size;
   while (vaddr_sub_obj && NextSubBufferPtr(vaddr_sub_obj) <= end_address) {
     amd::Memory* phys_mem_obj = vaddr_sub_obj->getUserData().phys_mem_obj;
@@ -452,21 +480,24 @@ hipError_t hipMemUnmap(void* ptr, size_t size) {
       HIP_RETURN(hipErrorInvalidValue);
     }
 
-    // Save next_ptr before enqueue — submitVirtualMap releases sub_obj
-    address next_ptr = NextSubBufferPtr(vaddr_sub_obj);
-
-    amd::Command* cmd = new amd::VirtualMapCommand(
-        *hip::getCurrentDevice()->NullStream(), amd::Command::EventWaitList{},
-        vaddr_sub_obj->getSvmPtr(), vaddr_sub_obj->getSize(), nullptr);
-    cmd->enqueue();
-    cmd->awaitCompletion();
-    cmd->release();
-    // restore the original pa of the generic allocation
     hip::GenericAllocation* ga =
         reinterpret_cast<hip::GenericAllocation*>(phys_mem_obj->getUserData().data);
+    void* sub_va = vaddr_sub_obj->getSvmPtr();
+    size_t sub_size = vaddr_sub_obj->getSize();
+    address next_ptr = NextSubBufferPtr(vaddr_sub_obj);
+
+    // Each sub-buffer is unmapped by the device that owns its physical backing.
+    amd::Device* sub_dev = g_devices[ga->GetProperties().location.id]->devices()[0];
+    if (!sub_dev->virtualUnmap(sub_va, sub_size)) {
+      LogPrintfError("hipMemUnmap: virtualUnmap failed for va: %p", sub_va);
+      HIP_RETURN(hipErrorInvalidValue);
+    }
+
+    // Release the ga ref only on successful HW unmap.
     ga->release();
 
-    // sub_obj already released in submitVirtualMap after HW unmap
+    // sub_obj already released inside UnmapMemObjBookkeeping (called from
+    // virtualUnmap on success).
     vaddr_sub_obj = amd::MemObjMap::FindMemObj(next_ptr);
   }
 

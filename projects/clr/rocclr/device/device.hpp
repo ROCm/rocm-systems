@@ -2033,8 +2033,8 @@ class Device : public RuntimeObject {
    *                                     pre-refactor behavior); PAL passes
    *                                     false.
    */
-  void FinalizeMapMemObjBookkeeping(amd::Memory* vaddr_sub_obj, amd::Memory* phys,
-                                    void* va_ptr, bool import_vmm_for_interprocess) const;
+  void FinalizeMapMemObjBookkeeping(amd::Memory* vaddr_sub_obj, amd::Memory* phys, void* va_ptr,
+                                    bool import_vmm_for_interprocess) const;
 
   /**
    * Shared "unmap" bookkeeping helper used by both HSA and PAL
@@ -2052,8 +2052,8 @@ class Device : public RuntimeObject {
    * @param release_sub_obj         HSA passes true; PAL passes false to
    *                                preserve pre-refactor behavior.
    */
-  void UnmapMemObjBookkeeping(amd::Memory* vaddr_sub_obj, void* va_ptr,
-                              bool destroy_virtual_buffer, bool release_sub_obj) const;
+  void UnmapMemObjBookkeeping(amd::Memory* vaddr_sub_obj, void* va_ptr, bool destroy_virtual_buffer,
+                              bool release_sub_obj) const;
 
   /**
    * Reserve a VA range with no backing store

@@ -2471,18 +2471,11 @@ static inline address NextSubBufferPtr(const amd::Memory* mem) {
 
 // ================================================================================================
 // Direct synchronous map path bypassing VirtualMapCommand. Reuses the
-// device-level VirtualGPU (xferQueue_) -- no new VMM queue is introduced.
+// device-level VirtualGPU (xferQueue_).
 // Locks execution() to serialize against this device's command submission,
 // then issues Pal::IQueue::RemapVirtualMemoryPages on MainEngine and waits
 // the fence. The HIP layer is responsible for draining peer-device queues
-// from the CPU side before invocation; PAL has no handle to other
-// pal::Device queues anyway.
-//
-// Note: rocclr lives below the HIP layer and cannot reach hip::Device's
-// NullStream directly. The PAL Device's pre-existing xferQueue_ is the
-// closest device-scoped VirtualGPU and its execution()/WaitForIdle still
-// catch in-flight PAL work on this device; user-stream draining is
-// performed by Commit 5's hipMemUnmap before this entry point runs.
+// from the CPU side before calling virtualMap
 bool Device::virtualMap(void* va, size_t size, amd::Memory* phys) {
   if (phys == nullptr) {
     LogError("PAL virtualMap: phys is nullptr");
@@ -2499,8 +2492,7 @@ bool Device::virtualMap(void* va, size_t size, amd::Memory* phys) {
   std::scoped_lock lock(vgpu->execution());
 
   amd::Memory* vaddr_base_obj = amd::MemObjMap::FindVirtualMemObj(va);
-  if (vaddr_base_obj == nullptr ||
-      !(vaddr_base_obj->getMemFlags() & CL_MEM_VA_RANGE_AMD)) {
+  if (vaddr_base_obj == nullptr || !(vaddr_base_obj->getMemFlags() & CL_MEM_VA_RANGE_AMD)) {
     LogPrintfError("PAL virtualMap: no virtual VA reservation for va: %p", va);
     return false;
   }
@@ -2515,18 +2507,16 @@ bool Device::virtualMap(void* va, size_t size, amd::Memory* phys) {
   Pal::IGpuMemory* phymem_igpu_mem = phys_pal_mem->iMem();
   size_t phys_offset = phys_pal_mem->offset();
 
-  size_t vaddr_offset =
-      reinterpret_cast<address>(vaddr_sub_obj->getSvmPtr()) -
-      reinterpret_cast<address>(vaddr_base_obj->getSvmPtr());
+  size_t vaddr_offset = reinterpret_cast<address>(vaddr_sub_obj->getSvmPtr()) -
+                        reinterpret_cast<address>(vaddr_base_obj->getSvmPtr());
 
   pal::Memory* vaddr_pal_mem = getGpuMemory(vaddr_base_obj);
-  Pal::VirtualMemoryRemapRange range{vaddr_pal_mem->iMem(), vaddr_offset,
-                                     phymem_igpu_mem,       phys_offset,
-                                     size,                  Pal::VirtualGpuMemAccessMode::NoAccess};
+  Pal::VirtualMemoryRemapRange range{
+      vaddr_pal_mem->iMem(), vaddr_offset, phymem_igpu_mem,
+      phys_offset,           size,         Pal::VirtualGpuMemAccessMode::NoAccess};
 
   vgpu->eventBegin(MainEngine);
-  auto result =
-      vgpu->queue(MainEngine).iQueue_->RemapVirtualMemoryPages(1, &range, false, nullptr);
+  auto result = vgpu->queue(MainEngine).iQueue_->RemapVirtualMemoryPages(1, &range, false, nullptr);
   GpuEvent event;
   vgpu->eventEnd(MainEngine, event);
   vgpu->setGpuEvent(event);
@@ -2549,9 +2539,7 @@ bool Device::virtualMap(void* va, size_t size, amd::Memory* phys) {
 
 // ================================================================================================
 // Direct synchronous unmap path. Symmetric to virtualMap, but preceded by
-// WaitForIdleCompute/Sdma on this device only (no peer waits — the HIP
-// layer already CPU-drained peer devices in Commit 5's hipMemUnmap; PAL
-// has no handle to other pal::Device queues regardless).
+// WaitForIdleCompute/Sdma on this device only. HIP layer must handle device sync
 bool Device::virtualUnmap(void* va, size_t size) {
   VirtualGPU* vgpu = xferQueue_;
   if (vgpu == nullptr) {
@@ -2569,29 +2557,29 @@ bool Device::virtualUnmap(void* va, size_t size) {
   }
 
   amd::Memory* vaddr_base_obj = amd::MemObjMap::FindVirtualMemObj(va);
-  if (vaddr_base_obj == nullptr ||
-      !(vaddr_base_obj->getMemFlags() & CL_MEM_VA_RANGE_AMD)) {
+  if (vaddr_base_obj == nullptr || !(vaddr_base_obj->getMemFlags() & CL_MEM_VA_RANGE_AMD)) {
     LogPrintfError("PAL virtualUnmap: no virtual VA reservation for va: %p", va);
     return false;
   }
 
-  size_t vaddr_offset =
-      reinterpret_cast<address>(vaddr_sub_obj->getSvmPtr()) -
-      reinterpret_cast<address>(vaddr_base_obj->getSvmPtr());
+  size_t vaddr_offset = reinterpret_cast<address>(vaddr_sub_obj->getSvmPtr()) -
+                        reinterpret_cast<address>(vaddr_base_obj->getSvmPtr());
 
   pal::Memory* vaddr_pal_mem = getGpuMemory(vaddr_base_obj);
   // Unmap: no physical backing on the range.
-  Pal::VirtualMemoryRemapRange range{vaddr_pal_mem->iMem(), vaddr_offset,
-                                     nullptr,               0,
-                                     size,                  Pal::VirtualGpuMemAccessMode::NoAccess};
+  Pal::VirtualMemoryRemapRange range{vaddr_pal_mem->iMem(),
+                                     vaddr_offset,
+                                     nullptr,
+                                     0,
+                                     size,
+                                     Pal::VirtualGpuMemAccessMode::NoAccess};
 
   // Drain in-flight work touching the VA range on this device's queues.
   vgpu->WaitForIdleCompute();
   vgpu->WaitForIdleSdma();
 
   vgpu->eventBegin(MainEngine);
-  auto result =
-      vgpu->queue(MainEngine).iQueue_->RemapVirtualMemoryPages(1, &range, false, nullptr);
+  auto result = vgpu->queue(MainEngine).iQueue_->RemapVirtualMemoryPages(1, &range, false, nullptr);
   GpuEvent event;
   vgpu->eventEnd(MainEngine, event);
   vgpu->setGpuEvent(event);

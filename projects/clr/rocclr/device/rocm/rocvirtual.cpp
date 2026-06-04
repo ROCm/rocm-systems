@@ -3650,8 +3650,8 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
 
   // If Physical address is not set, then it is map command. If set, it is unmap command.
   if (phys_mem_obj != nullptr) {
-    amd::Memory* vaddr_sub_obj = dev().MapMemObjBookkeeping(
-        phys_mem_obj, const_cast<void*>(vcmd.ptr()), vcmd.size());
+    amd::Memory* vaddr_sub_obj =
+        dev().MapMemObjBookkeeping(phys_mem_obj, const_cast<void*>(vcmd.ptr()), vcmd.size());
     if (vaddr_sub_obj == nullptr) {
       LogError("HSA Command: MapMemObjBookkeeping failed!");
       profilingEnd();
@@ -3664,8 +3664,7 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
                                        vaddr_sub_obj->getOffset(), opaque_hsa_handle, 0)) ==
         HSA_STATUS_SUCCESS) {
       constexpr bool kImportVmmForInterprocess = true;
-      dev().FinalizeMapMemObjBookkeeping(vaddr_sub_obj, phys_mem_obj,
-                                         const_cast<void*>(vcmd.ptr()),
+      dev().FinalizeMapMemObjBookkeeping(vaddr_sub_obj, phys_mem_obj, const_cast<void*>(vcmd.ptr()),
                                          kImportVmmForInterprocess);
     } else {
       LogError("HSA Command: hsa_amd_vmem_map failed!");

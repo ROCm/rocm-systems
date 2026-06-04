@@ -2351,8 +2351,8 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
   size_t vaddr_offset = 0;
   size_t phys_offset = 0;
   if (phys_mem_obj != nullptr) {
-    vaddr_sub_obj = dev().MapMemObjBookkeeping(phys_mem_obj, const_cast<void*>(vcmd.ptr()),
-                                               vcmd.size());
+    vaddr_sub_obj =
+        dev().MapMemObjBookkeeping(phys_mem_obj, const_cast<void*>(vcmd.ptr()), vcmd.size());
     if (vaddr_sub_obj == nullptr) {
       LogError("PAL Command: MapMemObjBookkeeping failed!");
       profilingEnd(vcmd);
@@ -2392,8 +2392,7 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
   if (result == Pal::Result::Success) {
     if (phys_mem_obj != nullptr) {
       constexpr bool kImportVmmForInterprocess = false;
-      dev().FinalizeMapMemObjBookkeeping(vaddr_sub_obj, phys_mem_obj,
-                                         const_cast<void*>(vcmd.ptr()),
+      dev().FinalizeMapMemObjBookkeeping(vaddr_sub_obj, phys_mem_obj, const_cast<void*>(vcmd.ptr()),
                                          kImportVmmForInterprocess);
     } else {
       // assert the vaddr_mem_obj is mapped and needs to be removed
