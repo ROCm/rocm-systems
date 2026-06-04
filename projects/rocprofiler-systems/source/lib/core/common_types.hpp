@@ -20,10 +20,10 @@ namespace rocprofsys
  */
 struct argument_info
 {
-    uint32_t    arg_number = 0;   ///< Argument position/index
-    std::string arg_type   = {};  ///< Argument type (e.g., "int", "float*")
-    std::string arg_name   = {};  ///< Argument name
-    std::string arg_value  = {};  ///< Argument value as string
+    std::uint32_t arg_number = 0;   ///< Argument position/index
+    std::string   arg_type   = {};  ///< Argument type (e.g., "int", "float*")
+    std::string   arg_name   = {};  ///< Argument name
+    std::string   arg_value  = {};  ///< Argument value as string
 };
 
 using function_args_t = std::vector<argument_info>;
@@ -73,8 +73,8 @@ process_arguments_string(const std::string& arg_str)
 
     for(auto it = tokens.begin(); it != tokens.end(); it += 4)
     {
-        argument_info arg = { static_cast<uint32_t>(std::stoi(*it)), *(it + 1), *(it + 2),
-                              *(it + 3) };
+        argument_info arg = { static_cast<std::uint32_t>(std::stoi(*it)), *(it + 1),
+                              *(it + 2), *(it + 3) };
         args.push_back(arg);
     }
 

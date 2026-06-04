@@ -1,0 +1,4 @@
+jobs:
+- pmc:
+  - GCEA_SARB_DRAM_REQ_PER_VC_sum
+  - GCEA_PRB_REQ_sum

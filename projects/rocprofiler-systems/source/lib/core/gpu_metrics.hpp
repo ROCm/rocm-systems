@@ -14,25 +14,26 @@ namespace gpu
 struct gpu_metrics_t
 {
     // VCN metrics
-    std::vector<uint16_t>              vcn_activity;  // Device-level VCN (when supported)
-    std::vector<std::vector<uint16_t>> vcn_busy;  // XCP-level VCN (per-XCP organization)
+    std::vector<std::uint16_t> vcn_activity;  // Device-level VCN (when supported)
+    std::vector<std::vector<std::uint16_t>>
+        vcn_busy;  // XCP-level VCN (per-XCP organization)
 
     // JPEG metrics
-    std::vector<uint16_t> jpeg_activity;  // Device-level JPEG (when supported)
-    std::vector<std::vector<uint16_t>>
+    std::vector<std::uint16_t> jpeg_activity;  // Device-level JPEG (when supported)
+    std::vector<std::vector<std::uint16_t>>
         jpeg_busy;  // XCP-level JPEG (per-XCP organization)
 
     // XGMI metrics
-    uint16_t              xgmi_link_width = 0;
-    uint16_t              xgmi_link_speed = 0;
-    std::vector<uint64_t> xgmi_read_data_acc;
-    std::vector<uint64_t> xgmi_write_data_acc;
+    std::uint16_t              xgmi_link_width = 0;
+    std::uint16_t              xgmi_link_speed = 0;
+    std::vector<std::uint64_t> xgmi_read_data_acc;
+    std::vector<std::uint64_t> xgmi_write_data_acc;
 
     // PCIe metrics
-    uint16_t pcie_link_width     = 0;
-    uint16_t pcie_link_speed     = 0;
-    uint64_t pcie_bandwidth_acc  = 0;
-    uint64_t pcie_bandwidth_inst = 0;
+    std::uint16_t pcie_link_width     = 0;
+    std::uint16_t pcie_link_speed     = 0;
+    std::uint64_t pcie_bandwidth_acc  = 0;
+    std::uint64_t pcie_bandwidth_inst = 0;
 };
 
 /// Settings structure for controlling which metrics are serialized
@@ -49,15 +50,16 @@ struct gpu_metrics_capabilities_t
 {
     struct flags_t
     {
-        uint8_t vcn_is_device_level_only  : 1;  ///< VCN is device-level (vs per-XCP)
-        uint8_t jpeg_is_device_level_only : 1;  ///< JPEG is device-level (vs per-XCP)
-        uint8_t reserved                  : 6;  ///< Reserved for future use
+        std::uint8_t vcn_is_device_level_only : 1;  ///< VCN is device-level (vs per-XCP)
+        std::uint8_t
+            jpeg_is_device_level_only : 1;  ///< JPEG is device-level (vs per-XCP)
+        std::uint8_t reserved         : 6;  ///< Reserved for future use
     };
 
     union
     {
-        flags_t flags;
-        uint8_t value;  ///< Raw byte value for easy serialization
+        flags_t      flags;
+        std::uint8_t value;  ///< Raw byte value for easy serialization
     };
 
     /// Default constructor - initializes all flags to zero
@@ -100,7 +102,7 @@ struct gpu_metrics_capabilities_t
  * @param settings Controls which metrics to include in serialization
  * @return Binary serialized data
  */
-std::vector<uint8_t>
+std::vector<std::uint8_t>
 serialize_gpu_metrics(const gpu_metrics_t&              metrics,
                       const gpu_metrics_capabilities_t& capabilities,
                       const gpu_metrics_settings_t&     settings);
@@ -118,7 +120,7 @@ serialize_gpu_metrics(const gpu_metrics_t&              metrics,
  * @throws std::runtime_error if serialized data is invalid
  */
 void
-deserialize_gpu_metrics(const std::vector<uint8_t>& serialized_data,
+deserialize_gpu_metrics(const std::vector<std::uint8_t>& serialized_data,
                         gpu_metrics_t& result, bool is_vcn_enabled, bool is_jpeg_enabled,
                         bool is_xgmi_enabled, bool is_pcie_enabled,
                         gpu_metrics_capabilities_t& capabilities);

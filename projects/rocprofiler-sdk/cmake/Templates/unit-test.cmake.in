@@ -59,9 +59,13 @@ set_tests_properties(
                SKIP_REGULAR_EXPRESSION
                "${_SKIP_REGEX}"
                ENVIRONMENT
-               "${_ENVIRONMENT}"
-               DISABLED
-               "${_DISABLED}")
+               "${_ENVIRONMENT}")
+
+if(_DISABLED)
+    set_tests_properties(
+        ${@RAUT_TARGET@_TESTS}
+        PROPERTIES DISABLED "${_DISABLED}")
+endif()
 
 # Disable specific tests
 set(_DISABLE_TESTS "@RAUT_DISABLE_TESTS@")

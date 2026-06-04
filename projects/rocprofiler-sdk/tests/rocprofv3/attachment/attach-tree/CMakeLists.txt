@@ -31,6 +31,9 @@ set(attachment-env
     "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
     )
 
+# Unconditionally disabled: intermittent failure caused by test app abort
+set(IS_DISABLED ON)
+
 # Test that launches the app and attaches to it and all its children via --attach-children
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-attachment-attach-tree

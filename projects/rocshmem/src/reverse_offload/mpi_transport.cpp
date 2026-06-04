@@ -226,7 +226,7 @@ void MPITransport::submitRequestsToMPI() {
   }
 }
 
-void MPITransport::initTransport(int num_queues, BackendProxyT *proxy) {
+void MPITransport::initTransport(int num_queues, BackendProxy *proxy) {
   waiting_quiet.resize(num_queues, std::vector<volatile char *>());
   outstanding.resize(num_queues, 0);
   transport_up = false;
@@ -254,14 +254,14 @@ void MPITransport::createNewTeam(ROBackend *backend, [[maybe_unused]] Team *pare
                                    const TeamInfo& team_info_wrt_parent,
                                    const TeamInfo& team_info_wrt_world,
                                    int num_pes, int my_pe_in_new_team,
-                                   MPI_Comm team_comm,
+                                   MPI_Comm new_team_comm,
                                    rocshmem_team_t *new_team) {
   ROTeam *new_team_obj{nullptr};
 
   CHECK_HIP(hipMalloc(&new_team_obj, sizeof(ROTeam)));
 
   new (new_team_obj) ROTeam(backend, team_info_wrt_parent, team_info_wrt_world,
-                            num_pes, my_pe_in_new_team, team_comm);
+                            num_pes, my_pe_in_new_team, new_team_comm);
 
   *new_team = get_external_team(new_team_obj);
 }

@@ -998,6 +998,7 @@ rsmi_status_t rsmi_dev_id_get(uint32_t dv_ind, uint16_t* id) {
   if (id == nullptr) {
     return RSMI_STATUS_INVALID_ARGS;
   }
+  DEVICE_MUTEX
   CHK_SUPPORT_NAME_ONLY(id)
   // Set the device ID to max value
   *id = std::numeric_limits<uint16_t>::max();
@@ -1427,11 +1428,15 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type, rsmi_clk_type_
     }
   }
 
-  // Some older drivers will not have the current frequency set
-  // assert(f->current < f->num_supported);
+  // Some older drivers, and SMU power-gated domains on APUs (e.g. gfx1151
+  // SYS/DF/DCEF/SOC/MEM at idle), expose the supported DPM table in
+  // pp_dpm_* without flagging any level as current ('*' marker absent).
+  // Treat that as "current unknown" rather than discarding the parsed
+  // table: keep f->num_supported / f->frequency populated and signal
+  // "no current level" via f->current = -1 so callers can still report
+  // the frequency table.
   if (f->current >= f->num_supported) {
     f->current = -1;
-    return RSMI_STATUS_UNEXPECTED_DATA;
   }
 
   return RSMI_STATUS_SUCCESS;
@@ -2973,12 +2978,10 @@ rsmi_status_t rsmi_dev_vendor_name_get(uint32_t dv_ind, char* name, size_t len) 
   if (name == nullptr || len == 0) {
     return RSMI_STATUS_INVALID_ARGS;
   }
+  DEVICE_MUTEX
   CHK_SUPPORT_NAME_ONLY(name)
 
   assert(len > 0);
-
-  DEVICE_MUTEX
-
   ret = get_dev_name_from_id(dv_ind, name, len, NAME_STR_VENDOR);
   return ret;
   CATCH
@@ -3022,9 +3025,8 @@ rsmi_status_t rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t*
   LOG_TRACE(ss);
 
   GET_DEV_AND_KFDNODE_FROM_INDX
-  CHK_API_SUPPORT_ONLY((b), RSMI_DEFAULT_VARIANT, RSMI_DEFAULT_VARIANT)
-
   DEVICE_MUTEX
+  CHK_API_SUPPORT_ONLY((b), RSMI_DEFAULT_VARIANT, RSMI_DEFAULT_VARIANT)
 
   ret = get_frequencies(amd::smi::kDevPCIEClk, RSMI_CLK_TYPE_PCIE, dv_ind, &b->transfer_rate,
                         b->lanes);
@@ -3130,11 +3132,29 @@ rsmi_status_t rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask) {
 
   int32_t ret_i;
   ret_i = dev->writeDevInfo(amd::smi::kDevPCIEClk, freq_enable_str);
-  //
-  // NOTE:  kDevPCIEClk sysfs file maybe not exist for all cases.
-  //        If it doesn't exist (pp_dpm_pcie), it shouldn't be an error
-  //        and will get translated to RSMI_STATUS_NOT_SUPPORTED.
-  return amd::smi::ErrnoToRsmiStatus(ret_i);
+  // kDevPCIEClk (pp_dpm_pcie) may be missing or read-only; map to a clear
+  // status. ENOTSUP/EOPNOTSUPP are the same value on Linux
+  // (see <asm-generic/errno.h>); EROFS is handled in ErrnoToRsmiStatus.
+  ret = amd::smi::ErrnoToRsmiStatus(ret_i);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    rsmi_status_t restore_ret = rsmi_dev_perf_level_set_v1(dv_ind, RSMI_DEV_PERF_LEVEL_AUTO);
+    if (restore_ret != RSMI_STATUS_SUCCESS) {
+      std::ostringstream restore_ss;
+      restore_ss << __PRETTY_FUNCTION__
+                 << " | perf level restore to AUTO failed (restore_ret=" << restore_ret
+                 << ", original_ret=" << ret << "). Device may remain in MANUAL.";
+      LOG_ERROR(restore_ss);
+    }
+    if (ret == RSMI_STATUS_UNKNOWN_ERROR) {
+      std::ostringstream unk_ss;
+      unk_ss << __PRETTY_FUNCTION__ << " | unmapped errno from writeDevInfo (errno=" << ret_i
+             << "); coercing UNKNOWN_ERROR -> NOT_SUPPORTED";
+      LOG_ERROR(unk_ss);
+      return RSMI_STATUS_NOT_SUPPORTED;
+    }
+    return ret;
+  }
+  return ret;
 
   CATCH
 }
@@ -3276,6 +3296,10 @@ rsmi_status_t rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
   amd::smi::MonitorTypes mon_type = amd::smi::kMonInvalid;
   uint16_t val_ui16;
   GET_DEV_FROM_INDX
+  // DEVICE_MUTEX moved before the HBM/gpuboard early-return paths so that
+  // all code paths — including the HBM temperature block — hold the lock.
+  // Previously the mutex was acquired after those blocks, leaving them unprotected.
+  DEVICE_MUTEX
 
   // handle gpu board temp
   if (sensor_type >= RSMI_TEMP_TYPE_GPUBOARD_NODE_FIRST &&
@@ -3293,14 +3317,18 @@ rsmi_status_t rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
 
     amd::smi::amdgpu_gpuboard_temp_metrics_v1_0 gpuboard_metric;
     ret = read_gpuboard_temp_metrics(file_path.c_str(), gpuboard_metric);
-    if (ret != RSMI_STATUS_SUCCESS) {
-      std::string err_msg = "Failed to read GPU board temperature metrics at " + file_path;
-      LOG_ERROR(err_msg);
+    if (ret == RSMI_STATUS_SUCCESS) {
+      ret = get_gpuboard_temp_value(gpuboard_metric,
+                                    static_cast<rsmi_temperature_type_t>(sensor_type), temperature);
       return ret;
     }
 
-    ret = get_gpuboard_temp_value(gpuboard_metric,
-                                  static_cast<rsmi_temperature_type_t>(sensor_type), temperature);
+    ret = amd::smi::get_gpuboard_temp_value_dynamic(
+        file_path.c_str(), static_cast<rsmi_temperature_type_t>(sensor_type), temperature);
+    if (ret != RSMI_STATUS_SUCCESS && ret != RSMI_STATUS_NOT_SUPPORTED) {
+      std::string err_msg = "Failed to read GPU board temperature metrics at " + file_path;
+      LOG_ERROR(err_msg);
+    }
     return ret;
   }
 
@@ -3320,14 +3348,18 @@ rsmi_status_t rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
 
     amd::smi::amdgpu_baseboard_temp_metrics_v1_0 baseboard_metric;
     ret = read_baseboard_temp_metrics(file_path.c_str(), baseboard_metric);
-    if (ret != RSMI_STATUS_SUCCESS) {
-      std::string err_msg = "Failed to read baseboard temperature metrics at " + file_path;
-      LOG_ERROR(err_msg);
+    if (ret == RSMI_STATUS_SUCCESS) {
+      ret = get_baseboard_temp_value(
+          baseboard_metric, static_cast<rsmi_temperature_type_t>(sensor_type), temperature);
       return ret;
     }
 
-    ret = get_baseboard_temp_value(baseboard_metric,
-                                   static_cast<rsmi_temperature_type_t>(sensor_type), temperature);
+    ret = amd::smi::get_baseboard_temp_value_dynamic(
+        file_path.c_str(), static_cast<rsmi_temperature_type_t>(sensor_type), temperature);
+    if (ret != RSMI_STATUS_SUCCESS && ret != RSMI_STATUS_NOT_SUPPORTED) {
+      std::string err_msg = "Failed to read baseboard temperature metrics at " + file_path;
+      LOG_ERROR(err_msg);
+    }
     return ret;
   }
 
@@ -3425,8 +3457,6 @@ rsmi_status_t rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
     LOG_INFO(ss);
     return RSMI_STATUS_SUCCESS;
   }  // end HBM temperature
-
-  DEVICE_MUTEX
 
   if (dev->monitor() == nullptr) {
     ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
@@ -3982,6 +4012,17 @@ rsmi_status_t rsmi_dev_energy_count_get(uint32_t dv_ind, uint64_t* power, float*
 
   *power = gpu_metrics.energy_accumulator;
   *timestamp = gpu_metrics.system_clock_counter;
+  // Some metrics tables leave energy_accumulator at the max-value sentinel when unavailable.
+  if (*power == std::numeric_limits<decltype(gpu_metrics.energy_accumulator)>::max()) {
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+       << " | Failed "
+       << " | Device #: " << dv_ind
+       << " | Cause: energy accumulator is unavailable for this metrics table"
+       << " | Returning: " << amd::smi::getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED, false)
+       << " |";
+    LOG_INFO(ss);
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
   // hard-coded for now since all ASICs have same resolution. If it ASIC
   // dependent then this information should come from Kernel
   if (counter_resolution) *counter_resolution = kEnergyCounterResolution;
@@ -7751,7 +7792,8 @@ rsmi_status_t rsmi_test_sleep(uint32_t dv_ind, uint32_t seconds) {
     return RSMI_STATUS_BUSY;
   }
 
-  sleep(seconds);
+  amd::smi::sleep_interruptible(seconds);
+
   return RSMI_STATUS_SUCCESS;
 }
 

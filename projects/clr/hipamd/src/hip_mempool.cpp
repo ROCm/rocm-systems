@@ -88,7 +88,7 @@ hipError_t hipMallocAsync(void** dev_ptr, size_t size, hipStream_t stream) {
   // Return error if any stream other than the current stream is in capture mode
   if (device->StreamCaptureBlocking()) {
     if (s->GetCaptureStatus() != hipStreamCaptureStatusActive) {
-      return hipErrorStreamCaptureUnsupported;
+      HIP_RETURN(hipErrorStreamCaptureUnsupported);
     }
   }
 
@@ -144,7 +144,7 @@ hipError_t hipFreeAsync(void* dev_ptr, hipStream_t stream) {
   // Return error if any stream other than the current stream is in capture mode
   if (device->StreamCaptureBlocking()) {
     if (s->GetCaptureStatus() != hipStreamCaptureStatusActive) {
-      return hipErrorStreamCaptureUnsupported;
+      HIP_RETURN(hipErrorStreamCaptureUnsupported);
     }
   }
 
@@ -409,7 +409,7 @@ hipError_t hipMemPoolImportFromShareableHandle(hipMemPool_t* mem_pool, void* sha
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  auto device = g_devices[0];
+  auto device = hip::getCurrentDevice();
   auto pool = new hip::MemoryPool(device, nullptr, true);
   // Note: The interface casts the integer value of file handle under Linux into void*,
   // but compiler may not allow to cast it back. Hence, make a cast with a union...

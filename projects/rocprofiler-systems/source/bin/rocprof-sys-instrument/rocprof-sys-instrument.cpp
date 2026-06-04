@@ -146,34 +146,34 @@ namespace path     = rocprofsys::common::path;
 using signal_settings = tim::signals::signal_settings;
 using sys_signal      = tim::signals::sys_signal;
 
-bool                                       binary_rewrite       = false;
-bool                                       is_attached          = false;
-bool                                       use_mpi              = false;
-bool                                       is_static_exe        = false;
-bool                                       force_config         = false;
-size_t                                     batch_size           = 50;
-strset_t                                   extra_libs           = {};
-std::vector<std::pair<uint64_t, string_t>> hash_ids             = {};
-std::map<string_t, bool>                   use_stubs            = {};
-std::map<string_t, procedure_t*>           beg_stubs            = {};
-std::map<string_t, procedure_t*>           end_stubs            = {};
-strvec_t                                   init_stub_names      = {};
-strvec_t                                   fini_stub_names      = {};
-strset_t                                   used_stub_names      = {};
-strvec_t                                   env_config_variables = {};
-std::vector<call_expr_pointer_t>           env_variables        = {};
-std::map<string_t, call_expr_pointer_t>    beg_expr             = {};
-std::map<string_t, call_expr_pointer_t>    end_expr             = {};
-const auto                                 npos_v               = string_t::npos;
-string_t                                   instr_mode           = "trace";
-string_t                                   print_coverage       = {};
-string_t                                   print_instrumented   = {};
-string_t                                   print_excluded       = {};
-string_t                                   print_available      = {};
-string_t                                   print_overlapping    = {};
-strset_t                                   print_formats        = { "txt", "json" };
-bool                                       dump_info_enabled    = false;
-std::string                                modfunc_dump_dir     = {};
+bool                                            binary_rewrite       = false;
+bool                                            is_attached          = false;
+bool                                            use_mpi              = false;
+bool                                            is_static_exe        = false;
+bool                                            force_config         = false;
+size_t                                          batch_size           = 50;
+strset_t                                        extra_libs           = {};
+std::vector<std::pair<std::uint64_t, string_t>> hash_ids             = {};
+std::map<string_t, bool>                        use_stubs            = {};
+std::map<string_t, procedure_t*>                beg_stubs            = {};
+std::map<string_t, procedure_t*>                end_stubs            = {};
+strvec_t                                        init_stub_names      = {};
+strvec_t                                        fini_stub_names      = {};
+strset_t                                        used_stub_names      = {};
+strvec_t                                        env_config_variables = {};
+std::vector<call_expr_pointer_t>                env_variables        = {};
+std::map<string_t, call_expr_pointer_t>         beg_expr             = {};
+std::map<string_t, call_expr_pointer_t>         end_expr             = {};
+const auto                                      npos_v               = string_t::npos;
+string_t                                        instr_mode           = "trace";
+string_t                                        print_coverage       = {};
+string_t                                        print_instrumented   = {};
+string_t                                        print_excluded       = {};
+string_t                                        print_available      = {};
+string_t                                        print_overlapping    = {};
+strset_t                                        print_formats        = { "txt", "json" };
+bool                                            dump_info_enabled    = false;
+std::string                                     modfunc_dump_dir     = {};
 auto regex_opts = std::regex_constants::egrep | std::regex_constants::optimize;
 
 strvec_t lib_search_paths =
@@ -1474,7 +1474,7 @@ main(int argc, char** argv)
     process_modules(filtered_modules);
 
     verbprintf(1, "Getting available procedures based on filtered modules...\n");
-    std::vector<procedure_t*>* app_functions =
+    std::vector<procedure_t*> app_functions =
         get_procedures(app_image, &filtered_modules, include_uninstr);
 
     //----------------------------------------------------------------------------------//
@@ -1508,9 +1508,9 @@ main(int argc, char** argv)
         }
     };
 
-    if(app_functions && !app_functions->empty())
+    if(!app_functions.empty())
     {
-        for(auto* itr : *app_functions)
+        for(auto* itr : app_functions)
         {
             if(itr->getModule())
             {
@@ -2202,6 +2202,7 @@ main(int argc, char** argv)
     {
         for(auto* itr : _objs)
         {
+            if(itr->name().find("librocprof-sys") != std::string::npos) continue;
             try
             {
                 itr->insertFiniCallback(_fini_sequence);

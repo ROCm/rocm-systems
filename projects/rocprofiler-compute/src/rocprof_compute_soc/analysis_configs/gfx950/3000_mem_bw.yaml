@@ -1049,7 +1049,7 @@ Panel Config:
       Equation: SUM(((4 * TA_BUFFER_WAVEFRONTS_sum) * 100)) / SUM(TA_BUFFER_TOTAL_CYCLES_sum)
     L1 Cache - VL1 coalesce efficiency: >-
       Measures how efficiently threads are packed into TCP requests via TA coalescing.
-      Numerator: Total threads processed (64 threads/wavefront × wavefronts).
+      Numerator: Total threads processed (64 threads/wavefront * wavefronts).
       Denominator: Maximum threads that could be served if every TCP request was fully coalesced (4 threads/request).
       100% = perfect 4:1 coalescing (4 contiguous threads share each cache line access).
       25% = no coalescing (each thread requires a separate TCP request).

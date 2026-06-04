@@ -322,7 +322,9 @@ memory:
     tags: []
   Unit_hipHostRegister_ReferenceFromKernelandhipMemset:
     <<: *level_2
+    # disabling due to flaky segfault in CI nightly https://github.com/ROCm/TheRock/issues/4111
     tags: []
+    disabled: [amd_linux]
   Unit_hipHostRegister_DirectReferenceFromKernel: *level_2
   Unit_hipHostRegister_DirectReferenceMultGpu:
     <<: *level_2
@@ -344,6 +346,8 @@ memory:
   Unit_hipHostRegister_Perform_hipMemcpy:
     <<: *level_2
     tags: [alloc]
+    # disabled due to flaky segfault in CI nightly https://github.com/ROCm/TheRock/issues/4111
+    disabled: [amd_linux]
   Unit_hipHostRegister_AsyncApis:
     <<: *level_2
     tags: [alloc]
@@ -486,7 +490,7 @@ memory:
     tags: [memset]
   Unit_hipMemset_SetMemoryWithOffset:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, smoke]
   Unit_hipMemsetAsync_SetMemoryWithOffset:
     <<: *level_2
     tags: [memset]
@@ -579,14 +583,14 @@ memory:
   Unit_hipMemPrefetchAsync_NonPageSz:
     <<: *level_2
     # Disabling below tests temporarily due to change in API behavior
-    disabled: [amd_windows, amd_wsl]
+    disabled: [amd_windows, amd_wsl, amd_linux]
     tags: [query]
   Unit_hipMemAdvise_MmapMem:
     <<: *level_2
     tags: [query]
   Unit_hipMallocManaged_Basic:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, smoke]
   Unit_hipMallocManaged_Advanced:
     <<: *level_2
     # Note: Windows disabled
@@ -1305,7 +1309,7 @@ memory:
     tags: [multigpu, transfer]
   Unit_hipHostMalloc_Basic:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, smoke]
   Unit_hipHostMalloc_Negative:
     <<: *level_2
     tags: [alloc]
@@ -1360,7 +1364,7 @@ memory:
     tags: [transfer]
   Unit_hipMemcpyAsync_Positive_Basic:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, smoke]
   Unit_hipMemcpyAsync_Positive_Synchronization_Behavior:
     <<: *level_2
     tags: [transfer]
@@ -1486,13 +1490,13 @@ memory:
     tags: [memset]
   Unit_hipMalloc_Positive_Basic:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, smoke]
   Unit_hipMalloc_Positive_Zero_Size:
     <<: *level_2
     tags: [alloc]
   Unit_hipMalloc_Positive_Alignment:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, smoke]
   Unit_hipMalloc_Negative_Parameters:
     <<: *level_2
     tags: [alloc]
@@ -1500,6 +1504,9 @@ memory:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows]
+    tags: [alloc]
+  Unit_hipMalloc_Positive_APU_LargeAllocSpill:
+    <<: *level_2
     tags: [alloc]
   Unit_hipMalloc_Allocate110PercentOfDeviceMemory: *level_2
   Unit_hipMalloc_AllocateAvailableVRAMAndPossibleRAM: *level_2
@@ -1763,6 +1770,7 @@ memory:
     tags: [query]
   Unit_hipMemPrefetchBatchAsync_LocationDistribution:
     <<: *level_2
+    disabled: [amd_windows, amd_linux]
     tags: [query]
   Unit_hipMemPrefetchBatchAsync_RoundTripDataIntegrity:
     <<: *level_2

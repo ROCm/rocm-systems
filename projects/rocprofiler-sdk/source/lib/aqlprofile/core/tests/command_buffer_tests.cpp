@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 #include <gtest/gtest.h>
-#include "core/commandbuffermgr.hpp"
+#include "lib/aqlprofile/core/commandbuffermgr.hpp"
 #include <array>
 #include <climits>
 

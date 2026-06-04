@@ -28,6 +28,7 @@
 #endif
 #endif
 
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
@@ -109,12 +110,20 @@ enum MemRangeAttribute : uint32_t {
   CoherencyMode = 100,       ///< Current coherency mode for the specified range
 };
 
-enum FuncCache : uint32_t  {
-  kPreferNone = 0,   ///< Default function cache configuration, no preference
-  kPreferLDS = 1,    ///< Prefer larger shared memory and smaller L1 cache
-  kPreferCache = 2,  ///< Prefer larger L1 cache and smaller shared memory
-  kPreferEqual = 3   ///< Prefer equal size L1 cache and shared memory
-};
+//! Maps hipFuncCache_t to group memory carveout percentage.
+//! PreferL1 maps to 1% (not 0%) because 0 means "no preference" in the
+//! AQL packet's group_mem_carveout field; 1% is the minimum value that
+//! signals a preference for cache over LDS.
+inline constexpr std::array<uint8_t, 4> kFuncCacheToGroupMemCarveoutPercent = {0, 100, 1, 50};
+static_assert(kFuncCacheToGroupMemCarveoutPercent.size() == 4,
+              "Must cover all hipFuncCache_t values");
+
+//! Convert hipFuncCache_t to carveout percentage, returning 0 for out-of-range values.
+inline uint8_t funcCacheToCarveoutPercent(uint32_t cacheConfig) {
+  return cacheConfig < kFuncCacheToGroupMemCarveoutPercent.size()
+      ? kFuncCacheToGroupMemCarveoutPercent[cacheConfig]
+      : 0;
+}
 
 constexpr int CpuDeviceId = static_cast<int>(-1);
 constexpr int InvalidDeviceId = static_cast<int>(-2);
@@ -283,6 +292,9 @@ struct Info : public amd::EmbeddedObject {
   //! Maximum number of work-items in a work-group executing a kernel
   //  using the data-parallel execution model.
   size_t maxWorkGroupSize_;
+
+  //! Maximum grid dimensions (from HSA_AGENT_INFO_GRID_MAX_DIM). Work-items per dimension.
+  uint32_t maxGridDim_[3];
 
   //! Preferred number of work-items in a work-group executing a kernel
   //  using the data-parallel execution model.
@@ -672,10 +684,12 @@ struct Info : public amd::EmbeddedObject {
 
   bool dmabufSupported_;  //!< DMABuf support flag
   bool gpuDirectRdmaWithHipVmmSupported_;  //!< GPU Direct RDMA with HIP VMM (DMA-Buf + HIP VMM)
+
+  uint32_t maxDynDataPrefetchRegions_;  //!< Max L2 prefetch regions (0 if unsupported)
 };
 
 //! Device settings
-class Settings : public amd::HeapObject {
+class Settings {
  public:
   enum KernelArgImpl {
     HostKernelArgs = 0,        //!< Kernel Arguments are put into host memory
@@ -710,7 +724,8 @@ class Settings : public amd::HeapObject {
       uint kernel_arg_impl_ : 2;              //!< Kernel argument implementation
       uint sdma_swap_supported_ : 1;         //!< SDMA linear swap copy (gfx94x/gfx95x)
       uint groupMemCarveout_ : 1;             //!< Group memory carveout functionality
-      uint reserved_ : 12;
+      uint sdma_indirect_supported_ : 1;     //!< SDMA linear indirect copy (gfx1250+)
+      uint reserved_ : 9;
     };
     uint value_;
   };
@@ -731,13 +746,6 @@ class Settings : public amd::HeapObject {
   void enableExtension(uint name) { extensions_ |= static_cast<uint64_t>(1) << name; }
 
   size_t stagedXferSize_ = 0;     //!< Staged buffer size
-  typedef struct CarveoutPref {
-    uint8_t totalSharedBanks;
-    uint8_t preferLDSBanks;
-    uint8_t preferCacheLDSBanks;
-    uint8_t preferEqualLDSBanks;
-  } CarveoutPref;
-  CarveoutPref groupMemPref_;
 
  private:
   //! Disable copy constructor
@@ -749,7 +757,7 @@ class Settings : public amd::HeapObject {
 
 //! Device-independent cache memory, base class for the device-specific
 //! memories. One Memory instance refers to one or more of these.
-class Memory : public amd::HeapObject {
+class Memory {
  public:
   //! Resource map flags
   enum CpuMapFlags {
@@ -775,7 +783,7 @@ class Memory : public amd::HeapObject {
     SyncFlags() : value_(0) {}
   };
 
-  struct WriteMapInfo : public amd::HeapObject {
+  struct WriteMapInfo {
     amd::Coord3D origin_;  //!< Origin of the map location
     amd::Coord3D region_;  //!< Mapped region
     amd::Image* baseMip_;  //!< The base mip level for images
@@ -1015,7 +1023,7 @@ class Memory : public amd::HeapObject {
   Memory(const Memory&) = delete;
 };
 
-class Sampler : public amd::HeapObject {
+class Sampler {
  public:
   //! Constructor
   Sampler() : hwSrd_(0), hwState_(nullptr) {}
@@ -1041,7 +1049,7 @@ class Sampler : public amd::HeapObject {
   Sampler(const Sampler&);
 };
 
-class ClBinary : public amd::HeapObject {
+class ClBinary {
  public:
   enum BinaryImageFormat {
     BIF_VERSION2 = 0,  //!< Binary Image Format version 2.0 (ELF)
@@ -1225,7 +1233,7 @@ inline Program::binary_t Program::binary() {
  *
  *  \brief The device interface class for the performance counters
  */
-class PerfCounter : public amd::HeapObject {
+class PerfCounter {
  public:
   //! Constructor for the device performance
   PerfCounter() {}
@@ -1247,7 +1255,7 @@ class PerfCounter : public amd::HeapObject {
  *
  *  \brief The device interface class for the performance counters
  */
-class ThreadTrace : public amd::HeapObject {
+class ThreadTrace {
  public:
   //! Constructor for the device performance
   ThreadTrace() {}
@@ -1454,6 +1462,23 @@ class MemObjMap : public AllStatic {
 
   //!< Find the mem object based on the input pointer, outputs the offset
   static amd::Memory* FindMemObj(const void* k, size_t* offset = nullptr, Device* dev = nullptr);
+  //!< Batched version: find multiple mem objects in one lock acquisition
+  static void FindMemObjBatch(const void* const* ptrs, size_t count,
+                              std::vector<amd::Memory*>& memories,
+                              std::vector<size_t>& offsets, Device* dev = nullptr);
+  //!< Batched pairs version: find src/dst pairs in one lock acquisition
+  static void FindMemObjBatchPairs(const void* const* srcs, const void* const* dsts,
+                                   size_t count,
+                                   std::vector<amd::Memory*>& src_memories,
+                                   std::vector<amd::Memory*>& dst_memories,
+                                   std::vector<size_t>& src_offsets,
+                                   std::vector<size_t>& dst_offsets,
+                                   Device* dev = nullptr);
+  //!< Single pair version: find one src/dst pair in one lock acquisition
+  static void FindMemObjPairs(const void* src, const void* dst,
+                              amd::Memory*& src_memory, amd::Memory*& dst_memory,
+                              size_t& src_offset, size_t& dst_offset,
+                              Device* dev = nullptr);
   static void UpdateAccess(amd::Device* peerDev);
   //!< Purge all user allocated memories on the given device
   static void Purge(amd::Device* dev);
@@ -1472,10 +1497,22 @@ class MemObjMap : public AllStatic {
   //!< Same as FindMemObj but for ipc handle to MemObj mapping
   static amd::Memory* FindIpcHandleMemObj(const IpcMemHandle& k);
 
+  //!< Atomically find and remove a mem object by ptr. Returns the removed Memory* or nullptr.
+  static amd::Memory* FindAndRemoveMemObj(const void* k);
+
   //!< Shared read/write lock for all MemObjMap operations (including per-device maps)
   static std::shared_mutex AllocatedLock_;
 
  private:
+  // Helper struct for memory object lookup results
+  struct LookupResult {
+    amd::Memory* memory;
+    size_t offset;
+  };
+
+  //!< Core lookup helper used by all FindMemObj* functions. Caller must hold AllocatedLock_.
+  static LookupResult findMemObjNoLock(const void* ptr, Device* dev);
+
   //!< the mem object<->hostptr information container
   static std::map<uintptr_t, amd::Memory*> MemObjMap_;
   //!< the virtual mem object<->hostptr information container
@@ -1711,7 +1748,7 @@ class Device : public RuntimeObject {
 
   typedef std::list<CommandQueue*> CommandQueues;
 
-  struct BlitProgram : public amd::HeapObject {
+  struct BlitProgram {
     Program* program_;  //!< GPU program object
     Context* context_;  //!< A dummy context
 
@@ -1810,6 +1847,9 @@ class Device : public RuntimeObject {
 
   ///! Allocates a device signal object
   virtual device::Signal* createSignal() const = 0;
+
+  ///! Allocates an IPC-capable signal, or returns nullptr if unsupported
+  virtual device::Signal* createIpcSignal() const { return nullptr; }
 
   //! Return true if initialized external API interop, otherwise false
   virtual bool bindExternalDevice(
@@ -2249,34 +2289,6 @@ class Device : public RuntimeObject {
   //! Sets the group memory carveout percentage hint for the device
   void UpdateGroupMemCarveout(uint8_t percent) { group_mem_carveout_hint_ = percent; }
 
-  uint8_t GetGroupMemCarveout(amd::FuncCache cacheConfig) const {
-    uint8_t totalSharedBanks = 0;
-    uint8_t LDSBanks = 0;
-    if (settings().groupMemCarveout_) {
-      totalSharedBanks = settings_->groupMemPref_.totalSharedBanks;
-      switch (cacheConfig) {
-        case kPreferLDS:
-          LDSBanks = settings_->groupMemPref_.preferLDSBanks;
-          break;
-        case kPreferCache:
-          LDSBanks = settings_->groupMemPref_.preferCacheLDSBanks;
-          break;
-        case kPreferEqual:
-          LDSBanks = settings_->groupMemPref_.preferEqualLDSBanks;
-          break;
-        case kPreferNone:
-        default:
-          break;
-      }
-    }
-    return (totalSharedBanks != 0) ? (static_cast<double>(LDSBanks) / totalSharedBanks) * 100 : 0;
-  }
-
-  //! Sets group memory carveout percentage hint for the device for respective cacheConfig
-  void UpdateGroupMemCarveout(amd::FuncCache cacheConfig) {
-    group_mem_carveout_hint_ = GetGroupMemCarveout(cacheConfig);
-  }
-
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)
   virtual device::UriLocator* createUriLocator() const = 0;
@@ -2339,7 +2351,7 @@ class Device : public RuntimeObject {
   uint64_t initial_heap_size_{HIP_INITIAL_DM_SIZE};     //!< Initial device heap size
   amd::Monitor activeQueuesLock_{};                     //!< Guards access to the activeQueues set
   std::unordered_map<amd::CommandQueue*, bool> activeQueues;  //!< The set of active queues
-  uint8_t group_mem_carveout_hint_; //!< LDS carveout
+  uint8_t group_mem_carveout_hint_{0}; //!< LDS carveout percentage (0 = no preference)
  private:
   const Isa* isa_;  //!< Device isa
   bool IsTypeMatching(cl_device_type type, bool offlineDevices);

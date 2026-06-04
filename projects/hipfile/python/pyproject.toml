@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "hipfile"
-version = "0.2.0.dev0"
+version = "0.2.0.dev1"
 classifiers = [
     "Development Status :: 3 - Alpha",
 ]
@@ -20,6 +20,7 @@ requires-python = ">=3.10"
 
 [project.urls]
 Homepage = "https://github.com/ROCm/rocm-systems/tree/develop/projects/hipfile"
+Changelog = "https://github.com/ROCm/rocm-systems/blob/develop/projects/hipfile/python/CHANGELOG.md"
 
 [tool.scikit-build]
 cmake.build-type = "Release"

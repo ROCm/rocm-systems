@@ -13,6 +13,7 @@
 #include "rocclr/os/os.hpp"
 
 #include <hip/amd_detail/hip_api_trace.hpp>
+#include "profiler/hip_clr_profiler.hpp"
 namespace hip {
 const HipToolsDispatchTable* GetHipToolsDispatchTable();
 }  // namespace hip
@@ -81,6 +82,10 @@ void init(bool* status) {
 
   // Complete platform initialization
   PlatformState::Instance().Init();
+
+  // Initialize built-in CLR profiler (no-op unless GPU_CLR_PROFILE=1)
+  HipProfilerInitExt();
+
   *status = true;
 }
 

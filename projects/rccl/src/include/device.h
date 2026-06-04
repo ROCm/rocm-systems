@@ -19,6 +19,8 @@
     #define _HIP_BFLOAT16_H_
     #include <hip/hip_bf16.h>
     typedef __hip_bfloat16 hip_bfloat16;
+  #elif ROCM_VERSION >= 70000
+    #include <hip/hip_bf16.h>
   #else
     #error "RCCL is not using the correct hip_bf16.h file. Please make sure that the correct header is included!"
   #endif
@@ -82,7 +84,7 @@ extern const char* funcNames[];
   #define NCCL_CUDA_ARCH_FAMILY_SPECIFIC 0
 #endif
 
-#include "net_device.h"
+#include "nccl_device/net_device.h"
 
 enum ncclDevRedOp_t {
   ncclDevSum, ncclDevProd, ncclDevMinMax,
@@ -125,7 +127,7 @@ union ncclLLFifoLine {
   #define WARP_SIZE 32
   #endif
   #if defined (__gfx950__)
-  #define NCCL_MAX_NTHREADS 512
+  #define NCCL_MAX_NTHREADS 256
   #else
   #define NCCL_MAX_NTHREADS 256
   #endif
@@ -166,7 +168,21 @@ union ncclLLFifoLine {
 // Make sure the clean mask will last for at least NCCL_NSTEPS
 static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK value");
 
+ /* Note regarding LL128 macros settings in RCCL below:
+  * Device code: NCCL_LL128_LINESIZE is arch-dependent (128 for gfx1250, 64 otherwise).
+  * Host code: Must NOT use these macros for logic as they default to 64. Instead use
+  * rcclLL128LineElemsFromArch() / rcclLL128DataElemsFromArch() (archinfo.h) or
+  * comm->ll128LineElems / comm->ll128DataElems (and proxyState->* in the net proxy). */
+
+#if __HIP_DEVICE_COMPILE__
+#if defined (__gfx1250__)
+#define NCCL_LL128_LINESIZE 128
+#else
 #define NCCL_LL128_LINESIZE 64
+#endif
+#else
+#define NCCL_LL128_LINESIZE 64
+#endif
 #define NCCL_LL128_LINEELEMS (NCCL_LL128_LINESIZE/sizeof(uint64_t))
 #define NCCL_LL128_DATAELEMS (NCCL_LL128_LINEELEMS-1)
 
@@ -231,6 +247,7 @@ struct ncclProxyConnector {
   int sameProcess;
   struct ncclProxyConnection* connection;
   ncclResult_t (*proxyProgress)(struct ncclProxyState* proxyState, struct ncclProxyArgs*); // Copied from transport if necessary
+  ncclResult_t (*proxyGinProgress)(struct ncclProxyState* proxyState);
 };
 
 struct ncclConnector {
@@ -252,7 +269,8 @@ struct ncclRing {
   // since we need to know how the user expects data to be ordered across
   // devices. Ordered from current device.
   int* userRanks;
-
+  // Maps a user rank to an internal ring index.
+  int* rankToIndex;  // inverse lookup of userRanks, setup in setupChannel
   int index; // This rank's index in the ring
 };
 
@@ -445,6 +463,16 @@ struct alignas(16) ncclDevWorkColl {
 };
 
 
+struct alignas(16) ncclDevWorkBcast {
+  int ringDepth;
+  int chunkSize;
+  void *sendbuff;
+  void *recvbuff;
+  size_t bytes;
+  size_t bytes_done;
+  uint8_t pad[8];
+};
+
 __device__ constexpr int ncclProtoGrainSize(int proto) {
   return proto == NCCL_PROTO_LL ? 16 :
         proto == NCCL_PROTO_LL128 ? WARP_SIZE*NCCL_LL128_SHMEM_ELEMS_PER_THREAD/NCCL_LL128_LINEELEMS*NCCL_LL128_DATAELEMS*sizeof(uint64_t) :
@@ -490,12 +518,21 @@ struct alignas(16) ncclDevWorkCollReg {
 enum ncclDevWorkType: uint8_t {
   ncclDevWorkTypeP2p,
   ncclDevWorkTypeColl,
-  ncclDevWorkTypeCollReg
+  ncclDevWorkTypeCollReg,
+  ncclDevWorkTypeBcast,  // for batched broadcast
 };
 
 constexpr size_t ncclDevWorkSize(enum ncclDevWorkType type) {
   return type == ncclDevWorkTypeP2p ? sizeof(ncclDevWorkP2p) :
-        type == ncclDevWorkTypeColl ? sizeof(ncclDevWorkColl) : sizeof(ncclDevWorkCollReg);
+         type == ncclDevWorkTypeColl ? sizeof(ncclDevWorkColl) :
+         type == ncclDevWorkTypeCollReg ? sizeof(ncclDevWorkCollReg) :
+         type == ncclDevWorkTypeBcast ? sizeof(ncclDevWorkBcast): 0;
+}
+
+__host__ __device__ constexpr int ncclMaxDevWorkBatchBytes(int cudaArch = NCCL_CUDA_ARCH) {
+  return cudaArch < 800 ? (1<<10) :
+    cudaArch < 900 ? (8<<10) :
+    (16<<10);
 }
 
 #define NCCL_MAX_DEV_WORK_BATCH_BYTES 192
@@ -790,7 +827,8 @@ __device__ constexpr int ncclShmemDynamicSize(int cudaArch = NCCL_CUDA_ARCH) {
 
 // Host-side table of kernel function pointers.
 extern int const ncclDevKernelCount;
-extern void* const ncclDevKernelList[/*ncclDevKernelCount*/];
+extern void* ncclDevKernelList[/*ncclDevKernelCount*/];
+extern int ncclDevKernelRequirements[/*ncclDevKernelCount*/];
 
 // Table of most specialized kernel function to run given func index.
 extern int const ncclDevFuncRowToId[];

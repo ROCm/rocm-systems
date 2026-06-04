@@ -44,6 +44,7 @@ option(PROFILE "Enable statistics and timing support" OFF)
 option(USE_RO "Enable RO conduit" ON)
 option(USE_IPC "Enable IPC support (using HIP)" OFF)
 option(USE_GDA "Enable GDA conduit" OFF)
+option(USE_SDMA "Enable SDMA transport (MI300X+)" OFF)
 option(USE_THREADS "Enable workgroup threads to share network queues" OFF)
 option(USE_WF_COAL "Enable wavefront message coalescing" OFF)
 option(USE_HEAP_DEVICE_FINEGRAIN "Heap uses GPU memory in finegrain mode" ON)
@@ -60,6 +61,7 @@ option(USE_HDP_FLUSH_HOST_SIDE "Use a polling thread to flush the HDP cache on t
 option(BUILD_FUNCTIONAL_TESTS "Build the functional tests (Requires MPI)" OFF)
 option(BUILD_EXAMPLES "Build the examples" OFF)
 option(BUILD_UNIT_TESTS "Build the unit tests (Requires MPI)" OFF)
+option(BUILD_PYTHON_TESTS "Install rocshmem4py test assets (RO execution requires MPI launcher, Python, pip)" OFF)
 option(BUILD_TESTS_ONLY "Build only tests. Used to link against rocSHMEM in a ROCm Release" OFF)
 option(BUILD_TOOLS "Build binary tools (e.g., rocshmem_info)" ON)
 
@@ -82,7 +84,7 @@ set_property(CACHE USE_EXTERNAL_MPI PROPERTY STRINGS AUTO ON OFF)
 include(${CMAKE_SOURCE_DIR}/cmake/setup_project.cmake)
 
 ## Setup VERSION
-set(VERSION_STRING 3.3.0)
+set(VERSION_STRING 3.4.0)
 message(STATUS "rocSHMEM Version: " "${VERSION_STRING}")
 
 project(rocshmem VERSION ${VERSION_STRING} LANGUAGES CXX)
@@ -158,6 +160,7 @@ set(DEFAULT_GPUS
 
 if(${ROCM_MAJOR_VERSION} GREATER 6)
   list(APPEND DEFAULT_GPUS gfx950)
+  list(APPEND DEFAULT_GPUS gfx1250)
 endif()
 
 if($ENV{BUILD_LOCAL_GPU_TARGET_ONLY})
@@ -194,11 +197,29 @@ message(STATUS "Compiling for ${GPU_TARGETS}")
 if (NOT BUILD_TESTS_ONLY)
   add_library(${PROJECT_NAME})
   add_library(roc::${PROJECT_NAME} ALIAS ${PROJECT_NAME})
-  add_subdirectory(src)
 
   #############################################################################
   # PACKAGE DEPENDENCIES
   #############################################################################
+  # GDA Requires libnuma
+  if(USE_GDA)
+    find_path(NUMA_INCLUDE_DIR NAMES numa.h)
+    find_library(NUMA_LIBRARY NAMES numa)
+
+    include(FindPackageHandleStandardArgs)
+    find_package_handle_standard_args(NUMA DEFAULT_MSG NUMA_LIBRARY NUMA_INCLUDE_DIR)
+
+    # Usually you would have to add libnuma to target but we use dlopen
+
+    if (NOT NUMA_FOUND)
+      message(STATUS "libnuma not found. Unable to build GDA")
+      set(USE_GDA OFF)
+      set(GDA_IONIC OFF)
+      set(GDA_BNXT OFF)
+      set(GDA_MLX5 OFF)
+    endif()
+  endif()
+
   if (NOT USE_EXTERNAL_MPI STREQUAL "OFF")
     find_package(MPI)
   else()
@@ -221,6 +242,10 @@ if (NOT BUILD_TESTS_ONLY)
 
   find_package(hip REQUIRED PATHS /opt/rocm)
   find_package(hsa-runtime64 REQUIRED)
+
+  if (USE_SDMA)
+    find_package(hsakmt REQUIRED PATHS /opt/rocm)
+  endif()
 
   set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
   set(THREADS_PREFER_PTHREAD_FLAG TRUE)
@@ -330,6 +355,7 @@ if (NOT BUILD_TESTS_ONLY)
       hsa-runtime64::hsa-runtime64
       -fgpu-rdc
       $<$<NOT:$<BOOL:${FILESYSTEM_NO_LINK_NEEDED}>>:stdc++fs>
+      $<$<BOOL:${USE_SDMA}>:hsakmt::hsakmt>
   )
 
   if(${ROCM_MAJOR_VERSION} LESS 7)
@@ -389,6 +415,13 @@ if (NOT BUILD_TESTS_ONLY)
     DESCRIPTION "ROCm OpenSHMEM (rocSHMEM)"
     MAINTAINER "rocSHMEM Maintainer <rocshmem-maintainer@amd.com>"
   )
+endif (NOT BUILD_TESTS_ONLY)
+
+###############################################################################
+# TEST SUBDIRECTORIES
+###############################################################################
+if (NOT BUILD_TESTS_ONLY)
+  add_subdirectory(src)
 endif (NOT BUILD_TESTS_ONLY)
 
 ###############################################################################

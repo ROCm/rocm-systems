@@ -37,48 +37,10 @@ HIPAllocator *default_allocator_{nullptr};
 SingleHeap::SingleHeap() {
 
   HIPAllocator *allocator = get_default_allocator();
-  if (allocator->type == AllocatorTypeCoarsegrained) {
-    heap_mem_ = new HeapMemoryType<HIPAllocatorCoarsegrained>(envvar::heap_size.get_value());
-  } else if (allocator->type == AllocatorTypeFinegrained) {
-    heap_mem_ = new HeapMemoryType<HIPAllocatorFinegrained>(envvar::heap_size.get_value());
-  } else if (allocator->type == AllocatorTypeUncached) {
-    heap_mem_ = new HeapMemoryType<HIPAllocatorUncached>(envvar::heap_size.get_value());
-  }
-#if defined USE_HEAP_DEVICE_VMM_POSIX
-  else if (allocator->type == AllocatorTypeVMMPosix) {
-    heap_mem_ = new HeapMemoryType<HIPAllocatorVMMPosixFd>(envvar::heap_size.get_value());
-  }
-#endif
-#if defined USE_HEAP_DEVICE_VMM_FABRIC
-  else if (allocator->type == AllocatorTypeVMMFabric) {
-    heap_mem_ = new HeapMemoryType<HIPAllocatorVMMFabric>(envvar::heap_size.get_value());
-  }
-#endif
-  else {
-    LOG_ERROR_ABORT("Unknown allocator type");
-  }
+  heap_mem_ = new HeapMemoryType(*allocator, envvar::heap_size.get_value());
   assert(heap_mem_ != nullptr);
 
-  if (heap_mem_->type_ == AllocatorTypeCoarsegrained) {
-    strat_ = new DLAllocatorStrategy<HeapMemoryType<HIPAllocatorCoarsegrained>>(reinterpret_cast<HeapMemoryType<HIPAllocatorCoarsegrained> *>(heap_mem_));
-  } else if (heap_mem_->type_ == AllocatorTypeFinegrained){
-    strat_ = new DLAllocatorStrategy<HeapMemoryType<HIPAllocatorFinegrained>>(reinterpret_cast<HeapMemoryType<HIPAllocatorFinegrained> *>(heap_mem_));
-  } else if (heap_mem_->type_ == AllocatorTypeUncached){
-    strat_ = new DLAllocatorStrategy<HeapMemoryType<HIPAllocatorUncached>>(reinterpret_cast<HeapMemoryType<HIPAllocatorUncached> *>(heap_mem_));
-  }
-#if defined USE_HEAP_DEVICE_VMM_POSIX
-  else if (heap_mem_->type_ == AllocatorTypeVMMPosix){
-    strat_ = new DLAllocatorStrategy<HeapMemoryType<HIPAllocatorVMMPosixFd>>(reinterpret_cast<HeapMemoryType<HIPAllocatorVMMPosixFd> *>(heap_mem_));
-  }
-#endif
-#if defined USE_HEAP_DEVICE_VMM_FABRIC
-  else if (heap_mem_->type_ == AllocatorTypeVMMFabric){
-    strat_ = new DLAllocatorStrategy<HeapMemoryType<HIPAllocatorVMMFabric>>(reinterpret_cast<HeapMemoryType<HIPAllocatorVMMFabric> *>(heap_mem_));
-  }
-#endif
-  else {
-    LOG_ERROR_ABORT("Unknown allocator type");
-  }
+  strat_ = new DLAllocatorStrategy<HeapMemoryType>(static_cast<HeapMemoryType *>(heap_mem_));
 }
 
 SingleHeap::~SingleHeap() {

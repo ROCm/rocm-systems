@@ -1,15 +1,98 @@
-# Per-block counter collection limits observed through rocprofv3. These are
-# PerfXpert tool/runtime guardrails, not vendor-published GPU peak specs.
-# Exceeding a limit yields rocprofv3 error code 38 in the guarded paths.
-# Source: llm-reference-guide.md §"Hardware Counter Per-Block Limits" (lines 10-65).
+# Per-block counter collection limits for rocprofv3 PMC pass planning. These
+# are PerfXpert tool/runtime guardrails, not GPU peak specifications.
+# Source: projects/rocprofiler-compute/src/utils/mi_gpu_spec.yaml
+#         perfmon_config entries on ROCm/rocm-systems develop.
+# The generic fallback limit is the minimum of known architecture-specific
+# limits so unknown architectures take the conservative path.
+# Note: gfx950 TCC_channels is topology metadata, not a per-pass counter limit,
+# so it is intentionally omitted from gpu_arch_limits.
+
+gpu_arch_limits:
+  gfx908:
+    SQ: 8
+    TA: 2
+    TD: 2
+    TCP: 4
+    TCC: 4
+    CPC: 2
+    CPF: 2
+    SPI: 6
+    GRBM: 2
+    GDS: 4
+  gfx90a:
+    SQ: 8
+    TA: 2
+    TD: 2
+    TCP: 4
+    TCC: 4
+    CPC: 2
+    CPF: 2
+    SPI: 6
+    GRBM: 2
+    GDS: 4
+  gfx940:
+    SQ: 8
+    TA: 2
+    TD: 2
+    TCP: 4
+    TCC: 4
+    CPC: 2
+    CPF: 2
+    SPI: 6
+    GRBM: 2
+    GDS: 4
+  gfx941:
+    SQ: 8
+    TA: 2
+    TD: 2
+    TCP: 4
+    TCC: 4
+    CPC: 2
+    CPF: 2
+    SPI: 6
+    GRBM: 2
+    GDS: 4
+  gfx942:
+    SQ: 8
+    TA: 2
+    TD: 2
+    TCP: 4
+    TCC: 4
+    CPC: 2
+    CPF: 2
+    SPI: 6
+    GRBM: 2
+    GDS: 4
+  gfx950:
+    SQ: 8
+    TA: 2
+    TD: 2
+    TCP: 4
+    TCC: 4
+    CPC: 2
+    CPF: 2
+    SPI: 6
+    GRBM: 2
+    GDS: 4
+  gfx1151:
+    SQ: 8
+    TA: 2
+    GRBM: 2
+    CPC: 2
+    GCEA: 2
+    TCP: 4
+    SPI: 6
+    GL1A: 4
+    GL1C: 4
+    GL2A: 4
+    GL2C: 4
 
 per_block_limits:
   SQ:
-    limit: 4
-    gfx942_limit: 8
-    note: "Shader Sequencer — conservative default 4, up to 8 on gfx942 (MI300X)"
+    limit: 8
+    note: "Shader Sequencer"
   GRBM:
-    limit: 4
+    limit: 2
     note: "Global Register Bus Manager — system-wide cycle counters"
   TCC:
     limit: 4
@@ -18,8 +101,35 @@ per_block_limits:
     limit: 4
     note: "Texture Cache Per-CU (vector L1)"
   TA:
-    limit: 4
+    limit: 2
     note: "Texture Address unit"
   TD:
-    limit: 4
+    limit: 2
     note: "Texture Data unit"
+  CPC:
+    limit: 2
+    note: "Command Processor Compute"
+  CPF:
+    limit: 2
+    note: "Command Processor Frontend"
+  SPI:
+    limit: 6
+    note: "Shader Processor Interpolator"
+  GDS:
+    limit: 4
+    note: "Global Data Share"
+  GCEA:
+    limit: 2
+    note: "Graphics/Compute Engine Adapter"
+  GL1A:
+    limit: 4
+    note: "Graphics L1 address block"
+  GL1C:
+    limit: 4
+    note: "Graphics L1 cache block"
+  GL2A:
+    limit: 4
+    note: "Graphics L2 address block"
+  GL2C:
+    limit: 4
+    note: "Graphics L2 cache block"

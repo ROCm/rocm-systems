@@ -390,24 +390,36 @@ __device__ __forceinline__ bool is_last_active_lane() {
 #define LOAD(VAR) __atomic_load_n((VAR), __ATOMIC_SEQ_CST)
 #define STORE(DST, SRC) __atomic_store_n((DST), (SRC), __ATOMIC_SEQ_CST)
 
+enum class MemcpyKind { Put, Get, PutBlocking, GetBlocking };
+
+constexpr bool is_put(MemcpyKind k) {
+  return k == MemcpyKind::Put || k == MemcpyKind::PutBlocking;
+}
+
+constexpr bool is_blocking(MemcpyKind k) {
+  return k == MemcpyKind::PutBlocking || k == MemcpyKind::GetBlocking;
+}
+
+template <MemcpyKind Kind = MemcpyKind::Put>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_lane(void* dst, void* src, size_t size) {
   uint8_t* dst_bytes{static_cast<uint8_t*>(dst)};
   uint8_t* src_bytes{static_cast<uint8_t*>(src)};
 
-  for (size_t i = 16; i > 1; i >>= 1) {
+  for (size_t i = 16; i >= 1; i >>= 1) {
     while (size >= i) {
-      store_asm(src_bytes, dst_bytes, i);
+      if constexpr (is_put(Kind)) {
+        put_asm(src_bytes, dst_bytes, i);
+      } else {
+        get_asm(src_bytes, dst_bytes, i);
+      }
       src_bytes += i;
       dst_bytes += i;
       size -= i;
     }
   }
-
-  if (size == 1) {
-    *dst_bytes = *src_bytes;
-  }
 }
 
+template <MemcpyKind Kind = MemcpyKind::Put>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_wg(void* dst, void* src, size_t size) {
   int thread_id{get_flat_block_id()};
   int block_size{get_flat_block_size()};
@@ -423,7 +435,8 @@ __device__ __forceinline__ bool is_last_active_lane() {
   dst_bytes = dst_def;
   src_bytes = src_def;
 
-  for (int j = 16; j > 1; j >>= 1) {
+  
+  for (int j = 16; j >= 1; j >>= 1) {
     cpy_size = size / j;
     for (int i = thread_id; i < cpy_size; i += block_size) {
       dst_bytes = dst_def;
@@ -432,20 +445,19 @@ __device__ __forceinline__ bool is_last_active_lane() {
       src_bytes += i * j;
       dst_bytes += i * j;
 
-      store_asm(src_bytes, dst_bytes, j);
+      if constexpr (is_put(Kind)) {
+        put_asm(src_bytes, dst_bytes, j);
+      } else {
+        get_asm(src_bytes, dst_bytes, j);
+      }
     }
     size -= cpy_size * j;
     dst_def += cpy_size * j;
     src_def += cpy_size * j;
   }
-
-  if (size == 1) {
-    if (is_thread_zero_in_block()) {
-      *dst_bytes = *src_bytes;
-    }
-  }
 }
 
+template <MemcpyKind Kind = MemcpyKind::Put>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_wave(void* dst, void* src, size_t size) {
   int wave_tid = get_flat_block_id() % WF_SIZE;
   int wave_size{wave_SZ()};
@@ -461,7 +473,7 @@ __device__ __forceinline__ bool is_last_active_lane() {
   dst_bytes = dst_def;
   src_bytes = src_def;
 
-  for (int j = 16; j > 1; j >>= 1) {
+  for (int j = 16; j >= 1; j >>= 1) {
     cpy_size = size / j;
     for (int i = wave_tid; i < cpy_size; i += wave_size) {
       dst_bytes = dst_def;
@@ -470,18 +482,28 @@ __device__ __forceinline__ bool is_last_active_lane() {
       src_bytes += i * j;
       dst_bytes += i * j;
 
-      store_asm(src_bytes, dst_bytes, j);
+      if constexpr (is_put(Kind)) {
+        put_asm(src_bytes, dst_bytes, j);
+      } else {
+        get_asm(src_bytes, dst_bytes, j);
+      }
     }
     size -= cpy_size * j;
     dst_def += cpy_size * j;
     src_def += cpy_size * j;
   }
+}
 
-  if (size == 1) {
-    if (is_thread_zero_in_wave()) {
-      *dst_bytes = *src_bytes;
-    }
+/* Is ptr_b in range [ptr_a, ptr_a + len_a) */
+[[maybe_unused]]
+__host__ __device__ static bool
+is_ptr_in_range(uintptr_t ptr_a, size_t len_a, uintptr_t ptr_b) {
+
+  if ((len_a == 0) || (ptr_b < ptr_a)) {
+    return false;
   }
+
+  return static_cast<size_t>(ptr_b - ptr_a) < len_a;
 }
 
 int rocm_init();

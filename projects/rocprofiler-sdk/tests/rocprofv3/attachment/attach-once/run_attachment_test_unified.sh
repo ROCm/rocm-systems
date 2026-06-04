@@ -87,7 +87,7 @@ echo "Attaching profiler to PID $APP_PID for 5 seconds (${OUTPUT_FORMAT} format)
 
 # Output the command and environment for debugging
 echo "===== COMMAND TO EXECUTE ====="
-echo "${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} --stats --summary --group-by-queue -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} --log-level ${LOG_LEVEL} -o ${OUTPUT_FILENAME:-out}"
+echo "${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} --stats --summary --group-by-queue --sync-output -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} --log-level ${LOG_LEVEL} -o ${OUTPUT_FILENAME:-out}"
 echo ""
 echo "===== ENVIRONMENT VARIABLES ====="
 env | grep "^ROCPROF" | sort
@@ -95,7 +95,7 @@ echo "===== END ENVIRONMENT ====="
 echo ""
 
 # Run rocprofv3 with --attach option
-LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} --stats --summary --group-by-queue -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} --log-level ${LOG_LEVEL} -o ${OUTPUT_FILENAME:-out}
+LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} --stats --summary --group-by-queue --sync-output -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} --log-level ${LOG_LEVEL} -o ${OUTPUT_FILENAME:-out}
 
 echo "${OUTPUT_FORMAT} profiler detached successfully"
 

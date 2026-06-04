@@ -170,11 +170,11 @@ class TestJacobi(RocprofsysTest):
 
     @pytest.mark.hip
     @pytest.mark.mpi
+    @pytest.mark.multi_gpu(2)
     @pytest.mark.rocpd("hpc_hip_environment")
     @pytest.mark.parametrize("mode", ["sys_run"])
     def test_hip(self, mode, hpc_hip_environment):
         env = hpc_hip_environment.copy()
-        env["ROCPROFSYS_TRACE_LEGACY"] = "ON"
         env["ROCPROFSYS_PERFETTO_COMBINE_TRACES"] = "ON"
 
         result = self.run_test(
@@ -185,27 +185,27 @@ class TestJacobi(RocprofsysTest):
             launcher="mpi",
             num_procs=2,
         )
-        # hipHostFree is one of the last calls and should be present if the program worked correctly
-        self.assert_regex(
-            result,
-            pass_regex=[r"0>>>.*_hipHostFree"],
-        )
-
+        self.assert_regex(result)
         # Taken from the program's defines.hpp
         JACOBI_MAX_LOOPS = 1000
 
         # With -g 2 1, 2 MPI ranks exist. The merged perfetto trace has 2x the per-rank count
-        MERGED_LAPLACIAN_KERNEL_COUNT = JACOBI_MAX_LOOPS * 2
-
         self.assert_perfetto(
             result,
             subtest_name="Laplacian Kernel Count Validation",
             perfetto_file="merged.proto",
             categories=["rocm_hip_stream"],
             print_output=True,
-            pass_regex=[
-                rf"LocalLaplacianKernel.*\|\s+{MERGED_LAPLACIAN_KERNEL_COUNT}\s+\|"
-            ],
+            pass_regex=[rf"LocalLaplacianKernel.*\|\s+{JACOBI_MAX_LOOPS * 2}\s+\|"],
+        )
+
+        # hipHostFree is one of the last calls — tracked via rocprofiler-sdk in Perfetto
+        self.assert_perfetto(
+            result,
+            subtest_name="hipHostFree Validation",
+            perfetto_file="merged.proto",
+            categories=["rocm_hip_api"],
+            pass_regex=[r"hipHostFree\s*\|\s*[1-9]"],
         )
 
 
@@ -273,6 +273,7 @@ class TestSplitCopyComputeHWQueues(RocprofsysTest):
         env = hpc_hip_environment.copy()
         env["ROCPROFSYS_ROCM_DOMAINS"] = "hip_api,hsa_api,kernel_dispatch,memory_copy"
         env["ROCPROFSYS_COUT_OUTPUT"] = "OFF"
+        env["ROCPROFSYS_ROCM_GROUP_BY_QUEUE"] = "ON"
 
         result = self.run_test(
             mode,

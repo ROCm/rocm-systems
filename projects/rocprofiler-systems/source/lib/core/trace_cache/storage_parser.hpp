@@ -5,6 +5,7 @@
 
 #include "common/defines.h"
 
+#include "core/progress/callback.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/type_registry.hpp"
 
@@ -17,6 +18,7 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include <utility>
 
 namespace rocprofsys
 {
@@ -31,12 +33,13 @@ class storage_parser
     static_assert(sizeof...(SupportedTypes) != 0, "SupportedTypes must be non-empty");
 
 public:
-    storage_parser(std::string _filename)
+    explicit storage_parser(std::string _filename)
     : m_filename(std::move(_filename))
     {}
 
     template <typename TypeProcessing>
-    void load(std::shared_ptr<TypeProcessing> _type_processing)
+    void load(std::shared_ptr<TypeProcessing> _type_processing,
+              progress::progress_callback     _progress_cb = {})
     {
         static_assert(
             type_traits::has_execute_processing<TypeProcessing, TypeIdentifierEnum,
@@ -66,9 +69,11 @@ public:
 
         sample_header header;
 
-        std::vector<uint8_t> sample;
+        std::vector<std::uint8_t> sample;
         sample.reserve(4096);
         size_t last_capacity = sample.capacity();
+
+        std::uint64_t last_pos = 0;
 
         while(!ifs.eof())
         {
@@ -100,6 +105,20 @@ public:
                     fmt::format("Bad read while consuming buffered storage. Filename: {} "
                                 "Bytes read: {}",
                                 m_filename, static_cast<int>(ifs.tellg())));
+            }
+
+            if(_progress_cb)
+            {
+                const auto pos = ifs.tellg();
+                if(pos != std::streampos{ -1 })
+                {
+                    const auto absolute = static_cast<std::uint64_t>(pos);
+                    if(absolute > last_pos)
+                    {
+                        _progress_cb(absolute - last_pos);
+                        last_pos = absolute;
+                    }
+                }
             }
 
             if(header.type == TypeIdentifierEnum::fragmented_space)

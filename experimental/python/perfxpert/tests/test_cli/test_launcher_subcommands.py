@@ -357,6 +357,7 @@ class TestBundledPriority:
             "resolve_user_opencode_binary",
             lambda: explicit,
         )
+        monkeypatch.setenv("PERFXPERT_IN_OPENCODE_SESSION", "1")
 
         def _fake_run(cmd, env=None, check=False, cwd=None):
             seen["cmd"] = cmd

@@ -236,10 +236,13 @@ void MPIEnvironment::TearDown()
 
     if(barrier_result == MPI_SUCCESS)
     {
-        // Wait for barrier with a timeout (1 second)
+        // Wait for barrier with a timeout.
+        // 3 s: ncclCommDestroy is now explicitly called (and MPI-barrier'd) inside
+        // cleanupTestCommunicator before TearDown runs, so the only remaining rank
+        // skew here is log-file I/O (RCCL_MPI_LOG_ALL_RANKS) which is fast.
         int        flag             = 0;
         auto       timeout_start    = std::chrono::steady_clock::now();
-        const auto timeout_duration = std::chrono::seconds(1);
+        const auto timeout_duration = std::chrono::seconds(3);
 
         while(!flag)
         {
