@@ -272,7 +272,10 @@ static void finishPlan(struct ncclComm* comm, struct ncclKernelPlan* plan) {
   plan->threadPerBlock = std::max(plan->threadPerBlock, 256 /*NCCL_MIN_NTHREADS*/);
 #endif
   // If we can fit everything into the kernel args we do so.
-  if (sizeof(ncclDevKernelArgs) + batchBytes + workBytes <= comm->workArgsBytes) {
+  // Keep persistent plans on the persistent device work
+  // buffer; inline-args storage gives a stale work descriptor at replay -> GPU fault.
+  if (!plan->persistent &&
+      sizeof(ncclDevKernelArgs) + batchBytes + workBytes <= comm->workArgsBytes) {
     plan->workStorageType = ncclDevWorkStorageTypeArgs;
   }
   plan->kernelArgsSize = sizeof(struct ncclDevKernelArgs) + batchBytes;
