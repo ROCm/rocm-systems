@@ -1083,6 +1083,16 @@ int rocshmem_gin_create_qps(int nRanks, int myRank,
       goto fail;
     }
 
+    // Verify QP state: re-issue modify_qp to RTS (no-op if already RTS, error otherwise)
+    for (int i = 0; i < nRanks; i++) {
+      struct ibv_qp_attr vattr;
+      memset(&vattr, 0, sizeof(vattr));
+      vattr.qp_state = IBV_QPS_RTS;
+      int rc = set->bnxt_re_dv.modify_qp(set->ibv_qps[i], &vattr, IBV_QP_STATE, 0, 0);
+      LOG_INFO("gin_qp verify_rts[%d]: modify_qp(RTS) rc=%d qp_num=0x%x",
+               i, rc, set->ibv_qps[i]->qp_num);
+    }
+
     // Dump QP state for comparison with GDABackend
     dump_ibv_context(set->nic.context);
     dump_ibv_device(set->nic.context->device);

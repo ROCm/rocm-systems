@@ -352,6 +352,13 @@ __device__ void QueuePair::bnxt_write_rma_wqe_with_keys(uintptr_t raddr, uint32_
     memcpy(sge_ptr,  &sge,  sizeof(struct bnxt_re_sge));
   }
 
+  {
+    uint8_t *wqe = (uint8_t*)hdr_ptr;
+    printf("WQE put_with_keys [%u]: ", qp_num);
+    for (int b = 0; b < 48; b++) printf("%02x", wqe[b]);
+    printf("\n");
+  }
+
   bnxt_re_fill_psns_for_msntbl(&bnxt_sq, size);
   bnxt_re_incr_tail(&bnxt_sq, GDA_BNXT_WQE_SLOT_COUNT);
 }
