@@ -68,6 +68,8 @@ TEST_F(HipFileBatch, CreateOperationRead)
     io_params->opcode = hipFileBatchRead;
 
     BatchOperation op = BatchOperation{std::move(io_params), default_mock_buffer, default_mock_file};
+
+    ASSERT_EQ(op.event().status, hipFileWaiting);
 }
 
 TEST_F(HipFileBatch, CreateOperationWrite)
@@ -75,6 +77,69 @@ TEST_F(HipFileBatch, CreateOperationWrite)
     io_params->opcode = hipFileBatchWrite;
 
     BatchOperation op = BatchOperation{std::move(io_params), default_mock_buffer, default_mock_file};
+
+    ASSERT_EQ(op.event().status, hipFileWaiting);
+}
+
+TEST_F(HipFileBatch, MarkOperationPending)
+{
+    BatchOperation op = BatchOperation{std::move(io_params), default_mock_buffer, default_mock_file};
+
+    op.markPending();
+
+    ASSERT_EQ(op.event().status, hipFilePending);
+}
+
+TEST_F(HipFileBatch, TryCancelWaitingOperationIsNoOp)
+{
+    BatchOperation op = BatchOperation{std::move(io_params), default_mock_buffer, default_mock_file};
+
+    op.tryCancel();
+
+    ASSERT_EQ(op.event().status, hipFileWaiting);
+}
+
+TEST_F(HipFileBatch, MarkPendingPendingOperationThrowsInvalidStateTransition)
+{
+    BatchOperation op = BatchOperation{std::move(io_params), default_mock_buffer, default_mock_file};
+
+    op.markPending();
+
+    ASSERT_THROW(op.markPending(), InvalidStateTransition);
+    ASSERT_EQ(op.event().status, hipFilePending);
+}
+
+TEST_F(HipFileBatch, CancelPendingOperation)
+{
+    BatchOperation op = BatchOperation{std::move(io_params), default_mock_buffer, default_mock_file};
+
+    op.markPending();
+    op.tryCancel();
+
+    ASSERT_EQ(op.event().status, hipFileCanceled);
+}
+
+TEST_F(HipFileBatch, CancelPendingOperationIsIdempotent)
+{
+    BatchOperation op = BatchOperation{std::move(io_params), default_mock_buffer, default_mock_file};
+
+    op.markPending();
+    op.tryCancel();
+    op.tryCancel();
+
+    ASSERT_EQ(op.event().status, hipFileCanceled);
+}
+
+TEST_F(HipFileBatch, MarkPendingCanceledOperationThrowsInvalidStateTransition)
+{
+    BatchOperation op = BatchOperation{std::move(io_params), default_mock_buffer, default_mock_file};
+
+    op.markPending();
+    op.tryCancel();
+
+    ASSERT_THROW(op.markPending(), InvalidStateTransition);
+
+    ASSERT_EQ(op.event().status, hipFileCanceled);
 }
 
 TEST_F(HipFileBatch, CreateOperationBadBuffer)
