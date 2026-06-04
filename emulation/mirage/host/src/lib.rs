@@ -462,7 +462,7 @@ fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Res
 
     publish_health(
         layout,
-        true,
+        false,
         "preparing",
         Some(format!(
             "resolving container provider for image {}",
