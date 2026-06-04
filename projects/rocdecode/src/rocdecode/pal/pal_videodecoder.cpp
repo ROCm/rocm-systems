@@ -83,6 +83,7 @@ void PalDpb::Clear() {
     for (uint32_t i = 0; i < slot_count_; ++i) {
         slots_[i].image.Reset();
         slots_[i].image_memory.Reset();
+        slots_[i].fence.Reset();
         slots_[i].occupied = false;
         slots_[i].poc = -1;
         slots_[i].frame_idx = -1;
@@ -219,6 +220,7 @@ Pal::IDevice* PalVideoDecoder::GetPalDevice() {
 
         // Check for VCN hardware
         Pal::DeviceProperties dev_props = {};
+        InfoLog(g_rocdec_logger, "PAL: Getting properties for device " + ROCDEC_TOSTR(i));
         dev->GetProperties(&dev_props);
 
         InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: Device ") + ROCDEC_TOSTR(i) +
@@ -289,7 +291,8 @@ PalVideoDecoder::PalVideoDecoder()
     , bit_depth_(0)
     , max_dpb_slots_(0)
     , initialized_(false)
-    , session_begun_(false) {
+    , session_begun_(false)
+    , last_submitted_slot_idx_(-1) {
 }
 
 PalVideoDecoder::~PalVideoDecoder() {
@@ -378,6 +381,13 @@ rocDecStatus PalVideoDecoder::Initialize(rocDecVideoCodec codec_type,
         const auto& eng_props = dev_props_for_alloc.engineProperties[eng];
 
         Pal::CmdAllocatorCreateInfo aci = {};
+        InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: CmdAllocator create - engineType=") + ROCDEC_TOSTR((int)eng) +
+                " queueType=" + ROCDEC_TOSTR((int)Pal::QueueTypeVideoDecode) +
+                " preferred heaps: " +
+                ROCDEC_TOSTR(eng_props.preferredCmdAllocHeaps[0]) + ", " +
+                ROCDEC_TOSTR(eng_props.preferredCmdAllocHeaps[1]) + ", " +
+                ROCDEC_TOSTR(eng_props.preferredCmdAllocHeaps[2]) + ", " +
+                ROCDEC_TOSTR(eng_props.preferredCmdAllocHeaps[3]));
         aci.flags.threadSafe = 1;
 
         // Initialize all allocator types from the device's preferred heaps for this engine
@@ -415,9 +425,10 @@ rocDecStatus PalVideoDecoder::Initialize(rocDecVideoCodec codec_type,
         Pal::CmdBufferCreateInfo cbci = {};
         cbci.engineType = eng;
         cbci.queueType = Pal::QueueTypeVideoDecode;
-        cbci.pCmdAllocator = nullptr;
+        //cbci.pCmdAllocator = nullptr;
+        cbci.pCmdAllocator = static_cast<Pal::ICmdAllocator*>(*cmd_allocator_.PtrAddr());
 
-        InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: CmdBuffer create - engineType=") + ROCDEC_TOSTR((int)cbci.engineType) +
+        InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: CmdBufferCreateInfo - engineType=") + ROCDEC_TOSTR((int)cbci.engineType) +
                 " queueType=" + ROCDEC_TOSTR((int)cbci.queueType) +
                 " (EngineTypeVcnDecode=" + ROCDEC_TOSTR((int)Pal::EngineTypeVcnDecode) +
                 " EngineTypeVcnUnified=" + ROCDEC_TOSTR((int)Pal::EngineTypeVcnUnified) +
@@ -446,30 +457,6 @@ rocDecStatus PalVideoDecoder::Initialize(rocDecVideoCodec codec_type,
         *cmd_buffer_.PtrAddr() = cb;
         *cmd_buffer_.MemAddr() = mem;
         InfoLog(g_rocdec_logger, "PAL: Command buffer created successfully");
-    }
-
-    // Create fence
-    {
-        Pal::FenceCreateInfo fci = {};
-        fci.flags.signaled = 0;
-
-        size_t sz = device_->GetFenceSize(&res);
-        if (Util::IsErrorResult(res)) {
-            CriticalLog(g_rocdec_logger, "PAL: GetFenceSize failed");
-            return ROCDEC_RUNTIME_ERROR;
-        }
-
-        void* mem = malloc(sz);
-        Pal::IFence* f = nullptr;
-        res = device_->CreateFence(fci, mem, &f);
-        if (Util::IsErrorResult(res) || !f) {
-            free(mem);
-            CriticalLog(g_rocdec_logger, "PAL: CreateFence failed");
-            return ROCDEC_RUNTIME_ERROR;
-        }
-
-        *fence_.PtrAddr() = f;
-        *fence_.MemAddr() = mem;
     }
 
     // Allocate DPB slots
@@ -556,6 +543,15 @@ rocDecStatus PalVideoDecoder::Initialize(rocDecVideoCodec codec_type,
 
         *decoder_heap_.PtrAddr() = heap_mem;
         *decoder_heap_.MemAddr() = heap_obj_mem;
+
+        Pal::GpuMemoryRef mem_ref = {};
+        mem_ref.pGpuMemory = heap_mem;
+        Pal::Result add_res = device_->AddGpuMemoryReferences(1, &mem_ref, nullptr, 0);
+        if (Util::IsErrorResult(add_res)) {
+            CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: AddGpuMemoryReferences (decoder heap) failed with result ") +
+                        ROCDEC_TOSTR((int)add_res));
+            return ROCDEC_RUNTIME_ERROR;
+        }
         InfoLog(g_rocdec_logger, "PAL: Decoder heap allocated successfully");
     }
 
@@ -588,7 +584,9 @@ rocDecStatus PalVideoDecoder::AllocateDecodedFrame(uint32_t width, uint32_t heig
     ici.mipLevels = 1;
     ici.arraySize = 1;
     ici.samples = 1;
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 961
     ici.fragments = 1;
+#endif
     ici.tiling = Pal::ImageTiling::Optimal;
     // TODO: PAL version mismatch - videoDecodeTarget not found
     // ici.usageFlags.videoDecodeTarget = 1;
@@ -618,16 +616,14 @@ rocDecStatus PalVideoDecoder::AllocateDecodedFrame(uint32_t width, uint32_t heig
     Pal::GpuMemoryCreateInfo mem_ci = {};
     mem_ci.size = mem_reqs.size;
     mem_ci.alignment = mem_reqs.alignment;
-    mem_ci.vaRange = Pal::VaRange::Default;
-    mem_ci.priority = Pal::GpuMemPriority::Normal;
-    mem_ci.heapCount = mem_reqs.heapCount;
-    for (uint32_t i = 0; i < mem_reqs.heapCount; ++i) {
-        mem_ci.heaps[i] = mem_reqs.heaps[i];
-    }
+    mem_ci.flags.interprocess = 1;
+    mem_ci.flags.shareable = 1;
+    mem_ci.heapCount = 1;
+    mem_ci.heaps[0] = Pal::GpuHeapGartCacheable;
 
     size_t gpu_mem_size = device_->GetGpuMemorySize(mem_ci, &res);
     if (Util::IsErrorResult(res)) {
-        CriticalLog(g_rocdec_logger, "PAL: GetGpuMemorySize failed");
+        CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: GetGpuMemorySize (decode surface) failed result=") + ROCDEC_TOSTR((int)res));
         return ROCDEC_RUNTIME_ERROR;
     }
 
@@ -636,7 +632,7 @@ rocDecStatus PalVideoDecoder::AllocateDecodedFrame(uint32_t width, uint32_t heig
     res = device_->CreateGpuMemory(mem_ci, gpu_mem_obj, &gpu_mem);
     if (Util::IsErrorResult(res) || !gpu_mem) {
         free(gpu_mem_obj);
-        CriticalLog(g_rocdec_logger, "PAL: CreateGpuMemory failed");
+        CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: CreateGpuMemory failed result=") + ROCDEC_TOSTR((int)res));
         return ROCDEC_RUNTIME_ERROR;
     }
 
@@ -650,7 +646,46 @@ rocDecStatus PalVideoDecoder::AllocateDecodedFrame(uint32_t width, uint32_t heig
         return ROCDEC_RUNTIME_ERROR;
     }
 
+    // Register with WDDM VidMm so the KMD keeps it resident for GPU access.
+    // On WDDM, per-submit gpuMemRefs are not supported; residency is managed device-wide.
+    {
+        Pal::GpuMemoryRef mem_ref = {};
+        mem_ref.pGpuMemory = gpu_mem;
+        Pal::Result add_res = device_->AddGpuMemoryReferences(1, &mem_ref, nullptr, 0);
+        if (Util::IsErrorResult(add_res)) {
+            CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: AddGpuMemoryReferences (DPB slot) failed with result ") +
+                        ROCDEC_TOSTR((int)add_res));
+            return ROCDEC_RUNTIME_ERROR;
+        }
+    }
+
     slot.image_index = 0;
+
+    // Create a fence for this slot so GetDecodeStatus/SyncSurface can track
+    // when a decode targeting this slot has completed, independently of other slots.
+    {
+        Pal::FenceCreateInfo fci = {};
+        fci.flags.signaled = 1; // Start signaled — no pending work yet
+
+        size_t fence_sz = device_->GetFenceSize(&res);
+        if (Util::IsErrorResult(res)) {
+            CriticalLog(g_rocdec_logger, "PAL: GetFenceSize failed for DPB slot fence");
+            return ROCDEC_RUNTIME_ERROR;
+        }
+
+        void* fence_mem = malloc(fence_sz);
+        Pal::IFence* f = nullptr;
+        res = device_->CreateFence(fci, fence_mem, &f);
+        if (Util::IsErrorResult(res) || !f) {
+            free(fence_mem);
+            CriticalLog(g_rocdec_logger, "PAL: CreateFence failed for DPB slot");
+            return ROCDEC_RUNTIME_ERROR;
+        }
+
+        *slot.fence.PtrAddr() = f;
+        *slot.fence.MemAddr() = fence_mem;
+    }
+
     return ROCDEC_SUCCESS;
 }
 
@@ -701,6 +736,19 @@ rocDecStatus PalVideoDecoder::AllocateBitstreamBuffer(size_t capacity) {
     if (Util::IsErrorResult(res)) {
         CriticalLog(g_rocdec_logger, "PAL: Map (bitstream) failed");
         return ROCDEC_RUNTIME_ERROR;
+    }
+
+    // Register with WDDM VidMm for GPU residency
+    if (device_) {
+        Pal::GpuMemoryRef mem_ref = {};
+        mem_ref.pGpuMemory = gpu_mem;
+        mem_ref.flags.readOnly = 1;  // GPU only reads the bitstream
+        Pal::Result add_res = device_->AddGpuMemoryReferences(1, &mem_ref, nullptr, 0);
+        if (Util::IsErrorResult(add_res)) {
+            CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: AddGpuMemoryReferences (bitstream) failed with result ") +
+                        ROCDEC_TOSTR((int)add_res));
+            return ROCDEC_RUNTIME_ERROR;
+        }
     }
 
     return ROCDEC_SUCCESS;
@@ -758,23 +806,6 @@ rocDecStatus PalVideoDecoder::DecodeHEVC(RocdecPicParams* params) {
     }
 
     const RocdecHevcPicParams* hevc = &params->pic_params.hevc;
-
-    // Upload bitstream to GPU
-    size_t bitstream_size = params->bitstream_data_len;
-    if (bitstream_size > bitstream_.capacity) {
-        rocDecStatus status = AllocateBitstreamBuffer(bitstream_size * 2);
-        if (status != ROCDEC_SUCCESS) {
-            return status;
-        }
-    }
-
-    rocDecStatus status = UploadBitstream(
-        static_cast<const uint8_t*>(params->bitstream_data),
-        bitstream_size
-    );
-    if (status != ROCDEC_SUCCESS) {
-        return status;
-    }
 
     // Map rocDecode HEVC parameters to PAL/UVD format
     hevc_t pal_hevc = {};
@@ -886,9 +917,9 @@ rocDecStatus PalVideoDecoder::DecodeHEVC(RocdecPicParams* params) {
     pal_hevc.curr_poc = hevc->curr_pic.poc;
     pal_hevc.curr_idx = static_cast<unsigned char>(params->curr_pic_idx);
 
-    // Reference picture list
+    // Reference picture list — hevc_t.ref_pic_list[16], rocDecode provides 15 ref slots.
+    // Fill all 16 entries; the 16th (index 15) has no rocDecode counterpart so mark invalid.
     for (size_t i = 0; i < 15; i++) {
-        // Check if reference is valid (not using is_invalid flag directly, check pic_idx)
         if (hevc->ref_frames[i].pic_idx != 0xFF && hevc->ref_frames[i].pic_idx >= 0) {
             pal_hevc.ref_pic_list[i] = static_cast<unsigned char>(hevc->ref_frames[i].pic_idx);
             pal_hevc.poc_list[i] = hevc->ref_frames[i].poc;
@@ -897,6 +928,7 @@ rocDecStatus PalVideoDecoder::DecodeHEVC(RocdecPicParams* params) {
             pal_hevc.poc_list[i] = 0;
         }
     }
+    pal_hevc.ref_pic_list[15] = 0xFF;  // No rocDecode counterpart — must be explicitly invalid
 
     // 10-bit mode
     if (hevc->bit_depth_luma_minus8 == 2) {
@@ -914,11 +946,13 @@ rocDecStatus PalVideoDecoder::DecodeHEVC(RocdecPicParams* params) {
             ROCDEC_TOSTR(hevc->picture_height_in_luma_samples));
 
     // Get current DPB slot for output
+    InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: Getting DPB slot for curr_pic_idx=") + ROCDEC_TOSTR(params->curr_pic_idx));
     PalDpbSlot* output_slot = dpb_.GetSlot(params->curr_pic_idx);
     if (!output_slot || !output_slot->image.Get()) {
         CriticalLog(g_rocdec_logger, "PAL: Invalid output slot");
         return ROCDEC_INVALID_PARAMETER;
     }
+    InfoLog(g_rocdec_logger, "PAL: DPB slot acquired");
 
     // Build PAL decode frame info
     Pal::VideoCodecInfo codec_info = {};
@@ -935,7 +969,7 @@ rocDecStatus PalVideoDecoder::DecodeHEVC(RocdecPicParams* params) {
 
     // Bitstream buffer
     decode_info.pBitstreamBuffer = bitstream_.gpu_memory.Get();
-    decode_info.bitstreamBufferSize = bitstream_size;
+    decode_info.bitstreamBufferSize = params->bitstream_data_len;
     decode_info.bitstreamBufferOffset = 0;
 
     // Decode target (output image)
@@ -953,8 +987,12 @@ rocDecStatus PalVideoDecoder::DecodeHEVC(RocdecPicParams* params) {
     decode_info.dpbArraySize = max_dpb_slots_;
 
     // Query device properties to determine DPB tier
+    InfoLog(g_rocdec_logger, "PAL: Calling device_->GetProperties ...");
     Pal::DeviceProperties dev_props = {};
     device_->GetProperties(&dev_props);
+    InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: GetProperties done - supportUnifiedDecodeTarget=") +
+            ROCDEC_TOSTR(dev_props.vcnipProperties.flags.supportUnifiedDecodeTarget) +
+            " supportArrayOfTextures=" + ROCDEC_TOSTR(dev_props.vcnipProperties.flags.supportArrayOfTextures));
 
     if (dev_props.vcnipProperties.flags.supportUnifiedDecodeTarget) {
         // Tier 2: Array of textures (preferred)
@@ -1016,31 +1054,128 @@ rocDecStatus PalVideoDecoder::DecodeHEVC(RocdecPicParams* params) {
         }
     }
 
+    // Wait for the previous frame's slot fence before recycling the shared cmd_allocator.
+    // The GPU queue serializes execution, but cmd_allocator_->Reset frees CPU-side memory
+    // that the GPU may still be reading for the previous submission.
+    if (last_submitted_slot_idx_ >= 0) {
+        PalDpbSlot* prev_slot = dpb_.GetSlot(last_submitted_slot_idx_);
+        if (prev_slot && prev_slot->fence.Get()) {
+            Pal::Result fence_status = prev_slot->fence->GetStatus();
+            if (fence_status == Pal::Result::NotReady) {
+                InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: Waiting for slot ") +
+                        ROCDEC_TOSTR(last_submitted_slot_idx_) + " fence before cmd_buffer Reset ...");
+                const Pal::IFence* wait_fences[] = { prev_slot->fence.Get() };
+                Pal::Result wait_res = device_->WaitForFences(1, wait_fences, true,
+                                                              std::chrono::nanoseconds(5000000000LL));
+                if (Util::IsErrorResult(wait_res)) {
+                    CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: WaitForFences failed with result ") +
+                                ROCDEC_TOSTR((int)wait_res));
+                    return ROCDEC_RUNTIME_ERROR;
+                }
+            }
+        }
+    }
+
+    // Upload bitstream after the fence wait so Frame N-1's GPU read of the shared
+    // bitstream buffer has completed before Frame N overwrites it.
+    {
+        size_t bitstream_size = params->bitstream_data_len;
+        if (bitstream_size > bitstream_.capacity) {
+            rocDecStatus alloc_status = AllocateBitstreamBuffer(bitstream_size * 2);
+            if (alloc_status != ROCDEC_SUCCESS) {
+                return alloc_status;
+            }
+        }
+        rocDecStatus upload_status = UploadBitstream(
+            static_cast<const uint8_t*>(params->bitstream_data),
+            bitstream_size
+        );
+        if (upload_status != ROCDEC_SUCCESS) {
+            return upload_status;
+        }
+    }
+
     // Reset and begin command buffer
+    InfoLog(g_rocdec_logger, "PAL: Calling cmd_buffer_->Reset ...");
     Pal::Result res = cmd_buffer_->Reset(cmd_allocator_.Get(), true);
+    InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: cmd_buffer_->Reset returned ") + ROCDEC_TOSTR((int)res));
     if (Util::IsErrorResult(res)) {
         CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: CmdBuffer Reset failed with result ") + ROCDEC_TOSTR((int)res));
         return ROCDEC_RUNTIME_ERROR;
     }
 
     Pal::CmdBufferBuildInfo build_info = {};
+    InfoLog(g_rocdec_logger, "PAL: Calling cmd_buffer_->Begin ...");
     res = cmd_buffer_->Begin(build_info);
+    InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: cmd_buffer_->Begin returned ") + ROCDEC_TOSTR((int)res));
     if (Util::IsErrorResult(res)) {
         CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: CmdBuffer Begin failed with result ") + ROCDEC_TOSTR((int)res));
         return ROCDEC_RUNTIME_ERROR;
     }
 
-    // Begin video decode session (if first frame)
-    if (!session_begun_) {
-        Pal::VideoDecodeBeginInfo begin_info = {};
-        begin_info.srcExtent.width = hevc->picture_width_in_luma_samples;
-        begin_info.srcExtent.height = hevc->picture_height_in_luma_samples;
-        cmd_buffer_->CmdBeginVideoDecode(begin_info);
-        session_begun_ = true;
-        InfoLog(g_rocdec_logger, "PAL: Video decode session begun");
-    }
+    InfoLog(g_rocdec_logger, "PAL: Calling CmdBindVideoDecoder ...");
+    cmd_buffer_->CmdBindVideoDecoder(*video_decoder_.Get());
+
+    InfoLog(g_rocdec_logger, "PAL: Calling CmdBeginVideoDecode ...");
+    Pal::VideoDecodeBeginInfo begin_info = {};
+    begin_info.srcExtent.width = hevc->picture_width_in_luma_samples;
+    begin_info.srcExtent.height = hevc->picture_height_in_luma_samples;
+    cmd_buffer_->CmdBeginVideoDecode(begin_info);
+    InfoLog(g_rocdec_logger, "PAL: CmdBeginVideoDecode done");
 
     // Submit decode frame command
+    // --- Frame parameter dump for submission debugging ---
+    {
+        static int s_frame_idx = 0;
+        InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: === FRAME ") + ROCDEC_TOSTR(s_frame_idx) + " DECODE_INFO DUMP ===");
+        InfoLog(g_rocdec_logger, ROCDEC_STR("PAL:   curr_pic_idx=") + ROCDEC_TOSTR(params->curr_pic_idx) +
+                " last_submitted_slot_idx=" + ROCDEC_TOSTR(last_submitted_slot_idx_));
+        InfoLog(g_rocdec_logger, ROCDEC_STR("PAL:   decodeType=") + ROCDEC_TOSTR((int)decode_info.decodeType) +
+                " srcExtent=" + ROCDEC_TOSTR(decode_info.srcExtent.width) + "x" + ROCDEC_TOSTR(decode_info.srcExtent.height));
+        InfoLog(g_rocdec_logger, ROCDEC_STR("PAL:   bitstreamBufferSize=") + ROCDEC_TOSTR(decode_info.bitstreamBufferSize) +
+                " bitstreamBufferOffset=" + ROCDEC_TOSTR(decode_info.bitstreamBufferOffset) +
+                " pBitstreamBuffer=" + ROCDEC_TOSTR((uintptr_t)decode_info.pBitstreamBuffer));
+        InfoLog(g_rocdec_logger, ROCDEC_STR("PAL:   pDecodeTargetBuffer=") + ROCDEC_TOSTR((uintptr_t)decode_info.pDecodeTargetBuffer) +
+                " decodeTargetArraySlice=" + ROCDEC_TOSTR(decode_info.decodeTargetArraySlice));
+        InfoLog(g_rocdec_logger, ROCDEC_STR("PAL:   pDpbCurrBuffer=") + ROCDEC_TOSTR((uintptr_t)decode_info.pDpbCurrBuffer) +
+                " dpbCurArraySlice=" + ROCDEC_TOSTR(decode_info.dpbCurArraySlice) +
+                " dpbArraySize=" + ROCDEC_TOSTR(decode_info.dpbArraySize));
+        InfoLog(g_rocdec_logger, ROCDEC_STR("PAL:   dpbTier1=") + ROCDEC_TOSTR(decode_info.dpbConfig.dynamicDpbTier1) +
+                " tier2=" + ROCDEC_TOSTR(decode_info.dpbConfig.dynamicDpbTier2) +
+                " tier3=" + ROCDEC_TOSTR(decode_info.dpbConfig.dynamicDpbTier3));
+        InfoLog(g_rocdec_logger, ROCDEC_STR("PAL:   pDecoderHeapBuffer=") + ROCDEC_TOSTR((uintptr_t)decode_info.pDecoderHeapBuffer) +
+                " decoderHeapOffset=" + ROCDEC_TOSTR(decode_info.decoderHeapOffset));
+        InfoLog(g_rocdec_logger, ROCDEC_STR("PAL:   pCodecInfoBuffer=") + ROCDEC_TOSTR((uintptr_t)decode_info.pCodecInfoBuffer));
+        InfoLog(g_rocdec_logger, ROCDEC_STR("PAL:   output_slot->fence=") + ROCDEC_TOSTR((uintptr_t)output_slot->fence.Get()) +
+                " fence_status=" + ROCDEC_TOSTR((int)output_slot->fence->GetStatus()));
+
+        // Dump reference buffer pointers to catch null/invalid refs
+        for (uint32_t i = 0; i < Pal::MaxDpbSliceCount; i++) {
+            if (decode_info.pDpbRefBuffers[i] != nullptr || decode_info.dpbRefArraySlices[i] != 0xFF) {
+                InfoLog(g_rocdec_logger, ROCDEC_STR("PAL:   ref[") + ROCDEC_TOSTR(i) + "]=" +
+                        ROCDEC_TOSTR((uintptr_t)decode_info.pDpbRefBuffers[i]) +
+                        " slice=" + ROCDEC_TOSTR((int)decode_info.dpbRefArraySlices[i]));
+            }
+        }
+
+        // Dump HEVC codec params that differ most between frames
+        InfoLog(g_rocdec_logger, ROCDEC_STR("PAL:   hevc.curr_poc=") + ROCDEC_TOSTR(pal_hevc.curr_poc) +
+                " curr_idx=" + ROCDEC_TOSTR((int)pal_hevc.curr_idx) +
+                " sps_info_flags=" + ROCDEC_TOSTR(pal_hevc.sps_info_flags) +
+                " pps_info_flags=" + ROCDEC_TOSTR(pal_hevc.pps_info_flags));
+        InfoLog(g_rocdec_logger, ROCDEC_STR("PAL:   ref_pic_list[0..3]=") +
+                ROCDEC_TOSTR((int)pal_hevc.ref_pic_list[0]) + "," +
+                ROCDEC_TOSTR((int)pal_hevc.ref_pic_list[1]) + "," +
+                ROCDEC_TOSTR((int)pal_hevc.ref_pic_list[2]) + "," +
+                ROCDEC_TOSTR((int)pal_hevc.ref_pic_list[3]));
+        InfoLog(g_rocdec_logger, ROCDEC_STR("PAL:   poc_list[0..3]=") +
+                ROCDEC_TOSTR(pal_hevc.poc_list[0]) + "," +
+                ROCDEC_TOSTR(pal_hevc.poc_list[1]) + "," +
+                ROCDEC_TOSTR(pal_hevc.poc_list[2]) + "," +
+                ROCDEC_TOSTR(pal_hevc.poc_list[3]));
+        InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: === END FRAME ") + ROCDEC_TOSTR(s_frame_idx) + " DUMP ===");
+        s_frame_idx++;
+    }
     cmd_buffer_->CmdDecodeVideoFrame(decode_info);
 
     // End command buffer
@@ -1050,9 +1185,11 @@ rocDecStatus PalVideoDecoder::DecodeHEVC(RocdecPicParams* params) {
         return ROCDEC_RUNTIME_ERROR;
     }
 
-    // Reset fence before submission so it can be signaled on completion
+    // Reset this slot's fence so it can be signaled when this decode completes.
+    // The queue serializes GPU work, so resetting after the previous submit for a
+    // different slot is safe — each slot has its own independent fence.
     {
-        Pal::IFence* fences_to_reset[] = { fence_.Get() };
+        Pal::IFence* fences_to_reset[] = { output_slot->fence.Get() };
         res = device_->ResetFences(1, fences_to_reset);
         if (Util::IsErrorResult(res)) {
             CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: ResetFences failed with result ") + ROCDEC_TOSTR((int)res));
@@ -1060,25 +1197,33 @@ rocDecStatus PalVideoDecoder::DecodeHEVC(RocdecPicParams* params) {
         }
     }
 
-    // Submit to queue, attaching fence via MultiSubmitInfo
+    // Submit to queue, attaching this slot's fence
     Pal::ICmdBuffer* cmd_bufs[] = { cmd_buffer_.Get() };
     Pal::PerSubQueueSubmitInfo per_queue_info = {};
     per_queue_info.cmdBufferCount = 1;
     per_queue_info.ppCmdBuffers = cmd_bufs;
 
-    Pal::IFence* submit_fence = fence_.Get();
+    Pal::IFence* submit_fence = output_slot->fence.Get();
     Pal::MultiSubmitInfo submit_info = {};
     submit_info.perSubQueueInfoCount = 1;
     submit_info.pPerSubQueueInfo = &per_queue_info;
     submit_info.ppFences = &submit_fence;
     submit_info.fenceCount = 1;
 
+    InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: Calling video_queue_->Submit - cmdBufCount=") +
+            ROCDEC_TOSTR(per_queue_info.cmdBufferCount) +
+            " fenceCount=" + ROCDEC_TOSTR(submit_info.fenceCount) +
+            " fence=" + ROCDEC_TOSTR((uintptr_t)submit_fence));
     res = video_queue_->Submit(submit_info);
+    InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: video_queue_->Submit returned ") + ROCDEC_TOSTR((int)res));
     if (Util::IsErrorResult(res)) {
-        CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: Queue Submit failed with result ") + ROCDEC_TOSTR((int)res));
+        CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: Queue Submit failed with result ") + ROCDEC_TOSTR((int)res) +
+                    " curr_pic_idx=" + ROCDEC_TOSTR(params->curr_pic_idx) +
+                    " last_submitted_slot_idx=" + ROCDEC_TOSTR(last_submitted_slot_idx_));
         return ROCDEC_RUNTIME_ERROR;
     }
 
+    last_submitted_slot_idx_ = params->curr_pic_idx;
     InfoLog(g_rocdec_logger, "PAL: HEVC frame decode submitted successfully");
     return ROCDEC_SUCCESS;
 }
@@ -1104,22 +1249,22 @@ rocDecStatus PalVideoDecoder::GetDecodeStatus(int pic_idx, RocdecDecodeStatus* d
 
     std::lock_guard<std::mutex> lock(mutex_);
 
-    if (!initialized_ || !fence_.Get()) {
-        dec_pic->decode_status = static_cast<rocDecDecodeStatus>(0);  // Invalid/not ready
+    if (!initialized_) {
+        dec_pic->decode_status = static_cast<rocDecDecodeStatus>(0);
         dec_pic->reserved[0] = 0;
         return ROCDEC_NOT_INITIALIZED;
     }
 
     // Check if picture index is valid
     PalDpbSlot* slot = dpb_.GetSlot(pic_idx);
-    if (!slot || !slot->occupied) {
+    if (!slot || !slot->occupied || !slot->fence.Get()) {
         dec_pic->decode_status = static_cast<rocDecDecodeStatus>(0);  // Invalid
         dec_pic->reserved[0] = 0;
         return ROCDEC_INVALID_PARAMETER;
     }
 
-    // Query fence status (non-blocking)
-    Pal::Result res = fence_->GetStatus();
+    // Non-blocking poll on this slot's fence — mirrors vaQuerySurfaceStatus
+    Pal::Result res = slot->fence->GetStatus();
 
     if (res == Pal::Result::Success) {
         // Fence is signaled - decode complete
@@ -1159,10 +1304,34 @@ void PalVideoDecoder::Destroy() {
         return;
     }
 
-    // Wait for pending operations
-    if (device_ && fence_.Get()) {
-        const Pal::IFence* fences[] = { fence_.Get() };
-        device_->WaitForFences(1, fences, true, std::chrono::nanoseconds::max());
+    // Wait for any in-flight decode to finish before tearing down resources.
+    // Only the last submitted slot can have a pending fence; waiting on it is sufficient.
+    if (device_ && last_submitted_slot_idx_ >= 0) {
+        PalDpbSlot* slot = dpb_.GetSlot(last_submitted_slot_idx_);
+        if (slot && slot->fence.Get()) {
+            const Pal::IFence* fences[] = { slot->fence.Get() };
+            device_->WaitForFences(1, fences, true, std::chrono::nanoseconds::max());
+        }
+    }
+
+    // Unregister GPU memory from WDDM VidMm residency tracking before releasing
+    {
+        // Collect all registered allocations
+        Pal::IGpuMemory* to_remove[2 + PalDpb::kMaxSlots] = {};
+        uint32_t remove_count = 0;
+
+        if (bitstream_.gpu_memory.Get())
+            to_remove[remove_count++] = bitstream_.gpu_memory.Get();
+        if (decoder_heap_.Get())
+            to_remove[remove_count++] = decoder_heap_.Get();
+        for (uint32_t i = 0; i < dpb_.GetSlotCount(); i++) {
+            PalDpbSlot* slot = dpb_.GetSlot(static_cast<int32_t>(i));
+            if (slot && slot->image_memory.Get())
+                to_remove[remove_count++] = slot->image_memory.Get();
+        }
+
+        if (remove_count > 0)
+            device_->RemoveGpuMemoryReferences(remove_count, to_remove, nullptr);
     }
 
     // Unmap bitstream
@@ -1173,9 +1342,8 @@ void PalVideoDecoder::Destroy() {
 
     // Release resources (PalObject destructors handle this)
     bitstream_.gpu_memory.Reset();
-    dpb_.Clear();
+    dpb_.Clear();  // Resets image, image_memory, and fence PalObjects for all slots
     decoder_heap_.Reset();
-    fence_.Reset();
     cmd_buffer_.Reset();
     cmd_allocator_.Reset();
     video_queue_.Reset();
@@ -1183,6 +1351,7 @@ void PalVideoDecoder::Destroy() {
 
     initialized_ = false;
     session_begun_ = false;
+    last_submitted_slot_idx_ = -1;
     device_ = nullptr;
 
     ReleasePalPlatform();
@@ -1251,21 +1420,23 @@ rocDecStatus PalVideoDecoder::ExportSurface(int pic_idx,
     const Pal::GpuMemoryDesc& mem_desc = gpu_mem->Desc();
     mem_size = mem_desc.size;
 
-    // Export GPU memory as Windows KMT handle
+    // Export GPU memory as KMT opaque handle (sharedViaNtHandle=0 path, uses m_hGlobalShare).
+    // The caller must import with hipExternalMemoryHandleTypeOpaqueWin32Kmt (not the NT variant).
 #if defined(PAL_KMT_BUILD)
     Pal::GpuMemoryExportInfo export_info = {};
-    export_info.exportType = Pal::ExportHandleType::Default;
+    export_info.exportType        = Pal::ExportHandleType::Default;
     export_info.pSecurityAttributes = nullptr;
-    export_info.pNtObjectName = nullptr;
-    export_info.accessFlags = 0;  // Use default access
+    export_info.pNtObjectName     = nullptr;
+    export_info.accessFlags       = 0; // Unused for KMT (non-NT) path
 
     Pal::OsExternalHandle external_handle = gpu_mem->ExportExternalHandle(export_info);
     if (external_handle == nullptr) {
-        CriticalLog(g_rocdec_logger, "PAL: ExportExternalHandle failed");
+        CriticalLog(g_rocdec_logger, "PAL: ExportExternalHandle failed (is memory allocated with interprocess=1?)");
         return ROCDEC_RUNTIME_ERROR;
     }
 
     kmt_handle = external_handle;
+    InfoLog(g_rocdec_logger, "PAL: Exported KMT opaque handle — import with hipExternalMemoryHandleTypeOpaqueWin32Kmt");
 #else
     // PAL_KMT_BUILD not defined - export not available
     CriticalLog(g_rocdec_logger, "PAL: ExportExternalHandle not available (PAL_KMT_BUILD not defined)");

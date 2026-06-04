@@ -238,9 +238,14 @@ rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32
         external_mem_handle_desc.size = va_drm_prime_surface_desc.objects[0].size;
 
         CHECK_HIP(hipImportExternalMemory(&hip_interop_[pic_idx].hip_ext_mem, &external_mem_handle_desc));
+        InfoLog(g_rocdec_logger, "HIP INTEROP DEBUG ----- Imported external memory for picture idx = " + ROCDEC_TOSTR(pic_idx) +
+                " size = " + ROCDEC_TOSTR(external_mem_handle_desc.size));
 
         external_mem_buffer_desc.size = va_drm_prime_surface_desc.objects[0].size;
         CHECK_HIP(hipExternalMemoryGetMappedBuffer((void**)&hip_interop_[pic_idx].hip_mapped_device_mem, hip_interop_[pic_idx].hip_ext_mem, &external_mem_buffer_desc));
+        InfoLog(g_rocdec_logger, "HIP INTEROP DEBUG ----- Got mapped buffer for picture idx = " + ROCDEC_TOSTR(pic_idx) +
+                " size = " + ROCDEC_TOSTR(external_mem_buffer_desc.size) +
+                " device pointer = " + ROCDEC_TOSTR((uintptr_t)hip_interop_[pic_idx].hip_mapped_device_mem));
 
         hip_interop_[pic_idx].width = va_drm_prime_surface_desc.width;
         hip_interop_[pic_idx].height = va_drm_prime_surface_desc.height;

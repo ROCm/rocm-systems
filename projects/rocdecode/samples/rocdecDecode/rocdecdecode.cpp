@@ -595,6 +595,7 @@ int ROCDECAPI handle_picture_display(void* user_data, RocdecParserDispInfo* disp
     params.progressive_frame = disp_info->progressive_frame;
     params.top_field_first = disp_info->top_field_first;
     // get device memory pointer for decoded output surface
+    // GetVideoFrame (KMT export) temporarily disabled while debugging decode-only path
     void* dev_mem_ptr[3] = { 0 };
     uint32_t pitch[3] = { 0 };
     CHECK(rocDecGetVideoFrame(p_dec_info->decoder, disp_info->picture_index, dev_mem_ptr, pitch, &params));

@@ -159,3 +159,105 @@ When adding codec support, implement:
 
 ### Samples
 Samples are installed to `${ROCM_PATH}/share/rocdecode/samples` and can be built standalone against installed rocDecode. Each sample has its own CMakeLists.txt and can be used as external project templates.
+
+---
+
+## Windows PAL Backend
+
+The Windows backend (`src/rocdecode/pal/`) uses AMD PAL (Platform Abstraction Library) to drive the VCN hardware decode engine directly, mirroring the Linux VA-API backend in structure and semantics.
+
+### Build (Windows)
+
+PAL is pulled from the drivers tree. `UVD_INCLUDE_DIR` points to the directory containing `drv_uvd_if.h` (the UVD firmware codec structures).
+
+```cmd
+mkdir build && cd build
+cmake -DPAL_ROOT=c:\github\drivers-amd-main\drivers\build\native\Debug\x64\pal\package ^
+      -DUVD_INCLUDE_DIR=c:\github\drivers-amd-main\drivers\uvdfwlib\uvdfw_inc\ ^
+      -DCMAKE_BUILD_TYPE=Debug ..
+cmake --build . --config Debug
+cmake --install . --config Debug
+```
+
+### Run the rocdecDecode sample
+
+```cmd
+cd samples\rocdecdecode\
+mkdir build && cd build
+cmake --build . --config Debug
+.\Debug\rocdecdecode.exe -i c:\opt\rocm\share\rocdecode\frames
+```
+
+### Architecture
+
+`RocDecoder` (`src/rocdecode/roc_decoder.cpp`) is the platform switchboard — it owns either `VaapiVideoDecoder` (Linux) or `PalVideoDecoder` (Windows) and forwards all calls via `#ifdef ROCDECODE_BUILD_WINDOWS`. The shared decode pipeline is:
+
+```
+rocDecParseVideoData()
+  └─ HevcParser / AvcParser  (src/parser/)
+       └─ SendPicForDecode()
+            └─ rocDecDecodeFrame()
+                 └─ RocDecoder::DecodeFrame()
+                      └─ PalVideoDecoder::DecodeFrame()
+                               └─ DecodeHEVC() / DecodeH264()
+```
+
+**Key files:**
+- `src/rocdecode/pal/pal_videodecoder.h` — `PalObject<T>` RAII wrapper, `PalDpbSlot`, `PalDpb`, `PalVideoDecoder` class declaration
+- `src/rocdecode/pal/pal_videodecoder.cpp` — all PAL backend logic
+
+### PAL Object Lifecycle
+
+PAL uses placement-new — callers own the backing memory. `PalObject<T>` handles this with `Destroy()` + `free()` in its destructor:
+
+```cpp
+size_t sz = device->GetFenceSize(&res);
+void* mem = malloc(sz);
+Pal::IFence* f = nullptr;
+device->CreateFence(fci, mem, &f);
+// PalObject<Pal::IFence> wraps f + mem and cleans up automatically
+```
+
+**Resources owned by `PalVideoDecoder`:**
+- `video_queue_` — PAL `IQueue` targeting the VCN decode engine
+- `cmd_allocator_` / `cmd_buffer_` — shared across frames (one frame recorded at a time)
+- `video_decoder_` — PAL `IVideoDecoder` session object
+- `decoder_heap_` — VCN-internal scratch `IGpuMemory`
+- `bitstream_` — CPU-writable / GPU-readable upload buffer for compressed data
+- `dpb_` — `PalDpb` managing `max_dpb_slots_` `PalDpbSlot` entries
+
+**Per `PalDpbSlot`:**
+- `image` / `image_memory` — decoded NV12/P010 surface (`IImage` + `IGpuMemory`)
+- `fence` — per-slot `IFence`, signaled when a decode targeting this slot completes
+
+### Submission Model (mirrors VA-API)
+
+`video_queue_->Submit()` is **fire-and-forget** — the GPU queue serializes work internally, exactly like `vaEndPicture()` on Linux. The next frame is submitted without waiting for the previous one.
+
+Per-frame flow in `DecodeHEVC()`:
+1. Wait on `dpb_[last_submitted_slot_idx_].fence` **before** `cmd_buffer_->Reset()` — the shared `cmd_allocator_` cannot be recycled while the GPU is still reading its previous commands
+2. Record: `Reset` → `Begin` → `CmdBindVideoDecoder` → `CmdBeginVideoDecode` → `CmdDecodeVideoFrame` → `End`
+3. `ResetFences(output_slot->fence)` — reset this slot's fence (safe: the wait in step 1 ensures it is no longer in-flight)
+4. `Submit(output_slot->fence)` — attach this slot's fence; it signals when this decode finishes
+5. Record `last_submitted_slot_idx_ = curr_pic_idx`
+
+**Why per-slot fences, not a single global fence:** `GetDecodeStatus(pic_idx)` must report readiness for a specific picture independently — directly paralleling `vaQuerySurfaceStatus(surface)` on Linux. A single global fence reset before every submit would be reset while still in-flight from the previous frame, corrupting its state and causing `Submit` to fail.
+
+### HIP Interop (`RocDecoder::GetVideoFrame`)
+
+Decoded frames are exposed to applications as HIP device pointers. The interop is performed once per slot and cached in `hip_interop_[pic_idx]`:
+
+| Platform | Export | HIP handle type |
+|---|---|---|
+| Linux | `vaExportSurfaceHandle` → DRM prime fd | `hipExternalMemoryHandleTypeOpaqueFd` |
+| Windows | PAL `ExportExternalHandle` → KMT opaque handle | `hipExternalMemoryHandleTypeOpaqueWin32Kmt` |
+
+On Windows, `GetVideoFrame` calls `GetDecodeStatus` to confirm the frame is ready before exporting. PAL DPB surface memory must be allocated with `flags.interprocess=1` and `flags.shareable=1` to enable KMT handle export.
+
+### Adding a New Codec (Windows)
+
+1. Add `DecodeXxx(RocdecPicParams*)` to `PalVideoDecoder`
+2. Map `RocdecXxxPicParams` fields to the PAL/UVD codec struct from `drv_uvd_if.h`
+3. Set `decode_info.decodeType` to the appropriate `Pal::VideoDecodeType` enum value
+4. Wire into `PalVideoDecoder::DecodeFrame()` dispatch and `Initialize()` codec mapping
+5. Add the matching implementation to `src/rocdecode/vaapi/` for Linux parity

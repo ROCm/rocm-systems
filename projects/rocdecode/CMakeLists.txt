@@ -23,6 +23,14 @@
 
 cmake_minimum_required(VERSION 3.10)
 
+# CMP0091: MSVC_RUNTIME_LIBRARY target property is honoured only when NEW.
+# Must be set before the first project() call.
+cmake_policy(SET CMP0091 NEW)
+# Force all targets to use the static Release CRT so they match the PAL
+# pre-built libs (compiled with /MT). This must be set before any add_library
+# or add_executable, which is why it is placed at the top of the file.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
 # Platform detection
 if(WIN32)
   set(IS_WINDOWS TRUE)
@@ -255,46 +263,23 @@ if(DEPENDENCIES_MET)
       message(FATAL_ERROR "PAL_ROOT (${PAL_ROOT}) does not contain inc/core directory")
     endif()
 
-    include_directories(${PAL_ROOT}/inc/core ${PAL_ROOT}/inc/util ${PAL_ROOT}/inc/gpuUtil ${PAL_ROOT}/shared/inc)
-
-    # PAL static libraries with all dependencies (matching vulkan-video-driver)
-    set(PAL_LIB_DIR "${PAL_ROOT}/lib/Release/x64")
+    # Use the PAL package CMake target to extract its INTERFACE compile definitions,
+    # include directories, and link libraries.  We store them in variables and apply
+    # them to rocdecode after add_library, rather than linking the 'pal' target itself.
+    # This avoids install(EXPORT) errors from 'pal' not being in the rocdecode export set.
+    if(NOT TARGET pal)
+      # Set the version before add_subdirectory so the PAL CMakeLists version check passes.
+      set(PAL_CLIENT_INTERFACE_MAJOR_VERSION 954)
+      add_subdirectory(${PAL_ROOT} ${CMAKE_BINARY_DIR}/pal_package EXCLUDE_FROM_ALL)
+    endif()
+    get_target_property(_pal_defs pal INTERFACE_COMPILE_DEFINITIONS)
+    get_target_property(_pal_incs pal INTERFACE_INCLUDE_DIRECTORIES)
+    get_target_property(_pal_libs pal INTERFACE_LINK_LIBRARIES)
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST}
-        ${PAL_LIB_DIR}/pal.lib
-        ${PAL_LIB_DIR}/palUtil.lib
-        ${PAL_LIB_DIR}/palCompilerDeps.lib
-        ${PAL_LIB_DIR}/addrlib.lib
-        ${PAL_LIB_DIR}/vam.lib
-        ${PAL_LIB_DIR}/amdrdf.lib
-        ${PAL_LIB_DIR}/zstd.lib
-        ${PAL_LIB_DIR}/pal_lz4.lib
-        ${PAL_LIB_DIR}/pal_uuid.lib
-        ${PAL_LIB_DIR}/metrohash.lib
-        ${PAL_LIB_DIR}/mpack.lib
-        ${PAL_LIB_DIR}/cwpack.lib
-        ${PAL_LIB_DIR}/stb_sprintf.lib
-        ${PAL_LIB_DIR}/DriverUtilsService.lib
-        ${PAL_LIB_DIR}/UberTraceService.lib
-        ${PAL_LIB_DIR}/SettingsRpcService2.lib
-        ${PAL_LIB_DIR}/dd_settings.lib
-        ${PAL_LIB_DIR}/devdriver.lib
-        ${PAL_LIB_DIR}/ddRpcServer.lib
-        ${PAL_LIB_DIR}/ddRpcClient.lib
-        ${PAL_LIB_DIR}/ddRpcShared.lib
-        ${PAL_LIB_DIR}/ddEventServer.lib
-        ${PAL_LIB_DIR}/ddEventClient.lib
-        ${PAL_LIB_DIR}/ddEventParser.lib
-        ${PAL_LIB_DIR}/ddEventStreamer.lib
-        ${PAL_LIB_DIR}/ddNet.lib
-        ${PAL_LIB_DIR}/ddSocket.lib
-        ${PAL_LIB_DIR}/ddYaml.lib
-        ${PAL_LIB_DIR}/dd_common.lib
-        ${PAL_LIB_DIR}/ddCore.lib
-        ${PAL_LIB_DIR}/ddCommon.lib
-        Setupapi.lib
+        ${_pal_libs}
         ws2_32.lib
     )
-    message("-- ${Green}${PROJECT_NAME} -- PAL libraries linked from ${PAL_LIB_DIR}${ColourReset}")
+    message("-- ${Green}${PROJECT_NAME} -- PAL linked via CMake target from ${PAL_ROOT}${ColourReset}")
   endif()
 
   # rocprofiler
@@ -330,37 +315,19 @@ if(DEPENDENCIES_MET)
   if(IS_WINDOWS)
     set_target_properties(${PROJECT_NAME} PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
     target_compile_definitions(${PROJECT_NAME} PRIVATE
-      ROCDECODE_BUILD_WINDOWS=1
-      PAL_KMT_BUILD=1
-      PAL_CLOSED_SOURCE=1
-    )
-# -----------------------------------------------------------------------
-# Platform-specific settings
-# -----------------------------------------------------------------------
-    target_compile_definitions(${PROJECT_NAME} PRIVATE
+        ROCDECODE_BUILD_WINDOWS=1
         WINVER=0x0A00
         _WIN32_WINNT=0x0A00
         WIN32_LEAN_AND_MEAN
         NOMINMAX
-        # Match PAL library build settings
-        PAL_CLIENT_INTERFACE_MAJOR_VERSION=954
-        GPUOPEN_CLIENT_INTERFACE_MAJOR_VERSION=42
-        PAL_BUILD_RDF=1
-        PAL_DEVELOPER_BUILD=0
-        PAL_KMT_BUILD=1
-        PAL_CLIENT_OCL=1
-        PAL_CLOSED_SOURCE=1
-        PAL_BUILD_GFX9=1
-        PAL_BUILD_LIGHT_SHAFT_OPT=1
-        PAL_BUILD_OSS=1
-        PAL_BUILD_VIDEO=1
-        PAL_BUILD_VIDEO_DECODER=1
-        PAL_BUILD_VCN3=1
-        PAL_BUILD_VCN4=1
-        PAL_BUILD_VCN5=1
-        )
+    )
+    # Apply PAL INTERFACE compile definitions and include directories extracted above.
+    # These must match what the PAL library was compiled with to avoid ABI mismatches.
+    target_compile_definitions(${PROJECT_NAME} PRIVATE ${_pal_defs})
+    target_include_directories(${PROJECT_NAME} PRIVATE ${_pal_incs})
 
     # Set static runtime library to match PAL (works for both MSVC and Clang)
+    # PAL static libs are built with /MT (Release CRT only); always match that regardless of build config.
     set_property(TARGET ${PROJECT_NAME} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
   else()
     target_compile_definitions(${PROJECT_NAME} PRIVATE ROCDECODE_BUILD_LINUX=1)
@@ -385,7 +352,7 @@ if(DEPENDENCIES_MET)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
   endif()
 
-  target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
+  target_link_libraries(${PROJECT_NAME} PRIVATE ${LINK_LIBRARY_LIST})
 
   set_target_properties(${PROJECT_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
   set_target_properties(${PROJECT_NAME} PROPERTIES LINKER_LANGUAGE CXX)
