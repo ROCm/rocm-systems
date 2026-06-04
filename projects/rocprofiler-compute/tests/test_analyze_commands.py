@@ -15,6 +15,8 @@ import pytest
 from rocprof_compute_analyze.analysis_cli import cli_analysis
 from utils.metrics.expression import build_eval_string
 from utils.metrics.metric_evaluator import MetricEvaluator
+from utils.profile_artifacts.factory import create_profile_artifact_reader
+from utils.profile_artifacts.interfaces import ArtifactReaderOptions
 
 config = {}
 config["cleanup"] = True
@@ -2217,3 +2219,51 @@ def test_join_prof_renames_sq_accum_prev_hires_to_bucket_target(tmp_path):
     assert "SQ_ACCUM_PREV_HIRES" not in merged.columns
     assert set(merged["SQ_LEVEL_WAVES_ACCUM"].tolist()) == {100, 200}
     assert "SQ_WAVES" in merged.columns
+
+
+def test_profile_artifact_reader_materializes_csv_results(tmp_path):
+    """CSV readers materialize current results_pmc_perf artifacts."""
+    (tmp_path / "profiling_config.yaml").write_text(
+        "format_rocprof_output: csv\njoin_type: kernel\n"
+    )
+    header = (
+        "GPU_ID,Kernel_Name,Dispatch_ID,Grid_Size,Workgroup_Size,"
+        "LDS_Per_Workgroup,Scratch_Per_Workitem,SGPR,vgpr,SQ_WAVES\n"
+    )
+    (tmp_path / "results_pmc_perf_0.csv").write_text(
+        header + "0,kernel_a,0,1024,64,32,0,8,4,10\n"
+    )
+
+    reader = create_profile_artifact_reader(
+        {"format_rocprof_output": "csv", "join_type": "kernel"},
+        ArtifactReaderOptions(join_type="kernel"),
+    )
+    reader.materialize_pmc_perf(tmp_path, tmp_path / "pmc_perf.csv")
+    pmc_frame = reader.read_pmc_frame(tmp_path)
+
+    assert (tmp_path / "pmc_perf.csv").exists()
+    assert pmc_frame["SQ_WAVES"].tolist() == [10]
+
+
+def test_profile_artifact_reader_materializes_rocpd_results(tmp_path):
+    """ROCPD readers preserve current legacy results_*.csv materialization."""
+    (tmp_path / "profiling_config.yaml").write_text("format_rocprof_output: rocpd\n")
+    (tmp_path / "results_pmc_perf_0.csv").write_text(
+        "Dispatch_ID,GPU_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,"
+        "Scratch_Per_Workitem,Arch_VGPR,Accum_VGPR,SGPR,Kernel_Name,"
+        "Kernel_ID,Start_Timestamp,End_Timestamp,Counter_Name,Counter_Value\n"
+        "0,2,1024,64,32,0,4,0,8,kernel_a,0,10,20,SQ_WAVES,10\n"
+        "0,2,1024,64,32,0,4,0,8,kernel_a,0,10,20,SQ_BUSY,5\n"
+    )
+
+    reader = create_profile_artifact_reader(
+        {"format_rocprof_output": "rocpd"},
+        ArtifactReaderOptions(),
+    )
+    reader.materialize_pmc_perf(tmp_path, tmp_path / "pmc_perf.csv")
+    pmc_frame = reader.read_pmc_frame(tmp_path)
+
+    assert (tmp_path / "pmc_perf.csv").exists()
+    assert pmc_frame["GPU_ID"].tolist() == [0]
+    assert pmc_frame["SQ_WAVES"].tolist() == [10]
+    assert pmc_frame["SQ_BUSY"].tolist() == [5]
