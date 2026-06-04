@@ -1052,9 +1052,7 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
   }
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  if (proxyState->ncclNet == &rocmNetIb) {
-    NCCLCHECK(rcclRocmNetP2pPolicy(req->handle, resources->isP2p));
-  } else if (proxyState->ncclNet == &netIbCast) {
+  if (proxyState->ncclNet == &netIbCast) {
     NCCLCHECK(rcclCastNetP2pPolicy(req->handle, resources->isP2p));
   }
 #endif

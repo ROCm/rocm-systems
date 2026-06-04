@@ -44,10 +44,24 @@ struct ncclIbCommStage {
 struct ncclIbHandle {
   union ncclSocketAddress connectAddr; // Filled by the target
   uint64_t magic; // random number to help debugging
+  int isP2p; // P2P flag
   struct ncclIbCommStage stage; // Used by the other side when connecting
 };
 
 NCCL_PARAM(IbQpsPerConn, "IB_QPS_PER_CONNECTION", 1);
+RCCL_PARAM(IbQpsPerP2p, "IB_QPS_PER_P2P", 0);
+
+// Calculate number of QPs based on P2P flag and device counts
+static int ncclIbCalculateNqps(int isP2p, int localNdevs, int remoteNdevs, const char* funcName) {
+  auto qp_multiplier = (rcclParamIbQpsPerP2p() > 0 && isP2p) ?
+                       rcclParamIbQpsPerP2p() : ncclParamIbQpsPerConn();
+  int localNqps = qp_multiplier * localNdevs;
+  int remoteNqps = qp_multiplier * remoteNdevs;
+  int maxNqps = (remoteNqps > localNqps) ? remoteNqps : localNqps;
+  INFO(NCCL_NET, "NET/IB: %s Max Nqps=%d, localNqps=%d, remoteNqps=%d",
+       funcName, maxNqps, localNqps, remoteNqps);
+  return maxNqps;
+}
 
 ncclResult_t ncclIbInitCommDevBase(int ibDevN, struct ncclIbNetCommDevBase* base, void* cq_context, int cqSize) {
   base->ibDevN = ibDevN;
@@ -525,6 +539,7 @@ ncclResult_t ncclIbConnect(void* ctx, int dev, void* opaqueHandle, void** sendCo
   struct ncclIbCommStage* stage = &handle->stage;
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*)stage->comm;
   int ready;
+  int isP2p = 0;
   uint8_t link_layer = IBV_LINK_LAYER_UNSPECIFIED;
   *sendComm = NULL;
 
@@ -585,10 +600,11 @@ ib_recv_dev_list:
   memcpy(&remoteVProps, stage->buffer, sizeof(ncclNetVDeviceProps_t));
   mergedDev = ncclIbMergedDevs + dev;
   comm->base.vProps = mergedDev->vProps;
-  int localNqps, remoteNqps;
-  localNqps  = ncclParamIbQpsPerConn() * comm->base.vProps.ndevs; // We must have at least 1 qp per-device
-  remoteNqps = ncclParamIbQpsPerConn() * remoteVProps.ndevs;
-  comm->base.nqps = remoteNqps > localNqps ? remoteNqps : localNqps; // Select max nqps (local or remote)
+  // Read isP2p from handle
+  isP2p = handle->isP2p;
+  INFO(NCCL_NET, "NET/IB: ncclIbConnect isP2p=%d", isP2p);
+  comm->base.nqps = ncclIbCalculateNqps(isP2p, comm->base.vProps.ndevs,
+                                         remoteVProps.ndevs, __func__);
 
   comm->base.nDataQps = std::max(comm->base.vProps.ndevs, remoteVProps.ndevs);
 
@@ -616,6 +632,7 @@ ib_recv_dev_list:
 
   memset(&meta, 0, sizeof(meta));
   meta.ndevs = comm->base.vProps.ndevs;
+  meta.isP2p = isP2p;
 
   // Create QPs on the sender side
   NCCLCHECKGOTO(ncclIbSenderQpsCreate(comm, &meta), ret, fail);
@@ -1004,10 +1021,6 @@ ib_recv_dev_list:
   NCCLCHECK(ncclIbCheckVProps(&mergedDev->vProps, &remoteVProps));
   rComm->base.vProps = mergedDev->vProps;
   memcpy(stage->buffer, &rComm->base.vProps, sizeof(ncclNetVDeviceProps_t));
-  int localNqps, remoteNqps;
-  localNqps  = ncclParamIbQpsPerConn() * rComm->base.vProps.ndevs; // We must have at least 1 qp per-device
-  remoteNqps = ncclParamIbQpsPerConn() * remoteVProps.ndevs;
-  rComm->base.nqps = remoteNqps > localNqps ? remoteNqps : localNqps; // Select max nqps (local or remote)
 
   rComm->base.nDataQps = std::max(rComm->base.vProps.ndevs, remoteVProps.ndevs);
 
@@ -1031,6 +1044,8 @@ ib_recv:
 
   /* copy back the received info */
   memcpy(&remMeta, stage->buffer, sizeof(struct ncclIbConnectionMetadata));
+  rComm->base.nqps = ncclIbCalculateNqps(remMeta.isP2p, rComm->base.vProps.ndevs,
+                                          remMeta.ndevs, __func__);
 
   // IB setup
   // Pre-declare variables because of goto
@@ -1150,6 +1165,7 @@ ib_recv:
   meta.tc = remMeta.tc;
 
   meta.ndevs = rComm->base.vProps.ndevs;
+  meta.isP2p = remMeta.isP2p;
   strncpy(meta.devName, mergedDev->devName, MAX_MERGED_DEV_NAME);
 
   stage->state = ncclIbCommStateSend;
@@ -1255,5 +1271,13 @@ ncclResult_t ncclIbCloseListen(void* listenComm) {
     NCCLCHECK(ncclSocketClose(&comm->sock));
     free(comm);
   }
+  return ncclSuccess;
+}
+
+ncclResult_t rcclNetP2pPolicy(void* handle, int isP2p) {
+  if (!handle) return ncclInvalidArgument;
+  struct ncclIbHandle* ibHandle = (struct ncclIbHandle*)handle;
+  if (ibHandle->magic != NCCL_SOCKET_MAGIC) return ncclInvalidArgument;
+  ibHandle->isP2p = isP2p;
   return ncclSuccess;
 }
