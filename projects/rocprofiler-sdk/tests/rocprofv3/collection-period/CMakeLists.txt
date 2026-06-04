@@ -8,18 +8,10 @@ project(
     LANGUAGES CXX
     VERSION 0.0.0)
 
-if(ROCPROFILER_MEMCHECK STREQUAL "ThreadSanitizer")
-    set(IS_THREAD_SANITIZER ON)
-else()
-    set(IS_THREAD_SANITIZER OFF)
-endif()
-
 find_package(rocprofiler-sdk REQUIRED)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
-
-set(collection-period-env "${PRELOAD_ENV}" ROCPROF_COLLECTION_PERIOD_TESTING=true)
 
 rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py)
 
@@ -42,7 +34,7 @@ rocprofiler_add_integration_execute_test(
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "ROCPROF_COLLECTION_PERIOD_TESTING=true"
     FIXTURES_SETUP rocprofv3-test-collection-period
-    UNSTABLE)
+    DISABLED_MEMCHECKS "ThreadSanitizer")
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-collection-period
