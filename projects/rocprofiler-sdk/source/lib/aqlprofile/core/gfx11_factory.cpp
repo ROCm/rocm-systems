@@ -82,7 +82,7 @@ const GpuBlockInfo* Gfx11Factory::block_table_[AQLPROFILE_BLOCKS_NUMBER] = {
     NULL /*&TcaCounterBlockInfo*/,
     NULL /*&TccCounterBlockInfo*/,
     &TcpCounterBlockInfo,
-    NULL /*&TdCounterBlockInfo*/,
+    &TdCounterBlockInfo,
     // MC blocks
     NULL /*MC_ARB*/,
     NULL /*MC_HUB*/,
