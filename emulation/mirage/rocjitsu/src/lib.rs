@@ -30,7 +30,7 @@ use mirage_core::emulator::{Emulator, EmulatorDef, EmulatorDescription, ExecMode
 use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::InjectionDef;
 use mirage_core::plugin::PluginsDef;
-use mirage_core::profile::ProfileDef;
+use mirage_core::profile::{FileMount, ProfileDef};
 use mirage_core::session::SessionHealth;
 use mirage_core::topology::TopologyDef;
 
@@ -116,12 +116,56 @@ impl Emulator for Rocjitsu {
         let mut env = std::collections::BTreeMap::new();
         env.insert("RJ_CONFIG".to_string(), config.display().to_string());
         env.insert("RJ_SCHEMA".to_string(), schema.display().to_string());
+
+        // For a containerised session the workload runs inside a node
+        // container that does *not* share the host filesystem, so the
+        // rocjitsu runtime assets (the KMD interposer, the flatbuffer
+        // schema, and the host-side library it may dlopen) must be
+        // bind-mounted in. The per-node host *inside* the container
+        // re-resolves this injection against its own environment, where
+        // `MIRAGE_CACHE=/mnt/mirage/cache`, so it looks for the assets
+        // under `<cache>/emulator/rocjitsu/` (see [`asset_dir`]). We mount
+        // each host asset to exactly that location so the in-container
+        // resolution finds them with no extra configuration. Without
+        // these mounts the in-container host fails to locate the KMD
+        // library and the exec can never start.
+        let mounts = if self.profile.containerize.is_some() {
+            // Mirrors `mirage_host`'s `CONTAINER_CACHE_DIR` +
+            // `<emulator>/<ASSET_SUBDIR>`; kept as a literal here to avoid
+            // a host→emulator crate dependency.
+            let container_asset_dir = format!("/mnt/mirage/cache/emulator/{ASSET_SUBDIR}");
+            let mut mounts = vec![FileMount {
+                host_path: ld_preload.display().to_string(),
+                container_path: format!("{container_asset_dir}/{KMD_LIB_NAME}"),
+                read_only: true,
+            }];
+            // The host-side rocjitsu library, if present on disk: the KMD
+            // interposer may dlopen it at runtime.
+            let host_lib = lib_path();
+            if host_lib.exists() {
+                mounts.push(FileMount {
+                    host_path: host_lib.display().to_string(),
+                    container_path: format!("{container_asset_dir}/{LIB_NAME}"),
+                    read_only: true,
+                });
+            }
+            // The flatbuffer schema (`RJ_SCHEMA`).
+            mounts.push(FileMount {
+                host_path: schema.display().to_string(),
+                container_path: format!("{container_asset_dir}/{SCHEMA_FBS_NAME}"),
+                read_only: true,
+            });
+            mounts
+        } else {
+            Default::default()
+        };
+
         Ok(InjectionDef {
             wrapper: None,
             ld_preload: Some(ld_preload.display().to_string()),
             files: Default::default(),
             env,
-            mounts: Default::default(),
+            mounts,
             devices: Default::default(),
             groups: Default::default(),
         })

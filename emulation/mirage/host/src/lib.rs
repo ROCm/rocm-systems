@@ -109,6 +109,7 @@ pub async fn run(config: HostConfig, shutdown: Arc<Notify>) -> Result<()> {
     if !layout.def().exists() {
         return Err(MirageError::SessionNotFound(config.session.to_string()));
     }
+    tracing::info!(session = %config.session, rank = ?config.rank, "host starting");
 
     // A per-node host runs inside a container and owns only its rank; the
     // orchestrator host runs on the real host and owns containers and
@@ -148,6 +149,7 @@ pub async fn run(config: HostConfig, shutdown: Arc<Notify>) -> Result<()> {
             return Err(e);
         }
         publish_health(&layout, true, "ready", None)?;
+        tracing::info!(session = %config.session, "host ready");
     }
 
     // Whether *this* host runs execs locally. The orchestrator runs them
@@ -206,6 +208,7 @@ pub async fn run(config: HostConfig, shutdown: Arc<Notify>) -> Result<()> {
                         continue;
                     }
                     seen.insert(eid.clone());
+                    tracing::info!(exec = %eid, "discovered new exec");
                     let exec_layout_clone = exec_layout.clone();
                     tasks.push(tokio::spawn(async move {
                         if let Err(err) = run_exec(exec_layout_clone, host_rank).await {
@@ -236,6 +239,7 @@ pub async fn run(config: HostConfig, shutdown: Arc<Notify>) -> Result<()> {
     }
 
     // Shutdown path: mark unhealthy and signal in-flight execs.
+    tracing::info!(session = %config.session, "host shutting down");
     if manages_session {
         publish_health(&layout, false, "stopping", None).ok();
     }
@@ -447,6 +451,15 @@ fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Res
     injected_env.push(("MIRAGE_STATE".to_string(), CONTAINER_STATE_DIR.to_string()));
     injected_env.push(("MIRAGE_CACHE".to_string(), CONTAINER_CACHE_DIR.to_string()));
 
+    // Propagate the orchestrator's log level into each node container so
+    // the per-node `mirage host` (and thus its exec/node events) logs at
+    // the verbosity the user asked for via `-v`/`-vv`. Without this the
+    // in-container host defaults to `warn` and its events never appear in
+    // `podman logs`.
+    if let Ok(log) = std::env::var("MIRAGE_LOG") {
+        injected_env.push(("MIRAGE_LOG".to_string(), log));
+    }
+
     publish_health(
         layout,
         true,
@@ -578,11 +591,6 @@ fn resolve_injection(session: &SessionId) -> Result<InjectionDef> {
 ///   status; other ranks only publish their own node files.
 async fn run_exec(layout: ExecLayout, host_rank: Option<u32>) -> Result<()> {
     let def: ExecDef = read_json(&layout.def())?;
-    // Resolve the emulator-level injection (env vars, LD_PRELOAD, ...)
-    // for this exec's session. For a rocjitsu session this is what wires
-    // `LD_PRELOAD=librocjitsu_kmd.so` plus `RJ_CONFIG`/`RJ_SCHEMA` into
-    // every spawned child so the workload actually runs under emulation.
-    let injection = resolve_injection(&def.session)?;
     // Only the aggregator (rank 0, or the non-containerised orchestrator)
     // publishes the exec-wide `status.json`; other per-node hosts only
     // write their own node files so concurrent hosts never race on it.
@@ -635,6 +643,53 @@ async fn run_exec(layout: ExecLayout, host_rank: Option<u32>) -> Result<()> {
         None => (0..node_count).collect(),
     };
 
+    tracing::info!(
+        session = %def.session,
+        command = %def.exec.command,
+        nodes = ranks.len(),
+        "running exec"
+    );
+
+    // Resolve the emulator-level injection (env vars, LD_PRELOAD, ...)
+    // for this exec's session. For a rocjitsu session this is what wires
+    // `LD_PRELOAD=librocjitsu_kmd.so` plus `RJ_CONFIG`/`RJ_SCHEMA` into
+    // every spawned child so the workload actually runs under emulation.
+    //
+    // Crucially, this happens *after* the initial `status.json` and node
+    // ranks are known: when injection resolution fails (e.g. the
+    // emulator's runtime library is missing inside a node container) we
+    // must record a terminal failure for every rank we own. Otherwise the
+    // exec would have no `status.json` reporting `ended`, and an attached
+    // client (`mirage run`) would block forever waiting for an exit that
+    // never comes.
+    let injection = match resolve_injection(&def.session) {
+        Ok(injection) => injection,
+        Err(e) => {
+            tracing::error!(session = %def.session, "exec setup failed: {e}");
+            for &rank in &ranks {
+                let nlayout = layout.node(rank);
+                let _ = std::fs::create_dir_all(&nlayout.root);
+                let _ = std::fs::write(nlayout.stderr(), format!("mirage: {e}\n").as_bytes());
+                let _ = write_bytes(&nlayout.exit_code(), b"127");
+                status.nodes.insert(
+                    rank,
+                    NodeStatus {
+                        pid: None,
+                        exit_code: Some(127),
+                    },
+                );
+            }
+            status.started = true;
+            status.ended = true;
+            status.ended_at = Some(Utc::now());
+            status.exit_code = Some(127);
+            if is_aggregator {
+                write_json(&layout.status(), &status)?;
+            }
+            return Ok(());
+        }
+    };
+
     let mut handles = Vec::new();
     for rank in ranks {
         let nlayout = layout.node(rank);
@@ -653,6 +708,7 @@ async fn run_exec(layout: ExecLayout, host_rank: Option<u32>) -> Result<()> {
         ) {
             Ok(node) => {
                 status.started = true;
+                tracing::debug!(rank, pid = node.pid, "spawned node");
                 status.nodes.insert(
                     rank,
                     NodeStatus {
@@ -695,6 +751,7 @@ async fn run_exec(layout: ExecLayout, host_rank: Option<u32>) -> Result<()> {
     for (node, child, nlayout) in handles {
         let code = wait_node(child).await;
         write_bytes(&nlayout.exit_code(), code.to_string().as_bytes())?;
+        tracing::debug!(node, code, "node exited");
         status.nodes.insert(
             node,
             NodeStatus {
@@ -738,6 +795,7 @@ async fn run_exec(layout: ExecLayout, host_rank: Option<u32>) -> Result<()> {
     if is_aggregator {
         write_json(&layout.status(), &status)?;
     }
+    tracing::info!(session = %def.session, exit_code = overall_code, "exec finished");
 
     // If the exec is keep=false, remove the directory.
     if !def.keep {

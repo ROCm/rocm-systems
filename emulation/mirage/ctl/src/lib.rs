@@ -33,6 +33,21 @@ pub fn init_logging(verbose: u8) {
         1 => "info",
         _ => "debug",
     };
+    // Propagate the chosen level to child processes via `MIRAGE_LOG`.
+    // Most importantly this reaches the detached per-session `mirage
+    // host`, which is re-exec'd from this binary without any `-v` flag
+    // and would otherwise default to `warn`, silently dropping all of
+    // its info/debug host events. Exporting it here (only when the user
+    // hasn't set `MIRAGE_LOG` themselves) means a `-v`/`-vv` on the CLI
+    // is honoured by the host's own logger too, so host events land in
+    // the per-session `node/0/host.log` at the requested verbosity.
+    if verbose > 0 && std::env::var_os("MIRAGE_LOG").is_none() {
+        // Safety: called once at the very start of `main`, before any
+        // additional threads (the tokio runtime) are spawned.
+        unsafe {
+            std::env::set_var("MIRAGE_LOG", level);
+        }
+    }
     let env = tracing_subscriber::EnvFilter::try_from_env("MIRAGE_LOG")
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(level));
     let _ = tracing_subscriber::fmt()
@@ -1479,6 +1494,7 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
                 a.provider.clone(),
                 &a.profile,
             )?;
+            tracing::info!(profile = %a.profile, "creating transient session");
             let def = ctl.session_create(CreateSessionRequest {
                 id: None,
                 profile: profile_ref,
@@ -1488,8 +1504,10 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
                         .unwrap_or("/".to_string())
                 }),
             })?;
+            tracing::info!(session = %def.id, "session created; spawning host");
             spawn_host_for(&def.id)?;
             ctl.session_wait_ready(&def.id, Duration::from_secs(10))?;
+            tracing::info!(session = %def.id, "session ready");
             (def.id, true)
         }
     };
@@ -1510,6 +1528,7 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
         keep: true,
     };
     let r = ctl.session_exec(&def)?;
+    tracing::info!(session = %sid, exec = %r.exec, "exec submitted; attaching");
     let code = follow_attach(ctl.as_ref(), &r).await?;
     if created && !a.keep_session {
         let _ = ctl.session_destroy(&sid);
