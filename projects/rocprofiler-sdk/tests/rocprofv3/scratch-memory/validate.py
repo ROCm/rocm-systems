@@ -115,7 +115,10 @@ def test_scratch_memory(json_input_data, csv_input_data):
 
     verify_scratch_memory_alternating_pattern(scratch_memory_data, bf_op_names)
     assert 2**64 - 1 not in scratch_reported_agent_ids
-    assert scratch_reported_agent_ids == detected_agents_ids
+    assert scratch_reported_agent_ids, "no scratch memory was reported on any agent"
+    assert scratch_reported_agent_ids.issubset(
+        detected_agents_ids
+    ), f"scratch reported on unknown agents: {scratch_reported_agent_ids - detected_agents_ids}"
 
     assert len(csv_input_data) > 0
 

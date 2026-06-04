@@ -237,9 +237,6 @@ def test_scratch_memory_tracking(input_data):
         scratch_reported_agent_ids.add(node["agent_id"]["handle"])
 
     assert 2**64 - 1 not in scratch_reported_agent_ids
-    # A runner may expose only a subset of the node's GPUs to the workload while
-    # rocprofiler-sdk still enumerates every agent in the topology. Require scratch
-    # to be reported on at least one agent, all of which must be detected GPU agents.
     assert scratch_reported_agent_ids, "no scratch memory was reported on any agent"
     assert scratch_reported_agent_ids.issubset(
         detected_agents_ids
