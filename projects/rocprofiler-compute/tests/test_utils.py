@@ -6236,7 +6236,7 @@ class TestBuildMetricList:
 
 
 # ---------------------------------------------------------------------------
-# Torch operator pattern matching (PurePosixPath glob)
+# Torch operator pattern matching (fnmatch glob)
 # ---------------------------------------------------------------------------
 
 H3 = "nn.Module.Net.forward/torch.nn.functional.relu/torch.relu"
@@ -6470,27 +6470,17 @@ def test_parse_patterns_empty():
     assert parse_torch_operator_patterns(Namespace()) == []
 
 
-# -- PatternMatcherEngine ---------------------------------------------------
+# -- fnmatch_glob_matches ---------------------------------------------------
 
 
 @pytest.mark.torch_ops
-def test_engine_glob_hierarchy_mode():
-    """The facade delegates to the glob-hierarchy implementation."""
-    from utils.pattern_matching import PatternMatcherEngine
+def test_glob_helper_matches_target():
+    """``fnmatch_glob_matches`` performs case-sensitive fnmatch globbing."""
+    from utils.pattern_matching import fnmatch_glob_matches
 
-    matcher = PatternMatcherEngine(mode="glob-hierarchy")
-    assert matcher.matches("*torch.relu", H3)
-    assert matcher.matches("*relu", H3)
-    assert not matcher.matches("sigmoid", H3)
-
-
-@pytest.mark.torch_ops
-def test_engine_invalid_mode():
-    """Unsupported strategy names should raise ValueError."""
-    from utils.pattern_matching import PatternMatcherEngine
-
-    with pytest.raises(ValueError):
-        PatternMatcherEngine(mode="regex")
+    assert fnmatch_glob_matches("*torch.relu", H3)
+    assert fnmatch_glob_matches("*relu", H3)
+    assert not fnmatch_glob_matches("sigmoid", H3)
 
 
 # -- Additional coverage (xuchen #26) ----------------------------------------
@@ -6602,12 +6592,11 @@ def test_star_pattern_matches_all():
 
 @pytest.mark.torch_ops
 def test_star_normalize_equivalence():
-    """``"all"`` normalizes to ``"*"``."""
-    from utils.pattern_matching import PurePosixGlobHierarchyMatcher
+    """``"all"`` and ``"*"`` both match any non-empty target."""
+    from utils.parser import torch_operator_pattern_matches as m
 
-    norm = PurePosixGlobHierarchyMatcher.normalize_pattern
-    assert norm("all") == "*"
-    assert norm("*") == "*"
+    assert m("all", H3)
+    assert m("*", H3)
 
 
 @pytest.mark.torch_ops
@@ -6624,12 +6613,11 @@ def test_case_sensitivity():
 @pytest.mark.torch_ops
 def test_all_keyword_case_sensitive():
     """The ``"all"`` alias is case-sensitive; other casings are literal."""
-    from utils.pattern_matching import PurePosixGlobHierarchyMatcher
+    from utils.parser import torch_operator_pattern_matches as m
 
-    norm = PurePosixGlobHierarchyMatcher.normalize_pattern
-    assert norm("all") == "*"
-    assert norm("ALL") == "ALL"
-    assert norm("All") == "All"
+    assert m("all", H3)
+    assert not m("ALL", H3)
+    assert not m("All", H3)
 
 
 @pytest.mark.torch_ops

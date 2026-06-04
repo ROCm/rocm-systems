@@ -2809,7 +2809,7 @@ def test_torch_trace_profile(
 
     Runs profiling with --torch-trace, verifies profile outputs (pmc_perf, marker
     and counter CSVs), then runs analyze with --list-torch-operators and
-    --torch-operator (PurePosixPath glob patterns like *relu, all), and verifies
+    --torch-operator (shell-style fnmatch glob patterns like *relu, all), and verifies
     torch_trace directory, consolidated CSV contents (hierarchy, kernel, counters),
     and CLI output format (call tree grouped by source location, aggregated stats,
     kernel IDs, sort order).
@@ -3112,7 +3112,7 @@ def test_torch_trace_profile(
         "Expected filter-selection log confirming -k intersection"
     )
 
-    # 21. Non-matching pattern degrades gracefully with a warning
+    # 21. Non-matching pattern aborts with a non-zero exit code
     capsys.readouterr()
     rc_nomatch = binary_handler_analyze_rocprof_compute([
         "--experimental",
@@ -3122,12 +3122,12 @@ def test_torch_trace_profile(
         "--torch-operator",
         "nonexistent_operator_xyz",
     ])
-    assert rc_nomatch == 0, (
-        "Analyze with non-matching --torch-operator should not crash"
+    assert rc_nomatch != 0, (
+        "Analyze with non-matching --torch-operator should exit non-zero"
     )
     out_nomatch = capsys.readouterr().out
     assert "No operators matched" in out_nomatch, (
-        "Expected warning about no operators matched"
+        "Expected error about no operators matched"
     )
 
     common.clean_output_dir(config["cleanup"], workload_dir)

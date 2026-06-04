@@ -738,10 +738,10 @@ line ``Operator summary: (no operators with recorded dispatches)``.
 Filtering by Operator
 ---------------------
 
-``--torch-operator`` uses PurePosixPath glob patterns to select operators.
-Operator hierarchies are ``/``-separated (e.g.
-``nn.Module.Net.forward/torch.nn.functional.relu``), and patterns are matched
-using ``PurePosixPath.match()``:
+``--torch-operator`` uses shell-style glob patterns (``fnmatch``) to select
+operators. Operator hierarchies are ``/``-separated (e.g.
+``nn.Module.Net.forward/torch.nn.functional.relu``); ``*``, ``?``, and
+``[seq]`` cross hierarchy levels, and matching is case-sensitive:
 
 * **Wildcard** — ``*relu`` (ends with relu), ``*conv*`` (contains conv)
 * **Exact** — ``torch.nn.functional.relu``

@@ -205,7 +205,7 @@ def test_analyze_torch_trace_invalid_operator_MI350(
         "--torch-operator",
         "nonexistent_op",
     ])
-    assert code == 0
+    assert code != 0
 
     output = capsys.readouterr().out
     assert "No operators matched" in output
