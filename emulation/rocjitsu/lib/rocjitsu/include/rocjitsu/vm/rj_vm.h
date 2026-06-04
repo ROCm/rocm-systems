@@ -28,29 +28,24 @@ typedef struct rj_vm_t rj_vm_t;
 
 /// @brief Create a VM from a JSON configuration file.
 ///
-/// @details Parses the JSON against the FlatBuffers schema, constructs the full
-/// component hierarchy, and loads any program binaries, all from the configuration.
+/// @details Parses the JSON against the embedded FlatBuffers schema, constructs
+/// the full component hierarchy, and loads any program binaries.
 /// @param[in] json_path Path to the JSON config file.
-/// @param[in] schema_path Path to the simulation_config.fbs schema.
 /// @param[out] vm The newly created VM handle.
 /// @retval ROCJITSU_STATUS_SUCCESS VM was created successfully.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL.
-/// @retval ROCJITSU_STATUS_INVALID_FILE The JSON or schema file could not be opened.
+/// @retval ROCJITSU_STATUS_INVALID_FILE The JSON file could not be opened.
 /// @retval ROCJITSU_STATUS_ERROR Parsing or construction failed.
-RJ_API_EXPORT rj_status_t rj_vm_create(const char *json_path, const char *schema_path,
-                                       rj_vm_t **vm);
+RJ_API_EXPORT rj_status_t rj_vm_create(const char *json_path, rj_vm_t **vm);
 
 /// @brief Create a VM from a JSON configuration string.
 ///
 /// @param[in] json JSON configuration string.
-/// @param[in] schema_path Path to the simulation_config.fbs schema.
 /// @param[out] vm The newly created VM handle.
 /// @retval ROCJITSU_STATUS_SUCCESS VM was created successfully.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL.
-/// @retval ROCJITSU_STATUS_INVALID_FILE The schema file could not be opened.
 /// @retval ROCJITSU_STATUS_ERROR Parsing or construction failed.
-RJ_API_EXPORT rj_status_t rj_vm_create_from_string(const char *json, const char *schema_path,
-                                                   rj_vm_t **vm);
+RJ_API_EXPORT rj_status_t rj_vm_create_from_string(const char *json, rj_vm_t **vm);
 
 /// @brief Increment the VM's reference count.
 ///

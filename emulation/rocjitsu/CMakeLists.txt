@@ -8,6 +8,10 @@ include(rj_default_compiler)
 
 project(rocm_jit_suite)
 
+# Generate compile_commands.json for clangd, clang-tidy, and other tooling that
+# needs the exact compiler invocations from the configured build tree.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # Default install prefix to /opt/rocm, matching other ROCm projects.
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     if(DEFINED ENV{ROCM_PATH})
@@ -169,31 +173,7 @@ set(FLATBUFFERS_BUILD_FLATLIB ON CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(googletest flatbuffers)
 
-# Compile FlatBuffers schemas into C++ headers.
-set(GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
-file(MAKE_DIRECTORY ${GENERATED_DIR})
-
-set(SCHEMA_FILES
-    ${CMAKE_CURRENT_SOURCE_DIR}/schemas/simulation_config.fbs
-    ${CMAKE_CURRENT_SOURCE_DIR}/schemas/checkpoint.fbs
-)
-
-set(GENERATED_HEADERS)
-foreach(schema ${SCHEMA_FILES})
-    get_filename_component(schema_name ${schema} NAME_WE)
-    set(output_header "${GENERATED_DIR}/${schema_name}_generated.h")
-    add_custom_command(
-        OUTPUT ${output_header}
-        COMMAND
-            $<TARGET_FILE:flatc> --cpp -I ${CMAKE_CURRENT_SOURCE_DIR}/schemas -o
-            ${GENERATED_DIR} ${schema}
-        DEPENDS flatc ${schema}
-        COMMENT "Compiling FlatBuffers schema: ${schema_name}.fbs"
-    )
-    list(APPEND GENERATED_HEADERS ${output_header})
-endforeach()
-
-add_custom_target(flatbuffers_schemas DEPENDS ${GENERATED_HEADERS})
+include(rj_flatbuffers)
 
 # Libraries
 add_subdirectory(lib/util)
@@ -206,6 +186,7 @@ set_target_properties(rocjitsu_shared PROPERTIES OUTPUT_NAME rocjitsu)
 target_link_libraries(
     rocjitsu_shared
     PRIVATE
+        rocjitsu_analysis
         rocjitsu_code
         rocjitsu_isa
         rocjitsu_isa_cdna1
@@ -228,6 +209,9 @@ target_link_libraries(
 )
 target_include_directories(rocjitsu_shared PRIVATE ${GENERATED_DIR})
 add_dependencies(rocjitsu_shared flatbuffers_schemas)
+
+# Developer and test workflow tools.
+add_subdirectory(tools)
 
 # Tests and scaling tools.
 if(BUILD_TESTING)

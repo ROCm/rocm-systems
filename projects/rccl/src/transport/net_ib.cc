@@ -179,6 +179,9 @@ static void ncclIbDevFatalError(struct ncclIbDev* dev) {
   ncclIbStatsFatalError(&dev->stats);
 }
 
+// [RCCL] NCCL 2.29.7 promoted ibvWcStatusStr / ibvWcOpcodeStr to public
+// helpers in ibvwrap.{h,cc}. The local static definitions that used to live
+// here would otherwise collide with the new ibvwrap.h declarations.
 pthread_t ncclIbAsyncThread;
 static void* ncclIbAsyncThreadMain(void* args) {
   struct ncclIbDev* dev = (struct ncclIbDev*)args;
@@ -2121,9 +2124,9 @@ cumem_flush_hsa:
         }
 #else
 #if defined(HIP_UNCACHED_MEMORY)
-        NCCLCHECKGOTO(ncclCudaCalloc(&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), hipDeviceMallocUncached), ret, fail);
+        NCCLCHECKGOTO(ncclCudaCalloc(&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), /*manager=*/nullptr, ncclMemPersist, hipDeviceMallocUncached), ret, fail);
 #else
-        NCCLCHECKGOTO(ncclCudaCalloc(&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), hipDeviceMallocFinegrained), ret, fail);
+        NCCLCHECKGOTO(ncclCudaCalloc(&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), /*manager=*/nullptr, ncclMemPersist, hipDeviceMallocFinegrained), ret, fail);
 #endif
         if (useDmaBuf)
         {
@@ -2147,7 +2150,7 @@ peermem_flush:
         flush_reg_done:
                 if (!gpuFlushRegistered) {
                   if (rCommDev->gpuFlush.gpuFlushGpuMem) {
-                    ncclCudaFree(rCommDev->gpuFlush.gpuFlushGpuMem);
+                    ncclCudaFree(rCommDev->gpuFlush.gpuFlushGpuMem, /*manager=*/nullptr);
                     rCommDev->gpuFlush.gpuFlushGpuMem = nullptr;
                   }
                   rCommDev->gpuFlush.gpuMr = nullptr;
@@ -3117,7 +3120,7 @@ ncclResult_t ncclIbCloseRecv(void* recvComm) {
       struct ncclIbRecvCommDev* commDev = comm->devs + i;
       if (comm->flushEnabled) {
         if (commDev->gpuFlush.gpuFlushGpuMem != nullptr) {
-          NCCLCHECK(ncclCudaFree(commDev->gpuFlush.gpuFlushGpuMem));
+          NCCLCHECK(ncclCudaFree(commDev->gpuFlush.gpuFlushGpuMem, /*manager=*/nullptr));
           commDev->gpuFlush.gpuFlushGpuMem = nullptr;
           if (commDev->gpuFlush.gpuMr != nullptr) NCCLCHECK(wrap_ibv_dereg_mr(commDev->gpuFlush.gpuMr));
           commDev->gpuFlush.gpuMr = nullptr;
@@ -3187,7 +3190,9 @@ ncclNet_t ncclNetIb = {
 /// GIN IB Plugin
 
 #include "gin/gin_host.h"
-#include "net_ib_gin.h"
+// [RCCL] hipify add_file_unique() renames net_ib/gin.h to net_ib/gin_tmp.h
+// to avoid a basename collision with include/nccl_device/gin.h.
+#include "net_ib/gin_tmp.h"
 
 const int NCCL_GIN_IB_ALLGATHER_TAG = 0xa0;
 const int NCCL_GIN_IB_ALLTOALL_TAG = 0xa1;
@@ -3294,7 +3299,12 @@ ncclResult_t ncclGinIbP2PBarrier(struct ncclGinIbCollComm *cComm) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclGinIbConnect(void* ctx, void* handles[], int nranks, int rank, void* listenComm, void** collComm) {
+// [RCCL] NCCL 2.29.7 added nConnections + queueDepth args to ncclGin_t::connect.
+// We don't yet thread connection multiplexing through this transport so we
+// accept the new args and ignore them; behaviour matches the prior
+// nConnections == 1 single-QP setup.
+ncclResult_t ncclGinIbConnect(void* ctx, void* handles[], int nranks, int rank, int nConnections, int queueDepth, void* listenComm, void** collComm) {
+  (void)nConnections; (void)queueDepth;
   struct ncclIbListenComm *lComm = (struct ncclIbListenComm *)listenComm;
   struct ncclGinIbCollComm *cComm = nullptr;
   int next;
@@ -3377,7 +3387,7 @@ ncclResult_t ncclGinIbCloseColl(void* collComm) {
 }
 
 #if !defined(__HIP_PLATFORM_AMD__)
-#include "gdaki/gin_host_gdaki.h"
+#include "net_ib/gdaki/gin_host_gdaki.h"
 
 static std::mutex ncclGinIbGdakiLockMutex;
 static int ncclGinIbGdakiNDevs = -1;
@@ -3417,16 +3427,17 @@ ncclResult_t ncclGinIbGdakiListen(void* ctx, int dev, void* opaqueHandle, void**
   return ncclNetIb.listen(ctx, ncclGinIbGdakiDevIndexes[dev], opaqueHandle, listenComm);
 }
 
-ncclResult_t ncclGinIbGdakiCreateContext(void* collComm, int nSignals, int nCounters, void **ginCtx, ncclNetDeviceHandle_v11_t** devHandle) {
+// [RCCL] 2.29.7: createContext gained nContexts; regMrSym gained mr_flags.
+ncclResult_t ncclGinIbGdakiCreateContext(void* collComm, int nSignals, int nCounters, int nContexts, void **ginCtx, ncclNetDeviceHandle_v11_t** devHandle) {
   struct ncclGinIbCollComm* cComm = (struct ncclGinIbCollComm*)collComm;
 
-  NCCLCHECK(ncclGinGdakiCreateContext(cComm, nSignals, nCounters, ginCtx, devHandle));
+  NCCLCHECK(ncclGinGdakiCreateContext(cComm, nSignals, nCounters, nContexts, ginCtx, devHandle));
 
   return ncclSuccess;
 }
 
 ncclResult_t ncclGinIbGdakiRegMrSym(void* collComm, void* data, size_t size, int type, uint64_t mr_flags, void** mhandle, void **ginHandle) {
-  return ncclGinGdakiRegMrSym((struct ncclGinIbCollComm *)collComm, data, size, type, mhandle, ginHandle);
+  return ncclGinGdakiRegMrSym((struct ncclGinIbCollComm *)collComm, data, size, type, mr_flags, mhandle, ginHandle);
 }
 
 ncclResult_t ncclGinIbGdakiDeregMrSym(void* collComm, void* mhandle) {
@@ -3521,9 +3532,12 @@ ncclResult_t ncclGinIbProxyCloseColl(void* collComm) {
   return ncclSuccess;
 }
 
+// [RCCL] 2.29.7 added an int connectionId parameter -- we don't yet model
+// per-connection multiplexing here, so just ignore it (matches connectionId==0).
 ncclResult_t ncclGinIbProxyIPut(void *collComm, uint64_t srcOff, void *srcMhandle, size_t size,
-                                uint64_t dstOff, void *dstMhandle, uint32_t rank, void **request)
+                                uint64_t dstOff, void *dstMhandle, uint32_t rank, int connectionId, void **request)
 {
+  (void)connectionId;
   struct ncclGinIbCollComm* cComm = (struct ncclGinIbCollComm*)collComm;
 
   struct ncclIbGinProxyMrHandle *srcMrHandle = (struct ncclIbGinProxyMrHandle *)srcMhandle;
@@ -3572,11 +3586,13 @@ ncclResult_t ncclGinIbProxyIPut(void *collComm, uint64_t srcOff, void *srcMhandl
   return ncclSuccess;
 }
 
+// [RCCL] 2.29.7 added an int connectionId parameter -- ignored as above.
 ncclResult_t ncclGinIbProxyIPutSignal(void *collComm, uint64_t srcOff, void *srcMhandle,
                                       size_t size, uint64_t dstOff, void *dstMhandle,
                                       uint32_t rank, uint64_t signalOff, void *signalMhandle,
-                                      uint64_t signalValue, uint32_t signalOp, void **request)
+                                      uint64_t signalValue, uint32_t signalOp, int connectionId, void **request)
 {
+  (void)connectionId;
   if (signalOp != NCCL_NET_SIGNAL_OP_INC && signalOp != NCCL_NET_SIGNAL_OP_ADD) {
     WARN("ncclGinIbProxyIPutSignal: Unsupported signalOp %u", signalOp);
     return ncclInvalidArgument;
@@ -3704,6 +3720,34 @@ ncclResult_t ncclGinIbProxyTest(void *collComm, void *request, int *done) {
 // No support for NCCL_IB_SPLIT_DATA_ON_QPS or NCCL_IB_MERGE_NICS
 ncclGin_t ncclGinIbProxy = {
   "GIN_IB_PROXY",
+  ncclGinIbInit,
+  ncclIbDevices,
+  ncclGinIbProxyGetProperties,
+  ncclIbListen,
+  ncclGinIbConnect,
+  NULL,
+  ncclGinIbProxyRegMrSym,
+  ncclGinIbProxyRegMrSymDmaBuf,
+  ncclGinIbProxyDeregMrSym,
+  NULL,
+  ncclGinIbCloseColl,
+  ncclIbCloseListen,
+  ncclGinIbProxyIPut,
+  ncclGinIbProxyIPutSignal,
+  ncclGinIbProxyTest,
+  NULL,
+  NULL,
+  ncclGinIbFinalize
+};
+
+// [RCCL] NCCL 2.29.7 introduced a top-level "ncclGinIb" dispatcher that
+// picks between GDAKI and Proxy at runtime. AMD doesn't ship the GDAKI
+// driver-mode kernels yet, so we point ncclGinIb at the Proxy
+// implementation -- this is a strict subset that always works on ROCm
+// HCAs and matches the existing behaviour. Whoever wires up GDAKI in
+// the future can replace this with a real dispatcher.
+ncclGin_t ncclGinIb = {
+  "GIN_IB",
   ncclGinIbInit,
   ncclIbDevices,
   ncclGinIbProxyGetProperties,
