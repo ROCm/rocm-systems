@@ -20,6 +20,19 @@ class ArtifactReaderOptions:
     verbose: int = 0
 
 
+@dataclass(frozen=True)
+class ProfilePassContext:
+    """Context needed to finalize one profiling pass."""
+
+    workload_dir: Path
+    fbase: str
+    profiler_command: str
+    using_native_tool: bool
+    torch_trace_enabled: bool
+    retain_rocpd_output: bool = False
+    kokkos_trace_enabled: bool = False
+
+
 class ProfileArtifactReader(Protocol):
     """Read profile artifacts without exposing their storage layout."""
 
@@ -31,3 +44,10 @@ class ProfileArtifactReader(Protocol):
 
     def read_pmc_frame(self, workload_dir: Path) -> pd.DataFrame:
         """Return the canonical PMC DataFrame for analysis."""
+
+
+class ProfileArtifactWriter(Protocol):
+    """Finalize profile artifacts after a profiling pass."""
+
+    def finalize_pass(self, context: ProfilePassContext) -> None:
+        """Finalize artifacts for one profiling pass."""

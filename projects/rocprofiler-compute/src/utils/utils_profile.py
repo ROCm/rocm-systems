@@ -14,13 +14,18 @@ from typing import Any, Union, cast
 
 import config
 import utils.utils_profile_csv as csv_ops
-from utils import rocpd_data
+from utils import rocpd_data as rocpd_data
 from utils.logger import (
     console_debug,
     console_error,
     console_log,
     console_warning,
     demarcate,
+)
+from utils.profile_artifacts.interfaces import ProfilePassContext
+from utils.profile_artifacts.writers import (
+    CsvProfileArtifactWriter,
+    RocpdProfileArtifactWriter,
 )
 from utils.utils_common import (
     capture_subprocess_output,
@@ -203,203 +208,54 @@ def run_prof(
                 _classify_output_line(stripped)
         console_error("Profiling execution failed.")
 
-    results_files: list[str] = []
-
+    pass_context = _build_profile_pass_context(
+        workload_dir=workload_dir,
+        fbase=fbase,
+        options=options,
+        torch_trace_enabled=torch_trace_enabled,
+        retain_rocpd_output=retain_rocpd_output,
+    )
     if format_rocprof_output == "rocpd":
-        # If using native tool for counter collection
-        if (
-            get_rocprof_cmd() == "rocprofiler-sdk"
-            and options["ROCPROF_COUNTER_COLLECTION"] == "0"
-        ):
-            for db_name in (Path(workload_dir) / "out/pmc_1").glob("*/*.db"):
-                pid = db_name.stem.split("_")[0]
-                counter_csv = (
-                    Path(workload_dir)
-                    / "out"
-                    / "pmc_1"
-                    / f"{pid}_native_counter_collection.csv"
-                )
-                if not counter_csv.is_file():
-                    console_debug(
-                        f"No native counter CSV for pid {pid}; "
-                        f"skipping rocpd update for {db_name}."
-                    )
-                    continue
-                counter_rows, _ = csv_ops.read_csv_as_dicts(str(counter_csv))
-                rocpd_data.update_rocpd_pmc_events(
-                    counter_rows,
-                    str(db_name),
-                )
-                console_debug(f"Updated rocpd db {db_name} with native tool counters.")
-        # Write results_fbase.csv
-        rocpd_data.convert_dbs_to_csv(
-            [str(p) for p in (Path(workload_dir) / "out/pmc_1").glob("*/*.db")],
-            workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv",
-            workload_dir + f"/out/pmc_1/{fbase}_marker_api_trace.csv",
-        )
-        # Subprocess succeeded but may have dispatched zero GPU kernels,
-        # in which case the CSV is missing or has no data rows.
-        try:
-            combined_rows, _ = csv_ops.read_csv_as_dicts(
-                workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv"
-            )
-        except (FileNotFoundError, ValueError):
-            combined_rows = []
-        if not combined_rows:
-            console_warning(
-                "No GPU kernel data collected. "
-                "The workload may not have dispatched any GPU kernels."
-            )
-            shutil.rmtree(f"{workload_dir}/out", ignore_errors=True)
-            return
-        else:
-            # Reset Dispatch_ID based on PID, Kernel_Name, Grid_Size,
-            # Workgroup_Size, LDS_Per_Workgroup, Start_Timestamp, End_Timestamp
-            csv_ops.assign_group_ids(
-                combined_rows,
-                [
-                    "PID",
-                    "Kernel_Name",
-                    "Grid_Size",
-                    "Workgroup_Size",
-                    "LDS_Per_Workgroup",
-                    "Start_Timestamp",
-                    "End_Timestamp",
-                ],
-                "Dispatch_ID",
-            )
-            # Reset Kernel_ID based on Kernel_Name, Grid_Size,
-            # Workgroup_Size, LDS_Per_Workgroup
-            csv_ops.assign_group_ids(
-                combined_rows,
-                ["Kernel_Name", "Grid_Size", "Workgroup_Size", "LDS_Per_Workgroup"],
-                "Kernel_ID",
-            )
-            # Drop PID since its not required
-            csv_ops.drop_column_from_rows(combined_rows, "PID")
-            # Write back to CSV
-            csv_ops.write_csv_from_dicts(
-                workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv",
-                combined_rows,
-            )
-            csv_ops.write_csv_from_dicts(
-                workload_dir + f"/results_{fbase}.csv", combined_rows
-            )
-            console_warning(
-                "Intermediate results_*.csv generation from rocpd databases is "
-                "deprecated and will be replaced with automatic .db file "
-                "retention in a future release."
-            )
-        if torch_trace_enabled:
-            # move counter collection and marker trace to workload dir
-            save_torch_trace_inputs(workload_dir, fbase, format_rocprof_output)
-        if retain_rocpd_output:
-            console_warning(
-                "--retain-rocpd-output is deprecated and will be removed in "
-                "a future release. .db files will be retained automatically."
-            )
-            for db_path in (Path(workload_dir) / "out/pmc_1").glob("*/*.db"):
-                pid = db_path.stem.split("_")[0]
-                shutil.copyfile(
-                    db_path,
-                    workload_dir + f"/{fbase}_{pid}.db",
-                )
-                console_warning(
-                    f"Retaining large raw rocpd database: "
-                    f"{workload_dir}/{fbase}_{pid}.db"
-                )
-        # Remove temp directory
-        shutil.rmtree(workload_dir + "/" + "out")
+        RocpdProfileArtifactWriter().finalize_pass(pass_context)
         return
     elif format_rocprof_output == "csv":
-        if get_rocprof_cmd() == "rocprofiler-sdk":
-            # rocprofv3 requires additional processing for each process
-            results_files = process_rocprofv3_output(
-                workload_dir,
-                # counter data collected using native tool
-                using_native_tool=options["ROCPROF_COUNTER_COLLECTION"] == "0",
-            )
-            # TODO: as rocprofv3 --kokkos-trace feature improves,
-            # rocprof-compute should make updates accordingly
-        else:
-            # rocprofv3 requires additional processing for each process
-            # rocprofv3 cannot use native tool
-            results_files = process_rocprofv3_output(
-                workload_dir, using_native_tool=False
-            )
-            if "--kokkos-trace" in options:
-                # TODO: as rocprofv3 --kokkos-trace feature improves,
-                # rocprof-compute should make updates accordingly
-                process_kokkos_trace_output(workload_dir, fbase)
-        # Add torch operator trace processing
-        if torch_trace_enabled:
-            # move counter collection and marker trace to workload dir
-            save_torch_trace_inputs(workload_dir, fbase, format_rocprof_output)
-        # Combine results into single CSV file
-        if results_files:
-            combined_results = csv_ops.concat_csv_files(results_files)
-        else:
-            console_warning(
-                f"Cannot write results for {fbase}.csv due to no counter "
-                "csv files generated."
-            )
-            return
-
-        # Overwrite column to ensure unique IDs.
-        csv_ops.add_column_to_rows(
-            combined_results, "Dispatch_ID", list(range(0, len(combined_results)))
-        )
-
-        # Reset Kernel_ID based on Kernel_Name, Grid_Size,
-        # Workgroup_Size, LDS_Per_Workgroup
-        csv_ops.assign_group_ids(
-            combined_results,
-            ["Kernel_Name", "Grid_Size", "Workgroup_Size", "LDS_Per_Workgroup"],
-            "Kernel_ID",
-        )
-
-        csv_ops.write_csv_from_dicts(
-            workload_dir + "/out/pmc_1/results_" + fbase + ".csv", combined_results
-        )
-
-        if Path(f"{workload_dir}/out").exists():
-            # copy and remove out directory if needed
-            shutil.copyfile(
-                f"{workload_dir}/out/pmc_1/results_{fbase}.csv",
-                f"{workload_dir}/results_{fbase}.csv",
-            )
-            # Remove temp directory
-            shutil.rmtree(f"{workload_dir}/out")
-
-        # Standardize rocprof headers via overwrite
-        # {<key to remove>: <key to replace>}
-        output_headers = {
-            # ROCm-6.1.0 specific csv headers
-            "KernelName": "Kernel_Name",
-            "Index": "Dispatch_ID",
-            "grd": "Grid_Size",
-            "gpu-id": "GPU_ID",
-            "wgr": "Workgroup_Size",
-            "lds": "LDS_Per_Workgroup",
-            "scr": "Scratch_Per_Workitem",
-            "sgpr": "SGPR",
-            "arch_vgpr": "Arch_VGPR",
-            "accum_vgpr": "Accum_VGPR",
-            "BeginNs": "Start_Timestamp",
-            "EndNs": "End_Timestamp",
-            # ROCm-6.0.0 specific csv headers
-            "GRD": "Grid_Size",
-            "WGR": "Workgroup_Size",
-            "LDS": "LDS_Per_Workgroup",
-            "SCR": "Scratch_Per_Workitem",
-            "ACCUM_VGPR": "Accum_VGPR",
-        }
-        csv_path = Path(workload_dir) / f"results_{fbase}.csv"
-        rows, _ = csv_ops.read_csv_as_dicts(str(csv_path))
-        csv_ops.rename_columns(rows, output_headers)
-        csv_ops.write_csv_from_dicts(str(csv_path), rows)
+        CsvProfileArtifactWriter().finalize_pass(pass_context)
     else:
         console_error(f"Unknown format_rocprof_output: {format_rocprof_output}")
+
+
+def _build_profile_pass_context(
+    workload_dir: str,
+    fbase: str,
+    options: Union[list[str], dict[str, Any]],
+    torch_trace_enabled: bool,
+    retain_rocpd_output: bool,
+) -> ProfilePassContext:
+    profiler_command = get_rocprof_cmd()
+    return ProfilePassContext(
+        workload_dir=Path(workload_dir),
+        fbase=fbase,
+        profiler_command=profiler_command,
+        using_native_tool=_uses_native_counter_collection(profiler_command, options),
+        torch_trace_enabled=torch_trace_enabled,
+        retain_rocpd_output=retain_rocpd_output,
+        kokkos_trace_enabled=_has_kokkos_trace(options),
+    )
+
+
+def _uses_native_counter_collection(
+    profiler_command: str,
+    options: Union[list[str], dict[str, Any]],
+) -> bool:
+    return (
+        profiler_command == "rocprofiler-sdk"
+        and isinstance(options, dict)
+        and options.get("ROCPROF_COUNTER_COLLECTION") == "0"
+    )
+
+
+def _has_kokkos_trace(options: Union[list[str], dict[str, Any]]) -> bool:
+    return isinstance(options, list) and "--kokkos-trace" in options
 
 
 def pc_sampling_prof(
