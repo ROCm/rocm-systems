@@ -75,6 +75,7 @@ struct triple_buffer_shared_data_t
         int      flags{};
         int64_t  se_id{0};
         uint64_t chunk_index{0};
+        uint64_t read_offset{0};
 
         /// Producer sets true after writing slot fields; consumer stores
         /// false after running the callback.
