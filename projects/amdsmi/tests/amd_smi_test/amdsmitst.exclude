@@ -98,3 +98,25 @@ FILTER[gfx1150]=${FILTER[strix_point]}
 FILTER[gfx1151]=${FILTER[strix_point]}
 FILTER[gfx1152]=${FILTER[strix_point]}
 FILTER[gfx1153]=${FILTER[strix_point]}
+
+# Privilege-based exclusions.
+# These tests perform set/write operations that require privileged container
+# access (e.g. --privileged, /dev/kfd, cap-add). When running non-privileged
+# (e.g. GFX 110X CI), detect_asic_filter.sh appends this list to GTEST_EXCLUDE
+# so the privileged cases are filtered out by the same gtest mechanism.
+# Rule: read-only tests stay; set/write tests are privileged.
+FILTER[non_privileged]=\
+"amdsmitstReadWrite.FanReadWrite:"\
+"amdsmitstReadWrite.TestPerfLevelReadWrite:"\
+"amdsmitstReadWrite.TestOverdriveReadWrite:"\
+"amdsmitstReadWrite.TestFrequenciesReadWrite:"\
+"amdsmitstReadWrite.TestPciReadWrite:"\
+"amdsmitstReadWrite.TestPowerReadWrite:"\
+"amdsmitstReadWrite.TestPowerCapReadWrite:"\
+"amdsmitstReadWrite.TestPerfCntrReadWrite:"\
+"amdsmitstReadWrite.TestPerfDeterminism:"\
+"amdsmitstReadWrite.TestXGMIReadWrite:"\
+"amdsmitstReadWrite.TestComputePartitionReadWrite:"\
+"amdsmitstReadWrite.TestMemoryPartitionReadWrite:"\
+"amdsmitstReadWrite.TestEvtNotifReadWrite:"\
+"amdsmitstReadWrite.TestMemoryReadWrite"

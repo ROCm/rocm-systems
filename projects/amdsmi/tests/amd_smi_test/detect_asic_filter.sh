@@ -99,4 +99,12 @@ if [ -n "$VIRT_MODE" ] && [ -n "${FILTER[$VIRT_MODE]+x}" ]; then
     echo "Virtualization detected — appending virtualization blacklist"
 fi
 
+# Layer on non-privileged exclusions when requested (e.g. GFX 110X CI).
+# Privileged set/write tests cannot run without privileged container access,
+# so AMDSMI_NON_PRIVILEGED appends FILTER[non_privileged] to the exclude list.
+if [ -n "$AMDSMI_NON_PRIVILEGED" ] && [ -n "${FILTER[non_privileged]+x}" ]; then
+    GTEST_EXCLUDE="${GTEST_EXCLUDE}:${FILTER[non_privileged]}"
+    echo "Non-privileged mode — appending non-privileged blacklist"
+fi
+
 echo "Final gtest negative filter: -${GTEST_EXCLUDE}"
