@@ -129,7 +129,8 @@ void TestFanReadWrite::Run(void) {
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NO_PERM);
 
     if (ret == AMDSMI_STATUS_NO_PERM || ret == AMDSMI_STATUS_NOT_SUPPORTED) {
-      std::cout << "\t**Set fan speed: Not supported or requires root/sudo. Skipping..." << std::endl;
+      std::cout << "\t**Set fan speed: Not supported or requires root/sudo. Skipping..."
+                << std::endl;
       continue;
     }
     CHK_ERR_ASRT(ret)

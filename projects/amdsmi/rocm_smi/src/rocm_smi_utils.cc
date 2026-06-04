@@ -354,22 +354,6 @@ rsmi_status_t ErrnoToRsmiStatus(int err) {
   }
 }
 
-rsmi_status_t SysfsWriteErrnoToRsmiStatus(int err) {
-  switch (err) {
-    case 0:
-      return RSMI_STATUS_SUCCESS;
-    case EACCES:
-    case EPERM:
-      return RSMI_STATUS_PERMISSION;
-    case ENOENT:
-      return RSMI_STATUS_NOT_SUPPORTED;
-    case EINVAL:
-      return RSMI_STATUS_INVALID_ARGS;
-    default:
-      return RSMI_STATUS_FILE_ERROR;
-  }
-}
-
 // Helper function to read multi-line sysfs file into vector of strings
 static int ReadSysfsLines(const std::string& path, std::vector<std::string>* lines) {
   auto is_regular_file_result = isRegularFile(path, nullptr);
