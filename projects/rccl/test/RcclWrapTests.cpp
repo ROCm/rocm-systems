@@ -104,6 +104,9 @@ static void CreateMockComm(
     mockComm->nNodes = 1; // Default to single node for P2P tests
     mockComm->rank   = 0; // Default rank
 
+    mockComm->pxnDisable      = RCCL_VALUE_UNSET;
+    mockComm->p2pNetChunkSize = RCCL_VALUE_UNSET;
+
     // Initialize topology
     memset(&mockTopo, 0, sizeof(mockTopo));
     mockComm->topo = &mockTopo;

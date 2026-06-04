@@ -420,8 +420,7 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
         {
             if(arr[i] == pmc::collectors::gpu::METRIC_VALUE_NOT_SUPPORTED_16) continue;
 
-            auto suffix     = "_" + std::to_string(i);
-            auto pmc_name   = std::string(base_name) + suffix;
+            auto pmc_name   = fmt::format("{}_{}", base_name, i);
             auto track_name = pmc_name;
 
             LOG_TRACE("Inserting metric: pmc_name: {}, track_name: {}, value: {}",

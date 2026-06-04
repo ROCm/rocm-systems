@@ -490,7 +490,7 @@ memory:
     tags: [memset]
   Unit_hipMemset_SetMemoryWithOffset:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, smoke]
   Unit_hipMemsetAsync_SetMemoryWithOffset:
     <<: *level_2
     tags: [memset]
@@ -590,7 +590,7 @@ memory:
     tags: [query]
   Unit_hipMallocManaged_Basic:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, smoke]
   Unit_hipMallocManaged_Advanced:
     <<: *level_2
     # Note: Windows disabled
@@ -1309,7 +1309,7 @@ memory:
     tags: [multigpu, transfer]
   Unit_hipHostMalloc_Basic:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, smoke]
   Unit_hipHostMalloc_Negative:
     <<: *level_2
     tags: [alloc]
@@ -1364,7 +1364,7 @@ memory:
     tags: [transfer]
   Unit_hipMemcpyAsync_Positive_Basic:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, smoke]
   Unit_hipMemcpyAsync_Positive_Synchronization_Behavior:
     <<: *level_2
     tags: [transfer]
@@ -1490,13 +1490,13 @@ memory:
     tags: [memset]
   Unit_hipMalloc_Positive_Basic:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, smoke]
   Unit_hipMalloc_Positive_Zero_Size:
     <<: *level_2
     tags: [alloc]
   Unit_hipMalloc_Positive_Alignment:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, smoke]
   Unit_hipMalloc_Negative_Parameters:
     <<: *level_2
     tags: [alloc]
