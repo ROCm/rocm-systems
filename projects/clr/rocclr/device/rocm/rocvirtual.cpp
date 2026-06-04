@@ -4639,41 +4639,35 @@ void VirtualGPU::submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) {
   // Serialize queue access like the other submit* paths.
   std::scoped_lock lock(execution());
 
-  // Unwrap the hsa_amd_external_semaphore_t stashed as the CLR-visible
-  // handle. Read-only: passed by value into the HSA call.
-  const auto* holder = static_cast<const hsa_amd_external_semaphore_t*>(
-      cmd.sem_ptr());
+  // Unwrap the CLR-visible handle; null guard for holder/queue.
+  const auto* holder =
+      static_cast<const hsa_amd_external_semaphore_t*>(cmd.sem_ptr());
   if (holder == nullptr || gpu_queue_ == nullptr) {
     cmd.setStatus(CL_INVALID_OPERATION);
     return;
   }
 
+  // A failed HSA call is logged but does not fail the command: some KMDs reject
+  // GPU-side waits even when signal works, and higher-level sync gates the data
+  // dependency. The barriers reproduce the needed cross-engine ordering.
   if (cmd.semaphoreCmd() == amd::ExternalSemaphoreCmd::COMMAND_SIGNAL_EXTSEMAPHORE) {
-    // Drain in-flight work before the signal. Default skipSignal=false
-    // populates dep_signal[] from WaitingSignal() so async SDMA copies (on
-    // separate engines) are waited on, not just in-order compute packets.
+    // Leading barrier: drain prior work (incl. async SDMA via dep_signal[])
+    // before the signal so external observers see it last.
     dispatchBarrierPacket(kBarrierPacketHeader);
 
-    hsa_status_t s = hsa_amd_queue_signal_external_semaphore(
-        gpu_queue_, *holder, cmd.fence());
+    hsa_status_t s =
+        hsa_amd_queue_signal_external_semaphore(gpu_queue_, *holder, cmd.fence());
     if (s != HSA_STATUS_SUCCESS) {
       LogError("Failed to signal external semaphore");
-      cmd.setStatus(CL_INVALID_OPERATION);
     }
   } else {
-    // GPU-side wait. Best-effort: post the wait but do NOT fail the
-    // command on KMD rejection (mirrors PAL, which only logs). Some
-    // KMDs reject GPU-side waits on imported syncobjs even though
-    // SIGNAL works; higher-level synchronization gates the actual
-    // data dependency in the meantime.
-    hsa_status_t s = hsa_amd_queue_wait_external_semaphore(
-        gpu_queue_, *holder, cmd.fence());
+    hsa_status_t s =
+        hsa_amd_queue_wait_external_semaphore(gpu_queue_, *holder, cmd.fence());
     if (s != HSA_STATUS_SUCCESS) {
       LogError("Failed to wait on external semaphore");
     } else {
-      // Barrier publishes the wait to cross-engine deps (dep_signal[]) so a
-      // later SDMA copy can't bypass it; acquire scope makes the producer's
-      // writes visible to GPU consumers.
+      // Trailing acquire barrier (successful wait only): orders later
+      // cross-engine deps after the wait and makes producer writes visible.
       dispatchBarrierPacket(kBarrierPacketAcquireHeader);
     }
   }
