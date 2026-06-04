@@ -1,0 +1,26 @@
+execute_process(
+    COMMAND "@CMAKE_COMMAND@" --build "@CMAKE_BINARY_DIR@" --target
+            two_vector_add_afl
+    RESULT_VARIABLE _rj_afl_build_result
+)
+
+if(NOT _rj_afl_build_result EQUAL 0)
+    message(FATAL_ERROR "two-vector-add AFL build failed: ${_rj_afl_build_result}")
+endif()
+
+file(REMOVE_RECURSE "@RJ_FUZZ_TWO_VECTOR_ADD_OUTPUT_DIR@")
+
+execute_process(
+    COMMAND
+        "@CMAKE_COMMAND@" -E env @RJ_FUZZ_TWO_VECTOR_ADD_ENV@
+        AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 AFL_NO_UI=1
+        AFL_SKIP_CPUFREQ=1 "@RJ_AFL_FUZZ_EXECUTABLE@" -i
+        "@RJ_FUZZ_TWO_VECTOR_ADD_INPUT_DIR@" -o
+        "@RJ_FUZZ_TWO_VECTOR_ADD_OUTPUT_DIR@" -V 1 --
+        "@RJ_FUZZ_TWO_VECTOR_ADD_BIN@"
+    RESULT_VARIABLE _rj_afl_result
+)
+
+if(NOT _rj_afl_result EQUAL 0)
+    message(FATAL_ERROR "two-vector-add AFL smoke test failed: ${_rj_afl_result}")
+endif()
