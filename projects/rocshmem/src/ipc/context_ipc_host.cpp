@@ -29,26 +29,19 @@
 #include "context_incl.hpp"
 #include "backend_ipc.hpp"
 #include "host/host.hpp"
+#include "ipc_policy.hpp"
 
-/* IPC non-MPI host AMO kernels. */
-__global__ static void ipc_fadd32(uint32_t *dst, uint32_t val,
-                                  uint32_t *result) {
-  *result = atomicAdd(dst, val);
+/* IPC non-MPI host AMO kernels — templated over the element type. */
+template <typename T>
+__global__ static void ipc_fadd(T *dst, T val, T *result) {
+  rocshmem::IpcImpl impl;
+  *result = impl.ipcAMOFetchAdd(dst, val);
 }
-__global__ static void ipc_fadd64(unsigned long long *dst,
-                                  unsigned long long val,
-                                  unsigned long long *result) {
-  *result = atomicAdd(dst, val);
-}
-__global__ static void ipc_fcas32(uint32_t *dst, uint32_t cond, uint32_t val,
-                                  uint32_t *result) {
-  *result = atomicCAS(dst, cond, val);
-}
-__global__ static void ipc_fcas64(unsigned long long *dst,
-                                  unsigned long long cond,
-                                  unsigned long long val,
-                                  unsigned long long *result) {
-  *result = atomicCAS(dst, cond, val);
+
+template <typename T>
+__global__ static void ipc_fcas(T *dst, T cond, T val, T *result) {
+  rocshmem::IpcImpl impl;
+  *result = impl.ipcAMOFetchCas(dst, cond, val);
 }
 
 namespace rocshmem {
@@ -106,6 +99,8 @@ __host__ void IPCHostContext::putmem(void *dest, const void *source,
   if (is_ipc_non_mpi()) {
     CHECK_HIP(hipMemcpyAsync(shmem_ptr(dest, pe), source, nelems,
                              hipMemcpyDefault, ctx_stream_));
+    // Blocking: drain stream so source is safe to reuse on return.
+    CHECK_HIP(hipStreamSynchronize(ctx_stream_));
     return;
   }
   host_interface->putmem(dest, source, nelems, pe, context_window_info);
@@ -116,6 +111,8 @@ __host__ void IPCHostContext::getmem(void *dest, const void *source,
   if (is_ipc_non_mpi()) {
     CHECK_HIP(hipMemcpyAsync(dest, shmem_ptr(source, pe), nelems,
                              hipMemcpyDefault, ctx_stream_));
+    // Blocking get: destination buffer must be populated on return.
+    CHECK_HIP(hipStreamSynchronize(ctx_stream_));
     return;
   }
   host_interface->getmem(dest, source, nelems, pe, context_window_info);
@@ -123,11 +120,6 @@ __host__ void IPCHostContext::getmem(void *dest, const void *source,
 
 __host__ void IPCHostContext::fence() {
   if (is_ipc_non_mpi()) {
-    /* ToDo: can we just use hipStreamSynchronize(ctx_stream_);
-     * as getmem / putmem use hipMemcpyAsync. ctx_stream is lost
-     * down the call chain, leading to a system level threadfence
-     */
-    rocshmem_quiet_kernel<<<1, 1, 0, ctx_stream_>>>();
     CHECK_HIP(hipStreamSynchronize(ctx_stream_));
     return;
   }
@@ -136,10 +128,6 @@ __host__ void IPCHostContext::fence() {
 
 __host__ void IPCHostContext::quiet() {
   if (is_ipc_non_mpi()) {
-    /* ToDo: can we just use hipStreamSynchronize(ctx_stream_);
-     * as getmem / putmem use hipMemcpyAsync
-     */
-    rocshmem_quiet_kernel<<<1, 1, 0, ctx_stream_>>>();
     CHECK_HIP(hipStreamSynchronize(ctx_stream_));
     return;
   }
@@ -156,36 +144,32 @@ __host__ void *IPCHostContext::shmem_ptr(const void *dest, int pe) {
 
 __host__ uint64_t IPCHostContext::ipc_amo_fadd(void *dst, uint64_t val,
                                               bool is32) {
-  if (is32) {
-    ipc_fadd32<<<1, 1, 0, ctx_stream_>>>(
-        reinterpret_cast<uint32_t *>(dst),
-        static_cast<uint32_t>(val),
+  if (is32)
+    ipc_fadd<uint32_t><<<1, 1, 0, ctx_stream_>>>(
+        reinterpret_cast<uint32_t *>(dst), static_cast<uint32_t>(val),
         reinterpret_cast<uint32_t *>(ipc_staging_buf_));
-  } else {
-    ipc_fadd64<<<1, 1, 0, ctx_stream_>>>(
+  else
+    ipc_fadd<unsigned long long><<<1, 1, 0, ctx_stream_>>>(
         reinterpret_cast<unsigned long long *>(dst),
         static_cast<unsigned long long>(val),
         reinterpret_cast<unsigned long long *>(ipc_staging_buf_));
-  }
   CHECK_HIP(hipStreamSynchronize(ctx_stream_));
   return *ipc_staging_buf_;
 }
 
 __host__ uint64_t IPCHostContext::ipc_amo_fcas(void *dst, uint64_t cond,
                                                uint64_t val, bool is32) {
-  if (is32) {
-    ipc_fcas32<<<1, 1, 0, ctx_stream_>>>(
-        reinterpret_cast<uint32_t *>(dst),
-        static_cast<uint32_t>(cond),
+  if (is32)
+    ipc_fcas<uint32_t><<<1, 1, 0, ctx_stream_>>>(
+        reinterpret_cast<uint32_t *>(dst), static_cast<uint32_t>(cond),
         static_cast<uint32_t>(val),
         reinterpret_cast<uint32_t *>(ipc_staging_buf_));
-  } else {
-    ipc_fcas64<<<1, 1, 0, ctx_stream_>>>(
+  else
+    ipc_fcas<unsigned long long><<<1, 1, 0, ctx_stream_>>>(
         reinterpret_cast<unsigned long long *>(dst),
         static_cast<unsigned long long>(cond),
         static_cast<unsigned long long>(val),
         reinterpret_cast<unsigned long long *>(ipc_staging_buf_));
-  }
   CHECK_HIP(hipStreamSynchronize(ctx_stream_));
   return *ipc_staging_buf_;
 }
