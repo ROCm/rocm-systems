@@ -473,6 +473,7 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     rj_add_hip_test_case(hip_memcpy_test "HipMemcpyTest.DeviceToDevice")
     rj_add_hip_test(hip_vector_add_test)
     rj_add_hip_test_case(hip_vector_add_test "HipVectorAddTest.CorrectResult")
+    rj_add_hip_test(hip_ds_transpose_acc_test)
 
     # --- RCCL collective test ---
     find_library(

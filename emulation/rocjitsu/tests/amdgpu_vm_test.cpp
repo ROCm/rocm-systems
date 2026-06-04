@@ -457,8 +457,9 @@ constexpr uint32_t v_cmp_eq_f32(uint32_t s0, uint32_t vs1) { return vopc(66, s0,
 // DS: 64-bit instruction.
 // dword0: offset0[7:0], offset1[15:8], gds[16], op[24:17], acc[25], encoding[31:26]=0x36
 // dword1: addr[7:0], data0[15:8], data1[23:16], vdst[31:24]
-constexpr uint32_t ds_lo(uint32_t op, uint8_t offset0 = 0, uint8_t offset1 = 0) {
-  return (0x36u << 26) | (op << 17) | (static_cast<uint32_t>(offset1) << 8) | offset0;
+constexpr uint32_t ds_lo(uint32_t op, uint8_t offset0 = 0, uint8_t offset1 = 0, uint8_t acc = 0) {
+  return (0x36u << 26) | (static_cast<uint32_t>(acc) << 25) | (op << 17) |
+         (static_cast<uint32_t>(offset1) << 8) | offset0;
 }
 constexpr uint32_t ds_hi(uint32_t vdst, uint32_t data0, uint32_t addr, uint32_t data1 = 0) {
   return (vdst << 24) | (data1 << 16) | (data0 << 8) | addr;
@@ -1127,6 +1128,59 @@ TEST(AtomicStressTest, GlobalAtomicAdd_MultiWorkgroup) {
 
   uint32_t final_val = f.mem()->read32(TARGET_ADDR);
   EXPECT_EQ(final_val, 1256u) << "1000 + 256 global atomic adds = 1256";
+}
+
+// Verify that ds_read_b64_tr_b16 with acc=1 writes to AccVGPR (vb+256+vdst),
+// not to VGPR (vb+vdst).
+TEST(DsTransposeTest, ReadB64TrB16_AccBit) {
+  VmFixture f("cdna4", 1, 10);
+
+  constexpr uint32_t VDST = 4;
+  constexpr uint32_t ADDR_REG = 0;
+  constexpr uint32_t DS_OP = 227; // ds_read_b64_tr_b16
+
+  // Kernel:
+  //   v_mov_b32 v0, 0          ; addr = LDS offset 0
+  //   v_mov_b32 v4, 0x42       ; sentinel in VGPR v4
+  //   v_mov_b32 v5, 0x42       ; sentinel in VGPR v5
+  //   ds_read_b64_tr_b16 a[4:5], v0  ; acc=1: write to AccVGPR
+  //   s_waitcnt lgkmcnt(0)
+  //   s_endpgm
+  using namespace enc;
+  const uint32_t code[] = {
+      v_mov_b32(ADDR_REG, INLINE_CONST(0)),
+      v_mov_b32(VDST, INLINE_CONST(42)),
+      v_mov_b32(VDST + 1, INLINE_CONST(42)),
+      ds_lo(DS_OP, /*offset0=*/0, /*offset1=*/0, /*acc=*/1),
+      ds_hi(VDST, /*data0=*/0, ADDR_REG),
+      S_WAITCNT_0,
+      S_ENDPGM,
+  };
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+
+  auto *cu = f.cu();
+
+  // Write a known non-zero pattern to LDS.
+  for (uint32_t i = 0; i < 256; ++i)
+    cu->lds().write32(i * 4, 0xDEADBEEF);
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, 64);
+  f.engine->run();
+
+  auto *wf = cu->wf(0);
+  ASSERT_NE(wf, nullptr);
+  uint32_t vb = wf->vgpr_alloc().base;
+
+  // VGPR v4 should still hold the sentinel (42), not overwritten by ds_read.
+  uint32_t vgpr_val = cu->read_vgpr(vb + VDST, 0);
+  EXPECT_EQ(vgpr_val, 42u) << "VGPR v" << VDST << " should NOT have been written when acc=1";
+
+  // AccVGPR a4 should have been written with LDS data (not 42, not 0).
+  uint32_t acc_val = cu->read_vgpr(vb + 256 + VDST, 0);
+  EXPECT_NE(acc_val, 0u) << "AccVGPR a" << VDST << " should have been written by ds_read";
+  EXPECT_NE(acc_val, 42u) << "AccVGPR a" << VDST
+                          << " should contain LDS data, not the VGPR sentinel";
 }
 
 } // namespace

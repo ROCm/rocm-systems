@@ -2043,11 +2043,12 @@ class CodeGenerator:
             'ds_read_tr_b16': (4, 2, 4),  # elem_size=4, num_elems=2, transpose=4
         }
         esz, ne, tr_kind = tr_map.get(sem.semantic_class, (4, 2, 4))
+        acc = self._acc_vgpr_expr
         L = []
         L.append(
             '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
-        L.append(f'  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;')
+        L.append(f'  d->dst_reg_base = wf.vgpr_alloc().base + {acc} + inst_.vdst;')
         L.append(f'  d->elem_size = {esz};')
         L.append(f'  d->num_elems = {ne};')
         L.append('  d->is_load = true;')
