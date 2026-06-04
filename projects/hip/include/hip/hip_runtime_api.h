@@ -5276,8 +5276,8 @@ hipError_t hipMemcpyFromSymbolAsync(void* dst, const void* symbol, size_t sizeBy
 hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind,
                           hipStream_t stream __dparm(0));
 /**
- *  @brief Fills the first sizeBytes bytes of the memory area pointed to by dest with the constant
- * byte value value.
+ *  @brief Fills the first sizeBytes bytes of the memory area pointed to by dst with the constant
+ * byte value.
  *
  *  @param[in,out] dst  Data being filled
  *  @param[in]  value  Value to be set
