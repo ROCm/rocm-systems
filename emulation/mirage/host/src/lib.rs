@@ -570,9 +570,9 @@ fn node_mirage_env(rank: u32, head_addr: &str, head_port: u16) -> Vec<(String, S
 fn resolve_injection(session: &SessionId) -> Result<InjectionDef> {
     let profile = resolve_profile(session)?;
     match profile.emulator.emulator {
-        EmulatorKind::Rocjitsu => mirage_rocjitsu::Rocjitsu::new(profile).injection_def(),
-        EmulatorKind::Hotswap => mirage_hotswap::Hotswap::new(profile).injection_def(),
-        EmulatorKind::Noop => mirage_core::emulator::Noop::new(profile).injection_def(),
+        EmulatorKind::Rocjitsu => mirage_rocjitsu::Rocjitsu::new(profile).injection_def(session),
+        EmulatorKind::Hotswap => mirage_hotswap::Hotswap::new(profile).injection_def(session),
+        EmulatorKind::Noop => mirage_core::emulator::Noop::new(profile).injection_def(session),
     }
 }
 

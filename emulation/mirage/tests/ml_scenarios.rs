@@ -46,7 +46,7 @@ fn rocjitsu_env() -> Option<(PathBuf, PathBuf, PathBuf)> {
             agent: mirage_core::common::MaybeRef::Ref(agent_name),
         }),
     };
-    let (cfg, schema) = mirage_rocjitsu::kmd_config(&def).ok()?;
+    let (cfg, schema) = mirage_rocjitsu::kmd_config(&def, None).ok()?;
     Some((kmd, cfg, schema))
 }
 

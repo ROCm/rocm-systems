@@ -32,7 +32,7 @@ use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::InjectionDef;
 use mirage_core::plugin::PluginsDef;
 use mirage_core::profile::{FileMount, ProfileDef};
-use mirage_core::session::SessionHealth;
+use mirage_core::session::{SessionHealth, SessionId};
 
 /// The HIP intercept library HotSwap ships. It is the artifact mirage
 /// anchors discovery on (its directory is the HotSwap lib dir) and the
@@ -151,7 +151,7 @@ impl Emulator for Hotswap {
         }
     }
 
-    fn injection_def(&self) -> Result<InjectionDef> {
+    fn injection_def(&self, _session: &SessionId) -> Result<InjectionDef> {
         // Refuse to run unemulated: without the HotSwap tree the
         // workload would silently run on real hardware, so fail loudly
         // with guidance instead.

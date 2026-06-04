@@ -11,7 +11,7 @@ use crate::{
     exec::InjectionDef,
     plugin::PluginsDef,
     profile::ProfileDef,
-    session::SessionHealth,
+    session::{SessionHealth, SessionId},
     topology::TopologyDef,
 };
 
@@ -186,7 +186,11 @@ pub trait Emulator {
     /// emulator is selected but its runtime library or assets are
     /// missing, so a misconfigured session fails loudly instead of
     /// silently running unemulated.
-    fn injection_def(&self) -> Result<InjectionDef>;
+    ///
+    /// `session` is the id of the session the workload runs in, so
+    /// emulators can materialise per-session runtime assets under the
+    /// session directory.
+    fn injection_def(&self, session: &SessionId) -> Result<InjectionDef>;
 }
 
 /// The built-in pass-through emulator: runs the workload directly with
@@ -236,7 +240,7 @@ impl Emulator for Noop {
         }
     }
 
-    fn injection_def(&self) -> Result<InjectionDef> {
+    fn injection_def(&self, _session: &SessionId) -> Result<InjectionDef> {
         Ok(InjectionDef::default())
     }
 }

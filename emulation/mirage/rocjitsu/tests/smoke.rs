@@ -42,7 +42,7 @@ fn embedded_assets_extract_round_trip() {
                 agent: MaybeRef::Ref(agent_name),
             }),
         };
-        let (cfg, schema) = kmd_config(&def).expect("sim config should materialise");
+        let (cfg, schema) = kmd_config(&def, None).expect("sim config should materialise");
         assert!(cfg.exists());
         assert!(schema.exists());
     }

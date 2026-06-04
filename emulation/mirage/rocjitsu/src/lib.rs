@@ -31,7 +31,7 @@ use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::InjectionDef;
 use mirage_core::plugin::PluginsDef;
 use mirage_core::profile::{FileMount, ProfileDef};
-use mirage_core::session::SessionHealth;
+use mirage_core::session::{SessionHealth, SessionId};
 use mirage_core::topology::TopologyDef;
 
 /// rocjitsu [`Emulator`] implementation. Bundles the rocjitsu-specific
@@ -64,8 +64,10 @@ impl Emulator for Rocjitsu {
         let _ = ensure_assets(false);
         // Building the kmd config resolves the topology + agent
         // references and checks the schema is available; any error here
-        // is precisely what would otherwise surface at run time.
-        kmd_config(&def.emulator)
+        // is precisely what would otherwise surface at run time. No
+        // session exists at validation time, so no per-session config is
+        // written.
+        kmd_config(&def.emulator, None)
             .map(|_| ())
             .map_err(|e| format!("rocjitsu cannot use this profile: {e}"))
     }
@@ -97,13 +99,13 @@ impl Emulator for Rocjitsu {
         }
     }
 
-    fn injection_def(&self) -> Result<InjectionDef> {
+    fn injection_def(&self, session: &SessionId) -> Result<InjectionDef> {
         let def = &self.profile.emulator;
         // Extract embedded assets if they aren't on disk yet; the
         // authoritative "assets missing" error comes from `kmd_config`
         // below, so this is best-effort.
         let _ = ensure_assets(false);
-        let (config, schema) = kmd_config(def)?;
+        let (config, schema) = kmd_config(def, Some(session))?;
         // Refuse to run unemulated: if the KMD interposer can't be
         // located there is nothing to emulate the workload, so fail
         // loudly rather than silently running on real hardware.
@@ -209,6 +211,10 @@ pub const LIB_NAME: &str = "librocjitsu.so";
 /// Name used for the extracted schema on disk.
 pub const SCHEMA_FBS_NAME: &str = "simulation_config.fbs";
 
+/// Name of the synthesised rocjitsu `SimulationConfig` written into the
+/// per-session directory (`<session>/rj_config.json`).
+pub const RJ_CONFIG_NAME: &str = "rj_config.json";
+
 /// Directory where extracted runtime assets are stored
 /// (`<MIRAGE_CACHE>/emulator/rocjitsu/`).
 pub fn asset_dir() -> PathBuf {
@@ -230,6 +236,12 @@ pub fn lib_path() -> PathBuf {
 /// On-disk path of the extracted flatbuffer schema.
 pub fn schema_fbs_path() -> PathBuf {
     asset_dir().join(SCHEMA_FBS_NAME)
+}
+
+/// On-disk path of the synthesised `SimulationConfig` for `session`
+/// (`<MIRAGE_RUNTIME>/session/<id>/rj_config.json`).
+pub fn rj_config_path(session: &SessionId) -> PathBuf {
+    mirage_core::paths::session_dir(session).join(RJ_CONFIG_NAME)
 }
 
 /// Write the embedded rocjitsu schema into
@@ -297,11 +309,18 @@ fn kmd_lib_search() -> mirage_core::discovery::LibSearch<'static> {
 /// 2. Wraps the agent's `vm` + `topology` with rocjitsu runtime
 ///    fields (`exec_mode` is taken from `def.exec_mode`; the other
 ///    fields use sane defaults).
-/// 3. Writes the result to
-///    `<MIRAGE_CACHE>/emulator/rocjitsu/sim_<hash>.json`, keyed on
-///    the JSON content so identical configs share a file and stale
-///    files are never overwritten in-place.
-pub fn kmd_config(def: &EmulatorDef) -> Result<(PathBuf, PathBuf)> {
+/// 3. Writes the result to `<session>/rj_config.json` when `session`
+///    is supplied (the per-session runtime location, alongside
+///    `def.json`/`health.json`). When `session` is `None` — e.g. at
+///    profile-validation time, before any session exists — it falls
+///    back to a content-addressed
+///    `<MIRAGE_CACHE>/emulator/rocjitsu/sim_<hash>.json` so identical
+///    configs share a file and stale files are never overwritten
+///    in-place.
+pub fn kmd_config(
+    def: &EmulatorDef,
+    session: Option<&SessionId>,
+) -> Result<(PathBuf, PathBuf)> {
     let topology: TopologyDef = match &def.topology {
         MaybeRef::Owned(t) => t.clone(),
         MaybeRef::Ref(name) => mirage_core::topology::store::get(name)?,
@@ -324,13 +343,29 @@ pub fn kmd_config(def: &EmulatorDef) -> Result<(PathBuf, PathBuf)> {
     let bytes = serde_json::to_vec_pretty(&sim).map_err(|e| {
         MirageError::Other(format!("rocjitsu kmd_config: serialize sim config: {e}"))
     })?;
-    let mut hasher = DefaultHasher::new();
-    bytes.hash(&mut hasher);
-    let key = format!("{:016x}", hasher.finish());
-    let cfg = asset_dir().join(format!("sim_{key}.json"));
-    if !cfg.exists() {
-        mirage_core::state::write_bytes(&cfg, &bytes)?;
-    }
+    let cfg = match session {
+        // Runtime: write the per-session config alongside the session's
+        // other state. One file per session, rewritten each time so it
+        // always reflects the current profile.
+        Some(id) => {
+            let cfg = rj_config_path(id);
+            mirage_core::state::write_bytes(&cfg, &bytes)?;
+            cfg
+        }
+        // Validation (no session yet): fall back to a content-addressed
+        // cache file so identical configs share a file and stale files
+        // are never overwritten in-place.
+        None => {
+            let mut hasher = DefaultHasher::new();
+            bytes.hash(&mut hasher);
+            let key = format!("{:016x}", hasher.finish());
+            let cfg = asset_dir().join(format!("sim_{key}.json"));
+            if !cfg.exists() {
+                mirage_core::state::write_bytes(&cfg, &bytes)?;
+            }
+            cfg
+        }
+    };
     let schema = schema_fbs_path();
     if !schema.exists() {
         return Err(MirageError::Other(format!(
