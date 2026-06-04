@@ -1194,17 +1194,17 @@ struct BatchCopyOp {
 //! Structure to hold pageable host-to-device write operation info for batch
 //! writes
 struct BatchWriteMemoryOp {
-  const void* srcHost;    //!< Source host pointer
-  Memory* dstMemory;      //!< Destination memory object
-  size_t dstOffset;       //!< Offset in destination buffer
+  const void* src_host;   //!< Source host pointer
+  Memory* dst_memory;     //!< Destination memory object
+  size_t dst_offset;      //!< Offset in destination buffer
   size_t size;            //!< Size of the copy in bytes
   CopyMetadata metadata;  //!< Copy metadata for this operation
 
   BatchWriteMemoryOp(const void* src_host_arg, Memory* dst_memory_arg, size_t dst_offset_arg,
                      size_t size_arg, CopyMetadata metadata_arg = CopyMetadata())
-      : srcHost(src_host_arg),
-        dstMemory(dst_memory_arg),
-        dstOffset(dst_offset_arg),
+      : src_host(src_host_arg),
+        dst_memory(dst_memory_arg),
+        dst_offset(dst_offset_arg),
         size(size_arg),
         metadata(metadata_arg) {}
 };
@@ -1212,17 +1212,17 @@ struct BatchWriteMemoryOp {
 //! Structure to hold device-to-pageable-host read operation info for batch
 //! reads
 struct BatchReadMemoryOp {
-  Memory* srcMemory;      //!< Source memory object
-  void* dstHost;          //!< Destination host pointer
-  size_t srcOffset;       //!< Offset in source buffer
+  Memory* src_memory;     //!< Source memory object
+  void* dst_host;         //!< Destination host pointer
+  size_t src_offset;      //!< Offset in source buffer
   size_t size;            //!< Size of the copy in bytes
   CopyMetadata metadata;  //!< Copy metadata for this operation
 
   BatchReadMemoryOp(Memory* src_memory_arg, void* dst_host_arg, size_t src_offset_arg,
                     size_t size_arg, CopyMetadata metadata_arg = CopyMetadata())
-      : srcMemory(src_memory_arg),
-        dstHost(dst_host_arg),
-        srcOffset(src_offset_arg),
+      : src_memory(src_memory_arg),
+        dst_host(dst_host_arg),
+        src_offset(src_offset_arg),
         size(size_arg),
         metadata(metadata_arg) {}
 };

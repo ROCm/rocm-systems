@@ -2135,7 +2135,7 @@ void VirtualGPU::SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd) {
     sync_flags.skipEntire_ = false;
 
     for (const amd::BatchWriteMemoryOp& op : write_ops) {
-      dev().getGpuMemory(op.dstMemory)->syncCacheFromHost(*this, sync_flags);
+      dev().getGpuMemory(op.dst_memory)->syncCacheFromHost(*this, sync_flags);
     }
   }
 
@@ -2145,7 +2145,7 @@ void VirtualGPU::SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd) {
   } else {
     if (!amd::IS_HIP) {
       for (const amd::BatchWriteMemoryOp& op : write_ops) {
-        op.dstMemory->signalWrite(&dev());
+        op.dst_memory->signalWrite(&dev());
       }
     }
   }
@@ -2163,7 +2163,7 @@ void VirtualGPU::SubmitBatchReadMemory(amd::BatchReadMemoryCommand& cmd) {
 
   if (!amd::IS_HIP) {
     for (const amd::BatchReadMemoryOp& op : read_ops) {
-      dev().getGpuMemory(op.srcMemory)->syncCacheFromHost(*this);
+      dev().getGpuMemory(op.src_memory)->syncCacheFromHost(*this);
     }
   }
 

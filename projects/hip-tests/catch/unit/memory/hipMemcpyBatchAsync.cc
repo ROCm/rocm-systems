@@ -40,10 +40,10 @@ struct BatchConfig {
 };
 
 enum class PointerPattern {
-  BasePointers,
-  OffsetPointers,
-  UnalignedPointers,
-  BroadcastSource,
+  kBasePointers,
+  kOffsetPointers,
+  kUnalignedPointers,
+  kBroadcastSource,
 };
 
 size_t CopyElements(size_t copy_size) {
@@ -472,12 +472,12 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_Functional) {
   const size_t copy_count = GENERATE(1, 8);
   const size_t copy_size = GENERATE(kSmallCopySize, kMediumCopySize, kLargeCopySize);
   const PointerPattern pointer_pattern =
-      GENERATE(PointerPattern::BasePointers, PointerPattern::OffsetPointers,
-               PointerPattern::UnalignedPointers, PointerPattern::BroadcastSource);
+      GENERATE(PointerPattern::kBasePointers, PointerPattern::kOffsetPointers,
+               PointerPattern::kUnalignedPointers, PointerPattern::kBroadcastSource);
   const hipMemcpyFlags flag = GENERATE(hipMemcpyFlagDefault, hipMemcpyFlagExtPreferCE);
-  const size_t offset_bytes = pointer_pattern == PointerPattern::OffsetPointers      ? sizeof(int)
-                              : pointer_pattern == PointerPattern::UnalignedPointers ? 1
-                                                                                     : 0;
+  const size_t offset_bytes = pointer_pattern == PointerPattern::kOffsetPointers      ? sizeof(int)
+                              : pointer_pattern == PointerPattern::kUnalignedPointers ? 1
+                                                                                      : 0;
 
   BatchConfig config{copy_count, copy_size};
   StreamGuard stream_guard(Streams::created);
@@ -492,7 +492,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_Functional) {
   hipMemcpyAttributes attr{
       hipMemcpySrcAccessOrderStream, {}, {}, static_cast<unsigned int>(flag)};
 
-  if (pointer_pattern == PointerPattern::BroadcastSource) {
+  if (pointer_pattern == PointerPattern::kBroadcastSource) {
     FillDeviceBuffers(src_ptrs, copy_size, kPatternValue);
     void* broadcast_src = src_ptrs.front();
     std::fill(src_ptrs.begin(), src_ptrs.end(), broadcast_src);
@@ -504,7 +504,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_Functional) {
                                 attrs_idxs, 1, nullptr, stream_guard.stream()));
   HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
 
-  if (pointer_pattern == PointerPattern::BroadcastSource) {
+  if (pointer_pattern == PointerPattern::kBroadcastSource) {
     VerifyDeviceBuffers(dst_ptrs, copy_size, kPatternValue, false);
   } else {
     VerifyDeviceBuffers(dst_ptrs, copy_size);

@@ -24,8 +24,8 @@ namespace {
 constexpr unsigned char kPattern = 0x5a;
 
 enum class PointerPattern {
-  BasePointers,
-  BroadcastSource,
+  kBasePointers,
+  kBroadcastSource,
 };
 
 std::string GetSizeSectionName(size_t size) {
@@ -37,9 +37,9 @@ std::string GetSizeSectionName(size_t size) {
 
 std::string GetPointerPatternSectionName(PointerPattern pointer_pattern) {
   switch (pointer_pattern) {
-    case PointerPattern::BasePointers:
+    case PointerPattern::kBasePointers:
       return "base pointers";
-    case PointerPattern::BroadcastSource:
+    case PointerPattern::kBroadcastSource:
       return "broadcast source";
   }
   return "unknown pointer pattern";
@@ -112,7 +112,7 @@ void RunDeviceToDeviceBenchmark(size_t copy_size, size_t batch_copy_count,
   std::vector<void*> dsts(batch_copy_count);
   std::vector<size_t> sizes(batch_copy_count, copy_size);
   for (size_t i = 0; i < batch_copy_count; ++i) {
-    srcs[i] = pointer_pattern == PointerPattern::BroadcastSource
+    srcs[i] = pointer_pattern == PointerPattern::kBroadcastSource
                   ? src_allocation.ptr()
                   : src_allocation.ptr() + (i * copy_size);
     dsts[i] = dst_allocation.ptr() + (i * copy_size);
@@ -139,7 +139,7 @@ void RunPeerToPeerBenchmark(size_t copy_size, size_t batch_copy_count,
   std::vector<void*> dsts(batch_copy_count);
   std::vector<size_t> sizes(batch_copy_count, copy_size);
   for (size_t i = 0; i < batch_copy_count; ++i) {
-    srcs[i] = pointer_pattern == PointerPattern::BroadcastSource
+    srcs[i] = pointer_pattern == PointerPattern::kBroadcastSource
                   ? src_allocation.ptr()
                   : src_allocation.ptr() + (i * copy_size);
     dsts[i] = dst_allocation.ptr() + (i * copy_size);
@@ -167,7 +167,7 @@ void RunHostDeviceBenchmark(size_t copy_size, size_t batch_copy_count,
   std::vector<void*> dsts(batch_copy_count);
   std::vector<size_t> sizes(batch_copy_count, copy_size);
   for (size_t i = 0; i < batch_copy_count; ++i) {
-    srcs[i] = pointer_pattern == PointerPattern::BroadcastSource
+    srcs[i] = pointer_pattern == PointerPattern::kBroadcastSource
                   ? src_allocation.ptr()
                   : src_allocation.ptr() + (i * copy_size);
     dsts[i] = dst_allocation.ptr() + (i * copy_size);
@@ -179,11 +179,11 @@ void RunHostDeviceBenchmark(size_t copy_size, size_t batch_copy_count,
                 pointer_pattern, kind);
 }
 
-} // namespace
+}  // namespace
 
 HIP_TEST_CASE(Performance_hipMemcpyBatchAsync_D2D) {
   const PointerPattern pointer_pattern =
-      GENERATE(PointerPattern::BasePointers, PointerPattern::BroadcastSource);
+      GENERATE(PointerPattern::kBasePointers, PointerPattern::kBroadcastSource);
   const auto [copy_size, batch_copy_count] = GENERATE(table<size_t, size_t>(
       {{4_KB, 4096}, {16_KB, 1024}, {64_KB, 256}, {256_KB, 64}, {1024_KB, 16}}));
   RunDeviceToDeviceBenchmark(copy_size, batch_copy_count, pointer_pattern);
@@ -194,7 +194,7 @@ HIP_TEST_CASE(Performance_hipMemcpyBatchAsync_P2P) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   const PointerPattern pointer_pattern =
-      GENERATE(PointerPattern::BasePointers, PointerPattern::BroadcastSource);
+      GENERATE(PointerPattern::kBasePointers, PointerPattern::kBroadcastSource);
   const auto [copy_size, batch_copy_count] = GENERATE(table<size_t, size_t>(
       {{4_KB, 4096}, {16_KB, 1024}, {64_KB, 256}, {256_KB, 64}, {1024_KB, 16}}));
   RunPeerToPeerBenchmark(copy_size, batch_copy_count, pointer_pattern);
@@ -202,7 +202,7 @@ HIP_TEST_CASE(Performance_hipMemcpyBatchAsync_P2P) {
 
 HIP_TEST_CASE(Performance_hipMemcpyBatchAsync_H2D_Pageable) {
   const PointerPattern pointer_pattern =
-      GENERATE(PointerPattern::BasePointers, PointerPattern::BroadcastSource);
+      GENERATE(PointerPattern::kBasePointers, PointerPattern::kBroadcastSource);
   const auto [copy_size, batch_copy_count] = GENERATE(table<size_t, size_t>(
       {{4_KB, 4096}, {16_KB, 1024}, {64_KB, 256}, {256_KB, 64}, {1024_KB, 16}}));
   RunHostDeviceBenchmark(copy_size, batch_copy_count, LinearAllocs::malloc, LinearAllocs::hipMalloc,
@@ -211,7 +211,7 @@ HIP_TEST_CASE(Performance_hipMemcpyBatchAsync_H2D_Pageable) {
 
 HIP_TEST_CASE(Performance_hipMemcpyBatchAsync_H2D_Pinned) {
   const PointerPattern pointer_pattern =
-      GENERATE(PointerPattern::BasePointers, PointerPattern::BroadcastSource);
+      GENERATE(PointerPattern::kBasePointers, PointerPattern::kBroadcastSource);
   const auto [copy_size, batch_copy_count] = GENERATE(table<size_t, size_t>(
       {{4_KB, 4096}, {16_KB, 1024}, {64_KB, 256}, {256_KB, 64}, {1024_KB, 16}}));
   RunHostDeviceBenchmark(copy_size, batch_copy_count, LinearAllocs::hipHostMalloc,
@@ -220,7 +220,7 @@ HIP_TEST_CASE(Performance_hipMemcpyBatchAsync_H2D_Pinned) {
 
 HIP_TEST_CASE(Performance_hipMemcpyBatchAsync_D2H_Pageable) {
   const PointerPattern pointer_pattern =
-      GENERATE(PointerPattern::BasePointers, PointerPattern::BroadcastSource);
+      GENERATE(PointerPattern::kBasePointers, PointerPattern::kBroadcastSource);
   const auto [copy_size, batch_copy_count] = GENERATE(table<size_t, size_t>(
       {{4_KB, 4096}, {16_KB, 1024}, {64_KB, 256}, {256_KB, 64}, {1024_KB, 16}}));
   RunHostDeviceBenchmark(copy_size, batch_copy_count, LinearAllocs::hipMalloc, LinearAllocs::malloc,
@@ -229,7 +229,7 @@ HIP_TEST_CASE(Performance_hipMemcpyBatchAsync_D2H_Pageable) {
 
 HIP_TEST_CASE(Performance_hipMemcpyBatchAsync_D2H_Pinned) {
   const PointerPattern pointer_pattern =
-      GENERATE(PointerPattern::BasePointers, PointerPattern::BroadcastSource);
+      GENERATE(PointerPattern::kBasePointers, PointerPattern::kBroadcastSource);
   const auto [copy_size, batch_copy_count] = GENERATE(table<size_t, size_t>(
       {{4_KB, 4096}, {16_KB, 1024}, {64_KB, 256}, {256_KB, 64}, {1024_KB, 16}}));
   RunHostDeviceBenchmark(copy_size, batch_copy_count, LinearAllocs::hipMalloc,

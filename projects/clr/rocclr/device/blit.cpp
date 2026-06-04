@@ -365,9 +365,9 @@ bool HostBlitManager::WriteBufferBatch(
     const std::vector<amd::BatchWriteMemoryOp>& write_ops) const {
   for (const amd::BatchWriteMemoryOp& op : write_ops) {
     device::Memory* dst_dev_mem =
-        op.dstMemory->getDeviceMemory(*op.dstMemory->getContext().devices()[0]);
+        op.dst_memory->getDeviceMemory(*op.dst_memory->getContext().devices()[0]);
 
-    if (!writeBuffer(op.srcHost, *dst_dev_mem, amd::Coord3D(op.dstOffset), amd::Coord3D(op.size),
+    if (!writeBuffer(op.src_host, *dst_dev_mem, amd::Coord3D(op.dst_offset), amd::Coord3D(op.size),
                      false, op.metadata)) {
       return false;
     }
@@ -378,8 +378,8 @@ bool HostBlitManager::WriteBufferBatch(
 bool HostBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp>& read_ops) const {
   for (const amd::BatchReadMemoryOp& op : read_ops) {
     device::Memory* src_dev_mem =
-        op.srcMemory->getDeviceMemory(*op.srcMemory->getContext().devices()[0]);
-    if (!readBuffer(*src_dev_mem, op.dstHost, amd::Coord3D(op.srcOffset), amd::Coord3D(op.size),
+        op.src_memory->getDeviceMemory(*op.src_memory->getContext().devices()[0]);
+    if (!readBuffer(*src_dev_mem, op.dst_host, amd::Coord3D(op.src_offset), amd::Coord3D(op.size),
                     false, op.metadata)) {
       return false;
     }
