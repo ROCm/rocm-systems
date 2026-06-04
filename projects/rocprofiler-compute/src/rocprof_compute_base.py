@@ -156,7 +156,7 @@ class RocProfCompute:
 
         self._validate_list_option_exclusions()
 
-        # Validate block 30 requires --membw-analysis and --experimental
+        # Validate block 30 / block 21 require their respective experimental flags
         filter_list: list[str] = []
         if hasattr(self.__args, "filter_blocks") and self.__args.filter_blocks:
             filter_list = self.__args.filter_blocks
@@ -170,11 +170,39 @@ class RocProfCompute:
             ):
                 if not self.__args.membw_analysis or not self.__args.experimental:
                     console_error(
-                        "Block 30 (Memory Bandwidth Analysis) is an experimental :"
-                        f"feature.\n"
+                        "Block 30 (Memory Bandwidth Analysis) is an experimental "
+                        "feature.\n"
                         f'To use "-b {block_input}", you must also specify: '
-                        f"--membw-analysis --experimental"
+                        "--membw-analysis --experimental"
                     )
+            # Check if this is block 21 (starts with "21" or "21.")
+            if block_input.startswith("21") and (
+                len(block_input) == 2 or block_input[2] == "."
+            ):
+                if (
+                    not getattr(self.__args, "pc_sampling", False)
+                    or not self.__args.experimental
+                ):
+                    console_error(
+                        "Block 21 (PC Sampling) is an experimental feature.\n"
+                        f'To use "-b {block_input}", you must also specify: '
+                        "--pc-sampling --experimental"
+                    )
+
+        # When --pc-sampling is set, inject "21" so downstream code sees it.
+        # Profile mode reads args.filter_blocks; analyze mode reads
+        # args.filter_metrics.
+        if getattr(self.__args, "pc_sampling", False):
+            target_attr = (
+                "filter_blocks" if hasattr(self.__args, "filter_blocks") else None
+            )
+            if target_attr is None and hasattr(self.__args, "filter_metrics"):
+                target_attr = "filter_metrics"
+            if target_attr is not None:
+                current = getattr(self.__args, target_attr) or []
+                if "21" not in current:
+                    current.append("21")
+                setattr(self.__args, target_attr, current)
 
         if self.__mode == "profile":
             self._validate_profile_mode_arguments()

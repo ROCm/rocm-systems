@@ -173,7 +173,7 @@ The following sample command profiles the ``vcopy`` workload.
       INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] [generate_output] Counter collection data has been written to: /home/auser/rocm-systems/projects/rocprofiler-compute/workloads/vcopy/MI325X/out/pmc_1/116379_native_counter_collection.csv
       INFO    |-> [rocprofiler-sdk] vcopy testing on GCD 0
       INFO    |-> [rocprofiler-sdk] Finished allocating vectors on the CPU
-   WARNING PC sampling data collection skipped as block 21 is not specified.
+   WARNING PC sampling data collection skipped as --pc-sampling is not specified.
       INFO [roofline] Checking for roofline.csv in /home/auser/rocm-systems/projects/rocprofiler-compute/workloads/vcopy/MI325X
    GPU Device 0 (gfx942) with 304 CUs: Profiling...
    100% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||]
@@ -1413,8 +1413,8 @@ MPI specification.
 
 **PC Sampling:**
 
-PC sampling (block 21) may fail to collect data for multi-rank applications with
-MPI communication due to synchronization requirements.
+PC sampling (``--pc-sampling``) may fail to collect data for multi-rank
+applications with MPI communication due to synchronization requirements.
 
 **Recommended single-pass modes:**
 

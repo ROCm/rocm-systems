@@ -31,6 +31,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Reworded the N/A metric-evaluation warning to "divide-by-zero or empty counter data" (the prior "missing counter data" message could only fire for non-missing causes).
 
+* PC sampling now opts in via `--pc-sampling --experimental`; explicit `-b 21` / `--block 21` is no longer accepted on its own.
+
 ### Removed
 
 * ``--path`` and ``--subpath`` options have been removed from profile mode. Use ``--output-directory`` instead.

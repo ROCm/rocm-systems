@@ -370,6 +370,7 @@ class TestProcessPanelsToDataframes:
         mock_args = MagicMock()
         mock_args.decimal = 2
         mock_args.membw_analysis = False
+        mock_args.pc_sampling = False
 
         mock_arch_configs = MagicMock()
         mock_arch_configs.panel_configs = {}
@@ -391,6 +392,7 @@ class TestProcessPanelsToDataframes:
         mock_args = MagicMock()
         mock_args.decimal = 2
         mock_args.membw_analysis = False
+        mock_args.pc_sampling = False
 
         # Create panel config with hidden section ID
         hidden_id = list(config.HIDDEN_SECTIONS)[0] if config.HIDDEN_SECTIONS else 0
