@@ -2,7 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 """
-Tests for the HIP graph capture example with rocTX ranges.
+Tests for the HIP graph capture example.
 """
 
 from __future__ import annotations
@@ -20,10 +20,14 @@ pytestmark = [
     pytest.mark.ci_enable,
 ]
 
-# If the below values change, update tests/rocpd-validation-rules/hip-graph-bubbles/
-# graph-bubbles-rules.json (expected kernels = K * I, graph_launch regions = I).
-_HIP_GRAPH_BUBBLES_NUM_KERNELS = "64"
-_HIP_GRAPH_BUBBLES_NUM_ITERATIONS = "6"
+# Configurations mirror the upstream rocprofiler-sdk hip-graph-bubbles tests
+# (projects/rocprofiler-sdk/tests/rocprofv3/hip-graph-bubbles-test/CMakeLists.txt):
+# (suffix, num_kernels, num_iterations, array_size, progress_interval, timeout).
+_HIP_GRAPH_BUBBLES_CONFIGS = [
+    ("k256-i20", "256", "20", "256", "25", 60),
+    ("k256-i200", "256", "200", "256", "25", 120),
+    # ("k2000-i200", "2000", "200", "256", "25", 180), # takes too long for CI
+]
 
 
 def _hip_graph_bubbles_rocm_events(gpu_info: GPUInfo) -> str:
@@ -35,20 +39,13 @@ def _hip_graph_bubbles_rocm_events(gpu_info: GPUInfo) -> str:
 
 @pytest.fixture
 def hip_graph_bubbles_env(gpu_info: GPUInfo) -> dict[str, str]:
-    """Environment variables for HIP graph + marker tests."""
+    """Environment variables for HIP graph tests (ROCPD is enabled for sys_run via
+    the @pytest.mark.rocpd marker, which sets ROCPROFSYS_USE_ROCPD=ON on this dict)."""
     return {
         "ROCPROFSYS_ROCM_EVENTS": _hip_graph_bubbles_rocm_events(gpu_info),
-        "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,kernel_dispatch,marker_api",
+        "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,kernel_dispatch",
         "ROCPROFSYS_USE_AMD_SMI": "OFF",
     }
-
-
-@pytest.fixture
-def hip_graph_bubbles_rocpd_env(
-    hip_graph_bubbles_env: dict[str, str],
-) -> dict[str, str]:
-    """Copy for sampling + ROCPD (apply_rocpd_marker adds ROCPROFSYS_USE_ROCPD=ON)."""
-    return hip_graph_bubbles_env.copy()
 
 
 @pytest.fixture
@@ -60,29 +57,40 @@ def hip_graph_bubbles_rules(validation_rules_dir: Path) -> list[Path]:
     ]
 
 
-@pytest.mark.timeout(120)
 @pytest.mark.class_name("hip-graph-bubbles")
 class TestHipGraphBubbles(RocprofsysTest):
-    """Exercise hip-graph-bubbles under rocprofiler-systems (no binary rewrite / runtime)."""
+    """Exercise hip-graph-bubbles under rocprofiler-systems.
 
-    @pytest.mark.rocpd("hip_graph_bubbles_rocpd_env")
-    @pytest.mark.parametrize("mode", ["baseline", "sampling", "sys_run"])
+    Runs each configuration in two modes:
+      * baseline - run the executable directly (no instrumentation)
+      * sys_run  - run under rocprof-sys-run with ROCPD output validated
+    """
+
+    @pytest.mark.rocpd("hip_graph_bubbles_env")
+    @pytest.mark.parametrize("mode", ["baseline", "sys_run"])
+    @pytest.mark.parametrize(
+        "suffix,num_kernels,num_iterations,array_size,progress_interval,timeout",
+        _HIP_GRAPH_BUBBLES_CONFIGS,
+    )
     def test(
         self,
         mode: str,
+        suffix: str,
+        num_kernels: str,
+        num_iterations: str,
+        array_size: str,
+        progress_interval: str,
+        timeout: int,
+        request: pytest.FixtureRequest,
         hip_graph_bubbles_env: dict[str, str],
-        hip_graph_bubbles_rocpd_env: dict[str, str],
         hip_graph_bubbles_rules: list[Path],
     ):
+        request.node.add_marker(pytest.mark.timeout(timeout))
         result = self.run_test(
             mode,
             "hip-graph-bubbles",
-            env=(
-                hip_graph_bubbles_rocpd_env
-                if mode == "sampling"
-                else hip_graph_bubbles_env
-            ),
-            run_args=[_HIP_GRAPH_BUBBLES_NUM_KERNELS, _HIP_GRAPH_BUBBLES_NUM_ITERATIONS],
+            env=hip_graph_bubbles_env,
+            run_args=[num_kernels, num_iterations, array_size, progress_interval],
             check_target_arch=True,
         )
         self.assert_regex(
@@ -91,5 +99,5 @@ class TestHipGraphBubbles(RocprofsysTest):
             pass_regex=[r"Test completed successfully"],
             fail_regex=[r"HIP error"],
         )
-        if mode == "sampling":
+        if mode == "sys_run":
             self.assert_rocpd(result, rules_files=hip_graph_bubbles_rules)

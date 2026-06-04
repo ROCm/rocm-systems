@@ -46,32 +46,10 @@ if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
     endif()
 endif()
 
-if(
-    (
-        NOT CMAKE_CXX_COMPILER_IS_HIPCC
-        OR (NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT hip_FOUND)
-    )
-    AND (NOT COMMAND rocprofiler_systems_custom_compilation AND NOT HIPCC_EXECUTABLE)
-)
-    message(AUTHOR_WARNING "hip-graph-bubbles target could not be built")
-    return()
-endif()
-
-find_library(
-    ROCTX_LIBRARY
-    NAMES rocprofiler-sdk-roctx
-    HINTS ${ROCmVersion_DIR} ${ROCM_PATH}
-    ENV ROCM_PATH
-    /opt/rocm
-    PATH_SUFFIXES lib lib64
-    PATHS ${ROCM_PATH}/lib ${ROCM_PATH}/lib64 /opt/rocm/lib /opt/rocm/lib64
-    REQUIRED
-)
-
 find_package(Threads REQUIRED)
 
 add_executable(hip-graph-bubbles hip-graph-bubbles.cpp)
-target_link_libraries(hip-graph-bubbles PRIVATE Threads::Threads ${ROCTX_LIBRARY})
+target_link_libraries(hip-graph-bubbles PRIVATE Threads::Threads)
 
 foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
     target_compile_options(hip-graph-bubbles PRIVATE --offload-arch=${arch})

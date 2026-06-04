@@ -2,17 +2,16 @@
 
 ## Overview
 
-This example builds a HIP graph that captures many sequential kernel launches, instantiates it once, and then executes the graph repeatedly in a loop. Each iteration is wrapped in a `roctxRangePush`/`roctxRangePop` pair named `graph_launch`, which produces distinct marker regions in traces and helps validate graph execution under rocprofiler-systems. The workload is useful for profiling HIP graph capture and replay, kernel dispatch from graphs, and marker API correlation when many kernels are bundled into a single graph launch.
+This example builds a HIP graph that captures many sequential kernel launches, instantiates it once, and then executes the graph repeatedly in a loop, synchronizing with the stream once after the final iteration. The workload is useful for profiling HIP graph capture and replay, kernel dispatch from graphs, and the timing behavior of graphs when many kernels are bundled into a single graph launch. It mirrors the upstream rocprofiler-sdk `hip-graph-bubbles` example (`projects/rocprofiler-sdk/tests/bin/hip-graph-bubbles/hip-graph-bubbles.cpp`).
 
 ## Source Files
 
-- `hip-graph-bubbles.cpp` - Captures `NUM_KERNELS` `simpleKernel` launches into a HIP graph, instantiates the graph, and runs `NUM_ITERATIONS` `hipGraphLaunch` calls with rocTX ranges and optional progress output.
+- `hip-graph-bubbles.cpp` - Captures `num_kernels` `simpleKernel` launches into a HIP graph, instantiates the graph, and runs `num_iterations` `hipGraphLaunch` calls with progress output.
 
 ## Prerequisites
 
 - CMake 3.25+
 - HIP runtime and `hipcc` compiler
-- rocprofiler-sdk-roctx library
 
 ## Building
 
@@ -44,8 +43,10 @@ cmake --build <build_dir> --target hip-graph-bubbles
 
 | Position | Description | Default |
 | ---------- | ------------- | --------- |
-| 1 | Number of kernels captured into the graph | 2000 |
-| 2 | Number of times to launch the graph | 200 |
+| 1 | Number of kernels captured into the graph (`num_kernels`) | 2000 |
+| 2 | Number of times to launch the graph (`num_iterations`) | 200 |
+| 3 | Per-kernel data array size (`array_size`, must be >= 256) | 256 |
+| 4 | Iterations between progress log lines (`progress_interval`) | 50 |
 
 Total kernel dispatches reported at exit equals `num_kernels * num_iterations`.
 
@@ -59,12 +60,12 @@ rocprof-sys-run -- ./hip-graph-bubbles 64 6
 
 | Variable | Value | Purpose |
 | ---------- | ------- | --------- |
-| `ROCPROFSYS_ROCM_DOMAINS` | `hip_runtime_api,kernel_dispatch,marker_api` | Trace HIP API, kernel launches, and rocTX markers |
+| `ROCPROFSYS_ROCM_DOMAINS` | `hip_runtime_api,kernel_dispatch` | Trace HIP API and kernel launches |
 | `ROCPROFSYS_ROCM_EVENTS` | `GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU` (Instinct) or `SQ_WAVES` (e.g. Navi) | Sample GPU hardware counters |
 
 ```bash
 rocprof-sys-run \
-    -e ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,marker_api \
+    -e ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch \
     -e ROCPROFSYS_ROCM_EVENTS=GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU \
     -- ./hip-graph-bubbles 64 6
 ```
