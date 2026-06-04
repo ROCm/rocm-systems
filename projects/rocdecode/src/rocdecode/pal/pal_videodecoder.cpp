@@ -83,6 +83,7 @@ void PalDpb::Clear() {
     for (uint32_t i = 0; i < slot_count_; ++i) {
         slots_[i].image.Reset();
         slots_[i].image_memory.Reset();
+        slots_[i].fence.Reset();
         slots_[i].occupied = false;
         slots_[i].poc = -1;
         slots_[i].frame_idx = -1;
@@ -1341,7 +1342,7 @@ void PalVideoDecoder::Destroy() {
 
     // Release resources (PalObject destructors handle this)
     bitstream_.gpu_memory.Reset();
-    dpb_.Clear();  // PalDpbSlot::fence PalObjects destroyed here
+    dpb_.Clear();  // Resets image, image_memory, and fence PalObjects for all slots
     decoder_heap_.Reset();
     cmd_buffer_.Reset();
     cmd_allocator_.Reset();
