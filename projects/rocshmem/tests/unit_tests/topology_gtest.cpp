@@ -586,9 +586,9 @@ TEST_F(DeviceTypeTestFixture, ParseNicMergeLevelKnown) {
 }
 
 TEST_F(DeviceTypeTestFixture, ParseNicMergeLevelUnknown) {
-  // Skip this test if warnings are not enabled
+  // Skip this test if warning logging is disabled (e.g., ROCSHMEM_DEBUG_LEVEL < WARN or includes :nowarn)
   if (!rocshmem::envvar::log_flags.show_warn) {
-    GTEST_SKIP() << "Skipping test because ROCSHMEM_DEBUG_LEVEL is not set to WARN or higher";
+    GTEST_SKIP() << "Skipping test because warning logging is disabled (ROCSHMEM_DEBUG_LEVEL < WARN or contains :nowarn)";
   }
 
   testing::internal::CaptureStderr();
