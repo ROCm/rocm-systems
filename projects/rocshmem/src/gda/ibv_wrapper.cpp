@@ -306,9 +306,10 @@ struct ibv_mr* IBVWrapper::reg_mr_vmm(struct ibv_pd* pd, void* addr, size_t leng
 }
 
 int IBVWrapper::dereg_mr(struct ibv_mr *mr) {
-  if (is_dmabuf_supported()) {
-    int fd = dmabuf_fd_map.erase((uintptr_t) mr);
-    close(fd);
+  auto it = dmabuf_fd_map.find((uintptr_t) mr);
+  if (it != dmabuf_fd_map.end()) {
+    close(it->second);
+    dmabuf_fd_map.erase(it);
   }
   return ibv.dereg_mr(mr);
 }
