@@ -15,22 +15,34 @@ make -C emulation/rocjitsu/third_party/AFLplusplus source-only
 
 ## Compile the test
 
-Configure rocjitsu with tests enabled, then build the instrumented target:
+Configure rocjitsu with tests enabled, then build one of the instrumented
+targets:
 
 ```bash
 cmake -S emulation/rocjitsu -B build/rocjitsu -G Ninja -DBUILD_TESTING=ON
 cmake --build build/rocjitsu --target hello_world_afl
+cmake --build build/rocjitsu --target hello_world_afl_persistent
 ```
 
-The compiled binary is written to:
+If AFL++ is built outside the rocjitsu tree, pass its checkout path:
+
+```bash
+cmake -S emulation/rocjitsu -B build/rocjitsu -G Ninja \
+  -DBUILD_TESTING=ON \
+  -DRJ_AFL_ROOT=$HOME/code/AFLplusplus
+```
+
+The compiled binaries are written to:
 
 ```text
 build/rocjitsu/fuzzer/tests/bin/hello_world_afl
+build/rocjitsu/fuzzer/tests/bin/hello_world_afl_persistent
 ```
 
 ## Fuzz the test
 
-Create a seed corpus and run AFL++ for a bounded smoke run:
+Create a seed corpus and run AFL++ for a bounded smoke run. The regular target
+reads one input from `stdin` and exits:
 
 ```bash
 mkdir -p build/rocjitsu/fuzzer/tests/hello_world_inputs
@@ -47,6 +59,23 @@ afl-fuzz \
   build/rocjitsu/fuzzer/tests/bin/hello_world_afl
 ```
 
+The persistent target is built from the same source with
+`RJ_AFL_PERSISTENT_MODE` defined. It calls `__AFL_INIT()` once, then processes
+inputs inside `__AFL_LOOP()` using AFL++'s shared testcase buffer:
+
+```bash
+rm -rf build/rocjitsu/fuzzer/tests/hello_world_persistent_findings
+
+AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 \
+AFL_NO_UI=1 \
+AFL_SKIP_CPUFREQ=1 \
+afl-fuzz \
+  -i build/rocjitsu/fuzzer/tests/hello_world_inputs \
+  -o build/rocjitsu/fuzzer/tests/hello_world_persistent_findings \
+  -V 1 -- \
+  build/rocjitsu/fuzzer/tests/bin/hello_world_afl_persistent
+```
+
 CTest runs the same flow with:
 
 ```bash
@@ -59,6 +88,7 @@ AFL++ writes findings under the output directory:
 
 ```text
 build/rocjitsu/fuzzer/tests/hello_world_findings/default/
+build/rocjitsu/fuzzer/tests/hello_world_persistent_findings/default/
 ```
 
 Useful files and directories:
