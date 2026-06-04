@@ -61,6 +61,7 @@
 #include "./amd_hsa_code_util.hpp"
 #include "core/inc/amd_core_dump.hpp"
 #include "hsakmt/hsakmt.h"
+#include "hsakmt/linux/kfd_ioctl.h"
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/amd_aql_queue.h"
 
@@ -338,6 +339,65 @@ struct SegmentInfo {
 
 using SegmentsInfo = std::vector<SegmentInfo>;
 using rocr::amd::hsa::alignUp;
+
+// Helper function to get device info from GpuAgent without debug mode
+static void GetCoreDeviceInfo(const AMD::GpuAgent* agent, kfd_dbg_device_info_entry& entry) {
+  // Call thunk API to get device info from topology/FMM/libdrm
+  HSAuint32 gpu_id = agent->properties().KFDGpuID;
+  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtGetCoreDeviceInfo(gpu_id, &entry));
+
+  if (status != HSAKMT_STATUS_SUCCESS) {
+    fprintf(stderr, "Failed to get core device info for GPU %u\n", gpu_id);
+    return;
+  }
+
+  // BUG WORKAROUND: hsaKmtGetCoreDeviceInfo returns zeros for many fields
+  // Manually populate from GpuAgent properties instead
+  const HsaNodeProperties& props = agent->properties();
+
+  entry.gpu_id = gpu_id;
+  entry.vendor_id = props.VendorId;
+  entry.device_id = props.DeviceId;
+
+  // Calculate gfx version from EngineId - decimal encoding for KFD 1.13 compatibility
+  entry.gfx_target_version = (props.EngineId.ui32.Major * 10000
+                               + props.EngineId.ui32.Minor * 100
+                               + props.EngineId.ui32.Stepping);
+
+  // Exception status - TODO: Get from agent exception tracking when implemented
+  entry.exception_status = 0;  // Placeholder until agent exception tracking is implemented
+}
+
+// Helper function to get queue snapshot from AqlQueue without debug mode
+static void GetCoreQueueInfo(AMD::AqlQueue* queue, kfd_queue_snapshot_entry& entry) {
+  // Zero out the structure first
+  memset(&entry, 0, sizeof(entry));
+
+  // Runtime direct fields (7 fields) - zero cost access from queue object
+  entry.ring_base_address = (uint64_t)queue->amd_queue_.hsa_queue.base_address;
+  entry.write_pointer_address = (uint64_t)&queue->amd_queue_.write_dispatch_id;
+  entry.read_pointer_address = (uint64_t)&queue->amd_queue_.read_dispatch_id;
+  entry.queue_id = (uint32_t)queue->aql_queue_id();
+  entry.gpu_id = static_cast<const AMD::GpuAgent*>(queue->GetAgent())->properties().KFDGpuID;
+  // entry.ring_size expects size in bytes, hsa_queue.size is in number of packets (64 bytes each)
+  entry.ring_size = queue->amd_queue_.hsa_queue.size * 64;
+  entry.queue_type = queue->amd_queue_.hsa_queue.type;
+
+  // Runtime cached (1 field) - TODO: Get exception status when implemented
+  // entry.exception_status = queue->GetExceptionStatus();
+  entry.exception_status = 0;  // Placeholder until exception caching is implemented
+
+  // GetQueueInfo (2 fields) - one non-debug ioctl for CWSR info
+  HsaQueueInfo queue_info;
+  if (HSAKMT_CALL(hsaKmtGetQueueInfo(entry.queue_id, &queue_info)) == HSAKMT_STATUS_SUCCESS) {
+    entry.ctx_save_restore_address = (uint64_t)queue_info.SaveAreaHeader;
+    entry.ctx_save_restore_area_size = (uint32_t)queue_info.SaveAreaSizeInBytes;
+  }
+
+  // Reserved field
+  entry.reserved = 0;
+}
+
 struct SegmentBuilder {
   virtual ~SegmentBuilder() = default;
   /* Find which segments needs to be created.  */

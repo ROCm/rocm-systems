@@ -323,6 +323,10 @@ namespace core {
 
       HSAKMT_PFN(hsaKmtGetRuntimeCapabilities) = (HSAKMT_DEF(hsaKmtGetRuntimeCapabilities)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtGetRuntimeCapabilities");
       if (HSAKMT_PFN(hsaKmtGetRuntimeCapabilities) == nullptr) goto LOAD_ERROR;
+      HSAKMT_PFN(hsaKmtGetCoreRuntimeInfo) = (HSAKMT_DEF(hsaKmtGetCoreRuntimeInfo)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtGetCoreRuntimeInfo");
+      if (HSAKMT_PFN(hsaKmtGetCoreRuntimeInfo) == nullptr) goto LOAD_ERROR;
+      HSAKMT_PFN(hsaKmtGetCoreDeviceInfo) = (HSAKMT_DEF(hsaKmtGetCoreDeviceInfo)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtGetCoreDeviceInfo");
+      if (HSAKMT_PFN(hsaKmtGetCoreDeviceInfo) == nullptr) goto LOAD_ERROR;
 
       HSAKMT_PFN(hsaKmtDebugTrapIoctl) = (HSAKMT_DEF(hsaKmtDebugTrapIoctl)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtDebugTrapIoctl");
       if (HSAKMT_PFN(hsaKmtDebugTrapIoctl) == nullptr) goto LOAD_ERROR;
@@ -547,6 +551,8 @@ LOAD_ERROR:
       HSAKMT_PFN(hsaKmtRuntimeDisable) = (HSAKMT_DEF(hsaKmtRuntimeDisable)*)(&hsaKmtRuntimeDisable);
       HSAKMT_PFN(hsaKmtCheckRuntimeDebugSupport) = (HSAKMT_DEF(hsaKmtCheckRuntimeDebugSupport)*)(&hsaKmtCheckRuntimeDebugSupport);
       HSAKMT_PFN(hsaKmtGetRuntimeCapabilities) = (HSAKMT_DEF(hsaKmtGetRuntimeCapabilities)*)(&hsaKmtGetRuntimeCapabilities);
+      HSAKMT_PFN(hsaKmtGetCoreRuntimeInfo) = (HSAKMT_DEF(hsaKmtGetCoreRuntimeInfo)*)(&hsaKmtGetCoreRuntimeInfo);
+      HSAKMT_PFN(hsaKmtGetCoreDeviceInfo) = (HSAKMT_DEF(hsaKmtGetCoreDeviceInfo)*)(&hsaKmtGetCoreDeviceInfo);
       HSAKMT_PFN(hsaKmtDebugTrapIoctl) = (HSAKMT_DEF(hsaKmtDebugTrapIoctl)*)(&hsaKmtDebugTrapIoctl);
       HSAKMT_PFN(hsaKmtSPMAcquire) = (HSAKMT_DEF(hsaKmtSPMAcquire)*)(&hsaKmtSPMAcquire);
       HSAKMT_PFN(hsaKmtSPMRelease) = (HSAKMT_DEF(hsaKmtSPMRelease)*)(&hsaKmtSPMRelease);
