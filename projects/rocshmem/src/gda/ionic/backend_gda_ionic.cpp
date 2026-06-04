@@ -68,6 +68,7 @@ void GDABackend::ionic_create_cqs(int ncqes) {
 }
 
 void GDABackend::ionic_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
+#if 0
   NicDevice &nic = nic_for_qp(conn_num);
   ionic_dv_ctx dvctx;
   ionic_dv.get_ctx(&dvctx, nic.context);
@@ -120,6 +121,7 @@ void GDABackend::ionic_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   /* Base Heap information */
   gpu_qp->base_heap = (uintptr_t) heap.get_local_heap_base();
   gpu_qp->base_heap_size = heap.get_size();
+#endif
 }
 
 void GDABackend::ionic_setup_parent_domain(NicDevice &nic, struct ibv_parent_domain_init_attr* pattr) {

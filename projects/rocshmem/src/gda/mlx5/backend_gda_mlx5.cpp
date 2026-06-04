@@ -22,6 +22,8 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
+#include <new>
+
 #include "log.hpp"
 #include "util.hpp"
 #include "gda/backend_gda.hpp"
@@ -96,7 +98,9 @@ void GDABackend::mlx5_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
    * };
    */
 
-  gpu_qp->mlx5_cq = gda_mlx5_device_cq(reinterpret_cast<mlx5_cqe64*>(qp.cq), qp.cq_dbrec);
+  int pe = conn_num % num_pes;
+  int nic_idx = nic_idx_for_qp(conn_num);
+  const NicDevice& nic = nic_for_qp(conn_num);
 
   int hip_dev_id{-1};
   CHECK_HIP(hipGetDevice(&hip_dev_id));
@@ -105,23 +109,28 @@ void GDABackend::mlx5_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   rocm_memory_lock_to_fine_grain(qp.uar->reg_addr, MLX5_DB_BLUEFLAME_BUFFER_SIZE,
                                  &gpu_db_ptr, hip_dev_id);
 
+  uint32_t qpn       = qp.qpn;
+  void*    base_heap = heap.get_local_heap_base();
+  size_t   heap_size = heap.get_size();
+  uint32_t lkey      = nic.heap_mr->lkey;
+  uint32_t rkey      = heap_rkey[pe * num_nics_ + nic_idx];
+  ibv_pd*  pd        = nic.pd_orig;
+
+  gda_mlx5_wqe*      sq_buf   = reinterpret_cast<gda_mlx5_wqe*>(qp.sq);
   // qp.dbrec points to two __be32 values: RQ dbrec at MLX5_RCV_DBR and SQ dbrec at MLX5_SND_DBR
-  gpu_qp->mlx5_sq = gda_mlx5_device_sq{reinterpret_cast<gda_mlx5_wqe*>(qp.sq),
-                                       &qp.qp_dbrec[MLX5_SND_DBR],
-                                       reinterpret_cast<gda_mlx5_doorbell*>(gpu_db_ptr),
-                                       static_cast<uint16_t>(qp.sq_depth)};
+  __be32*            sq_dbrec = &qp.qp_dbrec[MLX5_SND_DBR];
+  gda_mlx5_doorbell* sq_db    = reinterpret_cast<gda_mlx5_doorbell*>(gpu_db_ptr);
+  uint16_t           sq_depth = static_cast<uint16_t>(qp.sq_depth);
 
-  int pe = conn_num % num_pes;
-  int nic_idx = nic_idx_for_qp(conn_num);
-  NicDevice &nic = nic_for_qp(conn_num);
-  gpu_qp->rkey = heap_rkey[pe * num_nics_ + nic_idx];
-  gpu_qp->lkey = nic.heap_mr->lkey;
-  gpu_qp->qp_num = qp.qpn;
-  gpu_qp->inline_threshold = inline_threshold;
+  mlx5_cqe64* cq_buf   = reinterpret_cast<mlx5_cqe64*>(qp.cq);
+  __be32*     cq_dbrec = qp.cq_dbrec;
 
-  /* Base Heap information */
-  gpu_qp->base_heap = (uintptr_t) heap.get_local_heap_base();
-  gpu_qp->base_heap_size = heap.get_size();
+  /* QueuePair is either QueuePairMLX5 or QueuePairGeneric
+   * both have a constructor that accepts rvalue reference QueuePairMLX5&&,
+   * so just use that instead of trying to figure out which one we're using */
+  new (gpu_qp) QueuePair{QueuePairMLX5{qpn, base_heap, heap_size, lkey, rkey, pd,
+                                       gda_mlx5_device_sq{sq_buf, sq_dbrec, sq_db, sq_depth},
+                                       gda_mlx5_device_cq{cq_buf, cq_dbrec}}};
 }
 
 }  // namespace rocshmem
