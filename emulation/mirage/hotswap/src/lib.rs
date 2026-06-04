@@ -477,14 +477,16 @@ pub fn support_status() -> SupportStatus {
 /// Search policy mirage uses to locate the HotSwap install. Discovery
 /// is anchored on `libhotswap_intercept.so`; its directory is the
 /// HotSwap lib dir (where the patched ROCR and COMGR also live).
+///
+/// Kept deliberately small (see the crate README's "Where mirage
+/// looks"): an explicit `$HOTSWAP_HOME` install root, then the in-tree
+/// `MIRAGE_BUILD_HOTSWAP` build output. No generic system fallbacks —
+/// HotSwap ships its own patched ROCR/COMGR, so picking libs up from
+/// `$LD_LIBRARY_PATH` or `/opt/rocm/lib` would be wrong.
 pub fn lib_search() -> LibSearch<'static> {
     LibSearch {
-        // An explicit path straight to the intercept `.so`. `HSA_TOOLS_LIB`
-        // is the ROCm runtime's own variable, so honouring it here keeps
-        // mirage consistent with a manually-exported environment.
-        file_env: &["HOTSWAP_LIB", "HSA_TOOLS_LIB"],
-        // The HotSwap lib dir; also the `HOTSWAP_LIB_DIR` env contract var.
-        dir_env: &["HOTSWAP_LIB_DIR"],
+        file_env: &[],
+        dir_env: &[],
         // The HotSwap install root: `$HOTSWAP_HOME/lib` holds the libs.
         // This is what the `MIRAGE_BUILD_HOTSWAP` source build stages to
         // (under `build/hotswap`), and the var mirage injects.
@@ -495,6 +497,8 @@ pub fn lib_search() -> LibSearch<'static> {
         // `target/<profile>/mirage`, that is `../../build/hotswap/lib`,
         // so a monorepo build finds it without extra configuration.
         binary_relative_dirs: &["../../build/hotswap/lib"],
+        // HotSwap's discovery contract is just the two locations above.
+        system_fallbacks: false,
     }
 }
 
@@ -505,8 +509,8 @@ pub fn lib_path() -> Option<PathBuf> {
 }
 
 /// The HotSwap lib dir: the directory containing the intercept, the
-/// patched ROCR, and the COMGR transpiler. This is the value the env
-/// contract exposes as `HOTSWAP_LIB_DIR`.
+/// patched ROCR, and the COMGR transpiler. The env contract points
+/// `LD_LIBRARY_PATH` here and exposes its parent as `HOTSWAP_HOME`.
 pub fn lib_dir() -> Option<PathBuf> {
     lib_path().and_then(|p| p.parent().map(Path::to_path_buf))
 }
@@ -517,18 +521,9 @@ fn install_root() -> Option<PathBuf> {
     lib_dir().and_then(|d| d.parent().map(Path::to_path_buf))
 }
 
-/// The python adapter runtime directory, if present. Honours an
-/// explicit `HOTSWAP_PY_DIR`, else `runtime/hotswap_py` under the
-/// install root.
+/// The python adapter runtime directory, if present: `runtime/hotswap_py`
+/// under the install root.
 pub fn py_dir() -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("HOTSWAP_PY_DIR")
-        && !p.is_empty()
-    {
-        let p = PathBuf::from(p);
-        if p.is_dir() {
-            return Some(p);
-        }
-    }
     install_root()
         .map(|r| r.join("runtime/hotswap_py"))
         .filter(|p| p.is_dir())
@@ -557,7 +552,10 @@ mod tests {
     fn search_targets_the_intercept_lib() {
         let s = lib_search();
         assert_eq!(s.lib_name, "libhotswap_intercept.so");
-        assert!(s.dir_env.contains(&"HOTSWAP_LIB_DIR"));
+        // Discovery is scoped to the HotSwap install root and the
+        // in-tree build output — no generic system fallbacks.
+        assert!(s.home_env.contains(&"HOTSWAP_HOME"));
+        assert!(!s.system_fallbacks);
     }
 
     #[test]

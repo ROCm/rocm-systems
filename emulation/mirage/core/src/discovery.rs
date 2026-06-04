@@ -12,18 +12,21 @@
 //! contains it, then any env var in [`LibSearch::home_env`] holding an
 //! install root (with the library under `<root>/lib`).
 //!
-//! Absent an override, directories are searched in this order (first
-//! match wins), as implemented by [`LibSearch::search_dirs`]:
+//! Absent an override, the backend-specific
+//! [`LibSearch::binary_relative_dirs`] (resolved relative to the
+//! `mirage` binary) are always searched — this lets an in-tree
+//! `cargo build` of the monorepo find a freshly-built emulator without
+//! any extra configuration.
+//!
+//! Backends that opt in via [`LibSearch::system_fallbacks`] also search
+//! a set of generic locations (first match wins), as implemented by
+//! [`LibSearch::search_dirs`]:
 //!
 //! 1. Every directory on `$LD_LIBRARY_PATH`.
-//! 2. Any backend-specific [`LibSearch::binary_relative_dirs`],
-//!    resolved relative to the `mirage` binary. Lets an in-tree
-//!    `cargo build` of the monorepo find a freshly-built emulator
-//!    without any extra configuration.
-//! 3. `$ROCM_HOME` / `$ROCM_PATH` — the ROCm install root
+//! 2. `$ROCM_HOME` / `$ROCM_PATH` — the ROCm install root
 //!    (`<root>/lib`).
-//! 4. `../lib` relative to the `mirage` binary.
-//! 5. Standard system / ROCm library directories: `/opt/rocm/lib`,
+//! 3. `../lib` relative to the `mirage` binary.
+//! 4. Standard system / ROCm library directories: `/opt/rocm/lib`,
 //!    `/usr/local/lib`, `/usr/lib`, `/usr/lib/x86_64-linux-gnu`.
 
 use std::path::{Path, PathBuf};
@@ -53,6 +56,12 @@ pub struct LibSearch<'a> {
     /// binary's own directory (e.g. an in-tree build output). Empty
     /// for backends with no such location.
     pub binary_relative_dirs: &'a [&'a str],
+    /// Whether to also search the generic system fallback locations
+    /// (`$LD_LIBRARY_PATH`, `$ROCM_HOME`/`$ROCM_PATH`, `../lib`, and the
+    /// standard system/ROCm dirs). Backends with a tightly-scoped
+    /// discovery contract (e.g. HotSwap) set this `false` so discovery
+    /// is limited to their explicit overrides and build outputs.
+    pub system_fallbacks: bool,
 }
 
 impl LibSearch<'_> {
@@ -90,8 +99,8 @@ impl LibSearch<'_> {
             .ok()
             .and_then(|p| p.parent().map(Path::to_path_buf));
 
-        // 1. Every directory on $LD_LIBRARY_PATH.
-        if let Some(paths) = non_empty_var("LD_LIBRARY_PATH") {
+        // Generic, opt-in: every directory on $LD_LIBRARY_PATH.
+        if self.system_fallbacks && let Some(paths) = non_empty_var("LD_LIBRARY_PATH") {
             for entry in std::env::split_paths(&paths) {
                 if !entry.as_os_str().is_empty() {
                     dirs.push(entry);
@@ -99,29 +108,29 @@ impl LibSearch<'_> {
             }
         }
 
-        // 2. Backend-specific build outputs, relative to the mirage
-        //    binary.
+        // Always: backend-specific build outputs, relative to the mirage
+        // binary.
         if let Some(dir) = &exe_dir {
             for rel in self.binary_relative_dirs {
                 dirs.push(dir.join(rel));
             }
         }
 
-        // 3. ROCm install root ($ROCM_HOME / $ROCM_PATH) lib dir.
-        for key in ["ROCM_HOME", "ROCM_PATH"] {
-            if let Some(root) = non_empty_var(key) {
-                dirs.push(PathBuf::from(root).join("lib"));
+        if self.system_fallbacks {
+            // ROCm install root ($ROCM_HOME / $ROCM_PATH) lib dir.
+            for key in ["ROCM_HOME", "ROCM_PATH"] {
+                if let Some(root) = non_empty_var(key) {
+                    dirs.push(PathBuf::from(root).join("lib"));
+                }
             }
-        }
-
-        // 4. ../lib relative to the mirage binary.
-        if let Some(dir) = &exe_dir {
-            dirs.push(dir.join("../lib"));
-        }
-
-        // 5. Standard system / ROCm library directories.
-        for dir in STANDARD_LIB_DIRS {
-            dirs.push(PathBuf::from(dir));
+            // ../lib relative to the mirage binary.
+            if let Some(dir) = &exe_dir {
+                dirs.push(dir.join("../lib"));
+            }
+            // Standard system / ROCm library directories.
+            for dir in STANDARD_LIB_DIRS {
+                dirs.push(PathBuf::from(dir));
+            }
         }
 
         dirs
@@ -196,6 +205,14 @@ pub fn install_guidance(display_name: &str, search: &LibSearch) -> String {
             file_env = file_env,
             lib = search.lib_name,
         ));
+    } else if let Some(home_env) = search.home_env.first() {
+        msg.push_str(&format!(
+            "\nTip: point `{home_env}` at the install root (with `{lib}` \
+             under `<root>/lib`), e.g.\n  \
+             export {home_env}=/abs/path/to/install-root\n",
+            home_env = home_env,
+            lib = search.lib_name,
+        ));
     }
     msg
 }
@@ -226,6 +243,7 @@ mod tests {
             home_env: &[],
             lib_name: "definitely-not-a-real-lib-xyz.so",
             binary_relative_dirs: &[],
+            system_fallbacks: true,
         };
         assert!(!is_lib_installed(&s));
         let guidance = install_guidance("TestEmulator", &s);

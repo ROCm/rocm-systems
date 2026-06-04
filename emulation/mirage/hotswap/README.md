@@ -69,25 +69,11 @@ than silently running the workload unemulated.
 
 ### Where mirage looks
 
-Discovery is anchored on `libhotswap_intercept.so`; the directory that contains
-it is the HotSwap lib dir. mirage searches in the following locations, in order
-(the first match wins):
-
-1. `$HOTSWAP_LIB` / `$HSA_TOOLS_LIB` — an explicit path straight to the
-   intercept `.so`.
-2. `$HOTSWAP_LIB_DIR` — the HotSwap lib dir directly.
-3. `$HOTSWAP_HOME` — the HotSwap install root (`<root>/lib`).
-4. Any directory on `$LD_LIBRARY_PATH`.
-5. `../../build/hotswap/lib` relative to the `mirage` binary — where the
+Discovery is
+1. `$HOTSWAP_HOME` — the HotSwap install root (`<root>/lib`).
+2. `../../build/hotswap/` relative to the `mirage` binary — where the
    `MIRAGE_BUILD_HOTSWAP` source build stages, so a monorepo build is found
    automatically.
-6. `$ROCM_HOME` / `$ROCM_PATH` — the ROCm install root (`<root>/lib`).
-7. `../lib` relative to the `mirage` binary.
-8. Standard system / ROCm library directories: `/opt/rocm/lib`,
-   `/usr/local/lib`, `/usr/lib`, `/usr/lib/x86_64-linux-gnu`.
-
-The `llvm-tools/` and `runtime/hotswap_py/` directories are resolved relative to
-the lib dir's parent (or via `$HOTSWAP_PY_DIR`).
 
 ## Installation
 
@@ -97,7 +83,7 @@ Place the `lib/`, `llvm-tools/` and `runtime/hotswap_py/` directories under any
 location from [Where mirage looks](#where-mirage-looks), e.g.:
 
 ```sh
-export HOTSWAP_LIB_DIR=/abs/path/to/hotswap/lib
+export HOTSWAP_HOME=/abs/path/to/hotswap/
 # (llvm-tools/ and runtime/hotswap_py/ are expected next to that lib dir)
 ```
 

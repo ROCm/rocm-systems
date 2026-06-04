@@ -290,6 +290,9 @@ fn kmd_lib_search() -> mirage_core::discovery::LibSearch<'static> {
         // binary, so a monorepo `cargo build` finds a fresh build
         // without extra configuration.
         binary_relative_dirs: &["../../../rocjitsu/build/lib/rocjitsu/src/rocjitsu/kmd"],
+        // rocjitsu may also be installed separately; keep the generic
+        // ROCm/system fallbacks.
+        system_fallbacks: true,
     }
 }
 
