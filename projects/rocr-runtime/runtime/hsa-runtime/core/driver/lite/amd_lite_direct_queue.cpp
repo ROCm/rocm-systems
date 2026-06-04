@@ -2154,8 +2154,50 @@ hsa_status_t SubmitDirectQueue(const DirectQueuePlatform& platform,
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
   const uint64_t ring_dw = queue.ring_size_bytes / sizeof(uint32_t);
-  const uint64_t wptr = queue.wptr;
-  const uint64_t start = wptr % ring_dw;
+  // A PM4 packet must not straddle the ring-end boundary: the CP reads each
+  // packet as a contiguous run from rptr, so a dispatch block that wraps past
+  // the end is split into a malformed run and the CP faults (HSA 0x1000).
+  // Mirror the SubmitRingPm4 guard: when the block would cross the end, NOP-pad
+  // from the current offset to the ring end, advance wptr to the boundary, then
+  // write the real block at offset 0. Unlike the MES scheduler ring (whose CP
+  // treats the pre-wrap remainder as already-consumed and tolerates a zero
+  // fill), this is a live HQD-backed compute PQ, so the pad must be a real PM4
+  // TYPE-3 NOP packet — a zero dword decodes as a TYPE-0 register write and
+  // would itself fault. A single dispatch must fit the ring (dword_count <=
+  // ring_dw); the observed 69-dword dispatches are far below the 1024-dword
+  // ring, but reject the pathological case rather than corrupt the ring.
+  if (dword_count > ring_dw) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+  uint64_t wptr = queue.wptr;
+  uint64_t start = wptr % ring_dw;
+  if (start + dword_count > ring_dw) {
+    const uint64_t tail = ring_dw - start;  // 1 <= tail < ring_dw (start < ring_dw)
+    if (tail >= 2) {
+      // PM4 TYPE-3 IT_NOP filling exactly `tail` dwords: 1 header + (tail-1)
+      // ignored body dwords. Packet3's count field encodes (body_dwords - 1) =
+      // tail - 2. This matches the gfx1201-proven NOP (0xC0001000 = count 0 =>
+      // 2 dwords, used by the phase-9 probe) and the mainline ROCr nop-pad
+      // (amd_aql_queue.cpp: PM4_HDR(NOP, n) header + zero body). Advance wptr to
+      // the ring boundary so the real block lands contiguously at offset 0.
+      queue.ring_cpu[start] = Packet3(kPacket3Nop, static_cast<uint32_t>(tail - 2));
+      for (uint64_t i = 1; i < tail; ++i) {
+        queue.ring_cpu[start + i] = 0;
+      }
+      wptr += tail;  // advance past the NOP tail so wptr % ring_dw == 0
+    } else {
+      // tail == 1: a TYPE-3 NOP needs >= 2 dwords and cannot fit the single
+      // remaining slot, so fill it with a 1-dword TYPE-2 NOP (the CP consumes a
+      // TYPE-2 packet as a no-op). Only reachable when a prior dispatch left
+      // wptr exactly one dword short of the boundary (possible with mixed
+      // dispatch sizes; the uniform 69-dword stride never hits it). The TYPE-2
+      // encoding is not yet hardware-confirmed on gfx1201 (no wrap exercises it
+      // in the current tests) — revisit if a mixed-size workload faults here.
+      queue.ring_cpu[start] = 0x80000000u;  // PM4 TYPE-2 NOP (single dword)
+      wptr += 1;  // advance to the ring boundary (wptr % ring_dw == 0)
+    }
+    start = 0;
+  }
   for (size_t i = 0; i < dword_count; ++i) {
     queue.ring_cpu[(start + i) % ring_dw] = pm4[i];
   }
