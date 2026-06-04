@@ -321,11 +321,10 @@ TEST(ScratchAddrCalcTest, FlatScratchUsesWavefrontBase) {
   auto *wf = cu->dispatch_wf(0, 0, 104, 16);
   ASSERT_NE(wf, nullptr);
 
-  // Set scratch base to a known address via architected flat scratch SGPRs.
+  // Set scratch base via the wavefront's dedicated FLAT_SCRATCH register.
+  // On CDNA4 this is an architected HW register, not SGPRs s[102:103].
   constexpr uint64_t SCRATCH_BASE = 0x1'0000'0000ULL;
-  uint32_t sbase = wf->sgpr_alloc().base;
-  cu->write_sgpr(sbase + 102, static_cast<uint32_t>(SCRATCH_BASE));
-  cu->write_sgpr(sbase + 103, static_cast<uint32_t>(SCRATCH_BASE >> 32));
+  wf->set_scratch_base(SCRATCH_BASE);
 
   // Write a 32-bit offset into VGPR[0] lane 0.
   uint32_t vbase = wf->vgpr_alloc().base;
