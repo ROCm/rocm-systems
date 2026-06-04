@@ -303,11 +303,6 @@ pub enum ProfileCmd {
         #[arg(long)]
         no_input: bool,
     },
-    /// Interactive wizard: prompts for every field.
-    Wizard {
-        /// Name for the new profile.
-        name: Option<String>,
-    },
     /// Import a profile from a JSON file.
     Import {
         /// File to import from (use `-` for stdin).
@@ -388,8 +383,6 @@ pub enum SessionCmd {
     },
     /// Start a new session and its host process.
     Start(StartArgs),
-    /// Interactive wizard for starting a session.
-    Wizard,
     /// Stop a session and remove its state.
     Stop {
         id: SessionId,
@@ -403,9 +396,10 @@ pub enum SessionCmd {
 
 #[derive(Args, Debug)]
 pub struct StartArgs {
-    /// Profile to use (by name).
+    /// Profile to use (by name). Prompted for when omitted on a
+    /// terminal.
     #[arg(long)]
-    pub profile: String,
+    pub profile: Option<String>,
     /// Explicit session id; auto-generated if omitted.
     #[arg(long)]
     pub id: Option<SessionId>,
@@ -429,6 +423,10 @@ pub struct StartArgs {
     /// when omitted.
     #[arg(long)]
     pub provider: Option<String>,
+    /// Never prompt; require every field on the command line even on a
+    /// terminal.
+    #[arg(long)]
+    pub no_input: bool,
 }
 
 // ----- exec ------------------------------------------------------------------
@@ -661,9 +659,6 @@ fn profile_cmd(ctl: &dyn MirageCtl, cmd: ProfileCmd, json: bool) -> anyhow::Resu
                 println!("created profile {}", p.name);
             }
         }
-        ProfileCmd::Wizard { name } => {
-            return profile_wizard(ctl, name, json);
-        }
         ProfileCmd::Import { file } => {
             let bytes = if file == "-" {
                 let mut buf = Vec::new();
@@ -856,7 +851,6 @@ async fn session_cmd<C: MirageCtl>(
             println!("{}", serde_json::to_string_pretty(&h)?);
         }
         SessionCmd::Start(args) => return session_start(ctl, args, json).await,
-        SessionCmd::Wizard => return session_wizard(ctl, json).await,
         SessionCmd::Stop { id, force } => {
             if !force && !confirm(&format!("stop session {id}?"))? {
                 return Ok(ExitCode::from(0));
@@ -1183,28 +1177,35 @@ async fn session_start<C: MirageCtl>(
     args: StartArgs,
     json: bool,
 ) -> anyhow::Result<ExitCode> {
+    // Any field left off the command line is prompted for when stdin is
+    // a terminal (and `--no-input` wasn't given); otherwise its default
+    // is used. This makes `session start` an interactive UI while
+    // staying fully non-interactive in scripts, pipes and tests.
+    let interactive = !args.no_input && std::io::stdin().is_terminal();
+
+    let profile_name = resolve_start_profile(ctl, args.profile, interactive)?;
+    let id = resolve_start_id(args.id, interactive)?;
+    let workdir = resolve_start_workdir(args.workdir, interactive)?;
+    let ready_timeout = resolve_start_ready_timeout(args.ready_timeout, interactive)?;
+
     // Validate profile exists and resolve it so container overrides can
     // be applied.
-    let mut profile = ctl.profile_get(&args.profile)?;
+    let mut profile = ctl.profile_get(&profile_name)?;
     let profile_ref = apply_container_overrides(
         &mut profile,
         args.image,
         &args.mounts,
         args.provider,
-        &args.profile,
+        &profile_name,
     )?;
     let def = ctl.session_create(CreateSessionRequest {
-        id: args.id,
+        id,
         profile: profile_ref,
-        workdir: args.workdir.unwrap_or_else(|| {
-            std::env::current_dir()
-                .map(|p| p.display().to_string())
-                .unwrap_or("/".to_string())
-        }),
+        workdir,
     })?;
     if !args.no_host {
         spawn_host_for(&def.id)?;
-        wait_ready_or_bail(ctl, &def.id, Duration::from_secs(args.ready_timeout))?;
+        wait_ready_or_bail(ctl, &def.id, Duration::from_secs(ready_timeout))?;
     }
     if json {
         let s = ctl.session_state(&def.id)?;
@@ -1213,6 +1214,86 @@ async fn session_start<C: MirageCtl>(
         println!("{}", def.id);
     }
     Ok(ExitCode::from(0))
+}
+
+/// Resolve the profile name for `session start`: the `--profile` flag, an
+/// interactive picker over the known profiles, or a hard error when no
+/// profile was given and we can't prompt.
+fn resolve_start_profile<C: MirageCtl>(
+    ctl: &C,
+    profile: Option<String>,
+    interactive: bool,
+) -> anyhow::Result<String> {
+    if let Some(p) = profile {
+        return Ok(p);
+    }
+    if !interactive {
+        anyhow::bail!("a profile is required (pass --profile NAME)");
+    }
+    let profiles = ctl.profile_list()?;
+    if profiles.is_empty() {
+        anyhow::bail!("no profiles found; run `mirage profile create` first");
+    }
+    let pick = dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
+        .with_prompt("Profile")
+        .items(&profiles)
+        .default(0)
+        .interact()?;
+    Ok(profiles[pick].clone())
+}
+
+/// Resolve the session id: the `--id` flag, an interactive prompt (blank
+/// for auto), or `None` (auto-generated).
+fn resolve_start_id(
+    id: Option<SessionId>,
+    interactive: bool,
+) -> anyhow::Result<Option<SessionId>> {
+    if id.is_some() || !interactive {
+        return Ok(id);
+    }
+    let id_raw: String = dialoguer::Input::with_theme(&dialoguer::theme::ColorfulTheme::default())
+        .with_prompt("Session id (blank for auto)")
+        .allow_empty(true)
+        .interact_text()?;
+    if id_raw.trim().is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(SessionId::new(id_raw)?))
+    }
+}
+
+/// Resolve the working directory: the `--workdir` flag, an interactive
+/// prompt defaulting to the current directory, or the current directory.
+fn resolve_start_workdir(workdir: Option<String>, interactive: bool) -> anyhow::Result<String> {
+    let cwd = || {
+        std::env::current_dir()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| "/".to_string())
+    };
+    match workdir {
+        Some(w) => Ok(w),
+        None if interactive => Ok(dialoguer::Input::with_theme(
+            &dialoguer::theme::ColorfulTheme::default(),
+        )
+        .with_prompt("Working directory")
+        .with_initial_text(cwd())
+        .interact_text()?),
+        None => Ok(cwd()),
+    }
+}
+
+/// Resolve the host ready timeout: prompts (defaulting to the current
+/// value) when interactive, otherwise uses the value as-is.
+fn resolve_start_ready_timeout(ready_timeout: u64, interactive: bool) -> anyhow::Result<u64> {
+    if !interactive {
+        return Ok(ready_timeout);
+    }
+    Ok(
+        dialoguer::Input::with_theme(&dialoguer::theme::ColorfulTheme::default())
+            .with_prompt("Host ready timeout (seconds)")
+            .default(ready_timeout)
+            .interact_text()?,
+    )
 }
 
 /// Look up an executable named `name` on `PATH`, returning the first hit.
@@ -1571,200 +1652,6 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
         let _ = ctl.session_destroy(&sid);
     }
     Ok(code)
-}
-
-// ----- wizards ---------------------------------------------------------------
-
-/// Interactive `profile wizard` command.
-///
-/// Prompts the user for every field, defaulting to the registry's
-/// recommended emulator (rocjitsu if installed, else noop). The
-/// resulting profile is persisted via the standard `profile_put`
-/// path so it's indistinguishable from a non-wizard creation.
-fn profile_wizard(
-    ctl: &dyn MirageCtl,
-    suggested_name: Option<String>,
-    json: bool,
-) -> anyhow::Result<ExitCode> {
-    use dialoguer::{Confirm, Input, Select};
-
-    let theme = dialoguer::theme::ColorfulTheme::default();
-
-    let name: String = Input::with_theme(&theme)
-        .with_prompt("Profile name")
-        .with_initial_text(suggested_name.unwrap_or_default())
-        .validate_with(|s: &String| -> Result<(), &str> {
-            if s.trim().is_empty() {
-                Err("name required")
-            } else {
-                Ok(())
-            }
-        })
-        .interact_text()?;
-
-    let specs = registry();
-    let default_name = default_emulator().name;
-    let default_idx = specs
-        .iter()
-        .position(|s| s.name == default_name)
-        .unwrap_or(0);
-    let labels: Vec<String> = specs
-        .iter()
-        .map(|s| {
-            let installed = if s.installed {
-                "[installed]"
-            } else {
-                "[not installed]"
-            };
-            let supported = if s.support.supported {
-                ""
-            } else {
-                " [unsupported hardware]"
-            };
-            format!("{:<10} {installed}{supported}  {}", s.name, s.description)
-        })
-        .collect();
-    let pick = Select::with_theme(&theme)
-        .with_prompt("Emulator")
-        .items(&labels)
-        .default(default_idx)
-        .interact()?;
-    let spec = &specs[pick];
-
-    let nodes: u32 = Input::with_theme(&theme)
-        .with_prompt("Nodes per rack")
-        .default(1)
-        .interact_text()?;
-    let gpus_per_node: u32 = Input::with_theme(&theme)
-        .with_prompt("GPUs per node")
-        .default(1)
-        .interact_text()?;
-    let known_agents = mirage_core::agent::store::list().unwrap_or_default();
-    let agent: String = if known_agents.is_empty() {
-        "MI350X".to_string()
-    } else {
-        let default_idx = known_agents.iter().position(|n| n == "MI350X").unwrap_or(0);
-        let pick = Select::with_theme(&theme)
-            .with_prompt("Agent")
-            .items(&known_agents)
-            .default(default_idx)
-            .interact()?;
-        known_agents[pick].clone()
-    };
-    let description: String = Input::with_theme(&theme)
-        .with_prompt("Description (optional)")
-        .allow_empty(true)
-        .interact_text()?;
-
-    let proceed = Confirm::with_theme(&theme)
-        .with_prompt(format!(
-            "Create profile {name} using {} ({nodes} node(s) x {gpus_per_node} GPU(s), agent={agent})?",
-            spec.name
-        ))
-        .default(true)
-        .interact()?;
-    if !proceed {
-        eprintln!("aborted");
-        return Ok(ExitCode::from(1));
-    }
-
-    let topo = mirage_core::topology::TopologyDef {
-        nodes_per_rack: nodes,
-        gpus_per_node,
-        agent: MaybeRef::Ref(agent),
-    };
-    let p = ProfileDef {
-        name: name.clone(),
-        description: if description.is_empty() {
-            None
-        } else {
-            Some(description)
-        },
-        emulator: mirage_core::registry::make_def(spec, topo),
-        containerize: None,
-    };
-    if let Err(e) = validate_profile(&p) {
-        anyhow::bail!("cannot create profile {name}: {e}");
-    }
-    ctl.profile_put(&p)?;
-    if json {
-        println!("{}", serde_json::to_string_pretty(&p)?);
-    } else {
-        println!("created profile {name}");
-    }
-    Ok(ExitCode::from(0))
-}
-
-/// Interactive `session wizard` command.
-///
-/// Prompts for the profile (from `profile_list`), an optional id,
-/// the working directory, and a ready-timeout, then delegates to
-/// the standard `session_start` path so the host is spawned and the
-/// session becomes ready before the wizard returns.
-async fn session_wizard<C: MirageCtl>(ctl: &C, json: bool) -> anyhow::Result<ExitCode> {
-    use dialoguer::{Confirm, Input, Select};
-
-    let theme = dialoguer::theme::ColorfulTheme::default();
-
-    let profiles = ctl.profile_list()?;
-    if profiles.is_empty() {
-        anyhow::bail!("no profiles found; run `mirage profile wizard` first");
-    }
-    let pick = Select::with_theme(&theme)
-        .with_prompt("Profile")
-        .items(&profiles)
-        .default(0)
-        .interact()?;
-    let profile = profiles[pick].clone();
-
-    let id_raw: String = Input::with_theme(&theme)
-        .with_prompt("Session id (blank for auto)")
-        .allow_empty(true)
-        .interact_text()?;
-    let id = if id_raw.trim().is_empty() {
-        None
-    } else {
-        Some(SessionId::new(id_raw)?)
-    };
-
-    let workdir: String = Input::with_theme(&theme)
-        .with_prompt("Working directory")
-        .with_initial_text(
-            std::env::current_dir()
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|_| "/".into()),
-        )
-        .interact_text()?;
-
-    let ready_timeout: u64 = Input::with_theme(&theme)
-        .with_prompt("Host ready timeout (seconds)")
-        .default(10)
-        .interact_text()?;
-
-    let go = Confirm::with_theme(&theme)
-        .with_prompt(format!("Start session using profile {profile}?"))
-        .default(true)
-        .interact()?;
-    if !go {
-        eprintln!("aborted");
-        return Ok(ExitCode::from(1));
-    }
-
-    session_start(
-        ctl,
-        StartArgs {
-            profile,
-            id,
-            workdir: Some(workdir),
-            no_host: false,
-            ready_timeout,
-            image: None,
-            mounts: Vec::new(),
-            provider: None,
-        },
-        json,
-    )
-    .await
 }
 
 // ----- state dispatch --------------------------------------------------------
