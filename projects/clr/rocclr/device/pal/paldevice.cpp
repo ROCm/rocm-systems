@@ -2470,6 +2470,21 @@ static inline address NextSubBufferPtr(const amd::Memory* mem) {
 }
 
 // ================================================================================================
+// Direct synchronous map/unmap path. Stub for now; real PAL implementation
+// (NullStream execution() lock + WaitForIdle + IQueue::RemapVirtualMemoryPages
+// on MainEngine + fence wait + bookkeeping helper) lands in the next commit.
+bool Device::virtualMap(void* va, size_t size, amd::Memory* phys) {
+  LogError("PAL virtualMap not yet implemented");
+  return false;
+}
+
+// ================================================================================================
+bool Device::virtualUnmap(void* va, size_t size) {
+  LogError("PAL virtualUnmap not yet implemented");
+  return false;
+}
+
+// ================================================================================================
 bool Device::SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
                           VmmLocationType access_location) {
   amd::Memory* amd_mem_obj = amd::MemObjMap::FindMemObj(va_addr);

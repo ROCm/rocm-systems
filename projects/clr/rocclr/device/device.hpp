@@ -2065,6 +2065,35 @@ class Device : public RuntimeObject {
   virtual void* virtualAlloc(void* addr, size_t size, size_t alignment) = 0;
 
   /**
+   * Map a physical allocation into a previously-reserved virtual address
+   * range using the direct synchronous path (bypasses VirtualMapCommand /
+   * the command-event enqueue indirection).
+   *
+   * Performs the shared MapMemObjBookkeeping/FinalizeMapMemObjBookkeeping
+   * protocol around the backend-specific hardware mapping. The caller is
+   * responsible for ensuring no work is using the VA range prior to
+   * invocation (matches CUDA's hipMemMap contract).
+   *
+   * @param va    Virtual address (must lie in a CL_MEM_VA_RANGE_AMD reservation).
+   * @param size  Size of the mapping in bytes.
+   * @param phys  Physical memory object (amd::Memory* from hipMemCreate).
+   * @return true on success, false on backend failure (backend is expected
+   *         to LogError with the actual error class).
+   */
+  virtual bool virtualMap(void* va, size_t size, amd::Memory* phys) = 0;
+
+  /**
+   * Unmap a previously virtualMap'd range using the direct synchronous
+   * path. Performs the shared UnmapMemObjBookkeeping protocol around the
+   * backend-specific hardware unmap.
+   *
+   * @param va    Virtual address previously passed to virtualMap.
+   * @param size  Size of the mapping in bytes.
+   * @return true on success, false on backend failure.
+   */
+  virtual bool virtualUnmap(void* va, size_t size) = 0;
+
+  /**
    * Set Access permisions for a virtual memory object.
    *
    * @param va_addr Virtual Address ptr
