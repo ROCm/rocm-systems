@@ -79,22 +79,6 @@ NCCL_DEVICE_INLINE void postGfd(Coop coop, ncclGinProxyGpuCtx_t* proxyCtx, ncclG
       __stwt((uint4*)&q[idx] + i, ((uint4*)gfd)[i]);
 #endif
     }
-#if defined(__HIP_PLATFORM_AMD__)
-  #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-      union { v4u vec; uint4 u; } pkt;
-      pkt.u = ((uint4*)gfd)[i];
-      __builtin_amdgcn_global_store_b128((v4u_gptr)((uint4*)&q[idx] + i), pkt.vec,
-                                         RCCL_SYSTEM_SYNCSCOPE);
-  #else
-      uint64_t* p64 = reinterpret_cast<uint64_t*>((uint4*)&q[idx] + i);
-      const uint64_t* g64 = reinterpret_cast<const uint64_t*>((uint4*)gfd + i);
-      __builtin_nontemporal_store(g64[0], (u64_gptr)(p64 + 0));
-      __builtin_nontemporal_store(g64[1], (u64_gptr)(p64 + 1));
-  #endif
-#else
-      __stwt((uint4*)&q[idx] + i, ((uint4*)gfd)[i]);
-#endif
-    }
   }
 }
 

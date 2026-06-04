@@ -36,6 +36,14 @@ enum ncclGinOptFlags {
   ncclGinOptFlagsAggregateRequests = (1 << 1),
 };
 
+#ifndef NCCL_GIN_ROCSHMEM_ENABLE
+#if defined(__HIP_PLATFORM_AMD__) && defined(ENABLE_ROCSHMEM)
+#define NCCL_GIN_ROCSHMEM_ENABLE 1
+#else
+#define NCCL_GIN_ROCSHMEM_ENABLE 0
+#endif
+#endif
+
 #ifndef NCCL_GIN_ANVIL_ENABLE
 #if defined(__HIP_PLATFORM_AMD__) && defined(ENABLE_ROCSHMEM_GIN)
 #define NCCL_GIN_ANVIL_ENABLE 1

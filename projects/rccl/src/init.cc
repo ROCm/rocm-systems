@@ -817,6 +817,21 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
     sharedRes->refCount = 1;
     NCCLCHECK(ncclNetInit(comm));
     NCCLCHECK(ncclGinInit(comm));
+#if defined(ENABLE_ROCSHMEM) || defined(ENABLE_ROCSHMEM_GIN)
+    // Assign built-in GIN rocshmem/anvil plugins if requested and no GIN plugin was loaded.
+    if (sharedRes->ginState.ncclGin == nullptr) {
+      extern int64_t ncclParamGinType();
+      if (ncclParamGinType() == NCCL_NET_DEVICE_GIN_ROCSHMEM) {
+        extern ncclGin_t ncclGinRocshmem;
+        INFO(NCCL_INIT, "Using built-in GIN rocshmem plugin");
+        sharedRes->ginState.ncclGin = &ncclGinRocshmem;
+      } else if (ncclParamGinType() == NCCL_NET_DEVICE_GIN_ANVIL) {
+        extern ncclGin_t ncclGinAnvilPlugin;
+        INFO(NCCL_INIT, "Using built-in GIN anvil plugin (NCCL_GIN_TYPE=5, intra-node xGMI SDMA)");
+        sharedRes->ginState.ncclGin = &ncclGinAnvilPlugin;
+      }
+    }
+#endif
   } else {
     comm->sharedRes = parent->sharedRes;
     ncclAtomicRefCountIncrement(&parent->sharedRes->refCount);

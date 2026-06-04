@@ -15,6 +15,10 @@
 #include "gin/gin_host_proxy.h"
 #include "compiler.h"
 #include <cmath>
+#ifdef ENABLE_ROCSHMEM_GIN
+#include "gin/gin_host_rocshmem.h"
+#include "gin/gin_host_anvil.h"
+#endif
 
 NCCL_PARAM(GinEnable, "GIN_ENABLE", 1);
 NCCL_PARAM(GinSignalPoolSize, "GIN_SIGNAL_POOL_SIZE", 512 << 10);
@@ -368,6 +372,14 @@ ncclResult_t ncclGinRegister(struct ncclComm* comm, void* address, size_t size,
     if (ginState->ginType == NCCL_GIN_TYPE_PROXY) {
       NCCLCHECK(ncclGinProxyRegister(ginState->ncclGin, ginState->ginCtx[n], address, size,
                                      NCCL_PTR_CUDA, mrFlags, &ginHostWins[n], &ginDevWins[n]));
+#ifdef ENABLE_ROCSHMEM_GIN
+    } else if (ginState->ginType == NCCL_NET_DEVICE_GIN_ROCSHMEM) {
+      NCCLCHECK(ncclGinRocshmemRegister(ginState->ncclGin, ginState->ginCtx[n], address, size,
+                                         NCCL_PTR_CUDA, 0, &ginHostWins[n], &ginDevWins[n]));
+    } else if (ginState->ginType == NCCL_NET_DEVICE_GIN_ANVIL) {
+      NCCLCHECK(ncclGinAnvilRegister(ginState->ncclGin, ginState->ginCtx[n], address, size,
+                                     NCCL_PTR_CUDA, 0, &ginHostWins[n], &ginDevWins[n]));
+#endif
     } else {
       NCCLCHECK(ginState->ncclGin->regMrSym(ginState->ginComms[n], address, size, NCCL_PTR_CUDA, mrFlags,
                                             &ginHostWins[n], &ginDevWins[n]));
