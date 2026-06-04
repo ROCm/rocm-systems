@@ -8,6 +8,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added `amd-smi metric --partition` flag to display per-partition GPU metrics**.  
+  - New `-X`/`--partition` flag displays hierarchical partition metrics for multi-partition GPUs:
+    - **AID**: VCLK/DCLK/SCLK clocks with min/max limits, VCN/JPEG activity percentages
+    - **MID**: SOC clock frequency and temperature
+    - **XCP**: GFX clocks with min/max limits, lock status, GFX_BUSY_INST/JPEG_BUSY/VCN_BUSY usage, throttle accumulation counters, violation status and activity fields, and XCD temperatures
+
 - **Added `--folder` support to `amd-smi ras --afid`**.
   - `amd-smi ras --afid --folder <DIR>` decodes every `*.cper` in a directory and prints a `file_name | list of afids` table (or a JSON array under `--json`).
   - Records with no AFIDs show `-`; files that cannot be parsed show `decode failed`.
