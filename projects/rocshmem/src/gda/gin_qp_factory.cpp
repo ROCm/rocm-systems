@@ -445,7 +445,7 @@ static int gin_create_cqs(rocshmem_gin_qp_set *set) {
     set->bnxt_scqs.resize(n);
     set->bnxt_rcqs.resize(n);
     if (!set->qp_allocator)
-      set->qp_allocator = new HIPAllocator();
+      set->qp_allocator = new HIPAllocatorFinegrained();
 
     int cqe = 1;  // CQE compression: only need length 1
     int dmabuf_enabled = ibv.is_dmabuf_supported();
@@ -576,7 +576,7 @@ static int gin_create_qps(rocshmem_gin_qp_set *set) {
   case GDAProvider::BNXT: {
     set->bnxt_qps.resize(n);
     if (!set->qp_allocator)
-      set->qp_allocator = new HIPAllocator();
+      set->qp_allocator = new HIPAllocatorFinegrained();
 
     for (int i = 0; i < n; i++) {
       auto *ctx = set->nic.context;
