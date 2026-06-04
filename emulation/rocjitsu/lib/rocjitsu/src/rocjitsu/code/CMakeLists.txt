@@ -7,6 +7,7 @@ rj_add_object_library(rocjitsu_code
     basic_block.cpp
     executable.cpp
     file_io.cpp
+    hsa_code_object_reader_rewriter.cpp
     kernel_symbol.cpp
     rj_code.cpp
     dbt/binary_translator.cpp
