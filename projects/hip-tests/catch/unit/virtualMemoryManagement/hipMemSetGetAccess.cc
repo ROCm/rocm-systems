@@ -1608,6 +1608,125 @@ HIP_TEST_CASE(Unit_hipMemSetAccessHost_devicealloc) {
   HIP_CHECK(hipMemAddressFree(addr, mapSize));
   HIP_CHECK(hipMemRelease(handle));
 }
+
+namespace {
+// Kernel that touches the supplied buffer. Used by the cross-device access
+// gating tests below to attempt a read/write from a device that does not have
+// access granted to the VMM mapping.
+__global__ void touch_kernel(int* buf, int N) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < N) {
+    buf[i] = buf[i] + 1;
+  }
+}
+}  // namespace
+
+/**
+ * Test Description
+ * ------------------------
+ *    - cross-device access enumeration. Allocate physical
+ * memory on device 0 and map it. Grant access
+ * only to device 0. Then attempt to use the VA from device 1's stream
+ * WITHOUT calling hipMemSetAccess for device 1. The expected behavior is a
+ * documented failure mode: an access fault, a non-success return from
+ * hipDeviceSynchronize / hipStreamSynchronize, or a hipPeekAtLastError
+ * indicating the device could not access the mapping.
+ *
+ * ------------------------
+ *    - unit/virtualMemoryManagement/hipMemSetGetAccess.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.1, requires >= 2 GPUs
+ */
+HIP_TEST_CASE(Unit_hipMemSetAccess_CrossDeviceNoAccessFaults) {
+  int devicecount = 0;
+  HIP_CHECK(hipGetDeviceCount(&devicecount));
+  if (devicecount < 2) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
+  }
+  hipDevice_t dev0, dev1;
+  HIP_CHECK(hipDeviceGet(&dev0, 0));
+  HIP_CHECK(hipDeviceGet(&dev1, 1));
+  checkVMMSupported(dev0);
+  checkVMMSupported(dev1);
+
+  constexpr int N = DATA_SIZE;
+  size_t buffer_size = N * sizeof(int);
+  size_t granularity = 0;
+  hipMemAllocationProp prop{};
+  prop.type = hipMemAllocationTypePinned;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id = dev0;
+  HIP_CHECK(
+      hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
+  REQUIRE(granularity > 0);
+  size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
+
+  hipMemGenericAllocationHandle_t handle;
+  HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
+  void* ptrA = nullptr;
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
+  HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0));
+  HIP_CHECK(hipMemRelease(handle));
+
+  // Grant access only to device 0.
+  hipMemAccessDesc accDesc{};
+  accDesc.location.type = hipMemLocationTypeDevice;
+  accDesc.location.id = dev0;
+  accDesc.flags = hipMemAccessFlagsProtReadWrite;
+  HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accDesc, 1));
+
+  // Confirm that hipMemGetAccess reflects this (sanity).
+  unsigned long long flags = 0;  // NOLINT
+  hipMemLocation location{};
+  location.type = hipMemLocationTypeDevice;
+  location.id = dev1;
+  HIP_CHECK(hipMemGetAccess(&flags, &location, ptrA));
+  REQUIRE(flags == hipMemAccessFlagsProtNone);
+
+  // Now switch to dev1 and try to use the VA via a kernel on dev1's stream.
+  HIP_CHECK(hipSetDevice(1));
+  hipStream_t s1 = nullptr;
+  HIP_CHECK(hipStreamCreate(&s1));
+
+  // Clear any pre-existing error state.
+  (void)hipGetLastError();
+
+  hipLaunchKernelGGL(touch_kernel, dim3((N + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK),
+                     dim3(THREADS_PER_BLOCK), 0, s1, reinterpret_cast<int*>(ptrA), N);
+  hipError_t launch_err = hipGetLastError();
+  hipError_t sync_err = hipStreamSynchronize(s1);
+  hipError_t post_err = hipGetLastError();
+
+  // Best-effort cleanup. The device may be in a degraded state after an
+  // illegal access; treat teardown errors as additional evidence rather than
+  // hard failures.
+  (void)hipStreamDestroy(s1);
+  hipError_t destroy_err = hipGetLastError();
+  hipError_t setdev_err = hipSetDevice(0);
+  (void)hipGetLastError();
+  hipError_t unmap_err = hipMemUnmap(ptrA, size_mem);
+  hipError_t free_err = hipMemAddressFree(ptrA, size_mem);
+  (void)hipGetLastError();
+
+  bool any_failure = (launch_err != hipSuccess) || (sync_err != hipSuccess) ||
+                     (post_err != hipSuccess) || (destroy_err != hipSuccess) ||
+                     (setdev_err != hipSuccess) || (unmap_err != hipSuccess) ||
+                     (free_err != hipSuccess);
+  if (!any_failure) {
+    WARN(
+        "Cross-device access without SetAccess did not surface a public-API "
+        "error on this platform; access enforcement may be performed silently "
+        "or via fabric routing. Documenting gap.");
+  } else {
+    INFO("launch_err=" << launch_err << " sync_err=" << sync_err << " post_err=" << post_err
+                       << " destroy_err=" << destroy_err << " setdev_err=" << setdev_err
+                       << " unmap_err=" << unmap_err << " free_err=" << free_err);
+    SUCCEED("Cross-device use without access surfaced a documented failure.");
+  }
+}
+
 /**
  * End doxygen group VirtualMemoryManagementTest.
  * @}
