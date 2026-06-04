@@ -34,6 +34,30 @@ function(strip_arch_features targets_list out_var)
   set(${out_var} "${_result}" PARENT_SCOPE)
 endfunction()
 
+# Convert arch feature suffix to a list of llc -mattr=<feature> flags.
+# gfx950:sramecc+:xnack-  →  CMake list: "-mattr=+sramecc;-mattr=-xnack"
+# Caller uses the list directly in add_custom_command COMMAND so each element
+# becomes a separate shell argument (avoiding comma-joining issues).
+function(arch_features_to_mattr_flags full_arch out_var)
+  # Split the full arch string on ":" into a list
+  string(REPLACE ":" ";" _all_tokens "${full_arch}")
+  # Skip the first token (the base arch name) and process the rest as features
+  list(LENGTH _all_tokens _ntokens)
+  set(_flags "")
+  if(_ntokens GREATER 1)
+    list(SUBLIST _all_tokens 1 -1 _feat_tokens)
+    foreach(_tok ${_feat_tokens})
+      if(_tok STREQUAL "")
+        continue()
+      endif()
+      # "sramecc+" → "+sramecc", "xnack-" → "-xnack"
+      string(REGEX REPLACE "([a-zA-Z0-9_]+)([+-])$" "\\2\\1" _part "${_tok}")
+      list(APPEND _flags "-mattr=${_part}")
+    endforeach()
+  endif()
+  set(${out_var} "${_flags}" PARENT_SCOPE)
+endfunction()
+
 # Resolve the default arch list: GPU_TARGETS if set, otherwise auto-detect local GPUs.
 if(GPU_TARGETS)
   # Convert comma-separated string to CMake list (semicolon-separated)
@@ -55,6 +79,48 @@ endif()
 
 set(BITCODE_GPU_ARCHS "${_BITCODE_DEFAULT_ARCHS}" CACHE STRING "GPU architectures for device bitcode (semicolon-separated)")
 
+# Build a map of base-arch → full target string by querying rocminfo.
+# GPU_TARGETS/rocm_local_targets strip feature suffixes (e.g. :sramecc+:xnack-)
+# before they reach us, so we re-query rocminfo to recover them.  The result is
+# used by downstream cmake (CMakeDeviceBitcodeTester) to pass the correct -mattr
+# to llc, which embeds the feature suffix in the HSACO amdhsa.target metadata
+# string that HIP checks when loading the module.
+find_program(_ROCMINFO rocminfo PATHS ${ROCM_PATH}/bin NO_DEFAULT_PATH QUIET)
+if(_ROCMINFO)
+  set(_rocminfo_tmpfile "${CMAKE_BINARY_DIR}/CMakeFiles/rocminfo_out.txt")
+  execute_process(
+    COMMAND ${_ROCMINFO}
+    OUTPUT_FILE "${_rocminfo_tmpfile}"
+    ERROR_QUIET
+  )
+  # Parse lines like: "Name:  amdgcn-amd-amdhsa--gfx950:sramecc+:xnack-"
+  # Use REGEX filter to avoid loading the entire file into a CMake list (which would
+  # be split on semicolons in the output and lose entries).
+  file(STRINGS "${_rocminfo_tmpfile}" _rocminfo_isa_lines REGEX "amdgcn-amd-amdhsa--")
+  foreach(_line ${_rocminfo_isa_lines})
+    if(_line MATCHES "Name:.*amdgcn-amd-amdhsa--([a-zA-Z0-9_:+.-]+)")
+      set(_full_target "${CMAKE_MATCH_1}")
+      string(REGEX REPLACE ":.*" "" _base "${_full_target}")
+      # Only record if not already in the map (first GPU wins per arch)
+      if(NOT DEFINED _ROCMINFO_ARCH_${_base})
+        set(_ROCMINFO_ARCH_${_base} "${_full_target}")
+      endif()
+    endif()
+  endforeach()
+endif()
+
+# Build BITCODE_GPU_ARCHS_FULL: for each stripped arch, use rocminfo's full string
+# if available, otherwise fall back to the bare arch name.
+set(_BITCODE_FULL_LIST "")
+foreach(_arch ${_BITCODE_DEFAULT_ARCHS})
+  if(DEFINED _ROCMINFO_ARCH_${_arch})
+    list(APPEND _BITCODE_FULL_LIST "${_ROCMINFO_ARCH_${_arch}}")
+  else()
+    list(APPEND _BITCODE_FULL_LIST "${_arch}")
+  endif()
+endforeach()
+set(BITCODE_GPU_ARCHS_FULL "${_BITCODE_FULL_LIST}" CACHE STRING "Full GPU arch strings with features for device bitcode")
+
 # -fvisibility=default ensures extern "C" device API symbols remain
 # externally visible after llvm-link and llc.
 set(BITCODE_COMPILE_FLAGS_BASE
@@ -65,6 +131,7 @@ set(BITCODE_COMPILE_FLAGS_BASE
     -std=c++17
     -emit-llvm
     -fvisibility=default
+    -O3
     -Xclang -mcode-object-version=none
     -I${CMAKE_CURRENT_SOURCE_DIR}/include/rocshmem
     -I${CMAKE_CURRENT_SOURCE_DIR}/include
