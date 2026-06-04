@@ -303,10 +303,11 @@ class cli_analysis(OmniAnalyze_Base):
         ]
 
         if not matched_names:
-            console_error(
+            console_warning(
                 "torch trace",
-                f"No operators matched the pattern(s): {pattern_list}.",
+                f"No operators matched the pattern(s): {pattern_list}",
             )
+            sys.exit(0)
 
         matched_df = consolidated_df[
             consolidated_df["Operator_Name"].isin(matched_names)

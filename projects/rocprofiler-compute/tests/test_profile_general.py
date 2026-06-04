@@ -3032,10 +3032,14 @@ def test_torch_trace_profile(
         "--path",
         workload_dir,
         "--torch-operator",
-        "*relu",
+        "*relu*",
     ])
-    # 16. Analyze with --torch-operator *relu succeeds
-    assert returncode_analyze_relu == 0, "Analyze with --torch-operator *relu failed"
+    # 16. Analyze with --torch-operator *relu* succeeds and matches the relu subtree
+    assert returncode_analyze_relu == 0, "Analyze with --torch-operator *relu* failed"
+    out_relu = capsys.readouterr().out
+    assert "Matched PyTorch Operators" in out_relu, (
+        "Expected 'Matched PyTorch Operators' header from --torch-operator *relu*"
+    )
 
     # --- Verify torch-operator cli output ---
 
@@ -3112,7 +3116,7 @@ def test_torch_trace_profile(
         "Expected filter-selection log confirming -k intersection"
     )
 
-    # 21. Non-matching pattern aborts with a non-zero exit code
+    # 21. Non-matching pattern degrades gracefully with a warning
     capsys.readouterr()
     rc_nomatch = binary_handler_analyze_rocprof_compute([
         "--experimental",
@@ -3122,12 +3126,12 @@ def test_torch_trace_profile(
         "--torch-operator",
         "nonexistent_operator_xyz",
     ])
-    assert rc_nomatch != 0, (
-        "Analyze with non-matching --torch-operator should exit non-zero"
+    assert rc_nomatch == 0, (
+        "Analyze with non-matching --torch-operator should not crash"
     )
     out_nomatch = capsys.readouterr().out
     assert "No operators matched" in out_nomatch, (
-        "Expected error about no operators matched"
+        "Expected warning about no operators matched"
     )
 
     common.clean_output_dir(config["cleanup"], workload_dir)
