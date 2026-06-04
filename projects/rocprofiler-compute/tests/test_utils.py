@@ -1100,6 +1100,54 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
     )
 
 
+def test_rocprofiler_sdk_env_log_excludes_user_env(tmp_path, monkeypatch):
+    """run_prof and pc_sampling_prof must log only profiler-added env vars,
+    never the user's full environment, to avoid leaking secrets into
+    shared workload logs."""
+    monkeypatch.setenv("LEAK_CANARY_TOKEN", "SHOULD_NOT_APPEAR")
+
+    logs = []
+    monkeypatch.setattr(
+        "utils.utils_profile.console_debug",
+        lambda msg, *a, **k: logs.append(str(msg)),
+    )
+    monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofiler-sdk")
+    monkeypatch.setattr(
+        "utils.utils_profile.capture_subprocess_output",
+        lambda *a, **k: (True, "success"),
+    )
+    monkeypatch.setattr("utils.utils_common.parse_pmc_perf", lambda f: ["SQ_WAVES"])
+    monkeypatch.setattr(
+        "utils.utils_profile.process_rocprofv3_output", lambda *a, **k: []
+    )
+    monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
+
+    fname = tmp_path / "pmc_perf_test.yaml"
+    fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
+    workload_dir = str(tmp_path / "workload")
+
+    utils_profile.run_prof(
+        str(fname),
+        {
+            "APP_CMD": ["./test_app"],
+            "ROCPROF_OUTPUT_PATH": workload_dir,
+            "ROCPROF_COUNTER_COLLECTION": "1",
+        },
+        workload_dir,
+        logging.INFO,
+        "csv",
+    )
+    utils_profile.pc_sampling_prof(
+        {"APP_CMD": ["my_app", "--arg"]}, "host_trap", 1000, str(tmp_path)
+    )
+
+    assert sum("env vars" in m for m in logs) >= 2
+    env_log_lines = [m for m in logs if "env vars" in m]
+    assert any("ROCPROF_COUNTER_COLLECTION" in m for m in env_log_lines)
+    assert not any("SHOULD_NOT_APPEAR" in m for m in logs)
+
+
 def test_run_prof_rocpd_skips_pid_without_native_csv(tmp_path, monkeypatch):
     """run_prof skips per-pid rocpd update when its native counter CSV is missing."""
     fname = tmp_path / "pmc_perf_test.yaml"
