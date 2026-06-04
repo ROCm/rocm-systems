@@ -1148,6 +1148,33 @@ fn apply_container_overrides(
     Ok(MaybeRef::Owned(profile.clone()))
 }
 
+/// Wait for a freshly-spawned session host to become ready, turning a
+/// terminal bring-up failure into a hard error.
+///
+/// `session_wait_ready` resolves as soon as the session is either
+/// healthy *or* terminal, so a failed host/container bring-up (a bad
+/// image, a node that won't start, a missing emulator asset, …) returns
+/// `Ok` carrying an *unhealthy, terminal* health rather than an error.
+/// Callers about to run a workload must treat that as fatal: otherwise
+/// they submit an exec that no (now-exited) host will ever process and
+/// the client blocks forever. This surfaces the detailed health message
+/// (image pull error, node bring-up failure, …) as an error instead.
+fn wait_ready_or_bail<C: MirageCtl>(
+    ctl: &C,
+    id: &SessionId,
+    timeout: Duration,
+) -> anyhow::Result<()> {
+    let h = ctl.session_wait_ready(id, timeout)?;
+    if !h.healthy {
+        let state = h.state.unwrap_or_else(|| "failed".to_string());
+        match h.message {
+            Some(msg) => anyhow::bail!("session failed to start ({state}): {msg}"),
+            None => anyhow::bail!("session failed to start ({state})"),
+        }
+    }
+    Ok(())
+}
+
 async fn session_start<C: MirageCtl>(
     ctl: &C,
     args: StartArgs,
@@ -1174,7 +1201,7 @@ async fn session_start<C: MirageCtl>(
     })?;
     if !args.no_host {
         spawn_host_for(&def.id)?;
-        ctl.session_wait_ready(&def.id, Duration::from_secs(args.ready_timeout))?;
+        wait_ready_or_bail(ctl, &def.id, Duration::from_secs(args.ready_timeout))?;
     }
     if json {
         let s = ctl.session_state(&def.id)?;
@@ -1506,7 +1533,17 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
             })?;
             tracing::info!(session = %def.id, "session created; spawning host");
             spawn_host_for(&def.id)?;
-            ctl.session_wait_ready(&def.id, Duration::from_secs(10))?;
+            if let Err(e) =
+                wait_ready_or_bail(ctl.as_ref(), &def.id, Duration::from_secs(10))
+            {
+                // The transient session we just created never came up
+                // (e.g. a container image that couldn't be pulled or a
+                // node that wouldn't start). Tear it down so we don't
+                // leak a dead session, then surface the failure instead
+                // of submitting an exec no host will ever run.
+                let _ = ctl.session_destroy(&def.id);
+                return Err(e);
+            }
             tracing::info!(session = %def.id, "session ready");
             (def.id, true)
         }
