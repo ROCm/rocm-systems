@@ -251,11 +251,6 @@ void Graph::ScheduleOneNode(Node start, int stream_id) {
 
 // ================================================================================================
 hipError_t Graph::ScheduleNodes() {
-  if (use_segment_scheduling_) {
-    // Segment path: DFS or round-robin stream assignment selected in SelectStreamAssignment()
-    return ScheduleNodesIntoBatches();
-  }
-
   // Classic scheduling logic
   memset(&roots_[0], 0, sizeof(Node) * roots_.size());
   max_streams_ = 0;
