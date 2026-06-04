@@ -564,6 +564,10 @@ class Context {
 
   template <typename T, ROCSHMEM_OP Op>
   __host__ int reduce(rocshmem_team_t team, T* dest, const T* source, int nreduce);
+  
+  template <typename T, ROCSHMEM_OP Op>
+  __host__ int reduce_on_stream(rocshmem_team_t team, T* dest, const T* source,
+                                 int nreduce, hipStream_t stream);
 
   template <typename T>
   __host__ void wait_until(T *ivars, int cmp, T val);

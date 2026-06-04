@@ -813,6 +813,56 @@ __global__ ATTR_NO_INLINE void rocshmem_alltoallmem_kernel(rocshmem_team_t team,
   }
 }
 
+template <typename T, ROCSHMEM_OP Op>
+__global__ ATTR_NO_INLINE void rocshmem_reduce_on_stream_kernel(rocshmem_team_t team,
+                                            T *dest,
+                                            const T *source,
+                                            int nreduce)
+{
+  __shared__ rocshmem_ctx_t ctx;
+  __shared__ int ctx_result;
+
+  ctx_result = rocshmem_wg_team_create_ctx(team, 0, &ctx);
+
+  // If context creation failed, fall back to default context
+  if (ctx_result != 0)
+  {
+    ctx = ROCSHMEM_CTX_DEFAULT;
+    __syncthreads();
+  }
+
+  // Call device reduce function with created context and provided team
+  rocshmem_reduce_wg<T, Op>(ctx, team, dest,
+                            source, nreduce);
+
+  if (ctx != ROCSHMEM_CTX_INVALID || ctx != ROCSHMEM_CTX_DEFAULT)
+    rocshmem_wg_ctx_destroy(&ctx);
+}
+
+#define REDUCTION_ON_STREAM_KERNEL_DEF_GEN(T, TNAME, Op, Op_API) \
+    template \
+    __global__ ATTR_NO_INLINE void rocshmem_reduce_on_stream_kernel<T, Op_API>(rocshmem_team_t team, \
+                                                                T *dest, \
+                                                                const T *source, \
+                                                                int nreduce); \
+
+#define REDUCTION_ON_STREAM_KERNEL_DEF_GEN_ARITH(T, TNAME) \
+    REDUCTION_ON_STREAM_KERNEL_DEF_GEN(T, TNAME, sum, ROCSHMEM_SUM) \
+    REDUCTION_ON_STREAM_KERNEL_DEF_GEN(T, TNAME, min, ROCSHMEM_MIN) \
+    REDUCTION_ON_STREAM_KERNEL_DEF_GEN(T, TNAME, max, ROCSHMEM_MAX) \
+    REDUCTION_ON_STREAM_KERNEL_DEF_GEN(T, TNAME, prod, ROCSHMEM_PROD)
+
+#define REDUCTION_ON_STREAM_KERNEL_DEF_GEN_BITWISE(T, TNAME)  \
+  REDUCTION_ON_STREAM_KERNEL_DEF_GEN(T, TNAME, or, ROCSHMEM_OR)  \
+  REDUCTION_ON_STREAM_KERNEL_DEF_GEN(T, TNAME, and, ROCSHMEM_AND) \
+  REDUCTION_ON_STREAM_KERNEL_DEF_GEN(T, TNAME, xor, ROCSHMEM_XOR)
+
+#define INT_REDUCTION_ON_STREAM_KERNEL_GEN(T, TNAME) \
+  REDUCTION_ON_STREAM_KERNEL_DEF_GEN_ARITH(T, TNAME)     \
+  REDUCTION_ON_STREAM_KERNEL_DEF_GEN_BITWISE(T, TNAME)
+
+#define FLOAT_REDUCTION_ON_STREAM_KERNEL_GEN(T, TNAME) REDUCTION_ON_STREAM_KERNEL_DEF_GEN_ARITH(T, TNAME)
+
 __global__ ATTR_NO_INLINE void rocshmem_broadcastmem_kernel(
     rocshmem_team_t team, void *dest, const void *source, size_t nelems,
     int pe_root) {
@@ -2100,6 +2150,14 @@ WAIT_DEF_GEN(unsigned int, uint)
 WAIT_DEF_GEN(unsigned long, ulong)
 WAIT_DEF_GEN(unsigned long long, ulonglong)
 WAIT_DEF_GEN(uint64_t, uint64)
+
+INT_REDUCTION_ON_STREAM_KERNEL_GEN(int, int)
+INT_REDUCTION_ON_STREAM_KERNEL_GEN(long, long)
+INT_REDUCTION_ON_STREAM_KERNEL_GEN(long long, longlong)
+INT_REDUCTION_ON_STREAM_KERNEL_GEN(short, short)
+
+FLOAT_REDUCTION_ON_STREAM_KERNEL_GEN(float, float)
+FLOAT_REDUCTION_ON_STREAM_KERNEL_GEN(double, double)
 // clang-format on
 
 }  // namespace rocshmem

@@ -453,10 +453,10 @@ jobs:
       fail-fast: false
       matrix:
         system:
-          - { sanitizer: 'AddressSanitizer', os: 'ubuntu-22.04', runner: 'linux-mi325-8gpu-ossci-rocm-sandbox', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
-          - { sanitizer: 'ThreadSanitizer', os: 'ubuntu-22.04', runner: 'linux-mi325-8gpu-ossci-rocm-sandbox', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
-          - { sanitizer: 'LeakSanitizer', os: 'ubuntu-22.04', runner: 'linux-mi325-8gpu-ossci-rocm-sandbox', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
-          - { sanitizer: 'UndefinedBehaviorSanitizer', os: 'ubuntu-22.04', runner: 'linux-mi325-8gpu-ossci-rocm-sandbox', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
+          - { sanitizer: 'AddressSanitizer', os: 'ubuntu-22.04', runner: 'linux-mi325-gpu-rocm-cpu-sandbox', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
+          - { sanitizer: 'ThreadSanitizer', os: 'ubuntu-22.04', runner: 'linux-mi325-gpu-rocm-cpu-sandbox', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
+          - { sanitizer: 'LeakSanitizer', os: 'ubuntu-22.04', runner: 'linux-mi325-gpu-rocm-cpu-sandbox', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
+          - { sanitizer: 'UndefinedBehaviorSanitizer', os: 'ubuntu-22.04', runner: 'linux-mi325-gpu-rocm-cpu-sandbox', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
 
     # Disabled until a dedicated sanitizer runner pool is available.
     if: ${{ false }}

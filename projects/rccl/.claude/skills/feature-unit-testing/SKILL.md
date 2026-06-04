@@ -229,6 +229,11 @@ int ibv_poll_cq(struct ibv_cq *cq, int num, struct ibv_wc *wc) {
     return real_ibv_poll_cq(cq, num, wc);
 }
 ```
+LD_PRELOAD only works if the target calls the symbol through the PLT. It does **not** work when
+the code uses `dlopen`/`dlsym` to resolve symbols into private function pointers, or dispatches
+through a driver ops-struct (e.g. `cq->context->ops.poll_cq`) — both bypass interposition. Check
+the binary for `dlopen`/`dlsym` usage before planning a shim; if it's there, fall back to a
+compile-time fault hook instead.
 
 ---
 
