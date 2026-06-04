@@ -535,7 +535,8 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
         foreach(TC IN LISTS RJ_RCCL_TESTS)
             add_test(NAME ${TC} COMMAND daemon_test --gtest_filter=${TC})
             set_tests_properties(
-                ${TC} PROPERTIES TIMEOUT 180 LABELS "daemon;rccl"
+                ${TC}
+                PROPERTIES TIMEOUT 180 LABELS "daemon;rccl"
             )
         endforeach()
     endif()

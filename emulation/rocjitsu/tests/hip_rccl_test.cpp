@@ -90,9 +90,7 @@ static void read_file_blocking(const std::string &path, void *data, size_t size)
 
 static void barrier(const std::string &name) {
   std::string ready = g_shared_dir + "/" + name + ".ready." + std::to_string(g_rank);
-  {
-    std::ofstream(ready) << "1";
-  }
+  { std::ofstream(ready) << "1"; }
   for (int r = 0; r < g_world_size; ++r) {
     std::string other = g_shared_dir + "/" + name + ".ready." + std::to_string(r);
     while (!std::filesystem::exists(other))
