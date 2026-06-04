@@ -43,6 +43,7 @@ from .validators import (
 from .gpu import (
     GPUInfo,
     get_rocminfo,
+    is_apu_host,
     detect_gpu,
     lookup_gpu_category,
     get_target_gpu_arch,
@@ -78,6 +79,7 @@ __all__ = [
     # GPU
     "GPUInfo",
     "get_rocminfo",
+    "is_apu_host",
     "detect_gpu",
     "lookup_gpu_category",
     "get_target_gpu_arch",
