@@ -22,11 +22,8 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
+from utils.profile_artifacts.factory import create_profile_artifact_writer
 from utils.profile_artifacts.interfaces import ProfilePassContext
-from utils.profile_artifacts.writers import (
-    CsvProfileArtifactWriter,
-    RocpdProfileArtifactWriter,
-)
 from utils.utils_common import (
     capture_subprocess_output,
     create_temp_rocprofiler_metrics_path,
@@ -215,13 +212,11 @@ def run_prof(
         torch_trace_enabled=torch_trace_enabled,
         retain_rocpd_output=retain_rocpd_output,
     )
-    if format_rocprof_output == "rocpd":
-        RocpdProfileArtifactWriter().finalize_pass(pass_context)
-        return
-    elif format_rocprof_output == "csv":
-        CsvProfileArtifactWriter().finalize_pass(pass_context)
-    else:
+    if format_rocprof_output not in ("rocpd", "csv"):
         console_error(f"Unknown format_rocprof_output: {format_rocprof_output}")
+        return
+
+    create_profile_artifact_writer(format_rocprof_output).finalize_pass(pass_context)
 
 
 def _build_profile_pass_context(

@@ -3,12 +3,19 @@
 
 """Factory helpers for profile artifact readers."""
 
-from utils.profile_artifacts.csv_artifacts import CsvProfileArtifactReader
+from utils.profile_artifacts.csv_artifacts import (
+    CsvProfileArtifactReader,
+    CsvProfileArtifactWriter,
+)
 from utils.profile_artifacts.interfaces import (
     ArtifactReaderOptions,
     ProfileArtifactReader,
+    ProfileArtifactWriter,
 )
-from utils.profile_artifacts.rocpd_artifacts import RocpdProfileArtifactReader
+from utils.profile_artifacts.rocpd_artifacts import (
+    RocpdProfileArtifactReader,
+    RocpdProfileArtifactWriter,
+)
 
 
 def create_profile_artifact_reader(
@@ -19,3 +26,10 @@ def create_profile_artifact_reader(
     if profiling_config.get("format_rocprof_output", "rocpd") == "rocpd":
         return RocpdProfileArtifactReader(options)
     return CsvProfileArtifactReader(options)
+
+
+def create_profile_artifact_writer(format_rocprof_output: str) -> ProfileArtifactWriter:
+    """Create a writer for the profiling artifact format."""
+    if format_rocprof_output == "rocpd":
+        return RocpdProfileArtifactWriter()
+    return CsvProfileArtifactWriter()

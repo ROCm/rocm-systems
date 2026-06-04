@@ -9,7 +9,7 @@ from typing import Optional
 import pandas as pd
 
 from utils.logger import console_debug, console_error, console_warning
-from utils.profile_artifacts.interfaces import ArtifactReaderOptions
+from utils.profile_artifacts.interfaces import ArtifactReaderOptions, ProfilePassContext
 from utils.profile_artifacts.pmc_frame import load_pmc_frame_from_csv
 
 CSV_RESULT_PATTERNS = ["results_pmc_perf_*.csv", "SQ_*.csv", "SQC_*.csv"]
@@ -79,6 +79,32 @@ class CsvProfileArtifactReader:
             kernel_verbose=self._options.kernel_verbose,
             verbose=self._options.verbose,
         )
+
+
+class CsvProfileArtifactWriter:
+    """Finalize current CSV profile artifacts."""
+
+    def finalize_pass(self, context: ProfilePassContext) -> None:
+        from utils import utils_profile as profile_ops
+
+        result_files = _process_csv_outputs(context)
+        if context.torch_trace_enabled:
+            profile_ops.save_torch_trace_inputs(
+                str(context.workload_dir),
+                context.fbase,
+                "csv",
+            )
+        if not result_files:
+            profile_ops.console_warning(
+                f"Cannot write results for {context.fbase}.csv due to no counter "
+                "csv files generated."
+            )
+            return
+
+        combined_results = profile_ops.csv_ops.concat_csv_files(result_files)
+        _normalize_csv_counter_rows(combined_results)
+        _write_csv_counter_results(combined_results, context)
+        _standardize_csv_headers(context)
 
 
 def join_csv_prof_files(
@@ -278,3 +304,93 @@ def _drop_join_key(joined_df: pd.DataFrame) -> pd.DataFrame:
     if "key" not in joined_df.columns:
         return joined_df
     return joined_df.drop(columns=["key"])
+
+
+def _process_csv_outputs(context: ProfilePassContext) -> list[str]:
+    from utils import utils_profile as profile_ops
+
+    if context.profiler_command == "rocprofiler-sdk":
+        return profile_ops.process_rocprofv3_output(
+            str(context.workload_dir),
+            using_native_tool=context.using_native_tool,
+        )
+
+    result_files = profile_ops.process_rocprofv3_output(
+        str(context.workload_dir),
+        using_native_tool=False,
+    )
+    if context.kokkos_trace_enabled:
+        profile_ops.process_kokkos_trace_output(
+            str(context.workload_dir),
+            context.fbase,
+        )
+    return result_files
+
+
+def _normalize_csv_counter_rows(combined_results: list[dict]) -> None:
+    from utils import utils_profile as profile_ops
+
+    profile_ops.csv_ops.add_column_to_rows(
+        combined_results,
+        "Dispatch_ID",
+        list(range(0, len(combined_results))),
+    )
+    profile_ops.csv_ops.assign_group_ids(
+        combined_results,
+        ["Kernel_Name", "Grid_Size", "Workgroup_Size", "LDS_Per_Workgroup"],
+        "Kernel_ID",
+    )
+
+
+def _write_csv_counter_results(
+    combined_results: list[dict],
+    context: ProfilePassContext,
+) -> None:
+    from utils import utils_profile as profile_ops
+
+    profile_ops.csv_ops.write_csv_from_dicts(
+        str(context.workload_dir / "out" / "pmc_1" / f"results_{context.fbase}.csv"),
+        combined_results,
+    )
+    if (context.workload_dir / "out").exists():
+        profile_ops.shutil.copyfile(
+            str(
+                context.workload_dir
+                / "out"
+                / "pmc_1"
+                / f"results_{context.fbase}.csv"
+            ),
+            str(context.workload_dir / f"results_{context.fbase}.csv"),
+        )
+        profile_ops.shutil.rmtree(str(context.workload_dir / "out"))
+
+
+def _standardize_csv_headers(context: ProfilePassContext) -> None:
+    from utils import utils_profile as profile_ops
+
+    csv_path = context.workload_dir / f"results_{context.fbase}.csv"
+    rows, _ = profile_ops.csv_ops.read_csv_as_dicts(str(csv_path))
+    profile_ops.csv_ops.rename_columns(rows, _csv_output_headers())
+    profile_ops.csv_ops.write_csv_from_dicts(str(csv_path), rows)
+
+
+def _csv_output_headers() -> dict[str, str]:
+    return {
+        "KernelName": "Kernel_Name",
+        "Index": "Dispatch_ID",
+        "grd": "Grid_Size",
+        "gpu-id": "GPU_ID",
+        "wgr": "Workgroup_Size",
+        "lds": "LDS_Per_Workgroup",
+        "scr": "Scratch_Per_Workitem",
+        "sgpr": "SGPR",
+        "arch_vgpr": "Arch_VGPR",
+        "accum_vgpr": "Accum_VGPR",
+        "BeginNs": "Start_Timestamp",
+        "EndNs": "End_Timestamp",
+        "GRD": "Grid_Size",
+        "WGR": "Workgroup_Size",
+        "LDS": "LDS_Per_Workgroup",
+        "SCR": "Scratch_Per_Workitem",
+        "ACCUM_VGPR": "Accum_VGPR",
+    }
