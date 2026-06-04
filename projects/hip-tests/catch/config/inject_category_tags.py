@@ -118,7 +118,9 @@ def load_test_categories(yaml_path):
         # naming convention — ex_gpu_*, gfx*_exclude, etc. — is supported).
         ex_tags = [lbl for lbl in labels if lbl]
         for test_name in ((section or {}).get("test_patterns", []) if isinstance(section, dict) else []):
-            gpu_exclusion_tags.setdefault(test_name, set()).update(ex_tags)
+            base_test_name = test_name.split(" - ", 1)[0].strip()
+            if base_test_name:
+                gpu_exclusion_tags.setdefault(base_test_name, set()).update(ex_tags)
 
     return tier_patterns, gpu_exclusion_tags
 
