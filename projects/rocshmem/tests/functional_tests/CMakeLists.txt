@@ -72,6 +72,7 @@ target_sources(
     library_info_tester.cpp
     fence_ordering_tester.cpp
     tile_rma_tester.cpp
+    ipc_host_rma_tester.cpp
 )
 
 ###############################################################################

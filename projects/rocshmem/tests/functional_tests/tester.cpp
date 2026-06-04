@@ -33,6 +33,7 @@
 #include <vector>
 
 #include "amo_bitwise_tester.hpp"
+#include "ipc_host_rma_tester.hpp"
 #include "amo_extended_tester.hpp"
 #include "amo_standard_tester.hpp"
 #include "default_ctx_primitive_tester.hpp"
@@ -330,6 +331,46 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case PutmemOnStreamTestType:
       test_name = "Putmem_On_Stream";
       testers.push_back(new PutmemOnStreamTester(args));
+      break;
+    case IpcHostPutmemTestType:
+      test_name = "IPC_Host_Putmem";
+      testers.push_back(new IpcHostRmaTester(args));
+      break;
+    case IpcHostGetmemTestType:
+      test_name = "IPC_Host_Getmem";
+      testers.push_back(new IpcHostRmaTester(args));
+      break;
+    case IpcHostAmoFAddTestType:
+      test_name = "IPC_Host_Amo_FAdd";
+      testers.push_back(new IpcHostRmaTester(args));
+      break;
+    case IpcHostAmoFCswapTestType:
+      test_name = "IPC_Host_Amo_FCswap";
+      testers.push_back(new IpcHostRmaTester(args));
+      break;
+    case IpcHostCtxPutmemTestType:
+      test_name = "IPC_Host_Ctx_Putmem";
+      testers.push_back(new IpcHostRmaTester(args));
+      break;
+    case IpcHostCtxGetmemTestType:
+      test_name = "IPC_Host_Ctx_Getmem";
+      testers.push_back(new IpcHostRmaTester(args));
+      break;
+    case IpcHostIntAmoFAddTestType:
+      test_name = "IPC_Host_Int_Amo_FAdd";
+      testers.push_back(new IpcHostRmaTester(args));
+      break;
+    case IpcHostIntAmoFCswapTestType:
+      test_name = "IPC_Host_Int_Amo_FCswap";
+      testers.push_back(new IpcHostRmaTester(args));
+      break;
+    case IpcHostAmoAllPesTestType:
+      test_name = "IPC_Host_Amo_AllPes";
+      testers.push_back(new IpcHostRmaTester(args));
+      break;
+    case IpcHostAmoSelfTestType:
+      test_name = "IPC_Host_Amo_Self";
+      testers.push_back(new IpcHostRmaTester(args));
       break;
     case PutmemSignalOnStreamTestType:
       test_name = "Putmem_Signal_On_Stream";
@@ -871,6 +912,18 @@ bool Tester::peLaunchesKernel() {
     case FenceOrderPutLargeSmallTestType:
     case FenceOrderFanoutTestType:
     case FenceOrderPutWaveNbiChunksTestType:
+      is_launcher = true;
+      break;
+    case IpcHostPutmemTestType:
+    case IpcHostGetmemTestType:
+    case IpcHostAmoFAddTestType:
+    case IpcHostAmoFCswapTestType:
+    case IpcHostCtxPutmemTestType:
+    case IpcHostCtxGetmemTestType:
+    case IpcHostIntAmoFAddTestType:
+    case IpcHostIntAmoFCswapTestType:
+    case IpcHostAmoAllPesTestType:
+    case IpcHostAmoSelfTestType:
       is_launcher = true;
       break;
     default:

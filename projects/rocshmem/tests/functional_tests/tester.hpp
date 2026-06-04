@@ -160,7 +160,17 @@
   X(TileGetColumnMajor,        115)  \
   X(TileGetArbitrary,          116)  \
   X(ReduceOnStream,            117)  \
-  X(HostCtxCreate,             118) 
+  X(HostCtxCreate,             118)  \
+  X(IpcHostPutmem,             119)  \
+  X(IpcHostGetmem,             120)  \
+  X(IpcHostAmoFAdd,            121)  \
+  X(IpcHostAmoFCswap,          122)  \
+  X(IpcHostCtxPutmem,          123)  \
+  X(IpcHostCtxGetmem,          124)  \
+  X(IpcHostIntAmoFAdd,         125)  \
+  X(IpcHostIntAmoFCswap,       126)  \
+  X(IpcHostAmoAllPes,          127)  \
+  X(IpcHostAmoSelf,            128)
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {
   ROCSHMEM_FOREACH_TEST_TYPE(_ROCSHMEM_ENUM_ENTRY)
