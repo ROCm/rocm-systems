@@ -18,11 +18,10 @@
 
 using namespace rocprofiler_compute_tool;
 
-// These singletons are intentionally heap-allocated and never destroyed.
-// rocprofiler-sdk drives our callbacks and tool_fini from its own _dl_fini
-// finalizer, which runs after this library's static destructors would have
-// freed them. Giving them process lifetime keeps their vtables valid through
-// teardown and avoids a use-after-destruction (pure virtual call / SIGSEGV).
+// Heap-allocated and never destroyed on purpose: rocprofiler-sdk calls our
+// callbacks and tool_fini from its own _dl_fini, after this library's static
+// destructors would have freed them. Process lifetime avoids a teardown
+// use-after-destruction.
 static std::shared_ptr<InputParameters>& g_input_parameters = *new std::shared_ptr<InputParameters>(
     std::make_shared<EnvInputParameters>());
 static std::shared_ptr<SdkWrapper>& g_sdk_wrapper = *new std::shared_ptr<SdkWrapper>(
