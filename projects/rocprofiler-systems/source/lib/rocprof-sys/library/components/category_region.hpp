@@ -17,6 +17,7 @@
 #include "library/tracing/annotation.hpp"
 #include <cstdint>
 
+#include <algorithm>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -54,42 +55,77 @@ struct entry_key
 
 using timestamp_t = std::uint64_t;
 
-/// Per-thread stack of in-flight (started but not yet stopped) region begin
-/// timestamps, keyed by name+category
+/// Per-thread stack of region begin timestamps
 struct pending_region_storage_t
 {
     std::uint64_t                                 thread_id        = 0;
     std::map<entry_key, std::vector<timestamp_t>> map_name_to_args = {};
+    // Only contended during flush_all_pending_cached_entries(), which may drain this
+    // storage while its owning thread is still in cache_start/cache_stop
+    std::mutex mutex = {};
 };
 
-/// Global registry of every thread's pending-region storage. The registry owns the
-/// storages so they outlive the threads that created them, allowing the finalizing
-/// thread to flush orphaned frames belonging to parked/exited workers
+/// Global directory holding every thread's pending_region_storage_t. A thread adds its
+/// own entry via acquire() and removes it via release() when it exits.
+/// Leaked so thread-local destructors calling release() at process exit can't touch a
+/// freed registry
 struct pending_region_registry_t
 {
-    static inline std::vector<std::unique_ptr<pending_region_storage_t>>
-                             thread_storages      = {};
-    static inline std::mutex thread_storage_mutex = {};
+    std::vector<std::unique_ptr<pending_region_storage_t>> thread_storages      = {};
+    std::mutex                                             thread_storage_mutex = {};
+
+    static pending_region_registry_t& instance()
+    {
+        static pending_region_registry_t* _instance = new pending_region_registry_t{};
+        return *_instance;
+    }
 
     static pending_region_storage_t* acquire()
     {
-        std::lock_guard<std::mutex> _lk{ thread_storage_mutex };
-        thread_storages.emplace_back(std::make_unique<pending_region_storage_t>());
-        return thread_storages.back().get();
+        auto&                       _self = instance();
+        std::lock_guard<std::mutex> _lk{ _self.thread_storage_mutex };
+        _self.thread_storages.emplace_back(std::make_unique<pending_region_storage_t>());
+        return _self.thread_storages.back().get();
+    }
+
+    static void release(pending_region_storage_t* storage)
+    {
+        if(!storage) return;
+        auto&                       _self = instance();
+        std::lock_guard<std::mutex> _lk{ _self.thread_storage_mutex };
+        auto                        itr =
+            std::find_if(_self.thread_storages.begin(), _self.thread_storages.end(),
+                         [storage](const auto& _s) { return _s.get() == storage; });
+        if(itr != _self.thread_storages.end()) _self.thread_storages.erase(itr);
     }
 };
 
 namespace
 {
 
+/// Owns a thread's slot in the registry: registers a storage on first use and removes it
+/// when the owning thread exits
+struct pending_region_storage_handle_t
+{
+    pending_region_storage_handle_t()
+    : storage{ pending_region_registry_t::acquire() }
+    {}
+    ~pending_region_storage_handle_t() { pending_region_registry_t::release(storage); }
+
+    pending_region_storage_handle_t(const pending_region_storage_handle_t&) = delete;
+    pending_region_storage_handle_t& operator=(const pending_region_storage_handle_t&) =
+        delete;
+
+    pending_region_storage_t* storage = nullptr;
+};
+
 /// Per-thread handle into the global registry. The first access on a thread allocates
 /// and registers a dedicated storage; subsequent accesses reuse the cached pointer
 inline pending_region_storage_t&
 get_pending_region_storage()
 {
-    static thread_local pending_region_storage_t* _v =
-        pending_region_registry_t::acquire();
-    return *_v;
+    static thread_local pending_region_storage_handle_t _v = {};
+    return *_v.storage;
 }
 
 /// Resolve the calling thread's system tid and make sure its metadata is registered
@@ -127,7 +163,8 @@ cache_start(const char* name)
 {
     const auto start_ts =
         static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
-    auto& _storage = get_pending_region_storage();
+    auto&                       _storage = get_pending_region_storage();
+    std::lock_guard<std::mutex> _lk{ _storage.mutex };
     if(_storage.thread_id == 0) _storage.thread_id = current_region_thread_id();
     _storage.map_name_to_args[{ name, rocprofsys::trait::name<CategoryT>::value }]
         .push_back(start_ts);
@@ -137,9 +174,10 @@ template <typename CategoryT>
 void
 cache_stop(const char* name)
 {
-    auto&     _storage = get_pending_region_storage();
-    entry_key key{ name, rocprofsys::trait::name<CategoryT>::value };
-    auto      x = _storage.map_name_to_args.find(key);
+    auto&                       _storage = get_pending_region_storage();
+    std::lock_guard<std::mutex> _lk{ _storage.mutex };
+    entry_key                   key{ name, rocprofsys::trait::name<CategoryT>::value };
+    auto                        x = _storage.map_name_to_args.find(key);
     if(x != _storage.map_name_to_args.end() && !x->second.empty())
     {
         auto timestamp = x->second.back();
@@ -165,7 +203,8 @@ flush_pending_storage(pending_region_storage_t& _storage, timestamp_t end_ts)
     static constexpr std::string_view incomplete_suffix{ "incomplete" };
     // The main thread's program-entry frame (named after the executable) is
     // always open at finalization by design. It should not be tagged as incomplete
-    const auto& _exe_name = rocprofsys::config::get_exe_name();
+    const auto&                 _exe_name = rocprofsys::config::get_exe_name();
+    std::lock_guard<std::mutex> _lk{ _storage.mutex };
     for(const auto& [key, start_ts_stack] : _storage.map_name_to_args)
     {
         const auto _name = (key.name == _exe_name)
@@ -179,7 +218,7 @@ flush_pending_storage(pending_region_storage_t& _storage, timestamp_t end_ts)
     _storage.map_name_to_args.clear();
 }
 
-/// Flush all pending cached entries for this thread.
+/// Flush all pending cached entries for this thread
 inline void
 flush_pending_cached_entries()
 {
@@ -189,13 +228,14 @@ flush_pending_cached_entries()
 
 /// Flush pending cached entries across every thread.
 /// Identical to flush_pending_cached_entries() but drains the storages of all threads
-/// registered in the global registry, not just the calling thread
+/// registered in the global registry
 inline void
 flush_all_pending_cached_entries()
 {
     const auto end_ts = static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
-    std::lock_guard<std::mutex> _lk{ pending_region_registry_t::thread_storage_mutex };
-    for(auto& _storage : pending_region_registry_t::thread_storages)
+    auto&      _registry = pending_region_registry_t::instance();
+    std::lock_guard<std::mutex> _lk{ _registry.thread_storage_mutex };
+    for(auto& _storage : _registry.thread_storages)
     {
         if(_storage) flush_pending_storage(*_storage, end_ts);
     }

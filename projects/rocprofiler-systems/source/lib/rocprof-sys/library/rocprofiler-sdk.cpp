@@ -182,24 +182,46 @@ struct rocprofsys_ompt_thread_data_registry_t
     // ompt_cache_instant_event()
 };
 
+// As certain OMPT callbacks are received after our tool has already finished, certain
+// thread-specific events on the non-main threads are orphaned. Thus,
+// ompt_finalize_orphan_events() must loop through the storages on all threads, not just
+// the main one.
+// release() drops a thread's storage when it exits
+// (missing OMPT events are only caused via early finalization).
 struct rocprofsys_ompt_cb_storage_t
 {
-    // As certain OMPT callbacks are received after our tool has already finished, certain
-    // thread-specific events on the non-main threads are orphaned. Thus,
-    // ompt_finalize_orphan_events() must loop through the storages on all threads, not
-    // just the main one.
-    inline static std::vector<std::unique_ptr<rocprofsys_ompt_thread_data_registry_t>>
-                             thread_storages{};
-    inline static std::mutex thread_storage_mutex{};
+    std::vector<std::unique_ptr<rocprofsys_ompt_thread_data_registry_t>>
+               thread_storages{};
+    std::mutex thread_storage_mutex{};
+
+    static rocprofsys_ompt_cb_storage_t& instance()
+    {
+        static rocprofsys_ompt_cb_storage_t* _instance =
+            new rocprofsys_ompt_cb_storage_t{};
+        return *_instance;
+    }
 
     // Called once per thread, the first time the thread touches OMPT. Allocates a
     // new per-thread storage on the heap and registers it
     static rocprofsys_ompt_thread_data_registry_t* acquire()
     {
-        std::lock_guard<std::mutex> _lk{ thread_storage_mutex };
-        thread_storages.emplace_back(
+        auto&                       _self = instance();
+        std::lock_guard<std::mutex> _lk{ _self.thread_storage_mutex };
+        _self.thread_storages.emplace_back(
             std::make_unique<rocprofsys_ompt_thread_data_registry_t>());
-        return thread_storages.back().get();
+        return _self.thread_storages.back().get();
+    }
+
+    // Called when a thread exits to remove and free its storage
+    static void release(rocprofsys_ompt_thread_data_registry_t* storage)
+    {
+        if(!storage) return;
+        auto&                       _self = instance();
+        std::lock_guard<std::mutex> _lk{ _self.thread_storage_mutex };
+        auto                        itr =
+            std::find_if(_self.thread_storages.begin(), _self.thread_storages.end(),
+                         [storage](const auto& _s) { return _s.get() == storage; });
+        if(itr != _self.thread_storages.end()) _self.thread_storages.erase(itr);
     }
 };
 
@@ -1089,15 +1111,34 @@ ompt_cache_orphan_event(
                  trait::name<category::rocm_ompt_api>::value, name);
 }
 
+// Owns a thread's slot in the registry: registers a storage on first use and removes it
+// when the owning thread exits
+struct rocprofsys_ompt_thread_storage_handle_t
+{
+    rocprofsys_ompt_thread_storage_handle_t()
+    : storage{ rocprofsys_ompt_cb_storage_t::acquire() }
+    {}
+    ~rocprofsys_ompt_thread_storage_handle_t()
+    {
+        rocprofsys_ompt_cb_storage_t::release(storage);
+    }
+
+    rocprofsys_ompt_thread_storage_handle_t(
+        const rocprofsys_ompt_thread_storage_handle_t&) = delete;
+    rocprofsys_ompt_thread_storage_handle_t& operator=(
+        const rocprofsys_ompt_thread_storage_handle_t&) = delete;
+
+    rocprofsys_ompt_thread_data_registry_t* storage = nullptr;
+};
+
 // Returns this thread's OMPT storage. On the first call from a given thread the
 // storage is allocated through the shared registry and a pointer to it is cached
 // in this function's thread_local
 rocprofsys_ompt_thread_data_registry_t&
 get_ompt_per_thread_storage()
 {
-    static thread_local rocprofsys_ompt_thread_data_registry_t* _v =
-        rocprofsys_ompt_cb_storage_t::acquire();
-    return *_v;
+    static thread_local rocprofsys_ompt_thread_storage_handle_t _v{};
+    return *_v.storage;
 }
 
 void
@@ -1205,8 +1246,9 @@ ompt_finalize_orphan_events()
     auto finalize_ts = rocprofiler_timestamp_t{};
     ROCPROFILER_CALL(rocprofiler_get_timestamp(&finalize_ts));
 
-    std::lock_guard<std::mutex> _lk{ rocprofsys_ompt_cb_storage_t::thread_storage_mutex };
-    for(auto& _storage : rocprofsys_ompt_cb_storage_t::thread_storages)
+    auto&                       _registry = rocprofsys_ompt_cb_storage_t::instance();
+    std::lock_guard<std::mutex> _lk{ _registry.thread_storage_mutex };
+    for(auto& _storage : _registry.thread_storages)
     {
         if(!_storage) continue;
         for(const auto& [parallel_data, stored_data] : _storage->parallel_cb_storage)
