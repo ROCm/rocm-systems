@@ -2951,6 +2951,9 @@ class GraphMemAllocNode final : public GraphNode {
           *stream, amd::Command::EventWaitList{},
           node_params_.dptr, sub_obj->getSize(), nullptr);
       cmd->enqueue();
+      if (!AMD_DIRECT_DISPATCH) {
+        cmd->awaitCompletion();
+      }
       cmd->release();
       if (phys != nullptr && pool != nullptr) {
         pool->DecrementRefCount(phys);
