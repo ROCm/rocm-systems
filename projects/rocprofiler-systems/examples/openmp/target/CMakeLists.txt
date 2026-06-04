@@ -117,6 +117,28 @@ target_compile_options(openmp-target PRIVATE -fopenmp -ggdb)
 target_link_options(openmp-target PUBLIC -fopenmp)
 add_offload_flags(openmp-target)
 
+# GPU offload arches without xnack+ cannot support device-side AddressSanitizer:
+# the device ASan runtime only exists for xnack+ targets (e.g. gfx942/gfx950).
+# When building under a sanitizer, the OpenMP target offload device image would
+# otherwise be instrumented and fail to link with undefined __asan_* device
+# symbols. Disable device-side sanitizer instrumentation with -fno-gpu-sanitize
+# on non-xnack+ arches so the example still builds (host-side sanitizer only).
+string(FIND "${CMAKE_CXX_FLAGS}" "-fsanitize" _omp_target_sanitizer_pos)
+if(_omp_target_sanitizer_pos GREATER -1)
+    set(_omp_target_device_sanitizer OFF)
+    foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
+        if(arch MATCHES "xnack\\+")
+            set(_omp_target_device_sanitizer ON)
+        endif()
+    endforeach()
+    if(NOT _omp_target_device_sanitizer)
+        foreach(tgt openmp-target-lib openmp-target)
+            target_compile_options(${tgt} PRIVATE -fno-gpu-sanitize)
+            target_link_options(${tgt} PUBLIC -fno-gpu-sanitize)
+        endforeach()
+    endif()
+endif()
+
 foreach(tgt openmp-target-lib openmp-target)
     set_target_properties(
         ${tgt}
