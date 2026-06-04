@@ -825,6 +825,9 @@ graph:
   Unit_hipGraphAddBatchMemOpNode_NegativeTsts:
     <<: *level_2
     tags: [node]
+  Unit_hipGraphBatchMemOpNode_AQLCapture:
+    <<: *level_2
+    tags: [node]
   Unit_hipGraphBatchMemOpNodeSetParams_NegativeTsts:
     <<: *level_2
     tags: [node]
