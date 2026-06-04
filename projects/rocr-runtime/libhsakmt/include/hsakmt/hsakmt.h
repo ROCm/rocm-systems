@@ -902,6 +902,19 @@ hsaKmtGetRuntimeCapabilities(
     HSAuint32	*caps_mask // OUT
     );
 
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetCoreRuntimeInfo(
+    struct kfd_runtime_info *runtime_info // OUT
+    );
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetCoreDeviceInfo(
+    HSAuint32 gpu_id, // IN
+    struct kfd_dbg_device_info_entry *device_info // OUT
+    );
+
 /**
   Enable debug trap.
 */
