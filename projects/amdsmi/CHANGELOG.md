@@ -63,14 +63,15 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ## amd_smi_lib for ROCm 7.13.0
 
-### Changed
-
-- **Renamed `processor_type_t` enum typedef to `amdsmi_processor_type_t`**.
-  - The unprefixed typedef name did not follow the `amdsmi_*_t` convention used throughout `amdsmi.h` and was easy to collide with identifiers defined by other system-management libraries. New code should use `amdsmi_processor_type_t`. The old name is preserved as a backward-compatibility typedef alias, so existing callers continue to compile unchanged.
-
 ### Added
 
-- **Added APU metrics support (table versions 2.4 and 3.0)**.  
+- **Added `--sort-by-pid` flag and `amdsmi_get_gpu_process_list_by_pid()` API**.
+  - New C API `amdsmi_get_gpu_process_list_by_pid()` aggregates process info across all GPUs and returns results keyed by PID, with per-GPU breakdowns for memory, engine usage, and occupancy.
+  - New structs: `amdsmi_proc_gpu_entry_t`, `amdsmi_proc_info_by_pid_t`.
+  - New `--sort-by-pid` CLI flag for `amd-smi process` and `amd-smi monitor --process` groups output by PID instead of GPU.
+  - New Python interface function `amdsmi_get_gpu_process_list_by_pid()`.
+
+- **Added APU metrics support (table versions 2.4 and 3.0)**.
   - New `amdsmi_apu_metrics_t` struct accessible via `amdsmi_gpu_metrics_t.apu_metrics` pointer (non-null when APU-specific metrics are available).
   - **v2.4 metrics**:
     - `temperature_gfx`, `temperature_soc`, `temperature_core[8]`, `temperature_l3[2]`

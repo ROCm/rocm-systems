@@ -51,8 +51,6 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
-Refer to [amd_smi_violation_example.py](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/example/amd_smi_violation_example.py) for a complete Python usage example.
-
 Initialize CPUs only example:
 
 ```python
@@ -5612,8 +5610,6 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
-Refer to [amd_smi_violation_example.py](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/example/amd_smi_violation_example.py) for a complete Python usage example.
-
 ### amdsmi_set_gpu_compute_partition_mem_alloc_mode
 
 Description: Set the compute partition memory allocation mode for the given GPU. Requires elevated privileges (sudo). Controls whether each XCP is capped to an even share of memory (`CAPPING`) or may use the full partition memory (`ALL`).
@@ -5656,8 +5652,6 @@ except amdsmi.AmdSmiException as e:
 finally:
     amdsmi.amdsmi_shut_down()
 ```
-
-Refer to [amd_smi_violation_example.py](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/example/amd_smi_violation_example.py) for a complete Python usage example.
 
 ### amdsmi_set_gpu_compute_partition
 
