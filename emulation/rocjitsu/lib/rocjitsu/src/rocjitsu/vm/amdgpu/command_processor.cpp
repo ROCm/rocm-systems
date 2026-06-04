@@ -209,7 +209,6 @@ void CommandProcessor::register_queue(HwQueue queue) {
   {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     HwQueueState qs{};
-    qs.owner_process_id = queue.process_id;
     qs.queue_desc_va = queue.queue_desc_va;
     hw_queues_.push_back(std::move(queue));
     new_queue_states_.push_back(std::move(qs));
@@ -695,12 +694,11 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
                       dp.completion_signal);
   });
   util::Logger::cp([&](auto &os) {
-    os << std::format(
-        "DISPATCH #{} d={} \"{}\" wgs={} wfs/wg={} sig={:#x} pid={} ko={:#x} pc={:#x}"
-        " kernarg={:#x} user_sgprs={}",
-        total_dispatched_, dp.dispatch_id, kernel_sym.empty() ? "?" : kernel_sym, total_wgs,
-        wfs_per_wg, dp.completion_signal, dp.process_id, pkt.kernel_object, entry_pc,
-        dp.kernarg_addr, dp.num_user_sgprs);
+    os << std::format("DISPATCH #{} d={} \"{}\" wgs={} wfs/wg={} sig={:#x} pid={} ko={:#x} pc={:#x}"
+                      " kernarg={:#x} user_sgprs={}",
+                      total_dispatched_, dp.dispatch_id, kernel_sym.empty() ? "?" : kernel_sym,
+                      total_wgs, wfs_per_wg, dp.completion_signal, dp.process_id, pkt.kernel_object,
+                      entry_pc, dp.kernarg_addr, dp.num_user_sgprs);
     if (memory_) {
       auto *ko_ptr = memory_->translate_debug(pkt.kernel_object, queue.process_id);
       auto *pc_ptr = memory_->translate_debug(entry_pc, queue.process_id);
