@@ -49,7 +49,7 @@ _EXCLUDE_GPU_KEY_RE = re.compile(r"^exclude_gpu_(gfx\w+?)(?:_(windows|linux))?$"
 
 
 def parse_exclude_gpu_key(key):
-    """Return (gpu_arch, os_suffix) for a YAML key under ``exclude_gpu``.
+    """Return (gpu_arch, os_suffix) for a YAML key under ``exclude_arch``."""
 
     ``os_suffix`` is one of ``"windows"``, ``"linux"`` or ``None``.
     Returns ``(None, None)`` if the key does not match the expected shape.
@@ -194,7 +194,7 @@ def patch_header(header_path, tier_patterns, gpu_exclusion_tags):
                 extra += tag
                 added_tiers += 1
 
-            # GPU exclusion labels (any naming convention from test_categories.yaml)
+        # GPU exclusion labels (any naming convention from test_categories.yaml)
         for ex_tag in sorted(gpu_exclusion_tags.get(test_name, ())):
             tag = f"[{ex_tag}]"
             if tag not in existing_tags:

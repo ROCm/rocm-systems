@@ -46,6 +46,8 @@ test_categories:
       - "ABM_.*"
       - "MultiProc_.*"
       - "TypeQualifiers_.*"
+      - "Performance_.*"
+      - "Stress_.*"
 
     exclude:
     labels:
