@@ -277,7 +277,7 @@ pub enum ProfileCmd {
         agent: Option<String>,
         /// Nodes per rack.
         #[arg(long)]
-        nodes_per_rack: Option<u32>,
+        num_nodes: Option<u32>,
         /// GPUs per node.
         #[arg(long)]
         gpus_per_node: Option<u32>,
@@ -333,7 +333,7 @@ pub enum TopologyCmd {
         agent: String,
         /// Nodes per rack.
         #[arg(long, default_value_t = 1)]
-        nodes_per_rack: u32,
+        num_nodes: u32,
         /// GPUs per node.
         #[arg(long, default_value_t = 1)]
         gpus_per_node: u32,
@@ -628,7 +628,7 @@ fn profile_cmd(ctl: &dyn MirageCtl, cmd: ProfileCmd, json: bool) -> anyhow::Resu
             name,
             emulator,
             agent,
-            nodes_per_rack,
+            num_nodes,
             gpus_per_node,
             description,
             image,
@@ -641,7 +641,7 @@ fn profile_cmd(ctl: &dyn MirageCtl, cmd: ProfileCmd, json: bool) -> anyhow::Resu
                 name,
                 emulator,
                 agent,
-                nodes_per_rack,
+                num_nodes,
                 gpus_per_node,
                 description,
                 image,
@@ -703,11 +703,11 @@ fn topology_cmd(ctl: &dyn MirageCtl, cmd: TopologyCmd, json: bool) -> anyhow::Re
         TopologyCmd::Create {
             name,
             agent,
-            nodes_per_rack,
+            num_nodes,
             gpus_per_node,
         } => {
             let t = mirage_core::topology::TopologyDef {
-                nodes_per_rack,
+                num_nodes,
                 gpus_per_node,
                 agent: MaybeRef::Ref(agent),
             };
@@ -905,7 +905,7 @@ fn build_profile_create(
     name: Option<String>,
     emulator: Option<String>,
     agent: Option<String>,
-    nodes_per_rack: Option<u32>,
+    num_nodes: Option<u32>,
     gpus_per_node: Option<u32>,
     description: Option<String>,
     image: Option<String>,
@@ -979,7 +979,7 @@ fn build_profile_create(
     };
 
     // ----- topology -----
-    let nodes_per_rack = resolve_count(nodes_per_rack, "Nodes per rack", interactive, &theme)?;
+    let num_nodes = resolve_count(num_nodes, "Nodes per rack", interactive, &theme)?;
     let gpus_per_node = resolve_count(gpus_per_node, "GPUs per node", interactive, &theme)?;
 
     // ----- agent -----
@@ -1063,7 +1063,7 @@ fn build_profile_create(
     };
 
     let topo = mirage_core::topology::TopologyDef {
-        nodes_per_rack,
+        num_nodes,
         gpus_per_node,
         agent: MaybeRef::Ref(agent),
     };

@@ -708,7 +708,7 @@ mod tests {
                 exec_mode: Default::default(),
                 options: Default::default(),
                 topology: MaybeRef::Owned(crate::topology::TopologyDef {
-                    nodes_per_rack: 1,
+                    num_nodes: 1,
                     gpus_per_node: 1,
                     agent: MaybeRef::Ref("MI350X".to_string()),
                 }),

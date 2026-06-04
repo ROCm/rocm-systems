@@ -12,7 +12,7 @@ const DEFAULT_NEW_PROFILE = {
   topology_mode: "new" as "new" | "existing",
   topology_pick: "",
   topology_save_as: "",
-  nodes_per_rack: 1,
+  num_nodes: 1,
   gpus_per_node: 1,
   agent: "MI350X",
   exec_mode: "Functional" as "Functional" | "Clocked",
@@ -92,7 +92,7 @@ export function ProfilesPage() {
         topology = form.topology_pick;
       } else {
         const inline = {
-          nodes_per_rack: form.nodes_per_rack,
+          num_nodes: form.num_nodes,
           gpus_per_node: form.gpus_per_node,
           agent: form.agent,
         };
@@ -363,12 +363,12 @@ export function ProfilesPage() {
                 <input
                   type="number"
                   min={1}
-                  value={form.nodes_per_rack}
+                  value={form.num_nodes}
                   data-testid="wizard-nodes"
                   onChange={(e) =>
                     setForm({
                       ...form,
-                      nodes_per_rack: Math.max(1, +e.target.value || 1),
+                      num_nodes: Math.max(1, +e.target.value || 1),
                     })
                   }
                 />

@@ -156,7 +156,7 @@ fn create_profile(d: &Daemon, name: &str) {
             "plugins": {},
             "exec_mode": "Functional",
             "options": {},
-            "topology": {"nodes_per_rack": 1, "gpus_per_node": 1, "agent": "MI350X"}
+            "topology": {"num_nodes": 1, "gpus_per_node": 1, "agent": "MI350X"}
         }
     });
     let (s, b) = d.put_json(&format!("/api/profiles/{name}"), &prof);
@@ -365,7 +365,7 @@ async fn create_profile_async(client: &reqwest::Client, d: &Daemon, name: &str) 
             "plugins": {},
             "exec_mode": "Functional",
             "options": {},
-            "topology": {"nodes_per_rack": 1, "gpus_per_node": 1, "agent": "MI350X"}
+            "topology": {"num_nodes": 1, "gpus_per_node": 1, "agent": "MI350X"}
         }
     });
     let r = client

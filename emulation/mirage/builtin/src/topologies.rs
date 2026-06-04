@@ -22,9 +22,9 @@ pub fn default_topology() -> TopologyDef {
     layout(1, 1, "MI350X")
 }
 
-fn layout(nodes_per_rack: u32, gpus_per_node: u32, agent: &str) -> TopologyDef {
+fn layout(num_nodes: u32, gpus_per_node: u32, agent: &str) -> TopologyDef {
     TopologyDef {
-        nodes_per_rack,
+        num_nodes,
         gpus_per_node,
         agent: MaybeRef::Ref(agent.to_string()),
     }

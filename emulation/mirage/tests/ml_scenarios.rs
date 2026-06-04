@@ -41,7 +41,7 @@ fn rocjitsu_env() -> Option<(PathBuf, PathBuf, PathBuf)> {
         exec_mode: mirage_core::emulator::ExecMode::Functional,
         options: Default::default(),
         topology: mirage_core::common::MaybeRef::Owned(mirage_core::topology::TopologyDef {
-            nodes_per_rack: 1,
+            num_nodes: 1,
             gpus_per_node: 1,
             agent: mirage_core::common::MaybeRef::Ref(agent_name),
         }),

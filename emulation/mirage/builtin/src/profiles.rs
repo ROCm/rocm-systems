@@ -55,7 +55,7 @@ fn profile(name: &str, emulator: EmulatorKind, agent: &str) -> ProfileDef {
             exec_mode: ExecMode::default(),
             options: SimpleMap::default(),
             topology: MaybeRef::Owned(TopologyDef {
-                nodes_per_rack: 1,
+                num_nodes: 1,
                 gpus_per_node: 1,
                 agent: MaybeRef::Ref(agent.to_string()),
             }),

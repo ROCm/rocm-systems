@@ -40,7 +40,7 @@ export interface EmulatorDef {
 }
 
 export interface TopologyDef {
-  nodes_per_rack: number;
+  num_nodes: number;
   gpus_per_node: number;
   /// Either an agent preset name (string) or an inline
   /// `AgentDef` (typed loosely here).

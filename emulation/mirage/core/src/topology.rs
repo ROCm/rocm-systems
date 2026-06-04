@@ -23,9 +23,9 @@ fn one() -> u32 {
 /// definition each GPU instantiates.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TopologyDef {
-    /// Number of nodes per rack. Defaults to 1.
+    /// Number of nodes. Defaults to 1.
     #[serde(default = "one")]
-    pub nodes_per_rack: u32,
+    pub num_nodes: u32,
 
     /// Number of GPUs per node. Defaults to 1.
     #[serde(default = "one")]
@@ -39,7 +39,7 @@ pub struct TopologyDef {
 impl TopologyDef {
     /// Total number of nodes.
     pub fn total_nodes(&self) -> u32 {
-        self.nodes_per_rack
+        self.num_nodes
     }
 
     /// Total number of GPUs across the whole system.
@@ -99,7 +99,7 @@ mod tests {
     #[test]
     fn totals() {
         let t = TopologyDef {
-            nodes_per_rack: 4,
+            num_nodes: 4,
             gpus_per_node: 8,
             agent: MaybeRef::Ref("noop".to_string()),
         };
