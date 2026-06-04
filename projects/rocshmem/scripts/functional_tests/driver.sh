@@ -257,6 +257,7 @@ ExecTest_SLR() {
     "${cmd[@]}" >>"$LOG_FILE" 2>&1
   else
     echo "Skip:   $TEST_LOG_NAME (SLR requires $NUM_RANKS GPUs, only $NUM_GPUS available)"
+    return
   fi
 
   # Validate Test

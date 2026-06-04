@@ -190,6 +190,13 @@ static int recv_message(int fd, MessageType& type, void* payload = nullptr,
             if (ret != SLR_SUCCESS) {
                 return ret;
             }
+        } else {
+            // Consume payload bytes to keep pipe aligned, even if caller doesn't want them
+            std::vector<char> discard_buffer(header.payload_size);
+            ret = safe_read(fd, discard_buffer.data(), header.payload_size);
+            if (ret != SLR_SUCCESS) {
+                return ret;
+            }
         }
     }
 
@@ -271,6 +278,13 @@ static int SLR_Init() {
                 // Close unused ends of pipes
                 close(pipe_to_child[1]);    // Close write end of pipe to child
                 close(pipe_from_child[0]);  // Close read end of pipe from child
+
+                // Close all pipe FDs inherited from previously forked siblings
+                // to prevent O(N^2) FD accumulation
+                for (int prev_rank = 1; prev_rank < rank; prev_rank++) {
+                    close(g_slr_ctx.pipes[prev_rank].read_fd);
+                    close(g_slr_ctx.pipes[prev_rank].write_fd);
+                }
 
                 // Store parent pipe information
                 g_slr_ctx.parent_pipe.read_fd = pipe_to_child[0];
