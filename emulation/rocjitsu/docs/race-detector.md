@@ -13,25 +13,16 @@ or `s_barrier` instructions.
 
 This section is a standalone guide to getting up and running with race
 detection. For general rocjitsu build and usage instructions, see the
-[top-level README](../../../../../README.md). For an overview of the
-plugin system and sink configuration, see the [plugins README](../README.md).
+[README](../README.md). For an overview of the plugin system and sink
+configuration, see [plugins.md](plugins.md).
 
-Clone the repo and switch to the `race-detection-11` branch (the race
-detector hasn't landed on `develop` yet):
-
-```bash
-git clone git@github.com:ROCm/rocm-systems.git
-cd rocm-systems
-git checkout race-detection-11
-```
-
-Then build rocjitsu. You don't need a physical GPU — the emulator runs
-entirely on the CPU.
+Build rocjitsu (see [building.md](building.md) for details). You don't
+need a physical GPU — the emulator runs entirely on the CPU.
 
 ```bash
-export BUILD_DIR=/tmp/rj-build
-cmake -S emulation/rocjitsu -B $BUILD_DIR -G Ninja
-ninja -C $BUILD_DIR
+cd emulation/rocjitsu
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
 ```
 
 ### Example: detecting a missing barrier
@@ -80,7 +71,7 @@ hipcc -o /tmp/race_example race_example.hip --offload-arch=gfx950
 Run it under the emulator with `RJ_RACE=1` to enable the race detector:
 
 ```bash
-RJ_RACE=1 $BUILD_DIR/tools/rocjitsu/rocjitsu -- /tmp/race_example
+RJ_RACE=1 build/tools/rocjitsu/rocjitsu -- /tmp/race_example
 ```
 
 You should see output like:
@@ -105,8 +96,8 @@ ROCm workload — compiled HIP/HSA binaries, Python scripts using PyTorch
 or JAX, multi-process launchers like `torchrun`, etc.
 
 ```bash
-RJ_RACE=1 $BUILD_DIR/tools/rocjitsu/rocjitsu -- ./my_app
-RJ_RACE=1 $BUILD_DIR/tools/rocjitsu/rocjitsu -- python my_script.py
+RJ_RACE=1 build/tools/rocjitsu/rocjitsu -- ./my_app
+RJ_RACE=1 build/tools/rocjitsu/rocjitsu -- python my_script.py
 ```
 
 To capture reports to a file instead of stderr (useful for CI or
@@ -114,7 +105,7 @@ scripted workflows), set `RJ_SINKS=file` and `RJ_SINK_DIR`:
 
 ```bash
 RJ_RACE=1 RJ_SINKS=file RJ_SINK_DIR=/tmp/output \
-  $BUILD_DIR/tools/rocjitsu/rocjitsu -- ./my_app
+  build/tools/rocjitsu/rocjitsu -- ./my_app
 # Reports are written to /tmp/output/race.log
 ```
 
@@ -170,19 +161,20 @@ cause false positives when the other half is accessed independently.
 
 ## Directory layout
 
+Source files are under `lib/rocjitsu/src/rocjitsu/vm/plugins/race_detector/`:
+
 ```
 race_detector/
-├── plugin.h/.cpp        rocjitsu plugin adapter (translates hooks to core API)
-├── core/                  detection algorithm (does not depend on rocjitsu types)
-│   ├── race_detector.h/.cpp   main detector: event allocation, validation, retirement
-│   ├── wave_race_state.h/.cpp per-wave state: register tracking, waitcnt resolution
-│   ├── event_registry.h       append-only event store with prefix trimming
-│   ├── interval_set.h         half-open byte range tracking for LDS
-│   ├── types.h                core enum types and structs
-│   ├── common_register.h      SGPR/VGPR classification helpers
-│   ├── dim3d.h                3D coordinate helpers
-│   └── profiler_interface.h   optional hook profiling
-└── README.md
+├── plugin.h/.cpp          rocjitsu plugin adapter (translates hooks to core API)
+└── core/                  detection algorithm (does not depend on rocjitsu types)
+    ├── race_detector.h/.cpp   main detector: event allocation, validation, retirement
+    ├── wave_race_state.h/.cpp per-wave state: register tracking, waitcnt resolution
+    ├── event_registry.h       append-only event store with prefix trimming
+    ├── interval_set.h         half-open byte range tracking for LDS
+    ├── types.h                core enum types and structs
+    ├── common_register.h      SGPR/VGPR classification helpers
+    ├── dim3d.h                3D coordinate helpers
+    └── profiler_interface.h   optional hook profiling
 ```
 
 ## Tests
@@ -198,10 +190,10 @@ Tests are part of the rocjitsu test suite (`emulation/rocjitsu/tests/`):
 
 ```bash
 # Core detection tests
-ctest --test-dir $BUILD_DIR -R "RaceDetector|IntervalSet"
+ctest --test-dir build -R "RaceDetector|IntervalSet"
 
 # End-to-end HIP tests (RJ_RACE=1 is set automatically by ctest)
-ctest --test-dir $BUILD_DIR -R "RaceTest"
+ctest --test-dir build -R "RaceTest"
 ```
 
 ## Limitations
