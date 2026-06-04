@@ -38,6 +38,7 @@
 #include "functional/gpu_partition_metrics_read.h"
 #include "functional/hw_topology_read.h"
 #include "functional/id_info_read.h"
+#include "functional/kfd_atfork_read.h"
 #include "functional/mem_page_info_read.h"
 #include "functional/mem_util_read.h"
 #include "functional/memory_read_write.h"
@@ -223,6 +224,11 @@ TEST(amdsmitstReadOnly, TestErrCntRead) {
 
 TEST(amdsmitstReadOnly, TestMemUtilRead) {
   TestMemUtilRead tst;
+  RunGenericTest(&tst);
+}
+
+TEST(amdsmitstReadOnly, TestKfdAtforkRead) {
+  TestKfdAtforkRead tst;
   RunGenericTest(&tst);
 }
 

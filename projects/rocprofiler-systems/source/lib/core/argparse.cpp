@@ -1223,7 +1223,7 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
         auto _name = itr->get_name();
         auto _pos  = std::string::npos;
         while((_pos = _name.find('_')) != std::string::npos)
-            _name = _name.replace(_pos, 1, "-");
+            _name[_pos] = '-';
         return _name;
     };
 
@@ -1237,7 +1237,7 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
 
         _data.reg.processed_settings.emplace(itr.get());
 
-        auto _opt_name = std::string{ "--" } + _name;
+        auto _opt_name = fmt::format("--{}", _name);
         itr->set_command_line({ _opt_name });
         auto* _arg = static_cast<parser_t::argument*>(itr->add_argument(_parser));
         if(_arg)
@@ -1247,7 +1247,8 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
                 if(_value.empty()) _value = p.get<std::string>(_name);
                 if(_value.empty()) _value = fmt::format("{}", p.get<bool>(_name));
                 if(_value.empty())
-                    throw exception<std::runtime_error>("Error! no value for " + _name);
+                    throw exception<std::runtime_error>(
+                        fmt::format("Error! no value for {}", _name));
                 update_env(_data, itr->get_env_name(), _value);
             });
         }
@@ -1259,8 +1260,8 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
                     auto _value =
                         fmt::format("{}", fmt::join(p.get<strvec_t>(_name), " "));
                     if(_value.empty())
-                        throw exception<std::runtime_error>("Error! no value for " +
-                                                            _name);
+                        throw exception<std::runtime_error>(
+                            fmt::format("Error! no value for {}", _name));
                     update_env(_data, itr->get_env_name(), _value);
                 });
         }
