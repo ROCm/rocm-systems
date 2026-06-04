@@ -1911,6 +1911,13 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   int smem = rcclShmemDynamicSize(comm->cudaArch, comm->WarpSize);
   cudaStream_t launchStream = planner->streams->stream;
 
+  // Verify actual kernel launch geometry against init-time channel counts.
+  bool isP2pPlan = !ncclIntruQueueEmpty(&plan->p2pTaskQueue);
+  INFO(NCCL_COLL,
+       "Launch %s kernel: gridDim.x=%u blockDim.x=%u (p2pnChannels=%d, p2pnChannelsPerPeer=%d, nChannels=%d, nWorkBatches=%d)",
+       isP2pPlan ? "P2P" : "COLL", grid.x, block.x,
+       comm->p2pnChannels, comm->p2pnChannelsPerPeer, comm->nChannels, plan->nWorkBatches);
+
   NCCLCHECK(ncclProfilerStartKernelLaunchEvent(plan, launchStream));
 
   void* extra[] = {
