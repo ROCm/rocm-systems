@@ -123,11 +123,11 @@ struct ncclGinApi_PutValue {
 
 template <ncclNetDeviceType backend>
 struct ncclGinApi_GetSignalPtr {
-  NCCL_DEVICE_INLINE static uint64_t* call(ncclGinCtx, int peer, ncclGinSignal_t signalId);
+  NCCL_DEVICE_INLINE static uint64_t* call(ncclGinCtx, ncclGinSignal_t signalId);
 };
 template <ncclNetDeviceType backend>
 struct ncclGinApi_GetCounterPtr {
-  NCCL_DEVICE_INLINE static uint64_t* call(ncclGinCtx, int peer, ncclGinCounter_t counterId);
+  NCCL_DEVICE_INLINE static uint64_t* call(ncclGinCtx, ncclGinCounter_t counterId);
 };
 
 template <ncclNetDeviceType backend>

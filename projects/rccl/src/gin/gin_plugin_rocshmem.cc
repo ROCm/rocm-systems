@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#ifdef ENABLE_ROCSHMEM
+#if defined(ENABLE_ROCSHMEM) || defined(ENABLE_ROCSHMEM_GIN)
 
 /**
  * Built-in GIN plugin for rocshmem.
@@ -71,6 +71,7 @@ static ncclResult_t ginRocshmemListen(void* ctx, int dev, void* handle, void** l
 }
 
 static ncclResult_t ginRocshmemConnect(void* ctx, void* handles[], int nranks, int rank,
+                                       int nConnections, int queueDepth,
                                        void* listenComm, void** collComm) {
   // No-op: rocshmem manages its own connectivity
   auto* cctx = new ginRocshmemCollCtx;
@@ -98,7 +99,7 @@ static ncclResult_t ginRocshmemFinalize(void* ctx) {
 // Note: createContext/regMrSym don't use collComm for rocshmem (transport is internal)
 
 static ncclResult_t ginRocshmemCreateContext(void* collComm, int nSignals, int nCounters,
-                                              void** ginCtx, ncclNetDeviceHandle_v11_t** devHandle) {
+                                              int nContexts, void** ginCtx, ncclNetDeviceHandle_v11_t** devHandle) {
   // We need the ncclComm, but the plugin interface only gives us collComm.
   // For now, create the context without ncclComm — the rocshmem context
   // only needs nSignals/nCounters and rocshmem's symmetric heap.
@@ -137,10 +138,10 @@ static ncclResult_t ginRocshmemQueryLastError(void* ginCtx, bool* hasError) {
 }
 
 // Not used for rocshmem (device-initiated only)
-static ncclResult_t ginRocshmemIput(void*, uint64_t, void*, size_t, uint64_t, void*, uint32_t, void**) {
+static ncclResult_t ginRocshmemIput(void*, uint64_t, void*, size_t, uint64_t, void*, uint32_t, int, void**) {
   return ncclInternalError;
 }
-static ncclResult_t ginRocshmemIputSignal(void*, uint64_t, void*, size_t, uint64_t, void*, uint32_t, uint64_t, void*, uint64_t, uint32_t, void**) {
+static ncclResult_t ginRocshmemIputSignal(void*, uint64_t, void*, size_t, uint64_t, void*, uint32_t, uint64_t, void*, uint64_t, uint32_t, int, void**) {
   return ncclInternalError;
 }
 static ncclResult_t ginRocshmemTest(void*, void*, int*) {
@@ -148,7 +149,7 @@ static ncclResult_t ginRocshmemTest(void*, void*, int*) {
 }
 
 __attribute__((visibility("default")))
-ncclGin_v11_t ncclGinRocshmemPlugin = {
+ncclGin_t ncclGinRocshmem = {
   .name            = "rocshmem",
   .init            = ginRocshmemInit,
   .devices         = ginRocshmemDevices,

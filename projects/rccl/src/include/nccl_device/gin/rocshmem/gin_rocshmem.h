@@ -16,14 +16,19 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM> {
   template <typename Coop>
   NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, int peer, bool hasWins,
                                       ncclGinWindow_t dstWin, size_t dstOff, ncclGinWindow_t srcWin,
-                                      size_t srcOff, size_t bytes, bool hasSignal,
-                                      ncclGinSignal_t signalId, ncclGinSignalOp_t signalOp,
+                                      size_t srcOff, size_t bytes,
+                                      ncclGinSignalDescriptor signal, ncclGinSignalOp_t signalOp,
                                       uint64_t signalOpArg, bool hasCounter,
                                       ncclGinCounter_t counterId, bool hasDescriptor,
                                       ncclGinDescriptorSmem* descriptor,
-                                      cuda::thread_scope required, cuda::thread_scope given) {
+                                      cuda::thread_scope required, cuda::thread_scope given,
+                                      uint32_t optFlags = ncclGinOptFlagsDefault) {
     using nccl::utility::loadConst;
     ncclGinRocshmemGPUContext* rsCtx = (ncclGinRocshmemGPUContext*)ctx.handle;
+    bool hasSignal = signal.type != NCCL_GIN_SIGNAL_TYPE_NONE;
+    ncclGinSignal_t signalId = 0;
+    if (hasSignal && signal.type == NCCL_GIN_SIGNAL_TYPE_INDEXED)
+      signalId = signal.indexedSignal.signalId;
 
     if (hasWins) {
       ncclGinRocshmemMemHandle* dstMh = (ncclGinRocshmemMemHandle*)dstWin;
@@ -36,11 +41,9 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM> {
 
     if (hasSignal || hasCounter) {
       if (hasCounter)
-        rocshmem::rocshmem_quiet();  // counter only needs local completion (source consumed),
-                                     // but shmem API only provides quiet (remote completion);
-                                     // also sufficient to order data before signal
+        rocshmem::rocshmem_quiet();
       else
-        rocshmem::rocshmem_fence();  // lighter: just orders data before signal
+        rocshmem::rocshmem_fence();
 
       if (hasSignal) {
         if (signalOp == ncclGinSignalInc) signalOpArg = 1;
@@ -57,17 +60,22 @@ template <>
 struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM> {
   template <typename Coop, typename T>
   NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, int peer, ncclGinWindow_t dstWin,
-                                      size_t dstOff, T srcVal, bool hasSignal,
-                                      ncclGinSignal_t signalId, ncclGinSignalOp_t signalOp,
+                                      size_t dstOff, T srcVal,
+                                      ncclGinSignalDescriptor signal, ncclGinSignalOp_t signalOp,
                                       uint64_t signalOpArg, bool hasDescriptor,
                                       ncclGinDescriptorSmem* descriptor,
-                                      cuda::thread_scope required, cuda::thread_scope given) {
+                                      cuda::thread_scope required, cuda::thread_scope given,
+                                      uint32_t optFlags = ncclGinOptFlagsDefault) {
     using nccl::utility::loadConst;
     ncclGinRocshmemGPUContext* rsCtx = (ncclGinRocshmemGPUContext*)ctx.handle;
+    bool hasSignal = signal.type != NCCL_GIN_SIGNAL_TYPE_NONE;
+    ncclGinSignal_t signalId = 0;
+    if (hasSignal && signal.type == NCCL_GIN_SIGNAL_TYPE_INDEXED)
+      signalId = signal.indexedSignal.signalId;
+
     ncclGinRocshmemMemHandle* dstMh = (ncclGinRocshmemMemHandle*)dstWin;
     T* dst = (T*)(loadConst(&dstMh->baseAddr) + dstOff);
 
-    // Use rocshmem_p (scalar put) — value is on stack, no symmetric src needed
     static_assert(sizeof(T) <= 8, "PutValue requires sizeof(T) <= 8");
     if constexpr (sizeof(T) == 8)
       rocshmem::rocshmem_longlong_p((long long*)dst, (long long)srcVal, peer);
@@ -113,16 +121,18 @@ struct ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM> {
 
 template <>
 struct ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_ROCSHMEM> {
-  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, ncclGinSignal_t signalId) {
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, ncclGinSignalDescriptor signal) {
+    if (signal.type != NCCL_GIN_SIGNAL_TYPE_INDEXED) return;
     ncclGinRocshmemGPUContext* rsCtx = (ncclGinRocshmemGPUContext*)ctx.handle;
-    nccl::utility::loadConst(&rsCtx->signals)[signalId] = 0;
+    nccl::utility::loadConst(&rsCtx->signals)[signal.indexedSignal.signalId] = 0;
   }
 };
 
 template <>
 struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ROCSHMEM> {
   template <typename Coop>
-  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, cuda::memory_order ord) {
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, cuda::memory_order ord,
+                                      uint32_t* abortFlag) {
     rocshmem::rocshmem_quiet();
   }
 };

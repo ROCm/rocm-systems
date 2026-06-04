@@ -37,7 +37,7 @@ static ncclResult_t ncclGinAnvilListen(void*, int, void*, void** listenComm) {
   return ncclSuccess;
 }
 
-static ncclResult_t ncclGinAnvilConnect(void*, void*[], int, int, void*, void** collComm) {
+static ncclResult_t ncclGinAnvilConnect(void*, void*[], int, int, int, int, void*, void** collComm) {
   *collComm = (void*)0x1;
   return ncclSuccess;
 }

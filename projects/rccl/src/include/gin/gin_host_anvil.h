@@ -27,6 +27,6 @@ ncclResult_t ncclGinAnvilProgress(ncclGin_t *ginComm, void *ginCtx);
 ncclResult_t ncclGinAnvilQueryLastError(ncclGin_t *ginComm, void *ginCtx, bool *hasError);
 
 // The built-in plugin instance
-extern ncclGin_v11_t ncclGinAnvilPlugin;
+extern ncclGin_t ncclGinAnvilPlugin;
 
 #endif

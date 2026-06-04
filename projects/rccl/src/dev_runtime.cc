@@ -1512,33 +1512,6 @@ ncclResult_t ncclDevrGetLsaSelfAddr(struct ncclComm* comm, void* addr, void** ou
   return ncclSuccess;
 }
 
-// Get the LSA flat VA for self rank corresponding to a primary (ncclMemAlloc) address.
-ncclResult_t ncclDevrGetLsaSelfAddr(struct ncclComm* comm, void* addr, void** outAddr) {
-  struct ncclDevrState* devr = &comm->devrState;
-  uintptr_t a = reinterpret_cast<uintptr_t>(addr);
-  uintptr_t flatBase = reinterpret_cast<uintptr_t>(devr->lsaFlatBase);
-  uintptr_t flatEnd  = flatBase + (uintptr_t)devr->lsaSize * devr->bigSize;
-
-  // Already in the LSA flat range (resource window case)
-  if (a >= flatBase && a < flatEnd) {
-    *outAddr = addr;
-    return ncclSuccess;
-  }
-
-  // Search memHead for a memory whose primaryAddr matches (ncclMemAlloc case)
-  for (struct ncclDevrMemory* mem = devr->memHead; mem != nullptr; mem = mem->next) {
-    uintptr_t mbase = reinterpret_cast<uintptr_t>(mem->primaryAddr);
-    if (a >= mbase && a < mbase + mem->size) {
-      size_t off = a - mbase;
-      *outAddr = (char*)devr->lsaFlatBase + devr->lsaSelf * devr->bigSize + mem->bigOffset + off;
-      return ncclSuccess;
-    }
-  }
-
-  *outAddr = nullptr;
-  return ncclSuccess;
-}
-
 // Get the corresponding pointer in another lsa rank's symmetric memory window
 ncclResult_t ncclDevrGetLsaRankPtr(struct ncclComm* comm, struct ncclDevrWindow* winHost, size_t offset, int lsaRank, void** outPtr) {
   NCCLCHECK(CommCheck(comm, __func__, "comm"));

@@ -10,11 +10,9 @@
 #include "../gin_device_common.h"
 #include "gin_anvil_device_host_common.h"
 
-// Anvil SDMA packet helpers (rocshmem src/sdma); -I from ROCSHMEM_SDMA_SRC_DIR.
 #include "sdma/anvil_device.hpp"
 
-// Helper: compute per-rank pointer in LSA flat address space.
-NCCL_DEVICE_INLINE static inline uintptr_t ncclGinAnvilRankPtr(uintptr_t rank0Base, uint64_t strideBytes, int rank) {
+NCCL_DEVICE_INLINE static uintptr_t ncclGinAnvilRankPtr(uintptr_t rank0Base, uint64_t strideBytes, int rank) {
   return rank0Base + (uintptr_t)rank * (uintptr_t)strideBytes;
 }
 
@@ -23,30 +21,32 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL> {
   template <typename Coop>
   NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop, int peer, bool hasWins,
                                       ncclGinWindow_t dstWin, size_t dstOff, ncclGinWindow_t srcWin,
-                                      size_t srcOff, size_t bytes, bool hasSignal,
-                                      ncclGinSignal_t signalId, ncclGinSignalOp_t signalOp,
+                                      size_t srcOff, size_t bytes,
+                                      ncclGinSignalDescriptor signal, ncclGinSignalOp_t signalOp,
                                       uint64_t signalOpArg, bool hasCounter,
                                       ncclGinCounter_t counterId, bool,
                                       ncclGinDescriptorSmem*,
-                                      cuda::thread_scope, cuda::thread_scope) {
+                                      cuda::thread_scope, cuda::thread_scope,
+                                      uint32_t optFlags = ncclGinOptFlagsDefault) {
     using nccl::utility::loadConst;
     auto* aCtx = (ncclGinAnvilGPUContext*)ctx.handle;
+    bool hasSignal = signal.type != NCCL_GIN_SIGNAL_TYPE_NONE;
+    ncclGinSignal_t signalId = 0;
+    if (hasSignal && signal.type == NCCL_GIN_SIGNAL_TYPE_INDEXED)
+      signalId = signal.indexedSignal.signalId;
 
     if (!hasWins) return;
     if (peer == ctx.rank) return;
 
     auto* q = (rocshmem::anvil::SdmaQueueDeviceHandle*)loadConst(&aCtx->queues[peer]);
-    // Off-node peers have no SDMA queue (intra-node backend only).
     if (q == nullptr) return;
 
-    // Resolve per-window symmetric bases.
     auto* dstMh = (ncclGinAnvilMemHandle*)dstWin;
     auto* srcMh = (ncclGinAnvilMemHandle*)srcWin;
     uintptr_t dstRank0Base = loadConst(&dstMh->lsaRank0Base);
     uintptr_t srcRank0Base = loadConst(&srcMh->lsaRank0Base);
     uint64_t stride = loadConst(&dstMh->lsaStrideBytes);
 
-    // Local and remote pointers live in the same LSA flat VA space.
     void* dst = (void*)(ncclGinAnvilRankPtr(dstRank0Base, stride, peer) + dstOff);
     void* src = (void*)(ncclGinAnvilRankPtr(srcRank0Base, stride, ctx.rank) + srcOff);
 
@@ -58,8 +58,6 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL> {
       uint64_t* peerBase = (uint64_t*)loadConst(&aCtx->signalsBase[peer]);
       sigPtr = peerBase + signalId;
       if (signalOp == ncclGinSignalInc) signalOpArg = 1;
-      // Only ADD64 is supported in current SDMA helper; encode arg by repeated add is not supported.
-      // We treat any non-1 arg as 1 for now (matches Inc use in AlltoAll).
       signalOpArg = 1;
     }
 
@@ -79,12 +77,12 @@ template <>
 struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ANVIL> {
   template <typename Coop, typename T>
   NCCL_DEVICE_INLINE static void call(ncclGinCtx, Coop, int, ncclGinWindow_t,
-                                      size_t, T, bool,
-                                      ncclGinSignal_t, ncclGinSignalOp_t,
+                                      size_t, T,
+                                      ncclGinSignalDescriptor, ncclGinSignalOp_t,
                                       uint64_t, bool,
                                       ncclGinDescriptorSmem*,
-                                      cuda::thread_scope, cuda::thread_scope) {
-    // Not needed for AlltoAll path; leave unimplemented.
+                                      cuda::thread_scope, cuda::thread_scope,
+                                      uint32_t optFlags = ncclGinOptFlagsDefault) {
     __builtin_unreachable();
   }
 };
@@ -109,7 +107,6 @@ template <>
 struct ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ANVIL> {
   NCCL_DEVICE_INLINE static uint64_t* call(ncclGinCtx ctx, ncclGinSignal_t signalId) {
     auto* aCtx = (ncclGinAnvilGPUContext*)ctx.handle;
-    // readSignal/waitSignal operate on this rank's signal array (remote puts increment it)
     uint64_t* localBase = (uint64_t*)nccl::utility::loadConst(&aCtx->signalsBase[ctx.rank]);
     return localBase + signalId;
   }
@@ -117,17 +114,17 @@ struct ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ANVIL> {
 
 template <>
 struct ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_ANVIL> {
-  NCCL_DEVICE_INLINE static void call(ncclGinCtx, ncclGinSignal_t) {
-    // Resetting remote signals is a host responsibility for this backend.
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx, ncclGinSignalDescriptor signal) {
+    (void)signal;
   }
 };
 
 template <>
 struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL> {
   template <typename Coop>
-  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop, cuda::memory_order) {
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop, cuda::memory_order,
+                                      uint32_t* abortFlag) {
     auto* aCtx = (ncclGinAnvilGPUContext*)ctx.handle;
-    // Quiet all queues. This is conservative but correct.
     for (int p = 0; p < ctx.nRanks; p++) {
       if (p == ctx.rank) continue;
       auto* q = (rocshmem::anvil::SdmaQueueDeviceHandle*)nccl::utility::loadConst(&aCtx->queues[p]);
@@ -138,4 +135,3 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL> {
 };
 
 #endif /* _NCCL_DEVICE_GIN_ANVIL_H_ */
-
