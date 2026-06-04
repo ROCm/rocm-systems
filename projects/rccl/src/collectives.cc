@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2015-2023, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #include "argcheck.h" // Need some checks here since we access comm
 #include "collectives.h"
@@ -33,6 +34,9 @@ const char* ncclFuncToString(ncclFunc_t fn) {
   case ncclFuncScatter: return "Scatter";
   case ncclFuncSendRecv: return "SendRecv";
   case ncclFuncSend: return "Send";
+  case ncclFuncPutSignal: return "PutSignal";
+  case ncclFuncSignal: return "Signal";
+  case ncclFuncWaitSignal: return "WaitSignal";
   default: return "Invalid";
   }
 }
@@ -389,7 +393,7 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
      ddaThreshold = 0;	
   }
 
-  if (rcclParamDdaEnable() && (count * ncclTypeSize(datatype) <= ddaThreshold) && (ddaThreshold > 0) && ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op) && ncclGroupDepth == 0) {
+  if (!ncclParamLaunchOrderImplicit() && rcclParamDdaEnable() && (count * ncclTypeSize(datatype) <= ddaThreshold) && (ddaThreshold > 0) && ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op) && ncclGroupDepth == 0) {
     NCCLCHECK(ncclAllReduceDdaIpc(
         sendbuff,
         recvbuff,
@@ -584,5 +588,91 @@ ncclResult_t ncclRecv_impl(void* recvbuff, size_t count, ncclDataType_t datatype
 
   NCCLCHECK(Recorder::instance().record(rrRecv, info));
 
+  return ncclEnqueueCheck(&info);
+}
+
+NCCL_API(ncclResult_t, ncclPutSignal, const void* localbuff, size_t count, ncclDataType_t datatype,
+    int peer, ncclWindow_t peerWin, size_t peerWinOffset, int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, cudaStream_t stream);
+ncclResult_t ncclPutSignal(const void* localbuff, size_t count, ncclDataType_t datatype,
+    int peer, ncclWindow_t peerWin, size_t peerWinOffset, int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, cudaStream_t stream) {
+  NVTX3_FUNC_WITH_PARAMS(PutSignal, NcclNvtxParamsPut,
+    NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), peer, ctx));
+
+  struct ncclInfo info = {};
+  info.coll = ncclFuncPutSignal;
+  info.opName = "PutSignal";
+  info.sendbuff = localbuff;
+  info.recvbuff = NULL;
+  info.count = count;
+  info.datatype = datatype;
+  info.op = ncclSum;
+  info.root = peer;
+  info.comm = comm;
+  info.stream = stream;
+  info.chunkSteps = 1;
+  info.sliceSteps = 1;
+  info.peerWinOffset = peerWinOffset;
+  info.peerWin = peerWin;
+  info.sigIdx = sigIdx;
+  info.ctx = ctx;
+  info.flags = flags;
+  info.nDesc = 0;
+  info.signalDescs = NULL;
+  return ncclEnqueueCheck(&info);
+}
+
+NCCL_API(ncclResult_t, ncclSignal, int peer, int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, cudaStream_t stream);
+ncclResult_t ncclSignal(int peer, int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, cudaStream_t stream) {
+  NVTX3_FUNC_WITH_PARAMS(Signal, NcclNvtxParamsSignal,
+    NVTX3_PAYLOAD(comm ? comm->commHash : 0, peer, ctx));
+
+  struct ncclInfo info = {};
+  info.coll = ncclFuncSignal;
+  info.opName = "Signal";
+  info.sendbuff = NULL;
+  info.recvbuff = NULL;
+  info.count = 0;
+  info.datatype = ncclInt8;
+  info.op = ncclSum;
+  info.root = peer;
+  info.comm = comm;
+  info.stream = stream;
+  info.chunkSteps = 1;
+  info.sliceSteps = 1;
+  info.peerWinOffset = 0;
+  info.peerWin = NULL;
+  info.sigIdx = sigIdx;
+  info.ctx = ctx;
+  info.flags = flags;
+  info.nDesc = 0;
+  info.signalDescs = NULL;
+  return ncclEnqueueCheck(&info);
+}
+
+NCCL_API(ncclResult_t, ncclWaitSignal, int nDesc, ncclWaitSignalDesc_t* signalDescs, ncclComm_t comm, cudaStream_t stream);
+ncclResult_t ncclWaitSignal(int nDesc, ncclWaitSignalDesc_t* signalDescs, ncclComm_t comm, cudaStream_t stream) {
+  NVTX3_FUNC_WITH_PARAMS(WaitSignal, NcclNvtxParamsWaitSignal,
+    NVTX3_PAYLOAD(comm ? comm->commHash : 0, nDesc, 0));
+
+  struct ncclInfo info = {};
+  info.coll = ncclFuncWaitSignal;
+  info.opName = "WaitSignal";
+  info.sendbuff = NULL;
+  info.recvbuff = NULL;
+  info.count = 0;
+  info.datatype = ncclInt32;
+  info.op = ncclSum;
+  info.root = 0;
+  info.comm = comm;
+  info.stream = stream;
+  info.chunkSteps = 1;
+  info.sliceSteps = 1;
+  info.peerWinOffset = 0;
+  info.peerWin = NULL;
+  info.sigIdx = 0;
+  info.ctx = 0;
+  info.flags = 0;
+  info.nDesc = nDesc;
+  info.signalDescs = signalDescs;
   return ncclEnqueueCheck(&info);
 }

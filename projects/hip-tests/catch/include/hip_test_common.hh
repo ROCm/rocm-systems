@@ -740,12 +740,12 @@ class BlockingContext {
     HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);             \
   }
 
-// Per-device variant of CHECK_MANAGED_MEMORY_SUPPORT: skip the current test
-// when the explicitly-named device does not support managed memory.
+// Call to check whether managed memory is supported on the given device. Useful
+// when validating support across multiple devices without changing the current
+// device.
 #define CHECK_MANAGED_MEMORY_SUPPORT_ON_DEVICE(device)                         \
   if (!HipTest::isManagedMemorySupportedOnDevice(device)) {                    \
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);    \
-    return;                                                                    \
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);             \
   }
 
 #define CHECK_PCIE_ATOMIC_SUPPORT                                                                 \

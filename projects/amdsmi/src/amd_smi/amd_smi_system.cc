@@ -299,15 +299,30 @@ amdsmi_status_t AMDSmiSystem::populate_amd_cpus() {
   amdsmi_status_t amd_smi_status;
 
   /* esmi is for AMD cpus, if its not AMD CPU, we are not going to initialise esmi */
-  amd_smi_status = static_cast<amdsmi_status_t>(esmi_init());
-  if (amd_smi_status != AMDSMI_STATUS_SUCCESS) {
+  esmi_status_t esmi_status = esmi_init();
+  if (esmi_status != ESMI_SUCCESS) {
+    // CPU monitoring via ESMI is unavailable: non-AMD CPU, missing/unsupported
+    // energy or HSMP driver, or the CPU/SMU is in a bad state (busy, timeout,
+    // prerequisite not satisfied, etc.). This must NOT be fatal to amdsmi_init()
+    // - GPU and NIC functionality must remain usable. Skip CPU population and
+    // continue, mirroring the non-fatal BRCM/AI NIC discovery paths.
     std::cout << "\tESMI Not initialized, drivers not found " << std::endl;
-    return amd_smi_status;
+    return AMDSMI_STATUS_SUCCESS;
   }
 
   amd_smi_status = get_nr_cpu_sockets(&sockets);
+  if (amd_smi_status != AMDSMI_STATUS_SUCCESS) return AMDSMI_STATUS_SUCCESS;
   amd_smi_status = get_nr_cpu_cores(&cpus);
+  if (amd_smi_status != AMDSMI_STATUS_SUCCESS) return AMDSMI_STATUS_SUCCESS;
   amd_smi_status = get_nr_threads_per_core(&threads);
+  if (amd_smi_status != AMDSMI_STATUS_SUCCESS) return AMDSMI_STATUS_SUCCESS;
+
+  // Guard against a misbehaving driver reporting zero topology counts, which
+  // would otherwise cause a divide-by-zero below. CPU monitoring is simply
+  // skipped (non-fatal) rather than crashing amdsmi_init().
+  if (sockets == 0 || threads == 0) {
+    return AMDSMI_STATUS_SUCCESS;
+  }
 
   for (uint32_t i = 0; i < sockets; i++) {
     std::string cpu_socket_id = std::to_string(i);

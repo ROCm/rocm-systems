@@ -212,7 +212,7 @@ hipError_t hipMemcpyPeerAsync(void* dst, int dstDevice, const void* src, int src
   getStreamPerThread(stream);
   hip::Stream* hip_stream = hip::getStream(stream);
   if (hip_stream == nullptr) {
-    return hipErrorInvalidValue;
+    HIP_RETURN(hipErrorInvalidValue);
   }
 
   HIP_RETURN_ONFAIL(InitManagedVarDevicePtrForPeerDevices(srcDevice, dstDevice));
@@ -249,7 +249,7 @@ hipError_t hipMemcpy3DPeerAsync(hipMemcpy3DPeerParms* p, hipStream_t stream) {
   getStreamPerThread(stream);
   hip::Stream* hip_stream = hip::getStream(stream);
   if (hip_stream == nullptr) {
-    return hipErrorInvalidValue;
+    HIP_RETURN(hipErrorInvalidValue);
   }
 
   HIP_RETURN_ONFAIL(InitManagedVarDevicePtrForPeerDevices(p->srcDevice, p->dstDevice));
