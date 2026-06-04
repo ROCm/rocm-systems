@@ -63,7 +63,7 @@ device:
     <<: *level_2
     # Disabling tests which no longer behave the same on nvidia platform
     disabled: [nvidia_windows]
-    tags: [synchronization]
+    tags: [synchronization, smoke]
   Unit_hipDeviceSynchronize_Functional:
     <<: *level_2
     # Disabling tests which no longer behave the same on nvidia platform
@@ -98,13 +98,13 @@ device:
     tags: [multigpu, query]
   Unit_hipGetDeviceProperties_ArchPropertiesTst:
     <<: *level_2
-    tags: [query]
+    tags: [query, smoke]
   Unit_hipGetDeviceProperties_NegTst:
     <<: *level_2
     tags: [query]
   Unit_hipRuntimeGetVersion_Positive:
     <<: *level_2
-    tags: [init]
+    tags: [init, smoke]
   Unit_hipRuntimeGetVersion_Negative:
     <<: *level_2
     tags: [init]
@@ -116,7 +116,7 @@ device:
     tags: [config]
   Unit_hipGetSetDeviceFlags_SetThenGet:
     <<: *level_2
-    tags: [config]
+    tags: [config, smoke]
   Unit_hipGetSetDeviceFlags_Threaded:
     <<: *level_2
     tags: [config]
@@ -131,7 +131,7 @@ device:
     tags: [config]
   Unit_hipSetDevice_BasicSetGet:
     <<: *level_2
-    tags: [query]
+    tags: [query, smoke]
   Unit_hipGetSetDevice_MultiThreaded:
     <<: *level_2
     tags: [query]
@@ -304,7 +304,7 @@ device:
     tags: [config]
   Unit_hipInit_Positive:
     <<: *level_2
-    tags: [init]
+    tags: [init, smoke]
   Unit_hipInit_Negative:
     <<: *level_2
     # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
@@ -313,7 +313,7 @@ device:
     tags: [init]
   Unit_hipDriverGetVersion_Positive:
     <<: *level_2
-    tags: [init]
+    tags: [init, smoke]
   Unit_hipDriverGetVersion_Negative:
     <<: *level_2
     tags: [init]
