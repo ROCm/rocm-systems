@@ -13,11 +13,13 @@
 //! ([`mirage_core::state::write_json`]).
 
 pub mod agents;
+pub mod profiles;
 pub mod topologies;
 
 use mirage_core::error::Result;
 
 pub use agents::{agents, mi300x, mi350x, mi450x};
+pub use profiles::profiles;
 pub use topologies::{default_topology, topologies};
 
 /// Write all builtin agents to disk.
@@ -51,6 +53,24 @@ pub fn ensure_topologies(force: bool) -> Result<Vec<(String, bool)>> {
             continue;
         }
         mirage_core::state::write_json(&p, &topology)?;
+        report.push((name.to_string(), true));
+    }
+    Ok(report)
+}
+
+/// Write all builtin profiles to disk.
+///
+/// If `force` is true existing files are overwritten, otherwise only
+/// missing profiles are written. Returns `(name, written)` per entry.
+pub fn ensure_profiles(force: bool) -> Result<Vec<(String, bool)>> {
+    let mut report = Vec::new();
+    for (name, profile) in profiles() {
+        let p = mirage_core::paths::profile_path(name);
+        if p.exists() && !force {
+            report.push((name.to_string(), false));
+            continue;
+        }
+        mirage_core::state::write_json(&p, &profile)?;
         report.push((name.to_string(), true));
     }
     Ok(report)
