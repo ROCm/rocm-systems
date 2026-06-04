@@ -19,8 +19,7 @@ DOCKER_IMAGE="gin-anvil:latest"
 # Derived sizes / shared docker+mpirun settings (expand on host, not inside container).
 MAX_BYTES=$((${NP} * ${MSG_SIZE}))
 # No -it: script is often run over non-interactive SSH.
-## DOCKER_GPU="--rm --shm-size 64G --network host --device /dev/dri --device /dev/kfd --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged"
-DOCKER_GPU="--rm --shm-size 64G --network host --device /dev/dri --device /dev/kfd --ipc host --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged"
+DOCKER_GPU="--rm --shm-size 64G --network host --device /dev/dri --device /dev/kfd --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged"
 RCCL_LD_PATH="/workspace/rocshmem/lib:/workspace/rccl/lib:/opt/ucx/lib:/opt/ompi/lib:/opt/rocm/lib:/opt/rocm/core/lib/rocm_sysdeps/lib"
 MPIRUN_BASE="-n ${NP} --allow-run-as-root -mca pml ob1 -mca btl ^openib"
 
