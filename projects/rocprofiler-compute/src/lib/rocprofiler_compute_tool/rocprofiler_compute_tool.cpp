@@ -18,13 +18,23 @@
 
 using namespace rocprofiler_compute_tool;
 
-static std::shared_ptr<InputParameters> g_input_parameters = std::make_shared<EnvInputParameters>();
-static std::shared_ptr<SdkWrapper>      g_sdk_wrapper      = std::make_shared<SdkWrapperImpl>();
-static std::shared_ptr<SdkCallbacks> g_sdk_callbacks = std::make_shared<SdkCallbacksImpl>(g_sdk_wrapper);
-static std::shared_ptr<CountersWriter> g_counters_writer = std::make_shared<CsvCountersWriter>();
-static std::shared_ptr<rocprofiler_tool_configure_result_t> g_cfg;
-static std::atomic<bool>                                    g_tool_shutting_down{false};
-static std::atomic<bool>                                    g_hsa_intercept_done{false};
+// These singletons are intentionally heap-allocated and never destroyed.
+// rocprofiler-sdk drives our callbacks and tool_fini from its own _dl_fini
+// finalizer, which runs after this library's static destructors would have
+// freed them. Giving them process lifetime keeps their vtables valid through
+// teardown and avoids a use-after-destruction (pure virtual call / SIGSEGV).
+static std::shared_ptr<InputParameters>& g_input_parameters = *new std::shared_ptr<InputParameters>(
+    std::make_shared<EnvInputParameters>());
+static std::shared_ptr<SdkWrapper>& g_sdk_wrapper = *new std::shared_ptr<SdkWrapper>(
+    std::make_shared<SdkWrapperImpl>());
+static std::shared_ptr<SdkCallbacks>& g_sdk_callbacks = *new std::shared_ptr<SdkCallbacks>(
+    std::make_shared<SdkCallbacksImpl>(g_sdk_wrapper));
+static std::shared_ptr<CountersWriter>& g_counters_writer = *new std::shared_ptr<CountersWriter>(
+    std::make_shared<CsvCountersWriter>());
+static std::shared_ptr<rocprofiler_tool_configure_result_t>& g_cfg =
+    *new std::shared_ptr<rocprofiler_tool_configure_result_t>();
+static std::atomic<bool> g_tool_shutting_down{false};
+static std::atomic<bool> g_hsa_intercept_done{false};
 
 void test_knobs::set_input_parameters(const std::shared_ptr<InputParameters>& input_parameters)
 {
