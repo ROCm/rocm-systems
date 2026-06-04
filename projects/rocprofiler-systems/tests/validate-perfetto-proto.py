@@ -45,7 +45,9 @@ def load_trace(inp, max_tries=5, retry_wait=1, bin_path=None):
     return tp
 
 
-def validate_perfetto(data, labels, counts, depths, useSubstringForLabels=False):
+def validate_perfetto(
+    data, labels, counts, depths, useSubstringForLabels=False, aggregate_by_name=False
+):
     """
     Validates the given perfetto data against expected labels, counts, and depths.
 
@@ -57,6 +59,11 @@ def validate_perfetto(data, labels, counts, depths, useSubstringForLabels=False)
         depths (list of int): A list of expected depths corresponding to the labels.
         useSubstringForLabels (bool): If True, checks if the label in data contains
             the expected label as a substring. If False, checks for exact matches.
+        aggregate_by_name (bool): If True, validate each expected label by aggregating
+            its slice count across all depths, independently of order. The total number
+            of slices with that exact name (summed across all depths) must equal the
+            expected count. Other labels in the trace are ignored. Depths are not
+            checked in this mode.
     Raises:
         RuntimeError: If any of the labels, counts, or depths in the data do not match
             the expected values.
@@ -64,6 +71,16 @@ def validate_perfetto(data, labels, counts, depths, useSubstringForLabels=False)
 
     if not data and labels:
         raise RuntimeError("Data is empty but labels are not")
+
+    if aggregate_by_name:
+        totals = {}
+        for ditr in data:
+            totals[ditr["label"]] = totals.get(ditr["label"], 0) + ditr["count"]
+        for litr, citr in zip(labels, counts):
+            actual = totals.get(litr, 0)
+            if actual != citr:
+                raise RuntimeError(f"Mismatched count for '{litr}': {actual} vs. {citr}")
+        return
 
     expected = []
     for litr, citr, ditr in zip(labels, counts, depths):
@@ -155,6 +172,14 @@ if __name__ == "__main__":
         action="store_true",
         help="Verify each counter track has paired start/end entries (even count, last value is 0)",
     )
+    parser.add_argument(
+        "--aggregate-by-name",
+        action="store_true",
+        help="Match each expected label by aggregating its slice count across all "
+        "depths, independently of order: the total number of slices with that exact "
+        "name (summed across depths) must equal the expected count. Other labels are "
+        "ignored and depths are not checked.",
+    )
 
     args = parser.parse_args()
 
@@ -165,6 +190,11 @@ if __name__ == "__main__":
         )
 
     labels = args.labels if args.labels else args.label_substrings
+
+    # In aggregate-by-name mode depths are not used; default them so the length check
+    # passes.
+    if args.aggregate_by_name and not args.depths:
+        args.depths = [0] * len(labels)
 
     if len(labels) != len(args.counts) or len(labels) != len(args.depths):
         raise RuntimeError(
@@ -217,6 +247,7 @@ if __name__ == "__main__":
             args.counts,
             args.depths,
             useSubstringForLabels=args.label_substrings is not None,
+            aggregate_by_name=args.aggregate_by_name,
         )
 
     except RuntimeError as e:
@@ -287,11 +318,13 @@ if __name__ == "__main__":
 
     if args.check_counter_pairing and args.counter_names:
         for counter_name in args.counter_names:
-            tracks = tp.query(f"""SELECT counter_track.id, counter_track.name,
+            tracks = tp.query(
+                f"""SELECT counter_track.id, counter_track.name,
                   COUNT(counter.id) AS num_entries
                   FROM counter_track JOIN counter ON counter.track_id = counter_track.id
                   WHERE counter_track.name LIKE '%{counter_name}%'
-                  GROUP BY counter_track.id""")
+                  GROUP BY counter_track.id"""
+            )
             for row in tracks:
                 if row.num_entries % 2 != 0:
                     print(
@@ -300,9 +333,11 @@ if __name__ == "__main__":
                     )
                     ret = 1
                 else:
-                    last_value = tp.query(f"""SELECT counter.value FROM counter
+                    last_value = tp.query(
+                        f"""SELECT counter.value FROM counter
                           WHERE counter.track_id = {row.id}
-                          ORDER BY counter.ts DESC LIMIT 1""")
+                          ORDER BY counter.ts DESC LIMIT 1"""
+                    )
                     for val_row in last_value:
                         if val_row.value != 0:
                             print(

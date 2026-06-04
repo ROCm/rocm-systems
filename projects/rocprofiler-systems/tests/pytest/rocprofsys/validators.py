@@ -270,6 +270,7 @@ def validate_perfetto_trace(
     trace_processor_path: Optional[Path] = None,
     print_output: bool = False,
     check_counter_pairing: bool = False,
+    aggregate_by_name: bool = False,
     timeout: int = 120,
 ) -> ValidationResult:
     """Validate a Perfetto trace file using validate-perfetto-proto.py.
@@ -282,6 +283,8 @@ def validate_perfetto_trace(
         counts: Expected counts (-c flag)
         depths: Expected depths (-d flag)
         label_substrings: Expected label substrings (-s flag)
+        aggregate_by_name: Match labels by aggregating slice counts across all depths,
+            independently of order (--aggregate-by-name flag)
         counter_names: Counter names to validate (--counter-names flag)
         key_names: Debug key names to check (--key-names flag)
         key_counts: Expected counts for debug keys (--key-counts flag)
@@ -322,6 +325,9 @@ def validate_perfetto_trace(
 
     if check_counter_pairing:
         args.append("--check-counter-pairing")
+
+    if aggregate_by_name:
+        args.append("--aggregate-by-name")
 
     if key_names:
         args.extend(["--key-names"] + key_names)
