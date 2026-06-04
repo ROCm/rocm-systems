@@ -3206,7 +3206,7 @@ hipError_t hipExtStreamCreateWithCUMask(hipStream_t* stream, uint32_t cuMaskSize
  *
  * @param[in] stream  Stream to be queried
  * @param[in] cuMaskSize  Number of the block of memories (uint32_t *) allocated by user
- * @param[out] cuMask  Pointer to a pre-allocated block of memories (uint32_t *) in which
+ * @param[in, out] cuMask  Pointer to a pre-allocated block of memories (uint32_t *) in which
  * the stream's CU mask is returned. The CU mask is returned in a chunck of 32 bits where
  * each active bit represents one active CU.
  * @returns #hipSuccess, #hipErrorInvalidHandle, #hipErrorInvalidValue
@@ -5279,7 +5279,7 @@ hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes, hipMemcp
  *  @brief Fills the first sizeBytes bytes of the memory area pointed to by dest with the constant
  * byte value value.
  *
- *  @param[out] dst  Data being filled
+ *  @param[in,out] dst  Data being filled
  *  @param[in]  value  Value to be set
  *  @param[in]  sizeBytes  Data size in bytes
  *  @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotInitialized
@@ -5289,7 +5289,7 @@ hipError_t hipMemset(void* dst, int value, size_t sizeBytes);
  *  @brief Fills the first sizeBytes bytes of the memory area pointed to by dest with the constant
  * byte value value.
  *
- *  @param[out] dest  Data ptr to be filled
+ *  @param[in,out] dest  Data ptr to be filled
  *  @param[in]  value  Value to be set
  *  @param[in]  count  Number of values to be set
  *  @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotInitialized
@@ -5304,7 +5304,7 @@ hipError_t hipMemsetD8(hipDeviceptr_t dest, unsigned char value, size_t count);
  * stream argument. If stream is non-zero, the operation may overlap with operations in other
  * streams.
  *
- *  @param[out] dest  Data ptr to be filled
+ *  @param[in,out] dest  Data ptr to be filled
  *  @param[in]  value  Constant value to be set
  *  @param[in]  count  Number of values to be set
  *  @param[in]  stream  Stream identifier
@@ -5316,7 +5316,7 @@ hipError_t hipMemsetD8Async(hipDeviceptr_t dest, unsigned char value, size_t cou
  *  @brief Fills the first sizeBytes bytes of the memory area pointed to by dest with the constant
  * short value value.
  *
- *  @param[out] dest  Data ptr to be filled
+ *  @param[in,out] dest  Data ptr to be filled
  *  @param[in]  value  Constant value to be set
  *  @param[in]  count  Number of values to be set
  *  @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotInitialized
@@ -5331,7 +5331,7 @@ hipError_t hipMemsetD16(hipDeviceptr_t dest, unsigned short value, size_t count)
  * stream argument. If stream is non-zero, the operation may overlap with operations in other
  * streams.
  *
- *  @param[out] dest  Data ptr to be filled
+ *  @param[in,out] dest  Data ptr to be filled
  *  @param[in]  value  Constant value to be set
  *  @param[in]  count  Number of values to be set
  *  @param[in]  stream  Stream identifier
@@ -5343,7 +5343,7 @@ hipError_t hipMemsetD16Async(hipDeviceptr_t dest, unsigned short value, size_t c
  *  @brief Fills the memory area pointed to by dest with the constant integer
  * value for specified number of times.
  *
- *  @param[out] dest  Data being filled
+ *  @param[in,out] dest  Data being filled
  *  @param[in]  value  Constant value to be set
  *  @param[in]  count  Number of values to be set
  *  @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotInitialized
@@ -5358,7 +5358,7 @@ hipError_t hipMemsetD32(hipDeviceptr_t dest, int value, size_t count);
  * stream argument. If stream is non-zero, the operation may overlap with operations in other
  * streams.
  *
- *  @param[out] dst Pointer to device memory
+ *  @param[in,out] dst Pointer to device memory
  *  @param[in]  value  Value to set for each byte of specified memory
  *  @param[in]  sizeBytes  Size in bytes to set
  *  @param[in]  stream  Stream identifier
@@ -5374,7 +5374,7 @@ hipError_t hipMemsetAsync(void* dst, int value, size_t sizeBytes, hipStream_t st
  * stream argument. If stream is non-zero, the operation may overlap with operations in other
  * streams.
  *
- *  @param[out] dst Pointer to device memory
+ *  @param[in,out] dst Pointer to device memory
  *  @param[in]  value  Value to set for each byte of specified memory
  *  @param[in]  count  Number of values to be set
  *  @param[in]  stream  Stream identifier
@@ -5385,7 +5385,7 @@ hipError_t hipMemsetD32Async(hipDeviceptr_t dst, int value, size_t count,
 /**
  *  @brief Fills the memory area pointed to by dst with the constant value.
  *
- *  @param[out] dst Pointer to 2D device memory
+ *  @param[in,out] dst Pointer to 2D device memory
  *  @param[in]  pitch  Pitch size in bytes of 2D device memory, unused if height equals 1
  *  @param[in]  value  Constant value to set for each byte of specified memory
  *  @param[in]  width  Width size in bytes in 2D memory
@@ -5396,7 +5396,7 @@ hipError_t hipMemset2D(void* dst, size_t pitch, int value, size_t width, size_t 
 /**
  *  @brief Fills asynchronously the memory area pointed to by dst with the constant value.
  *
- *  @param[in]  dst Pointer to 2D device memory
+ *  @param[in,out]  dst Pointer to 2D device memory
  *  @param[in]  pitch  Pitch size in bytes of 2D device memory, unused if height equals 1
  *  @param[in]  value  Value to set for each byte of specified memory
  *  @param[in]  width  Width size in bytes in 2D memory
@@ -5409,7 +5409,7 @@ hipError_t hipMemset2DAsync(void* dst, size_t pitch, int value, size_t width, si
 /**
  *  @brief Fills synchronously the memory area pointed to by pitchedDevPtr with the constant value.
  *
- *  @param[in] pitchedDevPtr  Pointer to pitched device memory
+ *  @param[in,out] pitchedDevPtr  Pointer to pitched device memory
  *  @param[in]  value  Value to set for each byte of specified memory
  *  @param[in]  extent  Size parameters for width field in bytes in device memory
  *  @returns #hipSuccess, #hipErrorInvalidValue
@@ -5418,7 +5418,7 @@ hipError_t hipMemset3D(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent)
 /**
  *  @brief Fills asynchronously the memory area pointed to by pitchedDevPtr with the constant value.
  *
- *  @param[in] pitchedDevPtr  Pointer to pitched device memory
+ *  @param[in,out] pitchedDevPtr  Pointer to pitched device memory
  *  @param[in]  value  Value to set for each byte of specified memory
  *  @param[in]  extent  Size parameters for width field in bytes in device memory
  *  @param[in]  stream  Stream identifier
@@ -5431,7 +5431,7 @@ hipError_t hipMemset3DAsync(hipPitchedPtr pitchedDevPtr, int value, hipExtent ex
  *  @brief Fills 2D memory range of 'width' 8-bit values synchronously to the specified char value.
  * Height specifies numbers of rows to set and dstPitch speicifies the number of bytes between each
  * row.
- *  @param[in] dst       Pointer to device memory
+ *  @param[in,out] dst       Pointer to device memory
  *  @param[in] dstPitch  Pitch of dst device pointer
  *  @param[in] value     value to set
  *  @param[in] width     Width of row
@@ -5444,7 +5444,7 @@ hipError_t hipMemsetD2D8(hipDeviceptr_t dst, size_t dstPitch, unsigned char valu
  *  @brief Fills 2D memory range of 'width' 8-bit values asynchronously to the specified char value.
  * Height specifies numbers of rows to set and dstPitch speicifies the number of bytes between each
  * row.
- *  @param[in] dst       Pointer to device memory
+ *  @param[in,out] dst       Pointer to device memory
  *  @param[in] dstPitch  Pitch of dst device pointer
  *  @param[in] value     value to set
  *  @param[in] width     Width of row
@@ -5459,7 +5459,7 @@ hipError_t hipMemsetD2D8Async(hipDeviceptr_t dst, size_t dstPitch, unsigned char
  *  @brief Fills 2D memory range of 'width' 16-bit values synchronously to the specified short
  * value. Height specifies numbers of rows to set and dstPitch speicifies the number of bytes
  * between each row.
- *  @param[in] dst       Pointer to device memory
+ *  @param[in,out] dst       Pointer to device memory
  *  @param[in] dstPitch  Pitch of dst device pointer
  *  @param[in] value     value to set
  *  @param[in] width     Width of row
@@ -5472,7 +5472,7 @@ hipError_t hipMemsetD2D16(hipDeviceptr_t dst, size_t dstPitch, unsigned short va
  *  @brief Fills 2D memory range of 'width' 16-bit values asynchronously to the specified short
  * value. Height specifies numbers of rows to set and dstPitch speicifies the number of bytes
  * between each row.
- *  @param[in] dst       Pointer to device memory
+ *  @param[in,out] dst       Pointer to device memory
  *  @param[in] dstPitch  Pitch of dst device pointer
  *  @param[in] value     value to set
  *  @param[in] width     Width of row
@@ -5486,7 +5486,7 @@ hipError_t hipMemsetD2D16Async(hipDeviceptr_t dst, size_t dstPitch, unsigned sho
  *  @brief Fills 2D memory range of 'width' 32-bit values synchronously to the specified int value.
  * Height specifies numbers of rows to set and dstPitch speicifies the number of bytes between each
  * row.
- *  @param[in] dst       Pointer to device memory
+ *  @param[in,out] dst       Pointer to device memory
  *  @param[in] dstPitch  Pitch of dst device pointer
  *  @param[in] value     value to set
  *  @param[in] width     Width of row
@@ -5499,7 +5499,7 @@ hipError_t hipMemsetD2D32(hipDeviceptr_t dst, size_t dstPitch, unsigned int valu
  *  @brief Fills 2D memory range of 'width' 32-bit values asynchronously to the specified int
  * value. Height specifies numbers of rows to set and dstPitch speicifies the number of bytes
  * between each row.
- *  @param[in] dst       Pointer to device memory
+ *  @param[in,out] dst       Pointer to device memory
  *  @param[in] dstPitch  Pitch of dst device pointer
  *  @param[in] value     value to set
  *  @param[in] width     Width of row
