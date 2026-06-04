@@ -1638,14 +1638,13 @@ pc_sampling_callback(rocprofiler_context_id_t /* context_id*/,
 }
 
 void
-att_shader_data_callback(rocprofiler_agent_id_t agent,
-                         int64_t                se_id,
-                         uint64_t /* chunk_index */,
-                         void*                                        se_data,
-                         size_t                                       data_size,
-                         rocprofiler_thread_trace_shader_data_flags_t flags,
-                         rocprofiler_user_data_t                      userdata)
+att_shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
+                         rocprofiler_user_data_t                userdata)
 {
+    auto agent = shader_data.agent;
+    auto se_id = shader_data.shader_engine_id;
+    auto flags = shader_data.flags;
+
     if((flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL) != 0)
         ROCP_CI_LOG(WARNING) << "Thread trace buffer full!";
     std::lock_guard<std::mutex> lock(att_shader_data);
@@ -1659,7 +1658,7 @@ att_shader_data_callback(rocprofiler_agent_id_t agent,
     auto        output_stream   = get_output_stream(tool::get_config(), filename.str(), ".att");
     std::string output_filename = get_output_filename(tool::get_config(), filename.str(), ".att");
 
-    output_stream.stream->write(reinterpret_cast<char*>(se_data), data_size);
+    output_stream.stream->write(reinterpret_cast<char*>(shader_data.data), shader_data.data_size);
     auto key = tool::att_dispatch_agent_key_t{dispatch_id, agent.handle};
     tool_metadata->att_filenames[key].emplace_back(output_filename);
 }

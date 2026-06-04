@@ -89,13 +89,17 @@ thread_trace_callback(uint32_t shader, void* buffer, uint64_t size, void* callba
 {
     auto& cb_data = *static_cast<cbdata_t*>(callback_data);
 
-    cb_data.cb_fn(cb_data.agent,
-                  shader,
-                  cb_data.next_chunk++,
-                  buffer,
-                  size,
-                  ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END,
-                  *cb_data.userdata);
+    auto shader_data             = rocprofiler_thread_trace_shader_data_t{};
+    shader_data.size             = sizeof(shader_data);
+    shader_data.data             = buffer;
+    shader_data.data_size        = size;
+    shader_data.shader_engine_id = shader;
+    shader_data.chunk_index      = cb_data.next_chunk++;
+    shader_data.read_offset      = 0;
+    shader_data.agent            = cb_data.agent;
+    shader_data.flags            = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END;
+
+    cb_data.cb_fn(shader_data, *cb_data.userdata);
     // The iterator guarantees the last chunk is tagged with END; here we just
     // ferry the data to the user callback.
     return HSA_STATUS_SUCCESS;

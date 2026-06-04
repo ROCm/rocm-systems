@@ -205,13 +205,7 @@ TEST(thread_trace, init_shutdown)
     rocprofiler::thread_trace::test_init();
 
     // Sanity check: threads should spin and exit cleanly when the running flag flips.
-    auto empty_cb = [](rocprofiler_agent_id_t,
-                       int64_t,
-                       uint64_t,
-                       void*,
-                       size_t,
-                       rocprofiler_thread_trace_shader_data_flags_t,
-                       rocprofiler_user_data_t) {};
+    auto empty_cb = [](rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t) {};
 
     auto always_null = []() { return std::nullopt; };
 
@@ -226,13 +220,7 @@ TEST(thread_trace, status_query)
     rocprofiler::thread_trace::test_init();
 
     // Ensure the producer polls even when the GPU reports "nothing to copy".
-    auto empty_cb = [](rocprofiler_agent_id_t,
-                       int64_t,
-                       uint64_t,
-                       void*,
-                       size_t,
-                       rocprofiler_thread_trace_shader_data_flags_t,
-                       rocprofiler_user_data_t) {};
+    auto empty_cb = [](rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t) {};
 
     auto status_called = std::atomic<bool>{false};
     auto always_null   = [&]() {
@@ -259,14 +247,9 @@ TEST(thread_trace, multiple_calls)
 
     // Accumulate the payload sizes so we can verify every buffer reported by the
     // mock GPU eventually reaches the consumer.
-    auto fetch_cb = [](rocprofiler_agent_id_t,
-                       int64_t,
-                       uint64_t,
-                       void*,
-                       size_t data_size,
-                       rocprofiler_thread_trace_shader_data_flags_t,
-                       rocprofiler_user_data_t userdata) {
-        static_cast<std::atomic<size_t>*>(userdata.ptr)->fetch_add(data_size);
+    auto fetch_cb = [](rocprofiler_thread_trace_shader_data_t shader_data,
+                       rocprofiler_user_data_t                userdata) {
+        static_cast<std::atomic<size_t>*>(userdata.ptr)->fetch_add(shader_data.data_size);
     };
 
     auto input_buffer = std::vector<size_t>();
@@ -299,6 +282,46 @@ TEST(thread_trace, multiple_calls)
     EXPECT_EQ(data_received.load(), status_called.load() * BUFFER_SIZE + HEADER_BYTES);
 }
 
+TEST(thread_trace, read_offset)
+{
+    rocprofiler::thread_trace::test_init();
+    const size_t BUFFER_SIZE = rocprofiler::thread_trace::MOCK_BUFFER_SIZE;
+
+    constexpr uint64_t EXPECTED_READ_OFFSET = 128;
+    auto               read_offset_received = std::atomic<uint64_t>{0};
+
+    auto fetch_cb = [](rocprofiler_thread_trace_shader_data_t shader_data,
+                       rocprofiler_user_data_t                userdata) {
+        if(shader_data.chunk_index > 0 && shader_data.read_offset != 0)
+            static_cast<std::atomic<uint64_t>*>(userdata.ptr)->store(shader_data.read_offset);
+    };
+
+    auto input_buffer = std::vector<size_t>();
+    input_buffer.resize(BUFFER_SIZE / sizeof(size_t));
+
+    auto return_offset_status = [&]() -> std::optional<rocprofiler::hsa::sqtt_buffer_status_t> {
+        if(read_offset_received.load() != 0) return std::nullopt;
+
+        auto status        = rocprofiler::hsa::sqtt_buffer_status_t{};
+        status.data        = input_buffer.data();
+        status.size        = BUFFER_SIZE;
+        status.read_offset = EXPECTED_READ_OFFSET;
+        return status;
+    };
+
+    auto userdata = rocprofiler_user_data_t{.ptr = &read_offset_received};
+    auto threads =
+        rocprofiler::thread_trace::start_threads(fetch_cb, return_offset_status, userdata);
+
+    while(read_offset_received.load() == 0)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+    threads.flag->store(rocprofiler::thread_trace::WORKER_FLAG_STOP);
+    threads.join_all();
+
+    EXPECT_EQ(read_offset_received.load(), EXPECTED_READ_OFFSET);
+}
+
 TEST(thread_trace, data_integrity)
 {
     // With multiple per-slot consumer threads, callbacks may arrive out of
@@ -317,19 +340,15 @@ TEST(thread_trace, data_integrity)
 
     auto state = state_t{};
 
-    auto fetch_cb = [](rocprofiler_agent_id_t,
-                       int64_t,
-                       uint64_t chunk_index,
-                       void*    datain,
-                       size_t   data_size,
-                       rocprofiler_thread_trace_shader_data_flags_t,
-                       rocprofiler_user_data_t userdata) {
+    auto fetch_cb = [](rocprofiler_thread_trace_shader_data_t shader_data,
+                       rocprofiler_user_data_t                userdata) {
         auto* s     = static_cast<state_t*>(userdata.ptr);
-        auto* data  = static_cast<size_t*>(datain);
-        auto  chunk = std::vector<size_t>(data, data + data_size / sizeof(size_t));
+        auto* data  = static_cast<size_t*>(shader_data.data);
+        auto  chunk = std::vector<size_t>(
+            data, data + static_cast<size_t>(shader_data.data_size) / sizeof(size_t));
         {
             std::lock_guard lk{s->mut};
-            s->chunks.emplace(chunk_index, std::move(chunk));
+            s->chunks.emplace(shader_data.chunk_index, std::move(chunk));
         }
         s->received.fetch_add(1);
     };
@@ -396,15 +415,10 @@ TEST(thread_trace, slow_cpu)
 
     // Simulate a user callback that cannot keep up; the producer should flag a
     // CPU buffer stall so the consumer can drain and exit.
-    auto fetch_cb = [](rocprofiler_agent_id_t,
-                       int64_t,
-                       uint64_t,
-                       void*,
-                       size_t,
-                       rocprofiler_thread_trace_shader_data_flags_t flags,
-                       rocprofiler_user_data_t                      userdata) {
+    auto fetch_cb = [](rocprofiler_thread_trace_shader_data_t shader_data,
+                       rocprofiler_user_data_t                userdata) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        if(flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL)
+        if(shader_data.flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL)
             static_cast<std::atomic<bool>*>(userdata.ptr)->store(true);
     };
 
@@ -442,14 +456,9 @@ TEST(thread_trace, slow_gpu)
 
     // Simulate a GPU buffer overflow; the producer should flag a GPU buffer full
     // condition when the hardware reports it cannot keep up.
-    auto fetch_cb = [](rocprofiler_agent_id_t,
-                       int64_t,
-                       uint64_t,
-                       void*,
-                       size_t,
-                       rocprofiler_thread_trace_shader_data_flags_t flags,
-                       rocprofiler_user_data_t                      userdata) {
-        if(flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL)
+    auto fetch_cb = [](rocprofiler_thread_trace_shader_data_t shader_data,
+                       rocprofiler_user_data_t                userdata) {
+        if(shader_data.flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL)
             static_cast<std::atomic<bool>*>(userdata.ptr)->store(true);
     };
 
@@ -495,18 +504,13 @@ TEST(thread_trace, restart_after_overflow)
     auto state = std::make_shared<callback_state_t>();
 
     // Track callbacks before, during, and after an overflow event to verify restart.
-    auto fetch_cb = [](rocprofiler_agent_id_t,
-                       int64_t,
-                       uint64_t,
-                       void*,
-                       size_t,
-                       rocprofiler_thread_trace_shader_data_flags_t flags,
-                       rocprofiler_user_data_t                      userdata) {
+    auto fetch_cb = [](rocprofiler_thread_trace_shader_data_t shader_data,
+                       rocprofiler_user_data_t                userdata) {
         auto* s = static_cast<callback_state_t*>(userdata.ptr);
         s->total_callbacks.fetch_add(1);
 
-        if(flags & (ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL |
-                    ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL))
+        if(shader_data.flags & (ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL |
+                                ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL))
         {
             s->overflow_count.fetch_add(1);
             s->seen_overflow.store(true);
@@ -578,17 +582,12 @@ TEST(thread_trace, buffer_alternation)
     // running in parallel, the order in which callbacks land is racy, so the
     // best invariant we can assert is that the producer used more than one
     // staging slot and never exceeded the configured pool size.
-    auto fetch_cb = [](rocprofiler_agent_id_t,
-                       int64_t,
-                       uint64_t,
-                       void* data,
-                       size_t,
-                       rocprofiler_thread_trace_shader_data_flags_t,
-                       rocprofiler_user_data_t userdata) {
+    auto fetch_cb = [](rocprofiler_thread_trace_shader_data_t shader_data,
+                       rocprofiler_user_data_t                userdata) {
         auto* state = static_cast<callback_state_t*>(userdata.ptr);
         {
             std::lock_guard lk{state->mut};
-            state->buffer_addresses.insert(data);
+            state->buffer_addresses.insert(shader_data.data);
         }
         state->callback_count.fetch_add(1);
     };
