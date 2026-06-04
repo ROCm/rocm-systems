@@ -66,20 +66,17 @@ public:
 
     // Drop the queue from the outstanding set once it has executed past the dispatch that
     // carried this barrier's transition packet (called on each serialized completion).
-    void notify_drain(const Queue* queue);
+    void drain_queue(const Queue* queue);
 
     // Checks if this barrier is complete
     bool complete() const;
 
     // complete() AND no queue still references the signal -> safe to destroy (no handle reuse).
-    bool safe_to_retire() const;
+    bool safe_to_destroy() const;
 
     // Removes a queue from the barrier dependency list (waiting + outstanding transition packets).
     // If this is the last queue waiting, clears the barrier and marks it as complete.
     void remove_queue(const Queue* queue);
-
-    // Handle of the underlying barrier signal.
-    uint64_t signal_handle() const { return _barrier_signal.handle; }
 
 private:
     std::function<void()>                                      _barrier_finished = {};

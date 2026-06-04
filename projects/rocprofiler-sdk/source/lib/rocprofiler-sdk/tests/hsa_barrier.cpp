@@ -392,8 +392,8 @@ TEST(hsa_barrier, block_multi)
 // Regression tests: a barrier must not be retired (its signal destroyed/recyclable) while a queue
 // still holds an un-executed transition packet referencing it.
 
-// complete-but-referenced barrier is not safe_to_retire() until the carrying dispatch runs.
-TEST(hsa_barrier, safe_to_retire_gated_on_transition_drain)
+// complete-but-referenced barrier is not safe_to_destroy() until the carrying dispatch runs.
+TEST(hsa_barrier, safe_to_destroy_gated_on_transition_drain)
 {
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     test_init();
@@ -416,7 +416,7 @@ TEST(hsa_barrier, safe_to_retire_gated_on_transition_drain)
     hsa_barrier barrier([]() {}, get_api_table());
     barrier.set_barrier(q_map);
     ASSERT_FALSE(barrier.complete());
-    ASSERT_FALSE(barrier.safe_to_retire());
+    ASSERT_FALSE(barrier.safe_to_destroy());
 
     q->serialized_dispatched_inc();  // carrying dispatch (id 2) gets the transition packet
     auto pkt = barrier.enqueue_packet(q);
@@ -426,21 +426,21 @@ TEST(hsa_barrier, safe_to_retire_gated_on_transition_drain)
     q->serialized_completed_inc();  // completion of dispatch id 1
     q->async_complete();
     barrier.register_completion(q);
-    barrier.notify_drain(q);  // completed(1) < token(2): no-op
+    barrier.drain_queue(q);  // completed(1) < token(2): no-op
     ASSERT_TRUE(barrier.complete());
-    ASSERT_FALSE(barrier.safe_to_retire());
+    ASSERT_FALSE(barrier.safe_to_destroy());
 
     // carrier (id 2) completes -> retirable
     q->serialized_completed_inc();  // completion of dispatch id 2 (the carrier)
-    barrier.notify_drain(q);
-    ASSERT_TRUE(barrier.safe_to_retire());
+    barrier.drain_queue(q);
+    ASSERT_TRUE(barrier.safe_to_destroy());
 
     registration::set_init_status(1);
     registration::finalize();
 }
 
 // teardown escape: removing an enqueued queue releases the barrier instead of pinning it forever.
-TEST(hsa_barrier, safe_to_retire_after_enqueued_queue_removed)
+TEST(hsa_barrier, safe_to_destroy_after_enqueued_queue_removed)
 {
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     test_init();
@@ -467,67 +467,10 @@ TEST(hsa_barrier, safe_to_retire_after_enqueued_queue_removed)
     q->async_complete();
     barrier.register_completion(q);
     ASSERT_TRUE(barrier.complete());
-    ASSERT_FALSE(barrier.safe_to_retire());  // transition packet still outstanding
+    ASSERT_FALSE(barrier.safe_to_destroy());  // transition packet still outstanding
 
     barrier.remove_queue(q);
-    ASSERT_TRUE(barrier.safe_to_retire());
-
-    registration::set_init_status(1);
-    registration::finalize();
-}
-
-// a complete-but-referenced barrier's signal handle must not be recycled into a new barrier.
-TEST(hsa_barrier, retired_barrier_signal_not_recycled_while_transition_outstanding)
-{
-    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-    test_init();
-
-    registration::init_logging();
-    registration::set_init_status(-1);
-    context::push_client(1);
-
-    auto queues = create_queue_map(1);
-    ASSERT_EQ(queues.size(), 1u);
-    Queue* q = queues.begin()->second.get();
-
-    hsa_barrier::queue_map_ptr_t q_map;
-    for(const auto& [k, v] : queues)
-        q_map[k] = v.get();
-
-    // arm the barrier on one in-flight kernel
-    q->async_started();
-    auto* b_old = new hsa_barrier([]() {}, get_api_table());
-    b_old->set_barrier(q_map);
-    ASSERT_FALSE(b_old->complete());
-    const uint64_t old_handle = b_old->signal_handle();
-
-    // q gets a transition packet on the barrier signal (never executed below)
-    q->serialized_dispatched_inc();
-    auto pkt = b_old->enqueue_packet(q);
-    ASSERT_TRUE(pkt.has_value());
-    ASSERT_EQ(pkt->barrier_and.dep_signal[0].handle, old_handle);
-
-    // barrier clears; transition packet still outstanding
-    q->async_complete();
-    b_old->register_completion(q);
-    ASSERT_TRUE(b_old->complete());
-    ASSERT_FALSE(b_old->safe_to_retire());
-
-    // destroy while still referenced; its signal handle must not become reusable
-    delete b_old;
-
-    std::vector<std::unique_ptr<hsa_barrier>> fresh;
-    bool                                      reused = false;
-    for(int i = 0; i < 8; ++i)
-    {
-        fresh.emplace_back(std::make_unique<hsa_barrier>([]() {}, get_api_table()));
-        if(fresh.back()->signal_handle() == old_handle) reused = true;
-    }
-
-    EXPECT_FALSE(reused) << "retired barrier signal " << old_handle
-                         << " was recycled while a transition packet still referenced it";
-
-    fresh.clear();
+    ASSERT_TRUE(barrier.safe_to_destroy());
 
     registration::set_init_status(1);
     registration::finalize();

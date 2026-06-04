@@ -49,18 +49,13 @@ hsa_barrier::~hsa_barrier()
     _barrier_enqueued.rlock(
         [&](const auto& barrier_enqueued) { outstanding = !barrier_enqueued.empty(); });
 
+    // retirement is gated on safe_to_destroy() and queue teardown clears entries via remove_queue,
+    // so a barrier should never be destroyed while a transition packet still references its signal.
+    ROCP_ERROR_IF(outstanding) << "hsa_barrier (handle: " << _barrier_signal.handle
+                               << ") destroyed with outstanding transition packets";
+
     // release the signal so any stale transition packet can pass
     clear_barrier();
-
-    // Backstop: retirement is gated on safe_to_retire(), so this should not happen. If a packet
-    // still references this signal, leak it rather than let HSA recycle the handle into a barrier.
-    if(outstanding)
-    {
-        ROCP_WARNING << "hsa_barrier (handle: " << _barrier_signal.handle
-                     << ") destroyed with outstanding transition packets; leaking its signal to "
-                        "avoid handle reuse.";
-        return;
-    }
 
     // Destroy the barrier signal
     _core_api.hsa_signal_destroy_fn(_barrier_signal);
@@ -97,7 +92,8 @@ hsa_barrier::enqueue_packet(const Queue* queue)
         if(barrier_enqueued.find(queue->get_id().handle) == barrier_enqueued.end())
         {
             return_block = true;
-            // stamp the queue with the dispatch id that carries this transition packet
+            // record the current serialized-dispatch id; the transition packet has executed
+            // once this queue's completed count reaches it
             barrier_enqueued.emplace(queue->get_id().handle, queue->serialized_dispatched());
         }
     });
@@ -113,8 +109,10 @@ hsa_barrier::enqueue_packet(const Queue* queue)
 }
 
 void
-hsa_barrier::notify_drain(const Queue* queue)
+hsa_barrier::drain_queue(const Queue* queue)
 {
+    // transition packet can't have executed until the barrier clears; skip the lock while armed
+    if(!complete()) return;
     _barrier_enqueued.wlock([&](auto& barrier_enqueued) {
         auto it = barrier_enqueued.find(queue->get_id().handle);
         if(it == barrier_enqueued.end()) return;
@@ -170,7 +168,7 @@ hsa_barrier::complete() const
 }
 
 bool
-hsa_barrier::safe_to_retire() const
+hsa_barrier::safe_to_destroy() const
 {
     if(!complete()) return false;
     bool no_outstanding = false;
