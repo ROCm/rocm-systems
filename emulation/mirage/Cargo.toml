@@ -33,6 +33,7 @@ futures-util = "0.3"
 tokio = { workspace = true }
 tungstenite = "0.24"
 libc = { workspace = true }
+nix = { workspace = true }
 
 [workspace]
 members = ["builtin","core", "container", "ctl", "daemon", "dashboard", "host", "hotswap", "rocjitsu"]
@@ -48,7 +49,7 @@ tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
 tokio-util = "0.7"
 futures = "0.3"
-nix = { version = "0.29", features = ["fs", "signal", "process", "term"] }
+nix = { version = "0.29", features = ["fs", "signal", "process", "term", "user"] }
 libc = "0.2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

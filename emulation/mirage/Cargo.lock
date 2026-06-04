@@ -1052,6 +1052,7 @@ dependencies = [
  "mirage_host",
  "mirage_hotswap",
  "mirage_rocjitsu",
+ "nix",
  "predicates",
  "reqwest",
  "serde",

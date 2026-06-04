@@ -124,7 +124,10 @@ impl Daemon {
 
 impl Drop for Daemon {
     fn drop(&mut self) {
-        let _ = unsafe { libc::kill(self.child.id() as i32, libc::SIGTERM) };
+        let _ = nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(self.child.id() as i32),
+            nix::sys::signal::Signal::SIGTERM,
+        );
         let _ = self.child.wait();
         // Also kill any host children still alive under our runtime dir
         // (in case session_destroy wasn't called from the test).
@@ -134,9 +137,10 @@ impl Drop for Daemon {
                 if let Ok(s) = std::fs::read_to_string(&pidf)
                     && let Ok(pid) = s.trim().parse::<i32>()
                 {
-                    unsafe {
-                        libc::kill(pid, libc::SIGKILL);
-                    }
+                    let _ = nix::sys::signal::kill(
+                        nix::unistd::Pid::from_raw(pid),
+                        nix::sys::signal::Signal::SIGKILL,
+                    );
                 }
             }
         }

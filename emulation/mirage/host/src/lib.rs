@@ -1030,10 +1030,13 @@ fn spawn_node(
 
     // Make the master and FIFO read end non-blocking for AsyncFd.
     for fd in [master.as_raw_fd(), fifo_read.as_raw_fd()] {
-        unsafe {
-            let flags = libc::fcntl(fd, libc::F_GETFL);
-            libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
-        }
+        let flags = nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_GETFL)
+            .map(nix::fcntl::OFlag::from_bits_truncate)
+            .unwrap_or(nix::fcntl::OFlag::empty());
+        let _ = nix::fcntl::fcntl(
+            fd,
+            nix::fcntl::FcntlArg::F_SETFL(flags | nix::fcntl::OFlag::O_NONBLOCK),
+        );
     }
 
     let bridge = tokio::spawn(async move {
@@ -1047,24 +1050,14 @@ fn spawn_node(
     Ok(SpawnedNode { child, pid, bridge })
 }
 
-/// Read a fd into `buf`, mapping a negative return into the last OS error.
+/// Read a fd into `buf`, mapping a nix error into the last OS error.
 fn raw_read(fd: std::os::fd::RawFd, buf: &mut [u8]) -> std::io::Result<usize> {
-    let n = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
-    if n < 0 {
-        Err(std::io::Error::last_os_error())
-    } else {
-        Ok(n as usize)
-    }
+    nix::unistd::read(fd, buf).map_err(std::io::Error::from)
 }
 
-/// Write `buf` to a fd, mapping a negative return into the last OS error.
-fn raw_write(fd: std::os::fd::RawFd, buf: &[u8]) -> std::io::Result<usize> {
-    let n = unsafe { libc::write(fd, buf.as_ptr() as *const libc::c_void, buf.len()) };
-    if n < 0 {
-        Err(std::io::Error::last_os_error())
-    } else {
-        Ok(n as usize)
-    }
+/// Write `buf` to a fd, mapping a nix error into the last OS error.
+fn raw_write<Fd: std::os::fd::AsFd>(fd: Fd, buf: &[u8]) -> std::io::Result<usize> {
+    nix::unistd::write(fd, buf).map_err(std::io::Error::from)
 }
 
 /// Bridge a node's PTY for its whole lifetime:
@@ -1131,10 +1124,9 @@ async fn write_all_to_master(
     master: &tokio::io::unix::AsyncFd<std::os::fd::OwnedFd>,
     mut data: &[u8],
 ) -> std::io::Result<()> {
-    use std::os::fd::AsRawFd;
     while !data.is_empty() {
         let mut guard = master.writable().await?;
-        match guard.try_io(|inner| raw_write(inner.get_ref().as_raw_fd(), data)) {
+        match guard.try_io(|inner| raw_write(inner.get_ref(), data)) {
             Ok(Ok(0)) => break,
             Ok(Ok(n)) => data = &data[n..],
             Ok(Err(e)) => return Err(e),

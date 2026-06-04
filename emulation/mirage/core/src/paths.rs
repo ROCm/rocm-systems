@@ -82,8 +82,7 @@ pub fn xdg_runtime_dir() -> PathBuf {
         return PathBuf::from(p);
     }
     let tmp = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".to_string());
-    // SAFETY: getuid is always safe.
-    let uid = unsafe { libc::getuid() };
+    let uid = nix::unistd::getuid().as_raw();
     PathBuf::from(tmp).join(format!("mirage-{uid}"))
 }
 
