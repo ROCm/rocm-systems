@@ -21,9 +21,15 @@ export RCCL_TESTS_DIR="${RCCL_TESTS_SRC}"
     --rccl_home="${RCCL_BUILD_DIR}" --gpu_targets "${GPU_TARGETS:-native}")
 
 # Build the three plugin shared libs that the pytest suite expects on disk.
-for d in ext-profiler/example ext-tuner/example ext-profiler/inspector; do
-    make -C "${RCCL_INSTALL_DIR}/${d}" clean
-    make -C "${RCCL_INSTALL_DIR}/${d}"
+# Skip profiler_plugin_ce.cc in profiler/example
+for d in plugins/profiler/example plugins/tuner/example plugins/profiler/inspector; do
+    if [ "${d}" = "plugins/profiler/example" ]; then
+        make -C "${RCCL_INSTALL_DIR}/${d}" SRC_FILES="plugin.cc print_event.cc" clean
+        make -C "${RCCL_INSTALL_DIR}/${d}" SRC_FILES="plugin.cc print_event.cc"
+    else
+        make -C "${RCCL_INSTALL_DIR}/${d}" clean
+        make -C "${RCCL_INSTALL_DIR}/${d}"
+    fi
 done
 
 # Create and activate venv for the pytest dependencies.
