@@ -39,14 +39,14 @@ event:
     tags: [synchronization]
   Unit_hipEventElapsedTime:
     <<: *level_2
-    tags: [synchronization]
+    tags: [synchronization, smoke]
   Unit_hipEventElapsedTime_Verify_Capture:
     <<: *level_2
     tags: [synchronization]
   Unit_hipEventRecord:
     <<: *level_2
     disabled: [amd_windows]
-    tags: [synchronization]
+    tags: [synchronization, smoke]
   Unit_hipEventRecord_Negative:
     <<: *level_2
     tags: [synchronization]
@@ -73,7 +73,7 @@ event:
     tags: [lifecycle]
   Unit_hipEventCreate_Positive:
     <<: *level_2
-    tags: [lifecycle]
+    tags: [lifecycle, smoke]
   Unit_hipEventCreate_Verify_Capture:
     <<: *level_2
     tags: [lifecycle]
@@ -116,7 +116,7 @@ event:
     tags: [lifecycle]
   Unit_hipEventSynchronize_Default_Positive:
     <<: *level_2
-    tags: [synchronization]
+    tags: [synchronization, smoke]
   Unit_hipEventSynchronize_NoEventRecord_Positive:
     <<: *level_2
     tags: [synchronization]

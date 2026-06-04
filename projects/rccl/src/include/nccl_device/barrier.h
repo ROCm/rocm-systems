@@ -1,11 +1,13 @@
 /*************************************************************************
- * Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef _NCCL_DEVICE_BARRIER_H_
 #define _NCCL_DEVICE_BARRIER_H_
+#include "hip_compat.h"
 #include "impl/core__types.h"
 #include "impl/lsa_barrier__types.h"
 #include "impl/gin_barrier__types.h"

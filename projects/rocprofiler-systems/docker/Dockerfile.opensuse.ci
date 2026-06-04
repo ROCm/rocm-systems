@@ -14,7 +14,6 @@ ENV PATH=/usr/local/bin:${PATH}
 
 ARG EXTRA_PACKAGES=""
 ARG ELFUTILS_DOWNLOAD_VERSION="0.188"
-ARG BOOST_DOWNLOAD_VERSION="1.79.0"
 ARG NJOBS="8"
 
 RUN set +e; \
@@ -27,7 +26,7 @@ RUN set +e; \
 RUN zypper --non-interactive update -y && \
     zypper --non-interactive dist-upgrade -y && \
     zypper --non-interactive install -y -t pattern devel_basis && \
-    zypper --non-interactive install -y chrpath cmake curl dpkg-devel \
+    zypper --non-interactive install -y ccache chrpath cmake curl dpkg-devel \
         gcc-c++ gcc-fortran git gmock gtest iproute2 ninja nlohmann_json-devel \
         openmpi3-devel papi-devel python3-devel python3-pip rpm-build \
         sqlite3-devel vim wget libucp-devel libuct-devel && \

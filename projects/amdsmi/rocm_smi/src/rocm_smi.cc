@@ -1428,11 +1428,15 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type, rsmi_clk_type_
     }
   }
 
-  // Some older drivers will not have the current frequency set
-  // assert(f->current < f->num_supported);
+  // Some older drivers, and SMU power-gated domains on APUs (e.g. gfx1151
+  // SYS/DF/DCEF/SOC/MEM at idle), expose the supported DPM table in
+  // pp_dpm_* without flagging any level as current ('*' marker absent).
+  // Treat that as "current unknown" rather than discarding the parsed
+  // table: keep f->num_supported / f->frequency populated and signal
+  // "no current level" via f->current = -1 so callers can still report
+  // the frequency table.
   if (f->current >= f->num_supported) {
     f->current = -1;
-    return RSMI_STATUS_UNEXPECTED_DATA;
   }
 
   return RSMI_STATUS_SUCCESS;
@@ -3313,14 +3317,18 @@ rsmi_status_t rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
 
     amd::smi::amdgpu_gpuboard_temp_metrics_v1_0 gpuboard_metric;
     ret = read_gpuboard_temp_metrics(file_path.c_str(), gpuboard_metric);
-    if (ret != RSMI_STATUS_SUCCESS) {
-      std::string err_msg = "Failed to read GPU board temperature metrics at " + file_path;
-      LOG_ERROR(err_msg);
+    if (ret == RSMI_STATUS_SUCCESS) {
+      ret = get_gpuboard_temp_value(gpuboard_metric,
+                                    static_cast<rsmi_temperature_type_t>(sensor_type), temperature);
       return ret;
     }
 
-    ret = get_gpuboard_temp_value(gpuboard_metric,
-                                  static_cast<rsmi_temperature_type_t>(sensor_type), temperature);
+    ret = amd::smi::get_gpuboard_temp_value_dynamic(
+        file_path.c_str(), static_cast<rsmi_temperature_type_t>(sensor_type), temperature);
+    if (ret != RSMI_STATUS_SUCCESS && ret != RSMI_STATUS_NOT_SUPPORTED) {
+      std::string err_msg = "Failed to read GPU board temperature metrics at " + file_path;
+      LOG_ERROR(err_msg);
+    }
     return ret;
   }
 
@@ -3340,14 +3348,18 @@ rsmi_status_t rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
 
     amd::smi::amdgpu_baseboard_temp_metrics_v1_0 baseboard_metric;
     ret = read_baseboard_temp_metrics(file_path.c_str(), baseboard_metric);
-    if (ret != RSMI_STATUS_SUCCESS) {
-      std::string err_msg = "Failed to read baseboard temperature metrics at " + file_path;
-      LOG_ERROR(err_msg);
+    if (ret == RSMI_STATUS_SUCCESS) {
+      ret = get_baseboard_temp_value(
+          baseboard_metric, static_cast<rsmi_temperature_type_t>(sensor_type), temperature);
       return ret;
     }
 
-    ret = get_baseboard_temp_value(baseboard_metric,
-                                   static_cast<rsmi_temperature_type_t>(sensor_type), temperature);
+    ret = amd::smi::get_baseboard_temp_value_dynamic(
+        file_path.c_str(), static_cast<rsmi_temperature_type_t>(sensor_type), temperature);
+    if (ret != RSMI_STATUS_SUCCESS && ret != RSMI_STATUS_NOT_SUPPORTED) {
+      std::string err_msg = "Failed to read baseboard temperature metrics at " + file_path;
+      LOG_ERROR(err_msg);
+    }
     return ret;
   }
 

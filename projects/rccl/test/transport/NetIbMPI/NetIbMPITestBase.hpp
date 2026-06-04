@@ -8,18 +8,6 @@
 #define RCCL_TEST_NET_IB_MPI_TEST_BASE_HPP_
 
 #include <gtest/gtest.h>
-// Pre-seed the bf16 guard macros and pull in the new hip_bf16.h before
-// hip_runtime.h transitively includes the old hip_bfloat16.h. Otherwise
-// device.h's #error guard fires during the device-pass compile (the test
-// include path exposes the hipified librccl device.h via
-// ${PROJECT_BINARY_DIR}/hipify/src/include).
-#if defined(ROCM_VERSION) && ROCM_VERSION >= 60000
-  #if !defined(_HIP_INCLUDE_HIP_AMD_DETAIL_HIP_BFLOAT16_H_) && !defined(_HIP_BFLOAT16_H_)
-    #define _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_BFLOAT16_H_
-    #define _HIP_BFLOAT16_H_
-    #include <hip/hip_bf16.h>
-  #endif
-#endif
 #include <hip/hip_runtime.h>
 #include "MPITestBase.hpp"
 #include "NetIbCastInspect.hpp"
@@ -43,6 +31,7 @@
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
 #include <dirent.h>
@@ -411,6 +400,27 @@ protected:
         ASSERT_EQ(InitNetIb(), ncclSuccess);
         ASSERT_EQ(GetDeviceCount(p), ncclSuccess);
         ASSERT_GT(*p, 0);
+    }
+
+    // Count physical IB devices only. The plugin's devices()/GetDeviceCount
+    // returns ncclNMergedIbDevs, which GROWS as makeVDevice creates virtual
+    // NICs — so it is order-dependent across tests in the same process. Note a
+    // single-device vNIC (e.g. a deduped merge) also reports vProps.ndevs == 1,
+    // so ndevs alone cannot tell it apart from a physical NIC. Each physical NIC
+    // is registered with a unique underlying index in vProps.devs[0], while a
+    // 1-device vNIC reuses an existing physical index — so the count of DISTINCT
+    // single-device vProps.devs[0] values is the true physical device count.
+    int GetPhysicalDeviceCount() {
+        int n = 0;
+        if (GetDeviceCount(&n) != ncclSuccess) return 0;
+        std::set<int> physIdx;
+        for (int i = 0; i < n; i++) {
+            ncclNetProperties_t props;
+            memset(&props, 0, sizeof(props));
+            if (GetDeviceProperties(i, &props) != ncclSuccess) continue;
+            if (props.vProps.ndevs <= 1) physIdx.insert(props.vProps.devs[0]);
+        }
+        return (int)physIdx.size();
     }
 
     // Composite block: SetupConnection + wire up NetConnectionGuard for RAII cleanup.

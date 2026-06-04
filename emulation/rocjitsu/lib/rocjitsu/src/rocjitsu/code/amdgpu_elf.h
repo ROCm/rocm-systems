@@ -4,6 +4,8 @@
 #ifndef ROCJITSU_CODE_AMDGPU_ELF_H_
 #define ROCJITSU_CODE_AMDGPU_ELF_H_
 
+#include "rocjitsu/code/rj_code.h"
+
 #include <cstdint>
 
 namespace rocjitsu {
@@ -109,10 +111,32 @@ inline constexpr uint64_t SHF_WRITE = 1u << 0;
 inline constexpr uint64_t SHF_ALLOC = 1u << 1;
 inline constexpr uint64_t SHF_EXECINSTR = 1u << 2;
 
-inline constexpr uint32_t PT_LOAD = 1;
-
 /// @brief AMDGPU vendor specific notes for Code Object V3.
 inline constexpr uint32_t NT_AMDGPU_METADATA = 32;
+
+// Program header types.
+inline constexpr uint32_t PT_LOAD = 1;
+inline constexpr uint32_t PT_DYNAMIC = 2;
+inline constexpr uint32_t PT_NOTE = 4;
+
+// Dynamic section tags.
+inline constexpr int64_t DT_NULL = 0;
+inline constexpr int64_t DT_HASH = 4;
+inline constexpr int64_t DT_STRTAB = 5;
+inline constexpr int64_t DT_SYMTAB = 6;
+inline constexpr int64_t DT_STRSZ = 10;
+inline constexpr int64_t DT_SYMENT = 11;
+
+/**
+ * @brief ELF dynamic section entry.
+ */
+struct Elf64_Dyn {
+  int64_t d_tag;
+  union {
+    uint64_t d_val;
+    uint64_t d_ptr;
+  } d_un;
+};
 
 /**
  * @brief ELF header.

@@ -271,12 +271,13 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
         }
     }
 
-    // Merge the output files, if rank 0
-    if(dmp::rank() == 0)
+    // Merge the output files, if rank 0 and output is enabled for this rank
+    if(dmp::rank() == 0 &&
+       config::output_filtering::is_file_output_enabled_for_current_mpi_rank())
     {
         auto _output_folder = filepath::dirname(_filename);
         auto _script_path   = std::string{ "rocprof-sys-merge-output.sh" };
-        auto _script_dir    = get_env("ROCPROFSYS_SCRIPT_PATH", std::string{}, false);
+        auto _script_dir    = get_env("ROCPROFSYS_SCRIPT_PATH", std::string{});
 
         if(!_script_dir.empty())
         {

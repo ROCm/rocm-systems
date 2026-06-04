@@ -48,7 +48,7 @@ void rj_sigsegv_handler(int sig, siginfo_t *info, void *ctx) {
 }
 
 __attribute__((constructor)) void rj_install_signal_handler() {
-  struct sigaction sa{};
+  struct sigaction sa {};
   sa.sa_sigaction = rj_sigsegv_handler;
   sa.sa_flags = SA_SIGINFO;
   sigaction(SIGSEGV, &sa, nullptr);

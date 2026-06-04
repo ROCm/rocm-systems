@@ -1551,6 +1551,10 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
               }
               Barriers().GetLastSignal()->flags_.isPacketDispatch_ = true;
             }
+          } else if (has_prepatched_signal &&
+                     pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH &&
+                     amd::activity_prof::IsEnabled(OP_ID_DISPATCH)) {
+            slot->reserved2 = timestamp_->command().profilingInfo().correlation_id_;
           }
         }
         if (kernelNames != nullptr && i < kernelNames->size() &&
@@ -1928,7 +1932,33 @@ VirtualGPU::~VirtualGPU() {
 
   delete blitMgr_;
 
-  if (tracking_created_) {
+  bool skip_fence_barrier = false;
+  if (nullptr != schedulerQueue_) {
+#if defined(_WIN32)
+    if (isSchedulerQueueThreadRunning()) {
+      schedulerQueueThreadRunning_.store(false, std::memory_order_release);
+      {
+        std::lock_guard<std::mutex> lock(scheduler_mutex_);
+        pendingSchedulerEvents_.clear();
+        scheduler_cv_.notify_one();
+      }
+      if (schedulerQueueThread_.joinable()) {
+        schedulerQueueThread_.join();
+      }
+    }
+    if (!dev().IsPm4Emulation()) {
+      roc_device_.hasSchedulerQueue_.fetch_add(1, std::memory_order_release);
+      skip_fence_barrier = true;
+    } else {
+      Hsa::queue_destroy(schedulerQueue_);
+    }
+#else
+    Hsa::queue_destroy(schedulerQueue_);
+#endif  // _WIN32
+    schedulerQueue_ = nullptr;
+  }
+
+  if (tracking_created_ && !skip_fence_barrier) {
     std::scoped_lock l(execution());
     // Dedicated queues keep their HW queue, never acquire from pool
     if (!dedicated_queue_ && gpu_queue_ == nullptr) {
@@ -1951,23 +1981,6 @@ VirtualGPU::~VirtualGPU() {
   }
 
   delete printfdbg_;
-
-  if (nullptr != schedulerQueue_) {
-#if defined(_WIN32)
-    // Stop the monitor thread before destroying the queue
-    if (isSchedulerQueueThreadRunning()) {
-      schedulerQueueThreadRunning_.store(false, std::memory_order_relaxed);
-      {
-        std::lock_guard<std::mutex> lock(scheduler_mutex_);
-        scheduler_cv_.notify_one();
-      }
-      if (schedulerQueueThread_.joinable()) {
-        schedulerQueueThread_.join();
-      }
-    }
-#endif  // _WIN32
-    Hsa::queue_destroy(schedulerQueue_);
-  }
 
   if (nullptr != virtualQueue_) {
     virtualQueue_->release();
@@ -4379,9 +4392,14 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
 
     if ((devKernel->workGroupInfo()->usedStackSize_ & 0x1) == 0x1) {
       dispatchPacket.private_segment_size =
-              std::max<uint64_t>(dev().StackSize(), dispatchPacket.private_segment_size);
-      if (dispatchPacket.private_segment_size > 16 * Ki) {
-        dispatchPacket.private_segment_size = 16 * Ki;
+          std::max<uint64_t>(dev().StackSize(), dispatchPacket.private_segment_size);
+      const size_t maxStackSize = dev().MaxStackSize();
+      // we return an explicit error when we exceed the max stack size limit
+      if (dispatchPacket.private_segment_size > maxStackSize) {
+        LogPrintfError("Scratch size (%u) exceeds max allowed (%zu) for kernel : %s",
+                       dispatchPacket.private_segment_size, maxStackSize,
+                       gpuKernel.getDemangledName().c_str());
+        return false;
       }
     }
 
@@ -4630,6 +4648,21 @@ void VirtualGPU::submitAccumulate(amd::AccumulateCommand& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
   std::scoped_lock lock(execution());
   profilingBegin(vcmd);
+
+  // Register pre-patched HW event signals with the Timestamp for profiling.
+  // These signals were configured by ApplyHwEventPatches (isPacketDispatch_,
+  // done_ flags set there) but bypass ActiveSignal, so they must be added
+  // here so checkGpuTime → ExtractSignalTiming → addTimestamps picks them up.
+  if (timestamp_ != nullptr) {
+    for (const auto& [_, events] : vcmd.getHwEvents()) {
+      for (void* hw_event : events) {
+        auto* ps = reinterpret_cast<ProfilingSignal*>(hw_event);
+        if (ps != nullptr) {
+          timestamp_->AddProfilingSignal(ps);
+        }
+      }
+    }
+  }
 
   const Settings& settings = dev().settings();
   if (settings.barrier_value_packet_) {
