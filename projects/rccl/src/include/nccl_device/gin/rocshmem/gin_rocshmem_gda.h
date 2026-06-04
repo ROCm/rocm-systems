@@ -122,13 +122,6 @@ struct ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
   NCCL_DEVICE_INLINE static uint64_t* call(ncclGinCtx ctx, ncclGinSignal_t signalId) {
     ncclGinRocshmemGdaGPUContext* rsCtx = (ncclGinRocshmemGdaGPUContext*)ctx.handle;
     uint64_t* ptr = nccl::utility::loadConst(&rsCtx->signals) + signalId;
-    static __device__ uint64_t last_val = ~0ULL;
-    uint64_t v = *ptr;
-    if (v != last_val) {
-      printf("GDA GetSignalPtr: rank=%d signalId=%u ptr=%p val=%llu\n",
-             ctx.rank, signalId, (void*)ptr, (unsigned long long)v);
-      last_val = v;
-    }
     return ptr;
   }
 };
