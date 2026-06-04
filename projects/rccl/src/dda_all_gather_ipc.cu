@@ -125,18 +125,8 @@ ncclResult_t ncclAllGatherDdaIpc(
     ncclDataType_t datatype,
     ncclComm* comm,
     cudaStream_t stream) {
-  switch (datatype) {
-  case ncclFloat32:
-    return ncclAllGatherDdaIpcTyped<float>(
-        sendbuff, recvbuff, sendcount, comm, stream);
-  case ncclFloat16:
-    return ncclAllGatherDdaIpcTyped<half>(
-        sendbuff, recvbuff, sendcount, comm, stream);
-  case ncclBfloat16:
-    return ncclAllGatherDdaIpcTyped<bf16>(
-        sendbuff, recvbuff, sendcount, comm, stream);
-  default:
-    return ncclInvalidArgument;
-  }
+  int typeSize = ncclTypeSize(datatype);
+  return ncclAllGatherDdaIpcTyped<int8_t>(
+      sendbuff, recvbuff, sendcount * typeSize, comm, stream);
 }
 

@@ -38,7 +38,7 @@ namespace meta::comms {
 template <typename T>
 inline constexpr bool is_supported_type_v =
     (std::is_same<T, float>::value || std::is_same<T, half>::value ||
-     std::is_same<T, bf16>::value
+     std::is_same<T, int8_t>::value || std::is_same<T, bf16>::value
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
      || std::is_same<T, __hip_bfloat16>::value
 #endif

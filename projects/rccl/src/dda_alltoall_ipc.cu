@@ -62,13 +62,6 @@ static ncclResult_t ncclAllToAllDdaIpcTyped(
   void* peerPtrsDev = comm->ddaIpcPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
-  CUDACHECK(cudaMemcpyAsync(
-        comm->ddaIpcScratch,
-        sendbuff,
-        totalCount * sizeof(T),
-        cudaMemcpyDeviceToDevice,
-        stream));
-
   meta::comms::ddaAllToAllIpc<T, kDdaNranks, false>
       <<<grid, block, 0, stream>>>(
           d_ipcbuffs,
@@ -132,17 +125,8 @@ ncclResult_t ncclAllToAllDdaIpc(
     ncclDataType_t datatype,
     ncclComm* comm,
     cudaStream_t stream) {
-  switch (datatype) {
-  case ncclFloat32:
-    return ncclAllToAllDdaIpcTyped<float>(
-        sendbuff, recvbuff, count, comm, stream);
-  case ncclFloat16:
-    return ncclAllToAllDdaIpcTyped<half>(
-        sendbuff, recvbuff, count, comm, stream);
-  case ncclBfloat16:
-    return ncclAllToAllDdaIpcTyped<bf16>(
-        sendbuff, recvbuff, count, comm, stream);
-  default:
-    return ncclInvalidArgument;
-  }
+  
+  int typeSize = ncclTypeSize(datatype);
+  return ncclAllToAllDdaIpcTyped<int8_t>(
+        sendbuff, recvbuff, count * typeSize, comm, stream);
 }
