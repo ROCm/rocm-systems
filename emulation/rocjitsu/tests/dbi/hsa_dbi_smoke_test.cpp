@@ -17,6 +17,7 @@ RJ_DIAGNOSTIC_POP
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/executable.h"
 #include "rocjitsu/code/patch/instrumentor.h"
+#include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -559,9 +560,7 @@ TEST_F(HsaDbiSmokeHardware, TrampolineIsActuallyExecutedByGpu) {
                                    << " - trampoline body layout changed?";
 
   // s_endpgm 0 on CDNA: SOPP prefix (0x17F) << 23 | opcode 1 << 16 | simm16 0.
-  // TODO: replace with build_s_endpgm(0, arch) once an arch-aware helper exists
-  // in instruction_builder.h (opcode differs across CDNA/RDNA generations).
-  constexpr uint32_t kSEndpgm0 = 0xBF810000u;
+  constexpr uint32_t kSEndpgm0 = build_s_endpgm(0x0000,  ROCJITSU_CODE_ARCH_CDNA4);
   std::memcpy(sabotaged.data() + tramp->sectionOffset(), &kSEndpgm0, sizeof(kSEndpgm0));
 
   // Same inputs as the dispatch test so we can compare against its golden.

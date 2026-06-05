@@ -106,6 +106,18 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   }
 }
 
+/// @brief Get the s_endpgm opcode for a target ISA.
+[[nodiscard]] inline constexpr uint32_t sopp_op_endpgm(rj_code_arch_t arch) {
+  // GFX9 (CDNA1-4): opcode 2; GFX12 (RDNA3/3.5/4): opcode 32
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return 1;
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return 48;
+  default:
+    return 0;
+  }
+}
 /// @brief Get the s_nop opcode for a target ISA.
 [[nodiscard]] inline constexpr uint32_t sopp_op_nop([[maybe_unused]] rj_code_arch_t arch) {
   return 0; // s_nop is opcode 0 on all ISAs
@@ -166,6 +178,9 @@ build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4)
 // opcode 1 on GFX9 (CDNA1-4) and opcode 48 (0x30) on GFX12 (RDNA4); the
 // sabotage path in tests/dbi/hsa_dbi_smoke_test.cpp currently hardcodes the
 // CDNA encoding 0xBF810000.
+[[nodiscard]] inline constexpr uint32_t build_s_endpgm(int16_t simm16, rj_code_arch_t arch) {
+  return pack_sopp(sopp_op_endpgm(arch), simm16);
+}
 
 /// @brief Encode s_delay_alu for the given target ISA.
 [[nodiscard]] inline constexpr uint32_t build_s_delay_alu(uint16_t simm16, rj_code_arch_t) {
