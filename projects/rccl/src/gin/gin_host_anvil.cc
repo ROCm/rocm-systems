@@ -103,7 +103,7 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
     hipMemset(countersLocal, 0, countersBytes);
   }
 
-  // Exchange per-rank signal base pointers (symmetric heap local VAs for SDMA targeting).
+  // Enable xGMI P2P for in-node SDMA queues (rocshmem IPC covers symmetric heap).
   for (int r = 0; r < comm->nRanks; r++) {
     if (r == comm->rank) continue;
     if (comm->rankToNode[r] != comm->rankToNode[comm->rank]) continue;
@@ -112,10 +112,29 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
     rocshmem::anvil::EnablePeerAccess(comm->cudaDev, peerDev);
   }
 
-  // Gather pointers across all ranks (world). For off-node ranks, entries are nullptr.
+  // Build per-peer signal bases for SDMA on this GPU. Anvil SDMA packets carry an
+  // address in the *source* GPU VA space (like rocshmem AMOs), not the peer's raw
+  // local pointer. rocshmem_ptr(localBase, pe) returns the IPC-mapped address.
   NCCLCHECKGOTO(ncclCalloc(&ctx->signalsBaseHost, comm->nRanks), ret, fail_signals);
-  ctx->signalsBaseHost[comm->rank] = signalsLocal;
-  NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, ctx->signalsBaseHost, sizeof(uint64_t*)), ret, fail_signals);
+  for (int r = 0; r < comm->nRanks; r++) {
+    if (signalsLocal == nullptr) {
+      ctx->signalsBaseHost[r] = nullptr;
+      continue;
+    }
+    if (r == comm->rank) {
+      ctx->signalsBaseHost[r] = signalsLocal;
+    } else if (comm->rankToNode[r] != comm->rankToNode[comm->rank]) {
+      ctx->signalsBaseHost[r] = nullptr;
+    } else {
+      void* remote = rocshmem::rocshmem_ptr(signalsLocal, r);
+      if (remote == nullptr) {
+        WARN("GIN anvil: rocshmem_ptr(signals=%p, pe=%d) failed", (void*)signalsLocal, r);
+        ret = ncclSystemError;
+        goto fail_signals;
+      }
+      ctx->signalsBaseHost[r] = (uint64_t*)remote;
+    }
+  }
 
   NCCLCHECKGOTO(ncclCalloc(&ctx->queuesHost, comm->nRanks), ret, fail_signals);
 
