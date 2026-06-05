@@ -73,6 +73,8 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
 
         if(_v.find('-') != std::string::npos)
         {
+            // split the string into two parts at the '-' character and check if the
+            // result is valid
             auto _vv = tim::delimit(_v, "-");
             if(_vv.size() != 2)
             {
