@@ -12,12 +12,12 @@ and the ROCpd database.
 from __future__ import annotations
 import pytest
 from conftest import RocprofsysTest
-from rocprofsys import is_apu_host
+from rocprofsys import detect_gpu
 
 
 def expects_kfd_page_migrate() -> bool:
     """Discrete GPUs should record PAGE_MIGRATE; APUs often fault without migrate."""
-    return not is_apu_host()
+    return "apu" not in detect_gpu().categories
 
 
 pytestmark = [

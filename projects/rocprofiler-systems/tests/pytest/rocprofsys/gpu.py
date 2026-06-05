@@ -106,29 +106,6 @@ def get_rocminfo(rocm_path: Optional[Path] = None) -> Optional[Path]:
 
 
 @lru_cache(maxsize=1)
-def is_apu_host(rocm_path: Optional[Path] = None) -> bool:
-    """True when rocminfo reports APU memory properties (shared HBM / zero-copy).
-
-    Uses the literal ``APU`` string in rocminfo stdout (e.g. ``Memory Properties: APU``),
-    not architecture lists alone, because some targets (e.g. gfx942) can be discrete or APU.
-    """
-    rocminfo = get_rocminfo(rocm_path)
-    if not rocminfo:
-        return False
-    try:
-        result = subprocess.run(
-            [str(rocminfo)],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-        return "APU" in result.stdout
-    except (subprocess.SubprocessError, OSError):
-        return False
-
-
-@lru_cache(maxsize=1)
 def detect_gpu(rocm_path: Optional[Path] = None) -> GPUInfo:
     """Detect available AMD GPUs and their capabilities.
 

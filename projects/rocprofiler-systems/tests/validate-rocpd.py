@@ -147,14 +147,14 @@ def print_help():
     """)
 
 
-def _import_is_apu_host():
+def _import_detect_gpu():
     tests_dir = Path(os.path.dirname(os.path.abspath(__file__)))
     pytest_dir = tests_dir / "pytest"
     if str(pytest_dir) not in sys.path:
         sys.path.insert(0, str(pytest_dir))
-    from rocprofsys.gpu import is_apu_host
+    from rocprofsys.gpu import detect_gpu
 
-    return is_apu_host
+    return detect_gpu
 
 
 def validate_table(
@@ -252,7 +252,7 @@ def validate_table(
                 if validation_query.skip_on_apu and host_is_apu:
                     print(
                         f"⏭️  Skipping '{validation_query.description}' on '{table_name}' "
-                        f"(skip_on_apu: APU host — page migrate not expected)"
+                        f"(skip_on_apu: APU GPU — page migrate not expected)"
                     )
                     continue
 
@@ -470,11 +470,11 @@ if __name__ == "__main__":
 
     host_is_apu = False
     try:
-        host_is_apu = _import_is_apu_host()()
+        host_is_apu = "apu" in _import_detect_gpu()().categories
         if host_is_apu:
-            print("APU host detected (rocminfo); skip_on_apu rules will be skipped")
+            print("APU GPU detected (detect_gpu); skip_on_apu rules will be skipped")
     except Exception as e:
-        print(f"Warning: Could not detect APU host ({e}), running all queries")
+        print(f"Warning: Could not detect APU GPU ({e}), running all queries")
 
     print(f"Validating ROCPD. Database file: {args.database}")
 
