@@ -119,8 +119,8 @@ including:
 
     - One alternative architecture involves consumers explicitly
     calling into producers via an API to configure things like sampling frequencies. The approach here is simpler: we just
-    publish data streams at multiple frequencies and allow consumers to attach to the one they need. For example, a
-    PTP-enabled multi-node workload needing ~100 precision for performance analysis may need sampling at a high frequency
+    publish data streams at multiple frequencies and allow consumers to attach to the one(s) they need. For example, a
+    PTP-enabled multi-node workload needing ~100ns precision for performance analysis may need sampling at a high frequency
     such as 100 Hz, while a client application can tolerate lower precision such as 1 Hz. 
     
         - We envision publishing `M * N` streams, where `M` is the number of GPUs on the node and `N` is the
