@@ -41,7 +41,12 @@
 
 #include "lib/output/pc_sampling_pc_correction.hpp"
 
+#include "lib/common/logging.hpp"
+
+#include <algorithm>
 #include <array>
+#include <map>
+#include <utility>
 
 namespace rocprofiler
 {
@@ -58,6 +63,35 @@ bool
 starts_with(std::string_view str, std::string_view prefix)
 {
     return str.size() >= prefix.size() && str.compare(0, prefix.size(), prefix) == 0;
+}
+
+// Walk every symbol of a code object and build its (unsorted) classification.
+// This is the only comgr-coupled layer: it adapts the real decoder into the
+// per-instruction `decode` callback consumed by
+// CodeObjectClassification::add_symbol. The window state machine itself lives
+// in add_symbol and is exercised directly by the unit tests with synthetic
+// instructions (no decoder needed) -- this adapter is intentionally thin.
+//
+// Returns the built-and-sorted classification, or an empty one if the code
+// object has no symbols (a survivable case, e.g. data-only objects).
+std::shared_ptr<const CodeObjectClassification>
+build_classification(code_obj_decoder_t& decoder, rocprofiler_code_object_id_t co_id)
+{
+    auto classification = std::make_shared<CodeObjectClassification>();
+
+    // Symbols are keyed by load-relative vaddr offset -- the same space as a
+    // sample's pc.code_object_offset and the offset add_symbol records.
+    std::map<uint64_t, SymbolInfo> symbols = decoder.getSymbolMap(co_id);
+
+    for(const auto& [vaddr, sym] : symbols)
+    {
+        classification->add_symbol(sym.vaddr, sym.mem_size, [&](uint64_t voffset) {
+            return decoder.get(co_id, voffset);
+        });
+    }
+
+    classification->sort();
+    return classification;
 }
 }  // namespace
 
@@ -86,23 +120,131 @@ classify(std::string_view inst)
     return Kind::EXT;
 }
 
-PCCorrectionManager::PCCorrectionManager()  = default;
+void
+CodeObjectClassification::add_symbol(uint64_t         symbol_vaddr,
+                                     uint64_t         symbol_size,
+                                     const decode_fn& decode)
+{
+    auto           window = std::make_shared<InstructionStreamWindow>();  // has_ext1=false
+    const uint64_t end    = symbol_vaddr + symbol_size;
+
+    for(uint64_t voff = symbol_vaddr; voff < end;)
+    {
+        std::unique_ptr<Instruction> inst = decode(voff);
+        if(!inst || inst->size == 0 || voff + inst->size > end) break;
+
+        switch(classify(inst->inst))
+        {
+            case Kind::EXT:
+                // Close the current window only if it actually opened on an
+                // external and captured at least one internal.
+                if(window->has_ext1 && (window->M > 0 || window->N > 0))
+                {
+                    window->ext2_offset = voff;
+                    window->has_ext2    = true;
+                }
+                // Open a fresh window with this external as the new EXT1.
+                window              = std::make_shared<InstructionStreamWindow>();
+                window->ext1_offset = voff;
+                window->has_ext1    = true;
+                break;
+            case Kind::REGULAR_INTERNAL:
+                window->M++;
+                window->regular_internal_total_bytes += inst->size;
+                entries.push_back({voff, window});
+                break;
+            case Kind::S_ICACHE_INV:
+                window->N++;
+                entries.push_back({voff, window});
+                break;
+        }
+
+        voff += inst->size;
+    }
+    // End of symbol: a still-open window keeps has_ext2 false (trailing
+    // internals). The local `window` goes out of scope; nothing else to do.
+}
+
+void
+CodeObjectClassification::sort()
+{
+    std::sort(entries.begin(), entries.end(), [](const InternalEntry& a, const InternalEntry& b) {
+        return a.offset < b.offset;
+    });
+}
+
+std::optional<InternalEntry>
+CodeObjectClassification::find(uint64_t offset) const
+{
+    auto it = std::lower_bound(
+        entries.begin(), entries.end(), offset, [](const InternalEntry& e, uint64_t off) {
+            return e.offset < off;
+        });
+    if(it == entries.end() || it->offset != offset) return std::nullopt;
+    return *it;
+}
+
+PCCorrectionManager::PCCorrectionManager(common::Synchronized<code_obj_decoder_t, true>& decoder)
+: decoder_(decoder)
+{}
+
 PCCorrectionManager::~PCCorrectionManager() = default;
 
 void
 PCCorrectionManager::build(const rocprofiler_callback_tracing_code_object_load_data_t& obj_data)
 {
-    // TODO: single-shot pass over the code object's symbol map; build, sort by
-    // offset, and publish a shared_ptr<const CodeObjectClassification>.
-    (void) obj_data;
+    const auto co_id = obj_data.code_object_id;
+
+    // Decode under the decoder's lock; the symbol walk only reads, but the
+    // synced decoder exposes mutation via wlock, so we take the writer lock.
+    auto classification = decoder_.wlock(
+        [&](auto& decoder) { return build_classification(decoder, co_id); });
+
+    if(classification->entries.empty())
+    {
+        // No internal-like instructions (or no symbols at all -- e.g. data-only
+        // code objects). Nothing to correct; publish nothing. A later sample
+        // for this code object will simply miss the map and pass through.
+        ROCP_INFO << "PC correction: no entries for code object " << co_id
+                  << "; classification not published";
+        return;
+    }
+
+    publish(co_id, std::move(classification));
+}
+
+void
+PCCorrectionManager::publish(rocprofiler_code_object_id_t                    co_id,
+                             std::shared_ptr<const CodeObjectClassification> classification)
+{
+    // Publish atomically: readers observe either no entry or the fully-built,
+    // sorted, immutable classification.
+    map_.wlock([&](auto& m) { m.insert_or_assign(co_id, std::move(classification)); });
 }
 
 void
 PCCorrectionManager::erase(rocprofiler_code_object_id_t co_id)
 {
-    // TODO: brief wlock + erase. In-flight readers stay safe via the
-    // shared_ptr<const ...> copy-out in the lookup path.
-    (void) co_id;
+    // Brief wlock + erase. Any in-flight reader already copied the shared_ptr
+    // out under lookup()'s rlock, so the classification stays alive past this
+    // erase until that reader releases it.
+    map_.wlock([&](auto& m) { m.erase(co_id); });
+}
+
+std::optional<InternalEntry>
+PCCorrectionManager::lookup(rocprofiler_code_object_id_t co_id, uint64_t offset) const
+{
+    // Step 1: brief rlock, copy the shared_ptr out. The copy keeps the
+    // classification alive even if the code object is concurrently unloaded.
+    std::shared_ptr<const CodeObjectClassification> classification;
+    map_.rlock([&](const auto& m) {
+        auto it = m.find(co_id);
+        if(it != m.end()) classification = it->second;
+    });
+    if(!classification) return std::nullopt;
+
+    // Step 2: lock-free binary search on the immutable, sorted entries vector.
+    return classification->find(offset);
 }
 
 bool
