@@ -61,6 +61,7 @@ bool IPCEventEmulated::createIpcEventShmemIfNeeded() {
 
 // ================================================================================================
 hipError_t IPCEventEmulated::query() {
+  std::scoped_lock lock(lock_);
   if (ipc_evt_.ipc_shmem_) {
     const int prev_read_idx = ipc_evt_.ipc_shmem_->read_index;
     const int offset = prev_read_idx % IPC_SIGNALS_PER_EVENT;
@@ -75,6 +76,7 @@ hipError_t IPCEventEmulated::query() {
 
 // ================================================================================================
 hipError_t IPCEventEmulated::synchronize() {
+  std::scoped_lock lock(lock_);
   if (ipc_evt_.ipc_shmem_) {
     int prev_read_idx = ipc_evt_.ipc_shmem_->read_index;
     if (prev_read_idx >= 0) {
@@ -90,6 +92,7 @@ hipError_t IPCEventEmulated::synchronize() {
 
 // ================================================================================================
 hipError_t IPCEventEmulated::streamWait(hip::Stream* stream, uint flags) {
+  std::scoped_lock lock(lock_);
   const int offset = ipc_evt_.ipc_shmem_->read_index;
   return ihipStreamOperation(
       reinterpret_cast<hipStream_t>(stream),
@@ -101,12 +104,18 @@ hipError_t IPCEventEmulated::streamWait(hip::Stream* stream, uint flags) {
 // ================================================================================================
 hipError_t IPCEventEmulated::recordCommand(amd::Command*& command, amd::HostQueue* stream,
                                            uint32_t flags, bool batch_flush) {
+  // Graph event-record nodes call this directly; lock_ is recursive so the
+  // normal addMarker path is unaffected.
+  std::scoped_lock lock(lock_);
   command = new amd::Marker(*stream, kMarkerDisableFlush);
   return hipSuccess;
 }
 
 // ================================================================================================
 hipError_t IPCEventEmulated::enqueueRecordCommand(hip::Stream* stream, amd::Command* command) {
+  // Guard event_/shmem against concurrent query/synchronize/streamWait. Graph
+  // event-record nodes call this directly; lock_ is recursive.
+  std::scoped_lock lock(lock_);
   createIpcEventShmemIfNeeded();
 
   // Allocate signal slot for this event
@@ -150,6 +159,7 @@ hipError_t IPCEventEmulated::enqueueRecordCommand(hip::Stream* stream, amd::Comm
 
 // ================================================================================================
 hipError_t IPCEventEmulated::GetHandle(ihipIpcEventHandle_t* handle) {
+  std::scoped_lock lock(lock_);
   if (!createIpcEventShmemIfNeeded()) {
     return hipErrorInvalidValue;
   }
@@ -164,6 +174,7 @@ hipError_t IPCEventEmulated::GetHandle(ihipIpcEventHandle_t* handle) {
 
 // ================================================================================================
 hipError_t IPCEventEmulated::OpenHandle(ihipIpcEventHandle_t* handle) {
+  std::scoped_lock lock(lock_);
   ipc_evt_.ipc_name_ = handle->shmem_name;
 
   // Map shared memory from IPC handle
@@ -234,6 +245,7 @@ IPCEvent::~IPCEvent() {
 
 // ================================================================================================
 hipError_t IPCEvent::GetHandle(ihipIpcEventHandle_t* handle) {
+  std::scoped_lock lock(lock_);
   auto status = createIpcSignalIfNeeded();
   if (status != hipSuccess) {
     return status;
@@ -250,6 +262,7 @@ hipError_t IPCEvent::GetHandle(ihipIpcEventHandle_t* handle) {
 
 // ================================================================================================
 hipError_t IPCEvent::OpenHandle(ihipIpcEventHandle_t* handle) {
+  std::scoped_lock lock(lock_);
   if (handle->type != kIpcEventHandleROCr) {
     return hipErrorInvalidValue;
   }
