@@ -1322,3 +1322,91 @@ std::tuple<uint64_t, uint64_t, uint64_t, uint64_t> parse_bdfid(uint64_t bdfid) {
   uint64_t function = bdfid & 0x7;
   return std::tuple<uint64_t, uint64_t, uint64_t, uint64_t>(domain, bus, device_id, function);
 }
+
+amdsmi_status_t smi_amdgpu_read_clk_freq_from_pp_dpm(amd::smi::AMDSmiGPUDevice* device,
+                                                     const char* pp_dpm_file,
+                                                     amdsmi_frequencies_t* f) {
+  if (f == nullptr || device == nullptr || pp_dpm_file == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  uint32_t drm_render = device->get_drm_render_minor();
+  std::string sysfs_path =
+      "/sys/class/drm/renderD" + std::to_string(drm_render) + "/device/" + pp_dpm_file;
+
+  std::ifstream file(sysfs_path);
+  if (!file.good()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  f->num_supported = 0;
+  f->current = 0;
+  f->has_deep_sleep = 0;
+
+  std::string line;
+  uint32_t level_index = 0;
+
+  while (std::getline(file, line) && level_index < AMDSMI_MAX_NUM_FREQUENCIES) {
+    // Parse line format: "0: 200Mhz" or "1: 400Mhz *"
+    size_t colon_pos = line.find(':');
+    if (colon_pos == std::string::npos) {
+      continue;
+    }
+
+    std::string freq_str = line.substr(colon_pos + 1);
+
+    // Check if this is the current level (marked with *)
+    bool is_current = (freq_str.find('*') != std::string::npos);
+    if (is_current) {
+      f->current = level_index;
+    }
+
+    // Remove asterisk and surrounding whitespace
+    freq_str.erase(std::remove(freq_str.begin(), freq_str.end(), '*'), freq_str.end());
+    freq_str.erase(0, freq_str.find_first_not_of(" \t"));
+    size_t end = freq_str.find_last_not_of(" \t");
+    if (end != std::string::npos) {
+      freq_str.erase(end + 1);
+    }
+
+    // Parse "200Mhz" / "200 Mhz" / "200MHz"
+    uint64_t freq_value = 0;
+    char unit = 'M';  // Default to MHz
+
+    size_t unit_pos = freq_str.find_first_not_of("0123456789 ");
+    if (unit_pos != std::string::npos) {
+      std::string value_str = freq_str.substr(0, unit_pos);
+      value_str.erase(std::remove(value_str.begin(), value_str.end(), ' '), value_str.end());
+      try {
+        freq_value = std::stoull(value_str);
+      } catch (...) {
+        continue;  // Skip invalid lines
+      }
+      std::string unit_str = freq_str.substr(unit_pos);
+      if (!unit_str.empty()) {
+        unit = static_cast<char>(std::toupper(static_cast<unsigned char>(unit_str[0])));
+      }
+    }
+
+    f->frequency[level_index] = freq_value * amd::smi::get_multiplier_from_char(unit);
+    level_index++;
+  }
+
+  f->num_supported = level_index;
+  return (f->num_supported > 0) ? AMDSMI_STATUS_SUCCESS : AMDSMI_STATUS_NOT_SUPPORTED;
+}
+
+const char* smi_amdgpu_pp_dpm_filename_for_clk_type(amdsmi_clk_type_t clk_type) {
+  switch (clk_type) {
+    case AMDSMI_CLK_TYPE_VCLK0:
+      return "pp_dpm_vclk";
+    case AMDSMI_CLK_TYPE_VCLK1:
+      return "pp_dpm_vclk1";
+    case AMDSMI_CLK_TYPE_DCLK0:
+      return "pp_dpm_dclk";
+    case AMDSMI_CLK_TYPE_DCLK1:
+      return "pp_dpm_dclk1";
+    default:
+      return nullptr;
+  }
+}

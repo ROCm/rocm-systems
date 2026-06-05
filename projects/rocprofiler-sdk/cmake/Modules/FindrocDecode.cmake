@@ -51,18 +51,22 @@ function(_rocdecode_read_version_header _VERSION_VAR)
                                  "${rocDecode_INCLUDE_DIR}/rocdecode/rocdecode_version.h")
         file(READ "${rocDecode_INCLUDE_DIR}/rocdecode/rocdecode_version.h"
              _rocdecode_version)
-        macro(_rocdecode_get_version_num _VAR _NAME)
-            string(REGEX MATCH "define([ \t]+)${_NAME}([ \t]+)([0-9]+)" _tmp
-                         "${_rocdecode_version}")
+        macro(_rocdecode_get_version_num _VAR _COMPONENT)
             set(${_VAR} 0)
-            if(_tmp MATCHES "([0-9]+)")
-                string(REGEX REPLACE "(.*${_NAME}[ ]+)([0-9]+)" "\\2" ${_VAR} "${_tmp}")
-            endif()
+            foreach(_NAME "ROCDECODE_VERSION_${_COMPONENT}"
+                          "ROCDECODE_${_COMPONENT}_VERSION")
+                string(REGEX MATCH "define[ \t]+${_NAME}[ \t]+([0-9]+)" _tmp
+                             "${_rocdecode_version}")
+                if(_tmp)
+                    set(${_VAR} "${CMAKE_MATCH_1}")
+                    break()
+                endif()
+            endforeach()
         endmacro()
 
-        _rocdecode_get_version_num(_major "ROCDECODE_MAJOR_VERSION")
-        _rocdecode_get_version_num(_minor "ROCDECODE_MINOR_VERSION")
-        _rocdecode_get_version_num(_patch "ROCDECODE_PATCH_VERSION")
+        _rocdecode_get_version_num(_major "MAJOR")
+        _rocdecode_get_version_num(_minor "MINOR")
+        _rocdecode_get_version_num(_patch "PATCH")
         set(${_VERSION_VAR}
             ${_major}.${_minor}.${_patch}
             PARENT_SCOPE)

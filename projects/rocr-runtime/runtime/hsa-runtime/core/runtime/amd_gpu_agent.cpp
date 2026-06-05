@@ -140,6 +140,10 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   historical_clock_ratio_ = 0.0;
   assert(err == HSA_STATUS_SUCCESS && "hsaGetClockCounters error");
 
+  num_h2d_d2h_engines_ = properties_.NumSdmaEngines > 2 ? 2 : properties_.NumSdmaEngines;
+  num_p2p_engines_ =  properties_.NumSdmaXgmiEngines ? properties_.NumSdmaXgmiEngines
+                      : std::max(0U, properties_.NumSdmaEngines - 2);
+
   const core::Isa *isa_base;
 
   if (node_props.OverrideEngineId.Value != 0) {
@@ -884,7 +888,7 @@ void GpuAgent::InitDma() {
   queues_[QueuePCSampling].reset([queue_lambda]() { return queue_lambda(HSA::HSA_AMD_QUEUE_PRIORITY_MAXIMUM); });
 
   // Decide which engine to use for blits.
-  auto blit_lambda = [this](bool use_xgmi, lazy_ptr<core::Queue>& queue, bool isHostToDev, uint32_t rec_eng) {
+  auto blit_lambda = [this](bool prefer_xgmi, lazy_ptr<core::Queue>& queue, bool isHostToDev, uint32_t rec_eng) {
     Flag::SDMA_OVERRIDE sdma_override = core::Runtime::runtime_singleton_->flag().enable_sdma();
 
     // User SDMA queues are unstable on gfx8 and unsupported on gfx1013.
@@ -894,14 +898,14 @@ void GpuAgent::InitDma() {
 
     if (use_sdma && (HSA_PROFILE_BASE == profile_)) {
       // On gfx90a ensure that HostToDevice queue is created first and so is placed on SDMA0.
-      if ((!use_xgmi) && (!isHostToDev) && (isa_->GetMajorVersion() == 9) &&
+      if ((!prefer_xgmi) && (!isHostToDev) && (isa_->GetMajorVersion() == 9) &&
           (isa_->GetMinorVersion() == 0) && (isa_->GetStepping() == 10)) {
         GetBlitObject(BlitHostToDev);
         *blits_[BlitHostToDev];
       }
 
       // gfx94x is more efficient with reverse order of SDMA0/1 for host<->device copies
-      if (!use_xgmi && isa_->GetMajorVersion() == 9 && isa_->GetMinorVersion() >= 4)
+      if (!prefer_xgmi && isa_->GetMajorVersion() == 9 && isa_->GetMinorVersion() >= 4)
         rec_eng = (rec_eng + 1) % properties_.NumSdmaEngines;
 
       // Check support for targeted SDMA engines
@@ -913,16 +917,18 @@ void GpuAgent::InitDma() {
 
       // Observing strange behavior when fixing host<->device engines
       // on GFX9 devices older than GFX90a, so bypass engine fix.
-      if (!use_xgmi && isa_->GetMajorVersion() == 9 && isa_->GetMinorVersion() == 0
+      if (!prefer_xgmi && isa_->GetMajorVersion() == 9 && isa_->GetMinorVersion() == 0
           && isa_->GetStepping() < 10)
         rec_eng = -1;
 
       // devices without dedicated xGMI SDMA engines should not target specific
-      // SDMA engines for queue creation as resources are limited
-      if (!properties_.NumSdmaXgmiEngines)
+      // SDMA engines for queue creation as resources are limited.
+      if (!properties_.NumSdmaXgmiEngines) {
         rec_eng = -1;
+        prefer_xgmi = false;
+      }
 
-      auto ret = CreateBlitSdma(use_xgmi, rec_eng);
+      auto ret = CreateBlitSdma(prefer_xgmi, rec_eng);
       if (ret != nullptr) return ret;
     }
 
@@ -940,21 +946,18 @@ void GpuAgent::InitDma() {
   // Determine and instantiate the number of blit objects to
   // engage. The total number is sum of three plus number of
   // sdma-xgmi engines
-  uint32_t blit_cnt_ = DefaultBlitCount + properties_.NumSdmaXgmiEngines;
+  uint32_t blit_cnt_ = DefaultBlitCount + num_p2p_engines_;
   blits_.resize(blit_cnt_);
 
   // Initialize blit objects used for D2D, H2D, D2H, and
   // P2P copy operations.
-  // -- Blit at index BlitDevToDev(0) deals with copies within
-  //    local framebuffer and always engages a Blit Kernel
-  // -- Blit at index BlitHostToDev(1) deals with copies from
-  //    Host to Device (H2D) and could engage either a Blit
+  // -- Blit at index BlitDevToDev(0) deals with copies within local framebuffer and always engages a Blit Kernel
+  // -- Blit at index BlitHostToDev(1) deals with copies from Host to Device (H2D) and could engage either a Blit
   //    Kernel or sDMA
-  // -- Blit at index BlitDevToHost(2) deals with copies from
-  //    Device to Host (D2H) and Peer to Peer (P2P) over PCIe.
+  // -- Blit at index BlitDevToHost(2) deals with copies from Device to Host (D2H) and Peer to Peer (P2P) over PCIe.
   //    It could engage either a Blit Kernel or sDMA
-  // -- Blit at index DefaultBlitCount(3) and beyond deal
-  //    exclusively P2P over xGMI links
+  // -- Blit at index DefaultBlitCount(3) and beyond deal exclusively P2P. These can be over xGMI engines or SDMA
+  //    engines when number of SDMA engines > 2
   blits_[BlitDevToDev].reset([this]() {
     auto ret = CreateBlitKernel((*queues_[QueueUtility]).get());
     if (ret == nullptr)
@@ -1140,6 +1143,8 @@ hsa_status_t GpuAgent::DmaCopy(void* dst, core::Agent& dst_agent,
     gang_factor = gang_peers_info_[dst_agent.public_handle().handle];
   // Use non-D2D (auxillary) SDMA engines in the event of xGMI D2D support
   // when xGMI SDMA context is not available.
+  // We only gang on platforms with XGMI engines. No need to gang on platforms that use
+  // SDMA engines for p2p because we can achieve full line rate with a single copy operation.
   bool has_aux_gang = gang_factor > 1 &&
                       gang_factor >= properties_.NumSdmaEngines &&
                       !!!properties_.NumSdmaXgmiEngines;
@@ -1225,7 +1230,7 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
           (dst_agent.device_type() == core::Agent::kAmdGpuDevice)) &&
          ("Both devices are CPU agents which is not expected"));
 
-  if (engine_offset > properties_.NumSdmaEngines + properties_.NumSdmaXgmiEngines) {
+  if (engine_offset > num_h2d_d2h_engines_ + num_p2p_engines_) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
@@ -1245,8 +1250,8 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
 
     engine_offset = BlitDevToDev;
   } else {
-    bool is_xgmi = is_p2p && dst_agent.HiveId() && src_agent.HiveId() == dst_agent.HiveId() &&
-                         properties_.NumSdmaXgmiEngines;
+    bool use_p2p_engines = is_p2p && dst_agent.HiveId() && src_agent.HiveId() == dst_agent.HiveId() &&
+                         num_p2p_engines_;
 
     // Due to a RAS issue, GFX90a can only support H2D copies on SDMA0
     bool is_h2d_blit = (src_agent.device_type() == core::Agent::kAmdCpuDevice &&
@@ -1254,9 +1259,7 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
     bool limit_h2d_blit = isa_->GetVersion() == core::Isa::Version(9, 0, 10);
 
     // Ensure engine selection is within proper range based on transfer type
-    if ((is_xgmi && !rec_sdma_eng_override_ && engine_offset <= properties_.NumSdmaEngines) ||
-        (!is_xgmi && engine_offset > (properties_.NumSdmaEngines +
-                                      properties_.NumSdmaXgmiEngines)) ||
+    if ((use_p2p_engines && !rec_sdma_eng_override_ && engine_offset <= num_h2d_d2h_engines_) ||
           (!is_h2d_blit && !is_same_gpu && limit_h2d_blit &&
             engine_offset == BlitHostToDev)) {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -1276,7 +1279,7 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
   }
 
   // gfx1250 fast path: fuse poll+copy+signal into a single WaitSignal packet.
-  if (!profiling_enabled() && blit->isSDMA()) {
+  if (core::Runtime::runtime_singleton_->flag().enable_sdma_fastpath_debug() && !profiling_enabled() && blit->isSDMA()) {
     BlitSdmaBase* sdma_blit = static_cast<BlitSdmaBase*>((*blit).get());
     if (sdma_blit->IsGfx1250()) {
       hsa_status_t stat = sdma_blit->SubmitNotifyPrologue();
@@ -1315,16 +1318,16 @@ hsa_status_t GpuAgent::DmaCopyStatus(core::Agent& dst_agent, core::Agent& src_ag
   if (src_agent.device_type() == core::Agent::kAmdGpuDevice &&
                    dst_agent.device_type() == core::Agent::kAmdGpuDevice &&
                      dst_agent.HiveId() && src_agent.HiveId() == dst_agent.HiveId() &&
-                       properties_.NumSdmaXgmiEngines) {
-    //Find a free xGMI SDMA engine
+                       num_p2p_engines_ > 0) {
+    //Find a free p2p SDMA engine
     if (rec_sdma_eng_override_) {
-      for (int i = 0; i < (properties_.NumSdmaEngines + properties_.NumSdmaXgmiEngines); i++) {
+      for (int i = 0; i < (num_h2d_d2h_engines_ + num_p2p_engines_); i++) {
         if (DmaEngineIsFree(BlitHostToDev + i)) {
           *engine_ids_mask |= (HSA_AMD_SDMA_ENGINE_0 << i);
         }
       }
     } else {
-      for (int i = 0; i < properties_.NumSdmaXgmiEngines; i++) {
+      for (int i = 0; i < num_p2p_engines_; i++) {
         if (DmaEngineIsFree(DefaultBlitCount + i)) {
           *engine_ids_mask |= (HSA_AMD_SDMA_ENGINE_2 << i);
         }
@@ -1345,12 +1348,12 @@ hsa_status_t GpuAgent::DmaCopyStatus(core::Agent& dst_agent, core::Agent& src_ag
 
     // Check is D2H is free
     if (DmaEngineIsFree(BlitDevToHost)) {
-      *engine_ids_mask |= properties_.NumSdmaEngines > 1 ?
+      *engine_ids_mask |= num_h2d_d2h_engines_ > 1 ?
                           HSA_AMD_SDMA_ENGINE_1 :
                           HSA_AMD_SDMA_ENGINE_0;
     }
-    // Find a free xGMI SDMA engine for H2D/D2H though it may be lower bandwidth
-    for (int i = 0; i < properties_.NumSdmaXgmiEngines; i++) {
+    // Find a free p2p SDMA engine for H2D/D2H though it may be lower bandwidth when using XGMI links
+    for (int i = 0; i < num_p2p_engines_; i++) {
       if (DmaEngineIsFree(DefaultBlitCount + i)) {
          *engine_ids_mask |= (HSA_AMD_SDMA_ENGINE_2 << i);
       }
@@ -1362,11 +1365,18 @@ hsa_status_t GpuAgent::DmaCopyStatus(core::Agent& dst_agent, core::Agent& src_ag
 
 hsa_status_t GpuAgent::DmaPreferredEngine(core::Agent& dst_agent, core::Agent& src_agent,
                                           uint32_t *recommended_ids_mask) {
-  // gfx1250+: all SDMA engines are equivalent, return full mask.
+  // gfx1250+: all SDMA engines are equivalent and there are no XGMI engines, we prefer first 2 engines
+  // for h2d/d2h and remaining for p2p.
   if (isa_->GetMajorVersion() == 12 && isa_->GetMinorVersion() >= 5) {
-    const uint32_t total_sdma =
-        properties_.NumSdmaEngines + properties_.NumSdmaXgmiEngines;
-    *recommended_ids_mask = total_sdma ? ((1u << total_sdma) - 1) : 0;
+    bool is_p2p = (src_agent.device_type() == core::Agent::kAmdGpuDevice &&
+                  dst_agent.device_type() == core::Agent::kAmdGpuDevice);
+
+    if (is_p2p) {
+      *recommended_ids_mask = ((1u << num_p2p_engines_) - 1) << (DefaultBlitCount - 1);
+    } else {
+      *recommended_ids_mask = (1u << num_h2d_d2h_engines_) - 1;
+    }
+
     return HSA_STATUS_SUCCESS;
   }
 
@@ -1381,8 +1391,8 @@ hsa_status_t GpuAgent::DmaPreferredEngine(core::Agent& dst_agent, core::Agent& s
         dst_agent.device_type() == core::Agent::kAmdCpuDevice))) {
 
     if (src_agent.device_type() == core::Agent::kAmdCpuDevice) {
-      // Host to Device: Use SDMA engine 1 if available
-      *recommended_ids_mask = HSA_AMD_SDMA_ENGINE_1;
+      // Host to Device: Use SDMA engine 0 if available
+      *recommended_ids_mask = HSA_AMD_SDMA_ENGINE_0;
     } else {
       // Device to Host: Use SDMA engines 1 and 2 if available
       *recommended_ids_mask = HSA_AMD_SDMA_ENGINE_1;
@@ -1394,7 +1404,6 @@ hsa_status_t GpuAgent::DmaPreferredEngine(core::Agent& dst_agent, core::Agent& s
   } else {
     *recommended_ids_mask = rec_sdma_eng_id_peers_info_[dst_agent.public_handle().handle];
   }
-
   return HSA_STATUS_SUCCESS;
 }
 
@@ -1415,8 +1424,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
     out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
 
   // Resolve per-entry SDMA engines.
-  const uint32_t total_sdma =
-      properties_.NumSdmaEngines + properties_.NumSdmaXgmiEngines;
+  const uint32_t total_sdma = num_h2d_d2h_engines_ + num_p2p_engines_;
 
   // Select the coordinator engine. For gfx1250, all engines are
   // equivalent so we rotate the coordinator via PeekSdmaEngine (read-only peek
@@ -1443,6 +1451,14 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
 
   if (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP &&
       !coordinator->SwapSupported() && !coordinator->IsGfx1250())
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  const bool is_indirect =
+      (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC) ||
+      (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST) ||
+      (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST);
+
+  if (is_indirect && !coordinator->IndirectCopySupported())
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   struct EngineSlot { BlitSdmaBase* blit; uint32_t idx; };
@@ -1505,7 +1521,8 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
   }
 
   const char* op_name =
-      (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP) ? "Swap" : "Copy";
+      (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP) ? "Swap" :
+      is_indirect ? "Indirect" : "Copy";
 
   // GFX1250+ fast path: use wait/signal packets so bodies directly wait on
   // dep_signals and signal out_signal. No prologue or epilogue needed when
@@ -1562,6 +1579,19 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
             size_list[d], size_list[d],
             *body_deps_ptr, out_signal);
         break;
+      case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC:
+      case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST:
+      case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST: {
+        const bool ind_src = (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC) ||
+                             (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST);
+        const bool ind_dst = (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST) ||
+                             (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST);
+        stat = engines[d].blit->SubmitLinearCopyBodyIndirectWaitSignal(
+            dst_list[d], src_list[d], size_list[d],
+            ind_src, ind_dst,
+            *body_deps_ptr, out_signal);
+        break;
+      }
       default:
         stat = engines[d].blit->SubmitLinearCopyBodyWaitSignal(
             dst_list[d], src_list[d], size_list[d],
@@ -1590,11 +1620,19 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
 
   // Legacy Path: prologue -> body -> epilogue path.
 
+  bool use_body_signals = !coordinator->PlatformAtomicSupport();
+
+  // On gfx1250 with shared out_signal, use WaitSignal body to fuse
+  // poll+copy+signal into a single packet per body.
+  const bool waitsignal_body =
+      coordinator->IsGfx1250() && !use_body_signals;
+
+  // Indirect bodies only implement fused packets
+  if (is_indirect && !waitsignal_body) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
   // Allocate prologue synchronization signal
   core::unique_signal_ptr prologue_signal(new core::DefaultSignal(1));
   if (!prologue_signal->IsValid()) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-
-  bool use_body_signals = !coordinator->PlatformAtomicSupport();
 
   // Without platform atomic support, bodies cannot atomically decrement a
   // shared signal. Allocate per-body signals so each body writes to its own
@@ -1647,9 +1685,6 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
   if (stat != HSA_STATUS_SUCCESS) return stat;
 
   // Fan out: one body per entry on its resolved engine.
-  // On gfx1250 with shared out_signal, use WaitSignal body to fuse
-  // poll+copy+signal into a single packet per body.
-  const bool waitsignal_body = (coordinator->IsGfx1250()) && !use_body_signals;
   const std::vector<core::Signal*> body_deps = waitsignal_body
       ? std::vector<core::Signal*>{prologue_raw} : std::vector<core::Signal*>{};
 
@@ -1674,6 +1709,20 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
                 dst_list[d], const_cast<void*>(src_list[d]), size_list[d],
                 *prologue_raw, body_sig);
       break;
+    case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC:
+    case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST:
+    case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST: {
+      const bool ind_src =
+          (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC) ||
+          (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST);
+      const bool ind_dst =
+          (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST) ||
+          (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST);
+      stat = engines[d].blit->SubmitLinearCopyBodyIndirectWaitSignal(
+          dst_list[d], src_list[d], size_list[d], ind_src, ind_dst,
+          body_deps, out_signal);
+      break;
+    }
     default: // Default is Linear Copy
       stat = waitsignal_body
           ? engines[d].blit->SubmitLinearCopyBodyWaitSignal(
@@ -1842,8 +1891,49 @@ hsa_status_t GpuAgent::DmaCopySwap(
   core::Signal* out_signal_obj = core::Signal::Convert(op.completion_signal);
   core::Signal& out_signal = *out_signal_obj;
 
+  if (op.num_entries == 0) {
+    // Asymmetric swap is not yet supported here.
+    if (op.src_size != op.dst_size)
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+    const void* src_arr[1] = { op.src };
+    void* dst_arr[1] = { op.dst };
+    hsa_agent_t dst_agent_arr[1] = { op.dst_agent };
+    size_t size_arr[1] = { op.src_size };
+    return DmaCopyFanOutOp(HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP, out_signal,
+                           dep_signals, 1,
+                           src_arr, dst_arr, dst_agent_arr, size_arr);
+  }
+
   return DmaCopyFanOutOp(HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP, out_signal,
                          dep_signals, op.num_entries,
+                         const_cast<const void* const*>(op.src_list),
+                         op.dst_list, op.dst_agent_list, op.size_list);
+}
+
+hsa_status_t GpuAgent::DmaCopyIndirect(
+    const hsa_amd_memory_copy_op_t& op,
+    std::vector<core::Signal*>& dep_signals) {
+
+  core::Signal* out_signal_obj = core::Signal::Convert(op.completion_signal);
+  core::Signal& out_signal = *out_signal_obj;
+
+  // Each entry becomes a separate indirect packet routed to an SDMA engine by
+  // DmaCopyFanOutOp; the packet's per-entry indirect mode is taken from op.type
+  // (all entries in one HSA op share the same INDIRECT_{SRC,DST,SRCDST} kind).
+  const auto op_type = static_cast<hsa_amd_memory_copy_op_type_t>(op.type);
+
+  if (op.num_entries == 0) {
+    // Single indirect transfer using the scalar fields.
+    const void* src_arr[1] = { op.src };
+    void* dst_arr[1] = { op.dst };
+    hsa_agent_t dst_agent_arr[1] = { op.dst_agent };
+    size_t size_arr[1] = { op.size };
+    return DmaCopyFanOutOp(op_type, out_signal, dep_signals, 1,
+                           src_arr, dst_arr, dst_agent_arr, size_arr);
+  }
+
+  return DmaCopyFanOutOp(op_type, out_signal, dep_signals, op.num_entries,
                          const_cast<const void* const*>(op.src_list),
                          op.dst_list, op.dst_agent_list, op.size_list);
 }
@@ -1886,14 +1976,13 @@ hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
       status = DmaCopyBroadcast(op, dep_signals);
       break;
     case HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP:
-      if (op.num_entries == 0)
-        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       status = DmaCopySwap(op, dep_signals);
       break;
     case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC:
     case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST:
     case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST:
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      status = DmaCopyIndirect(op, dep_signals);
+      break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
