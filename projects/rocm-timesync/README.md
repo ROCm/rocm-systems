@@ -89,7 +89,7 @@ Pros:
 Cons:
 - Space inefficient: every ROCR instance stores timestamp data leading to duplication (nothing about a crosststamp is
   process specific)
-- Time inefficient: an `std::map()` or likely not going to perform insertions/queries as efficiently as a mature
+- Time inefficient: an `std::map()` is likely not going to perform insertions/queries as efficiently as a mature
   time-series database (TSDB)
 
 
