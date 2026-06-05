@@ -147,9 +147,9 @@ if (ENABLE_ROCSHMEM AND ROCSHMEM_LIBRARY)
     target_compile_options(alltoall_perf PRIVATE -fgpu-rdc $<$<CONFIG:Debug>:-ggdb -O0>)
     find_library(_DRM drm HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
     find_library(_DRM_AMDGPU drm_amdgpu HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
-    # Whole-archive librocshmem so host symbols (e.g. rocshmem::anvil::anvil,
-    # rocshmem_init) are always in the executable even if only librccl.so
-    # references them. librccl GIN-only builds do not link librocshmem.a.
+    # Whole-archive librocshmem so host symbols (e.g. rocshmem::anvil::anvil) are
+    # always in the executable even if only librccl.so references them. librccl
+    # GIN-only builds do not link librocshmem.a (--allow-shlib-undefined).
     target_link_libraries(alltoall_perf PRIVATE
         -Wl,--whole-archive
         ${ROCSHMEM_LIBRARY}
