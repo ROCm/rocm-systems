@@ -68,6 +68,8 @@ public:
                 (mock_statement * stmt, int position, std::string_view value));
 
     // Column extraction
+    MOCK_METHOD(int, column_count, (mock_statement * stmt));
+    MOCK_METHOD(std::string, column_name, (mock_statement * stmt, int position));
     MOCK_METHOD(int, column_type, (mock_statement * stmt, int position));
     MOCK_METHOD(int, column_int, (mock_statement * stmt, int position));
     MOCK_METHOD(std::int64_t, column_int64, (mock_statement * stmt, int position));
@@ -165,6 +167,11 @@ struct mock_sqlite3
         return active().bind_text(stmt, position, value);
     }
 
+    static int column_count(statement_t stmt) { return active().column_count(stmt); }
+    static std::string column_name(statement_t stmt, int position)
+    {
+        return active().column_name(stmt, position);
+    }
     static int column_type(statement_t stmt, int position)
     {
         return active().column_type(stmt, position);

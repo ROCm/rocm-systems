@@ -119,6 +119,15 @@ struct sqlite_api_policy
             stmt, position, value.data(), static_cast<int>(value.size()), SQLITE_STATIC);
     }
 
+    static int column_count(statement_t stmt) noexcept
+    {
+        return sqlite3_column_count(stmt);
+    }
+    static std::string column_name(statement_t stmt, int position)
+    {
+        const auto* name = sqlite3_column_name(stmt, position);
+        return name != nullptr ? std::string{ name } : std::string{};
+    }
     static int column_type(statement_t stmt, int position) noexcept
     {
         return sqlite3_column_type(stmt, position);

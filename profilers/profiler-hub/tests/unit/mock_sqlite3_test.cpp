@@ -54,4 +54,15 @@ TEST_F(mock_sqlite3_test, column_text_returns_recorded_string)
 
     EXPECT_EQ(mock_sqlite3::column_text(&stmt, 0), "uuid-x");
 }
+
+TEST_F(mock_sqlite3_test, column_count_and_name_forward_to_recorder)
+{
+    mock_statement stmt;
+    EXPECT_CALL(m_recorder, column_count(&stmt)).WillOnce(Return(2));
+    EXPECT_CALL(m_recorder, column_name(&stmt, 1))
+        .WillOnce(Return(std::string{ "label" }));
+
+    EXPECT_EQ(mock_sqlite3::column_count(&stmt), 2);
+    EXPECT_EQ(mock_sqlite3::column_name(&stmt, 1), "label");
+}
 }  // namespace

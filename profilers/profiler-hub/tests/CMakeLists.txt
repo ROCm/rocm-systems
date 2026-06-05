@@ -7,6 +7,7 @@
 
 if(PROFILER_HUB_BUILD_TESTS)
     add_subdirectory(unit)
+    add_subdirectory(integration)
 endif()
 
 # ------------------------------------------------------------ #

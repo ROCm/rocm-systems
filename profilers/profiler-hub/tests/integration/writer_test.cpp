@@ -5,7 +5,7 @@
 #include "profiler-hub/writer.hpp"
 #include "profiler-hub/writer_types.hpp"
 
-#include <sqlite3.h>
+#include "data_storage/backends/sqlite_api_policy.hpp"
 
 #include <gtest/gtest.h>
 
@@ -31,42 +31,49 @@ struct sqlite_query_result
 sqlite_query_result
 query_database(const std::string& db_path, const std::string& query)
 {
-    sqlite_query_result result;
-    sqlite3*            db = nullptr;
+    using policy_t = profiler_hub::data_storage::sqlite_api_policy;
 
-    if(sqlite3_open(db_path.c_str(), &db) != SQLITE_OK)
+    sqlite_query_result  result;
+    policy_t::database_t db = nullptr;
+
+    if(policy_t::open(db_path.c_str(), &db) != policy_t::result_ok)
     {
+        policy_t::close(db);
         throw std::runtime_error("Failed to open database: " + db_path);
     }
 
-    sqlite3_stmt* stmt = nullptr;
-    if(sqlite3_prepare_v2(db, query.c_str(), -1, &stmt, nullptr) != SQLITE_OK)
+    policy_t::statement_t stmt = nullptr;
+    if(policy_t::prepare(db, query.c_str(), &stmt) != policy_t::result_ok)
     {
-        std::string error = sqlite3_errmsg(db);
-        sqlite3_close(db);
+        std::string error = policy_t::errmsg(db);
+        policy_t::close(db);
         throw std::runtime_error("Failed to prepare query: " + error);
     }
 
-    int column_count = sqlite3_column_count(stmt);
+    const int column_count = policy_t::column_count(stmt);
     for(int i = 0; i < column_count; ++i)
     {
-        result.column_names.emplace_back(sqlite3_column_name(stmt, i));
+        result.column_names.emplace_back(policy_t::column_name(stmt, i));
     }
 
-    while(sqlite3_step(stmt) == SQLITE_ROW)
+    while(policy_t::step(stmt) == policy_t::result_row)
     {
         std::vector<std::string> row;
+        row.reserve(static_cast<size_t>(column_count));
         for(int i = 0; i < column_count; ++i)
         {
-            const auto* text =
-                reinterpret_cast<const char*>(sqlite3_column_text(stmt, i));
-            row.emplace_back(text ? text : "NULL");
+            // Preserve the original helper's NULL sentinel; the policy's
+            // column_text maps SQL NULL to an empty string, so distinguish via
+            // the column type.
+            row.emplace_back(policy_t::column_type(stmt, i) == policy_t::column_null
+                                 ? "NULL"
+                                 : policy_t::column_text(stmt, i));
         }
         result.rows.push_back(std::move(row));
     }
 
-    sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    policy_t::finalize(stmt);
+    policy_t::close(db);
 
     return result;
 }
