@@ -16,6 +16,12 @@ NCCL_DEVICE_INLINE static uintptr_t ncclGinAnvilRankPtr(uintptr_t rank0Base, uin
   return rank0Base + (uintptr_t)rank * (uintptr_t)strideBytes;
 }
 
+NCCL_DEVICE_INLINE static ncclGinAnvilGPUContext* ncclGinAnvilGetCtx(ncclGinCtx ctx) {
+  void* handle = nccl::utility::loadConst(&ctx.handle);
+  if (handle == nullptr) return nullptr;
+  return &((ncclGinAnvilGPUContext*)handle)[ctx.contextId];
+}
+
 template <>
 struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL> {
   template <typename Coop>
@@ -29,19 +35,35 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL> {
                                       cuda::thread_scope, cuda::thread_scope,
                                       uint32_t optFlags = ncclGinOptFlagsDefault) {
     using nccl::utility::loadConst;
-    auto* aCtx = &((ncclGinAnvilGPUContext*)ctx.handle)[ctx.contextId];
+    ncclGinAnvilGPUContext* aCtx = ncclGinAnvilGetCtx(ctx);
+    if (aCtx == nullptr) return;
+
     bool hasSignal = signal.type != NCCL_GIN_SIGNAL_TYPE_NONE;
     ncclGinSignal_t signalId = 0;
     if (hasSignal && signal.type == NCCL_GIN_SIGNAL_TYPE_INDEXED)
       signalId = signal.indexedSignal.signalId;
 
-    if (!hasWins) return;
     if (peer == ctx.rank) return;
 
     void** queues = (void**)loadConst(&aCtx->queues);
     if (queues == nullptr) return;
     auto* q = (rocshmem::anvil::SdmaQueueDeviceHandle*)loadConst(&queues[peer]);
     if (q == nullptr) return;
+
+    uint64_t* sigPtr = nullptr;
+    if (hasSignal) {
+      uint64_t* localSignals = (uint64_t*)loadConst(&aCtx->signals);
+      if (localSignals == nullptr) return;
+      sigPtr = localSignals + signalId;
+      if (signalOp == ncclGinSignalInc) signalOpArg = 1;
+    }
+
+    if (!hasWins) {
+      if (hasSignal) rocshmem::anvil::signal(*q, sigPtr);
+      return;
+    }
+
+    if (dstWin == nullptr || srcWin == nullptr) return;
 
     auto* dstMh = (ncclGinAnvilMemHandle*)dstWin;
     auto* srcMh = (ncclGinAnvilMemHandle*)srcWin;
@@ -55,16 +77,6 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL> {
 
     uint64_t* counterPtr = nullptr;
     if (hasCounter) counterPtr = (uint64_t*)(loadConst(&aCtx->counters) + counterId);
-
-    uint64_t* sigPtr = nullptr;
-    if (hasSignal) {
-      // Indexed completion signals are local (same as proxy/rocshmem GIN): the
-      // initiator SDMA-atomics its own signal array when the put completes.
-      uint64_t* localSignals = (uint64_t*)loadConst(&aCtx->signals);
-      if (localSignals == nullptr) return;
-      sigPtr = localSignals + signalId;
-      if (signalOp == ncclGinSignalInc) signalOpArg = 1;
-    }
 
     if (hasSignal && hasCounter) {
       rocshmem::anvil::putSignalCounter(*q, dst, src, bytes, sigPtr, counterPtr);
@@ -95,15 +107,19 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ANVIL> {
 template <>
 struct ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ANVIL> {
   NCCL_DEVICE_INLINE static uint64_t* call(ncclGinCtx ctx, ncclGinCounter_t counterId) {
-    auto* aCtx = &((ncclGinAnvilGPUContext*)ctx.handle)[ctx.contextId];
-    return nccl::utility::loadConst(&aCtx->counters) + counterId;
+    ncclGinAnvilGPUContext* aCtx = ncclGinAnvilGetCtx(ctx);
+    if (aCtx == nullptr) return nullptr;
+    uint64_t* counters = nccl::utility::loadConst(&aCtx->counters);
+    if (counters == nullptr) return nullptr;
+    return counters + counterId;
   }
 };
 
 template <>
 struct ncclGinApi_ResetCounter<NCCL_NET_DEVICE_GIN_ANVIL> {
   NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, ncclGinCounter_t counterId) {
-    auto* aCtx = &((ncclGinAnvilGPUContext*)ctx.handle)[ctx.contextId];
+    ncclGinAnvilGPUContext* aCtx = ncclGinAnvilGetCtx(ctx);
+    if (aCtx == nullptr) return;
     nccl::utility::loadConst(&aCtx->counters)[counterId] = 0;
   }
 };
@@ -111,7 +127,8 @@ struct ncclGinApi_ResetCounter<NCCL_NET_DEVICE_GIN_ANVIL> {
 template <>
 struct ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ANVIL> {
   NCCL_DEVICE_INLINE static uint64_t* call(ncclGinCtx ctx, ncclGinSignal_t signalId) {
-    auto* aCtx = &((ncclGinAnvilGPUContext*)ctx.handle)[ctx.contextId];
+    ncclGinAnvilGPUContext* aCtx = ncclGinAnvilGetCtx(ctx);
+    if (aCtx == nullptr) return nullptr;
     uint64_t* signals = nccl::utility::loadConst(&aCtx->signals);
     if (signals == nullptr) return nullptr;
     return signals + signalId;
@@ -131,7 +148,8 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL> {
   NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop, cuda::memory_order,
                                       uint32_t* abortFlag) {
     using nccl::utility::loadConst;
-    auto* aCtx = &((ncclGinAnvilGPUContext*)ctx.handle)[ctx.contextId];
+    ncclGinAnvilGPUContext* aCtx = ncclGinAnvilGetCtx(ctx);
+    if (aCtx == nullptr) return;
     void** queues = (void**)loadConst(&aCtx->queues);
     if (queues == nullptr) return;
     for (int p = 0; p < ctx.nRanks; p++) {

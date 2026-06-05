@@ -183,8 +183,8 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
 
   *outGinCtx = ctx;
   *outDevHandle = ctx->devHandle;
-  INFO(NCCL_INIT, "GIN anvil: context created (%d signals, %d counters, %d contexts, signalsDev=%p)",
-       nSignals, nCounters, nContexts, (void*)signalsLocal);
+  INFO(NCCL_INIT, "GIN anvil: context created (%d signals, %d counters, %d contexts, signalsDev=%p gpuCtxDev=%p)",
+       nSignals, nCounters, nContexts, (void*)signalsLocal, (void*)ctx->gpuCtxDev);
   free(gpuCtxHostArr);
   gpuCtxHostArr = nullptr;
   return ncclSuccess;
