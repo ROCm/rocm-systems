@@ -370,6 +370,24 @@ public:
   /// @returns Mutable pointer to the raw VGPR data.
   virtual uint8_t *vgpr_data(uint32_t base) = 0;
 
+  /// @brief Typed view of a single VGPR as the file's @c simdojo::VectorReg.
+  /// @details The abstract CU exposes the VGPR file only as a byte pointer
+  /// (@c vgpr_data), which erases the wavefront-size template parameter. The
+  /// file actually stores @c simdojo::VectorReg<N,uint32_t>, so this recovers
+  /// the typed register with the design's single localized @c reinterpret_cast.
+  /// The @c static_assert pins @c VectorReg<N> to @c N contiguous @c uint32_t
+  /// (no padding / vtable) so the byte view and the typed view coincide.
+  template <size_t N> simdojo::VectorReg<N, uint32_t> &vgpr_reg(uint32_t base) {
+    static_assert(sizeof(simdojo::VectorReg<N, uint32_t>) == N * sizeof(uint32_t),
+                  "VectorReg must be layout-compatible with raw lane storage");
+    return *reinterpret_cast<simdojo::VectorReg<N, uint32_t> *>(vgpr_data(base));
+  }
+  template <size_t N> const simdojo::VectorReg<N, uint32_t> &vgpr_reg(uint32_t base) const {
+    static_assert(sizeof(simdojo::VectorReg<N, uint32_t>) == N * sizeof(uint32_t),
+                  "VectorReg must be layout-compatible with raw lane storage");
+    return *reinterpret_cast<const simdojo::VectorReg<N, uint32_t> *>(vgpr_data(base));
+  }
+
   /// @brief Return the SGPR register file (for serialization).
   /// @returns Const reference to the SGPR register file.
   const simdojo::RegisterFile<uint32_t> &sgpr_file() const { return sgpr_file_; }

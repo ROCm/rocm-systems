@@ -995,12 +995,10 @@ VAccvgprReadVop3p::VAccvgprReadVop3p(const MachineInst *inst)
 }
 
 void VAccvgprReadVop3p::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    vdst.write_lane(wf, lane, src0.read_lane(wf, lane));
-  }
+  uint32_t n = wf.wf_size();
+  alignas(64) uint32_t buf[64];
+  src0.read_lane_chunk(wf, 0, n, buf);
+  vdst.write_lane_chunk(wf, 0, n, buf, wf.exec());
 }
 
 VAccvgprWriteVop3p::VAccvgprWriteVop3p(const MachineInst *inst)
@@ -1015,12 +1013,10 @@ VAccvgprWriteVop3p::VAccvgprWriteVop3p(const MachineInst *inst)
 }
 
 void VAccvgprWriteVop3p::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    vdst.write_lane(wf, lane, src0.read_lane(wf, lane));
-  }
+  uint32_t n = wf.wf_size();
+  alignas(64) uint32_t buf[64];
+  src0.read_lane_chunk(wf, 0, n, buf);
+  vdst.write_lane_chunk(wf, 0, n, buf, wf.exec());
 }
 
 VMfmaF3216x16x128F8f6f4Vop3pMfma::VMfmaF3216x16x128F8f6f4Vop3pMfma(const MachineInst *inst)

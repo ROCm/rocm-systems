@@ -53,6 +53,50 @@ add_executable(
     waitcnt_counter_test.cpp
     instruction_execution_harness_test.cpp
     decode_execute_benchmark.cpp
+    util_simd_test.cpp
+    v_add_simd_benchmark.cpp
+    simd_correctness/vop1_cvt_f64_scalar_correctness_test.cpp
+    simd_correctness/vopc_cmp_class_scalar_correctness_test.cpp
+    simd_correctness/vop2_simd_correctness_test.cpp
+    simd_correctness/vop2_carry_simd_correctness_test.cpp
+    simd_correctness/vop2_fma_simd_correctness_test.cpp
+    simd_correctness/vop2_fma_f64_simd_correctness_test.cpp
+    simd_correctness/vop2_cndmask_simd_correctness_test.cpp
+    simd_correctness/vop2_minmax_simd_correctness_test.cpp
+    simd_correctness/vop1_simd_correctness_test.cpp
+    simd_correctness/vop1_cvt_f8_simd_correctness_test.cpp
+    simd_correctness/vop1_f64_simd_correctness_test.cpp
+    simd_correctness/vop1_cvt_f64_simd_correctness_test.cpp
+    simd_correctness/vopc_simd_correctness_test.cpp
+    simd_correctness/vopc_cmp_class_simd_correctness_test.cpp
+    simd_correctness/vop3_modifier_simd_test.cpp
+    simd_correctness/vop3_binary_simd_correctness_test.cpp
+    simd_correctness/vop3_unary_simd_correctness_test.cpp
+    simd_correctness/vopc_vop3_int_simd_correctness_test.cpp
+    simd_correctness/vopc_vop3_fp32_simd_correctness_test.cpp
+    simd_correctness/vopc_vop3_fp16_simd_correctness_test.cpp
+    simd_correctness/vopc_vop3_fp64_simd_correctness_test.cpp
+    simd_correctness/vop3_ternary_int_simd_correctness_test.cpp
+    simd_correctness/vop3_cvt_f64_simd_correctness_test.cpp
+    simd_correctness/vop3_int_binary_extra_simd_correctness_test.cpp
+    simd_correctness/vop3_int_widening_ternary_simd_correctness_test.cpp
+    simd_correctness/vop3_fp64_simd_correctness_test.cpp
+    simd_correctness/vop3_carry_simd_correctness_test.cpp
+    simd_correctness/vop_alias_rdna_simd_correctness_test.cpp
+    simd_correctness/vop3_shift64_simd_correctness_test.cpp
+    simd_correctness/vop3_fp16_unary_simd_correctness_test.cpp
+    simd_correctness/vop3_fp16_transcendental_simd_correctness_test.cpp
+    simd_correctness/vop3_cndmask_pack_simd_correctness_test.cpp
+    simd_correctness/vop3_div_helpers_simd_correctness_test.cpp
+    simd_correctness/vop3_b16_rdna_simd_correctness_test.cpp
+    simd_correctness/vop3_ternary_fp_simd_correctness_test.cpp
+    simd_correctness/vop3_fmac_simd_correctness_test.cpp
+    simd_correctness/vop3_ldexp_simd_correctness_test.cpp
+    simd_correctness/vop3p_pk_binary_int_simd_correctness_test.cpp
+    simd_correctness/vop3p_pk_binary_fp16_simd_correctness_test.cpp
+    simd_correctness/vop3p_fma_mix_simd_correctness_test.cpp
+    simd_correctness/vop3p_mov_b32_simd_correctness_test.cpp
+    simd_correctness/vop3p_dot_simd_correctness_test.cpp
     execution_plugin_test.cpp
 )
 target_link_libraries(
