@@ -561,6 +561,15 @@ bool Os::CloseFileHandle(FileDesc fdesc) {
   return true;
 }
 
+amd::Os::FileDesc Os::DupFileHandle(FileDesc fdesc) {
+  HANDLE out = nullptr;
+  if (!DuplicateHandle(GetCurrentProcess(), fdesc, GetCurrentProcess(), &out, 0, FALSE,
+                       DUPLICATE_SAME_ACCESS)) {
+    return FDescInit();
+  }
+  return out;
+}
+
 bool Os::GetFileHandle(const char* fname, FileDesc* fd_ptr, size_t* sz_ptr) {
   if ((fd_ptr == nullptr) || (sz_ptr == nullptr)) {
     return false;

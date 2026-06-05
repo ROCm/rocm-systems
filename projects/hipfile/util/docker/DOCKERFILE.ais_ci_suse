@@ -9,6 +9,7 @@ LABEL org.opencontainers.image.source=https://github.com/ROCm/hipFile
 ARG SUSE_MAJOR_VERSION
 ARG SUSE_MINOR_VERSION
 ARG ROCM_VERSION=7.2.2
+ARG ONETBB_VERSION=2023.0.0
 
 # If the target ROCm Version on the package repository is non-standard, you can forcibly
 # set the ROCm version used in the package repo URL.
@@ -57,7 +58,6 @@ RUN zypper --gpg-auto-import-keys refresh
 # graphviz - Dozygen dependency
 # Defaults to gcc7. Use gcc13 to match Ubuntu24.
 RUN zypper install -y \
-        libboost_program_options1_66_0-devel \
         clang19 \
         cmake \
         doxygen \
@@ -91,6 +91,25 @@ RUN update-alternatives \
         --install /usr/bin/gcc gcc /usr/bin/gcc-13 100 \
         --slave /usr/bin/cc cc /usr/bin/gcc-13 \
         --slave /usr/bin/g++ g++ /usr/bin/g++-13
+
+# Build and install a fixed oneTBB release.
+RUN curl -L --fail \
+        "https://github.com/uxlfoundation/oneTBB/archive/refs/tags/v${ONETBB_VERSION}.tar.gz" \
+        -o /tmp/oneTBB-${ONETBB_VERSION}.tar.gz && \
+    tar -xzf /tmp/oneTBB-${ONETBB_VERSION}.tar.gz -C /tmp && \
+    cmake -S /tmp/oneTBB-${ONETBB_VERSION} \
+        -B /tmp/oneTBB-${ONETBB_VERSION}-build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_C_COMPILER=/usr/bin/gcc \
+        -DCMAKE_CXX_COMPILER=/usr/bin/g++ \
+        -DTBB_TEST=OFF \
+        -DTBB_STRICT=OFF && \
+    cmake --build /tmp/oneTBB-${ONETBB_VERSION}-build --parallel && \
+    cmake --install /tmp/oneTBB-${ONETBB_VERSION}-build && \
+    rm -rf /tmp/oneTBB-${ONETBB_VERSION} \
+        /tmp/oneTBB-${ONETBB_VERSION}-build \
+        /tmp/oneTBB-${ONETBB_VERSION}.tar.gz && \
+    ldconfig
 
 # AIS Code Repository Mount Point
 VOLUME /mnt/ais

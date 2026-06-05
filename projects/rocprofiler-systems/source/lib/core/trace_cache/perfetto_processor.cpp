@@ -181,10 +181,18 @@ using amd_smi_nic_rx_ucast_pkts_track =
     perfetto_counter_track<category::amd_smi_nic_rx_ucast_pkts>;
 using amd_smi_nic_tx_ucast_pkts_track =
     perfetto_counter_track<category::amd_smi_nic_tx_ucast_pkts>;
+using amd_smi_nic_tx_rdma_ack_timeout_track =
+    perfetto_counter_track<category::amd_smi_nic_tx_rdma_ack_timeout>;
+using amd_smi_nic_resp_tx_pkt_seq_err_track =
+    perfetto_counter_track<category::amd_smi_nic_resp_tx_pkt_seq_err>;
+using amd_smi_nic_req_rx_pkt_seq_err_track =
+    perfetto_counter_track<category::amd_smi_nic_req_rx_pkt_seq_err>;
+using amd_smi_nic_req_rx_impl_nak_seq_err_track =
+    perfetto_counter_track<category::amd_smi_nic_req_rx_impl_nak_seq_err>;
 
 // Unified Memory counter tracks
-using unified_memory_bandwidth_track =
-    perfetto_counter_track<category::unified_memory_bandwidth>;
+using unified_memory_migration_throughput_track =
+    perfetto_counter_track<category::unified_memory_migration_throughput>;
 using unified_memory_fault_rate_track =
     perfetto_counter_track<category::unified_memory_fault_rate>;
 
@@ -706,6 +714,31 @@ perfetto_processor_t::get_or_create_track(CategoryT, FuncT&& desc_gen, Args&&...
     return _track;
 }
 
+::perfetto::ThreadTrack
+perfetto_processor_t::get_thread_track(std::uint64_t thread_id)
+{
+    if(auto it = m_thread_track_cache.find(thread_id); it != m_thread_track_cache.end())
+        return it->second;
+
+    auto _track = ::perfetto::ThreadTrack::ForThread(
+        static_cast<::perfetto::base::PlatformThreadId>(thread_id));
+
+    // - Worker threads (sequent_value > 0) get a "Thread N" descriptor.
+    // - The main thread (sequent_value == 0) is intentionally left with its
+    //   default descriptor.
+    const auto& _info = thread_info::get(static_cast<std::int64_t>(thread_id), SystemTID);
+    if(_info && _info->index_data && _info->index_data->sequent_value > 0)
+    {
+        auto _desc = _track.Serialize();
+        _desc.mutable_thread()->set_thread_name(
+            fmt::format("Thread {}", _info->index_data->sequent_value));
+        ::perfetto::TrackEvent::SetTrackDescriptor(_track, _desc);
+    }
+
+    m_thread_track_cache.emplace(thread_id, _track);
+    return _track;
+}
+
 void
 perfetto_processor_t::handle(const kernel_dispatch_sample& _kds)
 {
@@ -982,21 +1015,26 @@ perfetto_processor_t::handle(const region_sample& _rs)
         annotate_perfetto(ctx, annotations);
     };
 
+    // Emit on the originating thread's track so multi-threaded runs keep one track
+    // per thread (as the live path does implicitly via the calling thread), instead
+    // of collapsing every thread onto the single replay thread.
+    auto _thread_track = get_thread_track(_rs.thread_id);
+
     auto emit_trace = [&](auto category_tag) {
         using CategoryT = decltype(category_tag);
         if(_corr_id != 0)
         {
-            tracing::push_perfetto_ts(CategoryT{}, _name.c_str(), _beg_ts,
-                                      ::perfetto::Flow::ProcessScoped(_corr_id),
-                                      add_annotations);
+            tracing::push_perfetto_track(
+                CategoryT{}, _name.c_str(), _thread_track, _beg_ts,
+                ::perfetto::Flow::ProcessScoped(_corr_id), add_annotations);
         }
         else
         {
-            tracing::push_perfetto_ts(CategoryT{}, _name.c_str(), _beg_ts,
-                                      add_annotations);
+            tracing::push_perfetto_track(CategoryT{}, _name.c_str(), _thread_track,
+                                         _beg_ts, add_annotations);
         }
 
-        tracing::pop_perfetto_ts(CategoryT{}, _name.c_str(), _end_ts);
+        tracing::pop_perfetto_track(CategoryT{}, _name.c_str(), _thread_track, _end_ts);
     };
 
     auto try_category = [&](auto category_tag) {
@@ -1016,7 +1054,7 @@ perfetto_processor_t::handle(const region_sample& _rs)
          try_category(category::rocm_hip_api{}) ||
          try_category(category::rocm_hsa_api{}) ||
          try_category(category::rocm_marker_api{}) ||
-         try_category(category::rocm_rccl{}) ||
+         try_category(category::rocm_ompt_api{}) || try_category(category::rocm_rccl{}) ||
          try_category(category::rocm_rocdecode_api{}) ||
          try_category(category::rocm_rocjpeg_api{}) || try_category(category::ucx{}) ||
          try_category(category::shmem{}) || try_category(category::vaapi{}));
@@ -1422,7 +1460,7 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
     {
         if(!amd_smi_nic_rx_ucast_bytes_track::exists(_device_id))
             amd_smi_nic_rx_ucast_bytes_track::emplace(
-                _device_id, make_track_name("RX RDMA Bytes"), "bytes");
+                _device_id, make_track_name("RX RDMA BYTES"), "bytes");
         TRACE_COUNTER(trait::name<category::amd_smi_nic_rx_ucast_bytes>::value,
                       amd_smi_nic_rx_ucast_bytes_track::at(_device_id, 0), _ts,
                       static_cast<double>(_nic_sample.metric_values.rx_rdma_ucast_bytes));
@@ -1432,7 +1470,7 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
     {
         if(!amd_smi_nic_tx_ucast_bytes_track::exists(_device_id))
             amd_smi_nic_tx_ucast_bytes_track::emplace(
-                _device_id, make_track_name("TX RDMA Bytes"), "bytes");
+                _device_id, make_track_name("TX RDMA BYTES"), "bytes");
         TRACE_COUNTER(trait::name<category::amd_smi_nic_tx_ucast_bytes>::value,
                       amd_smi_nic_tx_ucast_bytes_track::at(_device_id, 0), _ts,
                       static_cast<double>(_nic_sample.metric_values.tx_rdma_ucast_bytes));
@@ -1442,7 +1480,7 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
     {
         if(!amd_smi_nic_rx_ucast_pkts_track::exists(_device_id))
             amd_smi_nic_rx_ucast_pkts_track::emplace(
-                _device_id, make_track_name("RX RDMA Packets"), "packets");
+                _device_id, make_track_name("RX RDMA PACKETS"), "packets");
         TRACE_COUNTER(trait::name<category::amd_smi_nic_rx_ucast_pkts>::value,
                       amd_smi_nic_rx_ucast_pkts_track::at(_device_id, 0), _ts,
                       static_cast<double>(_nic_sample.metric_values.rx_rdma_ucast_pkts));
@@ -1452,7 +1490,7 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
     {
         if(!amd_smi_nic_tx_ucast_pkts_track::exists(_device_id))
             amd_smi_nic_tx_ucast_pkts_track::emplace(
-                _device_id, make_track_name("TX RDMA Packets"), "packets");
+                _device_id, make_track_name("TX RDMA PACKETS"), "packets");
         TRACE_COUNTER(trait::name<category::amd_smi_nic_tx_ucast_pkts>::value,
                       amd_smi_nic_tx_ucast_pkts_track::at(_device_id, 0), _ts,
                       static_cast<double>(_nic_sample.metric_values.tx_rdma_ucast_pkts));
@@ -1462,7 +1500,7 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
     {
         if(!amd_smi_nic_rx_cnp_pkts_track::exists(_device_id))
             amd_smi_nic_rx_cnp_pkts_track::emplace(
-                _device_id, make_track_name("RX CNP Packets"), "packets");
+                _device_id, make_track_name("RX CNP PACKETS"), "packets");
         TRACE_COUNTER(trait::name<category::amd_smi_nic_rx_cnp_pkts>::value,
                       amd_smi_nic_rx_cnp_pkts_track::at(_device_id, 0), _ts,
                       static_cast<double>(_nic_sample.metric_values.rx_rdma_cnp_pkts));
@@ -1472,10 +1510,51 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
     {
         if(!amd_smi_nic_tx_cnp_pkts_track::exists(_device_id))
             amd_smi_nic_tx_cnp_pkts_track::emplace(
-                _device_id, make_track_name("TX CNP Packets"), "packets");
+                _device_id, make_track_name("TX CNP PACKETS"), "packets");
         TRACE_COUNTER(trait::name<category::amd_smi_nic_tx_cnp_pkts>::value,
                       amd_smi_nic_tx_cnp_pkts_track::at(_device_id, 0), _ts,
                       static_cast<double>(_nic_sample.metric_values.tx_rdma_cnp_pkts));
+    }
+
+    if(_nic_sample.enabled_metric.bits.tx_rdma_ack_timeout)
+    {
+        if(!amd_smi_nic_tx_rdma_ack_timeout_track::exists(_device_id))
+            amd_smi_nic_tx_rdma_ack_timeout_track::emplace(
+                _device_id, make_track_name("TX ACK TIMEOUT"), "timeouts");
+        TRACE_COUNTER(trait::name<category::amd_smi_nic_tx_rdma_ack_timeout>::value,
+                      amd_smi_nic_tx_rdma_ack_timeout_track::at(_device_id, 0), _ts,
+                      static_cast<double>(_nic_sample.metric_values.tx_rdma_ack_timeout));
+    }
+
+    if(_nic_sample.enabled_metric.bits.resp_tx_pkt_seq_err)
+    {
+        if(!amd_smi_nic_resp_tx_pkt_seq_err_track::exists(_device_id))
+            amd_smi_nic_resp_tx_pkt_seq_err_track::emplace(
+                _device_id, make_track_name("RESP TX PKT SEQ ERR"), "errors");
+        TRACE_COUNTER(trait::name<category::amd_smi_nic_resp_tx_pkt_seq_err>::value,
+                      amd_smi_nic_resp_tx_pkt_seq_err_track::at(_device_id, 0), _ts,
+                      static_cast<double>(_nic_sample.metric_values.resp_tx_pkt_seq_err));
+    }
+
+    if(_nic_sample.enabled_metric.bits.req_rx_pkt_seq_err)
+    {
+        if(!amd_smi_nic_req_rx_pkt_seq_err_track::exists(_device_id))
+            amd_smi_nic_req_rx_pkt_seq_err_track::emplace(
+                _device_id, make_track_name("REQ RX PKT SEQ ERR"), "errors");
+        TRACE_COUNTER(trait::name<category::amd_smi_nic_req_rx_pkt_seq_err>::value,
+                      amd_smi_nic_req_rx_pkt_seq_err_track::at(_device_id, 0), _ts,
+                      static_cast<double>(_nic_sample.metric_values.req_rx_pkt_seq_err));
+    }
+
+    if(_nic_sample.enabled_metric.bits.req_rx_impl_nak_seq_err)
+    {
+        if(!amd_smi_nic_req_rx_impl_nak_seq_err_track::exists(_device_id))
+            amd_smi_nic_req_rx_impl_nak_seq_err_track::emplace(
+                _device_id, make_track_name("REQ RX IMPL NAK SEQ ERR"), "errors");
+        TRACE_COUNTER(
+            trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::value,
+            amd_smi_nic_req_rx_impl_nak_seq_err_track::at(_device_id, 0), _ts,
+            static_cast<double>(_nic_sample.metric_values.req_rx_impl_nak_seq_err));
     }
 }
 
@@ -1595,7 +1674,7 @@ perfetto_processor_t::handle_kfd_page_migrate(const kfd_sample& sample)
         resolve_kfd_migration_gpu_bucket(sample.args_str, m_kfd_node_type_cache);
     if(!gpu_node_id.has_value())
     {
-        LOG_TRACE("Failed to resolve unified memory bandwidth track for KFD "
+        LOG_TRACE("Failed to resolve unified memory migration throughput track for KFD "
                   "migration args '{}'",
                   sample.args_str);
         return;
@@ -1606,26 +1685,27 @@ perfetto_processor_t::handle_kfd_page_migrate(const kfd_sample& sample)
     if(gpu_index_it == m_kfd_node_to_gpu_index_cache.end())
     {
         LOG_TRACE("KFD node {} has no associated GPU device index; skipping "
-                  "unified memory bandwidth sample",
+                  "unified memory migration throughput sample",
                   *gpu_node_id);
         return;
     }
     const auto gpu_device_index = gpu_index_it->second;
 
-    if(!unified_memory_bandwidth_track::exists(gpu_device_index))
+    if(!unified_memory_migration_throughput_track::exists(gpu_device_index))
     {
-        auto track_name =
-            fmt::format("Unified Memory Bandwidth [Device {}]", gpu_device_index);
-        unified_memory_bandwidth_track::emplace(
+        auto track_name = fmt::format("Unified Memory Migration Throughput [Device {}]",
+                                      gpu_device_index);
+        unified_memory_migration_throughput_track::emplace(
             gpu_device_index, track_name, "GB/s",
-            trait::name<category::unified_memory_bandwidth>::value);
+            trait::name<category::unified_memory_migration_throughput>::value);
     }
 
     // bytes / ns == GB/s (decimal)
-    const double bandwidth_gbps = sample.value / static_cast<double>(duration_ns);
-    TRACE_COUNTER(trait::name<category::unified_memory_bandwidth>::value,
-                  unified_memory_bandwidth_track::at(gpu_device_index, 0),
-                  sample.end_timestamp, bandwidth_gbps);
+    const double migration_throughput_gbps =
+        sample.value / static_cast<double>(duration_ns);
+    TRACE_COUNTER(trait::name<category::unified_memory_migration_throughput>::value,
+                  unified_memory_migration_throughput_track::at(gpu_device_index, 0),
+                  sample.end_timestamp, migration_throughput_gbps);
 }
 
 void

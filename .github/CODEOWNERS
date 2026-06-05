@@ -19,7 +19,7 @@
 /projects/rocminfo/                                                   @dayatsin-amd @shwetagkhatri
 /projects/rocprofiler-compute/                                        @ROCm/rocprof-compute-reviewer # Owners: @ROCm/rocprof-compute-owners, Reviewers: @ROCm/rocprof-compute-reviewer
 /projects/rocprofiler-systems/                                        @ROCm/rocprof-sys @jrmadsen
-/projects/rocprofiler-sdk/                                            @ROCm/rocm-devtools-team @ROCm/rocprofiler-owners # First Review: @ROCm/rocm-devtools-team, Final Review: @ROCm/rocprofiler-owners 
+/projects/rocprofiler-sdk/                                            @ROCm/rocm-devtools-team @ROCm/rocprofiler-owners # First Review: @ROCm/rocm-devtools-team, Final Review: @ROCm/rocprofiler-owners
 /projects/rocr-runtime/                                               @kentrussell @dayatsin-amd @cfreeamd @atgutier
 /projects/roctracer/                                                  @ammarwa @bgopesh
 /projects/rocshmem/                                                   @ROCm/rocshmem-reviewers
@@ -44,11 +44,11 @@
 /projects/rocr-runtime/rocrtst                                        @shwetagkhatri @cfreeamd
 /projects/rocr-runtime/runtime/hsa-runtime/core/runtime/trap_handler/*.s	@lancesix @dayatsin-amd @cfreeamd @shwetagkhatri
 /projects/rocr-runtime/runtime/hsa-runtime/core/driver/xdna           @atgutier @ypapadop-amd @dayatsin-amd @cfreeamd
-/projects/rocr-runtime/runtime/hsa-runtime/core/driver/virtio         @dayatsin-amd @cfreeamd
+/projects/rocr-runtime/runtime/hsa-runtime/core/driver/virtio         @HongleiHuang-amd @dayatsin-amd @cfreeamd
 /projects/rocr-runtime/runtime/hsa-runtime/loader                     @dayatsin-amd @kzhuravl @cfreeamd
 /projects/rocr-runtime/runtime/hsa-runtime/image                      @shwetagkhatri @dayatsin-amd @cfreeamd
 /projects/rocr-runtime/runtime/hsa-runtime/pcs                        @shwetagkhatri @dayatsin-amd @cfreeamd
-/projects/rocr-runtime/docs/sphinx                                    @ROCm/rocm-documentation
+/projects/rocr-runtime/runtime/docs/sphinx                            @ROCm/rocm-documentation
 
 # rocprof-trace-decoder code owners
 /projects/rocprof-trace-decoder/                                      @ROCm/rocm-devtools-team
@@ -63,6 +63,9 @@
 # Emulation
 /emulation/                                                           @atgutier
 /emulation/mirage/                                                    @atgutier @amd-arosa
+
+# Profilers
+/profilers/profiler-hub                                               @ROCm/rocm-profiler-hub
 
 # Documentation-specific ownership by project (last to take precedence)
 

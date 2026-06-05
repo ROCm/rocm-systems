@@ -22,6 +22,7 @@
 
 #include "firmware_restrictions.hpp"
 
+#include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
@@ -64,10 +65,11 @@ findViaInstallPath(const std::string& filename)
 std::string
 findViaEnvironment(const std::string& filename)
 {
-    if(const char* metrics_path = nullptr; (metrics_path = getenv("ROCPROFILER_METRICS_PATH")))
+    auto metrics_path = common::get_env_optional("ROCPROFILER_METRICS_PATH");
+    if(metrics_path)
     {
         ROCP_INFO << filename << " is being looked up via env variable ROCPROFILER_METRICS_PATH";
-        return common::filesystem::path{std::string{metrics_path}} / filename;
+        return common::filesystem::path{*metrics_path} / filename;
     }
     // No environment variable, lookup via install path
     return findViaInstallPath(filename);
