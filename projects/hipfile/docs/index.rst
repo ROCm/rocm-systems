@@ -39,6 +39,16 @@ The hipFile public repository is located at
       * :doc:`Async multi-stream IO with registered streams <tutorials/async-multistream-io>`
       * :doc:`Python file copy through GPU memory <tutorials/python-file-copy>`
 
+   .. grid-item-card:: Reference
+
+      * :doc:`Synchronous read and write API reference <reference/api-synchronous-io>`
+      * :doc:`Driver lifecycle and configuration API reference <reference/api-driver>`
+      * :doc:`File handle, buffer, and RDMA API reference <reference/api-file-and-buffer>`
+      * :doc:`Asynchronous I/O API reference <reference/api-async>`
+      * :doc:`Batch I/O API reference <reference/api-batch>`
+      * :doc:`Error handling API reference <reference/api-errors>`
+      * :doc:`Python API reference <reference/api-python>`
+
 To contribute to the documentation, refer to
 `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
 

@@ -56,7 +56,7 @@ Explicitly closing the library is not required; its state is destroyed
 automatically at program exit.
 
 For the full driver API reference, see
-:doc:`/reference/api-driver-lifecycle`.
+:doc:`/reference/api-driver`.
 
 Auto-initialization
 -------------------
@@ -110,7 +110,7 @@ When you are finished with a file, call ``hipFileHandleDeregister`` to
 release the associated resources.
 
 For the complete file handle and buffer API reference, see
-:doc:`/reference/api-file-handle-and-buffer`.
+:doc:`/reference/api-file-and-buffer`.
 
 Buffer registration
 *******************

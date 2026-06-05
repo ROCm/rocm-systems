@@ -198,7 +198,7 @@ Next steps
 
 - For the API reference for ``hipFileReadAsync``, ``hipFileWriteAsync``,
   ``hipFileStreamRegister``, and ``hipFileStreamDeregister``, see
-  :doc:`/reference/api-async-io`.
+  :doc:`/reference/api-async`.
 - To understand the differences between the fastpath and fallback IO backends,
   see :doc:`/conceptual/io-backends`.
 - For a synchronous file copy example, see

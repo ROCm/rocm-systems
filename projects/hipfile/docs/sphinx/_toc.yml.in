@@ -19,6 +19,15 @@ subtrees:
       - file: tutorials/synchronous-file-copy
       - file: tutorials/async-multistream-io
       - file: tutorials/python-file-copy
+  - caption: Reference
+    entries:
+      - file: reference/api-synchronous-io
+      - file: reference/api-driver
+      - file: reference/api-file-and-buffer
+      - file: reference/api-async
+      - file: reference/api-batch
+      - file: reference/api-errors
+      - file: reference/api-python
   - caption: About
     entries:
       - file: license

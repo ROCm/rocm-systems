@@ -46,12 +46,12 @@ hipFile strives for a 1:1 correspondence with the cuFile API surface so that por
 Error code values
 -----------------
 
-Specific numeric error code values might differ between cuFile and hipFile. They might also change across hipFile releases. Robust error handling should check for any error first and then optionally drill down into specifics. See :doc:`/reference/api-error-handling` for recommended patterns.
+Specific numeric error code values might differ between cuFile and hipFile. They might also change across hipFile releases. Robust error handling should check for any error first and then optionally drill down into specifics. See :doc:`/reference/api-errors` for recommended patterns.
 
 ``hipFileDriverOpen``, ``hipFileDriverClose``, and ``hipFileUseCount`` semantics
 --------------------------------------------------------------------------------
 
-The side effects of ``hipFileDriverOpen()``, ``hipFileDriverClose()``, and the use count reported by ``hipFileUseCount()`` might not match cuFile's behavior. A special driver-initialization API call might not remain necessary in future hipFile releases. For more detail on the driver lifecycle, see :doc:`/reference/api-driver-lifecycle`.
+The side effects of ``hipFileDriverOpen()``, ``hipFileDriverClose()``, and the use count reported by ``hipFileUseCount()`` might not match cuFile's behavior. A special driver-initialization API call might not remain necessary in future hipFile releases. For more detail on the driver lifecycle, see :doc:`/reference/api-driver`.
 
 ``hoff_t`` instead of ``off_t``
 -------------------------------

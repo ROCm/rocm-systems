@@ -16,3 +16,11 @@ build:
   os: ubuntu-24.04
   tools:
     python: "3.12"
+  apt_packages:
+    - doxygen
+  jobs:
+    pre_build:
+      - cp projects/hipfile/docs/doxygen/Doxyfile.in projects/hipfile/docs/doxygen/Doxyfile
+      - sed -i "s#@AIS_LIBRARY_VERSION@#0.0.0#" projects/hipfile/docs/doxygen/Doxyfile
+      - sed -i "s#@AIS_DOXYFILE_INPUT@#../../include#" projects/hipfile/docs/doxygen/Doxyfile
+      - cd projects/hipfile/docs/doxygen && doxygen Doxyfile

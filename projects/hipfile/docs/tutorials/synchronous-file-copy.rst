@@ -177,7 +177,7 @@ registration is optional. When a buffer is not explicitly registered,
 hipFile uses an internal bounce buffer. Registering the buffer with
 ``hipFileBufRegister`` can improve throughput for workloads that perform
 many IO operations on the same buffer. See
-:doc:`/reference/api-file-handle-and-buffer` for the full API reference.
+:doc:`/reference/api-file-and-buffer` for the full API reference.
 
 Step 4 – chunk-loop: read and write
 ***********************************
@@ -275,7 +275,7 @@ Next steps
 
 - For the full API reference for ``hipFileRead``, ``hipFileWrite``,
   ``hipFileHandleRegister``, ``hipFileBufRegister``, and related functions,
-  see :doc:`/reference/api-file-handle-and-buffer`.
+  see :doc:`/reference/api-file-and-buffer`.
 - To understand when the hipFile driver is initialized and how reference
   counting works, see :doc:`/conceptual/registration-lifecycle`.
 - For an asynchronous, multi-stream variant of GPU-mediated IO, see

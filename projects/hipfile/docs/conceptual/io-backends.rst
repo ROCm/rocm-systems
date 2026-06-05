@@ -106,4 +106,4 @@ Two environment variables govern whether the fallback path is available:
 
 These variables are read from the process environment at library initialization through the ``Environment`` class and are reflected in the ``Configuration`` class methods ``fastpath()`` and ``fallback()``.
 
-For a full list of environment variables and their accepted values, see :doc:`/conceptual/environment-variables`. For details on driver initialization and the reference-counted lifecycle, see :doc:`/reference/api-driver-lifecycle`.
+For a full list of environment variables and their accepted values, see :doc:`/conceptual/environment-variables`. For details on driver initialization and the reference-counted lifecycle, see :doc:`/reference/api-driver`.
