@@ -139,6 +139,46 @@ std::vector<collectors::collector_slice> g_collector_slices;
 
 std::atomic<bool> g_reinit_pending{ false };
 
+// Shared implementation behind the public shutdown(). reset_gpu_perf_counter must be
+// false on the post-fork reinit path: that reinit only exists to refresh AMD SMI device
+// handles, but the rocprofiler-sdk GPU perf-counter collector is registered once (from
+// sdk_tool_configure) and is never recreated by setup(). Its SDK contexts are owned by
+// the parent and survive fork(), so tearing it down here would permanently disable GPU
+// hardware-counter sampling. Only the real finalize (public shutdown()) resets it.
+void
+shutdown_impl(bool reset_gpu_perf_counter)
+{
+    auto_lock_t _lk{ type_mutex<category::amd_smi>() };
+
+    if(!is_initialized())
+    {
+        return;
+    }
+
+    LOG_DEBUG("Shutting down PMC sampler.");
+
+    try
+    {
+        for(auto& slice : g_collector_slices)
+        {
+            slice.shutdown();
+        }
+    } catch(const std::runtime_error& _e)
+    {
+        LOG_ERROR("Exception thrown when shutting down PMC sampler: {}", _e.what());
+    }
+
+    is_initialized() = false;
+#if ROCPROFILER_VERSION >= 600
+    if(reset_gpu_perf_counter)
+    {
+        if(g_gpu_perf_counter_collector) g_gpu_perf_counter_collector->shutdown();
+        g_gpu_perf_counter_collector.reset();
+        g_gpu_perf_counter_provider.reset();
+    }
+#endif
+}
+
 void
 reinit_if_pending()
 {
@@ -146,7 +186,7 @@ reinit_if_pending()
     if(!g_reinit_pending.compare_exchange_strong(_expected, false)) return;
 
     LOG_DEBUG("Performing deferred PMC reinit after fork.");
-    shutdown();
+    shutdown_impl(/*reset_gpu_perf_counter=*/false);
     setup();
 }
 
@@ -244,32 +284,7 @@ setup()
 void
 shutdown()
 {
-    auto_lock_t _lk{ type_mutex<category::amd_smi>() };
-
-    if(!is_initialized())
-    {
-        return;
-    }
-
-    LOG_DEBUG("Shutting down PMC sampler.");
-
-    try
-    {
-        for(auto& slice : g_collector_slices)
-        {
-            slice.shutdown();
-        }
-    } catch(const std::runtime_error& _e)
-    {
-        LOG_ERROR("Exception thrown when shutting down PMC sampler: {}", _e.what());
-    }
-
-    is_initialized() = false;
-#if ROCPROFILER_VERSION >= 600
-    if(g_gpu_perf_counter_collector) g_gpu_perf_counter_collector->shutdown();
-    g_gpu_perf_counter_collector.reset();
-    g_gpu_perf_counter_provider.reset();
-#endif
+    shutdown_impl(/*reset_gpu_perf_counter=*/true);
 }
 
 void
