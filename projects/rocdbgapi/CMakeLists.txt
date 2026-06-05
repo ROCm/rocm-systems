@@ -97,6 +97,23 @@ endif()
 # <https://cmake.org/cmake/help/latest/variable/BUILD_SHARED_LIBS.html>.
 option(BUILD_SHARED_LIBS "Build amd-dbgapi as a shared library" ON)
 
+# Test suite options.  Default OFF so packaging builds are unaffected
+# unless a developer or CI job explicitly opts in.
+#
+# AMD_DBGAPI_BUILD_TESTS is the master switch.  The unit and feature
+# sub-options default to its value, so enabling the master switch turns
+# on both tiers, while a developer can selectively build only one tier.
+#
+# Tiers:
+#   unit     - OS-agnostic, no kernel driver, no GPU required.
+#   feature  - require the kernel driver (KFD on Linux, KMD on Windows);
+#              some additionally require a real GPU and a HIP runtime.
+option(AMD_DBGAPI_BUILD_TESTS "Build the rocdbgapi test suite" OFF)
+option(AMD_DBGAPI_BUILD_UNIT_TESTS
+  "Build rocdbgapi unit tests" ${AMD_DBGAPI_BUILD_TESTS})
+option(AMD_DBGAPI_BUILD_FEATURE_TESTS
+  "Build rocdbgapi feature tests" ${AMD_DBGAPI_BUILD_TESTS})
+
 if(ENABLE_ASSERTIONS)
   if(NOT uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG")
     # Add -UNDEBUG to the CFLAGS and CXXFLAGS
@@ -140,7 +157,12 @@ if(NOT CPACK_PACKAGING_INSTALL_PREFIX)
   set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
 endif()
 
-add_library(amd-dbgapi
+# Source list shared between the installable library (amd-dbgapi) and
+# the test-only internal seam target (amd-dbgapi-internal, defined in
+# cmake/AmdDbgapiInternal.cmake when AMD_DBGAPI_BUILD_TESTS is on).
+# Keep this list as the single source of truth so the two targets stay
+# in sync.
+set(_dbgapi_lib_sources
   src/agent.cpp
   src/architecture.cpp
   src/callbacks.cpp
@@ -162,6 +184,8 @@ add_library(amd-dbgapi
   src/watchpoint.cpp
   src/wave.cpp
   src/workgroup.cpp)
+
+add_library(amd-dbgapi ${_dbgapi_lib_sources})
 
 set_target_properties(amd-dbgapi PROPERTIES
   CXX_STANDARD 17
@@ -273,7 +297,9 @@ if(API_TRACING)
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  target_sources(amd-dbgapi PRIVATE src/os_driver_kfd.cpp src/utils_linux.cpp)
+  # OS-specific source list, also consumed by amd-dbgapi-internal.
+  set(_dbgapi_lib_os_sources src/os_driver_kfd.cpp src/utils_linux.cpp)
+  target_sources(amd-dbgapi PRIVATE ${_dbgapi_lib_os_sources})
 
   set(CMAKE_REQUIRED_FLAGS_BKP "${CMAKE_REQUIRED_FLAGS}")
   set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -std=c++17")
@@ -302,7 +328,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   endif()
   set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS_BKP}")
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
-  target_sources(amd-dbgapi PRIVATE src/os_driver_kmd.cpp src/utils_windows.cpp)
+  set(_dbgapi_lib_os_sources src/os_driver_kmd.cpp src/utils_windows.cpp)
+  target_sources(amd-dbgapi PRIVATE ${_dbgapi_lib_os_sources})
 
   target_include_directories(amd-dbgapi PRIVATE
     src/windows/imported
@@ -634,6 +661,15 @@ cpack_add_component(
   DISPLAY_NAME "ASAN"
   DESCRIPTION "ASAN libraries for the ROCM-DBGAPI"
   DEPENDS asan)
+
+if(AMD_DBGAPI_BUILD_TESTS OR AMD_DBGAPI_BUILD_UNIT_TESTS OR AMD_DBGAPI_BUILD_FEATURE_TESTS)
+  enable_testing()
+  # Build the test-only seam target that exposes internal C++ classes
+  # to unit tests.  Must come before add_subdirectory(test) so the
+  # target is visible to test CMakeLists.
+  include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/AmdDbgapiInternal.cmake)
+  add_subdirectory(test)
+endif()
 
 find_package(Doxygen)
 if(DOXYGEN_FOUND)
