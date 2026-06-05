@@ -140,9 +140,9 @@ union wstart_type
             .me = (dispatcher >> 2u) & 1u,
             .count = count,
             .isExt = wgext,
-            .wgid = wgext ? wgid : 0,
-            .last = wgext ? last : 0,
-            .dynvgpr = wgext ? dvg : 0};
+            .wgid = wgext ? static_cast<uint64_t>(wgid) : 0,
+            .last = wgext ? static_cast<uint64_t>(last) : 0,
+            .dynvgpr = wgext ? static_cast<uint64_t>(dvg) : 0};
     }
 
 #ifdef SQTT_LOGGING
