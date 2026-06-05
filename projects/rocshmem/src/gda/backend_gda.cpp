@@ -1556,15 +1556,29 @@ void GDABackend::create_queues() {
 
   mlx5_qps.resize(num_qps);
 
-  if (gda_provider == GDAProvider::BNXT) {
-    bnxt_create_cqs(ncqes);
-    bnxt_create_qps(sq_size);
-  } else if (gda_provider == GDAProvider::IONIC) {
+  switch (gda_provider) {
+#if defined(GDA_IONIC)
+  case GDAProvider::IONIC:
     ionic_create_cqs(ncqes);
     create_qps(sq_size);
-  } else if (gda_provider == GDAProvider::MLX5) {
+    break;
+#endif
+#if defined(GDA_BNXT)
+  case GDAProvider::BNXT:
+    bnxt_create_cqs(ncqes);
+    bnxt_create_qps(sq_size);
+    break;
+#endif
+#if defined(GDA_MLX5)
+  case GDAProvider::MLX5:
     // mlx5_create_qps also creates the associated CQs
     mlx5_create_qps(sq_size);
+    break;
+#endif
+  default:
+    create_cqs(ncqes);
+    create_qps(sq_size);
+    break;
   }
 
   alternate_qp_ports();
@@ -1660,9 +1674,11 @@ void GDABackend::create_parent_domain(NicDevice &nic) {
   CHECK_NNULL(nic.pd_parent, "ibv_alloc_parent_domain");
   dump_ibv_pd(nic.pd_parent);
 
+#if defined(GDA_IONIC)
   if (gda_provider == GDAProvider::IONIC) {
     ionic_setup_parent_domain(nic, &pattr);
   }
+#endif // defined(GDA_IONIC)
 }
 
 void GDABackend::create_cqs(int cqe) {
@@ -1693,17 +1709,23 @@ void GDABackend::create_cqs(int cqe) {
 
 void GDABackend::initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   switch (gda_provider) {
+#if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     ionic_initialize_gpu_qp(gpu_qp, conn_num);
     dump_ibv_qp(qps[conn_num], conn_num);
     break;
+#endif
+#if defined(GDA_BNXT)
   case GDAProvider::BNXT:
     bnxt_initialize_gpu_qp(gpu_qp, conn_num);
     dump_ibv_qp(qps[conn_num], conn_num);
     break;
+#endif
+#if defined(GDA_MLX5)
   case GDAProvider::MLX5:
     mlx5_initialize_gpu_qp(gpu_qp, conn_num);
     break;
+#endif
   default:
     assert(false /* GDAProvider initialize_gpu_qp */);
   }

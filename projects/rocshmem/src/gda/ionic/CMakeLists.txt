@@ -21,16 +21,12 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 # IN THE SOFTWARE.
 ###############################################################################
-target_sources(
-  ${PROJECT_NAME}
-  PRIVATE
-    backend_gda_ionic.cpp
-)
 
 if(GDA_IONIC)
 target_sources(
   ${PROJECT_NAME}
   PRIVATE
+    backend_gda_ionic.cpp
     queue_pair_ionic.cpp
 )
 endif()

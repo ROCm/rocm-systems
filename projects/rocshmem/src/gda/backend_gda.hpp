@@ -409,9 +409,23 @@ class GDABackend : public Backend {
   void cleanup_heap_memory_rkey();
 
   void initialize_gpu_qp(QueuePair* qp, int conn_num);
-  void bnxt_initialize_gpu_qp(QueuePair* qp, int conn_num);
+
+#if defined(GDA_IONIC)
   void ionic_initialize_gpu_qp(QueuePair* qp, int conn_num);
+  void ionic_create_cqs(int ncqes);
+  void ionic_setup_parent_domain(NicDevice &nic, struct ibv_parent_domain_init_attr* pattr);
+#endif // defined(GDA_IONIC)
+
+#if defined(GDA_BNXT)
+  void bnxt_initialize_gpu_qp(QueuePair* qp, int conn_num);
+  void bnxt_create_cqs(int ncqes);
+  void bnxt_create_qps(int sq_length);
+#endif // defined(GDA_BNXT)
+
+#if defined(GDA_MLX5)
   void mlx5_initialize_gpu_qp(QueuePair* qp, int conn_num);
+  void mlx5_create_qps(int sq_length);
+#endif // defined(GDA_MLX5)
 
   /**
    * @brief Setup InfiniBand Resources
@@ -457,15 +471,11 @@ class GDABackend : public Backend {
    * @brief Create all CQs with a of length ncqes
    */
   void create_cqs(int ncqes);
-  void bnxt_create_cqs(int ncqes);
-  void ionic_create_cqs(int ncqes);
 
   /**
    * @brief Create all QPs with a SQ of length sq_length
    */
   void create_qps(int sq_length);
-  void bnxt_create_qps(int sq_length);
-  void mlx5_create_qps(int sq_length);
 
   /**
    * @brief Reorders QPs to that we map rocSHMEM contexts to the correct QPs
@@ -503,7 +513,6 @@ class GDABackend : public Backend {
   static void pd_release(ibv_pd* pd, void* pd_context, void* ptr, uint64_t resource_type);
 
   void create_parent_domain(NicDevice &nic);
-  void ionic_setup_parent_domain(NicDevice &nic, struct ibv_parent_domain_init_attr* pattr);
 
   void setup_gpu_qps();
   void cleanup_gpu_qps();
@@ -606,22 +615,23 @@ class GDABackend : public Backend {
    * @brief structures holding the function pointers to the direct verbs functionality
    * of each network driver.
    */
+  ionicdv_funcs_t ionic_dv;
+
+  /**
+   * @brief handle used for the dlopen of the IONIC library
+   */
+  void *ionicdv_handle_{nullptr};
+
+  /**
+   * @brief structures holding the function pointers to the direct verbs functionality
+   * of each network driver.
+   */
   bnxtdv_funcs_t bnxt_re_dv;
 
   /**
    * @brief handle used for the dlopen of the BCOM library
    */
   void *bnxtdv_handle_{nullptr};
-
-  /**
-   * @brief initialize function table for BCOM direct verbs support
-   */
-  int bnxt_dv_dl_init();
-
-  /**
-   * @brief open bnxt dv lib
-   */
-  static void* bnxt_dv_dlopen();
 
   /**
    * @brief structures holding the function pointers to the direct verbs functionality
@@ -634,27 +644,7 @@ class GDABackend : public Backend {
    */
   void *mlx5dv_handle_{nullptr};
 
-  /**
-   * @brief initialize function table for MLNX direct verbs support
-   */
-  int mlx5_dv_dl_init();
-
-  /**
-   * @brief open mlx5 dv lib
-   */
-  static void* mlx5_dv_dlopen();
-
-  /**
-   * @brief structures holding the function pointers to the direct verbs functionality
-   * of each network driver.
-   */
-  ionicdv_funcs_t ionic_dv;
-
-  /**
-   * @brief handle used for the dlopen of the IONIC library
-   */
-  void *ionicdv_handle_{nullptr};
-
+#if defined(GDA_IONIC)
   /**
    * @brief initialize function table for IONIC direct verbs support
    */
@@ -664,6 +654,31 @@ class GDABackend : public Backend {
    * @brief open ionic dv lib
    */
   static void* ionic_dv_dlopen();
+#endif // defined(GDA_IONIC)
+
+#if defined(GDA_BNXT)
+  /**
+   * @brief initialize function table for BCOM direct verbs support
+   */
+  int bnxt_dv_dl_init();
+
+  /**
+   * @brief open bnxt dv lib
+   */
+  static void* bnxt_dv_dlopen();
+#endif // defined(GDA_BNXT)
+
+#if defined(GDA_MLX5)
+  /**
+   * @brief initialize function table for MLNX direct verbs support
+   */
+  int mlx5_dv_dl_init();
+
+  /**
+   * @brief open mlx5 dv lib
+   */
+  static void* mlx5_dv_dlopen();
+#endif // defined(GDA_MLX5)
 };
 
 }  // namespace rocshmem

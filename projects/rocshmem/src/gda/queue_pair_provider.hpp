@@ -41,7 +41,7 @@
 
 namespace rocshmem {
 
-#if defined(GDA_GENERIC)
+#if   defined(GDA_GENERIC)
 using QueuePair = QueuePairGeneric;
 #elif defined(GDA_IONIC)
 using QueuePair = QueuePairMLX5;
