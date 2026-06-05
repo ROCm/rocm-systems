@@ -634,10 +634,12 @@ NCCL_DEVICE_INLINE void ncclGin_BackendMask<beMask>::waitSignal(Coop coop, ncclG
   coop.sync();
   if (coop.thread_rank() == 0) {
     uint64_t* ptr = ncclGinCall<ncclGinApi_GetSignalPtr>(this->_makeCtx(), this->comm.ginSignalBase + signal);
-    uint64_t got;
-    #pragma unroll 1
-    do got = cuda::atomic_ref<uint64_t>{*ptr}.load(ord);
-    while (!nccl::utility::rollingLessEq(least, got, bits) && !testAbort(this->comm.abortFlag, steps));
+    if (ptr != nullptr) {
+      uint64_t got;
+      #pragma unroll 1
+      do got = cuda::atomic_ref<uint64_t>{*ptr}.load(ord);
+      while (!nccl::utility::rollingLessEq(least, got, bits) && !testAbort(this->comm.abortFlag, steps));
+    }
   }
   coop.sync();
 }

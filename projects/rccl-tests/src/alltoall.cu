@@ -139,15 +139,23 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
     case 2: // NvlAlltoAllKernelOptimized
       reqs->lsaBarrierCount = deviceCtaCount;
       return testSuccess;
-    case 3: // GinAlltoAllKernel
+    case 3: // GinAlltoAllKernel — matches 02_gin_alltoall_pure (GIN barrier only)
+      if (commProperties->ginType == NCCL_GIN_TYPE_NONE) {
+        fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
+        return testInternalError;
+      }
+      reqs->railGinBarrierCount = deviceCtaCount;
+      reqs->ginSignalCount = deviceCtaCount;
+      reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+      return testSuccess;
     case 4: // HybridAlltoAllKernel (LSA+GIN)
       if (commProperties->ginType == NCCL_GIN_TYPE_NONE) {
         fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
         return testInternalError;
       }
       reqs->barrierCount = deviceCtaCount;
+      reqs->railGinBarrierCount = deviceCtaCount;
       reqs->ginSignalCount = deviceCtaCount;
-      // Required when ginSignalCount/barrierCount > 0 (see NCCL 02_alltoall_gin example).
       reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
       return testSuccess;
     default:
@@ -167,8 +175,13 @@ bool AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* req
       return true;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
     case 3: // GinAlltoAllKernel
+      reqs->railGinBarrierCount = deviceCtaCount;
+      reqs->ginSignalCount = deviceCtaCount;
+      reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+      return true;
     case 4: // HybridAlltoAllKernel (LSA+GIN)
       reqs->barrierCount = deviceCtaCount;
+      reqs->railGinBarrierCount = deviceCtaCount;
       reqs->ginSignalCount = deviceCtaCount;
       reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
       return true;
@@ -298,7 +311,11 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
   ncclGin gin { devComm, ginContext };
   uint64_t signalValue = gin.readSignal(signalIndex);
 
-  ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x };
+  // GIN-only cross-rank barrier (see GinDeviceMPITests alltoallPureKernel / 02_gin_alltoall_pure).
+  // ncclBarrierSession uses LSA inbox stores that fault on Anvil when peer resource pointers
+  // are not wired; ncclGinBarrierSession syncs via GIN signals + shadows instead.
+  ncclGinBarrierSession<ncclCoopCta> bar {
+    ncclCoopCta(), gin, ncclTeamWorld(devComm), devComm.railGinBarrier, blockIdx.x};
   bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
 
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
