@@ -1004,9 +1004,9 @@ __FP8_HOST_DEVICE_STATIC__ T_int internal_cvt_e8m0_to_int_type(__hip_fp8_storage
   if (f > __hip_internal::numeric_limits<T_int>::max()) {
     return __hip_internal::numeric_limits<T_int>::max();
   }
-  if (f < __hip_internal::numeric_limits<T_int>::lowest()) {
-    return __hip_internal::numeric_limits<T_int>::lowest();
-  }
+  // e8m0 encodes only non-negative scales (2^-127..2^127) and NaN is handled
+  // above, so f is always >= 0. The lowest() clamp is therefore unreachable
+  // even when T_int is signed.
   return static_cast<T_int>(f);
 }
 
