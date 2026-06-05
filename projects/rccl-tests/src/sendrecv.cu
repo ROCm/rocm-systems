@@ -71,6 +71,7 @@ struct testColl sendRecvTest = {
   SendRecvInitData,
   SendRecvGetBw,
   SendRecvRunColl,
+  NULL,
   NULL
 };
 
