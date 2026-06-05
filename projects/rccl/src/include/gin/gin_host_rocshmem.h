@@ -14,6 +14,9 @@
 #include "gin/gin_host.h"
 #include "plugin/nccl_net.h"
 
+// Ensure rocSHMEM is initialized before Anvil SDMA setup (librccl is GIN-only).
+ncclResult_t ncclGinRocshmemEnsureInit(struct ncclComm* comm);
+
 // Called from gin_host.cc (with ncclComm context)
 ncclResult_t ncclGinRocshmemCreateContext(struct ncclComm *comm, void *collComm, int devId,
                                           int nSignals, int nCounters, void **outGinCtx,

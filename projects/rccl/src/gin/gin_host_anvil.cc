@@ -10,6 +10,7 @@
 #include "bootstrap.h"
 #include "comm.h"
 #include "dev_runtime.h"
+#include "gin/gin_host_rocshmem.h"
 #include "nccl_device/gin/anvil/gin_anvil_device_host_common.h"
 
 // Anvil host API (src/sdma); include path from ROCSHMEM_SOURCE_DIR or mono-repo sibling.
@@ -85,6 +86,10 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
   // Ensure symmetric runtime is initialized (for lsaRankList/bigSize fields).
   NCCLCHECK(ncclDevrInitOnce(comm));
 
+  // Anvil SDMA uses rocSHMEM host runtime (initEndpoint); ensure it is ready even
+  // when librccl is built GIN-only and the test binary owns rocshmem symbols.
+  NCCLCHECK(ncclGinRocshmemEnsureInit(comm));
+
   // For LSA flat VA accesses, expose signals in that space as well by mapping them
   // into symmetric memory is non-trivial. For now, we require signals to live in
   // LSA flat space by allocating them from the symmetric resource window.
@@ -130,6 +135,7 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
   memset(&ctx->gpuCtxHost, 0, sizeof(ctx->gpuCtxHost));
   ctx->gpuCtxHost.queues = ctx->queuesDev;
   ctx->gpuCtxHost.signalsBase = ctx->signalsBaseDev;
+  ctx->gpuCtxHost.signals = signalsLocal;
   ctx->gpuCtxHost.counters = countersLocal;
   ctx->gpuCtxHost.nSignals = nSignals;
   ctx->gpuCtxHost.nCounters = nCounters;

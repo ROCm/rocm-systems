@@ -55,7 +55,8 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL> {
 
     uint64_t* sigPtr = nullptr;
     if (hasSignal) {
-      uint64_t* peerBase = (uint64_t*)loadConst(&aCtx->signalsBase[peer]);
+      uint64_t** sigBases = (uint64_t**)loadConst(&aCtx->signalsBase);
+      uint64_t* peerBase = (uint64_t*)loadConst(&sigBases[peer]);
       sigPtr = peerBase + signalId;
       if (signalOp == ncclGinSignalInc) signalOpArg = 1;
       signalOpArg = 1;
@@ -107,8 +108,7 @@ template <>
 struct ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ANVIL> {
   NCCL_DEVICE_INLINE static uint64_t* call(ncclGinCtx ctx, ncclGinSignal_t signalId) {
     auto* aCtx = (ncclGinAnvilGPUContext*)ctx.handle;
-    uint64_t* localBase = (uint64_t*)nccl::utility::loadConst(&aCtx->signalsBase[ctx.rank]);
-    return localBase + signalId;
+    return nccl::utility::loadConst(&aCtx->signals) + signalId;
   }
 };
 

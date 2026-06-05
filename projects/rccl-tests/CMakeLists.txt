@@ -20,7 +20,6 @@ project(rccl-tests LANGUAGES CXX)
 option(USE_MPI                     "Build RCCL-tests with MPI support."           OFF)
 option(ENABLE_DEVICE_API           "Build with NCCL Device API support (GIN)."    OFF)
 option(ENABLE_ROCSHMEM             "Build with rocshmem GIN backend support."     OFF)
-set(ROCSHMEM_SOURCE_DIR "" CACHE PATH "rocSHMEM source tree (for Anvil SDMA device headers)")
 option(BUILD_LOCAL_GPU_TARGET_ONLY "Build only for GPUs detected on this machine" OFF)
 
 if (NOT CMAKE_BUILD_TYPE)
@@ -112,8 +111,8 @@ endif()
 # Set CMAKE flags
 #==================================================================================================
 set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "")
-set(CMAKE_CXX_STANDARD   17)   # ROCm 7.13+ HIP headers require C++17 (e.g. std::is_same_v in hip_ext.h)
-set(CMAKE_CXX_EXTENSIONS OFF)  # Without this line, it will add -std=gnu++17 instead, which has some issues.
+set(CMAKE_CXX_STANDARD   14)   # We use C++14 features, this will add compile option: -std=c++14
+set(CMAKE_CXX_EXTENSIONS OFF)  # Without this line, it will add -std=gnu++14 instead, which has some issues.
 set(CPACK_PACKAGING_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Path to install to when packaged.")
 if(ROCM_PATH)
   #list(APPEND CMAKE_PREFIX_PATH  # Temporary workaround 
@@ -212,15 +211,11 @@ endif()
 if (ENABLE_ROCSHMEM)
     message(STATUS "rocshmem GIN backend support enabled")
     add_definitions(-DENABLE_ROCSHMEM)
-    add_definitions(-DENABLE_ROCSHMEM_GIN)
     if (NOT ROCSHMEM_INSTALL_DIR)
         message(FATAL_ERROR "ENABLE_ROCSHMEM is ON but ROCSHMEM_INSTALL_DIR is not set")
     endif()
     # Device headers include <rocshmem/rocshmem.hpp> when ENABLE_ROCSHMEM is set
     include_directories(${ROCSHMEM_INSTALL_DIR}/include)
-    if (ROCSHMEM_SOURCE_DIR)
-        include_directories(${ROCSHMEM_SOURCE_DIR}/src/sdma)
-    endif()
     # rccl-tests device code calls rocshmem device functions via GIN template
     # specializations. librocshmem.a is compiled with -fgpu-rdc, so tests that
     # use GIN must also use -fgpu-rdc and device-link with it.

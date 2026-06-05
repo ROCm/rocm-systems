@@ -45,7 +45,7 @@ enum ncclGinOptFlags {
 #endif
 
 #ifndef NCCL_GIN_ANVIL_ENABLE
-#if defined(__HIP_PLATFORM_AMD__) && defined(ENABLE_ROCSHMEM_GIN)
+#if defined(__HIP_PLATFORM_AMD__) && (defined(ENABLE_ROCSHMEM_GIN) || defined(ENABLE_ROCSHMEM))
 #define NCCL_GIN_ANVIL_ENABLE 1
 #else
 #define NCCL_GIN_ANVIL_ENABLE 0

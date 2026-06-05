@@ -26,7 +26,7 @@ static std::map<void*, int> bufferRegRefcount;
 static std::mutex ginRocshmemInitMutex;
 static bool ginRocshmemRcclInited = false;
 
-static ncclResult_t ncclGinRocshmemEnsureInit(struct ncclComm* comm) {
+ncclResult_t ncclGinRocshmemEnsureInit(struct ncclComm* comm) {
   if (comm == nullptr) return ncclSuccess;
   if (rocshmem::rocshmem_n_pes() > 0) return ncclSuccess;
 

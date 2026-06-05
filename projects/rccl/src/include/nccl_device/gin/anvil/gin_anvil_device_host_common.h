@@ -13,10 +13,12 @@
 
 // Device-resident context handle for Anvil-SDMA based GIN.
 // - queues[peer] points to an SDMA queue handle for issuing ops to that peer.
-// - signalsBase[peer] is the base address of that peer's signal array in LSA flat VA space.
+// - signalsBase[peer] is the base address of that peer's signal array (for remote puts).
+// - signals is this rank's flat indexed signal array (for readSignal / indexed ops).
 struct ncclGinAnvilGPUContext {
   void** queues;              // device array [nRanks] of rocshmem::anvil::SdmaQueueDeviceHandle*
   uint64_t** signalsBase;     // device array [nRanks] of base pointers to peer signals
+  uint64_t* signals;          // device pointer to this rank's indexed signal array
   uint64_t* counters;         // device pointer to local counters array
   uint32_t nSignals;
   uint32_t nCounters;
