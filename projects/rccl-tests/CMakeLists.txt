@@ -112,8 +112,8 @@ endif()
 # Set CMAKE flags
 #==================================================================================================
 set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "")
-set(CMAKE_CXX_STANDARD   14)   # We use C++14 features, this will add compile option: -std=c++14
-set(CMAKE_CXX_EXTENSIONS OFF)  # Without this line, it will add -std=gnu++14 instead, which has some issues.
+set(CMAKE_CXX_STANDARD   17)   # ROCm 7.13+ HIP headers require C++17 (e.g. std::is_same_v in hip_ext.h)
+set(CMAKE_CXX_EXTENSIONS OFF)  # Without this line, it will add -std=gnu++17 instead, which has some issues.
 set(CPACK_PACKAGING_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Path to install to when packaged.")
 if(ROCM_PATH)
   #list(APPEND CMAKE_PREFIX_PATH  # Temporary workaround 

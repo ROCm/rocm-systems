@@ -154,7 +154,7 @@ if (ENABLE_ROCSHMEM AND ROCSHMEM_LIBRARY)
         -Wl,--whole-archive
         ${ROCSHMEM_LIBRARY}
         -Wl,--no-whole-archive
-        ibverbs hsa-runtime64 numa ${_DRM} ${_DRM_AMDGPU})
+        hsakmt ibverbs hsa-runtime64 numa ${_DRM} ${_DRM_AMDGPU})
     # -rdynamic: export executable rocshmem/anvil symbols for librccl.so to bind.
     target_link_options(alltoall_perf PRIVATE -fgpu-rdc --hip-link ${_rocshmem_offload_arch_flags} -rdynamic)
 endif()
