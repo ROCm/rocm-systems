@@ -12,10 +12,6 @@ and the ROCpd database.
 from __future__ import annotations
 import pytest
 from conftest import RocprofsysTest
-from rocprofsys import detect_gpu
-
-# GPU categories this test may skip validation for when detected on the system.
-KFD_GPU_CATEGORY_TO_SKIP = ["apu"]
 
 pytestmark = [
     pytest.mark.gpu,
@@ -23,14 +19,6 @@ pytestmark = [
     pytest.mark.hip,
     pytest.mark.kfd,
 ]
-
-
-def kfd_gpu_category_to_skip() -> list[str] | None:
-    """Return categories to skip this run, or None if none apply."""
-    detected = detect_gpu().categories
-    matched = [c for c in KFD_GPU_CATEGORY_TO_SKIP if c in detected]
-    return matched if matched else None
-
 
 # =============================================================================
 # Fixtures
@@ -82,9 +70,9 @@ class TestKFD(RocprofsysTest):
     @pytest.mark.timeout(120)
     @pytest.mark.rocpd("kfd_environment")
     @pytest.mark.parametrize("mode", ["sys_run"])
-    def test_events(self, mode, kfd_environment, kfd_rules):
+    def test_events(self, mode, kfd_environment, kfd_rules, gpu_info):
         """Run unified-memory and validate KFD events in Perfetto + ROCpd."""
-        gpu_category_to_skip = kfd_gpu_category_to_skip()
+        is_apu = "apu" in gpu_info.categories
 
         result = self.run_test(
             mode,
@@ -108,7 +96,7 @@ class TestKFD(RocprofsysTest):
             pass_regex=[r"PAGE_FAULT"],
         )
 
-        if gpu_category_to_skip is None:
+        if not is_apu:
             self.assert_perfetto(
                 result,
                 subtest_name="Perfetto KFD page migrate validation",
@@ -136,19 +124,19 @@ class TestKFD(RocprofsysTest):
             result,
             subtest_name="ROCpd KFD event validation",
             rules_files=kfd_rules,
-            gpu_category_to_skip=gpu_category_to_skip,
+            gpu_category_to_skip=["apu"] if is_apu else None,
         )
 
     @pytest.mark.timeout(120)
     @pytest.mark.rocpd("kfd_environment")
     @pytest.mark.parametrize("mode", ["sys_run"])
-    def test_prefetch_events(self, mode, kfd_environment, kfd_rules):
+    def test_prefetch_events(self, mode, kfd_environment, kfd_rules, gpu_info):
         """Focused test for prefetch-driven page migrations.
 
         Uses more prefetch iterations to generate a high volume of
         PAGE_MIGRATE_PREFETCH events.
         """
-        gpu_category_to_skip = kfd_gpu_category_to_skip()
+        is_apu = "apu" in gpu_info.categories
         env = kfd_environment.copy()
 
         result = self.run_test(
@@ -165,7 +153,7 @@ class TestKFD(RocprofsysTest):
             pass_regex=[r"6 tests completed"],
         )
 
-        if gpu_category_to_skip is None:
+        if not is_apu:
             self.assert_perfetto(
                 result,
                 subtest_name="Perfetto KFD prefetch migration validation",
@@ -181,7 +169,7 @@ class TestKFD(RocprofsysTest):
             print_output=True,
         )
 
-        if gpu_category_to_skip is None:
+        if not is_apu:
             self.assert_perfetto(
                 result,
                 subtest_name="Perfetto KFD combined event validation",
@@ -202,13 +190,13 @@ class TestKFD(RocprofsysTest):
             result,
             subtest_name="ROCpd KFD prefetch validation",
             rules_files=kfd_rules,
-            gpu_category_to_skip=gpu_category_to_skip,
+            gpu_category_to_skip=["apu"] if is_apu else None,
         )
 
     @pytest.mark.timeout(180)
     @pytest.mark.rocpd("kfd_environment")
     @pytest.mark.parametrize("mode", ["sys_run"])
-    def test_memory_pressure(self, mode, kfd_environment, kfd_rules):
+    def test_memory_pressure(self, mode, kfd_environment, kfd_rules, gpu_info):
         """Stress test with high memory pressure to trigger queue evictions.
 
         Uses larger pressure allocation to maximize the chance of
@@ -216,7 +204,7 @@ class TestKFD(RocprofsysTest):
         unified-memory program auto-scales pressure to at least 25%
         of GPU VRAM (capped at 4 GB).
         """
-        gpu_category_to_skip = kfd_gpu_category_to_skip()
+        is_apu = "apu" in gpu_info.categories
         env = kfd_environment.copy()
 
         result = self.run_test(
@@ -241,7 +229,7 @@ class TestKFD(RocprofsysTest):
             pass_regex=[r"PAGE_FAULT"],
         )
 
-        if gpu_category_to_skip is None:
+        if not is_apu:
             self.assert_perfetto(
                 result,
                 subtest_name="Perfetto KFD page migrate validation (pressure)",
@@ -269,5 +257,5 @@ class TestKFD(RocprofsysTest):
             result,
             subtest_name="ROCpd KFD pressure validation",
             rules_files=kfd_rules,
-            gpu_category_to_skip=gpu_category_to_skip,
+            gpu_category_to_skip=["apu"] if is_apu else None,
         )
