@@ -12,6 +12,9 @@ set(RCCL_SOURCE_DIR "${PROJECT_SOURCE_DIR}")
 # net_ib_cast: populate NET_IB_CAST_SOURCES and NET_IB_CAST_INCLUDE_DIRS
 add_subdirectory(transport/net_ib_cast)
 
+# devcomm: populate DEVCOMM_SOURCES and DEVCOMM_INCLUDE_DIRS
+add_subdirectory(devcomm)
+
 # Collect list of all source files
 #==================================================================================================
 # E.g: find src -type f \( -name "*.cc" -o -name "*.h" -o -name "*.hpp" \) | sort
@@ -360,6 +363,7 @@ set(SRC_FILES
   plugin/net/net_v9.cc
   plugin/net/net_v10.cc
   plugin/net/net_v11.cc
+  plugin/net/net_v12.cc
   plugin/profiler/profiler_v1.cc
   plugin/profiler/profiler_v2.cc
   plugin/profiler/profiler_v3.cc
@@ -438,6 +442,8 @@ endif()
 list(APPEND SRC_FILES ${SMI_SOURCES})
 # NET_IB_CAST_SOURCES already carry the src/ prefix (set by transport/net_ib_cast/CMakeLists.txt)
 list(APPEND SRC_FILES ${NET_IB_CAST_SOURCES})
+# DEVCOMM_SOURCES already carry the src/ prefix (set by devcomm/CMakeLists.txt)
+list(APPEND SRC_FILES ${DEVCOMM_SOURCES})
 
 # Hipify source files (copy of source generated into hipify directory)
 #==================================================================================================
@@ -639,6 +645,7 @@ target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/nccl_device)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/ionic)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/plugin)
 target_include_directories(rccl PRIVATE ${NET_IB_CAST_INCLUDE_DIRS})
+target_include_directories(rccl PRIVATE ${DEVCOMM_INCLUDE_DIRS})
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/gensrc)
 target_include_directories(rccl PRIVATE ${HSA_INCLUDE_PATH})
 target_include_directories(rccl PRIVATE ${SMI_INCLUDE_DIR})
