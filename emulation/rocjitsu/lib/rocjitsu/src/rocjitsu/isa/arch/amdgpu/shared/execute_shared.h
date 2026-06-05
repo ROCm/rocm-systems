@@ -26,6 +26,35 @@ namespace rocjitsu {
 namespace amdgpu {
 
 template <typename Inst>
+inline void execute_buffer_gl0_inv_mubuf([[maybe_unused]] Inst &inst,
+                                         [[maybe_unused]] Wavefront &wf) {
+  wf.cu().l1_vector().invalidate_all();
+  if (auto *l2 = wf.cu().l2())
+    l2->flush_all(wf.process_id());
+}
+
+template <typename Inst>
+inline void execute_buffer_gl1_inv_mubuf([[maybe_unused]] Inst &inst,
+                                         [[maybe_unused]] Wavefront &wf) {
+  wf.cu().l1_vector().invalidate_all();
+  if (auto *l2 = wf.cu().l2())
+    l2->flush_all(wf.process_id());
+}
+
+template <typename Inst>
+inline void execute_buffer_inv_mubuf([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  wf.cu().l1_vector().invalidate_all();
+  if (auto *l2 = wf.cu().l2())
+    l2->flush_all(wf.process_id());
+}
+
+template <typename Inst>
+inline void execute_buffer_wbl2_mubuf([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  if (auto *l2 = wf.cu().l2())
+    l2->flush_all(wf.process_id());
+}
+
+template <typename Inst>
 inline void execute_ds_bpermute_b32_ds([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   auto &cu = wf.cu();
@@ -1219,6 +1248,8 @@ inline void execute_s_getreg_b32_sopk([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_s_gl1_inv_smem([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   wf.cu().l1_vector().invalidate_all();
+  if (auto *l2 = wf.cu().l2())
+    l2->flush_all(wf.process_id());
 }
 
 template <typename Inst>
@@ -1328,6 +1359,25 @@ inline void execute_s_max_u32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   uint32_t result = std::max(s0, s1);
   inst.sdst.write_scalar(wf, result);
   wf.write_scc((s0 >= s1));
+}
+
+template <typename Inst>
+inline void execute_s_memrealtime_smem([[maybe_unused]] Inst &inst,
+                                       [[maybe_unused]] Wavefront &wf) {
+  static thread_local uint64_t counter = 0;
+  counter += 100;
+  uint32_t dst = wf.sgpr_alloc().base + inst.inst_.sdata;
+  wf.cu().write_sgpr(dst, static_cast<uint32_t>(counter));
+  wf.cu().write_sgpr(dst + 1, static_cast<uint32_t>(counter >> 32));
+}
+
+template <typename Inst>
+inline void execute_s_memtime_smem([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  static thread_local uint64_t counter = 0;
+  counter += 100;
+  uint32_t dst = wf.sgpr_alloc().base + inst.inst_.sdata;
+  wf.cu().write_sgpr(dst, static_cast<uint32_t>(counter));
+  wf.cu().write_sgpr(dst + 1, static_cast<uint32_t>(counter >> 32));
 }
 
 template <typename Inst>

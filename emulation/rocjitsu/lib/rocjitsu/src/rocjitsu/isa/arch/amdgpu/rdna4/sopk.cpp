@@ -152,7 +152,7 @@ SCallB64Sopk::SCallB64Sopk(const MachineInst *inst)
 void SCallB64Sopk::execute_impl(amdgpu::Wavefront &wf) {
   sdst.write_scalar64(wf, wf.pc + size_);
   int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
-  wf.pc = wf.pc + static_cast<int64_t>(offset) * 4 - size_;
+  wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
 }
 
 } // namespace rdna4

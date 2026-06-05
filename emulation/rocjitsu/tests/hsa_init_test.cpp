@@ -5,7 +5,7 @@
 /// @brief Verifies hsa_init() and GPU agent enumeration succeed through the
 ///        real ROCR runtime on the simulated GPU.
 ///
-/// Requires LD_PRELOAD=librocjitsu_kmd.so and RJ_CONFIG env var.
+/// Requires LD_PRELOAD=librocjitsu_kmd.so.
 
 #include <hsa/hsa.h>
 
