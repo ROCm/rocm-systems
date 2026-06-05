@@ -1,0 +1,49 @@
+name: Auto-assign PR (rocdbgapi / rocr-debug-agent)
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+    paths:
+      - 'projects/rocdbgapi/**'
+      - 'projects/rocr-debug-agent/**'
+
+permissions:
+  pull-requests: write
+
+jobs:
+  auto-assign:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assign random reviewer
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+
+            if (pr.draft) {
+              core.info('Skipping: PR is a draft.');
+              return;
+            }
+
+            if (pr.assignees && pr.assignees.length > 0) {
+              core.info(`Skipping: PR already has assignee(s): ${pr.assignees.map(a => a.login).join(', ')}`);
+              return;
+            }
+
+            const members = ['aktemur', 'amd-shahab', 'czidev-amd', 'lancesix', 'lumachad'];
+            const candidates = members.filter(login => login !== pr.user.login);
+
+            if (candidates.length === 0) {
+              core.warning('No eligible assignees after excluding PR author.');
+              return;
+            }
+
+            const assignee = candidates[Math.floor(Math.random() * candidates.length)];
+            core.info(`Assigning PR #${pr.number} to ${assignee} (from ${candidates.length} candidate(s))`);
+
+            await github.rest.issues.addAssignees({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+              assignees: [assignee]
+            });
