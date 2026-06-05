@@ -434,7 +434,9 @@ SSetGprIdxModeSopp::SSetGprIdxModeSopp(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SSetGprIdxModeSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SSetGprIdxModeSopp::execute_impl(amdgpu::Wavefront &wf) {
+  wf.set_m0((wf.m0() & 0xFFFFF0FFu) | ((simm16.read_scalar(wf) & 0xF) << 8));
+}
 
 SEndpgmOrderedPsDoneSopp::SEndpgmOrderedPsDoneSopp(const MachineInst *inst)
     : Sopp("s_endpgm_ordered_ps_done", reinterpret_cast<const OpEncoding *>(inst),

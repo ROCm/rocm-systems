@@ -1929,6 +1929,24 @@ class CodeGenerator:
         if cls == 'true_nop':
             return '  (void)wf;'
 
+        if cls == 'gpr_idx':
+            if op == 'on':
+                return (
+                    '  uint32_t idx = ssrc0.read_scalar(wf) & 0xFF;\n'
+                    '  uint32_t mode = ssrc1.read_scalar(wf) & 0xF;\n'
+                    '  wf.set_m0((wf.m0() & 0xFFFFF000u) | (mode << 8) | idx);\n'
+                    '  wf.set_mode_raw(wf.mode_raw() | Wavefront::GPR_IDX_EN_BIT);'
+                )
+            if op == 'off':
+                return '  wf.set_mode_raw(wf.mode_raw() & ~Wavefront::GPR_IDX_EN_BIT);'
+            if op == 'idx':
+                return '  wf.set_m0((wf.m0() & 0xFFFFFF00u) | (ssrc0.read_scalar(wf) & 0xFF));'
+            if op == 'mode':
+                return (
+                    f'  wf.set_m0((wf.m0() & 0xFFFFF0FFu) '
+                    f'| (({src_ops[0]}.read_scalar(wf) & 0xF) << 8));'
+                )
+
         if cls == 'set_vgpr_msb':
             L.append(
                 f'  wf.set_vgpr_msb_mode(static_cast<uint8_t>({src_ops[0]}.encoding_value_ & 0xffu));'
@@ -4084,6 +4102,11 @@ class CodeGenerator:
             # V_CMPX writes VCC+EXEC on CDNA but only EXEC on RDNA:
             'vector_cmpx',
             'vector_cmpx_class',
+            # FP8/BF8 conversions access inst_.op_sel (VOP3-only field):
+            'cvt_fp8',
+            'cvt_scalef32',
+            # vector_cvt_pk FP8 pack/unpack uses inst_.op_sel for word sel:
+            'vector_cvt_pk',
         }
     )
     _NON_SHAREABLE_MNEMONICS = frozenset(
@@ -5547,6 +5570,386 @@ class CodeGenerator:
             file=sys.stderr,
         )
 
+    @staticmethod
+    def _gen_narrow_cvt_header_REMOVED_PLACEHOLDER(out_path: str) -> None:
+        pass
+        content_UNUSED = f"""\
+// REMOVED — narrow FP conversions now live in util/data_types.h
+
+#ifndef {guard}
+#define {guard}
+
+#include <bit>
+#include <cmath>
+#include <cstdint>
+#include <limits>
+
+namespace util {{
+
+// LFSR for stochastic rounding seed advancement
+inline uint32_t prng_advance(uint32_t seed) {{
+  return (seed << 1) ^ ((seed >> 31) ? 197u : 0u);
+}}
+
+// --- FP8 E4M3 (OCP E4M3FN) with RNE rounding ---
+
+inline uint8_t f32_to_fp8_e4m3_rne(float val) {{
+  uint32_t f = std::bit_cast<uint32_t>(val);
+  uint32_t sign = (f >> 24) & 0x80;
+  if (std::isnan(val)) return static_cast<uint8_t>(sign | 0x7F);
+  int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
+  uint32_t f_mant = f & 0x7FFFFF;
+  if (f_exp == 0xFF) return static_cast<uint8_t>(sign | 0x7E);
+  int32_t exp = f_exp - 127 + 7;
+  if (exp <= 0) {{
+    if (exp < -3) return static_cast<uint8_t>(sign);
+    uint32_t mant = f_mant | 0x800000;
+    int shift = 21 - exp;
+    if (shift > 23) return static_cast<uint8_t>(sign);
+    uint32_t round_bit = (mant >> (shift - 1)) & 1;
+    uint32_t sticky = (mant & ((1u << (shift - 1)) - 1)) ? 1 : 0;
+    uint32_t result = mant >> shift;
+    result += round_bit & (sticky | (result & 1));
+    if (result >= 8) {{ result = 4; exp = 1; return static_cast<uint8_t>(sign | (1 << 3) | (result & 0x7)); }}
+    return static_cast<uint8_t>(sign | (result & 0x7));
+  }}
+  if (exp >= 15) {{
+    uint32_t mant = (f_mant >> 20) & 0x7;
+    if (exp > 15 || (exp == 15 && mant >= 7))
+      return static_cast<uint8_t>(sign | 0x7E);
+    return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 3) | mant);
+  }}
+  uint32_t round_bit = (f_mant >> 19) & 1;
+  uint32_t sticky = (f_mant & 0x7FFFF) ? 1 : 0;
+  uint32_t mant = (f_mant >> 20) & 0x7;
+  mant += round_bit & (sticky | (mant & 1));
+  if (mant > 0x7) {{
+    mant = 0;
+    exp += 1;
+    if (exp >= 15) {{
+      if (exp > 15) return static_cast<uint8_t>(sign | 0x7E);
+      return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 3));
+    }}
+  }}
+  return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 3) | mant);
+}}
+
+inline uint8_t f32_to_fp8_e4m3_sr(float val, uint32_t seed) {{
+  if (std::isnan(val)) return static_cast<uint8_t>((std::bit_cast<uint32_t>(val) >> 24) & 0x80) | 0x7F;
+  uint32_t f = std::bit_cast<uint32_t>(val);
+  uint32_t sign = (f >> 24) & 0x80;
+  int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
+  uint32_t f_mant = f & 0x7FFFFF;
+  if (f_exp == 0xFF) return static_cast<uint8_t>(sign | 0x7E);
+  int32_t exp = f_exp - 127 + 7;
+  if (exp <= 0) return static_cast<uint8_t>(sign);
+  if (exp >= 15) return static_cast<uint8_t>(sign | 0x7E);
+  uint32_t trunc_bits = f_mant & 0xFFFFF;
+  uint32_t random_add = seed >> 12;
+  uint32_t mant = (f_mant >> 20) & 0x7;
+  if ((trunc_bits + random_add) > 0xFFFFF) {{
+    mant += 1;
+    if (mant > 0x7) {{ mant = 0; exp += 1; if (exp >= 15) return static_cast<uint8_t>(sign | 0x7E); }}
+  }}
+  return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 3) | mant);
+}}
+
+// --- BF8 E5M2 with RNE rounding ---
+
+inline uint8_t f32_to_bf8_e5m2_rne(float val) {{
+  uint32_t f = std::bit_cast<uint32_t>(val);
+  uint32_t sign = (f >> 24) & 0x80;
+  if (std::isnan(val)) return static_cast<uint8_t>(sign | 0x7F);
+  int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
+  uint32_t f_mant = f & 0x7FFFFF;
+  if (f_exp == 0xFF) return static_cast<uint8_t>(sign | 0x7C);
+  int32_t exp = f_exp - 127 + 15;
+  if (exp <= 0) {{
+    if (exp < -1) return static_cast<uint8_t>(sign);
+    uint32_t mant = f_mant | 0x800000;
+    int shift = 22 - exp;
+    if (shift > 23) return static_cast<uint8_t>(sign);
+    uint32_t round_bit = (mant >> (shift - 1)) & 1;
+    uint32_t sticky = (mant & ((1u << (shift - 1)) - 1)) ? 1 : 0;
+    uint32_t result = mant >> shift;
+    result += round_bit & (sticky | (result & 1));
+    if (result >= 4) {{ return static_cast<uint8_t>(sign | (1 << 2) | 0); }}
+    return static_cast<uint8_t>(sign | (result & 0x3));
+  }}
+  if (exp >= 31) return static_cast<uint8_t>(sign | 0x7C);
+  uint32_t round_bit = (f_mant >> 20) & 1;
+  uint32_t sticky = (f_mant & 0xFFFFF) ? 1 : 0;
+  uint32_t mant = (f_mant >> 21) & 0x3;
+  mant += round_bit & (sticky | (mant & 1));
+  if (mant > 0x3) {{
+    mant = 0; exp += 1;
+    if (exp >= 31) return static_cast<uint8_t>(sign | 0x7C);
+  }}
+  return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 2) | mant);
+}}
+
+inline uint8_t f32_to_bf8_e5m2_sr(float val, uint32_t seed) {{
+  if (std::isnan(val)) return static_cast<uint8_t>((std::bit_cast<uint32_t>(val) >> 24) & 0x80) | 0x7F;
+  uint32_t f = std::bit_cast<uint32_t>(val);
+  uint32_t sign = (f >> 24) & 0x80;
+  int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
+  uint32_t f_mant = f & 0x7FFFFF;
+  if (f_exp == 0xFF) return static_cast<uint8_t>(sign | 0x7C);
+  int32_t exp = f_exp - 127 + 15;
+  if (exp <= 0) return static_cast<uint8_t>(sign);
+  if (exp >= 31) return static_cast<uint8_t>(sign | 0x7C);
+  uint32_t trunc_bits = f_mant & 0x1FFFFF;
+  uint32_t random_add = seed >> 11;
+  uint32_t mant = (f_mant >> 21) & 0x3;
+  if ((trunc_bits + random_add) > 0x1FFFFF) {{
+    mant += 1;
+    if (mant > 0x3) {{ mant = 0; exp += 1; if (exp >= 31) return static_cast<uint8_t>(sign | 0x7C); }}
+  }}
+  return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 2) | mant);
+}}
+
+// --- FP4 E2M1 (bias=1, no NaN/Inf, max=6.0) ---
+
+inline float fp4_e2m1_to_f32(uint8_t v) {{
+  uint32_t sign = (v >> 3) & 1;
+  uint32_t exp = (v >> 1) & 0x3;
+  uint32_t mant = v & 0x1;
+  if (exp == 0 && mant == 0) return std::bit_cast<float>(sign << 31);
+  if (exp == 0) {{
+    float result = 0.5f;
+    return sign ? -result : result;
+  }}
+  uint32_t f = (sign << 31) | ((exp + 127 - 1) << 23) | (mant << 22);
+  return std::bit_cast<float>(f);
+}}
+
+inline uint8_t f32_to_fp4_e2m1_rne(float val) {{
+  if (std::isnan(val)) return 0;
+  uint32_t f = std::bit_cast<uint32_t>(val);
+  uint32_t sign = (f >> 28) & 0x8;
+  if (std::isinf(val)) return static_cast<uint8_t>(sign | 0x7);
+  float absval = std::fabs(val);
+  if (absval > 6.0f) return static_cast<uint8_t>(sign | 0x7);
+  if (absval < 0.25f) return static_cast<uint8_t>(sign);
+  int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
+  uint32_t f_mant = f & 0x7FFFFF;
+  int32_t exp = f_exp - 127 + 1;
+  if (exp <= 0) {{
+    uint32_t round_bit = (f_mant >> 22) & 1;
+    uint32_t sticky = (f_mant & 0x3FFFFF) ? 1 : 0;
+    uint32_t result = round_bit & (sticky | 0);
+    return static_cast<uint8_t>(sign | result);
+  }}
+  if (exp > 3) return static_cast<uint8_t>(sign | 0x7);
+  uint32_t round_bit = (f_mant >> 21) & 1;
+  uint32_t sticky = (f_mant & 0x1FFFFF) ? 1 : 0;
+  uint32_t mant = (f_mant >> 22) & 0x1;
+  mant += round_bit & (sticky | (mant & 1));
+  if (mant > 1) {{
+    mant = 0; exp += 1;
+    if (exp > 3) return static_cast<uint8_t>(sign | 0x7);
+  }}
+  return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 1) | mant);
+}}
+
+inline uint8_t f32_to_fp4_e2m1_sr(float val, uint32_t seed) {{
+  if (std::isnan(val)) return 0;
+  uint32_t f = std::bit_cast<uint32_t>(val);
+  uint32_t sign = (f >> 28) & 0x8;
+  if (std::isinf(val) || std::fabs(val) > 6.0f) return static_cast<uint8_t>(sign | 0x7);
+  if (std::fabs(val) < 0.25f) return static_cast<uint8_t>(sign);
+  int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
+  uint32_t f_mant = f & 0x7FFFFF;
+  int32_t exp = f_exp - 127 + 1;
+  if (exp <= 0) return static_cast<uint8_t>(sign);
+  if (exp > 3) return static_cast<uint8_t>(sign | 0x7);
+  uint32_t trunc_bits = f_mant & 0x3FFFFF;
+  uint32_t random_add = seed >> 10;
+  uint32_t mant = (f_mant >> 22) & 0x1;
+  if ((trunc_bits + random_add) > 0x3FFFFF) {{
+    mant += 1;
+    if (mant > 1) {{ mant = 0; exp += 1; if (exp > 3) return static_cast<uint8_t>(sign | 0x7); }}
+  }}
+  return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 1) | mant);
+}}
+
+// --- FP6 E2M3 (bias=1, no NaN/Inf, max=7.5) ---
+
+inline float fp6_e2m3_to_f32(uint8_t v) {{
+  uint32_t sign = (v >> 5) & 1;
+  uint32_t exp = (v >> 3) & 0x3;
+  uint32_t mant = v & 0x7;
+  if (exp == 0 && mant == 0) return std::bit_cast<float>(sign << 31);
+  if (exp == 0) {{
+    float result = std::ldexp(static_cast<float>(mant), -3);
+    return sign ? -result : result;
+  }}
+  uint32_t f = (sign << 31) | ((exp + 127 - 1) << 23) | (mant << 20);
+  return std::bit_cast<float>(f);
+}}
+
+inline uint8_t f32_to_fp6_e2m3_rne(float val) {{
+  if (std::isnan(val)) return 0;
+  uint32_t f = std::bit_cast<uint32_t>(val);
+  uint32_t sign = (f >> 26) & 0x20;
+  if (std::isinf(val) || std::fabs(val) > 7.5f) return static_cast<uint8_t>(sign | 0x1F);
+  float absval = std::fabs(val);
+  if (absval < std::ldexp(1.0f, -4)) return static_cast<uint8_t>(sign);
+  int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
+  uint32_t f_mant = f & 0x7FFFFF;
+  int32_t exp = f_exp - 127 + 1;
+  if (exp <= 0) {{
+    uint32_t full_mant = f_mant | 0x800000;
+    int shift = 21 - exp;
+    if (shift > 23) return static_cast<uint8_t>(sign);
+    uint32_t round_bit = (full_mant >> (shift - 1)) & 1;
+    uint32_t sticky = (full_mant & ((1u << (shift - 1)) - 1)) ? 1 : 0;
+    uint32_t result = full_mant >> shift;
+    result += round_bit & (sticky | (result & 1));
+    if (result >= 8) return static_cast<uint8_t>(sign | (1 << 3));
+    return static_cast<uint8_t>(sign | (result & 0x7));
+  }}
+  if (exp > 3) return static_cast<uint8_t>(sign | 0x1F);
+  uint32_t round_bit = (f_mant >> 19) & 1;
+  uint32_t sticky = (f_mant & 0x7FFFF) ? 1 : 0;
+  uint32_t mant = (f_mant >> 20) & 0x7;
+  mant += round_bit & (sticky | (mant & 1));
+  if (mant > 0x7) {{
+    mant = 0; exp += 1;
+    if (exp > 3) return static_cast<uint8_t>(sign | 0x1F);
+  }}
+  return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 3) | mant);
+}}
+
+inline uint8_t f32_to_fp6_e2m3_sr(float val, uint32_t seed) {{
+  if (std::isnan(val)) return 0;
+  uint32_t f = std::bit_cast<uint32_t>(val);
+  uint32_t sign = (f >> 26) & 0x20;
+  if (std::isinf(val) || std::fabs(val) > 7.5f) return static_cast<uint8_t>(sign | 0x1F);
+  if (std::fabs(val) < std::ldexp(1.0f, -4)) return static_cast<uint8_t>(sign);
+  int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
+  uint32_t f_mant = f & 0x7FFFFF;
+  int32_t exp = f_exp - 127 + 1;
+  if (exp <= 0) return static_cast<uint8_t>(sign);
+  if (exp > 3) return static_cast<uint8_t>(sign | 0x1F);
+  uint32_t trunc_bits = f_mant & 0xFFFFF;
+  uint32_t random_add = seed >> 12;
+  uint32_t mant = (f_mant >> 20) & 0x7;
+  if ((trunc_bits + random_add) > 0xFFFFF) {{
+    mant += 1;
+    if (mant > 0x7) {{ mant = 0; exp += 1; if (exp > 3) return static_cast<uint8_t>(sign | 0x1F); }}
+  }}
+  return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 3) | mant);
+}}
+
+// --- BF6 E3M2 (bias=3, no NaN/Inf, max=28.0) ---
+
+inline float bf6_e3m2_to_f32(uint8_t v) {{
+  uint32_t sign = (v >> 5) & 1;
+  uint32_t exp = (v >> 2) & 0x7;
+  uint32_t mant = v & 0x3;
+  if (exp == 0 && mant == 0) return std::bit_cast<float>(sign << 31);
+  if (exp == 0) {{
+    float result = std::ldexp(static_cast<float>(mant), -4);
+    return sign ? -result : result;
+  }}
+  uint32_t f = (sign << 31) | ((exp + 127 - 3) << 23) | (mant << 21);
+  return std::bit_cast<float>(f);
+}}
+
+inline uint8_t f32_to_bf6_e3m2_rne(float val) {{
+  if (std::isnan(val)) return 0;
+  uint32_t f = std::bit_cast<uint32_t>(val);
+  uint32_t sign = (f >> 26) & 0x20;
+  if (std::isinf(val) || std::fabs(val) > 28.0f) return static_cast<uint8_t>(sign | 0x1F);
+  float absval = std::fabs(val);
+  if (absval < std::ldexp(1.0f, -5)) return static_cast<uint8_t>(sign);
+  int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
+  uint32_t f_mant = f & 0x7FFFFF;
+  int32_t exp = f_exp - 127 + 3;
+  if (exp <= 0) {{
+    uint32_t full_mant = f_mant | 0x800000;
+    int shift = 22 - exp;
+    if (shift > 23) return static_cast<uint8_t>(sign);
+    uint32_t round_bit = (full_mant >> (shift - 1)) & 1;
+    uint32_t sticky = (full_mant & ((1u << (shift - 1)) - 1)) ? 1 : 0;
+    uint32_t result = full_mant >> shift;
+    result += round_bit & (sticky | (result & 1));
+    if (result >= 4) return static_cast<uint8_t>(sign | (1 << 2));
+    return static_cast<uint8_t>(sign | (result & 0x3));
+  }}
+  if (exp > 7) return static_cast<uint8_t>(sign | 0x1F);
+  uint32_t round_bit = (f_mant >> 20) & 1;
+  uint32_t sticky = (f_mant & 0xFFFFF) ? 1 : 0;
+  uint32_t mant = (f_mant >> 21) & 0x3;
+  mant += round_bit & (sticky | (mant & 1));
+  if (mant > 0x3) {{
+    mant = 0; exp += 1;
+    if (exp > 7) return static_cast<uint8_t>(sign | 0x1F);
+  }}
+  return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 2) | mant);
+}}
+
+inline uint8_t f32_to_bf6_e3m2_sr(float val, uint32_t seed) {{
+  if (std::isnan(val)) return 0;
+  uint32_t f = std::bit_cast<uint32_t>(val);
+  uint32_t sign = (f >> 26) & 0x20;
+  if (std::isinf(val) || std::fabs(val) > 28.0f) return static_cast<uint8_t>(sign | 0x1F);
+  if (std::fabs(val) < std::ldexp(1.0f, -5)) return static_cast<uint8_t>(sign);
+  int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
+  uint32_t f_mant = f & 0x7FFFFF;
+  int32_t exp = f_exp - 127 + 3;
+  if (exp <= 0) return static_cast<uint8_t>(sign);
+  if (exp > 7) return static_cast<uint8_t>(sign | 0x1F);
+  uint32_t trunc_bits = f_mant & 0x1FFFFF;
+  uint32_t random_add = seed >> 11;
+  uint32_t mant = (f_mant >> 21) & 0x3;
+  if ((trunc_bits + random_add) > 0x1FFFFF) {{
+    mant += 1;
+    if (mant > 0x3) {{ mant = 0; exp += 1; if (exp > 7) return static_cast<uint8_t>(sign | 0x1F); }}
+  }}
+  return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 2) | mant);
+}}
+
+// --- 6-bit packing/unpacking (32×6-bit values ↔ 6 DWORDs, little-endian) ---
+
+inline void pack_6bit(const uint8_t vals[32], uint32_t dwords[6]) {{
+  for (int d = 0; d < 6; ++d) dwords[d] = 0;
+  for (int i = 0; i < 32; ++i) {{
+    uint64_t bit_offset = static_cast<uint64_t>(i) * 6;
+    uint32_t dw_idx = static_cast<uint32_t>(bit_offset / 32);
+    uint32_t bit_pos = static_cast<uint32_t>(bit_offset % 32);
+    uint32_t val6 = vals[i] & 0x3F;
+    dwords[dw_idx] |= val6 << bit_pos;
+    if (bit_pos > 26)
+      dwords[dw_idx + 1] |= val6 >> (32 - bit_pos);
+  }}
+}}
+
+inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
+  for (int i = 0; i < 32; ++i) {{
+    uint64_t bit_offset = static_cast<uint64_t>(i) * 6;
+    uint32_t dw_idx = static_cast<uint32_t>(bit_offset / 32);
+    uint32_t bit_pos = static_cast<uint32_t>(bit_offset % 32);
+    uint32_t val = (dwords[dw_idx] >> bit_pos) & 0x3F;
+    if (bit_pos > 26)
+      val |= (dwords[dw_idx + 1] << (32 - bit_pos)) & 0x3F;
+    vals[i] = static_cast<uint8_t>(val);
+  }}
+}}
+
+}} // namespace util
+
+#endif // {guard}
+"""
+        filepath = os.path.join(shared_dir, 'narrow_cvt.h')
+        with open(filepath, 'w') as f:
+            f.write(content)
+
+        import sys
+
+        print(f'Generated shared/narrow_cvt.h', file=sys.stderr)
+
     def gen_operand_types(self) -> None:
         """Generate operand type and OpSel enums."""
         code_lines = []
@@ -6031,8 +6434,10 @@ class CodeGenerator:
             )
         read_lane_lines.extend(
             [
-                f'  if (auto off = {_resolved_vgpr_read_call})',
-                '    return wf.cu().read_vgpr(wf.vgpr_alloc().base + *off, lane);',
+                f'  if (auto off = {_resolved_vgpr_read_call}) {{',
+                '    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;',
+                '    return wf.cu().read_vgpr(wf.vgpr_alloc().base + voff, lane);',
+                '  }',
                 '  if (is_immediate_type(opr_type_))',
                 '    return static_cast<uint32_t>(ev);',
                 '  return resolve_src_scalar(wf, ev);',
@@ -6046,7 +6451,8 @@ class CodeGenerator:
             '  if (delegate()) return delegate()->read_lane64(wf, lane);\n'
             '  int ev = encoding_value_;\n'
             f'  if (auto off = {_resolved_vgpr_read_call}) {{\n'
-            '    uint32_t idx = wf.vgpr_alloc().base + *off;\n'
+            '    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;\n'
+            '    uint32_t idx = wf.vgpr_alloc().base + voff;\n'
             '    uint32_t lo = wf.cu().read_vgpr(idx, lane);\n'
             '    uint32_t hi = wf.cu().read_vgpr(idx + 1, lane);\n'
             '    return static_cast<uint64_t>(hi) << 32 | lo;\n'
@@ -6359,7 +6765,8 @@ class CodeGenerator:
             '\n'
             'void Operand::write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) const {\n'
             f'  if (auto off = {_resolved_vgpr_encoded_call}) {{\n'
-            '    wf.cu().write_vgpr(wf.vgpr_alloc().base + *off, lane, val);\n'
+            '    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;\n'
+            '    wf.cu().write_vgpr(wf.vgpr_alloc().base + voff, lane, val);\n'
             '    return;\n'
             '  }\n'
             '  throw std::logic_error("write_lane called on non-VGPR operand type");\n'
@@ -6367,7 +6774,8 @@ class CodeGenerator:
             '\n' + _read_lane64_body + '\n\n'
             'void Operand::write_lane64(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) const {\n'
             f'  if (auto off = {_resolved_vgpr_encoded_call}) {{\n'
-            '    uint32_t idx = wf.vgpr_alloc().base + *off;\n'
+            '    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;\n'
+            '    uint32_t idx = wf.vgpr_alloc().base + voff;\n'
             '    wf.cu().write_vgpr(idx, lane, static_cast<uint32_t>(val));\n'
             '    wf.cu().write_vgpr(idx + 1, lane, static_cast<uint32_t>(val >> 32));\n'
             '    return;\n'
