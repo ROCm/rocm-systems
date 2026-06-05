@@ -24,10 +24,63 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <cstdint>
+#include <memory>
+#include <string>
 #include <string_view>
+#include <thread>
+#include <utility>
+#include <vector>
 
 using rocprofiler::tool::pc_correction::classify;
+using rocprofiler::tool::pc_correction::CodeObjectClassification;
+using rocprofiler::tool::pc_correction::Instruction;
+using rocprofiler::tool::pc_correction::InternalEntry;
 using rocprofiler::tool::pc_correction::Kind;
+using rocprofiler::tool::pc_correction::PCCorrectionManager;
+
+namespace
+{
+// Pull instructions from a fixed synthetic stream, advancing on each call. The
+// builder addresses instructions by voffset; this fake ignores it and returns
+// the next instruction in sequence (the builder walks strictly forward), which
+// is exactly what add_symbol consumes. Each instruction is given the size the
+// test specifies so byte accounting (regular_internal_total_bytes) is exercised.
+struct FakeStream
+{
+    std::vector<std::pair<std::string, uint64_t>> insts;  // {text, size}
+    size_t                                        next = 0;
+
+    std::unique_ptr<Instruction> operator()(uint64_t /*voffset*/)
+    {
+        if(next >= insts.size()) return nullptr;
+        auto& [text, size] = insts[next++];
+        return std::make_unique<Instruction>(std::string{text}, size);
+    }
+
+    // Total byte span of the stream -- pass as the symbol size so the walk
+    // consumes every instruction.
+    uint64_t total_size() const
+    {
+        uint64_t sum = 0;
+        for(const auto& [text, size] : insts)
+            sum += size;
+        return sum;
+    }
+};
+
+// Build a single-symbol classification from a synthetic stream at symbol base 0.
+CodeObjectClassification
+build_single_symbol(std::vector<std::pair<std::string, uint64_t>> insts)
+{
+    FakeStream               stream{std::move(insts), 0};
+    CodeObjectClassification c;
+    c.add_symbol(0, stream.total_size(), [&](uint64_t v) { return stream(v); });
+    c.sort();
+    return c;
+}
+}  // namespace
 
 TEST(pc_correction_classify, Classify_NopIsRegular)
 {
@@ -92,4 +145,251 @@ TEST(pc_correction_classify, Classify_SetPrioIsExt_Today)
     // s_setprio is a candidate internal pending hardware confirmation; until
     // then it must classify as EXT (the safe direction).
     EXPECT_EQ(classify("s_setprio 1"), Kind::EXT);
+}
+
+// ------------------------------------------------------------------
+// Window-builder tests (CodeObjectClassification::add_symbol).
+// All offsets assume 4-byte instructions starting at symbol base 0 unless a
+// test specifies otherwise.
+// ------------------------------------------------------------------
+
+TEST(pc_correction_build, EmptyChain_NoEntries)
+{
+    // Back-to-back externals: no internals -> no entries.
+    auto c = build_single_symbol({{"v_add", 4}, {"v_mov", 4}});
+    EXPECT_TRUE(c.entries.empty());
+}
+
+TEST(pc_correction_build, NoEXT1_LeadingInternal)
+{
+    // Symbol starts with internals (no preceding external) -> has_ext1 false.
+    auto c = build_single_symbol({{"s_nop", 4}, {"s_nop", 4}, {"v_add", 4}});
+    ASSERT_EQ(c.entries.size(), 2u);
+    for(const auto& e : c.entries)
+        EXPECT_FALSE(e.window->has_ext1);
+}
+
+TEST(pc_correction_build, NoEXT2_TrailingInternal)
+{
+    // Symbol: EXT@0 s_nop@4 s_nop@8 with no closing external. The trailing
+    // internals' window opened on EXT@0 but never closes -> has_ext2 false,
+    // which the cascade treats as "drop". This also covers EXT1 legitimately at
+    // offset 0 (no magic-zero collision).
+    auto c = build_single_symbol({{"v_add", 4}, {"s_nop", 4}, {"s_nop", 4}});
+    ASSERT_EQ(c.entries.size(), 2u);
+    const auto& w = *c.entries[0].window;
+    EXPECT_TRUE(w.has_ext1);
+    EXPECT_EQ(w.ext1_offset, 0u);  // opened by EXT@0 -- a valid offset, not a sentinel
+    EXPECT_FALSE(w.has_ext2);      // never closed -> trailing internals
+}
+
+TEST(pc_correction_build, M_Only_ForwardChain)
+{
+    // EXT@0 s_nop@4 s_nop@8 EXT@12: regular-only chain, M=2 N=0 B=8.
+    auto c = build_single_symbol({{"v_add", 4}, {"s_nop", 4}, {"s_nop", 4}, {"v_mov", 4}});
+    ASSERT_EQ(c.entries.size(), 2u);
+    const auto& w = *c.entries[0].window;
+    EXPECT_EQ(w.M, 2u);
+    EXPECT_EQ(w.N, 0u);
+    EXPECT_EQ(w.regular_internal_total_bytes, 8u);
+    EXPECT_TRUE(w.has_ext1);
+    EXPECT_EQ(w.ext1_offset, 0u);  // EXT1 at offset 0 -- valid, not a sentinel
+    EXPECT_TRUE(w.has_ext2);
+    EXPECT_EQ(w.ext2_offset, 12u);
+}
+
+TEST(pc_correction_build, N_Only_BackwardChain)
+{
+    // EXT@0 inv@4 inv@8 EXT@12: inv-only chain, M=0 N=2 B=0.
+    auto c =
+        build_single_symbol({{"v_add", 4}, {"s_icache_inv", 4}, {"s_icache_inv", 4}, {"v_mov", 4}});
+    ASSERT_EQ(c.entries.size(), 2u);
+    const auto& w = *c.entries[0].window;
+    EXPECT_EQ(w.M, 0u);
+    EXPECT_EQ(w.N, 2u);
+    EXPECT_EQ(w.regular_internal_total_bytes, 0u);
+    EXPECT_TRUE(w.has_ext1);
+    EXPECT_EQ(w.ext1_offset, 0u);
+    EXPECT_TRUE(w.has_ext2);
+    EXPECT_EQ(w.ext2_offset, 12u);
+}
+
+TEST(pc_correction_build, Mixed_OrderAgnostic)
+{
+    // Order inside the chain doesn't matter, only the counts: both layouts give
+    // M=2 N=1 B=8.
+    auto a = build_single_symbol(
+        {{"v_add", 4}, {"s_nop", 4}, {"s_icache_inv", 4}, {"s_nop", 4}, {"v_mov", 4}});
+    auto b = build_single_symbol(
+        {{"v_add", 4}, {"s_icache_inv", 4}, {"s_nop", 4}, {"s_nop", 4}, {"v_mov", 4}});
+
+    ASSERT_FALSE(a.entries.empty());
+    ASSERT_FALSE(b.entries.empty());
+    const auto& wa = *a.entries[0].window;
+    const auto& wb = *b.entries[0].window;
+    EXPECT_EQ(wa.M, 2u);
+    EXPECT_EQ(wa.N, 1u);
+    EXPECT_EQ(wa.regular_internal_total_bytes, 8u);
+    EXPECT_EQ(wb.M, 2u);
+    EXPECT_EQ(wb.N, 1u);
+    EXPECT_EQ(wb.regular_internal_total_bytes, 8u);
+}
+
+TEST(pc_correction_build, VariableWidthInternal)
+{
+    // An 8-byte regular internal must contribute its actual size, not a fixed 4.
+    auto c = build_single_symbol({{"v_add", 4}, {"s_nop", 8}, {"v_mov", 4}});
+    ASSERT_EQ(c.entries.size(), 1u);
+    const auto& w = *c.entries[0].window;
+    EXPECT_EQ(w.M, 1u);
+    EXPECT_EQ(w.regular_internal_total_bytes, 8u);
+    EXPECT_EQ(w.ext2_offset, 12u);  // EXT after a 4B + 8B run
+}
+
+TEST(pc_correction_build, BackToBackEXTs)
+{
+    // EXT@0 EXT@4 EXT@8 s_nop@12 EXT@16: only the single internal yields an
+    // entry, in the window opened by EXT@8 and closed by EXT@16.
+    auto c =
+        build_single_symbol({{"v_a", 4}, {"v_b", 4}, {"v_c", 4}, {"s_nop", 4}, {"v_d", 4}});
+    ASSERT_EQ(c.entries.size(), 1u);
+    const auto& w = *c.entries[0].window;
+    EXPECT_EQ(w.M, 1u);
+    EXPECT_EQ(w.ext1_offset, 8u);
+    EXPECT_EQ(w.ext2_offset, 16u);
+    EXPECT_EQ(c.entries[0].offset, 12u);
+}
+
+TEST(pc_correction_build, EntriesSortedAcrossSymbols)
+{
+    // Two symbols added in ascending base order; entries must end up globally
+    // sorted by offset after sort().
+    CodeObjectClassification c;
+
+    FakeStream s2{{{"v_add", 4}, {"s_nop", 4}, {"v_mov", 4}}, 0};
+    c.add_symbol(100, s2.total_size(), [&](uint64_t v) { return s2(v); });
+
+    FakeStream s1{{{"v_add", 4}, {"s_nop", 4}, {"v_mov", 4}}, 0};
+    c.add_symbol(0, s1.total_size(), [&](uint64_t v) { return s1(v); });
+
+    c.sort();
+    ASSERT_EQ(c.entries.size(), 2u);
+    EXPECT_LT(c.entries[0].offset, c.entries[1].offset);
+    EXPECT_EQ(c.entries[0].offset, 4u);    // internal in symbol @ base 0
+    EXPECT_EQ(c.entries[1].offset, 104u);  // internal in symbol @ base 100
+}
+
+TEST(pc_correction_build, FindHitsAndMisses)
+{
+    // EXT@0 s_nop@4 s_nop@8 EXT@12: internals at 4 and 8.
+    auto c = build_single_symbol({{"v_add", 4}, {"s_nop", 4}, {"s_nop", 4}, {"v_mov", 4}});
+
+    EXPECT_TRUE(c.find(4).has_value());
+    EXPECT_TRUE(c.find(8).has_value());
+    EXPECT_FALSE(c.find(0).has_value());   // external, no entry
+    EXPECT_FALSE(c.find(12).has_value());  // external, no entry
+    EXPECT_FALSE(c.find(99).has_value());  // out of range
+}
+
+// ------------------------------------------------------------------
+// Manager publish / lookup / erase tests. These use the publish() seam so no
+// comgr-backed decoder is required; the decoder reference is a default-
+// constructed (empty) translator that build() never touches here.
+// ------------------------------------------------------------------
+
+namespace
+{
+// A manager bound to an empty decoder. Safe because these tests drive
+// publish()/lookup()/erase() directly and never call build().
+struct ManagerFixture
+{
+    rocprofiler::tool::pc_correction::code_obj_decoder_t        decoder_value{};
+    rocprofiler::common::Synchronized<
+        rocprofiler::tool::pc_correction::code_obj_decoder_t, true>
+                        decoder{std::move(decoder_value)};
+    PCCorrectionManager mgr{decoder};
+
+    std::shared_ptr<const CodeObjectClassification> make_classification()
+    {
+        auto c = std::make_shared<CodeObjectClassification>(
+            build_single_symbol({{"v_add", 4}, {"s_nop", 4}, {"v_mov", 4}}));
+        return c;
+    }
+};
+}  // namespace
+
+TEST(pc_correction_manager, PublishThenLookupHit)
+{
+    ManagerFixture f;
+    f.mgr.publish(42, f.make_classification());
+
+    auto hit = f.mgr.lookup(42, 4);  // s_nop @ offset 4
+    ASSERT_TRUE(hit.has_value());
+    EXPECT_EQ(hit->offset, 4u);
+}
+
+TEST(pc_correction_manager, LookupMissUnknownCO)
+{
+    ManagerFixture f;
+    f.mgr.publish(42, f.make_classification());
+    EXPECT_FALSE(f.mgr.lookup(7, 4).has_value());   // unknown CO id
+    EXPECT_FALSE(f.mgr.lookup(42, 0).has_value());  // external offset
+}
+
+TEST(pc_correction_manager, EraseRemovesClassification)
+{
+    ManagerFixture f;
+    f.mgr.publish(42, f.make_classification());
+    ASSERT_TRUE(f.mgr.lookup(42, 4).has_value());
+    f.mgr.erase(42);
+    EXPECT_FALSE(f.mgr.lookup(42, 4).has_value());
+}
+
+TEST(pc_correction_manager, EraseDoesNotInvalidateInFlightReader)
+{
+    ManagerFixture f;
+    f.mgr.publish(42, f.make_classification());
+
+    // Simulate the copy-out: lookup returns a copy of the InternalEntry (which
+    // holds a shared_ptr to the window). Erasing the CO must not invalidate it.
+    auto entry = f.mgr.lookup(42, 4);
+    ASSERT_TRUE(entry.has_value());
+    f.mgr.erase(42);
+
+    ASSERT_TRUE(entry->window != nullptr);
+    EXPECT_EQ(entry->offset, 4u);  // still valid after erase
+}
+
+// ------------------------------------------------------------------
+// Concurrency: publish/erase racing against many concurrent lookups. Run under
+// TSan to catch data races; without TSan this still exercises the locking.
+// ------------------------------------------------------------------
+
+TEST(pc_correction_concurrency, ManyReadersOneWriter)
+{
+    ManagerFixture f;
+    f.mgr.publish(1, f.make_classification());
+
+    constexpr int          kReaders = 8;
+    std::atomic<bool>      stop{false};
+    std::vector<std::thread> readers;
+    readers.reserve(kReaders);
+    for(int i = 0; i < kReaders; ++i)
+        readers.emplace_back([&] {
+            while(!stop.load(std::memory_order_relaxed))
+                (void) f.mgr.lookup(1, 4);
+        });
+
+    // Writer churns publish/erase on a different CO id concurrently.
+    for(int i = 0; i < 1000; ++i)
+    {
+        f.mgr.publish(2, f.make_classification());
+        f.mgr.erase(2);
+    }
+
+    stop.store(true, std::memory_order_relaxed);
+    for(auto& t : readers)
+        t.join();
+
+    EXPECT_TRUE(f.mgr.lookup(1, 4).has_value());
 }
