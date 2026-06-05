@@ -83,6 +83,15 @@ uint32_t *AmdgpuIsaOperand<Isa>::simd_dst_ptr(amdgpu::Wavefront &wf, uint32_t la
   return nullptr;
 }
 
+template <typename Isa>
+void AmdgpuIsaOperand<Isa>::simd_notify_read(const amdgpu::Wavefront &wf, uint32_t lane_begin,
+                                             uint32_t lane_end, uint8_t byte_mask) const {
+  if (auto off = Isa::resolved_vgpr_offset(this->opr_type_, this->encoding_value_)) {
+    uint32_t physical_reg = wf.vgpr_alloc().base + *off;
+    wf.cu().notify_vgpr_read(&wf, physical_reg, lane_begin, lane_end, byte_mask);
+  }
+}
+
 } // namespace rocjitsu
 
 #endif // ROCJITSU_ISA_ISA_OPERAND_SIMD_INL_H_

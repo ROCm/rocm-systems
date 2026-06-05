@@ -201,6 +201,11 @@ private:
     return nullptr;
   }
 
+  /// @brief Notify the plugin system that this operand's VGPR was read
+  /// for lanes [lane_begin, lane_end). No-op for non-VGPR operands.
+  virtual void simd_notify_read(const amdgpu::Wavefront & /*wf*/, uint32_t /*lane_begin*/,
+                                uint32_t /*lane_end*/, uint8_t /*byte_mask*/) const {}
+
   Operand *delegate_ = nullptr;
 };
 
@@ -251,6 +256,8 @@ public:
 private:
   const uint32_t *simd_lane_ptr(const amdgpu::Wavefront &wf, uint32_t lane_base) const override;
   uint32_t *simd_dst_ptr(amdgpu::Wavefront &wf, uint32_t lane_base) const override;
+  void simd_notify_read(const amdgpu::Wavefront &wf, uint32_t lane_begin, uint32_t lane_end,
+                        uint8_t byte_mask) const override;
 };
 
 /// @brief DPP-aware operand proxy that applies lane permutation on read.
@@ -323,6 +330,11 @@ struct SimdAccess {
   }
   template <typename Op> static uint32_t *dst_ptr(const Op &op, Wavefront &wf, uint32_t lane_base) {
     return op.simd_dst_ptr(wf, lane_base);
+  }
+  template <typename Op>
+  static void notify_read(const Op &op, const Wavefront &wf, uint32_t lane_begin, uint32_t lane_end,
+                          uint8_t byte_mask) {
+    op.simd_notify_read(wf, lane_begin, lane_end, byte_mask);
   }
 };
 } // namespace amdgpu
