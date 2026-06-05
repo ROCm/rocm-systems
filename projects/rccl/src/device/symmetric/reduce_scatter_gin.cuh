@@ -17,12 +17,8 @@ static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
   Red<AccT> red(handler.devWork->redOpArg);
   Red<T> mmRed(handler.devWork->redOpArg);
 
-  // [RCCL] Warps here are hardware wavefronts of WARP_SIZE threads. ncclCoopWarpSpan
-  // measures thread_rank()/size()/sync() in units of WARP_SIZE (64 on gfx9), so the
-  // warp/role partitioning below must use WARP_SIZE too. Upstream NCCL hardcodes 32;
-  // keeping that on a wave64 GPU makes the stage-1 spans address threads [256,512) of a
-  // 256-thread block, yielding negative coop thread_rank() and out-of-bounds GIN signal
-  // indices (illegal memory access). Matches the WARP_SIZE usage in all_gather_gin.cuh.
+  // Warp/role partitioning is in units of WARP_SIZE (64 on gfx9); upstream's hardcoded 32
+  // would address threads past the block on wave64. ncclCoopWarpSpan uses WARP_SIZE too.
   int nWorkWarps = blockDim.x/WARP_SIZE - 2;
   int stage0_nWorkWarps;
   if (lsa.nRanks == 1) {
@@ -49,6 +45,9 @@ static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
     /*nWarps=*/!roleIsWorker ? 1 : (stage == 0 ? stage0_nWorkWarps : nWorkWarps - stage0_nWorkWarps),
     /*id=*/2 + stage
   };
+
+  // Zero the AMD software warp-span barrier slots before any coop sync (no-op on NVIDIA).
+  ncclCoopNamedBarrierInit();
 
   // Construct outbox only for stage=0 when lsa peers exist.
   alignas(ncclGinOutboxSession<ncclCoopWarpSpan>) char outbox_storage[sizeof(ncclGinOutboxSession<ncclCoopWarpSpan>)];
@@ -144,10 +143,7 @@ static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
             /*initFn*/[&]__device__(int nChunkElts, ncclSymPtr<T> inPtr)->void {
               if (!roleIsWorker) {
                 if (coopRole.thread_rank() == 0) {
-                  // totalSends += rail.nRanks-1;
-                  // [RCCL] The upstream NVPTX `red.relaxed.shared.add.s32` inline
-                  // asm has no amdgcn equivalent (the #else path traps). atomicAdd
-                  // lowers to a relaxed shared-memory atomic on both HIP and CUDA.
+                  // Portable replacement for upstream's NVPTX red.shared.add asm (no amdgcn equiv).
                   atomicAdd(&totalSends, rail.nRanks-1);
                 }
               } else {
