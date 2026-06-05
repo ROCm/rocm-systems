@@ -141,6 +141,10 @@ rocprofv3_error_signal_handler(int signo, siginfo_t*, void*);
 
 namespace
 {
+// Initialized once in rocprofv3_main. Used by the signal handler and finalization
+// to detect child processes (fork/fork+exec).
+pid_t ROCPROF_ROOT_PID = 0;
+
 // Thread for safe cleanup output generation
 auto output_generation_thread = common::Synchronized<std::optional<std::thread>>{};
 
@@ -220,9 +224,15 @@ struct signal_worker_state
 };
 
 auto&
-get_signal_worker()
+get_signal_worker(bool reset = false)
 {
     static auto*& _v = common::static_object<signal_worker_state>::construct();
+    if(reset)
+    {
+        // After fork, parent's state (eventfd, thread, atomics) is stale.
+        // Zero everything and reconstruct in place.
+        std::memset(static_cast<void*>(_v), 0, sizeof(signal_worker_state));
+    }
     return *CHECK_NOTNULL(_v);
 }
 
@@ -2383,8 +2393,9 @@ finalize_rocprofv3(std::string_view context)
     }
 
     // Join the worker thread if called from a non-worker context (atexit / rocprofv3_main).
-    // The worker thread calls this function too, so avoid self-join.
-    if(sw.thread.joinable() && sw.thread.get_id() != std::this_thread::get_id())
+    // Only in the root process — forked children have a stale thread object.
+    if(ROCPROF_ROOT_PID == getpid() && sw.thread.joinable() &&
+       sw.thread.get_id() != std::this_thread::get_id())
     {
         if(sw.eventfd >= 0)
         {
@@ -4259,6 +4270,7 @@ bool signal_handler_exit =
     rocprofiler::tool::get_env("ROCPROF_INTERNAL_TEST_SIGNAL_HANDLER_VIA_EXIT", false);
 
 int signal_handler_timeout = rocprofiler::tool::get_env("ROCPROF_SIGNAL_HANDLER_TIMEOUT", 10);
+
 }  // namespace
 
 #define ROCPROFV3_INTERNAL_API __attribute__((visibility("internal")));
@@ -4414,6 +4426,38 @@ diagnose_status(pid_t _pid, int _status)
 }
 
 void
+wait_for_children(pid_t this_pid, pid_t this_ppid, uint64_t this_tid, std::string_view context)
+{
+    auto get_children = [&this_pid]() {
+        auto fname    = fmt::format("/proc/{}/task/{}/children", this_pid, this_pid);
+        auto ifs      = std::ifstream{fname};
+        auto children = std::vector<pid_t>{};
+        while(ifs)
+        {
+            pid_t child_pid = 0;
+            ifs >> child_pid;
+            if(ifs && !ifs.eof() && child_pid > 0) children.emplace_back(child_pid);
+        }
+        return children;
+    };
+
+    auto _children = get_children();
+    ROCP_WARNING << fmt::format(
+        "[PPID={}][PID={}][TID={}][{}] rocprofv3 waiting for {} children to exit",
+        this_ppid,
+        this_pid,
+        this_tid,
+        context,
+        _children.size());
+
+    for(auto itr : _children)
+    {
+        auto status = wait_pid(itr, WUNTRACED | WNOHANG);
+        if(status) diagnose_status(itr, status.value());
+    }
+}
+
+void
 signal_finalization_worker()
 {
     auto& sw = get_signal_worker();
@@ -4432,34 +4476,6 @@ signal_finalization_worker()
     auto this_tid  = common::get_tid();
     auto this_func = std::string_view{__FUNCTION__};
 
-    auto get_children = [&this_pid]() {
-        auto fname    = fmt::format("/proc/{}/task/{}/children", this_pid, this_pid);
-        auto ifs      = std::ifstream{fname};
-        auto children = std::vector<pid_t>{};
-        while(ifs)
-        {
-            pid_t child_pid = 0;
-            ifs >> child_pid;
-            if(ifs && !ifs.eof() && child_pid > 0) children.emplace_back(child_pid);
-        }
-        return children;
-    };
-
-    auto _children = get_children();
-    ROCP_WARNING << fmt::format(
-        "[PPID={}][PID={}][TID={}][{}] rocprofv3 will wait for {} children to exit",
-        this_ppid,
-        this_pid,
-        this_tid,
-        this_func,
-        _children.size());
-
-    for(auto itr : _children)
-    {
-        auto status = wait_pid(itr, WUNTRACED | WNOHANG);
-        if(status) diagnose_status(itr, status.value());
-    }
-
     ROCP_WARNING << fmt::format(
         "[PPID={}][PID={}][TID={}][{}] rocprofv3 finalizing after signal {}...",
         this_ppid,
@@ -4471,6 +4487,11 @@ signal_finalization_worker()
     finalize_rocprofv3(this_func);
 
     if(tool::get_config().enable_process_sync) wait_peer_finished(this_pid, this_ppid);
+
+    // If we're handling signals, the app likely doesn't coordinate child shutdown.
+    // Wait for children so they can flush their profiling data via atexit before
+    // the parent re-raises and dies.
+    wait_for_children(this_pid, this_ppid, this_tid, this_func);
 
     ROCP_INFO << fmt::format(
         "[PPID={}][PID={}][TID={}][{}] rocprofv3 finalizing after signal... complete",
@@ -4490,6 +4511,10 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
     (void) ucontext;
 
     auto& sw = get_signal_worker();
+
+    // We're in the bad path — app doesn't coordinate shutdown properly.
+    // All processes (parent and children) need to flush and die.
+    // For well-behaved apps, use --disable-signal-handlers (atexit handles everything).
 
     // Re-entry guard (lock-free atomic, async-signal-safe)
     bool expected = false;
@@ -4545,9 +4570,8 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
         get_sigaction_function()(signo, &sa, nullptr);
     }
 
-    // Unblock the signal (it's auto-blocked during handler execution) and re-raise.
-    // This ensures immediate delivery to the just-restored handler.
-    sigset_t unblock;
+    // Unblock and re-raise. App's handler (or SIG_DFL) runs in a fresh delivery.
+    sigset_t unblock {};
     sigemptyset(&unblock);
     sigaddset(&unblock, signo);
     sigprocmask(SIG_UNBLOCK, &unblock, nullptr);
@@ -4673,7 +4697,7 @@ rocprofv3_signal(int signum, sighandler_t handler)
 {
     if(!get_signal_function()) get_signal_function() = (signal_func_t) dlsym(RTLD_NEXT, "signal");
 
-    if(get_signal_worker().handling.load(std::memory_order_relaxed) == true)
+    if(get_signal_worker().handling.load(std::memory_order_relaxed))
         return get_signal_function()(signum, handler);
 
     if(!is_handled_signal(signum) || !tool::get_config().enable_signal_handlers)
@@ -4693,7 +4717,7 @@ rocprofv3_sigaction(int signum,
     if(!get_sigaction_function())
         get_sigaction_function() = (sigaction_func_t) dlsym(RTLD_NEXT, "sigaction");
 
-    if(get_signal_worker().handling.load(std::memory_order_relaxed) == true)
+    if(get_signal_worker().handling.load(std::memory_order_relaxed))
         return get_sigaction_function()(signum, act, oldact);
 
     if(!is_handled_signal(signum) || !act || !tool::get_config().enable_signal_handlers)
@@ -4755,15 +4779,36 @@ rocprofv3_main(int argc, char** argv, char** envp)
     if(!get_sigaction_function())
         get_sigaction_function() = (sigaction_func_t) dlsym(RTLD_NEXT, "sigaction");
 
-    // Spawn signal finalization worker thread before installing signal handlers
+    // Determine root process for signal handling.
+    // Only the root process installs signal handlers and spawns the finalization worker.
+    // Children (fork or fork+exec) inherit ROCPROF_ROOT_PID and skip signal handling —
+    // they rely on atexit for finalization after the parent coordinates their shutdown.
+    // For apps that correctly handle signals themselves, --disable-signal-handlers
+    // bypasses all of this and relies purely on atexit in all processes.
     {
+        auto* root_pid_env = getenv("ROCPROF_ROOT_PID");
+        bool  is_child     = (root_pid_env != nullptr);
+
+        if(is_child)
+        {
+            // Reset the signal worker state — the inherited state references
+            // the parent's eventfd/thread which are inaccessible from here.
+            get_signal_worker(true);
+            ROCPROF_ROOT_PID = static_cast<pid_t>(std::stol(root_pid_env));
+        }
+        else
+        {
+            ROCPROF_ROOT_PID = getpid();
+            setenv("ROCPROF_ROOT_PID", std::to_string(ROCPROF_ROOT_PID).c_str(), 0);
+        }
+
+        // Spawn finalization worker in ALL processes (parent and children).
+        // On the bad path (signal handlers enabled), every process needs to
+        // flush its own profiling data async-signal-safely via a worker thread.
         auto& sw       = get_signal_worker();
         sw.eventfd     = eventfd(0, EFD_CLOEXEC);
         sw.timeout_sec = signal_handler_timeout;
-        // TODO: evaluate if tools need pre/post thread create callbacks
-        // if(auto* cb = get_thread_create_callback()) cb->pre("signal_finalization_worker");
         if(sw.eventfd >= 0) sw.thread = std::thread{signal_finalization_worker};
-        // if(auto* cb = get_thread_create_callback()) cb->post("signal_finalization_worker");
     }
 
     initialize_signal_handler(get_sigaction_function());
