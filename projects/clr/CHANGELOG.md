@@ -6,6 +6,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ### Added
 * New HIP APIs
+    - `hipModuleGetLoadingMode` returns the module loading mode - HIP_MODULE_EAGER_LOADING or HIP_MODULE_LAZY_LOADING. The loading mode can be controlled via the `HIP_MODULE_LOADING` environment variable (default: "lazy"). In lazy loading mode, symbol population is deferred until first access, potentially improving module load times.
     - Execution Context Management
     Support for the following APIs for parity with corresponding CUDA runtime APIs.
       * `hipDeviceGetDevResource` returns the device resource of a given type for a device

@@ -3576,6 +3576,12 @@ typedef union rocprofiler_hip_api_args_t
         const char*  name;
     } hipLibraryGetManaged;
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 30
+    struct
+    {
+        hipModuleLoadingMode_t* mode;
+    } hipModuleGetLoadingMode;
+#endif
 } rocprofiler_hip_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI

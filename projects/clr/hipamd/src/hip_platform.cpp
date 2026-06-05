@@ -17,6 +17,7 @@
 #include <mutex>
 #include <limits>
 #include <cmath>
+#include <cstdlib>
 
 namespace hip_impl {
 // ================================================================================================
@@ -1235,6 +1236,18 @@ void* PlatformState::GetDynamicLibraryHandle() {
 void PlatformState::SetDynamicLibraryHandle(void* handle) {
   std::scoped_lock lock(lock_);
   dynamicLibraryHandle_ = handle;
+}
+
+// ================================================================================================
+void PlatformState::GetLoadingMode(hipModuleLoadingMode_t* mode) {
+  *mode = HIP_MODULE_LAZY_LOADING;
+  std::string mod_loading_mode;
+  if (!flagIsDefault(HIP_MODULE_LOADING)) {
+      mod_loading_mode = HIP_MODULE_LOADING;
+  }
+  if (mod_loading_mode == "EAGER" || mod_loading_mode == "eager") {
+    *mode = HIP_MODULE_EAGER_LOADING;
+  }
 }
 
 }  // namespace hip

@@ -48,7 +48,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 1
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 29
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 30
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -631,6 +631,7 @@ typedef hipError_t (*t_hipMipmappedArrayGetLevel)(hipArray_t* pLevelArray,
 typedef hipError_t (*t_hipModuleGetFunction)(hipFunction_t* function, hipModule_t module,
                                              const char* kname);
 typedef hipError_t (*t_hipModuleGetFunctionCount)(unsigned int* count, hipModule_t module);
+typedef hipError_t (*t_hipModuleGetLoadingMode)(hipModuleLoadingMode_t* mode);
 typedef hipError_t (*t_hipModuleGetGlobal)(hipDeviceptr_t* dptr, size_t* bytes, hipModule_t hmod,
                                            const char* name);
 typedef hipError_t (*t_hipModuleGetTexRef)(textureReference** texRef, hipModule_t hmod,
@@ -1798,8 +1799,11 @@ struct HipDispatchTable {
   t_hipLibraryGetGlobal hipLibraryGetGlobal_fn;
   t_hipLibraryGetManaged hipLibraryGetManaged_fn;
 
-  // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 30
+  t_hipModuleGetLoadingMode hipModuleGetLoadingMode_fn;
+
+  // DO NOT EDIT ABOVE!
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 31
 
   // ******************************************************************************************* //
   //

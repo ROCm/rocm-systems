@@ -538,6 +538,7 @@ hipMipmappedArrayGetMemoryRequirements
 hipKernelGetAttribute
 hipKernelSetAttribute
 hipKernelGetFunction
+hipModuleGetLoadingMode
 hipOccupancyMaxPotentialClusterSize
 hipOccupancyMaxActiveClusters
 hipGreenCtxCreate

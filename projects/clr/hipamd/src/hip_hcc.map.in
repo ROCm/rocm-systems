@@ -643,6 +643,7 @@ global:
     hipLibraryGetKernelCount;
     hipLibraryGetGlobal;
     hipLibraryGetManaged;
+    hipModuleGetLoadingMode;
     hipStreamCopyAttributes;
     hipLibraryEnumerateKernels;
     hipKernelGetLibrary;

@@ -51,6 +51,8 @@ class PlatformState {
   void* GetDynamicLibraryHandle();
   void SetDynamicLibraryHandle(void* handle);
 
+  void GetLoadingMode(hipModuleLoadingMode_t* mode);
+
   // Exec Functions
   void SetupArgument(const void* arg, size_t size, size_t offset);
   void ConfigureCall(dim3 gridDim, dim3 blockDim, size_t sharedMem, hipStream_t stream);

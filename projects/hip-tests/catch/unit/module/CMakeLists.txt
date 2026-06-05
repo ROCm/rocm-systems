@@ -167,7 +167,8 @@ if(HIP_PLATFORM MATCHES "amd")
     ${TEST_SRC}
     hipExtModuleLaunchKernel.cc
     hipHccModuleLaunchKernel.cc
-    hipLinkCreate.cc)
+    hipLinkCreate.cc
+    hipModuleGetLoadingMode.cc)
 
   if(BUILD_SHARED_LIBS)
     set(TEST_SRC
