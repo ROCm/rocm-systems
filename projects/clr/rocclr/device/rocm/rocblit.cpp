@@ -2932,26 +2932,6 @@ bool KernelBlitManager::WriteBufferBatch(
   std::vector<BatchRawCopyOp> staging_copy_ops;
   size_t staging_batch_size = 0;
 
-  auto release_pinned_command_memory = [&]() {
-    if (amd::IS_HIP && (gpu().command() != nullptr) && gpu().command()->IsMemoryPinned()) {
-      gpu().releaseGpuMemoryFence();
-      gpu().command()->ReleasePinnedMemory();
-    }
-  };
-
-  auto flush_staging_copies = [&]() -> bool {
-    if (staging_copy_ops.empty()) {
-      return true;
-    }
-    const bool result = ShaderCopyBufferBatchRaw(staging_copy_ops);
-    staging_copy_ops.clear();
-    staging_batch_size = 0;
-    if (!result) {
-      release_pinned_command_memory();
-    }
-    return result;
-  };
-
   for (const amd::BatchWriteMemoryOp& op : write_ops) {
     Memory* dst_memory = dev().getRocMemory(op.dst_memory);
 
@@ -2966,8 +2946,15 @@ bool KernelBlitManager::WriteBufferBatch(
     while (remaining_size > 0) {
       const size_t max_staging_size = std::min(remaining_size, StagingXferSize);
       // Flush before getBuffer can rotate the staging pool past queued copies that still use it.
-      if ((staging_batch_size + max_staging_size) > StagingXferSize && !flush_staging_copies()) {
-        return false;
+      if ((staging_batch_size + max_staging_size) > StagingXferSize) {
+        const bool result = ShaderCopyBufferBatchRaw(staging_copy_ops);
+        staging_copy_ops.clear();
+        staging_batch_size = 0;
+        if (!result) {
+          gpu().releaseGpuMemoryFence();
+          gpu().command()->ReleasePinnedMemory();
+          return false;
+        }
       }
 
       BufferState buffer_state = {0};
@@ -2976,7 +2963,8 @@ bool KernelBlitManager::WriteBufferBatch(
       const size_t copy_size = buffer_state.copySize_;
       if (buffer_state.buffer_ == 0 || copy_size == 0) {
         LogWarning("KernelBlitManager::WriteBufferBatch: Buffer creation failed!");
-        release_pinned_command_memory();
+        gpu().releaseGpuMemoryFence();
+        gpu().command()->ReleasePinnedMemory();
         return false;
       }
 
@@ -3004,14 +2992,19 @@ bool KernelBlitManager::WriteBufferBatch(
     constexpr bool kSkipCpuWait = true;
     gpu().releaseGpuMemoryFence(kSkipCpuWait);
     if (!hsaCopyBatch(pinned_copy_ops)) {
-      release_pinned_command_memory();
+      gpu().releaseGpuMemoryFence();
+      gpu().command()->ReleasePinnedMemory();
       return false;
     }
     pinned_copy_ops.clear();
   }
 
-  if (!flush_staging_copies()) {
-    return false;
+  if (!staging_copy_ops.empty()) {
+    if (!ShaderCopyBufferBatchRaw(staging_copy_ops)) {
+      gpu().releaseGpuMemoryFence();
+      gpu().command()->ReleasePinnedMemory();
+      return false;
+    }
   }
 
   return true;
@@ -3030,37 +3023,12 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
   std::vector<StagingReadBack> staging_read_backs;
   size_t staging_batch_size = 0;
 
-  auto release_pinned_command_memory = [&]() {
-    if (amd::IS_HIP && (gpu().command() != nullptr) && gpu().command()->IsMemoryPinned()) {
-      gpu().releaseGpuMemoryFence();
-      gpu().command()->ReleasePinnedMemory();
-    }
-  };
-
-  auto flush_staging_copies = [&]() -> bool {
-    if (staging_copy_ops.empty()) {
-      return true;
-    }
-    if (!ShaderCopyBufferBatchRaw(staging_copy_ops)) {
-      staging_batch_size = 0;
-      release_pinned_command_memory();
-      return false;
-    }
-    gpu().Barriers().WaitCurrent();
-    for (const StagingReadBack& read_back : staging_read_backs) {
-      memcpy(read_back.dst, read_back.staging, read_back.size);
-    }
-    staging_copy_ops.clear();
-    staging_read_backs.clear();
-    staging_batch_size = 0;
-    return true;
-  };
-
   for (const amd::BatchReadMemoryOp& op : read_ops) {
     Memory* src_memory = dev().getRocMemory(op.src_memory);
     if (src_memory == nullptr) {
       LogError("KernelBlitManager::ReadBufferBatch: Invalid source memory!");
-      release_pinned_command_memory();
+      gpu().releaseGpuMemoryFence();
+      gpu().command()->ReleasePinnedMemory();
       return false;
     }
 
@@ -3071,8 +3039,20 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
 
     while (remaining_size > 0) {
       const size_t max_staging_size = std::min(remaining_size, StagingXferSize);
-      if ((staging_batch_size + max_staging_size) > StagingXferSize && !flush_staging_copies()) {
-        return false;
+      if ((staging_batch_size + max_staging_size) > StagingXferSize) {
+        if (!ShaderCopyBufferBatchRaw(staging_copy_ops)) {
+          staging_batch_size = 0;
+          gpu().releaseGpuMemoryFence();
+          gpu().command()->ReleasePinnedMemory();
+          return false;
+        }
+        gpu().Barriers().WaitCurrent();
+        for (const StagingReadBack& read_back : staging_read_backs) {
+          memcpy(read_back.dst, read_back.staging, read_back.size);
+        }
+        staging_copy_ops.clear();
+        staging_read_backs.clear();
+        staging_batch_size = 0;
       }
 
       BufferState buffer_state = {0};
@@ -3081,7 +3061,8 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
       const size_t copy_size = buffer_state.copySize_;
       if (buffer_state.buffer_ == 0 || copy_size == 0) {
         LogWarning("KernelBlitManager::ReadBufferBatch: Buffer creation failed!");
-        release_pinned_command_memory();
+        gpu().releaseGpuMemoryFence();
+        gpu().command()->ReleasePinnedMemory();
         return false;
       }
 
@@ -3109,14 +3090,23 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
     constexpr bool kSkipCpuWait = true;
     gpu().releaseGpuMemoryFence(kSkipCpuWait);
     if (!hsaCopyBatch(pinned_copy_ops)) {
-      release_pinned_command_memory();
+      gpu().releaseGpuMemoryFence();
+      gpu().command()->ReleasePinnedMemory();
       return false;
     }
     pinned_copy_ops.clear();
   }
 
-  if (!flush_staging_copies()) {
-    return false;
+  if (!staging_copy_ops.empty()) {
+    if (!ShaderCopyBufferBatchRaw(staging_copy_ops)) {
+      gpu().releaseGpuMemoryFence();
+      gpu().command()->ReleasePinnedMemory();
+      return false;
+    }
+    gpu().Barriers().WaitCurrent();
+    for (const StagingReadBack& read_back : staging_read_backs) {
+      memcpy(read_back.dst, read_back.staging, read_back.size);
+    }
   }
 
   return true;
