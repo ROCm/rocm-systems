@@ -35,7 +35,7 @@ rocprofiler_add_unit_test(
     TARGET aqlprofile-pm4-tests
     SOURCES ${AQLPROFILE_PM4_TEST_SOURCES}
     TEST_PREFIX "aqlprofile.pm4."
-    TEST_LIST aqlprofile_pm4_TESTS DISABLE_TESTS "SqttBuilderTest.BufferStepCalculation"
+    TEST_LIST aqlprofile_pm4_TESTS
     TIMEOUT 30
     LABELS "unittests;aqlprofile"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

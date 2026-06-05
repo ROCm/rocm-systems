@@ -80,11 +80,13 @@ rocprofiler_add_integration_execute_test(
     TARGET thread-trace-test-app
     TIMEOUT 10
     PRELOAD "$<TARGET_FILE:thread-trace-agent-tool>"
-    ENVIRONMENT "ATT_NODETAIL=1"
-    DISABLED ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})
+    ENVIRONMENT "ATT_NODETAIL=1")
 
 rocprofiler_sdk_sqtt_triple_buffer_disabled(TRIPLE_BUFFER_DISABLED)
-set(TRIPLE_BUFFER_DISABLED ${TRIPLE_BUFFER_DISABLED} OR ${IS_DISABLED})
+# triple buffering requires both a supported architecture and ROCm >= 7.2 (IS_DISABLED)
+if(IS_DISABLED)
+    set(TRIPLE_BUFFER_DISABLED ON)
+endif()
 
 # Checks for data integrity with ttracedata
 rocprofiler_add_integration_execute_test(
@@ -113,15 +115,17 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "TRIPLEBUFFER=1;ATT_NODETAIL=1;ATT_SLOW_CALLBACK=1"
     DISABLED ${TRIPLE_BUFFER_DISABLED})
 
-# Some runtime versions have a problem with this. Disabling until that is fully resolved.
-# Tests for thread trace not paused during application run (global destructor)
+# Tests for thread trace not paused during application run (global destructor).
+# This intermittently aborts during teardown when run back-to-back with the other
+# triple-buffer tests, so it is kept unstable until that runtime race is resolved.
 rocprofiler_add_integration_execute_test(
     thread-trace-api-triple-buffer-no-pause-test
     TARGET thread-trace-test-app
     TIMEOUT 120
     PRELOAD "$<TARGET_FILE:thread-trace-triple-buffer-tool>"
     ENVIRONMENT "TRIPLEBUFFER=1;EXECUTE_PAUSE=0"
-    DISABLED ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS} OR ${TRIPLE_BUFFER_DISABLED})
+    UNSTABLE
+    DISABLED ${TRIPLE_BUFFER_DISABLED})
 
 # Tests for thread trace starting and stopping multiple times during the application
 rocprofiler_add_integration_execute_test(

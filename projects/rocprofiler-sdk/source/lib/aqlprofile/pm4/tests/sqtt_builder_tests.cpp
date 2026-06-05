@@ -132,20 +132,30 @@ TEST_F(SqttBuilderTest, BufferStepCalculation)
 {
     GpuSqttBuilder<TestBuilder, TestPrimitives> builder(&agent_info);
 
-    // Test with different buffer sizes and SE masks
+    constexpr uint64_t kAlign = 1ULL << TestPrimitives::TT_BUFF_ALIGN_SHIFT;  // 4KB
+
+    // GetBaseStep reserves one aligned block for every disabled SE (out of the 64 possible
+    // SEs), divides the remaining space evenly across the enabled SEs, and floors the
+    // per-SE step down to the buffer alignment. Verify those invariants instead of assuming
+    // the whole buffer is split evenly with no reservation.
+    auto verify_step = [&](uint64_t total_buffer, uint64_t se_mask) {
+        const uint64_t enabled  = builder.PopCount(se_mask);
+        const uint64_t reserved = (64 - enabled) * kAlign;
+        const uint64_t step     = builder.GetBaseStep(total_buffer, se_mask);
+
+        // step must be aligned to the buffer alignment
+        EXPECT_EQ(step % kAlign, 0u);
+        // enabled SEs plus the space reserved for disabled SEs must fit within the buffer
+        EXPECT_LE(step * enabled + reserved, total_buffer);
+        // the step must be maximal: it cannot grow by another aligned block and still fit
+        EXPECT_GT((step + kAlign) * enabled + reserved, total_buffer);
+    };
+
     const uint64_t total_buffer = 1024 * 1024;  // 1MB total
 
-    // Test case 1: All SEs enabled (4 SEs)
-    uint64_t mask1 = 0xF;  // 0b1111
-    uint64_t step1 = builder.GetBaseStep(total_buffer, mask1);
-    EXPECT_EQ(step1 * builder.PopCount(mask1), total_buffer);
-    EXPECT_EQ(step1 & ((1ULL << TestPrimitives::TT_BUFF_ALIGN_SHIFT) - 1), 0);  // Check alignment
-
-    // Test case 2: Half SEs enabled (2 SEs)
-    uint64_t mask2 = 0x3;  // 0b0011
-    uint64_t step2 = builder.GetBaseStep(total_buffer, mask2);
-    EXPECT_EQ(step2 * builder.PopCount(mask2), total_buffer / 2);
-    EXPECT_EQ(step2 & ((1ULL << TestPrimitives::TT_BUFF_ALIGN_SHIFT) - 1), 0);  // Check alignment
+    verify_step(total_buffer, 0xF);  // all 4 SEs enabled
+    verify_step(total_buffer, 0x3);  // 2 SEs enabled
+    verify_step(total_buffer, 0x1);  // single SE enabled
 }
 
 TEST_F(SqttBuilderTest, PopulationCount)

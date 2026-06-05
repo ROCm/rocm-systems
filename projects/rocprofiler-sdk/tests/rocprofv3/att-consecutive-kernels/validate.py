@@ -32,7 +32,15 @@ def test_csv_data(csv_data):
     kernel_pattern = re.compile("kernel")
     MIN_EXPECTED_LINES = 5
     kernel_set = set()
+    non_empty_files = 0
     for stats_csv_data in csv_data:
+        # On multi-GPU systems the profiler emits a header-only stats file for every
+        # GPU agent, including the idle ones that ran no dispatches. Skip those and only
+        # validate the files that actually contain thread-trace data.
+        if len(stats_csv_data) == 0:
+            continue
+
+        non_empty_files += 1
         assert (
             len(stats_csv_data) >= MIN_EXPECTED_LINES
         ), "Expected stats csv file to be non-empty"
@@ -41,6 +49,7 @@ def test_csv_data(csv_data):
             if kernel_pattern.search(row["Source"]):
                 kernel_set.add(row["Source"])
 
+    assert non_empty_files > 0, "Expected at least one stats csv file with data"
     assert len(kernel_set) >= 4, "Expected all vector-ops kernels to be recorded"
 
 

@@ -233,9 +233,6 @@ set(ATT_PLUS_PCS_DISABLE ${IS_DISABLED})
 if(${IS_PC_SAMPLING_STOCHASTIC_DISABLED})
     set(ATT_PLUS_PCS_DISABLE ON)
 endif()
-if(${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})
-    set(ATT_PLUS_PCS_DISABLE ON)
-endif()
 set(PCS_ARGS --pc-sampling-beta-enabled 1 --pc-sampling-unit cycles
              --pc-sampling-interval 16384 --pc-sampling-method stochastic)
 
@@ -248,6 +245,28 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests;thread-trace;pc-sampling"
     DISABLED ${ATT_PLUS_PCS_DISABLE})
 
+# the two-GPU index test needs the decoder and at least two GPUs. The gfx-info list is
+# de-duplicated by architecture, so query rocminfo directly to count the GPU agents.
+set(ATT_MULTI_GPU_DISABLE ${IS_DISABLED})
+find_program(
+    rocminfo_EXECUTABLE
+    NAMES rocminfo
+    HINTS ${ROCM_PATH} /opt/rocm
+    PATHS ${ROCM_PATH} /opt/rocm
+    PATH_SUFFIXES bin)
+set(ATT_NUM_GPUS 0)
+if(rocminfo_EXECUTABLE)
+    execute_process(
+        COMMAND ${rocminfo_EXECUTABLE}
+        OUTPUT_VARIABLE _att_rocminfo_out
+        ERROR_QUIET)
+    string(REGEX MATCHALL "Device Type:[ \t]+GPU" _att_gpu_matches "${_att_rocminfo_out}")
+    list(LENGTH _att_gpu_matches ATT_NUM_GPUS)
+endif()
+if(ATT_NUM_GPUS LESS 2)
+    set(ATT_MULTI_GPU_DISABLE ON)
+endif()
+
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-gpu-index-two-gpus
     COMMAND
@@ -257,7 +276,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS vector-ops
     TIMEOUT 45
     LABELS "integration-tests"
-    DISABLED ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}
+    DISABLED ${ATT_MULTI_GPU_DISABLE}
     ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     FIXTURES_SETUP rocprofv3-test-att-gpu-index-two-gpus)
@@ -270,7 +289,7 @@ rocprofiler_add_integration_validate_test(
     DISCOVERY_ARGS -k test_multi_gpu_separate_agents
     TIMEOUT 45
     LABELS "integration-tests"
-    DISABLED ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}
+    DISABLED ${ATT_MULTI_GPU_DISABLE}
     FIXTURES_REQUIRED rocprofv3-test-att-gpu-index-two-gpus
     ARGS --att-multi-gpu-out-dir ${CMAKE_CURRENT_BINARY_DIR}/att-multi-gpu
     FAIL_REGULAR_EXPRESSION "AssertionError")
