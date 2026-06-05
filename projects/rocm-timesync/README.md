@@ -76,7 +76,7 @@ The key steps:
 - This thread stores timestamps in its local memory using some searchable data-structure, possibly something as simple
   as an `std::map` mapping GPU timestamp to system timestamp
 - ROCR's implementation of `hsa_amd_profiling_tick_to_system_domain()` invokes a translation function provided by `ROCm
-  timesync -- i.e., `translate()` - which queries this data structure and applies the offset.
+  timesync` -- i.e., `translate()` - which queries this data structure and applies the offset.
 
 
 #### Pros/Cons of in-process
