@@ -16,6 +16,7 @@
 
 #include "rocjitsu/isa/register_set.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -93,8 +94,66 @@ public:
   /// @brief Registers live immediately before @p inst executes.
   [[nodiscard]] const RegisterSet &live_before(const Instruction &inst) const;
 
+  /// @brief Reuse @p anchor's live-before set for a decoded temporary instruction.
+  ///
+  /// @details DBT remapping can decode a short-lived instruction with adjusted
+  /// operands and then run a normal semantic lowering on it. The temporary is
+  /// not part of the original CFG, so it needs the source instruction's
+  /// liveness for scratch allocation.
+  [[nodiscard]] bool alias_live_before(const Instruction &alias, const Instruction &anchor);
+
   /// @brief Convenience predicate for one register reference.
   [[nodiscard]] bool is_live_before(const Instruction &inst, RegisterRef ref) const;
+
+  /// @brief Encoded VGPR base for a caller-provided high-bank scratch window.
+  [[nodiscard]] std::optional<uint16_t> high_vgpr_scratch_base() const {
+    return high_vgpr_scratch_base_;
+  }
+
+  /// @brief Set the encoded base of a scratch window reached through VGPR_MSB.
+  void set_high_vgpr_scratch_base(std::optional<uint16_t> base) { high_vgpr_scratch_base_ = base; }
+
+  /// @brief Byte offset of a caller-reserved LDS spill zone, if available.
+  [[nodiscard]] std::optional<uint32_t> lds_spill_base() const { return lds_spill_base_; }
+
+  /// @brief Size in bytes of the caller-reserved LDS spill zone.
+  [[nodiscard]] uint32_t lds_spill_bytes() const { return lds_spill_bytes_; }
+
+  /// @brief Set the caller-reserved LDS spill zone used by semantic lowerings.
+  void set_lds_spill_zone(std::optional<uint32_t> base, uint32_t bytes) {
+    lds_spill_base_ = base;
+    lds_spill_bytes_ = bytes;
+  }
+
+  /// @brief Byte offset of a caller-reserved private scratch spill zone, if available.
+  [[nodiscard]] std::optional<uint32_t> private_spill_base() const { return private_spill_base_; }
+
+  /// @brief Size in bytes of the caller-reserved private scratch spill zone.
+  [[nodiscard]] uint32_t private_spill_bytes() const { return private_spill_bytes_; }
+
+  /// @brief Set the caller-reserved private scratch spill zone used by semantic lowerings.
+  void set_private_spill_zone(std::optional<uint32_t> base, uint32_t bytes) {
+    private_spill_base_ = base;
+    private_spill_bytes_ = bytes;
+  }
+
+  /// @brief Exclude a register range from temporary scratch allocation.
+  ///
+  /// @details These reservations are not liveness facts. They model registers
+  /// that semantic lowerings must not borrow even if the original instruction
+  /// stream does not make them live at a particular program point, such as
+  /// kernel-entry ABI SGPRs materialized by the descriptor translator.
+  void reserve_scratch_registers(RegisterRef ref);
+
+  /// @brief Set the highest ordinary SGPR index considered for scratch allocation.
+  ///
+  /// @details The default remains conservative across all supported families.
+  /// Target-specific translators may raise this when the host ISA exposes more
+  /// ordinary SGPRs.
+  void set_allocatable_sgpr_limit(uint16_t limit) {
+    allocatable_sgpr_limit_ =
+        std::min<uint16_t>(limit, static_cast<uint16_t>(REGISTER_SET_MAX_SGPRS));
+  }
 
   /// @brief Find N consecutive dead VGPRs immediately before an instruction.
   ///
@@ -123,6 +182,13 @@ private:
   std::vector<BlockLiveness> liveness_;
   std::unordered_map<const BasicBlock *, size_t> block_index_;
   std::unordered_map<const Instruction *, RegisterSet> live_before_;
+  std::optional<uint16_t> high_vgpr_scratch_base_;
+  std::optional<uint32_t> lds_spill_base_;
+  uint32_t lds_spill_bytes_ = 0;
+  std::optional<uint32_t> private_spill_base_;
+  uint32_t private_spill_bytes_ = 0;
+  RegisterSet scratch_reserved_;
+  uint16_t allocatable_sgpr_limit_ = static_cast<uint16_t>(REGISTER_SET_ALLOCATABLE_SGPRS);
   static constexpr RegisterSet empty_{};
 };
 

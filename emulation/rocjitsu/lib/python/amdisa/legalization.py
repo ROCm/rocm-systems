@@ -824,6 +824,9 @@ def _default_pairs(
         ('rdna2', 'rdna4'),
         ('rdna3', 'rdna4'),
         ('rdna3_5', 'rdna4'),
+        # gfx1250 is a GFX12-family source target used by IREE before all
+        # consumer systems have native gfx1250 execution support.
+        ('gfx1250', 'rdna4'),
         # RDNA → CDNA
         ('rdna1', 'cdna3'),
         ('rdna1', 'cdna4'),

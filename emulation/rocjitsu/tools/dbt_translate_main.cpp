@@ -38,15 +38,15 @@ struct TargetInfo {
   rj_code_target_id_t code_object_target;
 };
 
-// \NPI new GPU: add a {"gfxNNNN", ARCH, EF_MACH, TARGET} row here
-// (and bump the  std::array size) so the DBT tool can translate to/from it.
-constexpr std::array<TargetInfo, 4> kTargetInfos = {{
+constexpr std::array<TargetInfo, 5> kTargetInfos = {{
     {"gfx942", ROCJITSU_CODE_ARCH_CDNA3, EF_AMDGPU_MACH_AMDGCN_GFX942, ROCJITSU_CODE_TARGET_GFX942},
     {"gfx950", ROCJITSU_CODE_ARCH_CDNA4, EF_AMDGPU_MACH_AMDGCN_GFX950, ROCJITSU_CODE_TARGET_GFX950},
     {"gfx1200", ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1200,
      ROCJITSU_CODE_TARGET_GFX1200},
     {"gfx1201", ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1201,
      ROCJITSU_CODE_TARGET_GFX1201},
+    {"gfx1250", ROCJITSU_CODE_ARCH_GFX1250, EF_AMDGPU_MACH_AMDGCN_GFX1250,
+     ROCJITSU_CODE_TARGET_GFX1250},
 }};
 
 struct CliOptions {

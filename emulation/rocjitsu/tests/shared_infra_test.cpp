@@ -655,6 +655,20 @@ TEST(MfmaExecTest, OutputLoc32_4x4) {
   EXPECT_EQ(loc.lane, 1u);
 }
 
+TEST(MfmaExecTest, WmmaInputLocF16K32IsTwoContiguousK16Chunks) {
+  // gfx1250 WMMA is wave32-only. For 16-bit K=32 operands, the current ISA
+  // layout is two register-contiguous K=16 chunks.
+  auto k32_k8 = amdgpu::wmma_input_loc(16, 32, /*i=*/0, /*k=*/8, 16);
+  auto k16_k8 = amdgpu::wmma_input_loc(16, 16, /*i=*/0, /*k=*/8, 16);
+  EXPECT_EQ(k32_k8.vgpr_offset, k16_k8.vgpr_offset);
+  EXPECT_EQ(k32_k8.lane, k16_k8.lane);
+
+  auto k32_k16 = amdgpu::wmma_input_loc(16, 32, /*i=*/0, /*k=*/16, 16);
+  auto second_k16_k0 = amdgpu::wmma_input_loc(16, 16, /*i=*/0, /*k=*/0, 16);
+  EXPECT_EQ(k32_k16.vgpr_offset, second_k16_k0.vgpr_offset + 4u);
+  EXPECT_EQ(k32_k16.lane, second_k16_k0.lane);
+}
+
 TEST(MfmaExecTest, ResolveAccConstant) {
   // Encoding value 0-255 = inline constant. The callback should be invoked.
   uint32_t const_acc = 0;

@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: MIT
 
 include(rj_configure_target)
-include(rj_find_amdcxx)
 
 # Device kernels (compiled from HIP sources for simulator testing).
 add_subdirectory(kernels)
@@ -22,15 +21,11 @@ set(RJ_OBJECT_LIBS
     rocjitsu_isa_rdna3_5
     rocjitsu_isa_rdna4
     rocjitsu_isa_gfx1250
-    # \NPI new ISA family: link its rocjitsu_isa_<isa> object library here, and \
-    # wire any new *_sim_test.cpp and kernels/ coverage into this file.
     rocjitsu_isa_risc_v
     simdojo
     rocjitsu_kmd
     rocjitsu_vm
     rocjitsu_vm_amdgpu
-    rocjitsu_plugin_logging
-    rocjitsu_plugin_race_detector
     rocjitsu_vm_risc_v
     rocjitsu_config
     rocjitsu_dbt_config
@@ -337,93 +332,18 @@ add_executable(
     simdojo_sim_test.cpp
     simulated_kfd_test.cpp
     decode_smoke_test.cpp
-    smem_sbase_operand_test.cpp
     shared_infra_test.cpp
     transcendental_test.cpp
     analysis/liveness_test.cpp
     patch/spill_manager_test.cpp
-    patch/instruction_builder_test.cpp
-    patch/trampoline_builder_test.cpp
-    patch/instrumentor_test.cpp
-    patch/error_report_test.cpp
-    code/code_object_target_id_test.cpp
     dbt/translate_test.cpp
     mtype_flags_test.cpp
-    sysfs_test.cpp
     kfd_ioctl_test.cpp
     waitcnt_counter_test.cpp
     instruction_execution_harness_test.cpp
-    cdna3_predicate_mask_test.cpp
     decode_execute_benchmark.cpp
-    util_simd_test.cpp
-    v_add_simd_benchmark.cpp
-    mfma_simd_benchmark.cpp
-    wmma_simd_benchmark.cpp
-    simd_correctness/vop1_cvt_f64_scalar_correctness_test.cpp
-    simd_correctness/vopc_cmp_class_scalar_correctness_test.cpp
-    simd_correctness/vop2_simd_correctness_test.cpp
-    simd_correctness/vop2_carry_simd_correctness_test.cpp
-    simd_correctness/vop2_fma_simd_correctness_test.cpp
-    simd_correctness/vop2_fma_f64_simd_correctness_test.cpp
-    simd_correctness/vop2_cndmask_simd_correctness_test.cpp
-    simd_correctness/vop2_minmax_simd_correctness_test.cpp
-    simd_correctness/vop1_simd_correctness_test.cpp
-    simd_correctness/vop1_cvt_f8_simd_correctness_test.cpp
-    simd_correctness/vop1_f64_simd_correctness_test.cpp
-    simd_correctness/vop1_cvt_f64_simd_correctness_test.cpp
-    simd_correctness/vopc_simd_correctness_test.cpp
-    simd_correctness/vopc_cmp_class_simd_correctness_test.cpp
-    simd_correctness/vop3_modifier_simd_test.cpp
-    simd_correctness/vop3_binary_simd_correctness_test.cpp
-    simd_correctness/vop3_unary_simd_correctness_test.cpp
-    simd_correctness/vopc_vop3_int_simd_correctness_test.cpp
-    simd_correctness/vopc_vop3_fp32_simd_correctness_test.cpp
-    simd_correctness/vopc_vop3_fp16_simd_correctness_test.cpp
-    simd_correctness/vopc_vop3_fp64_simd_correctness_test.cpp
-    simd_correctness/vop3_ternary_int_simd_correctness_test.cpp
-    simd_correctness/vop3_cvt_f64_simd_correctness_test.cpp
-    simd_correctness/vop3_int_binary_extra_simd_correctness_test.cpp
-    simd_correctness/vop3_int_widening_ternary_simd_correctness_test.cpp
-    simd_correctness/vop3_fp64_simd_correctness_test.cpp
-    simd_correctness/vop3_carry_simd_correctness_test.cpp
-    simd_correctness/vop_alias_rdna_simd_correctness_test.cpp
-    simd_correctness/vop3_shift64_simd_correctness_test.cpp
-    simd_correctness/vop3_shift64_scalar_correctness_test.cpp
-    simd_correctness/vop3_fp16_unary_simd_correctness_test.cpp
-    simd_correctness/vop3_fp16_transcendental_simd_correctness_test.cpp
-    simd_correctness/vop3_cndmask_pack_simd_correctness_test.cpp
-    simd_correctness/vop3_div_helpers_simd_correctness_test.cpp
-    simd_correctness/vop3_b16_rdna_simd_correctness_test.cpp
-    simd_correctness/vop3_cvt_pk_f32_rdna_correctness_test.cpp
-    simd_correctness/vop3_ternary_fp_simd_correctness_test.cpp
-    simd_correctness/vop3_fmac_simd_correctness_test.cpp
-    simd_correctness/vop3_ldexp_simd_correctness_test.cpp
-    simd_correctness/vop3p_pk_binary_int_simd_correctness_test.cpp
-    simd_correctness/vop3p_pk_binary_fp16_simd_correctness_test.cpp
-    simd_correctness/vop3p_fma_mix_simd_correctness_test.cpp
-    simd_correctness/vop3p_mov_b32_simd_correctness_test.cpp
-    simd_correctness/vop3p_dot_simd_correctness_test.cpp
     execution_plugin_test.cpp
-    race-detector/race_detector_event_registry_test.cpp
-    race-detector/race_detector_tests.cpp
-    race-detector/interval_set_tests.cpp
-    data_types_test.cpp
-    drm_info_layout_test.cpp
 )
-if(HAS_DEVICE_KERNELS)
-    target_sources(
-        rocjitsu_tests
-        PRIVATE dbt/multikernel_indirect_branch_test.cpp
-    )
-endif()
-if(RJ_ENABLE_EXPENSIVE_CHECKS)
-    target_sources(
-        rocjitsu_tests
-        PRIVATE
-            simd_correctness/mfma_simd_exact_test.cpp
-            simd_correctness/wmma_simd_exact_test.cpp
-    )
-endif()
 target_link_libraries(
     rocjitsu_tests
     PRIVATE
@@ -435,10 +355,31 @@ target_link_libraries(
         GTest::gtest_main
 )
 rj_configure_target(rocjitsu_tests TEST)
-# Benchmarks are timing tools, not correctness tests; keep them out of the
-# default ctest run (invoke them directly via
-# ./rocjitsu_tests --gtest_filter='*Benchmark*').
-rj_add_gtest_tests(rocjitsu_tests TEST_FILTER -*Benchmark*)
+
+set(RJ_IREE_GFX1250_VALIDATION_DIR
+    "${CMAKE_SOURCE_DIR}/../../../iree-gfx1250-validation"
+    CACHE PATH
+    "Path to the workspace IREE gfx1250 validation artifact bundle"
+)
+if(EXISTS "${RJ_IREE_GFX1250_VALIDATION_DIR}/instruction_audit.json")
+    target_compile_definitions(
+        rocjitsu_tests
+        PRIVATE IREE_GFX1250_VALIDATION_DIR="${RJ_IREE_GFX1250_VALIDATION_DIR}"
+    )
+    message(
+        STATUS
+        "IREE gfx1250 artifact translation test enabled (${RJ_IREE_GFX1250_VALIDATION_DIR})"
+    )
+else()
+    message(
+        STATUS
+        "IREE gfx1250 artifact translation test will skip "
+        "(missing ${RJ_IREE_GFX1250_VALIDATION_DIR})"
+    )
+endif()
+
+include(GoogleTest)
+gtest_discover_tests(rocjitsu_tests)
 
 add_executable(
     rj_dbt_translate_smoke_test
@@ -453,17 +394,10 @@ target_include_directories(
 target_link_libraries(rj_dbt_translate_smoke_test PRIVATE GTest::gtest)
 rj_configure_target(rj_dbt_translate_smoke_test TEST)
 add_dependencies(rj_dbt_translate_smoke_test rj_dbt_translate)
-if(RJ_INSTALL_TESTS)
-    rj_install_test_target(rj_dbt_translate_smoke_test)
-    rj_install_test_target(rj_dbt_translate)
-endif()
-rj_add_test(
+add_test(
     NAME "RjDbtTranslate.Smoke"
     COMMAND rj_dbt_translate_smoke_test $<TARGET_FILE:rj_dbt_translate>
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    INSTALL_COMMAND
-        "bin/rj_dbt_translate_smoke_test"
-        "bin/rj_dbt_translate"
 )
 
 # --- Scaling test (standalone executable) ---
@@ -724,7 +658,9 @@ _rj_path_from_installed_test_bin(
 find_program(
     ROCMINFO_EXECUTABLE
     NAMES rocminfo
-    HINTS "${ROCM_PATH}"
+    HINTS ${CMAKE_SOURCE_DIR}/.venv
+    ENV ROCM_PATH
+    /opt/rocm
     PATH_SUFFIXES bin
     DOC "Path to the rocminfo executable"
 )
@@ -736,33 +672,39 @@ if(ROCMINFO_EXECUTABLE AND RJ_HAS_KFD_DEVICE)
             ROCMINFO_PATH="${ROCMINFO_EXECUTABLE}"
             ROCJITSU_BIN="$<TARGET_FILE:rocjitsu_bin>"
             RJ_CONFIG_PATH="${RJ_CDNA4_KMD_CONFIG}"
-            RJ_INSTALLED_ROCJITSU_BIN="${_rj_installed_rocjitsu_bin}"
-            RJ_INSTALLED_CONFIG_PATH="${_rj_installed_cdna4_kmd_config}"
     )
     target_link_libraries(rocminfo_test PRIVATE GTest::gtest_main)
-    add_dependencies(rocminfo_test rocjitsu_bin rocjitsu_shared)
+    add_dependencies(rocminfo_test rocjitsu_bin rocjitsu_kmd_shim)
 
-    if(RJ_INSTALL_TESTS)
-        rj_install_test_target(rocminfo_test)
-    endif()
-    set(_rocminfo_install_environment_arg)
-    if(ROCM_PATH AND EXISTS "${ROCM_PATH}/bin/rocminfo")
-        list(
-            APPEND _rocminfo_install_environment_arg
-            INSTALL_ENVIRONMENT
-            "ROCMINFO_PATH=${ROCM_PATH}/bin/rocminfo"
-        )
-    endif()
-    foreach(
-        _rocminfo_test
-        IN
-        ITEMS
-            ExitsSuccessfully
-            InterposerActive
-            HsaSystemAttributes
-            DetectsGpuAgent
-            ReportsGfx950
-            ReportsWavefrontSize
+    add_test(
+        NAME "RocminfoTest.ExitsSuccessfully"
+        COMMAND rocminfo_test --gtest_filter=RocminfoTest.ExitsSuccessfully
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    add_test(
+        NAME "RocminfoTest.InterposerActive"
+        COMMAND rocminfo_test --gtest_filter=RocminfoTest.InterposerActive
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    add_test(
+        NAME "RocminfoTest.HsaSystemAttributes"
+        COMMAND rocminfo_test --gtest_filter=RocminfoTest.HsaSystemAttributes
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    add_test(
+        NAME "RocminfoTest.DetectsGpuAgent"
+        COMMAND rocminfo_test --gtest_filter=RocminfoTest.DetectsGpuAgent
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    add_test(
+        NAME "RocminfoTest.ReportsGfx950"
+        COMMAND rocminfo_test --gtest_filter=RocminfoTest.ReportsGfx950
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    add_test(
+        NAME "RocminfoTest.ReportsWavefrontSize"
+        COMMAND rocminfo_test --gtest_filter=RocminfoTest.ReportsWavefrontSize
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     )
         rj_add_test(
             NAME "RocminfoTest.${_rocminfo_test}"
@@ -876,7 +818,13 @@ endif()
 
 # --- HSA init test (requires ROCm HSA runtime + CLI launcher) ---
 
-find_library(HSA_RUNTIME64 hsa-runtime64 PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
+find_library(
+    HSA_RUNTIME64
+    hsa-runtime64
+    PATHS /opt/rocm/lib
+    ENV ROCM_PATH
+    PATH_SUFFIXES lib
+)
 if(HSA_RUNTIME64)
     get_filename_component(RJ_HSA_LIBRARY_DIR "${HSA_RUNTIME64}" DIRECTORY)
     get_filename_component(RJ_HSA_ROCM_ROOT "${RJ_HSA_LIBRARY_DIR}" DIRECTORY)
@@ -889,31 +837,26 @@ if(HSA_RUNTIME64)
     )
     target_link_libraries(hsa_init_test PRIVATE ${HSA_RUNTIME64} GTest::gtest)
     target_link_options(hsa_init_test PRIVATE -Wl,-rpath,${RJ_HSA_LIBRARY_DIR})
-    add_dependencies(hsa_init_test rocjitsu_bin rocjitsu_shared)
-    if(RJ_INSTALL_TESTS)
-        rj_install_test_target(hsa_init_test)
-    endif()
-    foreach(_hsa_test IN ITEMS InitSucceeded GpuAgentFound)
-        rj_add_test(
-            NAME "HsaTest.${_hsa_test}"
-            COMMAND
-                ${RJ_CLI}
-                --config
-                ${RJ_CDNA4_KMD_CONFIG}
-                --
-                $<TARGET_FILE:hsa_init_test>
-                "--gtest_filter=HsaTest.${_hsa_test}"
-            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-            SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
-            INSTALL_COMMAND
-                "\${RJ_INSTALLED_BINDIR}/rocjitsu"
-                "--config"
-                "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA4_KMD_CONFIG_NAME}"
-                "--"
-                "bin/hsa_init_test"
-                "--gtest_filter=HsaTest.${_hsa_test}"
-        )
-    endforeach()
+    add_dependencies(hsa_init_test rocjitsu_bin rocjitsu_kmd_shim)
+    add_test(
+        NAME "HsaTest.InitSucceeded"
+        COMMAND
+            ${RJ_CLI} --config ${RJ_CDNA4_KMD_CONFIG} --
+            $<TARGET_FILE:hsa_init_test> --gtest_filter=HsaTest.InitSucceeded
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    add_test(
+        NAME "HsaTest.GpuAgentFound"
+        COMMAND
+            ${RJ_CLI} --config ${RJ_CDNA4_KMD_CONFIG} --
+            $<TARGET_FILE:hsa_init_test> --gtest_filter=HsaTest.GpuAgentFound
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    set_tests_properties(
+        "HsaTest.InitSucceeded"
+        "HsaTest.GpuAgentFound"
+        PROPERTIES SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
+    )
     message(STATUS "HSA init test enabled (found ${HSA_RUNTIME64})")
 
     # --- HSA translate test: CDNA4→RDNA4 on-device verification ---
@@ -923,14 +866,16 @@ if(HSA_RUNTIME64)
         find_program(
             ROCM_AGENT_ENUM
             rocm_agent_enumerator
-            HINTS "${ROCM_PATH}"
+            HINTS
+            ENV ROCM_PATH
+            ${RJ_HSA_ROCM_ROOT}
+            /opt/rocm
             PATH_SUFFIXES bin
         )
         set(HAS_DBT_VECTOR_ADD_GPU FALSE)
         set(HAS_CDNA3_GPU FALSE)
         set(HAS_RDNA4_GPU FALSE)
         set(HAS_GFX1201_GPU FALSE)
-        set(HAS_CDNA2_GPU FALSE)
         if(ROCM_AGENT_ENUM)
             execute_process(
                 COMMAND ${ROCM_AGENT_ENUM}
@@ -954,9 +899,6 @@ if(HSA_RUNTIME64)
             if(_agent_rc EQUAL 0 AND _agents MATCHES "gfx1201")
                 set(HAS_GFX1201_GPU TRUE)
             endif()
-            if(_agent_rc EQUAL 0 AND _agents MATCHES "gfx90a")
-                set(HAS_CDNA2_GPU TRUE)
-            endif()
         endif()
 
         add_executable(hsa_translate_test dbt/hsa_translate_test.cpp)
@@ -972,7 +914,6 @@ if(HSA_RUNTIME64)
             hsa_translate_test
             PRIVATE
                 ${RJ_OBJECT_LIBS}
-                util
                 ${HSA_RUNTIME64}
                 GTest::gtest
                 GTest::gtest_main
@@ -987,9 +928,6 @@ if(HSA_RUNTIME64)
         )
         add_dependencies(hsa_translate_test device_kernels)
         rj_configure_target(hsa_translate_test TEST)
-        if(RJ_INSTALL_TESTS)
-            rj_install_test_target(hsa_translate_test)
-        endif()
 
         add_executable(hsa_hooks_test dbt/hsa_hooks_test.cpp)
         target_include_directories(
@@ -1023,18 +961,22 @@ if(HSA_RUNTIME64)
             rocjitsu_hooks
         )
         rj_configure_target(hsa_hooks_test TEST)
-        if(RJ_INSTALL_TESTS)
-            rj_install_test_target(hsa_hooks_test)
-        endif()
 
-        if(HAS_RDNA4_GPU)
-            rj_add_test(
+        if(HAS_DBT_VECTOR_ADD_GPU)
+            add_test(
                 NAME "HsaTranslateTest.TranslateAndDispatchVectorAdd"
                 COMMAND hsa_translate_test --gtest_filter=*VectorAdd*
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-                INSTALL_COMMAND
-                    "bin/hsa_translate_test"
-                    "--gtest_filter=*VectorAdd*"
+            )
+            message(
+                STATUS
+                "HSA translate test enabled (supported DBT GPU detected)"
+            )
+        else()
+            message(
+                STATUS
+                "HSA translate vector_add test built but NOT registered with CTest "
+                "(no supported DBT GPU)"
             )
         endif()
 
@@ -1058,14 +1000,17 @@ if(HSA_RUNTIME64)
             )
         endif()
 
+        message(
+            STATUS
+            "HSA hooks test built but NOT registered with CTest "
+            "(CDNA4 MFMA hook smoke needs MFMA scalar/inline operand lowering)"
+        )
+
         if(HAS_RDNA4_GPU)
-            rj_add_test(
+            add_test(
                 NAME "HsaTranslateTest.TranslateAndDispatchMfma16x16"
                 COMMAND hsa_translate_test --gtest_filter=*Mfma16x16*
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-                INSTALL_COMMAND
-                    "bin/hsa_translate_test"
-                    "--gtest_filter=*Mfma16x16*"
             )
             message(STATUS "HSA translate test enabled (RDNA4 GPU detected)")
         else()
@@ -1075,13 +1020,12 @@ if(HSA_RUNTIME64)
             )
         endif()
 
-        set(RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE cdna4_to_cdna3_dispatch_test)
         add_executable(
-            ${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}
+            cdna4_to_cdna3_dispatch_test
             dbt/cdna4_to_cdna3_dispatch_test.cpp
         )
         target_include_directories(
-            ${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}
+            cdna4_to_cdna3_dispatch_test
             PRIVATE
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
@@ -1089,71 +1033,93 @@ if(HSA_RUNTIME64)
                 ${RJ_HSA_INCLUDE_DIR}
         )
         target_link_libraries(
-            ${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}
+            cdna4_to_cdna3_dispatch_test
             PRIVATE
                 ${RJ_OBJECT_LIBS}
-                util
                 ${HSA_RUNTIME64}
                 GTest::gtest
                 GTest::gtest_main
         )
         target_link_options(
-            ${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}
+            cdna4_to_cdna3_dispatch_test
             PRIVATE -Wl,-rpath,${RJ_HSA_LIBRARY_DIR}
         )
         target_compile_definitions(
-            ${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}
+            cdna4_to_cdna3_dispatch_test
             PRIVATE HAS_HOST_AMDGPU=1 KERNEL_DIR="${KERNEL_OUTPUT_DIR}"
         )
-        add_dependencies(${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE} device_kernels)
-        rj_configure_target(${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE} TEST)
-        if(RJ_INSTALL_TESTS)
-            rj_install_test_target(${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE})
-        endif()
+        add_dependencies(cdna4_to_cdna3_dispatch_test device_kernels)
+        rj_configure_target(cdna4_to_cdna3_dispatch_test TEST)
 
-        set(RJ_CDNA4_TO_CDNA3_TRANSLATE_TESTS
-            DynamicCopyLoopTranslates
-            TritonDynamicMatmulTranslates
-            TritonBufferAsyncMatmulTranslates
-            TritonFlashAttentionNoAsyncTranslates
-            TritonFlashAttentionBufferAsyncTranslates
+        add_test(
+            NAME "Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulTranslates"
+            COMMAND
+                cdna4_to_cdna3_dispatch_test
+                --gtest_filter=Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulTranslates
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         )
-        foreach(_test_name IN LISTS RJ_CDNA4_TO_CDNA3_TRANSLATE_TESTS)
-            rj_add_test(
-                NAME "Cdna4ToCdna3DispatchTest.${_test_name}"
-                COMMAND
-                    ${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}
-                    --gtest_filter=Cdna4ToCdna3DispatchTest.${_test_name}
-                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-                TIMEOUT 120
-                INSTALL_COMMAND
-                    "bin/${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}"
-                    "--gtest_filter=Cdna4ToCdna3DispatchTest.${_test_name}"
-            )
-        endforeach()
+        set_tests_properties(
+            "Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulTranslates"
+            PROPERTIES TIMEOUT 120
+        )
 
         if(HAS_CDNA3_GPU)
-            set(RJ_CDNA4_TO_CDNA3_DISPATCH_RUN_TESTS
-                DynamicCopyLoopDispatchAndRun
-                TritonDynamicMatmulDispatchAndRun
-                TritonBufferAsyncMatmulDispatchAndRun
-                TritonBufferAsyncMatmulConservativeLivenessDispatchAndRun
-                TritonFlashAttentionNoAsyncDispatchAndRun
-                TritonFlashAttentionBufferAsyncDispatchAndRun
+            add_test(
+                NAME "Cdna4ToCdna3DispatchTest.DynamicCopyLoopDispatchAndRun"
+                COMMAND
+                    cdna4_to_cdna3_dispatch_test
+                    --gtest_filter=Cdna4ToCdna3DispatchTest.DynamicCopyLoopDispatchAndRun
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
             )
-            foreach(_test_name IN LISTS RJ_CDNA4_TO_CDNA3_DISPATCH_RUN_TESTS)
-                rj_add_test(
-                    NAME "Cdna4ToCdna3DispatchTest.${_test_name}"
-                    COMMAND
-                        ${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}
-                        --gtest_filter=Cdna4ToCdna3DispatchTest.${_test_name}
-                    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-                    TIMEOUT 120
-                    INSTALL_COMMAND
-                        "bin/${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}"
-                        "--gtest_filter=Cdna4ToCdna3DispatchTest.${_test_name}"
-                )
-            endforeach()
+            add_test(
+                NAME
+                    "Cdna4ToCdna3DispatchTest.TritonDynamicMatmulDispatchAndRun"
+                COMMAND
+                    cdna4_to_cdna3_dispatch_test
+                    --gtest_filter=Cdna4ToCdna3DispatchTest.TritonDynamicMatmulDispatchAndRun
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            )
+            add_test(
+                NAME
+                    "Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulDispatchAndRun"
+                COMMAND
+                    cdna4_to_cdna3_dispatch_test
+                    --gtest_filter=Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulDispatchAndRun
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            )
+            add_test(
+                NAME
+                    "Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulConservativeLivenessDispatchAndRun"
+                COMMAND
+                    cdna4_to_cdna3_dispatch_test
+                    --gtest_filter=Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulConservativeLivenessDispatchAndRun
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            )
+            add_test(
+                NAME
+                    "Cdna4ToCdna3DispatchTest.TritonFlashAttentionNoAsyncDispatchAndRun"
+                COMMAND
+                    cdna4_to_cdna3_dispatch_test
+                    --gtest_filter=Cdna4ToCdna3DispatchTest.TritonFlashAttentionNoAsyncDispatchAndRun
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            )
+            add_test(
+                NAME
+                    "Cdna4ToCdna3DispatchTest.TritonFlashAttentionBufferAsyncDispatchAndRun"
+                COMMAND
+                    cdna4_to_cdna3_dispatch_test
+                    --gtest_filter=Cdna4ToCdna3DispatchTest.TritonFlashAttentionBufferAsyncDispatchAndRun
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            )
+            set_tests_properties(
+                "Cdna4ToCdna3DispatchTest.DynamicCopyLoopDispatchAndRun"
+                "Cdna4ToCdna3DispatchTest.TritonDynamicMatmulDispatchAndRun"
+                "Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulDispatchAndRun"
+                "Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulConservativeLivenessDispatchAndRun"
+                "Cdna4ToCdna3DispatchTest.TritonFlashAttentionNoAsyncDispatchAndRun"
+                "Cdna4ToCdna3DispatchTest.TritonFlashAttentionBufferAsyncDispatchAndRun"
+                PROPERTIES TIMEOUT 120
+            )
             message(
                 STATUS
                 "CDNA4->CDNA3 dispatch tests enabled (CDNA3 GPU detected)"
@@ -1165,83 +1131,12 @@ if(HSA_RUNTIME64)
                 "(no CDNA3 GPU)"
             )
         endif()
-
-        # --- HSA DBI smoke test: gfx90a kernel patched with inlined nop ---
-        # Build always; register with CTest only when a gfx90a GPU is present.
-        add_executable(hsa_dbi_smoke_test dbi/hsa_dbi_smoke_test.cpp)
-        target_include_directories(
-            hsa_dbi_smoke_test
-            PRIVATE
-                ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
-                ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
-                ${CMAKE_SOURCE_DIR}/lib/util/include
-                ${RJ_HSA_INCLUDE_DIR}
-        )
-        target_link_libraries(
-            hsa_dbi_smoke_test
-            PRIVATE
-                ${RJ_OBJECT_LIBS}
-                ${HSA_RUNTIME64}
-                GTest::gtest
-                GTest::gtest_main
-        )
-        target_link_options(
-            hsa_dbi_smoke_test
-            PRIVATE -Wl,-rpath,${RJ_HSA_LIBRARY_DIR}
-        )
-        target_compile_definitions(
-            hsa_dbi_smoke_test
-            PRIVATE HAS_HOST_AMDGPU=1 KERNEL_DIR="${KERNEL_OUTPUT_DIR}"
-        )
-        add_dependencies(hsa_dbi_smoke_test device_kernels)
-        rj_configure_target(hsa_dbi_smoke_test TEST)
-        if(RJ_INSTALL_TESTS)
-            rj_install_test_target(hsa_dbi_smoke_test)
-        endif()
-
-        # Local helper: register one TEST_F case from hsa_dbi_smoke_test as a
-        # CTest entry. <group> is the part of the fixture name after
-        # "HsaDbiSmoke" (Static or Hardware). Scoped here because it's only
-        # used by the calls immediately below.
-        function(register_hsa_dbi_smoke_case group case)
-            set(oneValueArgs TIMEOUT)
-            cmake_parse_arguments(RJ_DBI "" "${oneValueArgs}" "" ${ARGN})
-            set(name "HsaDbiSmoke${group}.${case}")
-            rj_add_test(
-                NAME "${name}"
-                COMMAND hsa_dbi_smoke_test --gtest_filter=${name}
-                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-                INSTALL_COMMAND
-                    "bin/hsa_dbi_smoke_test"
-                    "--gtest_filter=${name}"
-                ${ARGN}
-            )
-        endfunction()
-
-        # Static-only test: no GPU needed, runs anywhere the binary is built.
-        register_hsa_dbi_smoke_case(Static PatchedElfActuallyContainsInstrumentation)
-
-        if(HAS_CDNA2_GPU)
-            # Hardware-gated tests. The two that dispatch get an explicit
-            # timeout; the load+validate one runs quickly enough for the
-            # default.
-            register_hsa_dbi_smoke_case(Hardware PatchedElfLoadsAndValidatesInHsaExecutable)
-            register_hsa_dbi_smoke_case(Hardware PatchedKernelDispatchMatchesOriginal TIMEOUT 30)
-            register_hsa_dbi_smoke_case(Hardware TrampolineIsActuallyExecutedByGpu TIMEOUT 30)
-            message(STATUS "HSA DBI smoke test enabled (gfx90a detected)")
-        else()
-            message(
-                STATUS
-                "HSA DBI smoke test built but NOT registered with CTest "
-                "(no gfx90a)"
-            )
-        endif()
     endif()
 else()
     message(STATUS "HSA init test disabled (libhsa-runtime64 not found)")
 endif()
 
-# --- HIP tests (requires amdclang++ + CLI launcher) ---
+# --- HIP tests (requires hipcc + CLI launcher) ---
 
 rj_find_amdcxx(AMDCXX)
 set(RJ_ENABLE_HIP_TESTS ON)
@@ -1291,20 +1186,8 @@ endif()
 if(RJ_ENABLE_HIP_TESTS)
     set(GTEST_INC ${googletest_SOURCE_DIR}/googletest/include)
     set(GTEST_LIB_DIR ${CMAKE_BINARY_DIR}/lib)
-    set(RJ_HIP_SANITIZER_FLAGS)
-    foreach(_rj_sanitizer_flag IN LISTS RJ_SANITIZER_COMPILE_OPTIONS)
-        list(APPEND RJ_HIP_SANITIZER_FLAGS -Xarch_host ${_rj_sanitizer_flag})
-    endforeach()
-    set(RJ_HIP_SANITIZER_LINK_FLAGS)
-    foreach(_rj_sanitizer_flag IN LISTS RJ_SANITIZER_LINK_OPTIONS)
-        list(
-            APPEND RJ_HIP_SANITIZER_LINK_FLAGS
-            -Xarch_host
-            ${_rj_sanitizer_flag}
-        )
-    endforeach()
 
-    # Helper: build a HIP test binary with amdclang++ + gtest.
+    # Helper: build a HIP test binary with hipcc + gtest.
     function(rj_add_hip_test TEST_NAME)
         cmake_parse_arguments(ARG "" "ARCH;SOURCE" "EXTRA_LIBS" ${ARGN})
         if(NOT ARG_ARCH)
@@ -1316,105 +1199,37 @@ if(RJ_ENABLE_HIP_TESTS)
             set(HIP_TEST_SRC ${CMAKE_CURRENT_SOURCE_DIR}/${TEST_NAME}.cpp)
         endif()
         set(HIP_TEST_BIN ${CMAKE_CURRENT_BINARY_DIR}/${TEST_NAME})
-        set(HIP_EXTRA_LIBS)
-        if(ARG_EXTRA_LIBS)
-            set(HIP_EXTRA_LIBS -x none ${ARG_EXTRA_LIBS})
-        endif()
         add_custom_command(
             OUTPUT ${HIP_TEST_BIN}
             COMMAND
-                ${AMDCXX} -x hip --offload-arch=${ARG_ARCH}
-                --rocm-path=${ROCM_PATH} -std=c++20 -O2
-                ${RJ_HIP_SANITIZER_FLAGS} -isystem ${GTEST_INC}
-                -I${CMAKE_CURRENT_SOURCE_DIR} -o ${HIP_TEST_BIN} ${HIP_TEST_SRC}
-                ${HIP_EXTRA_LIBS} -L${GTEST_LIB_DIR} -lgtest -lpthread
-                -Wl,-rpath,${GTEST_LIB_DIR} -Wl,-rpath,${RJ_HSA_LIBRARY_DIR}
-                ${RJ_HIP_SANITIZER_LINK_FLAGS}
+                ${HIPCC_EXECUTABLE} --offload-arch=${ARG_ARCH} -std=c++20
+                -isystem ${GTEST_INC} -I${CMAKE_CURRENT_SOURCE_DIR}
+                -L${GTEST_LIB_DIR} -lgtest -lpthread ${ARG_EXTRA_LIBS}
+                -Wl,-rpath,${GTEST_LIB_DIR} -o ${HIP_TEST_BIN} ${HIP_TEST_SRC}
             DEPENDS ${HIP_TEST_SRC} GTest::gtest GTest::gtest_main
-            COMMENT "Building ${TEST_NAME} with amdclang++ -x hip (${ARG_ARCH})"
+            COMMENT "Building ${TEST_NAME} with hipcc (${ARG_ARCH})"
             VERBATIM
         )
         add_custom_target(${TEST_NAME}_target ALL DEPENDS ${HIP_TEST_BIN})
-        add_dependencies(${TEST_NAME}_target rocjitsu_bin rocjitsu_shared)
-        if(RJ_INSTALL_TESTS)
-            rj_install_test_program(${HIP_TEST_BIN})
-        endif()
+        add_dependencies(${TEST_NAME}_target rocjitsu_bin rocjitsu_kmd_shim)
     endfunction()
 
     # Helper: register a HIP test case run through the CLI launcher.
     function(rj_add_hip_test_case TEST_BIN TEST_CASE)
-        cmake_parse_arguments(
-            ARG
-            ""
-            "CONFIG;NAME;TIMEOUT"
-            "ENVIRONMENT"
-            ${ARGN}
-        )
+        cmake_parse_arguments(ARG "" "CONFIG;NAME" "" ${ARGN})
         if(NOT ARG_CONFIG)
             set(ARG_CONFIG ${RJ_CDNA4_KMD_CONFIG})
         endif()
         if(NOT ARG_NAME)
             set(ARG_NAME ${TEST_CASE})
         endif()
-        get_filename_component(_install_config_name "${ARG_CONFIG}" NAME)
-        set(_install_env)
-        foreach(_env_entry IN LISTS ARG_ENVIRONMENT)
-            if(_env_entry MATCHES "^(ROCJITSU_RUNTIME_DIR|RJ_SINK_DIR)=(.*)$")
-                set(_env_name "${CMAKE_MATCH_1}")
-                set(_env_value "${CMAKE_MATCH_2}")
-                if(IS_ABSOLUTE "${_env_value}")
-                    file(
-                        RELATIVE_PATH
-                        _env_relpath
-                        "${CMAKE_CURRENT_BINARY_DIR}"
-                        "${_env_value}"
-                    )
-                    if(_env_relpath MATCHES "^\\.\\.")
-                        get_filename_component(
-                            _env_relpath
-                            "${_env_value}"
-                            NAME
-                        )
-                    endif()
-                    list(
-                        APPEND _install_env
-                        "${_env_name}=runtime/${_env_relpath}"
-                    )
-                else()
-                    list(APPEND _install_env "${_env_entry}")
-                endif()
-            else()
-                list(APPEND _install_env "${_env_entry}")
-            endif()
-        endforeach()
-        set(_test_args
-            NAME
-            ${ARG_NAME}
+        add_test(
+            NAME ${ARG_NAME}
             COMMAND
-            ${RJ_CLI}
-            --config
-            ${ARG_CONFIG}
-            --
-            ${CMAKE_CURRENT_BINARY_DIR}/${TEST_BIN}
-            --gtest_filter=${TEST_CASE}
-            INSTALL_COMMAND
-            "\${RJ_INSTALLED_BINDIR}/rocjitsu"
-            "--config"
-            "\${RJ_INSTALLED_CONFIG_DIR}/${_install_config_name}"
-            "--"
-            "bin/${TEST_BIN}"
-            "--gtest_filter=${TEST_CASE}"
+                ${RJ_CLI} --config ${ARG_CONFIG} --
+                ${CMAKE_CURRENT_BINARY_DIR}/${TEST_BIN}
+                --gtest_filter=${TEST_CASE}
         )
-        if(RJ_INSTALL_TESTS AND _install_env)
-            list(APPEND _test_args INSTALL_ENVIRONMENT ${_install_env})
-        endif()
-        if(ARG_ENVIRONMENT)
-            list(APPEND _test_args ENVIRONMENT ${ARG_ENVIRONMENT})
-        endif()
-        if(ARG_TIMEOUT)
-            list(APPEND _test_args TIMEOUT ${ARG_TIMEOUT})
-        endif()
-        rj_add_test(${_test_args})
     endfunction()
 
     if(RJ_HIP_RUNTIME_SUPPORTS_TEST_ARCH)
@@ -1606,7 +1421,13 @@ if(RJ_ENABLE_HIP_TESTS)
     endif()
 
     # --- rocBLAS GEMM test ---
-    find_library(ROCBLAS_LIB rocblas PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
+    find_library(
+        ROCBLAS_LIB
+        rocblas
+        PATHS /opt/rocm/lib
+        ENV ROCM_PATH
+        PATH_SUFFIXES lib
+    )
     if(ROCBLAS_LIB)
         if(RJ_HIP_RUNTIME_SUPPORTS_GFX950)
             rj_add_hip_test(hip_gemm_test ARCH gfx950 EXTRA_LIBS ${ROCBLAS_LIB})

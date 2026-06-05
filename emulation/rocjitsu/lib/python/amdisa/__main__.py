@@ -37,6 +37,7 @@ _ENCODING_TRANSLATOR_PAIRS = [
     ('cdna4', 'cdna3'),
     ('cdna4', 'rdna4'),
     ('cdna4', 'rdna3'),
+    ('gfx1250', 'rdna4'),
 ]
 
 _PROFILES = {

@@ -5,6 +5,8 @@ exclude: |
     | build/
     | build-.*/
     | _build/
+    # generated DBT tables can exceed the generic large-file hook limit
+    | emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/dbt/generated/.*_gfx1250_to_rdna4\.h
     # external source of truth
     | shared/amdgpu-windows-interop
     # these projects have their own pre-commit-config.yaml

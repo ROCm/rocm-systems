@@ -65,6 +65,7 @@ using rocjitsu::EF_AMDGPU_MACH;
 using rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1100;
 using rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1200;
 using rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1201;
+using rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1250;
 using rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX942;
 using rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX950;
 using rocjitsu::Elf64_Ehdr;
@@ -95,15 +96,17 @@ struct TargetInfo {
   uint32_t mach;
 };
 
-constexpr std::array<uint32_t, 5> kAcceptedConcreteTargetMachs = {
+constexpr std::array<uint32_t, 6> kAcceptedConcreteTargetMachs = {
     EF_AMDGPU_MACH_AMDGCN_GFX942, EF_AMDGPU_MACH_AMDGCN_GFX950, EF_AMDGPU_MACH_AMDGCN_GFX1100,
-    EF_AMDGPU_MACH_AMDGCN_GFX1200, EF_AMDGPU_MACH_AMDGCN_GFX1201};
+    EF_AMDGPU_MACH_AMDGCN_GFX1200, EF_AMDGPU_MACH_AMDGCN_GFX1201,
+    EF_AMDGPU_MACH_AMDGCN_GFX1250};
 
-constexpr std::array<TargetInfo, 4> kArchAliases = {{
+constexpr std::array<TargetInfo, 5> kArchAliases = {{
     {"cdna3", ROCJITSU_CODE_ARCH_CDNA3, elf_mach_for_arch(ROCJITSU_CODE_ARCH_CDNA3)},
     {"cdna4", ROCJITSU_CODE_ARCH_CDNA4, elf_mach_for_arch(ROCJITSU_CODE_ARCH_CDNA4)},
     {"rdna3", ROCJITSU_CODE_ARCH_RDNA3, elf_mach_for_arch(ROCJITSU_CODE_ARCH_RDNA3)},
     {"rdna4", ROCJITSU_CODE_ARCH_RDNA4, elf_mach_for_arch(ROCJITSU_CODE_ARCH_RDNA4)},
+    {"gfx1250", ROCJITSU_CODE_ARCH_GFX1250, elf_mach_for_arch(ROCJITSU_CODE_ARCH_GFX1250)},
 }};
 
 /// @brief Return the byte offset immediately after an API-table field.
@@ -314,6 +317,8 @@ void log_message(int required_level, const char *format, ...) {
     return "rdna3";
   case ROCJITSU_CODE_ARCH_RDNA4:
     return "rdna4";
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return "gfx1250";
   default:
     return "invalid";
   }

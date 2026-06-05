@@ -20,6 +20,7 @@ namespace rocjitsu {
 namespace gfx1250 {
 
 namespace {
+
 constexpr uint32_t HW_REG_MODE = 1;
 constexpr uint32_t HW_REG_STATUS = 2;
 constexpr uint32_t HW_REG_HW_ID1 = 4;

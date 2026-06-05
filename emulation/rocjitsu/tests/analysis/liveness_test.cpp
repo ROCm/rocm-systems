@@ -14,6 +14,7 @@
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/isa/register_set.h"
+#include "util/except.h"
 
 #include <gtest/gtest.h>
 
@@ -192,6 +193,15 @@ public:
   }
 };
 
+class ZeroInvalidDecoder : public Decoder {
+public:
+  Instruction *decode(const rj_code_binary_inst_t *inst) override {
+    if (*inst == 0)
+      throw util::InvalidInst("0");
+    return new TestInstruction("test_end", {}, {}, PROGRAM_TERMINATOR);
+  }
+};
+
 std::vector<std::unique_ptr<BasicBlock>>
 build_test_blocks(std::vector<TestOpcode> ops, std::span<const uint64_t> extra_leaders = {}) {
   std::vector<uint32_t> words;
@@ -270,6 +280,17 @@ TEST(RegisterSetAnalysis, KeepsRegisterClassesSeparate) {
   EXPECT_TRUE(set.contains({RegClass::SGPR, 4, 1}));
   EXPECT_FALSE(set.contains({RegClass::VGPR, 4, 1}));
   EXPECT_FALSE(set.contains({RegClass::ACC_VGPR, 4, 1}));
+}
+
+TEST(BasicBlockBuild, SkipsInvalidZeroPaddingBetweenAlignedKernels) {
+  TestCodeObject co({1, 0, 0, 1});
+  ZeroInvalidDecoder decoder;
+
+  auto blocks = BasicBlock::build(co, decoder);
+
+  ASSERT_EQ(blocks.size(), 2u);
+  EXPECT_EQ(blocks[0]->start_offset(), 0u);
+  EXPECT_EQ(blocks[1]->start_offset(), 12u);
 }
 
 TEST(RegisterSetAnalysis, IgnoresSpecialRegisterClasses) {
@@ -677,6 +698,30 @@ TEST(LivenessAnalysis, MinFreeVgprForcesScratchAllocationAboveFloor) {
   EXPECT_EQ(liveness.find_free_sgpr(&use, 0), 0);
   EXPECT_EQ(liveness.find_free_run(&use, 1, 0), 4);
   EXPECT_EQ(liveness.find_free_run(&use, 1, 7), 7);
+}
+
+TEST(LivenessAnalysis, ReservedScratchSgprsAreNotAllocated) {
+  auto blocks = build_test_blocks({TestOpcode::UseSgpr4, TestOpcode::End});
+  LivenessAnalysis liveness = analyze_scope(blocks);
+  liveness.reserve_scratch_registers({RegClass::SGPR, 5, 3});
+
+  const Instruction &use = *blocks[0]->instructions().begin();
+  EXPECT_EQ(liveness.find_free_sgpr(&use, 4), 8);
+  EXPECT_EQ(liveness.find_free_sgpr_pair(&use, 4), 8);
+}
+
+TEST(LivenessAnalysis, TargetSpecificSgprLimitExposesRdna4ScratchWindow) {
+  auto blocks = build_test_blocks({TestOpcode::UseSgpr4, TestOpcode::End});
+  LivenessAnalysis liveness = analyze_scope(blocks);
+  liveness.reserve_scratch_registers(
+      {RegClass::SGPR, 0, static_cast<uint8_t>(REGISTER_SET_ALLOCATABLE_SGPRS)});
+
+  const Instruction &use = *blocks[0]->instructions().begin();
+  EXPECT_EQ(liveness.find_free_sgpr_pair(&use, 0), std::nullopt);
+
+  liveness.set_allocatable_sgpr_limit(106);
+  EXPECT_EQ(liveness.find_free_sgpr(&use, 0), 102);
+  EXPECT_EQ(liveness.find_free_sgpr_pair(&use, 0), 102);
 }
 
 TEST(LivenessAnalysis, ReadWriteSameRegisterIsLiveBeforeInstruction) {

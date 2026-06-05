@@ -248,6 +248,12 @@ set(FLATBUFFERS_INSTALL OFF CACHE BOOL "" FORCE)
 set(FLATBUFFERS_BUILD_FLATLIB ON CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(googletest flatbuffers)
+if(RJ_SANITIZER STREQUAL "msan" AND TARGET flatc)
+    # flatc is a build-time host generator. Running it under MSan reports
+    # third-party/libstdc++ startup state before RocJITsu binaries are linked.
+    target_compile_options(flatc PRIVATE -fno-sanitize=memory)
+    target_link_options(flatc PRIVATE -fno-sanitize=memory)
+endif()
 
 include(rj_flatbuffers)
 

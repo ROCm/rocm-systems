@@ -44,7 +44,11 @@ def _clang_format(path: Path) -> None:
     here keeps regenerated files diff-clean even when callers forget to run
     it manually.
     """
-    exe = shutil.which('clang-format')
+    exe = (
+        shutil.which('clang-format')
+        or shutil.which('clang-format-18')
+        or shutil.which('clang-format-20')
+    )
     if not exe:
         print(
             'warning: clang-format not found; emitted files may need manual '
@@ -165,12 +169,36 @@ _CDNA4_TO_CDNA3_ENC_MAP: dict[str, str] = {
     'VOP3_SDST_ENC': 'VOP3_SDST_ENC',
 }
 
+# gfx1250 is RDNA4/GFX12-like and already uses the RDNA4 V-prefixed memory,
+# LDS, and scratch encoding families. Keep this separate from the CDNA4 maps
+# so any future gfx1250-specific differences stay local to the source pair.
+_GFX1250_TO_RDNA4_ENC_MAP: dict[str, str] = {
+    'ENC_SOP1': 'ENC_SOP1',
+    'ENC_SOP2': 'ENC_SOP2',
+    'ENC_SOPC': 'ENC_SOPC',
+    'ENC_SOPK': 'ENC_SOPK',
+    'ENC_SOPP': 'ENC_SOPP',
+    'ENC_SMEM': 'ENC_SMEM',
+    'ENC_VOP1': 'ENC_VOP1',
+    'ENC_VOP2': 'ENC_VOP2',
+    'ENC_VOPC': 'ENC_VOPC',
+    'ENC_VOP3': 'ENC_VOP3',
+    'ENC_VOP3P': 'ENC_VOP3P',
+    'ENC_VDS': 'ENC_VDS',
+    'ENC_VBUFFER': 'ENC_VBUFFER',
+    'ENC_VFLAT': 'ENC_VFLAT',
+    'ENC_VGLOBAL': 'ENC_VGLOBAL',
+    'ENC_VSCRATCH': 'ENC_VSCRATCH',
+    'VOP3_SDST_ENC': 'VOP3_SDST_ENC',
+}
+
 # Lookup the right per-pair enc_map. New target ISAs are added by appending
-# entries here plus a corresponding _CDNA4_TO_<DST>_ENC_MAP definition above.
+# entries here plus a corresponding map definition above.
 _PAIR_ENC_MAPS: dict[tuple[str, str], dict[str, str]] = {
     ('cdna4', 'cdna3'): _CDNA4_TO_CDNA3_ENC_MAP,
     ('cdna4', 'rdna4'): _CDNA4_TO_RDNA4_ENC_MAP,
     ('cdna4', 'rdna3'): _CDNA4_TO_RDNA3_ENC_MAP,
+    ('gfx1250', 'rdna4'): _GFX1250_TO_RDNA4_ENC_MAP,
 }
 
 # ---------------------------------------------------------------------------
@@ -629,7 +657,7 @@ def _emit_decode_fn(trans, src_ns, src_name):
     return lines
 
 
-def _emit_encode_fn(trans, dst_ns, dst_name):
+def _emit_encode_fn(trans, dst_ns, dst_name, src_name):
     base = trans.src_enc_name.lower().replace('enc_', '')
     fn = f'encode_{base}_{dst_name}'
     fsname = _fields_struct_name(trans.src_enc_name)
@@ -680,6 +708,16 @@ def _emit_encode_fn(trans, dst_ns, dst_name):
         elif m.kind == 'insert':
             lines.append(f'    dst.{m.dst_name} = 0;')
         # drop and coherency: nothing to encode
+
+    if src_name == 'gfx1250' and dst_name == 'rdna4':
+        if trans.dst_enc_name == 'ENC_VOP3':
+            lines.append(
+                '    canonicalize_gfx1250_rdna4_unused_vop3_src2(dst, dst_op);'
+            )
+        elif trans.dst_enc_name == 'VOP3_SDST_ENC':
+            lines.append(
+                '    canonicalize_gfx1250_rdna4_unused_vop3_sdst_src2(dst, dst_op);'
+            )
 
     # Remap null register sentinels only when translating into RDNA encodings:
     # CDNA uses 0x7F (7-bit max), while RDNA uses 0x7C. CDNA SMEM also has an
@@ -812,6 +850,15 @@ def _emit_dispatch(translations, src_name, dst_name):
     lines.append(f'        break;')
     lines.append(f'    }}')
 
+    if src_name == 'gfx1250' and dst_name == 'rdna4':
+        lines.append(f'    if (((w0 >> 26) & 0x3F) == 0x35) {{')
+        lines.append(f'        if (rdna4_vop3_sdst_opcode(dst_op))')
+        lines.append(
+            f'            return {fn}(kEnc_VOP3_SDST_ENC, w0, w1, w2, dst_op);'
+        )
+        lines.append(f'        return {fn}(kEnc_VOP3, w0, w1, w2, dst_op);')
+        lines.append(f'    }}')
+
     # For formats with encoding fields narrower than 9 bits, the
     # 9-bit encoding_id has don't-care low bits. If no exact match,
     # try masking and retrying (one level, not recursive).
@@ -852,6 +899,104 @@ def _extract_enc_field_values(spec, enc_names):
         for n in enc_names
         if n in spec.encoding_map
     }
+
+
+def _compress_ranges(values):
+    ranges = []
+    vals = sorted(set(values))
+    if not vals:
+        return ranges
+    start = prev = vals[0]
+    for value in vals[1:]:
+        if value == prev + 1:
+            prev = value
+            continue
+        ranges.append((start, prev))
+        start = prev = value
+    ranges.append((start, prev))
+    return ranges
+
+
+def _opcode_ranges_without_src2(spec, enc_name: str):
+    """Destination opcodes whose default encoding has no SRC2 operand."""
+
+    enc = spec.encoding_map.get(enc_name)
+    if enc is None:
+        return []
+
+    opcodes = []
+    for inst in enc.insts:
+        # Implied-literal alternates are also stored on the parent encoding.
+        # Only the default encoding tells us whether the base instruction has
+        # an architectural SRC2 operand.
+        if inst.enc_name != enc_name:
+            continue
+        fields = {op.name for op in inst.operands}
+        if not fields.intersection({'src2', 'vsrc2'}):
+            opcodes.append(inst.opcode)
+    return _compress_ranges(opcodes)
+
+
+def _opcode_ranges_for_encoding(spec, enc_name: str):
+    enc = spec.encoding_map.get(enc_name)
+    if enc is None:
+        return []
+    return _compress_ranges(
+        inst.opcode for inst in enc.insts if inst.enc_name == enc_name
+    )
+
+
+def _range_condition(ranges):
+    terms = []
+    for start, end in ranges:
+        if start == end:
+            terms.append(f'op == {start}')
+        else:
+            terms.append(f'(op >= {start} && op <= {end})')
+    return ' || '.join(terms) if terms else 'false'
+
+
+def _emit_gfx1250_rdna4_vop3_src2_helpers(dst_spec):
+    vop3_ranges = _opcode_ranges_without_src2(dst_spec, 'ENC_VOP3')
+    vop3_sdst_ranges = _opcode_ranges_without_src2(dst_spec, 'VOP3_SDST_ENC')
+    vop3_sdst_opcode_ranges = _opcode_ranges_for_encoding(dst_spec, 'VOP3_SDST_ENC')
+
+    lines = [
+        '// gfx1250 VOP3 encodes inline-zero in SRC2 for some instructions whose',
+        '// RDNA4 default encoding has no architectural SRC2 operand. Clear the',
+        '// target reserved bits after regular field copying.',
+        'inline bool rdna4_vop3_has_unused_src2(uint16_t op) {',
+        f'    return {_range_condition(vop3_ranges)};',
+        '}',
+        '',
+        'inline bool rdna4_vop3_sdst_has_unused_src2(uint16_t op) {',
+        f'    return {_range_condition(vop3_sdst_ranges)};',
+        '}',
+        '',
+        'inline bool rdna4_vop3_sdst_opcode(uint16_t op) {',
+        f'    return {_range_condition(vop3_sdst_opcode_ranges)};',
+        '}',
+        '',
+        'inline void canonicalize_gfx1250_rdna4_unused_vop3_src2(',
+        '    rocjitsu::rdna4::Vop3MachineInst &dst, uint16_t dst_op) {',
+        '    if (!rdna4_vop3_has_unused_src2(dst_op))',
+        '        return;',
+        '    dst.src2 = 0;',
+        '    dst.abs &= 0x3;',
+        '    dst.opsel &= 0xB;',
+        '    dst.neg &= 0x3;',
+        '}',
+        '',
+        'inline void canonicalize_gfx1250_rdna4_unused_vop3_sdst_src2(',
+        '    rocjitsu::rdna4::Vop3SdstEncMachineInst &dst, uint16_t dst_op) {',
+        '    if (!rdna4_vop3_sdst_has_unused_src2(dst_op))',
+        '        return;',
+        '    dst.src2 = 0;',
+        '    dst.neg &= 0x3;',
+        '}',
+        '',
+    ]
+    return lines
 
 
 # ---------------------------------------------------------------------------
@@ -953,10 +1098,13 @@ def generate_encoding_translators(src_spec, dst_spec, src_name, dst_name, output
         '',
     ]
 
+    if src_name == 'gfx1250' and dst_name == 'rdna4':
+        pair_lines.extend(_emit_gfx1250_rdna4_vop3_src2_helpers(dst_spec))
+
     for t in translations:
         pair_lines.extend(_emit_decode_fn(t, src_ns, src_name))
     for t in translations:
-        pair_lines.extend(_emit_encode_fn(t, dst_ns, dst_name))
+        pair_lines.extend(_emit_encode_fn(t, dst_ns, dst_name, src_name))
     pair_lines.extend(_emit_dispatch(translations, src_name, dst_name))
 
     pair_lines += [

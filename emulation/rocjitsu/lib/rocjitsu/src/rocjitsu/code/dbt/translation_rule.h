@@ -31,6 +31,8 @@
 
 namespace rocjitsu {
 
+inline constexpr uint16_t kAnyTranslationOpcode = 0xFFFFu;
+
 class Instruction;
 class LivenessAnalysis;
 

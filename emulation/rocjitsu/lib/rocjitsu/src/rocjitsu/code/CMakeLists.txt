@@ -17,6 +17,7 @@ rj_add_object_library(rocjitsu_code
     dbt/semantic/cdna4_to_rdna_common.cpp
     dbt/semantic/cdna4_to_rdna3.cpp
     dbt/semantic/cdna4_to_rdna4.cpp
+    dbt/semantic/gfx1250_to_rdna4.cpp
     dbt/semantic_translator.cpp
     dbt/waitcnt_translator.cpp
     patch/code_object_patcher.cpp

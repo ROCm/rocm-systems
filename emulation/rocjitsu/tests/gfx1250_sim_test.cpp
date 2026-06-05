@@ -3878,10 +3878,14 @@ TEST(Gfx1250SimulationTest, VgprMsbModeTracksModeRegisterLayout) {
   amdgpu::Wavefront *wf = dispatch_one_wave(sim, code, std::size(code));
   ASSERT_NE(wf, nullptr);
 
-  constexpr uint8_t kSetLayout = 0xB9;  // src0=1, src1=2, src2=3, dst=2.
-  constexpr uint8_t kModeLayout = 0xE6; // dst,src0,src1,src2 packed in MODE.
+  constexpr uint8_t kSetLayout = 0xB9;        // src0=1, src1=2, src2=3, dst=2.
+  constexpr uint8_t kModeLayout = 0xE6;       // dst,src0,src1,src2 packed in MODE.
+  constexpr uint16_t kSetTransition = 0x40B9; // previous dst=1, next kSetLayout.
   static_assert(amdgpu::set_vgpr_msb_to_mode_layout(kSetLayout) == kModeLayout);
   static_assert(amdgpu::mode_layout_to_set_vgpr_msb(kModeLayout) == kSetLayout);
+  static_assert(amdgpu::s_set_vgpr_msb_new_mode(kSetTransition) == kSetLayout);
+  static_assert(amdgpu::s_set_vgpr_msb_previous_mode(kSetTransition) == 0x40);
+  static_assert(amdgpu::s_set_vgpr_msb_previous_mode_layout(kSetTransition) == 0x01);
   for (uint32_t layout = 0; layout <= 0xFF; ++layout) {
     EXPECT_EQ(amdgpu::mode_layout_to_set_vgpr_msb(
                   amdgpu::set_vgpr_msb_to_mode_layout(static_cast<uint8_t>(layout))),

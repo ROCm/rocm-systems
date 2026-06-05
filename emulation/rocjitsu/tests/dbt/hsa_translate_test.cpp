@@ -134,14 +134,12 @@ HostTarget select_host_target(hsa_agent_t gpu) {
   return t;
 }
 
-} // namespace
-
-TEST(HsaTranslateTest, TranslateAndDispatchVectorAdd) {
-  // 1. Translate CDNA4 to the selected host target.
-  Executable exec(kernel_path("vector_add"));
+void translate_and_dispatch_vector_add(const char *kernel_name, rj_code_target_id_t guest_target,
+                                       rj_code_arch_t guest_arch, bool require_rdna4_host) {
+  Executable exec(kernel_path(kernel_name));
   ASSERT_TRUE(exec.is_valid());
-  ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950), 0u);
-  const auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
+  ASSERT_GT(exec.num_code_objects(guest_target), 0u);
+  const auto *co = exec.code_object(guest_target, 0);
   ASSERT_NE(co, nullptr);
 
   ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
@@ -153,8 +151,12 @@ TEST(HsaTranslateTest, TranslateAndDispatchVectorAdd) {
   ASSERT_NE(target.mach, 0u) << "Test requires CDNA3 (gfx940/941/942), RDNA3 (gfx1100), or RDNA4 "
                                 "(gfx1200/1201) GPU, found: "
                              << target.isa_name;
+  if (require_rdna4_host) {
+    ASSERT_EQ(target.arch, ROCJITSU_CODE_ARCH_RDNA4)
+        << "This guest target currently requires an RDNA4 DBT host, found: " << target.isa_name;
+  }
 
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, target.arch, target.mach);
+  BinaryTranslator translator(guest_arch, target.arch, target.mach);
   auto result = translator.translate(*co);
   ASSERT_FALSE(result.elf_bytes.empty());
   EXPECT_TRUE(result.ok()) << "Translation diagnostic: " << result.diagnostics.front().message;
@@ -297,6 +299,18 @@ TEST(HsaTranslateTest, TranslateAndDispatchVectorAdd) {
   hsa_executable_destroy(executable);
   hsa_code_object_reader_destroy(reader);
   hsa_shut_down();
+}
+
+} // namespace
+
+TEST(HsaTranslateTest, TranslateAndDispatchVectorAdd) {
+  translate_and_dispatch_vector_add("vector_add", ROCJITSU_CODE_TARGET_GFX950,
+                                    ROCJITSU_CODE_ARCH_CDNA4, false);
+}
+
+TEST(HsaTranslateTest, TranslateAndDispatchGfx1250VectorAdd) {
+  translate_and_dispatch_vector_add("vector_add_gfx1250", ROCJITSU_CODE_TARGET_GFX1250,
+                                    ROCJITSU_CODE_ARCH_GFX1250, true);
 }
 
 TEST(HsaTranslateTest, TranslateAndDispatchMfma16x16) {
