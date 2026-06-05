@@ -35,10 +35,12 @@
 
 using rocprofiler::tool::pc_correction::classify;
 using rocprofiler::tool::pc_correction::CodeObjectClassification;
+using rocprofiler::tool::pc_correction::CorrectionResult;
 using rocprofiler::tool::pc_correction::Instruction;
 using rocprofiler::tool::pc_correction::InternalEntry;
 using rocprofiler::tool::pc_correction::Kind;
 using rocprofiler::tool::pc_correction::PCCorrectionManager;
+using stochastic_record_t = rocprofiler::tool::rocprofiler_tool_pc_sampling_stochastic_record_t;
 
 namespace
 {
@@ -392,4 +394,191 @@ TEST(pc_correction_concurrency, ManyReadersOneWriter)
         t.join();
 
     EXPECT_TRUE(f.mgr.lookup(1, 4).has_value());
+}
+
+// ------------------------------------------------------------------
+// Gating tests (PCCorrectionManager::should_correct).
+// ------------------------------------------------------------------
+
+namespace
+{
+// Build a stochastic record with the gating-relevant fields set. wave_issued and
+// reason_not_issued are the two HW signals should_correct inspects.
+stochastic_record_t
+make_record(bool wave_issued, uint32_t reason_not_issued, uint64_t co_id = 0, uint64_t offset = 0)
+{
+    rocprofiler_pc_sampling_record_stochastic_v0_t rec{};
+    rec.wave_issued                 = wave_issued ? 1 : 0;
+    rec.snapshot.reason_not_issued  = reason_not_issued;
+    rec.pc.code_object_id           = co_id;
+    rec.pc.code_object_offset       = offset;
+    return stochastic_record_t{rec, /*inst_index*/ 0};
+}
+
+// A reason value that is consistent with a healthy internal (anything other than
+// ARBITER_NOT_WIN). 0 is the first enum value and is not ARBITER_NOT_WIN.
+constexpr uint32_t kReasonInternalOk = 0u;
+constexpr uint32_t kReasonArbiterNotWin =
+    ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_ARBITER_NOT_WIN;
+}  // namespace
+
+TEST(pc_correction_gate, DisabledReturnsFalse)
+{
+    ManagerFixture f;  // enabled defaults false
+    auto           rec = make_record(/*wave_issued*/ true, kReasonInternalOk);
+    EXPECT_FALSE(f.mgr.should_correct(rec.pc_sample_record, "s_nop"));
+}
+
+TEST(pc_correction_gate, ExtInstructionFalse)
+{
+    ManagerFixture f;
+    f.mgr.set_enabled(true);
+    auto rec = make_record(/*wave_issued*/ true, kReasonInternalOk);
+    EXPECT_FALSE(f.mgr.should_correct(rec.pc_sample_record, "v_add_f32 v0, v1, v2"));
+}
+
+TEST(pc_correction_gate, HealthyInternalFalse)
+{
+    ManagerFixture f;
+    f.mgr.set_enabled(true);
+    // On an internal, but signals are consistent with a legitimate internal.
+    auto rec = make_record(/*wave_issued*/ false, kReasonInternalOk);
+    EXPECT_FALSE(f.mgr.should_correct(rec.pc_sample_record, "s_nop"));
+}
+
+TEST(pc_correction_gate, InternalWaveIssuedTrue)
+{
+    ManagerFixture f;
+    f.mgr.set_enabled(true);
+    // wave_issued is impossible for an internal -> leaked from adjacent external.
+    auto rec = make_record(/*wave_issued*/ true, kReasonInternalOk);
+    EXPECT_TRUE(f.mgr.should_correct(rec.pc_sample_record, "s_nop"));
+}
+
+TEST(pc_correction_gate, InternalArbiterNotWinTrue)
+{
+    ManagerFixture f;
+    f.mgr.set_enabled(true);
+    // reason ARBITER_NOT_WIN is impossible for a never-arbitrated internal.
+    auto rec = make_record(/*wave_issued*/ false, kReasonArbiterNotWin);
+    EXPECT_TRUE(f.mgr.should_correct(rec.pc_sample_record, "s_icache_inv"));
+}
+
+// ------------------------------------------------------------------
+// Cascade tests (PCCorrectionManager::correct). Each publishes a classification
+// for a single symbol, then corrects a record whose PC lands on a chosen
+// internal offset.
+// ------------------------------------------------------------------
+
+namespace
+{
+// Publish `insts` as one symbol at base 0 under `co_id`, then correct a record
+// whose PC lands at `offset`. Returns the result and leaves the mutated record
+// in `out_rec`.
+CorrectionResult
+correct_at(PCCorrectionManager&                          mgr,
+           uint64_t                                      co_id,
+           std::vector<std::pair<std::string, uint64_t>> insts,
+           uint64_t                                      offset,
+           stochastic_record_t&                          out_rec)
+{
+    mgr.publish(co_id,
+                std::make_shared<CodeObjectClassification>(build_single_symbol(std::move(insts))));
+    out_rec = make_record(/*wave_issued*/ true, kReasonInternalOk, co_id, offset);
+    return mgr.correct(out_rec);
+}
+}  // namespace
+
+TEST(pc_correction_cascade, M_Only_ForwardToEXT2)
+{
+    // EXT@0 s_nop@4 s_nop@8 EXT@12; sample at offset 4 -> forward to EXT2 (12).
+    ManagerFixture      f;
+    stochastic_record_t rec{make_record(false, 0)};
+    auto                result =
+        correct_at(f.mgr, 1, {{"v_add", 4}, {"s_nop", 4}, {"s_nop", 4}, {"v_mov", 4}}, 4, rec);
+    EXPECT_EQ(result, CorrectionResult::Keep);
+    EXPECT_EQ(rec.pc_sample_record.pc.code_object_offset, 12u);
+    EXPECT_EQ(rec.original_pc_offset, 4u);
+}
+
+TEST(pc_correction_cascade, N_Only_BackwardToEXT1)
+{
+    // EXT@0 inv@4 inv@8 EXT@12; sample at offset 8 -> backward to EXT1 (0).
+    ManagerFixture      f;
+    stochastic_record_t rec{make_record(false, 0)};
+    auto                result = correct_at(
+        f.mgr, 1, {{"v_add", 4}, {"s_icache_inv", 4}, {"s_icache_inv", 4}, {"v_mov", 4}}, 8, rec);
+    EXPECT_EQ(result, CorrectionResult::Keep);
+    EXPECT_EQ(rec.pc_sample_record.pc.code_object_offset, 0u);
+    EXPECT_EQ(rec.original_pc_offset, 8u);
+}
+
+TEST(pc_correction_cascade, Mixed_BelowBoundary_BackwardToEXT1)
+{
+    // EXT@0 inv@4 inv@8 s_nop@12 EXT@16: B=4, boundary = 16-4 = 12. Sample at
+    // offset 4 (< 12) -> backward to EXT1 (0).
+    ManagerFixture      f;
+    stochastic_record_t rec{make_record(false, 0)};
+    auto                result = correct_at(
+        f.mgr,
+        1,
+        {{"v_add", 4}, {"s_icache_inv", 4}, {"s_icache_inv", 4}, {"s_nop", 4}, {"v_mov", 4}},
+        4,
+        rec);
+    EXPECT_EQ(result, CorrectionResult::Keep);
+    EXPECT_EQ(rec.pc_sample_record.pc.code_object_offset, 0u);
+}
+
+TEST(pc_correction_cascade, Mixed_AtOrAboveBoundary_Drop)
+{
+    // EXT@0 inv@4 s_nop@8 EXT@12: B=4, boundary = 12-4 = 8. Sample at offset 8
+    // (>= 8) -> ambiguous -> drop. PC must be left unchanged.
+    ManagerFixture      f;
+    stochastic_record_t rec{make_record(false, 0)};
+    auto                result = correct_at(
+        f.mgr, 1, {{"v_add", 4}, {"s_icache_inv", 4}, {"s_nop", 4}, {"v_mov", 4}}, 8, rec);
+    EXPECT_EQ(result, CorrectionResult::Drop);
+    EXPECT_EQ(rec.pc_sample_record.pc.code_object_offset, 8u);  // unchanged
+}
+
+TEST(pc_correction_cascade, LeadingInternalsOrphan_Drop)
+{
+    // Symbol begins with internals (no EXT1). Sample at offset 0 -> drop.
+    ManagerFixture      f;
+    stochastic_record_t rec{make_record(false, 0)};
+    auto result = correct_at(f.mgr, 1, {{"s_nop", 4}, {"s_nop", 4}, {"v_add", 4}}, 0, rec);
+    EXPECT_EQ(result, CorrectionResult::Drop);
+}
+
+TEST(pc_correction_cascade, TrailingInternalsOrphan_Drop)
+{
+    // Symbol ends with internals (no EXT2). Sample at the last internal -> drop.
+    ManagerFixture      f;
+    stochastic_record_t rec{make_record(false, 0)};
+    auto result = correct_at(f.mgr, 1, {{"v_add", 4}, {"s_nop", 4}, {"s_nop", 4}}, 8, rec);
+    EXPECT_EQ(result, CorrectionResult::Drop);
+}
+
+TEST(pc_correction_cascade, BackwardToEXT1_AtOffsetZero)
+{
+    // Regression for the has_ext1/has_ext2 flags (vs a zero-offset sentinel):
+    // EXT1 legitimately at offset 0 must still be a valid correction target.
+    // EXT@0 inv@4 EXT@8; sample at 4 -> backward to EXT1 (0), NOT a drop.
+    ManagerFixture      f;
+    stochastic_record_t rec{make_record(false, 0)};
+    auto                result =
+        correct_at(f.mgr, 1, {{"v_add", 4}, {"s_icache_inv", 4}, {"v_mov", 4}}, 4, rec);
+    EXPECT_EQ(result, CorrectionResult::Keep);
+    EXPECT_EQ(rec.pc_sample_record.pc.code_object_offset, 0u);
+}
+
+TEST(pc_correction_cascade, LookupMiss_PassThroughKeep)
+{
+    // gate said yes but no classification exists for this CO -> keep unchanged.
+    ManagerFixture      f;
+    stochastic_record_t rec = make_record(/*wave_issued*/ true, kReasonInternalOk, /*co*/ 99, 4);
+    auto                result = f.mgr.correct(rec);
+    EXPECT_EQ(result, CorrectionResult::Keep);
+    EXPECT_EQ(rec.pc_sample_record.pc.code_object_offset, 4u);  // unchanged
+    EXPECT_EQ(rec.original_inst_index, -1);                     // no correction stashed
 }
