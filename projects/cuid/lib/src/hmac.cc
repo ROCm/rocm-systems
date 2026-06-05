@@ -67,7 +67,7 @@ struct cuid_hmac::Impl {
 };
 
 cuid_hmac::cuid_hmac()
-    : impl_(nullptr), key(nullptr), key_len(0), valid(false)) {
+    : impl_(nullptr), key(nullptr), key_len(0), valid(false) {
   impl_ = new Impl();
   impl_->digest_name = "SHA256";
   impl_->hAlg = nullptr;
