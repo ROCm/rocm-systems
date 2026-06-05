@@ -26,14 +26,21 @@ __host__ DeviceMailbox::DeviceMailbox(int nRanks, int nBlocks, void* flagsBuf)
 /* static */ __host__ std::pair<std::unique_ptr<DeviceBuffer>, DeviceMailbox>
 DeviceMailbox::mallocAndInit(int nRanks, int nBlocks) {
   assert(nRanks == NRANKS);
+  const size_t flagBytes = static_cast<size_t>(nRanks * nBlocks * sizeof(FlagType));
+  // Assume 2MB granularity for testing purposes
+  const size_t granularity = 2u * 1024u * 1024u;
+  const size_t alignedFlagBytes = ((flagBytes + granularity - 1) / granularity) * granularity;
+  INFO(NCCL_ALL,
+    "DeviceMailbox::mallocAndInit: nRanks=%d nBlocks=%d logicalBytes=%zu "
+    "granularity=%zu allocBytes=%zu",
+    nRanks, nBlocks, flagBytes, granularity, alignedFlagBytes);
   auto flagBuf =
-      std::make_unique<DeviceBuffer>(nRanks * nBlocks * sizeof(FlagType));
+      std::make_unique<DeviceBuffer>(alignedFlagBytes);
   if (flagBuf == nullptr) {
     ERROR("DeviceMailbox::mallocAndInit: allocation failed");
     return {nullptr, DeviceMailbox{}};
   }
-  cudaError_t err = cudaMemset(
-      flagBuf->get(), 0, nRanks * nBlocks * sizeof(FlagType));
+  cudaError_t err = cudaMemset(flagBuf->get(), 0, flagBytes);
   if (err != cudaSuccess) {
     WARN("DeviceMailbox::mallocAndInit: cudaMemset failed (%s)",
          cudaGetErrorString(err));

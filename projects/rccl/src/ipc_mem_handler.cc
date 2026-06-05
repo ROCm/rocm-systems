@@ -49,17 +49,32 @@ ncclResult_t ncclIpcMemHandler::exchangeMemPtrs() {
   const int handleBytes = static_cast<int>(sizeof(cudaIpcMemHandle_t));
 
   std::vector<cudaIpcMemHandle_t> ipcHandles(static_cast<size_t>(nranks_));
-  CUDACHECK(cudaIpcGetMemHandle(&ipcHandles[rank_], memPtrs_[static_cast<size_t>(rank_)]));
+  void* selfPtr = memPtrs_[static_cast<size_t>(rank_)];
+  cudaError_t cerr = cudaIpcGetMemHandle(&ipcHandles[rank_], selfPtr);
+  if (cerr != cudaSuccess) {
+    WARN("ncclIpcMemHandler::exchangeMemPtrs: cudaIpcGetMemHandle (export) "
+         "failed for rank %d ptr %p (%s)",
+         rank_, selfPtr, cudaGetErrorString(cerr));
+    (void)cudaGetLastError();
+    return ncclUnhandledCudaError;
+  }
   NCCLCHECK(bootstrapAllGather(bootstrap_, ipcHandles.data(), handleBytes));
 
   for (int i = 0; i < nranks_; ++i) {
     if (i == rank_) {
       continue;
     }
-    CUDACHECK(cudaIpcOpenMemHandle(
-        &memPtrs_[static_cast<size_t>(i)],
-        ipcHandles[i],
-        cudaIpcMemLazyEnablePeerAccess));
+    cerr = cudaIpcOpenMemHandle(
+      &memPtrs_[static_cast<size_t>(i)],
+      ipcHandles[i],
+      cudaIpcMemLazyEnablePeerAccess);
+    if (cerr != cudaSuccess) {
+      WARN("ncclIpcMemHandler::exchangeMemPtrs: cudaIpcOpenMemHandle (import) "
+         "failed for peer %d (%s)",
+         i, cudaGetErrorString(cerr));
+      (void)cudaGetLastError();
+      return ncclUnhandledCudaError;
+    }
   }
   exchanged_ = true;
   return ncclSuccess;
