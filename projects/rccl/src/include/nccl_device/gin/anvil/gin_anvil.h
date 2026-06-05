@@ -37,9 +37,8 @@ NCCL_DEVICE_INLINE static void ncclGinAnvilLocalSignalOp(uint64_t* sigPtr, ncclG
                                                          uint64_t signalOpArg) {
   if (sigPtr == nullptr) return;
   if (signalOp == ncclGinSignalInc) signalOpArg = 1;
-  cuda::atomic_ref<uint64_t, cuda::thread_scope_system> ref(*sigPtr);
   if (signalOp == ncclGinSignalInc || signalOp == ncclGinSignalAdd)
-    ref.fetch_add(signalOpArg, cuda::memory_order_relaxed);
+    atomicAdd((unsigned long long*)sigPtr, (unsigned long long)signalOpArg);
 }
 
 template <>
