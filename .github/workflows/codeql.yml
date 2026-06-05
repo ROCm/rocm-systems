@@ -14,10 +14,9 @@ on:
       - develop
       - "release**/therock*"
       - "release/rocm-rel-7.[1-2]*"
-    paths:  
+    paths:
       - '**.py'
       - '.github/workflows/**'
-  workflow_dispatch:
   workflow_dispatch:
 
 concurrency:
