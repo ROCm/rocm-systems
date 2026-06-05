@@ -69,7 +69,7 @@ below illustrates the architecture
 ![](doc/img/in-process.png)
 
 The key steps:
-- A new thread $$ ROCr-timesyunc-r_{m} $$ queries KFD for crosststamps of the form (`CLOCK_REALTIME` timestamp, GPU `m`
+- A new thread `ROCr-timesync-r_m` queries KFD for crosststamps of the form (`CLOCK_REALTIME` timestamp, GPU `m`
   timestamp). It may use the existing `AMDKFD_IOC_GET_CLOCK_COUNTERS` `ioctl()` call or some TBD similar new interface.
   It performs these queries at a frequency needed for the system/application's target precision. This can be
   communicated via a system-wide configuration or an application-specific configuration like an HSA env variable.
@@ -99,10 +99,10 @@ diagram below illustrates one such architecture.
 ![](doc/img/out-of-process.png)
 
 The key steps:
-- A standalone `ROCm-timesync` system service is deployed. It runs $$ rocm-timesync-d_{m} $$ which query KFD for
+- A standalone `ROCm-timesync` system service is deployed. It runs `rocm-timesync-d_m` which query KFD for
   (`CLOCK_REALTIME`, GPU `m`) crosststamps. We envision one thread per GPU on the system 
 - These threads publish data streams througgh a tracing infrastructure such as [lttng](https://lttng.org/).
-- On the ROCR side, $$ ROCR-timesync-r_{m} $$ consumes the data streams it needs (e.g., the GPUs it's process is using),
+- On the ROCR side, `ROCR-timesync-r_m` consumes the data streams it needs (e.g., the GPUs it's process is using),
   and stores this data in a shared TSDB.
 - ROCR's implementation of `hsa_amd_profiling_tick_to_system_domain()` invokes a translation function provided by `ROCm
   timesync -- i.e., `translate()` - which queries the TSDB and applies the offset.
@@ -121,7 +121,7 @@ including:
     PTP-enabled multi-node workload needing ~100 precision for performance analysis may need sampling at a high frequency
     such as 100 Hz, while a client application can tolerate lower precision such as 1 Hz. 
     
-        - We envision publishing $$M * N$$ streams, where $$M$$ is the number of GPUs on the node and $$N$$ is the
+        - We envision publishing `M * N` streams, where `M` is the number of GPUs on the node and `N` is the
           number of precisions/frequencies supported.
 
         - Importantly, `lttng` provides mechanisms for producers to determine at runtime if a stream has any active
