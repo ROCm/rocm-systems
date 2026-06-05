@@ -40,6 +40,9 @@ public:
   /// @brief Get the daemon's DRM sysfs directory path.
   [[nodiscard]] const std::string &drm_path() const { return drm_path_; }
 
+  /// @brief Get the daemon's NCCL topology XML file path (used for NCCL_TOPO_FILE).
+  [[nodiscard]] const std::string &nccl_topo_path() const { return nccl_topo_path_; }
+
   /// @brief Find a stored memfd that covers the given GPUVM address.
   /// @details Used by the interposer to intercept anonymous MAP_FIXED at
   /// addresses that have daemon-shared memfd mappings.
@@ -97,6 +100,7 @@ private:
   uint32_t next_id_ = 0;             ///< Monotonic request ID counter (for debugging).
   std::string topology_path_;        ///< Daemon's sysfs topology directory path.
   std::string drm_path_;             ///< Daemon's DRM sysfs directory path.
+  std::string nccl_topo_path_;       ///< Daemon's NCCL topology XML file path.
   std::atomic<bool> closing_{false}; ///< Set by close() to break WAIT_EVENTS loops.
   int shutdown_efd_ = -1;            ///< eventfd written by close() to wake WAIT_EVENTS pollers.
 

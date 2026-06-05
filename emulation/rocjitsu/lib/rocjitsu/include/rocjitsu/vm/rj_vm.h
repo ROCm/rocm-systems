@@ -210,6 +210,16 @@ RJ_API_EXPORT rj_status_t rj_vm_topology_path(rj_vm_t *vm, const char **path);
 /// @param[out] path Pointer to the DRM path string (owned by the VM).
 RJ_API_EXPORT rj_status_t rj_vm_drm_path(rj_vm_t *vm, const char **path);
 
+/// @brief Get the path of the synthesized NCCL topology XML file.
+/// @details The path is empty if no topology has been generated yet. The
+/// interposer sets NCCL_TOPO_FILE to this path so RCCL uses our symmetric
+/// XGMI graph instead of reading real /sys/bus/pci/devices/<bdf>/... state
+/// (which would contaminate the topology with whatever real PCIe devices
+/// happen to occupy our simulated BDFs).
+/// @param[in] vm VM handle.
+/// @param[out] path Pointer to the NCCL topo path string (owned by the VM).
+RJ_API_EXPORT rj_status_t rj_vm_nccl_topo_path(rj_vm_t *vm, const char **path);
+
 /// @brief Get the backing memory handle (local mode).
 RJ_API_EXPORT rj_status_t rj_vm_get_shared_mem(rj_vm_t *vm, int64_t offset, rj_handle_t *handle);
 

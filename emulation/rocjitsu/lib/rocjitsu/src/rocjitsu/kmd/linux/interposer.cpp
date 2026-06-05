@@ -210,6 +210,13 @@ public:
     if (fd < 0)
       return nullptr;
     remote_kfd_fd_ = fd;
+    // Point RCCL at the daemon-synthesized NCCL topology and disable IB
+    // probing. Without these, RCCL reads real /sys/bus/pci/devices/... at
+    // our simulated BDFs (not interposed) and tries to open real RoCE
+    // hardware. overwrite=0 on IB_DISABLE lets the user opt back in.
+    if (!remote_->nccl_topo_path().empty())
+      ::setenv("NCCL_TOPO_FILE", remote_->nccl_topo_path().c_str(), 1);
+    ::setenv("NCCL_IB_DISABLE", "1", 0);
     return remote_;
   }
 
@@ -330,6 +337,14 @@ public:
         return nullptr;
       }
       std::thread([vm = rj_vm_]() { rj_vm_run(vm, nullptr); }).detach();
+      // Same NCCL topology + IB defense as the daemon path. The Sysfs
+      // synthesis runs inside rj_vm_create (driver setup_topology), so the
+      // path is already available here.
+      const char *nccl_path = nullptr;
+      if (rj_vm_nccl_topo_path(rj_vm_, &nccl_path) == ROCJITSU_STATUS_SUCCESS && nccl_path &&
+          nccl_path[0] != '\0')
+        ::setenv("NCCL_TOPO_FILE", nccl_path, 1);
+      ::setenv("NCCL_IB_DISABLE", "1", 0);
       in_construction = false;
     }
     return driver();

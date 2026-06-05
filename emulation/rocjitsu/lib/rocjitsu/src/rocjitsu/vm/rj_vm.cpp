@@ -346,6 +346,15 @@ rj_status_t rj_vm_drm_path(rj_vm_t *vm, const char **path) {
   return ROCJITSU_STATUS_SUCCESS;
 }
 
+rj_status_t rj_vm_nccl_topo_path(rj_vm_t *vm, const char **path) {
+  if (!vm || !path || !vm->vm || !vm->vm->driver())
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  static thread_local std::string cached_nccl_topo;
+  cached_nccl_topo = vm->vm->driver()->topology().nccl_topo_path();
+  *path = cached_nccl_topo.c_str();
+  return ROCJITSU_STATUS_SUCCESS;
+}
+
 rj_status_t rj_vm_get_shared_mem(rj_vm_t *vm, int64_t offset, rj_handle_t *handle) {
   if (!vm || !handle || !vm->vm || !vm->vm->driver())
     return ROCJITSU_STATUS_INVALID_ARGUMENT;

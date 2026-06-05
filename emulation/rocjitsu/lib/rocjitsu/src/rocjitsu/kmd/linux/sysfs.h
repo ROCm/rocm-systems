@@ -102,6 +102,13 @@ public:
   /// @brief Get the generated DRM sysfs path (empty if not yet generated).
   const std::string &drm_path() const { return drm_dir_; }
 
+  /// @brief Get the generated NCCL topology XML file path (empty if not yet generated).
+  /// @details RCCL otherwise reads /sys/bus/pci/devices/<bdf>/... (which the
+  /// LD_PRELOAD interposer does not interpose) and sees real host PCIe state at
+  /// our simulated BDFs, producing asymmetric XGMI links that fail path
+  /// discovery. Pointing NCCL_TOPO_FILE at this file bypasses that probe.
+  const std::string &nccl_topo_path() const { return nccl_topo_path_; }
+
   /// @brief Get the GPU info used to generate the topology.
   const GpuInfo &gpu_info() const { return gpu_info_; }
 
@@ -114,6 +121,7 @@ public:
 private:
   std::string topology_dir_;
   std::string drm_dir_;
+  std::string nccl_topo_path_;
   GpuInfo gpu_info_{};
 
   void write_file(const std::string &path, const std::string &content);
@@ -124,6 +132,7 @@ private:
   void write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, const GpuInfo &gpu,
                       uint32_t total_gpus);
   void write_drm_tree(const std::vector<GpuInfo> &gpus);
+  void write_nccl_topo(const std::vector<GpuInfo> &gpus);
 };
 
 } // namespace rocjitsu

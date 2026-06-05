@@ -6,9 +6,11 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unistd.h>
 
 namespace rocjitsu {
@@ -17,15 +19,20 @@ namespace fs = std::filesystem;
 
 Sysfs::~Sysfs() { cleanup(); }
 
-Sysfs::Sysfs(Sysfs &&other) noexcept : topology_dir_(std::move(other.topology_dir_)) {
+Sysfs::Sysfs(Sysfs &&other) noexcept
+    : topology_dir_(std::move(other.topology_dir_)),
+      nccl_topo_path_(std::move(other.nccl_topo_path_)) {
   other.topology_dir_.clear();
+  other.nccl_topo_path_.clear();
 }
 
 Sysfs &Sysfs::operator=(Sysfs &&other) noexcept {
   if (this != &other) {
     cleanup();
     topology_dir_ = std::move(other.topology_dir_);
+    nccl_topo_path_ = std::move(other.nccl_topo_path_);
     other.topology_dir_.clear();
+    other.nccl_topo_path_.clear();
   }
   return *this;
 }
@@ -46,6 +53,9 @@ void Sysfs::cleanup() {
     fs::remove_all(drm_dir_);
     drm_dir_.clear();
   }
+  // nccl_topo_path_ lives under topology_dir_; remove_all above handles the
+  // file. Clear the cached path so the accessor reflects post-cleanup state.
+  nccl_topo_path_.clear();
 }
 
 void Sysfs::setup_environment() {}
@@ -361,6 +371,102 @@ void Sysfs::write_drm_tree(const std::vector<GpuInfo> &gpus) {
   write_file(drm_dir_ + "/version", "drm 1.1.0\n");
 }
 
+namespace {
+
+std::string format_bdf(uint32_t location_id) {
+  uint32_t bus = (location_id >> 8) & 0xFF;
+  uint32_t dev = (location_id >> 3) & 0x1F;
+  uint32_t func = location_id & 0x7;
+  std::ostringstream os;
+  os << "0000:" << std::hex << std::setw(2) << std::setfill('0') << bus << ":" << std::setw(2)
+     << std::setfill('0') << dev << "." << func;
+  return os.str();
+}
+
+// Decode gfx_target_version (encoded as major*10000 + minor*100 + step) into
+// the "gfxNNN" string RCCL expects (e.g. 90500 -> "gfx950", 90010 -> "gfx90a").
+// Returns empty if the value is missing or doesn't fit the standard encoding;
+// the caller then omits the gcn attribute entirely rather than emit a wrong
+// label. Every real ROCm target so far (gfx908..gfx950, gfx10xx..gfx12xx)
+// decodes cleanly here, so the empty path only triggers on a misconfigured
+// or unset gfx_target_version.
+std::string gfx_name_from_target_version(uint32_t v) {
+  if (v == 0)
+    return {};
+  uint32_t major = v / 10000;
+  uint32_t minor = (v / 100) % 100;
+  uint32_t step = v % 100;
+  if (minor >= 10)
+    return {};
+  std::ostringstream os;
+  os << "gfx" << major << minor;
+  if (step < 10)
+    os << step;
+  else if (step == 10)
+    os << 'a';
+  else if (step == 11)
+    os << 'b';
+  else if (step == 12)
+    os << 'c';
+  else
+    return {};
+  return os.str();
+}
+
+uint64_t host_hash_value() {
+  char hostname[256] = {};
+  if (gethostname(hostname, sizeof(hostname) - 1) != 0)
+    hostname[0] = '\0';
+  return std::hash<std::string_view>{}(std::string_view(hostname));
+}
+
+} // namespace
+
+void Sysfs::write_nccl_topo(const std::vector<GpuInfo> &gpus) {
+  if (topology_dir_.empty())
+    return;
+
+  std::ostringstream os;
+  os << "<system version=\"2\">\n"
+     << "  <cpu host_hash=\"0x" << std::hex << host_hash_value() << std::dec
+     << "\" numaid=\"0\" affinity=\"ffffffff,ffffffff,ffffffff,ffffffff\""
+        " arch=\"x86_64\" vendor=\"AuthenticAMD\" familyid=\"175\" modelid=\"17\">\n";
+
+  for (size_t i = 0; i < gpus.size(); ++i) {
+    const auto &gpu = gpus[i];
+    std::string bdf = format_bdf(gpu.location_id);
+
+    std::ostringstream vendor_hex;
+    vendor_hex << "0x" << std::hex << std::setw(4) << std::setfill('0') << gpu.vendor_id;
+    std::ostringstream device_hex;
+    device_hex << "0x" << std::hex << std::setw(4) << std::setfill('0') << gpu.device_id;
+
+    os << "    <pci busid=\"" << bdf << "\" class=\"0x130000\" vendor=\"" << vendor_hex.str()
+       << "\" device=\"" << device_hex.str() << "\" subsystem_vendor=\"" << vendor_hex.str()
+       << "\" subsystem_device=\"0x0c34\" link_speed=\"32.0 GT/s PCIe\" link_width=\"16\">\n"
+       << "      <gpu dev=\"" << i << "\" sm=\"256\"";
+    if (auto gcn = gfx_name_from_target_version(gpu.gfx_target_version); !gcn.empty())
+      os << " gcn=\"" << gcn << "\"";
+    os << " arch=\"38911\" rank=\"" << i << "\" gdr=\"0\">\n";
+
+    for (size_t j = 0; j < gpus.size(); ++j) {
+      if (j == i)
+        continue;
+      os << "        <xgmi target=\"" << format_bdf(gpus[j].location_id)
+         << "\" count=\"1\" tclass=\"0x130000\"/>\n";
+    }
+
+    os << "      </gpu>\n"
+       << "    </pci>\n";
+  }
+
+  os << "  </cpu>\n"
+     << "</system>\n";
+
+  nccl_topo_path_ = topology_dir_ + "/nccl_topo.xml";
+  write_file(nccl_topo_path_, os.str());
+}
+
 std::string Sysfs::generate(const GpuInfo &gpu) { return generate(std::vector<GpuInfo>{gpu}); }
 
 std::string Sysfs::generate(const std::vector<GpuInfo> &gpus) {
@@ -388,6 +494,7 @@ std::string Sysfs::generate(const std::vector<GpuInfo> &gpus) {
     write_gpu_node(nodes_dir, i + 1, gpus[i], num_gpus);
 
   write_drm_tree(gpus);
+  write_nccl_topo(gpus);
 
   return topology_dir_;
 }

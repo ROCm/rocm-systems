@@ -65,6 +65,10 @@ static void handle_client(int client_fd, rj_vm_t *vm, std::stop_token stop) {
       rj_vm_drm_path(vm, &drm);
       auto drm_len = drm ? std::strlen(drm) : 0;
 
+      const char *nccl = nullptr;
+      rj_vm_nccl_topo_path(vm, &nccl);
+      auto nccl_len = nccl ? std::strlen(nccl) : 0;
+
       RpcHeader resp{};
       resp.request_id = hdr.request_id;
 
@@ -73,14 +77,18 @@ static void handle_client(int client_fd, rj_vm_t *vm, std::stop_token stop) {
       hs.gpu_id = gpu_id;
       hs.topology_path_len = static_cast<uint32_t>(topo_len);
       hs.drm_path_len = static_cast<uint32_t>(drm_len);
+      hs.nccl_topo_path_len = static_cast<uint32_t>(nccl_len);
 
-      resp.payload_bytes = sizeof(hs) + hs.topology_path_len + hs.drm_path_len;
+      resp.payload_bytes =
+          sizeof(hs) + hs.topology_path_len + hs.drm_path_len + hs.nccl_topo_path_len;
       rpc_send_exact(client_fd, &resp, sizeof(resp));
       rpc_send_exact(client_fd, &hs, sizeof(hs));
       if (topo_len > 0)
         rpc_send_exact(client_fd, topo, topo_len);
       if (drm_len > 0)
         rpc_send_exact(client_fd, drm, drm_len);
+      if (nccl_len > 0)
+        rpc_send_exact(client_fd, nccl, nccl_len);
       break;
     }
 

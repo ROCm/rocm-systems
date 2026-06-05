@@ -47,14 +47,15 @@ struct RpcHeader {
 };
 
 /// @brief RPC protocol version. Increment when making breaking changes.
-inline constexpr uint32_t kRpcProtocolVersion = 2;
+inline constexpr uint32_t kRpcProtocolVersion = 3;
 
 /// @brief Handshake response payload (sent after RPC_HANDSHAKE).
 struct RpcHandshakeResponse {
-  uint32_t version;           ///< Protocol version (kRpcProtocolVersion).
-  uint32_t gpu_id;            ///< KFD gpu_id for the simulated device.
-  uint32_t topology_path_len; ///< Length of the topology path string that follows.
-  uint32_t drm_path_len;      ///< Length of the DRM sysfs path string that follows.
+  uint32_t version;            ///< Protocol version (kRpcProtocolVersion).
+  uint32_t gpu_id;             ///< KFD gpu_id for the simulated device.
+  uint32_t topology_path_len;  ///< Length of the topology path string that follows.
+  uint32_t drm_path_len;       ///< Length of the DRM sysfs path string that follows.
+  uint32_t nccl_topo_path_len; ///< Length of the NCCL_TOPO_FILE path string that follows.
 };
 
 /// @brief Ioctl request payload (when opcode == RPC_IOCTL).
@@ -86,7 +87,7 @@ struct RpcMunmapRequest {
 };
 
 static_assert(sizeof(RpcHeader) == 16);
-static_assert(sizeof(RpcHandshakeResponse) == 16);
+static_assert(sizeof(RpcHandshakeResponse) == 20);
 static_assert(sizeof(RpcIoctlRequest) == 8);
 static_assert(sizeof(RpcMmapRequest) == 32);
 static_assert(sizeof(RpcMmapResponse) == 8);

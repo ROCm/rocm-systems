@@ -144,6 +144,14 @@ int RemoteDriver::open() {
       return -1;
   }
 
+  if (hs.nccl_topo_path_len > kMaxPathLen)
+    return -1;
+  if (hs.nccl_topo_path_len > 0) {
+    nccl_topo_path_.resize(hs.nccl_topo_path_len);
+    if (!rpc_recv_exact(sock_, nccl_topo_path_.data(), hs.nccl_topo_path_len))
+      return -1;
+  }
+
   // Create a high-numbered synthetic KFD fd to avoid collisions with ROCR's
   // internal fd lifecycle. Use the top of the current rlimit range (same
   // approach as SimulatedDriver::init_reserved_fd_range).
