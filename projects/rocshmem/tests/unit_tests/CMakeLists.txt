@@ -152,47 +152,53 @@ rocm_install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/unit_test_wrapper.sh
 # Set BUILD_CTESTS=ON to register unit tests
 if(BUILD_CTESTS)
     message(STATUS "Registering CTest-based unit tests")
-    include(${CMAKE_CURRENT_SOURCE_DIR}/CTestUnitTests.cmake)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/CTestUnitTests.cmake OPTIONAL)
 
-    # Initialize install-time test generation
-    set(INSTALL_CTEST_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/CTestUnitInstall.cmake")
-    init_install_ctest_generation("${INSTALL_CTEST_OUTPUT}")
+    # Check if CTest generation functions are available
+    if(COMMAND init_install_ctest_generation AND COMMAND register_all_unit_tests)
+        # Initialize install-time test generation
+        set(INSTALL_CTEST_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/CTestUnitInstall.cmake")
+        init_install_ctest_generation("${INSTALL_CTEST_OUTPUT}")
 
-    # Configure template header
-    configure_file(
-        ${CMAKE_CURRENT_SOURCE_DIR}/CTestUnitInstall.cmake.in
-        ${INSTALL_CTEST_OUTPUT}
-        @ONLY)
+        # Configure template header
+        configure_file(
+            ${CMAKE_CURRENT_SOURCE_DIR}/CTestUnitInstall.cmake.in
+            ${INSTALL_CTEST_OUTPUT}
+            @ONLY)
 
-    # Register all tests (populates both build-time and install-time)
-    register_all_unit_tests()
+        # Register all tests (populates both build-time and install-time)
+        register_all_unit_tests()
 
-    # Apply YAML-based tier labels (build-time only)
-    set(_test_categories_yaml "${CMAKE_SOURCE_DIR}/tests/test_categories.yaml")
-    include(${ROCM_SYSTEMS_ROOT}/shared/ctest/TestCategories.cmake OPTIONAL)
-    if(COMMAND apply_ctest_category_labels AND EXISTS "${_test_categories_yaml}")
-        # Apply tier labels to build-time tests
-        apply_ctest_category_labels("${_test_categories_yaml}")
+        # Apply YAML-based tier labels (build-time only)
+        set(_test_categories_yaml "${CMAKE_SOURCE_DIR}/tests/test_categories.yaml")
+        include(${ROCM_SYSTEMS_ROOT}/shared/ctest/TestCategories.cmake OPTIONAL)
+        if(COMMAND apply_ctest_category_labels AND EXISTS "${_test_categories_yaml}")
+            # Apply tier labels to build-time tests
+            apply_ctest_category_labels("${_test_categories_yaml}")
+        endif()
+
+        # Apply tier labels to install-time CTest file
+        include(${CMAKE_SOURCE_DIR}/tests/ApplyInstallTierLabels.cmake OPTIONAL)
+        if(COMMAND apply_install_tier_labels AND EXISTS "${_test_categories_yaml}")
+            apply_install_tier_labels("${INSTALL_CTEST_OUTPUT}" "${_test_categories_yaml}")
+        endif()
+
+        # Install the generated install-time CTest file
+        rocm_install(FILES "${INSTALL_CTEST_OUTPUT}"
+                     COMPONENT tests
+                     DESTINATION ${CMAKE_INSTALL_BINDIR}/rocshmem/tests/unit
+                     RENAME CTestTestfile.cmake)
+
+        # Print summary
+        get_directory_property(all_tests TESTS)
+        list(LENGTH all_tests num_tests)
+        message(STATUS "Registered ${num_tests} unit tests")
+        message(STATUS "Run with: ctest -L unit")
+        message(STATUS "Install-time CTest file: ${INSTALL_CTEST_OUTPUT}")
+    else()
+        message(WARNING "CTest generation files not found in sparse checkout - skipping CTest registration")
+        set(BUILD_CTESTS OFF CACHE BOOL "CTests disabled due to missing files" FORCE)
     endif()
-
-    # Apply tier labels to install-time CTest file
-    include(${CMAKE_SOURCE_DIR}/tests/ApplyInstallTierLabels.cmake)
-    if(COMMAND apply_install_tier_labels AND EXISTS "${_test_categories_yaml}")
-        apply_install_tier_labels("${INSTALL_CTEST_OUTPUT}" "${_test_categories_yaml}")
-    endif()
-
-    # Install the generated install-time CTest file
-    rocm_install(FILES "${INSTALL_CTEST_OUTPUT}"
-                 COMPONENT tests
-                 DESTINATION ${CMAKE_INSTALL_BINDIR}/rocshmem/tests/unit
-                 RENAME CTestTestfile.cmake)
-
-    # Print summary
-    get_directory_property(all_tests TESTS)
-    list(LENGTH all_tests num_tests)
-    message(STATUS "Registered ${num_tests} unit tests")
-    message(STATUS "Run with: ctest -L unit")
-    message(STATUS "Install-time CTest file: ${INSTALL_CTEST_OUTPUT}")
 endif()
 
 # For backward compatibility, the shell script is still available
