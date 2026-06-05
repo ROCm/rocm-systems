@@ -10,8 +10,8 @@ from contextlib import ExitStack, closing
 from pathlib import Path
 from typing import Any, Optional
 
-from interface import csv_data
 from utils.logger import console_debug, console_error, console_warning
+from utils.profile_data import csv_data
 
 COUNTERS_COLLECTION_QUERY = """
 SELECT

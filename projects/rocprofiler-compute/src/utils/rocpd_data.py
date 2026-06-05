@@ -3,7 +3,7 @@
 
 """Compatibility exports for ROCPD data helpers."""
 
-from interface.rocpd_data import (
+from utils.profile_data.rocpd_data import (
     COUNTERS_COLLECTION_QUERY,
     INSERT_QUERY,
     KERNEL_DISPATCH_QUERY,

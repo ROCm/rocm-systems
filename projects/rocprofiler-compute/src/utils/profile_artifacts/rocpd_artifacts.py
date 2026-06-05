@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pandas as pd
 
-from interface.rocpd_data import RocpdAnalysisData, RocpdProfileData
 from utils.profile_artifacts.interfaces import ArtifactReaderOptions, ProfilePassContext
 from utils.profile_artifacts.pmc_frame import load_pmc_frame_from_csv
+from utils.profile_data.rocpd_data import RocpdAnalysisData, RocpdProfileData
 
 
 class RocpdProfileArtifactReader:

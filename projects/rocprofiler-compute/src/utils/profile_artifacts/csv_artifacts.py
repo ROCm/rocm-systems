@@ -8,16 +8,16 @@ from typing import Optional
 
 import pandas as pd
 
-from interface.csv_data import (
+from utils.profile_artifacts.interfaces import ArtifactReaderOptions, ProfilePassContext
+from utils.profile_artifacts.pmc_frame import load_pmc_frame_from_csv
+from utils.profile_data.csv_data import (
     CsvAnalysisData,
     CsvProfileData,
     concat_csv_files,
 )
-from interface.csv_data import (
+from utils.profile_data.csv_data import (
     join_csv_prof_files as join_csv_prof_files_impl,
 )
-from utils.profile_artifacts.interfaces import ArtifactReaderOptions, ProfilePassContext
-from utils.profile_artifacts.pmc_frame import load_pmc_frame_from_csv
 
 
 class CsvProfileArtifactReader:

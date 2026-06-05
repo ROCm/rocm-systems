@@ -1176,15 +1176,15 @@ def test_run_prof_rocpd_skips_pid_without_native_csv(tmp_path, monkeypatch):
         lambda *a, **k: (True, "success"),
     )
     monkeypatch.setattr(
-        "interface.rocpd_data.update_rocpd_pmc_events",
+        "utils.profile_data.rocpd_data.update_rocpd_pmc_events",
         lambda *a, **k: update_calls.append(a),
     )
     monkeypatch.setattr(
-        "interface.rocpd_data.convert_dbs_to_csv",
+        "utils.profile_data.rocpd_data.convert_dbs_to_csv",
         lambda *a, **k: None,
     )
     monkeypatch.setattr(
-        "interface.rocpd_data.console_debug",
+        "utils.profile_data.rocpd_data.console_debug",
         lambda msg, *a, **k: debug_msgs.append(msg),
     )
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)

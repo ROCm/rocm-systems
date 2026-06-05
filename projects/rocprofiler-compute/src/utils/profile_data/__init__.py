@@ -1,4 +1,4 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Data interfaces for profile artifacts."""
+"""Profile-mode-safe data interfaces for artifacts."""
