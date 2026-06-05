@@ -2974,6 +2974,13 @@ bool Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>* paral
 hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
   hipError_t status = hipSuccess;
 
+  // Pin the launching thread to this device's GPU-local NUMA node for the
+  // duration of the launch (opt-in via AMD_GRAPH_CPU_AFFINITY). The mask is
+  // restored on every return path by the guard's destructor, so it is never
+  // held when the application forks/spawns between launches.
+  amd::ScopedGraphCpuAffinity scopedGraphAffinity(
+      Device()->devices()[0]->getPreferredNumaNode());
+
   // Retain under shared lock so hipDeviceGraphMemTrim's refcount check is accurate.
   // The lock blocks only while trim holds the exclusive (write) lock.
   {

@@ -375,6 +375,36 @@ inline void Os::resetPreferredNumaNode() {
   }
 }
 
+//! RAII scope guard: pin the calling thread to a GPU-local NUMA node for the
+//! duration of a hipGraph launch, then restore the original mask on exit.
+//!
+//! Unlike the process-wide AMD_CPU_AFFINITY pin (held from HIP init to
+//! teardown), this restores the caller's mask when the scope ends, so the
+//! runtime's optimization never leaks into child processes the application
+//! forks/spawns between launches. Gated by AMD_GRAPH_CPU_AFFINITY.
+class ScopedGraphCpuAffinity {
+ public:
+  explicit ScopedGraphCpuAffinity(uint32_t node) {
+    // Mutually exclusive with the process-wide pin: if AMD_CPU_AFFINITY already
+    // owns this thread's mask, do nothing -- otherwise our restore would tear
+    // down its TLS affinity state after the first launch.
+    if (AMD_GRAPH_CPU_AFFINITY && !AMD_CPU_AFFINITY) {
+      numa::NumaNode numaNode(node);
+      active_ = numaNode.SchedSetAffinityIfAllowed();
+    }
+  }
+  ~ScopedGraphCpuAffinity() {
+    if (active_) {
+      numa::resetThreadAffinity();
+    }
+  }
+  ScopedGraphCpuAffinity(const ScopedGraphCpuAffinity&) = delete;
+  ScopedGraphCpuAffinity& operator=(const ScopedGraphCpuAffinity&) = delete;
+
+ private:
+  bool active_ = false;  //!< True only if this scope actually applied a pin.
+};
+
 }  // namespace amd
 
 #endif /*OS_HPP_*/
