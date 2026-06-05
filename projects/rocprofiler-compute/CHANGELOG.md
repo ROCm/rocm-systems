@@ -30,8 +30,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added backward compatibility for live attach mode to work with older ROCm 7.x.x releases.
 
-* Added opt-in sanitizer builds via CMake `-DENABLE_SANITIZER=ASAN|HOST_ASAN|TSAN`.
-
 ### Changed
 
 * Moved `--gui` and `--tui` analyze options to experimental status. These features now require the `--experimental` flag to be enabled (e.g., `rocprof-compute analyze --experimental --gui`).
