@@ -105,6 +105,8 @@ template< class... >
 using void_t = void;
 
 #if defined(_WIN32)
+#pragma push_macro("min")
+#pragma push_macro("max")
 #ifdef min
 #undef min
 #endif
@@ -190,6 +192,11 @@ template <> struct numeric_limits<char> {
   }
   static constexpr char lowest() noexcept { return min(); }
 };
+
+#if defined(_WIN32)
+#pragma pop_macro("max")
+#pragma pop_macro("min")
+#endif
 
 #undef __HIP_INTERNAL_NUMERIC_LIMITS_SIGNED_INTEGER
 #undef __HIP_INTERNAL_NUMERIC_LIMITS_UNSIGNED_INTEGER
