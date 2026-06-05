@@ -132,12 +132,11 @@ including:
 
 #### Pros/Cons of out-of-process
 
+Pros:
 + Space efficiency: while each consumer does independently populate timestamp data to a shared TSDB, the fact that
 consumers all consume data from a common set of lttng streams mean that the TSDB can perform deduplication (or simply
 overwrite) if multiple consumers store the same data. TSDBs also have built-in mechanisms for compression, downsampling,
 and other mechanisms that can drastically reduce the storage needed for timestamp data.
-
-Other pros of this approach include:
 + Time efficiency: A mature TSDB will have very fast insertion and query mechanisms for time-series data.
 + Producer/consumer can evolve independently
 
