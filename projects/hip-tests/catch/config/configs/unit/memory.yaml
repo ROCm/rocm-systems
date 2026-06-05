@@ -1723,6 +1723,9 @@ memory:
   Unit_hipPointerGetAttribute_MemoryTypes:
     <<: *level_2
     tags: [query, image]
+  Unit_hipPointerGetAttribute_DeferredManagedVar:
+    <<: *level_2
+    tags: [query]
   Unit_hipPointerGetAttribute_KernelUpdation:
     <<: *level_2
     tags: [query]

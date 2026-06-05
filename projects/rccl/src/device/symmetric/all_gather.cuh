@@ -240,7 +240,7 @@ static __device__ void allgather_LL_body(
     int pack = t%nIterPacks;
     #if 1
       // NOTE: Unrolling speedup on eos nranks=8 size=64K: 5.7us vs 6.7us
-      constexpr int Unroll = 1;
+      constexpr int Unroll = 4;
       #pragma unroll 1
       for (int i = t; i < (nRanks*nIterPacks & -(Unroll*tn)); i += Unroll*tn) {
         Pack got[Unroll];
