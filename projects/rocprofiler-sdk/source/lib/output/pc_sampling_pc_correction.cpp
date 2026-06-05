@@ -46,6 +46,7 @@
 #include <algorithm>
 #include <array>
 #include <map>
+#include <mutex>
 #include <utility>
 
 namespace rocprofiler
@@ -251,19 +252,90 @@ bool
 PCCorrectionManager::should_correct(const rocprofiler_pc_sampling_record_stochastic_v0_t& s,
                                     std::string_view decoded_inst) const
 {
-    // TODO: hot-path gate (env-var flag, gfx1250 flag, PC-on-internal check,
-    // impossible-signal check).
-    (void) s;
-    (void) decoded_inst;
+    // Single enable gate: folds the env-var toggle and "a gfx1250 agent is being
+    // sampled" into one relaxed atomic read (set during configuration). Cheapest
+    // check, so it runs first.
+    if(!enabled()) return false;
+
+    // Condition 1: the reported PC lands on an internal or s_icache_inv. Uses the
+    // instruction string the tool already decoded for this sample -- no extra
+    // decoder call and no classification-map lookup on this path.
+    if(classify(decoded_inst) == Kind::EXT) return false;
+
+    // Condition 2: the snapshot carries a signal that is impossible for an
+    // internal instruction, meaning it leaked from an adjacent external.
+    //  - wave_issued: internals are never issued.
+    //  - reason_not_issued == ARBITER_NOT_WIN: internals are never arbitrated, so
+    //    they cannot lose arbitration. Any other reason (e.g. an
+    //    internal-instruction reason) is consistent with a healthy internal --
+    //    leave it alone.
+    if(s.wave_issued) return true;
+    if(s.snapshot.reason_not_issued ==
+       ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_ARBITER_NOT_WIN)
+        return true;
+
     return false;
 }
 
 CorrectionResult
 PCCorrectionManager::correct(rocprofiler_tool_pc_sampling_stochastic_record_t& s) const
 {
-    // TODO: lookup + cascade; mutate s in place and return Keep, or return Drop
-    // for boundary / ambiguous samples.
-    (void) s;
+    const uint64_t co_id  = s.pc_sample_record.pc.code_object_id;
+    const uint64_t offset = s.pc_sample_record.pc.code_object_offset;
+
+    auto entry = lookup(co_id, offset);
+    if(!entry)
+    {
+        // should_correct already established this PC is on an internal, so a
+        // missing classification means the code-object bookkeeping raced or a
+        // future change decoupled the two checks. Keeping the sample untouched
+        // is safer than dropping one we don't understand. Warn once per process
+        // (rate-limited) so a broken invariant is visible without flooding logs.
+        static std::once_flag warn_once;
+        std::call_once(warn_once, [] {
+            ROCP_WARNING << "PC correction: classification missing for a sampled code object; "
+                            "sample(s) passed through unchanged";
+        });
+        return CorrectionResult::Keep;
+    }
+
+    const InstructionStreamWindow& w = *entry->window;
+
+    // Boundary samples: a window with no opening external (leading internals) or
+    // no closing external (trailing internals) cannot be corrected -- drop.
+    // Presence is tracked by the has_ext1/has_ext2 flags, not a zero-offset
+    // sentinel, because offset 0 is a valid load-relative offset.
+    if(!w.has_ext1 || !w.has_ext2) return CorrectionResult::Drop;
+
+    uint64_t corrected = 0;
+    if(w.M == 0)
+    {
+        // s_icache_inv-only chain: correct backward to the opening external.
+        corrected = w.ext1_offset;
+    }
+    else if(w.N == 0)
+    {
+        // Regular-internal-only chain: correct forward to the closing external.
+        corrected = w.ext2_offset;
+    }
+    else
+    {
+        // Mixed chain. Below the trailing-M boundary the reported PC is only
+        // reachable by the s_icache_inv mechanism -> correct backward to EXT1.
+        // At or above the boundary both mechanisms can produce it -> ambiguous,
+        // so drop.
+        const uint64_t trailing_m_boundary = w.ext2_offset - w.regular_internal_total_bytes;
+        if(offset < trailing_m_boundary)
+            corrected = w.ext1_offset;
+        else
+            return CorrectionResult::Drop;
+    }
+
+    // Stash originals for optional debug retention (not serialized in v1), then
+    // mutate in place. The caller re-resolves inst_index from the corrected PC.
+    s.original_pc_offset                     = offset;
+    s.original_inst_index                    = s.inst_index;
+    s.pc_sample_record.pc.code_object_offset = corrected;
     return CorrectionResult::Keep;
 }
 

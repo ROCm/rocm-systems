@@ -86,6 +86,14 @@ struct rocprofiler_tool_pc_sampling_stochastic_record_t
     rocprofiler_pc_sampling_record_stochastic_v0_t pc_sample_record;
     int64_t                                        inst_index;
 
+    // PC correction debug retention. When PC correction mutates a sample, it
+    // writes the corrected value into pc_sample_record.pc.code_object_offset
+    // (and the apply hook re-resolves inst_index), stashing the originals here
+    // beforehand. NOT serialized today -- defaults of 0 / -1 mean "no
+    // correction applied". Kept for optional opt-in debug exposure later.
+    uint64_t original_pc_offset  = 0;
+    int64_t  original_inst_index = -1;
+
     rocprofiler_tool_pc_sampling_stochastic_record_t(
         rocprofiler_pc_sampling_record_stochastic_v0_t record,
         int64_t                                        index)
@@ -96,6 +104,11 @@ struct rocprofiler_tool_pc_sampling_stochastic_record_t
     template <typename ArchiveT>
     void save(ArchiveT& ar) const
     {
+        // original schema unchanged: the corrected PC is already in
+        // pc_sample_record.pc.code_object_offset and the corrected inst_index in
+        // inst_index, so downstream writers see corrected values transparently.
+        // original_pc_offset / original_inst_index are intentionally not emitted today
+        // (kept for later debug exposure).
         ar(cereal::make_nvp("record", pc_sample_record));
         ar(cereal::make_nvp("inst_index", inst_index));
     }
@@ -105,6 +118,7 @@ struct rocprofiler_tool_pc_sampling_stats
 {
     uint64_t valid_samples   = 0;
     uint64_t invalid_samples = 0;
+    uint64_t dropped_samples = 0;  // suppressed by PC correction (CorrectionResult::Drop)
 };
 
 }  // namespace tool

@@ -326,8 +326,18 @@ public:
     CorrectionResult correct(rocprofiler_tool_pc_sampling_stochastic_record_t& s) const;
 
 private:
-    common::Synchronized<code_obj_decoder_t, true>&       decoder_;
-    std::atomic<bool>                                     enabled_{false};
+    common::Synchronized<code_obj_decoder_t, true>& decoder_;
+
+    // Atomic because it is written on one thread and read on another: set once by
+    // the configuration thread via set_enabled(), then read on the sample-callback
+    // thread(s) by should_correct() for every sample. A plain bool with a
+    // concurrent cross-thread write+read is a data race (undefined behavior under
+    // the C++ memory model, and flagged by ThreadSanitizer), even though the write
+    // happens-before sampling in wall-clock terms. memory_order_relaxed is
+    // sufficient: the flag carries no other state, so there is nothing to
+    // synchronize-with; relaxed compiles to a plain load on x86/ARM.
+    std::atomic<bool> enabled_{false};
+
     mutable common::Synchronized<ClassificationMap, true> map_;
 };
 
