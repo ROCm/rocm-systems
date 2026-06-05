@@ -104,7 +104,7 @@ The key steps:
 - A standalone `ROCm-timesync` system service is deployed. It runs `rocm-timesync-d_m` which query KFD for
   (`CLOCK_REALTIME`, GPU `m`) crosststamps. We envision one thread per GPU on the system 
 - These threads publish data streams througgh a tracing infrastructure such as [lttng](https://lttng.org/).
-- On the ROCR side, `ROCR-timesync-r_m` consumes the data streams it needs (e.g., the GPUs it's process is using),
+- On the ROCR side, `ROCR-timesync-r_m` consumes the data streams it needs (e.g., the GPUs its process is using),
   and stores this data in a shared TSDB.
 - ROCR's implementation of `hsa_amd_profiling_tick_to_system_domain()` invokes a translation function provided by `ROCm
   timesync` -- i.e., `translate()` - which queries the TSDB and applies the offset.
