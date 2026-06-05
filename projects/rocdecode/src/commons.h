@@ -108,7 +108,7 @@ public:
         }
     }
     ~RocDecFuncScopeLog() {
-        if (logger_.GetLogLevel() >= kRocDecLogInfo) {
+        if (start_time_ != 0 && logger_.GetLogLevel() >= kRocDecLogInfo) {
             uint64_t end_time = GET_TIME_NS() / 1000ULL;
             OutputMsg("[" + ROCDEC_TOSTR(kRocDecLogInfo) + ", Info] " + ROCDEC_STR(filename_) + ":" + ROCDEC_TOSTR(line_) + ": " +
                       ROCDEC_TOSTR(end_time) + ROCDEC_STR(" us: ") + ROCDEC_STR("[pid:") + ROCDEC_TOSTR(getpid()) + ROCDEC_STR(" tid:") +
@@ -180,7 +180,8 @@ static inline std::string RocDecFmtPtr(T* p) {
 // Pass a string built with RocDecFmtPtr() / ROCDEC_TOSTR() for each argument, e.g.:
 //   FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(handle) + ", " + RocDecFmtPtr(pic_params))
 #define FunctionEntryLogWithArgs(logger, args) \
-    RocDecFuncScopeLog _rocdec_func_scope_log_(logger, FILENAME_ONLY, __LINE__, __func__, (args))
+    RocDecFuncScopeLog _rocdec_func_scope_log_(logger, FILENAME_ONLY, __LINE__, __func__, \
+        ((logger).GetLogLevel() >= kRocDecLogInfo) ? std::string(args) : std::string())
 
 // FunctionExitLog is a no-op: exit is logged automatically when the
 // RocDecFuncScopeLog RAII object created by FunctionEntryLog goes out of scope.
