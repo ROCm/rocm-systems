@@ -148,9 +148,9 @@ if (ENABLE_ROCSHMEM AND ROCSHMEM_LIBRARY)
     find_library(_DRM drm HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
     find_library(_DRM_AMDGPU drm_amdgpu HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
     target_link_libraries(alltoall_perf PRIVATE ${ROCSHMEM_LIBRARY} ibverbs hsa-runtime64 numa ${_DRM} ${_DRM_AMDGPU})
-    # -rdynamic exports symbols so librccl.so can resolve rocshmem host functions
-    # from this executable (librccl.so is built with ENABLE_ROCSHMEM_GIN which
-    # leaves rocshmem host symbols unresolved)
+    # -rdynamic exports symbols so librccl.so can resolve rocshmem/anvil host
+    # functions from this executable (librccl GIN-only build does not link
+    # librocshmem.a; see projects/rccl/src/CMakeLists.txt ENABLE_ROCSHMEM_GIN).
     target_link_options(alltoall_perf PRIVATE -fgpu-rdc --hip-link ${_rocshmem_offload_arch_flags} -rdynamic)
 endif()
 add_rccl_test(alltoallv)

@@ -19,8 +19,7 @@ DOCKER_IMAGE="gin-anvil:latest"
 # Derived sizes / shared docker+mpirun settings (expand on host, not inside container).
 MAX_BYTES=$((${NP} * ${MSG_SIZE}))
 # No -it: script is often run over non-interactive SSH.
-## DOCKER_GPU="--rm --shm-size 64G --network host --device /dev/dri --device /dev/kfd --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged"
-DOCKER_GPU="--rm --shm-size 64G --network host --device /dev/dri --device /dev/kfd --ipc host --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged"
+DOCKER_GPU="--rm --shm-size 64G --network host --device /dev/dri --device /dev/kfd --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged"
 RCCL_LD_PATH="/workspace/rocshmem/lib:/workspace/rccl/lib:/opt/ucx/lib:/opt/ompi/lib:/opt/rocm/lib:/opt/rocm/core/lib/rocm_sysdeps/lib"
 MPIRUN_BASE="-n ${NP} --allow-run-as-root -mca pml ob1 -mca btl ^openib"
 
@@ -103,18 +102,18 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R 2 -D 1 -A 1
 fi
 
-if [ 1 -eq 1 ]; then
+if [ 0 -eq 1 ]; then
 #####
 # RCCL AlltoAll: GIN_ROCSHMEM (NCCL_GIN_TYPE=4) + rocSHMEM SDMA path
 echo "=== RCCL AlltoAll: GIN_ROCSHMEM (NCCL_GIN_TYPE=4) + rocSHMEM SDMA np=${NP} max_bytes=${MAX_BYTES} ==="
 docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   mpirun ${MPIRUN_BASE} \
-  -x RCCL_ROCSHMEM_ENABLE=0 \
   -x ROCSHMEM_BACKEND=ipc \
   -x ROCSHMEM_HEAP_SIZE=1073741824 \
   -x ROCSHMEM_SDMA_ENABLED=1 \
-  -x NCCL_GIN_ENABLE=1 \
   -x NCCL_GIN_TYPE=4 \
+  -x NCCL_DEBUG=INFO \
+  -x NCCL_DEBUG_SUBSYS=INIT \
   -x NCCL_CUMEM_ENABLE=1 \
   -x RCCL_ENABLE_INTRANET=1 \
   -x NCCL_DMABUF_ENABLE=1 \
@@ -131,12 +130,9 @@ if [ 1 -eq 1 ]; then
 echo "=== RCCL AlltoAll: GIN_ANVIL (NCCL_GIN_TYPE=5) np=${NP} max_bytes=${MAX_BYTES} ==="
 docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   mpirun ${MPIRUN_BASE} \
-  -x RCCL_TEST_SKIP_ROCSHMEM_PREINIT=1 \
-  -x RCCL_ROCSHMEM_ENABLE=0 \
-  -x NCCL_GIN_ENABLE=1 \
   -x NCCL_GIN_TYPE=5 \
-  -x NCCL_DEBUG=VERSION \
-  -x NCCL_DEBUG_SUBSYS=INIT,NET \
+  -x NCCL_DEBUG=INFO \
+  -x NCCL_DEBUG_SUBSYS=INIT \
   -x NCCL_CUMEM_ENABLE=1 \
   -x RCCL_ENABLE_INTRANET=1 \
   -x NCCL_DMABUF_ENABLE=1 \

@@ -1130,12 +1130,10 @@ if(ENABLE_ROCSHMEM)
   list(REMOVE_DUPLICATES _rocshmem_offload_arch_flags)
   target_link_options(rccl PRIVATE -fgpu-rdc --hip-link ${_rocshmem_offload_arch_flags})
 elseif(ENABLE_ROCSHMEM_GIN)
-  # GIN rocshmem: device rocshmem symbols resolved from the executable; host
-  # may still need librocshmem (e.g. GIN_ANVIL uses Anvil SDMA in librocshmem).
-  if(ROCSHMEM_LIBRARY)
-    target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
-    target_link_libraries(rccl PRIVATE hsakmt::hsakmt)
-  endif()
+  # GIN-only build: do not link librocshmem.a into librccl.so. The test/app binary
+  # links librocshmem with -rdynamic; host rocshmem/anvil symbols resolve there.
+  # Linking librocshmem here duplicates the runtime and breaks GIN type-4 device
+  # kernels (nil GPU fault) and exit-time double-free in rccl-tests.
   target_link_options(rccl PRIVATE "LINKER:--allow-shlib-undefined")
 endif()
 
