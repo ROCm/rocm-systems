@@ -714,6 +714,31 @@ perfetto_processor_t::get_or_create_track(CategoryT, FuncT&& desc_gen, Args&&...
     return _track;
 }
 
+::perfetto::ThreadTrack
+perfetto_processor_t::get_thread_track(std::uint64_t thread_id)
+{
+    if(auto it = m_thread_track_cache.find(thread_id); it != m_thread_track_cache.end())
+        return it->second;
+
+    auto _track = ::perfetto::ThreadTrack::ForThread(
+        static_cast<::perfetto::base::PlatformThreadId>(thread_id));
+
+    // - Worker threads (sequent_value > 0) get a "Thread N" descriptor.
+    // - The main thread (sequent_value == 0) is intentionally left with its
+    //   default descriptor.
+    const auto& _info = thread_info::get(static_cast<std::int64_t>(thread_id), SystemTID);
+    if(_info && _info->index_data && _info->index_data->sequent_value > 0)
+    {
+        auto _desc = _track.Serialize();
+        _desc.mutable_thread()->set_thread_name(
+            fmt::format("Thread {}", _info->index_data->sequent_value));
+        ::perfetto::TrackEvent::SetTrackDescriptor(_track, _desc);
+    }
+
+    m_thread_track_cache.emplace(thread_id, _track);
+    return _track;
+}
+
 void
 perfetto_processor_t::handle(const kernel_dispatch_sample& _kds)
 {
@@ -990,21 +1015,26 @@ perfetto_processor_t::handle(const region_sample& _rs)
         annotate_perfetto(ctx, annotations);
     };
 
+    // Emit on the originating thread's track so multi-threaded runs keep one track
+    // per thread (as the live path does implicitly via the calling thread), instead
+    // of collapsing every thread onto the single replay thread.
+    auto _thread_track = get_thread_track(_rs.thread_id);
+
     auto emit_trace = [&](auto category_tag) {
         using CategoryT = decltype(category_tag);
         if(_corr_id != 0)
         {
-            tracing::push_perfetto_ts(CategoryT{}, _name.c_str(), _beg_ts,
-                                      ::perfetto::Flow::ProcessScoped(_corr_id),
-                                      add_annotations);
+            tracing::push_perfetto_track(
+                CategoryT{}, _name.c_str(), _thread_track, _beg_ts,
+                ::perfetto::Flow::ProcessScoped(_corr_id), add_annotations);
         }
         else
         {
-            tracing::push_perfetto_ts(CategoryT{}, _name.c_str(), _beg_ts,
-                                      add_annotations);
+            tracing::push_perfetto_track(CategoryT{}, _name.c_str(), _thread_track,
+                                         _beg_ts, add_annotations);
         }
 
-        tracing::pop_perfetto_ts(CategoryT{}, _name.c_str(), _end_ts);
+        tracing::pop_perfetto_track(CategoryT{}, _name.c_str(), _thread_track, _end_ts);
     };
 
     auto try_category = [&](auto category_tag) {
@@ -1024,7 +1054,7 @@ perfetto_processor_t::handle(const region_sample& _rs)
          try_category(category::rocm_hip_api{}) ||
          try_category(category::rocm_hsa_api{}) ||
          try_category(category::rocm_marker_api{}) ||
-         try_category(category::rocm_rccl{}) ||
+         try_category(category::rocm_ompt_api{}) || try_category(category::rocm_rccl{}) ||
          try_category(category::rocm_rocdecode_api{}) ||
          try_category(category::rocm_rocjpeg_api{}) || try_category(category::ucx{}) ||
          try_category(category::shmem{}) || try_category(category::vaapi{}));

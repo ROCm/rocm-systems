@@ -1,14 +1,20 @@
 ---
 errorHandling:
-  Unit_hipGetErrorName_Positive_Basic: *level_2
+  Unit_hipGetErrorName_Positive_Basic:
+    <<: *level_2
+    tags: [smoke]
   Unit_hipGetErrorName_Negative_Parameters: *level_2
-  Unit_hipGetErrorString_Positive_Basic: *level_2
+  Unit_hipGetErrorString_Positive_Basic:
+    <<: *level_2
+    tags: [smoke]
   Unit_hipGetErrorString_Negative_Parameters: *level_2
   Unit_hipDrvGetErrorName_Positive_Basic: *level_2
   Unit_hipDrvGetErrorName_Negative_Parameters: *level_2
   Unit_hipDrvGetErrorString_Positive_Basic: *level_2
   Unit_hipDrvGetErrorString_Negative_Parameters: *level_2
-  Unit_hipGetLastError_Positive_Basic: *level_2
+  Unit_hipGetLastError_Positive_Basic:
+    <<: *level_2
+    tags: [smoke]
   Unit_hipGetLastError_Positive_Threaded: *level_2
   Unit_hipGetLastError_with_hipMemcpyPeerAsync:
     <<: *level_2
@@ -40,7 +46,9 @@ errorHandling:
   Unit_hipGetLastError_With_Thread: *level_2
   Unit_hipGetLastError_MultiProcess: *level_2
   Unit_hipGetLastError_Kernel_Invalid_Config: *level_2
-  Unit_hipPeekAtLastError_Positive_Basic: *level_2
+  Unit_hipPeekAtLastError_Positive_Basic:
+    <<: *level_2
+    tags: [smoke]
   Unit_hipPeekAtLastError_Positive_Threaded: *level_2
   Unit_hipPeekAtLastError_Positive: *level_2
   Unit_hipPeekAtLastError_Chk_Updated_Status: *level_2

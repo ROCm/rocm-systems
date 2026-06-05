@@ -904,6 +904,8 @@ rocDecStatus VaContext::CheckDecCapForCodecType(RocdecDecodeCaps *dec_cap) {
                         va_contexts_[va_ctx_id].output_format_mask |= 1 << rocDecVideoSurfaceFormat_NV12;
                         break;
                     case VA_FOURCC_P016:
+                    case VA_FOURCC_P012:
+                    case VA_FOURCC_P010:
                         va_contexts_[va_ctx_id].output_format_mask |= 1 << rocDecVideoSurfaceFormat_P016;
                         break;
                     default:
@@ -1123,11 +1125,19 @@ void VaContext::GetDrmNodeOffset(std::string device_name, uint8_t device_id, std
             // Instead, use the device name to identify MI300A etc.
             std::string mi300a = "MI300A";
             size_t found_mi300a = device_name.find(mi300a);
+            std::string mi308 = "MI308";
+            size_t found_mi308 = device_name.find(mi308);
             if (found_mi300a != std::string::npos) {
                 if (device_id < visible_devices.size()) {
                     offset = (visible_devices[device_id] % 6);
                 } else {
                     offset = (device_id % 6);
+                }
+            } else if (found_mi308 != std::string::npos) {
+                if (device_id < visible_devices.size()) {
+                    offset = (visible_devices[device_id] % 4);
+                } else {
+                    offset = (device_id % 4);
                 }
             } else {
                 if (device_id < visible_devices.size()) {
