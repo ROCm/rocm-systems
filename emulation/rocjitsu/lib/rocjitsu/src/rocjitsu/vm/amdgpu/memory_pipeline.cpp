@@ -104,6 +104,12 @@ void vector_complete(VectorMemState &d, ComputeUnitCore &cu) {
       uint32_t copy_size =
           is_atomic ? std::min(d.elem_size - i * 4, 4u) : std::min(d.elem_size, 4u);
       std::memcpy(&val, &d.response_data[data_offset], copy_size);
+      if (d.sign_extend && i == 0 && d.elem_size < 4) {
+        if (d.elem_size == 1)
+          val = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int8_t>(val)));
+        else if (d.elem_size == 2)
+          val = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(val)));
+      }
       if (copy_size <= 2 && (d.d16_hi || d.d16_lo)) {
         if (cu.sram_ecc()) {
           if (d.d16_hi)
@@ -125,12 +131,12 @@ void vector_complete(VectorMemState &d, ComputeUnitCore &cu) {
 
 } // namespace
 
-void ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront & /*wf*/) {
+void ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<ScalarMemState>();
   if (d.is_load) {
-    l1_->load(d.addr, d.num_dwords, d.response_data);
+    l1_->load(d.addr, d.num_dwords, d.response_data, wf.process_id());
   } else {
-    l1_->store(d.addr, d.num_dwords, d.store_data);
+    l1_->store(d.addr, d.num_dwords, d.store_data, wf.process_id());
   }
 }
 
@@ -215,7 +221,7 @@ template <typename F> F apply_fp_atomic(AtomicOp op, F old_val, F src_val) {
 /// Reads old value from L2, applies the atomic operation, writes new value
 /// back. Invalidates the L1 line to prevent stale reads. Old values are
 /// stored in response_data for GLC return.
-void execute_atomic_rmw(VectorMemState &d, L2Cache *l2, L1VectorCache *l1) {
+void execute_atomic_rmw(VectorMemState &d, L2Cache *l2, L1VectorCache *l1, uint32_t vmid) {
   const uint32_t esz = d.elem_size;
   d.response_data.resize(d.wf_size * esz);
 
@@ -230,49 +236,52 @@ void execute_atomic_rmw(VectorMemState &d, L2Cache *l2, L1VectorCache *l1) {
                   d.atomic_op == AtomicOp::FMAX);
 
     // Perform the atomic RMW under L2's atomic lock.
-    l2->atomic_rmw(ea, esz, [&](uint8_t *line_data, uint32_t offset) {
-      if (esz == 4) {
-        uint32_t old_val;
-        std::memcpy(&old_val, line_data + offset, 4);
+    l2->atomic_rmw(
+        ea, esz,
+        [&](uint8_t *line_data, uint32_t offset) {
+          if (esz == 4) {
+            uint32_t old_val;
+            std::memcpy(&old_val, line_data + offset, 4);
 
-        uint32_t new_val;
-        if (is_fp) {
-          float old_f = std::bit_cast<float>(old_val);
-          float src_f;
-          std::memcpy(&src_f, &d.store_data[lane * src_stride], 4);
-          new_val = std::bit_cast<uint32_t>(apply_fp_atomic(d.atomic_op, old_f, src_f));
-        } else {
-          uint32_t src_val = 0, cmp_val = 0;
-          std::memcpy(&src_val, &d.store_data[lane * src_stride], 4);
-          if (is_cmpswap)
-            std::memcpy(&cmp_val, &d.store_data[lane * src_stride + 4], 4);
-          new_val = apply_int_atomic(d.atomic_op, old_val, src_val, cmp_val);
-        }
+            uint32_t new_val;
+            if (is_fp) {
+              float old_f = std::bit_cast<float>(old_val);
+              float src_f;
+              std::memcpy(&src_f, &d.store_data[lane * src_stride], 4);
+              new_val = std::bit_cast<uint32_t>(apply_fp_atomic(d.atomic_op, old_f, src_f));
+            } else {
+              uint32_t src_val = 0, cmp_val = 0;
+              std::memcpy(&src_val, &d.store_data[lane * src_stride], 4);
+              if (is_cmpswap)
+                std::memcpy(&cmp_val, &d.store_data[lane * src_stride + 4], 4);
+              new_val = apply_int_atomic(d.atomic_op, old_val, src_val, cmp_val);
+            }
 
-        std::memcpy(line_data + offset, &new_val, 4);
-        std::memcpy(&d.response_data[lane * 4], &old_val, 4);
-      } else if (esz == 8) {
-        uint64_t old_val;
-        std::memcpy(&old_val, line_data + offset, 8);
+            std::memcpy(line_data + offset, &new_val, 4);
+            std::memcpy(&d.response_data[lane * 4], &old_val, 4);
+          } else if (esz == 8) {
+            uint64_t old_val;
+            std::memcpy(&old_val, line_data + offset, 8);
 
-        uint64_t new_val;
-        if (is_fp) {
-          double old_f = std::bit_cast<double>(old_val);
-          double src_f;
-          std::memcpy(&src_f, &d.store_data[lane * src_stride], 8);
-          new_val = std::bit_cast<uint64_t>(apply_fp_atomic(d.atomic_op, old_f, src_f));
-        } else {
-          uint64_t src_val = 0, cmp_val = 0;
-          std::memcpy(&src_val, &d.store_data[lane * src_stride], 8);
-          if (is_cmpswap)
-            std::memcpy(&cmp_val, &d.store_data[lane * src_stride + 8], 8);
-          new_val = apply_int_atomic(d.atomic_op, old_val, src_val, cmp_val);
-        }
+            uint64_t new_val;
+            if (is_fp) {
+              double old_f = std::bit_cast<double>(old_val);
+              double src_f;
+              std::memcpy(&src_f, &d.store_data[lane * src_stride], 8);
+              new_val = std::bit_cast<uint64_t>(apply_fp_atomic(d.atomic_op, old_f, src_f));
+            } else {
+              uint64_t src_val = 0, cmp_val = 0;
+              std::memcpy(&src_val, &d.store_data[lane * src_stride], 8);
+              if (is_cmpswap)
+                std::memcpy(&cmp_val, &d.store_data[lane * src_stride + 8], 8);
+              new_val = apply_int_atomic(d.atomic_op, old_val, src_val, cmp_val);
+            }
 
-        std::memcpy(line_data + offset, &new_val, 8);
-        std::memcpy(&d.response_data[lane * 8], &old_val, 8);
-      }
-    });
+            std::memcpy(line_data + offset, &new_val, 8);
+            std::memcpy(&d.response_data[lane * 8], &old_val, 8);
+          }
+        },
+        vmid);
 
     // Invalidate stale L1 line.
     l1->invalidate(ea);
@@ -344,14 +353,14 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   }
 
   if (d.atomic_op != AtomicOp::NONE) {
-    execute_atomic_rmw(d, l2_, l1_);
+    execute_atomic_rmw(d, l2_, l1_, wf.process_id());
     return;
   }
 
   if (d.is_load) {
     d.response_data.resize(d.wf_size * d.num_elems * d.elem_size);
     l1_->load(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems, d.response_data.data(),
-              d.mtype, d.non_temporal);
+              d.mtype, d.non_temporal, wf.process_id());
   } else {
     // Trace: dump per-lane addresses, hex data, and float values for stores.
     util::Logger::vm([&](auto &os) {
@@ -378,7 +387,7 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
       }
     });
     l1_->store(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems, d.store_data.data(),
-               d.mtype, d.non_temporal);
+               d.mtype, d.non_temporal, wf.process_id());
   }
 }
 

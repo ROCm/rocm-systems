@@ -533,19 +533,10 @@ void GraphExec::BuildSyncPlan() {
           {completion_barrier, nullptr, segment.id,
            amd::Device::HwEventPatch::kCompletionSignal});
     } else if (!lastBatch.dispatchPackets.empty()) {
-      // All nodes are capturable — append a real completion barrier packet so that
-      // ApplyHwEventPatches patches the barrier's completion signal, not the last
-      // kernel dispatch's. Patching the last kernel dispatch directly causes
-      // dispatchAqlPacketBatchFlat to see a pre-patched non-zero signal and skip
-      // profiling setup (reserved2 / isPacketDispatch_) for that kernel.
-      uint8_t* completion_barrier = device->CreateBarrierPacket();
-      sync_plan_.barrier_packets.push_back(completion_barrier);
-
-      lastBatch.dispatchPackets.push_back(completion_barrier);
-      lastBatch.dispatchKernelNames.push_back(kBarrierKernelNamePtr);
-
+      // Safe to patch the last kernel dispatch directly
+      uint8_t* last_pkt = lastBatch.dispatchPackets.back();
       sync_plan_.patch_list.push_back(
-          {completion_barrier, nullptr, segment.id,
+          {last_pkt, nullptr, segment.id,
            amd::Device::HwEventPatch::kCompletionSignal});
     }
 
@@ -1929,8 +1920,14 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
 
   size_t batchIndex = 0;
 
-  // Lambda to dispatch the current batch at batchIndex
-  auto dispatchCurrentBatch = [&]() -> hipError_t {
+  // Lambda to dispatch the current batch at batchIndex.
+  // attach_signal=true asks the dispatcher to give the last packet a real
+  // completion signal (via Barriers().ActiveSignal) so a downstream
+  // uncaptured node — typically an SDMA memcpy on a different engine — can
+  // wait on it directly through HwQueueTracker::WaitingSignal, avoiding
+  // the otherwise-required pre/post Marker barriers around the uncaptured
+  // node.
+  auto dispatchCurrentBatch = [&](bool attach_signal = false) -> hipError_t {
     if (!segBatch || batchIndex >= segBatch->packet_batches.size()) {
       return hipSuccess;
     }
@@ -1959,7 +1956,7 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
 
     if (!flatData->empty()) {
       bool batchStatus = stream->vdev()->dispatchAqlPacketBatchFlat(
-          *flatData, *flatHdrs, accumulate, false, kernelNamesToDispatch, true);
+          *flatData, *flatHdrs, accumulate, attach_signal, kernelNamesToDispatch, true);
       if (!batchStatus) {
         return hipErrorUnknown;
       }
@@ -2029,8 +2026,25 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
         }
         // Skip all consecutive captured nodes that belong to this batch
         i += packetBatch.nodeRanges.size() - 1;
-
-        status = dispatchCurrentBatch();
+        // Check if the next uncaptured node is an SDMA memcpy that needs handoff.
+        // Only set sdma_follows if that's the case and the node will use SDMA.
+        // Otherwise, staging-blit or other paths do not need the signal.
+        bool sdma_follows = false;
+        size_t next = i + 1;
+        if (next < segment.nodes.size() &&
+            next < segBatch->node_capture_status.size() &&
+            !segBatch->node_capture_status[next] &&
+            segment.nodes[next]->GetType() == hipGraphNodeTypeMemcpy) {
+          auto* memcpyNode = dynamic_cast<GraphMemcpyNode*>(segment.nodes[next]);
+          // Memcpy node types that don't derive from GraphMemcpyNode
+          // (e.g. GraphDrvMemcpyNode) fall back to the conservative
+          // "assume SDMA" behavior.
+          sdma_follows = (memcpyNode == nullptr) || !memcpyNode->WillBypassSdmaEngine();
+        }
+        if (sdma_follows && !packetBatch.dispatchPackets.empty()) {
+          stream->vdev()->addSystemScope();
+        }
+        status = dispatchCurrentBatch(sdma_follows);
         if (status != hipSuccess) return status;
       }
     } else {

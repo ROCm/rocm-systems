@@ -137,9 +137,10 @@ register_preset_and_domain_arguments(argument_parser& parser, std::string_view t
         .add_argument(
             { "--rocm" },
             "Enable ROCm API tracing. Optional value specifies domains: "
-            "--rocm (all defaults) or --rocm=hip,kernel,memory. "
+            "--rocm (all defaults) or --rocm=hip,kernel,memory,kfd_events. "
             "Shortcuts: hip->hip_runtime_api, kernel->kernel_dispatch, "
-            "memory->memory_copy, hsa->hsa_api, marker->marker_api, rccl->rccl_api")
+            "memory->memory_copy, hsa->hsa_api, marker->marker_api, rccl->rccl_api. "
+            "Opt-in domains (not in defaults): kfd_events (requires ROCm 7.13+).")
         .min_count(0)
         .max_count(1)
         .dtype("string")

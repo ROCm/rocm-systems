@@ -3,7 +3,13 @@
 
 #include "rocjitsu/config/config_loader.h"
 
+#include "rocjitsu/vm/virtual_machine.h"
+
 #include "rocjitsu/vm/amdgpu/command_processor.h"
+
+rocjitsu::SoC *rocjitsu::config::LoadedConfig::soc() {
+  return dynamic_cast<SoC *>(build_result.root.get());
+}
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/hbm_controller.h"
@@ -61,8 +67,7 @@ simdojo::ExecMode parse_exec_mode(const rocjitsu::fb::SimulationConfig *fb_confi
 }
 
 const rocjitsu::fb::SimulationConfig *
-parse_json(const std::string &json, const std::string &schema_path, flatbuffers::Parser &parser) {
-  std::string schema_text = read_file(schema_path);
+parse_json(const std::string &json, const std::string &schema_text, flatbuffers::Parser &parser) {
   parser.opts.skip_unexpected_fields_in_json = true;
   if (!parser.Parse(schema_text.c_str()))
     throw std::runtime_error("Failed to parse schema: " + std::string(parser.error_));
@@ -445,7 +450,6 @@ std::unordered_map<std::string, FactoryFn> &factories() {
       cc.sgprs_per_wf = config_u32(cfg, "sgprs_per_wf", 104);
       cc.vgprs_per_wf = config_u32(cfg, "vgprs_per_wf", 256);
       cc.lds_size_kb = config_u32(cfg, "lds_size_kb", 160);
-      cc.functional_quantum = config_u32(cfg, "functional_quantum", 0);
       return amdgpu::ComputeUnitCore::create(n, cc, mem, nullptr, mode);
     };
   }
@@ -496,9 +500,32 @@ void do_wire_cps(simdojo::CompositeComponent *root) {
       continue;
     std::vector<simdojo::Component *> sub;
     par->collect_components(sub);
-    for (auto *s : sub)
+    for (auto *s : sub) {
       if (auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(s))
         cp->add_compute_unit(cu);
+    }
+  }
+}
+
+/// @brief Register each shader engine's SPI with its parent XCD's command
+/// processor. Must be called AFTER CUs are added to SEs (so the lazily
+/// created SPI captures the correct CU list).
+void wire_spi_to_cp(simdojo::CompositeComponent *root) {
+  std::vector<simdojo::Component *> all;
+  root->collect_components(all);
+  for (auto *comp : all) {
+    auto *cp = dynamic_cast<amdgpu::CommandProcessor *>(comp);
+    if (!cp)
+      continue;
+    auto *par = static_cast<simdojo::CompositeComponent *>(cp->parent());
+    if (!par)
+      continue;
+    std::vector<simdojo::Component *> sub;
+    par->collect_components(sub);
+    for (auto *s : sub) {
+      if (auto *se = dynamic_cast<amdgpu::ShaderEngine *>(s))
+        cp->add_spi(&se->spi());
+    }
   }
 }
 
@@ -617,6 +644,10 @@ TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo:
       soc->set_memory(mem);
   }
 
+  // Wire SPIs after CUs are added to SEs (above), so the lazily created
+  // SPI captures the correct CU list.
+  wire_spi_to_cp(root);
+
   result.root = std::move(root_owner);
   result.memory = mem;
   return result;
@@ -675,6 +706,25 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config) {
     dev.num_sdma_xgmi_engines = d->num_sdma_xgmi_engines();
     dev.num_cp_queues = d->num_cp_queues();
     dev.max_engine_clk_fcompute = d->max_engine_clk_fcompute();
+    dev.location_id = d->location_id();
+    dev.hive_id = d->hive_id();
+    dev.domain = d->domain();
+  }
+
+  if (fb_config->vm() && fb_config->vm()->gpu())
+    result.num_gpus = std::max(1u, fb_config->vm()->gpu()->num_gpus());
+
+  if (result.num_gpus > 1 && result.device.present) {
+    result.devices.resize(result.num_gpus);
+    for (uint32_t i = 0; i < result.num_gpus; ++i) {
+      result.devices[i] = result.device;
+      result.devices[i].gpu_id = result.device.gpu_id + i;
+      result.devices[i].location_id = 0x0300 + (i << 8);
+      result.devices[i].drm_render_minor = 128 + i;
+      result.devices[i].unique_id = result.device.unique_id + i;
+    }
+    for (uint32_t i = 1; i < result.num_gpus; ++i)
+      result.extra_gpu_builds.push_back(build_topology(topo_def, result.exec_mode, arch));
   }
 
   return result;
@@ -737,16 +787,16 @@ const char *arch_to_string(rj_code_arch_t arch) {
   }
 }
 
-LoadedConfig load_config(const std::string &json_path, const std::string &schema_path) {
+LoadedConfig load_config(const std::string &json_path, const std::string &schema_text) {
   std::string json_text = read_file(json_path);
   flatbuffers::Parser parser;
-  auto *fb_config = parse_json(json_text, schema_path, parser);
+  auto *fb_config = parse_json(json_text, schema_text, parser);
   return build_from_fb(fb_config);
 }
 
-LoadedConfig load_config_from_string(const std::string &json, const std::string &schema_path) {
+LoadedConfig load_config_from_string(const std::string &json, const std::string &schema_text) {
   flatbuffers::Parser parser;
-  auto *fb_config = parse_json(json, schema_path, parser);
+  auto *fb_config = parse_json(json, schema_text, parser);
   return build_from_fb(fb_config);
 }
 
