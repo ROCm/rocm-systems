@@ -133,19 +133,27 @@ TEST_F(SqttBuilderTest, BufferStepCalculation)
     GpuSqttBuilder<TestBuilder, TestPrimitives> builder(&agent_info);
 
     // Test with different buffer sizes and SE masks
-    const uint64_t total_buffer = 1024 * 1024;  // 1MB total
+    const uint64_t total_buffer = 1024 * 1024;                       // 1MB total
+    const uint64_t block        = 1ULL << TestPrimitives::TT_BUFF_ALIGN_SHIFT;
+
+    // GetBaseStep partitions the buffer across all 64 SE slots: each enabled SE
+    // receives `step` bytes, while each of the (64 - num_enabled) disabled SEs
+    // reserves a single alignment block. Those two contributions therefore sum
+    // back to the requested buffer size.
 
     // Test case 1: All SEs enabled (4 SEs)
     uint64_t mask1 = 0xF;  // 0b1111
     uint64_t step1 = builder.GetBaseStep(total_buffer, mask1);
-    EXPECT_EQ(step1 * builder.PopCount(mask1), total_buffer);
-    EXPECT_EQ(step1 & ((1ULL << TestPrimitives::TT_BUFF_ALIGN_SHIFT) - 1), 0);  // Check alignment
+    EXPECT_EQ(step1 * builder.PopCount(mask1) + (64 - builder.PopCount(mask1)) * block,
+              total_buffer);
+    EXPECT_EQ(step1 & (block - 1), 0);  // Check alignment
 
     // Test case 2: Half SEs enabled (2 SEs)
     uint64_t mask2 = 0x3;  // 0b0011
     uint64_t step2 = builder.GetBaseStep(total_buffer, mask2);
-    EXPECT_EQ(step2 * builder.PopCount(mask2), total_buffer / 2);
-    EXPECT_EQ(step2 & ((1ULL << TestPrimitives::TT_BUFF_ALIGN_SHIFT) - 1), 0);  // Check alignment
+    EXPECT_EQ(step2 * builder.PopCount(mask2) + (64 - builder.PopCount(mask2)) * block,
+              total_buffer);
+    EXPECT_EQ(step2 & (block - 1), 0);  // Check alignment
 }
 
 TEST_F(SqttBuilderTest, PopulationCount)
