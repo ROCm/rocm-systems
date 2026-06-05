@@ -610,8 +610,6 @@ class Graph {
     graphSet_.insert(this);
     mem_pool_ = device->GetGraphMemoryPool();
     graphInstantiated_ = false;
-    // Initialize per-graph segment scheduling flag from global env var
-    use_segment_scheduling_ = DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING;
     roots_.resize(DEBUG_HIP_FORCE_GRAPH_QUEUES);
     leafs_.resize(DEBUG_HIP_FORCE_GRAPH_QUEUES);
     wait_order_.resize(DEBUG_HIP_FORCE_GRAPH_QUEUES);
@@ -695,10 +693,6 @@ class Graph {
   const std::vector<Node>& GetTopoOrder() const { return topoOrder_; }
   /// returns all the edges in the graph
   std::vector<std::pair<Node, Node>> GetEdges() const;
-  /// Returns whether segment scheduling is enabled for this graph
-  bool IsSegmentSchedulingEnabled() const { return use_segment_scheduling_; }
-  // Enable or disable segment scheduling for this graph
-  void SetSegmentScheduling(bool segmentScheduling) {use_segment_scheduling_ = segmentScheduling;}
   // returns the original graph ptr if cloned
   const Graph* getOriginalGraph() const { return pOriginalGraph_; }
   // Add user obj resource to graph
@@ -731,15 +725,6 @@ class Graph {
   }
   // Delete user obj resource from graph
   void RemoveUserObjGraph(UserObject* pUserObj) { graphUserObj_.erase(pUserObj); }
-
-  //! Schedules one node on a vitual stream.
-  //! It will also process the nodes in edges, using DFS
-  void ScheduleOneNode(Node node,     //!< Node for scheduling on a virtual stream
-                       int stream_id  //!< Current active virtual stream to use for scheduling
-  );
-
-  //! Schedules all nodes in the graph into different streams
-  hipError_t ScheduleNodes();
 
   // Hierarchical path structure for child graph support
   struct HierarchicalPath {
@@ -982,10 +967,6 @@ class Graph {
   hip::MemoryPool* mem_pool_;          //!< Memory pool, associated with this graph
   std::unordered_set<GraphNode*> capturedNodes_;
   bool graphInstantiated_;
-  //!< Per-graph flag to control segment scheduling
-  //!< Can be disabled per-graph for complex graphs that benefit from classic path
-  bool use_segment_scheduling_;
-
   //! Map of device ID to vector of streams allocated for that device during graph execution.
   //! Each device may require multiple streams to handle parallel execution of graph nodes.
   std::unordered_map<int, std::vector<hip::Stream*>> streams_dev_;
@@ -1037,10 +1018,8 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
       }
     }
     parallel_streams_.clear();
-    if (IsSegmentSchedulingEnabled()) {
-      if (kernArgManager_ != nullptr) {
-        kernArgManager_->release();
-      }
+    if (kernArgManager_ != nullptr) {
+      kernArgManager_->release();
     }
     if (signalManager_ != nullptr) {
       signalManager_->release();
@@ -1267,12 +1246,7 @@ class ChildGraphNode : public GraphNode, public GraphExec {
 
   bool GetGraphCaptureStatus() { return graphCaptureStatus_; }
 
-  bool GraphCaptureEnabled() override {
-    if (IsSegmentSchedulingEnabled()) {
-      return graphCaptureStatus_;
-    }
-    return false;
-  }
+  bool GraphCaptureEnabled() override { return graphCaptureStatus_; }
 
   std::vector<Node>& GetChildGraphNodeOrder() { return topoOrder_; }
 
@@ -1504,7 +1478,7 @@ class GraphKernelNode : public GraphNode {
     }
     resolvedFunc_ = func;
     amd::Kernel* kernel = hip::asKernel(func);
-    if (parentGraph_ != nullptr && parentGraph_->IsSegmentSchedulingEnabled()) {
+    if (parentGraph_ != nullptr) {
       auto device = g_devices[dev_id_]->devices()[0];
       device::Kernel* devKernel = const_cast<device::Kernel*>(kernel->getDeviceKernel(*device));
       kernargSegmentByteSize_ = devKernel->KernargSegmentByteSize();
@@ -1870,13 +1844,8 @@ class GraphKernelNode : public GraphNode {
   }
 
   virtual bool GraphCaptureEnabled() override {
-    if (parentGraph_ != nullptr && parentGraph_->IsSegmentSchedulingEnabled()) {
-      // Disable capture for cooperative kernels
-      if (!coopKernel_) {
-        return true;
-      }
-    }
-    return false;
+    // Disable capture for cooperative kernels
+    return !coopKernel_;
   }
 };
 
@@ -2035,16 +2004,7 @@ class GraphMemcpyNode : public GraphNode {
     }
   }
   virtual bool GraphCaptureEnabled() override {
-    if (parentGraph_ != nullptr && parentGraph_->IsSegmentSchedulingEnabled()) {
-      switch (copyParams_.kind) {
-        case hipMemcpyDeviceToDevice:
-          return true;
-          break;
-        default:
-          break;
-      }
-    }
-    return false;
+    return copyParams_.kind == hipMemcpyDeviceToDevice;
   }
 
   // Returns true when this memcpy will NOT use the SDMA engine, so no
@@ -2316,19 +2276,15 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
     }
   }
   virtual bool GraphCaptureEnabled() override {
-    if (parentGraph_ != nullptr && parentGraph_->IsSegmentSchedulingEnabled()) {
-      hip::MemcpyType type = hipHostToHost;
+    hip::MemcpyType type = hipHostToHost;
 
-      size_t dOffset, sOffset;
-      amd::Memory* dstMemory = getMemoryObjectForCurrentDevice(dst_, dOffset);
-      amd::Memory* srcMemory = getMemoryObjectForCurrentDevice(src_, sOffset);
+    size_t dOffset, sOffset;
+    amd::Memory* dstMemory = getMemoryObject(dst_, dOffset);
+    amd::Memory* srcMemory = getMemoryObject(src_, sOffset);
 
-      // The case below is only interested in hipCopyBuffer,
-      // which is only valid for device to device copies.
-      if (dstMemory != nullptr && srcMemory != nullptr) {
-        return (hipCopyBuffer == ihipGetMemcpyType(srcMemory, dstMemory, kind_));
-      }
-      return false;
+    // hipCopyBuffer is only valid for device to device copies.
+    if (dstMemory != nullptr && srcMemory != nullptr) {
+      return (hipCopyBuffer == ihipGetMemcpyType(srcMemory, dstMemory, kind_));
     }
     return false;
   }
@@ -2677,12 +2633,7 @@ class GraphMemsetNode : public GraphNode {
     }
   }
 
-  virtual bool GraphCaptureEnabled() override {
-    if (parentGraph_ != nullptr && parentGraph_->IsSegmentSchedulingEnabled()) {
-      return true;
-    }
-    return false;
-  }
+  virtual bool GraphCaptureEnabled() override { return true; }
 
   hipError_t CreateCommand(hip::Stream* stream) override {
     hipError_t status = GraphNode::CreateCommand(stream);

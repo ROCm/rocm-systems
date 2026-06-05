@@ -246,8 +246,7 @@ release(uint, DEBUG_HIP_FORCE_GRAPH_QUEUES, 4,                                \
 release(uint, DEBUG_HIP_GRAPH_BATCH_SIZE, 256,                                \
         "Number of graph nodes to batch at a time")                           \
 release(uint, DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING, 1,                          \
-        "0 = Disable (classic path), 1 = Enable (auto DFS/round-robin), "    \
-        "2 = Force DFS, 3 = Force round-robin")                               \
+        "1 = Auto (DFS or round-robin), 2 = Force DFS, 3 = Force round-robin")\
 release(uint, DEBUG_HIP_BLOCK_SYNC, 50,                                       \
         "Blocks synchronization on CPU until the callback processing is done")\
 release(uint, DEBUG_CLR_MAX_BATCH_SIZE, 1000,                                 \
