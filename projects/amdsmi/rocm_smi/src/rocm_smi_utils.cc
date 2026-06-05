@@ -39,6 +39,7 @@
 #include <cstdint>
 #include <cstring>
 #include <ctime>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -1512,33 +1513,21 @@ bool is_device_vfio_bound(const std::string& pci_sysfs_path) {
   // Virtualization detection indicators
   constexpr std::string_view kVFIO_PCI = "vfio-pci";
 
-  constexpr size_t kMAX_DRIVER_SYMLINK_LEN = 1024;  // Linux kernel limits symlink targets to
-                                                    // 4096 bytes (on most filesystems)
-                                                    // Size (sweet spot): ~512-1024 bytes
-
   std::string driver_link = pci_sysfs_path + "/driver";
-  char buf[kMAX_DRIVER_SYMLINK_LEN];
+  std::error_code ec;
+  auto target = std::filesystem::read_symlink(driver_link, ec);
+  if (ec) {
+    return false;
+  }
 
-  ssize_t len = readlink(driver_link.c_str(), buf, sizeof(buf) - 1);
-  if (len > 0) {
-    // Reject if readlink truncated the data
-    if (static_cast<std::size_t>(len) >= (sizeof(buf) - 1)) {
-      ss << __PRETTY_FUNCTION__ << " | [WARNING] Driver path truncated (len=" << len
-         << "), cannot reliably detect vfio-pci (passthrough)";
-      LOG_WARN(ss);
-      return false;
-    }
+  std::string driver = target.string();
+  ss << __PRETTY_FUNCTION__ << " | Device driver: " << driver;
+  LOG_DEBUG(ss);
 
-    buf[len] = '\0';
-    std::string driver(buf);
-    ss << __PRETTY_FUNCTION__ << " | Device driver: " << driver;
-    LOG_DEBUG(ss);
-
-    if (amd::smi::contains(driver, kVFIO_PCI)) {
-      ss << __PRETTY_FUNCTION__ << " | Device bound to vfio-pci (passthrough)";
-      LOG_INFO(ss);
-      return true;
-    }
+  if (amd::smi::contains(driver, kVFIO_PCI)) {
+    ss << __PRETTY_FUNCTION__ << " | Device bound to vfio-pci (passthrough)";
+    LOG_INFO(ss);
+    return true;
   }
   return false;
 }
