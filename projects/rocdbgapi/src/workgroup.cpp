@@ -88,7 +88,9 @@ workgroup_t::xfer_local_memory (const address_space_t &address_space,
   amd_dbgapi_size_t limit = m_local_memory_size;
   amd_dbgapi_size_t offset = segment_address;
 
-  if ((offset + size) > limit)
+  /* Equivalent to (offset + size) > limit but written so it cannot
+     overflow when offset and size are near UINT64_MAX.  */
+  if (offset > limit || size > limit - offset)
     {
       size_t max_size = offset < limit ? limit - offset : 0;
       if (max_size == 0 && size != 0)
