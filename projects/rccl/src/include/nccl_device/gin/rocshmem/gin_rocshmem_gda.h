@@ -23,34 +23,43 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
                                       ncclGinDescriptorSmem* descriptor,
                                       cuda::thread_scope required, cuda::thread_scope given) {
     using nccl::utility::loadConst;
-    ncclGinRocshmemGdaGPUContext* rsCtx = (ncclGinRocshmemGdaGPUContext*)ctx.handle;
-    rocshmem::QueuePair* qp = loadConst(loadConst(&rsCtx->qps) + peer);
-    rocshmem::ActiveWFInfo wf_info(peer, rocshmem::ThreadScope::thread);
 
-    if (hasWins) {
-      ncclGinRocshmemGdaMemHandle* dstMh = (ncclGinRocshmemGdaMemHandle*)dstWin;
-      ncclGinRocshmemGdaMemHandle* srcMh = (ncclGinRocshmemGdaMemHandle*)srcWin;
+    coop.sync();
+    if (coop.thread_rank() == 0) {
+      ncclGinRocshmemGdaGPUContext* rsCtx = (ncclGinRocshmemGdaGPUContext*)ctx.handle;
+      rocshmem::QueuePair* qp = loadConst(loadConst(&rsCtx->qps) + peer);
+      rocshmem::ActiveWFInfo wf_info(peer, rocshmem::ThreadScope::thread);
 
-      uintptr_t dstAddr = loadConst(loadConst(&dstMh->remote_vas) + peer) + dstOff;
-      uintptr_t srcAddr = loadConst(&srcMh->local_va) + srcOff;
-      uint32_t dstRkey = loadConst(loadConst(&dstMh->rkeys) + peer);
-      uint32_t srcLkey = loadConst(&srcMh->lkey);
+      if ((required == cuda::thread_scope_system) && (given > required)) {
+        __threadfence_system();
+      }
 
-      qp->put_nbi_with_keys((void*)dstAddr, dstRkey, (void*)srcAddr, srcLkey, bytes, wf_info, !hasSignal);
+      if (hasWins) {
+        ncclGinRocshmemGdaMemHandle* dstMh = (ncclGinRocshmemGdaMemHandle*)dstWin;
+        ncclGinRocshmemGdaMemHandle* srcMh = (ncclGinRocshmemGdaMemHandle*)srcWin;
+
+        uintptr_t dstAddr = loadConst(loadConst(&dstMh->remote_vas) + peer) + dstOff;
+        uintptr_t srcAddr = loadConst(&srcMh->local_va) + srcOff;
+        uint32_t dstRkey = loadConst(loadConst(&dstMh->rkeys) + peer);
+        uint32_t srcLkey = loadConst(&srcMh->lkey);
+
+        qp->put_nbi_with_keys((void*)dstAddr, dstRkey, (void*)srcAddr, srcLkey, bytes, wf_info, !hasSignal);
+      }
+
+      if (hasSignal) {
+        if (signalOp == ncclGinSignalInc) signalOpArg = 1;
+        uintptr_t sigAddr = loadConst(loadConst(&rsCtx->signal_raddrs) + peer) + sizeof(uint64_t) * signalId;
+        uint32_t sigRkey = loadConst(loadConst(&rsCtx->signal_rkeys) + peer);
+        qp->atomic_add_with_keys((void*)sigAddr, sigRkey, (int64_t)signalOpArg, wf_info, /*fence=*/true);
+      } else if (hasCounter) {
+        qp->quiet(wf_info);
+      }
+
+      if (hasCounter) {
+        atomicAdd((unsigned long long*)&loadConst(&rsCtx->counters)[counterId], 1ULL);
+      }
     }
-
-    if (hasSignal) {
-      if (signalOp == ncclGinSignalInc) signalOpArg = 1;
-      uintptr_t sigAddr = loadConst(loadConst(&rsCtx->signal_raddrs) + peer) + sizeof(uint64_t) * signalId;
-      uint32_t sigRkey = loadConst(loadConst(&rsCtx->signal_rkeys) + peer);
-      qp->atomic_add_with_keys((void*)sigAddr, sigRkey, (int64_t)signalOpArg, wf_info, /*fence=*/true);
-    } else if (hasCounter) {
-      qp->quiet(wf_info);
-    }
-
-    if (hasCounter) {
-      atomicAdd((unsigned long long*)&loadConst(&rsCtx->counters)[counterId], 1ULL);
-    }
+    coop.sync();
   }
 };
 
@@ -64,24 +73,33 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
                                       ncclGinDescriptorSmem* descriptor,
                                       cuda::thread_scope required, cuda::thread_scope given) {
     using nccl::utility::loadConst;
-    ncclGinRocshmemGdaGPUContext* rsCtx = (ncclGinRocshmemGdaGPUContext*)ctx.handle;
-    rocshmem::QueuePair* qp = loadConst(loadConst(&rsCtx->qps) + peer);
-    rocshmem::ActiveWFInfo wf_info(peer, rocshmem::ThreadScope::thread);
 
-    ncclGinRocshmemGdaMemHandle* dstMh = (ncclGinRocshmemGdaMemHandle*)dstWin;
-    uintptr_t dstAddr = loadConst(loadConst(&dstMh->remote_vas) + peer) + dstOff;
-    uint32_t dstRkey = loadConst(loadConst(&dstMh->rkeys) + peer);
+    coop.sync();
+    if (coop.thread_rank() == 0) {
+      ncclGinRocshmemGdaGPUContext* rsCtx = (ncclGinRocshmemGdaGPUContext*)ctx.handle;
+      rocshmem::QueuePair* qp = loadConst(loadConst(&rsCtx->qps) + peer);
+      rocshmem::ActiveWFInfo wf_info(peer, rocshmem::ThreadScope::thread);
 
-    // lkey=0: put_nbi_with_keys copies srcVal inline into the WQE
-    // (inline_threshold >= sizeof(T)), so no registered MR is needed.
-    qp->put_nbi_with_keys((void*)dstAddr, dstRkey, &srcVal, 0, sizeof(T), wf_info, !hasSignal);
+      ncclGinRocshmemGdaMemHandle* dstMh = (ncclGinRocshmemGdaMemHandle*)dstWin;
+      uintptr_t dstAddr = loadConst(loadConst(&dstMh->remote_vas) + peer) + dstOff;
+      uint32_t dstRkey = loadConst(loadConst(&dstMh->rkeys) + peer);
 
-    if (hasSignal) {
-      if (signalOp == ncclGinSignalInc) signalOpArg = 1;
-      uintptr_t sigAddr = loadConst(loadConst(&rsCtx->signal_raddrs) + peer) + sizeof(uint64_t) * signalId;
-      uint32_t sigRkey = loadConst(loadConst(&rsCtx->signal_rkeys) + peer);
-      qp->atomic_add_with_keys((void*)sigAddr, sigRkey, (int64_t)signalOpArg, wf_info, /*fence=*/true);
+      if ((required == cuda::thread_scope_system) && (given > required)) {
+        __threadfence_system();
+      }
+
+      // lkey=0: put_nbi_with_keys copies srcVal inline into the WQE
+      // (inline_threshold >= sizeof(T)), so no registered MR is needed.
+      qp->put_nbi_with_keys((void*)dstAddr, dstRkey, &srcVal, 0, sizeof(T), wf_info, !hasSignal);
+
+      if (hasSignal) {
+        if (signalOp == ncclGinSignalInc) signalOpArg = 1;
+        uintptr_t sigAddr = loadConst(loadConst(&rsCtx->signal_raddrs) + peer) + sizeof(uint64_t) * signalId;
+        uint32_t sigRkey = loadConst(loadConst(&rsCtx->signal_rkeys) + peer);
+        qp->atomic_add_with_keys((void*)sigAddr, sigRkey, (int64_t)signalOpArg, wf_info, /*fence=*/true);
+      }
     }
+    coop.sync();
   }
 };
 
