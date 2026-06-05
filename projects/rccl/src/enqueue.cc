@@ -1899,7 +1899,7 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   ncclResult_t ret = ncclSuccess;
   struct ncclKernelPlanner* planner = &comm->planner;
   int nChannels = 0;
-  for (int i = 0; i < MAXCHANNELS/64; i++)
+  for (int i = 0; i < MAXCHANNELS/CHANNELS_PER_MASK_WORD; i++)
     nChannels += countOneBits(plan->channelMask.masks[i]);
   void* sym = plan->kernelFn;
 #ifdef ENABLE_WARP_SPEED

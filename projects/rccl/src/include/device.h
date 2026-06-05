@@ -154,6 +154,9 @@ union ncclLLFifoLine {
 // lifts the upper bound.
 #define MAXCHANNELS 256
 #endif
+// Number of channel bits packed into one uint64_t word of channelMasks. The
+// global channelId for bit `x` in word `i` is `i*CHANNELS_PER_MASK_WORD + x`.
+#define CHANNELS_PER_MASK_WORD 64
 #define CHANNEL_LIMIT 16 // this is used to limit channels for pre MI3xx GPUs
 #define NCCL_MAX_LOCAL_RANKS 72
 #define NCCL_MIN_NTHREADS (4*WARP_SIZE)
@@ -712,8 +715,10 @@ enum ncclDevWorkStorageType: uint8_t {
 };
 
 struct channelMasks {
-  uint64_t masks[MAXCHANNELS/64];
+  uint64_t masks[MAXCHANNELS/CHANNELS_PER_MASK_WORD];
 };
+static_assert(MAXCHANNELS % CHANNELS_PER_MASK_WORD == 0,
+              "MAXCHANNELS must be a multiple of CHANNELS_PER_MASK_WORD");
 
 struct alignas(16) ncclDevKernelArgs {
   struct ncclKernelComm* comm;

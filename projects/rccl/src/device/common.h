@@ -521,7 +521,7 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
   int tn = blockDim.x;
   int x = tid;
   int total = 0, y;
-  int num = MAXCHANNELS/64 > 0 ? MAXCHANNELS/64 : 1;
+  int num = MAXCHANNELS/CHANNELS_PER_MASK_WORD > 0 ? MAXCHANNELS/CHANNELS_PER_MASK_WORD : 1;
 #ifdef ENABLE_WARP_SPEED
   int warpCount    = tn / WARP_SIZE;
   int localWarpId  = tid / WARP_SIZE;
@@ -551,11 +551,11 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
         y = total + y;
         if (blockIdx.x == y) {
           // channelId is the absolute bit position in the global mask:
-          // i*64 + x. Using `x + total` was only correct when prior mask
-          // words were densely packed (which broke for sparse channel sets,
-          // e.g. SATURATE_P2P_NCHANNELS with small messages or non-pow2
-          // tilings, causing the wrong channel to be loaded -> IMA).
-          ncclShmem.channelId = x + i*64;
+          // i*CHANNELS_PER_MASK_WORD + x. Using `x + total` was only correct
+          // when prior mask words were densely packed (which broke for sparse
+          // channel sets, e.g. SATURATE_P2P_NCHANNELS with small messages or
+          // non-pow2 tilings, causing the wrong channel to be loaded -> IMA).
+          ncclShmem.channelId = x + i*CHANNELS_PER_MASK_WORD;
           break;
         }
       }
@@ -565,7 +565,7 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
           y = __popcll(args->channelMask.masks[i] & ((1ull<<x)-1));
           y = y + total;
           if (blockIdx.x == y) {
-            ncclShmem.channelId = x + i*64;
+            ncclShmem.channelId = x + i*CHANNELS_PER_MASK_WORD;
             break;
           }
         }
@@ -650,8 +650,9 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
         y = total + y;
         if (globalWarpId == y) {
           // Same fix as the non-WS path: channelId is the absolute bit
-          // position (i*64 + laneId), not total bits seen so far.
-          ncclShmem.warpChannelId[localWarpId] = laneId + i*64;
+          // position (i*CHANNELS_PER_MASK_WORD + laneId), not total bits
+          // seen so far.
+          ncclShmem.warpChannelId[localWarpId] = laneId + i*CHANNELS_PER_MASK_WORD;
           break;
         }
       }

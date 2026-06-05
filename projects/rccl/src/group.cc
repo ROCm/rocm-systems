@@ -397,7 +397,7 @@ static void reclaimPlannerState(struct ncclComm* comm) {
   comm->preconnectNext = reinterpret_cast<struct ncclComm*>(0x1);
   // connectSend/connectRecv are allocated as comm->nRanks * NCCL_MAX_CONNS
   for (int i = 0; i < comm->nRanks * NCCL_MAX_CONNS; i++) {
-    for (int j = 0; j < MAXCHANNELS/64; j++) {
+    for (int j = 0; j < MAXCHANNELS/CHANNELS_PER_MASK_WORD; j++) {
       comm->connectSend[i].masks[j] = 0UL;
       comm->connectRecv[i].masks[j] = 0UL;
     }
