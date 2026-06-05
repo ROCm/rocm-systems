@@ -22,17 +22,17 @@
    block until it prints "READY\n", so dbgapi attach is guaranteed
    to race against a queue with at least one in-flight dispatch.
 
-   The child binary path is baked in at compile time via the
-   DBGAPI_HIP_IDLE_WORKLOAD_PATH define, which the CMake target sets
-   to the absolute path of the built idle_kernel executable.  Tests
-   that link against this support code must therefore be added
-   alongside the workload registration so the macro is provided; if
-   it is missing the test target won't compile.
+   The workload binary is located at runtime by looking next to the
+   running test executable for "dbgapi_test_idle_kernel".  Both
+   supported layouts colocate the workload with the test binaries:
+   the build tree puts everything under build/test/feature/, and the
+   install tree puts everything under tests/rocdbgapi/.  No paths
+   are baked in at compile time.
 
-   If HIP wasn't found at configure time, the workload target isn't
-   built and DBGAPI_HIP_IDLE_WORKLOAD_PATH is set to an empty string;
-   spawn_hip_workload() returns an invalid idle_child_t in that case
-   and the test should GTEST_SKIP.  */
+   If the workload binary isn't found (e.g. HIP wasn't available at
+   configure time so it was never built, or the install dropped it),
+   spawn_hip_workload() returns an invalid idle_child_t and the test
+   should GTEST_SKIP.  */
 
 #ifndef DBGAPI_FEATURE_SUPPORT_SPAWN_HIP_WORKLOAD_H
 #define DBGAPI_FEATURE_SUPPORT_SPAWN_HIP_WORKLOAD_H

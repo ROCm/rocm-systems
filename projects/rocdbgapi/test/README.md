@@ -85,6 +85,54 @@ CI uses these labels to route tests to runners with the right
 hardware.  Locally, prefer label filters (`-L`) over `-R` for tier
 selection.
 
+## Install layout
+
+When the suite is enabled, every test binary — plus the
+`dbgapi_test_idle_kernel` HIP workload — is installed under the
+`tests` component:
+
+```
+<prefix>/
+├── lib/
+│   └── librocm-dbgapi.so*           Public library.
+└── tests/
+    └── rocdbgapi/
+        ├── dbgapi_unit_*            Unit-tier binaries.
+        ├── dbgapi_feature_*         Feature-tier binaries.
+        └── dbgapi_test_idle_kernel  HIP workload (only built when HIP is found).
+```
+
+Installing only the test bits:
+
+```shell
+cmake --install build-rocdbgapi --component tests
+```
+
+This is the layout TheRock's test stage consumes: the test stage pulls
+the `tests` component to a GPU runner and invokes the binaries via
+`ctest` there.  Colocating the workload with the test binaries keeps
+the runtime next-to-exe lookup in `spawn_hip_workload.cpp` working
+from both the build tree (`build/test/feature/`) and the install tree
+(`tests/rocdbgapi/`) without any compile-time path bake-in.
+
+### Runtime library dependencies
+
+Each test binary needs the following shared libraries at runtime:
+
+| Library                | Resolved via                                                |
+| ---------------------- | ----------------------------------------------------------- |
+| `librocm-dbgapi.so`    | RPATH baked at install: `$ORIGIN/../../lib` (relative from `tests/rocdbgapi/` to `${CMAKE_INSTALL_LIBDIR}` under the same prefix). No `LD_LIBRARY_PATH` needed. |
+| `libamd_comgr.so`      | Runner's `LD_LIBRARY_PATH` (or default loader search) — outside our packaging boundary. |
+| `libamdhip64.so`       | Runner's `LD_LIBRARY_PATH` (only needed for the HIP workload child). |
+
+Build-tree binaries Just Work because CMake's default behavior bakes
+the absolute build-tree library directory into the binary's RUNPATH at
+link time.
+
+GPU-tier tests additionally need `/dev/kfd` to be accessible — see the
+"skip envelope" section below for how missing prerequisites turn into
+skips rather than failures.
+
 ## The skip envelope
 
 A core property of the feature tier: **a missing prerequisite is a
