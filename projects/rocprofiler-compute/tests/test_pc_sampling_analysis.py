@@ -767,6 +767,7 @@ def test_pc_sampling_analyze_sorting_type_offset(
         workload_dir,
         "--block",
         "21",
+        "--experimental",
         "--pc-sampling-sorting-type",
         "offset",
     ])
@@ -790,6 +791,7 @@ def test_pc_sampling_analyze_sorting_type_count(
         workload_dir,
         "--block",
         "21",
+        "--experimental",
         "--pc-sampling-sorting-type",
         "count",
     ])
