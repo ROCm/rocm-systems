@@ -27,6 +27,7 @@
 #include "host_symbol_info.hpp"
 #include "kernel_symbol_info.hpp"
 #include "pc_sample_transform.hpp"
+#include "pc_sampling_pc_correction.hpp"
 
 #include "lib/att-tool/att_lib_wrapper.hpp"
 #include "lib/common/container/small_vector.hpp"
@@ -184,6 +185,9 @@ struct metadata
     metadata& operator=(const metadata&) = delete;
     metadata& operator=(metadata&&) noexcept = delete;
 
+    // PC sampling reported-PC correction (gfx1250 stochastic).
+    pc_correction::PCCorrectionManager& pc_correction() { return pc_correction_mgr; }
+
     // Loads all counters supported on agents. Used by the 'rocprofv3-avail' tool.
     void init(inprocess);
 
@@ -255,6 +259,10 @@ private:
     std::vector<std::string> instruction_decoder = {};
     std::vector<std::string> instruction_comment = {};
     std::map<inst_t, size_t> indexes             = {};
+
+    // Declared after `decoder` so the reference the manager stores is bound to a
+    // fully-constructed member.
+    pc_correction::PCCorrectionManager pc_correction_mgr{decoder};
 };
 
 template <typename Tp>
