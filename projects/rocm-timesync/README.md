@@ -39,7 +39,7 @@ A notional workflow we need to support is something like this:
     - Store crosststamps in some form of storage (e.g., a time-series database or simple in-memory hashtable). The
       storage must support subsequent querying for timestamp translation.
     - **Note: whether these operations are done by the same or separate threads, whether those threads are part of the
-      ROCr instance or a separate system daemon(s), and how storage is managed are design considerations we
+      ROCR instance or a separate system daemon(s), and how storage is managed are design considerations we
       will elaborate on below.**
 3. Kernel dispatch/completion events produced by the workload, which include raw GPU timestamps, are surfaced into rocprof
 5. rocprof calls into ROCR through HSA API to convert these raw GPU timestamps to the system/realtime timeline (e.g.,
@@ -62,14 +62,14 @@ We discuss two different models that land at different points in this design spa
 
 ### In-process
 
-The simplest design is to simply extend ROCr with mechanisms to measure, store, and query crosststamps. We call this
+The simplest design is to simply extend ROCR with mechanisms to measure, store, and query crosststamps. We call this
 "**in-process**" because everything is done through threads that are part of main host process. The diagram
 below illustrates the architecture
 
 ![](doc/img/in-process.png)
 
 The key steps:
-- A new thread `ROCr-timesync-r_m` queries KFD for crosststamps of the form (`CLOCK_REALTIME` timestamp, GPU `m`
+- A new thread `ROCR-timesync-r_m` queries KFD for crosststamps of the form (`CLOCK_REALTIME` timestamp, GPU `m`
   timestamp). It may use the existing `AMDKFD_IOC_GET_CLOCK_COUNTERS` `ioctl()` call or some TBD similar new interface.
   It performs these queries at a frequency needed for the system/application's target precision. This can be
   communicated via a system-wide configuration or an application-specific configuration like an HSA env variable.
