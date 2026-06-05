@@ -12,7 +12,9 @@
 
 #include <cstdint>
 #include <cuda_runtime.h>
+#if defined(RCCL_DEVICE_LINKER) // Without this, we get a duplicate symbol error when building with the --no-device-linker flag on ROCm 7.13.
 #include <cooperative_groups.h>
+#endif
 #if defined(__HIP_PLATFORM_AMD__)
 // HIP analog of CUDA __stwt: dwordx4 builtins, v4u typedefs, system sync scope.
 #include "nccl_device/rccl_ptr.h"

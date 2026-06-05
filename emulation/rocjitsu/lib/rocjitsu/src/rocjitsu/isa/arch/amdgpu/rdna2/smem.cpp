@@ -295,8 +295,7 @@ SMemtimeSmem::SMemtimeSmem(const MachineInst *inst)
 }
 
 void SMemtimeSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_memtime_smem(*this, wf);
 }
 
 SMemrealtimeSmem::SMemrealtimeSmem(const MachineInst *inst)
@@ -309,8 +308,7 @@ SMemrealtimeSmem::SMemrealtimeSmem(const MachineInst *inst)
 }
 
 void SMemrealtimeSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_memrealtime_smem(*this, wf);
 }
 
 } // namespace rdna2

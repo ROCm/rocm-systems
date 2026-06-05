@@ -3635,7 +3635,7 @@ rsmi_status_t rsmi_dev_fan_reset(uint32_t dv_ind, uint32_t sensor_ind) {
     uint64_t od_min_pwm = 0;
     int parse_ret = amd::smi::ParseGpuOdFanRange(fan_ctrl_path, &od_min_pwm, nullptr);
     if (parse_ret != 0) {
-      return amd::smi::SysfsWriteErrnoToRsmiStatus(parse_ret);
+      return amd::smi::ErrnoToRsmiStatus(parse_ret);
     }
     return amd::smi::WriteGpuOdFanPwm(fan_ctrl_path, std::to_string(od_min_pwm));
 
@@ -3673,7 +3673,7 @@ rsmi_status_t rsmi_dev_fan_speed_set(uint32_t dv_ind, uint32_t sensor_ind, uint6
     uint64_t od_max_pwm = 0;
     int parse_ret = amd::smi::ParseGpuOdFanRange(fan_ctrl_path, &od_min_pwm, &od_max_pwm);
     if (parse_ret != 0) {
-      return amd::smi::SysfsWriteErrnoToRsmiStatus(parse_ret);
+      return amd::smi::ErrnoToRsmiStatus(parse_ret);
     }
     if (speed < od_min_pwm || speed > od_max_pwm) {
       return RSMI_STATUS_INPUT_OUT_OF_BOUNDS;

@@ -539,6 +539,7 @@ typedef struct aqlprofile_att_buffer_status_t
     bool     needs_swap;  // If buffer requires swap
     bool     is_too_late;
     bool     error;
+    uint64_t read_offset;
 } aqlprofile_att_buffer_status_t;
 
 /**

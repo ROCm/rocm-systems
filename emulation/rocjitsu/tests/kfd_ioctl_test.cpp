@@ -1,7 +1,12 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/kmd/linux/simulated_driver.h"
+#include "rocjitsu/vm/virtual_machine.h"
+
+#include "embedded_schema.h"
+#include "simdojo/sim/simulation.h"
 
 #include <gtest/gtest.h>
 
@@ -23,8 +28,26 @@ class KfdIoctlTest : public ::testing::Test {
 protected:
   void SetUp() override {
     setenv("RJ_CONFIG", CONFIG_PATH.c_str(), 1);
-    driver_ = rocjitsu::SimulatedDriver::create_default();
-    ASSERT_NE(driver_, nullptr);
+    loaded_ = rocjitsu::config::load_config(CONFIG_PATH.c_str(), rocjitsu::kEmbeddedSchema);
+    auto *soc = loaded_.soc();
+    auto num_xcds = soc->num_xcds();
+
+    loaded_.engine_config.max_ticks = 0;
+    loaded_.engine_config.await_primaries = true;
+    engine_ = std::make_unique<simdojo::SimulationEngine>(loaded_.engine_config);
+
+    auto root = loaded_.take_root();
+    root.release();
+    auto vm = std::make_unique<rocjitsu::VirtualMachine>(std::unique_ptr<rocjitsu::SoC>(soc));
+    driver_ = vm->driver();
+
+    engine_->topology().set_root(std::move(vm));
+    loaded_.wire_links(engine_->topology());
+    soc->wire_backing(engine_->topology());
+    engine_->build();
+    engine_->register_as_primary();
+
+    driver_->setup_topology(loaded_.device, num_xcds);
     int fd = driver_->open();
     ASSERT_GE(fd, 0);
   }
@@ -34,7 +57,9 @@ protected:
       driver_->close();
   }
 
-  std::unique_ptr<rocjitsu::SimulatedDriver> driver_;
+  rocjitsu::config::LoadedConfig loaded_;
+  std::unique_ptr<simdojo::SimulationEngine> engine_;
+  rocjitsu::SimulatedDriver *driver_ = nullptr;
 };
 
 TEST_F(KfdIoctlTest, SetMemoryPolicy) {
