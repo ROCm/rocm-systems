@@ -42,6 +42,8 @@ docker run --rm ${DOCKER_IMAGE} bash -lc "
   ls -la /workspace/rocshmem/bin 2>/dev/null || true
   ls -la /workspace/rccl/lib 2>/dev/null || true
   ls -la /workspace/rccl-tests/alltoall_perf 2>/dev/null || true
+  echo '=== alltoall_perf anvil symbol export ==='
+  nm -D /workspace/rccl-tests/alltoall_perf 2>/dev/null | grep anvil || echo 'MISSING anvil symbols'
 "
 
 if [ 1 -eq 1 ]; then

@@ -111,7 +111,7 @@ endif()
 # Set CMAKE flags
 #==================================================================================================
 set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "")
-set(CMAKE_CXX_STANDARD   14)   # We use C++14 features, this will add compile option: -std=c++14
+set(CMAKE_CXX_STANDARD   17)   # C++17 required for ROCm hip_ext.h (std::is_same_v) when ENABLE_ROCSHMEM=ON
 set(CMAKE_CXX_EXTENSIONS OFF)  # Without this line, it will add -std=gnu++14 instead, which has some issues.
 set(CPACK_PACKAGING_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Path to install to when packaged.")
 if(ROCM_PATH)
@@ -210,7 +210,7 @@ endif()
 
 if (ENABLE_ROCSHMEM)
     message(STATUS "rocshmem GIN backend support enabled")
-    add_definitions(-DENABLE_ROCSHMEM)
+    add_definitions(-DENABLE_ROCSHMEM -DENABLE_ROCSHMEM_GIN)
     if (NOT ROCSHMEM_INSTALL_DIR)
         message(FATAL_ERROR "ENABLE_ROCSHMEM is ON but ROCSHMEM_INSTALL_DIR is not set")
     endif()
