@@ -103,11 +103,7 @@ def enumerate_kernels():
       for algo in ["LL","LD"]:
         # ReduceScatter emits sum and avg for every float type.
         yield Rec(coll="ReduceScatter", algo=algo, red=red, ty=ty)
-      # [RCCL] Multi-node GIN symmetric ReduceScatter (non-multicast). The
-      # multicast variant (RailA2A_LsaLDMC) is intentionally omitted: it is in
-      # kernelMask_LDMC and is masked off whenever LSA multimem is unavailable
-      # (always on ROCm/gfx, since there is no NVLS/multimem), so only the
-      # non-MC RailA2A_LsaLD kernel can ever be selected here.
+      # Multi-node GIN ReduceScatter; non-multicast only (no NVLS/multimem on ROCm).
       for algo in ["RailA2A_LsaLD"]:
         yield Rec(coll="ReduceScatter", algo=algo, red=red, ty=ty)
 
@@ -136,8 +132,7 @@ def kernel_fdep(k):
 
 def kernel_fname(k):
   if k.coll in reductions:
-    # GIN algos compile their own (heavier) device path; keep them in a
-    # separate TU so the intra-node LL/LD kernels are unaffected.
+    # GIN algos compile a heavier device path; keep them in a separate TU.
     if k.algo in gin_algos:
       return paste('_', coll_to_lower[k.coll], 'gin', k.red, k.ty) + '.cpp'
     if k.algo in ldmc_algos and k.ty.startswith('f8'):
@@ -221,8 +216,7 @@ for (fname, coll), ks in kernels_by_file.items():
     print("-- Generating %s" % os.path.join(gensrc, fname))
     emitln(f, '#include "sym_kernels.h"')
     emitln(f, '#include "symmetric/kernel.h"')
-    # GIN instantiation TUs pull in the *_gin.h header, which provides the
-    # ncclSymkRun_*_RailA2A/RailRing definitions (the non-GIN header does not).
+    # GIN instantiation TUs need the *_gin.h header for the RailA2A/RailRing defs.
     if ks and all(k.algo in gin_algos for k in ks):
       emitln(f, '#include "symmetric/{coll}_gin.h"'.format(coll=coll_to_lower[coll]))
     else:

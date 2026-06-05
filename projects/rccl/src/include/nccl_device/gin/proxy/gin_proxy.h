@@ -216,21 +216,14 @@ NCCL_DEVICE_INLINE void put(Coop coop, ncclGinProxyGfd_t* gfd, ncclGinProxyGpuCt
                             ncclGinSignalDescriptor signal, ncclGinSignalOp_t signalOp,
                             uint64_t signalVal, bool hasCounter, ncclGinCounter_t counterId,
                             cuda::thread_scope required, cuda::thread_scope given) {
-  // The proxy hands the source buffer to the NIC, which is a system-scope agent
-  // (it DMA-reads GPU memory over PCIe), so the payload must be released to
-  // system scope before the GFD is published. `given` is the scope to which the
-  // caller has already released the source. Emit a system release fence whenever
-  // that is narrower than system.
-  //
-  // [RCCL] NOTE: RCCL's cuda shim (hip_compat.h) orders the thread_scope enum
-  // thread(0) < block(1) < device(2) < system(3), i.e. system is the WIDEST and
-  // LARGEST value. Upstream NVIDIA libcu++ uses the opposite ordering (system is
-  // the smallest value), where the original guard was `given > thread_scope_system`
-  // meaning "narrower than system". With the reversed hip_compat ordering that
-  // test is always false, so the fence became dead code and the worker-written
-  // outbox was never flushed to system scope before the proxy NIC read it -
-  // causing nondeterministic, page-granular stale/zero payloads on remote peers.
+  // Release the source to system scope before the GFD is published, since the NIC
+  // DMA-reads it. hip_compat.h orders thread_scope with system widest (largest), so
+  // "narrower than system" is given < system (upstream libcu++ uses the opposite order).
+#if defined(__HIP_PLATFORM_AMD__)
   if ((int)given < (int)cuda::thread_scope_system) {
+#else
+  if ((int)given > (int)cuda::thread_scope_system) {
+#endif
     cuda::atomic_thread_fence(cuda::memory_order_release, cuda::thread_scope_system);
   }
 
