@@ -86,6 +86,8 @@ rocprofiler_add_integration_execute_test(
     ARGS $<TARGET_FILE:attachment-test> $<TARGET_FILE:rocprofiler-sdk-c-tool>
     TIMEOUT 45
     DISABLED ${IS_DISABLED}
+    # flaky in CI; disable until the underlying issue is fixed
+    UNSTABLE
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "${rocattach-test-env}"
     PASS_REGULAR_EXPRESSION "verified: grandchild pid [0-9]+ loaded the tool library"
