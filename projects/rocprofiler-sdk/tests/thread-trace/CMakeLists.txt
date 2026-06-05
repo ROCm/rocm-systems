@@ -75,6 +75,8 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 120
     PRELOAD "$<TARGET_FILE:thread-trace-triple-buffer-tool>"
     ENVIRONMENT "TRIPLEBUFFER=1;ATT_NODETAIL=1;ATT_SLOW_CALLBACK=0"
+    # flaky in CI (subprocess aborted); disable until the underlying issue is fixed
+    UNSTABLE
     DISABLED ${TRIPLE_BUFFER_DISABLED})
 
 # Collects a lot of data, and check if parsering works successfully
