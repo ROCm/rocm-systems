@@ -65,7 +65,6 @@ extensions = [
 
 external_toc_path = "sphinx/_toc.yml"
 external_projects_current_project = "amdsmi"
-external_projects_remote_repository = "" # uncomment to disable network requests if you encounter rate limits
 myst_fence_as_directive = ["mermaid"]
 # For substitutions in MyST Markdown files using Jinja-style
 # double-curly-braces.
@@ -77,19 +76,14 @@ myst_substitutions = {"AMDSMI_VERSION": version}
 
 # Builder-related settings
 exclude_patterns = [
+    "extension/**",
     "CLAUDE.md",
     "AGENTS.md",
 ]
-# suppress_warnings = ["etoc.toctree"]
 
 # Doxygen-related settings
 doxygen_root = DOCS_DIR / "doxygen"
-doxygen_project = {
-    "name": "AMD SMI C/C++ API reference",
-    "path": doxygen_root / "_out"/ "xml",
-}
-breathe_projects = {"amdsmi": doxygen_project["path"]}
-# breathe_projects_source = {"amdsmi": (AMDSMI_H.parent, [AMDSMI_H.name])}
+breathe_projects = {"amdsmi": doxygen_root / "_out" / "xml"}
 breathe_default_project = "amdsmi"
 breathe_domain_by_extension = {"h": "c"}
 amdsmi_doxygen_tagfile = doxygen_root / "_out" / "tagfile.xml"
@@ -106,7 +100,6 @@ def generate_doxyfile(_app, _config):
 
     replacements = {
         "@PROJECT_NUMBER@": version,
-        "@INPUT@": str(AMDSMI_H),
         "@OUTPUT_DIRECTORY@": str(doxygen_root / "_out"),
         "@GENERATE_TAGFILE@": str(amdsmi_doxygen_tagfile),
     }
