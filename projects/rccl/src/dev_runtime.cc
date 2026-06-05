@@ -8,6 +8,8 @@
 #include "dev_runtime.h"
 #include "comm.h"
 #include "nccl_device/core_tmp.h"
+#include "nccl_device/gin_barrier.h"
+#include "nccl_device/lsa_barrier.h"
 #include "rma/rma.h"
 #include "device.h"
 #include "sym_kernels.h"
@@ -15,12 +17,25 @@
 #include "group.h"
 #include "nccl_device.h"
 #include "utils.h"
+#if defined(NCCL_OS_WINDOWS)
+#include "gin/gin_host_win_stub.h"
+#else
 #include "gin/gin_host.h"
+#endif
 #include "argcheck.h"
 #include <mutex>
 
 NCCL_PARAM(WinStride, "WIN_STRIDE", -1);
 NCCL_PARAM(EnableVersionCheck, "ENABLE_VERSION_CHECK", 1);
+NCCL_PARAM(ElasticBufferRegister, "ELASTIC_BUFFER_REGISTER", 1);
+
+extern struct ncclDevCommCompat ncclDevCommCompat_v22902, ncclDevCommCompat_v22907, ncclDevCommCompat_v23000;
+
+// The order of entries in the array shouldn't matter (with the exception of the terminating nullptr)
+static struct ncclDevCommCompat *devCommCompat[] = {
+  &ncclDevCommCompat_v22902, &ncclDevCommCompat_v22907, &ncclDevCommCompat_v23000,
+  nullptr
+};
 
 // Global window map using intrusive address map
 // Uses ncclDevrWindow directly (vidmem as key, next pointer embedded in struct)
@@ -32,7 +47,7 @@ static ncclResult_t symWindowDestroy(struct ncclComm* comm, struct ncclWindow_vi
 struct ncclDevrMemory {
   int refCount;
   struct ncclDevrMemory* next;
-  CUmemGenericAllocationHandle memHandle;
+  CUmemGenericAllocationHandle* memHandles;
   void* primaryAddr; // What we hope is the VA of this memory's first mapping.
   size_t size;
   size_t bigOffset; // offset in big VA space
@@ -41,6 +56,15 @@ struct ncclDevrMemory {
   void* rmaHostWins[NCCL_GIN_MAX_CONNECTIONS];
   ncclGinWindow_t rmaDevWins[NCCL_GIN_MAX_CONNECTIONS];
   int winFlags;
+  // Maxmimum number of segments across all ranks in the communicator
+  int maxGlobalNumSegments;
+  int maxLsaNumSegments;
+  int numSegments;
+  bool hasSysmemSegment;
+  // True if any rank in the communicator has a sysmem segment
+  bool globalHasSysmemSegment;
+  size_t* segmentSizes;
+  int* segmentCounts;
 };
 
 struct ncclDevrWindowSorted {
@@ -74,6 +98,40 @@ static void listRemove(Obj* list, int* count, int index);
 
 NCCL_PARAM(LsaTeamSize, "LSA_TEAM_SIZE", 0)
 
+// Compute the LSA team size from the comm topology without any side effects.
+static int computeLsaSize(struct ncclComm* comm) {
+  if (comm->devrState.bigSize != 0) return comm->devrState.lsaSize;
+
+  // LSA needs to be the same size for all ranks, and it needs to represent
+  // a consecutive set of ranks.
+  int lsaSize = ncclParamLsaTeamSize();
+  if (comm->p2pCrossClique && comm->nvlDomainSize == comm->nRanks) {
+    // Single NVLD: all ranks share memory via fabric handles. Extend LSA to full domain.
+    // Multi-NVLD (with potentially unequal domain sizes) is not yet supported for cross-clique LSA
+    lsaSize = comm->nRanks;
+    INFO(NCCL_INIT, "LSA extended to full NVL domain: lsaSize=%d (cross-clique P2P)", lsaSize);
+  } else {
+    // Standard node-based gcd LSA calculation
+    int nodeSize = 1;
+    for (int r=1; r < comm->nRanks; r++) {
+      if (comm->rankToNode[r] == comm->rankToNode[r-1]) {
+        nodeSize += 1;
+      } else {
+        lsaSize = gcd(lsaSize, nodeSize);
+        nodeSize = 1;
+      }
+    }
+    lsaSize = gcd(lsaSize, nodeSize);
+  }
+
+  return lsaSize;
+}
+
+bool ncclDevrIsOneLsaTeam(struct ncclComm* comm) {
+  int lsaSize = computeLsaSize(comm);
+  return lsaSize == comm->nRanks; // Same as comm->nRanks / comm->devrState.lsaSize == 1
+}
+
 ncclResult_t ncclDevrInitOnce(struct ncclComm* comm) {
   ncclResult_t ret = ncclSuccess;
   struct ncclDevrState* devr = &comm->devrState;
@@ -81,17 +139,7 @@ ncclResult_t ncclDevrInitOnce(struct ncclComm* comm) {
 
   // LSA needs to be the same size for all ranks, and it needs to represent
   // a consecutive set of ranks.
-  int lsaSize = ncclParamLsaTeamSize();
-  int nodeSize = 1;
-  for (int r=1; r < comm->nRanks; r++) {
-    if (comm->rankToNode[r] == comm->rankToNode[r-1]) {
-      nodeSize += 1;
-    } else {
-      lsaSize = gcd(lsaSize, nodeSize);
-      nodeSize = 1;
-    }
-  }
-  lsaSize = gcd(lsaSize, nodeSize);
+  int lsaSize = computeLsaSize(comm);
   devr->lsaSize = lsaSize;
   devr->lsaSelf = comm->rank % lsaSize;
   devr->lsaRankList = (int*)malloc(devr->lsaSize*sizeof(int));
@@ -202,58 +250,123 @@ ncclResult_t ncclDevrFinalize(struct ncclComm* comm) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static ncclResult_t symMemoryMapLsaTeam(
-    struct ncclComm* comm, CUmemGenericAllocationHandle memHandle, size_t size, size_t bigOffset
-  ) {
-  ncclResult_t ret = ncclSuccess;
-  struct ncclDevrState* devr = &comm->devrState;
-  CUmemAccessDesc accessDesc = {};
-  union Message {
+// Message layout used for LSA team all-gather (one per rank per segment).
+struct symLsaMessage {
+  union {
     CUmemGenericAllocationHandle memHandle;
     CUmemFabricHandle fabricHandle;
   };
+  CUmemLocationType type;
+  size_t segmentSize;
+};
 
-  Message* messages = (Message*)calloc(devr->lsaSize, sizeof(Message));
+static ncclResult_t symMemorySetAccessForVASegment(struct ncclComm* comm, symLsaMessage* message, CUdeviceptr addr) {
+  CUmemAccessDesc accessDesc;
+  accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+  accessDesc.location.id = comm->cudaDev;
+  accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+  CUCHECK(cuMemSetAccess(addr, message->segmentSize, &accessDesc, 1));
+  return ncclSuccess;
+}
+
+static ncclResult_t symMemoryExportSegmentHandle(
+    struct ncclComm* comm, symLsaMessage* msg,
+    CUmemGenericAllocationHandle memHandle, size_t segmentSize
+  ) {
+  ncclResult_t ret = ncclSuccess;
+  CUmemAllocationProp prop;
+  CUCHECKGOTO(cuMemGetAllocationPropertiesFromHandle(&prop, memHandle), ret, fail);
+  msg->type = prop.location.type;
+  msg->segmentSize = segmentSize;
   if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
-    messages[devr->lsaSelf].memHandle = memHandle;
+    msg->memHandle = memHandle;
   } else {
-    CUCHECKGOTO(cuMemExportToShareableHandle(&messages[devr->lsaSelf].fabricHandle, memHandle, ncclCuMemHandleType, 0), ret, fail);
+    CUCHECKGOTO(cuMemExportToShareableHandle(&msg->fabricHandle, memHandle, ncclCuMemHandleType, 0), ret, fail);
+  }
+fail:
+  return ret;
+}
+
+static ncclResult_t symMemoryImportAndMapSegmentHandle(
+    struct ncclComm* comm, int r, CUdeviceptr addr, symLsaMessage* msg,
+    CUmemGenericAllocationHandle memHandle
+  ) {
+  ncclResult_t ret = ncclSuccess;
+  struct ncclDevrState* devr = &comm->devrState;
+  CUmemGenericAllocationHandle impHandle;
+  if (r == devr->lsaSelf) {
+    impHandle = memHandle;
+  } else {
+    if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
+      int fd = -1;
+      NCCLCHECKGOTO(ncclProxyClientGetFdBlocking(comm, devr->lsaRankList[r], msg, &fd), ret, fail);
+      CUCHECKGOTO(cuMemImportFromShareableHandle(&impHandle, reinterpret_cast<void*>((uintptr_t)fd), ncclCuMemHandleType), ret, fail);
+      SYSCHECKGOTO(close(fd), "close", ret, fail);
+    } else {
+      CUCHECKGOTO(cuMemImportFromShareableHandle(&impHandle, (void*)&msg->fabricHandle, ncclCuMemHandleType), ret, fail);
+    }
+  }
+  CUCHECKGOTO(cuMemMap(addr, msg->segmentSize, 0, impHandle, 0), ret, fail);
+  NCCLCHECKGOTO(symMemorySetAccessForVASegment(comm, msg, addr), ret, fail);
+  if (r != devr->lsaSelf) {
+    CUCHECKGOTO(cuMemRelease(impHandle), ret, fail);
+  }
+fail:
+  return ret;
+}
+
+static ncclResult_t symMemoryImportAndMapSegmentsForRank(
+    struct ncclComm* comm, int r, symLsaMessage* messages, int maxSegments,
+    int numSegments, CUmemGenericAllocationHandle* memHandles, size_t bigOffset
+  ) {
+  ncclResult_t ret = ncclSuccess;
+  struct ncclDevrState* devr = &comm->devrState;
+  uintptr_t base = reinterpret_cast<uintptr_t>(devr->lsaFlatBase);
+  uintptr_t addr = base + r * devr->bigSize + bigOffset;
+  for (int segment = 0; segment < numSegments; segment++) {
+    symLsaMessage* msg = messages + r * maxSegments + segment;
+    CUmemGenericAllocationHandle handle = (r == devr->lsaSelf) ? memHandles[segment] : (CUmemGenericAllocationHandle) 0ULL;
+    NCCLCHECKGOTO(symMemoryImportAndMapSegmentHandle(comm, r, reinterpret_cast<CUdeviceptr>(addr), msg, handle), ret, fail);
+    addr += msg->segmentSize;
+  }
+fail:
+  return ret;
+}
+
+static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMemory* mem) {
+  ncclResult_t ret = ncclSuccess;
+  struct ncclDevrState* devr = &comm->devrState;
+  symLsaMessage* messages = nullptr;
+  int* segmentCounts = mem->segmentCounts;  // filled from global allgather in symMemoryObtain
+  int maxSegments = 0;
+  const int numSegments = mem->numSegments;
+  size_t* segmentSizes = mem->segmentSizes;
+
+  for (int rank = 0; rank < devr->lsaSize; rank++) {
+    maxSegments = std::max(maxSegments, segmentCounts[rank]);
+  }
+  mem->maxLsaNumSegments = maxSegments;
+
+  NCCLCHECKGOTO(ncclCalloc(&messages, (size_t)devr->lsaSize * maxSegments), ret, fail);
+
+  for (int segment = 0; segment < numSegments; segment++) {
+    symLsaMessage* msg = messages + devr->lsaSelf * maxSegments + segment;
+    NCCLCHECKGOTO(symMemoryExportSegmentHandle(comm, msg, mem->memHandles[segment], segmentSizes[segment]), ret, fail);
+    INFO(NCCL_REG, "[%d] Segment %d, Type : %d, numSegments : %d, Segment size : %ld, memHandle : %lld", devr->lsaSelf, segment, msg->type, numSegments, msg->segmentSize, msg->memHandle);
   }
 
-  NCCLCHECKGOTO(bootstrapIntraNodeAllGather(comm->bootstrap, devr->lsaRankList, devr->lsaSelf, devr->lsaSize, messages, sizeof(Message)), ret, fail);
+  NCCLCHECKGOTO(bootstrapIntraNodeAllGather(comm->bootstrap, devr->lsaRankList, devr->lsaSelf, devr->lsaSize, messages, sizeof(symLsaMessage) * maxSegments), ret, fail);
 
   if (devr->lsaFlatBase == nullptr) { // Create on first need.
     CUdeviceptr addr;
     CUCHECKGOTO(cuMemAddressReserve(&addr, devr->lsaSize*devr->bigSize, NCCL_MAX_PAGE_SIZE, 0, 0), ret, fail);
     devr->lsaFlatBase = reinterpret_cast<void*>(addr);
   }
-  accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-  accessDesc.location.id = comm->cudaDev;
-  accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+
   for (int r = 0; r < devr->lsaSize; r++) {
-    CUmemGenericAllocationHandle impHandle;
-    if (r == devr->lsaSelf) {
-      impHandle = memHandle;
-    } else {
-      if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
-        int fd = -1;
-        NCCLCHECKGOTO(ncclProxyClientGetFdBlocking(comm, devr->lsaRankList[r], &messages[r], &fd), ret, fail);
-        CUCHECKGOTO(cuMemImportFromShareableHandle(&impHandle, reinterpret_cast<void*>((uintptr_t)fd), ncclCuMemHandleType), ret, fail);
-        SYSCHECKGOTO(close(fd), "close", ret, fail);
-      } else {
-        CUCHECKGOTO(cuMemImportFromShareableHandle(&impHandle, (void*)&messages[r].fabricHandle, ncclCuMemHandleType), ret, fail);
-      }
-    }
-    uintptr_t base = reinterpret_cast<uintptr_t>(devr->lsaFlatBase);
-    CUdeviceptr addr = reinterpret_cast<CUdeviceptr>(base + r * devr->bigSize + bigOffset);
-    // CUdeviceptr addr = reinterpret_cast<uintptr_t>((char*)devr->lsaFlatBase + r*devr->bigSize + bigOffset);
-    CUCHECKGOTO(cuMemMap(addr, size, 0, impHandle, 0), ret, fail);
-    CUCHECKGOTO(cuMemSetAccess(addr, size, &accessDesc, 1), ret, fail);
-    if (r != devr->lsaSelf) {
-      CUCHECKGOTO(cuMemRelease(impHandle), ret, fail);
-    }
+    NCCLCHECKGOTO(symMemoryImportAndMapSegmentsForRank(comm, r, messages, maxSegments, segmentCounts[r], mem->memHandles, mem->bigOffset), ret, fail);
   }
-  // Ensure everyone has imported my mem handle.
+  // Ensure everyone has imported my mem handles.
   NCCLCHECKGOTO(bootstrapIntraNodeBarrier(comm->bootstrap, devr->lsaRankList, devr->lsaSelf, devr->lsaSize, 0xbeef), ret, fail);
 leave:
   free(messages);
@@ -267,8 +380,13 @@ static ncclResult_t symBindTeamMemory(
   ) {
   if (comm->nvlsSupport && tm->mcBasePtr != nullptr) {
   #if CUDART_VERSION >= 12010
-    INFO(NCCL_NVLS, "Binding multicast memory at big=%lx to team {%d x %d}", mem->bigOffset, tm->team.nRanks, tm->team.stride);
-    CUCHECK(cuMulticastBindMem(tm->mcHandle, mem->bigOffset, mem->memHandle, 0, mem->size, 0));
+      // Multimem teams are currently unsupported for memory containing CPU-backed physical segments
+      if (mem->globalHasSysmemSegment) {
+        INFO(NCCL_NVLS, "Skipping bind multicast for maxGlobalNumSegments = %d, big=%lx, team {%d x %d}", mem->maxGlobalNumSegments, mem->bigOffset, tm->team.nRanks, tm->team.stride);
+      } else {
+        INFO(NCCL_NVLS, "Binding multicast memory at big=%lx to team {%d x %d}", mem->bigOffset, tm->team.nRanks, tm->team.stride);
+        CUCHECK(cuMulticastBindAddr(tm->mcHandle, mem->bigOffset, reinterpret_cast<CUdeviceptr>(mem->primaryAddr), mem->size, 0));
+      }
   #endif
   }
   return ncclSuccess;
@@ -277,9 +395,9 @@ static ncclResult_t symBindTeamMemory(
 static ncclResult_t symUnbindTeamMemory(
     struct ncclComm* comm, struct ncclDevrTeam* tm, struct ncclDevrMemory* mem
   ) {
-  if (comm->nvlsSupport && tm->mcBasePtr != nullptr) {
+  if (comm->nvlsSupport && tm->mcBasePtr != nullptr && !mem->globalHasSysmemSegment) {
   #if CUDART_VERSION >= 12010
-    CUCHECK(cuMulticastUnbind(tm->mcHandle, comm->cudaDev, mem->bigOffset, mem->size));
+      CUCHECK(cuMulticastUnbind(tm->mcHandle, comm->cudaDev, mem->bigOffset, mem->size));
   #endif
   }
   return ncclSuccess;
@@ -312,6 +430,8 @@ static ncclResult_t symTeamObtain(
         return ncclSuccess;
       }
       break; // Need to enable multimem
+    } else {
+      t = t->next;
     }
   }
 
@@ -409,8 +529,12 @@ static void symTeamDestroyAll(struct ncclComm* comm) {
 }
 
 static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrMemory* mem) {
-  NCCLCHECK(ncclGinConnectOnce(comm, comm->globalGinSupport, 0)); // Will allocate the default number of contexts if needed.
-  NCCLCHECK(ncclGinRegister(comm, mem->primaryAddr, mem->size, mem->ginHostWins, mem->ginDevWins, mem->winFlags));
+  if (mem->hasSysmemSegment) {
+    WARN("Window registration of addresses that contain CPU-backed physical segments is currently not supported with GIN.");
+    return ncclInvalidArgument;
+  }
+  NCCLCHECK(ncclGinRegister(comm, mem->primaryAddr, mem->size, mem->ginHostWins, mem->ginDevWins, mem->winFlags,
+                            mem->maxGlobalNumSegments > 1));
   return ncclSuccess;
 }
 
@@ -424,36 +548,86 @@ static ncclResult_t symMemoryRegisterRma(struct ncclComm* comm, struct ncclDevrM
 // Due to multicast binds for each pre-exiting team, this function requires
 // caller do a world barrier before returning to user.
 static ncclResult_t symMemoryObtain(
-    struct ncclComm* comm, CUmemGenericAllocationHandle memHandle, void* memAddr, size_t size, int winFlags,
-    struct ncclDevrMemory** outMem
+    struct ncclComm* comm, CUmemGenericAllocationHandle* memHandles, int numSegments, void* memAddr, size_t size, int winFlags,
+    struct ncclDevrMemory** outMem, bool hasSysmemSegment = false
   ) {
   ncclResult_t ret = ncclSuccess;
   struct ncclDevrState* devr = &comm->devrState;
   int64_t bigOffset = 0;
+  struct segmentInfo { int numSegments; bool hasSysmemSegment; };
+  struct segmentInfo* globalSegmentInfo = nullptr;
+  const int globalLsaTeamBaseIdx = devr->lsaSize * (comm->rank / devr->lsaSize);
 
   struct ncclDevrMemory* mem = devr->memHead;
   while (mem != nullptr) {
-    if (mem->memHandle == memHandle) {
-      CUCHECKIGNORE(cuMemRelease(memHandle));
-      goto leave;
+    if (mem->primaryAddr == memAddr && mem->size == size && mem->numSegments == numSegments) {
+      // Check if all memHandles that [memAddr, memAddr + size] spans also match
+      bool allMatch = true;
+      for (int segment = 0; segment < mem->numSegments; segment++) {
+        if (mem->memHandles[segment] != memHandles[segment]) {
+          allMatch = false;
+          break;
+        }
+      }
+      if (allMatch) {
+        for (int segment = 0; segment < mem->numSegments; segment++) {
+          CUCHECKIGNORE(cuMemRelease(memHandles[segment]));
+        }
+        goto leave;
+      }
     }
     mem = mem->next;
   }
 
   // New memory.
-  mem = (struct ncclDevrMemory*)malloc(sizeof(struct ncclDevrMemory));
-  mem->refCount = 0;
-  mem->memHandle = memHandle;
+  NCCLCHECKGOTO(ncclCalloc(&mem, 1), ret, fail_mem);
+  NCCLCHECKGOTO(ncclCalloc(&mem->memHandles, numSegments), ret, fail_mem);
+  memcpy(mem->memHandles, memHandles, sizeof(*mem->memHandles) * numSegments);
   mem->primaryAddr = memAddr;
   mem->size = size;
   mem->winFlags = winFlags;
+  mem->hasSysmemSegment = hasSysmemSegment;
+  mem->numSegments = numSegments;
+
+  NCCLCHECKGOTO(ncclCalloc(&mem->segmentSizes, numSegments), ret, fail_mem);
+  NCCLCHECKGOTO(ncclCalloc(&globalSegmentInfo, comm->nRanks), ret, fail_mem);
+
+  if (numSegments > 1) {
+    size_t offset = 0;
+    for (int segment = 0; segment < numSegments; segment++) {
+      size_t baseSendSize = 0;
+      CUdeviceptr segmentStart = reinterpret_cast<CUdeviceptr>(reinterpret_cast<char*>(mem->primaryAddr) + offset);
+      CUCHECKGOTO(cuMemGetAddressRange(NULL, &baseSendSize, segmentStart), ret, fail_mem);
+      mem->segmentSizes[segment] = baseSendSize;
+      offset += baseSendSize;
+    }
+  } else {
+    mem->segmentSizes[0] = size;
+  }
+
+  // We need max segments and global sysmem info to selectively disable some features
+  globalSegmentInfo[comm->rank].numSegments = numSegments;
+  globalSegmentInfo[comm->rank].hasSysmemSegment = hasSysmemSegment;
+  NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, globalSegmentInfo, sizeof(*globalSegmentInfo)), ret, fail_mem);
+  mem->globalHasSysmemSegment = false;
+  for (int r = 0; r < comm->nRanks; r++) {
+    if (mem->maxGlobalNumSegments < globalSegmentInfo[r].numSegments) {
+      mem->maxGlobalNumSegments = globalSegmentInfo[r].numSegments;
+    }
+    if (globalSegmentInfo[r].hasSysmemSegment) mem->globalHasSysmemSegment = true;
+  }
+
+  NCCLCHECKGOTO(ncclCalloc(&mem->segmentCounts, devr->lsaSize), ret, fail_mem);
+  for (int r = 0; r < devr->lsaSize; r++) {
+    mem->segmentCounts[r] = globalSegmentInfo[globalLsaTeamBaseIdx + r].numSegments;
+  }
 
   // Grab offset in the big space.
   NCCLCHECKGOTO(ncclSpaceAlloc(&devr->bigSpace, devr->bigSize, size, devr->granularity, &bigOffset), ret, fail_mem);
   mem->bigOffset = bigOffset;
 
   // Map unicast addresses into flat VA space for lsa team.
-  NCCLCHECKGOTO(symMemoryMapLsaTeam(comm, memHandle, size, bigOffset), ret, fail_mem_space);
+  NCCLCHECKGOTO(symMemoryMapLsaTeam(comm, mem), ret, fail_mem_space);
 
   // If our caller doesn't have a VA then we'll use the LSA mapping.
   if (mem->primaryAddr == nullptr) {
@@ -472,7 +646,7 @@ static ncclResult_t symMemoryObtain(
   // ginEnabled is set in ncclDevrCommCreateInternal, which might not be called for RMA proxy
   // so we introduce rmaProxyEnabled to track if RMA proxy is enabled
   devr->rmaProxyEnabled = devr->nLsaTeams > 1 && comm->config.numRmaCtx > 0 && comm->globalRmaProxySupport;
-  if (devr->rmaProxyEnabled) {
+  if (devr->rmaProxyEnabled && mem->maxGlobalNumSegments == 1) {
     NCCLCHECKGOTO(symMemoryRegisterRma(comm, mem), ret, fail_mem_space_teams);
   }
 
@@ -483,6 +657,7 @@ static ncclResult_t symMemoryObtain(
 leave:
   mem->refCount += 1;
   *outMem = mem;
+  free(globalSegmentInfo);
   return ret;
 
 fail_mem_space_teams:
@@ -492,7 +667,13 @@ fail_mem_space_teams:
 fail_mem_space:
   ncclSpaceFree(&devr->bigSpace, bigOffset, size);
 fail_mem:
+  if (mem != nullptr) {
+    free(mem->memHandles);
+    free(mem->segmentSizes);
+    free(mem->segmentCounts);
+  }
   free(mem);
+  free(globalSegmentInfo);
 //fail:
   return ret;
 }
@@ -505,7 +686,7 @@ static void symMemoryDropRef(
     if (devr->ginEnabled) {
       ncclGinDeregister(comm, mem->ginHostWins);
     }
-    if (devr->rmaProxyEnabled) {
+    if (devr->rmaProxyEnabled && mem->maxGlobalNumSegments == 1) {
       ncclRmaProxyDeregister(comm, mem->rmaHostWins);
     }
     for (struct ncclDevrTeam* t = devr->teamHead; t != nullptr; t = t->next) {
@@ -513,17 +694,28 @@ static void symMemoryDropRef(
     }
     for (int r = 0; r < devr->lsaSize; r++) {
       uintptr_t base = reinterpret_cast<uintptr_t>(devr->lsaFlatBase);
-      CUdeviceptr addr = reinterpret_cast<CUdeviceptr>(base + r * devr->bigSize + mem->bigOffset);
-      // CUdeviceptr addr = reinterpret_cast<uintptr_t>((char*)devr->lsaFlatBase + r*devr->bigSize + mem->bigOffset);
-      CUCHECKIGNORE(cuMemUnmap(addr, mem->size));
+      uintptr_t addr = base + r * devr->bigSize + mem->bigOffset;
+      for (int idx = 0; idx < mem->segmentCounts[r]; idx++) {
+        CUdeviceptr tmpBase;
+        size_t tmpBaseSize;
+        CUCHECKIGNORE(cuMemGetAddressRange(&tmpBase, &tmpBaseSize, reinterpret_cast<CUdeviceptr>(addr)));
+        CUCHECKIGNORE(cuMemUnmap(reinterpret_cast<CUdeviceptr>(addr), tmpBaseSize));
+        addr = addr + tmpBaseSize;
+      }
     }
+
     ncclSpaceFree(&devr->bigSpace, mem->bigOffset, mem->size);
-    CUCHECKIGNORE(cuMemRelease(mem->memHandle));
+    for (int segment = 0; segment < mem->numSegments; segment++) {
+      CUCHECKIGNORE(cuMemRelease(mem->memHandles[segment]));
+    }
 
     struct ncclDevrMemory** ptr = &devr->memHead;
     while (*ptr != mem) ptr = &(*ptr)->next;
     *ptr = mem->next; // Remove from list.
 
+    free(mem->segmentCounts);
+    free(mem->segmentSizes);
+    free(mem->memHandles);
     free(mem);
   }
 }
@@ -668,12 +860,15 @@ ncclResult_t ncclDevrWindowRegisterInGroup(
   ncclResult_t ret = ncclSuccess;
   CUdeviceptr memAddr = 0;
   size_t memSize = 0;
-  CUmemGenericAllocationHandle memHandle = 0x0ULL;
+  CUmemGenericAllocationHandle* memHandles = nullptr;
   size_t memOffset;
   struct ncclDevrMemory* mem = nullptr;
   cudaStream_t stream = nullptr;
   void* localRegHandle = nullptr;
   struct ncclDevrWindow* winHost = nullptr;
+  int numSegments = 0;
+  size_t offset = 0;
+  bool hasSysmemSegment = false;
 
   NCCLCHECKGOTO(ncclCommRegister(comm, userPtr, userSize, &localRegHandle), ret, fail);
 
@@ -688,21 +883,47 @@ ncclResult_t ncclDevrWindowRegisterInGroup(
     NCCLCHECKGOTO(ncclSymkInitOnce(comm), ret, fail);
   }
 
-  // Get underlying cumem handle:
-  CUCHECKGOTO(cuMemGetAddressRange(&memAddr, &memSize, reinterpret_cast<CUdeviceptr>(userPtr)), ret, fail_locReg);
+  // Get underlying cumem base address and number of mapped physical segments that userPtr spans
+  NCCLCHECKGOTO(ncclCuMemGetAddressRange(reinterpret_cast<CUdeviceptr>(userPtr), userSize, &memAddr, &memSize, &numSegments, &hasSysmemSegment), ret, fail_locReg);
+  NCCLCHECKGOTO(ncclCalloc(&memHandles, numSegments), ret, fail_locReg);
+
+  if (hasSysmemSegment) {
+    if (!ncclParamElasticBufferRegister()) {
+      WARN("VA represented by {userPtr = %p, size = %zu} contains CPU-backed physical segments, but NCCL_ELASTIC_BUFFER_REGISTER is set to 0. Please set NCCL_ELASTIC_BUFFER_REGISTER=1 and retry window registration", userPtr, userSize);
+      ret = ncclInvalidArgument;
+      goto fail_locReg;
+    }
+#if CUDART_VERSION >= 12080
+    else if (comm->MNNVL) {
+        int multiNodeLsaSupported = 0;
+        CUCHECKGOTO(cuDeviceGetAttribute(&multiNodeLsaSupported, CU_DEVICE_ATTRIBUTE_HOST_NUMA_MULTINODE_IPC_SUPPORTED, comm->cudaDev), ret, fail_locReg);
+        if (!multiNodeLsaSupported) {
+          WARN("VA represented by {userPtr = %p, size = %zu} contains CPU-backed physical segments, but the LSA team does not support multi-node IPC on CPU-backed buffers. Please retry by setting NCCL_MNNVL_ENABLE=0", userPtr, userSize);
+          ret = ncclInvalidArgument;
+          goto fail_locReg;
+        }
+    }
+#endif
+  }
+
   memOffset = reinterpret_cast<uintptr_t>(userPtr) - reinterpret_cast<uintptr_t>(memAddr);
-  // memOffset = reinterpret_cast<CUdeviceptr>(userPtr) - memAddr;
   if (memOffset%NCCL_WIN_REQUIRED_ALIGNMENT != 0) {
     WARN("Window address must be suitably aligned.");
     ret = ncclInvalidArgument;
     goto fail;
   }
 
-  CUCHECKGOTO(cuMemRetainAllocationHandle(&memHandle, reinterpret_cast<void*>(memAddr)), ret, fail_locReg);
+  // Retain all handles
+  for (int segment = 0; segment < numSegments; segment++) {
+    size_t baseSendSize;
+    CUCHECK(cuMemGetAddressRange(nullptr, &baseSendSize, reinterpret_cast<CUdeviceptr>(reinterpret_cast<char*>(memAddr) + offset)));
+    CUCHECKGOTO(cuMemRetainAllocationHandle(&memHandles[segment], (void *) (reinterpret_cast<char*>(memAddr) + offset)), ret, fail_locReg);
+    offset += baseSendSize;
+  }
 
-  // Trade cumem handle for ncclDevrMemory*
-  NCCLCHECKGOTO(symMemoryObtain(comm, memHandle, (void*)memAddr, memSize, winFlags, &mem), ret, fail_locReg_memHandle);
-  memHandle = 0x0; // symMemoryObtain took our reference
+  // Trade cumem handles for ncclDevrMemory*
+  NCCLCHECKGOTO(symMemoryObtain(comm, memHandles, numSegments, (void*)memAddr, memSize, winFlags, &mem, hasSysmemSegment), ret, fail_locReg_memHandle);
+  memset(memHandles, 0, numSegments * sizeof(*memHandles)); // symMemoryObtain took our reference
 
   CUDACHECKGOTO(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), ret, fail);
 
@@ -725,6 +946,7 @@ ncclResult_t ncclDevrWindowRegisterInGroup(
   }
 
   CUDACHECKIGNORE(cudaStreamDestroy(stream));
+  free(memHandles);
   return ret;
 
 fail_locReg_memHandle_mem_stream_win:
@@ -735,7 +957,10 @@ fail_locReg_memHandle_mem_stream:
   CUDACHECKIGNORE(cudaStreamDestroy(stream));
   symMemoryDropRef(comm, mem);
 fail_locReg_memHandle:
-  if (memHandle != 0x0) { CUCHECKIGNORE(cuMemRelease(memHandle)); }
+  for (int idx = 0; idx < numSegments; idx++) {
+    if (memHandles[idx] != 0x0ULL) { CUCHECKIGNORE(cuMemRelease(memHandles[idx])); }
+  }
+  free(memHandles);
 fail_locReg:
   ncclCommDeregister(comm, localRegHandle);
 fail:
@@ -752,9 +977,11 @@ static ncclResult_t deepCopyDevCommRequirements(
   struct ncclTeamRequirements **dstTeam;
 
   NCCLCHECK(ncclCalloc(dst, 1));
+  **dst = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
 
-  /* copy the entire struct now and update linked lists later */
-  **dst = *src;
+  // Copy the entire struct now and update linked lists later.  Because of backwards compatibility, the source may
+  // actually be smaller than the type would imply.
+  memcpy(*dst, src, src->size);
 
   dstRes = &(*dst)->resourceRequirementsList;
   for (struct ncclDevResourceRequirements* rr = src->resourceRequirementsList; rr != nullptr; rr = rr->next) {
@@ -804,7 +1031,8 @@ void freeDevCommRequirements(
 
 bool ncclGinResourcesRequested(struct ncclDevCommRequirements const* reqs) {
   bool requestedGinResources = reqs->ginSignalCount > 0 || reqs->ginCounterCount > 0 ||
-                               reqs->barrierCount > 0 || reqs->railGinBarrierCount > 0;
+                               reqs->barrierCount > 0 || reqs->railGinBarrierCount > 0 ||
+                               reqs->worldGinBarrierCount > 0;
 
   struct ncclDevResourceRequirements* node = reqs->resourceRequirementsList;
   while (!requestedGinResources && node != nullptr) {
@@ -815,12 +1043,64 @@ bool ncclGinResourcesRequested(struct ncclDevCommRequirements const* reqs) {
   return requestedGinResources;
 }
 
-NCCL_PARAM(GinExclusiveContexts, "GIN_EXCLUSIVE_CONTEXTS", -1);
+#if defined(NCCL_OS_LINUX)
+#include "nccl_device/gin/gdaki/gin_gdaki_device_host_common.h"
+static void ncclDevCommGdakiDump(void* handle) {
+  struct ncclGinGdakiGPUContext ctx;
+  if (cudaMemcpy(&ctx, handle, sizeof(ctx), cudaMemcpyDeviceToHost) == cudaSuccess) {
+    printf("    GDAKI qp %p companion qp %p sink buffer lkey %x\n", ctx.gdqp, ctx.companion_gdqp, ctx.sink_buffer_lkey);
+    printf("    GDAKI counters %p rkeys %p lkey %x offset %d\n", ctx.counters_table.buffer,
+        ctx.counters_table.rkeys, ctx.counters_table.lkey, ctx.counters_table.offset);
+    printf("    GDAKI signals  %p rkeys %p lkey %x offset %d\n", ctx.signals_table.buffer,
+        ctx.signals_table.rkeys, ctx.signals_table.lkey, ctx.signals_table.offset);
+  }
+}
+
+#include "nccl_device/gin/proxy/gin_proxy_device_host_common.h"
+static void ncclDevCommProxyDump(void* handle) {
+  ncclGinProxyGpuCtx_t ctx;
+  if (cudaMemcpy(&ctx, handle, sizeof(ctx), cudaMemcpyDeviceToHost) == cudaSuccess) {
+    printf("    PROXY nranks %d queue size %d queues %p\n", ctx.nranks, ctx.queueSize, ctx.queues);
+    printf("    PROXY pis %p cis %p counters %p signals %p\n", ctx.pis, ctx.cis, ctx.counters, ctx.signals);
+  }
+}
+#elif defined(NCCL_OS_WINDOWS)
+static void ncclDevCommGdakiDump(void* handle) {
+  printf("    GDAKI handle %p (detailed dump not available on Windows)\n", handle);
+}
+static void ncclDevCommProxyDump(void* handle) {
+  printf("    PROXY handle %p (detailed dump not available on Windows)\n", handle);
+}
+#endif /* !NCCL_OS_WINDOWS */
+
+void ncclDevCommDump(struct ncclDevComm* devComm) {
+  printf("**** Dev Comm Dump %p ****\n", devComm);
+  printf(" Rank %d/%d CPC32 %d\n", devComm->rank, devComm->nRanks, devComm->nRanks_rcp32);
+  printf(" LSA Rank %d/%d CPC32 %d\n", devComm->lsaRank, devComm->lsaSize, devComm->lsaSize_rcp32);
+  printf("\n");
+  printf(" GIN\n");
+  printf("  Mode %s\n", devComm->ginIsRailed ? "Rail" : "Full");
+  printf("  Connections %d\n", devComm->ginConnectionCount);
+  for (int c=0; c<devComm->ginConnectionCount; c++) {
+    printf("   [%d] %d %p\n", c, devComm->ginNetDeviceTypes[c], devComm->ginHandles[c]);
+    if (devComm->ginNetDeviceTypes[c] == NCCL_GIN_TYPE_GDAKI) ncclDevCommGdakiDump(devComm->ginHandles[c]);
+    if (devComm->ginNetDeviceTypes[c] == NCCL_GIN_TYPE_PROXY) ncclDevCommProxyDump(devComm->ginHandles[c]);
+  }
+  printf("  Signals  %d shadows %p\n", devComm->ginSignalCount, devComm->ginSignalShadows);
+  printf("  Contexts %d\n", devComm->ginContextCount);
+  printf("\n");
+  printf(" Abort flag %p\n", devComm->abortFlag);
+  printf(" LSA Barriers count %d handle %d\n", devComm->lsaBarrier.nBarriers, devComm->lsaBarrier.bufHandle);
+  printf(" Hybrid Barriers count %d LSA handle %d GIN Rail Barrier signal0 %d\n", devComm->hybridLsaBarrier.nBarriers,
+         devComm->hybridLsaBarrier.bufHandle, devComm->hybridRailGinBarrier.signal0);
+  printf(" GIN Rail Barrier signal0 %d\n", devComm->railGinBarrier.signal0);
+  printf(" GIN World Barrier signal0 %d\n", devComm->worldGinBarrier.signal0);
+}
 
 ncclResult_t ncclDevrCommCreateInternal(
     struct ncclComm* comm,
-    struct ncclDevCommRequirements const* reqs, struct ncclDevComm* outDevComm, bool isInternal,
-    ncclResult_t (*outDevCommCopyCB)(struct ncclDevComm const* tmpDevComm, void* out)
+    struct ncclDevCommRequirements* reqs, struct ncclDevComm* outDevComm, bool isInternal,
+    struct ncclDevCommCompat* devCompat
   ) {
   ncclResult_t ret = ncclSuccess;
   struct ncclDevrState* devr = &comm->devrState;
@@ -829,22 +1109,26 @@ ncclResult_t ncclDevrCommCreateInternal(
   bool ginActivated = false;
   struct ncclDevrTeam* tmLsa;
   size_t bufSizeTotal;
-  int nGinConnections = 0;
-  int nGinContexts = 0;
+  int nGinContexts = reqs->ginContextCount;
   int ginSignalTotal = 0, ginCounterTotal = 0;
   struct ncclDevResourceRequirements* resReqsHead = reqs->resourceRequirementsList;
   struct ncclDevResourceRequirements lsaBarReq;
+  struct ncclDevResourceRequirements hybridLsaBarrierReq;
   cudaStream_t stream = nullptr;
   struct ncclDevResourceRequirements railGinBarrierReq;
+  struct ncclDevResourceRequirements hybridRailGinBarrierReq;
+  struct ncclDevResourceRequirements worldGinBarrierReq;
   CUmemGenericAllocationHandle memHandle = 0x0;
   struct ncclDevrMemory* mem = nullptr;
   struct ncclDevrWindow* win = nullptr;
   struct ncclWindow_vidmem* winHost = nullptr;
   size_t ginSignalShadowsOffset = 0;
-  bool ginExclusiveContexts = false;
-  void* outDevCommPreserve;
+  void* outDevCommPreserve = nullptr;
   struct ncclDevComm outDevCommTmp;
 
+  // This function always operates on the current version of the ncclDevResourceRequirements structure, thanks
+  // to the deepCopyDevCommRequirements() function, so version checks are not needed.  The data in reqs can also
+  // be changed by this function, which is again OK thanks to the fact that it's not a user-supplied structure.
   ncclGinConnectionType_t requestedConnectionType = reqs->ginConnectionType;
 
   if (reqs->ginForceEnable) {
@@ -871,10 +1155,6 @@ ncclResult_t ncclDevrCommCreateInternal(
         WARN("User requested GIN connection type NCCL_GIN_CONNECTION_FULL but the communicator supports only NCCL_GIN_CONNECTION_RAIL");
         return ncclInvalidArgument;
       }
-      if (comm->sharedRes->ginState.ginConnectionType == NCCL_GIN_CONNECTION_RAIL) {
-        WARN("User requested GIN connection type NCCL_GIN_CONNECTION_FULL but the communicator is already connected with NCCL_GIN_CONNECTION_RAIL");
-        return ncclInvalidArgument;
-      }
     }
 
     ginActivated = !devr->ginEnabled;
@@ -882,58 +1162,31 @@ ncclResult_t ncclDevrCommCreateInternal(
   }
 
   if (ginActivated) {
-    NCCLCHECKGOTO(ncclGinConnectOnce(comm, requestedConnectionType, reqs->ginContextCount, reqs->ginQueueDepth), ret, fail);
+    NCCLCHECKGOTO(ncclGinConnectOnce(comm), ret, fail);
     // Register all preexisting memories with GIN. Update the windows later when
     // we have a stream.
     for (struct ncclDevrMemory* mem = devr->memHead; mem != nullptr; mem = mem->next) {
       NCCLCHECKGOTO(symMemoryRegisterGin(comm, mem), ret, fail);
     }
   }
-  if (devr->ginEnabled) {
-    nGinConnections = comm->sharedRes->ginState.ginCommCount;
-
-    if (ncclParamGinExclusiveContexts() != -1)
-      ginExclusiveContexts = ncclParamGinExclusiveContexts();
-    else
-      ginExclusiveContexts = reqs->ginExclusiveContexts;
-    if (ginExclusiveContexts) {
-      int unallocated = comm->sharedRes->ginState.ctxLastExclusive - comm->sharedRes->ginState.ctxFirstAvailable;
-      nGinContexts = reqs->ginContextCount;
-      if (nGinContexts > unallocated) {
-        WARN("Requested number of exclusive GIN contexts (%d) exceeds the unallocated count (%d). Use NCCL_GIN_NCONTEXTS to increase the limit", nGinContexts, unallocated);
-        ret = ncclInvalidArgument;
-        goto fail;
-      }
-    } else {
-      nGinContexts = std::min(reqs->ginContextCount, comm->sharedRes->ginState.ctxLastExclusive);
-      if (nGinContexts == 0) {
-        WARN("No shared contexts are available (%d requested) as all have been allocated for exclusive use. Use NCCL_GIN_NCONTEXTS to increase the limit", reqs->ginContextCount);
-        ret = ncclInvalidArgument;
-        goto fail;
-      }
-      if (nGinContexts < reqs->ginContextCount) {
-        INFO(NCCL_INIT|NCCL_NET,
-             "Capping the number of GIN contexts to %d (%d requested). Use NCCL_GIN_NCONTEXTS to increase the limit",
-             nGinContexts, reqs->ginContextCount);
-      }
-    }
-  }
 
   // If we have a copy callback for backwards compatibility, we use a temporary buffer for the devComm and, once we're
   // finished, we let the callback copy the data over.
-  if (outDevCommCopyCB) {
+  if (devCompat && devCompat->devCommCopyNewToOld) {
     outDevCommPreserve = outDevComm;
     outDevComm = &outDevCommTmp;
   }
 
   memset(outDevComm, 0, sizeof(*outDevComm));
+  outDevComm->magic = NCCL_API_MAGIC;
+  outDevComm->version = reqs->version;
   outDevComm->rank = comm->rank;
   outDevComm->nRanks = comm->nRanks;
   outDevComm->nRanks_rcp32 = idivRcp32(comm->nRanks);
   outDevComm->lsaRank = devr->lsaSelf;
   outDevComm->lsaSize = devr->lsaSize;
   outDevComm->lsaSize_rcp32 = idivRcp32(devr->lsaSize);
-  outDevComm->ginIsRailed = requestedConnectionType == NCCL_GIN_CONNECTION_RAIL; // false if FULL or NONE
+  outDevComm->ginIsRailed = comm->sharedRes->ginState.ginConnectionType == NCCL_GIN_CONNECTION_RAIL; // false if FULL or NONE
   if (isInternal) outDevComm->abortFlag = comm->abortFlagDev;
 
   NCCLCHECKGOTO(symTeamObtain(comm, lsa, /*multicast=*/reqs->lsaMultimem, &tmLsa), ret, fail);
@@ -952,13 +1205,24 @@ ncclResult_t ncclDevrCommCreateInternal(
 
   resReqsHead = reqs->resourceRequirementsList;
 
-  ncclLsaBarrierCreateRequirement(lsa, std::max(reqs->barrierCount, reqs->lsaBarrierCount), &outDevComm->lsaBarrier, &lsaBarReq);
+  // Initialize resources for the hybrid barrier
+  ncclLsaBarrierCreateRequirement(lsa, reqs->barrierCount, &outDevComm->hybridLsaBarrier, &hybridLsaBarrierReq);
+  hybridLsaBarrierReq.next = resReqsHead;
+  ncclGinBarrierCreateRequirement(comm, ncclTeamRail(comm), reqs->barrierCount, &outDevComm->hybridRailGinBarrier, &hybridRailGinBarrierReq);
+  hybridRailGinBarrierReq.next = &hybridLsaBarrierReq;
+  resReqsHead = &hybridRailGinBarrierReq;
+
+  ncclLsaBarrierCreateRequirement(lsa, reqs->lsaBarrierCount, &outDevComm->lsaBarrier, &lsaBarReq);
   lsaBarReq.next = resReqsHead;
   resReqsHead = &lsaBarReq;
 
-  ncclGinBarrierCreateRequirement(comm, ncclTeamRail(comm), std::max(reqs->barrierCount, reqs->railGinBarrierCount), &outDevComm->railGinBarrier, &railGinBarrierReq);
+  ncclGinBarrierCreateRequirement(comm, ncclTeamRail(comm), reqs->railGinBarrierCount, &outDevComm->railGinBarrier, &railGinBarrierReq);
   railGinBarrierReq.next = resReqsHead;
   resReqsHead = &railGinBarrierReq;
+
+  ncclGinBarrierCreateRequirement(comm, ncclTeamWorld(comm), reqs->worldGinBarrierCount, &outDevComm->worldGinBarrier, &worldGinBarrierReq);
+  worldGinBarrierReq.next = resReqsHead;
+  resReqsHead = &worldGinBarrierReq;
 
   { struct ncclDevResourceRequirements* rr = resReqsHead;
     bufSizeTotal = 0;
@@ -976,8 +1240,14 @@ ncclResult_t ncclDevrCommCreateInternal(
     }
     bufSizeTotal= alignUp(bufSizeTotal, 128);
     ginSignalShadowsOffset = bufSizeTotal;
-    bufSizeTotal += nGinContexts*ginSignalTotal*sizeof(uint64_t); // include signal shadows
+    bufSizeTotal += nGinContexts * ginSignalTotal * sizeof(uint64_t); // include signal shadows
     bufSizeTotal = alignUp(bufSizeTotal, devr->granularity);
+  }
+
+  if (devr->ginEnabled) {
+    reqs->ginSignalCount = ginSignalTotal;
+    reqs->ginCounterCount = ginCounterTotal;
+    NCCLCHECK(ncclGinDevCommSetup(comm, reqs, outDevComm));
   }
 
   CUDACHECKGOTO(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), ret, fail);
@@ -1018,7 +1288,7 @@ ncclResult_t ncclDevrCommCreateInternal(
 
     CUCHECKGOTO(cuMemCreate(&memHandle, bufSizeTotal, &memProp, 0), ret, fail_stream);
 
-    NCCLCHECKGOTO(symMemoryObtain(comm, memHandle, NULL, bufSizeTotal, /*winFlags=*/0, &mem), ret, fail_stream_mem);
+    NCCLCHECKGOTO(symMemoryObtain(comm, &memHandle, 1, NULL, bufSizeTotal, /*winFlags=*/0, &mem), ret, fail_stream_mem);
     memHandle = 0x0; // Reference given to symMemoryObtain
 
     NCCLCHECKGOTO(symWindowCreate( // Requires world barrier afterward.
@@ -1033,55 +1303,25 @@ ncclResult_t ncclDevrCommCreateInternal(
     CUDACHECKGOTO(cudaMemsetAsync(win->userPtr, 0, bufSizeTotal, stream), ret, fail_stream_mem_win);
   }
 
-  if (devr->ginEnabled) {
-    outDevComm->ginConnectionCount = nGinConnections;
-    outDevComm->ginContextCount = nGinContexts;
-    outDevComm->ginSignalCount = ginSignalTotal;
-    outDevComm->ginCounterCount = ginCounterTotal;
-    NCCLCHECKGOTO(ncclGinAllocSignalsCounters(comm,
-      ginSignalTotal, &outDevComm->ginSignalBase,
-      ginCounterTotal, &outDevComm->ginCounterBase
-    ), ret, fail_stream_mem_win);
-    if (ginExclusiveContexts) {
-      comm->sharedRes->ginState.ctxLastExclusive -= nGinContexts;
-      outDevComm->ginContextBase = comm->sharedRes->ginState.ctxLastExclusive;
-    } else {
-      comm->sharedRes->ginState.ctxFirstAvailable = std::max(comm->sharedRes->ginState.ctxFirstAvailable, nGinContexts);
-      outDevComm->ginContextBase = 0;
-    }
-    INFO(NCCL_INIT|NCCL_NET, "Initialized a devComm with %d GIN connections, %d %s contexts (base %d), %d signals (base %d), %d counters (base %d)",
-         nGinConnections, nGinContexts, (ginExclusiveContexts ? "exclusive" : "shared"),
-         outDevComm->ginContextBase, ginSignalTotal, outDevComm->ginSignalBase, ginCounterTotal, outDevComm->ginCounterBase);
+  CUDACHECKGOTO(cudaStreamSynchronize(stream), ret, fail_stream_mem_win);
 
-    for (int connectionId=0; connectionId < nGinConnections; connectionId++) {
-      outDevComm->ginNetDeviceTypes[connectionId] = (int)comm->sharedRes->ginState.ginDevHandles[connectionId]->netDeviceType;
-      outDevComm->ginHandles[connectionId] = comm->sharedRes->ginState.ginDevHandles[connectionId]->handle;
-    }
+  NCCLCHECKGOTO(bootstrapBarrier(comm->bootstrap, comm->rank, comm->nRanks, 0xbeef), ret, fail_stream_mem_win);
+  CUDACHECKGOTO(cudaStreamDestroy(stream), ret, fail_stream_mem_win);
+
+  //ncclDevCommDump(outDevComm);
+  if (outDevCommPreserve) {
+    NCCLCHECKGOTO(devCompat->devCommCopyNewToOld(comm, outDevCommPreserve, outDevComm), ret, fail_stream_mem_win);
   }
-
-  CUDACHECKGOTO(cudaStreamSynchronize(stream), ret, fail_stream_mem_win_signals);
-
-  NCCLCHECKGOTO(bootstrapBarrier(comm->bootstrap, comm->rank, comm->nRanks, 0xbeef), ret, fail_stream_mem_win_signals);
-  CUDACHECKGOTO(cudaStreamDestroy(stream), ret, fail_stream_mem_win_signals);
-
-  if (outDevCommCopyCB) NCCLCHECKGOTO(outDevCommCopyCB(outDevComm, outDevCommPreserve), ret, fail_stream_mem_win_signals);
   return ret;
 
-fail_stream_mem_win_signals:
-  if (devr->ginEnabled) {
-    ncclGinFreeSignalsCounters(comm,
-      outDevComm->ginSignalBase, outDevComm->ginSignalCount,
-      outDevComm->ginCounterBase, outDevComm->ginCounterCount
-    );
-  }
 fail_stream_mem_win:
   symWindowDestroy(comm, win->vidmem, stream);
-  cudaStreamSynchronize(stream);
+  CUDACHECKIGNORE(cudaStreamSynchronize(stream));
 fail_stream_mem:
   if (memHandle != 0x0) { CUCHECKIGNORE(cuMemRelease(memHandle)); }
   symMemoryDropRef(comm, mem);
 fail_stream:
-  cudaStreamDestroy(stream);
+  CUDACHECKIGNORE(cudaStreamDestroy(stream));
 fail:
   return ret;
 }
@@ -1162,58 +1402,47 @@ ncclResult_t ncclDevrFindWindow(
   return ncclSuccess;
 }
 
+bool ncclDevrWindowIsMultiSegment(struct ncclDevrWindow* win) {
+  return win != NULL && win->memory->maxGlobalNumSegments > 1;
+}
+
+bool ncclDevrWindowHasSysmemSegment(struct ncclDevrWindow* win) {
+  return win != NULL && win->memory->globalHasSysmemSegment;
+}
+
 // Returns ncclInvalidUsage if the compiled version is greater than the runtime version and NCCL_ENABLE_VERSION_CHECK=0 is not set
-static ncclResult_t validateNcclVersion(int compiledVersion, int minSupportedVersion = -1) {
-  int runtimeVersion;
-  if (ncclParamEnableVersionCheck() == 0)
-    return ncclSuccess;
-  NCCLCHECK(ncclGetVersion(&runtimeVersion));
-  if (compiledVersion > runtimeVersion) {
-    WARN("NCCL library version is too old. This application was compiled with NCCL version %d, but is running with NCCL library version %d.", compiledVersion, runtimeVersion);
+static ncclResult_t getNcclVersionCompat(int compiledVersion, struct ncclDevCommCompat** devCompatPtr) {
+  *devCompatPtr = nullptr;
+
+  if (compiledVersion > NCCL_VERSION_CODE && ncclParamEnableVersionCheck()) {
+    char compiledBuf[16], runtimeBuf[16];
+    WARN("NCCL library is too old. This application was compiled with NCCL version %s, but is running with NCCL library version %s.",
+         ncclVersionToString(compiledVersion, compiledBuf, sizeof(compiledBuf)),
+         ncclVersionToString(NCCL_VERSION_CODE, runtimeBuf, sizeof(runtimeBuf)));
     return ncclInvalidUsage;
   }
-  if (minSupportedVersion > 0 && compiledVersion < minSupportedVersion) {
-    WARN("The application was compiled with too old version of NCCL. It was compiled with NCCL version %d, but is running with NCCL library version %d. It needs to be recompiled with at least NCCL version %d.", compiledVersion, runtimeVersion, minSupportedVersion);
+
+  struct ncclDevCommCompat *devCompat = nullptr;
+  for (int i = 0; devCommCompat[i]; i++) {
+    if (compiledVersion >= devCommCompat[i]->minVersion && compiledVersion <= devCommCompat[i]->maxVersion) {
+      devCompat = devCommCompat[i];
+      break;
+    }
+  }
+  if (devCompat == nullptr) {
+    char compiledBuf[16], runtimeBuf[16];
+    WARN("NCCL library is not backwards compatible. This application was compiled with NCCL version %s, but is running with NCCL library version %s.",
+         ncclVersionToString(compiledVersion, compiledBuf, sizeof(compiledBuf)),
+         ncclVersionToString(NCCL_VERSION_CODE, runtimeBuf, sizeof(runtimeBuf)));
     return ncclInvalidUsage;
   }
+  *devCompatPtr = devCompat;
+
   return ncclSuccess;
 }
 
-typedef enum : uint8_t {
-  NCCL_GIN_TYPE_NONE_v22902 = 0,
-  NCCL_GIN_TYPE_PROXY_v22902 = 2,
-  NCCL_GIN_TYPE_GDAKI_v22902 = 3,
-} ncclGinType_t_v22902;
-
-struct ncclCommProperties_v22902 {
-  size_t size;
-  unsigned int magic;
-  unsigned int version;
-
-  int rank;
-  int nRanks;
-  int cudaDev;
-  int nvmlDev;
-  bool deviceApiSupport;
-  bool multimemSupport;
-  ncclGinType_t_v22902 ginType;
-};
-
-static ncclResult_t ncclCommQueryProperties_v22902(ncclComm_t comm, struct ncclCommProperties_v22902* props) {
-  ncclCommProperties_t newProps = NCCL_COMM_PROPERTIES_INITIALIZER;
-
-  NCCLCHECK(ncclCommQueryProperties(comm, &newProps));
-
-  props->rank = newProps.rank;
-  props->nRanks = newProps.nRanks;
-  props->cudaDev = newProps.cudaDev;
-  props->nvmlDev = newProps.nvmlDev;
-  // We don't provide backwards compatibility for GIN with 2.29.2.  If a communicator needs it, we disable Device API.
-  props->deviceApiSupport = (newProps.deviceApiSupport && ncclTeamLsa(comm).nRanks == comm->nRanks);
-  props->multimemSupport = newProps.multimemSupport;
-  props->ginType = NCCL_GIN_TYPE_NONE_v22902;
-
-  return ncclSuccess;
+void ncclDevCommCopyLsaData(void* dstRankPtr, void const* srcRankPtr) {
+  memcpy(dstRankPtr, srcRankPtr, offsetof(struct ncclDevComm, railGinBarrier) - offsetof(struct ncclDevComm, rank));
 }
 
 NCCL_API(ncclResult_t, ncclCommQueryProperties, ncclComm_t, ncclCommProperties_t*);
@@ -1228,105 +1457,49 @@ ncclResult_t ncclCommQueryProperties(ncclComm_t comm, ncclCommProperties_t* prop
     return ncclInvalidUsage;
   }
 
-  NCCLCHECK(validateNcclVersion(props->version));
-
-  if (props->version >= NCCL_VERSION(2, 29, 2) && props->version <= NCCL_VERSION(2, 29, 3)) {
-    NCCLCHECK(ncclCommQueryProperties_v22902(comm, (struct ncclCommProperties_v22902*)props));
-    return ncclSuccess;
-  }
+  struct ncclDevCommCompat *devCompat = nullptr;
+  NCCLCHECK(getNcclVersionCompat(props->version, &devCompat));
 
   props->rank = comm->rank;
   props->nRanks = comm->nRanks;
   props->cudaDev = comm->cudaDev;
   props->nvmlDev = comm->nvmlDev;
   props->deviceApiSupport = comm->symmetricSupport;
-  props->multimemSupport = comm->nvlsSupport;
-  props->hostRmaSupport = comm->hostRmaSupport;
-  NCCLCHECK(getGlobalGinType(comm, &props->ginType));
-  NCCLCHECK(getGlobalRailedGinType(comm, &props->railedGinType));
+  // NVLS multicast isn't available across cliques
+  props->multimemSupport = comm->nvlsSupport && !comm->p2pCrossClique;
 
-  // Preferring to call ncclDevrInitOnce directly instead to calling ncclTeam* functions because
-  // we can propagate the result of ncclDevrInitOnce back to the caller.
-  NCCLCHECK(ncclDevrInitOnce(comm));
-  props->nLsaTeams = comm->devrState.nLsaTeams;
+  if (props->version > NCCL_VERSION(2, 29, 3)) {
+    props->hostRmaSupport = comm->hostRmaSupport;
+    NCCLCHECK(getGlobalGinType(comm, &props->ginType));
+    NCCLCHECK(getGlobalRailedGinType(comm, &props->railedGinType));
 
+    // Preferring to call ncclDevrInitOnce directly instead to calling ncclTeam* functions because
+    // we can propagate the result of ncclDevrInitOnce back to the caller.
+    NCCLCHECK(ncclDevrInitOnce(comm));
+    props->nLsaTeams = comm->devrState.nLsaTeams;
+  }
+
+  if (devCompat->commPropertiesFilter) {
+    NCCLCHECK(devCompat->commPropertiesFilter(comm, props));
+  }
   return ncclSuccess;
 }
 
-struct ncclDevCommRequirements_v22902 {
-  size_t size;
-  unsigned int magic;
-  unsigned int version;
-
-  // These two structures are unchanged.
-  ncclDevResourceRequirements_t* resourceRequirementsList;
-  ncclTeamRequirements_t* teamRequirementsList;
-
-  bool lsaMultimem;
-
-  int barrierCount;
-  int lsaBarrierCount;
-  int railGinBarrierCount;
-
-  int lsaLLA2ABlockCount, lsaLLA2ASlotCount;
-
-  bool ginForceEnable;
-  int ginContextCount;
-  int ginSignalCount;
-  int ginCounterCount;
-};
-
-struct ncclDevComm_v22902 {
-  int rank, nRanks;
-  uint32_t nRanks_rcp32;
-  int lsaRank, lsaSize;
-  uint32_t lsaSize_rcp32;
-
-  // This structure is unchanged.
-  struct ncclDevCommWindowTable* windowTable;
-
-  // The ncclWindow_vidmem structure is unchanged, and ncclWindow_t is just a (device) pointer to it.
-  ncclWindow_t resourceWindow;
-  struct ncclWindow_vidmem resourceWindow_inlined;
-
-  // ncclMultimemHandle_t, ncclLsaBarrierHandle_t, and ncclGinBarrierHandle_t are unchanged.
-  ncclMultimemHandle_t lsaMultimem;
-  ncclLsaBarrierHandle_t lsaBarrier;
-  ncclGinBarrierHandle_t railGinBarrier;
-
-  uint8_t ginContextCount;
-  uint8_t ginNetDeviceTypes[4];
-  void* ginHandles[4];
-  uint32_t ginSignalBase;
-  int ginSignalCount;
-  uint32_t ginCounterBase;
-  int ginCounterCount;
-  uint64_t* ginSignalShadows;
-};
-
-static ncclResult_t ncclDevCommCreateCopyCB_v22902(struct ncclDevComm const* tmpDevComm, void* out) {
-  struct ncclDevComm_v22902* outDevComm = (struct ncclDevComm_v22902*)out;
-
-  outDevComm->rank = tmpDevComm->rank;
-  outDevComm->nRanks = tmpDevComm->nRanks;
-  outDevComm->nRanks_rcp32 = tmpDevComm->nRanks_rcp32;
-  outDevComm->lsaRank = tmpDevComm->lsaRank;
-  outDevComm->lsaSize = tmpDevComm->lsaSize;
-  outDevComm->lsaSize_rcp32 = tmpDevComm->lsaSize_rcp32;
-  outDevComm->windowTable = tmpDevComm->windowTable;
-  outDevComm->resourceWindow = tmpDevComm->resourceWindow;
-  outDevComm->resourceWindow_inlined = tmpDevComm->resourceWindow_inlined;
-  outDevComm->lsaMultimem = tmpDevComm->lsaMultimem;
-  outDevComm->lsaBarrier = tmpDevComm->lsaBarrier;
-  // No need to copy GIN-specific fields since this is used only if GIN has not been requested.
-
-  return ncclSuccess;
-}
-
-static ncclResult_t ncclDevCommCreateCommon(
+NCCL_API(ncclResult_t, ncclDevCommCreate, ncclComm_t comm, ncclDevCommRequirements_t const* reqs, ncclDevComm_t* outDevComm);
+ncclResult_t ncclDevCommCreate(
     ncclComm_t comm, struct ncclDevCommRequirements const* reqs,
-    struct ncclDevComm* outDevComm, ncclResult_t (*outDevCommCopyCB)(struct ncclDevComm const* tmpDevComm, void* out)
+    struct ncclDevComm* outDevComm
   ) {
+  NCCLCHECK(CommCheck(comm, __func__, "comm"));
+  NCCLCHECK(PtrCheck(reqs, __func__, "reqs"));
+  if (reqs->magic != NCCL_API_MAGIC) {
+    WARN("Cannot create device communicator: ncclDevCommRequirements_t argument must be initialized via NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER");
+    return ncclInvalidUsage;
+  }
+
+  struct ncclDevCommCompat *devCompat = nullptr;
+  NCCLCHECK(getNcclVersionCompat(reqs->version, &devCompat));
+
   ncclResult_t ret = ncclSuccess;
   int saveDev;
   struct ncclDevrCommCreateTask* task = nullptr;
@@ -1348,8 +1521,11 @@ static ncclResult_t ncclDevCommCreateCommon(
   NCCLCHECKGOTO(ncclCalloc(&task, 1), ret, fail);
   // reqs must be deep copied to the task so background threads can safely access it
   NCCLCHECKGOTO(deepCopyDevCommRequirements(reqs, &task->reqs), ret, fail);
+  if (devCompat->devCommRequirementsFilter) {
+    NCCLCHECKGOTO(devCompat->devCommRequirementsFilter(comm, task->reqs), ret, fail);
+  }
   task->outDevComm = outDevComm;
-  task->outDevCommCopyCB = outDevCommCopyCB;
+  task->devCompat = devCompat;
   ncclIntruQueueEnqueue(&comm->devrState.commCreateTaskQueue, task);
   ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
 
@@ -1363,102 +1539,49 @@ fail:
   goto exit;
 }
 
-static ncclResult_t ncclDevCommCreate_v22902(
-    ncclComm_t comm, struct ncclDevCommRequirements_v22902 const* reqs,
-    struct ncclDevComm_v22902* outDevComm
-  ) {
-  ncclDevCommRequirements_t newReqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
-
-  bool userRequestedGin = reqs->ginForceEnable || reqs->ginSignalCount > 0 || reqs->ginCounterCount > 0;
-  {
-    struct ncclDevResourceRequirements* rr = reqs->resourceRequirementsList;
-    while (!userRequestedGin && rr != nullptr) {
-      userRequestedGin = rr->ginSignalCount > 0 || rr->ginCounterCount > 0;
-      rr = rr->next;
-    }
-  }
-  if (userRequestedGin) {
-    int runtimeVersion;
-    NCCLCHECK(ncclGetVersion(&runtimeVersion));
-    WARN("The application was compiled with too old version of NCCL. It was compiled with NCCL version %d, but is running with NCCL library version %d. Because of its use of GIN device kernels, it needs to be recompiled, preferably with the same NCCL version that it will be running with.", reqs->version, runtimeVersion);
-    return ncclInvalidUsage;
-  }
-
-  newReqs.resourceRequirementsList = reqs->resourceRequirementsList;
-  newReqs.teamRequirementsList = reqs->teamRequirementsList;
-  newReqs.lsaMultimem = reqs->lsaMultimem;
-  // Prior to 2.29.4, a non-zero barrierCount did not imply GIN, but it does since, so we can't just copy it over.
-  newReqs.lsaBarrierCount = std::max(reqs->lsaBarrierCount, reqs->barrierCount);
-  newReqs.lsaLLA2ABlockCount = reqs->lsaLLA2ABlockCount;
-  newReqs.lsaLLA2ASlotCount = reqs->lsaLLA2ASlotCount;
-  // No need to copy GIN-specific fields since we established above that it's not being requested.
-
-  memset(outDevComm, '\0', sizeof(*outDevComm));
-  NCCLCHECK(ncclDevCommCreateCommon(comm, &newReqs, (struct ncclDevComm*)outDevComm, ncclDevCommCreateCopyCB_v22902));
-
-  return ncclSuccess;
-}
-
-NCCL_API(ncclResult_t, ncclDevCommCreate, ncclComm_t comm, ncclDevCommRequirements_t const* reqs, ncclDevComm_t* outDevComm);
-ncclResult_t ncclDevCommCreate(
-    ncclComm_t comm, struct ncclDevCommRequirements const* reqs,
-    struct ncclDevComm* outDevComm
-  ) {
-  NCCLCHECK(CommCheck(comm, __func__, "comm"));
-  NCCLCHECK(PtrCheck(reqs, __func__, "reqs"));
-  if (reqs->magic != NCCL_API_MAGIC) {
-    WARN("Cannot create device communicator: ncclDevCommRequirements_t argument must be initialized via NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER");
-    return ncclInvalidUsage;
-  }
-
-  NCCLCHECK(validateNcclVersion(reqs->version));
-
-  if (reqs->version >= NCCL_VERSION(2, 29, 2) && reqs->version <= NCCL_VERSION(2, 29, 3)) {
-    NCCLCHECK(ncclDevCommCreate_v22902(comm, (const struct ncclDevCommRequirements_v22902*)reqs,
-                                       (struct ncclDevComm_v22902*)outDevComm));
-    return ncclSuccess;
-  }
-
-  return ncclDevCommCreateCommon(comm, reqs, outDevComm, /*outDevCommCopyCB=*/nullptr);
-}
-
 NCCL_API(ncclResult_t, ncclDevCommDestroy, ncclComm_t comm, ncclDevComm_t const* devComm);
 ncclResult_t ncclDevCommDestroy(
     struct ncclComm* comm, struct ncclDevComm const* devComm
   ) {
   NCCLCHECK(CommCheck(comm, __func__, "comm"));
   NCCLCHECK(PtrCheck(devComm, __func__, "devComm"));
-  struct ncclDevrState* devr = &comm->devrState;
-  if (devr->ginEnabled) {
-    // [RCCL] TODO(NCCL 2.29.7 sync): port ncclGinResetSignalsAndCounters
-    // (a CUDA kernel + host launcher) into RCCL device code. For now leave
-    // the device-side state untouched -- it gets fully torn down right
-    // below via ncclGinFreeSignalsCounters anyway, so dropping the reset
-    // affects only debug visibility, not correctness.
-    // NCCLCHECK(ncclGinResetSignalsAndCounters(comm, devComm));
+  int saveDev;
+  ncclResult_t ret = ncclSuccess;
+  struct ncclDevCommCompat *devCompat = nullptr;
+  ncclDevComm_t devCommTmp;
 
-    ncclGinFreeSignalsCounters(comm,
-      devComm->ginSignalBase, devComm->ginSignalCount,
-      devComm->ginCounterBase, devComm->ginCounterCount
-    );
-
-    if (devComm->ginContextBase == comm->sharedRes->ginState.ctxLastExclusive) {
-      // Since we don't track the shared/exclusive state of each context individually, we can't support the general
-      // case of release.  However, we support the release of contexts of the most recently created exclusive devComm,
-      // as it doesn't require any additional tracking.
-      comm->sharedRes->ginState.ctxLastExclusive += devComm->ginContextCount;
-    }
+  if (devComm->magic == NCCL_API_MAGIC) {
+    NCCLCHECK(getNcclVersionCompat(devComm->version, &devCompat));
+  } else {
+    // Unversioned devComm -- must be v22902 or v22907.  v22902 handles devCommDestroy for both.
+    devCompat = &ncclDevCommCompat_v22902;
   }
+  if (devCompat->devCommCopyOldToNew) {
+    memset(&devCommTmp, 0, sizeof(devCommTmp));
+    devCommTmp.magic = NCCL_API_MAGIC;
+    devCommTmp.version = NCCL_VERSION_CODE;
+    NCCLCHECK(devCompat->devCommCopyOldToNew(comm, &devCommTmp, devComm));
+    devComm = &devCommTmp;
+  }
+
+  CUDACHECK(cudaGetDevice(&saveDev));
+  CUDACHECK(cudaSetDevice(comm->cudaDev)); // This is needed at least for cuMem memory freeing in GDAKI
+
   if (devComm->resourceWindow != nullptr) {
-    NCCLCHECK(ncclCommWindowDeregister(comm, devComm->resourceWindow));
+    NCCLCHECKGOTO(ncclCommWindowDeregister(comm, devComm->resourceWindow), ret, end);
   }
-  return ncclSuccess;
+  if (devComm->ginContextCount) {
+    NCCLCHECKGOTO(ncclGinDevCommFree(comm, devComm), ret, end);
+  }
+
+end:
+  CUDACHECKIGNORE(cudaSetDevice(saveDev));
+  return ret;
 }
 
 NCCL_API(ncclResult_t, ncclWinGetUserPtr, ncclComm_t comm, ncclWindow_t win, void** outUserPtr);
 ncclResult_t ncclWinGetUserPtr(struct ncclComm* comm, struct ncclWindow_vidmem* win, void** outUserPtr) {
   NCCLCHECK(CommCheck(comm, __func__, "comm"));
-  NCCLCHECK(PtrCheck(win, __func__, "win"));
   NCCLCHECK(PtrCheck(outUserPtr, __func__, "outUserPtr"));
 
   if (!comm->symmetricSupport) {
@@ -1467,8 +1590,10 @@ ncclResult_t ncclWinGetUserPtr(struct ncclComm* comm, struct ncclWindow_vidmem* 
     return ncclSuccess;
   }
 
-  struct ncclDevrWindow* winHost = NULL;
-  struct ncclWindow_vidmem* winDevHost = NULL;
+  NCCLCHECK(PtrCheck(win, __func__, "win"));
+
+  struct ncclDevrWindow* winHost = nullptr;
+  struct ncclWindow_vidmem* winDevHost = nullptr;
   NCCLCHECK(ncclShadowPoolToHost(&comm->devrState.shadows, win, &winDevHost));
 
   winHost = (struct ncclDevrWindow*)winDevHost->winHost;
@@ -1478,6 +1603,17 @@ ncclResult_t ncclWinGetUserPtr(struct ncclComm* comm, struct ncclWindow_vidmem* 
   }
 
   *outUserPtr = winHost->userPtr;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclDevrWorldToLsaRank(struct ncclComm* comm, int peerWorldRank, int* peerLsaRank) {
+  ncclTeam_t worldTeam = ncclTeamWorld(comm);
+  ncclTeam_t lsaTeam = ncclTeamLsa(comm);
+  if (!ncclTeamRankIsMember(lsaTeam, worldTeam, peerWorldRank)) {
+    WARN("ncclDevrWorldToLsaRank: world rank %d is not a member of the LSA team", peerWorldRank);
+    return ncclInternalError;
+  }
+  *peerLsaRank = ncclTeamRankToTeam(lsaTeam, worldTeam, peerWorldRank);
   return ncclSuccess;
 }
 

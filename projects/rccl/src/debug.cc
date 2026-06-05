@@ -12,14 +12,13 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
-#include <strings.h>
-#include <sys/syscall.h>
 #include <chrono>
 #include "param.h"
 #include "compiler.h"
 #include <mutex>
 #include "os.h"
 #include "env.h"
+#include <cinttypes>
 
 #define NCCL_DEBUG_RESET_TRIGGERED (-2)
 
@@ -136,6 +135,8 @@ static void ncclDebugInit() {
         mask = NCCL_RAS;
       } else if (strcasecmp(subsys, "VERBS") == 0) {
         mask = NCCL_VERBS;
+      } else if (strcasecmp(subsys, "DESTROY") == 0) {
+        mask = NCCL_DESTROY;
       } else if (strcasecmp(subsys, "ALL") == 0) {
         mask = NCCL_ALL;
       }
@@ -284,7 +285,11 @@ static void ncclDebugInit() {
     if (debugFn[0] != '\0') {
       FILE *file = fopen(debugFn, "w");
       if (file != nullptr) {
+#if defined(NCCL_OS_LINUX)
         setlinebuf(file); // disable block buffering
+#elif defined(NCCL_OS_WINDOWS)
+        setvbuf(file, NULL, _IOLBF, 0); // disable block buffering
+#endif
         ncclDebugFile = file;
       }
     }
@@ -363,8 +368,8 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char *file
         memcpy(localTimestampFormat, ncclDebugTimestampFormat, ncclDebugTimestampSubsecondsStart);
         snprintf(localTimestampFormat + ncclDebugTimestampSubsecondsStart,
                  ncclDebugTimestampSubsecondDigits+1,
-                 "%0*ld", ncclDebugTimestampSubsecondDigits,
-                 nowNs / (1000000000L/ncclDebugTimestampMaxSubseconds));
+                 "%0*" PRIu64, ncclDebugTimestampSubsecondDigits,
+                 (uint64_t)(nowNs / (1000000000L/ncclDebugTimestampMaxSubseconds)));
         strcpy(    localTimestampFormat+ncclDebugTimestampSubsecondsStart+ncclDebugTimestampSubsecondDigits,
                ncclDebugTimestampFormat+ncclDebugTimestampSubsecondsStart+ncclDebugTimestampSubsecondDigits);
       }
@@ -433,6 +438,7 @@ void ncclResetDebugInit() {
   COMPILER_ATOMIC_STORE(&ncclDebugLevel, NCCL_DEBUG_RESET_TRIGGERED, std::memory_order_release);
   pthread_mutex_unlock(&ncclDebugLock);
 }
+
 
 NCCL_PARAM(SetThreadName, "SET_THREAD_NAME", 0);
 

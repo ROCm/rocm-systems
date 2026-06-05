@@ -3299,12 +3299,11 @@ ncclResult_t ncclGinIbP2PBarrier(struct ncclGinIbCollComm *cComm) {
   return ncclSuccess;
 }
 
-// [RCCL] NCCL 2.29.7 added nConnections + queueDepth args to ncclGin_t::connect.
-// We don't yet thread connection multiplexing through this transport so we
-// accept the new args and ignore them; behaviour matches the prior
-// nConnections == 1 single-QP setup.
-ncclResult_t ncclGinIbConnect(void* ctx, void* handles[], int nranks, int rank, int nConnections, int queueDepth, void* listenComm, void** collComm) {
-  (void)nConnections; (void)queueDepth;
+// [RCCL] NCCL 2.30.3 (ncclGin v13) dropped the nConnections + queueDepth args
+// from ncclGin_t::connect. We keep the prior single-QP-per-peer setup; the
+// per-context QP fan-out introduced upstream is not modelled here (the proxy
+// context is a thin wrapper over this collComm, see ncclGinIbProxyCreateContext).
+ncclResult_t ncclGinIbConnect(void* ctx, void* handles[], int nranks, int rank, void* listenComm, void** collComm) {
   struct ncclIbListenComm *lComm = (struct ncclIbListenComm *)listenComm;
   struct ncclGinIbCollComm *cComm = nullptr;
   int next;
@@ -3532,13 +3531,40 @@ ncclResult_t ncclGinIbProxyCloseColl(void* collComm) {
   return ncclSuccess;
 }
 
-// [RCCL] 2.29.7 added an int connectionId parameter -- we don't yet model
-// per-connection multiplexing here, so just ignore it (matches connectionId==0).
-ncclResult_t ncclGinIbProxyIPut(void *collComm, uint64_t srcOff, void *srcMhandle, size_t size,
-                                uint64_t dstOff, void *dstMhandle, uint32_t rank, int connectionId, void **request)
+// [RCCL] ncclGin v13 (NCCL 2.30.3) reworked the proxy backend: iput/iputSignal/
+// iget/iflush now take an opaque per-comm GIN context plus a context index rather
+// than the (collComm, connectionId) pair used by v12, and createContext/
+// destroyContext are mandatory (the GIN host proxy layer calls them
+// unconditionally). Upstream allocates a fresh set of per-context QPs in
+// createContext; RCCL keeps the simpler single set of QPs created in
+// ncclGinIbConnect (stored on the collComm) and shares them across contexts, so
+// the ginCtx is just a thin wrapper around the collComm and the context index is
+// ignored (matches the prior connectionId == 0 behaviour).
+struct ncclGinIbProxyCtx {
+  struct ncclGinIbCollComm* cComm;
+  int nContexts;
+};
+
+ncclResult_t ncclGinIbProxyCreateContext(void* collComm, ncclGinConfig_v13_t* config, void** ginCtx, ncclNetDeviceHandle_v11_t** devHandle) {
+  (void)devHandle;  // the proxy device handle is built by the GIN host layer, not here
+  struct ncclGinIbProxyCtx* gc = NULL;
+  NCCLCHECK(ncclCalloc(&gc, 1));
+  gc->cComm = (struct ncclGinIbCollComm*)collComm;
+  gc->nContexts = config ? config->nContexts : 1;
+  *ginCtx = gc;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclGinIbProxyDestroyContext(void* ginCtx) {
+  free(ginCtx);
+  return ncclSuccess;
+}
+
+ncclResult_t ncclGinIbProxyIPut(void *ginCtx, int context, uint64_t srcOff, void *srcMhandle, size_t size,
+                                uint64_t dstOff, void *dstMhandle, uint32_t rank, void **request)
 {
-  (void)connectionId;
-  struct ncclGinIbCollComm* cComm = (struct ncclGinIbCollComm*)collComm;
+  (void)context;
+  struct ncclGinIbCollComm* cComm = ((struct ncclGinIbProxyCtx*)ginCtx)->cComm;
 
   struct ncclIbGinProxyMrHandle *srcMrHandle = (struct ncclIbGinProxyMrHandle *)srcMhandle;
   struct ncclIbGinProxyMrHandle *dstMrHandle = (struct ncclIbGinProxyMrHandle *)dstMhandle;
@@ -3586,19 +3612,19 @@ ncclResult_t ncclGinIbProxyIPut(void *collComm, uint64_t srcOff, void *srcMhandl
   return ncclSuccess;
 }
 
-// [RCCL] 2.29.7 added an int connectionId parameter -- ignored as above.
-ncclResult_t ncclGinIbProxyIPutSignal(void *collComm, uint64_t srcOff, void *srcMhandle,
+// [RCCL] v13 signature: opaque ginCtx + context index (ignored, see ncclGinIbProxyIPut).
+ncclResult_t ncclGinIbProxyIPutSignal(void *ginCtx, int context, uint64_t srcOff, void *srcMhandle,
                                       size_t size, uint64_t dstOff, void *dstMhandle,
                                       uint32_t rank, uint64_t signalOff, void *signalMhandle,
-                                      uint64_t signalValue, uint32_t signalOp, int connectionId, void **request)
+                                      uint64_t signalValue, uint32_t signalOp, void **request)
 {
-  (void)connectionId;
+  (void)context;
   if (signalOp != NCCL_NET_SIGNAL_OP_INC && signalOp != NCCL_NET_SIGNAL_OP_ADD) {
     WARN("ncclGinIbProxyIPutSignal: Unsupported signalOp %u", signalOp);
     return ncclInvalidArgument;
   }
 
-  struct ncclGinIbCollComm* cComm = (struct ncclGinIbCollComm*)collComm;
+  struct ncclGinIbCollComm* cComm = ((struct ncclGinIbProxyCtx*)ginCtx)->cComm;
 
   struct ncclIbGinProxyMrHandle *srcMrHandle = (struct ncclIbGinProxyMrHandle *)srcMhandle;
   struct ncclIbGinProxyMrHandle *dstMrHandle = (struct ncclIbGinProxyMrHandle *)dstMhandle;
@@ -3718,26 +3744,31 @@ ncclResult_t ncclGinIbProxyTest(void *collComm, void *request, int *done) {
 }
 
 // No support for NCCL_IB_SPLIT_DATA_ON_QPS or NCCL_IB_MERGE_NICS
+// [RCCL] iget/iflush are left NULL: the RCCL IB proxy backend does not yet
+// implement GIN GET/FLUSH (the GIN host proxy layer null-checks them and reports
+// an unsupported-op error if a device kernel requests one).
 ncclGin_t ncclGinIbProxy = {
   "GIN_IB_PROXY",
-  ncclGinIbInit,
-  ncclIbDevices,
-  ncclGinIbProxyGetProperties,
-  ncclIbListen,
-  ncclGinIbConnect,
-  NULL,
-  ncclGinIbProxyRegMrSym,
-  ncclGinIbProxyRegMrSymDmaBuf,
-  ncclGinIbProxyDeregMrSym,
-  NULL,
-  ncclGinIbCloseColl,
-  ncclIbCloseListen,
-  ncclGinIbProxyIPut,
-  ncclGinIbProxyIPutSignal,
-  ncclGinIbProxyTest,
-  NULL,
-  NULL,
-  ncclGinIbFinalize
+  ncclGinIbInit,                 // init
+  ncclIbDevices,                 // devices
+  ncclGinIbProxyGetProperties,   // getProperties
+  ncclIbListen,                  // listen
+  ncclGinIbConnect,              // connect
+  ncclGinIbProxyCreateContext,   // createContext
+  ncclGinIbProxyRegMrSym,        // regMrSym
+  ncclGinIbProxyRegMrSymDmaBuf,  // regMrSymDmaBuf
+  ncclGinIbProxyDeregMrSym,      // deregMrSym
+  ncclGinIbProxyDestroyContext,  // destroyContext
+  ncclGinIbCloseColl,            // closeColl
+  ncclIbCloseListen,             // closeListen
+  ncclGinIbProxyIPut,            // iput
+  ncclGinIbProxyIPutSignal,      // iputSignal
+  NULL,                          // iget   (unsupported on RCCL IB proxy backend)
+  NULL,                          // iflush (unsupported on RCCL IB proxy backend)
+  ncclGinIbProxyTest,            // test
+  NULL,                          // ginProgress
+  NULL,                          // queryLastError
+  ncclGinIbFinalize              // finalize
 };
 
 // [RCCL] NCCL 2.29.7 introduced a top-level "ncclGinIb" dispatcher that
@@ -3748,22 +3779,24 @@ ncclGin_t ncclGinIbProxy = {
 // the future can replace this with a real dispatcher.
 ncclGin_t ncclGinIb = {
   "GIN_IB",
-  ncclGinIbInit,
-  ncclIbDevices,
-  ncclGinIbProxyGetProperties,
-  ncclIbListen,
-  ncclGinIbConnect,
-  NULL,
-  ncclGinIbProxyRegMrSym,
-  ncclGinIbProxyRegMrSymDmaBuf,
-  ncclGinIbProxyDeregMrSym,
-  NULL,
-  ncclGinIbCloseColl,
-  ncclIbCloseListen,
-  ncclGinIbProxyIPut,
-  ncclGinIbProxyIPutSignal,
-  ncclGinIbProxyTest,
-  NULL,
-  NULL,
-  ncclGinIbFinalize
+  ncclGinIbInit,                 // init
+  ncclIbDevices,                 // devices
+  ncclGinIbProxyGetProperties,   // getProperties
+  ncclIbListen,                  // listen
+  ncclGinIbConnect,              // connect
+  ncclGinIbProxyCreateContext,   // createContext
+  ncclGinIbProxyRegMrSym,        // regMrSym
+  ncclGinIbProxyRegMrSymDmaBuf,  // regMrSymDmaBuf
+  ncclGinIbProxyDeregMrSym,      // deregMrSym
+  ncclGinIbProxyDestroyContext,  // destroyContext
+  ncclGinIbCloseColl,            // closeColl
+  ncclIbCloseListen,             // closeListen
+  ncclGinIbProxyIPut,            // iput
+  ncclGinIbProxyIPutSignal,      // iputSignal
+  NULL,                          // iget   (unsupported on RCCL IB proxy backend)
+  NULL,                          // iflush (unsupported on RCCL IB proxy backend)
+  ncclGinIbProxyTest,            // test
+  NULL,                          // ginProgress
+  NULL,                          // queryLastError
+  ncclGinIbFinalize              // finalize
 };

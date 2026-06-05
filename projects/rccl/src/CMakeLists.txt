@@ -270,6 +270,7 @@ set(SRC_FILES
   include/plugin/net/net_v9.h
   include/plugin/net/net_v10.h
   include/plugin/net/net_v11.h
+  include/plugin/net/net_v12.h
   include/plugin/profiler/net_ib_v1.h
   include/plugin/profiler/net_ib.h
   include/plugin/profiler/net_socket_v1.h
@@ -284,9 +285,11 @@ set(SRC_FILES
   include/plugin/tuner/tuner_v3.h
   include/plugin/tuner/tuner_v4.h
   include/plugin/tuner/tuner_v5.h
+  include/plugin/tuner/tuner_v6.h
   include/plugin/nccl_gin.h
   include/plugin/gin/gin_v11.h
   include/plugin/gin/gin_v12.h
+  include/plugin/gin/gin_v13.h
   misc/alt_rsmi.cc
   misc/archinfo.cc
   misc/argcheck.cc
@@ -296,7 +299,7 @@ set(SRC_FILES
 # misc/gdrwrap.cc
   misc/ibvsymbols.cc
   misc/ibvwrap.cc
-  misc/ipcsocket.cc
+  os/linux_ipcsocket.cc
   misc/mlx5dvsymbols.cc
   misc/mlx5dvwrap.cc
   misc/ionicdvsymbols.cc
@@ -321,12 +324,31 @@ set(SRC_FILES
   nccl_device/lsa_barrier.cc
   os/linux.cc
   include/os.h
+  include/os/linux.h
+  include/os/windows.h
+  param/c_api.cc
+  param/param.cc
+  param/param_registry.cc
+  include/param/c_api.h
+  include/param/common.h
+  include/param/param.h
+  include/param/param_registry.h
+  include/param/parser_bitset.h
+  include/param/parser_common.h
+  include/param/parser_default.h
+  include/param/parser_enum.h
+  include/param/parser_list.h
+  include/param/parsers.h
+  include/param/utils.h
   rma/rma.cc
   rma/rma_ce.cc
   rma/rma_proxy.cc
+  rma/rma_proxy_launch.cc
+  rma/rma_proxy_progress.cc
   include/rma/rma.h
   include/rma/rma_ce.h
   include/rma/rma_proxy.h
+  include/rma/rma_proxy_mem.h
   plugin/net.cc
   plugin/env.cc
   plugin/env/env_v1.cc
@@ -349,10 +371,12 @@ set(SRC_FILES
   plugin/tuner/tuner_v3.cc
   plugin/tuner/tuner_v4.cc
   plugin/tuner/tuner_v5.cc
+  plugin/tuner/tuner_v6.cc
   plugin/tuner/csv_tuner.cc
   plugin/gin.cc
   plugin/gin/gin_v11.cc
   plugin/gin/gin_v12.cc
+  plugin/gin/gin_v13.cc
   ras/client.cc
   ras/client_support.cc
   ras/collectives.cc

@@ -41,6 +41,9 @@ struct ncclLsaBarrierSession_internal {
     uint32_t* state = (uint32_t*)ncclGetResourceBufferPeerPointer(comm, handle.bufHandle, team, owner);
     return state + 3*handle.nBarriers + index*team.nRanks + peer;
   }
+
+  template<bool EnableTimeout>
+  NCCL_DEVICE_INLINE ncclResult_t waitInternal(Coop, cuda::memory_order order, uint64_t timeoutCycles);
 };
 #endif
 
