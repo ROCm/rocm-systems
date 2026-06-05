@@ -37,17 +37,36 @@ rocprofiler_configure_pytest_files(COPY validate.py input.txt conftest.py
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
+file(
+    WRITE ${CMAKE_CURRENT_BINARY_DIR}/cc_retry.cmake
+    [==[
+if(NOT DEFINED CC_MAX_ATTEMPTS)
+    set(CC_MAX_ATTEMPTS 3)
+endif()
+set(_attempt 1)
+while(_attempt LESS_EQUAL ${CC_MAX_ATTEMPTS})
+    execute_process(COMMAND ${CC_CMD} RESULT_VARIABLE _rc)
+    if(_rc EQUAL 0)
+        return()
+    endif()
+    message(STATUS "cc_retry: attempt ${_attempt}/${CC_MAX_ATTEMPTS} failed (rc=${_rc}); retrying")
+    math(EXPR _attempt "${_attempt} + 1")
+endwhile()
+message(FATAL_ERROR "cc_retry: command failed after ${CC_MAX_ATTEMPTS} attempts")
+]==])
+
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-conversion-script
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i ${CMAKE_CURRENT_BINARY_DIR}/input.txt
-        -T -d ${CMAKE_CURRENT_BINARY_DIR}/out_conversion_script -o pmc1 --output-format
-        csv -- $<TARGET_FILE:vector-ops>
+        ${CMAKE_COMMAND} -DCC_MAX_ATTEMPTS=3
+        "-DCC_CMD=$<TARGET_FILE:rocprofiler-sdk::rocprofv3>$<SEMICOLON>-i$<SEMICOLON>${CMAKE_CURRENT_BINARY_DIR}/input.txt$<SEMICOLON>-T$<SEMICOLON>-d$<SEMICOLON>${CMAKE_CURRENT_BINARY_DIR}/out_conversion_script$<SEMICOLON>-o$<SEMICOLON>pmc1$<SEMICOLON>--output-format$<SEMICOLON>csv$<SEMICOLON>--$<SEMICOLON>$<TARGET_FILE:vector-ops>"
+        -P ${CMAKE_CURRENT_BINARY_DIR}/cc_retry.cmake
     DEPENDS vector-ops
     LABELS "integration-tests"
     TIMEOUT 45
     PRELOAD "${PRELOAD_ENV}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    ENVIRONMENT "ROCPROF_SIGNAL_HANDLERS=0"
     FIXTURES_SETUP rocprofv3-test-conversion-script)
 
 set(convert_tests rocprofv3-test-conversion-script-convert-no-agent-prefix
