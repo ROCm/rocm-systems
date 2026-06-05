@@ -181,7 +181,7 @@ ncclResult_t ncclGinDevCommFree(struct ncclComm* comm, struct ncclDevComm const*
 ncclResult_t ncclGinRegister(struct ncclComm* comm, void* address, size_t size,
                              void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS],
                              ncclGinWindow_t ginDevWins[NCCL_GIN_MAX_CONNECTIONS], int winFlags,
-                             bool multiSegment) {
+                             bool multiSegment, int memType) {
   (void)comm;
   (void)address;
   (void)size;
@@ -189,6 +189,7 @@ ncclResult_t ncclGinRegister(struct ncclComm* comm, void* address, size_t size,
   (void)ginDevWins;
   (void)winFlags;
   (void)multiSegment;
+  (void)memType;
   return ncclSuccess;
 }
 

@@ -9,8 +9,7 @@ include ../makefiles/version.mk
 
 ##### src files
 INCEXPORTS  := nccl.h nccl_device.h \
-	$(patsubst include/%,%,$(wildcard include/nccl_device/*.h include/nccl_device/*/*.h include/nccl_device/*/*/*.h)) \
-	$(patsubst include/%,%,$(wildcard include/param/*.h))
+	$(patsubst include/%,%,$(wildcard include/nccl_device/*.h include/nccl_device/*/*.h include/nccl_device/*/*/*.h))
 
 # On Linux use real net_socket and net_ib; on Windows use stubs (avoid multiple definition)
 TRANSPORT_CC = $(wildcard transport/*.cc)
@@ -179,11 +178,6 @@ $(INCDIR)/%.h : %.h
 $(INCDIR)/nccl_%.h : include/nccl_%.h
 	@printf "Grabbing   %-35s > %s\n" $< $@
 	mkdir -p $(INCDIR)
-	install -m 644 $< $@
-
-$(INCDIR)/param/%.h: include/param/%.h
-	@printf "Grabbing   %-35s > %s\n" $< $@
-	mkdir -p $(INCDIR)/param
 	install -m 644 $< $@
 
 $(INCDIR)/nccl_device/%.h: include/nccl_device/%.h

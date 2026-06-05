@@ -10,7 +10,6 @@
 #include <cstring>
 #include "cuda_runtime.h"
 #include "nccl.h"
-#include "param/c_api.h"
 
 int main(int argc, char* argv[]) {
   bool longFormat = false;

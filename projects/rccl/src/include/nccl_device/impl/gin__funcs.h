@@ -37,6 +37,40 @@ NCCL_DEVICE_INLINE int teamRankToGinRank(ncclDevComm const& comm, ncclTeam team,
   }
 }
 
+// Multi-segment put/get helpers
+NCCL_DEVICE_INLINE void findSegmentFromWindow(ncclWindow_t win, size_t offset, int* outSeg, size_t* outSegOffset) {
+  int seg = 0;
+  size_t segOffset = offset;
+  size_t cumulative = 0;
+  for (int i = 0; i < win->numSegments; i++) {
+    struct ncclSegmentWindow const& w = win->ginMultiSegmentWins[i];
+    if (cumulative + w.segmentSize > offset) {
+      seg = i;
+      segOffset = offset - cumulative;
+      break;
+    }
+    cumulative += w.segmentSize;
+  }
+  *outSeg = seg;
+  *outSegOffset = segOffset;
+}
+
+NCCL_DEVICE_INLINE size_t getSegmentChunkSize(size_t srcRemaining, size_t dstRemaining, size_t remaining) {
+  size_t chunk = srcRemaining;
+  if (dstRemaining < chunk) chunk = dstRemaining;
+  if (remaining < chunk) chunk = remaining;
+  return chunk;
+}
+
+NCCL_DEVICE_INLINE void advanceSegmentCursor(
+    int* seg, size_t* segOffset, size_t chunkSize, size_t segmentSize) {
+  *segOffset += chunkSize;
+  if (*segOffset >= segmentSize) {
+    (*seg)++;
+    *segOffset = 0;
+  }
+}
+
 #endif // NCCL_CHECK_CUDACC
 } // namespace internal
 } // namespace gin
@@ -229,6 +263,16 @@ NCCL_DEVICE_INLINE constexpr ncclGinCounter_t ncclGin_getCounterId(ncclGin const
 
 ////////////////////////////////////////////////////////////////////////////////
 
+////////////////////////////////////////////////////////////////////////////////
+// ncclGin bufType helpers:
+
+#if NCCL_CHECK_CUDACC
+NCCL_DEVICE_INLINE constexpr bool ncclGin_isDeviceOnly(ncclGin_SegmentDevice) { return true; }
+NCCL_DEVICE_INLINE constexpr bool ncclGin_isDeviceOnly(ncclGin_SegmentMixed) { return false; }
+NCCL_DEVICE_INLINE constexpr bool ncclGin_isDeviceOnly(ncclGin_SegmentHostNuma) { return false; }
+#endif
+////////////////////////////////////////////////////////////////////////////////
+
 #if NCCL_CHECK_CUDACC
 NCCL_DEVICE_INLINE void ncclGinPut_v2(
     ncclGin_C* net,
@@ -295,7 +339,8 @@ template<
   typename RemoteAction, // one of ncclGin_{None|SignalInc}
   typename LocalAction, // one of ncclGin_{None|CounterInc}
   typename Coop,
-  typename DescriptorSmem
+  typename DescriptorSmem,
+  typename SegmentType // one of ncclGin_{SegmentDevice|SegmentMixed|SegmentHostNuma}
 >
 NCCL_DEVICE_INLINE void ncclGin_BackendMask<beMask>::put(
     ncclTeam team, int peer,
@@ -305,30 +350,97 @@ NCCL_DEVICE_INLINE void ncclGin_BackendMask<beMask>::put(
     Coop coop,
     DescriptorSmem descriptor,
     cuda::thread_scope givenRelease, cuda::thread_scope requiredRelease,
-    uint32_t optFlags
+    uint32_t optFlags, SegmentType bufType
   ) const {
   using nccl::utility::loadConst;
   using nccl::gin::internal::teamRankToGinRank;
   ncclGinCtx_M<beMask> ctx = this->_makeCtx();
   coop.sync();
   if (coop.thread_rank() == 0) {
-    ncclGinCall<ncclGinApi_Put>(ctx,
-      ncclCoopThread(), teamRankToGinRank(this->comm, team, peer), /*hasWins=*/true,
-      loadConst(&dstWin->ginWins[this->connectionId]),
-      4096*size_t(loadConst(&dstWin->ginOffset4K)) + dstOffset,
-      loadConst(&srcWin->ginWins[this->connectionId]),
-      4096*size_t(loadConst(&srcWin->ginOffset4K)) + srcOffset, bytes,
-      ncclGin_getSignalDescriptor(*this, remoteAction),
-      ncclGin_getSignalOp(remoteAction),
-      ncclGin_getSignalOpArg(remoteAction),
-      ncclGin_isCounter(localAction),
-      ncclGin_getCounterId(*this, localAction),
-      ncclGin_isDescriptor(descriptor),
-      ncclGin_getDescriptor(descriptor),
-      requiredRelease,
-      givenRelease,
-      optFlags
-    );
+    if (ncclGin_isDeviceOnly(bufType)) {
+      ncclGinCall<ncclGinApi_Put>(ctx,
+          ncclCoopThread(), teamRankToGinRank(this->comm, team, peer), /*hasWins=*/true,
+          loadConst(&dstWin->ginWins[this->connectionId]),
+          4096*size_t(loadConst(&dstWin->ginOffset4K)) + dstOffset,
+          loadConst(&srcWin->ginWins[this->connectionId]),
+          4096*size_t(loadConst(&srcWin->ginOffset4K)) + srcOffset, bytes,
+          ncclGin_getSignalDescriptor(*this, remoteAction),
+          ncclGin_getSignalOp(remoteAction),
+          ncclGin_getSignalOpArg(remoteAction),
+          ncclGin_isCounter(localAction),
+          ncclGin_getCounterId(*this, localAction),
+          ncclGin_isDescriptor(descriptor),
+          ncclGin_getDescriptor(descriptor),
+          requiredRelease,
+          givenRelease,
+          optFlags
+          );
+    } else {
+      if (srcWin->numSegments == 1 && dstWin->numSegments == 1) {
+        ncclGinCall<ncclGinApi_Put>(ctx,
+            ncclCoopThread(), teamRankToGinRank(this->comm, team, peer), /*hasWins=*/true,
+            loadConst(&dstWin->ginWins[this->connectionId]),
+            4096*size_t(loadConst(&dstWin->ginOffset4K)) + dstOffset,
+            loadConst(&srcWin->ginWins[this->connectionId]),
+            4096*size_t(loadConst(&srcWin->ginOffset4K)) + srcOffset, bytes,
+            ncclGin_getSignalDescriptor(*this, remoteAction),
+            ncclGin_getSignalOp(remoteAction),
+            ncclGin_getSignalOpArg(remoteAction),
+            ncclGin_isCounter(localAction),
+            ncclGin_getCounterId(*this, localAction),
+            ncclGin_isDescriptor(descriptor),
+            ncclGin_getDescriptor(descriptor),
+            cuda::thread_scope_system, // for safety, escalate to system regardless of what the user requested
+            givenRelease,
+            optFlags
+            );
+      } else {
+        // Multi-segment case. The puts are chunked to handle multiple registration entries and src/dst windows that potentially have a different number of segments
+        int srcSeg;
+        size_t srcSegOffset;
+        nccl::gin::internal::findSegmentFromWindow(srcWin, srcOffset, &srcSeg, &srcSegOffset);
+        int dstSeg;
+        size_t dstSegOffset;
+        nccl::gin::internal::findSegmentFromWindow(dstWin, dstOffset, &dstSeg, &dstSegOffset);
+        bool doneSysmemFence = false;
+        size_t remaining = bytes;
+        cuda::thread_scope localRequiredRelease = requiredRelease;
+
+        while (remaining > 0) {
+          struct ncclSegmentWindow const& dstSegmentWindow = dstWin->ginMultiSegmentWins[dstSeg];
+          struct ncclSegmentWindow const& srcSegmentWindow = srcWin->ginMultiSegmentWins[srcSeg];
+          if (!doneSysmemFence && srcSegmentWindow.memType == CU_MEM_LOCATION_TYPE_HOST_NUMA) {
+            localRequiredRelease = cuda::thread_scope_system; // for safety, escalate to system regardless of what the user requested
+            doneSysmemFence = true;
+          }
+          const size_t srcRemaining = srcSegmentWindow.segmentSize - srcSegOffset;
+          const size_t dstRemaining = dstSegmentWindow.segmentSize - dstSegOffset;
+          const size_t putSize = nccl::gin::internal::getSegmentChunkSize(srcRemaining, dstRemaining, remaining);
+          const bool isLastPut = (remaining == putSize);
+          ncclGinCall<ncclGinApi_Put>(ctx,
+              ncclCoopThread(), teamRankToGinRank(this->comm, team, peer), /*hasWins=*/true,
+              loadConst(&dstWin->ginMultiSegmentWins[dstSeg].ginWins[this->connectionId]),
+              dstSegOffset,
+              loadConst(&srcWin->ginMultiSegmentWins[srcSeg].ginWins[this->connectionId]),
+              srcSegOffset, putSize,
+              isLastPut ? ncclGin_getSignalDescriptor(*this, remoteAction) : ncclGin_getSignalDescriptor(*this, ncclGin_None{}),
+              ncclGin_getSignalOp(remoteAction),
+              ncclGin_getSignalOpArg(remoteAction),
+              isLastPut ? ncclGin_isCounter(localAction) : false,
+              ncclGin_getCounterId(*this, localAction),
+              ncclGin_isDescriptor(descriptor),
+              ncclGin_getDescriptor(descriptor),
+              localRequiredRelease,
+              givenRelease,
+              optFlags
+              );
+          remaining -= putSize;
+          nccl::gin::internal::advanceSegmentCursor(&srcSeg, &srcSegOffset, putSize, srcSegmentWindow.segmentSize);
+          nccl::gin::internal::advanceSegmentCursor(&dstSeg, &dstSegOffset, putSize, dstSegmentWindow.segmentSize);
+          localRequiredRelease = cuda::thread_scope_thread;
+        }
+      }
+    }
   }
   coop.sync();
 }
@@ -341,7 +453,8 @@ template<
   typename RemoteAction, // one of ncclGin_{None|SignalInc}
   typename LocalAction, // one of ncclGin_{None|CounterInc}
   typename Coop,
-  typename DescriptorSmem
+  typename DescriptorSmem,
+  typename SegmentType
 >
 NCCL_DEVICE_INLINE void ncclGin_BackendMask<beMask>::put(
     ncclTeam team, int peer,
@@ -351,11 +464,11 @@ NCCL_DEVICE_INLINE void ncclGin_BackendMask<beMask>::put(
     DescriptorSmem descriptor,
     cuda::thread_scope givenRelease,
     cuda::thread_scope requiredRelease,
-    uint32_t optFlags
+    uint32_t optFlags, SegmentType bufType
   ) const {
   this->put(
     team, peer, dstElts.window, dstElts.offset, srcElts.window, srcElts.offset, nElts*sizeof(T),
-    remoteAction, localAction, coop, descriptor, givenRelease, requiredRelease, optFlags
+    remoteAction, localAction, coop, descriptor, givenRelease, requiredRelease, optFlags, bufType
   );
 }
 #endif
@@ -740,26 +853,67 @@ NCCL_DEVICE_INLINE void ncclGin_BackendMask<beMask>::flushAsync(ncclTeam team, u
 }
 
 template<unsigned beMask>
-template<typename Coop, typename DescriptorSmem>
+template<typename Coop, typename DescriptorSmem, typename SegmentType>
 NCCL_DEVICE_INLINE void ncclGin_BackendMask<beMask>::get(
     ncclTeam team, int peer,
     ncclWindow_t remoteWnd, size_t remoteOffset,
     ncclWindow_t localWnd, size_t localOffset,
     size_t bytes, Coop coop,
     DescriptorSmem descriptor,
-    uint32_t optFlags) const {
+    uint32_t optFlags, SegmentType bufType) const {
   using nccl::utility::loadConst;
   using nccl::gin::internal::teamRankToGinRank;
+  ncclGinCtx_M<beMask> ctx = this->_makeCtx();
   coop.sync();
-  ncclGinCall<ncclGinApi_Get>(this->_makeCtx(), coop,
-      teamRankToGinRank(this->comm, team, peer),
-      loadConst(&remoteWnd->ginWins[this->connectionId]),
-      4096*size_t(loadConst(&remoteWnd->ginOffset4K)) + remoteOffset,
-      loadConst(&localWnd->ginWins[this->connectionId]),
-      4096*size_t(loadConst(&localWnd->ginOffset4K)) + localOffset, bytes,
-      ncclGin_isDescriptor(descriptor),
-      ncclGin_getDescriptor(descriptor),
-      optFlags);
+  if (ncclGin_isDeviceOnly(bufType)) {
+    ncclGinCall<ncclGinApi_Get>(ctx, coop,
+        teamRankToGinRank(this->comm, team, peer),
+        loadConst(&remoteWnd->ginWins[this->connectionId]),
+        4096*size_t(loadConst(&remoteWnd->ginOffset4K)) + remoteOffset,
+        loadConst(&localWnd->ginWins[this->connectionId]),
+        4096*size_t(loadConst(&localWnd->ginOffset4K)) + localOffset, bytes,
+        ncclGin_isDescriptor(descriptor),
+        ncclGin_getDescriptor(descriptor),
+        optFlags);
+  } else {
+    if (remoteWnd->numSegments == 1 && localWnd->numSegments == 1) {
+      ncclGinCall<ncclGinApi_Get>(ctx, coop,
+          teamRankToGinRank(this->comm, team, peer),
+          loadConst(&remoteWnd->ginWins[this->connectionId]),
+          4096*size_t(loadConst(&remoteWnd->ginOffset4K)) + remoteOffset,
+          loadConst(&localWnd->ginWins[this->connectionId]),
+          4096*size_t(loadConst(&localWnd->ginOffset4K)) + localOffset, bytes,
+          ncclGin_isDescriptor(descriptor),
+          ncclGin_getDescriptor(descriptor),
+          optFlags);
+    } else {
+      // Multi-segment case: chunk the get across separate per-segment registrations
+      int remoteSeg, localSeg;
+      size_t remoteSegOffset, localSegOffset;
+      nccl::gin::internal::findSegmentFromWindow(remoteWnd, remoteOffset, &remoteSeg, &remoteSegOffset);
+      nccl::gin::internal::findSegmentFromWindow(localWnd, localOffset, &localSeg, &localSegOffset);
+      size_t remaining = bytes;
+      while (remaining > 0) {
+        struct ncclSegmentWindow const& remoteSegmentWindow = remoteWnd->ginMultiSegmentWins[remoteSeg];
+        struct ncclSegmentWindow const& localSegmentWindow = localWnd->ginMultiSegmentWins[localSeg];
+        const size_t remoteRemaining = remoteSegmentWindow.segmentSize - remoteSegOffset;
+        const size_t localRemaining = localSegmentWindow.segmentSize - localSegOffset;
+        const size_t getSize = nccl::gin::internal::getSegmentChunkSize(remoteRemaining, localRemaining, remaining);
+        ncclGinCall<ncclGinApi_Get>(ctx, coop,
+            teamRankToGinRank(this->comm, team, peer),
+            loadConst(&remoteWnd->ginMultiSegmentWins[remoteSeg].ginWins[this->connectionId]),
+            remoteSegOffset,
+            loadConst(&localWnd->ginMultiSegmentWins[localSeg].ginWins[this->connectionId]),
+            localSegOffset, getSize,
+            ncclGin_isDescriptor(descriptor),
+            ncclGin_getDescriptor(descriptor),
+            optFlags);
+        remaining -= getSize;
+        nccl::gin::internal::advanceSegmentCursor(&remoteSeg, &remoteSegOffset, getSize, remoteSegmentWindow.segmentSize);
+        nccl::gin::internal::advanceSegmentCursor(&localSeg, &localSegOffset, getSize, localSegmentWindow.segmentSize);
+      }
+    }
+  }
   coop.sync();
 }
 

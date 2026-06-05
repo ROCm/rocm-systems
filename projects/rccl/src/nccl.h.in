@@ -1162,6 +1162,102 @@ ncclResult_t pncclGroupEnd();
 ncclResult_t  ncclGroupSimulateEnd(ncclSimInfo_t* simInfo);
 ncclResult_t pncclGroupSimulateEnd(ncclSimInfo_t* simInfo);
 
+/*
+ * Parameter access
+ *
+ * For accessing NCCL runtime parameters. Parameters are identified by string keys
+ * and can be read as typed values or as strings. NCCL provides two styles of parameter
+ * APIs: handle-based and key-based.
+ */
+
+/*
+ * Handle-based API (allows typed access)
+ *
+ * Handles represents parameters and are opaque (internal details hidden).
+ */
+typedef struct ncclParamHandle ncclParamHandle_t;
+
+/*
+ * Look up the parameter identified by key and store a handle to it in
+ * out. The returned handle is owned by the parameter system and must not
+ * be freed by the caller.
+ */
+ncclResult_t ncclParamBind(ncclParamHandle_t** out, const char* key);
+ncclResult_t pncclParamBind(ncclParamHandle_t** out, const char* key);
+
+/*
+ * Read the value of the parameter bound to h as the type of out.
+ * Function names are suffixed with I/U and 8/16/32/64 for 8-, 16-, 32- and 64-bit
+ * signed and unsigned integers.
+ */
+ncclResult_t ncclParamGetI8(ncclParamHandle_t* h, int8_t* out);
+ncclResult_t pncclParamGetI8(ncclParamHandle_t* h, int8_t* out);
+
+ncclResult_t ncclParamGetI16(ncclParamHandle_t* h, int16_t* out);
+ncclResult_t pncclParamGetI16(ncclParamHandle_t* h, int16_t* out);
+
+ncclResult_t ncclParamGetI32(ncclParamHandle_t* h, int32_t* out);
+ncclResult_t pncclParamGetI32(ncclParamHandle_t* h, int32_t* out);
+
+ncclResult_t ncclParamGetI64(ncclParamHandle_t* h, int64_t* out);
+ncclResult_t pncclParamGetI64(ncclParamHandle_t* h, int64_t* out);
+
+ncclResult_t ncclParamGetU8(ncclParamHandle_t* h, uint8_t* out);
+ncclResult_t pncclParamGetU8(ncclParamHandle_t* h, uint8_t* out);
+
+ncclResult_t ncclParamGetU16(ncclParamHandle_t* h, uint16_t* out);
+ncclResult_t pncclParamGetU16(ncclParamHandle_t* h, uint16_t* out);
+
+ncclResult_t ncclParamGetU32(ncclParamHandle_t* h, uint32_t* out);
+ncclResult_t pncclParamGetU32(ncclParamHandle_t* h, uint32_t* out);
+
+ncclResult_t ncclParamGetU64(ncclParamHandle_t* h, uint64_t* out);
+ncclResult_t pncclParamGetU64(ncclParamHandle_t* h, uint64_t* out);
+
+/*
+ * Read the value of the parameter bound to h as a string.
+ * Returned pointer is owned by the parameter system and is valid until the
+ * next ncclParamGetStr() call on the same thread.
+ */
+ncclResult_t ncclParamGetStr(ncclParamHandle_t* h, const char** out);
+ncclResult_t pncclParamGetStr(ncclParamHandle_t* h, const char** out);
+
+/*
+ * Read the value of the parameter bound to h as raw binary data.
+ * The user needs to allocate a buffer for the result and the parameter value is copied
+ * into user buffer as bytes.
+ */
+ncclResult_t ncclParamGet(ncclParamHandle_t* h, void* out, int maxLen, int* len);
+ncclResult_t pncclParamGet(ncclParamHandle_t* h, void* out, int maxLen, int* len);
+
+/*
+ * Key-based API (no handle required, typeless access, return value as string)
+ */
+
+/*
+ * Get parameter value as string by key. Returned pointer is owned by the
+ * parameter system and is valid until the next ncclParamGetParameter() call
+ * on the same thread.
+ */
+ncclResult_t ncclParamGetParameter(const char* key, const char** value, int* valueLen);
+ncclResult_t pncclParamGetParameter(const char* key, const char** value, int* valueLen);
+
+/*
+ * Get all registered parameter keys. Returned pointer table is owned by the
+ * parameter system and is valid until the next ncclParamGetAllParameterKeys()
+ * call on the same thread. By default, the results include only parameters published
+ * in NCCL documentation. Setting NCCL_PARAM_DUMP_ALL=true will include all parameters.
+ */
+ncclResult_t ncclParamGetAllParameterKeys(const char*** table, int* tableLen);
+ncclResult_t pncclParamGetAllParameterKeys(const char*** table, int* tableLen);
+
+/*
+ * Dump all parameters to log output. By default, the result includes only parameters published
+ * in NCCL documentation. Setting NCCL_PARAM_DUMP_ALL=true will include all parameters.
+ */
+void ncclParamDumpAll(void);
+void pncclParamDumpAll(void);
+
 #ifdef __cplusplus
 } // end extern "C"
 #endif

@@ -8,6 +8,7 @@
 #include "comm.h"
 #include "dev_runtime.h"
 #include "utils.h"
+#include "devcomm_v22902.h"
 
 typedef enum : uint8_t {
   NCCL_GIN_TYPE_NONE_v22902 = 0,
@@ -45,7 +46,7 @@ struct ncclDevComm_v22902 {
 
   // ncclWindow_t is just a (device) pointer.
   ncclWindow_t resourceWindow;
-  struct ncclWindow_vidmem resourceWindow_inlined;
+  struct ncclWindow_vidmem_v22902 resourceWindow_inlined;
 
   ncclMultimemHandle_t lsaMultimem;
   ncclLsaBarrierHandle_t lsaBarrier;

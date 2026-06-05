@@ -2,6 +2,14 @@
 
 Full documentation for RCCL is available at [https://rccl.readthedocs.io](https://rccl.readthedocs.io)
 
+## Unreleased - RCCL 2.30.4 for ROCm 7.12
+
+### Changed
+* Compatibility with NCCL 2.30.4.
+
+### Known issues
+* Elastic-buffer support for GIN (multi-segment symmetric memory windows backed by a mix of device and CPU/`HOST_NUMA` memory, exposed through `NCCL_ELASTIC_BUFFER_REGISTER` and `NCCL_SYM_REUSE_SYSMEM_HANDLES`) was newly synced from upstream and compiles on ROCm, but is unverified on AMD hardware.
+
 ## Unreleased - RCCL 2.30.3 for ROCm 7.12
 
 ### Changed

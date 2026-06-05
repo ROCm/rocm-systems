@@ -8,6 +8,7 @@
 #include "comm.h"
 #include "dev_runtime.h"
 #include "utils.h"
+#include "devcomm_v22902.h"
 
 struct ncclDevComm_v22907 {
   int rank, nRanks;
@@ -18,7 +19,7 @@ struct ncclDevComm_v22907 {
   struct ncclDevCommWindowTable* windowTable;
 
   ncclWindow_t resourceWindow;
-  struct ncclWindow_vidmem resourceWindow_inlined;
+  struct ncclWindow_vidmem_v22902 resourceWindow_inlined;
 
   ncclMultimemHandle_t lsaMultimem;
   ncclLsaBarrierHandle_t lsaBarrier;

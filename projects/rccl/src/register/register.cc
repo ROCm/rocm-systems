@@ -44,17 +44,23 @@ ncclResult_t ncclRegister(struct ncclComm* comm, void* data, size_t size, bool i
 
   bool hasSysmemSegment = false;
   if (ncclCuMemEnable()) {
-      CUdeviceptr base;
-      size_t baseSize;
-      int numSegments;
-      int legacyIpcCap;
-      // Checks for a Sysmem segment is only valid with cuMem based allocators, so a IS_LEGACY_CUDA_IPC check is required to ensure
+    CUdeviceptr base;
+    size_t baseSize;
+    int numSegments;
+    int legacyIpcCap;
+    CUCHECK(cuMemGetAddressRange(&base, &baseSize, (CUdeviceptr) data));
+    CUmemorytype memType;
+    CUCHECK(cuPointerGetAttribute(&memType, CU_POINTER_ATTRIBUTE_MEMORY_TYPE, (CUdeviceptr) data));
+    if (memType == CU_MEMORYTYPE_HOST) {
+      hasSysmemSegment = true;
+    } else {
+      // Check for a Sysmem segment is only valid with cuMem based allocators, so a IS_LEGACY_CUDA_IPC check is required to ensure
       // that we're calling ncclCuMemGetAddressRange only when necessary.
-      CUCHECK(cuMemGetAddressRange(&base, &baseSize, (CUdeviceptr) data));
       CUCHECK(cuPointerGetAttribute((void*)&legacyIpcCap, CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE, (CUdeviceptr) base));
       if (!legacyIpcCap) {
         NCCLCHECK(ncclCuMemGetAddressRange((CUdeviceptr) data, size, (CUdeviceptr *)&base, &baseSize, &numSegments, &hasSysmemSegment));
       }
+    }
   }
   if (hasSysmemSegment) {
     INFO(NCCL_REG, "Skipping registration for buffer %p size %zi since it contains segments backed by CPU memory",

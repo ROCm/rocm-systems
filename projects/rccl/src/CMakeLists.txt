@@ -329,7 +329,6 @@ set(SRC_FILES
   param/c_api.cc
   param/param.cc
   param/param_registry.cc
-  include/param/c_api.h
   include/param/common.h
   include/param/param.h
   include/param/param_registry.h
