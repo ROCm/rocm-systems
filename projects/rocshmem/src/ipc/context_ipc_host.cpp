@@ -120,7 +120,8 @@ __host__ void IPCHostContext::getmem(void *dest, const void *source,
 
 __host__ void IPCHostContext::fence() {
   if (is_ipc_non_mpi()) {
-    CHECK_HIP(hipStreamSynchronize(ctx_stream_));
+    // All host-initiated ops (putmem, getmem, AMOs) synchronize ctx_stream_
+    // before returning, so ordering is already guaranteed. fence() is a no-op.
     return;
   }
   host_interface->fence(context_window_info);
