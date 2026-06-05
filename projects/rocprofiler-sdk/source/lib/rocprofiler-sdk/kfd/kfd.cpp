@@ -838,6 +838,18 @@ ioctl(int kfd_fd, T& args)
     return exit_code;
 }
 
+// Returns true if the KFD device node can actually be opened. On platforms
+// without a real KFD (e.g. WSL2, which exposes /dev/dxg but not /dev/kfd) this
+// lets the caller gracefully disable KFD event tracing instead of aborting.
+inline bool
+kfd_device_available()
+{
+    int probe_fd = ::open(KFD_DEVICE_PATH, O_RDWR | O_CLOEXEC);
+    if(probe_fd == -1) return false;
+    ::close(probe_fd);
+    return true;
+}
+
 struct kfd_device_fd
 {
     fd_t fd{-1};
@@ -1564,6 +1576,18 @@ template <size_t... Inxs>
 rocprofiler_status_t init(std::index_sequence<Inxs...>)
 {
     static const small_vector<size_t> event_ids{Inxs...};
+
+    // On platforms without a usable KFD device node (e.g. WSL2, where only
+    // /dev/dxg is exposed), gracefully disable KFD event tracing instead of
+    // aborting in kfd_device_fd(). Other rocprofiler services are unaffected.
+    if(!kfd::kfd_device_available())
+    {
+        ROCP_WARNING << fmt::format(
+            "KFD device {} is not available; KFD event tracing is disabled for this run",
+            kfd::KFD_DEVICE_PATH);
+        return ROCPROFILER_STATUS_SUCCESS;
+    }
+
     // Check if version is more than 1.11
     auto ver = kfd::get_version();
     if(ver.major_version * 1000 + ver.minor_version > 1011)
