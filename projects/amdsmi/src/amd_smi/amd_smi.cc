@@ -1481,12 +1481,6 @@ amdsmi_status_t amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_hand
     LOG_INFO(ss);
   }
 
-  if (amd::smi::trim(std::string(board_info->manufacturer_name)) == "0x1002") {
-    std::string amd_name(amd::smi::kAmdManufacturerName);
-    smi_clear_char_and_reinitialize(board_info->manufacturer_name, AMDSMI_MAX_STRING_LENGTH,
-                                    amd_name);
-  }
-
   ss << __PRETTY_FUNCTION__ << " | [After rocm smi correction] "
      << "Returning status = AMDSMI_STATUS_SUCCESS"
      << "\n; info->model_number: |" << board_info->model_number << "|"
@@ -2400,7 +2394,7 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
 
   // If vendor name is empty and the vendor id is 0x1002, set vendor name to AMD vendor string
   if ((info->vendor_name[0] == '\0') && info->vendor_id == 0x1002) {
-    std::string amd_name(amd::smi::kAmdVendorName);
+    std::string amd_name = "Advanced Micro Devices, Inc. [AMD/ATI]";
     smi_clear_char_and_reinitialize(info->vendor_name, AMDSMI_MAX_STRING_LENGTH, amd_name);
   }
 

@@ -34,9 +34,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
-- **Fixed manufacturer name display for AMD GPUs**.  
-  - `amdsmi_get_gpu_board_info()` now translates the AMD PCI vendor ID (`0x1002`) into the human-readable `Advanced Micro Devices, Inc. [AMD/ATI]` when the host `pci.ids` lookup is unavailable and `manufacturer_name` is returned as the raw ID, matching the value shown when the lookup succeeds.
-  - Fixes `amd-smi static --board` displaying `0x1002` instead of the vendor name.
+- **Fixed AMD GPU manufacturer name display in `amd-smi static --board`**.  
+  - The CLI now displays the canonical vendor name `Advanced Micro Devices, Inc. [AMD/ATI]` when the board manufacturer name is reported as the raw AMD PCI vendor ID (`0x1002`) because the host `pci.ids` lookup is unavailable. The C and Python APIs continue to return the raw value unchanged.
+  - Standardized the hardcoded AMD vendor string on the canonical `pci.ids` spelling (with the comma) so `VENDOR_NAME` and `MANUFACTURER_NAME` are consistent with `lspci`.
 
 - **Fixed `amdsmi_get_gpu_cper_entries()` crash (`free(): invalid pointer` / `SIGABRT`) when the CPER node reports zero bytes**.  
   - debugfs CPER nodes (`/sys/kernel/debug/dri/<N>/amdgpu_ring_cper`) report `st_size == 0` because their content is generated on read. The previous `std::ifstream`-based read allocated a zero-byte buffer and left an STL `basic_filebuf` whose destructor could perform an invalid free across the library boundary when `libamd_smi.so` is `LD_PRELOAD`-ed alongside a different host libstdc++ (the device-metrics-exporter / `gpuagent` scenario), aborting the process and zeroing all GPU metrics.

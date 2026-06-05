@@ -36,7 +36,6 @@
 #include <queue>
 #include <sstream>
 #include <string>
-#include <string_view>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -56,12 +55,6 @@
 #endif
 
 namespace amd::smi {
-
-// Human-readable AMD vendor name for amdsmi_get_gpu_asic_info()'s vendor_name field.
-constexpr std::string_view kAmdVendorName = "Advanced Micro Devices Inc. [AMD/ATI]";
-// Human-readable AMD manufacturer name for amdsmi_get_gpu_board_info()'s
-// manufacturer_name field (canonical pci.ids spelling, includes the comma).
-constexpr std::string_view kAmdManufacturerName = "Advanced Micro Devices, Inc. [AMD/ATI]";
 
 pthread_mutex_t* GetMutex(uint32_t dv_ind);
 int SameFile(const std::string fileA, const std::string fileB);
